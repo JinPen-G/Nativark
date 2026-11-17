@@ -1,6 +1,9 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { clientSqlInitialRevisionSchema } from './client-sql-revisions';
+import { decodeAiClientMaterialBodies, encodeAiClientMaterialBodies } from '../privacy/ai-body-storage.codec';
+import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+import type { ClientRequestContext } from '../../client/client-auth.service';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
@@ -11,6 +14,16 @@ const rowSchema = z.object({ id: z.string().uuid(), tenantId: id, workspaceId: i
   createdAt: z.date(), expiresAt: z.date() }).strict();
 export type AiClientSceneMaterial = z.infer<typeof rowSchema>;
 export type AiClientMaterialScope = Pick<AiClientSceneMaterial, 'tenantId' | 'workspaceId' | 'channel' | 'principalHash' | 'principalKind'>;
+/** Shared original storage key derived from the authenticated client snapshot.
+ * A matching key is a selector; each consumer still uses its current Guard. */
+export function originalClientMaterialScope(identity: Pick<ClientRequestContext,
+  'tenantId' | 'workspaceId' | 'customerId' | 'customerType' | 'sessionId'>,
+  channel: AiClientMaterialScope['channel'], appId?: string): AiClientMaterialScope {
+  const scope = { tenantId: identity.tenantId, workspaceId: identity.workspaceId };
+  return { ...scope, channel, principalKind: identity.customerType,
+    principalHash: requestFingerprint({ ...scope, channel, appId: appId ?? null, customerId: identity.customerId,
+      customerType: identity.customerType, sessionId: identity.sessionId }) };
+}
 export type AiClientMaterialDb = Pick<PrismaClient, '$transaction' | '$queryRaw' | '$executeRaw' | 'tenant' | 'businessWorkspace'>;
 type Reader = Pick<Prisma.TransactionClient, '$queryRaw'>;
 
@@ -53,7 +66,7 @@ export class PrismaClientSceneMaterialRepository {
     try {
       const rows = await reader.$queryRaw<unknown[]>(query);
       if (!Array.isArray(rows) || rows.length > 1) throw new AiClientMaterialError('AI_CLIENT_STORAGE_UNAVAILABLE');
-      return rows.length ? this.decode(rows[0], scope) : null;
+      return rows.length ? this.decode(decodeAiClientMaterialBodies(this.db, rows[0]), scope) : null;
     } catch (error) {
       if (error instanceof AiClientMaterialError) throw error;
       throw new AiClientMaterialError('AI_CLIENT_STORAGE_UNAVAILABLE');
@@ -69,8 +82,8 @@ export class PrismaClientSceneMaterialRepository {
     return row;
   }
 
-  async findSource(scope: AiClientMaterialScope, materialRef: string) {
-    const row = await this.load(this.db, Prisma.sql`SELECT * FROM ai_client_scene_materials WHERE tenantId = ${scope.tenantId}
+  async findSource(scope: AiClientMaterialScope, materialRef: string, reader: Reader = this.db) {
+    const row = await this.load(reader, Prisma.sql`SELECT * FROM ai_client_scene_materials WHERE tenantId = ${scope.tenantId}
       AND workspaceId = ${scope.workspaceId} AND channel = ${scope.channel} AND principalHash = ${scope.principalHash}
       AND id = ${materialRef} LIMIT 1`, scope);
     if (!row) return null;
@@ -90,13 +103,14 @@ export class PrismaClientSceneMaterialRepository {
           if (existing.inputHash !== row.inputHash) throw new AiClientMaterialError('AI_CLIENT_REVISION_CONFLICT');
           return { row: existing, replayed: true };
         }
+        const protectedBodies = encodeAiClientMaterialBodies(this.db, row);
         attempted = true;
         await tx.$executeRaw(Prisma.sql`INSERT INTO ai_client_scene_materials
           (id, tenantId, workspaceId, channel, principalKind, principalHash, bindingHash, publicationHash, operationKey,
            inputHash, materialHash, command, material, publication, revision, createdAt, expiresAt)
           VALUES (${row.id}, ${row.tenantId}, ${row.workspaceId}, ${row.channel}, ${row.principalKind}, ${row.principalHash},
             ${row.bindingHash}, ${row.publicationHash}, ${row.operationKey}, ${row.inputHash}, ${row.materialHash},
-            ${JSON.stringify(row.command)}, ${JSON.stringify(row.material)}, ${JSON.stringify(row.publication)},
+            ${JSON.stringify(protectedBodies.command)}, ${JSON.stringify(protectedBodies.material)}, ${JSON.stringify(protectedBodies.publication)},
             ${row.revision}, ${row.createdAt}, ${row.expiresAt})`);
         return { row, replayed: false };
       };

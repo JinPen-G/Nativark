@@ -3,7 +3,7 @@
  * current original receipts can resolve it. This never authorizes deletion. */
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
-import { AI_RETENTION_HTTP_SCHEMAS, AI_RETENTION_HTTP_CONTRACTS,
+import { AI_RETENTION_HTTP_SCHEMAS, AI_RETENTION_HTTP_CONTRACTS, AI_PLATFORM_RETENTION_HTTP_CONTRACTS,
   type AiRetentionHttpRequestsDraft, type AiRetentionHttpResponsesDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { AiRetentionUnknown } from './retention.service';
@@ -41,6 +41,33 @@ export function retentionHttpResponse<A extends Action>(action: A, value: unknow
     return copy as AiRetentionHttpResponsesDraft[A];
   } catch {
     if (AI_RETENTION_HTTP_CONTRACTS[action].write) throw new AiRetentionUnknown();
+    throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+  }
+}
+
+/** Separate PLATFORM transport. It accepts neither a workspace identifier nor
+ * workspace-only resource kinds; a valid receipt still grants no maintenance. */
+export function platformRetentionHttpRequest(action: Action, value: unknown) {
+  try {
+    const copy = structuredClone(value), contract = AI_PLATFORM_RETENTION_HTTP_CONTRACTS[action];
+    if (Buffer.byteLength(JSON.stringify(copy), 'utf8') > 65536
+      || !ajv.getSchema(`#/components/schemas/${contract.request}`)!(copy)) throw Error();
+    return copy;
+  } catch { throw new AiTaskRepositoryError('AI_INVALID_INPUT'); }
+}
+export function platformRetentionHttpResponse(action: Action, value: unknown, command: unknown) {
+  try {
+    const copy = wire(structuredClone(value)), contract = AI_PLATFORM_RETENTION_HTTP_CONTRACTS[action];
+    if (Buffer.byteLength(JSON.stringify(copy), 'utf8') > 131072
+      || !ajv.getSchema(`#/components/schemas/${contract.response}`)!(copy)) throw Error();
+    const result = copy as Record<string, unknown>, input = command as Record<string, unknown>;
+    if ('id' in result && result.id !== input.id || 'results' in result && (result.limit !== (input.limit ?? 5)
+      || Number(result.scanned) > Number(result.limit) || !Array.isArray(result.results)
+      || result.results.length !== result.scanned) || 'rows' in result && (!Array.isArray(result.rows)
+        || result.rows.length > Number(input.limit ?? 20))) throw Error();
+    return copy;
+  } catch {
+    if (AI_PLATFORM_RETENTION_HTTP_CONTRACTS[action].write) throw new AiRetentionUnknown();
     throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
   }
 }

@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
-import { aiClientTaskReadRequestSchema } from '@rental-os/shared';
+import { aiClientTaskReadRequestSchema, aiClientOrderActionSourceSchema, type AiClientOrderActionSource } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { AiClientMaterialScope } from './prisma-client-scene-material.repository';
@@ -51,6 +51,16 @@ export class PrismaClientTaskInputRepository {
       if (row.creationKey !== creationKey) throw unavailable();
       return row;
     } catch (error) { if (error instanceof AiTaskRepositoryError) throw error; throw unavailable(); }
+  }
+  /** Original own-order input metadata, not a scene selected by the caller.
+   * The request host still checks the original material and current read policy. */
+  async readOrderNavigationSource(scope: AiClientMaterialScope, value: AiClientOrderActionSource) {
+    const source = aiClientOrderActionSourceSchema.parse(structuredClone(value));
+    const row = await this.findCreation(scope, source.task.creationKey);
+    if (!row || row.materialRef !== source.task.materialRef
+      || row.materialInputHash !== requestFingerprint({ kind: 'order', orderId: source.material.orderId })
+      || !['quote_clarification', 'order_explanation'].includes(row.sceneCode)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    return row;
   }
   async claim(value: AiClientTaskInput) {
     const row = this.decode(structuredClone(value), value);

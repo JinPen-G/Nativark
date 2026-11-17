@@ -1,5 +1,6 @@
 import { useId } from "react";
 import { safeDisplayText } from "./safe-display";
+import { useAiManagementLocale } from "./management-locale";
 
 export interface ModelTextProps {
   text: string;
@@ -7,6 +8,7 @@ export interface ModelTextProps {
 }
 /** Untrusted text only: neither Markdown nor tool requests execute here. */
 export function ModelText({ text, kind = "text" }: ModelTextProps) {
+  const { t } = useAiManagementLocale();
   const id = useId();
   const bounded = safeDisplayText(text, 20_000);
   const preview = bounded.slice(0, 800);
@@ -23,13 +25,13 @@ export function ModelText({ text, kind = "text" }: ModelTextProps) {
     >
       <h3 id={id}>
         {kind === "tool_candidate"
-          ? "工具动作候选（未执行）"
-          : "AI 生成内容（需核对）"}
+          ? t("工具动作候选（未执行）")
+          : t("AI 生成内容（需核对）")}
       </h3>
       <p data-ai-visible-text={kind === 'text' ? '' : undefined} style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{preview}</p>
       {bounded.length > preview.length && (
         <details>
-          <summary>展开剩余文本</summary>
+          <summary>{t("展开剩余文本")}</summary>
           <p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
             {bounded.slice(preview.length)}
           </p>
@@ -37,7 +39,7 @@ export function ModelText({ text, kind = "text" }: ModelTextProps) {
       )}
       {typeof text === "string" && text.length > 20_000 && (
         <p role="status">
-          内容超过展示上限，已截断。请通过受权宿主核对完整记录。
+          {t("内容超过展示上限，已截断。请通过受权宿主核对完整记录。")}
         </p>
       )}
     </section>

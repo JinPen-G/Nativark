@@ -739,6 +739,82 @@ export class ClientApiService {
     };
   }
 
+  /** Original client-visible navigation facts only. The caller must enter the
+   * current client Guard/ALS; these projections never reveal a profile contact,
+   * payment URL/token, internal price or another customer's business object. */
+  private assertClientNavigationContext(context: ClientRequestContext) {
+    const identity = getRequestIdentity();
+    if (!identity || identity.tenantId !== context.tenantId || identity.workspaceId !== context.workspaceId
+      || identity.userId !== context.customerId || identity.audience !== 'client' || identity.isSaasAdmin || identity.staffApi)
+      throw new ForbiddenException('导航读取缺少当前本人身份');
+  }
+
+  async readOwnProfileNavigation(context: ClientRequestContext) {
+    this.assertClientNavigationContext(context);
+    this.requireActiveMembership(context);
+    await this.currentWorkspace(context);
+    const row = await this.prisma.customerProfile.findFirst({ where: { id: context.customerId, tenantId: context.tenantId,
+      customerType: context.customerType, status: 'active', mergedIntoCustomerId: null },
+      select: { id: true, tenantId: true, name: true, customerType: true, ordinaryRevision: true } });
+    if (!row || !Number.isSafeInteger(row.ordinaryRevision) || row.ordinaryRevision < 1)
+      throw new NotFoundException('本人普通资料版本不可用');
+    this.assertClientNavigationContext(context);
+    return { id: row.id, name: row.name, customerType: row.customerType, ordinaryRevision: row.ordinaryRevision,
+      resourceVersion: requestFingerprint({ id: row.id, tenantId: row.tenantId, customerType: row.customerType,
+        name: row.name, ordinaryRevision: row.ordinaryRevision }) };
+  }
+
+  async readClientProductNavigation(context: ClientRequestContext, itemGroupId: string) {
+    this.assertClientNavigationContext(context);
+    this.requireActiveMembership(context);
+    if (typeof itemGroupId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(itemGroupId))
+      throw new BadRequestException('商品导航引用无效');
+    await this.currentWorkspace(context);
+    const page = await this.core.listItemGroupsPage(context.tenantId, { itemGroupId, limit: 1 });
+    const item = page.rows[0];
+    if (page.rows.length !== 1 || !item || item.id !== itemGroupId || item.tenantId !== context.tenantId
+      || item.status !== 'enabled' || item.categoryCode !== context.categoryCode || page.truncated || page.nextCursor !== null
+      || page.source !== 'persisted_workspace_configuration' || !/^[a-f0-9]{64}$/u.test(page.configurationVersion))
+      throw new NotFoundException('当前发布商品不可用');
+    this.assertClientNavigationContext(context);
+    return { id: item.id, name: item.name, resourceVersion: page.configurationVersion };
+  }
+
+  async readOwnPaymentNavigation(context: ClientRequestContext, orderId: string, intentId: string) {
+    this.assertClientNavigationContext(context);
+    this.requireActiveMembership(context);
+    const order = await this.assertClientOrder(context, orderId);
+    const row = await this.prisma.rentalPaymentIntent.findFirst({ where: { id: intentId, tenantId: context.tenantId,
+      workspaceId: context.workspaceId, orderId }, select: { id: true, orderId: true, instrument: true,
+      status: true, updatedAt: true } });
+    if (!row || !(row.updatedAt instanceof Date) || !Number.isFinite(row.updatedAt.getTime()))
+      throw new NotFoundException('本人原支付单不可用');
+    this.assertClientNavigationContext(context);
+    return { id: row.id, orderId: row.orderId, status: row.status, resourceVersion: requestFingerprint({
+      ...row, updatedAt: row.updatedAt.toISOString(), orderVersion: order.updatedAt }) };
+  }
+
+  async readOwnOrderNavigationSources(context: ClientRequestContext, orderId: string) {
+    this.assertClientNavigationContext(context);
+    const order = await this.assertClientOrder(context, orderId);
+    const productIds = [...new Set(order.lines.map(row => row.itemGroupId))].sort();
+    if (productIds.length > 20 || !Number.isFinite(Date.parse(order.updatedAt)))
+      throw new ConflictException('原订单商品关联超出读取范围');
+    const payments = await this.prisma.rentalPaymentIntent.findMany({ where: { tenantId: context.tenantId,
+      workspaceId: context.workspaceId, orderId }, orderBy: { id: 'asc' }, take: 21,
+      select: { id: true, updatedAt: true } });
+    if (payments.length > 20 || payments.some(row => !(row.updatedAt instanceof Date) || !Number.isFinite(row.updatedAt.getTime())))
+      throw new ConflictException('原支付单关联超出读取范围');
+    const current = await this.assertClientOrder(context, orderId);
+    if (current.id !== order.id || current.updatedAt !== order.updatedAt
+      || requestFingerprint(current.lines) !== requestFingerprint(order.lines)) throw new ConflictException('原订单关联已变化');
+    this.assertClientNavigationContext(context);
+    const paymentIds = payments.map(row => row.id);
+    return { orderId: order.id, orderVersion: order.updatedAt, customerId: context.customerId, productIds, paymentIds,
+      resourceVersion: requestFingerprint({ orderId: order.id, orderVersion: order.updatedAt, customerId: context.customerId,
+        productIds, payments: payments.map(row => ({ id: row.id, updatedAt: row.updatedAt.toISOString() })) }) };
+  }
+
   async updateProfile(context: ClientRequestContext, input: ClientProfileUpdateRequest) {
     const data: Prisma.CustomerProfileUpdateManyMutationInput = {};
     if (input.name !== undefined) {
@@ -937,7 +1013,9 @@ export class ClientApiService {
     const orderIds = new Set(customerOrders.map((order) => order.id));
     const logs = this.business
       .listNotificationLogs(context.tenantId, (await this.context(context.tenantId)))
-      .filter((log) => log.businessObjectType === "order" && Boolean(log.businessObjectId) && orderIds.has(log.businessObjectId!))
+      // An unsent draft belongs to its author, never to the customer's inbox.
+      .filter((log): log is typeof log & { status: Exclude<typeof log.status, 'draft'> } => log.status !== 'draft'
+        && log.businessObjectType === "order" && Boolean(log.businessObjectId) && orderIds.has(log.businessObjectId!))
       .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
     const start = (page - 1) * pageSize;
     return {
@@ -1031,7 +1109,7 @@ export class ClientApiService {
    * HTTP route. The caller must use current ClientGuard and prove the originating
    * request/explicit selection; the reference itself grants no authority. */
   async createQuoteForOriginalOperation(context: ClientRequestContext, input: ClientCreateQuoteRequest, reference: string,
-    prepared?: { inputHash: string; configurationHash: string }) {
+    prepared?: { inputHash: string; configurationHash: string }, beforePersist?: (native: Prisma.TransactionClient) => Promise<void>) {
     context = structuredClone(context); input = structuredClone(input);
     prepared = prepared && structuredClone(prepared);
     const key = this.clientQuoteOriginalKey(context, reference);
@@ -1045,7 +1123,13 @@ export class ClientApiService {
       || prepared.configurationHash !== requestFingerprint(business))) throw new ConflictException('报价准备依据已变化，请重新确认');
     this.clientQuoteOriginalKey(context, reference);
     const quote = await this.business.createQuoteForOriginalOperation(context.tenantId, business, normalized,
-      { key, inputHash: requestFingerprint(normalized) });
+      { key, inputHash: requestFingerprint(normalized) }, beforePersist ? async native => {
+        // This callback is supplied only by an internal server host. HTTP input
+        // cannot provide it; original receipt reads never invoke it.
+        this.clientQuoteOriginalKey(context, reference);
+        await beforePersist(native);
+        this.clientQuoteOriginalKey(context, reference);
+      } : undefined);
     this.clientQuoteOriginalKey(context, reference);
     if (quote.tenantId !== context.tenantId || quote.request.customerId !== context.customerId
       || requestFingerprint(quote.request) !== requestFingerprint(normalized)) throw new ConflictException('报价原操作依据不一致');
@@ -1385,8 +1469,16 @@ export class ClientApiService {
     return { orderId: created.order.id, replayed: created.replayed };
   }
 
-  async createOrder(context: ClientRequestContext, input: ClientCreateOrderRequest, requestContext?: ClientOrderRequestContext) {
+  async createOrder(context: ClientRequestContext, input: ClientCreateOrderRequest, requestContext?: ClientOrderRequestContext,
+    beforeDispatch?: (prepared: Awaited<ReturnType<ClientApiService['prepareOrderSubmission']>>) => Promise<void>) {
+    context = structuredClone(context);
     const { business, orderInput } = await this.prepareClientOrder(context, structuredClone(input));
+    // Request-bound hosts may lose their independent use grant while the
+    // original Core preparation awaits. Recheck after that final preparation,
+    // immediately before calling the writer; never accept this hook from HTTP.
+    if (beforeDispatch) await beforeDispatch({ tenantId: context.tenantId, workspaceId: context.workspaceId,
+      customerId: context.customerId, request: structuredClone(orderInput),
+      requestHash: this.orders.fingerprintOrderRequest(orderInput), execution: 'not_submitted', inventory: 'not_reserved' });
     // 收货地址在报价阶段已由核心解析并固化进报价/订单快照；下单直接消费报价即可，无需再查客户端旁表。
     const created = await this.orders.createOrder(context.tenantId, orderInput, `client:${context.customerId}`, business, idempotencyKeyOf(requestContext));
     const order = await this.assertClientOrder(context, created.order.id);

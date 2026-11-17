@@ -1,6 +1,7 @@
 import { AI_TASK_OPENING_PROPOSAL_HTTP_DRAFT, AI_TASK_OPENING_PROPOSAL_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_TASK_READ_POLICY_HTTP, AI_TASK_READ_POLICY_SCHEMAS } from '@rental-os/shared';
 import { ADMIN_UI_CORNER_RADIUS_CONTROL_MAX, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } from '@rental-os/shared';
+import { AI_CATEGORY_PROPOSAL_HTTP, AI_CATEGORY_PROPOSAL_CONTRACTS } from '@rental-os/shared';
 import { STAFF_UPLOAD_OBSERVATION_HTTP, STAFF_UPLOAD_OBSERVATION_SCHEMAS } from '@rental-os/shared';
 import { STAFF_FULFILLMENT_RECEIPT_HTTP, STAFF_FULFILLMENT_RECEIPT_CONTRACT } from '@rental-os/shared';
 import { AI_TASK_ORIGINAL_READ_POLICY_HTTP, AI_TASK_ORIGINAL_READ_POLICY_ENTRY_PERMISSIONS } from '@rental-os/shared';
@@ -47,6 +48,10 @@ import { AI_KNOWLEDGE_CONSUMPTION_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_SCENE_ORDER_READ_HTTP_DRAFT, AI_ORDER_READ_HTTP_CONTRACTS, AI_SCENE_PLAN_POLICY_HTTP_DRAFT, AI_SCENE_REQUEST_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT, AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT, AI_INSPECTION_CANCELLATION_HTTP_CONTRACTS, AI_INSPECTION_TASK_HTTP_CONTRACTS, AI_INSPECTION_TASK_POLICY_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_RETENTION_HTTP_CONTRACTS, AI_ORIGINAL_POLICY_HTTP_CONTRACTS, AI_CLIENT_TASK_POLICY_HTTP_DRAFT, AI_CLIENT_POLICY_HTTP_CONTRACTS, AI_INSPECTION_MANUAL_HTTP_CONTRACTS, AI_INSPECTION_LIFECYCLE_HTTP_CONTRACTS, AI_CATEGORY_DRAFT_HTTP_CONTRACTS } from '@rental-os/shared';
+import { AI_PLATFORM_RETENTION_HTTP, AI_PLATFORM_RETENTION_HTTP_CONTRACTS } from '@rental-os/shared';
+import { AI_ENTRY_SCENE_CATALOG_HTTP, AI_ENTRY_SCENE_CATALOG_CONTRACTS } from '@rental-os/shared';
+import { AI_REGISTERED_ENTRY_ACTION_HTTP, AI_REGISTERED_ENTRY_ACTION_CONTRACTS } from '@rental-os/shared';
+import { AI_ENTRY_NOTIFICATION_DRAFT_HTTP, AI_ENTRY_NOTIFICATION_DRAFT_CONTRACTS } from '@rental-os/shared';
 
 type HttpMethod = "get" | "post" | "put" | "patch" | "delete";
 
@@ -2349,6 +2354,26 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: 'Current original diagnosis and Core section are revalidated. Preview is read-only; explicit preparation creates one linked original R1 Task and AI proposal. No active configuration, business draft, publication or model dispatch. Unknown uses the same original operation; history never resumes preparation.',
     requestSchema: contract.request, responseSchema: contract.response,
   })),
+  ...Object.entries(AI_ENTRY_NOTIFICATION_DRAFT_CONTRACTS).map(([action, contract]) => ({
+    method: 'post' as const, path: `/api/${AI_ENTRY_NOTIFICATION_DRAFT_HTTP.basePath}/${AI_ENTRY_NOTIFICATION_DRAFT_HTTP[action as keyof typeof AI_ENTRY_NOTIFICATION_DRAFT_CONTRACTS]}`,
+    tag: 'AI Native', operationId: `entryNotificationDraft_${action}`, authRequired: true, permissions: ['system:integration:manage'],
+    summary: '明确准备和保存未发送通知草稿，按原操作读取；不发送、不重试或刷新供应商。',
+    requestSchema: contract.request, responseSchema: contract.response,
+  })),
+  ...(['operatorBasePath', 'staffBasePath', 'websiteBasePath', 'wechatBasePath'] as const).flatMap(surface =>
+    Object.entries(AI_REGISTERED_ENTRY_ACTION_CONTRACTS).map(([action, contract]) => ({
+      method: 'post' as const, path: `/api/${AI_REGISTERED_ENTRY_ACTION_HTTP[surface]}/${AI_REGISTERED_ENTRY_ACTION_HTTP[action as keyof typeof AI_REGISTERED_ENTRY_ACTION_CONTRACTS]}`,
+      tag: 'AI Native', operationId: `registeredEntryAction_${surface}_${action}`, authRequired: true, permissions: [],
+      summary: 'Current server-issued fixed Action; original resource authorization, version and expiry rechecked. No business dispatch.',
+      requestSchema: contract.request, responseSchema: contract.response,
+    }))),
+  ...(['operatorBasePath', 'staffBasePath', 'websiteBasePath', 'wechatBasePath'] as const).map(surface => ({
+    method: 'post' as const, path: `/api/${AI_ENTRY_SCENE_CATALOG_HTTP[surface]}/${AI_ENTRY_SCENE_CATALOG_HTTP.read}`,
+    tag: 'AI Native', operationId: `readAiSceneCatalog_${surface}`, authRequired: true,
+    permissions: surface === 'staffBasePath' ? ['rental-os:order:view'] : [],
+    summary: 'Current server-bound scene metadata. Audience, scope and surface are never supplied by the caller. Directory observation does not authorize Task, model or Core execution.',
+    requestSchema: AI_ENTRY_SCENE_CATALOG_CONTRACTS.read.request, responseSchema: AI_ENTRY_SCENE_CATALOG_CONTRACTS.read.response,
+  })),
   ...Object.entries(AI_AUTOMATION_EXPLANATION_CONTRACTS).map(([action, contract]) => ({
     method: 'post' as const, path: `/api/${AI_AUTOMATION_EXPLANATION_HTTP.basePath}/${AI_AUTOMATION_EXPLANATION_HTTP[action as keyof typeof AI_AUTOMATION_EXPLANATION_CONTRACTS]}`,
     tag: 'AI Native', operationId: `automationExplanation_${action}`,
@@ -2427,6 +2452,14 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   { method: 'post', path: '/api/ai-native/privacy/receipts', tag: 'AI Native', operationId: 'listAiRetentionReceipts',
     permissions: ['system:params:manage'], authRequired: true, summary: 'Bounded current-workspace receipt observation after an ambiguous batch reply.',
     requestSchema: AI_RETENTION_HTTP_CONTRACTS.receipts.request, responseSchema: AI_RETENTION_HTTP_CONTRACTS.receipts.response },
+  ...Object.entries(AI_PLATFORM_RETENTION_HTTP_CONTRACTS).map(([action, contract]) => ({
+    method: 'post' as const,
+    path: `/api/${AI_PLATFORM_RETENTION_HTTP.basePath}/${AI_PLATFORM_RETENTION_HTTP[action as keyof typeof AI_PLATFORM_RETENTION_HTTP_CONTRACTS]}`,
+    tag: 'AI Native', operationId: `platformAiRetention_${action}`, authRequired: true,
+    permissions: [contract.write ? 'system:ai-provider:manage' : 'system:ai-provider:view'],
+    summary: 'Bounded platform-only AI body maintenance and original receipts. Current SaaS authority, null business attribution, original accounting holds and deletion journals remain mandatory. No model, Core execution or unsigned restore.',
+    requestSchema: contract.request, responseSchema: contract.response,
+  })),
   ...AI_CLIENT_PUBLIC_HTTP.basePaths.flatMap(base => Object.entries(AI_CLIENT_PUBLIC_CONTRACTS).map(([action, contract]) => ({
     method: 'post' as const, path: `/api/${base}/${AI_CLIENT_PUBLIC_HTTP[action as keyof typeof AI_CLIENT_PUBLIC_CONTRACTS]}`,
     tag: 'AI Native', operationId: `clientPublic_${base.includes('wechat') ? 'wechat' : 'web'}_${action}`, permissions: [],
@@ -2442,6 +2475,9 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   ...([AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedBasePath, AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedWechatBasePath]
     .flatMap((base, surface) => ([
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readHostCapabilities, 'AiClientHostCapabilitiesRequest', 'AiClientHostCapabilities'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readOrderTaskHostCapabilities, 'AiClientOrderActionSource', 'AiClientHostCapabilities'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readOrderAction, 'AiClientOrderActionSource', 'AiClientOrderActionDraft'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.revalidateOrderAction, 'AiClientOrderActionRevalidation', 'AiClientOrderActionDraft'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.prepareOrderMaterial, 'AiClientOrderMaterialRequest', 'AiClientOrderMaterialReceipt'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readOrderMaterialReceipt, 'AiClientOrderMaterialRequest', 'AiClientOrderMaterialReceipt'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.createTask, 'AiClientTaskReadRequest', 'AiClientTaskCreationReceipt'],
@@ -2483,6 +2519,10 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
       [AI_CLIENT_ENTRY_HTTP_DRAFT.handoffBookingDraft, 'AiBookingActionRequest', 'AiBookingHandoffResponse'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingHandoff, 'AiBookingHandoffSelection', 'AiBookingHandoff'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingOperation, 'AiBookingOperationReadRequest', 'AiBookingOperationReadResponse'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.issueBookingTransfer, 'AiClientBookingTransferIssueRequest', 'AiClientBookingTransferIssueResponse'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingTransferIssue, 'AiClientBookingTransferIssueRequest', 'AiClientBookingTransferIssueResponse'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.consumeBookingTransfer, 'AiClientBookingTransferRequest', 'AiClientBookingTransferReceipt'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingTransferReceipt, 'AiClientBookingTransferRequest', 'AiClientBookingTransferReceipt'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingAcceptance, 'AiBookingAcceptanceReadRequest', 'AiBookingAcceptanceReadResponse'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.acceptBookingSubmission, 'AiBookingSubmissionAcceptanceRequest', 'AiBookingSubmissionAcceptance'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.submitAcceptedBooking, 'AiBookingSubmissionDecision', 'AiBookingSubmissionReceipt'],
@@ -2501,6 +2541,11 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
       : operation === 'model-control'
         ? '明确为同一当前受权材料登记一次重新解释或排版，沿原 Task、Gateway 与累计预算执行模型。原操作重放只读原收据，不重报价格、重放业务工具或授予业务批准。'
       : 'Current operator-owned conversation metadata and original request admission only. No model start, task cancellation, approval or business commit; unknown uses the original operation/admission. Default-disabled provider requires migration and explicit server configuration.',
+    requestSchema: contract.request, responseSchema: contract.response })),
+  ...Object.entries(AI_CATEGORY_PROPOSAL_CONTRACTS).map(([operation, contract]) => ({
+    method: 'post' as const, path: `/api/${AI_CATEGORY_PROPOSAL_HTTP.basePath}/${AI_CATEGORY_PROPOSAL_HTTP[operation as keyof typeof AI_CATEGORY_PROPOSAL_CONTRACTS]}`,
+    tag: 'AI Native', operationId: `aiCategoryProposal_${operation}`, permissions: [contract.permission],
+    summary: 'Current SaaS category proposal over original platform Task/Gateway/ledger. Explicit generation only; candidates are not draft saves, publication or adoption. Unknown observes its original operation.',
     requestSchema: contract.request, responseSchema: contract.response })),
   ...Object.entries(AI_CATEGORY_DRAFT_HTTP_CONTRACTS).map(([operation, contract]) => ({
     method: 'post' as const, path: `/api/ai-native/category-drafts/${operation}`, tag: 'AI Native',
@@ -2772,6 +2817,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: 'Current authorized tenant review only. Returns a keyed original source/version reference, never old keys, masks, prompts or logs. Explicit save with legacySource requires revision zero, a replacement credential, operationKey and disabled BYOK; original settings remain unchanged and current capability/budget is not granted.',
     requestSchema: objectOf({}, [], false), responseSchema: 'AiLegacyModelConfigurationDraft' },
   ...(['operator', 'staff'] as const).flatMap(audience => [
+    ['candidates/observation', 'outboxObservation'],
     ['candidates/read', 'readCandidate'], ['candidates/prepare', 'prepareCandidate'], ['candidates/prepare-pending', 'preparePending'],
     ['candidates/pending/continue', 'continuePendingBatch'],
     ['inputs/prepare', 'prepareInput'], ['inputs/read', 'readInput'], ['tasks/create', 'createTask'], ['tasks/read-creation', 'readCreation'],
@@ -3020,6 +3066,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     [AI_SCENE_MODEL_HTTP_DRAFT.readCancellationSettlementReceipt, 'AiSceneModelCancelDraft'],
     [AI_SCENE_MODEL_HTTP_DRAFT.readAnswer, 'AiSceneModelAnswerQueryDraft'],
     [AI_SCENE_MODEL_HTTP_DRAFT.readModelResult, AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readModelResult.request],
+    [AI_SCENE_MODEL_HTTP_DRAFT.readQuoteGoalCandidates, AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readQuoteGoalCandidates.request],
     [AI_SCENE_MODEL_HTTP_DRAFT.reopenModelSource, AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.reopenModelSource.request],
     [AI_SCENE_MODEL_HTTP_DRAFT.reopenOpeningModelSource, AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.reopenOpeningModelSource.request],
   ] as const).map(([action, requestSchema]) => ({ method: 'post' as const,
@@ -3028,6 +3075,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
       : action === AI_SCENE_MODEL_HTTP_DRAFT.readTaskEvents ? AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readTaskEvents.response
       : action === AI_SCENE_MODEL_HTTP_DRAFT.readTaskScene ? AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readTaskScene.response
       : action === AI_SCENE_MODEL_HTTP_DRAFT.readModelResult ? AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readModelResult.response
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.readQuoteGoalCandidates ? AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readQuoteGoalCandidates.response
       : action === AI_SCENE_MODEL_HTTP_DRAFT.reopenModelSource ? AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.reopenModelSource.response
       : action === AI_SCENE_MODEL_HTTP_DRAFT.reopenOpeningModelSource ? AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.reopenOpeningModelSource.response
       : action === AI_SCENE_MODEL_HTTP_DRAFT.readTaskPerformance ? 'AiTaskPerformanceObservationDraft'
@@ -3069,7 +3117,8 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     ["get", "/{code}/audits", "rentalCategoryGovernanceAudits", "Read platform configuration audit records, not tenant business data", "audit"]
   ] as Array<[HttpMethod, string, string, string, string, SchemaObject?]>).map(([method, suffix, operationId, summary, permission, requestSchema]): ContractOperation => ({
     method, path: `/api/platform/rental-categories${suffix}`, tag: "Platform Rental Core",
-    operationId, summary, permissions: [`system:rental-category:${permission}`], requestSchema, responseSchema: "GenericObject"
+    operationId, summary, permissions: [`system:rental-category:${permission}`], requestSchema,
+    responseSchema: suffix === '/{code}/audits' ? 'AiCategoryGovernanceAuditPage' : "GenericObject"
   })),
   { method: "post", path: "/api/platform/rental-categories", tag: "Platform Rental Core", operationId: "createRentalCategory",
     summary: "Create an independent unopened identity and draft from a verified template or immutable source; original request and audit commit together. Dynamic creation is closed by default.",

@@ -8,11 +8,13 @@ import { fingerprintAiProposalDraft } from '../proposal-binding-draft';
 import type { ApprovedOrderSnapshotSource } from './approved-order-composition.ports';
 import type { PersistedApprovedOrderPolicyAuthority } from './persisted-approved-order-policy.authority';
 import { deniedOrder, orderContextHash } from './prisma-approved-order.source';
+import { approvedOrderMerchantDelegationSnapshotSchema } from './approved-order-merchant-delegation';
 
 export const approvedOrderPreviewSchema = z.object({
   id: z.string().min(1), tenantId: z.string().min(1), pricingPlanVersion: z.string().min(1),
   expiresAt: z.string().datetime({ offset: true }),
-  consumedAt: z.string().datetime({ offset: true }).optional(), consumedOrderId: z.string().min(1).optional()
+  consumedAt: z.string().datetime({ offset: true }).optional(), consumedOrderId: z.string().min(1).optional(),
+  merchantDelegation: approvedOrderMerchantDelegationSnapshotSchema.optional()
 }).passthrough();
 
 function jsonValue(value: unknown): Prisma.InputJsonValue | null {
@@ -69,16 +71,26 @@ export class PrismaApprovedOrderSnapshotSource implements ApprovedOrderSnapshotS
         return row;
       };
       const input = await read('INPUT'), preview = await read('PREVIEW');
-      const body: CreateRentalOrderDto = await this.validation.transform(input.payload, { type: 'body', metatype: CreateRentalOrderDto });
+      const originalBody: CreateRentalOrderDto = JSON.parse(JSON.stringify(input.payload));
+      const body: CreateRentalOrderDto = await this.validation.transform(structuredClone(originalBody), { type: 'body', metatype: CreateRentalOrderDto });
       const quote = approvedOrderPreviewSchema.parse(preview.payload);
       if (body.capabilityExceptions !== undefined || requestFingerprint(body) !== input.contentHash
         || requestFingerprint(quote) !== preview.contentHash || body.quoteId !== quote.id
         || first.context.scope.kind !== 'workspace' || quote.tenantId !== first.context.scope.tenantId
         || quote.consumedAt || quote.consumedOrderId) throw deniedOrder();
+      if (quote.merchantDelegation) {
+        const { merchantDelegation, ...originalQuote } = quote;
+        if (merchantDelegation.quoteHash !== requestFingerprint(originalQuote) || merchantDelegation.requestHash !== input.contentHash
+          || merchantDelegation.quoteId !== quote.id || merchantDelegation.personalCustomerId !== body.customerId
+          || body.customerType !== 'personal' || body.bookingIdentity?.bookingIdentity !== 'enterprise_employee'
+          || body.bookingIdentity.corporateCustomerId !== merchantDelegation.corporateCustomerId
+          || Date.parse(merchantDelegation.expiresAt) > Date.parse(quote.expiresAt)) throw deniedOrder();
+      }
       const current = await this.policy.authorizeRead(request.taskId, tx);
       if (current.scopeId !== first.scopeId || orderContextHash(first.context) !== orderContextHash(current.context)) throw deniedOrder();
       const envelope = { scopeId: base.scopeId, taskId: base.taskId, actionId: base.actionId };
-      return { input: { ...envelope, ...request.action.input, payload: structuredClone(body) },
+      // Original booking-identity order is part of Core's historical comparison.
+      return { input: { ...envelope, ...request.action.input, payload: originalBody },
         preview: { ...envelope, ...request.action.preview, payload: structuredClone(quote) } };
     } catch (error) {
       if (error instanceof AiTaskRepositoryError) throw new AiTaskRepositoryError(error.code);

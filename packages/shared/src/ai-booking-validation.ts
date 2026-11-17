@@ -2,18 +2,25 @@
  * scope, quote freshness, choice and execution still belong to server guards. */
 import { z } from 'zod';
 import { AI_BOOKING_DRAFT_CONTRACT_VERSION, AI_BOOKING_DRAFT_STATES, AI_BOOKING_INPUT_SOURCES,
-  aiBookingSelectionSchema, type AiBookingDraft, type AiBookingHandoff, type AiBookingOperationReadResponse } from './ai-booking-draft';
+  aiBookingSelectionSchema, aiBookingSourceVersionSchema, type AiBookingDraft, type AiBookingHandoff, type AiBookingOperationReadResponse } from './ai-booking-draft';
 import { AI_CUSTOMER_ENTRY_SURFACES, aiEntryActionSchema } from './ai-entry-action-draft';
+import { RENTAL_PRICING_UNIT_CODES } from './core';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const hash = z.string().regex(/^[a-f0-9]{64}$/u), date = z.string().datetime({ offset: true });
-const sourceVersion = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*(?:\/[A-Za-z0-9][A-Za-z0-9._:-]*)*$/u);
+const sourceVersion = aiBookingSourceVersionSchema;
 const source = z.enum(AI_BOOKING_INPUT_SOURCES), amount = z.number().finite().nonnegative();
 const scope = z.object({ kind: z.literal('workspace'), tenantId: id, workspaceId: id }).strict();
+const serviceFieldSource = z.enum(['user_explicit', 'core_normalized']);
+const serviceSources = z.array(z.object({ serviceId: id,
+  fields: z.object({ serviceId: z.literal('user_explicit'), quantity: z.literal('user_explicit'),
+    scheduledStartAt: serviceFieldSource, scheduledEndAt: serviceFieldSource, serviceLocationId: serviceFieldSource }).strict()
+}).strict()).max(20);
 const material = z.object({ selection: aiBookingSelectionSchema,
   sources: z.object({ quoteId: source, timeZone: source, startAt: source, endAt: source,
     fulfillmentMode: source, fulfillmentLocationId: source, returnLocationId: source, bookingIdentity: source,
     lines: source, services: source, deliveryAddressId: source.optional(), deliveryAddressConfirmation: source.optional() }).strict(),
+  serviceSources: serviceSources.optional(),
   deliveryAddress: z.discriminatedUnion('source', [
     z.object({ source: z.literal('current_client_saved_address'), addressId: id, observedRevision: z.number().int().min(1),
       observedUpdatedAt: date, quoteAddressRevision: z.null(), snapshotFingerprint: hash, serviceAreaFingerprint: hash }).strict(),
@@ -24,9 +31,27 @@ const material = z.object({ selection: aiBookingSelectionSchema,
     priceVersionId: id.nullable(), calendarVersion: id.nullable(), categoryVersionId: id.nullable(),
     currency: z.string().regex(/^[A-Z]{3}$/u), payableAmount: amount, depositAmount: amount, preAuthAmount: amount,
     chargeLines: z.array(z.object({ type: id, amount: z.number().finite(), sourceId: id.nullable(),
-      sourceVersion: sourceVersion.nullable() }).strict()).max(100), expiresAt: date, createdAt: date }).strict(),
+      sourceVersion: sourceVersion.nullable() }).strict()).max(100),
+    lines: z.array(z.object({ itemGroupId: id, quantity: z.number().int().min(1).max(999),
+      pricingUnit: z.enum(RENTAL_PRICING_UNIT_CODES), source: z.literal('original_core_quote') }).strict()).min(1).max(20).optional(),
+    expiresAt: date, createdAt: date }).strict(),
   catalogVersion: hash, availabilityVersion: hash, identityVersion: hash,
-  availability: z.literal('available_at_observation_not_reserved') }).strict();
+  availability: z.literal('available_at_observation_not_reserved') }).strict().superRefine((value, context) => {
+  if (value.quote.lines && (value.quote.lines.length !== value.selection.lines.length
+    || value.quote.lines.some((line, index) => line.itemGroupId !== value.selection.lines[index]?.itemGroupId
+      || line.quantity !== value.selection.lines[index]?.quantity)))
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'Original quote pricing lines must bind the selected items' });
+  if (value.serviceSources === undefined) return; // Legacy parsing grants no missing-field provenance.
+  const services = value.selection.services ?? [], ids = new Set(value.serviceSources.map(row => row.serviceId));
+  if (value.serviceSources.length !== services.length || ids.size !== value.serviceSources.length
+    || new Set(services.map(row => row.serviceId)).size !== services.length
+    || services.some(row => !ids.has(row.serviceId) || row.scheduledStartAt === undefined
+      || row.scheduledEndAt === undefined || row.serviceLocationId === undefined)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'Original service field sources must bind each normalized occurrence' });
+  }
+});
+/** Exact original material parsing is separate from current permission/use. */
+export const aiBookingMaterialSchema = material;
 export const aiBookingDraftSchema: z.ZodType<AiBookingDraft> = z.object({
   contractVersion: z.literal(AI_BOOKING_DRAFT_CONTRACT_VERSION), bookingDraftId: z.string().uuid(),
   audience: z.literal('customer'), surface: z.enum(AI_CUSTOMER_ENTRY_SURFACES), scope,

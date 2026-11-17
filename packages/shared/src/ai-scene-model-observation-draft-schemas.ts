@@ -58,6 +58,7 @@ export const AI_SCENE_MODEL_OBSERVATION_SCHEMAS: Record<string, AiLeafSchemaDraf
   AiSceneKnowledgeSnapshotDraft: knowledge,
   AiSceneModelResultObservationDraft: { oneOf: [available('order_explanation', 'AiOrderExplanationMaterialDraft', true),
     available('opening_diagnosis', 'AiOpeningBusinessMaterialDraft'), available('quote_clarification', 'AiQuoteBusinessMaterialDraft'),
+    available('quote_clarification', 'AiQuoteGoalBusinessMaterialDraft'),
     ...['order_explanation', 'opening_diagnosis', 'quote_clarification'].flatMap(scene => [unavailable(scene, 'unknown', 'reconcile'),
       unavailable(scene, 'failed', 'manual_review'), unavailable(scene, 'stale', 'reread_facts')])] },
   AiOrderSourceObservationDraft: { oneOf: [

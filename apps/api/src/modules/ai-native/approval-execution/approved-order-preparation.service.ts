@@ -6,7 +6,8 @@ import { getRequestIdentity } from '../../../common/request-identity';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiProposalRepository, AiProposalRepositoryError } from '../ai-proposal-repository';
 import { AiTaskRepositoryError, aiTaskAccessFromContext } from '../ai-task.repository';
-import type { PersistedApprovedOrderDependencies } from './approved-order-composition.ports';
+import type { PersistedApprovedOrderDependencies, ApprovedOrderMerchantDelegationSnapshot } from './approved-order-composition.ports';
+import { readApprovedOrderMerchantDelegation } from './approved-order-merchant-delegation';
 import { AiApprovedOrderRouteAuthority } from './approved-order-route.authority';
 import type { PersistedApprovedOrderPolicyAuthority } from './persisted-approved-order-policy.authority';
 import { approvedOrderPreviewSchema, approvedOrderSnapshotJson, type PrismaApprovedOrderSnapshotSource } from './prisma-approved-order-snapshot.source';
@@ -72,7 +73,7 @@ export class ApprovedOrderPreparationService {
   }
 
   private async persist(tx: Prisma.TransactionClient, command: Command, context: AiExecutionContext, scopeId: string,
-    body: CreateRentalOrderRequest, quote: RentalQuoteSnapshotV1) {
+    body: CreateRentalOrderRequest, quote: RentalQuoteSnapshotV1 & { merchantDelegation?: ApprovedOrderMerchantDelegationSnapshot }) {
     if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace' || !['operator', 'staff'].includes(context.audience)) throw deniedOrder();
     const inputJson = approvedOrderSnapshotJson(body), previewJson = approvedOrderSnapshotJson(quote);
     const inputHash = requestFingerprint(inputJson), previewHash = requestFingerprint(previewJson);
@@ -120,16 +121,27 @@ export class ApprovedOrderPreparationService {
           taskId: command.taskId, actionId: command.actionId, runId: command.lease.runId };
         const input = structuredClone(await this.d.inputSource.read(reference, tx));
         if (!input || requestFingerprint(input) !== step.fingerprint) throw deniedOrder();
-        return this.route.withOrderPreparation(current.context, input, async (context, body) => {
+        return this.route.withOrderPreparation(current.context, input, async (context, body, actorAuth) => {
           const quote = await this.quote(context, body, tx);
           if (Date.parse(command.expiresAt) > Date.parse(quote.expiresAt)) throw deniedOrder();
-          const result = await this.persist(tx, command, context, current.scopeId, body, quote);
+          const delegation = body.bookingIdentity?.bookingIdentity === 'enterprise_employee' && this.d.inputSource.readDelegation
+            ? await this.d.inputSource.readDelegation(reference, tx) : null;
+          if (body.bookingIdentity?.bookingIdentity === 'enterprise_employee' && !delegation) {
+            throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+          }
+          const readDelegation = () => delegation ? readApprovedOrderMerchantDelegation(this.d.merchantDelegations,
+            actorAuth, delegation.reference, body, requestFingerprint(quote), 'prepare') : Promise.resolve(null);
+          if (requestFingerprint(await readDelegation()) !== requestFingerprint(delegation)
+            || delegation && Date.parse(command.expiresAt) > Date.parse(delegation.expiresAt)) throw deniedOrder();
+          const preview = delegation ? { ...quote, merchantDelegation: delegation } : quote;
+          const result = await this.persist(tx, command, context, current.scopeId, body, preview);
           const latest = await this.policy.authorizePreparation(command.taskId, tx);
           if (latest.scopeId !== current.scopeId || orderContextHash(latest.context) !== orderContextHash(context)
             || requestFingerprint(await this.quote(latest.context, body, tx)) !== requestFingerprint(quote)) throw deniedOrder();
           const latestInput = await this.d.inputSource.read({ ...reference, context: structuredClone(latest.context) }, tx);
           if (!latestInput || requestFingerprint(latestInput) !== step.fingerprint
             || (await this.lock(tx, command, latest.context, latest.scopeId)).binding !== step.binding) throw deniedOrder();
+          if (requestFingerprint(await readDelegation()) !== requestFingerprint(delegation)) throw deniedOrder();
           return { result, body: structuredClone(body) };
         });
       // The real input/quote/current-entitlement rechecks can cross Prisma's

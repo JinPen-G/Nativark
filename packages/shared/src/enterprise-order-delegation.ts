@@ -96,3 +96,37 @@ export type EnterpriseOrderDelegationOriginal = EnterpriseOrderDelegationView | 
   delegationKey: string;
   retryable: false;
 };
+
+/** Bind a public customer read to its original quote and delegation locator.
+ * An absent receipt keeps the operation pending. Only the server's consumed
+ * or revoked original can release the customer's submission controls. */
+export function enterpriseOrderDelegationMatches(value: unknown, expected: {
+  delegationKey: string;
+  requestReference: EnterpriseOrderDelegationRequestReference;
+  tenantId: string;
+  personalCustomerId: string;
+  corporateCustomerId: string;
+  quoteId: string;
+}): value is EnterpriseOrderDelegationView {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value as EnterpriseOrderDelegationView;
+  const identifier = (input: unknown): input is string => typeof input === "string" && /^[A-Za-z0-9._:-]{1,191}$/u.test(input);
+  if (row.delegationKey !== expected.delegationKey || row.purpose !== "merchant_operator" || row.retryable !== false
+    || row.personalCustomerId !== expected.personalCustomerId || row.corporateCustomerId !== expected.corporateCustomerId
+    || row.quoteId !== expected.quoteId || !identifier(row.workspaceId)
+    || JSON.stringify(row.requestReference) !== JSON.stringify(expected.requestReference)
+    || !Number.isSafeInteger(row.revision) || row.revision < 1
+    || typeof row.confirmedAt !== "string" || typeof row.expiresAt !== "string"
+    || !Number.isFinite(Date.parse(row.confirmedAt)) || !Number.isFinite(Date.parse(row.expiresAt))
+    || !row.original || row.original.retryable !== false) return false;
+  if (row.state === "issued" || row.state === "expired") return row.revision === 1 && row.original.state === "not_submitted";
+  if (row.state === "revoked") return row.revision >= 2 && row.original.state === "revoked";
+  if (row.state !== "consumed" || row.revision < 2 || row.original.state !== "consumed") return false;
+  const receipt = row.original;
+  return receipt.delegationKey === expected.delegationKey && receipt.coreIdempotencyKey === expected.delegationKey
+    && receipt.tenantId === expected.tenantId && receipt.workspaceId === row.workspaceId
+    && receipt.personalCustomerId === expected.personalCustomerId && receipt.corporateCustomerId === expected.corporateCustomerId
+    && receipt.quoteId === expected.quoteId && /^[a-f0-9]{64}$/u.test(receipt.sourceHash)
+    && /^[a-f0-9]{64}$/u.test(receipt.requestHash) && identifier(receipt.actorUserId)
+    && identifier(receipt.orderId) && typeof receipt.consumedAt === "string" && Number.isFinite(Date.parse(receipt.consumedAt));
+}

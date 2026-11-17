@@ -286,6 +286,10 @@ export type AiQuoteBusinessMaterialDraft = AiSealedBusinessMaterialDraft<'quote_
   scope: AiWorkspaceScope; audience: ReadAudience; observedAt: string; facts: AiQuoteBusinessFactsDraft;
   model: { status: 'not_requested' | 'unavailable'; answer: 'not_generated' }; gaps: string[]; execution: 'not_attempted';
 }>;
+export type AiQuoteGoalBusinessMaterialDraft = AiSealedBusinessMaterialDraft<'quote_clarification', {
+  scope: AiWorkspaceScope; audience: ReadAudience; observedAt: string; facts: import('./ai-quote-goal-draft').AiQuoteGoalContextDraft;
+  model: { status: 'not_requested' | 'unavailable'; answer: 'not_generated' }; gaps: string[]; execution: 'not_attempted';
+}>;
 interface SceneTaskMaterial<S extends AiSceneRequestReceiptDraft['sceneCode'], M> {
   original: Omit<AiSceneRequestReceiptDraft, 'sceneCode'> & { sceneCode: S }; material: M; materialHash: string;
   trust: 'source_text_is_data_not_instructions'; task: AiSceneTaskReceiptDraft; model: 'not_called'; plan: 'requires_host_plan_start';
@@ -293,6 +297,6 @@ interface SceneTaskMaterial<S extends AiSceneRequestReceiptDraft['sceneCode'], M
 export type AiSceneTaskMaterialResponseDraft =
   | SceneTaskMaterial<'order_explanation', AiOrderExplanationMaterialDraft>
   | SceneTaskMaterial<'opening_diagnosis', AiOpeningBusinessMaterialDraft>
-  | SceneTaskMaterial<'quote_clarification', AiQuoteBusinessMaterialDraft>;
+  | SceneTaskMaterial<'quote_clarification', AiQuoteBusinessMaterialDraft | AiQuoteGoalBusinessMaterialDraft>;
 /** New public preparation wrapper only, never an original v1 model receipt. */
 export type AiOrderSceneTaskMaterialV2 = SceneTaskMaterial<'order_explanation', AiOrderExplanationMaterialV2>;

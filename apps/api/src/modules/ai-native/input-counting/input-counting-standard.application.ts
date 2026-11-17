@@ -33,7 +33,7 @@ const configurationSchema = z.discriminatedUnion('enabled', [z.object({ enabled:
     platformProfileId: identifier.max(36), timeoutMs: z.number().int().min(1000).max(30000),
     nativeToolResults: z.boolean().default(false) }).strict()])
   .refine(value => !value.enabled || !value.nativeToolResults || value.sceneCode === 'order_explanation');
-type Dependencies = Pick<InputCountingRequestDependencies, 'auth' | 'guard' | 'subscriptions' | 'clock' | 'nativeToolResultsForRequest'> & {
+type Dependencies = Pick<InputCountingRequestDependencies, 'auth' | 'guard' | 'subscriptions' | 'clock' | 'nativeToolResultsForRequest' | 'capacity'> & {
   db: PrismaClient; secrets: SecretBox;
   core?: Pick<RentalCoreService, 'getOrder' | 'readOrderFacts'>;
 };
@@ -90,6 +90,7 @@ export function composeStandardInputCounting(input: Dependencies, value?: unknow
   const nativeToolResultsForRequest = configuration.enabled && configuration.nativeToolResults
     ? input.nativeToolResultsForRequest ?? originalNativeFactory(input) : undefined;
   const writes = configuration.enabled ? new InputCountingRequestFactory({ db, auth, guard, subscriptions, clock,
+    ...(input.capacity ? { capacity: input.capacity } : {}),
     ...(nativeToolResultsForRequest ? { nativeToolResultsForRequest } : {}),
     connectionConfiguration: { db, secrets: input.secrets, platformProfileId: configuration.platformProfileId },
     configuration: { sceneCode: configuration.sceneCode, sceneMaxOutputTokens: configuration.sceneMaxOutputTokens,

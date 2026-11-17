@@ -8,7 +8,7 @@ import { AI_CONVERSATION_DRAFT_VERSION, validateAiConversationAdmissionDraft, va
   type AiSceneModelQuoteReceiptResponseDraft, type AiTaskInputReceiptReferenceDraft, type AiWorkspaceScope } from '@rental-os/shared';
 import { commandHash } from './budget-settings-session';
 
-export type QuoteAnswerReference = { reference: AiTaskInputReceiptReferenceDraft; receiptId: string };
+export type QuoteAnswerReference = { reference: AiTaskInputReceiptReferenceDraft; receiptId: string; runId?: string };
 export type ConfirmedQuoteSource = { answer: QuoteAnswerReference; quoteId: string; runId: string };
 type Observed = Extract<AiSceneModelQuotePreparationResponseDraft, { original: unknown }>;
 type Ready = Observed & { preparation: Extract<Observed['preparation'], { status: 'ready' }>;
@@ -32,7 +32,9 @@ const same = (left: unknown, right: unknown) => JSON.stringify(sorted(left)) ===
 const code = (v: unknown, max = 191): v is string => typeof v === 'string' && v.length <= max && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(v);
 const hash = (v: unknown): v is string => typeof v === 'string' && /^[a-f0-9]{64}$/u.test(v);
 const answerKey = (v: QuoteAnswerReference) => [v.reference.taskId, v.reference.requestId, v.reference.expectedRevision, v.reference.submissionKey, v.receiptId];
-const validAnswer = (v: QuoteAnswerReference) => !!v && !!v.reference && Object.keys(v).length === 2
+const validAnswer = (v: QuoteAnswerReference) => !!v && !!v.reference
+  && Object.keys(v).every(key => ['reference', 'receiptId', 'runId'].includes(key))
+  && (v.runId === undefined || code(v.runId, 36))
   && Object.keys(v.reference).length === 4 && code(v.receiptId, 36) && code(v.reference.taskId, 36) && code(v.reference.requestId, 36)
   && code(v.reference.submissionKey) && Number.isInteger(v.reference.expectedRevision) && v.reference.expectedRevision >= 1 && v.reference.expectedRevision <= 4294967294;
 const scopeEqual = (a: AiWorkspaceScope, b: AiWorkspaceScope) => a.tenantId === b.tenantId && a.workspaceId === b.workspaceId;
@@ -70,9 +72,9 @@ export class ConversationQuoteConfirmationSession {
     const packet = await this.ports.admission(query, signal); this.check(signal);
     if (!validateAiConversationAdmissionDraft(packet, query) || !packet.result || !same(packet.result, this.turn)) throw Error('AI_REVISION_CONFLICT');
   }
-  private binding(value: { receipt: { taskId: string; requestId: string; receiptId: string }; original?: unknown }, answer: QuoteAnswerReference) {
+  private binding(value: { receipt: { taskId: string; requestId: string; receiptId: string; runId?: string }; original?: unknown }, answer: QuoteAnswerReference) {
     if (value.receipt.taskId !== answer.reference.taskId || value.receipt.requestId !== answer.reference.requestId
-      || value.receipt.receiptId !== answer.receiptId || value.original !== undefined
+      || value.receipt.receiptId !== answer.receiptId || answer.runId !== undefined && value.receipt.runId !== answer.runId || value.original !== undefined
         && !validateAiSceneRequestReceiptDraft(value.original, this.turn.original, this.turn)) throw Error('AI_RESULT_UNKNOWN');
   }
   private original(): Marker {

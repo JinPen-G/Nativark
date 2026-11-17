@@ -28,7 +28,7 @@ function signed(value, publicKey) {
     || !crypto.verify(null, Buffer.from(value.payload), publicKey, Buffer.from(value.signature, 'base64'))) fail();
   return JSON.parse(value.payload);
 }
-/** All restored workspaces need fresh server-signed AFTER-replay attestations.
+/** All restored workspace and platform scopes need fresh server-signed AFTER-replay attestations.
  * The original dump hash and exact newly created database are mandatory. A
  * certificate from another clone/scope/snapshot never grants access here.
  */
@@ -38,24 +38,38 @@ function verifyRestoredAiScopes({ certificates, publicKey, database, snapshotSha
   if (!/^[A-Za-z0-9_]{1,64}$/u.test(database) || !/^[a-f0-9]{64}$/u.test(snapshotSha256)
     || !Array.isArray(certificates) || !Array.isArray(scopes) || scopes.length > 500 || certificates.length !== scopes.length
     || !Number.isFinite(now.getTime())) fail();
-  const expected = new Set(scopes.map(s => JSON.stringify([s.tenantId, s.workspaceId])));
+  const scopeKey = s => {
+    if (!s || typeof s !== 'object') fail();
+    if (s.scopeKind === 'PLATFORM') {
+      if (typeof s.scopeId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/u.test(s.scopeId)
+        || s.tenantId !== null || s.workspaceId !== null) fail();
+      return JSON.stringify(['PLATFORM', s.scopeId, null, null]);
+    }
+    if (s.scopeKind !== undefined && s.scopeKind !== 'WORKSPACE'
+      || typeof s.tenantId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(s.tenantId)
+      || typeof s.workspaceId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(s.workspaceId)) fail();
+    return JSON.stringify(['WORKSPACE', s.tenantId, s.workspaceId]);
+  };
+  const expected = new Set(scopes.map(scopeKey));
   if (expected.size !== scopes.length) fail();
   for (const item of certificates) {
     const p = signed(item, publicKey), at = Date.parse(p.verifiedAt);
-    if (p.version !== 'ai-restored-scope-1' || p.policyVersion !== POLICY || p.database !== database
+    const platform = p.version === 'ai-restored-platform-scope-1';
+    if ((!platform && p.version !== 'ai-restored-scope-1') || p.policyVersion !== POLICY || p.database !== database
       || p.snapshotSha256 !== snapshotSha256 || !/^[a-f0-9]{64}$/u.test(p.manifestHash)
       || !Number.isFinite(at) || at > now.getTime() || now.getTime() - at > 60000
-      || !expected.delete(JSON.stringify([p.tenantId, p.workspaceId]))) fail();
+      || platform && p.scopeKind !== 'PLATFORM'
+      || !expected.delete(scopeKey(platform ? p : { scopeKind: 'WORKSPACE', tenantId: p.tenantId, workspaceId: p.workspaceId }))) fail();
   }
   if (expected.size) fail();
   return { state: 'privacy_barrier_passed', scopes: scopes.length, database };
 }
 function assertRestoreAiBarrier(query, database, snapshotSha256, certificates, publicKey) {
   if (!/^[A-Za-z0-9_]{1,64}$/u.test(database)) fail();
-  const hasAi = Number(query(`SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${database}' AND table_name IN ('ai_tasks','ai_knowledge_documents','ai_structured_memories','ai_client_scene_materials')`));
+  const hasAi = Number(query(`SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${database}' AND table_name IN ('ai_tasks','ai_task_original_requests','ai_knowledge_documents','ai_structured_memories','ai_client_scene_materials','ai_inspection_drafts')`));
   if (!Number.isSafeInteger(hasAi) || hasAi < 0) fail();
   if (hasAi === 0) return { state: 'no_ai_task_tables' };
-  const scopes = JSON.parse(query(`SELECT COALESCE(JSON_ARRAYAGG(JSON_OBJECT('tenantId', tenantId, 'workspaceId', workspaceId)), JSON_ARRAY()) FROM (SELECT tenantId, id AS workspaceId FROM \`${database}\`.business_workspaces LIMIT 501) privacy_scopes`));
+  const scopes = JSON.parse(query(`SELECT COALESCE(JSON_ARRAYAGG(JSON_OBJECT('scopeKind', scopeKind, 'scopeId', scopeId, 'tenantId', tenantId, 'workspaceId', workspaceId)), JSON_ARRAY()) FROM (SELECT 'WORKSPACE' AS scopeKind, NULL AS scopeId, tenantId, id AS workspaceId FROM \`${database}\`.business_workspaces UNION ALL SELECT 'PLATFORM' AS scopeKind, id AS scopeId, tenantId, workspaceId FROM \`${database}\`.ai_scopes WHERE kind='platform' AND scopeKey='platform' AND tenantId IS NULL AND workspaceId IS NULL LIMIT 501) privacy_scopes`));
   return verifyRestoredAiScopes({ certificates, publicKey, database, snapshotSha256, scopes });
 }
 /** Targeted AI-only backup expiry. Never scans/deletes generic SQL backups,

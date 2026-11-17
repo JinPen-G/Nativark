@@ -22,7 +22,10 @@ function clear(identity: string) {
   localStorage.removeItem(storageKey(identity)); pendingOperations.delete(identity);
 }
 
-export function EnterpriseBookingApproval({ quoteId, identity, english, onOrder, onNewQuote }: { quoteId: string; identity: string; english: boolean; onOrder: (id: string) => void; onNewQuote?: () => void }) {
+export function EnterpriseBookingApproval({ quoteId, identity, english, onOrder, onNewQuote, externalBlocked = false, onDelegate }: {
+  quoteId: string; identity: string; english: boolean; onOrder: (id: string) => void; onNewQuote?: () => void;
+  externalBlocked?: boolean; onDelegate?: (approval: EnterpriseBookingApprovalView) => Promise<void>;
+}) {
   const host = captureEnterpriseHostSession(), hostIdentity = host?.operationScope;
   const owner = useRef(identity); owner.current = identity;
   const mounted = useRef(true), inFlight = useRef(false);
@@ -82,7 +85,7 @@ export function EnterpriseBookingApproval({ quoteId, identity, english, onOrder,
     publish();
   };
   const command = async (submit: boolean) => {
-    current(); if (!storageReady || inFlight.current || readPending(hostIdentity!)) return;
+    current(); if (!storageReady || inFlight.current || externalBlocked || readPending(hostIdentity!)) return;
     if (approval?.state === 'closed' || !purpose.trim() || submit && (!checked || approval?.state !== 'approved' || approval.quoteId !== quoteId)) throw new Error('请核对用途、原报价及批准；已封闭的原申请不能复用');
     inFlight.current = true; setBusy(true); setError('');
     try {
@@ -120,13 +123,17 @@ export function EnterpriseBookingApproval({ quoteId, identity, english, onOrder,
     catch (e) { if (mounted.current && owner.current === identity && host?.current()) setError(e instanceof Error ? e.message : '原结果不可用'); }
     finally { inFlight.current = false; if (mounted.current && owner.current === identity && host?.current()) setBusy(false); }
   };
-  const blocked = busy || Boolean(pending) || !storageReady;
+  const blocked = busy || Boolean(pending) || !storageReady || externalBlocked;
   return <section><p className="mock-note">{english ? 'Enterprise payment requires approval. Approval does not reserve stock or confirm payment.' : '本次企业付款须逐单审批；批准不预占库存或额度，也不代表已支付。'}</p>
     <label className="booking-field">{english ? 'Purpose' : '用途'}<textarea value={purpose} disabled={blocked} maxLength={500} onChange={event => setPurpose(event.target.value)} /></label>
     {!approval && <button type="button" className="button button-dark" disabled={blocked || !purpose.trim()} onClick={() => void command(false).catch(() => undefined)}>{english ? 'Request approval' : '申请企业批准'}</button>}
     {approval && <p>{english ? 'Original approval' : '原批准'}：{approval.state} / {approval.expiresAt}</p>}
     {approval?.state === 'closed' && <><p role="status">{english ? 'The original execution is sealed. This did not cancel an order or retry submission. A new request needs a new quote and approval.' : '原执行已封闭，没有取消订单或重试下单。新申请须重新报价并取得新的批准。'}</p>{sealed && approval.quoteId === quoteId && onNewQuote && <button type="button" className="button button-outline" disabled={blocked} onClick={() => { current(); onNewQuote(); }}>{english ? 'Obtain a new quote' : '重新获取报价'}</button>}</>}
-    {approval?.state === 'approved' && <><label><input type="checkbox" checked={checked} disabled={blocked} onChange={event => setChecked(event.target.checked)} />{english ? 'I reviewed this quote and enterprise responsibility; explicitly submit' : '我已核对本报价、企业付款责任及保证金安排，明确提交'}</label><button type="button" className="button button-dark" disabled={blocked || !checked || !purpose.trim()} onClick={() => void command(true).catch(() => undefined)}>{english ? 'Explicitly submit' : '核对后提交'}</button></>}
+    {approval?.state === 'approved' && <><label><input type="checkbox" checked={checked} disabled={blocked} onChange={event => setChecked(event.target.checked)} />{english ? 'I reviewed this quote, enterprise payment responsibility and deposit arrangements.' : '我已核对本报价、企业付款责任及保证金安排。'}</label><button type="button" className="button button-dark" disabled={blocked || !checked || !purpose.trim()} onClick={() => void command(true).catch(() => undefined)}>{english ? 'Explicitly submit' : '核对后提交'}</button>
+      {onDelegate && <button type="button" className="button button-outline" disabled={blocked || !checked || !purpose.trim()} onClick={() => {
+        current(); if (!blocked && checked && approval.quoteId === quoteId) void onDelegate(approval).catch(() => undefined);
+      }}>{english ? 'Confirm merchant delegation' : '确认并委托商户'}</button>}
+    </>}
     <button type="button" className="button button-outline" disabled={busy || !storageReady} onClick={() => void readOriginal()}>{english ? 'Read original approval/result' : '核对原批准与提交结果'}</button>
     {pending && <p role="status">{english ? 'Keep this original request; do not submit with a new key' : '保留原请求，不能换键重新提交'}{pending.quoteId !== quoteId ? english ? ' (an earlier quote)' : '（另一份原报价）' : ''}</p>}
     {error && <p role="alert">{error}</p>}

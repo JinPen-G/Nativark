@@ -7,6 +7,7 @@ import type { ClientRequestContext } from '../client/client-auth.service';
 import type { ClientApiService } from '../client/client-api.service';
 import { ClientCreateQuoteRequestDto } from '../client/client-request.dto';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
+import type { Prisma } from '@prisma/client';
 
 const reference = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const readSchema = z.object({ reference }).strict();
@@ -46,10 +47,10 @@ export function composeGuardedClientOriginalQuotes(input: {
     return context;
   };
   const current = <T>(method: 'GET' | 'POST', path: 'auth/me' | 'quotes', body: unknown,
-    work: (context: ClientRequestContext) => Promise<T>) => runWithRequestIdentity({}, async () => {
+    work: (context: ClientRequestContext, recheck: () => Promise<void>) => Promise<T>) => runWithRequestIdentity({}, async () => {
     const before = await authorize(method, path, body);
     const recheck = async () => { if (requestFingerprint(await authorize(method, path, body)) !== requestFingerprint(before)) throw new ForbiddenException(); };
-    try { const result = await work(before); await recheck(); return result; }
+    try { const result = await work(before, recheck); await recheck(); return result; }
     catch (error) { await recheck(); throw error; }
   });
   return Object.freeze({
@@ -60,14 +61,15 @@ export function composeGuardedClientOriginalQuotes(input: {
       const body = await validation.transform(parsed.data.input, { type: 'body', metatype: ClientCreateQuoteRequestDto });
       return current('POST', 'quotes', body, context => input.client.prepareQuoteForOriginalOperation!(context, body));
     },
-    async create(value: unknown) {
+    async create(value: unknown, beforePersist?: (native: Prisma.TransactionClient) => Promise<void>) {
       const parsed = createSchema.safeParse(structuredClone(value));
       if (!parsed.success) throw new BadRequestException();
       const command = parsed.data;
       const body = await validation.transform(command.input, { type: 'body', metatype: ClientCreateQuoteRequestDto });
-      return current('POST', 'quotes', body, async context => {
+      return current('POST', 'quotes', body, async (context, recheck) => {
         try {
-          const quote = await input.client.createQuoteForOriginalOperation(context, body, command.reference, command.prepared);
+          const quote = await input.client.createQuoteForOriginalOperation(context, body, command.reference, command.prepared,
+            beforePersist ? async native => { await recheck(); await beforePersist(native); } : undefined);
           return { quote, quotePersistence: 'saved' as const, inventoryReservation: 'not_attempted' as const,
             orderExecution: 'not_attempted' as const, retryable: false as const };
         } catch (error) {

@@ -21,6 +21,8 @@ export function composeClientBooking(input: {
   repository: PrismaClientBookingRepository; scope: AiClientMaterialScope; bindingHash: string; surface: AiCustomerEntrySurface;
   loadMaterial(ref: string): Promise<Material>; loadHistoricalMaterial?(ref: string): Promise<Material>;
   assertCurrent(): Promise<void>; clock(): Date;
+  /** Current source/target continuation interlock, never receipt authority. */
+  assertUse?(row: ClientBookingRow): Promise<void>;
   withReceiptRead<T>(read: () => Promise<T>): Promise<T>;
 }) {
   const repo = input.repository;
@@ -30,6 +32,7 @@ export function composeClientBooking(input: {
     return row;
   };
   const verify = async (row: ClientBookingRow) => {
+    if (input.assertUse) await input.assertUse(row);
     if (!active.includes(row.state)) throw new AiClientEntryError('AI_PROPOSAL_STALE', `draft_${row.state}`, 'reprepare');
     if (row.expiresAt <= input.clock()) {
       await repo.invalidate(row, 'expired', 'lifetime_elapsed');
@@ -42,6 +45,7 @@ export function composeClientBooking(input: {
       const latest = await load(row.id);
       if (hashJson(latest) !== hashJson(row)) throw new AiClientEntryError('AI_REVISION_CONFLICT', 'draft_changed');
       await input.assertCurrent();
+      if (input.assertUse) await input.assertUse(latest);
       return { row, rowMaterial: material.row, material: material.material,
         policyFingerprint: material.policyFingerprint, policyExpiresAt: material.policyExpiresAt };
     } catch (error) {

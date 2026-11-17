@@ -1,12 +1,13 @@
 import type { AnimatedIconName } from "@/components/ui/AnimatedIcon";
 
 export type ResultKind = "brief" | "quote" | "tasks" | "schedule" | "inventory" | "customer" | "comparison" | "ledger" | "document" | "trend";
-export interface OperatorCapability { id: string; name: string; icon: AnimatedIconName; route: string; description: string; prompt: string; result: ResultKind; action?: string }
+export interface OperatorCapability { id: string; name: string; icon: AnimatedIconName; route: string; description: string; prompt: string; result: ResultKind; action?: string; nativeScene?: 'quote_clarification' | 'order_explanation' | 'opening_diagnosis' }
 /** Candidate UI catalog, not a claim that a backend capability has shipped. */
 export const OPERATOR_CAPABILITIES: OperatorCapability[] = [
+  { id: "opening", name: "开业诊断", icon: "folder", route: "/rental/settings", description: "按已选分区核对开业配置与缺口", prompt: "检查已选分区的开业准备情况", result: "document", nativeScene: "opening_diagnosis" },
   { id: "brief", name: "经营简报", icon: "dashboard", route: "/workbench", description: "抓住经营重点与今日待办", prompt: "整理今天的经营简报，优先告诉我需要关注的事项", result: "brief" },
-  { id: "booking", name: "预约库存", icon: "inventory", route: "/rental/orders", description: "查档期、整理资源与报价草稿", prompt: "为周末两套设备整理预约资料和报价草稿", result: "quote", action: "确认预约草稿" },
-  { id: "orders", name: "订单履约", icon: "orders", route: "/rental/orders", description: "准备交付、归还与交接清单", prompt: "整理今日待交付订单，生成交接清单", result: "tasks", action: "确认履约安排" },
+  { id: "booking", name: "预约库存", icon: "inventory", route: "/rental/orders", description: "查档期、整理资源与报价草稿", prompt: "为周末两套设备整理预约资料和报价草稿", result: "quote", nativeScene: 'quote_clarification' },
+  { id: "orders", name: "订单履约", icon: "orders", route: "/rental/orders", description: "核对原订单状态、费用与下一步", prompt: "解释这笔订单的当前状态和下一步", result: "tasks", nativeScene: 'order_explanation' },
   { id: "team", name: "门店协同", icon: "customers", route: "/rental/locations", description: "梳理门店任务与负责人分工", prompt: "安排周末两家门店的交付和归还分工", result: "schedule", action: "确认分工草稿" },
   { id: "assets", name: "资产养护", icon: "inventory", route: "/rental/assets", description: "关注养护、库存与资产异常", prompt: "检查设备养护优先级，列出需要处理的事项", result: "inventory" },
   { id: "members", name: "客户会员", icon: "customers", route: "/membership/personal", description: "整理客户资料、审核与权益", prompt: "汇总待审核会员，整理需要补充的资料", result: "customer" },

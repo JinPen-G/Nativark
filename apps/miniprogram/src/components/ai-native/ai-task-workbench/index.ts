@@ -9,6 +9,7 @@ export interface NativeAiSnapshot {
   modelText?: string | null;
   modelStatus?: string;
   continueAvailable?: boolean;
+  openOrderAvailable?: boolean;
   steps?: readonly unknown[];
   fields?: readonly unknown[];
   inputRevision?: string;
@@ -39,6 +40,7 @@ export interface NativeAiHost {
   cancel?: (context: AiReadContext) => Promise<void>;
   reconcile?: (context: AiReadContext) => Promise<void>;
   continueInput?: (context: AiReadContext) => Promise<void>;
+  openOrder?: (context: AiReadContext) => Promise<void>;
   inspectionDraft?: (context: AiReadContext, input: unknown) => Promise<void>;
 }
 interface Runtime {
@@ -76,7 +78,7 @@ function projectRows(value: unknown, keys: readonly string[]): unknown[] {
   });
 }
 const blank = {
-  clientModel: false, modelText: '', modelStatus: '', continueAvailable: false, cancellationAvailable: false,
+  clientModel: false, modelText: '', modelStatus: '', continueAvailable: false, openOrderAvailable: false, cancellationAvailable: false,
   steps: [] as unknown[], fields: [] as unknown[], proposal: null as { id: string; revision: string } | null,
   sources: [] as unknown[], memories: [] as unknown[], inspection: [] as unknown[], order: null as Record<string, unknown> | null,
   inputRevision: "", ready: false, proposalEnabled: false, proposalExpired: true,
@@ -142,12 +144,15 @@ Component({
         this.setData({ ...blank, clientModel: true, phase: 'unavailable' }); return;
       }
       r.snapshot = result;
+      // Filter display text only; the original snapshot keeps its exact body.
+      const displayText = text?.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/gu, '') ?? '';
       const inputRevision = typeof result.inputRevision === 'string' ? result.inputRevision : '';
       const cancellation = host.clientCancellation?.();
       this.setData({ clientModel: true, selectedTaskId: taskId, taskListAvailable: true, ready: true, phase: 'customer_model',
         cancellationAvailable: cancellation?.origin.taskId === taskId && typeof host.readAfterObservation === 'function',
-        modelText: text ?? '', modelStatus: typeof result.modelStatus === 'string' ? result.modelStatus : '',
+        modelText: displayText, modelStatus: typeof result.modelStatus === 'string' ? result.modelStatus : '',
         continueAvailable: result.continueAvailable === true && typeof host.continueInput === 'function',
+        openOrderAvailable: result.openOrderAvailable === true && typeof host.openOrder === 'function',
         inputRevision, fields: projectRows(result.fields,['key','label','value','error','readonly','required','maxLength']),
         inputEnabled: Boolean(inputRevision && typeof host.submitInput === 'function' && rows(result.fields).some(field => field
           && typeof field === 'object' && (field as { readonly?: boolean }).readonly !== true)),
@@ -203,7 +208,7 @@ Component({
         if (host.clientModel) {
           // Stop/receipt controls use their separate original task read. A
           // broken event stream must not reopen model/input execution controls.
-          this.setData({ ready: false, inputEnabled: false, continueAvailable: false, modelText: '', phase: 'unsynced',
+          this.setData({ ready: false, inputEnabled: false, continueAvailable: false, openOrderAvailable: false, modelText: '', phase: 'unsynced',
             modelStatus: '原任务变化待核对', errorLabel: '请读取原任务核对' });
         } else this.setData({ ...blank, phase: 'unsynced' });
         for (const id of ['#clarification', '#confirmation', '#sources']) this.selectComponent?.(id)?.detachHost?.();
@@ -291,6 +296,18 @@ Component({
       } catch {
         if (r.alive && r.shown && epoch === r.epoch) this.setData({ ...blank, phase: "failed", errorLabel: "读取失败，请由宿主重新核对" });
       }
+    },
+    async onOpenOrder(): Promise<void> {
+      const r = state(this), host = r.host, context = r.context;
+      if (!r.alive || !r.shown || !r.enabled || !host?.clientModel || !context || r.pending
+        || !r.snapshot?.openOrderAvailable || typeof host.openOrder !== 'function') return;
+      const epoch = r.epoch; r.pending = true; this.setData({ pending: true, errorLabel: '' });
+      try { await host.openOrder({ ...context }); }
+      catch { if (r.alive && r.shown && r.epoch === epoch && r.host === host) {
+        if (r.snapshot) r.snapshot = { ...r.snapshot, openOrderAvailable: false };
+        this.setData({ openOrderAvailable: false, errorLabel: '原订单暂不可打开，请核对原记录' });
+      } }
+      finally { if (r.alive && r.epoch === epoch && r.host === host) { r.pending = false; this.setData({ pending: false }); } }
     },
     async runHostAction(action: "submitInput" | "confirmProposal" | "openSource" | "inspectionDraft", input: unknown): Promise<void> {
       const r = state(this); const host = r.host; const callback = host?.[action]; const context = r.context;

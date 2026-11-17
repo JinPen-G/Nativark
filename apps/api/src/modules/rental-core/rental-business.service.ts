@@ -122,8 +122,15 @@ import {
   type TenantRentalProfile
 } from "@rental-os/shared";
 import { getRequestIdentity, getRequestTenantId, getRequestWorkspaceId } from "../../common/request-identity";
+import { hasEffectivePermission } from '../../common/permission-match';
+import { canManageWorkspaceWideNotifications } from './rental-workbench-todos';
+import { lockRentalBusinessTenant } from './rental-business-fence';
 import { SecretBox } from "../../common/secret-box";
+import { createNotificationDraftBodyRetentionReader, notificationDraftRetentionState, notificationDraftRetentionReceiptId,
+  type NotificationDraftBodyErasure, type NotificationDraftBodyRetention } from "../ai-native/privacy/retention-notification-draft";
 import { RentalStateRepository } from "./rental-state.repository";
+import { isNotificationDraftCacheLog, isVerifiedNotificationDraftCacheLog,
+  readNotificationDraftCacheLog, stripNotificationDraftCacheBody } from "./rental-notification-log-cache";
 import {
   RentalBusinessConfigRepository,
   readRentalReadinessAccountFacts,
@@ -241,6 +248,34 @@ const extensionPricingContext = new AsyncLocalStorage<{ tenantId: string; worksp
 /** One quote's detached business configuration. No transaction or authority is
  * supplied here; every persisted fact and commit gate keeps its original owner. */
 const quoteConfigurationContext = new AsyncLocalStorage<{ owner: RentalBusinessService; tenantId: string; workspaceId: string; state: RentalBusinessState }>();
+
+/** Server-only unsent notification boundary; these are not send DTOs or grants. */
+export interface RentalNotificationDraftInput {
+  customerId: string; templateId: string; templateVersion: string;
+  variables: Record<string, string | number | boolean | null>;
+}
+export interface RentalNotificationDraftOriginal { key: string; actorId: string }
+export type RentalNotificationDraftObservation = {
+  version: 'rental-notification-draft-1'; id: string; key: string; actorId: string;
+  scope: { tenantId: string; workspaceId: string }; customerId: string; customerVersion: string;
+  templateId: string; templateVersion: string; eventCode: string; channel: RentalNotificationTemplateV1['channel'];
+  commandHash: string; inputHash: string; templateHash: string; configurationHash: string; contentHash: string;
+  provider: 'not_dispatched'; attempts: 0;
+} & (
+  | { recipient: string; renderedTitle: string; renderedBody: string;
+      variables: Record<string, string | number | boolean | null>;
+      status: 'prepared' | 'draft'; createdAt: string | null; bodyRetention?: never }
+  | { recipient: null; renderedTitle: null; renderedBody: null; variables: null;
+      status: 'draft'; createdAt: string; bodyRetention: NotificationDraftBodyRetention }
+);
+export class RentalNotificationDraftUnknownError extends Error {
+  readonly code = 'NOTIFICATION_DRAFT_RESULT_UNKNOWN'; readonly retryable = false;
+  readonly nextAction = 'read_original_notification_draft';
+  constructor() { super('NOTIFICATION_DRAFT_RESULT_UNKNOWN'); }
+}
+type NotificationDraftMetadata = Pick<RentalNotificationDraftObservation, 'version' | 'id' | 'key' | 'actorId' | 'scope'
+  | 'customerId' | 'customerVersion' | 'templateId' | 'templateVersion' | 'eventCode' | 'channel'
+  | 'commandHash' | 'inputHash' | 'templateHash' | 'configurationHash' | 'contentHash'> & { previewHash: string; createdAt: string };
 
 interface BusinessContext {
   categoryVersionId?: string;
@@ -613,7 +648,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         state.rewardLedger = fact.rewardLedger;
         state.benefitAccounts = fact.benefitAccounts;
         state.referrals = fact.referrals;
-        state.notificationLogs = fact.notificationLogs;
+        state.notificationLogs = await this.notificationLogsForCache({ tenantId, workspaceId }, fact.notificationLogs);
       }
       this.states.set(workspaceId, state);
     }
@@ -648,7 +683,13 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     for (const row of await this.stateRepository?.loadBusinessStates() ?? []) {
       const state = row.state as unknown as RentalBusinessState;
       // 快照行自带 workspaceId，直接按空间键装载。
-      if (state?.categoryCode) this.states.set(row.workspaceId, state);
+      if (state?.categoryCode) {
+        // Old recovery snapshots are references only; they cannot retain or
+        // republish notification preparation bodies before original readback.
+        state.notificationLogs = (state.notificationLogs ?? []).map(log =>
+          isNotificationDraftCacheLog(log) ? stripNotificationDraftCacheBody(log) : log);
+        this.states.set(row.workspaceId, state);
+      }
     }
   }
 
@@ -676,7 +717,14 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       await this.persistBusinessConfig(tenantId, state);
       state.configPersisted = true;
     }
-    await this.stateRepository?.saveBusinessState(tenantId, workspaceId, state);
+    if (this.stateRepository) {
+      const notifications = await this.notificationLogsForCache({ tenantId, workspaceId }, state.notificationLogs);
+      if (this.workspaceOf(tenantId) !== workspaceId) throw new ForbiddenException('通知快照的当前空间已变化');
+      state.notificationLogs = notifications;
+      // Only notification copies are changed. Keep the original writer and
+      // other configuration/financial fields; no new save/cleanup operation.
+      await this.stateRepository.saveBusinessState(tenantId, workspaceId, { ...state, notificationLogs: notifications });
+    }
   }
 
   /** 把整份业务配置落库。仅用于补落懒加载默认值；此后各 save* 方法按条写穿。 */
@@ -4341,10 +4389,346 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return result;
   }
 
-  listNotificationLogs(tenantId: string, context: BusinessContext) { return this.state(tenantId, context).notificationLogs; }
+  private async notificationLogsForCache(owner: { tenantId: string; workspaceId: string }, logs: RentalNotificationSendLogV1[]) {
+    if (!Array.isArray(logs)) throw new ServiceUnavailableException('通知缓存格式无效');
+    const result: RentalNotificationSendLogV1[] = [];
+    let withheld = false;
+    for (const log of logs) {
+      if (!isNotificationDraftCacheLog(log)) { result.push(log); continue; }
+      try {
+        if (!this.prisma || !this.secretBox) throw new ServiceUnavailableException('通知草稿原缓存读取器不可用');
+        result.push(await readNotificationDraftCacheLog(this.prisma, this.secretBox, owner, log));
+      } catch {
+        // A draft has its own authorized reader. Missing evidence withholds
+        // this optional projection without blocking ordinary sending records.
+        withheld = true;
+      }
+    }
+    if (withheld) this.logger.warn('部分通知草稿未纳入缓存，请从原草稿入口核对');
+    return result;
+  }
+
+  listNotificationLogs(tenantId: string, context: BusinessContext) {
+    const state = this.state(tenantId, context);
+    // Synchronous legacy consumers retain their array contract. Draft rows
+    // contain only immutable verified receipts; previews use the original
+    // independently authorized draft reader, including erasure validation.
+    return state.notificationLogs.filter(log => !isNotificationDraftCacheLog(log) || isVerifiedNotificationDraftCacheLog(log));
+  }
 
   async findNotificationLog(tenantId: string, id: string): Promise<RentalNotificationSendLogV1 | undefined> {
     return (await this.factStore.findNotificationDelivery(tenantId, id))?.log;
+  }
+
+  private notificationDraftScope(tenantId: string, original: RentalNotificationDraftOriginal) {
+    // Workspace notification rights do not contain tenant membership/sensitive
+    // grants. The request host independently rechecks the original customer
+    // tenant Guard before and after source reads; this domain returns masked
+    // material only and cannot grant access to a customer's sensitive fields.
+    const identity = getRequestIdentity();
+    if (!original || typeof original.actorId !== 'string' || typeof original.key !== 'string'
+      || !identity || identity.tenantId !== tenantId || identity.userId !== original.actorId
+      || identity.isSaasAdmin || identity.audience !== 'operator' || identity.staffApi || !identity.workspaceId
+      || !/^[a-f0-9]{64}$/u.test(original.key)
+      || !(identity.isPlatformAdmin || hasEffectivePermission(identity.permissions ?? [], 'system:integration:manage'))
+      || !canManageWorkspaceWideNotifications(identity.dataScope,
+        identity.locationScope?.mode === 'selected' ? identity.locationScope.locationIds : identity.locationScope?.mode === 'all' ? undefined : [])) {
+      throw new ForbiddenException('通知草稿缺少当前原通知权限或完整空间范围');
+    }
+    if (!this.prisma || !this.secretBox || typeof this.prisma.$transaction !== 'function'
+      || typeof this.prisma.rentalNotificationLog?.findFirst !== 'function'
+      || typeof this.prisma.rentalNotificationTemplate?.findFirst !== 'function'
+      || typeof this.prisma.customerProfile?.findFirst !== 'function'
+      || typeof this.factStore.insertNotificationLog !== 'function'
+      || typeof this.factStore.findNotificationDelivery !== 'function') throw new ServiceUnavailableException('通知草稿持久化或安全组件不可用');
+    return { tenantId, workspaceId: identity.workspaceId };
+  }
+
+  private notificationDraftInput(value: RentalNotificationDraftInput) {
+    let input: RentalNotificationDraftInput;
+    try { input = structuredClone(value); } catch { throw new BadRequestException('通知草稿输入无效'); }
+    const id = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u;
+    if (!input || typeof input !== 'object' || Array.isArray(input)
+      || Object.keys(input).sort().join(',') !== 'customerId,templateId,templateVersion,variables'
+      || [input.customerId, input.templateId, input.templateVersion].some(value => typeof value !== 'string' || !id.test(value))
+      || !input.variables || Array.isArray(input.variables) || typeof input.variables !== 'object'
+      || Object.keys(input.variables).length > 64 || Object.entries(input.variables).some(([key, item]) =>
+        !/^[A-Za-z0-9_]{1,64}$/u.test(key) || item !== null && (typeof item === 'string' ? item.length > 2000
+          : typeof item === 'number' ? !Number.isFinite(item) : typeof item !== 'boolean'))
+      || Buffer.byteLength(JSON.stringify(input), 'utf8') > 32768) throw new BadRequestException('通知草稿输入无效');
+    return input;
+  }
+
+  private notificationDraftCommandHash(input: RentalNotificationDraftInput) {
+    return this.secretBox!.fingerprint(requestFingerprint({ version: 'rental-notification-draft-1', input }));
+  }
+
+  private notificationDraftPreviewText(value: string, recipient: string) {
+    let text = value.split(recipient).join(maskRecipient(recipient));
+    const canonical = canonicalSmsRecipient(recipient);
+    if (canonical && canonical !== recipient) text = text.split(canonical).join(maskRecipient(recipient));
+    return text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/gu, '')
+      .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/giu, 'Bearer [已脱敏]')
+      .replace(/((?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|password|secret|密钥|令牌|密码)\s*[=:：]\s*)[^\s,;，；]+/giu, '$1[已脱敏]')
+      .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu, '[邮箱已脱敏]')
+      .replace(/\b[1-9][0-9]{16}[0-9X]\b/giu, '[证件号已脱敏]')
+      .replace(/\b(?:\+?86[ -]?)?(1[3-9][0-9])[0-9]{4}([0-9]{4})\b/gu, '$1****$2');
+  }
+
+  private notificationDraftObservation(row: Prisma.RentalNotificationLogGetPayload<object>, original: RentalNotificationDraftOriginal,
+    expectedCommandHash?: string, verifiedErasure?: NotificationDraftBodyErasure | null): RentalNotificationDraftObservation {
+    const scope = this.notificationDraftScope(row.tenantId, original);
+    const retained = notificationDraftRetentionState(row);
+    if (retained.erasure) {
+      const metadata = retained.metadata, erasure = retained.erasure;
+      if (!verifiedErasure || !isDeepStrictEqual(erasure, verifiedErasure)
+        || metadata.actorId !== original.actorId || metadata.key !== original.key
+        || row.workspaceId !== scope.workspaceId || expectedCommandHash !== undefined && metadata.commandHash !== expectedCommandHash) {
+        throw new ConflictException('原通知草稿缺少核同的正文删除收据');
+      }
+      return { version: metadata.version, id: row.id, key: original.key, actorId: original.actorId, scope,
+        customerId: metadata.customerId, customerVersion: metadata.customerVersion, templateId: metadata.templateId,
+        templateVersion: metadata.templateVersion, eventCode: metadata.eventCode, channel: metadata.channel,
+        commandHash: metadata.commandHash, inputHash: metadata.inputHash, templateHash: metadata.templateHash,
+        configurationHash: metadata.configurationHash, contentHash: metadata.contentHash,
+        recipient: null, renderedTitle: null, renderedBody: null, variables: null,
+        status: 'draft', createdAt: metadata.createdAt, provider: 'not_dispatched', attempts: 0,
+        bodyRetention: { state: 'erased', receiptId: erasure.receiptId, policyVersion: erasure.policyVersion,
+          erasedAt: erasure.erasedAt, erasedRevision: erasure.erasedRevision } };
+    }
+    if (verifiedErasure) throw new ConflictException('原通知草稿正文与删除收据不一致');
+    const variables = row.variables as Record<string, unknown>;
+    const metadata = variables?.notificationDraft as NotificationDraftMetadata, preview = variables?.preview as RentalNotificationDraftInput['variables'];
+    if (row.workspaceId !== scope.workspaceId || row.idempotencyKey !== original.key || row.status !== 'draft'
+      || row.provider !== 'not_dispatched' || row.attempts !== 0 || row.maxAttempts !== 0 || row.revision !== 1
+      || row.providerMessageId !== null || row.sentAt !== null || row.nextAttemptAt !== null || row.lastAttemptAt !== null || row.leaseUntil !== null
+      || !row.recipientEncrypted || !metadata || metadata.version !== 'rental-notification-draft-1'
+      || metadata.id !== row.id || metadata.key !== original.key || metadata.scope?.tenantId !== row.tenantId
+      || metadata.scope?.workspaceId !== row.workspaceId || metadata.templateId !== row.templateId
+      || metadata.templateVersion !== row.templateVersion || metadata.eventCode !== row.eventCode || metadata.channel !== row.channel
+      || !['sms', 'email', 'app_push', 'wechat'].includes(row.channel)
+      || metadata.actorId !== original.actorId || metadata.customerId !== row.businessObjectId || row.businessObjectType !== 'customer'
+      || expectedCommandHash !== undefined && metadata.commandHash !== expectedCommandHash
+      || !preview || Object.values(preview).some(value => value !== null && !['string', 'number', 'boolean'].includes(typeof value))
+      || ![metadata.commandHash, metadata.inputHash, metadata.templateHash, metadata.configurationHash, metadata.contentHash, metadata.previewHash]
+        .every(hash => typeof hash === 'string' && /^[a-f0-9]{64}$/u.test(hash))
+      || !Number.isFinite(Date.parse(metadata.customerVersion)) || !(row.createdAt instanceof Date)
+      || !Number.isFinite(row.createdAt.getTime()) || row.createdAt.toISOString() !== metadata.createdAt
+      || metadata.previewHash !== requestFingerprint({ recipient: row.recipient,
+        renderedTitle: row.renderedTitle, renderedBody: row.renderedBody, variables: preview })) throw new ConflictException('原通知草稿收据绑定无效');
+    let sealed: Record<string, string>, rawVariables: unknown;
+    try { sealed = this.secretBox!.decrypt(row.recipientEncrypted); rawVariables = JSON.parse(sealed.variables);
+      const command = this.notificationDraftInput({ customerId: metadata.customerId, templateId: row.templateId,
+        templateVersion: row.templateVersion, variables: rawVariables as RentalNotificationDraftInput['variables'] });
+      if (requestFingerprint(JSON.parse(sealed.metadata)) !== requestFingerprint(metadata)
+        || metadata.commandHash !== this.notificationDraftCommandHash(command)
+        || typeof sealed.recipient !== 'string' || !sealed.recipient || typeof sealed.renderedTitle !== 'string'
+        || typeof sealed.renderedBody !== 'string'
+        || row.recipientFingerprint !== this.secretBox!.fingerprint(sealed.recipient)
+        || metadata.inputHash !== this.secretBox!.fingerprint(requestFingerprint({ commandHash: metadata.commandHash,
+          templateHash: metadata.templateHash, configurationHash: metadata.configurationHash,
+          customerVersion: metadata.customerVersion, recipient: sealed.recipient }))
+        || metadata.contentHash !== this.secretBox!.fingerprint(requestFingerprint({ inputHash: metadata.inputHash,
+          recipient: sealed.recipient, renderedTitle: sealed.renderedTitle, renderedBody: sealed.renderedBody, variables: rawVariables }))) throw Error();
+    } catch { throw new ServiceUnavailableException('原通知草稿密文或来源无法核对'); }
+    return { version: metadata.version, id: row.id, key: original.key, actorId: original.actorId, scope,
+      customerId: metadata.customerId, customerVersion: metadata.customerVersion, templateId: row.templateId,
+      templateVersion: row.templateVersion, eventCode: row.eventCode, channel: row.channel as RentalNotificationTemplateV1['channel'],
+      commandHash: metadata.commandHash, inputHash: metadata.inputHash, templateHash: metadata.templateHash,
+      configurationHash: metadata.configurationHash, contentHash: metadata.contentHash, recipient: row.recipient,
+      renderedTitle: row.renderedTitle, renderedBody: row.renderedBody, variables: structuredClone(preview),
+      status: 'draft', createdAt: row.createdAt.toISOString(), provider: 'not_dispatched', attempts: 0 };
+  }
+
+  /** Original same-key receipt only. Current template changes never mint a new
+   * draft or rewrite historical content; the caller rechecks current read access. */
+  async readNotificationDraft(tenantId: string, value: RentalNotificationDraftOriginal, expectedCommandHash?: string) {
+    const original = Object.freeze(structuredClone(value)), scope = this.notificationDraftScope(tenantId, original);
+    const row = await this.prisma!.rentalNotificationLog.findFirst({ where: { ...scope, idempotencyKey: original.key } });
+    if (!row) {
+      // A restored snapshot may omit an already-erased original row. Its
+      // retained tombstone still blocks same-key creation or body restoration.
+      if (typeof this.prisma!.aiDataErasure?.findUnique !== 'function') throw new ServiceUnavailableException('通知草稿删除账本不可用');
+      const erased = await this.prisma!.aiDataErasure.findUnique({ where: {
+        id: notificationDraftRetentionReceiptId(scope, `notification-draft-${original.key}`) } });
+      this.notificationDraftScope(tenantId, original);
+      if (erased) throw new ServiceUnavailableException('原通知草稿已删除正文，须核对原恢复收据');
+      return null;
+    }
+    const retention = createNotificationDraftBodyRetentionReader(this.prisma!);
+    const erasure = await retention.readErasure(row);
+    this.notificationDraftScope(tenantId, original);
+    const observed = this.notificationDraftObservation(row, original, expectedCommandHash, erasure);
+    const delivery = await this.factStore.findNotificationDelivery(tenantId, row.id);
+    if (!delivery || delivery.log.status !== 'draft' || delivery.log.idempotencyKey !== original.key
+      || delivery.log.templateId !== row.templateId || delivery.log.templateVersion !== row.templateVersion
+      || delivery.log.renderedTitle !== row.renderedTitle || delivery.log.renderedBody !== row.renderedBody
+      || delivery.log.recipient !== row.recipient || delivery.log.attempts !== 0 || delivery.log.provider !== 'not_dispatched'
+      || delivery.log.providerMessageId !== undefined || delivery.log.sentAt !== undefined
+      || delivery.log.nextAttemptAt !== undefined || delivery.log.lastAttemptAt !== undefined
+      || delivery.maxAttempts !== 0 || !isDeepStrictEqual(delivery.log.variables, row.variables)) throw new ServiceUnavailableException('原通知草稿收据不可用');
+    const closing = await this.prisma!.rentalNotificationLog.findFirst({ where: { ...scope, id: row.id, idempotencyKey: original.key } });
+    if (!closing || requestFingerprint(closing) !== requestFingerprint(row)) throw new ConflictException('原通知草稿在读取时变化');
+    if (!isDeepStrictEqual(await retention.readErasure(closing), erasure)) throw new ConflictException('原通知草稿删除收据在读取时变化');
+    this.notificationDraftScope(tenantId, original);
+    return observed;
+  }
+
+  private async notificationDraftMaterial(tenantId: string, context: BusinessContext, input: RentalNotificationDraftInput,
+    original: RentalNotificationDraftOriginal, tx?: RentalBusinessFactTx) {
+    const scope = this.notificationDraftScope(tenantId, original), db = tx ?? this.prisma!;
+    const template = structuredClone(this.state(tenantId, context).notificationTemplates.find(row => row.id === input.templateId
+      && row.version === input.templateVersion && row.status === 'enabled'));
+    const stored = await db.rentalNotificationTemplate.findFirst({ where: { ...scope, id: input.templateId,
+      version: input.templateVersion, status: 'enabled' } });
+    if (!template || !stored || stored.tenantId !== tenantId || stored.workspaceId !== scope.workspaceId
+      || stored.title !== template.title || stored.body !== template.body || stored.eventCode !== template.eventCode
+      || stored.channel !== template.channel || !isDeepStrictEqual(stored.variableSchema, template.variableSchema)
+      || !(stored.updatedAt instanceof Date) || !Number.isFinite(stored.updatedAt.getTime())
+      || !context.settings.notifications.enabledEvents.includes(template.eventCode)
+      || !context.settings.notifications.editableChannels.includes(template.channel)) throw new ConflictException('当前原通知模板或版本已变化');
+    if (!template.variableSchema || Array.isArray(template.variableSchema) || typeof template.variableSchema !== 'object'
+      || Object.keys(template.variableSchema).length > 64 || Object.entries(template.variableSchema).some(([key, rule]) =>
+        !/^[A-Za-z0-9_]{1,64}$/u.test(key) || !rule || typeof rule !== 'object' || typeof rule.required !== 'boolean')
+      || typeof template.title !== 'string' || typeof template.body !== 'string'
+      || template.title.length > 191 || Buffer.byteLength(template.body, 'utf8') > 32768) {
+      throw new BadRequestException('当前原通知模板不可用于有界草稿');
+    }
+    const used = [...template.title.matchAll(/\{\{(\w+)\}\}/g), ...template.body.matchAll(/\{\{(\w+)\}\}/g)].map(match => match[1]);
+    if (used.some(key => !Object.hasOwn(template.variableSchema, key))) {
+      throw new BadRequestException('模板使用了未注册变量');
+    }
+    const unknown = Object.keys(input.variables).filter(key => !Object.hasOwn(template.variableSchema, key));
+    const missing = Object.entries(template.variableSchema).filter(([key, rule]) => rule.required
+      && (!Object.hasOwn(input.variables, key) || input.variables[key] === ''));
+    if (unknown.length || missing.length) throw new BadRequestException('通知变量须符合当前原模板');
+    const customer = await db.customerProfile.findFirst({ where: { tenantId, id: input.customerId },
+      select: { id: true, tenantId: true, phone: true, email: true, updatedAt: true, status: true, mergedIntoCustomerId: true } });
+    if (!customer || customer.tenantId !== tenantId || customer.status !== 'active' || customer.mergedIntoCustomerId
+      || !(customer.updatedAt instanceof Date) || !Number.isFinite(customer.updatedAt.getTime())) throw new ConflictException('原客户收件目标不可用');
+    // SMS/email use the original customer profile. There is no original push or
+    // WeChat destination source here; an arbitrary ID is never a substitute.
+    const recipient = template.channel === 'sms' ? customer.phone?.trim() : template.channel === 'email' ? customer.email?.trim() : undefined;
+    if (!recipient || (template.channel === 'sms' ? !isSmsRecipient(recipient) : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(recipient))) {
+      throw new ServiceUnavailableException('原通知渠道收件目标未提供');
+    }
+    const commandHash = this.notificationDraftCommandHash(input), templateHash = requestFingerprint({ id: stored.id,
+      tenantId: stored.tenantId, workspaceId: stored.workspaceId, eventCode: stored.eventCode, channel: stored.channel,
+      title: stored.title, body: stored.body, variableSchema: stored.variableSchema, status: stored.status,
+      version: stored.version, updatedAt: stored.updatedAt.toISOString() });
+    const configurationHash = requestFingerprint({ notifications: context.settings.notifications,
+      categoryVersionId: context.categoryVersionId ?? null, categoryAdoptionRevision: context.categoryAdoptionRevision ?? null });
+    const customerVersion = customer.updatedAt.toISOString();
+    const inputHash = this.secretBox!.fingerprint(requestFingerprint({ commandHash, templateHash, configurationHash, customerVersion, recipient }));
+    // Only submitted own fields are values; Object prototype members cannot
+    // satisfy required variables or become rendered notification content.
+    const render = (source: string, values: RentalNotificationDraftInput['variables']) => source.replace(/\{\{(\w+)\}\}/g,
+      (_match, key: string) => String(Object.hasOwn(values, key) ? values[key] ?? '' : ''));
+    const rawTitle = render(template.title, input.variables), rawBody = render(template.body, input.variables);
+    if (Array.from(rawTitle).length > 191 || Buffer.byteLength(rawBody, 'utf8') > 32768) throw new BadRequestException('通知草稿超过原有界预览范围');
+    // The ciphertext retains every original value. A numeric variable can also
+    // contain a phone/identity number, so no supplied scalar leaks via preview.
+    const variables = Object.fromEntries(Object.entries(input.variables).map(([key, value]) => [key,
+      value === null ? null : value === '' ? '' : '[已加密保留]']));
+    const renderedTitle = this.notificationDraftPreviewText(render(template.title, variables), recipient);
+    const renderedBody = this.notificationDraftPreviewText(render(template.body, variables), recipient);
+    if (Array.from(renderedTitle).length > 191 || Buffer.byteLength(renderedBody, 'utf8') > 32768) throw new BadRequestException('通知草稿脱敏预览超过原存储范围');
+    const contentHash = this.secretBox!.fingerprint(requestFingerprint({ inputHash, recipient, renderedTitle: rawTitle, renderedBody: rawBody, variables: input.variables }));
+    const observation: RentalNotificationDraftObservation = { version: 'rental-notification-draft-1', id: `notification-draft-${original.key}`,
+      key: original.key, actorId: original.actorId, scope, customerId: input.customerId, customerVersion,
+      templateId: template.id, templateVersion: template.version, eventCode: template.eventCode, channel: template.channel,
+      commandHash, inputHash, templateHash, configurationHash, contentHash, recipient: maskRecipient(recipient),
+      renderedTitle, renderedBody, variables, status: 'prepared', createdAt: null, provider: 'not_dispatched', attempts: 0 };
+    return { observation, recipient, rawTitle, rawBody };
+  }
+
+  /** Pure preparation on the original enabled template. No outbox, provider,
+   * SMS rate reservation, sending or retry is called by this preview. */
+  async previewNotificationDraft(tenantId: string, context: BusinessContext, value: RentalNotificationDraftInput,
+    reference: RentalNotificationDraftOriginal) {
+    const input = this.notificationDraftInput(value), original = Object.freeze(structuredClone(reference));
+    this.notificationDraftScope(tenantId, original);
+    const existing = await this.readNotificationDraft(tenantId, original, this.notificationDraftCommandHash(input));
+    return existing ?? (await this.notificationDraftMaterial(tenantId, context, input, original)).observation;
+  }
+
+  /** Save an explicitly reviewed unsent draft through the original log store.
+   * The server callback rechecks current permission and source inside the same
+   * transaction; uncertain persistence can only read this original key. */
+  async prepareNotificationDraft(tenantId: string, context: BusinessContext, value: RentalNotificationDraftInput,
+    reference: RentalNotificationDraftOriginal, review: { inputHash: string; expiresAt: string },
+    revalidate: (tx?: RentalBusinessFactTx) => Promise<void>) {
+    const input = this.notificationDraftInput(value), original = Object.freeze(structuredClone(reference));
+    const scope = this.notificationDraftScope(tenantId, original), expected = Object.freeze(structuredClone(review));
+    if (typeof revalidate !== 'function' || !/^[a-f0-9]{64}$/u.test(expected.inputHash)
+      || !Number.isFinite(Date.parse(expected.expiresAt))) throw new BadRequestException('通知草稿缺少原审阅来源');
+    const commandHash = this.notificationDraftCommandHash(input), existing = await this.readNotificationDraft(tenantId, original, commandHash);
+    if (existing) { await revalidate(); this.notificationDraftScope(tenantId, original); return existing; }
+    let writeAttempted = false, callbackCompleted = false;
+    try {
+      return await this.prisma!.$transaction(async tx => {
+        await lockRentalBusinessTenant(tx, tenantId);
+        await tx.$queryRaw(Prisma.sql`SELECT id FROM customer_profiles WHERE tenantId=${tenantId} AND id=${input.customerId} LOCK IN SHARE MODE`);
+        await tx.$queryRaw(Prisma.sql`SELECT id FROM rental_notification_templates WHERE tenantId=${tenantId} AND workspaceId=${scope.workspaceId} AND id=${input.templateId} LOCK IN SHARE MODE`);
+        const replay = await tx.rentalNotificationLog.findFirst({ where: { ...scope, idempotencyKey: original.key } });
+        if (replay) { await revalidate(tx); callbackCompleted = true; return this.notificationDraftObservation(replay, original, commandHash); }
+        await revalidate(tx);
+        const material = await this.notificationDraftMaterial(tenantId, context, input, original, tx);
+        await revalidate(tx);
+        if (material.observation.inputHash !== expected.inputHash || Date.parse(expected.expiresAt) <= Date.now()) {
+          throw new ConflictException('通知草稿审阅材料已变化或过期');
+        }
+        const view = material.observation, createdAt = new Date().toISOString();
+        const metadata: NotificationDraftMetadata = { version: view.version, id: view.id, key: view.key, actorId: view.actorId,
+          scope: view.scope, templateId: view.templateId, templateVersion: view.templateVersion, eventCode: view.eventCode,
+          channel: view.channel, createdAt,
+          customerId: view.customerId, customerVersion: view.customerVersion, commandHash, inputHash: view.inputHash,
+          templateHash: view.templateHash, configurationHash: view.configurationHash, contentHash: view.contentHash,
+          previewHash: requestFingerprint({ recipient: view.recipient, renderedTitle: view.renderedTitle, renderedBody: view.renderedBody, variables: view.variables }) };
+        const encrypted = this.secretBox!.encrypt({ metadata: JSON.stringify(metadata), recipient: material.recipient,
+          variables: JSON.stringify(input.variables), renderedTitle: material.rawTitle, renderedBody: material.rawBody });
+        if (Buffer.byteLength(encrypted, 'utf8') > 60000) throw new BadRequestException('通知草稿密文超过原存储范围');
+        const log: RentalNotificationSendLogV1 = { id: view.id, tenantId,
+          templateId: view.templateId, templateVersion: view.templateVersion, eventCode: view.eventCode, channel: view.channel,
+          recipient: view.recipient, renderedTitle: view.renderedTitle, renderedBody: view.renderedBody,
+          variables: { notificationDraft: metadata, preview: view.variables }, status: 'draft', provider: 'not_dispatched',
+          attempts: 0, maxAttempts: 0, businessObjectType: 'customer', businessObjectId: view.customerId, idempotencyKey: original.key, createdAt };
+        // The original store resolves workspace before its INSERT. Wrap only
+        // this transaction's create boundary so the final current checks run
+        // after that wait; do not replace its insert/idempotency implementation.
+        const guardedTx = new Proxy(tx, { get: (target, property) => {
+          if (property !== 'rentalNotificationLog') return Reflect.get(target, property, target);
+          return new Proxy(target.rentalNotificationLog, { get: (delegate, operation) => {
+            if (operation !== 'create') return Reflect.get(delegate, operation, delegate);
+            const create = delegate.create.bind(delegate);
+            return async (...args: Parameters<typeof delegate.create>) => {
+              await revalidate(tx);
+              const closing = await this.notificationDraftMaterial(tenantId, context, input, original, tx);
+              // Material reads also await original sources. Recheck the live
+              // request and authorization after them, before invoking INSERT.
+              await revalidate(tx);
+              if (closing.observation.inputHash !== expected.inputHash || Date.parse(expected.expiresAt) <= Date.now()) {
+                throw new ConflictException('通知草稿在原保存前已变化或过期');
+              }
+              this.notificationDraftScope(tenantId, original); writeAttempted = true;
+              return create(...args);
+            };
+          } });
+        } });
+        this.notificationDraftScope(tenantId, original);
+        const outcome = await this.factStore.insertNotificationLog(log, guardedTx, encrypted, this.secretBox!.fingerprint(material.recipient));
+        const saved = await tx.rentalNotificationLog.findFirst({ where: { ...scope, idempotencyKey: original.key } });
+        if (!saved || !['inserted', 'duplicate'].includes(outcome)) throw new RentalNotificationDraftUnknownError();
+        const observed = this.notificationDraftObservation(saved, original, commandHash);
+        await revalidate(tx);
+        if (Date.parse(expected.expiresAt) <= Date.now()) throw new ConflictException('通知草稿保存时原审阅已过期');
+        this.notificationDraftScope(tenantId, original); callbackCompleted = true;
+        return observed;
+      }, { maxWait: 2500, timeout: 15000 });
+    } catch (error) {
+      if (writeAttempted || callbackCompleted) throw new RentalNotificationDraftUnknownError();
+      throw error;
+    }
   }
 
   /**
@@ -4445,8 +4829,11 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   applyNotificationLogToCache(tenantId: string, context: BusinessContext, log: RentalNotificationSendLogV1) {
     const state = this.state(tenantId, context);
     const index = state.notificationLogs.findIndex((item) => item.id === log.id);
-    if (index < 0) state.notificationLogs.unshift(log);
-    else state.notificationLogs[index] = log;
+    // This synchronous callback cannot prove a draft's current deletion
+    // journal. Keep it bodyless and unavailable until original readback.
+    const cached = isNotificationDraftCacheLog(log) ? stripNotificationDraftCacheBody(log) : log;
+    if (index < 0) state.notificationLogs.unshift(cached);
+    else state.notificationLogs[index] = cached;
   }
 
   private async deliverNotification(
@@ -4687,6 +5074,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   async retryNotification(tenantId: string, context: BusinessContext, id: string, rateReserved = false) {
     const current = await this.factStore.findNotificationDelivery(tenantId, id);
     if (!current) throw new NotFoundException("通知发送记录不存在");
+    if (current.log.status === 'draft') throw new ConflictException('未发送通知草稿不可进入重试或投递流程');
     if (current.log.channel !== "sms") throw new BadRequestException("只有真实短信通知支持重试");
     if (["sent", "delivery_pending", "delivered"].includes(current.log.status)) return current.log;
     if (current.log.status === "delivery_uncertain") throw new ConflictException("短信投递结果未知，请先查询服务商记录，不能直接重试");
@@ -5142,7 +5530,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   async createQuoteForOriginalOperation(tenantId: string, context: BusinessContext, value: RentalQuoteRequest,
-    proof: RentalQuoteOriginalOperation): Promise<RentalQuoteSnapshotV1> {
+    proof: RentalQuoteOriginalOperation, beforePersist?: (native: Prisma.TransactionClient) => Promise<void>): Promise<RentalQuoteSnapshotV1> {
     const input = structuredClone(value), currentContext = structuredClone(context),
       original = Object.freeze({ key: proof?.key, inputHash: proof?.inputHash });
     if (!/^[a-f0-9]{64}$/u.test(original.key ?? '') || original.inputHash !== requestFingerprint(input))
@@ -5155,7 +5543,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       if (!state.quotes.some(row => row.id === stored.id)) state.quotes.unshift(stored);
       return stored;
     }
-    return this.createQuote(tenantId, currentContext, input, undefined, original);
+    return this.createQuote(tenantId, currentContext, input, undefined, original, beforePersist);
   }
 
   async readQuoteForOriginalOperation(tenantId: string, proof: RentalQuoteOriginalOperation) {
@@ -5180,7 +5568,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   async createQuote(tenantId: string, context: BusinessContext, input: RentalQuoteRequest, preResolvedDeliveryAddress?: RentalDeliveryAddressSnapshot,
-    original?: RentalQuoteOriginalOperation) {
+    original?: RentalQuoteOriginalOperation, beforePersist?: (native: Prisma.TransactionClient) => Promise<void>) {
     // Capture one caller intent before the first configuration/identity wait.
     // Later caller edits cannot change the original key, customer, quantities,
     // frozen source or calculation context of this quote.
@@ -5188,6 +5576,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     context = structuredClone(context);
     preResolvedDeliveryAddress = preResolvedDeliveryAddress === undefined ? undefined : structuredClone(preResolvedDeliveryAddress);
     original = original === undefined ? undefined : Object.freeze({ key: original.key, inputHash: original.inputHash });
+    await this.refreshWorkspaceContext(tenantId, context);
     const sourceSnapshot = currentQuoteSource(tenantId);
     if (original) {
       if (!/^[a-f0-9]{64}$/u.test(original.key) || original.inputHash !== requestFingerprint(input))
@@ -5198,7 +5587,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       ? await this.refreshWorkspaceConfiguration(tenantId, context, state => this.captureQuoteConfiguration(state, input.customerCouponId))
       : this.captureQuoteConfiguration(this.state(tenantId, context), input.customerCouponId);
     const persisted = await quoteConfigurationContext.run({ owner: this, tenantId, workspaceId, state }, () =>
-      this.createQuoteFromConfiguration(tenantId, context, input, sourceSnapshot, preResolvedDeliveryAddress, original));
+      this.createQuoteFromConfiguration(tenantId, context, input, sourceSnapshot, preResolvedDeliveryAddress, original, beforePersist));
     // The calculation copy never becomes the current configuration cache.
     // A later refresh may have replaced it while this quote awaited persistence.
     const current = this.states.get(workspaceId);
@@ -5210,7 +5599,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
   private async createQuoteFromConfiguration(tenantId: string, context: BusinessContext, input: RentalQuoteRequest,
     sourceSnapshot: ReturnType<typeof currentQuoteSource>, preResolvedDeliveryAddress?: RentalDeliveryAddressSnapshot,
-    original?: RentalQuoteOriginalOperation) {
+    original?: RentalQuoteOriginalOperation, beforePersist?: (native: Prisma.TransactionClient) => Promise<void>) {
     let categoryVersionId: string | undefined;
     let categoryAdoptionRevision: number | undefined;
     if (this.categoryResolver) {
@@ -5993,7 +6382,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     let persisted = quote;
     if (original) {
       if (!this.factStore.saveQuoteForOriginalOperation) throw new ServiceUnavailableException('报价原操作持久化不可用');
-      persisted = await this.factStore.saveQuoteForOriginalOperation(quote, original, expectedBinding);
+      persisted = await this.factStore.saveQuoteForOriginalOperation(quote, original, expectedBinding, beforePersist);
     } else await this.factStore.upsertQuote(quote, expectedBinding);
     return persisted;
   }

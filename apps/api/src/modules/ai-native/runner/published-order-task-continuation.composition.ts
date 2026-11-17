@@ -60,9 +60,9 @@ export function composePublishedOrderTaskContinuation(d: ControlledApprovedOrder
       if (waiting.checkpointRef !== command.checkpointRef || waiting.taskRevision !== command.expectedTaskRevision
         || requestFingerprint(waiting.proposal) !== requestFingerprint(command.proposal)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
       const view = await observe(() => root.orders.approvals.readProposal(key.taskId, waiting.proposal), signal);
-      // The standard human host has no independent enterprise payer authority.
+      // The standard human host has no original customer enterprise delegation.
       // An approval from another path must not silently widen this consumer.
-      if (view.facts.input.payload.bookingIdentity?.enterpriseContractAndPayer === true) throw unavailable();
+      if (view.facts.input.payload.bookingIdentity?.bookingIdentity === 'enterprise_employee') throw unavailable();
       const decision = view.proposal.status === 'cancelled' ? 'reject' as const : 'approve' as const;
       const approved = await observe(() => root.orders.approvals.readReceipt(key.taskId, { ...waiting.proposal, decision }), signal);
       if (approved.kind !== 'recorded' || approved.record.decision !== (decision === 'reject' ? 'rejected' : 'approved')) throw unavailable();

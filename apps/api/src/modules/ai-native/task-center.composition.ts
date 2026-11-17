@@ -10,6 +10,7 @@ import type { AiTaskCredentialSource } from './task-current-action.authority';
 import { composePrismaTaskCurrentActionAuthority } from './prisma-task-action-policy.source';
 import { TaskBudgetUsageReader, type TaskBudgetUsageDb } from './budget/task-budget-usage.reader';
 import { TaskPerformanceReader } from './observability/task-performance.reader';
+import type { TaskFaultObservationOptions } from './observability/task-fault-observation.reader';
 import { AiTaskTransitionRepository } from './ai-task-transition.repository';
 import type { AiTaskStopQueryDraft } from '@rental-os/shared';
 
@@ -28,6 +29,8 @@ export function composePersistedTaskCenter(input: {
   clock?: () => Date;
   usageDb?: TaskBudgetUsageDb;
   performanceDb?: ConstructorParameters<typeof TaskPerformanceReader>[0];
+  /** Trusted server-only diagnostic sources; never copied from HTTP input. */
+  faultOptions?: TaskFaultObservationOptions;
   includeCancellation?: boolean;
 }) {
   const clock = input.clock ?? (() => new Date());
@@ -44,7 +47,7 @@ export function composePersistedTaskCenter(input: {
   if (input.usageDb && !Object.is(input.db, input.usageDb)) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
   const usage = input.usageDb ? new TaskBudgetUsageReader(input.usageDb, actions, scopes, clock) : undefined;
   if (input.performanceDb && (!usage || !Object.is(input.db, input.performanceDb))) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-  const performance = usage && input.performanceDb ? new TaskPerformanceReader(input.performanceDb, actions, usage, clock) : undefined;
+  const performance = usage && input.performanceDb ? new TaskPerformanceReader(input.performanceDb, actions, usage, clock, input.faultOptions) : undefined;
   const transitions = input.includeCancellation === true ? new AiTaskTransitionRepository(input.db, actions, clock) : undefined;
   const cancellation = transitions && Object.freeze({
     request: (query: AiTaskStopQueryDraft) => transitions.transition({ ...query, to: 'cancel_requested', reason: 'cancel_requested' }),

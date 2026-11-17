@@ -36,6 +36,21 @@ export class InspectionRecognitionService {
     return this.basis ? (await this.basis.revalidate(target, reference, signal)).reference : unrecordedInspectionRecognitionBasis();
   }
 
+  /** Original-question material only. Current order/file reads revalidate the
+   * frozen association; no draft editing, evidence adoption or byte resolver is
+   * exposed. An existing question owns its deadline in the Task repository. */
+  async readOriginalMaterial(value: unknown) {
+    const before = await this.drafts.readFrozenRecognitionInput(structuredClone(value));
+    const metadata = { target: before.target, assetId: before.assetId, templateVersion: before.templateVersion,
+      bindingFingerprint: before.input.bindingFingerprint, media: before.input.media };
+    const hash = await this.evidence.readOriginalMetadata(metadata);
+    const after = await this.drafts.readFrozenRecognitionInput(structuredClone(value));
+    if (requestFingerprint(before) !== requestFingerprint(after)
+      || await this.evidence.readOriginalMetadata(metadata) !== hash) throw new InspectionAssistError('BINDING_CHANGED');
+    inspectionRecognitionMediaKind(after.input);
+    return { draftId: after.draftId, draftRevision: after.draftRevision, input: after.input };
+  }
+
   /** Server-only adapter for the existing Gateway. The returned function stays
    * in request memory, never a DTO, dispatch grant or persisted credential. */
   async gatewayMedia(value: unknown) {
@@ -127,11 +142,17 @@ export class InspectionRecognitionService {
   async readPreparation(value: unknown) {
     const input = parseInspectionInput(schema, value);
     const target = { orderId: input.orderId, allocationId: input.allocationId, templateId: input.templateId, stage: input.stage };
-    return this.authority.withAction(target, 'bind', async scope => {
-      await this.drafts.read({ ...target, draftId: input.draftId });
+    return this.authority.withAction(target, 'read', async scope => {
+      const selection = { ...target, draftId: input.draftId };
+      const before = await this.drafts.readHistorySelection(selection);
+      if (requestFingerprint(before.context) !== requestFingerprint(scope)) throw new InspectionAssistError('ACCESS_DENIED');
       const fingerprint = requestFingerprint({ kind: 'inspection.input', scope, input });
       const receipt = await this.repository.receipt(scope, input.operationId, fingerprint);
       if (receipt.status === 'found' && receipt.result.draftId !== input.draftId) throw new InspectionAssistError('BINDING_CHANGED');
+      // Original receipt metadata survives later draft/template changes. It
+      // does not restore those old materials for another model invocation.
+      const after = await this.drafts.readHistorySelection(selection);
+      if (requestFingerprint(after) !== requestFingerprint(before)) throw new InspectionAssistError('ACCESS_DENIED');
       return { ...receipt, inputId: `inspection.input:${requestFingerprint({ scope, operationId: input.operationId })}`,
         execution: 'not_attested' as const, retryable: false as const };
     });

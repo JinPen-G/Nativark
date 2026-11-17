@@ -6,7 +6,7 @@ import { enterpriseExchangeConfirmation } from "../../core/enterprise-exchange-c
 import { contractMissing } from "../../contracts/planned";
 import { isDeliveryMode } from "../../core/cart";
 import { loadCatalog } from "../../core/catalogStore";
-import { serverNow } from "../../core/clock";
+import { clockCalibrated, serverNow } from "../../core/clock";
 import { describeError } from "../../core/errors";
 import { ensureServiceForOrder } from "../../core/flow";
 import { isApiError } from "../../core/http";
@@ -27,6 +27,7 @@ import { createClientTaskSession, clientTaskStorageKey, type ClientTaskView } fr
 import type { NativeAiHost, NativeAiSnapshot } from '../../components/ai-native/ai-task-workbench/index';
 import type { AiReadContext } from '../../components/ai-native/types';
 import { writeRequiredStorage } from '../../core/storage';
+import { captureClientEntryActionContext, createClientEntryActionApi, type ClientOriginalPaymentRecord } from '../../api/ai-entry-actions';
 
 /**
  * P08 订单详情 + P09 取消面板 + 取还指引（需求 §9.3、§10.1、§10.3）。
@@ -109,6 +110,12 @@ interface OrderData {
   aiNativeMemories: unknown[];
   aiNativeOrderProjection: Record<string, unknown> | null;
   aiOrderFactsExpanded: boolean;
+  aiEntryActionsAvailable: boolean;
+  aiEntryActionsContext: string;
+  aiOriginalPaymentTarget: string;
+  aiOriginalPaymentLoading: boolean;
+  aiOriginalPaymentMessage: string;
+  aiOriginalPayment: (ClientOriginalPaymentRecord & { statusLabel: string; instrumentLabel: string; amountText: string; readAt: string }) | null;
 }
 
 const CANCEL_REASONS = ["行程变更", "选错了设备或时间", "找到其他方案", "其他原因"];
@@ -180,7 +187,9 @@ Page({
     aiNativeSources: [],
     aiNativeMemories: [],
     aiNativeOrderProjection: null,
-    aiOrderFactsExpanded: false
+    aiOrderFactsExpanded: false,
+    aiEntryActionsAvailable: false, aiEntryActionsContext: '', aiOriginalPaymentTarget: '',
+    aiOriginalPaymentLoading: false, aiOriginalPaymentMessage: '', aiOriginalPayment: null
   } as OrderData,
 
   orderId: "" as string,
@@ -196,6 +205,39 @@ Page({
   clientTaskHostKey: '',
   clientTaskEpoch: 0,
   clientTaskReading: false,
+  originalPaymentEpoch: 0,
+  withdrawEntryActions() {
+    this.originalPaymentEpoch++;
+    this.selectComponent?.('#ai-entry-actions')?.withdraw?.();
+    this.setData({ aiEntryActionsAvailable: false, aiEntryActionsContext: '', aiOriginalPaymentLoading: false,
+      aiOriginalPaymentMessage: '', aiOriginalPayment: null });
+  },
+  async onReadOriginalPayment(): Promise<void> {
+    const target = this.data.aiOriginalPaymentTarget, orderId = this.orderId;
+    if (!target || this.data.aiOriginalPaymentLoading || !this.aiOrderFactsActive || !this.data.aiEntryActionsAvailable
+      || this.data.view.status !== 'ready' || this.data.order?.id !== orderId) return;
+    let context: ReturnType<typeof captureClientEntryActionContext>;
+    try { context = captureClientEntryActionContext(); } catch { this.withdrawEntryActions(); return; }
+    const epoch = ++this.originalPaymentEpoch, load = this.loadVersion;
+    const current = () => epoch === this.originalPaymentEpoch && load === this.loadVersion && this.aiOrderFactsActive
+      && this.data.aiEntryActionsAvailable && this.data.view.status === 'ready' && this.data.order?.id === orderId
+      && this.orderId === orderId && this.data.aiOriginalPaymentTarget === target && context.current();
+    this.setData({ aiOriginalPaymentLoading: true, aiOriginalPaymentMessage: '', aiOriginalPayment: null });
+    try {
+      const value = await createClientEntryActionApi({ orderId, current }).readOriginalPayment(target);
+      if (!current()) return;
+      const statuses = { pending: '待处理', paid: '原记录已支付', failed: '支付失败', funding_failed: '入账失败', closed: '已关闭' };
+      const instruments = { rental: '租金 / 费用', deposit: '押金', preauthorization: '预授权' };
+      this.setData({ aiOriginalPayment: { ...value, statusLabel: statuses[value.status], instrumentLabel: instruments[value.instrument],
+        amountText: formatMoney(value.amount, value.currency), readAt: clockCalibrated() ? new Date(serverNow()).toISOString() : '' } });
+    } catch {
+      if (current()) this.setData({ aiOriginalPaymentMessage: '原支付记录当前不可读取，请在原订单核对；未查询渠道或办理支付。', aiOriginalPayment: null });
+    } finally {
+      if (epoch === this.originalPaymentEpoch) {
+        if (!current()) this.withdrawEntryActions(); else this.setData({ aiOriginalPaymentLoading: false });
+      }
+    }
+  },
   disposeClientTask() {
     this.clientTaskEpoch++; this.clientTask?.dispose(); this.clientTask = undefined; this.clientTaskHostKey = ''; this.clientTaskReading = false;
     this.selectComponent?.('#ai-native-workbench')?.hostLogout?.();
@@ -206,6 +248,7 @@ Page({
       input_saved: '补充说明已保存，请明确继续取得回答', running: '正在取得回答', complete: '回答已取得', unknown: '原结果待核对，不重复调用模型', unavailable: '解释暂不可用，可继续使用原订单页面' };
     const question = view.question, field = question?.contract.fields.length === 1 ? question.contract.fields[0] : null;
     return { modelText: view.modelText, modelStatus: labels[view.status], continueAvailable: view.canContinue,
+      openOrderAvailable: view.canOpenOrder === true,
       observationGeneration: view.observationGeneration,
       ...(view.observation ? { cursorState: { taskId: view.observation.taskId, version: view.observation.contractVersion,
         cursor: view.observation.cursor, events: [], sync: 'synced' as const, reason: 'none' as const },
@@ -257,6 +300,15 @@ Page({
           await controller.submitClarification(input.draft.clarification_text); requireContext(requested);
         },
         continueInput: async requested => { requireContext(requested); await controller.continueAnswer(); requireContext(requested); },
+        openOrder: async requested => {
+          requireContext(requested);
+          const opened = await controller.openOrder(id => {
+            requireContext(requested);
+            if (id !== this.orderId) throw Error('client_order_navigation_changed');
+            navigate(buildUrl(ROUTES.order, { id }));
+          });
+          if (!opened) throw Error('client_order_navigation_unavailable');
+        },
         reconcile: async requested => { requireContext(requested); await controller.refresh(); requireContext(requested); },
       };
         widget?.attachHost?.(host); widget?.hostShow?.(true); this.clientTaskHostKey = key;
@@ -297,6 +349,7 @@ Page({
   onLoad(options: Record<string, string | undefined>) {
     this.aiFactsUnsubscribe?.();
     this.aiFactsUnsubscribe = sessionEvents.on(event => {
+      this.withdrawEntryActions();
       this.disposeClientTask();
       if (event.type === "refreshed") return;
       this.loadVersion++; this.exchangeLoadVersion++; this.exchangeApprovalRows = [];
@@ -306,6 +359,8 @@ Page({
     this.setData({ aiNativeOrderProjection: null, aiOrderFactsExpanded: false });
     this.orderId = options.id ?? "";
     this.serviceCode = options.service ?? "";
+    const payment = options.paymentIntentId ?? '';
+    this.setData({ aiOriginalPaymentTarget: /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(payment) ? payment : '' });
     this.setData({ servicePhone: cachedMerchant()?.servicePhone ?? "" });
     if (!requireSignIn(buildUrl(ROUTES.order, { id: this.orderId, service: this.serviceCode }))) return;
   },
@@ -319,6 +374,7 @@ Page({
   // Default-off lifecycle hooks are intentionally cleanup-only. They do not attach a host,
   // read AI data, or start polling until a server capability is wired in a later release.
   onHide() {
+    this.withdrawEntryActions();
     this.disposeClientTask();
     this.aiOrderFactsActive = false; this.loadVersion++; this.exchangeLoadVersion++; this.exchangeApprovalRows = [];
     this.setData({ aiNativeOrderProjection: null, aiOrderFactsExpanded: false, exchangeRequests: [], exchangeLoadError: "", exchangeLoading: false, exchangeBlocked: true, exchangePending: false, showExchangeConsent: false, exchangeConsentReason: "", exchangeConsentTarget: undefined, exchangeConfirming: false });
@@ -326,6 +382,7 @@ Page({
   },
 
   onUnload() {
+    this.withdrawEntryActions();
     this.disposeClientTask();
     this.aiFactsUnsubscribe?.(); this.aiFactsUnsubscribe = undefined;
     this.aiOrderFactsActive = false; this.loadVersion++; this.exchangeLoadVersion++; this.exchangeApprovalRows = [];
@@ -343,6 +400,7 @@ Page({
   },
 
   async load(): Promise<void> {
+    this.withdrawEntryActions();
     if (!this.orderId || !isSignedIn()) return;
     const token = ++this.loadVersion; this.exchangeLoadVersion++; this.exchangeApprovalRows = [];
     this.setData({ exchangeRequests: [], exchangeLoadError: "", exchangeLoading: false, exchangeBlocked: true, exchangePending: false, showExchangeConsent: false, exchangeConsentReason: "", exchangeConsentTarget: undefined, exchangeConfirming: false });
@@ -372,6 +430,7 @@ Page({
         ensureCurrentZone()
       ]);
       if (token !== this.loadVersion) return;
+      if (!this.aiOrderFactsActive || order.id !== this.orderId) throw Error('原订单页面已变化');
       this.render(order, funding, fulfillment, extensions, fees, catalog);
       void this.loadExchangeProgress();
     } catch (error) {
@@ -531,6 +590,9 @@ Page({
     });
     this.setData({
       view: readyState(),
+      aiEntryActionsAvailable: this.aiOrderFactsActive && order.id === this.orderId && currentSession()?.customer.customerType === 'personal',
+      aiEntryActionsContext: JSON.stringify([contextVersion(), currentServiceCode(), currentSession()?.customer.customerId,
+        order.id, order.updatedAt, this.loadVersion]),
       aiNativeOrderProjection: this.aiOrderFactsActive ? customerOrderFacts(order, this.orderId) : null,
       order,
       funding,

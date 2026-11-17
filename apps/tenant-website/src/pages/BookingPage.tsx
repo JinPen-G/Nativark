@@ -19,7 +19,10 @@ import { nowInput, offsetDaysInput, validRentalPeriod } from "../data/datetime";
 import { knownMoney } from "../data/money";
 import { rentalQuery } from "../data/rentalQuery";
 import type { DemoOrder } from "../types";
-import { useBookingHandoffHost } from "../features/ai-native/BookingHandoffHost";
+import {
+  useBookingHandoffHost,
+  useBookingHandoffPending,
+} from "../features/ai-native/BookingHandoffHost";
 import { BookingHandoffPanel } from "../features/ai-native/BookingHandoffPanel";
 import {
   handoffLocalInput,
@@ -41,6 +44,7 @@ export function BookingPage() {
   } = useSite();
   const { isAuthenticated, session, currentWorkspace } = useAuth();
   const handoffHost = useBookingHandoffHost();
+  const handoffPending = useBookingHandoffPending();
   const location = useLocation();
   const hasHandoffReference = Boolean(
     location.state &&
@@ -150,7 +154,11 @@ export function BookingPage() {
     );
 
   const remoteMode = isRemote && isAuthenticated;
-  if (remoteMode && hasHandoffReference && !handoffHost?.enabled) {
+  if (
+    remoteMode &&
+    (hasHandoffReference || handoffPending) &&
+    !handoffHost?.enabled
+  ) {
     return (
       <div className="shell booking-page">
         <PageHeading
@@ -637,7 +645,7 @@ export function BookingPage() {
               );
             }}
           >
-            {(handoff, original) => (
+            {(handoff, original, originalStatus) => (
               <div className="booking-layout">
                 <div className="booking-form">
                   <section className="booking-card" id="booking-product">
@@ -765,6 +773,7 @@ export function BookingPage() {
                     fulfillment={fulfillment}
                     handoff={handoff}
                     originalFacts={original}
+                    originalStatus={originalStatus}
                   />
                 </aside>
               </div>

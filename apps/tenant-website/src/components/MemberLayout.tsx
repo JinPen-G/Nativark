@@ -2,12 +2,13 @@ import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useSite } from "../SiteContext";
 import { useAuth } from "../AuthContext";
-import { Address, Bell, LogOut, Receipt, Ticket } from "./SiteIcon";
+import { Address, Bell, LogOut, Receipt, Ticket, User } from "./SiteIcon";
 import { Breadcrumbs, PageHeading } from "./PageHeader";
 import { useActiveRail } from "../hooks/useActiveRail";
 
 export type MemberSection =
   | "orders"
+  | "profile"
   | "addresses"
   | "coupons"
   | "notifications";
@@ -32,6 +33,12 @@ export function MemberLayout({
   const name = customerName || (en ? "Your account" : "我的账户");
   const links = [
     { id: "orders", label: t("orders"), to: "/orders", Icon: Receipt },
+    {
+      id: "profile",
+      label: language === "en" ? "My profile" : "本人资料",
+      to: "/account?section=profile",
+      Icon: User,
+    },
     {
       id: "addresses",
       label: t("addressBook"),

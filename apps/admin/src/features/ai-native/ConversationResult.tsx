@@ -31,10 +31,15 @@ const emptyView = (owner: string): View => ({ owner, result: null, display: null
 const emptyReview = { busy: false, review: null, parameters: null, unavailable: false };
 const noSubscribe = () => () => {};
 const emptyReviewSnapshot = () => emptyReview;
-export function ConversationResult({ identity, conversationId, turn, current, onAccessDenied, onAnswerReceipt }: {
+export function ConversationResult({ identity, conversationId, turn, current, onAccessDenied, onAnswerReceipt,
+  embedded = false, autoRead = false, readOnly = false, onResultChange }: {
   identity?: string; conversationId: string; turn: AiConversationTurnObservationDraft; current: () => boolean;
   onAccessDenied?: () => void;
   onAnswerReceipt?: (receipt: QuoteAnswerReference | null) => void;
+  onResultChange?: (result: Result | null) => void;
+  /** The native console owns the chat text and layout. This only reads its
+   * original result and supplies the existing sandbox/review consumers. */
+  embedded?: boolean; autoRead?: boolean; readOnly?: boolean;
 }) {
   const visible = useVisibleObservationHost();
   const { t } = useAiManagementLocale(), auth = useAuthStore();
@@ -50,7 +55,7 @@ export function ConversationResult({ identity, conversationId, turn, current, on
   const liveHost = useRef<ReturnType<typeof createConversationWorkbenchHost> | null>(null);
   const request = useRef<AbortController | null>(null), generation = useRef(0), mounted = useRef(false);
   const renderGeneration = generation.current;
-  const scope = useRef({ owner, current, onAccessDenied }); scope.current = { owner, current, onAccessDenied };
+  const scope = useRef({ owner, current, onAccessDenied, onResultChange }); scope.current = { owner, current, onAccessDenied, onResultChange };
   const permitted = () => {
     const now = useAuthStore.getState();
     return scope.current.owner === owner && currentSessionEpoch() === epoch && !signal.aborted && !document.hidden
@@ -70,11 +75,11 @@ export function ConversationResult({ identity, conversationId, turn, current, on
     const scoped = createConversationWorkbenchHost({ conversationId, turn, tenantId, workspaceId,
       source: originalResult, current: () => liveHost.current === scoped && active(),
       admission: aiConversationsApi.admission, tasks: aiTaskCenterApi,
-      onReview: section => { setRequestedProposal(null); setReviewSection(section); },
-      onConfirmation: reference => { setRequestedProposal(reference); setReviewSection('approval'); },
+      onReview: section => { if (readOnly) throw Error('AI_RESOURCE_UNAVAILABLE'); setRequestedProposal(null); setReviewSection(section); },
+      onConfirmation: reference => { if (readOnly) throw Error('AI_RESOURCE_UNAVAILABLE'); setRequestedProposal(reference); setReviewSection('approval'); },
     });
     return scoped;
-  }, [owner, displayEpoch]);
+  }, [owner, displayEpoch, readOnly]);
   const reviewState = useSyncExternalStore(host?.inputReview.subscribe ?? noSubscribe,
     host?.inputReview.snapshot ?? emptyReviewSnapshot, host?.inputReview.snapshot ?? emptyReviewSnapshot);
   const clear = () => {
@@ -117,15 +122,23 @@ export function ConversationResult({ identity, conversationId, turn, current, on
       const result = value.status === 'observed' && value.result.status === 'available' ? value.result : null;
       publish({ owner, result: value, display: result ? { taskId: result.taskId, runId: result.runId, resultId: result.resultId } : null,
         busy: false, error: false });
+      scope.current.onResultChange?.(value);
       setRequestedProposal(null); if (!result) setReviewSection(null);
       if (result) host?.port.activate();
     } catch (failure) { if (turn.task) visible?.cancelTask(turn.task.taskId);
       if (ownsRead()) { host?.port.suspend(); publish({ ...emptyView(owner), error: true }); setReviewSection(null); setRequestedProposal(null);
+        scope.current.onResultChange?.(null);
         if ([401, 403].includes((failure as { response?: { status?: number } }).response?.status ?? 0)) deny(); }
       throw failure; }
     finally { if (request.current === controller) request.current = null; }
   };
   const currentRead = useRef(read); currentRead.current = read;
+  useEffect(() => {
+    if (!autoRead || !active()) return;
+    // Reopening may read an existing result, never start or repeat its model.
+    // Failed reads stay visible and require an explicit retry.
+    void currentRead.current().catch(() => undefined);
+  }, [owner, host, autoRead]);
   const controlHost = useMemo(() => ({ identity: owner, taskId: turn.task?.taskId ?? null,
     current: () => active() && liveHost.current === host,
     refresh: (value: AiWorkbenchModelControlObservation, abort: AbortSignal) => {
@@ -136,15 +149,15 @@ export function ConversationResult({ identity, conversationId, turn, current, on
   const { result, display, busy, error } = view.owner === owner ? view : emptyView(owner);
   if (!allowed) return null;
   return <section aria-label={t('原轮次模型结果')} aria-busy={busy}>
-    <p>{safeDisplayText(turn.turnId, 191)}</p>
-    <ActionButton label={t(result ? '重读原模型结果' : '读取原模型结果')} disabled={busy || !active()} onAction={() => read()} />
+    {!embedded && <p>{safeDisplayText(turn.turnId, 191)}</p>}
+    {(!embedded || error) && <ActionButton label={t(result ? '重读原模型结果' : '读取原模型结果')} disabled={busy || !active()} onAction={() => read()} />}
     {error && <Alert type="warning" title={t('原结果当前不可读取，旧正文已清除；不自动重试或重新生成。')} />}
     {result && <>
-      <p className={styles.help}>{t('模型文本不证明业务已完成；本次只读，不启动模型或业务。')}</p>
+      {!embedded && <p className={styles.help}>{t('模型文本不证明业务已完成；本次只读，不启动模型或业务。')}</p>}
       {result.status === 'material_erased' ? <p>{t('原输入已清理，不恢复正文或执行权限。')}</p>
         : result.status === 'no_task_observed' ? <p>{t('未观察到任务关联，不推断模型未调用。')}</p>
           : result.status === 'no_unique_result' ? <p>{t('该原轮次没有唯一可定位结果，不猜测其他轮次或补造答案。')}</p>
-            : result.status === 'observed' && result.result.status === 'available' ? <VisibleObservationBoundary kind="text"
+            : result.status === 'observed' && result.result.status === 'available' ? !embedded && <VisibleObservationBoundary kind="text"
                 reference={{ taskId: result.result.taskId, runId: result.result.runId, source: { kind: 'model_result', resultId: result.result.resultId } }}
                 ready={result.result.text!.value.trim().length > 0 && active()}><ModelText text={result.result.text!.value} /></VisibleObservationBoundary>
               : result.status === 'observed' && <p>{t(result.result.status === 'stale' ? '事实已变化，旧正文不显示，请回原业务页核对。'
@@ -153,16 +166,18 @@ export function ConversationResult({ identity, conversationId, turn, current, on
     {host && turn.task && tenantId && workspaceId && <TaskWorkbenchModelControlProvider value={controlHost}>
       <TaskWorkbenchDisplay identity={owner} expected={{ tenantId, workspaceId, taskId: turn.task.taskId,
         runId: display?.runId ?? turn.task.runId, ...(display ? { resultId: display.resultId } : {}) }}
+        embedded={embedded} autoRead={autoRead} readOnly={readOnly}
         port={host.port} enabled={!busy && originalResult() !== null}
         current={() => active() && generation.current === renderGeneration} />
-      {(reviewSection === 'input' || onAnswerReceipt) && <section aria-label={t('补充信息')} hidden={busy} inert={busy}>
+      {!readOnly && (reviewSection === 'input' || onAnswerReceipt) && <section aria-label={t('补充信息')} hidden={busy} inert={busy}>
         <TaskClarification key={`input:${owner}`} taskId={turn.task.taskId} identity={reviewIdentity}
+          visibleConversation={{ conversationId, turnId: turn.turnId }}
           current={() => active() && !latest.current.busy && (!reviewState.review || host.reviewCurrent())} onAccessDenied={deny}
           onReceiptChange={onAnswerReceipt}
           candidateReview={host.reviewCurrent() ? reviewState.review : null}
           onCandidateReviewed={status => { if (status === 'adopted') host.inputReview.clear(); }} />
       </section>}
-      {reviewSection === 'approval' && <section aria-label={t('人工确认')} hidden={busy} inert={busy}>
+      {!readOnly && reviewSection === 'approval' && <section aria-label={t('人工确认')} hidden={busy} inert={busy}>
         {turn.capabilityCode === 'quote_clarification' ? <TaskQuoteReprepare key={`approval:${owner}`}
             taskId={turn.task.taskId} identity={reviewIdentity} current={() => active() && !latest.current.busy} onAccessDenied={deny}
             requestedProposal={requestedProposal ?? undefined} parameterReview={host.reviewCurrent() ? reviewState.parameters : null}

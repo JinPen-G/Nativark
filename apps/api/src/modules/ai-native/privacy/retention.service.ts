@@ -1,5 +1,5 @@
 import { hasEffectivePermission } from '../../../common/permission-match';
-import { Prisma, type PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient, type AiClientSceneMaterial } from '@prisma/client';
 import type { AiExecutionContext } from '@rental-os/shared';
 import type { AuthService } from '../../auth/auth.service';
 import type { FileStorageRuntimeService } from '../../integrations/file-storage.runtime.service';
@@ -16,9 +16,14 @@ import { retentionKinds, requireRestorePermit, signRetentionManifest, retentionP
 import { sign, type KeyObject } from 'node:crypto';
 import { knowledgeRecordSchema, parsePersisted, queueIndex } from '../knowledge/knowledge-validation';
 import { inspectRetentionSource } from './retention-model-sources';
-import { projectAiTaskWireEvent } from '../ai-task-event.repository';
-import { aiTaskConfirmationEventSchema } from '../runner/prisma-task-confirmation-history.reader';
-import { aiTaskResumedConfirmationSchema } from '../runner/prisma-task-run-evidence.repository';
+import { eraseExpiredTaskBodies, eraseRetainedSourceTaskBodies } from './retention-task-bodies';
+import { AI_BODY_STORAGE_KINDS, protectAiBodyStorageRows } from './prisma-ai-body-storage';
+import { eraseExpiredInspectionDraftBodies } from './retention-inspection-draft';
+import { eraseExpiredNotificationDraftBodies, eraseNotificationDraftSnapshotCopies, type NotificationDraftRetentionCipher } from './retention-notification-draft';
+import { PrismaClientBookingRepository, type ClientBookingOperation } from '../scenes/prisma-client-booking.repository';
+import { PrismaClientSceneMaterialRepository } from '../scenes/prisma-client-scene-material.repository';
+import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+import { clientMaterialSnapshotHash } from '../scenes/client-entry-action';
 
 export const aiRetentionCleanupSchema = z.object({ kind: z.enum(retentionKinds),
   limit: z.number().int().min(1).max(10).default(5),
@@ -45,7 +50,8 @@ export class AiRetentionService {
   private readonly identities: AiTaskCurrentIdentityAuthority;
   constructor(readonly db: PrismaClient, auth: Pick<AuthService, 'resolveAccessContext'>,
     credentials: AiTaskCredentialSource, private readonly files?: Pick<FileStorageRuntimeService, 'eraseAiRetentionObject'>,
-    private readonly clock: () => Date = () => new Date(), private readonly restoreKeyHash?: string) {
+    private readonly clock: () => Date = () => new Date(), private readonly restoreKeyHash?: string,
+    private readonly notificationDraftCipher?: NotificationDraftRetentionCipher) {
     this.identities = new AiTaskCurrentIdentityAuthority(auth, credentials, clock);
   }
   async current(): Promise<Session> {
@@ -57,9 +63,168 @@ export class AiRetentionService {
     return { context, hash: fingerprint(stable), tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId };
   }
   async check(before: Session) { if ((await this.current()).hash !== before.hash) throw refused(); }
+  /** Explicit host maintenance for legacy plaintext. Existing retention
+   * management authority is mandatory; importing/starting never runs it.
+   * It changes storage representation only, not original hashes or consent. */
+  async protectStoredBodies(value: unknown) {
+    const command = z.object({ model: z.string().refine(value => AI_BODY_STORAGE_KINDS.includes(value)),
+      limit: z.number().int().min(1).max(10).default(5), after: z.union([
+        z.object({ id: z.string().min(1).max(191) }).strict(),
+        z.object({ taskId: z.string().min(1).max(36), cursor: z.string().regex(/^[1-9][0-9]{0,19}$/u) }).strict(),
+        z.object({ recordId: z.string().min(1).max(191), revision: z.number().int().min(1).max(4294967294) }).strict()
+      ]).optional() }).strict().parse(structuredClone(value));
+    const current = await this.current(), scope = await this.db.aiScope.findFirst({ where: aiPersistenceScopeColumns(current.context.scope) });
+    if (!scope) throw unavailable();
+    return protectAiBodyStorageRows(this.db, { ...command, scopeId: scope.id,
+      tenantId: current.tenantId, workspaceId: current.workspaceId, check: () => this.check(current) });
+  }
   private now() { const value = this.clock(); if (!Number.isFinite(value.getTime())) throw unavailable(); return value; }
   private cutoff(days: number) { return new Date(this.now().getTime() - days * 86400000); }
   private readonly unresolvedTask = aiTaskHasUnresolvedEffects;
+  /** Keep original submission/transfer receipts. A terminal Draft permits
+   * erasing its AI source only under the same lock used by acceptance/submission.
+   * A verified live tombstone can supersede an older active backup state, but
+   * cannot authorize deletion of business receipts or unresolved effects. */
+  private async canEraseBookingMaterial(tx: Prisma.TransactionClient, row: AiClientSceneMaterial, restoring: boolean) {
+    try {
+      const hash = z.string().regex(/^[a-f0-9]{64}$/u);
+      const metadata = z.object({ id: z.string().uuid(), tenantId: id, workspaceId: id,
+        channel: z.enum(['web', 'wechat_miniprogram', 'app']), principalKind: z.enum(['personal', 'corporate']),
+        principalHash: hash, inputHash: hash, materialHash: hash, bindingHash: hash }).parse(row);
+      const source = { tenantId: metadata.tenantId, workspaceId: metadata.workspaceId, channel: metadata.channel,
+        principalKind: metadata.principalKind, principalHash: metadata.principalHash };
+      const materials = new PrismaClientSceneMaterialRepository(this.db);
+      const submission = z.object({ handoffRef: z.string().uuid(), contactPhone: z.string().max(32).optional() }).strict();
+      const receiptMaterial = z.object({ version: z.literal('client-booking-acceptance-1'), handoffRef: z.string().uuid(),
+        bookingDraftId: z.string().uuid(), selectionRevision: z.literal(1), inputFingerprint: hash, operationKey: id,
+        quoteId: id, accepted: z.object({ tenantId: id, workspaceId: id, request: z.object({ quoteId: id }) }) });
+      if (row.erasedAt) {
+        // A repeated trusted restore may already have erased these bodies. Only
+        // the exact original marker is reusable; copied bodies never get this exemption.
+        const receiptId = fingerprint([AI_RETENTION_POLICY.version, source.tenantId, source.workspaceId, 'material', row.id]);
+        const marker = z.object({ retention: z.literal('erased'), receiptId: z.literal(receiptId),
+          policyVersion: z.literal(AI_RETENTION_POLICY.version) }).strict();
+        if (!restoring || ![row.command, row.material, row.publication].every(body => marker.safeParse(body).success)) return false;
+      } else {
+        const original = await materials.findSource(source, row.id, tx);
+        const materialKind = original?.command && typeof original.command === 'object' && 'kind' in original.command
+          ? original.command.kind : undefined;
+        if (!original || original.operationKey !== row.operationKey || original.bindingHash !== row.bindingHash
+          || original.inputHash !== row.inputHash || original.materialHash !== row.materialHash
+          || original.inputHash !== requestFingerprint(original.command)
+          || original.materialHash !== clientMaterialSnapshotHash(materialKind, original.material)) return false;
+        const command = submission.safeParse(original.command);
+        const claimsReceipt = z.object({ version: z.literal('client-booking-acceptance-1') }).safeParse(original.material).success;
+        // Goal/prepare callers choose their own keys, including these prefixes.
+        // Identify business receipts from decoded original types and derived
+        // associations; contradictory business-shaped records remain held.
+        if (command.success || claimsReceipt) {
+          if (!command.success) throw unavailable();
+          const prepared = receiptMaterial.parse(original.material);
+          const acceptanceKey = `booking-order:${requestFingerprint({ scope: source, handoffRef: command.data.handoffRef })}`;
+          if (prepared.handoffRef !== command.data.handoffRef || prepared.operationKey !== acceptanceKey
+            || prepared.accepted.tenantId !== source.tenantId || prepared.accepted.workspaceId !== source.workspaceId
+            || prepared.accepted.request.quoteId !== prepared.quoteId) throw unavailable();
+          if (original.operationKey === acceptanceKey) return false;
+          const acceptance = await materials.findOperation(source, acceptanceKey, tx);
+          if (!acceptance || original.operationKey !== `booking-attempt:${acceptance.id}`
+            || acceptance.bindingHash !== original.bindingHash || acceptance.inputHash !== original.inputHash
+            || acceptance.materialHash !== original.materialHash
+            || requestFingerprint(acceptance.command) !== original.inputHash
+            || requestFingerprint(acceptance.material) !== original.materialHash) throw unavailable();
+          return false;
+        }
+      }
+      const references = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT id FROM ai_client_booking_drafts
+        WHERE tenantId = ${source.tenantId} AND workspaceId = ${source.workspaceId}
+        AND materialRef = ${row.id} LIMIT 2 FOR UPDATE`);
+      if (references.length > 1) return false;
+      if (!references.length) return true;
+      const bookings = new PrismaClientBookingRepository(this.db, this.clock);
+      const draft = await bookings.find(source, references[0].id, tx, true);
+      if (!draft || draft.materialRef !== row.id || draft.inputHash !== row.inputHash || draft.bindingHash !== row.bindingHash
+        || draft.state === 'submitted') return false;
+      const inactive = ['abandoned', 'stale', 'expired'].includes(draft.state);
+      if (!inactive && !restoring) return false;
+      const referencesToOperations = await tx.aiClientBookingDraftOperation.findMany({
+        where: { tenantId: source.tenantId, workspaceId: source.workspaceId, draftId: draft.id }, take: 5 });
+      // The original flow has at most create/select/handoff/abandon. Missing or
+      // contradictory history is not proof that a formal submission never ran.
+      if (!referencesToOperations.length || referencesToOperations.length > 4) return false;
+      const operations: ClientBookingOperation[] = [];
+      for (const reference of referencesToOperations) {
+        const operation = await bookings.operation(source, reference.operationKey, tx);
+        if (!operation || operation.id !== reference.id || operation.draftId !== draft.id
+          || operation.resultRevision > draft.revision
+          || (operation.kind === 'handoff') !== (operation.handoffRef !== null)) return false;
+        operations.push(operation);
+      }
+      operations.sort((left, right) => left.resultRevision - right.resultRevision);
+      let originalState = 'draft_created', selection: ClientBookingOperation | undefined;
+      for (const [index, operation] of operations.entries()) {
+        if (operation.resultRevision !== index + 1) return false;
+        if (index === 0) { if (operation.kind !== 'create') return false; continue; }
+        if (operation.kind === 'select' && originalState === 'draft_created') {
+          originalState = 'user_selected'; selection = operation;
+        } else if (operation.kind === 'handoff' && originalState === 'user_selected') originalState = 'handed_to_booking_page';
+        else if (operation.kind === 'abandon' && ['draft_created', 'user_selected', 'handed_to_booking_page'].includes(originalState)) originalState = 'abandoned';
+        else return false;
+      }
+      // selectedAt is captured before the select receipt's clock sample. The
+      // original writer does not guarantee equal milliseconds between those reads.
+      if (draft.selectionRevision !== (selection ? 1 : 0)) return false;
+      if (selection) {
+        if (!draft.selectedAt || draft.selectedAt < draft.createdAt || draft.selectedAt < operations[0].createdAt
+          || draft.selectedAt > selection.createdAt || draft.selectedAt > draft.updatedAt
+          || draft.selectedAt >= draft.expiresAt) return false;
+      } else if (draft.selectedAt !== null) return false;
+      const latest = operations[operations.length - 1];
+      if (['stale', 'expired'].includes(draft.state)) {
+        // Original invalidation is a locked CAS after the last active operation;
+        // elapsed TTL alone never substitutes for that persisted transition.
+        if (!draft.invalidReason || originalState === 'abandoned' || draft.revision !== operations.length + 1) return false;
+      } else if (draft.state !== originalState || draft.revision !== operations.length) return false;
+      if (draft.state === 'abandoned') {
+        if (latest.kind !== 'abandon' || latest.resultRevision !== draft.revision
+          || latest.inputHash !== requestFingerprint({ bookingDraftId: draft.id, expectedRevision: draft.revision - 1,
+            inputFingerprint: draft.inputHash, operationKey: latest.operationKey, decision: 'abandon' })) return false;
+      }
+      // Use the original scoped Draft locators, including malformed/unknown
+      // receipts. Expiring a transfer does not prove that it was unconsumed.
+      const transferHash = requestFingerprint({ tenantId: source.tenantId, workspaceId: source.workspaceId, draftId: draft.id });
+      if (await tx.operationLog.findFirst({ where: { tenantId: source.tenantId, workspaceId: source.workspaceId,
+        id: { in: [`booking-transfer:original:${transferHash}`, `booking-transfer:consumed:${transferHash}`] } }, select: { id: true } })) return false;
+      const handoffs = await tx.aiClientBookingHandoff.findMany({
+        where: { tenantId: source.tenantId, workspaceId: source.workspaceId, draftId: draft.id }, take: 2 });
+      const handoffOperations = operations.filter(operation => operation.kind === 'handoff');
+      if (handoffs.length > 1 || handoffs.length !== handoffOperations.length) return false;
+      for (const reference of handoffs) {
+        const handoff = await bookings.handoff(source, reference.id, tx);
+        if (!handoff || handoff.draftId !== draft.id || handoff.inputHash !== draft.inputHash
+          || handoff.selectionRevision !== draft.selectionRevision || handoffOperations[0]?.handoffRef !== handoff.id) return false;
+        const operationKey = `booking-order:${requestFingerprint({ scope: source, handoffRef: handoff.id })}`;
+        const referenceToAcceptance = await tx.aiClientSceneMaterial.findFirst({ where: { ...source, operationKey }, select: { id: true } });
+        if (referenceToAcceptance) {
+          // Preparing the original request is not submission. Validate its
+          // original receipt, then check the indexed attempt under this Draft
+          // lock. Keep the receipt itself even when its terminal AI source goes.
+          const acceptance = await materials.findOperation(source, operationKey, tx);
+          if (!acceptance || acceptance.id !== referenceToAcceptance.id || acceptance.bindingHash !== draft.bindingHash
+            || acceptance.inputHash !== requestFingerprint(acceptance.command)
+            || acceptance.materialHash !== requestFingerprint(acceptance.material)) return false;
+          const prepared = receiptMaterial.parse(acceptance.material);
+          if (prepared.handoffRef !== handoff.id || prepared.bookingDraftId !== draft.id
+            || prepared.inputFingerprint !== draft.inputHash || prepared.operationKey !== operationKey
+            || prepared.accepted.tenantId !== source.tenantId || prepared.accepted.workspaceId !== source.workspaceId
+            || prepared.accepted.request.quoteId !== prepared.quoteId
+            || submission.parse(acceptance.command).handoffRef !== handoff.id) return false;
+          if (await tx.aiClientSceneMaterial.findFirst({ where: { ...source,
+            operationKey: `booking-attempt:${acceptance.id}` }, select: { id: true } })) return false;
+        }
+      }
+      return true;
+    } catch { return false; }
+  }
   async receipt(value: unknown) {
     const command = aiRetentionReceiptSchema.parse(value), current = await this.current();
     const row = await this.db.aiDataErasure.findFirst({ where: { id: command.id,
@@ -133,6 +298,15 @@ export class AiRetentionService {
     else if (command.kind === 'material') ids = (await this.db.aiClientSceneMaterial.findMany({ where: { ...where,
       erasedAt: null, createdAt: { lte: this.cutoff(30) } }, orderBy: { id: 'asc' },
       take: command.limit, select: { id: true } })).map(row => row.id);
+    else if (command.kind === 'inspection_draft') ids = (await this.db.aiInspectionDraft.findMany({ where: { ...where,
+      createdAt: { lte: this.cutoff(30) }, expiresAt: { lte: this.now() } }, orderBy: { id: 'asc' },
+      take: command.limit, select: { id: true } })).map(row => row.id);
+    else if (command.kind === 'notification_draft') {
+      if (!this.notificationDraftCipher) throw unavailable();
+      ids = (await this.db.rentalNotificationLog.findMany({ where: { ...where, status: 'draft',
+        createdAt: { lte: this.cutoff(30) } }, orderBy: { id: 'asc' }, take: command.limit,
+        select: { id: true } })).map(row => row.id);
+    }
     else ids = (await this.db.fileAsset.findMany({ where: { tenantId: current.tenantId, ...page, businessModule: 'ai-native',
       businessType: 'ai_knowledge_document', metadata: { path: '$.workspaceId', equals: current.workspaceId },
       status: { in: ['active', 'failed', 'ai_erasure_pending'] }, createdAt: { lte: this.cutoff(7) } },
@@ -177,7 +351,7 @@ export class AiRetentionService {
         if (receipt && (receipt.tenantId !== owner.tenantId || receipt.workspaceId !== owner.workspaceId
           || receipt.kind !== kind || receipt.resourceId !== resourceId || receipt.policyVersion !== AI_RETENTION_POLICY.version
           || expectedHash && receipt.targetHash !== expectedHash)) throw refused();
-        if (receipt?.state === 'erased' && !expectedHash && kind !== 'task') return { id: key, state: 'erased', replayed: true };
+        if (receipt?.state === 'erased' && !expectedHash && !['task', 'inspection_draft', 'notification_draft'].includes(kind)) return { id: key, state: 'erased', replayed: true };
         if (['knowledge', 'memory', 'attachment'].includes(kind)) {
           const source = await inspectRetentionSource(tx, scope.id, kind as 'knowledge' | 'memory' | 'attachment', resourceId, owner);
           if (source !== 'clear') return { id: key, state: source,
@@ -191,10 +365,13 @@ export class AiRetentionService {
             : kind === 'knowledge' ? await tx.aiKnowledgeDocument.findFirst({ where: { id: resourceId, ...owner }, select: { id: true } })
             : kind === 'memory' ? await tx.aiStructuredMemory.findFirst({ where: { id: resourceId, ...owner }, select: { id: true } })
             : kind === 'material' ? await tx.aiClientSceneMaterial.findFirst({ where: { id: resourceId, ...owner }, select: { id: true } })
+            : kind === 'inspection_draft' ? await tx.aiInspectionDraft.findFirst({ where: { id: resourceId, ...owner }, select: { id: true } })
+            : kind === 'notification_draft' ? await tx.rentalNotificationLog.findFirst({ where: { id: resourceId, ...owner }, select: { id: true } })
             : await tx.fileAsset.findFirst({ where: { id: resourceId, tenantId: owner.tenantId,
               metadata: { path: '$.workspaceId', equals: owner.workspaceId } }, select: { id: true } });
           if (!exists) {
             await this.check(current); attempted = true;
+            if (kind === 'notification_draft') await eraseNotificationDraftSnapshotCopies(tx, owner, resourceId, () => this.check(current));
             await tx.aiDataErasure.upsert({ where: { id: key }, create: { id: key, ...owner, kind, resourceId,
               targetHash: expectedHash, policyVersion: AI_RETENTION_POLICY.version, state: 'erased', erasedAt: now },
               update: { state: 'erased', erasedAt: now, revision: { increment: 1 } } });
@@ -203,80 +380,19 @@ export class AiRetentionService {
         }
         let targetHash: string;
         if (kind === 'task') {
-          const task = await tx.aiTask.findFirst({ where: { id: resourceId, scopeId: scope.id } });
-          if (!task || !terminal.includes(task.status as typeof terminal[number])
-            || task.updatedAt > this.cutoff(30) && !expectedHash && receipt?.state !== 'erased') throw unavailable();
-          // Required proposal/approval/Core receipts outlive ordinary dialogue.
-          // Their existence is not a permanent hold on every model body/input.
-          // unresolvedTask already refuses live effects and uncertain consumption.
-          const businessTools = ['rental.order.commit', 'tenant.notifications.commit'];
-          const businessStep = await tx.aiStep.findFirst({ where: { taskId: task.id, scopeId: scope.id,
-            toolCode: { in: businessTools } }, select: { id: true } });
-          targetHash = fingerprint([kind, task.id, task.inputRef, task.inputHash, task.createdAt.toISOString()]);
-          if (expectedHash && targetHash !== expectedHash || receipt && receipt.targetHash !== targetHash) throw refused();
           await this.check(current); attempted = true;
-          if (receipt?.state !== 'erased') {
-            const changed = await tx.aiTask.updateMany({ where: { id: task.id, scopeId: scope.id, revision: task.revision,
-              status: task.status }, data: { archivedAt: businessStep ? task.archivedAt : now, revision: { increment: 1 } } });
-            if (changed.count !== 1) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-          }
-          const taskWhere = { taskId: task.id, scopeId: scope.id };
-          await tx.aiTaskResultArtifact.updateMany({ where: { ...taskWhere, step: { toolCode: { notIn: businessTools } } }, data: { payload: mark } });
-          await tx.aiTaskInputReceipt.updateMany({ where: taskWhere, data: { answers: [] } });
-          await tx.aiTaskInputRequest.updateMany({ where: taskWhere, data: { allowedFields: [] } });
-          await tx.aiTaskActionInput.updateMany({ where: { ...taskWhere, toolCode: { notIn: businessTools } }, data: { payload: mark } });
-          // Plans hold IDs/limits, not prompts. Retain the original plan hash
-          // where a business phase needs it to reopen approval/Core receipts.
-          if (!businessStep)
-            await tx.aiTaskRunPlan.updateMany({ where: taskWhere, data: { payload: mark } });
-          // Business receipt readers use current task authority. Erasing the
-          // dialogue does not archive that authority or permit a new execution.
-          // Event data/cursor remain useful, but refresh history and internal
-          // inputs can contain the same customer/address labels as the head.
-          if (task.eventCursor < 0n || task.eventCursor > 18446744073709551615n
-            || await tx.aiTaskEvent.findFirst({ where: { ...taskWhere,
-              OR: [{ cursor: { lte: 0n } }, { cursor: { gt: task.eventCursor } }] }, select: { cursor: true } })) throw unavailable();
-          let afterCursor = 0n, eventCount = 0;
-          while (afterCursor < task.eventCursor) {
-            const events = await tx.aiTaskEvent.findMany({ where: { ...taskWhere,
-              cursor: { gt: afterCursor, lte: task.eventCursor } }, orderBy: { cursor: 'asc' }, take: 200 });
-            eventCount += events.length;
-            // Bounded pages under the same transaction/watermark. Overflow or
-            // missing history rolls back instead of leaving a plaintext suffix.
-            if (!events.length || eventCount > 10000) throw unavailable();
-            for (const event of events) {
-              if (event.scopeId !== scope.id || event.taskId !== task.id || event.cursor <= afterCursor
-                || event.cursor > task.eventCursor) throw unavailable();
-              afterCursor = event.cursor;
-              const raw = event.payload;
-              if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw unavailable();
-              const data = projectAiTaskWireEvent(event).data;
-              let confirmation;
-              if (businessStep && event.type === 'task.transition' && raw.confirmation !== undefined) {
-                const envelope = aiTaskConfirmationEventSchema.parse(raw), initiator = envelope.initiator;
-                if (initiator.actorKind !== task.ownerKind || initiator.actorId !== task.ownerId) throw refused();
-                const paused = envelope.data.from === 'running' && envelope.data.to === 'waiting_confirmation'
-                  && envelope.data.reason === 'confirmation_required';
-                const resumed = envelope.data.from === 'waiting_confirmation' && envelope.data.to === 'running'
-                  && envelope.data.reason === 'resume';
-                if (!paused && !resumed) throw unavailable();
-                confirmation = { initiator, confirmation: resumed ? aiTaskResumedConfirmationSchema.parse(raw).confirmation
-                  : { checkpointRef: envelope.confirmation.checkpointRef, phaseId: envelope.confirmation.phaseId } };
-              }
-              // Reconstruct only validated wire data and minimal business proof.
-              // Never carry previousRequest, extra audit fields or prompt copies.
-              const safe = { data, ...confirmation, retention: mark };
-              const changedEvent = await tx.aiTaskEvent.updateMany({ where: { ...taskWhere, cursor: event.cursor,
-                taskRevision: event.taskRevision, type: event.type }, data: { payload: safe } });
-              if (changedEvent.count !== 1) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-            }
-          }
-          // Preserve the minimal business phase/approval/receipt association;
-          // it is independent from ordinary inputs and generated response text.
-          if (task.inputRef && !await tx.aiTask.findFirst({ where: { scopeId: scope.id, inputRef: task.inputRef,
-            id: { not: task.id }, archivedAt: null }, select: { id: true } })) {
-            await tx.aiTaskOriginalRequest.updateMany({ where: { id: task.inputRef, scopeId: scope.id }, data: { payload: mark, erasedAt: now } });
-          }
+          return eraseExpiredTaskBodies(tx, { scopeId: scope.id, owner, taskId: resourceId, now,
+            check: () => this.check(current) }, expectedHash);
+        } else if (kind === 'inspection_draft') {
+          await this.check(current); attempted = true;
+          return eraseExpiredInspectionDraftBodies(tx, { scopeId: scope.id, owner, draftId: resourceId, now,
+            check: () => this.check(current) }, expectedHash);
+        } else if (kind === 'notification_draft') {
+          if (!this.notificationDraftCipher) throw unavailable();
+          await this.check(current); attempted = true;
+          return eraseExpiredNotificationDraftBodies(tx, { scopeId: scope.id, owner,
+            draftId: resourceId, now, cipher: this.notificationDraftCipher,
+            check: () => this.check(current) }, expectedHash);
         } else if (kind === 'request') {
           const row = await tx.aiTaskOriginalRequest.findFirst({ where: { id: resourceId, scopeId: scope.id } });
           if (!row || row.createdAt > this.cutoff(30) && !expectedHash) throw unavailable();
@@ -301,6 +417,8 @@ export class AiRetentionService {
           if (!state || typeof state !== 'object' || Array.isArray(state)) throw unavailable();
           const { preference: _body, confirmationRecordId: _confirmation, ...safe } = state;
           await this.check(current); attempted = true;
+          await eraseRetainedSourceTaskBodies(tx, { scopeId: scope.id, owner, kind: 'memory', resourceId: row.id,
+            now, check: () => this.check(current) });
           const changed = await tx.aiStructuredMemory.updateMany({ where: { id: row.id, ...owner,
             revision: row.revision, ownerKind: row.ownerKind, ownerId: row.ownerId }, data: { content: {},
               contentHash: fingerprint({}), status: 'deleted', confirmationRecordId: null, deletedAt: now,
@@ -318,6 +436,8 @@ export class AiRetentionService {
           targetHash = fingerprint([kind, doc.id, doc.createdAt.toISOString()]);
           if (expectedHash && targetHash !== expectedHash) throw refused();
           await this.check(current); attempted = true;
+          if (!withdrawing) await eraseRetainedSourceTaskBodies(tx, { scopeId: scope.id, owner,
+            kind: 'knowledge', resourceId: doc.id, now, check: () => this.check(current) });
           const parsed = parsePersisted(knowledgeRecordSchema, doc.state);
           const next = queueIndex({ ...parsed, document: { ...parsed.document,
             title: withdrawing ? parsed.document.title : '[已删除]', publication: withdrawing ? 'withdrawn' : 'deleted',
@@ -328,9 +448,13 @@ export class AiRetentionService {
           if (changed.count !== 1) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
           if (!withdrawing) await tx.aiKnowledgeChunk.deleteMany({ where: { version: { documentId: doc.id, document: owner } } });
         } else if (kind === 'material') {
+          await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_client_scene_materials WHERE id = ${resourceId}
+            AND tenantId = ${owner.tenantId} AND workspaceId = ${owner.workspaceId} FOR UPDATE`);
           const row = await tx.aiClientSceneMaterial.findFirst({ where: { id: resourceId, ...owner } });
           if (!row || row.createdAt > this.cutoff(30) && !expectedHash) throw unavailable();
-          if (await tx.aiClientBookingDraft.findFirst({ where: { materialRef: row.id, ...owner }, select: { id: true } })) return { id: key, state: 'held', reason: 'original_operation_retention' };
+          targetHash = fingerprint([kind, row.id, row.materialHash, row.inputHash, row.createdAt.toISOString()]);
+          if (expectedHash && targetHash !== expectedHash || receipt && receipt.targetHash !== targetHash) throw refused();
+          if (!await this.canEraseBookingMaterial(tx, row, Boolean(expectedHash))) return { id: key, state: 'held', reason: 'original_operation_retention' };
           const inputs = await tx.aiClientTaskInput.findMany({ where: { materialRef: row.id, ...owner }, take: 51 });
           if (inputs.length > 50) return { id: key, state: 'held', reason: 'original_operation_retention' };
           for (const input of inputs) {
@@ -340,13 +464,12 @@ export class AiRetentionService {
             const task = tasks[0];
             if (tasks.length !== 1 || task.inputHash !== input.inputHash || !task.archivedAt
               || !terminal.includes(task.status as typeof terminal[number])) return { id: key, state: 'held', reason: 'original_operation_retention' };
+            if (await this.unresolvedTask(tx, scope.id, task.id, owner)) return { id: key, state: 'held', reason: 'unresolved_effects' };
             const erased = await tx.aiDataErasure.findFirst({ where: { id: fingerprint([AI_RETENTION_POLICY.version,
               owner.tenantId, owner.workspaceId, 'task', task.id]), ...owner, kind: 'task', resourceId: task.id,
               policyVersion: AI_RETENTION_POLICY.version, state: 'erased' } });
             if (!erased) return { id: key, state: 'held', reason: 'original_operation_retention' };
           }
-          targetHash = fingerprint([kind, row.id, row.materialHash, row.inputHash, row.createdAt.toISOString()]);
-          if (expectedHash && targetHash !== expectedHash) throw refused();
           await this.check(current); attempted = true;
           const changed = await tx.aiClientSceneMaterial.updateMany({ where: { id: row.id, ...owner, revision: row.revision },
             data: { command: mark, material: mark, publication: mark, erasedAt: now } });

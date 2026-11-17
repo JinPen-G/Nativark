@@ -14,10 +14,20 @@
   </ai-task-workbench>
   <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
   <block wx:else>
+    <view class="section section--tight"><ai-scene-catalog context-key="{{id}}"></ai-scene-catalog></view>
     <view class="section order-heading">
       <view class="row row--between"><view class="title">#{{orderNo}}</view><status-tag label="{{status}}" tone="{{tone}}" small="{{true}}"></status-tag></view>
       <view class="order-heading__meta">下单时间：{{createdAt}}<text class="link small" bindtap="onCopy">复制订单号</text></view>
     </view>
+    <view wx:if="{{aiEntryActionsAvailable}}" class="section section--tight"><ai-entry-actions id="ai-entry-actions" order-id="{{id}}" context-key="{{aiEntryActionsContext}}" available="{{aiEntryActionsAvailable}}"></ai-entry-actions></view>
+    <view wx:if="{{canReadInspectionTasks || aiInspectionTaskVisible}}" class="section section--tight"><view class="card order-info-card">
+      <view class="subtitle">原检查任务</view>
+      <view class="muted small mt-8">选择{{pickupLabel}}或{{returnLabel}}阶段，核对已保存的任务与结果。</view>
+      <button class="btn btn--outline btn--block mt-12" loading="{{aiInspectionTaskChoosing || aiInspectionTaskLoading}}"
+        disabled="{{!canReadInspectionTasks || aiInspectionTaskChoosing || aiInspectionTaskLoading}}" bindtap="onReadInspectionTask">选择阶段并读取原任务</button>
+      <text wx:if="{{aiInspectionTaskMessage}}" role="status">{{aiInspectionTaskMessage}}</text>
+      <ai-inspection-task wx:if="{{aiInspectionTaskVisible}}" id="ai-inspection-task" />
+    </view></view>
     <view class="section section--tight">
       <view class="card order-info-card">
         <view class="order-card-heading">

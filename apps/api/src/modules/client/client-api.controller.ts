@@ -55,10 +55,14 @@ import {
   VerifyClientRegistrationChallengeRequestDto
 } from "./client-request.dto";
 import { type ClientRequestContext as ClientSessionContext } from "./client-auth.service";
+import { ExecutionContextHost } from '@nestjs/core/helpers/execution-context-host';
+import { ApiAuthGuard } from '../../common/api-auth.guard';
+import { runWithRequestIdentity } from '../../common/request-identity';
 
 interface ClientRequest {
   client?: ClientSessionContext;
   headers?: Record<string, unknown>;
+  ip?: string;
 }
 
 interface ClientBinaryResponse {
@@ -81,7 +85,8 @@ export class ClientApiController {
     @Optional() private readonly wechat?: ClientWechatAuthService,
     @Optional() private readonly addresses?: ClientDeliveryAddressService,
     @Optional() private readonly closure?: ClientAccountClosureService,
-    @Optional() private readonly enterprise?: EnterpriseAccessService
+    @Optional() private readonly enterprise?: EnterpriseAccessService,
+    @Optional() private readonly readGuard?: ApiAuthGuard
   ) {}
 
   private requireWechat() {
@@ -268,8 +273,26 @@ export class ClientApiController {
   }
 
   @Get("profile")
-  profile(@Req() req: ClientRequest) {
-    return this.api.profile(currentClient(req));
+  async profile(@Req() req: ClientRequest) {
+    const original = structuredClone(currentClient(req)), authorization = req.headers?.authorization;
+    if (typeof authorization !== 'string' || authorization.length > 8192 || !/^Bearer \S+$/u.test(authorization)
+      || typeof this.readGuard?.revalidateClientRead !== 'function') throw new UnauthorizedException('当前本人资料读取权限不可用');
+    const binding = (value: ClientSessionContext) => JSON.stringify({ tenantId: value.tenantId, tenantCode: value.tenantCode,
+      customerId: value.customerId, customerType: value.customerType, workspaceId: value.workspaceId,
+      workspaceCode: value.workspaceCode, categoryCode: value.categoryCode, membershipStatus: value.membershipStatus,
+      sessionId: value.sessionId });
+    const result = await this.api.profile(original);
+    // Original source reads may outlive the request's first Guard check. A
+    // revoked session or switched workspace cannot deliver the old profile.
+    await runWithRequestIdentity({}, async () => {
+      const request: ClientRequest & { method: string; url: string; originalUrl: string } = {
+        method: 'GET', url: '/api/client/v1/profile', originalUrl: '/api/client/v1/profile',
+        headers: { authorization }, ip: req.ip,
+      };
+      if (await this.readGuard!.revalidateClientRead(new ExecutionContextHost([request])) !== true
+        || binding(currentClient(request)) !== binding(original)) throw new UnauthorizedException('本人资料读取期间会话已变化');
+    });
+    return result;
   }
 
   @Patch("profile")

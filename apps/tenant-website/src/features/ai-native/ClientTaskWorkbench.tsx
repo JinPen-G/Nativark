@@ -2,6 +2,8 @@
  * remain separate from model starts and answer continuation; model prose is
  * displayed as generated context, never an order/payment/price observation. */
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useSite } from '../../SiteContext';
 import { captureEnterpriseHostSession, sessionApi, subscribeCustomerSession } from '../../data/authClient';
 import { createClientTaskApi } from './client-task-api';
 import { createClientTaskSession, clientTaskStorageKey, type ClientTaskView } from './client-task-session';
@@ -11,11 +13,14 @@ const initial: ClientTaskView = { status: 'closed', task: null, modelText: null,
   canExplain: false, canRead: false, canSubmit: false, canContinue: false, readOnly: true, modelUnavailable: false,
   observation: null, observationGeneration: 0 };
 export function ClientTaskWorkbench({ orderId, scopeKey, english }: { orderId: string; scopeKey: string; english: boolean }) {
+  const navigate = useNavigate(), { href } = useSite();
   const [record,setRecord] = useState({ scopeKey, view: initial }), [working,setWorking] = useState(false), [error,setError] = useState(false);
   const [draft,setDraft] = useState({ reference: '', value: '' });
   const currentScope = useRef(scopeKey), generation = useRef(0), busy = useRef(false), session = useRef<ReturnType<typeof createClientTaskSession> | null>(null);
   currentScope.current = scopeKey;
   const view = record.scopeKey === scopeKey ? record.view : initial;
+  // Presentation only: keep the original result and recovery references intact.
+  const modelText = view.modelText?.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/gu, '') ?? '';
   const cancellation = record.scopeKey === scopeKey ? session.current?.cancellationHost() : null;
   const question = view.question, field = question?.contract.fields.length === 1 && question.contract.fields[0].kind === 'text'
     && question.contract.fields[0].fieldId === 'clarification_text' ? question.contract.fields[0] : null;
@@ -58,6 +63,14 @@ export function ClientTaskWorkbench({ orderId, scopeKey, english }: { orderId: s
       onClick={() => void work(owner => owner.explain())}>{english ? 'Request an explanation' : '请求解释'}</button>}
     <button type="button" className="button button-outline" disabled={working} onClick={() => void work(owner => owner.refresh())}>
       {english ? 'Check original answer' : '核对原回答'}</button>
+    {(view.canOpenOrder || view.task || cancellation) && <button type="button" className="button button-outline" disabled={working || !view.canOpenOrder}
+      onClick={() => void work(async owner => {
+        const opened = await owner.openOrder(id => {
+          if (id !== orderId || document.hidden || currentScope.current !== scopeKey) throw Error('client_order_navigation_changed');
+          navigate(href(`/orders/${encodeURIComponent(id)}`));
+        });
+        if (!opened) throw Error('client_order_navigation_unavailable');
+      })}>{english ? 'Check and open original order' : '核对并打开原订单'}</button>}
     {working && <p role="status">{english ? 'Processing your request…' : '正在处理本次请求…'}</p>}
     {view.status === 'unknown' && <p role="status">{english ? 'The original result needs checking. No model call is repeated.' : '原结果待核对，不重复调用模型。'}</p>}
     {field && question && <><label className="booking-field">{field.label}<textarea maxLength={field.maxLength} value={inputValue}
@@ -67,7 +80,7 @@ export function ClientTaskWorkbench({ orderId, scopeKey, english }: { orderId: s
     {view.canContinue && <><p>{english ? 'Context saved. Continue explicitly to obtain an answer.' : '补充说明已保存，请明确继续取得回答。'}</p>
       <button type="button" className="button button-outline" disabled={working} onClick={() => void work(owner => owner.continueAnswer())}>
         {english ? 'Continue answering' : '继续回答'}</button></>}
-    {view.modelText && <><p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{view.modelText}</p>
+    {modelText && <><p dir="auto" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', unicodeBidi: 'plaintext' }}>{modelText}</p>
       <p>{english ? 'Generated explanation. Amounts and order/payment status remain in the original order details.' : '模型生成说明；金额、订单和付款状态以原订单信息为准。'}</p></>}
     {(error || view.status === 'unavailable' || view.modelUnavailable) && <p role="status">{english ? 'The explanation is unavailable. You can still use the original order page.' : '解释暂不可用，可继续使用原订单页面。'}</p>}
     {cancellation && <ClientTaskCancellation orderId={orderId} scopeKey={scopeKey} origin={cancellation.origin} english={english}

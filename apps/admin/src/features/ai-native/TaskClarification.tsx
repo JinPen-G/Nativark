@@ -62,11 +62,13 @@ export function validateTaskClarificationProgress(value: AiTaskClarificationProg
     throw Error('AI_RESULT_UNKNOWN');
   return structuredClone(value);
 }
-export function TaskClarification({ taskId, identity, current, onAccessDenied, onReceiptChange, candidateReview, onCandidateReviewed }: {
+export function TaskClarification({ taskId, identity, current, onAccessDenied, onReceiptChange, candidateReview, onCandidateReviewed,
+  visibleConversation }: {
   taskId: string; identity: string; current: () => boolean; onAccessDenied: () => void;
-  onReceiptChange?: (value: { reference: ReceiptReference; receiptId: string } | null) => void;
+  onReceiptChange?: (value: { reference: ReceiptReference; receiptId: string; runId?: string } | null) => void;
   candidateReview?: WorkbenchInputCandidateReview | null;
   onCandidateReviewed?: (status: 'adopted' | 'conflict') => void;
+  visibleConversation?: Readonly<{ conversationId: string; turnId: string }>;
 }) {
   const visible = useVisibleObservationHost();
   const { t } = useLocale(), label = useId(), key = `ai-task-input:${identity}:${taskId}`;
@@ -77,12 +79,12 @@ export function TaskClarification({ taskId, identity, current, onAccessDenied, o
   const [original, setOriginal] = useState<AiTaskInputSubmissionDraft | null>(null);
   const [saved, setSaved] = useState(() => savedReference(key, taskId));
   const [locked, setLocked] = useState(() => { try { return sessionStorage.getItem(key) !== null; } catch { return true; } });
-  const [receipt, setReceipt] = useState<AiTaskClarificationProgressDraft | null>(null);
+  const [receipt, setReceipt] = useState<(AiTaskClarificationProgressDraft & { reference: ReceiptReference }) | null>(null);
   const [error, setError] = useState(false), [busy, setBusy] = useState(false);
   const flight = useRef<AbortController | null>(null), mounted = useRef(true), owner = useRef({ taskId, identity });
   const draftBasis = useRef<Question | null>(null);
-  const active = useRef({ taskId, identity, current, onAccessDenied, onReceiptChange, candidateReview, onCandidateReviewed });
-  active.current = { taskId, identity, current, onAccessDenied, onReceiptChange, candidateReview, onCandidateReviewed };
+  const active = useRef({ taskId, identity, current, onAccessDenied, onReceiptChange, candidateReview, onCandidateReviewed, visibleConversation });
+  active.current = { taskId, identity, current, onAccessDenied, onReceiptChange, candidateReview, onCandidateReviewed, visibleConversation };
   useEffect(() => {
     owner.current = { taskId, identity }; mounted.current = true;
     draftBasis.current = null;
@@ -96,9 +98,12 @@ export function TaskClarification({ taskId, identity, current, onAccessDenied, o
     document.addEventListener('visibilitychange', hidden);
     return () => { mounted.current = false; flight.current?.abort(); flight.current = null; draftBasis.current = null;
       document.removeEventListener('visibilitychange', hidden); };
-  }, [taskId, identity, key]);
+  }, [taskId, identity, key, visibleConversation?.conversationId, visibleConversation?.turnId]);
   const same = (signal?: AbortSignal) => mounted.current && active.current.taskId === taskId && active.current.identity === identity
-    && owner.current.taskId === taskId && owner.current.identity === identity && !document.hidden && active.current.current() && !signal?.aborted;
+    && owner.current.taskId === taskId && owner.current.identity === identity
+    && active.current.visibleConversation?.conversationId === visibleConversation?.conversationId
+    && active.current.visibleConversation?.turnId === visibleConversation?.turnId
+    && !document.hidden && active.current.current() && !signal?.aborted;
   const retainQuestion = (value: Question | null, offered: Parameters<typeof preserveWorkbenchQuestionDraft>[2] = []) => {
     // Absence of a successor question is not a replacement field contract.
     // Keep still-legal local input under its previous basis, with no submission
@@ -122,14 +127,23 @@ export function TaskClarification({ taskId, identity, current, onAccessDenied, o
         if (!same(controller.signal)) return;
         // A new persisted request can be answered. Missing/consumed questions
         // never clear an uncertain submission or grant retry of its old key.
+        const storedMarker = sessionStorage.getItem(key);
         const stored = savedReference(key, taskId);
+        setSaved(stored); setLocked(stored !== null);
         // A damaged locator or an unobserved old submission stays closed even
         // when another question appears. Observe the original receipt first.
-        if (stored === 'invalid') { setSaved('invalid'); setLocked(true); }
-        else if (!stored) { setLocked(false); }
+        if (!stored || stored === 'invalid') { setOriginal(null); setReceipt(null); }
         else if (value && stored.requestId !== value.requestId && receipt?.receipt.state === 'observed'
+          && displaySame(receipt.reference, stored)
           && !(receipt.continuation.kind === 'run_outcome' && receipt.continuation.status === 'unknown')) {
-          sessionStorage.removeItem(key); setOriginal(null); setSaved(null); setReceipt(null); setLocked(false);
+          // Another mounted consumer can replace the locator while this view
+          // retains an earlier receipt. Only retire the exact observed value.
+          if (sessionStorage.getItem(key) !== storedMarker) throw Error('AI_RESULT_UNKNOWN');
+          sessionStorage.removeItem(key);
+          const remaining = savedReference(key, taskId);
+          setOriginal(null); setSaved(remaining); setReceipt(null); setLocked(remaining !== null);
+        } else if (receipt && !displaySame(receipt.reference, stored)) {
+          setOriginal(null); setReceipt(null);
         }
         if (operation === 'candidate') {
           const review = active.current.candidateReview;
@@ -149,6 +163,17 @@ export function TaskClarification({ taskId, identity, current, onAccessDenied, o
         return;
       }
       let submission = original;
+      const currentReference = operation === 'submit' ? null : savedReference(key, taskId);
+      if (operation !== 'submit') {
+        setSaved(currentReference); setLocked(currentReference !== null);
+        if (!currentReference || currentReference === 'invalid') throw Error('AI_RESOURCE_UNAVAILABLE');
+        if (operation === 'continue' && (receipt?.receipt.state !== 'observed'
+          || !displaySame(receipt.reference, currentReference))) throw Error('AI_RESULT_UNKNOWN');
+        if (submission && !displaySame(currentReference, { taskId, requestId: submission.requestId,
+          expectedRevision: submission.expectedRevision, submissionKey: submission.submissionKey })) {
+          submission = null; setOriginal(null);
+        }
+      }
       if (operation === 'submit') {
         if (locked || !input || sessionStorage.getItem(key)) throw Error('AI_RESULT_UNKNOWN');
         const latest = question(await aiTaskCenterApi.input(taskId, controller.signal), taskId);
@@ -162,23 +187,41 @@ export function TaskClarification({ taskId, identity, current, onAccessDenied, o
         setOriginal(submission); setSaved({ taskId, requestId: submission.requestId, expectedRevision: submission.expectedRevision,
           submissionKey: submission.submissionKey }); setLocked(true); setDraft({}); setInput(null);
       }
-      const reference = submission ?? (saved !== 'invalid' ? saved : null);
+      const reference = submission ?? (currentReference !== 'invalid' ? currentReference : null);
       if (!reference || operation === 'submit' && !submission) throw Error('AI_RESOURCE_UNAVAILABLE');
-      if (operation === 'submit' && submission) visibleKey = visible?.begin({ taskId, trigger: 'original_input_resume', originKey: submission.requestId }) ?? null;
+      if (operation === 'submit' && submission) visibleKey = visible?.begin({ taskId, trigger: 'original_input_resume',
+        originKey: submission.requestId, ...visibleConversation }) ?? null;
       dispatched = true;
-      const result = validateTaskClarificationProgress(await (operation === 'receipt'
+      let result = validateTaskClarificationProgress(await (operation === 'receipt'
         ? aiTaskCenterApi.inputReceipt(submission ? { submission: structuredClone(submission) } : { reference: structuredClone(reference) }, controller.signal)
         : operation === 'submit' ? aiTaskCenterApi.resumeInput({ submission: structuredClone(submission!) }, controller.signal)
           : aiTaskCenterApi.continueInput(submission ? { submission: structuredClone(submission) } : { reference: structuredClone(reference) }, controller.signal)), reference);
+      if (operation === 'submit' && visibleKey && same(controller.signal) && result.receipt.state === 'observed' && !result.receipt.runId
+        && result.continuation.kind === 'run_outcome' && ['succeeded', 'partially_succeeded', 'paused'].includes(result.continuation.status)) {
+        // The submit acknowledgement carries the original receipt, while its
+        // separate read attests the exact resumed Run for this live window.
+        try {
+          const observed = validateTaskClarificationProgress(await aiTaskCenterApi.inputReceipt({
+            submission: structuredClone(submission!) }, controller.signal), reference);
+          if (same(controller.signal) && observed.receipt.state === 'observed' && observed.receipt.runId
+            && observed.receipt.receiptId === result.receipt.receiptId && observed.receipt.taskRevision === result.receipt.taskRevision)
+            result = { ...result, receipt: { ...result.receipt, runId: observed.receipt.runId } };
+          else visible?.cancel(visibleKey);
+        } catch (failure) {
+          visible?.cancel(visibleKey);
+          if ([401, 403].includes((failure as { response?: { status?: number } }).response?.status ?? 0)) throw failure;
+        }
+      }
       if (same(controller.signal) && result.receipt.state === 'observed' && result.receipt.runId
         && result.continuation.kind === 'run_outcome' && ['succeeded', 'partially_succeeded', 'paused'].includes(result.continuation.status))
         visible?.bindRun(visibleKey, result.receipt.runId);
       else visible?.cancel(visibleKey);
       if (same(controller.signal)) {
-        setReceipt(result);
+        setReceipt({ ...result, reference: { taskId, requestId: reference.requestId,
+          expectedRevision: reference.expectedRevision, submissionKey: reference.submissionKey } });
         if (result.receipt.state === 'observed' && result.receipt.runId) active.current.onReceiptChange?.({
           reference: { taskId, requestId: reference.requestId, expectedRevision: reference.expectedRevision, submissionKey: reference.submissionKey },
-          receiptId: result.receipt.receiptId,
+          receiptId: result.receipt.receiptId, runId: result.receipt.runId,
         });
       }
       if (operation === 'submit' && result.receipt.state !== 'observed') throw Error('AI_RESULT_UNKNOWN');
@@ -204,7 +247,8 @@ export function TaskClarification({ taskId, identity, current, onAccessDenied, o
         disabled={busy || locked || candidateReview.status !== 'ready' || Date.parse(candidateReview.expiresAt) <= Date.now()}
         onAction={() => run('candidate')} />}
       {(original || saved && saved !== 'invalid') && <ActionButton label={t('核对原回答收据')} pendingLabel={t('核对中…')} disabled={busy} onAction={() => run('receipt')} />}
-      {(original || saved && saved !== 'invalid') && receipt?.receipt.state === 'observed' && <ConfirmAction label={t('明确继续原任务')}
+      {(original || saved && saved !== 'invalid') && receipt?.receipt.state === 'observed'
+        && !(receipt.continuation.kind === 'not_started' && receipt.continuation.reason === 'quote_parameters_ready') && <ConfirmAction label={t('明确继续原任务')}
         prompt={t('按这份已保存的回答继续？仍须当前权限、原计划和累计限额；不会自动批准业务。')}
         doneLabel={t('已获得继续结果')} disabled={busy} onConfirm={() => run('continue')} />}
     </div>
@@ -242,6 +286,8 @@ export function TaskClarification({ taskId, identity, current, onAccessDenied, o
       ? '尚未观察到原回答收据，不代表未提交；请勿另建操作重发。'
       : receipt.continuation.kind === 'run_outcome' && receipt.continuation.status === 'unknown'
         ? '原回答已记录，继续结果仍待核对；不代表业务成功。'
-        : '原回答已记录；请读取当前问题或任务状态。回答不等于业务批准或执行成功。')}</p>}
+        : receipt.continuation.kind === 'not_started' && receipt.continuation.reason === 'quote_parameters_ready'
+          ? '报价参数已齐备，请核对原参数并明确生成报价；尚未批准或创建订单。'
+          : '原回答已记录；请读取当前问题或任务状态。回答不等于业务批准或执行成功。')}</p>}
   </section>;
 }

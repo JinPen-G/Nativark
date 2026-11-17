@@ -13,6 +13,9 @@ import { createClientGoalSession, clientGoalStorageKey, clientGoalTimeOptions, c
 import { createClientTaskCancellationApi } from './client-task-cancellation-api';
 import { createClientTaskCancellationSession, clientTaskCancellationStorageKey,
   type ClientTaskCancellationOrigin, type ClientTaskCancellationView } from './client-task-cancellation-session';
+import { BookingDraftReview, QuoteParameterReview } from './BookingDraftReview';
+import { ClientSceneCatalog } from './ClientSceneCatalog';
+import { ClientOriginalQuoteFacts } from './ClientOriginalQuoteFacts';
 
 const initial = (): ClientGoalView => ({ status: 'closed', hasLocator: false, task: null, question: null, receipt: null,
   projection: null, sources: null, selection: null, quote: null, canExtract: false, canRead: false, canSubmit: false,
@@ -36,8 +39,14 @@ const modeLabel = (mode: string, en: boolean) => {
     carrier_shipping: ['承运寄送', 'Carrier shipping'] };
   return labels[mode as RentalFulfillmentMode]?.[en ? 1 : 0] ?? mode;
 };
-const candidateLabel = (choice: { id: string; label: string }, choices: { id: string; label: string }[]) =>
-  choices.some(other => other.id !== choice.id && other.label === choice.label) ? `${choice.label} (${choice.id})` : choice.label;
+/** Display only, using the native plain-text filter. Original IDs, source hashes,
+ * field paths, human input and submission values never pass through this helper. */
+const displayText = (value: string, limit = 4000) => Array.from(value).slice(0, limit).join('')
+  .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/gu, '');
+const candidateLabel = (choice: { id: string; label: string }, choices: { id: string; label: string }[]) => {
+  const label = displayText(choice.label, 191);
+  return choices.some(other => other.id !== choice.id && displayText(other.label, 191) === label) ? `${label} (${choice.id})` : label;
+};
 const optionsFor = (projection: AiClientGoalProjection | null, field: string) => projection?.choices.find(group => group.field === field)?.choices ?? [];
 
 export function ClientGoalPicker(props: {
@@ -62,6 +71,17 @@ export function ClientGoalPicker(props: {
   const items = projection?.candidates?.conditions.items ?? [], form = draft.reference === projectionRef ? draft.form : emptyForm(items.length);
   const goalText = goal.scopeKey === scopeKey ? goal.text : '', loggedIn = Boolean(captureEnterpriseHostSession());
   const bookingView = bookingRecord?.scopeKey === scopeKey && ownerCurrent.current?.() ? bookingRecord.view : null;
+  const submitted = bookingView?.draft?.state === 'submitted'
+    && bookingView.draft.execution === 'submitted_request_not_business_success';
+  const checkingBooking = bookingView?.status === 'unknown' || bookingView?.status === 'checking';
+  const notSubmitted = !checkingBooking && bookingView?.observed === true && bookingView.draft?.execution === 'not_submitted'
+    && ['draft_created', 'user_selected', 'handed_to_booking_page'].includes(bookingView.draft.state);
+  const reviewLocations = bookingView?.draft && view.quote?.quoteId === bookingView.draft.material.quote.quoteId
+    && view.selection && projection?.context.timeZone === bookingView.draft.material.selection.timeZone
+    && view.selection.fulfillmentLocationId === bookingView.draft.material.selection.fulfillmentLocationId
+    && view.selection.returnLocationId === bookingView.draft.material.selection.returnLocationId
+    ? projection.choices.filter(group => ['fulfillmentLocationId', 'returnLocationId'].includes(group.field))
+      .flatMap(group => group.choices) : undefined;
   const cancellationOrigin = (() => { try { return ownerCurrent.current?.() ? owner.current?.cancellationOrigin() ?? null : null; } catch { return null; } })();
   const question = view.question, textField = question?.contract.fields.length === 1 && question.contract.fields[0].kind === 'text'
     && question.contract.fields[0].fieldId === 'clarification_text' ? question.contract.fields[0] : null;
@@ -217,8 +237,10 @@ export function ClientGoalPicker(props: {
     bookingAbort.current?.abort(); bookingAbort.current = null; setBookingRecord(null);
     setGoal({ scopeKey, text: '' }); setAnswer({ reference: '', text: '' }); setDraft({ reference: '', form: emptyForm(0) });
   });
-  const selectedLabel = (field: string, id?: string) => optionsFor(projection, field).find(option => option.id === id)?.label ?? id ?? (en ? 'Not selected' : '未选择');
-  const money = (amount: number | null) => amount === null || !view.quote?.currency ? (en ? 'Unavailable' : '未提供') : `${amount} ${view.quote.currency}`;
+  const selectedLabel = (field: string, id?: string) => {
+    const choices = optionsFor(projection, field), selected = choices.find(option => option.id === id);
+    return selected ? candidateLabel(selected, choices) : id ?? (en ? 'Not selected' : '未选择');
+  };
   const choose = (field: string, value: string, label: string, change: (value: string) => void, kind?: 'unit' | 'mode') => {
     const options = optionsFor(projection, field), group = projection?.choices.find(row => row.field === field);
     return <label className="booking-field">{label}<select value={value} disabled={working || !view.canPrepareQuote || options.length === 0}
@@ -231,6 +253,7 @@ export function ClientGoalPicker(props: {
   };
   return <section className="booking-card" aria-label={en ? 'Find rental items from your goal' : '按使用目标选品'} aria-busy={working}>
     <h3>{en ? 'What do you need to rent?' : '这次想租什么？'}</h3>
+    <ClientSceneCatalog scopeKey={scopeKey} tenantCode={props.tenantCode} serviceCode={props.serviceCode} english={en} />
     <p>{en ? 'Describe your plan, extract suggested conditions, then choose the rental details before requesting a quote.' : '说说使用计划，提取建议条件，再逐项选择租赁安排并确认报价。'}</p>
     {!view.hasLocator && <label className="full-field">{en ? 'Your rental goal' : '使用目标'}<textarea value={goalText} maxLength={4096} rows={3}
       disabled={working || !loggedIn} onChange={event => setGoal({ scopeKey, text: event.target.value })} /></label>}
@@ -241,9 +264,9 @@ export function ClientGoalPicker(props: {
       onClick={() => void refresh()}>{en ? 'Check original result' : '核对原结果'}</button>
     {!loggedIn && <p role="status">{en ? 'Sign in to extract a goal. You can browse and book through the ordinary pages.' : '登录后可提取目标；浏览商品和普通预约仍可继续。'}</p>}
     {working && <p role="status">{en ? 'Processing this request…' : '正在处理本次请求…'}</p>}
-    {view.status === 'unknown' && <p role="status">{en ? 'The original result needs checking. Use the original result button to continue checking.' : '原结果待核对，请使用“核对原结果”继续读取。'}</p>}
+    {!submitted && view.status === 'unknown' && <p role="status">{en ? 'The original result needs checking. Use the original result button to continue checking.' : '原结果待核对，请使用“核对原结果”继续读取。'}</p>}
     {view.status === 'running' && <p role="status">{en ? 'The original task is still running. Check its result later.' : '原任务仍在处理，可稍后核对结果。'}</p>}
-    {textField && question && <><label className="full-field">{textField.label}<textarea rows={3} maxLength={textField.maxLength} value={answerText}
+    {textField && question && <><label className="full-field">{displayText(textField.label)}<textarea rows={3} maxLength={textField.maxLength} value={answerText}
       disabled={working || !view.canSubmit} onChange={event => setAnswer({ reference: answerRef, text: event.target.value })} /></label>
       <button type="button" className="button button-outline button-block" disabled={working || !view.canSubmit || !answerText.trim()}
         onClick={() => void work(instance => instance.submitClarification(answerText))}>{en ? 'Save additional details' : '提交补充说明'}</button></>}
@@ -253,15 +276,15 @@ export function ClientGoalPicker(props: {
     {projection?.state === 'requires_input' && !view.selection && <>
       <h4>{en ? 'Suggested conditions' : '建议条件'}</h4>
       <p>{en ? 'These are unconfirmed suggestions. Product availability and charges are checked when you request the original quote.' : '以下为未确认的建议；可租性与费用在原报价流程核定。'}</p>
-      <dl>{projection.candidates?.conditions.start && <><dt>{en ? 'Suggested start' : '建议开始'}</dt><dd>{projection.candidates.conditions.start}</dd></>}
-        {projection.candidates?.conditions.end && <><dt>{en ? 'Suggested end' : '建议结束'}</dt><dd>{projection.candidates.conditions.end}</dd></>}
-        {projection.candidates?.conditions.locationName && <><dt>{en ? 'Suggested location' : '建议地点'}</dt><dd>{projection.candidates.conditions.locationName}</dd></>}
+      <dl>{projection.candidates?.conditions.start && <><dt>{en ? 'Suggested start' : '建议开始'}</dt><dd>{displayText(projection.candidates.conditions.start, 80)}</dd></>}
+        {projection.candidates?.conditions.end && <><dt>{en ? 'Suggested end' : '建议结束'}</dt><dd>{displayText(projection.candidates.conditions.end, 80)}</dd></>}
+        {projection.candidates?.conditions.locationName && <><dt>{en ? 'Suggested location' : '建议地点'}</dt><dd>{displayText(projection.candidates.conditions.locationName, 191)}</dd></>}
       </dl>
       {!items.length && <p role="status">{en ? 'No product condition was extracted. Continue through the ordinary catalog.' : '未提取到商品条件，请继续使用普通商品目录。'}</p>}
       {items.length > 0 && <form className="booking-form" onSubmit={event => { event.preventDefault(); prepare(); }}>
         <h4>{en ? 'Choose rental details' : '选择租赁条件'}</h4>
         {items.map((item, index) => <fieldset key={index} className="booking-form" disabled={working || !view.canPrepareQuote}>
-          <legend>{item.productName ?? (en ? `Item ${index + 1}` : `商品 ${index + 1}`)}</legend>
+          <legend>{displayText(item.productName ?? (en ? `Item ${index + 1}` : `商品 ${index + 1}`), 191)}</legend>
           {(item.quantity !== undefined || item.pricingUnit) && <p>{en ? 'Suggested' : '建议'}：{item.quantity ?? '—'} {item.pricingUnit ? unitLabel(item.pricingUnit, en) : ''}</p>}
           <div className="form-grid">{choose(`items.${index}.itemGroupId`, form.lines[index]?.item ?? '', en ? 'Product' : '商品', value => editLine(index, { item: value }))}
             {choose(`items.${index}.pricingUnit`, form.lines[index]?.unit ?? '', en ? 'Pricing unit' : '计费单位', value => editLine(index, { unit: value, usage: '' }), 'unit')}
@@ -271,7 +294,7 @@ export function ClientGoalPicker(props: {
               value={form.lines[index].usage} onChange={event => editLine(index, { usage: event.target.value })} /></label>}
           </div>
         </fieldset>)}
-        <p>{en ? 'Dates below use the merchant time zone' : '以下时间均按商户时区填写'}：{projection.context.timeZone}</p>
+        <p>{en ? 'Dates below use the merchant time zone' : '以下时间均按商户时区填写'}：{displayText(projection.context.timeZone, 128)}</p>
         <div className="form-grid">
           <label className="booking-field">{en ? 'Rental start' : '取用时间'}<input type="datetime-local" step={60} required value={form.start}
             disabled={working || !view.canPrepareQuote} onChange={event => edit({ start: event.target.value, startInstant: '' })} /></label>
@@ -288,7 +311,7 @@ export function ClientGoalPicker(props: {
           <label className="booking-field">{en ? 'Return location' : '归还地点'}<select required value={form.returnLocation}
             disabled={working || !view.canPrepareQuote || !form.location} onChange={event => edit({ returnLocation: event.target.value })}><option value="">{en ? 'Choose explicitly' : '请选择'}</option>
             {optionsFor(projection, 'returnLocationId').filter(option => view.sources?.fulfillment.allowDifferentReturnLocation || option.id === form.location)
-              .map(option => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
+              .map(option => <option key={option.id} value={option.id}>{candidateLabel(option, optionsFor(projection, 'returnLocationId'))}</option>)}</select></label>
           {choose('bookingIdentity', form.identity, en ? 'Booking identity' : '预约身份', value => edit({ identity: value, payer: '', notice: false }))}
           {form.identity && form.identity !== 'personal' && <label className="booking-field">{en ? 'Contract and payer' : '签约与付款主体'}<select required value={form.payer}
             disabled={working || !view.canPrepareQuote || !policy?.available} onChange={event => edit({ payer: event.target.value, notice: false })}>
@@ -296,11 +319,11 @@ export function ClientGoalPicker(props: {
             <option value="enterprise" disabled={!policy?.enterprisePaymentAllowed}>{en ? 'Enterprise contract and payment' : '企业签约付款'}</option></select></label>}
           {delivery && <label className="booking-field">{en ? 'Your saved delivery address' : '本人配送地址'}<select value={form.address} required
             disabled={working || !view.canPrepareQuote || !view.sources?.addresses?.length} onChange={event => edit({ address: event.target.value })}>
-            <option value="">{en ? 'Choose an address' : '请选择地址'}</option>{view.sources?.addresses?.map(address => <option key={address.id} value={address.id}>{address.label}</option>)}</select>
+            <option value="">{en ? 'Choose an address' : '请选择地址'}</option>{view.sources?.addresses?.map(address => <option key={address.id} value={address.id}>{displayText(address.label)}</option>)}</select>
             {!view.sources?.addresses?.length && <small>{en ? 'No address is available. Manage addresses through the ordinary account page.' : '暂无可用地址，请到原账户页面管理地址。'}</small>}</label>}
         </div>
         {form.identity && form.identity !== 'personal' && <>
-          {policy?.noticeText && <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{policy.noticeText}</p>}
+          {policy?.noticeText && <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{displayText(policy.noticeText, 20000)}</p>}
           <label className="login-agree"><input type="checkbox" checked={form.notice} disabled={working || !view.canPrepareQuote || !policy?.available || !policy.noticeVersion || !policy.noticeText}
             onChange={event => edit({ notice: event.target.checked })} />{en ? 'I have reviewed and accept the current enterprise notice.' : '我已阅读并接受当前企业订单告知。'}</label>
           {(!policy?.available || !policy.noticeVersion || !policy.noticeText) && <p role="status">{en ? 'This enterprise option is currently unavailable. Choose a different available identity.' : '当前企业身份不可用，请选择其他可用预约身份。'}</p>}
@@ -317,17 +340,21 @@ export function ClientGoalPicker(props: {
         <dt>{en ? 'Booking identity' : '预约身份'}</dt><dd>{view.selection.bookingIdentity?.bookingIdentity === 'personal' ? (en ? 'Personal' : '个人')
           : `${selectedLabel('bookingIdentity', view.selection.bookingIdentity?.corporateCustomerId)} · ${view.selection.bookingIdentity?.enterpriseContractAndPayer ? (en ? 'Enterprise payment' : '企业付款') : (en ? 'Personal payment' : '个人付款')}`}</dd></dl>
     </>}
-    {view.canConfirmQuote && <><p>{en ? 'Parameters are prepared. Confirm separately to obtain the original quote.' : '参数已准备，请另行确认取得原报价。'}</p>
+    {!submitted && view.status === 'prepared' && <QuoteParameterReview review={view.parameterReview ?? null} english={en} />}
+    {!submitted && view.canConfirmQuote && <><p>{en ? 'Parameters are prepared. Confirm separately to obtain the original quote.' : '参数已准备，请另行确认取得原报价。'}</p>
       <button type="button" className="button button-dark button-block" disabled={working} onClick={() => void work(instance => instance.confirmQuote())}>{en ? 'Confirm parameters and get quote' : '确认参数并取得报价'}</button></>}
-    {view.quote && <><h4>{en ? 'Original quote' : '原报价'}</h4><dl><dt>{en ? 'Payable' : '应付'}</dt><dd>{money(view.quote.payableAmount)}</dd>
-      <dt>{en ? 'Deposit' : '押金'}</dt><dd>{money(view.quote.depositAmount)}</dd><dt>{en ? 'Preauthorization' : '预授权'}</dt><dd>{money(view.quote.preAuthAmount)}</dd></dl>
-      <p>{en ? 'No order has been submitted. Continue on the original booking page.' : '尚未提交订单，请在原预约页继续办理。'}</p></>}
-    {view.canSelect && (!bookingView || bookingView.canPrepare || bookingView.canSave) && <button type="button" className="button button-dark button-block"
+    <ClientOriginalQuoteFacts quote={view.quote} observedAt={view.quoteObservedAt} english={en} />
+    {!submitted && view.canSelect && (!bookingView || bookingView.canPrepare || bookingView.canSave) && <button type="button" className="button button-dark button-block"
       disabled={working || Boolean(bookingView?.readOnly)} onClick={() => void generateBooking()}>{en ? 'Generate reservation draft from this quote' : '按原报价生成预约草稿'}</button>}
-    {bookingView?.draft && <p>{en ? 'Reservation draft saved. Review it before continuing.' : '预约草稿已保存，请核对后明确继续。'}</p>}
-    {bookingView && !bookingView.readOnly && (bookingView.canChoose || bookingView.canHandoff || bookingView.handoff) && <button type="button" className="button button-dark button-block"
+    {submitted && <p role="status" aria-live="polite">{en ? 'The original booking request was submitted. Check the original business result; payment, fulfillment and resource status require their original receipts.' : '原预约请求已提交，业务结果待核对；付款、履约和资源状态以原业务收据为准。'}</p>}
+    {notSubmitted && <p role="status">{en ? 'The original reservation draft has not submitted a booking request. Order and resource status come from the original business receipts.' : '原预约草稿尚未提交预约请求；订单和资源状态以原业务收据为准。'}</p>}
+    {bookingView?.draft && !submitted && !notSubmitted && !checkingBooking && <p role="status">{en ? 'The original draft cannot currently be submitted. Check its original record or contact the merchant.' : '原草稿当前不可用于提交，请核对原记录或联系商户。'}</p>}
+    {bookingView?.draft && <p style={{ overflowWrap: 'anywhere' }}>{en ? 'Original draft / revision' : '原草稿／修订'}：{bookingView.draft.bookingDraftId} / {bookingView.draft.revision}</p>}
+    <BookingDraftReview draft={bookingView?.draft ?? null} english={en}
+      locations={reviewLocations} />
+    {!submitted && bookingView && !bookingView.readOnly && (bookingView.canChoose || bookingView.canHandoff || bookingView.handoff) && <button type="button" className="button button-dark button-block"
       disabled={working} onClick={() => void continueBooking()}>{en ? 'Confirm draft and continue to original booking' : '确认草稿并前往原预约页'}</button>}
-    {bookingView?.status === 'unknown' && <p role="status">{en ? 'The original reservation operation needs checking. No draft is created again.' : '原预约操作待核对，请读取原结果，不重复生成草稿。'}</p>}
+    {!submitted && checkingBooking && <p role="status" aria-live="polite">{en ? 'The original reservation operation needs checking. No draft is created again.' : '原预约操作待核对，请读取原结果，不重复生成草稿。'}</p>}
     {bookingView?.readOnly && bookingView.observed && <p role="status">{en ? 'Original reservation recorded; it is available only for checking.' : '原预约操作已记录，当前仅供核对。'}</p>}
     {view.canStartNew && <button type="button" className="button button-outline button-block" disabled={working || Boolean(bookingView && !bookingView.observed)}
       onClick={() => void newGoal()}>{en ? 'Start a new rental goal' : '填写新的使用目标'}</button>}

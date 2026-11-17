@@ -35,8 +35,8 @@ function words(children: ReactNode, streaming: boolean) {
   return Children.map(children, (child, childIndex) => typeof child === 'string' && streaming
     ? child.split(/(\s+)/).map((word, index) => <span className="chat-word" key={`${childIndex}-${index}`}>{word}</span>) : child);
 }
-export function ChatMarkdown({ content, sources = [], streaming = false, onCopy }: { content: string; sources?: ChatSource[]; streaming?: boolean; onCopy: (value: string) => void }) {
-  return <div className={`chat-markdown ${streaming ? 'is-streaming' : ''}`}><Markdown remarkPlugins={[citationPlugin]} components={{
+export function ChatMarkdown({ content, sources = [], streaming = false, onCopy, visibleText = false }: { content: string; sources?: ChatSource[]; streaming?: boolean; onCopy: (value: string) => void; visibleText?: boolean }) {
+  return <div className={`chat-markdown ${streaming ? 'is-streaming' : ''}`} data-ai-visible-text={visibleText || undefined}><Markdown remarkPlugins={[citationPlugin]} components={{
     p: ({ children }) => <p>{words(children, streaming)}</p>,
     li: ({ children }) => <li>{words(children, streaming)}</li>,
     a: ({ href, children }) => {

@@ -1,4 +1,7 @@
 import { AiTaskReadPolicyController } from './modules/ai-native/task-read-policy.application';
+import { AiCategoryProposalController } from './modules/ai-native/category-assist/category-proposal-http.application';
+import { AI_NATIVE_CATEGORY_PROPOSAL_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+import { AI_NATIVE_BODY_DATABASE_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AutomationExplanationController } from './modules/ai-native/automation/automation-explanation.controller';
 import { AI_NATIVE_AUTOMATION_EXPLANATION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { TaskOpeningProposalController } from './modules/ai-native/task-opening-proposal.controller';
@@ -181,7 +184,15 @@ import { AiSettingsChangeController, AiSettingsTaskCreationController, AiSetting
   AiSettingsTaskController, AiSettingsTaskReadController } from './modules/ai-native/scenes/settings-task.controller';
 import { OperatorAutomationController, StaffAutomationController } from './modules/ai-native/automation/human-automation-request.controller';
 import { HumanAutomationPolicyRequestController } from './modules/ai-native/automation/human-automation-policy-request.controller';
-import { AiRetentionController } from "./modules/ai-native/privacy/retention.controller";
+import { AiRetentionController, AiPlatformRetentionController } from "./modules/ai-native/privacy/retention.controller";
+import { OperatorEntrySceneCatalogController, StaffEntrySceneCatalogController,
+  WebsiteEntrySceneCatalogController, WechatEntrySceneCatalogController } from './modules/ai-native/scenes/entry-scene-catalog.controller';
+import { AI_NATIVE_SCENE_CATALOG_PROVIDERS } from './modules/ai-native/ai-native-application.providers';
+import { AI_NATIVE_ENTRY_ACTION_PROVIDERS } from './modules/ai-native/ai-native-application.providers';
+import { OperatorRegisteredEntryActionController, StaffRegisteredEntryActionController,
+  WebsiteRegisteredEntryActionController, WechatRegisteredEntryActionController,
+  OperatorEntryNotificationDraftController } from './modules/ai-native/scenes/registered-entry-action.controller';
+import { AI_NATIVE_PLATFORM_RETENTION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AiCategoryDraftController } from './modules/ai-native/category-assist/category-draft.application';
 import { AI_NATIVE_CATEGORY_DRAFT_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AI_NATIVE_STAFF_RECOGNITION_PROVIDERS } from './modules/ai-native/ai-native-application.providers';
@@ -216,6 +227,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     StaffInspectionTaskPolicyController,
     ClientTaskPolicyController,
     AiCategoryDraftController,
+    AiCategoryProposalController,
     AiConversationController,
     TextCapabilityProbeController,
     AiInputCountingController,
@@ -257,6 +269,16 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     WebsiteClientPublicController,
     WechatClientPublicController,
     AiRetentionController,
+    AiPlatformRetentionController,
+    OperatorEntrySceneCatalogController,
+    StaffEntrySceneCatalogController,
+    WebsiteEntrySceneCatalogController,
+    WechatEntrySceneCatalogController,
+    OperatorRegisteredEntryActionController,
+    StaffRegisteredEntryActionController,
+    WebsiteRegisteredEntryActionController,
+    WechatRegisteredEntryActionController,
+    OperatorEntryNotificationDraftController,
     AiOriginalSceneObservationController,
     AiOriginalQuoteModelExecutionController,
     AiOriginalOpeningModelExecutionController,
@@ -301,13 +323,17 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     PlatformDemoRequestController
   ],
   providers: [
+    AI_NATIVE_BODY_DATABASE_PROVIDER,
     AI_NATIVE_AUTOMATION_EXPLANATION_PROVIDER,
     AI_NATIVE_TASK_OPENING_PROPOSAL_PROVIDER,
     AiCreditService,
     ...AI_NATIVE_STAFF_RECOGNITION_PROVIDERS,
     AI_NATIVE_CLIENT_POLICY_PROVIDER,
     AI_NATIVE_CATEGORY_DRAFT_PROVIDER,
+    AI_NATIVE_CATEGORY_PROPOSAL_PROVIDER,
     ...AI_NATIVE_RUNTIME_CONFIGURATION_PROVIDERS,
+    ...AI_NATIVE_SCENE_CATALOG_PROVIDERS,
+    ...AI_NATIVE_ENTRY_ACTION_PROVIDERS,
     AI_NATIVE_CONVERSATION_PROVIDER,
     AI_NATIVE_MEMBER_NAME_PROVIDER,
     ApiAuthGuard,
@@ -345,6 +371,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     ...AI_NATIVE_CLIENT_ENTRY_PROVIDERS,
     ...AI_NATIVE_CLIENT_PUBLIC_PROVIDERS,
     AI_NATIVE_RETENTION_PROVIDER,
+    AI_NATIVE_PLATFORM_RETENTION_PROVIDER,
     AI_NATIVE_ORIGINAL_OBSERVATION_PROVIDER,
     AI_NATIVE_ORIGINAL_READ_POLICY_PROVIDER,
     AuthService,

@@ -4,6 +4,7 @@
 import {
   aiClientHostCapabilitiesSchema, aiClientQuoteConfirmationRequestSchema, aiClientQuotePreparationRequestSchema,
   aiClientQuotePreparationResponseSchema, aiClientQuotePreparationReadResponseSchema, aiClientQuoteResultReadResponseSchema,
+  aiClientQuoteParameterReviewSchema,
   type AiClientHostCapabilities, type AiClientQuotePreparationRequest, type AiClientQuoteConfirmationRequest,
   type AiClientQuotePreparationResponse, type AiClientQuoteFacts, type ClientCreateQuoteRequest,
 } from '@rental-os/shared';
@@ -27,6 +28,8 @@ export interface ClientQuoteView {
   status: 'closed' | 'opening' | 'ready' | 'preparing' | 'prepared' | 'confirming' | 'checking' | 'quoted' | 'unknown' | 'unavailable' | 'invalidated';
   canPrepare: boolean; canConfirm: boolean; canRead: boolean; pendingCore: boolean; matchesInput: boolean;
   material: AiClientQuotePreparationResponse | null; quote: AiClientQuoteFacts | null;
+  /** This original response's server time; display only, never persisted. */
+  quoteObservedAt?: string | null;
   readOnly?: boolean;
 }
 interface Locator {
@@ -42,6 +45,7 @@ const localId = (value: unknown): value is string => typeof value === 'string' &
 const localDate = (value: unknown): value is string => typeof value === 'string'
   && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u.test(value) && Number.isFinite(Date.parse(value));
 const optionalLocal = (record: Record<string, unknown>, keys: string[], validate: (value: unknown) => boolean) => keys.every(key => record[key] === undefined || validate(record[key]));
+const pricingUnitSchema = aiClientQuoteParameterReviewSchema.innerType().shape.lines.element.shape.pricingUnit;
 const parseLocator = (value: unknown): Locator => {
   const row = localObject(value, ['version','owner','request','material','phase']);
   if (row.version !== 'client-quote-operation-1' || typeof row.owner !== 'string' || row.owner.length > 1024
@@ -65,8 +69,9 @@ export function clientQuoteSelectedInput(value: ClientCreateQuoteRequest): Clien
     if (identity.bookingIdentity !== 'personal' || (identity.enterpriseContractAndPayer !== undefined && identity.enterpriseContractAndPayer !== false)) throw Error('quote_parameters_unavailable');
   }
   for (const value of row.lines) {
-    const line = localObject(value, ['itemGroupId','pricingGroupId','quantity','usageQuantity','note']);
-    if (!localId(line.itemGroupId) || !optionalLocal(line, ['pricingGroupId'], localId) || typeof line.quantity !== 'number'
+    const line = localObject(value, ['itemGroupId','pricingGroupId','quantity','pricingUnit','usageQuantity','note']);
+    if (!localId(line.itemGroupId) || !optionalLocal(line, ['pricingGroupId'], localId)
+      || line.pricingUnit !== undefined && !pricingUnitSchema.safeParse(line.pricingUnit).success || typeof line.quantity !== 'number'
       || !Number.isFinite(line.quantity) || line.quantity <= 0 || (line.note !== undefined && line.note !== '')
       || (line.usageQuantity !== undefined && (typeof line.usageQuantity !== 'number' || !Number.isFinite(line.usageQuantity) || line.usageQuantity < 0))) throw Error('quote_parameters_unavailable');
   }
@@ -91,6 +96,36 @@ const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.st
 const emptyView = (): ClientQuoteView => ({ status: 'closed', canPrepare: false, canConfirm: false, canRead: false,
   pendingCore: false, matchesInput: true, material: null, quote: null });
 
+/** One local deadline withdraws a live observation. It never polls or renews a
+ * server grant, and a delayed/adjusted clock can only shorten its local use. */
+function createClientQuoteExpiry(now: () => number, withdraw: () => void) {
+  let timer: ReturnType<typeof setTimeout> | undefined, deadline: number | undefined;
+  const clear = () => {
+    if (timer !== undefined) clearTimeout(timer);
+    timer = undefined; deadline = undefined;
+  };
+  return {
+    clear,
+    schedule(values: Array<string | null | undefined>): boolean {
+      const dates = values.filter((value): value is string => value !== undefined && value !== null).map(value => Date.parse(value));
+      const current = now();
+      if (!Number.isFinite(current) || dates.some(value => !Number.isFinite(value))) { clear(); return false; }
+      if (!dates.length) { clear(); return true; }
+      const next = Math.min(...dates);
+      if (next <= current) { clear(); return false; }
+      if (deadline === next && timer !== undefined) return true;
+      clear(); deadline = next;
+      timer = setTimeout(() => { timer = undefined; deadline = undefined; withdraw(); }, Math.min(next - current, 300000));
+      return true;
+    }
+  };
+}
+
+const preparationBasis = (value: AiClientQuotePreparationResponse) => {
+  const { replayed: _replayed, parameterReview: _review, ...basis } = value;
+  return basis;
+};
+
 export function createClientQuoteSession(input: {
   context: ClientQuoteContext; api: ClientQuoteApi; readHost(): Promise<unknown>; now(): number; newKey(): string;
   selection(): ClientCreateQuoteRequest;
@@ -99,20 +134,65 @@ export function createClientQuoteSession(input: {
 }) {
   const owner = clientQuoteOwner(input.context);
   let closed = false, busy = false, locator: Locator | null = null, host: AiClientHostCapabilities | null = null;
+  let serverMaterial: AiClientQuotePreparationResponse | null = null, locallyExpired = false;
+  let quoteObservedAt: string | null = null;
   let view = emptyView();
-  const current = () => !closed && input.context.current();
+  const current = () => { try { return !closed && input.context.current(); } catch { return false; } };
   const matches = () => {
     try { return !locator || same(locator.request.input, clientQuoteSelectedInput(input.selection())); } catch { return false; }
   };
+  const withdraw = () => { locallyExpired = true; serverMaterial = null; expiry.clear(); };
+  const expiry = createClientQuoteExpiry(input.now, () => { withdraw(); emit(view.status, view.quote); });
+  const updateExpiry = () => {
+    if (!current()) { withdraw(); return; }
+    if (!locallyExpired && !expiry.schedule([host?.expiresAt,
+      locator?.phase === 'quote_observed' ? undefined : locator?.material?.expiresAt])) withdraw();
+  };
+  const assertReference = () => {
+    if (!current() || locator && !same(input.storage.read(), locator)) throw Error('quote_reference_changed');
+  };
+  const checkedMaterial = (value: unknown) => {
+    const material = aiClientQuotePreparationResponseSchema.parse(value), selected = locator?.request.input;
+    if (!selected) throw Error('quote_source_changed');
+    const review = material.parameterReview;
+    if (review && (review.lines.length !== selected.lines.length || review.lines.some((line, index) => {
+      const original = selected.lines[index];
+      return line.lineIndex !== index || line.itemGroupId !== original.itemGroupId || line.pricingGroupId !== original.pricingGroupId
+        || line.quantity !== original.quantity || (original.pricingUnit !== undefined
+          ? line.source !== 'user_explicit' || line.basis !== 'user_input' || line.pricingUnit !== original.pricingUnit
+          : line.source !== 'server_default' || line.basis !== (original.pricingGroupId ? 'pricing_group_default' : 'business_settings_default'));
+    }))) throw Error('quote_parameter_review_changed');
+    return material;
+  };
+  const readPreparation = async () => {
+    assertReference();
+    const observed = aiClientQuotePreparationReadResponseSchema.parse(await input.api.readPreparation(copy(locator!.request)));
+    assertReference();
+    if (observed.state === 'unknown') {
+      if (observed.operationKey !== locator!.request.operationKey) throw Error('quote_source_changed');
+      return null;
+    }
+    const material = checkedMaterial(copy({ ...observed, state: undefined, retryable: undefined, execution: undefined, replayed: true }));
+    if (locator!.material && (!same(preparationBasis(locator!.material), preparationBasis(material))
+      || locator!.material.parameterReview && !same(locator!.material.parameterReview, material.parameterReview))) throw Error('quote_source_changed');
+    return material;
+  };
   const emit = (status: ClientQuoteView['status'], quote: AiClientQuoteFacts | null = null) => {
+    updateExpiry();
     if (!current()) return;
-    const writable = Boolean(host?.enabled && host.policy.allowCreate && host.capabilities.bookingDrafts && Date.parse(host.expiresAt) > input.now());
-    const matchesInput = matches(), material = locator?.material ?? null;
+    const writable = !locallyExpired && Boolean(host?.enabled && host.policy.allowCreate && host.capabilities.bookingDrafts && Date.parse(host.expiresAt) > input.now());
+    // A restored packet is a locator. Only a current server response supplies
+    // the review shown before a new human confirmation.
+    const material = locallyExpired ? null : serverMaterial ?? (locator?.material
+      ? { ...locator.material, parameterReview: undefined } : null);
+    const reviewed = Boolean(serverMaterial?.parameterReview);
+    const matchesInput = matches();
     const pendingCore = locator?.phase === 'confirmation_pending' || (locator?.phase === 'quote_observed' && status !== 'quoted');
-    view = { status, material, quote, matchesInput, pendingCore, readOnly: !writable,
+    view = { status, material, quote, quoteObservedAt: quote ? quoteObservedAt : null, matchesInput, pendingCore,
+      readOnly: !writable || locator?.phase === 'prepared' && !reviewed,
       canPrepare: writable && !busy && ((!locator && status === 'ready') || (!matchesInput && status === 'prepared') || status === 'quoted'),
       canConfirm: writable && !busy && matchesInput && status === 'prepared' && locator?.phase === 'prepared'
-        && Boolean(material && Date.parse(material.expiresAt) > input.now()),
+        && reviewed && Boolean(material && Date.parse(material.expiresAt) > input.now()),
       canRead: !busy && Boolean(locator && host?.policy.allowRead), };
     input.changed(copy(view));
   };
@@ -137,32 +217,42 @@ export function createClientQuoteSession(input: {
   };
   const recheck = async (purpose: 'read' | 'write' = 'read') => {
     host = validateHost(await input.readHost());
+    locallyExpired = false;
     if (purpose === 'write' && (!host.enabled || !host.policy.allowCreate || !host.capabilities.bookingDrafts)) throw Error('quote_write_unavailable');
   };
   const observe = (value: unknown) => {
     const result = aiClientQuoteResultReadResponseSchema.parse(value), material = locator?.material;
     if (!material || result.source.materialRef !== material.materialRef || result.source.materialHash !== material.materialHash) throw Error('quote_source_changed');
     if (result.state === 'observed') {
+      quoteObservedAt = result.observedAt ?? null;
       persist({ ...locator!, phase: 'quote_observed' });
       return result.quote;
     }
+    quoteObservedAt = null;
     return null;
   };
   const reference = () => aiClientQuoteConfirmationRequestSchema.parse({ materialRef: locator?.material?.materialRef,
     expectedMaterialHash: locator?.material?.materialHash });
   const operate = async (status: ClientQuoteView['status'], action: () => Promise<{ status: ClientQuoteView['status']; quote?: AiClientQuoteFacts | null }>, purpose: 'read' | 'write' = 'read') => {
     if (busy || !current()) return;
-    busy = true; emit(status);
+    quoteObservedAt = null; busy = true; emit(status);
     let result: { status: ClientQuoteView['status']; quote?: AiClientQuoteFacts | null } = { status: 'unavailable' };
-    try { await recheck(purpose); result = await action(); await recheck('read'); }
-    catch { result = { status: locator && ['preparation_pending', 'confirmation_pending'].includes(locator.phase) ? 'unknown' : 'unavailable' }; }
+    try { await recheck(purpose); result = await action(); await recheck('read'); assertReference(); }
+    catch { serverMaterial = null; quoteObservedAt = null;
+      result = { status: locator && ['preparation_pending', 'confirmation_pending'].includes(locator.phase) ? 'unknown' : 'unavailable' }; }
     finally { busy = false; emit(result.status, result.quote ?? null); }
   };
   return Object.freeze({
-    snapshot: () => copy(view),
+    snapshot: () => {
+      if (!current()) { withdraw(); return { ...emptyView(), status: 'invalidated' as const }; }
+      const wasExpired = locallyExpired; updateExpiry();
+      if (!wasExpired && locallyExpired) emit(view.status, view.quote);
+      return copy(view);
+    },
     originalInput: () => locator ? copy(locator.request.input) : null,
     async open() {
       if (closed || busy || !current()) return;
+      serverMaterial = null; quoteObservedAt = null;
       busy = true; emit('opening');
       let status: ClientQuoteView['status'] = 'unavailable';
       try {
@@ -187,16 +277,26 @@ export function createClientQuoteSession(input: {
         const request = { operationKey: input.newKey(), input: selection };
         aiClientQuotePreparationRequestSchema.parse(request);
         persist({ version: 'client-quote-operation-1', owner, request, material: null, phase: 'preparation_pending' });
-        const material = aiClientQuotePreparationResponseSchema.parse(await input.api.prepare(copy(request)));
+        const material = checkedMaterial(await input.api.prepare(copy(request)));
         if (!current() || !same(selection, clientQuoteSelectedInput(input.selection()))) throw Error('quote_input_changed');
         persist({ ...locator!, material, phase: 'prepared' });
+        serverMaterial = material;
         return { status: 'prepared' };
       }, 'write');
     },
     async confirm() {
+      updateExpiry();
+      if (locallyExpired) { emit(view.status, view.quote); return; }
       if (!view.canConfirm || busy || !current()) return;
+      const reviewed = serverMaterial;
       return operate('confirming', async () => {
-        if (!matches() || !locator?.material || Date.parse(locator.material.expiresAt) <= input.now()) throw Error('quote_input_changed');
+        if (!matches() || !reviewed?.parameterReview || !locator?.material) throw Error('quote_input_changed');
+        const material = await readPreparation();
+        if (!material?.parameterReview || !same(preparationBasis(reviewed), preparationBasis(material))
+          || !same(reviewed.parameterReview, material.parameterReview)) throw Error('quote_parameter_review_changed');
+        updateExpiry();
+        if (locallyExpired || !current() || !matches() || Date.parse(material.expiresAt) <= input.now()) throw Error('quote_input_changed');
+        serverMaterial = material;
         persist({ ...locator, phase: 'confirmation_pending' });
         const result = await input.api.confirm(reference());
         if (!current() || !matches()) throw Error('quote_input_changed');
@@ -211,21 +311,16 @@ export function createClientQuoteSession(input: {
           const quote = observe(await input.api.readOriginal(reference()));
           return { status: quote ? 'quoted' : 'unknown', quote };
         }
-        const observed = aiClientQuotePreparationReadResponseSchema.parse(await input.api.readPreparation(copy(locator!.request)));
-        if (!current()) throw Error('quote_context_changed');
-        if (observed.state === 'unknown') {
-          if (observed.operationKey !== locator!.request.operationKey) throw Error('quote_source_changed');
-          return { status: 'unknown' };
-        }
-        const material = aiClientQuotePreparationResponseSchema.parse(copy({ ...observed, state: undefined,
-          retryable: undefined, execution: undefined, replayed: true }));
-        if (locator!.material && !same({ ...locator!.material, replayed: true }, material)) throw Error('quote_source_changed');
+        const material = await readPreparation();
+        if (!material) { serverMaterial = null; return { status: 'unknown' }; }
         persist({ ...locator!, material, phase: 'prepared' });
+        serverMaterial = material;
         return { status: 'prepared' };
       });
     },
     dispose() {
-      closed = true; host = null; locator = null; view = { ...emptyView(), status: 'invalidated' };
+      closed = true; expiry.clear(); host = null; locator = null; serverMaterial = null; quoteObservedAt = null;
+      view = { ...emptyView(), status: 'invalidated' };
       input.changed(copy(view));
     },
   });
@@ -241,7 +336,7 @@ export interface ClientQuoteBookingView {
   status: 'idle' | 'checking' | 'material_ready' | 'draft_ready' | 'selected' | 'handoff_ready' | 'observed' | 'unknown' | 'unavailable' | 'invalidated';
   canPrepare: boolean; canSave: boolean; canChoose: boolean; canHandoff: boolean; canRead: boolean;
   draft: AiBookingDraft | null; handoff: AiBookingHandoff | null;
-  readOnly?: boolean; observed?: boolean; operation?: AiBookingOperationReadResponse | null;
+  readOnly?: boolean; observed?: boolean; operation?: AiBookingOperationReadResponse | null; pendingCore?: boolean;
 }
 export interface ClientQuoteBookingApi {
   prepareBooking(value: AiClientQuoteBookingRequest): Promise<unknown>;
@@ -301,8 +396,9 @@ export function createClientQuoteBookingSession(input: {
   let closed = false, busy = false, invalidCache = false, saved: BookingLocator | null = null, host: AiClientHostCapabilities | null = null;
   let action: AiEntryActionDraft | null = null, draft: AiBookingDraft | null = null, handoff: AiBookingHandoff | null = null;
   let observed = false, detailUnavailable = false, operation: AiBookingOperationReadResponse | null = null;
+  let locallyExpired = false, pendingCore = true;
   let view: ClientQuoteBookingView = { status: 'idle', canPrepare: false, canSave: false, canChoose: false, canHandoff: false,
-    canRead: false, draft: null, handoff: null, readOnly: true, observed: false, operation: null };
+    canRead: false, draft: null, handoff: null, readOnly: true, observed: false, operation: null, pendingCore: true };
   const current = () => {
     try { return !closed && input.context.current() && same(initialSelection, aiBookingSelectionSchema.parse(input.selection())); }
     catch { return false; }
@@ -312,10 +408,24 @@ export function createClientQuoteBookingSession(input: {
   const sourceUsable = () => Boolean(saved?.material && Date.parse(saved.material.expiresAt) > input.now());
   const draftUsable = () => Boolean(draft && Date.parse(draft.expiresAt) > input.now()
     && ['draft_created','user_selected','handed_to_booking_page'].includes(draft.state));
+  const withdraw = () => {
+    locallyExpired = true; pendingCore = true; detailUnavailable = true; action = null; draft = null; handoff = null; expiry.clear();
+  };
+  const expiry = createClientQuoteExpiry(input.now, () => { withdraw(); emit(view.status); });
+  const updateExpiry = () => {
+    if (!current()) { withdraw(); return; }
+    if (!locallyExpired && !expiry.schedule([host?.expiresAt, saved?.material?.expiresAt,
+      draft?.expiresAt, draft?.material.quote.expiresAt, action?.expiresAt, handoff?.expiresAt])) withdraw();
+  };
+  const assertReference = () => {
+    if (!current() || saved && !same(input.storage.read(), saved)) throw Error('booking_reference_changed');
+  };
   const emit = (status: ClientQuoteBookingView['status']) => {
+    updateExpiry();
     if (!current()) return;
-    const writable = writeNow() && !detailUnavailable;
-    view = { status, draft, handoff, observed, operation, readOnly: !writable || Boolean(saved && !sourceUsable())
+    if (locallyExpired) { action = null; draft = null; handoff = null; pendingCore = true; }
+    const writable = !locallyExpired && writeNow() && !detailUnavailable;
+    view = { status, draft, handoff, observed, operation, pendingCore, readOnly: busy || !writable || Boolean(saved && !sourceUsable())
       || Boolean(draft && !draftUsable()) || Boolean(handoff && Date.parse(handoff.expiresAt) <= input.now()),
       canPrepare: !busy && writable && !saved && !invalidCache && status === 'idle',
       canSave: !busy && writable && sourceUsable() && status === 'material_ready' && !saved?.createKey,
@@ -341,26 +451,52 @@ export function createClientQuoteBookingSession(input: {
       || next.tenantCode !== input.context.tenantCode || next.serviceCode !== input.context.serviceCode
       || Date.parse(next.expiresAt) <= input.now() || (host && !same(host.scope, next.scope))) throw Error('booking_host_changed');
     host = next;
+    locallyExpired = false;
     if (purpose === 'write' && !writeNow()) throw Error('booking_write_unavailable');
   };
+  const hostBasis = () => host && { customerId: host.customerId, customerType: host.customerType,
+    tenantCode: host.tenantCode, serviceCode: host.serviceCode, surface: host.surface, scope: host.scope,
+    releaseRevision: host.releaseRevision, policy: host.policy, capabilities: host.capabilities };
   const checkAction = (value: AiEntryActionDraft, code: 'CREATE_BOOKING_DRAFT' | 'OPEN_BOOKING') => {
     const result = aiEntryActionSchema.parse(value);
     if (!saved?.material || !host || result.actionCode !== code || result.surface !== input.context.surface || !same(result.scope, host.scope)
       || result.associations.materialRef !== saved.material.materialRef || result.associations.quoteId !== initialSelection.quoteId
+      || result.inputFingerprint !== saved.material.inputHash
       || Date.parse(result.expiresAt) <= input.now() || (code === 'CREATE_BOOKING_DRAFT'
-        ? result.resource.id !== initialSelection.quoteId || result.resource.resourceVersion !== saved.material.materialHash || result.inputFingerprint !== saved.material.inputHash
+        ? result.resource.id !== initialSelection.quoteId || result.resource.resourceVersion !== saved.material.materialHash
         : result.resource.id !== saved.draftId || result.associations.bookingDraftId !== saved.draftId)) throw Error('booking_action_changed');
     return copy(result);
   };
   const checkDraft = (value: AiBookingDraft, writing = false) => {
     const result = aiBookingDraftSchema.parse(value);
-    // This bridge first resolves the original Core choice, then persists that
-    // normalized choice as its input. Only an omitted return location may take
-    // the bound material value; every explicit choice must remain unchanged.
+    // The journal retains human input; the bound material retains Core facts.
+    // Only an omitted field with its original Core source can be filled. An
+    // aggregate legacy label cannot confer missing service-field provenance.
+    const suppliedServices = initialSelection.services ?? [], actualServices = result.material.selection.services ?? [];
+    if (suppliedServices.length !== actualServices.length
+      || new Set(suppliedServices.map(row => row.serviceId)).size !== suppliedServices.length
+      || new Set(actualServices.map(row => row.serviceId)).size !== actualServices.length) throw Error('booking_draft_changed');
+    const expectedServices = result.material.selection.services?.map(actual => {
+      const matches = suppliedServices.filter(row => row.serviceId === actual.serviceId);
+      if (matches.length !== 1 || matches[0].quantity !== actual.quantity) throw Error('booking_draft_changed');
+      const chosen = matches[0], sources = result.material.serviceSources?.filter(row => row.serviceId === actual.serviceId);
+      if (sources && sources.length !== 1) throw Error('booking_draft_changed');
+      const fields = sources?.[0].fields;
+      const expected = { ...chosen };
+      for (const field of ['scheduledStartAt', 'scheduledEndAt', 'serviceLocationId'] as const) {
+        if (chosen[field] === undefined && actual[field] !== undefined) {
+          if (fields?.[field] !== 'core_normalized') throw Error('booking_draft_changed');
+          expected[field] = actual[field];
+        } else if (fields && fields[field] !== 'user_explicit') throw Error('booking_draft_changed');
+      }
+      return expected;
+    });
+    const originalReturn = initialSelection.returnLocationId === undefined
+      && (result.material.sources.returnLocationId === 'core_normalized'
+        || !writing && result.material.serviceSources === undefined && result.material.sources.returnLocationId === 'user_explicit');
     const expectedSelection = aiBookingSelectionSchema.parse({ ...initialSelection,
-      ...(initialSelection.returnLocationId === undefined
-        && ['user_explicit', 'core_normalized'].includes(result.material.sources.returnLocationId)
-        ? { returnLocationId: result.material.selection.returnLocationId } : {}) });
+      ...(originalReturn ? { returnLocationId: result.material.selection.returnLocationId } : {}),
+      ...(initialSelection.services !== undefined && expectedServices !== undefined ? { services: expectedServices } : {}) });
     if (!saved?.material || !host || result.surface !== input.context.surface || !same(result.scope, host.scope)
       || result.materialRef !== saved.material.materialRef || result.inputFingerprint !== saved.material.inputHash
       || !same(aiBookingSelectionSchema.parse(result.material.selection), expectedSelection)
@@ -372,27 +508,55 @@ export function createClientQuoteBookingSession(input: {
   const checkHandoff = (value: AiBookingHandoff, writing = false) => {
     const result = aiBookingHandoffSchema.parse(value);
     if (!host || !saved?.draftId || !draft || result.surface !== input.context.surface || !same(result.scope, host.scope)
-      || result.bookingDraftId !== saved.draftId
+      || result.bookingDraftId !== saved.draftId || result.revision !== draft.revision + (writing ? 1 : 0)
+      || saved.handoffRef !== null && result.handoffRef !== saved.handoffRef
       || !same(aiBookingSelectionSchema.parse(result.fields), aiBookingSelectionSchema.parse(draft.material.selection))
-      || (writing && Date.parse(result.expiresAt) <= input.now())) throw Error('booking_handoff_changed');
+      || Date.parse(result.expiresAt) <= input.now()
+      || writing && !draftUsable()) throw Error('booking_handoff_changed');
     return copy(result);
   };
   const run = async (purpose: 'read' | 'write', work: () => Promise<ClientQuoteBookingView['status']>) => {
     if (busy || !current() || invalidCache) return;
-    busy = true; observed = false; operation = null; detailUnavailable = false; emit('checking');
+    busy = true; pendingCore = true; observed = false; operation = null; detailUnavailable = false; emit('checking');
     let status: ClientQuoteBookingView['status'] = 'unavailable';
-    try { await recheck(purpose); status = await work(); await recheck('read'); }
-    catch { action = null; draft = null; handoff = null; observed = false; operation = null;
+    try {
+      await recheck(purpose); assertReference(); const basis = copy(hostBasis());
+      status = await work(); await recheck('read'); assertReference();
+      if (!same(basis, hostBasis())) throw Error('booking_host_changed');
+      // Close the current business reference after the final host wait. Neither
+      // a read earlier in this turn nor a cached ready view grants transfer.
+      if (status === 'handoff_ready' && saved?.handoffRef && handoff) {
+        const expected = copy(handoff);
+        draft = { ...checkDraft(await input.api.readBookingDraft({ bookingDraftId: saved.draftId! }), true), action: null };
+        handoff = checkHandoff(await input.api.readHandoff({ handoffRef: saved.handoffRef }));
+        assertReference();
+        if (!same(expected, handoff)) throw Error('booking_handoff_changed');
+      } else if (!pendingCore && draft && saved?.draftId) {
+        const latest = checkDraft(await input.api.readBookingDraft({ bookingDraftId: saved.draftId }), true);
+        assertReference();
+        if (!same({ ...latest, action: null }, { ...draft, action: null })) throw Error('booking_revision_changed');
+        draft = latest;
+      }
+    }
+    catch { pendingCore = true; action = null; draft = null; handoff = null; observed = false; operation = null;
       status = saved && ['preparation_pending','draft_pending','selection_pending','handoff_pending'].includes(saved.stage) ? 'unknown' : 'unavailable'; }
     finally { busy = false; emit(status); }
   };
   const sourceMatches = (source: { materialRef: string; materialHash: string }) => source.materialRef === input.original.materialRef
     && source.materialHash === input.original.expectedMaterialHash;
   const session = {
-    snapshot: () => copy(view),
+    snapshot: () => {
+      if (!current()) { withdraw(); return { ...view, status: 'invalidated' as const, canPrepare: false, canSave: false,
+        canChoose: false, canHandoff: false, canRead: false, draft: null, handoff: null, operation: null, observed: false, readOnly: true, pendingCore: true }; }
+      const wasExpired = locallyExpired; updateExpiry();
+      if (!wasExpired && locallyExpired) emit(view.status);
+      return copy(view);
+    },
     async open() {
       if (closed || busy || !current()) return;
-      busy = true; let status: ClientQuoteBookingView['status'] = 'unavailable';
+      pendingCore = true;
+      action = null; draft = null; handoff = null; observed = false; operation = null;
+      busy = true; emit('checking'); let status: ClientQuoteBookingView['status'] = 'unavailable';
       try {
         await recheck('read');
         const value = input.storage.read();
@@ -407,6 +571,8 @@ export function createClientQuoteBookingSession(input: {
       finally { busy = false; emit(status); }
     },
     async prepare() {
+      updateExpiry();
+      if (locallyExpired) { emit(view.status); return; }
       if (!view.canPrepare) return;
       return run('write', async () => {
         const request = aiClientQuoteBookingRequestSchema.parse({ original: input.original, selection: initialSelection, operationKey: input.newKey() });
@@ -416,10 +582,12 @@ export function createClientQuoteBookingSession(input: {
         if (result.operationKey !== saved!.request.operationKey || !sourceMatches(result.source)) throw Error('booking_source_changed');
         if (result.state === 'unknown') return 'unknown';
         persist({ ...saved!, material: result.material, stage: 'material_ready' });
-        action = checkAction(result.action, 'CREATE_BOOKING_DRAFT'); observed = true; return 'material_ready';
+        action = checkAction(result.action, 'CREATE_BOOKING_DRAFT'); pendingCore = false; observed = true; return 'material_ready';
       });
     },
     async saveDraft() {
+      updateExpiry();
+      if (locallyExpired) { emit(view.status); return; }
       if (!view.canSave || !saved?.material || saved.createKey) return;
       return run('write', async () => {
         action = checkAction(await input.api.issueBookingAction({ materialRef: saved!.material!.materialRef, actionCode: 'CREATE_BOOKING_DRAFT' }), 'CREATE_BOOKING_DRAFT');
@@ -427,10 +595,16 @@ export function createClientQuoteBookingSession(input: {
         const result = await input.api.createBookingDraft({ action, operationKey });
         if (result.operation !== operationKey) throw Error('booking_operation_changed');
         draft = checkDraft(result.draft, true); persist({ ...saved!, draftId: draft.bookingDraftId, stage: 'draft_ready' });
+        const latest = checkDraft(await input.api.readBookingDraft({ bookingDraftId: draft.bookingDraftId }), true);
+        if (!same(latest, draft)) throw Error('booking_revision_changed');
+        draft = latest;
+        pendingCore = draft.state !== 'draft_created' || saved!.chooseKey !== null || saved!.handoffKey !== null;
         observed = true; return 'draft_ready';
       });
     },
     async choose() {
+      updateExpiry();
+      if (locallyExpired) { emit(view.status); return; }
       if (!view.canChoose || !draft || saved?.chooseKey) return;
       const previous = copy(draft);
       return run('write', async () => {
@@ -444,6 +618,8 @@ export function createClientQuoteBookingSession(input: {
       });
     },
     async handoff() {
+      updateExpiry();
+      if (locallyExpired) { emit(view.status); return; }
       if (!view.canHandoff || !saved?.draftId || saved.handoffKey) return;
       return run('write', async () => {
         const original = checkDraft(await input.api.readBookingDraft({ bookingDraftId: saved!.draftId! }), true);
@@ -464,7 +640,7 @@ export function createClientQuoteBookingSession(input: {
           if (result.state === 'unknown') return 'unknown';
           persist({ ...saved!, stage: 'material_ready', material: { materialRef: result.material.materialRef, materialHash: result.material.materialHash,
             inputHash: result.material.inputHash, expiresAt: result.material.expiresAt } });
-          observed = true; return 'material_ready'; // Metadata only; no Action is requested by a read.
+          pendingCore = false; observed = true; return 'material_ready'; // Metadata only; no Action is requested by a read.
         }
         const stage = saved!.stage, operationKey = ['handoff_pending','handoff_ready'].includes(stage) ? saved!.handoffKey
           : ['selection_pending','selected'].includes(stage) ? saved!.chooseKey : saved!.createKey;
@@ -481,7 +657,7 @@ export function createClientQuoteBookingSession(input: {
           if (!writeNow() || !sourceUsable()) { detailUnavailable = true; return 'observed'; }
           try { draft = { ...checkDraft(await input.api.readBookingDraft({ bookingDraftId: receipt.bookingDraftId })), action: null };
             handoff = checkHandoff(await input.api.readHandoff({ handoffRef: receipt.handoffRef })); }
-          catch { detailUnavailable = true; return 'observed'; }
+          catch { draft = null; handoff = null; detailUnavailable = true; return 'observed'; }
           return 'handoff_ready';
         }
         persist({ ...saved!, draftId: receipt.bookingDraftId, stage: expectedKind === 'select' ? 'selected' : 'draft_ready' });
@@ -489,6 +665,9 @@ export function createClientQuoteBookingSession(input: {
         try { draft = { ...checkDraft(await input.api.readBookingDraft({ bookingDraftId: receipt.bookingDraftId })), action: null }; }
         catch { detailUnavailable = true; return 'observed'; }
         if (expectedKind === 'select') return 'selected';
+        // Only this current server read can establish an unselected Draft.
+        // TTL, cached state and an operation's mere absence cannot do so.
+        pendingCore = draft.state !== 'draft_created' || saved!.chooseKey !== null || saved!.handoffKey !== null;
         return draft.state === 'draft_created' ? 'draft_ready' : 'observed';
       });
     },
@@ -498,12 +677,21 @@ export function createClientQuoteBookingSession(input: {
       return session.snapshot();
     },
     async continueBooking() {
+      if (busy || !current() || invalidCache) return session.snapshot();
+      // Once an original handoff attempt exists, every explicit transfer reads
+      // that operation and the current server reference. A prior manual recover
+      // or cached ready view cannot authorize navigation, selection or reissue.
+      if (saved?.handoffKey) { await session.recover(); return session.snapshot(); }
+      if (saved && ['draft_pending','selection_pending'].includes(saved.stage)) { await session.recover(); return session.snapshot(); }
+      updateExpiry();
+      if (locallyExpired) { emit(view.status); return session.snapshot(); }
       if (view.canChoose) await session.choose();
       if (view.canHandoff) await session.handoff();
       return session.snapshot();
     },
-    dispose() { closed = true; action = null; draft = null; handoff = null; view = { ...view, status: 'invalidated', canPrepare: false,
+    dispose() { closed = true; pendingCore = pendingCore || saved !== null; expiry.clear(); action = null; draft = null; handoff = null; view = { ...view, status: 'invalidated', canPrepare: false,
       canSave: false, canChoose: false, canHandoff: false, canRead: false, draft: null, handoff: null, operation: null, observed: false, readOnly: true };
+      view.pendingCore = pendingCore;
       input.changed(copy(view)); },
   };
   return Object.freeze(session);

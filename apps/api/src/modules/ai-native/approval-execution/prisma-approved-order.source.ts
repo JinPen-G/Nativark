@@ -8,6 +8,7 @@ import { checkAiApprovalBindingDraft, fingerprintAiProposalDraft } from '../prop
 import { isAiStepExecutionContext } from '../task-contract-validation';
 import type { ApprovedOrderCommand, ApprovedOrderCompositionDependencies, ApprovedOrderPolicyRequest, ApprovedOrderSnapshot } from './approved-order-composition.ports';
 import type { AiApprovedOrderInput } from './approved-order.ports';
+import { approvedOrderMerchantDelegationSnapshotSchema } from './approved-order-merchant-delegation';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const revision = z.number().int().positive().max(4294967294);
@@ -106,7 +107,32 @@ export class PrismaApprovedOrderSource {
       || actionRow.step.toolVersion !== action.toolVersion
       || !(version.expiresAt instanceof Date) || version.expiresAt.getTime() !== Date.parse(payload.expiresAt)
       || !(approval.issuedAt instanceof Date) || !(approval.expiresAt instanceof Date)) throw deniedOrder();
-    const businessIdempotencyKey = `ai-order:${requestFingerprint([base.scopeId, base.taskId, action.actionId])}`;
+    const snapshots = structuredClone(await d.snapshots.read({ context: structuredClone(context), ...base,
+      proposalId: command.proposalId, proposalRevision: command.proposalRevision, action: structuredClone(action) }, tx));
+    for (const kind of ['input', 'preview'] as const) {
+      const snapshot: ApprovedOrderSnapshot<unknown> | undefined = snapshots?.[kind], ref = action[kind];
+      if (!snapshot || snapshot.scopeId !== base.scopeId || snapshot.taskId !== base.taskId || snapshot.actionId !== action.actionId
+        || snapshot.recordId !== ref.recordId || snapshot.revision !== ref.revision || snapshot.contentHash !== ref.contentHash
+        || requestFingerprint(snapshot.payload) !== ref.contentHash) throw deniedOrder();
+    }
+    const body = snapshots.input.payload, preview = snapshots.preview.payload;
+    if (!body || !preview || action.target.resourceType !== 'quote' || action.target.resourceId !== body.quoteId
+      || action.target.version !== preview.pricingPlanVersion
+      || preview.id !== body.quoteId || preview.tenantId !== context.scope.tenantId
+      || preview.consumedAt || preview.consumedOrderId) throw deniedOrder();
+    const merchantDelegation = preview.merchantDelegation
+      ? approvedOrderMerchantDelegationSnapshotSchema.parse(preview.merchantDelegation) : undefined;
+    if (merchantDelegation) {
+      const { merchantDelegation: _delegation, ...originalQuote } = preview;
+      if (merchantDelegation.quoteHash !== requestFingerprint(originalQuote) || merchantDelegation.requestHash !== action.input.contentHash
+        || merchantDelegation.quoteId !== body.quoteId || merchantDelegation.personalCustomerId !== body.customerId
+        || body.bookingIdentity?.bookingIdentity !== 'enterprise_employee'
+        || merchantDelegation.corporateCustomerId !== body.bookingIdentity.corporateCustomerId) throw deniedOrder();
+    }
+    // D is already the original Core key. A task-specific replacement key would
+    // split enterprise and AI recovery into two independent business actions.
+    const businessIdempotencyKey = merchantDelegation?.reference.delegationKey
+      ?? `ai-order:${requestFingerprint([base.scopeId, base.taskId, action.actionId])}`;
     const input: Omit<AiApprovedOrderInput, 'lease'> = { context, ...base, actionId: command.actionId, approvalId: command.approvalId,
       proposalId: command.proposalId, proposalRevision: command.proposalRevision, actionFingerprint: actionRow.requestFingerprint,
       businessIdempotencyKey };
@@ -127,20 +153,10 @@ export class PrismaApprovedOrderSource {
     // A committed action is checked at issuance; expiry or cancellation cannot erase its historical fact.
     const bindingTime = operation === 'replay' ? approval.issuedAt.toISOString() : now().toISOString();
     if (!checkAiApprovalBindingDraft({ payload, payloadHash: version.payloadHash, status: 'confirmed' }, approvalRecord, context, action.actionId, bindingTime).valid) throw deniedOrder();
-    const snapshots = structuredClone(await d.snapshots.read({ context: structuredClone(context), ...base,
-      proposalId: command.proposalId, proposalRevision: command.proposalRevision, action: structuredClone(action) }, tx));
-    for (const kind of ['input', 'preview'] as const) {
-      const snapshot: ApprovedOrderSnapshot<unknown> | undefined = snapshots?.[kind], ref = action[kind];
-      if (!snapshot || snapshot.scopeId !== base.scopeId || snapshot.taskId !== base.taskId || snapshot.actionId !== action.actionId
-        || snapshot.recordId !== ref.recordId || snapshot.revision !== ref.revision || snapshot.contentHash !== ref.contentHash
-        || requestFingerprint(snapshot.payload) !== ref.contentHash) throw deniedOrder();
-    }
-    const body = snapshots.input.payload, preview = snapshots.preview.payload;
-    if (!body || !preview || action.target.resourceType !== 'quote' || action.target.resourceId !== body.quoteId
-      || action.target.version !== preview.pricingPlanVersion
-      || preview.id !== body.quoteId || preview.tenantId !== context.scope.tenantId
-      || preview.consumedAt || preview.consumedOrderId) throw deniedOrder();
     if (body.capabilityExceptions !== undefined) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    if (operation === 'execute' && body.bookingIdentity?.bookingIdentity === 'enterprise_employee' && !merchantDelegation) {
+      throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    }
     if (operation === 'execute' && tx) {
       const identity = getRequestIdentity();
       if (!identity || identity.isSaasAdmin || identity.userId !== context.actor.userId
@@ -149,7 +165,9 @@ export class PrismaApprovedOrderSource {
       const quote = await d.quoteFacts.findQuote(context.scope.tenantId, body.quoteId, tx);
       if (!quote) throw deniedOrder();
       const { consumedAt: _at, consumedOrderId: _order, ...immutableQuote } = quote;
-      if (requestFingerprint(immutableQuote) !== action.preview.contentHash) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      if (requestFingerprint(immutableQuote) !== (merchantDelegation?.quoteHash ?? action.preview.contentHash)) {
+        throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      }
     }
     let inputBindingHash: string | null = null;
     if (operation === 'execute' && d.executionInput) {
@@ -157,7 +175,8 @@ export class PrismaApprovedOrderSource {
         const authorized = await d.executionInput!.readAuthorized({ context: structuredClone(context), ...base,
           actionId: action.actionId, runId: command.runId }, client);
         if (requestFingerprint(authorized.body) !== action.input.contentHash
-          || requestFingerprint(authorized.body) !== requestFingerprint(body)) throw deniedOrder();
+          || requestFingerprint(authorized.body) !== requestFingerprint(body)
+          || requestFingerprint(authorized.merchantDelegation) !== requestFingerprint(merchantDelegation)) throw deniedOrder();
         return authorized.bindingHash;
       };
       // Standalone observation can run while the same Core action holds the
@@ -176,6 +195,6 @@ export class PrismaApprovedOrderSource {
     if (operation === 'execute' && (approval.expiresAt <= now() || version.expiresAt <= now())) throw deniedOrder();
     return { input, binding: { tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId,
       idempotencyKey: businessIdempotencyKey, requestFingerprint: input.actionFingerprint, request: body }, committedId,
-      payloadHash: version.payloadHash, previewHash: action.preview.contentHash, inputBindingHash, operation };
+      payloadHash: version.payloadHash, previewHash: action.preview.contentHash, inputBindingHash, merchantDelegation, operation };
   }
 }

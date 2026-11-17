@@ -7,6 +7,7 @@ import type { AiTaskRepository, AiTaskRepositoryAuthority } from '../ai-task.rep
 import { AiTaskResultRepository, type AiTaskResultProjection } from '../runner/ai-task-result.repository';
 import { parseTaskModelInput, taskModelFingerprint, taskModelIdentity, continueTaskModelMaterial, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, type TaskModelPolicy, type TaskModelInput } from '../model-input/task-model-input';
 import { readTaskModelRunOrigin } from '../task-input/prisma-task-input.repository';
+import { aiTaskRunPlanSchema } from '../runner/prisma-task-run-evidence.repository';
 import type { AiTaskInputSource } from '../task-input/task-input.ports';
 import { isGatewayResult } from '../gateway-contract-validation';
 import type { PersistedBudgetEvidenceSource } from '../budget/budget-dependency-adapters';
@@ -68,12 +69,14 @@ export class InspectionRecognitionResultService {
   /** Server-bound frozen input -> current persisted candidate evidence -> human
    * clarification. Caller/model text never supplies a question contract or a
    * new attachment. Answers remain context, not corrections or submission. */
-  inputSource(value: unknown): AiTaskInputSource {
+  inputSource(value: unknown, mode: 'current' | 'original_pending' = 'current'): AiTaskInputSource {
     const reference = referenceSchema.omit({ taskId: true, resultId: true }).parse(structuredClone(value));
     const resolve: AiTaskInputSource['resolve'] = async presented => {
       const binding = structuredClone(presented), source = this.source;
       if (!source || binding.toolCode !== this.modelTool || binding.toolVersion !== AI_TOOL_DRAFT_VERSION) throw changed();
-      const projection = await this.read({ ...reference, taskId: binding.taskId, resultId: binding.basisResultRef });
+      const resultReference = { ...reference, taskId: binding.taskId, resultId: binding.basisResultRef };
+      const projection = mode === 'original_pending'
+        ? (await this.collect(resultReference, false, 'original_pending')).projection : await this.read(resultReference);
       if (projection.status !== 'available' || projection.runId !== binding.runId || projection.stepId !== binding.stepId) {
         throw new InspectionAssistError('RECONCILIATION_REQUIRED');
       }
@@ -82,29 +85,56 @@ export class InspectionRecognitionResultService {
       if (!task || task.id !== binding.taskId || task.scopeId !== binding.scopeId
         || task.inputRef !== reference.inputId || task.sceneCode !== source.policy.sceneCode) throw changed();
       const run = await source.db.aiRun.findFirst({ where: { scopeId: binding.scopeId, taskId: binding.taskId, id: binding.runId } });
-      const policy = await source.db.aiTaskPlanPolicy.findFirst({ where: {
-        scopeId: binding.scopeId, sceneCode: task.sceneCode, sceneVersion: task.sceneVersion
-      } });
       if (!run || run.scopeId !== binding.scopeId || run.taskId !== binding.taskId || run.id !== binding.runId
         || run.actorId !== before.actorId || run.actorKind !== before.actorKind
-        || !Number.isSafeInteger(run.sequence) || run.sequence < 1
-        || !policy || policy.scopeId !== binding.scopeId || policy.sceneCode !== source.policy.sceneCode
-        || policy.sceneVersion !== task.sceneVersion
-        || !policy.enabled || !(policy.expiresAt instanceof Date)
-        || !Number.isFinite(policy.expiresAt.getTime())
-        || policy.expiresAt <= (source.clock?.() ?? new Date())
-        || requestFingerprint(policy.allowedTools) !== requestFingerprint([{ code: this.modelTool, version: AI_TOOL_DRAFT_VERSION }])) throw changed();
-      const ceilings = z.object({ maxCalls: z.number().int().positive() }).passthrough().parse(policy.limits);
+        || !Number.isSafeInteger(run.sequence) || run.sequence < 1) throw changed();
+      let maxCalls: number, expiresAt: Date;
+      if (mode === 'original_pending') {
+        // Reading an existing question cannot depend on today's generation
+        // policy or extend its lifetime. Rebuild from its original run plan;
+        // the pending repository separately verifies its full hash/history.
+        const key = { scopeId: binding.scopeId, taskId: binding.taskId, runId: binding.runId };
+        const saved = await source.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } });
+        const plan = aiTaskRunPlanSchema.safeParse(saved?.payload);
+        const question = await source.db.aiTaskInputRequest.findUnique({ where: { scopeId_taskId_runId_stepId_planHash: {
+          ...key, stepId: binding.stepId, planHash: binding.planHash } } });
+        if (!saved || Object.entries(key).some(([name, value]) => saved[name as keyof typeof saved] !== value)
+          || !plan.success || saved.planHash !== binding.planHash || requestFingerprint(plan.data) !== binding.planHash
+          || plan.data.taskId !== binding.taskId || plan.data.runId !== binding.runId
+          || plan.data.taskRevision !== binding.planRevision || plan.data.steps.length !== 1
+          || plan.data.steps[0].registrationRef !== binding.registrationRef || plan.data.steps[0].toolCode !== this.modelTool
+          || plan.data.steps[0].toolVersion !== AI_TOOL_DRAFT_VERSION || plan.data.steps[0].operation !== 'external_unknown' || !question
+          || Object.entries(key).some(([name, value]) => question[name as keyof typeof question] !== value)
+          || question.stepId !== binding.stepId || question.planHash !== binding.planHash
+          || question.planRevision !== binding.planRevision || question.inputRef !== binding.inputRef
+          || question.inputHash !== binding.inputHash || question.basisResultRef !== binding.basisResultRef
+          || question.status !== 'PENDING' || question.waitingTaskRevision !== task.revision
+          || question.contractCode !== 'inspection_context' || question.contractVersion !== '1'
+          || !(question.expiresAt instanceof Date) || !Number.isFinite(question.expiresAt.getTime())
+          || question.expiresAt <= (source.clock?.() ?? new Date())) throw changed();
+        maxCalls = plan.data.limits.maxCalls; expiresAt = question.expiresAt;
+      } else {
+        const policy = await source.db.aiTaskPlanPolicy.findFirst({ where: {
+          scopeId: binding.scopeId, sceneCode: task.sceneCode, sceneVersion: task.sceneVersion
+        } });
+        if (!policy || policy.scopeId !== binding.scopeId || policy.sceneCode !== source.policy.sceneCode
+          || policy.sceneVersion !== task.sceneVersion || !policy.enabled || !(policy.expiresAt instanceof Date)
+          || !Number.isFinite(policy.expiresAt.getTime()) || policy.expiresAt <= (source.clock?.() ?? new Date())
+          || requestFingerprint(policy.allowedTools) !== requestFingerprint([{ code: this.modelTool, version: AI_TOOL_DRAFT_VERSION }])) throw changed();
+        maxCalls = z.object({ maxCalls: z.number().int().positive() }).passthrough().parse(policy.limits).maxCalls;
+        expiresAt = policy.expiresAt;
+      }
       const after = await source.tasks.resolveAccess(binding.taskId, 'read_step_terminal');
       if (before.bindingKey !== after.bindingKey) throw new InspectionAssistError('ACCESS_DENIED');
       const unclear = projection.candidates.filter(candidate => candidate.status === 'missing' || candidate.status === 'blurred');
-      if (!unclear.length || run.sequence >= Math.min(ceilings.maxCalls, 31)) return { kind: 'not_required' };
-      return { kind: 'required', inputRef: binding.inputRef, inputHash: binding.inputHash, expiresAt: policy.expiresAt.toISOString(),
+      if (!unclear.length || run.sequence >= Math.min(maxCalls, 31)) return { kind: 'not_required' };
+      return { kind: 'required', inputRef: binding.inputRef, inputHash: binding.inputHash, expiresAt: expiresAt.toISOString(),
         contract: { draftVersion: AI_TASK_INPUT_DRAFT_VERSION, code: 'inspection_context', version: '1',
           fields: [{ fieldId: 'clarification_text', kind: 'text', required: true, maxLength: 2048,
             label: `请说明原检查材料中不明确的字段：${[...new Set(unclear.map(candidate => candidate.fieldCode))].join('、').slice(0, 55)}；仍需人工核对。` }] } };
     };
     return Object.freeze<AiTaskInputSource>({ resolve, validateAnswers: async (binding, contract, answers) => {
+      if (mode === 'original_pending') throw new InspectionAssistError('ACCESS_DENIED');
       const expected = await resolve(structuredClone(binding));
       if (expected.kind !== 'required' || requestFingerprint(contract) !== requestFingerprint(expected.contract)
         || !validateAiTaskInputAnswersDraft(expected.contract, answers)) throw new InspectionAssistError('ACCESS_DENIED');
@@ -162,30 +192,33 @@ export class InspectionRecognitionResultService {
       bindingFingerprint: collected.bindingFingerprint, candidates: collected.projection.candidates };
   }
 
-  private async collect(input: Reference, allowReceiptReplay: boolean) {
+  private async collect(input: Reference, allowReceiptReplay: boolean, mode: 'current' | 'original_pending' = 'current') {
     if (!this.source || !this.results || !this.recognition || !this.drafts || !this.candidates) {
       throw new InspectionAssistError('STORAGE_UNAVAILABLE');
     }
     const source = this.source, target = targetOf(input);
-    return this.authority.withAction(target, 'bind', async scope => {
+    return this.authority.withAction(target, mode === 'original_pending' ? 'read' : 'bind', async scope => {
       const initial = structuredClone(await source.authority.resolve(input.taskId, 'read_step_terminal'));
       this.sameActor(scope, initial);
-      const detail = await this.drafts!.read({ ...target, draftId: input.draftId });
+      const detail = mode === 'original_pending' ? { revision: input.expectedRevision }
+        : await this.drafts!.read({ ...target, draftId: input.draftId });
       if (detail.revision !== input.expectedRevision && (!allowReceiptReplay || detail.revision < input.expectedRevision)) {
         throw new InspectionAssistError('REVISION_CONFLICT');
       }
       // A newer revision is allowed ONLY to reconstruct the original receipt's
       // canonical request. save() cannot write it at a newer revision.
       const mediaReference = { ...target, draftId: input.draftId, inputId: input.inputId, expectedRevision: detail.revision };
-      const bound = await this.recognition!.gatewayMedia(mediaReference);
+      const bound = mode === 'original_pending' ? await this.recognition!.readOriginalMaterial(mediaReference)
+        : await this.recognition!.gatewayMedia(mediaReference);
       const result = await this.results!.read({ taskId: input.taskId, resultId: input.resultId });
-      const persisted = await this.readBinding(input, scope, result, taskModelIdentity(initial));
+      const persisted = await this.readBinding(input, scope, result, taskModelIdentity(initial), mode);
       let messages = inspectionRecognitionMessages({ ...bound, draftRevision: input.expectedRevision }, source.policy.kind!);
       const media = bound.input.media.map(ref => ({ kind: source.policy.kind, attachmentId: ref.attachmentId, attachmentRevision: ref.attachmentRevision,
         mediaType: ref.mediaType, contentHash: ref.contentHash, sizeBytes: ref.sizeBytes }));
       for (const round of persisted.history) {
         const parent = parseTaskModelInput(round.input, source.policy);
-        if (taskModelFingerprint(parent, source.policy) !== round.inputHash || parent.identityHash !== taskModelIdentity(initial)
+        if (taskModelFingerprint(parent, source.policy) !== round.inputHash
+          || parent.identityHash !== (mode === 'original_pending' ? persisted.input.identityHash : taskModelIdentity(initial))
           || requestFingerprint(parent.intent.messages) !== requestFingerprint(messages)
           || requestFingerprint(parent.media) !== requestFingerprint(media)) throw changed();
         messages = continueTaskModelMaterial(parent, round.result, round.answers, source.policy).messages;
@@ -214,21 +247,33 @@ export class InspectionRecognitionResultService {
           || !bound.input.media.some(original => original.attachmentId === ref.attachmentId
             && original.attachmentRevision === ref.attachmentRevision
             && (ref.kind !== 'audio' || original.durationMs !== null && ref.span.endMs <= original.durationMs))))) throw changed();
-        const checked = await this.candidates!.consume({ ...target, bindingFingerprint: bound.input.bindingFingerprint, candidates: values }, bound.input.basis);
-        values = checked.candidates; basisIssues = checked.basisIssues;
+        if (mode === 'original_pending') {
+          // Original candidates only reconstruct the stored question. They do
+          // not gain current asset/adoption evidence or any business authority.
+          if (new Set(values.map(candidate => candidate.candidateId)).size !== values.length
+            || new Set(values.map(candidate => candidate.fieldCode)).size !== values.length
+            || values.some(candidate => !bound.input.template.fields.some(field => field.code === candidate.fieldCode)
+              || candidate.sources.some(ref => ref.kind === 'image'
+                ? ref.region.x + ref.region.width > 1 || ref.region.y + ref.region.height > 1
+                : ref.span.endMs <= ref.span.startMs))) throw new InspectionAssistError('INVALID_INPUT');
+        } else {
+          const checked = await this.candidates!.consume({ ...target, bindingFingerprint: bound.input.bindingFingerprint, candidates: values }, bound.input.basis);
+          values = checked.candidates; basisIssues = checked.basisIssues;
+        }
         await this.verifyDispatch(persisted, scope, payload.usage);
         status = 'available';
       }
       // Awaiting evidence/template/authorization may change identity or inputs.
       // Never substitute a newer payload under the old task result reference.
-      const currentBound = await this.recognition!.gatewayMedia(mediaReference);
+      const currentBound = mode === 'original_pending' ? await this.recognition!.readOriginalMaterial(mediaReference)
+        : await this.recognition!.gatewayMedia(mediaReference);
       if (requestFingerprint(currentBound.input) !== requestFingerprint(bound.input)) throw changed();
       const currentResult = await this.results!.read({ taskId: input.taskId, resultId: input.resultId });
       if (requestFingerprint(currentResult) !== requestFingerprint(result)) throw changed();
       const current = await source.authority.resolve(input.taskId, 'read_step_terminal');
       this.sameActor(scope, current);
       if (taskModelIdentity(current) !== taskModelIdentity(initial)) throw new InspectionAssistError('ACCESS_DENIED');
-      const currentBinding = await this.readBinding(input, scope, currentResult, taskModelIdentity(current));
+      const currentBinding = await this.readBinding(input, scope, currentResult, taskModelIdentity(current), mode);
       if (!isDeepStrictEqual(currentBinding, persisted)) throw changed();
       if (status === 'available' && isGatewayResult(payload) && payload.usage.kind === 'reported') {
         await this.verifyDispatch(currentBinding, scope, payload.usage);
@@ -261,7 +306,8 @@ export class InspectionRecognitionResultService {
     }
   }
 
-  private async readBinding(reference: Reference, scope: AiInspectionActorScope, result: AiTaskResultProjection, identityHash: string) {
+  private async readBinding(reference: Reference, scope: AiInspectionActorScope, result: AiTaskResultProjection, identityHash: string,
+    mode: 'current' | 'original_pending' = 'current') {
     const source = this.source!;
     const access = await source.tasks.resolveAccess(reference.taskId, 'read_step_terminal');
     return source.db.$transaction(async tx => {
@@ -279,7 +325,9 @@ export class InspectionRecognitionResultService {
       if (!saved || saved.id !== step.inputRef || saved.scopeId !== key.scopeId || saved.taskId !== key.taskId || saved.runId !== key.runId
         || saved.toolCode !== step.toolCode || saved.toolVersion !== step.toolVersion || saved.fingerprint !== step.requestFingerprint) throw changed();
       const input = parseTaskModelInput(saved.payload, source.policy);
-      if (taskModelFingerprint(input, source.policy) !== saved.fingerprint || input.identityHash !== identityHash) throw changed();
+      if (taskModelFingerprint(input, source.policy) !== saved.fingerprint
+        || mode === 'current' && input.identityHash !== identityHash
+        || !('tenantId' in input.configuration) || input.configuration.tenantId !== scope.tenantId) throw changed();
       const invocation = await tx.aiGatewayInvocation.findFirst({ where: { ...key, stepId: step.id, callId: input.intent.requestId } });
       if (!invocation || invocation.scopeId !== key.scopeId || invocation.taskId !== key.taskId || invocation.runId !== key.runId
         || invocation.stepId !== step.id || invocation.actionId !== step.actionId || invocation.actorId !== scope.ownerId
@@ -297,6 +345,13 @@ export class InspectionRecognitionResultService {
       const lineage = await readTaskModelRunOrigin(tx, access, { scopeId: task.scopeId, taskId: task.id,
         runId: run.id, originRunId: run.resourceOriginRunId ?? run.id, registrationRef: saved.registrationRef, includeHistory: true });
       if (lineage.registrationRef !== saved.registrationRef) throw changed();
+      if (mode === 'original_pending') {
+        // Original full-permission hashes are retained provenance, not today's
+        // read grant. Owner/scope/Run/Invocation are bound above, current read
+        // authority is checked separately, and the original lineage stays exact.
+        const origin = lineage.history[0] ? parseTaskModelInput(lineage.history[0].input, source.policy) : input;
+        if (input.identityHash !== origin.identityHash) throw changed();
+      }
       return { input, invocation, actionInputId: saved.id, history: lineage.history };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
   }

@@ -21,6 +21,7 @@ export type AuthorizedTextProbeWorkflowDependencies = Omit<PersistedTaskAuthoriz
   platformProfileId: string;
   pricing: TextCapabilityProbeDependencies['pricing'] | { mode: 'persisted_calls'; priceVersion: string };
   audit?: TextCapabilityProbeDependencies['audit'];
+  capacity?: TextCapabilityProbeDependencies['capacity'];
   protocol?: TextCapabilityProbeDependencies['protocol'];
   host: Parameters<typeof composePersistedTextProbeWorkflow>[0]['host'];
   sceneVersion: string;
@@ -49,7 +50,7 @@ export function composeAuthorizedPersistedTextProbeWorkflow(input: AuthorizedTex
     })() : input.pricing as TextCapabilityProbeDependencies['pricing'];
   const application = new TextCapabilityProbeApplication({ db: input.db, scopes: authorization.scopes,
     subscriptions: input.subscriptions, authorization, management, configuration, platformConnection: platform.invocation,
-    pricing, audit: input.audit, protocol: input.protocol, clock: input.clock });
+    pricing, audit: input.audit, capacity: input.capacity, protocol: input.protocol, clock: input.clock });
   const workflow = composePersistedTextProbeWorkflow({ ...input, probe: application,
     financialEvidence: application.financialEvidence });
   return Object.freeze({ application, workflow });

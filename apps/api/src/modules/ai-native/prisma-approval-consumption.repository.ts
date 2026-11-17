@@ -6,6 +6,7 @@ import { isAiStepExecutionContext } from './task-contract-validation';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import type { ApprovedOrderBinding, ApprovedOrderTransaction } from '../rental-core/approved-order-transaction.ports';
 import type { AiApprovedOrderInput, AiApprovedOrderAuthority } from './approval-execution/approved-order.ports';
+import { bindAiBodyStorageTransaction } from './privacy/prisma-ai-body-storage';
 
 type Db = Pick<PrismaClient, '$transaction' | 'aiApproval' | 'aiApprovalConsumption' | 'aiProposal' | 'aiProposalAction' | 'aiProposalVersion'>;
 type Tx = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
@@ -113,14 +114,16 @@ export class PrismaAiApprovalConsumptionRepository implements AiApprovalConsumpt
       replay: async (binding, orderId) => {
         if (await read(structuredClone(binding)) !== orderId) throw new AiApprovalConsumptionRepositoryError('INVALID_BINDING');
       },
-      prepare: async (tx, binding) => {
+      prepare: async (native, binding) => {
+        const tx = bindAiBodyStorageTransaction(this.db, native);
         await verify(tx, binding);
         const existing = await tx.aiApprovalConsumption.findFirst({ where, select });
         if (existing) throw new AiApprovalConsumptionRepositoryError(same(project(existing)) ? 'UNKNOWN' : 'CONFLICT');
         const { context: _, lease: __, ...record } = input;
         await tx.aiApprovalConsumption.create({ data: { ...record, status: 'RESERVED', resultRef: null }, select });
       },
-      commit: async (tx, binding, orderId) => {
+      commit: async (native, binding, orderId) => {
+        const tx = bindAiBodyStorageTransaction(this.db, native);
         await verify(tx, binding);
         const order = await tx.rentalOrder.findFirst({ where: { tenantId: binding.tenantId, workspaceId: binding.workspaceId, id: orderId }, select: { id: true } });
         const receipt = await tx.rentalOrderIdempotencyRecord.findFirst({ where: { tenantId: binding.tenantId, workspaceId: binding.workspaceId,

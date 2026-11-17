@@ -19,6 +19,7 @@ import { buildOpeningDiagnosisText } from './opening-diagnosis-renderer';
 import { withoutTaskModelDisplayMessages } from '../model-input/task-model-display-witness';
 import { readAiOpeningCalendarSource } from '../tools/diagnostic-read-facts.service';
 import { buildQuotePreparationSummary } from '../workbench-authoritative-summary';
+import type { AiQuoteGoalModelReadResult } from './quote-goal-projection';
 
 type Scenes = ReturnType<typeof composeAiOriginalScenes>;
 type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiStep' | 'aiTaskActionInput' | 'aiGatewayInvocation' | 'aiTaskResultArtifact' | 'aiTaskOriginalRequest'>;
@@ -152,6 +153,11 @@ export function quoteFactsFingerprint(material: unknown) {
   const facts = packet.payload.facts;
   delete packet.payload.observedAt;
   delete facts.observedAt;
+  if (facts.kind === 'quote_goal_context') {
+    const configuration = z.record(z.unknown()).parse(facts.configuration);
+    delete configuration.observedAt;
+    facts.configuration = configuration;
+  }
   const availability = facts.availability;
   if (availability && typeof availability === 'object' && !Array.isArray(availability)) {
     // This identifies the fresh availability read, not stock or quote revision.
@@ -184,13 +190,27 @@ export class AiOriginalSceneResultService {
       ...(policy.structuredOutput !== undefined ? { structuredOutput: policy.structuredOutput } : {}) });
   }
 
-  async read(value: unknown) {
+  async read(value: unknown) { return (await this.readObserved(value, false)).observation; }
+
+  /** Server-only candidate port. It shares all original invocation, lineage,
+   * current resource and final permission checks with the public observation.
+   * Raw extraction text never replaces its deterministic business summary. */
+  async readQuoteGoalCandidates(value: unknown): Promise<AiQuoteGoalModelReadResult> {
+    const { observation, candidateText } = await this.readObserved(value, true);
+    const { original, sceneCode, taskId, runId, resultId, observedAt, status, materialHash, callId } = observation;
+    return freezeOriginalInput({ original, sceneCode, taskId, runId, resultId, observedAt, status,
+      ...(materialHash ? { materialHash } : {}), ...(callId ? { callId } : {}), candidateText });
+  }
+
+  private async readObserved(value: unknown, goalCandidates: boolean) {
     const parsed = commandSchema.safeParse(structuredClone(value));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const command = freezeOriginalInput(parsed.data), original = await this.scenes.requests.readHistorical(command.original);
     if (original.receipt.state === 'revoked') throw denied();
     if (!['order_explanation', 'opening_diagnosis', 'quote_clarification'].includes(original.request.sceneCode)
       || this.policy.sceneCode !== original.request.sceneCode) throw unavailable();
+    if (goalCandidates && (original.request.sceneCode !== 'quote_clarification' || original.request.input.kind !== 'quote_goal')) throw denied();
+    let candidateText: string | null = null;
     const task = await this.scenes.readTaskReceipt(command.original.inputRef);
     if (task.state !== 'observed') throw unavailable();
     const access = structuredClone(await this.tasks.resolveAccess(task.taskId, 'read_step_terminal'));
@@ -305,7 +325,9 @@ export class AiOriginalSceneResultService {
         if (!this.knowledge) throw unavailable();
         await this.knowledge.revalidate(frozen.knowledge, command.original.inputRef);
       }
-      output = fingerprint(current) === fingerprint(frozen.material)
+      const currentMatches = fingerprint(current) === fingerprint(frozen.material);
+      if (goalCandidates && currentMatches) candidateText = frozen.text;
+      output = currentMatches
         ? { ...base, status: 'available', text: { value: isOrder ? buildOrderExplanation(current).text
           : original.request.sceneCode === 'opening_diagnosis' ? buildOpeningDiagnosisText(current)
             : buildQuotePreparationSummary({ request: original.request, material: frozen.material, history: provenance.history }),
@@ -340,7 +362,7 @@ export class AiOriginalSceneResultService {
     if ((await this.tasks.resolveAccess(task.taskId, 'read_step_terminal')).bindingKey !== finalAccess.bindingKey) throw denied();
     // A historical read may cross natural expiry while validating its sources.
     // Publish the checked closing receipt, without renewing execution authority.
-    return freezeOriginalInput({ ...output, original: after.receipt });
+    return freezeOriginalInput({ observation: { ...output, original: after.receipt }, candidateText });
   }
 
   /** Opening evidence uses the original readiness partition reader, not an

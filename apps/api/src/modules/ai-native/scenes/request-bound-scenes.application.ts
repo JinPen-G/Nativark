@@ -1005,7 +1005,8 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
       }
       const { source } = composeOriginalSceneClarificationSource({ db: input.db, tasks: authorization.tasks, scenes,
         scene: { code: scene.sceneCode, version: scene.sceneVersion }, gatewayScene: policy,
-        results: { read: command => resultReader(scene.sceneCode).read(command) } });
+        results: { read: command => resultReader(scene.sceneCode).read(command),
+          readQuoteGoalCandidates: command => resultReader(scene.sceneCode).readQuoteGoalCandidates(command) } });
       return PrismaTaskInputRepository.pendingReader(input.db, authorization.tasks, source, input.clock).readPending(task.taskId);
     };
     const center = composeAiTaskCenterScene({ list: persistedCenter.list, events: persistedCenter.events,
@@ -1135,6 +1136,17 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
         if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
         const original = await root.scenes.requests.readHistorical(parsed.data.original);
         return root.resultReader(original.request.sceneCode).read(parsed.data);
+      });
+    },
+    readQuoteGoalCandidates(request: AiSceneHttpRequest, value: unknown) {
+      return call(request, value, async (root, command) => {
+        const parsed = z.object({ original: originalRequestReferenceSchema,
+          resultId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict().safeParse(structuredClone(command));
+        if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        const reader = root.resultReader('quote_clarification');
+        const { routeScene: _routeScene, ...policy } = gatewayTextIntentBindingSchema.parse({
+          ...resultPolicy, sceneCode: 'quote_clarification', orderExplainTool: false });
+        return root.scenes.createQuoteGoalProjectionReader(root.tasks, reader, policy).read(parsed.data);
       });
     },
     reopenModelSource(request: AiSceneHttpRequest, value: unknown) {
@@ -1367,9 +1379,9 @@ export type RequestBoundPersistedOriginalSceneModelDependencies =
   Omit<RequestBoundOriginalSceneModelDependencies, 'runtime' | 'priceVersion' | 'kind' | 'inputCounting'> & {
     /** Server-owned configuration. No request may choose a provider or task. */
     gateway: Pick<PersistedTaskCallGatewayDependencies,
-      'secrets' | 'platformProfileId' | 'routeScene' | 'callPriceVersion' | 'adapters' | 'nativeProtocol' | 'audit'>
+      'secrets' | 'platformProfileId' | 'routeScene' | 'callPriceVersion' | 'adapters' | 'nativeProtocol' | 'audit' | 'capacity'>
       | Pick<PersistedTaskGatewayDependencies,
-        'secrets' | 'platformProfileId' | 'routeScene' | 'pricing' | 'adapters' | 'nativeProtocol' | 'audit' | 'inputCounting'>;
+        'secrets' | 'platformProfileId' | 'routeScene' | 'pricing' | 'adapters' | 'nativeProtocol' | 'audit' | 'inputCounting' | 'capacity'>;
   };
 
 /** Formal original-reference model actions. Resolve the current original task
@@ -1525,6 +1537,7 @@ export function composeRequestBoundPersistedOriginalSceneModel(
     submitAnswer: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       callWaiting(request, value, 'explicit_wait_submit', (app, command) => app.submitAnswer(command), signal),
     readModelResult: recoveryReaders.readModelResult,
+    readQuoteGoalCandidates: recoveryReaders.readQuoteGoalCandidates,
     reopenModelSource: recoveryReaders.reopenModelSource,
     reopenOpeningModelSource: recoveryReaders.reopenOpeningModelSource,
     readOrderReadChainAnswer: (request: AiSceneHttpRequest, value: unknown) => call(request, value, async (app, command) => await app.readAnswer(command)),
@@ -1695,6 +1708,7 @@ export function composeRequestBoundOriginalSceneModel(dependencies: RequestBound
     requestCancel: (request: AiSceneHttpRequest, value: unknown) => call(request, value,
       (app, command) => app.application.requestCancel(command), { write: true }),
     readModelResult: recoveryReaders.readModelResult,
+    readQuoteGoalCandidates: recoveryReaders.readQuoteGoalCandidates,
     reopenModelSource: recoveryReaders.reopenModelSource,
     reopenOpeningModelSource: recoveryReaders.reopenOpeningModelSource
   });
@@ -1955,6 +1969,8 @@ export function composeRequestBoundQuoteSelections(dependencies: RequestBoundQuo
     originals: composeAiOriginalScenes(input).requests }));
   return Object.freeze({
     select: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.select(command), { write: true }),
+    prepareMerchantDelegation: (request: AiSceneHttpRequest, value: unknown) => call(request, value,
+      (app, command) => app.prepareMerchantDelegation(command), { write: false }),
     read: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.read(command), { write: false }),
     reconcile: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.reconcile(command), { write: false }),
     readOperationLocator: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readOperationLocator(command), { write: false })
@@ -2084,12 +2100,14 @@ export function composeRequestBoundSelectedQuoteTask(dependencies: RequestBoundQ
     const recovery = new AiOriginalSceneRecoveryService(input.db, originals, composePersistedTaskAuthorization(input).tasks);
     const center = composeAiTaskCenterScene({ list: persisted.list, events: persisted.events, usage: persisted.usage, ...business,
       scenes: { requests: originals, readTaskReceipt: originals.readTaskReceipt.bind(originals), readRecovery: recovery.read.bind(recovery) } });
-    // No creation, quote preparation, start, continuation or recovery escapes.
-    // Task observations and original Core receipts keep independent current read
-    // rights; losing create permission does not re-authorize either execution.
+    // Exact original recovery never publishes or continues new business work.
+    // Its current read/takeover/recovery policies are separate from creation;
+    // observing an old receipt cannot grant another lease or order execution.
     return Object.freeze({ requestCancel: tasks.requestCancel,
       settleUnstartedCancellation: tasks.settleUnstartedCancellation,
       readCancellation: tasks.readCancellation, readCancellationSettlement: tasks.readCancellationSettlement,
+      recover: tasks.recover, takeover: tasks.takeover, readTakeoverReceipt: tasks.readTakeoverReceipt,
+      readRecoverySnapshot: tasks.readRecoverySnapshot,
       readResult: tasks.readResult, readScene: center.readScene,
       readTaskSnapshot: (value: unknown) => readOriginalTaskSnapshot({ requests: originals,
         readTaskReceipt: originals.readTaskReceipt.bind(originals) }, persisted.events, value) });
@@ -2118,6 +2136,16 @@ export function composeRequestBoundSelectedQuoteTask(dependencies: RequestBoundQ
     readTaskPage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskPage(command), { write: false }),
     readTaskUsage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskUsage(command), { write: false }),
     readTaskSnapshot: (request: AiSceneHttpRequest, value: unknown) => retainedCall(request, value, (app, command) => app.readTaskSnapshot(command), { write: false }),
+    // Server-only TaskCenter ports reuse its existing closed Task/Run/fence
+    // commands. Public route and contract registration stay with that owner.
+    readRecoverySnapshot: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => retainedCall(request, value,
+      (app, command) => app.readRecoverySnapshot(command, signal), { write: false, signal }),
+    readTakeoverReceipt: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => retainedCall(request, value,
+      (app, command) => app.readTakeoverReceipt(command, signal), { write: false, signal }),
+    recover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => retainedCall(request, value,
+      (app, command) => app.recover(command, signal), { write: true, signal, preflightOnly: true }),
+    takeover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => retainedCall(request, value,
+      (app, command) => app.takeover(command, signal), { write: true, signal, preflightOnly: true }),
     readTaskEvents: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskEvents(command), { write: false }),
     readTaskReconnect: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskReconnect(command), { write: false }),
     readScene: (request: AiSceneHttpRequest, value: unknown) => retainedCall(request, value, (app, command) => app.readScene(command), { write: false }),
@@ -2128,8 +2156,8 @@ export function composeRequestBoundSelectedQuoteTask(dependencies: RequestBoundQ
     readResult: (request: AiSceneHttpRequest, value: unknown) => retainedCall(request, value, (app, command) => app.readResult(command), { write: false }),
     requestCancel: (request: AiSceneHttpRequest, value: unknown) => retainedCall(request, value, (app, command) => app.requestCancel(command), { write: true }),
     // Internal consumers only; no new Controller/OpenAPI action is registered.
-    settleUnstartedCancellation: (request: AiSceneHttpRequest, value: unknown) => retainedCall(request, value,
-      (app, command) => app.settleUnstartedCancellation(command), { write: true }),
+    settleUnstartedCancellation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => retainedCall(request, value,
+      (app, command) => app.settleUnstartedCancellation(command), { write: true, signal }),
     readCancellation: (request: AiSceneHttpRequest, value: unknown) => retainedCall(request, value,
       (app, command) => app.readCancellation(command), { write: false }),
     readCancellationSettlement: (request: AiSceneHttpRequest, value: unknown) => retainedCall(request, value,

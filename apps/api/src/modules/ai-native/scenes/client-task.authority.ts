@@ -53,14 +53,15 @@ export class AiClientPolicyAuthority {
     private readonly requestId: string, private readonly clock: () => Date) {
     this.entitlements = new PrismaSubscriptionBudgetReader(dependencies.db, dependencies.subscriptions, clock);
   }
-  async policy(subject: ClientPolicySubject, operation: ClientPolicyOperation) {
+  async policy(subject: ClientPolicySubject, operation: ClientPolicyOperation,
+    reader: Pick<AiClientTaskDb, '$queryRaw'> = this.dependencies.db, locked = false) {
     subject = structuredClone(subject);
     const { identity } = subject;
     let rows: unknown[];
     try {
-      rows = await this.dependencies.db.$queryRaw<unknown[]>(Prisma.sql`SELECT * FROM ai_client_task_policies
+      rows = await reader.$queryRaw<unknown[]>(Prisma.sql`SELECT * FROM ai_client_task_policies
         WHERE tenantId = ${subject.tenantId} AND workspaceId = ${subject.workspaceId} AND channel = ${subject.channel}
-        AND customerType = ${subject.principalKind} AND sceneCode = ${this.scene.sceneCode} AND sceneVersion = ${this.scene.sceneVersion} LIMIT 1`);
+        AND customerType = ${subject.principalKind} AND sceneCode = ${this.scene.sceneCode} AND sceneVersion = ${this.scene.sceneVersion} LIMIT 1 ${locked ? Prisma.sql`FOR UPDATE` : Prisma.empty}`);
     } catch { throw unavailable(); }
     const parsed = policySchema.safeParse(Array.isArray(rows) && rows.length === 1 ? rows[0] : null);
     if (!parsed.success) throw unavailable();

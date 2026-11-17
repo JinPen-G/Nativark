@@ -29,11 +29,19 @@ export interface AiInspectionSavedCandidateReview {
   reviewIssues: AiInspectionReviewIssueDraft[]; basisIssues: AiInspectionRecognitionBasisIssueDraft[];
   sourcesMatchDraftEvidence: boolean; adoption: 'human_confirmation_required' | 'unavailable';
 }
+/** Metadata from the original verified deletion receipt. It keeps human
+ * decisions traceable without returning erased AI candidates or questions. */
+export interface AiInspectionBodyRetentionDraft {
+  state: 'erased'; receiptId: string; policyVersion: string;
+  candidateRefs: Array<{ candidateId: string; fieldCode: string }>;
+  inputRefs: Array<{ inputId: string; inputFingerprint: string }>;
+}
 export interface AiInspectionDraftReadResponse {
   draftId: string; revision: number; status: AiInspectionDraftStatus; target: AiInspectionTarget; assetId: string;
   templateVersion: string; bindingFingerprint: string; state: AiInspectionDraftState; inspectionId: string | null;
   recognitionEvidence: 'caller_supplied_not_model_execution_proof';
   candidateReviews: AiInspectionSavedCandidateReview[];
+  bodyRetention?: AiInspectionBodyRetentionDraft;
 }
 export interface AiInspectionManualHttpRequests {
   'history-read': AiStaffInspectionHistoryRequest; 'receipt-host-read': AiStaffInspectionReceiptHostRequest;
@@ -87,6 +95,9 @@ const submission = object({ mode: choice('original_single', 'manual_review_only'
   body: object({ templateId: id, results: map({ oneOf: [text(2000, 0), { type: 'number' }, bool, list(id, 100)] }),
     attachments: list(id, 101), handoverSignatureFileAssetId: id }, ['templateId', 'results', 'attachments']) }, ['actionId', 'requestHash', 'body']);
 const nullable = (value: AiLeafSchemaDraft): AiLeafSchemaDraft => ({ oneOf: [value, nil] });
+const bodyRetention = object({ state: choice('erased'), receiptId: hash, policyVersion: id,
+  candidateRefs: list(object({ candidateId: id, fieldCode: id }), 100),
+  inputRefs: list(object({ inputId: id, inputFingerprint: hash }), 8) });
 const basisReference: AiLeafSchemaDraft = { oneOf: [
   object({ version: choice('inspection-recognition-basis-1'), status: choice('recorded'), referenceId: id, sourceHash: hash }),
   object({ version: choice('inspection-recognition-basis-1'), status: choice('not_recorded') }),
@@ -133,7 +144,9 @@ export const AI_INSPECTION_MANUAL_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft
       decision: choice('manual', 'accepted', 'modified', 'rejected'), candidateId: id, actorId: id }, ['value', 'decision', 'actorId'])),
       candidates: list(ref('AiInspectionCandidateDraft'), 100), evidence: list(evidence, 100), missingFields: list(id, 100),
       reviewRequired: bool, submission, recognitionInputs: list(recognition, 8), candidateBasis: map(basisReference) },
-      ['version', 'fields', 'candidates', 'evidence', 'missingFields', 'reviewRequired']) }),
+      ['version', 'fields', 'candidates', 'evidence', 'missingFields', 'reviewRequired']), bodyRetention },
+    ['draftId', 'revision', 'status', 'target', 'assetId', 'templateVersion', 'bindingFingerprint', 'inspectionId',
+      'recognitionEvidence', 'candidateReviews', 'state']),
   AiInspectionOperationResult: receipt,
   AiInspectionReceiptLookup: { oneOf: [object({ status: choice('found'), result: receipt }),
     object({ status: choice('absent') }), object({ status: choice('unavailable') })] },

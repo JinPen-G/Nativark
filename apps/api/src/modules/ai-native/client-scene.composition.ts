@@ -31,7 +31,7 @@ export interface AiClientSessionSource {
   withRead?<T>(operation: ClientReadOperation, value: unknown, read: (context: ClientRequestContext) => Promise<T>): Promise<T>;
 }
 
-type ClientReadOperation = 'catalog' | 'availability' | 'orders' | 'order' | 'feeItems' | 'corporateIdentities' | 'profile' | 'cancellationPreview' | 'quote' | 'bookingOptions' | 'savedDeliveryAddress';
+type ClientReadOperation = 'catalog' | 'availability' | 'orders' | 'order' | 'feeItems' | 'corporateIdentities' | 'profile' | 'paymentNavigation' | 'cancellationPreview' | 'quote' | 'bookingOptions' | 'savedDeliveryAddress';
 
 /** Request-bound production adapter: credentials are supplied by the server
  * request host, never by model/tool parameters. The existing Guard resolves
@@ -67,7 +67,7 @@ export function createAiGuardedClientSession(guard: Pick<ApiAuthGuard, 'canActiv
     withRead: async <T>(operation: ClientReadOperation, value: unknown, read: (context: ClientRequestContext) => Promise<T>) => {
       const routes = { catalog: 'catalog', availability: 'availability', orders: 'my/orders',
         order: 'orders', feeItems: 'orders', corporateIdentities: 'membership/corporates', profile: 'profile', cancellationPreview: 'orders',
-        quote: 'quotes', bookingOptions: 'membership/booking-options', savedDeliveryAddress: 'profile/addresses' } as const;
+        paymentNavigation: 'orders', quote: 'quotes', bookingOptions: 'membership/booking-options', savedDeliveryAddress: 'profile/addresses' } as const;
       if (!Object.prototype.hasOwnProperty.call(routes, operation)) throw new Error('AI_CLIENT_CAPABILITY_UNAVAILABLE');
       let path: string = routes[operation];
       const orderRead = operation === 'order' || operation === 'cancellationPreview' || operation === 'quote';
@@ -76,8 +76,14 @@ export function createAiGuardedClientSession(guard: Pick<ApiAuthGuard, 'canActiv
         if (!parsed.success) throw new Error('AI_CLIENT_INVALID_INPUT');
         path += `/${parsed.data}${operation === 'cancellationPreview' ? '/cancel/preview' : operation === 'feeItems' ? '/fee-items' : ''}`;
       }
+      if (operation === 'paymentNavigation') {
+        const payment = z.object({ orderId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
+          intentId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict().safeParse(value);
+        if (!payment.success) throw new Error('AI_CLIENT_INVALID_INPUT');
+        path += `/${payment.data.orderId}/payment-intents/${payment.data.intentId}`;
+      }
       const method = operation === 'availability' || operation === 'cancellationPreview' ? 'POST' : 'GET';
-      const routeValue = orderRead || operation === 'savedDeliveryAddress' ? {} : value;
+      const routeValue = orderRead || operation === 'savedDeliveryAddress' || operation === 'paymentNavigation' ? {} : value;
       return authorize(method, path, routeValue, async before => {
         const result = await read(before);
         await authorize(method, path, routeValue, async after => {

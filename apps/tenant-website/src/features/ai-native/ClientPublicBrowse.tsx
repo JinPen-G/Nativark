@@ -1,6 +1,6 @@
-/** Original public browse reference only. Current login must explicitly choose
- * continuation; rendering, re-opening, hiding and receipt reads never prepare
- * another request. Traditional catalogue/booking remain independent. */
+/** Original public browse reference only. Lifecycle callbacks inspect local
+ * locator presence; only explicit intents read or continue the original request.
+ * Cached records grant no execution. Traditional browsing stays independent. */
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { createAiClientPublicContinuitySession, type AiClientPublicContinuityView } from '@rental-os/shared';
@@ -8,7 +8,7 @@ import { customerSessionGeneration } from '@rental-os/web-client';
 import { loadSession, sessionApi, subscribeCustomerSession } from '../../data/authClient';
 import { createClientPublicApi } from './client-public-api';
 
-const empty: AiClientPublicContinuityView = { status: 'idle', expiresAt: null, canPrepare: true, canContinue: false,
+const empty: AiClientPublicContinuityView = { status: 'idle', expiresAt: null, canPrepare: false, canContinue: false,
   canRead: false, loginRequired: false };
 export function ClientPublicBrowse({ tenantCode, serviceCode, kind, english, loginHref }: {
   tenantCode: string; serviceCode: string; kind: 'catalog' | 'help'; english: boolean; loginHref: string;
@@ -16,27 +16,48 @@ export function ClientPublicBrowse({ tenantCode, serviceCode, kind, english, log
   const scope = JSON.stringify([tenantCode, serviceCode, kind]);
   const scopeRef = useRef(scope), owner = useRef<ReturnType<typeof createAiClientPublicContinuitySession> | null>(null);
   const epoch = useRef(0), busy = useRef(false);
+  const failedWrite = useRef<{ scope: string; reference: string | null; previous: string | null } | null>(null);
   const [state, setState] = useState({ scope, view: empty }), [working, setWorking] = useState(false);
   scopeRef.current = scope;
   const view = state.scope === scope ? state.view : empty;
   const signedIn = loadSession(tenantCode);
   const needsServiceSwitch = view.loginRequired && !!signedIn?.accessToken && signedIn.workspace?.workspaceCode !== serviceCode;
   useEffect(() => {
-    const close = () => { epoch.current++; busy.current = false; owner.current?.dispose(); owner.current = null;
-      setState({ scope, view: empty }); setWorking(false); };
-    close();
-    const changed = () => { close(); if (!document.hidden) void run('refresh'); };
-    const visibility = () => { if (document.hidden) close(); else void run('refresh'); };
+    let active = true;
+    const close = () => { if (!active) return; epoch.current++; busy.current = false; owner.current?.dispose(); owner.current = null;
+      if (active && scopeRef.current === scope) { setState({ scope, view: empty }); setWorking(false); } };
+    const restoreLocal = () => {
+      if (!active) return;
+      close();
+      if (!active || scopeRef.current !== scope || document.hidden) return;
+      try {
+        const present = sessionStorage.getItem(`rental-os:public-ai:${scope}`) !== null;
+        // Presence offers an explicit check only. The shared session validates
+        // the exact original locator under current authority after that click.
+        const held = present || failedWrite.current?.scope === scope;
+        setState({ scope, view: { ...empty, status: held ? 'unknown' : 'idle', canRead: held, canPrepare: !held } });
+      } catch { setState({ scope, view: { ...empty, status: 'unavailable', canRead: true } }); }
+    };
+    const changed = restoreLocal;
+    const visibility = () => { if (document.hidden) close(); else restoreLocal(); };
     const unsubscribe = subscribeCustomerSession(tenantCode, changed);
     document.addEventListener('visibilitychange', visibility); window.addEventListener('pagehide', close);
-    void run('refresh');
-    return () => { epoch.current++; owner.current?.dispose(); owner.current = null; unsubscribe();
+    restoreLocal();
+    return () => { close(); active = false; unsubscribe();
       document.removeEventListener('visibilitychange', visibility); window.removeEventListener('pagehide', close); };
   }, [scope, tenantCode]);
   const ensure = async () => {
-    if (owner.current) return owner.current;
-    const captured = epoch.current, current = () => captured === epoch.current && scopeRef.current === scope && !document.hidden;
+    if (owner.current) return { session: owner.current, opened: false };
+    const captured = epoch.current, sessionGeneration = customerSessionGeneration(tenantCode);
+    const current = () => captured === epoch.current && scopeRef.current === scope && !document.hidden
+      && customerSessionGeneration(tenantCode) === sessionGeneration;
     const key = `rental-os:public-ai:${scope}`;
+    let held = sessionStorage.getItem(key);
+    const read = () => {
+      const raw = sessionStorage.getItem(key);
+      if (!current() || raw !== held) throw Error('public_original_reference_changed');
+      return raw === null ? undefined : JSON.parse(raw);
+    };
     const session = createAiClientPublicContinuitySession({ target: { tenantCode, serviceCode }, kind, channel: 'web', current,
       client: () => {
         const value = loadSession(tenantCode), generation = customerSessionGeneration(tenantCode);
@@ -47,20 +68,43 @@ export function ClientPublicBrowse({ tenantCode, serviceCode, kind, english, log
           && loadSession(tenantCode)?.workspace?.workspaceCode === serviceCode };
       }, api: createClientPublicApi({ tenantCode, serviceCode, current }), now: Date.now,
       newKey: () => `public-${crypto.randomUUID()}`,
-      storage: { read: () => { const raw = sessionStorage.getItem(key); return raw === null ? undefined : JSON.parse(raw); },
-        write: value => { sessionStorage.setItem(key, JSON.stringify(value)); } },
-      changed: next => { if (current()) setState({ scope, view: next }); } });
-    owner.current = session; await session.open(); return session;
+      storage: { read,
+        write: value => {
+          const previous = held;
+          try {
+            read(); held = JSON.stringify(value);
+            sessionStorage.setItem(key, held);
+            if (sessionStorage.getItem(key) !== held) throw Error('public_original_reference_not_retained');
+          } catch (error) { failedWrite.current = { scope, reference: held, previous }; throw error; }
+        } },
+      changed: next => { if (current()) setState({ scope, view: failedWrite.current?.scope === scope
+        ? { ...next, canPrepare: false, canContinue: false, canRead: true } : next }); } });
+    owner.current = session; await session.open(); return current() ? { session, opened: true } : null;
   };
   const run = async (action: 'prepare' | 'refresh' | 'continueOriginal') => {
-    if (busy.current || document.hidden) return;
+    if (busy.current || document.hidden || scopeRef.current !== scope) return;
+    if (failedWrite.current?.scope === scope && action !== 'refresh') return;
+    const available = owner.current?.snapshot() ?? view;
+    if (action === 'prepare' && !available.canPrepare || action === 'continueOriginal' && !available.canContinue) return;
     const captured = epoch.current; busy.current = true; setWorking(true);
     try {
-      const session = await ensure();
-      if (captured !== epoch.current || document.hidden || scopeRef.current !== scope) return;
-      await session[action]();
+      if (failedWrite.current?.scope === scope) {
+        const retained = sessionStorage.getItem(`rental-os:public-ai:${scope}`);
+        // A failed response write may leave the confirmed pending journal. It
+        // still identifies this exact original request, so an explicit read may
+        // recover it; a competing page's different locator remains rejected.
+        if (retained === null || retained !== failedWrite.current.reference && retained !== failedWrite.current.previous) {
+          throw Error('public_original_reference_not_retained');
+        }
+        owner.current?.dispose(); owner.current = null; failedWrite.current = null;
+      }
+      const opened = await ensure();
+      if (!opened || captured !== epoch.current || document.hidden || scopeRef.current !== scope) return;
+      // open() already reads the held original record. One explicit check
+      // needs one read; subsequent checks reuse the same original session.
+      if (action !== 'refresh' || !opened.opened) await opened.session[action]();
     }
-    catch { if (captured === epoch.current) setState({ scope, view: { ...empty, status: 'unavailable', canPrepare: false } }); }
+    catch { if (captured === epoch.current) setState({ scope, view: { ...empty, status: 'unavailable', canRead: true } }); }
     finally { if (captured === epoch.current) { busy.current = false; setWorking(false); } }
   };
   return <section className="booking-card" aria-busy={working} aria-label={english ? 'Continue this browsing request' : '继续本次浏览'}>
@@ -72,7 +116,7 @@ export function ClientPublicBrowse({ tenantCode, serviceCode, kind, english, log
       onClick={() => void run('refresh')}>{english ? 'Check original request' : '核对原浏览记录'}</button>}
     {view.loginRequired && !needsServiceSwitch && <Link className="button button-outline" to={loginHref}>{english ? 'Log in to continue' : '登录后继续'}</Link>}
     {needsServiceSwitch && <button type="button" className="button button-outline" disabled={working} onClick={() => {
-      if (busy.current || document.hidden) return;
+      if (busy.current || document.hidden || scopeRef.current !== scope) return;
       const captured = epoch.current;
       busy.current = true; setWorking(true);
       void sessionApi.switchWorkspace(serviceCode).catch(() => {
@@ -82,7 +126,7 @@ export function ClientPublicBrowse({ tenantCode, serviceCode, kind, english, log
     {view.canContinue && <button type="button" className="button button-dark" disabled={working}
       onClick={() => void run('continueOriginal')}>{english ? 'Continue with this account' : '以当前账号继续本次浏览'}</button>}
     {view.status === 'continued' && <p role="status">{english ? 'This account is linked to the public request. Select rental details before requesting a quote.' : '本次公开浏览已续接到当前账号，请继续选择租赁条件后核价。'}</p>}
-    {view.status === 'unknown' && <p role="status">{english ? 'The original result needs checking. Keep this request.' : '原结果待核对，请保留本次记录。'}</p>}
+    {view.status === 'unknown' && <p role="status">{english ? 'The original result needs checking. Check the original request.' : '原结果待核对，请点击核对原浏览记录。'}</p>}
     {view.status === 'identity_changed' && <p role="status">{english ? 'This record belongs to another account session.' : '该记录属于另一账号会话，请继续普通浏览。'}</p>}
     {view.status === 'unavailable' && <p role="status">{english ? 'Continuation is unavailable. You can continue normal browsing and booking.' : '续接暂不可用，可继续普通浏览和预约。'}</p>}
   </section>;

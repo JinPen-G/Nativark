@@ -7,6 +7,7 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../database/prisma.service";
 import { lockActiveCategoryBinding } from "./category-active-write";
 import { BUSINESS_FAILURE_OUTBOX, type BusinessFailureOutboxParticipant } from "../ai-native/business-events/prisma-business-failure-outbox";
+import { stripNotificationDraftSnapshotBodies } from './rental-notification-snapshot';
 
 export const RENTAL_CONFIGURATION_REVISION_MAX = 2_147_483_647;
 
@@ -130,7 +131,7 @@ export class RentalStateRepository {
 
   async saveBusinessState(tenantId: string, workspaceId: string, state: unknown) {
     if (!this.enabled()) return;
-    const json = JSON.parse(JSON.stringify(state)) as Prisma.InputJsonValue;
+    const json = JSON.parse(JSON.stringify(stripNotificationDraftSnapshotBodies(state))) as Prisma.InputJsonValue;
     await this.prisma.rentalBusinessStateSnapshot.upsert({
       where: { workspaceId },
       update: { state: json },

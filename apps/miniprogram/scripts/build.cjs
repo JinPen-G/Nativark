@@ -155,6 +155,10 @@ async function main() {
   const nativeDirectory = path.join(dist, 'vendor', 'shared-ai-client');
   fs.mkdirSync(nativeDirectory, { recursive: true });
   fs.writeFileSync(path.join(nativeDirectory, 'index.js'), nativeRuntime.code);
+  const entryRuntime = await require('../../../scripts/miniprogram-ai-runtime.cjs').buildEntryActionRuntime(root);
+  const entryDirectory = path.join(dist, 'components', 'ai-native');
+  fs.mkdirSync(entryDirectory, { recursive: true });
+  fs.writeFileSync(path.join(entryDirectory, 'entry-action-runtime.js'), entryRuntime.code);
 
   // 默认值来自编译后的 config/public.js（即 src/config/public.ts 里的常量）。
   const configFile = path.join(dist, "config", "public.js");

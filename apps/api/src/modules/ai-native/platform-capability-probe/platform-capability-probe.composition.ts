@@ -26,6 +26,7 @@ import type { AiTaskRunnerClock } from '../runner/ai-task-runner.ports';
 import { PlatformTaskIdentityAuthority, composePlatformTaskAuthorization, PlatformTaskPlanPolicyReader } from './platform-probe.authorization';
 import { PlatformBudgetAuthorizationSource, PlatformPolicyEntitlementSource, PlatformGatewayCallPricing } from './platform-budget.authorization';
 import { PlatformCapabilityProbeAuthority } from './platform-probe.authority';
+import type { GatewayCapacityPort } from '../gateway-capacity.ports';
 
 export interface AuthorizedPlatformCapabilityProbeDependencies {
   db: PrismaClient;
@@ -38,6 +39,7 @@ export interface AuthorizedPlatformCapabilityProbeDependencies {
   priceVersion: string;
   host: { holderId: string; leaseMs: number };
   audit?: UnifiedGatewayAudit;
+  capacity?: GatewayCapacityPort;
   protocol?: ModelJsonTransport;
   clock?: () => Date;
   monotonic?: () => number;
@@ -107,7 +109,7 @@ export function composeAuthorizedPlatformCapabilityProbe(input: AuthorizedPlatfo
       auditForTask: (taskId, facts) => new PrismaPlatformGatewayAudit(input.db, scopes, facts, taskId, clock),
     }),
     ...(input.protocol !== undefined ? { protocol: input.protocol } : {}),
-    clock,
+    clock, ...(input.capacity ? { capacity: input.capacity } : {}),
     platformConnection: createAuthorizedPlatformModelConfiguration({ db: input.db, guard: input.guard,
       credentials: input.credentials, invocation: platformIdentity, profileId: input.platformProfileId,
       secrets: input.secrets }).invocation,

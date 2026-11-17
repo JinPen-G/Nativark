@@ -1,14 +1,19 @@
 import { z } from 'zod';
-import { AI_SCENE_REQUEST_DRAFT_VERSION, AI_SCENE_REQUEST_MAX_BYTES, type AiSceneRequestCreateDraft, type AiSceneRequestBody } from '@rental-os/shared';
+import { AI_SCENE_REQUEST_DRAFT_VERSION, AI_SCENE_REQUEST_MAX_BYTES, AI_QUOTE_GOAL_DRAFT_VERSION, AI_QUOTE_GOAL_LIMITS,
+  type AiSceneRequestCreateDraft, type AiSceneRequestBody } from '@rental-os/shared';
 import { aiQuoteCandidateInputSchema } from '../tools/quote-candidate-preparation.service';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const common = { draftVersion: z.literal(AI_SCENE_REQUEST_DRAFT_VERSION), requestKey: id.max(128) };
+export const originalQuoteGoalInputSchema = z.object({ kind: z.literal('quote_goal'),
+  draftVersion: z.literal(AI_QUOTE_GOAL_DRAFT_VERSION), goalText: z.string().min(1).max(AI_QUOTE_GOAL_LIMITS.goalCharacters)
+    .refine(value => value.trim().length > 0) }).strict();
 const bodies = [
   z.object({ ...common, sceneCode: z.literal('order_explanation'), input: z.object({ orderId: id, question: z.enum(['status', 'fees', 'payments', 'next_steps']) }).strict() }).strict(),
   z.object({ ...common, sceneCode: z.literal('opening_diagnosis'), input: z.object({ sections: z.array(id).min(1).max(9).refine(value => new Set(value).size === value.length) }).strict() }).strict(),
-  z.object({ ...common, sceneCode: z.literal('quote_clarification'), input: z.object({ candidate: aiQuoteCandidateInputSchema }).strict() }).strict()
+  z.object({ ...common, sceneCode: z.literal('quote_clarification'), input: z.union([
+    z.object({ candidate: aiQuoteCandidateInputSchema }).strict(), originalQuoteGoalInputSchema]) }).strict()
 ] as const;
 const create = z.discriminatedUnion('sceneCode', bodies);
 const reissue = z.discriminatedUnion('sceneCode', [bodies[0].extend({ previousInputRef: z.string().uuid() }), bodies[1].extend({ previousInputRef: z.string().uuid() }), bodies[2].extend({ previousInputRef: z.string().uuid() })]);

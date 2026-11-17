@@ -1,0 +1,4 @@
+.inspection-task { padding: 24rpx; overflow-wrap: anywhere; word-break: break-word; }
+.inspection-task > text { display: block; margin-bottom: 16rpx; }
+.inspection-task > button { min-height: 88rpx; margin-top: 16rpx; white-space: normal; }
+.inspection-task__note { margin-top: 24rpx; }

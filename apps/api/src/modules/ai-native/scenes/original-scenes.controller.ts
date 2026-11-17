@@ -17,7 +17,7 @@ import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_REQUEST_HTTP_CONTRACTS, AI_SCENE_
   type AiSceneModelQuoteConfirmResponseDraft, type AiSceneModelQuoteReceiptResponseDraft,
   type AiOriginalQuoteReviewResponseDraft, type AiOriginalQuoteConfirmResponseDraft,
   type AiOriginalQuoteReceiptResponseDraft, type AiOriginalQuotesCompareResponseDraft, type AiSceneTaskMaterialResponseDraft,
-  type AiSceneOrderExtensionPreviewDraft } from '@rental-os/shared';
+  validateAiQuoteGoalProjectionDraft, type AiSceneOrderExtensionPreviewDraft } from '@rental-os/shared';
 import { validateAiExtensionPreviewResponse } from './extension-preview-http.contract';
 import { originalPolicyRequest, originalPolicyResponse } from './original-policy-http.contract';
 import { originalRequestReferenceSchema } from '../task-request/original-request.validation';
@@ -419,6 +419,14 @@ export class AiOriginalSceneObservationController {
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readModelResult) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readModelResult(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
     return respondAiScene(async () => validateAiSceneModelObservation(await this.observations.readModelResult(request, body)));
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readQuoteGoalCandidates) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readQuoteGoalCandidates(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(async () => {
+      const value: unknown = await this.observations.readQuoteGoalCandidates(request, structuredClone(body));
+      if (!validateAiQuoteGoalProjectionDraft(value)) throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+      return value;
+    });
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.reopenModelSource) @HttpCode(200) @Header('Cache-Control', 'no-store')
   reopenModelSource(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {

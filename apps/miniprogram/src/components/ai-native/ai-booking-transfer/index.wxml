@@ -1,0 +1,34 @@
+<view wx:if="{{enabled}}" class="booking-transfer mt-16" aria-label="在另一端继续预约">
+  <view class="section-title">在另一端继续预约</view>
+  <view class="body mt-16">先在另一端正常登录同一商户和服务。这里只转接原预约引用，订单仍需在原预约页确认提交。</view>
+  <view wx:if="{{!loggedIn}}" class="body mt-16">请先正常登录，再打开此预约转接入口。</view>
+  <button wx:if="{{kind === 'issue' && view.canIssue}}" class="btn btn--primary btn--block mt-16" loading="{{working}}"
+    disabled="{{working || paused}}" bindtap="onIssue">生成短期转接引用</button>
+  <view wx:if="{{kind === 'consume' && view.canRetain}}" class="field mt-16">
+    <view class="field__label">另一端提供的转接引用</view>
+    <view class="input-box"><input class="field__input" type="text" value="{{reference}}" maxlength="36"
+      disabled="{{!loggedIn || working || paused}}" bindinput="onReference" aria-label="另一端提供的转接引用" /></view>
+    <button class="btn btn--outline btn--block mt-16" disabled="{{!view.canRetain || !reference || working || paused}}"
+      bindtap="onRetain">保留引用，准备接续</button>
+    <view wx:if="{{view.hasLocator}}" class="body mt-16">可明确选择另一个原转接引用；原引用和未知操作继续保留。</view>
+  </view>
+  <view wx:if="{{kind === 'consume' && view.hasLocator}}" class="body mt-16 booking-transfer__reference">已保留原转接引用：{{view.transferRef}}</view>
+  <button wx:if="{{view.canConsume}}" class="btn btn--primary btn--block mt-16" loading="{{working}}"
+    disabled="{{working || paused}}" bindtap="onConsume">确认接续原预约</button>
+  <view wx:if="{{view.issue.state === 'issued'}}" class="body mt-16">
+    <view>在另一端输入此短期引用：</view>
+    <view class="booking-transfer__reference mt-16" user-select="true">{{view.transferRef}}</view>
+    <view class="mt-16">引用有效至：{{view.expiresAt}}</view>
+  </view>
+  <button wx:if="{{view.canRead}}" class="btn btn--outline btn--block mt-16" disabled="{{working || paused}}"
+    bindtap="onRead">核对原转接结果</button>
+  <button wx:if="{{kind === 'consume' && view.canRead}}" class="btn btn--outline btn--block mt-16" disabled="{{working || paused}}"
+    bindtap="onReceipt">只核对原预约结果</button>
+  <button wx:if="{{view.canContinue}}" class="btn btn--primary btn--block mt-16" loading="{{working}}"
+    disabled="{{working || paused}}" bindtap="onContinue">核对引用并打开原预约页</button>
+  <view wx:if="{{working}}" class="body mt-16">正在核对原转接。</view>
+  <view wx:if="{{view.status === 'unknown'}}" class="notice notice--warning mt-16">原结果待核对，请读取原收据，不重复转接。</view>
+  <view wx:if="{{view.status === 'expired'}}" class="notice mt-16">短期引用已到期，不能继续；已有操作仍可核对原收据。</view>
+  <view wx:if="{{view.status === 'consumed'}}" class="body mt-16">已读取原接续收据；它不表示订单创建、付款或履约成功。</view>
+  <view wx:if="{{error || view.status === 'unavailable'}}" class="notice notice--warning mt-16">暂时无法核对，请保留原引用并读取原结果。</view>
+</view>

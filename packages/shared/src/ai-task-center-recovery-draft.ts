@@ -13,7 +13,7 @@ import { leafClosed as object, leafEnum as choice, leafId as id, leafInt as inte
 
 export const AI_TASK_CENTER_RECOVERY_HTTP = Object.freeze({ basePath: 'ai-native/task-center/recovery',
   target: 'target', snapshot: 'snapshot', recover: 'recover', takeover: 'takeover', receipt: 'receipt' } as const);
-export type AiTaskRecoveryHostDraft = 'order_read' | 'opening_model' | 'quote_model' | 'opening_read';
+export type AiTaskRecoveryHostDraft = 'order_read' | 'opening_model' | 'quote_model' | 'opening_read' | 'selected_quote_order';
 export interface AiTaskRecoveryTargetQueryDraft { taskId: string; runId?: string }
 export interface AiTaskRecoveryRunQueryDraft { taskId: string; runId: string }
 export interface AiTaskRecoveryCommandDraft extends AiTaskRecoveryRunQueryDraft {
@@ -47,7 +47,7 @@ export const AI_TASK_CENTER_RECOVERY_SCHEMAS: Record<string, AiLeafSchemaDraft> 
   AiTaskRecoveryCommandDraft: object({ ...receipt, planHash: hash }),
   AiTaskRecoveryReceiptQueryDraft: object(receipt),
   AiTaskRecoveryTargetDraft: { oneOf: [
-    object({ ...base, status: choice('available'), host: choice('order_read', 'opening_model', 'quote_model', 'opening_read'),
+    object({ ...base, status: choice('available'), host: choice('order_read', 'opening_model', 'quote_model', 'opening_read', 'selected_quote_order'),
       original: ref('AiSceneRequestReadDraft'), originRunId: shortId, planHash: hash, snapshot: ref('AiTaskRecoverySnapshot'),
       actions: { type: 'array', items: choice('recover', 'takeover'), minItems: 0, maxItems: 2, uniqueItems: true } }),
     object({ ...base, status: choice('unavailable'), reason: choice('original_request_unavailable', 'plan_unavailable',

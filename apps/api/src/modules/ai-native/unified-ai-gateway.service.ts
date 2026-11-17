@@ -14,6 +14,8 @@ import type { UnifiedGatewayPorts, GatewayInvocationResult, GatewayStreamEvent }
 import { gatewayRoutingBinding } from './gateway-routing.service';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { isGatewayOrderExplainRequest } from './gateway-contract-validation';
+import { gatewayCapacityRequest, type GatewayCapacityLease } from './gateway-capacity.ports';
+import { retainGatewayCapacityPromise, retainGatewayCapacityIterator } from './gateway-capacity.service';
 
 type UnresolvedRequest = Omit<ModelRequest, 'model'> & { model?: string };
 type UnresolvedProtocolRequest = Omit<ModelProtocolRequest, 'model'> & { model?: string };
@@ -28,6 +30,7 @@ export class UnifiedAiGatewayService {
   private readonly intentBinding?: GatewayTextIntentBinding;
   constructor(private readonly ports: UnifiedGatewayPorts, private readonly deadlineMs = 120_000, intentBinding?: GatewayTextIntentBinding) {
     if (!Number.isSafeInteger(deadlineMs) || deadlineMs < 1 || deadlineMs > 120_000) throw new ModelGatewayError('CONFIG_INVALID');
+    if (ports.capacity !== undefined && typeof ports.capacity?.acquire !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
     if (intentBinding !== undefined) {
       const parsed = gatewayTextIntentBindingSchema.safeParse(intentBinding);
       if (!parsed.success) throw new ModelGatewayError('CONFIG_INVALID');
@@ -165,6 +168,17 @@ export class UnifiedAiGatewayService {
       throw error;
     }
   }
+  private async capacity(context: GatewayContext, profile: import('./provider-profile.ports').AiProviderProfileRecord,
+    callId: string, life: GatewayDeadline, capture: (lease: GatewayCapacityLease) => void) {
+    const capacity = this.ports.capacity;
+    if (!capacity) return;
+    await life.wait(() => capacity.acquire(gatewayCapacityRequest(context, profile, callId, life.expiresAt), life.controller.signal)
+      .then(lease => {
+        if (!lease || typeof lease.release !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+        if (life.controller.signal.aborted) { lease.release(); throw new ModelGatewayError(life.reason() ?? 'CANCELLED'); }
+        capture(lease);
+      }));
+  }
 
   private usageRecorder(value: GatewayAccountingCall, reservationId: string) {
     const call = structuredClone(value);
@@ -264,6 +278,7 @@ export class UnifiedAiGatewayService {
     let binding: AiDispatchBinding | undefined;
     let budgetCall: GatewayAccountingCall | undefined;
     let admissionId: string | undefined, reservationId: string | undefined, dispatched = false, accounted = false, settled = false, closed = false;
+    let capacityLease: GatewayCapacityLease | undefined, capacityTransferred = false;
     try {
       const resolution = structuredClone(await life.wait(() => this.ports.routing.resolve(context, this.required(request))));
       if (intentBinding && resolution.scene !== intentBinding.routeScene) throw new ModelGatewayError('CONFIG_INVALID');
@@ -293,6 +308,14 @@ export class UnifiedAiGatewayService {
         if (closed) { void life.cleanup(() => this.ports.dispatch.finish(structuredClone(token), 'cancelled')).catch(() => {}); }
         else admissionId = admission.id;
       }));
+      // Only the original acknowledged dispatch claimant may wait. A rejected
+      // or cancelled wait closes that exact unsent token, with no money reserve.
+      await this.capacity(context, route.profile, request.callId, life, lease => { capacityLease = lease; });
+      if (capacityLease) {
+        await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
+        await life.wait(() => this.assertMediaCurrent(context, transportRequest, life.controller.signal));
+        await life.wait(assertNativeCurrent);
+      }
       budgetCall = { context: structuredClone(context), binding: structuredClone(binding), expiresAt: life.expiresAt,
         request: { callId: request.callId, model: transportRequest.model, maxOutputTokens: request.maxOutputTokens, intentHash: intentBinding?.intentHash ?? hash,
           countRequestHash: nativeResult
@@ -317,16 +340,24 @@ export class UnifiedAiGatewayService {
       dispatched = true;
       const recordUsage = this.usageRecorder(call, usage.id);
       const transportStarted = performance.now();
+      const beforeDispatch = () => {
+        if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
+        capacityLease?.assertCurrent?.();
+      };
       const invoke = () => nativeResult ? this.ports.transport.invokeNativeToolResult!(structuredClone(context),
-        structuredClone(transportRequest), structuredClone(route), life.controller.signal, structuredClone(nativeResult), recordUsage, call.request.countRequestHash)
-        : this.ports.transport.invoke(structuredClone(context), structuredClone(transportRequest), structuredClone(route), life.controller.signal, recordUsage, call.request.countRequestHash);
-      const rawResult = structuredClone(await life.wait(() => invoke()
-        .then(async value => {
-          // Pin the returned payload before receipt persistence yields to its owner.
-          const result = structuredClone(value);
-          if (result.usage) await recordUsage(result.usage);
-          return result;
-        })));
+        structuredClone(transportRequest), structuredClone(route), life.controller.signal, structuredClone(nativeResult), recordUsage, call.request.countRequestHash, beforeDispatch)
+        : this.ports.transport.invoke(structuredClone(context), structuredClone(transportRequest), structuredClone(route), life.controller.signal, recordUsage, call.request.countRequestHash, beforeDispatch);
+      const rawResult = structuredClone(await life.wait(() => {
+        capacityLease?.assertCurrent?.();
+        capacityTransferred = true;
+        return retainGatewayCapacityPromise(capacityLease, invoke)
+          .then(async value => {
+            // Pin the returned payload before receipt persistence yields to its owner.
+            const result = structuredClone(value);
+            if (result.usage) await recordUsage(result.usage);
+            return result;
+          });
+      }));
       await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
       await life.wait(assertNativeCurrent);
       const result = intentBinding ? this.textResult(rawResult,
@@ -356,6 +387,7 @@ export class UnifiedAiGatewayService {
       if (admissionId && !terminalCommitted) { try { await life.cleanup(() => this.ports.dispatch.finish(structuredClone(binding!), dispatched ? 'unknown' : 'cancelled')); } catch { /* durable state is authoritative */ } }
       throw failure;
     } finally {
+      if (!capacityTransferred) capacityLease?.release();
       closed = true;
       life.close();
       if (!settled && (reservationId || admissionId)) {
@@ -379,6 +411,7 @@ export class UnifiedAiGatewayService {
     let binding: AiDispatchBinding | undefined;
     let budgetCall: GatewayAccountingCall | undefined;
     let admissionId: string | undefined, reservationId: string | undefined, dispatched = false, accounted = false, settled = false, closed = false;
+    let capacityLease: GatewayCapacityLease | undefined, capacityTransferred = false;
     let iterator: AsyncIterator<GatewayStreamEvent> | undefined;
     let sourceDone = false;
     let finalResult: GatewayInvocationResult | undefined;
@@ -412,6 +445,11 @@ export class UnifiedAiGatewayService {
         if (closed) { void life.cleanup(() => this.ports.dispatch.finish(structuredClone(token), 'cancelled')).catch(() => {}); }
         else admissionId = admission.id;
       }));
+      await this.capacity(context, route.profile, request.callId, life, lease => { capacityLease = lease; });
+      if (capacityLease) {
+        await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
+        await life.wait(() => this.assertMediaCurrent(context, transportRequest, life.controller.signal));
+      }
       budgetCall = { context: structuredClone(context), binding: structuredClone(binding), expiresAt: life.expiresAt,
         request: { callId: request.callId, model: transportRequest.model, maxOutputTokens: request.maxOutputTokens, intentHash: intentBinding?.intentHash ?? hash,
           countRequestHash: this.ports.transport.inputBoundHash?.(structuredClone(transportRequest), structuredClone(route), true) } };
@@ -433,7 +471,14 @@ export class UnifiedAiGatewayService {
       const transportStarted = performance.now();
       let firstText: number | null = null;
       let result: GatewayInvocationResult | undefined;
-      iterator = this.ports.transport.stream(structuredClone(context), structuredClone(transportRequest), structuredClone(route), life.controller.signal, recordUsage, call.request.countRequestHash)[Symbol.asyncIterator]();
+      const beforeDispatch = () => {
+        if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
+        capacityLease?.assertCurrent?.();
+      };
+      capacityLease?.assertCurrent?.();
+      iterator = retainGatewayCapacityIterator(this.ports.transport.stream(structuredClone(context), structuredClone(transportRequest), structuredClone(route),
+        life.controller.signal, recordUsage, call.request.countRequestHash, beforeDispatch)[Symbol.asyncIterator](), capacityLease);
+      capacityTransferred = true;
       while (true) {
         const item = await life.wait(() => iterator!.next().then(async value => {
           const item = structuredClone(value);
@@ -486,6 +531,7 @@ export class UnifiedAiGatewayService {
       if (admissionId && !terminalCommitted) { try { await life.cleanup(() => this.ports.dispatch.finish(structuredClone(binding!), dispatched ? 'unknown' : 'cancelled')); } catch { /* durable state is authoritative */ } }
       throw failure;
     } finally {
+      if (!capacityTransferred) capacityLease?.release();
       life.controller.abort();
       closed = true;
       life.close();

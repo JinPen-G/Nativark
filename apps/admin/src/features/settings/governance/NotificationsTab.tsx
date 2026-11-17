@@ -18,10 +18,12 @@ import styles from "./GovernanceForms.module.css";
 
 type TemplateForm = Omit<SaveRentalNotificationTemplateRequest, "variableSchema"> & { variableDefinitions: NotificationVariableRow[] };
 const deliveryLabels: Record<RentalNotificationSendLogV1["status"], string> = {
+  draft: "未发送草稿",
   sent: "服务商已受理", delivered: "已送达", delivery_pending: "等待回执", delivery_failed: "投递失败",
   delivery_uncertain: "结果未知", queued: "待发送", failed: "发送失败", simulated: "模拟", simulation_failed: "模拟失败",
 };
 const deliveryColor = (status: RentalNotificationSendLogV1["status"]) => status === "delivered" ? "success"
+  : status === "draft" ? "default"
   : status === "sent" || status === "delivery_pending" ? "processing" : status === "simulated" ? "default"
     : status === "queued" || status === "delivery_uncertain" ? "warning" : "error";
 

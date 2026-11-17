@@ -99,12 +99,14 @@ export class AiQuotePreviewService {
    * from the authorized immutable repository, never model parameters. Read-only
    * recovery cannot fall through to quote creation when no row is observed. */
   async previewOriginal(value: unknown, original: Readonly<{ reference: string; expectedIdentityHash: string }>,
-    expectedConfigurationFingerprint?: string, readOnly = false, expectedAddressFingerprint?: string): Promise<AiQuotePreviewResult> {
+    expectedConfigurationFingerprint?: string, readOnly = false, expectedAddressFingerprint?: string,
+    revalidateOriginal?: () => Promise<void>): Promise<AiQuotePreviewResult> {
     const binding = structuredClone(original);
     if (!binding.reference || binding.reference.length > 512 || !/^[a-f0-9]{64}$/.test(binding.expectedIdentityHash)
       || typeof this.core.createQuoteForOriginalOperation !== 'function'
-      || typeof this.core.readQuoteForOriginalOperation !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
-    return this.execute(value, expectedConfigurationFingerprint, { ...binding, readOnly }, expectedAddressFingerprint);
+      || typeof this.core.readQuoteForOriginalOperation !== 'function'
+      || revalidateOriginal !== undefined && typeof revalidateOriginal !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+    return this.execute(value, expectedConfigurationFingerprint, { ...binding, readOnly }, expectedAddressFingerprint, revalidateOriginal);
   }
 
   /** Called inside the guarded read composition with a currently authorized
@@ -155,7 +157,7 @@ export class AiQuotePreviewService {
 
   private async execute(value: unknown, expectedConfigurationFingerprint?: string,
     original?: Readonly<{ reference: string; expectedIdentityHash: string; readOnly: boolean }>,
-    expectedAddressFingerprint?: string): Promise<AiQuotePreviewResult> {
+    expectedAddressFingerprint?: string, revalidateOriginal?: () => Promise<void>): Promise<AiQuotePreviewResult> {
     const parsed = aiQuotePreviewInputSchema.safeParse(value);
     if (!parsed.success) {
       const fields = [...new Set(parsed.error.issues.map(issue => issue.path.join(".")).filter(Boolean))];
@@ -202,6 +204,10 @@ export class AiQuotePreviewService {
           // Recheck the original quote permission immediately before R1 work.
           return this.authority.withQuote(structuredClone(parsed.data) as RentalQuoteRequest, async final => {
             if (binding(final) !== binding(context)) throw new ModelGatewayError('FORBIDDEN');
+            // A final credential/config/address wait may have superseded the
+            // human answer. This trusted server callback rechecks its original
+            // Task/Run before R1, never from a model or HTTP payload.
+            if (!original?.readOnly) await revalidateOriginal?.();
             try {
               const operation = original ? {
                 key: originalQuoteKey(context, original.reference), inputHash: expectedRequest

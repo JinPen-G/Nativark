@@ -20,6 +20,7 @@ const definitions = JSON.parse(JSON.stringify({ ...AI_BUSINESS_MATERIAL_DRAFT_SC
 const ajv = new Ajv({ strict: true, coerceTypes: false, useDefaults: false, removeAdditional: false });
 addFormats(ajv);
 const quoteMaterial = ajv.compile<AiQuoteBusinessMaterialDraft>({ $ref: '#/$defs/AiQuoteBusinessMaterialDraft', $defs: definitions });
+const goalMaterial = ajv.compile<import('@rental-os/shared').AiQuoteGoalBusinessMaterialDraft>({ $ref: '#/$defs/AiQuoteGoalBusinessMaterialDraft', $defs: definitions });
 const openingMaterial = ajv.compile<AiOpeningBusinessMaterialDraft>({ $ref: '#/$defs/AiOpeningBusinessMaterialDraft', $defs: definitions });
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const same = (a: unknown, b: unknown) => requestFingerprint(a) === requestFingerprint(b);
@@ -71,6 +72,20 @@ export function buildQuotePreparationSummary(input: {
   request: AiSceneRequestBody; material: unknown; history: Parameters<typeof applyOriginalQuoteAnswers>[1];
 }): string {
   const material = structuredClone(input.material);
+  if (input.request.sceneCode === 'quote_clarification' && input.request.input.kind === 'quote_goal') {
+    if (!goalMaterial(material) || material.payloadFingerprint !== requestFingerprint(material.payload)
+      || material.payloadBytes !== Buffer.byteLength(JSON.stringify(material.payload), 'utf8')
+      || material.payload.facts.goalHash !== requestFingerprint(input.request.input)
+      || !same(material.payload.scope, material.payload.facts.configuration.scope)
+      || material.payload.audience !== material.payload.facts.configuration.audience) throw unavailable();
+    const configuration = material.payload.facts.configuration;
+    return ['原报价目标（尚未形成正式报价参数）',
+      `配置版本：${code(configuration.configVersion)}；品类：${code(configuration.categoryCode)}；时区：${configuration.timeZone}。`,
+      `原配置观察时间：${configuration.observedAt}。`,
+      '模型仅提取未确认的条件；客户、商品、数量、日期和地点仍须明确核对。',
+      '未选择客户或企业付款方，未核价、锁库存、批准或创建订单。',
+      '通过原候选和澄清入口继续；unknown 只读取原结果，不换键重做。'].join('\n');
+  }
   if (input.request.sceneCode !== 'quote_clarification' || !quoteMaterial(material)
     || material.payloadFingerprint !== requestFingerprint(material.payload)
     || material.payloadBytes !== Buffer.byteLength(JSON.stringify(material.payload), 'utf8')

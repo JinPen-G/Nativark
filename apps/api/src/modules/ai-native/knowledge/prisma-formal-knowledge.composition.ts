@@ -3,17 +3,21 @@ import { createKnowledgePolicyManagementFactory, type KnowledgePolicyManagementF
 import type { KnowledgePolicyManagementDb } from './human-knowledge-policy-management.service';
 import { composeFormalPersistedHumanKnowledge, type FormalHumanKnowledgeDependencies } from './persistent-knowledge.composition';
 import { PrismaKnowledgeActionPolicySource } from './prisma-knowledge-policy.source';
+import type { KnowledgeReadOperationLogs } from './knowledge-sensitive-read.audit';
 
 export type PrismaFormalKnowledgeDependencies = Omit<FormalHumanKnowledgeDependencies, 'knowledgePolicy' | 'memory'> & {
   policyDb: KnowledgePolicyReadDb;
   policyManagement?: KnowledgePolicyManagementFactoryOptions;
   memory?: Omit<NonNullable<FormalHumanKnowledgeDependencies['memory']>, 'policy'>;
+  /** Original durable audit for request-owned sensitive consumers. Missing
+   * wiring cannot grant plaintext delivery at the scene/file boundary. */
+  operationLogs?: KnowledgeReadOperationLogs;
 };
 
 /** Opt-in only. Empty/disabled/expired policy storage never becomes a grant.
  * Provisioning grants is a separate authorized administrative responsibility. */
 export function composePrismaFormalHumanKnowledge(input: PrismaFormalKnowledgeDependencies) {
-  const { policyDb, memory, policyManagement, ...base } = input;
+  const { policyDb, memory, policyManagement, operationLogs: _operationLogs, ...base } = input;
   const policies = new PrismaKnowledgeActionPolicySource(policyDb, () => new Date(input.clock.now()));
   if (policyManagement && !Object.is(policyDb, input.db)) throw new Error('Knowledge management requires the original policy transaction');
   const management = policyManagement ? createKnowledgePolicyManagementFactory({ ...policyManagement,
