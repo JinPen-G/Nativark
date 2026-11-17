@@ -6,6 +6,30 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、15、16、17、18及19／20／21／22／23／24／25／26已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain28-copilot-versioned-transfer-20261118"></a>
+## AIN-28 Copilot原会话转接版本修复与非作者复验（2026-11-18）
+
+控制台修复已普通推送并回读GitHub，固定AI提交为`0f09a14708b44ffac84fd1b46ba738039c0eefa4`。dev1继续复现业务页Copilot的转接P2，实际点击函数仅传四字段，原控制台读取器要求含`draftVersion`的五字段定位，页面跳转后因此未接收原会话。原反例进程58888退出0，stdin SHA-256为`482df12ae6f0aec4fa5506e5ce5841d800e48d34760d4ad05bad23f94e2f3bfb`。
+
+Root在原`CopilotLayout`消费shared正式出口的`AI_CONVERSATION_DRAFT_VERSION`，转接携带同一原会话的完整定位。固定源码blob为`f3ac8de0653ec10bd8f8ec3bdfccec8fe5a272a7`，严格读取器blob为`091a5b4b9ba9939569759f25e4a909b60700875b`。实际接收页面经该读取器调用原`openNative`。[Copilot点击入口](../../apps/admin/src/features/copilot/CopilotLayout.tsx)、[严格读取器](../../apps/admin/src/features/ai-native/conversation-navigation.ts)、[控制台接收页](../../apps/admin/src/features/ai-operator/AiOperatorPage.tsx)
+
+### 原反例及最终验证
+
+- Root沿实际点击函数AST及真实导航读取器运行原正向断言，旧源码退出1，修后退出0。同一会话和场景转接成功，错版本、身份、epoch、额外字段、当前路由撤权及切workspace均拒绝。原关闭调用1次，模型、Task、服务端业务写入及服务读取均为0，audit为空，行为目录未创建。
+- 旧源码和修后stdin SHA-256分别为`e7d421767881e2fb1368a7b8401cb0ddca8889dc526654d12e0bbe2a738ddc57`与`9b21f012c10fdf5cb4c9fd189c2848d150bbb86c1f7329aef2dbb9cf1a90b014`。命令沿`node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 -`，使用本树原离线preload和不可达DATABASE_URL。
+- 完整后台TypeScript5.9.3最终候选树为`b44e38d58c33340f4caa86bc423fa32ba2af7b49`，相比控制台已验树仅替换本片Copilot源。shared为129根／337源／129份内存声明，admin为665根／4002源，诊断均为0，退出0。类型命令将内存上限设为4096，stdin SHA-256为`af1b46e54cb4bff62d94f962e5e2f1b525383f00458364809dc79845203ce257`，audit为空。
+- dev1从实际`transfer`点击和严格读取器独立复验，进程29308退出0，stdin SHA-256为`071a7b529a851b1f221851d38d9e88e21f797f95541cf76e722d41a496610ec2`。合法五字段恢复同一会话，错版本、身份和epoch均拒绝，模型、Task及服务端业务写入均为0，audit为空。最终原对话终态时间为2026-11-18 03:14:06（Asia/Shanghai），四份源码blob与本片及控制台已上传提交核同。
+
+dev1完成原键恢复、可见观测、固定确认及权限／对象隔离四项非作者核定。可见观测沿原启动标记回读、准确来源和连续两帧可见，原结果重开保持原窗口。确认分别消费原人工复核、批准、继续及Core收据，历史回读沿只读状态。当前身份、scope、epoch和隐藏撤回均沿原实际边界。本片两P2均完成非作者复验。[控制台修复](#ain28-console-next-round-recovery-20261118)、[原入口及操作资料](#ain28-user-operation-real-test-handoff-20261117)
+
+dev1首轮连续读取夹具因空`updateNode`返回`undefined`而退出1，改用原`chat-state`后退出0，失败stdin SHA-256为`4c52b0fb751dc03b944e69afd070fc20bb57cc8e5b7c9611306d1aecf2b29c42`。原失败输出和两个旧反例保留在原对话。Root前一阶段的提示断言失败也沿原证据保留。
+
+Root最小证据树为`bc100ef2cb96decd15d349b0e2922f388fe749b3`，唯一保留于本地引用`refs/codex/ai-native/ain28-copilot-transfer-20261118`，包含旧失败、最终stdin／实际输出、类型和dev1终态，可用`git show refs/codex/ai-native/ain28-copilot-transfer-20261118:metadata.json`读取。分支提交和该本地引用的可用范围分别按实际结果核定。
+
+Root类型进程61608已退出，finally删除本树`output/.tmp/ain28-copilot-transfer`及其唯一audit文件并核实消失。dev1五个进程均退出，原任务目录从未创建。本片服务、端口、数据库、依赖、构建产物及文件测试脚本创建数均为0。真实浏览器、Controller与外部环境沿负责人实测清单执行。原28继续核完整四条、最终归档及main交付，任务百分比保持原表。
+
+原文档检查器核11/11白名单文档、0错误，新增阶段及接续本地锚点均通过，`git diff --check`退出0。
+
 <a id="ain28-console-next-round-recovery-20261118"></a>
 ## AIN-28 控制台原结果核对后下一轮恢复修复（2026-11-18）
 
