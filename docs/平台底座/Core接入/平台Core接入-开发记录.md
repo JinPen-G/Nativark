@@ -11,6 +11,27 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-http-entry-20261118"></a>
+
+## Rental空间能力与员工收款HTTP单源接入（2026-11-18）
+
+固定父版d08dc345983672850a8c13728b0f9add987ad287保全原Controller、DTO及完整接续，已实际远端回读。RD与dev1继续共用原施工树；本片由RD迁入两条Rental HTTP链，dev1在非交叉文件修公共集成和接公共页面。当天真实main为7d49c26c9423f2400a233275e84cca5cb4127fa3，相对已接1d53ada2bb79a220e4d99f75f27508bfac5360a5只改AI Native三册；待本片固化后按固定版本归并，不整取其他树WIP。
+
+[空间能力Controller](../../../packages/rental-core/src/http-workspace-capabilities.controller.ts)、[员工收款Controller](../../../packages/rental-core/src/http-staff-payments.controller.ts)及[空间能力DTO](../../../packages/rental-core/src/http-workspace-capability.dto.ts)实际迁入Rental包，原三路径仅再导出同一类。[HTTP服务接点](../../../packages/rental-core/src/http-service-ports.ts)只给出本链实际方法与两个令牌，[原AppModule](../../../apps/api/src/app.module.ts)通过useExisting提供原服务实例。原8条路径、10个方法正文/HTTP装饰器和DTO校验保持；原Guard/ALS、员工地点范围、操作人、业务事务、审计和原收据沿原链裁定，无Core公共宿主不登记这些Controller。
+
+现有API合同/权限检查原先只读旧Controller正文。新增共用[源码发现接点](../../../scripts/controller-sources.cjs)，沿本仓库正式包出口、再导出和继承读取实际实现，两个原检查复用此入口；不执行Controller/Core或加载宿主。原合同、schema引用、权限及Seed断言未删除或放宽。发现81份实际源码，包含两个迁出Controller、公共认证父类、订阅/集成和Core管理转接。
+
+| 必要核对 | 实际结果与边界 |
+| --- | --- |
+| HTTP包级冒烟 | 复用既有stdin内存入口，退出0；实际Nest路径/Inject元数据、原服务委托、缺空间拒绝、空地点范围、同一ALS及旧新Controller对象同一性通过。服务/身份为明确fixture，无数据库查询 |
+| 完整类型与原用例 | `node --no-compilation-cache - api tests/workspace-capability.test.cjs`，退出0；十配置0诊断，Rental231根/958源/462输出、API1031根/2548源/2062输出。原空间能力用例全部通过，未新增永久测试脚本 |
+| 共同版本 | 上述完整类型使用dev1当前已稳定的集成JSON存储修复；编译前后11份HTTP/存储接点正文一致。修复由所属宿主映射本schema的JsonNull，保留原测试配置CAS；其独立阶段由dev1交付后统一固化 |
+| 失败与缺口 | 首轮完整类型2处集成JsonNull诊断已由dev1修；仅三包装载原用例的早期虚拟依赖解析失败保留。现有API合同检查仍退出1，报告614项：包括符号/单引号路径尚未识别及其他未配对路径；本片8条路由没有缺合同/缺Controller报告。链式后续DTO/权限/客户写归属检查未执行，不称整体合同检查通过 |
+| 资料与出口 | 六份现行/模块资料1547个本地链接、173个锚点，0问题；2个DTO类正文与固定父版一致，4个新增出口的JS/声明及typesVersions解析到同一产物，差异格式检查退出0 |
+| 环境 | 原238模型由Prisma5.22官方WASM/generator在内存生成，TS5.9.3；源码/声明/JS和短核对均留内存。没有安装、生成共享client/dist、真实HTTP/数据库、浏览器、迁移或服务启动 |
+
+源码职责、正式出口及实际接线同步到[Rental包导读](../../../packages/rental-core/README.md)和[原业务导读](../../../apps/api/src/modules/rental-core/README.md)。完整Rental主/业务Controller、各端、schema/迁移/Seed、标准装配与AI/作业仍待收口；API源码发现的非字面量路径缺口纳入后续接口规范化。原PCH本片未跨下一档，需求/任务身份与规则保持。旧清理受阻、外观失败及历史缺链沿现行接续承接，不以局部通过证明全功能或正式验收。固定提交由包含本节的Git提交定位，普通推送后读取真实远端。
+
 <a id="core-shared-dev1-migration-20261118"></a>
 
 ## 副手成果迁入与共享工作树协作（2026-11-18）

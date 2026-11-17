@@ -782,6 +782,22 @@
     "./enterprise-approval-ports": {
       "types": "./dist/enterprise-approval-ports.d.ts",
       "default": "./dist/enterprise-approval-ports.js"
+    },
+    "./http-service-ports": {
+      "types": "./dist/http-service-ports.d.ts",
+      "default": "./dist/http-service-ports.js"
+    },
+    "./http-workspace-capabilities": {
+      "types": "./dist/http-workspace-capabilities.controller.d.ts",
+      "default": "./dist/http-workspace-capabilities.controller.js"
+    },
+    "./http-staff-payments": {
+      "types": "./dist/http-staff-payments.controller.d.ts",
+      "default": "./dist/http-staff-payments.controller.js"
+    },
+    "./http-workspace-capability.dto": {
+      "types": "./dist/http-workspace-capability.dto.d.ts",
+      "default": "./dist/http-workspace-capability.dto.js"
     }
   },
   "typesVersions": {
@@ -1364,6 +1380,18 @@
       ],
       "enterprise-approval-ports": [
         "dist/enterprise-approval-ports.d.ts"
+      ],
+      "http-service-ports": [
+        "dist/http-service-ports.d.ts"
+      ],
+      "http-workspace-capabilities": [
+        "dist/http-workspace-capabilities.controller.d.ts"
+      ],
+      "http-staff-payments": [
+        "dist/http-staff-payments.controller.d.ts"
+      ],
+      "http-workspace-capability.dto": [
+        "dist/http-workspace-capability.dto.d.ts"
       ]
     }
   },

@@ -12,6 +12,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const { controllerSources } = require("./controller-sources.cjs");
 
 require("ts-node").register({
   transpileOnly: true,
@@ -34,17 +35,6 @@ const isPublic = (routePath) =>
   PUBLIC_ROUTE_PREFIXES.some((prefix) => routePath === prefix || routePath.startsWith(`${prefix}/`));
 
 const repoRoot = path.resolve(__dirname, "..");
-const controllerRoot = path.join(repoRoot, "apps", "api", "src", "modules");
-
-function readControllerFiles(dir) {
-  const files = [];
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) files.push(...readControllerFiles(fullPath));
-    else if (entry.isFile() && entry.name.endsWith(".controller.ts")) files.push(fullPath);
-  }
-  return files;
-}
 
 /** 控制器前缀 + 方法路由 → 守卫看到的路径（已剥掉全局 /api 前缀）。 */
 function guardPath(prefix, route) {
@@ -57,8 +47,7 @@ function guardPath(prefix, route) {
 
 function controllerRoutes() {
   const routes = [];
-  for (const file of readControllerFiles(controllerRoot)) {
-    const source = fs.readFileSync(file, "utf8");
+  for (const [file, source] of controllerSources(repoRoot)) {
     const controllerMatch = source.match(/@Controller\((?:"([^"]*)")?\)/);
     if (!controllerMatch) continue;
     const prefix = controllerMatch[1] ?? "";

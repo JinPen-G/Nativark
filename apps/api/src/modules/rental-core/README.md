@@ -2,6 +2,8 @@
 
 Rental Core维护租赁领域事实，包括经营空间/品类、商品和资产、报价库存、订单履约、检查及金额。它是首个业务Core示范，平台身份、公共后台和原AI机制通过受控适配消费，具体报价、金额与状态仍在原Core裁定。
 
+[空间能力Controller](workspace-capability.controller.ts)和[员工收款Controller](staff-offline-payment.controller.ts)已转接Rental包的同一HTTP实现。宿主用正式服务令牌绑定原实例，原Guard/ALS、员工地点范围、DTO、业务事务和原收据沿原链处理；租户、空间及操作人来自已验证身份。[实际HTTP与接线](../../../../../packages/rental-core/README.md#使用与构建) · [原API文档](../../contracts/openapi-document.ts) · [迁出源码发现](../../../../../scripts/controller-sources.cjs)
+
 企业预约、续租/换货费用批准和商户委托的五个服务也已转接Rental包。原Controller/客户API继续供给同一身份、政策、核心和调用方事务；费用批准不代替资金或检查同意，unknown按原键读取。企业续租报价显式传递已有事务，授信占用由Core生效流程执行一次。[批准链与参加者](../../../../../packages/rental-core/README.md#使用与构建) · [实际预约批准](../../../../../packages/rental-core/src/mysql-enterprise-approval.ts) · [实际续租批准](../../../../../packages/rental-core/src/mysql-enterprise-extension-approval.ts) · [实际换货批准](../../../../../packages/rental-core/src/mysql-enterprise-exchange-approval.ts) · [明确委托提交](../../../../../packages/rental-core/src/mysql-enterprise-merchant-order-submission.ts)
 
 [通知缓存](rental-notification-log-cache.ts)和[恢复投影](rental-notification-snapshot.ts)已转接Rental包内同一实现。原业务provider供给原通知正文保留读取器，维护策略和删除账仍由AI隐私模块裁定；草稿保存、原结果读取和发送分别授权。进程缓存及恢复副本只留核验过的无正文引用，删除后的原结果返回原删除收据；失应答不换键重做。[草稿接点](../../../../../packages/rental-core/src/notification-draft.ts) · [实际缓存核验](../../../../../packages/rental-core/src/notification-log-cache.ts) · [实际恢复投影](../../../../../packages/rental-core/src/notification-snapshot.ts) · [原维护读取器](../ai-native/privacy/retention-notification-draft.ts)

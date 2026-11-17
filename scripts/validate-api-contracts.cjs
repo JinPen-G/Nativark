@@ -1,5 +1,5 @@
-const fs = require("node:fs");
 const path = require("node:path");
+const { controllerSources } = require("./controller-sources.cjs");
 
 require("ts-node").register({
   transpileOnly: true,
@@ -15,26 +15,7 @@ const {
 } = require("../apps/api/src/contracts/openapi-document");
 
 const repoRoot = path.resolve(__dirname, "..");
-const controllerRoot = path.join(repoRoot, "apps", "api", "src", "modules");
 const httpMethods = ["get", "post", "put", "patch", "delete"];
-
-function readControllerFiles(dir) {
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
-  const files = [];
-
-  for (const entry of entries) {
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...readControllerFiles(fullPath));
-      continue;
-    }
-    if (entry.isFile() && entry.name.endsWith(".controller.ts")) {
-      files.push(fullPath);
-    }
-  }
-
-  return files;
-}
 
 function normalizeRoute(prefix, route) {
   const raw = ["api", prefix, route]
@@ -48,8 +29,7 @@ function normalizeRoute(prefix, route) {
 function controllerOperations() {
   const routes = [];
 
-  for (const file of readControllerFiles(controllerRoot)) {
-    const source = fs.readFileSync(file, "utf8");
+  for (const [file, source] of controllerSources(repoRoot)) {
     const controllerMatch = source.match(/@Controller\((?:"([^"]*)")?\)/);
     if (!controllerMatch) {
       continue;

@@ -6,6 +6,7 @@
 
 | 入口 | 职责与直接消费者 |
 | --- | --- |
+| [空间能力HTTP](src/http-workspace-capabilities.controller.ts)、[员工收款HTTP](src/http-staff-payments.controller.ts)、[服务接点](src/http-service-ports.ts)、[空间能力DTO](src/http-workspace-capability.dto.ts) | 正式HTTP子出口持有原8条路径与校验；宿主Guard先形成可信身份，再通过同一原服务实例处理。原API只再导出，Controller注册不取得额外业务权限 |
 | [核心聚合](src/mysql-core-runtime.ts)、[宿主接点](src/core-runtime-ports.ts) | `/mysql-core-runtime` 持有原配置、库存、订单、交接及结算裁定；原Nest入口供给同一13项依赖，Controller/AI/企业及各端继续消费原签名 |
 | [报价/营销聚合](src/mysql-business-runtime.ts)、[宿主接点](src/business-runtime-ports.ts) | `/mysql-business-runtime` 维护价格、日历、规则、报价、券、奖励和通知恢复；原Nest入口保持14项依赖并供给原正文保留读取器，当前与历史价格分别读取 |
 | [订单确认](src/mysql-order-confirmation.ts)、[确认接点](src/order-confirmation-ports.ts)、[批准合同](src/approved-order-transaction.ports.ts) | `/mysql-order-confirmation` 与 `/approved-order-ports` 保留原报价消费、库存/容量、券、批准和幂等同事务提交，客户/企业参加者由宿主供给 |
@@ -87,6 +88,8 @@
 | [批准设置应用](src/mysql-approved-settings.ts)、[真实路由授权桥](src/approved-settings-route-authority.ts)、[参加者合同](src/approved-settings-ports.ts)、[严格输入](src/approved-settings-validation.ts) | /mysql-approved-settings 与 /approved-settings-route-authority 复用原Guard/ALS，通知配置CAS、批准消费与原操作同事务，历史读取不以当前配置或过期重做 |
 
 ## 使用与构建
+
+HTTP入口从 `/http-workspace-capabilities`、`/http-staff-payments` 导入；`/http-service-ports` 给出两个服务令牌及实际方法合同。宿主将令牌绑定到原空间能力、原员工收款服务，使用 `useExisting` 保持同一实例；当前 [API装配](../../apps/api/src/app.module.ts) 是兼容示例。原 [Guard](../../apps/api/src/common/api-auth.guard.ts)、员工地点投影、当前空间、事务与原收据仍由原链核验。公共无Core宿主不注册这些Controller。字段与路径继续查 [OpenAPI](../../apps/api/src/contracts/openapi-document.ts)，SDK接点不开放Agent工具。
 
 租赁客户仓储从 `@rental-os/rental-core/mysql-customer-master` 创建，传入同一数据源。注册、合并、会员/账号状态和企业流程持有原锁及事务，再把同一事务传给仓储方法；普通姓名变更使用原修订CAS，企业关系变化不恢复旧授权。后台重置口令和客户端自助注册分别沿原规则，不能借重试解除暂停。[原注册入口](../../apps/api/src/modules/platform/customer-registration.service.ts) · [原注册验证](../../tests/customer-registration-unified.test.cjs) · [写入口检查](../../scripts/validate-customer-write-ownership.cjs)
 
