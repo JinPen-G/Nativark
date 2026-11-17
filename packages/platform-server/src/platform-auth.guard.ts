@@ -32,12 +32,17 @@ export class PlatformAuthGuard implements CanActivate {
       throw new ForbiddenException("首次登录或密码重置后必须先修改密码");
     if (!policy && !this.cores?.registered(method, path, "operator"))
       throw new ForbiddenException("该接口未在当前公共宿主或Core中登记");
+    if (policy?.access === "tenant_summary" && user.isSaasAdmin)
+      throw new ForbiddenException("当前接口只读取调用者本租户的订阅摘要");
     if (policy?.access === "tenant" && (user.isSaasAdmin || !user.isPlatformAdmin
       && !user.permissions.includes("*") && !user.permissions.includes(policy.permission)))
       throw new ForbiddenException("当前账号缺少本租户设置权限");
     if (policy?.access === "saas" && (!user.isSaasAdmin
       || !user.permissions.includes("*") && !user.permissions.includes(policy.permission)))
       throw new ForbiddenException("当前接口需要SaaS管理身份和权限");
+    // 原订阅管理沿SaaS身份的system:tenant:授权，普通租户通配权限仍不能进入。
+    if (policy?.access === "saas_subscription" && !user.isSaasAdmin)
+      throw new ForbiddenException("仅 SaaS 平台管理员可以管理租户订阅");
     enterRequestIdentity({ tenantId: user.tenantId, userId: user.id, audience: "operator", accessSession: current.accessSession,
       permissions: [...user.permissions], isPlatformAdmin: user.isPlatformAdmin, isSaasAdmin: Boolean(user.isSaasAdmin),
       workspaceId: undefined, dataScope: user.dataScope, organizationId: user.organizationId, locationScope: undefined,

@@ -22,7 +22,9 @@ import { CATEGORY_PREPARATION_PREVIEW_SCHEMA, CATEGORY_PREPARATION_BATCH_READ_SC
   CATEGORY_ADOPTION_REQUEST_SCHEMA, CATEGORY_ADOPTION_RESULT_SCHEMA, CATEGORY_ADOPTION_RECEIPT_SCHEMA } from "./category-governance-schemas";
 import { DESKTOP_BUSINESS_SCHEMAS, DESKTOP_BUSINESS_OPERATIONS } from './ai-desktop-business-schemas';
 import { AI_AUTOMATION_EVENT_TASK_HTTP_DRAFT } from '@rental-os/shared';
-import { RENTAL_CATEGORY_CODE_PATTERN, RENTAL_CATEGORY_ICON_CODES, FeatureOwnership, FeatureReleaseStatus, SubscriptionRequestType, SubscriptionPlan } from '@rental-os/shared';
+import { RENTAL_CATEGORY_CODE_PATTERN, RENTAL_CATEGORY_ICON_CODES } from '@rental-os/shared';
+import { SUBSCRIPTION_HTTP_OPERATIONS } from '@rental-os/platform-server/subscription-http-policy';
+import { SUBSCRIPTION_OPENAPI_SCHEMAS, SUBSCRIPTION_OPENAPI_QUERY_SCHEMAS } from '@rental-os/platform-server/subscription-openapi';
 import { AI_AUTOMATION_REVIEW_HTTP_CONTRACTS, AI_AUTOMATION_REVIEW_GRANT_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_AUTOMATION_EXPLANATION_HTTP, AI_AUTOMATION_EXPLANATION_CONTRACTS } from '@rental-os/shared';
 import { AI_AUTOMATION_POLICY_HTTP_CONTRACTS } from '@rental-os/shared';
@@ -73,6 +75,7 @@ export interface SchemaObject {
   pattern?: string;
   minimum?: number;
   maximum?: number;
+  multipleOf?: number;
   items?: SchemaObject;
   minItems?: number;
   maxItems?: number;
@@ -167,7 +170,7 @@ function apiResult(schema?: string | SchemaObject): SchemaObject {
       data: toSchema(schema),
       requestId: stringSchema
     },
-    ["data", "requestId"]
+    schema === "Subscription.Void" ? ["requestId"] : ["data", "requestId"]
   );
 }
 
@@ -247,6 +250,7 @@ function buildPaths(operations: ContractOperation[]) {
 }
 
 export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
+  ...SUBSCRIPTION_OPENAPI_SCHEMAS,
   ...STAFF_UPLOAD_OBSERVATION_SCHEMAS,
   ...AI_MEMBER_NAME_SCHEMAS,
   ...AI_TASK_RULE_DRAFT_SCHEMAS,
@@ -4349,39 +4353,16 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   backlogOperation("put", "/api/platform/official-calendars/{id}", "OfficialCalendarSource", "updateOfficialCalendarSource", "Update a public official calendar source", ["system:calendar-source:manage"]),
   backlogOperation("get", "/api/platform/official-calendars/{id}/versions", "OfficialCalendarSource", "listOfficialCalendarSourceVersions", "List versions of a public official calendar source", ["system:calendar-source:manage"]),
   backlogOperation("post", "/api/platform/official-calendars/{id}/versions", "OfficialCalendarSource", "registerOfficialCalendarSourceVersion", "Register a new annual version of a public official calendar source", ["system:calendar-source:manage"]),
-  // SUB-01 SaaS 版本订阅（§5.2/§7/§8）。租户端 platform/subscription（单数）自读/申请；平台端 platform/subscriptions（复数）跨租户管理，守卫另有 fail-closed。
-  backlogOperation("get", "/api/platform/subscription/view", "Subscription", "getTenantSubscriptionView", "Get the calling tenant's subscription aggregate view", ["rental-os:subscription:view"]),
-  { method: "get", path: "/api/platform/subscription/category-labels", tag: "Subscription", operationId: "getTenantSubscriptionCategoryLabels",
-    summary: "Read Core-owned published category labels visible to this tenant; existing spaces remain labelled after new opening stops",
-    permissions: ["rental-os:subscription:view"], responseSchema: arrayOf(objectOf({ code: rentalCategoryCodeSchema, name: { type: "string", maxLength: 100 } }, ["code", "name"], false)) },
-  backlogOperation("get", "/api/platform/subscription/reminder", "Subscription", "getTenantSubscriptionReminder", "Get the authenticated tenant's expiry summary without commercial details", []),
-  { ...backlogOperation("post", "/api/platform/subscription/requests", "Subscription", "submitTenantSubscriptionRequest", "Submit an upgrade/renew/consult request for the calling tenant", ["rental-os:subscription:manage"]),
-    requestSchema: objectOf({ type: { type: "string", enum: Object.values(SubscriptionRequestType) }, targetPlan: { type: "string", enum: Object.values(SubscriptionPlan) },
-      moduleIntent: { type: "array", maxItems: 100, uniqueItems: true, items: rentalCategoryCodeSchema }, contactName: { type: "string", maxLength: 120 }, contactPhone: { type: "string", maxLength: 32 },
-      note: { type: "string", maxLength: 2000 }, dedupeKey: { type: "string", minLength: 1, maxLength: 191, pattern: "\\S" } }, ["type", "dedupeKey"], false) },
-  backlogOperation("post", "/api/platform/subscription/requests/{id}/cancel", "Subscription", "cancelTenantSubscriptionRequest", "Cancel the calling tenant's own pending request", ["rental-os:subscription:manage"]),
-  backlogOperation("get", "/api/platform/subscriptions", "Subscription", "listTenantSubscriptions", "List tenant subscriptions (plan/serviceStatus/dueWithin/keyword filters)", ["system:tenant:subscription:manage"]),
-  backlogOperation("get", "/api/platform/subscriptions/feature-catalog", "Subscription", "listSubscriptionFeatureCatalog", "List the platform feature catalog", ["system:tenant:subscription:manage"]),
-  { method: "get", path: "/api/platform/subscriptions/category-labels", tag: "Subscription", operationId: "getPlatformSubscriptionCategoryLabels",
-    summary: "Read minimal Core-owned published category identities for subscription catalog maintenance; no tenant facts or draft definitions",
-    permissions: ["system:tenant:subscription:manage"], responseSchema: arrayOf(objectOf({ code: rentalCategoryCodeSchema, name: { type: "string", maxLength: 100 } }, ["code", "name"], false)) },
-  backlogOperation("get", "/api/platform/subscriptions/standard-prices", "Subscription", "listSubscriptionStandardPrices", "List standard plan prices", ["system:tenant:subscription:manage"]),
-  backlogOperation("patch", "/api/platform/subscriptions/requests/{id}", "Subscription", "handleSubscriptionRequest", "Handle (process/reject) a subscription request", ["system:tenant:subscription:manage"]),
-  { ...backlogOperation("put", "/api/platform/subscriptions/feature-catalog/{code}", "Subscription", "upsertSubscriptionFeatureCatalog", "Upsert a feature catalog entry (full PUT)", ["system:tenant:subscription:manage"]),
-    requestSchema: objectOf({ code: { type: "string", minLength: 1, maxLength: 191 }, name: { type: "string", minLength: 1, maxLength: 191 }, module: { type: "string", minLength: 1, maxLength: 191 },
-      categories: { type: "array", maxItems: 100, uniqueItems: true, items: rentalCategoryCodeSchema }, defaultOwnership: { type: "string", enum: Object.values(FeatureOwnership) },
-      currentOwnership: { type: "string", enum: Object.values(FeatureOwnership) }, releaseStatus: { type: "string", enum: Object.values(FeatureReleaseStatus) },
-      valueText: stringSchema, prerequisiteText: stringSchema, externalFeeNote: stringSchema, contentVersion: { type: "string", maxLength: 64 }, reason: { type: "string", maxLength: 512 } },
-    ["code", "name", "module", "categories", "defaultOwnership", "currentOwnership", "releaseStatus"], false) },
-  backlogOperation("put", "/api/platform/subscriptions/standard-prices/{plan}", "Subscription", "setSubscriptionStandardPrice", "Set a standard plan price", ["system:tenant:subscription:manage"]),
-  backlogOperation("get", "/api/platform/subscriptions/{tenantId}", "Subscription", "getTenantSubscriptionDetail", "Get one tenant's subscription detail", ["system:tenant:subscription:manage"]),
-  backlogOperation("post", "/api/platform/subscriptions/{tenantId}/provision", "Subscription", "provisionTenantSubscription", "Provision a tenant subscription", ["system:tenant:subscription:manage"]),
-  backlogOperation("post", "/api/platform/subscriptions/{tenantId}/renew", "Subscription", "renewTenantSubscription", "Renew a tenant subscription", ["system:tenant:subscription:manage"]),
-  backlogOperation("post", "/api/platform/subscriptions/{tenantId}/upgrade", "Subscription", "upgradeTenantSubscriptionPro", "Upgrade a tenant subscription to PRO", ["system:tenant:subscription:manage"]),
-  backlogOperation("post", "/api/platform/subscriptions/{tenantId}/extend", "Subscription", "extendTenantSubscription", "Temporarily extend a tenant subscription end", ["system:tenant:subscription:manage"]),
-  backlogOperation("post", "/api/platform/subscriptions/{tenantId}/schedule-next", "Subscription", "scheduleNextTenantSubscription", "Schedule the next subscription segment", ["system:tenant:subscription:manage"]),
-  backlogOperation("post", "/api/platform/subscriptions/{tenantId}/feature-grants", "Subscription", "grantTenantFeature", "Grant a tenant-specific feature", ["system:tenant:subscription:manage"]),
-  backlogOperation("post", "/api/platform/subscriptions/{tenantId}/feature-grants/revoke", "Subscription", "revokeTenantFeature", "Revoke a tenant-specific feature grant", ["system:tenant:subscription:manage"]),
+  // 公共订阅HTTP与schema单源。保留原客户端路径和operationId，员工投影仍由Rental消费。
+  ...SUBSCRIPTION_HTTP_OPERATIONS.map((item): ContractOperation => ({
+    method: item.method.toLowerCase() as HttpMethod,
+    path: `/api${item.path.replace(/:([a-zA-Z]+)/g, "{$1}")}`,
+    tag: "Subscription", operationId: item.id, summary: item.summary,
+    permissions: "permission" in item ? [item.permission] : [],
+    responseSchema: item.response,
+    ...("request" in item ? { requestSchema: item.request } : {}),
+    ...("query" in item ? { parameters: item.query.map(name => queryParam(name, SUBSCRIPTION_OPENAPI_QUERY_SCHEMAS[name])) } : {})
+  })),
   backlogOperation("get", "/api/rental/v1/subscription/context", "Subscription", "getStaffSubscriptionContext", "Staff/operator read-only subscription & entitlement context for the staff mini-program (amounts redacted)", []),
   backlogOperation("put", "/api/rental/v1/calendars/{year}/days/{date}", "RentalBusiness", "updateRentalBusinessCalendarDay", "Update tenant calendar day", ["rental-os:calendar:edit", "rental-os:price:manage"]),
   backlogOperation("delete", "/api/rental/v1/calendars/{year}/days/{date}", "RentalBusiness", "removeRentalBusinessCalendarDayOverride", "Remove tenant calendar day override", ["rental-os:calendar:edit", "rental-os:price:manage"]),

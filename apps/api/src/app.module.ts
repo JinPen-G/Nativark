@@ -151,6 +151,7 @@ import { TenantSubscriptionController } from "./modules/subscription/subscriptio
 import { PlatformSubscriptionController } from "./modules/subscription/subscription-platform.controller";
 import { StaffSubscriptionController } from "./modules/subscription/subscription-staff.controller";
 import { SubscriptionService } from "./modules/subscription/subscription.service";
+import { SUBSCRIPTION_APPLICATION } from "@rental-os/platform-server/subscription-store";
 import { PublicDemoRequestController } from "./modules/demo-requests/public-demo-request.controller";
 import { PlatformDemoRequestController } from "./modules/demo-requests/platform-demo-request.controller";
 import { DemoRequestService } from "./modules/demo-requests/demo-request.service";
@@ -462,6 +463,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     WebsiteChannelProfileService,
     WebsiteAssetService,
     SubscriptionService,
+    { provide: SUBSCRIPTION_APPLICATION, useExisting: SubscriptionService },
     DemoRequestService,
     IntegrationsService,
     IntegrationsRepository,

@@ -1,3 +1,4 @@
+import { SUBSCRIPTION_ROUTES } from "@rental-os/platform-admin/subscription/subscriptionRoutes";
 import { ApartmentOutlined, ApiOutlined, AppstoreOutlined, BgColorsOutlined, BoxPlotOutlined, CalendarOutlined, ControlOutlined, CrownOutlined, DashboardOutlined, FileSearchOutlined, FileTextOutlined, FormOutlined, FundOutlined, GiftOutlined, IdcardOutlined, MobileOutlined, SafetyCertificateOutlined, SettingOutlined, ShopOutlined, TagsOutlined, TeamOutlined, ToolOutlined } from "@/components/ui/icons";
 import { RentalCategoryCode, type RentalCapability, type RentalCategoryTerminology } from "@rental-os/shared";
 import type { ReactNode } from "react";
@@ -97,12 +98,12 @@ export const APP_ROUTES = {
   platformTools: { path: "/platform/tools", label: "平台工具与治理", permission: "system:params:manage", audience: "saas", icon: <ControlOutlined />, menu: true },
   platformOfficialCalendars: { path: "/platform/official-calendars", label: "公共官方日历", permission: "system:calendar-source:manage", audience: "saas", icon: <CalendarOutlined />, menu: true },
   // SUB-02/03 版本订阅：租户端「版本与订阅」(rental-os:subscription:view 进入、:manage 办理) + PRO 介绍/申请详情；平台端「租户订阅」用 system:tenant:subscription:manage（复用 system:tenant: 前缀，走既有 SaaS 管理员放行，无需改 authStore）。权限码与服务端守卫严格同名，legacyPermissions 留空。
-  subscription: { path: "/settings/subscription", label: "版本与订阅", permission: "rental-os:subscription:view", audience: "tenant", icon: <CrownOutlined />, menu: true },
-  subscriptionPro: { path: "/settings/subscription/pro", label: "版本对比", permission: "rental-os:subscription:view", audience: "tenant", icon: <CrownOutlined /> },
-  subscriptionRequestDetail: { path: "/settings/subscription/requests/:id", label: "申请详情", permission: "rental-os:subscription:view", audience: "tenant", icon: <CrownOutlined /> },
-  platformSubscriptions: { path: "/platform/subscriptions", label: "租户订阅", permission: "system:tenant:subscription:manage", audience: "saas", icon: <CrownOutlined />, menu: true },
-  platformSubscriptionDetail: { path: "/platform/subscriptions/:id", label: "租户订阅详情", permission: "system:tenant:subscription:manage", audience: "saas", icon: <CrownOutlined /> },
-  subscriptionCatalog: { path: "/platform/subscription-catalog", label: "功能目录与定价", permission: "system:tenant:subscription:manage", audience: "saas", icon: <AppstoreOutlined />, menu: true }
+  subscription: { path: SUBSCRIPTION_ROUTES.subscription.path, label: "版本与订阅", permission: "rental-os:subscription:view", audience: "tenant", icon: <CrownOutlined />, menu: true },
+  subscriptionPro: { path: SUBSCRIPTION_ROUTES.subscriptionPro.path, label: "版本对比", permission: "rental-os:subscription:view", audience: "tenant", icon: <CrownOutlined /> },
+  subscriptionRequestDetail: { path: SUBSCRIPTION_ROUTES.subscriptionRequestDetail.path, label: "申请详情", permission: "rental-os:subscription:view", audience: "tenant", icon: <CrownOutlined /> },
+  platformSubscriptions: { path: SUBSCRIPTION_ROUTES.platformSubscriptions.path, label: "租户订阅", permission: "system:tenant:subscription:manage", audience: "saas", icon: <CrownOutlined />, menu: true },
+  platformSubscriptionDetail: { path: SUBSCRIPTION_ROUTES.platformSubscriptionDetail.path, label: "租户订阅详情", permission: "system:tenant:subscription:manage", audience: "saas", icon: <CrownOutlined /> },
+  subscriptionCatalog: { path: SUBSCRIPTION_ROUTES.subscriptionCatalog.path, label: "功能目录与定价", permission: "system:tenant:subscription:manage", audience: "saas", icon: <AppstoreOutlined />, menu: true }
 } satisfies Record<string, AppRouteDefinition>;
 
 export const APP_NAVIGATION: AppNavigationSection[] = [

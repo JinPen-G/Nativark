@@ -1,7 +1,7 @@
 /** 公共 Web 组合工厂，默认空Core。宿主注入登记页面，身份/权限来自原API。 */
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { createBrowserRouter, createRoutesFromElements, Navigate, Outlet, RouterProvider } from "react-router-dom";
-import { Blocks, Settings, UserRound } from "lucide-react";
+import { Blocks, Crown, Settings, UserRound } from "lucide-react";
 import { AdminRuntimeProvider } from "./runtime";
 import { AdminUiProvider } from "./AdminUiProvider";
 import { PlatformShell } from "./PlatformShell";
@@ -16,6 +16,9 @@ import { CoreAccessPage } from "./CoreAccessPage";
 import { canManagePublicResource } from "./application-access";
 import { useAdminSession } from "./runtime";
 import { PublicManagementPage } from "./features/access/PublicManagementPages";
+import { TenantSubscriptionPage, SubscriptionProPage, SubscriptionRequestDetailPage, PlatformSubscriptionsPage,
+  PlatformSubscriptionDetailPage, SubscriptionCatalogPage, SubscriptionExpiryFloatingCard, SubscriptionRoute,
+  SUBSCRIPTION_ROUTES, hasSubscriptionPermission } from "./features/subscription";
 
 function ProtectedLayout() {
   const { session, brandName, brand, pages } = usePlatformApplication();
@@ -37,13 +40,20 @@ function ProtectedLayout() {
     ...(can("system:user:manage") ? [{ path: "/settings/member-cores", label: en ? "Member Core access" : "成员 Core 分配" }] : []),
     ...(can("system:user:manage") ? [{ path: "/settings/users", label: en ? "Members" : "人员管理" }] : []),
     ...(can("system:role:manage") ? [{ path: "/settings/roles", label: en ? "Roles" : "角色权限" }] : []),
+    ...(hasSubscriptionPermission(state.user, "rental-os:subscription:view")
+      ? [{ path: SUBSCRIPTION_ROUTES.subscription.path, label: en ? "Plan and subscription" : "版本与订阅", icon: <Crown size={18} /> }] : []),
+    ...(hasSubscriptionPermission(state.user, "system:tenant:subscription:manage")
+      ? [{ path: SUBSCRIPTION_ROUTES.platformSubscriptions.path, label: en ? "Subscriptions" : "租户订阅", icon: <Crown size={18} /> },
+        { path: SUBSCRIPTION_ROUTES.subscriptionCatalog.path, label: en ? "Feature catalog and pricing" : "功能目录与定价", icon: <Blocks size={18} /> }] : []),
     ...(canManagePublicResource(state.user, "saas", "system:tenant:manage")
       ? [{ path: "/platform/tenants", label: en ? "Tenants" : "租户管理" }] : []),
     ...(canManagePublicResource(state.user, "saas", "system:tenant:manage")
       ? [{ path: "/platform/core-access", label: en ? "Tenant Core access" : "租户 Core 授权" }] : [])
   ];
   return <PlatformShell brandName={brandName} brand={brand} pages={pages} onSignOut={session.signOut}
-    publicSections={[{ key: "overview", label: "", routes }]}><Outlet key={session.currentSessionEpoch()} /></PlatformShell>;
+    publicSections={[{ key: "overview", label: "", routes }]}>
+    <Outlet key={session.currentSessionEpoch()} /><SubscriptionExpiryFloatingCard />
+  </PlatformShell>;
 }
 
 function SignIn() {
@@ -89,6 +99,12 @@ export function createPlatformAdminApplication(options: PlatformAdminApplication
     { path: "/settings/security", element: <AccountSecurity /> },
     { path: "/settings/appearance", element: <AccountAppearancePage /> },
     { path: "/settings/tenant", element: <TenantSetting /> }, { path: "/settings/tenant-appearance", element: <TenantSetting appearance /> },
+    { path: SUBSCRIPTION_ROUTES.subscription.path, element: <SubscriptionRoute permission="rental-os:subscription:view"><TenantSubscriptionPage /></SubscriptionRoute> },
+    { path: SUBSCRIPTION_ROUTES.subscriptionPro.path, element: <SubscriptionRoute permission="rental-os:subscription:view"><SubscriptionProPage /></SubscriptionRoute> },
+    { path: SUBSCRIPTION_ROUTES.subscriptionRequestDetail.path, element: <SubscriptionRoute permission="rental-os:subscription:view"><SubscriptionRequestDetailPage /></SubscriptionRoute> },
+    { path: SUBSCRIPTION_ROUTES.platformSubscriptions.path, element: <SubscriptionRoute permission="system:tenant:subscription:manage"><PlatformSubscriptionsPage /></SubscriptionRoute> },
+    { path: SUBSCRIPTION_ROUTES.platformSubscriptionDetail.path, element: <SubscriptionRoute permission="system:tenant:subscription:manage"><PlatformSubscriptionDetailPage /></SubscriptionRoute> },
+    { path: SUBSCRIPTION_ROUTES.subscriptionCatalog.path, element: <SubscriptionRoute permission="system:tenant:subscription:manage"><SubscriptionCatalogPage /></SubscriptionRoute> },
     { path: "/platform/core-access", element: <CoreAccessPage audience="saas" /> },
     { path: "/settings/member-cores", element: <CoreAccessPage audience="tenant" /> },
     { path: "/platform/tenants", element: <PublicManagementPage kind="tenants" /> },

@@ -1,7 +1,2 @@
-/** Controls edit service-local wall time; subscriptionOperations alone resolves it to an instant. */
-import dayjs, { type Dayjs } from "dayjs";
-
-export const serviceDateField = {
-  getValueProps: (value?: string) => ({ value: value ? dayjs(value) : null }),
-  getValueFromEvent: (value: Dayjs | null) => value?.format(value.millisecond() ? "YYYY-MM-DDTHH:mm:ss.SSS" : "YYYY-MM-DDTHH:mm:ss"),
-};
+/** 原后台兼容出口，订阅页面与交互由公共包唯一维护。 */
+export * from "@rental-os/platform-admin/subscription/subscriptionDateField";

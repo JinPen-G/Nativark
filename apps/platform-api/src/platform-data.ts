@@ -6,12 +6,13 @@ import { CoreDataContractSchema } from "@rental-os/core-contracts";
 import { mysqlStructureFromMigrations, readMysqlPhysicalData } from "@rental-os/platform-core-host";
 import type { CoreMysqlDataPlan } from "@rental-os/core-host/mysql-deployment";
 
-export const PUBLIC_PLATFORM_DATA_VERSION = "0.1.0";
+export const PUBLIC_PLATFORM_DATA_VERSION = "0.1.1";
 const migrations = [
   { id: "platform.foundation", name: "20261115000000_public_foundation", sha256: "b220ba5046f16900f7d475351ec466ae56c8b9c02cc5de703c8ded83784a710a" },
   { id: "platform.core-access", name: "20261115010000_core_access", sha256: "ef03bb4bae3ff0337213cb1f87aa2ebeb8338faec016be05de645dfea54c2411" },
   { id: "platform.core-bindings", name: "20261115020000_core_bindings", sha256: "5666ecd0d42099cf0865e8d8116709d3f7a07c77d360972cbe5866f15fa1a8bb" },
-  { id: "platform.subscription-term", name: "20261115030000_public_subscription_term", sha256: "ff2ca9614628d7b5282c22293bb81b8c6e70ce0d3d69be2da301fc0a89e7449b" }
+  { id: "platform.subscription-term", name: "20261115030000_public_subscription_term", sha256: "ff2ca9614628d7b5282c22293bb81b8c6e70ce0d3d69be2da301fc0a89e7449b" },
+  { id: "platform.subscription-operations", name: "20261117000000_public_subscription_operations", sha256: "60ebbcaf2d572514a5ce4209a074a8c9d31454a4fbcb4b07380915dde4d8fa66" }
 ] as const;
 
 export function createPublicPlatformDataPlan(): CoreMysqlDataPlan {

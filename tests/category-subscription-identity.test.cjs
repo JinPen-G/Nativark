@@ -20,7 +20,7 @@ test("subscription labels expose published Core names and scope tenant choices w
   assert.equal("OR" in reads[0].where, false);
   assert.deepEqual(reads[1].where.OR, [{ openingScope: "all" }, { openingScope: "pilot", openingTenantIds: { array_contains: "tenant-one" } }, { workspaces: { some: { tenantId: "tenant-one" } } }]);
   assert.deepEqual(reads[1].where.versions.some.status.in, ["published", "legacy_baseline"]);
-  const controller = new TenantSubscriptionController({ rentalCategoryLabels: async tenantId => { assert.equal(tenantId, "authenticated-tenant"); return []; } });
+  const controller = new TenantSubscriptionController({ categoryLabels: async tenantId => { assert.equal(tenantId, "authenticated-tenant"); return []; } });
   await controller.categoryLabels({ user: { tenantId: "authenticated-tenant" }, body: { tenantId: "foreign-tenant" } });
   assert.deepEqual(await rentalCategoryIdentityOptions(db, "tenant-one"), [{ code: "studio_kits", name: "舞台套装" }]);
 });

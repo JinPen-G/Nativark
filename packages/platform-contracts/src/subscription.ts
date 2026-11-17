@@ -1,11 +1,15 @@
 /**
- * SUB-01（SaaS 版本订阅与 PRO 升级专项）平台域只读契约。
+ * SUB-01（SaaS 版本订阅与 PRO 升级专项）公共订阅读取与办理契约。
  *
  * 对外只有基础版(standard)/PRO(pro) 两个版本（§2）；到期/待生效/未配置是「服务状态」，
  * 与版本名称分别展示。功能可用按「当前套餐公共权益 ∪ 租户额外授权」判定，不硬编码 PRO（§3.5/§9.1）。
  * §14.2 待定金额一律可空，页面显示"价格待公布/待确认"，不得退化为 0 元。
  * 正式出口为 `@rental-os/platform-contracts/subscription`；原shared再导出同一声明。
  */
+
+/** 原订阅适用范围的编码语法，注册和发布事实由实际宿主目录核验。 */
+export const SUBSCRIPTION_CATEGORY_CODE_PATTERN = /^(?!(?:constructor|prototype)$)[a-z][a-z0-9_]{1,63}(?![\s\S])/u;
+export interface SubscriptionCategoryLabel { code: string; name: string }
 
 /** 系统版本：对外只有这两个（§2）。 */
 export enum SubscriptionPlan {

@@ -4,13 +4,14 @@ import type { AuthUser, TenantIdentity, TenantAppearanceProfile, SaveTenantAppea
   CreatePlatformTenantRequest, SaveSystemUserRequest, SaveSystemRoleRequest, SystemRoleRow, SystemUserRow } from "@rental-os/platform-contracts";
 import { PLATFORM_HTTP_OPERATIONS } from "./platform-http-policy";
 import { RAW_HTTP_RESPONSE } from "./common/request-id.interceptor";
+import { SUBSCRIPTION_OPENAPI_SCHEMAS, SUBSCRIPTION_OPENAPI_QUERY_SCHEMAS } from "./modules/subscription/subscription-openapi";
 
 type Schema = { [field: string]: unknown };
 const string: Schema = { type: "string" }, boolean: Schema = { type: "boolean" };
 const integer: Schema = { type: "integer" }, strings: Schema = { type: "array", items: string };
 const object = (properties: Record<string, Schema>, required: readonly string[] = [], additionalProperties = false): Schema =>
   ({ type: "object", properties, required, additionalProperties });
-const ref = (name: string): Schema => ({ $ref: `#/components/schemas/Platform.${name}` });
+const ref = (name: string): Schema => ({ $ref: `#/components/schemas/${name.includes(".") ? name : `Platform.${name}`}` });
 const password: Schema = { type: "string", format: "password", writeOnly: true };
 const date: Schema = { type: "string", format: "date-time" };
 const location = object({ mode: { type: "string", enum: ["all", "selected"] }, locationIds: strings }, ["mode", "locationIds"]);
@@ -19,6 +20,7 @@ const radius = (maximum: number): Schema => ({ type: "integer", minimum: 4, maxi
 const array = (name: string): Schema => ({ type: "array", items: ref(name) });
 
 export const PLATFORM_OPENAPI_SCHEMAS = {
+  ...SUBSCRIPTION_OPENAPI_SCHEMAS,
   "Platform.Health": object({ service: string, status: string, time: date }, ["service", "status", "time"]),
   "Platform.OpenApi": { type: "object", additionalProperties: true },
   "Platform.LoginRequest": object({ tenantCode: string, account: string, password }, ["tenantCode", "account", "password"]),
@@ -89,20 +91,27 @@ export function createPlatformOpenApi() {
   for (const item of PLATFORM_HTTP_OPERATIONS) {
     const content = (schema: Schema) => ({ "application/json": { schema } });
     const raw = item.path === "/openapi.json";
-    const response = raw ? ref(item.response) : object({ data: ref(item.response), requestId: string }, ["data", "requestId"]);
+    const response = raw ? ref(item.response) : object({ data: ref(item.response), requestId: string },
+      item.response === "Subscription.Void" ? ["requestId"] : ["data", "requestId"]);
     const operation = { operationId: `Platform.${item.id}`, summary: item.summary, tags: ["Platform"],
       security: item.access === "anonymous" ? [] : [{ bearerAuth: [] }],
       "x-requiredPermissions": "permission" in item ? [item.permission] : [],
       "x-effect": item.method === "GET" ? "read" : "write",
-      description: item.access === "tenant" ? "当前operator的本租户管理范围，SaaS身份不代租户操作。当前角色/账号与提交条件由服务端复验，Core授权另行办理。"
+      description: item.access === "saas_subscription" ? "沿原SaaS订阅管理身份办理。租户父锁、当前修订、价格版本、申请与审计在原事务中核对；续费后仍需当前Core和成员授权。"
+        : item.access === "tenant_summary" ? "仅当前operator本租户的无金额提醒。SaaS身份不能代替租户读取，提醒不授予业务权限。"
+        : item.access === "tenant" ? "当前operator的本租户管理范围，SaaS身份不代租户操作。当前角色/账号与提交条件由服务端复验，Core授权另行办理。"
         : item.access === "saas" ? "仅当前SaaS管理身份与对应权限。平台管理不会获得目标租户业务访问权；创建账号口令只在本响应返回，不记日志。"
         : item.access === "self" ? "当前签名会话的本人范围；请求体和查询参数不能指定另一主体。" : "公共传输入口；登录保护及原令牌消费仍由对应服务执行。",
       ...("request" in item ? { requestBody: { required: true, content: content(ref(item.request)) } } : {}),
-      ...(item.path.includes(":") ? { parameters: item.path.split("/").filter(part => part.startsWith(":"))
-        .map(part => ({ name: part.slice(1), in: "path", required: true, schema: string })) } : {}),
+      parameters: [
+        ...item.path.split("/").filter(part => part.startsWith(":"))
+          .map(part => ({ name: part.slice(1), in: "path", required: true, schema: string })),
+        ...("query" in item ? item.query.map(name => ({ name, in: "query", required: false, schema: SUBSCRIPTION_OPENAPI_QUERY_SCHEMAS[name] })) : [])
+      ],
       responses: { [item.method === "POST" ? "201" : "200"]: { description: "成功", content: content(response) },
         "400": { description: "输入不符合原DTO或业务约束" }, "401": { description: "原会话失效或登录受限" },
-        "403": { description: "当前主体或操作权限不足" }, "409": { description: "会话或配置修订已变化" },
+        "403": { description: "当前主体或操作权限不足" }, "404": { description: "目标租户或原申请不存在" }, "409": { description: "会话或配置修订已变化" },
+        "503": { description: "实际必需参加者不可用，操作未完成" },
         "500": { description: "实际持久化失败；不能视为已保存或可重发" } } };
     (paths[`/api${item.path.replace(/:([a-z]+)/g, "{$1}")}`] ??= {})[item.method.toLowerCase()] = operation;
   }
