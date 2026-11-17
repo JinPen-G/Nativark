@@ -1,5 +1,26 @@
-/** 原登录/密码/脱敏安全配置的公共默认值与合并规则，保存权限和持久化由调用方处理。 */
+/** 原登录/密码/脱敏安全配置的公共默认、合并、数值校验和平台主体读取。保存由公共管理事务执行。 */
+import { BadRequestException } from "@nestjs/common";
 import type { SystemSecurityBaselineConfig } from "@rental-os/platform-contracts";
+import type { PlatformAuthDataStore } from "./platform-auth-data-store";
+
+export const PLATFORM_SECURITY_TENANT_ID = "tenant_platform";
+
+export async function readPlatformSecurityBaseline(source: Pick<PlatformAuthDataStore, "systemParameterSet">): Promise<SystemSecurityBaselineConfig> {
+  const row = await source.systemParameterSet.findFirst({
+    where: { tenantId: PLATFORM_SECURITY_TENANT_ID, module: "system-rules", status: "EFFECTIVE" },
+    orderBy: { versionNo: "desc" }
+  });
+  const content = row?.content as { security?: Partial<SystemSecurityBaselineConfig> } | undefined;
+  return normalizeSecurityBaseline(content?.security);
+}
+
+export function validateSecurityBaseline(input?: Partial<SystemSecurityBaselineConfig>) {
+  const security = normalizeSecurityBaseline(input);
+  const numbers = [security.loginRateLimit.maxFailures, security.loginRateLimit.windowMinutes, security.loginRateLimit.lockMinutes,
+    security.passwordPolicy.minLength, security.passwordPolicy.expireDays];
+  if (numbers.some(value => !Number.isFinite(value) || value < 0))
+    throw new BadRequestException("系统参数中的数字配置不能为负数");
+}
 
 export function defaultSecurityBaseline(): SystemSecurityBaselineConfig {
   return {

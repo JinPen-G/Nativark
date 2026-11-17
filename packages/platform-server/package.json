@@ -230,6 +230,26 @@
     "./official-calendar-openapi": {
       "types": "./dist/modules/official-calendars/official-calendar-openapi.d.ts",
       "default": "./dist/modules/official-calendars/official-calendar-openapi.js"
+    },
+    "./management": {
+      "types": "./dist/modules/platform/platform-management.service.d.ts",
+      "default": "./dist/modules/platform/platform-management.service.js"
+    },
+    "./management-store": {
+      "types": "./dist/modules/platform/platform-management.store.d.ts",
+      "default": "./dist/modules/platform/platform-management.store.js"
+    },
+    "./management-http": {
+      "types": "./dist/modules/platform/platform-management.controller.d.ts",
+      "default": "./dist/modules/platform/platform-management.controller.js"
+    },
+    "./settings-http-policy": {
+      "types": "./dist/modules/platform/platform-settings-http-policy.d.ts",
+      "default": "./dist/modules/platform/platform-settings-http-policy.js"
+    },
+    "./settings-openapi": {
+      "types": "./dist/modules/platform/platform-settings-openapi.d.ts",
+      "default": "./dist/modules/platform/platform-settings-openapi.js"
     }
   },
   "scripts": {
@@ -418,6 +438,21 @@
       ],
       "official-calendar-openapi": [
         "dist/modules/official-calendars/official-calendar-openapi.d.ts"
+      ],
+      "management": [
+        "dist/modules/platform/platform-management.service.d.ts"
+      ],
+      "management-store": [
+        "dist/modules/platform/platform-management.store.d.ts"
+      ],
+      "management-http": [
+        "dist/modules/platform/platform-management.controller.d.ts"
+      ],
+      "settings-http-policy": [
+        "dist/modules/platform/platform-settings-http-policy.d.ts"
+      ],
+      "settings-openapi": [
+        "dist/modules/platform/platform-settings-openapi.d.ts"
       ]
     }
   }

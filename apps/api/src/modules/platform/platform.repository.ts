@@ -2,6 +2,7 @@
  * 业务空间、客户与Rental初始化保留本域事务和校验，不成为无Core认证的依赖。 */
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
 import { PlatformIdentityRepository } from "./platform-identity.repository";
+import { readPlatformSecurityBaseline } from "@rental-os/platform-server/security";
 import { randomUUID } from "node:crypto";
 import { assertCategoryAdoptionAllowed } from "../rental-core/category-governance-policy";
 import { rentalCategoryStorageCode } from "../rental-core/category-identity";
@@ -89,6 +90,9 @@ const RENTAL_PERMISSION_REPLACEMENTS: Record<string, string[]> = {
 @Injectable()
 export class PlatformRepository extends PlatformIdentityRepository {
   constructor(protected readonly prisma: PrismaService) { super(prisma); }
+
+  /** 登录前没有会话；只读平台主体的原生效安全配置，与独立公共认证共用读取算法。 */
+  getSecurityBaseline() { return readPlatformSecurityBaseline(this.prisma); }
 
   async listTenants(): Promise<TenantSummary[]> {
     const tenants = await this.prisma.tenant.findMany({

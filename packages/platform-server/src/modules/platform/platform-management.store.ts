@@ -11,6 +11,10 @@ type UserWrite = {
 type PublicRole = StoredPlatformRole & { id: string; tenantId: string; code: string; description: string | null; enabledBusinessScopes: unknown };
 type RoleWrite = { code: string; name: string; description?: string | null; scope: StoredPlatformRoleScope; fixedAllPermissions: boolean;
   enabledBusinessScopes: string[]; buttonPermissions: string[]; dataScope: StoredPlatformDataScope; isActive: boolean };
+type StoredOrganization = { id: string; tenantId: string; parentId: string | null; type: StoredPlatformRoleScope;
+  code: string; name: string; status: string };
+type OrganizationWrite = { parentId?: string; type: StoredPlatformRoleScope; code: string; name: string; status?: string };
+type ParameterContent = { [key: string]: PlatformJsonValue | undefined };
 export interface PlatformManagementTransaction extends PlatformAuthTransaction {
   user: PlatformUserStore & {
     findMany(query: { where: { tenantId: string; isSaasAdmin?: boolean }; include: PublicUserInclude;
@@ -29,8 +33,20 @@ export interface PlatformManagementTransaction extends PlatformAuthTransaction {
       status?: StoredPlatformTenant["status"]; statusReason?: string; statusChangedAt?: Date; statusChangedBy?: string } }): PromiseLike<unknown>;
   };
   organizationUnit: {
-    findFirst(query: { where: { id: string; tenantId: string } }): PromiseLike<{ id: string } | null>;
-    create(query: { data: { id: string; tenantId: string; type: "OPERATOR"; code: string; name: string } }): PromiseLike<{ id: string }>;
+    findFirst(query: { where: { id?: string | { not: string | undefined }; tenantId: string; code?: string } }): PromiseLike<StoredOrganization | null>;
+    findUnique(query: { where: { id: string } }): PromiseLike<StoredOrganization | null>;
+    findMany(query: { where: { tenantId?: string; id?: string }; orderBy: Array<{ tenantId?: "asc"; code?: "asc" }> }): PromiseLike<StoredOrganization[]>;
+    create(query: { data: OrganizationWrite & { id: string; tenantId: string } }): PromiseLike<StoredOrganization>;
+    update(query: { where: { id: string }; data: OrganizationWrite | { status: string } }): PromiseLike<StoredOrganization>;
+  };
+  systemParameterSet: {
+    findFirst(query: { where: { tenantId: string; module: string; status: "EFFECTIVE" }; orderBy: { versionNo: "desc" } }): PromiseLike<{
+      id: string; versionNo: number; content: PlatformJsonValue
+    } | null>;
+    create(query: { data: { tenantId: string; module: string; versionNo: number; status: "EFFECTIVE";
+      content: ParameterContent; operator: string } }): PromiseLike<unknown>;
+    updateMany(query: { where: { id: string; tenantId: string; module: string; versionNo: number; status: "EFFECTIVE" };
+      data: { content: ParameterContent; operator: string } }): PromiseLike<{ count: number }>;
   };
   role: {
     findMany(query: { where: { tenantId: string; id?: { in: string[] }; isActive?: boolean; code?: string };

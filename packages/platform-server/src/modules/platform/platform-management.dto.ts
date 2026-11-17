@@ -1,7 +1,35 @@
 /** 公共HTTP输入只消费正式公共合同；Rental带品类/空间的初始化DTO继续由其原入口维护。 */
 import { RoleScope, TenantStatus, type CreatePlatformTenantRequest, type SavePlatformSelfProfileRequest,
-  type SaveSystemRoleRequest, type SaveSystemUserRequest, type UpdateTenantRequest, type UpdateTenantStatusRequest } from "@rental-os/platform-contracts";
-import { IsArray, IsBoolean, IsEnum, IsIn, IsNotEmpty, IsOptional, IsString, MaxLength } from "class-validator";
+  type SaveOrganizationRequest, type SaveSystemRoleRequest, type SaveSystemUserRequest, type SystemSecurityBaselineConfig,
+  type UpdateTenantRequest, type UpdateTenantStatusRequest } from "@rental-os/platform-contracts";
+import { IsArray, IsBoolean, IsEnum, IsIn, IsNotEmpty, IsObject, IsOptional, IsString, MaxLength } from "class-validator";
+
+export class SaveOrganizationDto implements SaveOrganizationRequest {
+  @IsOptional() @IsString() @IsNotEmpty() id?: string;
+  @IsString() @IsNotEmpty() tenantId!: string;
+  @IsOptional() @IsString() @IsNotEmpty() parentId?: string;
+  @IsEnum(RoleScope) type!: RoleScope;
+  @IsString() @IsNotEmpty() code!: string;
+  @IsString() @IsNotEmpty() name!: string;
+  @IsIn(["enabled", "disabled"]) status!: "enabled" | "disabled";
+  @IsOptional() @IsString() @IsNotEmpty() operator?: string;
+}
+
+export class OrganizationStatusInputDto {
+  @IsIn(["enabled", "disabled"]) status!: "enabled" | "disabled";
+  @IsOptional() @IsString() @IsNotEmpty() operator?: string;
+  @IsOptional() @IsString() @IsNotEmpty() tenantId?: string;
+}
+
+export class SaveSecurityBaselineInputDto {
+  @IsObject() config!: SystemSecurityBaselineConfig;
+  @IsOptional() @IsString() @IsNotEmpty() operator?: string;
+}
+
+export class SecondConfirmationInputDto {
+  @IsString() @IsNotEmpty() action!: string;
+  @IsOptional() @IsString() @IsNotEmpty() confirmationCode?: string;
+}
 
 export class CreatePlatformTenantDto implements CreatePlatformTenantRequest {
   @IsString() @IsNotEmpty() tenantCode!: string;

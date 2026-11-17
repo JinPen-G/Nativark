@@ -28,6 +28,8 @@ import { INTEGRATION_HTTP_OPERATIONS } from '@rental-os/platform-server/integrat
 import { INTEGRATION_OPENAPI_SCHEMAS } from '@rental-os/platform-server/integration-openapi';
 import { OFFICIAL_CALENDAR_HTTP_OPERATIONS } from '@rental-os/platform-server/official-calendar-http-policy';
 import { OFFICIAL_CALENDAR_SCHEMAS, OFFICIAL_CALENDAR_OPENAPI_QUERY_SCHEMAS } from '@rental-os/platform-server/official-calendar-openapi';
+import { PLATFORM_SETTINGS_HTTP_OPERATIONS } from '@rental-os/platform-server/settings-http-policy';
+import { PLATFORM_SETTINGS_SCHEMAS, PLATFORM_SETTINGS_OPENAPI_QUERY_SCHEMAS } from '@rental-os/platform-server/settings-openapi';
 import { SUBSCRIPTION_OPENAPI_SCHEMAS, SUBSCRIPTION_OPENAPI_QUERY_SCHEMAS } from '@rental-os/platform-server/subscription-openapi';
 import { AI_AUTOMATION_REVIEW_HTTP_CONTRACTS, AI_AUTOMATION_REVIEW_GRANT_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_AUTOMATION_EXPLANATION_HTTP, AI_AUTOMATION_EXPLANATION_CONTRACTS } from '@rental-os/shared';
@@ -257,6 +259,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ...SUBSCRIPTION_OPENAPI_SCHEMAS,
   ...INTEGRATION_OPENAPI_SCHEMAS,
   ...OFFICIAL_CALENDAR_SCHEMAS,
+  ...PLATFORM_SETTINGS_SCHEMAS,
   ...STAFF_UPLOAD_OBSERVATION_SCHEMAS,
   ...AI_MEMBER_NAME_SCHEMAS,
   ...AI_TASK_RULE_DRAFT_SCHEMAS,
@@ -983,18 +986,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     },
     ["userId", "account", "temporaryPassword", "message"]
   ),
-  OrganizationSummary: objectOf(
-    {
-      id: stringSchema,
-      tenantId: stringSchema,
-      parentId: stringSchema,
-      type: stringSchema,
-      code: stringSchema,
-      name: stringSchema,
-      status: stringSchema
-    },
-    ["id", "tenantId", "type", "code", "name", "status"]
-  ),
+  OrganizationSummary: PLATFORM_SETTINGS_SCHEMAS["PlatformSettings.Organization"],
   PermissionModule: objectOf(
     {
       code: stringSchema,
@@ -1145,21 +1137,9 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     },
     ["status", "testedAt", "provider", "modelName", "message"]
   ),
-  SystemSecurityBaselineConfig: objectSchema,
-  SaveSecurityBaselineRequest: objectOf(
-    {
-      config: ref("SystemSecurityBaselineConfig"),
-      operator: stringSchema
-    },
-    ["config"]
-  ),
-  SecondConfirmationCheckRequest: objectOf(
-    {
-      action: stringSchema,
-      confirmationCode: stringSchema
-    },
-    ["action"]
-  ),
+  SystemSecurityBaselineConfig: PLATFORM_SETTINGS_SCHEMAS["PlatformSettings.SecurityBaseline"],
+  SaveSecurityBaselineRequest: PLATFORM_SETTINGS_SCHEMAS["PlatformSettings.SaveSecurityBaseline"],
+  SecondConfirmationCheckRequest: PLATFORM_SETTINGS_SCHEMAS["PlatformSettings.SecondConfirmation"],
   PlatformAuditResult: objectOf(
     {
       rows: arrayOf("PlatformAuditLogRow"),
@@ -2290,8 +2270,6 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("post", "/api/membership/plans/assignments", "Membership", "assignCustomerMembershipPlan", "Grant a published personal or corporate membership plan", ["rental-os:member:plan:manage"]),
   backlogOperation("get", "/api/membership/plans/assignments/{customerId}", "Membership", "listCustomerMembershipPlanAssignments", "List membership plan grants for a customer in the current workspace", ["rental-os:member:view"]),
   backlogOperation("post", "/api/membership/plans/assignments/{assignmentId}/revoke", "Membership", "revokeCustomerMembershipPlanAssignment", "Revoke an active membership plan grant with an audit reason", ["rental-os:member:plan:manage"]),
-  backlogOperation("post", "/api/platform/organizations", "Platform", "createOrganization", "Create organization", ["system:org:manage"]),  backlogOperation("put", "/api/platform/organizations/{id}", "Platform", "updateOrganization", "Update organization", ["system:org:manage"]),
-  backlogOperation("put", "/api/platform/organizations/{id}/status", "Platform", "setOrganizationStatus", "Set organization status", ["system:org:manage"]),
 ];
 
 /** Existing settings lifecycle: names publish the actual request/response,
@@ -3311,16 +3289,6 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "get",
-    path: "/api/platform/organizations",
-    tag: "Platform",
-    operationId: "listOrganizations",
-    summary: "List organizations",
-    permissions: ["system:user:manage"],
-    parameters: [queryParam("tenantId")],
-    responseSchema: arrayOf("OrganizationSummary")
-  },
-  {
-    method: "get",
     path: "/api/platform/permission-tree",
     tag: "Platform",
     operationId: "listPermissionTree",
@@ -3356,35 +3324,6 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     permissions: ["system:params:manage"],
     requestSchema: "SystemAiConnectionTestRequest",
     responseSchema: "SystemAiConnectionTestResult"
-  },
-  {
-    method: "get",
-    path: "/api/platform/security-baseline",
-    tag: "Platform",
-    operationId: "getSecurityBaseline",
-    summary: "Get security baseline",
-    permissions: ["system:params:manage"],
-    responseSchema: "SystemSecurityBaselineConfig"
-  },
-  {
-    method: "put",
-    path: "/api/platform/security-baseline",
-    tag: "Platform",
-    operationId: "saveSecurityBaseline",
-    summary: "Save security baseline",
-    permissions: ["system:params:manage"],
-    requestSchema: "SaveSecurityBaselineRequest",
-    responseSchema: "SystemSecurityBaselineConfig"
-  },
-  {
-    method: "post",
-    path: "/api/platform/security-baseline/second-confirmation/check",
-    tag: "Platform",
-    operationId: "checkSecondConfirmation",
-    summary: "Check second confirmation code",
-    permissions: ["system:params:manage"],
-    requestSchema: "SecondConfirmationCheckRequest",
-    responseSchema: "GenericObject"
   },
   {
     method: "get",
@@ -4314,6 +4253,15 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   backlogOperation("get", "/api/rental/v1/calendars/{year}", "RentalBusiness", "getRentalBusinessCalendar", "Get annual business calendar", ["rental-os:calendar:edit", "rental-os:calendar:publish", "rental-os:price:manage", "rental-os:rules:manage", "rental-os:order:view"]),
   backlogOperation("get", "/api/rental/v1/official-calendar-sources", "RentalBusiness", "listRentalOfficialCalendarSourceVersions", "List public official calendar source versions", ["rental-os:calendar:view-history", "rental-os:calendar:edit", "rental-os:calendar:publish", "rental-os:price:manage", "rental-os:rules:manage"]),
   backlogOperation("post", "/api/rental/v1/calendars/{year}/apply-official-source", "RentalBusiness", "applyRentalOfficialCalendarSource", "Apply a public official calendar source version to the workspace draft", ["rental-os:calendar:edit", "rental-os:price:manage"]),
+  // 公共组织/安全操作与字段单源；保留原operationId，改正旧组织写入文档的权限和GenericObject缺口。
+  ...PLATFORM_SETTINGS_HTTP_OPERATIONS.map((item): ContractOperation => ({
+    method: item.method.toLowerCase() as HttpMethod,
+    path: `/api${item.path.replace(/:([a-zA-Z]+)/g, "{$1}")}`,
+    tag: "Platform", operationId: item.id, summary: item.summary,
+    permissions: [item.permission], responseSchema: item.response,
+    ...("request" in item ? { requestSchema: item.request } : {}),
+    ...("query" in item ? { parameters: item.query.map(name => queryParam(name, PLATFORM_SETTINGS_OPENAPI_QUERY_SCHEMAS[name])) } : {})
+  })),
   // 公共来源合同单源；组合文档保留原路径、operationId和权限，引用实际DTO字段。
   ...OFFICIAL_CALENDAR_HTTP_OPERATIONS.map((item): ContractOperation => ({
     method: item.method.toLowerCase() as HttpMethod,

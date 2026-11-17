@@ -492,7 +492,7 @@ export class PlatformController {
 
   @Get("security-baseline")
   securityBaseline() {
-    return this.platformService.getSecurityBaseline();
+    return this.platformService.readSecurityBaseline();
   }
 
   @Put("security-baseline")

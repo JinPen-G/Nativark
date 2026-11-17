@@ -1,4 +1,5 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, Optional } from "@nestjs/common";
+/** 原组合平台的业务适配及内存演示。持久化组织/安全管理委托同一公共应用；Rental范围与初始化仍由原业务链裁定。 */
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
@@ -78,6 +79,7 @@ import { CustomerCorporateSettlementService } from "./customer-corporate-settlem
 import { WorkspaceCapabilityService } from "../rental-core/workspace-capability.service";
 import { RentalCoreService } from "../rental-core/rental-core.service";
 import { defaultSecurityBaseline, normalizeSecurityBaseline } from "./platform-security-baseline";
+import { PlatformManagementService } from "@rental-os/platform-server/management";
 import { assertNoLegacyAiCredentials, closedLegacyAiSettings } from "./legacy-system-ai";
 
 interface StoredUser extends Omit<SaveSystemUserRequest, "tenantId"> {
@@ -126,8 +128,15 @@ export class PlatformService {
     @Optional() private readonly customerMerge?: CustomerMergeService,
     // CORP-SETTLE-01A：企业授信账务流水。继续追加在最后，保持既有位置参数测试兼容。
     @Optional() private readonly customerCorporateSettlement?: CustomerCorporateSettlementService,
-    @Optional() private readonly memberships?: MembershipService
+    @Optional() private readonly memberships?: MembershipService,
+    // 追加依赖保留原位置构造；持久化宿主必须供给该公共管理实例。
+    @Optional() private readonly publicManagement?: PlatformManagementService
   ) {}
+
+  private requirePublicManagement() {
+    if (!this.publicManagement) throw new ServiceUnavailableException("公共组织与安全管理服务未装配");
+    return this.publicManagement;
+  }
 
   private readonly logger = new Logger(PlatformService.name);
 
@@ -764,14 +773,21 @@ export class PlatformService {
 
   async getSecurityBaseline() {
     // 登录等认证前流程没有租户身份：安全基线显式从平台主体读取，不回退演示租户
+    if (this.useMysqlDataSource()) return this.platformRepository.getSecurityBaseline();
     const config = await this.getSystemRules(PLATFORM_SUBJECT_TENANT_ID);
     return normalizeSecurityBaseline(config.security);
+  }
+
+  /** 管理HTTP须复验当前会话；登录前读取继续使用上面的无会话接点。 */
+  readSecurityBaseline() {
+    return this.useMysqlDataSource() ? this.requirePublicManagement().readSecurityBaseline() : this.getSecurityBaseline();
   }
 
   async saveSecurityBaseline(
     input: SystemSecurityBaselineConfig,
     currentUser?: SystemUserRow
   ) {
+    if (this.useMysqlDataSource()) return this.requirePublicManagement().saveSecurityBaseline(input);
     this.assertSaasAdmin(currentUser);
     if (!currentUser!.permissions.includes("system:params:manage") && !currentUser!.permissions.includes("*")) {
       throw new ForbiddenException("修改全平台安全基线需要系统参数管理权限");
@@ -779,9 +795,7 @@ export class PlatformService {
     const operator = currentUser!.displayName;
     const security = normalizeSecurityBaseline(input);
     // 安全基线是平台级配置：读取、写入和审计都固定使用平台主体，不回退演示租户
-    const config = this.useMysqlDataSource()
-      ? this.copySystemRulesConfig(await this.platformRepository.getSystemRules(PLATFORM_SUBJECT_TENANT_ID) ?? this.systemRulesConfig)
-      : this.copySystemRulesConfig();
+    const config = this.copySystemRulesConfig();
     const next: SystemRulesConfig = {
       ...config,
       security,
@@ -790,32 +804,21 @@ export class PlatformService {
     };
     this.validateSystemRulesConfig(next);
 
-    if (this.useMysqlDataSource()) {
-      await this.platformRepository.saveSystemRules(next, operator, PLATFORM_SUBJECT_TENANT_ID);
-      await this.platformRepository.recordAuditLog({
-        tenantId: PLATFORM_SUBJECT_TENANT_ID,
-        action: "security-baseline.update",
-        operator,
-        targetType: "security-baseline",
-        targetId: "system-security",
-        detail: "更新登录限流、密码策略、脱敏和二次确认配置。"
-      });
-    } else {
-      this.systemRulesConfig = next;
-      this.recordMemoryAudit({
-        tenantId: PLATFORM_SUBJECT_TENANT_ID,
-        action: "security-baseline.update",
-        operator,
-        targetType: "security-baseline",
-        targetId: "system-security",
-        detail: "更新登录限流、密码策略、脱敏和二次确认配置。"
-      });
-    }
+    this.systemRulesConfig = next;
+    this.recordMemoryAudit({
+      tenantId: PLATFORM_SUBJECT_TENANT_ID,
+      action: "security-baseline.update",
+      operator,
+      targetType: "security-baseline",
+      targetId: "system-security",
+      detail: "更新登录限流、密码策略、脱敏和二次确认配置。"
+    });
 
     return security;
   }
 
   async checkSecondConfirmation(action: string, confirmationCode?: string) {
+    if (this.useMysqlDataSource()) return this.requirePublicManagement().checkSecondConfirmation(action, confirmationCode);
     const baseline = await this.getSecurityBaseline();
     const required =
       baseline.secondConfirmation.enabled &&
@@ -2082,7 +2085,7 @@ export class PlatformService {
 
   listOrganizations(tenantId?: string, currentUser?: SystemUserRow) {
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.listOrganizations(tenantId, currentUser);
+      return this.requirePublicManagement().listOrganizations(tenantId);
     }
     if (isOrganizationScopedUser(currentUser)) {
       const scopedTenantId = resolveTenantIdForQuery(tenantId, currentUser);
@@ -2113,7 +2116,7 @@ export class PlatformService {
     const tenantId = this.resolveTargetTenantId(input.tenantId, currentUser);
     input = { ...input, tenantId };
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.saveOrganization(input);
+      return this.requirePublicManagement().saveOrganization(input);
     }
 
     const code = input.code.trim();
@@ -2189,14 +2192,9 @@ export class PlatformService {
     operator = "租户管理员",
     currentUser?: SystemUserRow
   ) {
+    if (this.useMysqlDataSource()) return this.requirePublicManagement().setOrganizationStatus(id, status, operator);
     const existing = this.organizations.find((item) => item.id === id);
-    const mysqlTarget = this.useMysqlDataSource()
-      ? await this.platformRepository.getOrganizationTenantId(id)
-      : existing?.tenantId;
-    this.resolveTargetTenantId(mysqlTarget, currentUser);
-    if (this.useMysqlDataSource()) {
-      return this.platformRepository.setOrganizationStatus(id, status, operator);
-    }
+    this.resolveTargetTenantId(existing?.tenantId, currentUser);
 
     const row = this.organizations.find((item) => item.id === id);
     if (!row) {

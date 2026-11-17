@@ -7,6 +7,7 @@ import { RAW_HTTP_RESPONSE } from "./common/request-id.interceptor";
 import { SUBSCRIPTION_OPENAPI_SCHEMAS, SUBSCRIPTION_OPENAPI_QUERY_SCHEMAS } from "./modules/subscription/subscription-openapi";
 import { INTEGRATION_OPENAPI_SCHEMAS } from "./modules/integrations/integration-openapi";
 import { OFFICIAL_CALENDAR_SCHEMAS, OFFICIAL_CALENDAR_OPENAPI_QUERY_SCHEMAS } from "./modules/official-calendars/official-calendar-openapi";
+import { PLATFORM_SETTINGS_SCHEMAS, PLATFORM_SETTINGS_OPENAPI_QUERY_SCHEMAS } from "./modules/platform/platform-settings-openapi";
 
 type Schema = { [field: string]: unknown };
 const string: Schema = { type: "string" }, boolean: Schema = { type: "boolean" };
@@ -20,12 +21,14 @@ const location = object({ mode: { type: "string", enum: ["all", "selected"] }, l
 const storedRadius: Schema = { type: "integer", minimum: 0, description: "历史值保持可读，界面按当前圆角范围显示；读取不会重写配置。" };
 const radius = (maximum: number): Schema => ({ type: "integer", minimum: 4, maximum, nullable: true });
 const array = (name: string): Schema => ({ type: "array", items: ref(name) });
-const querySchemas: Readonly<Record<string, Schema>> = { ...SUBSCRIPTION_OPENAPI_QUERY_SCHEMAS, ...OFFICIAL_CALENDAR_OPENAPI_QUERY_SCHEMAS };
+const querySchemas: Readonly<Record<string, Schema>> = { ...SUBSCRIPTION_OPENAPI_QUERY_SCHEMAS, ...OFFICIAL_CALENDAR_OPENAPI_QUERY_SCHEMAS,
+  ...PLATFORM_SETTINGS_OPENAPI_QUERY_SCHEMAS };
 
 export const PLATFORM_OPENAPI_SCHEMAS = {
   ...SUBSCRIPTION_OPENAPI_SCHEMAS,
   ...INTEGRATION_OPENAPI_SCHEMAS,
   ...OFFICIAL_CALENDAR_SCHEMAS,
+  ...PLATFORM_SETTINGS_SCHEMAS,
   "Platform.Health": object({ service: string, status: string, time: date }, ["service", "status", "time"]),
   "Platform.OpenApi": { type: "object", additionalProperties: true },
   "Platform.LoginRequest": object({ tenantCode: string, account: string, password }, ["tenantCode", "account", "password"]),
@@ -106,6 +109,7 @@ export function createPlatformOpenApi() {
         : item.access === "tenant_summary" ? "仅当前operator本租户的无金额提醒。SaaS身份不能代替租户读取，提醒不授予业务权限。"
         : item.access === "tenant" ? "当前operator的本租户管理范围，SaaS身份不代租户操作。当前角色/账号与提交条件由服务端复验，Core授权另行办理。"
         : item.access === "saas" ? "仅当前SaaS管理身份与对应权限。平台管理不会获得目标租户业务访问权；创建账号口令只在本响应返回，不记日志。"
+        : item.access === "authenticated" ? "当前operator的原系统参数读取权限；由当前会话围栏复验。认证前内部读取使用独立只读接点。"
         : item.access === "self" ? "当前签名会话的本人范围；请求体和查询参数不能指定另一主体。" : "公共传输入口；登录保护及原令牌消费仍由对应服务执行。",
       ...("request" in item ? { requestBody: { required: true, content: content(ref(item.request)) } } : {}),
       parameters: [

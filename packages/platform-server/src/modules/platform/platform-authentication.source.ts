@@ -1,6 +1,6 @@
 /** 公共认证读取原平台账号、会话、安全配置和审计；没有Rental初始化或业务范围依赖。 */
 import type { SystemSecurityBaselineConfig } from "@rental-os/platform-contracts";
-import { normalizeSecurityBaseline } from "./platform-security-baseline";
+import { readPlatformSecurityBaseline } from "./platform-security-baseline";
 import { PlatformIdentityRepository } from "./platform-identity.repository";
 import type { PlatformAuthenticationSource } from "../auth/auth-session.service";
 
@@ -12,13 +12,8 @@ export class PlatformAuthenticationRepository
     return this.getTenantIdentity(id);
   }
 
-  async getSecurityBaseline(): Promise<SystemSecurityBaselineConfig> {
-    const row = await this.prisma.systemParameterSet.findFirst({
-      where: { tenantId: "tenant_platform", module: "system-rules", status: "EFFECTIVE" },
-      orderBy: { versionNo: "desc" },
-    });
-    const content = row?.content as { security?: Partial<SystemSecurityBaselineConfig> } | undefined;
-    return normalizeSecurityBaseline(content?.security);
+  getSecurityBaseline(): Promise<SystemSecurityBaselineConfig> {
+    return readPlatformSecurityBaseline(this.prisma);
   }
 
   async recordSecurityAudit(input: {

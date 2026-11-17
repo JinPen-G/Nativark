@@ -1,13 +1,28 @@
 /** 无Core公共管理HTTP，路径权限由同源政策登记，主体和提交点在应用服务重新核验。 */
-import { Body, Controller, Delete, Get, Param, Post, Put } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Put, Query } from "@nestjs/common";
 import { requireRequestTenantId } from "../../common/request-identity";
 import { PlatformManagementService } from "./platform-management.service";
 import { CreatePlatformTenantDto, PlatformTenantStatusDto, PlatformUserStatusDto, SavePlatformRoleDto,
-  SavePlatformSelfProfileDto, SavePlatformUserDto, UpdatePlatformTenantDto } from "./platform-management.dto";
+  SavePlatformSelfProfileDto, SavePlatformUserDto, UpdatePlatformTenantDto, SaveOrganizationDto,
+  OrganizationStatusInputDto, SaveSecurityBaselineInputDto, SecondConfirmationInputDto } from "./platform-management.dto";
 
 @Controller("platform")
 export class PlatformManagementController {
   constructor(private readonly service: PlatformManagementService) {}
+
+  @Get("organizations") organizations(@Query("tenantId") tenantId?: string) { return this.service.listOrganizations(tenantId); }
+  @Post("organizations") createOrganization(@Body() body: SaveOrganizationDto) { return this.service.saveOrganization(body); }
+  @Put("organizations/:id") saveOrganization(@Param("id") id: string, @Body() body: SaveOrganizationDto) {
+    return this.service.saveOrganization({ ...body, id });
+  }
+  @Put("organizations/:id/status") setOrganizationStatus(@Param("id") id: string, @Body() body: OrganizationStatusInputDto) {
+    return this.service.setOrganizationStatus(id, body.status, body.operator);
+  }
+  @Get("security-baseline") securityBaseline() { return this.service.readSecurityBaseline(); }
+  @Put("security-baseline") saveSecurityBaseline(@Body() body: SaveSecurityBaselineInputDto) { return this.service.saveSecurityBaseline(body.config); }
+  @Post("security-baseline/second-confirmation/check") checkSecondConfirmation(@Body() body: SecondConfirmationInputDto) {
+    return this.service.checkSecondConfirmation(body.action, body.confirmationCode);
+  }
 
   @Get("tenants") tenants() { return this.service.listTenants(); }
   @Post("tenants") createTenant(@Body() body: CreatePlatformTenantDto) { return this.service.createTenant(body); }

@@ -1,6 +1,6 @@
 # 公共 SaaS 服务
 
-`@rental-os/platform-server` 提供公共身份、会话、租户 / 人员角色管理、外观、完整订阅办理、基础集成与官方日历来源。宿主提供唯一持久化实例，服务通过各模块窄存储端口消费它。原 API 路径通过本包窄子出口再导出，Rental 认证仍继承同一会话实现。[包与子出口](package.json) · [公共合同](../platform-contracts/README.md)
+`@rental-os/platform-server` 提供公共身份、会话、租户 / 人员角色 / 组织管理、安全配置、外观、完整订阅办理、基础集成与官方日历来源。宿主提供唯一持久化实例，服务通过各模块窄存储端口消费它。原 API 路径通过本包窄子出口再导出，Rental 认证仍继承同一会话实现。[包与子出口](package.json) · [公共合同](../platform-contracts/README.md)
 
 | 阅读步骤 | 源码与职责 |
 | --- | --- |
@@ -9,7 +9,7 @@
 | 公共会话 | [公共认证](src/modules/auth/platform-auth.service.ts)、[共享会话算法](src/modules/auth/auth-session.service.ts)；原签名、失败保护、单次刷新和改密 |
 | 当前组织范围 | [组织子树与地点交集](src/common/organization-location-scope.ts) 从 `/organization-location-scope` 提供；调用方先限定租户，缺失/停用组织返回空集合，配置地点只缩小已映射范围 |
 | 身份存储 | [仓储](src/modules/platform/platform-identity.repository.ts)、[认证来源](src/modules/platform/platform-authentication.source.ts)、[窄存储端口](src/modules/platform/platform-auth-data-store.ts)；平台账号、角色和会话，业务表不进入端口 |
-| 公共管理 | [应用服务](src/modules/platform/platform-management.service.ts)、[仓储](src/modules/platform/platform-management.repository.ts)、[存储端口](src/modules/platform/platform-management.store.ts)、[主体围栏](src/modules/platform/platform-principal.authority.ts)；SaaS与租户管理分开，当前原会话 / 角色在同事务复验 |
+| 公共管理 | [模块导读](src/modules/platform/README.md)、[应用服务](src/modules/platform/platform-management.service.ts)、[仓储](src/modules/platform/platform-management.repository.ts)、[存储端口](src/modules/platform/platform-management.store.ts)、[主体围栏](src/modules/platform/platform-principal.authority.ts)；SaaS与租户管理分开，当前原会话 / 角色在同事务复验 |
 | 部署初始化 | [公共初始化](src/modules/platform/platform-initialization.ts)；首次创建SaaS主体，重复执行不重置账号，不运行Core初始化 |
 | 公共订阅 | [模块接入与 API](src/modules/subscription/README.md)、[办理服务](src/modules/subscription/subscription.service.ts)、[存储参加者](src/modules/subscription/subscription-store.ts)；原申请、线下收费、统一期限、排期、提醒、修订与审计 |
 | 统一期限 | [只读来源](src/modules/subscription/subscription-reader.ts)、[同源状态投影](src/modules/subscription/subscription-state.ts)、[周年/时区](src/modules/subscription/subscription-term.ts)；当前期限与排期，原Rental服务和新Core共同消费 |
@@ -40,10 +40,12 @@ const platform = PlatformServerModule.register({
 
 公共管理使用原 `system:tenant:manage/bootstrap`、`system:user:manage` 与 `system:role:manage`。租户成员管理还要求当前租户管理员或明确全租户数据范围；固定全权角色和SaaS身份不能经普通角色输入创建。权限码须已登记，角色不自动赋予Core使用权。管理员创建、状态与密码重置、权限修改和对应审计同事务，唯一键 / 事务冲突明确返回，错误不重做。本人资料只改姓名和联系方式。
 
+组织读取按当前租户及连续启用的组织子树投影，维护沿原账号管理权限、全租户数据范围和完整地点范围。安全管理的七个操作由 `/settings-http-policy` 与 `/settings-openapi` 同源声明；登录前使用 `readPlatformSecurityBaseline(database)` 读取固定平台主体，管理 HTTP 则经当前主体围栏。全平台安全保存要求 SaaS 身份及原参数管理权限，保留原生效版本和其他配置，写入与审计同事务。[组织、安全及方法对应](src/modules/platform/README.md)
+
 `readPublicSubscriptionTerm(transaction, tenantId)` 在调用方原事务读取当前统一期限和已到生效点的排期，不物化排期、不新建订阅。明确到期拒绝新业务；历史未登记状态保持原“待确认”的兼容，不因此视为永久或批量停业。公共订阅办理消费相同状态/周年算法，金额、收费和已发布功能规则沿原 SUB 规则裁定。此入口不赋予Core使用权或绕过冻结。
 
 短信适配和业务服务从 `@rental-os/platform-server/notification-delivery` 共用结果类型与 `NotificationDeliveryUnknownError`。请求已离开服务而结果未明时，调用方保持原操作/投递记录，查询原回执；错误类型不允许换键重发或证明回滚。[原Provider消费者](../../apps/api/src/modules/integrations/tenant-integration.runtime.service.ts) · [Rental消费者](../rental-core/src/business-runtime-ports.ts)
 
 构建使用本包 `build`，类型使用本包 `lint`。已有 [登录保护](../../tests/auth-login-lockout.test.cjs)、[外观](../../tests/admin-appearance-settings.test.cjs) 和 [MCP 原审计](../../tests/mcp-original-audit.test.cjs) 保留；命令先核读写及隔离要求。[验证规则](../../AGENTS.md#修改验证与交付)
 
-当前独立宿主已有公共初始化、认证、人员 / 角色 / 租户管理、外观、完整订阅和健康 / 文档链，基础集成及 Core 主装配继续按 [PCH 接续](../../docs/平台底座/Core接入/平台Core接入-协作接续.md) 交付。类型及离线行为不等于真实数据库、HTTP、浏览器或部署通过。
+当前独立宿主已有公共初始化、认证、人员 / 角色 / 租户 / 组织管理、安全配置、外观、完整订阅和健康 / 文档链，基础集成及 Core 主装配继续按 [PCH 接续](../../docs/平台底座/Core接入/平台Core接入-协作接续.md) 交付。类型及离线行为不等于真实数据库、HTTP、浏览器或部署通过。

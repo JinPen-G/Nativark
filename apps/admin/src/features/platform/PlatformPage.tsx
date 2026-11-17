@@ -1,6 +1,6 @@
 import { ListFilters, useListFilter } from "@/components/ui";
 import { DeleteOutlined, EditOutlined, KeyOutlined, PlusOutlined } from "@/components/ui/icons";
-import type { OrganizationSummary, SaveOrganizationRequest, SaveSystemRoleRequest, SaveSystemUserRequest, SystemRoleRow, SystemUserRow } from "@rental-os/shared";
+import type { SaveSystemRoleRequest, SaveSystemUserRequest, SystemRoleRow, SystemUserRow } from "@rental-os/shared";
 import { Col, Row, Space, Tag, Typography } from "antd";
 import { ListSection, App } from "@/components/ui";
 import { Form } from "@/components/ui";
@@ -12,12 +12,13 @@ import { Button, ConfirmAction, CopyButton, Drawer, SaveButton, Tabs } from "@/c
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { api } from "@/api/platform";
+import { OrganizationsPage, useOrganizationsQuery } from "@rental-os/platform-admin/platform-settings";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useLocale } from "@/app/locale";
 import { useAuthStore } from "@/features/auth/authStore";
 
-type EditorKind = "organization" | "user" | "role" | undefined;
+type EditorKind = "user" | "role" | undefined;
 
 export function PlatformPage() {
   const { message, modal } = App.useApp();
@@ -27,18 +28,15 @@ export function PlatformPage() {
   const operator = useAuthStore((state) => state.user?.displayName ?? t("租户管理员"));
   const [activeKey, setActiveKey] = useState("users");
   const [editor, setEditor] = useState<EditorKind>();
-  const [editingOrganization, setEditingOrganization] = useState<OrganizationSummary>();
   const [editingUser, setEditingUser] = useState<SystemUserRow>();
   const [editingRole, setEditingRole] = useState<SystemRoleRow>();
-  const [organizationForm] = Form.useForm<SaveOrganizationRequest>();
   const [userForm] = Form.useForm<SaveSystemUserRequest>();
   const [roleForm] = Form.useForm<SaveSystemRoleRequest>();
 
-  const organizations = useQuery({ queryKey: ["platform-organizations"], queryFn: api.organizations });
+  const organizations = useOrganizationsQuery();
   const users = useQuery({ queryKey: ["platform-users"], queryFn: api.users });
   const roles = useQuery({ queryKey: ["platform-roles"], queryFn: api.roles });
   const userFilter = useListFilter(users.data, { fields: row => [row.account, row.displayName, row.phone], status: row => row.isActive ? "active" : "disabled" });
-  const organizationFilter = useListFilter(organizations.data, { fields: row => [row.name, row.code] });
   const roleFilter = useListFilter(roles.data, { fields: row => [row.name, row.code] });
   const permissions = useQuery({ queryKey: ["platform-permissions"], queryFn: api.permissionTree });
   const audit = useQuery({ queryKey: ["platform-audit"], queryFn: api.auditLogs });
@@ -50,8 +48,6 @@ export function PlatformPage() {
     queryClient.invalidateQueries({ queryKey: ["platform-audit"] })
   ]);
 
-  const saveOrganization = useMutation({ mutationFn: api.saveOrganization, onSuccess: async () => { await refreshPlatform(); closeEditor(); message.success(t("组织已保存")); }, onError: () => message.error(t("组织保存失败，请检查编码和层级")) });
-  const toggleOrganization = useMutation({ mutationFn: ({ id, status }: { id: string; status: OrganizationSummary["status"] }) => api.setOrganizationStatus(id, status, operator), onSuccess: async () => { await refreshPlatform(); message.success(t("组织状态已更新")); }, onError: () => message.error(t("组织状态更新失败，请检查下级组织和关联账号")) });
   const saveUser = useMutation({ mutationFn: api.saveUser, onSuccess: async () => { await refreshPlatform(); closeEditor(); message.success(t("账号已保存")); }, onError: () => message.error(t("账号保存失败，请检查账号唯一性、组织和角色")) });
   const toggleUser = useMutation({ mutationFn: ({ id, isActive }: { id: string; isActive: boolean }) => api.setUserStatus(id, isActive), onSuccess: async () => { await refreshPlatform(); message.success(t("账号状态已更新")); }, onError: () => message.error(t("账号状态更新失败")) });
   const resetPassword = useMutation({ mutationFn: api.resetUserPassword, onSuccess: (result) => modal.success({ title: t("密码已重置"), content: <><Typography.Paragraph>{result.message}</Typography.Paragraph><Typography.Text code>{result.temporaryPassword}</Typography.Text><CopyButton value={result.temporaryPassword} /></> }), onError: () => message.error(t("密码重置失败")) });
@@ -66,18 +62,10 @@ export function PlatformPage() {
 
   function closeEditor() {
     setEditor(undefined);
-    setEditingOrganization(undefined);
     setEditingUser(undefined);
     setEditingRole(undefined);
-    organizationForm.resetFields();
     userForm.resetFields();
     roleForm.resetFields();
-  }
-
-  function openOrganization(record?: OrganizationSummary) {
-    setEditingOrganization(record);
-    organizationForm.setFieldsValue(record ?? { tenantId: tenant?.tenantId ?? "tenant_001", type: "store" as SaveOrganizationRequest["type"], code: "", name: "", status: "enabled", operator });
-    setEditor("organization");
   }
 
   function openUser(record?: SystemUserRow) {
@@ -100,8 +88,7 @@ export function PlatformPage() {
     <>
       <PageHeader title={t("平台配置")} extra={
         activeKey === "users" ? <Button type="primary" icon={<PlusOutlined />} onClick={() => openUser()}>{t("新增账号")}</Button>
-          : activeKey === "organizations" ? <Button type="primary" icon={<PlusOutlined />} onClick={() => openOrganization()}>{t("新增组织")}</Button>
-            : activeKey === "roles" ? <Button type="primary" icon={<PlusOutlined />} onClick={() => openRole()}>{t("新增角色")}</Button>
+          : activeKey === "roles" ? <Button type="primary" icon={<PlusOutlined />} onClick={() => openRole()}>{t("新增角色")}</Button>
               : undefined
       } />
       <QueryState loading={loading} error={error}>
@@ -123,13 +110,11 @@ export function PlatformPage() {
             {
               key: "organizations",
               label: `${t("组织")} (${organizations.data?.length ?? 0})`,
-              children: <><Table<OrganizationSummary> toolbar={<><ListFilters filter={organizationFilter} placeholder="组织名称或编码" /></>} rowKey="id" onRefresh={() => organizations.refetch()} loading={organizations.isLoading} refreshing={organizations.isFetching} dataSource={organizationFilter.rows} pagination={organizationFilter.pagination} columns={[
-                { title: t("组织"), render: (_, record) => <><b>{record.name}</b><br /><span className="muted">{record.code}</span></> },
-                { title: t("类型"), dataIndex: "type", render: (value) => <Tag>{t(String(value))}</Tag> },
-                { title: t("上级组织"), dataIndex: "parentId", render: (value) => organizations.data?.find((item) => item.id === value)?.name ?? t("根组织") },
-                { title: t("状态"), render: (_, record) => <Switch checked={record.status === "enabled"} loading={toggleOrganization.isPending} onChange={(checked) => toggleOrganization.mutate({ id: record.id, status: checked ? "enabled" : "disabled" })} /> },
-                { title: t("操作"), render: (_, record) => <Button type="link" icon={<EditOutlined />} onClick={() => openOrganization(record)}>{t("编辑")}</Button> }
-              ]} /></>
+              children: <OrganizationsPage embedded onSaved={async () => { await Promise.all([
+                queryClient.invalidateQueries({ queryKey: ["platform-users"] }),
+                queryClient.invalidateQueries({ queryKey: ["platform-roles"] }),
+                queryClient.invalidateQueries({ queryKey: ["platform-audit"] })
+              ]); }} />
             },
             {
               key: "roles",
@@ -158,12 +143,6 @@ export function PlatformPage() {
           ]} />
         </ListSection>
       </QueryState>
-
-      <Drawer presentation="dialog" title={editingOrganization ? t("编辑组织") : t("新增组织")} open={editor === "organization"} size={500} destroyOnHidden onClose={closeEditor} extra={<SaveButton label={t("保存")} form={organizationForm} pending={saveOrganization.isPending} onSave={(values) => saveOrganization.mutateAsync({ ...values, id: editingOrganization?.id, operator })} />}>
-        <Form form={organizationForm} layout="vertical" onFinish={(values) => saveOrganization.mutate({ ...values, id: editingOrganization?.id, operator })}>
-          <Form.Item name="tenantId" hidden><Input /></Form.Item><Form.Item name="name" label={t("组织名称")} rules={[{ required: true }]}><Input /></Form.Item><Form.Item name="code" label={t("组织编码")} rules={[{ required: true }]}><Input disabled={Boolean(editingOrganization)} /></Form.Item><Form.Item name="type" label={t("组织类型")} rules={[{ required: true }]}><Select options={[{ value: "operator", label: t("营运中心") }, { value: "car_shop", label: t("业务公司") }, { value: "store", label: t("门店") }, { value: "station", label: t("履约点") }]} /></Form.Item><Form.Item name="parentId" label={t("上级组织")}><Select allowClear options={(organizations.data ?? []).filter((item) => item.id !== editingOrganization?.id).map((item) => ({ value: item.id, label: item.name }))} /></Form.Item><Form.Item name="status" label={t("状态")}><Select options={[{ value: "enabled", label: t("启用") }, { value: "disabled", label: t("停用") }]} /></Form.Item>
-        </Form>
-      </Drawer>
 
       <Drawer title={editingUser ? t("编辑账号") : t("新增账号")} open={editor === "user"} size={520} destroyOnHidden onClose={closeEditor} extra={<SaveButton label={t("保存")} form={userForm} pending={saveUser.isPending} onSave={(values) => saveUser.mutateAsync({ ...values, id: editingUser?.id })} />}>
         <Form form={userForm} layout="vertical" onFinish={(values) => saveUser.mutate({ ...values, id: editingUser?.id })}>

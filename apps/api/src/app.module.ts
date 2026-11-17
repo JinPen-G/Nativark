@@ -56,6 +56,8 @@ import { OpenApiController } from "./modules/openapi/openapi.controller";
 import { DatabaseModule } from "./modules/database/database.module";
 import { PlatformController } from "./modules/platform/platform.controller";
 import { PlatformRepository } from "./modules/platform/platform.repository";
+import { PLATFORM_AUTH_DATA_STORE } from "@rental-os/platform-server/auth-store";
+import { PlatformManagementService } from "@rental-os/platform-server/management";
 import { SharedCustomerRepository } from "./modules/platform/shared-customer.repository";
 import { CustomerOperationsRepository } from "./modules/platform/customer-operations.repository";
 import { CustomerRegistrationService } from "./modules/platform/customer-registration.service";
@@ -392,6 +394,8 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     AI_NATIVE_ORIGINAL_OBSERVATION_PROVIDER,
     AI_NATIVE_ORIGINAL_READ_POLICY_PROVIDER,
     AuthService,
+    { provide: PLATFORM_AUTH_DATA_STORE, useExisting: PrismaService },
+    PlatformManagementService,
     PlatformService,
     PlatformRepository,
     SharedCustomerRepository,

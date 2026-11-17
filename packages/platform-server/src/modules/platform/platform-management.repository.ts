@@ -1,13 +1,17 @@
-/** 公共租户、账号与角色仓储。无行业表或业务初始化，原身份与权限投影保持单源。
+/** 公共租户、账号、角色、组织与安全配置仓储。原身份与权限投影保持单源。
  * 调用方先锁当前主体；所有写入与审计在同一公共事务，Core使用权另由Core宿主维护。 */
-import { BadRequestException, ForbiddenException, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import type { CreatePlatformTenantRequest, PlatformTenantSummary, SaveSystemRoleRequest, SaveSystemUserRequest,
-  SystemRoleRow, UpdateTenantRequest, UpdateTenantStatusRequest } from "@rental-os/platform-contracts";
+import type { CreatePlatformTenantRequest, OrganizationSummary, PlatformTenantSummary, SaveOrganizationRequest,
+  SaveSystemRoleRequest, SaveSystemUserRequest, SystemRoleRow, SystemSecurityBaselineConfig, SystemUserRow,
+  UpdateTenantRequest, UpdateTenantStatusRequest } from "@rental-os/platform-contracts";
 import { generateTemporaryPassword, hashPassword } from "../../common/password";
+import { buildOrganizationWhere, isOrganizationScopedUser, resolveTenantIdForQuery } from "../../common/platform-data-permission";
+import { enabledOrganizationSubtreeIds } from "../../common/organization-location-scope";
 import { PlatformIdentityRepository } from "./platform-identity.repository";
 import type { PlatformManagementDatabase, PlatformManagementTransaction } from "./platform-management.store";
 import type { StoredPlatformRoleScope, StoredPlatformDataScope } from "./platform-auth-data-store";
+import { PLATFORM_SECURITY_TENANT_ID } from "./platform-security-baseline";
 
 export class PlatformManagementRepository extends PlatformIdentityRepository {
   constructor(database: PlatformManagementDatabase) { super(database); }
@@ -69,6 +73,75 @@ export class PlatformManagementRepository extends PlatformIdentityRepository {
       statusChangedAt: new Date(), statusChangedBy: operator } });
     if (input.status !== "active") await tx.$executeRaw`UPDATE auth_sessions s JOIN \`User\` u ON u.id=s.userId
       SET s.revokedAt=${new Date()} WHERE u.tenantId=${id} AND s.revokedAt IS NULL`;
+  }
+
+  async listOrganizations(tx: Pick<PlatformManagementTransaction, "organizationUnit">, tenantId?: string,
+    currentUser?: SystemUserRow): Promise<OrganizationSummary[]> {
+    if (isOrganizationScopedUser(currentUser)) {
+      const scopedTenantId = resolveTenantIdForQuery(tenantId, currentUser);
+      if (!scopedTenantId || !currentUser.organizationId) return [];
+      const organizations = await tx.organizationUnit.findMany({
+        where: { tenantId: scopedTenantId }, orderBy: [{ tenantId: "asc" }, { code: "asc" }]
+      });
+      const allowedOrganizationIds = new Set(enabledOrganizationSubtreeIds(organizations, currentUser.organizationId));
+      return organizations.filter(organization => allowedOrganizationIds.has(organization.id))
+        .map(organization => this.toOrganizationSummary(organization));
+    }
+    const organizations = await tx.organizationUnit.findMany({
+      where: buildOrganizationWhere(tenantId, currentUser), orderBy: [{ tenantId: "asc" }, { code: "asc" }]
+    });
+    return organizations.map(organization => this.toOrganizationSummary(organization));
+  }
+
+  async saveOrganization(tx: PlatformManagementTransaction, input: SaveOrganizationRequest) {
+    const code = input.code.trim(), name = input.name.trim(), parentId = input.parentId?.trim() || undefined;
+    const status = input.status ?? "enabled";
+    if (!code || !name) throw new BadRequestException("组织编码和组织名称不能为空");
+    if (!await tx.tenant.findUnique({ where: { id: input.tenantId } })) throw new BadRequestException("租户不存在");
+    if (await tx.organizationUnit.findFirst({ where: { id: { not: input.id }, tenantId: input.tenantId, code } }))
+      throw new BadRequestException("该租户下组织编码已存在");
+    if (parentId) {
+      if (parentId === input.id) throw new BadRequestException("上级组织不能选择自身");
+      if (!await tx.organizationUnit.findFirst({ where: { id: parentId, tenantId: input.tenantId } }))
+        throw new BadRequestException("上级组织不属于当前租户");
+    }
+    const existing = input.id ? await tx.organizationUnit.findFirst({ where: { id: input.id, tenantId: input.tenantId } }) : undefined;
+    if (input.id && !existing) throw new NotFoundException("组织不存在");
+    const id = input.id ?? `org_${randomUUID()}`;
+    const data = { parentId, type: input.type.toUpperCase() as StoredPlatformRoleScope, code, name, status };
+    const row = existing ? await tx.organizationUnit.update({ where: { id }, data })
+      : await tx.organizationUnit.create({ data: { id, tenantId: input.tenantId, ...data } });
+    return { organization: this.toOrganizationSummary(row), created: !existing };
+  }
+
+  async setOrganizationStatus(tx: PlatformManagementTransaction, id: string, status: OrganizationSummary["status"], tenantId: string) {
+    const existing = await tx.organizationUnit.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException("组织不存在");
+    if (existing.tenantId !== tenantId) throw new ForbiddenException("不能访问或修改其他租户的数据");
+    const row = await tx.organizationUnit.update({ where: { id }, data: { status } });
+    return this.toOrganizationSummary(row);
+  }
+
+  private toOrganizationSummary(row: { id: string; tenantId: string; parentId: string | null;
+    type: StoredPlatformRoleScope; code: string; name: string; status: string }): OrganizationSummary {
+    return { id: row.id, tenantId: row.tenantId, parentId: row.parentId ?? undefined,
+      type: this.toSharedRoleScope(row.type), code: row.code, name: row.name, status: row.status as OrganizationSummary["status"] };
+  }
+
+  async saveSecurityBaseline(tx: PlatformManagementTransaction, security: SystemSecurityBaselineConfig, operator: string) {
+    const where = { tenantId: PLATFORM_SECURITY_TENANT_ID, module: "system-rules", status: "EFFECTIVE" as const };
+    const current = await tx.systemParameterSet.findFirst({ where, orderBy: { versionNo: "desc" } });
+    const previous = current?.content ?? {};
+    if (typeof previous !== "object" || Array.isArray(previous)) throw new BadRequestException("现有安全配置格式无法核对");
+    const content = { ...previous, security: { ...security }, updatedAt: new Date().toISOString(), updatedBy: operator };
+    // 原生效版本及其他字段留在同一对象。父租户锁串行化公共保存，版本/状态在写入点再次匹配。
+    if (current) {
+      const updated = await tx.systemParameterSet.updateMany({ where: { id: current.id, versionNo: current.versionNo, ...where },
+        data: { content, operator } });
+      if (updated.count !== 1) throw new ConflictException("安全基线在提交期间变化，请重读后核对");
+    } else {
+      await tx.systemParameterSet.create({ data: { ...where, versionNo: 1, content, operator } });
+    }
   }
 
   async user(tx: PlatformManagementTransaction, id: string, tenantId: string) {

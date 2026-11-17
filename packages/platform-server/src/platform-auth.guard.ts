@@ -34,6 +34,9 @@ export class PlatformAuthGuard implements CanActivate {
       throw new ForbiddenException("该接口未在当前公共宿主或Core中登记");
     if (policy?.access === "tenant_summary" && user.isSaasAdmin)
       throw new ForbiddenException("当前接口只读取调用者本租户的订阅摘要");
+    if (policy?.access === "authenticated" && !user.permissions.includes("*")
+      && !user.permissions.includes(policy.permission) && (user.isSaasAdmin || !user.isPlatformAdmin))
+      throw new ForbiddenException("当前账号缺少安全配置读取权限");
     if (policy?.access === "tenant" && (user.isSaasAdmin || !user.isPlatformAdmin
       && !user.permissions.includes("*") && !user.permissions.includes(policy.permission)))
       throw new ForbiddenException("当前账号缺少本租户设置权限");

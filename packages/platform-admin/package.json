@@ -227,7 +227,10 @@
     "./integrations": "./src/features/integrations/index.ts",
     "./integration-client": "./src/features/integrations/client.ts",
     "./insight-metrics": "./src/components/InsightMetrics.tsx",
-    "./source/features/settings/TenantIntegrationsPage": "./src/features/integrations/TenantIntegrationsPage.tsx"
+    "./source/features/settings/TenantIntegrationsPage": "./src/features/integrations/TenantIntegrationsPage.tsx",
+    "./platform-settings": "./src/features/platform-settings/index.ts",
+    "./platform-settings/client": "./src/features/platform-settings/client.ts",
+    "./platform-settings/styles": "./src/features/platform-settings/PlatformSettings.module.css"
   },
   "scripts": {
     "lint": "tsc -p tsconfig.json",

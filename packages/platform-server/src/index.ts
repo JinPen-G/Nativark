@@ -19,6 +19,8 @@ export * from "./modules/platform/platform-management.dto";
 export * from "./modules/platform/platform-initialization";
 export * from "./modules/platform/platform-authentication.source";
 export * from "./modules/platform/platform-security-baseline";
+export * from "./modules/platform/platform-settings-http-policy";
+export * from "./modules/platform/platform-settings-openapi";
 export * from "./modules/client/account-appearance.service";
 export * from "./modules/client/account-appearance.controller";
 export * from "./modules/client/account-appearance.dto";

@@ -88,7 +88,7 @@ export class PlatformServerModule {
         ...(options.coreHttpProvider ? [{ ...options.coreHttpProvider, provide: REGISTERED_CORE_HTTP_ACCESS }] : []),
         { provide: APP_GUARD, useExisting: PlatformAuthGuard },
         { provide: APP_INTERCEPTOR, useClass: RequestIdInterceptor }
-      ], exports: [PlatformAuthService, PlatformAuthenticationRepository, SubscriptionService, SUBSCRIPTION_APPLICATION,
+      ], exports: [PlatformAuthService, PlatformAuthenticationRepository, PlatformManagementService, SubscriptionService, SUBSCRIPTION_APPLICATION,
         TenantIntegrationService, TenantIntegrationRuntimeService, ObjectStorageProviderService, SecretBox, TENANT_INTEGRATION_APPLICATION,
         OfficialCalendarSourceService, OFFICIAL_CALENDAR_APPLICATION, OFFICIAL_CALENDAR_SOURCE_READER,
         PLATFORM_AUTH_DATA_STORE, PLATFORM_APPEARANCE_DATA_STORE, PLATFORM_SUBSCRIPTION_DATA_STORE, INTEGRATION_DATA_STORE,

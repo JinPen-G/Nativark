@@ -1,14 +1,18 @@
 /** 公共管理应用服务：当前原主体→公共事务→仓储→同事务审计。
  * 每次写入和返回前复验当前权限，临时密码只在对应创建/重置响应返回，不记审计。 */
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable } from "@nestjs/common";
-import type { CreatePlatformTenantRequest, CreatePlatformTenantResult, SavePlatformSelfProfileRequest,
-  SaveSystemRoleRequest, SaveSystemUserRequest, SystemUserRow, UpdateTenantRequest, UpdateTenantStatusRequest } from "@rental-os/platform-contracts";
+import type { CreatePlatformTenantRequest, CreatePlatformTenantResult, OrganizationSummary, SaveOrganizationRequest,
+  SavePlatformSelfProfileRequest, SaveSystemRoleRequest, SaveSystemUserRequest, SystemSecurityBaselineConfig,
+  SystemUserRow, UpdateTenantRequest, UpdateTenantStatusRequest } from "@rental-os/platform-contracts";
 import { generateTemporaryPassword, hashPassword } from "../../common/password";
+import { getRequestIdentity } from "../../common/request-identity";
+import { hasEffectivePermission } from "../../permission-match";
 import { PLATFORM_AUTH_DATA_STORE } from "./platform-auth-data-store";
 import { PlatformManagementRepository } from "./platform-management.repository";
 import type { PlatformManagementDatabase, PlatformManagementTransaction } from "./platform-management.store";
 import { PlatformPrincipalAuthority } from "./platform-principal.authority";
 import { managesPlatformTenants, managesTenant } from "./platform-permissions";
+import { normalizeSecurityBaseline, PLATFORM_SECURITY_TENANT_ID, readPlatformSecurityBaseline, validateSecurityBaseline } from "./platform-security-baseline";
 
 @Injectable()
 export class PlatformManagementService {
@@ -20,11 +24,12 @@ export class PlatformManagementService {
   }
 
   private run<T>(permission: string, saas: boolean, target: string | undefined,
-    work: (tx: PlatformManagementTransaction, user: SystemUserRow) => Promise<T>, enabling = false) {
+    work: (tx: PlatformManagementTransaction, user: SystemUserRow) => Promise<T>, enabling = false,
+    authorize?: (user: SystemUserRow) => boolean) {
     const actor = this.principals.current(), tenantId = target ?? actor.tenantId;
     if (!saas && tenantId !== actor.tenantId) throw new ForbiddenException("公共管理不能跨租户");
-    const allowed = (user: SystemUserRow) => saas ? user.isSaasAdmin === true
-      && (user.permissions.includes(permission) || user.permissions.includes("*")) : managesTenant(user, permission);
+    const allowed = authorize ?? ((user: SystemUserRow) => saas ? user.isSaasAdmin === true
+      && (user.permissions.includes(permission) || user.permissions.includes("*")) : managesTenant(user, permission));
     return this.database.$transaction(async tx => {
       const lease = await this.principals.lock(tx, actor, tenantId, undefined, enabling);
       if (!allowed(lease.user)) throw new ForbiddenException("缺少当前公共管理权限与租户范围");
@@ -40,9 +45,75 @@ export class PlatformManagementService {
   }
 
   private audit(tx: PlatformManagementTransaction, user: SystemUserRow, tenantId: string, action: string,
-    targetId: string, metadata: Record<string, string | boolean | number | undefined> = {}) {
+    targetId: string, metadata: Record<string, string | boolean | number | undefined> = {},
+    context: { operator?: string; targetType?: string; detail?: string } = {}) {
     return tx.operationLog.create({ data: { tenantId, userId: user.id, action,
-      detail: { operator: user.id, targetType: "platform", targetId, metadata } } });
+      detail: { operator: user.id, targetType: "platform", targetId, metadata, ...context } } });
+  }
+
+  listOrganizations(tenantId?: string) {
+    return this.run("system:user:manage", false, undefined, (tx, user) => this.repository.listOrganizations(tx, tenantId, user),
+      false, user => !user.isSaasAdmin && (user.isPlatformAdmin || hasEffectivePermission(user.permissions, "system:user:manage")));
+  }
+
+  private canManageOrganizations(user: SystemUserRow) {
+    return !user.isSaasAdmin && (user.isPlatformAdmin || hasEffectivePermission(user.permissions, "system:user:manage"))
+      && (user.isPlatformAdmin || user.permissions.includes("*") || user.dataScope === "all")
+      && getRequestIdentity()?.locationScope?.mode !== "selected";
+  }
+
+  saveOrganization(input: SaveOrganizationRequest) {
+    const actor = this.principals.current();
+    if (input.tenantId !== actor.tenantId) throw new ForbiddenException("不能访问或修改其他租户的数据");
+    return this.run("system:user:manage", false, undefined, async (tx, user) => {
+      const { organization, created } = await this.repository.saveOrganization(tx, input);
+      await this.audit(tx, user, actor.tenantId, created ? "organization.create" : "organization.update", organization.id, {},
+        { operator: input.operator ?? "平台管理员", targetType: "organization", detail: `${created ? "创建" : "更新"}组织 ${organization.name}` });
+      return organization;
+    }, false, user => this.canManageOrganizations(user));
+  }
+
+  setOrganizationStatus(id: string, status: OrganizationSummary["status"], operator = "租户管理员") {
+    const actor = this.principals.current();
+    return this.run("system:user:manage", false, undefined, async (tx, user) => {
+      const organization = await this.repository.setOrganizationStatus(tx, id, status, actor.tenantId);
+      await this.audit(tx, user, actor.tenantId, "organization.status", id, {}, { operator, targetType: "organization",
+        detail: `${status === "enabled" ? "启用" : "停用"}组织 ${organization.name}` });
+      return organization;
+    }, false, user => this.canManageOrganizations(user));
+  }
+
+  readSecurityBaseline() {
+    return this.run("system:params:manage", false, undefined, tx => readPlatformSecurityBaseline(tx), false,
+      user => hasEffectivePermission(user.permissions, "system:params:manage") || !user.isSaasAdmin && user.isPlatformAdmin);
+  }
+
+  saveSecurityBaseline(input: SystemSecurityBaselineConfig) {
+    return this.run("system:params:manage", true, PLATFORM_SECURITY_TENANT_ID, async (tx, user) => {
+      const security = normalizeSecurityBaseline(input);
+      validateSecurityBaseline(security);
+      await this.repository.saveSecurityBaseline(tx, security, user.displayName);
+      await this.audit(tx, user, PLATFORM_SECURITY_TENANT_ID, "security-baseline.update", "system-security", {},
+        { operator: user.displayName, targetType: "security-baseline", detail: "更新登录限流、密码策略、脱敏和二次确认配置。" });
+      return security;
+    });
+  }
+
+  /** 原管理工具的 MVP 检查结果，业务批准和执行仍消费其正式授权与收据。 */
+  checkSecondConfirmation(action: string, confirmationCode?: string) {
+    return this.run("system:params:manage", false, undefined, async tx => {
+      const baseline = await readPlatformSecurityBaseline(tx);
+      const required = baseline.secondConfirmation.enabled && baseline.secondConfirmation.actions.includes(action);
+      if (required && !confirmationCode?.trim()) throw new BadRequestException("该关键操作需要二次确认码");
+      return {
+        action,
+        required,
+        accepted: !required || confirmationCode === "000000",
+        message: required && confirmationCode !== "000000"
+          ? "MVP 预留二次确认校验，演示确认码为 000000。"
+          : "二次确认校验通过。"
+      };
+    }, false, user => !user.isSaasAdmin && (user.isPlatformAdmin || hasEffectivePermission(user.permissions, "system:params:manage")));
   }
 
   listTenants() { return this.run("system:tenant:manage", true, undefined, tx => this.repository.tenants(tx)); }

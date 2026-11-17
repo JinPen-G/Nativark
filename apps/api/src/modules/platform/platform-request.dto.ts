@@ -6,10 +6,8 @@ import {
   type GeneratePlatformNumberRequest,
   type PlatformDictionaryItem,
   type RentalCurrency,
-  type SaveOrganizationRequest,
   type SavePlatformFilterPresetRequest,
   type SystemRulesConfig,
-  type SystemSecurityBaselineConfig,
   type SaveSystemUserAccessRequest,
   type SaveWorkspaceAccessRequest,
   type TenantBootstrapRequest,
@@ -19,28 +17,13 @@ import { Type } from "class-transformer";
 import { IsArray, IsBoolean, IsEnum, IsIn, IsInt, IsNotEmpty, IsObject, IsOptional, IsString, Matches, MaxLength, Min, ValidateNested } from "class-validator";
 // 公共账号/角色/租户字段由平台包单源维护，行业初始化和业务字段继续保留在本适配。
 export { UpdatePlatformTenantDto as UpdateTenantDto, PlatformTenantStatusDto as UpdateTenantStatusDto,
-  SavePlatformRoleDto as SaveSystemRoleDto, SavePlatformUserDto as SaveSystemUserDto } from "@rental-os/platform-server/management-dto";
+  SavePlatformRoleDto as SaveSystemRoleDto, SavePlatformUserDto as SaveSystemUserDto,
+  SaveOrganizationDto, OrganizationStatusInputDto, SaveSecurityBaselineInputDto,
+  SecondConfirmationInputDto } from "@rental-os/platform-server/management-dto";
 
 const DATA_SCOPES = ["all", "organization", "store", "own"] as const;
 const DICTIONARY_DATE_PATTERNS = ["yyyyMMdd", "yyyyMM", "yyMMdd", "none"] as const;
 const RESET_CYCLES = ["daily", "monthly", "yearly", "never"] as const;
-
-export class SaveOrganizationDto implements SaveOrganizationRequest {
-  @IsOptional() @IsString() @IsNotEmpty() id?: string;
-  @IsString() @IsNotEmpty() tenantId!: string;
-  @IsOptional() @IsString() @IsNotEmpty() parentId?: string;
-  @IsEnum(RoleScope) type!: RoleScope;
-  @IsString() @IsNotEmpty() code!: string;
-  @IsString() @IsNotEmpty() name!: string;
-  @IsIn(["enabled", "disabled"]) status!: "enabled" | "disabled";
-  @IsOptional() @IsString() @IsNotEmpty() operator?: string;
-}
-
-export class OrganizationStatusInputDto {
-  @IsIn(["enabled", "disabled"]) status!: "enabled" | "disabled";
-  @IsOptional() @IsString() @IsNotEmpty() operator?: string;
-  @IsOptional() @IsString() @IsNotEmpty() tenantId?: string;
-}
 
 export class SaveSystemRuleSectionBodyInputDto {
   @IsObject() config!: SystemRulesConfig;
@@ -49,16 +32,6 @@ export class SaveSystemRuleSectionBodyInputDto {
 
 export class OperatorInputDto {
   @IsOptional() @IsString() @IsNotEmpty() operator?: string;
-}
-
-export class SaveSecurityBaselineInputDto {
-  @IsObject() config!: SystemSecurityBaselineConfig;
-  @IsOptional() @IsString() @IsNotEmpty() operator?: string;
-}
-
-export class SecondConfirmationInputDto {
-  @IsString() @IsNotEmpty() action!: string;
-  @IsOptional() @IsString() @IsNotEmpty() confirmationCode?: string;
 }
 
 export class SavePlatformFilterPresetDto implements SavePlatformFilterPresetRequest {

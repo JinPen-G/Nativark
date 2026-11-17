@@ -1,6 +1,6 @@
 # 独立公共 API 宿主
 
-这个宿主只装配公共 SaaS 服务和公共 schema，不依赖 `apps/api`、`@rental-os/shared`、Rental 或工单源码。默认不安装任何 Core。当前提供公共初始化、登录 / 本人 / 会话 / 改密、租户与人员角色管理、账户与租户外观、完整订阅办理、健康和 OpenAPI；基础集成、完整后台和标准 Core 装配由 [PCH](../../docs/平台底座/Core接入/平台Core接入-协作接续.md) 继续交付。
+这个宿主只装配公共 SaaS 服务和公共 schema，不依赖 `apps/api`、`@rental-os/shared`、Rental 或工单源码。默认不安装任何 Core。当前提供公共初始化、登录 / 本人 / 会话 / 改密、租户与人员角色 / 组织管理、安全配置、账户与租户外观、完整订阅办理、健康和 OpenAPI；基础集成、完整后台和标准 Core 装配由 [PCH](../../docs/平台底座/Core接入/平台Core接入-协作接续.md) 继续交付。
 
 | 入口 | 职责 |
 | --- | --- |
@@ -11,6 +11,7 @@
 | [初始化](src/initialize.ts) | 显式命令创建公共SaaS账号，口令来自进程；重复执行不重置已有账号，失败不补默认账号 |
 | [数据库](src/database.ts) | 由本宿主 schema 生成的单一 Client；导入不连接，实际请求按 Prisma 建立连接 |
 | [公共订阅接入与 API](../../packages/platform-server/src/modules/subscription/README.md) | 当前租户查看/申请、SaaS 办理、目录与标准年费、原修订/排期/审计 |
+| [公共组织与安全管理](../../packages/platform-server/src/modules/platform/README.md) | 当前主体和组织范围复验、固定平台安全读取、同事务保存与审计；七操作、五路径由同源政策/schema组合 |
 | [基础集成](../../packages/platform-server/src/modules/integrations/README.md) | 原配置、修订、连通性与受控宿主依赖 |
 | [官方日历来源](../../packages/platform-server/src/modules/official-calendars/README.md) | 公共来源维护、年度版本追加与业务只读接点 |
 | [公共 schema](prisma/schema.prisma) | 公共账号、角色、会话、外观与设置表；保留原表名和身份标识，行业关联仅为可空历史引用 |
@@ -33,6 +34,8 @@ Client 输出在本宿主 `generated/client`，运行产物从同一宿主目录
 构建后，在配置 `SEED_PLATFORM_PASSWORD` 的独立公共库执行 `npm run db:platform:initialize`，创建 `platform` / `admin` 的SaaS账号。初始口令至少8位且包含字母和数字，首次登录必须改密。已有公共库升级后，同一命令核验原管理员并补录当前公共权限目录，角色编辑可选择原订阅权限码。原角色授权与账号口令由既有管理入口维护。主体核验失败时，目录补录随同一事务回滚。命令会访问数据库，口令不进入控制台和审计。
 
 SaaS管理员通过 `POST /api/platform/tenants` 创建公共租户与首个管理员，创建响应返回一次临时口令。租户管理员改密后使用 `/api/platform/tenant`、`users`、`roles`、`permission-tree`；本人资料使用 `/api/platform/self-profile`，外观仍用原正式路径。详细字段、权限、副作用和错误从同版本 OpenAPI读取。
+
+组织列表及维护使用 `/api/platform/organizations`，按当前租户及原组织范围开放。全平台安全配置使用 `/api/platform/security-baseline`，读取和 SaaS 保存分别授权；登录前读取复用同一个固定平台来源。公共后台对应组织页和安全页已直接消费这些接口，Core作者无需自行复制设置页。[公共后台](../platform-admin/README.md) · [管理方法与权限](../../packages/platform-server/src/modules/platform/README.md)
 
 标准Core管理位于 `/api/platform/core-host`，当前组合已登记管理、本人Core目录和范围HTTP，默认本人目录为空。真正选中Core时提供固定服务、业务HTTP、真实订阅和数据观察；SaaS授权、成员分配与绑定分别成立。[标准宿主用法](../../packages/platform-core-host/README.md)
 

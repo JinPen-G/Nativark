@@ -11,6 +11,33 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-public-organizations-security-20261118"></a>
+
+## 公共组织、安全管理与原后台同源接入（2026-11-18）
+
+固定父版2a7462312d1912995b37fd670cfda61e730d9878已普通推送并实际远端回读，包含当天核定main ba1de9f91860c4e73503eded4e1d05d2307b0e28。dev1交出稳定11文件服务组与16文件页面组并停写、释放共同文件窗口，RD在同一共享树接原主装配、兼容委托、正式出口及两套接口资料。原文和完整旧接续在固定父版保全，本片不重建历史副本。
+
+[公共管理模块](../../../packages/platform-server/src/modules/platform/README.md)持有当前主体、组织投影、组织维护与全平台安全配置。原[AppModule](../../../apps/api/src/app.module.ts)将PLATFORM_AUTH_DATA_STORE绑定到唯一PrismaService，并提供同一PlatformManagementService；原[PlatformService](../../../apps/api/src/modules/platform/platform.service.ts)追加该依赖，六个持久化管理方法委托公共实例，原位置构造与内存演示分支保留。缺管理实例明确503。认证前读取仍从固定tenant_platform的最新EFFECTIVE system-rules读取，不要求ALS会话；管理HTTP读取另经当前主体围栏，原[认证仓储](../../../packages/platform-server/src/modules/platform/platform-authentication.source.ts)与[平台仓储](../../../apps/api/src/modules/platform/platform.repository.ts)共用同一只读算法。
+
+组织维护保留当前租户、原账号管理权限、全租户数据及完整地点范围；组织读取只返回连续启用的受权子树。安全保存保留原有限非负数值、平台主体锁、生效版本与其他JSON字段，更新/审计同事务，返回前复验当前权限。原二次确认MVP管理工具结果保留，业务批准与执行仍消费其正式授权/收据。[公共服务](../../../packages/platform-server/src/modules/platform/platform-management.service.ts) · [仓储](../../../packages/platform-server/src/modules/platform/platform-management.repository.ts)
+
+[公共组织与安全页面](../../../packages/platform-admin/src/features/platform-settings/README.md)在同一应用登记/settings/organizations和原/platform/system，个人改密继续/settings/security。原组织页签嵌入同一组件，原安全/概览入口再导出；六个原请求委托宿主唯一客户端，保留字段、信号与失败Promise。58项原英文映射迁出且原值不变，另补5项提示；四类原CSS通过正式样式出口及composes复用。共同提交Promise、当前身份/权限复核、草稿保留与保存后读取失败分别处理。
+
+[七操作/五路径](../../../packages/platform-server/src/modules/platform/platform-settings-http-policy.ts)与[schema](../../../packages/platform-server/src/modules/platform/platform-settings-openapi.ts)同时进入公共Guard/OpenAPI及原组合文档。原七份重复操作描述改用同一来源，保留原operationId及四份DTO类身份；原组织写入文档的system:org:manage修为实际system:user:manage，tenantId查询按正式声明提供。新增窄出口/typesVersions与原实际源码对应，宿主无需复制公共设置实现。
+
+| 必要核对 | 实际结果与边界 |
+| --- | --- |
+| 作者服务端证据 | node --no-compilation-cache - dev1-public-settings-types，9入口/719源/0诊断、退出0；dev1-public-settings-smoke最终退出0，复用原access-data-scope-regression的组织子树/投影/内存/Prisma断言，同进程12组核公共主体、CRUD/跨租户/范围、审计与撤权回滚、安全原版本/其他字段/历史草稿/JSON null/首次保存/同键冲突、原数值/MVP结果及Nest同一实例。准确命令与结果从dev1原会话2026-11-18 05:40的交付消息复核，不重复执行原用例 |
+| 作者页面证据 | node --no-compilation-cache - dev1-public-settings-ui-types，15入口/2664源/0诊断；dev1-public-settings-ui-smoke核六原接口/payload/signal/失败Promise、权限矩阵、路由和共同submit声明、63项实际翻译及Vite preprocessCSS同源类继承，均退出0。原6个组织及8个安全Form.Item结构/校验保持，antd6.6.0定向lint issues=[]/partial=false，22个模块链接通过 |
+| 最终服务与宿主类型 | node --no-compilation-cache - packages/platform-server/tsconfig.json apps/platform-api/tsconfig.json apps/api/tsconfig.json，stdin实际TS5.9.3；公共服务71根/887源、公共API7根/957源、原API1033根/2590源均0诊断，退出0、stderr空。Prisma5.22官方WASM/generator在内存生成原238模型/35枚举31,201,337字节声明及公共31模型/14枚举2,006,058字节声明，磁盘写入0 |
+| 最终前端类型 | node --no-compilation-cache - packages/platform-admin/tsconfig.json apps/platform-admin/tsconfig.json apps/admin/tsconfig.json，公共包278根/2543源、零CoreWeb5根/2544源、原后台661根/4302源均0诊断，退出0、stderr空；公共两配置行业源码0，写入0 |
+| RD同实例冒烟 | node --no-compilation-cache -，stdin实际当前TS/Nest切片与明确存储/委托fixture；唯一数据库与管理实例、原六方法委托、认证前两次固定平台读取、缺实例503、原内存兼容、四DTO类同一性、七操作/两文档/schema及查询、公共同路径Guard允许/拒绝通过，退出0、stderr空。数据库客户端实例化0、网络0、磁盘写入0；两次读取仅为明确fixture |
+| 保留的验证问题 | 作者服务冒烟前三次因Module变量重名、同步异常断言、missing fixture复用已有编码失败；页面前两轮141/9诊断来自验证器Node解析及CSS出口误当TS。RD最初直接API检查因缺生成客户端产生3927级联诊断，换官方内存声明后通过；接线冒烟先后缺.d.ts源码定位及Prisma fixture的$Enums，修验证器后通过。未改产品源码或放宽原断言迁就这些失败 |
+| 工具与运行边界 | 作者antd CLI首次info自动尝试3次fetch均被离线守卫阻断，按真实NO_UPDATE_CHECK入口关闭后完成后续查询/lint；保留原问题。服务/页面临时目录已删除，RD验证全在内存，无永久测试脚本或新增依赖。真实HTTP、DB并发、浏览器/Portal/回车快速点击、窄窗口、完整主题与完整宿主未验 |
+| 最终资料与出口 | 九份资料1211个本地链接、168个锚点引用均可定位，问题0；稀疏未检目标按固定Git定位。服务五个、前端三个新正式出口与实际源码及声明映射对应，两包依赖/peer与根lock一致；定向空白检查退出0 |
+
+公共服务、公共前端、两个零Core宿主及根README同步实际能力入口。按PCH-03/04/06/07/08原门槛复核，本片未跨下一档：完整Rental装配/数据/页面/AI/作业、干净包安装、多真实Core、真实无Core运行与独立更新/回退仍缺。dev1接续公共字典与编号，RD统一索引、交叉文件和四册；本片只暂存组织/安全完整组及对应资料，不夹带后续WIP。整体614项API合同问题、旧外观失败与清理残留继续承接。最终链接、格式、包/lock对应与普通推送以包含本节的固定提交和实际远端回读核定。
+
 <a id="core-rental-enterprise-http-20261118"></a>
 
 ## Rental企业HTTP与客户请求校验单源接入（2026-11-18）
