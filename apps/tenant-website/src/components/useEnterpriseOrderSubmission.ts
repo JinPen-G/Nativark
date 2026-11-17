@@ -18,7 +18,10 @@ export function useEnterpriseOrderSubmission(onOrder: (id: string) => void) {
   const [delegation, setDelegation] = useState<EnterpriseOrderDelegationView>();
   const currentDelegation = useRef<EnterpriseOrderDelegationView | undefined>(undefined);
   currentDelegation.current = delegation;
-  const current = () => { if (!mounted.current || latest.current !== identity || !host?.current()) throw new Error('客户身份或空间已变化，原提交已隔离'); };
+  const current = (requireVisible = false) => {
+    if (!mounted.current || latest.current !== identity || !host?.current()) throw new Error('客户身份或空间已变化，原提交已隔离');
+    if (requireVisible && typeof document !== 'undefined' && document.visibilityState !== 'visible') throw new Error('客户页面已隐藏，保留原操作供再次核对');
+  };
   const read = (): Original | undefined => {
     current();
     const ownerKey = storageKey(host!.operationScope);
@@ -158,21 +161,22 @@ export function useEnterpriseOrderSubmission(onOrder: (id: string) => void) {
     finally { busy.current = false; if (mounted.current && latest.current === identity && host?.current()) render(n => n + 1); }
   };
   const revokeDelegation = async () => {
-    current(); if (!ready || busy.current) return; const original = read();
+    current(true); if (!ready || busy.current) return; const original = read();
     if (original?.kind !== 'delegation' || original.revocationKey) throw new Error('须核对本人的原委托');
     busy.current = true; render(n => n + 1); setError('');
     try {
       const result = await observe(original);
+      current(true);
       if (!result || !['issued', 'expired'].includes(result.state)) return;
       assertOriginal(original);
       const revocationKey = `revoke-${await clientGoalTextHash(JSON.stringify(['enterprise-order-delegation-1', 'revoke',
         host!.tenantCode, host!.workspaceCode, host!.customerId, original.key, result.revision]))}`;
-      assertOriginal(original);
+      assertOriginal(original); current(true);
       const revocation: Original = { ...original, revocationKey, revocationRevision: result.revision };
-      remember(revocation); current();
+      remember(revocation); current(true);
       await sessionApi.revokeEnterpriseOrderDelegation({ operationKey: revocation.revocationKey!, delegationKey: original.key,
         expectedRevision: result.revision, reason: '本人明确撤销本次原商户委托', confirm: true });
-      current(); await observe(revocation);
+      current(true); await observe(revocation);
     } catch (e) { if (mounted.current && latest.current === identity && host?.current()) setError(e instanceof Error ? e.message : '原委托撤销待核对'); throw e; }
     finally { busy.current = false; if (mounted.current && latest.current === identity && host?.current()) render(n => n + 1); }
   };

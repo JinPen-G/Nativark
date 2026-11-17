@@ -6,6 +6,107 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain15-client-delegation-recovery-guard-20261117"></a>
+## AIN-15 客户原委托定位、索引与隐藏撤销修复（2026-11-17）
+
+固定前置为f19723df3d06f625f70805b231d721b16c4a3d86，原任务15／26按全文继续核定。dev1对固定小程序复现两处P2，分别为原定位归属不符后解除待核锁定并覆盖指针派发新请求，以及原终态清理删除已被替换的D索引。dev2从固定Web源码定位撤销等待原D返回后缺少页面可见状态复核。Root在下方三份原消费者修复这些范围。
+
+### 原入口与恢复约束
+
+1. 小程序原定位读取传播实际存储异常，并核当前本人和服务归属。读取失败、定位不匹配和未知原结果保持enterprisePending。原批准申请、批准提交、委托、普通提交、购物车变更和重新报价各自核这一门禁。
+2. 原新命令在保存与派发前重新读取本人指针和D索引。另一个页面新增的原索引恢复到本页，保留原定位并进入待核锁定。确认弹窗和hash等待后的读取异常也在派发前保留锁定。
+3. 原consumed／revoked清理先比较本人指针和对应索引的完整定位，再分别删除、回读并选择替换引用。旧记录没有二级索引时，仍可在精确终态核实后清理。删除后出现的新原引用继续被保留和锁定。
+4. 小程序原企业核对卡片位于购物车及页面加载条件外。重登后购物车已清理或原存储读取暂时失败时，仍有显式核对入口。存储恢复后按原D重新读取，消费结果取原Core收据。
+5. Web撤销在启动、原D读取返回、原hash返回、保存后及应答返回时重新核当前身份和页面可见状态。派发后页面隐藏保留原revocationKey，回到可见页面后只按原操作收据恢复。
+
+实现沿[原小程序页](../../apps/miniprogram/src/pages/checkout/index.ts)、[原核对控件](../../apps/miniprogram/src/pages/checkout/index.wxml)及[原Web提交锁](../../apps/tenant-website/src/components/useEnterpriseOrderSubmission.ts)。本片有限存储值检查、删除前后回读和可见状态模拟的范围明确，真实浏览器存储原子性、微信宿主及账号绑定沿负责人实测清单核定。
+
+### 必要验证与固定源码
+
+原Node入口为node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 -，stdin沿本树原prisma-offline-preload.cjs、不可达DATABASE_URL和本树绝对写根。过程使用[原消费者夹具](../../tests/enterprise-consumers.test.cjs)的页面、存储、deferred及事件入口，宿主补充仅在内存完成。
+
+| 验证 | stdin SHA-256及实际结果 |
+| --- | --- |
+| 小程序原方法与本片恢复 | cf4925388c2fdde2b542ef2cc69f0d4eaea08cabc6a71d476207945fadc0398c，退出0。原5组方法／存储／免逐单／历史购物车检查通过。定位不匹配、原读取失败、索引被替换、旧记录无二级索引、删除后新引用、无购物车重登，以及三种命令派发前新增索引与确认后读取失败通过。待核范围新增POST为0，原索引保留，合法精确终态可进入原订单。 |
+| 小程序正式声明与类型 | b7193db0a9df3782899c39d777f0c11622fac703fe4bbf7f2713857916257def，退出0。TypeScript5.9.3，shared336源／128份声明仅在内存，原ES2020小程序3根／245源零诊断。 |
+| Web隐藏撤销与原恢复 | e19998b6751ad149d07f388099d93f65915c9a36ccf3eb5b14e8a4fa18c58d7c，退出0。原D等待中隐藏、原hash等待中隐藏时新增撤销为0；可见页面明确撤销1次。派发后隐藏保留原撤销键，原收据恢复读取1次，撤销总派发保持1次。 |
+| Web定向类型 | 469912505c3d23f0154cf77188e15e5a026b37a46b831ef8c0fbbe178db4237c，退出0。TypeScript5.9.3，4根／296源零诊断。 |
+
+夹具初次准备中，存储替换文本命中三个宿主，随后约束到原miniFixture；跨realm JSON对象比较也已统一到原字段字节后复验。两次准备失败保留本对话原回执，最终原断言与上述预期均通过。所有行为审计为0，验证进程正常退出，声明、运行时、测试脚本和任务临时目录的新增数为0。
+
+三份清单SHA-256为f3d0b5a59676f04df59b1e2e23e3dfb60a010387bbbba5d695b1d0ea0bc278fe。Git过滤后的blob与工作树原始字节分别登记。
+
+| 本片源码 | Git blob | 工作树SHA-256 |
+| --- | --- | --- |
+| [apps/miniprogram/src/pages/checkout/index.ts](../../apps/miniprogram/src/pages/checkout/index.ts) | e1b7c4f19bffba0183f8b1365cf66d5c55af8ed4 | 3214bb4a7d328fde1a40f03a4ddc3b56216f388128279540db73d961de94d8bc |
+| [apps/miniprogram/src/pages/checkout/index.wxml](../../apps/miniprogram/src/pages/checkout/index.wxml) | 014f83fbf24633f8e276eeb9545071c4b433e49e | e37cd816c31617b8988bc58cd6cce3e3de49c616c7bb708d6e68d9f18a46fb4e |
+| [apps/tenant-website/src/components/useEnterpriseOrderSubmission.ts](../../apps/tenant-website/src/components/useEnterpriseOrderSubmission.ts) | 128808536864ff13929dd2609e13e8a8f99ffb62 | f737c81adc8d7556e3df106950baf09ee34ed9e6b4763796ce81478a8bf3cfdd |
+
+本片文档检查node --no-node-snapshot --no-compilation-cache scripts/validate-docs.cjs退出1，仍为原导航三处历史附件及界面规范一处稀疏示例，共4处既有缺链。新增文件链接及13处片段锚点定向核对通过，git diff --check退出0。
+
+dev1继续对本片固定候选复验原两个反例及客户消费者，dev2核Web隐藏撤销、用户操作和证据索引。原15／26的完整条款与独立复核继续按原任务核定，任务百分比沿正式任务册。
+
+<a id="ain28-user-operation-real-test-handoff-20261117"></a>
+## AIN-28 用户操作与负责人实测交付（2026-11-17）
+
+部署、双轨设置、轮换、监控、留存、灰度、停用和回退使用[原操作资料](#ain27-operational-delivery-20261117)。本节沿f19723df3d06f625f70805b231d721b16c4a3d86的原消费者和[原定位恢复修复](#ain15-client-delegation-recovery-guard-20261117)整理各角色操作和实测入口，实际运行结果由负责人登记。
+
+### 现有页面操作
+
+| 角色和页面 | 操作与原结果 |
+| --- | --- |
+| 经营人员，`/ai-operator`原控制台 | 选择当前已开放能力。订单解释先选原订单并提交问题，开业选择原分区，报价输入明确需求。显式发送后原会话、Task和Gateway推进，右工作区处理原待答、候选、Core报价、选单及人工批准，最后读原业务收据。最近对话沿原引用重开，unknown先核原journal。关闭／释放收据和空闲修订确认后再开始新输入。[原控制台说明](../../apps/admin/src/features/ai-operator/README.md)、[实际接线](#ain-native-console-direct-integration-20261115) |
+| 经营人员，业务页Copilot | 在原订单页打开侧栏，选择订单状态、费用、收款或下一步，点击“确认并运行订单 Agent”，再按“核对原结果”读取原Task及Core事实。使用“在 Agent 控制台继续”转接同一受权会话。自由文字用于本地确认说明。切订单、空间、账号或撤权后重新选择当前对象。[原侧栏](../../apps/admin/src/features/copilot/CopilotLayout.tsx)、[会话导航](../../apps/admin/src/features/ai-native/conversation-navigation.ts) |
+| 经营人员，`/ai/tasks` | 读取原Task、步骤、结果和待答，使用“读取当前问题”“核对原回答收据”及适用“明确继续原任务”。条件变化重新准备并确认。停止按“读取停止目标”→“请求取消任务”→“核对原停止收据”操作，保留原键，丢应答查同一收据，再按当前权续办善后或接管。恢复／takeover使用服务端当前权限及fencing。[原任务页](../../apps/admin/src/features/ai-native/TaskCenterPage.tsx)、[原回答](../../apps/admin/src/features/ai-native/TaskClarification.tsx)、[原停止](../../apps/admin/src/features/ai-native/TaskCancellation.tsx) |
+| 企业客户与代办人 | 客户本人在原预约页核身份、付款和告知，逐单企业付款先在原控件申请、读取批准及明确勾选，其他两条路径勾选本报价委托并点击“确认并委托商户”。小程序再经“确认委托”弹窗。经营人员用该原引用读取精确输入并准备、选择和请求AI人工批准，Core复核当前关系、资格、政策、报价及库存。分别核原订单、D／AI消费和适用企业批准。[原D完整输入](#ain15-26-original-input-stop-continuation-20261117)、[个人付款](#ain15-personal-enterprise-delegation-20261117)、[两端原委托操作](#ain15-client-delegation-original-consumers-20261117) |
+| 员工，原订单／交付／归还检查页 | 在受权订单明确展开AI，选图或录制WAV并上传，明确保存检查草稿后启动识别。PNG／JPEG最多512KiB，WAV最多12秒且512KiB，同次使用一种来源。审阅原识别Task及候选，人工逐字段确认或更正，再填入原履约表、客户签名并另行正式提交。弱网保留原草稿／上传／操作引用，迟到结果与切空间重核原对象。[交付页](../../apps/staff-miniprogram/src/pages/pickup/index.wxml)、[归还页](../../apps/staff-miniprogram/src/pages/return/index.wxml)、[原员工验收](#ain20-signature-reopen-simulated-whole-closeout-20261114) |
+| 客户，网站商品／预约页 | 在当前服务点击“按使用目标选品”，必要时先切换服务。输入目标、回答原问题并明确选择候选，核Core金额、绝对时间、数量和身份，创建原Booking Draft后明确继续到`/booking/{productId}`原预约。登录、企业身份和跨端变化重核当前受权引用，普通浏览、预约和支付沿原页面。[商品页](../../apps/tenant-website/src/pages/ProductsPage.tsx)、[预约页](../../apps/tenant-website/src/pages/BookingPage.tsx)、[原两端后继](#ain22-goal-booking-original-consumers-20261114) |
+| 客户，微信商品／帮助／本人订单页 | 在当前发布空间显式使用公开浏览、目标选品或本人订单助手，按原问题选商品和时间，核报价／草稿后进入原预约和收银台。网站／微信转接使用短期原引用及服务端当前身份／scope，付款状态取正式记录／回调。[微信商品页](../../apps/miniprogram/src/pages/catalog/index.wxml)、[客户安全边界](#ain21-simulated-whole-closeout-20261114)、[双向转接](#ain-entry04-14-cross-surface-whole-closeout-20261115) |
+| SaaS和空间治理管理员 | 在`/platform/rental-categories`及原空间品类／规则页读正式策略和能力，审草稿、差异和历史影响，分别办理校验、发布和空间采用。普通资料、规则／日历及通知受控修改沿原字段差异、当前修订、人工批准和保存收据，敏感验证走原专用流程。[原品类消费者](#ain23-category-human-model-consumers-20261114)、[原资料与配置](#ain16-simulated-whole-closeout-20261114) |
+
+模型解释、候选、报价、草稿、审批请求、批准、业务提交和原收据分别显示原状态。当前AI能力／政策不足时，用户从原订单、预约、履约、支付、客户或配置页接续。历史、来源、下载和收据重核当前身份／scope，unknown保留原操作关联。
+
+
+本地恢复引用及服务端原读取分别核定。部分读取接口使用POST，实测以材料／Task／模型调用／Core业务写入的新增数和原账、原收据判定恢复效果。引用缺失、unknown或未决副作用按原操作处理，操作员保留原Task、run、request／submission／operationKey和scope。
+
+### 负责人实测清单
+
+每组实测固定提交、API／shared／端构建、schema与迁移、publication／模型／能力／prompt／tool／政策版本和测试数据，记录真实环境、命令／操作、期望／实际、失败及清理责任。各环境分别使用固定版本。
+
+| 实测组 | 操作及必需观察 |
+| --- | --- |
+| 独立数据库与升级 | 预检新`rental_os_e2e_*`目标不存在。测空库、完整旧BYOK、旧来源审阅替换、CAS冲突、原事务及配对隔离库恢复，核旧密文、新修订、同dump双目标证书和原CLI收尾。 |
+| 平台及BYOK供应商 | 负责人确定D01／D02所需模型、地区、用途、费率和额度，用真实管理员配置两轨。核真实结构化工具／usage／callId，认证失败、能力不足、限流、超时及迟到终态，平台金额与BYOK Token／calls各记原账。 |
+| 控制台及Copilot | 实际浏览器完成订单、开业和报价目标，处理待答、候选、关闭／新轮次和两个入口转接。核原会话／Task／Run／材料、Core事实、可见窗口、重开／重读调用数量和切对象隔离。 |
+| 四品类及企业变体 | 摄影／露营／车辆／工程分别用同Core输入对照人工与AI。测普通本人、企业付款及企业优惠个人付款，核D、适用企业审批、AI批准、原主体／债权持久化、金额／单位／资格等价及一批准一动作。 |
+| 条件变化、并发及恢复 | 改时间／数量／对象、使报价过期或锁内缺货，并发重复原请求，测提交前后断线、停止中断和新holder接管。核旧方案拒绝、新确认、同一原业务结果、原键／账／fencing、unknown以及两实例澄清定位。 |
+| 当前授权、知识和展示 | 测同租户跨空间／地点／own、客户／员工／平台隔离、当前撤权、附件／来源／知识撤回及旧缓存。实际浏览器核固定确认、生成展示隔离、事实绑定、键盘／字号／窄屏及迟到响应。 |
+| 微信、履约和支付 | 微信开发者工具及指定真机测相机／相册／录音、上传、弱网、切后台／空间、人工更正／签名和原履约收据。客户两端测本人／企业范围、草稿转接及原收银台，实际支付成功取原渠道／回调证据。 |
+| 外部删除、备份及灰度 | 按D04／D05登记真实责任人、供应商副本、对象删除、混合备份淘汰和当前删除账本重放。测模型／prompt／tool／政策回退、原unknown只读、阶段放量／停止和原人工主链，按原运维流程回收本次资源。 |
+
+AIN-D01～D05的真实供应商／数据责任、商业额度、无人动作、留存责任及容量采用由负责人决定，原本地最小留存政策继续按需求§17执行。四项Reserved沿原任务册登记为高级路由／自动故障转移、外部MCP／Agent市场、独立APP和跨空间经营合并，基础BYOK在本期范围内。[正式需求](<AI Native-需求.md>)、[原储备及决策](<AI Native-开发任务.md#6-待决和外部依赖>)
+
+
+
+<a id="ain-main-fixed-merge-precheck-20261117"></a>
+## main固定整合预检（2026-11-17）
+
+本轮负责人目标要求每两项原任务新达100%办理固定main节点。实际main和GitHub均为62ca183f10b7c316ab63c28ef6d04ee88d06488b。本轮以该节点和客户消费者前置f19723df3d06f625f70805b231d721b16c4a3d86执行git merge-tree --write-tree --name-only --messages，退出1，得到23份冲突文件。预检树对象为59c6c9ac7ec7d8e500629fcd4fa5f3dfafd96671，工作区、暂存区、MERGE_HEAD及CHERRY_PICK_HEAD另行核对。
+
+| 冲突归属 | 固定数量和核对入口 |
+| --- | --- |
+| 后台外壳和图标 | 3份，AppShell、AnimatedIcon及图标来源清单 |
+| 原AI控制台和Copilot | 3份，AiOperatorPage、CopilotLayout及Copilot模块说明 |
+| API鉴权和契约 | 2份，api-auth.guard和openapi-document |
+| 企业批准及委托 | 4份，enterprise-approval.service、enterprise-merchant.controller、enterprise-order-delegation-source及enterprise-workflows.controller |
+| Core原业务和确认 | 2份，rental-business.service及rental-order-confirmation.service |
+| 员工构建 | 1份，原员工build.cjs |
+| 客户网站 | 5份，MemberLayout、RemoteBooking、AccountPage、BookingPage及OrderPages |
+| AI现行文档 | 2份，原记录和接续 |
+| shared委托契约 | 1份，enterprise-order-delegation |
+
+主仓库存在并行未提交成果。整合前逐文件核定在写归属、双方固定改动及相应WIP，按最终候选重新预检并保全实际涉及差异，再执行本轮授权的固定整合。当前功能和必要模拟继续在已分配AI树办理，助手继续原独立事项。main整合和整合后的必要验证仍属于原目标的未完项。
+
 <a id="ain15-client-delegation-original-consumers-20261117"></a>
 ## AIN-15 客户预约的原委托签发、恢复与撤销（2026-11-17）
 

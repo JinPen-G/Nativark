@@ -32,6 +32,19 @@
     </view>
   </view>
 
+  <view wx:if="{{enterprisePending && !aiEnabled}}" class="section"><view class="card">
+    <view class="subtitle">核对原企业操作</view>
+    <view wx:if="{{enterpriseError}}" class="notice notice--warning mt-8" role="status">{{enterpriseError}}</view>
+    <button class="btn mt-8" disabled="{{enterpriseBusy}}" bindtap="onReadEnterpriseApproval">只查原企业操作结果，不重发</button>
+    <block wx:if="{{enterpriseDelegationKey}}">
+      <view class="small mt-8">原商户委托编号 {{enterpriseDelegationKey}}</view>
+      <view class="muted small mt-8">商户可用此编号读取原报价及所需批准，再办理本次预约。</view>
+      <view wx:if="{{enterpriseDelegation}}" class="small mt-8">{{enterpriseDelegation.state}} / {{enterpriseDelegation.expiresAt}}</view>
+      <button wx:if="{{enterpriseDelegation && (enterpriseDelegation.state === 'issued' || enterpriseDelegation.state === 'expired') && !enterpriseDelegationRevoking}}"
+        class="btn mt-8" disabled="{{enterpriseBusy}}" bindtap="onRevokeEnterpriseDelegation">明确撤销这份委托</button>
+    </block>
+  </view></view>
+
   <view wx:if="{{aiEnabled}}" class="section">
     <view class="card">
       <view class="subtitle">{{aiReadOnly ? '原预约只读核对' : '原预约材料交接'}}</view>
@@ -112,15 +125,7 @@
         <checkbox-group bindchange="onEnterpriseAccept"><label><checkbox value="accept" checked="{{enterpriseAccepted}}" disabled="{{locked || enterprisePending}}" />我知悉企业身份订单（含优惠个人付款）可被受权管理员查看，纯个人订单不共享。</label></checkbox-group>
         <view class="muted mt-8">保证金按商户/企业合同默认企业承担，不代表已付款或冻结；员工承担须原资金能力支持。</view>
       </block>
-      <view wx:if="{{enterpriseError}}" class="notice notice--warning mt-8">{{enterpriseError}}</view>
-      <button wx:if="{{enterprisePending}}" class="btn mt-8" disabled="{{enterpriseBusy}}" bindtap="onReadEnterpriseApproval">只查原企业操作结果，不重发</button>
-      <block wx:if="{{enterpriseDelegationKey}}">
-        <view class="small mt-8">原商户委托编号 {{enterpriseDelegationKey}}</view>
-        <view class="muted small mt-8">商户可用此编号读取原报价及所需批准，再办理本次预约。</view>
-        <view wx:if="{{enterpriseDelegation}}" class="small mt-8">{{enterpriseDelegation.state}} / {{enterpriseDelegation.expiresAt}}</view>
-        <button wx:if="{{enterpriseDelegation && (enterpriseDelegation.state === 'issued' || enterpriseDelegation.state === 'expired') && !enterpriseDelegationRevoking}}"
-          class="btn mt-8" disabled="{{enterpriseBusy}}" bindtap="onRevokeEnterpriseDelegation">明确撤销这份委托</button>
-      </block>
+      <view wx:if="{{enterpriseError && !enterprisePending}}" class="notice notice--warning mt-8">{{enterpriseError}}</view>
       <block wx:if="{{enterprisePayer && quote.membershipSnapshot.enterpriseBasis.approvalMode === 'per_order'}}">
         <input placeholder="本次租赁用途" value="{{enterprisePurpose}}" disabled="{{enterprisePending}}" bindinput="onEnterprisePurpose" maxlength="500" />
         <button class="btn mt-8" disabled="{{enterpriseBusy || enterprisePending || !quote || !enterprisePurpose || enterpriseApproval.state === 'closed'}}" bindtap="onEnterpriseApproval">申请企业批准（不自动下单）</button>
@@ -306,8 +311,8 @@
         <view class="muted small">需支付</view>
         <money-text amount="{{quote ? payable : null}}" currency="{{currency}}" size="large" tone="primary"></money-text>
       </view>
-      <button wx:if="{{quoteExpired}}" class="btn btn--secondary btn--cta bottom-bar__action" hover-class="btn-hover" bindtap="onRequote">重新报价</button>
-      <button wx:else class="btn btn--primary btn--cta bottom-bar__action" hover-class="btn-hover" bindtap="onSubmit" disabled="{{submitting || paymentBlocked || locked || quoteLoading}}">{{submitting ? '提交中…' : '确认预约'}}</button>
+      <button wx:if="{{quoteExpired}}" class="btn btn--secondary btn--cta bottom-bar__action" hover-class="btn-hover" bindtap="onRequote" disabled="{{enterprisePending || enterpriseBusy}}">重新报价</button>
+      <button wx:else class="btn btn--primary btn--cta bottom-bar__action" hover-class="btn-hover" bindtap="onSubmit" disabled="{{submitting || enterprisePending || enterpriseBusy || paymentBlocked || locked || quoteLoading}}">{{submitting ? '提交中…' : '确认预约'}}</button>
     </view>
 
     <sheet visible="{{showPeriodSheet}}" title="选择租赁时间" footer="{{true}}" bind:close="onClosePeriod">

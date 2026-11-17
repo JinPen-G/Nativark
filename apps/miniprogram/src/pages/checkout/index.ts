@@ -330,10 +330,16 @@ Page({
   enterpriseStorageKey() { return `${STORAGE_KEYS.enterpriseOperations}:${PUBLIC_CONFIG.tenantCode}:${currentSession()?.customer.customerId ?? ""}:${currentServiceCode()}`; },
   readEnterpriseOriginal(): EnterpriseCheckoutOperation | undefined {
     const ownerKey = this.enterpriseStorageKey();
-    const current = readStorage<EnterpriseCheckoutOperation>(ownerKey);
-    if (current) return current;
+    // Storage errors and foreign locators keep unresolved writes locked.
+    const current = wx.getStorageSync(ownerKey) as EnterpriseCheckoutOperation | undefined;
+    if (current) {
+      if (current.customerId !== currentSession()?.customer.customerId || current.serviceCode !== currentServiceCode()) {
+        throw new Error("原企业操作定位不匹配，保留待核锁定");
+      }
+      return current;
+    }
     if (!this.aiMode) {
-      const legacy = readStorage<EnterpriseCheckoutOperation>(STORAGE_KEYS.enterpriseOperations);
+      const legacy = wx.getStorageSync(STORAGE_KEYS.enterpriseOperations) as EnterpriseCheckoutOperation | undefined;
       if (legacy && legacy.customerId === currentSession()?.customer.customerId && legacy.serviceCode === currentServiceCode()) return legacy;
     }
     const prefix = `${ownerKey}:delegation:`;
@@ -344,6 +350,19 @@ Page({
       || original.customerId !== currentSession()?.customer.customerId || original.serviceCode !== currentServiceCode()) throw new Error("原委托索引不可读，不能重新派发");
     writeRequiredStorage(ownerKey, original);
     return original;
+  },
+  assertNoEnterpriseOriginal() {
+    try {
+      const original = this.readEnterpriseOriginal();
+      if (!original) return;
+      this.enterpriseOperation = { ...original, version: contextVersion(), viewEpoch: this.enterpriseViewEpoch };
+      this.setData({ enterpriseDelegationKey: original.kind === "delegation" ? original.key : "",
+        enterpriseDelegationRevoking: Boolean(original.revocationKey) });
+      throw new Error("已有原企业操作待核对，保留其引用");
+    } catch (error) {
+      this.setData({ enterprisePending: true });
+      throw error;
+    }
   },
   enterpriseCurrent(operation: { version: number; viewEpoch?: number; customerId: string; serviceCode: string }) {
     return this.aiVisible && !this.aiDisposed && (operation.viewEpoch === undefined || operation.viewEpoch === this.enterpriseViewEpoch) && operation.version === contextVersion()
@@ -763,7 +782,9 @@ Page({
     try { original = this.readEnterpriseOriginal(); }
     catch (error) {
       this.enterpriseOperation = undefined;
-      this.setData({ enterprisePending: true, enterpriseBusy: false, enterpriseError: describeError(error).message });
+      this.setData({ enterprisePending: true, enterpriseBusy: false, enterpriseDelegation: undefined,
+        enterpriseDelegationKey: "", enterpriseDelegationRevoking: false, enterpriseApproval: undefined,
+        enterpriseError: describeError(error).message });
       return;
     }
     if (this.aiMode) {
@@ -997,7 +1018,7 @@ Page({
   },
 
   mutate(mutator: (draft: CartState) => void) {
-    if (this.enterpriseOperation) { toast("企业原提交结果待核对，不能修改或重发"); return; }
+    if (this.enterpriseOperation || this.data.enterprisePending) { toast("企业原提交结果待核对，不能修改或重发"); return; }
     const cart = getCart();
     if (!cart) return;
     try {
@@ -1023,7 +1044,7 @@ Page({
   },
 
   changeQuantity(key: string, quantity: number) {
-    if (this.enterpriseOperation) { toast("原企业操作待核对，不能修改清单"); return; }
+    if (this.enterpriseOperation || this.data.enterprisePending) { toast("原企业操作待核对，不能修改清单"); return; }
     const cart = getCart();
     if (!cart) return;
     try {
@@ -1320,7 +1341,7 @@ Page({
     const operation = this.enterpriseOperation;
     if (!operation || !this.enterpriseCurrent(operation)) throw new Error("原企业操作身份已变化");
     if (operation.kind === "delegation") {
-      this.assertEnterpriseDelegationOriginal(operation);
+      this.assertEnterpriseDelegationOriginal(operation, true);
       removeStorage(`${this.enterpriseStorageKey()}:delegation:${operation.key}`);
       this.assertEnterpriseDelegationOriginal(operation);
     }
@@ -1332,13 +1353,20 @@ Page({
       enterpriseDelegationRevoking: Boolean(replacement?.revocationKey) });
     if (replacement) throw new Error("原企业操作引用已变化，保留当前引用并继续锁定");
   },
-  assertEnterpriseDelegationOriginal(operation: EnterpriseCheckoutOperation) {
-    const saved = readStorage<EnterpriseCheckoutOperation>(this.enterpriseStorageKey());
+  assertEnterpriseDelegationOriginal(operation: EnterpriseCheckoutOperation, checkIndex = false) {
+    const ownerKey = this.enterpriseStorageKey();
+    const saved = readStorage<EnterpriseCheckoutOperation>(ownerKey);
     const locator = (value: EnterpriseCheckoutOperation | undefined) => value && { key: value.key, quoteId: value.quoteId, kind: value.kind,
       customerId: value.customerId, serviceCode: value.serviceCode, tenantId: value.tenantId, corporateCustomerId: value.corporateCustomerId,
       requestReference: value.requestReference, requestRevision: value.requestRevision,
       revocationKey: value.revocationKey, revocationRevision: value.revocationRevision };
     if (!this.enterpriseCurrent(operation) || JSON.stringify(locator(saved)) !== JSON.stringify(locator(operation))) throw new Error("原委托定位或客户页面已变化，保留当前原操作");
+    if (checkIndex) {
+      const indexed = wx.getStorageSync(`${ownerKey}:delegation:${operation.key}`) as EnterpriseCheckoutOperation | undefined;
+      if (indexed && JSON.stringify(locator(indexed)) !== JSON.stringify(locator(operation))) {
+        throw new Error("原委托索引已变化，保留待核锁定");
+      }
+    }
   },
   async resolveEnterpriseDelegation(operation: EnterpriseCheckoutOperation) {
     if (!operation.tenantId || !operation.corporateCustomerId || !operation.requestReference) throw new Error("原委托定位缺失，不能重新派发");
@@ -1408,11 +1436,12 @@ Page({
   },
   async onEnterpriseApproval() {
     const quote = this.data.quote, purpose = this.data.enterprisePurpose.trim();
-    if (!quote || !purpose || this.data.enterpriseApproval?.quoteId === quote.id && this.data.enterpriseApproval.state === "closed" || this.data.enterpriseBusy || this.enterpriseReading || this.enterpriseOperation || !currentSession()) return;
+    if (!quote || !purpose || this.data.enterpriseApproval?.quoteId === quote.id && this.data.enterpriseApproval.state === "closed" || this.data.enterprisePending || this.data.enterpriseBusy || this.enterpriseReading || this.enterpriseOperation || !currentSession()) return;
     const operation = { key: newKey("enterprise-approval"), kind: "request" as const, version: contextVersion(), viewEpoch: this.enterpriseViewEpoch,
       quoteId: quote.id, customerId: currentSession()!.customer.customerId, serviceCode: currentServiceCode() };
     this.setData({ enterpriseBusy: true });
     try {
+      this.assertNoEnterpriseOriginal();
       writeRequiredStorage(this.enterpriseStorageKey(), operation); this.enterpriseOperation = operation; this.setData({ enterprisePending: true });
       await requestEnterpriseApproval({ operationKey: operation.key, quoteId: quote.id, purpose, reason: purpose, expectedRevision: 0 });
       if (this.enterpriseCurrent(operation)) await this.resolveEnterpriseOperation();
@@ -1423,20 +1452,31 @@ Page({
     if (this.data.enterpriseBusy || this.enterpriseReading || !currentSession()) return;
     const owner = { version: contextVersion(), viewEpoch: this.enterpriseViewEpoch, customerId: currentSession()!.customer.customerId, serviceCode: currentServiceCode() };
     this.enterpriseReading = true; this.setData({ enterpriseBusy: true });
-    try { await this.resolveEnterpriseOperation(); }
+    try {
+      if (!this.enterpriseOperation) {
+        const original = this.readEnterpriseOriginal();
+        if (original) {
+          this.enterpriseOperation = { ...original, version: contextVersion(), viewEpoch: this.enterpriseViewEpoch };
+          this.setData({ enterprisePending: true, enterpriseDelegationKey: original.kind === "delegation" ? original.key : "",
+            enterpriseDelegationRevoking: Boolean(original.revocationKey) });
+        } else if (this.data.enterprisePending) throw new Error("原企业操作定位缺失，保留待核锁定");
+      }
+      await this.resolveEnterpriseOperation();
+    }
     catch (error) { if (this.enterpriseCurrent(owner)) this.setData({ enterpriseError: describeError(error).message }); }
     finally { this.enterpriseReading = false; if (this.enterpriseCurrent(owner)) this.setData({ enterpriseBusy: false }); }
   },
   async onSubmitEnterpriseApproval() {
     const approval = this.data.enterpriseApproval;
     if (!approval || approval.state !== "approved" || approval.quoteId !== this.data.quote?.id || !this.data.agreed
-      || this.data.enterpriseBusy || this.enterpriseReading || this.enterpriseOperation || !currentSession()) return;
+      || this.data.enterprisePending || this.data.enterpriseBusy || this.enterpriseReading || this.enterpriseOperation || !currentSession()) return;
     const operation = { key: newKey("enterprise-submit"), kind: "submit" as const, approvalId: approval.id, version: contextVersion(), viewEpoch: this.enterpriseViewEpoch,
       quoteId: approval.quoteId, customerId: currentSession()!.customer.customerId, serviceCode: currentServiceCode() };
     this.setData({ enterpriseBusy: true });
     try {
       const confirmed = (await wx.showModal({ title: "确认企业付款预约", content: "我已核对原报价、企业签约付款责任及保证金安排，明确提交本次请求。批准不保证库存或已支付。", confirmText: "明确提交" })).confirm;
-      if (!confirmed || !this.enterpriseCurrent(operation) || this.enterpriseOperation || approval !== this.data.enterpriseApproval) return;
+      if (!confirmed || !this.enterpriseCurrent(operation) || this.data.enterprisePending || this.enterpriseOperation || approval !== this.data.enterpriseApproval) return;
+      this.assertNoEnterpriseOriginal();
       writeRequiredStorage(this.enterpriseStorageKey(), operation); this.enterpriseOperation = operation; this.setData({ enterprisePending: true });
       await submitEnterpriseApproval({ operationKey: operation.key, approvalId: approval.id, expectedRevision: approval.revision, reason: this.data.enterprisePurpose || "本人核对后明确提交", confirm: true });
       if (this.enterpriseCurrent(operation)) await this.resolveEnterpriseOperation();
@@ -1444,11 +1484,12 @@ Page({
     finally { if (this.enterpriseCurrent(operation)) this.setData({ enterpriseBusy: false }); }
   },
   async submitEnterpriseOrder(quoteId: string) {
-    if (this.enterpriseOperation || this.enterpriseReading || this.data.enterpriseBusy || !currentSession()) return;
+    if (this.enterpriseOperation || this.data.enterprisePending || this.enterpriseReading || this.data.enterpriseBusy || !currentSession()) return;
     const operation = { key: newKey("enterprise-order"), kind: "order" as const, version: contextVersion(), viewEpoch: this.enterpriseViewEpoch,
       quoteId, customerId: currentSession()!.customer.customerId, serviceCode: currentServiceCode() };
     this.setData({ enterpriseBusy: true });
     try {
+      this.assertNoEnterpriseOriginal();
       writeRequiredStorage(this.enterpriseStorageKey(), operation); this.enterpriseOperation = operation; this.setData({ enterprisePending: true });
       await createEnterpriseOrder(quoteId, operation.key);
       if (this.enterpriseCurrent(operation)) await this.resolveEnterpriseOperation();
@@ -1466,8 +1507,9 @@ Page({
     if (approvalRequired && (!approval || approval.state !== "approved" || approval.quoteId !== quote.id)) { toast("须先取得本人的原企业批准"); return; }
     const owner = { version: contextVersion(), viewEpoch: this.enterpriseViewEpoch, customerId: session.customer.customerId, serviceCode: currentServiceCode() };
     const current = () => {
-      if (!this.enterpriseCurrent(owner) || this.data.quote !== quote || this.enterpriseOperation || readStorage<EnterpriseCheckoutOperation>(this.enterpriseStorageKey())
+      if (!this.enterpriseCurrent(owner) || this.data.quote !== quote || this.enterpriseOperation
         || approvalRequired && this.data.enterpriseApproval !== approval) throw new Error("原报价、批准或客户页面已变化，请重新核对");
+      this.assertNoEnterpriseOriginal();
     };
     this.enterpriseReading = true; this.setData({ enterpriseBusy: true });
     try {
@@ -1625,7 +1667,7 @@ Page({
 
   onRequote() {
     if (!this.aiVisible || this.aiDisposed) return;
-    if (this.enterpriseOperation) { toast("原企业操作待核对，不能重新报价"); return; }
+    if (this.enterpriseOperation || this.data.enterprisePending) { toast("原企业操作待核对，不能重新报价"); return; }
     const cart = getCart();
     this.syncQuotePreparation(cart);
     if (cart?.submission || this.aiMode || this.aiQuoteMode || this.data.aiHandoffPending || this.aiPendingHandoffRef) return;
@@ -1647,7 +1689,7 @@ Page({
     if (!this.aiVisible || this.aiDisposed) return;
     this.syncQuotePreparation(getCart());
     if (this.aiMode || this.aiQuoteMode || this.data.aiHandoffPending) return;
-    if (this.data.submitting || this.data.enterpriseBusy || this.enterpriseReading || this.enterpriseOperation) return;
+    if (this.data.submitting || this.data.enterprisePending || this.data.enterpriseBusy || this.enterpriseReading || this.enterpriseOperation) return;
     if (this.data.paymentBlocked) {
       this.setData({ formError: this.data.paymentNote });
       return;
@@ -1673,6 +1715,7 @@ Page({
   /** replay=true 表示恢复一次结果未知的提交：同键同报价重放。 */
   async submit(replay: boolean) {
     if (!this.aiVisible || this.aiDisposed) return;
+    if (this.enterpriseOperation || this.data.enterprisePending) return;
     this.syncQuotePreparation(getCart());
     const cart = getCart();
     if (!cart || this.aiMode || this.data.aiHandoffPending || this.aiQuoteMode && !replay || replay && !cart.submission) return;
@@ -1709,13 +1752,18 @@ Page({
   },
 
   async onRecover() {
-    if (this.enterpriseOperation) { await this.onReadEnterpriseApproval(); return; }
+    if (this.enterpriseOperation || this.data.enterprisePending) { await this.onReadEnterpriseApproval(); return; }
     const cart = getCart();
     if (cart?.bookingIdentity?.bookingIdentity === "enterprise_employee" && cart.submission && currentSession()) {
       const operation = { key: cart.submission.key, kind: "order" as const, version: contextVersion(), viewEpoch: this.enterpriseViewEpoch,
         quoteId: cart.submission.quoteId, customerId: currentSession()!.customer.customerId, serviceCode: currentServiceCode() };
-      try { writeRequiredStorage(this.enterpriseStorageKey(), operation); this.enterpriseOperation = operation; this.setData({ enterprisePending: true }); await this.onReadEnterpriseApproval(); }
-      catch (error) { this.setData({ enterpriseError: describeError(error).message }); }
+      try {
+        const original = this.readEnterpriseOriginal();
+        if (original) this.enterpriseOperation = { ...original, version: contextVersion(), viewEpoch: this.enterpriseViewEpoch };
+        else { writeRequiredStorage(this.enterpriseStorageKey(), operation); this.enterpriseOperation = operation; }
+        this.setData({ enterprisePending: true }); await this.onReadEnterpriseApproval();
+      }
+      catch (error) { this.setData({ enterprisePending: true, enterpriseError: describeError(error).message }); }
       return;
     }
     void this.submit(true);
