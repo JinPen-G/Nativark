@@ -12,7 +12,7 @@
 
 Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该Core。未来跨Core协作通过明确对象引用/接口/事件实现，本期不开放共享业务表或隐含读权。先交标准本地包，再接固定GitHub Release获取及Topic发现；底座与Core分别更新，保留下游业务、配置、数据和授权。[包标准](平台Core接入-开发任务.md#core-package-standard) · [独立更新](平台Core接入-开发任务.md#independent-upgrades)
 
-唯一施工树为 C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS，分支 codex/platform-core-extraction。本树由本对话唯一写入；允许修改PCH所需Auth/Guard/ALS、正式包出口、主装配/OpenAPI、schema/迁移/Seed与后台外壳。main索引和其他树仍归其作者。源码已接住固定main3e0b2c72865fa0a21053f26608bda878861c9f90；最新远端1d53ada2bb79a220e4d99f75f27508bfac5360a5仅多AI Native三册文档，源代码片收口后顺序归并。父版85780491bb9e5df0ce2b0ad3550345e71dabe63f保全本次旧接续，不追其他专项活动HEAD。[当前固定主线](平台Core接入-开发记录.md#core-main-notification-sync-20261117)
+唯一施工树为 C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS，分支 codex/platform-core-extraction。本树由本对话唯一写入；允许修改PCH所需Auth/Guard/ALS、正式包出口、主装配/OpenAPI、schema/迁移/Seed与后台外壳。main索引和其他树仍归其作者。已接住固定main1d53ada2bb79a220e4d99f75f27508bfac5360a5；源码相对3e0b2c72865fa0a21053f26608bda878861c9f90无变化，后续三册AI Native文档逐份保留。源码阶段372327384c4b466241bf0f62ed8fe705a15cd8ac已普通推送并实际远端回读；该固定提交保存本次旧接续，不追其他专项活动HEAD。[当前固定主线](平台Core接入-开发记录.md#core-main-notification-sync-20261117)
 
 通知草稿/原删除收据、报价提交前回调、个人付款委托与恢复正文剥离现已接到Rental包。原维护读取器由宿主真实供给，缓存只有核验过的不可变无正文引用；原API构造及当前权限/事务保持。公共权限匹配、面板图标及193个精确源码兼容出口同步修正，原后台通过正式包出口复用完整呈现。十配置后端、原101项企业工作流及一次stdin行为通过，七配置前端类型通过；未做真实运行。[当前源码和验证](平台Core接入-开发记录.md#core-main-notification-sync-20261117)
 

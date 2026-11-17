@@ -15,7 +15,7 @@
 
 ## 固定主线通知草稿、委托与后台兼容接续（2026-11-17）
 
-固定父版85780491bb9e5df0ce2b0ad3550345e71dabe63f已普通推送并实际远端回读，保全原实现和完整接续。本片在独占任务树归并固定main3e0b2c72865fa0a21053f26608bda878861c9f90，九处冲突逐项保留上游功能及已迁出单源；主树和副手树未写入。开工远端再前进到1d53ada2bb79a220e4d99f75f27508bfac5360a5，只新增AI Native三册的两项固定文档提交，待本片源代码合并收口后顺序归并，不把远端文档变化当作本片源码验证版本。
+固定父版85780491bb9e5df0ce2b0ad3550345e71dabe63f已普通推送并实际远端回读，保全原实现和完整接续。本片在独占任务树归并固定main3e0b2c72865fa0a21053f26608bda878861c9f90，九处冲突逐项保留上游功能及已迁出单源；主树和副手树未写入。源码阶段提交372327384c4b466241bf0f62ed8fe705a15cd8ac，普通推送退出0，实际远端回读为同一SHA。随后顺序归并固定main1d53ada2bb79a220e4d99f75f27508bfac5360a5，只新增AI Native三册的两项文档提交；这三份blob与固定main一致，其余源码无差异，不因文档整合重复业务测试。
 
 [报价/营销聚合](../../../packages/rental-core/src/mysql-business-runtime.ts)、[报价事实](../../../packages/rental-core/src/mysql-business-facts.ts)和[恢复快照](../../../packages/rental-core/src/mysql-state.ts)接住上游通知草稿准备/保存/原结果、报价提交前回调及恢复正文剥离。原业务API保持14项构造依赖，适配层供给原[正文保留读取器](../../../apps/api/src/modules/ai-native/privacy/retention-notification-draft.ts)，Core不反向导入API源码。清理策略、删除账及原校验仍由维护服务裁定，缺读取器明确不可用。
 
