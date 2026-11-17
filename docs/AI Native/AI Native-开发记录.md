@@ -6,6 +6,81 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain27-operational-delivery-20261117"></a>
+## AIN-27 双轨、运行、灰度与回退操作交付（2026-11-17）
+
+本阶段按原六条和 AIN-A30／A31整理可操作交付。源码候选为 `6a107ec538c7a077d2236d508e48ab1bba6d2b44`，正式依据为需求 v1.15及任务 v1.19。dev1已核定前置36份操作相关源码，清单 SHA-256为 `05eb293122104de94c47cf66ef9d97a5aaaccabc4f37d74784b3474db5e451f5`。Root继续从当前设置页、部署发布、容量、SecretBox、维护及原升级CLI核对操作顺序。当前原15／26整体依赖待最后澄清复验与全文核定，本节先交付操作资料，任务百分比沿任务册。
+
+### 双轨设置与原保存核对
+
+| 使用者与入口 | 操作及核对依据 |
+| --- | --- |
+| SaaS管理员，`/platform/ai` | 用当前 `system:ai-provider:view` 读取已有目录，选择正式Profile后读取当前配置。首次配置明确选择修订零，按 `system:ai-provider:manage` 保存停用配置，再分别审阅费率、当前配置修订的能力证据和平台预算。目录、保存、能力证据与调用准入各有独立结果。[原页面](../../apps/admin/src/features/ai-native/PlatformModelSettingsPage.tsx) |
+| 租户管理员，`/settings/ai` | 在当前经营空间持 `system:params:manage` 读取设置，明确选择平台AI或自带供应商并通过原CAS保存，再重新读取。新租户默认平台模式。平台额度经申请、SaaS审批和租户空间分配。BYOK由供应商计费，平台记录原调用／Token。两轨继续核原权限、政策、能力、Task累计资源及原用量关联。[原页面](../../apps/admin/src/features/ai-native/AiModelSettingsPage.tsx) |
+| 旧自定义配置的管理员 | 先读取原来源版本和受控协议，审阅旧配置后输入新密钥，按原source revision准备停用替换。原加密配置保留，切平台与回到BYOK均按新合法修订保存。损坏或不支持的旧协议由原服务返回不可用。[兼容服务](../../apps/api/src/modules/ai-native/tenant-model-config.service.ts) |
+| 保存冲突或应答丢失的操作者 | 冲突后读取当前修订再审阅差异。unknown保留原operationKey，使用页面“核对原保存收据”，观察原提交后重新读取当前配置。存储引用不可用时先恢复原引用读取条件。原收据、当前配置、能力与执行批准分别核验。[租户保存会话](../../apps/admin/src/features/ai-native/model-settings-session.ts)、[平台保存会话](../../apps/admin/src/features/ai-native/platform-model-settings-session.ts) |
+
+AIN-D01由负责人确定真实供应商、模型、处理地区、数据用途、额度及试点。当前已实现协议和能力声明由原配置／适配器提供。负责人实测时分别记录平台与BYOK的真实调用、结构化工具往返、usage、认证失败、超时、限流及适用图片／语音，核原callId和配置修订。供应商连接、必需能力证据、费率与预算就绪后，再执行获准场景。原Gateway及单账入口见[标准装配](../../apps/api/src/modules/ai-native/ai-native-application.providers.ts)。
+
+### 部署、轮换、队列和监控
+
+1. 部署责任人固定API、shared运行时、各客户端、schema及追加migration版本，同时登记publication、配置／Profile、capability、scene／prompt／tool／plan、政策、价格及币种。按原构建入口生成本次发布产物，确认生产者和消费者使用同一正式公共契约。原配置分节及实际工厂见[部署发布](../../apps/api/src/modules/ai-native/runtime-publication.configuration.ts)和[标准装配](../../apps/api/src/modules/ai-native/ai-native-application.providers.ts)。
+2. 通过原ConfigService提供 `AI_NATIVE_RUNTIME_PUBLICATION`，version取 `ain-runtime-publication-1`，revision为本次新版本，configurations只填已审的原宿主闭合配置。entryActions、conversations、模型、报价执行、设置执行、客户、员工、计数及能力探测分别发布。缺节沿原工厂返回不可用。工厂捕获发布配置，部署变更需重建对应宿主，原运行任务继续按持久绑定和当前政策复验。配置JSON最大65536字节，未知节和非法配置拒绝。[发布schema](../../apps/api/src/modules/ai-native/runtime-publication.configuration.ts)
+3. 轮换加密密钥前，先将 `INTEGRATION_FINGERPRINT_KEY` 固定为原指纹派生所用密钥并验证原身份／收件人哈希。然后配置新的 `INTEGRATION_ENCRYPTION_KEY_ID`、`INTEGRATION_ENCRYPTION_KEY`，在 `INTEGRATION_PREVIOUS_ENCRYPTION_KEYS` 保存最多5个已核旧版本，验证v1与v2旧密文可读和新写入版本。生产密钥为至少32字节随机值，版本ID只用公开别名。旧密钥退出由部署责任人核全部在用密文及恢复范围后决定。[原SecretBox](../../apps/api/src/common/secret-box.ts)
+4. 出站沿原受控协议、公网DNS、连接地址和TLS检查，重定向拒绝。回调、域名、微信渠道与对象存储沿所属正式业务配置分别验收。供应商字段、客户端 `VITE_*` 和模型内容各有固定用途，服务端凭据由原加密配置持有。[网关装配](../../apps/api/src/modules/ai-native/ai-native-application.providers.ts)
+5. `configurations.gatewayCapacity` 的当前候选为进程并发4、总等待队列32、单租户等待4、最长等待15000ms。各进程分别持有自己的容量门，配置变化关闭新网络工作，已有占用由原lease释放。原Logger的 `ai.gateway.capacity.pressure` 提供saturated、rate_limited、timeout及configuration_changed告警，每原因30秒限频。容量数字属于首发候选，生产规模和采用由AIN-D05确定。[容量服务](../../apps/api/src/modules/ai-native/gateway-capacity.runtime.ts)
+6. 管理人员在原调用记录和TaskCenter核原Task／Run／Step、callId、用量、拒绝、取消、接管、原业务结果及未决关联。故障观测须配置精确scope／actor／audience和原阈值。正常50样本、延迟候选、成本包络、财务账／资源账和未记录指标沿[AIN-25固定测量](#ain25-measurement-cost-rollback-whole-20261114)。监控由这些原事实形成，缺终结或截断样本的比例保持未记录。
+
+### 灰度、停用与人工路线
+
+| 阶段 | 放量、停止及责任 |
+| --- | --- |
+| 只读和草稿 | 负责人固定试点租户、角色、空间、scene及正式工具，核当前权限、事实来源、能力和有限资源。先运行订单解释、开业诊断或已审草稿，记录拒绝、unknown、费用和人工办理结果。放量条件为该范围实测通过且负责人批准下一阶段。 |
+| 确认写入 | 在已审范围使用原Proposal／Approval及Core事务，分别核报价、人工批准、正式提交和原订单／设置收据。条件变化重新准备并确认。任一越权、重复业务、无法核对金额或持续unknown触发停止，交原业务页和原键收据核对。 |
+| 有限自动化 | AIN-D03另行确定主体、工具、scope、阈值、冷却、收件人、额度、有效期和启用人。当前经营事件页支持disabled、shadow和manual_confirmation，采用原read→preview→prepare→明确commit。生产无人动作范围由负责人另行放行，R3继续原人工审核。[原经营事件政策](../../apps/admin/src/features/ai-native/AutomationReviewSection.tsx) |
+
+租户停新模型调用在 `/settings/ai` 读取当前配置，保存enabled=false并核原收据。平台跨两轨停某场景在 `/platform/ai` 的“平台预算”选择每个已开放的sceneCode，读取原PLATFORM政策，将gates.platform或gates.scene设为false，明确保存后逐原收据核对。全范围停用需覆盖已开放scene，BYOK同样受原政策门和宿主发布控制。单Profile的enabled控制该配置，新请求还受租户／场景／执行门约束。原独立读权及善后权决定历史／原收据访问，unknown继续核原操作。[平台原政策页](../../apps/admin/src/features/ai-native/PlatformBudgetSettings.tsx)
+
+人工办理使用原订单、预约、履约、支付、客户或配置页面。任务中心读取原任务、当前问题和原取消／回答／批准收据，明确选择继续或接管，保留原Task、request、submission／operationKey、inputHash、planHash和fencing。报价／确认／收款／交付分别以所属原业务事实显示。恢复操作、配置保存及页面切换均有独立结果。[原TaskCenter](../../apps/admin/src/features/ai-native/TaskCenterPage.tsx)、[原停止入口](../../apps/admin/src/features/ai-native/TaskCancellation.tsx)
+
+### 留存、备份与恢复责任
+
+| 数据及责任 | 原政策与可操作入口 |
+| --- | --- |
+| 本地正文、索引和缓存，由对应数据服务维护 | 普通AI对话／生成及准备材料30天，未绑定AI临时附件7天。知识与确认记忆撤回立即停止读取并清索引／缓存，明确删除的正文及重复正文7天内清理。当前经营空间维护权下调用 `POST /api/ai-native/privacy/cleanup`，按kind与最多10项的limit／after分页，再查receipt／receipts。审批、业务账及原收据沿业务政策，关联运行中／unknown效果保留hold。 |
+| 平台正文，由平台数据服务维护 | 当前SaaS管理权下调用 `POST /api/ai-native/platform-privacy/cleanup`，只接受task／request及原分页字段，收据读取独立核平台读取权。原Scope保持PLATFORM／null，原请求工厂按close撤回凭证。 |
+| 外部对象及供应商副本，由对应适配／运营责任人核验 | AI专用且有原存储位置证明的附件可由原清理服务DELETE，再按原HEAD证据核对。供应商副本、数据地区、删除政策和真实责任人属于AIN-D04的生产交付项。共享业务附件、原订单／检查材料使用所属业务留存规则。 |
+| 备份淘汰和访问恢复，由部署运维责任人留证 | 已删除内容在备份最长30天淘汰。混合业务备份按原运维策略逐份核验，AI专用本地适配处理自己的明确副本。恢复访问前重放快照外当前删除账本，核全部经营空间和真实平台Scope的独立签名证书。 |
+
+具体kind、收据、附件删除证据、精确hold、正文副本和两类维护权限见[原保留接口](../../apps/api/src/modules/ai-native/privacy/README.md)。部署责任人把Ed25519公钥SPKI DER的SHA-256固定到 `configurations.retentionRestore.publicKeyHash`，可信备份宿主持签名私钥。恢复服务器使用 `OPS_AI_RETENTION_PUBLIC_KEY` 独立验签，原manifest／permit／证书绑定dump摘要、准确目标、全部scope和60秒窗口。[原可信工厂阶段](#ain27-retention-restore-host-config-20261116)
+
+### 模型、政策与数据库回退
+
+先停新执行并固定当前原账，再将已审原模型／prompt／tool／政策值作为新合法修订保存和发布，取得该修订的当前能力证明。原Task／D／callId、input／plan、批准、Core结果、财务和累计资源沿其原版本读取，unknown保留原占用和待核对状态。模型A2→停用B3→值恢复A4、publication／plan policy和prompt／scene三组必要模拟退出0，原调用均保持1次，固定命令和原结果见[版本恢复证据](#ain25-measurement-cost-rollback-whole-20261114)。
+
+数据库回退沿原备份和兼容迁移。原 `ops:upgrade-drill` 先准备同dump的升级／回滚配对隔离库，升级库应用原追加迁移，可信宿主在两目标重放当前删除标记后签发各自全scope证书。再使用同一备份和原接续文件执行以下入口，两个屏障通过后原CLI才授应用访问并启动独立测试API。
+
+`npm run ops:upgrade-drill -- --file <原备份.sql> --finalize-ai <原接续.json> --ai-retention-certificates <升级证书数组.json> --rollback-ai-retention-certificates <回滚证书数组.json>`
+
+原 `ops:restore-source` 同样使用原 `--file`、`--finalize-ai` 和 `--ai-retention-certificates` 接续隔离目标。原CLI核库名、备份SHA、迁移基线、签名及目标，接续复用原库。失败保留隔离克隆及最少定位，成功按原清理路径回收本次API、授权与克隆，`--keep` 的库交具体创建者管理。生产数据库恢复前由运维负责人完成备份、兼容及访问恢复检查。[原升级CLI](../../scripts/ops/upgrade-drill.cjs)、[原恢复CLI](../../scripts/ops/restore-source.cjs)
+
+原升级五情景已由作者和Root独立执行原CLI的有限内存模拟。缺证书、错目标和坏签名时授权与启动计数均为0。完整双目标接续、无AI表旧路径及自有资源回收通过。Root命令stdin SHA-256为 `459e65b663c3e409b0f394d7c51d63b056f92bf44ae6dd34c2c9b8a8c3b4b9fd`，退出0。完整结果及固定脚本版本见[原升级恢复屏障](#ain27-upgrade-restore-barrier-fixed-20261116)。
+
+### 原六条交付映射
+
+| 原条款 | 本节交付及验证边界 |
+| --- | --- |
+| 1，批准范围与供应商验证 | 双轨原设置、唯一Gateway、能力／错误／usage及实测顺序已定位。真实供应商与适用多模态由负责人实测并记录实际callId。 |
+| 2，双轨与升级兼容 | 新租户平台默认、旧BYOK审阅／停用替换、模式切换原配置保留和同键unknown恢复沿原页面／服务与既有模拟证据。两轨财务及Task资源职责分开。 |
+| 3，部署与运营 | 发布配置、凭据轮换、出站／回调／域名、容量告警、原任务观测、四类留存责任和可信恢复入口齐备，生产责任人、真实配置及实测由负责人确定。 |
+| 4，灰度与停用 | 只读／草稿、人工确认写入及额外批准的有限自动化分阶段交付，各阶段具备放量、停止和原人工路线。当前政策模式、全scene停用与BYOK控制沿原接口操作。 |
+| 5，回退 | 原三版本回退模拟和配对隔离库／双scope屏障／清理五情景已固定，原业务结果和删除账本可继续受权核对。 |
+| 6，研发验收与真实交付 | 原A30／A31实现和模拟证据、部署／灰度／停用／回退与负责人实测资料汇入本册。原26全文依赖及最后独立发现仍按其原任务完成后核定G4。 |
+
+本阶段为原册内操作资料整理，真实配置、数据库、供应商、微信及部署状态沿负责人后续实测登记。Root只读取原源码和固定证据，原Task与账务状态保留在其业务域。新增过程文件、依赖、进程、端口和任务临时目录为0。
+
+文档检查命令 `node --no-node-snapshot --no-compilation-cache scripts/validate-docs.cjs` 退出1，仍为原导航三处历史附件和界面规范一处稀疏示例共4处缺链。新操作资料23处文件／锚点及当前接续定向核查通过，`git diff --check` 退出0。
+
 <a id="ain15-26-clarification-locator-binding-20261117"></a>
 ## AIN-15／26 原澄清收据定位与并发保留（2026-11-17）
 
