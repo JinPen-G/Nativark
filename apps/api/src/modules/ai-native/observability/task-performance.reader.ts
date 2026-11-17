@@ -16,9 +16,11 @@ import { PrismaTaskTakeoverRepository } from '../runner/prisma-task-takeover.rep
 import { evaluateAiTaskTransitionDraft } from '../task-transition-draft';
 import { aiStepActionId } from '../ai-step-registration.repository';
 import { aiTaskRunPlanSchema } from '../runner/prisma-task-run-evidence.repository';
+import { TaskLifecycleObservationReader, taskLifecycleSampleRates, type TaskLifecycleObservationDb,
+  type TaskLifecycleObservation, type TaskLifecycleSampleRates } from './task-lifecycle-observation.reader';
+import { TaskFaultObservationReader, type TaskFaultObservation, type TaskFaultObservationOptions } from './task-fault-observation.reader';
 
-type Db = Pick<PrismaClient, 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskExecutionBudget' | 'aiTaskExecutionCharge'
-  | 'aiGatewayInvocation' | 'operationLog'> & Partial<Pick<PrismaClient, '$transaction' | 'aiTaskEvent' | 'aiTaskRunOverhead' | 'aiTaskRunPlan'>>;
+type Db = TaskLifecycleObservationDb & Pick<PrismaClient, 'aiGatewayInvocation'>;
 const id = z.string().min(1).max(36).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const commandSchema = z.object({ taskId: id, usageLimit: z.number().int().min(1).max(20), usageAfter: id.optional(), includeTaskFinancial: z.boolean().optional() }).strict();
 const sampleSchema = z.object({ taskIds: z.array(id).min(1).max(50)
@@ -63,8 +65,14 @@ function fencedSnapshot<T extends { fencingToken: Prisma.Decimal }>(rows: T[]) {
 }
 
 export class TaskPerformanceReader {
+  private readonly lifecycle: TaskLifecycleObservationReader;
+  private readonly faults: TaskFaultObservationReader;
   constructor(private readonly db: Db, private readonly actions: Pick<AiTaskRepositoryAuthority, 'resolve'>,
-    private readonly usage: Pick<TaskBudgetUsageReader, 'read'> & Partial<Pick<TaskBudgetUsageReader, 'summary'>>, private readonly clock: () => Date = () => new Date()) {}
+    private readonly usage: Pick<TaskBudgetUsageReader, 'read'> & Partial<Pick<TaskBudgetUsageReader, 'summary'>>, private readonly clock: () => Date = () => new Date(),
+    faultOptions?: TaskFaultObservationOptions) {
+    this.lifecycle = new TaskLifecycleObservationReader(db, actions, clock, usage);
+    this.faults = new TaskFaultObservationReader(db, actions, clock, faultOptions);
+  }
 
   /** A partial aggregate can close a failed/cancelled successor. Its original
    * Task event and released Run-time receipt attest that closure; status names,
@@ -210,7 +218,7 @@ export class TaskPerformanceReader {
   /** A caller-selected original sample, never a whole-tenant rate inferred
    * from one page. Each task and its independent takeover receipt need current
    * authority. Pending tasks do not become failures; SLO is not evaluated. */
-  async sample(value: unknown): Promise<AiTaskOutcomeSampleDraft> {
+  async sample(value: unknown): Promise<AiTaskOutcomeSampleDraft & { lifecycleRates: TaskLifecycleSampleRates }> {
     const parsed = sampleSchema.safeParse(structuredClone(value));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const now = this.clock(); time(now);
@@ -229,7 +237,8 @@ export class TaskPerformanceReader {
       operationLog: db.operationLog, $transaction: transaction.bind(db) }, this.actions, this.clock);
     type Item = { task: Prisma.AiTaskGetPayload<{ select: typeof taskSelect }>; status: AiTaskStatusDraft;
       context: AiExecutionContext; access: ReturnType<typeof aiTaskAccessFromContext>;
-      logs: Awaited<ReturnType<typeof db.operationLog.findMany>>; takeover: boolean };
+      logs: Awaited<ReturnType<typeof db.operationLog.findMany>>; takeover: boolean;
+      lifecycle: Awaited<ReturnType<TaskLifecycleObservationReader['capture']>> };
     const items: Item[] = [];
     let sampleIdentity: string | undefined;
     try {
@@ -268,7 +277,8 @@ export class TaskPerformanceReader {
           if (observed.status !== 'observed' || observed.receiptId !== row.id) throw unavailable();
           takeover = true;
         }
-        items.push({ task, status, context, access, logs, takeover });
+        const lifecycle = await this.lifecycle.capture(task.id, context, task);
+        items.push({ task, status, context, access, logs, takeover, lifecycle });
       }
       for (const item of items) {
         if (identity(await authorize(item.task.id, 'read_metadata')) !== sampleIdentity
@@ -283,6 +293,7 @@ export class TaskPerformanceReader {
         if (!isDeepStrictEqual(current, item.task) || !isDeepStrictEqual(latest, item.logs))
           throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
       }
+      for (const item of items) await item.lifecycle.revalidate();
       // A later sample read may revoke an earlier task's authority. Close all
       // current grants after the final storage await, without using old access
       // as a cached permission or manufacturing an atomic snapshot.
@@ -290,6 +301,7 @@ export class TaskPerformanceReader {
         if (identity(await authorize(item.task.id, 'read_metadata')) !== sampleIdentity
           || identity(await authorize(item.task.id, 'read_step_terminal')) !== sampleIdentity)
           throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        await item.lifecycle.reauthorize();
       }
       const counts = Object.fromEntries(AI_TASK_STATUSES_DRAFT.map(status => [status, 0])) as Record<AiTaskStatusDraft, number>;
       for (const item of items) counts[item.status]++;
@@ -301,6 +313,7 @@ export class TaskPerformanceReader {
           terminal, total, percent: terminal === total ? (100 * counts.succeeded / total).toFixed(2) : null },
         takeoverRate: { tasksWithReceipt: takeoverCount, total, percent: (100 * takeoverCount / total).toFixed(2),
           basis: 'original_same_owner_takeover_receipts' },
+        lifecycleRates: taskLifecycleSampleRates(items.map(item => item.lifecycle.value)),
         coverage: 'requested_authorized_one_owner_workspace_scene_version',
         consistency: 'revalidated_reads_not_atomic_snapshot', slo: 'not_evaluated', execution: 'read_only_no_lease_or_model' };
     } catch (error) {
@@ -309,7 +322,15 @@ export class TaskPerformanceReader {
     }
   }
 
-  async read(value: unknown, clientSourceBinding?: (value: AiTaskClientVisibleReportDraft) => Promise<string | null>): Promise<AiTaskPerformanceObservationDraft> {
+  async read(value: unknown, clientSourceBinding?: (value: AiTaskClientVisibleReportDraft) => Promise<string | null>): Promise<AiTaskPerformanceObservationDraft & { lifecycle: TaskLifecycleObservation; faults: TaskFaultObservation }> {
+    const captured = await this.capture(value, clientSourceBinding);
+    captured.assertCurrentPolicy();
+    return captured.value;
+  }
+
+  /** Server-only observation handle. HTTP hosts keep its policy witness through
+   * their last identity wait; no callback or authority enters the wire packet. */
+  async capture(value: unknown, clientSourceBinding?: (value: AiTaskClientVisibleReportDraft) => Promise<string | null>) {
     const parsed = commandSchema.safeParse(structuredClone(value));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const command = parsed.data, before = structuredClone(await this.actions.resolve(command.taskId, 'read_metadata'));
@@ -522,6 +543,8 @@ export class TaskPerformanceReader {
           ...(command.usageAfter ? { after: command.usageAfter } : {}) });
         if (!isDeepStrictEqual(originalPage, currentPage)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
       }
+      const lifecycle = await this.lifecycle.capture(task.id, before, task);
+      const faults = await this.faults.capture(task.id, before, task, lifecycle);
       await partialEnd?.revalidate();
       const latest = structuredClone(await this.db.aiTask.findFirst({ where: access.where, select: taskSelect }));
       if (!latest || !isDeepStrictEqual(latest, task) || !isDeepStrictEqual(fencedSnapshot(await readRuns()), runs)
@@ -533,8 +556,11 @@ export class TaskPerformanceReader {
       }
       for (const item of sourceChecks) if (await clientSourceBinding!(item.report) !== item.binding)
         throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-      const after = await this.actions.resolve(command.taskId, 'read_metadata'), now = this.clock();
+      await faults.revalidate();
+      const after = await this.actions.resolve(command.taskId, 'read_metadata');
       if (identity(before) !== identity(after)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      await faults.reauthorize();
+      const now = this.clock();
       if (time(now) < time(task.createdAt) || time(task.updatedAt) > time(now)) throw unavailable();
       if (runs.some(run => run.startedAt && time(run.startedAt) > time(now) || run.endedAt && time(run.endedAt) > time(now))) throw unavailable();
       const startTimes = runs.slice(0, 50).flatMap(run => run.startedAt ? [time(run.startedAt)] : []);
@@ -544,7 +570,7 @@ export class TaskPerformanceReader {
       const finalRun = runs.length <= 50 ? runs.at(-1) : undefined;
       const end = ['SUCCEEDED', 'PARTIALLY_SUCCEEDED', 'FAILED', 'CANCELLED'].includes(task.status)
         && finalRun?.status === task.status ? finalRun.endedAt : partialEnd?.endedAt ?? null;
-      const result: AiTaskPerformanceObservationDraft = { version: 'task-performance-1', observedAt: now.toISOString(),
+      const result: AiTaskPerformanceObservationDraft & { lifecycle: TaskLifecycleObservation; faults: TaskFaultObservation } = { version: 'task-performance-1', observedAt: now.toISOString(),
         task: { taskId: task.id, sceneCode: task.sceneCode, sceneVersion: task.sceneVersion, status: task.status.toLowerCase(),
           revision: task.revision, createdAt: task.createdAt.toISOString(), lastChangedAt: task.updatedAt.toISOString(),
           cancelRequestedAt: task.cancelRequestedAt?.toISOString() ?? null },
@@ -565,6 +591,8 @@ export class TaskPerformanceReader {
           truncated: invocations.length > 50, coverage: 'completed_gateway_observations_only' },
         budgetAdmission: { denials: denialItems, truncated: invocations.length > 50, coverage: 'recorded_rejections_only' },
         clientVisible,
+        lifecycle: lifecycle.value,
+        faults: faults.valueAt(now),
         measurements: { firstToken: clientItems.some(item => item.kind === 'text') ? 'client_reported' : 'not_recorded',
           firstCard: clientItems.some(item => item.kind === 'card') ? 'client_reported' : 'not_recorded',
           modelLatency: modelItems.length ? 'gateway_transport_wall_time_only' : 'not_recorded',
@@ -572,7 +600,8 @@ export class TaskPerformanceReader {
           rates: 'not_computed', slo: 'not_evaluated' },
         consistency: 'revalidated_reads_not_atomic_snapshot', execution: 'read_only_no_dispatch_or_release' };
       if (Buffer.byteLength(JSON.stringify(result), 'utf8') > 131072) throw unavailable();
-      return result;
+      faults.assertCurrentPolicy();
+      return { value: result, assertCurrentPolicy: faults.assertCurrentPolicy };
     } catch (error) {
       if (error instanceof AiTaskRepositoryError) throw error;
       if (error instanceof BudgetError) throw new AiTaskRepositoryError(error.code === 'INVALID' ? 'AI_INVALID_INPUT'

@@ -22,6 +22,7 @@ import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT, AI_SCENE_ORDER_READ_HTTP_DRAFT,
 import { AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT, AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_CLIENT_TASK_POLICY_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_CLIENT_PUBLIC_HTTP } from '@rental-os/shared';
+import { AI_ENTRY_SCENE_CATALOG_HTTP } from '@rental-os/shared';
 import { AI_TASK_RULE_DRAFT_HTTP, AI_TASK_RULE_DRAFT_READ_PERMISSIONS } from "@rental-os/shared";
 import { AI_TASK_ORIGINAL_READ_POLICY_HTTP, AI_TASK_ORIGINAL_READ_POLICY_ENTRY_PERMISSIONS } from '@rental-os/shared';
 import { AI_TASK_CENTER_HTTP_DRAFT, AI_TASK_CENTER_ENTRY_PERMISSIONS, AI_CONVERSATION_HTTP_DRAFT } from '@rental-os/shared';
@@ -29,6 +30,7 @@ import { AI_TASK_CENTER_RECOVERY_HTTP, AI_TASK_CENTER_RECOVERY_CONTRACTS } from 
 import { AI_AUTOMATION_EXPLANATION_HTTP, AI_AUTOMATION_EXPLANATION_CONTRACTS } from '@rental-os/shared';
 import { AI_ORDER_EXPLANATION_HTTP_V2 } from '@rental-os/shared';
 import { AI_COUNTING_HTTP_DRAFT, AI_COUNTING_HTTP_OPERATIONS } from '@rental-os/shared';
+import { AI_CATEGORY_DRAFT_HTTP_CONTRACTS, AI_CATEGORY_PROPOSAL_HTTP, AI_CATEGORY_PROPOSAL_CONTRACTS } from '@rental-os/shared';
 import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_CONSUMPTION_HTTP_DRAFT, AI_KNOWLEDGE_POLICY_HTTP_DRAFT, AI_TEXT_CAPABILITY_HTTP_DRAFT, AI_BUDGET_MANAGEMENT_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT, AI_SCENE_PLAN_POLICY_HTTP_DRAFT, RentalCategoryCode,
   type RentalCapability, type SystemUserRow } from "@rental-os/shared";
 import { AuthService } from "../modules/auth/auth.service";
@@ -40,12 +42,21 @@ import { enterRequestIdentity, getRequestIdentity, runWithRequestIdentity, type 
 import type { TrustedWorkspaceAccess } from '../modules/auth/trusted-workspace-principal';
 import { matchableRequestPath } from "./request-path";
 import { isStaffAuthPath, isStaffBusinessRouteAllowed, staffRoutePermissions, isHumanAutomationRoute } from "./staff-api-policy";
+import { AI_REGISTERED_ENTRY_ACTION_HTTP, AI_REGISTERED_ENTRY_ACTION_CONTRACTS } from '@rental-os/shared';
+import { AI_ENTRY_NOTIFICATION_DRAFT_HTTP, AI_ENTRY_NOTIFICATION_DRAFT_CONTRACTS } from '@rental-os/shared';
 import { PrismaService } from "../modules/database/prisma.service";
 import { resolveUserBusinessLocationScope } from "./business-location-scope";
-import { isPlatformAiProviderPath, platformAiProviderPermission, platformCapabilityProbePermission, PLATFORM_AI_PROVIDER_PERMISSIONS } from './platform-ai-access-policy';
+import { isPlatformAiProviderPath, platformAiProviderPermission, platformCapabilityProbePermission, platformRetentionPermission, PLATFORM_AI_PROVIDER_PERMISSIONS } from './platform-ai-access-policy';
 
 const countingRouteAccess = new Map<string, typeof AI_COUNTING_HTTP_OPERATIONS[number][3]>(AI_COUNTING_HTTP_OPERATIONS.map(([action, _request, _response, access]) =>
   [`${AI_COUNTING_HTTP_DRAFT.method} /${AI_COUNTING_HTTP_DRAFT.basePath}/${AI_COUNTING_HTTP_DRAFT[action]}`, access] as const));
+const categoryDraftRoutes = new Map<string, string>([
+  ...Object.entries(AI_CATEGORY_DRAFT_HTTP_CONTRACTS).map(([operation, contract]) =>
+    [`POST /ai-native/category-drafts/${operation}`, contract.write ? 'system:rental-category:edit' : 'system:rental-category:view'] as const),
+  ...Object.entries(AI_CATEGORY_PROPOSAL_CONTRACTS).map(([operation, contract]) =>
+    [`POST /${AI_CATEGORY_PROPOSAL_HTTP.basePath}/${AI_CATEGORY_PROPOSAL_HTTP[operation as keyof typeof AI_CATEGORY_PROPOSAL_CONTRACTS]}`, contract.permission] as const)
+]);
+const registeredCategoryDraftPermission = (method: string, path: string) => categoryDraftRoutes.get(`${method.toUpperCase()} ${path}`);
 
 interface RequestLike {
   method: string;
@@ -253,7 +264,7 @@ const originalTaskObservationRoutes = new Set([
   AI_SCENE_MODEL_HTTP_DRAFT.readInput,
   AI_SCENE_MODEL_HTTP_DRAFT.readRecoverySnapshot, AI_SCENE_MODEL_HTTP_DRAFT.readTakeoverReceipt,
   AI_SCENE_MODEL_HTTP_DRAFT.readCancellationReceipt, AI_SCENE_MODEL_HTTP_DRAFT.readCancellationSettlementReceipt,
-  AI_SCENE_MODEL_HTTP_DRAFT.readAnswer, AI_SCENE_MODEL_HTTP_DRAFT.readModelResult,
+  AI_SCENE_MODEL_HTTP_DRAFT.readAnswer, AI_SCENE_MODEL_HTTP_DRAFT.readModelResult, AI_SCENE_MODEL_HTTP_DRAFT.readQuoteGoalCandidates,
   AI_SCENE_MODEL_HTTP_DRAFT.reopenModelSource, AI_SCENE_MODEL_HTTP_DRAFT.reopenOpeningModelSource,
 ].map(action => `POST /${AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${action}`));
 
@@ -286,6 +297,20 @@ export function requiredPermissions(method: string, path: string) {
     return path.endsWith('/prepare') ? ['rental-os:price:manage'] : ['rental-os:order:view', 'rental-os:price:manage'];
   }
   if (method.toUpperCase() === "POST" && path === "/auth/development/reset-demo-password") return ["system:params:manage"];
+  if (method.toUpperCase() === 'POST' && Object.keys(AI_ENTRY_NOTIFICATION_DRAFT_CONTRACTS).some(action =>
+    path === `/${AI_ENTRY_NOTIFICATION_DRAFT_HTTP.basePath}/${AI_ENTRY_NOTIFICATION_DRAFT_HTTP[action as keyof typeof AI_ENTRY_NOTIFICATION_DRAFT_CONTRACTS]}`)) {
+    // The request-bound leaf additionally checks current original customer
+    // sensitive-field rights, workspace-wide scope and draft/source binding.
+    return ['system:integration:manage'];
+  }
+  if (method.toUpperCase() === 'POST' && Object.keys(AI_REGISTERED_ENTRY_ACTION_CONTRACTS).some(action =>
+    path === `/${AI_REGISTERED_ENTRY_ACTION_HTTP.operatorBasePath}/${AI_REGISTERED_ENTRY_ACTION_HTTP[action as keyof typeof AI_REGISTERED_ENTRY_ACTION_CONTRACTS]}`
+    || path === `/${AI_REGISTERED_ENTRY_ACTION_HTTP.staffBasePath}/${AI_REGISTERED_ENTRY_ACTION_HTTP[action as keyof typeof AI_REGISTERED_ENTRY_ACTION_CONTRACTS]}`)) {
+    // Entry is authenticated; each resource's original route is independently
+    // checked inside the reader. This does not grant business permission.
+    return [];
+  }
+  if (method.toUpperCase() === 'POST' && path === `/${AI_ENTRY_SCENE_CATALOG_HTTP.operatorBasePath}/${AI_ENTRY_SCENE_CATALOG_HTTP.read}`) return [];
   if (method.toUpperCase() === 'POST' && Object.keys(AI_AUTOMATION_EXPLANATION_CONTRACTS).some(action =>
     path === `/${AI_AUTOMATION_EXPLANATION_HTTP.basePath}/${AI_AUTOMATION_EXPLANATION_HTTP[action as keyof typeof AI_AUTOMATION_EXPLANATION_CONTRACTS]}`)) {
     return ['rental-os:order:view', 'system:integration:manage', 'rental-os:finance:view'];
@@ -337,9 +362,8 @@ export function requiredPermissions(method: string, path: string) {
   if (method.toUpperCase() === 'POST' && (['read', 'change', 'operation', 'readModelPlan', 'changeModelPlan'] as const)
     .some(operation => path === `/${AI_CLIENT_TASK_POLICY_HTTP_DRAFT.basePath}/${AI_CLIENT_TASK_POLICY_HTTP_DRAFT[operation]}`))
     return ['system:params:manage'];
-  if (method.toUpperCase() === 'POST' && /^\/ai-native\/category-drafts\/(?:detail|create|patch|validate|review)$/u.test(path)) {
-    return [path.endsWith('/create') || path.endsWith('/patch') ? 'system:rental-category:edit' : 'system:rental-category:view'];
-  }
+  const categoryDraftPermission = registeredCategoryDraftPermission(method, path);
+  if (categoryDraftPermission) return [categoryDraftPermission];
   if (method.toUpperCase() === 'POST' && path === `/${AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${AI_SCENE_MODEL_HTTP_DRAFT.readTaskScene}`) {
     // Entry alternatives only. The selected original reader separately checks
     // THIS task's owner, scene, current action policy and business authority.
@@ -386,6 +410,8 @@ export function requiredPermissions(method: string, path: string) {
   }
   const aiProviderPermission = platformAiProviderPermission(method, path);
   if (aiProviderPermission) return [aiProviderPermission];
+  const retentionPermission = platformRetentionPermission(method, path);
+  if (retentionPermission) return [retentionPermission];
   if (path === "/platform/rental-categories" || path.startsWith("/platform/rental-categories/")) {
     if (path.startsWith("/platform/rental-categories/creation-requests/")) return ["system:rental-category:edit"];
     if (path.endsWith("/audits")) return ["system:rental-category:audit"];
@@ -964,7 +990,7 @@ export class ApiAuthGuard implements CanActivate {
   async revalidateClientRead(context: ExecutionContext) {
     const request = context.switchToHttp().getRequest<RequestLike>();
     const path = matchableRequestPath(request.url), method = request.method.toUpperCase();
-    const get = /^\/client\/v1\/(?:auth\/me|catalog|my\/orders|orders\/[A-Za-z0-9][A-Za-z0-9._:-]{0,190}(?:\/fee-items)?|quotes\/[A-Za-z0-9][A-Za-z0-9._:-]{0,190}|membership\/(?:corporates|booking-options)|profile(?:\/addresses)?)$/u;
+    const get = /^\/client\/v1\/(?:auth\/me|catalog|my\/orders|orders\/[A-Za-z0-9][A-Za-z0-9._:-]{0,190}(?:\/fee-items|\/payment-intents\/[A-Za-z0-9][A-Za-z0-9._:-]{0,190})?|quotes\/[A-Za-z0-9][A-Za-z0-9._:-]{0,190}|membership\/(?:corporates|booking-options)|profile(?:\/addresses)?)$/u;
     const post = /^\/client\/v1\/(?:availability|orders\/[A-Za-z0-9][A-Za-z0-9._:-]{0,190}\/cancel\/preview)$/u;
     if (!(method === 'GET' && get.test(path) || method === 'POST' && post.test(path))) {
       throw new ForbiddenException('该接口不是已注册的客户端只读复验入口');
@@ -1136,7 +1162,9 @@ export class ApiAuthGuard implements CanActivate {
     const original = trusted ? this.authService.consumeTrustedWorkspaceAccess(await trusted()) : undefined;
     const accessContext = original ? original.context : await this.authService.resolveAccessContext(token, {
       allowInvalidWorkspace: tenantMembershipRoute || path.startsWith("/auth/") || path.startsWith("/staff/v1/auth/") || path.startsWith("/platform/")
-        || platformCapabilityProbePermission(request.method, path) !== undefined,
+        || platformCapabilityProbePermission(request.method, path) !== undefined
+        || request.method.toUpperCase() === 'POST' && path === `/${AI_ENTRY_SCENE_CATALOG_HTTP.operatorBasePath}/${AI_ENTRY_SCENE_CATALOG_HTTP.read}`
+        || registeredCategoryDraftPermission(request.method, path) !== undefined,
       audience: staffApiRequest ? "staff" : "operator"
     });
     const scopedDatabase = original?.transaction ?? this.prisma;
@@ -1185,7 +1213,19 @@ export class ApiAuthGuard implements CanActivate {
     if (isBudgetPlatformRoute(request.method, path) && !user.isSaasAdmin) {
       throw new ForbiddenException('仅 SaaS 平台管理员可以管理平台 AI 预算');
     }
+    const operatorCatalogPath = `/${AI_ENTRY_SCENE_CATALOG_HTTP.operatorBasePath}`;
+    const operatorCatalogRead = request.method.toUpperCase() === 'POST' && path === `${operatorCatalogPath}/${AI_ENTRY_SCENE_CATALOG_HTTP.read}`;
+    if ((path === operatorCatalogPath || path.startsWith(`${operatorCatalogPath}/`)) && !operatorCatalogRead)
+      throw new ForbiddenException('场景目录只开放已登记的当前受权读取');
     const platformProbePermission = platformCapabilityProbePermission(request.method, path);
+    const platformPrivacyPermission = platformRetentionPermission(request.method, path);
+    if ((path === '/ai-native/platform-privacy' || path.startsWith('/ai-native/platform-privacy/'))
+      && (!platformPrivacyPermission || !user.isSaasAdmin)) {
+      throw new ForbiddenException('平台AI正文维护仅向当前获权SaaS管理员开放已登记操作');
+    }
+    if (registeredCategoryDraftPermission(request.method, path) && !user.isSaasAdmin) {
+      throw new ForbiddenException('AI 品类草稿仅向当前获权的 SaaS 平台管理员开放');
+    }
     if ((path === '/ai-native/credits' || path.startsWith('/ai-native/credits/'))
       && !creditTenantRoutes.has(`${request.method.toUpperCase()} ${path}`)
       && !creditPlatformRoutes.has(`${request.method.toUpperCase()} ${path}`)) {
@@ -1222,6 +1262,9 @@ export class ApiAuthGuard implements CanActivate {
       !isPlatformAiProviderPath(path) &&
       !isBudgetPlatformRoute(request.method, path) &&
       !platformProbePermission &&
+      !platformPrivacyPermission &&
+      !registeredCategoryDraftPermission(request.method, path) &&
+      !operatorCatalogRead &&
       path !== "/platform/demo-requests"
     ) {
       throw new ForbiddenException("SaaS 平台管理员只能访问租户管理能力");

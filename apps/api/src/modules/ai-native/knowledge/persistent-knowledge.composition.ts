@@ -2,6 +2,7 @@ import type { PrismaClient } from '@prisma/client';
 import type { KnowledgeModulePorts } from './knowledge.module';
 import { composeKnowledgeServices } from './knowledge.module';
 import { PrismaKnowledgeRepository } from './prisma-knowledge.repository';
+import { createPrismaKnowledgeRetention } from './prisma-knowledge-retention';
 import { PrismaStructuredMemoryRepository } from './prisma-memory.repository';
 import { PrismaKnowledgeReadAdapter } from './prisma-knowledge-read.adapter';
 import { PrismaKnowledgeIndexAdapter } from './prisma-knowledge-index.adapter';
@@ -58,6 +59,7 @@ export function createPersistedKnowledgePorts(input: PersistentKnowledgeDependen
   // supplied files port lacks assertBound instead of skipping the check.
   return { documents: { repository, authorization: input.authorization, files: input.files, clock: input.clock,
     attachmentBindingRequired: true },
+    retention: createPrismaKnowledgeRetention(input.db, clock),
     memory: { repository: memory, confirmations: memory, authorization: input.memoryAuthorization, clock: input.clock },
     content: reads, search: reads, selection: input.selection ?? new PrismaKnowledgeSelectionAdapter(input.db, repository, input.authorization), index: input.index ?? new PrismaKnowledgeIndexAdapter(input.db, input.authorization), gateway: input.gateway, cache: input.cache, policy: input.policy };
 }

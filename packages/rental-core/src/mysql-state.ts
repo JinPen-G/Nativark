@@ -3,6 +3,7 @@
  * business-settings versions, nor authorize reading or replaying business facts. */
 import { ConflictException } from "@nestjs/common";
 import { sqltag as sql, type Sql, type InputJsonValue } from "@prisma/client/runtime/library";
+import { stripNotificationDraftSnapshotBodies } from "./notification-snapshot";
 import type { RentalSnapshotTransaction, RentalSnapshotStore, RentalSnapshotConfig, RentalSnapshotContacts } from "./state-storage";
 
 export type { RentalSnapshotTransaction, RentalSnapshotStore, RentalSnapshotConfig, RentalSnapshotContacts, RentalRecoverySnapshotRow } from "./state-storage";
@@ -128,7 +129,7 @@ export class RentalStateRepository<TTransaction extends RentalSnapshotTransactio
 
   async saveBusinessState(tenantId: string, workspaceId: string, state: unknown) {
     if (!this.enabled()) return;
-    const json = JSON.parse(JSON.stringify(state)) as InputJsonValue;
+    const json = JSON.parse(JSON.stringify(stripNotificationDraftSnapshotBodies(state))) as InputJsonValue;
     await this.store.rentalBusinessStateSnapshot.upsert({
       where: { workspaceId },
       update: { state: json },

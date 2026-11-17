@@ -5,7 +5,7 @@ import { gatewayTextIntentPolicySchema, prepareGatewayTextIntent, type GatewayTe
 import type { GatewayRoutingResolution } from '../gateway-routing.service';
 import { ModelGatewayError } from '../model-gateway.ports';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
-import { gatewayBudgetPrincipal } from '../budget/gateway-budget-principal';
+import { gatewayBudgetPrincipal, gatewayPlatformBudgetPrincipal } from '../budget/gateway-budget-principal';
 import { nativeToolResultReferenceSchema, nativeToolResultIntentFingerprint } from './native-tool-result.ports';
 import { taskModelDisplayWitnessSchema, inspectTaskModelDisplayInput, withoutTaskModelDisplayMessages } from './task-model-display-witness';
 
@@ -172,6 +172,19 @@ export function taskModelIntent(taskId: string, runId: string, registrationRef: 
 
 export function taskModelConfiguration(route: GatewayRoutingResolution): AiGatewayConfigReferenceDraft {
   const context = route.context, profile = route.route.profile, owner = route.route.scope;
+  if (context.scope.kind === 'platform') {
+    try { gatewayPlatformBudgetPrincipal(context); } catch { throw new ModelGatewayError('FORBIDDEN'); }
+    if (route.consumerScope.kind !== 'PLATFORM' || owner.kind !== 'PLATFORM' || route.consumerScope.id !== owner.id
+      || profile.scopeId !== owner.id || profile.scopeKind !== 'PLATFORM'
+      || profile.serviceMode !== 'platform_managed' || route.selection.mode !== 'platform_managed') {
+      throw new ModelGatewayError('FORBIDDEN');
+    }
+    const result: AiGatewayConfigReferenceDraft = { configId: profile.id, configRevision: profile.configRevision,
+      credentialRef: profile.credentialRef, protocol: profile.protocol, provider: profile.provider, model: profile.model,
+      consumerScope: { kind: 'platform' }, serviceMode: 'platform_managed', configurationScope: { kind: 'platform' } };
+    if (!isGatewayConfig(result)) throw new ModelGatewayError('CONFIG_INVALID');
+    return result;
+  }
   let principal: ReturnType<typeof gatewayBudgetPrincipal>;
   try { principal = gatewayBudgetPrincipal(context); } catch { throw new ModelGatewayError('FORBIDDEN'); }
   if (route.consumerScope.kind !== 'WORKSPACE'

@@ -38,7 +38,7 @@
 
 `npm run lint -w @rental-os/platform-admin` 检查源码类型，宿主负责 Vite 产物。只读组件来源核验为 `node scripts/audit-admin-components.cjs --json`。这些命令不证明浏览器、真实 HTTP、数据库保存或独立安装通过。
 
-真实零Core消费者见[公共Web宿主](../../apps/platform-admin/README.md)。新宿主使用 `/forms` 的草稿同步/离页保护及 `/motion` 启动入口；`/source/*` 仅为既有源码兼容转接，新业务页面使用正式 `/core`、`/ui` 等出口。
+真实零Core消费者见[公共Web宿主](../../apps/platform-admin/README.md)。新宿主使用 `/forms` 的草稿同步/离页保护及 `/motion` 启动入口。既有 `/source/` 转接路径在 [包配置](package.json) 中逐项映射实际文件及扩展名，TypeScript与Vite均消费同一出口；它们只承担原后台兼容。新业务页面使用正式 `/core`、`/ui` 等出口，统一能力查询不重复列出这些兼容路径。
 
 公共应用按当前身份显示“租户 Core 授权”或“成员 Core 分配”。前者只由 SaaS 管理员读取当前部署目录并为租户开通/停用；后者从服务端 `assignable` 选择本租户已获权 Core，不要求管理者先分配给自己。地址参数只定位真实目录对象，缺失对象不挂载命令。提交中的路由/对象切换被阻止，未知结果保留原核对编号；分配与业务角色各自管理，界面可见性不代替服务端权限。
 

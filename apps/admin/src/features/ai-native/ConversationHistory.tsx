@@ -13,6 +13,7 @@ import { ConversationDetail } from './ConversationDetail';
 import { ConversationLifecycle } from './ConversationLifecycle';
 import { ConversationOrderContext } from './ConversationAdmission';
 import type { ConversationSelection } from './conversation-navigation';
+import { EntrySceneCatalog } from './EntrySceneCatalog';
 
 const scenes: Record<AiSceneCode, string> = {
   order_explanation: '订单解读', opening_diagnosis: '开业诊断', quote_clarification: '报价说明',
@@ -72,6 +73,7 @@ export function ConversationHistory({ current, enabled, identity, initialConvers
     current: () => scope.current.orderId === orderId && scope.current.enabled && scope.current.current() && !document.hidden } : null}>
     <section className={styles.section} aria-label={t('本人对话历史')} aria-busy={busy}>
     <h2>{t('本人对话历史')}</h2>
+    <EntrySceneCatalog identity={identity} enabled={enabled && visible} current={current} />
     <p className={styles.help}>{t('只读取对话记录，不启动任务；完整对话与结果仍需独立受权读取。')}</p>
     <div className={styles.toolbar}>
       <Select aria-label={t('对话能力')} value={capability} disabled={busy || !visible || !!orderId}

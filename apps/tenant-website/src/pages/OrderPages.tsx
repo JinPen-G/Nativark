@@ -20,6 +20,7 @@ import { ClientTaskWorkbench } from "../features/ai-native/ClientTaskWorkbench";
 import { EnterpriseExtensionApproval } from "../components/EnterpriseExtensionApproval";
 import { EnterpriseExchangeProgress } from "../components/EnterpriseExchangeProgress";
 import { EnterpriseExchangeRequest } from "../components/EnterpriseExchangeRequest";
+import { ClientRegisteredEntryActions } from "../features/ai-native/ClientRegisteredEntryActions";
 
 const date = (value: unknown) => {
   if (typeof value !== "string") return "—";
@@ -537,6 +538,38 @@ export function OrderDetailPage() {
               title={title}
               description={statusLabel(order.status, t)}
             />
+            {remote &&
+              orderId &&
+              session?.customer.customerType === "personal" && (
+                <ClientTaskWorkbench
+                  orderId={orderId}
+                  scopeKey={JSON.stringify([
+                    tenantCode,
+                    session.customer.customerId,
+                    currentWorkspace?.workspaceCode,
+                    orderId,
+                    revision,
+                  ])}
+                  english={en}
+                />
+              )}
+            {remote &&
+              orderId &&
+              order?.id === orderId &&
+              session?.customer.customerType === "personal" && (
+                <ClientRegisteredEntryActions
+                  orderId={orderId}
+                  scopeKey={JSON.stringify([
+                    tenantCode,
+                    session.customer.customerId,
+                    currentWorkspace?.workspaceCode,
+                    orderId,
+                    order.updatedAt,
+                    revision,
+                  ])}
+                  english={en}
+                />
+              )}
             <div className="order-detail-layout">
               <div>
                 <section className="order-section">

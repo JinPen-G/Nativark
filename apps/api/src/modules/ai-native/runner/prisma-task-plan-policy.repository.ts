@@ -4,7 +4,7 @@ import { AI_TOOL_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/share
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
 import type { AuthService } from '../../auth/auth.service';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
-import { AiScopeRepository } from '../ai-scope.repository';
+import { AiScopeRepository, type AiCurrentScopeAuthority } from '../ai-scope.repository';
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
 import type { AiTaskCredentialSource } from '../task-current-action.authority';
 import { TenantModelConfigurationAuthority } from '../tenant-model-config.authority';
@@ -36,16 +36,19 @@ export class AiTaskPlanPolicyResultUnknownError extends Error {
  * No production registration, policy seed, subscription or dispatch grant. */
 export class PrismaTaskPlanPolicyRepository {
   private readonly scopes: AiScopeRepository;
-  private readonly management: TenantModelConfigurationAuthority;
+  private readonly management?: TenantModelConfigurationAuthority;
   private readonly selected: z.infer<typeof scene>;
-  constructor(private readonly db: Pick<PrismaClient, '$transaction' | 'aiScope' | 'aiTaskPlanPolicy'>,
+  constructor(private readonly db: Pick<PrismaClient, '$transaction' | 'aiScope' | 'aiTaskPlanPolicy'> & Partial<Pick<PrismaClient, 'user' | 'operationLog'>>,
     input: { auth: Pick<AuthService, 'resolveAccessContext'>; credentials: AiTaskCredentialSource;
       guard: Pick<ApiAuthGuard, 'canActivate'>; scene: z.infer<typeof scene>; tool?: PersistedTaskInputTool;
       /** Server-owned scene assembly only; put() never accepts tool names. */
       tools?: readonly PersistedTaskInputTool[];
       /** New management hosts require audit in the same policy transaction.
        * Existing legacy suppliers remain explicit; no caller can select this. */
-      audit?: boolean },
+      audit?: boolean;
+      /** Explicit server platform manager, already backed by the original
+       * platform Guard. No request may choose this identity or scope. */
+      platformAuthority?: AiCurrentScopeAuthority },
     private readonly wall: () => Date = () => new Date()) {
     this.selected = scene.parse(structuredClone(input.scene));
     this.audit = input.audit === true;
@@ -55,17 +58,32 @@ export class PrismaTaskPlanPolicyRepository {
     if (!configured.success || !configured.data.some(tool => tool.code === this.tool)) throw unavailable();
     this.configuredTools = structuredClone(configured.data);
     if (typeof db?.$transaction !== 'function' || typeof db.aiTaskPlanPolicy?.updateMany !== 'function') throw unavailable();
-    const current = new AiTaskCurrentIdentityAuthority(input.auth, input.credentials, wall);
+    const current = input.platformAuthority ?? new AiTaskCurrentIdentityAuthority(input.auth, input.credentials, wall);
     this.scopes = new AiScopeRepository(db, current, wall);
-    this.management = new TenantModelConfigurationAuthority(input.guard, input.credentials, current);
+    this.platform = input.platformAuthority !== undefined;
+    if (this.platform && (typeof input.platformAuthority?.resolve !== 'function' || typeof db.user?.findUnique !== 'function')) throw unavailable();
+    if (!this.platform) this.management = new TenantModelConfigurationAuthority(input.guard, input.credentials, current);
   }
   private async access() {
     try {
       const current = await this.scopes.resolveCurrent();
       const c = current.context;
+      if (this.platform) {
+        if (c.scope.kind !== 'platform' || c.actor.kind !== 'saas_admin' || c.audience !== 'operator'
+          || current.scope.kind !== 'PLATFORM') throw denied();
+        const user = await this.db.user!.findUnique({ where: { id: c.actor.userId },
+          select: { id: true, tenantId: true, isActive: true, isSaasAdmin: true } });
+        if (!user || user.id !== c.actor.userId || !user.isActive || !user.isSaasAdmin
+          || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(user.tenantId)) throw denied();
+        const again = await this.scopes.resolveCurrent();
+        if (identity(c) !== identity(again.context) || current.scope.id !== again.scope.id) throw denied();
+        return { key: { scopeId: current.scope.id, sceneCode: this.selected.code, sceneVersion: this.selected.version },
+          binding: requestFingerprint({ scope: current.scope.id, identity: identity(again.context), journalTenantId: user.tenantId }),
+          manager: { tenantId: user.tenantId, workspaceId: null, userId: user.id } };
+      }
       if (c.scope.kind !== 'workspace' || c.actor.kind !== 'user' || c.audience !== 'operator'
         || current.scope.kind !== 'WORKSPACE') throw denied();
-      await this.management.authorize({ tenantId: c.scope.tenantId, workspaceId: c.scope.workspaceId, actorId: c.actor.userId }, 'manage');
+      await this.management!.authorize({ tenantId: c.scope.tenantId, workspaceId: c.scope.workspaceId, actorId: c.actor.userId }, 'manage');
       const again = await this.scopes.resolveCurrent();
       if (identity(c) !== identity(again.context) || current.scope.id !== again.scope.id) throw denied();
       return { key: { scopeId: current.scope.id, sceneCode: this.selected.code, sceneVersion: this.selected.version },
@@ -81,6 +99,7 @@ export class PrismaTaskPlanPolicyRepository {
     return { revision: row.revision, enabled: row.enabled, limits, expiresAt: row.expiresAt.toISOString() };
   }
   private readonly tool: PersistedTaskInputTool;
+  private readonly platform: boolean;
   private readonly audit: boolean;
   private readonly configuredTools: z.infer<typeof aiPersistedPlanToolsSchema>;
   private tools() { return structuredClone(this.configuredTools); }
@@ -91,6 +110,40 @@ export class PrismaTaskPlanPolicyRepository {
     if (!row) return { state: 'not_configured' as const };
     if (Object.entries(before.key).some(([key, value]) => row[key as keyof typeof row] !== value)) throw denied();
     return { state: 'configured' as const, ...this.project(row) };
+  }
+  /** Original same-manager CAS audit, not today's mutable policy. A lost save
+   * reply is observed here without repeating put or granting generation. */
+  async readMutation(value: unknown) {
+    const parsed = z.object({ expectedRevision: revision.nullable(), inputHash: z.string().regex(/^[a-f0-9]{64}$/u) }).strict().safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    if (!this.audit || typeof this.db.operationLog?.findMany !== 'function') throw unavailable();
+    const before = await this.access();
+    const read = () => this.db.operationLog!.findMany({ where: { ...before.manager, action: 'ai_task_plan_policy_changed',
+      detail: { path: '$.scopeId', equals: before.key.scopeId } }, orderBy: { createdAt: 'desc' }, take: 101 });
+    const rows = await read();
+    if (rows.length > 100) throw unavailable();
+    const candidates = rows.filter(row => {
+      const detail = row.detail as { sceneCode?: unknown; sceneVersion?: unknown; previousRevision?: unknown; savedPolicy?: unknown } | null;
+      return detail?.sceneCode === before.key.sceneCode && detail.sceneVersion === before.key.sceneVersion
+        && detail.previousRevision === parsed.data.expectedRevision && detail.savedPolicy;
+    });
+    if (candidates.length > 1) throw unavailable();
+    if ((await this.access()).binding !== before.binding) throw denied();
+    if (!candidates.length) return { state: 'not_observed' as const, policy: null, retryable: false as const };
+    const row = candidates[0], detail = row.detail as unknown as { scopeId: string; sceneCode: string; sceneVersion: string;
+      previousRevision: number | null; revision: number; enabled: boolean; afterHash: string; savedPolicyHash: string;
+      savedPolicy: { revision: number; enabled: boolean; limits: z.infer<typeof aiTaskRunnerLimitsSchema>; expiresAt: string } };
+    const saved = detail.savedPolicy, limits = aiTaskRunnerLimitsSchema.parse(saved.limits);
+    if (row.tenantId !== before.manager.tenantId || row.workspaceId !== before.manager.workspaceId || row.userId !== before.manager.userId
+      || detail.scopeId !== before.key.scopeId || saved.revision !== (parsed.data.expectedRevision ?? 0) + 1
+      || saved.revision !== detail.revision || saved.enabled !== detail.enabled || !Number.isFinite(Date.parse(saved.expiresAt))
+      || detail.savedPolicyHash !== requestFingerprint(saved)
+      || detail.afterHash !== requestFingerprint({ enabled: saved.enabled, limits, allowedTools: this.tools(),
+        expiresAt: new Date(saved.expiresAt), revision: saved.revision })
+      || requestFingerprint({ enabled: saved.enabled, limits, expiresAt: saved.expiresAt }) !== parsed.data.inputHash) throw conflict();
+    const currentRows = await read();
+    if (requestFingerprint(currentRows) !== requestFingerprint(rows) || (await this.access()).binding !== before.binding) throw denied();
+    return { state: 'recorded' as const, policy: { state: 'configured' as const, ...saved, limits }, retryable: false as const };
   }
   async put(value: unknown) {
     const parsed = draft.safeParse(structuredClone(value));
@@ -127,7 +180,7 @@ export class PrismaTaskPlanPolicyRepository {
             previousRevision: current?.revision ?? null, revision: next.revision, enabled: next.enabled,
             beforeHash: current ? requestFingerprint({ enabled: current.enabled, limits: current.limits,
               allowedTools: current.allowedTools, expiresAt: current.expiresAt.toISOString() }) : null,
-            afterHash: requestFingerprint(next), dispatch: 'not_granted' };
+            afterHash: requestFingerprint(next), savedPolicy: result, savedPolicyHash: requestFingerprint(result), dispatch: 'not_granted' };
           const hash = requestFingerprint({ manager: before.manager, detail });
           const auditId = `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
           await tx.operationLog.create({ data: { id: auditId, ...before.manager,

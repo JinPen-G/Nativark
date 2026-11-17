@@ -7,7 +7,7 @@
 | 入口 | 职责与直接消费者 |
 | --- | --- |
 | [核心聚合](src/mysql-core-runtime.ts)、[宿主接点](src/core-runtime-ports.ts) | `/mysql-core-runtime` 持有原配置、库存、订单、交接及结算裁定；原Nest入口供给同一13项依赖，Controller/AI/企业及各端继续消费原签名 |
-| [报价/营销聚合](src/mysql-business-runtime.ts)、[宿主接点](src/business-runtime-ports.ts) | `/mysql-business-runtime` 维护价格、日历、规则、报价、券、奖励和通知恢复；原Nest入口供给14项依赖，当前与历史价格分别读取 |
+| [报价/营销聚合](src/mysql-business-runtime.ts)、[宿主接点](src/business-runtime-ports.ts) | `/mysql-business-runtime` 维护价格、日历、规则、报价、券、奖励和通知恢复；原Nest入口保持14项依赖并供给原正文保留读取器，当前与历史价格分别读取 |
 | [订单确认](src/mysql-order-confirmation.ts)、[确认接点](src/order-confirmation-ports.ts)、[批准合同](src/approved-order-transaction.ports.ts) | `/mysql-order-confirmation` 与 `/approved-order-ports` 保留原报价消费、库存/容量、券、批准和幂等同事务提交，客户/企业参加者由宿主供给 |
 | [商户委托](src/merchant-delegation.ts)、[服务端报价访问](src/server-quote-access.ts) | `/merchant-delegation` 与 `/server-quote-access` 共用公共Auth/ALS及原封存来源；历史结果只核对原键/原消费关系，字段或JSON复制不能取得执行权 |
 | [配货与扫描](src/mysql-allocation.ts)、[私有存储/事件](src/allocation-storage.ts) | `/mysql-allocation` 保留原候选、预分配/改配/锁定/释放、办理锁、已记录异常及自动扫描；宿主只登记一个执行者，失败事件参加同一事务 |
@@ -48,6 +48,7 @@
 | [业务配置仓储](src/mysql-business-configuration.ts)、[存储与宿主接点](src/business-configuration-storage.ts) | `/mysql-business-configuration` 持有原定价/优惠/服务、日历/规则版本及通知模板读写，原身份、范围、品类锁和配置事件由宿主供给；原事务、发布审计和历史正文保护保持 |
 | [核心配置仓储](src/mysql-core-configuration.ts)、[存储与宿主接点](src/core-configuration-storage.ts) | `/mysql-core-configuration` 维护档案、经营空间、商品/套装、定价组、地点/主体、券与检查模板及有界配置读取；同一事务复核当前品类，保留配置修订和首次初始化限制 |
 | [业务事实仓储](src/mysql-business-facts.ts)、[本表视图与宿主接点](src/business-fact-storage.ts) | `/mysql-business-facts` 保存报价原依据、券占用/核销及预算、奖励/权益余额、推荐和通知原流水；当前空间/订单可见性、配置读取和原事件由宿主提供，保留调用方事务 |
+| [通知草稿合同](src/notification-draft.ts)、[核验缓存](src/notification-log-cache.ts)、[恢复投影](src/notification-snapshot.ts) | 三个通知子出口共用原草稿、原删除收据与无正文缓存；正文保留策略及删除账由宿主原维护读取器核验，缓存副本不授予发送或正文读取权 |
 | [报价能力事实](src/mysql-quote-capabilities.ts)、[库存对象依据](src/quote-inventory-basis.ts) | `/mysql-quote-capabilities` 在原事务复核启用实例及冻结条件，`/quote-inventory-basis` 使用有界配置读取核对商品/套装；新报价与历史动作各用原依据，不给旧报价补当前事实 |
 | [核心事实仓储](src/mysql-core-facts.ts)、[本表视图](src/core-fact-storage.ts)、[当前身份接点](src/fact-request-context.ts) | `/mysql-core-facts` 读写订单聚合、资产/库存、归还处置、工单、检查和续租/换货事实；宿主提供原当前身份/范围、组织算法、检查事件及调用方事务 |
 | [冻结检查依据](src/mysql-order-inspection-basis.ts)、[单件配货依据](src/mysql-order-allocation-pickup.ts) | MySQL子出口只读原订单关联的冻结来源，在库侧限制JSON与结果范围，并复验原完整身份和对象修订；缺历史不改用当前模板或属性 |
@@ -111,7 +112,9 @@
 
 核心聚合从 `@rental-os/rental-core/mysql-core-runtime` 导入。核心/事实仓储、恢复、Hook、资金与服务容量使用本包的同一实例，会员、企业支出/授信、文件生命周期与企业续租报价按 [实际端口](src/core-runtime-ports.ts) 供给。原Nest provider保留原构造顺序和初始化钩子；恢复在模块初始化读取，配置预热在全部回填之后运行，事务内配置读取不发布进程缓存。历史订单没有能力快照时保留空执行名单，当前新能力不反向影响旧订单。HTTP权限仍由原Guard裁定，业务方法继续接收调用方已有事务。[原Nest接线](../../apps/api/src/modules/rental-core/rental-core.service.ts) · [核心验证](../../tests/rental-core-v01.test.cjs) · [换货/续租历史验证](../../tests/rental-exchange-segment-pricing.test.cjs)
 
-报价/营销服务从 `@rental-os/rental-core/mysql-business-runtime` 导入，配置、事实和核心配置仓储使用同一实例；会员、企业币种核验、密文及短信通过 [实际端口](src/business-runtime-ports.ts) 供给。原14项构造顺序与两个初始化钩子保留，配置/事实按同一刷新队列装载，续租事务上下文沿用模块级ALS。报价来源每次从同一公共可信身份读取，detached配置不发布进程缓存；`delivery_uncertain` 只按原投递记录查询，尝试次数与租约仍分别处理。[原Nest接线](../../apps/api/src/modules/rental-core/rental-business.service.ts) · [报价/营销验证](../../tests/rental-business-v1.test.cjs) · [通知恢复验证](../../tests/rental-notification-lease.test.cjs)
+报价/营销服务从 `@rental-os/rental-core/mysql-business-runtime` 导入，配置、事实和核心配置仓储使用同一实例；会员、企业币种核验、密文及短信通过 [实际端口](src/business-runtime-ports.ts) 供给。原API的14项构造顺序与两个初始化钩子保留，适配层另把原通知正文保留读取器传给包内构造末尾的可选接点。配置/事实按同一刷新队列装载，续租事务上下文沿用模块级ALS。报价来源每次从同一公共可信身份读取，detached配置不发布进程缓存；`delivery_uncertain` 只按原投递记录查询，尝试次数与租约仍分别处理。[原Nest接线](../../apps/api/src/modules/rental-core/rental-business.service.ts) · [报价/营销验证](../../tests/rental-business-v1.test.cjs) · [通知恢复验证](../../tests/rental-notification-lease.test.cjs)
+
+通知草稿的准备、保存和原结果读取仍由同一业务实例执行，发送是另一个授权动作。宿主通过 `/notification-draft` 的窄接点供给原维护读取器；`/notification-log-cache` 只接收核验过的原行与删除账，产生不可变且无正文的缓存，反序列化副本不会获得核验标记。`/notification-snapshot` 在原恢复写入时剥离草稿正文，普通发送记录保持原值；正文已删除时，原结果返回原删除收据与空正文，不能以缓存内容或空密文推断删除成功。[原维护读取器](../../apps/api/src/modules/ai-native/privacy/retention-notification-draft.ts) · [原缓存适配](../../apps/api/src/modules/rental-core/rental-notification-log-cache.ts)
 
 订单确认从 `@rental-os/rental-core/mysql-order-confirmation` 导入，供给同一核心、业务、事实、幂等、Hook、客户/会员、服务容量和企业政策实例。新订单在原ReadCommitted事务重查客户/资格、责任主体、地点/经营者、库存和企业政策，再一起提交订单、报价消费、券、容量、原幂等及批准；批准事务保留原等待与执行上限。返回的 `replayed` 供调用方判断是否发送首次下单通知。原键恢复只读取原收据和批准消费关联，失应答不换键重做。[确认Nest接线](../../apps/api/src/modules/rental-core/rental-order-confirmation.service.ts) · [确认范围验证](../../tests/rental-order-quote-scope.test.cjs) · [原批准事务验证](../../tests/ai-native-fork-execution-approved-core.test.cjs)
 

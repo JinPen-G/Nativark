@@ -15,19 +15,144 @@ import type {
   AiClientQuoteFacts,
   ClientCatalogResponse,
   ClientCreateQuoteRequest,
+  EnterpriseBookingApprovalView,
   EnterpriseOwnRentalPolicy,
   RentalFulfillmentMode,
   RentalQuoteSnapshotV1,
 } from "@rental-os/shared";
-import { formatRentalMoney, RENTAL_FULFILLMENT_MODES } from "@rental-os/shared";
+import {
+  aiClientQuotePreparationRequestSchema,
+  aiClientQuotePreparationResponseSchema,
+  formatRentalMoney,
+  RENTAL_FULFILLMENT_MODES,
+} from "@rental-os/shared";
 import { EnterpriseBookingApproval } from "./EnterpriseBookingApproval";
 import {
   readOriginalBookingQuote,
   originalBookingUnitLabel,
   type OriginalBookingQuoteFacts,
+  type BookingHandoffState,
 } from "../features/ai-native/booking-handoff";
 import { ClientQuotePreparation } from "../features/ai-native/ClientQuotePreparation";
-import { clientQuoteStorageKey } from "../features/ai-native/client-quote-session";
+import {
+  clientQuoteBookingStoredRequest,
+  clientQuoteOwner,
+  clientQuoteSelectedInput,
+  clientQuoteStorageKey,
+} from "../features/ai-native/client-quote-session";
+import {
+  clientQuoteCatalogTimeZone,
+  clientQuoteTimeRange,
+} from "../features/ai-native/client-quote-time";
+
+/** Local phase checks only prevent another ordinary operation while an original
+ * confirmation or booking needs checking. They never open an AI host or read it. */
+function retainedQuoteState(
+  context: Parameters<typeof clientQuoteOwner>[0] | null,
+) {
+  const empty = {
+    hasLocator: false,
+    pendingCore: false,
+    preparationOnly: true,
+    reference: null as string | null,
+    readable: true,
+  };
+  if (!context) return empty;
+  try {
+    const key = clientQuoteStorageKey(context),
+      quoteRaw = localStorage.getItem(key),
+      bookingRaw = localStorage.getItem(`${key}:booking`);
+    const hasLocator = quoteRaw !== null || bookingRaw !== null;
+    if (!hasLocator) return empty;
+    const reference = JSON.stringify([key, quoteRaw, bookingRaw]),
+      owner = clientQuoteOwner(context);
+    let pendingCore = false,
+      preparationOnly = true;
+    if (quoteRaw !== null) {
+      let row: Record<string, unknown> | null = null;
+      try {
+        const value: unknown = JSON.parse(quoteRaw);
+        if (value && typeof value === "object" && !Array.isArray(value))
+          row = value as Record<string, unknown>;
+        if (
+          !row ||
+          row.version !== "client-quote-operation-1" ||
+          row.owner !== owner ||
+          Object.keys(row).length !== 5 ||
+          Object.keys(row).some(
+            (field) =>
+              !["version", "owner", "request", "material", "phase"].includes(
+                field,
+              ),
+          )
+        )
+          throw Error();
+        const request = aiClientQuotePreparationRequestSchema.parse(
+          row.request,
+        );
+        if (
+          JSON.stringify(request.input) !==
+          JSON.stringify(
+            clientQuoteSelectedInput(request.input as ClientCreateQuoteRequest),
+          )
+        )
+          throw Error();
+        const material =
+          row.material === null
+            ? null
+            : aiClientQuotePreparationResponseSchema.parse(row.material);
+        if (
+          (row.phase === "preparation_pending" && material === null) ||
+          (row.phase === "prepared" && material !== null)
+        )
+          preparationOnly = true;
+        else if (
+          row.phase === "confirmation_pending" ||
+          row.phase === "quote_observed"
+        ) {
+          pendingCore = true;
+          preparationOnly = false;
+        } else throw Error();
+      } catch {
+        // A damaged identifiable original may already have crossed confirmation;
+        // an arbitrary cache value is not evidence that the business is pending.
+        pendingCore =
+          row?.version === "client-quote-operation-1" && row.owner === owner;
+        preparationOnly = !pendingCore;
+      }
+    }
+    if (bookingRaw !== null) {
+      let row: Record<string, unknown> | null = null;
+      try {
+        const value: unknown = JSON.parse(bookingRaw);
+        if (value && typeof value === "object" && !Array.isArray(value))
+          row = value as Record<string, unknown>;
+        clientQuoteBookingStoredRequest(value);
+        if (row?.owner === owner) {
+          pendingCore = true;
+          preparationOnly = false;
+        }
+      } catch {
+        if (
+          row?.version === "client-quote-booking-operation-1" &&
+          row.owner === owner
+        ) {
+          pendingCore = true;
+          preparationOnly = false;
+        }
+      }
+    }
+    return {
+      hasLocator,
+      pendingCore,
+      preparationOnly,
+      reference,
+      readable: true,
+    };
+  } catch {
+    return { ...empty, preparationOnly: false, readable: false };
+  }
+}
 
 /** 真实租户 + 已登录：走后端 可用性 → 报价 → 下单。金额与库存全部以服务端为准。 */
 interface RemoteBookingProps {
@@ -42,6 +167,7 @@ interface RemoteBookingProps {
   onReturnLocationChange?: (id: string) => void;
   handoff?: AiBookingHandoff;
   originalFacts?: OriginalBookingQuoteFacts | null;
+  originalStatus?: BookingHandoffState["status"];
 }
 
 const modeLabels: Record<RentalFulfillmentMode, { zh: string; en: string }> = {
@@ -60,6 +186,7 @@ export function RemoteBooking(props: RemoteBookingProps) {
     <OriginalHandoffBooking
       handoff={props.handoff}
       suppliedFacts={props.originalFacts}
+      originalStatus={props.originalStatus}
     />
   ) : (
     <ManualRemoteBooking {...props} />
@@ -69,9 +196,11 @@ export function RemoteBooking(props: RemoteBookingProps) {
 export function OriginalHandoffBooking({
   handoff,
   suppliedFacts,
+  originalStatus,
 }: {
   handoff: AiBookingHandoff;
   suppliedFacts?: OriginalBookingQuoteFacts | null;
+  originalStatus?: BookingHandoffState["status"];
 }) {
   const { language } = useSite();
   const { session, currentWorkspace } = useAuth();
@@ -179,7 +308,15 @@ export function OriginalHandoffBooking({
           )}
         </>
       )}
-      <p>{en ? "Not submitted / not reserved" : "尚未提交 / 资源未预占"}</p>
+      <p role="status">
+        {originalStatus === "accepted"
+          ? en
+            ? "The original material was accepted. Order creation, payment and resource status still require the original business result."
+            : "原材料已受理；建单、付款和资源状态仍须核对原业务结果。"
+          : en
+            ? "This shows the original material. Submission, order creation and resource status come from the original receipts."
+            : "这里只展示原材料；提交、建单和资源状态以原收据为准。"}
+      </p>
       <p role="status">
         {en
           ? "Use the explicit acceptance and submission controls above when the server host provides them. No new quote is created here."
@@ -223,6 +360,10 @@ function ManualRemoteBooking({
     null,
   );
   const quoteSelection = useRef<string | null>(null);
+  const [catalogTime, setCatalogTime] = useState<{
+    identity: string;
+    timeZone: string;
+  } | null>(null);
   const [policies, setPolicies] = useState<EnterpriseOwnRentalPolicy[]>([]),
     [policyError, setPolicyError] = useState("");
   const [enterprise, setEnterprise] = useState(""),
@@ -232,18 +373,32 @@ function ManualRemoteBooking({
   const quoteVersion = useRef(0),
     host = captureEnterpriseHostSession();
   const hostIdentity = host?.identity;
-  const quoteModeRef = useRef(false),
-    [quoteMode, setQuoteMode] = useState(false);
+  const quoteModeRef = useRef(false);
+  const [quoteIntent, setQuoteIntent] = useState({
+    scope: "",
+    active: false,
+    pendingCore: false,
+    observedOwner: "" as string | undefined,
+    observedReference: null as string | null,
+  });
+  const quoteIntentRef = useRef(quoteIntent);
   const personalScope = host && {
     tenantCode: host.tenantCode,
     serviceCode: host.workspaceCode,
     customerId: host.customerId,
     surface: "tenant_website" as const,
   };
+  const originalQuote = retainedQuoteState(personalScope);
+  quoteIntentRef.current = quoteIntent;
   const identity = JSON.stringify([hostIdentity, enterprise, paymentMode]);
   const enterpriseOrder = useEnterpriseOrderSubmission((id) =>
     navigate(href(`/orders/${encodeURIComponent(id)}`)),
   );
+  const [delegationConsent, setDelegationConsent] = useState<{
+    quoteId: string;
+    checked: boolean;
+  } | null>(null);
+  const currentQuote = useRef<RentalQuoteSnapshotV1 | null>(null);
   useEffect(() => {
     let cancelled = false;
     setPolicies([]);
@@ -267,22 +422,6 @@ function ManualRemoteBooking({
       quoteVersion.current++;
     };
   }, [hostIdentity]);
-  useEffect(() => {
-    let retained = false;
-    try {
-      retained = Boolean(
-        personalScope &&
-        localStorage.getItem(clientQuoteStorageKey(personalScope)) !== null,
-      );
-    } catch {
-      retained = quoteModeRef.current;
-    }
-    quoteModeRef.current = retained;
-    setQuoteMode(retained);
-    return () => {
-      quoteVersion.current++;
-    };
-  }, [hostIdentity]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [loadRevision, setLoadRevision] = useState(0);
@@ -297,6 +436,7 @@ function ManualRemoteBooking({
       setReady(false);
       setError("");
       setQuote(null);
+      setCatalogTime(null);
       try {
         if (
           !currentWorkspace ||
@@ -304,12 +444,29 @@ function ManualRemoteBooking({
         ) {
           await switchWorkspace(product.categoryId);
         }
+        const timeOwner = captureEnterpriseHostSession();
         const [cat, addressRes, couponRes] = await Promise.all([
           sessionApi.catalog(),
           sessionApi.addresses().catch(() => ({ items: [] })),
           sessionApi.coupons().catch(() => []),
         ]);
         if (cancelled) return;
+        if (
+          timeOwner?.current() &&
+          timeOwner.workspaceCode === product.categoryId
+        ) {
+          try {
+            setCatalogTime({
+              identity: timeOwner.identity,
+              timeZone: clientQuoteCatalogTimeZone(cat, {
+                tenantCode: timeOwner.tenantCode,
+                serviceCode: timeOwner.workspaceCode,
+              }),
+            });
+          } catch {
+            setCatalogTime(null);
+          }
+        }
         const locs = (cat.locations ||
           []) as ClientCatalogResponse["locations"];
         const preferred = locs.find((loc) => loc.id === preferredLocationId);
@@ -396,16 +553,26 @@ function ManualRemoteBooking({
   ]);
   // 选择变更立即隔离旧报价，防抖窗口和迟到响应均无法启用旧报价的提交按钮。
   const quote = quoteSelection.current === selectionKey ? quoteSnapshot : null;
+  currentQuote.current = quote;
   useEffect(() => {
     quoteVersion.current++;
     setQuote(null);
     setBusy(false);
     setError("");
   }, [selectionKey]);
+  const quoteTimes = useMemo(() => {
+    if (!hostIdentity || catalogTime?.identity !== hostIdentity) return null;
+    try {
+      return clientQuoteTimeRange(startDate, endDate, catalogTime.timeZone);
+    } catch {
+      return null;
+    }
+  }, [hostIdentity, catalogTime, startDate, endDate]);
   const personalSelection = useMemo<ClientCreateQuoteRequest | null>(() => {
     if (
       !ready ||
       enterprise ||
+      !quoteTimes ||
       !locationId ||
       !fulfillmentMode ||
       !validTerm ||
@@ -422,8 +589,8 @@ function ManualRemoteBooking({
         bookingIdentity: { bookingIdentity: "personal" },
         fulfillmentMode: fulfillmentMode as RentalFulfillmentMode,
         fulfillmentLocationId: locationId,
-        startAt: toIsoDateTime(startDate),
-        endAt: toIsoDateTime(endDate),
+        startAt: quoteTimes.startAt,
+        endAt: quoteTimes.endAt,
         lines: [{ itemGroupId: product.id, quantity }],
         ...(requiresAddress ? { deliveryAddressId: addressId } : {}),
         ...(!isDelivery ? { returnLocationId } : {}),
@@ -435,6 +602,7 @@ function ManualRemoteBooking({
   }, [
     ready,
     enterprise,
+    quoteTimes,
     locationId,
     returnLocationId,
     validTerm,
@@ -454,23 +622,136 @@ function ManualRemoteBooking({
     quantity,
     couponId,
   ]);
-  const onQuoteMode = useCallback((active: boolean, hasLocator: boolean) => {
-    quoteVersion.current++;
-    quoteModeRef.current = active || hasLocator;
-    setQuoteMode(quoteModeRef.current);
-    setQuote(null);
-    setBusy(false);
-    setError("");
-  }, []);
-  const bookingSelection = useCallback(
-    async (
-      original: AiClientQuoteFacts,
-      selected: ClientCreateQuoteRequest,
-    ): Promise<AiBookingSelection> => {
+  const quoteScope = JSON.stringify([
+      hostIdentity,
+      personalSelection,
+      quoteTimes?.timeZone,
+    ]),
+    quoteScopeRef = useRef(quoteScope);
+  quoteScopeRef.current = quoteScope;
+  const quoteLifetime = useMemo(
+      () => ({ active: false, epoch: 0 }),
+      [quoteScope],
+    ),
+    quoteEpoch = quoteLifetime.epoch;
+  const currentIntent =
+    quoteIntent.scope === quoteScope
+      ? quoteIntent
+      : { active: false, pendingCore: false };
+  const observedReference =
+    quoteIntent.observedOwner === hostIdentity
+      ? quoteIntent.observedReference
+      : null;
+  const quotePending =
+    currentIntent.pendingCore ||
+    (originalQuote.pendingCore &&
+      originalQuote.reference !== observedReference);
+  const quoteMode = currentIntent.active || quotePending;
+  quoteModeRef.current = quoteMode;
+  useEffect(() => {
+    quoteLifetime.active = true;
+    const invalidate = () => {
+      quoteLifetime.epoch++;
+      quoteVersion.current++;
+      const next = {
+        scope: quoteScope,
+        active: false,
+        pendingCore: false,
+        observedOwner: hostIdentity,
+        observedReference: null,
+      };
+      quoteIntentRef.current = next;
+      setQuoteIntent(next);
+      setQuote(null);
+      setBusy(false);
+    };
+    const visibility = () => {
+      if (document.hidden) invalidate();
+    };
+    const storage = (event: StorageEvent) => {
+      if (!personalScope) return;
+      const key = clientQuoteStorageKey(personalScope);
+      if (
+        event.key === null ||
+        event.key === key ||
+        event.key === `${key}:booking`
+      )
+        invalidate();
+    };
+    document.addEventListener("visibilitychange", visibility);
+    window.addEventListener("pagehide", invalidate);
+    window.addEventListener("storage", storage);
+    return () => {
+      quoteLifetime.active = false;
+      quoteVersion.current++;
+      document.removeEventListener("visibilitychange", visibility);
+      window.removeEventListener("pagehide", invalidate);
+      window.removeEventListener("storage", storage);
+    };
+  }, [quoteScope, quoteLifetime]);
+  const onQuoteMode = useCallback(
+    (active: boolean, _hasLocator: boolean, pendingCore: boolean) => {
+      if (
+        !quoteLifetime.active ||
+        quoteEpoch !== quoteLifetime.epoch ||
+        document.hidden ||
+        quoteScopeRef.current !== quoteScope ||
+        !host?.current()
+      )
+        return;
+      const original = retainedQuoteState(personalScope);
+      // The original consumer may release this exact locator after an explicit,
+      // trusted read/ordinary choice. A different locator immediately holds again.
+      // Checking parameter preparation can report an unknown observation without
+      // crossing Core confirmation. Only an explicit active intent pauses it.
+      const next = {
+        scope: quoteScope,
+        active: active === true,
+        pendingCore: pendingCore === true && !original.preparationOnly,
+        observedOwner: hostIdentity,
+        observedReference:
+          !active && !pendingCore && original.readable
+            ? original.reference
+            : null,
+      };
+      if (JSON.stringify(next) === JSON.stringify(quoteIntentRef.current))
+        return;
+      const previous = quoteModeRef.current;
+      quoteIntentRef.current = next;
+      setQuoteIntent(next);
+      quoteModeRef.current =
+        next.active ||
+        next.pendingCore ||
+        (original.pendingCore && original.reference !== next.observedReference);
+      if (previous === quoteModeRef.current) return;
+      quoteVersion.current++;
+      setQuote(null);
+      setBusy(false);
+      setError("");
+    },
+    [quoteScope, quoteLifetime, quoteEpoch],
+  );
+  const ordinaryHeld = () => {
+    if (enterprise) return false;
+    const original = retainedQuoteState(personalScope),
+      intent = quoteIntentRef.current;
+    return (
+      quoteModeRef.current ||
+      (original.pendingCore &&
+        (intent.observedOwner !== hostIdentity ||
+          original.reference !== intent.observedReference))
+    );
+  };
+  const recheckQuoteSelection = useCallback(
+    async (selected: ClientCreateQuoteRequest) => {
       const current = captureEnterpriseHostSession();
       if (
-        !current ||
+        !current?.current() ||
+        current.identity !== hostIdentity ||
+        document.hidden ||
+        quoteScopeRef.current !== quoteScope ||
         enterprise ||
+        !quoteTimes ||
         !personalSelection ||
         JSON.stringify(selected) !== JSON.stringify(personalSelection)
       )
@@ -478,14 +759,48 @@ function ManualRemoteBooking({
       const catalog = await sessionApi.catalog();
       if (
         !current.current() ||
-        typeof catalog.timeZone !== "string" ||
-        !catalog.timeZone ||
-        catalog.timeZone.length > 100
+        document.hidden ||
+        quoteScopeRef.current !== quoteScope
       )
         throw Error("booking_catalog_unavailable");
+      const zone = clientQuoteCatalogTimeZone(catalog, {
+        tenantCode: current.tenantCode,
+        serviceCode: current.workspaceCode,
+      });
+      const times = clientQuoteTimeRange(startDate, endDate, zone);
+      if (
+        times.timeZone !== quoteTimes.timeZone ||
+        times.startAt !== selected.startAt ||
+        times.endAt !== selected.endAt
+      )
+        throw Error("booking_time_zone_changed");
+      return times;
+    },
+    [
+      hostIdentity,
+      enterprise,
+      personalSelection,
+      quoteTimes,
+      quoteScope,
+      startDate,
+      endDate,
+    ],
+  );
+  const validateQuoteSelection = useCallback(
+    async (selected: ClientCreateQuoteRequest) => {
+      await recheckQuoteSelection(selected);
+    },
+    [recheckQuoteSelection],
+  );
+  const bookingSelection = useCallback(
+    async (
+      original: AiClientQuoteFacts,
+      selected: ClientCreateQuoteRequest,
+    ): Promise<AiBookingSelection> => {
+      const times = await recheckQuoteSelection(selected);
       return {
         quoteId: original.quoteId,
-        timeZone: catalog.timeZone,
+        timeZone: times.timeZone,
         startAt: selected.startAt,
         endAt: selected.endAt,
         fulfillmentMode: selected.fulfillmentMode,
@@ -507,10 +822,17 @@ function ManualRemoteBooking({
         ...(selected.services ? { services: selected.services } : {}),
       };
     },
-    [enterprise, personalSelection],
+    [recheckQuoteSelection],
   );
 
   const getQuote = useCallback(async () => {
+    if (
+      document.hidden ||
+      !host?.current() ||
+      quoteScopeRef.current !== quoteScope ||
+      ordinaryHeld()
+    )
+      return;
     if (!enterprise && quoteModeRef.current) return;
     if (!validTerm) {
       setError(t("invalidDate"));
@@ -581,7 +903,12 @@ function ManualRemoteBooking({
         ...(!isDelivery ? { returnLocationId } : {}),
         ...(couponId ? { customerCouponId: couponId } : {}),
       });
-      if (version === quoteVersion.current && host?.current()) {
+      if (
+        version === quoteVersion.current &&
+        host?.current() &&
+        !document.hidden &&
+        !ordinaryHeld()
+      ) {
         quoteSelection.current = selectionKey;
         setQuote(q as unknown as RentalQuoteSnapshotV1);
       }
@@ -615,6 +942,7 @@ function ManualRemoteBooking({
     language,
     hostIdentity,
     selectionKey,
+    quoteScope,
   ]);
 
   // 自动报价：就绪且参数有效时，输入变化后自动重新计价（防抖），无需手动点按钮。
@@ -632,6 +960,15 @@ function ManualRemoteBooking({
       (!enterprise && quoteMode)
     )
       return;
+    // A retained confirmation/booking (or unclassified cache) is never an
+    // instruction to create another quote when a read returns or a page opens.
+    if (
+      !enterprise &&
+      (!originalQuote.readable ||
+        (originalQuote.hasLocator && !originalQuote.preparationOnly))
+    )
+      return;
+    if (!enterprise && quoteIntent.scope === quoteScope) return;
     if (requiresAddress && !addressId) return;
     const timer = window.setTimeout(() => {
       getQuote();
@@ -656,13 +993,18 @@ function ManualRemoteBooking({
     enterpriseOrder.blocked,
     quoteMode,
     enterprise,
+    quoteIntent.scope,
+    quoteScope,
   ]);
 
   const submitOrder = useCallback(async () => {
     if (
+      document.hidden ||
+      !host?.current() ||
+      quoteScopeRef.current !== quoteScope ||
       !quote?.id ||
       enterpriseOrder.blocked ||
-      (!enterprise && quoteModeRef.current)
+      ordinaryHeld()
     )
       return;
     if (quote.membershipSnapshot?.bookingIdentity === "enterprise_employee") {
@@ -692,7 +1034,28 @@ function ManualRemoteBooking({
     } finally {
       setBusy(false);
     }
-  }, [quote, href, enterpriseOrder]);
+  }, [quote, href, enterpriseOrder, enterprise, hostIdentity, quoteScope]);
+  const delegateOrder = async (approval?: EnterpriseBookingApprovalView) => {
+    const original = quote;
+    const assertView = () => {
+      if (
+        document.hidden ||
+        !host?.current() ||
+        quoteScopeRef.current !== quoteScope ||
+        currentQuote.current !== original
+      )
+        throw Error("原报价或客户页面已变化，请重新核对");
+    };
+    assertView();
+    if (
+      !original ||
+      (!approval &&
+        (!delegationConsent?.checked ||
+          delegationConsent.quoteId !== original.id))
+    )
+      throw Error("请明确核对并确认原报价的商户委托");
+    await enterpriseOrder.delegate(original, approval, assertView);
+  };
 
   if (!ready) {
     return (
@@ -722,6 +1085,9 @@ function ManualRemoteBooking({
     );
   }
 
+  const delegationClosed =
+    enterpriseOrder.delegation?.state === "revoked" &&
+    enterpriseOrder.delegation.quoteId === quote?.id;
   const money = (amount: unknown, deduction = false) => {
     const currency = quote?.currency;
     if (
@@ -951,10 +1317,11 @@ function ManualRemoteBooking({
       {!enterprise && (
         <ClientQuotePreparation
           selection={personalSelection}
-          scopeKey={JSON.stringify([hostIdentity, personalSelection])}
+          scopeKey={quoteScope}
           english={language === "en"}
           onMode={onQuoteMode}
           bookingSelection={bookingSelection}
+          validateSelection={validateQuoteSelection}
           onHandoff={(handoff) =>
             navigate(href(`/booking/${encodeURIComponent(product.id)}`), {
               state: { aiBookingHandoffRef: handoff.handoffRef },
@@ -962,11 +1329,43 @@ function ManualRemoteBooking({
           }
         />
       )}
+      {!enterprise && quoteTimes && (
+        <p>
+          {language === "en" ? "Reservation draft times" : "预约草稿时间"} (
+          {quoteTimes.timeZone})：
+          <time dateTime={quoteTimes.startAt}>{quoteTimes.startAt}</time> —{" "}
+          <time dateTime={quoteTimes.endAt}>{quoteTimes.endAt}</time>
+        </p>
+      )}
+      {!enterprise && !quoteTimes && (
+        <p role="status">
+          {language === "en"
+            ? "The reservation draft needs valid, unambiguous times in the current business time zone. Check the dates or contact the merchant; no time is guessed."
+            : "预约草稿需要当前营业时区下明确、有效的取还时间。请核对日期和时间或联系商户，不自动猜测时间。"}
+        </p>
+      )}
       {busy && !quote ? (
         <p className="mock-note">
           <LoadingOutlined /> {t("quoting")}
         </p>
       ) : null}
+      {!enterprise && quotePending && (
+        <p role="status">
+          {language === "en"
+            ? "The original confirmation or reservation needs checking. Check its original result or use the manual service; no second operation is sent."
+            : "原确认或预约结果待核对，请核对原结果或联系人工办理；不派发第二操作。"}
+        </p>
+      )}
+      {!enterprise && !quoteMode && !quote && (
+        <button
+          type="button"
+          className="button button-outline button-block"
+          disabled={busy}
+          onClick={() => void getQuote()}
+        >
+          {language === "en" ? "Request ordinary quote" : "获取普通预约报价"}
+        </button>
+      )}
       {quote && (!quoteMode || enterprise) && (
         <>
           <div>
@@ -1022,6 +1421,109 @@ function ManualRemoteBooking({
             : "核对原企业订单结果"}
         </button>
       )}
+      {quote?.membershipSnapshot?.bookingIdentity === "enterprise_employee" &&
+        !(
+          quote.membershipSnapshot.enterpriseContractAndPayer &&
+          quote.membershipSnapshot.enterpriseBasis?.approvalMode === "per_order"
+        ) && (
+          <>
+            <label>
+              <input
+                type="checkbox"
+                checked={
+                  delegationConsent?.quoteId === quote.id &&
+                  delegationConsent.checked
+                }
+                disabled={busy || enterpriseOrder.blocked || delegationClosed}
+                onChange={(event) =>
+                  setDelegationConsent({
+                    quoteId: quote.id,
+                    checked: event.target.checked,
+                  })
+                }
+              />
+              {language === "en"
+                ? "I reviewed this original quote, payment responsibility and deposit arrangements, and authorize the merchant to submit this reservation."
+                : "我已核对本次原报价、签约付款责任及保证金安排，授权商户代办这次预约。"}
+            </label>
+            <button
+              type="button"
+              className="button button-outline button-block"
+              disabled={
+                busy ||
+                enterpriseOrder.blocked ||
+                delegationClosed ||
+                !enterpriseOrder.ready ||
+                delegationConsent?.quoteId !== quote.id ||
+                !delegationConsent.checked
+              }
+              onClick={() => void delegateOrder().catch(() => undefined)}
+            >
+              {language === "en"
+                ? "Confirm merchant delegation"
+                : "确认并委托商户"}
+            </button>
+          </>
+        )}
+      {(enterpriseOrder.pending?.kind === "delegation" || delegationClosed) && (
+        <section aria-live="polite">
+          <p>
+            {language === "en"
+              ? "Original merchant delegation"
+              : "原商户委托编号"}{" "}
+            <code>
+              {enterpriseOrder.pending?.key ??
+                enterpriseOrder.delegation?.delegationKey}
+            </code>
+          </p>
+          <p>
+            {delegationClosed
+              ? language === "en"
+                ? "This original delegation was revoked. A new reservation needs a new quote and any required approval."
+                : "原委托已撤销。后续预约须重新获取报价并取得适用批准。"
+              : language === "en"
+                ? "The merchant can use this reference with the original quote and required approval. Check the original result before another submission."
+                : "商户可使用此编号读取原报价及所需批准。请先核对原委托结果，再办理后续提交。"}
+          </p>
+          {enterpriseOrder.delegation && (
+            <p>
+              {enterpriseOrder.delegation.state} ·{" "}
+              {enterpriseOrder.delegation.expiresAt}
+            </p>
+          )}
+          {enterpriseOrder.delegation &&
+            ["issued", "expired"].includes(enterpriseOrder.delegation.state) &&
+            enterpriseOrder.pending?.kind === "delegation" &&
+            !enterpriseOrder.pending.revocationKey && (
+              <button
+                type="button"
+                className="button button-outline"
+                disabled={enterpriseOrder.busy}
+                onClick={() =>
+                  void enterpriseOrder.revokeDelegation().catch(() => undefined)
+                }
+              >
+                {language === "en"
+                  ? "Explicitly revoke this delegation"
+                  : "明确撤销这份委托"}
+              </button>
+            )}
+          {delegationClosed && (
+            <button
+              type="button"
+              className="button button-outline"
+              disabled={busy || enterpriseOrder.blocked}
+              onClick={() => {
+                setDelegationConsent(null);
+                setQuote(null);
+                void getQuote();
+              }}
+            >
+              {language === "en" ? "Obtain a new quote" : "重新获取报价"}
+            </button>
+          )}
+        </section>
+      )}
       {(!quoteMode || enterprise) &&
         (quote?.membershipSnapshot?.enterpriseContractAndPayer &&
         quote.membershipSnapshot.enterpriseBasis?.approvalMode ===
@@ -1031,6 +1533,8 @@ function ManualRemoteBooking({
             quoteId={quote.id}
             identity={identity}
             english={language === "en"}
+            externalBlocked={enterpriseOrder.blocked || delegationClosed}
+            onDelegate={delegateOrder}
             onOrder={(id) =>
               navigate(href(`/orders/${encodeURIComponent(id)}`))
             }
@@ -1047,6 +1551,7 @@ function ManualRemoteBooking({
               busy ||
               !quote ||
               enterpriseOrder.blocked ||
+              delegationClosed ||
               Boolean(enterprise && !enterpriseOrder.ready)
             }
             onClick={submitOrder}

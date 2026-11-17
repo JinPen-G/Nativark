@@ -14,6 +14,16 @@ export class AiClientEntryError extends Error implements AiEntryFailureDraft {
 }
 export const entryActionSchema = aiEntryActionSchema;
 
+/** A cancellation preview's query time is not an estimated-fee change.
+ * Creation, current verification and retention use the same frozen facts. */
+export function clientMaterialSnapshotHash(kind: unknown, value: unknown) {
+  if (kind === 'cancellation_preview' && value && typeof value === 'object' && 'calculatedAt' in value) {
+    const { calculatedAt: _observation, ...facts } = value;
+    return requestFingerprint(facts);
+  }
+  return requestFingerprint(value);
+}
+
 export function parseEntry<T>(schema: z.ZodType<T>, value: unknown): T {
   const parsed = schema.safeParse(structuredClone(value));
   if (!parsed.success) throw new AiClientEntryError('AI_INVALID_INPUT', 'invalid_contract');

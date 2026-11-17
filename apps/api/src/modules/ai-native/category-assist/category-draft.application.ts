@@ -4,13 +4,13 @@ import { ExecutionContextHost } from '@nestjs/core/helpers/execution-context-hos
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { z } from 'zod';
-import { RENTAL_CATEGORY_DEFINITIONS, type SystemUserRow } from '@rental-os/shared';
+import { isRentalCategoryCode, type SystemUserRow } from '@rental-os/shared';
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
 import { getRequestIdentity, runWithRequestIdentity } from '../../../common/request-identity';
 import type { AiOrderRouteCredentialSource } from '../order-route-context.authority';
 import type { CategoryGovernanceController } from '../../rental-core/category-governance.controller';
 import { CategoryGovernancePreviewGuard } from '../../rental-core/category-governance-preview.guard';
-import { CreateCategoryDraftDto, PatchCategoryDraftDto } from '../../rental-core/category-governance-request.dto';
+import { CreateCategoryDraftDto, PatchCategoryDraftDto, PreviewRentalCategoryCreationDto } from '../../rental-core/category-governance-request.dto';
 import { withRequestAbort } from '../scenes/request-abort';
 import type { IncomingMessage } from 'node:http';
 import { categoryDraftRequest, categoryDraftResponse } from './category-draft-http.contract';
@@ -19,13 +19,16 @@ export class CategoryAssistError extends Error {
   constructor(readonly code: 'INVALID_INPUT' | 'ACCESS_DENIED' | 'UNAVAILABLE', readonly writeMayHaveCommitted = false) { super(code); }
 }
 
-const code = z.string().min(1).max(128).refine(value => RENTAL_CATEGORY_DEFINITIONS.some(definition => definition.code === value));
+// Format does not establish registration. Every accepted identity is resolved
+// by the original Core controller under the current platform principal.
+const code = z.string().refine(isRentalCategoryCode);
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u);
 const versionRequest = z.object({ code, versionId: id }).strict();
 type Dependencies = {
   guard: Pick<ApiAuthGuard, 'canActivate'>;
   credentials: AiOrderRouteCredentialSource;
-  controller: Pick<CategoryGovernanceController, 'detail' | 'create' | 'patch' | 'validate' | 'preview'>;
+  controller: Pick<CategoryGovernanceController, 'detail' | 'create' | 'patch' | 'validate' | 'preview'>
+    & Partial<Pick<CategoryGovernanceController, 'catalog' | 'previewCreation'>>;
 };
 
 /** Current human draft preparation only, never a model tool. Original platform
@@ -44,6 +47,21 @@ export class CategoryDraftApplication {
   async detail(value: unknown) {
     const input = this.parse(z.object({ code }).strict(), value);
     return this.current('GET', input.code, async user => this.dependencies.controller.detail(input.code, { user }));
+  }
+
+  /** Read-only proposal input. Assembly must supply the original catalog;
+   * absence is not replaced with builtin constants or invented availability. */
+  async catalog() {
+    const catalog = this.dependencies.controller.catalog;
+    if (!catalog) throw new CategoryAssistError('UNAVAILABLE');
+    return this.current('GET', 'capability-catalog', async user => catalog.call(this.dependencies.controller, { user }));
+  }
+
+  async previewCreation(value: unknown) {
+    const preview = this.dependencies.controller.previewCreation;
+    if (!preview) throw new CategoryAssistError('UNAVAILABLE');
+    const body = await this.dto(PreviewRentalCategoryCreationDto, value);
+    return this.current('POST', 'creation-preview', async user => preview.call(this.dependencies.controller, body, { user }));
   }
 
   async create(value: unknown) {

@@ -1,4 +1,5 @@
 import { toDisplayStep, type DisplayStep } from "./display-models";
+import { useAiManagementLocale } from "./management-locale";
 import styles from './AiManagement.module.css';
 export interface TaskTimelineProps {
   taskId: string;
@@ -17,16 +18,17 @@ const labels: Record<DisplayStep["status"], string> = {
   unknown: "待核对",
 };
 export function TaskTimeline({ taskId, steps }: TaskTimelineProps) {
-  if (!steps) return <p role="status">步骤不可用</p>;
+  const { t } = useAiManagementLocale();
+  if (!steps) return <p role="status">{t("步骤不可用")}</p>;
   const rows = steps
     .map(toDisplayStep)
     .filter((step) => step.taskId === taskId);
-  if (!rows.length) return <p role="status">暂无步骤</p>;
+  if (!rows.length) return <p role="status">{t("暂无步骤")}</p>;
   return (
-    <ol className={styles.timeline} aria-label="任务步骤时间线">
+    <ol className={styles.timeline} aria-label={t("任务步骤时间线")}>
       {rows.map((step) => (
         <li key={step.id}>
-          <strong>{step.availability === "unavailable" ? "无法识别／待刷新（待核对）" : labels[step.status]}</strong>
+          <strong>{t(step.availability === "unavailable" ? "无法识别／待刷新（待核对）" : labels[step.status])}</strong>
           <span>{step.action}</span>
           {step.occurredAt && <time dateTime={step.occurredAt}>{step.occurredAt}</time>}
         </li>

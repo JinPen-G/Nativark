@@ -13,6 +13,7 @@ import { BoundCalendarDraftUnknownError } from '../rental-core/bound-calendar-dr
 import { BoundRuleDraftUnknownError } from '../rental-core/bound-rule-draft.service';
 import { OriginalDraftRejectedError, OriginalDraftRejectionUnknownError } from './original-draft-rejection.store';
 import type { RentalQuoteRequest, RentalOrderExtensionRequest, PreviewRentalCalendarRangeOverrideRequest, ApplyRentalCalendarRangeOverrideRequest, SystemUserRow } from '@rental-os/shared';
+import type { EnterpriseMerchantDelegationActorAuth } from '../enterprise/enterprise-merchant-delegation.service';
 import { z } from 'zod';
 
 export type AiBusinessReadKind = 'catalog' | 'order_candidates' | 'availability' | 'membership_candidates' | 'booking_identity_options' | 'booking_delivery_addresses' | 'opening' | 'rule_versions' | 'rule_version' | 'calendar_version' | 'risk' | 'quote_context' | 'payment_intents' | 'payment_refunds';
@@ -39,6 +40,7 @@ const routes = {
   calendar_range_apply: { method: 'POST', path: '/rental/v1/calendars/:year/days/range' },
   risk: { method: 'GET', path: '/rental/v1/reports/operations' },
   quote_context: { method: 'GET', path: '/rental/v1/business-settings' },
+  merchant_delegation: { method: 'GET', path: '/membership/enterprise-workflows/order-delegations/:delegationKey' },
   payment_intents: { method: 'GET', path: '/rental/v1/orders/:orderId/payment-intents' },
   payment_refunds: { method: 'GET', path: '/rental/v1/orders/:orderId/payment-intents/:intentId/refunds' },
   quote: { method: 'POST', path: '/rental/v1/quotes' },
@@ -59,6 +61,17 @@ export class AiBusinessReadRouteAuthority implements AiBusinessReadAuthority {
   async withRead<T>(kind: AiBusinessReadKind, input: unknown, read: (context: AiExecutionContext) => Promise<T>): Promise<T> {
     if (['quote', 'extension_preview', 'calendar_range_apply', 'rule_draft_preview', 'rule_draft_save'].includes(kind as string)) throw new ModelGatewayError('INVALID_REQUEST');
     return this.withRoute(kind, input, read);
+  }
+
+  /** Original merchant GET Guard and its actual Auth principal. The private
+   * enterprise reader still verifies the D source, relationship and location. */
+  async withMerchantDelegationRead<T>(delegationKey: string,
+    read: (context: AiExecutionContext, actor: EnterpriseMerchantDelegationActorAuth) => Promise<T>): Promise<T> {
+    const key = z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/u).parse(delegationKey);
+    return this.withRoute('merchant_delegation', { delegationKey: key }, async (context, request) => {
+      if (context.audience !== 'operator' || !request?.authorization) throw new ModelGatewayError('FORBIDDEN');
+      return read(context, { authorization: request.authorization, user: request.user });
+    });
   }
 
   /** R1 persisted quote, explicitly separate from read tools. The bridge does
@@ -153,12 +166,16 @@ export class AiBusinessReadRouteAuthority implements AiBusinessReadAuthority {
   }
 
   private async withRoute<T>(kind: keyof typeof routes, input: unknown,
-    read: (context: AiExecutionContext, request?: { user: SystemUserRow }) => Promise<T>): Promise<T> {
+    read: (context: AiExecutionContext, request?: { user: SystemUserRow; authorization?: string }) => Promise<T>): Promise<T> {
     if (!Object.prototype.hasOwnProperty.call(routes, kind) || typeof read !== 'function') throw new ModelGatewayError('INVALID_REQUEST');
     const body = structuredClone(input);
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new ModelGatewayError('INVALID_REQUEST');
     if (kind === 'rule_versions' && Object.keys(body).length !== 0) throw new ModelGatewayError('INVALID_REQUEST');
     let route: { method: string; path: string } = routes[kind];
+    if (kind === 'merchant_delegation') {
+      const parsed = z.object({ delegationKey: z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/u) }).strict().parse(body);
+      route = { ...route, path: route.path.replace(':delegationKey', parsed.delegationKey) };
+    }
     if (kind === 'calendar_range_apply') {
       const parsed = z.object({ year: z.number().int().min(1900).max(2200), startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
         endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u), fields: z.object({ name: z.string().min(1).max(120).optional(),
@@ -206,7 +223,7 @@ export class AiBusinessReadRouteAuthority implements AiBusinessReadAuthority {
       if (!parsed.success || ['expire-pending', 'reconcile-pickup-overdue'].includes(parsed.data.toLowerCase())) throw new ModelGatewayError('INVALID_REQUEST');
       route = { ...route, path: route.path.replace(':orderId', parsed.data) };
     }
-    const authorize = async <R>(consume: (context: AiExecutionContext, request: { user: SystemUserRow }) => Promise<R>): Promise<R> => {
+    const authorize = async <R>(consume: (context: AiExecutionContext, request: { user: SystemUserRow; authorization: string }) => Promise<R>): Promise<R> => {
       const credential = structuredClone(await this.credentials.current());
       if (!credential || !['operator', 'staff'].includes(credential.audience)
         || typeof credential.authorization !== 'string' || credential.authorization.length > 8192
@@ -230,7 +247,7 @@ export class AiBusinessReadRouteAuthority implements AiBusinessReadAuthority {
             ...(identity.organizationId ? { organizationId: identity.organizationId } : {}) }
         };
         if (!isAiStepExecutionContext(context)) throw new ModelGatewayError('FORBIDDEN');
-        return consume(structuredClone(context), { user: structuredClone(user) });
+        return consume(structuredClone(context), { user: structuredClone(user), authorization: credential.authorization });
       });
     };
     const binding = (context: AiExecutionContext) => {
@@ -248,7 +265,7 @@ export class AiBusinessReadRouteAuthority implements AiBusinessReadAuthority {
           return result;
         }
         let result!: T, failure: unknown, failed = false;
-        try { result = kind === 'extension_preview' ? await read(context, request) : await read(context); }
+        try { result = kind === 'extension_preview' || kind === 'merchant_delegation' ? await read(context, request) : await read(context); }
         catch (error) { failure = error; failed = true; }
         // Recheck even failed reads: an optional-source downgrade must never
         // swallow a concurrent revocation. Only the business fault, not a

@@ -1,10 +1,12 @@
 /** Canonical original-selection transport. Preparation/receipts are reads;
  * only explicit select/start delegates the original server-owned operation. */
-import { AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT,
+import { AI_QUOTE_SELECTION_HTTP_DRAFT, AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT,
   AI_SCENE_REQUEST_HTTP_DRAFT, validateAiQuoteSelectionHttpValue, validateAiSceneQuoteHttpResponse,
   type ApiResult, type AiClarifiedQuoteSelectionPreparationInputDraft, type AiClarifiedQuoteSelectionPreparationDraft,
   type AiClarifiedQuoteSelectionRequestDraft, type AiClarifiedQuoteSelectionOriginalOperationReadDraft,
   type AiQuoteSelectionSelectResponseDraft, type AiQuoteSelectionReconcileResponseDraft,
+  type AiMerchantDelegatedQuoteSelectionPreparationInputDraft, type AiMerchantDelegatedQuoteSelectionPreparationDraft,
+  type AiQuoteSelectionCreateDraft, type AiQuoteSelectionOperationLocatorDraft,
   type AiSelectedQuoteTaskRequestDraft, type AiSelectedQuoteTaskRunDraft, type AiSelectedQuoteTaskResultDraft,
   type AiHumanQuoteOrderRepreparePreparationInputDraft, type AiHumanQuoteOrderRepreparePreparationDraft,
   type AiHumanQuoteOrderReprepareRequestDraft, type AiHumanQuoteOrderReprepareResponseDraft,
@@ -19,7 +21,7 @@ import { AI_EXECUTION_RESPONSE_TIMEOUT_MS } from './aiRequestTiming';
 
 async function call<T>(basePath: string, action: string, input: unknown, signal: AbortSignal, running = false): Promise<T> {
   if (signal.aborted) throw Error('AI_SCOPE_CHANGED');
-  const result = await http.post<ApiResult<T>>(`/${basePath}/${action}`, input,
+  const result = await http.post<ApiResult<T>>(`/${basePath}${action ? `/${action}` : ''}`, input,
     { signal: AbortSignal.any([signal, currentSessionSignal()]), ...(running ? { timeout: AI_EXECUTION_RESPONSE_TIMEOUT_MS } : {}) });
   return result.data.data;
 }
@@ -33,6 +35,18 @@ async function linkedValue<T>(basePath: string, action: string, input: unknown, 
   return value;
 }
 export const aiQuoteSelectionsApi = Object.freeze({
+  prepareMerchantDelegation: (input: AiMerchantDelegatedQuoteSelectionPreparationInputDraft, signal: AbortSignal) =>
+    linkedValue<AiMerchantDelegatedQuoteSelectionPreparationDraft>(AI_QUOTE_SELECTION_HTTP_DRAFT.basePath,
+      AI_QUOTE_SELECTION_HTTP_DRAFT.prepareMerchantDelegation, input, signal,
+      (value): value is AiMerchantDelegatedQuoteSelectionPreparationDraft => validateAiQuoteSelectionHttpValue('AiMerchantDelegatedQuoteSelectionPreparationDraft', value)),
+  selectMerchantDelegation: (input: AiQuoteSelectionCreateDraft, signal: AbortSignal) =>
+    linkedValue<AiQuoteSelectionSelectResponseDraft>(AI_QUOTE_SELECTION_HTTP_DRAFT.basePath,
+      AI_QUOTE_SELECTION_HTTP_DRAFT.select, input, signal,
+      (value): value is AiQuoteSelectionSelectResponseDraft => validateAiQuoteSelectionHttpValue('AiQuoteSelectionSelectResponseDraft', value), true),
+  merchantDelegationOperation: (input: AiQuoteSelectionOperationLocatorDraft, signal: AbortSignal) =>
+    linkedValue<AiQuoteSelectionReconcileResponseDraft>(AI_QUOTE_SELECTION_HTTP_DRAFT.basePath,
+      AI_QUOTE_SELECTION_HTTP_DRAFT.readOperation, input, signal,
+      (value): value is AiQuoteSelectionReconcileResponseDraft => validateAiQuoteSelectionHttpValue('AiQuoteSelectionReconcileResponseDraft', value)),
   reissuePreparation: (input: AiQuoteRequestReissuePreparationInputDraft, signal: AbortSignal) => linkedValue<AiQuoteRequestReissuePreparationDraft>(
     AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT.basePath, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT.readReissuePreparation, input, signal,
     (value): value is AiQuoteRequestReissuePreparationDraft => validateAiQuoteSelectionHttpValue('AiQuoteRequestReissuePreparationDraft', value)),

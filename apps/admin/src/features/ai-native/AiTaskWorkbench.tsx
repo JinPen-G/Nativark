@@ -234,7 +234,7 @@ export function AiTaskWorkbench({
   const detailSynchronized = Boolean(currentDetail) && !eventBatch?.resyncRequired;
 
   return (
-    <section aria-label="AI 任务工作台" data-ai-workbench="feature-local">
+    <section aria-label={t("AI 任务工作台")} data-ai-workbench="feature-local">
       <TaskList
         tasks={tasks}
         translate={t}
@@ -254,8 +254,8 @@ export function AiTaskWorkbench({
         <h2>{t(title)}</h2>
         {detailState === "failed" && taskId && onResync && (
           <ActionButton
-            label="重新读取"
-            pendingLabel="读取中…"
+            label={t("重新读取")}
+            pendingLabel={t("读取中…")}
             onAction={requestResync}
           />
         )}
@@ -264,8 +264,8 @@ export function AiTaskWorkbench({
             {eventBatch?.resyncRequired && (
               <Alert
                 type="warning"
-                message="事件未同步，请由宿主重新读取快照后再继续。"
-                action={onResync ? <ActionButton label="重新读取事件" pendingLabel="读取中…" onAction={requestResync} /> : undefined}
+                message={t("事件未同步，请由宿主重新读取快照后再继续。")}
+                action={onResync ? <ActionButton label={t("重新读取事件")} pendingLabel={t("读取中…")} onAction={requestResync} /> : undefined}
               />
             )}
             {detailSynchronized && typeof currentDetail.modelText === "string" && (currentDetail.modelObservation?.status === 'available'
@@ -276,8 +276,8 @@ export function AiTaskWorkbench({
             {detailSynchronized && <Accordion items={[
               { key: 'steps', title: t('执行步骤'), content: <TaskTimeline taskId={taskId} steps={currentDetail.steps} /> },
               ...(readConfirmation && currentDetail.confirmationSteps?.length ? [{ key: 'confirmation', title: t('确认记录'), content: <>{currentDetail.confirmationSteps.slice(0, 20).map(step =>
-              <ConfirmationHistory key={`${identity}:${step.runId}:${step.stepId}`} taskId={taskId} {...step} read={readConfirmation} />)}
-              {(currentDetail.confirmationSteps.length > 20) && <p role="status">仅展示前20个确认步骤，其他记录未加载。</p>}</> }] : []),
+              <ConfirmationHistory key={`${identity}:${step.runId}:${step.stepId}`} taskId={taskId} {...step} read={readConfirmation} translate={t} />)}
+              {(currentDetail.confirmationSteps.length > 20) && <p role="status">{t("仅展示前20个确认步骤，其他记录未加载。")}</p>}</> }] : []),
               ...(currentDetail.factRows ? [{ key: 'facts', title: t('任务信息'), content: <dl className={styles.facts}>{currentDetail.factRows.slice(0, 24).map((row, index) => <div key={index}>
                 <dt>{safeDisplayText(row.label, 100)}</dt><dd style={{ overflowWrap: "anywhere" }}>{safeDisplayText(row.value, 1000)}</dd>
               </div>)}</dl> }] : [])
@@ -309,7 +309,7 @@ export function AiTaskWorkbench({
             {detailSynchronized && currentDetail.assessments && <CapabilityStatus assessments={currentDetail.assessments} />}
           </>
         )}
-        {detailState === "unavailable" && <Alert type="warning" message="宿主未提供任务详情读取能力；不会自动请求或补造结果。" />}
+        {detailState === "unavailable" && <Alert type="warning" message={t("宿主未提供任务详情读取能力；不会自动请求或补造结果。")} />}
         {display && taskId && context.tenantId && context.workspaceId && <TaskWorkbenchDisplay
           identity={display.identity} expected={{ taskId, tenantId: context.tenantId, workspaceId: context.workspaceId,
             ...(currentDetail?.modelObservation?.status === 'available' ? { runId: currentDetail.modelObservation.runId, resultId: currentDetail.modelObservation.resultId } : {}) }}
@@ -321,17 +321,17 @@ export function AiTaskWorkbench({
   );
 }
 
-function ConfirmationHistory({ taskId, runId, stepId, read }: { taskId: string; runId: string; stepId: string;
-  read: NonNullable<AiTaskWorkbenchProps['readConfirmation']> }) {
+function ConfirmationHistory({ taskId, runId, stepId, read, translate: t }: { taskId: string; runId: string; stepId: string;
+  read: NonNullable<AiTaskWorkbenchProps['readConfirmation']>; translate: (text: string) => string }) {
   const [history, setHistory] = useState<AiTaskConfirmationHistoryDraft | null>(null);
   const [error, setError] = useState(false);
   const request = useRef<AbortController | null>(null);
   const reader = useRef(read); reader.current = read;
   useEffect(() => () => { request.current?.abort(); }, []);
-  return <section aria-label="原人工确认记录">
-    <h3>原人工确认记录</h3>
-    <p>步骤 {safeDisplayText(stepId, 191)}。只核对原记录，不批准、不继续执行；没有记录不代表未执行。</p>
-    <ActionButton label="读取原确认历史" pendingLabel="读取中…" onAction={async () => {
+  return <section aria-label={t("原人工确认记录")}>
+    <h3>{t("原人工确认记录")}</h3>
+    <p>{t("步骤 {stepId}。只核对原记录，不批准、不继续执行；没有记录不代表未执行。").replace('{stepId}', () => safeDisplayText(stepId, 191))}</p>
+    <ActionButton label={t("读取原确认历史")} pendingLabel={t("读取中…")} onAction={async () => {
       if (request.current) throw Error('AI_RESOURCE_UNAVAILABLE');
       const controller = new AbortController(), selectedReader = read; request.current = controller;
       setHistory(null); setError(false);
@@ -349,15 +349,17 @@ function ConfirmationHistory({ taskId, runId, stepId, read }: { taskId: string; 
       } catch (failure) { if (!controller.signal.aborted && reader.current === selectedReader) setError(true); throw failure; }
       finally { if (request.current === controller) request.current = null; }
     }} />
-    {error && <Alert type="warning" title="原确认记录不可读取，旧内容已清除。"/>}
+    {error && <Alert type="warning" title={t("原确认记录不可读取，旧内容已清除。")}/>}
     {history && <div aria-live="polite">
-      {!history.phases.length && <p>尚未观察到原确认阶段，不推断审批或业务结果。</p>}
+      {!history.phases.length && <p>{t("尚未观察到原确认阶段，不推断审批或业务结果。")}</p>}
       <ul>{history.phases.map(phase => <li key={phase.phaseId}>
-        阶段 {phase.sequence}：{phase.kind === 'confirmation' ? '已保存等待记录' : phase.kind === 'succeeded' ? '原阶段完成，业务结果需另查原收据'
-          : phase.kind === 'failed' ? '原阶段未完成' : phase.kind === 'unknown' ? '结果待核对' : '尚无阶段收据'}
+        {t("阶段 {sequence}：{status}").replace('{sequence}', String(phase.sequence)).replace('{status}', () => t(phase.kind === 'confirmation'
+          ? '已保存等待记录' : phase.kind === 'succeeded' ? '原阶段完成，业务结果需另查原收据'
+          : phase.kind === 'failed' ? '原阶段未完成' : phase.kind === 'unknown' ? '结果待核对' : '尚无阶段收据'))}
       </li>)}</ul>
-      <p>已观察的转换：{history.transitions.map(item => item.kind === 'paused' ? '暂停等待' : '按原决定继续').join(' → ') || '未观察到'}。</p>
-      <p>读取记录不是新的批准、执行许可或业务成功证明。</p>
+      <p>{t("已观察的转换：{transitions}。").replace('{transitions}', () => history.transitions.map(item => t(item.kind === 'paused'
+        ? '暂停等待' : '按原决定继续')).join(' → ') || t('未观察到'))}</p>
+      <p>{t("读取记录不是新的批准、执行许可或业务成功证明。")}</p>
     </div>}
   </section>;
 }

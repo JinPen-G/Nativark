@@ -16,9 +16,11 @@ import { PrismaTaskConfirmationCheckpointSource } from './prisma-task-confirmati
 import { aiTaskRunnerLimitsSchema, aiTaskRunPlanSchema, PrismaTaskRunEvidenceRepository } from './prisma-task-run-evidence.repository';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { PrismaTaskApplication, type AiTaskApplicationHost } from './prisma-task-application';
-import { withAiTaskHeldPreparationDefinition, type AiTaskHeldPreparation } from './ai-task-runner.service';
-import type { AiTaskRunnerClock } from './ai-task-runner.ports';
+import { AiTaskRunnerError, callAiTaskRunnerDependency, snapshotAiTaskRunnerRecoveryLease,
+  withAiTaskHeldPreparationDefinition, type AiTaskHeldPreparation } from './ai-task-runner.service';
+import type { AiTaskRunnerClaimInput, AiTaskRunnerClock } from './ai-task-runner.ports';
 import type { AiTaskRunnerRepositoryCommandFactory } from './ai-task-runner.repository-adapter';
+import { AiTaskTakeoverCommitUnknownError, PrismaTaskTakeoverRepository } from './prisma-task-takeover.repository';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const taskSchema = z.object({ taskId: id.max(36), runId: id.max(36), registrationRef: id,
@@ -137,7 +139,73 @@ export function composeTaskOrderHost(input: TaskOrderHostDependencies) {
   const unavailableInput = async () => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); };
   const application = new PrismaTaskApplication({ db: input.db, tasks: authorization.tasks, runner: root.runner,
     recovery, events, host: input.host, prepare, clock: input.runnerClock, inputs: { submit: unavailableInput, readPending: unavailableInput } });
+  const takeovers = input.selectedOrder ? new PrismaTaskTakeoverRepository(input.db, authorization.authority, input.clock) : undefined;
+  const selectedRecovery = takeovers ? {
+    /** Only an acknowledged fence can enter original-result recovery. The
+     * selection consumer rechecks its immutable material after this mutation;
+     * a receipt read cannot repair a lost ACK or authorize another claim. */
+    async takeoverAndRecover(command: AiTaskRunnerClaimInput & { previousHolderId: string },
+      signal: AbortSignal | undefined, revalidate: () => Promise<void>) {
+      if (command.taskId !== task.taskId || command.runId !== task.runId || typeof revalidate !== 'function')
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      if (signal?.aborted) return { status: 'unavailable' as const, completedSteps: 0, cleanupFailed: 0 };
+      const original = structuredClone(command);
+      let lease;
+      try {
+        const received = await callAiTaskRunnerDependency(child => takeovers.takeover(original, child),
+          5000, 'selected_order_takeover', undefined, input.runnerClock);
+        lease = snapshotAiTaskRunnerRecoveryLease(original, received);
+      } catch (error) {
+        if (error instanceof AiTaskRunnerError && (error.code === 'AI_RUN_LIMIT' || error.code === 'AI_RESULT_UNKNOWN'))
+          throw new AiTaskTakeoverCommitUnknownError();
+        throw error;
+      }
+      let runnerOwnsLease = false;
+      try {
+        await callAiTaskRunnerDependency(() => revalidate(), 5000,
+          'selected_order_takeover_revalidate', undefined, input.runnerClock);
+        if (signal?.aborted) return { status: 'unavailable' as const, completedSteps: 0, cleanupFailed: 0 };
+        return await root.runner.recover(lease, signal, () => { runnerOwnsLease = true; });
+      } catch {
+        // Fencing already committed and its ACK was checked. A later source,
+        // permission or recovery failure cannot be reported as no takeover.
+        throw new AiTaskTakeoverCommitUnknownError();
+      } finally {
+        if (!runnerOwnsLease) {
+          // Preflight has not transferred the protected interval to the runner.
+          // Release only this positively acknowledged generation, never one
+          // reconstructed from a holder lookup or the takeover audit receipt.
+          try {
+            await callAiTaskRunnerDependency(async child => {
+              const current = await authorization.tasks.readMetadata(task.taskId);
+              if (child.aborted || current.taskId !== task.taskId) throw new AiTaskTakeoverCommitUnknownError();
+              const release = { taskId: task.taskId, runId: task.runId, holderId: lease.holderId,
+                expectedTaskRevision: current.revision, expectedRunRevision: lease.revision,
+                expectedFencingToken: lease.fencingToken };
+              const receipt = await authorization.tasks.releaseRun(release);
+              if (child.aborted || receipt.released !== true || receipt.revision !== release.expectedRunRevision + 1)
+                throw new AiTaskTakeoverCommitUnknownError();
+            }, 5000, 'selected_order_takeover_cleanup', undefined, input.runnerClock);
+          } catch { throw new AiTaskTakeoverCommitUnknownError(); }
+        }
+      }
+    },
+    async readTakeoverReceipt(command: Pick<AiTaskRunnerClaimInput,
+      'taskId' | 'runId' | 'expectedTaskRevision' | 'expectedRunRevision' | 'expectedFencingToken'>,
+      signal?: AbortSignal) {
+      if (command.taskId !== task.taskId || command.runId !== task.runId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      try {
+        return await callAiTaskRunnerDependency(() => takeovers.readReceipt(structuredClone(command)),
+          5000, 'selected_order_takeover_receipt', signal, input.runnerClock);
+      } catch (error) {
+        if (error instanceof AiTaskRunnerError && (error.code === 'AI_RUN_LIMIT' || error.code === 'AI_RESULT_UNKNOWN'))
+          throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        throw error;
+      }
+    }
+  } : {};
   return Object.freeze({ orders, ...root, authorization, registrations, transitions, taskTransitions, recovery, events,
+    ...selectedRecovery,
     application: Object.freeze({ start: application.start.bind(application), continueConfirmation: application.continueConfirmation.bind(application),
       readConfirmation: application.readConfirmation.bind(application),
       readConfirmationHistory: application.readConfirmationHistory.bind(application),

@@ -15,11 +15,11 @@ import type { RentalCategoryCreationReader } from "./category-runtime";
 
 export type RentalBusinessRuntimeTransaction = RentalBusinessFactTransaction & RentalBusinessConfigurationTransaction
   & RentalCoreConfigurationTransaction & RentalServiceCapacityTransaction & RentalSnapshotTransaction
-  & RentalCategoryCreationReader & Pick<Prisma.TransactionClient, "customerDeliveryAddress" | "rentalPriceAdjustmentPlan">;
+  & RentalCategoryCreationReader & Pick<Prisma.TransactionClient, "customerDeliveryAddress" | "rentalPriceAdjustmentPlan" | "customerProfile" | "rentalNotificationLog" | "rentalNotificationTemplate" | "aiDataErasure">;
 
 export type RentalBusinessRuntimeStorage<TTransaction extends RentalBusinessRuntimeTransaction> = TTransaction & {
   $transaction<TResult>(run: (transaction: TTransaction) => Promise<TResult>,
-    options?: { isolationLevel: "ReadCommitted" }): Promise<TResult>;
+    options?: { isolationLevel?: "ReadCommitted"; maxWait?: number; timeout?: number }): Promise<TResult>;
 };
 
 export interface RentalBusinessMemberships<TTransaction> extends Pick<RentalCoreMemberships<TTransaction>, "hasOpenRiskForBooking"> {

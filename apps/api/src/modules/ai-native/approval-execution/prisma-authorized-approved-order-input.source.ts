@@ -47,6 +47,13 @@ export class PrismaAuthorizedApprovedOrderInputSource implements ApprovedOrderEx
         return { reference, row, binding: requestFingerprint({ reference, revision: step.revision, row }) };
       };
       const original = await read();
+      const readMaterial = async () => {
+        const body = await this.reader.read(input, tx);
+        const merchantDelegation = body?.bookingIdentity?.bookingIdentity === 'enterprise_employee' && this.reader.readDelegation
+          ? await this.reader.readDelegation(input, tx) : null;
+        if (!body || merchantDelegation && merchantDelegation.requestHash !== requestFingerprint(body)) throw deniedOrder();
+        return { body: structuredClone(body), ...(merchantDelegation ? { merchantDelegation: structuredClone(merchantDelegation) } : {}) };
+      };
       const validateProof = (value: unknown) => {
         const proof = proofSchema.parse(structuredClone(value));
         const now = this.clock();
@@ -60,34 +67,38 @@ export class PrismaAuthorizedApprovedOrderInputSource implements ApprovedOrderEx
       if (envelopedRead) {
         let started = false, completed = false, violated = false;
         let callbackBindingHash: string | null = null;
+        let callbackMaterialHash: string | null = null;
         const observed = await envelopedRead(original.reference, tx, async proof => {
           if (started) { violated = true; throw deniedOrder(); }
           started = true;
           const bindingHash = validateProof(proof);
           callbackBindingHash = bindingHash;
-          const body = await this.reader.read(input, tx);
+          const material = await readMaterial();
           const latest = await read();
-          if (!body || requestFingerprint(body) !== original.reference.fingerprint || latest.binding !== original.binding) throw deniedOrder();
+          if (requestFingerprint(material.body) !== original.reference.fingerprint || latest.binding !== original.binding) throw deniedOrder();
+          callbackMaterialHash = requestFingerprint(material);
           completed = true;
-          return { body: structuredClone(body), bindingHash };
+          return { ...material, bindingHash };
         });
         // The returned authority packet cannot replace the proof used for the
         // actual body read, or erase an already-observed callback violation.
         if (violated || !completed || callbackBindingHash === null || !observed?.value
           || observed.value.bindingHash !== callbackBindingHash || validateProof(observed.original) !== callbackBindingHash
           || validateProof(observed.current) !== callbackBindingHash
+          || requestFingerprint({ body: observed.value.body, ...(observed.value.merchantDelegation
+            ? { merchantDelegation: observed.value.merchantDelegation } : {}) }) !== callbackMaterialHash
           || requestFingerprint(observed.value.body) !== original.reference.fingerprint) throw deniedOrder();
-        return { body: structuredClone(observed.value.body), bindingHash: observed.value.bindingHash };
+        return { ...structuredClone(observed.value) };
       }
       // Legacy/custom authorities keep the original independent proof pair;
       // failure of an offered envelope never falls back to this path.
       const authorize = async () => validateProof(await this.authority.authorizeOrderInput(original.reference, tx));
       const bindingHash = await authorize();
-      const body = await this.reader.read(input, tx);
+      const material = await readMaterial();
       const latest = await read();
-      if (!body || requestFingerprint(body) !== original.reference.fingerprint || latest.binding !== original.binding
+      if (requestFingerprint(material.body) !== original.reference.fingerprint || latest.binding !== original.binding
         || await authorize() !== bindingHash) throw deniedOrder();
-      return { body: structuredClone(body), bindingHash };
+      return { ...material, bindingHash };
     } catch (error) {
       if (error instanceof AiTaskRepositoryError) throw new AiTaskRepositoryError(error.code);
       throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
@@ -96,5 +107,9 @@ export class PrismaAuthorizedApprovedOrderInputSource implements ApprovedOrderEx
 
   async read(reference: Parameters<ApprovedOrderOriginalInputSource['read']>[0], tx: Prisma.TransactionClient) {
     return (await this.readAuthorized(reference, tx)).body;
+  }
+
+  async readDelegation(reference: Parameters<ApprovedOrderOriginalInputSource['read']>[0], tx: Prisma.TransactionClient) {
+    return (await this.readAuthorized(reference, tx)).merchantDelegation ?? null;
   }
 }

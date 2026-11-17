@@ -1,7 +1,7 @@
 /** Explicit original-ID sample consumption. A sample is never a tenant-wide
  * rate; current session, selection and visibility own every displayed result. */
 import { useEffect, useRef, useState } from 'react';
-import { AI_TASK_STATUSES_DRAFT, AI_TASK_TERMINAL_STATUSES_DRAFT, type AiTaskOutcomeSampleDraft } from '@rental-os/shared';
+import { AI_TASK_STATUSES_DRAFT, AI_TASK_TERMINAL_STATUSES_DRAFT, validateAiTaskLifecycleSampleRatesDraft, type AiTaskOutcomeSampleDraft } from '@rental-os/shared';
 import { currentSessionEpoch, currentSessionSignal } from '@/app/queryClient';
 import { aiTaskCenterApi } from '@/api/aiTaskCenter';
 import { ActionButton, Alert } from '@/components/ui';
@@ -39,6 +39,19 @@ export function validateTaskOutcomeObservation(value: AiTaskOutcomeSampleDraft, 
     || takeover.tasksWithReceipt < 0 || takeover.tasksWithReceipt > total
     || takeover.percent !== (100 * takeover.tasksWithReceipt / total).toFixed(2)
     || takeover.basis !== 'original_same_owner_takeover_receipts') fail();
+  if (value.lifecycleRates !== undefined) {
+    if (!validateAiTaskLifecycleSampleRatesDraft(value.lifecycleRates)) fail();
+    const { cancellation, recovery } = value.lifecycleRates;
+    if (cancellation.requested + cancellation.notRecordedTasks !== selected.length
+      || cancellation.recorded + cancellation.pending !== cancellation.requested
+      || cancellation.state !== (!cancellation.requested ? 'not_recorded' : cancellation.pending ? 'pending' : 'recorded')
+      || cancellation.percent !== (cancellation.requested && !cancellation.pending ? (100 * cancellation.recorded / cancellation.requested).toFixed(2) : null)
+      || recovery.recorded + recovery.pending !== recovery.attempts || recovery.succeeded > recovery.recorded
+      || recovery.notRecordedTasks > selected.length
+      || recovery.state !== (!recovery.attempts && !recovery.truncated ? 'not_recorded'
+        : recovery.truncated || recovery.pending ? 'pending' : 'recorded')
+      || recovery.percent !== (recovery.attempts && !recovery.pending && !recovery.truncated ? (100 * recovery.succeeded / recovery.attempts).toFixed(2) : null)) fail();
+  }
   return value;
 }
 
@@ -90,8 +103,15 @@ export function TaskOutcomeObservation({ taskIds, current, onAccessDenied }: {
         <div><dt>{t('样本成功率')}</dt><dd>{value.successRate.percent === null ? t('尚未计算') : `${value.successRate.percent}%`}
           {' · '}{value.successRate.succeeded}/{value.sampleSize}</dd></div>
         <div><dt>{t('原接管收据比例')}</dt><dd>{value.takeoverRate.percent}% · {value.takeoverRate.tasksWithReceipt}/{value.sampleSize}</dd></div>
+        {value.lifecycleRates && <>
+          <div><dt>{t('取消善后收据比例')}</dt><dd>{value.lifecycleRates.cancellation.percent === null ? t('证据未齐，未计算') : `${value.lifecycleRates.cancellation.percent}%`}
+            {' · '}{value.lifecycleRates.cancellation.recorded}/{value.lifecycleRates.cancellation.requested}</dd></div>
+          <div><dt>{t('原恢复完整成功比例')}</dt><dd>{value.lifecycleRates.recovery.percent === null ? t('证据未齐，未计算') : `${value.lifecycleRates.recovery.percent}%`}
+            {' · '}{value.lifecycleRates.recovery.succeeded}/{value.lifecycleRates.recovery.attempts}</dd></div>
+        </>}
       </dl>
       {value.successRate.state === 'pending' && <p>{t('任务尚未全部结束，最终成功率未计算。')}</p>}
+      {value.lifecycleRates && <p className="muted">{t('取消善后不表示业务回滚；恢复比例仅包含已核对的原恢复运行，不代表全租户或 SLO。')}</p>}
       <p className="muted">{t('接管仅指原人工恢复收据；真实 SLO 未评估。')}</p>
     </div>}
   </section>;

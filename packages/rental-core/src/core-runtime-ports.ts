@@ -3,6 +3,7 @@
  * 会员、企业支出和授信仍由所属原服务按调用方的同一事务核验。 */
 import type { CreateFileUploadSessionRequest, FileAssetSummary, FileDownloadUrlSummary } from "@rental-os/platform-contracts/files";
 import type { RentalMembershipSnapshot, RentalOrder, RentalOrderExtension, RentalOrderExtensionRequest, RentalRuleConfig } from "./contracts";
+import type { ApprovedOrderBinding } from "./approved-order-transaction.ports";
 import type { ApprovedExtensionBinding, EnterpriseExtensionPrice } from "./approved-extension-ports";
 import type { RentalQualificationAction, RentalQualificationCheckWindow } from "./qualification";
 import type { RentalCoreConfigurationTransaction } from "./core-configuration-storage";
@@ -24,7 +25,7 @@ export interface RentalCoreMemberships<TTransaction> {
   assertBookingQualificationForAction(tenantId: string, workspaceId: string,
     snapshot: RentalMembershipSnapshot | undefined, rule: RentalRuleConfig["qualification"],
     action: RentalQualificationAction, window: RentalQualificationCheckWindow,
-    transaction?: TTransaction): Promise<unknown>;
+    transaction?: TTransaction, delegatedBinding?: Readonly<ApprovedOrderBinding>): Promise<unknown>;
 }
 
 export interface RentalCoreEnterprisePolicies<TTransaction> {

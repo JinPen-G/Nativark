@@ -36,7 +36,7 @@ export interface AiTaskActionPolicyMutationResult {
   expiresAt: string;
 }
 
-type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiTaskActionPolicy'> & Partial<Pick<PrismaClient, 'operationLog'>>;
+type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiTaskActionPolicy'> & Partial<Pick<PrismaClient, 'operationLog' | 'user'>>;
 type Tx = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
 
 const error = (code: ConstructorParameters<typeof AiTaskRepositoryError>[0]) => new AiTaskRepositoryError(code);
@@ -91,6 +91,20 @@ export class PrismaTaskActionPolicyRepository {
     if ((await this.access(taskId)).bindingKey !== bindingKey) throw error('AI_ACCESS_DENIED');
   }
 
+  /** The journal FK for a platform receipt belongs to the persisted current
+   * SaaS user. Call attribution remains PLATFORM; no tenant membership is
+   * inferred from this logging requirement. */
+  private async journal(context: AiExecutionContext, db: Pick<Db, 'user'> = this.db) {
+    if (context.scope.kind === 'workspace' && context.actor.kind === 'user') return {
+      tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId, userId: context.actor.userId };
+    if (context.scope.kind !== 'platform' || context.actor.kind !== 'saas_admin' || context.audience !== 'operator'
+      || typeof db.user?.findUnique !== 'function') throw error('AI_ACCESS_DENIED');
+    const user = await db.user.findUnique({ where: { id: context.actor.userId },
+      select: { id: true, tenantId: true, isActive: true, isSaasAdmin: true } });
+    if (!user || user.id !== context.actor.userId || !user.isActive || !user.isSaasAdmin || !id.test(user.tenantId)) throw error('AI_ACCESS_DENIED');
+    return { tenantId: user.tenantId, workspaceId: null, userId: user.id };
+  }
+
   private validate(value: AiTaskActionPolicyMutation) {
     if (!value || !id.test(value.taskId) || !operations.includes(value.operation)) throw error('AI_INVALID_INPUT');
     if (!Array.isArray(value.requiredPermissions) || value.requiredPermissions.length < 1 || value.requiredPermissions.length > 64
@@ -141,15 +155,15 @@ export class PrismaTaskActionPolicyRepository {
       && (!Number.isInteger(expectedRevision) || expectedRevision < 1 || expectedRevision >= maxRevision)) throw error('AI_INVALID_INPUT');
     if (typeof this.db.operationLog?.findUnique !== 'function') throw error('AI_RESOURCE_UNAVAILABLE');
     const access = await this.access(taskId), context = access.context;
-    if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user') throw error('AI_ACCESS_DENIED');
+    const journal = await this.journal(context);
     const key = receiptId(access.scopeId, taskId, operation, expectedRevision);
     let row;
     try { row = structuredClone(await this.db.operationLog.findUnique({ where: { id: key } })); }
     catch { throw error('AI_STORAGE_UNAVAILABLE'); }
     await this.recheck(taskId, access.bindingKey);
     const absent = { state: 'not_observed' as const, policy: null, retryable: false as const };
-    if (!row || row.id !== key || row.tenantId !== context.scope.tenantId || row.workspaceId !== context.scope.workspaceId
-      || row.userId !== context.actor.userId || row.action !== receiptAction) return absent;
+    if (!row || row.id !== key || row.tenantId !== journal.tenantId || row.workspaceId !== journal.workspaceId
+      || row.userId !== journal.userId || row.action !== receiptAction) return absent;
     const detail = row.detail as { payload?: { kind?: string; scopeId?: string; taskId?: string; operation?: string;
       expectedRevision?: number | null; result?: AiTaskActionPolicyMutationResult }; payloadHash?: string } | null;
     const payload = detail?.payload, result = payload?.result;
@@ -160,6 +174,7 @@ export class PrismaTaskActionPolicyRepository {
       || result.revision !== (expectedRevision ?? 0) + 1 || typeof result.expiresAt !== 'string') throw error('AI_STORAGE_UNAVAILABLE');
     const policy = this.project({ ...result, expiresAt: new Date(result.expiresAt) });
     await this.recheck(taskId, access.bindingKey);
+    if (requestFingerprint(await this.journal(context)) !== requestFingerprint(journal)) throw error('AI_ACCESS_DENIED');
     if (payload.kind !== (mutation === 'clear' ? 'ai-task-action-policy-clear-1' : 'ai-task-action-policy-save-1')) return absent;
     return { state: 'recorded' as const, policy, retryable: false as const };
   }
@@ -168,12 +183,12 @@ export class PrismaTaskActionPolicyRepository {
     taskId: string, operation: AiTaskActionPolicyOperation, expectedRevision: number | null,
     result: AiTaskActionPolicyMutationResult, mutation: 'configure' | 'clear') {
     const context = access.context;
-    if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user'
-      || typeof tx.operationLog?.create !== 'function') throw error('AI_RESOURCE_UNAVAILABLE');
+    if (typeof tx.operationLog?.create !== 'function') throw error('AI_RESOURCE_UNAVAILABLE');
+    const journal = await this.journal(context, tx);
     const payload = { kind: mutation === 'clear' ? 'ai-task-action-policy-clear-1' : 'ai-task-action-policy-save-1',
       scopeId: access.scopeId, taskId, operation, expectedRevision, result };
     await tx.operationLog.create({ data: { id: receiptId(access.scopeId, taskId, operation, expectedRevision),
-      tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId, userId: context.actor.userId,
+      ...journal,
       action: receiptAction, detail: JSON.parse(JSON.stringify({ payloadHash: requestFingerprint(payload), payload })) as Prisma.InputJsonValue } });
   }
 
@@ -182,8 +197,8 @@ export class PrismaTaskActionPolicyRepository {
     if (expectedRevision !== null && (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1 || expectedRevision > maxRevision)) throw error('AI_INVALID_INPUT');
     const access = await this.access(next.taskId);
     const context = access.context;
-    if (recordOriginalReceipt && (context.scope.kind !== 'workspace' || context.actor.kind !== 'user'
-      || typeof this.db.operationLog?.findUnique !== 'function')) throw error('AI_RESOURCE_UNAVAILABLE');
+    if (recordOriginalReceipt && typeof this.db.operationLog?.findUnique !== 'function') throw error('AI_RESOURCE_UNAVAILABLE');
+    if (recordOriginalReceipt) await this.journal(context);
     let completed = false;
     try {
       const saved = await this.db.$transaction(async (tx: Tx) => {
@@ -231,8 +246,8 @@ export class PrismaTaskActionPolicyRepository {
     if (!(now instanceof Date) || !Number.isFinite(now.getTime())) throw error('AI_INVALID_INPUT');
     if (!operations.includes(operation) || !Number.isSafeInteger(expectedRevision) || expectedRevision < 1 || expectedRevision >= maxRevision) throw error('AI_INVALID_INPUT');
     const access = await this.access(taskId);
-    if (recordOriginalReceipt && (access.context.scope.kind !== 'workspace' || access.context.actor.kind !== 'user'
-      || typeof this.db.operationLog?.findUnique !== 'function')) throw error('AI_RESOURCE_UNAVAILABLE');
+    if (recordOriginalReceipt && typeof this.db.operationLog?.findUnique !== 'function') throw error('AI_RESOURCE_UNAVAILABLE');
+    if (recordOriginalReceipt) await this.journal(access.context);
     let completed = false;
     try {
       const saved = await this.db.$transaction(async (tx: Tx) => {

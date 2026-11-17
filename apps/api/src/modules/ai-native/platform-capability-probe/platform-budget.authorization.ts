@@ -28,8 +28,9 @@ const code = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 export class PlatformBudgetAuthorizationSource implements BudgetAuthorizationSource {
   private readonly bindings;
   constructor(private readonly input: { db: PrismaClient; scopes: Pick<AiScopeRepository, 'resolveCurrent'>; clock?: () => Date },
-    bindings?: PrismaGatewayInvocationBindings) {
-    if (typeof input?.scopes?.resolveCurrent !== 'function' || typeof input.db?.$transaction !== 'function') throw new BudgetError('UNAVAILABLE');
+    bindings?: PrismaGatewayInvocationBindings, private readonly sceneCode: string = TEXT_PROBE_SCENE) {
+    if (typeof input?.scopes?.resolveCurrent !== 'function' || typeof input.db?.$transaction !== 'function'
+      || !code.test(sceneCode)) throw new BudgetError('UNAVAILABLE');
     this.bindings = bindings ?? new PrismaGatewayInvocationBindings(input.db, input.scopes, input.clock);
   }
   async resolveContext() { return (await this.input.scopes.resolveCurrent()).context; }
@@ -64,7 +65,7 @@ export class PlatformBudgetAuthorizationSource implements BudgetAuthorizationSou
       const row = await this.input.db.aiGatewayInvocation.findUnique({ where: { scopeId_callId: {
         scopeId: before.scope.id, callId: association.requestId } } });
       if (!row || row.scopeId !== before.scope.id || row.actorId !== principal.actorId
-        || row.sceneCode !== TEXT_PROBE_SCENE || !isGatewayConfig(row.configuration)) throw new BudgetError('FORBIDDEN');
+        || row.sceneCode !== this.sceneCode || !isGatewayConfig(row.configuration)) throw new BudgetError('FORBIDDEN');
       const dispatching = action === 'reserve' || action === 'dispatch';
       const binding = dispatching ? await this.bindings.resolveForReserve(gatewayContext, {
         callId: row.callId, model: row.configuration.model, maxOutputTokens: row.maxOutputTokens, intentHash: row.intentHash,
@@ -103,14 +104,15 @@ export class PlatformBudgetAuthorizationSource implements BudgetAuthorizationSou
  * original lifecycle keeps its own separate grant above. */
 export class PlatformPolicyEntitlementSource implements BudgetEntitlementSource {
   constructor(private readonly db: Pick<PrismaClient, 'aiBudgetPolicy'> & Pick<PrismaClient, 'aiScope'>,
-    private readonly sceneCode: string = TEXT_PROBE_SCENE, private readonly clock: () => Date = () => new Date()) {}
+    private readonly sceneCode: string = TEXT_PROBE_SCENE, private readonly clock: () => Date = () => new Date(),
+    private readonly featureCode: string = 'ai.native.platform.probe') {}
   async #platformScopeId() {
     const row = await this.db.aiScope.findFirst({ where: { kind: 'PLATFORM' }, select: { id: true } });
     if (!row?.id) throw new BudgetError('UNAVAILABLE');
     return row.id;
   }
   async check(context: Readonly<AiExecutionContext>, featureCode: string) {
-    if (featureCode !== 'ai.native.platform.probe' || context.scope?.kind !== 'platform' || context.actor?.kind !== 'saas_admin') {
+    if (featureCode !== this.featureCode || context.scope?.kind !== 'platform' || context.actor?.kind !== 'saas_admin') {
       throw new BudgetError('FORBIDDEN');
     }
     const row = await this.db.aiBudgetPolicy.findUnique({ where: { scopeId_scopeKind_sceneCode: {

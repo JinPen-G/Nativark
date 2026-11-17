@@ -12,7 +12,8 @@ import { aiClientGoalPreparationRequestSchema, aiClientGoalPreparationReadReques
   aiClientGoalCandidatesRequestSchema, aiClientGoalProjectionSchema, aiClientGoalQuoteRequestSchema,
   type AiClientGoalProjection, type AiClientGoalQuoteRequest } from './ai-client-goal-draft';
 import { aiClientQuotePreparationResponseSchema, aiClientQuotePreparationReadResponseSchema,
-  aiClientQuoteConfirmationRequestSchema, aiClientQuoteResultReadResponseSchema, type AiClientQuoteFacts } from './ai-client-quote-draft';
+  aiClientQuoteConfirmationRequestSchema, aiClientQuoteResultReadResponseSchema, type AiClientQuoteFacts,
+  type AiClientQuoteParameterReview } from './ai-client-quote-draft';
 import type { ClientCreateQuoteRequest } from './client';
 import type { RentalFulfillmentMode } from './core';
 import type { EnterpriseOwnRentalPolicy } from './enterprise-policy';
@@ -82,6 +83,10 @@ export interface ClientGoalView {
   hasLocator: boolean; task: Creation['task']; question: Question; receipt: Receipt;
   projection: AiClientGoalProjection | null; sources: ClientGoalFormSources | null;
   selection: ClientCreateQuoteRequest | null; quote: AiClientQuoteFacts | null;
+  /** Server observation of this exact original quote; display only, not journaled. */
+  quoteObservedAt?: string | null;
+  /** Only the current authorized preparation read, never the local journal. */
+  parameterReview?: AiClientQuoteParameterReview | null;
   canExtract: boolean; canRead: boolean; canSubmit: boolean; canContinue: boolean;
   canPrepareQuote: boolean; canConfirmQuote: boolean; canSelect: boolean; readOnly: boolean;
   canStartNew: boolean;
@@ -213,6 +218,10 @@ export function createClientGoalSession(input: {
   let originalTaskId: string | null = null;
   let question: Question = null, receipt: Receipt = null, projection: AiClientGoalProjection | null = null;
   let sources: ClientGoalFormSources | null = null, quote: AiClientQuoteFacts | null = null, view = blank();
+  let quoteObservedAt: string | null = null;
+  let parameterReview: AiClientQuoteParameterReview | null = null;
+  let expiryTimer: ReturnType<typeof setTimeout> | undefined;
+  const clearExpiry = () => { if (expiryTimer !== undefined) clearTimeout(expiryTimer); expiryTimer = undefined; };
   const current = () => !closed && input.context.current();
   const assertHeld = () => {
     if (!current()) throw Error('client_goal_context_changed');
@@ -231,11 +240,17 @@ export function createClientGoalSession(input: {
     && question.contract.fields[0].kind === 'text' ? question.contract.fields[0] : null;
   const writable = () => Boolean(host?.enabled && host.policy.allowCreate && fresh(host.expiresAt));
   const emit = (status: ClientGoalView['status']) => {
+    clearExpiry();
     if (!current()) return;
+    const deadlines = [host?.expiresAt, question?.expiresAt,
+      saved?.phase === 'quote_prepared' ? saved.quote?.material?.expiresAt : undefined, quote?.expiresAt]
+      .filter((value): value is string => typeof value === 'string').map(Date.parse);
+    const upcoming = deadlines.filter(value => Number.isFinite(value) && value > input.now());
+    if (parameterReview && saved?.quote && !fresh(saved.quote.material?.expiresAt)) parameterReview = null;
     const active = !busy && !invalid, write = writable(), task = creation?.task
       ? { ...creation.task, ...(snapshot ? { revision: snapshot.revision, status: snapshot.status } : {}) } : null;
     view = { status, hasLocator: Boolean(saved), task, question, receipt, projection, sources,
-      selection: saved?.quote ? copy(saved.quote.request.input) : null, quote,
+      selection: saved?.quote ? copy(saved.quote.request.input) : null, quote, quoteObservedAt: quote ? quoteObservedAt : null, parameterReview,
       canExtract: active && write && status === 'ready' && (!saved || saved.phase === 'goal_ready' && fresh(saved.material?.expiresAt)
         || saved.phase === 'task_ready' && task?.status === 'queued'),
       canRead: active && Boolean(saved && host?.policy.allowRead),
@@ -246,12 +261,19 @@ export function createClientGoalSession(input: {
       canPrepareQuote: active && write && Boolean(host?.capabilities.bookingDrafts && status === 'candidates'
         && projection?.state === 'requires_input' && sources && saved?.phase === 'candidates' && !saved.quote && fresh(saved.material?.expiresAt)),
       canConfirmQuote: active && write && Boolean(host?.capabilities.bookingDrafts && status === 'prepared'
-        && saved?.phase === 'quote_prepared' && fresh(saved.quote?.material?.expiresAt)),
+        && saved?.phase === 'quote_prepared' && parameterReview && fresh(saved.quote?.material?.expiresAt)),
       canSelect: active && write && Boolean(status === 'quoted' && saved?.phase === 'quoted' && quote && fresh(quote.expiresAt)),
       canStartNew: active && write && typeof input.storage.archive === 'function'
         && Boolean(saved?.task && ['candidates','quoted'].includes(saved.phase)),
       readOnly: !write };
     input.changed(copy(view));
+    if (upcoming.length) expiryTimer = setTimeout(() => {
+      expiryTimer = undefined;
+      // One local withdrawal, never a request, policy renewal or journal write.
+      // Explicit read must re-establish every server grant after this deadline.
+      host = null; parameterReview = null; projection = null; sources = null;
+      emit(view.status);
+    }, Math.min(Math.max(1, Math.min(...upcoming) - input.now()), 300000));
   };
   const recheck = async (purpose: 'read' | 'create' | 'control' | 'quote') => {
     assertHeld(); const next = aiClientHostCapabilitiesSchema.parse(await input.api.readHost(abort.signal)); assertHeld();
@@ -341,10 +363,12 @@ export function createClientGoalSession(input: {
     if (result.source.materialRef !== reference.materialRef || result.source.materialHash !== reference.expectedMaterialHash
       || quote && result.quote && quote.quoteId !== result.quote.quoteId) throw Error('client_goal_quote_changed');
     quote = result.quote;
+    quoteObservedAt = result.state === 'observed' ? result.observedAt ?? null : null;
     if (result.state === 'observed') persist({ ...saved!, phase: 'quoted' });
     return result.state === 'observed' ? 'quoted' as const : 'unknown' as const;
   };
   const readQuote = async (): Promise<ClientGoalView['status']> => {
+    parameterReview = null;
     if (!saved?.quote) return 'unknown';
     const result = aiClientQuotePreparationReadResponseSchema.parse(await input.api.readGoalQuotePreparation(copy(saved.quote.request), abort.signal)); assertHeld();
     if (result.state === 'unknown') {
@@ -352,6 +376,18 @@ export function createClientGoalSession(input: {
       return 'unknown';
     }
     acceptQuoteMaterial(materialLocator({ materialRef: result.materialRef, materialHash: result.materialHash, inputHash: result.inputHash, expiresAt: result.expiresAt }));
+    if (result.parameterReview) {
+      const selected = saved.quote.request.input;
+      if (result.parameterReview.lines.length !== selected.lines.length
+        || result.parameterReview.lines.some((line, index) => {
+          const original = selected.lines[index];
+          return line.quantity !== original.quantity || original.itemGroupId && original.itemGroupId !== line.itemGroupId
+            || line.pricingGroupId !== original.pricingGroupId
+            || (original.pricingUnit !== undefined ? line.source !== 'user_explicit' || line.pricingUnit !== original.pricingUnit
+              : line.source !== 'server_default');
+        })) throw Error('client_goal_quote_parameters_changed');
+      parameterReview = copy(result.parameterReview);
+    }
     if (saved.phase === 'confirmation_pending' || saved.phase === 'quoted') return observeQuote(await input.api.readQuoteOriginal(quoteReference(), abort.signal));
     return 'prepared';
   };
@@ -408,7 +444,7 @@ export function createClientGoalSession(input: {
     if (busy || !opened || !current() || invalid) return;
     busy = true; emit('working'); let status: ClientGoalView['status'] = 'unavailable';
     try { await recheck(purpose); status = await action(); await recheck('read'); }
-    catch { creation = null; snapshot = null; question = null; receipt = null; projection = null; sources = null; quote = null;
+    catch { creation = null; snapshot = null; question = null; receipt = null; projection = null; sources = null; quote = null; quoteObservedAt = null; parameterReview = null;
       status = saved && unresolved(saved.phase) ? 'unknown' : 'unavailable'; }
     finally { busy = false; emit(status); }
   };
@@ -514,9 +550,14 @@ export function createClientGoalSession(input: {
     },
     async confirmQuote() {
       if (!view.canConfirmQuote || saved?.phase !== 'quote_prepared') return;
+      const reviewed = parameterReview ? copy(parameterReview) : null;
       return operate('quote', async () => {
         if (await readQuote() !== 'prepared' || !fresh(saved!.quote?.material?.expiresAt)) return 'unknown';
-        await recheck('quote'); persist({ ...saved!, phase: 'confirmation_pending' });
+        if (!reviewed || !parameterReview || !same(reviewed, parameterReview)) throw Error('client_goal_quote_parameters_changed');
+        await recheck('quote');
+        if (!parameterReview || !same(reviewed, parameterReview) || !fresh(saved!.quote?.material?.expiresAt))
+          throw Error('client_goal_quote_parameters_changed');
+        persist({ ...saved!, phase: 'confirmation_pending' });
         return observeQuote(await input.api.confirmQuoteParameters(quoteReference(), abort.signal));
       });
     },
@@ -596,12 +637,12 @@ export function createClientGoalSession(input: {
         input.storage.write(null);
         if ((input.storage.read() ?? null) !== null) { invalid = true; throw Error('client_goal_reference_not_retained'); }
         held = null; saved = null; creation = null; snapshot = null; originalTaskId = null;
-        question = null; receipt = null; projection = null; sources = null; quote = null;
+        question = null; receipt = null; projection = null; sources = null; quote = null; quoteObservedAt = null; parameterReview = null;
         return 'ready';
       });
     },
-    dispose() { closed = true; abort.cancel(); creation = null; snapshot = null; originalTaskId = null; question = null; receipt = null;
-      projection = null; sources = null; quote = null; host = null; view = blank(); },
+    dispose() { closed = true; clearExpiry(); abort.cancel(); creation = null; snapshot = null; originalTaskId = null; question = null; receipt = null;
+      projection = null; sources = null; quote = null; quoteObservedAt = null; parameterReview = null; host = null; view = blank(); },
   };
   return Object.freeze(session);
 }

@@ -80,7 +80,7 @@ function publicConfig(defaults) {
   return { apiOrigin, appId, allowLocalApi, builtAt: new Date().toISOString() };
 }
 
-function main() {
+async function main() {
   if (checkOnly) {
     runTsc(["-p", "tsconfig.json", "--noEmit"]);
     process.stdout.write("[staff-miniprogram build] 类型检查通过\n");
@@ -96,6 +96,10 @@ function main() {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.copyFileSync(file, target);
   }
+  const actionRuntime = await require('../../../scripts/miniprogram-ai-runtime.cjs').buildEntryActionRuntime(root);
+  const actionRuntimeFile = path.join(dist, 'components', 'ai-native', 'entry-action-runtime.js');
+  fs.mkdirSync(path.dirname(actionRuntimeFile), { recursive: true });
+  fs.writeFileSync(actionRuntimeFile, actionRuntime.code);
 
   const configFile = path.join(dist, "config", "public.js");
   if (!fs.existsSync(configFile)) fail("缺少编译产物 config/public.js");
@@ -139,14 +143,16 @@ function main() {
   process.stdout.write(`[staff-miniprogram build] 完成：${mode}，${appJson.pages.length} 个页面 → ${path.relative(root, dist)}/（API：${config.apiOrigin}${config.appId ? `，AppID：${config.appId}` : ""}）\n`);
 }
 
-try { main(); buildCompleted = true; }
-catch (error) { process.stderr.write(`[staff-miniprogram build] ${error.message}\n`); process.exitCode = 1; }
-finally {
-  try { releaseMiniprogramSharedTypes(privateTypeConfig); }
-  catch (error) { process.stderr.write(`[staff-miniprogram cleanup] ${error.message}\n`); process.exitCode = 1; }
-  if (outputPrepared && !buildCompleted) {
-    try {
-      clearMiniprogramBuildOutput(root, process.argv.slice(2));
-    } catch (error) { process.stderr.write(`[staff-miniprogram cleanup] ${error.message}\n`); process.exitCode = 1; }
+(async () => {
+  try { await main(); buildCompleted = true; }
+  catch (error) { process.stderr.write(`[staff-miniprogram build] ${error.message}\n`); process.exitCode = 1; }
+  finally {
+    try { releaseMiniprogramSharedTypes(privateTypeConfig); }
+    catch (error) { process.stderr.write(`[staff-miniprogram cleanup] ${error.message}\n`); process.exitCode = 1; }
+    if (outputPrepared && !buildCompleted) {
+      try {
+        clearMiniprogramBuildOutput(root, process.argv.slice(2));
+      } catch (error) { process.stderr.write(`[staff-miniprogram cleanup] ${error.message}\n`); process.exitCode = 1; }
+    }
   }
-}
+})();

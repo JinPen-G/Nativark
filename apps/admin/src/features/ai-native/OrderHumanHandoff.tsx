@@ -14,6 +14,7 @@ import { createOrderHumanHandoffSession } from './order-human-handoff-session';
 import { formatTimestamp } from './formatters';
 import { safeDisplayText } from './safe-display';
 import { orderStatusLabels } from '@/features/rental-core/rentalOrderColumns';
+import { RegisteredOrderActions } from './RegisteredOrderActions';
 import styles from './AiManagement.module.css';
 export function OrderHumanHandoff({ query, identity, current, verify, validate, onAccessDenied, onUnavailable, onObserved }: {
   query: AiTaskOrderHandoffQuery; identity: string; current(): boolean;
@@ -54,6 +55,7 @@ export function OrderHumanHandoff({ query, identity, current, verify, validate, 
     {!!data.error && <Alert type="warning" title={t('当前订单提示不可用，旧事实已撤回。')} />}
     {data.evidenceError && <Alert type="warning" title={t('订单事实与来源未能核验，旧事实已撤回；可继续原订单人工流程。')} />}
     {frame && <section className={styles.section}>
+      <RegisteredOrderActions query={{ taskId: frame.taskId, runId: frame.runId }} identity={identity} current={current} />
       <p>{t('以下来自当前订单读取，与原模型回答分别核对。')}</p>
       <p>{frame.order.orderNo} · {t(orderStatusLabels[frame.order.status] ?? frame.order.status)}</p>
       <p>{t('查询时点')}：{formatTimestamp(frame.order.observedAt).value} · {t('订单版本')}：{frame.order.version}</p>

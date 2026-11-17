@@ -27,10 +27,11 @@ import { ModelGatewayError, modelAdapterSupportsCapabilities, type ModelAdapter,
 import type { PublicGatewayRuntime } from '../public-ai-gateway.service';
 import type { AutomationExplanationAuthority } from './automation-model-explanation.composition';
 import { createOriginalAutomationDispatchReader } from './original-automation-dispatch.reader';
+import type { GatewayCapacityPort } from '../gateway-capacity.ports';
 
 export function composeAutomationModelGateway(d: { db: PrismaClient; authorization: CurrentPersistentTaskAuthorization;
   taskId: string; subscriptions: Pick<SubscriptionService, 'readCategoryCommercialContext'>; secrets: SecretBox;
-  pricing: GatewayPricingSelection; adapters: readonly ModelAdapter[]; clock?: () => Date;
+  pricing: GatewayPricingSelection; adapters: readonly ModelAdapter[]; clock?: () => Date; capacity?: GatewayCapacityPort;
   /** An explicit publication can pin the already registered platform profile. */
   platformProfileId?: string;
   /** Current-human original access; never reused to admit a new model call. */
@@ -66,7 +67,8 @@ export function composeAutomationModelGateway(d: { db: PrismaClient; authorizati
   const admission = new PrismaAdmissionRepository(d.db), audit = new PrismaTaskGatewayAudit(d.db, scopes, accounting.facts, d.taskId, clock);
   const runtime: PublicGatewayRuntime = { evidence: 'live',
     ports: { routing, admission: new InvocationAdmissionService(admission, clock), dispatch: new InvocationDispatchService(admission),
-      budget: accounting.budget, audit, observation: audit, transport: new RoutedModelTransport({ platform, tenant }, adapters) },
+      budget: accounting.budget, audit, observation: audit, transport: new RoutedModelTransport({ platform, tenant }, adapters),
+      ...(d.capacity ? { capacity: d.capacity } : {}) },
     verifyEvidence: async (resolution, mode) => {
       if (mode !== 'live' || resolution.scene !== 'chat') return false;
       if (d.platformProfileId !== undefined && resolution.selection.mode === 'platform_managed'

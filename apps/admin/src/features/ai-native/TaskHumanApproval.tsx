@@ -14,6 +14,7 @@ import { ActionButton, Alert, ConfirmAction, Select } from "@/components/ui";
 import { safeDisplayText } from "./safe-display";
 import { VisibleObservationBoundary } from './VisibleObservationBoundary';
 import { formatAmount, formatTimestamp } from "./formatters";
+import { OriginalOrderReceiptLink } from './OriginalOrderReceiptLink';
 
 const amountLabels = { rentalAmount: "租金", discountAmount: "折扣", couponAmount: "优惠券", serviceAmount: "服务费",
   fulfillmentAmount: "履约费", depositAmount: "押金", preAuthAmount: "预授权", payableAmount: "应付", receivableAmount: "应收" } as const;
@@ -134,8 +135,9 @@ export function TaskProposalExecutionBoundary({ value }: { value: AiTaskHumanRev
   </section>;
 }
 /** Per-step receipt observations survive choosing a successor, not scope refresh. */
-export function TaskActionResults({ steps, observations }: { steps: readonly TaskHumanStep[];
-  observations: Readonly<Record<string, AiTaskBusinessObservationDraft>> }) {
+export function TaskActionResults({ steps, observations, identity, current, onAccessDenied }: { steps: readonly TaskHumanStep[];
+  observations: Readonly<Record<string, AiTaskBusinessObservationDraft>>;
+  identity?: string; current?: () => boolean; onAccessDenied?: () => void }) {
   const { t } = useLocale();
   if (!steps.length) return null;
   return <section aria-label={t('已登记动作与原结果')} style={{ overflowWrap: 'anywhere' }}>
@@ -154,6 +156,15 @@ export function TaskActionResults({ steps, observations }: { steps: readonly Tas
             ? <>{t('原Core订单已确认提交')}: {safeDisplayText(observed.order.id, 191)}</>
             : <>{t('原设置修改已确认提交')}: {t('结果修订')} {observed.receipt.resultRevision}</>
             : t(observed.status === 'unknown' ? '原业务结果待核对，不能自动重试。' : '尚未观察到原业务收据，不证明未提交。')}</p>
+          {identity && current && observed.kind === 'order' && observed.status === 'committed' && <>
+            <p className="muted">{t('订单收据不代表付款或履约已完成。')}</p>
+            <OriginalOrderReceiptLink key={`${identity}:${observed.observedAt}`} orderId={observed.order.id} identity={identity}
+              current={current} onAccessDenied={onAccessDenied} readOriginal={async signal => {
+                const query = taskHumanStepQuery(step.taskId, step), original = await aiTaskCenterApi.business(query, signal);
+                return originalBusinessObservation(original, query) && original.kind === 'order' && original.status === 'committed'
+                  ? original.order.id : null;
+              }} />
+          </>}
         </> : <p>{t('尚未读取该动作的原业务收据，不推断未执行或已回滚。')}</p>}
       </li>;
     })}</ol>
@@ -426,7 +437,8 @@ export function TaskHumanApproval({ taskId, identity, current, onAccessDenied, r
           if (result.status === "committed") { sessionStorage.removeItem(continueKey); setContinuation(null); }
         })} />
     </div>
-    <TaskActionResults steps={steps} observations={stepObservations} />
+    <TaskActionResults steps={steps} observations={stepObservations} identity={identity}
+      current={() => active.current.current() && requestedOwner.current === requestedKey} onAccessDenied={onAccessDenied} />
     {message && <Alert type="warning" title={message} />}
     {original === "invalid" && <Alert type="warning" title={t("原决定引用不可读取。请通过原业务页核对，不再提交新决定。")}/>}
     {continuation && <Alert type="warning" title={t(continuation === "invalid" ? "原继续引用不可读取，请通过原业务页核对。"

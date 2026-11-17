@@ -29,9 +29,10 @@ export interface TaskCenterRecoveryTargetDependencies {
   db: Db;
   tasks: Pick<AiTaskRepository, 'resolveAccess'>;
   original: { readRecoverySnapshot(request: Request, value: unknown): Promise<unknown> };
+  selectedOrder?: { readRecoverySnapshot(request: Request, value: unknown, signal?: AbortSignal): Promise<unknown> };
   clock?: () => Date;
 }
-export type TaskCenterRecoveryHost = 'order_read' | 'opening_model' | 'quote_model' | 'opening_read';
+export type TaskCenterRecoveryHost = 'order_read' | 'opening_model' | 'quote_model' | 'opening_read' | 'selected_quote_order';
 type UnavailableReason = 'original_request_unavailable' | 'plan_unavailable' | 'host_unavailable'
   | 'specialized_host_required' | 'host_run_mismatch';
 type Base = { taskId: string; runId: string; observedAt: string; execution: 'read_only_no_lease_or_dispatch' };
@@ -141,11 +142,43 @@ export async function readTaskCenterRecoveryTarget(d: TaskCenterRecoveryTargetDe
       if (!originalRow || originalRow.status !== 'STORED' || originalRow.erasedAt) return unavailableEvidence('original_request_unavailable');
       const original = await readOriginalTaskModelProvenance(tx, task);
       const control = await tx.operationLog.findFirst({ where: { id: run.id, userId: access.actorId, action: WORKBENCH_MODEL_CONTROL_ACTION }, select: { id: true } });
-      const selection = await tx.aiTaskQuoteSelection.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, runId: key.runId }, select: { id: true } });
-      if (control || selection) return unavailableEvidence('specialized_host_required', { original, control, selection });
+      const selections = await tx.aiTaskQuoteSelection.findMany({ where: { scopeId: key.scopeId, taskId: key.taskId,
+        runId: key.runId, originalRequestId: task.inputRef, ownerKind: access.actorKind, ownerId: access.actorId,
+        audience: access.audience }, take: 2 });
+      if (control) return unavailableEvidence('specialized_host_required', { original, control, selections });
       const saved = await tx.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } });
       const plan = readPlan(saved, key);
       if (!plan) return unavailableEvidence('plan_unavailable', original);
+      if (selections.length) {
+        if (selections.length !== 1 || !d.selectedOrder) return unavailableEvidence('specialized_host_required', { original, selections });
+        const selection = selections[0], registrationRef = `quote-selection:${selection.id}`;
+        if (task.sceneCode !== 'quote_clarification' || selection.scopeId !== key.scopeId || selection.taskId !== key.taskId
+          || selection.runId !== key.runId || selection.originalRequestId !== task.inputRef
+          || selection.ownerKind !== access.actorKind || selection.ownerId !== access.actorId || selection.audience !== access.audience
+          || plan.steps.length !== 1 || requestFingerprint(plan.steps) !== requestFingerprint([
+            stepDefinition(registrationRef, 'rental.order.commit', 'idempotent')]) || plan.taskRevision > task.revision) throw unavailable();
+        const inputs = await tx.aiTaskActionInput.findMany({ where: key, take: 2 });
+        const steps = await tx.aiStep.findMany({ where: key, select: stepSelect, orderBy: { sequence: 'asc' }, take: 2 });
+        if (inputs.length !== 1 || steps.length !== 1) throw unavailable();
+        const input = inputs[0], step = steps[0];
+        if (input.scopeId !== key.scopeId || input.taskId !== key.taskId || input.runId !== key.runId
+          || input.registrationRef !== registrationRef || input.toolCode !== 'rental.order.commit'
+          || input.toolVersion !== AI_TOOL_DRAFT_VERSION || input.fingerprint !== selection.inputHash
+          || requestFingerprint(input.payload) !== selection.inputHash
+          || requestFingerprint(selection.payload) !== selection.inputHash
+          || step.scopeId !== key.scopeId || step.taskId !== key.taskId || step.runId !== key.runId
+          || step.sequence !== 1 || step.inputRef !== input.id || step.toolCode !== input.toolCode
+          || step.toolVersion !== input.toolVersion || step.requestFingerprint !== input.fingerprint
+          || step.actionId !== aiStepActionId(access.scope, task.id, registrationRef)) throw unavailable();
+        return { reason: null, host: 'selected_quote_order' as const, original, originRunId: key.runId,
+          planHash: saved!.planHash, policyVersion: saved!.policyVersion, steps, taskState, runState: runEvidence(run),
+          stamp: requestFingerprint({ taskState, taskBinding: { scopeId: task.scopeId, inputRef: task.inputRef,
+            inputHash: task.inputHash, inputRevision: task.inputRevision }, original, scope: access.scope,
+            run: runEvidence(run), plan, authorityHash: saved!.authorityHash, policyVersion: saved!.policyVersion,
+            selection: { id: selection.id, inputHash: selection.inputHash, selectionFingerprint: selection.selectionFingerprint,
+              supersededAt: selection.supersededAt?.toISOString() ?? null }, input: { id: input.id,
+                payloadHash: requestFingerprint(input.payload), fingerprint: input.fingerprint, policyRevision: input.policyRevision }, steps }) };
+      }
       const roots = await tx.aiRun.findMany({ where: { scopeId: key.scopeId, taskId: key.taskId, sequence: 1,
         actorKind: access.actorKind, actorId: access.actorId }, take: 2, select: runSelect });
       const root = roots[0];
@@ -252,7 +285,9 @@ export async function readTaskCenterRecoveryTarget(d: TaskCenterRecoveryTargetDe
   let observed: AiSceneModelRecoverySnapshotReadResponse | null = null;
   if (before.host && original) {
     observed = validateAiModelRecoveryResponse('AiSceneModelRecoverySnapshotReadResponse',
-      await read(() => d.original.readRecoverySnapshot(request, { original, runId: query.runId }))) as AiSceneModelRecoverySnapshotReadResponse;
+      await read(() => before.host === 'selected_quote_order'
+        ? d.selectedOrder!.readRecoverySnapshot(request, query, signal)
+        : d.original.readRecoverySnapshot(request, { original, runId: query.runId }))) as AiSceneModelRecoverySnapshotReadResponse;
     const snapshot = observed.snapshot;
     if (requestFingerprint(observed.original) !== requestFingerprint(original)
       || requestFingerprint(snapshot.task) !== requestFingerprint(before.taskState)

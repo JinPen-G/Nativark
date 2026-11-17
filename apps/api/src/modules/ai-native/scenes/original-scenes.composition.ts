@@ -14,6 +14,9 @@ import { freezeOriginalInput, originalRequestReferenceSchema, parseOriginalReque
 import { AiConversationRepository } from '../conversation.repository';
 import { AiConversationContextReader } from '../conversation-context.reader';
 import { PrismaQuoteSelectionRepository, type HumanQuoteSelectionDependencies } from '../task-request/prisma-quote-selection.repository';
+import { AiQuoteGoalProjectionService, type AiQuoteGoalModelReadPort } from './quote-goal-projection';
+import { AiGuardedQuoteCoreContextSource } from '../tools/quote-route.composition';
+import type { TaskModelPolicy } from '../model-input/task-model-input';
 
 type BusinessDependencies = Parameters<typeof composeAiAuthorizedBusinessTools>[0];
 export type AiOriginalSceneDependencies = PersistedTaskAuthorizationDependencies & BusinessDependencies & {
@@ -84,6 +87,11 @@ export function composeAiOriginalScenes(input: AiOriginalSceneDependencies) {
   };
   // Composition-only current preflight; not an HTTP grant or request producer.
   return Object.freeze({ requests, tools, creationAuthority: authority, createHistoryReader,
+    createQuoteGoalProjectionReader(tasks: Pick<AiTaskRepository, 'resolveAccess'>, results: AiQuoteGoalModelReadPort, modelPolicy: TaskModelPolicy) {
+      return new AiQuoteGoalProjectionService({ db: input.db, tasks, requests, results, modelPolicy,
+        authority: routes, catalog: tools.catalog, members: tools.membershipCandidates,
+        contexts: new AiGuardedQuoteCoreContextSource(input.core, routes), clock });
+    },
     create: (value: unknown) => create(value), reissue: (value: unknown) => create(value, true),
     queryOrders: tools.orders.read.bind(tools.orders),
     read: requests.read.bind(requests), reconcile: requests.reconcile.bind(requests), createTask: requests.createTask.bind(requests),

@@ -17,10 +17,13 @@ import type { HumanQuoteSelectionDependencies } from '../task-request/prisma-quo
 import { AiBusinessReadRouteAuthority } from '../business-read-route.authority';
 import { assertAiReadContextBinding } from '../tools/read-context-binding';
 import type { RentalCoreService } from '../../rental-core/rental-core.service';
+import { AiApprovedOrderRouteAuthority } from '../approval-execution/approved-order-route.authority';
+import { approvedOrderSelectionInput, readApprovedOrderMerchantDelegation } from '../approval-execution/approved-order-merchant-delegation';
 
 export function composeClarifiedQuoteSelectionPreparation(
   model: Parameters<typeof composeClarifiedQuoteSelectionRequests>[0],
-  dependencies: Pick<HumanQuoteSelectionDependencies, 'quoteFacts' | 'guard' | 'credentials' | 'clock'>
+  dependencies: Pick<HumanQuoteSelectionDependencies, 'quoteFacts' | 'guard' | 'credentials' | 'clock' | 'merchantDelegations'>
+    & Partial<Pick<HumanQuoteSelectionDependencies, 'confirmation'>>
     & { core: Partial<Pick<RentalCoreService, 'readAvailability'>> }) {
   if (typeof model?.readClarifiedQuoteReceipt !== 'function' || typeof dependencies.quoteFacts?.findQuote !== 'function'
     || typeof dependencies.core?.readAvailability !== 'function')
@@ -68,14 +71,14 @@ export function composeClarifiedQuoteSelectionPreparation(
           throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       };
       assertUsableQuote(quote);
-      // A ready quote is not a current independent corporate payer grant. Keep
-      // the existing self-paid boundary; never infer a company from intent.
-      if (body.customerType !== 'personal' || !body.customerId || body.deliveryAddressDraft
-        || body.bookingIdentity?.enterpriseContractAndPayer === true) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      if (body.customerType !== 'personal' || !body.customerId || body.deliveryAddressDraft && !command.merchantDelegation
+        || body.bookingIdentity?.enterpriseContractAndPayer === true && !command.merchantDelegation) {
+        throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      }
       const customerName = quote.membershipSnapshot?.personalCustomerName;
       if (!customerName || quote.membershipSnapshot?.personalCustomerId !== body.customerId)
         throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-      const selection = parseQuoteSelection({ draftVersion: AI_QUOTE_SELECTION_DRAFT_VERSION,
+      const baseSelection = parseQuoteSelection({ draftVersion: AI_QUOTE_SELECTION_DRAFT_VERSION,
         originalInputRef: original.original.inputRef, taskId: original.receipt.taskId, runId: original.receipt.runId,
         selectionKey: command.selectionKey, expectedSelectionRevision: command.expectedSelectionRevision,
         order: { quoteId: quote.id, customerType: body.customerType, customerId: body.customerId, customerName,
@@ -84,7 +87,25 @@ export function composeClarifiedQuoteSelectionPreparation(
           startAt: body.startAt, endAt: body.endAt, lines: body.lines.map(line => ({ itemGroupId: line.itemGroupId, quantity: line.quantity,
             ...(line.pricingGroupId ? { pricingGroupId: line.pricingGroupId } : {}), ...(line.note ? { note: line.note } : {}) })) }
       });
-      const material = approvedOrderReviewMaterial(selection.order, quote);
+      const readDelegated = async () => {
+        if (!command.merchantDelegation) return null;
+        const source = dependencies.merchantDelegations, confirmation = dependencies.confirmation;
+        if (!source || typeof source.readMerchantDelegatedSubmission !== 'function'
+          || typeof confirmation?.normalizeOrderInput !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        return new AiApprovedOrderRouteAuthority(dependencies.guard, dependencies.credentials, dependencies.clock)
+          .withOrderReview(first.context, baseSelection.order, async (_context, actorAuth) => {
+            const original = await source.readMerchantDelegatedSubmission(actorAuth, command.merchantDelegation!);
+            const request = JSON.parse(JSON.stringify(confirmation.normalizeOrderInput(structuredClone(original.request))));
+            const snapshot = await readApprovedOrderMerchantDelegation(source, actorAuth, command.merchantDelegation!,
+              request, requestFingerprint(quote), 'prepare');
+            if (original.quoteId !== quote.id || request.quoteId !== quote.id) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+            return { request, snapshot };
+          });
+      };
+      const delegated = await readDelegated();
+      const selection = delegated ? parseQuoteSelection({ ...baseSelection, order: approvedOrderSelectionInput(delegated.request),
+        merchantDelegation: delegated.snapshot.reference }) : baseSelection;
+      const material = approvedOrderReviewMaterial(delegated?.request ?? selection.order, quote);
       // The immutable quote explains its original price; it cannot attest today's
       // stock. Query the SAME period/location/quantities under the original read
       // Guard before offering a selectable command. No reservation or substitute.
@@ -131,6 +152,7 @@ export function composeClarifiedQuoteSelectionPreparation(
       assertAiReadContextBinding(afterStock.context, first.context);
       if (requestFingerprint(afterStock.quote) !== requestFingerprint(quote)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
       assertUsableQuote(afterStock.quote);
+      if (requestFingerprint(await readDelegated()) !== requestFingerprint(delegated)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
       return freezeOriginalInput({ selection, clarification: command.clarification, material,
         quote: { id: quote.id, originalOperation: 'read_only' as const },
         selectionState: 'not_saved' as const, quotation: 'original_unchanged' as const,

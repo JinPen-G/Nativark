@@ -11,6 +11,37 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-main-notification-sync-20261117"></a>
+
+## 固定主线通知草稿、委托与后台兼容接续（2026-11-17）
+
+固定父版85780491bb9e5df0ce2b0ad3550345e71dabe63f已普通推送并实际远端回读，保全原实现和完整接续。本片在独占任务树归并固定main3e0b2c72865fa0a21053f26608bda878861c9f90，九处冲突逐项保留上游功能及已迁出单源；主树和副手树未写入。开工远端再前进到1d53ada2bb79a220e4d99f75f27508bfac5360a5，只新增AI Native三册的两项固定文档提交，待本片源代码合并收口后顺序归并，不把远端文档变化当作本片源码验证版本。
+
+[报价/营销聚合](../../../packages/rental-core/src/mysql-business-runtime.ts)、[报价事实](../../../packages/rental-core/src/mysql-business-facts.ts)和[恢复快照](../../../packages/rental-core/src/mysql-state.ts)接住上游通知草稿准备/保存/原结果、报价提交前回调及恢复正文剥离。原业务API保持14项构造依赖，适配层供给原[正文保留读取器](../../../apps/api/src/modules/ai-native/privacy/retention-notification-draft.ts)，Core不反向导入API源码。清理策略、删除账及原校验仍由维护服务裁定，缺读取器明确不可用。
+
+[草稿合同](../../../packages/rental-core/src/notification-draft.ts)、[核验缓存](../../../packages/rental-core/src/notification-log-cache.ts)和[恢复投影](../../../packages/rental-core/src/notification-snapshot.ts)由三个正式子出口提供，原路径窄转接同一对象。原结果按当前范围/权限读取原行及删除账；缓存仅包含核验过的不可变无正文metadata，WeakSet标记不随反序列化传播。保存恢复副本再次剥离草稿正文，普通发送记录保持原值。原结果读取不发送、不写入、不换键重做。
+
+[订单确认](../../../packages/rental-core/src/mysql-order-confirmation.ts)、[原委托来源](../../../packages/rental-core/src/enterprise-order-delegation-source.ts)及[同源委托合同](../../../packages/rental-core/src/enterprise-order-delegation.ts)接住个人付款委托、提交资格复验与委托匹配。原新业务裁定/事务和个人付款、企业付款的不同条件保持。公共[权限匹配](../../../packages/platform-server/src/permission-match.ts)迁为单源，原API再导出；[AppModule](../../../apps/api/src/app.module.ts)同时保留原外观provider和新增AI Native接线。
+
+公共后台补齐原panelRightOpen/panelRightClose实际图标及AnimatedIcon登记，旧路径再导出同一组件，两份源码SHA-256分别为0c49f2e1bedf44f7220f1ce4deb35667bcb711e18b677c5e922130e5511d0d08、cb36d9c4f9a22250ab73c43c27e9b62750a6ff4ba4cae8a95a4d97875a28e4b9，与固定main及既有来源记录一致。
+
+后台完整类型进一步暴露旧`/source/*`目标缺少扩展名的真实出口问题。标准TypeScript解析确实不能找到theme等原组件，之前带源码映射的验证不足以证明这一边界。现将193个实际兼容路径在[包配置](../../../packages/platform-admin/package.json)中精确映射文件及扩展名；14个公共正式出口保持，原页面不改导入名。统一能力索引跳过这些重复兼容路径，继续从正式UI/Core等入口发现功能。
+
+| 必要核对 | 实际结果与边界 |
+| --- | --- |
+| 主线业务正文 | 19个受影响方法与固定main的可执行正文一致，仅映射包内类型和真实参加者；没有重写草稿、委托、锁/事务或原收据算法 |
+| 后端与原企业冒烟 | `node --no-compilation-cache - api tests/enterprise-workflows.test.cjs` 的十配置0诊断，原101/101、0fail/skip/todo/cancelled；原238模型由Prisma5.22官方WASM/generator内存生成，TS5.9.3，原API1030根/2515源/2060输出 |
+| 单次定向行为 | `node --no-compilation-cache - api-main-sync-behavior` 经stdin复用实际编译的API薄适配、Rental、SecretBox、ALS和原维护读取器，退出0、1/1；保留/删除原结果、无正文缓存、品牌不可复制、坏删除账/跨范围/缺权限/缺行拒绝、两类unconfigured委托差异通过，原读取writes=0。SQL/身份/存储为明确fixture，无HTTP |
+| 正式前端类型 | 修正依赖顺序及真实出口后，`node --no-compilation-cache - api-frontend` 的七配置退出0；公共后台237根/2499源、原后台661根/4259源均0诊断，声明/JS留内存，未使用源码出口替身 |
+| 前置失败保留 | 前三次前端准备漏前置合同或platform-server声明；补完整顺序后原后台3679诊断，定位为兼容出口缺扩展名。修实际包配置后一次定向复验通过，未放宽类型或原业务断言 |
+| 资料与收尾 | 六份阶段/模块文档1468本地链接、129锚点引用，0问题；现有文档检查器及固定Git定位稀疏目标，未改检查器。差异空白检查退出0，修掉本片一行空白。原PCH需求/任务与lock无差异，output/.tmp为空，验证进程已退出 |
+
+原需求/任务v1.5、编号、顺序、依赖及原分档保持；本片未跨下一档。源码头及[Rental导读](../../../packages/rental-core/README.md)、[原业务导读](../../../apps/api/src/modules/rental-core/README.md)、[公共服务](../../../packages/platform-server/README.md)与[公共后台](../../../packages/platform-admin/README.md)同步说明真实接点。未新增永久测试脚本、依赖环境、共享生成物或业务服务；前后端验证进程均已退出。真实数据库/HTTP/浏览器、干净安装、升级恢复、完整无Core运行、多Core及独立审查仍未验，旧外观及历史附件问题继续保留。
+
+负责人指定的dev1已实际在独立树进行公共订阅及基础集成；最近一次紧凑快照确认公共合同、服务、后台与独立API类型通过，原API参加者接线继续验证。此片不整取其活动WIP，固定交付由本对话读取后按差异整合。
+
+两处旧残留的原生PowerShell删除再次在启动前被自动审批以blocked by policy拒绝，命令内预检查未执行；责任清单最近尝试时间更新为2026-11-17T13:53:33.619Z。未换壳/工具绕过，两处仍为已归集、删除受阻，不能称释放空间。本片没有新建依赖环境或临时文件。
+
 <a id="core-rental-enterprise-workflow-runtime-20261117"></a>
 
 ## Rental 企业申请、管理请求与原任务投影（2026-11-17）

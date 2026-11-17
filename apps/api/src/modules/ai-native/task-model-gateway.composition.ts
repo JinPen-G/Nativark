@@ -42,6 +42,7 @@ import { createNativeModelEgressTransport } from './model-egress.transport';
 import { capabilityProfileFingerprint } from './capability-verification';
 import type { GatewayConnectionResolver } from './routed-model-transport';
 import type { NativeToolResultResolver } from './model-input/native-tool-result.ports';
+import type { GatewayCapacityPort } from './gateway-capacity.ports';
 
 export type PersistedTaskCallGatewayDependencies = PersistedTaskAuthorizationDependencies & {
   guard: Pick<ApiAuthGuard, 'canActivate'>;
@@ -61,6 +62,8 @@ export type PersistedTaskCallGatewayDependencies = PersistedTaskAuthorizationDep
   nativeProtocol?: NativeModelProtocol | readonly NativeModelProtocol[];
   /** Optional explicit audit sink. Otherwise use the existing durable OperationLog. */
   audit?: UnifiedGatewayAudit;
+  /** Shared process network gate, never an execution or financial grant. */
+  capacity?: GatewayCapacityPort;
   /** Server-created original attachment ACL/ObjectReader adapter, not request
    * bytes/URL or a capability grant. Absent means media remains unavailable. */
   media?: GatewayMediaAttachmentResolver;
@@ -301,9 +304,11 @@ export function composePersistedTaskGateway(input: PersistedTaskGatewayDependenc
       delete visible.nativeToolCalls;
       return visible;
     },
-    async *stream(...args: Parameters<RoutedModelTransport['stream']>) {
+    stream(...args: Parameters<RoutedModelTransport['stream']>) {
       if (input.nativeToolResults) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
-      yield* originalTransport.stream(...args);
+      // Preserve the private underlying-termination signal; finishing a
+      // wrapping generator alone cannot release an occupied network slot.
+      return originalTransport.stream(...args);
     }
   };
   const runtime: PublicGatewayRuntime = {
@@ -311,7 +316,7 @@ export function composePersistedTaskGateway(input: PersistedTaskGatewayDependenc
     ports: { routing, admission: new InvocationAdmissionService(admissions, clock),
       dispatch: new InvocationDispatchService(admissions), budget: accounting.budget,
       audit: audit ?? deliveryObservation, observation: deliveryObservation,
-      transport, ...(media ? { media } : {}),
+      transport, ...(input.capacity ? { capacity: input.capacity } : {}), ...(media ? { media } : {}),
       ...(input.nativeCounting ? { nativeToolResults: input.nativeCounting } : {}) },
     verifyEvidence: async (resolution, mode) => {
       if (mode !== 'live' || resolution.scene !== routeScene) return false;
@@ -364,7 +369,8 @@ export function composePersistedTaskGateway(input: PersistedTaskGatewayDependenc
       resolvers: { platform: bind(platform), tenant: bind(tenant) }, transport: createNativeModelEgressTransport(),
       policyOptions: { orderExplainTool: { name: 'rental_order_explain', version: AI_TOOL_DRAFT_VERSION } },
       ...(nativeCounting ? { nativeToolResults: nativeCounting } : {}),
-      countingPriceVersion: counting.countingPriceVersion, timeoutMs: counting.timeoutMs }).preparation(inner);
+      countingPriceVersion: counting.countingPriceVersion, timeoutMs: counting.timeoutMs,
+      ...(input.capacity ? { capacity: input.capacity } : {}) }).preparation(inner);
   } }) : undefined;
   return Object.freeze({ runtime, priceVersion: selection.priceVersion, accountingRecovery: accounting.recovery,
     ...(nativeToolBindings ? { nativeToolBindings } : {}),

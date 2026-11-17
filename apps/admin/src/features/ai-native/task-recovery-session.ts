@@ -129,7 +129,7 @@ export function parseTaskRecoveryOperation(value: unknown, taskId: string): Task
   return result as unknown as TaskRecoveryOperation;
 }
 function target(value: TaskRecoveryTarget, taskId: string): TaskRecoveryTarget {
-  if (!closed(value, ['original', 'host', 'snapshot', 'actions']) || !['order_read', 'opening_model', 'quote_model', 'opening_read'].includes(value.host as string)
+  if (!closed(value, ['original', 'host', 'snapshot', 'actions']) || !['order_read', 'opening_model', 'quote_model', 'opening_read', 'selected_quote_order'].includes(value.host as string)
     || !Array.isArray(value.actions) || value.actions.length > 2 || new Set(value.actions).size !== value.actions.length
     || value.actions.some(action => !['recover', 'takeover'].includes(action))
     || value.host === 'opening_read' && value.actions.length !== 0) throw Error('AI_RESOURCE_UNAVAILABLE');

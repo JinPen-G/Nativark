@@ -6,7 +6,7 @@ import { AI_TASK_INPUT_DRAFT_VERSION, aiClientHostCapabilitiesSchema, aiClientOr
   aiClientTaskModelControlResponseSchema, aiClientTaskModelResultReadResponseSchema, aiClientTaskInputReadResponseSchema,
   aiClientTaskInputSubmissionRequestSchema, aiClientTaskInputSubmissionReceiptSchema, aiClientTaskInputReceiptReadResponseSchema,
   isAiTaskInputContractDraft, aiClientTaskEventsReadRequestSchema,
-  aiClientTaskSnapshotReadResponseSchema, aiClientTaskEventsReadResponseSchema } from '@rental-os/shared';
+  aiClientTaskSnapshotReadResponseSchema, aiClientTaskEventsReadResponseSchema, aiClientOrderActionSchema } from '@rental-os/shared';
 import type { ClientTaskApi } from './client-task-api';
 
 type MaterialRequest = Parameters<ClientTaskApi['prepareMaterial']>[0];
@@ -33,6 +33,8 @@ export interface ClientTaskView {
   task: Creation['task']; modelText: string | null; question: Question; receipt: Receipt['receipt'];
   scope: { kind: 'workspace'; tenantId: string; workspaceId: string } | null;
   canExplain: boolean; canRead: boolean; canSubmit: boolean; canContinue: boolean;
+  /** A local explicit-read affordance. It cannot authorize an Action. */
+  canOpenOrder?: boolean;
   readOnly: boolean; modelUnavailable: boolean;
   /** Original metadata watermark and a local read generation, never execution authority. */
   observation: Observation | null; observationGeneration: number;
@@ -75,7 +77,21 @@ export function createClientTaskSession(input: {
   let modelUnavailable = false, view = initial();
   let originalTaskId: string | null = null, cancellationReadPending: string | null = null;
   let observation: Observation | null = null, observationGeneration = 0;
+  let navigationOrigin: { material: Material; creation: Creation } | null = null;
   const current = () => !closed && input.context.current();
+  const rememberNavigationOrigin = () => {
+    navigationOrigin = current() && input.api.orderNavigation && material?.state === 'observed' && creation?.state === 'observed'
+      && creation.task?.taskId === originalTaskId ? { material: copy(material), creation: copy(creation) } : null;
+  };
+  const navigationAvailable = () => {
+    const port = input.api.orderNavigation;
+    if (!current() || busy || invalidCache || !saved?.task || !originalTaskId || navigationOrigin?.material.state !== 'observed'
+      || navigationOrigin.creation.state !== 'observed' || typeof port?.readHost !== 'function'
+      || typeof port.readAction !== 'function' || typeof port.revalidateAction !== 'function'
+      || !host?.policy.allowRead || !Number.isFinite(Date.parse(host.expiresAt)) || Date.parse(host.expiresAt) <= input.now()
+      || !navigationOrigin.material.expiresAt || Date.parse(navigationOrigin.material.expiresAt) <= input.now()) return false;
+    try { return same(input.storage.read(), held); } catch { return false; }
+  };
   const textField = () => question && isAiTaskInputContractDraft(question.contract) && question.contract.fields.length === 1
     && question.contract.fields[0].fieldId === 'clarification_text' && question.contract.fields[0].kind === 'text' ? question.contract.fields[0] : null;
   const emit = (status: ClientTaskView['status']) => {
@@ -85,6 +101,7 @@ export function createClientTaskSession(input: {
       ...(observation ? { status: observation.status, revision: observation.revision } : {}) } : null;
     const taskAcceptsInput = task?.status === 'waiting_input', taskCanContinue = task?.status === 'running';
     view = { status, task, question, receipt, scope: host?.scope ?? null, observation, observationGeneration,
+      canOpenOrder: navigationAvailable(),
       modelText: model?.state === 'observed' && model.resultPurpose === 'answer' && model.result?.status === 'succeeded' ? model.result.text : null,
       readOnly: !writeEntry, modelUnavailable,
       canExplain: !busy && !invalidCache && ((!saved || saved.phase === 'material_ready') ? writeEntry
@@ -105,7 +122,9 @@ export function createClientTaskSession(input: {
   };
   const recheck = async (purpose: 'read' | 'create' | 'original_control') => {
     if (!current()) throw Error('client_task_context_changed');
-    const next = aiClientHostCapabilitiesSchema.parse(await input.readHost());
+    const originalRead = purpose === 'read' && saved?.task && input.api.orderNavigation;
+    const next = aiClientHostCapabilitiesSchema.parse(await (originalRead && saved?.task
+      ? originalRead.readHost({ material: copy(saved.material), task: copy(saved.task) }) : input.readHost()));
     if (!current() || next.policy.allowRead !== true || next.customerType !== 'personal'
       || next.customerId !== input.context.customerId || next.tenantCode !== input.context.tenantCode || next.serviceCode !== input.context.serviceCode
       || next.surface !== input.context.surface || Date.parse(next.expiresAt) <= input.now() || (host && !same(host.scope,next.scope))) throw Error('client_task_scope_changed');
@@ -149,6 +168,7 @@ export function createClientTaskSession(input: {
     return result.value;
   };
   const readOriginal = async () => {
+    navigationOrigin = null;
     if (!saved) return 'ready' as const;
     const originalMaterial = acceptMaterial(await input.api.readMaterial(copy(saved.material)));
     if (originalMaterial.state !== 'observed') return 'unknown' as const;
@@ -158,6 +178,7 @@ export function createClientTaskSession(input: {
     }
     const created = acceptCreation(await input.api.readCreation(copy(saved.task)));
     if (created.state !== 'observed' || !created.task) return 'unknown' as const;
+    rememberNavigationOrigin();
     if (saved.phase === 'task_pending') persist({ ...saved, phase: 'task_created' });
     await readObservation();
     // A terminal task cannot consume another answer. Retain the original
@@ -194,8 +215,14 @@ export function createClientTaskSession(input: {
   const run = async (purpose: 'read' | 'create' | 'original_control', action: () => Promise<ClientTaskView['status']>): Promise<void> => {
     if (busy || !current() || invalidCache) return;
     busy = true; emit('working'); let status: ClientTaskView['status'] = 'unavailable';
-    try { await recheck(purpose); status = await action(); await recheck('read'); }
+    try { await recheck(purpose); status = await action(); await recheck('read'); rememberNavigationOrigin(); }
     catch { question = null; model = null; receipt = null; creation = null; material = null; observation = null;
+      // Model/input observation may be unavailable while the independently
+      // authorized original order remains readable. Close that read host again;
+      // its source checks grant no model retry or cached navigation authority.
+      if (navigationOrigin) {
+        try { await recheck('read'); } catch { navigationOrigin = null; }
+      }
       status = saved && ['material_pending','task_pending','model_pending','answer_pending','continuation_pending'].includes(saved.phase) ? 'unknown' : 'unavailable'; }
     finally {
       busy = false; emit(status);
@@ -205,7 +232,80 @@ export function createClientTaskSession(input: {
   };
   const refreshOriginal = (): Promise<void> => run('read', readOriginal);
   const session = {
-    snapshot: () => copy(view),
+    snapshot: () => ({ ...copy(view), canOpenOrder: navigationAvailable() }),
+    async openOrder(navigate: (orderId: string) => void | Promise<void>): Promise<boolean> {
+      const port = input.api.orderNavigation;
+      if (!navigationAvailable() || !port || !saved?.task) return false;
+      const source = { material: copy(saved.material), task: copy(saved.task) }, deadline = input.now() + 15000;
+      const knownTaskId = originalTaskId, knownMaterial = navigationOrigin && copy(navigationOrigin.material),
+        knownCreation = navigationOrigin && copy(navigationOrigin.creation);
+      const unexpired = (value: string) => Number.isFinite(Date.parse(value)) && Date.parse(value) > input.now();
+      const assertCurrent = () => {
+        if (!current() || !Number.isFinite(deadline) || input.now() >= deadline || !saved?.task || !same(source.material, saved.material)
+          || !same(source.task, saved.task) || !same(input.storage.read(), held)) throw Error('client_order_navigation_changed');
+      };
+      const readHost = async () => {
+        assertCurrent();
+        const value = aiClientHostCapabilitiesSchema.parse(await port.readHost(copy(source))); assertCurrent();
+        if (value.audience !== 'customer' || value.customerType !== 'personal' || !value.enabled || !value.policy.allowRead
+          || value.policy.allowCreate || !same(value.capabilities.entryActions, ['OPEN_ORDER']) || value.capabilities.bookingDrafts
+          || value.capabilities.savedDeliveryAddresses || value.capabilities.bookingReceiptRead
+          || value.customerId !== input.context.customerId || value.tenantCode !== input.context.tenantCode
+          || value.serviceCode !== input.context.serviceCode || value.surface !== input.context.surface
+          || value.channel !== (input.context.surface === 'tenant_website' ? 'web' : 'wechat_miniprogram')
+          || !unexpired(value.expiresAt)) throw Error('client_order_navigation_unavailable');
+        return value;
+      };
+      const hostBasis = (value: Awaited<ReturnType<typeof readHost>>) => ({ contractVersion: value.contractVersion,
+        audience: value.audience, surface: value.surface, channel: value.channel, customerId: value.customerId,
+        tenantCode: value.tenantCode, serviceCode: value.serviceCode, scope: value.scope,
+        releaseRevision: value.releaseRevision, policy: { revision: value.policy.revision, allowRead: value.policy.allowRead } });
+      const readSource = async () => {
+        assertCurrent();
+        const observedMaterial = aiClientOrderMaterialReceiptSchema.parse(await input.api.readMaterial(copy(source.material))); assertCurrent();
+        if (observedMaterial.state !== 'observed' || observedMaterial.operationKey !== source.material.operationKey
+          || observedMaterial.materialRef !== source.task.materialRef || !observedMaterial.expiresAt
+          || !unexpired(observedMaterial.expiresAt) || knownMaterial?.state === 'observed'
+            && (observedMaterial.materialRef !== knownMaterial.materialRef || observedMaterial.materialHash !== knownMaterial.materialHash
+              || observedMaterial.expiresAt !== knownMaterial.expiresAt)) throw Error('client_order_material_unavailable');
+        const observedTask = aiClientTaskCreationReceiptSchema.parse(await input.api.readCreation(copy(source.task))); assertCurrent();
+        if (observedTask.state !== 'observed' || !observedTask.task || !observedTask.inputRef || !observedTask.inputHash
+          || observedTask.creationKey !== source.task.creationKey || observedTask.materialRef !== observedMaterial.materialRef
+          || knownTaskId && observedTask.task.taskId !== knownTaskId || knownCreation?.state === 'observed'
+            && (observedTask.task.runId !== knownCreation.task?.runId || observedTask.inputRef !== knownCreation.inputRef
+              || observedTask.inputHash !== knownCreation.inputHash)) throw Error('client_order_task_unavailable');
+        return { material: observedMaterial, task: { taskId: observedTask.task.taskId, runId: observedTask.task.runId,
+          inputRef: observedTask.inputRef, inputHash: observedTask.inputHash } };
+      };
+      const checkAction = (value: unknown, basis: Awaited<ReturnType<typeof readSource>>, publication: Awaited<ReturnType<typeof readHost>>) => {
+        const action = aiClientOrderActionSchema.parse(value);
+        if (action.actionCode !== 'OPEN_ORDER' || action.resource.kind !== 'order' || action.resource.id !== input.context.orderId
+          || action.surface !== input.context.surface || !same(action.scope, publication.scope)
+          || action.associations.materialRef !== basis.material.materialRef || action.resource.resourceVersion !== basis.material.materialHash
+          || action.associations.quoteId !== null || action.associations.bookingDraftId !== null
+          || !unexpired(action.expiresAt)) throw Error('client_order_action_unavailable');
+        return action;
+      };
+      busy = true; emit(view.status);
+      try {
+        const firstHost = await readHost(), firstSource = await readSource();
+        const action = checkAction(await port.readAction(copy(source)), firstSource, firstHost); assertCurrent();
+        // A displayed Action or a model result never grants navigation. Close
+        // the original reads and publication again before the fixed callback.
+        const latestHost = await readHost(), latestSource = await readSource();
+        if (!same(hostBasis(firstHost), hostBasis(latestHost)) || !same(firstSource, latestSource)) throw Error('client_order_origin_changed');
+        // The formal final read closes current server source, release and
+        // policy checks. No caller-supplied Action can replace that proof.
+        const checked = checkAction(await port.revalidateAction(copy(action), copy(source)), latestSource, latestHost); assertCurrent();
+        if (!same(action, checked) || !unexpired(checked.expiresAt)) throw Error('client_order_action_changed');
+        assertCurrent(); await navigate(checked.resource.id); return true;
+      } catch {
+        navigationOrigin = null;
+        question = null; model = null; receipt = null; creation = null; material = null; observation = null;
+        emit(saved && ['material_pending','task_pending','model_pending','answer_pending','continuation_pending'].includes(saved.phase) ? 'unknown' : 'unavailable');
+        return false;
+      } finally { busy = false; emit(view.status); }
+    },
     // Only an observed original creation supplies this private host. The ID
     // survives a lost model reply, but is never restored from browser storage.
     cancellationHost() {
@@ -243,10 +343,24 @@ export function createClientTaskSession(input: {
       if (busy || !current()) return;
       busy = true; let status: ClientTaskView['status'] = 'unavailable';
       try {
-        await recheck('read'); const value = input.storage.read(); held = value === undefined || value === null ? undefined : copy(value);
-        if (held !== undefined) { try { saved = parseLocator(held, owner, input.context.orderId); } catch { invalidCache = true; throw Error('client_task_locator_invalid'); } status = 'unknown'; }
-        else status = 'ready';
-      } catch { status = 'unavailable'; }
+        // Only local locators are restored before authorization. This lets the
+        // original Task choose its independent read host, without restoring
+        // cached permissions or borrowing a new-booking publication.
+        try {
+          const value = input.storage.read(), next = value === undefined || value === null ? undefined : copy(value);
+          const record = next === undefined ? null : parseLocator(next, owner, input.context.orderId);
+          if (saved && !same(saved, record)) throw Error('client_task_original_replaced');
+          held = next; saved = record; invalidCache = false;
+        } catch { invalidCache = true; throw Error('client_task_locator_invalid'); }
+        await recheck('read'); status = saved ? 'unknown' : 'ready';
+        if (input.api.orderNavigation && saved?.task) {
+          const originalMaterial = acceptMaterial(await input.api.readMaterial(copy(saved.material)));
+          if (originalMaterial.state === 'observed') acceptCreation(await input.api.readCreation(copy(saved.task)));
+          await recheck('read');
+          if (!same(input.storage.read(), held)) throw Error('client_task_original_replaced');
+          rememberNavigationOrigin();
+        }
+      } catch { navigationOrigin = null; status = 'unavailable'; }
       finally { busy = false; emit(status); }
     },
     async explain() {
@@ -322,6 +436,7 @@ export function createClientTaskSession(input: {
       });
     },
     dispose() { closed = true; cancellationReadPending = null; originalTaskId = null;
+      navigationOrigin = null;
       question = null; model = null; receipt = null; creation = null; observation = null; view = initial(); input.changed(copy(view)); },
   };
   return Object.freeze(session);

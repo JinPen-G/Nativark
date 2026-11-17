@@ -1,4 +1,4 @@
-import type { AiExecutionContext } from '@rental-os/shared';
+import { validateAiQuoteGoalInputDraft, type AiExecutionContext, type AiQuoteGoalContextDraft } from '@rental-os/shared';
 import { assertAiReadContextBinding } from './read-context-binding';
 import type { AiBusinessReadAuthority } from '../business-read-route.authority';
 import type { AiAvailabilityReadFactsService } from '../availability-read-facts.service';
@@ -45,6 +45,40 @@ export class AiQuoteBusinessPreparationService {
         rounding: 'Core_quote_snapshot_only_not_recomputed' as const };
       if (requestFingerprint(current) !== requestFingerprint(await this.sources.contexts.current(context.scope, context))) throw new ModelGatewayError('CONFIG_INVALID');
       return result;
+    });
+  }
+
+  /** Goal collection reads configuration only. It cannot manufacture a Core
+   * candidate's required identity/quantity, select a row or save a quotation. */
+  async prepareGoalInput(value: unknown, expectedContext?: AiExecutionContext) {
+    const input: unknown = structuredClone(value), expected = expectedContext && structuredClone(expectedContext);
+    if (!validateAiQuoteGoalInputDraft(input)) throw new ModelGatewayError('INVALID_REQUEST');
+    return this.authority.withRead('quote_context', {}, async context => {
+      assertAiReadContextBinding(context, expected);
+      if (context.scope.kind !== 'workspace' || context.audience !== 'operator' && context.audience !== 'staff')
+        throw new ModelGatewayError('FORBIDDEN');
+      const current = structuredClone(await this.sources.contexts.current(context.scope, context));
+      const pricingUnits = current.category.businessModel.pricingUnits.filter(unit => current.settings.pricing.enabledUnits.includes(unit));
+      const fulfillmentModes = current.category.businessModel.fulfillmentModes.filter(mode => current.settings.fulfillment.enabledModes.includes(mode));
+      const timeZone = current.settings.calendar.timeZone;
+      if (!pricingUnits.length || !fulfillmentModes.length || !timeZone) throw new ModelGatewayError('CONFIG_INVALID');
+      try { new Intl.DateTimeFormat('en', { timeZone }).format(0); } catch { throw new ModelGatewayError('CONFIG_INVALID'); }
+      const source = { category: current.category, settings: current.settings, profile: current.profile,
+        categoryVersionId: current.categoryVersionId ?? null, categoryAdoptionRevision: current.categoryAdoptionRevision ?? null,
+        locations: current.locations, operators: current.operators };
+      const after = await this.sources.contexts.current(context.scope, context);
+      if (requestFingerprint(source) !== requestFingerprint({ category: after.category, settings: after.settings, profile: after.profile,
+        categoryVersionId: after.categoryVersionId ?? null, categoryAdoptionRevision: after.categoryAdoptionRevision ?? null,
+        locations: after.locations, operators: after.operators })) throw new AiQuotePreparedSourcesChanged();
+      const facts: AiQuoteGoalContextDraft = { kind: 'quote_goal_context', goalHash: requestFingerprint(input),
+        configuration: { scope: context.scope, audience: context.audience, observedAt: context.authorizedAt,
+          sourceHash: requestFingerprint(source), categoryCode: current.category.code, configVersion: current.settings.configVersion,
+          timeZone, pricingUnits, fulfillmentModes,
+          deliveryDestination: current.category.businessModel.deliveryDestination, capabilities: [...current.profile.capabilities] },
+        input: 'unconfirmed_human_goal', quotation: 'not_created', identitySelection: 'explicit_human_choice_required' };
+      return sealBusinessScenario('quote_clarification', { scope: context.scope, audience: context.audience, observedAt: context.authorizedAt,
+        facts, model: { status: 'not_requested' as const, answer: 'not_generated' as const },
+        gaps: ['human_selection_evidence_owned_by_mainline', 'no_stock_reservation', 'no_order_approval'], execution: 'not_attempted' as const });
     });
   }
 

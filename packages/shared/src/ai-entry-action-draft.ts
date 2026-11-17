@@ -8,12 +8,24 @@ export const AI_ENTRY_ACTION_CODES = ['OPEN_ORDER', 'OPEN_CUSTOMER', 'OPEN_PRODU
   'OPEN_PAYMENT', 'OPEN_DISPATCH', 'CREATE_BOOKING_DRAFT', 'CREATE_NOTIFICATION_DRAFT'] as const;
 export type AiEntryActionCode = (typeof AI_ENTRY_ACTION_CODES)[number];
 export const AI_ENTRY_ACTION_REGISTRY = {
-  OPEN_ORDER: { resourceKind: 'order', riskLevel: 'R0', requiresConfirmation: false, availability: 'requires_server_assembly' },
-  CREATE_BOOKING_DRAFT: { resourceKind: 'quote', riskLevel: 'R1', requiresConfirmation: true, availability: 'requires_server_assembly' },
-  OPEN_BOOKING: { resourceKind: 'booking_draft', riskLevel: 'R0', requiresConfirmation: false, availability: 'requires_server_assembly' },
-  OPEN_CUSTOMER: { availability: 'unavailable' }, OPEN_PRODUCT: { availability: 'unavailable' },
-  OPEN_PROFILE: { availability: 'unavailable' }, OPEN_PAYMENT: { availability: 'unavailable' },
-  OPEN_DISPATCH: { availability: 'unavailable' }, CREATE_NOTIFICATION_DRAFT: { availability: 'unavailable' }
+  OPEN_ORDER: { resourceKind: 'order', riskLevel: 'R0', requiresConfirmation: false,
+    audiences: ['operations', 'staff', 'customer'], availability: 'requires_server_assembly' },
+  CREATE_BOOKING_DRAFT: { resourceKind: 'quote', riskLevel: 'R1', requiresConfirmation: true,
+    audiences: ['customer'], availability: 'requires_server_assembly' },
+  OPEN_BOOKING: { resourceKind: 'booking_draft', riskLevel: 'R0', requiresConfirmation: false,
+    audiences: ['customer'], availability: 'requires_server_assembly' },
+  OPEN_CUSTOMER: { resourceKind: 'customer', riskLevel: 'R0', requiresConfirmation: false,
+    audiences: ['operations', 'staff'], availability: 'requires_server_assembly' },
+  OPEN_PRODUCT: { resourceKind: 'item_group', riskLevel: 'R0', requiresConfirmation: false,
+    audiences: ['operations', 'staff', 'customer'], availability: 'requires_server_assembly' },
+  OPEN_PROFILE: { resourceKind: 'customer_profile', riskLevel: 'R0', requiresConfirmation: false,
+    audiences: ['customer'], availability: 'requires_server_assembly' },
+  OPEN_PAYMENT: { resourceKind: 'payment', riskLevel: 'R0', requiresConfirmation: false,
+    audiences: ['operations', 'customer'], availability: 'requires_server_assembly' },
+  OPEN_DISPATCH: { resourceKind: 'order_allocation', riskLevel: 'R0', requiresConfirmation: false,
+    audiences: ['operations', 'staff'], availability: 'requires_server_assembly' },
+  CREATE_NOTIFICATION_DRAFT: { resourceKind: 'notification_draft', riskLevel: 'R1', requiresConfirmation: true,
+    audiences: ['operations'], availability: 'requires_server_assembly' }
 } as const;
 
 

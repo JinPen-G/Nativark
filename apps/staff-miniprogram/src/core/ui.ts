@@ -24,6 +24,7 @@ export const ROUTES = {
   scanResult: "/pages/scan-result/index",
   scanManual: "/pages/scan-manual/index",
   assets: "/pages/assets/index",
+  product: "/pages/product/index",
   asset: "/pages/asset/index",
   assetLedger: "/pages/asset-ledger/index",
   assetNew: "/pages/asset-new/index",

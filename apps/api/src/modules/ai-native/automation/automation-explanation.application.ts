@@ -31,6 +31,7 @@ import type { ModelAdapter } from '../model-gateway.ports';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { HumanAutomationHttpRequest } from './human-automation-request.composition';
 import type { AiTaskRunnerClock } from '../runner/ai-task-runner.ports';
+import type { GatewayCapacityPort } from '../gateway-capacity.ports';
 import { prepareAutomationExplanationAdmission, admitOriginalAutomationExplanationStart,
   readOriginalAutomationExplanationAdmission } from './automation-explanation-start-admission';
 
@@ -53,7 +54,7 @@ export class AutomationExplanationApplication {
   constructor(private readonly d: { db: PrismaClient; auth: Pick<AuthService, 'resolveAccessContext'>; guard: Pick<ApiAuthGuard, 'canActivate'>;
     core: Pick<RentalCoreService, 'getOrder'>; subscriptions: Pick<SubscriptionService, 'readCategoryCommercialContext'>;
     secrets: SecretBox; resources?: BusinessFailureResourcePorts; currentConfiguration(): unknown;
-    adapters?: readonly ModelAdapter[]; clock?: () => Date;
+    adapters?: readonly ModelAdapter[]; clock?: () => Date; capacity?: GatewayCapacityPort;
     /** Trusted server timing ports; HTTP/model fields never select them. */
     runnerClock?: AiTaskRunnerClock; monotonic?: () => number }) {}
 
@@ -164,7 +165,8 @@ export class AutomationExplanationApplication {
         const gateway = composeAutomationModelGateway({ db: this.d.db, authorization: authority.currentAuthorization(), originalReads: authority,
           taskId: original.taskId, subscriptions: this.d.subscriptions, secrets: this.d.secrets, pricing: publication.pricing,
           platformProfileId: publication.platformProfileId,
-          adapters: this.d.adapters ?? createNativeModelAdapters(NATIVE_MODEL_PROTOCOLS), clock });
+          adapters: this.d.adapters ?? createNativeModelAdapters(NATIVE_MODEL_PROTOCOLS), clock,
+          ...(this.d.capacity ? { capacity: this.d.capacity } : {}) });
         const runtime = { ...gateway.runtime, verifyEvidence: async (...args: Parameters<typeof gateway.runtime.verifyEvidence>) => {
           live();
           if (requestFingerprint(publication) !== requestFingerprint(readAutomationExplanationConfiguration(this.d.currentConfiguration()))) return false;

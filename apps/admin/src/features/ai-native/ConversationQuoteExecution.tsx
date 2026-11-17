@@ -49,6 +49,6 @@ export function ConversationQuoteExecution({ identity, conversationId, turn, cur
     {!denied && showResult && <ConversationResult conversationId={conversationId} turn={turn} current={active} />}
     {!denied && turn.task && <><TaskClarification key={`${identity}:${turn.task.taskId}`} taskId={turn.task.taskId} identity={identity} current={active} onAccessDenied={deny} onReceiptChange={setAnswer} />
       <ConversationQuoteConfirmation identity={identity} conversationId={conversationId} turn={turn} answer={answer} current={active} onAccessDenied={deny} onQuoteSource={setQuoteSource} />
-      <ConversationQuoteSelection identity={identity} conversationId={conversationId} turn={turn} source={quoteSource} current={active} onAccessDenied={deny} /></>}
+      <ConversationQuoteSelection identity={identity} conversationId={conversationId} turn={turn} source={quoteSource} answer={answer} current={active} onAccessDenied={deny} /></>}
   </section>;
 }

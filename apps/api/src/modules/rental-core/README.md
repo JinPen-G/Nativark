@@ -2,6 +2,8 @@
 
 Rental Core维护租赁领域事实，包括经营空间/品类、商品和资产、报价库存、订单履约、检查及金额。它是首个业务Core示范，平台身份、公共后台和原AI机制通过受控适配消费，具体报价、金额与状态仍在原Core裁定。
 
+[通知缓存](rental-notification-log-cache.ts)和[恢复投影](rental-notification-snapshot.ts)已转接Rental包内同一实现。原业务provider供给原通知正文保留读取器，维护策略和删除账仍由AI隐私模块裁定；草稿保存、原结果读取和发送分别授权。进程缓存及恢复副本只留核验过的无正文引用，删除后的原结果返回原删除收据；失应答不换键重做。[草稿接点](../../../../../packages/rental-core/src/notification-draft.ts) · [实际缓存核验](../../../../../packages/rental-core/src/notification-log-cache.ts) · [实际恢复投影](../../../../../packages/rental-core/src/notification-snapshot.ts) · [原维护读取器](../ai-native/privacy/retention-notification-draft.ts)
+
 [检查准备](rental-exchange-inspection-preparation.service.ts)和[专用影像](rental-exchange-inspection-media.service.ts)现在只供给原Nest依赖，实际检查、原键、冻结照片接受及完成恢复由Rental包执行。旧读辅助与DTO再导出同一实现；原Controller、企业换货批准及检查同意继续使用原签名和权限。文件服务保留自己的计划、存储配置和单次冻结/原目标核对，Core只接本链必要方法。[检查实现](../../../../../packages/rental-core/src/mysql-exchange-inspection-preparation.ts) · [影像实现](../../../../../packages/rental-core/src/mysql-exchange-inspection-media.ts) · [私有接点](../../../../../packages/rental-core/src/exchange-inspection-ports.ts) · [严格DTO](../../../../../packages/rental-core/src/exchange-inspection-preparation.dto.ts) · [八项API声明](rental-exchange-inspection-preparation.schemas.ts)
 
 [资金服务](rental-funding.service.ts)是原Nest兼容接线，将同一Prisma数据源、Auth/ALS身份、原订单可见范围和企业应收参与者交给Rental包。资金事件、余额和收退款门禁只有一份实现，调用方原事务、幂等回放、演练/实款区分与企业现金核销保持。[实际资金服务](../../../../../packages/rental-core/src/mysql-funding.ts) · [存储与应收接点](../../../../../packages/rental-core/src/funding-storage.ts) · [事件规则](../../../../../packages/rental-core/src/funding-events.ts)

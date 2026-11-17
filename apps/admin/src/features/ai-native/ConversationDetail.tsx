@@ -170,7 +170,7 @@ function ConversationQuoteTurn({ identity, conversationId, turn, current, onAcce
       onAccessDenied={deny} onAnswerReceipt={setAnswer} />
     <ConversationQuoteConfirmation identity={identity} conversationId={conversationId} turn={turn} answer={answer}
       current={active} onAccessDenied={deny} onQuoteSource={setQuoteSource} />
-    <ConversationQuoteSelection identity={identity} conversationId={conversationId} turn={turn} source={quoteSource}
+    <ConversationQuoteSelection identity={identity} conversationId={conversationId} turn={turn} source={quoteSource} answer={answer}
       current={active} onAccessDenied={deny} />
   </section>;
 }

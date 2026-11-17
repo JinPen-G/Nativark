@@ -7,11 +7,29 @@ import { PrismaAiApprovalConsumptionRepository } from '../prisma-approval-consum
 import { AiApprovedOrderRouteAuthority } from './approved-order-route.authority';
 import type { AiApprovedOrderAuthority } from './approved-order.ports';
 import type { ApprovedOrderCompositionDependencies } from './approved-order-composition.ports';
+import type { ApprovedOrderBinding, ApprovedOrderTransaction } from '../../rental-core/approved-order-transaction.ports';
+import { RentalMerchantDelegatedOrderPort } from '../../rental-core/rental-merchant-delegated-order.authority';
+import { readApprovedOrderMerchantDelegation } from './approved-order-merchant-delegation';
 import { approvedOrderCommandSchema, deniedOrder, orderContextHash, PrismaApprovedOrderSource } from './prisma-approved-order.source';
 
 import { AiApprovedOrderResultUnknownError } from './approved-order.errors';
 import { AiScopeResolutionError } from '../ai-scope.repository';
 export { AiApprovedOrderResultUnknownError } from './approved-order.errors';
+
+function jointOrderApproval(merchant: ApprovedOrderTransaction, approved: ApprovedOrderTransaction): ApprovedOrderTransaction {
+  const enterprise = Object.freeze({ ...merchant }), ai = Object.freeze({ ...approved });
+  return Object.freeze<ApprovedOrderTransaction>({
+    authorize: async binding => { await enterprise.authorize(binding); await ai.authorize(binding); },
+    recover: async binding => {
+      const enterpriseOrder = await enterprise.recover(binding), aiOrder = await ai.recover(binding);
+      if (enterpriseOrder !== aiOrder) throw new AiApprovedOrderResultUnknownError();
+      return enterpriseOrder;
+    },
+    prepare: async (tx, binding) => { await enterprise.prepare(tx, binding); await ai.prepare(tx, binding); },
+    commit: async (tx, binding, orderId) => { await enterprise.commit(tx, binding, orderId); await ai.commit(tx, binding, orderId); },
+    replay: async (binding, orderId) => { await enterprise.replay(binding, orderId); await ai.replay(binding, orderId); }
+  });
+}
 
 export function composeAiApprovedOrder(dependencies: ApprovedOrderCompositionDependencies) {
   const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
@@ -20,7 +38,9 @@ export function composeAiApprovedOrder(dependencies: ApprovedOrderCompositionDep
     || typeof dependencies.policy?.resolve !== 'function' || typeof dependencies.snapshots?.read !== 'function'
     || typeof dependencies.confirmation?.createApprovedOrder !== 'function' || typeof dependencies.quoteFacts?.findQuote !== 'function'
     || typeof dependencies.toolVersion !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(dependencies.toolVersion)
-    || (dependencies.executionInput && typeof dependencies.executionInput.readAuthorized !== 'function')) throw unavailable();
+    || (dependencies.executionInput && typeof dependencies.executionInput.readAuthorized !== 'function')
+    || (dependencies.merchantDelegations && ['readMerchantDelegatedSubmission', 'prepareMerchantDelegatedSubmission', 'merchantDelegationParticipant']
+      .some(name => typeof dependencies.merchantDelegations![name as keyof typeof dependencies.merchantDelegations] !== 'function'))) throw unavailable();
   const coreMethods = ['resolveWorkspaceId', 'readBusinessContext', 'getProfile', 'getWorkspaceCategory', 'getBusinessSettings', 'listItemGroups',
     'listPricingGroups', 'listCouponTemplates', 'listLocations', 'listOperators', 'getOrder'] as const;
   if (coreMethods.some(method => typeof dependencies.core?.[method] !== 'function')
@@ -43,6 +63,8 @@ export function composeAiApprovedOrder(dependencies: ApprovedOrderCompositionDep
     credentials: { current: dependencies.credentials.current.bind(dependencies.credentials) },
     quoteFacts: { findQuote: dependencies.quoteFacts.findQuote.bind(dependencies.quoteFacts) } };
   const create = dependencies.confirmation.createApprovedOrder.bind(dependencies.confirmation);
+  const fingerprintOrderRequest = dependencies.confirmation.fingerprintOrderRequest?.bind(dependencies.confirmation);
+  const readOrderCreation = dependencies.confirmation.readOrderCreation?.bind(dependencies.confirmation);
   const source = new PrismaApprovedOrderSource(d);
   const repository = new PrismaAiApprovalConsumptionRepository(d.db, d.clock);
   const route = new AiApprovedOrderRouteAuthority(d.guard, d.credentials, d.clock);
@@ -75,9 +97,22 @@ export function composeAiApprovedOrder(dependencies: ApprovedOrderCompositionDep
           || (current.operation === 'execute' && current.inputBindingHash !== original.inputBindingHash)) throw deniedOrder();
       };
       let enclosedReceiptId: string | null = null;
+      const assertBinding = (binding: Readonly<ApprovedOrderBinding>) => {
+        const { merchantDelegation: proof, ...plain } = binding;
+        if (requestFingerprint(plain) !== requestFingerprint(original.binding)) throw deniedOrder();
+        if (proof) {
+          const delegation = original.merchantDelegation;
+          if (!delegation || original.input.context.actor.kind !== 'user'
+            || requestFingerprint(proof) !== requestFingerprint({ version: delegation.version, purpose: delegation.purpose,
+              delegationKey: delegation.reference.delegationKey, expectedRevision: delegation.reference.expectedRevision,
+              sourceHash: delegation.sourceHash, basisHash: delegation.basisHash, requestHash: delegation.requestHash,
+              quoteId: delegation.quoteId, personalCustomerId: delegation.personalCustomerId,
+              corporateCustomerId: delegation.corporateCustomerId, actorUserId: original.input.context.actor.userId })) throw deniedOrder();
+        }
+      };
       const authority: AiApprovedOrderAuthority = {
         resolve: async (_input, binding, action, tx) => {
-          if (requestFingerprint(binding) !== requestFingerprint(original.binding)) throw deniedOrder();
+          assertBinding(binding);
           if (action === 'replay' && enclosedReceiptId !== null) {
             // resultFact encloses this exact receipt with full source/snapshot
             // checks. Still reauthorize current task and order reads on both
@@ -98,6 +133,18 @@ export function composeAiApprovedOrder(dependencies: ApprovedOrderCompositionDep
         }
       };
       const participant = repository.createOrderTransaction(original.input, authority);
+      const merchantOrders = (joint: boolean) => {
+        const merchant = d.merchantDelegations;
+        if (!merchant || !fingerprintOrderRequest || !readOrderCreation) throw unavailable();
+        return new RentalMerchantDelegatedOrderPort({ fingerprintOrderRequest, readOrderCreation, createApprovedOrder: create }, {
+          readMerchantDelegatedSubmission: merchant.readMerchantDelegatedSubmission.bind(merchant),
+          prepareMerchantDelegatedSubmission: merchant.prepareMerchantDelegatedSubmission.bind(merchant),
+          merchantDelegationParticipant: (actorAuth, reference) => {
+            const originalParticipant = merchant.merchantDelegationParticipant(actorAuth, reference);
+            return joint ? jointOrderApproval(originalParticipant, participant) : originalParticipant;
+          }
+        });
+      };
       const resultFact = async (orderId: string) => withRead(orderId, original.input.context, async () => {
         const current = await source.read(command, 'replay');
         same(current);
@@ -114,19 +161,37 @@ export function composeAiApprovedOrder(dependencies: ApprovedOrderCompositionDep
         // or lines; later fulfillment/changes and expired idempotency receipts
         // must remain readable without recreating the original action.
         if (order.quoteId !== original.binding.request.quoteId) throw new AiApprovedOrderResultUnknownError();
+        if (original.merchantDelegation) {
+          const delegation = original.merchantDelegation, orders = merchantOrders(false);
+          await route.withOrderReview(current.input.context, original.binding.request, async (_context, actorAuth) => {
+            const readDelegation = () => readApprovedOrderMerchantDelegation(d.merchantDelegations, actorAuth,
+              delegation.reference, original.binding.request, delegation.quoteHash, 'read');
+            if (requestFingerprint(await readDelegation()) !== requestFingerprint(delegation)) throw deniedOrder();
+            const receipt = await orders.readOriginal(actorAuth, delegation.reference);
+            if (receipt.state !== 'observed' || receipt.orderId !== orderId) throw new AiApprovedOrderResultUnknownError();
+            if (requestFingerprint(await readDelegation()) !== requestFingerprint(delegation)) throw deniedOrder();
+          });
+        }
         const latest = await source.read(command, 'replay');
         same(latest);
         if (latest.committedId !== orderId) throw deniedOrder();
         return order;
       });
       if (original.committedId) return { order: await resultFact(original.committedId), replayed: true };
-      const result = await route.withOrderWrite(original.input, original.binding, async (context, body, userName) => {
+      const result = await route.withOrderWrite(original.input, original.binding, async (context, body, userName, actorAuth) => {
         if (context.scope.kind !== 'workspace' || d.core.resolveWorkspaceId(context.scope.tenantId) !== context.scope.workspaceId) throw deniedOrder();
         const tenantId = context.scope.tenantId;
         const business: BusinessContext = await d.core.readBusinessContext(tenantId);
         await authority.resolve(original.input, original.binding, 'execute');
         effectPossible = true;
-        try { return await create(tenantId, body, userName, business, original.input.businessIdempotencyKey, participant); }
+        try {
+          if (original.merchantDelegation) {
+            // Core seals this exact server-owned joint participant. Both approval
+            // consumptions and the D-key order receipt use Core's supplied tx.
+            return await merchantOrders(true).execute(actorAuth, original.merchantDelegation.reference, userName, business);
+          }
+          return await create(tenantId, body, userName, business, original.input.businessIdempotencyKey, participant);
+        }
         catch { throw new AiApprovedOrderResultUnknownError(); }
       });
       return { order: await resultFact(result.order.id), replayed: result.replayed };

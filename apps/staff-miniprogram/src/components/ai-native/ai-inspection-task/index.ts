@@ -4,7 +4,7 @@
  * to the original form; this component never submits a Core inspection. */
 import { createStaffInspectionTaskApi } from '../../../api/ai-inspection-tasks';
 import { serverNow } from '../../../core/clock';
-import { readStorage, writeStorage } from '../../../core/storage';
+import { readInspectionOriginalStorage, writeInspectionOriginalStorage } from '../inspection-original-storage';
 import { AiPollingController, AiPollingLoop } from '../polling-controller';
 import { createStaffInspectionTaskSession, staffInspectionTaskStorageKey,
   type StaffInspectionTaskContext, type StaffInspectionTaskView } from '../inspection-task-session';
@@ -20,7 +20,7 @@ interface Runtime {
 const instances = new WeakMap<object, Runtime>();
 const state = (instance: object) => { const value = instances.get(instance); if (!value) throw Error('staff_inspection_task_unavailable'); return value; };
 const blank = { statusLabel: '', currentTask: null as Record<string, unknown> | null, canBegin: false, canStart: false,
-  canRead: false, canSubmit: false, canContinue: false, canUseHumanValues: false, pending: false, resultAvailable: false, taskId: '', inputRevision: '', fields: [] as unknown[], errorLabel: '' };
+  readOnly: false, canRead: false, canSubmit: false, canContinue: false, canUseHumanValues: false, pending: false, resultAvailable: false, taskId: '', inputRevision: '', fields: [] as unknown[], errorLabel: '' };
 function label(status: StaffInspectionTaskView['status']): string {
   switch (status) {
     case 'working': return '正在处理原检查任务';
@@ -47,7 +47,8 @@ Component({
       this.detachHost();
       if (!host?.context || !host.context.tenantId || !host.context.workspaceId || !host.context.ownerId
         || !host.context.source || typeof host.context.current !== 'function') return;
-      r.host = { context: { ...host.context, source: { ...host.context.source } } };
+      r.host = { context: { ...host.context, source: { ...host.context.source }, readOnly: host.context.readOnly === true,
+        ...(host.context.originalReference ? { originalReference: { ...host.context.originalReference } } : {}) } };
     },
     detachHost(): void {
       const r = state(this); r.epoch++; r.shown = false; r.pending = false; r.inputSignature = '';
@@ -64,25 +65,43 @@ Component({
     hostLogout(): void { this.detachHost(); },
     async hostShow(): Promise<void> {
       const r = state(this); if (!r.alive || r.shown || !r.host?.context.current()) return;
-      r.shown = true;
-      await this.work('read');
+      r.shown = true; const host = r.host, epoch = r.epoch;
+      if (host.context.readOnly) {
+        // Showing a historical host restores local selectors only. The page's
+        // explicit history choice or read button owns the original API reads.
+        try { await this.openSession(); }
+        catch { if (r.alive && r.shown && r.host === host && r.epoch === epoch && host.context.current()) this.setData({ ...blank, readOnly: true,
+          errorLabel: '原任务定位暂不可核对，请保留原记录并继续人工检查' }); }
+      } else await this.work('read');
+    },
+    async openSession(): Promise<ReturnType<typeof createStaffInspectionTaskSession> | null> {
+      const r = state(this), host = r.host;
+      if (!r.alive || !r.shown || !host?.context.current()) return null;
+      if (r.owner) return r.owner;
+      const epoch = r.epoch, current = () => r.alive && r.shown && r.epoch === epoch && r.host === host && host.context.current();
+      const context = { ...host.context, current }, key = staffInspectionTaskStorageKey(context);
+      r.owner = createStaffInspectionTaskSession({ context, api: createStaffInspectionTaskApi({ current }), now: serverNow,
+        newKey: () => `staff-inspection-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
+        storage: { read: () => readInspectionOriginalStorage(key), write: value => {
+          if (host.context.readOnly) throw Error('原任务只读宿主不能写入定位');
+          writeInspectionOriginalStorage(key, value);
+        } }, changed: view => { if (current()) this.receiveView(view); } });
+      const owner = r.owner; await owner.open();
+      return current() && r.owner === owner ? owner : null;
     },
     async work(kind: 'begin' | 'start' | 'continue' | 'read'): Promise<void> {
       const r = state(this), host = r.host;
-      if (!r.alive || !r.shown || !host || !host.context.current() || r.pending && kind !== 'read') return;
+      if (!r.alive || !r.shown || !host || !host.context.current() || r.pending && kind !== 'read'
+        || host.context.readOnly && kind !== 'read') return;
       const epoch = r.epoch, current = () => r.alive && r.shown && r.epoch === epoch && r.host === host && host.context.current();
       const api = createStaffInspectionTaskApi({ current });
       let ownsPending = false;
       try {
-        if (!r.owner) {
-          const context = { ...host.context, current }, key = staffInspectionTaskStorageKey(context);
-          r.owner = createStaffInspectionTaskSession({ context, api, now: serverNow,
-            newKey: () => `staff-inspection-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
-            storage: { read: () => readStorage(key), write: value => writeStorage(key,value) },
-            changed: view => { if (current()) this.receiveView(view); } });
-          await r.owner.open();
-        }
+        if (!await this.openSession() || !current() || !r.owner) return;
         if (kind === 'read' && r.pending) { await r.owner.observe(); return; }
+        const view = r.owner.snapshot();
+        if (kind === 'begin' && !view.canBegin || kind === 'start' && !view.canStart
+          || kind === 'continue' && !view.canContinue) return;
         ownsPending = true; r.pending = true; this.setData({ pending: true, errorLabel: '' });
         if (kind === 'begin') {
           let inputId: string | undefined;
@@ -100,29 +119,31 @@ Component({
         else await r.owner.refresh();
         if (current()) this.startReads();
       } catch { if (current()) { r.loop?.pause(); this.selectComponent?.('#task-input')?.detachHost?.(); r.inputSignature = '';
-        this.setData({ errorLabel: '原任务暂不可核对，请使用原人工检查', currentTask: null, fields: [], canSubmit: false, canContinue: false, canStart: false, resultAvailable: false }); } }
+        this.setData({ errorLabel: '原任务暂不可核对，请使用原人工检查', currentTask: null, fields: [], canBegin: false, canSubmit: false, canContinue: false, canStart: false, resultAvailable: false }); } }
       finally { if (current() && ownsPending) { r.pending = false; this.setData({ pending: false }); } }
     },
     receiveView(view: StaffInspectionTaskView): void {
       const r = state(this); if (!r.alive || !r.shown || !r.host?.context.current()) return;
       r.view = view;
       const epoch = r.epoch, owner = r.owner, host = r.host;
+      const readOnly = host.context.readOnly === true;
       const question = view.question, taskId = view.task?.taskId,
         signature = question ? JSON.stringify([taskId,question.requestId,question.revision,question.contract]) : '';
       const changed = signature !== r.inputSignature;
-      this.setData({ statusLabel: label(view.status), canBegin: view.canBegin, canStart: view.canStart, canRead: view.canRead,
-        canSubmit: view.canSubmit, canContinue: view.canContinue, canUseHumanValues: Boolean(owner), resultAvailable: Boolean(view.result), taskId: view.task?.taskId ?? '',
+      const statusLabel = readOnly && view.status === 'waiting_input' ? '原任务正在等待补充；本入口只读' : label(view.status);
+      this.setData({ statusLabel, readOnly, canBegin: !readOnly && view.canBegin, canStart: !readOnly && view.canStart, canRead: view.canRead,
+        canSubmit: !readOnly && view.canSubmit, canContinue: !readOnly && view.canContinue, canUseHumanValues: !readOnly && Boolean(owner), resultAvailable: Boolean(view.result), taskId: view.task?.taskId ?? '',
         currentTask: view.task ? { id: view.task.taskId, title: '本次检查识别', status: view.task.status, statusLabel: label(view.status),
-          updatedLabel: '', summary: '候选由员工核实，任务不提交检查', availabilityLabel: '原受权任务', partial: false } : null,
+          updatedLabel: '', summary: readOnly ? '只核对原任务，不启动或继续识别' : '候选由员工核实，任务不提交检查', availabilityLabel: '原受权任务', partial: false } : null,
         ...(changed ? { inputRevision: question ? `${question.requestId}:${question.revision}` : '', fields: question?.contract.fields.map(field => ({
-          key: field.fieldId, label: field.label, required: field.required, readonly: !view.canSubmit, kind: field.kind,
+          key: field.fieldId, label: field.label, required: field.required, readonly: readOnly || !view.canSubmit, kind: field.kind,
           ...(field.kind === 'text' ? { maxLength: field.maxLength } : field.kind === 'integer' ? { minimum: field.minimum, maximum: field.maximum } : { options: field.options })
         })) ?? [] } : {})
       }, () => {
         if (!r.alive || !r.shown || r.epoch !== epoch || r.owner !== owner || r.host !== host
           || r.view !== view || !host.context.current()) return;
         const child = this.selectComponent?.('#task-input');
-        if (!view.canSubmit || !question || !owner) { child?.detachHost?.(); r.inputSignature = ''; return; }
+        if (readOnly || !view.canSubmit || !question || !owner) { child?.detachHost?.(); r.inputSignature = ''; return; }
         if (changed) {
           child?.attachHost?.(async (value: unknown) => {
             const input = value as { taskId?: unknown; inputRevision?: unknown; draft?: Record<string, unknown> } | null;
@@ -137,12 +158,12 @@ Component({
       });
       if (view.task && ['succeeded','partially_succeeded','failed','cancelled'].includes(view.task.status)) {
         r.loop?.destroy(); r.loop = null;
-      } else if (view.task && !r.loop) this.startReads();
+      } else if (!readOnly && view.task && !r.loop) this.startReads();
     },
     startReads(): void {
       const r = state(this), host = r.host, owner = r.owner;
       r.loop?.destroy(); r.loop = null;
-      if (!r.alive || !r.shown || !host?.context.current() || !owner || !r.view?.task
+      if (!r.alive || !r.shown || !host?.context.current() || host.context.readOnly || !owner || !r.view?.task
         || ['succeeded','partially_succeeded','failed','cancelled'].includes(r.view.task.status)) return;
       const epoch = r.epoch, current = () => r.alive && r.shown && r.epoch === epoch && r.host === host && r.owner === owner && host.context.current();
       const controller = new AiPollingController(async (_context,signal) => {
@@ -163,10 +184,10 @@ Component({
     onBegin(): void { void this.work('begin'); },
     onStart(): void { void this.work('start'); },
     onContinue(): void { void this.work('continue'); },
-    onRead(): void { void this.work('read'); },
+    onRead(): Promise<void> { return this.work('read'); },
     async originalHumanValues(): Promise<InspectionHumanHandoff> {
       const r = state(this), host = r.host, owner = r.owner, epoch = r.epoch;
-      if (!r.alive || !r.shown || r.pending || !host?.context.current() || !owner) throw Error('原人工检查值暂不可用');
+      if (!r.alive || !r.shown || r.pending || !host?.context.current() || host.context.readOnly || !owner) throw Error('原人工检查值暂不可用');
       const current = () => r.alive && r.shown && r.host === host && r.owner === owner && r.epoch === epoch && host.context.current();
       r.pending = true; this.setData({ pending: true });
       try {
@@ -178,13 +199,13 @@ Component({
     },
     onUseHumanValues(): void {
       const r = state(this);
-      if (r.alive && r.shown && !r.pending && r.host?.context.current() && r.owner) this.triggerEvent('humanvalues');
+      if (r.alive && r.shown && !r.pending && r.host?.context.current() && !r.host.context.readOnly && r.owner) this.triggerEvent('humanvalues');
     },
     originalResultReference() {
       const r = state(this); return r.alive && r.shown && this.data.resultAvailable && r.host?.context.current() && r.view?.result ? { ...r.view.result } : null;
     },
     onReviewResult(): void {
-      const r = state(this); if (!r.alive || !r.shown || !this.data.resultAvailable || !r.host?.context.current() || !r.view?.result) return;
+      const r = state(this); if (!r.alive || !r.shown || !this.data.resultAvailable || !r.host?.context.current() || r.host.context.readOnly || !r.view?.result) return;
       this.triggerEvent('result', { reference: { ...r.view.result } });
     },
   },

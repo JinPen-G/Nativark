@@ -34,6 +34,10 @@ export interface TaskCenterRecoveryDependencies {
   auth: Parameters<typeof composePersistedTaskCenter>[0]['auth'];
   original: { readRecoverySnapshot(request: Request, value: unknown): Promise<unknown>;
     readTakeoverReceipt(request: Request, value: unknown): Promise<unknown> };
+  selectedOrder?: { readRecoverySnapshot(request: Request, value: unknown, signal?: AbortSignal): Promise<unknown>;
+    readTakeoverReceipt(request: Request, value: unknown, signal?: AbortSignal): Promise<unknown>;
+    recover(request: Request, value: unknown, signal?: AbortSignal): Promise<unknown>;
+    takeover(request: Request, value: unknown, signal?: AbortSignal): Promise<unknown> };
   host(kind: AiTaskRecoveryHostDraft): Host | undefined;
   clock?: () => Date;
 }
@@ -95,7 +99,8 @@ export function composeTaskCenterRecoveryRequests(d: TaskCenterRecoveryDependenc
         let result: AiTaskRecoveryTargetDraft | AiTaskRecoveryResultDraft | AiTaskRecoveryReceiptDraft | AiTaskRecoverySnapshotDraft;
         if (action === 'target') {
           const found = await read(() => locator(command as AiTaskRecoveryTargetQueryDraft));
-          const target = await read(() => readTaskCenterRecoveryTarget({ db: d.db, tasks: root.tasks, original: d.original, clock }, request, found.query, signal));
+          const target = await read(() => readTaskCenterRecoveryTarget({ db: d.db, tasks: root.tasks, original: d.original,
+            selectedOrder: d.selectedOrder, clock }, request, found.query, signal));
           await read(found.verify);
           const actions: Array<'recover' | 'takeover'> = [];
           if (target.status === 'available' && d.host(target.host)
@@ -111,14 +116,30 @@ export function composeTaskCenterRecoveryRequests(d: TaskCenterRecoveryDependenc
         } else if (action === 'snapshot' || action === 'receipt') {
           const found = await read(() => locator(command as AiTaskRecoveryRunQueryDraft));
           if (action === 'snapshot') {
-            const value = await read(() => d.original.readRecoverySnapshot(request, { original: found.original, runId: found.run.id }));
+            // Snapshot observation remains independent of execution-host
+            // availability. An old original/model-control read must not become
+            // unavailable merely because it has no new recovery target.
+            const selections = await read(() => d.db.aiTaskQuoteSelection.findMany({ where: { scopeId: found.task.scopeId,
+              taskId: found.task.id, runId: found.run.id, originalRequestId: found.original.inputRef,
+              ownerKind: found.access.actorKind, ownerId: found.access.actorId, audience: found.access.audience }, take: 2 }));
+            if (selections.length > 1 || selections.length === 1 && !d.selectedOrder) throw unavailable();
+            const value = selections.length === 1
+              ? await read(() => d.selectedOrder!.readRecoverySnapshot(request, found.query, signal))
+              : await read(() => d.original.readRecoverySnapshot(request, { original: found.original, runId: found.run.id }));
             if (!validateAiTaskCenterRecoveryValue('AiSceneModelRecoverySnapshotReadResponse', value)
               || !same(value.original, found.original) || value.snapshot.task.taskId !== found.task.id || value.snapshot.run.runId !== found.run.id) throw unavailable();
             result = value;
           } else {
             const query = command as AiTaskRecoveryReceiptQueryDraft;
-            const value = await read(() => d.original.readTakeoverReceipt(request, { original: found.original, runId: found.run.id,
-              expectedTaskRevision: query.expectedTaskRevision, expectedRunRevision: query.expectedRunRevision, expectedFencingToken: query.expectedFencingToken }));
+            const selections = await read(() => d.db.aiTaskQuoteSelection.findMany({ where: { scopeId: found.task.scopeId,
+              taskId: found.task.id, runId: found.run.id, originalRequestId: found.original.inputRef,
+              ownerKind: found.access.actorKind, ownerId: found.access.actorId, audience: found.access.audience }, take: 2 }));
+            if (selections.length > 1 || selections.length === 1 && !d.selectedOrder) throw unavailable();
+            const value = await read(() => selections.length === 1
+              ? d.selectedOrder!.readTakeoverReceipt(request, query, signal)
+              : d.original.readTakeoverReceipt(request, { original: found.original, runId: found.run.id,
+                expectedTaskRevision: query.expectedTaskRevision, expectedRunRevision: query.expectedRunRevision,
+                expectedFencingToken: query.expectedFencingToken }));
             if (!value || typeof value !== 'object' || !('receipt' in value) || !('original' in value) || !same(value.original, found.original)) throw unavailable();
             const packet = { ...found.query, original: found.original, receipt: value.receipt, execution: 'read_only_no_lease_or_dispatch' };
             if (!validateAiTaskCenterRecoveryValue('AiTaskRecoveryReceiptDraft', packet)
@@ -128,7 +149,8 @@ export function composeTaskCenterRecoveryRequests(d: TaskCenterRecoveryDependenc
           await read(found.verify);
         } else {
           const commandValue = command as AiTaskRecoveryCommandDraft, fence = snapshotTaskCenterRecoveryFence(commandValue);
-          const target = await read(() => readTaskCenterRecoveryTarget({ db: d.db, tasks: root.tasks, original: d.original, clock }, request,
+          const target = await read(() => readTaskCenterRecoveryTarget({ db: d.db, tasks: root.tasks, original: d.original,
+            selectedOrder: d.selectedOrder, clock }, request,
             { taskId: fence.taskId, runId: fence.runId }, signal));
           if (target.status !== 'available') throw unavailable();
           assertTaskCenterRecoveryFence(fence, target.snapshot);
@@ -136,7 +158,9 @@ export function composeTaskCenterRecoveryRequests(d: TaskCenterRecoveryDependenc
           const host = d.host(target.host); if (!host) throw unavailable();
           const original = action === 'recover' ? target.original : { original: target.original,
             expectedTaskRevision: fence.expectedTaskRevision, expectedRunRevision: fence.expectedRunRevision, expectedFencingToken: fence.expectedFencingToken };
-          const returned = await host[action](request, original, signal, fence); live();
+          const returned = target.host === 'selected_quote_order'
+            ? await d.selectedOrder![action](request, fence, signal)
+            : await host[action](request, original, signal, fence); live();
           let outcome: unknown = returned;
           if (target.host === 'order_read') {
             const observed = validateAiOrderReadResponse(action, returned, original);

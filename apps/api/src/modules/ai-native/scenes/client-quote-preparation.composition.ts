@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { aiClientQuoteParameterReviewSchema, RENTAL_PRICING_UNIT_CODES } from '@rental-os/shared';
 import type { ClientApiService } from '../../client/client-api.service';
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
@@ -32,6 +33,8 @@ export function composeClientOriginalQuotePreparation(input: {
   client: Pick<ClientApiService, 'prepareQuoteForOriginalOperation' | 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation'>;
   tasks: AiClientTaskDependencies; channel: 'web' | 'wechat_miniprogram'; tenantCode: string; serviceCode: string;
   clock?: () => Date;
+  /** Request-local publication/lifecycle check, never a wire or model grant. */
+  assertCurrent?(): Promise<void>;
 }) {
   const enabled = input.enabled === true, clock = input.clock ?? (() => new Date());
   const scene = clientTaskSceneSchema.parse({ sceneCode: input.tasks.sceneCode, sceneVersion: input.tasks.sceneVersion });
@@ -76,11 +79,45 @@ export function composeClientOriginalQuotePreparation(input: {
     await check(bound);
     return { bound, row, material, permission };
   };
-  const packet = (row: AiClientSceneMaterial) => ({ materialRef: row.id, materialHash: row.materialHash,
-    inputHash: decode(row).inputHash, revision: row.revision, expiresAt: row.expiresAt.toISOString(),
-    preparation: 'normalized_parameters' as const, eligibility: 'not_attested' as const,
-    quotePersistence: 'not_attempted' as const, inventoryReservation: 'not_attempted' as const,
-    humanAction: 'explicit_confirmation_required' as const });
+  const parameterReview = (material: ReturnType<typeof decode>) => {
+    // The original Core resolver preserves line order, quantity and explicit
+    // units. Only an omitted unit can carry its registered server-default basis.
+    // Do not read current configuration or mutate the persisted human input.
+    const line = z.object({ itemGroupId: z.string().optional(), pricingGroupId: z.string().optional(),
+      quantity: z.number().finite().positive(), pricingUnit: z.string().optional() }).passthrough();
+    const lines = z.object({ lines: z.array(line).min(1).max(100) }).passthrough();
+    const original = lines.safeParse(material.input), normalized = lines.safeParse(material.normalized);
+    if (!original.success || !normalized.success || original.data.lines.length !== normalized.data.lines.length) throw unavailable();
+    // An old preparation could precede Core's unit normalization. Its exact
+    // receipt remains readable; today's default cannot sign that old material.
+    const unit = z.enum(RENTAL_PRICING_UNIT_CODES);
+    if (normalized.data.lines.some(value => value.pricingUnit === undefined)) {
+      if (normalized.data.lines.some(value => value.pricingUnit !== undefined && !unit.safeParse(value.pricingUnit).success)) throw unavailable();
+      return undefined;
+    }
+    return aiClientQuoteParameterReviewSchema.parse({ configurationHash: material.configurationHash,
+      lines: normalized.data.lines.map((value, lineIndex) => {
+        const selected = original.data.lines[lineIndex];
+        if (selected.quantity !== value.quantity || selected.itemGroupId && selected.itemGroupId !== value.itemGroupId
+          || selected.pricingGroupId !== value.pricingGroupId
+          || selected.pricingUnit !== undefined && selected.pricingUnit !== value.pricingUnit) throw unavailable();
+        return { lineIndex, itemGroupId: value.itemGroupId,
+          ...(value.pricingGroupId === undefined ? {} : { pricingGroupId: value.pricingGroupId }),
+          quantity: value.quantity, pricingUnit: value.pricingUnit,
+          source: selected.pricingUnit === undefined ? 'server_default' : 'user_explicit',
+          basis: selected.pricingUnit !== undefined ? 'user_input'
+            : selected.pricingGroupId === undefined ? 'business_settings_default' : 'pricing_group_default' };
+      }) });
+  };
+  const packet = (row: AiClientSceneMaterial) => {
+    const material = decode(row), review = parameterReview(material);
+    return { materialRef: row.id, materialHash: row.materialHash,
+      inputHash: material.inputHash, revision: row.revision, expiresAt: row.expiresAt.toISOString(),
+      ...(review ? { parameterReview: review } : {}),
+      preparation: 'normalized_parameters' as const, eligibility: 'not_attested' as const,
+      quotePersistence: 'not_attempted' as const, inventoryReservation: 'not_attempted' as const,
+      humanAction: 'explicit_confirmation_required' as const };
+  };
   const observeOriginal = async (value: unknown) => {
     const { bound, row, permission } = await load(value, 'read');
     const result = await quotes.readOriginal({ reference: `${row.id}:${row.materialHash}` });
@@ -152,6 +189,7 @@ export function composeClientOriginalQuotePreparation(input: {
         || normalized.customerId !== bound.identity.customerId) throw denied();
       const material = canonical({ version: 'client-prequote-1', input: raw, normalized: normalized.request,
         inputHash: normalized.inputHash, configurationHash: normalized.configurationHash });
+      if (!parameterReview(material as ReturnType<typeof decode>)) throw unavailable();
       const latest = await grant(bound, 'create');
       if (latest.policyHash !== permission.policyHash) throw stale();
       await check(bound);
@@ -176,6 +214,7 @@ export function composeClientOriginalQuotePreparation(input: {
       // Pre-existing original quotes remain readable without manufacturing a
       // new attempt or reentering the writer after an upgrade/restart.
       if ((await observeOriginal(value)).state === 'observed') return observedConfirmation(value);
+      if (!parameterReview(material)) throw unavailable();
       const currentParameters = await quotes.prepare({ input: material.input });
       if (currentParameters.inputHash !== material.inputHash || currentParameters.configurationHash !== material.configurationHash) throw stale();
       await check(bound);
@@ -205,7 +244,25 @@ export function composeClientOriginalQuotePreparation(input: {
       await check(bound);
       if ((await grant(bound, 'execute')).policyHash !== permission.policyHash || row.expiresAt <= clock()) throw stale();
       const result = await quotes.create({ reference: `${row.id}:${row.materialHash}`, input: material.input,
-        prepared: { inputHash: material.inputHash, configurationHash: material.configurationHash } });
+        prepared: { inputHash: material.inputHash, configurationHash: material.configurationHash } }, async native => {
+        // The same original quote transaction calls after all internal Core
+        // waits. Pin this material, attempt and policy, then close current Auth,
+        // publication and execution admission; an old attempt never re-dispatches.
+        const source = await repository.findOperation(bound.scope, row.operationKey, native, true);
+        const attempt = await repository.findOperation(bound.scope, operationKey, native, true);
+        const subject = { ...bound.scope, identity: bound.identity };
+        const lockedPolicy = await authority.policy(subject, 'execute', native, true);
+        if (!source || !attempt || requestFingerprint(canonical(source)) !== requestFingerprint(canonical(row))) throw stale();
+        assertAttempt(attempt, row, material);
+        await check(bound); await input.assertCurrent?.();
+        const final = await grant(bound, 'execute');
+        await check(bound); await input.assertCurrent?.();
+        // No awaited Guard or publication read follows this deadline check
+        // before the originating Core transaction initiates its INSERT.
+        if (final.policyHash !== permission.policyHash
+          || requestFingerprint(canonical(final.policy)) !== requestFingerprint(canonical(lockedPolicy))
+          || row.expiresAt <= clock() || final.policy.expiresAt <= clock()) throw stale();
+      });
       await check(bound);
       if ((await grant(bound, 'execute')).policyHash !== permission.policyHash) throw denied();
       return { ...result, source: { materialRef: row.id, materialHash: row.materialHash },

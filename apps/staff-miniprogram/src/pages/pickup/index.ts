@@ -7,7 +7,7 @@ import { inspectionResults, inspectionRows, type InspectionFieldRow } from "../.
 import { resolveImage } from "../../core/images";
 import { newKey } from "../../core/keys";
 import { blockedState, errorState, handleCommonViewAction, loadingState, readyState, type ViewState } from "../../core/page";
-import { can, isSignedIn } from "../../core/session";
+import { can, currentSession, isSignedIn } from "../../core/session";
 import { itemGroupCover, maskPhone } from "../../core/presenters";
 import { themeBehavior } from "../../core/theme-behavior";
 import { formatBusinessRange } from "../../core/time";
@@ -34,6 +34,21 @@ interface GateItem { key: string; label: string; tone: string; status: string; h
 const PICKUP_ALLOCATION_STATUSES = ["pre_assigned", "locked", "allocated"];
 const RESERVATION_DEAD = ["released", "expired", "cancelled"];
 
+/** Local display witness from the original session. Token rotation and code
+ * ordering are not permission changes; the server still authorizes every read. */
+function inspectionReadAccessKey(): string {
+  const session = currentSession();
+  if (!session) return "";
+  const user = session.user;
+  const codes = (values: readonly string[]) => values.includes("*") ? ["*"] : [...new Set(values)].sort();
+  return JSON.stringify([inspectionPageScopeKey(), codes(user.permissions), user.dataScope,
+    codes(user.tenantPermissions), user.tenantDataScope, user.isTenantAdmin, user.mustChangePassword]);
+}
+function inspectionReadBlock(): ViewState | null {
+  if (!can("rental-os:order:view")) return blockedState("无订单查看权限", "请联系管理员授权");
+  return can("rental-os:order:pickup") ? null : blockedState("无领取权限", "请联系管理员授权");
+}
+
 Page({
   behaviors: [themeBehavior],
   data: { ...emptyInspectionHandover(), aiInspectionRecording: false, aiInspectionMediaBusy: false, aiInspectionMediaReady: false, aiInspectionCanUpload: false, aiInspectionCanSaveDraft: false, aiInspectionCanRecoverMedia: false, aiInspectionCanVerifyUpload: false, aiInspectionMediaMessage: '', aiInspectionTaskVisible: false, aiInspectionTaskLoading: false, aiInspectionTaskMessage: "", aiInspectionVisible: false, aiInspectionHistoryLoading: false, aiInspectionHistoryMessage: "", view: loadingState() as ViewState, id: "", orderNo: "", customer: "", phone: "", period: "", location: "", itemLabel: "物品", pickupLabel: "领取", groups: [] as DeviceGroup[], sharedFields: [] as InspectionFieldRow[], hasBulk: false, gates: [] as GateItem[], templateName: "", noTemplate: false, hasDeliveryAddress: false, deliveryLabel: "配送", deliveryRecipient: "", deliveryPhone: "", deliveryAddressText: "", busy: false, uploading: false, signatureWidth: 320, signatureHeight: 150, signatureDrawn: false, signatureFileAssetId: "", error: "" },
@@ -45,6 +60,8 @@ Page({
   inspectionPageShown: false,
   inspectionPageEpoch: 0,
   inspectionLoadedScope: '',
+  inspectionAccessKey: null as string | null,
+  inspectionReadRequired: false,
   inspectionContextUnsubscribe: undefined as (() => void) | undefined,
   inspectionUploadAbort: undefined as (() => void) | undefined,
   clearInspectionContext() {
@@ -53,8 +70,18 @@ Page({
     this.order = undefined; this.template = undefined; this.boolCodes = []; this.inspectionLoadedScope = '';
     this.signatureDrawing = false; this.signatureContext = undefined;
     clearInspectionPage(this); clearInspectionTaskPage(this);
-    this.setData({ orderNo: '', customer: '', phone: '', period: '', sharedFields: [], busy: false, uploading: false,
+    this.setData({ orderNo: '', customer: '', phone: '', period: '', location: '', sharedFields: [], busy: false, uploading: false,
       signatureDrawn: false, signatureFileAssetId: '', templateName: '', noTemplate: true, error: '', aiInspectionRecording: false, aiInspectionMediaBusy: false, aiInspectionMediaReady: false, aiInspectionCanUpload: false, aiInspectionCanSaveDraft: false, aiInspectionCanRecoverMedia: false, aiInspectionCanVerifyUpload: false, aiInspectionMediaMessage: '', groups: [], gates: [], hasDeliveryAddress: false, deliveryRecipient: '', deliveryPhone: '', deliveryAddressText: '' });
+  },
+  observeInspectionAccess() {
+    const key = inspectionReadAccessKey();
+    if (this.inspectionAccessKey === null) { this.inspectionAccessKey = key; return; }
+    if (this.inspectionAccessKey === key) return;
+    this.clearInspectionContext(); this.inspectionAccessKey = key; this.inspectionReadRequired = true;
+    // loadContext emits refreshed inside its own await. Withdraw immediately,
+    // then wait for an explicit reread instead of recursively starting a load.
+    this.setData({ view: inspectionReadBlock() ?? blockedState("权限或数据范围已更新",
+      "请重新读取原订单和检查模板后继续。", "重新读取", "refresh") });
   },
   attachInspectionHost(host: StaffInspectionHost) { attachInspectionPage(this, host, "pickup"); },
   attachRemoteInspectionHost(reference: { allocationId: string; draftId: string }, recognitionReference?: InspectionRecognitionReference) {
@@ -104,30 +131,43 @@ Page({
     hideInspectionHumanForm(this);
     stopInspectionPageRecording(this, true); cancelInspectionPageUpload(this); hideInspectionPage(this); hideInspectionTaskPage(this); this.setData({ uploading: false, busy: false, aiInspectionRecording: false, aiInspectionMediaBusy: false }); },
   onUnload() { this.inspectionPageShown = false; this.clearInspectionContext(); this.inspectionContextUnsubscribe?.(); this.inspectionContextUnsubscribe = undefined; },
-  onLoad(query: Record<string, string>) { this.inspectionPageShown = false; this.clearInspectionContext(); const width = Math.max(240, wx.getSystemInfoSync().windowWidth - 48); this.setData({ id: query.id ?? "", signatureWidth: width }); },
+  onLoad(query: Record<string, string>) { this.inspectionPageShown = false; this.inspectionAccessKey = null; this.inspectionReadRequired = false; this.clearInspectionContext(); const width = Math.max(240, wx.getSystemInfoSync().windowWidth - 48); this.setData({ id: query.id ?? "", signatureWidth: width }); },
   onShow() {
     this.inspectionPageShown = true;
     if (!isSignedIn()) { this.clearInspectionContext(); this.inspectionPageShown = false; relaunch(ROUTES.login); return; }
     if (!this.inspectionContextUnsubscribe) this.inspectionContextUnsubscribe = subscribeInspectionPageScope(() => {
-      if (this.inspectionLoadedScope === inspectionPageScopeKey()) return;
-      this.clearInspectionContext(); if (this.inspectionPageShown && isSignedIn()) void this.load();
+      this.observeInspectionAccess();
     });
+    this.observeInspectionAccess();
+    const blocked = inspectionReadBlock();
+    if (blocked) { this.clearInspectionContext(); this.setData({ view: blocked }); return; }
+    if (this.inspectionReadRequired) return;
     if (this.inspectionLoadedScope !== inspectionPageScopeKey()) this.clearInspectionContext();
     this.restoreHandover();
     void this.selectComponent('#ai-inspection-assist')?.hostShow?.(); showInspectionTaskPage(this);
     if (!this.order) void this.load();
   },
   async load() {
+    if (!this.inspectionPageShown || !isSignedIn()) return;
+    this.observeInspectionAccess();
+    const blocked = inspectionReadBlock();
+    if (blocked) { this.clearInspectionContext(); this.setData({ view: blocked }); return; }
+    const accessKey = inspectionReadAccessKey();
+    this.inspectionAccessKey = accessKey; this.inspectionReadRequired = false;
     let work: InspectionPageWorkContext;
     this.inspectionPageEpoch++;
-    try { work = captureInspectionPageWork(this, true); } catch { return; }
+    try {
+      const captured = captureInspectionPageWork(this, true);
+      work = { ...captured, current: () => captured.current() && inspectionReadAccessKey() === accessKey };
+    } catch { return; }
     if (!this.data.id) { this.setData({ view: blockedState("缺少订单编号", "请从订单详情重新进入") }); return; }
     this.setData({ view: loadingState() });
     try {
       const [order, templates, context, itemGroups, funding] = await Promise.all([getOrder(work.orderId), listInspectionTemplates("pickup", work.orderId), loadContext(), listItemGroups().catch(() => []), getOrderFunding(work.orderId).catch(() => undefined)]);
       if (!work.current()) return;
       if (order.id !== work.orderId) throw new Error('原订单引用不一致');
-      if (!can("rental-os:order:pickup")) { this.setData({ view: blockedState("无领取权限", "请联系管理员授权") }); return; }
+      const currentBlock = inspectionReadBlock();
+      if (currentBlock) { this.clearInspectionContext(); this.setData({ view: currentBlock }); return; }
       this.order = order; this.inspectionLoadedScope = work.scopeKey;
       this.template = templates.find((row) => row.enabled && row.categoryCode === order.categoryCode);
       this.restoreHandover();

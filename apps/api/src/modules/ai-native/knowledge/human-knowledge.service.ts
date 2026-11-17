@@ -10,6 +10,7 @@ import { KnowledgeTextParser } from './knowledge-text-parser';
 import { KnowledgeSourceService } from './knowledge-source.service';
 import { PrismaKnowledgeReadAdapter } from './prisma-knowledge-read.adapter';
 import { PrismaKnowledgeRepository } from './prisma-knowledge.repository';
+import { createPrismaKnowledgeRetention } from './prisma-knowledge-retention';
 import { KnowledgeError, requiredPort, unavailable } from './knowledge-errors';
 import { documentSourceSchema, draftInput, mutationInput, fingerprint, id, parse, visible } from './knowledge-validation';
 
@@ -54,7 +55,8 @@ export class HumanKnowledgeService {
     if (ports.files !== undefined) requiredPort(ports.files, ['read']);
     this.documents = new KnowledgeDocumentService({ repository: this.repository, authorization: this.authorization,
       clock: ports.clock, files: ports.files ?? { read: async () => unavailable() }, parser: new KnowledgeTextParser(),
-      attachmentBindingRequired: ports.files !== undefined });
+      attachmentBindingRequired: ports.files !== undefined }, createPrismaKnowledgeRetention(ports.db,
+      () => new Date(ports.clock.now())));
     this.publication = new KnowledgePublicationService(this.documents);
   }
   private invoke(callback: (context: AiExecutionContext) => Promise<KnowledgeRecord>) {

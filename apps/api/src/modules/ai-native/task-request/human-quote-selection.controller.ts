@@ -135,6 +135,16 @@ async function respondHumanQuote<T>(work: () => Promise<T>, unknownAction = 'rec
 export class AiHumanQuoteSelectionController {
   constructor(@Inject(AI_HUMAN_QUOTE_SELECTION_REQUESTS) private readonly selections: ReturnType<typeof composeRequestBoundQuoteSelections>) {}
   private readonly respond = respondHumanQuote;
+  @Post(AI_QUOTE_SELECTION_HTTP_DRAFT.prepareMerchantDelegation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  prepareMerchantDelegation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return this.respond(async () => validateQuoteSelectionResponse('AiMerchantDelegatedQuoteSelectionPreparationDraft',
+      await this.selections.prepareMerchantDelegation(request, body)));
+  }
+  @Post(AI_QUOTE_SELECTION_HTTP_DRAFT.readOperation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readOperation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return this.respond(async () => validateQuoteSelectionResponse('AiQuoteSelectionReconcileResponseDraft',
+      await this.selections.readOperationLocator(request, body)));
+  }
   @Post() @HttpCode(200) @Header('Cache-Control', 'no-store')
   select(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
     return this.respond(async () => validateQuoteSelectionResponse('AiQuoteSelectionSelectResponseDraft',

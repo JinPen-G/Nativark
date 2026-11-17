@@ -12,15 +12,15 @@ AI chat 为归档作者独立完成的实现；Agent run 保留公开归档 CSS 
 
 | 文件 | 必要适配 |
 | --- | --- |
-| AiChat.tsx | 原聊天状态可由租户 shell 托管，保留原分支算法；增加当前能力会话范围筛选与顶栏工作区入口；模型菜单移入两层输入框；本地化；接入共享动态偏好；附件对象URL由 shell 统一释放 |
+| AiChat.tsx | 原聊天状态可由租户 shell 托管，保留原分支算法；增加当前能力会话范围筛选与顶栏工作区入口；模型菜单移入两层输入框；本地化；接入共享动态偏好；附件对象URL由 shell 统一释放；原生业务接入使用可选宿主状态、发送检查及历史回调，不修改原CSS |
 | chat-state.ts | responder options 增加可选 chatId，用于隔离并发/过期运行 |
-| chat-demo.ts | 去掉 `.ts` 导入后缀以兼容项目 TS 配置；原默认示例保留作来源资料，业务页面显式传入自己的本地 responder/history/models，不显示原编码示例 |
+| chat-demo.ts | 去掉 `.ts` 导入后缀以兼容项目 TS 配置；原默认示例保留作来源资料；业务页面显式传入正式 responder/history/models，不显示原编码示例 |
 | ChatMarkdown.tsx / ToolCall.tsx | 仅本地化可见按钮和提示，Markdown、引用、来源卡片和工具面板保持原实现 |
 | AgentRun.tsx | activityOnly 模式隐藏编码结果、PR与重启动作；保留运行步骤及其输入/输出折叠；本地化和共享动态偏好 |
 | shared/MeasuredHeight.tsx | 保留测量弹簧，改读平台有效动态偏好 |
 | ../archive-adapter.css | 主题色、字体、圆角和宿主尺寸；不改原 CSS 文件 |
 
-业务数据、模拟事件和最终结果位于上层 `demo-response.ts`、`OperatorContext.tsx`、`capabilities.ts`。真实业务接入依然需要消息流、工具事件与结果回调。当前没有模型请求、业务API读取、写入、上传或调度。
+原演示回应与示例结果仍保留在 `demo-response.ts`、`chat-demo.ts` 和 `capabilities.ts` 的示例函数中，不能作为业务数据。实际业务由上层 `OperatorContext.tsx`、`native-session.ts` 和 `NativeOperatorWorkspace.tsx` 通过正式原会话／Task／结果接口接入；原归档不直接获取业务凭据、不决定批准、不直连模型或Core。阶段验证与未验环境见专项原记录，不以组件来源或静态效果宣布业务已完成。
 
 ## 文档
 

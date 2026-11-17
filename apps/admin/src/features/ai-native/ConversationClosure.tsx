@@ -9,7 +9,7 @@ import { ConversationLifecycleSession } from './conversation-lifecycle-session';
 import { useAiManagementLocale } from './management-locale';
 
 export function ConversationClosure({ identity, conversationId, observation, current, onChanged, onRotate, canClose, beforeClose }: {
-  identity: string; conversationId: string; observation: AiConversationObservationDraft | null; current: () => boolean; onChanged: () => void;
+  identity: string; conversationId: string; observation: AiConversationObservationDraft | null; current: () => boolean; onChanged: () => void | Promise<void>;
   canClose: boolean; beforeClose: (observation: AiConversationObservationDraft) => void;
   onRotate: (proof: { operationKey: string; expectedRevision: number; turnId: string; originalInputRef: string }, acknowledge: () => void) => Promise<void>;
 }) {
@@ -37,7 +37,8 @@ export function ConversationClosure({ identity, conversationId, observation, cur
       if (typeof beforeClose !== 'function') throw Error('AI_RESULT_UNKNOWN');
       beforeClose(target!);
     }
-    scope.current.onChanged();
+    const beforeChange = scope.current.onChanged();
+    if (beforeChange) await beforeChange;
     if (action === 'receipt') await session.reconcile();
     else if (action === 'rotate') await session.completeClosure(async (proof, acknowledge) => {
       if (scope.current.identity !== identity || scope.current.conversationId !== conversationId || document.hidden || !scope.current.current()) throw Error('AI_SCOPE_CHANGED');
@@ -47,7 +48,10 @@ export function ConversationClosure({ identity, conversationId, observation, cur
       const turn = target!.currentTurn!;
       await session.close(turn.task ? 'release' : 'closeUnstarted', conversationId, target!.revision, turn.turnId, turn.original.inputRef);
     }
-    if (scope.current.identity === identity && scope.current.conversationId === conversationId && !document.hidden && scope.current.current()) scope.current.onChanged();
+    if (scope.current.identity === identity && scope.current.conversationId === conversationId && !document.hidden && scope.current.current()) {
+      const afterChange = scope.current.onChanged();
+      if (afterChange) await afterChange;
+    }
   };
   return <section aria-label={t('原轮次关闭与释放')} aria-busy={state.busy}>
     <p>{t('关闭未创建请求或释放已终结轮次由服务端核验；不取消任务，不释放未知费用。')}</p>

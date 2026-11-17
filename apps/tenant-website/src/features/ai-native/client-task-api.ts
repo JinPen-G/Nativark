@@ -6,7 +6,17 @@ import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientOrderMaterialRequestSchema, aiClien
   aiClientTaskReadRequestSchema, aiClientTaskCreationReceiptSchema, aiClientTaskModelControlResponseSchema,
   aiClientTaskModelResultReadResponseSchema, aiClientTaskInputReadResponseSchema, aiClientTaskInputSubmissionRequestSchema,
   aiClientTaskInputSubmissionReceiptSchema, aiClientTaskInputReceiptReadResponseSchema,
-  aiClientTaskEventsReadRequestSchema, aiClientTaskSnapshotReadResponseSchema, aiClientTaskEventsReadResponseSchema } from '@rental-os/shared';
+  aiClientTaskEventsReadRequestSchema, aiClientTaskSnapshotReadResponseSchema, aiClientTaskEventsReadResponseSchema,
+  aiClientOrderActionSourceSchema, aiClientOrderActionSchema, aiClientOrderActionRevalidationSchema, aiClientHostCapabilitiesSchema,
+  type AiClientHostCapabilities, type AiClientOrderActionSource, type AiClientOrderAction } from '@rental-os/shared';
+
+/** Local read ports use the original public references. They are not HTTP
+ * contracts, publication switches or a source of navigation authority. */
+export interface ClientOrderNavigationPort {
+  readHost(source: AiClientOrderActionSource): Promise<AiClientHostCapabilities>;
+  readAction(source: AiClientOrderActionSource): Promise<AiClientOrderAction>;
+  revalidateAction(action: AiClientOrderAction, source: AiClientOrderActionSource): Promise<AiClientOrderAction>;
+}
 
 export function createClientTaskApi(context: { tenantCode: string; current(): boolean }) {
   const call = async <T>(action: string, request: unknown, schema: { parse(value: unknown): T }, signal?: AbortSignal): Promise<T> => {
@@ -19,6 +29,17 @@ export function createClientTaskApi(context: { tenantCode: string; current(): bo
     return schema.parse(body);
   };
   return Object.freeze({
+    orderNavigation: Object.freeze({
+      readHost(source: AiClientOrderActionSource) {
+        return call(AI_CLIENT_ENTRY_HTTP_DRAFT.readOrderTaskHostCapabilities, aiClientOrderActionSourceSchema.parse(source), aiClientHostCapabilitiesSchema);
+      },
+      readAction(source: AiClientOrderActionSource) {
+        return call(AI_CLIENT_ENTRY_HTTP_DRAFT.readOrderAction, aiClientOrderActionSourceSchema.parse(source), aiClientOrderActionSchema);
+      },
+      revalidateAction(action: AiClientOrderAction, source: AiClientOrderActionSource) {
+        return call(AI_CLIENT_ENTRY_HTTP_DRAFT.revalidateOrderAction, aiClientOrderActionRevalidationSchema.parse({ ...source, action }), aiClientOrderActionSchema);
+      },
+    }),
     prepareMaterial(input: ReturnType<typeof aiClientOrderMaterialRequestSchema.parse>, signal?: AbortSignal) {
       return call(AI_CLIENT_ENTRY_HTTP_DRAFT.prepareOrderMaterial, aiClientOrderMaterialRequestSchema.parse(input), aiClientOrderMaterialReceiptSchema, signal);
     },
@@ -57,4 +78,4 @@ export function createClientTaskApi(context: { tenantCode: string; current(): bo
     },
   });
 }
-export type ClientTaskApi = ReturnType<typeof createClientTaskApi>;
+export type ClientTaskApi = Omit<ReturnType<typeof createClientTaskApi>, 'orderNavigation'> & { readonly orderNavigation?: ClientOrderNavigationPort };

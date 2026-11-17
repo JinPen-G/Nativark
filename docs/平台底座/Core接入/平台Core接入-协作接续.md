@@ -12,7 +12,9 @@
 
 Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该Core。未来跨Core协作通过明确对象引用/接口/事件实现，本期不开放共享业务表或隐含读权。先交标准本地包，再接固定GitHub Release获取及Topic发现；底座与Core分别更新，保留下游业务、配置、数据和授权。[包标准](平台Core接入-开发任务.md#core-package-standard) · [独立更新](平台Core接入-开发任务.md#independent-upgrades)
 
-唯一施工树为 C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS，分支 codex/platform-core-extraction。本树由本对话唯一写入；允许修改PCH所需Auth/Guard/ALS、正式包出口、主装配/OpenAPI、schema/迁移/Seed与后台外壳。main索引和其他树仍归其作者。最近实际远端main为62ca183f10b7c316ab63c28ef6d04ee88d06488b，已在本树祖先；新增固定main按差异核对后整合，不追其他专项活动HEAD。[固定主线与记录保全](平台Core接入-开发记录.md#core-main-runtime-sync-20261115)
+唯一施工树为 C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS，分支 codex/platform-core-extraction。本树由本对话唯一写入；允许修改PCH所需Auth/Guard/ALS、正式包出口、主装配/OpenAPI、schema/迁移/Seed与后台外壳。main索引和其他树仍归其作者。源码已接住固定main3e0b2c72865fa0a21053f26608bda878861c9f90；最新远端1d53ada2bb79a220e4d99f75f27508bfac5360a5仅多AI Native三册文档，源代码片收口后顺序归并。父版85780491bb9e5df0ce2b0ad3550345e71dabe63f保全本次旧接续，不追其他专项活动HEAD。[当前固定主线](平台Core接入-开发记录.md#core-main-notification-sync-20261117)
+
+通知草稿/原删除收据、报价提交前回调、个人付款委托与恢复正文剥离现已接到Rental包。原维护读取器由宿主真实供给，缓存只有核验过的不可变无正文引用；原API构造及当前权限/事务保持。公共权限匹配、面板图标及193个精确源码兼容出口同步修正，原后台通过正式包出口复用完整呈现。十配置后端、原101项企业工作流及一次stdin行为通过，七配置前端类型通过；未做真实运行。[当前源码和验证](平台Core接入-开发记录.md#core-main-notification-sync-20261117)
 
 企业资格、订单/财务读取、原命令/审计、客户主档/会员、政策及成员交接已单源迁入Rental包，公共日志基础写入/脱敏在platform-server。企业申请、管理请求、任务中心、行政交接、付款证明和成员审计现也迁入Rental，原API只供给同一实例；客户各端、续租/换货费用合同由纯业务出口维护。本片97个方法/函数正文及138个合同声明正文一致，原101项工作流冒烟和十配置类型通过。下一步继续费用批准/委托及剩余Controller，再处理数据/迁移/Seed和标准装配。父版48a5ecac5a1a1c6d974e183260a7895e5fe10c56保全本片原文/完整接续。[当前申请/任务阶段](平台Core接入-开发记录.md#core-rental-enterprise-workflow-runtime-20261117)[当前政策/成员阶段](平台Core接入-开发记录.md#core-rental-enterprise-policy-members-20261117) · [客户主档](平台Core接入-开发记录.md#core-rental-customer-master-20261117) · [企业读取](平台Core接入-开发记录.md#core-rental-enterprise-reads-20261117) · [原工作流基线](平台Core接入-开发记录.md#core-enterprise-workflow-fixture-20261117)。官方日历源按公共能力处理，原恢复/收款与采用未完项沿阶段证据承接。[恢复/收款](平台Core接入-开发记录.md#core-rental-recovery-payments-20261117) · [采用闭包](平台Core接入-开发记录.md#core-rental-category-adoption-20261117)。正式需求/任务身份、依赖、顺序和业务规则沿批准依据，MIT与品牌原稿引用固定Git。
 
@@ -51,11 +53,11 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 
 ## 5. 验证边界与保留问题
 
-当前申请/任务阶段97个方法/函数正文及客户/续租/换货138个合同声明正文与固定父版相同，原Nest构造类型/顺序保持。原101/101工作流冒烟、十配置类型0诊断，原缺交接运行时的503反例及回滚断言保留。首轮两处类型来源已修正；首次冒烟98/101的三处失败为投影函数从原shared运行时变成VM独立原型，仅修既有loader的同源导入后复验通过，未改业务或断言。SQL/锁/事务/存储仍为明确fixture，真实HTTP/数据库/浏览器/微信、完整Nest宿主/安装/更新、独立接手及审查未验。恢复/资金、原创建夹具和草稿旧失败、日历PROVIDER_UNAVAILABLE包装沿原记录保留。当前worker已退出，output/.tmp为空。[当前阶段证据](平台Core接入-开发记录.md#core-rental-enterprise-workflow-runtime-20261117) · [恢复/收款](平台Core接入-开发记录.md#core-rental-recovery-payments-20261117)
+当前固定主线片19个受影响业务方法正文保留，原101/101工作流及一次通知/委托stdin冒烟通过，原读取writes=0。十配置后端和七配置前端0诊断；后台真实源码出口缺扩展名问题已修，此前缺前置声明和3679诊断保留在记录。SQL/锁/事务/身份/存储仍为明确fixture，真实HTTP/数据库/浏览器/微信、完整Nest宿主/安装/更新、独立接手及审查未验。申请/任务阶段的97个方法与138个合同正文、原503反例/回滚及VM投影失败证据继续从原记录读取；恢复/资金、原创建夹具和草稿旧失败、日历PROVIDER_UNAVAILABLE包装同样保留。当前worker已退出，output/.tmp为空，没有新增临时环境或业务服务。[当前主线证据](平台Core接入-开发记录.md#core-main-notification-sync-20261117) · [申请/任务](平台Core接入-开发记录.md#core-rental-enterprise-workflow-runtime-20261117) · [恢复/收款](平台Core接入-开发记录.md#core-rental-recovery-payments-20261117)
 
 未经进一步授权，不安装依赖、读.env、启真实服务、访问业务HTTP/DB/模型/供应商、执行迁移、合main或发布。中文提交到当前任务分支、普通推送后读取实际远端。正式需求/任务与已应用历史迁移保持，旧原文优先引用固定Git。
 
-旧公共宿主临时环境已归集到 D:/工作文件/rental-OS/output/.cleanup-pending/pch-preparation/platform-host-integration/environment，840文件/91,808,304字节，责任清单为同任务manifest.json。另一个原任务目录rental-business-facts/residual仍有1个0字节guard.log及原责任清单。2026-11-17同一原生PowerShell删除命令仍被自动审批在启动前以blocked by policy拒绝，命令内预检查也未执行；原文件数/体积及0链接已有只读证据，当前没有使用旧环境的任务进程，两份清单最近尝试时间为2026-11-17T08:47:09.724Z。没有换壳/工具绕过，工具恢复后由本会话优先处理，不能称已释放空间。[清理证据](平台Core接入-开发记录.md#core-rental-recovery-receipts-20261116)
+旧公共宿主临时环境已归集到 D:/工作文件/rental-OS/output/.cleanup-pending/pch-preparation/platform-host-integration/environment，840文件/91,808,304字节，责任清单为同任务manifest.json。另一个原任务目录rental-business-facts/residual仍有1个0字节guard.log及原责任清单。2026-11-17原生PowerShell删除命令仍被自动审批在启动前以blocked by policy拒绝，命令内预检查也未执行；原文件数/体积及0链接已有只读证据，当前没有使用旧环境的任务进程，两份清单最近尝试时间为2026-11-17T13:53:33.619Z。没有换壳/工具绕过，工具恢复后由本会话优先处理，不能称已释放空间。[当前清理尝试](平台Core接入-开发记录.md#core-main-notification-sync-20261117) · [原清理证据](平台Core接入-开发记录.md#core-rental-recovery-receipts-20261116)
 
 旧外观测试17例16过/1个静态失败、总导航三份历史附件及MCP导读五个原隔离附件缺失继续保留；近期全局文档检查的稀疏未检目标须按固定Git定位，不删除引用或修改检查器掩盖。原授权/生成/MCP检查的审批拒绝历史保留，后来定向补证不能冒称完整宿主验收。[当前MCP审计](平台Core接入-开发记录.md#core-original-mcp-audit-20261115) · [导读缺链](平台Core接入-开发记录.md#core-rental-capability-runtime-20261116)
 

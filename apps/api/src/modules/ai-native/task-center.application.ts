@@ -7,7 +7,8 @@ import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import { z } from 'zod';
 import { AI_TASK_CENTER_HTTP_DRAFT, AI_TASK_CENTER_ENTRY_PERMISSIONS, AI_TASK_STATUSES_DRAFT,
-  AI_TASK_DRAFT_VERSION, AI_SCENE_REQUEST_DRAFT_VERSION, type AiTaskModelObservationDraft, type AiTaskClientVisibleReportDraft,
+  AI_TASK_DRAFT_VERSION, AI_SCENE_REQUEST_DRAFT_VERSION, AI_QUOTE_SELECTION_DRAFT_VERSION,
+  type AiTaskModelObservationDraft, type AiTaskClientVisibleReportDraft,
   type AiWorkbenchModelControlObservation, type AiSceneRequestReadDraft } from '@rental-os/shared';
 import type { PrismaClient } from '@prisma/client';
 import { runWithRequestIdentity } from '../../common/request-identity';
@@ -51,6 +52,8 @@ type Dependencies = Omit<Parameters<typeof composePersistedTaskCenter>[0], 'cred
   business?: TaskCenterBusinessDependencies;
   continuation?: TaskCenterContinuationDependencies;
   originalInputs?: TaskCenterInputDependencies;
+  selectedOrderCancellation?: { db: PrismaClient;
+    settleUnstartedCancellation(request: Request, value: unknown, signal?: AbortSignal): Promise<unknown> };
 };
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const schemas = {
@@ -107,6 +110,7 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
           || !AI_TASK_CENTER_ENTRY_PERMISSIONS.some(permission => hasEffectivePermission(before.access.permissions, permission)))
           throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
         const root = composePersistedTaskCenter({ ...input, credentials, includeCancellation: action === 'stop' || action === 'stopReceipt' });
+        let assertPerformancePolicy: (() => void) | undefined;
         const originalResult = async (query = schemas.result.parse(command)): Promise<AiTaskModelObservationDraft> => {
           if (!input.originalDb || !readOriginalResult) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
           const access = await root.tasks.resolveAccess(query.taskId, 'read_step_terminal');
@@ -211,23 +215,62 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
           const access = await root.tasks.resolveAccess(query.taskId, 'read_metadata');
           const task = await input.db.aiTask.findFirst({ where: access.where });
           if (!task) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-          if (action === 'stop') {
-            if (task.revision !== query.expectedRevision) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-            // The original repository owns transition policy, task CAS, audit
-            // event and cancellation state. No lease, remote cancel or refund.
-            await root.cancellation.request(query);
-          }
-          try {
+          const readCancellation = async () => {
             const result = z.object({ taskId: id, expectedRevision: z.number().int(),
               status: z.enum(['observed', 'not_observed']), cancellation: z.literal('request_not_rollback'),
+              snapshot: z.object({ revision: z.number().int().min(1), status: z.enum(AI_TASK_STATUSES_DRAFT) }).passthrough(),
               automaticRetry: z.literal(false), remoteCancellation: z.literal('not_attested') }).passthrough()
-              .safeParse(await root.cancellation.read(query));
+              .safeParse(await root.cancellation!.read(query));
             if (!result.success || result.data.taskId !== query.taskId || result.data.expectedRevision !== query.expectedRevision)
               throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-            if (action === 'stop' && result.data.status !== 'observed') throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+            return result.data;
+          };
+          if (action === 'stop') {
+            const transition = await root.tasks.resolveAccess(query.taskId, 'transition_task');
+            if (transition.bindingKey !== access.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+            // 原请求已落库时沿其事件续办，保持原修订定位和当前动作权限。
+            // 新请求的 CAS、审计和取消状态仍由原仓储原子提交。
+            if ((await readCancellation()).status !== 'observed') {
+              try { await root.cancellation.request(query); }
+              catch (error) {
+                if (!(error instanceof AiTaskRepositoryError) || error.code !== 'AI_REVISION_CONFLICT') throw error;
+                // 另一个同请求可能已提交。核对原事件后才能认定冲突发生在提交前。
+                if ((await readCancellation()).status !== 'observed') throw error;
+              }
+            }
+          }
+          try {
+            const result = await readCancellation();
+            if (action === 'stop' && result.status !== 'observed') throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+            if (action === 'stop' && result.snapshot.status === 'cancel_requested'
+              && task.sceneCode === 'quote_clarification' && task.inputRef && input.selectedOrderCancellation) {
+              const cancellation = input.selectedOrderCancellation;
+              if (!Object.is(cancellation.db, input.db)) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+              const runs = await cancellation.db.aiRun.findMany({ where: { scopeId: task.scopeId, taskId: task.id,
+                actorKind: access.actorKind, actorId: access.actorId }, orderBy: { sequence: 'desc' }, take: 2 });
+              const run = runs[0];
+              if (run && runs[1]?.sequence === run.sequence) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+              if (run) {
+                const key = { scopeId: task.scopeId, taskId: task.id, runId: run.id };
+                const selections = await cancellation.db.aiTaskQuoteSelection.findMany({ where: { ...key,
+                  originalRequestId: task.inputRef, ownerKind: access.actorKind, ownerId: access.actorId,
+                  audience: access.audience }, take: 2 });
+                if (selections.length > 1) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+                if (selections[0] && !await cancellation.db.aiTaskRunPlan.findFirst({ where: key })) {
+                  // The original selected host checks absence and consumed-answer
+                  // lineage under the Task lock. The completed model prefix and
+                  // original charges stay intact, with no plan or lease minted here.
+                  await cancellation.settleUnstartedCancellation({ headers: { authorization: header.data } }, {
+                    selection: { draftVersion: AI_QUOTE_SELECTION_DRAFT_VERSION, originalInputRef: task.inputRef,
+                      taskId: task.id, runId: run.id, selectionId: selections[0].id, inputHash: selections[0].inputHash },
+                    expectedRevision: result.snapshot.revision
+                  }, activeSignal);
+                }
+              }
+            }
             const latest = await root.tasks.resolveAccess(query.taskId, 'read_metadata');
             if (access.bindingKey !== latest.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-            return { ...query, status: result.data.status, cancellation: 'request_not_rollback' as const,
+            return { ...query, status: result.status, cancellation: 'request_not_rollback' as const,
               automaticRetry: false as const, remoteCancellation: 'not_attested' as const, budgetRelease: 'not_attempted' as const };
           } catch (error) {
             if (error instanceof AiTaskRepositoryError && error.code === 'AI_ACCESS_DENIED') throw error;
@@ -295,7 +338,9 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
           }, command, activeSignal);
         })() : action === 'performance'  ? await (async () => {
           if (!root.performance) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-          return root.performance.read(schemas.performance.parse(command), clientVisibleSource);
+          const captured = await root.performance.capture(schemas.performance.parse(command), clientVisibleSource);
+          assertPerformancePolicy = captured.assertCurrentPolicy;
+          return captured.value;
         })() : action === 'outcomes' ? await (async () => {
           if (!root.performance) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
           return root.performance.sample(schemas.outcomes.parse(command));
@@ -314,6 +359,7 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
             })();
         if (!active || originalIdentityHash(await identity.resolve()) !== originalIdentityHash(before))
           throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        assertPerformancePolicy?.();
         return structuredClone(result);
       });
       if (action === 'decision') {

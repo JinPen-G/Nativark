@@ -2,6 +2,9 @@
  * 继续消费原Guard/ALS、Prisma、通知及密文服务，不创建第二套业务状态或执行者。 */
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
+import { rentalNotificationDraftRetention } from "./rental-notification-log-cache";
+export { RentalNotificationDraftUnknownError } from "@rental-os/rental-core/notification-draft";
+export type { RentalNotificationDraftInput, RentalNotificationDraftOriginal, RentalNotificationDraftObservation } from "@rental-os/rental-core/notification-draft";
 import { RentalBusinessService as CoreRentalBusinessService } from "@rental-os/rental-core/mysql-business-runtime";
 import { RentalBusinessConfigRepository, type RentalBusinessConfigStore } from "./rental-business-config.repository";
 import { RentalBusinessFactRepository, type RentalBusinessFactStore } from "./rental-business-fact.repository";
@@ -38,6 +41,6 @@ export class RentalBusinessService extends CoreRentalBusinessService<Prisma.Tran
     @Optional() corporateSettlement?: CustomerCorporateSettlementService
   ) {
     super(configStore, factStore, coreConfigStore, stateRepository, prisma, hooks, capabilities, hookAudits,
-      serviceCapacities, memberships, notificationRuntime, secretBox, categoryResolver, corporateSettlement);
+      serviceCapacities, memberships, notificationRuntime, secretBox, categoryResolver, corporateSettlement, rentalNotificationDraftRetention);
   }
 }

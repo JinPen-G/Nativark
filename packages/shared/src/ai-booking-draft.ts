@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { RENTAL_FULFILLMENT_MODES, type RentalFulfillmentMode } from './core';
+import { RENTAL_FULFILLMENT_MODES, type RentalFulfillmentMode, type RentalPricingUnit } from './core';
 import type { AiCustomerEntryScope, AiCustomerEntrySurface, AiEntryActionDraft } from './ai-entry-action-draft';
 
 export const AI_BOOKING_DRAFT_CONTRACT_VERSION = 'ain-booking-draft-1' as const;
@@ -7,6 +7,10 @@ export const AI_BOOKING_DRAFT_STATES = ['draft_created', 'user_selected', 'hande
 export type AiBookingDraftState = (typeof AI_BOOKING_DRAFT_STATES)[number];
 export const AI_BOOKING_INPUT_SOURCES = ['user_explicit', 'server_default', 'core_normalized', 'authorized_fact', 'model_candidate'] as const;
 export type AiBookingInputSource = (typeof AI_BOOKING_INPUT_SOURCES)[number];
+/** Original Core service/terms versions are bounded references, never URLs,
+ * resource IDs or new authority. Shared by quote and Booking projections. */
+export const AI_BOOKING_SOURCE_VERSION_PATTERN = '^[A-Za-z0-9][A-Za-z0-9._:-]*(?:/[A-Za-z0-9][A-Za-z0-9._:-]*)*$';
+export const aiBookingSourceVersionSchema = z.string().min(1).max(191).regex(new RegExp(AI_BOOKING_SOURCE_VERSION_PATTERN));
 
 /** Explicit original-page choice only; never carries address text or grants submission. */
 export interface AiBookingOneTimeAddressConfirmation {
@@ -67,6 +71,9 @@ export interface AiBookingQuoteFacts {
   depositAmount: number;
   preAuthAmount: number;
   chargeLines: Array<{ type: string; amount: number; sourceId: string | null; sourceVersion: string | null }>;
+  /** Missing on legacy facts. Normalized units come from the same original
+   * Core quote; this does not relabel a default as human-selected input. */
+  lines?: Array<{ itemGroupId: string; quantity: number; pricingUnit: RentalPricingUnit; source: 'original_core_quote' }>;
   expiresAt: string;
   createdAt: string;
 }
@@ -94,10 +101,26 @@ export interface AiBookingOneTimeAddressEvidence {
 
 export type AiBookingAddressEvidence = AiBookingSavedAddressEvidence | AiBookingOneTimeAddressEvidence;
 
+/** A service stays human-selected. Omitted optional occurrence fields can
+ * retain the same original Core quote's normalization, never become human input. */
+export interface AiBookingServiceFieldSources {
+  serviceId: string;
+  fields: {
+    serviceId: 'user_explicit';
+    quantity: 'user_explicit';
+    scheduledStartAt: 'user_explicit' | 'core_normalized';
+    scheduledEndAt: 'user_explicit' | 'core_normalized';
+    serviceLocationId: 'user_explicit' | 'core_normalized';
+  };
+}
+
 export interface AiBookingMaterial {
   selection: AiBookingSelection;
   sources: Record<Exclude<keyof AiBookingSelection, 'deliveryAddressId' | 'deliveryAddressConfirmation'>, AiBookingInputSource>
     & { deliveryAddressId?: AiBookingInputSource; deliveryAddressConfirmation?: AiBookingInputSource };
+  /** Missing only on legacy materials. It cannot authorize filling omitted
+   * service fields from an old aggregate 'user_explicit' label. */
+  serviceSources?: AiBookingServiceFieldSources[];
   deliveryAddress?: AiBookingAddressEvidence;
   quote: AiBookingQuoteFacts;
   catalogVersion: string;

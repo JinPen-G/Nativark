@@ -111,7 +111,8 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
       for (const [subpath, conditions] of Object.entries(exports)) {
         const target = exportTarget(conditions);
         // 样式和兼容源码通配出口不作为单个 TypeScript 模块解析。
-        if (subpath.includes("*") || target?.endsWith(".css")) continue;
+        // 原源码转接由同一正式UI出口覆盖，不将兼容别名登记为另一项能力。
+        if (subpath.startsWith("./source/") || subpath.includes("*") || target?.endsWith(".css")) continue;
         const file = target && packageSource(root, packageDirectory, target);
         if (!file) {
           addIssue("export_source", `${packageDirectory}/package.json`, `未找到 ${subpath} 对应的当前源码入口`);

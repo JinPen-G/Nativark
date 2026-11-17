@@ -10,7 +10,7 @@ const target = obj({ bindingVersion: choice(AI_TASK_INPUT_QUOTE_ROW_TARGET_VERSI
 const options = { type: "array", minItems: 1, maxItems: 50, uniqueItems: true, items: obj({ value: id(), label: text(160) }) } satisfies AiLeafSchemaDraft;
 const field: AiLeafSchemaDraft = { oneOf: [
   // Legacy untargeted fields keep their exact closed shape.
-  obj({ ...base, fieldId: choice("customer_selection", "item_selection", "pickup_location", "return_location", "fulfillment_selection", "pricing_unit_selection", "delivery_address_selection", "enterprise_selection", "enterprise_payer_selection"), kind: choice("choice"), options }),
+  obj({ ...base, fieldId: choice("customer_type_selection", "customer_selection", "item_selection", "pickup_location", "return_location", "fulfillment_selection", "pricing_unit_selection", "delivery_address_selection", "enterprise_selection", "enterprise_payer_selection"), kind: choice("choice"), options }),
   obj({ ...base, fieldId: choice("quantity"), kind: choice("integer"), minimum: int(1, 1000000), maximum: int(1, 1000000) }),
   obj({ ...base, fieldId: choice("starts_at", "ends_at", "usage_quantity", "clarification_text"), kind: choice("text"), maxLength: int(1, 2048) }),
   obj({ ...base, fieldId: choice("item_selection", "pricing_unit_selection"), kind: choice("choice"), options, target }),

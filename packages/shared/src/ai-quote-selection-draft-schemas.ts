@@ -9,6 +9,8 @@ import { leafClosed as object, leafEnum as choice, leafId as id, leafText as tex
 
 const version = choice(AI_QUOTE_SELECTION_DRAFT_VERSION), uuid = { type: 'string', format: 'uuid' };
 const hash = { type: 'string', pattern: '^[a-f0-9]{64}$' };
+const merchantDelegation = object({ delegationKey: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' },
+  expectedRevision: { type: 'integer', const: 1 }, approvalId: id() }, ['delegationKey', 'expectedRevision']);
 const order = object({ quoteId: id(), customerType: choice('personal'), customerId: id(), customerName: text(), contactPhone: text(32),
   bookingIdentity: { oneOf: [object({ bookingIdentity: choice('personal') }),
     object({ bookingIdentity: choice('enterprise_employee'), corporateCustomerId: id(), enterpriseContractAndPayer: { type: 'boolean' } })] },
@@ -19,7 +21,8 @@ const order = object({ quoteId: id(), customerType: choice('personal'), customer
 const reference = { draftVersion: version, originalInputRef: uuid, selectionId: uuid };
 const selectionProof = object({ ...reference, taskId: uuid, runId: uuid, inputHash: hash });
 const selectionCreate = object({ draftVersion: version, originalInputRef: uuid, taskId: uuid, runId: uuid,
-  selectionKey: { ...id(), maxLength: 128 }, expectedSelectionRevision: integer(0, 4294967293), order });
+  selectionKey: { ...id(), maxLength: 128 }, expectedSelectionRevision: integer(0, 4294967293), order, merchantDelegation },
+  ['draftVersion', 'originalInputRef', 'taskId', 'runId', 'selectionKey', 'expectedSelectionRevision', 'order']);
 const operationLocator = object({ draftVersion: version, originalInputRef: uuid, taskId: uuid, runId: uuid,
   selectionKey: { ...id(), maxLength: 128 }, expectedSelectionRevision: integer(0, 4294967293), quoteId: id() });
 const clarification = { oneOf: [object({ original: object({ draftVersion: choice(AI_SCENE_REQUEST_DRAFT_VERSION), inputRef: uuid }),
@@ -111,8 +114,15 @@ export const AI_QUOTE_SELECTION_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft>
   AiClarifiedQuoteSelectionRequestDraft: object({ selection: selectionCreate, clarification }),
   AiQuoteSelectionOperationLocatorDraft: operationLocator,
   AiClarifiedQuoteSelectionOriginalOperationReadDraft: object({ selection: operationLocator, clarification }),
-  AiClarifiedQuoteSelectionPreparationInputDraft: object({ clarification, selectionKey: { ...id(), maxLength: 128 }, expectedSelectionRevision: integer(0, 4294967293) }),
+  AiClarifiedQuoteSelectionPreparationInputDraft: object({ clarification, selectionKey: { ...id(), maxLength: 128 },
+    expectedSelectionRevision: integer(0, 4294967293), merchantDelegation }, ['clarification', 'selectionKey', 'expectedSelectionRevision']),
   AiClarifiedQuoteSelectionPreparationDraft: object({ selection: selectionCreate, clarification, material: AI_APPROVAL_ORDER_MATERIAL_SCHEMA,
+    quote: object({ id: id(), originalOperation: choice('read_only') }), selectionState: choice('not_saved'), quotation: choice('original_unchanged'),
+    approval: choice('not_granted'), order: choice('not_created'), nextAction: choice('explicit_human_selection_then_original_approval') }),
+  AiMerchantDelegatedQuoteSelectionPreparationInputDraft: object({ draftVersion: version, originalInputRef: uuid, taskId: uuid, runId: uuid,
+    selectionKey: { ...id(), maxLength: 128 }, expectedSelectionRevision: integer(0, 4294967293), merchantDelegation }),
+  AiMerchantDelegatedQuoteSelectionPreparationDraft: object({ selection: selectionCreate, material: AI_APPROVAL_ORDER_MATERIAL_SCHEMA,
+    merchantDelegation: object({ reference: merchantDelegation, expiresAt: leafTime }),
     quote: object({ id: id(), originalOperation: choice('read_only') }), selectionState: choice('not_saved'), quotation: choice('original_unchanged'),
     approval: choice('not_granted'), order: choice('not_created'), nextAction: choice('explicit_human_selection_then_original_approval') }),
   AiQuoteSelectionSelectResponseDraft: object({ receipt: ref('AiQuoteSelectionReceiptDraft'), replayed: { type: 'boolean' } }),

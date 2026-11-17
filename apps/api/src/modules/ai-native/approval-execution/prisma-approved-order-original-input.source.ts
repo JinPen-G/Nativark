@@ -8,6 +8,8 @@ import type { ApprovedOrderOriginalInputSource } from './approved-order-composit
 import type { PersistedApprovedOrderPolicyAuthority } from './persisted-approved-order-policy.authority';
 import { approvedOrderSnapshotJson } from './prisma-approved-order-snapshot.source';
 import { deniedOrder, orderContextHash } from './prisma-approved-order.source';
+import { approvedOrderMerchantDelegationSnapshotSchema } from './approved-order-merchant-delegation';
+import { fingerprintAiQuoteSelection } from '../task-request/prisma-quote-selection.repository';
 
 const id = z.string().min(1).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const referenceSchema = z.object({ scopeId: id.max(36), taskId: id.max(36), runId: id.max(36),
@@ -52,9 +54,9 @@ export class PrismaApprovedOrderOriginalInputSource implements ApprovedOrderOrig
           || requestFingerprint(row.payload) !== row.fingerprint) throw deniedOrder();
         const body: CreateRentalOrderDto = await this.validation.transform(structuredClone(row.payload), { type: 'body', metatype: CreateRentalOrderDto });
         if (body.capabilityExceptions !== undefined || requestFingerprint(body) !== row.fingerprint) throw deniedOrder();
-        // DTO instances materialize absent optional properties as undefined. Return the
-        // same validated JSON bytes, not those transient class-transformer properties.
-        const normalized: CreateRentalOrderDto = JSON.parse(JSON.stringify(approvedOrderSnapshotJson(body)));
+        // DTO equivalence is checked above. Serialize the original JSON to retain
+        // historical field order and omit transient optional instance properties.
+        const normalized: CreateRentalOrderDto = JSON.parse(JSON.stringify(approvedOrderSnapshotJson(row.payload)));
         return { body: normalized, binding: requestFingerprint({ step, row }) };
       };
       const original = await read();
@@ -66,6 +68,38 @@ export class PrismaApprovedOrderOriginalInputSource implements ApprovedOrderOrig
       return structuredClone(latest.body);
     } catch (error) {
       if (error instanceof AiTaskRepositoryError) throw new AiTaskRepositoryError(error.code);
+      throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    }
+  }
+
+  async readDelegation(presented: Parameters<ApprovedOrderOriginalInputSource['read']>[0], tx: Prisma.TransactionClient) {
+    try {
+      const input = structuredClone(presented), body = await this.read(input, tx);
+      if (body.bookingIdentity?.bookingIdentity !== 'enterprise_employee') return null;
+      const key = { scopeId: input.scopeId, taskId: input.taskId, runId: input.runId, actionId: input.actionId };
+      const step = await tx.aiStep.findFirst({ where: key });
+      const row = step?.inputRef ? await tx.aiTaskActionInput.findFirst({ where: {
+        scopeId: key.scopeId, taskId: key.taskId, runId: key.runId, id: step.inputRef } }) : null;
+      const selectionId = row?.registrationRef?.startsWith('quote-selection:') ? row.registrationRef.slice('quote-selection:'.length) : null;
+      if (!row || !id.max(36).safeParse(selectionId).success || input.context.actor.kind !== 'user'
+        || typeof tx.aiTaskQuoteSelection?.findFirst !== 'function') throw deniedOrder();
+      const selection = await tx.aiTaskQuoteSelection.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId,
+        runId: key.runId, id: selectionId! } });
+      if (!selection || selection.id !== selectionId || selection.scopeId !== key.scopeId || selection.taskId !== key.taskId
+        || selection.runId !== key.runId || selection.ownerKind !== 'USER' || selection.ownerId !== input.context.actor.userId
+        || selection.audience !== input.context.audience.toUpperCase() || selection.supersededAt !== null
+        || selection.inputHash !== row.fingerprint || selection.inputHash !== requestFingerprint(body)
+        || requestFingerprint(selection.payload) !== selection.inputHash || selection.selectionFingerprint !== fingerprintAiQuoteSelection(selection)) throw deniedOrder();
+      const basis = selection.quoteBasis;
+      if (!basis || typeof basis !== 'object' || Array.isArray(basis) || !basis.merchantDelegation) return null;
+      const delegation = approvedOrderMerchantDelegationSnapshotSchema.parse(basis.merchantDelegation);
+      if (delegation.quoteId !== body.quoteId || delegation.quoteHash !== selection.quoteHash
+        || delegation.requestHash !== selection.inputHash || delegation.personalCustomerId !== body.customerId
+        || body.bookingIdentity?.bookingIdentity !== 'enterprise_employee'
+        || delegation.corporateCustomerId !== body.bookingIdentity.corporateCustomerId) throw deniedOrder();
+      return structuredClone(delegation);
+    } catch (error) {
+      if (error instanceof AiTaskRepositoryError) throw error;
       throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     }
   }

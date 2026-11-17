@@ -10,6 +10,7 @@ import { InspectionAssistError, inspectionId, inspectionTargetSchema, parseInspe
 import type { InspectionEvidenceAuthority } from './inspection-candidate.service';
 import type { InspectionDraftEvidence } from './inspection-draft.service';
 import type { FileStorageRuntimeService } from '../../integrations/file-storage.runtime.service';
+import type { inspectionRecognitionInputSchema } from './inspection-draft.service';
 
 const bindSchema = inspectionTargetSchema.extend({ templateId: inspectionId, attachmentId: inspectionId }).strict();
 type Binding = Awaited<ReturnType<InspectionTemplateService['read']>>;
@@ -108,6 +109,36 @@ export class PrismaInspectionEvidenceAuthority implements InspectionEvidenceAuth
     if (!row.contentHash || !row.mediaType) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
     if (source.kind === 'image') return row.mediaType.startsWith('image/') && !!row.width && !!row.height;
     return row.mediaType.startsWith('audio/') && row.durationMs !== null && source.span.endMs <= row.durationMs;
+  }
+
+  /** Read the original bound file metadata without opening bytes, rebinding a
+   * file or requiring inspection-write permission. Current original file ACL
+   * and both metadata snapshots still have to match the frozen input. */
+  async readOriginalMetadata(value: { target: AiInspectionTarget; assetId: string; templateVersion: string;
+    bindingFingerprint: string; media: z.infer<typeof inspectionRecognitionInputSchema>['media'] }) {
+    const snapshot = structuredClone(value);
+    if (!snapshot.media.length || snapshot.media.length > 8) throw new InspectionAssistError('INVALID_INPUT');
+    return this.authority.withAction(snapshot.target, 'read', async scope => {
+      const read = async () => {
+        const rows = [];
+        for (const ref of snapshot.media) {
+          const row = await this.db.aiInspectionEvidenceBinding.findFirst({ where: { ...scope, ...snapshot.target,
+            assetId: snapshot.assetId, templateVersion: snapshot.templateVersion, bindingFingerprint: snapshot.bindingFingerprint,
+            attachmentId: ref.attachmentId, attachmentRevision: ref.attachmentRevision } });
+          if (!row) throw new InspectionAssistError('BINDING_CHANGED');
+          const asset = await this.asset(scope, snapshot.target, ref.attachmentId);
+          if (row.uploadSessionId !== asset.uploadSession!.id || row.storageFingerprint !== this.storageHash(asset)
+            || row.contentHash !== ref.contentHash || row.mediaType !== ref.mediaType || row.sizeBytes !== ref.sizeBytes
+            || row.width !== ref.width || row.height !== ref.height || row.durationMs !== ref.durationMs)
+            throw new InspectionAssistError('BINDING_CHANGED');
+          rows.push(row);
+        }
+        return rows;
+      };
+      const before = await read(), after = await read();
+      if (requestFingerprint(before) !== requestFingerprint(after)) throw new InspectionAssistError('BINDING_CHANGED');
+      return requestFingerprint(before);
+    });
   }
 
   async verifyPhoto(binding: Binding, attachmentId: string): Promise<boolean> {

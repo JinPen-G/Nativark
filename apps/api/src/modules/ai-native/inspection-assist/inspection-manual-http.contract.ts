@@ -94,6 +94,11 @@ export function inspectionManualResponse<A extends Action>(action: A, value: unk
       sameTarget(expected, result.target);
       if (expected.draftId !== result.draftId) throw Error();
       if ('state' in result) {
+        if (result.bodyRetention && (result.state.candidates.length || result.state.recognitionInputs !== undefined
+          || !result.state.reviewRequired || new Set(result.bodyRetention.candidateRefs.map(ref => ref.candidateId)).size !== result.bodyRetention.candidateRefs.length
+          || new Set(result.bodyRetention.inputRefs.map(ref => ref.inputId)).size !== result.bodyRetention.inputRefs.length
+          || Object.entries(result.state.fields).some(([code, field]) => field.candidateId
+            && !result.bodyRetention!.candidateRefs.some(ref => ref.candidateId === field.candidateId && ref.fieldCode === code)))) throw Error();
         fieldKeys(result.state.fields);
         if (result.state.submission) fieldKeys(result.state.submission.body.results);
         snapshotInspectionCandidates(result.state.candidates);

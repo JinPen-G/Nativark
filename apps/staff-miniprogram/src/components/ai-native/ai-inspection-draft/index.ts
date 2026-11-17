@@ -49,7 +49,8 @@ Component({
       if (detachedViews.has(this) || this.data.readonly || typeof event?.detail?.value !== "string") return;
       const key = event.currentTarget?.dataset?.key;
       if (!this.data.visibleItems.some(item => item.key === key)) return;
-      this.triggerEvent("draftchange", { key, humanValue: boundedText(event.detail.value) });
+      // Display filtering must not rewrite human input; the original template/server still validate it.
+      this.triggerEvent("draftchange", { key, humanValue: Array.from(event.detail.value).slice(0, 4000).join("") });
     },
     onCandidateDecision(event: WechatMiniprogram.TouchEvent) {
       if (detachedViews.has(this) || this.data.readonly || !this.data.candidateActions) return;

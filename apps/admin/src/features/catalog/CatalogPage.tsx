@@ -25,6 +25,7 @@ import { ADMIN_TABLE_COLUMN_WIDTH } from "@/app/designTokens";
 import { useListQueryIdentity } from "@/components/ui/LiveRefresh";
 import { useModalDismissal } from "@/components/ui/useModalDismissal";
 import dayjs from "dayjs";
+import { useSearchParams } from 'react-router-dom';
 import styles from "./CatalogEditors.module.css";
 
 const inventoryLabels: Record<string, string> = { serialized: "序列化资产", quantity: "数量库存", consumable: "一次性耗材", bundle: "套装" };
@@ -98,6 +99,9 @@ function CatalogWorkspace({ scope }: { scope: string }) {
   const { t, locale } = useLocale();
   const queryClient = useQueryClient();
   const canManage = useAuthStore((state) => state.hasPermission("rental-core:catalog:manage"));
+  const [searchParams] = useSearchParams();
+  const requestedItemGroup = searchParams.get('itemGroupId');
+  const focusedItemGroup = requestedItemGroup && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(requestedItemGroup) ? requestedItemGroup : null;
   const [keyword, setKeyword] = useState("");
   const [editing, setEditing] = useState<RentalItemGroup>();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -148,7 +152,11 @@ function CatalogWorkspace({ scope }: { scope: string }) {
     },
     onError: () => message.error(t("照片删除失败"))
   });
-  const rows = useMemo(() => (groups.data ?? []).filter((item) => `${item.code}${item.name}${Object.values(item.attributes).join("")}`.toLowerCase().includes(keyword.toLowerCase())), [groups.data, keyword]);
+  // A registered Action may focus an already-authorized original row. URL
+  // parameters never replace the page Guard or fetch a wider catalog.
+  const rows = useMemo(() => (groups.data ?? []).filter((item) => (!focusedItemGroup || item.id === focusedItemGroup)
+    && `${item.code}${item.name}${Object.values(item.attributes).join("")}`.toLowerCase().includes(keyword.toLowerCase())),
+  [groups.data, keyword, focusedItemGroup]);
   const busy = save.isPending || removeImage.isPending;
   const editorUnavailable = !canManage || !category || groups.isError || profile.isError || categories.isError;
 

@@ -11,9 +11,12 @@ export function composePersistedApprovedOrder(dependencies: PersistedApprovedOrd
       || typeof dependencies.db?.aiApprovedOrderSnapshot?.create !== 'function' || typeof dependencies.db.aiRun?.updateMany !== 'function'
       || typeof dependencies.db.aiStep?.findFirst !== 'function' || typeof dependencies.db.aiStep?.updateMany !== 'function'
       || typeof dependencies.db.aiTask?.updateMany !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-    const d = { ...dependencies, inputSource: { read: dependencies.inputSource.read.bind(dependencies.inputSource) },
+    const d = { ...dependencies, inputSource: { read: dependencies.inputSource.read.bind(dependencies.inputSource),
+      ...(dependencies.inputSource.readDelegation ? { readDelegation: dependencies.inputSource.readDelegation.bind(dependencies.inputSource) } : {}) },
       confirmation: { createApprovedOrder: dependencies.confirmation.createApprovedOrder.bind(dependencies.confirmation),
-        assertOrderMatchesQuote: dependencies.confirmation.assertOrderMatchesQuote.bind(dependencies.confirmation) },
+        assertOrderMatchesQuote: dependencies.confirmation.assertOrderMatchesQuote.bind(dependencies.confirmation),
+        ...(dependencies.confirmation.fingerprintOrderRequest ? { fingerprintOrderRequest: dependencies.confirmation.fingerprintOrderRequest.bind(dependencies.confirmation) } : {}),
+        ...(dependencies.confirmation.readOrderCreation ? { readOrderCreation: dependencies.confirmation.readOrderCreation.bind(dependencies.confirmation) } : {}) },
       quoteFacts: { findQuote: dependencies.quoteFacts.findQuote.bind(dependencies.quoteFacts) },
       credentials: { current: dependencies.credentials.current.bind(dependencies.credentials) },
       guard: { canActivate: dependencies.guard.canActivate.bind(dependencies.guard) } };

@@ -36,6 +36,7 @@ import { QueryState } from "@/components/QueryState";
 import { CustomerAnalysis } from "./CustomerAnalysis";
 import { useListQueryIdentity } from "@/components/ui/LiveRefresh";
 import { useModalDismissal } from "@/components/ui/useModalDismissal";
+import { NotificationDraftFlow } from '@/features/ai-native/NotificationDraftFlow';
 
 type AddressForm = {
   recipient: string;
@@ -443,7 +444,10 @@ export function CustomerProfileDetails({ customerId, canManage, canView, canReve
     }] : []),
     { key: "benefits", label: t("积分与权益"), children: current && <BenefitsTab overview={current} /> },
     { key: "orders", label: current && current.access?.orders !== "restricted" ? `${t("历史订单")} (${current.orders.total})` : t("历史订单"), children: current && <OrdersTab overview={current} canViewOrders={canViewOrders} onPageChange={(page, pageSize) => { setOrderPage(page); setOrderPageSize(pageSize); }} onOpenOrder={(orderId) => navigate(`/rental/orders/${orderId}`)} /> },
-    { key: "audit", label: t("状态与审计"), children: current && <AuditTab overview={current} canReveal={canReveal} /> }
+    { key: "audit", label: t("状态与审计"), children: current && <AuditTab overview={current} canReveal={canReveal} /> },
+    ...(canView && canReveal && customerId ? [{ key: 'notification-draft', label: t('未发送通知草稿'),
+      children: current && <NotificationDraftFlow customerId={customerId} visible={activeTab === 'notification-draft'}
+        current={() => !!current && current.profile.id === customerId && !denied} /> }] : [])
   ];
   function openAddressEditor(address?: CustomerProfileAddress) {
     if (!editable || saveAddress.isPending) return;

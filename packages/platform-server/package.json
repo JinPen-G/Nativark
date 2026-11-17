@@ -118,6 +118,10 @@
     "./operation-log": {
       "types": "./dist/common/operation-log.service.d.ts",
       "default": "./dist/common/operation-log.service.js"
+    },
+    "./permission-match": {
+      "types": "./dist/permission-match.d.ts",
+      "default": "./dist/permission-match.js"
     }
   },
   "scripts": {
@@ -220,6 +224,9 @@
       ],
       "operation-log": [
         "dist/common/operation-log.service.d.ts"
+      ],
+      "permission-match": [
+        "dist/permission-match.d.ts"
       ]
     }
   }

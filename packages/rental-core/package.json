@@ -746,6 +746,18 @@
     "./enterprise-workflow-ports": {
       "types": "./dist/enterprise-workflow-ports.d.ts",
       "default": "./dist/enterprise-workflow-ports.js"
+    },
+    "./notification-draft": {
+      "types": "./dist/notification-draft.d.ts",
+      "default": "./dist/notification-draft.js"
+    },
+    "./notification-log-cache": {
+      "types": "./dist/notification-log-cache.d.ts",
+      "default": "./dist/notification-log-cache.js"
+    },
+    "./notification-snapshot": {
+      "types": "./dist/notification-snapshot.d.ts",
+      "default": "./dist/notification-snapshot.js"
     }
   },
   "typesVersions": {
@@ -1301,6 +1313,15 @@
       ],
       "enterprise-workflow-ports": [
         "dist/enterprise-workflow-ports.d.ts"
+      ],
+      "notification-draft": [
+        "dist/notification-draft.d.ts"
+      ],
+      "notification-log-cache": [
+        "dist/notification-log-cache.d.ts"
+      ],
+      "notification-snapshot": [
+        "dist/notification-snapshot.d.ts"
       ]
     }
   },

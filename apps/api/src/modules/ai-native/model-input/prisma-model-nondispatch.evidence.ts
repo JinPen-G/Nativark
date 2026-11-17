@@ -2,6 +2,7 @@
  * Callers supply current authorized ownership and recheck authority afterwards.
  * Absence/expiry alone is never proof; this grants neither retry nor refund. */
 import type { Prisma, PrismaClient } from '@prisma/client';
+import type { AiGatewayConfigReferenceDraft } from '@rental-os/shared';
 import { isGatewayConfig } from '../gateway-contract-validation';
 import { requestFingerprint as hash } from '../../rental-core/rental-idempotency.repository';
 
@@ -13,30 +14,39 @@ type Invocation = Prisma.AiGatewayInvocationGetPayload<{ select: typeof invocati
 type Db = Pick<PrismaClient, 'aiGatewayInvocation' | 'aiInvocationAdmission' | 'aiGatewayAccountingReceipt' | 'aiBudgetReservation'>;
 
 function invocationBinding(row: Invocation) {
-  if (!isGatewayConfig(row.configuration) || !('tenantId' in row.configuration)
-    || hash(row.configuration) !== row.configurationHash) return null;
+  if (!isGatewayConfig(row.configuration) || hash(row.configuration) !== row.configurationHash) return null;
+  const configuration: AiGatewayConfigReferenceDraft = row.configuration;
+  const platform = 'consumerScope' in configuration && configuration.consumerScope.kind === 'platform';
+  if (platform ? configuration.serviceMode !== 'platform_managed' || configuration.configurationScope.kind !== 'platform'
+    || 'tenantId' in configuration : !('tenantId' in configuration)) return null;
   return { id: row.id, scopeId: row.scopeId, taskId: row.taskId, runId: row.runId, stepId: row.stepId,
     actionId: row.actionId, actorId: row.actorId, callId: row.callId, registrationHash: row.registrationHash,
-    intentHash: row.intentHash, configurationHash: row.configurationHash, tenantId: row.configuration.tenantId, configId: row.configuration.configId,
+    intentHash: row.intentHash, configurationHash: row.configurationHash,
+    scopeKind: platform ? 'PLATFORM' as const : 'WORKSPACE' as const,
+    tenantId: 'tenantId' in configuration ? configuration.tenantId : null, configId: configuration.configId,
     configRevision: row.configuration.configRevision, priceVersion: row.priceVersion,
     maxOutputTokens: row.maxOutputTokens, mode: row.mode, sceneCode: row.sceneCode,
     leaseOwnerId: row.leaseOwnerId, fencingToken: row.fencingToken.toFixed(0) };
 }
 
 export async function readModelNonDispatchEvidence(db: Db,
-  owner: Readonly<{ scopeId: string; tenantId: string; workspaceId: string; actorId: string }>, value: Invocation) {
+  owner: Readonly<{ scopeId: string; tenantId: string; workspaceId: string; actorId: string }
+    | { scopeId: string; scopeKind: 'PLATFORM'; actorId: string }>, value: Invocation) {
   // This binding must come from the caller's current authorized task/context,
   // not from an HTTP payload. It is evidence selection, never authorization.
-  const { scopeId, tenantId, workspaceId, actorId } = structuredClone(owner), expected = invocationBinding(value);
-  if (!expected || !scopeId || !tenantId || !workspaceId || !actorId
-    || expected.scopeId !== scopeId || expected.tenantId !== tenantId || expected.actorId !== actorId) return null;
+  owner = structuredClone(owner);
+  const { scopeId, actorId } = owner, platform = 'scopeKind' in owner && owner.scopeKind === 'PLATFORM';
+  const tenantId = 'tenantId' in owner ? owner.tenantId : null, workspaceId = 'workspaceId' in owner ? owner.workspaceId : null;
+  const scopeKind = platform ? 'PLATFORM' : 'WORKSPACE', expected = invocationBinding(value);
+  if (!expected || !scopeId || !actorId || (platform ? tenantId !== null || workspaceId !== null : !tenantId || !workspaceId)
+    || expected.scopeKind !== scopeKind || expected.scopeId !== scopeId || expected.tenantId !== tenantId || expected.actorId !== actorId) return null;
   const read = async () => {
     const [invocation, admission, receipt, reservation] = await Promise.all([
       db.aiGatewayInvocation.findFirst({ where: { id: expected.id, scopeId: expected.scopeId,
         taskId: expected.taskId, runId: expected.runId, stepId: expected.stepId, actorId, callId: expected.callId },
         select: invocationSelect }).then(row => row ? invocationBinding(row) : null),
-      db.aiInvocationAdmission.findFirst({ where: { tenantId, workspaceId, actorId, callId: expected.callId },
-        select: { id: true, tenantId: true, workspaceId: true, actorId: true, callId: true, profileId: true,
+      db.aiInvocationAdmission.findFirst({ where: { scopeKind, tenantId, workspaceId, actorId, callId: expected.callId },
+        select: { id: true, scopeKind: true, tenantId: true, workspaceId: true, actorId: true, callId: true, profileId: true,
           status: true, dispatchId: true, requestHash: true, revokedAt: true, completedAt: true, unknownReason: true } })
         .then(row => row ? structuredClone(row) : null),
       db.aiGatewayAccountingReceipt.findFirst({ where: { scopeId: expected.scopeId, invocationId: expected.id },
@@ -45,13 +55,14 @@ export async function readModelNonDispatchEvidence(db: Db,
           state: true, usageHash: true, inputTokens: true, outputTokens: true } })
         .then(row => row ? { ...structuredClone(row), inputTokens: row.inputTokens?.toString() ?? null,
           outputTokens: row.outputTokens?.toString() ?? null } : null),
-      db.aiBudgetReservation.findFirst({ where: { scopeId: expected.scopeId, scopeKind: 'WORKSPACE', callId: expected.callId },
+      db.aiBudgetReservation.findFirst({ where: { scopeId: expected.scopeId, scopeKind, callId: expected.callId },
         select: { id: true, scopeId: true, scopeKind: true, tenantId: true, workspaceId: true, actorId: true,
           callId: true, requestId: true, idempotencyKey: true, runId: true, stepId: true, actionId: true,
           sceneCode: true, priceVersion: true, configRevision: true, configurationHash: true, status: true, dispatchState: true } })
         .then(row => row ? structuredClone(row) : null)
     ]);
     if (!invocation || hash(invocation) !== hash(expected) || !admission
+      || admission.scopeKind !== scopeKind
       || admission.tenantId !== tenantId || admission.workspaceId !== workspaceId || admission.actorId !== actorId
       || admission.callId !== expected.callId || admission.profileId !== expected.configId || admission.status !== 'cancelled'
       || !(admission.revokedAt instanceof Date) || !Number.isFinite(admission.revokedAt.getTime())
@@ -61,13 +72,13 @@ export async function readModelNonDispatchEvidence(db: Db,
     // A lost reserve/link acknowledgement is not an empty balance. If either
     // financial row exists, require the complete original released linkage.
     if (receipt || reservation) {
-      if (!receipt || !reservation || receipt.scopeId !== expected.scopeId || receipt.scopeKind !== 'WORKSPACE'
+      if (!receipt || !reservation || receipt.scopeId !== expected.scopeId || receipt.scopeKind !== scopeKind
         || receipt.tenantId !== tenantId || receipt.workspaceId !== workspaceId || receipt.taskId !== expected.taskId
         || receipt.invocationId !== expected.id || receipt.reservationId !== reservation.id
         || receipt.admissionId !== admission.id || receipt.dispatchToken !== admission.dispatchId
         || receipt.requestHash !== admission.requestHash || receipt.state !== 'cancelled'
         || receipt.usageHash !== null || receipt.inputTokens !== null || receipt.outputTokens !== null
-        || reservation.scopeId !== expected.scopeId || reservation.scopeKind !== 'WORKSPACE'
+        || reservation.scopeId !== expected.scopeId || reservation.scopeKind !== scopeKind
         || reservation.tenantId !== tenantId || reservation.workspaceId !== workspaceId || reservation.actorId !== actorId
         || reservation.callId !== expected.callId || reservation.requestId !== expected.callId || reservation.idempotencyKey !== expected.callId
         || reservation.runId !== expected.runId || reservation.stepId !== expected.stepId || reservation.actionId !== expected.actionId
