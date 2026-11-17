@@ -1,7 +1,2 @@
-/** Match permissions already resolved for the current authenticated principal.
- * Uses the original Guard's exact-or-* semantics without expanding permissions
- * or interpreting policy/tool allowlists as authority. Scope and ACL still apply. */
-export function hasEffectivePermission(granted: readonly string[], required: string): boolean {
-  return Array.isArray(granted) && typeof required === 'string' && required.length > 0
-    && (granted.includes(required) || granted.includes('*'));
-}
+/** 兼容公共集成的原权限读取路径，匹配算法由正式出口单源维护。 */
+export { hasEffectivePermission } from "../permission-match";

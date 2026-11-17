@@ -11,6 +11,30 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-shared-dev1-migration-20261118"></a>
+
+## 副手成果迁入与共享工作树协作（2026-11-18）
+
+负责人明确要求RD与dev1共用本树持续完成原PCH拆分，并允许双方为具体冲突和阻塞直接协商。本轮施工方式覆盖任务册第2节“并行作者必须独立工作树”的旧约束；正式需求、任务编号/范围/依赖/顺序和G1～G4门槛保持。迁入前RD固定提交c6351b288a08ae80a17cf36f7cb1c4cc715bef00及旧接续由Git保全，当日实际远端main为1d53ada2bb79a220e4d99f75f27508bfac5360a5，已在本树祖先。
+
+dev1已确认旧树停写、未完成写操作0、运行验证进程0。其[公共订阅服务](../../../packages/platform-server/src/modules/subscription/README.md)与[订阅后台](../../../packages/platform-admin/src/features/subscription/README.md)固定交付ee3295d07ab96c5a1a8d75cf9efb2412b3ead63e迁入为98949e534effa193ab96ddce898f70d85b1c10f9，原API与后台继续转接同一实现。29模型、6份迁移的[公共schema](../../../apps/platform-api/prisma/schema.prisma)现包含统一订阅办理、第三方配置和适配日志；原组合schema及已应用迁移未改写，新增公共迁移仍未执行。
+
+基础集成尚未完成。旧树24份已跟踪差异与19份新增文件先保存为未完检查点719cb92e919b140027cc56e10434e9ec77db5a09，普通推送退出0，实际远端回读相同；再迁入为af89920dd4df3dca12cd2e3e6add14491ff7f425。[公共集成](../../../packages/platform-server/src/modules/integrations/README.md)持有配置/凭据/短信/对象存储接点，[原Rental参加者](../../../apps/api/src/modules/integrations/rental-integration-business.participant.ts)保护原支付、短信、文件依赖；完整类型、集成冒烟、公共后台及示范宿主接线由共享施工继续核验，不能把检查点当完整公共能力。
+
+| 迁入/退出核对 | 实际结果与边界 |
+| --- | --- |
+| 成果去向 | 起点48a5至源检查点共129个变更路径，121个同内容或同移除，8个明确合并当前AppModule/OpenAPI、模块导读、正式包出口及权限兼容；19个新增文件均在，缺失0 |
+| 包出口与权限 | 合并原精确后台兼容出口及新增订阅出口；原权限算法一致，新common路径转接同一正式实现，JSON同名出口去重，原精确或*语义保持 |
+| 格式/合同修正 | 来源检查点保留4处混合换行空白问题，本树只规范该文件换行，可执行正文一致；首轮公共合同3诊断来自本包自引用，改用同一Provider的相对导入/再导出后消除 |
+| 必要类型 | 复用既有全内存入口，`node --no-compilation-cache - api-rental-only`，退出0；公共合同9根/203源/18输出、公共服务61根/849源/122输出、Rental227根/954源/454输出，均0诊断；TS5.9.3与原238模型Prisma5.22官方内存声明 |
+| 冒烟边界 | 来源订阅提交记录58/58为原作者固定证据；RD首轮十配置/一份订阅用例被上述合同诊断中止，未执行到用例。修后本片只完成三配置类型，完整API/公共宿主/前端类型及实际订阅和集成冒烟仍由后续切片核验 |
+| 资料与差异 | 六份现行/模块资料952个本地链接、130个锚点，0问题；git diff --check退出0。需求和任务无差异，验证未新建脚本或临时环境 |
+| 旧树移除 | 原C:/Users/Penn/.codex/worktrees/saas-platform-dev1/rental-OS为4,308文件/46,105,313字节、0链接；核绝对目标、清洁状态、忽略文件为空、固定HEAD与无在用进程后，原生PowerShell内调用Git worktree remove，退出0；旧目录和Git登记均已不存在，源任务分支及固定Git成果仍保留 |
+
+共享施工目录为C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS、分支codex/platform-core-extraction。RD独占Git索引、提交/普通推送及PCH四册，继续Rental/Controller/客户端/数据与总装配；dev1持续负责公共订阅/基础集成的API/UI/数据及模块导读，后续补公共组织/其余安全。双方按文件分工，共同文件先约具体短窗口，真实冲突直接单点协商。dev1的attach_worktree因聊天归属核验失败未完成UI关联，但已显式在共享目录核验分支与HEAD；所有命令必须指定共享workdir，不再使用已移除旧树，不为工具关联失败新建或复制工作树。
+
+本片没有新增测试脚本、安装依赖、临时验证目录或后台业务服务，原worker均已退出。SQL/事务/身份及供应商仍未取真实环境证据，原任务未跨下一档。完整Rental标准包、无Core真实运行、双Core、干净安装、独立更新/回退/接手及独立审查沿下列现行缺口承接；旧清理待办、外观1失败和缺失历史附件保留。共享分工的持续目标通过负责人指定的dev1聊天下发，其他专项和PM/QA未通知。
+
 <a id="core-rental-enterprise-approval-runtime-20261117"></a>
 
 ## Rental企业批准、明确委托与续租事务收口（2026-11-17）

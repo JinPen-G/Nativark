@@ -7,8 +7,8 @@
 
 export type TenantIntegrationCapability = "sms" | "payment" | "file";
 
-import type { TenantIntegrationProvider } from "@rental-os/platform-contracts/integration-provider";
-export type { TenantIntegrationProvider } from "@rental-os/platform-contracts/integration-provider";
+import type { TenantIntegrationProvider } from "./integration-provider";
+export type { TenantIntegrationProvider } from "./integration-provider";
 
 export type TenantIntegrationTestStatus = "not_tested" | "passed" | "failed";
 export type TenantIntegrationTestMode = "none" | "configuration" | "live";

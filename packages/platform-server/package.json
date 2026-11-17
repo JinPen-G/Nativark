@@ -159,10 +159,6 @@
       "types": "./dist/common/outbound-url.d.ts",
       "default": "./dist/common/outbound-url.js"
     },
-    "./permission-match": {
-      "types": "./dist/common/permission-match.d.ts",
-      "default": "./dist/common/permission-match.js"
-    },
     "./tenant-integration": {
       "types": "./dist/modules/integrations/tenant-integration.service.d.ts",
       "default": "./dist/modules/integrations/tenant-integration.service.js"
@@ -339,9 +335,6 @@
       ],
       "outbound-url": [
         "dist/common/outbound-url.d.ts"
-      ],
-      "permission-match": [
-        "dist/common/permission-match.d.ts"
       ],
       "tenant-integration": [
         "dist/modules/integrations/tenant-integration.service.d.ts"

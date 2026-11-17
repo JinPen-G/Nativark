@@ -1,8 +1,8 @@
 # 平台 Core 接入当前协作接续
 
-更新时间：2026-11-17。
+更新时间：2026-11-18。
 
-> 负责人已授权本对话全权负责独占工作树及PCH拆分所需公共文件，持续完成PCH-01～12。无Core独立运行、完整Rental标准包及全功能验收仍未完成。正式依据为[需求v1.5](平台Core接入-需求.md)与[开发任务v1.5](平台Core接入-开发任务.md)，进度只由原G1～G4门槛核收。
+> 负责人已授权RD与dev1共用本树持续完成PCH-01～12，并允许双方就具体冲突/阻塞直接协商；Git索引、提交推送和PCH四册由RD统一负责。无Core独立运行、完整Rental标准包及全功能验收仍未完成。正式依据为[需求v1.5](平台Core接入-需求.md)与[开发任务v1.5](平台Core接入-开发任务.md)，进度只由原G1～G4门槛核收。
 
 ## 1. 当前目标与施工范围
 
@@ -12,19 +12,19 @@
 
 Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该Core。未来跨Core协作通过明确对象引用/接口/事件实现，本期不开放共享业务表或隐含读权。先交标准本地包，再接固定GitHub Release获取及Topic发现；底座与Core分别更新，保留下游业务、配置、数据和授权。[包标准](平台Core接入-开发任务.md#core-package-standard) · [独立更新](平台Core接入-开发任务.md#independent-upgrades)
 
-唯一施工树为 C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS，分支 codex/platform-core-extraction。本树由本对话唯一写入；允许修改PCH所需Auth/Guard/ALS、正式包出口、主装配/OpenAPI、schema/迁移/Seed与后台外壳。main索引和其他树仍归其作者。已接住固定main1d53ada2bb79a220e4d99f75f27508bfac5360a5；源码相对3e0b2c72865fa0a21053f26608bda878861c9f90无变化，后续三册AI Native文档逐份保留。源码阶段372327384c4b466241bf0f62ed8fe705a15cd8ac已普通推送并实际远端回读；该固定提交保存本次旧接续，不追其他专项活动HEAD。[当前固定主线](平台Core接入-开发记录.md#core-main-notification-sync-20261117)
+唯一施工树为 C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS，分支 codex/platform-core-extraction。本树由RD与dev1按文件分工写入；允许修改PCH所需Auth/Guard/ALS、正式包出口、主装配/OpenAPI、schema/迁移/Seed与后台外壳。main索引和其他树仍归其作者。已接住固定main1d53ada2bb79a220e4d99f75f27508bfac5360a5；源码相对3e0b2c72865fa0a21053f26608bda878861c9f90无变化，后续三册AI Native文档逐份保留。源码阶段372327384c4b466241bf0f62ed8fe705a15cd8ac已普通推送并实际远端回读；该固定提交保存本次旧接续，不追其他专项活动HEAD。[当前固定主线](平台Core接入-开发记录.md#core-main-notification-sync-20261117)
 
 通知草稿/原删除收据、报价提交前回调、个人付款委托与恢复正文剥离已接到Rental包，公共权限匹配、面板图标及193个精确兼容出口保留。原维护读取器由宿主真实供给，缓存只有核验过的不可变无正文引用。费用批准与商户委托的五个服务现也归Rental单源，旧Nest构造顺序保持，78个方法正文与固定父版一致；续租持久报价明确参加已有事务，客户层不重复调用Core授信占用。原42项批准/续租/换货冒烟及十配置类型通过，下一步迁入Controller与客户端；当前切片固定父版6d142a6bd96b829c0f124308d8f0dd9d1cd8e6d2保存原文和完整旧接续。[当前批准链](平台Core接入-开发记录.md#core-rental-enterprise-approval-runtime-20261117) · [原主线兼容](平台Core接入-开发记录.md#core-main-notification-sync-20261117)
 
 企业资格、订单/财务读取、原命令/审计、客户主档/会员、政策及成员交接已单源迁入Rental包，公共日志基础写入/脱敏在platform-server。企业申请、管理请求、任务中心、行政交接、付款证明和成员审计现也迁入Rental，原API只供给同一实例；客户各端、续租/换货费用合同由纯业务出口维护。本片97个方法/函数正文及138个合同声明正文一致，原101项工作流冒烟和十配置类型通过。下一步继续剩余Controller和客户端，再处理数据/迁移/Seed和标准装配。父版48a5ecac5a1a1c6d974e183260a7895e5fe10c56保全本片原文/完整接续。[当前申请/任务阶段](平台Core接入-开发记录.md#core-rental-enterprise-workflow-runtime-20261117)[当前政策/成员阶段](平台Core接入-开发记录.md#core-rental-enterprise-policy-members-20261117) · [客户主档](平台Core接入-开发记录.md#core-rental-customer-master-20261117) · [企业读取](平台Core接入-开发记录.md#core-rental-enterprise-reads-20261117) · [原工作流基线](平台Core接入-开发记录.md#core-enterprise-workflow-fixture-20261117)。官方日历源按公共能力处理，原恢复/收款与采用未完项沿阶段证据承接。[恢复/收款](平台Core接入-开发记录.md#core-rental-recovery-payments-20261117) · [采用闭包](平台Core接入-开发记录.md#core-rental-category-adoption-20261117)。正式需求/任务身份、依赖、顺序和业务规则沿批准依据，MIT与品牌原稿引用固定Git。
 
-负责人明确指定 `[Saas 底座]-dev1` 为副手，已成功下发固定48a5基线及公共订阅→基础集成范围；实际独立树为 C:/Users/Penn/.codex/worktrees/saas-platform-dev1/rental-OS、分支 codex/saas-platform-dev1。已回读首个订阅固定交付ee3295d07ab96c5a1a8d75cf9efb2412b3ead63e，包含公共办理/API/UI及独立schema，尚未整合到本树；副手仍在自己的树处理基础集成。本对话继续Rental并统一维护PCH四册，只整合固定差异。本树仍由本对话唯一写入，副手不操作main或本树。[分工证据](平台Core接入-开发记录.md#core-rental-enterprise-workflow-runtime-20261117)
+负责人已将 `[Saas 底座]-dev1` 迁入共享施工。原订阅ee3295及基础集成未完检查点719cb92e919b140027cc56e10434e9ec77db5a09均已保全并迁入；旧树目录及Git登记已移除，源分支留存。dev1持续完成公共订阅/基础集成API/UI/数据和模块导读，随后补公共组织/其余安全；RD继续Rental并统一索引、提交/推送及PCH四册。共同文件先约具体窗口，双方直接处理真实冲突。attach_worktree因归属校验未完成UI关联，但共享目录/分支已通过显式workdir核实；今后所有命令固定到本节唯一施工路径。[迁入与共享证据](平台Core接入-开发记录.md#core-shared-dev1-migration-20261118)
 
 ## 2. 已有实际接点
 
 | 模块 | 当前实现及证据入口 |
 | --- | --- |
-| 公共合同/服务与无Core API | [platform-contracts](../../../packages/platform-contracts/README.md)、[platform-server](../../../packages/platform-server/README.md)、[platform-api](../../../apps/platform-api/README.md)持有认证、会话、外观、初始化、租户/人员角色及公共HTTP；22公共模型/4份迁移和独立构建已提供。原API窄转接同一实现，原组合schema/迁移保留。[公共宿主](平台Core接入-开发记录.md#core-public-host-packages-20261115) · [初始化/管理](平台Core接入-开发记录.md#core-public-management-20261115) |
+| 公共合同/服务与无Core API | [platform-contracts](../../../packages/platform-contracts/README.md)、[platform-server](../../../packages/platform-server/README.md)、[platform-api](../../../apps/platform-api/README.md)持有认证、会话、外观、初始化、租户/人员角色及公共HTTP；29公共模型/6份迁移已提供，新增订阅及集成链未执行，集成仍为未完检查点。原API窄转接同一实现，原组合schema/迁移保留。[公共宿主](平台Core接入-开发记录.md#core-public-host-packages-20261115) · [初始化/管理](平台Core接入-开发记录.md#core-public-management-20261115) |
 | 标准Core宿主 | [core-contracts](../../../packages/core-contracts/README.md)、core-host与[platform-core-host](../../../packages/platform-core-host/README.md)提供正式清单、授权/分配、绑定/原收据、本人目录、范围/就绪、HTTP政策和移除预检。独立公共主装配消费同源Guard/OpenAPI，原Rental总装配仍需迁移。[公共主接点](平台Core接入-开发记录.md#core-public-assembly-20261115) |
 | 期限与实际数据观察 | 公共统一订阅期限reader、固定公共SQL/结构检查、工单实际物理reader及原Prisma账已提供，目录/升级预检消费真实证据接点。当前数据库/迁移尚未实际执行，清单不能补成功。[期限/公共数据](平台Core接入-开发记录.md#core-public-data-term-20261115) · [工单物理与原账](平台Core接入-开发记录.md#core-mysql-data-observation-20261115) |
 | 公共后台 | [platform-admin](../../../packages/platform-admin/README.md)持有原外壳/UIArc、主题/语言/音效、通知/休息/面板、页面/表单/列表和稳定会话/请求/缓存端口；[零Core Web](../../../apps/platform-admin/README.md)与[工单Web](../../../apps/example-tickets-admin/README.md)复用同一应用工厂。Core目录/授权面板、人员角色、租户创建/资料/状态及本人安全已接公共页面。[目录](平台Core接入-开发记录.md#core-access-directory-ui-20261115) · [人员角色](平台Core接入-开发记录.md#core-public-access-pages-20261115) · [租户页面](平台Core接入-开发记录.md#core-public-tenant-pages-20261115) · [恢复口令/角色删除](平台Core接入-开发记录.md#core-public-access-actions-20261115) · [本人安全](平台Core接入-开发记录.md#core-public-self-security-20261115) |
@@ -36,7 +36,7 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 ## 3. 下一实施入口与未完项
 
 1. 继续完成Rental独立包。核心/报价营销、配置与业务请求DTO、订单确认/批准/商户委托、配货/办理锁/自动扫描、工作台/经营报表/到期作业、具体检查同意/批准执行、规则/日历绑定草稿、批准设置、品类草稿/发布/开通政策、采用准备/最终提交及经营空间边界已单源迁入；事实/配置/恢复/收据、资金/容量/企业核销及原冻结规则也有正式出口。企业政策、邀请/成员及管理员交接、申请/管理请求/任务中心、行政交接及成员审计已完成单源迁移，费用批准/委托已完成单源迁移，下一步迁入Controller和客户端，再形成标准Core装配、schema/迁移/Seed、页面/客户端、其余作业/回调及AI接点。客户主档/会员唯一写入、企业政策与资格由Rental包提供，会员业务服务、文件与原Auth仍由宿主供给实际参加者，不能以空适配替代；保留原权限码、标识、金额、锁、事务、幂等和历史依据，事件/作业只有一个执行者。[完整兼容清单](平台Core接入-开发记录.md#core-ownership-baseline-20261114) · [原主核心](平台Core接入-开发记录.md#core-rental-core-facts-20261116) · [确认/委托](平台Core接入-开发记录.md#core-rental-order-confirmation-20261116) · [配货/扫描](平台Core接入-开发记录.md#core-rental-allocation-runtime-20261116)
-2. 公共组织、安全、完整订阅办理和基础集成尚未全部独立；dev1按明确分工先补完整订阅、再补基础集成的实际API/UI与数据所有权，本对话读取固定交付后整合，公共组织/其余安全仍须继续。不能将已有认证、基本资料或期限reader当作完整公共能力。原有效会话的wid必须作为签名证据核验，不在公共业务workspace恢复Rental权限；原简称省略/null/空字符串及审计兼容保持。[公共兼容基线](平台Core接入-开发记录.md#core-public-window-baseline-20261115) · [原身份SQL](平台Core接入-开发记录.md#core-principal-sql-runtime-20261115) · [公共认证](平台Core接入-开发记录.md#core-public-auth-extraction-20261115)
+2. 公共组织、安全、完整订阅办理和基础集成尚未全部独立；订阅办理/API/UI已迁入，基础集成服务/合同/schema已保全为未完检查点；dev1在共享树继续补实际API/UI、示范宿主和数据所有权，公共组织/其余安全随后继续。不能将已有认证、基本资料或期限reader当作完整公共能力。原有效会话的wid必须作为签名证据核验，不在公共业务workspace恢复Rental权限；原简称省略/null/空字符串及审计兼容保持。[公共兼容基线](平台Core接入-开发记录.md#core-public-window-baseline-20261115) · [原身份SQL](平台Core接入-开发记录.md#core-principal-sql-runtime-20261115) · [公共认证](平台Core接入-开发记录.md#core-public-auth-extraction-20261115)
 3. 完成原Rental主AppModule/Guard与各audience接线。主provider通过明确imports/exports供给同一数据库、人员、订阅、审计和部署目录，总Core模块与单独模块不重复登记Controller。标准HTTP从所选Core贡献生成，未知政策拒绝；staff/client沿各自正式授权，不按operator使用权直接放行。[统一装配](平台Core接入-开发记录.md#core-application-assembly-20261115) · [HTTP政策](平台Core接入-开发记录.md#core-http-policy-registration-20261115)
 4. 生命周期仍须实际核租户授权、成员分配、原绑定/初始化、停新、排空和代码移除。当前授权结果与随后读取错误分开，unknown只读原键；撤权先取消旧请求、清除目标Core缓存。Core绑定/当前范围/实际就绪分别读取，跨事务不逆序持父锁。移除预检clear不执行删除，缺业务/AI/回调/作业/历史依赖证据不得移除。[结果读取/缓存](平台Core接入-开发记录.md#core-access-refresh-receipt-20261115) · [范围/就绪](平台Core接入-开发记录.md#core-scope-readiness-20261115) · [移除预检](平台Core接入-开发记录.md#core-removal-preflight-20261115) · [工单移除依赖](平台Core接入-开发记录.md#core-tickets-removal-data-20261115)
 5. 实际安装/部署消费同一固定标准包和版本锁；源码目录缺标准清单须拒绝。迁移prepare仍pending，不写成功账或执行DDL。工单旧绑定/初始化版保持可读，普通准入核完整迁移/物理库；普通更新拒绝租户/容器范围转换及容器类型改名，改变范围须专门迁移。[包与命令](平台Core接入-开发记录.md#core-package-current-cli-20261115) · [原绑定兼容](平台Core接入-开发记录.md#core-tickets-binding-readability-20261115) · [更新范围](平台Core接入-开发记录.md#core-update-scope-compatibility-20261115)
@@ -49,9 +49,11 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 
 每片同步实际源码职责、复杂事务/历史原因、模块导读、正式API资料及接入步骤。开发Agent从[统一能力查询](../../../packages/core-contracts/README.md#找到平台已有的功能)定位正式导入、页面/API及源码；动态登记、完整API字段、六个未检出应用/客户端和用途说明缺口仍须处理，索引issues=0不代表全部源码规范化。[覆盖/部署快照](平台Core接入-开发记录.md#core-index-deployment-snapshot-20261115) · [源码导读](平台Core接入-开发记录.md#core-source-reading-20261115)
 
-只做对应改动的必要测试，复用既有用例与短stdin，不新增成批脚本，不删断言、skip/todo或放宽权限。原四册维护，记录放完整阶段证据，任务只更新跨档进度，接续覆盖当前现场。本次明确副手任务已作单点交接；后续由本对话读取固定交付，PM按规则读取原记录，不主动群发或重复通知。其他Rental品类治理、AI Native、MCP/Harness和Runtime/SDK专项仍按各自正式依据核收，不重派或继承进度。
+只做对应改动的必要测试，复用既有用例与短stdin，不新增成批脚本，不删断言、skip/todo或放宽权限。原四册维护，记录放完整阶段证据，任务只更新跨档进度，接续覆盖当前现场。本次负责人已明确允许RD/dev1持续单点协作，结果和必要冲突写原记录；PM按规则读取，不主动群发或重复通知。其他Rental品类治理、AI Native、MCP/Harness和Runtime/SDK专项仍按各自正式依据核收，不重派或继承进度。
 
 ## 5. 验证边界与保留问题
+
+当前共享迁入核129个路径、无缺失，公共合同/公共服务/Rental三配置类型0诊断；完整宿主、API/前端及集成冒烟待继续。迁移前原文由c6351b288a08ae80a17cf36f7cb1c4cc715bef00保全。[迁入证据](平台Core接入-开发记录.md#core-shared-dev1-migration-20261118)
 
 当前批准链78个方法正文保留，原42/42批准、续租和换货冒烟及十配置类型通过，未新增永久测试脚本。首轮31个端口类型诊断、42例的15/27、37/5和39/3失败及两处实际调用问题保留在当前记录；未放宽原有效断言。原主线片19个方法、101/101工作流、通知/委托原读取writes=0及七配置前端0诊断沿固定证据保留，后台兼容出口及此前3679诊断也可追溯。SQL/锁/事务/身份/资金/存储仍为明确fixture，真实HTTP/数据库/浏览器/微信、完整Nest宿主/安装/更新、独立接手及审查未验。申请/任务、恢复/资金、原创建/草稿及日历PROVIDER_UNAVAILABLE旧问题均沿原记录承接。当前worker已退出，本片输出留内存，没有新增临时环境或业务服务。[当前批准证据](平台Core接入-开发记录.md#core-rental-enterprise-approval-runtime-20261117) · [原主线证据](平台Core接入-开发记录.md#core-main-notification-sync-20261117) · [申请/任务](平台Core接入-开发记录.md#core-rental-enterprise-workflow-runtime-20261117) · [恢复/收款](平台Core接入-开发记录.md#core-rental-recovery-payments-20261117)
 
