@@ -9,9 +9,29 @@ const shared = require('../packages/shared/dist');
 class HttpError extends Error { constructor(body) { super(typeof body === 'string' ? body : body.message); this.body = body; } }
 const common = { Injectable: () => value => value, BadRequestException: HttpError, ConflictException: HttpError, ForbiddenException: HttpError };
 function load(file, deps = {}) {
+  const sources = {
+    'apps/api/src/modules/enterprise/enterprise-policy.service.ts': 'packages/rental-core/src/mysql-enterprise-policy.ts',
+    'apps/api/src/modules/enterprise/enterprise-order-delegation-source.ts': 'packages/rental-core/src/enterprise-order-delegation-source.ts',
+  };
+  file = sources[file] ?? file;
   const exports = {};
   const source = ts.transpileModule(fs.readFileSync(path.resolve(file), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true } }).outputText;
-  vm.runInNewContext(source, { exports, require: name => deps[name] ?? (name === '@nestjs/common' ? common : name === '@prisma/client' ? { Prisma } : name === '@rental-os/shared' ? shared : (() => { throw new Error(name); })()), Date, Map, Set, JSON }, { filename: file });
+  vm.runInNewContext(source, { exports, require: name => {
+    const aliases = {
+      '@rental-os/platform-contracts/request-fingerprint': '../rental-core/rental-idempotency.repository',
+      '@rental-os/platform-server/request-identity': '../../common/request-identity',
+      './category-identity': '../rental-core/category-identity',
+      './merchant-delegation': '../rental-core/rental-merchant-delegated-order.authority',
+      './enterprise-receipt': './enterprise-command.service',
+    };
+    if (name in deps) return deps[name];
+    if (aliases[name] in deps) return deps[aliases[name]];
+    if (name === '@nestjs/common') return common;
+    if (name === '@prisma/client') return { Prisma };
+    if (name === '@rental-os/shared' || name === './rental-category-code') return shared;
+    if (name === './enterprise-order-delegation') return require('@rental-os/rental-core/enterprise-order-delegation');
+    throw new Error(name);
+  }, Date, Map, Set, JSON }, { filename: file });
   return exports;
 }
 const idempotencyModule = require('@rental-os/platform-contracts/request-fingerprint');

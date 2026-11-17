@@ -7,3 +7,10 @@ export type RentalEnterpriseAccessStorage = Pick<PrismaClient,
 export type RentalEnterpriseReadStorage = RentalEnterpriseAccessStorage & Pick<PrismaClient,
   "$transaction" | "clientAuthSession" | "operationLog">;
 export type RentalEnterpriseCommandStorage = Pick<PrismaClient, "$transaction">;
+
+/** 仍传入原宿主实例，保证政策的事务/非事务读取身份比较及锁语义不变。 */
+export type RentalEnterprisePolicyStorage = Pick<PrismaClient,
+  "$queryRaw" | "$executeRaw" | "$transaction" | "businessWorkspace" | "customerProfile" |
+  "customerCorporateMembership" | "rentalCategoryDefinition">;
+export type RentalEnterpriseMembersStorage = Pick<PrismaClient,
+  "$queryRaw" | "$executeRaw" | "$transaction" | "customerProfile" | "customerCorporateMembership">;

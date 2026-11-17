@@ -19,6 +19,8 @@ import type {
 import type { RentalAttributeDefinition, RentalCategoryDefinition } from "./core";
 import type { AdminLoginBranding } from "./platform";
 import type { CompleteFileUploadRequest, FileDownloadUrlSummary, FileUploadSessionSummary } from "./infrastructure";
+import type { ClientQuoteServiceRequest } from "@rental-os/rental-core/client-order-requests";
+export type { ClientQuoteServiceRequest, ClientOrderExtensionRequest } from "@rental-os/rental-core/client-order-requests";
 
 export const CLIENT_API_VERSION = "v1" as const;
 export const CLIENT_REGISTRATION_CHANNEL = "app" as const;
@@ -525,14 +527,6 @@ export interface ClientQuoteLineRequest {
   note?: string;
 }
 
-export interface ClientQuoteServiceRequest {
-  serviceId: string;
-  quantity: number;
-  scheduledStartAt?: string;
-  scheduledEndAt?: string;
-  serviceLocationId?: string;
-}
-
 /** 原受控客户表单的本单地址；只交Core固化快照，不写地址簿，不进入模型或Booking确认载荷。 */
 export type ClientQuoteDeliveryAddressDraft = RentalDeliveryAddressDraft;
 
@@ -568,12 +562,6 @@ export interface ClientAvailabilityRequest {
 
 export interface ClientCancelOrderRequest {
   reason: string;
-}
-
-export interface ClientOrderExtensionRequest {
-  newEndAt: string;
-  services?: ClientQuoteServiceRequest[];
-  memo?: string;
 }
 
 export interface ClientChangePasswordRequest {

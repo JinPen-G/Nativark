@@ -635,6 +635,38 @@
       "types": "./dist/enterprise-workflows.d.ts",
       "default": "./dist/enterprise-workflows.js"
     },
+    "./enterprise-policy": {
+      "types": "./dist/enterprise-policy.d.ts",
+      "default": "./dist/enterprise-policy.js"
+    },
+    "./enterprise-transfer-decision": {
+      "types": "./dist/enterprise-transfer-decision.d.ts",
+      "default": "./dist/enterprise-transfer-decision.js"
+    },
+    "./enterprise-order-delegation": {
+      "types": "./dist/enterprise-order-delegation.d.ts",
+      "default": "./dist/enterprise-order-delegation.js"
+    },
+    "./client-order-requests": {
+      "types": "./dist/client-order-requests.d.ts",
+      "default": "./dist/client-order-requests.js"
+    },
+    "./mysql-enterprise-policy": {
+      "types": "./dist/mysql-enterprise-policy.d.ts",
+      "default": "./dist/mysql-enterprise-policy.js"
+    },
+    "./mysql-enterprise-members": {
+      "types": "./dist/mysql-enterprise-members.d.ts",
+      "default": "./dist/mysql-enterprise-members.js"
+    },
+    "./enterprise-administrator-continuity": {
+      "types": "./dist/enterprise-administrator-continuity.d.ts",
+      "default": "./dist/enterprise-administrator-continuity.js"
+    },
+    "./enterprise-order-delegation-source": {
+      "types": "./dist/enterprise-order-delegation-source.d.ts",
+      "default": "./dist/enterprise-order-delegation-source.js"
+    },
     "./enterprise-receipt": {
       "types": "./dist/enterprise-receipt.d.ts",
       "default": "./dist/enterprise-receipt.js"
@@ -1141,6 +1173,30 @@
       ],
       "enterprise-workflows": [
         "dist/enterprise-workflows.d.ts"
+      ],
+      "enterprise-policy": [
+        "dist/enterprise-policy.d.ts"
+      ],
+      "enterprise-transfer-decision": [
+        "dist/enterprise-transfer-decision.d.ts"
+      ],
+      "enterprise-order-delegation": [
+        "dist/enterprise-order-delegation.d.ts"
+      ],
+      "client-order-requests": [
+        "dist/client-order-requests.d.ts"
+      ],
+      "mysql-enterprise-policy": [
+        "dist/mysql-enterprise-policy.d.ts"
+      ],
+      "mysql-enterprise-members": [
+        "dist/mysql-enterprise-members.d.ts"
+      ],
+      "enterprise-administrator-continuity": [
+        "dist/enterprise-administrator-continuity.d.ts"
+      ],
+      "enterprise-order-delegation-source": [
+        "dist/enterprise-order-delegation-source.d.ts"
       ],
       "enterprise-receipt": [
         "dist/enterprise-receipt.d.ts"

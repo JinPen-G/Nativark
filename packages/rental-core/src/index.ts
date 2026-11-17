@@ -7,3 +7,7 @@ export * from "./exchange-choices";
 export * from "./document-contracts";
 export * from "./enterprise";
 export * from "./enterprise-workflows";
+export * from "./enterprise-policy";
+export * from "./enterprise-transfer-decision";
+export * from "./enterprise-order-delegation";
+export * from "./client-order-requests";

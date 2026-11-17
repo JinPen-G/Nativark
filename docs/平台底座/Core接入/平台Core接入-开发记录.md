@@ -11,6 +11,29 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-enterprise-policy-members-20261117"></a>
+
+## Rental 企业政策、成员邀请与管理员交接（2026-11-17）
+
+固定父版d46319b85cdad81f66c2b69e3e8ca57729ab5a24已普通推送并实际远端回读，保存原服务、合同和完整接续；main62ca183f10b7c316ab63c28ef6d04ee88d06488b在任务祖先。[企业政策](../../../packages/rental-core/src/mysql-enterprise-policy.ts)、[邀请/成员与管理员交接](../../../packages/rental-core/src/mysql-enterprise-members.ts)、[管理员连续性](../../../packages/rental-core/src/enterprise-administrator-continuity.ts)及[原委托来源](../../../packages/rental-core/src/enterprise-order-delegation-source.ts)成为Rental包单源。旧API的政策/成员provider只供给原三项/四项Nest依赖，其他旧路径再导出同一读取；保留同一存储实例及原事务，不通过克隆视图破坏政策的实例身份判断。
+
+[政策合同](../../../packages/rental-core/src/enterprise-policy.ts)、[交接K/C结果](../../../packages/rental-core/src/enterprise-transfer-decision.ts)、[委托合同](../../../packages/rental-core/src/enterprise-order-delegation.ts)及[客户服务项/续租请求](../../../packages/rental-core/src/client-order-requests.ts)迁入纯业务出口，原shared再导出同一声明/运行时。后两项客户接口只移动原字段，未新增或改写请求；公共人员合同仍来自platform-contracts。MySQL私有视图只列实际查询、事务及业务表，资格和关系写入分别接原requireAction与saveEnterpriseRelation，不把企业客户成员作为公共租户后台人员，也不向通用Core合同开放Prisma。
+
+| 必要核对 | 实际结果与边界 |
+| --- | --- |
+| 业务正文 | 政策24、成员39、连续性2、委托来源2，共67个方法/函数正文与固定父版一致；原限额、一次性原码、告知、Tenant锁/修订、最后管理员保护、当前关系/动作、批准和原K/C不变 |
+| 合同与旧入口 | 三份合同全部声明/函数及两个客户接口字段一致；原Nest构造参数类型/顺序保持，八个新正式子出口及typesVersions均指向实际源码；运行依赖、peer与lock未改 |
+| 原基线 | 父版原政策11项及原工作流101项分别通过，沿[政策夹具](#core-enterprise-policy-fixture-20261117)和[工作流基线](#core-enterprise-workflow-fixture-20261117)固定证据；不是默认推断原全部业务正常 |
+| 候选行为 | node --no-compilation-cache - api-enterprise-policy-members-candidate tests/enterprise-policy.test.cjs tests/enterprise-workflows.test.cjs，PID18440退出0、stderr空，112/112、0 fail/skip/todo/cancelled；只修原用例源码/依赖定位，73/862处断言及11/104处原test声明保持。缺交接运行时的原503反例仍拒绝且不写 |
+| 正式类型 | 官方Prisma5.22原238模型、TS5.9.3，十个正式配置0诊断；Rental207根/932源/414输出，完整原API988根/2451源/1976输出；声明/JS均留内存，未写共享client/dist |
+| 资料与收尾 | 四份本片模块导读/记录/接续定向检查1326个本地链接、121个锚点，0问题；git diff --check退出0，正式需求/任务无差异。worker18440已退出，无新增临时环境或后台服务 |
+
+首轮PID53284在Rental类型阶段退出1，发现ClientOrderExtensionRequest仍属于shared/client，未进入业务测试。定位后把它与原服务项字段迁入Rental纯合同并保留兼容出口，再用同一入口复验通过。stdin复用原验证入口，SHA-256 f7fbc5a38ad010ed28d18208bd28d807750ee3e839841c716d5e0f77c2a68579，没有新增测试脚本、依赖环境或临时目录。
+
+SQL执行、锁、行、事务及授权数据仍为明确fixture；实际服务与原Controller/DTO消费不等于真实MySQL/HTTP、完整Nest宿主、浏览器或标准包安装。源码职责、Rental/原API导读和当前接续同片更新；下一步继续企业申请/管理请求/任务中心、费用批准与委托、Controller及剩余业务，然后数据/迁移/Seed、页面/客户端/作业/AI和标准Rental装配。公共组织/完整订阅/集成、无Core真实运行、多真实Core、独立升级/回退/接手与审查仍未齐。按原G1～G4复核未跨下一档，正式需求/任务保持，不按移动文件或用例数计分。
+
+原两处集中待清理残留与责任清单保留，本次原生PowerShell删除仍在启动前被自动审批以blocked by policy拒绝，没有换壳/工具绕过；不能称已删除。阶段结束精确暂存、中文提交并普通推送当前任务分支，上传后读取实际远端，不合main或发布。
+
 <a id="core-enterprise-workflow-fixture-20261117"></a>
 
 ## 原企业工作流验证入口与SQL绑定夹具（2026-11-17）

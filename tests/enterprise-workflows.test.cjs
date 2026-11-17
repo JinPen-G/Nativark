@@ -27,10 +27,15 @@ function load(relative, deps = {}) {
   const sources = {
     'apps/api/src/common/request-identity.ts': 'packages/platform-server/src/common/request-identity.ts',
     'apps/api/src/modules/enterprise/enterprise-command.service.ts': 'packages/rental-core/src/mysql-enterprise-command.ts',
+    'apps/api/src/modules/enterprise/enterprise-policy.service.ts': 'packages/rental-core/src/mysql-enterprise-policy.ts',
+    'apps/api/src/modules/enterprise/enterprise-members.service.ts': 'packages/rental-core/src/mysql-enterprise-members.ts',
+    'apps/api/src/modules/enterprise/enterprise-administrator-continuity.ts': 'packages/rental-core/src/enterprise-administrator-continuity.ts',
+    'apps/api/src/modules/enterprise/enterprise-order-delegation-source.ts': 'packages/rental-core/src/enterprise-order-delegation-source.ts',
     'apps/api/src/modules/platform/shared-customer.repository.ts': 'packages/rental-core/src/mysql-customer-master.ts',
     'apps/api/src/modules/client/enterprise-access.service.ts': 'packages/rental-core/src/mysql-enterprise-access.ts',
     'apps/api/src/modules/rental-core/rental-idempotency.repository.ts': 'packages/platform-contracts/src/request-fingerprint.ts',
     'packages/shared/src/enterprise.ts': 'packages/rental-core/src/enterprise.ts',
+    'packages/shared/src/enterprise-transfer-decision.ts': 'packages/rental-core/src/enterprise-transfer-decision.ts',
   };
   relative = sources[relative] ?? relative;
   const file = path.join(root, relative), exports = {};
@@ -42,6 +47,8 @@ function load(relative, deps = {}) {
     if (name === '@rental-os/platform-server/request-identity' && '../../common/request-identity' in deps) return deps['../../common/request-identity'];
     if (name === '@rental-os/platform-server/request-identity') return identity;
     if (name === '@rental-os/platform-server/operation-log') return load('packages/platform-server/src/common/operation-log.service.ts', { './request-identity': identity });
+    // Keep the existing absent-runtime fixture on the service's new contract import.
+    if (name === './enterprise-transfer-decision' && '@rental-os/shared' in deps) return deps['@rental-os/shared'];
     if (relative.startsWith('packages/rental-core/src/') && name.startsWith('./')) return load(path.posix.join(path.posix.dirname(relative), `${name}.ts`), deps);
     if (name === './enterprise-receipt') return load('packages/rental-core/src/enterprise-receipt.ts');
     if (name === './enterprise') return load('packages/rental-core/src/enterprise.ts');
