@@ -150,6 +150,67 @@ dev1实际回合 `01a1e991-c128-7e83-bf0f-60e86b2a759b` 沿固定main产品 `01b
 
 本片固定独立报价及各自最终订单的实际通过结果。原15六条、原26五条及A01～A29的全文G4继续合并既有失败／恢复证据核定，当前任务百分比沿原册。真实数据库、浏览器、微信、供应商及资金实测按负责人原交付清单执行。
 
+### 原人工业务源码与合并影响
+
+Root用实际Git对象及TypeScript5.9.3的类方法解析，比较原main `62ca183f10b7c316ab63c28ef6d04ee88d06488b` 与产品 `01bcfda15cb26c10899761906ac8648c03357f02`。以下三份文件的完整Git字节一致，方法及构造入口数量分别为134、204和82。
+
+| 原业务文件 | 两版本共用Git blob |
+| --- | --- |
+| `apps/api/src/modules/rental-core/rental-core.controller.ts` | `f49236089e17639d9a5ab152cd0ce788be404736` |
+| `apps/api/src/modules/rental-core/rental-core.service.ts` | `1959d7a2ef8ffa917d2f685c4be7101cece78bc6` |
+| `apps/api/src/modules/rental-core/rental-business.controller.ts` | `97af8f6335a0d591664c96599a4a73d01db49a14` |
+
+原报价服务的创建／配置计算及确认服务的create／resolveMembershipAtCommit属于合并影响范围，当前独立报价与各自最终订单4/4已经进入这些实际入口。报价事务等待撤权和原键恢复沿dev2补验 `6cda87bfa2321a8b7d38868ee75286ce3a622b5a632bb9872b96470b7b3b7f18`，原断言保留，补齐两处夹具异步读取后退出0。人工履约、结算及所属权限继续沿原Core固定行为证据。上述Git及方法比较属于静态来源核对。
+
+### A01～A29原范围与证据索引
+
+dev2在实际回合 `01a1e9ba-9b01-77d0-8e95-e5340d6b86b3` 已逐项读取29个原编号、实际生产者和原阶段证据，原矩阵继续沿正式需求§18。下表登记当前可核入口，各原阶段首段的提交、命令、数据与源码哈希承担其原版本身份。本轮新增证据固定到main01bcfda15，各组内存、宿主模拟、历史真库及负责人后续实测分别记录。
+
+| 原编号 | 原范围及当前证据入口 | 当前验证边界 |
+| --- | --- | --- |
+| A01 | [双轨Gateway、能力与错误](#ain05-simulated-whole-closeout-20261111) | 原模拟证据继承，真实供应商交负责人实测。 |
+| A02 | [共用授权](#ain04-whole-task-closeout-20261105)、[知识ACL](#ain10-simulated-whole-closeout-20261111) | tenant／workspace／地点／own负例沿原实际范围。 |
+| A03 | [全端合同](#ain02-consumer-contract-closeout-20261104)、[授权](#ain04-whole-task-closeout-20261105) | audience与平台内容隔离沿原负例。 |
+| A04 | [原运行器](#ain06-simulated-whole-closeout-20261111)、[原输入与Core重检](#ain15-26-original-input-stop-continuation-20261117) | 原撤权／换空间／冻结证据，加本片主线事务等待撤权零报价写入。 |
+| A05 | [公共合同](#ain02-consumer-contract-closeout-20261104)、[八类工具接点](#ain05-eight-kind-whole-intake-20261107) | 原未知字段／工具／版本／枚举和伪造金额拒绝证据。 |
+| A06 | [当前人工参数](#ain15-current-human-parameters-order-handoff-20261114)、[精确澄清定位](#ain15-26-clarification-locator-binding-20261117) | 原同名、日期、时区、商品选择及两处定位P2复验。 |
+| A07 | [原Core报价](#ain09-whole-task-closeout-20261105)、本片独立报价与各自订单对照 | 主线四品类4/4通过，当前priceVersion空值及原其他变体分别核定。 |
+| A08 | [日期地点变化](#ain15-date-location-original-confirmation-20261114)、[四品类锁内缺货](#ain26-four-category-fixed-evidence-style-20261115) | 原重选／新报价／新批准及4类库存失败证据。服务容量争用补验由dev1继续。 |
+| A09 | [原批准与幂等](#ain07-simulated-whole-closeout-20261111)、[个人付款D](#ain15-personal-enterprise-delegation-20261117) | 原绑定、单次消费及丢应答恢复，加主线每路单次保存／AI批准消费。 |
+| A10 | [提交及竞争恢复](#ain06-simulated-whole-closeout-20261111)、[任务中心接管](#ain26-selected-task-center-recovery-20261115) | 原提交前后、丢应答、holder及fencing范围，加主线原报价恢复。 |
+| A11 | [原取消终态](#ain25-cancellation-all-terminal-public-consumers-20261114)、[停止续办](#ain15-26-original-input-stop-continuation-20261117) | unknown查原账／收据，原善后状态和有限取消组合证据。 |
+| A12 | [原订单解释](#ain12-13-simulated-whole-closeout-20261113) | 原报价／建单／收款／交付、金额及原因来源。 |
+| A13 | [权威历史事实](#ain08-whole-task-closeout-20261105)、[原材料消费者](#ain13-14-original-material-consumers-20261112) | 原历史快照与缺依据拒绝证据。 |
+| A14 | [开业整项](#ain14-category-capability-whole-closeout-20261113)、[资料配置](#ain16-simulated-whole-closeout-20261114) | 原缺项、提案／草稿／发布／采用分层结果。 |
+| A15 | [资料配置整项](#ain16-simulated-whole-closeout-20261114) | 原普通资料、敏感验证、共享范围及修订冲突。 |
+| A16 | [知识整项](#ain10-simulated-whole-closeout-20261111)、[隐私整项](#ain24-platform-inspection-expiry-whole-closeout-20261115) | 原ACL、撤回／删除、缓存失效和来源。 |
+| A17 | [Gateway](#ain05-simulated-whole-closeout-20261111)、[独立展示攻击](#ain24-independent-language-display-attacks-20261115) | 原注入、收件人与受控出网证据。 |
+| A18 | [原预算与计量](#ain11-simulated-whole-closeout-20261111)、[成本与回退](#ain25-measurement-cost-rollback-whole-20261114) | 原并发预留、累计资源、未知计量与单账范围。 |
+| A19 | [后台公共交互](#ain12-13-simulated-whole-closeout-20261113)、[四端展示](#ain-entry09-safe-display-whole-closeout-20261115)、[时间与可访问性](#ain-entry16-simulated-whole-closeout-20261115) | 原宿主模拟继承，浏览器实页按角色清单交付。 |
+| A20 | [Outbox整项](#ain17-simulated-whole-closeout-20261114)、[经营事件整项](#ain18-simulated-whole-closeout-20261114) | 原重复／乱序、循环、冷却、影子和三级停用。 |
+| A21 | [媒体整项](#ain19-source-text-simulated-whole-closeout-20261114)、[员工整项](#ain20-signature-reopen-simulated-whole-closeout-20261114) | 原图片／语音来源、模糊留空、人工更正及提交。 |
+| A22 | [员工原宿主](#ain20-signature-reopen-simulated-whole-closeout-20261114) | 原上传、弱网与切空间模拟，微信／真机交负责人。 |
+| A23 | [客户场景](#ain21-simulated-whole-closeout-20261114)、[两端预约](#ain22-goal-booking-original-consumers-20261114)、[D消费者](#ain15-client-delegation-original-consumers-20261117) | 原公开／本人／企业范围、两端恢复及原支付宿主。 |
+| A24 | [品类助手](#ain23-category-human-model-consumers-20261114) | 原真实能力、策略、治理校验、发布与采用范围。 |
+| A25 | [故障与版本回退](#ain25-measurement-cost-rollback-whole-20261114)、[运行交付](#ain27-operational-delivery-20261117) | 原模型降级、取消、恢复及原副作用保全。 |
+| A26 | [隐私全文](#ain24-platform-inspection-expiry-whole-closeout-20261115)、[原正文加密](#ain24-encrypted-original-bodies-native-tx-20261115) | 原密钥／敏感审计、留存和删除模拟，真实外部副本交负责人。 |
+| A27 | [原经营事实](#ain08-whole-task-closeout-20261105) | 原数据不足、利用率／利润缺依据及明确空态。 |
+| A28 | 本片原人工源码比较、独立报价与各自订单、[人工及实测交付](#ain28-user-operation-real-test-handoff-20261117) | 原关闭AI的履约／结算回归按固定证据继承，主线受影响报价／建单4/4通过。 |
+| A29 | [四品类组合](#ain26-four-category-fixed-evidence-style-20261115)、[运行器](#ain06-simulated-whole-closeout-20261111)、[选单接管](#ain26-selected-task-center-recovery-20261115)及本片对照 | 正常／锁内失败／丢应答、并发／停止／恢复／接管分别沿原版本。服务容量补验及原15全文仍待最后汇总。 |
+
+### 历史附件的最小追溯与现状
+
+dev2已定位两份历史scope报告的原生成命令与封存结果。Root再从原Claude执行 `81fd5280-1ea8-43aa-b15a-c15af1f5ed97` 的准确字节偏移只读核同命令SHA-256、原调用和原终态，记录如下。
+
+| 历史范围 | 原生成与终态 | 当前保全状态 |
+| --- | --- | --- |
+| `output/ain06-audio-host-continuation-20261108/scope-verification.json` | 调用 `call_MJVDpTw54LhXKmEUzQlt3mi2`，原记录偏移114563236，命令SHA-256 `2ddd311e69dc6b0e236dd34642a98251021042373a034d92c229e5e51ce76c51`。原封存退出0，音频1/1，3份目标变化及2312份非目标保全。登记报告SHA-256 `0afdd15b5f89431db882e62a830bd6b4695eb7f1df5e932c0e0302cc87064cbb`。 | 原报告及stage-fixed.tar.gz在当前AI树和原foundation物理目录均未找到。命令与终态仍可从原执行定位。原wholeTaskG4=false及既有非零audit保留。 |
+| `output/ain06-settled-prefix-continuation-20261108/scope-verification.json` | 调用 `call_VanpgXpLe2If3LxQmAj1axEU__rk16__Z1Jl_h7ot5K7deDl`，原记录偏移115415520，命令SHA-256 `929762163dc587177ab439b477d29c6f6495d087f48b05b37645780ea8f24ca8`。原封存退出0，原测试1/1，3份目标变化及2312份非目标保全。登记报告SHA-256 `058ab7080ec2f921071a0b2f253097728e93a672bfb0de459a240a3a669b250a`。 | 原报告及stage-fixed.tar.gz在两处均未找到。原源码／断言保全、未跑原生入口和原75%状态继续沿当时证据解释。 |
+
+原09的mysql-result-three-categories.json和mysql-result-four-categories.json在当前AI树及固定提交缺原字节，原16组范围沿[原09记录](#ain09-whole-task-closeout-20261105)定位。本片主线独立报价与各自订单4/4有新的完整执行结果，其他身份、单位、资格、配送及Hook沿原适用证据核定。上述原附件的缺失与原失败明确保留在交付索引中。
+
+本片29个编号完整且唯一，54处阶段锚点及本地文件链接已定向核对。原任务算术与Git空白检查通过，文档检查仍退出1并保留上述四处既有缺链。原命令和Git对象读取均为只读，新增测试文件、临时目录、依赖及服务进程为0。
+
 ### 原26分档及剩余门槛
 
 | 原门槛 | 本片依据与状态 |
