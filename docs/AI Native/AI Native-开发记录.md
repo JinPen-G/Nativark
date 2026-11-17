@@ -6,6 +6,28 @@
 > 全表门槛复核已按2026-11-18最终交付核闭，原28项及ENTRY各阶段的G1～G4、固定消费者、必要模拟／类型和独立复验见[原28最终收口](#ain28-four-clause-final-closeout-20261118)及下方实施摘要。原2026-11-09[合并后复核](#ain-post-consolidation-review-20261109)保留当时依据。当前分数唯一维护在正式开发任务。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain27-28-main-final-delivery-20261118"></a>
+## AIN-27／28最终main交付与远端回执（2026-11-18）
+
+原28最终研发登记提交`748f761535343ca224532ee252fe93ba60dbbee9`已普通推送AI分支并回读GitHub。Root按本轮负责人“每两项原任务整合main”的持续目标，以main固定`7d49c26c9423f2400a233275e84cca5cb4127fa3`及该AI提交生成最终候选树`32e2051e869a9c39b4609c55e6a602793202c1db`。相对已做完整后台类型、实际入口模拟及两侧非作者核定的`74c62684132f7e2452d755f6329d012291993630`，后继仅含三份AI文档差异。
+
+### 实际合并及上传
+
+- 开始前main分支、HEAD、暂存区、MERGE_HEAD／CHERRY_PICK_HEAD及八条入站路径已核。各入站工作区文件的规范化Git blob与固定main父版本一致。实际远端main与该本地父版本同SHA，AI最终登记已在目标远端。
+- 实际命令`git merge --no-ff --no-commit 748f761535343ca224532ee252fe93ba60dbbee9`退出0，自动合并Copilot和原记录。暂存范围恰为三份入口源码及五份已有文档，`git write-tree`与固定候选树相同。原文档检查器核11/11、0错误，暂存差异检查退出0。
+- 中文合并提交为`914c29bec94fc5dc33054a7a198f052f02d642bf`，父版本分别为上述main和AI，提交树为`32e2051e869a9c39b4609c55e6a602793202c1db`。`git merge-base --is-ancestor`核AI最终登记在该main提交中，退出0。
+- `git push origin HEAD:refs/heads/main`退出0，随后`git ls-remote --heads origin refs/heads/main`退出0并回读`914c29bec94fc5dc33054a7a198f052f02d642bf`。原27／28固定main节点已完成实际交付，产品基线使用该提交。[原28全文与验证](#ain28-four-clause-final-closeout-20261118)、[角色操作及实测](#ain28-user-operation-real-test-handoff-20261117)
+
+### WIP、原文及资源核对
+
+主线65份已跟踪WIP的原二进制差异及61份未跟踪成果的原字节，在实际合并和提交后均核同。跟踪差异SHA-256为`192ce2ef32fb32452edf90661429dfb246ec6178ca661906722d506eef20bc0b`，未跟踪文件Git哈希序列SHA-256为`6a56989b16b9659babeb6c86e77edc9d883dfbfaba1013ce163ddfc7b1b15175`。旧本地演示界面两份原稿仍由唯一的本地Git补丁保全，引用`refs/codex/ai-native/main-wip-preservation-20261117`，blob为`d47e4c9d3214b53e1dae585d41faae008ba97da7`，27982字节，SHA-256为`af5fc3f0e6486f971fb7118d89aafd2e5ae0dc819d05048bc5997da16cb67c38`。[原整合及原稿去向](#ain-main-fixed-native-integration-20261117)
+
+最终候选375个显式阶段锚点全部逐一匹配固定父版本，无丢失、重复或拼接正文。main保留原Copilot的header／dock结构，三份入口源码与已核定版本同字节。API、shared、网站和两类小程序沿固定主线产品基线继承已验结果，后继入口代码已有必要模拟、完整后台类型及非作者复验。原失败、历史scope附件缺字节和unknown关联继续沿原阶段读取。
+
+Root验证子进程均已退出，两处本轮任务临时目录已删除并核实，本树`output/.tmp`为空。main的`admin-header-actions`、`admin-nativark-brand`和`admin-shell-ui`归原创建者保留，本片服务、端口、数据库、依赖及文件测试脚本创建数均为0。真实环境由负责人沿原实测清单执行。此后交付回执和最终接续使用文档后继提交同步，产品源码基线为上述已上传main提交。
+
+交付回执及最终接续的原文档命令`node --no-node-snapshot --no-compilation-cache scripts/validate-docs.cjs`退出0，11/11文档零错误，两份新增／更新现场的本地文件与锚点定向核查均通过，`git diff --check`退出0。
+
 <a id="ain28-four-clause-final-closeout-20261118"></a>
 ## AIN-28 四条、A32与全范围最终研发收口（2026-11-18）
 
@@ -4332,7 +4354,7 @@ c04外部超时失败已由AI-dev2对照当前及原 `859ad9abd` 的同一服务
 
 ## 原28项当前实施摘要
 
-本表按已归档的原任务全文和固定main产品`01bcfda15cb26c10899761906ac8648c03357f02`同步当前实现。研发分档及总进度只查正式任务册。历史命令、失败、未知关联和真实环境证据分别沿对应原阶段读取。[正式任务](<AI Native-开发任务.md>)、[固定主线验证](#ain-main-fixed-native-integration-20261117)
+本表按已归档的原任务全文和固定main产品`914c29bec94fc5dc33054a7a198f052f02d642bf`同步当前实现。研发分档及总进度只查正式任务册。历史命令、失败、未知关联和真实环境证据分别沿对应原阶段读取。[正式任务](<AI Native-开发任务.md>)、[最终主线交付](#ain27-28-main-final-delivery-20261118)
 
 | 任务 | 当前实现与完整阶段依据 | 验证及运行边界 |
 | --- | --- | --- |
@@ -4363,7 +4385,7 @@ c04外部超时失败已由AI-dev2对照当前及原 `859ad9abd` 的同一服务
 | AIN-25 性能／SLO | 原采样／成本包络、容量／背压／公平性／告警、故障恢复／人工降级与模型／prompt／policy回退已核。[原五条全文](#ain25-measurement-cost-rollback-whole-20261114) | 候选SLO及成本使用明确模拟样本，D05生产参数和真实供应商成本由负责人核定。 |
 | AIN-26 组合验收 | 固定构建／迁移／政策／输入、四品类独立报价和订单、多端／平台／事件、A01～A29与缺陷复验已核。[原五条全文](#ain26-combined-whole-closeout-20261118) | 固定main完整类型与实际OpenAPI／AppModule装配已验证，历史附件与当次失败继续保留实际边界。 |
 | AIN-27 部署与回退 | 双轨、部署／轮换／容量／监控／留存、三阶段灰度／停用、版本回退和升级双目标屏障已有实现及操作资料。[原操作交付](#ain27-operational-delivery-20261117) | 原六条及依赖已完成本轮研发核定，真实供应商、试点及生产放行沿负责人实测。[最终独立核定](#ain27-six-clause-whole-closeout-20261118) |
-| AIN-28 最终交付 | 原四条、A32、两个入口非作者复验、四端操作、工具／API／恢复合同、历史导航及资源交付已核闭。[原28全文](#ain28-four-clause-final-closeout-20261118)、[操作及实测交付](#ain28-user-operation-real-test-handoff-20261117) | 最终main按固定候选整合，完整阶段原文和原失败保留，真实环境沿负责人实测清单执行。 |
+| AIN-28 最终交付 | 原四条、A32、两个入口非作者复验、四端操作、工具／API／恢复合同、历史导航及资源交付已核闭。[原28全文](#ain28-four-clause-final-closeout-20261118)、[操作及实测交付](#ain28-user-operation-real-test-handoff-20261117) | 固定main产品已交付并回读GitHub，完整阶段原文和原失败保留，真实环境沿负责人实测清单执行。[最终交付](#ain27-28-main-final-delivery-20261118) |
 
 ## ENTRY 增量实施摘要
 
