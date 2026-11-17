@@ -6,6 +6,35 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、15、16、17、18及19／20／21／22／23／24／25／26已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain28-console-next-round-recovery-20261118"></a>
+## AIN-28 控制台原结果核对后下一轮恢复修复（2026-11-18）
+
+前置AI提交为`55e74054e1ed3c53a5bed823560373c751bff218`，main为`7d49c26c9423f2400a233275e84cca5cb4127fa3`。dev1从候选树`bfcc7e0fdff0f704280272abbc1d3df9a313041a`复现AIN-12／28的P2。关闭当前轮后，原页面`readOriginal`对历史帧调用`native.open`，清除了同一空闲修订的下一轮证明，发送门禁因此拒绝合法输入。直接`native.read`保留证明。原反例退出0，原定位字节保持，模型、Task及服务端写入均为0。
+
+Root修复原两个消费者。在同一会话、场景、活跃状态且无当前轮时，重开复核原空闲修订和最终元数据，再保留已由关闭收据建立的证明。`read`也绑定原会话及场景。实际发送预检和`canSend`同时核页面帧及当前会话帧，迟到页面状态失去当前证明后保留输入并拒绝发送。[原会话实现](../../apps/admin/src/features/ai-operator/native-session.ts)、[原页面调用](../../apps/admin/src/features/ai-operator/OperatorContext.tsx)
+
+| 固定源码 | Git LF blob | dev1读取的工作区CRLF blob |
+| --- | --- | --- |
+| `native-session.ts` | `fc66db97e360943c1b2a61f7d77404c527bc9578` | `43487e23fb22cfc26dd2220d410056e44e388f8a` |
+| `OperatorContext.tsx` | `dd0e66b7fa493db13a2b9c6b54884a9f7fbcd398` | `180920f6e9066a0f8f57699c1ddd1796394bc84c` |
+
+### 必要验证与独立复验
+
+- Root从实际页面AST提取`readOriginal`和发送门禁，执行真实会话实现及shared校验。旧固定源码的正向断言退出1。修后10/10、退出0，覆盖同修订原页面核对、重复刷新、不同修订、新当前轮、终读期间修订变化、撤权失败、同页撤回、重挂载、scope变化及定位改变。所有夹具模型、Task及服务端写入均为0，audit为空。
+- 首轮修后夹具退出1，原因是断言将原始错误码当作面向用户的提示。夹具改为分别核可读提示和实际抛出的`AI_REVISION_CONFLICT`／`AI_ACCESS_DENIED`，原失败保留。产品错误门禁沿原实现。
+- dev1独立用实际页面调用和原聊天状态复验，同修订恢复发送、不同修订拒绝和重挂载拒绝均通过。进程40268已退出，退出码0，stdin SHA-256为`b6e10c3bf6ee44a9484af7d374971af2c8f0584b0fe26b7f831953d4f5d0b71c`。原定位保持，模型、Task和服务端写入均为0，audit为空，任务目录未创建。Root核其CRLF blob与当前源码相同。
+- 完整后台TypeScript5.9.3验证候选树`1ba0e58c4f7a1d3f7082d809b94c337d6d5535c3`，shared为129根／337源／129份内存声明，admin为665根／4002源，诊断均为0，退出0。复用受管依赖和Git固定来源，声明只在内存产生。
+
+Root行为命令为`node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 -`，类型命令将内存上限设为4096。均使用本树原离线preload、不可达DATABASE_URL及本树`output/.tmp/ain28-next-round-recovery`的audit／写根／TEMP／TMP。旧源码、首轮夹具失败、最终10项及类型stdin SHA-256分别为`23e996a11d0633202b091cc296f0e316201f5a87f7148593aa60fa28f8b11440`、`1fb1158613924c710c670bc5b6daeede00635f015f4fbbced1d55c7dc7a24325`、`b9c1a6173ea5effab27a769049b9d366ded082b8dc494cf81b06673c68f93aba`、`af1b46e54cb4bff62d94f962e5e2f1b525383f00458364809dc79845203ce257`。
+
+必要stdin、实际输出和元数据保留在唯一的本地Git证据引用`refs/codex/ai-native/ain28-next-round-recovery-20261118`，树为`05a3bd7384aef2cc524e78d7f1d7f7e4d6fcda21`，可用`git show refs/codex/ai-native/ain28-next-round-recovery-20261118:metadata.json`读取。该引用保留在本机Git对象库，分支普通推送的覆盖范围沿实际远端回读核定。
+
+类型子进程42044已退出，finally删除本任务目录并核实消失。行为验证未创建该目录，本片服务、端口、数据库和依赖创建数均为0。真实浏览器与外部环境沿[负责人实测清单](#ain28-user-operation-real-test-handoff-20261117)执行。
+
+原控制台P2已完成修复及独立复验。dev1另复现Copilot转接缺`draftVersion`，沿原28继续修复、复验及最终交付，任务百分比保持原表。
+
+原文档检查器核11/11白名单文档、0错误，新增阶段及接续本地锚点均通过，`git diff --check`退出0。
+
 <a id="ain27-six-clause-whole-closeout-20261118"></a>
 ## AIN-27 双轨、部署灰度与回退全文研发收口（2026-11-18）
 

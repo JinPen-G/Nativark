@@ -78,6 +78,7 @@ export class NativeOperatorSession {
   async open(chatId: string, conversationId: string, scene: NativeScene, signal: AbortSignal) {
     if (!id(chatId) || !id(conversationId)) throw Error('AI_INVALID_INPUT');
     this.check(signal);
+    const previousFrame = this.frames.get(chatId);
     this.frames.delete(chatId);
     const detail = await this.d.api.detail({ draftVersion: version, conversationId, limit: 20 }, scene, signal);
     this.check(signal);
@@ -96,6 +97,13 @@ export class NativeOperatorSession {
       if (frame.result.status === 'observed' && frame.result.result.status !== 'unknown') {
         frame.phase = 'result'; this.save({ ...locator, pending: false });
       }
+    }
+    // Reopening keeps the original close proof only after rechecking its empty head.
+    if (previousFrame?.readyForNext && previousFrame.conversationId === conversationId && previousFrame.scene === scene
+      && previousFrame.observation?.revision === detail.conversation.revision
+      && detail.conversation.status === 'active' && detail.conversation.currentTurn === null) {
+      if (JSON.stringify(await this.metadata(locator, signal)) !== JSON.stringify(detail.conversation)) throw Error('AI_REVISION_CONFLICT');
+      frame.readyForNext = true;
     }
     this.publish(chatId, frame, signal); return frame;
   }
@@ -135,7 +143,8 @@ export class NativeOperatorSession {
       const held = this.frames.get(chatId);
       // A receipt-proven empty revision stays ready across result refreshes.
       // A different head or a remount has no local permission to start a round.
-      if (held?.readyForNext && held.observation?.revision === observed.revision && observed.status === 'active' && !turn)
+      if (held?.readyForNext && held.conversationId === frame.conversationId && held.scene === frame.scene
+        && held.observation?.revision === observed.revision && observed.status === 'active' && !turn)
         frame.readyForNext = true;
       if (frame.phase === 'result') this.save({ ...locator, pending: false });
       this.publish(chatId, frame, signal); return frame;
