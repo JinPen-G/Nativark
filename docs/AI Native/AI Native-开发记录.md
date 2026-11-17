@@ -6,6 +6,35 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、15、16、17、18及19／20／21／22／23／24／25／26已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain28-historical-navigation-operation-fixes-20261118"></a>
+## AIN-28 历史导航与操作交付缺口修复（2026-11-18）
+
+固定main为`7d49c26c9423f2400a233275e84cca5cb4127fa3`，AI四册前置为`0b2bceac85727de00e70dd1609dd4e4800159b7d`。本片回读dev1三份历史原稿的最终核定，以及dev2两个入口、四端操作和恢复合同的固定源码结论。修改归原28交付资料与导航范围，原正式需求和任务门槛沿原册。
+
+### 三份历史导航原稿
+
+三份原稿在整理提交`b25d5538659bf250754eb5971452309f5576a846`与删除前提交`116b581829ff72b4f1743f51df70ae0eed5db0c0`中均为同一Git对象。后者已核为固定main祖先。本片重新读取原blob核对字节数和SHA-256，3/3一致，导航使用该固定Git版本。
+
+| 原Git路径 | blob | 原字节SHA-256 | 字节数 | 固定入口 |
+| --- | --- | --- | --- | --- |
+| `docs/历史归档/整理前快照-20261016/README.md` | `4005af04362c75d078a408a0b9ccd98955e26786` | `dac3934b32b25544612a22d5b6768c9fa192d24f8acb0c91a247923ba4e40649` | 1903 | [原稿1](https://github.com/Xiao0ozZ/rental-OS/blob/116b581829ff72b4f1743f51df70ae0eed5db0c0/docs/%E5%8E%86%E5%8F%B2%E5%BD%92%E6%A1%A3/%E6%95%B4%E7%90%86%E5%89%8D%E5%BF%AB%E7%85%A7-20261016/README.md) |
+| `docs/历史归档/租赁平台/20261016-整合前/管理后台-开发任务.md` | `23c36ebb9d278a416baaafe73f7658df12154d91` | `ac0858f829ee52937550ac241bf7c8eb81ab202c789c7350f733822e014a90fa` | 17227 | [原稿2](https://github.com/Xiao0ozZ/rental-OS/blob/116b581829ff72b4f1743f51df70ae0eed5db0c0/docs/%E5%8E%86%E5%8F%B2%E5%BD%92%E6%A1%A3/%E7%A7%9F%E8%B5%81%E5%B9%B3%E5%8F%B0/20261016-%E6%95%B4%E5%90%88%E5%89%8D/%E7%AE%A1%E7%90%86%E5%90%8E%E5%8F%B0-%E5%BC%80%E5%8F%91%E4%BB%BB%E5%8A%A1.md) |
+| `docs/历史归档/租赁平台/20261016-整合前/租赁平台-开发任务.md` | `cea95a134e027496b59e666255d19440af1f3ac0` | `b935b4fa1a7dc5a3b92a50940854af8672180a83980a919298bb920a4c9a01ab` | 10825 | [原稿3](https://github.com/Xiao0ozZ/rental-OS/blob/116b581829ff72b4f1743f51df70ae0eed5db0c0/docs/%E5%8E%86%E5%8F%B2%E5%BD%92%E6%A1%A3/%E7%A7%9F%E8%B5%81%E5%B9%B3%E5%8F%B0/20261016-%E6%95%B4%E5%90%88%E5%89%8D/%E7%A7%9F%E8%B5%81%E5%B9%B3%E5%8F%B0-%E5%BC%80%E5%8F%91%E4%BB%BB%E5%8A%A1.md) |
+
+快照索引记录原整理前提交`7477af7818ead66751bdc14acdc3122ad45f139c`。管理后台原稿v1.16保留原17项任务身份，租赁平台原稿v5.3是跨端任务索引。两稿整理前LF字节与清单CRLF字节的关系已由dev1核定，现导航目标使用上表实际Git对象。原稿内部相对链接按固定提交所在路径解释。
+
+### 操作与恢复说明
+
+- 平台品类操作补齐开发预览模式、`VITE_RENTAL_CATEGORY_GOVERNANCE_PREVIEW=true`及当前SaaS／`system:rental-category:view`前置，校验、发布和采用继续核各自正式治理权限与人工确认。[实际开关](../../apps/admin/src/app/categoryGovernancePreview.ts)、[路由权限](../../apps/admin/src/app/navigation.tsx)、[角色操作](#ain28-user-operation-real-test-handoff-20261117)
+- 原保留接口README的恢复屏障相对链接补齐一级父目录，实际指向本仓库`scripts/ops/ai-retention.cjs`。[保留与恢复接口](../../apps/api/src/modules/ai-native/privacy/README.md)
+- 工具、API及恢复入口归入原操作章节，核原OpenAPI、TaskCenter、conversations和recovery Controller。读取、回答、批准、停止、恢复和接管分别走原合同，实际效果由原材料／Task／调用／业务账与收据观察。[合同与操作入口](#工具api契约与恢复入口)
+
+本阶段证据层为Git字节、固定源码及文档链接核查。原两份历史scope附件缺原字节、旧非零audit、旧断言失败及unknown关联继续沿原记录留明边界。原27全文独立核定与原28最终范围、缺陷和资源交付继续从当前接续处理。[当前接续](<AI Native-协作接续.md>)
+
+本片只修改原导航、记录、接续和已有恢复接口说明。任务临时目录、构建产物、依赖安装、后台进程、端口及数据库创建数均为0。
+
+文档检查命令 `node --no-node-snapshot --no-compilation-cache scripts/validate-docs.cjs` 退出0，11/11白名单文档、0错误。新增历史核定9处、角色操作和合同34处、保留接口11处本地文件／锚点定向核查通过，`git diff --check` 退出0。固定Git历史链接另按上表原对象及当前远端main祖先关系核定。
+
 <a id="ain26-combined-whole-closeout-20261118"></a>
 ## AIN-26 四品类与多端组合全文收口（2026-11-18）
 
@@ -355,12 +384,24 @@ dev1继续对本片固定候选复验原两个反例及客户消费者，dev2核
 | 员工，原订单／交付／归还检查页 | 在受权订单明确展开AI，选图或录制WAV并上传，明确保存检查草稿后启动识别。PNG／JPEG最多512KiB，WAV最多12秒且512KiB，同次使用一种来源。审阅原识别Task及候选，人工逐字段确认或更正，再填入原履约表、客户签名并另行正式提交。弱网保留原草稿／上传／操作引用，迟到结果与切空间重核原对象。[交付页](../../apps/staff-miniprogram/src/pages/pickup/index.wxml)、[归还页](../../apps/staff-miniprogram/src/pages/return/index.wxml)、[原员工验收](#ain20-signature-reopen-simulated-whole-closeout-20261114) |
 | 客户，网站商品／预约页 | 在当前服务点击“按使用目标选品”，必要时先切换服务。输入目标、回答原问题并明确选择候选，核Core金额、绝对时间、数量和身份，创建原Booking Draft后明确继续到`/booking/{productId}`原预约。登录、企业身份和跨端变化重核当前受权引用，普通浏览、预约和支付沿原页面。[商品页](../../apps/tenant-website/src/pages/ProductsPage.tsx)、[预约页](../../apps/tenant-website/src/pages/BookingPage.tsx)、[原两端后继](#ain22-goal-booking-original-consumers-20261114) |
 | 客户，微信商品／帮助／本人订单页 | 在当前发布空间显式使用公开浏览、目标选品或本人订单助手，按原问题选商品和时间，核报价／草稿后进入原预约和收银台。网站／微信转接使用短期原引用及服务端当前身份／scope，付款状态取正式记录／回调。[微信商品页](../../apps/miniprogram/src/pages/catalog/index.wxml)、[客户安全边界](#ain21-simulated-whole-closeout-20261114)、[双向转接](#ain-entry04-14-cross-surface-whole-closeout-20261115) |
-| SaaS和空间治理管理员 | 在`/platform/rental-categories`及原空间品类／规则页读正式策略和能力，审草稿、差异和历史影响，分别办理校验、发布和空间采用。普通资料、规则／日历及通知受控修改沿原字段差异、当前修订、人工批准和保存收据，敏感验证走原专用流程。[原品类消费者](#ain23-category-human-model-consumers-20261114)、[原资料与配置](#ain16-simulated-whole-closeout-20261114) |
+| SaaS和空间治理管理员 | 平台品类页`/platform/rental-categories`的路由注册要求开发预览模式及`VITE_RENTAL_CATEGORY_GOVERNANCE_PREVIEW=true`，读取还须当前SaaS身份和`system:rental-category:view`。在该入口及原空间品类／规则页读正式策略和能力，审草稿、差异和历史影响，校验、发布和空间采用分别核服务端当前治理权限及人工确认。普通资料、规则／日历及通知受控修改沿原字段差异、当前修订、人工批准和保存收据，敏感验证走原专用流程。[预览开关](../../apps/admin/src/app/categoryGovernancePreview.ts)、[路由权限](../../apps/admin/src/app/navigation.tsx)、[原品类消费者](#ain23-category-human-model-consumers-20261114)、[原资料与配置](#ain16-simulated-whole-closeout-20261114) |
 
 模型解释、候选、报价、草稿、审批请求、批准、业务提交和原收据分别显示原状态。当前AI能力／政策不足时，用户从原订单、预约、履约、支付、客户或配置页接续。历史、来源、下载和收据重核当前身份／scope，unknown保留原操作关联。
 
 
 本地恢复引用及服务端原读取分别核定。部分读取接口使用POST，实测以材料／Task／模型调用／Core业务写入的新增数和原账、原收据判定恢复效果。引用缺失、unknown或未决副作用按原操作处理，操作员保留原Task、run、request／submission／operationKey和scope。
+
+### 工具、API契约与恢复入口
+
+公共契约从`@rental-os/shared`正式出口消费，部署时核API、shared运行时及端构建的固定版本。具体字段、错误及授权要求沿现有合同和Controller读取。[公共出口](../../packages/shared/src/index.ts)、[OpenAPI注册](../../apps/api/src/contracts/openapi-document.ts)
+
+| 用途 | 已注册入口及操作边界 |
+| --- | --- |
+| OpenAPI合同 | `GET /api/openapi.json`提供目标部署实际合同，核对方法、路径和公开schema版本。[实际注册](../../apps/api/src/contracts/openapi-document.ts) |
+| 原任务、结果、批准及观测 | `POST /api/ai-native/task-center/*`。快照、事件、来源、结果和原收据分别读取，回答、继续、批准及停止分别走对应原命令。[原任务Controller](../../apps/api/src/modules/ai-native/task-center.application.ts) |
+| 原会话、轮次及结果 | `POST /api/ai-native/conversations/*`。重开和读回保留原会话、Task及输入关联，明确新轮次使用原受控启动入口。[原会话Controller](../../apps/api/src/modules/ai-native/conversation.application.ts) |
+| 恢复与接管 | `POST /api/ai-native/task-center/recovery/*`。先读原target／snapshot和收据，再按当前权明确recover／takeover，绑定原Task／Run、计划哈希、修订和fencing。原unknown按同一操作核对。[原恢复Controller](../../apps/api/src/modules/ai-native/task-center-recovery.application.ts) |
+| 正文维护与可信备份恢复 | 空间及平台分别使用原`privacy`／`platform-privacy`管理入口，备份导出、删除账本重放和签名证书由可信宿主接原工厂。[保留与恢复接口](../../apps/api/src/modules/ai-native/privacy/README.md) |
 
 ### 负责人实测清单
 
