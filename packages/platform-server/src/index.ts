@@ -32,3 +32,4 @@ export * from "./platform-openapi";
 export * from "./modules/subscription/subscription-state";
 export * from "./modules/subscription/subscription-term";
 export * from "./modules/subscription/subscription-reader";
+export * from "./common/operation-log.service";

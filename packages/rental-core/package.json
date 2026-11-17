@@ -622,6 +622,46 @@
     "./mysql-snapshot-backfill": {
       "types": "./dist/mysql-snapshot-backfill.d.ts",
       "default": "./dist/mysql-snapshot-backfill.js"
+    },
+    "./client-context": {
+      "types": "./dist/client-context.d.ts",
+      "default": "./dist/client-context.js"
+    },
+    "./enterprise": {
+      "types": "./dist/enterprise.d.ts",
+      "default": "./dist/enterprise.js"
+    },
+    "./enterprise-workflows": {
+      "types": "./dist/enterprise-workflows.d.ts",
+      "default": "./dist/enterprise-workflows.js"
+    },
+    "./enterprise-receipt": {
+      "types": "./dist/enterprise-receipt.d.ts",
+      "default": "./dist/enterprise-receipt.js"
+    },
+    "./enterprise-read-storage": {
+      "types": "./dist/enterprise-read-storage.d.ts",
+      "default": "./dist/enterprise-read-storage.js"
+    },
+    "./mysql-enterprise-access": {
+      "types": "./dist/mysql-enterprise-access.d.ts",
+      "default": "./dist/mysql-enterprise-access.js"
+    },
+    "./mysql-enterprise-orders": {
+      "types": "./dist/mysql-enterprise-orders.d.ts",
+      "default": "./dist/mysql-enterprise-orders.js"
+    },
+    "./mysql-enterprise-reader-audit": {
+      "types": "./dist/mysql-enterprise-reader-audit.d.ts",
+      "default": "./dist/mysql-enterprise-reader-audit.js"
+    },
+    "./mysql-enterprise-command": {
+      "types": "./dist/mysql-enterprise-command.d.ts",
+      "default": "./dist/mysql-enterprise-command.js"
+    },
+    "./mysql-enterprise-finance": {
+      "types": "./dist/mysql-enterprise-finance.d.ts",
+      "default": "./dist/mysql-enterprise-finance.js"
     }
   },
   "typesVersions": {
@@ -1084,6 +1124,36 @@
       ],
       "mysql-snapshot-backfill": [
         "dist/mysql-snapshot-backfill.d.ts"
+      ],
+      "client-context": [
+        "dist/client-context.d.ts"
+      ],
+      "enterprise": [
+        "dist/enterprise.d.ts"
+      ],
+      "enterprise-workflows": [
+        "dist/enterprise-workflows.d.ts"
+      ],
+      "enterprise-receipt": [
+        "dist/enterprise-receipt.d.ts"
+      ],
+      "enterprise-read-storage": [
+        "dist/enterprise-read-storage.d.ts"
+      ],
+      "mysql-enterprise-access": [
+        "dist/mysql-enterprise-access.d.ts"
+      ],
+      "mysql-enterprise-orders": [
+        "dist/mysql-enterprise-orders.d.ts"
+      ],
+      "mysql-enterprise-reader-audit": [
+        "dist/mysql-enterprise-reader-audit.d.ts"
+      ],
+      "mysql-enterprise-command": [
+        "dist/mysql-enterprise-command.d.ts"
+      ],
+      "mysql-enterprise-finance": [
+        "dist/mysql-enterprise-finance.d.ts"
       ]
     }
   },

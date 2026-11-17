@@ -114,6 +114,10 @@
     "./organization-location-scope": {
       "types": "./dist/common/organization-location-scope.d.ts",
       "default": "./dist/common/organization-location-scope.js"
+    },
+    "./operation-log": {
+      "types": "./dist/common/operation-log.service.d.ts",
+      "default": "./dist/common/operation-log.service.js"
     }
   },
   "scripts": {
@@ -213,6 +217,9 @@
       ],
       "organization-location-scope": [
         "dist/common/organization-location-scope.d.ts"
+      ],
+      "operation-log": [
+        "dist/common/operation-log.service.d.ts"
       ]
     }
   }

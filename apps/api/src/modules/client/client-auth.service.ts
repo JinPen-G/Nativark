@@ -9,6 +9,7 @@ import {
   UnauthorizedException
 } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
+import type { ClientRequestContext } from "@rental-os/rental-core/client-context";
 import {
   CLIENT_API_VERSION,
   type ClientMembershipLoginRequest,
@@ -42,22 +43,7 @@ const CHALLENGE_COOLDOWN_SECONDS = 60;
 const MAX_CHALLENGE_ATTEMPTS = 5;
 const BLOCKED_MEMBERSHIP_STATUSES = new Set(["exited", "closed"]);
 
-export interface ClientRequestContext {
-  tenantId: string;
-  tenantCode: string;
-  customerId: string;
-  customerType: "personal" | "corporate";
-  displayName: string;
-  phone: string;
-  workspaceId: string;
-  workspaceCode: string;
-  workspaceName: string;
-  categoryCode: string;
-  membershipStatus: string;
-  sessionId: string;
-  /** 会话绑定的微信身份（微信手机号登录或绑定后写入）；小程序支付据此取可信 openid。 */
-  wechatIdentityId?: string;
-}
+export type { ClientRequestContext } from "@rental-os/rental-core/client-context";
 
 interface ClientTokenPayload {
   typ: "client";

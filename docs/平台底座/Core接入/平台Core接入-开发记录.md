@@ -11,6 +11,28 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-enterprise-reads-20261117"></a>
+
+## Rental 企业资格、订单/财务读取与公共审计归属（2026-11-17）
+
+固定父版89a840a4c28116d26b060c3b025ff34fc102eb0a已提交、普通推送并实际远端回读，保存原企业服务、合同和完整接续；main62ca183f10b7c316ab63c28ef6d04ee88d06488b仍在任务祖先。[企业资格](../../../packages/rental-core/src/mysql-enterprise-access.ts)、[订单读取](../../../packages/rental-core/src/mysql-enterprise-orders.ts)、[历史/财务投影](../../../packages/rental-core/src/mysql-enterprise-finance.ts)、[原命令](../../../packages/rental-core/src/mysql-enterprise-command.ts)和[读取审计](../../../packages/rental-core/src/mysql-enterprise-reader-audit.ts)成为Rental包内单源。原客户Auth继续产生相同可信上下文，原Nest provider供给同一数据库、资金和授信参加者，其他旧路径再导出同一实现。[私有读取/事务视图](../../../packages/rental-core/src/enterprise-read-storage.ts) · [客户上下文](../../../packages/rental-core/src/client-context.ts) · [原HTTP入口](../../../apps/api/src/modules/enterprise/enterprise-read.controller.ts)
+
+企业合同和工作流纯规则从 /enterprise、/enterprise-workflows 提供，原shared兼容再导出；原哈希/JSON解释单源放在 /enterprise-receipt。资格仍核个人客户、有效客户账号/会话、两个会员关系、企业管理成员、明确入口/动作与当前关系修订，读取前后再次核验当前空间和权限。订单只投影原企业归属及告知字段，纯个人订单和其他商户不可见；缺原金额、保证金或账单不补零或生成事实。原企业账户历史涉及其他空间时明确不可用，不用当前空间的小计代替权威全账。原命令保持Tenant父锁、同事务操作键/请求指纹及已提交结果回读，不重放业务。
+
+[公共日志](../../../packages/platform-server/src/common/operation-log.service.ts)从 /operation-log 提供不依赖Prisma模型的窄存储视图，沿原ALS取业务空间、递归脱敏与requireSuccess要求；旧可选rentalOrderId只兼容原审计行，不要求业务表或授权任何Core。原API日志继承同一基础方法，其OAuth/MCP/Core原收据的严格事务方法继续原位执行，普通最佳努力日志不能代替它们。企业敏感读取只有原审计持久化成功、最终资格仍有效才释放数据，审计成功不证明新业务或付款成功。
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| 同范围原实现 | node --no-compilation-cache - api-enterprise-read-baseline tests/enterprise-portal-access.test.cjs，PID45148退出0、stderr空；7项原入口加7项必要stdin边界共14/14、0 fail/skip/todo/cancelled |
+| 同范围候选 | api-enterprise-read-candidate，PID39776退出0、stderr空；同样14/14。stdin SHA-256 f7fbc5a38ad010ed28d18208bd28d807750ee3e839841c716d5e0f77c2a68579，所有JS/声明留内存 |
+| 运行正文与兼容 | 五服务及工作流共70执行单元与父版相同，公共日志三个方法在类名/私有可见性迁移后正文相同；原hash/JSON序列化和客户上下文字段保留。原Controller/DTO/OpenAPI/AppModule/schema/迁移/Seed无差异 |
+| 正式类型 | Prisma5.22原238模型、TypeScript5.9.3，十个正式配置0诊断；Rental197根/922源/394输出，公共服务39根/825源/78输出，API988根/2441源/1976输出 |
+| 原验证入口 | 只改原enterprise-portal-access四行依赖/源码定位，保留七项原断言；新边界以stdin运行，无新增测试脚本。覆盖IO撤权/错误audience、缺保证金、未核实现金、跨空间账户历史、审计失败/最终撤权、嵌套脱敏和原命令同键/不同输入拒绝 |
+
+数据库行、SQL执行、事务、资金/授信和日志持久化均为明确fixture；实际编译的原Auth/ALS与服务运行不等于真实HTTP/数据库/浏览器或完整Nest宿主。标准包安装、多真实Core、独立升级/回退/接手及审查仍未验。剩余企业政策/成员/工作流服务、Controller、数据/迁移/Seed、页面/客户端/作业/AI与标准Rental装配继续推进；完整公共组织/订阅/集成及05/06/07范围未齐，按原G1～G4复核未跨下一档，不改需求/任务身份、依赖、顺序或百分比。
+
+源码短头、Rental/原API/公共服务导读、根入口与当前接续同片更新；定向九份文档1503本地链接/174锚点/101表格0问题，新正式出口/typesVersions均有实际源码，运行依赖和lock未变；git -c core.whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol diff --check退出0。两个验证worker已退出，output/.tmp无新增产物。原两处残留仍为840文件/91,808,304字节及1个0字节guard.log；同一原生PowerShell删除再次在启动前被自动审批以blocked by policy拒绝，原清单最近尝试更新为2026-11-17T03:57:10.973Z，此前只读已核0链接且当前不使用。没有换壳/工具绕过，不称已删除或释放空间。中文提交并普通推送既有任务分支，上传后读取实际远端，不合main或发布。
+
 <a id="core-enterprise-access-fixture-20261117"></a>
 
 ## 原企业入口验证夹具与跨领域schema组合（2026-11-17）

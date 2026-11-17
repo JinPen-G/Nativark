@@ -6,27 +6,13 @@ import { Prisma, AiAudience } from "@prisma/client";
 import type { CoreAccessReceipt, CoreBindingReceipt } from "@rental-os/core-host";
 import type { SystemUserRow } from "@rental-os/shared";
 import { PrismaService } from "../modules/database/prisma.service";
-import { getRequestWorkspaceId } from "./request-identity";
+import { PlatformOperationLogService } from "@rental-os/platform-server/operation-log";
 import { isDeepStrictEqual } from 'node:util';
 import type { OriginalCatalogGoalIntentAudit } from '@rental-os/mcp-server/prisma-mcp-catalog-goal-intents' with { 'resolution-mode': 'import' };
 import { AI_SCENE_CODES } from '@rental-os/shared';
 import { requestFingerprint } from './request-fingerprint';
 
-export interface OperationLogInput {
-  tenantId?: string;
-  user?: SystemUserRow;
-  userId?: string;
-  /** 租赁订单（rental_orders）。 */
-  rentalOrderId?: string;
-  action: string;
-  targetType: string;
-  targetId?: string;
-  operator?: string;
-  detail?: string;
-  metadata?: Record<string, unknown>;
-  /** Sensitive-data reads must not return data unless their audit record is durable. */
-  requireSuccess?: boolean;
-}
+export type { OperationLogInput } from "@rental-os/platform-server/operation-log";
 
 /** Server-only original OAuth event association, never an HTTP/MCP input DTO.
  * The original authenticated consent/grant/management author owns these IDs. */
@@ -88,8 +74,9 @@ export interface CoreBusinessAuditInput {
 }
 
 @Injectable()
-export class OperationLogService {
-  constructor(private readonly prisma: PrismaService) {}
+export class OperationLogService extends PlatformOperationLogService {
+  declare protected readonly prisma: PrismaService;
+  constructor(prisma: PrismaService) { super(prisma); }
 
   /** 当前受权Core管理事实的同事务审计。输入来自Core管理原收据，写失败沿原事务抛出。 */
   async recordCoreAccessReceipt(transaction: Prisma.TransactionClient, receipt: CoreAccessReceipt): Promise<void> {
@@ -132,43 +119,7 @@ export class OperationLogService {
     } });
   }
 
-  async record(input: OperationLogInput) {
-    const tenantId = input.tenantId ?? input.user?.tenantId;
 
-    if (!tenantId) {
-      if (input.requireSuccess) throw new InternalServerErrorException("敏感资料审计失败，未返回完整信息");
-      return;
-    }
-
-    try {
-      await this.prisma.operationLog.create({
-        data: {
-          tenantId,
-          // SPACE-03：经营空间归属取自**会话**，不接受调用方传入，也不回退默认空间。
-          // 平台域动作（租户创建/冻结、平台配置）本就没有空间，留 NULL 表示"不属于
-          // 任何经营空间"——比塞一个看似精确的假归属诚实。
-          workspaceId: getRequestWorkspaceId() ?? null,
-          userId: input.userId ?? input.user?.id,
-          rentalOrderId: input.rentalOrderId,
-          action: input.action,
-          detail: this.toJsonValue({
-            operator:
-              input.operator ??
-              input.user?.displayName ??
-              input.user?.account ??
-              "系统",
-            targetType: input.targetType,
-            targetId: input.targetId,
-            detail: input.detail,
-            metadata: this.maskSensitive(input.metadata ?? {})
-          })
-        }
-      });
-    } catch {
-      if (input.requireSuccess) throw new InternalServerErrorException("敏感资料审计失败，未返回完整信息");
-      // 审计不能阻断业务主流程；MySQL 未连接时由业务自身错误处理。
-    }
-  }
 
   /** Atomic ORIGINAL OAuth audit, not the interceptor's eventual/best-effort log.
    * Supplied native transaction is mandatory; do not read mutable Web ALS, borrow
@@ -550,38 +501,7 @@ export class OperationLogService {
     return match ? match[1] : undefined;
   }
 
-  private toJsonValue(value: Record<string, unknown>): Prisma.InputJsonValue {
-    return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
-  }
 
-  private maskSensitive(value: unknown): unknown {
-    if (Array.isArray(value)) {
-      return value.map((item) => this.maskSensitive(item));
-    }
-    if (!value || typeof value !== "object") {
-      return value;
-    }
 
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, item]) => {
-        const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/gu, '');
-        const shouldMask =
-          normalizedKey.includes("password") ||
-          normalizedKey.includes("token") ||
-          normalizedKey.includes("apikey") ||
-          normalizedKey.includes("credential") ||
-          normalizedKey.includes("authorization") ||
-          normalizedKey.includes("privatekey") ||
-          normalizedKey.includes("encryptionkey") ||
-          normalizedKey.includes("accesskey") ||
-          normalizedKey.includes("baseurl") ||
-          normalizedKey.includes("secret") ||
-          normalizedKey.includes("phone") ||
-          normalizedKey.includes("identity") ||
-          normalizedKey.includes("license");
 
-        return [key, shouldMask ? "[masked]" : this.maskSensitive(item)];
-      })
-    );
-  }
 }

@@ -13,7 +13,7 @@ function load(file, deps = {}) {
   return exports;
 }
 const shared = require('../packages/shared/dist');
-const { EnterpriseAccessService } = load('apps/api/src/modules/client/enterprise-access.service.ts', { '@rental-os/shared': shared, '@prisma/client': { Prisma: require('@prisma/client').Prisma } });
+const { EnterpriseAccessService } = load('apps/api/src/modules/client/enterprise-access.service.ts', { '@rental-os/rental-core/mysql-enterprise-access': require('@rental-os/rental-core/mysql-enterprise-access') });
 const context = { tenantId: 't1', tenantCode: 'demo', customerId: 'p1', customerType: 'personal', sessionId: 'session', displayName: 'Admin', membershipStatus: 'active' };
 function rows(action = ['portal:enter', 'members:read']) {
   return action.map(action => ({ corporateCustomerId: 'c1', corporateName: 'Company', membershipId: 'r1', role: 'admin', action, tenantRevision: 1, corporateRevision: 1, tenantEnabled: true, corporateEnabled: true }));
@@ -122,7 +122,7 @@ test('all seven portal operations retain matching Controller methods and OpenAPI
   Object.values(enterpriseSchemas).forEach(check);
 });
 test('SQL source guards current session, active memberships and grant relationship revision', () => {
-  const code = fs.readFileSync('apps/api/src/modules/client/enterprise-access.service.ts', 'utf8');
+  const code = fs.readFileSync('packages/rental-core/src/mysql-enterprise-access.ts', 'utf8');
   for (const guard of ["s.revokedAt IS NULL", "s.expiresAt>NOW(3)", "personalMember.status='active'", "corporateMember.status='active'", "account.status='active'", "g.membershipUpdatedAt=m.updatedAt", "m.effectiveTo>NOW(3)"]) assert.ok(code.includes(guard), guard);
   const migration = fs.readFileSync('apps/api/prisma/migrations/20261101000100_enterprise_portal_access/migration.sql', 'utf8');
   assert.ok(migration.includes('DEFAULT false'));

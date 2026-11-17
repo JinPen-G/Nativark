@@ -103,7 +103,7 @@ Rental Core 是首个业务示范，提供商品、资产、库存、报价、�
 | `apps/platform-api` | 默认无 Core 的独立公共 API，初始化 / 认证 / 租户与人员角色 / 外观已提供，完整运行继续交付 | [宿主导读](apps/platform-api/README.md) |
 | `apps/example-tickets-api` | 公共底座与单工单Core受控组合，标准包和迁移准备，真实运行验收继续交付 | [示范导读](apps/example-tickets-api/README.md) |
 | `packages/platform-contracts` | 无行业依赖的公共身份、人员与设置合同；原 shared 兼容再导出 | [正式出口](packages/platform-contracts/README.md) |
-| `packages/platform-server` | 原认证、会话、外观及公共 HTTP 的唯一实现，存储由宿主提供 | [源码路线](packages/platform-server/README.md) |
+| `packages/platform-server` | 原认证、会话、外观、公共日志及公共 HTTP 的唯一实现，存储由宿主提供 | [源码路线](packages/platform-server/README.md) |
 | `packages/platform-core-host` | 真实公共身份、标准Core授权/绑定、目录/范围与HTTP的单源适配 | [接入路线](packages/platform-core-host/README.md) |
 | `packages/platform-admin` | 公共后台外壳、UIArc 与 Core 页面适配，原后台窄转接同一实现 | [公共前端导读](packages/platform-admin/README.md) |
 | `apps/platform-admin` | 默认无Core的公共Web宿主，登录/改密/本人资料和基本设置，真实运行继续验收 | [公共后台导读](apps/platform-admin/README.md) |
