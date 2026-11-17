@@ -6,6 +6,12 @@
  */
 
 import type { SystemDataScope } from "@rental-os/platform-contracts";
+import type { CalendarDayType, OfficialCalendarDayInput } from "@rental-os/platform-contracts/official-calendar";
+export type {
+  OfficialCalendarDayInput, OfficialCalendarSource, OfficialCalendarSourceVersion,
+  OfficialCalendarSourceVersionSummary, SaveOfficialCalendarSourceRequest,
+  RegisterOfficialCalendarSourceVersionRequest
+} from "@rental-os/platform-contracts/official-calendar";
 import { RentalCategoryCode } from "./rental-category-code";
 export { RentalCategoryCode, RENTAL_CATEGORY_CODE_PATTERN, isRentalCategoryCode, type BuiltinRentalCategoryCode } from "./rental-category-code";
 
@@ -2667,7 +2673,7 @@ export interface SaveRentalCouponTemplateRequest {
   status?: RentalCouponTemplate["status"];
 }
 
-export type RentalDayType = "workday" | "weekend" | "statutory_holiday" | "makeup_workday" | "tenant_special";
+export type RentalDayType = CalendarDayType;
 
 /**
  * 营业状态（需求 4.5.4 的四态）。
@@ -2968,83 +2974,6 @@ export interface RentalCalendarVersionSummary
 export interface SaveRentalCalendarDayRequest
   extends Omit<RentalCalendarDay, "source" | "overrideBy" | "overrideAt" | "overriddenFrom" | "overrideScope"> {
   overrideReason: string;
-}
-
-export type OfficialCalendarDayInput = Array<
-  Pick<RentalCalendarDay, "date" | "dayType" | "name"> &
-    Partial<Pick<RentalCalendarDay, "pricingMultiplier" | "closed">>
->;
-
-/**
- * 公共官方日历来源（需求 4.5.2/4.5.8）。
- *
- * 平台级资源，**不属于任何租户**：官方节假日数据是公共基础来源，由 SaaS 平台管理员
- * 维护。经营空间不能直接导入原始官方数据，只能引用某个来源版本生成自己的年度草稿，
- * 再由有权限的空间人员确认并发布——否则「导入即影响全部经营空间」，与需求相反。
- */
-export interface OfficialCalendarSource {
-  id: string;
-  region: "CN";
-  name: string;
-  url: string;
-  notes?: string;
-  isActive: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/**
- * 公共官方日历的**来源版本**（需求 4.5.2：官方日历再次调整时必须形成新的来源版本）。
- * 只追加：旧版本保留，供空间日历追溯自己当初引用的是哪一版官方数据。
- */
-export interface OfficialCalendarSourceVersion {
-  id: string;
-  sourceId: string;
-  /**
-   * 登记当时的来源信息**快照**。
-   *
-   * 不是 join 来源主档得到的当前值：主档允许改名称、URL、地区，一改就会让昨天登记的
-   * 旧版本显示成新名称新 URL，租户引用旧版本时也拿到改后的信息，等于历史版本的含义
-   * 被事后改写。主档继续维护，历史版本一律按快照解释。
-   */
-  sourceName: string;
-  sourceUrl: string;
-  region: "CN";
-  year: number;
-  /** 展示用版本号（1.0/1.1…）。排序与并发分配一律用 `sequence`。 */
-  version: string;
-  /** 版本序号（1 起）。字符串版本号在 1.10 之后会被字典序排到 1.9 之前。 */
-  sequence: number;
-  /** 官方公告的发布日期。与 `importedAt` 不同：追溯要能区分官方何时发布与平台何时入库。 */
-  publishedAt: string;
-  importedAt: string;
-  importedBy?: string;
-  days: OfficialCalendarDayInput;
-}
-
-/** 来源版本的轻量摘要：列表不返回整年 days，只给条数。 */
-export interface OfficialCalendarSourceVersionSummary
-  extends Omit<OfficialCalendarSourceVersion, "days"> {
-  dayCount: number;
-  /** 来源主档当前是否启用。停用来源的旧版本不再供空间新应用，但历史引用必须保留。 */
-  sourceActive: boolean;
-}
-
-/** 登记或更新一个公共官方日历来源（仅 SaaS 平台管理员）。 */
-export interface SaveOfficialCalendarSourceRequest {
-  id?: string;
-  region: "CN";
-  name: string;
-  url: string;
-  notes?: string;
-  isActive?: boolean;
-}
-
-/** 为某来源登记一个新的年度来源版本（仅 SaaS 平台管理员）。版本号由服务端递增。 */
-export interface RegisterOfficialCalendarSourceVersionRequest {
-  year: number;
-  publishedAt: string;
-  days: OfficialCalendarDayInput;
 }
 
 /**

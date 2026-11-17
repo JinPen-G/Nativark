@@ -11,6 +11,28 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-public-official-calendars-20261118"></a>
+
+## 公共官方日历来源与实际数据计划接线（2026-11-18）
+
+固定父版48a52786a5f5bd4fd01dc99a30f5e516d57d3795与当天真实任务远端一致，包含main7d49c26c9423f2400a233275e84cca5cb4127fa3。dev1在共享树迁入公共来源服务、HTTP、DTO、私有存储及数据定义；RD供给公共合同、原Rental兼容出口、主装配、Guard/OpenAPI消费者并修复结构解析。索引、PCH四册及上传统一由RD负责。原源码和完整接续通过固定父版保全，不重复复制。
+
+[公共来源模块](../../../packages/platform-server/src/modules/official-calendars/README.md)持有来源主档、年度版本追加及原快照读取；[公共来源合同](../../../packages/platform-contracts/src/official-calendar.ts)保留原日期代码和六项来源声明，原Rental/shared再导出同名类型。[公共主装配](../../../packages/platform-server/src/platform-server.module.ts)将同一数据库供给来源存储，以同一应用实例服务维护HTTP和冻结六方法reader；[原组合](../../../apps/api/src/app.module.ts)及[Rental接线](../../../apps/api/src/modules/rental-core/rental-http.providers.ts)复用该实例。业务读取接点不提供save/register，来源维护仍要求原SaaS身份及system:calendar-source:manage；各Core自行裁定业务日历、营业及价格。
+
+公共和原组合OpenAPI共用五个操作、三条路径与七项schema。原路径/operationId/权限保持，来源版本列表补齐原可选整数year过滤，主档名称、ID及HTTPS字段与DTO同步。两表最终快照/sequence/唯一键及RESTRICT外键进入独立公共链，数据版本0.1.3；原组合历史迁移没有变化。[数据计划](../../../apps/platform-api/src/platform-data.ts)核七份原文摘要后形成31表预期。此前构造计划在集成表的建表内换行外键处退出1；[结构解析器](../../../packages/platform-core-host/src/mysql-structure.ts)现与ALTER共用原外键解析，保留引用和删除/更新规则，未知DDL仍拒绝。未执行迁移或写入成功账。
+
+| 必要核对 | 实际结果与边界 |
+| --- | --- |
+| 原正文与字段 | 固定e1104f4b4f5677bfac8fd1370b53c4c58db6c612的来源服务11方法、Controller5方法，可执行正文均一致；三类DTO原字段/装饰器约束保留，日期类型改为公共声明，六项来源合同已沿双向类型夹具核兼容 |
+| 定向冒烟 | `node --no-compilation-cache - pch-official-calendar-smoke`，stdin复用原内存加载入口，退出0、stderr空；两个实际Nest切片核同一应用/数据库、旧新Controller同一类、冻结reader及原Rental别名。普通租户通配/SaaS无权限拒绝、有权限允许，原来源快照、停用禁新/历史读取、DTO正常/拒绝及两文档year/操作/schema同源通过 |
+| 数据计划 | 同一冒烟实际读取七份SQL及摘要，生成31表预期；集成建表内外键指向Tenant并保留CASCADE，未知DROP拒绝。新增官方来源SQL SHA-256为5a9cbd12aeb905da46d332a028460e6f4bc30d96a7b7381c45c497d472d8e568，原组合迁移差异为空 |
+| 同版本类型 | `node --no-compilation-cache - api`，十配置均0诊断，Rental235根/984源/470输出、原API1032根/2560源/2064输出；`node --no-compilation-cache - pch-public-calendar-api-types`，公共依赖及独立API均0诊断，宿主7根/794源/14输出，公共schema31模型/14枚举 |
+| 资料与格式 | 本片九份模块/现行资料1626本地链接、151锚点，0问题；稀疏未检目标按固定Git定位，不代替全库检查。七个公共来源子出口、公共合同出口与typesVersions/lock同源，精确暂存后核差异格式 |
+| 首轮失败与修复 | 冒烟装载曾猜错正式子出口，随后组合顺序及缺原Prisma枚举使装载失败，均未进入业务断言；按实际根出口、原加载顺序及官方schema枚举修复。新增year查询的字典推断曾产生1个类型诊断，改为同源Schema字典后消除，不放宽字段或运行权限 |
+| 环境与未验 | TS5.9.3、Prisma5.22官方WASM/generator，声明/JS与fixture留内存。来源存储/事务/身份为明确fixture，未实例化数据库客户端、访问网络、读.env、启动服务或安装依赖；不是干净安装、真实HTTP/数据库或浏览器验收 |
+
+模块职责、公共出口、原业务采用及数据读取导读同步。公共集成JSON的作者完整命令同时补回[原阶段](#core-public-integration-json-20261118)，不重复跑已通过的四份入口。完整公共页面/组织/安全、Rental标准装配、独立包数据和客户端、无Core真实运行及安装/升级/接手仍未完成；复核PCH-01/02/03/04/06/07/08原门槛，本片未跨下一档。定向资料/格式及远端结果由包含本节的提交定位；旧清理、外观失败及历史缺链沿接续保留。
+
 <a id="core-public-integration-json-20261118"></a>
 
 ## 公共集成测试账与宿主JSON空值适配（2026-11-18）
@@ -23,7 +45,8 @@
 
 | 必要核对 | 实际结果与边界 |
 | --- | --- |
-| 作者固定冒烟 | dev1确认原安全、内存租户隔离、连接与修订、默认选择/历史依赖四份入口均退出0，八文件已停写；完整命令和初次失败待其当前阶段报告补齐，RD未把源码核对称作独立审查 |
+| 作者固定冒烟 | dev1交付四次独立stdin命令 `node --no-compilation-cache - dev1-integration-integrations-security`、`dev1-integration-integrations-memory-scope`、`dev1-integration-tenant-integration-connectivity`、`dev1-integration-tenant-integration-default`；分别内存加载原安全、租户隔离、连接与修订、默认/历史依赖入口，均退出0、stderr空、离线守卫无违规；没有重跑或称独立审查 |
+| 作者定向类型 | `node --no-compilation-cache - dev1-integration-store-types`，4入口/586源/0诊断、退出0，原临时目录已删除；不是实际HTTP/数据库/Provider或并发库验证 |
 | 同版本类型 | RD的[主/业务HTTP十配置类型](#core-rental-main-http-20261118)已使用本组稳定实现，均0诊断；公共日历合同三配置检查再次消费同一JSON存储，公共服务68根/884源/136输出、Rental235根/984源/470输出均0诊断，产物留内存 |
 | 源码与退出 | RD逐项核八文件差异并保存内存SHA-256核对集合，提交前确认未变；模块导读同步原CAS和两宿主映射。具体链接/格式及上传结果由包含本节的固定提交定位 |
 | 未验 | SQL/事务/配置/探针为明确fixture，未运行真实供应商、HTTP、数据库并发或公共迁移；公共集成页面及完整宿主接线沿后续阶段核收 |

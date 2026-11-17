@@ -23,7 +23,7 @@ function column(line: string, table: MysqlTableShape): MysqlColumnShape {
 }
 
 function foreignKey(line: string) {
-  const match = /^CONSTRAINT `([^`]+)` FOREIGN KEY \(([^)]+)\) REFERENCES `([^`]+)`\(([^)]+)\) ON DELETE (RESTRICT|CASCADE|SET NULL|NO ACTION) ON UPDATE (RESTRICT|CASCADE|SET NULL|NO ACTION)$/i.exec(line);
+  const match = /^CONSTRAINT `([^`]+)`\s+FOREIGN KEY \(([^)]+)\) REFERENCES `([^`]+)`\(([^)]+)\) ON DELETE (RESTRICT|CASCADE|SET NULL|NO ACTION) ON UPDATE (RESTRICT|CASCADE|SET NULL|NO ACTION)$/i.exec(line);
   if (!match) throw new Error(`未支持的公共外键定义：${line}`);
   return { name: match[1], columns: names(match[2]), targetTable: match[3], targetColumns: names(match[4]), deleteRule: match[5], updateRule: match[6] };
 }
@@ -44,6 +44,8 @@ export function mysqlStructureFromMigrations(migrations: readonly string[]): Mys
           if (primary) table.indexes.push({ name: "PRIMARY", columns: names(primary[1]), unique: true });
           else if (index) table.indexes.push({ name: index[2], columns: names(index[3]), unique: index[1] !== "INDEX" });
           else if (check) table.checks.push({ name: check[1], clause: check[2] });
+          // 同一受控外键既可在建表内声明，也可由后续ALTER追加；换行不改变约束。
+          else if (/^CONSTRAINT `[^`]+`\s+FOREIGN KEY\b/i.test(definition)) table.foreignKeys.push(foreignKey(definition));
           else throw new Error(`未支持的公共表约束：${table.name} ${definition}`);
         }
       }

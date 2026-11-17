@@ -34,9 +34,13 @@ import { INTEGRATION_PAYMENT_PROBE, type PaymentIntegrationProbe } from "./modul
 import { INTEGRATION_DATA_STORE, INTEGRATION_BUSINESS_PARTICIPANT, INTEGRATION_RUNTIME_PROVIDERS,
   PUBLIC_INTEGRATION_RUNTIME_PROVIDERS, TENANT_INTEGRATION_APPLICATION, TENANT_INTEGRATION_CONNECTIVITY,
   type TenantIntegrationDataStore, type TenantIntegrationBusinessParticipant, type IntegrationRuntimeProviders } from "./modules/integrations/integration-store";
+import { OfficialCalendarSourceService } from "./modules/official-calendars/official-calendar-source.service";
+import { OfficialCalendarSourceController } from "./modules/official-calendars/official-calendar-source.controller";
+import { OFFICIAL_CALENDAR_DATA_STORE, OFFICIAL_CALENDAR_APPLICATION, type OfficialCalendarDataStore } from "./modules/official-calendars/official-calendar-store";
+import { OFFICIAL_CALENDAR_SOURCE_READER, createOfficialCalendarSourceReader } from "./modules/official-calendars/official-calendar-source-reader";
 
 export type PlatformDatabase = PlatformAuthDataStore & PlatformAppearanceDataStore & PlatformManagementDatabase & SubscriptionDataStore
-  & TenantIntegrationDataStore & PlatformOperationLogStorage;
+  & TenantIntegrationDataStore & OfficialCalendarDataStore & PlatformOperationLogStorage;
 @Module({})
 export class PlatformServerModule {
   static register<Dependencies extends unknown[]>(options: { imports?: ModuleMetadata["imports"]; inject?: FactoryProvider["inject"];
@@ -56,12 +60,13 @@ export class PlatformServerModule {
     if (options.integrationBusiness && options.integrationBusinessProvider) throw new Error("集成业务依赖只能登记一个实际参加者");
     return { module: PlatformServerModule, imports: [ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }), ...(options.imports ?? [])],
       controllers: [AuthSessionController, TenantAppearanceProfileController, AccountAppearanceController, PlatformHealthController, PlatformOpenApiController, PlatformManagementController,
-        TenantSubscriptionController, PlatformSubscriptionController, TenantIntegrationController],
+        TenantSubscriptionController, PlatformSubscriptionController, TenantIntegrationController, OfficialCalendarSourceController],
       providers: [
         { provide: PLATFORM_AUTH_DATA_STORE, inject: options.inject ?? [], useFactory: options.useFactory },
         { provide: PLATFORM_APPEARANCE_DATA_STORE, useExisting: PLATFORM_AUTH_DATA_STORE },
         { provide: PLATFORM_SUBSCRIPTION_DATA_STORE, useExisting: PLATFORM_AUTH_DATA_STORE },
         { provide: INTEGRATION_DATA_STORE, useExisting: PLATFORM_AUTH_DATA_STORE },
+        { provide: OFFICIAL_CALENDAR_DATA_STORE, useExisting: PLATFORM_AUTH_DATA_STORE },
         { provide: PlatformOperationLogService, inject: [PLATFORM_AUTH_DATA_STORE], useFactory: (database: PlatformDatabase) => new PlatformOperationLogService(database) },
         { provide: PlatformAuthenticationRepository, inject: [PLATFORM_AUTH_DATA_STORE], useFactory: (database: PlatformDatabase) => new PlatformAuthenticationRepository(database) },
         TenantAppearanceProfileService, AccountAppearanceService, PlatformAuthService, PlatformAuthGuard, PlatformManagementService, SubscriptionService,
@@ -69,6 +74,9 @@ export class PlatformServerModule {
         SecretBox, TenantIntegrationService, TenantIntegrationRuntimeService, TenantIntegrationConnectivityService, ObjectStorageProviderService,
         { provide: TENANT_INTEGRATION_APPLICATION, useExisting: TenantIntegrationService },
         { provide: TENANT_INTEGRATION_CONNECTIVITY, useExisting: TenantIntegrationConnectivityService },
+        OfficialCalendarSourceService,
+        { provide: OFFICIAL_CALENDAR_APPLICATION, useExisting: OfficialCalendarSourceService },
+        { provide: OFFICIAL_CALENDAR_SOURCE_READER, inject: [OfficialCalendarSourceService], useFactory: createOfficialCalendarSourceReader },
         { provide: INTEGRATION_RUNTIME_PROVIDERS, useValue: options.integrationRuntimeProviders ?? PUBLIC_INTEGRATION_RUNTIME_PROVIDERS },
         ...(options.integrationBusiness ? [{ provide: INTEGRATION_BUSINESS_PARTICIPANT, useValue: options.integrationBusiness }] : []),
         ...(options.integrationBusinessProvider ? [{ ...options.integrationBusinessProvider, provide: INTEGRATION_BUSINESS_PARTICIPANT }] : []),
@@ -82,6 +90,8 @@ export class PlatformServerModule {
         { provide: APP_INTERCEPTOR, useClass: RequestIdInterceptor }
       ], exports: [PlatformAuthService, PlatformAuthenticationRepository, SubscriptionService, SUBSCRIPTION_APPLICATION,
         TenantIntegrationService, TenantIntegrationRuntimeService, ObjectStorageProviderService, SecretBox, TENANT_INTEGRATION_APPLICATION,
-        PLATFORM_AUTH_DATA_STORE, PLATFORM_APPEARANCE_DATA_STORE, PLATFORM_SUBSCRIPTION_DATA_STORE, INTEGRATION_DATA_STORE] };
+        OfficialCalendarSourceService, OFFICIAL_CALENDAR_APPLICATION, OFFICIAL_CALENDAR_SOURCE_READER,
+        PLATFORM_AUTH_DATA_STORE, PLATFORM_APPEARANCE_DATA_STORE, PLATFORM_SUBSCRIPTION_DATA_STORE, INTEGRATION_DATA_STORE,
+        OFFICIAL_CALENDAR_DATA_STORE] };
   }
 }

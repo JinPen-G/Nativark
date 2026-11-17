@@ -38,6 +38,10 @@
     "./tenant-integrations": {
       "types": "./dist/tenant-integrations.d.ts",
       "default": "./dist/tenant-integrations.js"
+    },
+    "./official-calendar": {
+      "types": "./dist/official-calendar.d.ts",
+      "default": "./dist/official-calendar.js"
     }
   },
   "scripts": {
@@ -66,6 +70,9 @@
       ],
       "tenant-integrations": [
         "dist/tenant-integrations.d.ts"
+      ],
+      "official-calendar": [
+        "dist/official-calendar.d.ts"
       ]
     }
   },

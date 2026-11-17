@@ -106,6 +106,8 @@ import { RentalDueJobScheduler } from "./modules/rental-core/rental-due-job.sche
 import { RentalBusinessController } from "./modules/rental-core/rental-business.controller";
 import { OfficialCalendarSourceController } from "./modules/rental-core/official-calendar-source.controller";
 import { OfficialCalendarSourceService } from "./modules/rental-core/official-calendar-source.service";
+import { OFFICIAL_CALENDAR_DATA_STORE, OFFICIAL_CALENDAR_APPLICATION } from "@rental-os/platform-server/official-calendar-store";
+import { OFFICIAL_CALENDAR_SOURCE_READER, createOfficialCalendarSourceReader } from "@rental-os/platform-server/official-calendar-reader";
 import { RentalBusinessService } from "./modules/rental-core/rental-business.service";
 import { RentalStateRepository } from "./modules/rental-core/rental-state.repository";
 import { RentalSnapshotBackfillService } from "./modules/rental-core/rental-snapshot-backfill.service";
@@ -431,6 +433,9 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     RentalDueJobScheduler,
     RentalBusinessService,
     OfficialCalendarSourceService,
+    { provide: OFFICIAL_CALENDAR_DATA_STORE, useExisting: PrismaService },
+    { provide: OFFICIAL_CALENDAR_APPLICATION, useExisting: OfficialCalendarSourceService },
+    { provide: OFFICIAL_CALENDAR_SOURCE_READER, inject: [OfficialCalendarSourceService], useFactory: createOfficialCalendarSourceReader },
     RentalStateRepository,
     RentalSnapshotBackfillService,
     RentalCoreConfigRepository,

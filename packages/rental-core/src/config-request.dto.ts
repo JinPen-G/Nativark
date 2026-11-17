@@ -6,9 +6,7 @@ import { RENTAL_CURRENCY_CODES, RENTAL_DISCOUNT_TARGETS, RENTAL_DISCOUNT_TYPES, 
 import type {
   ApplyOfficialCalendarSourceRequest,
   PublishRentalCalendarRequest,
-  RegisterOfficialCalendarSourceVersionRequest,
   RestoreRentalCalendarVersionRequest,
-  SaveOfficialCalendarSourceRequest,
   VoidRentalCalendarRequest,
   RemoveRentalCalendarDayOverrideRequest,
   PreviewRentalCalendarRangeOverrideRequest,
@@ -1586,72 +1584,7 @@ export class RestoreRentalCalendarVersionDto implements RestoreRentalCalendarVer
 
 /* ---------- 公共官方日历来源注册表（平台级，需求 4.5.2/4.5.8） ---------- */
 
-export class SaveOfficialCalendarSourceDto implements SaveOfficialCalendarSourceRequest {
-  @IsOptional()
-  @IsString()
-  @IsNotEmpty()
-  id?: string;
-
-  @IsIn(["CN"])
-  region!: "CN";
-
-  @IsString()
-  @Matches(NON_BLANK_PATTERN, { message: "来源名称不能为空白" })
-  @MaxLength(191, { message: "来源名称不能超过 191 字" })
-  name!: string;
-
-  /** 只接受 HTTPS：这份数据会被所有租户引用，来源不可验证时出错面是全平台。 */
-  @IsUrl({ require_tld: false, protocols: ["https"], require_protocol: true })
-  @MaxLength(191, { message: "来源地址不能超过 191 字" })
-  url!: string;
-
-  @IsOptional()
-  @IsString()
-  notes?: string;
-
-  @IsOptional()
-  @IsBoolean()
-  isActive?: boolean;
-}
-
-export class OfficialCalendarSourceDayInputDto {
-  /** 只接受 YYYY-MM-DD：带时间会让同一天出现多个键。 */
-  @IsISO8601()
-  date!: string;
-
-  @IsIn(["statutory_holiday", "makeup_workday"])
-  dayType!: RentalDayType;
-
-  @IsString()
-  @Matches(NON_BLANK_PATTERN, { message: "节日或调休名称不能为空白" })
-  name!: string;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @Max(MAX_MULTIPLIER)
-  pricingMultiplier?: number;
-
-  @IsOptional()
-  @IsBoolean()
-  closed?: boolean;
-}
-
-export class RegisterOfficialCalendarSourceVersionDto implements RegisterOfficialCalendarSourceVersionRequest {
-  @IsInt()
-  @Min(2000)
-  @Max(2999)
-  year!: number;
-
-  @IsISO8601()
-  publishedAt!: string;
-
-  @IsArray()
-  @ArrayNotEmpty()
-  @ValidateNested({ each: true })
-  @Type(() => OfficialCalendarSourceDayInputDto)
-  days!: OfficialCalendarSourceDayInputDto[];
-}
+export { SaveOfficialCalendarSourceDto, OfficialCalendarSourceDayInputDto, RegisterOfficialCalendarSourceVersionDto } from "@rental-os/platform-server/official-calendar-dto";
 
 /** 经营空间引用某个公共来源版本生成/更新本空间年度草稿（需求 4.5.2）。 */
 export class ApplyOfficialCalendarSourceDto implements ApplyOfficialCalendarSourceRequest {

@@ -532,3 +532,4 @@ export * from "./common";
 export * from "./files";
 export * from "./integration-provider";
 export * from "./tenant-integrations";
+export * from "./official-calendar";

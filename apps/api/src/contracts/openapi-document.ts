@@ -26,6 +26,8 @@ import { RENTAL_CATEGORY_CODE_PATTERN, RENTAL_CATEGORY_ICON_CODES } from '@renta
 import { SUBSCRIPTION_HTTP_OPERATIONS } from '@rental-os/platform-server/subscription-http-policy';
 import { INTEGRATION_HTTP_OPERATIONS } from '@rental-os/platform-server/integration-http-policy';
 import { INTEGRATION_OPENAPI_SCHEMAS } from '@rental-os/platform-server/integration-openapi';
+import { OFFICIAL_CALENDAR_HTTP_OPERATIONS } from '@rental-os/platform-server/official-calendar-http-policy';
+import { OFFICIAL_CALENDAR_SCHEMAS, OFFICIAL_CALENDAR_OPENAPI_QUERY_SCHEMAS } from '@rental-os/platform-server/official-calendar-openapi';
 import { SUBSCRIPTION_OPENAPI_SCHEMAS, SUBSCRIPTION_OPENAPI_QUERY_SCHEMAS } from '@rental-os/platform-server/subscription-openapi';
 import { AI_AUTOMATION_REVIEW_HTTP_CONTRACTS, AI_AUTOMATION_REVIEW_GRANT_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_AUTOMATION_EXPLANATION_HTTP, AI_AUTOMATION_EXPLANATION_CONTRACTS } from '@rental-os/shared';
@@ -86,7 +88,7 @@ export interface SchemaObject {
   properties?: Record<string, SchemaObject>;
   minProperties?: number;
   maxProperties?: number;
-  required?: string[];
+  required?: readonly string[];
   additionalProperties?: boolean | SchemaObject;
   nullable?: boolean;
 }
@@ -254,6 +256,7 @@ function buildPaths(operations: ContractOperation[]) {
 export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ...SUBSCRIPTION_OPENAPI_SCHEMAS,
   ...INTEGRATION_OPENAPI_SCHEMAS,
+  ...OFFICIAL_CALENDAR_SCHEMAS,
   ...STAFF_UPLOAD_OBSERVATION_SCHEMAS,
   ...AI_MEMBER_NAME_SCHEMAS,
   ...AI_TASK_RULE_DRAFT_SCHEMAS,
@@ -4311,11 +4314,15 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   backlogOperation("get", "/api/rental/v1/calendars/{year}", "RentalBusiness", "getRentalBusinessCalendar", "Get annual business calendar", ["rental-os:calendar:edit", "rental-os:calendar:publish", "rental-os:price:manage", "rental-os:rules:manage", "rental-os:order:view"]),
   backlogOperation("get", "/api/rental/v1/official-calendar-sources", "RentalBusiness", "listRentalOfficialCalendarSourceVersions", "List public official calendar source versions", ["rental-os:calendar:view-history", "rental-os:calendar:edit", "rental-os:calendar:publish", "rental-os:price:manage", "rental-os:rules:manage"]),
   backlogOperation("post", "/api/rental/v1/calendars/{year}/apply-official-source", "RentalBusiness", "applyRentalOfficialCalendarSource", "Apply a public official calendar source version to the workspace draft", ["rental-os:calendar:edit", "rental-os:price:manage"]),
-  backlogOperation("get", "/api/platform/official-calendars", "OfficialCalendarSource", "listOfficialCalendarSources", "List public official calendar sources", ["system:calendar-source:manage"]),
-  backlogOperation("post", "/api/platform/official-calendars", "OfficialCalendarSource", "createOfficialCalendarSource", "Register a public official calendar source", ["system:calendar-source:manage"]),
-  backlogOperation("put", "/api/platform/official-calendars/{id}", "OfficialCalendarSource", "updateOfficialCalendarSource", "Update a public official calendar source", ["system:calendar-source:manage"]),
-  backlogOperation("get", "/api/platform/official-calendars/{id}/versions", "OfficialCalendarSource", "listOfficialCalendarSourceVersions", "List versions of a public official calendar source", ["system:calendar-source:manage"]),
-  backlogOperation("post", "/api/platform/official-calendars/{id}/versions", "OfficialCalendarSource", "registerOfficialCalendarSourceVersion", "Register a new annual version of a public official calendar source", ["system:calendar-source:manage"]),
+  // 公共来源合同单源；组合文档保留原路径、operationId和权限，引用实际DTO字段。
+  ...OFFICIAL_CALENDAR_HTTP_OPERATIONS.map((item): ContractOperation => ({
+    method: item.method.toLowerCase() as HttpMethod,
+    path: `/api${item.path.replace(/:([a-zA-Z]+)/g, "{$1}")}`,
+    tag: "OfficialCalendarSource", operationId: item.id, summary: item.summary,
+    permissions: [item.permission], responseSchema: item.response,
+    ...("request" in item ? { requestSchema: item.request } : {}),
+    ...("query" in item ? { parameters: item.query.map(name => queryParam(name, OFFICIAL_CALENDAR_OPENAPI_QUERY_SCHEMAS[name])) } : {})
+  })),
   // 公共订阅HTTP与schema单源。保留原客户端路径和operationId，员工投影仍由Rental消费。
   ...SUBSCRIPTION_HTTP_OPERATIONS.map((item): ContractOperation => ({
     method: item.method.toLowerCase() as HttpMethod,

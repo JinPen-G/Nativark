@@ -26,7 +26,7 @@ import { RentalDocumentService } from "./rental-document.service";
 import { RentalExchangePreviewService } from "./rental-exchange-preview.service";
 import { RentalExchangeInspectionPreparationService } from "./rental-exchange-inspection-preparation.service";
 import { RentalExchangeInspectionMediaService } from "./rental-exchange-inspection-media.service";
-import { OfficialCalendarSourceService } from "./official-calendar-source.service";
+import { OFFICIAL_CALENDAR_SOURCE_READER } from "@rental-os/platform-server/official-calendar-reader";
 import { WorkspaceCapabilityService } from "./workspace-capability.service";
 import { StaffOfflinePaymentService } from "./staff-offline-payment.service";
 
@@ -51,7 +51,7 @@ export const RENTAL_HTTP_PROVIDERS: Provider[] = [
   existing<NonNullable<RentalHttpApplications["exchangePreview"]>>(RENTAL_HTTP_EXCHANGE_PREVIEW, RentalExchangePreviewService),
   existing<NonNullable<RentalHttpApplications["exchangeInspections"]>>(RENTAL_HTTP_EXCHANGE_INSPECTIONS, RentalExchangeInspectionPreparationService),
   existing<NonNullable<RentalHttpApplications["exchangeInspectionMedia"]>>(RENTAL_HTTP_EXCHANGE_INSPECTION_MEDIA, RentalExchangeInspectionMediaService),
-  existing<RentalHttpApplications["officialCalendarSources"]>(RENTAL_HTTP_OFFICIAL_CALENDAR_SOURCES, OfficialCalendarSourceService),
+  { provide: RENTAL_HTTP_OFFICIAL_CALENDAR_SOURCES, useExisting: OFFICIAL_CALENDAR_SOURCE_READER },
   existing<RentalHttpApplications["workspaceCapabilities"]>(RENTAL_WORKSPACE_CAPABILITIES_APPLICATION, WorkspaceCapabilityService),
   existing<RentalHttpApplications["staffPayments"]>(RENTAL_STAFF_PAYMENTS_APPLICATION, StaffOfflinePaymentService),
   {

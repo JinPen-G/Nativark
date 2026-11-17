@@ -6,6 +6,7 @@ import { PLATFORM_HTTP_OPERATIONS } from "./platform-http-policy";
 import { RAW_HTTP_RESPONSE } from "./common/request-id.interceptor";
 import { SUBSCRIPTION_OPENAPI_SCHEMAS, SUBSCRIPTION_OPENAPI_QUERY_SCHEMAS } from "./modules/subscription/subscription-openapi";
 import { INTEGRATION_OPENAPI_SCHEMAS } from "./modules/integrations/integration-openapi";
+import { OFFICIAL_CALENDAR_SCHEMAS, OFFICIAL_CALENDAR_OPENAPI_QUERY_SCHEMAS } from "./modules/official-calendars/official-calendar-openapi";
 
 type Schema = { [field: string]: unknown };
 const string: Schema = { type: "string" }, boolean: Schema = { type: "boolean" };
@@ -19,10 +20,12 @@ const location = object({ mode: { type: "string", enum: ["all", "selected"] }, l
 const storedRadius: Schema = { type: "integer", minimum: 0, description: "历史值保持可读，界面按当前圆角范围显示；读取不会重写配置。" };
 const radius = (maximum: number): Schema => ({ type: "integer", minimum: 4, maximum, nullable: true });
 const array = (name: string): Schema => ({ type: "array", items: ref(name) });
+const querySchemas: Readonly<Record<string, Schema>> = { ...SUBSCRIPTION_OPENAPI_QUERY_SCHEMAS, ...OFFICIAL_CALENDAR_OPENAPI_QUERY_SCHEMAS };
 
 export const PLATFORM_OPENAPI_SCHEMAS = {
   ...SUBSCRIPTION_OPENAPI_SCHEMAS,
   ...INTEGRATION_OPENAPI_SCHEMAS,
+  ...OFFICIAL_CALENDAR_SCHEMAS,
   "Platform.Health": object({ service: string, status: string, time: date }, ["service", "status", "time"]),
   "Platform.OpenApi": { type: "object", additionalProperties: true },
   "Platform.LoginRequest": object({ tenantCode: string, account: string, password }, ["tenantCode", "account", "password"]),
@@ -108,7 +111,7 @@ export function createPlatformOpenApi() {
       parameters: [
         ...item.path.split("/").filter(part => part.startsWith(":"))
           .map(part => ({ name: part.slice(1), in: "path", required: true, schema: string })),
-        ...("query" in item ? item.query.map(name => ({ name, in: "query", required: false, schema: SUBSCRIPTION_OPENAPI_QUERY_SCHEMAS[name] })) : [])
+        ...("query" in item ? item.query.map(name => ({ name, in: "query", required: false, schema: querySchemas[name] })) : [])
       ],
       responses: { [item.method === "POST" ? "201" : "200"]: { description: "成功", content: content(response) },
         "400": { description: "输入不符合原DTO或业务约束" }, "401": { description: "原会话失效或登录受限" },

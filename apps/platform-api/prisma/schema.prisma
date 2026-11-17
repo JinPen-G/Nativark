@@ -646,3 +646,64 @@ model ExternalAdapterLog {
   @@index([tenantId, businessType, businessId])
   @@index([tenantId, status, createdAt])
 }
+
+model OfficialCalendarSource {
+  id        String   @id @default(uuid())
+  /// 目前只有中国大陆；预留以便后续接其他地区的公共假日数据。
+  region    String   @default("CN")
+  /// 来源机构或文件名，例如「国务院办公厅年度放假通知」。
+  name      String
+  /// 官方公告地址，必须 HTTPS——来源不可验证的数据不该进入公共来源库。
+  url       String
+  notes     String?  @db.Text
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  versions OfficialCalendarSourceVersion[]
+
+  @@unique([region, name], map: "official_calendar_sources_region_name_key")
+  @@map("official_calendar_sources")
+}
+
+/// 公共官方日历的**来源版本**（需求 4.5.2：「官方日历再次调整时必须形成新的来源版本；
+/// 已发布的经营空间日历、有效报价和订单不得被静默覆盖」）。
+///
+/// 只追加：同一来源同一年度的每次调整都新增一行，旧版本保留，供空间日历追溯自己
+/// 当初引用的是哪一版官方数据。
+model OfficialCalendarSourceVersion {
+  id                 String                 @id @default(uuid())
+  sourceId           String
+  /// Restrict 而非 Cascade：来源版本声明为「只追加、旧版本保留」，若允许级联删除，
+  /// 直接删来源就会连带清空全部不可变历史版本，与不可变承诺相悖。来源只能停用，
+  /// 仍有版本时不得删除（当前也没有删除来源的 API，这是数据库层的兜底）。
+  source             OfficialCalendarSource @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  year               Int
+  /// 来源版本号，由平台按 1.0/1.1… 递增。展示用；排序与并发分配一律用 sequence。
+  version            String
+  /// 版本序号（1 起）。字符串版本号在 1.10 之后会被字典序排到 1.9 之前，
+  /// 因此列表排序与「下一个版本号」分配都用这个整数，并靠唯一键把并发登记挡成冲突。
+  sequence           Int
+  /// 登记当时的来源信息**快照**。
+  ///
+  /// 不能在读取历史版本时去 join 来源主档：主档允许改名称、URL、地区，一改就会让
+  /// 昨天登记的旧版本显示成新名称、新 URL，租户引用旧版本时也拿到改后的信息——
+  /// 与「来源版本不可变、可历史追溯」冲突。主档继续维护，但不得改写历史版本的含义。
+  sourceNameSnapshot String
+  sourceUrlSnapshot  String
+  regionSnapshot     String
+  /// 官方公告的发布日期，与导入时间不同：追溯要能区分「官方什么时候发的」与「我们什么时候入的库」。
+  publishedAt        DateTime
+  importedAt         DateTime               @default(now())
+  importedBy         String?
+  /// ImportRentalCalendarDayInput[]：该版本的整年官方日期（法定节假日与调休工作日）。
+  days               Json
+  createdAt          DateTime               @default(now())
+
+  @@unique([sourceId, year, version], map: "official_calendar_source_versions_source_year_version_key")
+  /// 并发登记的关口：两个平台管理员同时算出同一个 sequence 时，其中一个必然撞唯一键，
+  /// 由服务层转成明确的 409/重试，而不是靠"先查后写"这种在并发下必然出错的时序。
+  @@unique([sourceId, year, sequence], map: "official_calendar_source_versions_source_year_sequence_key")
+  @@index([year], map: "official_calendar_source_versions_year_idx")
+  @@map("official_calendar_source_versions")
+}

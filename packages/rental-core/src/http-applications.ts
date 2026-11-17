@@ -3,9 +3,9 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import type { PlatformOperationLogService } from "@rental-os/platform-server/operation-log";
 import type {
-  BookingMemberOption, CustomerMembershipBookingOption,
-  OfficialCalendarSourceVersion, OfficialCalendarSourceVersionSummary
+  BookingMemberOption, CustomerMembershipBookingOption
 } from "./contracts";
+import type { OfficialCalendarSourceVersion, OfficialCalendarSourceVersionSummary } from "@rental-os/platform-contracts/official-calendar";
 import type { RentalCoreService } from "./mysql-core-runtime";
 import type { RentalBusinessService } from "./mysql-business-runtime";
 import type { RentalAllocationService } from "./mysql-allocation";

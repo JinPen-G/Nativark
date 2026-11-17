@@ -171,7 +171,7 @@ npm run lint -w @rental-os/rental-core
 
 构建先生成公共合同与公共服务，再生成本包 JS/声明。根出口提供领域合同与常量，营业日和品类治理按子出口加载。服务端计价、器材及能力执行/条件子出口使用可选 peer `@nestjs/common`，沿用原 HTTP 异常类型，调用宿主和源码构建须提供兼容版本。核心聚合与换货批准子出口使用可选 peer @rental-os/platform-server 的正式 /request-identity，原Guard/API与Rental共用同一ALS实例；领域根出口不加载它。公共请求指纹从 `@rental-os/platform-contracts/request-fingerprint` 复用，已保存的条件 hash 沿用原算法。
 
-HTTP宿主登记 `/http-core` 和 `/http-business` 的两个Controller，从 `/http-applications` 取得明确令牌并绑定同一应用实例。原组合的[接线入口](../../apps/api/src/modules/rental-core/rental-http.providers.ts)使用 `useExisting`，不再创建另一套核心、资金、数据库或生命周期执行者；可选检查事件只绑定原方法。文件上传使用原 `@nestjs/platform-express` 适配，生成模型留在私有HTTP/MySQL边界。公共来源日历、日志和业务会员/企业结算分别由其实际所有者供给。`/http-context` 复用已选Core的原快照与刷新队列，显式操作键保持191字符边界，各动作仍决定默认键与重放方式。原API再导出同一Controller，路径/字段/权限及原操作读取沿[OpenAPI](../../apps/api/src/contracts/openapi-document.ts)保持。
+HTTP宿主登记 `/http-core` 和 `/http-business` 的两个Controller，从 `/http-applications` 取得明确令牌并绑定同一应用实例。原组合的[接线入口](../../apps/api/src/modules/rental-core/rental-http.providers.ts)使用 `useExisting`，不再创建另一套核心、资金、数据库或生命周期执行者；可选检查事件只绑定原方法。文件上传使用原 `@nestjs/platform-express` 适配，生成模型留在私有HTTP/MySQL边界。公共来源日历由 [platform-server只读接点](../platform-server/src/modules/official-calendars/README.md)提供，业务HTTP不取得来源维护方法；原来源合同和DTO兼容出口转接同一公共声明。日志和业务会员/企业结算分别由实际所有者供给。`/http-context` 复用已选Core的原快照与刷新队列，显式操作键保持191字符边界，各动作仍决定默认键与重放方式。原API再导出同一Controller，路径/字段/权限及原操作读取沿[OpenAPI](../../apps/api/src/contracts/openapi-document.ts)保持。
 
 品类解析和身份子出口同样使用服务端 peer。宿主供给本表只读方法后创建 `RentalCategoryResolver`，普通读取使用同一数据源，业务提交点传入自己的事务视图。`forVersion` 定位原发布引用，`forWorkspace` 每次重读当前绑定，`openingOptions` 返回最多100项及明确截断状态。旧 API 的 Nest provider 继续承担这条装配。[原 provider](../../apps/api/src/modules/rental-core/rental-category-resolver.service.ts)
 

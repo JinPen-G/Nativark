@@ -202,6 +202,34 @@
     "./integration-openapi": {
       "types": "./dist/modules/integrations/integration-openapi.d.ts",
       "default": "./dist/modules/integrations/integration-openapi.js"
+    },
+    "./official-calendar-source": {
+      "types": "./dist/modules/official-calendars/official-calendar-source.service.d.ts",
+      "default": "./dist/modules/official-calendars/official-calendar-source.service.js"
+    },
+    "./official-calendar-store": {
+      "types": "./dist/modules/official-calendars/official-calendar-store.d.ts",
+      "default": "./dist/modules/official-calendars/official-calendar-store.js"
+    },
+    "./official-calendar-dto": {
+      "types": "./dist/modules/official-calendars/official-calendar-request.dto.d.ts",
+      "default": "./dist/modules/official-calendars/official-calendar-request.dto.js"
+    },
+    "./official-calendar-http": {
+      "types": "./dist/modules/official-calendars/official-calendar-source.controller.d.ts",
+      "default": "./dist/modules/official-calendars/official-calendar-source.controller.js"
+    },
+    "./official-calendar-reader": {
+      "types": "./dist/modules/official-calendars/official-calendar-source-reader.d.ts",
+      "default": "./dist/modules/official-calendars/official-calendar-source-reader.js"
+    },
+    "./official-calendar-http-policy": {
+      "types": "./dist/modules/official-calendars/official-calendar-http-policy.d.ts",
+      "default": "./dist/modules/official-calendars/official-calendar-http-policy.js"
+    },
+    "./official-calendar-openapi": {
+      "types": "./dist/modules/official-calendars/official-calendar-openapi.d.ts",
+      "default": "./dist/modules/official-calendars/official-calendar-openapi.js"
     }
   },
   "scripts": {
@@ -218,7 +246,8 @@
     "class-validator": "^0.14.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "@prisma/client": "^5.22.0"
+    "@prisma/client": "^5.22.0",
+    "class-transformer": "^0.5.1"
   },
   "devDependencies": {
     "@types/node": "^22.9.0"
@@ -368,6 +397,27 @@
       ],
       "integration-openapi": [
         "dist/modules/integrations/integration-openapi.d.ts"
+      ],
+      "official-calendar-source": [
+        "dist/modules/official-calendars/official-calendar-source.service.d.ts"
+      ],
+      "official-calendar-store": [
+        "dist/modules/official-calendars/official-calendar-store.d.ts"
+      ],
+      "official-calendar-dto": [
+        "dist/modules/official-calendars/official-calendar-request.dto.d.ts"
+      ],
+      "official-calendar-http": [
+        "dist/modules/official-calendars/official-calendar-source.controller.d.ts"
+      ],
+      "official-calendar-reader": [
+        "dist/modules/official-calendars/official-calendar-source-reader.d.ts"
+      ],
+      "official-calendar-http-policy": [
+        "dist/modules/official-calendars/official-calendar-http-policy.d.ts"
+      ],
+      "official-calendar-openapi": [
+        "dist/modules/official-calendars/official-calendar-openapi.d.ts"
       ]
     }
   }
