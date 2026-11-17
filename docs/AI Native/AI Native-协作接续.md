@@ -4,7 +4,7 @@
 
 ## 当前目标与工作现场
 
-main 固定整合已普通推送，GitHub实际产品提交为01bcfda15cb26c10899761906ac8648c03357f02，提交／索引树为d842d4ae090f1210a6330cf4dd81796f7850ffa2。23份冲突已处理，shared／四端及API完整类型、实际OpenAPI／AppModule装配与操作唯一检查通过。产品字节与已验证83e943bde07af41985646d2f579a3dc7c9481258一致，两树仅差本记录和接续。13份重叠路径已保全，旧本地演示界面的两份原稿继续沿唯一Git补丁引用读取，其余WIP留主线工作区。当前以已合入版本补AIN-15四品类最终订单等价及26～28全文核定。完整验证、实际主线、工具超时、WIP去向与清理见[固定整合阶段](<AI Native-开发记录.md#ain-main-fixed-native-integration-20261117>)。
+main 固定整合已普通推送，GitHub实际产品提交为01bcfda15cb26c10899761906ac8648c03357f02，提交／索引树为d842d4ae090f1210a6330cf4dd81796f7850ffa2。23份冲突已处理，shared／四端及API完整类型、实际OpenAPI／AppModule装配与操作唯一检查通过。产品字节与已验证83e943bde07af41985646d2f579a3dc7c9481258一致，两树仅差本记录和接续。13份重叠路径已保全，旧本地演示界面的两份原稿继续沿唯一Git补丁引用读取，其余WIP留主线工作区。原26的固定版本、现用Client及G1～G3已按[主线验收基线](<AI Native-开发记录.md#ain26-main-fixed-baseline-20261117>)核定。dev1合并后四品类最终订单4/4已交，当前补原Controller独立人工报价及各自订单对照；dev2继续原26全文及27～28核定。完整验证、实际主线、工具超时、WIP去向与清理见[固定整合阶段](<AI Native-开发记录.md#ain-main-fixed-native-integration-20261117>)。
 
 当前临时负责人为01a1e422-8ae5-7383-9e41-c80cb71bcc70，按负责人本轮授权接替原AI-RD。本轮持续目标无token_budget。Root目标卡当前回读为active、remainingTokens=null，按负责人“继续”指令持续推进。dev1／dev2当前派单回合均active且已有工具执行，目标卡与实际回合分别核定。历史误设预算及资源失败保留在[临时接管阶段](<AI Native-开发记录.md#ain-temporary-rd-takeover-20261116>)，当前原输入、委托重检及停止续办见[阶段记录](<AI Native-开发记录.md#ain15-26-original-input-stop-continuation-20261117>)。
 
