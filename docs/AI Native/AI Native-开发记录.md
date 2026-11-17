@@ -120,6 +120,36 @@ dev1在独立Node进程读取固定01bcfda15源码，人工分支经过原AuthSe
 
 本组人工报价取AI原报价副本，CustomerOperations、service capacities与capability hooks未装配，空priceVersion保持原缺失状态。该组覆盖个人双商品的最终订单变换与原键幂等。Root已按原15第5条派dev1继续从原Controller独立报价，按同版本分别比较报价及各自最终订单，并核原组件及既有变体证据。dev2本次原存储夹具在异步配置读取处先失败，原断言保留，内存补齐两处等待后已核事务等待撤权零报价写入及保留读权的原键恢复；完整命令与全文结论继续由原对话固化。
 
+### 后继独立报价与各自订单对照
+
+dev1实际回合 `01a1e991-c128-7e83-bf0f-60e86b2a759b` 沿固定main产品 `01bcfda15cb26c10899761906ac8648c03357f02` 补完原15第5条。人工通过实际Auth／Guard／ALS／ValidationPipe进入 `RentalBusinessController.quote` 独立生成报价，再由 `RentalCoreController.createOrder` 保存订单。AI经过原澄清、报价、提案审阅、明确批准和继续确认。两路各自使用独立Core／Business和内存仓储，在报价前分别加载同一份原配置。Root回读原执行及结果，四品类严格对照4/4通过，退出0，stderr为空。
+
+| 品类 | 原单位 | 比较报价叶字段 | 比较持久订单叶字段 | 租赁应付CNY | 报价应收CNY |
+| --- | --- | --- | --- | --- | --- |
+| 摄影camera | day_24h | 2458 | 217 | 665 | 665 |
+| 露营camping | calendar_day | 2462 | 247 | 532 | 1132 |
+| 车辆vehicle | day_24h | 2471 | 230 | 1273 | 1273 |
+| 工程construction | shift | 2475 | 260 | 6840 | 6840 |
+
+每类两路各生成一份报价、保存一份订单，实际保存状态均为原Core的draft。人工批准消费为0，AI批准消费为1，模型调用与累计calls均为2。人工同键重放、原报价重复读取和AI原结果重复读取保持保存及消费计数。两路各自进入原 `createQuote → captureQuoteConfiguration → createQuoteFromConfiguration` 一次。比较只对齐各自生成的报价、订单、明细和预留ID，并核原关联。原请求hash的差异完整保留，包括各自quoteId与人工的空capabilityExceptions。
+
+两路报价来源为 `rental-quote-source-1`，定价计划及规则版本为1.0，日历为 `2027:draft`。priceVersionId／priceVersion为空，记录为本组未覆盖的价格版本情形。客户门禁、容量服务和能力运行时已实际进入，本组基线无附加服务及启用Hook实例。容量争用、具体Hook、企业付款、丢应答、停止／撤权、配送及其他单位继续沿原固定阶段证据按适用范围核定。
+
+| 原执行证据 | 固定值 |
+| --- | --- |
+| 命令 | `node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 --input-type=commonjs -` |
+| stdin SHA-256 | `a18331a8fc845906be896b1582393729179571091e9fe2edaa6fef01e8b36037` |
+| stdout SHA-256 | `4e815e195ca954a8d6498f98e3bbb49dab1f02be692df436a8c2fdcd2a8d4ed0` |
+| 720项固定源码读取清单SHA-256 | `f971103f7739adfb32f55b618e7851c9644cfdf0e8bb93193b19380320dfa406` |
+| 88项受管依赖读取清单SHA-256 | `9dae66921a2c5a288f8c30c1196a296c9ac992fb8b072c5fcabc3b3f5f4b8094` |
+| 原结果调用 | `call_qqlw9CYTYBRWIl7IXvwu01bn`、`call_xxPiVIYrVW5ehnApIuEn1ucV` |
+
+本组为离线内存行为验证，TypeScript5.9.3、ts-node的transpileOnly=false零诊断，完整包类型沿已验证主线候选。完整stdin、输出及读取清单留dev1原对话。先前夹具缺字段、随机费率ID、可空字段及BigInt断言的准备失败保留，旧continueAnswer冲突断言继续按实际归属核定。六个验证进程已退出，任务临时目录不存在，offline audit与文件写入均为0。
+
+本片文档命令 `node --no-node-snapshot --no-compilation-cache scripts/validate-docs.cjs` 退出1，11/11文档已检查，仍为导航历史三处及稀疏检出示例一处既有缺链。新增证据及接续的本地链接、原任务算术和 `git diff --check` 定向核对均通过。文档核对新增临时文件、依赖及服务进程为0。
+
+本片固定独立报价及各自最终订单的实际通过结果。原15六条、原26五条及A01～A29的全文G4继续合并既有失败／恢复证据核定，当前任务百分比沿原册。真实数据库、浏览器、微信、供应商及资金实测按负责人原交付清单执行。
+
 ### 原26分档及剩余门槛
 
 | 原门槛 | 本片依据与状态 |
