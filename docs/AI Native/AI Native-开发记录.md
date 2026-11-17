@@ -3,8 +3,47 @@
 > 文档用途：为 Codex、Claude 和人工开发者说明各任务已做什么、还缺什么、从哪里核验。不是需求基线，也不是第二套百分比台账。
 > 归纳日期：2026-11-11。先读下方原28项与ENTRY当前摘要，再按任务查近期功能阶段。活动现场与写入范围只见[当前接续](<AI Native-协作接续.md>)；本文件不续派旧指令。现行依据为需求v1.15/任务v1.19；2026-11-11经负责人明确变更为本轮模拟研发验收、负责人另做真实测试，功能范围不变。旧阶段按当时门槛留下的分数与未验事实保留，不能沿用旧实测前置卡住新口径的研发收口。
 > 原28项及 ENTRY 的百分比唯一维护在[正式开发任务](<AI Native-开发任务.md>)。条款通过不等于整项完成，不改验收标准来提高比例。
-> 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
+> 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、15、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
+
+<a id="ain15-six-clause-capacity-whole-closeout-20261117"></a>
+## AIN-15 六条全文与容量补验收口（2026-11-17）
+
+固定产品为 main 的 `01bcfda15cb26c10899761906ac8648c03357f02`。dev1 实际回合 `01a1ea01-d82f-7651-b0fb-2d18fcea0de3` 完成原15六条最终独立核定。Root回读原工具终态、固定源码及结论，容量服务Git字节SHA-256为 `600b7769afeb7f510ab457063c849ec6bf235ac62d6a86bc866f5e29480e0e05`，与补验读取清单一致。当前main后继及AI的31ff09559仅同步文档，产品沿原固定版本。
+
+| 原条款 | 全文核定与原证据 |
+| --- | --- |
+| 1，澄清、身份、权威查询、报价、确认、开单及链接 | 原Task／Gateway、Core报价、明确批准和持久订单接通。个人付款、企业优惠个人付款及企业付款分别沿原本人委托和正式资格／付款授权。[原身份付款](#ain15-personal-enterprise-delegation-20261117)、[原订单链接](#ain15-original-order-link-consumers-20261114) |
+| 2，同名和批准隔离、条件变化重选 | 原人类选择、日期／地点／数量／商品变化重新准备，旧输入与批准保持原绑定。参数与澄清定位P2已修复并独立复验。[原参数](#ain15-current-human-parameters-order-handoff-20261114)、[日期地点变化](#ain15-date-location-original-confirmation-20261114)、[澄清定位](#ain15-26-clarification-locator-binding-20261117) |
+| 3，准确业务状态、支付／待办及人工出口 | 四端按原audience消费正式收据。Web和小程序定位／索引／隐藏交付P2已修复，unknown保留原键及当前受权人工入口。[两端恢复](#ain15-client-delegation-recovery-guard-20261117)、[可见交付](#ain15-client-result-visible-delivery-20261117) |
+| 4，正常、缺货、竞争、过期、撤权、丢应答及取消 | 继承原四品类锁内缺货、联合回滚、丢ACK、七项停止、恢复及接管证据，本片补齐服务容量竞争和原键重放。[四品类原组合](#ain26-four-category-fixed-evidence-style-20261115)、[原停止续办](#ain15-26-original-input-stop-continuation-20261117) |
+| 5，四品类人工与AI最终结果等价 | 固定main下两路独立Core／Business各生成报价并保存订单，逐字段对照4/4，各路报价／保存各一次，AI批准消费一次，重放保持业务计数。[独立报价与各自最终订单](#ain26-main-fixed-baseline-20261117) |
+| 6，目标驱动、重选／新报价／新批准及原结果 | 原目标、当前事实、用户重选和Core新报价通过正式确认后执行，停止／unknown／接管沿原任务处理。[原参数与输入](#ain15-26-original-input-stop-continuation-20261117)、[原任务接管](#ain26-selected-task-center-recovery-20261115) |
+
+### 最后容量补验
+
+实际调用 [RentalServiceCapacityService](../../apps/api/src/modules/rental-core/rental-service-capacity.service.ts)，复用[原容量用例](../../tests/rental-service-capacity.test.cjs)前三组断言与[原事务fixture](../../tests/fixtures/ai-native/task-input-store.cjs)，补核同键重放。原用例的环境初始化和真实数据库操作未执行，原断言在独立Node进程的有限内存事务中运行。
+
+| 补验 | 实际结果 |
+| --- | --- |
+| 原报价检查 | 预留量0，预留行0。 |
+| 调用方事务失败 | 容量及预留行回滚为0。 |
+| 两个服务实例竞争最后一份容量 | 成功1、原409拒绝1，预留量1、预留行1。 |
+| 原键重放 | 持久状态不变，新增create为0，仍为单份预留。 |
+
+命令为 `node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 --input-type=commonjs -`，最终PID58732，退出0、stderr为空、4/4通过。stdin SHA-256为 `c83b125a71a469600cdbe905fe1e87d616afa893ecb143bbe5a8f829ceae4773`，stdout为 `91d29a35eebf34a372acf2c6d3c6a965a31d45898c826598dbf52b8f8809f968`。146项固定源清单SHA-256为 `aaf631444e5cc5b6c72516332c67135b9adb2ee640dec73bfe66194cf99ca5a3`，88项受管依赖清单为 `9dae66921a2c5a288f8c30c1196a296c9ac992fb8b072c5fcabc3b3f5f4b8094`。原工具结果为 `call_a4hzMUqhwz1nEy98ROG6i2UP`，最终回执为 `call_jR2L6ktoHhuthbY2UI2u6tP1`。
+
+容量补验使用原串行内存事务、快照回滚及精确SQL行投影，覆盖有限存储与锁调度模拟。模型调用、Core建单、audit及文件writes均为0。实际订单等价沿前述独立报价／订单组。TypeScript5.9.3、transpileOnly=false零诊断，完整API、shared、MCP及四端noEmit沿[主线完整验证](#ain-main-fixed-native-integration-20261117)继承。
+
+### 原失败与验证边界
+
+两个容量准备失败保留，PID42976与20404均退出1。原fixture缺Prisma的gte比较，导致Date窗口及数值容量门禁不匹配。仅在本次内存加载补齐比较，原fixture与生产源码未修改。最终内存fixture SHA-256为 `51b4a20288de38c2c278d3d9d3b7fee21bd235d06fce62cd3a9192e06525af0f`，原字节为 `be39cf5b95e8b8c43d1560b96bf8ef5ae10621eebda8f3c707fc6f091c3135cd`。
+
+旧 `continueAnswer` 冲突断言在0920cf9e3d引入，432dc375d9后的参数齐备路径返回 `not_started / quote_parameters_ready`，当前四品类组已核Task／Run／调用数不变。旧原用例失败作为预期漂移保留，未将原整套测试记绿。Hook原16组沿未启用、版本、确定性顺序、只读快照、意见契约及必选拒绝范围继承，当前四品类基线的executed=[]仅说明未启用。原09两份mysql-result分类附件的缺字节继续在[原证据索引](#ain26-main-fixed-baseline-20261117)明确登记。
+
+原07／09／12依赖已按固定研发证据完成。G1正式输入／契约、G2原服务主链、G3实际四端装配及G4原六条全文、必要模拟／类型／修复复验和独立核定均成立，本片将原15登记为本轮研发100%。原26～28继续按全文及依赖核定。三个容量验证进程已退出，任务临时目录未创建，无新增验证残留。真实数据库、浏览器／微信、供应商、支付及生产放行沿[负责人实测清单](#ain28-user-operation-real-test-handoff-20261117)办理。
+
+本片文档验证命令 `node --no-node-snapshot --no-compilation-cache scripts/validate-docs.cjs` 退出1，11/11文档已检查，仍为导航三处历史附件及稀疏示例一处既有缺链。原任务算术、18处新增文件／阶段引用和 `git diff --check` 定向核对通过。文档验证新增临时文件、依赖及服务进程为0。
 
 <a id="ain-main-fixed-native-integration-20261117"></a>
 ## main 固定整合与完整装配复验（2026-11-17）
