@@ -702,6 +702,50 @@
     "./customer-master-storage": {
       "types": "./dist/customer-master-storage.d.ts",
       "default": "./dist/customer-master-storage.js"
+    },
+    "./mysql-enterprise-application": {
+      "types": "./dist/mysql-enterprise-application.d.ts",
+      "default": "./dist/mysql-enterprise-application.js"
+    },
+    "./mysql-enterprise-management-request": {
+      "types": "./dist/mysql-enterprise-management-request.d.ts",
+      "default": "./dist/mysql-enterprise-management-request.js"
+    },
+    "./mysql-enterprise-task-center": {
+      "types": "./dist/mysql-enterprise-task-center.d.ts",
+      "default": "./dist/mysql-enterprise-task-center.js"
+    },
+    "./mysql-enterprise-rental-handoff": {
+      "types": "./dist/mysql-enterprise-rental-handoff.d.ts",
+      "default": "./dist/mysql-enterprise-rental-handoff.js"
+    },
+    "./mysql-enterprise-membership-audit": {
+      "types": "./dist/mysql-enterprise-membership-audit.d.ts",
+      "default": "./dist/mysql-enterprise-membership-audit.js"
+    },
+    "./enterprise-payment-proof-source": {
+      "types": "./dist/enterprise-payment-proof-source.d.ts",
+      "default": "./dist/enterprise-payment-proof-source.js"
+    },
+    "./enterprise-transfer-receipt-projection": {
+      "types": "./dist/enterprise-transfer-receipt-projection.d.ts",
+      "default": "./dist/enterprise-transfer-receipt-projection.js"
+    },
+    "./client-contracts": {
+      "types": "./dist/client-contracts.d.ts",
+      "default": "./dist/client-contracts.js"
+    },
+    "./enterprise-expense": {
+      "types": "./dist/enterprise-expense.d.ts",
+      "default": "./dist/enterprise-expense.js"
+    },
+    "./enterprise-exchange": {
+      "types": "./dist/enterprise-exchange.d.ts",
+      "default": "./dist/enterprise-exchange.js"
+    },
+    "./enterprise-workflow-ports": {
+      "types": "./dist/enterprise-workflow-ports.d.ts",
+      "default": "./dist/enterprise-workflow-ports.js"
     }
   },
   "typesVersions": {
@@ -1224,6 +1268,39 @@
       ],
       "customer-master-storage": [
         "dist/customer-master-storage.d.ts"
+      ],
+      "mysql-enterprise-application": [
+        "dist/mysql-enterprise-application.d.ts"
+      ],
+      "mysql-enterprise-management-request": [
+        "dist/mysql-enterprise-management-request.d.ts"
+      ],
+      "mysql-enterprise-task-center": [
+        "dist/mysql-enterprise-task-center.d.ts"
+      ],
+      "mysql-enterprise-rental-handoff": [
+        "dist/mysql-enterprise-rental-handoff.d.ts"
+      ],
+      "mysql-enterprise-membership-audit": [
+        "dist/mysql-enterprise-membership-audit.d.ts"
+      ],
+      "enterprise-payment-proof-source": [
+        "dist/enterprise-payment-proof-source.d.ts"
+      ],
+      "enterprise-transfer-receipt-projection": [
+        "dist/enterprise-transfer-receipt-projection.d.ts"
+      ],
+      "client-contracts": [
+        "dist/client-contracts.d.ts"
+      ],
+      "enterprise-expense": [
+        "dist/enterprise-expense.d.ts"
+      ],
+      "enterprise-exchange": [
+        "dist/enterprise-exchange.d.ts"
+      ],
+      "enterprise-workflow-ports": [
+        "dist/enterprise-workflow-ports.d.ts"
       ]
     }
   },

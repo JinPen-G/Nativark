@@ -11,6 +11,30 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-enterprise-workflow-runtime-20261117"></a>
+
+## Rental 企业申请、管理请求与原任务投影（2026-11-17）
+
+固定父版48a5ecac5a1a1c6d974e183260a7895e5fe10c56已普通推送并实际远端回读，保全原服务、客户/费用合同和完整接续；实际远端main62ca183f10b7c316ab63c28ef6d04ee88d06488b已在任务祖先。[企业申请](../../../packages/rental-core/src/mysql-enterprise-application.ts)、[管理请求](../../../packages/rental-core/src/mysql-enterprise-management-request.ts)、[企业待办](../../../packages/rental-core/src/mysql-enterprise-task-center.ts)、[行政交接](../../../packages/rental-core/src/mysql-enterprise-rental-handoff.ts)和[成员审计](../../../packages/rental-core/src/mysql-enterprise-membership-audit.ts)成为Rental包实际单源，原API保留原Nest依赖类型/顺序并供给同一实例。
+
+[付款证明来源](../../../packages/rental-core/src/enterprise-payment-proof-source.ts)及[管理员交接收据投影](../../../packages/rental-core/src/enterprise-transfer-receipt-projection.ts)随链迁入；付款证明仍核原订单修订、冻结文件及当前客户/商户权限，管理审核不改变政策、授信或确认资金到账。待办从持久原申请/批准/收据形成，行政交接不改订单或主体，读取后继续核当前作用域。[私有参加者](../../../packages/rental-core/src/enterprise-workflow-ports.ts)只列实际批准list与客户原交接材料，存储继续使用原实例，保留事务/非事务身份比较与锁顺序。
+
+[客户API合同](../../../packages/rental-core/src/client-contracts.ts)、[续租费用合同](../../../packages/rental-core/src/enterprise-expense.ts)和[换货费用合同](../../../packages/rental-core/src/enterprise-exchange.ts)由纯业务出口维护，原shared兼容再导出全部声明与运行时常量。公共品牌/文件形状继续复用platform-contracts，客户端入口不加载MySQL或Nest。原Controller、DTO与OpenAPI路径未改变，入口和schema链接已同步到[包导读](../../../packages/rental-core/README.md)及[原业务导读](../../../apps/api/src/modules/rental-core/README.md)。
+
+| 必要核对 | 实际结果与边界 |
+| --- | --- |
+| 原业务正文 | 七份实现共97个方法/函数及构造正文与固定父版一致；原授权、主体映射、材料、Tenant锁、事务、幂等、历史投影和原收据不变 |
+| 合同与正式出口 | 客户105、续租21、换货12个非import/转接声明正文相同；11个新增正式子出口及typesVersions指向实际产物，运行依赖/peer/lock不变 |
+| 必要类型 | `node --no-compilation-cache - api-enterprise-projections tests/enterprise-workflows.test.cjs` 的十配置均0诊断，包含公共包、Rental/shared、MCP和原API直接消费者；原238模型由Prisma5.22官方WASM/generator在内存生成，TS5.9.3。Rental为218根/943源/436内存输出 |
+| 原冒烟 | 最终 `node --no-compilation-cache - api-enterprise-smoke tests/enterprise-workflows.test.cjs` 退出0，原101/101、0fail/skip/todo/cancelled。复用既有夹具及内存产物，涵盖审批、重复键、回滚、后续撤权、原反馈/付款证明、任务/审计及行政交接；SQL/存储/事务是明确fixture，非真库/HTTP |
+| 文档/格式与原接线 | `node --no-compilation-cache -` 定向四份文档1366本地链接/123锚点，0问题；五个原Nest构造的参数名/类型/顺序/Optional一致。`git -c core.whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol diff --check` 退出0，正式需求/任务及lock无差异 |
+
+首轮类型检查发现批准视图来源与一个包内自引用缺项，修正为唯一正式来源；随后十配置类型通过。首次冒烟98/101，三例是原shared运行时投影改由独立VM递归加载后产生不同对象原型，业务正文不变；仅把既有loader映射到同一正式运行时，再做上述复验。测试只新增七个源码定位及同源运行时映射，共10行，业务断言全部保留，没有新增测试脚本或skip/todo。
+
+父版完整PCH依据与任务身份、依赖、顺序继续保留；本片未跨下一档。Rental费用批准/委托、Controller、数据/迁移/Seed、页面/客户端、标准装配及AI/作业的完整组合仍待推进，浏览器、真实数据库/HTTP、干净安装、独立更新/回退/接手和审查未验。当前worker已退出，output/.tmp为空；旧两处集中待清理及外观/历史附件问题沿原接续保留，不以本片通过掩盖。
+
+负责人已自行创建并明确指定副手 `[Saas 底座]-dev1`（01a1e8ef-3ca4-7b10-ac1f-7055cde66798）。本对话经一次单点交接工具成功下发固定48a5基线及独立工作树要求，已观察该任务开始；副手先做完整公共订阅，再做基础集成，公共源码/包导出/装配必要差异在其独立树维护。本对话继续Rental并维护PCH四册，主动读取其固定成果后整合；副手实际工作树和首个交付尚待回读。未通知PM/QA或其他对话，没有重建已有聊天或派额外助手。
+
 <a id="core-rental-enterprise-policy-members-20261117"></a>
 
 ## Rental 企业政策、成员邀请与管理员交接（2026-11-17）

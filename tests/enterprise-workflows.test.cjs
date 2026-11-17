@@ -31,6 +31,13 @@ function load(relative, deps = {}) {
     'apps/api/src/modules/enterprise/enterprise-members.service.ts': 'packages/rental-core/src/mysql-enterprise-members.ts',
     'apps/api/src/modules/enterprise/enterprise-administrator-continuity.ts': 'packages/rental-core/src/enterprise-administrator-continuity.ts',
     'apps/api/src/modules/enterprise/enterprise-order-delegation-source.ts': 'packages/rental-core/src/enterprise-order-delegation-source.ts',
+    'apps/api/src/modules/enterprise/enterprise-application.service.ts': 'packages/rental-core/src/mysql-enterprise-application.ts',
+    'apps/api/src/modules/enterprise/enterprise-management-request.service.ts': 'packages/rental-core/src/mysql-enterprise-management-request.ts',
+    'apps/api/src/modules/enterprise/enterprise-task-center.service.ts': 'packages/rental-core/src/mysql-enterprise-task-center.ts',
+    'apps/api/src/modules/enterprise/enterprise-rental-handoff.service.ts': 'packages/rental-core/src/mysql-enterprise-rental-handoff.ts',
+    'apps/api/src/modules/enterprise/enterprise-membership-audit.service.ts': 'packages/rental-core/src/mysql-enterprise-membership-audit.ts',
+    'apps/api/src/modules/enterprise/enterprise-payment-proof-source.ts': 'packages/rental-core/src/enterprise-payment-proof-source.ts',
+    'apps/api/src/modules/enterprise/enterprise-transfer-receipt-projection.ts': 'packages/rental-core/src/enterprise-transfer-receipt-projection.ts',
     'apps/api/src/modules/platform/shared-customer.repository.ts': 'packages/rental-core/src/mysql-customer-master.ts',
     'apps/api/src/modules/client/enterprise-access.service.ts': 'packages/rental-core/src/mysql-enterprise-access.ts',
     'apps/api/src/modules/rental-core/rental-idempotency.repository.ts': 'packages/platform-contracts/src/request-fingerprint.ts',
@@ -49,6 +56,9 @@ function load(relative, deps = {}) {
     if (name === '@rental-os/platform-server/operation-log') return load('packages/platform-server/src/common/operation-log.service.ts', { './request-identity': identity });
     // Keep the existing absent-runtime fixture on the service's new contract import.
     if (name === './enterprise-transfer-decision' && '@rental-os/shared' in deps) return deps['@rental-os/shared'];
+    // These projections originally came from the shared runtime in this realm.
+    // Reuse its canonical export so a VM-created prototype does not change strict assertions.
+    if (name === './enterprise-workflows') return deps['@rental-os/shared'] ?? require('@rental-os/rental-core/enterprise-workflows');
     if (relative.startsWith('packages/rental-core/src/') && name.startsWith('./')) return load(path.posix.join(path.posix.dirname(relative), `${name}.ts`), deps);
     if (name === './enterprise-receipt') return load('packages/rental-core/src/enterprise-receipt.ts');
     if (name === './enterprise') return load('packages/rental-core/src/enterprise.ts');

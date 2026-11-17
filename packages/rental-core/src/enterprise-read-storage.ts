@@ -14,3 +14,9 @@ export type RentalEnterprisePolicyStorage = Pick<PrismaClient,
   "customerCorporateMembership" | "rentalCategoryDefinition">;
 export type RentalEnterpriseMembersStorage = Pick<PrismaClient,
   "$queryRaw" | "$executeRaw" | "$transaction" | "customerProfile" | "customerCorporateMembership">;
+
+export type RentalEnterpriseApplicationStorage = Pick<PrismaClient, "$queryRaw" | "$transaction">;
+export type RentalEnterpriseManagementStorage = RentalEnterpriseReadStorage & Pick<PrismaClient,
+  "rentalCategoryDefinition">;
+export type RentalEnterpriseTaskCenterStorage = Pick<PrismaClient, "$queryRaw">;
+export type RentalEnterpriseHandoffStorage = Pick<PrismaClient, "$queryRaw" | "$transaction">;
