@@ -6,8 +6,9 @@
 
 | 入口 | 职责与直接消费者 |
 | --- | --- |
-| [订单前端](admin/orders/README.md)、[统一页面贡献](admin/index.tsx)、[订单请求](admin/orders/client.ts) | `/admin` 组合订单与养护，`/admin/orders` 提供列表、新建、详情及原配货/资金/检查/单据链；宿主提供当前身份、经营空间、原请求与跨领域组件，旧地址消费同一实现 |
+| [订单前端](admin/orders/README.md)、[统一页面贡献](admin/index.tsx)、[订单请求](admin/orders/client.ts) | `/admin` 组合订单、养护与能力页面，`/admin/orders` 提供列表、新建、详情及原配货/资金/检查/单据链；宿主提供当前身份、经营空间、原请求与跨领域组件，旧地址消费同一实现 |
 | [养护工单前端](admin/work-orders/README.md)、[页面贡献](admin/work-orders/index.tsx)、[客户端工厂](admin/work-orders/client.ts) | `/admin/work-orders` 提供原列表/看板/详情与六类表单；宿主供给当前权限/经营空间及唯一请求，旧路由和十二HTTP方法薄适配同一实现 |
+| [能力治理前端](admin/capabilities/README.md)、[页面贡献](admin/capabilities/index.tsx)、[请求工厂](admin/capabilities/client.ts) | `/admin/capabilities` 提供原能力目录、配置、升级及审计；宿主供给当前范围和原会话刷新，配置入口保留查看/管理权限与原修订，卡片复用原生 UIArc |
 | [核心HTTP](src/http-core.controller.ts)、[业务HTTP](src/http-business.controller.ts)、[应用接点](src/http-applications.ts)、[快照与操作键](src/http-context.ts) | `/http-core` 与 `/http-business` 持有原履约、报价、规则和营销HTTP；宿主绑定同一业务/数据库实例，Guard/ALS及原动作继续核权限、事务和原收据 |
 | [空间能力HTTP](src/http-workspace-capabilities.controller.ts)、[员工收款HTTP](src/http-staff-payments.controller.ts)、[服务接点](src/http-service-ports.ts)、[空间能力DTO](src/http-workspace-capability.dto.ts) | 正式HTTP子出口持有原8条路径与校验；宿主Guard先形成可信身份，再通过同一原服务实例处理。原API只再导出，Controller注册不取得额外业务权限 |
 | [企业读取HTTP](src/http-enterprise-read.controller.ts)、[商户决策HTTP](src/http-enterprise-merchant.controller.ts)、[行政交接HTTP](src/http-enterprise-handoff-merchant.controller.ts)、[客户工作流HTTP](src/http-enterprise-workflows.controller.ts) | 四个正式子出口保留客户与营运两套鉴权、原149操作、材料前后复验和原收据；[21项实际接点](src/http-enterprise-applications.ts)由宿主绑定同一服务/数据库 |

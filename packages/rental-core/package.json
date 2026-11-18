@@ -975,6 +975,18 @@
       "types": "./admin/index.tsx",
       "default": "./admin/index.tsx"
     },
+    "./admin/capabilities": {
+      "types": "./admin/capabilities/index.tsx",
+      "default": "./admin/capabilities/index.tsx"
+    },
+    "./admin/capabilities/client": {
+      "types": "./admin/capabilities/client.ts",
+      "default": "./admin/capabilities/client.ts"
+    },
+    "./admin/capabilities/pages": {
+      "types": "./admin/capabilities/pages.ts",
+      "default": "./admin/capabilities/pages.ts"
+    },
     "./admin/orders": {
       "types": "./admin/orders/index.tsx",
       "default": "./admin/orders/index.tsx"
@@ -1952,6 +1964,15 @@
       ],
       "http-customer-avatar-applications": [
         "dist/http-customer-avatar-applications.d.ts"
+      ],
+      "admin/capabilities": [
+        "admin/capabilities/index.tsx"
+      ],
+      "admin/capabilities/client": [
+        "admin/capabilities/client.ts"
+      ],
+      "admin/capabilities/pages": [
+        "admin/capabilities/pages.ts"
       ]
     }
   },

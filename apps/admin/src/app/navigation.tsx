@@ -1,6 +1,7 @@
 /** 原组合后台路由与菜单，投影已登记页面并保留原权限及URL；业务授权由服务端裁定。 */
 import { RENTAL_WORK_ORDER_PAGES, RENTAL_WORK_ORDER_LEGACY_PERMISSIONS } from "@rental-os/rental-core/admin/work-orders/pages";
 import { RENTAL_ORDER_PAGES, RENTAL_ORDER_LEGACY_PERMISSIONS } from "@rental-os/rental-core/admin/orders/pages";
+import { RENTAL_CAPABILITY_PAGES, RENTAL_CAPABILITY_LEGACY_PERMISSIONS } from "@rental-os/rental-core/admin/capabilities/pages";
 import { SUBSCRIPTION_ROUTES } from "@rental-os/platform-admin/subscription/subscriptionRoutes";
 import { ApartmentOutlined, ApiOutlined, AppstoreOutlined, BgColorsOutlined, BoxPlotOutlined, CalendarOutlined, ControlOutlined, CrownOutlined, CustomerServiceOutlined, DashboardOutlined, FileSearchOutlined, FileTextOutlined, FormOutlined, FundOutlined, GiftOutlined, IdcardOutlined, MobileOutlined, SafetyCertificateOutlined, SendOutlined, SettingOutlined, ShopOutlined, TagsOutlined, TeamOutlined, ToolOutlined } from "@/components/ui/icons";
 import { RentalCategoryCode, type RentalCapability, type RentalCategoryTerminology } from "@rental-os/shared";
@@ -60,7 +61,7 @@ export const APP_ROUTES = {
   rentalSettings: { path: "/rental/settings", label: "品类与业务规则", permission: "rental-os:price:manage", legacyPermissions: ["rental-os:calendar:edit", "rental-os:calendar:publish", "rental-os:calendar:view-history", "rental-os:rules:manage", "rental-os:rules:publish", "system:integration:manage"], audience: "tenant", icon: <SettingOutlined />, menu: true },
   // CORE-EXT-02C：能力治理入口。刻意**不**给 capability 门禁——它是治理能力本身的页面，
   // 若也要求某个能力已启用，全新空间就会陷入「没有入口去启用第一个能力」的死锁。
-  rentalCapabilities: { path: "/rental/capabilities", label: "经营空间能力", permission: "rental-core:capability:view", legacyPermissions: ["rental-core:capability:manage"], audience: "tenant", icon: <ControlOutlined />, menu: true },
+  rentalCapabilities: { path: `/rental${RENTAL_CAPABILITY_PAGES.capabilities.path}`, label: RENTAL_CAPABILITY_PAGES.capabilities.title.default, permission: RENTAL_CAPABILITY_LEGACY_PERMISSIONS.view, legacyPermissions: [RENTAL_CAPABILITY_LEGACY_PERMISSIONS.manage], audience: "tenant", icon: <ControlOutlined />, menu: Boolean(RENTAL_CAPABILITY_PAGES.capabilities.menu) },
   membershipReviews: { scope: "tenant-membership", path: "/membership/reviews", label: "会员审核", permission: "rental-os:member:view", legacyPermissions: ["rental-os:member:review", "rental-os:member:qualification-review"], audience: "tenant", icon: <SafetyCertificateOutlined />, menu: true },
   personalMembers: { scope: "tenant-membership", path: "/membership/personal", label: "个人会员", permission: "rental-os:member:view", legacyPermissions: ["rental-os:member:manage"], audience: "tenant", icon: <IdcardOutlined />, menu: true },
   personalMemberDetail: { scope: "tenant-membership", path: "/membership/personal/:customerId", label: "个人会员资料", permission: "rental-os:member:view", legacyPermissions: ["rental-os:member:manage"], audience: "tenant", icon: <IdcardOutlined /> },

@@ -4,6 +4,7 @@
     "index.tsx",
     "orders",
     "work-orders",
+    "capabilities",
     "../../platform-admin/src/**/*.d.ts"
   ]
 }

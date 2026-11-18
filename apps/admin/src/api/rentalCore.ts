@@ -4,6 +4,7 @@
  */
 import { createRentalWorkOrderApi } from "@rental-os/rental-core/admin/work-orders/client";
 import { createRentalOrderApi } from "@rental-os/rental-core/admin/orders/client";
+import { createRentalCapabilityApi } from "@rental-os/rental-core/admin/capabilities/client";
 import type {
   TenantReadinessStatus,
   RentalDocumentType,
@@ -82,11 +83,6 @@ import type {
   PaymentStatementBatchSummary,
   ReviewPaymentStatementLineRequest,
   RentalServiceCapacity,
-  SaveWorkspaceCapabilityRequest,
-  UpgradeWorkspaceCapabilityRequest,
-  WorkspaceCapabilityAuditEvent,
-  WorkspaceCapabilityInstance,
-  WorkspaceCapabilityOverview,
   GrantRentalRewardRequest,
   ApplyOfficialCalendarSourceRequest,
   OfficialCalendarSourceVersionSummary,
@@ -278,12 +274,8 @@ export const rentalCoreApi = {
   applyStockOperation: (data: RentalStockOperationRequest) => request<RentalStockOperationResult>("/rental/v1/stock-operations", { method: "post", data }),
   ...createRentalWorkOrderApi(request),
   orders: () => request<RentalOrder[]>("/rental/v1/orders"),
-  // CORE-EXT-02C：经营空间能力治理。读写都不带 workspaceId——空间取自会话，
-  // 客户端无法指定要治理哪个空间的能力，因此也伪造不了能力范围。
-  capabilities: () => request<WorkspaceCapabilityOverview>("/rental/v1/capabilities"),
-  saveCapability: (data: SaveWorkspaceCapabilityRequest) => request<WorkspaceCapabilityInstance>("/rental/v1/capabilities", { method: "put", data }),
-  upgradeCapability: (code: string, data: UpgradeWorkspaceCapabilityRequest) => request<WorkspaceCapabilityInstance>(`/rental/v1/capabilities/${code}/upgrade`, { method: "post", data }),
-  capabilityAudits: (code?: string) => request<WorkspaceCapabilityAuditEvent[]>("/rental/v1/capability-audits", { params: { code } })
+  // 空间能力读写沿原认证会话的当前经营空间。
+  ...createRentalCapabilityApi(request)
 };
 
 /**

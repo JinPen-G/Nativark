@@ -9,6 +9,7 @@
     ".": "./src/index.ts",
     "./core": "./src/core/index.ts",
     "./ui": "./src/components/ui/index.ts",
+    "./native-ui": "./src/native-ui.ts",
     "./shell": "./src/shell.ts",
     "./runtime": "./src/runtime/index.ts",
     "./session-pages": "./src/session-pages.tsx",
