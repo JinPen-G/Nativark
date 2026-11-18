@@ -34,7 +34,8 @@ export function PlatformBudgetSettings({ identity }: { identity: string }) {
   </section>;
 }
 function PlatformBudgetEditor({ identity, sceneCode }: { identity: string; sceneCode: string }) {
-  const { t } = useLocale(), [form] = Form.useForm<PlatformBudgetForm>();
+  const { t, locale } = useLocale(), [form] = Form.useForm<PlatformBudgetForm>();
+  const moneyText = (zh: string, en: string) => locale.startsWith('en') ? en : t(zh);
   const canManage = useAuthStore(s => s.hasPermission('system:ai-provider:manage'));
   const session = useMemo(() => {
     const epoch = currentSessionEpoch(), actor = useAuthStore.getState().user?.id; let storage: Storage | undefined;
@@ -53,6 +54,7 @@ function PlatformBudgetEditor({ identity, sceneCode }: { identity: string; scene
     const settings = policy.settings, limit = settings?.budget, quantity = limit && limit.state !== 'not_configured' ? limit.quantity : null;
     form.setFieldsValue({ state: limit?.state ?? 'not_configured', unit: quantity?.unit ?? 'calls',
       amount: quantity?.unit === 'money' ? quantity.amount : String(quantity?.value ?? 0), currency: quantity?.unit === 'money' ? quantity.currency : '',
+      taskAmount: settings?.maxMoneyPerTask?.amount ?? '', taskCurrency: settings?.maxMoneyPerTask?.currency ?? '',
       concurrent: String(settings?.maxConcurrent ?? 0), calls: String(settings?.maxCallsPerRun ?? 0),
       allowedModels: settings?.allowedModels.join('\n') ?? '', allowedScenes: settings?.allowedScenes.join('\n') ?? '',
       platformEnabled: settings?.gates.platform.enabled ?? false, tenantEnabled: settings?.gates.tenant.enabled ?? false,
@@ -82,6 +84,27 @@ function PlatformBudgetEditor({ identity, sceneCode }: { identity: string; scene
         } }]}><Input maxLength={25} disabled={disabled || budgetState === 'not_configured'} /></Form.Item>
         {unit === 'money' && budgetState !== 'not_configured' && <Form.Item name="currency" label={t('币种')}
           rules={[{ required: true, pattern: /^[A-Z]{3}$/u }]}><Input maxLength={3} /></Form.Item>}
+        {unit === 'money' && budgetState !== 'not_configured' && <>
+          <p role="status">{policy.settings?.maxMoneyPerTask
+            ? moneyText('金额上限按同一任务的所有运行累计；0 拒绝新金额调用。', 'The cap covers all runs of the same task. Zero blocks new monetary calls.')
+            : moneyText('单个任务金额上限未配置；新金额调用保持拒绝。', 'The amount limit per task is not configured. New monetary calls remain blocked.')}</p>
+          <Form.Item name="taskAmount" label={moneyText('单个任务金额上限', 'Amount limit per task')}
+            dependencies={['unit', 'state', 'taskCurrency']} rules={[{ validator: async (_, value) => {
+              if (value === undefined || value === '') {
+                if (policy.settings?.maxMoneyPerTask) throw Error(moneyText('已有上限不能留空；填写 0.000000 可拒绝新金额调用。', 'Keep the saved cap, or enter 0.000000 to block new monetary calls.'));
+                return;
+              }
+              if (typeof value !== 'string' || !/^(0|[1-9][0-9]{0,17})\.[0-9]{6}$/u.test(value))
+                throw Error(moneyText('金额须填写六位小数，不自动补零或换汇。', 'Enter an amount with six decimals. No automatic padding or conversion.'));
+            } }]}><Input maxLength={25} /></Form.Item>
+          <Form.Item name="taskCurrency" label={moneyText('任务上限币种', 'Task cap currency')}
+            dependencies={['taskAmount', 'currency']} rules={[{ validator: async (_, value) => {
+              const amount = form.getFieldValue('taskAmount');
+              if ((amount === undefined || amount === '') && (value === undefined || value === '')) return;
+              if (typeof value !== 'string' || !/^[A-Z]{3}$/u.test(value) || value !== form.getFieldValue('currency'))
+                throw Error(moneyText('填写与原金额预算一致的三位大写币种。', 'Use the same three-letter uppercase currency as the monetary budget.'));
+            } }]}><Input maxLength={3} /></Form.Item>
+        </>}
         </FormSection> },
         { key: 'limits', label: t('调用限制'), content: <FormSection title={t('调用限制')}>
         <div className={styles.formGrid}>

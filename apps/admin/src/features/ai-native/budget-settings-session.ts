@@ -1,6 +1,6 @@
 /** One current-scope policy editor. Unknown writes remain locked across reload;
  * a current policy read is not an immutable receipt for an earlier save. */
-import type { AiBudgetLimitDraft, AiBudgetSettingsReadDraft, AiBudgetSettingsSummaryDraft,
+import type { AiBudgetLimitDraft, AiUsageQuantityDraft, AiBudgetSettingsReadDraft, AiBudgetSettingsSummaryDraft,
   AiBudgetSettingsChangeDraft, AiBudgetSettingsInitializeDraft, AiBudgetSettingsRefreshConfigurationDraft } from '@rental-os/shared';
 import type { AiBudgetSettingsOperationReadDraft } from '@rental-os/shared';
 
@@ -8,6 +8,14 @@ const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v ===
 const integer = (v: unknown, min: number, max: number): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= min && v <= max;
 const code = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(v);
 const invalid = (): never => { throw Error('AI_INVALID_INPUT'); };
+type TaskMoney = Extract<AiUsageQuantityDraft, { unit: 'money' }>;
+function taskMoney(value: unknown): TaskMoney {
+  if (!object(value) || Object.keys(value).some(key => !['unit', 'amount', 'currency', 'scale'].includes(key))
+    || value.unit !== 'money' || typeof value.amount !== 'string'
+    || !/^(0|[1-9][0-9]{0,17})\.[0-9]{6}$/u.test(value.amount)
+    || typeof value.currency !== 'string' || !/^[A-Z]{3}$/u.test(value.currency) || value.scale !== 6) return invalid();
+  return { unit: 'money', amount: value.amount, currency: value.currency, scale: 6 };
+}
 // Same sorted JSON SHA-256 convention as the server request fingerprint.
 // Persist only this digest and the original key, never the edited policy body.
 export async function commandHash(value: unknown): Promise<string> {
@@ -42,7 +50,8 @@ export function budgetPolicyFields(s: unknown) {
     if (!object(g) || typeof g.enabled !== 'boolean' || !integer(g.revision, 1, 4294967295)) return invalid();
     return { enabled: g.enabled, revision: g.revision }; };
   return { gates: { platform: gate('platform'), tenant: gate('tenant'), scene: gate('scene') }, budget: limit(s.budget),
-    allowedScenes: [...s.allowedScenes] as string[], maxConcurrent: s.maxConcurrent, maxCallsPerRun: s.maxCallsPerRun };
+    allowedScenes: [...s.allowedScenes] as string[], maxConcurrent: s.maxConcurrent, maxCallsPerRun: s.maxCallsPerRun,
+    ...(s.maxMoneyPerTask === undefined ? {} : { maxMoneyPerTask: taskMoney(s.maxMoneyPerTask) }) };
 }
 /** Select only existing shared display fields; never expose extension JSON. */
 export function budgetSettingsSummary(value: unknown, selector: AiBudgetSettingsReadDraft): AiBudgetSettingsSummaryDraft {
@@ -65,14 +74,26 @@ export function budgetSettingsSummary(value: unknown, selector: AiBudgetSettings
     configurationMeaning: value.configurationMeaning, settings: fields };
 }
 export type BudgetForm = { state: 'not_configured' | 'zero' | 'limited'; unit: 'calls' | 'tokens' | 'money';
-  amount: string; currency: string; concurrent: string; calls: string; enabled: boolean };
-export function prepareBudgetFields(v: BudgetForm) {
+  amount: string; currency: string; concurrent: string; calls: string; enabled: boolean;
+  taskAmount?: string; taskCurrency?: string };
+export function prepareBudgetFields(v: BudgetForm, allowTaskMoney = true) {
   const natural = (s: string, max: number) => /^(0|[1-9][0-9]*)$/u.test(s) && integer(Number(s), 0, max) ? Number(s) : invalid();
   const budget = limit(v.state === 'not_configured' ? { state: v.state } : { state: v.state, quantity: v.unit === 'money'
     ? { unit: v.unit, amount: v.amount, currency: v.currency, scale: 6 }
     : { unit: v.unit, value: natural(v.amount, v.unit === 'calls' ? 4294967295 : Number.MAX_SAFE_INTEGER) } });
   if (typeof v.enabled !== 'boolean') return invalid();
-  return { budget, maxConcurrent: natural(v.concurrent, 10000), maxCallsPerRun: natural(v.calls, 10000), enabled: v.enabled };
+  let maxMoneyPerTask: TaskMoney | undefined;
+  // Hidden fields can retain an old Form value after a unit/mode change. Only
+  // an explicit monetary edit supplies a new cap; omission preserves old JSON.
+  if (allowTaskMoney && v.unit === 'money' && v.state !== 'not_configured') {
+    const amount = v.taskAmount ?? '', currency = v.taskCurrency ?? '';
+    if (amount !== '' || currency !== '') {
+      maxMoneyPerTask = taskMoney({ unit: 'money', amount, currency, scale: 6 });
+      if (currency !== v.currency) return invalid();
+    }
+  }
+  return { budget, maxConcurrent: natural(v.concurrent, 10000), maxCallsPerRun: natural(v.calls, 10000), enabled: v.enabled,
+    ...(maxMoneyPerTask === undefined ? {} : { maxMoneyPerTask }) };
 }
 type Ports = { read(v: AiBudgetSettingsReadDraft, s: AbortSignal): Promise<unknown>;
   readOperation(v: AiBudgetSettingsOperationReadDraft, s: AbortSignal): Promise<unknown>;
@@ -151,7 +172,13 @@ export class BudgetSettingsSession {
       if (this.storage.getItem(this.key) !== null) { this.publish({ locked: true }); throw Error('AI_RESULT_UNKNOWN'); }
       if (change === 'refresh' && old.state !== 'configured') return invalid();
       const expectedRevision = old.revision ?? 0;
-      const fields = change === 'refresh' ? null : prepareBudgetFields(change);
+      const fields = change === 'refresh' ? null : prepareBudgetFields(change,
+        old.state !== 'configured' || old.modelPolicy.mode === 'platform_managed');
+      // Tenant changes are patches. An absent property cannot clear a saved
+      // cap; an explicit zero is the supported way to close monetary admission.
+      if (change !== 'refresh' && old.state === 'configured' && old.modelPolicy.mode === 'platform_managed'
+        && old.settings.maxMoneyPerTask && change.unit === 'money' && change.state !== 'not_configured'
+        && (change.taskAmount !== undefined || change.taskCurrency !== undefined) && !fields?.maxMoneyPerTask) return invalid();
       if (old.state === 'not_configured' && fields?.enabled) return invalid();
       const operationKey = this.newOperationKey(); if (!code(operationKey)) return invalid();
       const command = change === 'refresh' ? { ...this.selector, expectedRevision, operationKey, confirmCurrentConfiguration: true as const }

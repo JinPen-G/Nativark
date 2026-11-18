@@ -8,6 +8,7 @@ import { assertByokMeterLimits, byokMeterScene } from './byok-usage-meter';
 import { platformCreditScene } from './platform-credit-policy';
 import { assertBudgetPolicyBinding } from './budget-policy-binding';
 import { assertBudgetSettingsPermit, validateBudgetSettings } from './budget-settings';
+import { assertTaskMoneyLimit } from './task-money-limit';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
 import type { BudgetSettingsOperation } from './budget.ports';
@@ -394,6 +395,10 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
           if (usage.concurrent >= BigInt(settings.maxConcurrent) || usage.runCalls >= BigInt(settings.maxCallsPerRun)
             || usage.used + requested > limit) throw new BudgetError('EXHAUSTED');
         }
+        if (quote.quantity.unit === 'money') await assertTaskMoneyLimit(tx, {
+          association: quote.association, actorId: quote.actorId, sceneCode: command.sceneCode,
+          consumerScope: consumer, quantity: quote.quantity, policies: rows.map(policy), phase: 'reserve'
+        });
         await revalidate();
         assertFresh();
         const data = { id: randomUUID(), tenantId, workspaceId, billingMode: quote.association.config.serviceMode, scopeId: consumer.scopeId, scopeKind: consumer.scopeKind, sceneCode: command.sceneCode, actorId: quote.actorId, requestId: quote.association.requestId, runId: quote.association.runId, stepId: quote.association.stepId, actionId: quote.association.actionId, callId: quote.callId, idempotencyKey: quote.association.idempotencyKey, requestHash, configurationHash: requestFingerprint(quote.association.config), configRevision: quote.association.config.configRevision, priceVersion: quote.association.priceVersion, unitKind: quote.quantity.unit, ...quantityFields(quote.quantity, 'reserved'), status: 'reserved', dispatchState: 'not_dispatched', expiresAt: quote.expiresAt };
@@ -547,6 +552,11 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
         const now = this.clock();
         if (!(now instanceof Date) || !Number.isFinite(now.getTime()) || current.status !== 'reserved' || current.dispatched
           || current.expiresAt <= now) throw new BudgetError('UNAVAILABLE');
+        if (current.reserved.unit === 'money') await assertTaskMoneyLimit(tx, {
+          association: current.association, actorId: current.actorId, sceneCode: current.sceneCode,
+          consumerScope: { scopeId: current.scopeId, scopeKind: current.scopeKind, sceneCode: current.sceneCode },
+          quantity: current.reserved, policies: rows.map(policy), phase: 'dispatch'
+        });
       }
       const next = input.action === 'dispatch' ? { status: 'reserved', dispatchState: 'dispatched' } : input.action === 'unknown' ? { status: 'pending_reconciliation', dispatchState: 'unknown', unknownReason: input.reason ?? 'result_unknown' } : input.action === 'release' ? { status: 'released', dispatchState: 'not_dispatched' } : { status: 'settled', dispatchState: 'completed', ...(input.usage ? quantityFields(input.usage.quantity, 'actual') : {}) };
       const changed = await tx.aiBudgetReservation.updateMany({ where: { id: record.id, scopeId: record.scopeId, scopeKind: record.scopeKind, actorId: record.actorId, callId: record.callId,

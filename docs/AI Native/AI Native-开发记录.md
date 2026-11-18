@@ -9,15 +9,15 @@
 <a id="ain-r1-task-money-final-review-20261118"></a>
 ## Task累计金额上限与最终版本复核（2026-11-18）
 
-临时RD后续复查的R1-B01为Task累计金额上限P2，关联原AIN-06／11／25／28。原预算仓储按政策总额及Run次数检查，缺少同一Task全部Run共享的独立金额上限。R1-E01为dev2对最终固定组合的本人复核待补。AI分支前置`a4ebf788419ecd5d6426650206861030b771195e`已回读与GitHub一致，本阶段仍在施工，最终组合验证和独立复核尚未完成。
+临时RD后续复查的R1-B01为Task累计金额上限P2，关联原AIN-06／11／25／28。原预算仓储按政策总额及Run次数检查，缺少同一Task全部Run共享的独立金额上限。本片已补配置、原账累计及预留／派发检查，并完成必要行为和非作者复验。R1-E01所缺dev2本人对原main交付及最终固定组合的复核回执也已读取核定。AI分支前置`a4ebf788419ecd5d6426650206861030b771195e`已回读与GitHub一致。Root公共片检查点`f82ffa04ea8bf874f3677fdbf279ca4509071e77`仅含六份协议／服务端保存源码及原记录、接续两册，中文提交后普通推送退出0，实际GitHub任务分支已回读同SHA。本片最终六源已冻结，后继提交与上传回执按实际结果续证。
 
 ### 实现与当前归属
 
 Root负责公共协议、服务端设置接点、索引和四册。`maxMoneyPerTask`沿原`settingsJson`及六位金额契约保存，旧缺字段继续可读，零额度原样保留，币种及精度由原工具校验。SaaS实际配置入口沿原平台预算页，普通租户的额度申请与空间分配仍按原职责消费平台政策。当前政策修订适用于新预留与派发检查，没有新增Task创建时的金额快照。
 
-dev1独占原预算仓储及`task-money-limit.ts`，将累计检查接在同键预留观察和原派发事件重放之后。settled累计原实际金额，reserved及pending_reconciliation累计原预留金额，可信release按原终态排除，过期与unknown继续占用。原Task来自Run／Invocation，原财务关联先核后聚合，缺关联或SQL结果拒绝新金额调用。结算、核对及可信释放沿原单账执行。
+dev1实现原预算仓储及`task-money-limit.ts`，将累计检查接在同键预留观察和原派发事件重放之后。settled累计原实际金额，reserved及pending_reconciliation累计原预留金额，可信release按原终态排除，过期与unknown继续占用。原Task来自Run／Invocation，原财务关联先核后聚合，缺关联或SQL结果拒绝新金额调用。结算、核对及可信释放沿原单账执行。两源最终blob为`c65c347caef3ceaba2b70496b7060ed58bf9c000`及`8419a790de1eb373ece64459ab5341e843476cf1`，均已交回Root。
 
-dev2独占平台／租户原预算组件及两份session，负责金额上限的读取、显示和原CAS保存。平台实际入口为`PlatformModelSettingsPage → PlatformBudgetSettings`。原`TenantBudgetSettings`缺生产引用，其内部scene表单尚未作为普通租户入口接入。两位助手的源码、验证及最终复核结果由Root主动读取，main由PM按固定成果整合。
+dev2的平台／租户原预算组件及两份session已冻结并交回Root，负责金额上限的读取、显示和原CAS保存。四源按`PlatformBudgetSettings.tsx`、`TenantBudgetSettings.tsx`、`budget-settings-session.ts`、`platform-budget-settings-session.ts`顺序的Git blob分别为`c036848b0a94ab79c60f4869100fe2afd23a5e9b`、`f0bf08e5e2753b4adcc1afce30b6491860576ae7`、`a4205a37e9ec70cbff54db4cdbeac6593e23a76d`、`e69b156e892d880596cab544c95f0aeaf09be941`。平台实际入口为`PlatformModelSettingsPage → PlatformBudgetSettings`。原`TenantBudgetSettings`缺生产引用，其内部scene表单尚未作为普通租户入口接入。dev2已完成Root六源及最终组合的非作者核定，dev1已完成该四源的五组非作者模拟。两位助手的源码、验证及最终复核结果由Root主动读取，main由PM按固定成果整合。
 
 ### 已执行的必要验证
 
@@ -27,13 +27,28 @@ dev2独占平台／租户原预算组件及两份session，负责金额上限的
 | --- | --- |
 | 原Auth／Guard／Controller／预算保存链，12组 | `3d57088a9947e485fb74145e44a49a144cb9c1cabd5acd79a0e2adac2fd5c91d`，exit0。新值、旧缺值、零额度、六位及大整数精度、非法字段、币种不符、同键、丢COMMIT应答、撤权、等待期间撤权和BYOK拒绝通过，零模型派发／预留／账事件。数据库为原序列化事务替身。 |
 | 实际公开OpenAPI装配，七个组件 | `d6382a83416ddcb82ecd6b43c40df4b7b5d6d0b5564d7e6e2edfd1f1158d6b17`，exit0。新金额schema及设置读写组件与原leaf转换同值，旧缺字段保持可选。 |
-| Root六源与当时依赖的noEmit类型 | `0bd894e495449af170fb8aa37134ab27d02885ad5f8829826e036c2114801f8f`，TS5.9.3、六根／1624源、零诊断、exit0。尚待两位作者冻结后的最终组合核对。 |
+| Root六源与当时依赖的noEmit类型 | `0bd894e495449af170fb8aa37134ab27d02885ad5f8829826e036c2114801f8f`，TS5.9.3、六根／1624源、零诊断、exit0。该早期类型范围的后继以最终固定补片组合类型为准。 |
+| 仓储、协议与实际SaaS消费者组合类型 | `0191e81db32476ee54cfb2be67a0972f31df538dea03e142afc4e43470c312f2`，TS5.9.3，API八根／1624源及后台六根／1488源，均零诊断、exit0。14根检查前后Git blob同值，后继币种分支修复另有定向行为及最终固定类型证据。 |
+| 后继可信释放币种修复及原键恢复 | dev1原驱动`2a8c077bf08c89516a1c25e170c87e5c726f6352eb18b281f7ff725e7c1c4ac3`，修前exit1、修后exit0。有cancelled accounting及仅有原release ledger两条正向，原政策CAS改版后新币种预留／派发成功；累计达3.000000后再加0.000001拒绝。旧CNY释放行、收据及原键reserve／release／read保持原结果。 |
+| 后继可信释放与异币种拒绝 | dev1驱动`28315657de6287eaef37c5d71b80a403fb4788806f358928d3f9c763c80d7008`，六条负向、exit0。缺release、范围篡改、错误accounting状态拒绝；reserved／unknown／settled异币种仍记冲突，原政策CAS也拒绝换币种。 |
+| 最终固定补片组合类型 | Root驱动`6b48b699b4a48d8dd19b0bfaf46e2522223de8315c645c512221b07128bcab80`，TS5.9.3，API八根／1624源及后台六根／1488源，均零诊断、exit0。编译宿主固定helper `8419a790…`的同字节源，其余13根从本树读取并核前后blob同值；检查结束当前helper仍同8419a790。没有声明替身或文件生成。 |
+| 原文档链接与任务算术 | 初次驱动`6dd1cd7fb6fd1eaabbea319ed576e2465d8fdca81d2106eec4fee692a010ef73`及最终本人回执驱动`7d817344a93b6f64a22032b48de2c3664fa380deba7be8b88d6fa4d303f2d5f1`均实际调用原`check()`，11/11、零错误、exit0，audit为空、临时目录未创建。空白检查退出0。 |
 
 验证器首次采用未核定的Prisma声明解析，产生3314条连带诊断，stdin `257990d7462436c2610de9f0651db655c2d766c6cbd60954355f861e25474881`、exit1。改为与行为验证相同的受管Prisma声明后，只余原公开MCP子出口的声明定位，stdin `4779ee25f9b9af2a4e22b571ec9dc09699b7e366af6375904403e9809d930499`、exit1。按该包正式exports映射本树源码后类型通过，没有改产品来消除这些验证器问题。OpenAPI初次驱动使用不存在的Tenant前缀schema名，stdin `8fa1c5f78842bab3626f118c41b5e02b8961aa2bef2c42e536912710fa1ff654`、exit1，按原`AiBudgetSettings*`名字修正驱动后通过。
 
-### 剩余与证据边界
+固定类型快照的首次驱动`630f403b6c0b83c1b9ce401835dd2d6baf59c20f3c6b91a0e0dd8ecdc72fb2e4`因字符串replacement解释源码中的美元替换记号而解析失败，exit1，尚未进入产品类型检查。将replacement改为返回原字面的回调后，同一8419a790源码快照复验通过。该修正只在stdin驱动中，未改产品或测试文件。
 
-继续核定dev1的跨Run累计、同键与派发重放、未知及过期占用、可信释放、关联缺损和实际超限结算。dev2完成实际SaaS消费者核接与原额度分配差异核定后冻结源码，再完成两侧非作者复核及R1-E01最终组合本人核对。Root公共协议／原保存接点按未完成R1的检查点同步，完整组合与独立复核仍未核闭，最终版本及上传回执在本节后继补齐。必要模拟、类型及复核按原研发门槛核闭，真实数据库、浏览器、供应商及生产放行由负责人沿原清单另行执行。
+### 独立回执与证据边界
+
+dev1已冻结仓储主体`c65c347caef3ceaba2b70496b7060ed58bf9c000`及首版累计查询`e59efa2433b476c252fda868c91f5718157e5f7d`。Root逐文件回读同blob。作者跨Run／原键、25组生命周期和拒绝边界、Task scope锚点修后复验、两根类型及四源非作者模拟的stdin SHA-256依次为`8cbf41c7e0c1701e58a77aae29d4e825337e3f9ae8a20043d6eff78ac4c61376`、`3474c1d0160f707630999943dc242a53a99d63302db9071b90188e28b05b2042`、`3565d16fad0e394d2a630d3dbabf01c2e737dd30126d32ddbc3df94f02567367`、`244cb338ab54f32a26af56d79a9e9729340748744638617852f82422575783f3`及`27a0e11ce1ece036efea8700be9431ae2ceea307686d2d6c82b055d839ffd3d5`，均退出0。命令为`C:/Program Files/nodejs/node.exe --no-compilation-cache -`，两根类型为TS5.9.3／764源／零诊断。夹具漏tenantId、Task scope漏筛和UI内存装载ESM错误的三个早期退出1保留，分别修正后复验通过。作者已退出自有进程，audit为空，临时目录未创建。
+
+后继复核确认首版累计查询存在可信释放的旧币种误拒分支。原`saveSettings`兼容性检查及`consumption`排除released，允许全部可信释放后按原CAS换币种；首版`task_money_sum`虽将released计为金额0，仍把其旧币种计入`currencyErrors`。dev1仅修改`task-money-limit.ts`，先保留范围和release完整性核验，再将可信释放行整体排除消费聚合。Root反向还原两处聚合变更及两行原因注释后得到原e59同blob，确认没有其他源码变化。后继两条正向、六条负向及最终组合类型均已通过；作者首轮SaaS夹具字段错误留原回合，夹具只在内存修正。上述首版绿色范围不作为该新增分支的通过证据。
+
+Root直接回读临时RD原R1-E01正文，欠缺证据特指dev2本人对最终main交付版本的回执及目标收口。原main产品`914c29bec94fc5dc33054a7a198f052f02d642bf`已核为当前远端main `ba1de9f91860c4e73503eded4e1d05d2307b0e28`的祖先。dev2最终回合`01a1ed63-e6ee-74b2-b00c-c3d5af3f7f10`已完成，Root读取其本人终态`msg_18e912a4f0a19f88000007be`。该结论同时核定原main产品树`32e2051e869a9c39b4609c55e6a602793202c1db`、三份入口源码与完整CopilotPanel继承、375份原阶段正文，以及本片公共六源、仓储`c65c347c…`与最终helper `8419a790…`。其本人确认后继两条正向、六条负向及最终14根组合类型的范围和固定字节，未重复运行同字节绿色组。
+
+R1-B01已完成修复、定向复验及独立技术核定，R1-E01已补齐两层版本的本人回执。dev2的目标工具实际返回goal=null，其指定复核工作已完成；没有新建卡片或伪造目标完成状态。Root持续目标仍为active，本片待办理最终固定提交、远端回读及PM后续main整合。原28项及ENTRY的完整研发登记沿此前固定阶段保留，真实数据库、浏览器、供应商及生产放行由负责人沿原清单另行执行。
+
+Root回读全部六源仍与上列blob相同。Root所有内存验证作业均已退出，dev1和dev2最终回合均completed／idle，绿色组audit均为0。两位助手已释放源码写权，自有进程退出或本轮未创建运行资源，任务临时根`output/.tmp/ain-task-money-20261118`未创建。本片无新增或扩写测试文件，必要模拟、类型及非作者复核按原研发门槛留证。
 
 <a id="ain27-28-main-final-delivery-20261118"></a>
 ## AIN-27／28最终main交付与远端回执（2026-11-18）
