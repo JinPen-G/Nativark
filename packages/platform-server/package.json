@@ -298,6 +298,10 @@
     "./integration-inbound-mail": {
       "types": "./dist/modules/integrations/inbound-mail-codec.d.ts",
       "default": "./dist/modules/integrations/inbound-mail-codec.js"
+    },
+    "./messaging": {
+      "types": "./dist/modules/messaging/index.d.ts",
+      "default": "./dist/modules/messaging/index.js"
     }
   },
   "scripts": {
@@ -537,6 +541,9 @@
       ],
       "integration-inbound-mail": [
         "dist/modules/integrations/inbound-mail-codec.d.ts"
+      ],
+      "messaging": [
+        "dist/modules/messaging/index.d.ts"
       ]
     }
   }

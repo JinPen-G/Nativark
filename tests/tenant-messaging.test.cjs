@@ -8,12 +8,36 @@ const { EventEmitter } = require('node:events');
 const apiRequire = require('node:module').createRequire(path.join(__dirname, '../apps/api/package.json'));
 
 function load(file, dependencies = {}) {
-  const code = ts.transpileModule(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true, emitDecoratorMetadata: true }
-  }).outputText;
-  const module = { exports: {} };
-  new Function('require', 'module', 'exports', code)(name => Object.hasOwn(dependencies, name) ? dependencies[name] : apiRequire(name), module, module.exports);
-  return module.exports;
+  const root = path.join(__dirname, '..'), modules = new Map();
+  const sourceFile = candidate => [candidate, `${candidate}.ts`, `${candidate}.js`, path.join(candidate, 'index.ts')]
+    .find(filename => fs.existsSync(filename) && fs.statSync(filename).isFile());
+  const resolveSource = (name, parent) => {
+    if (name.startsWith('.')) return sourceFile(path.resolve(path.dirname(parent), name));
+    const match = /^@rental-os\/([^/]+)(.*)$/u.exec(name);
+    if (!match) return undefined;
+    const directory = path.join(root, 'packages', match[1]), metadata = path.join(directory, 'package.json');
+    if (!fs.existsSync(metadata)) return undefined;
+    const entry = JSON.parse(fs.readFileSync(metadata, 'utf8')).exports?.[match[2] ? `.${match[2]}` : '.'];
+    const target = typeof entry === 'string' ? entry : entry?.require ?? entry?.default ?? entry?.import ?? entry?.types;
+    if (typeof target !== 'string') return undefined;
+    return sourceFile(path.join(directory, target.replace(/^\.\/dist\//u, 'src/').replace(/\.d\.ts$|\.js$/u, '.ts')));
+  };
+  const evaluate = filename => {
+    if (modules.has(filename)) return modules.get(filename).exports;
+    const module = { exports: {} };
+    modules.set(filename, module);
+    const code = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true, emitDecoratorMetadata: true }
+    }).outputText;
+    // 兼容入口与公共实现共用本次fixture，unknown错误身份和邮箱运输不会落回真实依赖。
+    new Function('require', 'module', 'exports', '__filename', '__dirname', code)(name => {
+      if (Object.hasOwn(dependencies, name)) return dependencies[name];
+      const source = resolveSource(name, filename);
+      return source ? evaluate(source) : apiRequire(name);
+    }, module, module.exports, filename, path.dirname(filename));
+    return module.exports;
+  };
+  return evaluate(path.join(root, file));
 }
 const nest = require('@nestjs/common');
 const { Prisma } = apiRequire('@prisma/client');

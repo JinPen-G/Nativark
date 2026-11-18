@@ -1,6 +1,6 @@
 # 公共 SaaS 服务
 
-`@rental-os/platform-server` 提供公共身份、会话、租户 / 人员角色 / 组织管理、安全配置、外观、完整订阅办理、字典与编号、基础集成、官方日历来源、文件存储原语及通知台账。宿主提供唯一持久化实例，服务通过各模块窄存储端口消费它。原 API 路径通过本包窄子出口再导出，Rental 认证仍继承同一会话实现。[包与子出口](package.json) · [公共合同](../platform-contracts/README.md)
+`@rental-os/platform-server` 提供公共身份、会话、租户 / 人员角色 / 组织管理、安全配置、外观、完整订阅办理、字典与编号、基础集成、官方日历来源、文件存储原语、通知台账及运营邀请 / 寄件 / 客服邮件应用。宿主提供唯一持久化实例，服务通过各模块窄存储端口消费它。原 API 路径通过本包窄子出口再导出，Rental 认证仍继承同一会话实现。[包与子出口](package.json) · [公共合同](../platform-contracts/README.md)
 
 | 阅读步骤 | 源码与职责 |
 | --- | --- |
@@ -15,6 +15,7 @@
 | 统一期限 | [只读来源](src/modules/subscription/subscription-reader.ts)、[同源状态投影](src/modules/subscription/subscription-state.ts)、[周年/时区](src/modules/subscription/subscription-term.ts)；当前期限与排期，原Rental服务和新Core共同消费 |
 | 基础集成 | [模块导读](src/modules/integrations/README.md)、[配置服务](src/modules/integrations/tenant-integration.service.ts)、[存储与宿主参加者](src/modules/integrations/integration-store.ts)；原配置修订、凭据保护、连通性与实际投递接点 |
 | 邮箱运输 | [邮箱运行时](src/modules/integrations/tenant-email.runtime.service.ts)、[SMTP](src/modules/integrations/smtp-transport.ts)、[IMAP](src/modules/integrations/imap-reader.ts)、[邮件文本解析](src/modules/integrations/inbound-mail-codec.ts)；四个正式子出口共用原算法，测试不投递，业务发送和原台账由调用方维护 |
+| 公共消息应用 | [三步接入](src/modules/messaging/README.md)、[邀请](src/modules/messaging/tenant-operator-invitations.service.ts)、[寄件](src/modules/messaging/tenant-dispatch.service.ts)、[客服](src/modules/messaging/tenant-support-email.service.ts)从 `/messaging` 提供；宿主供给实际权限 / 范围及账号授权，原操作键和邮件 UID 游标保持 |
 | 官方日历来源 | [模块导读](src/modules/official-calendars/README.md)、[来源服务](src/modules/official-calendars/official-calendar-source.service.ts)、[冻结读取器](src/modules/official-calendars/official-calendar-source-reader.ts)；公共主档、只追加年度版本与历史快照 |
 | 字典与编号 | [模块及 API](src/modules/platform-tools/README.md)、[服务](src/modules/platform-tools/platform-tools.service.ts)、[生效配置仓储](src/modules/platform-tools/platform-tools.repository.ts)；当前租户维护、原格式及同事务取号，公共缺省为空 |
 | 文件存储与冻结 | [模块导读](src/modules/files/README.md)、[字节处理](src/modules/files/file-storage-primitives.ts)、[冻结内核](src/modules/files/file-content-freeze.ts)、[文件仓储](src/modules/files/file-storage.repository.ts)；原限长传输、元数据、上传会话和唯一冻结目标，业务 ACL 由所属 Core 提供 |

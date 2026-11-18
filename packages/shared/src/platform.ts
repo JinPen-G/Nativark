@@ -7,7 +7,7 @@ import type {
   RentalCategoryCode,
   RentalCurrency
 } from "./core";
-import type { TenantIdentity, PlatformTenantSummary, AuthUser, SystemDataScope, SystemUserRow, SaveSystemUserRequest, SystemSecurityBaselineConfig } from "./platform-identity";
+import type { TenantIdentity, PlatformTenantSummary, AuthUser, SystemDataScope, SystemUserRow, SaveSystemUserRequest, SystemSecurityBaselineConfig, SaveWorkspaceAccessRequest } from "./platform-identity";
 export * from "./platform-identity";
 
 export enum RentalMode {
@@ -202,14 +202,6 @@ export function normalizeOperatorShortName(value: unknown): string | null | unde
  * 空间授权也不能留下半套结果。因此管理端编辑账号时必须把这组关系作为
  * 同一个事务边界提交。
  */
-export interface SaveWorkspaceAccessRequest {
-  workspaceId: string;
-  roleId?: string;
-  dataScope?: SystemDataScope;
-  locationScope?: { mode: "all" | "selected"; locationIds: string[] };
-  isActive: boolean;
-}
-
 export interface SaveSystemUserAccessRequest extends SaveSystemUserRequest {
   workspaceAccesses: SaveWorkspaceAccessRequest[];
 }

@@ -50,6 +50,10 @@
     "./jobs": {
       "types": "./dist/jobs.d.ts",
       "default": "./dist/jobs.js"
+    },
+    "./tenant-messaging": {
+      "types": "./dist/tenant-messaging.d.ts",
+      "default": "./dist/tenant-messaging.js"
     }
   },
   "scripts": {
@@ -87,6 +91,9 @@
       ],
       "jobs": [
         "dist/jobs.d.ts"
+      ],
+      "tenant-messaging": [
+        "dist/tenant-messaging.d.ts"
       ]
     }
   },
