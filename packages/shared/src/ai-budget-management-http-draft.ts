@@ -1,4 +1,4 @@
-import type { AiUsageSettingsDraft, AiBudgetLimitDraft } from './ai-usage-draft';
+import type { AiUsageSettingsDraft, AiBudgetLimitDraft, AiTaskMoneyLimitDraft } from './ai-usage-draft';
 import { leafClosed as obj, leafEnum as choice, leafRef as ref, leafInt as int, leafList as list, leafText as text, leafTime as time,
   type AiLeafSchemaDraft } from './ai-gateway-draft-schemas';
 
@@ -63,7 +63,7 @@ export type AiBudgetSettingsOperationReceiptDraft = AiBudgetSettingsOperationRea
 export type AiBudgetSettingsSummaryDraft = AiBudgetSettingsReadDraft & { admission: 'not_granted' } & (
   | { state: 'not_configured'; revision: null; settings: null; modelPolicy: null }
   | { state: 'configured'; revision: number;
-      settings: Pick<AiUsageSettingsDraft, 'gates' | 'budget' | 'allowedScenes' | 'maxConcurrent' | 'maxCallsPerRun'>;
+      settings: Pick<AiUsageSettingsDraft, 'gates' | 'budget' | 'allowedScenes' | 'maxConcurrent' | 'maxCallsPerRun' | 'maxMoneyPerTask'>;
       modelPolicy: { mode: 'platform_managed'; serviceName: 'Rental OS AI'; selection: 'managed_by_platform' }
         | { mode: 'tenant_managed'; allowedModels: string[] };
       configurationMeaning: 'saved_policy_reference_not_current_selection' });
@@ -72,20 +72,21 @@ export type AiBudgetSettingsChangeResponseDraft = { savedRevision: number; polic
 export type AiBudgetSettingsChangeDraft = AiBudgetSettingsReadDraft & {
   expectedRevision: number; operationKey?: string;
   /** Config, credentials, models and scene whitelist remain server-owned. */
-  changes: { budget?: AiBudgetLimitDraft; maxConcurrent?: number; maxCallsPerRun?: number; enabled?: boolean };
+  changes: { budget?: AiBudgetLimitDraft; maxConcurrent?: number; maxCallsPerRun?: number; maxMoneyPerTask?: AiTaskMoneyLimitDraft; enabled?: boolean };
 };
 export type AiPlatformBudgetSettingsReadDraft = { sceneCode: string };
 export type AiPlatformBudgetSettingsOperationReadDraft = AiPlatformBudgetSettingsReadDraft & { operationKey: string };
 export type AiPlatformBudgetSettingsSummaryDraft = AiPlatformBudgetSettingsReadDraft & { scope: 'platform'; admission: 'not_granted' } & (
   | { state: 'not_configured'; revision: null; settings: null }
   | { state: 'configured'; revision: number;
-      settings: Pick<AiUsageSettingsDraft, 'gates' | 'allowedModels' | 'allowedScenes' | 'budget' | 'maxConcurrent' | 'maxCallsPerRun'> });
+      settings: Pick<AiUsageSettingsDraft, 'gates' | 'allowedModels' | 'allowedScenes' | 'budget' | 'maxConcurrent' | 'maxCallsPerRun' | 'maxMoneyPerTask'> });
 export type AiPlatformBudgetSettingsOperationReceiptDraft = AiPlatformBudgetSettingsOperationReadDraft & {
   scope: 'platform'; admission: 'not_granted'; automaticRetry: false } & (
   | { state: 'unknown' }
   | { state: 'recorded'; action: 'platformSave'; expectedRevision: number; savedRevision: number; commandHash: string; recordedAt: string });
 export type AiBudgetSettingsInitializeDraft = AiBudgetSettingsReadDraft & {
   expectedRevision: 0; operationKey?: string; budget: AiBudgetLimitDraft; maxConcurrent: number; maxCallsPerRun: number; enabled: boolean;
+  maxMoneyPerTask?: AiTaskMoneyLimitDraft;
 };
 /** Rebinds the server-selected current configuration, retaining limits and
  * historical reservations. The changed policy gate is saved disabled. */
@@ -94,7 +95,7 @@ export type AiBudgetSettingsRefreshConfigurationDraft = AiBudgetSettingsReadDraf
 };
 export type AiPlatformBudgetSettingsSaveDraft = AiPlatformBudgetSettingsReadDraft & {
   expectedRevision: number; operationKey?: string;
-  settings: Pick<AiUsageSettingsDraft, 'gates' | 'allowedModels' | 'allowedScenes' | 'budget' | 'maxConcurrent' | 'maxCallsPerRun'>;
+  settings: Pick<AiUsageSettingsDraft, 'gates' | 'allowedModels' | 'allowedScenes' | 'budget' | 'maxConcurrent' | 'maxCallsPerRun' | 'maxMoneyPerTask'>;
 };
 /** All failures are non-retry instructions. Keyed saves use the original
  * operation receipt; a current policy value is never proof of that save. */
@@ -106,7 +107,9 @@ export type AiBudgetSettingsHttpFailureDraft = {
 const scene = { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' };
 const selector = { scope: choice('tenant', 'workspace'), sceneCode: scene };
 const settings = { gates: obj({ platform: ref('AiSettingGateDraft'), tenant: ref('AiSettingGateDraft'), scene: ref('AiSettingGateDraft') }),
-  budget: ref('AiBudgetLimitDraft'), allowedScenes: list(scene, 100), maxConcurrent: int(0, 10000), maxCallsPerRun: int(0, 10000) };
+  budget: ref('AiBudgetLimitDraft'), allowedScenes: list(scene, 100), maxConcurrent: int(0, 10000), maxCallsPerRun: int(0, 10000),
+  maxMoneyPerTask: ref('AiTaskMoneyLimitDraft') };
+const settingsRequired = ['gates', 'budget', 'allowedScenes', 'maxConcurrent', 'maxCallsPerRun'];
 const modelPolicy = { oneOf: [obj({ mode: choice('platform_managed'), serviceName: choice('Rental OS AI'), selection: choice('managed_by_platform') }),
   obj({ mode: choice('tenant_managed'), allowedModels: list(text(256), 100) })] };
 const admission = choice('not_granted'), none = { type: 'null' };
@@ -161,9 +164,9 @@ export const AI_BUDGET_MANAGEMENT_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft
   AiBudgetSettingsRefreshConfigurationDraft: obj({ ...selector, operationKey: { ...pricingKey, maxLength: 128 }, expectedRevision: int(1, 4294967294),
     confirmCurrentConfiguration: { type: 'boolean', const: true } }, ['scope', 'sceneCode', 'expectedRevision', 'confirmCurrentConfiguration']),
   AiBudgetSettingsInitializeDraft: obj({ ...selector, operationKey: { ...pricingKey, maxLength: 128 }, expectedRevision: { type: 'integer', const: 0 }, budget: ref('AiBudgetLimitDraft'),
-    maxConcurrent: int(0, 10000), maxCallsPerRun: int(0, 10000), enabled: { type: 'boolean' } }, ['scope', 'sceneCode', 'expectedRevision', 'budget', 'maxConcurrent', 'maxCallsPerRun', 'enabled']),
+    maxConcurrent: int(0, 10000), maxCallsPerRun: int(0, 10000), maxMoneyPerTask: ref('AiTaskMoneyLimitDraft'), enabled: { type: 'boolean' } }, ['scope', 'sceneCode', 'expectedRevision', 'budget', 'maxConcurrent', 'maxCallsPerRun', 'enabled']),
   AiBudgetSettingsChangeDraft: obj({ ...selector, operationKey: { ...pricingKey, maxLength: 128 }, expectedRevision: int(0, 4294967294), changes: {
-    ...obj({ budget: ref('AiBudgetLimitDraft'), maxConcurrent: int(0, 10000), maxCallsPerRun: int(0, 10000), enabled: { type: 'boolean' } }, []), minProperties: 1 } }, ['scope', 'sceneCode', 'expectedRevision', 'changes']),
+    ...obj({ budget: ref('AiBudgetLimitDraft'), maxConcurrent: int(0, 10000), maxCallsPerRun: int(0, 10000), maxMoneyPerTask: ref('AiTaskMoneyLimitDraft'), enabled: { type: 'boolean' } }, []), minProperties: 1 } }, ['scope', 'sceneCode', 'expectedRevision', 'changes']),
   AiPlatformBudgetSettingsReadDraft: obj({ sceneCode: scene }),
   AiPlatformBudgetSettingsOperationReadDraft: obj({ sceneCode: scene, operationKey: { ...pricingKey, maxLength: 128 } }),
   AiPlatformBudgetSettingsOperationReceiptDraft: { oneOf: [
@@ -173,15 +176,15 @@ export const AI_BUDGET_MANAGEMENT_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft
       automaticRetry: { type: 'boolean', const: false }, state: choice('recorded'), action: choice('platformSave'),
       expectedRevision: int(0, 4294967294), savedRevision: int(1, 4294967295), commandHash: pricingHash, recordedAt: time })] },
   AiPlatformBudgetSettingsSaveDraft: obj({ sceneCode: scene, expectedRevision: int(0, 4294967294), operationKey: { ...pricingKey, maxLength: 128 },
-    settings: obj({ ...settings, allowedModels: list(text(256), 100) }) }, ['sceneCode', 'expectedRevision', 'settings']),
+    settings: obj({ ...settings, allowedModels: list(text(256), 100) }, [...settingsRequired, 'allowedModels']) }, ['sceneCode', 'expectedRevision', 'settings']),
   AiBudgetSettingsSummaryDraft: { oneOf: [
     obj({ ...selector, state: choice('not_configured'), revision: none, settings: none, modelPolicy: none, admission }),
-    obj({ ...selector, state: choice('configured'), revision: int(1, 4294967295), settings: obj(settings), modelPolicy,
+    obj({ ...selector, state: choice('configured'), revision: int(1, 4294967295), settings: obj(settings, settingsRequired), modelPolicy,
       configurationMeaning: choice('saved_policy_reference_not_current_selection'), admission })] },
   AiPlatformBudgetSettingsSummaryDraft: { oneOf: [
     obj({ scope: choice('platform'), sceneCode: scene, state: choice('not_configured'), revision: none, settings: none, admission }),
     obj({ scope: choice('platform'), sceneCode: scene, state: choice('configured'), revision: int(1, 4294967295),
-      settings: obj({ ...settings, allowedModels: list(text(256), 100) }), admission })] },
+      settings: obj({ ...settings, allowedModels: list(text(256), 100) }, [...settingsRequired, 'allowedModels']), admission })] },
   AiBudgetSettingsChangeResponseDraft: obj({ savedRevision: int(1, 4294967295), policy: ref('AiBudgetSettingsSummaryDraft'),
     observation: choice('same_revision', 'changed_after_save') }),
   AiBudgetSettingsHttpFailureDraft: obj({ code: choice('AI_INVALID_INPUT', 'AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE', 'AI_REVISION_CONFLICT', 'AI_RESULT_UNKNOWN'),

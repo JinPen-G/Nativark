@@ -1,6 +1,6 @@
 # Rental OS Harness 插件
 
-本目录提供原版Harness的独立MCP连接Bundle，不替换保留的`clients/agent-desktop/`。当前可显式发起标准OAuth登录，私有内存持有短期凭据，并通过原公开MCP工具桥消费服务端已发布只读工具；**尚无生产业务工具发布，也未与真实Rental OAuth服务联调**。原个人聊天与模型配置不受影响。
+本目录提供原版 Harness 的独立 MCP 连接 Bundle。当前可显式发起标准 OAuth 登录，私有内存持有短期凭据，并通过原公开 MCP 工具桥消费服务端已发布只读工具。原个人聊天与模型配置独立于本插件。
 
 ## 已接入的宿主机制
 
@@ -129,11 +129,13 @@ MCP客户端保持官方SDK的`2026-07-28`固定协商，通过`server/discover`
 
 [构建入口](scripts/build-bundle.cjs)在调用方指定的全新目录严格编译，再用明确指定的已安装npm执行离线、禁安装脚本的pack。它检查已安装声明版本、完整文件集合、公开入口和局部 / 已声明外部import，生成`.tgz`及`bundle-manifest.json`；清单包含源码 / 构建器SHA-256、构建依赖版本、归档SHA-256 / SHA-512完整性和文件列表，不含本机绝对路径。目录已存在或构建失败就拒绝，不覆盖旧产物，失败保留pack日志。它不安装依赖、不写源码dist或根lock、不发布或启动Host。可明确使用本树已有Harness的声明构建，归档运行时不依赖该源码目录；这是离线构建方式，不代表插件独立依赖安装已验。
 
+运行宿主集成测试前，将 `HARNESS_ROOT` 设为已准备好声明、依赖及构建产物的兼容 Harness 源码绝对路径。`HARNESS_NPM_CLI` 可指定已安装的 `npm-cli.js` 绝对路径，默认使用本机 `.tools/npm/bin/npm-cli.js`。构建 CLI 对应参数为 `--harness-root` 和 `--npm-cli`。
+
 既有[Loader组合测试](../../tests/harness-plugin.test.cjs)现在消费真正的`.tgz`：先核对完整性 / 文件集合并解包到独立profile，再沿原公开Bundle / Loader加载，验证原命令、OAuth / MCP及释放。HTTP、浏览器、监听器和原服务端仍是外部夹具；没有通过`dsh plugin add`安装到用户profile、运行GUI或联调真实OAuth，不将这份归档当正式发布或业务可用证明。
 
 ### 独立原版Harness的安装入口
 
-获准安装后使用原[Bundle安装机制](../agent-desktop/harness/docs/user/develop/basic/publish.zh.md#安装进-profile)。目标宿主须符合`engines.dsh`的`0.2.1-rc.2`，其他版本未验，不自动豁免。将交付清单与归档一起保存并核对SHA-256；选择当前实际使用的profile，不重置它，不复制宿主node_modules，也不装另一套Rental客户端。
+获准安装后使用宿主的 Bundle 安装机制。目标宿主须符合 `engines.dsh` 的 `0.2.1-rc.2`。将交付清单与归档一起保存并核对 SHA-256，选择当前实际使用的 profile。
 
 原CLI接受`dsh plugin --profile <实际名称> add <安装包绝对路径>`，卸载为`dsh plugin --profile <实际名称> remove @rental-os/harness-plugin`；这两条是原版文档提供的入口，本树尚未执行安装 / 卸载。安装可能联网取得声明依赖，预构建不等于离线安装；依赖下载及构建脚本授权须单独核对，不批量允许脚本。安装完成后按原管理器的实际结果重启 / 重载同一profile，在聊天输入`/rental status`检查命令。默认无部署地址或业务授权，只能显示未配置；实际OAuth / grant、权限 / 字段 / 持久计量未齐不能访问Rental业务。
 
@@ -146,7 +148,7 @@ Bundle停用与卸载不同：原`PluginManager.setBundleEnabled`只改变profil
 真实登录目前有三项具体前置，核验命令不会绕过：
 
 1. 原Rental Auth仅有Web operator / staff会话，固定MCP grant、OAuth AS、refresh / 撤销及原Guard复验未交付；公共Auth / Guard由原服务端作者维护，不透传Web token。
-2. Harness原[HTTP工厂](../agent-desktop/harness/packages/mcp/mcp-client/src/transport.ts)只传静态headers，没有供外部Bundle注册的OAuth provider / transport工厂。不能猴子补丁、全局fetch拦截或写token到patch；需要受支持的逐请求认证接点，或经明确确认由独立标准MCP适配拥有唯一连接。
-3. 原[authorization](../agent-desktop/harness/packages/credentials/authorization/src/index.ts)的成功点必须写共享credentials，不适合本片不共享token的策略；本插件复用原人类命令、Host路由及官方OAuth SDK，不注册假flow或占位grant。默认[credentials-local](../agent-desktop/harness/packages/credentials/credentials-local/README.md#who-can-read-the-file)仍不用于Rental，长期安全凭据和跨进程恢复未交付。
+2. 兼容宿主的 HTTP 工厂只传静态 headers。逐请求认证需要受支持的接点，或由独立标准 MCP 适配持有唯一连接。
+3. 宿主的 authorization 成功后写共享 credentials。本插件复用原人类命令、Host 路由及官方 OAuth SDK，凭据由插件独立管理。
 
-客户端授权码 / PKCE到专用MCP握手已有离线组合，不能替代上述服务端生产者、真实系统浏览器 / listener、grant撤销传播或业务准入。下一片须接原固定身份 / 持久目标 / 字段生产者，并补所需最终发送 / 恢复控制，才能开放目录首片；不堆检查命令或用synthetic工具冒充生产业务。完整范围、实际命令 / 失败 / 通过和剩余见[开发记录](../../docs/Harness插件/Harness插件-开发记录.md)及[协作接续](../../docs/Harness插件/Harness插件-协作接续.md)。
+客户端授权码 / PKCE 到专用 MCP 握手已有离线组合。生产接入仍需验证服务端身份、字段授权、真实系统浏览器和监听器、grant 撤销传播以及发送与恢复控制。

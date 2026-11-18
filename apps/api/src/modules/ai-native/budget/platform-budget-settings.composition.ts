@@ -12,12 +12,14 @@ import { BudgetService } from './budget.service';
 import { PrismaBudgetRepository } from './prisma-budget.repository';
 import { BudgetError, type BudgetAuthority, type BudgetPolicyKey } from './budget.ports';
 import { platformBudgetOperationWhere, platformBudgetReceiptSchema } from './budget-settings-operation';
+import { taskMoneyLimitSchema } from './budget-settings';
 
 const code = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const readSchema = z.object({ sceneCode: code }).strict();
 const fields = z.object({ gates: z.unknown(), allowedModels: z.array(z.string().min(1).max(256)).max(100),
   allowedScenes: z.array(code).max(100), budget: z.unknown(),
-  maxConcurrent: z.number().int().min(0).max(10000), maxCallsPerRun: z.number().int().min(0).max(10000) }).strict();
+  maxConcurrent: z.number().int().min(0).max(10000), maxCallsPerRun: z.number().int().min(0).max(10000),
+  maxMoneyPerTask: taskMoneyLimitSchema.optional() }).strict();
 const writeSchema = readSchema.extend({ expectedRevision: z.number().int().min(0).max(4294967294), operationKey: code.optional(), settings: fields }).strict();
 const identity = (context: AiExecutionContext) => {
   const { requestId: _, authorizedAt: __, ...current } = context;

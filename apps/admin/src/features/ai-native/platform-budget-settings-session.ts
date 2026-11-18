@@ -82,6 +82,14 @@ export class PlatformBudgetSettingsSession {
       if (marker !== null || this.state.locked || !old || !form) throw Error('AI_RESULT_UNKNOWN');
       if (form.confirmed !== true) return invalid();
       const fields = prepareBudgetFields({ ...form, enabled: false }), names = ['platform', 'tenant', 'scene'] as const;
+      const previousCap = old.settings?.maxMoneyPerTask;
+      if (previousCap && form.unit === 'money' && form.state !== 'not_configured'
+        && (form.taskAmount !== undefined || form.taskCurrency !== undefined) && !fields.maxMoneyPerTask) return invalid();
+      // Platform saves replace the complete projection. Carry an untouched
+      // original cap through older callers and hidden non-money Form fields.
+      const maxMoneyPerTask = fields.maxMoneyPerTask ?? previousCap;
+      if (maxMoneyPerTask && fields.budget.state !== 'not_configured' && fields.budget.quantity.unit === 'money'
+        && maxMoneyPerTask.currency !== fields.budget.quantity.currency) return invalid();
       const gates = Object.fromEntries(names.map(name => {
         const enabled = form[`${name}Enabled`], previous = old.settings?.gates[name];
         if (typeof enabled !== 'boolean' || (!old.settings && enabled)) return invalid();
@@ -90,7 +98,8 @@ export class PlatformBudgetSettingsSession {
       })) as AiPlatformBudgetSettingsSaveDraft['settings']['gates'];
       const command: AiPlatformBudgetSettingsSaveDraft = { sceneCode: this.sceneCode, operationKey: this.newKey(), expectedRevision: old.revision ?? 0,
         settings: { budget: fields.budget, maxConcurrent: fields.maxConcurrent, maxCallsPerRun: fields.maxCallsPerRun, gates,
-          allowedModels: entries(form.allowedModels, true), allowedScenes: entries(form.allowedScenes) } };
+          allowedModels: entries(form.allowedModels, true), allowedScenes: entries(form.allowedScenes),
+          ...(maxMoneyPerTask === undefined ? {} : { maxMoneyPerTask: structuredClone(maxMoneyPerTask) }) } };
       if (!code(command.operationKey) || command.expectedRevision >= 4294967295) return invalid();
       const fingerprint = await commandHash(command); this.check(c.signal, g);
       if (!this.canManage()) throw Error('AI_ACCESS_DENIED');

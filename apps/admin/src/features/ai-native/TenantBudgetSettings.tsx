@@ -42,7 +42,8 @@ export function TenantBudgetSettings({ identity }: { identity: string }) {
   </section>;
 }
 function BudgetEditor({ identity, selector }: { identity: string; selector: AiBudgetSettingsReadDraft }) {
-  const { t } = useLocale(), [form] = Form.useForm<BudgetForm>();
+  const { t, locale } = useLocale(), [form] = Form.useForm<BudgetForm>();
+  const moneyText = (zh: string, en: string) => locale.startsWith('en') ? en : t(zh);
   const session = useMemo(() => {
     const epoch = currentSessionEpoch(); let storage: Storage | undefined;
     try { storage = window.sessionStorage; } catch { /* read-only without durable unknown lock */ }
@@ -59,10 +60,13 @@ function BudgetEditor({ identity, selector }: { identity: string; selector: AiBu
     const settings = policy.settings, budget = settings?.budget, quantity = budget && budget.state !== 'not_configured' ? budget.quantity : null;
     form.setFieldsValue({ state: budget?.state ?? 'not_configured', unit: quantity?.unit ?? 'calls',
       amount: quantity?.unit === 'money' ? quantity.amount : String(quantity?.value ?? 0), currency: quantity?.unit === 'money' ? quantity.currency : '',
+      taskAmount: settings?.maxMoneyPerTask?.amount ?? '', taskCurrency: settings?.maxMoneyPerTask?.currency ?? '',
       concurrent: String(settings?.maxConcurrent ?? 0), calls: String(settings?.maxCallsPerRun ?? 0),
       enabled: settings?.gates[selector.scope === 'tenant' ? 'tenant' : 'scene'].enabled ?? false });
   }, [policy, form, selector.scope]);
   const budgetState = Form.useWatch('state', form), unit = Form.useWatch('unit', form);
+  const byok = policy?.state === 'configured' && policy.modelPolicy.mode === 'tenant_managed';
+  const showTaskMoney = policy?.state === 'configured' && !byok && unit === 'money' && budgetState !== 'not_configured';
   return <section aria-label={t('当前预算政策')} aria-busy={state.busy}>
     <Alert type={state.feedback === 'saved' ? 'success' : state.locked ? 'warning' : 'info'} title={t(messages[state.feedback])} />
     <ActionButton label={t('读取同一政策现状')} successLabel={t('现状已读取')} disabled={state.busy} onAction={session.read} />
@@ -80,15 +84,36 @@ function BudgetEditor({ identity, selector }: { identity: string; selector: AiBu
           <Select options={[{ value: 'not_configured', label: t('未配置（拒绝准入）') }, { value: 'zero', label: t('零额度') }, { value: 'limited', label: t('有限额度') }]} />
         </Form.Item>
         <Form.Item name="unit" label={t('计量单位')} rules={[{ required: true }]}>
-          <Select disabled={state.busy || state.locked || budgetState === 'not_configured'} options={[{ value: 'calls', label: t('调用次数') }, { value: 'tokens', label: 'Tokens' }, { value: 'money', label: t('金额（六位小数）') }]} />
+          <Select disabled={state.busy || state.locked || budgetState === 'not_configured'} options={[{ value: 'calls', label: t('调用次数') }, { value: 'tokens', label: 'Tokens' }, { value: 'money', label: t('金额（六位小数）'), disabled: byok }]} />
         </Form.Item>
-        <Form.Item name="amount" label={t('额度')} rules={[{ validator: async (_, value) => {
+        {!(byok && unit === 'money') && <Form.Item name="amount" label={t('额度')} rules={[{ validator: async (_, value) => {
           if (budgetState === 'not_configured') return;
           if (typeof value !== 'string' || !(unit === 'money' ? /^(0|[1-9][0-9]{0,17})\.[0-9]{6}$/u : /^(0|[1-9][0-9]*)$/u).test(value)) throw Error(t('请填写精确额度；金额须六位小数，次数须整数。'));
         } }]}>
-          <Input maxLength={25} disabled={state.busy || state.locked || budgetState === 'not_configured'} />
-        </Form.Item>
-        {unit === 'money' && budgetState !== 'not_configured' && <Form.Item name="currency" label={t('币种')} rules={[{ required: true, pattern: /^[A-Z]{3}$/u, message: t('填写明确的三位大写币种，不自动换汇。') }]}><Input maxLength={3} /></Form.Item>}
+           <Input maxLength={25} disabled={state.busy || state.locked || budgetState === 'not_configured'} />
+        </Form.Item>}
+        {unit === 'money' && budgetState !== 'not_configured' && !byok && <Form.Item name="currency" label={t('币种')} rules={[{ required: true, pattern: /^[A-Z]{3}$/u, message: t('填写明确的三位大写币种，不自动换汇。') }]}><Input maxLength={3} /></Form.Item>}
+        {showTaskMoney && <>
+          <p role="status">{policy.settings?.maxMoneyPerTask
+            ? moneyText('金额上限按同一任务的所有运行累计；0 拒绝新金额调用。', 'The cap covers all runs of the same task. Zero blocks new monetary calls.')
+            : moneyText('单个任务金额上限未配置；新金额调用保持拒绝。', 'The amount limit per task is not configured. New monetary calls remain blocked.')}</p>
+          <Form.Item name="taskAmount" label={moneyText('单个任务金额上限', 'Amount limit per task')}
+            dependencies={['unit', 'state', 'taskCurrency']} rules={[{ validator: async (_, value) => {
+              if (value === undefined || value === '') {
+                if (policy.settings?.maxMoneyPerTask) throw Error(moneyText('已有上限不能留空；填写 0.000000 可拒绝新金额调用。', 'Keep the saved cap, or enter 0.000000 to block new monetary calls.'));
+                return;
+              }
+              if (typeof value !== 'string' || !/^(0|[1-9][0-9]{0,17})\.[0-9]{6}$/u.test(value))
+                throw Error(moneyText('金额须填写六位小数，不自动补零或换汇。', 'Enter an amount with six decimals. No automatic padding or conversion.'));
+            } }]}><Input maxLength={25} /></Form.Item>
+          <Form.Item name="taskCurrency" label={moneyText('任务上限币种', 'Task cap currency')}
+            dependencies={['taskAmount', 'currency']} rules={[{ validator: async (_, value) => {
+              const amount = form.getFieldValue('taskAmount');
+              if ((amount === undefined || amount === '') && (value === undefined || value === '')) return;
+              if (typeof value !== 'string' || !/^[A-Z]{3}$/u.test(value) || value !== form.getFieldValue('currency'))
+                throw Error(moneyText('填写与原金额预算一致的三位大写币种。', 'Use the same three-letter uppercase currency as the monetary budget.'));
+            } }]}><Input maxLength={3} /></Form.Item>
+        </>}
         <Form.Item name="concurrent" label={t('并发上限（0–10000）')} rules={[{ required: true, pattern: /^(0|[1-9][0-9]{0,3}|10000)$/u }]}><Input inputMode="numeric" maxLength={5} /></Form.Item>
         <Form.Item name="calls" label={t('单次运行调用上限（0–10000）')} rules={[{ required: true, pattern: /^(0|[1-9][0-9]{0,3}|10000)$/u }]}><Input inputMode="numeric" maxLength={5} /></Form.Item>
         <Form.Item name="enabled" label={t('本层政策门')} valuePropName="checked"><Switch disabled={state.busy || state.locked || policy.state === 'not_configured'} /></Form.Item>

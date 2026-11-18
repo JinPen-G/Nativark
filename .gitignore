@@ -3,6 +3,7 @@ node_modules/
 /.tools/
 /docs/
 /clients/agent-desktop/
+/docker-compose.override.yml
 
 # Build output
 dist/
