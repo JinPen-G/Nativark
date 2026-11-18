@@ -64,7 +64,9 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 
 未经进一步授权，不安装依赖、读.env、启真实服务、访问业务HTTP/DB/模型/供应商、执行迁移、合main或发布。中文提交到当前任务分支、普通推送后读取实际远端。正式需求/任务与已应用历史迁移保持，旧原文优先引用固定Git。
 
-旧公共宿主临时环境已归集到 D:/工作文件/rental-OS/output/.cleanup-pending/pch-preparation/platform-host-integration/environment，840文件/91,808,304字节，责任清单为同任务manifest.json。另一个原任务目录rental-business-facts/residual仍有1个0字节guard.log及原责任清单。2026-11-17原生PowerShell删除命令仍被自动审批在启动前以blocked by policy拒绝，命令内预检查也未执行；原文件数/体积及0链接已有只读证据，当前没有使用旧环境的任务进程，两份清单最近尝试时间为2026-11-17T15:47:41.734Z，本次另行只读核实文件数/体积和0链接。没有换壳/工具绕过，工具恢复后由本会话优先处理，不能称已释放空间。[当前清理尝试](平台Core接入-开发记录.md#core-rental-enterprise-approval-runtime-20261117) · [原清理证据](平台Core接入-开发记录.md#core-rental-recovery-receipts-20261116)
+旧公共宿主临时环境已归集到 D:/工作文件/rental-OS/output/.cleanup-pending/pch-preparation/platform-host-integration/environment，840文件/91,808,304字节，责任清单为同任务manifest.json。另一个原任务目录rental-business-facts/residual仍有1个0字节guard.log及原责任清单。2026-11-18再次使用原生PowerShell删除，仍被自动审批在创建进程前以blocked by policy拒绝，命令内进程/路径复验没有执行。此前同一原生入口已实际只读核840文件/91,808,304字节、1文件/0字节及两处0链接；本片所有验证worker已退出，没有使用旧环境。两份责任清单最近尝试时间为2026-11-18T11:02:22.523Z，状态仍为已归集、删除受阻。没有换壳/工具绕过，工具恢复后由本会话优先处理，不能称已释放空间。[当前清理尝试](平台Core接入-开发记录.md#core-rental-files-http-20261118) · [原清理证据](平台Core接入-开发记录.md#core-rental-recovery-receipts-20261116)
+
+dev2订单前端仍在约定路径施工，作者报告列表已对照原冻结源码的66组行操作、930个单元格及两种表格呈现；整份旧列表脚本在公共壳间距断言4px与当前规范/实现0px处失败，原断言保留，固定基线与规范条款尚待RD收口核定，不能并入本片通过证据。
 
 旧外观测试17例16过/1个静态失败及MCP导读五个原隔离附件缺失继续保留。总导航原三份历史附件入口已由本日固定main改为删除前Git引用，本轮仅核当前导航，未再运行全局CLI。稀疏未检目标须按固定Git定位，不删除引用或修改检查器掩盖。原授权/生成/MCP检查的审批拒绝历史保留，后来定向补证不能冒称完整宿主验收。[当前MCP审计](平台Core接入-开发记录.md#core-original-mcp-audit-20261115) · [导读缺链](平台Core接入-开发记录.md#core-rental-capability-runtime-20261116)
 
