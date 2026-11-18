@@ -4,6 +4,7 @@
 
 | 版本 | 日期 | 编辑 | 变更 |
 | --- | --- | --- | --- |
+| v1.18 | 2026-11-18 | Codex | 微信客户登录/绑定归Rental，受控运输归公共服务；补企业凭证/检查字节与员工原键观察的实际SDK入口。原HTTP路径、字段、授权、缓存、一次性凭证及原冻结收据保持。 |
 | v1.17 | 2026-11-18 | Codex | 客户HTTP、认证/统一注册、限流及官网图片实际迁入Rental包，补同一实例装配和源码入口；原客户v1路径/字段、会话、用途证明、事务和原收据语义保持。 |
 | v1.16 | 2026-11-18 | Codex | 客户业务应用及目录字段投影单源迁入Rental包，补正式SDK/宿主参加者入口；原95个方法及18项实例顺序保持，检查响应供给原同事务出箱，HTTP v1字段与行为不变。 |
 | v1.15 | 2026-11-18 | Codex | 补充Rental包中配送地址、历史快照、本人注销与宿主参加者的源码/SDK入口；原客户API v1路径、请求和响应保持兼容。 |
@@ -199,5 +200,7 @@ Idempotency-Key: <unique-key-for-mutating-action>
 开发Agent从[客户HTTP](../../../packages/rental-core/src/http-client.controller.ts)进入[客户业务应用](../../../packages/rental-core/src/mysql-client-application.ts)，再沿[业务参加者](../../../packages/rental-core/src/client-application-ports.ts)查看真实数据库、客户Auth、会员、付款/文件、订单和同事务出箱。[HTTP接线](../../../apps/api/src/modules/client/client-http.providers.ts)按[八项正式接点](../../../packages/rental-core/src/http-client-applications.ts)绑定同一实例，原[Controller路径](../../../apps/api/src/modules/client/client-api.controller.ts)兼容再导出。服务端从 `@rental-os/rental-core/http-client`、`/http-client-applications` 和 `/mysql-client-application` 接入，客户端使用 `/client-contracts` 合同；目录字段由[同源投影](../../../packages/rental-core/src/category-client-projection.ts)生成，导入源码或取得目录不授予业务权限。
 
 认证、后台/自助统一注册与限流沿[客户Auth](../../../packages/rental-core/src/mysql-client-auth.ts) → [注册](../../../packages/rental-core/src/mysql-customer-registration.ts) / [原事务](../../../packages/rental-core/src/mysql-customer-registration-transaction.ts) / [配额](../../../packages/rental-core/src/mysql-client-rate-limit.ts) → [私有参加者](../../../packages/rental-core/src/client-session-ports.ts)阅读。原[Auth接线](../../../apps/api/src/modules/client/client-auth.service.ts)和[注册接线](../../../apps/api/src/modules/platform/customer-registration.service.ts)供给同一数据库、短信和客户锁；客户用途证明、会话及会员不能由Core注册或页面缓存代替。官网图片的原公开读取由[同一图片实现](../../../packages/rental-core/src/mysql-client-website-assets.ts)维护。
+
+微信手机号登录和绑定沿[Rental微信应用](../../../packages/rental-core/src/mysql-client-wechat-auth.ts) → [私有接点](../../../packages/rental-core/src/client-wechat-ports.ts) → [公共同一运输](../../../packages/platform-server/src/modules/integrations/wechat-mini-program.adapter.ts)阅读。SDK分别从 `/mysql-client-wechat-auth`、`/client-wechat-ports` 与 `@rental-os/platform-server/integration-wechat` 使用；原Nest供给渠道、客户/会员、当前会话和事务，注册或运输本身不创建跨业务读权。企业原证明/检查字节及员工原键观察由[凭证读取](../../../packages/rental-core/src/file-application-rental-evidence.ts)与[原键观察](../../../packages/rental-core/src/file-application-staff-observation.ts)处理，沿原HTTP授权和返回前复验，不开放客户端通用文件读取。
 
 地址和注销分别沿[地址与交付快照](../../../packages/rental-core/src/mysql-client-delivery-address.ts) / [本人注销](../../../packages/rental-core/src/mysql-client-account-closure.ts) → [生命周期参加者](../../../packages/rental-core/src/client-lifecycle-ports.ts)阅读。服务端分别从 `/mysql-client-delivery-address` 和 `/mysql-client-account-closure` 接入；可信身份、业务状态及审计由宿主供给。[包使用说明](../../../packages/rental-core/README.md#使用与构建)

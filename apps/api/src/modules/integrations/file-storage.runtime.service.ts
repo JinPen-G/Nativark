@@ -3,6 +3,8 @@
 import { FileStoragePrimitives, FileStorageRepository, MAX_FILE_BYTES, freezeFileUploadContent, createOriginalFileUploadFacts, readOriginalFileUploadReceipt, FileStorageCleanup, COMPLETED_STAGING_PENDING, issueFileDownloadReference, FileStorageApplication } from "@rental-os/platform-server/files";
 import { RentalFileBusinessReferences } from "@rental-os/rental-core/file-access";
 import { RentalExchangeInspectionFileStorage, type RentalExchangeInspectionStoragePlan } from "@rental-os/rental-core/file-application-exchange-inspection";
+import { RentalEvidenceFileStorage } from "@rental-os/rental-core/file-application-rental-evidence";
+import { RentalStaffUploadObservation } from "@rental-os/rental-core/file-application-staff-observation";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, OnApplicationBootstrap, OnApplicationShutdown, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { INSPECTION_OBJECT_READER, readInspectionMedia, type InspectionObjectReader } from "../ai-native/inspection-assist/inspection-media.reader";
 import { KNOWLEDGE_FILE_ACCESS, type KnowledgeFileAccess } from "../ai-native/knowledge/knowledge-file-access";
@@ -18,10 +20,9 @@ import type {
   FileUploadCleanupSummary,
   FileDownloadUrlSummary,
   FileUploadSessionSummary,
-  StaffUploadObservationRequest, StaffUploadObservationResponse, StaffUploadObservedSession
+  StaffUploadObservationRequest, StaffUploadObservationResponse
 } from "@rental-os/shared";
 import { parseStaffUploadObservation } from './file-upload.dto';
-import { assertOutboundUrl } from "../../common/outbound-url";
 import { PrismaService } from "../database/prisma.service";
 import { TenantIntegrationService, type TenantIntegrationRuntimeConfig } from "./tenant-integration.service";
 import { FileBusinessAccessService } from "../files/file-business-access.service";
@@ -66,13 +67,15 @@ export class FileStorageRuntimeService extends FileStoragePrimitives implements 
   private readonly fileReferences: RentalFileBusinessReferences;
   private readonly cleanup: FileStorageCleanup<Prisma.TransactionClient>;
   private readonly exchangeInspectionFiles: RentalExchangeInspectionFileStorage<FileBusinessOwner>;
+  private readonly evidenceFiles: RentalEvidenceFileStorage;
+  private readonly staffUploadObservations: RentalStaffUploadObservation;
   private readonly staffFiles?: FileStorageApplication<FileBusinessOwner, Prisma.TransactionClient>;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly integrations: TenantIntegrationService,
     @Optional() private readonly operationLog?: OperationLogService,
-    @Optional() @Inject(INSPECTION_OBJECT_READER) private readonly inspectionObjectReader?: InspectionObjectReader,
+    @Optional() @Inject(INSPECTION_OBJECT_READER) inspectionObjectReader?: InspectionObjectReader,
     @Optional() @Inject(KNOWLEDGE_FILE_ACCESS) private readonly knowledgeFiles?: KnowledgeFileAccess,
     @Optional() private readonly fileAccess?: FileBusinessAccessService,
     @Optional() @Inject(RENTAL_FILE_AUTHORITY) auth?: RentalFileWorkspaceAuthority
@@ -89,6 +92,19 @@ export class FileStorageRuntimeService extends FileStoragePrimitives implements 
       objectRequest: (...args) => this.objectRequest(...args),
       persistUploadFacts: (...args) => this.persistUploadFacts(...args),
       readInspectionMedia
+    });
+    this.evidenceFiles = new RentalEvidenceFileStorage(prisma, integrations, {
+      presign: (...args) => this.presign(...args),
+      matchesOwner: (...args) => this.matchesOwner(...args),
+      assertBusinessReference: (...args) => this.assertBusinessReference(...args),
+      inspectionObjectReader,
+      readInspectionMedia
+    });
+    this.staffUploadObservations = new RentalStaffUploadObservation(prisma, fileAccess, {
+      parseStaffUploadObservation,
+      validateInput: input => this.validateInput(input),
+      matchesOwner: (...args) => this.matchesOwner(...args),
+      matchesUploadRequest: (...args) => this.matchesUploadRequest(...args)
     });
     this.cleanup = new FileStorageCleanup<Prisma.TransactionClient>({
       store: prisma,
@@ -522,79 +538,7 @@ export class FileStorageRuntimeService extends FileStoragePrimitives implements 
    * No provider configuration, object request, signing or mutation is used. */
   async observeStaffUpload(tenantId: string, value: StaffUploadObservationRequest,
     valueOwner: FileBusinessOwner): Promise<StaffUploadObservationResponse> {
-    const input = parseStaffUploadObservation(value), owner = structuredClone(valueOwner), access = this.fileAccess;
-    const file = { ...input.file, fileName: input.file.fileName.trim(), mimeType: input.file.mimeType.trim().toLowerCase() };
-    if (!access || !owner?.workspaceId || !owner.actorUserId || owner.businessType !== file.businessType
-      || owner.businessId !== file.businessId || owner.uploadScene !== file.uploadScene
-      || (file.uploadScene === 'work-order-evidence') !== (file.businessType === 'rental_work_order')) {
-      throw new ForbiddenException('原员工上传观察归属不可用');
-    }
-    const currentOwner = () => {
-      const identity = getRequestIdentity();
-      if (!identity || identity.isSaasAdmin || identity.audience !== 'staff' || identity.staffApi !== true
-        || identity.tenantId !== tenantId || identity.workspaceId !== owner.workspaceId || identity.userId !== owner.actorUserId) {
-        throw new ForbiddenException('原员工上传观察身份已变化');
-      }
-      return access.authorityKey(tenantId);
-    };
-    const authority = currentOwner();
-    const current = () => { if (currentOwner() !== authority) throw new ForbiddenException('原员工上传观察权限已变化'); };
-    const load = async () => {
-      current();
-      const session = await this.prisma.fileUploadSession.findFirst({ where: 'sessionId' in input.reference
-        ? { tenantId, id: input.reference.sessionId } : { tenantId, idempotencyKey: input.reference.idempotencyKey } });
-      if (!session) return null;
-      const asset = await this.prisma.fileAsset.findFirst({ where: { tenantId, id: session.fileAssetId } });
-      const metadata = asset?.metadata && typeof asset.metadata === 'object' && !Array.isArray(asset.metadata)
-        ? asset.metadata as JsonRecord : null;
-      // A tenant-wide unique-key hit must not disclose another employee's or
-      // workspace's upload, even when its business object is otherwise visible.
-      if (!asset || !metadata || asset.uploadedBy !== owner.actorUserId || metadata.workspaceId !== owner.workspaceId
-        || metadata.source !== 'staff-miniprogram') return null;
-      const mimeType = this.validateInput({ ...file, idempotencyKey: session.idempotencyKey ?? '' });
-      if (!this.matchesOwner(asset, owner) || !this.matchesUploadRequest(asset, { ...file, idempotencyKey: session.idempotencyKey ?? '' }, mimeType)
-        || session.tenantId !== tenantId || asset.tenantId !== tenantId || session.fileAssetId !== asset.id
-        || session.provider !== asset.storageProvider || session.storageKey !== asset.storageKey
-        || ('sessionId' in input.reference ? session.id !== input.reference.sessionId : session.idempotencyKey !== input.reference.idempotencyKey)) {
-        throw new ConflictException('原上传会话与文件描述不一致');
-      }
-      if (['pickup-evidence', 'return-evidence', 'handover-signature'].includes(file.uploadScene)) {
-        const stage = file.uploadScene === 'pickup-evidence' ? 'pickup' : file.uploadScene === 'return-evidence' ? 'return' : file.metadata?.handoverStage;
-        if (!stage || !file.metadata?.handoverBatchId || metadata.handoverStage !== stage
-          || metadata.handoverBatchId !== file.metadata.handoverBatchId
-          || file.metadata.handoverStage !== undefined && file.metadata.handoverStage !== stage) {
-          throw new ConflictException('原上传交接阶段或批次不一致');
-        }
-      }
-      if (!['pending_upload', 'freeze_pending', 'completed', 'failed'].includes(session.status)
-        || !['pending_upload', 'active', 'failed', 'delete_pending', 'deleted'].includes(asset.status)
-        || ['pending_upload', 'freeze_pending'].includes(session.status) && asset.status !== 'pending_upload'
-        || session.status === 'completed' && !['active', 'delete_pending', 'deleted'].includes(asset.status)
-        || session.status === 'failed' && !['failed', 'deleted'].includes(asset.status)
-        || !(session.expiresAt instanceof Date) || !Number.isFinite(session.expiresAt.getTime())
-        || session.completedAt != null && (!(session.completedAt instanceof Date) || !Number.isFinite(session.completedAt.getTime()))) {
-        throw new ServiceUnavailableException('原上传状态暂不可核对');
-      }
-      return { session, asset };
-    };
-    const before = structuredClone(await load());
-    if (before) await access.assertRead(tenantId, before.asset);
-    current();
-    const after = await load();
-    if (fileFactHash(before) !== fileFactHash(after)) throw new ConflictException('原上传观察期间记录已变化');
-    if (after) await access.assertRead(tenantId, after.asset);
-    current();
-    const semantics = { reference: structuredClone(input.reference), descriptionHash: requestFingerprint(file),
-      observation: 'stored_metadata_not_transfer_proof' as const, retryable: false as const,
-      uploadGrant: 'not_provided' as const, nextAction: 'read_original_upload' as const };
-    if (!before) return { ...semantics, state: 'not_observed', session: null };
-    return { ...semantics, state: 'observed', session: {
-      sessionId: before.session.id, fileAssetId: before.asset.id,
-      status: before.session.status as StaffUploadObservedSession['status'],
-      fileStatus: before.asset.status as StaffUploadObservedSession['fileStatus'],
-      mode: before.session.provider === 'local_mock' ? 'simulation' : 'provider',
-      expiresAt: before.session.expiresAt.toISOString(), completedAt: before.session.completedAt?.toISOString() ?? null,
-    } };
+    return this.staffUploadObservations.observeStaffUpload(tenantId, value, valueOwner);
   }
 
   /** Current-authorized observation of the original knowledge upload only.
@@ -813,46 +757,11 @@ export class FileStorageRuntimeService extends FileStoragePrimitives implements 
   /** Merchant application evidence is read through the authenticated controller,
    * not a reusable bearer download URL. The controller rechecks its reviewer. */
   async readAuthorityBytes(tenantId: string, fileAssetId: string, applicantCustomerId: string) {
-    return this.readEnterpriseEvidenceBytes(tenantId, fileAssetId, applicantCustomerId, { businessType: "customer", businessId: applicantCustomerId, uploadScene: "enterprise-authority" });
+    return this.evidenceFiles.readAuthorityBytes(tenantId, fileAssetId, applicantCustomerId);
   }
 
   async readPaymentProofBytes(tenantId: string, fileAssetId: string, applicantCustomerId: string, orderId: string, workspaceId: string, contentHash: string) {
-    if (!workspaceId || !orderId || !/^[a-f0-9]{64}$/u.test(contentHash)) throw new BadRequestException("原费用回款凭证字节绑定无效");
-    return this.readEnterpriseEvidenceBytes(tenantId, fileAssetId, applicantCustomerId,
-      { businessType: "rental_order", businessId: orderId, workspaceId, uploadScene: ENTERPRISE_PAYMENT_PROOF_SCENE }, contentHash);
-  }
-
-  private async readEnterpriseEvidenceBytes(tenantId: string, fileAssetId: string, applicantCustomerId: string, owner: FileBusinessOwner, contentHash?: string) {
-    const asset = await this.prisma.fileAsset.findFirst({ where: { tenantId, id: fileAssetId, businessType: owner.businessType, businessId: owner.businessId, uploadedBy: applicantCustomerId, uploadScene: owner.uploadScene, status: "active" }, include: { uploadSession: true } });
-    if (!asset || asset.storageProvider === "local_mock" || asset.uploadSession?.status !== "completed" || !asset.uploadSession.completedAt
-      || !["application/pdf", "image/png", "image/jpeg"].includes(asset.mimeType) || asset.sizeBytes < 1 || asset.sizeBytes > MAX_FILE_BYTES) throw new NotFoundException("授权材料未真实归档或不属于当前申请");
-    if (owner.uploadScene === ENTERPRISE_PAYMENT_PROOF_SCENE && (asset.businessModule !== "enterprise" || asset.checksum !== contentHash
-      || (asset.metadata as JsonRecord | null)?.workspaceId !== owner.workspaceId || (asset.metadata as JsonRecord | null)?.fileUploadVersion !== 2
-      || (asset.metadata as JsonRecord | null)?.fileContentVersion !== 1 || (asset.metadata as JsonRecord | null)?.contentHash !== contentHash
-      || asset.uploadSession.provider !== asset.storageProvider || asset.uploadSession.storageKey !== asset.storageKey)) throw new ConflictException("原费用回款凭证冻结内容不可核对");
-    const config = await this.integrations.runtimeConfig("file", tenantId, asset.storageProvider as never);
-    if (!config) throw new ServiceUnavailableException("授权材料存储不可用");
-    if (contentHash && (asset.metadata as JsonRecord | null)?.storageLocationHash !== this.retentionLocationHash(config)) throw new ConflictException("原费用回款凭证存储位置已变化");
-    const signed = this.presign(config, "GET", asset.storageKey, asset.mimeType, new Date(Date.now() + 60000));
-    const target = await assertOutboundUrl(signed.url, "授权材料存储地址", { allowQuery: true });
-    const response = await fetch(target, { redirect: "error", signal: AbortSignal.timeout(8000) });
-    if (!response.ok || !response.body) throw new ServiceUnavailableException("授权材料读取失败");
-    const reader = response.body.getReader(), chunks: Buffer[] = []; let size = 0;
-    try {
-      while (true) {
-        const chunk = await reader.read(); if (chunk.done) break;
-        size += chunk.value.byteLength; if (size > asset.sizeBytes || size > MAX_FILE_BYTES) throw new BadRequestException("授权材料超过登记大小");
-        chunks.push(Buffer.from(chunk.value));
-      }
-    } finally { await reader.cancel().catch(() => undefined); }
-    const after = await this.prisma.fileAsset.findFirst({ where: { tenantId, id: asset.id, status: "active", updatedAt: asset.updatedAt, storageKey: asset.storageKey } });
-    if (!after || size !== asset.sizeBytes) throw new ConflictException("读取期间授权材料已变化或不完整");
-    const content = Buffer.concat(chunks);
-    if (contentHash && createHash("sha256").update(content).digest("hex") !== contentHash) throw new ConflictException("原费用回款凭证读取字节与冻结摘要不一致");
-    const signatures = asset.mimeType === "application/pdf" ? content.subarray(0, 5).toString("ascii") === "%PDF-"
-      : asset.mimeType === "image/png" ? content.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) : content[0] === 255 && content[1] === 216 && content[2] === 255;
-    if (!signatures) throw new BadRequestException("授权材料格式与登记类型不匹配");
-    return { mimeType: asset.mimeType, content };
+    return this.evidenceFiles.readPaymentProofBytes(tenantId, fileAssetId, applicantCustomerId, orderId, workspaceId, contentHash);
   }
 
   async downloadUrl(tenantId: string, fileAssetId: string, owner?: FileBusinessOwner): Promise<FileDownloadUrlSummary> {
@@ -886,43 +795,7 @@ export class FileStorageRuntimeService extends FileStoragePrimitives implements 
   }
 
   async readInspectionBytes(tenantId: string, fileAssetId: string, owner: FileBusinessOwner, maxBytes: number, signal: AbortSignal) {
-    if (!owner.workspaceId || !owner.actorUserId || owner.businessType !== 'rental_order' || !owner.businessId
-      || !['pickup-evidence', 'return-evidence'].includes(owner.uploadScene ?? '')
-      || !Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_FILE_BYTES) throw new BadRequestException('检查证据读取参数无效');
-    if (!this.inspectionObjectReader) throw new ServiceUnavailableException('非URL受控检查存储读取未配置');
-    const asset = await this.prisma.fileAsset.findFirst({ where: { id: fileAssetId, tenantId, status: 'active', uploadedBy: owner.actorUserId }, include: { uploadSession: true } });
-    if (!asset || !this.matchesOwner(asset, owner) || asset.uploadSession?.status !== 'completed' || !asset.uploadSession.completedAt
-      || asset.uploadSession.tenantId !== tenantId || asset.uploadSession.storageKey !== asset.storageKey) throw new NotFoundException('检查附件不属于当前业务或未完成上传');
-    await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? '', owner.workspaceId);
-    if (asset.storageProvider === 'local_mock' || !await this.integrations.runtimeConfig('file', tenantId, asset.storageProvider as never, { requireLiveTest: false })) {
-      throw new ServiceUnavailableException('检查附件没有可用的持久存储配置');
-    }
-    const controller = new AbortController(), abort = () => controller.abort();
-    signal.addEventListener('abort', abort, { once: true });
-    const timeout = setTimeout(abort, 8000);
-    try {
-      if (signal.aborted) controller.abort();
-      if (controller.signal.aborted) throw new ServiceUnavailableException('检查读取已取消');
-      let rejectOpening: () => void = () => undefined;
-      const aborted = new Promise<never>((_resolve, reject) => {
-        rejectOpening = () => reject(new ServiceUnavailableException('检查读取已取消'));
-        controller.signal.addEventListener('abort', rejectOpening, { once: true });
-      });
-      const opening = this.inspectionObjectReader.open({ tenantId, workspaceId: owner.workspaceId, fileAssetId,
-        provider: asset.storageProvider, storageKey: asset.storageKey }, controller.signal).then(async stream => {
-        if (controller.signal.aborted) { await stream.cancel().catch(() => undefined); throw new ServiceUnavailableException('检查读取已取消'); }
-        return stream;
-      });
-      let stream: ReadableStream<Uint8Array>;
-      try { stream = await Promise.race([opening, aborted]); }
-      finally { controller.signal.removeEventListener('abort', rejectOpening); }
-      const result = await readInspectionMedia(stream, maxBytes, controller.signal);
-      if (result.mediaType !== asset.mimeType.split(';', 1)[0].trim().toLowerCase()) throw new BadRequestException('检查附件实际格式与登记类型不同');
-      const after = await this.prisma.fileAsset.findFirst({ where: { id: asset.id, tenantId, status: 'active', updatedAt: asset.updatedAt, uploadedBy: owner.actorUserId } });
-      if (!after || after.storageKey !== asset.storageKey) throw new ConflictException('读取期间附件已变化');
-      if (controller.signal.aborted) throw new ServiceUnavailableException('检查读取已取消');
-      return result;
-    } finally { clearTimeout(timeout); signal.removeEventListener('abort', abort); }
+    return this.evidenceFiles.readInspectionBytes(tenantId, fileAssetId, owner, maxBytes, signal);
   }
 
   async assertKnowledgeBinding(tenantId: string, fileAssetId: string, owner: FileBusinessOwner, target?: { documentVersion: string; expectedRevision: number }) {

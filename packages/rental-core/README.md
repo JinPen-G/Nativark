@@ -12,6 +12,7 @@
 | [客户HTTP](src/http-client.controller.ts)、[八项实际接点](src/http-client-applications.ts) | `/http-client` 保留原客户 v1 路径、本人/企业读取及返回前的会话复验；宿主以同一 Auth、业务、微信、地址、注销、企业和 Guard 实例接线 |
 | [员工认证HTTP](src/http-staff-auth.controller.ts)、[员工附件HTTP](src/http-staff-uploads.controller.ts)、[原键观察合同](src/staff-upload-observation.ts) | `/http-staff-auth`、`/http-staff-uploads` 与 `/staff-upload-observation` 保留原staff身份、五组上传场景、地点/本人/检查绑定及原始body校验；宿主供给同一会话、文件、数据库和观察解析器 |
 | [客户认证](src/mysql-client-auth.ts)、[统一注册](src/mysql-customer-registration.ts)、[注册事务](src/mysql-customer-registration-transaction.ts)、[私有参加者](src/client-session-ports.ts) | 客户令牌、用途证明、会员/账号与原客户行锁单源；后台和自助注册共用同一规则，Serializable 冲突只作原有限重试 |
+| [微信客户认证](src/mysql-client-wechat-auth.ts)、[私有参加者](src/client-wechat-ports.ts) | `/mysql-client-wechat-auth` 保留原手机号登录/绑定、同一客户与当前会话、渠道和AppID水印核验；微信运输从公共 `/integration-wechat` 供给 |
 | [客户限流](src/mysql-client-rate-limit.ts)、[官网图片](src/mysql-client-website-assets.ts) | 原数据库配额、来源地址和唯一清理实例；图片按原字节/格式/2MB 与租户规则读取，公开路径保持兼容 |
 | [企业请求DTO](src/http-enterprise-request.dto.ts)、[订单查询DTO](src/http-enterprise-order-query.dto.ts)、[客户请求DTO](src/http-client-request.dto.ts) | 原企业申请/成员、客户注册/报价/履约及文件完成校验单源；续租、换货、委托与交接DTO各从同名HTTP子出口使用，输入校验不授予执行权 |
 | [本人地址与交付快照](src/mysql-client-delivery-address.ts)、[本人注销](src/mysql-client-account-closure.ts)、[配送区域](src/client-delivery-service-area.ts)、[宿主参加者](src/client-lifecycle-ports.ts) | 客户地址按租户与本人校验，报价/订单快照保持原值；注销沿原短信证明、会员/账号状态及会话撤销顺序。原客户Controller、报价及AI场景消费同一实现 |
@@ -27,6 +28,7 @@
 | [换货检查准备](src/mysql-exchange-inspection-preparation.ts)、[准备与照片消费](src/exchange-inspection-preparation.read.ts)、[严格DTO](src/exchange-inspection-preparation.dto.ts) | /mysql-exchange-inspection-preparation、/exchange-inspection-preparation-read与/exchange-inspection-dto保留原操作者、订单锁、冻结模板、照片消费及原收据同事务；检查事实不授予费用、客户同意或履约权 |
 | [专用检查影像](src/mysql-exchange-inspection-media.ts)、[原影像读取](src/exchange-inspection-media.read.ts)、[当前身份/文件/事务接点](src/exchange-inspection-ports.ts) | /mysql-exchange-inspection-media与/exchange-inspection-media-read核原来源、文件/会话、占用与完成；原文件适配负责私有计划、单次暂存读取和冻结目标核对 |
 | [附件 ACL](src/file-access.ts)、[业务读取](src/file-business-access.ts)、[引用存在性](src/file-business-reference.ts)、[读取参加者](src/file-access-ports.ts) | `/file-access` 持有原商品公开图、客户敏感附件及订单/资产/检查等对象范围；公共文件表和字节存储不能授予 Rental 业务读权 |
+| [企业凭证/检查字节](src/file-application-rental-evidence.ts)、[员工原键观察](src/file-application-staff-observation.ts) | `/file-application-rental-evidence` 与 `/file-application-staff-observation` 读取原上传者/空间、冻结摘要与当前ACL；观察不续签，检查只消费宿主受控对象reader和原解码器 |
 | [凭证合同](src/document-contracts.ts)、[纯渲染](src/document-renderer.ts)、[归档与历史](src/mysql-documents.ts)、[本表读写视图](src/document-storage.ts) | /document-contracts与/document-renderer不依赖数据库；/mysql-documents保留逐字段释放、稳定内容摘要、同内容唯一归档和当前订单/空间/财务历史门禁 |
 | [经营空间边界](src/mysql-workspace-scope.ts) | `/mysql-workspace-scope` 核请求空间所属租户及跨空间写入；原初始化/恢复只读取默认空间，原Guard先裁定请求授权 |
 | [配置运行时DTO](src/config-request.dto.ts) | `/configuration-dto` 与原API共用字段、嵌套校验和装饰器元数据；规则候选采用同一类，审批、业务规则及保存仍由所属服务处理 |
@@ -97,6 +99,10 @@
 | [批准设置应用](src/mysql-approved-settings.ts)、[真实路由授权桥](src/approved-settings-route-authority.ts)、[参加者合同](src/approved-settings-ports.ts)、[严格输入](src/approved-settings-validation.ts) | /mysql-approved-settings 与 /approved-settings-route-authority 复用原Guard/ALS，通知配置CAS、批准消费与原操作同事务，历史读取不以当前配置或过期重做 |
 
 ## 使用与构建
+
+微信客户认证从 `/mysql-client-wechat-auth` 接入，实际事务、渠道凭据、同一客户主档/注册、当前会话和审计经 `/client-wechat-ports` 供给。运输使用 `@rental-os/platform-server/integration-wechat` 的同一类和错误身份，保留原AppID缓存及凭据一次刷新；业务绑定核水印，已登录客户的一次性code错误不重试、不视为会话失效。原[微信Nest接线](../../apps/api/src/modules/client/client-wechat-auth.service.ts)保持八项构造位置。
+
+企业凭证与检查字节经 `/file-application-rental-evidence` 读取，宿主供给真实文件配置、业务引用、受控检查对象reader和原媒体解码器。返回前核当前文件、完整大小、原冻结摘要及业务绑定；员工从 `/file-application-staff-observation` 只观察本人/当前空间的原键事实，缺原记录明确返回未观察，不因此放行重传或提供上传地址。原Runtime继续供给同一参加者与唯一清理/扫描实例。
 
 HTTP入口从 `/http-workspace-capabilities`、`/http-staff-payments` 导入；`/http-service-ports` 给出两个服务令牌及实际方法合同。宿主将令牌绑定到原空间能力、原员工收款服务，使用 `useExisting` 保持同一实例；当前 [API装配](../../apps/api/src/app.module.ts) 是兼容示例。原 [Guard](../../apps/api/src/common/api-auth.guard.ts)、员工地点投影、当前空间、事务与原收据仍由原链核验。公共无Core宿主不注册这些Controller。字段与路径继续查 [OpenAPI](../../apps/api/src/contracts/openapi-document.ts)，SDK接点不开放Agent工具。
 

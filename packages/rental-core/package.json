@@ -950,6 +950,22 @@
     "./http-client": {
       "types": "./dist/http-client.controller.d.ts",
       "default": "./dist/http-client.controller.js"
+    },
+    "./file-application-rental-evidence": {
+      "types": "./dist/file-application-rental-evidence.d.ts",
+      "default": "./dist/file-application-rental-evidence.js"
+    },
+    "./file-application-staff-observation": {
+      "types": "./dist/file-application-staff-observation.d.ts",
+      "default": "./dist/file-application-staff-observation.js"
+    },
+    "./mysql-client-wechat-auth": {
+      "types": "./dist/mysql-client-wechat-auth.d.ts",
+      "default": "./dist/mysql-client-wechat-auth.js"
+    },
+    "./client-wechat-ports": {
+      "types": "./dist/client-wechat-ports.d.ts",
+      "default": "./dist/client-wechat-ports.js"
     }
   },
   "typesVersions": {
@@ -1658,6 +1674,18 @@
       ],
       "http-client": [
         "dist/http-client.controller.d.ts"
+      ],
+      "file-application-rental-evidence": [
+        "dist/file-application-rental-evidence.d.ts"
+      ],
+      "file-application-staff-observation": [
+        "dist/file-application-staff-observation.d.ts"
+      ],
+      "mysql-client-wechat-auth": [
+        "dist/mysql-client-wechat-auth.d.ts"
+      ],
+      "client-wechat-ports": [
+        "dist/client-wechat-ports.d.ts"
       ]
     }
   },

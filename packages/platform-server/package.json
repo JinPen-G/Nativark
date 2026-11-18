@@ -270,6 +270,10 @@
     "./file-dto": {
       "types": "./dist/modules/files/file-upload.dto.d.ts",
       "default": "./dist/modules/files/file-upload.dto.js"
+    },
+    "./integration-wechat": {
+      "types": "./dist/modules/integrations/wechat-mini-program.adapter.d.ts",
+      "default": "./dist/modules/integrations/wechat-mini-program.adapter.js"
     }
   },
   "scripts": {
@@ -488,6 +492,9 @@
       ],
       "file-dto": [
         "dist/modules/files/file-upload.dto.d.ts"
+      ],
+      "integration-wechat": [
+        "dist/modules/integrations/wechat-mini-program.adapter.d.ts"
       ]
     }
   }

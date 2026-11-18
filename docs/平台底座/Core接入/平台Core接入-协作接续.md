@@ -2,7 +2,7 @@
 
 更新时间：2026-11-18。
 
-> 负责人已授权RD与dev1共用本树持续完成PCH-01～12，并允许双方就具体冲突/阻塞直接协商；Git索引、提交推送和PCH四册由RD统一负责。无Core独立运行、完整Rental标准包及全功能验收仍未完成。正式依据为[需求v1.5](平台Core接入-需求.md)与[开发任务v1.5](平台Core接入-开发任务.md)，进度只由原G1～G4门槛核收。
+> 负责人已授权RD统一调配dev1、dev2，三人共用本树持续完成PCH-01～12；冲突由RD核定来源和唯一写入者，Git索引、提交推送和PCH四册由RD统一负责。无Core独立运行、完整Rental标准包及全功能验收仍未完成。正式依据为[需求v1.5](平台Core接入-需求.md)与[开发任务v1.5](平台Core接入-开发任务.md)，进度只由原G1～G4门槛核收。
 
 ## 1. 当前目标与施工范围
 
@@ -12,7 +12,7 @@
 
 Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该Core。未来跨Core协作通过明确对象引用/接口/事件实现，本期不开放共享业务表或隐含读权。先交标准本地包，再接固定GitHub Release获取及Topic发现；底座与Core分别更新，保留下游业务、配置、数据和授权。[包标准](平台Core接入-开发任务.md#core-package-standard) · [独立更新](平台Core接入-开发任务.md#independent-upgrades)
 
-唯一施工树为 C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS，分支 codex/platform-core-extraction。本树由RD与dev1按文件分工写入；允许修改PCH所需Auth/Guard/ALS、正式包出口、主装配/OpenAPI、schema/迁移/Seed与后台外壳。main索引和其他树仍归其作者。已接当天固定main ba1de9f91860c4e73503eded4e1d05d2307b0e28，合并b973a983fc8dde6011bea8ca5acf19cd7fe26be8；八文件无dev1 WIP交叉，固定blob与受影响原后台类型已核。此前公共集成页面a3b9215a6e87caa57e9eee18592140660d94abbf已实际远端回读。后续只接核定固定main，不追其他专项活动HEAD。[当前固定主线](平台Core接入-开发记录.md#core-main-ai-delivery-20261118)
+唯一施工树为 C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS，分支 codex/platform-core-extraction。本树由RD、dev1、dev2按文件分工写入；允许修改PCH所需Auth/Guard/ALS、正式包出口、主装配/OpenAPI、schema/迁移/Seed与后台外壳。main索引和其他树仍归其作者。已接当天固定main ba1de9f91860c4e73503eded4e1d05d2307b0e28，合并b973a983fc8dde6011bea8ca5acf19cd7fe26be8；八文件无dev1 WIP交叉，固定blob与受影响原后台类型已核。此前公共集成页面a3b9215a6e87caa57e9eee18592140660d94abbf已实际远端回读。后续只接核定固定main，不追其他专项活动HEAD。[当前固定主线](平台Core接入-开发记录.md#core-main-ai-delivery-20261118)
 
 负责人已将 `[Saas 底座]-dev1` 迁入共享施工，原成果与未完检查点均已保全并迁入；旧树目录及Git登记已移除，源分支留存。Git索引、提交/推送、四册和主装配由RD统一负责，dev1按约定文件边界持续抽取公共能力，实际冲突直接协商。attach_worktree的UI归属关联仍未核定，双方所有命令均显式指定本节唯一共享路径。[迁入与共享证据](平台Core接入-开发记录.md#core-shared-dev1-migration-20261118)
 
@@ -39,7 +39,7 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 ## 3. 下一实施入口与未完项
 
 1. 继续完成Rental独立包。核心/报价营销、配置与业务请求DTO、订单确认/批准/商户委托、配货/办理锁/自动扫描、工作台/经营报表/到期作业、具体检查同意/批准执行、规则/日历绑定草稿、批准设置、品类草稿/发布/开通政策、采用准备/最终提交及经营空间边界已单源迁入；事实/配置/恢复/收据、资金/容量/企业核销及原冻结规则也有正式出口。企业政策、邀请/成员及管理员交接、申请/管理请求/任务中心、行政交接及成员审计已完成单源迁移，费用批准/委托已完成单源迁移，主/企业/客户HTTP已迁入，继续剩余渠道及会员/文件实际参加者，再形成标准Core装配、schema/迁移/Seed、页面/客户端、其余作业/回调及AI接点。客户主档/会员唯一写入、企业政策与资格由Rental包提供，会员业务服务、文件与原Auth仍由宿主供给实际参加者，不能以空适配替代；保留原权限码、标识、金额、锁、事务、幂等和历史依据，事件/作业只有一个执行者。[完整兼容清单](平台Core接入-开发记录.md#core-ownership-baseline-20261114) · [原主核心](平台Core接入-开发记录.md#core-rental-core-facts-20261116) · [确认/委托](平台Core接入-开发记录.md#core-rental-order-confirmation-20261116) · [配货/扫描](平台Core接入-开发记录.md#core-rental-allocation-runtime-20261116)
-2. dev1继续原Runtime中企业授权/回款凭证字节读取、Staff原键观察及检查字节读取的窄私有适配；Runtime目前只允许对应方法委托，Rental新文件持有原正文。Staff HTTP与共用DTO11路径已停写，包配置/AppModule由RD统一接线。知识ACL留原AI参加者，其他旧合法module/scene及历史兼容继续核定私有编排，unknown只核原事实。当前33模型/八迁移不开放零Core通用上传HTTP，原扫描/timer仍唯一；需要扩大共同窗口时先就具体交叉协调。[Staff HTTP](平台Core接入-开发记录.md#core-rental-staff-http-20261118) · [专用影像](平台Core接入-开发记录.md#core-rental-private-exchange-files-20261118) · [公共应用/Staff](平台Core接入-开发记录.md#core-public-file-application-staff-20261118) · [创建/数据/围栏](平台Core接入-开发记录.md#core-public-file-upload-data-20261118)
+2. 微信客户认证、企业凭证/检查字节和Staff原键观察已完成单源迁移，原Runtime对应薄委托；固定证据见[微信/文件读取](平台Core接入-开发记录.md#core-rental-wechat-file-readers-20261118)。dev1继续企业回款证明创建/完成的私有参加者，先独占新增文件，Runtime剩余方法按RD释放的窄窗口接线。dev2独占packages/rental-core/admin/work-orders养护工单列表/看板/详情/弹窗、原业务薄适配及api/rentalCore对应12方法；公共Record/Kanban/ContentTransition、CorePage摘要/动态标题/动作呈现、包出口及最终权限/路径映射由RD处理。Staff HTTP与共用DTO11路径已停写，包配置/AppModule由RD统一接线。知识ACL留原AI参加者，其他旧合法module/scene及历史兼容继续核定私有编排，unknown只核原事实。当前33模型/八迁移不开放零Core通用上传HTTP，原扫描/timer仍唯一；需要扩大共同窗口时先就具体交叉协调。[Staff HTTP](平台Core接入-开发记录.md#core-rental-staff-http-20261118) · [专用影像](平台Core接入-开发记录.md#core-rental-private-exchange-files-20261118) · [公共应用/Staff](平台Core接入-开发记录.md#core-public-file-application-staff-20261118) · [创建/数据/围栏](平台Core接入-开发记录.md#core-public-file-upload-data-20261118)
 3. 完成原Rental主AppModule/Guard与各audience接线。主provider通过明确imports/exports供给同一数据库、人员、订阅、审计和部署目录，总Core模块与单独模块不重复登记Controller。标准HTTP从所选Core贡献生成，未知政策拒绝；staff/client沿各自正式授权，不按operator使用权直接放行。[统一装配](平台Core接入-开发记录.md#core-application-assembly-20261115) · [HTTP政策](平台Core接入-开发记录.md#core-http-policy-registration-20261115)
 4. 生命周期仍须实际核租户授权、成员分配、原绑定/初始化、停新、排空和代码移除。当前授权结果与随后读取错误分开，unknown只读原键；撤权先取消旧请求、清除目标Core缓存。Core绑定/当前范围/实际就绪分别读取，跨事务不逆序持父锁。移除预检clear不执行删除，缺业务/AI/回调/作业/历史依赖证据不得移除。[结果读取/缓存](平台Core接入-开发记录.md#core-access-refresh-receipt-20261115) · [范围/就绪](平台Core接入-开发记录.md#core-scope-readiness-20261115) · [移除预检](平台Core接入-开发记录.md#core-removal-preflight-20261115) · [工单移除依赖](平台Core接入-开发记录.md#core-tickets-removal-data-20261115)
 5. 实际安装/部署消费同一固定标准包和版本锁；源码目录缺标准清单须拒绝。迁移prepare仍pending，不写成功账或执行DDL。工单旧绑定/初始化版保持可读，普通准入核完整迁移/物理库；普通更新拒绝租户/容器范围转换及容器类型改名，改变范围须专门迁移。[包与命令](平台Core接入-开发记录.md#core-package-current-cli-20261115) · [原绑定兼容](平台Core接入-开发记录.md#core-tickets-binding-readability-20261115) · [更新范围](平台Core接入-开发记录.md#core-update-scope-compatibility-20261115)

@@ -11,6 +11,30 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-wechat-file-readers-20261118"></a>
+
+## 微信客户认证与Rental文件读取（2026-11-18）
+
+固定父版56d8b970aa82dfdf9f9114bddc134fc524993aee已核实际任务远端，main仍为已包含的ba1de9f91860c4e73503eded4e1d05d2307b0e28，暂存区空，无合并/拣选。RD持有微信与共同出口/资料，dev1完成三文件后停写；固定原文从父版读取，不重复复制。负责人已明确RD统一调配dev1、dev2共用本树；dev2独占Rental养护工单前端及对应API方法，公共组件、CorePage、配置、装配、schema、四册及索引仍由RD维护。
+
+[微信客户认证](../../../packages/rental-core/src/mysql-client-wechat-auth.ts)及[私有参加者](../../../packages/rental-core/src/client-wechat-ports.ts)归Rental；[受控运输](../../../packages/platform-server/src/modules/integrations/wechat-mini-program.adapter.ts)归公共服务。原两路径分别供给八项原Nest依赖和再导出同一运输/错误类，AppID缓存、原一次凭据刷新、当前会话绑定和客户注册规则保持。
+
+[企业凭证/检查字节](../../../packages/rental-core/src/file-application-rental-evidence.ts)与[员工原键观察](../../../packages/rental-core/src/file-application-staff-observation.ts)归Rental，原[Runtime](../../../apps/api/src/modules/integrations/file-storage.runtime.service.ts)四个公开方法薄委托，私有企业字节方法也归包内。当前上传者/空间、原冻结内容和完整字节、企业HTTP读取前后授权、受控检查输入及迟到stream释放均保留；观察不给续签或重试依据。其他创建/完成、知识及专用权威由原参加者继续处理。
+
+| 必要核验 | 实际结果与边界 |
+| --- | --- |
+| 微信固定正文/类型 | 对照父版，两组各9个方法/辅助函数正文完全一致；TypeScript5.9.3实际8根/2375源0诊断，进程37864终态退出0。Prisma5.22官方内存声明由238/35与公共33/14生成，31,201,345/2,177,556字节，磁盘输出0 |
+| 微信一次冒烟 | stdin进程35300终态退出0；同一运输/错误类、AppID缓存、一次凭据刷新、同一客户和当前会话、跨App水印写前拒绝、其他客户冲突不覆盖、已登录code错误400且不重试。private call与事务为明确fixture，真实HTTP/DNS未执行 |
+| 作者文件类型 | dev1-rental-file-readers-targeted-types退出0；四个真实消费者根1901源0诊断，新包两根声明654源0诊断，最后Runtime构造清理只复验单根1862源0诊断 |
+| 作者一次原消费者冒烟 | dev1-rental-file-readers-accepted-smoke退出0；实际Nest/原Runtime五Staff tuple、原键/原始body拒绝/撤权/旧凭证/PUT unknown链，企业两角色原HTTP读取涵盖上传者/空间/原hash、超限/不完整、文件和申请返回前复验及缓存头 |
+| 原检查消费者 | 原ai-native-inspection-media-submission三个相关用例正文复用，实际受控S3 producer、取消后迟到stream关闭、原evidence→Runtime→冻结输入3/3通过，0skip/0todo |
+| 固定映射及未通过范围 | 五个迁入方法按端口/owner类型映射AST相同，其余34个Runtime方法完整AST未变。临时S3域名断言漏桶前缀，按实际签名修正；检查fixture补原238模型DMMF。额外API声明输出试跑曾报85项本片外导出诊断，该扩展范围未通过，不与本片定向类型混称全绿 |
+| 清理与未验 | 作者output/.tmp/dev1-rental-file-readers已删除，离线守卫无网络/.env/越界写事件；RD全部编译/冒烟内存输出，无新增永久测试脚本。真实HTTP/MySQL并发/对象云/微信宿主、完整安装与独立审查未验 |
+
+RD核定三个停写源码sha256依次为Runtime 7ad37b79e5da0b0901a9bfb9d32dcc91c30ad5b05a2b31bf8fa55b0174db438d、rental-evidence 0e807818c5d1ccf9fb1a0543c9e7133e2429a94df8bd27b3701a9b5e39df93f8、staff-observation 9c79abd2829e7eeae1c057a8d0dd1a02720c2ea92579dde939a7001a13f57826，与作者固定证据一致。两包五个正式子出口/typesVersions同源；依赖未变，lock不改。[公共模块](../../../packages/platform-server/src/modules/integrations/README.md)、[Rental导读](../../../packages/rental-core/README.md)、[原业务入口](../../../apps/api/src/modules/rental-core/README.md)及[API说明v1.18](../../公共技术资料/接口说明/客户端-API说明.md)同步实际入口。七份资料定向核1839链接、166锚点及100表格，0问题；五个正式出口、实际源码与typesVersions对应，两包依赖/peer/meta与lock一致。出口检查首轮误把合法的./前缀差异视为不等，更正检查后通过，产品源码未改。限定CRLF差异在本片精确暂存前核收。
+
+本阶段按原PCH门槛复核仍未跨下一档；完整Rental标准装配、数据/迁移/Seed、各端/AI/作业及安装更新验收继续交付，不按迁入文件数提高进度。阶段版本以包含本节的Git提交定位，普通推送后读取实际远端。当前施工窗口及未完项由接续唯一维护。
+
 <a id="core-rental-staff-http-20261118"></a>
 
 ## Rental员工认证与附件HTTP（2026-11-18）
