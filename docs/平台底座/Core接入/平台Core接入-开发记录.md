@@ -11,6 +11,32 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-public-file-upload-data-20261118"></a>
+
+## 公共文件创建、原回执、数据与存储配置围栏（2026-11-18）
+
+固定父版91f07d0f4e8dd0db2b1f34bb29480c5792ddfdbd已普通推送并真实远端回读。dev1交出上传五路径后停写，RD固定其索引；其后cleanup/download三项重叠工作区保持下一独立片，不覆盖已固定上传源码。RD并行追加公共文件模型、迁移、数据计划及零Core配置接线，dev1将原Rental文件依赖核验抽为公共两函数。原文与完整旧接续由固定父版保全。
+
+[公共创建](../../../packages/platform-server/src/modules/files/file-upload-session.ts)保持原file_/session标识、一次15分钟有效期、原默认真实配置、380字符定位限制、配置锁→当前授权/引用复验→pending事实的同事务顺序。[原回执/续签](../../../packages/platform-server/src/modules/files/file-upload-receipt.ts)保持租户/文件/会话及配置指纹、原键和原有效期；仅仍有效pending可以取得原暂存PUT，终态、过期或freeze_pending只返回原回执。原创建入口保留专用场景/企业证明/知识准入、原键匹配、P2002重读及知识写入尝试/result_unknown解释，普通引用在配置读取后建立事实前再复验一次。知识专用回执/激活绑定及共享客户与空间业务判断仍由原参加者负责，公共模块没有Rental枚举。[原真实委托](../../../apps/api/src/modules/integrations/file-storage.runtime.service.ts)
+
+[公共schema](../../../apps/platform-api/prisma/schema.prisma)追加原FileAsset与FileUploadSession及Tenant关系，原字段、默认、字符串状态、JSON、原ID/唯一键/索引及删除/更新规则保持；只省略所属AI检查反向关系。新[文件迁移](../../../apps/platform-api/prisma/migrations/20261118010000_public_files/migration.sql)复用原三迁移的四段文件语句，LF固定2748字节，SHA-256为f64d360bd77e354f95217f31ccb7e340bd8b9d00f82a7a025539d51de2731d38。原组合schema及历史链不改写。[数据计划](../../../apps/platform-api/src/platform-data.ts)升至0.1.4/八迁移，33公共模型/14枚举；结构预期为33表/341列/85索引/7 CHECK/27外键。原七迁移前缀及结构保持，外键解析只补原SQL中引用表与列括号间的合法空格，不忽略未知DDL。
+
+空Core目录不能证明没有文件依赖。[公共只读围栏](../../../packages/platform-server/src/modules/files/file-integration-dependencies.ts)从正式/file-integration-dependencies接原配置同一事务，查询限定当前租户/提供者。停用保留原四类asset状态及pending/cleanup会话，并显式保护freeze_pending和任何非空cleanupError；位置变更保留原非deleted文件与cleanupError依据，补freeze_pending。这样即使原asset已deleted或缺失，未知清理/冻结仍保留恢复通道。原[Rental参加者](../../../apps/api/src/modules/integrations/rental-integration-business.participant.ts)的文件分支及[零Core装配](../../../apps/platform-api/src/core-assembly.ts)共用此核验，结算与payment/sms正文保持，空范围查询前拒绝，DB错误原样抛出。33模型本身不开放零Core通用上传或替代附件ACL。
+
+| 必要核验 | 实际结果与边界 |
+| --- | --- |
+| 上传作者类型/原冒烟 | node --no-compilation-cache - dev1-public-file-upload-ports-types退出0，两入口/585源0诊断；entry-types四入口/1838源0诊断，当时公共声明31模型。entry-smoke原完整lifecycle十段通过，创建/原键、生产模拟拒绝、原回执/有效期/配置变化及ACL/冻结/unknown/专用检查均保留，未改原用例适应本片 |
+| 知识相关参加者 | upload-knowledge-participant-smoke四组通过，实际创建/完成→公共内核，synthetic知识/传输fixture；成功绑定、撤权/无效字节零PUT、实际COMMIT后丢响应仍result_unknown且同key一原会话、原读取不发PUT票据/访问对象、写入前撤权不建事实。原知识全套2/6未重跑 |
+| 新公共数据类型 | node --no-compilation-cache - packages/platform-core-host/tsconfig.json apps/platform-api/tsconfig.json apps/example-tickets-api/tsconfig.json，stdin复用原只读类型入口，退出0、stderr空；Core宿主22根/957源、公共API7根/966源、工单API6根/982源0诊断。Prisma5.22官方内存声明33模型/14枚举、2177548字节、生成写入0。新增配置围栏后同命令仅传公共API配置：7根/967源0诊断，未重复其他两个配置 |
+| 一次数据/部署准备 | node --no-compilation-cache -，stdin公共数据/部署准备冒烟最终退出0：两模型字段与原源一致、原七迁移结构不变、缺cleanup列/错误CASCADE拒绝、SQL摘要变化及未知DDL拒绝，零Core完整八迁移准备11个内存文件。information_schema与发行资料为明确fixture，15次fixture查询，无DDL、网络、客户端实例化或磁盘写入。首轮把关系字段计入物理列而断言19!==20，修正原19/15实际列数后只复验同一冒烟，未改产品源码 |
+| 文件围栏作者 | dev1-public-file-integration-types退出0，原238/公共33模型，两根/737源0诊断；integration-smoke核参数化tenant/provider、状态/cleanupError、允许/拒绝、空范围零查询、DB错误、identity资产短路及Rental同事务委托。结算方法及payment/sms两个分支AST正文逐字一致 |
+| 一次公共/原接线 | node --no-compilation-cache -，stdin公共/原文件配置围栏冒烟退出0，实际core-assembly与原Rental委托共用核验，空事实允许、active/冻结/unknown清理及位置变更拒绝，原SQL参数/事务保留、DB错误传播、非file规则不变；24次raw-query fixture回调。公共数据库模块为未实例化fixture，业务数据库/网络/磁盘写入0 |
+| 资料与资源 | 作者上传18导读链接及围栏diff检查通过，stderr/守卫违规为空，taskTemp均finally删除。RD更新数据/宿主/模块导读及原四册；上传导读只在索引补公共数据/围栏说明，工作区cleanup说明单独保留，没有永久测试脚本、安装或后台服务 |
+
+没有执行公共迁移、生成磁盘Client、真实MySQL/对象云/HTTP/浏览器或干净安装。真实文件业务权威、完整公共文件应用/HTTP、Rental标准装配/数据/各端及事件作业仍待交付，按原PCH-03/06/08门槛未跨下一档。原外观/API问题、知识2/6与旧清理残留继续承接；版本/结构预检和待部署文件不等于实际更新或恢复通过。
+
+最终六份资料1113本地链接/145锚点/0问题，文件导读从上传版本索引读取，稀疏目标以固定Git定位。18路径精确暂存，上传五路径源码及补数据/围栏后的导读blob保持；下一cleanup和新应用文件排除。新迁移暂存字节与固定摘要一致，新子出口/声明对应，依赖与根lock保持。CRLF空白检查使用原限定配置退出0，中文提交/普通推送后实际回读。
+
 <a id="core-public-file-freeze-20261118"></a>
 
 ## 原文件完成链的公共冻结内核与生命周期核验（2026-11-18）

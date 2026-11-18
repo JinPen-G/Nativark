@@ -8,6 +8,8 @@
 | --- | --- |
 | [公共字节原语](file-storage-primitives.ts) | 原文件类型/大小校验、存储键、会话/资产投影、对象删除及精确限长读取；原运行时继承消费 |
 | [内容冻结内核](file-content-freeze.ts) | 原通用上传完成入口委托同一目标占用、单次写入及原目标读取核验；当前授权、配置锁及专用字节由原参加者供给 |
+| [上传事实创建](file-upload-session.ts) | 原普通创建入口委托同一 ID、原键、15 分钟有效期、配置锁及 pending 文件/会话事务，专用规则由原参加者供给 |
+| [原上传回执](file-upload-receipt.ts) | 原会话及同一暂存键续签，保持原有效期，终态、过期和未知冻结只返回原回执 |
 | [文件仓储](file-storage.repository.ts) | 原租户内元数据查询、原幂等键/会话 ID 读取、同事务建立文件及上传会话；原运行时与 IntegrationsRepository 委托 |
 | [私有存储端口](file-storage.store.ts) | 原 FileAsset 与 FileUploadSession 字段以及本片实际使用的表操作 |
 | [对象存储提供者](../integrations/object-storage.provider.service.ts) | 原 S3/OSS/COS 签名、受控出站请求与连接探针 |
@@ -24,11 +26,17 @@
 
 `persistUploadFacts(tx, tenantId, facts, metadata)` 仅接调用方已经使用的原事务，先创建 `pending_upload` 文件，再以同一文件 ID 创建原上传会话。metadata 由原编排过滤客户端保留字段并补入可信操作者、空间、配置和专用证据，仓储保持原内容。`findUploadSession(tenantId, reference)` 只读取当前租户下指定原会话 ID 或原幂等键。
 
+原创建入口先核同一租户/幂等键的既有回执、请求描述及业务归属，再调用 `createOriginalFileUploadFacts`。公共内核创建原标识与有效期，读取原默认配置，在原同一事务锁住配置并调用所属来源的授权/引用复验和事实写入。普通业务引用及知识写入尝试标记由原参加者负责，唯一键冲突重读和知识提交失应答继续由原入口解释。模拟模式由宿主显式允许，公共内核缺此许可时保持配置不可用。
+
+`readOriginalFileUploadReceipt` 保留原会话、文件、配置指纹和有效期。仅仍有效的 `pending_upload` 可以取得原暂存键的 PUT，返回前再核原业务引用、原会话、原文件及当前配置。已完成、过期、失败或 `freeze_pending` 返回原回执，续签不会延长有效期或另建目标。租户共享客户资料与空间业务的区别由 Rental 原参加者判断，公共框架没有 Rental 场景枚举。
+
 ## 数据与装配
 
-本片不执行 schema 或迁移。独立公共 schema 需要复用原 FileAsset 与 `file_upload_sessions` 表及 Tenant 反向关系，字段、默认、原 ID、字符串状态和历史 JSON 沿原来源核对。保留 `fileAssetId` 唯一、`file_upload_sessions_scope_idem_key`、`file_upload_sessions_scope_status_idx` 以及 FileAsset 的两个原租户索引。组合 schema 的 AI 检查证据反向关系仍由其所属模块装配。[原模型](../../../../../apps/api/prisma/schema.prisma)
+独立公共 [schema](../../../../../apps/platform-api/prisma/schema.prisma) 已追加原 FileAsset 与 `file_upload_sessions` 两模型及 Tenant 反向关系，公共数据版本为 `0.1.4`，八份迁移由 [数据计划](../../../../../apps/platform-api/src/platform-data.ts) 固定。文件字段、默认、原 ID、字符串状态和历史 JSON 保留，`fileAssetId` 唯一、原幂等唯一键、会话状态索引及 FileAsset 两个租户索引均沿原来源。组合 schema 的 AI 检查反向关系仍由其所属模块装配。新 [公共文件迁移](../../../../../apps/platform-api/prisma/migrations/20261118010000_public_files/migration.sql) 仅用于独立公共库，原组合链不覆盖；本阶段没有执行 DDL。
 
 正式包出口 `@rental-os/platform-server/files` 暴露本模块入口。原运行时构造参数及原 Nest provider 保持，内部仓储使用原 Prisma 实例。Rental 原 ACL 接线通过 `@rental-os/rental-core/file-access` 消费单源业务规则。组合模块/独立宿主的 Provider、Controller、schema 和迁移由装配负责人统一维护。
+
+存储配置停用或原位变更从 `@rental-os/platform-server/file-integration-dependencies` 复用 [只读核验](file-integration-dependencies.ts)。它使用配置已锁定的同一事务读取当前租户/提供者的文件、上传与清理原收据；active/pending/delete、freeze_pending 及非空 cleanupError 均需先迁移或处理。空 Core 目录也执行核验，查询失败向上返回，不据目录为空推断没有文件依赖。业务附件 ACL 和原配置授权仍由各自入口核定。
 
 ## 验证
 

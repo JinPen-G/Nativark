@@ -3,9 +3,10 @@ import { ConflictException } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
 import { RENTAL_CURRENCY_CODES, type RentalCurrency, type TenantIntegrationCapability, type TenantIntegrationProvider } from "@rental-os/shared";
 import type { TenantIntegrationBusinessParticipant, TenantIntegrationTransaction } from "@rental-os/platform-server/integration-store";
+import { assertFileProviderCanDisable, assertFileProviderIdentityChange } from "@rental-os/platform-server/file-integration-dependencies";
 import { PrismaService } from "../database/prisma.service";
 
-type RentalIntegrationTransaction = Pick<Prisma.TransactionClient, "rentalPaymentIntent" | "rentalPaymentRefund" | "rentalNotificationLog" | "fileAsset" | "fileUploadSession">;
+type RentalIntegrationTransaction = Pick<Prisma.TransactionClient, "rentalPaymentIntent" | "rentalPaymentRefund" | "rentalNotificationLog">;
 
 export class RentalIntegrationBusinessParticipant implements TenantIntegrationBusinessParticipant {
   constructor(private readonly prisma: PrismaService) {}
@@ -78,31 +79,18 @@ export class RentalIntegrationBusinessParticipant implements TenantIntegrationBu
       if (pendingBound || pendingUnbound) throw new ConflictException("该短信平台仍有未完成或待核对的通知，请先处理完再停用");
       return;
     }
-    const [asset, session] = await Promise.all([
-      tx.fileAsset.findFirst({
-        where: { tenantId, storageProvider: provider, status: { in: ["active", "pending_upload", "delete_pending", "delete_in_progress"] } },
-        select: { id: true }
-      }),
-      tx.fileUploadSession.findFirst({
-        where: { tenantId, provider, status: { in: ["pending_upload", "cleanup_in_progress"] } },
-        select: { id: true }
-      })
-    ]);
-    if (asset || session) throw new ConflictException("该文件平台仍有已存文件或待清理上传，请先完成迁移/清理后再停用");
+    await assertFileProviderCanDisable(transaction, tenantId, provider);
   }
   async assertProviderIdentityChange(transaction: TenantIntegrationTransaction, tenantId: string,
     capability: "payment" | "file", provider: TenantIntegrationProvider) {
-    // transaction由原配置服务的同一数据库与行锁供给，只转换到五张原依赖表的窄读取能力。
+    if (capability === 'file') {
+      await assertFileProviderIdentityChange(transaction, tenantId, provider);
+      return;
+    }
+    // transaction由原配置服务的同一数据库与行锁供给，支付仍沿原业务表读取。
     const tx = transaction as unknown as RentalIntegrationTransaction;
-    const dependent = capability === 'file'
-      ? await tx.fileAsset.findFirst({ where: { tenantId: tenantId, storageProvider: provider, status: { not: 'deleted' } }, select: { id: true } })
-        || await tx.fileUploadSession.findFirst({ where: { tenantId: tenantId, provider, OR: [
-          { status: { in: ['pending_upload', 'cleanup_in_progress'] } }, { cleanupError: { not: null } }
-        ] }, select: { id: true } })
-      : await tx.rentalPaymentIntent.findFirst({ where: { tenantId: tenantId, provider }, select: { id: true } })
+    const dependent = await tx.rentalPaymentIntent.findFirst({ where: { tenantId: tenantId, provider }, select: { id: true } })
         || await tx.rentalPaymentRefund.findFirst({ where: { tenantId: tenantId, provider }, select: { id: true } });
-    if (dependent) throw new ConflictException(capability === 'file'
-      ? '原文件或上传仍依赖当前存储位置，不能原位更换；请先完成受控迁移/清理'
-      : '历史支付或退款仍依赖原商户配置，不能原位更换；需保留原商户恢复通路');
+    if (dependent) throw new ConflictException('历史支付或退款仍依赖原商户配置，不能原位更换；需保留原商户恢复通路');
   }
 }

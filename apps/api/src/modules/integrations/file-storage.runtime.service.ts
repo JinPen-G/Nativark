@@ -1,6 +1,6 @@
-/** 原组合文件编排。公共字节、内容冻结和文件表由platform-server维护，Rental引用与ACL由Rental包提供。
+/** 原组合文件编排。公共创建、原回执、字节、内容冻结和文件表由platform-server维护，Rental引用与ACL由Rental包提供。
  * 专用检查、知识与企业证据沿原入口和原冻结/unknown收据，不以通用存储替代业务授权。 */
-import { FileStoragePrimitives, FileStorageRepository, MAX_FILE_BYTES, freezeFileUploadContent } from "@rental-os/platform-server/files";
+import { FileStoragePrimitives, FileStorageRepository, MAX_FILE_BYTES, freezeFileUploadContent, createOriginalFileUploadFacts, readOriginalFileUploadReceipt } from "@rental-os/platform-server/files";
 import { RentalFileBusinessReferences } from "@rental-os/rental-core/file-access";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, OnApplicationBootstrap, OnApplicationShutdown, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { INSPECTION_OBJECT_READER, readInspectionMedia, type InspectionObjectReader } from "../ai-native/inspection-assist/inspection-media.reader";
@@ -150,35 +150,33 @@ export class FileStorageRuntimeService extends FileStoragePrimitives implements 
     if (input.businessType === 'ai_knowledge_document') await this.authorizeKnowledgeUpload(tenantId, input, owner);
     else await this.assertBusinessReference(tenantId, input.businessType, input.businessId, owner?.workspaceId);
 
-    const assetId = `file_${randomUUID().replace(/-/g, "")}`;
-    const sessionId = randomUUID();
-    const expiresAt = new Date(Date.now() + UPLOAD_TTL_SECONDS * 1000);
-    const configured = await this.integrations.runtimeConfig("file", tenantId);
-    if (input.businessType === 'ai_knowledge_document' && configured?.provider !== 's3_compatible') throw new ServiceUnavailableException('知识首建需要可读取的受控存储');
-    const provider = configured?.provider ?? "local_mock";
-    const storageKey = this.storageKey(configured, tenantId, assetId, configured ? "blob" : input.fileName);
-    if (storageKey.length > 380) throw new ConflictException("文件对象定位过长，不能创建安全上传会话");
-    const mode = configured ? "provider" : "simulation";
-    if (!configured && process.env.NODE_ENV === "production") {
-      throw new ServiceUnavailableException("文件存储尚未配置，请先启用一个文件平台");
-    }
-
     let knowledgeWriteAttempted = false;
     let created: {
       asset: Prisma.FileAssetGetPayload<object>;
       session: Prisma.FileUploadSessionGetPayload<object>;
     };
     try {
-      created = await this.prisma.$transaction(async (tx) => {
-        if (configured) {
-          // runtimeConfig 在事务外读取；锁住配置行后再创建 pending 上传会话，
-          // 与停用配置的检查形成互斥，避免产生无法继续上传或清理的孤儿会话。
-          await this.integrations.assertEnabledInTransaction(tx, tenantId, "file", configured.provider, { configRevision: configured.revision });
+      created = await createOriginalFileUploadFacts<FileBusinessOwner, Prisma.TransactionClient, typeof created>(
+        { tenantId, request: input, owner, mimeType }, {
+          runtimeConfig: () => this.integrations.runtimeConfig("file", tenantId),
+          validateConfiguration: config => {
+            if (input.businessType === 'ai_knowledge_document' && config?.provider !== 's3_compatible')
+              throw new ServiceUnavailableException('知识首建需要可读取的受控存储');
+          },
+          allowSimulation: process.env.NODE_ENV !== "production",
+          storageKey: (config, currentTenantId, assetId, fileName) => this.storageKey(config, currentTenantId, assetId, fileName),
+          transaction: work => this.prisma.$transaction(work),
+          assertEnabled: (tx, config) => this.integrations.assertEnabledInTransaction(tx, tenantId, "file", config.provider,
+            { configRevision: config.revision }),
+          beforePersist: async () => {
+            if (input.businessType === 'ai_knowledge_document') await this.authorizeKnowledgeUpload(tenantId, input, owner);
+            // 配置读取会让出执行，建立上传事实前再次核原业务引用及空间归属。
+            else await this.assertBusinessReference(tenantId, input.businessType, input.businessId, owner?.workspaceId);
+            if (input.businessType === 'ai_knowledge_document') knowledgeWriteAttempted = true;
+          },
+          persist: (tx, facts, config) => this.persistUploadFacts(tx, tenantId, facts, config)
         }
-        if (input.businessType === 'ai_knowledge_document') await this.authorizeKnowledgeUpload(tenantId, input, owner);
-        if (input.businessType === 'ai_knowledge_document') knowledgeWriteAttempted = true;
-        return this.persistUploadFacts(tx, tenantId, { input: { ...input, idempotencyKey }, owner, assetId, sessionId, expiresAt, provider, storageKey, mode, mimeType }, configured);
-      });
+      );
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         const concurrent = await this.files.findUploadSession(tenantId, { idempotencyKey });
@@ -1283,35 +1281,14 @@ export class FileStorageRuntimeService extends FileStoragePrimitives implements 
   private async originalUploadSummary(tenantId: string, session: Prisma.FileUploadSessionGetPayload<object>,
     asset: Prisma.FileAssetGetPayload<object>, owner?: FileBusinessOwner) {
     session = structuredClone(session); asset = structuredClone(asset);
-    const metadata = asset.metadata as JsonRecord | null;
-    const mode = metadata?.uploadMode === "provider" ? "provider" : "simulation";
-    const summary = this.sessionSummary(session, asset, mode);
-    if (session.tenantId !== tenantId || asset.tenantId !== tenantId || session.fileAssetId !== asset.id
-      || session.provider !== asset.storageProvider || session.storageKey !== asset.storageKey
-      || owner?.workspaceId && metadata?.workspaceId && metadata.workspaceId !== owner.workspaceId && !["customer", "customer_profile", "membership_review"].includes(asset.businessType)) {
-      throw new ConflictException("原上传会话与文件绑定不一致");
-    }
-    if (session.status !== "pending_upload" || asset.status !== "pending_upload" || session.expiresAt.getTime() <= Date.now() || mode === "simulation") {
-      return summary;
-    }
-    if (metadata?.fileUploadVersion !== 2) throw new ConflictException("旧上传会话缺少临时对象和原配置依据，须核对原会话");
-    const config = await this.integrations.runtimeConfig("file", tenantId, session.provider as never, { requireLiveTest: false });
-    if (!config || metadata.storageLocationHash !== this.retentionLocationHash(config)
-      || metadata.uploadConfigHash !== requestFingerprint({ id: config.id, provider: config.provider, settings: config.settings, credentials: config.credentials })) {
-      throw new ConflictException("文件平台配置已变化，不能续签原上传会话");
-    }
-    const signed = this.presign(config, "PUT", this.pendingObjectKey(asset.storageKey), asset.mimeType, session.expiresAt);
-    await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner?.workspaceId);
-    const currentSession = await this.prisma.fileUploadSession.findFirst({ where: { id: session.id, tenantId } });
-    const currentAsset = await this.prisma.fileAsset.findFirst({ where: { id: asset.id, tenantId } });
-    const currentConfig = await this.integrations.runtimeConfig("file", tenantId, session.provider as never, { requireLiveTest: false });
-    if (!currentSession || !currentAsset || requestFingerprint(currentSession) !== requestFingerprint(session)
-      || requestFingerprint(currentAsset) !== requestFingerprint(asset) || session.expiresAt.getTime() <= Date.now()
-      || !currentConfig || metadata.uploadConfigHash !== requestFingerprint({ id: currentConfig.id, provider: currentConfig.provider,
-        settings: currentConfig.settings, credentials: currentConfig.credentials })) {
-      throw new ConflictException("原上传会话在续签期间已变化");
-    }
-    return { ...summary, uploadUrl: signed.url, uploadHeaders: signed.headers };
+    return readOriginalFileUploadReceipt({ tenantId, session, asset, owner }, {
+      isTenantSharedBinding: file => ["customer", "customer_profile", "membership_review"].includes(file.businessType),
+      assertBusinessReference: () => this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner?.workspaceId),
+      runtimeConfig: () => this.integrations.runtimeConfig("file", tenantId, session.provider as never, { requireLiveTest: false }),
+      readSession: () => this.prisma.fileUploadSession.findFirst({ where: { id: session.id, tenantId } }),
+      readAsset: () => this.prisma.fileAsset.findFirst({ where: { id: asset.id, tenantId } }),
+      signPendingPut: (config, storageKey, mimeType, expiresAt) => this.presign(config, "PUT", storageKey, mimeType, expiresAt)
+    });
   }
 
   private matchesUploadRequest(

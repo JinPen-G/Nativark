@@ -4,3 +4,7 @@ export type { FileUploadFacts } from "./file-storage.repository";
 export type { FileStorageOwner, FileStorageTransaction, StoredFileAsset, StoredFileUploadSession } from "./file-storage.store";
 export { freezeFileUploadContent } from "./file-content-freeze";
 export type { FileContentFreezeAsset, FileContentFreezeSession, FileContentFreezeTransaction, FileContentFreezeParticipants } from "./file-content-freeze";
+export { readOriginalFileUploadReceipt } from "./file-upload-receipt";
+export type { FileUploadReceiptParticipants } from "./file-upload-receipt";
+export { createOriginalFileUploadFacts } from "./file-upload-session";
+export type { FileUploadSessionParticipants, OriginalFileUploadFacts } from "./file-upload-session";

@@ -13,6 +13,7 @@
 | [公共订阅接入与 API](../../packages/platform-server/src/modules/subscription/README.md) | 当前租户查看/申请、SaaS 办理、目录与标准年费、原修订/排期/审计 |
 | [公共组织与安全管理](../../packages/platform-server/src/modules/platform/README.md) | 当前主体和组织范围复验、固定平台安全读取、同事务保存与审计；七操作、五路径由同源政策/schema组合 |
 | [公共字典与编号](../../packages/platform-server/src/modules/platform-tools/README.md) | 本租户工具权限、最高生效配置、同事务取号和审计；五个原操作共用 DTO 与 OpenAPI |
+| [公共文件数据及依赖](../../packages/platform-server/src/modules/files/README.md) | 原文件/上传/清理收据两模型，存储配置变更在同一事务核真实文件依赖；业务文件 HTTP 另须受控权威 |
 | [基础集成](../../packages/platform-server/src/modules/integrations/README.md) | 原配置、修订、连通性与受控宿主依赖 |
 | [官方日历来源](../../packages/platform-server/src/modules/official-calendars/README.md) | 公共来源维护、年度版本追加与业务只读接点 |
 | [公共 schema](prisma/schema.prisma) | 公共账号、角色、会话、外观与设置表；保留原表名和身份标识，行业关联仅为可空历史引用 |
@@ -28,7 +29,7 @@ npm run lint:platform-api
 npm run api:document:platform
 ```
 
-Client 输出在本宿主 `generated/client`，运行产物从同一宿主目录读取。公共构建消费 `platform-contracts`、`platform-server` 和标准 `core-contracts` / `core-host` / `platform-core-host`。当前 schema 的 31 个模型均属平台，包含 6 个 Core 授权/绑定及原收据表、2 个统一期限表、5 个订阅办理表、2 个基础集成表和 2 个官方日历来源表。公共数据版本为 `0.1.3`，七份迁移摘要由数据计划固定，官方来源两表沿原快照、数值序号与 RESTRICT 外键定义追加。命令是否可执行取决于当前环境许可。
+Client 输出在本宿主 `generated/client`，运行产物从同一宿主目录读取。公共构建消费 `platform-contracts`、`platform-server` 和标准 `core-contracts` / `core-host` / `platform-core-host`。当前 schema 的 33 个模型均属平台，包含 6 个 Core 授权/绑定及原收据表、2 个统一期限表、5 个订阅办理表、2 个基础集成表、2 个官方日历来源表和 2 个文件/上传表。公共数据版本为 `0.1.4`，八份迁移摘要由数据计划固定；文件原字段、唯一键、清理收据及原外键保留。命令是否可执行取决于当前环境许可。
 
 新公共库按 `npm run db:platform:migrate:deploy` 应用本链。**不能把本基线套在已有 Rental 组合库**；已有库切换须先按原迁移来源和数据所有权演练兼容迁移。
 
@@ -39,6 +40,8 @@ SaaS管理员通过 `POST /api/platform/tenants` 创建公共租户与首个管�
 组织列表及维护使用 `/api/platform/organizations`，按当前租户及原组织范围开放。全平台安全配置使用 `/api/platform/security-baseline`，读取和 SaaS 保存分别授权；登录前读取复用同一个固定平台来源。公共后台对应组织页和安全页已直接消费这些接口，Core作者无需自行复制设置页。[公共后台](../platform-admin/README.md) · [管理方法与权限](../../packages/platform-server/src/modules/platform/README.md)
 
 字典使用 `/api/platform/dictionaries`，编号规则及取号使用 `/api/platform/number-rules`，各自要求原工具权限；SaaS 账号不能代租户调用。公共初始化补录两项权限目录，原角色授权不因此扩大。公共缺省为空，租赁默认资料仍由原组合提供；新建和维护从公共后台完成。[五个操作、存储和原格式](../../packages/platform-server/src/modules/platform-tools/README.md)
+
+文件配置停用和存储位置变更必须核原文件、上传及清理收据，默认零 Core 组合也通过同一事务执行该核验。保留文件或unknown依赖时先迁移/处理；查询失败不放行。当前已有公共文件数据和同源内核，业务文件HTTP仍需宿主提供真实对象/成员/范围及附件权威，不因数据表存在开放零 Core 任意上传。[实际接线](src/core-assembly.ts) · [文件迁移](prisma/migrations/20261118010000_public_files/migration.sql)
 
 标准Core管理位于 `/api/platform/core-host`，当前组合已登记管理、本人Core目录和范围HTTP，默认本人目录为空。真正选中Core时提供固定服务、业务HTTP、真实订阅和数据观察；SaaS授权、成员分配与绑定分别成立。[标准宿主用法](../../packages/platform-core-host/README.md)
 

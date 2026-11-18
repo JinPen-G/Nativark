@@ -262,6 +262,10 @@
     "./files": {
       "types": "./dist/modules/files/index.d.ts",
       "default": "./dist/modules/files/index.js"
+    },
+    "./file-integration-dependencies": {
+      "types": "./dist/modules/files/file-integration-dependencies.d.ts",
+      "default": "./dist/modules/files/file-integration-dependencies.js"
     }
   },
   "scripts": {
@@ -474,6 +478,9 @@
       ],
       "files": [
         "dist/modules/files/index.d.ts"
+      ],
+      "file-integration-dependencies": [
+        "dist/modules/files/file-integration-dependencies.d.ts"
       ]
     }
   }

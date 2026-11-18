@@ -17,6 +17,7 @@
 | 官方日历来源 | [模块导读](src/modules/official-calendars/README.md)、[来源服务](src/modules/official-calendars/official-calendar-source.service.ts)、[冻结读取器](src/modules/official-calendars/official-calendar-source-reader.ts)；公共主档、只追加年度版本与历史快照 |
 | 字典与编号 | [模块及 API](src/modules/platform-tools/README.md)、[服务](src/modules/platform-tools/platform-tools.service.ts)、[生效配置仓储](src/modules/platform-tools/platform-tools.repository.ts)；当前租户维护、原格式及同事务取号，公共缺省为空 |
 | 文件存储与冻结 | [模块导读](src/modules/files/README.md)、[字节处理](src/modules/files/file-storage-primitives.ts)、[冻结内核](src/modules/files/file-content-freeze.ts)、[文件仓储](src/modules/files/file-storage.repository.ts)；原限长传输、元数据、上传会话和唯一冻结目标，业务 ACL 由所属 Core 提供 |
+| 文件配置围栏 | [只读文件依赖](src/modules/files/file-integration-dependencies.ts) 从 `/file-integration-dependencies` 提供，原配置同事务读取文件、上传/冻结/清理收据，空 Core 目录不能代替依赖证据 |
 | 公共设置 | [租户外观](src/modules/client/tenant-appearance-profile.service.ts)、[本人外观](src/modules/client/account-appearance.service.ts)、[存储端口](src/modules/platform/platform-appearance-data-store.ts)；修订冲突、省略与清空沿原语义 |
 | 公共审计 | [日志写入与脱敏](src/common/operation-log.service.ts) 从 `/operation-log` 提供；宿主供给原日志表，业务空间来自同一ALS，敏感读取要求持久写入成功。原OAuth/MCP/Core原收据审计仍由各自严格事务入口负责 |
 | 短信结果接点 | [原结果与unknown错误](src/common/notification-delivery.ts) 从 `/notification-delivery` 提供，原Provider及Core共用同一错误身份；实际发送、凭据和回执仍由原通知服务负责 |
@@ -46,7 +47,9 @@ const platform = PlatformServerModule.register({
 
 字典与编号从 `/tools` 使用同一 `PlatformToolsService`，请求类从 `/tools-dto` 复用。公共模块已登记五个原 HTTP 操作与同源 OpenAPI；独立公共宿主注册公共 Controller，原组合只保留原 Controller 和同一服务实例。取号与保存先锁租户，再核当前主体、生效配置与审计，失败由调用方读取核对。两个工具权限通过公共初始化补录，不自动授予成员。普通 Core 可消费公共工具，业务本身的编号规则继续由其领域决定。[接入与原子性](src/modules/platform-tools/README.md)
 
-文件服务从 `/files` 消费原字节、格式、原存储键和文件表实现；原运行时与元数据仓储已委托同一实现。`freezeFileUploadContent` 在原完成链中先提交唯一目标再写一次，恢复只核原目标；当前授权、配置锁和知识专用字节由原参加者供给，最终激活仍在原完成事务。其余通用生命周期及 HTTP / 公共数据装配继续按 PCH 迁移，知识、专用检查、企业证据及附件读取仍须由各自原授权链裁定。[文件入口及数据边界](src/modules/files/README.md)
+文件服务从 `/files` 消费原字节、格式、原存储键和文件表实现；原运行时与元数据仓储已委托同一实现。`createOriginalFileUploadFacts` 通过原配置锁、授权/引用参加者和同事务建立pending事实，`readOriginalFileUploadReceipt` 仅为仍有效会话续签原暂存键，不延长原有效期。`freezeFileUploadContent` 在原完成链中先提交唯一目标再写一次，恢复只核原目标；最终激活及知识绑定仍在原完成事务。公共文件两模型/迁移已提供，业务HTTP及完整应用装配继续按PCH推进，知识、专用检查、企业证据及附件读取仍须由各自原授权链裁定。[文件入口及数据边界](src/modules/files/README.md)
+
+原Rental配置参加者及零Core公共宿主从 `/file-integration-dependencies` 复用同一只读查询，先取得原配置事务，再核当前租户/提供者的实际文件及上传依赖。停用保留原active/pending/delete判断并显式保护freeze_pending及非空cleanupError，存储位置变更保留原非deleted文件与unknown依据。查询异常向上返回。支付、短信和业务结算仍由原领域供给，不因公共文件表存在而取消其核验。
 
 `readPublicSubscriptionTerm(transaction, tenantId)` 在调用方原事务读取当前统一期限和已到生效点的排期，不物化排期、不新建订阅。明确到期拒绝新业务；历史未登记状态保持原“待确认”的兼容，不因此视为永久或批量停业。公共订阅办理消费相同状态/周年算法，金额、收费和已发布功能规则沿原 SUB 规则裁定。此入口不赋予Core使用权或绕过冻结。
 

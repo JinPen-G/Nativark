@@ -71,6 +71,8 @@ model Tenant {
   subscriptionEvents                SubscriptionEvent[]
   adapterLogs                       ExternalAdapterLog[]
   integrationConfigs                TenantIntegrationConfig[]
+  files                             FileAsset[]
+  fileUploadSessions                FileUploadSession[]
   logs                              OperationLog[]
   createdAt                         DateTime                                 @default(now())
   updatedAt                         DateTime                                 @updatedAt
@@ -263,6 +265,60 @@ model TenantAppearanceProfile {
 
   @@map("tenant_appearance_profiles")
 
+}
+
+/// 公共文件事实沿原表名/字段保存；业务ACL、知识及检查绑定由所选Core或专用模块提供。
+model FileAsset {
+  id              String             @id @default(uuid())
+  tenantId        String
+  tenant          Tenant             @relation(fields: [tenantId], references: [id])
+  businessModule  String
+  businessType    String
+  businessId      String?
+  fileName        String
+  fileExt         String?
+  mimeType        String
+  sizeBytes       Int                @default(0)
+  storageProvider String             @default("local_mock")
+  storageKey      String
+  publicUrl       String?
+  checksum        String?
+  uploadScene     String
+  status          String             @default("active")
+  uploadedBy      String?
+  metadata        Json?
+  uploadSession   FileUploadSession?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([tenantId, businessType, businessId])
+  @@index([tenantId, uploadScene, createdAt])
+}
+
+/// 原会话/冻结/清理收据，状态和原对象键不能由过期推断成功、回滚或可重发。
+model FileUploadSession {
+  id              String    @id @default(uuid())
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fileAssetId     String    @unique
+  fileAsset       FileAsset @relation(fields: [fileAssetId], references: [id], onDelete: Cascade)
+  provider        String    @db.VarChar(40)
+  storageKey      String    @db.VarChar(500)
+  status          String    @default("pending_upload") @db.VarChar(24)
+  idempotencyKey  String?
+  expiresAt       DateTime
+  completedAt     DateTime?
+  failureReason   String?   @db.VarChar(500)
+  /// 原清理占用和失败观察，不能据此重新发送未知操作。
+  cleanupAttempts Int       @default(0)
+  lastCleanupAt   DateTime?
+  cleanupError    String?   @db.VarChar(500)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([tenantId, idempotencyKey], map: "file_upload_sessions_scope_idem_key")
+  @@index([tenantId, status, expiresAt], map: "file_upload_sessions_scope_status_idx")
+  @@map("file_upload_sessions")
 }
 
 model OperationLog {
