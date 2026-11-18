@@ -11,6 +11,7 @@
 | [养护工单前端](admin/work-orders/README.md)、[页面贡献](admin/work-orders/index.tsx)、[客户端工厂](admin/work-orders/client.ts) | `/admin/work-orders` 提供原列表/看板/详情与六类表单；宿主供给当前权限/经营空间及唯一请求，旧路由和十二HTTP方法薄适配同一实现 |
 | [履约网络前端](admin/locations/README.md)、[地点贡献](admin/locations/index.tsx)、[客户端与范围](admin/locations/client.ts) | `/admin/locations` 持有地点与经营主体、两表单、原列表/卡片及导入导出；统一贡献供给七页，宿主提供当前范围和原组织查看/映射权限 |
 | [能力治理前端](admin/capabilities/README.md)、[页面贡献](admin/capabilities/index.tsx)、[请求工厂](admin/capabilities/client.ts) | `/admin/capabilities` 提供原能力目录、配置、升级及审计；宿主供给当前范围和原会话刷新，配置入口保留查看/管理权限与原修订，卡片复用原生 UIArc |
+| [统一HTTP装配](src/http.module.ts)、[原组合宿主](../../apps/api/src/app.module.ts) | `/http` 一次提供19个原Controller与九组应用接线；宿主供给同一业务实例及当前身份/Guard，必需服务缺失时拒绝装配，原可选依赖保持 |
 | [核心HTTP](src/http-core.controller.ts)、[业务HTTP](src/http-business.controller.ts)、[应用接点](src/http-applications.ts)、[快照与操作键](src/http-context.ts) | `/http-core` 与 `/http-business` 持有原履约、报价、规则和营销HTTP；宿主绑定同一业务/数据库实例，Guard/ALS及原动作继续核权限、事务和原收据 |
 | [空间能力HTTP](src/http-workspace-capabilities.controller.ts)、[员工收款HTTP](src/http-staff-payments.controller.ts)、[服务接点](src/http-service-ports.ts)、[空间能力DTO](src/http-workspace-capability.dto.ts) | 正式HTTP子出口持有原8条路径与校验；宿主Guard先形成可信身份，再通过同一原服务实例处理。原API只再导出，Controller注册不取得额外业务权限 |
 | [企业读取HTTP](src/http-enterprise-read.controller.ts)、[商户决策HTTP](src/http-enterprise-merchant.controller.ts)、[行政交接HTTP](src/http-enterprise-handoff-merchant.controller.ts)、[客户工作流HTTP](src/http-enterprise-workflows.controller.ts) | 四个正式子出口保留客户与营运两套鉴权、原149操作、材料前后复验和原收据；[21项实际接点](src/http-enterprise-applications.ts)由宿主绑定同一服务/数据库 |
@@ -113,6 +114,14 @@
 | [批准设置应用](src/mysql-approved-settings.ts)、[真实路由授权桥](src/approved-settings-route-authority.ts)、[参加者合同](src/approved-settings-ports.ts)、[严格输入](src/approved-settings-validation.ts) | /mysql-approved-settings 与 /approved-settings-route-authority 复用原Guard/ALS，通知配置CAS、批准消费与原操作同事务，历史读取不以当前配置或过期重做 |
 
 ## 使用与构建
+
+Rental HTTP从 `@rental-os/rental-core/http` 的 `RentalHttpModule` 接入，类型 `RentalHttpServiceGroups` 列出宿主需要供给的真实应用。
+
+1. 按 `rental`、`enterprise`、`client`、`category`、`channels`、`members`、`files`、`staff` 与 `customerAvatar` 九组提供已有服务；所有业务、文件及审计使用同一数据库和当前身份。
+2. 在宿主 `imports` 中使用 `RentalHttpModule.registerFactory({ imports, inject, useFactory })`，工厂返回上一步的应用集合。已经完成实例装配的宿主可用 `register(services)`；应用集合只创建一次，必需服务缺失时启动失败，原可选服务保持原处理。
+3. 由宿主注册原身份/权限Guard、ALS及Rental HTTP政策，并选择该Core的路由贡献。员工、客户与企业接口沿各自audience和业务范围裁定；HTTP模块与单独品类模块选其一，避免重复Controller。
+
+原组合AppModule从 `/http` 导入同一19个Controller，保留原Controller列表和provider接线；服务、数据、作业和AI的完整独立装配继续沿正式Core边界供给。字段、请求验证类和政策从下面各HTTP出口及[OpenAPI源码](../../apps/api/src/contracts/openapi-document.ts)查阅。[统一模块](src/http.module.ts) · [原服务绑定](../../apps/api/src/modules/rental-core/rental-http.providers.ts)
 
 微信客户认证从 `/mysql-client-wechat-auth` 接入，实际事务、渠道凭据、同一客户主档/注册、当前会话和审计经 `/client-wechat-ports` 供给。运输使用 `@rental-os/platform-server/integration-wechat` 的同一类和错误身份，保留原AppID缓存及凭据一次刷新；业务绑定核水印，已登录客户的一次性code错误不重试、不视为会话失效。原[微信Nest接线](../../apps/api/src/modules/client/client-wechat-auth.service.ts)保持八项构造位置。
 

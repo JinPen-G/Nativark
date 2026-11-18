@@ -1,5 +1,11 @@
-/** 原公共平台、Rental与AI Native的组合装配，显式供给同一服务及数据库实例。
- * 环境加载和监听由main负责；业务Controller、作业与授权沿所属模块的原入口执行。 */
+/** 原公共平台、Rental与AI Native的兼容组合宿主，Rental HTTP消费正式包中的同一类。
+ * 显式供给原数据库、当前身份/Guard及唯一业务/作业实例；环境加载和监听由main负责。 */
+import {
+  StaffAuthController, CategoryGovernanceController, CategoryAdoptionPreparationController, MembershipController, EnterpriseWorkflowsController,
+  EnterpriseReadController, EnterpriseMerchantController, EnterpriseRentalHandoffMerchantController, CustomerAvatarController, RentalCoreController,
+  RentalBusinessController, WorkspaceCapabilityController, FilesController, StaffUploadsController, StaffOfflinePaymentController,
+  ClientApiController, MiniProgramChannelController, ClientChannelProfileController, WebsiteChannelProfileController
+} from "@rental-os/rental-core/http";
 import { AiTaskReadPolicyController } from './modules/ai-native/task-read-policy.application';
 import { AiCategoryProposalController } from './modules/ai-native/category-assist/category-proposal-http.application';
 import { AI_NATIVE_CATEGORY_PROPOSAL_PROVIDER } from './modules/ai-native/ai-native-application.providers';
@@ -31,10 +37,7 @@ import { OperationAuditInterceptor } from "./common/operation-audit.interceptor"
 import { OperationLogService } from "./common/operation-log.service";
 import { RequestIdInterceptor } from "./common/request-id.interceptor";
 import { AuthController } from "./modules/auth/auth.controller";
-import { StaffAuthController } from "./modules/auth/staff-auth.controller";
 import { AuthService } from "./modules/auth/auth.service";
-import { FilesController } from "./modules/files/files.controller";
-import { StaffUploadsController } from "./modules/files/staff-uploads.controller";
 import { HealthController } from "./modules/health/health.controller";
 import { IntegrationsController } from "./modules/integrations/integrations.controller";
 import { IntegrationsRepository } from "./modules/integrations/integrations.repository";
@@ -77,7 +80,6 @@ import { CustomerOperationsService } from "./modules/platform/customer-operation
 import { CustomerMergeService } from "./modules/platform/customer-merge.service";
 import { CustomerCorporateService } from "./modules/platform/customer-corporate.service";
 import { CustomerCorporateSettlementService } from "./modules/platform/customer-corporate-settlement.service";
-import { MembershipController } from "./modules/platform/membership.controller";
 import { MembershipService } from "./modules/platform/membership.service";
 import { EnterprisePortalService } from "./modules/platform/enterprise-portal.service";
 import { EnterpriseAccessService } from "./modules/client/enterprise-access.service";
@@ -85,7 +87,6 @@ import { EnterpriseCommandService } from "./modules/enterprise/enterprise-comman
 import { EnterpriseApplicationService } from "./modules/enterprise/enterprise-application.service";
 import { EnterpriseRentalHandoffService } from "./modules/enterprise/enterprise-rental-handoff.service";
 import { EnterpriseMembershipAuditService } from "./modules/enterprise/enterprise-membership-audit.service";
-import { EnterpriseRentalHandoffMerchantController } from "./modules/enterprise/enterprise-rental-handoff-merchant.controller";
 import { EnterpriseMembersService } from "./modules/enterprise/enterprise-members.service";
 import { EnterprisePolicyService } from "./modules/enterprise/enterprise-policy.service";
 import { EnterpriseApprovalService } from "./modules/enterprise/enterprise-approval.service";
@@ -95,14 +96,9 @@ import { EnterpriseExchangeApprovalService } from "./modules/enterprise/enterpri
 import { EnterpriseExtensionApprovalService } from "./modules/enterprise/enterprise-extension-approval.service";
 import { EnterpriseTaskCenterService } from "./modules/enterprise/enterprise-task-center.service";
 import { EnterpriseManagementRequestService } from "./modules/enterprise/enterprise-management-request.service";
-import { EnterpriseWorkflowsController } from "./modules/enterprise/enterprise-workflows.controller";
 import { EnterpriseOrderReaderService } from "./modules/enterprise/enterprise-order-reader.service";
-import { EnterpriseReadController } from "./modules/enterprise/enterprise-read.controller";
-import { EnterpriseMerchantController } from "./modules/enterprise/enterprise-merchant.controller";
-import { CustomerAvatarController } from "./modules/platform/customer-avatar.controller";
 import { CustomerAvatarService } from "./modules/platform/customer-avatar.service";
 import { PlatformService } from "./modules/platform/platform.service";
-import { RentalCoreController } from "./modules/rental-core/rental-core.controller";
 import { RentalExchangePreviewService } from "./modules/rental-core/rental-exchange-preview.service";
 import { RentalExchangeInspectionPreparationService } from "./modules/rental-core/rental-exchange-inspection-preparation.service";
 import { RentalExchangeInspectionConsentService } from "./modules/rental-core/rental-exchange-inspection-consent.service";
@@ -110,14 +106,11 @@ import { RentalApprovedExchangeService } from "./modules/rental-core/rental-appr
 import { RentalExchangeInspectionMediaService } from "./modules/rental-core/rental-exchange-inspection-media.service";
 import { RentalCoreService } from "./modules/rental-core/rental-core.service";
 import { RentalCategoryResolver } from "./modules/rental-core/rental-category-resolver.service";
-import { CategoryGovernanceController } from "./modules/rental-core/category-governance.controller";
 import { CategoryGovernanceService } from "./modules/rental-core/category-governance.service";
-import { CategoryAdoptionPreparationController } from "./modules/rental-core/category-adoption-preparation.controller";
 import { CategoryAdoptionPreparationService } from "./modules/rental-core/category-adoption-preparation.service";
 import { CategoryAdoptionApplication } from "./modules/rental-core/category-adoption.application";
 import { RentalAllocationService } from "./modules/rental-core/rental-allocation.service";
 import { RentalDueJobScheduler } from "./modules/rental-core/rental-due-job.scheduler";
-import { RentalBusinessController } from "./modules/rental-core/rental-business.controller";
 import { OfficialCalendarSourceController } from "./modules/rental-core/official-calendar-source.controller";
 import { OfficialCalendarSourceService } from "./modules/rental-core/official-calendar-source.service";
 import { OFFICIAL_CALENDAR_DATA_STORE, OFFICIAL_CALENDAR_APPLICATION } from "@rental-os/platform-server/official-calendar-store";
@@ -134,11 +127,9 @@ import { RentalIdempotencyRepository } from "./modules/rental-core/rental-idempo
 import { RentalIdempotentActionService } from "./modules/rental-core/rental-idempotent-action.service";
 import { RentalFundingService } from "./modules/rental-core/rental-funding.service";
 import { RentalOrderReceivableRepository } from "./modules/rental-core/rental-order-receivable.repository";
-import { StaffOfflinePaymentController } from "./modules/rental-core/staff-offline-payment.controller";
 import { StaffOfflinePaymentService } from "./modules/rental-core/staff-offline-payment.service";
 import { RentalDocumentService } from "./modules/rental-core/rental-document.service";
 import { RentalOrderConfirmationService } from "./modules/rental-core/rental-order-confirmation.service";
-import { WorkspaceCapabilityController } from "./modules/rental-core/workspace-capability.controller";
 import { RENTAL_HTTP_PROVIDERS } from "./modules/rental-core/rental-http.providers";
 import { RENTAL_ENTERPRISE_HTTP_PROVIDERS } from "./modules/enterprise/enterprise-http.providers";
 import { RENTAL_STAFF_HTTP_PROVIDERS } from "./modules/files/staff-http.providers";
@@ -152,7 +143,7 @@ import { CapabilityHookRuntime } from "./modules/rental-core/capability-hook.run
 import { CapabilityHookRepository } from "./modules/rental-core/capability-hook.repository";
 import { CapabilityHookRegistrar } from "./modules/rental-core/capability-hook.registrar";
 import { RentalServiceCapacityService } from "./modules/rental-core/rental-service-capacity.service";
-import { ClientApiController } from "./modules/client/client-api.controller";
+
 import { ClientApiService } from "./modules/client/client-api.service";
 import { ClientAuthService } from "./modules/client/client-auth.service";
 import { ClientApiRateLimitService } from "./modules/client/client-api-rate-limit.service";
@@ -160,15 +151,15 @@ import { ClientAccountClosureService } from "./modules/client/client-account-clo
 import { ClientDeliveryAddressService } from "./modules/client/client-delivery-address.service";
 import { ClientWechatAuthService } from "./modules/client/client-wechat-auth.service";
 import { WechatMiniProgramAdapter } from "./modules/client/wechat-mini-program.adapter";
-import { MiniProgramChannelController } from "./modules/client/mini-program-channel.controller";
+
 import { MiniProgramChannelService } from "./modules/client/mini-program-channel.service";
-import { ClientChannelProfileController } from "./modules/client/client-channel-profile.controller";
+
 import { ClientChannelProfileService } from "./modules/client/client-channel-profile.service";
 import { TenantAppearanceProfileController } from "./modules/client/tenant-appearance-profile.controller";
 import { TenantAppearanceProfileService } from "./modules/client/tenant-appearance-profile.service";
 import { AccountAppearanceController } from "./modules/client/account-appearance.controller";
 import { AccountAppearanceService } from "./modules/client/account-appearance.service";
-import { WebsiteChannelProfileController } from "./modules/client/website-channel-profile.controller";
+
 import { WebsiteChannelProfileService } from "./modules/client/website-channel-profile.service";
 import { WebsiteAssetService } from "./modules/client/website-asset.service";
 import { TenantSubscriptionController } from "./modules/subscription/subscription.controller";

@@ -8,8 +8,8 @@
 
 import type { InfraAdapterCapability, NotificationTemplateSummary, NotificationSendLogSummary, AdapterLogSummary } from "@rental-os/platform-contracts/notifications";
 export type { InfraAdapterCapability, NotificationTemplateSummary, NotificationSendLogSummary, SendMockNotificationRequest, AdapterLogSummary } from "@rental-os/platform-contracts/notifications";
-import type { AsyncJobSummary } from "@rental-os/platform-contracts/jobs";
-export type { AsyncJobSummary, CreateAsyncJobRequest } from "@rental-os/platform-contracts/jobs";
+import type { AsyncJobSummary, PrintJobSummary } from "@rental-os/platform-contracts/jobs";
+export type { AsyncJobSummary, CreateAsyncJobRequest, PrintJobSummary, CreatePrintJobRequest } from "@rental-os/platform-contracts/jobs";
 
 export interface InfraCapabilityCard {
   capability: InfraAdapterCapability;
@@ -149,32 +149,7 @@ export interface DataExchangeJobResult {
   sourceFileAsset?: FileAssetSummary;
 }
 
-export interface PrintJobSummary {
-  id: string;
-  documentNo: string;
-  documentType: string;
-  templateCode: string;
-  businessType: string;
-  businessId?: string;
-  status: "mock_generated" | "queued" | "failed" | string;
-  fileAssetId?: string;
-  operator?: string;
-  payload: Record<string, unknown>;
-  result?: Record<string, unknown>;
-  createdAt: string;
-  updatedAt: string;
-}
-
 export type { RentalDocumentType, RentalDocumentRenderResult, RentalDocumentSnapshotSummary } from "@rental-os/rental-core/document-contracts";
-
-export interface CreatePrintJobRequest {
-  documentType: "pickup_sheet" | "return_sheet" | "rental_contract" | "invoice" | string;
-  templateCode: string;
-  businessType: string;
-  businessId?: string;
-  payload?: Record<string, unknown>;
-  operator?: string;
-}
 
 export interface TBoxDeviceSummary {
   id: string;

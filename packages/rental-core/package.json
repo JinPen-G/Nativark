@@ -1214,6 +1214,10 @@
     "./http-category": {
       "types": "./dist/http-category.module.d.ts",
       "default": "./dist/http-category.module.js"
+    },
+    "./http": {
+      "types": "./dist/http.module.d.ts",
+      "default": "./dist/http.module.js"
     }
   },
   "typesVersions": {
@@ -2120,6 +2124,9 @@
       ],
       "http-category": [
         "dist/http-category.module.d.ts"
+      ],
+      "http": [
+        "dist/http.module.d.ts"
       ]
     }
   },

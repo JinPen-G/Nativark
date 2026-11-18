@@ -2,6 +2,8 @@
 
 Rental Core维护租赁领域事实，包括经营空间/品类、商品和资产、报价库存、订单履约、检查及金额。它是首个业务Core示范，平台身份、公共后台和原AI机制通过受控适配消费，具体报价、金额与状态仍在原Core裁定。
 
+原AppModule现从正式 `/http` 出口消费同一19个Rental Controller；[统一HTTP模块](../../../../../packages/rental-core/src/http.module.ts)按九组应用供给组合，工厂复用已有实例，必需服务缺失时拒绝。独立宿主从[三步接线](../../../../../packages/rental-core/README.md#使用与构建)开始，当前本目录继续承接原业务/数据/身份适配，完整标准Core应用、数据和AI装配沿真实依赖推进。
+
 [客户Controller](../client/client-api.controller.ts)已转接[Rental客户HTTP](../../../../../packages/rental-core/src/http-client.controller.ts)。[八项实际接线](../client/client-http.providers.ts)共用原业务、Auth、微信、地址、注销、企业与Guard实例；本人/企业授权和返回前的会话绑定复验保持。客户认证、统一注册、数据库限流及官网图片也已归Rental，旧路径只提供Nest接线，原会话、用途证明、客户行锁和有限冲突重试继续单源执行。[客户认证](../../../../../packages/rental-core/src/mysql-client-auth.ts) · [统一注册](../../../../../packages/rental-core/src/mysql-customer-registration.ts) · [限流](../../../../../packages/rental-core/src/mysql-client-rate-limit.ts) · [官网图片](../../../../../packages/rental-core/src/mysql-client-website-assets.ts) · [API字段](../../contracts/openapi-document.ts)
 
 [原微信接线](../client/client-wechat-auth.service.ts)已供给[Rental微信客户认证](../../../../../packages/rental-core/src/mysql-client-wechat-auth.ts)同一事务、客户/注册、渠道、秘密存储和当前会话；[公共运输](../../../../../packages/platform-server/src/modules/integrations/wechat-mini-program.adapter.ts)保留原AppID缓存及错误身份。客户登录/绑定、水印和一次性凭证规则仍由Rental核定。企业授权/回款证明与检查字节、Staff原键观察已由[Rental读取参加者](../../../../../packages/rental-core/src/file-application-rental-evidence.ts)及[观察参加者](../../../../../packages/rental-core/src/file-application-staff-observation.ts)单源处理，原[文件Runtime](../integrations/file-storage.runtime.service.ts)只委托对应方法；实际知识/检查权威和冻结摘要继续保留。

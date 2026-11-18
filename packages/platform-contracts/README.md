@@ -20,7 +20,7 @@ import { TenantStatus, type PlatformSessionContextResponse } from "@rental-os/pl
 
 通知目录、发送日志与适配日志从 `@rental-os/platform-contracts/notifications` 导入，根合同及原 shared/infrastructure 再导出同一五项声明。模板内容、业务触发和真实发送由宿主提供，模拟回执仍使用原状态字段；声明不包含业务默认模板或额外授权。[通知合同](src/notifications.ts) · [原兼容出口](../shared/src/infrastructure.ts)
 
-异步任务的 `AsyncJobSummary`、`CreateAsyncJobRequest` 从 `@rental-os/platform-contracts/jobs` 导入，根和原 shared/infrastructure 再导出同一声明。创建、尝试次数、排期、历史状态及可空结果沿原字段；台账登记不授予业务执行权限。存储和日志参加者由宿主提供，任务执行由所属业务负责。[作业合同](src/jobs.ts) · [公共台账](../platform-server/src/modules/jobs/job-ledger.ts)
+异步任务的 `AsyncJobSummary`、`CreateAsyncJobRequest` 和打印任务的 `PrintJobSummary`、`CreatePrintJobRequest` 从 `@rental-os/platform-contracts/jobs` 导入，根和原 shared/infrastructure 再导出同一声明。创建、尝试次数、排期、历史状态及可空结果沿原字段；台账登记不授予业务执行权限。存储和日志参加者由宿主提供，打印模板、业务裁定和实际执行由所属业务负责。[作业合同](src/jobs.ts) · [公共台账](../platform-server/src/modules/jobs/job-ledger.ts)
 
 运营邀请、寄件中心和客服邮件从 `@rental-os/platform-contracts/tenant-messaging` 导入，根出口及原shared再导出同一声明。原账号/邀请载荷的`workspaceAccesses`字段保持兼容，由宿主按所属Core核验，公共租户角色与Core使用权分别处理；字段本身不强制新Core采用Rental经营空间。投递状态、邀请原操作键和邮件分页字段保持，公开结果不包含邀请令牌或SMTP凭据。[消息合同](src/tenant-messaging.ts) · [公共应用](../platform-server/src/modules/messaging/README.md)
 
