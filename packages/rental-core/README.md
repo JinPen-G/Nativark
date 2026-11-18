@@ -21,6 +21,7 @@
 | [换货候选与试算](src/mysql-exchange-preview.ts)、[事务与服务视图](src/exchange-preview-ports.ts)、[候选合同](src/exchange-choices.ts) | /mysql-exchange-preview在原订单锁内读取当前候选及冻结价格依据，保留容量、整行和币种限制；试算不批准、不执行、不收款 |
 | [换货检查准备](src/mysql-exchange-inspection-preparation.ts)、[准备与照片消费](src/exchange-inspection-preparation.read.ts)、[严格DTO](src/exchange-inspection-preparation.dto.ts) | /mysql-exchange-inspection-preparation、/exchange-inspection-preparation-read与/exchange-inspection-dto保留原操作者、订单锁、冻结模板、照片消费及原收据同事务；检查事实不授予费用、客户同意或履约权 |
 | [专用检查影像](src/mysql-exchange-inspection-media.ts)、[原影像读取](src/exchange-inspection-media.read.ts)、[当前身份/文件/事务接点](src/exchange-inspection-ports.ts) | /mysql-exchange-inspection-media与/exchange-inspection-media-read核原来源、文件/会话、占用与完成；原文件适配负责私有计划、单次暂存读取和冻结目标核对 |
+| [附件 ACL](src/file-access.ts)、[业务读取](src/file-business-access.ts)、[引用存在性](src/file-business-reference.ts)、[读取参加者](src/file-access-ports.ts) | `/file-access` 持有原商品公开图、客户敏感附件及订单/资产/检查等对象范围；公共文件表和字节存储不能授予 Rental 业务读权 |
 | [凭证合同](src/document-contracts.ts)、[纯渲染](src/document-renderer.ts)、[归档与历史](src/mysql-documents.ts)、[本表读写视图](src/document-storage.ts) | /document-contracts与/document-renderer不依赖数据库；/mysql-documents保留逐字段释放、稳定内容摘要、同内容唯一归档和当前订单/空间/财务历史门禁 |
 | [经营空间边界](src/mysql-workspace-scope.ts) | `/mysql-workspace-scope` 核请求空间所属租户及跨空间写入；原初始化/恢复只读取默认空间，原Guard先裁定请求授权 |
 | [配置运行时DTO](src/config-request.dto.ts) | `/configuration-dto` 与原API共用字段、嵌套校验和装饰器元数据；规则候选采用同一类，审批、业务规则及保存仍由所属服务处理 |
@@ -117,6 +118,8 @@ HTTP入口从 `/http-workspace-capabilities`、`/http-staff-payments` 导入；`
 换货检查准备从 `@rental-os/rental-core/mysql-exchange-inspection-preparation` 创建，供给同一数据源、核心、试算、幂等与当前授权实例。影像从 `/mysql-exchange-inspection-media` 创建，供给同一检查实例和原文件服务；两者的[窄接点](src/exchange-inspection-ports.ts)只描述本链需要的方法。`readForExecution` 使用调用方已有事务，准备、照片消费、批准和原收据不会因迁移另开提交边界。[原检查provider](../../apps/api/src/modules/rental-core/rental-exchange-inspection-preparation.service.ts) · [原影像provider](../../apps/api/src/modules/rental-core/rental-exchange-inspection-media.service.ts)
 
 文件适配返回的完整计划通过 `TPlan` 原样交还该适配，私有配置不进入公共清单或HTTP结果。完成占用先提交，只有本次已确认占用可读取暂存并冻结一次；重启或首响应丢失只核对原冻结目标。没有可信冻结证据时保持unknown，订单修订或当前权限变化继续拒绝。严格输入从 `/exchange-inspection-dto` 复用；HTTP八项路由、权限及字段仍由[原接口声明](../../apps/api/src/modules/rental-core/rental-exchange-inspection-preparation.schemas.ts)提供，SDK方法不是任意业务Agent的调用许可。[原七项检查消费者](../../tests/enterprise-extension-approval.test.cjs)
+
+普通附件权限从 `@rental-os/rental-core/file-access` 接入同一 `RentalFileBusinessAccessService` 与 `RentalFileBusinessReferences`，供给原事实仓储、报价读取及客户敏感资料参加者。原 [文件权限适配](../../apps/api/src/modules/files/file-business-access.service.ts) 已消费同一实现。未知业务绑定拒绝，租户共享客户资料不开放跨空间订单；公开商品图须有启用空间、已发布渠道和真实媒体绑定。元数据与上传会话使用 [公共文件模块](../platform-server/src/modules/files/README.md)，实名、承运、知识和专用检查沿所属 Controller 与授权入口处理。
 
 核心聚合从 `@rental-os/rental-core/mysql-core-runtime` 导入。核心/事实仓储、恢复、Hook、资金与服务容量使用本包的同一实例，会员、企业支出/授信、文件生命周期与企业续租报价按 [实际端口](src/core-runtime-ports.ts) 供给。原Nest provider保留原构造顺序和初始化钩子；恢复在模块初始化读取，配置预热在全部回填之后运行，事务内配置读取不发布进程缓存。历史订单没有能力快照时保留空执行名单，当前新能力不反向影响旧订单。HTTP权限仍由原Guard裁定，业务方法继续接收调用方已有事务。[原Nest接线](../../apps/api/src/modules/rental-core/rental-core.service.ts) · [核心验证](../../tests/rental-core-v01.test.cjs) · [换货/续租历史验证](../../tests/rental-exchange-segment-pricing.test.cjs)
 

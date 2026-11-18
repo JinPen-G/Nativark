@@ -1,4 +1,4 @@
-/** 原组合平台的业务适配及内存演示。持久化组织/安全管理委托同一公共应用；Rental范围与初始化仍由原业务链裁定。 */
+/** 原组合平台的业务适配及内存演示。持久化组织/安全、字典/编号委托同一公共应用；Rental范围与初始化仍由原业务链裁定。 */
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Prisma } from "@prisma/client";
@@ -32,7 +32,6 @@ import {
   PlatformAuditLogQuery,
   PlatformAuditLogRow,
   PlatformDictionaryGroup,
-  PlatformDictionaryItem,
   PlatformFilterPreset,
   PlatformFilterPresetQuery,
   PlatformFilterPresetScope,
@@ -80,6 +79,7 @@ import { WorkspaceCapabilityService } from "../rental-core/workspace-capability.
 import { RentalCoreService } from "../rental-core/rental-core.service";
 import { defaultSecurityBaseline, normalizeSecurityBaseline } from "./platform-security-baseline";
 import { PlatformManagementService } from "@rental-os/platform-server/management";
+import { PlatformToolsService, advanceNumberRule, createDictionaryGroup, createNumberRule, formatPlatformNumber } from "@rental-os/platform-server/tools";
 import { assertNoLegacyAiCredentials, closedLegacyAiSettings } from "./legacy-system-ai";
 
 interface StoredUser extends Omit<SaveSystemUserRequest, "tenantId"> {
@@ -130,12 +130,18 @@ export class PlatformService {
     @Optional() private readonly customerCorporateSettlement?: CustomerCorporateSettlementService,
     @Optional() private readonly memberships?: MembershipService,
     // 追加依赖保留原位置构造；持久化宿主必须供给该公共管理实例。
-    @Optional() private readonly publicManagement?: PlatformManagementService
+    @Optional() private readonly publicManagement?: PlatformManagementService,
+    @Optional() private readonly publicTools?: PlatformToolsService
   ) {}
 
   private requirePublicManagement() {
     if (!this.publicManagement) throw new ServiceUnavailableException("公共组织与安全管理服务未装配");
     return this.publicManagement;
+  }
+
+  private requirePublicTools() {
+    if (!this.publicTools) throw new ServiceUnavailableException("公共字典与编号服务未装配");
+    return this.publicTools;
   }
 
   private readonly logger = new Logger(PlatformService.name);
@@ -1163,27 +1169,17 @@ export class PlatformService {
 
   async listDictionaries() {
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.getPlatformDictionaries(this.dictionaryGroups);
+      return this.requirePublicTools().listDictionaries(this.dictionaryGroups);
     }
     return this.clone(this.dictionaryGroups);
   }
 
   async saveDictionaryGroup(input: SavePlatformDictionaryGroupRequest) {
-    this.validateDictionaryGroup(input);
-
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.savePlatformDictionaryGroup(input);
+      return this.requirePublicTools().saveDictionaryGroup(input);
     }
 
-    const group: PlatformDictionaryGroup = {
-      code: input.code.trim(),
-      name: input.name.trim(),
-      module: input.module.trim(),
-      description: input.description?.trim(),
-      items: this.normalizeDictionaryItems(input.items),
-      updatedAt: new Date().toISOString(),
-      updatedBy: input.operator || "营运端"
-    };
+    const group = createDictionaryGroup(input);
     const index = this.dictionaryGroups.findIndex((item) => item.code === group.code);
     if (index >= 0) {
       this.dictionaryGroups[index] = group;
@@ -1203,7 +1199,7 @@ export class PlatformService {
 
   async listNumberRules() {
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.getPlatformNumberRules(this.numberRules);
+      return this.requirePublicTools().listNumberRules(this.numberRules);
     }
     return this.clone(
       this.numberRules.map((rule) => ({
@@ -1214,28 +1210,12 @@ export class PlatformService {
   }
 
   async saveNumberRule(input: SavePlatformNumberRuleRequest) {
-    this.validateNumberRule(input);
-
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.savePlatformNumberRule(input);
+      return this.requirePublicTools().saveNumberRule(input);
     }
 
-    const existing = this.numberRules.find((rule) => rule.code === input.code);
-    const rule: PlatformNumberRule = {
-      code: input.code.trim().toUpperCase(),
-      name: input.name.trim(),
-      module: input.module.trim(),
-      prefix: input.prefix.trim().toUpperCase(),
-      datePattern: input.datePattern,
-      sequenceLength: input.sequenceLength,
-      currentSequence: input.currentSequence ?? existing?.currentSequence ?? 0,
-      resetCycle: input.resetCycle,
-      enabled: input.enabled,
-      sample: "",
-      updatedAt: new Date().toISOString(),
-      updatedBy: input.operator || "营运端"
-    };
-    rule.sample = this.formatNumber(rule, rule.currentSequence + 1);
+    const existing = this.numberRules.find((rule) => rule.code === input.code.trim().toUpperCase());
+    const rule = createNumberRule(input, existing);
 
     const index = this.numberRules.findIndex((item) => item.code === rule.code);
     if (index >= 0) {
@@ -1256,35 +1236,25 @@ export class PlatformService {
 
   async generateNumber(input: GeneratePlatformNumberRequest) {
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.generatePlatformNumber(input);
+      return this.requirePublicTools().generateNumber(input);
     }
 
-    const rule = this.numberRules.find((item) => item.code === input.code);
-    if (!rule) {
+    const index = this.numberRules.findIndex((item) => item.code === input.code);
+    if (index < 0) {
       throw new NotFoundException("编号规则不存在");
     }
-    if (!rule.enabled) {
-      throw new BadRequestException("编号规则已停用");
-    }
-
-    rule.currentSequence += 1;
-    rule.sample = this.formatNumber(rule, rule.currentSequence + 1);
-    rule.updatedAt = new Date().toISOString();
-    rule.updatedBy = input.operator || "营运端";
+    const { rule, result } = advanceNumberRule(this.numberRules[index], input.operator);
+    this.numberRules[index] = rule;
     this.recordMemoryAudit({
       tenantId: "tenant_001",
       action: "number.generate",
       operator: rule.updatedBy,
       targetType: "number-rule",
       targetId: rule.code,
-      detail: `生成编号：${this.formatNumber(rule, rule.currentSequence)}`
+      detail: `生成编号：${result.generatedNo}`
     });
 
-    return {
-      code: rule.code,
-      generatedNo: this.formatNumber(rule, rule.currentSequence),
-      nextSequence: rule.currentSequence + 1
-    };
+    return result;
   }
 
   getTenantBootstrapPreview(): TenantBootstrapPreview {
@@ -3036,84 +3006,8 @@ export class PlatformService {
     };
   }
 
-  private validateDictionaryGroup(input: SavePlatformDictionaryGroupRequest) {
-    if (!input.code.trim() || !input.name.trim() || !input.module.trim()) {
-      throw new BadRequestException("字典编码、名称和归属模块不能为空");
-    }
-    if (input.items.length === 0) {
-      throw new BadRequestException("数据字典至少保留一个字典项");
-    }
-    this.normalizeDictionaryItems(input.items);
-  }
-
-  private normalizeDictionaryItems(items: PlatformDictionaryItem[]) {
-    const codes = new Set<string>();
-    return items
-      .map((item) => ({
-        code: item.code.trim(),
-        label: item.label.trim(),
-        value: item.value.trim(),
-        sortNo: Number(item.sortNo),
-        enabled: Boolean(item.enabled),
-        remark: item.remark?.trim()
-      }))
-      .sort((left, right) => left.sortNo - right.sortNo)
-      .map((item) => {
-        if (!item.code || !item.label || !item.value) {
-          throw new BadRequestException("字典项编码、显示名称和值不能为空");
-        }
-        if (!Number.isFinite(item.sortNo)) {
-          throw new BadRequestException("字典项排序必须是数字");
-        }
-        if (codes.has(item.code)) {
-          throw new BadRequestException("字典项编码不能重复");
-        }
-        codes.add(item.code);
-        return item;
-      });
-  }
-
-  private validateNumberRule(input: SavePlatformNumberRuleRequest) {
-    if (!input.code.trim() || !input.name.trim() || !input.module.trim()) {
-      throw new BadRequestException("编号规则编码、名称和归属模块不能为空");
-    }
-    if (!input.prefix.trim()) {
-      throw new BadRequestException("编号前缀不能为空");
-    }
-    if (!Number.isInteger(input.sequenceLength) || input.sequenceLength < 3 || input.sequenceLength > 12) {
-      throw new BadRequestException("流水号长度必须是 3 到 12 位整数");
-    }
-    if (input.currentSequence !== undefined && input.currentSequence < 0) {
-      throw new BadRequestException("当前流水不能为负数");
-    }
-  }
-
   private formatNumber(rule: PlatformNumberRule, sequence: number) {
-    const parts = [rule.prefix];
-    const datePart = this.formatDatePart(rule.datePattern);
-    if (datePart) {
-      parts.push(datePart);
-    }
-    parts.push(String(sequence).padStart(rule.sequenceLength, "0"));
-    return parts.join("-");
-  }
-
-  private formatDatePart(pattern: PlatformNumberRule["datePattern"]) {
-    if (pattern === "none") {
-      return "";
-    }
-    const now = new Date();
-    const yyyy = String(now.getFullYear());
-    const yy = yyyy.slice(-2);
-    const mm = String(now.getMonth() + 1).padStart(2, "0");
-    const dd = String(now.getDate()).padStart(2, "0");
-    if (pattern === "yyyyMMdd") {
-      return `${yyyy}${mm}${dd}`;
-    }
-    if (pattern === "yyyyMM") {
-      return `${yyyy}${mm}`;
-    }
-    return `${yy}${mm}${dd}`;
+    return formatPlatformNumber(rule, sequence);
   }
 
   private recordMemoryAudit(input: Omit<PlatformAuditLogRow, "id" | "createdAt">) {

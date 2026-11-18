@@ -3,6 +3,7 @@ import { LocaleContext } from "./localeContext";
 import { accessMessages } from "../features/access/messages";
 import { integrationMessages } from "../features/integrations/messages";
 import { platformSettingsMessages } from "../features/platform-settings/messages";
+import { platformToolsMessages } from "../features/platform-tools/messages";
 
 export type AdminLocale = "zh-CN" | "en-US";
 
@@ -20,6 +21,7 @@ const ENGLISH: Readonly<Record<string, string>> = {
   ...accessMessages,
   ...integrationMessages,
   ...platformSettingsMessages,
+  ...platformToolsMessages,
   "本地音频": "Local audio",
   "选择本地音频": "Choose local audio",
   "更换本地音频": "Change local audio",

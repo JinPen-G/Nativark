@@ -1,6 +1,6 @@
 # 公共 SaaS 服务
 
-`@rental-os/platform-server` 提供公共身份、会话、租户 / 人员角色 / 组织管理、安全配置、外观、完整订阅办理、基础集成与官方日历来源。宿主提供唯一持久化实例，服务通过各模块窄存储端口消费它。原 API 路径通过本包窄子出口再导出，Rental 认证仍继承同一会话实现。[包与子出口](package.json) · [公共合同](../platform-contracts/README.md)
+`@rental-os/platform-server` 提供公共身份、会话、租户 / 人员角色 / 组织管理、安全配置、外观、完整订阅办理、字典与编号、基础集成、官方日历来源及文件存储原语。宿主提供唯一持久化实例，服务通过各模块窄存储端口消费它。原 API 路径通过本包窄子出口再导出，Rental 认证仍继承同一会话实现。[包与子出口](package.json) · [公共合同](../platform-contracts/README.md)
 
 | 阅读步骤 | 源码与职责 |
 | --- | --- |
@@ -15,6 +15,8 @@
 | 统一期限 | [只读来源](src/modules/subscription/subscription-reader.ts)、[同源状态投影](src/modules/subscription/subscription-state.ts)、[周年/时区](src/modules/subscription/subscription-term.ts)；当前期限与排期，原Rental服务和新Core共同消费 |
 | 基础集成 | [模块导读](src/modules/integrations/README.md)、[配置服务](src/modules/integrations/tenant-integration.service.ts)、[存储与宿主参加者](src/modules/integrations/integration-store.ts)；原配置修订、凭据保护、连通性与实际投递接点 |
 | 官方日历来源 | [模块导读](src/modules/official-calendars/README.md)、[来源服务](src/modules/official-calendars/official-calendar-source.service.ts)、[冻结读取器](src/modules/official-calendars/official-calendar-source-reader.ts)；公共主档、只追加年度版本与历史快照 |
+| 字典与编号 | [模块及 API](src/modules/platform-tools/README.md)、[服务](src/modules/platform-tools/platform-tools.service.ts)、[生效配置仓储](src/modules/platform-tools/platform-tools.repository.ts)；当前租户维护、原格式及同事务取号，公共缺省为空 |
+| 文件存储原语 | [模块导读](src/modules/files/README.md)、[字节处理](src/modules/files/file-storage-primitives.ts)、[文件仓储](src/modules/files/file-storage.repository.ts)；原限长传输、元数据和上传会话，业务 ACL 由所属 Core 提供 |
 | 公共设置 | [租户外观](src/modules/client/tenant-appearance-profile.service.ts)、[本人外观](src/modules/client/account-appearance.service.ts)、[存储端口](src/modules/platform/platform-appearance-data-store.ts)；修订冲突、省略与清空沿原语义 |
 | 公共审计 | [日志写入与脱敏](src/common/operation-log.service.ts) 从 `/operation-log` 提供；宿主供给原日志表，业务空间来自同一ALS，敏感读取要求持久写入成功。原OAuth/MCP/Core原收据审计仍由各自严格事务入口负责 |
 | 短信结果接点 | [原结果与unknown错误](src/common/notification-delivery.ts) 从 `/notification-delivery` 提供，原Provider及Core共用同一错误身份；实际发送、凭据和回执仍由原通知服务负责 |
@@ -41,6 +43,10 @@ const platform = PlatformServerModule.register({
 公共管理使用原 `system:tenant:manage/bootstrap`、`system:user:manage` 与 `system:role:manage`。租户成员管理还要求当前租户管理员或明确全租户数据范围；固定全权角色和SaaS身份不能经普通角色输入创建。权限码须已登记，角色不自动赋予Core使用权。管理员创建、状态与密码重置、权限修改和对应审计同事务，唯一键 / 事务冲突明确返回，错误不重做。本人资料只改姓名和联系方式。
 
 组织读取按当前租户及连续启用的组织子树投影，维护沿原账号管理权限、全租户数据范围和完整地点范围。安全管理的七个操作由 `/settings-http-policy` 与 `/settings-openapi` 同源声明；登录前使用 `readPlatformSecurityBaseline(database)` 读取固定平台主体，管理 HTTP 则经当前主体围栏。全平台安全保存要求 SaaS 身份及原参数管理权限，保留原生效版本和其他配置，写入与审计同事务。[组织、安全及方法对应](src/modules/platform/README.md)
+
+字典与编号从 `/tools` 使用同一 `PlatformToolsService`，请求类从 `/tools-dto` 复用。公共模块已登记五个原 HTTP 操作与同源 OpenAPI；独立公共宿主注册公共 Controller，原组合只保留原 Controller 和同一服务实例。取号与保存先锁租户，再核当前主体、生效配置与审计，失败由调用方读取核对。两个工具权限通过公共初始化补录，不自动授予成员。普通 Core 可消费公共工具，业务本身的编号规则继续由其领域决定。[接入与原子性](src/modules/platform-tools/README.md)
+
+文件服务从 `/files` 消费原字节、格式、原存储键和文件表实现；原运行时与元数据仓储已委托同一实现。当前通用生命周期及其 HTTP / 公共数据装配继续按 PCH 迁移，知识、专用检查、企业证据及附件读取仍须由各自原授权链裁定。[文件入口及数据边界](src/modules/files/README.md)
 
 `readPublicSubscriptionTerm(transaction, tenantId)` 在调用方原事务读取当前统一期限和已到生效点的排期，不物化排期、不新建订阅。明确到期拒绝新业务；历史未登记状态保持原“待确认”的兼容，不因此视为永久或批量停业。公共订阅办理消费相同状态/周年算法，金额、收费和已发布功能规则沿原 SUB 规则裁定。此入口不赋予Core使用权或绕过冻结。
 

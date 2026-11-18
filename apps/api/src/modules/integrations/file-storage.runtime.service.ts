@@ -1,3 +1,7 @@
+/** 原组合文件编排。公共字节/文件表由platform-server维护，Rental引用与ACL由Rental包提供。
+ * 专用检查、知识与企业证据沿原入口和原冻结/unknown收据，不以通用存储替代业务授权。 */
+import { FileStoragePrimitives, FileStorageRepository, MAX_FILE_BYTES } from "@rental-os/platform-server/files";
+import { RentalFileBusinessReferences } from "@rental-os/rental-core/file-access";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, OnApplicationBootstrap, OnApplicationShutdown, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { INSPECTION_OBJECT_READER, readInspectionMedia, type InspectionObjectReader } from "../ai-native/inspection-assist/inspection-media.reader";
 import { KNOWLEDGE_FILE_ACCESS, type KnowledgeFileAccess } from "../ai-native/knowledge/knowledge-file-access";
@@ -22,7 +26,7 @@ import { TenantIntegrationService, type TenantIntegrationRuntimeConfig } from ".
 import { FileBusinessAccessService } from "../files/file-business-access.service";
 import { OperationLogService } from "../../common/operation-log.service";
 import { getRequestIdentity } from "../../common/request-identity";
-import { ObjectStorageProviderService, safeObjectPrefix, fetchObjectStorageWithTimeout as fetchWithTimeout } from "@rental-os/platform-server/object-storage";
+import { fetchObjectStorageWithTimeout as fetchWithTimeout } from "@rental-os/platform-server/object-storage";
 import { fileStorageLocationHash, frozenFileContentHash } from "./file-content-binding";
 import { aiRetentionObjectHash } from "../ai-native/privacy/retention-binding";
 import { AI_RETENTION_POLICY } from "../ai-native/privacy/retention-policy";
@@ -56,15 +60,16 @@ export type ExchangeInspectionUploadPlan = UploadFacts & { config: TenantIntegra
   storageLocationHash: string; uploadUrl: string; uploadHeaders: Record<string, string> };
 
 const UPLOAD_TTL_SECONDS = 15 * 60;
-const MAX_FILE_BYTES = 20 * 1024 * 1024;
 // Separate cleanup receipts leave completed uploads terminal. Once DELETE is
 // claimed, a lost result permits only HEAD observation of this original staging key.
 const COMPLETED_STAGING_PENDING = "completed_staging_pending";
 const COMPLETED_STAGING_UNKNOWN = "completed_staging_unknown";
 
 @Injectable()
-export class FileStorageRuntimeService extends ObjectStorageProviderService implements OnApplicationBootstrap, OnApplicationShutdown {
+export class FileStorageRuntimeService extends FileStoragePrimitives implements OnApplicationBootstrap, OnApplicationShutdown {
   private cleanupTimer?: ReturnType<typeof setInterval>;
+  private readonly files: FileStorageRepository;
+  private readonly fileReferences: RentalFileBusinessReferences;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -73,7 +78,11 @@ export class FileStorageRuntimeService extends ObjectStorageProviderService impl
     @Optional() @Inject(INSPECTION_OBJECT_READER) private readonly inspectionObjectReader?: InspectionObjectReader,
     @Optional() @Inject(KNOWLEDGE_FILE_ACCESS) private readonly knowledgeFiles?: KnowledgeFileAccess,
     @Optional() private readonly fileAccess?: FileBusinessAccessService
-  ) { super(); }
+  ) {
+    super();
+    this.files = new FileStorageRepository(prisma);
+    this.fileReferences = new RentalFileBusinessReferences(prisma);
+  }
 
   onApplicationBootstrap() {
     // 多实例部署也可以各自运行：每个会话先用条件更新抢占，重复扫描不会重复删对象。
@@ -120,9 +129,7 @@ export class FileStorageRuntimeService extends ObjectStorageProviderService impl
     if (owner && !this.matchesOwner({ businessType: input.businessType, businessId: input.businessId, uploadScene: input.uploadScene }, owner)) {
       throw new BadRequestException("上传业务对象与当前业务归属不一致");
     }
-    const existing = await this.prisma.fileUploadSession.findFirst({
-      where: { tenantId, idempotencyKey }
-    });
+    const existing = await this.files.findUploadSession(tenantId, { idempotencyKey });
     if (existing) {
       const existingAsset = await this.prisma.fileAsset.findUniqueOrThrow({ where: { id: existing.fileAssetId } });
       if (existingAsset.tenantId !== tenantId) throw new NotFoundException("上传会话不存在或不属于当前租户");
@@ -174,9 +181,7 @@ export class FileStorageRuntimeService extends ObjectStorageProviderService impl
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-        const concurrent = await this.prisma.fileUploadSession.findFirst({
-          where: { tenantId, idempotencyKey }
-        });
+        const concurrent = await this.files.findUploadSession(tenantId, { idempotencyKey });
         if (concurrent) {
           const concurrentAsset = await this.prisma.fileAsset.findUniqueOrThrow({ where: { id: concurrent.fileAssetId } });
           if (concurrentAsset.tenantId !== tenantId) throw new NotFoundException("上传会话不存在或不属于当前租户");
@@ -202,26 +207,8 @@ export class FileStorageRuntimeService extends ObjectStorageProviderService impl
   }
 
   private async persistUploadFacts(tx: Prisma.TransactionClient, tenantId: string, facts: UploadFacts, configured?: TenantIntegrationRuntimeConfig) {
-    const { input, owner, assetId, sessionId, expiresAt, provider, storageKey, mode, mimeType } = facts;
-    const idempotencyKey = input.idempotencyKey.trim();
-        const asset = await tx.fileAsset.create({
-          data: {
-            id: assetId,
-            tenantId,
-            businessModule: input.businessModule.trim(),
-            businessType: input.businessType.trim(),
-            businessId: input.businessId.trim(),
-            fileName: input.fileName.trim().slice(0, 180),
-            fileExt: input.fileName.includes(".") ? input.fileName.split(".").pop()?.slice(0, 20) : null,
-            mimeType,
-            sizeBytes: input.sizeBytes,
-            storageProvider: provider,
-            storageKey,
-            publicUrl: null,
-            uploadScene: input.uploadScene.trim(),
-            status: "pending_upload",
-            uploadedBy: owner?.actorUserId ?? null,
-            metadata: {
+    const { input, owner, mode } = facts;
+    return this.files.persistUploadFacts(tx, tenantId, facts, {
               ...Object.fromEntries(Object.entries(input.metadata ?? {}).filter(([key]) => ![
                 "fileUploadVersion", "fileContentVersion", "contentHash", "stagingStorageKey", "storageLocationHash", "uploadConfigHash",
                 "knowledgeUploadVersion", "knowledgeContentHash", "knowledgeRevision", "uploadMode", "workspaceId", "uploadedByUserId", "enterprisePaymentProof"
@@ -240,22 +227,7 @@ export class FileStorageRuntimeService extends ObjectStorageProviderService impl
                 ...(configured ? { storageLocationHash: this.retentionLocationHash(configured) } : {}),
                 ...(owner?.knowledgeRevision ? { knowledgeRevision: { ...owner.knowledgeRevision } } : {}) } : {}),
               uploadMode: mode
-            } as Prisma.InputJsonValue
-          }
-        });
-        const session = await tx.fileUploadSession.create({
-          data: {
-            id: sessionId,
-            tenantId,
-            fileAssetId: asset.id,
-            provider,
-            storageKey,
-            status: "pending_upload",
-            idempotencyKey,
-            expiresAt
-          }
-        });
-        return { asset, session };
+            });
   }
 
   /** Internal plan only: no object request or file write occurs before the caller's transaction. */
@@ -1376,14 +1348,6 @@ export class FileStorageRuntimeService extends ObjectStorageProviderService impl
     return { ...summary, uploadUrl: signed.url, uploadHeaders: signed.headers };
   }
 
-  private pendingObjectKey(storageKey: string) { return `${storageKey}.pending-upload`; }
-
-  private matchesOwner(asset: { businessType: string; businessId: string | null; uploadScene: string }, owner: FileBusinessOwner) {
-    return (!owner.businessType || asset.businessType === owner.businessType)
-      && (!owner.businessId || asset.businessId === owner.businessId)
-      && (!owner.uploadScene || asset.uploadScene === owner.uploadScene);
-  }
-
   private matchesUploadRequest(
     asset: { businessModule: string; businessType: string; businessId: string | null; fileName: string; mimeType: string; sizeBytes: number; uploadScene: string; metadata?: unknown },
     input: CreateFileUploadSessionRequest,
@@ -1401,122 +1365,7 @@ export class FileStorageRuntimeService extends ObjectStorageProviderService impl
   }
 
   private async assertBusinessReference(tenantId: string, businessType: string, businessId: string, workspaceId?: string) {
-    const id = businessId.trim();
-    const type = businessType.trim().toLowerCase();
-    let exists: boolean;
-    switch (type) {
-      case "rental_order":
-      case "order":
-        exists = Boolean(await this.prisma.rentalOrder.findFirst({ where: { id, tenantId, ...(workspaceId ? { workspaceId } : {}) }, select: { id: true } }));
-        break;
-      case "rental_quote":
-      case "quote":
-        exists = Boolean(await this.prisma.rentalQuote.findFirst({ where: { id, tenantId, ...(workspaceId ? { workspaceId } : {}) }, select: { id: true } }));
-        break;
-      case "rental_item_group":
-      case "item_group":
-        exists = Boolean(await this.prisma.rentalItemGroup.findFirst({ where: { id, tenantId, ...(workspaceId ? { workspaceId } : {}) }, select: { id: true } }));
-        break;
-      case "rental_asset":
-      case "asset":
-        exists = Boolean(await this.prisma.rentalAsset.findFirst({ where: { id, tenantId, ...(workspaceId ? { workspaceId } : {}) }, select: { id: true } }));
-        break;
-      case "rental_work_order":
-      case "work_order":
-        exists = Boolean(await this.prisma.rentalWorkOrder.findFirst({ where: { id, tenantId, ...(workspaceId ? { workspaceId } : {}) }, select: { id: true } }));
-        break;
-      case "customer":
-      case "customer_profile":
-        // 客户和资质附件属于租户共享主档，不以来源空间或会员状态授权。
-        // 客户端的 owner 在入口固定为本人；操作员敏感资料权限仍由 guard 负责。
-        exists = Boolean(await this.prisma.customerProfile.findFirst({ where: { id, tenantId }, select: { id: true } }));
-        break;
-      case "customer_contract":
-      case "corporate_contract":
-        exists = Boolean(await this.prisma.customerCorporateContract.findFirst({ where: { id, tenantId }, select: { id: true } }));
-        break;
-      case "customer_invoice_profile":
-      case "invoice_profile":
-        exists = Boolean(await this.prisma.customerCorporateInvoiceProfile.findFirst({ where: { id, tenantId }, select: { id: true } }));
-        break;
-      case "customer_credit":
-      case "credit":
-        exists = Boolean(await this.prisma.customerCorporateCredit.findFirst({ where: { id, tenantId }, select: { id: true } }));
-        break;
-      case "membership_review": {
-        const review = await this.prisma.customerMembershipReview.findFirst({ where: { id, tenantId }, select: { customerId: true, sourceWorkspaceId: true } });
-        // 来源空间仅保留审计来源，不限制租户内共享审核资料；但来源与客户不能跨租户。
-        exists = Boolean(review
-          && await this.prisma.customerProfile.findFirst({ where: { id: review.customerId, tenantId }, select: { id: true } })
-          && (!review.sourceWorkspaceId || await this.prisma.businessWorkspace.findFirst({ where: { id: review.sourceWorkspaceId, tenantId }, select: { id: true } })));
-        break;
-      }
-      case "async_job":
-        exists = Boolean(await this.prisma.asyncJob.findFirst({ where: { id, tenantId }, select: { id: true } }));
-        break;
-      case "document_print_job":
-        exists = Boolean(await this.prisma.documentPrintJob.findFirst({ where: { id, tenantId }, select: { id: true } }));
-        break;
-      default:
-        throw new BadRequestException(`文件业务类型未登记引用校验规则：${businessType}`);
-    }
-    if (!exists) throw new NotFoundException("文件关联的业务对象不存在或不属于当前租户");
-  }
-
-  private assetSummary(asset: {
-    id: string;
-    businessModule: string;
-    businessType: string;
-    businessId: string | null;
-    fileName: string;
-    fileExt: string | null;
-    mimeType: string;
-    sizeBytes: number;
-    storageProvider: string;
-    uploadScene: string;
-    status: string;
-    uploadedBy: string | null;
-    createdAt: Date;
-  }): FileAssetSummary {
-    return {
-      id: asset.id,
-      businessModule: asset.businessModule,
-      businessType: asset.businessType,
-      businessId: asset.businessId ?? undefined,
-      fileName: asset.fileName,
-      fileExt: asset.fileExt ?? undefined,
-      mimeType: asset.mimeType,
-      sizeBytes: asset.sizeBytes,
-      storageProvider: asset.storageProvider,
-      uploadScene: asset.uploadScene,
-      status: asset.status,
-      uploadedBy: asset.uploadedBy ?? undefined,
-      createdAt: asset.createdAt.toISOString()
-    };
-  }
-
-  private validateInput(input: CreateFileUploadSessionRequest) {
-    if (!input.businessModule?.trim() || !input.businessType?.trim() || !input.businessId?.trim() || !input.uploadScene?.trim()) throw new ConflictException("文件业务归属、业务对象和上传场景不能为空");
-    if (input.businessModule.trim().length > 64 || input.businessType.trim().length > 64 || input.businessId.trim().length > 191 || input.uploadScene.trim().length > 64) throw new ConflictException("文件业务归属字段过长");
-    if (!input.fileName?.trim() || input.fileName.trim().length > 180 || !input.mimeType?.trim()) throw new ConflictException("文件名和类型不能为空且不能超过 180 个字符");
-    const mimeType = input.mimeType.trim().toLowerCase();
-    if (!/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/u.test(mimeType) || mimeType.length > 127) throw new ConflictException("文件类型格式无效");
-    if (["text/html", "application/xhtml+xml", "image/svg+xml", "text/javascript", "application/javascript"].includes(mimeType)) {
-      throw new ConflictException("不允许上传可直接执行或内嵌脚本的文件类型");
-    }
-    if (!Number.isInteger(input.sizeBytes) || input.sizeBytes <= 0 || input.sizeBytes > MAX_FILE_BYTES) throw new ConflictException("文件大小必须在 1B 到 20MB 之间");
-    if (!input.idempotencyKey?.trim() || input.idempotencyKey.length > 191) throw new ConflictException("上传必须带有效幂等键");
-    return mimeType;
-  }
-
-  private storageKey(config: TenantIntegrationRuntimeConfig | undefined, tenantId: string, assetId: string, fileName: string) {
-    const prefix = safeObjectPrefix(config?.settings.objectPrefix ?? "tenant-files");
-    const safeName = fileName.trim().replace(/[^a-zA-Z0-9._-]/gu, "_").slice(0, 180) || "file";
-    return `${prefix ? `${prefix}/` : ""}${tenantId}/${assetId}/${safeName}`;
-  }
-
-  private sessionSummary(session: { id: string; fileAssetId: string; provider: string; status: string; expiresAt: Date }, asset: { id: string }, mode: "provider" | "simulation" = "simulation"): FileUploadSessionSummary {
-    return { sessionId: session.id, fileAssetId: asset.id, provider: session.provider, mode, status: session.status, expiresAt: session.expiresAt.toISOString() };
+    return this.fileReferences.assertExists(tenantId, businessType, businessId, workspaceId);
   }
 
   private async failSession(tenantId: string, sessionId: string, reason: string) {
@@ -1524,63 +1373,5 @@ export class FileStorageRuntimeService extends ObjectStorageProviderService impl
       this.prisma.fileUploadSession.updateMany({ where: { id: sessionId, tenantId, status: "pending_upload" }, data: { status: "failed", failureReason: reason, cleanupError: "待执行过期对象清理" } }),
       this.prisma.fileAsset.updateMany({ where: { tenantId, uploadSession: { is: { id: sessionId } }, status: "pending_upload" }, data: { status: "failed" } })
     ]);
-  }
-
-  private async deleteObject(config: TenantIntegrationRuntimeConfig, storageKey: string, at: Date) {
-    const expiresAt = new Date(at.getTime() + 5 * 60 * 1000);
-    const signed = this.presign(config, "DELETE", storageKey, "application/octet-stream", expiresAt);
-    const response = await this.objectRequest(signed.url, { method: "DELETE", headers: signed.headers });
-    return response.status === 404 || response.ok;
-  }
-
-  /** Exact byte evidence, not a client digest or HEAD-only size claim. The
-   * timeout covers stream consumption; abort/cancel never proves rollback. */
-  private async readObjectContent(config: TenantIntegrationRuntimeConfig, storageKey: string, mimeType: string, sizeBytes: number) {
-    if (!Number.isSafeInteger(sizeBytes) || sizeBytes < 1 || sizeBytes > MAX_FILE_BYTES) throw new ConflictException("文件大小无效");
-    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 8000);
-    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
-    const wait = async <T>(work: Promise<T>): Promise<T> => {
-      let rejectAbort: () => void = () => undefined;
-      const aborted = new Promise<never>((_resolve, reject) => { rejectAbort = () => reject(new ServiceUnavailableException("文件内容读取结果未明确")); });
-      controller.signal.addEventListener("abort", rejectAbort, { once: true });
-      if (controller.signal.aborted) rejectAbort();
-      try { return await Promise.race([work, aborted]); }
-      finally { controller.signal.removeEventListener("abort", rejectAbort); }
-    };
-    try {
-      const signed = this.presign(config, "GET", storageKey, mimeType, new Date(Date.now() + 60_000));
-      const task = this.objectRequest(signed.url, { method: "GET", headers: signed.headers, signal: controller.signal });
-      void task.then(response => { if (controller.signal.aborted && response.body) void response.body.cancel().catch(() => undefined); }, () => undefined);
-      const response = await wait(task);
-      const actualType = (response.headers.get("content-type") ?? "").split(";", 1)[0].trim().toLowerCase();
-      if (!response.ok || !response.body || response.headers.get("content-length") !== String(sizeBytes) || actualType !== mimeType) {
-        if (response.body) void response.body.cancel().catch(() => undefined);
-        throw new ConflictException("实际上传文件的类型或大小与原声明不一致");
-      }
-      reader = response.body.getReader();
-      const chunks: Buffer[] = []; let total = 0;
-      for (;;) {
-        const next = await wait(reader.read());
-        if (next.done) break;
-        if (!(next.value instanceof Uint8Array) || (total += next.value.byteLength) > sizeBytes) throw new ConflictException("实际上传内容超过原文件大小");
-        chunks.push(Buffer.from(next.value));
-      }
-      if (total !== sizeBytes) throw new ConflictException("实际上传内容大小不完整");
-      return Buffer.concat(chunks, total);
-    } finally {
-      controller.abort(); clearTimeout(timer);
-      if (reader) { void reader.cancel().catch(() => undefined); reader.releaseLock(); }
-    }
-  }
-
-  private async objectExists(config: TenantIntegrationRuntimeConfig, storageKey: string, mimeType: string, sizeBytes: number, expiresAt: Date) {
-    const signed = this.presign(config, "HEAD", storageKey, mimeType, expiresAt);
-    const response = await fetchWithTimeout(signed.url, { method: "HEAD", headers: signed.headers });
-    if (!response.ok) return false;
-    const contentLength = Number(response.headers.get("content-length"));
-    if (!Number.isSafeInteger(contentLength) || contentLength !== sizeBytes) return false;
-    const expectedType = mimeType.split(";", 1)[0].trim().toLowerCase();
-    const actualType = String(response.headers.get("content-type") ?? "").split(";", 1)[0].trim().toLowerCase();
-    return Boolean(actualType) && actualType === expectedType;
   }
 }

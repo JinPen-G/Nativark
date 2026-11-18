@@ -16,6 +16,7 @@
 - “第三方服务”复用[公共集成页](../../packages/platform-admin/src/features/integrations/README.md)，路径沿原 `/tenant/integrations`。同一应用工厂提供菜单和受保护路由，页面按当前租户身份及原集成权限开放；目录、配置保存和连接测试共用唯一请求与缓存边界。短信、支付和云存储仅显示服务端实际提供的能力。
 - “组织管理”位于 `/settings/organizations`，复用原组织列表、筛选、编辑和状态操作；受权只读与全租户维护分别开放。[公共组织页面](../../packages/platform-admin/src/features/platform-settings/README.md)
 - “安全基线”沿原 `/platform/system` 提供原登录限流、密码策略、脱敏和二次确认配置，读取与 SaaS 保存分别授权，保存失败保留草稿并明确重读核对。个人改密使用上方“账号安全”。[同源页面与请求](../../packages/platform-admin/src/features/platform-settings/index.ts)
+- “平台工具”位于 `/platform/tools`，字典与编号分别按当前权限显示，复用同一公共页签、表单及取号结果。零 Core 租户可从空列表创建第一组字典或编号规则；编号保存保留服务端最新流水。[页面与请求](../../packages/platform-admin/src/features/platform-tools/README.md)
 
 ## 本地使用
 

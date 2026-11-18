@@ -23,7 +23,6 @@ import type {
   SaveWorkspaceMemberRequest,
   UpdateBusinessWorkspaceRequest,
   WorkspaceMember,
-  GeneratePlatformNumberRequest,
   OrganizationSummary,
   PermissionModule,
   PlatformAuditLogQuery,
@@ -35,8 +34,6 @@ import type {
   PlatformNumberRule,
   SaveOrganizationRequest,
   SavePlatformFilterPresetRequest,
-  SavePlatformDictionaryGroupRequest,
-  SavePlatformNumberRuleRequest,
   SaveSystemRoleRequest,
   SaveSystemUserAccessRequest,
   SaveSystemUserRequest,
@@ -1579,151 +1576,6 @@ export class PlatformRepository extends PlatformIdentityRepository {
     return { id, deleted: true };
   }
 
-  async getPlatformDictionaries(
-    defaults: PlatformDictionaryGroup[]
-  ): Promise<PlatformDictionaryGroup[]> {
-    const content = await this.getPlatformConfig<{ groups: PlatformDictionaryGroup[] }>(
-      "platform-dictionaries"
-    );
-    return content?.groups ?? defaults;
-  }
-
-  async savePlatformDictionaryGroup(
-    input: SavePlatformDictionaryGroupRequest
-  ): Promise<PlatformDictionaryGroup> {
-    const tenantId = await this.resolveConfigTenantId();
-    const current =
-      (await this.getPlatformConfig<{ groups: PlatformDictionaryGroup[] }>(
-        "platform-dictionaries",
-        tenantId
-      ))?.groups ?? [];
-    const group: PlatformDictionaryGroup = {
-      code: input.code.trim(),
-      name: input.name.trim(),
-      module: input.module.trim(),
-      description: input.description?.trim(),
-      items: input.items
-        .map((item) => ({
-          code: item.code.trim(),
-          label: item.label.trim(),
-          value: item.value.trim(),
-          sortNo: Number(item.sortNo),
-          enabled: Boolean(item.enabled),
-          remark: item.remark?.trim()
-        }))
-        .sort((left, right) => left.sortNo - right.sortNo),
-      updatedAt: new Date().toISOString(),
-      updatedBy: input.operator || "营运端"
-    };
-    const next = current.filter((item) => item.code !== group.code);
-    next.unshift(group);
-    await this.savePlatformConfig(tenantId, "platform-dictionaries", {
-      groups: next
-    });
-    await this.recordAuditLog({
-      tenantId,
-      action: "dictionary.update",
-      operator: group.updatedBy,
-      targetType: "dictionary",
-      targetId: group.code,
-      detail: `更新数据字典：${group.name}`
-    });
-    return group;
-  }
-
-  async getPlatformNumberRules(
-    defaults: PlatformNumberRule[]
-  ): Promise<PlatformNumberRule[]> {
-    const content = await this.getPlatformConfig<{ rules: PlatformNumberRule[] }>(
-      "platform-number-rules"
-    );
-    return (content?.rules ?? defaults).map((rule) => ({
-      ...rule,
-      sample: this.formatNumber(rule, rule.currentSequence + 1)
-    }));
-  }
-
-  async savePlatformNumberRule(
-    input: SavePlatformNumberRuleRequest
-  ): Promise<PlatformNumberRule> {
-    const tenantId = await this.resolveConfigTenantId();
-    const current =
-      (await this.getPlatformConfig<{ rules: PlatformNumberRule[] }>(
-        "platform-number-rules",
-        tenantId
-      ))?.rules ?? [];
-    const existing = current.find((rule) => rule.code === input.code);
-    const rule: PlatformNumberRule = {
-      code: input.code.trim().toUpperCase(),
-      name: input.name.trim(),
-      module: input.module.trim(),
-      prefix: input.prefix.trim().toUpperCase(),
-      datePattern: input.datePattern,
-      sequenceLength: input.sequenceLength,
-      currentSequence: input.currentSequence ?? existing?.currentSequence ?? 0,
-      resetCycle: input.resetCycle,
-      enabled: input.enabled,
-      sample: "",
-      updatedAt: new Date().toISOString(),
-      updatedBy: input.operator || "营运端"
-    };
-    rule.sample = this.formatNumber(rule, rule.currentSequence + 1);
-    const next = current.filter((item) => item.code !== rule.code);
-    next.unshift(rule);
-    await this.savePlatformConfig(tenantId, "platform-number-rules", {
-      rules: next
-    });
-    await this.recordAuditLog({
-      tenantId,
-      action: "number-rule.update",
-      operator: rule.updatedBy,
-      targetType: "number-rule",
-      targetId: rule.code,
-      detail: `更新编号规则：${rule.name}`
-    });
-    return rule;
-  }
-
-  async generatePlatformNumber(
-    input: GeneratePlatformNumberRequest
-  ) {
-    const tenantId = await this.resolveConfigTenantId();
-    const content = await this.getPlatformConfig<{ rules: PlatformNumberRule[] }>(
-      "platform-number-rules",
-      tenantId
-    );
-    const rules = content?.rules ?? [];
-    const rule = rules.find((item) => item.code === input.code);
-    if (!rule) {
-      throw new NotFoundException("编号规则不存在");
-    }
-    if (!rule.enabled) {
-      throw new BadRequestException("编号规则已停用");
-    }
-    rule.currentSequence += 1;
-    rule.updatedAt = new Date().toISOString();
-    rule.updatedBy = input.operator || "营运端";
-    rule.sample = this.formatNumber(rule, rule.currentSequence + 1);
-    await this.savePlatformConfig(tenantId, "platform-number-rules", {
-      rules
-    });
-    const generatedNo = this.formatNumber(rule, rule.currentSequence);
-    await this.recordAuditLog({
-      tenantId,
-      action: "number.generate",
-      operator: rule.updatedBy,
-      targetType: "number-rule",
-      targetId: rule.code,
-      detail: `生成编号：${generatedNo}`
-    });
-
-    return {
-      code: rule.code,
-      generatedNo,
-      nextSequence: rule.currentSequence + 1
-    };
-  }
-
   async bootstrapTenant(
     input: TenantBootstrapRequest,
     preview: TenantBootstrapPreview,
@@ -2086,34 +1938,6 @@ export class PlatformRepository extends PlatformIdentityRepository {
       throw new NotFoundException("当前登录租户不存在");
     }
     return tenant.id;
-  }
-
-  private formatNumber(rule: PlatformNumberRule, sequence: number) {
-    const parts = [rule.prefix];
-    const datePart = this.formatDatePart(rule.datePattern);
-    if (datePart) {
-      parts.push(datePart);
-    }
-    parts.push(String(sequence).padStart(rule.sequenceLength, "0"));
-    return parts.join("-");
-  }
-
-  private formatDatePart(pattern: PlatformNumberRule["datePattern"]) {
-    if (pattern === "none") {
-      return "";
-    }
-    const now = new Date();
-    const yyyy = String(now.getFullYear());
-    const yy = yyyy.slice(-2);
-    const mm = String(now.getMonth() + 1).padStart(2, "0");
-    const dd = String(now.getDate()).padStart(2, "0");
-    if (pattern === "yyyyMMdd") {
-      return `${yyyy}${mm}${dd}`;
-    }
-    if (pattern === "yyyyMM") {
-      return `${yyyy}${mm}`;
-    }
-    return `${yy}${mm}${dd}`;
   }
 
   private async findRoleWithPermissions(id: string, tx?: Prisma.TransactionClient) {

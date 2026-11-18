@@ -7,9 +7,56 @@
 ## 1. 依据与来源
 
 - [需求v1.5](平台Core接入-需求.md)、[开发任务v1.5](平台Core接入-开发任务.md)。
-- [接口与生命周期设计](平台Core接入-开发任务.md#contract-design)、[接入指南](平台Core接入-开发任务.md#integration-guide)：随本次需求澄清更新，仍为实施准备，非已发布SDK/API。
+- [接口与生命周期设计](平台Core接入-开发任务.md#contract-design)、[接入指南](平台Core接入-开发任务.md#integration-guide)：正式设计与接入路线，实际实现、验证层级及发行状态从本册固定阶段读取。
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
+
+<a id="core-public-tools-20261118"></a>
+
+## 公共字典、编号与原后台同源工具接入（2026-11-18）
+
+固定父版40aecca483ff58f1f9da1d82882d1b61183bce7b已普通推送并真实远端回读，包含当天固定main ba1de9f91860c4e73503eded4e1d05d2307b0e28。RD与dev1在唯一共享树按文件分工，dev1交出10份服务源码及6份页面源码和两份原薄适配后停写；RD接正式出口、唯一服务与原Controller、公共应用、语言、权限目录及两套OpenAPI。索引由RD统一操作，后续文件冻结与回执源码不夹入本片。原文及完整旧接续由固定父版保全。
+
+[公共工具服务](../../../packages/platform-server/src/modules/platform-tools/README.md)通过同一数据库、当前会话/角色与原工具权限访问租户最高EFFECTIVE配置，Tenant父锁早于主体和配置操作。规则保存、取号与审计同一Serializable事务，提交前复验当前权限；配置CAS、审计或撤权失败不自动重发。保留草稿、历史版本及其他JSON，缺生效行在最大版本后建立。公共缺省为空，原Rental三组字典、五条编号及原演示次序留在可信适配；原仓储五个重复工具方法及两项私有格式函数已移除，初始化模板保留。
+
+编号沿原前缀、日期、连字符和padStart算法，resetCycle维持原连续计数行为。保存先正规化编码，在锁内保留省略的最新流水；安全整数边界拒绝继续递增。原内存分支消费同一纯函数，保持原tenant_001演示审计。工具HTTP不另加全租户数据或全部地点门槛，SaaS拒绝租户工具，权限元数据补录不自动授予角色。[服务](../../../packages/platform-server/src/modules/platform-tools/platform-tools.service.ts) · [原格式与正规化](../../../packages/platform-server/src/modules/platform-tools/platform-tools.values.ts)
+
+[公共工具页](../../../packages/platform-admin/src/features/platform-tools/README.md)及原后台复用两个页签、原表单和取号结果；五个原API委托宿主唯一客户端。零Core可从空列表填写首项六字段建立第一组字典。编号页面省略没有编辑控件的currentSequence，保存与回车共用同一Promise，成功和随后刷新失败分开反馈，草稿、取消和身份代次沿原边界。52个公共词条包含原后台实际迁出的41项，原英文值逐项一致。
+
+正式服务出口为/tools与/tools-dto，呈现出口为/platform-tools及/platform-tools/client。五操作进入公共政策/Guard和公共/原组合OpenAPI，保留saveDictionaryGroup等原operationId；七个旧schema名称引用同一公共对象，四个原DTO为同一公共类再导出。独立宿主登记公共Controller，原组合只登记原Controller与唯一公共服务，原PlatformService的五方法委托同一实例。[政策](../../../packages/platform-server/src/modules/platform-tools/platform-tools-http-policy.ts) · [schema](../../../packages/platform-server/src/modules/platform-tools/platform-tools-openapi.ts) · [原装配](../../../apps/api/src/app.module.ts)
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| 作者服务与页面 | node --no-compilation-cache - dev1-public-tools-types：服务9入口/738源0诊断；同次页面1诊断，修正展开对象后dev1-public-tools-ui-types及first-dictionary-ui-types为8入口/1530源0诊断。公共类型中的readonly enum另由RD用展开数组保持DTO枚举元数据 |
+| 作者一次行为核验 | dev1-public-tools-smoke共10组通过，包括12并发唯一流水、当前租户/版本/草稿/JSON、权限、审计/撤权/CAS回滚、DTO/schema/Nest/client；锁与数据库为明确fixture。first-dictionary-smoke四组通过，真实Hook提交→公共客户端→公共服务，React/query/宿主为fixture；覆盖首项、同Promise、拒绝、旧项与词条 |
+| 最终服务类型 | node --no-compilation-cache - pch-tools-final-api-types退出0、stderr空：公共服务84根/900源、Rental251根/1029源、公共API7根/966源、原API1033根/2607源，全部0诊断。TS5.9.3；Prisma5.22官方内存声明对应原238模型/35枚举及公共31模型/14枚举，生成写入0 |
+| 最终页面类型 | pch-tools-final-ui-types退出0、stderr空：公共后台283根/2548源、零CoreWeb5根/2549源、原后台661根/4307源，全部0诊断；两个公共配置行业源码0、写入0 |
+| 一次主装配冒烟 | pch-tools-smoke退出0、stderr空；实际TS/Nest切片核唯一数据库/工具/管理实例、原五方法委托、原3/5与公共空缺省、真实内存正规化/流水保留、四DTO同一、五政策/两文档/七schema、两个权限目录及Guard允许own scope而拒绝缺权限/SaaS。业务查询、网络、数据库客户端实例化及磁盘写入均0 |
+| 工具与资料 | antd lint0；初次CommonJS加载CLI报ERR_REQUIRE_ASYNC_MODULE后改ESM执行，未安装或联网。作者31链接通过；模块导读、宿主和PCH资料随本片更新。最终定向链接、出口/lock与索引空白检查另随提交核验，不以类型结果代替真实运行 |
+
+本片主实现、正常/拒绝和直接消费者已有证据，完整PCH-03/04/06/07/08还缺Rental标准装配/数据/页面/AI/作业、真实无Core运行、多Core、干净安装及独立升级/回退；按原连续门槛复核未跨下一档。所有新增验证为必要短stdin或作者既有入口，无永久测试脚本、新依赖环境或后台业务服务。真实MySQL锁竞争、HTTP、浏览器/Portal/回车快速点击、窄窗口及完整宿主未验。
+
+工具与文件首片合并资料定向核验为11份/1604本地链接/170锚点/0问题；文件导读从已固定首片暂存blob读取，稀疏目标按固定Git定位。13份首片索引与作者交出字节一致，两份原CRLF经Git转换为LF，正规化后一致；后续冻结工作区不覆盖这些暂存blob。空白检查保留原PlatformService的CRLF，使用git -c core.whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol diff --cached --check；不修改源码换行或忽略实际尾部空白。
+
+<a id="core-public-file-primitives-20261118"></a>
+
+## 公共文件原语、元数据与Rental附件权限（2026-11-18）
+
+同一固定父版40aecca保全原文件及业务授权实现。dev1交出13路径首片，RD在索引固定该版本；后续冻结内核的工作区改动保留为下一片，不覆盖首片暂存blob。首片只将原公共字节、文件表和Rental附件规则迁为单源，没有新增公共文件HTTP、schema或DDL。
+
+[公共文件模块](../../../packages/platform-server/src/modules/files/README.md)持有九项原字节/格式/限长读取与对象处理、当前租户元数据/会话读取及同事务persistUploadFacts。[原运行时](../../../apps/api/src/modules/integrations/file-storage.runtime.service.ts)继承公共原语，内部仓储与Rental业务引用使用同一Prisma；原[IntegrationsRepository](../../../apps/api/src/modules/integrations/integrations.repository.ts)委托公共元数据存储。metadata沿原对象过滤表达式和原内容保存，原存储键、字段投影、超时/取消和精确字节校验保留；首片37个尚未迁入方法正文与固定父版一致。
+
+[Rental附件规则](../../../packages/rental-core/src/file-access.ts)及[实际参加者](../../../packages/rental-core/src/file-access-ports.ts)持有原业务ACL、引用存在性、商品公开图及客户敏感材料判断，原[业务ACL服务](../../../apps/api/src/modules/files/file-business-access.service.ts)仅供给原事实、报价和敏感资料参加者。未知业务、租户/空间越界拒绝。Files、Staff、知识与专用检查Controller及当前授权原位保留，通用存储不能获得任意业务权限。正式出口为platform-server/files与rental-core/file-access，声明映射与现有依赖对应。
+
+| 首片必要验证 | 实际结果与边界 |
+| --- | --- |
+| 作者类型 | dev1-public-files-primitives-types为17入口/1892源0诊断，metadata-types为1入口/571源0诊断。首轮四诊断含三项metadata顶层null过宽，收窄为原对象；另一项是工具DTO枚举readonly，由RD修正为原运行时数组 |
+| 一次端口冒烟 | dev1-public-files-port-smoke五组通过：精确字节、取消/超时、原metadata/actor/key/tenant与安全投影、原同事务失败、Rental引用/未知拒绝。SQL、业务、配置和传输为明确fixture |
+| 原生命周期首片结果 | dev1-public-files-primitives-smoke退出1。前九段通过，最后原805行byteRequests===1得到3；恢复三个原源码开工快照也得到同一3!==1。首轮资格fixture漏categoryCode，同开工源码也失败，首片仅补原110行CAMERA且保留原assert，该段随后通过。此版本未改最终计数断言，不能称完整生命周期通过 |
+| 知识原套件 | 原ai-native-knowledge-lane-b-file-runtime为2通过/6失败/0 skip/todo；恢复三个原源码开工快照仍同2/6。失败为Memory的AI_RESOURCE_UNAVAILABLE、首建result_unknown及后四项KnowledgeSensitiveReadAudit unavailable。保留知识实现和原断言，不能用本片局部绿色替代知识验收 |
+| 资料与临时产物 | 作者15本地链接及格式通过。类型/冒烟复用既有离线守卫，临时目录在finally删除，没有永久测试脚本、新安装、外部业务连接或后台服务。RD复用本节同期完整类型结果，不重复扩大全套回归 |
+
+生命周期计数旧fixture将暂存GET、唯一冻结PUT和原目标GET混为同一byteRequests，后续冻结片按真实三类操作分别核验；专用冻结意图不应因TTL变回pending。这两项更正及后续原完整用例结果在下一完整阶段保留，首片失败证据不覆盖。知识2/6、完整文件公共编排/数据/宿主、真实云与MySQL仍为未完项。当前公共数据仍31模型/14枚举、七迁移、0.1.3，没有执行DDL或覆盖旧库。
 
 <a id="core-public-organizations-security-20261118"></a>
 

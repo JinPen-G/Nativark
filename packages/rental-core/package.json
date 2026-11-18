@@ -862,6 +862,10 @@
     "./http-enterprise-workflows": {
       "types": "./dist/http-enterprise-workflows.controller.d.ts",
       "default": "./dist/http-enterprise-workflows.controller.js"
+    },
+    "./file-access": {
+      "types": "./dist/file-access.d.ts",
+      "default": "./dist/file-access.js"
     }
   },
   "typesVersions": {
@@ -1504,6 +1508,9 @@
       ],
       "http-enterprise-workflows": [
         "dist/http-enterprise-workflows.controller.d.ts"
+      ],
+      "file-access": [
+        "dist/file-access.d.ts"
       ]
     }
   },

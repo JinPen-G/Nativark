@@ -30,6 +30,7 @@ import { OFFICIAL_CALENDAR_HTTP_OPERATIONS } from '@rental-os/platform-server/of
 import { OFFICIAL_CALENDAR_SCHEMAS, OFFICIAL_CALENDAR_OPENAPI_QUERY_SCHEMAS } from '@rental-os/platform-server/official-calendar-openapi';
 import { PLATFORM_SETTINGS_HTTP_OPERATIONS } from '@rental-os/platform-server/settings-http-policy';
 import { PLATFORM_SETTINGS_SCHEMAS, PLATFORM_SETTINGS_OPENAPI_QUERY_SCHEMAS } from '@rental-os/platform-server/settings-openapi';
+import { PLATFORM_TOOLS_HTTP_OPERATIONS, PLATFORM_TOOLS_SCHEMAS } from '@rental-os/platform-server/tools';
 import { SUBSCRIPTION_OPENAPI_SCHEMAS, SUBSCRIPTION_OPENAPI_QUERY_SCHEMAS } from '@rental-os/platform-server/subscription-openapi';
 import { AI_AUTOMATION_REVIEW_HTTP_CONTRACTS, AI_AUTOMATION_REVIEW_GRANT_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_AUTOMATION_EXPLANATION_HTTP, AI_AUTOMATION_EXPLANATION_CONTRACTS } from '@rental-os/shared';
@@ -260,6 +261,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ...INTEGRATION_OPENAPI_SCHEMAS,
   ...OFFICIAL_CALENDAR_SCHEMAS,
   ...PLATFORM_SETTINGS_SCHEMAS,
+  ...PLATFORM_TOOLS_SCHEMAS,
   ...STAFF_UPLOAD_OBSERVATION_SCHEMAS,
   ...AI_MEMBER_NAME_SCHEMAS,
   ...AI_TASK_RULE_DRAFT_SCHEMAS,
@@ -1161,98 +1163,13 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     },
     ["id", "tenantId", "action", "operator", "targetType", "detail", "createdAt"]
   ),
-  PlatformDictionaryGroup: objectOf(
-    {
-      code: stringSchema,
-      name: stringSchema,
-      module: stringSchema,
-      description: stringSchema,
-      items: arrayOf("PlatformDictionaryItem"),
-      updatedAt: { type: "string", format: "date-time" },
-      updatedBy: stringSchema
-    },
-    ["code", "name", "module", "items", "updatedAt", "updatedBy"]
-  ),
-  PlatformDictionaryItem: objectOf(
-    {
-      code: stringSchema,
-      label: stringSchema,
-      value: stringSchema,
-      sortNo: numberSchema,
-      enabled: booleanSchema,
-      remark: stringSchema
-    },
-    ["code", "label", "value", "sortNo", "enabled"]
-  ),
-  SavePlatformDictionaryGroupRequest: objectOf(
-    {
-      name: stringSchema,
-      module: stringSchema,
-      description: stringSchema,
-      items: arrayOf("PlatformDictionaryItem"),
-      operator: stringSchema
-    },
-    ["name", "module", "items", "operator"]
-  ),
-  PlatformNumberRule: objectOf(
-    {
-      code: stringSchema,
-      name: stringSchema,
-      module: stringSchema,
-      prefix: stringSchema,
-      datePattern: stringSchema,
-      sequenceLength: numberSchema,
-      currentSequence: numberSchema,
-      resetCycle: stringSchema,
-      enabled: booleanSchema,
-      sample: stringSchema,
-      updatedAt: { type: "string", format: "date-time" },
-      updatedBy: stringSchema
-    },
-    [
-      "code",
-      "name",
-      "module",
-      "prefix",
-      "datePattern",
-      "sequenceLength",
-      "currentSequence",
-      "resetCycle",
-      "enabled",
-      "sample",
-      "updatedAt",
-      "updatedBy"
-    ]
-  ),
-  SavePlatformNumberRuleRequest: objectOf(
-    {
-      name: stringSchema,
-      module: stringSchema,
-      prefix: stringSchema,
-      datePattern: stringSchema,
-      sequenceLength: numberSchema,
-      currentSequence: numberSchema,
-      resetCycle: stringSchema,
-      enabled: booleanSchema,
-      operator: stringSchema
-    },
-    ["name", "module", "prefix", "datePattern", "sequenceLength", "resetCycle", "enabled", "operator"]
-  ),
-  GeneratePlatformNumberRequest: objectOf(
-    {
-      code: stringSchema,
-      operator: stringSchema
-    },
-    ["code", "operator"]
-  ),
-  GeneratePlatformNumberResult: objectOf(
-    {
-      code: stringSchema,
-      generatedNo: stringSchema,
-      nextSequence: numberSchema
-    },
-    ["code", "generatedNo", "nextSequence"]
-  ),
+  PlatformDictionaryGroup: PLATFORM_TOOLS_SCHEMAS["PlatformTools.Dictionary"],
+  PlatformDictionaryItem: PLATFORM_TOOLS_SCHEMAS["PlatformTools.Dictionary"].properties.items.items,
+  SavePlatformDictionaryGroupRequest: PLATFORM_TOOLS_SCHEMAS["PlatformTools.SaveDictionary"],
+  PlatformNumberRule: PLATFORM_TOOLS_SCHEMAS["PlatformTools.NumberRule"],
+  SavePlatformNumberRuleRequest: PLATFORM_TOOLS_SCHEMAS["PlatformTools.SaveNumberRule"],
+  GeneratePlatformNumberRequest: PLATFORM_TOOLS_SCHEMAS["PlatformTools.GenerateNumber"],
+  GeneratePlatformNumberResult: PLATFORM_TOOLS_SCHEMAS["PlatformTools.GeneratedNumber"],
   PlatformFilterPreset: objectOf(
     {
       id: stringSchema,
@@ -3396,54 +3313,6 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "get",
-    path: "/api/platform/dictionaries",
-    tag: "Platform",
-    operationId: "listDictionaries",
-    summary: "List dictionary groups",
-    permissions: ["system:dictionary:manage"],
-    responseSchema: arrayOf("PlatformDictionaryGroup")
-  },
-  {
-    method: "put",
-    path: "/api/platform/dictionaries/{code}",
-    tag: "Platform",
-    operationId: "saveDictionaryGroup",
-    summary: "Save dictionary group",
-    permissions: ["system:dictionary:manage"],
-    requestSchema: "SavePlatformDictionaryGroupRequest",
-    responseSchema: "PlatformDictionaryGroup"
-  },
-  {
-    method: "get",
-    path: "/api/platform/number-rules",
-    tag: "Platform",
-    operationId: "listNumberRules",
-    summary: "List number rules",
-    permissions: ["system:number-rule:manage"],
-    responseSchema: arrayOf("PlatformNumberRule")
-  },
-  {
-    method: "put",
-    path: "/api/platform/number-rules/{code}",
-    tag: "Platform",
-    operationId: "saveNumberRule",
-    summary: "Save number rule",
-    permissions: ["system:number-rule:manage"],
-    requestSchema: "SavePlatformNumberRuleRequest",
-    responseSchema: "PlatformNumberRule"
-  },
-  {
-    method: "post",
-    path: "/api/platform/number-rules/generate",
-    tag: "Platform",
-    operationId: "generateNumber",
-    summary: "Generate sample number",
-    permissions: ["system:number-rule:manage"],
-    requestSchema: "GeneratePlatformNumberRequest",
-    responseSchema: "GeneratePlatformNumberResult"
-  },
-  {
-    method: "get",
     path: "/api/platform/tenant-bootstrap/preview",
     tag: "Platform",
     operationId: "getTenantBootstrapPreview",
@@ -4253,6 +4122,14 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   backlogOperation("get", "/api/rental/v1/calendars/{year}", "RentalBusiness", "getRentalBusinessCalendar", "Get annual business calendar", ["rental-os:calendar:edit", "rental-os:calendar:publish", "rental-os:price:manage", "rental-os:rules:manage", "rental-os:order:view"]),
   backlogOperation("get", "/api/rental/v1/official-calendar-sources", "RentalBusiness", "listRentalOfficialCalendarSourceVersions", "List public official calendar source versions", ["rental-os:calendar:view-history", "rental-os:calendar:edit", "rental-os:calendar:publish", "rental-os:price:manage", "rental-os:rules:manage"]),
   backlogOperation("post", "/api/rental/v1/calendars/{year}/apply-official-source", "RentalBusiness", "applyRentalOfficialCalendarSource", "Apply a public official calendar source version to the workspace draft", ["rental-os:calendar:edit", "rental-os:price:manage"]),
+  // 公共字典/编号沿原路径与operationId；返回和请求字段从同一工具schema取得。
+  ...PLATFORM_TOOLS_HTTP_OPERATIONS.map((item): ContractOperation => ({
+    method: item.method.toLowerCase() as HttpMethod,
+    path: `/api${item.path.replace(/:([a-zA-Z]+)/g, "{$1}")}`,
+    tag: "Platform", operationId: item.id, summary: item.summary,
+    permissions: [item.permission], responseSchema: item.response,
+    ...("request" in item ? { requestSchema: item.request } : {})
+  })),
   // 公共组织/安全操作与字段单源；保留原operationId，改正旧组织写入文档的权限和GenericObject缺口。
   ...PLATFORM_SETTINGS_HTTP_OPERATIONS.map((item): ContractOperation => ({
     method: item.method.toLowerCase() as HttpMethod,

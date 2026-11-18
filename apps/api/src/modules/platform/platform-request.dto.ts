@@ -3,8 +3,6 @@ import {
   RentalCategoryCode,
   RENTAL_CATEGORY_CODE_PATTERN,
   RoleScope,
-  type GeneratePlatformNumberRequest,
-  type PlatformDictionaryItem,
   type RentalCurrency,
   type SavePlatformFilterPresetRequest,
   type SystemRulesConfig,
@@ -43,40 +41,6 @@ export class SavePlatformFilterPresetDto implements SavePlatformFilterPresetRequ
   @IsObject() filters!: Record<string, unknown>;
   @IsOptional() @IsBoolean() isDefault?: boolean;
   @IsOptional() @IsString() @IsNotEmpty() operator?: string;
-}
-
-export class SavePlatformDictionaryBodyInputDto {
-  @IsString() @IsNotEmpty() name!: string;
-  @IsString() @IsNotEmpty() module!: string;
-  @IsOptional() @IsString() description?: string;
-  @IsArray() @ValidateNested({ each: true }) @Type(() => PlatformDictionaryItemInputDto) items!: PlatformDictionaryItemInputDto[];
-  @IsString() @IsNotEmpty() operator!: string;
-}
-
-export class PlatformDictionaryItemInputDto implements PlatformDictionaryItem {
-  @IsString() @IsNotEmpty() code!: string;
-  @IsString() @IsNotEmpty() label!: string;
-  @IsString() value!: string;
-  @IsInt() sortNo!: number;
-  @IsBoolean() enabled!: boolean;
-  @IsOptional() @IsString() remark?: string;
-}
-
-export class SavePlatformNumberRuleBodyInputDto {
-  @IsString() @IsNotEmpty() name!: string;
-  @IsString() @IsNotEmpty() module!: string;
-  @IsString() prefix!: string;
-  @IsIn(DICTIONARY_DATE_PATTERNS) datePattern!: "yyyyMMdd" | "yyyyMM" | "yyMMdd" | "none";
-  @IsInt() @Min(1) sequenceLength!: number;
-  @IsOptional() @IsInt() @Min(0) currentSequence?: number;
-  @IsIn(RESET_CYCLES) resetCycle!: "daily" | "monthly" | "yearly" | "never";
-  @IsBoolean() enabled!: boolean;
-  @IsString() @IsNotEmpty() operator!: string;
-}
-
-export class GeneratePlatformNumberDto implements GeneratePlatformNumberRequest {
-  @IsString() @IsNotEmpty() code!: string;
-  @IsString() @IsNotEmpty() operator!: string;
 }
 
 export class TenantBootstrapDto implements TenantBootstrapRequest {
@@ -138,3 +102,5 @@ export class SetUserStatusInputDto {
 export class ResetUserPasswordInputDto {
   @IsOptional() @IsString() @IsNotEmpty() tenantId?: string;
 }
+
+export { SavePlatformDictionaryBodyInputDto, PlatformDictionaryItemInputDto, SavePlatformNumberRuleBodyInputDto, GeneratePlatformNumberDto } from "@rental-os/platform-server/tools-dto";

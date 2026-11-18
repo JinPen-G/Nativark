@@ -12,6 +12,7 @@
 | [公共第三方服务](src/features/integrations/README.md) | 原目录、配置抽屉和测试反馈；零Core与工单宿主共用同一路由、权限、请求及双语文案 |
 | [公共租户/人员/角色](src/features/access/PublicManagementPages.tsx)、[权限编辑器](src/features/access/PermissionMatrix.tsx) | SaaS租户创建/资料/状态与本租户人员角色管理；共用原目录、保存、草稿与权限组件，旧Rental入口转接 |
 | [公共组织与安全设置](src/features/platform-settings/README.md) | 原组织列表/编辑器、安全基线与概览、请求及双语文案；公共应用和原后台消费同一实现 |
+| [公共字典与编号](src/features/platform-tools/README.md) | 原两个页签、列表与表单、首组字典创建和取号结果，原后台与公共应用共用请求及词条 |
 | [正式出口](src/index.ts)、[壳组合](src/PlatformShell.tsx) | Provider、完整侧栏、面包屑/页名、通知、休息和面板，导航由获权 Core 页面声明生成 |
 | [运行时端口](src/runtime/index.ts)、[查询边界](src/runtime/session-queries.ts) | 宿主提供当前服务端会话、请求、订阅及代次；切身份先中止旧请求再清缓存，不推断业务回滚 |
 | [公共浏览器会话](src/runtime/browser-session.ts)、[HTTP](src/runtime/browser-http.ts)、[登录/改密](src/session-pages.tsx) | 独立公共Web宿主使用同一认证执行者；原Rental只适配原存储、空间与刷新收据 |
@@ -58,3 +59,5 @@ SaaS“租户管理”读取公共租户目录；创建还须有 `system:tenant:
 “第三方服务”沿原 `/tenant/integrations` 进入。公共应用与原Rental后台共用同一页面；租户平台管理员、明确集成权限或通配权限可见，SaaS账号沿原规则不进入租户配置页。目录、保存及连接测试使用宿主唯一请求入口，供应商可用性与历史配置由服务端裁定。集成双语在公共模块维护，Core无需再复制词条。[页面与请求](src/features/integrations/index.ts) · [公共文案](src/features/integrations/messages.ts)
 
 记录事实和浮层退出可从正式 `/shell` 的 `RecordFacts`、`RecordFact` 及 `/ui` 的 `useModalDismissal` 使用。旧Rental路径已转接这些实际出口，Core作者无需导入兼容源码路径。
+
+“平台工具”沿原 `/platform/tools` 使用 `/platform-tools` 的页面与 `usePlatformToolsTabs`；需要嵌入原页面时复用其页签和结果浮层。`/platform-tools/client` 提供五个原请求方法，消费宿主唯一 HTTP 客户端。字典与编号各自按原权限开放，SaaS 账号不进入租户工具。零 Core 缺省列表为空，可填写首个字典项建立第一组；编号保存省略页面没有编辑控件的当前流水，由服务在锁内保留最新值。取号成功与随后刷新失败分别反馈。[简单接入及表单行为](src/features/platform-tools/README.md)

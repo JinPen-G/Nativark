@@ -250,6 +250,18 @@
     "./settings-openapi": {
       "types": "./dist/modules/platform/platform-settings-openapi.d.ts",
       "default": "./dist/modules/platform/platform-settings-openapi.js"
+    },
+    "./tools": {
+      "types": "./dist/modules/platform-tools/index.d.ts",
+      "default": "./dist/modules/platform-tools/index.js"
+    },
+    "./tools-dto": {
+      "types": "./dist/modules/platform-tools/platform-tools.dto.d.ts",
+      "default": "./dist/modules/platform-tools/platform-tools.dto.js"
+    },
+    "./files": {
+      "types": "./dist/modules/files/index.d.ts",
+      "default": "./dist/modules/files/index.js"
     }
   },
   "scripts": {
@@ -453,6 +465,15 @@
       ],
       "settings-openapi": [
         "dist/modules/platform/platform-settings-openapi.d.ts"
+      ],
+      "tools": [
+        "dist/modules/platform-tools/index.d.ts"
+      ],
+      "tools-dto": [
+        "dist/modules/platform-tools/platform-tools.dto.d.ts"
+      ],
+      "files": [
+        "dist/modules/files/index.d.ts"
       ]
     }
   }

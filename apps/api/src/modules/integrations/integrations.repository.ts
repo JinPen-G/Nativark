@@ -1,3 +1,4 @@
+import { FileStorageRepository, fileAssetSummary } from "@rental-os/platform-server/files";
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE } from "@rental-os/shared";
 import { Prisma } from "@prisma/client";
@@ -21,7 +22,8 @@ import { PrismaService } from "../database/prisma.service";
 
 @Injectable()
 export class IntegrationsRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly files: FileStorageRepository;
+  constructor(private readonly prisma: PrismaService) { this.files = new FileStorageRepository(prisma); }
 
   async ensureDefaultNotificationTemplates(tenantId = requireRequestTenantId()) {
     const templates = defaultNotificationTemplates();
@@ -58,26 +60,8 @@ export class IntegrationsRepository {
     );
   }
 
-  async listFiles(
-    tenantId = requireRequestTenantId(),
-    query: FileAssetQuery = {}
-  ): Promise<FileAssetSummary[]> {
-    const where: Prisma.FileAssetWhereInput = {
-      tenantId,
-      businessModule: query.businessModule,
-      businessType: query.businessType,
-      businessId: query.businessId,
-      uploadScene: query.uploadScene,
-      status: query.status,
-      NOT: { uploadScene: RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE }
-    };
-    const limit = Math.min(Math.max(Number(query.limit ?? 80), 1), 200);
-    const rows = await this.prisma.fileAsset.findMany({
-      where,
-      orderBy: { createdAt: "desc" },
-      take: limit
-    });
-    return rows.map(toFileAssetSummary);
+  async listFiles(tenantId = requireRequestTenantId(), query: FileAssetQuery = {}): Promise<FileAssetSummary[]> {
+    return this.files.listFiles(tenantId, query, RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE);
   }
 
   async createFile(
@@ -109,7 +93,7 @@ export class IntegrationsRepository {
         metadata: (input.metadata ?? {}) as Prisma.InputJsonValue
       }
     });
-    return toFileAssetSummary(row);
+    return fileAssetSummary(row);
   }
 
   async listNotificationTemplates(
@@ -403,26 +387,6 @@ function defaultNotificationTemplates(): NotificationTemplateSummary[] {
       updatedAt: now
     }
   ];
-}
-
-function toFileAssetSummary(
-  row: Prisma.FileAssetGetPayload<Record<string, never>>
-): FileAssetSummary {
-  return {
-    id: row.id,
-    businessModule: row.businessModule,
-    businessType: row.businessType,
-    businessId: row.businessId ?? undefined,
-    fileName: row.fileName,
-    fileExt: row.fileExt ?? undefined,
-    mimeType: row.mimeType,
-    sizeBytes: row.sizeBytes,
-    storageProvider: row.storageProvider,
-    uploadScene: row.uploadScene,
-    status: row.status,
-    uploadedBy: row.uploadedBy ?? undefined,
-    createdAt: row.createdAt.toISOString()
-  };
 }
 
 function toNotificationTemplateSummary(

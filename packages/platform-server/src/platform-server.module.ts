@@ -18,6 +18,9 @@ import { PlatformOpenApiController, PLATFORM_OPENAPI_DOCUMENT, createPlatformOpe
 import type { PlatformManagementDatabase } from "./modules/platform/platform-management.store";
 import { PlatformManagementService } from "./modules/platform/platform-management.service";
 import { PlatformManagementController } from "./modules/platform/platform-management.controller";
+import { PlatformToolsService } from "./modules/platform-tools/platform-tools.service";
+import { PlatformToolsController } from "./modules/platform-tools/platform-tools.controller";
+import type { PlatformToolsDatabase } from "./modules/platform-tools/platform-tools.store";
 import { SubscriptionService } from "./modules/subscription/subscription.service";
 import { TenantSubscriptionController } from "./modules/subscription/subscription.controller";
 import { PlatformSubscriptionController } from "./modules/subscription/subscription-platform.controller";
@@ -39,7 +42,7 @@ import { OfficialCalendarSourceController } from "./modules/official-calendars/o
 import { OFFICIAL_CALENDAR_DATA_STORE, OFFICIAL_CALENDAR_APPLICATION, type OfficialCalendarDataStore } from "./modules/official-calendars/official-calendar-store";
 import { OFFICIAL_CALENDAR_SOURCE_READER, createOfficialCalendarSourceReader } from "./modules/official-calendars/official-calendar-source-reader";
 
-export type PlatformDatabase = PlatformAuthDataStore & PlatformAppearanceDataStore & PlatformManagementDatabase & SubscriptionDataStore
+export type PlatformDatabase = PlatformAuthDataStore & PlatformAppearanceDataStore & PlatformManagementDatabase & PlatformToolsDatabase & SubscriptionDataStore
   & TenantIntegrationDataStore & OfficialCalendarDataStore & PlatformOperationLogStorage;
 @Module({})
 export class PlatformServerModule {
@@ -60,7 +63,7 @@ export class PlatformServerModule {
     if (options.integrationBusiness && options.integrationBusinessProvider) throw new Error("集成业务依赖只能登记一个实际参加者");
     return { module: PlatformServerModule, imports: [ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }), ...(options.imports ?? [])],
       controllers: [AuthSessionController, TenantAppearanceProfileController, AccountAppearanceController, PlatformHealthController, PlatformOpenApiController, PlatformManagementController,
-        TenantSubscriptionController, PlatformSubscriptionController, TenantIntegrationController, OfficialCalendarSourceController],
+        TenantSubscriptionController, PlatformSubscriptionController, TenantIntegrationController, OfficialCalendarSourceController, PlatformToolsController],
       providers: [
         { provide: PLATFORM_AUTH_DATA_STORE, inject: options.inject ?? [], useFactory: options.useFactory },
         { provide: PLATFORM_APPEARANCE_DATA_STORE, useExisting: PLATFORM_AUTH_DATA_STORE },
@@ -69,7 +72,7 @@ export class PlatformServerModule {
         { provide: OFFICIAL_CALENDAR_DATA_STORE, useExisting: PLATFORM_AUTH_DATA_STORE },
         { provide: PlatformOperationLogService, inject: [PLATFORM_AUTH_DATA_STORE], useFactory: (database: PlatformDatabase) => new PlatformOperationLogService(database) },
         { provide: PlatformAuthenticationRepository, inject: [PLATFORM_AUTH_DATA_STORE], useFactory: (database: PlatformDatabase) => new PlatformAuthenticationRepository(database) },
-        TenantAppearanceProfileService, AccountAppearanceService, PlatformAuthService, PlatformAuthGuard, PlatformManagementService, SubscriptionService,
+        TenantAppearanceProfileService, AccountAppearanceService, PlatformAuthService, PlatformAuthGuard, PlatformManagementService, PlatformToolsService, SubscriptionService,
         { provide: SUBSCRIPTION_APPLICATION, useExisting: SubscriptionService },
         SecretBox, TenantIntegrationService, TenantIntegrationRuntimeService, TenantIntegrationConnectivityService, ObjectStorageProviderService,
         { provide: TENANT_INTEGRATION_APPLICATION, useExisting: TenantIntegrationService },
@@ -88,7 +91,7 @@ export class PlatformServerModule {
         ...(options.coreHttpProvider ? [{ ...options.coreHttpProvider, provide: REGISTERED_CORE_HTTP_ACCESS }] : []),
         { provide: APP_GUARD, useExisting: PlatformAuthGuard },
         { provide: APP_INTERCEPTOR, useClass: RequestIdInterceptor }
-      ], exports: [PlatformAuthService, PlatformAuthenticationRepository, PlatformManagementService, SubscriptionService, SUBSCRIPTION_APPLICATION,
+      ], exports: [PlatformAuthService, PlatformAuthenticationRepository, PlatformManagementService, PlatformToolsService, SubscriptionService, SUBSCRIPTION_APPLICATION,
         TenantIntegrationService, TenantIntegrationRuntimeService, ObjectStorageProviderService, SecretBox, TENANT_INTEGRATION_APPLICATION,
         OfficialCalendarSourceService, OFFICIAL_CALENDAR_APPLICATION, OFFICIAL_CALENDAR_SOURCE_READER,
         PLATFORM_AUTH_DATA_STORE, PLATFORM_APPEARANCE_DATA_STORE, PLATFORM_SUBSCRIPTION_DATA_STORE, INTEGRATION_DATA_STORE,

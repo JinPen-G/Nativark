@@ -230,7 +230,9 @@
     "./source/features/settings/TenantIntegrationsPage": "./src/features/integrations/TenantIntegrationsPage.tsx",
     "./platform-settings": "./src/features/platform-settings/index.ts",
     "./platform-settings/client": "./src/features/platform-settings/client.ts",
-    "./platform-settings/styles": "./src/features/platform-settings/PlatformSettings.module.css"
+    "./platform-settings/styles": "./src/features/platform-settings/PlatformSettings.module.css",
+    "./platform-tools": "./src/features/platform-tools/index.ts",
+    "./platform-tools/client": "./src/features/platform-tools/client.ts"
   },
   "scripts": {
     "lint": "tsc -p tsconfig.json",

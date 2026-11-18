@@ -21,6 +21,7 @@ import { TenantSubscriptionPage, SubscriptionProPage, SubscriptionRequestDetailP
   SUBSCRIPTION_ROUTES, hasSubscriptionPermission } from "./features/subscription";
 import { TenantIntegrationsPage, TENANT_INTEGRATIONS_ROUTE, hasTenantIntegrationPermission } from "./features/integrations";
 import { OrganizationsPage, PlatformSecurityPage, PLATFORM_SETTINGS_ROUTES, canReadOrganizations, canReadSecurityBaseline } from "./features/platform-settings";
+import { PlatformToolsPage, PLATFORM_TOOLS_ROUTE, canManagePlatformTools } from "./features/platform-tools";
 
 function ProtectedLayout() {
   const { session, brandName, brand, pages } = usePlatformApplication();
@@ -45,6 +46,7 @@ function ProtectedLayout() {
     ...(can("system:role:manage") ? [{ path: "/settings/roles", label: en ? "Roles" : "角色权限" }] : []),
     ...(canReadOrganizations(state.user) ? [{ path: PLATFORM_SETTINGS_ROUTES.organizations.path, label: en ? "Organizations" : "组织管理" }] : []),
     ...(canReadSecurityBaseline(state.user) ? [{ path: PLATFORM_SETTINGS_ROUTES.security.path, label: en ? "Security baseline" : "安全基线" }] : []),
+    ...(canManagePlatformTools(state.user) ? [{ path: PLATFORM_TOOLS_ROUTE, label: en ? "Platform tools" : "平台工具与治理" }] : []),
     ...(hasSubscriptionPermission(state.user, "rental-os:subscription:view")
       ? [{ path: SUBSCRIPTION_ROUTES.subscription.path, label: en ? "Plan and subscription" : "版本与订阅", icon: <Crown size={18} /> }] : []),
     ...(hasSubscriptionPermission(state.user, "system:tenant:subscription:manage")
@@ -107,6 +109,7 @@ export function createPlatformAdminApplication(options: PlatformAdminApplication
     { path: TENANT_INTEGRATIONS_ROUTE.path, element: <TenantIntegrationsPage /> },
     { path: PLATFORM_SETTINGS_ROUTES.organizations.path, element: <OrganizationsPage /> },
     { path: PLATFORM_SETTINGS_ROUTES.security.path, element: <PlatformSecurityPage /> },
+    { path: PLATFORM_TOOLS_ROUTE, element: <PlatformToolsPage /> },
     { path: SUBSCRIPTION_ROUTES.subscription.path, element: <SubscriptionRoute permission="rental-os:subscription:view"><TenantSubscriptionPage /></SubscriptionRoute> },
     { path: SUBSCRIPTION_ROUTES.subscriptionPro.path, element: <SubscriptionRoute permission="rental-os:subscription:view"><SubscriptionProPage /></SubscriptionRoute> },
     { path: SUBSCRIPTION_ROUTES.subscriptionRequestDetail.path, element: <SubscriptionRoute permission="rental-os:subscription:view"><SubscriptionRequestDetailPage /></SubscriptionRoute> },

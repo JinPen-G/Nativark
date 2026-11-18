@@ -8,6 +8,7 @@ import { SUBSCRIPTION_OPENAPI_SCHEMAS, SUBSCRIPTION_OPENAPI_QUERY_SCHEMAS } from
 import { INTEGRATION_OPENAPI_SCHEMAS } from "./modules/integrations/integration-openapi";
 import { OFFICIAL_CALENDAR_SCHEMAS, OFFICIAL_CALENDAR_OPENAPI_QUERY_SCHEMAS } from "./modules/official-calendars/official-calendar-openapi";
 import { PLATFORM_SETTINGS_SCHEMAS, PLATFORM_SETTINGS_OPENAPI_QUERY_SCHEMAS } from "./modules/platform/platform-settings-openapi";
+import { PLATFORM_TOOLS_SCHEMAS } from "./modules/platform-tools/platform-tools-openapi";
 
 type Schema = { [field: string]: unknown };
 const string: Schema = { type: "string" }, boolean: Schema = { type: "boolean" };
@@ -29,6 +30,7 @@ export const PLATFORM_OPENAPI_SCHEMAS = {
   ...INTEGRATION_OPENAPI_SCHEMAS,
   ...OFFICIAL_CALENDAR_SCHEMAS,
   ...PLATFORM_SETTINGS_SCHEMAS,
+  ...PLATFORM_TOOLS_SCHEMAS,
   "Platform.Health": object({ service: string, status: string, time: date }, ["service", "status", "time"]),
   "Platform.OpenApi": { type: "object", additionalProperties: true },
   "Platform.LoginRequest": object({ tenantCode: string, account: string, password }, ["tenantCode", "account", "password"]),

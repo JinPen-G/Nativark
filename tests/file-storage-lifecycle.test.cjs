@@ -107,7 +107,7 @@ const prisma = {
   asyncJob: lookup([{ id: 'job-file', tenantId, businessType: 'rental_order', businessId: 'order-another-space' }]),
   customerProfile: lookup(customerProfiles), rentalItemGroup: lookup([catalogGroup]),
   businessWorkspace: { findFirst: async ({ where }) => publicationEnabled && where.tenantId === tenantId && where.id === workspaceId
-    ? { id: workspaceId, tenantId, status: "ACTIVE" } : null },
+    ? { id: workspaceId, tenantId, status: "ACTIVE", categoryCode: "CAMERA" } : null },
   fileAsset: {
     findMany: async ({ where, take }) => [...assets.values()].filter(row => matches(row, where)).slice(0, take ?? assets.size),
     create: async ({ data }) => {

@@ -58,6 +58,7 @@ import { PlatformController } from "./modules/platform/platform.controller";
 import { PlatformRepository } from "./modules/platform/platform.repository";
 import { PLATFORM_AUTH_DATA_STORE } from "@rental-os/platform-server/auth-store";
 import { PlatformManagementService } from "@rental-os/platform-server/management";
+import { PlatformToolsService } from "@rental-os/platform-server/tools";
 import { SharedCustomerRepository } from "./modules/platform/shared-customer.repository";
 import { CustomerOperationsRepository } from "./modules/platform/customer-operations.repository";
 import { CustomerRegistrationService } from "./modules/platform/customer-registration.service";
@@ -396,6 +397,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     AuthService,
     { provide: PLATFORM_AUTH_DATA_STORE, useExisting: PrismaService },
     PlatformManagementService,
+    PlatformToolsService,
     PlatformService,
     PlatformRepository,
     SharedCustomerRepository,

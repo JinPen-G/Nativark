@@ -8,7 +8,7 @@ Nativark 为开发者和开发 AI 提供构建业务应用所需的公共基础�
 
 开源主体是 Nativark 底座。**Rental Core 将作为首个开源业务 Core 示范**，展示如何在公共底座上构建完整业务、接入客户端并向 Agent 提供受控工具。后续可按同一接入边界扩展 CRM、TMS 等业务 Core。
 
-当前仓库正在从 Rental OS 组合工程中抽离公共底座。原开发命令运行底座与 Rental Core 的组合；独立公共 API 与后台已提供初始化、认证、租户 / 人员角色 / 组织管理、安全与外观设置、订阅及 Core 授权接点。完整独立运行、Rental 标准装配和多 Core 验收继续由平台接入专项推进。源码目录、npm 包名及配置变量目前沿用原工程标识。[独立公共 API](apps/platform-api/README.md) · [公共后台](apps/platform-admin/README.md)
+当前仓库正在从 Rental OS 组合工程中抽离公共底座。原开发命令运行底座与 Rental Core 的组合；独立公共 API 与后台已提供初始化、认证、租户 / 人员角色 / 组织管理、安全与外观设置、订阅、字典与编号及 Core 授权接点。完整独立运行、Rental 标准装配和多 Core 验收继续由平台接入专项推进。源码目录、npm 包名及配置变量目前沿用原工程标识。[独立公共 API](apps/platform-api/README.md) · [公共后台](apps/platform-admin/README.md)
 
 - [底座建设范围](#底座建设范围)
 - [理解架构](#理解架构)
@@ -103,9 +103,9 @@ Rental Core 是首个业务示范，提供商品、资产、库存、报价、�
 | `apps/platform-api` | 默认无 Core 的独立公共 API，初始化 / 认证 / 公共管理 / 组织与安全 / 订阅已提供，完整运行继续交付 | [宿主导读](apps/platform-api/README.md) |
 | `apps/example-tickets-api` | 公共底座与单工单Core受控组合，标准包和迁移准备，真实运行验收继续交付 | [示范导读](apps/example-tickets-api/README.md) |
 | `packages/platform-contracts` | 无行业依赖的公共身份、人员与设置合同；原 shared 兼容再导出 | [正式出口](packages/platform-contracts/README.md) |
-| `packages/platform-server` | 原认证、会话、外观、公共日志及公共 HTTP 的唯一实现，存储由宿主提供 | [源码路线](packages/platform-server/README.md) |
+| `packages/platform-server` | 认证、公共管理与订阅、字典/编号、集成、文件原语及公共 HTTP 的唯一实现，存储由宿主提供 | [源码路线](packages/platform-server/README.md) |
 | `packages/platform-core-host` | 真实公共身份、标准Core授权/绑定、目录/范围与HTTP的单源适配 | [接入路线](packages/platform-core-host/README.md) |
-| `packages/platform-admin` | 公共后台外壳、UIArc、组织/安全/订阅/集成设置与 Core 页面适配，原后台窄转接同一实现 | [公共前端导读](packages/platform-admin/README.md) |
+| `packages/platform-admin` | 公共后台外壳、UIArc、组织/安全/订阅/集成/工具设置与 Core 页面适配，原后台窄转接同一实现 | [公共前端导读](packages/platform-admin/README.md) |
 | `apps/platform-admin` | 默认无Core的公共Web宿主，登录/改密、公共管理、组织/安全/订阅与集成设置，真实运行继续验收 | [公共后台导读](apps/platform-admin/README.md) |
 | `apps/example-tickets-admin` | 复用同一公共应用的工单Web宿主，四页声明接线与标准包构建核验 | [工单后台导读](apps/example-tickets-admin/README.md) |
 | `apps/admin` | SaaS 管理、租户公共后台与现有业务页面 | [入口](apps/admin/src/main.tsx)、[本端规则](apps/admin/AGENTS.md) |
