@@ -303,7 +303,11 @@ export type AdminTranslate = (value: string, values?: AdminMessageValues) => str
 
 /** Complete messages let English reorder counts without concatenating Chinese fragments. */
 export function translateAdminText(value: string, locale: AdminLocale, values?: AdminMessageValues, messages: AdminMessages = {}) {
-  const text = locale === "en-US" ? messages[value] ?? ENGLISH[value] ?? value : value;
+  // 只读各字典自身登记的词条；constructor等原型成员仍按原规则回退原文。
+  const message = Object.prototype.hasOwnProperty.call(messages, value) ? messages[value] : undefined;
+  const text = locale === "en-US"
+    ? message ?? (Object.prototype.hasOwnProperty.call(ENGLISH, value) ? ENGLISH[value] : value)
+    : value;
   if (!values) return text;
   return text.replace(/\{([a-zA-Z][a-zA-Z0-9_]*)\}/g, (token, key: string) =>
     Object.prototype.hasOwnProperty.call(values, key) ? String(values[key]) : token);

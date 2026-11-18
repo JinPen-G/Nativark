@@ -77,7 +77,7 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 
 旧公共宿主临时环境已归集到 D:/工作文件/rental-OS/output/.cleanup-pending/pch-preparation/platform-host-integration/environment，840文件/91,808,304字节，责任清单为同任务manifest.json。另一个原任务目录rental-business-facts/residual仍有1个0字节guard.log及原责任清单。2026-11-18再次使用原生PowerShell删除，仍被自动审批在创建进程前以blocked by policy拒绝，命令内进程/路径复验没有执行。此前同一原生入口已实际只读核840文件/91,808,304字节、1文件/0字节及两处0链接；本片所有验证worker已退出，没有使用旧环境。两份责任清单最近尝试时间为2026-11-18T11:02:22.523Z，状态仍为已归集、删除受阻。没有换壳/工具绕过，工具恢复后由本会话优先处理，不能称已释放空间。[当前清理尝试](平台Core接入-开发记录.md#core-rental-files-http-20261118) · [原清理证据](平台Core接入-开发记录.md#core-rental-recovery-receipts-20261116)
 
-dev2订单列表/详情已固定，作者对照原冻结源码的66组行操作、930个单元格及两种表格呈现，原检查/影像消费者6/6、请求兼容8/8和17个导读链接通过。标准整份列表脚本仍在公共翻译器constructor回退断言退出1，RD尚未核开工版，不记为既有失败，保留原断言并由RD核定公共修复。原间距4px问题已定位固定main的pageTop=0与contextOpticalInset=var(--space-1)，规范3.3/3.4保持；前后依据留原记录。dev2继续只在约定业务路径迁移新建订单与服务端报价/客户委托闭包，通知/公共数据及Git索引仍由RD负责。
+dev2订单列表/详情已固定，作者对照原冻结源码的66组行操作、930个单元格及两种表格呈现，原检查/影像消费者6/6、请求兼容8/8和17个导读链接通过。RD已核constructor回退属于抽取时遗漏原词条检查的新增回归，公共函数已恢复；一次原翻译区段冒烟及单根197源类型通过，dev2标准完整列表复验退出0，原三个断言保留。[翻译修复](平台Core接入-开发记录.md#core-public-locale-compatibility-20261118) 原间距4px问题已定位固定main的pageTop=0与contextOpticalInset=var(--space-1)，规范3.3/3.4保持。dev2继续在约定业务路径迁移新建订单与服务端报价/客户委托闭包，通知/公共数据及Git索引仍由RD负责。
 
 旧外观测试17例16过/1个静态失败及MCP导读五个原隔离附件缺失继续保留。总导航原三份历史附件入口已由本日固定main改为删除前Git引用，本轮仅核当前导航，未再运行全局CLI。稀疏未检目标须按固定Git定位，不删除引用或修改检查器掩盖。原授权/生成/MCP检查的审批拒绝历史保留，后来定向补证不能冒称完整宿主验收。[当前MCP审计](平台Core接入-开发记录.md#core-original-mcp-audit-20261115) · [导读缺链](平台Core接入-开发记录.md#core-rental-capability-runtime-20261116)
 
