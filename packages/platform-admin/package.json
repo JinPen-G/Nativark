@@ -232,7 +232,9 @@
     "./platform-settings/client": "./src/features/platform-settings/client.ts",
     "./platform-settings/styles": "./src/features/platform-settings/PlatformSettings.module.css",
     "./platform-tools": "./src/features/platform-tools/index.ts",
-    "./platform-tools/client": "./src/features/platform-tools/client.ts"
+    "./platform-tools/client": "./src/features/platform-tools/client.ts",
+    "./source/components/RecordDetailLayout.module.css": "./src/components/RecordDetailLayout.module.css",
+    "./source/components/kanban-board/KanbanBridge": "./src/components/kanban-board/KanbanBridge.tsx"
   },
   "scripts": {
     "lint": "tsc -p tsconfig.json",

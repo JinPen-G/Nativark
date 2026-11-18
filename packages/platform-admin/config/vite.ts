@@ -3,11 +3,13 @@ import { fileURLToPath } from "node:url";
 import { motionPreferenceAdapter, motionPreferenceStyles } from "./motionPreferenceAdapter";
 import { actionButtonIconAdapter } from "./actionButtonIconAdapter";
 import { nativeSidebarStyles } from "./nativeSidebarStyles";
+import { kanbanBoardAdapter } from "./kanbanBoardAdapter";
+export { adaptKanbanRuntime, kanbanBoardAdapter } from "./kanbanBoardAdapter";
 
 export function platformAdminVite() {
   const source = (path: string) => fileURLToPath(new URL(path, import.meta.url));
   return {
-    plugins: [motionPreferenceAdapter(), actionButtonIconAdapter()],
+    plugins: [motionPreferenceAdapter(), actionButtonIconAdapter(), kanbanBoardAdapter()],
     postcss: [motionPreferenceStyles(), nativeSidebarStyles()],
     alias: {
       "@/registry": source("../../ui-arc/vendor/registry"),

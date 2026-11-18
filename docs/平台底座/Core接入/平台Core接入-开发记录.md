@@ -11,6 +11,31 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-public-record-kanban-work-orders-20261118"></a>
+
+## 公共详情/看板与Rental养护页面（2026-11-18）
+
+固定父版 f252100c2196334c581048704f1296aebf2a365d 已实际推送并回读，三人按共享树路径分工施工。RD抽取公共呈现，dev2完成养护页后停写并交付；Runtime和公共文件存储类型属于dev1下一片，订单新文件属于dev2下一片，精确暂存保留这些在制差异。
+
+原详情布局/展开、22份看板/来源及构建适配共27文件实际迁入[platform-admin](../../../packages/platform-admin/README.md)。25文件原SHA-256相同，包含全部保留运行时、CSS、JSON及来源；两处实际适配为Bridge的同一语言Context相对路径，以及详情布局的品牌/页头/内容栈扩展。原布局/返回/事实分组和看板交互保持，旧入口窄转接，旧CSS类通过composes复用公共同名样式。公共 `/ui` 正式供给详情/内容栈、事实/可选展开、QueryState、内容切换、列表控件和看板；`/vite`登记原严格看板适配一次，原后台移除重复登记。CorePage增加当前对象标题/摘要及动作图标、danger、pending和等待文案，仍由当前页/权限及真实Promise决定行为，原Arc spinner/success与vendor没有改写。
+
+[Rental养护贡献](../../../packages/rental-core/admin/work-orders/README.md)持有列表、看板、详情/历史/处置及六类表单，声明rental:work-orders/work-order-detail两页。原营运入口供给实际Auth、经营空间、当前权限及旧深链接；原api/rentalCore对应十二方法转接同一工厂。页面从公共CorePage、useCoreForm和UI接入，双入口提交共用同一Promise，校验完成后再次核当前对象/弹窗/会话。原 navigation 通过纯 `/admin/work-orders/pages` 出口读取路径、双语页名和分组，原 AppRouter/AppShell 消费同一 APP_ROUTES；旧 URL、图标、权限码及 history 参数不变。兼容权限表由页面声明单源供给；前端所需平台/React/路由/Query/antd/图标同伴依赖和 lock 同步声明为可选，领域根出口不加载它们。标准Core授权映射与完整组合仍是后续入口。
+
+| 必要核验 | 实际结果与边界 |
+| --- | --- |
+| 公共必要类型 | stdin实际TypeScript5.9.3，platform-admin 295根/2563源0诊断，进程36012终态退出0，磁盘输出0 |
+| 公共一次呈现冒烟 | stdin进程8408退出0；实际CorePage/ActionButton/详情/严格看板适配核动态页名/摘要、图标/danger/pending、当前撤权与卸载拒绝、同一确认及命令Promise、原返回/内容栈、原hash及坏归档拒绝。React/权限为明确fixture，无DOM或网络 |
+| 无Core内存构建 | Vite8.2.1实际公共应用，进程26072退出0：4产物、11008模块、7,368,193字节，未引入apps/admin或shared业务源码，磁盘输出0。首轮因只读主树依赖未定位antd/Tailwind CSS而失败；仅补验证映射后复验，产品源码未改 |
+| dev2必要类型 | 当前正式出口/tsconfig下，公共合同10根/204源、Rental前端十三领域出口13根/220源、Core合同36根/220源、Rental前端10根/1419源及原后台654根/4315源均0诊断。130份JS/声明内存产物已释放，磁盘生成0 |
+| dev2一次原冒烟 | node --no-compilation-cache --test tests/admin-work-order-board.test.cjs退出0，原4组、0skip/todo；保留流转/排序/退出与原键盘断言，仅调整真实源码定位，新增重复提交和迟到校验断言。首次2!==1复现两个提交入口各发一次请求，六表单改用同一公共useCoreForm后相关复验通过 |
+| 请求与组件 | dev2 stdin对照固定父版的十二方法/16输入、原Promise身份及四读取取消信号通过，退出0；作者Form lint与RD ActionButton/CorePage两文件antd lint均0问题、无partial/skipped |
+| 最终导航接线 | 原 navigation 和养护适配两根加八个原 ambient 声明，10根/1574源0诊断，进程40788退出0、磁盘输出0；原4组冒烟在补正式 pages 依赖定位后进程42036退出0，全部原断言保留、0skip/todo。首次定向类型漏原 ambient 声明产生80诊断，仅补原 d.ts 后复验通过 |
+| 兼容 CSS | Vite 内存实际编译旧 CSS 与公共 CSS，两模块/两产物/2278字节，九个类全部包含公共同名类，进程30312退出0、磁盘输出0。PostCSS 仍给出缺 from 选项告警；当前两份 CSS 无资源 URL，本片未据此改写原插件 |
+
+呈现冒烟首轮CSS-module fixture缺ES模块身份，RecordDetailStack的className读为undefined；补fixture后只复验同一冒烟通过，没有修改产品样式。当前源码与模块说明、正式出口、能力索引可发现路径和简单接入步骤同片核定。六份资料定向核1622链接、180锚点和103表格，0问题；25份原稿摘要保留，两包依赖/peer/meta与lock一致。正式出口与实际源码定位一致，精确暂存64路径后的限定CRLF空白检查退出0。
+
+本片没有新增永久测试脚本、安装、环境文件、业务服务或磁盘构建产物。浏览器/窄屏/实际动作动效、真实HTTP/数据库、标准Rental授权与完整安装未验。原PCH-07仍缺发现/安装与版本管理UI及完整宿主验证，06/08仍缺统一数据/事件作业合同与标准总装配，未据本片提升原任务百分比。正式版本由包含本节的Git提交定位。
+
 <a id="core-rental-enterprise-file-binding-20261118"></a>
 
 ## Rental企业回款文件绑定（2026-11-18）

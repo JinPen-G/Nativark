@@ -16,6 +16,12 @@
 /* The original final content slot holds the phase icon. Text-only idle commands
    reserve no empty icon space; pending/success keep the native slot and motion. */
 [data-rental-arc-action][data-action-icon="none"][data-state="idle"] > span[aria-hidden="true"] > span:last-child { display: none; }
+/* Danger follows the existing Arc button tokens; the original lifecycle and motion stay intact. */
+[data-rental-arc-action][data-button-danger] { color: var(--danger); background: var(--surface); border-color: var(--border); }
+@media (hover: hover) and (pointer: fine) {
+  [data-rental-arc-action][data-button-danger]:hover:not(:disabled) { border-color: var(--danger); background: var(--surface-muted); }
+}
+[data-rental-arc-action][data-button-danger]:active:not(:disabled) { border-color: var(--danger); background: var(--surface-muted); }
 .arc-copy-action button { border-radius: var(--rental-ui-radius-button, 18px); }
 [data-rental-arc-button][data-button-kind="link"] { padding-inline: var(--rental-control-padding-small); min-height: var(--rental-control-height-small); }
 [data-rental-arc-button][data-button-kind="link"]:not([data-button-danger]) { color: var(--accent); }

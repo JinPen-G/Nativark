@@ -1,3 +1,5 @@
+/** 原组合后台路由与菜单，投影已登记页面并保留原权限及URL；业务授权由服务端裁定。 */
+import { RENTAL_WORK_ORDER_PAGES, RENTAL_WORK_ORDER_LEGACY_PERMISSIONS } from "@rental-os/rental-core/admin/work-orders/pages";
 import { SUBSCRIPTION_ROUTES } from "@rental-os/platform-admin/subscription/subscriptionRoutes";
 import { ApartmentOutlined, ApiOutlined, AppstoreOutlined, BgColorsOutlined, BoxPlotOutlined, CalendarOutlined, ControlOutlined, CrownOutlined, DashboardOutlined, FileSearchOutlined, FileTextOutlined, FormOutlined, FundOutlined, GiftOutlined, IdcardOutlined, MobileOutlined, SafetyCertificateOutlined, SettingOutlined, ShopOutlined, TagsOutlined, TeamOutlined, ToolOutlined } from "@/components/ui/icons";
 import { RentalCategoryCode, type RentalCapability, type RentalCategoryTerminology } from "@rental-os/shared";
@@ -45,8 +47,8 @@ export const APP_ROUTES = {
   itemGroups: { path: "/rental/item-groups", label: "商品目录", permission: "rental-core:catalog:view", audience: "tenant", icon: <AppstoreOutlined />, menu: true },
   pricingGroups: { path: "/rental/pricing-groups", label: "定价分组", permission: "rental-os:price:manage", audience: "tenant", icon: <TagsOutlined />, menu: true },
   assets: { path: "/rental/assets", label: "资产与库存", permission: "rental-core:asset:view", audience: "tenant", icon: <BoxPlotOutlined />, menu: true },
-  workOrders: { path: "/rental/work-orders", label: "养护工单", permission: "rental-core:maintenance:view", audience: "tenant", icon: <ToolOutlined />, menu: true },
-  workOrderDetail: { path: "/rental/work-orders/:workOrderId", label: "养护工单详情", permission: "rental-core:maintenance:view", audience: "tenant", icon: <ToolOutlined /> },
+  workOrders: { path: `/rental${RENTAL_WORK_ORDER_PAGES.workOrders.path}`, label: RENTAL_WORK_ORDER_PAGES.workOrders.title.default, permission: RENTAL_WORK_ORDER_LEGACY_PERMISSIONS.view, audience: "tenant", icon: <ToolOutlined />, menu: Boolean(RENTAL_WORK_ORDER_PAGES.workOrders.menu) },
+  workOrderDetail: { path: `/rental${RENTAL_WORK_ORDER_PAGES.workOrderDetail.path}`, label: RENTAL_WORK_ORDER_PAGES.workOrderDetail.title.default, permission: RENTAL_WORK_ORDER_LEGACY_PERMISSIONS.view, audience: "tenant", icon: <ToolOutlined /> },
   locations: { path: "/rental/locations", label: "履约地点", permission: "rental-os:station:view", audience: "tenant", icon: <ShopOutlined />, menu: true },
   pricing: { path: "/rental/pricing", label: "价格版本与调价", permission: "rental-os:price:manage", audience: "tenant", icon: <FundOutlined />, menu: true },
   pricingVersions: { path: "/rental/pricing/versions", label: "空间价格版本", permission: "rental-os:price:manage", audience: "tenant", icon: <FundOutlined /> },
@@ -110,7 +112,7 @@ export const APP_NAVIGATION: AppNavigationSection[] = [
   { key: "platform-rental-core", label: "租赁内核", icon: <ControlOutlined />, routes: [APP_ROUTES.platformCategories, APP_ROUTES.platformCategoryCapabilities] },
   { key: "overview", label: "概览", icon: <DashboardOutlined />, routes: [APP_ROUTES.workbench, APP_ROUTES.operationReport, APP_ROUTES.notifications] },
   { key: "transactions", label: "租赁交易", icon: <ApartmentOutlined />, routes: [APP_ROUTES.orders] },
-  { key: "inventory", label: "商品与资产", icon: <AppstoreOutlined />, routes: [APP_ROUTES.itemGroups, APP_ROUTES.assets, APP_ROUTES.workOrders, APP_ROUTES.locations] },
+  { key: "inventory", label: RENTAL_WORK_ORDER_PAGES.workOrders.menu.group.default, icon: <AppstoreOutlined />, routes: [APP_ROUTES.itemGroups, APP_ROUTES.assets, APP_ROUTES.workOrders, APP_ROUTES.locations] },
   { key: "commercial", label: "定价与营销", icon: <FundOutlined />, routes: [APP_ROUTES.pricingGroups, APP_ROUTES.pricing, APP_ROUTES.discounts, APP_ROUTES.coupons, APP_ROUTES.services] },
   { key: "customers", label: "会员与客户", icon: <TeamOutlined />, routes: [APP_ROUTES.membershipReviews, APP_ROUTES.personalMembers, APP_ROUTES.corporateMembers, APP_ROUTES.membershipPlans, APP_ROUTES.membershipRewards] },
   // 租户侧设置按职责拆分，避免开业、业务规则、账号权限、外部服务和财务对账

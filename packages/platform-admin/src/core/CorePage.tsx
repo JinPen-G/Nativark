@@ -50,6 +50,11 @@ export function CorePageHostProvider({ host, children }: { host: CorePageHost; c
 
 export type CoreAdminPageAction<Values> = CorePageAction<FormInstance<Values>, Values> & {
   intent?: ActionButtonIntent;
+  /** 原按钮呈现由公共适配承担，pending仍来自真实业务Promise。 */
+  icon?: ReactNode;
+  danger?: boolean;
+  pending?: boolean;
+  pendingLabel?: string;
   /** 确认动作沿原ConfirmAction；业务自己声明危险程度。 */
   confirmTone?: "neutral" | "danger";
 };
@@ -63,7 +68,7 @@ function PageAction<Values>({ host, action }: { host: CorePageHost; action: Core
   // 确认面板也可能在原点击后等待；执行前取当前声明/权限，不保留旧回调绕过撤权。
   const current = () => {
     const value = live.current;
-    if (!value.active || value.action.disabled || !access(value.host, value.action.permissions))
+    if (!value.active || value.action.disabled || value.action.pending || !access(value.host, value.action.permissions))
       throw new Error(t("当前操作不可用"));
     return value;
   };
@@ -76,7 +81,8 @@ function PageAction<Values>({ host, action }: { host: CorePageHost; action: Core
   const confirming = useRef<Promise<unknown> | null>(null);
   let button: ReactNode;
   if (action.kind === "navigate" || action.kind === "open") {
-    button = <Button type={variant === "primary" ? "primary" : "default"} disabled={action.disabled} onClick={() => {
+    button = <Button type={variant === "primary" ? "primary" : "default"} icon={action.icon} danger={action.danger}
+      loading={action.pending} disabled={action.disabled} onClick={() => {
       try {
         const value = current(), latest = value.action;
         if (latest.kind === "open") latest.open();
@@ -88,7 +94,8 @@ function PageAction<Values>({ host, action }: { host: CorePageHost; action: Core
       } catch { toast({ type: "error", title: t("当前操作不可用") }); }
     }}>{label}</Button>;
   } else if (action.kind === "save") {
-    button = <SaveButton label={label} variant={variant} disabled={action.disabled} intent={action.intent} onActionError={reportFailure}
+    button = <SaveButton label={label} variant={variant} disabled={action.disabled} intent={action.intent}
+      icon={action.icon} danger={action.danger} pending={action.pending} pendingLabel={action.pendingLabel} onActionError={reportFailure}
       form={action.form} onSave={values => {
         const latest = current().action;
         if (latest.kind !== "save" || latest.form !== action.form) return Promise.reject(new Error(t("当前操作不可用")));
@@ -101,24 +108,28 @@ function PageAction<Values>({ host, action }: { host: CorePageHost; action: Core
       return latest.execute();
     };
     button = action.confirmation
-      ? <ConfirmAction label={label} prompt={corePageText(action.confirmation, locale)} tone={action.confirmTone ?? "neutral"}
-          disabled={action.disabled} onConfirm={() => {
+      ? <ConfirmAction label={label} icon={action.icon} prompt={corePageText(action.confirmation, locale)}
+          tone={action.confirmTone ?? (action.danger ? "danger" : "neutral")} pendingLabel={action.pendingLabel}
+          disabled={action.disabled || action.pending} onConfirm={() => {
             if (confirming.current) return confirming.current;
             const request = Promise.resolve().then(execute);
             confirming.current = request;
             void request.finally(() => { if (confirming.current === request) confirming.current = null; }).catch(() => undefined);
             return request;
           }} />
-      : <ActionButton label={label} variant={variant} disabled={action.disabled} intent={action.intent} onAction={execute} onActionError={reportFailure} />;
+      : <ActionButton label={label} variant={variant} disabled={action.disabled} intent={action.intent}
+          icon={action.icon} danger={action.danger} pending={action.pending} pendingLabel={action.pendingLabel} onAction={execute} onActionError={reportFailure} />;
   }
   return reason && action.disabled
     ? <Tooltip title={reason}><span tabIndex={0} aria-label={`${label} · ${reason}`}>{button}</span></Tooltip>
     : button;
 }
 
-/** Core仅提供业务内容及当前操作；标题来自路由单源，原页头负责portal/清理和Form归属。 */
-export function CorePage<Values = Record<string, unknown>>({ actions = [], description, view, note, children }: {
+/** 路由提供默认标题，Core可呈现当前获权对象的动态页名/摘要；原页头负责portal、清理和Form归属。 */
+export function CorePage<Values = Record<string, unknown>>({ actions = [], title, summary, description, view, note, children }: {
   actions?: readonly CoreAdminPageAction<Values>[];
+  title?: string;
+  summary?: ReactNode;
   description?: string;
   view?: ReactNode;
   note?: { title: string; description: ReactNode };
@@ -134,6 +145,6 @@ export function CorePage<Values = Record<string, unknown>>({ actions = [], descr
   }
   const buttons = actions.filter(action => access(host, action.permissions)).map(action =>
     <PageAction key={JSON.stringify([action.id, action.kind, action.kind === "command" ? action.confirmation : undefined])} host={host} action={action} />);
-  return <><PageHeading title={corePageText(host.page.definition.title, locale)} brandName={host.brandName}
-    description={description} view={view} note={note} extra={buttons} />{children}</>;
+  return <><PageHeading title={title ?? corePageText(host.page.definition.title, locale)} brandName={host.brandName}
+    summary={summary} description={description} view={view} note={note} extra={buttons} />{children}</>;
 }

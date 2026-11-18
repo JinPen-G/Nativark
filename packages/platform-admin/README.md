@@ -19,7 +19,8 @@
 | [Core 出口](src/core/index.ts)、[路由](src/core/CoreRoutes.tsx)、[页面](src/core/CorePage.tsx) | 路由、主按钮、真实就绪/范围、表单/列表和原结果管理；服务端继续复核授权 |
 | [UI 出口](src/components/ui/index.ts)、[主题](src/app/theme.tsx)、[语言](src/app/locale.tsx) | 单一 Context 与原组件适配，Core 可提供字典，原后台保留完整业务字典 |
 | [外壳](src/components/BusinessShell.tsx)、[页头插槽](src/components/workspace/WorkspaceHeader.tsx) | 原几何与动效、单个活动路由、表单原生提交关联及卸载清理 |
-| [构建适配](config/vite.ts)、[样式](src/styles.css) | 同源 UIArc 别名、动效偏好与按钮图标；环境/代理由宿主管理 |
+| [详情与事实布局](src/components/RecordDetailLayout.tsx)、[看板](src/components/kanban-board/KanbanBoard.tsx) | `/ui` 供给原记录布局/内容栈、事实/可选展开、QueryState/内容切换、列表控件和受控看板，Core提供业务事实和回调 |
+| [构建适配](config/vite.ts)、[样式](src/styles.css) | 同源 UIArc 别名、动效偏好、按钮图标与严格看板适配；环境/代理由宿主管理 |
 | [原后台适配](../../apps/admin/src/app/adminRuntime.ts) | 原 authStore/request/queryClient 消费端口，旧源码入口窄转接同一公共实现 |
 
 ## 宿主接入
@@ -34,11 +35,13 @@
 4. 受控组合调用正式 Core 页面注册函数，将同一注册表传给 `PlatformShell.pages` 和 `createCoreRouteElements`。公共菜单由宿主按原权限提供。
 5. 页面通过 `CorePage` 的操作声明复用原主按钮，通过 `useCoreRequest` 消费本 Core 路径和会话/页面围栏。实际例子及 Agent 模板见[接入指南](../../docs/平台底座/Core接入/平台Core接入-开发任务.md#core-quick-start)。
 
+CorePage 的 `title`、`summary` 可显示当前受权对象；`actions` 可声明图标、危险程度、等待状态和等待文案，公共按钮继续等待真实Promise并复验当前操作。`RecordDetailLayout` 接收事实、返回回调及可选Core页头，`RecordDetailStack`提供原内容间距。`KanbanBoard`只映射已经获权的数据和业务回调，宿主调用一次 `platformAdminVite()` 即带入保留看板的严格构建适配。实际接入见[Rental养护工单](../rental-core/admin/work-orders/README.md)。
+
 无 Core 时传空注册表，壳保留全部公共控件及联系管理员的提示，默认通知为空，不开放通用 Agent。通知内容/详情和可选面板通过宿主端口提供。公共包本身不拥有登录凭据、API 代理或可用权限。
 
 ## 来源与验证
 
-原 UIArc 源码仍在 [ui-arc](../ui-arc/README.md)，保留来源与许可。侧栏许可及来源随[实际源码](src/components/animate-sidebar/LICENSE.md)移动；[路由动效来源](src/components/workspace/sources.json)和[休息组件来源](src/features/rest/archive/SOURCE.md)保留。源码/静态/类型证据和剩余运行缺口见[开发记录](../../docs/平台底座/Core接入/平台Core接入-开发记录.md#core-public-admin-boundary-20261115)。
+原 UIArc 源码仍在 [ui-arc](../ui-arc/README.md)，保留来源与许可。侧栏许可及来源随[实际源码](src/components/animate-sidebar/LICENSE.md)移动；[路由动效来源](src/components/workspace/sources.json)、[休息组件来源](src/features/rest/archive/SOURCE.md)及[看板来源/原hash](src/components/kanban-board/SOURCE.md)保留。源码/静态/类型证据和剩余运行缺口见[开发记录](../../docs/平台底座/Core接入/平台Core接入-开发记录.md#core-public-admin-boundary-20261115)。
 
 `npm run lint -w @rental-os/platform-admin` 检查源码类型，宿主负责 Vite 产物。只读组件来源核验为 `node scripts/audit-admin-components.cjs --json`。这些命令不证明浏览器、真实 HTTP、数据库保存或独立安装通过。
 

@@ -1,0 +1,7 @@
+{
+  "extends": "../../../apps/platform-admin/tsconfig.json",
+  "include": [
+    "work-orders",
+    "../../platform-admin/src/**/*.d.ts"
+  ]
+}

@@ -19,7 +19,10 @@ function evaluate(source, filename, dependencies) {
   }, loaded, loaded.exports);
   return loaded.exports;
 }
-const policy = loadSource('apps/admin/src/features/rental-core/workOrderBoardPolicy.ts');
+const corePolicy = loadSource('packages/rental-core/admin/work-orders/workOrderBoardPolicy.ts');
+const policy = loadSource('apps/admin/src/features/rental-core/workOrderBoardPolicy.ts', {
+  '@rental-os/rental-core/admin/work-orders/policy': corePolicy,
+});
 
 test('work-order drops preserve start, submit, review, assignment and terminal gates', () => {
   const permissions = { manage: true, review: true };
@@ -47,10 +50,11 @@ test('filtered personal ordering retains hidden cards and appends newly seen rec
   assert.deepEqual(previous, ['first', 'hidden', 'second']);
 });
 
-test('work-order forms keep their target through exit, discard cancelled drafts, and lock while submitting', () => {
+test('work-order forms keep their target through exit, discard cancelled drafts, and lock while submitting', async () => {
   const React = require('react');
   const slots = [], forms = [], effects = [];
   let cursor = 0, formCursor = 0, changed = false, pending = false;
+  let executeMutation = () => { throw Error('Unexpected business write'); };
   const hooks = {
     useState(initial) {
       const index = cursor++;
@@ -62,47 +66,81 @@ test('work-order forms keep their target through exit, discard cancelled drafts,
       if (!previous || dependencies.some((value, at) => !Object.is(value, previous[at]))) effects.push(effect);
       slots[index] = dependencies;
     },
+    useRef(initial) {
+      const index = cursor++;
+      if (!(index in slots)) slots[index] = { current: initial };
+      return slots[index];
+    },
   };
+  hooks.useLayoutEffect = hooks.useEffect;
+  hooks.useCallback = callback => callback;
   const Form = Object.assign(() => null, {
     useForm() {
       const index = formCursor++;
-      forms[index] ??= { values: {}, resetFields() { this.values = {}; }, setFieldsValue(next) { this.values = { ...this.values, ...next }; } };
+      forms[index] ??= { values: {}, resetFields() { this.values = {}; }, setFieldsValue(next) { this.values = { ...this.values, ...next }; },
+        getFieldsValue() { return { ...this.values }; }, validateFields() { return Promise.resolve({ ...this.values }); } };
       return [forms[index]];
     },
     useWatch: (name, form) => form.values[name], Item: 'field',
   });
   const rows = ['first', 'second'].map(id => ({ id, workNo: `WO-${id}`, status: 'pending', reason: id, updatedAt: '2026-11-09', type: 'repair', attachments: [] }));
-  const dismissal = loadSource('apps/admin/src/components/ui/useModalDismissal.ts', { react: hooks });
+  const dismissal = loadSource('packages/platform-admin/src/components/ui/useModalDismissal.ts', { react: hooks });
   const ui = Object.fromEntries(['ActionButton', 'AnimatedNumber', 'Segmented', 'ListFilterItem', 'ListSection', 'Empty', 'Modal', 'Alert', 'Table', 'Input', 'Button', 'DataTableRowActions', 'DataTableStatus', 'DataTableText', 'SearchField', 'Select', 'Tabs'].map(name => [name, name]));
-  const auth = { tenant: { tenantId: 'tenant' }, user: { id: 'operator', permissions: ['*'] }, currentWorkspaceId: 'workspace', hasPermission: () => true };
-  const { MaintenanceWorkOrdersPage } = loadSource('apps/admin/src/features/rental-core/MaintenanceWorkOrdersPage.tsx', {
+  const auth = { sessionVerified: true, tenant: { tenantId: 'tenant' }, user: { id: 'operator', permissions: ['*'] }, currentWorkspaceId: 'workspace', hasPermission: () => true };
+  const authStore = Object.assign(select => select(auth), { getState: () => auth });
+  const router = { useNavigate: () => () => {}, useParams: () => ({}), useSearchParams: () => [new URLSearchParams(), () => {}] };
+  const pageMetadata = loadSource('packages/rental-core/admin/work-orders/pages.ts');
+  const coreContracts = { corePageKey: (coreId, pageId) => `${coreId}:${pageId}`, resolveCorePageLocation: () => '' };
+  let pageHost;
+  const { useCoreForm } = loadSource('packages/platform-admin/src/core/useCoreForm.ts', {
+    react: hooks,
+    '../app/serverFormSnapshot': loadSource('packages/platform-admin/src/app/serverFormSnapshot.ts'),
+    '../app/locale': { useLocale: () => ({ t: text => text }) },
+    '../components/ui': { useFeedback: () => ({ toast() {} }) },
+    './CorePage': { useCorePageHost: () => pageHost },
+  });
+  const { MaintenanceWorkOrdersPage: CoreWorkOrdersPage } = loadSource('packages/rental-core/admin/work-orders/MaintenanceWorkOrdersPage.tsx', {
     'react/jsx-runtime': require('react/jsx-runtime'), react: hooks,
     './WorkOrderBoard': { WorkOrderBoard: 'Board' }, './workOrderBoardPolicy': policy,
-    '@/components/ui': { ...ui, Form, App: { useApp: () => ({ message: { success() {}, warning() {}, error() {} } }) } },
-    '@/components/RecordDisclosure': { RecordDisclosure: 'Disclosure' },
-    'react-router-dom': { useNavigate: () => () => {}, useParams: () => ({}), useSearchParams: () => [new URLSearchParams(), () => {}] },
-    '@/components/ui/icons': { PlusOutlined: 'plus' },
+    '@rental-os/platform-admin/ui': { ...ui, Form, App: { useApp: () => ({ message: { success() {}, warning() {}, error() {} } }) },
+      RecordDisclosure: 'Disclosure', RecordDetailLayout: 'Detail', RecordDetailStack: 'Stack', RecordFacts: 'Facts',
+      QueryState: 'QueryState', ContentTransition: 'Transition', useModalDismissal: dismissal.useModalDismissal },
+    '@rental-os/platform-admin/core': { CorePage: 'CorePage', useCorePageHost: () => pageHost, useCoreForm },
+    '@rental-os/core-contracts': coreContracts,
+    './pages': pageMetadata,
+    'react-router-dom': router,
     '@tanstack/react-query': {
       useQuery: ({ queryKey }) => ({ data: queryKey[1] === 'work-orders' ? rows : [], isLoading: false, isFetching: false, isError: false }),
       useQueryClient: () => ({ invalidateQueries: async () => {} }),
-      useMutation: () => ({ isPending: pending, mutate() { throw Error('Unexpected business write'); }, mutateAsync() { throw Error('Unexpected business write'); } }),
+      useMutation: () => ({ isPending: pending, mutate: input => { void executeMutation(input); }, mutateAsync: input => executeMutation(input) }),
     },
     antd: { Descriptions: 'Descriptions', Space: 'Space', Tag: 'Tag', Typography: { Text: 'Text' } },
-    '@/components/RecordDetailLayout': { RecordDetailLayout: 'Detail', RecordFacts: 'Facts' },
-    '@/components/RecordDetailLayout.module.css': { default: {} },
-    'lucide-react': Object.fromEntries(['ClipboardCheck', 'Columns3', 'FileText', 'History', 'List', 'Play', 'UserRoundPen', 'X'].map(name => [name, name])),
-    '@/app/useServerFormSync': { useServerFormSync() {} }, '@/api/rentalCore': { rentalCoreApi: {} },
-    '@/app/locale': { useLocale: () => ({ locale: 'zh-CN', t: text => text }) },
-    '@/components/PageHeader': { PageHeader: 'PageHeader' }, '@/components/QueryState': { QueryState: 'QueryState' },
-    '@/components/workspace/ContentTransition': { ContentTransition: 'Transition' },
-    '@/components/ui/useModalDismissal': dismissal,
-    '@/features/auth/authStore': { useAuthStore: Object.assign(select => select(auth), { getState: () => auth }) },
+    'lucide-react': Object.fromEntries(['ArrowLeft', 'ClipboardCheck', 'Columns3', 'FileText', 'History', 'List', 'Play', 'Plus', 'UserRoundPen', 'X'].map(name => [name, name])),
+    '@rental-os/platform-admin/forms': { useServerFormSync() {} },
+    '@rental-os/platform-admin/locale': { useLocale: () => ({ locale: 'zh-CN', t: text => text }) },
     './WorkOrderBoard.module.css': { default: {} },
+  });
+  const { MaintenanceWorkOrdersPage } = loadSource('apps/admin/src/features/rental-core/MaintenanceWorkOrdersPage.tsx', {
+    'react/jsx-runtime': require('react/jsx-runtime'),
+    '@rental-os/platform-admin/core': { CorePageHostProvider: 'CorePageHostProvider' },
+    '@rental-os/core-contracts': coreContracts,
+    '@rental-os/rental-core/admin/work-orders': { ...pageMetadata, MaintenanceWorkOrdersPage: CoreWorkOrdersPage },
+    '@rental-os/rental-core/admin/work-orders/pages': pageMetadata,
+    'react-router-dom': router, '@/api/rentalCore': { rentalCoreApi: {} },
+    '@/app/branding': { resolveAdminBrandName: () => 'Rental' },
+    '@/app/queryClient': { currentSessionEpoch: () => 0 },
+    '@/features/auth/authStore': { useAuthStore: authStore },
   });
   const elements = node => !React.isValidElement(node) ? [] : [node, ...React.Children.toArray(node.props.children).flatMap(elements)];
   const render = () => {
     let tree, attempts = 0;
-    do { assert.ok(attempts++ < 10, 'Rendering must settle'); cursor = 0; formCursor = 0; changed = false; tree = MaintenanceWorkOrdersPage(); while (effects.length) effects.shift()(); } while (changed);
+    do {
+      assert.ok(attempts++ < 10, 'Rendering must settle'); cursor = 0; formCursor = 0; changed = false;
+      const hosted = MaintenanceWorkOrdersPage();
+      pageHost = hosted.props.host;
+      tree = hosted.props.children.type(hosted.props.children.props);
+      while (effects.length) effects.shift()();
+    } while (changed);
     return elements(tree);
   };
   const openCancel = row => render().find(node => node.type === 'Board').props.actions(row).props.actions.find(action => action.id === 'cancel').onSelect();
@@ -125,13 +163,45 @@ test('work-order forms keep their target through exit, discard cancelled drafts,
   for (const name of ['closable', 'keyboard', 'maskClosable']) assert.equal(saving.props[name], false, name);
   assert.equal(saving.props.cancelButtonProps.disabled, true);
   assert.equal(elements(saving).find(node => node.props.form === forms[4]).props.disabled, true);
+
+  pending = false;
+  forms[4].setFieldsValue({ reason: 'same validated cancellation' });
+  const inputs = [];
+  let finish;
+  const request = new Promise(resolve => { finish = resolve; });
+  executeMutation = input => { inputs.push(input); return request; };
+  const currentModal = cancelModal();
+  const currentForm = elements(currentModal).find(node => node.props.form === forms[4]);
+  const confirmed = currentModal.props.onConfirm();
+  currentForm.props.onFinish({ ...forms[4].values });
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(inputs.length, 1, 'The modal confirm and native form submission share one business request.');
+  assert.deepEqual(inputs[0], { kind: 'cancel', id: 'second', data: { reason: 'same validated cancellation' } });
+  finish({ id: 'second', status: 'cancelled' });
+  await confirmed;
+
+  let validated;
+  forms[4].validateFields = () => new Promise(resolve => { validated = resolve; });
+  const previousModal = cancelModal();
+  const previousConfirm = previousModal.props.onConfirm();
+  previousModal.props.onCancel();
+  cancelModal().props.afterClose();
+  openCancel(rows[0]);
+  validated({ reason: 'previous work order validation' });
+  await assert.rejects(previousConfirm, { name: 'AbortError' });
+  assert.equal(inputs.length, 1, 'Late validation cannot submit to a different work-order dialog.');
+  assert.match(cancelModal().props.title, /WO-first/);
 });
 
 test('archived native keyboard drag commits once on drop and never on preview or Escape', () => {
-  const archive = 'apps/admin/src/components/kanban-board/archive/';
+  const archive = 'packages/platform-admin/src/components/kanban-board/archive/';
   const original = fs.readFileSync(path.join(root, archive, 'reference-runtime.js'));
   assert.equal(crypto.createHash('sha256').update(original).digest('hex'), '017b7cdda46945ab120afc39ddcc833c805dac9948c73c41b84a7727b4b50e13');
-  const { adaptKanbanRuntime } = loadSource('apps/admin/config/kanbanBoardAdapter.ts');
+  const sharedBoardAdapter = loadSource('packages/platform-admin/config/kanbanBoardAdapter.ts');
+  const { adaptKanbanRuntime } = loadSource('apps/admin/config/kanbanBoardAdapter.ts', {
+    '@rental-os/platform-admin/vite': sharedBoardAdapter,
+  });
   const adapted = adaptKanbanRuntime(original.toString('utf8'), '/' + archive + 'reference-runtime.js');
   assert.ok(adapted.includes('onPointerDown') && adapted.includes('460 * (m - p)') && adapted.includes('scrollLeft += l'), 'Preserve the native drag, spring and edge-scroll implementation');
   const states = [];

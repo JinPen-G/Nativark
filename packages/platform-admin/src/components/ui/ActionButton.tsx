@@ -1,9 +1,9 @@
 import { ConfigProvider, type FormInstance } from "antd";
-import { useRef } from "react";
+import { useRef, type ReactNode } from "react";
 import { ActionButton as ArcActionButton, type ActionButtonProps as ArcProps } from "@/registry/components/action-button/action-button";
 import { useLocale } from "../../app/locale";
 import { formSnapshotFingerprint, notifyFormSaved } from "../../app/serverFormSnapshot";
-import { ActionButtonIconContext } from "./ActionButtonIcon";
+import { ActionButtonIconContext, ActionButtonCustomIconContext } from "./ActionButtonIcon";
 import { resolveActionButtonIntent, type ActionButtonIntent } from "./actionButtonIntent";
 import { useWorkspaceActionForm } from "../workspace/WorkspaceHeader";
 
@@ -11,13 +11,15 @@ export interface ActionButtonProps extends Omit<ArcProps, "onAction"> {
   /** Resolve only after the real operation completes. Throw on failure. */
   onAction: () => Promise<unknown>;
   pending?: boolean;
+  icon?: ReactNode;
+  danger?: boolean;
   variant?: "primary" | "secondary";
   /** Semantic idle icon; unknown labels stay text-only instead of suggesting navigation. */
   intent?: ActionButtonIntent;
 }
 
 /** Original Arc motion, with tenant tokens, locale and a synchronous double-click guard. */
-export function ActionButton({ onAction, pending, disabled, pendingLabel, successLabel, variant = "primary", intent, ...props }: ActionButtonProps) {
+export function ActionButton({ onAction, pending, disabled, pendingLabel, successLabel, variant = "primary", intent, icon, danger, ...props }: ActionButtonProps) {
   const { componentDisabled } = ConfigProvider.useConfig();
   const { t } = useLocale();
   const idleIcon = intent ?? resolveActionButtonIntent(props.label);
@@ -32,10 +34,11 @@ export function ActionButton({ onAction, pending, disabled, pendingLabel, succes
     void request.finally(() => { if (inFlight.current === request) inFlight.current = null; }).catch(() => undefined);
     return request;
   }
-  return <ActionButtonIconContext.Provider value={idleIcon}><ArcActionButton {...props} data-rental-arc-action="" data-rental-arc-button="" data-button-kind={variant}
-    data-action-icon={idleIcon}
+  return <ActionButtonIconContext.Provider value={idleIcon}><ActionButtonCustomIconContext.Provider value={icon}><ArcActionButton {...props} data-rental-arc-action="" data-rental-arc-button=""
+    data-button-kind={danger ? "danger" : variant} data-button-danger={danger || undefined}
+    data-action-icon={icon === undefined ? idleIcon : icon === null ? "none" : "custom"}
     label={t(props.label)} disabled={(disabled ?? componentDisabled) || Boolean(pending && !inFlight.current)} onAction={run}
-    pendingLabel={pendingLabel ?? t("处理中")} successLabel={successLabel ?? t("已完成")} /></ActionButtonIconContext.Provider>;
+    pendingLabel={pendingLabel ?? t("处理中")} successLabel={successLabel ?? t("已完成")} /></ActionButtonCustomIconContext.Provider></ActionButtonIconContext.Provider>;
 }
 
 export interface SaveButtonProps<Values> extends Omit<ActionButtonProps, "onAction" | "form"> {

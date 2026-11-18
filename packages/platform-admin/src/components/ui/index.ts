@@ -68,3 +68,15 @@ export { AnimatedNumber } from "./AnimatedNumber";
 export { LiveRefresh, useLiveRefresh } from "./LiveRefresh";
 export { Statistic } from "./Statistic";
 export { useModalDismissal } from "./useModalDismissal";
+
+export { RecordDetailLayout, RecordDetailStack } from "../RecordDetailLayout";
+export type { RecordDetailLayoutProps } from "../RecordDetailLayout";
+export { RecordDisclosure } from "../RecordDisclosure";
+export { RecordFacts, type RecordFact } from "../RecordFacts";
+export { QueryState } from "../QueryState";
+export { ContentTransition, useContentTransition } from "../workspace/ContentTransition";
+export { KanbanBoard } from "../kanban-board/KanbanBoard";
+export type { KanbanBoardProps, KanbanCard, KanbanColumn, KanbanPerson } from "../kanban-board/KanbanBoard";
+export type { KanbanBusinessBridge } from "../kanban-board/KanbanBridge";
+export { default as kanbanBoardClasses } from "../kanban-board/archive/classes.json";
+export { useListControls } from "./ListSection";

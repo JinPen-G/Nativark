@@ -1,15 +1,18 @@
-import { createContext, useContext } from "react";
+import { createContext, useContext, type ReactNode } from "react";
 import { ArrowRight, Check, ChevronLeft, ChevronRight, CirclePlay, FileCheck2, ListChecks,
   Mail, Plus, PlugZap, Save, Search, Send, Square, SquarePen, Trash2, Undo2, X, type LucideProps } from "lucide-react";
 import { AnimatedIcon } from "./AnimatedIcon";
 import type { ActionButtonIntent } from "./actionButtonIntent";
 
 export const ActionButtonIconContext = createContext<ActionButtonIntent>("none");
+export const ActionButtonCustomIconContext = createContext<ReactNode | undefined>(undefined);
 
 /** Inserted only into the original Arc idle-glyph slot by actionButtonIconAdapter.
  * The upstream spinner, drawn check, lifecycle and motion still own every other state. */
 export function ActionButtonIdleIcon({ width = 17, height = 17, className, style }: LucideProps) {
-  const intent = useContext(ActionButtonIconContext);
+  const intent = useContext(ActionButtonIconContext), icon = useContext(ActionButtonCustomIconContext);
+  if (icon !== undefined) return icon === null ? null : <span aria-hidden="true" className={className}
+    style={{ display: "inline-flex", width, height, alignItems: "center", justifyContent: "center", ...style }} data-action-icon="custom">{icon}</span>;
   if (intent === "none") return null;
   if (intent === "refresh" || intent === "retry" || intent === "upload" || intent === "download") {
     return <AnimatedIcon name={intent === "retry" ? "refresh" : intent} className={className}

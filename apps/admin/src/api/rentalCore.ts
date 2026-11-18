@@ -2,6 +2,7 @@
  * 门市租赁核心业务 API（`/rental/v1/*`）：品类与能力、商品与资产、库存、定价与优惠、
  * 日历与规则版本、订单全流程、验机、工单、通知与报表。均按当前会话的经营空间作用。
  */
+import { createRentalWorkOrderApi } from "@rental-os/rental-core/admin/work-orders/client";
 import type {
   TenantReadinessStatus,
   RentalDocumentType,
@@ -77,15 +78,6 @@ import type {
   RentalStockLedgerEntry,
   RentalStockOperationRequest,
   RentalStockOperationResult,
-  RentalStockDisposition,
-  RentalWorkOrder,
-  RentalWorkOrderAssignee,
-  RentalWorkOrderHistoryEntry,
-  CreateRentalWorkOrderRequest,
-  AssignRentalWorkOrderRequest,
-  CancelRentalWorkOrderRequest,
-  SubmitRentalWorkOrderRequest,
-  ReviewRentalWorkOrderRequest,
   RentalValueAddedService,
   RentalWorkspaceOperationReport,
   RentalWorkspaceReportFilter,
@@ -301,18 +293,7 @@ export const rentalCoreApi = {
   stockBalances: () => request<RentalStockBalance[]>("/rental/v1/stock-balances"),
   stockLedger: (params?: { itemGroupId?: string; locationId?: string; batchNo?: string; sourceDocumentNo?: string; limit?: number }) => request<RentalStockLedgerEntry[]>("/rental/v1/stock-ledger", { params }),
   applyStockOperation: (data: RentalStockOperationRequest) => request<RentalStockOperationResult>("/rental/v1/stock-operations", { method: "post", data }),
-  stockDispositions: (orderId?: string) => request<RentalStockDisposition[]>("/rental/v1/stock-dispositions", { params: { orderId } }),
-  restoreStockDisposition: (id: string) => request<RentalStockDisposition>(`/rental/v1/stock-dispositions/${id}/restore`, { method: "post" }),
-  writeOffStockDisposition: (id: string, reason: string) => request<RentalStockDisposition>("/rental/v1/stock-dispositions/" + id + "/write-off", { method: "post", data: { reason } }),
-  workOrders: (status?: string) => request<RentalWorkOrder[]>("/rental/v1/work-orders", { params: { status } }),
-  workOrderAssignees: (locationId?: string) => request<RentalWorkOrderAssignee[]>("/rental/v1/work-order-assignees", { params: { locationId } }),
-  workOrderHistory: (id: string) => request<RentalWorkOrderHistoryEntry[]>(`/rental/v1/work-orders/${id}/history`),
-  createWorkOrder: (data: CreateRentalWorkOrderRequest) => request<RentalWorkOrder>("/rental/v1/work-orders", { method: "post", data }),
-  assignWorkOrder: (id: string, data: AssignRentalWorkOrderRequest) => request<RentalWorkOrder>(`/rental/v1/work-orders/${id}/assign`, { method: "put", data }),
-  startWorkOrder: (id: string) => request<RentalWorkOrder>(`/rental/v1/work-orders/${id}/start`, { method: "post" }),
-  submitWorkOrder: (id: string, data: SubmitRentalWorkOrderRequest) => request<RentalWorkOrder>(`/rental/v1/work-orders/${id}/submit`, { method: "post", data }),
-  reviewWorkOrder: (id: string, data: ReviewRentalWorkOrderRequest) => request<RentalWorkOrder>(`/rental/v1/work-orders/${id}/review`, { method: "post", data }),
-  cancelWorkOrder: (id: string, data: CancelRentalWorkOrderRequest) => request<RentalWorkOrder>(`/rental/v1/work-orders/${id}/cancel`, { method: "post", data }),
+  ...createRentalWorkOrderApi(request),
   orders: () => request<RentalOrder[]>("/rental/v1/orders"),
   /** Same server filters/sort and session scope, without pagination; never reuse the visible page as an export. */
   orderExportRows: ({ status, keyword, from, to, assignment, pendingFeeOnly, sort }: Omit<RentalOrderListQuery, "page" | "pageSize">) =>

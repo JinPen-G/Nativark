@@ -4,7 +4,6 @@ import { defineConfig, loadEnv } from "vite";
 import { platformAdminVite } from "../../packages/platform-admin/config/vite";
 import tailwindcss from "@tailwindcss/vite";
 import { copilotArchiveStyles } from "./config/copilotArchiveStyles.js";
-import { kanbanBoardAdapter } from "./config/kanbanBoardAdapter.js";
 import { apiProxyTarget, loadViteEnvironment, publicEnvironmentDefinitions } from "../../config/environment.cjs";
 
 export default defineConfig(({ mode }) => {
@@ -18,7 +17,7 @@ export default defineConfig(({ mode }) => {
     envPrefix: [],
     define: publicEnvironmentDefinitions("admin", env),
     build: offline ? { outDir: "dist-ai-offline" } : undefined,
-    plugins: [...platform.plugins, kanbanBoardAdapter(), tailwindcss(), react()],
+    plugins: [...platform.plugins, tailwindcss(), react()],
     css: { postcss: { plugins: [...platform.postcss, copilotArchiveStyles()] } },
     resolve: {
       // Prefer source contracts over stray CommonJS build artifacts in shared/src.
