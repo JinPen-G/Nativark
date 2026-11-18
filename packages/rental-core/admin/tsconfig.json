@@ -1,6 +1,8 @@
 {
   "extends": "../../../apps/platform-admin/tsconfig.json",
   "include": [
+    "index.tsx",
+    "orders",
     "work-orders",
     "../../platform-admin/src/**/*.d.ts"
   ]

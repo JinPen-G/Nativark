@@ -1,5 +1,6 @@
 /** 原组合后台路由与菜单，投影已登记页面并保留原权限及URL；业务授权由服务端裁定。 */
 import { RENTAL_WORK_ORDER_PAGES, RENTAL_WORK_ORDER_LEGACY_PERMISSIONS } from "@rental-os/rental-core/admin/work-orders/pages";
+import { RENTAL_ORDER_PAGES, RENTAL_ORDER_LEGACY_PERMISSIONS } from "@rental-os/rental-core/admin/orders/pages";
 import { SUBSCRIPTION_ROUTES } from "@rental-os/platform-admin/subscription/subscriptionRoutes";
 import { ApartmentOutlined, ApiOutlined, AppstoreOutlined, BgColorsOutlined, BoxPlotOutlined, CalendarOutlined, ControlOutlined, CrownOutlined, DashboardOutlined, FileSearchOutlined, FileTextOutlined, FormOutlined, FundOutlined, GiftOutlined, IdcardOutlined, MobileOutlined, SafetyCertificateOutlined, SettingOutlined, ShopOutlined, TagsOutlined, TeamOutlined, ToolOutlined } from "@/components/ui/icons";
 import { RentalCategoryCode, type RentalCapability, type RentalCategoryTerminology } from "@rental-os/shared";
@@ -41,9 +42,9 @@ export const APP_ROUTES = {
   // 新建订单不进菜单：它是「订单管理」页上的主操作（页面右上角按钮），
   // 菜单里再放一条等于把一个动作伪装成一个板块，也让「租赁交易」多出一层噪音。
   // 路由本身照常注册，权限仍由 permission 把关。
-  orderCreate: { path: "/rental/orders/new", label: "新建订单", permission: "rental-os:order:create", audience: "tenant", icon: <FormOutlined /> },
-  orders: { path: "/rental/orders", label: "订单管理", permission: "rental-os:order:view", audience: "tenant", icon: <FileTextOutlined />, menu: true },
-  orderDetail: { path: "/rental/orders/:id", label: "订单详情", permission: "rental-os:order:view", audience: "tenant", icon: <FileTextOutlined /> },
+  orderCreate: { path: `/rental${RENTAL_ORDER_PAGES.orderCreate.path}`, label: RENTAL_ORDER_PAGES.orderCreate.title.default, permission: RENTAL_ORDER_LEGACY_PERMISSIONS.create, audience: "tenant", icon: <FormOutlined /> },
+  orders: { path: `/rental${RENTAL_ORDER_PAGES.orders.path}`, label: RENTAL_ORDER_PAGES.orders.title.default, permission: RENTAL_ORDER_LEGACY_PERMISSIONS.view, audience: "tenant", icon: <FileTextOutlined />, menu: Boolean(RENTAL_ORDER_PAGES.orders.menu) },
+  orderDetail: { path: `/rental${RENTAL_ORDER_PAGES.orderDetail.path}`, label: RENTAL_ORDER_PAGES.orderDetail.title.default, permission: RENTAL_ORDER_LEGACY_PERMISSIONS.view, audience: "tenant", icon: <FileTextOutlined /> },
   itemGroups: { path: "/rental/item-groups", label: "商品目录", permission: "rental-core:catalog:view", audience: "tenant", icon: <AppstoreOutlined />, menu: true },
   pricingGroups: { path: "/rental/pricing-groups", label: "定价分组", permission: "rental-os:price:manage", audience: "tenant", icon: <TagsOutlined />, menu: true },
   assets: { path: "/rental/assets", label: "资产与库存", permission: "rental-core:asset:view", audience: "tenant", icon: <BoxPlotOutlined />, menu: true },

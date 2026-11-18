@@ -971,6 +971,26 @@
       "types": "./dist/file-application-enterprise-payment-proof.d.ts",
       "default": "./dist/file-application-enterprise-payment-proof.js"
     },
+    "./admin": {
+      "types": "./admin/index.tsx",
+      "default": "./admin/index.tsx"
+    },
+    "./admin/orders": {
+      "types": "./admin/orders/index.tsx",
+      "default": "./admin/orders/index.tsx"
+    },
+    "./admin/orders/client": {
+      "types": "./admin/orders/client.ts",
+      "default": "./admin/orders/client.ts"
+    },
+    "./admin/orders/logic": {
+      "types": "./admin/orders/logic.ts",
+      "default": "./admin/orders/logic.ts"
+    },
+    "./admin/orders/pages": {
+      "types": "./admin/orders/pages.ts",
+      "default": "./admin/orders/pages.ts"
+    },
     "./admin/work-orders": {
       "types": "./admin/work-orders/index.tsx",
       "default": "./admin/work-orders/index.tsx"
@@ -1821,6 +1841,21 @@
       ],
       "file-application-enterprise-payment-proof": [
         "dist/file-application-enterprise-payment-proof.d.ts"
+      ],
+      "admin": [
+        "admin/index.tsx"
+      ],
+      "admin/orders": [
+        "admin/orders/index.tsx"
+      ],
+      "admin/orders/client": [
+        "admin/orders/client.ts"
+      ],
+      "admin/orders/logic": [
+        "admin/orders/logic.ts"
+      ],
+      "admin/orders/pages": [
+        "admin/orders/pages.ts"
       ],
       "admin/work-orders": [
         "admin/work-orders/index.tsx"

@@ -3554,11 +3554,12 @@ check('Mini exchange request clears downstream choices, isolates late replies an
 
 function adminInspectionFixture() {
   const hooks = reactHost(), storage = new Map(), calls = [], events = emitter();
+  hooks.runtime.useLayoutEffect = hooks.runtime.useEffect;
+  hooks.runtime.useCallback = callback => callback;
   const f = { hooks, storage, calls, events, epoch: 1, storageMode: '', viewKey: 'v1', original: { state: 'not_recorded', retryable: false }, handler: undefined,
     order: { id: 'o1', updatedAt: '2026-11-04T00:00:00Z', status: 'renting', fulfillmentMode: 'pickup', lines: [{ id: 'line', itemGroupId: 'old', itemGroupName: 'Original', inventoryMode: 'serialized', quantity: 1 }],
       allocations: [{ id: 'allocation', orderLineId: 'line', status: 'picked_up', assetNo: 'OLD', quantity: 1 }] },
     auth: { sessionVerified: true, token: 'synthetic-token', tenant: { tenantId: 't1' }, currentWorkspaceId: 'w1', user: { id: 'operator', tenantId: 't1', permissions: ['rental-os:order:operate'], dataScope: 'all', locationScope: { mode: 'all', locationIds: [] } }, hasPermission: () => true } };
-  const useAuthStore = () => f.auth; useAuthStore.getState = () => f.auth; useAuthStore.subscribe = fn => events.on(fn);
   const localStorage = { getItem: key => { if (f.storageMode === 'throw') throw new Error('storage unavailable'); return storage.get(key) ?? null; },
     setItem: (key, value) => { if (f.storageMode === 'throw') throw new Error('storage unavailable'); if (f.storageMode !== 'drop') storage.set(key, value); }, removeItem: key => storage.delete(key) };
   const locks = new Map(), navigator = { locks: { request: (key, fn) => { const pending = (locks.get(key) ?? Promise.resolve()).then(fn); locks.set(key, pending.catch(() => {})); return pending; } } };
@@ -3568,11 +3569,23 @@ function adminInspectionFixture() {
     const result = f.handler ? await f.handler(config) : config.url.endsWith('/requirements') ? plain(f.requirements) : config.method === 'get' ? plain(f.original) : (() => { throw new Error('ACK lost'); })();
     return { data: { data: result } };
   } } };
-  const original = load('apps/admin/src/features/membership/original-enterprise-operation.ts', { react: hooks.runtime, '@/features/auth/authStore': { useAuthStore }, '@/app/queryClient': query, '@/api/http': transport }, { localStorage, navigator, AbortController, AbortSignal });
-  const dependencies = { react: hooks.runtime, '@/api/http': transport, '@/features/auth/authStore': { useAuthStore }, '@/app/queryClient': query,
-    '../membership/original-enterprise-operation': original };
-  f.createHelper = () => load('apps/admin/src/features/rental-core/original-exchange-inspection.ts', dependencies, { localStorage, navigator, AbortController, AbortSignal, crypto: { randomUUID: () => crypto.randomUUID() } });
+  const getSession = () => ({ ...f.auth, authenticated: Boolean(f.auth.token) });
+  const requestOriginal = async (url, options) => (await transport.http.request({ ...options, url, _authRetry: true })).data.data;
+  f.context = { get session() { return getSession(); }, getSession, requestOriginal,
+    runtime: { ...query, request: requestOriginal, subscribe: listener => events.on(listener) } };
+  const contextModule = load('packages/rental-core/admin/orders/page-context.tsx', {
+    react: { ...hooks.runtime, createContext: () => ({}) }, 'react/jsx-runtime': hooks.jsx, './client': {},
+  });
+  const dependencies = { react: hooks.runtime, './page-context': { ...contextModule, useRentalOrderContext: () => f.context } };
+  const globals = { localStorage, navigator, AbortController, AbortSignal, DOMException, crypto: { randomUUID: () => crypto.randomUUID() } };
+  f.createHelper = () => {
+    const core = load('packages/rental-core/admin/orders/original-exchange-inspection.ts', dependencies, globals);
+    return load('apps/admin/src/features/rental-core/original-exchange-inspection.ts', {
+      '@rental-os/rental-core/admin/orders': core, './legacy-order-context': { useLegacyRentalOrderOperations: () => f.context },
+    }, globals);
+  };
   f.helper = f.createHelper();
+  const coreHelper = load('packages/rental-core/admin/orders/original-exchange-inspection.ts', dependencies, globals);
   const exchange = { orderLineId: 'line', allocationId: 'allocation', replacementItemGroupId: 'new', replacementAssetId: 'asset', priceBasis: 'original_order_price', originalDisposition: 'return_to_warehouse' };
   f.requirements = { orderId: 'o1', workspaceId: 'w1', expectedOrderUpdatedAt: f.order.updatedAt, exchange, requirementsHash: 'a'.repeat(64), media: 'unavailable', reservation: 'not_reserved', executionBasis: {},
     templates: [{ side: 'original_return', template: { id: 'old-template', name: 'Original return', version: 'v1', fields: [{ code: 'ok', label: 'Condition', type: 'boolean', required: true }] } },
@@ -3582,14 +3595,28 @@ function adminInspectionFixture() {
   f.record = key => ({ ...plain(f.requirements), id: 'prepared-1', actorUserId: 'operator', operationKey: key, requestHash: 'b'.repeat(64), revision: 1, state: 'prepared',
     reason: 'Private inspection facts', createdAt: '2026-11-04T00:00:00Z', inspections: plain(f.input.inspections), exceptions: [], customerConsent: 'not_connected', execution: 'not_connected' });
   f.mountHelper = () => hooks.mount(() => f.helper.useOriginalExchangeInspection('o1', 'operation-token-double', f.viewKey));
-  const form = Object.assign('form', {});
-  const Form = { Item: 'field', useForm: () => [{}] };
-  const ui = { ActionButton: 'action', Alert: 'alert', Button: 'button', Form, Input: Object.assign('input', { TextArea: 'textarea' }), ListSection: 'section', SaveButton: 'save', Select: 'select' };
+  const form = { getFieldsValue: () => ({}), validateFields: async () => ({}) };
+  const Form = { Item: 'field', useForm: () => [form] };
+  const ui = { ActionButton: 'action', Alert: 'alert', Button: 'button', Form, Input: Object.assign('input', { TextArea: 'textarea' }), ListSection: 'section', SaveButton: 'save', Select: 'select', useFeedback: () => ({ toast() {} }) };
+  const locale = { useLocale: () => ({ t: value => value }) };
+  const { useCoreForm } = load('packages/platform-admin/src/core/useCoreForm.ts', {
+    react: hooks.runtime, '../app/serverFormSnapshot': load('packages/platform-admin/src/app/serverFormSnapshot.ts', {}),
+    '../app/locale': locale, '../components/ui': ui, './CorePage': { useCorePageHost: () => ({
+      lifetimeKey: contextModule.rentalOrderSessionIdentity(getSession(), f.epoch),
+      page: { key: 'rental:order-detail', coreId: 'rental', definition: { permissions: [] } }, canAccess: () => f.auth.sessionVerified,
+    }) },
+  }, globals);
+  const editor = load('packages/rental-core/admin/orders/useOrderEditor.ts', {
+    react: hooks.runtime, '@rental-os/platform-admin/core': { useCoreForm },
+    '@rental-os/platform-admin/ui': ui, '@rental-os/platform-admin/locale': locale,
+  }, globals);
   const rentalCoreApi = { itemGroups: async () => [], pricingGroups: async () => [], allocationCandidates: async () => {} };
+  f.context.api = rentalCoreApi;
   const data = { groups: [{ id: 'new', name: 'New', status: 'enabled', inventoryMode: 'serialized' }], pricing: [], candidates: { reservations: [{ orderLineId: 'line', candidates: [{ assetId: 'asset', assetNo: 'NEW', available: true }] }] } };
-  const page = load('apps/admin/src/features/rental-core/ExchangeInspectionPreparationPanel.tsx', { react: hooks.runtime, 'react/jsx-runtime': hooks.jsx, antd: { InputNumber: 'number' },
+  const page = load('packages/rental-core/admin/orders/ExchangeInspectionPreparationPanel.tsx', { react: hooks.runtime, 'react/jsx-runtime': hooks.jsx, antd: { InputNumber: 'number' },
     '@tanstack/react-query': { useQuery: options => ({ data: options.queryKey[0].includes('groups') ? data.groups : options.queryKey[0].includes('pricing') ? data.pricing : data.candidates, isFetching: false }) },
-    '@/components/ui': ui, '@/api/rentalCore': { rentalCoreApi }, '@/app/locale': { useLocale: () => ({ t: value => value }) }, './original-exchange-inspection': f.helper,
+    '@rental-os/platform-admin/ui': ui, '@rental-os/platform-admin/locale': locale, './original-exchange-inspection': coreHelper,
+    './page-context': dependencies['./page-context'], './useOrderEditor': editor,
     './ExchangeInspectionMediaPanel': { ExchangeInspectionMediaPanel: 'media-panel' }, './OrderDetail.module.css': { default: {} } });
   f.mediaDependencies = dependencies; f.mediaGlobals = { localStorage, navigator, AbortController, AbortSignal, URL, TextEncoder,
     crypto: { randomUUID: () => crypto.randomUUID(), subtle: crypto.webcrypto.subtle } }; f.ui = ui;
@@ -3652,11 +3679,18 @@ function adminImageFixture() {
     return source ? { state: 'observed', source: plain(source), retryable: false } : { state: 'not_recorded', retryable: false };
   };
   f.mediaGlobals.fetch = async (url, config) => { assert.ok(JSON.parse([...f.storage.values()][0]).some(row => row.phase === 'put_attempted'), 'PUT dispatch follows durable seal'); f.puts.push({ url, ...config }); return f.putHook ? f.putHook() : { ok: true }; };
-  f.createMedia = () => load('apps/admin/src/features/rental-core/original-exchange-inspection-media.ts', f.mediaDependencies, f.mediaGlobals);
+  f.createMedia = () => {
+    const core = load('packages/rental-core/admin/orders/original-exchange-inspection-media.ts', f.mediaDependencies, f.mediaGlobals);
+    return load('apps/admin/src/features/rental-core/original-exchange-inspection-media.ts', {
+      '@rental-os/rental-core/admin/orders': core, './legacy-order-context': { useLegacyRentalOrderOperations: () => f.context },
+    }, f.mediaGlobals);
+  };
   f.media = f.createMedia(); f.mountMedia = () => f.hooks.mount(() => f.media.useOriginalExchangeInspectionMedia('o1', 'operation-token-double', f.viewKey));
-  f.mediaPage = load('apps/admin/src/features/rental-core/ExchangeInspectionMediaPanel.tsx', { react: f.hooks.runtime, 'react/jsx-runtime': f.hooks.jsx,
-    '@/components/ui': { ...f.ui, FileUpload: 'files' }, '@/components/workspace/ContentTransition': { ContentTransition: 'transition' }, '@/app/locale': { useLocale: () => ({ t: value => value }) },
-    './original-exchange-inspection-media': f.media, './OrderDetail.module.css': { default: {} } });
+  f.mediaPage = load('packages/rental-core/admin/orders/ExchangeInspectionMediaPanel.tsx', { react: f.hooks.runtime, 'react/jsx-runtime': f.hooks.jsx,
+    '@rental-os/platform-admin/ui': { ...f.ui, FileUpload: 'files', ContentTransition: 'transition' }, '@rental-os/platform-admin/locale': { useLocale: () => ({ t: value => value }) },
+    './page-context': f.mediaDependencies['./page-context'],
+    './original-exchange-inspection-media': load('packages/rental-core/admin/orders/original-exchange-inspection-media.ts', f.mediaDependencies, f.mediaGlobals),
+    './OrderDetail.module.css': { default: {} } });
   f.request = { expectedOrderUpdatedAt: f.order.updatedAt, exchange: plain(f.body.exchange) }; f.newDisabled = false; f.unavailable = false;
   f.mountMediaPage = () => f.hooks.mount(() => f.mediaPage.ExchangeInspectionMediaPanel({ orderId: 'o1', orderRevision: f.order.updatedAt, operationToken: 'operation-token-double', request: f.request, newDisabled: f.newDisabled, unavailable: f.unavailable }));
   f.reference = key => JSON.parse([...f.storage.values()].find(value => value.startsWith('['))).find(row => !key || row.key === key);

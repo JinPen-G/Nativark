@@ -436,11 +436,14 @@ void (async () => {
 
   {
     const fs = require("node:fs"), path = require("node:path"), ts = require("typescript");
-    const helpers = {}, journal = {};
+    const helpers = {}, journal = {}, coreJournal = {};
     new Function("exports", ts.transpileModule(fs.readFileSync(path.join(__dirname, "../apps/admin/src/features/ai-native/settings-operation-reference.ts"), "utf8"),
       { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(helpers);
+    new Function("exports", ts.transpileModule(fs.readFileSync(path.join(__dirname, "../packages/rental-core/admin/orders/service-execution-reference.ts"), "utf8"),
+      { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(coreJournal);
     new Function("exports", "require", ts.transpileModule(fs.readFileSync(path.join(__dirname, "../apps/admin/src/features/rental-core/service-execution-reference.ts"), "utf8"),
       { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(journal, name => {
+        if (name === "@rental-os/rental-core/admin/orders/logic") return coreJournal;
         assert.match(name, /settings-operation-reference$/); return helpers;
       });
     const rows = new Map(), storage = { getItem: key => rows.get(key) ?? null, setItem: (key, value) => rows.set(key, value), removeItem: key => rows.delete(key) };
@@ -456,9 +459,12 @@ void (async () => {
     assert.equal(journal.readServiceExecutionReference(storage, reference.scope, reference.orderId).blocked, true);
     rows.set(storedKey, JSON.stringify(reference));
     journal.clearServiceExecutionReference(storage, reference); assert.equal(rows.size, 0);
-    const returnJournal = {};
+    const returnJournal = {}, coreReturnJournal = {};
+    new Function("exports", ts.transpileModule(fs.readFileSync(path.join(__dirname, "../packages/rental-core/admin/orders/return-operation-reference.ts"), "utf8"),
+      { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(coreReturnJournal);
     new Function("exports", "require", ts.transpileModule(fs.readFileSync(path.join(__dirname, "../apps/admin/src/features/rental-core/return-operation-reference.ts"), "utf8"),
       { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(returnJournal, name => {
+        if (name === "@rental-os/rental-core/admin/orders/logic") return coreReturnJournal;
         assert.match(name, /settings-operation-reference$/); return helpers;
       });
     const payload = { items: [{ allocationId: "actual-allocation", quantity: 1 }] };
@@ -477,7 +483,7 @@ void (async () => {
     }
     await assert.rejects(returnJournal.retainReturnOperation(undefined, reference.scope, "order", "partial", payload));
     assert.equal(rows.size, 0);
-    const source = fs.readFileSync(path.join(__dirname, "../apps/admin/src/features/rental-core/RentalOrderDetailPage.tsx"), "utf8");
+    const source = fs.readFileSync(path.join(__dirname, "../packages/rental-core/admin/orders/RentalOrderDetailPage.tsx"), "utf8");
     assert.match(source, /retainServiceExecutionReference\(serviceReferenceStorage\(\), command.reference\)/);
     assert.match(source, /command.reference.orderId, command.reference.occurrenceId, command.data, command.reference.key/);
     assert.match(source, /currentSessionEpoch\(\) === epoch/);

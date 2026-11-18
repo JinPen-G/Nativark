@@ -6,6 +6,7 @@
 
 | 入口 | 职责与直接消费者 |
 | --- | --- |
+| [订单前端](admin/orders/README.md)、[统一页面贡献](admin/index.tsx)、[订单请求](admin/orders/client.ts) | `/admin` 组合订单与养护，`/admin/orders` 提供列表、新建、详情及原配货/资金/检查/单据链；宿主提供当前身份、经营空间、原请求与跨领域组件，旧地址消费同一实现 |
 | [养护工单前端](admin/work-orders/README.md)、[页面贡献](admin/work-orders/index.tsx)、[客户端工厂](admin/work-orders/client.ts) | `/admin/work-orders` 提供原列表/看板/详情与六类表单；宿主供给当前权限/经营空间及唯一请求，旧路由和十二HTTP方法薄适配同一实现 |
 | [核心HTTP](src/http-core.controller.ts)、[业务HTTP](src/http-business.controller.ts)、[应用接点](src/http-applications.ts)、[快照与操作键](src/http-context.ts) | `/http-core` 与 `/http-business` 持有原履约、报价、规则和营销HTTP；宿主绑定同一业务/数据库实例，Guard/ALS及原动作继续核权限、事务和原收据 |
 | [空间能力HTTP](src/http-workspace-capabilities.controller.ts)、[员工收款HTTP](src/http-staff-payments.controller.ts)、[服务接点](src/http-service-ports.ts)、[空间能力DTO](src/http-workspace-capability.dto.ts) | 正式HTTP子出口持有原8条路径与校验；宿主Guard先形成可信身份，再通过同一原服务实例处理。原API只再导出，Controller注册不取得额外业务权限 |
@@ -244,4 +245,4 @@ MySQL 快照与收据子出口使用可选 peer `@prisma/client` 的原 SQL/JSON
 
 规则验证沿原消费者复用，覆盖服务计费/条款、优惠取舍、押金/预授权、换货冻结检查及资产和证据边界。[服务目录](../../tests/rental-service-catalog.test.cjs) · [优惠取舍](../../tests/rental-discount-selection.test.cjs) · [资金规则](../../tests/rental-security-deposit.test.cjs) · [换货检查](../../tests/rental-exchange-inspection.test.cjs) · [资产有效期](../../tests/rental-asset-validity.test.cjs) · [检查证据](../../tests/rental-inspection-evidence.test.cjs)
 
-必要兼容验证覆盖能力执行、条件与历史依据、计价、器材及检查。源码测试优先 `.ts`，正式消费者使用本版构建产物。拆前合同与运行时导出按固定 Git 对照，实际证据和剩余边界沿 PCH 记录维护。[原能力执行器](../../tests/capability-hook-runtime.test.cjs) · [条件与历史依据](../../tests/category-capability-conditions.test.cjs) · [原计价测试](../../tests/rental-pricing-strategy.test.cjs) · [原器材测试](../../tests/capability-equipment.test.cjs) · [检查资源](../../tests/rental-inspection-resource.test.cjs) · [用量纠正](../../tests/rental-inspection-usage-correction.test.cjs) · [PCH 记录](../../docs/平台底座/Core接入/平台Core接入-开发记录.md#core-rental-domain-package-20261115)
+必要兼容验证覆盖能力执行、条件与历史依据、计价、器材及检查。源码测试优先 `.ts`，正式消费者使用本版构建产物。开发新 Core 从[五步接入手册](../core-contracts/README.md#五步快速接入)开始，订单与养护分别提供真实页面样例。[原能力执行器](../../tests/capability-hook-runtime.test.cjs) · [条件与历史依据](../../tests/category-capability-conditions.test.cjs) · [原计价测试](../../tests/rental-pricing-strategy.test.cjs) · [原器材测试](../../tests/capability-equipment.test.cjs) · [检查资源](../../tests/rental-inspection-resource.test.cjs) · [用量纠正](../../tests/rental-inspection-usage-correction.test.cjs)

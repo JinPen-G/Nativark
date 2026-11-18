@@ -121,7 +121,7 @@ function PageAction<Values>({ host, action }: { host: CorePageHost; action: Core
           icon={action.icon} danger={action.danger} pending={action.pending} pendingLabel={action.pendingLabel} onAction={execute} onActionError={reportFailure} />;
   }
   // 深链接只能定位当前页面的已登记动作；包住禁用按钮便于说明原因，不触发业务执行。
-  const target = <span data-core-page={host.page.key} data-core-action={action.id}
+  const target = <span data-core-page={host.page.key} data-core-action={action.id} style={{ display: "inline-flex" }}
     tabIndex={action.disabled ? 0 : -1} aria-label={reason && action.disabled ? `${label} · ${reason}` : undefined}>{button}</span>;
   return reason && action.disabled ? <Tooltip title={reason}>{target}</Tooltip> : target;
 }

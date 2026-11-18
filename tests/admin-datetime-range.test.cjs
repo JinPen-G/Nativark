@@ -4,7 +4,7 @@ const path = require('node:path');
 const ts = require('typescript');
 const dayjs = require('dayjs');
 const root = path.resolve(__dirname, '..');
-const source = fs.readFileSync(path.join(root, 'apps/admin/src/components/ui/DatePicker.tsx'), 'utf8');
+const source = fs.readFileSync(path.join(root, 'packages/platform-admin/src/components/ui/DatePicker.tsx'), 'utf8');
 // Exercise the adapter without a browser, login or separate preview page.
 const integratedRange = () => {};
 const arcRange = () => {};
@@ -21,7 +21,7 @@ const modules = {
   '@/registry/components/time-picker/time-picker': { TimePicker: () => {} },
   '@/registry/components/date-range-picker/date-range-picker': { DateRangePicker: arcRange },
   '@/registry/components/popover/popover': { Popover: () => {}, PopoverContent: () => {}, PopoverTrigger: () => {} },
-  '@/app/locale': { useLocale: () => ({ locale: 'zh-CN', t: value => value }) },
+  '../../app/locale': { useLocale: () => ({ locale: 'zh-CN', t: value => value }) },
   './Button': { Button: () => {} },
   './ArcLocale': { ArcLocale: () => {} },
 };
@@ -86,6 +86,6 @@ endpoints[0].props.onChange(dayjs('2027-01-02'));
 assert.equal(pairChange[1], originalPair[1]);
 assert.equal(changedEnd, 'start', 'Changing a start date is not an end-date edit merely because both are filled');
 assert.deepEqual(originalPair.map(date => date.format('YYYY-MM-DD')), ['2027-01-01', '2027-01-10']);
-const order = fs.readFileSync(path.join(root, 'apps/admin/src/features/rental-core/RentalOrderCreatePage.tsx'), 'utf8');
+const order = fs.readFileSync(path.join(root, 'packages/rental-core/admin/orders/RentalOrderCreatePage.tsx'), 'utf8');
 assert.match(order, /<DatePicker\.RangePicker showTime/);
 console.log('admin-datetime-range: integrated datetime, opening month, clear/disabled guards, pinned endpoints and change ownership passed (no browser verification)');

@@ -476,7 +476,7 @@ test('admin funding summaries separate corporate allocation from cash and never 
   const React = require('react'), { renderToStaticMarkup } = require('react-dom/server');
   const fs = require('node:fs'), path = require('node:path'), ts = require('typescript');
   const load = (file, overrides) => {
-    const code = ts.transpileModule(fs.readFileSync(path.join(__dirname, '../apps/admin/src/features/rental-core', file), 'utf8'), {
+    const code = ts.transpileModule(fs.readFileSync(path.join(__dirname, '../packages/rental-core/admin/orders', file), 'utf8'), {
       compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true }
     }).outputText;
     const module = { exports: {} };
@@ -485,9 +485,9 @@ test('admin funding summaries separate corporate allocation from cash and never 
   };
   const text = ({ children }) => React.createElement('span', null, children);
   const presentation = load('orderDetailPresentation.ts', {});
-  const mocks = { '@/app/locale': { useLocale: () => ({ t: value => value }) },
-    '@/components/ui': { DataTableStatus: text, Alert: ({ title }) => text({ children: title }), Button: text, ListSection: text, Table: () => null },
-    '@/features/membership/CustomerPreview': { CustomerPreview: () => null },
+  const CustomerPreview = () => null;
+  const mocks = { '@rental-os/platform-admin/locale': { useLocale: () => ({ t: value => value }) },
+    '@rental-os/platform-admin/ui': { DataTableStatus: text, Alert: ({ title }) => text({ children: title }), Button: text, ListSection: text, Table: () => null },
     './orderListPresentation': { plannedReturnAt: order => order.endAt },
     './orderDetailPresentation': presentation, './OrderDetail.module.css': { __esModule: true, default: {} } };
   const summary = load('OrderDetailSummary.tsx', mocks);
@@ -496,7 +496,7 @@ test('admin funding summaries separate corporate allocation from cash and never 
   const funding = await balance(f), location = { id: 'loc', name: 'Warehouse', operator: { id: 'op', name: 'Operator' } };
   const order = { ...f.order, status: 'renting', customerType: 'corporate', fulfillmentMode: 'store_pickup_return',
     fulfillmentLocationSnapshot: location, returnLocationSnapshot: location };
-  const renderSummary = value => renderToStaticMarkup(React.createElement(summary.OrderDetailSummary, { order, funding: value, fundingState: 'ready' }));
+  const renderSummary = value => renderToStaticMarkup(React.createElement(summary.OrderDetailSummary, { order, funding: value, fundingState: 'ready', CustomerPreview }));
   const html = renderSummary(funding);
   assert.match(html, /现金实收/); assert.match(html, /企业回款已核销/); assert.match(html, /100\.00/);
   assert.doesNotMatch(html, /模拟资金/);
@@ -506,11 +506,11 @@ test('admin funding summaries separate corporate allocation from cash and never 
   const panel = renderToStaticMarkup(React.createElement(OrderFundingPanel, { order, funding, loading: false, error: false,
     refresh() {}, depositRequirement: 0, preauthorizationRequirement: 0, actions: {} }));
   assert.match(panel, /企业回款已核销/); assert.match(panel, /现金实收/);
-  const page = fs.readFileSync(path.join(__dirname, '../apps/admin/src/features/rental-core/RentalOrderDetailPage.tsx'), 'utf8');
+  const page = fs.readFileSync(path.join(__dirname, '../packages/rental-core/admin/orders/RentalOrderDetailPage.tsx'), 'utf8');
   assert.match(page, /knownMoney\(value\) \? formatRentalMoney\(value, detail\?\.currency\) : "—"/);
-  const documents = fs.readFileSync(path.join(__dirname, '../apps/admin/src/features/rental-core/OrderDocumentsPanel.tsx'), 'utf8');
-  assert.match(documents, /rentalCoreApi\.orderDocumentVersion\(order\.id, type, selection\.snapshotId\)/);
-  assert.match(documents, /rentalCoreApi\.orderDocument\(order\.id, type\)/);
+  const documents = fs.readFileSync(path.join(__dirname, '../packages/rental-core/admin/orders/OrderDocumentsPanel.tsx'), 'utf8');
+  assert.match(documents, /rentalCoreApi\.orderDocumentVersion\(order\.id, type, selection\.snapshotId, \{ signal \}\)/);
+  assert.match(documents, /rentalCoreApi\.orderDocument\(order\.id, type, \{ signal \}\)/);
   assert.doesNotMatch(documents, /function documentHtml/);
 });
 
