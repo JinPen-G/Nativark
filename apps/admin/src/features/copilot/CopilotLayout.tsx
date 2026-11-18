@@ -169,17 +169,17 @@ function CopilotPanel({ narrow, open, background }: { narrow: boolean; open: boo
       </article>)}
     </div></div>
     {!!copilot.contexts.length && <div className="asp-context copilot-contexts" aria-label={t('待发送的上下文')}>{copilot.contexts.map(record => <span key={record.key} className="asp-selection-chip" title={`${record.source} · ${contextLabel(record)}`}><FileText size={12} /><span>{contextLabel(record)}</span><button type="button" aria-label={`${t('移除上下文')} ${contextLabel(record)}`} onClick={() => copilot.remove(record.key)}><X size={12} /></button></span>)}</div>}
-    <form className="asp-composer" onSubmit={event => { event.preventDefault(); send(); }}><textarea ref={input} aria-label={t('向 Copilot 提问')} placeholder={t('询问所选内容，或描述要处理的工作…')} value={copilot.draft} maxLength={4000} rows={2} onChange={event => copilot.setDraft(event.target.value)} onKeyDown={event => {
+    <form className="asp-composer" onSubmit={event => { event.preventDefault(); send(); }}><textarea ref={input} aria-label={t('向 Copilot 提问')} placeholder={t(copilot.orderId ? '询问这笔订单…' : '请先打开一笔订单再提问')} value={copilot.draft} disabled={!copilot.orderId} maxLength={4000} rows={2} onChange={event => copilot.setDraft(event.target.value)} onKeyDown={event => {
       if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) { event.preventDefault(); send(); }
-    }} />{copilot.busy ? <button type="button" className="asp-send" aria-label={t('停止生成')} onClick={copilot.stop}><Square size={13} /></button> : <button type="submit" className="asp-send" aria-label={t('发送消息')} data-sound="press" disabled={!copilot.draft.trim()}><ArrowUp size={16} /></button>}</form>
+    }} />{copilot.busy ? <button type="button" className="asp-send" aria-label={t('停止生成')} onClick={copilot.stop}><Square size={13} /></button> : <button type="submit" className="asp-send" aria-label={t('发送消息')} data-sound="press" disabled={!copilot.orderId || !copilot.draft.trim()}><ArrowUp size={16} /></button>}</form>
     <div className="copilot-footnote">{t('模型内容需核对；本入口读取原订单事实，业务办理沿原页面。')}</div>
     {copilot.feedback && <p className="asp-state" role="status">{t(copilot.feedback)}</p>}
     {!copilot.orderId && <div className="copilot-routes"><button type="button" onClick={copilot.close}>{t('回原页面办理资料或配置')}</button></div>}
     <span className="asp-sr" role="status">{copilot.notice && t('已添加 {count} 条上下文', { count: copilot.notice })}</span>
     <Modal title={<><ShieldCheck size={18} /> {t('确认处理方案')}</>} open={open && Boolean(copilot.review)} onCancel={copilot.dismissReview} footer={<>
-      <Button onClick={copilot.dismissReview}>{t('返回核对')}</Button><Button type="primary" disabled={!copilot.available || copilot.busy} onClick={() => void copilot.confirm()}>{t('确认并运行订单 Agent')}</Button>
+      <Button onClick={copilot.dismissReview}>{t('返回核对')}</Button><Button type="primary" disabled={!copilot.review?.question || !copilot.available || copilot.busy} onClick={() => void copilot.confirm()}>{t('确认并运行订单 Agent')}</Button>
     </>}><div className="copilot-review"><p>{copilot.review?.prompt}</p><dl><div><dt>{t('原订单定位')}</dt><dd>{copilot.review?.orderId}</dd></div></dl>
-      <label><span>{t('本次发送的问题')}</span><Select aria-label={t('本次发送的问题')} value={copilot.review?.question} options={ORDER_QUESTIONS.map(item => ({ ...item, label: t(item.label) }))}
+      <label><span>{t('本次发送的问题')}</span><Select aria-label={t('本次发送的问题')} placeholder={t('请选择问题类别')} value={copilot.review?.question ?? undefined} options={ORDER_QUESTIONS.map(item => ({ ...item, label: t(item.label) }))}
         onChange={value => copilot.selectQuestion(String(value) as OrderQuestion)} /></label>
       <small>{t('当前模型接口接收订单定位和所选问题类别。输入框文字仅作本页核对备注；页面字段不会作为服务端事实提交。确认后将创建原会话、任务并启动模型。')}</small>
     </div></Modal>

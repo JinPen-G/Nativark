@@ -28,8 +28,11 @@ export function AiOperatorNavigation({ query }: { query: string }) {
         <HighlightItem value={item.id} asChild><div className="rental-sidebar-route-target"><SidebarMenuButton tooltip={item.name} isActive={operator.view === "chat" && operator.active.capabilityId === item.id} aria-current={operator.view === "chat" && operator.active.capabilityId === item.id ? "page" : undefined} onClick={() => operator.chooseCapability(item.id)} data-sound="press"><AnimatedIcon name={item.icon} /><span>{item.name}</span></SidebarMenuButton></div></HighlightItem>
       </SidebarMenuItem>)}
     </SidebarMenu></SidebarGroup>
-    {operator.capabilityThreads.some(thread => thread.messages.length) && <SidebarGroup className="operator-history"><SidebarGroupLabel>当前能力的对话</SidebarGroupLabel><SidebarMenu>
-      {operator.capabilityThreads.filter(thread => thread.messages.length && matches(thread.title)).map(thread => <SidebarMenuItem key={thread.id}><SidebarMenuButton tooltip={thread.title} onClick={() => operator.selectConversation(thread.id)} data-sound="press"><AnimatedIcon name="messages" /><span>{thread.title}</span></SidebarMenuButton></SidebarMenuItem>)}
+    {operator.capability.nativeScene && <SidebarGroup className="operator-history"><SidebarGroupLabel>当前能力的对话</SidebarGroupLabel><SidebarMenu>
+      <SidebarMenuItem><SidebarMenuButton onClick={() => void operator.history('active')}>查看最近对话</SidebarMenuButton></SidebarMenuItem>
+      <SidebarMenuItem><SidebarMenuButton onClick={() => void operator.history('archived')}>查看已归档对话</SidebarMenuButton></SidebarMenuItem>
+      {operator.capabilityThreads.filter(thread => (thread.messages.length || thread.native || thread.hasOriginal) && matches(thread.title)).map(thread => <SidebarMenuItem key={thread.id}><SidebarMenuButton tooltip={thread.title} onClick={() => operator.selectConversation(thread.id)} data-sound="press"><AnimatedIcon name="messages" /><span>{thread.group === '已归档' ? '已归档 · ' : ''}{thread.title}</span></SidebarMenuButton></SidebarMenuItem>)}
+      {operator.historyPage?.next && <SidebarMenuItem><SidebarMenuButton onClick={() => void operator.history(operator.historyPage!.status, operator.historyPage!.next!)}>加载更多{operator.historyPage.status === 'archived' ? '已归档对话' : '最近对话'}</SidebarMenuButton></SidebarMenuItem>}
     </SidebarMenu></SidebarGroup>}
   </Highlight>;
 }
