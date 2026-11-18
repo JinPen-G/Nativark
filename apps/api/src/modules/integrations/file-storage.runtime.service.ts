@@ -1,10 +1,11 @@
-/** 原组合文件编排。公共创建、原回执、字节、内容冻结、按租户清理、读取签名和文件表由platform-server维护，Rental引用与ACL由Rental包提供。
+/** 原组合文件编排。公共创建、原回执、字节、内容冻结、按租户清理、读取签名和文件表由platform-server维护，Rental引用、ACL与企业回款绑定由Rental包提供。
  * 专用检查、知识与企业证据沿原入口和原冻结/unknown收据，不以通用存储替代业务授权。 */
 import { FileStoragePrimitives, FileStorageRepository, MAX_FILE_BYTES, freezeFileUploadContent, createOriginalFileUploadFacts, readOriginalFileUploadReceipt, FileStorageCleanup, COMPLETED_STAGING_PENDING, issueFileDownloadReference, FileStorageApplication } from "@rental-os/platform-server/files";
 import { RentalFileBusinessReferences } from "@rental-os/rental-core/file-access";
 import { RentalExchangeInspectionFileStorage, type RentalExchangeInspectionStoragePlan } from "@rental-os/rental-core/file-application-exchange-inspection";
 import { RentalEvidenceFileStorage } from "@rental-os/rental-core/file-application-rental-evidence";
 import { RentalStaffUploadObservation } from "@rental-os/rental-core/file-application-staff-observation";
+import { RentalEnterprisePaymentProofFileParticipant } from "@rental-os/rental-core/file-application-enterprise-payment-proof";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, OnApplicationBootstrap, OnApplicationShutdown, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { INSPECTION_OBJECT_READER, readInspectionMedia, type InspectionObjectReader } from "../ai-native/inspection-assist/inspection-media.reader";
 import { KNOWLEDGE_FILE_ACCESS, type KnowledgeFileAccess } from "../ai-native/knowledge/knowledge-file-access";
@@ -37,8 +38,6 @@ import { knowledgeUploadRevisionSchema, knowledgeUploadKey } from '../ai-native/
 import { RENTAL_FILE_AUTHORITY, RentalFileApplicationParticipant, isRentalStaffFileBinding, type RentalFileWorkspaceAuthority } from "./rental-file-application.participant";
 
 type JsonRecord = Record<string, unknown>;
-// Prisma rows carry Date objects; the request canonicalizer expects JSON values.
-const fileFactHash = (value: unknown) => requestFingerprint(JSON.parse(JSON.stringify(value)));
 
 export interface FileBusinessOwner {
   knowledgeRevision?: KnowledgeUploadRevision;
@@ -69,6 +68,7 @@ export class FileStorageRuntimeService extends FileStoragePrimitives implements 
   private readonly exchangeInspectionFiles: RentalExchangeInspectionFileStorage<FileBusinessOwner>;
   private readonly evidenceFiles: RentalEvidenceFileStorage;
   private readonly staffUploadObservations: RentalStaffUploadObservation;
+  private readonly enterprisePaymentProofFiles = new RentalEnterprisePaymentProofFileParticipant();
   private readonly staffFiles?: FileStorageApplication<FileBusinessOwner, Prisma.TransactionClient>;
 
   constructor(
@@ -172,12 +172,7 @@ export class FileStorageRuntimeService extends FileStoragePrimitives implements 
     if (isRentalStaffFileBinding(tenantId, input)) return this.requireStaffFiles().createUploadSession(tenantId, input, owner);
     input = structuredClone(input); owner = structuredClone(owner);
     if (input.uploadScene?.trim() === RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE) throw new BadRequestException("换货检查影像必须经专用原业务入口上传");
-    if (input.uploadScene?.trim() === ENTERPRISE_PAYMENT_PROOF_SCENE) {
-      if (!owner?.enterprisePaymentProof || owner.enterprisePaymentProof.purpose !== "rental_fee" || owner.enterprisePaymentProof.orderId !== input.businessId
-        || !owner.workspaceId || !owner.actorUserId || input.businessModule !== "enterprise" || input.businessType !== "rental_order"
-        || owner.uploadScene !== ENTERPRISE_PAYMENT_PROOF_SCENE) throw new BadRequestException("费用回款凭证须经原企业订单专用入口上传");
-      input.metadata = { ...input.metadata, enterprisePaymentProof: { ...owner.enterprisePaymentProof } };
-    }
+    input = this.enterprisePaymentProofFiles.prepareUpload(input, owner);
     const mimeType = this.validateInput(input);
     const idempotencyKey = input.idempotencyKey.trim();
     if (owner && !this.matchesOwner({ businessType: input.businessType, businessId: input.businessId, uploadScene: input.uploadScene }, owner)) {
@@ -271,7 +266,7 @@ export class FileStorageRuntimeService extends FileStoragePrimitives implements 
                 uploadedAt: new Date().toISOString()
               } : {}),
               ...(owner?.workspaceId ? { workspaceId: owner.workspaceId } : {}),
-              ...(owner?.enterprisePaymentProof ? { enterprisePaymentProof: { ...owner.enterprisePaymentProof } } : {}),
+              ...this.enterprisePaymentProofFiles.uploadMetadata(owner),
               ...(configured ? { fileUploadVersion: 2,
                 storageLocationHash: this.retentionLocationHash(configured),
                 uploadConfigHash: requestFingerprint({ id: configured.id, provider: configured.provider, settings: configured.settings, credentials: configured.credentials }) } : {}),
@@ -627,11 +622,7 @@ export class FileStorageRuntimeService extends FileStoragePrimitives implements 
     let asset = structuredClone(await this.prisma.fileAsset.findFirst({ where: { id: session.fileAssetId, tenantId } }));
     if (asset && isRentalStaffFileBinding(tenantId, asset)) return this.requireStaffFiles().completeUpload(tenantId, sessionId, input, owner);
     if (asset?.uploadScene === RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE) throw new BadRequestException("专用换货影像只能核验原业务完成入口");
-    if (asset?.uploadScene === ENTERPRISE_PAYMENT_PROOF_SCENE && (!owner?.enterprisePaymentProof || owner.uploadScene !== ENTERPRISE_PAYMENT_PROOF_SCENE
-      || (asset.metadata as JsonRecord | null)?.workspaceId !== owner.workspaceId
-      || fileFactHash((asset.metadata as JsonRecord | null)?.enterprisePaymentProof ?? null) !== fileFactHash(owner.enterprisePaymentProof))) {
-      throw new BadRequestException("费用回款凭证只能经原企业订单入口核验归档");
-    }
+    this.enterprisePaymentProofFiles.assertComplete(asset, owner);
     if (!asset || (owner && (!this.matchesOwner(asset, owner) || (owner.actorUserId && asset.uploadedBy !== owner.actorUserId)))) throw new NotFoundException("上传会话不存在或不属于当前业务对象");
     const knowledgeInput: CreateFileUploadSessionRequest | undefined = asset.businessType === 'ai_knowledge_document' ? {
       businessModule: asset.businessModule, businessType: asset.businessType, businessId: asset.businessId ?? '', uploadScene: asset.uploadScene,
@@ -874,8 +865,7 @@ export class FileStorageRuntimeService extends FileStoragePrimitives implements 
       && asset.mimeType === mimeType
       && asset.sizeBytes === input.sizeBytes
       && asset.uploadScene === input.uploadScene.trim()
-      && (asset.uploadScene !== ENTERPRISE_PAYMENT_PROOF_SCENE
-        || fileFactHash((asset.metadata as JsonRecord | null)?.enterprisePaymentProof ?? null) === fileFactHash(input.metadata?.enterprisePaymentProof ?? null));
+      && this.enterprisePaymentProofFiles.matchesUploadRequest(asset, input);
   }
 
   private async assertBusinessReference(tenantId: string, businessType: string, businessId: string, workspaceId?: string) {

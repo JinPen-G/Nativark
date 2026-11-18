@@ -102,6 +102,8 @@
 
 微信客户认证从 `/mysql-client-wechat-auth` 接入，实际事务、渠道凭据、同一客户主档/注册、当前会话和审计经 `/client-wechat-ports` 供给。运输使用 `@rental-os/platform-server/integration-wechat` 的同一类和错误身份，保留原AppID缓存及凭据一次刷新；业务绑定核水印，已登录客户的一次性code错误不重试、不视为会话失效。原[微信Nest接线](../../apps/api/src/modules/client/client-wechat-auth.service.ts)保持八项构造位置。
 
+企业回款文件绑定从 `/file-application-enterprise-payment-proof` 接入。原企业 Controller 提供当前客户、空间及订单依据，参加者覆盖客户端提交的证明元数据，并核完成与重放的原绑定；原文件编排继续维护同一上传键、冻结对象和事务。其他原合法 module/scene 沿现有兼容入口处理。[企业绑定参加者](src/file-application-enterprise-payment-proof.ts) · [原文件编排](../../apps/api/src/modules/integrations/file-storage.runtime.service.ts)
+
 企业凭证与检查字节经 `/file-application-rental-evidence` 读取，宿主供给真实文件配置、业务引用、受控检查对象reader和原媒体解码器。返回前核当前文件、完整大小、原冻结摘要及业务绑定；员工从 `/file-application-staff-observation` 只观察本人/当前空间的原键事实，缺原记录明确返回未观察，不因此放行重传或提供上传地址。原Runtime继续供给同一参加者与唯一清理/扫描实例。
 
 HTTP入口从 `/http-workspace-capabilities`、`/http-staff-payments` 导入；`/http-service-ports` 给出两个服务令牌及实际方法合同。宿主将令牌绑定到原空间能力、原员工收款服务，使用 `useExisting` 保持同一实例；当前 [API装配](../../apps/api/src/app.module.ts) 是兼容示例。原 [Guard](../../apps/api/src/common/api-auth.guard.ts)、员工地点投影、当前空间、事务与原收据仍由原链核验。公共无Core宿主不注册这些Controller。字段与路径继续查 [OpenAPI](../../apps/api/src/contracts/openapi-document.ts)，SDK接点不开放Agent工具。

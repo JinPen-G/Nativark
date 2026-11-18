@@ -11,6 +11,20 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-enterprise-file-binding-20261118"></a>
+
+## Rental企业回款文件绑定（2026-11-18）
+
+固定父版 bfa75b23ea406af522888a235a120ee9ab6c21b0 已核实际任务远端，main ba1de9f91860c4e73503eded4e1d05d2307b0e28 已包含。dev1 完成约定两路径后停写，RD核实其字节、正式出口及资料后统一提交；公共呈现与dev2养护页面的在制成果另片保存。
+
+[企业绑定参加者](../../../packages/rental-core/src/file-application-enterprise-payment-proof.ts)持有原创建准入、完成绑定、metadata投影及重放比较。原[Runtime](../../../apps/api/src/modules/integrations/file-storage.runtime.service.ts)仅对应四块委托；四块AST逐项一致，其余34个方法、构造依赖及装饰器AST保留。专用企业入口供给服务端原订单依据，客户端metadata不能覆盖；其他旧合法module/scene与历史回执继续兼容。
+
+作者用既有stdin离线入口完成一次真实 EnterpriseWorkflowsController→Runtime→参加者冒烟，dev1-enterprise-payment-proof-final-consumer-check退出0、stderr空、守卫无违规。实际三根消费者1889源及新入口声明单根922源均0诊断。涵盖创建/完成/原键、客户端伪造依据覆盖、上传者/空间/对象修订及当前grant撤销拒绝、原冻结摘要、PUT失应答后freeze_pending保留原键/对象、TTL后只读原目标完成、不同checksum拒绝及其他旧合法场景兼容。首轮TS2304为移除仍被原下载拒绝使用的场景常量导入；恢复原导入后只复验上述范围通过，没有新增业务规则。
+
+RD回读停写源码SHA-256与作者证据一致：Runtime dcbdd7a44dcfd5a0846373cac8d4874ff95e4fb95253cb1e12c4711e7c1557ba；参加者52af7524661d0003dc8b1e99fb82ba5465cfd56ff76fa136eae32f0a77334823。正式exports/typesVersions同源，依赖与lock未变。模块导读、API说明v1.19和接续同步实际入口；五份资料1501链接、160锚点及98表格定向核验0问题，限定CRLF空白检查退出0。
+
+作者output/.tmp/dev1-enterprise-payment-proof已删除，短命Node已退出，无新增永久测试脚本。数据库、当前政策及对象传输是明确fixture；真实HTTP、MySQL并发、对象云和微信未验。原PCH门槛尚未跨下一档，完整Rental主装配、数据/迁移/Seed、AI/作业与各端继续交付，正式版本以包含本节的Git提交定位。
+
 <a id="core-rental-wechat-file-readers-20261118"></a>
 
 ## 微信客户认证与Rental文件读取（2026-11-18）

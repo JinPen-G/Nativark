@@ -966,6 +966,10 @@
     "./client-wechat-ports": {
       "types": "./dist/client-wechat-ports.d.ts",
       "default": "./dist/client-wechat-ports.js"
+    },
+    "./file-application-enterprise-payment-proof": {
+      "types": "./dist/file-application-enterprise-payment-proof.d.ts",
+      "default": "./dist/file-application-enterprise-payment-proof.js"
     }
   },
   "typesVersions": {
@@ -1686,6 +1690,9 @@
       ],
       "client-wechat-ports": [
         "dist/client-wechat-ports.d.ts"
+      ],
+      "file-application-enterprise-payment-proof": [
+        "dist/file-application-enterprise-payment-proof.d.ts"
       ]
     }
   },
