@@ -4,6 +4,7 @@
  */
 import { createRentalWorkOrderApi } from "@rental-os/rental-core/admin/work-orders/client";
 import { createRentalOrderApi } from "@rental-os/rental-core/admin/orders/client";
+import { createRentalLocationApi } from "@rental-os/rental-core/admin/locations/client";
 import { createRentalCapabilityApi } from "@rental-os/rental-core/admin/capabilities/client";
 import type {
   TenantReadinessStatus,
@@ -18,7 +19,6 @@ import type {
   PartialReturnRentalOrderRequest,
   RentalAsset,
   RentalAssetStatusHistory,
-  RentalCategoryDefinition,
   RentalCalendarOverrideAudit,
   RentalCalendarPublishPreview,
   RentalCalendarVersionSummary,
@@ -29,8 +29,6 @@ import type {
   RentalCustomerBenefitAccount,
   RentalCustomerCoupon,
   RentalDiscountPlan,
-  RentalFulfillmentLocation,
-  RentalFulfillmentOperator,
   RentalFundingBalance,
   RentalFundingEvent,
   RentalFundingFailureRequest,
@@ -111,8 +109,6 @@ import type {
   SendRentalNotificationRequest,
   SaveRentalAssetRequest,
   SaveRentalCouponTemplateRequest,
-  SaveRentalFulfillmentLocationRequest,
-  SaveRentalFulfillmentOperatorRequest,
   SaveRentalItemGroupRequest,
   SaveRentalPricingGroupRequest,
   UpdateRentalPricingGroupSecurityRatesRequest,
@@ -128,8 +124,10 @@ import type {
 import { useQuery } from "@tanstack/react-query";
 import { http, request, requestText } from "./http";
 
+const rentalLocationApi = createRentalLocationApi(request);
+
 export const rentalCoreApi = {
-  categories: () => request<RentalCategoryDefinition[]>("/rental/v1/categories"),
+  categories: rentalLocationApi.categories,
   /**
    * REPORT-01A：当前经营空间经营报表。
    *
@@ -249,9 +247,9 @@ export const rentalCoreApi = {
   queryNotificationDelivery: (id: string) => request<RentalNotificationSendLogV1>(`/rental/v1/notification-logs/${id}/query-delivery`, { method: "post" }),
   retryDueNotifications: (limit = 20) => request<{ attempted: number; sent: number; failed: number; ids: string[] }>(`/rental/v1/notification-logs/retry-due?limit=${limit}`, { method: "post" }),
   sendNotification: (data: SendRentalNotificationRequest) => request<RentalNotificationSendLogV1>("/rental/v1/notifications/send", { method: "post", data }),
-  operators: () => request<RentalFulfillmentOperator[]>("/rental/v1/fulfillment-operators"),
-  saveOperator: (data: SaveRentalFulfillmentOperatorRequest) => request<RentalFulfillmentOperator>(data.id ? `/rental/v1/fulfillment-operators/${data.id}` : "/rental/v1/fulfillment-operators", { method: data.id ? "put" : "post", data }),
-  saveLocation: (data: SaveRentalFulfillmentLocationRequest) => request<RentalFulfillmentLocation>(data.id ? `/rental/v1/locations/${data.id}` : "/rental/v1/locations", { method: data.id ? "put" : "post", data }),
+  operators: rentalLocationApi.operators,
+  saveOperator: rentalLocationApi.saveOperator,
+  saveLocation: rentalLocationApi.saveLocation,
   saveItemGroup: (data: SaveRentalItemGroupRequest) => request<RentalItemGroup>(data.id ? `/rental/v1/item-groups/${data.id}` : "/rental/v1/item-groups", { method: data.id ? "put" : "post", data }),
   uploadItemGroupImage: async (id: string, file: File) => {
     const form = new FormData();

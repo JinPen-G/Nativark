@@ -28,12 +28,13 @@ const read = (relative) => fs.readFileSync(path.join(ROOT, relative), "utf8");
  * 新 realm 里的对象带着另一份 Object 原型，`deepStrictEqual` 会必然失败，
  * 而 `notDeepEqual` 会必然通过——后者是静默失效的断言，比报错更危险。
  */
-function loadPureTsModule(relative) {
+function loadPureTsModule(relative, dependencies = {}) {
   const { outputText } = ts.transpileModule(read(relative), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }
   });
   const shim = { exports: {} };
-  new Function("module", "exports", "require", outputText)(shim, shim.exports, require);
+  new Function("module", "exports", "require", outputText)(shim, shim.exports,
+    name => Object.hasOwn(dependencies, name) ? dependencies[name] : require(name));
   return shim.exports;
 }
 
@@ -211,17 +212,27 @@ void (() => {
   const assetPage = read("apps/admin/src/features/catalog/AssetWorkspacePage.tsx");
   assert.match(
     assetPage,
-    /title=\{resolveTenantNavigationLabels\(profile\.data\?\.terminology\)\.routes\.assets \?\? "资产与库存"\}/u,
+    /title=\{t\(resolveTenantNavigationLabels\(profile\.data\?\.terminology\)\.routes\.assets \?\? "资产与库存"\)\}/u,
     "资产页标题必须与菜单同源解析，并保留固定回落"
   );
   const catalogPage = read("apps/admin/src/features/catalog/CatalogPage.tsx");
   const pricingGroupPage = read("apps/admin/src/features/commercial/PricingGroupPage.tsx");
-  const locationPage = read("apps/admin/src/features/fulfillment/LocationPage.tsx");
+  const locationPage = read("packages/rental-core/admin/locations/LocationPage.tsx");
+  const workOrderPages = loadPureTsModule("packages/rental-core/admin/work-orders/pages.ts");
+  const { rentalLocationTitle, RENTAL_LOCATION_PAGES } = loadPureTsModule("packages/rental-core/admin/locations/pages.ts", {
+    "../work-orders/pages": workOrderPages
+  });
+  assert.equal(RENTAL_LOCATION_PAGES.locations.menu.group, workOrderPages.RENTAL_WORK_ORDER_PAGES.workOrders.menu.group, "地点须沿原商品与资产分组");
+  assert.ok(RENTAL_LOCATION_PAGES.locations.menu.order > workOrderPages.RENTAL_WORK_ORDER_PAGES.workOrders.menu.order, "地点须排在原养护工单之后");
   assert.match(catalogPage, /resolveTenantNavigationLabels\(profile\.data\?\.terminology\)\.routes\.itemGroups/u, "商品目录页标题必须与菜单使用同一解析结果");
   assert.match(catalogPage, /pricingGroup\.memberItemGroupIds\.includes\(row\.id\)/u, "产品型号页必须反向显示所属的全部定价分组");
   assert.match(pricingGroupPage, /row\.members\.length[\s\S]{0,180}member\.name[\s\S]{0,80}member\.code/u, "定价分组页必须显示包含的型号名称和编码");
   assert.doesNotMatch(catalogPage, /category(Code)?\s*===?\s*["']vehicle["']/u, "品类主档页面不得通过 vehicle 硬编码分支实现展示差异");
-  assert.match(locationPage, /resolveTenantNavigationLabels\(profile\.data\?\.terminology\)\.routes\.locations/u, "履约地点页标题必须与菜单使用同一解析结果");
+  assert.match(locationPage, /rentalLocationTitle\(profile\.data\?\.terminology\)/u, "履约地点页标题必须与菜单使用同一解析结果");
+  for (const definition of RENTAL_CATEGORY_DEFINITIONS) {
+    assert.equal(rentalLocationTitle(definition.terminology), resolveTenantNavigationLabels(definition.terminology).routes.locations ?? "履约地点", "地点页面须与原菜单共用品类标题");
+  }
+  assert.equal(rentalLocationTitle(), "履约地点", "缺品类档案时保留原固定回落");
   const coreService = read("apps/api/src/modules/rental-core/rental-core.service.ts");
   assert.match(coreService, /navigationLabels:[\s\S]{0,180}defaults\.navigationLabels[\s\S]{0,180}profile\.terminology\.navigationLabels/u,
     "旧空间读取档案时必须补入品类定义的导航配置，不能只让新空间生效");

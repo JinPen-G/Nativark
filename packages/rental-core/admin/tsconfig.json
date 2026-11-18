@@ -5,6 +5,7 @@
     "orders",
     "work-orders",
     "capabilities",
+    "locations",
     "../../platform-admin/src/**/*.d.ts"
   ]
 }

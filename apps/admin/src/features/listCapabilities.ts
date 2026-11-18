@@ -1,6 +1,8 @@
 /** Page eligibility and exact payloads for optional list tools. Original APIs remain the only write path. */
-import { RentalInventoryMode, type RentalAttributeDefinition, type RentalItemGroup, type RentalFulfillmentLocation, type RentalFulfillmentOperator, type SaveRentalItemGroupRequest, type SaveRentalFulfillmentLocationRequest, type SaveRentalFulfillmentOperatorRequest, type CustomerMembershipPlan, type RegisterPersonalMembershipRequest, type SaveCorporateMembershipRequest } from "@rental-os/shared";
+import { RentalInventoryMode, type RentalAttributeDefinition, type RentalItemGroup, type SaveRentalItemGroupRequest, type CustomerMembershipPlan, type RegisterPersonalMembershipRequest, type SaveCorporateMembershipRequest } from "@rental-os/shared";
 import { rentalCoreApi } from "@/api/rentalCore";
+import { locationCapabilities as createLocationCapabilities, operatorCapabilities as createOperatorCapabilities }
+  from "@rental-os/rental-core/admin/locations/list-capabilities";
 import { membershipApi } from "@/api/membership";
 import { useAuthStore } from "@/features/auth/authStore";
 import { defineListImport, type ListBatchAction, type ListExport } from "@/components/ui";
@@ -86,33 +88,11 @@ export function catalogCapabilities(t: Translator, fields: RentalAttributeDefini
 }
 
 export function operatorCapabilities(t: Translator, onComplete: Complete) {
-  const allowed = permitted("rental-os:station:manage");
-  return {
-    exportConfig: { filename: t("经营主体"), fields: [{ label: t("编码"), value: (row: RentalFulfillmentOperator) => row.code }, { label: t("名称"), value: (row: RentalFulfillmentOperator) => row.name }, { label: t("经营方式"), value: (row: RentalFulfillmentOperator) => t(row.type === "partner" ? "合作商" : "自营") }, { label: t("结算方式"), value: (row: RentalFulfillmentOperator) => row.settlementMode }, { label: t("状态"), value: (row: RentalFulfillmentOperator) => t(row.status === "enabled" ? "已启用" : "已停用") }] },
-    importConfig: allowed() ? defineListImport<SaveRentalFulfillmentOperatorRequest>({ filename: t("经营主体模板"), fields: [{ key: "code", label: "编码", required: true }, { key: "name", label: "名称", required: true }, { key: "type", label: "经营方式", required: true, example: "self_operated / partner" }, { key: "settlementMode", label: "结算方式", required: true, example: "self / monthly / per_order" }],
-      parse: value => ({ code: required(value.code, "编码"), name: required(value.name, "名称"), type: choice(value.type, ["self_operated", "partner"]), settlementMode: choice(value.settlementMode, ["self", "monthly", "per_order"]), status: "enabled" }), key: row => row.code, existingKeys: async () => (await rentalCoreApi.operators()).map(row => row.code), create: value => createOnly(() => rentalCoreApi.saveOperator(value), ["经营主体编码已存在"]), allowed, onComplete }) : undefined,
-    batchActions: allowed() ? statusActions("rental-os:station:manage", rentalCoreApi.operators, (row, status) => rentalCoreApi.saveOperator({ id: row.id, code: row.code, name: row.name, type: row.type, settlementMode: row.settlementMode, contactName: row.contactName, contactPhone: row.contactPhone, status }), onComplete) : [],
-  };
+  return createOperatorCapabilities(t, onComplete, { api: rentalCoreApi, allowed: permitted("rental-os:station:manage") });
 }
 
 export function locationCapabilities(t: Translator, locationTypes: string[], onComplete: Complete) {
-  const allowed = permitted("rental-os:station:manage");
-  return {
-    exportConfig: { filename: t("履约地点"), fields: [{ label: t("编码"), value: (row: RentalFulfillmentLocation) => row.code }, { label: t("名称"), value: (row: RentalFulfillmentLocation) => row.name }, { label: t("经营主体"), value: (row: RentalFulfillmentLocation) => row.operatorName }, { label: t("地点类型"), value: (row: RentalFulfillmentLocation) => row.type }, { label: t("地址"), value: (row: RentalFulfillmentLocation) => row.address }, { label: t("状态"), value: (row: RentalFulfillmentLocation) => t(row.status === "enabled" ? "已启用" : "已停用") }] },
-    importConfig: allowed() ? defineListImport<SaveRentalFulfillmentLocationRequest>({ filename: t("履约地点模板"), fields: [{ key: "code", label: "编码", required: true }, { key: "name", label: "名称", required: true }, { key: "type", label: "地点类型", required: true, example: locationTypes.join(" / ") }, { key: "operatorCode", label: "经营主体编码", required: true }, { key: "capabilities", label: "履约能力", required: true, example: "pickup|return|storage|delivery" }, { key: "address", label: "地址" }],
-      parse: value => {
-        const type = choice(value.type, ["store", "warehouse", "station", "locker", "delivery_hub", "project_site"]);
-        if (!locationTypes.includes(type)) throw new Error("当前品类不支持该地点类型");
-        return { code: required(value.code, "编码"), name: required(value.name, "名称"), type, operatorId: required(value.operatorCode, "经营主体编码"), capabilities: value.capabilities.split("|").map(item => choice(item.trim(), ["pickup", "return", "storage", "delivery"])), address: value.address || undefined, timezone: "Asia/Shanghai", status: "enabled" };
-      }, key: row => row.code, existingKeys: async () => (await rentalCoreApi.locations()).map(row => row.code), create: async value => {
-        // Template refers to readable operator codes. Resolve them without auto-creating an operator.
-        const operator = (await rentalCoreApi.operators()).find(row => row.code === value.operatorId && row.status === "enabled");
-        if (!operator) throw new ListPreflightError("经营主体不存在或已停用");
-        if (!allowed()) throw new ListPreflightError("当前操作不可用");
-        return createOnly(() => rentalCoreApi.saveLocation({ ...value, operatorId: operator.id }), ["履约地点编码已存在"]);
-      }, allowed, onComplete }) : undefined,
-    batchActions: allowed() ? statusActions("rental-os:station:manage", rentalCoreApi.locations, (row, status) => rentalCoreApi.saveLocation({ id: row.id, code: row.code, name: row.name, type: row.type, organizationId: row.organizationId, operatorId: row.operatorId, parentLocationId: row.parentLocationId, capabilities: row.capabilities, address: row.address, province: row.province, city: row.city, district: row.district, timezone: row.timezone, latitude: row.latitude, longitude: row.longitude, contactName: row.contactName, contactPhone: row.contactPhone, businessHours: row.businessHours, status }), onComplete) : [],
-  };
+  return createLocationCapabilities(t, locationTypes, onComplete, { api: rentalCoreApi, allowed: permitted("rental-os:station:manage") });
 }
 
 export function planBatchActions(onComplete: Complete): ListBatchAction<CustomerMembershipPlan>[] {

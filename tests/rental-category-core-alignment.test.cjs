@@ -79,7 +79,7 @@ void (async () => {
     "apps/admin/src/features/catalog/CatalogPage.tsx",
     "apps/admin/src/features/catalog/AssetWorkspacePage.tsx",
     "apps/admin/src/features/commercial/PricingGroupPage.tsx",
-    "apps/admin/src/features/fulfillment/LocationPage.tsx"
+    "packages/rental-core/admin/locations/LocationPage.tsx"
   ].map((file) => readFileSync(join(__dirname, "..", file), "utf8")).join("\n");
   for (const vehicleOnlyText of ["舒适轿车组", "车牌/VIN", "具体单车", "车行、摄影合作商"]) {
     assert.ok(!genericUiFiles.includes(vehicleOnlyText), `通用页面不得写死车辆文案：${vehicleOnlyText}`);

@@ -1142,6 +1142,22 @@
     "./corporate-application-storage": {
       "types": "./dist/corporate-application-storage.d.ts",
       "default": "./dist/corporate-application-storage.js"
+    },
+    "./admin/locations": {
+      "types": "./admin/locations/index.tsx",
+      "default": "./admin/locations/index.tsx"
+    },
+    "./admin/locations/client": {
+      "types": "./admin/locations/client.ts",
+      "default": "./admin/locations/client.ts"
+    },
+    "./admin/locations/pages": {
+      "types": "./admin/locations/pages.ts",
+      "default": "./admin/locations/pages.ts"
+    },
+    "./admin/locations/list-capabilities": {
+      "types": "./admin/locations/listCapabilities.ts",
+      "default": "./admin/locations/listCapabilities.ts"
     }
   },
   "typesVersions": {
@@ -1994,6 +2010,18 @@
       ],
       "corporate-application-storage": [
         "dist/corporate-application-storage.d.ts"
+      ],
+      "admin/locations": [
+        "admin/locations/index.tsx"
+      ],
+      "admin/locations/client": [
+        "admin/locations/client.ts"
+      ],
+      "admin/locations/pages": [
+        "admin/locations/pages.ts"
+      ],
+      "admin/locations/list-capabilities": [
+        "admin/locations/listCapabilities.ts"
       ]
     }
   },
