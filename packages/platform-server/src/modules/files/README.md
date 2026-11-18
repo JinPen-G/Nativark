@@ -7,6 +7,7 @@
 | 源码 | 职责及直接消费者 |
 | --- | --- |
 | [公共字节原语](file-storage-primitives.ts) | 原文件类型/大小校验、存储键、会话/资产投影、对象删除及精确限长读取；原运行时继承消费 |
+| [内容冻结内核](file-content-freeze.ts) | 原通用上传完成入口委托同一目标占用、单次写入及原目标读取核验；当前授权、配置锁及专用字节由原参加者供给 |
 | [文件仓储](file-storage.repository.ts) | 原租户内元数据查询、原幂等键/会话 ID 读取、同事务建立文件及上传会话；原运行时与 IntegrationsRepository 委托 |
 | [私有存储端口](file-storage.store.ts) | 原 FileAsset 与 FileUploadSession 字段以及本片实际使用的表操作 |
 | [对象存储提供者](../integrations/object-storage.provider.service.ts) | 原 S3/OSS/COS 签名、受控出站请求与连接探针 |
@@ -19,7 +20,7 @@
 
 公共文件仓储仅保存已核定事实。`businessId`、`workspaceId`、文件 metadata 和客户端摘要不能授予业务读取或写入权限。列表候选继续由原业务 ACL 过滤，未知绑定、知识与资格资料继续按原专用入口处理。公共投影保持原字段集合，不返回存储键或公开地址。公开商品图仍由 Rental 读取真实启用工作空间、租户、已发布客户端渠道及商品媒体绑定证据。
 
-公共字节读取保持原八秒流超时、取消、响应类型、精确声明长度、累计字节上限及最终长度核对。取消时释放 reader 和 timer。签名、网络请求和旧测试注入点沿原提供者实现。原完成编排继续计算实际字节 SHA-256，先在同事务记录唯一冻结目标再发送 PUT，恢复仅核对原目标。知识、检查、企业凭证和隐私擦除各自保持原授权及 unknown 收据。
+公共字节读取保持原八秒流超时、取消、响应类型、精确声明长度、累计字节上限及最终长度核对。取消时释放 reader 和 timer。签名、网络请求和旧测试注入点沿原提供者实现。原通用完成编排调用 `freezeFileUploadContent` 计算实际字节 SHA-256，先在同事务记录唯一冻结目标再发送 PUT，恢复仅核对原目标。恢复分支从原会话与文件的持久状态决定。原知识授权及其受控字节来源继续在占用前复验，原最终激活事务仍由完成编排执行。专用检查、企业凭证和隐私擦除各自保持原授权及 unknown 收据。
 
 `persistUploadFacts(tx, tenantId, facts, metadata)` 仅接调用方已经使用的原事务，先创建 `pending_upload` 文件，再以同一文件 ID 创建原上传会话。metadata 由原编排过滤客户端保留字段并补入可信操作者、空间、配置和专用证据，仓储保持原内容。`findUploadSession(tenantId, reference)` 只读取当前租户下指定原会话 ID 或原幂等键。
 

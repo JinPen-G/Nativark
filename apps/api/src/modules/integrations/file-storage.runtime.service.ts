@@ -1,6 +1,6 @@
-/** 原组合文件编排。公共字节/文件表由platform-server维护，Rental引用与ACL由Rental包提供。
+/** 原组合文件编排。公共字节、内容冻结和文件表由platform-server维护，Rental引用与ACL由Rental包提供。
  * 专用检查、知识与企业证据沿原入口和原冻结/unknown收据，不以通用存储替代业务授权。 */
-import { FileStoragePrimitives, FileStorageRepository, MAX_FILE_BYTES } from "@rental-os/platform-server/files";
+import { FileStoragePrimitives, FileStorageRepository, MAX_FILE_BYTES, freezeFileUploadContent } from "@rental-os/platform-server/files";
 import { RentalFileBusinessReferences } from "@rental-os/rental-core/file-access";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, OnApplicationBootstrap, OnApplicationShutdown, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { INSPECTION_OBJECT_READER, readInspectionMedia, type InspectionObjectReader } from "../ai-native/inspection-assist/inspection-media.reader";
@@ -989,66 +989,32 @@ export class FileStorageRuntimeService extends FileStoragePrimitives implements 
     let frozen: { storageKey: string; checksum: string; config: TenantIntegrationRuntimeConfig } | undefined;
     if (session.provider !== "local_mock") {
       const config = await this.integrations.runtimeConfig("file", tenantId, session.provider as never, { requireLiveTest: false });
-      const originalMetadata = asset.metadata as JsonRecord | null;
-      if (!config || originalMetadata?.fileUploadVersion !== 2
-        || originalMetadata.storageLocationHash !== this.retentionLocationHash(config)
-        || originalMetadata.uploadConfigHash !== requestFingerprint({ id: config.id, provider: config.provider, settings: config.settings, credentials: config.credentials })) {
-        throw new ConflictException("原上传缺少有效临时对象或文件配置依据，不能确认完成");
-      }
-      let checksum: string, destination: string;
-      if (resumingFreeze) {
-        checksum = String(originalMetadata.contentHash ?? ""); destination = asset.storageKey;
-        if (!/^[a-f0-9]{64}$/u.test(checksum) || session.storageKey !== destination || originalMetadata.fileContentVersion !== 1
-          || asset.checksum !== checksum || typeof originalMetadata.stagingStorageKey !== "string"
-          || !destination.startsWith(`${originalMetadata.stagingStorageKey}.committed/`)
-          || !destination.endsWith(`/${checksum}`)) {
-          throw new ConflictException("原内容冻结依据无效，禁止另写或替换文件");
-        }
-        if (input.checksum?.trim() && input.checksum.trim() !== checksum) throw new ConflictException("原冻结收据与文件摘要不一致");
-      } else {
-        const knowledgeContent = knowledgeInput
-          ? await this.knowledgeFiles?.readUploadContent?.(tenantId, asset.id, owner!) : undefined;
-        if (knowledgeInput && (!knowledgeContent || !(knowledgeContent.bytes instanceof Uint8Array)
-          || knowledgeContent.bytes.byteLength !== asset.sizeBytes)) throw new ServiceUnavailableException("知识上传原字节读取未配置或不可用");
-        const bytes = knowledgeContent ? Buffer.from(knowledgeContent.bytes)
-          : await this.readObjectContent(config, this.pendingObjectKey(session.storageKey), asset.mimeType, asset.sizeBytes);
-        checksum = createHash("sha256").update(bytes).digest("hex");
-        if (knowledgeContent && knowledgeContent.contentHash !== checksum) throw new ConflictException("知识原字节与摘要不一致");
-        if (input.checksum?.trim() && input.checksum.trim() !== checksum) throw new ConflictException("文件内容摘要与实际上传字节不一致");
-        destination = `${session.storageKey}.committed/${randomUUID()}/${checksum}`;
-        // Persist the exact one-time write intent first. A lost commit or PUT
-        // response is only observed at this destination; staging is never reread.
-        const claimed = await this.prisma.$transaction(async tx => {
+      if (!config) throw new ConflictException("原上传缺少有效临时对象或文件配置依据，不能确认完成");
+      const pendingAsset = asset;
+      const result = await freezeFileUploadContent<
+        Prisma.FileAssetGetPayload<object>, Prisma.FileUploadSessionGetPayload<object>, Prisma.TransactionClient
+      >({ tenantId, asset, session, config, checksum: input.checksum }, {
+        transaction: work => this.prisma.$transaction(work),
+        beforeClaim: async () => {
           if (knowledgeInput) await this.authorizeKnowledgeUpload(tenantId, knowledgeInput, owner);
-          await this.integrations.assertEnabledInTransaction(tx, tenantId, "file", config.provider, { configRevision: config.revision });
-          const [currentAsset, currentSession] = await Promise.all([
-            tx.fileAsset.findFirst({ where: { id: asset!.id, tenantId } }),
-            tx.fileUploadSession.findFirst({ where: { id: session!.id, tenantId } })
-          ]);
-          if (requestFingerprint(currentAsset) !== requestFingerprint(asset) || requestFingerprint(currentSession) !== requestFingerprint(session)
-            || session!.expiresAt.getTime() <= Date.now()) throw new ConflictException("原上传会话在内容读取期间已变化");
-          const sessionClaim = await tx.fileUploadSession.updateMany({ where: { id: session!.id, tenantId, status: "pending_upload",
-            updatedAt: session!.updatedAt, storageKey: session!.storageKey, fileAssetId: asset!.id },
-            data: { status: "freeze_pending", storageKey: destination } });
-          if (sessionClaim.count !== 1) throw new ConflictException("原上传已被另一完成操作占用，请读取原结果");
-          const assetClaim = await tx.fileAsset.updateMany({ where: { id: asset!.id, tenantId, status: "pending_upload",
-            updatedAt: asset!.updatedAt, storageKey: asset!.storageKey }, data: { storageKey: destination, checksum,
-            metadata: { ...originalMetadata, fileContentVersion: 1, contentHash: checksum, stagingStorageKey: session!.storageKey } as Prisma.InputJsonValue } });
-          if (assetClaim.count !== 1) throw new ConflictException("原上传文件已变化，不能冻结内容");
-          return { asset: await tx.fileAsset.findUniqueOrThrow({ where: { id: asset!.id } }),
-            session: await tx.fileUploadSession.findFirst({ where: { id: session!.id, tenantId } }) };
-        });
-        if (!claimed.session) throw new ConflictException("原内容冻结会话缺失");
-        asset = structuredClone(claimed.asset); session = structuredClone(claimed.session);
-        const signed = this.presign(config, "PUT", destination, asset.mimeType, new Date(Date.now() + 60_000));
-        const response = await this.objectRequest(signed.url, { method: "PUT", headers: signed.headers, body: new Uint8Array(bytes) });
-        if (!response.ok) throw new ServiceUnavailableException("正式文件存储未确认写入，只能核对原内容冻结结果");
-      }
-      const written = await this.readObjectContent(config, destination, asset.mimeType, asset.sizeBytes);
-      if (createHash("sha256").update(written).digest("hex") !== checksum) {
-        throw new ConflictException("正式文件内容校验失败，禁止激活证据");
-      }
-      frozen = { storageKey: destination, checksum, config };
+        },
+        assertConfiguration: (tx, currentConfig) => this.integrations.assertEnabledInTransaction(tx, tenantId, "file", currentConfig.provider,
+          { configRevision: currentConfig.revision }),
+        readContent: (currentConfig, storageKey, mimeType, sizeBytes) => this.readObjectContent(currentConfig, storageKey, mimeType, sizeBytes),
+        writeContent: (currentConfig, storageKey, mimeType, bytes) => {
+          const signed = this.presign(currentConfig, "PUT", storageKey, mimeType, new Date(Date.now() + 60_000));
+          return this.objectRequest(signed.url, { method: "PUT", headers: signed.headers, body: new Uint8Array(bytes) });
+        },
+        ...(knowledgeInput ? { readPendingContent: async () => {
+          const content = await this.knowledgeFiles?.readUploadContent?.(tenantId, pendingAsset.id, owner!);
+          if (!content || !(content.bytes instanceof Uint8Array) || content.bytes.byteLength !== pendingAsset.sizeBytes)
+            throw new ServiceUnavailableException("知识上传原字节读取未配置或不可用");
+          return content;
+        } } : {})
+      });
+      asset = result.asset;
+      session = result.session;
+      frozen = result.frozen;
     }
     let knowledgeContentHash: string | undefined;
     if (knowledgeInput) {

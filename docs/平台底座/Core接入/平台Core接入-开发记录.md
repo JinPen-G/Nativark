@@ -11,6 +11,26 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-public-file-freeze-20261118"></a>
+
+## 原文件完成链的公共冻结内核与生命周期核验（2026-11-18）
+
+工具与文件首片已在1eea4a677a8e7ba2e3785a5779d67ce613db833f普通推送并实际远端回读，原13路径首片由该固定提交保全。dev1交出五路径冻结组后停写，RD核完整内核与原实际委托、分类计数和TTL证据不变断言，再单独固化；新的原上传回执/创建文件不进入本片。
+
+[freezeFileUploadContent](../../../packages/platform-server/src/modules/files/file-content-freeze.ts)实际承接原completeUpload的63行冻结逻辑，原[完成入口](../../../apps/api/src/modules/integrations/file-storage.runtime.service.ts)用29行参加者委托同一实现。原v2暂存依据、配置/位置摘要、实际字节SHA-256、当前资产/会话指纹、同事务配置锁与CAS保留；先提交唯一freeze_pending目标，再发送一次PUT，恢复从原持久状态判断，仅读取原目标，不重分配键或重读暂存。原知识授权在占用前复验，专用字节读取及精确长度由原知识参加者提供，最终激活、知识绑定和后续复验留原完成事务。专用检查、隐私擦除及企业证据没有变成通用执行入口。[模块与调用链](../../../packages/platform-server/src/modules/files/README.md)
+
+原生命周期fixture两项失败均在开工源码基线复现。第一项把暂存GET、冻结PUT和目标GET都计入byteRequests，得到3!==1；现保留byteRequests===1只计原暂存GET，另核冻结PUT与原目标GET各1。第二项期望TTL后回到pending_upload，但原inspectExchangeInspectionUpload在PUT前已经持久化freeze_pending及唯一目标，通用清理明确排除专用场景；现先核原冻结状态、共同目标、摘要及proof对应证据，再逐字段核TTL清理前后资产/会话全量快照不变，人为expiresAt改动单独保存/恢复。未改生产状态或回退unknown，原保护意图变为直接的不变断言。[原生命周期用例](../../../tests/file-storage-lifecycle.test.cjs) · [首片失败与基线](#core-public-file-primitives-20261118)
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| 冻结内核类型 | node --no-compilation-cache - dev1-public-file-freeze-core-types，1入口/582源0诊断；dev1-public-file-freeze-entry-types，runtime/index/内核3入口/1836源0诊断。复用已交证据，没有再扩大完整API类型 |
+| 原冻结与知识参加者 | dev1-public-file-freeze-entry-smoke复用原593～783全部冻结/cleanup断言，实际completeUpload→公共内核通过；knowledge-participant-smoke两组经实际创建/完成入口核成功、撤权与无效字节零PUT，知识及传输为明确synthetic fixture |
+| 原完整生命周期 | dev1-public-file-freeze-lifecycle-smoke最终退出0，执行到file storage lifecycle tests passed；本人绑定、竞争、业务ACL、资格事务、不可变冻结、PUT/COMMIT unknown、撤权/过期、completed暂存清理及专用检查/通用隔离/TTL等十段全部通过。stderr与守卫违规为空，没有新增永久测试脚本 |
+| 更正前失败保留 | 分类计数后完整用例退出1，暴露旧freeze_pending!==pending_upload；恢复三个原源码开工快照后同样失败。更正前的3!==1与状态失败保留在本段及首片记录，不改断言为实际值3或改变生产状态迁就fixture |
+| 资料与资源 | 作者16个导读链接及diff检查通过，taskTemp不存在，本片临时产物已由finally清理。RD核完整内核/实际委托/五路径交付，更新公共包及原PCH资料，按固定版本定向核链接与CRLF空白格式 |
+
+知识全套原2通过/6失败独立承接，本片只复验相关参加者，不重跑或改知识依赖。没有真实MySQL、对象云、HTTP、浏览器、完整文件公共宿主或独立安装证据。当前公共数据仍31模型/14枚举、七迁移、0.1.3，DDL未执行。按原PCH-03/06/08门槛复核未跨下一档；原上传创建/续签、cleanup/download及标准宿主继续由共享分工推进。
+
 <a id="core-public-tools-20261118"></a>
 
 ## 公共字典、编号与原后台同源工具接入（2026-11-18）

@@ -797,18 +797,43 @@ void runWithRequestIdentity(operatorIdentity, async () => {
   const originalFetch=globalThis.fetch, originalEgress=require('../apps/api/src/common/outbound-url').assertOutboundUrl;
   const egress=require('../apps/api/src/common/outbound-url'); egress.assertOutboundUrl=async url=>new URL(url);
   const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7x8AAAAASUVORK5CYII=','base64');
-  assert.equal(png.length,68); let byteRequests=0;
-  globalThis.fetch=async () => { byteRequests++; return new Response(png,{ headers:{'content-length':'68','content-type':'image/png'} }); };
+  assert.equal(png.length,68); let byteRequests=0, frozenWrites=0, frozenReads=0;
+  globalThis.fetch=async (url, init) => {
+    const objectPath=decodeURIComponent(new URL(url).pathname);
+    const stagingPath=decodeURIComponent(new URL(plan.uploadUrl).pathname);
+    if (init?.method === 'GET' && objectPath === stagingPath) byteRequests++;
+    if (init?.method === 'PUT' && objectPath.startsWith(stagingPath+'.committed/')) frozenWrites++;
+    if (init?.method === 'GET' && objectPath.startsWith(stagingPath+'.committed/')) frozenReads++;
+    return new Response(png,{ headers:{'content-length':'68','content-type':'image/png'} });
+  };
   try {
     await assert.rejects(dedicated.inspectExchangeInspectionUpload(tenantId,plan.assetId,{...owner,workspaceId:otherWorkspaceId},plan.configRowHash,plan.storageLocationHash),/归属/u);
     const proof=await dedicated.inspectExchangeInspectionUpload(tenantId,plan.assetId,owner,plan.configRowHash,plan.storageLocationHash);
     assert.equal(proof.contentHash,require('node:crypto').createHash('sha256').update(png).digest('hex')); assert.equal(proof.width,1); assert.equal(byteRequests,1);
+    assert.equal(frozenWrites,1); assert.equal(frozenReads,1);
+    const frozenSession=sessions.get(plan.sessionId), frozenAsset=assets.get(plan.assetId);
+    assert.equal(frozenSession.status,'freeze_pending');
+    assert.equal(frozenAsset.status,'pending_upload');
+    assert.equal(frozenSession.storageKey,frozenAsset.storageKey);
+    assert.ok(frozenAsset.storageKey.startsWith(plan.storageKey+'.committed/'));
+    assert.ok(frozenAsset.storageKey.endsWith('/'+proof.contentHash));
+    assert.equal(frozenAsset.checksum,proof.contentHash);
+    assert.equal(frozenAsset.metadata.contentHash,proof.contentHash);
+    assert.deepEqual(frozenAsset.metadata.exchangeInspectionFrozenEvidence,{
+      sourceId:owner.exchangeInspectionSourceId,contentHash:proof.contentHash,sizeBytes:proof.sizeBytes,
+      mimeType:proof.mimeType,width:proof.width,height:proof.height
+    });
     await assert.rejects(dedicated.completeUpload(tenantId,plan.sessionId,{},owner),/专用/u);
     await assert.rejects(dedicated.deleteFileAsset(tenantId,plan.assetId,owner),/专用/u);
-    sessions.get(plan.sessionId).expiresAt=new Date(0);
+    const sessionBeforeExpiry=structuredClone(frozenSession), assetBeforeExpiry=structuredClone(frozenAsset);
+    frozenSession.expiresAt=new Date(0);
+    const expiredSessionBeforeCleanup=structuredClone(frozenSession);
     const retained=await dedicated.cleanupExpiredUploadSessions(tenantId); assert.ok(!retained.sessionIds.includes(plan.sessionId));
-    assert.equal(sessions.get(plan.sessionId).status,'pending_upload'); assert.equal(assets.get(plan.assetId).status,'pending_upload');
-    sessions.get(plan.sessionId).expiresAt=plan.expiresAt;
+    assert.equal(frozenSession.status,'freeze_pending'); assert.equal(frozenAsset.status,'pending_upload');
+    assert.deepEqual(frozenSession,expiredSessionBeforeCleanup);
+    assert.deepEqual(frozenAsset,assetBeforeExpiry);
+    frozenSession.expiresAt=plan.expiresAt;
+    assert.deepEqual(frozenSession,sessionBeforeExpiry);
     const completion=await dedicated.completeExchangeInspectionUpload(dedicatedDb,tenantId,plan.assetId,owner,proof);
     assert.equal(completion.contentHash,proof.contentHash); assert.equal(assets.get(plan.assetId).status,'active');
     await assert.rejects(dedicated.downloadUrl(tenantId,plan.assetId),/专用/u);
