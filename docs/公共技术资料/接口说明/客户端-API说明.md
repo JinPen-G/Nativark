@@ -4,6 +4,7 @@
 
 | 版本 | 日期 | 编辑 | 变更 |
 | --- | --- | --- | --- |
+| v1.20 | 2026-11-18 | Codex | 渠道字段、请求类、配置/官网/微信凭证服务及三Controller迁入Rental单源，补正式SDK与同实例接线；原HTTP、发布空间、修订比较、只写密钥与AppID保护保持。 |
 | v1.19 | 2026-11-18 | Codex | 企业回款证明创建、完成及重放绑定迁入Rental参加者，补实际SDK与原编排入口；HTTP字段、专用授权、原键和冻结语义保持。 |
 | v1.18 | 2026-11-18 | Codex | 微信客户登录/绑定归Rental，受控运输归公共服务；补企业凭证/检查字节与员工原键观察的实际SDK入口。原HTTP路径、字段、授权、缓存、一次性凭证及原冻结收据保持。 |
 | v1.17 | 2026-11-18 | Codex | 客户HTTP、认证/统一注册、限流及官网图片实际迁入Rental包，补同一实例装配和源码入口；原客户v1路径/字段、会话、用途证明、事务和原收据语义保持。 |
@@ -197,6 +198,8 @@ Idempotency-Key: <unique-key-for-mutating-action>
 - 当前 API 版本固定为 `v1`。不兼容变更必须新建版本，不在 v1 中静默改变字段含义。
 
 机器可读契约由 `GET /api/openapi.json` 返回，源码见[组合OpenAPI](../../../apps/api/src/contracts/openapi-document.ts)。客户合同单源位于[Rental客户端合同](../../../packages/rental-core/src/client-contracts.ts)，原[shared客户端出口](../../../packages/shared/src/client.ts)兼容再导出；请求校验见[客户DTO](../../../packages/rental-core/src/http-client-request.dto.ts)。
+
+渠道后台的三个入口继续使用 `GET/PUT /api/platform/client-channel`、`GET/PUT /api/platform/website-channel` 及 `GET/PUT /api/platform/mini-program-channel`、`POST /api/platform/mini-program-channel/test`，官网图片仍从 `/api/platform/website-channel/assets` 上传，沿原 `system:integration:manage` 权限。字段由[渠道合同](../../../packages/rental-core/src/channel-contracts.ts)和[同源DTO](../../../packages/rental-core/src/http-channel.dto.ts)维护，[渠道Controller](../../../packages/rental-core/src/http-channels.controller.ts)通过[四项正式应用端口](../../../packages/rental-core/src/http-channel-applications.ts)接到客户端配置、官网配置、图片与微信凭证实例。[原Nest接线](../../../apps/api/src/modules/client/channel-http.providers.ts)使用 useExisting，服务端从 `/http-channels`、`/http-channel-dto` 和 `/http-channel-applications` 使用，客户端类型从 `/channel-contracts` 使用。租赁发布空间与微信客户绑定归Rental，公共外观在同一租户事实中维护。
 
 开发Agent从[客户HTTP](../../../packages/rental-core/src/http-client.controller.ts)进入[客户业务应用](../../../packages/rental-core/src/mysql-client-application.ts)，再沿[业务参加者](../../../packages/rental-core/src/client-application-ports.ts)查看真实数据库、客户Auth、会员、付款/文件、订单和同事务出箱。[HTTP接线](../../../apps/api/src/modules/client/client-http.providers.ts)按[八项正式接点](../../../packages/rental-core/src/http-client-applications.ts)绑定同一实例，原[Controller路径](../../../apps/api/src/modules/client/client-api.controller.ts)兼容再导出。服务端从 `@rental-os/rental-core/http-client`、`/http-client-applications` 和 `/mysql-client-application` 接入，客户端使用 `/client-contracts` 合同；目录字段由[同源投影](../../../packages/rental-core/src/category-client-projection.ts)生成，导入源码或取得目录不授予业务权限。
 

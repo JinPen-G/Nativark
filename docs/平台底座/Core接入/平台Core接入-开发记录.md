@@ -11,6 +11,26 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-client-channels-20261118"></a>
+
+## Rental渠道配置与原HTTP接线（2026-11-18）
+
+固定父版755816bf6b8da1312dc4cca480f96a2aa413453d已普通推送并读取真实远端；main仍为已包含的ba1de9f91860c4e73503eded4e1d05d2307b0e28。RD持有渠道、共同出口/AppModule与四册；dev1的文件Runtime和dev2的订单成果按共享路径保留，索引仍由RD统一操作。
+
+[十五个渠道合同](../../../packages/rental-core/src/channel-contracts.ts)、[十一请求类](../../../packages/rental-core/src/http-channel.dto.ts)、[三渠道Controller](../../../packages/rental-core/src/http-channels.controller.ts)及客户端/官网/微信配置三服务实际迁入Rental包。原shared和API九路径薄适配同一实现；[四个应用令牌](../../../packages/rental-core/src/http-channel-applications.ts)由[原Nest provider](../../../apps/api/src/modules/client/channel-http.providers.ts)通过useExisting供给原配置/图片实例，AppModule只追加同一组别名。发布经营空间、默认服务、官网目录和微信客户绑定属于Rental；品牌/圆角同步写原公共外观事实。通用Core作者沿平台合同使用自身页面/配置，不必实现Rental渠道。
+
+对照固定父版，三服务19/18/7项方法与辅助函数正文共44项相同；只变存储/公共依赖来源与Nest接线。原三个HTTP共八方法的正文/路由/装饰器及十一DTO字段/嵌套装饰器保持。原预读修订比较、Serializable渠道事务、原审计顺序、内容/地址校验、密钥只写不读、AppID已有身份保护与单次凭据测试不变。私有MySQL端口采用当前生成模型的有限Pick，公共Core合同与领域根出口不加载Prisma/Nest/React运行时。
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| 当前类型 | stdin TypeScript5.9.3，实际provider与三旧Controller四根/1097源0诊断，进程38300退出0。Prisma5.22官方内存声明为组合238模型/35枚举和公共33模型/14枚举，31,201,345/2,177,556字节，磁盘生成0 |
+| 原保存用例 | 复用client-channel原两段保存用例及全部原断言，正常保存、跨租户发布/默认服务拒绝、颜色/内容/品类及旧修订拒绝通过；原文件其他十五段未执行。外链DNS使用明确公网解析fixture，未调用真实DNS |
+| DTO/凭证/Nest | stdin进程41624退出0；原三DTO出口是同一类，真实class-validator正常请求通过；已绑定AppID更换和SaaS租户写入拒绝，密钥不返响应，凭据仅调用一次fixture。实际Nest容器三Controller/四别名共用同一提供实例，退出close，未监听HTTP |
+| 首轮与复验 | 首轮类型3诊断源于使用了不存在的微信出口及错误审计类名，改用原integration-wechat/PlatformOperationLogService后仅复验本片。第一次冒烟26636两段原正文已通过，但Windows loader路径未归一导致同一服务被编译成两个类，Nest别名失败；只修验证缓存路径，复验DTO/凭证/Nest范围，产品源码未改 |
+| 边界 | 数据库/事务、审计和微信凭据均为明确fixture。原修订检查的真库并发、真实HTTP/DNS/微信、标准包安装、升级及独立审查未验；没有新增永久测试脚本、依赖、环境文件、磁盘产物或后台业务服务 |
+
+模块导读、API说明v1.20和接续同步正式SDK与真实调用链。四份资料1517链接、162锚点及100表格定向核验0问题；十一DTO类及八HTTP方法/装饰器逐项AST对照父版一致，八个正式出口与源码/typesVersions对应，依赖/peer/meta与lock未变且一致。精确暂存26路径后的限定CRLF空白检查退出0。PCH-06/08仍缺完整异步/回调、会员及标准主装配、独立schema/迁移/Seed；按原门槛尚未跨下一档，阶段版本由包含本节的Git提交定位。
+
 <a id="core-public-record-kanban-work-orders-20261118"></a>
 
 ## 公共详情/看板与Rental养护页面（2026-11-18）

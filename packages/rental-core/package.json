@@ -986,6 +986,38 @@
     "./admin/work-orders/pages": {
       "types": "./admin/work-orders/pages.ts",
       "default": "./admin/work-orders/pages.ts"
+    },
+    "./channel-contracts": {
+      "types": "./dist/channel-contracts.d.ts",
+      "default": "./dist/channel-contracts.js"
+    },
+    "./client-channel-ports": {
+      "types": "./dist/client-channel-ports.d.ts",
+      "default": "./dist/client-channel-ports.js"
+    },
+    "./mysql-client-channel-profile": {
+      "types": "./dist/mysql-client-channel-profile.d.ts",
+      "default": "./dist/mysql-client-channel-profile.js"
+    },
+    "./mysql-website-channel-profile": {
+      "types": "./dist/mysql-website-channel-profile.d.ts",
+      "default": "./dist/mysql-website-channel-profile.js"
+    },
+    "./mysql-mini-program-channel": {
+      "types": "./dist/mysql-mini-program-channel.d.ts",
+      "default": "./dist/mysql-mini-program-channel.js"
+    },
+    "./http-channel-dto": {
+      "types": "./dist/http-channel.dto.d.ts",
+      "default": "./dist/http-channel.dto.js"
+    },
+    "./http-channels": {
+      "types": "./dist/http-channels.controller.d.ts",
+      "default": "./dist/http-channels.controller.js"
+    },
+    "./http-channel-applications": {
+      "types": "./dist/http-channel-applications.d.ts",
+      "default": "./dist/http-channel-applications.js"
     }
   },
   "typesVersions": {
@@ -1721,6 +1753,30 @@
       ],
       "admin/work-orders/pages": [
         "admin/work-orders/pages.ts"
+      ],
+      "channel-contracts": [
+        "dist/channel-contracts.d.ts"
+      ],
+      "client-channel-ports": [
+        "dist/client-channel-ports.d.ts"
+      ],
+      "mysql-client-channel-profile": [
+        "dist/mysql-client-channel-profile.d.ts"
+      ],
+      "mysql-website-channel-profile": [
+        "dist/mysql-website-channel-profile.d.ts"
+      ],
+      "mysql-mini-program-channel": [
+        "dist/mysql-mini-program-channel.d.ts"
+      ],
+      "http-channel-dto": [
+        "dist/http-channel.dto.d.ts"
+      ],
+      "http-channels": [
+        "dist/http-channels.controller.d.ts"
+      ],
+      "http-channel-applications": [
+        "dist/http-channel-applications.d.ts"
       ]
     }
   },

@@ -11,3 +11,5 @@ export * from "./enterprise-policy";
 export * from "./enterprise-transfer-decision";
 export * from "./enterprise-order-delegation";
 export * from "./client-order-requests";
+
+export * from "./channel-contracts";
