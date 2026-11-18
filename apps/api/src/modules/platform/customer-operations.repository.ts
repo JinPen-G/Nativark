@@ -13,38 +13,12 @@ import type {
   CustomerStatusHistoryEntry,
   CustomerStatusScope
 } from "@rental-os/shared";
+import type { CustomerStatusHistoryInput, CustomerSensitiveAccessInput } from "@rental-os/rental-core/customer-operations-ports";
+export type { CustomerStatusHistoryInput, CustomerSensitiveAccessInput } from "@rental-os/rental-core/customer-operations-ports";
 import { PrismaService } from "../database/prisma.service";
 import { SharedCustomerRepository } from "./shared-customer.repository";
 
 export type CustomerTx = Prisma.TransactionClient;
-
-/** 写状态历史所需的最小信息。`at` 由服务层统一给，保证一次动作内时间一致。 */
-export interface CustomerStatusHistoryInput {
-  customerId: string;
-  scope: CustomerStatusScope;
-  workspaceId?: string;
-  action: CustomerStatusAction;
-  fromStatus?: string;
-  toStatus: string;
-  reason: string;
-  operator?: string;
-  approver?: string;
-  at: string;
-  /** Internal original status transaction only; never supplied by a client DTO. */
-  captureEnterpriseRecipients?: boolean;
-}
-
-export interface CustomerSensitiveAccessInput {
-  workspaceId?: string;
-  customerId: string;
-  field: string;
-  action: CustomerSensitiveAccessAuditEntry["action"];
-  revealed: boolean;
-  operator?: string;
-  permission?: string;
-  reason?: string;
-  at: string;
-}
 
 /**
  * CUSTOMER-01B：客户账号、租户会员状态、状态历史与访问审计的持久化。

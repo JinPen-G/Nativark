@@ -11,6 +11,24 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-membership-application-20261118"></a>
+
+## Rental会员应用与同事务参加者（2026-11-18）
+
+固定父版5d7899af36ef19a298744032389329285cbb2c56已普通推送并读取实际任务远端，已包含的main为ba1de9f91860c4e73503eded4e1d05d2307b0e28。RD收口会员应用、正式出口与资料；dev1文件HTTP和dev2订单前端在制成果按共享路径保留，未夹入本片。负责人再次明确其他对话的模型及推理设置不得由RD或助手修改，调配仅涉及任务和文件边界。
+
+[会员应用](../../../packages/rental-core/src/mysql-membership.ts)持有原注册审核、租户共享会员、空间资质、方案版本与授予、当前企业关系和报价权益的单源逻辑。[私有参加者](../../../packages/rental-core/src/membership-ports.ts)要求同一存储、客户锁/风险/状态、客户主档、统一注册与企业政策；[状态及审计输入](../../../packages/rental-core/src/customer-operations-ports.ts)由所属Rental域唯一声明，生成模型只留私有MySQL接点。原[会员provider](../../../apps/api/src/modules/platform/membership.service.ts)薄适配同一个Core类，保留原五个构造位置及真实直接构造缺省。原[状态仓储](../../../apps/api/src/modules/platform/customer-operations.repository.ts)此片只转接两个输入声明，其实现仍待下一片迁入。原会员Controller、客户、AI候选、报价及订单消费同一实例与合同。
+
+对照固定父版，57项会员方法及三个辅助函数在类型擦除后正文相同；客户锁、当前权限、空间/租户范围、历史快照、原修订与同事务写入顺序保持。原Member/MembershipPlan只解释历史，此流程不作新旧双写。正式 `/mysql-membership`、`/membership-ports` 和 `/customer-operations-ports` 的exports/typesVersions与实际源码对应，依赖/peer与锁文件未变。
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| 当前类型 | stdin `node --no-compilation-cache -`，TypeScript5.9.3；旧会员provider、Controller、状态仓储及AI候选四根/1890源0诊断，进程33180退出0，stderr空。Prisma5.22官方内存声明为组合238模型/35枚举与公共33模型/14枚举，31,201,345/2,177,556字节，磁盘生成0 |
+| 一次会员冒烟 | stdin进程11128退出0，实际旧provider继承同一个Core类；开放企业风险/无风险、客户主体锁缺失、原manual注册缺省及无审核权限写入0通过。存储、锁和事务是明确fixture，网络调用及磁盘输出0，stderr空 |
+| 首轮与修复 | 类型进程41904退出1、六诊断；CRLF文本替换漏删五个旧import及原Injectable装饰器。只清除迁入后遗留引用、统一新源码换行后复验本片通过，没有放宽端口或业务规则。后续注释仅说明当前表写入与历史表不双写，行为未变 |
+
+模块导读及客户端API说明v1.22同步实际SDK、参加者和消费者路径；PCH四册沿原门槛维护，本片没有新增永久测试脚本、安装、环境文件、业务服务或磁盘构建产物。真实HTTP/MySQL并发、会员重启恢复、完整Core装配/安装及独立审查未验。PCH-06/08仍缺状态治理、异步接点与标准总装配、独立schema/迁移/Seed，尚未据本片跨下一档。六份资料定向核1889链接、203锚点与121表格，0问题；正式出口、三个原辅助函数及包依赖/锁一致。精确暂存范围只含会员片，限定CRLF空白检查沿本片执行。最终阶段版本由包含本节的Git提交定位。
+
 <a id="core-rental-file-runtime-20261118"></a>
 
 ## Rental文件应用与原宿主边界（2026-11-18）

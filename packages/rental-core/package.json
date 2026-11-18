@@ -1022,6 +1022,18 @@
     "./file-application-runtime": {
       "types": "./dist/file-application-runtime.d.ts",
       "default": "./dist/file-application-runtime.js"
+    },
+    "./mysql-membership": {
+      "types": "./dist/mysql-membership.d.ts",
+      "default": "./dist/mysql-membership.js"
+    },
+    "./membership-ports": {
+      "types": "./dist/membership-ports.d.ts",
+      "default": "./dist/membership-ports.js"
+    },
+    "./customer-operations-ports": {
+      "types": "./dist/customer-operations-ports.d.ts",
+      "default": "./dist/customer-operations-ports.js"
     }
   },
   "typesVersions": {
@@ -1784,6 +1796,15 @@
       ],
       "file-application-runtime": [
         "dist/file-application-runtime.d.ts"
+      ],
+      "mysql-membership": [
+        "dist/mysql-membership.d.ts"
+      ],
+      "membership-ports": [
+        "dist/membership-ports.d.ts"
+      ],
+      "customer-operations-ports": [
+        "dist/customer-operations-ports.d.ts"
       ]
     }
   },
