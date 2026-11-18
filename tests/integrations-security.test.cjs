@@ -17,7 +17,10 @@ assert.doesNotThrow(() => outbound.parseOutboundUrl("https://openapi.alipay.com/
 const paymentSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "modules", "integrations", "payment.runtime.service.ts"), "utf8");
 const fileSource = [
   fs.readFileSync(path.join(repo, "apps", "api", "src", "modules", "integrations", "file-storage.runtime.service.ts"), "utf8"),
-  fs.readFileSync(path.join(repo, "packages", "platform-server", "src", "modules", "integrations", "object-storage.provider.service.ts"), "utf8")
+  fs.readFileSync(path.join(repo, "packages", "platform-server", "src", "modules", "integrations", "object-storage.provider.service.ts"), "utf8"),
+  fs.readFileSync(path.join(repo, "packages", "rental-core", "src", "file-application-runtime.ts"), "utf8"),
+  fs.readFileSync(path.join(repo, "packages", "platform-server", "src", "modules", "files", "file-storage-primitives.ts"), "utf8"),
+  fs.readFileSync(path.join(repo, "packages", "platform-server", "src", "modules", "files", "file-download.ts"), "utf8")
 ].join("\n");
 const smsSource = fs.readFileSync(path.join(repo, "packages", "platform-server", "src", "modules", "integrations", "tenant-integration.runtime.service.ts"), "utf8");
 const notificationSource = fs.readFileSync(path.join(repo, "packages", "rental-core", "src", "mysql-business-runtime.ts"), "utf8");

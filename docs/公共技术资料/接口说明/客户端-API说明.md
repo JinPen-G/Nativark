@@ -4,6 +4,7 @@
 
 | 版本 | 日期 | 编辑 | 变更 |
 | --- | --- | --- | --- |
+| v1.21 | 2026-11-18 | Codex | 文件兼容编排迁入 Rental 正式应用出口，原 Nest 宿主供给同一权限、配置及知识/检查参加者；原 HTTP、合法场景、上传键与冻结/清理收据保持，AI 物理清理沿原政策单独处理。 |
 | v1.20 | 2026-11-18 | Codex | 渠道字段、请求类、配置/官网/微信凭证服务及三Controller迁入Rental单源，补正式SDK与同实例接线；原HTTP、发布空间、修订比较、只写密钥与AppID保护保持。 |
 | v1.19 | 2026-11-18 | Codex | 企业回款证明创建、完成及重放绑定迁入Rental参加者，补实际SDK与原编排入口；HTTP字段、专用授权、原键和冻结语义保持。 |
 | v1.18 | 2026-11-18 | Codex | 微信客户登录/绑定归Rental，受控运输归公共服务；补企业凭证/检查字节与员工原键观察的实际SDK入口。原HTTP路径、字段、授权、缓存、一次性凭证及原冻结收据保持。 |
@@ -207,6 +208,6 @@ Idempotency-Key: <unique-key-for-mutating-action>
 
 微信手机号登录和绑定沿[Rental微信应用](../../../packages/rental-core/src/mysql-client-wechat-auth.ts) → [私有接点](../../../packages/rental-core/src/client-wechat-ports.ts) → [公共同一运输](../../../packages/platform-server/src/modules/integrations/wechat-mini-program.adapter.ts)阅读。SDK分别从 `/mysql-client-wechat-auth`、`/client-wechat-ports` 与 `@rental-os/platform-server/integration-wechat` 使用；原Nest供给渠道、客户/会员、当前会话和事务，注册或运输本身不创建跨业务读权。企业原证明/检查字节及员工原键观察由[凭证读取](../../../packages/rental-core/src/file-application-rental-evidence.ts)与[原键观察](../../../packages/rental-core/src/file-application-staff-observation.ts)处理，沿原HTTP授权和返回前复验，不开放客户端通用文件读取。
 
-企业回款证明的创建、完成和重放由 `/file-application-enterprise-payment-proof` 的[原绑定参加者](../../../packages/rental-core/src/file-application-enterprise-payment-proof.ts)处理。它只接受原企业入口提供的当前订单、客户及空间依据；[原Runtime](../../../apps/api/src/modules/integrations/file-storage.runtime.service.ts)继续负责会话、原键、冻结及同事务事实。结果不明只核原目标，TTL不构成重传许可。
+企业回款证明的创建、完成和重放由 `/file-application-enterprise-payment-proof` 的[原绑定参加者](../../../packages/rental-core/src/file-application-enterprise-payment-proof.ts)处理。它只接受原企业入口提供的当前订单、客户及空间依据；[原Runtime](../../../apps/api/src/modules/integrations/file-storage.runtime.service.ts)供给同一权限和配置，实际会话、原键、冻结及同事务事实由[Rental文件应用](../../../packages/rental-core/src/file-application-runtime.ts)单源维护。服务端从 `@rental-os/rental-core/file-application-runtime` 接入，客户端路径及原收据字段保持。结果不明只核原目标，TTL不构成重传许可。
 
 地址和注销分别沿[地址与交付快照](../../../packages/rental-core/src/mysql-client-delivery-address.ts) / [本人注销](../../../packages/rental-core/src/mysql-client-account-closure.ts) → [生命周期参加者](../../../packages/rental-core/src/client-lifecycle-ports.ts)阅读。服务端分别从 `/mysql-client-delivery-address` 和 `/mysql-client-account-closure` 接入；可信身份、业务状态及审计由宿主供给。[包使用说明](../../../packages/rental-core/README.md#使用与构建)

@@ -11,6 +11,20 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-file-runtime-20261118"></a>
+
+## Rental文件应用与原宿主边界（2026-11-18）
+
+固定父版1e5d23f589237ecd63574d4889e749880f2bdfa6已普通推送并读取实际任务远端；已包含的main仍为ba1de9f91860c4e73503eded4e1d05d2307b0e28。dev1完成文件编排后保留三份已验证字节，RD登记正式出口并同步资料；dev2的订单在制成果按共享边界保留，索引由RD统一维护。其他对话的模型和推理设置由负责人管理，消息工具参数校验失败未执行发送，RD停用该入口，以共享接续协调当前窗口。
+
+[Rental文件应用](../../../packages/rental-core/src/file-application-runtime.ts)持有原创建、原键观察、完成、专用证据、下载及按租户清理编排。正式 `/file-application-runtime` 的JS/声明与typesVersions同源，领域根出口不加载本私有MySQL/Nest适配。原[Runtime](../../../apps/api/src/modules/integrations/file-storage.runtime.service.ts)仅供给同一存储、配置、Auth/ACL、原知识修订及检查解析器并登记唯一定时器。[AI清理参加者](../../../apps/api/src/modules/integrations/file-ai-retention.participant.ts)保留原政策、同事务确认与unknown收据；失应答只核原对象。公共文件应用的根store只要求本文件能力，业务回调仍取得调用方完整原事务。
+
+RD对照固定父版，38项原可执行正文在类型擦除及精确参加者名称映射后一致。35项归Rental兼容应用，两个定时器生命周期和AI擦除入口归原宿主；原合法任意module/scene、历史缺项、固定Staff tuple及knowledge/unknown仍由真实原权威判断，未新增宽松fallback或收窄旧合法输入。三文件SHA-256分别为Rental应用89e61565354c56927c1968ba76e4ccb68258692c21da87bab9676e9459163780、宿主d3d01d913956e1f6559902cf4e0782de39fdedd912b1f914bf3dd44bfda374db、AI参加者0c7a4407d0abb3f4dc0556f294ab3b7dcced40ed0501849e79ef960062fe310b。
+
+必要TypeScript5.9.3经stdin进程32720退出0，实际Runtime/AI参加者/包内应用三根1885源零诊断。Prisma5.22官方内存声明由组合238模型/35枚举及公共33模型/14枚举生成31,201,345/2,177,556字节，磁盘输出0。正文对照辅助工具初次只处理class声明，未识别装饰器转换的class表达式；改为对实际方法正文独立擦除类型后38项一致，产品源码未改。作者沿正式出口核实际主装配三根2383源及声明单根948源，均零诊断；217份声明仅留内存，原宿主加载的是同一个Rental类。原 integrations-security 用例退出0，仅补三处实际源码读取路径，全部原断言保留；这是原安全静态用例与装配证据，未扩成真实文件业务或HTTP验收。作者明确停写三份Runtime源码及该用例，验证目录已删除，RD未重复扩大测试。
+
+本片同步Rental及原业务导读、公共文件接入和API说明v1.21；六份资料1826链接、168锚点及101表格定向核验无问题。正式出口及声明映射已核，包依赖与原锁文件未变，精确暂存12路径的限定CRLF空白检查退出0；原HTTP字段、权限码及收据状态保持。没有新增永久测试脚本、安装、环境文件或业务服务；真实HTTP/MySQL并发/对象存储、完整标准包安装及独立审查未验。PCH-06/08仍缺完整会员、异步与标准主装配及独立数据/迁移/Seed，尚未据本片跨下一档。最终阶段版本由包含本节的Git提交定位。
+
 <a id="core-rental-client-channels-20261118"></a>
 
 ## Rental渠道配置与原HTTP接线（2026-11-18）

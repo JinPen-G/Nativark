@@ -21,7 +21,8 @@ type CleanupAudit = { tenantId: string; action: string; targetType: string; deta
 type UploadRows = { asset: StoredFileAsset; session: StoredFileUploadSession };
 
 export interface FileStorageApplicationParticipants<Transaction extends FileStorageApplicationTransaction> {
-  store: Transaction;
+  /** 根存储只需公共文件能力；业务参加者仍接收调用方的完整原事务。 */
+  store: FileStorageApplicationTransaction;
   transaction<T>(work: (transaction: Transaction) => Promise<T>): Promise<T>;
   runtimeConfig(tenantId: string, provider?: string, options?: { requireLiveTest: false }): Promise<TenantIntegrationRuntimeConfig | undefined>;
   assertEnabled(transaction: Transaction, tenantId: string, config: TenantIntegrationRuntimeConfig): Promise<void>;

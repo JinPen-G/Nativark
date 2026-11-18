@@ -57,7 +57,7 @@ await files.downloadUrl(tenantId, fileAssetId, owner);
 
 `readOriginalFileUploadReceipt` 保留原会话、文件、配置指纹和有效期。仅仍有效的 `pending_upload` 可以取得原暂存键的 PUT，返回前再核原业务引用、原会话、原文件及当前配置。已完成、过期、失败或 `freeze_pending` 返回原回执，续签不会延长有效期或另建目标。租户共享客户资料与空间业务的区别由 Rental 原参加者判断，公共框架没有 Rental 场景枚举。
 
-`FileStorageCleanup` 没有计时器或租户发现。原运行时仍持有唯一计时器及全租户扫描，按原租户委托三个清理方法。原完成暂存清理在发送 DELETE 前记录 unknown，失应答及提交结果未知时只 HEAD 原键，保持完成文件与证据不变。原过期 session→asset 两写以同一 callback 事务按原顺序提交或回滚，事务内不请求对象存储。专用保留场景由原宿主明确传入，缺少租户的调用在查询前拒绝。
+`FileStorageCleanup` 没有计时器或租户发现。原 Nest 宿主仍持有唯一计时器，Rental 兼容应用发现原租户集合并逐租户委托三个清理方法。[兼容应用](../../../../rental-core/src/file-application-runtime.ts)没有启动钩子或另一套定时器。原完成暂存清理在发送 DELETE 前记录 unknown，失应答及提交结果未知时只 HEAD 原键，保持完成文件与证据不变。原过期 session→asset 两写以同一 callback 事务按原顺序提交或回滚，事务内不请求对象存储。专用保留场景由原宿主明确传入，缺少租户的调用在查询前拒绝。
 
 `issueFileDownloadReference` 必须接实际业务 ACL 和成功审计参加者，配置/审计让出执行后继续核对原文件绑定及当前权限。模拟引用需宿主显式允许。原组合在进入公共内核前继续执行实名、知识、企业凭证及专用检查的原拒绝或专用读取规则。可公开商品图片仍经 Rental 原发布证据和当前绑定核验，公共内核没有默认公开场景。
 
@@ -65,7 +65,7 @@ await files.downloadUrl(tenantId, fileAssetId, owner);
 
 独立公共 [schema](../../../../../apps/platform-api/prisma/schema.prisma) 已追加原 FileAsset 与 `file_upload_sessions` 两模型及 Tenant 反向关系，公共数据版本为 `0.1.4`，八份迁移由 [数据计划](../../../../../apps/platform-api/src/platform-data.ts) 固定。文件字段、默认、原 ID、字符串状态和历史 JSON 保留，`fileAssetId` 唯一、原幂等唯一键、会话状态索引及 FileAsset 两个租户索引均沿原来源。组合 schema 的 AI 检查反向关系仍由其所属模块装配。新 [公共文件迁移](../../../../../apps/platform-api/prisma/migrations/20261118010000_public_files/migration.sql) 仅用于独立公共库，原组合链不覆盖；本阶段没有执行 DDL。
 
-正式包出口 `@rental-os/platform-server/files` 暴露本模块入口。原运行时与仓储使用同一 Prisma 实例，Staff 五组固定场景通过公共应用处理，其他旧合法输入和历史记录继续原兼容编排。Staff 的原主体权威由 `RENTAL_FILE_AUTHORITY` 窄 token 提供，组合宿主在实际调用时延迟取得同一 AuthService，避免原 Auth→Platform→Rental→文件构造链回环。缺原 Auth 或文件 ACL 时拒绝受控 Staff 场景。Rental ACL 从 `@rental-os/rental-core/file-access` 消费单源业务规则。组合模块/独立宿主的 Provider、Controller、schema 和迁移由装配负责人统一维护。
+正式包出口 `@rental-os/platform-server/files` 暴露本模块入口。原运行时与仓储使用同一 Prisma 实例，Staff 五组固定场景通过公共应用处理，其他旧合法输入和历史记录由 Rental 的正式 `/file-application-runtime` 保持原兼容编排。根存储仅要求公共文件能力，业务回调仍接调用方的完整原事务。Staff 的原主体权威由 `RENTAL_FILE_AUTHORITY` 窄 token 提供，组合宿主在实际调用时延迟取得同一 AuthService，避免原 Auth→Platform→Rental→文件构造链回环。缺原 Auth 或文件 ACL 时拒绝受控 Staff 场景。Rental ACL 从 `@rental-os/rental-core/file-access` 消费单源业务规则。组合模块/独立宿主的 Provider、Controller、schema 和迁移由装配负责人统一维护。
 
 存储配置停用或原位变更从 `@rental-os/platform-server/file-integration-dependencies` 复用 [只读核验](file-integration-dependencies.ts)。它使用配置已锁定的同一事务读取当前租户/提供者的文件、上传与清理原收据；active/pending/delete、freeze_pending 及非空 cleanupError 均需先迁移或处理。空 Core 目录也执行核验，查询失败向上返回，不据目录为空推断没有文件依赖。业务附件 ACL 和原配置授权仍由各自入口核定。
 

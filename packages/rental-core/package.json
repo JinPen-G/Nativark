@@ -1018,6 +1018,10 @@
     "./http-channel-applications": {
       "types": "./dist/http-channel-applications.d.ts",
       "default": "./dist/http-channel-applications.js"
+    },
+    "./file-application-runtime": {
+      "types": "./dist/file-application-runtime.d.ts",
+      "default": "./dist/file-application-runtime.js"
     }
   },
   "typesVersions": {
@@ -1777,6 +1781,9 @@
       ],
       "http-channel-applications": [
         "dist/http-channel-applications.d.ts"
+      ],
+      "file-application-runtime": [
+        "dist/file-application-runtime.d.ts"
       ]
     }
   },

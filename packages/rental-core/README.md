@@ -31,6 +31,7 @@
 | [换货检查准备](src/mysql-exchange-inspection-preparation.ts)、[准备与照片消费](src/exchange-inspection-preparation.read.ts)、[严格DTO](src/exchange-inspection-preparation.dto.ts) | /mysql-exchange-inspection-preparation、/exchange-inspection-preparation-read与/exchange-inspection-dto保留原操作者、订单锁、冻结模板、照片消费及原收据同事务；检查事实不授予费用、客户同意或履约权 |
 | [专用检查影像](src/mysql-exchange-inspection-media.ts)、[原影像读取](src/exchange-inspection-media.read.ts)、[当前身份/文件/事务接点](src/exchange-inspection-ports.ts) | /mysql-exchange-inspection-media与/exchange-inspection-media-read核原来源、文件/会话、占用与完成；原文件适配负责私有计划、单次暂存读取和冻结目标核对 |
 | [附件 ACL](src/file-access.ts)、[业务读取](src/file-business-access.ts)、[引用存在性](src/file-business-reference.ts)、[读取参加者](src/file-access-ports.ts) | `/file-access` 持有原商品公开图、客户敏感附件及订单/资产/检查等对象范围；公共文件表和字节存储不能授予 Rental 业务读权 |
+| [文件兼容应用](src/file-application-runtime.ts) | `/file-application-runtime` 持有原合法上传场景、原键/冻结/下载、专用参加者和按租户清理；原宿主只提供同一数据库、配置、身份与知识/检查参加者及唯一定时器 |
 | [企业凭证/检查字节](src/file-application-rental-evidence.ts)、[员工原键观察](src/file-application-staff-observation.ts) | `/file-application-rental-evidence` 与 `/file-application-staff-observation` 读取原上传者/空间、冻结摘要与当前ACL；观察不续签，检查只消费宿主受控对象reader和原解码器 |
 | [凭证合同](src/document-contracts.ts)、[纯渲染](src/document-renderer.ts)、[归档与历史](src/mysql-documents.ts)、[本表读写视图](src/document-storage.ts) | /document-contracts与/document-renderer不依赖数据库；/mysql-documents保留逐字段释放、稳定内容摘要、同内容唯一归档和当前订单/空间/财务历史门禁 |
 | [经营空间边界](src/mysql-workspace-scope.ts) | `/mysql-workspace-scope` 核请求空间所属租户及跨空间写入；原初始化/恢复只读取默认空间，原Guard先裁定请求授权 |
@@ -104,6 +105,8 @@
 ## 使用与构建
 
 微信客户认证从 `/mysql-client-wechat-auth` 接入，实际事务、渠道凭据、同一客户主档/注册、当前会话和审计经 `/client-wechat-ports` 供给。运输使用 `@rental-os/platform-server/integration-wechat` 的同一类和错误身份，保留原AppID缓存及凭据一次刷新；业务绑定核水印，已登录客户的一次性code错误不重试、不视为会话失效。原[微信Nest接线](../../apps/api/src/modules/client/client-wechat-auth.service.ts)保持八项构造位置。
+
+原文件兼容应用从 `@rental-os/rental-core/file-application-runtime` 导入 `RentalFileStorageApplication`。宿主提供同一文件/业务存储、配置锁、当前 Auth/ACL、审计和原知识/检查解析器；原合法任意 module/scene 及历史回执继续沿原权限处理。固定 Staff 场景消费公共文件应用，企业和换货专用依据分别使用所属参加者。原 Nest 类只维护唯一定时器、生命周期与 AI 清理参加者，AI 物理删除仍核原政策和收据。[文件应用](src/file-application-runtime.ts) · [原宿主](../../apps/api/src/modules/integrations/file-storage.runtime.service.ts) · [AI 清理参加者](../../apps/api/src/modules/integrations/file-ai-retention.participant.ts)
 
 企业回款文件绑定从 `/file-application-enterprise-payment-proof` 接入。原企业 Controller 提供当前客户、空间及订单依据，参加者覆盖客户端提交的证明元数据，并核完成与重放的原绑定；原文件编排继续维护同一上传键、冻结对象和事务。其他原合法 module/scene 沿现有兼容入口处理。[企业绑定参加者](src/file-application-enterprise-payment-proof.ts) · [原文件编排](../../apps/api/src/modules/integrations/file-storage.runtime.service.ts)
 
