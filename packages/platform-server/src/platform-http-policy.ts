@@ -4,6 +4,7 @@ import { INTEGRATION_HTTP_OPERATIONS } from "./modules/integrations/integration-
 import { OFFICIAL_CALENDAR_HTTP_OPERATIONS } from "./modules/official-calendars/official-calendar-http-policy";
 import { PLATFORM_SETTINGS_HTTP_OPERATIONS } from "./modules/platform/platform-settings-http-policy";
 import { PLATFORM_TOOLS_HTTP_OPERATIONS } from "./modules/platform-tools/platform-tools-http-policy";
+import { TENANT_MESSAGING_HTTP_OPERATIONS } from "./modules/messaging/tenant-messaging-http-policy";
 export const PLATFORM_HTTP_OPERATIONS = [
   { method: "GET", path: "/health", id: "health", summary: "读取公共宿主健康状态", access: "anonymous", response: "Health" },
   { method: "GET", path: "/openapi.json", id: "openApi", summary: "读取当前宿主接口资料", access: "anonymous", response: "OpenApi" },
@@ -40,6 +41,7 @@ export const PLATFORM_HTTP_OPERATIONS = [
   ...OFFICIAL_CALENDAR_HTTP_OPERATIONS,
   ...PLATFORM_SETTINGS_HTTP_OPERATIONS,
   ...PLATFORM_TOOLS_HTTP_OPERATIONS,
+  ...TENANT_MESSAGING_HTTP_OPERATIONS,
 ] as const;
 
 export function platformHttpPolicy(method: string, path: string) {

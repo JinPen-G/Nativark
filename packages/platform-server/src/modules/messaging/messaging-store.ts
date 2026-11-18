@@ -39,7 +39,6 @@ export interface TenantInvitationTransaction extends TenantMessagingSqlTransacti
 
 export interface TenantInvitationDataStore<Transaction extends TenantInvitationTransaction> extends TenantInvitationTransaction {
   tenant: {
-    findUnique(query: { where: { id: string }; select: { name: true } }): PromiseLike<{ name: string } | null>;
     findUnique(query: { where: { id: string }; select: { code: true; name: true; status: true } }): PromiseLike<{
       code: string; name: string; status: string;
     } | null>;

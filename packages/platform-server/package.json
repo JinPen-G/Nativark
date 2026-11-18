@@ -302,6 +302,10 @@
     "./messaging": {
       "types": "./dist/modules/messaging/index.d.ts",
       "default": "./dist/modules/messaging/index.js"
+    },
+    "./member-invitation-authority": {
+      "types": "./dist/modules/platform/platform-member-invitation.authority.d.ts",
+      "default": "./dist/modules/platform/platform-member-invitation.authority.js"
     }
   },
   "scripts": {
@@ -544,6 +548,9 @@
       ],
       "messaging": [
         "dist/modules/messaging/index.d.ts"
+      ],
+      "member-invitation-authority": [
+        "dist/modules/platform/platform-member-invitation.authority.d.ts"
       ]
     }
   }

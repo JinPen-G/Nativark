@@ -28,6 +28,32 @@ function foreignKey(line: string) {
   return { name: match[1], columns: names(match[2]), targetTable: match[3], targetColumns: names(match[4]), deleteRule: match[5], updateRule: match[6] };
 }
 
+// 原迁移允许多列写在同一行；只在引号和括号外拆逗号，保留ENUM、DECIMAL及复合键原文。
+function tableDefinitions(body: string): string[] {
+  const definitions: string[] = [];
+  let start = 0, depth = 0, quote: string | undefined;
+  for (let index = 0; index < body.length; index++) {
+    const character = body[index];
+    if (quote) {
+      if (character === "\\") index++;
+      else if (character === quote) {
+        if (body[index + 1] === quote) index++;
+        else quote = undefined;
+      }
+    } else if (character === "'" || character === '"' || character === "`") quote = character;
+    else if (character === "(") depth++;
+    else if (character === ")") depth--;
+    else if (character === "," && depth === 0) {
+      definitions.push(body.slice(start, index).trim());
+      start = index + 1;
+    }
+    if (depth < 0) throw new Error("公共建表定义括号不匹配");
+  }
+  if (quote || depth !== 0) throw new Error("公共建表定义引号或括号不匹配");
+  definitions.push(body.slice(start).trim());
+  return definitions;
+}
+
 export function mysqlStructureFromMigrations(migrations: readonly string[]): MysqlTableShape[] {
   const tables = new Map<string, MysqlTableShape>();
   for (const text of migrations) for (const statement of text.replace(/^\s*--.*$/gm, "").split(";").map(value => value.trim()).filter(Boolean)) {
@@ -35,7 +61,7 @@ export function mysqlStructureFromMigrations(migrations: readonly string[]): Mys
     if (create) {
       if (tables.has(create[1])) throw new Error(`公共表重复定义：${create[1]}`);
       const table: MysqlTableShape = { name: create[1], collation: create[3], columns: [], indexes: [], checks: [], foreignKeys: [] };
-      for (const definition of create[2].split(/,\s*\n/).map(line => line.trim()).filter(Boolean)) {
+      for (const definition of tableDefinitions(create[2])) {
         if (definition.startsWith("`")) table.columns.push(column(definition, table));
         else {
           const primary = /^PRIMARY KEY \(([^)]+)\)$/i.exec(definition);

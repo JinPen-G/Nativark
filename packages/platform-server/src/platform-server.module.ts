@@ -1,6 +1,6 @@
 /** 独立公共API模块。宿主提供唯一持久化实例，Core及其迁移/业务HTTP另行显式装配。 */
 import { Module, type DynamicModule, type ModuleMetadata, type FactoryProvider } from "@nestjs/common";
-import { ConfigModule } from "@nestjs/config";
+import { ConfigModule, ConfigService } from "@nestjs/config";
 import { APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import { PlatformAuthGuard, REGISTERED_CORE_HTTP_ACCESS, type RegisteredCoreHttpAccess } from "./platform-auth.guard";
 import { PlatformAuthService } from "./modules/auth/platform-auth.service";
@@ -42,9 +42,18 @@ import { OfficialCalendarSourceService } from "./modules/official-calendars/offi
 import { OfficialCalendarSourceController } from "./modules/official-calendars/official-calendar-source.controller";
 import { OFFICIAL_CALENDAR_DATA_STORE, OFFICIAL_CALENDAR_APPLICATION, type OfficialCalendarDataStore } from "./modules/official-calendars/official-calendar-store";
 import { OFFICIAL_CALENDAR_SOURCE_READER, createOfficialCalendarSourceReader } from "./modules/official-calendars/official-calendar-source-reader";
+import { TenantOperatorInvitationsController } from "./modules/messaging/tenant-operator-invitations.controller";
+import { AcceptTenantOperatorInvitationController } from "./modules/messaging/accept-operator-invitation.controller";
+import { TenantDispatchController } from "./modules/messaging/tenant-dispatch.controller";
+import { TenantSupportEmailController } from "./modules/messaging/tenant-support-email.controller";
+import { TENANT_OPERATOR_INVITATIONS_HTTP_APPLICATION, TENANT_DISPATCH_HTTP_APPLICATION, TENANT_SUPPORT_EMAIL_HTTP_APPLICATION,
+  type TenantMessagingHttpApplications } from "./modules/messaging/tenant-messaging-http.application";
+import { createPublicMessagingApplications, type PublicMessagingDatabase } from "./platform-messaging";
+
+const PUBLIC_MESSAGING_APPLICATIONS = Symbol("platform.messaging.public-applications");
 
 export type PlatformDatabase = PlatformAuthDataStore & PlatformAppearanceDataStore & PlatformManagementDatabase & PlatformToolsDatabase & SubscriptionDataStore
-  & TenantIntegrationDataStore & OfficialCalendarDataStore & PlatformOperationLogStorage;
+  & TenantIntegrationDataStore & OfficialCalendarDataStore & PlatformOperationLogStorage & PublicMessagingDatabase;
 @Module({})
 export class PlatformServerModule {
   static register<Dependencies extends unknown[]>(options: { imports?: ModuleMetadata["imports"]; inject?: FactoryProvider["inject"];
@@ -64,7 +73,8 @@ export class PlatformServerModule {
     if (options.integrationBusiness && options.integrationBusinessProvider) throw new Error("集成业务依赖只能登记一个实际参加者");
     return { module: PlatformServerModule, imports: [ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }), ...(options.imports ?? [])],
       controllers: [AuthSessionController, TenantAppearanceProfileController, AccountAppearanceController, PlatformHealthController, PlatformOpenApiController, PlatformManagementController,
-        TenantSubscriptionController, PlatformSubscriptionController, TenantIntegrationController, OfficialCalendarSourceController, PlatformToolsController],
+        TenantSubscriptionController, PlatformSubscriptionController, TenantIntegrationController, OfficialCalendarSourceController, PlatformToolsController,
+        TenantOperatorInvitationsController, AcceptTenantOperatorInvitationController, TenantDispatchController, TenantSupportEmailController],
       providers: [
         { provide: PLATFORM_AUTH_DATA_STORE, inject: options.inject ?? [], useFactory: options.useFactory },
         { provide: PLATFORM_APPEARANCE_DATA_STORE, useExisting: PLATFORM_AUTH_DATA_STORE },
@@ -73,6 +83,15 @@ export class PlatformServerModule {
         { provide: OFFICIAL_CALENDAR_DATA_STORE, useExisting: PLATFORM_AUTH_DATA_STORE },
         { provide: PlatformOperationLogService, inject: [PLATFORM_AUTH_DATA_STORE], useFactory: (database: PlatformDatabase) => new PlatformOperationLogService(database) },
         { provide: PlatformAuthenticationRepository, inject: [PLATFORM_AUTH_DATA_STORE], useFactory: (database: PlatformDatabase) => new PlatformAuthenticationRepository(database) },
+        { provide: PUBLIC_MESSAGING_APPLICATIONS,
+          inject: [PLATFORM_AUTH_DATA_STORE, ConfigService, TenantIntegrationService, TenantEmailRuntimeService, PlatformOperationLogService],
+          useFactory: createPublicMessagingApplications },
+        { provide: TENANT_OPERATOR_INVITATIONS_HTTP_APPLICATION, inject: [PUBLIC_MESSAGING_APPLICATIONS],
+          useFactory: (applications: TenantMessagingHttpApplications) => applications.invitations },
+        { provide: TENANT_DISPATCH_HTTP_APPLICATION, inject: [PUBLIC_MESSAGING_APPLICATIONS],
+          useFactory: (applications: TenantMessagingHttpApplications) => applications.dispatch },
+        { provide: TENANT_SUPPORT_EMAIL_HTTP_APPLICATION, inject: [PUBLIC_MESSAGING_APPLICATIONS],
+          useFactory: (applications: TenantMessagingHttpApplications) => applications.support },
         TenantAppearanceProfileService, AccountAppearanceService, PlatformAuthService, PlatformAuthGuard, PlatformManagementService, PlatformToolsService, SubscriptionService,
         { provide: SUBSCRIPTION_APPLICATION, useExisting: SubscriptionService },
         SecretBox, TenantIntegrationService, TenantIntegrationRuntimeService, TenantEmailRuntimeService, TenantIntegrationConnectivityService, ObjectStorageProviderService,
@@ -96,6 +115,7 @@ export class PlatformServerModule {
       ], exports: [PlatformAuthService, PlatformAuthenticationRepository, PlatformManagementService, PlatformToolsService, SubscriptionService, SUBSCRIPTION_APPLICATION,
         TenantIntegrationService, TenantIntegrationRuntimeService, ObjectStorageProviderService, SecretBox, TENANT_INTEGRATION_APPLICATION,
         OfficialCalendarSourceService, OFFICIAL_CALENDAR_APPLICATION, OFFICIAL_CALENDAR_SOURCE_READER,
+        TENANT_OPERATOR_INVITATIONS_HTTP_APPLICATION, TENANT_DISPATCH_HTTP_APPLICATION, TENANT_SUPPORT_EMAIL_HTTP_APPLICATION,
         PLATFORM_AUTH_DATA_STORE, PLATFORM_APPEARANCE_DATA_STORE, PLATFORM_SUBSCRIPTION_DATA_STORE, INTEGRATION_DATA_STORE,
         OFFICIAL_CALENDAR_DATA_STORE] };
   }

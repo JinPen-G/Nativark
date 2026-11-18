@@ -15,7 +15,7 @@
 | 统一期限 | [只读来源](src/modules/subscription/subscription-reader.ts)、[同源状态投影](src/modules/subscription/subscription-state.ts)、[周年/时区](src/modules/subscription/subscription-term.ts)；当前期限与排期，原Rental服务和新Core共同消费 |
 | 基础集成 | [模块导读](src/modules/integrations/README.md)、[配置服务](src/modules/integrations/tenant-integration.service.ts)、[存储与宿主参加者](src/modules/integrations/integration-store.ts)；原配置修订、凭据保护、连通性与实际投递接点 |
 | 邮箱运输 | [邮箱运行时](src/modules/integrations/tenant-email.runtime.service.ts)、[SMTP](src/modules/integrations/smtp-transport.ts)、[IMAP](src/modules/integrations/imap-reader.ts)、[邮件文本解析](src/modules/integrations/inbound-mail-codec.ts)；四个正式子出口共用原算法，测试不投递，业务发送和原台账由调用方维护 |
-| 公共消息应用 | [三步接入](src/modules/messaging/README.md)、[邀请](src/modules/messaging/tenant-operator-invitations.service.ts)、[寄件](src/modules/messaging/tenant-dispatch.service.ts)、[客服](src/modules/messaging/tenant-support-email.service.ts)从 `/messaging` 提供；宿主供给实际权限 / 范围及账号授权，原操作键和邮件 UID 游标保持 |
+| 公共消息应用 | [三步接入](src/modules/messaging/README.md)、[HTTP 与同源政策](src/modules/messaging/tenant-messaging-http.module.ts)、[邀请](src/modules/messaging/tenant-operator-invitations.service.ts)、[寄件](src/modules/messaging/tenant-dispatch.service.ts)、[客服](src/modules/messaging/tenant-support-email.service.ts)从 `/messaging` 提供；公共模块自动装配，Core 的业务范围与寄件来源由真实参加者供给 |
 | 官方日历来源 | [模块导读](src/modules/official-calendars/README.md)、[来源服务](src/modules/official-calendars/official-calendar-source.service.ts)、[冻结读取器](src/modules/official-calendars/official-calendar-source-reader.ts)；公共主档、只追加年度版本与历史快照 |
 | 字典与编号 | [模块及 API](src/modules/platform-tools/README.md)、[服务](src/modules/platform-tools/platform-tools.service.ts)、[生效配置仓储](src/modules/platform-tools/platform-tools.repository.ts)；当前租户维护、原格式及同事务取号，公共缺省为空 |
 | 文件存储与冻结 | [模块导读](src/modules/files/README.md)、[字节处理](src/modules/files/file-storage-primitives.ts)、[冻结内核](src/modules/files/file-content-freeze.ts)、[文件仓储](src/modules/files/file-storage.repository.ts)；原限长传输、元数据、上传会话和唯一冻结目标，业务 ACL 由所属 Core 提供 |
@@ -46,6 +46,8 @@ const platform = PlatformServerModule.register({
 ```
 
 注册时公共认证、外观、管理与订阅指向同一实例。HTTP 中间件使用 [同一个 ALS](src/common/request-identity.ts)，公共新会话不签发业务空间。保留旧 `wid` 的有效签名仍须与原会话一致；进入公共面不从旧 ID 恢复业务权限。Rental 专属范围继续由原认证适配解析。
+
+公共邀请、寄件和客服邮件也由本模块装配到同一数据库与邮件运行时。默认 [成员邀请权威](src/modules/platform/platform-member-invitation.authority.ts)只授普通租户角色和有效组织，显式接受空业务范围；账号、角色、审计与一次性凭证在原接受事务中提交。Core 使用权另行分配，原 Rental 邀请继续原经营空间规则。HTTP、DTO 与 OpenAPI 从同一消息声明产生，查重、预览和 `inspect` 明确为读取。[接口与接入](src/modules/messaging/README.md)
 
 登录、刷新与改密沿原认证算法；刷新旧会话的撤销与新会话创建同事务，改密和会话撤销同事务。租户外观权限沿 `system:integration:manage`，本人外观仅取当前签名主体；SaaS 身份不能借公共设置接口代替租户操作。旧品牌读取由 Rental 组合另外注入，公共服务不查询客户端业务表。
 

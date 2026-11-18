@@ -63,6 +63,21 @@ export class PlatformIdentityRepository {
     return user ? this.toUserRow(user) : undefined;
   }
 
+  /** 租户共享管理只读基础账号角色；公开邀请接受时也按原邀请人当前权限复验。
+   * 业务空间覆盖、签名字段和历史JSON都不能增加这里的管理权。 */
+  async assertTenantManagementPermission(tenantId: string, actorUserId: string | undefined, permission: string,
+    transaction: PlatformAuthTransaction = this.prisma): Promise<SystemUserRow> {
+    const actor = actorUserId
+      ? await transaction.user.findFirst({ where: { id: actorUserId, tenantId, isActive: true }, include: this.userInclude() })
+      : null;
+    if (!actor || actor.isSaasAdmin) throw new ForbiddenException("缺少当前租户管理身份");
+    const user = this.toUserRow(actor);
+    if (!user.isPlatformAdmin && (user.dataScope !== "all" || !user.permissions.includes(permission))) {
+      throw new ForbiddenException(`租户管理操作需要完整租户范围及权限：${permission}`);
+    }
+    return user;
+  }
+
   async createAuthSession(input: {
     id: string;
     userId: string;

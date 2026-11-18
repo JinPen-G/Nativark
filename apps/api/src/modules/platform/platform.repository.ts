@@ -1327,16 +1327,7 @@ export class PlatformRepository extends PlatformIdentityRepository {
   private async assertTenantPermissionInTransaction(
     tx: Prisma.TransactionClient, tenantId: string, actorUserId: string | undefined, permission: string
   ) {
-    const actor = actorUserId
-      ? await tx.user.findFirst({ where: { id: actorUserId, tenantId, isActive: true }, include: this.userInclude() })
-      : null;
-    if (!actor || actor.isSaasAdmin) throw new ForbiddenException("缺少当前租户管理身份");
-    const user = this.toUserRow(actor);
-    // 这里管理租户共享授权，不能借当前空间角色或历史 JSON 中的通配符提权。
-    if (!user.isPlatformAdmin && (user.dataScope !== "all" || !user.permissions.includes(permission))) {
-      throw new ForbiddenException(`租户管理操作需要完整租户范围及权限：${permission}`);
-    }
-    return user;
+    return super.assertTenantManagementPermission(tenantId, actorUserId, permission, tx);
   }
 
   /** 公共租户管理入口复用基础租户角色，不读取空间覆盖权限。 */

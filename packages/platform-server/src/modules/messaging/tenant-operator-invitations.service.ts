@@ -96,7 +96,7 @@ export class PlatformTenantOperatorInvitationsService<Transaction extends Tenant
   }
   async mailPreview(input: InviteTenantOperatorRequest): Promise<TenantOperatorInvitationMailPreview> {
     const actor = await this.requireManager(), email = normalizeEmail(input.email);
-    const tenant = await this.prisma.tenant.findUnique({ where: { id: actor.tenantId }, select: { name: true } });
+    const tenant = await this.prisma.tenant.findUnique({ where: { id: actor.tenantId }, select: { code: true, name: true, status: true } });
     if (!tenant) throw new NotFoundException("租户不存在");
     const verified = await this.prisma.$transaction(tx => this.accounts.validateOperatorInvitationAccess(tx, actor.tenantId, actor.userId, input));
     const mail = renderOperatorInvitation({ tenantName: tenant.name, inviteeName: input.displayName?.trim() || email.split("@")[0],
@@ -238,7 +238,7 @@ export class PlatformTenantOperatorInvitationsService<Transaction extends Tenant
         await tx.$executeRaw(Prisma.sql`UPDATE tenant_operator_invitations SET status = 'accepted', acceptedAt = NOW(3), acceptedUserId = ${userId}, updatedAt = NOW(3) WHERE tenantId = ${row.tenantId} AND id = ${row.id}`);
         return tenant.code;
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-      return { tenantCode, message: "邀请已接受，账号和空间权限已生效，请使用邮箱与刚设置的密码登录" };
+      return { tenantCode, message: "邀请已接受，账号及已配置权限已生效，请使用邮箱与刚设置的密码登录" };
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && ["P2002", "P2034"].includes(error.code)) throw new ConflictException("账号或邀请已变化，请使用邮箱登录核对");
       throw error;

@@ -9,6 +9,7 @@ import { INTEGRATION_OPENAPI_SCHEMAS } from "./modules/integrations/integration-
 import { OFFICIAL_CALENDAR_SCHEMAS, OFFICIAL_CALENDAR_OPENAPI_QUERY_SCHEMAS } from "./modules/official-calendars/official-calendar-openapi";
 import { PLATFORM_SETTINGS_SCHEMAS, PLATFORM_SETTINGS_OPENAPI_QUERY_SCHEMAS } from "./modules/platform/platform-settings-openapi";
 import { PLATFORM_TOOLS_SCHEMAS } from "./modules/platform-tools/platform-tools-openapi";
+import { TENANT_MESSAGING_OPENAPI_SCHEMAS } from "./modules/messaging/tenant-messaging-openapi";
 
 type Schema = { [field: string]: unknown };
 const string: Schema = { type: "string" }, boolean: Schema = { type: "boolean" };
@@ -31,6 +32,7 @@ export const PLATFORM_OPENAPI_SCHEMAS = {
   ...OFFICIAL_CALENDAR_SCHEMAS,
   ...PLATFORM_SETTINGS_SCHEMAS,
   ...PLATFORM_TOOLS_SCHEMAS,
+  ...TENANT_MESSAGING_OPENAPI_SCHEMAS,
   "Platform.Health": object({ service: string, status: string, time: date }, ["service", "status", "time"]),
   "Platform.OpenApi": { type: "object", additionalProperties: true },
   "Platform.LoginRequest": object({ tenantCode: string, account: string, password }, ["tenantCode", "account", "password"]),
@@ -106,7 +108,7 @@ export function createPlatformOpenApi() {
     const operation = { operationId: `Platform.${item.id}`, summary: item.summary, tags: ["Platform"],
       security: item.access === "anonymous" ? [] : [{ bearerAuth: [] }],
       "x-requiredPermissions": "permission" in item ? [item.permission] : [],
-      "x-effect": item.method === "GET" ? "read" : "write",
+      "x-effect": "effect" in item ? item.effect : item.method === "GET" ? "read" : "write",
       description: item.access === "saas_subscription" ? "沿原SaaS订阅管理身份办理。租户父锁、当前修订、价格版本、申请与审计在原事务中核对；续费后仍需当前Core和成员授权。"
         : item.access === "tenant_summary" ? "仅当前operator本租户的无金额提醒。SaaS身份不能代替租户读取，提醒不授予业务权限。"
         : item.access === "tenant" ? "当前operator的本租户管理范围，SaaS身份不代租户操作。当前角色/账号与提交条件由服务端复验，Core授权另行办理。"
@@ -114,7 +116,7 @@ export function createPlatformOpenApi() {
         : item.access === "authenticated" ? "当前operator的原系统参数读取权限；由当前会话围栏复验。认证前内部读取使用独立只读接点。"
         : item.access === "self" ? "当前签名会话的本人范围；请求体和查询参数不能指定另一主体。" : "公共传输入口；登录保护及原令牌消费仍由对应服务执行。",
       ...("request" in item ? { requestBody: { required: true, content: content(ref(item.request)) } } : {}),
-      parameters: [
+      parameters: "parameters" in item ? item.parameters : [
         ...item.path.split("/").filter(part => part.startsWith(":"))
           .map(part => ({ name: part.slice(1), in: "path", required: true, schema: string })),
         ...("query" in item ? item.query.map(name => ({ name, in: "query", required: false, schema: querySchemas[name] })) : [])
@@ -122,6 +124,7 @@ export function createPlatformOpenApi() {
       responses: { [item.method === "POST" ? "201" : "200"]: { description: "成功", content: content(response) },
         "400": { description: "输入不符合原DTO或业务约束" }, "401": { description: "原会话失效或登录受限" },
         "403": { description: "当前主体或操作权限不足" }, "404": { description: "目标租户或原申请不存在" }, "409": { description: "会话或配置修订已变化" },
+        "429": { description: "请求超出当前限流，按原操作或凭证核对，不换键重发" },
         "503": { description: "实际必需参加者不可用，操作未完成" },
         "500": { description: "实际持久化失败；不能视为已保存或可重发" } } };
     (paths[`/api${item.path.replace(/:([a-z]+)/g, "{$1}")}`] ??= {})[item.method.toLowerCase()] = operation;

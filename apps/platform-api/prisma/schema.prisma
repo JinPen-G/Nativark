@@ -72,6 +72,9 @@ model Tenant {
   adapterLogs                       ExternalAdapterLog[]
   notificationTemplates             NotificationTemplate[]
   notificationLogs                  NotificationSendLog[]
+  operatorInvitations               TenantOperatorInvitation[]
+  supportMailboxes                   TenantSupportMailbox[]
+  supportEmails                     TenantSupportEmail[]
   asyncJobs                         AsyncJob[]
   integrationConfigs                TenantIntegrationConfig[]
   files                             FileAsset[]
@@ -831,4 +834,73 @@ model AsyncJob {
   @@index([tenantId, jobType, status])
   @@index([tenantId, scheduledAt])
   @@index([tenantId, businessType, businessId])
+}
+
+/// 公共运营邀请保留原一次性凭证、授权快照和投递引用；业务授权由所选Core参加者裁定。
+model TenantOperatorInvitation {
+  id              String   @id @db.VarChar(191)
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+  email           String   @db.VarChar(191)
+  displayName     String   @db.VarChar(100)
+  tokenHash       String   @unique @db.Char(64)
+  idempotencyKey  String   @db.VarChar(128)
+  requestHash     String   @db.Char(64)
+  invitedBy       String   @db.VarChar(191)
+  accessSnapshot  Json
+  dispatchId      String   @db.VarChar(191)
+  status          String   @default("pending") @db.VarChar(20)
+  expiresAt       DateTime @db.DateTime(3)
+  acceptedAt      DateTime? @db.DateTime(3)
+  acceptedUserId  String?  @db.VarChar(191)
+  createdAt       DateTime @default(now()) @db.DateTime(3)
+  updatedAt       DateTime @updatedAt @db.DateTime(3)
+
+  @@unique([tenantId, idempotencyKey], map: "tenant_operator_invitations_idempotency_key")
+  @@index([tenantId, email, status], map: "tenant_operator_invitations_email_idx")
+  @@index([tenantId, createdAt], map: "tenant_operator_invitations_created_idx")
+  @@map("tenant_operator_invitations")
+}
+
+/// 公共客服邮箱按原服务器/文件夹指纹维护租约与UID游标。
+model TenantSupportMailbox {
+  id                 String @id @db.VarChar(191)
+  tenantId           String
+  tenant             Tenant @relation(fields: [tenantId], references: [id])
+  configId           String @db.VarChar(191)
+  mailboxFingerprint String @db.Char(64)
+  uidValidity        String? @db.VarChar(64)
+  lastUid            BigInt @default(0) @db.UnsignedBigInt
+  lastSyncedAt       DateTime? @db.DateTime(3)
+  leaseToken         String? @db.VarChar(64)
+  leaseUntil         DateTime? @db.DateTime(3)
+  createdAt          DateTime @default(now()) @db.DateTime(3)
+  updatedAt          DateTime @updatedAt @db.DateTime(3)
+
+  @@unique([tenantId, configId, mailboxFingerprint], map: "tenant_support_mailbox_source_key")
+  @@map("tenant_support_mailboxes")
+}
+
+/// 客服邮件只保存原安全文本与附件元数据，UID和租户隔离沿原唯一键。
+model TenantSupportEmail {
+  id                 String @id @db.VarChar(191)
+  tenantId           String
+  tenant             Tenant @relation(fields: [tenantId], references: [id])
+  configId           String @db.VarChar(191)
+  mailboxFingerprint String @db.Char(64)
+  uidValidity        String @db.VarChar(64)
+  uid                BigInt @db.UnsignedBigInt
+  senderEmail        String @db.VarChar(320)
+  senderName         String @db.VarChar(191)
+  recipient          String @db.VarChar(1000)
+  subject            String @db.VarChar(500)
+  bodyText           String @db.MediumText
+  attachments        Json
+  messageId          String? @db.VarChar(191)
+  receivedAt         DateTime @db.DateTime(3)
+  createdAt          DateTime @default(now()) @db.DateTime(3)
+
+  @@unique([tenantId, configId, mailboxFingerprint, uidValidity, uid], map: "tenant_support_email_uid_key")
+  @@index([tenantId, receivedAt], map: "tenant_support_email_received_idx")
+  @@map("tenant_support_emails")
 }
