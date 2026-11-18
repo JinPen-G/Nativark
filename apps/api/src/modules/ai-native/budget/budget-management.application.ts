@@ -7,7 +7,7 @@ import { createAuthorizedPlatformBudgetSettings } from './platform-budget-settin
 import { PrismaTaskBudgetAuthorizationSource } from './prisma-task-budget-authorization.source';
 import { PrismaGatewayCallPricing } from './prisma-gateway-call-pricing';
 import { BudgetError, type BudgetPolicy } from './budget.ports';
-import { presentBudgetSettingsFields } from './budget-settings';
+import { presentBudgetSettingsFields, taskMoneyLimitSchema } from './budget-settings';
 import type { SecretBox } from '../../../common/secret-box';
 import { createPersistedTenantModelConfiguration } from '../tenant-model-config.composition';
 import { TenantModelConfigurationAuthority } from '../tenant-model-config.authority';
@@ -30,8 +30,7 @@ const count = z.number().int().min(0).max(10000);
 const quantity = z.discriminatedUnion('unit', [
   z.object({ unit: z.literal('calls'), value: z.number().int().min(0).max(4294967295) }).strict(),
   z.object({ unit: z.literal('tokens'), value: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER) }).strict(),
-  z.object({ unit: z.literal('money'), amount: z.string().regex(/^(0|[1-9][0-9]{0,17})\.[0-9]{6}$/u),
-    currency: z.string().regex(/^[A-Z]{3}$/u), scale: z.literal(6) }).strict()
+  taskMoneyLimitSchema
 ]);
 const zeroQuantity = z.discriminatedUnion('unit', [
   z.object({ unit: z.literal('calls'), value: z.literal(0) }).strict(),
@@ -46,17 +45,18 @@ const budget = z.union([
 ]);
 const revision = z.number().int().min(0).max(4294967294);
 const change = read.extend({ ...operation, expectedRevision: revision, changes: z.object({ budget: budget.optional(),
-  maxConcurrent: count.optional(), maxCallsPerRun: count.optional(), enabled: z.boolean().optional() })
+  maxConcurrent: count.optional(), maxCallsPerRun: count.optional(), maxMoneyPerTask: taskMoneyLimitSchema.optional(), enabled: z.boolean().optional() })
   .strict().refine(value => Object.keys(value).length > 0) }).strict();
 const initialize = read.extend({ ...operation, expectedRevision: z.literal(0), budget, maxConcurrent: count,
-  maxCallsPerRun: count, enabled: z.boolean() }).strict();
+  maxCallsPerRun: count, maxMoneyPerTask: taskMoneyLimitSchema.optional(), enabled: z.boolean() }).strict();
 const refreshConfiguration = read.extend({ ...operation, expectedRevision: z.number().int().min(1).max(4294967294),
   confirmCurrentConfiguration: z.literal(true) }).strict();
 const gate = z.object({ enabled: z.boolean(), revision: z.number().int().min(1).max(4294967295) }).strict();
 const platformRead = z.object({ sceneCode: code }).strict();
 const platformSave = platformRead.extend({ expectedRevision: revision, operationKey: code.optional(), settings: z.object({
   gates: z.object({ platform: gate, tenant: gate, scene: gate }).strict(), allowedModels: z.array(z.string().min(1).max(256)).max(100),
-  allowedScenes: z.array(code).max(100), budget, maxConcurrent: count, maxCallsPerRun: count }).strict() }).strict();
+  allowedScenes: z.array(code).max(100), budget, maxConcurrent: count, maxCallsPerRun: count,
+  maxMoneyPerTask: taskMoneyLimitSchema.optional() }).strict() }).strict();
 
 export type BudgetManagementDependencies = {
   tenant?: Omit<Parameters<typeof createAuthorizedPersistedGatewayBudget>[0], 'credentials' | 'pricing' | 'taskId'> & {
@@ -252,13 +252,14 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
       const initial = refresh ? null : initialize.parse(value);
       // BYOK has usage limits, not a tenant-authored supplier money budget.
       // Refresh still preserves old monetary policy/history with its gate off.
-      if (initial && selected.config.serviceMode === 'tenant_managed' && initial.budget.state !== 'not_configured'
-        && initial.budget.quantity.unit === 'money') throw new BudgetError('INVALID');
+      if (initial && selected.config.serviceMode === 'tenant_managed' && (initial.maxMoneyPerTask !== undefined
+        || initial.budget.state !== 'not_configured' && initial.budget.quantity.unit === 'money')) throw new BudgetError('INVALID');
       const enabled = { enabled: true, revision: 1 }, controlled = { enabled: initial?.enabled ?? false, revision: 1 };
       const settings: AiUsageSettingsDraft = previous ? structuredClone(previous.settings) : { draftVersion: AI_USAGE_DRAFT_VERSION,
         scope: { kind: 'tenant', tenantId: context.scope.tenantId }, config: selected.config, sceneCode: command.sceneCode,
         allowedModels: [selected.model], allowedScenes: [command.sceneCode], budget: initial!.budget,
         maxConcurrent: initial!.maxConcurrent, maxCallsPerRun: initial!.maxCallsPerRun,
+        ...(initial!.maxMoneyPerTask === undefined ? {} : { maxMoneyPerTask: initial!.maxMoneyPerTask }),
         gates: { platform: enabled, tenant: command.scope === 'tenant' ? controlled : enabled,
           scene: command.scope === 'workspace' ? controlled : enabled } };
       if (refresh) {
@@ -303,6 +304,10 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
       // it cannot become a new BYOK money limit or be re-enabled as one.
       if (settings.config.serviceMode === 'tenant_managed' && (patch.budget !== undefined || patch.enabled === true)
         && settings.budget.state !== 'not_configured' && settings.budget.quantity.unit === 'money') throw new BudgetError('INVALID');
+      if (patch.maxMoneyPerTask !== undefined) {
+        if (settings.config.serviceMode === 'tenant_managed') throw new BudgetError('INVALID');
+        settings.maxMoneyPerTask = patch.maxMoneyPerTask;
+      }
       if (patch.maxConcurrent !== undefined) settings.maxConcurrent = patch.maxConcurrent;
       if (patch.maxCallsPerRun !== undefined) settings.maxCallsPerRun = patch.maxCallsPerRun;
       if (patch.enabled !== undefined) {

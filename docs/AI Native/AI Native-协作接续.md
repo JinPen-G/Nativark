@@ -1,6 +1,10 @@
 # AI Native 当前协作接续
 
-更新日期为2026-11-18，正式依据为[需求v1.15](<AI Native-需求.md>)及[任务v1.19](<AI Native-开发任务.md>)。原AIN-01～28和ENTRY原18项均按完整实现、必要模拟／类型及独立复核完成研发验收，百分比唯一维护在任务册。真实测试由负责人沿原交付清单执行。
+更新日期为2026-11-18，正式依据为[需求v1.15](<AI Native-需求.md>)及[任务v1.19](<AI Native-开发任务.md>)。临时RD固定交付已登记原AIN-01～28和ENTRY原18项研发验收，百分比唯一维护在任务册。Root当前继续核闭后续复查的R1-B01与R1-E01，真实测试由负责人沿原交付清单执行。
+
+## 当前收尾
+
+AI分支前置为已上传并回读GitHub的`a4ebf788419ecd5d6426650206861030b771195e`。R1-B01补原Task全部Run共享的累计金额上限，R1-E01补dev2对最终固定组合的本人复核。Root公共协议／服务端保存接点的12组原入口模拟、七个公开schema及六源类型已通过，仓储和前端片仍由作者完成冻结及验证。接着核跨Run、同键恢复、unknown／过期占用和派发前检查，再完成最终组合及非作者复核。[实现、失败与当前证据](<AI Native-开发记录.md#ain-r1-task-money-final-review-20261118>)
 
 ## 已交付固定版本
 
@@ -18,11 +22,13 @@ AI研发源码固定提交为0e4e6367a27b36f2bde58639a0f2bdd1b00e2476，原28最
 
 ## 写入归属及保全
 
-临时AI-RD为01a1e422-8ae5-7383-9e41-c80cb71bcc70，施工树为D:/工作文件/rental-OS/worktree/ai-native、codex/ai-native。本轮持续目标无token_budget，研发及固定main整合成果已交付。dev1 01a1bf34-f061-74c2-b588-3e21385c4b49和dev2 01a1bf35-1ee5-7400-a97d-c0ebf5f9482c的固定核定已交，源码、四册、索引及main操作由Root完成。后续新需求、实测发现和跨专项依赖按负责人当轮授权及现有消息纪律办理，结果留原对话供负责人读取。
+临时AI-RD为01a1e422-8ae5-7383-9e41-c80cb71bcc70，其固定交付沿上方原阶段保留。当前Root为01a1be68-da55-7f13-9536-79be07cb2093，施工树为D:/工作文件/rental-OS/worktree/ai-native、codex/ai-native，独占AI索引、四册及本片公共协议和服务端设置接点。持续目标仍在执行，无token_budget。
+
+dev1 01a1bf34-f061-74c2-b588-3e21385c4b49独占`prisma-budget.repository.ts`及`task-money-limit.ts`。dev2 01a1bf35-1ee5-7400-a97d-c0ebf5f9482c独占`PlatformBudgetSettings.tsx`、`TenantBudgetSettings.tsx`及两份budget-settings session。Root主动读取两位助手的冻结结果并核接，不覆盖活动源码。main由PM串行整合，固定版本及验证留原记录供其读取。派工省略model／thinking，保留负责人选择的模型和思考设置。
 
 main原65份已跟踪WIP与61份未跟踪成果已在合并前后核同，Core、企业、Harness、Agent接入和界面由原作者继续维护。旧本地演示界面两份原稿保全于唯一的本地Git补丁refs/codex/ai-native/main-wip-preservation-20261117，blob d47e4c9d3214b53e1dae585d41faae008ba97da7，字节SHA-256为af5fc3f0e6486f971fb7118d89aafd2e5ae0dc819d05048bc5997da16cb67c38。[WIP与原稿去向](<AI Native-开发记录.md#ain27-28-main-final-delivery-20261118>)
 
-Root和助手本轮验证进程均退出，Root任务临时目录已删除，本树output/.tmp为空。main的admin-header-actions、admin-nativark-brand和admin-shell-ui归原创建者。必要stdin／类型输出及独立终态保留在原记录所列本地Git证据引用，分支提交与本地引用分别按实际结果读取。必要离线验证沿本树原preload、不可达DATABASE_URL和任务写根，只读复用受管主仓库依赖，声明在内存生成。
+临时RD固定交付的验证进程及临时环境已按原阶段清理。当前Root验证只用stdin和内存，任务根`output/.tmp/ain-task-money-20261118`尚未创建，后续交付前核对本人作业及两位助手资源。main的admin-header-actions、admin-nativark-brand和admin-shell-ui归原创建者。必要stdin／类型输出及独立终态沿原记录保留，分支提交与本地引用分别按实际结果读取。必要离线验证沿本树原preload、不可达DATABASE_URL和任务写根，只读复用受管主仓库依赖。
 
 ## 历史证据与真实恢复边界
 
