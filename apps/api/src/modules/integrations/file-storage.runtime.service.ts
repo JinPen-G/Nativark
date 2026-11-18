@@ -1,6 +1,6 @@
-/** 原组合文件编排。公共创建、原回执、字节、内容冻结和文件表由platform-server维护，Rental引用与ACL由Rental包提供。
+/** 原组合文件编排。公共创建、原回执、字节、内容冻结、按租户清理、读取签名和文件表由platform-server维护，Rental引用与ACL由Rental包提供。
  * 专用检查、知识与企业证据沿原入口和原冻结/unknown收据，不以通用存储替代业务授权。 */
-import { FileStoragePrimitives, FileStorageRepository, MAX_FILE_BYTES, freezeFileUploadContent, createOriginalFileUploadFacts, readOriginalFileUploadReceipt } from "@rental-os/platform-server/files";
+import { FileStoragePrimitives, FileStorageRepository, MAX_FILE_BYTES, freezeFileUploadContent, createOriginalFileUploadFacts, readOriginalFileUploadReceipt, FileStorageCleanup, COMPLETED_STAGING_PENDING, issueFileDownloadReference } from "@rental-os/platform-server/files";
 import { RentalFileBusinessReferences } from "@rental-os/rental-core/file-access";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, OnApplicationBootstrap, OnApplicationShutdown, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { INSPECTION_OBJECT_READER, readInspectionMedia, type InspectionObjectReader } from "../ai-native/inspection-assist/inspection-media.reader";
@@ -60,16 +60,13 @@ export type ExchangeInspectionUploadPlan = UploadFacts & { config: TenantIntegra
   storageLocationHash: string; uploadUrl: string; uploadHeaders: Record<string, string> };
 
 const UPLOAD_TTL_SECONDS = 15 * 60;
-// Separate cleanup receipts leave completed uploads terminal. Once DELETE is
-// claimed, a lost result permits only HEAD observation of this original staging key.
-const COMPLETED_STAGING_PENDING = "completed_staging_pending";
-const COMPLETED_STAGING_UNKNOWN = "completed_staging_unknown";
 
 @Injectable()
 export class FileStorageRuntimeService extends FileStoragePrimitives implements OnApplicationBootstrap, OnApplicationShutdown {
   private cleanupTimer?: ReturnType<typeof setInterval>;
   private readonly files: FileStorageRepository;
   private readonly fileReferences: RentalFileBusinessReferences;
+  private readonly cleanup: FileStorageCleanup<Prisma.TransactionClient>;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -82,6 +79,16 @@ export class FileStorageRuntimeService extends FileStoragePrimitives implements 
     super();
     this.files = new FileStorageRepository(prisma);
     this.fileReferences = new RentalFileBusinessReferences(prisma);
+    this.cleanup = new FileStorageCleanup<Prisma.TransactionClient>({
+      store: prisma,
+      transaction: work => prisma.$transaction(work),
+      runtimeConfig: (tenantId, provider) => this.integrations.runtimeConfig("file", tenantId, provider as never, { requireLiveTest: false }),
+      excludedUploadScene: RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE,
+      deleteObject: (config, storageKey, at) => this.deleteObject(config, storageKey, at),
+      presign: (config, method, storageKey, mimeType, expiresAt) => this.presign(config, method, storageKey, mimeType, expiresAt),
+      objectRequest: (url, init) => this.objectRequest(url, init),
+      ...(operationLog ? { recordAudit: input => operationLog.record(input) } : {})
+    });
   }
 
   onApplicationBootstrap() {
@@ -545,57 +552,7 @@ export class FileStorageRuntimeService extends FileStoragePrimitives implements 
    * cleanupError holds the fixed pending/unknown marker; the upload remains
    * completed and its active evidence is never invalidated by cleanup failure. */
   private async cleanupCompletedStagingObjects(tenantId: string, limit: number): Promise<FileUploadCleanupSummary> {
-    const now = new Date(), staleBefore = new Date(now.getTime() - 10 * 60 * 1000);
-    const rows = structuredClone(await this.prisma.fileUploadSession.findMany({
-      where: { tenantId, status: "completed", expiresAt: { lte: now }, OR: [
-        { cleanupError: COMPLETED_STAGING_PENDING },
-        { cleanupError: COMPLETED_STAGING_UNKNOWN, lastCleanupAt: { lte: staleBefore } }
-      ] },
-      orderBy: [{ expiresAt: "asc" }, { id: "asc" }], take: Math.max(1, Math.min(limit, 100))
-    }));
-    const summary: FileUploadCleanupSummary = { scanned: rows.length, invalidated: 0, deletedObjects: 0, cleanupPending: 0, sessionIds: [] };
-    for (const row of rows) {
-      try {
-        const asset = await this.prisma.fileAsset.findFirst({ where: { id: row.fileAssetId, tenantId } });
-        const config = await this.integrations.runtimeConfig("file", tenantId, row.provider as never, { requireLiveTest: false });
-        const metadata = asset?.metadata as JsonRecord | null;
-        const staging = metadata?.stagingStorageKey;
-        if (!asset || !config || row.provider === "local_mock" || config.provider !== row.provider
-          || asset.storageProvider !== row.provider || asset.storageKey !== row.storageKey
-          || !["active", "delete_pending", "delete_in_progress", "deleted"].includes(asset.status)
-          || !row.completedAt || typeof staging !== "string" || !frozenFileContentHash(asset, config)) {
-          throw new ConflictException("已完成上传缺少原临时对象与存储位置依据，不能清理");
-        }
-        // Persist uncertainty before external DELETE. A lost claim acknowledgement
-        // must not become a second DELETE; later owners only observe this key.
-        const claimed = await this.prisma.$transaction(async tx => {
-          const current = await tx.fileAsset.findFirst({ where: { id: asset.id, tenantId } });
-          if (requestFingerprint(current) !== requestFingerprint(asset)) throw new ConflictException("原文件清理依据已变化");
-          return tx.fileUploadSession.updateMany({ where: { id: row.id, tenantId, status: "completed",
-            updatedAt: row.updatedAt, storageKey: row.storageKey, provider: row.provider, fileAssetId: asset.id,
-            cleanupError: row.cleanupError, expiresAt: row.expiresAt, completedAt: row.completedAt },
-            data: { cleanupError: COMPLETED_STAGING_UNKNOWN, cleanupAttempts: { increment: 1 }, lastCleanupAt: now } });
-        });
-        if (claimed.count !== 1) continue;
-        summary.sessionIds.push(row.id);
-        const key = this.pendingObjectKey(staging);
-        const method = row.cleanupError === COMPLETED_STAGING_PENDING ? "DELETE" : "HEAD";
-        const signed = this.presign(config, method, key, "application/octet-stream", new Date(now.getTime() + 60_000));
-        const response = await this.objectRequest(signed.url, { method, headers: signed.headers });
-        const absent = method === "DELETE" ? response.ok || response.status === 404 : response.status === 404;
-        if (!absent) throw new ServiceUnavailableException("原临时对象清理结果尚未证实");
-        const recorded = await this.prisma.fileUploadSession.updateMany({ where: { id: row.id, tenantId, status: "completed",
-          storageKey: row.storageKey, fileAssetId: asset.id, cleanupError: COMPLETED_STAGING_UNKNOWN,
-          lastCleanupAt: now }, data: { cleanupError: null } });
-        if (recorded.count !== 1) throw new ConflictException("原临时对象清理收据已变化");
-        summary.deletedObjects += 1;
-      } catch {
-        // Do not overwrite the original marker with provider errors or credentials.
-        // Missing evidence stays unavailable; uncertain deletion stays HEAD-only.
-        summary.cleanupPending += 1;
-      }
-    }
-    return summary;
+    return this.cleanup.cleanupCompletedStagingObjects(tenantId, limit);
   }
 
   /**
@@ -604,90 +561,7 @@ export class FileStorageRuntimeService extends FileStoragePrimitives implements 
    * freeze_pending 不进入任何过期清理，未知冻结仍只能核对原结果。
    */
   async cleanupExpiredUploadSessions(tenantId: string, limit = 50): Promise<FileUploadCleanupSummary> {
-    const now = new Date();
-    const staleCleanupBefore = new Date(now.getTime() - 10 * 60 * 1000);
-    const rows = await this.prisma.fileUploadSession.findMany({
-      where: {
-        tenantId,
-        expiresAt: { lte: now },
-        fileAsset: { is: { uploadScene: { not: RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE } } },
-        OR: [
-          { status: "pending_upload" },
-          { status: "failed", cleanupError: { not: null } },
-          { status: "cleanup_in_progress", lastCleanupAt: { lte: staleCleanupBefore } }
-        ]
-      },
-      orderBy: { expiresAt: "asc" },
-      take: Math.max(1, Math.min(limit, 100))
-    });
-    let invalidated = 0;
-    let deletedObjects = 0;
-    let cleanupPending = 0;
-    const sessionIds: string[] = [];
-    for (const row of rows) {
-      const source = await this.prisma.fileAsset.findFirst({ where: { id: row.fileAssetId, tenantId } });
-      if (source?.uploadScene === RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE) continue;
-      const claimed = await this.prisma.fileUploadSession.updateMany({
-        where: {
-          id: row.id,
-          tenantId,
-          fileAsset: { is: { uploadScene: { not: RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE } } },
-          OR: [
-            { status: "pending_upload" },
-            { status: "failed", cleanupError: { not: null } },
-            { status: "cleanup_in_progress", lastCleanupAt: { lte: staleCleanupBefore } }
-          ]
-        },
-        data: { status: "cleanup_in_progress", cleanupAttempts: { increment: 1 }, lastCleanupAt: now }
-      });
-      if (claimed.count !== 1) continue;
-      sessionIds.push(row.id);
-      let cleanupError: string | undefined;
-      let deleted = row.provider === "local_mock";
-      try {
-        if (!deleted) {
-          const config = await this.integrations.runtimeConfig("file", tenantId, row.provider as never, { requireLiveTest: false });
-          if (!config) throw new ServiceUnavailableException("文件平台已停用，无法清理过期对象");
-          const asset = await this.prisma.fileAsset.findFirst({ where: { id: row.fileAssetId, tenantId } });
-          const metadata = asset?.metadata as JsonRecord | null;
-          const staged = metadata?.fileUploadVersion === 2;
-          if (staged && metadata.storageLocationHash !== this.retentionLocationHash(config)) throw new ConflictException("原上传存储位置已变化，不能清理其他位置的对象");
-          deleted = await this.deleteObject(config, staged ? this.pendingObjectKey(row.storageKey) : row.storageKey, now);
-          if (!deleted) throw new ServiceUnavailableException("对象存储未确认删除过期对象");
-        }
-      } catch (error) {
-        cleanupError = (error instanceof Error ? error.message : String(error)).slice(0, 500);
-      }
-      await this.prisma.$transaction([
-        this.prisma.fileUploadSession.update({
-          where: { id: row.id },
-          data: {
-            status: "failed",
-            failureReason: "上传会话已过期",
-            cleanupError: cleanupError ?? null
-          }
-        }),
-        this.prisma.fileAsset.updateMany({
-          where: { id: row.fileAssetId, tenantId, status: "pending_upload" },
-          data: { status: "failed" }
-        })
-      ]);
-      invalidated += 1;
-      if (deleted) deletedObjects += 1;
-      else cleanupPending += 1;
-    }
-    const completed = await this.cleanupCompletedStagingObjects(tenantId, limit);
-    deletedObjects += completed.deletedObjects;
-    cleanupPending += completed.cleanupPending;
-    sessionIds.push(...completed.sessionIds);
-    await this.operationLog?.record({
-      tenantId,
-      action: "file.upload.cleanup-expired",
-      targetType: "file-upload-session",
-      detail: "清理过期文件上传会话",
-      metadata: { scanned: rows.length + completed.scanned, invalidated, deletedObjects, cleanupPending }
-    });
-    return { scanned: rows.length + completed.scanned, invalidated, deletedObjects, cleanupPending, sessionIds };
+    return this.cleanup.cleanupExpiredUploadSessions(tenantId, limit);
   }
 
   /**
@@ -726,36 +600,7 @@ export class FileStorageRuntimeService extends FileStoragePrimitives implements 
 
   /** 删除业务记录已经从页面移除、但 provider 暂时不可达的文件。 */
   async cleanupPendingFileAssetDeletes(tenantId: string, limit = 50) {
-    const rows = await this.prisma.fileAsset.findMany({
-      where: { tenantId, status: { in: ["delete_pending", "delete_in_progress"] }, uploadScene: { not: RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE } },
-      orderBy: { updatedAt: "asc" },
-      take: Math.max(1, Math.min(limit, 100))
-    });
-    let deleted = 0;
-    let pending = 0;
-    for (const row of rows) {
-      if (row.uploadScene === RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE) continue;
-      const claimed = await this.prisma.fileAsset.updateMany({
-        where: { id: row.id, tenantId, status: { in: ["delete_pending", "delete_in_progress"] }, uploadScene: { not: RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE } },
-        data: { status: "delete_in_progress" }
-      });
-      if (claimed.count !== 1) continue;
-      try {
-        if (row.storageProvider !== "local_mock") {
-          const config = await this.integrations.runtimeConfig("file", tenantId, row.storageProvider as never, { requireLiveTest: false });
-          if (!config || !(await this.deleteObject(config, row.storageKey, new Date()))) throw new ServiceUnavailableException("对象存储未确认删除文件");
-        }
-        await this.prisma.fileAsset.updateMany({ where: { id: row.id, tenantId, status: "delete_in_progress" }, data: { status: "deleted" } });
-        deleted += 1;
-      } catch {
-        await this.prisma.fileAsset.updateMany({ where: { id: row.id, tenantId, status: "delete_in_progress" }, data: { status: "delete_pending" } });
-        pending += 1;
-      }
-    }
-    if (deleted || pending) {
-      await this.operationLog?.record({ tenantId, action: "file.delete.cleanup", targetType: "file", detail: "重试待删除业务文件", metadata: { scanned: rows.length, deleted, pending } });
-    }
-    return { scanned: rows.length, deleted, pending };
+    return this.cleanup.cleanupPendingFileAssetDeletes(tenantId, limit);
   }
 
   async cleanupPendingFileAssetDeletesForAllTenants(limitPerTenant = 50) {
@@ -1133,53 +978,14 @@ export class FileStorageRuntimeService extends FileStoragePrimitives implements 
     }
     if (owner) await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner.workspaceId);
     if (!this.fileAccess || !this.operationLog) throw new ServiceUnavailableException("文件业务读取权威或访问审计未配置");
-    const actor = getRequestIdentity();
-    const auditActor = { requireSuccess: true, ...(actor?.audience !== 'client' ? { userId: actor?.userId } : {}) };
-    const authorityKey = this.fileAccess.authorityKey(tenantId);
-    const binding = (row: typeof asset) => requestFingerprint({ id: row.id, tenantId: row.tenantId, status: row.status,
-      businessType: row.businessType, businessId: row.businessId, uploadScene: row.uploadScene,
-      storageKey: row.storageKey, storageProvider: row.storageProvider, mimeType: row.mimeType,
-      updatedAt: row.updatedAt.toISOString(), metadata: row.metadata });
-    const originalBinding = binding(asset);
-    await this.fileAccess.assertRead(tenantId, asset);
-    // Config lookup and audit can yield; no URL leaves the service until the
-    // original file binding and current request authority have been read again.
-    const recheck = async () => {
-      const current = await this.prisma.fileAsset.findFirst({ where: { id: fileAssetId, tenantId, status: "active" } });
-      if (!current || binding(current) !== originalBinding
-        || this.fileAccess!.authorityKey(tenantId) !== authorityKey) throw new ConflictException("文件或读取授权已变化");
-      await this.fileAccess!.assertRead(tenantId, current);
-      const afterAccess = await this.prisma.fileAsset.findFirst({ where: { id: fileAssetId, tenantId, status: "active" } });
-      if (!afterAccess || binding(afterAccess) !== originalBinding || this.fileAccess!.authorityKey(tenantId) !== authorityKey) {
-        throw new ConflictException("文件或读取授权已变化");
-      }
-    };
-    if (asset.storageProvider === "local_mock") {
-      if (process.env.NODE_ENV === "production") {
-        throw new ServiceUnavailableException("生产环境禁止访问未归档的模拟文件，请先配置文件存储平台");
-      }
-      const result = { fileAssetId, provider: asset.storageProvider, mode: "simulation" as const, downloadUrl: `/api/files/${fileAssetId}/download-url` };
-      await this.operationLog?.record({ tenantId, action: "file.download-url.issue", targetType: "file", targetId: fileAssetId, detail: "生成受保护文件访问引用", ...auditActor,
-        metadata: { mode: result.mode, audience: actor?.audience ?? 'public', actorId: actor?.userId,
-          businessType: asset.businessType, businessId: asset.businessId } });
-      await recheck();
-      return result;
-    }
-    const config = await this.integrations.runtimeConfig("file", tenantId, asset.storageProvider as never);
-    if (!config) throw new ServiceUnavailableException("文件平台已停用，无法生成下载地址");
-    const contentMetadata = asset.metadata as JsonRecord | null;
-    if (contentMetadata?.fileUploadVersion === 2 && !frozenFileContentHash(asset, config)) {
-      throw new ConflictException("正式文件内容版本或原存储位置无法核实");
-    }
-    await recheck();
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-    const signed = this.presign(config, "GET", asset.storageKey, asset.mimeType, expiresAt);
-    const result = { fileAssetId, provider: asset.storageProvider, mode: "provider" as const, downloadUrl: signed.url, expiresAt: expiresAt.toISOString() };
-    await this.operationLog?.record({ tenantId, action: "file.download-url.issue", targetType: "file", targetId: fileAssetId, detail: "生成短时文件访问签名", ...auditActor,
-      metadata: { mode: result.mode, expiresAt: result.expiresAt, audience: actor?.audience ?? 'public', actorId: actor?.userId,
-        businessType: asset.businessType, businessId: asset.businessId } });
-    await recheck();
-    return result;
+    return issueFileDownloadReference({ tenantId, fileAssetId, asset }, {
+      access: this.fileAccess,
+      recordAudit: input => this.operationLog!.record(input),
+      readAsset: () => this.prisma.fileAsset.findFirst({ where: { id: fileAssetId, tenantId, status: "active" } }),
+      runtimeConfig: () => this.integrations.runtimeConfig("file", tenantId, asset.storageProvider as never),
+      allowSimulation: process.env.NODE_ENV !== "production",
+      signGet: (config, storageKey, mimeType, expiresAt) => this.presign(config, "GET", storageKey, mimeType, expiresAt)
+    });
   }
 
   async readKnowledgeBytes(tenantId: string, fileAssetId: string, owner: FileBusinessOwner, maxBytes: number, signal?: AbortSignal) {

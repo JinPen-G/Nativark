@@ -8,3 +8,7 @@ export { readOriginalFileUploadReceipt } from "./file-upload-receipt";
 export type { FileUploadReceiptParticipants } from "./file-upload-receipt";
 export { createOriginalFileUploadFacts } from "./file-upload-session";
 export type { FileUploadSessionParticipants, OriginalFileUploadFacts } from "./file-upload-session";
+export { FileStorageCleanup, COMPLETED_STAGING_PENDING, COMPLETED_STAGING_UNKNOWN } from "./file-cleanup";
+export type { FileCleanupTransaction, FileCleanupParticipants } from "./file-cleanup";
+export { issueFileDownloadReference } from "./file-download";
+export type { FileDownloadAsset, FileDownloadAccess, FileDownloadAudit, FileDownloadParticipants } from "./file-download";

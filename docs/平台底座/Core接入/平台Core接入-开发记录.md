@@ -11,6 +11,27 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-public-file-cleanup-download-20261118"></a>
+
+## 公共文件按租户清理与受保护下载（2026-11-18）
+
+创建、原回执、33模型/八迁移与配置围栏已在768716af91120408067a662bfc02d8657742b4b4普通推送，RD本次实际远端回读为同一提交。dev1交出cleanup/download五路径后停写，RD完整核对两份公共实现、原运行时委托与模块导读，再单独固定此片。新公共应用三文件及Staff参加者保留在工作区，原文和旧接续由上述固定父版保全。
+
+[FileStorageCleanup](../../../packages/platform-server/src/modules/files/file-cleanup.ts)持有原三个按租户清理算法。[原运行时](../../../apps/api/src/modules/integrations/file-storage.runtime.service.ts)继续持有唯一计时器、全租户发现和专用保留场景，只委托相同数据库和对象提供者。完成暂存对象在DELETE前持久化原unknown收据，失应答只HEAD原键，原已完成文件和证据保持。原过期session→asset两写从数组事务改为同一callback事务，按原顺序、条件与提交点提交或回滚，事务内没有对象网络；此改变已按共享分工核定。缺租户在查询前拒绝，冻结和专用保留场景继续排除，原两项staging marker值不变。
+
+[issueFileDownloadReference](../../../packages/platform-server/src/modules/files/file-download.ts)接原FileBusinessAccessService和必须成功的访问审计。原资产/业务/存储绑定及当前权限在配置、ACL或审计等待后复核，模拟引用仍要求宿主明确允许；原专用资料、公开商品图及客户敏感附件继续由原入口或Rental ACL裁定。正式/files出口提供清理、下载及窄参加者类型，公共层没有Rental场景枚举或另一个扫描执行者。[源码路线](../../../packages/platform-server/src/modules/files/README.md) · [公共包](../../../packages/platform-server/README.md)
+
+| 必要核验 | 实际结果与边界 |
+| --- | --- |
+| 作者一次定向类型 | dev1实际原Runtime及公共出口四根/1840源，复用官方238/33模型声明，最终退出0、0诊断。首轮completedAt可空类型问题已修为Date或null，保留原存储语义 |
+| 作者原生命周期冒烟 | 短stdin复用原file-storage-lifecycle.test.cjs，十段全部通过，原用例本片未改；覆盖原回执、ACL、冻结/unknown、过期及完成暂存清理和专用保留。知识原全套2/6未重跑 |
+| RD源码与消费者核对 | 两份公共实现完整读取，三个清理方法和下载委托核对；原计时器、全租户发现、专用分支及提供者仍在原宿主。复用作者同片类型/冒烟证据，没有再运行完整API或同一生命周期 |
+| 资料与资源 | 作者20个导读链接/格式通过，stderr与守卫违规为空，临时目录已删除。RD同片更新模块导读、包说明和原记录/接续，必要链接与CRLF空白检查随提交核定；没有新增永久测试脚本、安装或业务服务 |
+
+这份证据使用明确数据库、事务、Auth与对象传输fixture，没有真实MySQL、对象云、HTTP、浏览器或干净安装。公共应用正式出口、Staff实际参加者接线、其他合法历史输入兼容和知识/专用绑定仍继续完成；公共异步接点、Rental标准装配/数据/各端/AI尚未全部迁移，PCH-03/06/08未跨下一档。原问题与集中待清理责任清单继续由当前接续承接。
+
+RD定向资料检查退出0，六份资料1162本地链接/184锚点/0问题，稀疏目标按固定Git定位。原需求/任务无差异，当前固定main ba1de9f91860c4e73503eded4e1d05d2307b0e28为任务HEAD祖先；限定CRLF空白检查退出0。提交仅此片五路径与包说明、原记录/接续共八路径，新公共应用与Staff参加者不进入此提交。
+
 <a id="core-public-file-upload-data-20261118"></a>
 
 ## 公共文件创建、原回执、数据与存储配置围栏（2026-11-18）
