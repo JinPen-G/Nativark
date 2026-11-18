@@ -11,6 +11,26 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-membership-http-state-20261118"></a>
+
+## Rental会员HTTP、客户状态与门户授权（2026-11-18）
+
+固定父版d1884e3cb4d57ed6f22c9762924729d1b30d67d8已普通推送并回读实际远端。RD继续会员闭包，dev1文件HTTP、dev2订单前端及其原消费者用例按共享路径保留，未夹入本片；索引和共同出口仍由RD维护。
+
+[客户状态仓储](../../../packages/rental-core/src/mysql-customer-operations.ts)持有原客户锁、账号/会员状态CAS、状态历史、风险及敏感访问审计，主档写入仍委托同一客户仓储。[门户应用](../../../packages/rental-core/src/mysql-enterprise-portal.ts)持有原开通、动作授予、当前有效关系修订和审计收据。有限MySQL视图留私有适配，平台公共合同不加载这些生成模型。[会员HTTP](../../../packages/rental-core/src/http-membership.controller.ts)与[会员请求验证类](../../../packages/rental-core/src/http-membership-request.dto.ts)使用包内同一声明，门户三类由[对应请求出口](../../../packages/rental-core/src/http-enterprise-portal-request.dto.ts)提供。会员14类与门户3类合计17类，原34个HTTP操作、参数装饰器、字段及验证保持。原Controller/DTO窄转接同一类，[两项HTTP令牌](../../../packages/rental-core/src/http-membership-applications.ts)由[原provider列表](../../../apps/api/src/modules/rental-core/rental-http.providers.ts)以useExisting绑定同一会员和门户实例；原主AppModule继续消费这份列表，不重复登记Controller或业务服务。
+
+对照父版，状态仓储19项、门户8项、Controller37项方法正文一致；34个HTTP方法及17类DTO装饰器/字段对应原源码。根存储与调用方事务使用同一有限存储视图，既有事务实例未换包装。CAS影响0行不写状态历史，成功后按原顺序写历史；敏感资料读取审计独立保存。门户旧操作只回原收据，不重置当前修订或恢复被撤销的动作授予；企业订单和资金仍另核原资格。
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| 当前类型 | stdin `node --no-compilation-cache -`，TypeScript5.9.3；实际HTTP provider、会员Controller、状态治理/合并和微信认证五根/1903源0诊断，进程11928退出0。Prisma5.22官方内存声明沿当前238/33模型生成，磁盘输出0，stderr空 |
+| 一次定向冒烟 | stdin进程40796退出0；真实同源状态类、主体锁/风险、CAS0/1及历史失败传播、独立敏感审计通过。复用原门户修订冲突/已提交键回放一段的全部断言，两项真实Nest别名和Controller共用原实例；跨租户读取0、缺经营空间/缺门户参加者拒绝及DTO同源/合法非法值通过。容器已close，磁盘输出及真实网络0 |
+| 首轮与复验 | 初次类型进程26424退出1、一诊断，私有db入口尚未接受原根存储投影；只补同一有限存储类型后复验通过。冒烟33264在加载原完整provider列表时缺Prisma.Decimal退出1；补既有官方SQL运行时Decimal及DMMF枚举后只复验本片，产品源码未因此改动 |
+
+原enterprise-portal-access用例只更新实际SDK源码及依赖定位，保留原断言并核旧Controller正式转接；本次只执行上述原门户行为段，未称整份用例通过。模块导读与API说明v1.23同步正式出口、同实例接线及简明接入步骤。新增永久测试脚本0，没有安装、环境文件、磁盘客户端或业务服务；SQL/存储/事务和认证上下文为明确fixture，真实HTTP/MySQL、浏览器、完整独立装配/安装及审查未验。
+
+PCH-06/08仍需客户治理/合并、事件作业与标准总装配、独立schema/迁移/Seed及全功能消费者汇集，尚未据本片跨下一档。六份资料定向核1652链接、200锚点与122表格，0问题；六个正式出口/类型映射和原依赖/lock一致。精确暂存只含本片20路径，限定CRLF空白检查沿本片执行。最终阶段版本由包含本节的Git提交定位。
+
 <a id="core-rental-membership-application-20261118"></a>
 
 ## Rental会员应用与同事务参加者（2026-11-18）

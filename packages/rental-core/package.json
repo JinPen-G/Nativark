@@ -1034,6 +1034,30 @@
     "./customer-operations-ports": {
       "types": "./dist/customer-operations-ports.d.ts",
       "default": "./dist/customer-operations-ports.js"
+    },
+    "./mysql-customer-operations": {
+      "types": "./dist/mysql-customer-operations.d.ts",
+      "default": "./dist/mysql-customer-operations.js"
+    },
+    "./mysql-enterprise-portal": {
+      "types": "./dist/mysql-enterprise-portal.d.ts",
+      "default": "./dist/mysql-enterprise-portal.js"
+    },
+    "./http-membership": {
+      "types": "./dist/http-membership.controller.d.ts",
+      "default": "./dist/http-membership.controller.js"
+    },
+    "./http-membership-request.dto": {
+      "types": "./dist/http-membership-request.dto.d.ts",
+      "default": "./dist/http-membership-request.dto.js"
+    },
+    "./http-enterprise-portal-request.dto": {
+      "types": "./dist/http-enterprise-portal-request.dto.d.ts",
+      "default": "./dist/http-enterprise-portal-request.dto.js"
+    },
+    "./http-membership-applications": {
+      "types": "./dist/http-membership-applications.d.ts",
+      "default": "./dist/http-membership-applications.js"
     }
   },
   "typesVersions": {
@@ -1805,6 +1829,24 @@
       ],
       "customer-operations-ports": [
         "dist/customer-operations-ports.d.ts"
+      ],
+      "mysql-customer-operations": [
+        "dist/mysql-customer-operations.d.ts"
+      ],
+      "mysql-enterprise-portal": [
+        "dist/mysql-enterprise-portal.d.ts"
+      ],
+      "http-membership": [
+        "dist/http-membership.controller.d.ts"
+      ],
+      "http-membership-request.dto": [
+        "dist/http-membership-request.dto.d.ts"
+      ],
+      "http-enterprise-portal-request.dto": [
+        "dist/http-enterprise-portal-request.dto.d.ts"
+      ],
+      "http-membership-applications": [
+        "dist/http-membership-applications.d.ts"
       ]
     }
   },

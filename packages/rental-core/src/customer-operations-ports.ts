@@ -1,6 +1,7 @@
 /** Rental客户状态与审计的私有参加者声明。历史、权限来源及原事务由所属业务持有；
  * 本声明不注册HTTP，也不授予账号、会员或敏感资料访问权。 */
-import type { Prisma } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
+import type { SharedCustomerRepository } from "./mysql-customer-master";
 import type { CustomerMembershipStatus, CustomerSensitiveAccessAuditEntry, CustomerStatusAction, CustomerStatusScope } from "./contracts";
 import type { RentalCustomerBusinessGate } from "./client-session-ports";
 
@@ -29,6 +30,11 @@ export interface CustomerSensitiveAccessInput {
   reason?: string;
   at: string;
 }
+
+/** 状态仓储只消费这些表和原SQL运行时；完整业务事务仍由调用方传入。 */
+export type RentalCustomerOperationsStorage = Pick<PrismaClient, "$queryRaw" | "$executeRaw" |
+  "customerAccount" | "customerStatusHistoryEntry" | "customerSensitiveAccessAudit" | "customerRiskRecord">;
+export type RentalCustomerOperationsWriter = Pick<SharedCustomerRepository, "createAccount" | "updateAccount" | "updateMembership">;
 
 /** 会员流程实际消费的风险、主体锁与状态/历史同事务接点。 */
 export interface RentalMembershipOperations extends RentalCustomerBusinessGate {

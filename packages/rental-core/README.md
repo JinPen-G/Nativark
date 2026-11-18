@@ -40,6 +40,7 @@
 | [正式出口](src/index.ts)、[合同](src/contracts.ts) | 原商品/资产、报价订单、履约检查、价格资金、日历与客户会员定义和运行时常量；[shared 兼容出口](../shared/src/core.ts)继续服务原 API、各客户端和 AI |
 | [品类标识](src/rental-category-code.ts) | 原稳定格式及内置常量，格式合法不代表注册、发布或采用权限 |
 | [会员应用](src/mysql-membership.ts)、[私有存储/参加者](src/membership-ports.ts)、[状态审计接点](src/customer-operations-ports.ts) | `/mysql-membership` 持有租户共享会员、注册审核、当前资质、方案版本/授予及报价权益；业务风险、客户锁和企业政策使用同一原实例，金额/订单执行仍由订单域裁定 |
+| [客户状态仓储](src/mysql-customer-operations.ts)、[门户授权](src/mysql-enterprise-portal.ts)、[会员HTTP](src/http-membership.controller.ts)、[HTTP参加者](src/http-membership-applications.ts) | 状态与历史按原事务/CAS组合，敏感访问审计独立保存；门户开通/动作授权、原操作收据和会员路由由Rental维护，宿主通过同一服务别名接线 |
 | [客户主档与会员](src/mysql-customer-master.ts)、[本表事务视图](src/customer-master-storage.ts) | `/mysql-customer-master` 是五个客户模型的唯一写入口，保留原租户共享、创建归属、普通资料CAS与企业关系修订；同一事务供给注册/合并/状态/企业链，客户共享不开放跨空间订单或其他Core读权 |
 | [企业客户资格](src/mysql-enterprise-access.ts)、[客户上下文](src/client-context.ts) | `/mysql-enterprise-access` 从原客户会话、企业成员关系和明确动作读取资格；原客户Auth供给可信上下文，角色名称不自动取得入口或营运权限 |
 | [企业订单读取](src/mysql-enterprise-orders.ts)、[财务投影](src/mysql-enterprise-finance.ts)、[私有存储](src/enterprise-read-storage.ts) | `/mysql-enterprise-orders` 与 `/mysql-enterprise-finance` 保留原告知字段、本人/企业和当前空间范围，读取前后复验；资金和授信来源由宿主供给，缺原依据返回不可用 |
@@ -116,6 +117,8 @@
 HTTP入口从 `/http-workspace-capabilities`、`/http-staff-payments` 导入；`/http-service-ports` 给出两个服务令牌及实际方法合同。宿主将令牌绑定到原空间能力、原员工收款服务，使用 `useExisting` 保持同一实例；当前 [API装配](../../apps/api/src/app.module.ts) 是兼容示例。原 [Guard](../../apps/api/src/common/api-auth.guard.ts)、员工地点投影、当前空间、事务与原收据仍由原链核验。公共无Core宿主不注册这些Controller。字段与路径继续查 [OpenAPI](../../apps/api/src/contracts/openapi-document.ts)，SDK接点不开放Agent工具。
 
 会员应用从 `@rental-os/rental-core/mysql-membership` 创建 `MembershipService`，依次提供同一存储、状态/风险操作、客户主档、统一注册和企业政策实例。`/membership-ports` 描述实际方法，`/customer-operations-ports` 为状态与审计输入的唯一声明。租户共享会员仍按空间解析业务资质和权益；审核、客户状态及原附件依据在原事务内核定，履约重读当前关系/资质并使用订单原规则，历史快照不替代当前权限。[会员应用](src/mysql-membership.ts) · [原Nest接线](../../apps/api/src/modules/platform/membership.service.ts) · [原Controller](../../apps/api/src/modules/platform/membership.controller.ts)
+
+会员HTTP从 `/http-membership` 登记Controller，`/http-membership-applications` 的两个令牌绑定同一会员和门户服务；请求验证类从 `/http-membership-request.dto`、`/http-enterprise-portal-request.dto` 导入。客户状态仓储从 `/mysql-customer-operations` 创建并传入同一主档写入者，门户授权从 `/mysql-enterprise-portal` 创建并接同一存储。原租户/空间、角色、门户修订及收据规则保持；门户授权不替代企业订单/资金资格。[原同实例接线](../../apps/api/src/modules/rental-core/rental-http.providers.ts) · [原门户验证](../../tests/enterprise-portal-access.test.cjs)
 
 租赁客户仓储从 `@rental-os/rental-core/mysql-customer-master` 创建，传入同一数据源。注册、合并、会员/账号状态和企业流程持有原锁及事务，再把同一事务传给仓储方法；普通姓名变更使用原修订CAS，企业关系变化不恢复旧授权。后台重置口令和客户端自助注册分别沿原规则，不能借重试解除暂停。[原注册入口](../../apps/api/src/modules/platform/customer-registration.service.ts) · [原注册验证](../../tests/customer-registration-unified.test.cjs) · [写入口检查](../../scripts/validate-customer-write-ownership.cjs)
 

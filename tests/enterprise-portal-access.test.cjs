@@ -58,10 +58,10 @@ test('entry-only grants survive separate action editing and invalid member-only 
 test('revision conflict has an explicit pre-write rejection; committed original keys only replay receipts', async () => {
   class HttpError extends Error { constructor(body) { super(body.message ?? body); this.body = body; } }
   const common = { Injectable: () => x => x, ForbiddenException: HttpError, BadRequestException: HttpError, ConflictException: HttpError, NotFoundException: HttpError };
-  const { EnterprisePortalService } = load('apps/api/src/modules/platform/enterprise-portal.service.ts', {
+  const { EnterprisePortalService } = load('packages/rental-core/src/mysql-enterprise-portal.ts', {
     '@nestjs/common': common, '@prisma/client': { Prisma: {} },
-    '@rental-os/shared': { ENTERPRISE_PORTAL_ACTIONS: ['portal:enter', 'members:read'] },
-    '../../common/request-identity': { requireRequestTenantId: () => 't1', requireRequestUserId: () => 'u1' },
+    './enterprise': { ENTERPRISE_PORTAL_ACTIONS: ['portal:enter', 'members:read'] },
+    '@rental-os/platform-server/request-identity': { requireRequestTenantId: () => 't1', requireRequestUserId: () => 'u1' },
   });
   let revision = 2, writes = 0; const receipts = new Map();
   const tx = {
@@ -95,7 +95,8 @@ test('revision conflict has an explicit pre-write rejection; committed original 
 test('all seven portal operations retain matching Controller methods and OpenAPI references', () => {
   const api = fs.readFileSync('apps/api/src/contracts/openapi-document.ts', 'utf8');
   const client = fs.readFileSync('packages/rental-core/src/http-client.controller.ts', 'utf8');
-  const membership = fs.readFileSync('apps/api/src/modules/platform/membership.controller.ts', 'utf8');
+  const membership = fs.readFileSync('packages/rental-core/src/http-membership.controller.ts', 'utf8');
+  assert.ok(fs.readFileSync('apps/api/src/modules/platform/membership.controller.ts', 'utf8').includes('@rental-os/rental-core/http-membership'));
   // 复用原合同检查器的源码加载方式，跨领域引用在实际OpenAPI组合中核对。
   require('ts-node').register({ transpileOnly: true, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
   const { ENTERPRISE_COMPONENT_SCHEMAS: enterpriseSchemas } = require('../apps/api/src/contracts/enterprise-schemas');
