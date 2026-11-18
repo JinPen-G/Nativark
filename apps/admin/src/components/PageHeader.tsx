@@ -13,18 +13,24 @@ import { useWorkspaceHeader, WorkspacePageActions, WorkspacePageTitle } from "./
 
 /**
  * 工作区内将当前页名及主操作送到面包屑栏；无宿主时保留完整页头。
- * description/summary/view 留在内容区，统一拥有到首个内容的间距。
+ * description/summary/view 留在内容区；tools 放查询、刷新和辅助入口，不占主操作位。
  * note 是可按需查看的详细口径，不让长规则文字与主操作争夺层级。
  * 只有 `type="info"` 的口径说明适合放进来——系统限制类的 warning（例如"电子合同尚未
  * 接入"）必须常显，藏起来会让人误以为功能已经完整。
  */
-export function PageHeader({ title, description, summary, view, extra, note }: {
+export function PageHeader({ title, description, summary, view, extra, navigation, tools, toolsPlacement = "context", note }: {
   title: string;
   description?: string;
   /** Current filtered facts in one compact content line. */
   summary?: ReactNode;
   view?: ReactNode;
   extra?: ReactNode;
+  /** Back/parent navigation remains at the start of the content, outside primary actions. */
+  navigation?: ReactNode;
+  /** Contextual tools remain with the page's query/view row, below global utilities. */
+  tools?: ReactNode;
+  /** Only query/navigation-only views share a row; full forms keep their full width. */
+  toolsPlacement?: "context" | "view";
   note?: { title: string; description: ReactNode };
 }) {
   const location = useLocation();
@@ -38,6 +44,11 @@ export function PageHeader({ title, description, summary, view, extra, note }: {
   const translatedDescription = description ? t(description) : undefined;
   const translatedNoteTitle = note ? t(note.title) : undefined;
   const translatedNoteDescription = note && typeof note.description === "string" ? t(note.description) : note?.description;
+  const contentTools = tools && <div className="page-context-tools" role="group" aria-label={`${translatedTitle} · ${t("页面操作")}`}>{tools}</div>;
+  const toolsWithView = Boolean(view && toolsPlacement === "view");
+  const contentView = view && <div className="page-toolbar-view">{toolsWithView && tools
+    ? <div className="page-content-toolbar"><div className="page-content-controls">{view}</div>{contentTools}</div>
+    : view}</div>;
 
   useEffect(() => {
     document.title = `${translatedTitle} · ${brandName}`;
@@ -51,12 +62,14 @@ export function PageHeader({ title, description, summary, view, extra, note }: {
       </InfoPopover>}
     </WorkspacePageTitle>
     <WorkspacePageActions label={`${translatedTitle} · ${t("页面操作")}`}>{extra}</WorkspacePageActions>
-    {(translatedDescription || summary || view) && <div className="page-header page-header-compact">
-      {(translatedDescription || summary) && <div className="page-context-row">
+    {(translatedDescription || summary || view || tools || navigation) && <div className="page-header page-header-compact">
+      {(translatedDescription || summary || navigation || tools && !toolsWithView) && <div className="page-context-row">
+        {navigation && <div className="page-context-navigation">{navigation}</div>}
         {translatedDescription && <p className="page-context" role="note">{translatedDescription}</p>}
         {summary && <div className="page-summary">{summary}</div>}
+        {!toolsWithView && contentTools}
       </div>}
-      {view && <div className="page-toolbar-view">{view}</div>}
+      {contentView}
     </div>}
   </>;
 
@@ -83,8 +96,11 @@ export function PageHeader({ title, description, summary, view, extra, note }: {
         {extra && <Space className="page-toolbar-actions" wrap>{extra}</Space>}
       </div>
       {/* view 也可能承载完整的 Tab 面板/表单，保持块流；控件组自己负责内部排布。
-          标题行只保留导出、新增等页面动作，不为副标题或空插槽预留高度。 */}
-      {view && <div className="page-toolbar-view">{view}</div>}
+          标题行只保留当前任务的主要动作，不为副标题或空插槽预留高度。 */}
+      {(navigation || tools && !toolsWithView) && <div className="page-context-row">
+        {navigation && <div className="page-context-navigation">{navigation}</div>}{!toolsWithView && contentTools}
+      </div>}
+      {contentView}
     </div>
   );
 }

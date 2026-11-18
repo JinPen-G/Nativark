@@ -67,10 +67,8 @@ function DesktopBusinessPolicyEditor({ identity }: { identity: string }) {
           <DataTableStatus variant="soft" tone={!configured?.enabled ? 'neutral' : expired ? 'warning' : 'success'}>{t(policyLabel)}</DataTableStatus>
           {configured && <span>{t('授权到期时间')} · {dayjs(configured.expiresAt).format('YYYY-MM-DD HH:mm')}</span>}
         </div>}
-        extra={<div className={styles.actions}>
-          <ActionButton variant="secondary" label={t('刷新授权设置')} successLabel={t('已刷新')} disabled={state.busy} onAction={() => session.load()} />
-          <SaveButton form={form} label={t('保存授权设置')} pending={state.busy && Boolean(state.pending)} disabled={blocked} onSave={save} />
-        </div>} />
+        tools={<ActionButton variant="secondary" label={t('刷新授权设置')} successLabel={t('已刷新')} disabled={state.busy} onAction={() => session.load()} />}
+        extra={<SaveButton form={form} label={t('保存授权设置')} pending={state.busy && Boolean(state.pending)} disabled={blocked} onSave={save} />} />
     </div>
     <section className={styles.stack} aria-label={t('桌面客户端数据访问')} aria-busy={state.busy}>
       {state.feedback !== 'idle' && <Alert type={state.feedback === 'saved' || state.feedback === 'recorded' ? 'success' : 'warning'} title={t(messages[state.feedback])} />}

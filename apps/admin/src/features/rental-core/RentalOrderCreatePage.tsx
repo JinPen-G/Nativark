@@ -194,7 +194,7 @@ export function RentalOrderCreatePage() {
 
   if (created) {
     return <>
-      <PageHeader title={t("新建租赁订单")} extra={<Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/rental/orders")}>{t("返回订单")}</Button>} />
+      <PageHeader title={t("新建租赁订单")} navigation={<Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate("/rental/orders")}>{t("返回订单")}</Button>} />
       <Card className="data-panel">
         <Result
           status="success"
@@ -514,7 +514,7 @@ export function RentalOrderCreatePage() {
   return <>
     <PageHeader
       title={t("新建租赁订单")}
-      extra={<Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/rental/orders")}>{t("返回订单")}</Button>}
+      navigation={<Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate("/rental/orders")}>{t("返回订单")}</Button>}
     />
     <Tabs activeKey={submissionMode} destroyOnHidden={false} onChange={setSubmissionMode} items={[
       { key: "ordinary", label: locale === "en-US" ? "Ordinary order" : "常规订单", children: ordinaryForm,

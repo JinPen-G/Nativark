@@ -107,7 +107,7 @@ function MembershipRewardsWorkspace({ scope }: { scope: string }) {
       <PageHeader
         title={t("会员激励")}
         description={t("人工补发仅用于补偿；营销余额不是支付资金。")}
-        extra={<Button type="primary" icon={<Plus />} disabled={!canSeeRewards} onClick={() => setRewardOpen(true)}>{t("补发奖励")}</Button>}
+        tools={<Button icon={<Plus />} disabled={!canSeeRewards} onClick={() => setRewardOpen(true)}>{t("补发奖励")}</Button>}
       />
         <Tabs activeKey={view} onChange={setView} aria-label={t("会员激励")} items={[
         { key: "accounts", label: t("客户权益账户"), children:

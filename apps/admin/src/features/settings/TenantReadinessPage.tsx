@@ -42,8 +42,7 @@ export function TenantReadinessPage() {
     return (
       <PageHeader
         title={t("开业配置")}
-        view={<Alert type="error" showIcon title={t("数据暂不可用，请稍后重试")} />}
-        extra={<Button onClick={() => readiness.refetch()}>{t("重试")}</Button>}
+        view={<Alert type="error" showIcon title={t("数据暂不可用，请稍后重试")} action={<Button onClick={() => readiness.refetch()}>{t("重试")}</Button>} />}
       />
     );
   }

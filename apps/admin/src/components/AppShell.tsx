@@ -94,8 +94,8 @@ function ShellContents({ children }: { children: ReactNode }) {
     ...(detailRoute && current.route && detailRoute.path !== current.route.path ? [{ title: currentCrumb(detailRoute.label) }] : []),
   ];
 
-  return <BusinessShell fullWidth={tenantConsole} identity={JSON.stringify([user?.id, tenant?.tenantId, currentWorkspaceId])} selectedKey={selectedKey}
-    brand={<NativeWorkspaceSwitcher compact={tenantConsole} />} account={<NativeAccountMenu />}
+  return <BusinessShell fullWidth={tenantConsole} referenceSidebar identity={JSON.stringify([user?.id, tenant?.tenantId, currentWorkspaceId])} selectedKey={selectedKey}
+    brand={<NativeWorkspaceSwitcher compact />} account={<NativeAccountMenu />}
     navigation={({ query, onNavigate }) => aiMode ? <AiOperatorNavigation query={query} />
       : <NativeNavigation sections={sections} selectedKey={selectedKey} query={query} onNavigate={onNavigate} />}
     sidebarExtra={canUseOperator ? ({ resetSearch, onNavigate }) => <OperatorModeSwitch ai={aiMode} onChange={next => {

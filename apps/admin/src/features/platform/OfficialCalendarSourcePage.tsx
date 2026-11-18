@@ -113,8 +113,8 @@ export function OfficialCalendarSourcePage() {
           title: t("官方数据是公共基础来源，导入不会自动影响任何经营空间"),
           description: t("官方再次调整时请登记新的来源版本；已发布的空间日历、有效报价和订单继续指向它们各自引用的那一版，不会被静默覆盖。")
         }}
+        tools={<Button disabled={!sources.isSuccess} onClick={() => openVersion()}>{t("登记年度版本")}</Button>}
         extra={<div className={styles.controls}>
-          <Button disabled={!sources.isSuccess} onClick={() => openVersion()}>{t("登记年度版本")}</Button>
           <Button
             type="primary"
             onClick={() => {

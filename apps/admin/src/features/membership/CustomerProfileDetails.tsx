@@ -459,7 +459,8 @@ export function CustomerProfileDetails({ customerId, canManage, canView, canReve
   return <>
     <QueryState loading={overview.isLoading} error={overview.error} onRetry={canView ? () => overview.refetch({ throwOnError: true }) : undefined}>
       {current && current.profile.customerType !== "personal" ? <Alert type="warning" showIcon title={t("未找到个人会员资料")} /> : current && <RecordDetailLayout title={current.profile.name || t("个人会员资料")} onBack={onClose}
-        actions={<><Button type="primary" disabled={!editable} onClick={onEdit}>{t("编辑基础资料")}</Button>{actions}</>}
+        actions={<Button type="primary" disabled={!editable} onClick={onEdit}>{t("编辑基础资料")}</Button>}
+        secondaryActions={actions}
         status={<><DataTableStatus variant="soft" tone={(current.profile.membership?.status ?? current.profile.status) === "active" ? "success" : "neutral"}>{t(statusLabel[current.profile.membership?.status ?? current.profile.status] ?? current.profile.status)}</DataTableStatus><span>{t("个人会员")}</span>{current.profile.mergedIntoCustomerId && <Tag color="warning">{t("已合并")}</Tag>}</>}
         facts={[
           { key: "phone", label: "手机号", value: current.profile.phoneMasked || current.profile.phone || "—" },

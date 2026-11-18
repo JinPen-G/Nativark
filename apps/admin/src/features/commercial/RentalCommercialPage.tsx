@@ -385,9 +385,9 @@ function RentalCommercialWorkspace({ section, scope }: { section: RentalCommerci
       <PageHeader
         title={sectionTitle}
         description={section === "pricing" ? t("已有价格须通过调价计划变更。") : undefined}
+        tools={section === "pricing" && <Button icon={<HistoryOutlined />} onClick={() => setVersionsOpen(true)}>{t("价格版本")}</Button>}
         extra={
           <Space>
-            {section === "pricing" && <Button icon={<HistoryOutlined />} onClick={() => setVersionsOpen(true)}>{t("价格版本")}</Button>}
             {section === "pricing" ? (
               <Button type="primary" icon={<PlusOutlined />} disabled={adjustmentBusy || !priceMatrixReady || unpricedCount > 0 || !currentPriceVersion} onClick={openAdjustment}>{t("新增调价计划")}</Button>
             ) : <Button type="primary" icon={<PlusOutlined />} disabled={section === "services" && (serviceUnavailable || saveService.isPending)} onClick={() => section === "discounts" ? (DISCOUNT_PLAN_DEMO ? message.info(t("演示版：多规则编辑待后端接入，未保存任何内容")) : editDiscount()) : editService()}>{t(section === "discounts" ? "新增优惠方案" : "新增服务")}</Button>}

@@ -892,7 +892,7 @@ function RentalOrderDetailContent() {
   };
 
   return <TableRefreshProvider onRefresh={() => order.refetch()} busy={order.isFetching}>
-    <PageHeader title={detail?.orderNo ?? t("订单详情")} extra={<Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/rental/orders")}>{t("返回列表")}</Button>} />
+    <PageHeader title={detail?.orderNo ?? t("订单详情")} navigation={<Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate("/rental/orders")}>{t("返回列表")}</Button>} />
     <QueryState loading={order.isLoading} error={order.error}>{detail && <div className={detailStyles.stack}>
   <OrderDetailSummary order={detail} funding={!funding.isError && canViewFunding ? funding.data : undefined} fundingState={!canViewFunding ? "restricted" : funding.isError ? "error" : funding.data ? "ready" : "loading"} pickupLabel={profile.data?.terminology.pickupLabel} deliveryAddress={detail.deliveryAddressSnapshot ? ((() => {
             const address = revealedDeliveryAddress?.orderId === detail.id ? revealedDeliveryAddress.snapshot : detail.deliveryAddressSnapshot!;

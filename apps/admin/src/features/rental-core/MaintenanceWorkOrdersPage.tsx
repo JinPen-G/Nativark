@@ -245,14 +245,14 @@ export function MaintenanceWorkOrdersPage() {
     <PageHeader
       title={t("养护工单")}
       description={t("异常隔离须完成养护并通过验收后才能恢复库存。")}
-      extra={<Space wrap><ActionButton variant="secondary" label={t("刷新")} pending={workOrders.isFetching || dispositions.isFetching} onAction={() => Promise.all([workOrders.refetch({ throwOnError: true }), dispositions.refetch({ throwOnError: true }), assignees.refetch({ throwOnError: true })])} />{canManage && <Button type="primary" icon={<PlusOutlined />} disabled={run.isPending || Boolean(dialog) || dispositions.isLoading || dispositions.isError} onClick={() => openDialog("create")}>{t("新建工单")}</Button>}</Space>}
+      extra={canManage && mainView === "work" && <Button type="primary" icon={<PlusOutlined />} disabled={run.isPending || Boolean(dialog) || dispositions.isLoading || dispositions.isError} onClick={() => openDialog("create")}>{t("新建工单")}</Button>}
     />
       <div className={styles.viewBar}>
       <Tabs aria-label={t("工单与归还处置")} activeKey={mainView} onChange={setMainView} items={[{key:"work",label:<>{t("养护工单")} {workOrders.data && <AnimatedNumber value={workOrders.data.length}/>}</>},{key:"dispositions",label:<>{t("归还处置")} {dispositions.data && <AnimatedNumber value={dispositions.data.length}/>}</>}]}/>
-      {mainView === "work" && <Segmented iconOnly aria-label={t("工单视图")} value={workView} onChange={value=>setWorkView(String(value))} options={[
+      <Space><ActionButton variant="secondary" label={t("刷新")} pending={workOrders.isFetching || dispositions.isFetching} onAction={() => Promise.all([workOrders.refetch({ throwOnError: true }), dispositions.refetch({ throwOnError: true }), assignees.refetch({ throwOnError: true })])} />{mainView === "work" && <Segmented iconOnly aria-label={t("工单视图")} value={workView} onChange={value=>setWorkView(String(value))} options={[
         { value:"board", label:<span title={t("任务看板")} aria-label={t("任务看板")}><Columns3 size={16} aria-hidden /></span> },
         { value:"list", label:<span title={t("列表")} aria-label={t("列表")}><List size={16} aria-hidden /></span> },
-      ]}/>}
+      ]}/>}</Space>
       </div>
       <ContentTransition value={`${mainView}:${workView}`}>
       <div hidden={mainView!=="dispositions"}><QueryState loading={dispositions.isLoading} error={dispositions.error} onRetry={() => dispositions.refetch({ throwOnError: true })}><ListSection>
@@ -328,12 +328,14 @@ export function MaintenanceWorkOrdersPage() {
         { key: "quantity", label: "数量", value: activeWorkOrder.quantity },
         { key: "updated", label: "更新时间", value: dateTime(activeWorkOrder.updatedAt, locale) }
       ] : undefined}
-      actions={activeWorkOrder && <>
+      secondaryActions={activeWorkOrder && <>
         {canManage && ["pending", "in_progress"].includes(activeWorkOrder.status) && <Button disabled={run.isPending || Boolean(dialog) || workOrders.isError} onClick={() => openDialog("assign", activeWorkOrder)}>{t("派工")}</Button>}
+        {canManage && ["pending", "in_progress", "pending_review"].includes(activeWorkOrder.status) && <Button danger disabled={run.isPending || Boolean(dialog) || workOrders.isError} onClick={() => openDialog("cancel", activeWorkOrder)}>{t("取消工单")}</Button>}
+      </>}
+      actions={activeWorkOrder && <>
         {canManage && activeWorkOrder.status === "pending" && <ActionButton label={t("开始处理")} intent="play" disabled={Boolean(dialog) || workOrders.isError} pending={run.isPending} onAction={() => run.mutateAsync({ kind: "start", id: activeWorkOrder.id })} />}
         {canManage && activeWorkOrder.status === "in_progress" && <Button type="primary" disabled={run.isPending || Boolean(dialog) || workOrders.isError} onClick={() => openDialog("submit", activeWorkOrder)}>{t("提交验收")}</Button>}
         {canReview && activeWorkOrder.status === "pending_review" && <Button type="primary" disabled={run.isPending || Boolean(dialog) || workOrders.isError} onClick={() => openDialog("review", activeWorkOrder)}>{t("验收")}</Button>}
-        {canManage && ["pending", "in_progress", "pending_review"].includes(activeWorkOrder.status) && <Button danger disabled={run.isPending || Boolean(dialog) || workOrders.isError} onClick={() => openDialog("cancel", activeWorkOrder)}>{t("取消工单")}</Button>}
       </>}>
         {!activeWorkOrder ? <Alert type="warning" showIcon title={t("未找到养护工单")} /> : <Tabs aria-label={t("工单详情")} activeKey={detailTab} onChange={key => setSearchParams(key === "history" ? { tab: key } : {})} items={[
           { key: "detail", label: t("处理与验收"), children: <div className={recordStyles.stack}>

@@ -40,7 +40,7 @@ export function SubscriptionRequestDetailPage() {
   });
 
   return <PageHeader title="申请详情"
-    extra={<Button onClick={() => navigate(APP_ROUTES.subscription.path)}>{t("返回版本与订阅")}</Button>}
+    navigation={<Button type="text" onClick={() => navigate(APP_ROUTES.subscription.path)}>{t("返回版本与订阅")}</Button>}
     view={<QueryState loading={query.isLoading}>
       {query.error ? <Alert type="error" showIcon message={subscriptionError(query.error, t("申请详情加载失败"))} action={<Button onClick={() => query.refetch()}>{t("重试")}</Button>} />
         : !request ? <Empty scene="map" description={t("未找到当前租户的申请")} />

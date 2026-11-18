@@ -6,7 +6,7 @@
 - `NativeNavigation`：宿主给出的路由、短名称、分组与菜单搜索；`flat`沿企业原链接和图标，内联分组继续原动画。
 - `NativeContextSwitcher`：受控身份展示、已允许选项与原切换回调；宿主通过`brandUnframed`选择无底板品牌呈现，防止重复提交，失败恢复入口。
 - `NativeWorkspaceSwitcher`：营运宿主的既有品牌与空间切换命令，薄接共用身份视图；不改变权限或缓存边界。
-- `TenantSidebarHeader`：租户身份区对齐、Logo悬停展开入口及收起态菜单搜索；空间切换继续由原子组件执行。
+- `TenantSidebarHeader`：管理端共用身份区对齐、Logo悬停展开入口及收起态菜单搜索；租户空间切换继续由原子组件执行。
 - `NativeAccountMenuView`：共用NavUser布局、示例默认头像、浏览器主题/语言与宿主账号动作；不读取营运会话。
 - `NativeAccountMenu`：营运宿主按原权限传入订阅、设置及退出命令。
 - `animate-sidebar.css`：原主题与 Tailwind 类；构建适配将 reset、变量和 portal 限定在侧栏，正文为作用域边界。半透明浮层沿用原样式。
@@ -22,13 +22,19 @@
 
 ## 共用宿主入口
 
-`BusinessShell`沿当前管理主线提取，兼容企业固定`5b4398fa34ba0776e62aad5b8536dbbf1997bf5f`的品牌、账号、导航、时间及身份参数；只参考固定源码，没有覆盖企业工作树。`headerUtilities`接休息/通知/辅助面板，`headerTime`接第二行时间，页头Provider保留实际Form所属关系和当前页面标题。企业原`headerActions={<WorkspaceClock />}`自动归入时间行，其他操作仍在主按钮区。默认内容列使用同一圆角面板；`wrapContent`接完整页头/内容列，营运端交给原`CopilotLayout`保持340px独立侧板和原Sheet动效，共用框架不为客户端接入营运Copilot或休息权限。
+`BusinessShell`沿当前管理主线提取，兼容企业固定`5b4398fa34ba0776e62aad5b8536dbbf1997bf5f`的品牌、账号、导航、时间及身份参数；只参考固定源码，没有覆盖企业工作树。顶栏按时间→休息/通知→页面主操作→辅助面板开关排列；`headerTime`、`headerUtilities`、页头Provider的action目标和`headerPanelControl`分别承接这四种职责。企业原`headerActions={<WorkspaceClock />}`自动归入时间位置，其他操作仍在主按钮区。正文不足600px时操作自然换到下一行，面板开关保持右上角；52px首行与20/12px左右留白保持。默认内容列使用同一圆角面板；`wrapContent`接完整页头/内容列，营运端交给原`CopilotLayout`保持340px独立侧板和原Sheet动效，共用框架不为客户端接入营运Copilot或休息权限。
+
+`PageHeader.extra`只承接页面主要创建或保存；`navigation`在正文左侧承接返回，`tools`在正文上方右侧放刷新、核对及辅助设置，只有纯筛选/导航视图才用`toolsPlacement="view"`与视图同行。整份表单、资料主体不与工具挤进同一行。`RecordDetailLayout.actions`与`secondaryActions`沿同一规则区分主任务和资料辅助操作；分阶段履约、资金、发送、弹窗确认与局部保存留在各自内容附近。页头Provider继续保留原React/Form关系与可见页签作用域，不改验证、权限或命令语义。
+
+原站Support conversation、Product detail、Project board的主按钮实测32px，页签为40px轨道和32px内按钮。当前中文后台页面主操作采用36px，右上图标控件保持32px；普通Tabs/Segmented外高40px，列表图标切换及显式紧凑Segmented保持36px。只在设计token与适配CSS调整几何，原UIArc选择滑块、按钮和面板动效保持。
+
+顶栏休息入口与右侧面板开关使用Animate UI公开Coffee、PanelRightOpen/PanelRightClose原版动态图标；固定源码及哈希列于[图标来源](../ui/animated-icons/sources.json)，许可沿[保留许可](../ui/animated-icons/LICENSE.md)。完整按钮悬停或聚焦触发原动效，减少动态时保持静态；休息时长、通知、面板开关和业务保存仍使用各自原回调。
 
 `PageHeading`在共用外壳里将当前页名/操作送入页头，独立宿主保留原页头。自带面包屑的营运宿主用`headerTitleTarget={false}`及`WorkspaceBreadcrumbCurrent`，企业普通context默认追加当前标题。`identity`变化在绘制前取消原路由快照、释放inert与deadline，查询和客户授权仍由各宿主决定。共用文件与依赖经企业原tsconfig的固定入口覆盖在内存核验，不替代真实企业认证、浏览器或正式验收。
 
 ## 状态与交互
 
-Provider 使用公开的 `animateOnHover=false`，避免焦点/展开项与新悬停项争抢浮动高亮。`ADMIN_SIDEBAR_REFERENCE_MOTION` 保存实测的0.3秒、bounce=0弹簧；侧栏宽度与二级菜单高度共用该弹簧，文字按150ms、cubic-bezier(.22,1,.36,1)淡出，二级内容显式收组时沿原站200ms进入／140ms退出。NativeNavigation在侧栏收起时保留同一父级和二级节点，使一级菜单随二级高度连续补位，展开恢复原组状态；退出内容立即 inert、aria-hidden，150ms后隐藏可见性。参考动效由宿主负责时不叠加原 SidebarPrimitive.Highlight 的整栏 blur 动画，选中背景仍使用独立受控 Highlight；SaaS保留原默认路径。所有参考参数沿 useTempoTransition 与共享减少动态设置。
+Provider 使用公开的 `animateOnHover=false`，避免焦点/展开项与新悬停项争抢浮动高亮。`ADMIN_SIDEBAR_REFERENCE_MOTION` 保存实测的0.3秒、bounce=0弹簧；侧栏宽度与二级菜单高度共用该弹簧，文字按150ms、cubic-bezier(.22,1,.36,1)淡出，二级内容显式收组时沿原站200ms进入／140ms退出。NativeNavigation在侧栏收起时保留同一父级和二级节点，使一级菜单随二级高度连续补位，展开恢复原组状态；退出内容立即 inert、aria-hidden，150ms后隐藏可见性。参考动效由宿主负责时不叠加原 SidebarPrimitive.Highlight 的整栏 blur 动画，选中背景仍使用独立受控 Highlight。管理端租户与SaaS通过`BusinessShell.referenceSidebar`共用Logo槽展开、右侧收起和菜单搜索入口；SaaS保留240/48px栏宽、原外框与配色，身份顶行补偿其外框偏移后对齐52px正文页头。未启用此端口的共用消费者继续原默认入口。所有参考参数沿 useTempoTransition 与共享减少动态设置。
 
 当前路由以 `data-active` / `aria-current` 表达，租户控制台和Agent模式的菜单文字、图标、hover和选中态按UIArc Metrics Dashboard固定中性色在适配层接入，浮层同源；业务按钮和SaaS原主色保持独立。浅色外底为原foundation混合色、内容白色，深色外底19%/内容21.5% OKLCH。选中背景使用原 Animate UI `effects/highlight` 的受控 parent 模式，沿当前授权路由平滑移动，保留原生 highlight 弹簧与减少动态支持；hover/click 均关闭，悬停和焦点不改选中状态。当前分组关闭或侧栏收起时，背景移至所属分类；搜索无当前项时隐藏高亮。子项背景跟随原链接的 -1px 位移，避免错位。一级菜单高亮只测触发按钮这一行，不测包含二级菜单的整组li；该行随侧栏宽度收拢，租户收起完成后为40px宽、32px高的图标按钮。
 

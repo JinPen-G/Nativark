@@ -162,7 +162,8 @@ function PersonalMembershipWorkspace({ scope }: { scope: string }) {
     {!customerId && <>
     <PageHeader title={t("个人会员管理")} description={t("会员资料在租户内共享；状态变更影响全部空间。")}
       summary={<InsightMetrics items={[{ label: t("会员"), value: memberFilter.rows.length }, { label: t("待审核"), value: memberFilter.rows.filter(row => row.membershipStatus === "pending_activation").length }, { label: t("风险受限"), value: memberFilter.rows.filter(row => row.membershipStatus === "risk_restricted").length }]} />}
-      extra={<Space wrap><Button disabled={!canManage || settings.isPending || settings.isError} onClick={() => { setRegistrationMode(settings.data?.registrationMode); setRegistrationOpen(true); }}>{t("注册设置")}</Button><Button onClick={() => setDrawer("types")} disabled={!canManageTypes}>{t("当前空间证件类型")}</Button><Button type="primary" onClick={openCreate} disabled={!canManage}>{t("新增个人会员")}</Button></Space>} />
+      tools={<><Button disabled={!canManage || settings.isPending || settings.isError} onClick={() => { setRegistrationMode(settings.data?.registrationMode); setRegistrationOpen(true); }}>{t("注册设置")}</Button><Button onClick={() => setDrawer("types")} disabled={!canManageTypes}>{t("当前空间证件类型")}</Button></>}
+      extra={<Button type="primary" onClick={openCreate} disabled={!canManage}>{t("新增个人会员")}</Button>} />
     {settings.isError && <Alert type="warning" showIcon title={t("注册设置暂不可用，会员资料仍可查看")} action={<ActionButton variant="secondary" label={t("重试")} onAction={() => settings.refetch({ throwOnError: true })} />} />}
     <ListSection controls={<ListFilters filter={memberFilter} placeholder="姓名、邮箱或手机尾号" options={Object.entries(membershipLabel).map(([value, label]) => ({ value, label }))} />}><Table<PersonalMembershipMember> toolbarNote={false} emptyScene={memberFilter.keyword || memberFilter.status ? "search" : "empty"}
       importConfig={personalImport(t, refresh, !settings.isError && settings.data?.supportsOnlyNewImport === true)}

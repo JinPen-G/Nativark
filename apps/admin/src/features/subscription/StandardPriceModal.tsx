@@ -67,8 +67,8 @@ export function StandardPriceModal({ open, plan, current, onClose }: { open: boo
         <FormSection title={t("标准价格")}>
         <Form.Item name="published" label={t("已发布正式价格")} valuePropName="checked"><Switch /></Form.Item>
         <div hidden={!published}><Row gutter={16}>
-        <Col span={12}><Form.Item name="annualFee" label={t("标准年费")} rules={published ? [{ required: true, type: "number", min: 0.01, max: 9999999999.99 }] : []}><InputNumber min={0.01} max={9999999999.99} precision={2} style={{ width: "100%" }} /></Form.Item></Col>
-        <Col span={12}><Form.Item name="currency" label={t("币种")} rules={published ? [{ required: true, pattern: /^[A-Za-z]{3}$/, message: t("请填写三位币种代码") }] : []}><Input placeholder="CNY" maxLength={3} /></Form.Item></Col>
+        <Col xs={24} sm={12}><Form.Item name="annualFee" label={t("标准年费")} rules={published ? [{ required: true, type: "number", min: 0.01, max: 9999999999.99 }] : []}><InputNumber min={0.01} max={9999999999.99} precision={2} style={{ width: "100%" }} /></Form.Item></Col>
+        <Col xs={24} sm={12}><Form.Item name="currency" label={t("币种")} rules={published ? [{ required: true, pattern: /^[A-Za-z]{3}$/, message: t("请填写三位币种代码") }] : []}><Input placeholder="CNY" maxLength={3} /></Form.Item></Col>
         </Row><Form.Item name="taxInclusive" label={t("税口径")} rules={published ? [{ required: true }] : []}>
           <Select allowClear options={[{ value: true, label: t("含税") }, { value: false, label: t("未税") }]} />
         </Form.Item></div>
