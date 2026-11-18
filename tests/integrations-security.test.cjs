@@ -31,7 +31,10 @@ const guardSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "commo
 const filePermissionSource = guardSource.match(/if \(path\.startsWith\("\/files"\)\) \{[\s\S]*?\n  \}/u)?.[0] ?? "";
 const openapiSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "contracts", "openapi-document.ts"), "utf8");
 const integrationSource = fs.readFileSync(path.join(repo, "packages", "platform-server", "src", "modules", "integrations", "tenant-integration.service.ts"), "utf8");
-const integrationsServiceSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "modules", "integrations", "integrations.service.ts"), "utf8");
+const integrationsServiceSource = [
+  fs.readFileSync(path.join(repo, "apps", "api", "src", "modules", "integrations", "integrations.service.ts"), "utf8"),
+  fs.readFileSync(path.join(repo, "packages", "platform-server", "src", "modules", "files", "file-ledger.ts"), "utf8")
+].join("\n");
 
 assert.match(paymentSource, /decrypted\.mchid/);
 assert.match(paymentSource, /decrypted\.appid/);

@@ -11,6 +11,24 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-public-file-ledger-20261118"></a>
+
+## 公共文件台账与原集成委托（2026-11-18）
+
+dev1已明确停写并固定公共台账、原集成服务/仓储及原安全用例四路径，RD核定字节后登记同一 `/files` 出口并收口资料。固定父版9c5ddeef527cfff65fec715b494e73395ee10917已普通推送、真实远端回读一致；订单在制源码、其正式出口/导航及主按钮接线另片保留，不夹入本次文件阶段。
+
+[FileLedgerApplication](../../../packages/platform-server/src/modules/files/file-ledger.ts)持有原租户内文件列表、受保护投影与模拟元数据。真实业务权威通过当前范围键和filterReadable供给，存储等待后保留原复核；缺权威拒绝列表。原[IntegrationsService](../../../apps/api/src/modules/integrations/integrations.service.ts)委托同一实例，保留原模拟列表Map/初始数据和创建日志。原[仓储](../../../apps/api/src/modules/integrations/integrations.repository.ts)转接createSimulationFileAsset，当前租户、字段/默认/原标识、日志错误传播与原专用场景拒绝保持。公共模块没有Rental枚举，业务排除场景由宿主传入。
+
+模拟元数据继续在原应用入口拒绝生产模式，实际对象上传沿FileStorageApplication原键/冻结/激活链。日志失败不删除已经写入的原事实，不将模拟返回解释为对象已上传。公共元数据投影不返回storageKey/publicUrl；实名客户、承运空间/订单、知识及专用证据继续沿真实Rental/AI参加者裁定，台账登记不取得额外业务权限。
+
+作者报告公共台账、原完整文件生命周期、集成安全/内存隔离及原HTTP的SQL/内存创建/日志回调冒烟均通过，验证目录与Nest context已清理；本片复用这些已有行为证据，RD未重复整套用例。RD逐项核除台账外的32个服务方法、16个仓储方法及20个模块辅助函数正文，与固定父版相同；原安全用例97处assert调用保持97，只更新实际源码/参加者定位。
+
+RD补核公共 `/files` 正式出口类型。首轮进程39628退出1、九条TS6059均来自把公共合同源码映射到另一个包的rootDir内；没有改产品tsconfig或过滤诊断。随后沿原包配置先将公共合同声明生成到内存，再消费正式.d.ts：进程10068退出0、stderr空，合同10根204源/10声明，文件出口1根596源均0诊断。磁盘Client/dist/shim/临时文件输出0，此证据是SDK类型闭包，不能当作完整API或真实数据库运行。
+
+四份作者成果的固定SHA-256依次为：台账cf9a1acae032b8498d4a16fa1ac403dc84f94819a0bf2779dfceb6cf27f68c72；原服务1e1b09c6e9f991a1db3a2d7501065aa8f72b98ab3c26caf8a2d6e455316b7a75；原仓储672bbed2df03f8660976f61fcc0bbcb8b3fba8b9ea88efb91c00227a18c45324；安全用例f96a53c41e463059d047bdb4c27e740fecf8e330727efadecf93c2216ef235ff。路径顺序见上文与[原用例](../../../tests/integrations-security.test.cjs)，提交前再次核字节身份；Git固定成果作为原文，不另复制保全包。
+
+[文件接入说明](../../../packages/platform-server/src/modules/files/README.md#core-接入)、平台服务导读及API说明v1.25同步正式入口和模拟/真实边界。开发者提供实际存储、业务权威与日志回调即可复用列表，附件仍沿原三步接入。五份本片资料1244链接/167锚点0问题，四份作者成果提交前哈希再次一致；限定CRLF格式检查随精确提交执行。当前完整公共事件/作业与Rental标准装配尚未收口，本片未跨PCH-06下一档；真实HTTP/数据库/对象云、无Core实际运行和完整安装验收继续保留。新增永久测试脚本0，旧待清理残留沿原责任清单受阻，未创建新的依赖环境或业务服务。
+
 <a id="core-public-order-operation-boundary-20261118"></a>
 
 ## 公共原操作请求、引用与页头定位（2026-11-18）

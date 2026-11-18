@@ -17,3 +17,5 @@ export { FileStorageApplication } from "./file-storage.application";
 export type { FileStorageApplicationParticipants } from "./file-storage.application";
 export type { FileStorageApplicationTransaction } from "./file-storage.application-store";
 export type { FileStorageAuthority, FileStorageBinding, FileUploadAuthorityContext, FileAssetAuthorityContext, FileCompletionAuthorityContext } from "./file-storage-authority";
+export { FileLedgerApplication, createSimulationFileAsset } from "./file-ledger";
+export type { FileLedgerAuthority, FileLedgerStorage, FileLedgerParticipants, FileLedgerMetadataStore } from "./file-ledger";

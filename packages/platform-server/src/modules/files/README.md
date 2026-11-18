@@ -17,6 +17,7 @@
 | [按租户清理](file-cleanup.ts) | 原未完成过期、已完成暂存及待删除文件的原键处理，专用保留场景由宿主提供 |
 | [受保护下载](file-download.ts) | 实际业务 ACL、原绑定复核及成功审计完成后释放短时 GET 引用 |
 | [文件仓储](file-storage.repository.ts) | 原租户内元数据查询、原幂等键/会话 ID 读取、同事务建立文件及上传会话；原运行时与 IntegrationsRepository 委托 |
+| [公共文件台账](file-ledger.ts) | `FileLedgerApplication` 共用原列表过滤、租户模拟元数据和创建日志回调，业务可读范围由实际权威提供；原 IntegrationsService 委托 |
 | [私有存储端口](file-storage.store.ts) | 原 FileAsset 与 FileUploadSession 字段以及本片实际使用的表操作 |
 | [对象存储提供者](../integrations/object-storage.provider.service.ts) | 原 S3/OSS/COS 签名、受控出站请求与连接探针 |
 | [原冻结合同](../../../../platform-contracts/src/file-content-binding.ts) | 存储位置及已冻结字节指纹，原兼容入口继续消费同源合同 |
@@ -44,6 +45,10 @@ await files.downloadUrl(tenantId, fileAssetId, owner);
 `FileStorageApplicationParticipants`、`FileStorageApplicationTransaction`和各authority context从同一正式出口取得。需要主体锁的Core在参加者的`transaction`中先获取原主体lease，再执行公共应用回调；回调内才锁配置，提交前沿同一lease复验。文件会话、冻结、激活与领域绑定使用同一事务，不在配置锁之后反向获取主体锁。知识等专用来源按需提供原回执、受控字节和同事务激活参加者，unknown继续从所属原操作读取。
 
 每租户清理由`files.cleanup`提供，计时器和租户发现只在宿主登记一次。不同Core的专用保留场景必须由宿主按其实际规则明确供给。普通页面防重不替代原幂等键、文件事实CAS与服务端授权。
+
+需要文件目录时，从同一 `/files` 出口使用 `FileLedgerApplication`，给它提供 `storage`、实际 `authority`、存储模式和原创建日志回调，然后调用 `listFiles(query)`。当前租户从同一ALS读取，存储等待后复核权限范围；缺业务权威时拒绝读取。`excludedScene` 只供所属业务明确排除自己的专用来源，公共模块没有Rental场景枚举。
+
+`createFile` 与配套存储函数 `createSimulationFileAsset` 只登记原开发模拟元数据，不上传对象。普通Core附件使用前面的原键上传链；模拟创建在应用入口继续拒绝生产模式，日志失败向上返回并保留已经写入的原台账事实。列表和应用返回投影不包含存储键或公开地址。原[服务](../../../../../apps/api/src/modules/integrations/integrations.service.ts)与[存储](../../../../../apps/api/src/modules/integrations/integrations.repository.ts)继续在公共调用前处理Rental专用场景。
 
 ## 业务与字节边界
 

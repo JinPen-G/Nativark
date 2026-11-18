@@ -1,4 +1,5 @@
-import { FileStorageRepository, fileAssetSummary } from "@rental-os/platform-server/files";
+/** 原集成数据适配。文件列表和模拟登记复用公共台账存储，Rental专用场景保留原拒绝。 */
+import { FileStorageRepository, createSimulationFileAsset } from "@rental-os/platform-server/files";
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE } from "@rental-os/shared";
 import { Prisma } from "@prisma/client";
@@ -69,31 +70,7 @@ export class IntegrationsRepository {
     tenantId = requireRequestTenantId()
   ): Promise<FileAssetSummary> {
     if (input.uploadScene?.trim() === RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE) throw new BadRequestException("不能直接登记专用换货影像");
-    const fileId = `file_${cryptoRandomId()}`;
-    const fileExt = input.fileName.includes(".")
-      ? input.fileName.split(".").pop()
-      : undefined;
-    const row = await this.prisma.fileAsset.create({
-      data: {
-        id: fileId,
-        tenantId,
-        businessModule: input.businessModule,
-        businessType: input.businessType,
-        businessId: input.businessId,
-        fileName: input.fileName,
-        fileExt,
-        mimeType: input.mimeType,
-        sizeBytes: Math.max(0, Math.round(input.sizeBytes ?? 0)),
-        storageProvider: "local_mock",
-        storageKey: `mock/${tenantId}/${fileId}/${input.fileName}`,
-        publicUrl: `/api/files/${fileId}/download`,
-        checksum: `mock-sha256-${cryptoRandomId()}`,
-        uploadScene: input.uploadScene,
-        uploadedBy: input.uploadedBy,
-        metadata: (input.metadata ?? {}) as Prisma.InputJsonValue
-      }
-    });
-    return fileAssetSummary(row);
+    return createSimulationFileAsset(this.prisma, input, tenantId);
   }
 
   async listNotificationTemplates(

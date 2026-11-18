@@ -18,6 +18,7 @@
 | 字典与编号 | [模块及 API](src/modules/platform-tools/README.md)、[服务](src/modules/platform-tools/platform-tools.service.ts)、[生效配置仓储](src/modules/platform-tools/platform-tools.repository.ts)；当前租户维护、原格式及同事务取号，公共缺省为空 |
 | 文件存储与冻结 | [模块导读](src/modules/files/README.md)、[字节处理](src/modules/files/file-storage-primitives.ts)、[冻结内核](src/modules/files/file-content-freeze.ts)、[文件仓储](src/modules/files/file-storage.repository.ts)；原限长传输、元数据、上传会话和唯一冻结目标，业务 ACL 由所属 Core 提供 |
 | Core 文件应用 | [应用](src/modules/files/file-storage.application.ts)、[权威参加者](src/modules/files/file-storage-authority.ts)、[事务端口](src/modules/files/file-storage.application-store.ts)从 `/files` 提供；受控业务登记后调用同一原键/冻结/激活链 |
+| 公共文件台账 | [列表与模拟元数据](src/modules/files/file-ledger.ts)从 `/files` 提供，原IntegrationsService委托；当前租户、实际业务可读范围、等待后复核及原创建日志保持，实际上传仍走原键应用 |
 | 文件清理与下载 | [按租户清理](src/modules/files/file-cleanup.ts)、[受保护下载](src/modules/files/file-download.ts)；原完成暂存清理先记 unknown，失应答仅核原键；下载沿实际业务 ACL、原绑定复核与成功审计 |
 | 文件配置围栏 | [只读文件依赖](src/modules/files/file-integration-dependencies.ts) 从 `/file-integration-dependencies` 提供，原配置同事务读取文件、上传/冻结/清理收据，空 Core 目录不能代替依赖证据 |
 | 公共设置 | [租户外观](src/modules/client/tenant-appearance-profile.service.ts)、[本人外观](src/modules/client/account-appearance.service.ts)、[存储端口](src/modules/platform/platform-appearance-data-store.ts)；修订冲突、省略与清空沿原语义 |

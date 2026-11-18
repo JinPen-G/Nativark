@@ -1,6 +1,8 @@
+/** 原集成应用入口。文件台账委托公共应用，Rental场景沿实际业务权威裁定。 */
 import { BadRequestException, Injectable, NotFoundException, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "node:crypto";
+import { FileLedgerApplication } from "@rental-os/platform-server/files";
 import type {
   AdapterLogSummary,
   AsyncJobSummary,
@@ -29,13 +31,6 @@ import { RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE } from "@rental-os/shared";
 import { IntegrationsRepository } from "./integrations.repository";
 import { FileBusinessAccessService } from "../files/file-business-access.service";
 
-function safeFileAssetSummary(file: FileAssetSummary): FileAssetSummary {
-  const safe = { ...file };
-  delete safe.storageKey;
-  delete safe.publicUrl;
-  return safe;
-}
-
 @Injectable()
 export class IntegrationsService {
   private get defaultTenantId() {
@@ -46,7 +41,39 @@ export class IntegrationsService {
     private readonly configService: ConfigService,
     private readonly integrationsRepository: IntegrationsRepository,
     @Optional() private readonly fileAccess?: FileBusinessAccessService
-  ) {}
+  ) {
+    this.fileLedger = new FileLedgerApplication({
+      storage: integrationsRepository,
+      authority: fileAccess,
+      usePersistentStorage: () => this.useMysqlDataSource(),
+      initialFiles: this.files,
+      simulationFiles: this.filesByTenant,
+      excludedScene: RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE,
+      recordMetadataCreation: (input, created) => this.recordAdapterLog({
+        provider: "mock-file-storage-adapter",
+        capability: "file",
+        operation: "upload_metadata",
+        businessType: input.businessType,
+        businessId: input.businessId,
+        status: "mock_success",
+        requestJson: {
+          fileName: input.fileName,
+          mimeType: input.mimeType,
+          businessModule: input.businessModule,
+          businessType: input.businessType,
+          businessId: input.businessId,
+          storageProvider: "local_mock"
+        },
+        responseJson: {
+          externalCallSkipped: true,
+          fileId: created.id,
+          reference: "protected-file-reference"
+        }
+      })
+    });
+  }
+
+  private readonly fileLedger: FileLedgerApplication;
 
   private readonly files: FileAssetSummary[] = [
     {
@@ -243,81 +270,12 @@ export class IntegrationsService {
   }
 
   async listFiles(query: FileAssetQuery = {}) {
-    if (!this.fileAccess) throw new ServiceUnavailableException("文件业务读取权威未配置");
-    const tenantId = this.defaultTenantId;
-    if (this.useMysqlDataSource()) {
-      const key = this.fileAccess.authorityKey(tenantId);
-      const candidates = await this.integrationsRepository.listFiles(tenantId, query);
-      if (this.fileAccess.authorityKey(tenantId) !== key) throw new ServiceUnavailableException("文件读取期间授权范围已变化");
-      return this.fileAccess.filterReadable(tenantId, candidates);
-    }
-    const limit = Math.min(Math.max(Number(query.limit ?? 80), 1), 200);
-    const candidates = this.memoryFilesForTenant(tenantId)
-      .filter((file) => {
-        if (file.uploadScene === RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE) return false;
-        if (query.businessModule && file.businessModule !== query.businessModule) {
-          return false;
-        }
-        if (query.businessType && file.businessType !== query.businessType) {
-          return false;
-        }
-        if (query.businessId && file.businessId !== query.businessId) {
-          return false;
-        }
-        if (query.uploadScene && file.uploadScene !== query.uploadScene) {
-          return false;
-        }
-        if (query.status && file.status !== query.status) {
-          return false;
-        }
-        return true;
-      })
-      .slice(0, limit)
-      .map(safeFileAssetSummary);
-    return this.fileAccess.filterReadable(tenantId, candidates);
+    return this.fileLedger.listFiles(query);
   }
 
   async createFile(input: CreateFileAssetRequest) {
     if (input.uploadScene?.trim() === RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE) throw new BadRequestException("不能直接登记专用换货影像");
-    // 该接口只登记开发/演示用的模拟文件元数据，不是实际的对象存储上传。
-    // 生产环境禁止它生成 local_mock active 资产，避免未配置真实文件平台时
-    // 把“已生成元数据”误读成“文件已上传并可用”。真实业务必须走
-    // FileStorageRuntimeService 的上传会话、live 门禁和完成确认链。
-    if (process.env.NODE_ENV === "production") {
-      throw new ServiceUnavailableException("生产环境禁止创建模拟文件资产，请使用真实文件存储上传链");
-    }
-    validateRequired(input.businessModule, "业务模块不能为空");
-    validateRequired(input.businessType, "业务对象类型不能为空");
-    validateRequired(input.fileName, "文件名不能为空");
-    validateRequired(input.mimeType, "文件类型不能为空");
-
-    const created = this.useMysqlDataSource()
-      ? await this.integrationsRepository.createFile(input, this.defaultTenantId)
-      : this.createMemoryFile(input);
-
-    await this.recordAdapterLog({
-      provider: "mock-file-storage-adapter",
-      capability: "file",
-      operation: "upload_metadata",
-      businessType: input.businessType,
-      businessId: input.businessId,
-      status: "mock_success",
-      requestJson: {
-        fileName: input.fileName,
-        mimeType: input.mimeType,
-        businessModule: input.businessModule,
-        businessType: input.businessType,
-        businessId: input.businessId,
-        storageProvider: "local_mock"
-      },
-      responseJson: {
-        externalCallSkipped: true,
-        fileId: created.id,
-        reference: "protected-file-reference"
-      }
-    });
-
-    return safeFileAssetSummary(created);
+    return this.fileLedger.createFile(input);
   }
 
   async listNotificationTemplates() {
@@ -712,49 +670,6 @@ export class IntegrationsService {
     });
 
     return device;
-  }
-
-  private createMemoryFile(input: CreateFileAssetRequest) {
-    const tenantId = this.defaultTenantId;
-    const fileId = `file_${shortId()}`;
-    const fileExt = input.fileName.includes(".")
-      ? input.fileName.split(".").pop()
-      : undefined;
-    const row: FileAssetSummary = {
-      id: fileId,
-      businessModule: input.businessModule,
-      businessType: input.businessType,
-      businessId: input.businessId,
-      fileName: input.fileName,
-      fileExt,
-      mimeType: input.mimeType,
-      sizeBytes: Math.max(0, Math.round(input.sizeBytes ?? 0)),
-      storageProvider: "local_mock",
-      storageKey: `mock/${tenantId}/${fileId}/${input.fileName}`,
-      publicUrl: `/api/files/${fileId}/download`,
-      uploadScene: input.uploadScene,
-      status: "active",
-      uploadedBy: input.uploadedBy,
-      createdAt: new Date().toISOString()
-    };
-    this.memoryFilesForTenant(tenantId).unshift(row);
-    return row;
-  }
-
-  private memoryFilesForTenant(tenantId: string) {
-    const existing = this.filesByTenant.get(tenantId);
-    if (existing) return existing;
-    const seeded = this.files.map((file) => {
-      const id = `${file.id}_${tenantId}`;
-      return {
-        ...file,
-        id,
-        storageKey: (file.storageKey ?? `mock/${tenantId}/${id}`).replace(/^mock\/[^/]+/u, `mock/${tenantId}`),
-        publicUrl: `/api/files/${id}/download`
-      };
-    });
-    this.filesByTenant.set(tenantId, seeded);
-    return seeded;
   }
 
   private createMemoryNotificationLog(input: SendMockNotificationRequest) {
