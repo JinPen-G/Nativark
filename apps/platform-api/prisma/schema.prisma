@@ -70,6 +70,8 @@ model Tenant {
   subscriptionRequests              SubscriptionRequest[]
   subscriptionEvents                SubscriptionEvent[]
   adapterLogs                       ExternalAdapterLog[]
+  notificationTemplates             NotificationTemplate[]
+  notificationLogs                  NotificationSendLog[]
   integrationConfigs                TenantIntegrationConfig[]
   files                             FileAsset[]
   fileUploadSessions                FileUploadSession[]
@@ -681,6 +683,48 @@ model TenantIntegrationConfig {
   @@unique([tenantId, capability, provider], map: "tenant_integration_configs_scope_provider_key")
   @@index([tenantId, capability, enabled], map: "tenant_integration_configs_scope_capability_idx")
   @@map("tenant_integration_configs")
+}
+
+// 通知内容由所属宿主提供；公共台账保留原字段、租户范围和历史标识。
+model NotificationTemplate {
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  code      String
+  name      String
+  category  String
+  trigger   String
+  channels  Json
+  content   String
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, code])
+  @@index([tenantId, category, enabled])
+}
+
+model NotificationSendLog {
+  id           String    @id @default(uuid())
+  tenantId     String
+  tenant       Tenant    @relation(fields: [tenantId], references: [id])
+  templateCode String?
+  businessType String
+  businessId   String?
+  targetType   String
+  targetName   String?
+  targetMasked String?
+  channels     Json
+  provider     String    @default("mock")
+  status       String
+  requestJson  Json
+  responseJson Json?
+  sentAt       DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([tenantId, businessType, businessId])
+  @@index([tenantId, templateCode, createdAt])
+  @@index([tenantId, status, createdAt])
 }
 
 model ExternalAdapterLog {

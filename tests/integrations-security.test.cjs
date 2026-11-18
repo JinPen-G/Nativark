@@ -33,7 +33,8 @@ const openapiSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "con
 const integrationSource = fs.readFileSync(path.join(repo, "packages", "platform-server", "src", "modules", "integrations", "tenant-integration.service.ts"), "utf8");
 const integrationsServiceSource = [
   fs.readFileSync(path.join(repo, "apps", "api", "src", "modules", "integrations", "integrations.service.ts"), "utf8"),
-  fs.readFileSync(path.join(repo, "packages", "platform-server", "src", "modules", "files", "file-ledger.ts"), "utf8")
+  fs.readFileSync(path.join(repo, "packages", "platform-server", "src", "modules", "files", "file-ledger.ts"), "utf8"),
+  fs.readFileSync(path.join(repo, "packages", "platform-server", "src", "modules", "notifications", "notification-ledger.ts"), "utf8")
 ].join("\n");
 
 assert.match(paymentSource, /decrypted\.mchid/);

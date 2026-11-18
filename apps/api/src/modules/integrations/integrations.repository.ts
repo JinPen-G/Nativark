@@ -1,6 +1,8 @@
-/** 原集成数据适配。文件列表和模拟登记复用公共台账存储，Rental专用场景保留原拒绝。 */
+/** 原集成数据适配。文件、通知及适配日志消费公共存储，Rental默认内容和专用场景由原宿主裁定。 */
 import { FileStorageRepository, createSimulationFileAsset } from "@rental-os/platform-server/files";
+import { NotificationLedgerRepository } from "@rental-os/platform-server/notifications";
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { createHash } from "node:crypto";
 import { RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE } from "@rental-os/shared";
 import { Prisma } from "@prisma/client";
 import type {
@@ -24,41 +26,17 @@ import { PrismaService } from "../database/prisma.service";
 @Injectable()
 export class IntegrationsRepository {
   private readonly files: FileStorageRepository;
-  constructor(private readonly prisma: PrismaService) { this.files = new FileStorageRepository(prisma); }
+  private readonly notifications: NotificationLedgerRepository;
+  constructor(private readonly prisma: PrismaService) {
+    this.files = new FileStorageRepository(prisma);
+    this.notifications = new NotificationLedgerRepository(prisma, {
+      defaultTemplates: defaultNotificationTemplates,
+      defaultOperator: "营运端"
+    });
+  }
 
   async ensureDefaultNotificationTemplates(tenantId = requireRequestTenantId()) {
-    const templates = defaultNotificationTemplates();
-    await Promise.all(
-      templates.map((template) =>
-        this.prisma.notificationTemplate.upsert({
-          where: {
-            tenantId_code: {
-              tenantId,
-              code: template.code
-            }
-          },
-          update: {
-            name: template.name,
-            category: template.category,
-            trigger: template.trigger,
-            channels: template.channels as Prisma.InputJsonValue,
-            content: template.content,
-            enabled: template.enabled
-          },
-          create: {
-            id: template.id,
-            tenantId,
-            code: template.code,
-            name: template.name,
-            category: template.category,
-            trigger: template.trigger,
-            channels: template.channels as Prisma.InputJsonValue,
-            content: template.content,
-            enabled: template.enabled
-          }
-        })
-      )
-    );
+    return this.notifications.ensureDefaultNotificationTemplates(tenantId);
   }
 
   async listFiles(tenantId = requireRequestTenantId(), query: FileAssetQuery = {}): Promise<FileAssetSummary[]> {
@@ -73,92 +51,24 @@ export class IntegrationsRepository {
     return createSimulationFileAsset(this.prisma, input, tenantId);
   }
 
-  async listNotificationTemplates(
-    tenantId = requireRequestTenantId()
-  ): Promise<NotificationTemplateSummary[]> {
-    await this.ensureDefaultNotificationTemplates(tenantId);
-    const rows = await this.prisma.notificationTemplate.findMany({
-      where: { tenantId },
-      orderBy: [{ category: "asc" }, { code: "asc" }]
-    });
-    return rows.map(toNotificationTemplateSummary);
+  async listNotificationTemplates(tenantId = requireRequestTenantId()): Promise<NotificationTemplateSummary[]> {
+    return this.notifications.listNotificationTemplates(tenantId);
   }
 
-  async listNotificationLogs(
-    tenantId = requireRequestTenantId()
-  ): Promise<NotificationSendLogSummary[]> {
-    const rows = await this.prisma.notificationSendLog.findMany({
-      where: { tenantId },
-      orderBy: { createdAt: "desc" },
-      take: 80
-    });
-    return rows.map(toNotificationLogSummary);
+  async listNotificationLogs(tenantId = requireRequestTenantId()): Promise<NotificationSendLogSummary[]> {
+    return this.notifications.listNotificationLogs(tenantId);
   }
 
-  async recordNotification(
-    input: SendMockNotificationRequest,
-    tenantId = requireRequestTenantId()
-  ): Promise<NotificationSendLogSummary> {
-    const now = new Date();
-    const row = await this.prisma.notificationSendLog.create({
-      data: {
-        id: `notify_${cryptoRandomId()}`,
-        tenantId,
-        templateCode: input.templateCode,
-        businessType: input.businessType,
-        businessId: input.businessId,
-        targetType: input.targetType,
-        targetName: input.targetName,
-        targetMasked: input.targetMasked,
-        channels: input.channels as Prisma.InputJsonValue,
-        provider: "mock-notification-adapter",
-        status: "mock_success",
-        requestJson: {
-          templateCode: input.templateCode,
-          variables: input.variables ?? {},
-          operator: input.operator ?? "营运端"
-        },
-        responseJson: {
-          externalCallSkipped: true,
-          message: "MVP 阶段未调用真实短信、邮件或 APP 推送。"
-        },
-        sentAt: now
-      }
-    });
-    return toNotificationLogSummary(row);
+  async recordNotification(input: SendMockNotificationRequest, tenantId = requireRequestTenantId()): Promise<NotificationSendLogSummary> {
+    return this.notifications.recordNotification(input, tenantId);
   }
 
-  async listAdapterLogs(
-    tenantId = requireRequestTenantId()
-  ): Promise<AdapterLogSummary[]> {
-    const rows = await this.prisma.externalAdapterLog.findMany({
-      where: { tenantId },
-      orderBy: { createdAt: "desc" },
-      take: 120
-    });
-    return rows.map(toAdapterLogSummary);
+  async listAdapterLogs(tenantId = requireRequestTenantId()): Promise<AdapterLogSummary[]> {
+    return this.notifications.listAdapterLogs(tenantId);
   }
 
-  async recordAdapterLog(
-    input: Omit<AdapterLogSummary, "id" | "createdAt">,
-    tenantId = requireRequestTenantId()
-  ): Promise<AdapterLogSummary> {
-    const row = await this.prisma.externalAdapterLog.create({
-      data: {
-        id: `adapter_${cryptoRandomId()}`,
-        tenantId,
-        provider: input.provider,
-        capability: input.capability,
-        operation: input.operation,
-        businessType: input.businessType,
-        businessId: input.businessId,
-        status: input.status,
-        requestJson: input.requestJson as Prisma.InputJsonValue,
-        responseJson: input.responseJson as Prisma.InputJsonValue | undefined,
-        errorMessage: input.errorMessage
-      }
-    });
-    return toAdapterLogSummary(row);
+  async recordAdapterLog(input: Omit<AdapterLogSummary, "id" | "createdAt">, tenantId = requireRequestTenantId()): Promise<AdapterLogSummary> {
+    return this.notifications.recordAdapterLog(input, tenantId);
   }
 
   async listJobs(tenantId = requireRequestTenantId()): Promise<AsyncJobSummary[]> {
@@ -327,11 +237,13 @@ export class IntegrationsRepository {
   }
 }
 
-function defaultNotificationTemplates(): NotificationTemplateSummary[] {
+function defaultNotificationTemplates(tenantId: string): NotificationTemplateSummary[] {
   const now = new Date().toISOString();
+  // 新模板按租户派生主键。更新通过 tenantId/code 定位已有模板，避免多个租户初始化时争用全局固定 ID。
+  const tenantSuffix = createHash("sha256").update(tenantId).digest("hex");
   return [
     {
-      id: "tpl_order_confirmed",
+      id: `tpl_order_confirmed_${tenantSuffix}`,
       code: "order_confirmed",
       name: "订单已确认",
       category: "订单",
@@ -342,7 +254,7 @@ function defaultNotificationTemplates(): NotificationTemplateSummary[] {
       updatedAt: now
     },
     {
-      id: "tpl_post_charge_notice",
+      id: `tpl_post_charge_notice_${tenantSuffix}`,
       code: "post_charge_notice",
       name: "完成后追缴通知",
       category: "订单",
@@ -353,7 +265,7 @@ function defaultNotificationTemplates(): NotificationTemplateSummary[] {
       updatedAt: now
     },
     {
-      id: "tpl_contract_signature",
+      id: `tpl_contract_signature_${tenantSuffix}`,
       code: "contract_signature",
       name: "租赁合约签署",
       category: "合同",
@@ -364,61 +276,6 @@ function defaultNotificationTemplates(): NotificationTemplateSummary[] {
       updatedAt: now
     }
   ];
-}
-
-function toNotificationTemplateSummary(
-  row: Prisma.NotificationTemplateGetPayload<Record<string, never>>
-): NotificationTemplateSummary {
-  return {
-    id: row.id,
-    code: row.code,
-    name: row.name,
-    category: row.category,
-    trigger: row.trigger,
-    channels: stringArray(row.channels),
-    content: row.content,
-    enabled: row.enabled,
-    updatedAt: row.updatedAt.toISOString()
-  };
-}
-
-function toNotificationLogSummary(
-  row: Prisma.NotificationSendLogGetPayload<Record<string, never>>
-): NotificationSendLogSummary {
-  return {
-    id: row.id,
-    templateCode: row.templateCode ?? undefined,
-    businessType: row.businessType,
-    businessId: row.businessId ?? undefined,
-    targetType: row.targetType,
-    targetName: row.targetName ?? undefined,
-    targetMasked: row.targetMasked ?? undefined,
-    channels: stringArray(row.channels),
-    provider: row.provider,
-    status: row.status,
-    sentAt: row.sentAt?.toISOString(),
-    createdAt: row.createdAt.toISOString(),
-    requestJson: recordValue(row.requestJson),
-    responseJson: row.responseJson ? recordValue(row.responseJson) : undefined
-  };
-}
-
-function toAdapterLogSummary(
-  row: Prisma.ExternalAdapterLogGetPayload<Record<string, never>>
-): AdapterLogSummary {
-  return {
-    id: row.id,
-    provider: row.provider,
-    capability: row.capability,
-    operation: row.operation,
-    businessType: row.businessType ?? undefined,
-    businessId: row.businessId ?? undefined,
-    status: row.status,
-    requestJson: recordValue(row.requestJson),
-    responseJson: row.responseJson ? recordValue(row.responseJson) : undefined,
-    errorMessage: row.errorMessage ?? undefined,
-    createdAt: row.createdAt.toISOString()
-  };
 }
 
 function toAsyncJobSummary(
@@ -491,12 +348,6 @@ function recordValue(value: Prisma.JsonValue): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
-}
-
-function stringArray(value: Prisma.JsonValue): string[] {
-  return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === "string")
-    : [];
 }
 
 function cryptoRandomId() {

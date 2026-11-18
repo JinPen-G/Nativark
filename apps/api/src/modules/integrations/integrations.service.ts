@@ -1,8 +1,9 @@
-/** 原集成应用入口。文件台账委托公共应用，Rental场景沿实际业务权威裁定。 */
+/** 原集成应用入口。文件、通知及适配日志委托公共台账，Rental列表ACL和默认消息由原参加者供给。 */
 import { BadRequestException, Injectable, NotFoundException, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "node:crypto";
 import { FileLedgerApplication } from "@rental-os/platform-server/files";
+import { NotificationLedgerApplication } from "@rental-os/platform-server/notifications";
 import type {
   AdapterLogSummary,
   AsyncJobSummary,
@@ -42,6 +43,16 @@ export class IntegrationsService {
     private readonly integrationsRepository: IntegrationsRepository,
     @Optional() private readonly fileAccess?: FileBusinessAccessService
   ) {
+    this.notificationLedger = new NotificationLedgerApplication({
+      storage: integrationsRepository,
+      usePersistentStorage: () => this.useMysqlDataSource(),
+      defaultOperator: "营运端",
+      initialTemplates: this.notificationTemplates,
+      initialNotificationLogs: this.notificationLogs,
+      initialAdapterLogs: this.adapterLogs,
+      notificationLogsByTenant: this.notificationLogsByTenant,
+      adapterLogsByTenant: this.adapterLogsByTenant
+    });
     this.fileLedger = new FileLedgerApplication({
       storage: integrationsRepository,
       authority: fileAccess,
@@ -74,6 +85,7 @@ export class IntegrationsService {
   }
 
   private readonly fileLedger: FileLedgerApplication;
+  private readonly notificationLedger: NotificationLedgerApplication;
 
   private readonly files: FileAssetSummary[] = [
     {
@@ -279,60 +291,19 @@ export class IntegrationsService {
   }
 
   async listNotificationTemplates() {
-    if (this.useMysqlDataSource()) {
-      return this.integrationsRepository.listNotificationTemplates(this.defaultTenantId);
-    }
-    return [...this.notificationTemplates];
+    return this.notificationLedger.listNotificationTemplates();
   }
 
   async listNotificationLogs() {
-    if (this.useMysqlDataSource()) {
-      return this.integrationsRepository.listNotificationLogs(this.defaultTenantId);
-    }
-    return [...this.memoryNotificationLogsForTenant(this.defaultTenantId)];
+    return this.notificationLedger.listNotificationLogs();
   }
 
   async sendNotification(input: SendMockNotificationRequest) {
-    if (!input.channels?.length) {
-      throw new BadRequestException("至少选择一个通知渠道");
-    }
-    if (process.env.NODE_ENV === "production" && input.channels.some((channel) => String(channel).toUpperCase() === "SMS")) {
-      throw new ServiceUnavailableException("生产环境禁止通过模拟入口记录短信发送，请使用已验证的租户短信平台");
-    }
-    validateRequired(input.businessType, "业务对象类型不能为空");
-
-    const log = this.useMysqlDataSource()
-      ? await this.integrationsRepository.recordNotification(input, this.defaultTenantId)
-      : this.createMemoryNotificationLog(input);
-
-    await this.recordAdapterLog({
-      provider: "mock-notification-adapter",
-      capability: inferNotificationCapability(input.channels),
-      operation: "send_notification",
-      businessType: input.businessType,
-      businessId: input.businessId,
-      status: "mock_success",
-      requestJson: {
-        templateCode: input.templateCode,
-        channels: input.channels,
-        targetMasked: input.targetMasked,
-        variables: input.variables ?? {}
-      },
-      responseJson: {
-        externalCallSkipped: true,
-        notificationLogId: log.id,
-        message: "MVP 阶段未调用真实短信、邮件或 APP 推送。"
-      }
-    });
-
-    return log;
+    return this.notificationLedger.sendMockNotification(input);
   }
 
   async listAdapterLogs() {
-    if (this.useMysqlDataSource()) {
-      return this.integrationsRepository.listAdapterLogs(this.defaultTenantId);
-    }
-    return [...this.memoryAdapterLogsForTenant(this.defaultTenantId)];
+    return this.notificationLedger.listAdapterLogs();
   }
 
   async invokeMockAdapter(input: InvokeMockAdapterRequest) {
@@ -363,17 +334,7 @@ export class IntegrationsService {
   }
 
   async recordAdapterLog(input: Omit<AdapterLogSummary, "id" | "createdAt">) {
-    if (this.useMysqlDataSource()) {
-      return this.integrationsRepository.recordAdapterLog(input, this.defaultTenantId);
-    }
-
-    const row: AdapterLogSummary = {
-      id: `adapter_${shortId()}`,
-      createdAt: new Date().toISOString(),
-      ...input
-    };
-    this.memoryAdapterLogsForTenant(this.defaultTenantId).unshift(row);
-    return row;
+    return this.notificationLedger.recordAdapterLog(input);
   }
 
   async listJobs() {
@@ -672,36 +633,6 @@ export class IntegrationsService {
     return device;
   }
 
-  private createMemoryNotificationLog(input: SendMockNotificationRequest) {
-    const tenantId = this.defaultTenantId;
-    const now = new Date().toISOString();
-    const row: NotificationSendLogSummary = {
-      id: `notify_${shortId()}`,
-      templateCode: input.templateCode,
-      businessType: input.businessType,
-      businessId: input.businessId,
-      targetType: input.targetType,
-      targetName: input.targetName,
-      targetMasked: input.targetMasked,
-      channels: input.channels,
-      provider: "mock-notification-adapter",
-      status: "mock_success",
-      sentAt: now,
-      createdAt: now,
-      requestJson: {
-        templateCode: input.templateCode,
-        variables: input.variables ?? {},
-        operator: input.operator ?? "营运端"
-      },
-      responseJson: {
-        externalCallSkipped: true,
-        message: "MVP 阶段未调用真实短信、邮件或 APP 推送。"
-      }
-    };
-    this.memoryNotificationLogsForTenant(tenantId).unshift(row);
-    return row;
-  }
-
   private createMemoryJob(input: CreateAsyncJobRequest) {
     const tenantId = this.defaultTenantId;
     const now = new Date().toISOString();
@@ -802,28 +733,6 @@ export class IntegrationsService {
     device.lastHeartbeatAt = input.plateNo ? new Date().toISOString() : device.lastHeartbeatAt;
     device.updatedAt = new Date().toISOString();
     return device;
-  }
-
-  private memoryNotificationLogsForTenant(tenantId: string) {
-    const existing = this.notificationLogsByTenant.get(tenantId);
-    if (existing) return existing;
-    const seeded = this.notificationLogs.map((item) => ({
-      ...item,
-      id: `${item.id}_${tenantId}`
-    }));
-    this.notificationLogsByTenant.set(tenantId, seeded);
-    return seeded;
-  }
-
-  private memoryAdapterLogsForTenant(tenantId: string) {
-    const existing = this.adapterLogsByTenant.get(tenantId);
-    if (existing) return existing;
-    const seeded = this.adapterLogs.map((item) => ({
-      ...item,
-      id: `${item.id}_${tenantId}`
-    }));
-    this.adapterLogsByTenant.set(tenantId, seeded);
-    return seeded;
   }
 
   private memoryJobsForTenant(tenantId: string) {
@@ -1221,18 +1130,6 @@ function buildCapabilityCards(input: {
       totalLogs: relatedLogs.length + extraCount
     };
   });
-}
-
-function inferNotificationCapability(
-  channels: Array<"APP" | "SMS" | "EMAIL" | string>
-): InfraAdapterCapability {
-  if (channels.includes("SMS")) {
-    return "sms";
-  }
-  if (channels.includes("EMAIL")) {
-    return "email";
-  }
-  return "app_push";
 }
 
 function validateRequired(value: unknown, message: string) {

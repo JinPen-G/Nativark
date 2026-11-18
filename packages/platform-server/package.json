@@ -274,6 +274,10 @@
     "./integration-wechat": {
       "types": "./dist/modules/integrations/wechat-mini-program.adapter.d.ts",
       "default": "./dist/modules/integrations/wechat-mini-program.adapter.js"
+    },
+    "./notifications": {
+      "types": "./dist/modules/notifications/notification-ledger.d.ts",
+      "default": "./dist/modules/notifications/notification-ledger.js"
     }
   },
   "scripts": {
@@ -495,6 +499,9 @@
       ],
       "integration-wechat": [
         "dist/modules/integrations/wechat-mini-program.adapter.d.ts"
+      ],
+      "notifications": [
+        "dist/modules/notifications/notification-ledger.d.ts"
       ]
     }
   }

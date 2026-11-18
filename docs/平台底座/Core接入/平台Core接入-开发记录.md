@@ -11,6 +11,28 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-public-notification-ledger-20261118"></a>
+
+## 公共通知台账与独立数据归属（2026-11-18）
+
+固定父版31e72e0811ac290e8b223a4a04788da9983d93e1已普通推送并实际远端回读。dev1通知五路径已停写，RD核固定字节、公共出口和数据归属后收口；dev2订单页面与RD订单装配在制差异保留，未夹入本片。协作消息接口在参数校验处失败，未获得消息送达证据；其他聊天的模型/推理设置由负责人管理，RD继续沿共享接续核定路径。
+
+[NotificationLedgerApplication / Repository](../../../packages/platform-server/src/modules/notifications/notification-ledger.ts)持有原通知模板、发送日志、模拟通知和适配日志单源实现，从 `/notifications` 正式出口使用。[原服务](../../../apps/api/src/modules/integrations/integrations.service.ts)五方法与[原仓储](../../../apps/api/src/modules/integrations/integrations.repository.ts)六方法委托同一实例；其他26个服务方法和11个仓储方法的正文与固定父版一致。默认模板和操作者由宿主提供，公共模块不植入Rental内容。
+
+当前租户仍由同一公共ALS取得，SQL/内存日志隔离、JSON字段投影和80/120条原排序上限保持。模拟入口不是实际投递，生产SMS仍拒绝；通知登记与随后适配日志分别提交，后一步失败传播并保留已写通知事实。Rental业务通知、收件范围、实际Provider、unknown和原投递收据继续由原业务服务裁定。
+
+原默认模板使用全局固定主键，多个租户初始化会冲突。本片只对新Rental默认模板增加tenantId的SHA-256后缀，三份业务内容、原tenantId/code定位和update正文保持；已有模板ID不改，重复初始化复用同一行。[原内存隔离用例](../../../tests/integrations-memory-scope.test.cjs)保留原10处assert并补7处主键/历史/重复初始化检查；[安全用例](../../../tests/integrations-security.test.cjs)原97处assert均保留，只补单源源码定位。没有新建永久测试脚本。
+
+公共schema增加原NotificationTemplate与NotificationSendLog两模型及Tenant关系，ExternalAdapterLog已由公共集成持有，本片核其模型与组合schema相同并复用。数据版本为0.1.5、九迁移；[新迁移](../../../apps/platform-api/prisma/migrations/20261118020000_public_notifications/migration.sql)2273字节、SHA-256 a5b991a6d3cc165b364670ca325c9a15a84f40fc8ba05be1db5ffb4e75c88bfd，四段建表/外键SQL直接沿原add_infra_adapters字节，原八份公共迁移和旧组合链不改写。[数据计划](../../../apps/platform-api/src/platform-data.ts)登记同一摘要，缺真实迁移账或结构不判就绪。
+
+作者已核原HTTP同实例、持久/内存隔离、JSON投影、日志失败保留通知事实及模板回归通过，本片复用其一次冒烟。作者另沿正式包配置生成公共合同11份、通知切片5份内存声明，下游导入0诊断，磁盘产物0；RD不重复整套API类型或既有行为用例。这是作者自检证据，不记独立审查。
+
+RD补公共数据必要冒烟：node --no-compilation-cache -（内存stdin），进程43776退出0、stderr空。Prisma5.22官方6934字节WASM闭包validate/get_dmmf核35模型/14枚举，三份通知/适配模型与原组合一致；没有生成磁盘Client。实际当前数据计划与MySQL结构解析核35表/367列/92索引/7CHECK/29外键，15次显式information_schema fixture回调核正常、缺通知列及错误CASCADE拒绝；迁移摘要变化和未知DDL拒绝。正式createCoreMigrationDeployment生成零Core的12份内存待部署文件，包含第九迁移，不安装或执行DDL。
+
+[三步接入](../../../packages/platform-server/src/modules/notifications/README.md#core-接入)、公共服务/宿主导读和API说明v1.27同步。原有效HTTP、主体Guard和客户端本人通知未改；新Core使用正式台账与自身真实权威，不能从模板/日志登记取得业务读权。六份资料1272个本地链接/178个锚点0问题，稀疏未检目标按当前固定Git对象定位，作者固定五文件哈希再次一致；限定格式随本片精确提交核验。
+
+按原门槛复核，PCH-06事件/作业/回调的完整注册、恢复和实际消费者仍未齐套，本片不凭局部台账提高百分比。独立公共API的通知HTTP装配、完整Rental标准包/数据/Seed、AI、干净安装、多真实Core及独立更新继续；真实数据库/HTTP/浏览器/供应商、接手和正式验收无本片证据。验证只读复用原依赖，所有输出留内存，进程已退出；两个既有待清理残留沿原清单受阻，本片新增临时目录/后台服务0。
+
 <a id="core-rental-customer-governance-20261118"></a>
 
 ## Rental客户治理、合并与头像单源（2026-11-18）

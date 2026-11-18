@@ -4,6 +4,7 @@
 
 | 版本 | 日期 | 编辑 | 变更 |
 | --- | --- | --- | --- |
+| v1.27 | 2026-11-18 | Codex | 通知模板/日志与适配日志台账单源迁入公共服务，原集成实例委托；公共数据链补两张通知表，复用已有适配日志，保留原租户范围、历史模板ID及模拟/真实投递边界。 |
 | v1.26 | 2026-11-18 | Codex | 客户治理、合并/注销检查、经营分析及头像归Rental单源，补正式SDK与同实例头像HTTP接线；原范围、状态/历史事务、资金核验与管理端路由保持。通知五项合同移入公共包，原shared同源再导出。 |
 | v1.25 | 2026-11-18 | Codex | 公共文件台账与模拟元数据单源迁入，补正式SDK/原服务委托；原HTTP字段、列表业务ACL、专用场景、租户隔离及生产模拟拒绝保持。 |
 | v1.24 | 2026-11-18 | Codex | 文件兼容HTTP与实名/承运DTO归Rental，补四项原服务别名及SDK入口；公共上传/完成DTO、原业务ACL、客户范围、承运订单/空间与Staff原键解析保持。 |
@@ -219,6 +220,6 @@ Idempotency-Key: <unique-key-for-mutating-action>
 
 营运客户治理从 `/mysql-customer-governance` 的[同源应用](../../../packages/rental-core/src/mysql-customer-governance.ts) → [合并/注销检查](../../../packages/rental-core/src/mysql-customer-merge.ts) → [主档与状态参加者](../../../packages/rental-core/src/customer-governance-ports.ts)阅读。经营分析从 `/mysql-customer-insights` 的[原订单投影](../../../packages/rental-core/src/mysql-customer-insights.ts)使用。头像沿 `/mysql-customer-avatar` 与 `/http-customer-avatar` 的[实现](../../../packages/rental-core/src/mysql-customer-avatar.ts) / [Controller](../../../packages/rental-core/src/http-customer-avatar.controller.ts)接入，原 `GET/POST /api/platform/customers/{customerId}/avatar` 使用营运客户Guard；[宿主别名](../../../apps/api/src/modules/rental-core/rental-http.providers.ts)复用同一头像实例。客户端本人注销继续从其专用生命周期入口访问，不取得营运客户管理权限。
 
-通知模板、发送日志和适配日志的类型从 `@rental-os/platform-contracts/notifications` 使用，原shared/infrastructure保持同源兼容；业务消息、收件范围和真实发送仍由原业务服务裁定。[正式通知合同](../../../packages/platform-contracts/src/notifications.ts)
+通知模板、发送日志和适配日志的类型从 `@rental-os/platform-contracts/notifications` 使用，原shared/infrastructure保持同源兼容。应用/仓储从 `@rental-os/platform-server/notifications` 的[公共台账](../../../packages/platform-server/src/modules/notifications/notification-ledger.ts)使用，原集成服务委托同一实例，HTTP及Guard仍沿原入口；客户本人通知继续走自己的订单授权。业务消息、收件范围和真实投递由原业务服务裁定，`sendMockNotification` 只登记模拟事实，生产SMS拒绝。模板按租户与编码更新，已有ID不变，新Rental默认模板采用租户派生ID，避免跨租户初始化主键冲突。[正式通知合同](../../../packages/platform-contracts/src/notifications.ts) · [三步接入](../../../packages/platform-server/src/modules/notifications/README.md#core-接入)
 
 地址和注销分别沿[地址与交付快照](../../../packages/rental-core/src/mysql-client-delivery-address.ts) / [本人注销](../../../packages/rental-core/src/mysql-client-account-closure.ts) → [生命周期参加者](../../../packages/rental-core/src/client-lifecycle-ports.ts)阅读。服务端分别从 `/mysql-client-delivery-address` 和 `/mysql-client-account-closure` 接入；可信身份、业务状态及审计由宿主供给。[包使用说明](../../../packages/rental-core/README.md#使用与构建)
