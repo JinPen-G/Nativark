@@ -1,0 +1,35 @@
+name: Nativark release
+
+on:
+  push:
+    branches: [main, codex/nativark-hourly-release]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  images:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: 检出固定提交
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: 构建 API 和 Web 发布镜像
+        shell: bash
+        run: |
+          set -euo pipefail
+          for service in api web; do
+            docker build --file scripts/ops/deployment/Dockerfile --target "$service" \
+              --build-arg "PRODUCT_COMMIT=$GITHUB_SHA" --tag "nativark-$service:$GITHUB_SHA" .
+            test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' \
+              "nativark-$service:$GITHUB_SHA")" = "$GITHUB_SHA"
+          done
+          docker run --rm --network none --entrypoint sh "nativark-api:$GITHUB_SHA" -ec \
+            'test -s dist/main.js && test -s prisma/schema.prisma && node -e "require(\"@prisma/client\")"'
+          docker run --rm --network none --entrypoint sh "nativark-web:$GITHUB_SHA" -ec \
+            'test -s /usr/share/nginx/html/index.html && nginx -V >/dev/null 2>&1'
+          python3 scripts/ops/deployment/hourly-update.py --self-test

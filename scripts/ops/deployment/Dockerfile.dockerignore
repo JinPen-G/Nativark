@@ -1,0 +1,11 @@
+.git
+.github
+**/.env
+**/.env.*
+**/node_modules
+**/dist
+**/dist-agent-desktop
+output
+clients
+worktree
+docs
