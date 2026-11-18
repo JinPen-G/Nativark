@@ -5,10 +5,56 @@ const path = require('node:path');
 const ts = require('typescript');
 const React = require('react');
 
-function load(file, dependencies) {
-  const code = ts.transpileModule(fs.readFileSync(path.resolve(__dirname, '..', file), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
+function sourceFile(relative) {
+  const root = path.resolve(__dirname, '..');
+  if (relative === 'apps/admin/src/app/locale.tsx' || relative === 'apps/admin/src/components/ui/LiveRefresh.tsx') return path.resolve(root, relative);
+  const candidates = [relative.replace(/^apps\/admin\/src\//u, 'packages/platform-admin/src/'), relative];
+  for (const candidate of candidates) {
+    for (const suffix of ['', '.ts', '.tsx', '/index.ts']) {
+      const filename = path.resolve(root, candidate + suffix);
+      if (fs.existsSync(filename) && fs.statSync(filename).isFile()) return filename;
+    }
+  }
+  return path.resolve(root, relative);
+}
+
+function dependencyFile(name, filename) {
+  const root = path.resolve(__dirname, '..');
+  if (name.startsWith('@/')) return sourceFile('apps/admin/src/' + name.slice(2));
+  if (name.startsWith('.')) return sourceFile(path.relative(root, path.resolve(path.dirname(filename), name)));
+  const packageName = /^@rental-os\/([^/]+)(.*)$/u.exec(name);
+  if (!packageName) return undefined;
+  const packageRoot = path.join(root, 'packages', packageName[1]);
+  const metadata = path.join(packageRoot, 'package.json');
+  if (!fs.existsSync(metadata)) return undefined;
+  const entry = JSON.parse(fs.readFileSync(metadata, 'utf8')).exports?.[packageName[2] ? '.' + packageName[2] : '.'];
+  const target = typeof entry === 'string' ? entry : entry?.require ?? entry?.default ?? entry?.import ?? entry?.types;
+  if (typeof target !== 'string') return undefined;
+  const source = target.replace(/^\.\/dist\//u, 'src/').replace(/\.d\.ts$|\.js$/u, '.ts');
+  return sourceFile(path.relative(root, path.join(packageRoot, source)));
+}
+
+function load(file, dependencies = {}) {
+  const root = path.resolve(__dirname, '..');
+  const original = path.resolve(root, file);
+  const filename = sourceFile(file);
+  if (filename.endsWith('.css')) return { __esModule: true, default: {} };
+  const source = fs.readFileSync(filename, 'utf8');
+  const code = ts.transpileModule(source, { fileName: filename, compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
   const exported = { exports: {} };
-  new Function('require', 'module', 'exports', code)(name => Object.hasOwn(dependencies, name) ? dependencies[name] : require(name), exported, exported.exports);
+  const aliases = { '@rental-os/platform-admin/ui': '@/components/ui', '@rental-os/platform-admin/locale': '@/app/locale' };
+  // 复用订单列表用例的同源解析，迁移后的导入继续消费原 fixture。
+  new Function('require', 'module', 'exports', code)(name => {
+    if (Object.hasOwn(dependencies, name)) return dependencies[name];
+    if (Object.hasOwn(dependencies, aliases[name])) return dependencies[aliases[name]];
+    const target = dependencyFile(name, filename);
+    if (target) {
+      const equivalent = Object.keys(dependencies).find(key => dependencyFile(key, original) === target);
+      if (equivalent) return dependencies[equivalent];
+      return load(path.relative(root, target), dependencies);
+    }
+    return require(name);
+  }, exported, exported.exports);
   return exported.exports;
 }
 
@@ -33,8 +79,9 @@ test('refreshed header consumers share the retained provider and inactive parent
 
 test('page tools remain beside their content while only the primary action enters the shell', () => {
   const { renderToStaticMarkup } = require('react-dom/server');
-  const { PageHeader } = load('apps/admin/src/components/PageHeader.tsx', {
+  const dependencies = {
     '@/components/ui/icons': { InfoCircleOutlined: () => null },
+    './ui/Button': { Button: 'button' }, './ui/InfoPopover': { InfoPopover: 'span' },
     antd: { Space: 'div' }, '@/components/ui': { Button: 'button', InfoPopover: 'span' },
     'react-router-dom': { useLocation: () => ({ pathname: '/settings/example' }) },
     '@/app/navigation': { findRouteByPath: () => undefined },
@@ -44,7 +91,9 @@ test('page tools remain beside their content while only the primary action enter
     './ui/AnimatedIcon': { AnimatedIcon: () => null },
     '@/app/navigation-icons': { routeIconName: () => 'settings' },
     './workspace/WorkspaceHeader': { useWorkspaceHeader: () => ({}), WorkspacePageTitle: 'header-title', WorkspacePageActions: 'header-actions' },
-  });
+  };
+  const { PageHeading } = load('packages/platform-admin/src/components/PageHeading.tsx', dependencies);
+  const { PageHeader } = load('apps/admin/src/components/PageHeader.tsx', { ...dependencies, '@rental-os/platform-admin/shell': { PageHeading } });
   const props = { title: '设置', extra: React.createElement('button', null, '保存'), navigation: React.createElement('button', null, '返回'), tools: React.createElement('button', null, '刷新') };
   const form = React.createElement('form', { id: 'current-draft' }, React.createElement('input', { name: 'draft', defaultValue: 'retain me' }));
   const markup = renderToStaticMarkup(React.createElement(PageHeader, { ...props, view: form }));
@@ -139,7 +188,7 @@ test('portaled saves retain native submit association and validate before a sing
     '@/registry/components/action-button/action-button': { ActionButton: 'arc-action' },
     '@/app/locale': { useLocale: () => ({ t: text => text }) },
     '@/app/serverFormSnapshot': snapshot,
-    './ActionButtonIcon': { ActionButtonIconContext: React.createContext('none') },
+    './ActionButtonIcon': { ActionButtonIconContext: React.createContext('none'), ActionButtonCustomIconContext: React.createContext(undefined) },
     './actionButtonIntent': load('apps/admin/src/components/ui/actionButtonIntent.ts', {}),
     '../workspace/WorkspaceHeader': { useWorkspaceActionForm: () => formOwner },
   });
@@ -148,7 +197,13 @@ test('portaled saves retain native submit association and validate before a sing
   const props = { label: '保存配置', form, onClickCapture: () => events.push('capture'), onSave: values => {
     saved.push(values); return new Promise(resolve => { finish = resolve; });
   } };
-  const render = () => { cursor = 0; const action = SaveButton(props); return action.type(action.props).props.children; };
+  const render = () => {
+    cursor = 0;
+    const button = SaveButton(props);
+    let action = button.type(button.props);
+    while (action.type !== 'arc-action') action = action.props.children;
+    return action;
+  };
   let action = render();
   assert.equal(action.props.form, 'original-form');
   assert.equal(action.props.type, 'submit');
@@ -282,12 +337,20 @@ test('opening another catalog record clears nested draft fields through the actu
     const form = new FormStore(() => {}).getForm();
     form.getInternalHooks('RC_FORM_INTERNAL_HOOKS');
     let selected;
-    const common = { setEditing: value => { selected = value; }, editorUnavailable: false };
-    const open = kind === 'model' ? editor('apps/admin/src/features/catalog/CatalogPage.tsx', 'CatalogWorkspace', 'openEditor', {
-      ...common, form, busy: false, setPendingFiles() {}, setDrawerOpen() {}, presentation: undefined,
+    const editingDriver = { dismiss: close => close(), markClean() {} };
+    const common = {
+      setEditorState: value => { selected = value.record; },
+      editorGeneration: { current: 0 },
+      editorUnavailable: false,
+      allowed: () => true,
+    };
+    const open = kind === 'model' ? editor('packages/rental-core/admin/catalog/CatalogPage.tsx', 'CatalogWorkspace', 'openEditor', {
+      ...common, form, busy: false, setPendingFiles() {},
+      drawerOpen: false, catalogDismissal: { visible: true }, editor: editingDriver, presentation: undefined,
       category: { supportedInventoryModes: ['serialized'] }, RentalInventoryMode: { Serialized: 'serialized' }
-    }) : editor('apps/admin/src/features/catalog/AssetWorkspacePage.tsx', 'AssetWorkspace', 'openAssetEditor', {
-      ...common, assetForm: form, saveAsset: { isPending: false }, setAssetDrawerOpen() {},
+    }) : editor('packages/rental-core/admin/catalog/AssetWorkspacePage.tsx', 'AssetWorkspace', 'openAssetEditor', {
+      ...common, assetForm: form, saveAsset: { isPending: false },
+      assetDrawerOpen: false, assetDismissal: { visible: true }, assetEditor: editingDriver,
       serializedGroups: [{ id: 'model-b' }], locations: { data: [{ id: 'location-b' }] }, RentalAssetStatus: { Available: 'available' }
     });
     form.setFieldsValue({ id: 'first', attributes: { retainedInFirst: 'unsaved' }, description: 'old draft' });
@@ -302,8 +365,9 @@ test('opening another catalog record clears nested draft fields through the actu
   }
   const form = new FormStore(() => {}).getForm();
   form.getInternalHooks('RC_FORM_INTERNAL_HOOKS');
-  const openStock = editor('apps/admin/src/features/catalog/StockOperationsPanel.tsx', 'StockOperationsPanel', 'openEditor', {
-    form, canManage: true, unavailable: false, apply: { isPending: false },
+  const openStock = editor('packages/rental-core/admin/catalog/StockOperationsPanel.tsx', 'StockOperationsPanel', 'openEditor', {
+    form, canManage: true, unavailable: false, apply: { isPending: false }, allowed: () => true, open: false,
+    stockDismissal: { visible: true }, editor: { dismiss: close => close(), markClean() {} },
     quantityGroups: [{ id: 'quantity-model' }], storageLocations: [{ id: 'storage' }],
     setOperationKey() {}, setOperationType() {}, setOpen() {},
   });
@@ -330,6 +394,84 @@ test('opening another catalog record clears nested draft fields through the actu
   assert.equal(adjustmentForm.getFieldValue('scheduledAtValue'), undefined, 'A new price adjustment cannot inherit a cancelled schedule.');
   rate.baseAmount = 180;
   assert.equal(openedSource.rates[0].baseAmount, 100, 'Refreshing the price cache cannot relabel or reprice an open draft.');
+});
+
+test('catalog photos suppress the prior object URL before effects run for a new query identity', context => {
+  const createObjectURL = URL.createObjectURL;
+  const revokeObjectURL = URL.revokeObjectURL;
+  const activeUrls = new Set();
+  context.mock.method(URL, 'createObjectURL', data => {
+    const url = createObjectURL(data);
+    activeUrls.add(url);
+    return url;
+  });
+  context.mock.method(URL, 'revokeObjectURL', url => {
+    assert.ok(activeUrls.delete(url), 'Every generated object URL is released exactly once.');
+    revokeObjectURL(url);
+  });
+  for (const presentation of [undefined, 'card']) {
+    let scope = 'scope-a', data = new Blob(['original']), cursor = 0;
+    let effect, cleanup, dependencies;
+    let props = { groupId: 'group-a', image: { id: 'image-a', fileName: 'original.png' }, presentation };
+    const state = [];
+    const { ItemGroupPhoto } = load('packages/rental-core/admin/catalog/ItemGroupPhoto.tsx', {
+      react: {
+        ...React,
+        useState: initial => {
+          const slot = cursor++;
+          if (!(slot in state)) state[slot] = initial;
+          return [state[slot], value => { state[slot] = typeof value === 'function' ? value(state[slot]) : value; }];
+        },
+        useEffect: (next, values) => {
+          if (!dependencies || values.some((value, index) => value !== dependencies[index])) {
+            dependencies = values;
+            effect = next;
+          }
+        },
+      },
+      '@tanstack/react-query': { useQuery: () => ({ data, isError: false }) },
+      antd: { Image: 'photo' },
+      './page-context': { useRentalCatalogPageContext: () => ({ api: {}, scopeKey: scope }) },
+      '@rental-os/platform-admin/locale': { useLocale: () => ({ t: text => text }) },
+      './ItemGroupPhoto.module.css': { default: {} },
+    });
+    const renderedUrl = () => {
+      cursor = 0;
+      const photo = ItemGroupPhoto(props);
+      return presentation === 'card' ? photo.props.children.props.src : photo.props.src;
+    };
+    const flush = () => {
+      if (!effect) return;
+      if (cleanup) cleanup();
+      cleanup = effect();
+      effect = undefined;
+    };
+    try {
+      assert.equal(renderedUrl(), undefined);
+      flush();
+      assert.equal(typeof renderedUrl(), 'string');
+      scope = 'scope-b';
+      data = undefined;
+      assert.equal(renderedUrl(), undefined, 'The new scope cannot render the previous object URL before effect cleanup.');
+      flush();
+      data = new Blob(['current']);
+      renderedUrl();
+      flush();
+      assert.equal(typeof renderedUrl(), 'string');
+      data = new Blob(['updated']);
+      assert.equal(renderedUrl(), undefined, 'The object URL must belong to the current query bytes.');
+      flush();
+      assert.equal(typeof renderedUrl(), 'string');
+      props = { ...props, image: { ...props.image, id: 'image-b' } };
+      assert.equal(renderedUrl(), undefined, 'Another image cannot reuse the previous URL.');
+      flush();
+      props = { ...props, groupId: 'group-b' };
+      assert.equal(renderedUrl(), undefined, 'Another item group cannot reuse the previous URL.');
+    } finally {
+      if (cleanup) cleanup();
+    }
+    assert.equal(activeUrls.size, 0, 'Replacing and unmounting a photo releases all generated object URLs.');
+  }
 });
 
 test('price adjustment submission keeps untouched prices out of a refreshed draft and cannot create it twice', async () => {
@@ -362,9 +504,10 @@ test('price adjustment submission keeps untouched prices out of a refreshed draf
 test('live refresh is opt-in, pauses while editing, stops on denial and resets across identities', () => {
   let identity = { tenant: { tenantId: 't' }, currentWorkspaceId: 'w', user: { id: 'u' } };
   let state;
-  const { useLiveRefresh } = load('apps/admin/src/components/ui/LiveRefresh.tsx', {
-    react: { useState: initial => { state ??= initial; return [state, next => { state = typeof next === 'function' ? next(state) : next; }]; }, useEffect: effect => effect() },
+  const { useLiveRefresh, useListQueryIdentity } = load('apps/admin/src/components/ui/LiveRefresh.tsx', {
+    react: { ...React, useState: initial => { state ??= initial; return [state, next => { state = typeof next === 'function' ? next(state) : next; }]; }, useEffect: effect => effect() },
     '@/features/auth/authStore': { useAuthStore: selector => selector(identity) },
+    './BusinessUiScope': { useBusinessUiScope: () => ({ identity: useListQueryIdentity() }) },
     '@/app/locale': {}, './Switch': {}
   });
   let live = useLiveRefresh('orders');
@@ -387,6 +530,7 @@ test('list identity ignores permission ordering but retains access and organizat
     id: 'operator', permissions, dataScope: 'self_org', organizationId: 'org-a', locationScope: { mode: 'selected', locationIds: ['one'] }
   } };
   const { useListQueryIdentity } = load('apps/admin/src/components/ui/LiveRefresh.tsx', {
+    '@rental-os/platform-admin/source/components/ui/LiveRefresh': {},
     react: {}, '@/features/auth/authStore': { useAuthStore: selector => selector(identity) }, '@/app/locale': {}, './Switch': {}
   });
   const original = useListQueryIdentity();
@@ -444,7 +588,10 @@ test('subscription detail retains its editor through temporary refresh failures 
   const { PlatformSubscriptionDetailPage } = load('apps/admin/src/features/subscription/PlatformSubscriptionDetailPage.tsx', {
     antd: { Space: 'space', Tag: 'tag' },
     '@/components/ui': new Proxy({}, { get: (_, key) => String(key) }),
-    '@/components/RecordDetailLayout': { RecordFacts: 'facts' },
+    '../../components/RecordFacts': { RecordFacts: 'facts' },
+    './SubscriptionPageHeader': { PageHeader: 'page' },
+    './client': { useSubscriptionApi: () => ({}) },
+    './subscriptionRoutes': { SUBSCRIPTION_ROUTES: { platformSubscriptions: { path: '/platform/subscriptions' } } },
     '@/components/ui/useModalDismissal': {},
     './TenantSubscription.module.css': { default: {} },
     '@tanstack/react-query': { useQuery: () => query },

@@ -5,6 +5,7 @@
 import { createRentalWorkOrderApi } from "@rental-os/rental-core/admin/work-orders/client";
 import { createRentalOrderApi } from "@rental-os/rental-core/admin/orders/client";
 import { createRentalLocationApi } from "@rental-os/rental-core/admin/locations/client";
+import { createRentalCatalogApi, type RentalCatalogImageRequest } from "@rental-os/rental-core/admin/catalog/client";
 import { createRentalCapabilityApi } from "@rental-os/rental-core/admin/capabilities/client";
 import type {
   TenantReadinessStatus,
@@ -15,10 +16,7 @@ import type {
   CorrectRentalInspectionUsageRequest,
   ManageRentalAllocationRequest,
   RentalAllocationCandidates,
-  ApiResult,
   PartialReturnRentalOrderRequest,
-  RentalAsset,
-  RentalAssetStatusHistory,
   RentalCalendarOverrideAudit,
   RentalCalendarPublishPreview,
   RentalCalendarVersionSummary,
@@ -42,7 +40,6 @@ import type {
   AdjustRentalInspectionExceptionRequest,
   RecordRentalInspectionExceptionCustomerResponseRequest,
   ReviewRentalOrderFeeReviewRequest,
-  RentalItemGroup,
   RentalOrder,
   RentalDeliveryAddressSnapshot,
   RentalOrderListQuery,
@@ -68,10 +65,6 @@ import type {
   RentalRuleVersionAudit,
   RentalRulePublishPreview,
   PublishRentalRuleVersionRequest,
-  RentalStockBalance,
-  RentalStockLedgerEntry,
-  RentalStockOperationRequest,
-  RentalStockOperationResult,
   RentalValueAddedService,
   RentalWorkspaceOperationReport,
   RentalWorkspaceReportFilter,
@@ -107,9 +100,7 @@ import type {
   SaveRentalServiceCapacityRequest,
   UpdateRentalServiceOccurrenceRequest,
   SendRentalNotificationRequest,
-  SaveRentalAssetRequest,
   SaveRentalCouponTemplateRequest,
-  SaveRentalItemGroupRequest,
   SaveRentalPricingGroupRequest,
   UpdateRentalPricingGroupSecurityRatesRequest,
   SaveTenantRentalBusinessSettingsRequest,
@@ -122,9 +113,23 @@ import type {
   FileDownloadUrlSummary
 } from "@rental-os/shared";
 import { useQuery } from "@tanstack/react-query";
+import { currentSessionEpoch, currentSessionSignal } from "@/app/queryClient";
 import { http, request, requestText } from "./http";
 
+/** 型号图片复用原 Axios 鉴权与刷新，查询取消和会话切换均拒绝迟到字节。 */
+export const requestRentalCatalogImage: RentalCatalogImageRequest = async (path, options) => {
+  const epoch = currentSessionEpoch();
+  const sessionSignal = currentSessionSignal();
+  const signal = options?.signal ? AbortSignal.any([options.signal, sessionSignal]) : sessionSignal;
+  if (signal.aborted) throw new DOMException("型号图片读取已取消", "AbortError");
+  const response = await http.get<Blob>(path, { responseType: "blob", signal });
+  if (signal.aborted || currentSessionEpoch() !== epoch)
+    throw new DOMException("型号图片所属会话已变化", "AbortError");
+  return response.data;
+};
+
 const rentalLocationApi = createRentalLocationApi(request);
+const rentalCatalogApi = createRentalCatalogApi(request, requestRentalCatalogImage);
 
 export const rentalCoreApi = {
   categories: rentalLocationApi.categories,
@@ -250,26 +255,18 @@ export const rentalCoreApi = {
   operators: rentalLocationApi.operators,
   saveOperator: rentalLocationApi.saveOperator,
   saveLocation: rentalLocationApi.saveLocation,
-  saveItemGroup: (data: SaveRentalItemGroupRequest) => request<RentalItemGroup>(data.id ? `/rental/v1/item-groups/${data.id}` : "/rental/v1/item-groups", { method: data.id ? "put" : "post", data }),
-  uploadItemGroupImage: async (id: string, file: File) => {
-    const form = new FormData();
-    form.append("file", file);
-    const response = await http.post<ApiResult<RentalItemGroup>>(`/rental/v1/item-groups/${id}/images`, form);
-    return response.data.data;
-  },
-  removeItemGroupImage: (id: string, imageId: string) => request<RentalItemGroup>(`/rental/v1/item-groups/${id}/images/${imageId}`, { method: "delete" }),
-  itemGroupImageBlob: async (id: string, imageId: string) => {
-    const response = await http.get<Blob>(`/rental/v1/item-groups/${id}/images/${imageId}`, { responseType: "blob" });
-    return response.data;
-  },
+  saveItemGroup: rentalCatalogApi.saveItemGroup,
+  uploadItemGroupImage: rentalCatalogApi.uploadItemGroupImage,
+  removeItemGroupImage: rentalCatalogApi.removeItemGroupImage,
+  itemGroupImageBlob: rentalCatalogApi.itemGroupImageBlob,
   savePricingGroup: (data: SaveRentalPricingGroupRequest) => request<RentalPricingGroup>(data.id ? `/rental/v1/pricing-groups/${data.id}` : "/rental/v1/pricing-groups", { method: data.id ? "put" : "post", data }),
   updatePricingGroupSecurityRates: (id: string, data: UpdateRentalPricingGroupSecurityRatesRequest) => request<{ id: string; sequence: number; version: string; effectiveFrom: string; changeReason?: string }>(`/rental/v1/pricing-groups/${id}/security-rates`, { method: "patch", data }),
-  assets: () => request<RentalAsset[]>("/rental/v1/assets"),
-  assetStatusHistory: (assetId: string) => request<RentalAssetStatusHistory[]>(`/rental/v1/assets/${encodeURIComponent(assetId)}/status-history`),
-  saveAsset: (data: SaveRentalAssetRequest) => request<RentalAsset>(data.id ? `/rental/v1/assets/${data.id}` : "/rental/v1/assets", { method: data.id ? "put" : "post", data }),
-  stockBalances: () => request<RentalStockBalance[]>("/rental/v1/stock-balances"),
-  stockLedger: (params?: { itemGroupId?: string; locationId?: string; batchNo?: string; sourceDocumentNo?: string; limit?: number }) => request<RentalStockLedgerEntry[]>("/rental/v1/stock-ledger", { params }),
-  applyStockOperation: (data: RentalStockOperationRequest) => request<RentalStockOperationResult>("/rental/v1/stock-operations", { method: "post", data }),
+  assets: rentalCatalogApi.assets,
+  assetStatusHistory: rentalCatalogApi.assetStatusHistory,
+  saveAsset: rentalCatalogApi.saveAsset,
+  stockBalances: rentalCatalogApi.stockBalances,
+  stockLedger: rentalCatalogApi.stockLedger,
+  applyStockOperation: rentalCatalogApi.applyStockOperation,
   ...createRentalWorkOrderApi(request),
   orders: () => request<RentalOrder[]>("/rental/v1/orders"),
   // 空间能力读写沿原认证会话的当前经营空间。

@@ -21,8 +21,8 @@ const read = (relative) => fs.readFileSync(path.join(ROOT, relative), "utf8");
 /**
  * 管理端是 ESM 包，`.ts` 不能直接 require；而这里要断言的是**运行时行为**，
  * 不是源码文本。因此把纯模块转译成 CJS 后求值。
- * 该模块只有一个 `import type`（编译期擦除），求值时不触发任何依赖加载——
- * 这也正是把术语解析拆成无 JSX 纯模块的原因之一。
+ * 术语模块的类型导入在编译时擦除。页面声明与导航登记的运行时依赖由
+ * fixture 明确供给，路由与权限使用同一实际导出验证。
  *
  * 刻意用 `new Function` 在**当前 realm** 内求值，而不是 `vm.runInNewContext`：
  * 新 realm 里的对象带着另一份 Object 原型，`deepStrictEqual` 会必然失败，
@@ -30,7 +30,8 @@ const read = (relative) => fs.readFileSync(path.join(ROOT, relative), "utf8");
  */
 function loadPureTsModule(relative, dependencies = {}) {
   const { outputText } = ts.transpileModule(read(relative), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }
+    fileName: relative,
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX }
   });
   const shim = { exports: {} };
   new Function("module", "exports", "require", outputText)(shim, shim.exports,
@@ -39,7 +40,7 @@ function loadPureTsModule(relative, dependencies = {}) {
 }
 
 const { RENTAL_CATEGORY_DEFINITIONS } = require("@rental-os/shared");
-const { resolveTenantNavigationLabels, applyTenantNavigationLabels } = loadPureTsModule("apps/admin/src/app/navigation-terminology.ts");
+const { resolveTenantNavigationLabels, applyTenantNavigationLabels } = loadPureTsModule("packages/rental-core/admin/catalog/navigation-terminology.ts");
 
 const ok = (m) => console.log(`  ✓ ${m}`);
 const byCode = (code) => {
@@ -146,7 +147,7 @@ void (() => {
   ok("套用：分组与菜单文案真的被替换，权限与 SaaS 文案原样保留，无档案时逐字段回落");
 
   // ============ 5. 解析层不得出现品类编码分支 ============
-  const terminologySource = read("apps/admin/src/app/navigation-terminology.ts");
+  const terminologySource = read("packages/rental-core/admin/catalog/navigation-terminology.ts");
   const shell = read("apps/admin/src/components/AppShell.tsx");
   const nav = read("apps/admin/src/app/navigation.tsx");
   for (const [relative, source] of [
@@ -182,14 +183,33 @@ void (() => {
   ok("接线：外壳按当前空间取档案，菜单与面包屑同源且随空间切换重算");
 
   // ============ 7. 只改文案，不改路由与鉴权契约 ============
+  const workOrderPages = loadPureTsModule("packages/rental-core/admin/work-orders/pages.ts");
+  const catalogPages = loadPureTsModule("packages/rental-core/admin/catalog/pages.ts", {
+    "../work-orders/pages": workOrderPages,
+    "./navigation-terminology": { resolveTenantNavigationLabels, applyTenantNavigationLabels }
+  });
+  const { APP_ROUTES } = loadPureTsModule("apps/admin/src/app/navigation.tsx", {
+    "@rental-os/rental-core/admin/work-orders/pages": workOrderPages,
+    "@rental-os/rental-core/admin/orders/pages": loadPureTsModule("packages/rental-core/admin/orders/pages.ts"),
+    "@rental-os/rental-core/admin/capabilities/pages": loadPureTsModule("packages/rental-core/admin/capabilities/pages.ts"),
+    "@rental-os/rental-core/admin/catalog/pages": catalogPages,
+    "@rental-os/platform-admin/subscription/subscriptionRoutes": loadPureTsModule("packages/platform-admin/src/features/subscription/subscriptionRoutes.ts"),
+    "@/components/ui/icons": new Proxy({}, { get: () => () => null }),
+    "@rental-os/shared": require("@rental-os/shared"),
+    "./navigation-terminology": { resolveTenantNavigationLabels, applyTenantNavigationLabels },
+    "./categoryGovernancePreview": { CATEGORY_GOVERNANCE_PREVIEW_ENABLED: false },
+    "react/jsx-runtime": { jsx: () => null, jsxs: () => null }
+  });
+  const registeredRoutes = Object.values(APP_ROUTES);
   for (const [routePath, permission] of [
     ["/rental/item-groups", "rental-core:catalog:view"],
     ["/rental/pricing-groups", "rental-os:price:manage"],
     ["/rental/assets", "rental-core:asset:view"],
     ["/rental/locations", "rental-os:station:view"]
   ]) {
-    assert.ok(nav.includes(`path: "${routePath}"`), `路由路径 ${routePath} 不得变更`);
-    assert.ok(nav.includes(`permission: "${permission}"`), `权限码 ${permission} 不得变更`);
+    const route = registeredRoutes.find(candidate => candidate.path === routePath);
+    assert.ok(route, `路由路径 ${routePath} 不得变更`);
+    assert.equal(route.permission, permission, `权限码 ${permission} 不得变更`);
   }
   assert.match(
     nav,
@@ -209,16 +229,15 @@ void (() => {
 
   // ============ 8. 页面标题与菜单同源 ============
   // 菜单叫「车辆与车队」而页面标题仍写死「资产与库存」，等于只改了一半。
-  const assetPage = read("apps/admin/src/features/catalog/AssetWorkspacePage.tsx");
+  const assetPage = read("packages/rental-core/admin/catalog/AssetWorkspacePage.tsx");
   assert.match(
     assetPage,
     /title=\{t\(resolveTenantNavigationLabels\(profile\.data\?\.terminology\)\.routes\.assets \?\? "资产与库存"\)\}/u,
     "资产页标题必须与菜单同源解析，并保留固定回落"
   );
-  const catalogPage = read("apps/admin/src/features/catalog/CatalogPage.tsx");
+  const catalogPage = read("packages/rental-core/admin/catalog/CatalogPage.tsx");
   const pricingGroupPage = read("apps/admin/src/features/commercial/PricingGroupPage.tsx");
   const locationPage = read("packages/rental-core/admin/locations/LocationPage.tsx");
-  const workOrderPages = loadPureTsModule("packages/rental-core/admin/work-orders/pages.ts");
   const { rentalLocationTitle, RENTAL_LOCATION_PAGES } = loadPureTsModule("packages/rental-core/admin/locations/pages.ts", {
     "../work-orders/pages": workOrderPages
   });
@@ -233,7 +252,10 @@ void (() => {
     assert.equal(rentalLocationTitle(definition.terminology), resolveTenantNavigationLabels(definition.terminology).routes.locations ?? "履约地点", "地点页面须与原菜单共用品类标题");
   }
   assert.equal(rentalLocationTitle(), "履约地点", "缺品类档案时保留原固定回落");
-  const coreService = read("apps/api/src/modules/rental-core/rental-core.service.ts");
+  const coreServiceAdapter = read("apps/api/src/modules/rental-core/rental-core.service.ts");
+  assert.match(coreServiceAdapter, /RentalCoreService as CoreRentalCoreService[\s\S]*?from "@rental-os\/rental-core\/mysql-core-runtime"[\s\S]*?class RentalCoreService extends CoreRentalCoreService/u,
+    "原服务必须继承 Rental 包的同源档案实现");
+  const coreService = read("packages/rental-core/src/mysql-core-runtime.ts");
   assert.match(coreService, /navigationLabels:[\s\S]{0,180}defaults\.navigationLabels[\s\S]{0,180}profile\.terminology\.navigationLabels/u,
     "旧空间读取档案时必须补入品类定义的导航配置，不能只让新空间生效");
   ok("页面标题：资产、目录与地点页标题均由当前品类术语驱动");

@@ -1158,6 +1158,34 @@
     "./admin/locations/list-capabilities": {
       "types": "./admin/locations/listCapabilities.ts",
       "default": "./admin/locations/listCapabilities.ts"
+    },
+    "./admin/catalog": {
+      "types": "./admin/catalog/index.tsx",
+      "default": "./admin/catalog/index.tsx"
+    },
+    "./admin/catalog/client": {
+      "types": "./admin/catalog/client.ts",
+      "default": "./admin/catalog/client.ts"
+    },
+    "./admin/catalog/context": {
+      "types": "./admin/catalog/page-context.ts",
+      "default": "./admin/catalog/page-context.ts"
+    },
+    "./admin/catalog/pages": {
+      "types": "./admin/catalog/pages.ts",
+      "default": "./admin/catalog/pages.ts"
+    },
+    "./admin/catalog/images": {
+      "types": "./admin/catalog/ItemGroupPhoto.tsx",
+      "default": "./admin/catalog/ItemGroupPhoto.tsx"
+    },
+    "./admin/catalog/list-capabilities": {
+      "types": "./admin/catalog/listCapabilities.ts",
+      "default": "./admin/catalog/listCapabilities.ts"
+    },
+    "./admin/catalog/terminology": {
+      "types": "./admin/catalog/navigation-terminology.ts",
+      "default": "./admin/catalog/navigation-terminology.ts"
     }
   },
   "typesVersions": {
@@ -2022,6 +2050,27 @@
       ],
       "admin/locations/list-capabilities": [
         "admin/locations/listCapabilities.ts"
+      ],
+      "admin/catalog": [
+        "admin/catalog/index.tsx"
+      ],
+      "admin/catalog/client": [
+        "admin/catalog/client.ts"
+      ],
+      "admin/catalog/context": [
+        "admin/catalog/page-context.ts"
+      ],
+      "admin/catalog/pages": [
+        "admin/catalog/pages.ts"
+      ],
+      "admin/catalog/images": [
+        "admin/catalog/ItemGroupPhoto.tsx"
+      ],
+      "admin/catalog/list-capabilities": [
+        "admin/catalog/listCapabilities.ts"
+      ],
+      "admin/catalog/terminology": [
+        "admin/catalog/navigation-terminology.ts"
       ]
     }
   },

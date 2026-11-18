@@ -76,8 +76,8 @@ void (async () => {
   }
 
   const genericUiFiles = [
-    "apps/admin/src/features/catalog/CatalogPage.tsx",
-    "apps/admin/src/features/catalog/AssetWorkspacePage.tsx",
+    "packages/rental-core/admin/catalog/CatalogPage.tsx",
+    "packages/rental-core/admin/catalog/AssetWorkspacePage.tsx",
     "apps/admin/src/features/commercial/PricingGroupPage.tsx",
     "packages/rental-core/admin/locations/LocationPage.tsx"
   ].map((file) => readFileSync(join(__dirname, "..", file), "utf8")).join("\n");
@@ -122,8 +122,8 @@ void (async () => {
   );
 
   const genericPermissionSources = [
-    "apps/admin/src/features/catalog/CatalogPage.tsx",
-    "apps/admin/src/features/catalog/AssetWorkspacePage.tsx",
+    "packages/rental-core/admin/catalog/CatalogPage.tsx",
+    "packages/rental-core/admin/catalog/AssetWorkspacePage.tsx",
     "apps/api/src/common/api-auth.guard.ts",
     "apps/api/src/contracts/openapi-document.ts"
   ].map((file) => readFileSync(join(__dirname, "..", file), "utf8")).join("\n");

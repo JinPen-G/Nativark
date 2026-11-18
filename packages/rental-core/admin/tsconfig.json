@@ -6,6 +6,7 @@
     "work-orders",
     "capabilities",
     "locations",
+    "catalog",
     "../../platform-admin/src/**/*.d.ts"
   ]
 }
