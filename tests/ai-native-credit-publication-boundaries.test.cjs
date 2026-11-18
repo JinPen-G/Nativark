@@ -29,3 +29,11 @@ test('strict publication validation rejects malformed input while bootstrap disa
   assert.equal(runtimeConfigurationProvider(Symbol(), 'orderModel').useFactory(snapshot), undefined);
   assert.equal(readRuntimePublication({ get: () => undefined }).state, 'unconfigured');
 });
+
+test('deployment preflight reads a bounded UTF-8 publication without opening an application', async () => {
+  const { checkPublication } = require('../scripts/ops/check-ai-publication.cjs');
+  const valid = JSON.stringify({version:'ain-runtime-publication-1',revision:'r1',configurations:{}});
+  assert.equal(await checkPublication([valid]),'configured');
+  assert.equal(await checkPublication([]),'unconfigured');
+  for (const value of ['{', Buffer.from([255]), Buffer.alloc(65537), valid.replace('r1','!')]) assert.equal(await checkPublication([value]),'invalid');
+});

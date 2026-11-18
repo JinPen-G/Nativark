@@ -23,7 +23,7 @@
 
 ## 备份与恢复
 
-`AiRetentionRestoreVerifier` 的 Ed25519 公钥hash必须由服务器固定。签名键不可来自HTTP；没有配置时恢复拒绝。由可信备份宿主调用 `exportRestoreManifest({id, sha256, createdAt}, privateKey)`，从**恢复快照以外的当前删除账本**导出完整清单（最多500项；超限拒绝，不能把分页冒充完整）。清单绑定原快照SHA256、租户/空间、期限和删除/撤回，签名后60秒内有效。
+`AiRetentionRestoreVerifier` 使用服务端固定的 Ed25519 公钥哈希。可信备份宿主调用 `exportRestoreManifest({id, sha256, createdAt}, privateKey)`，从恢复快照以外的当前删除账本，在同一可重复读事务中读取全部标记。大清单每页 250 项，签名覆盖快照 SHA256、范围、期限、总数和有序页摘要。旧单页凭证仍可核验。签名后 60 秒内有效。
 
 标准宿主在 `AI_NATIVE_RUNTIME_PUBLICATION` 的 `configurations.retentionRestore.publicKeyHash` 固定这个公钥hash，值为Ed25519公钥SPKI DER的SHA-256。原 `AI_RETENTION_REQUESTS` 与 `AI_PLATFORM_RETENTION_REQUESTS` 同时消费该部署配置并暴露上述host-only导出／重放方法，关闭请求工厂后原凭证撤回。既有平台独立token仍兼容；同时提供时必须与公共部署hash一致。配置仅保存公钥hash，私钥来自可信备份宿主，许可由原Verifier在可信进程中验签产生。原HTTP仅接cleanup／receipt／receipts及原字段。
 
@@ -31,7 +31,13 @@
 
 原 `scripts/ops/restore-source.cjs` 在GRANT之前校验全部恢复空间的证书、原dump摘要和准确目标库。首次导入后未满足隐私门会保留隔离库与output接续记录；重放完成后使用同一 `--file`、`--finalize-ai <接续记录>`、`--ai-retention-certificates <证书数组JSON>` 接续，**不重复导入、不覆盖旧库**。公钥来自服务器 `OPS_AI_RETENTION_PUBLIC_KEY`，不接受证书自带公钥。恢复演练同样不将缺证据当作验收通过。
 
-平台使用[独立恢复凭证](platform-retention-restore.ts)。`AI_NATIVE_PLATFORM_RETENTION_RESTORE_KEY_HASH`由可信服务端固定；私钥和快照身份仅由备份宿主传给原request factory的exportRestoreManifest／reapplyRestore，不接受HTTP密钥或恢复请求。源库在恢复快照之外导出至多500项完整平台删除标记，签名绑定原scopeId、PLATFORM／null、dump SHA、期限；目标隔离库重放后生成ai-restored-platform-scope-1证书。原[恢复屏障](../../../../../../scripts/ops/ai-retention.cjs)同时核全部workspace和真实平台Scope证书，少平台证书、错快照、过期或unknown均不放行。恢复仍不能启动模型、Worker或业务服务。
+平台按相同分页规则导出完整删除集合。签名绑定平台 scopeId、PLATFORM／null、dump SHA 和期限。目标隔离库完成删除重放后生成 `ai-restored-platform-scope-1` 证书，只有数据库中的每个空间和平台范围都与有效证书逐一匹配，才可通过恢复屏障。[平台恢复凭证](platform-retention-restore.ts) · [全库恢复屏障](../../../../../../scripts/ops/ai-retention.cjs)
+
+### 清理值守与续跑
+
+在获批的环境中，由该环境运维负责人配置原调度宿主、值班告警和处置人。按空间或平台、材料种类分别持久保存本次扫描游标、最近已核对页时间、最近完整扫描时间、已擦除数、保留数、未决数。限额为每页 10 项。只有保存该页原收据后才能推进 `nextAfter`。进程中断从持久游标续办。失去应答先在原范围核对收据，仍有未决就保留原页与原操作。末页返回空游标时记录扫描完成时间，下一轮从头扫描，覆盖上一轮已经过游标的新增到期项。
+
+积压使用同一空间、种类、政策时间点的受权候选总数，并区分受保留、待核对和待擦除。最老逾期时长按候选原到期日计算。无法获得完整候选视图时，展示已观察下界和采样时间。一次处理 10 项不能推算全库积压。监控接入原值班渠道，收据不可核、对象删除应答不明、权限失效、扫描超过批准调度周期或连续周期积压上升时通知处置人。平台与空间分别记录。日志仅保留最小计数、时间和原收据定位。
 
 `scripts/ops/ai-retention.cjs` 的 `AiOnlyBackupRetentionStore` 是可选本地AI专用副本适配：显式服务器目录/当前权限/固定公钥，AES-256-GCM加密保存，签名绑定内容hash，指定最多10个原ID清理30天到期副本。不得清理混合业务SQL备份、业务原件、外部tombstone档案、目录、链接或数据卷。混合业务备份仍需原运维保留策略，不能把AI专用适配当作所有备份已完成清理。
 

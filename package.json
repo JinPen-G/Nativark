@@ -8,6 +8,7 @@
     "packages/*"
   ],
   "scripts": {
+    "ai:publication:check": "node scripts/ops/check-ai-publication.cjs",
     "docs:check": "node scripts/validate-docs.cjs",
     "test:docs": "node --test tests/docs-check.test.cjs",
     "test:demo-requests": "npm run build -w @rental-os/shared && node --test tests/demo-requests.test.cjs",

@@ -7,6 +7,22 @@ const { AiRetentionRestoreVerifier, signRetentionManifest } = require('../apps/a
 const { AiPlatformRetentionRestoreVerifier, signPlatformRetentionManifest } = require('../apps/api/src/modules/ai-native/privacy/platform-retention-restore');
 const { AI_RETENTION_POLICY } = require('../apps/api/src/modules/ai-native/privacy/retention-policy');
 const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+test('restore barrier verifies 501 distinct workspaces and the platform in one restored snapshot', () => {
+  const { verifyRestoredAiScopes } = require('../scripts/ops/ai-retention.cjs');
+  const { sign } = require('node:crypto');
+  const now = new Date(), database = 'restored', snapshotSha256 = 'a'.repeat(64);
+  const scopes = [...Array.from({length:501}, (_, index) => ({tenantId:'tenant',workspaceId:`space-${index}`})),
+    {scopeKind:'PLATFORM',scopeId:'platform',tenantId:null,workspaceId:null}];
+  const certificates = scopes.map(scope => {
+    const payload = JSON.stringify({...scope, version:scope.scopeKind ? 'ai-restored-platform-scope-1' : 'ai-restored-scope-1',
+      policyVersion:AI_RETENTION_POLICY.version,database,snapshotSha256,manifestHash:'b'.repeat(64),verifiedAt:now.toISOString()});
+    return {payload,signature:sign(null,Buffer.from(payload),privateKey).toString('base64')};
+  });
+  const input = {certificates,publicKey,database,snapshotSha256,scopes,now};
+  assert.equal(verifyRestoredAiScopes(input).scopes,502);
+  for (const invalid of [certificates.slice(0,-1), [...certificates.slice(0,-1),certificates[0]]]) assert.throws(() => verifyRestoredAiScopes({...input,certificates:invalid}));
+  assert.throws(() => verifyRestoredAiScopes({...input,snapshotSha256:'c'.repeat(64)}));
+});
 for (const platform of [false, true]) {
   test(`${platform ? 'platform' : 'workspace'} restores 501 markers only with the complete ordered signed manifest`, () => {
     const now = new Date(), sign = platform ? signPlatformRetentionManifest : signRetentionManifest;
