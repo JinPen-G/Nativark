@@ -1,6 +1,6 @@
 /** 原组合文件编排。公共创建、原回执、字节、内容冻结、按租户清理、读取签名和文件表由platform-server维护，Rental引用与ACL由Rental包提供。
  * 专用检查、知识与企业证据沿原入口和原冻结/unknown收据，不以通用存储替代业务授权。 */
-import { FileStoragePrimitives, FileStorageRepository, MAX_FILE_BYTES, freezeFileUploadContent, createOriginalFileUploadFacts, readOriginalFileUploadReceipt, FileStorageCleanup, COMPLETED_STAGING_PENDING, issueFileDownloadReference } from "@rental-os/platform-server/files";
+import { FileStoragePrimitives, FileStorageRepository, MAX_FILE_BYTES, freezeFileUploadContent, createOriginalFileUploadFacts, readOriginalFileUploadReceipt, FileStorageCleanup, COMPLETED_STAGING_PENDING, issueFileDownloadReference, FileStorageApplication } from "@rental-os/platform-server/files";
 import { RentalFileBusinessReferences } from "@rental-os/rental-core/file-access";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, OnApplicationBootstrap, OnApplicationShutdown, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { INSPECTION_OBJECT_READER, readInspectionMedia, type InspectionObjectReader } from "../ai-native/inspection-assist/inspection-media.reader";
@@ -32,6 +32,8 @@ import { aiRetentionObjectHash } from "../ai-native/privacy/retention-binding";
 import { AI_RETENTION_POLICY } from "../ai-native/privacy/retention-policy";
 import { KnowledgeCommitUnknownError } from '../ai-native/knowledge/knowledge-errors';
 import { knowledgeUploadRevisionSchema, knowledgeUploadKey } from '../ai-native/knowledge/human-knowledge-upload.service';
+import type { AuthService } from "../auth/auth.service";
+import { RENTAL_FILE_AUTHORITY, RentalFileApplicationParticipant, isRentalStaffFileBinding } from "./rental-file-application.participant";
 
 type JsonRecord = Record<string, unknown>;
 type ExchangeInspectionFrozenEvidence = { sourceId: string; contentHash: string; sizeBytes: number; mimeType: "image/png" | "image/jpeg"; width: number; height: number };
@@ -67,6 +69,7 @@ export class FileStorageRuntimeService extends FileStoragePrimitives implements 
   private readonly files: FileStorageRepository;
   private readonly fileReferences: RentalFileBusinessReferences;
   private readonly cleanup: FileStorageCleanup<Prisma.TransactionClient>;
+  private readonly staffFiles?: FileStorageApplication<FileBusinessOwner, Prisma.TransactionClient>;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -74,7 +77,8 @@ export class FileStorageRuntimeService extends FileStoragePrimitives implements 
     @Optional() private readonly operationLog?: OperationLogService,
     @Optional() @Inject(INSPECTION_OBJECT_READER) private readonly inspectionObjectReader?: InspectionObjectReader,
     @Optional() @Inject(KNOWLEDGE_FILE_ACCESS) private readonly knowledgeFiles?: KnowledgeFileAccess,
-    @Optional() private readonly fileAccess?: FileBusinessAccessService
+    @Optional() private readonly fileAccess?: FileBusinessAccessService,
+    @Optional() @Inject(RENTAL_FILE_AUTHORITY) auth?: Pick<AuthService, "lockRequestWorkspaceAccess">
   ) {
     super();
     this.files = new FileStorageRepository(prisma);
@@ -89,6 +93,25 @@ export class FileStorageRuntimeService extends FileStoragePrimitives implements 
       objectRequest: (url, init) => this.objectRequest(url, init),
       ...(operationLog ? { recordAudit: input => operationLog.record(input) } : {})
     });
+    if (auth && fileAccess) {
+      const staff = new RentalFileApplicationParticipant(prisma, auth, fileAccess);
+      this.staffFiles = new FileStorageApplication<FileBusinessOwner, Prisma.TransactionClient>({
+        store: prisma,
+        transaction: work => staff.transaction(work),
+        runtimeConfig: (tenantId, provider, options) => this.integrations.runtimeConfig("file", tenantId, provider as never, options),
+        assertEnabled: (tx, tenantId, config) => this.integrations.assertEnabledInTransaction(tx, tenantId, "file", config.provider,
+          { configRevision: config.revision }),
+        allowSimulation: process.env.NODE_ENV !== "production",
+        isUniqueConflict: error => error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002",
+        excludedUploadScene: RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE,
+        ...(operationLog ? { recordAudit: input => operationLog.record(input) } : {})
+      }, staff.authorities);
+    }
+  }
+
+  private requireStaffFiles() {
+    if (!this.staffFiles) throw new ServiceUnavailableException("员工文件原认证或文件ACL参加者未配置");
+    return this.staffFiles;
   }
 
   onApplicationBootstrap() {
@@ -123,6 +146,7 @@ export class FileStorageRuntimeService extends FileStoragePrimitives implements 
     input: CreateFileUploadSessionRequest,
     owner?: FileBusinessOwner
   ): Promise<FileUploadSessionSummary> {
+    if (isRentalStaffFileBinding(tenantId, input)) return this.requireStaffFiles().createUploadSession(tenantId, input, owner);
     input = structuredClone(input); owner = structuredClone(owner);
     if (input.uploadScene?.trim() === RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE) throw new BadRequestException("换货检查影像必须经专用原业务入口上传");
     if (input.uploadScene?.trim() === ENTERPRISE_PAYMENT_PROOF_SCENE) {
@@ -791,6 +815,7 @@ export class FileStorageRuntimeService extends FileStoragePrimitives implements 
     let session = structuredClone(await this.prisma.fileUploadSession.findFirst({ where: { id: sessionId, tenantId } }));
     if (!session) throw new NotFoundException("上传会话不存在");
     let asset = structuredClone(await this.prisma.fileAsset.findFirst({ where: { id: session.fileAssetId, tenantId } }));
+    if (asset && isRentalStaffFileBinding(tenantId, asset)) return this.requireStaffFiles().completeUpload(tenantId, sessionId, input, owner);
     if (asset?.uploadScene === RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE) throw new BadRequestException("专用换货影像只能核验原业务完成入口");
     if (asset?.uploadScene === ENTERPRISE_PAYMENT_PROOF_SCENE && (!owner?.enterprisePaymentProof || owner.uploadScene !== ENTERPRISE_PAYMENT_PROOF_SCENE
       || (asset.metadata as JsonRecord | null)?.workspaceId !== owner.workspaceId
@@ -966,6 +991,7 @@ export class FileStorageRuntimeService extends FileStoragePrimitives implements 
 
   async downloadUrl(tenantId: string, fileAssetId: string, owner?: FileBusinessOwner): Promise<FileDownloadUrlSummary> {
     const asset = await this.prisma.fileAsset.findFirst({ where: { id: fileAssetId, tenantId, status: "active" } });
+    if (asset && isRentalStaffFileBinding(tenantId, asset)) return this.requireStaffFiles().downloadUrl(tenantId, fileAssetId, owner);
     if (asset?.uploadScene === RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE) throw new ServiceUnavailableException("专用换货影像必须按原业务权限和内容指纹读取，不签发下载URL");
     if (asset?.businessType === 'ai_knowledge_document') throw new ServiceUnavailableException('知识附件必须经当前文档权限读取，不签发下载URL');
     if (asset?.uploadScene === 'enterprise-authority') throw new ServiceUnavailableException('企业授权材料必须经当前申请及审核权限读取，不签发可复用下载URL');

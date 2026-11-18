@@ -11,6 +11,30 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-public-file-application-staff-20261118"></a>
+
+## 公共文件应用与原Staff实际消费者（2026-11-18）
+
+清理/下载已在3ce760ce6212164d018b273dbbae25c46e957594普通推送并实际远端回读。RD完整核公共应用三文件、Staff真实参加者和原Runtime三入口后补正式出口、主Provider与三步接入说明；dev1按约定接Staff并停写，双方在共享树按文件边界完成同一切片。旧原文及接续由该固定父版保全。
+
+[FileStorageApplication](../../../packages/platform-server/src/modules/files/file-storage.application.ts)从/files提供创建、原回执、完成、下载及按租户清理，消费[权威合同](../../../packages/platform-server/src/modules/files/file-storage-authority.ts)和[窄文件事务](../../../packages/platform-server/src/modules/files/file-storage.application-store.ts)。module/type/scene精确登记真实业务参加者，登记本身不授予权限；原键、15分钟有效期、配置指纹、元数据保护、唯一冻结目标及同事务激活保留。知识或专用来源通过原回执、受控字节、激活前后与失应答参加者裁定，不用通用文件表替代领域绑定。新Core从正式包接入，无需导入旧API运行时。[三步接入与调用](../../../packages/platform-server/src/modules/files/README.md#core-接入)
+
+[Staff参加者](../../../apps/api/src/modules/integrations/rental-file-application.participant.ts)仅接可信staff及rental-core下pickup-evidence、return-evidence、handover-signature、offline-payment-proof、work-order-evidence五组原tuple。沿原Auth主体lease→配置锁顺序，当前角色、地点组织投影、领域对象/阶段与原FileBusinessAccessService复验，外部等待及提交前继续核同一lease；foreign transaction、缺会话/地点/Auth和撤权拒绝。新上传核Controller供给的阶段/批次/地点，旧回执严格按原键、文件描述、上传者和当前对象范围读持久事实，缺后加metadata字段不会凭空改写或拒绝旧依据。[原Staff Controller](../../../apps/api/src/modules/files/staff-uploads.controller.ts)及观察原键、检查绑定均未改。
+
+[原Runtime](../../../apps/api/src/modules/integrations/file-storage.runtime.service.ts)只在createUploadSession、completeUpload、downloadUrl中为可信staff+固定tuple分流到公共应用，其他37个原方法正文与固定父版逐字一致。其他operator/client合法任意module/scene及不匹配历史记录继续原真实兼容编排，不从payload动态创建权威，不全量收窄原DTO。[组合装配](../../../apps/api/src/app.module.ts)登记RENTAL_FILE_AUTHORITY窄token，只注入ModuleRef；调用主体锁时才取原同一AuthService并传原事务，避免Auth→Platform→Rental→文件已有构造链形成回环。缺原实例或授权失败向上返回，不构造空lease或备用Auth。
+
+| 必要核验 | 实际结果与边界 |
+| --- | --- |
+| 作者最终类型 | dev1-staff-file-application-runtime-types退出0，两根/1858源0诊断，公共33/组合238模型官方声明。token只依赖原Auth类型，公共应用无apps/api反向导入 |
+| 原Staff/Runtime一次冒烟 | dev1-staff-file-application-runtime-smoke最终退出0，实际Runtime及原StaffController五组场景create/complete/download、原键observe、归一化文件名/MIME及同key回放、缺Auth/撤权/地点/会话、foreign tx、最终lease失败回滚、operator旧合法输入兼容及一次PUT失应答后仅读原freeze_pending目标均通过；主体→配置锁序保留 |
+| RD实际Provider冒烟 | stdin读取AppModule实际factory后在内存转译调用，构造时零get，业务调用取原Auth一次、透传原tx/lease及this，缺实例/主体拒绝传播；其余37方法AST正文核对通过。ModuleRef/Auth与事务为明确fixture，未实例化全Nest宿主 |
+| 首轮问题 | 参加者按sessionId重建回执未带metadata，现从原幂等键和资产读取原阶段依据，不用本次payload补历史。作者临时路径正则转义语法错、RD跨VM原型和跨调用计数fixture断言均仅更正stdin脚本，生产源码未因此修改；最后只复验相关冒烟 |
+| 资料与资源 | 公共应用/事务/authority context正式出口与三步说明同步；源码短头、模块导读和原四册随片维护。作者guard/stderr为空，taskTemp已删除；RD所有新增验证在内存，没有新永久测试、依赖安装或业务服务 |
+
+数据库、Auth lease/ModuleRef及对象传输仍为明确fixture；没有真实HTTP、Nest完整宿主、MySQL、对象云或干净安装证据。Staff权威当前仍由原API适配提供，Rental私有文件适配、客户/营运完整迁移及公共可靠事件/作业接点继续交付；真实多Core安装、独立更新/回退与接手也未完成。PCH-03/06/08未跨下一档，原问题与集中待清理责任清单由当前接续承接。
+
+RD六份资料定向检查退出0，1176本地链接/186锚点/0问题，稀疏目标按固定Git定位；限定CRLF空白检查退出0。实际AppModule追加单根消费者类型由dev1补核，结果未返回前保留待核状态，不以factory fixture替代完整装配类型。当前11路径检查点仅包含本片公共应用/出口、原Staff参加者/Runtime、AppModule与四份资料，下一Rental私有文件或客户源码排除；正式需求/任务无差异。
+
 <a id="core-public-file-cleanup-download-20261118"></a>
 
 ## 公共文件按租户清理与受保护下载（2026-11-18）

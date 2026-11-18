@@ -1,3 +1,5 @@
+/** 原公共平台、Rental与AI Native的组合装配，显式供给同一服务及数据库实例。
+ * 环境加载和监听由main负责；业务Controller、作业与授权沿所属模块的原入口执行。 */
 import { AiTaskReadPolicyController } from './modules/ai-native/task-read-policy.application';
 import { AiCategoryProposalController } from './modules/ai-native/category-assist/category-proposal-http.application';
 import { AI_NATIVE_CATEGORY_PROPOSAL_PROVIDER } from './modules/ai-native/ai-native-application.providers';
@@ -22,7 +24,7 @@ import { Module } from "@nestjs/common";
 import { PLATFORM_APPEARANCE_DATA_STORE, LEGACY_TENANT_APPEARANCE_READER } from "./modules/platform/platform-appearance-data-store";
 import { PrismaService } from "./modules/database/prisma.service";
 import { AiDesktopBusinessModule } from './modules/ai-native/desktop-business/desktop-business.module';
-import { APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
+import { APP_GUARD, APP_INTERCEPTOR, ModuleRef } from "@nestjs/core";
 import { ApiAuthGuard } from "./common/api-auth.guard";
 import { ConfigModule } from "@nestjs/config";
 import { OperationAuditInterceptor } from "./common/operation-audit.interceptor";
@@ -43,6 +45,7 @@ import { TenantIntegrationService } from "./modules/integrations/tenant-integrat
 import { TENANT_INTEGRATION_APPLICATION, TENANT_INTEGRATION_CONNECTIVITY } from "@rental-os/platform-server/integration-store";
 import { TenantIntegrationRuntimeService } from "./modules/integrations/tenant-integration.runtime.service";
 import { FileStorageRuntimeService } from "./modules/integrations/file-storage.runtime.service";
+import { RENTAL_FILE_AUTHORITY } from "./modules/integrations/rental-file-application.participant";
 import { FileBusinessAccessService } from "./modules/files/file-business-access.service";
 import { PaymentRuntimeService } from "./modules/integrations/payment.runtime.service";
 import { PaymentWebhookController } from "./modules/integrations/payment-webhook.controller";
@@ -488,6 +491,15 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     { provide: TENANT_INTEGRATION_APPLICATION, useExisting: TenantIntegrationService },
     { provide: TENANT_INTEGRATION_CONNECTIVITY, useExisting: TenantIntegrationConnectivityService },
     TenantIntegrationRuntimeService,
+    {
+      provide: RENTAL_FILE_AUTHORITY,
+      inject: [ModuleRef],
+      // Auth→Platform→Rental→文件已有构造链；调用时才取得同一Auth，避免文件反向构造Auth。
+      useFactory: (modules: ModuleRef): Pick<AuthService, "lockRequestWorkspaceAccess"> => ({
+        lockRequestWorkspaceAccess: transaction => modules.get<AuthService>(AuthService, { strict: false })
+          .lockRequestWorkspaceAccess(transaction)
+      })
+    },
     FileStorageRuntimeService,
     FileBusinessAccessService,
     PaymentRuntimeService,

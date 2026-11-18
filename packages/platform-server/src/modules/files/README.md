@@ -1,11 +1,14 @@
 # 文件存储与原回执
 
-本模块持有原公共文件字节处理、格式校验、文件元数据和上传会话持久操作。原组合运行时使用同一数据库及同一事务调用这些实现，原业务控制器继续提供当前授权。当前切片的生命周期编排入口仍在原运行时，独立公共宿主接入由后续切片沿同一状态机完成。[模块出口](index.ts) · [原编排](../../../../../apps/api/src/modules/integrations/file-storage.runtime.service.ts)
+本模块提供公共文件应用、字节处理、格式校验、元数据、上传会话及原回执。Core通过受控宿主登记自己的真实业务权威，再调用同一创建、完成、下载和清理实现。原组合继续提供当前身份、业务授权及专用资料裁定。[模块出口](index.ts) · [原消费者](../../../../../apps/api/src/modules/integrations/file-storage.runtime.service.ts)
 
 ## 阅读路径
 
 | 源码 | 职责及直接消费者 |
 | --- | --- |
+| [公共文件应用](file-storage.application.ts) | 按受控登记消费实际权威，沿原键创建/回读、一次冻结及同事务激活；Core不需要导入旧API运行时 |
+| [业务权威合同](file-storage-authority.ts) | module/type/scene绑定、当前权限、原回执和领域激活参加者；登记本身不授予访问权 |
+| [应用事务端口](file-storage.application-store.ts) | 同一文件表与冻结/激活/清理事务能力，业务表由Core参加者访问 |
 | [公共字节原语](file-storage-primitives.ts) | 原文件类型/大小校验、存储键、会话/资产投影、对象删除及精确限长读取；原运行时继承消费 |
 | [内容冻结内核](file-content-freeze.ts) | 原通用上传完成入口委托同一目标占用、单次写入及原目标读取核验；当前授权、配置锁及专用字节由原参加者供给 |
 | [上传事实创建](file-upload-session.ts) | 原普通创建入口委托同一 ID、原键、15 分钟有效期、配置锁及 pending 文件/会话事务，专用规则由原参加者供给 |
@@ -19,6 +22,27 @@
 | [Rental 附件权限](../../../../rental-core/src/file-access.ts) | 当前业务对象读取 ACL、已发布商品图、客户敏感附件以及业务引用存在性 |
 
 原 [FilesController](../../../../../apps/api/src/modules/files/files.controller.ts) 混合公共工具及实名、承运等 Rental 专用入口，各自保留原 Guard 和业务授权。原 [员工控制器](../../../../../apps/api/src/modules/files/staff-uploads.controller.ts) 继续校验场景、阶段、地点范围、本人上传和检查绑定。原 [文件 ACL 接线](../../../../../apps/api/src/modules/files/file-business-access.service.ts) 供给同一 Rental 事实仓储、报价读取和客户敏感资料参加者。
+
+## Core 接入
+
+1. 宿主提供唯一文件数据库、原事务、集成配置及配置锁。模拟模式由宿主明确选择，真实配置与成功审计仍按实际能力提供。
+2. Core为固定的`businessModule/businessType/uploadScene`提供`FileStorageAuthority`，每次核当前主体、Core使用权、对象/范围及领域证据。未登记或缺真实权威时拒绝，不能从请求payload动态生成登记。
+3. Core从正式`@rental-os/platform-server/files`创建应用并调用原键接口。业务HTTP由所选Core声明，公共宿主不会因为文件表存在而开放所有上传场景。
+
+```ts
+import { FileStorageApplication } from "@rental-os/platform-server/files";
+
+// hostFiles提供真实存储/事务/配置，coreAuthority提供该业务的当前权限与证据。
+const files = new FileStorageApplication(hostFiles, [coreAuthority]);
+await files.createUploadSession(tenantId, request, owner);
+await files.readUploadReceipt(tenantId, originalSessionId, owner);
+await files.completeUpload(tenantId, originalSessionId, completion, owner);
+await files.downloadUrl(tenantId, fileAssetId, owner);
+```
+
+`FileStorageApplicationParticipants`、`FileStorageApplicationTransaction`和各authority context从同一正式出口取得。需要主体锁的Core在参加者的`transaction`中先获取原主体lease，再执行公共应用回调；回调内才锁配置，提交前沿同一lease复验。文件会话、冻结、激活与领域绑定使用同一事务，不在配置锁之后反向获取主体锁。知识等专用来源按需提供原回执、受控字节和同事务激活参加者，unknown继续从所属原操作读取。
+
+每租户清理由`files.cleanup`提供，计时器和租户发现只在宿主登记一次。不同Core的专用保留场景必须由宿主按其实际规则明确供给。普通页面防重不替代原幂等键、文件事实CAS与服务端授权。
 
 ## 业务与字节边界
 
@@ -40,7 +64,7 @@
 
 独立公共 [schema](../../../../../apps/platform-api/prisma/schema.prisma) 已追加原 FileAsset 与 `file_upload_sessions` 两模型及 Tenant 反向关系，公共数据版本为 `0.1.4`，八份迁移由 [数据计划](../../../../../apps/platform-api/src/platform-data.ts) 固定。文件字段、默认、原 ID、字符串状态和历史 JSON 保留，`fileAssetId` 唯一、原幂等唯一键、会话状态索引及 FileAsset 两个租户索引均沿原来源。组合 schema 的 AI 检查反向关系仍由其所属模块装配。新 [公共文件迁移](../../../../../apps/platform-api/prisma/migrations/20261118010000_public_files/migration.sql) 仅用于独立公共库，原组合链不覆盖；本阶段没有执行 DDL。
 
-正式包出口 `@rental-os/platform-server/files` 暴露本模块入口。原运行时构造参数及原 Nest provider 保持，内部仓储使用原 Prisma 实例。Rental 原 ACL 接线通过 `@rental-os/rental-core/file-access` 消费单源业务规则。组合模块/独立宿主的 Provider、Controller、schema 和迁移由装配负责人统一维护。
+正式包出口 `@rental-os/platform-server/files` 暴露本模块入口。原运行时与仓储使用同一 Prisma 实例，Staff 五组固定场景通过公共应用处理，其他旧合法输入和历史记录继续原兼容编排。Staff 的原主体权威由 `RENTAL_FILE_AUTHORITY` 窄 token 提供，组合宿主在实际调用时延迟取得同一 AuthService，避免原 Auth→Platform→Rental→文件构造链回环。缺原 Auth 或文件 ACL 时拒绝受控 Staff 场景。Rental ACL 从 `@rental-os/rental-core/file-access` 消费单源业务规则。组合模块/独立宿主的 Provider、Controller、schema 和迁移由装配负责人统一维护。
 
 存储配置停用或原位变更从 `@rental-os/platform-server/file-integration-dependencies` 复用 [只读核验](file-integration-dependencies.ts)。它使用配置已锁定的同一事务读取当前租户/提供者的文件、上传与清理原收据；active/pending/delete、freeze_pending 及非空 cleanupError 均需先迁移或处理。空 Core 目录也执行核验，查询失败向上返回，不据目录为空推断没有文件依赖。业务附件 ACL 和原配置授权仍由各自入口核定。
 

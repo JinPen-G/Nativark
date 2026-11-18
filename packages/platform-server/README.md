@@ -17,6 +17,7 @@
 | 官方日历来源 | [模块导读](src/modules/official-calendars/README.md)、[来源服务](src/modules/official-calendars/official-calendar-source.service.ts)、[冻结读取器](src/modules/official-calendars/official-calendar-source-reader.ts)；公共主档、只追加年度版本与历史快照 |
 | 字典与编号 | [模块及 API](src/modules/platform-tools/README.md)、[服务](src/modules/platform-tools/platform-tools.service.ts)、[生效配置仓储](src/modules/platform-tools/platform-tools.repository.ts)；当前租户维护、原格式及同事务取号，公共缺省为空 |
 | 文件存储与冻结 | [模块导读](src/modules/files/README.md)、[字节处理](src/modules/files/file-storage-primitives.ts)、[冻结内核](src/modules/files/file-content-freeze.ts)、[文件仓储](src/modules/files/file-storage.repository.ts)；原限长传输、元数据、上传会话和唯一冻结目标，业务 ACL 由所属 Core 提供 |
+| Core 文件应用 | [应用](src/modules/files/file-storage.application.ts)、[权威参加者](src/modules/files/file-storage-authority.ts)、[事务端口](src/modules/files/file-storage.application-store.ts)从 `/files` 提供；受控业务登记后调用同一原键/冻结/激活链 |
 | 文件清理与下载 | [按租户清理](src/modules/files/file-cleanup.ts)、[受保护下载](src/modules/files/file-download.ts)；原完成暂存清理先记 unknown，失应答仅核原键；下载沿实际业务 ACL、原绑定复核与成功审计 |
 | 文件配置围栏 | [只读文件依赖](src/modules/files/file-integration-dependencies.ts) 从 `/file-integration-dependencies` 提供，原配置同事务读取文件、上传/冻结/清理收据，空 Core 目录不能代替依赖证据 |
 | 公共设置 | [租户外观](src/modules/client/tenant-appearance-profile.service.ts)、[本人外观](src/modules/client/account-appearance.service.ts)、[存储端口](src/modules/platform/platform-appearance-data-store.ts)；修订冲突、省略与清空沿原语义 |
@@ -51,6 +52,8 @@ const platform = PlatformServerModule.register({
 文件服务从 `/files` 消费原字节、格式、原存储键和文件表实现；原运行时与元数据仓储已委托同一实现。`createOriginalFileUploadFacts` 通过原配置锁、授权/引用参加者和同事务建立pending事实，`readOriginalFileUploadReceipt` 仅为仍有效会话续签原暂存键，不延长原有效期。`freezeFileUploadContent` 在原完成链中先提交唯一目标再写一次，恢复只核原目标；最终激活及知识绑定仍在原完成事务。公共文件两模型/迁移已提供，业务HTTP及完整应用装配继续按PCH推进，知识、专用检查、企业证据及附件读取仍须由各自原授权链裁定。[文件入口及数据边界](src/modules/files/README.md)
 
 `FileStorageCleanup` 由原宿主按租户调用，宿主继续持有唯一计时器、租户发现与专用保留场景。过期会话和资产的两次写入在同一 callback 事务内提交或回滚，事务内不访问对象存储。`issueFileDownloadReference` 使用所属业务的实际 ACL 和必须成功的审计，在配置或审计等待后复核当前权限及原文件绑定，再返回短时 GET。原专用入口继续裁定实名、知识、企业证明与检查资料。
+
+新Core使用`FileStorageApplication`，由受控宿主供给真实事务、配置和其`FileStorageAuthority`，按固定module/type/scene调用创建、回执、完成、下载及每租户清理。各来源仍复验当前授权，领域激活可参加同一事务；需要主体锁时先锁主体再执行公共回调中的配置锁。接口和三步接入在[文件模块](src/modules/files/README.md#core-接入)维护，Core不需要导入旧API文件运行时。
 
 原Rental配置参加者及零Core公共宿主从 `/file-integration-dependencies` 复用同一只读查询，先取得原配置事务，再核当前租户/提供者的实际文件及上传依赖。停用保留原active/pending/delete判断并显式保护freeze_pending及非空cleanupError，存储位置变更保留原非deleted文件与unknown依据。查询异常向上返回。支付、短信和业务结算仍由原领域供给，不因公共文件表存在而取消其核验。
 
