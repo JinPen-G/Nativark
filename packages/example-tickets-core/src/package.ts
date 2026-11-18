@@ -12,6 +12,7 @@ export function packTicketsPackage(input: {
   source: CoreManifest["source"];
   sourceDirectory: string;
   platformSource: CoreManifest["source"];
+  /** 固定版本的公开接入README原文；参数名保留原程序调用兼容。 */
   platformTask: string;
   host?: CoreHostVersions;
 }) {

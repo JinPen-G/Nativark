@@ -1,5 +1,8 @@
 # Dependencies
 node_modules/
+/.tools/
+/docs/
+/clients/agent-desktop/
 
 # Build output
 dist/

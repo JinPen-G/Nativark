@@ -4,7 +4,7 @@ import { createTicketsOpenApi } from "./openapi";
 import { closeSync, lstatSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
-import { CoreSourceSchema } from "@rental-os/core-contracts";
+import { CORE_GUIDE_SOURCE_FILE, CoreSourceSchema } from "@rental-os/core-contracts";
 import { packTicketsPackage } from "./package";
 
 try {
@@ -24,7 +24,7 @@ try {
       { cwd: repository, encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     if (sameSource.status !== 0 || untracked.trim()) throw new Error("工单或接入合同源码与所选固定提交不同，请先提交并从该版本重新构建");
     const platformSource = CoreSourceSchema.parse(JSON.parse(readFileSync(args[2], "utf8")));
-    const platformTask = execFileSync("git", ["show", `${platformSource.commit}:docs/平台底座/Core接入/平台Core接入-开发任务.md`],
+    const platformTask = execFileSync("git", ["show", `${platformSource.commit}:${CORE_GUIDE_SOURCE_FILE}`],
       { cwd: repository, encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 1024 * 1024 });
     const pack = packTicketsPackage({ directory, source, sourceDirectory: "packages/example-tickets-core", platformSource, platformTask });
     const output = resolve(args[3]);

@@ -25,7 +25,7 @@ npm run lint:example-tickets-api
 node apps/example-tickets-api/dist/prepare-deployment.js <固定底座发行JSON> <已准备工单包目录> <新部署目录>
 ```
 
-底座发行JSON使用正式 `CorePlatformReleaseSchema`，包含真实来源提交、整体摘要、平台 / 合同 / Node版本及当前公共数据计划，不能使用`latest`或占位摘要。结果返回 `core.deployment.lock.json` 与4份公共加1份工单的Prisma迁移组合；原SQL字节 / 摘要保留，输出路径不得覆盖已有部署。准备命令不连接数据库、不执行Core安装脚本。
+底座发行JSON使用正式 `CorePlatformReleaseSchema`，包含真实来源提交、整体摘要、平台 / 合同 / Node版本及当前公共数据计划，不能使用`latest`或占位摘要。结果返回 `core.deployment.lock.json` 与所选公共迁移加1份工单的Prisma迁移组合；原SQL字节 / 摘要保留，输出路径不得覆盖已有部署。准备命令不连接数据库、不执行Core安装脚本。
 
 在获准独立数据库部署环境，使用同一组合的 schema 路径执行 `prisma migrate deploy --schema <新部署目录>/schema.prisma`，然后按公共宿主命令创建SaaS主体。Core迁移原账名称固定为 `core.example-tickets.tickets.initial`，与运行观察相同；不能手工补“迁移成功”收据。配置 `CORE_DEPLOYMENT_LOCK` 指向同一固定锁、`DATABASE_URL` / `AUTH_TOKEN_SECRET` 后运行 `npm run start -w @rental-os/example-tickets-api`。
 
@@ -39,6 +39,6 @@ npm run register:permissions -w @rental-os/example-tickets-api
 
 成功输出 `status=registered`、所选Core版本与 `permissions=6`，随后权限树可读到精确工单权限。登记失败时核包摘要、权限归属/类型及数据库，不能跳过门禁或用通配角色补成功。该命令不应用迁移、创建业务数据或授予租户/成员Core。
 
-SaaS管理员先创建测试租户，再使用 `/api/platform/core-host/tenant-grants` 开通工单；租户管理员给本人及需要的成员分配Core与工单角色，再办理首次绑定。业务入口是 `/api/cores/example-tickets/...`，支持创建 / 分派 / 开始 / 关闭及分页 / 原收据。包 / 注册、租户授权、成员分配、绑定 / 数据就绪分别成立。[同源接口资料](../../packages/example-tickets-core/src/openapi.ts) · [快速指南](../../docs/平台底座/Core接入/平台Core接入-开发任务.md#core-quick-start)
+SaaS管理员先创建测试租户，再使用 `/api/platform/core-host/tenant-grants` 开通工单；租户管理员给本人及需要的成员分配Core与工单角色，再办理首次绑定。业务入口是 `/api/cores/example-tickets/...`，支持创建 / 分派 / 开始 / 关闭及分页 / 原收据。包 / 注册、租户授权、成员分配、绑定 / 数据就绪分别成立。[同源接口资料](../../packages/example-tickets-core/src/openapi.ts) · [快速指南](../../packages/core-contracts/README.md#五步快速接入)
 
-当前已有实际Nest组合、内存类型、必要离线SQL业务及部署迁移组合证据；严格包核验接入后的干净包运行、真实数据库 / HTTP / 后台页面仍待验证。[当前缺口与证据](../../docs/平台底座/Core接入/平台Core接入-协作接续.md)
+当前已有实际Nest组合、内存类型、必要离线SQL业务及部署迁移组合证据；严格包核验接入后的干净包运行、真实数据库 / HTTP / 后台页面仍待验证。

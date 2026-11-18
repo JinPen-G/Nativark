@@ -2,7 +2,52 @@
 
 这个包让底座和业务 Core 使用同一份清单、版本规则和对象引用。正式入口为 `@rental-os/core-contracts`；目录检查使用 Node 专用出口 `@rental-os/core-contracts/package`。包不导入 Rental、Nest、Prisma 或模型 SDK。
 
-**目前已实现清单/页面/服务端合同、静态包检查、OpenAPI 贡献组合、独立升级预检及本地/固定 GitHub Release 包准备。** [公共宿主适配](../platform-core-host/README.md)已提供真实身份、授权/绑定和HTTP主接点，默认无Core宿主消费空目录；选中Core的完整运行/持久化、页面和安装验证仍在拆分中。下面的检查可以运行；检查通过不代表 Core 已安装或业务可用。完整接入手册在[五步快速接入](../../docs/平台底座/Core接入/平台Core接入-开发任务.md#core-quick-start)随实现维护。
+**目前已实现清单/页面/服务端合同、静态包检查、OpenAPI 贡献组合、独立升级预检及本地/固定 GitHub Release 包准备。** [公共宿主适配](../platform-core-host/README.md)已提供真实身份、授权/绑定和HTTP主接点，默认无Core宿主消费空目录；选中Core的完整运行/持久化、页面和安装验证仍在拆分中。开发新Core从下面的五步开始，本手册与代码一起公开发布。
+
+<a id="core-quick-start"></a>
+
+## 五步快速接入
+
+准备 Node.js 22 LTS、npm 锁定依赖和独立 MySQL 开发库，环境配置见[根 README](../../README.md#本地运行)。默认无Core的[API宿主](../../apps/platform-api/README.md)和[后台宿主](../../apps/platform-admin/README.md)是公共框架；[工单Core](../example-tickets-core/README.md)提供业务链的开发样例。完整安装与真实运行验收仍在继续，具体命令的前置按各宿主说明准备。
+
+1. **从最小Core确定业务和标识。** 以工单包为参考，在自己的Core中实现实体、状态、校验和存储。维护[业务合同](../example-tickets-core/src/contracts.ts)、[清单](../example-tickets-core/src/manifest.ts)及[独立迁移](../example-tickets-core/migrations/001-tickets.sql)，更换Core ID、名称、版本和业务字段。Core自行选择租户或自己的容器范围；会员、库存、金额等领域规则由业务决定。清单使用本文的唯一schema，固定声明来源、兼容范围、权限、入口和数据版本。
+2. **提供同源服务与API。** 参考[服务](../example-tickets-core/src/service.ts)、[HTTP合同](../example-tickets-core/src/http.ts)、[服务端贡献](../example-tickets-core/src/server.ts)和[Nest适配](../example-tickets-core/src/nest.ts)。复用公共当前身份、Core授权与成员范围，业务再校验角色、对象及提交条件；OpenAPI从同一请求/响应schema生成。Core可以省略AI贡献，普通业务仍按原权限工作。
+3. **声明页面和本页主按钮。** 参考[工单四页](../example-tickets-core/admin/index.tsx)，从 `@rental-os/platform-admin/core` 使用 `CorePage`、`useCoreForm`、`CoreList` 和 `useCoreRequest`。声明路由、父级、权限和页面动作，复用框架侧栏、面包屑、主按钮、表单反馈及缓存隔离。页面通过已注册映射导航，避免自行复制外壳或请求客户端。宿主接入见[工单Web的三处装配](../../apps/example-tickets-admin/README.md#接入只看这三处)。
+4. **构建并检查固定标准包。** 包含 `core.manifest.json`、实际入口、同版本 `openapi.json`、生成的 `CORE_GUIDE.md`、README、LICENSE及所声明迁移。先提交自己的源码，再按[工单打包说明](../example-tickets-core/README.md)构建并生成一个新包；用下面的共用检查核清单、路径、入口和兼容。安装准备和更新预检分别见本文后面的说明，未知结果沿原包或操作读取。
+5. **只在宿主装配，然后授权使用。** 参考[工单API装配](../../apps/example-tickets-api/src/assembly.ts)和[Web入口](../../apps/example-tickets-admin/src/main.tsx)，将受控Core贡献交给公共宿主，两端使用同一标准包和部署锁。按[服务端步骤](../../apps/example-tickets-api/README.md)准备迁移、初始化公共账号并登记精确权限；SaaS管理员授权租户，租户管理员分配成员及业务角色，再完成Core绑定与业务设置。包、租户授权、成员分配和业务就绪分别成立。
+
+```sh
+npm run build -w @rental-os/core-contracts
+node packages/core-contracts/dist/check.js <已解包Core目录> --host <宿主版本JSON> --json
+node packages/core-contracts/dist/capabilities.js --query CorePage --json
+```
+
+验证至少覆盖业务正常操作、未授权/跨租户拒绝、同请求键读取原结果、单Core停用与重开，以及不选该Core时公共登录和设置可用。服务端事务、授权与原收据负责正确性，界面防重不能替代它们。底座和Core各自发布新版本，使用同一版本锁预检；数据迁移保留原文，升级不重置用户配置或授权。
+
+<a id="core-agent-template"></a>
+
+## 交给开发Agent的任务模板
+
+将下面的文本和目标业务要求一起交给Agent。无需提供维护者的内部开发文档。
+
+```text
+请在这个仓库开发一个业务Core。
+先读 packages/core-contracts/README.md 的五步快速接入，
+按需要查看 packages/example-tickets-core 和两个工单宿主的真实入口。
+Core ID、业务范围、字段、动作与角色按我提供的业务要求定义。
+复用正式平台合同、身份、存储协调、后台外壳、表单、列表和请求工具。
+页面路由与主按钮用正式贡献声明，只修改Core及明确的宿主装配配置。
+请求/响应和OpenAPI使用同一schema，权限、对象、事务与幂等在服务端校验。
+AI工具可选，不提供时不要扫描API或数据库自行补工具。
+同步源码职责和Core README，生成标准包、CORE_GUIDE.md与API资料。
+每个完整切片只做必要类型检查和一次相关冒烟，不新增大量测试脚本。
+交付包版本/摘要、实际修改入口、验证结果和未验条件。
+安装、迁移、服务启动与真实业务连接按我明确授权的环境执行。
+```
+
+### 快速路径之外按需查阅
+
+查功能从下方能力索引开始；查字段和注册规则沿正式源码；查宿主、数据或界面分别看对应模块README。后续章节提供包检查、服务端/HTTP/页面贡献、独立更新和GitHub发现的详细参考。
 
 ## 找到平台已有的功能
 
@@ -17,7 +62,7 @@ node packages/core-contracts/dist/capabilities.js --id "api:GET:/api/auth/me" --
 
 每项结果包含名称、类型、归属、版本、源码路径和行号、正式导入或 HTTP/页面入口，以及可用的文档链接和原声明元数据。公共导出还给出直接导入计数和前5个源码位置，可以从已有消费者了解用法。查询默认返回20项，使用 `--limit`（最多100项）和 `--offset` 分页，`nextOffset` 给出下一页位置。`--owner` 按输出中的准确归属筛选，`--kind` 支持 `module`、`export`、`ui`、`page`、`api`、`extension`。`--repo` 可显式指定本次源码根目录。
 
-索引从 workspace 包出口、TypeScript 导出与源码说明、Controller 路由、后台 `APP_ROUTES`、Core 页面贡献和 UIArc 来源清单读取。源码新增或迁移后再次查询即可反映变化。新增 Core 使用自己的正式包出口、清单、页面和 API 贡献登记能力，宿主可通过 `@rental-os/core-contracts/development` 的 `describeCoreDevelopmentCapabilities` 取得同源目录，查询合同由该出口提供。完整接入路径见[开发能力索引设计](../../docs/平台底座/Core接入/平台Core接入-开发任务.md#capability-index)。
+索引从 workspace 包出口、TypeScript 导出与源码说明、Controller 路由、后台 `APP_ROUTES`、Core 页面贡献和 UIArc 来源清单读取。源码新增或迁移后再次查询即可反映变化。新增 Core 使用自己的正式包出口、清单、页面和 API 贡献登记能力，宿主可通过 `@rental-os/core-contracts/development` 的 `describeCoreDevelopmentCapabilities` 取得同源目录，查询合同由该出口提供。[能力目录实现](src/development.ts)
 
 输出固定 `audience=development`，`source.snapshot=working-tree` 和当前 Git 修订说明本次读取位置。Git 检出目录同时给出 `source.workingTreeChanged`，表示扫描时是否有未提交修改；当前修订不是这些修改的固定版本。`coverage` 列出实际扫描的来源，并从 Git 跟踪的 workspace 与独立客户端包清单标明未检出的 `notPresent`；已检出但不属于当前扫描范围的独立包标为 `partial`。静态解析缺口通过 `issues` 表达。源码声明、宿主登记和运行验证分别核定，API 的 `registration` 标记源码或明确宿主登记，UIArc 条目标记为保留源码。用途/约束优先读取准确的源码注释和模块 README，缺少说明的条目保留准确入口供后续整改。
 
@@ -220,15 +265,15 @@ node packages/core-contracts/dist/plan-update.js <当前锁JSON> <升级请求JS
 
 ## 生成随包指南与归档
 
-`CORE_GUIDE.md` 从任务册的快速入口和Agent模板生成。传入Core清单与含 `repository`/`commit` 的底座来源JSON，底座提交必须已在当前本地Git中存在；来源不含凭据。
+`CORE_GUIDE.md` 从本README的五步快速入口和Agent模板生成。传入Core清单与含 `repository`/`commit` 的底座来源JSON，底座提交必须已在当前本地Git中存在并包含这份公开手册；来源不含凭据。
 
 ```sh
 node packages/core-contracts/dist/generate-guide.js <Core清单JSON> <底座来源JSON>
 ```
 
-命令只向标准输出写Markdown，不覆盖包内已有指南。程序内可从正式出口调用 `renderCoreGuide(manifest, taskDocument, platformSource)`；任务册/源码引用固定到指定提交，服务端、后台、API及已声明可选贡献链接到包内入口。README/LICENSE也可从生成指南直接打开。缺少原文锚点会拒绝生成，指南保留对应版本的支持状态。完整页面接入要求见[页面声明](../../docs/平台底座/Core接入/平台Core接入-开发任务.md#declarative-page-contract)，实际React适配与样例已提供，主宿主接线仍待实施。
+命令只向标准输出写Markdown，不覆盖包内已有指南。程序内可从正式出口调用 `renderCoreGuide(manifest, guideDocument, platformSource)`；公开手册及源码引用固定到指定提交，服务端、后台、API及已声明可选贡献链接到包内入口。README/LICENSE也可从生成指南直接打开。缺少原文锚点会拒绝生成，指南保留对应版本的支持状态。页面接入见[公共后台包](../platform-admin/README.md)和本文页面声明章节。
 
-打包时复用正式出口 `pinCoreDocumentationLinks(text, sourceFile, source)`，以原源码文件路径解释相对链接并固定到本次提交，保留外链、围栏及行内代码示例。从任务册抽出的章节锚点指回原任务册；完整README可传第四参数true保留本页锚点。链接越出固定源码仓库时拒绝，生成过程不访问网络或执行文档命令。[生成源码](src/guide.ts) · [工单打包消费者](../example-tickets-core/src/package.ts)
+打包时复用正式出口 `pinCoreDocumentationLinks(text, sourceFile, source)`，以原源码文件路径解释相对链接并固定到本次提交，保留外链、围栏及行内代码示例。抽出的章节锚点指回公开手册；完整README可传第四参数true保留本页锚点。链接越出固定源码仓库时拒绝，生成过程不访问网络或执行文档命令。[生成源码](src/guide.ts) · [工单打包消费者](../example-tickets-core/src/package.ts)
 
 Node专用出口 `@rental-os/core-contracts/archive` 提供 `createCoreArchive(files)` 与 `readCoreArchive(bytes, expectedSha256)`，采用USTAR+gzip。相同文件按固定排序、权限和时间打包；校验整个压缩包SHA-256后返回内存文件。首版最多5000文件、单文件32MiB、解压总量128MiB，只接普通文件，不接PAX/软硬链接、目录条目、重复或越界路径。包内禁止实际 `.env`、Git元数据和node_modules；保留 `.env.example` 模板入口。
 
@@ -326,4 +371,4 @@ npm test -w @rental-os/core-contracts
 
 [单一验证入口](test/core-contracts.test.cjs)使用本树源码进行类型检查和编译，运行必要合同用例后清理本树 `output/.tmp/core-contracts`。它验证空/单/双 Core 声明、独立版本、越界/链接路径、迁移摘要、缺文件与 CLI；这些是静态及离线行为证据，不是租户、数据库或浏览器验收。
 
-[正式需求](../../docs/平台底座/Core接入/平台Core接入-需求.md)与[任务](../../docs/平台底座/Core接入/平台Core接入-开发任务.md)维护全量交付；[开发记录](../../docs/平台底座/Core接入/平台Core接入-开发记录.md)记录已实现阶段，[协作接续](../../docs/平台底座/Core接入/平台Core接入-协作接续.md)定位下一入口。
+公开使用说明以本手册及各源码模块README为入口。维护者的内部需求、任务、记录与接续在本地单独维护，标准包和指南生成均不依赖它们。

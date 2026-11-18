@@ -81,9 +81,9 @@ npm run pack:core -w @rental-os/example-tickets-core -- <Core仓库HTTPS地址> 
 
 命令先构建当前Core和合同，再核所选提交与当前Core/合同源码一致，生成清单、同源OpenAPI和固定版本CORE_GUIDE.md，按清单收集编译入口/后台TSX/迁移/许可。包内README链接转换为固定源码引用，根源码原文不另维护副本。输出packed/sha256/files的JSON，之后使用平台prepare-install命令核版本并准备待部署目录。重复输出拒绝覆盖；失败不安装、执行迁移或授权Core。[打包实现](src/package.ts) · [命令入口](src/metadata.ts)
 
-独立发行目录可从Node专用 `@rental-os/example-tickets-core/package` 使用packTicketsPackage，显式提供自己的编译目录、Core/底座来源及固定任务原文。它只读声明文件并返回标准包字节，调用者负责在该来源版本构建后写一个新文件；标准包格式、检查和安装仍复用公共出口，不做第二套解压/安装器。
+独立发行目录可从Node专用 `@rental-os/example-tickets-core/package` 使用packTicketsPackage，显式提供自己的编译目录、Core/底座来源及固定公开接入README原文。公开手册内容仍通过旧参数名`platformTask`传入，保持已有程序调用兼容。它只读声明文件并返回标准包字节，调用者负责在该来源版本构建后写一个新文件；标准包格式、检查和安装仍复用公共出口，不做第二套解压/安装器。
 
-生成的CORE_GUIDE直接链接本包API、服务端/后台入口和README/LICENSE。任务册和源码资料固定到各自来源提交，README保留本页锚点和代码示例；两份资料复用同一链接规则，Core作者维护原README即可。[资料生成](../core-contracts/src/guide.ts)
+生成的CORE_GUIDE直接链接本包API、服务端/后台入口和README/LICENSE。公开接入手册和源码资料固定到各自来源提交，README保留本页锚点和代码示例；两份资料复用同一链接规则，Core作者维护原README即可。[资料生成](../core-contracts/src/guide.ts)
 
 ## HTTP 与 API 文档
 
@@ -124,4 +124,4 @@ npm run pack:core -w @rental-os/example-tickets-core -- <Core仓库HTTPS地址> 
 
 [index](src/index.ts) → [业务schema](src/contracts.ts)/[服务](src/service.ts)/[服务端注册](src/server.ts)/[发行清单](src/manifest.ts)。[Nest入口](src/nest.ts) → 同一[HTTP合同](src/http.ts)与服务，[OpenAPI](src/openapi.ts)及[元数据命令](src/metadata.ts)供离线资料。[MySQL私有适配](src/mysql.ts) → [独立迁移](migrations/001-tickets.sql)。公开领域出口不依赖Rental/Nest/Prisma；私有mysql/nest出口才读取对应依赖。
 
-当前类型和反向依赖检查通过，离线SQL事务替身核过完整业务链、当前权限/租户拒绝、修订与同键收据、审计失败回滚和参数化；没有运行真实MySQL、HTTP或后台。固定证据与剩余接线见[PCH开发记录](../../docs/平台底座/Core接入/平台Core接入-开发记录.md#core-tickets-domain-20261114)。不新增专用测试运行器，继续复用必要类型检查及原定向验证。
+当前类型和反向依赖检查通过，离线SQL事务替身核过完整业务链、当前权限/租户拒绝、修订与同键收据、审计失败回滚和参数化；没有运行真实MySQL、HTTP或后台。不新增专用测试运行器，继续复用必要类型检查及原定向验证。

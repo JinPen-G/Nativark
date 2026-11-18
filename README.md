@@ -35,7 +35,7 @@ Nativark 将可复用的 SaaS 能力与行业业务分开维护，使新业务�
 | 基础服务 | 文件存储、通知、审计及事件、作业的公共接点 | 裁定业务文件 ACL、释放字段、消息内容和事件事实 |
 | Core 生命周期 | 受控注册、兼容检查、租户授权、成员分配、绑定与停用接点 | 维护领域配置、初始化、迁移、历史读取和在途业务收尾 |
 
-已有公共实现可从当前组合工程中查阅。Core 注册、成员分配、多 Core 隔离及独立运行的实现范围和验收入口由正式接入文档维护。[Core 接入需求](docs/平台底座/Core接入/平台Core接入-需求.md) · [开发任务](docs/平台底座/Core接入/平台Core接入-开发任务.md)
+已有公共实现可从当前组合工程的 [API 模块](apps/api/src/modules)和[公共契约](packages/shared/src/index.ts)查阅。开发新业务Core先读[五步接入手册与Agent模板](packages/core-contracts/README.md#五步快速接入)，再按需查看真实工单示例及公共模块。
 
 ## 理解架构
 
@@ -83,7 +83,7 @@ Core 持有业务事实与最终裁定。Agent 通过明确发布的工具读取
 
 Core 的 AI 工具为可选贡献。普通业务通过页面和 API 按权限运行，Agent 查询与操作入口在工具发布后按授权开放。工具的开放范围由发布状态、租户授权、成员使用权、角色、资源范围、AI 政策及必要批准共同决定。租户订阅期限统一管理，各 Core 的开通与停用分别控制。
 
-跨 Core 数据协作将在具体场景中设计受控对象引用、接口和事件，数据由所属 Core 维护。[接口与生命周期设计](docs/平台底座/Core接入/平台Core接入-开发任务.md#contract-design) · [接入指南](docs/平台底座/Core接入/平台Core接入-开发任务.md#integration-guide) · [跨 Core 协作规划](docs/平台底座/未来规划/平台底座-通用化与开源方案.md#cross-core-collaboration)
+跨 Core 数据协作将在具体场景中设计受控对象引用、接口和事件，数据由所属 Core 维护。
 
 ## Rental Core 示范
 
@@ -91,7 +91,7 @@ Rental Core 是首个业务示范，提供商品、资产、库存、报价、�
 
 这个示范将展示 Core 如何使用公共身份、租户、后台和 AI 接入机制，同时保有业务模型、事务、金额、幂等与历史快照。客户网站、员工与客户小程序、企业客户门户提供该业务的多端消费样例。
 
-现有实现与业务验收范围沿 Rental 专项维护。开发者可从实际 Controller、领域服务和客户端调用链开始阅读。[Rental Core 需求](<docs/Rental Core/Rental Core-需求.md>) · [品类治理](<docs/Rental Core/品类治理/品类治理-需求.md>) · [业务源码](apps/api/src/modules/rental-core)
+开发者可从实际 Controller、领域服务和客户端调用链开始阅读。[业务源码](apps/api/src/modules/rental-core)
 
 ## 项目组成
 
@@ -114,13 +114,12 @@ Rental Core 是首个业务示范，提供商品、资产、库存、报价、�
 | `packages/ui-arc` | 组件源码、来源与许可 | [组件说明](packages/ui-arc/README.md) |
 | `packages/mcp-server` | 受控 MCP 传输和工具适配 | [包说明](packages/mcp-server/README.md) |
 | `clients/harness-plugin` | Harness 客户端对标准 MCP 的消费 | [插件说明](clients/harness-plugin/README.md) |
-| `apps/api/src/modules/rental-core` | 首个业务 Core 的领域实现 | [Rental 专项](<docs/Rental Core/Rental Core-协作接续.md>) |
+| `apps/api/src/modules/rental-core` | 首个业务 Core 的领域实现 | [领域模块](apps/api/src/modules/rental-core) |
 | `apps/tenant-website`、`apps/enterprise-portal` | Rental 客户网站与企业客户门户 | [客户网站](apps/tenant-website/README.md)、[企业门户](apps/enterprise-portal/README.md) |
 | `apps/miniprogram`、`apps/staff-miniprogram` | Rental 客户与员工微信小程序 | [客户小程序](apps/miniprogram/README.md)、[员工小程序](apps/staff-miniprogram/README.md) |
 | `tests`、`scripts` | 契约、业务、宿主验证与开发、运维脚本 | [命令清单](package.json) |
-| `docs` | 正式需求、任务、阶段记录、接续与公共技术资料 | [文档导航](docs/文档导航.md) |
 
-根构建按 shared → MCP server → API → admin 执行。网站、小程序和 `clients/` 使用各自构建入口。平台营销网站位于 `apps/website` 与 `apps/website-next`，原定制客户端及上游来源保留在 `clients/agent-desktop`。[静态网站](apps/website/README.md) · [Next.js 网站](apps/website-next/README.md) · [保留客户端](clients/agent-desktop/README.md)
+根构建按 shared → MCP server → API → admin 执行。网站、小程序和 Harness 插件使用各自构建入口。[静态网站](apps/website/README.md) · [Next.js 网站](apps/website-next/README.md) · [Harness 插件](clients/harness-plugin/README.md)
 
 ## 本地运行
 
@@ -190,7 +189,7 @@ npm run db:migrate:deploy
 npm run db:seed
 ```
 
-重复 Seed 会更新示范账号、角色和配置，请在自己的开发库使用。新增迁移、已有库升级与恢复流程见数据库指南。[Compose 配置](docker-compose.yml) · [数据库指南](docs/公共技术资料/开发指南/数据库-启动指南.md)
+重复 Seed 会更新示范账号、角色和配置，请在自己的开发库使用。[Compose 配置](docker-compose.yml) · [数据库迁移](apps/api/prisma/migrations)
 
 ### 4. 启动 API 与管理后台
 
@@ -209,7 +208,7 @@ npm run dev
 
 API 与后台也可分别通过 `npm run dev:api`、`npm run dev:admin` 启动。使用 Seed 中自己设置的账号口令登录对应平台或示范租户。支付、短信、对象存储、微信与模型服务按所需场景配置及验证。
 
-其他示范客户端的运行方式见各自 README，详细架构与环境约束见公共指南。[项目开发指南](docs/公共技术资料/开发指南/项目-开发指南.md)
+其他示范客户端的运行方式见[项目组成](#项目组成)列出的各端 README。
 
 ## 选择一个开发入口
 
@@ -218,12 +217,12 @@ API 与后台也可分别通过 `npm run dev:api`、`npm run dev:admin` 启动�
 | 开发内容 | 实际入口 | 需要同时核对 |
 | --- | --- | --- |
 | 公共身份、租户与权限 | [Auth](apps/api/src/modules/auth/auth.service.ts)、[Guard](apps/api/src/common/api-auth.guard.ts)、[请求上下文](apps/api/src/common/request-identity.ts)、[平台服务](apps/api/src/modules/platform/platform.service.ts) | 当前身份、角色、租户及业务范围、会话撤销、审计 |
-| Core 接入与底座抽离 | [接入需求](docs/平台底座/Core接入/平台Core接入-需求.md)、[接口设计](docs/平台底座/Core接入/平台Core接入-开发任务.md#contract-design) | 数据所有者、正式出口、版本、构建组合和初始化事务 |
+| Core 接入与底座抽离 | [应用装配](apps/api/src/app.module.ts)、[公共契约](packages/shared/src/index.ts) | 数据所有者、正式出口、版本、构建组合和初始化事务 |
 | 管理后台与页面接入 | [后台规则](apps/admin/AGENTS.md)、[导航](apps/admin/src/app/navigation.tsx)、[路由](apps/admin/src/app/AppRouter.tsx) | 服务端授权、主题与语言、空错态、请求与缓存隔离 |
 | 公共 API 与运行时契约 | [shared 出口](packages/shared/src/index.ts)、[OpenAPI](apps/api/src/contracts/openapi-document.ts) | DTO、schema、生产者、各端消费者及产物版本 |
-| AI Native | [专项入口](<docs/AI Native/AI Native-协作接续.md>)、[应用组合](apps/api/src/modules/ai-native/ai-native-application.providers.ts) | 工具发布、当前权限、Gateway、预算、批准与原收据 |
-| Rental 业务示范 | [Core 源码](apps/api/src/modules/rental-core)、[业务需求](<docs/Rental Core/Rental Core-需求.md>) | 业务规则、历史快照、库存与金额、幂等及事务 |
-| 外部 Agent 客户端 | [MCP](docs/MCP服务/MCP服务-协作接续.md)、[Harness](docs/Harness插件/Harness插件-协作接续.md) | 原身份、目标授权、数据投影和工具可用性 |
+| AI Native | [应用组合](apps/api/src/modules/ai-native/ai-native-application.providers.ts) | 工具发布、当前权限、Gateway、预算、批准与原收据 |
+| Rental 业务示范 | [Core 源码](apps/api/src/modules/rental-core) | 业务规则、历史快照、库存与金额、幂等及事务 |
+| 外部 Agent 客户端 | [MCP 服务](packages/mcp-server/README.md)、[Harness 插件](clients/harness-plugin/README.md) | 原身份、目标授权、数据投影和工具可用性 |
 
 阅读一项功能时，沿页面或调用方 → API 封装 → Controller / Guard → 应用与领域服务 → 仓储 / 外部适配 → 原结果读取追踪。
 
@@ -233,7 +232,7 @@ API 与后台也可分别通过 `npm run dev:api`、`npm run dev:admin` 启动�
 
 | 验证内容 | 入口 | 证据范围 |
 | --- | --- | --- |
-| 文档 | `npm run docs:check` | 白名单文档链接、共用入口和 AI Native 任务表算术 |
+| 本地维护文档 | `npm run docs:check` | 维护者工作区具备内部文档时执行 |
 | 文档检查器 | `npm run test:docs` | 检查规则自身的回归 |
 | 公共接口 | `npm run contract:validate` | Controller、OpenAPI、DTO、路由权限和客户写入归属的静态一致性 |
 | 后台结构 | `npm run test:admin` | 后台约定与结构检查 |
@@ -246,21 +245,12 @@ API 与后台也可分别通过 `npm run dev:api`、`npm run dev:admin` 启动�
 
 欢迎围绕公共底座、Core 接入和示范业务贡献代码。新能力先明确归属、接口与验收范围，再从实际调用链实现一个完整功能阶段。
 
-- 从文档导航阅读对应需求、任务和当前接续，核对工作树与文件归属。
+- 从相关模块入口核对工作树、文件归属与验证方式。
 - 公共协议通过正式包出口复用，接口变更同步生产者、DTO / OpenAPI 和直接消费者。
 - 关键文件用简短说明表达职责与限制，复杂事务、并发和恢复逻辑解释实现原因。
 - 完成必要验证后，记录命令、结果、固定版本和剩余问题，提交范围清晰的改动。
 
-每个正式专项的文档按四册维护。
-
-| 文档 | 职责 |
-| --- | --- |
-| `主题-需求.md` | 产品范围、业务规则和验收依据 |
-| `主题-开发任务.md` | 固定任务、依赖、实施要求与有证据的进度 |
-| `主题-开发记录.md` | 功能阶段的实现、验证、问题及来源 |
-| `主题-协作接续.md` | 当前目标、写入归属、未完成项和下一入口 |
-
-开发 AI 与人类贡献者使用相同的项目规则，必要的源码说明与文档随实现更新。历史原文通过固定 Git 版本或专项归档保留。[文档导航](docs/文档导航.md) · [共用开发规则](AGENTS.md) · [Claude 入口](CLAUDE.md)
+开源贡献的使用说明随对应源码维护。仓库根目录 `docs/` 为维护者私有开发资料，仅在本地保存，排除在提交与发行范围之外。[共用开发规则](AGENTS.md) · [Claude 入口](CLAUDE.md)
 
 ## 部署前检查
 
@@ -271,15 +261,14 @@ API 与后台也可分别通过 `npm run dev:api`、`npm run dev:admin` 启动�
 - 已启用供应商的真实调用、原操作核对、日志脱敏和维护责任。
 - 发行包的第三方许可、来源文件和素材分发范围。
 
-部署、备份与恢复操作沿目标环境和既有脚本办理。安全问题通过维护者确认的私密渠道报告，材料先脱敏。[运维脚本](scripts/ops) · [数据库与恢复指南](docs/公共技术资料/开发指南/数据库-启动指南.md)
+部署、备份与恢复操作沿目标环境和既有脚本办理。安全问题通过维护者确认的私密渠道报告，材料先脱敏。[运维脚本](scripts/ops)
 
 ## 许可证与第三方内容
 
-Nativark 自有源码及相关文档采用 MIT License，允许使用、修改、分发和商业使用。分发时须保留版权与许可证声明。[MIT 许可证](LICENSE)
+Nativark 公开发布的自有源码及配套使用说明采用 MIT License，允许使用、修改、分发和商业使用。分发时须保留版权与许可证声明。[MIT 许可证](LICENSE)
 
 引用的组件、客户端源码和素材按各自许可及来源声明使用，随发行包保留对应版权与许可文件。
 
 - UIArc 组件按其来源与许可使用。[UIArc 许可](packages/ui-arc/LICENSE) · [来源说明](packages/ui-arc/README.md)
 - Animate UI 等保留组件的许可随对应源码维护。[侧栏许可](packages/platform-admin/src/components/animate-sidebar/LICENSE.md) · [组件来源](apps/admin/src/components/animate-sidebar/README.md)
-- 原定制客户端中的上游 Harness 按原许可和第三方声明使用。[上游许可](clients/agent-desktop/harness/LICENSE) · [第三方声明](clients/agent-desktop/harness/THIRD_PARTY_NOTICES.md) · [来源记录](clients/agent-desktop/UPSTREAM.json)
 - 网站图片、字体、标志与动画的使用范围沿素材来源核定。[网站说明](apps/website/README.md)
