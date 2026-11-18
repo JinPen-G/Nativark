@@ -6,7 +6,7 @@ import { z } from 'zod';
 import type { AiCreditBalance, AiCreditRequest, AiCreditSummary, AiTenantCallRecord, AiTenantCallRecords } from '@rental-os/shared';
 import { PrismaService } from '../../database/prisma.service';
 import { AuthService } from '../../auth/auth.service';
-import { creditAllocations, creditConsumption } from './platform-credit-limit';
+import { creditAllocations, creditAmount, creditAtoms, creditConsumption } from './platform-credit-limit';
 import { isGatewayConfig } from '../gateway-contract-validation';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { modelUsageSchema } from '../model-gateway.ports';
@@ -208,8 +208,9 @@ export class AiCreditService {
       const balances: AiCreditBalance[] = [];
       for (const row of accounts) {
         const usage = await creditConsumption(tx, actor.tenantId, row.currency);
-        balances.push({ currency: row.currency, grantedAmount: row.grantedAmount.toFixed(6), spentAmount: usage.spent.toFixed(6),
-          heldAmount: usage.held.toFixed(6), availableAmount: Prisma.Decimal.max(0, row.grantedAmount.sub(usage.spent).sub(usage.held)).toFixed(6),
+        const available = creditAtoms(row.grantedAmount) - usage.spent - usage.held;
+        balances.push({ currency: row.currency, grantedAmount: row.grantedAmount.toFixed(6), spentAmount: creditAmount(usage.spent),
+          heldAmount: creditAmount(usage.held), availableAmount: creditAmount(available > 0n ? available : 0n),
           revision: row.revision, allocations: Object.entries(creditAllocations(row.allocationsJson)).map(([workspaceId, amount]) => ({ workspaceId, amount })) });
       }
       await recheck(); return { currencies, balances, requests: requests.slice(0, 20).map(present), workspaces,
@@ -264,14 +265,14 @@ export class AiCreditService {
         const allowed = await tx.businessWorkspace.findMany({ where: { tenantId: actor.tenantId,
           id: { in: Object.keys(allocations) } }, select: { id: true, status: true }, take: 65 });
         if (allowed.length !== Object.keys(allocations).length) fail('AI_ACCESS_DENIED', 403);
-        const total = Object.values(allocations).reduce((sum, value) => sum.add(value), new Prisma.Decimal(0));
-        if (total.gt(account.grantedAmount)) fail('AI_CREDIT_ALLOCATION_EXCEEDED');
+        const total = Object.values(allocations).reduce((sum, value) => sum + creditAtoms(value), 0n);
+        if (total > creditAtoms(account.grantedAmount)) fail('AI_CREDIT_ALLOCATION_EXCEEDED');
         const prior = creditAllocations(account.allocationsJson);
         if (allowed.some(row => row.status !== 'ACTIVE'
           && new Prisma.Decimal(allocations[row.id]).gt(new Prisma.Decimal(prior[row.id] ?? 0)))) fail('AI_ACCESS_DENIED', 403);
         for (const workspaceId of new Set([...Object.keys(prior), ...Object.keys(allocations)])) {
           const usage = await creditConsumption(tx, actor.tenantId, input.currency, workspaceId);
-          if (usage.spent.add(usage.held).gt(new Prisma.Decimal(allocations[workspaceId] ?? 0))) fail('AI_CREDIT_ALREADY_COMMITTED');
+          if (usage.spent + usage.held > creditAtoms(allocations[workspaceId] ?? '0')) fail('AI_CREDIT_ALREADY_COMMITTED');
         }
         await recheck();
         const updated = await tx.aiTenantAiAllowance.updateMany({ where: { ...where.tenantId_currency, revision: input.expectedRevision },
@@ -427,7 +428,7 @@ export class AiCreditService {
           if (!(await this.currencies(tx)).includes(row.currency)) fail('AI_PLATFORM_PRICING_NOT_CONFIGURED', 503);
           await tx.$queryRaw(Prisma.sql`SELECT tenantId FROM ai_tenant_ai_allowances WHERE tenantId = ${row.tenantId} AND currency = ${row.currency} FOR UPDATE`);
           const current = await tx.aiTenantAiAllowance.findUnique({ where: { tenantId_currency: { tenantId: row.tenantId, currency: row.currency } } });
-          if ((current?.grantedAmount ?? new Prisma.Decimal(0)).add(input.amount!).gt('999999999999999999.999999')) fail('AI_CREDIT_ALLOCATION_EXCEEDED');
+          if (creditAtoms(current?.grantedAmount ?? '0') + creditAtoms(input.amount!) > creditAtoms('999999999999999999.999999')) fail('AI_CREDIT_ALLOCATION_EXCEEDED');
           await tx.aiTenantAiAllowance.upsert({ where: { tenantId_currency: { tenantId: row.tenantId, currency: row.currency } },
             create: { tenantId: row.tenantId, currency: row.currency, grantedAmount: input.amount!, allocationsJson: {} },
             update: { grantedAmount: { increment: input.amount! }, revision: { increment: 1 } } });

@@ -2,7 +2,7 @@
  * ConfigService. Each consumer retains its own closed configuration schema,
  * current permissions, persisted policies and Gateway/Core checks. This source
  * neither publishes database policy nor starts work or supplies credentials. */
-import type { FactoryProvider } from '@nestjs/common';
+import { Logger, type FactoryProvider } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { z } from 'zod';
 import { AiTaskRepositoryError } from './ai-task.repository';
@@ -89,7 +89,13 @@ export function readRuntimePublication(source: Pick<ConfigService, 'get'>): Runt
 export const AI_NATIVE_RUNTIME_PUBLICATION_PROVIDER: FactoryProvider<RuntimePublication> = {
   provide: AI_NATIVE_RUNTIME_PUBLICATION,
   inject: [ConfigService],
-  useFactory: readRuntimePublication,
+  useFactory: (source: ConfigService): RuntimePublication => {
+    try { return readRuntimePublication(source); }
+    catch {
+      new Logger('AiRuntimePublication').error('AI_RUNTIME_PUBLICATION_INVALID: AI configuration sections disabled');
+      return immutable({ state: 'unconfigured', revision: null, configurations: {} });
+    }
+  },
 };
 
 /** Only the fixed provider registry may select a section; HTTP/model input

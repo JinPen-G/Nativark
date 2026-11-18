@@ -9,6 +9,15 @@ export function creditAllocations(value: unknown) {
   if (!parsed.success || Object.keys(parsed.data).length > 64) throw new BudgetError('UNAVAILABLE');
   return parsed.data;
 }
+export function creditAtoms(value: Prisma.Decimal | string): bigint {
+  const amount = typeof value === 'string' ? new Prisma.Decimal(value) : value;
+  if (!amount.isFinite() || amount.isNegative() || amount.decimalPlaces() > 6) throw new BudgetError('UNAVAILABLE');
+  return BigInt(amount.toFixed(6).replace('.', ''));
+}
+export function creditAmount(atoms: bigint): string {
+  const digits = atoms.toString().padStart(7, '0');
+  return `${digits.slice(0, -6)}.${digits.slice(-6)}`;
+}
 /** SQL aggregation over the ORIGINAL reservations, including unresolved holds.
  * This is a limit check, never another reserve/settle/release operation. */
 export async function creditConsumption(tx: Pick<Tx, 'aiBudgetReservation'>,
@@ -21,12 +30,12 @@ export async function creditConsumption(tx: Pick<Tx, 'aiBudgetReservation'>,
     _count: { _all: true, reservedMoney: true, actualMoney: true },
     _sum: { reservedMoney: true, actualMoney: true } });
   if (rows.length > 3 || new Set(rows.map(row => row.status)).size !== rows.length) throw new BudgetError('UNAVAILABLE');
-  let spent = new Prisma.Decimal(0), held = new Prisma.Decimal(0);
+  let spent = 0n, held = 0n;
   for (const row of rows) {
     const field = row.status === 'settled' ? 'actualMoney' : 'reservedMoney', amount = row._sum[field];
     if (row._count._all < 1 || row._count[field] !== row._count._all || amount === null
       || !amount.isFinite() || amount.isNegative() || amount.decimalPlaces() > 6) throw new BudgetError('UNAVAILABLE');
-    if (row.status === 'settled') spent = spent.add(amount); else held = held.add(amount);
+    if (row.status === 'settled') spent += creditAtoms(amount); else held += creditAtoms(amount);
   }
   return { spent, held };
 }
@@ -38,12 +47,12 @@ export async function assertPlatformCreditLimit(tx: Tx, tenantId: string, worksp
   await tx.$queryRaw(Prisma.sql`SELECT tenantId FROM ai_tenant_ai_allowances WHERE tenantId = ${tenantId} AND currency = ${currency} FOR UPDATE`);
   const account = await tx.aiTenantAiAllowance.findUnique({ where: { tenantId_currency: { tenantId, currency } } });
   if (!account || account.grantedAmount.lte(0)) throw new BudgetError('EXHAUSTED');
-  const quantity = new Prisma.Decimal(requested), total = await creditConsumption(tx, tenantId, currency);
-  if (total.spent.add(total.held).add(quantity).gt(account.grantedAmount)) throw new BudgetError('EXHAUSTED');
+  const quantity = creditAtoms(requested), total = await creditConsumption(tx, tenantId, currency);
+  if (total.spent + total.held + quantity > creditAtoms(account.grantedAmount)) throw new BudgetError('EXHAUSTED');
   if (workspaceId) {
     const allocated = creditAllocations(account.allocationsJson)[workspaceId];
     if (!allocated) throw new BudgetError('EXHAUSTED');
     const usage = await creditConsumption(tx, tenantId, currency, workspaceId);
-    if (usage.spent.add(usage.held).add(quantity).gt(new Prisma.Decimal(allocated))) throw new BudgetError('EXHAUSTED');
+    if (usage.spent + usage.held + quantity > creditAtoms(allocated)) throw new BudgetError('EXHAUSTED');
   }
 }

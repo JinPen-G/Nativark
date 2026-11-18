@@ -12,6 +12,8 @@ AI研发源码固定提交为0e4e6367a27b36f2bde58639a0f2bdd1b00e2476，原28最
 
 ## 后续操作入口
 
+本次复查由负责人指定本对话直接处理，修复基于 `main@ba1de9f91860`，写入 `codex/ai-native-review-fixes` 的独立工作树。当前金额精度及启动工厂已做离线验证，待办包括客户恢复、任务及会话入口、知识和额度分页、隐私恢复与运行保障。详见[修复记录](<AI Native-开发记录.md#ain-review-fixes-20261118>)。
+
 负责人按原清单固定提交、构建、schema／迁移、publication／模型／能力／prompt／tool／政策版本和测试数据，分别实施真实数据库／升级恢复、浏览器、微信／设备、平台及BYOK供应商、支付、外部对象／删除／备份及灰度测试。D01～D05的供应商、数据责任、商业额度、无人动作及容量采用归负责人决定，原本地最小留存按需求§17执行。[部署运行与回退](<AI Native-开发记录.md#ain27-operational-delivery-20261117>)、[实测清单](<AI Native-开发记录.md#ain28-user-operation-real-test-handoff-20261117>)
 
 历史会话重开用于原结果核对。无原待核操作时用独立“新对话”承接新输入，同页下一轮沿原关闭收据与当前空闲修订。Copilot空轮次保留原定位和journal，可从“在 Agent 控制台继续”进入同一受权会话。准备、草稿、人工审批、Core执行和原收据分别操作。[已核正常入口](<AI Native-开发记录.md#ain28-four-clause-final-closeout-20261118>)
