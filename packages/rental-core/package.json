@@ -1130,6 +1130,18 @@
     "./http-customer-avatar-applications": {
       "types": "./dist/http-customer-avatar-applications.d.ts",
       "default": "./dist/http-customer-avatar-applications.js"
+    },
+    "./mysql-customer-corporate": {
+      "types": "./dist/mysql-customer-corporate.d.ts",
+      "default": "./dist/mysql-customer-corporate.js"
+    },
+    "./mysql-customer-corporate-settlement": {
+      "types": "./dist/mysql-customer-corporate-settlement.d.ts",
+      "default": "./dist/mysql-customer-corporate-settlement.js"
+    },
+    "./corporate-application-storage": {
+      "types": "./dist/corporate-application-storage.d.ts",
+      "default": "./dist/corporate-application-storage.js"
     }
   },
   "typesVersions": {
@@ -1973,6 +1985,15 @@
       ],
       "admin/capabilities/pages": [
         "admin/capabilities/pages.ts"
+      ],
+      "mysql-customer-corporate": [
+        "dist/mysql-customer-corporate.d.ts"
+      ],
+      "mysql-customer-corporate-settlement": [
+        "dist/mysql-customer-corporate-settlement.d.ts"
+      ],
+      "corporate-application-storage": [
+        "dist/corporate-application-storage.d.ts"
       ]
     }
   },
