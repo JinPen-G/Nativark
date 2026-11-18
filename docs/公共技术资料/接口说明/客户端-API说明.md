@@ -4,6 +4,7 @@
 
 | 版本 | 日期 | 编辑 | 变更 |
 | --- | --- | --- | --- |
+| v1.26 | 2026-11-18 | Codex | 客户治理、合并/注销检查、经营分析及头像归Rental单源，补正式SDK与同实例头像HTTP接线；原范围、状态/历史事务、资金核验与管理端路由保持。通知五项合同移入公共包，原shared同源再导出。 |
 | v1.25 | 2026-11-18 | Codex | 公共文件台账与模拟元数据单源迁入，补正式SDK/原服务委托；原HTTP字段、列表业务ACL、专用场景、租户隔离及生产模拟拒绝保持。 |
 | v1.24 | 2026-11-18 | Codex | 文件兼容HTTP与实名/承运DTO归Rental，补四项原服务别名及SDK入口；公共上传/完成DTO、原业务ACL、客户范围、承运订单/空间与Staff原键解析保持。 |
 | v1.23 | 2026-11-18 | Codex | 会员HTTP与验证类、客户状态仓储及门户授权归Rental单源，补正式SDK/同实例别名；原路由、角色、空间、状态历史事务/CAS与门户操作收据保持。 |
@@ -215,5 +216,9 @@ Idempotency-Key: <unique-key-for-mutating-action>
 企业回款证明的创建、完成和重放由 `/file-application-enterprise-payment-proof` 的[原绑定参加者](../../../packages/rental-core/src/file-application-enterprise-payment-proof.ts)处理。它只接受原企业入口提供的当前订单、客户及空间依据；[原Runtime](../../../apps/api/src/modules/integrations/file-storage.runtime.service.ts)供给同一权限和配置，实际会话、原键、冻结及同事务事实由[Rental文件应用](../../../packages/rental-core/src/file-application-runtime.ts)单源维护。服务端从 `@rental-os/rental-core/file-application-runtime` 接入，客户端路径及原收据字段保持。结果不明只核原目标，TTL不构成重传许可。
 
 文件目录沿[公共台账](../../../packages/platform-server/src/modules/files/file-ledger.ts) → [原集成服务](../../../apps/api/src/modules/integrations/integrations.service.ts) / [存储委托](../../../apps/api/src/modules/integrations/integrations.repository.ts)阅读。Core从 `@rental-os/platform-server/files` 取得 `FileLedgerApplication` 和真实权威/存储参加者，按当前租户与原业务ACL查询；模拟元数据不能当作真实上传，生产入口继续拒绝。实际附件仍调用同一出口的 `FileStorageApplication` 原键链。[简单接入](../../../packages/platform-server/src/modules/files/README.md#core-接入)
+
+营运客户治理从 `/mysql-customer-governance` 的[同源应用](../../../packages/rental-core/src/mysql-customer-governance.ts) → [合并/注销检查](../../../packages/rental-core/src/mysql-customer-merge.ts) → [主档与状态参加者](../../../packages/rental-core/src/customer-governance-ports.ts)阅读。经营分析从 `/mysql-customer-insights` 的[原订单投影](../../../packages/rental-core/src/mysql-customer-insights.ts)使用。头像沿 `/mysql-customer-avatar` 与 `/http-customer-avatar` 的[实现](../../../packages/rental-core/src/mysql-customer-avatar.ts) / [Controller](../../../packages/rental-core/src/http-customer-avatar.controller.ts)接入，原 `GET/POST /api/platform/customers/{customerId}/avatar` 使用营运客户Guard；[宿主别名](../../../apps/api/src/modules/rental-core/rental-http.providers.ts)复用同一头像实例。客户端本人注销继续从其专用生命周期入口访问，不取得营运客户管理权限。
+
+通知模板、发送日志和适配日志的类型从 `@rental-os/platform-contracts/notifications` 使用，原shared/infrastructure保持同源兼容；业务消息、收件范围和真实发送仍由原业务服务裁定。[正式通知合同](../../../packages/platform-contracts/src/notifications.ts)
 
 地址和注销分别沿[地址与交付快照](../../../packages/rental-core/src/mysql-client-delivery-address.ts) / [本人注销](../../../packages/rental-core/src/mysql-client-account-closure.ts) → [生命周期参加者](../../../packages/rental-core/src/client-lifecycle-ports.ts)阅读。服务端分别从 `/mysql-client-delivery-address` 和 `/mysql-client-account-closure` 接入；可信身份、业务状态及审计由宿主供给。[包使用说明](../../../packages/rental-core/README.md#使用与构建)

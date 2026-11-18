@@ -1070,6 +1070,34 @@
     "./http-file.dto": {
       "types": "./dist/http-file.dto.d.ts",
       "default": "./dist/http-file.dto.js"
+    },
+    "./customer-governance-ports": {
+      "types": "./dist/customer-governance-ports.d.ts",
+      "default": "./dist/customer-governance-ports.js"
+    },
+    "./mysql-customer-governance": {
+      "types": "./dist/mysql-customer-governance.d.ts",
+      "default": "./dist/mysql-customer-governance.js"
+    },
+    "./mysql-customer-merge": {
+      "types": "./dist/mysql-customer-merge.d.ts",
+      "default": "./dist/mysql-customer-merge.js"
+    },
+    "./mysql-customer-insights": {
+      "types": "./dist/mysql-customer-insights.d.ts",
+      "default": "./dist/mysql-customer-insights.js"
+    },
+    "./mysql-customer-avatar": {
+      "types": "./dist/mysql-customer-avatar.d.ts",
+      "default": "./dist/mysql-customer-avatar.js"
+    },
+    "./http-customer-avatar": {
+      "types": "./dist/http-customer-avatar.controller.d.ts",
+      "default": "./dist/http-customer-avatar.controller.js"
+    },
+    "./http-customer-avatar-applications": {
+      "types": "./dist/http-customer-avatar-applications.d.ts",
+      "default": "./dist/http-customer-avatar-applications.js"
     }
   },
   "typesVersions": {
@@ -1868,6 +1896,27 @@
       ],
       "http-file.dto": [
         "dist/http-file.dto.d.ts"
+      ],
+      "customer-governance-ports": [
+        "dist/customer-governance-ports.d.ts"
+      ],
+      "mysql-customer-governance": [
+        "dist/mysql-customer-governance.d.ts"
+      ],
+      "mysql-customer-merge": [
+        "dist/mysql-customer-merge.d.ts"
+      ],
+      "mysql-customer-insights": [
+        "dist/mysql-customer-insights.d.ts"
+      ],
+      "mysql-customer-avatar": [
+        "dist/mysql-customer-avatar.d.ts"
+      ],
+      "http-customer-avatar": [
+        "dist/http-customer-avatar.controller.d.ts"
+      ],
+      "http-customer-avatar-applications": [
+        "dist/http-customer-avatar-applications.d.ts"
       ]
     }
   },

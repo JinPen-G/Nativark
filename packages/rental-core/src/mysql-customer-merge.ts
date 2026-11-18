@@ -1,0 +1,490 @@
+/** Rental客户重复识别、合并与注销检查。只写原映射和状态，不搬订单/资金历史；
+ * 原租户父锁、客户锁、管理员连续性、资金与未决事实沿同一事务核验。 */
+import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
+import type {
+  CustomerClosability,
+  CustomerDuplicateCandidate,
+  CustomerMergePreview,
+  RentalFundingEvent,
+  MergeCustomersRequest
+} from "./contracts";
+import { $Enums, Prisma } from "@prisma/client";
+import type { RentalCustomerMergeStorage, RentalCustomerMergeCustomers, RentalCustomerMergeOperations } from "./customer-governance-ports";
+import { assertOtherEnterpriseAdministrator } from "./enterprise-administrator-continuity";
+import { deriveFundingLedgers, isRealFundingEvent, rentalPaymentBalance, resolveOfflineFundingEvents } from "./funding-events";
+
+const stamp = () => new Date().toISOString();
+
+/** 订单的非终态。落在这些状态上的订单都算「未完成」，注销前必须先处理。 */
+const OPEN_ORDER_STATUSES: $Enums.RentalOrderV1Status[] = [
+  $Enums.RentalOrderV1Status.DRAFT,
+  $Enums.RentalOrderV1Status.RESERVED,
+  $Enums.RentalOrderV1Status.READY_FOR_PICKUP,
+  $Enums.RentalOrderV1Status.RENTING,
+  $Enums.RentalOrderV1Status.RETURN_INSPECTION
+];
+
+const mask = (value?: string | null) => {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.length <= 4) return "****";
+  return `${trimmed.slice(0, 3)}****${trimmed.slice(-4)}`;
+};
+
+/**
+ * CUSTOMER-01D：重复客户识别、人工合并与注销前置检查。
+ *
+ * 三条口径贯穿本层：
+ *   1. **合并不搬数据**。需求 4.8.3 明确「合并后订单、支付、合同和历史事件继续保留
+ *      原始业务引用」，因此合并只写映射 + 标记被合并方，绝不 UPDATE 订单的 customerId。
+ *      搬数据会让历史凭证与当时的事实不一致，且不可逆。
+ *   2. **不合并会员权益**。双方唯一会员、方案授予与营销资产分别保留，
+ *      不把两边等级或历史业务事实合成一份。
+ *   3. **注销只挡真实存在的事实，缺数据源的类别显式要求人工确认**。
+ *      假装检查过退款与争议，正是需求 4.8.13 所禁止的「借注销规避欠款」。
+ */
+export class CustomerMergeService {
+  constructor(
+    private readonly prisma: RentalCustomerMergeStorage,
+    private readonly customers: RentalCustomerMergeCustomers,
+    private readonly operations: RentalCustomerMergeOperations
+  ) {}
+
+  private db(tx?: Prisma.TransactionClient) {
+    return tx ?? this.prisma;
+  }
+
+  /**
+   * 找出可能与该客户重复的主档（需求 4.8.3）。
+   *
+   * 只在**同租户内**查找——跨租户重复不是重复，那是两个不同租户各自的客户。
+   * 已被合并掉的主档仍会列出，但带 `mergedIntoCustomerId`，供界面标灰而不是当成可选目标。
+   */
+  async findDuplicates(tenantId: string, customerId: string): Promise<CustomerDuplicateCandidate[]> {
+    const profile = await this.customers.findById(tenantId, customerId);
+    if (!profile) throw new NotFoundException("客户不存在");
+
+    const found = new Map<string, CustomerDuplicateCandidate>();
+    const push = (row: {
+      id: string; name: string; phoneMasked: string; customerType: string;
+      mergedIntoCustomerId?: string | null; createdAt: Date;
+    }, matchedBy: string, matchedValueMasked?: string) => {
+      if (row.id === customerId) return;
+      // 先命中的判据优先保留：phone 比 contact_phone 更强，顺序由调用次序决定。
+      if (found.has(row.id)) return;
+      found.set(row.id, {
+        customerId: row.id,
+        name: row.name,
+        phoneMasked: row.phoneMasked,
+        customerType: row.customerType as CustomerDuplicateCandidate["customerType"],
+        matchedBy,
+        matchedValueMasked,
+        mergedIntoCustomerId: row.mergedIntoCustomerId ?? undefined,
+        createdAt: row.createdAt.toISOString()
+      });
+    };
+
+    // 1) 手机号完全相同。库层已保证同租户手机号唯一，因此这条通常查不到——
+    //    但存量数据（唯一键建立之前写入的行）仍可能存在，必须照查。
+    for (const row of await this.prisma.customerProfile.findMany({
+      where: { tenantId, phone: profile.phone, id: { not: customerId } }
+    })) {
+      push(row, "phone", row.phoneMasked);
+    }
+
+    // 2) 实名证件掩码相同（个人）。掩码相同不等于证件相同，因此它只是**候选**，
+    //    最终由人工核验——这也是需求把合并定为人工动作的原因。
+    if (profile.identityNoMasked) {
+      for (const row of await this.prisma.customerProfile.findMany({
+        where: { tenantId, identityNoMasked: profile.identityNoMasked, id: { not: customerId } }
+      })) {
+        push(row, "identity", profile.identityNoMasked);
+      }
+    }
+
+    // 3) 企业：统一社会信用代码相同。库层同租户唯一，同样只为存量兜底。
+    const corporate = await this.prisma.customerCorporateProfile.findFirst({
+      where: { tenantId, customerId }
+    });
+    if (corporate) {
+      const peers = await this.prisma.customerCorporateProfile.findMany({
+        where: { tenantId, unifiedSocialCreditCode: corporate.unifiedSocialCreditCode, customerId: { not: customerId } },
+        include: { customer: true }
+      });
+      for (const peer of peers) {
+        push(peer.customer, "uscc", corporate.unifiedSocialCreditCodeMasked);
+      }
+    }
+
+    // 4) 已验证联系人手机号相同（需求 4.8.3：企业结合已验证联系人识别）。
+    for (const contact of await this.prisma.customerContact.findMany({
+      where: { tenantId, customerId, status: "active" }
+    })) {
+      for (const row of await this.prisma.customerProfile.findMany({
+        where: { tenantId, phone: contact.phone, id: { not: customerId } }
+      })) {
+        push(row, "contact_phone", contact.phoneMasked);
+      }
+    }
+
+    return [...found.values()].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  }
+
+  /**
+   * 合并预览。**只读**，不写任何东西。
+   *
+   * 预览与提交分开是需求要求的人工闭环：运营先看清字段冲突、双方唯一会员
+   * 与将被保留的历史引用，再决定是否提交。直接一步合并没有回头路。
+   */
+  async previewMerge(
+    tenantId: string,
+    sourceCustomerId: string,
+    targetCustomerId: string,
+    tx?: Prisma.TransactionClient
+  ): Promise<CustomerMergePreview> {
+    const db = this.db(tx);
+    const [source, target] = await Promise.all([
+      this.customers.findById(tenantId, sourceCustomerId, tx),
+      this.customers.findById(tenantId, targetCustomerId, tx)
+    ]);
+    const blockers: CustomerMergePreview["blockers"] = [];
+    if (!source || !target) throw new NotFoundException("待合并的客户不存在");
+    if (sourceCustomerId === targetCustomerId) {
+      blockers.push({ code: "same_customer", message: "被合并方与保留方不能是同一份主档" });
+    }
+    if (source.mergedIntoCustomerId) {
+      blockers.push({ code: "source_already_merged", message: "被合并方已经被合并过，不能重复合并" });
+    }
+    // 目标也已被合并 → 会形成 A→B→C 的链，历史引用要多跳才能找到当前主档。
+    if (target.mergedIntoCustomerId) {
+      blockers.push({ code: "target_already_merged", message: "保留方本身已被合并，请直接合并到最终保留的主档" });
+    }
+    if (source.customerType !== target.customerType) {
+      blockers.push({ code: "type_mismatch", message: "个人客户与企业客户不能互相合并" });
+    }
+
+    const fields: Array<[string, string | undefined, string | undefined]> = [
+      ["name", source.name, target.name],
+      ["phone", source.phoneMasked, target.phoneMasked],
+      ["email", mask(source.email), mask(target.email)],
+      ["identityNoMasked", source.identityNoMasked, target.identityNoMasked],
+      ["corporateName", source.corporateName, target.corporateName],
+      ["corporateTaxNo", mask(source.corporateTaxNo), mask(target.corporateTaxNo)]
+    ];
+    const fieldDiff = fields.map(([field, sourceValue, targetValue]) => ({
+      field,
+      sourceValue,
+      targetValue,
+      // 只有两边都有值且不同才算冲突：一边为空是补全，不需要人工取舍。
+      conflict: Boolean(sourceValue && targetValue && sourceValue !== targetValue)
+    }));
+
+    // 将被保留的历史引用：合并后这些仍指向被合并方，不搬迁。
+    const [asCustomer, asContract, asPayer, asUser] = await Promise.all([
+      db.rentalOrder.count({ where: { tenantId, customerId: sourceCustomerId } }),
+      db.rentalOrder.count({ where: { tenantId, contractSubjectCustomerId: sourceCustomerId } }),
+      db.rentalOrder.count({ where: { tenantId, payerSubjectCustomerId: sourceCustomerId } }),
+      db.rentalOrder.count({ where: { tenantId, userSubjectCustomerId: sourceCustomerId } })
+    ]);
+
+    return {
+      sourceCustomerId,
+      targetCustomerId,
+      fieldDiff,
+      sourceMembership: source.membership,
+      targetMembership: target.membership,
+      preservedReferences: [
+        { kind: "order_customer", count: asCustomer },
+        { kind: "order_contract_subject", count: asContract },
+        { kind: "order_payer_subject", count: asPayer },
+        { kind: "order_user_subject", count: asUser }
+      ],
+      blockers
+    };
+  }
+
+  /** Only explicitly migrated enterprises whose source still has current management
+   * authority need continuity. Frozen accounts are already unavailable; this is not
+   * a safety-freeze blocker or a transfer of the source's grants to the survivor. */
+  private async assertPersonalMergeAdministratorContinuity(
+    tenantId: string, sourceCustomerId: string, tx: Prisma.TransactionClient
+  ) {
+    const managed = await tx.$queryRaw<Array<{ id: string; corporateCustomerId: string }>>`
+      SELECT m.id,m.corporateCustomerId FROM customer_corporate_memberships m
+      JOIN customer_profiles p ON p.tenantId=m.tenantId AND p.id=m.personalCustomerId AND p.customerType='personal' AND p.status='active' AND p.mergedIntoCustomerId IS NULL
+      JOIN customer_accounts a ON a.tenantId=m.tenantId AND a.customerId=p.id AND a.status='active'
+      JOIN customer_memberships pm ON pm.tenantId=m.tenantId AND pm.customerId=p.id AND pm.status='active'
+      JOIN enterprise_portal_grants entry ON entry.tenantId=m.tenantId AND entry.corporateCustomerId=m.corporateCustomerId AND entry.membershipId=m.id AND entry.membershipUpdatedAt=m.updatedAt AND entry.action='portal:enter'
+      JOIN enterprise_portal_grants manage ON manage.tenantId=m.tenantId AND manage.corporateCustomerId=m.corporateCustomerId AND manage.membershipId=m.id AND manage.membershipUpdatedAt=m.updatedAt AND manage.action='administrators:manage'
+      WHERE m.tenantId=${tenantId} AND m.personalCustomerId=${sourceCustomerId} AND m.role='admin' AND m.status='active'
+        AND m.effectiveFrom<=NOW(3) AND (m.effectiveTo IS NULL OR m.effectiveTo>NOW(3))
+        AND (EXISTS (SELECT 1 FROM enterprise_corporate_portals portal WHERE portal.tenantId=m.tenantId AND portal.corporateCustomerId=m.corporateCustomerId)
+          OR EXISTS (SELECT 1 FROM enterprise_scope_policies policy WHERE policy.tenantId=m.tenantId AND policy.corporateCustomerId=m.corporateCustomerId))`;
+    for (const row of managed) {
+      await assertOtherEnterpriseAdministrator(tx, tenantId, row.corporateCustomerId, row.id);
+    }
+  }
+
+  /**
+   * 提交人工合并。**一个事务**里完成：复验个人管理员连续性、标记被合并方、撤销被合并企业的关系授权修订、写映射、关闭其登录账号、双方各记一条历史。
+   *
+   * 刻意**不做**的三件事：
+   *   1. 不 UPDATE 任何订单的 customerId 或主体列——历史引用必须继续指向被合并方
+   *      （需求 4.8.3）。搬迁会让历史凭证与当时事实不一致，而且不可逆。
+   *   2. 不合并双方会员与权益——等级、授予、积分与券分别保留。
+   *      被合并方的会员原样留着作为历史，
+   *      但它已无法开展新业务（`mergedIntoCustomerId` 由 01B 的 assertTransactable 拦下）。
+   *   3. 不删除被合并方主档——订单、发票、合同仍引用它。
+   */
+  async mergeCustomers(tenantId: string, input: MergeCustomersRequest, operator?: string) {
+    const reason = input.reason?.trim();
+    if (!reason) throw new BadRequestException("人工合并必须填写原因");
+    const preview = await this.previewMerge(tenantId, input.sourceCustomerId, input.targetCustomerId);
+    if (preview.blockers.length) {
+      throw new ConflictException(`不能合并：${preview.blockers.map((row) => row.message).join("；")}`);
+    }
+    const at = stamp();
+    await this.prisma.$transaction(async (tx) => {
+      // Tenant is the enterprise authorization fence. Acquire it before the original
+      // customer gates, matching member/status writes without upgrading a shared lock.
+      const tenants = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM Tenant WHERE id=${tenantId} FOR UPDATE`;
+      if (!tenants.length) throw new NotFoundException("租户不存在");
+      // 与订单创建共用主档行锁。按 id 排序依次加锁，避免两路反向合并形成死锁。
+      for (const customerId of [input.sourceCustomerId, input.targetCustomerId].sort()) {
+        if (!(await this.operations.lockCustomerBusinessGate(tenantId, customerId, tx))) {
+          throw new NotFoundException("待合并的客户不存在");
+        }
+      }
+      // 事务外预览只服务于快速反馈；真正提交必须在锁后重算，不能使用陈旧快照。
+      const lockedPreview = await this.previewMerge(tenantId, input.sourceCustomerId, input.targetCustomerId, tx);
+      if (lockedPreview.blockers.length) {
+        throw new ConflictException(`不能合并：${lockedPreview.blockers.map((row) => row.message).join("；")}`);
+      }
+      // Resolve the original source type again under both gates; caller fields and
+      // the outside preview cannot choose which authority is being terminated.
+      const source = await this.customers.findById(tenantId, input.sourceCustomerId, tx);
+      if (!source) throw new NotFoundException("待合并的客户不存在");
+      if (source.customerType === "personal") {
+        await this.assertPersonalMergeAdministratorContinuity(tenantId, input.sourceCustomerId, tx);
+      } else if (source.customerType !== "corporate") {
+        throw new ConflictException("客户主体类型无法核实，不能合并");
+      }
+      const sourceAccount = await this.operations.findAccountByCustomer(tenantId, input.sourceCustomerId, tx);
+      // 以「尚未被合并」为写入条件：并发两路合并同一主档时，后到者更新 0 行并拿到 409，
+      // 而不是双双写出映射（唯一键也会挡，但这里先给出可解释的错误）。
+      const marked = await this.customers.markMerged(tenantId, input.sourceCustomerId, input.targetCustomerId, tx);
+      if (marked === 0) {
+        throw new ConflictException("该主档已被合并或正被并发合并，请刷新后重试");
+      }
+      if (source.customerType === "corporate") {
+        // Corporate merge ends this original enterprise's new authority, not its
+        // employees' personal identities. Preserve all grant/policy/approval facts,
+        // but advance migrated relation revisions in the same merge transaction.
+        // The survivor's administrators are never a handoff or grant replacement.
+        await this.customers.invalidateCorporateEnterpriseAuthority(tenantId, input.sourceCustomerId, tx);
+      }
+      await tx.customerMergeMapping.create({
+        data: {
+          tenantId,
+          sourceCustomerId: input.sourceCustomerId,
+          targetCustomerId: input.targetCustomerId,
+          reason,
+          operator: operator ?? null,
+          approver: input.approver ?? null,
+          // 字段差异与人工取舍结论一并固化：事后要能解释「保留了谁的值、谁决定的」。
+          fieldDiff: {
+            diff: lockedPreview.fieldDiff,
+            resolutions: input.fieldResolutions ?? {}
+          } as unknown as object,
+          // 双方唯一会员的原始快照；合并不搬移等级、授予或历史业务事实。
+          membershipSnapshot: {
+            source: lockedPreview.sourceMembership ?? null,
+            target: lockedPreview.targetMembership ?? null,
+            preservedReferences: lockedPreview.preservedReferences
+          } as unknown as object,
+          mergedAt: new Date(at)
+        }
+      });
+      // 被合并方的登录账号必须关掉：主档已是终态，留一个能登录的账号等于留一个
+      // 可以继续下单的入口。账号不存在则跳过（线下客户没有账号）。
+      if (sourceAccount && sourceAccount.status !== "closed") {
+        await this.customers.updateAccount(tenantId, { accountId: sourceAccount.id }, {
+          status: "closed", closedAt: new Date(at), lastReason: `合并进 ${input.targetCustomerId}：${reason}`, lastOperator: operator ?? null
+        }, undefined, tx);
+        await this.operations.appendStatusHistory(tenantId, {
+          customerId: input.sourceCustomerId,
+          scope: "account",
+          action: "close",
+          fromStatus: sourceAccount.status,
+          toStatus: "closed",
+          reason: `因合并关闭账号：${reason}`,
+          operator,
+          approver: input.approver,
+          at
+        }, tx);
+      }
+      // 双方各记一条 merge 历史：只记被合并方会让保留方的时间线出现
+      // 「凭空多出一批历史引用」而无从解释。
+      await this.operations.appendStatusHistory(tenantId, {
+        customerId: input.sourceCustomerId,
+        scope: "account",
+        action: "merge",
+        fromStatus: "active",
+        toStatus: "merged",
+        reason: `合并进 ${input.targetCustomerId}：${reason}`,
+        operator,
+        approver: input.approver,
+        at
+      }, tx);
+      await this.operations.appendStatusHistory(tenantId, {
+        customerId: input.targetCustomerId,
+        scope: "account",
+        action: "merge",
+        toStatus: "active",
+        reason: `接收合并 ${input.sourceCustomerId}：${reason}`,
+        operator,
+        approver: input.approver,
+        at
+      }, tx);
+    });
+
+    // 合并属敏感动作，单独留一条访问审计（需求 4.8.14 要求合并进入审计日志）。
+    await this.operations.recordSensitiveAccess(tenantId, {
+      customerId: input.sourceCustomerId,
+      field: "customer_merge",
+      action: "reveal",
+      revealed: true,
+      operator,
+      reason: `合并进 ${input.targetCustomerId}：${reason}`,
+      at
+    });
+
+    return this.prisma.customerMergeMapping.findFirst({
+      where: { tenantId, sourceCustomerId: input.sourceCustomerId }
+    });
+  }
+
+  /**
+   * 注销前置检查（需求 4.8.13）。
+   *
+   * `blockers` 只由**真实存在的事实**产生，非空即禁止注销。
+   * `manualConfirmations` 保留未录入系统的线下资金、争议与追偿核验。
+   * 已有资金流水与退款表必须先自动检查，不得用人工确认绕过真实欠款。
+   * 账号和统一会员注销均检查全租户，不接受空间缩小检查范围。
+   */
+  async assertClosable(
+    tenantId: string,
+    customerId: string,
+    tx?: Prisma.TransactionClient
+  ): Promise<CustomerClosability> {
+    const db = this.db(tx);
+    const profile = await this.customers.findById(tenantId, customerId, tx);
+    if (!profile) throw new NotFoundException("客户不存在");
+    const blockers: CustomerClosability["blockers"] = [];
+
+    // 未完成订单：客户在**任一角色**上的在途订单都算。只查 customerId 会漏掉
+    // 「他是别人订单的付款主体」这种同样有资金义务的情形。
+    const roleFilter = {
+      OR: [
+        { customerId },
+        { contractSubjectCustomerId: customerId },
+        { payerSubjectCustomerId: customerId },
+        { userSubjectCustomerId: customerId }
+      ]
+    };
+    const openOrders = await db.rentalOrder.count({
+      where: { tenantId, status: { in: OPEN_ORDER_STATUSES }, ...roleFilter }
+    });
+    if (openOrders > 0) {
+      blockers.push({
+        code: "open_orders",
+        message: `存在 ${openOrders} 张未完成订单（含作为签约/付款/使用主体的订单），必须先处理完毕`,
+        count: openOrders
+      });
+    }
+
+    // 归属无法判定的存量保证金：金额到底是押金还是预授权都说不清，
+    // 放它过去等于默认「不用退」。必须先人工厘清。
+    const unverifiedDeposit = await db.rentalOrder.count({
+      where: { tenantId, legacyDepositUnverified: true, ...roleFilter }
+    });
+    if (unverifiedDeposit > 0) {
+      blockers.push({
+        code: "legacy_unverified_deposit",
+        message: `存在 ${unverifiedDeposit} 张订单的保证金归属未厘清（押金/预授权无法判定），必须先确认后再注销`,
+        count: unverifiedDeposit
+      });
+    }
+
+    // 资金不能仅凭订单终态推断已结清，也不能让另一个空间的余额从注销检查中消失。
+    const financialOrders = await db.rentalOrder.findMany({
+      where: { tenantId, ...roleFilter },
+      select: {
+        id: true, finalPayableAmount: true, fundingEvents: { where: { tenantId } },
+        offlinePaymentRegistrations: { where: { tenantId, status: "confirmed", fundingEventId: { not: null } } }
+      }
+    });
+    let unsettledRentalOrders = 0;
+    let heldSecurityOrders = 0;
+    for (const order of financialOrders) {
+      const events: RentalFundingEvent[] = order.fundingEvents.map((event) => ({
+        id: event.id, tenantId: event.tenantId, workspaceId: event.workspaceId, orderId: event.orderId,
+        instrument: event.instrument as RentalFundingEvent["instrument"], action: event.action as RentalFundingEvent["action"],
+        amount: Number(event.amount), balanceAfter: Number(event.balanceAfter), provider: event.provider as RentalFundingEvent["provider"],
+        paymentMethod: event.paymentMethod as RentalFundingEvent["paymentMethod"] ?? undefined,
+        idempotencyKey: event.idempotencyKey, reason: event.reason, operator: event.operator ?? undefined,
+        failureCode: event.failureCode ?? undefined, at: event.at.toISOString(), createdAt: event.createdAt.toISOString()
+      }));
+      // 注销不属于演练：模拟退款不能抵消实收，历史线下款复用原确认关系。
+      const realEvents = resolveOfflineFundingEvents(events, order.offlinePaymentRegistrations).filter(isRealFundingEvent);
+      const ledgers = deriveFundingLedgers(realEvents);
+      if (rentalPaymentBalance(Number(order.finalPayableAmount), realEvents).balance !== 0) unsettledRentalOrders += 1;
+      if (ledgers.deposit.balance !== 0 || ledgers.preauthorization.balance !== 0) heldSecurityOrders += 1;
+    }
+    if (unsettledRentalOrders) blockers.push({
+      code: "unsettled_rental_funds", count: unsettledRentalOrders,
+      message: `存在 ${unsettledRentalOrders} 张订单的租金/费用未结清或缺少结清记录`
+    });
+    if (heldSecurityOrders) blockers.push({
+      code: "unsettled_security_funds", count: heldSecurityOrders,
+      message: `存在 ${heldSecurityOrders} 张订单仍有押金或预授权余额，必须先退还、释放或处理余额异常`
+    });
+    const unresolvedRefunds = await db.rentalPaymentRefund.count({
+      where: { tenantId, status: { notIn: ["succeeded", "closed"] }, order: { tenantId, ...roleFilter } }
+    });
+    if (unresolvedRefunds) blockers.push({
+      code: "unresolved_refunds", count: unresolvedRefunds,
+      message: `存在 ${unresolvedRefunds} 笔未完成或失败待处理的退款`
+    });
+
+    // 未关闭的风险记录：需求 4.8.13 明确不得借注销规避风险限制。
+    if (await this.operations.hasOpenRisk(tenantId, customerId, undefined, tx)) {
+      blockers.push({
+        code: "open_risk",
+        message: "存在未关闭的风险记录，必须先完成复核或关闭"
+      });
+    }
+
+    // 企业授信仍生效：账期意味着可能存在未到期应收。撤销授信是独立动作，
+    // 必须先做，否则注销会把一个仍有账期的企业留在系统外。
+    const credit = await db.customerCorporateCredit.findFirst({
+      where: { tenantId, customerId, status: "active" }
+    });
+    if (credit) {
+      blockers.push({
+        code: "active_corporate_credit",
+        message: `企业授信仍处于生效状态（账期 ${credit.settlementTermDays} 天），必须先撤销授信`
+      });
+    }
+
+    return {
+      closable: blockers.length === 0,
+      blockers,
+      manualConfirmations: [
+        { code: "refunds", message: "是否存在尚未录入系统的线下退款，需人工确认" },
+        { code: "deposit_returned", message: "历史线下押金与预授权是否已退还/解冻，缺少流水凭据的部分需人工确认" },
+        { code: "disputes", message: "是否存在未结争议或追偿——本系统当前没有争议记录表，需人工确认" }
+      ]
+    };
+  }
+}

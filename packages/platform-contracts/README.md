@@ -18,6 +18,8 @@ import { TenantStatus, type PlatformSessionContextResponse } from "@rental-os/pl
 
 第三方服务标识从 `@rental-os/platform-contracts/integration-provider` 导入。原 shared/tenant-integrations 再导出同一类型，目录和现有DTO/API字段保持；标识不携带SDK、密钥或调用权限。公共通知结果使用该标识描述原服务商回执。[服务标识](src/integration-provider.ts) · [原兼容合同](../shared/src/tenant-integrations.ts) · [通知结果](../platform-server/src/common/notification-delivery.ts)
 
+通知目录、发送日志与适配日志从 `@rental-os/platform-contracts/notifications` 导入，根合同及原 shared/infrastructure 再导出同一五项声明。模板内容、业务触发和真实发送由宿主提供，模拟回执仍使用原状态字段；声明不包含业务默认模板或额外授权。[通知合同](src/notifications.ts) · [原兼容出口](../shared/src/infrastructure.ts)
+
 官方日历来源从 `@rental-os/platform-contracts/official-calendar` 导入，根出口提供同一声明。来源主档、年度不可变版本、原来源快照和轻量摘要归平台；日期字段保留原代码及可选字段，Core自行决定业务采用、营业和价格规则。原Rental/shared继续再导出同名类型，公共合同不依赖Rental日期实体。[来源合同](src/official-calendar.ts) · [Rental兼容与业务采用](../rental-core/src/contracts.ts)
 
 阅读时从正式类型到 [公共服务](../platform-server/README.md)，再到 [公共宿主](../../apps/platform-api/README.md)。`PlatformTenantSummary.enabledBusinessLines` 是兼容字段，公共身份返回空集合；实际 Core 使用权从当前部署、租户授权及成员分配读取。租户、角色或公共文档存在不会赋予业务工具权限。

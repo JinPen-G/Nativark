@@ -42,6 +42,10 @@
     "./official-calendar": {
       "types": "./dist/official-calendar.d.ts",
       "default": "./dist/official-calendar.js"
+    },
+    "./notifications": {
+      "types": "./dist/notifications.d.ts",
+      "default": "./dist/notifications.js"
     }
   },
   "scripts": {
@@ -73,6 +77,9 @@
       ],
       "official-calendar": [
         "dist/official-calendar.d.ts"
+      ],
+      "notifications": [
+        "dist/notifications.d.ts"
       ]
     }
   },

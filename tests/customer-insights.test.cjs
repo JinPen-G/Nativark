@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const ts = require('typescript');
 const { Prisma } = require('@prisma/client');
-const filename = path.resolve(__dirname, '../apps/api/src/modules/platform/customer-insights.ts');
+const filename = path.resolve(__dirname, '../packages/rental-core/src/mysql-customer-insights.ts');
 const source = ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const loaded = { exports: {} };
 new Function('require', 'module', 'exports', source)(require, loaded, loaded.exports);
@@ -54,17 +54,21 @@ test('empty history is a real zero and missing monetary aggregates are never fil
 });
 
 test('the original profile gate rejects tenant, workspace, financial and restricted-scope access before analytics reads', async () => {
-  const serviceFile = path.resolve(__dirname, '../apps/api/src/modules/platform/customer-operations.service.ts');
+  const serviceFile = path.resolve(__dirname, '../packages/rental-core/src/mysql-customer-governance.ts');
   const compiled = ts.transpileModule(fs.readFileSync(serviceFile, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true } }).outputText;
   const exported = { exports: {} };
   new Function('require', 'module', 'exports', compiled)(name => {
-    if (name === '@nestjs/common' || name === '@prisma/client' || name === '@rental-os/shared') return require(name);
-    if (name === '../../common/request-identity') return { getRequestWorkspaceId: () => 'workspace-a', getRequestDataScope: () => 'all', getRequestLocationIds: () => undefined };
-    if (name === './customer-insights') return { readCustomerInsights: () => { throw new Error('analytics must never run for denied access'); } };
+    if (name === '@nestjs/common' || name === '@prisma/client') return require(name);
+    if (name === './contracts') return require('@rental-os/shared');
+    if (name === '@rental-os/platform-server/request-identity') return {
+      getRequestWorkspaceId: () => 'workspace-a', getRequestDataScope: () => 'all', getRequestLocationIds: () => undefined,
+      getRequestIdentity: () => ({ tenantId: 'tenant-a', userId: 'operator-a' })
+    };
+    if (name === './mysql-customer-insights') return { readCustomerInsights: () => { throw new Error('analytics must never run for denied access'); } };
     return {};
   }, exported, exported.exports);
   const service = new exported.exports.CustomerOperationsService({}, {}, {});
-  const user = { isActive: true, isSaasAdmin: false, tenantId: 'tenant-a', dataScope: 'all', permissions: ['rental-os:order:view', 'rental-os:finance:view', 'rental-os:marketing:manage'] };
+  const user = { id: 'operator-a', isActive: true, isSaasAdmin: false, tenantId: 'tenant-a', dataScope: 'all', permissions: ['rental-os:order:view', 'rental-os:finance:view', 'rental-os:marketing:manage'] };
   for (const denied of [{ ...user, tenantId: 'tenant-b' }, { ...user, isSaasAdmin: true }, { ...user, dataScope: 'own' }, { ...user, locationScope: { mode: 'selected', locationIds: ['location-a'] } }, { ...user, permissions: ['rental-os:order:view'] }]) {
     await assert.rejects(service.getProfileOverview('tenant-a', 'workspace-a', 'customer-a', denied), error => error.getStatus?.() === 403);
   }

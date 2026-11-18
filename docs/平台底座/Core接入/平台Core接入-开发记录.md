@@ -11,6 +11,32 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-customer-governance-20261118"></a>
+
+## Rental客户治理、合并与头像单源（2026-11-18）
+
+固定父版f9d3233bfa0622193f079ef9ca65bfa6f6202170已普通推送并实际远端回读。本片由RD继续客户闭包，dev1通知目录/台账和dev2订单页面按约定路径在制；公共出口、主提供者、资料及索引仍由RD负责，订单包配置在制差异按内容单独保留。
+
+[客户治理](../../../packages/rental-core/src/mysql-customer-governance.ts)、[合并/注销检查](../../../packages/rental-core/src/mysql-customer-merge.ts)和[经营分析](../../../packages/rental-core/src/mysql-customer-insights.ts)成为Rental包内唯一实现，[私有参加者](../../../packages/rental-core/src/customer-governance-ports.ts)只供给实际消费的MySQL表、同一主档/状态写入者和注销检查。原平台目录三个路径变为Nest接线或正式再导出；公共身份SystemUserRow从platform-contracts取得，业务合同从同一Rental定义取得，当前ALS从公共request-identity使用。
+
+主档/会员按租户共享，原空间/地点、本人订单、敏感资料/审计权限及资料返回字段保持。账号与会员状态独立，状态/历史/CAS、企业授权失效及租户父锁→客户锁顺序不变。合并仍只写原映射、被合并状态和历史，不迁移订单/资金引用或合并会员权益；注销沿原全租户在途订单、租金/押金/预授权、待退款、风险和授信事实核验，缺注销检查继续拒绝，人工确认不能绕过真实阻断。
+
+[头像实现](../../../packages/rental-core/src/mysql-customer-avatar.ts)与[两条原HTTP](../../../packages/rental-core/src/http-customer-avatar.controller.ts)归Rental。原路径转接同一类，[主HTTP提供者](../../../apps/api/src/modules/rental-core/rental-http.providers.ts)以useExisting绑定同一头像实例。保留原位图内容/5MB、路径限制、参数化SQL、I/O后当前记录复验、失败新文件清理及生产未装配受控存储拒绝；没有因抽包开放新的本地写入回退。SDK新增七个私有/HTTP子出口，领域根合同继续不加载ORM或文件系统。
+
+静态逐项对照原父版，治理35、合并6、分析1、头像5及头像HTTP2，共49个方法/函数正文一致；只调整归属、引用、构造参加者与Nest别名。头像上传字段、原2个HTTP方法及装饰器保持。
+
+一次必要冒烟进程21528退出0、stderr空，使用实际TypeScript产物、原Nest薄接线和从主提供者源码抽取的实际别名：同一注销/头像实例、缺注销能力拒绝、原全租户在途角色检查、阻断前不写状态、CAS0拒绝、脱敏与跨租户拒绝通过。头像格式拒绝、原管理URL/返回头、读取时替换拒绝、SQL失败后清理以及生产拒绝通过。SQL、对象字节/文件I/O均为明确fixture，10次原raw-query回调，Nest context已close，磁盘写入/真实网络0。
+
+复用原[customer-insights](../../../tests/customer-insights.test.cjs)三用例，3通过/0失败/0跳过/0todo。只更新两处实际源码与依赖定位，并补原夹具缺失的getRequestIdentity及可信用户标识，全部assert调用保持。补夹具前在父版原服务复现相同TypeError，未将其解释为搬迁新增业务失败；没有执行customer-operations/customer-merge-closure的真库脚本或读取其.env。
+
+必要类型沿实际配置及官方Prisma5.22 WASM/generator在内存取得238模型/35枚举、31,201,337字节声明。先核Rental七个正式根618源0诊断，再以真实SDK声明核原六个提供者/Controller根1839源0诊断，最终进程43540退出0、stderr空。公共合同11根205源、Core合同36/220、Core宿主8/210、公共服务97/916、Rental305/1099、shared130/367、MCP59/495，全部声明生成0诊断且无磁盘产物；其中通知源码仍为作者在制，不将本片视为其完整阶段验收。
+
+前几次检查保留失败：4784在作者新增通知源码缺正式公共合同时退出1；2692核出本片shared局部类型导入漏项和内存声明方案的composite/incremental冲突；17060缺Core宿主实际声明，产生五条跨rootDir诊断。已补真实类型导入及声明依赖，隔离编译不写buildinfo、产品tsconfig未变；没有过滤诊断、放宽类型或改原业务规则来变绿。
+
+dev1所需[通知合同](../../../packages/platform-contracts/src/notifications.ts)单源迁入原五项声明，根合同及[原shared/infrastructure](../../../packages/shared/src/infrastructure.ts)兼容再导出，字段/联合类型与父版相同。公共 /notifications 台账出口已由RD在工作区登记，原通知服务/仓储及该实现等待作者完成必要冒烟后另片固定；不能将模拟通知登记解释为真实发送。对应SDK/模块导读及API说明v1.26同步，五份资料1628链接/169锚点0问题，限定格式检查随精确提交核验。初次文档核对在1000ms工具上限超时并重置内核，改为30秒上限并缓存锚点后同范围通过；未创建临时文件。
+
+按原G1～G4复核，PCH-04所有audience入口和撤权范围仍须齐套，PCH-05排空/历史执行依赖与PCH-06事件/作业/回调的真实接点及可实施合同仍未复核齐，本片不据局部迁移提高百分比。Rental其余企业治理/结算、标准装配、数据/迁移/Seed、其他页面/端、AI和作业继续；无Core实际运行、干净安装、多真实Core、独立升级回退及完整验收仍无本片证据。新增永久测试脚本0，本片验证worker全部退出、临时文件/Client/dist输出0，两个既有残留仍沿原待清理清单受阻。
+
 <a id="core-public-file-ledger-20261118"></a>
 
 ## 公共文件台账与原集成委托（2026-11-18）

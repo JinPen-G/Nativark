@@ -14,6 +14,8 @@ import { OperationLogService } from "../../common/operation-log.service";
 import { PrismaService } from "../database/prisma.service";
 import { MembershipService } from "../platform/membership.service";
 import { CustomerCorporateSettlementService } from "../platform/customer-corporate-settlement.service";
+import { CustomerAvatarService } from "../platform/customer-avatar.service";
+import { RENTAL_CUSTOMER_AVATAR_APPLICATION, type RentalCustomerAvatarHttpApplication } from "@rental-os/rental-core/http-customer-avatar-applications";
 import { EnterprisePortalService } from "../platform/enterprise-portal.service";
 import { RENTAL_MEMBERSHIP_APPLICATION, RENTAL_ENTERPRISE_PORTAL_APPLICATION,
   type RentalMembershipHttpApplication, type RentalEnterprisePortalHttpApplication } from "@rental-os/rental-core/http-membership-applications";
@@ -53,6 +55,7 @@ export const RENTAL_HTTP_PROVIDERS: Provider[] = [
   existing<NonNullable<RentalHttpApplications["memberships"]>>(RENTAL_HTTP_MEMBERSHIPS, MembershipService),
   existing<RentalMembershipHttpApplication>(RENTAL_MEMBERSHIP_APPLICATION, MembershipService),
   existing<RentalEnterprisePortalHttpApplication>(RENTAL_ENTERPRISE_PORTAL_APPLICATION, EnterprisePortalService),
+  existing<RentalCustomerAvatarHttpApplication>(RENTAL_CUSTOMER_AVATAR_APPLICATION, CustomerAvatarService),
   existing<NonNullable<RentalHttpApplications["exchangePreview"]>>(RENTAL_HTTP_EXCHANGE_PREVIEW, RentalExchangePreviewService),
   existing<NonNullable<RentalHttpApplications["exchangeInspections"]>>(RENTAL_HTTP_EXCHANGE_INSPECTIONS, RentalExchangeInspectionPreparationService),
   existing<NonNullable<RentalHttpApplications["exchangeInspectionMedia"]>>(RENTAL_HTTP_EXCHANGE_INSPECTION_MEDIA, RentalExchangeInspectionMediaService),

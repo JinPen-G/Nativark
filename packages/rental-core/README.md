@@ -41,6 +41,9 @@
 | [品类标识](src/rental-category-code.ts) | 原稳定格式及内置常量，格式合法不代表注册、发布或采用权限 |
 | [会员应用](src/mysql-membership.ts)、[私有存储/参加者](src/membership-ports.ts)、[状态审计接点](src/customer-operations-ports.ts) | `/mysql-membership` 持有租户共享会员、注册审核、当前资质、方案版本/授予及报价权益；业务风险、客户锁和企业政策使用同一原实例，金额/订单执行仍由订单域裁定 |
 | [客户状态仓储](src/mysql-customer-operations.ts)、[门户授权](src/mysql-enterprise-portal.ts)、[会员HTTP](src/http-membership.controller.ts)、[HTTP参加者](src/http-membership-applications.ts) | 状态与历史按原事务/CAS组合，敏感访问审计独立保存；门户开通/动作授权、原操作收据和会员路由由Rental维护，宿主通过同一服务别名接线 |
+| [客户治理](src/mysql-customer-governance.ts)、[合并与注销检查](src/mysql-customer-merge.ts)、[私有参加者](src/customer-governance-ports.ts) | `/mysql-customer-governance` 与 `/mysql-customer-merge` 复用同一主档、状态仓储和原事务；保留当前空间/地点范围、敏感审计、账号/会员独立状态、租户父锁与注销事实核验，合并只写映射与状态，历史引用不搬迁 |
+| [客户经营分析](src/mysql-customer-insights.ts) | `/mysql-customer-insights` 读取已授权的原订单谓词，按币种分别汇总原应付金额与UTC月份；缺金额不补零，不将应付金额解释为收款 |
+| [客户头像](src/mysql-customer-avatar.ts)、[头像HTTP](src/http-customer-avatar.controller.ts)、[实例别名](src/http-customer-avatar-applications.ts) | `/mysql-customer-avatar` 与 `/http-customer-avatar` 保留原2条客户管理路由、5MB位图/内容检查、文件读取后复验及原参数化SQL；生产模式仍须装配受控存储，宿主通过原Guard和同一头像实例接线 |
 | [客户主档与会员](src/mysql-customer-master.ts)、[本表事务视图](src/customer-master-storage.ts) | `/mysql-customer-master` 是五个客户模型的唯一写入口，保留原租户共享、创建归属、普通资料CAS与企业关系修订；同一事务供给注册/合并/状态/企业链，客户共享不开放跨空间订单或其他Core读权 |
 | [企业客户资格](src/mysql-enterprise-access.ts)、[客户上下文](src/client-context.ts) | `/mysql-enterprise-access` 从原客户会话、企业成员关系和明确动作读取资格；原客户Auth供给可信上下文，角色名称不自动取得入口或营运权限 |
 | [企业订单读取](src/mysql-enterprise-orders.ts)、[财务投影](src/mysql-enterprise-finance.ts)、[私有存储](src/enterprise-read-storage.ts) | `/mysql-enterprise-orders` 与 `/mysql-enterprise-finance` 保留原告知字段、本人/企业和当前空间范围，读取前后复验；资金和授信来源由宿主供给，缺原依据返回不可用 |

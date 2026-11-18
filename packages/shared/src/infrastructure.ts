@@ -6,18 +6,8 @@
  * 与具体品类业务无关。因此单独成文件，原来的 legacy.ts 随之删除。
  */
 
-export type InfraAdapterCapability =
-  | "payment"
-  | "pre_auth"
-  | "sms"
-  | "email"
-  | "app_push"
-  | "e_contract"
-  | "tbox"
-  | "ai_dispatch"
-  | "export"
-  | "print"
-  | "file";
+import type { InfraAdapterCapability, NotificationTemplateSummary, NotificationSendLogSummary, AdapterLogSummary } from "@rental-os/platform-contracts/notifications";
+export type { InfraAdapterCapability, NotificationTemplateSummary, NotificationSendLogSummary, SendMockNotificationRequest, AdapterLogSummary } from "@rental-os/platform-contracts/notifications";
 
 export interface InfraCapabilityCard {
   capability: InfraAdapterCapability;
@@ -114,60 +104,6 @@ export interface ReviewPaymentStatementLineRequest {
   reason: string;
 }
 
-export interface NotificationTemplateSummary {
-  id: string;
-  code: string;
-  name: string;
-  category: string;
-  trigger: string;
-  channels: Array<"APP" | "SMS" | "EMAIL" | string>;
-  content: string;
-  enabled: boolean;
-  updatedAt: string;
-}
-
-export interface NotificationSendLogSummary {
-  id: string;
-  templateCode?: string;
-  businessType: string;
-  businessId?: string;
-  targetType: "member" | "corporate" | "operator" | string;
-  targetName?: string;
-  targetMasked?: string;
-  channels: Array<"APP" | "SMS" | "EMAIL" | string>;
-  provider: string;
-  status: "mock_success" | "mock_failed" | "skipped" | string;
-  sentAt?: string;
-  createdAt: string;
-  requestJson: Record<string, unknown>;
-  responseJson?: Record<string, unknown>;
-}
-
-export interface SendMockNotificationRequest {
-  templateCode?: string;
-  businessType: string;
-  businessId?: string;
-  targetType: "member" | "corporate" | "operator" | string;
-  targetName?: string;
-  targetMasked?: string;
-  channels: Array<"APP" | "SMS" | "EMAIL" | string>;
-  variables?: Record<string, string | number>;
-  operator?: string;
-}
-
-export interface AdapterLogSummary {
-  id: string;
-  provider: string;
-  capability: InfraAdapterCapability | string;
-  operation: string;
-  businessType?: string;
-  businessId?: string;
-  status: "mock_success" | "mock_failed" | "reserved" | "skipped" | string;
-  requestJson: Record<string, unknown>;
-  responseJson?: Record<string, unknown>;
-  errorMessage?: string;
-  createdAt: string;
-}
 
 export interface InvokeMockAdapterRequest {
   provider: string;
