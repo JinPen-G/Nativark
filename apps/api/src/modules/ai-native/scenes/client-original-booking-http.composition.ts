@@ -1,7 +1,7 @@
 /** Expose the existing original-quote booking consumer through closed public
  * projections. It neither creates another quote nor selects/accepts a draft.
- * Receipt reads expose only the original material locator, never an Action. */
-import { AI_CLIENT_QUOTE_BOOKING_VERSION, aiClientQuoteBookingRequestSchema,
+ * Receipt reads may project the original selection after the bound Core check. */
+import { AI_CLIENT_QUOTE_BOOKING_VERSION, aiClientQuoteBookingRequestSchema, aiClientBookingReadRequestSchema,
   aiClientQuoteBookingPreparationResponseSchema, aiClientQuoteBookingOperationResponseSchema,
   type AiClientQuoteBookingPreparationResponse, type AiClientQuoteBookingOperationResponse } from '@rental-os/shared';
 import type { AiClientApplicationRequest, composeRequestBoundClientApplication } from './client-request.application';
@@ -42,15 +42,20 @@ export function composeClientOriginalBookingHttp(application: ReturnType<typeof 
     },
     async readOriginalQuoteBookingOperation(request: AiClientApplicationRequest, value: unknown, signal?: AbortSignal): Promise<AiClientQuoteBookingOperationResponse> {
       if (signal?.aborted) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-      const command = aiClientQuoteBookingRequestSchema.parse(structuredClone(value)), result = await flow.readOperation(currentRequest(request), command);
-      if (signal?.aborted) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const command = aiClientBookingReadRequestSchema.parse(structuredClone(value));
       const base = { contractVersion: AI_CLIENT_QUOTE_BOOKING_VERSION, operationKey: command.operationKey,
         source: { materialRef: command.original.materialRef, materialHash: command.original.expectedMaterialHash },
         currentUse: 'not_authorized_by_receipt' as const, execution: 'not_attested' as const, retryable: false as const };
-      if (result.state === 'unknown') return aiClientQuoteBookingOperationResponseSchema.parse({ ...base, state: 'unknown',
+      const unknown = () => aiClientQuoteBookingOperationResponseSchema.parse({ ...base, state: 'unknown',
         material: null, nextAction: 'read_original_quote_booking_operation' });
+      const selection = 'selectionHash' in command ? await application.readBookingSelectionReference(currentRequest(request), command) : command.selection;
+      if (signal?.aborted) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      if (!selection) return unknown();
+      const result = await flow.readOperation(currentRequest(request), { original: command.original, operationKey: command.operationKey, selection });
+      if (signal?.aborted) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      if (result.state === 'unknown') return unknown();
       if (result.operationKey !== command.operationKey) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-      const parsed = aiClientQuoteBookingOperationResponseSchema.safeParse({ ...base, state: 'observed', material: {
+      const parsed = aiClientQuoteBookingOperationResponseSchema.safeParse({ ...base, state: 'observed', ...('selectionHash' in command ? { originalSelection: selection } : {}), material: {
         materialRef: result.materialRef, materialHash: result.materialHash, inputHash: result.inputHash,
         revision: result.revision, expiresAt: result.expiresAt, createdAt: result.createdAt,
         observedAt: result.observedAt, materialValidity: result.materialValidity }, nextAction: 'revalidate_material_before_action' });

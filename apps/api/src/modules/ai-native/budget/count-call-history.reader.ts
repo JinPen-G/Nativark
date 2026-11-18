@@ -25,7 +25,7 @@ const reservationSelect = { id: true, scopeId: true, scopeKind: true, tenantId: 
 type CountReservation = Prisma.AiBudgetReservationGetPayload<{ select: typeof reservationSelect }>;
 type ClaimRow = { id: string; action: string; tenantId: string; workspaceId: string | null; userId: string | null;
   createdAt: Date; detail: unknown; invocationId: string | null; scopeId: string | null };
-type Query = { tenantId: string; scopes: readonly { id: string; workspaceId: string | null }[];
+type Query = { tenantId: string; workspaceId?: string;
   since: Date; until: Date; mode?: 'platform_managed' | 'tenant_managed' };
 export type CallHistoryAnchor = { id: string; createdAt: Date; kind: 'model' | 'input_counting' };
 export type CountCallHistoryEntry = { actorId: string; createdAt: Date; record: AiTenantCallRecord };
@@ -38,19 +38,17 @@ const decoded = (value: unknown) => typeof value === 'string' ? JSON.parse(value
 export class CountCallHistoryReader {
   constructor(private readonly tx: Pick<Prisma.TransactionClient, '$queryRaw' | 'aiGatewayInvocation' | 'aiBudgetReservation' | 'operationLog'>) {}
   private async query(input: Query, anchor?: CallHistoryAnchor, id?: string): Promise<ClaimRow[]> {
-    const scopes = input.scopes.filter(scope => scope.workspaceId !== null);
-    if (!scopes.length) return [];
-    const scopeJoin = Prisma.join(scopes.map(scope => Prisma.sql`(g.scopeId = ${scope.id} AND c.workspaceId = ${scope.workspaceId})`), ' OR ');
     const position = id !== undefined ? Prisma.sql`AND c.id = ${id}` : !anchor ? Prisma.empty
       : anchor.kind === 'model' ? Prisma.sql`AND c.createdAt <= ${anchor.createdAt}`
         : Prisma.sql`AND (c.createdAt < ${anchor.createdAt} OR (c.createdAt = ${anchor.createdAt} AND c.id < ${anchor.id}))`;
     const mode = input.mode ? Prisma.sql`AND (g.id IS NULL OR JSON_UNQUOTE(JSON_EXTRACT(g.configuration, '$.serviceMode')) = ${input.mode})` : Prisma.empty;
     const rows = await this.tx.$queryRaw<ClaimRow[]>(Prisma.sql`SELECT c.id, c.action, c.tenantId, c.workspaceId, c.userId,
       c.createdAt, c.detail, g.id AS invocationId, g.scopeId
-      FROM OperationLog c LEFT JOIN ai_gateway_invocations g
-      ON g.callId = JSON_UNQUOTE(JSON_EXTRACT(c.detail, '$.callId')) AND g.actorId = c.userId AND (${scopeJoin})
+      FROM OperationLog c JOIN business_workspaces w ON w.tenantId = c.tenantId AND w.id = c.workspaceId
+      JOIN ai_scopes s ON s.tenantId = w.tenantId AND s.workspaceId = w.id AND s.kind = 'WORKSPACE'
+      LEFT JOIN ai_gateway_invocations g ON g.callId = JSON_UNQUOTE(JSON_EXTRACT(c.detail, '$.callId')) AND g.actorId = c.userId AND g.scopeId = s.id
       WHERE c.action = 'ai.model.count_tokens.dispatch' AND c.tenantId = ${input.tenantId}
-      AND c.workspaceId IN (${Prisma.join(scopes.map(scope => scope.workspaceId!))})
+      ${input.workspaceId ? Prisma.sql`AND w.id = ${input.workspaceId}` : Prisma.empty}
       AND c.createdAt >= ${input.since} AND c.createdAt < ${input.until} ${mode} ${position}
       ORDER BY c.createdAt DESC, c.id DESC LIMIT ${id !== undefined ? 1 : 51}`);
     if (rows.length > (id !== undefined ? 1 : 51) || new Set(rows.map(row => row.id)).size !== rows.length) return unavailable();
@@ -61,7 +59,7 @@ export class CountCallHistoryReader {
     if (!parsed.success || row.action !== 'ai.model.count_tokens.dispatch' || row.tenantId !== input.tenantId
       || row.tenantId !== parsed.data.tenantId || row.workspaceId !== parsed.data.workspaceId || row.userId !== parsed.data.actorId
       || row.id !== countTokensDispatchOperationId(parsed.data) || !row.invocationId
-      || !input.scopes.some(scope => scope.id === row.scopeId && scope.workspaceId === row.workspaceId)
+      || !row.scopeId || input.workspaceId !== undefined && row.workspaceId !== input.workspaceId
       || !(row.createdAt instanceof Date) || !Number.isFinite(row.createdAt.getTime())
       || row.createdAt < input.since || row.createdAt >= input.until) return unavailable();
     return parsed.data;
@@ -76,7 +74,7 @@ export class CountCallHistoryReader {
     const rows = await this.query(input, anchor);
     if (!rows.length) return [];
     const claims = rows.map(row => this.claim(row, input));
-    const scopeIds = input.scopes.map(scope => scope.id), receiptIds = claims.map(countTokensOperationId);
+    const scopeIds = [...new Set(rows.map(row => row.scopeId!))], receiptIds = claims.map(countTokensOperationId);
     const [parents, reservations, receipts] = await Promise.all([
       this.tx.aiGatewayInvocation.findMany({ where: { scopeId: { in: scopeIds }, id: { in: rows.map(row => row.invocationId!) } }, take: 51, select: parentSelect }),
       this.tx.aiBudgetReservation.findMany({ where: { tenantId: input.tenantId, scopeKind: 'WORKSPACE',

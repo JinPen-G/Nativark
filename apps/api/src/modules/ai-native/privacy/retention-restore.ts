@@ -1,4 +1,5 @@
-import { createHash, createPublicKey, sign, verify, type KeyObject } from 'node:crypto';
+import { createHash, createPublicKey, type KeyObject } from 'node:crypto';
+import { signManifestPages, verifyManifestPages } from './retention-manifest-pages';
 import { z } from 'zod';
 import { AI_RETENTION_POLICY } from './retention-policy';
 
@@ -8,7 +9,7 @@ const tombstone = z.object({ kind: z.enum(retentionKinds), resourceId: id, targe
   mode: z.enum(['erase', 'withdraw']).default('erase') }).strict();
 const manifest = z.object({ version: z.literal('ai-restore-tombstones-1'), policyVersion: z.literal(AI_RETENTION_POLICY.version),
   tenantId: id, workspaceId: id, snapshotId: z.string().uuid(), snapshotSha256: hash, snapshotCreatedAt: z.string().datetime(),
-  issuedAt: z.string().datetime(), complete: z.literal(true), tombstones: z.array(tombstone).max(500) }).strict();
+  issuedAt: z.string().datetime(), complete: z.literal(true), tombstones: z.array(tombstone) }).strict();
 type Manifest = z.infer<typeof manifest>;
 export type AiRestorePermit = Readonly<{ keyHash: string; manifest: Readonly<Manifest> }>;
 const permits = new WeakSet<object>();
@@ -26,9 +27,7 @@ export class AiRetentionRestoreVerifier {
     retentionPublicKeyHash(publicKey);
   }
   verify(value: unknown): AiRestorePermit {
-    const envelope = z.object({ payload: z.string().max(262144), signature: z.string().max(128) }).strict().parse(value);
-    if (!verify(null, Buffer.from(envelope.payload), this.publicKey, Buffer.from(envelope.signature, 'base64'))) throw Error('AI_RETENTION_RESTORE_UNAVAILABLE');
-    const parsed = manifest.parse(JSON.parse(envelope.payload)), now = this.clock().getTime();
+    const parsed = manifest.parse(verifyManifestPages(value, this.publicKey)), now = this.clock().getTime();
     if (!Number.isFinite(now) || Date.parse(parsed.issuedAt) > now || now - Date.parse(parsed.issuedAt) > 60000
       || Date.parse(parsed.snapshotCreatedAt) > Date.parse(parsed.issuedAt)
       || now - Date.parse(parsed.snapshotCreatedAt) > AI_RETENTION_POLICY.backupMaximumDays * 86400000
@@ -48,6 +47,5 @@ export function requireRestorePermit(permit: AiRestorePermit, keyHash: string | 
 }
 export function signRetentionManifest(value: unknown, privateKey: KeyObject) {
   if (privateKey.type !== 'private' || privateKey.asymmetricKeyType !== 'ed25519') throw Error('AI_RETENTION_RESTORE_UNAVAILABLE');
-  const payload = JSON.stringify(manifest.parse(value));
-  return { payload, signature: sign(null, Buffer.from(payload), privateKey).toString('base64') };
+  return signManifestPages(manifest.parse(value), privateKey);
 }

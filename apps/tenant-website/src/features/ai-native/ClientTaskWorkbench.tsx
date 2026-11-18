@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSite } from '../../SiteContext';
 import { captureEnterpriseHostSession, sessionApi, subscribeCustomerSession } from '../../data/authClient';
+import { withClientRecoveryLock } from '../../data/clientRecoveryStorage';
 import { createClientTaskApi } from './client-task-api';
 import { createClientTaskSession, clientTaskStorageKey, type ClientTaskView } from './client-task-session';
 import { ClientTaskCancellation } from './ClientTaskCancellation';
@@ -53,7 +54,15 @@ export function ClientTaskWorkbench({ orderId, scopeKey, english }: { orderId: s
   const work = async (action: (owner: NonNullable<typeof session.current>) => Promise<unknown>) => {
     if (busy.current || document.hidden || currentScope.current !== scopeKey) return;
     const epoch = generation.current; busy.current = true; setWorking(true); setError(false);
-    try { const owner = await ensure(); if (owner) await action(owner); }
+    try {
+      const captured = captureEnterpriseHostSession();
+      if (!captured?.current()) throw Error('client_task_unavailable');
+      await withClientRecoveryLock(captured.operationScope, async () => {
+        if (!captured.current() || epoch !== generation.current || document.hidden) return;
+        const owner = await ensure();
+        if (owner && captured.current()) await action(owner);
+      });
+    }
     catch { if (epoch === generation.current) setError(true); }
     finally { if (epoch === generation.current) { busy.current = false; setWorking(false); } }
   };
@@ -87,7 +96,7 @@ export function ClientTaskWorkbench({ orderId, scopeKey, english }: { orderId: s
       onObserved={value => {
         const owner = session.current;
         if (currentScope.current !== scopeKey || document.hidden || owner?.cancellationHost()?.origin.taskId !== value.taskId) return;
-        void owner.refreshAfterObservation(value.taskId);
+        void work(async active => { if (active === owner) await active.refreshAfterObservation(value.taskId); });
       }} />}
   </section>;
 }

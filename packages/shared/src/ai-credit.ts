@@ -26,4 +26,5 @@ export interface AiCreditBalance {
 export interface AiCreditSummary {
   currencies: string[]; balances: AiCreditBalance[]; requests: AiCreditRequest[];
   workspaces: { id: string; name: string }[]; requestHistoryComplete: boolean;
+  nextCurrency: string | null; nextWorkspace: string | null;
 }

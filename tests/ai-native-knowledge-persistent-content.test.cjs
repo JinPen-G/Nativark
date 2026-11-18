@@ -29,14 +29,15 @@ async function setup() {
   const retrieval = new KnowledgeRetrievalService(docs, sources, selection, adapter);
   const document = { draftVersion: 'ain-c06-draft-1', documentId: 'doc-a', documentVersion: 'v1', attachmentId: 'attachment-a', owner, scope, aclRevision: 1, title: 'Synthetic SOP', publication: 'published', parsing: 'parsed', indexing: 'indexed', validFrom: '2026-10-01T00:00:00Z' };
   const chunk = { draftVersion: 'ain-c06-draft-1', documentId: 'doc-a', documentVersion: 'v1', chunkId: 'chunk-a', scope, aclRevision: 1, locator: { kind: 'section', sectionId: 'section-a', paragraph: 1 }, text: 'Synthetic camping SOP', trust: 'untrusted_data' };
-  await repo.commit({ scope, documentId: 'doc-a', expectedRevision: 0, next: { document, revision: 1 }, chunks: [chunk], newVersion: true, operation: { id: 'seed-a', fingerprint: 'seed-hash' } });
+  const contentHash = require('node:crypto').createHash('sha256').update(chunk.text).digest('hex');
+  await repo.commit({ scope, documentId: 'doc-a', expectedRevision: 0, next: { document, revision: 1, contentHash }, chunks: [chunk], newVersion: true, operation: { id: 'seed-a', fingerprint: 'seed-hash' } });
   const source = { kind: 'document', documentId: chunk.documentId, documentVersion: chunk.documentVersion, chunkId: chunk.chunkId, scope, aclRevision: 1, locator: chunk.locator };
   return { db, repo, state, authorization, docs, adapter, sources, retrieval, source, chunk };
 }
 test('actual repository -> content -> source and lexical retrieval return immutable scoped evidence', async () => {
   const s = await setup();
   assert.deepEqual(await s.sources.readChunk(context, s.source), s.chunk);
-  assert.deepEqual(s.db.queries[0].where.state, { path: '$.chunkId', equals: 'chunk-a' });
+  assert.deepEqual(s.db.queries[0].where.state, { path: '$.chunk.chunkId', equals: 'chunk-a' });
   assert.equal(s.db.queries[0].take, 2); // One logical source, plus a duplicate probe; never load all bodies.
   const result = await s.retrieval.recall(context, { requestId: 'query-a', query: 'camping', limit: 5 });
   assert.equal(result.status, 'ready'); assert.equal(result.matches[0].excerpt, s.chunk.text);
@@ -93,8 +94,8 @@ test('corrupt body columns, unknown JSON and duplicate chunk IDs fail closed', a
 });
 test('historical version body refuses mismatched persisted text, scope and version', async () => {
   for (const change of [row => { row.text = 'foreign historical text'; },
-    row => { row.state.scope.workspaceId = 'foreign-space'; },
-    row => { row.state.documentVersion = 'foreign-version'; },
+    row => { row.state.chunk.scope.workspaceId = 'foreign-space'; },
+    row => { row.state.chunk.documentVersion = 'foreign-version'; },
     row => { row.state.secret = 'undeclared'; }]) {
     const s = await setup();
     assert.equal((await s.repo.versionContent(scope, 'doc-a', 'v1')).chunks[0].text, s.chunk.text);

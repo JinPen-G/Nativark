@@ -1,5 +1,6 @@
 import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req } from '@nestjs/common';
 import { z } from 'zod';
+import { logInterruptedRetention } from './retention-page-observation';
 import { AI_PLATFORM_RETENTION_HTTP } from '@rental-os/shared';
 import type { AiRetentionService } from './retention.service';
 import { AiTaskRepositoryError } from '../ai-task.repository';
@@ -46,6 +47,7 @@ export class AiRetentionController {
         ? writing ? 'AI_RESULT_UNKNOWN' : 'AI_RESOURCE_UNAVAILABLE' : rawCode;
       const status = error instanceof z.ZodError || code === 'AI_INVALID_INPUT' ? 400 : code === 'AI_ACCESS_DENIED' ? 403
         : code === 'AI_REVISION_CONFLICT' || code === 'AI_RESULT_UNKNOWN' ? 409 : 503;
+      if (writing && (status === 503 || code === 'AI_RESULT_UNKNOWN')) logInterruptedRetention('workspace', status);
       throw new HttpException({ code: status === 400 ? 'AI_INVALID_INPUT' : status === 503 ? 'AI_RESOURCE_UNAVAILABLE'
         : code, retryable: false, ...(code === 'AI_RESULT_UNKNOWN' ? { nextAction: 'list_retention_receipts' } : {}) }, status);
     }
@@ -82,6 +84,7 @@ export class AiPlatformRetentionController {
         ? writing ? 'AI_RESULT_UNKNOWN' : 'AI_RESOURCE_UNAVAILABLE' : raw;
       const status = error instanceof z.ZodError || code === 'AI_INVALID_INPUT' ? 400 : code === 'AI_ACCESS_DENIED' ? 403
         : code === 'AI_REVISION_CONFLICT' || code === 'AI_RESULT_UNKNOWN' ? 409 : 503;
+      if (writing && (status === 503 || code === 'AI_RESULT_UNKNOWN')) logInterruptedRetention('platform', status);
       throw new HttpException({ code: status === 400 ? 'AI_INVALID_INPUT' : status === 503 ? 'AI_RESOURCE_UNAVAILABLE' : code,
         retryable: false, ...(code === 'AI_RESULT_UNKNOWN' ? { nextAction: 'list_retention_receipts' } : {}) }, status);
     }

@@ -176,7 +176,7 @@ function showIntake(page: Page, state: IntakeRuntime, message?: string) {
     aiInspectionMediaMessage: state.message || (locator?.phase === 'draft_saved' ? '原 AI 检查草稿已保存；识别仍须明确启动'
       : locator?.phase === 'evidence_ready' ? '原附件已核对，请明确保存 AI 检查草稿'
       : locator ? '原上传或草稿待核对，不重新上传或换键提交'
-      : state.local ? '本机材料已选定，尚未上传' : '图片限 PNG/JPEG、512KB；录音为 WAV、最长12秒，同一识别不混用') });
+      : state.local ? '本机材料已选定，尚未上传' : '图片支持 PNG、JPEG，最大 512 KiB。WAV 录音最长 12 秒。') });
 }
 async function selectIntakeTarget(page: Page, stage: 'pickup' | 'return', state: IntakeRuntime) {
   const work = captureInspectionPageWork(page); state.work = work; loadIntake(page, stage, state);
@@ -220,8 +220,9 @@ export async function chooseInspectionPageImage(page: Page, stage: 'pickup' | 'r
     const image = await new Promise<WechatMiniprogram.GetImageInfoSuccessCallbackResult>((resolve, reject) => wx.getImageInfo({ src: file.path, success: resolve, fail: () => reject(Error('图片格式无法核对')) }));
     if (!work.current()) return;
     assertIntakeRetained(state);
-    const mimeType = image.type === 'png' ? 'image/png' : image.type === 'jpeg' ? 'image/jpeg' : null;
-    if (!mimeType || !Number.isSafeInteger(file.size) || file.size < 1 || file.size > mediaLimit) throw Error('AI 图片只接 PNG/JPEG，单文件不超过512KB；其他材料可走原人工检查');
+    const format = String(image.type).toLowerCase();
+    const mimeType = format === 'png' ? 'image/png' : ['jpg','jpeg'].includes(format) ? 'image/jpeg' : null;
+    if (!mimeType || !Number.isSafeInteger(file.size) || file.size < 1 || file.size > mediaLimit) throw Error('请选择 512 KiB 以内的 PNG 或 JPEG 图片，也可继续人工检查。');
     state.local = { ...file, kind: 'image', mimeType, fileName: `${stage}-ai-evidence.${mimeType === 'image/png' ? 'png' : 'jpg'}` };
   } catch (error) { showIntake(page, state, error instanceof Error ? error.message : '原材料暂不可用'); }
   finally { state.busy = false; showIntake(page, state); }
@@ -243,7 +244,7 @@ export async function startInspectionPageRecording(page: Page, stage: 'pickup' |
         assertIntakeRetained(state);
         if (!Number.isSafeInteger(result.duration) || !Number.isSafeInteger(result.fileSize)
           || result.duration < 1 || result.duration > 12000 || result.fileSize < 1 || result.fileSize > mediaLimit) {
-          showIntake(page, state, 'WAV录音不超过12秒/512KB；无法核对时继续人工检查'); return;
+          showIntake(page, state, '请选择 12 秒、512 KiB 以内的 WAV 录音，也可继续人工检查。'); return;
         }
         state.local = { path: result.tempFilePath, size: result.fileSize, kind: 'audio', mimeType: 'audio/wav', fileName: `${stage}-ai-evidence.wav` };
         showIntake(page, state);

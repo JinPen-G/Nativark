@@ -114,6 +114,8 @@ export const AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS = {
       inputHash: { anyOf: [hash, { type: 'null' }] }, task: { type: 'null' } })] },
   AiClientTaskReadRequest: object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid }),
   AiClientTaskInputSubmissionRequest: object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid, submission: clientAnswer }),
+  AiClientTaskInputRecoveryRequest: { oneOf: [object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid, submission: clientAnswer }),
+    object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid, submission: object({ requestId: { ...id, maxLength: 36 }, expectedRevision: { ...taskRevision, maximum: 4294967294 }, submissionKey: id }) })] },
   AiClientTaskInputReadResponse: { oneOf: [object({ contractVersion: literal(AI_TASK_INPUT_DRAFT_VERSION), state: literal('pending'),
     question: object({ requestId: { ...id, maxLength: 36 }, revision: { type: 'integer', minimum: 1, maximum: 4294967294 },
       expiresAt: date, contract: AI_TASK_INPUT_DRAFT_SCHEMAS.AiTaskInputContractDraft }), execution: literal('not_authorized_by_observation') }),

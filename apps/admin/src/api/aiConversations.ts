@@ -184,13 +184,13 @@ export const aiConversationsApi = Object.freeze({
       return result.data.data;
     }, input, active, () => epoch === currentSessionEpoch());
   },
-  async detail(input: AiConversationTurnListDraft, capabilityCode: AiSceneCode, signal: AbortSignal) {
+  async detail(input: AiConversationTurnListDraft, capabilityCode: AiSceneCode, signal: AbortSignal, includeClosedTurn = false) {
     const epoch = currentSessionEpoch(), active = AbortSignal.any([signal, currentSessionSignal()]);
     const read = async (action: 'read' | 'turns', query: unknown, requestSignal: AbortSignal) => {
       const result = await http.post<ApiResult<unknown>>(`/${AI_CONVERSATION_HTTP_DRAFT.basePath}/${action}`, query, { signal: requestSignal });
       return result.data.data;
     };
-    return readConversationDetail({ read: (query, signal) => read('read', query, signal),
+    return readConversationDetail({ read: (query, signal) => read('read', includeClosedTurn ? { ...query, includeClosedTurn: true } : query, signal),
       turns: (query, signal) => read('turns', query, signal) }, input, capabilityCode, active, () => epoch === currentSessionEpoch());
   },
   async result(input: AiConversationTurnReferenceDraft, turn: AiConversationTurnObservationDraft, signal: AbortSignal) {

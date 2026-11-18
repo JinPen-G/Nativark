@@ -15,7 +15,7 @@ export { useSimulatedRun } from './useSimulatedRun';
 export type { AgentRunState, ChangedFile, DiffLine, ProposedChange, RunResult, RunScript, RunStep, ScriptStep, StepMark } from './agent-run-state';
 export type PullRequest = { number: number; url?: string };
 export type AgentRunProps = {
-  activityOnly?: boolean; task?: string; model?: { name: string; mark?: ReactNode }; script?: RunScript; run?: AgentRunState; autoPlay?: boolean;
+  activityOnly?: boolean; statusText?: string; task?: string; model?: { name: string; mark?: ReactNode }; script?: RunScript; run?: AgentRunState; autoPlay?: boolean;
   onApprove?: (change: ProposedChange) => void | Promise<unknown>;
   onReject?: (change: ProposedChange, reason: string) => void | Promise<unknown>;
   onOpenPullRequest?: () => PullRequest | void | Promise<PullRequest | void>;
@@ -76,7 +76,7 @@ function StreamedSummary({ text }: { text: string }) {
   }, [text, chunks.length, reducedMotion]);
   return <p className={c('summary')} aria-label={text}>{chunks.map((chunk, index) => <span key={index} aria-hidden="true" className={c('chunk')} data-shown={index < shown || undefined}>{chunk}</span>)}</p>;
 }
-export function AgentRun({ task = REQUEST, model, script = sampleScript, run, autoPlay = true, onApprove, onReject, onOpenPullRequest, onRestart, className = '', activityOnly = false }: AgentRunProps) {
+export function AgentRun({ task = REQUEST, model, script = sampleScript, run, autoPlay = true, onApprove, onReject, onOpenPullRequest, onRestart, className = '', activityOnly = false, statusText }: AgentRunProps) {
   const root = useRef<HTMLElement>(null), [visible, setVisible] = useState(false), simulated = useSimulatedRun(script, { running: visible && !run }), state = run ?? simulated.state;
   const [open, setOpen] = useState<Record<string, boolean>>({}), [expanded, setExpanded] = useState(false), [pending, setPending] = useState(false), [error, setError] = useState(''), [pr, setPr] = useState<{ status: 'idle' | 'opening' | 'opened' | 'error'; number?: number; url?: string; error?: string }>({ status: 'idle' });
   const rowRefs = useRef(new Map<string, HTMLButtonElement>()), restartButton = useRef<HTMLButtonElement>(null), version = useRef(0), lock = useRef(false), prLock = useRef(false), prTimer = useRef<ReturnType<typeof setTimeout> | null>(null), latestState = useRef(state), id = useId(); latestState.current = state;
@@ -114,7 +114,7 @@ export function AgentRun({ task = REQUEST, model, script = sampleScript, run, au
     } catch (failure) { if (stamp === version.current) setPr({ status: 'error', error: failure instanceof Error ? failure.message : 'Could not open the pull request. Try again.' }); }
     finally { if (stamp === version.current) prLock.current = false; }
   }
-  const settled = ['done', 'stopped'].includes(state.status), statusLabel = { idle: '就绪', working: '本地演示中', waiting: '等待确认', done: '已完成', stopped: '已停止' }[state.status], currentStep = state.steps.at(-1), seconds = Math.round(state.elapsedMs / 1000);
+  const settled = ['done', 'stopped', 'partial'].includes(state.status), statusLabel = statusText ?? { idle: '就绪', working: run ? '执行中' : '本地演示中', waiting: '等待确认', partial: '部分成功', done: '已完成', stopped: '已停止' }[state.status], currentStep = state.steps.at(-1), seconds = Math.round(state.elapsedMs / 1000);
   const totalAdd = state.result?.files.reduce((sum, file) => sum + file.additions, 0) ?? 0, totalDel = state.result?.files.reduce((sum, file) => sum + file.deletions, 0) ?? 0;
   return <section ref={root} className={`${c('root')} agent-run-local ${className}`} aria-labelledby={`${id}-task`}>
     <header className={c('header')}><div className={c('titleRow')}><h3 id={`${id}-task`} className={c('task')}>{task}</h3><button ref={restartButton} type="button" className={c('iconButton')} aria-label="Restart run" title="Restart run" onClick={restart} hidden={activityOnly}><RotateCcw size={16} /></button></div>
@@ -131,7 +131,7 @@ export function AgentRun({ task = REQUEST, model, script = sampleScript, run, au
       <div className={c('resultActions')}><button type="button" className={c('prButton')} data-pr={pr.status} disabled={pr.status === 'opening' || pr.status === 'opened'} onClick={openPr}>{pr.status === 'opening' ? <LoaderCircle size={16} className={c('spin')} /> : <BrandMark brand="github" size={16} />}{pr.status === 'opened' ? pr.number ? `PR #${pr.number} opened` : 'Pull request opened' : pr.status === 'opening' ? 'Opening' : pr.status === 'error' ? 'Retry pull request' : 'Open pull request'}</button>{pr.url && <a href={pr.url} target="_blank" rel="noreferrer">View pull request</a>}</div>{pr.error && <p className="agent-run-error" role="alert">{pr.error}</p>}
     </section></MeasuredHeight>}
     {!activityOnly && state.status === 'stopped' && <section className={c('result')} aria-label="Stopped result"><p className={c('summary')}>The change was sent back again. Nothing was written.</p><button type="button" className="agent-run-start" onClick={restart}>Restart run</button></section>}
-    <span className={c('srOnly')} role="status">{activityOnly ? `${statusLabel}，共${state.steps.length}个步骤，仅本地演示。` : state.status === 'waiting' ? 'Waiting for you. Review the changes to 2 files, then approve or reject.' : state.status === 'done' ? `Done in ${seconds}s. ${state.result?.tests.passed ?? 0} of ${state.result?.tests.total ?? 0} tests passed.` : state.status === 'stopped' ? 'Stopped. Nothing was written.' : currentStep ? stepLabel(currentStep) : 'Ready. This is a local simulated run.'}</span>
+    <span className={c('srOnly')} role="status">{activityOnly ? statusLabel : state.status === 'waiting' ? 'Waiting for you. Review the changes to 2 files, then approve or reject.' : state.status === 'done' ? `Done in ${seconds}s. ${state.result?.tests.passed ?? 0} of ${state.result?.tests.total ?? 0} tests passed.` : state.status === 'stopped' ? 'Stopped. Nothing was written.' : currentStep ? stepLabel(currentStep) : 'Ready. This is a local simulated run.'}</span>
     <span className={c('srOnly')} role="status">{pr.status === 'opened' ? `${onOpenPullRequest ? '' : 'Simulated locally. No real pull request was created. '}${pr.number ? `PR #${pr.number} opened.` : 'Pull request opened.'}` : pr.error ?? ''}</span>
   </section>;
 }

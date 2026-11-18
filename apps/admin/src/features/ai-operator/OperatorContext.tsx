@@ -9,12 +9,12 @@ import { useAuthStore } from '@/features/auth/authStore';
 import { aiTaskCenterApi } from '@/api/aiTaskCenter';
 import { aiConversationsApi } from '@/api/aiConversations';
 import { OPERATOR_CAPABILITIES, type OperatorArtifact } from './capabilities';
-import { NativeOperatorSession, nativeResultText, nativeAgentRun, type NativeFrame, type NativeScene } from './native-session';
+import { NativeOperatorSession, nativeResultText as renderNativeResult, nativeAgentRun, type NativeFrame, type NativeScene } from './native-session';
+import { useAiManagementLocale } from '../ai-native/management-locale';
 import type { LiveVisibleObservationSession, VisibleSourceReference } from '../ai-native/visible-observation-session';
 import { AI_QUOTE_GOAL_DRAFT_VERSION, validateAiQuoteGoalInputDraft } from '@rental-os/shared';
 export type OperatorView = 'chat' | 'plugins' | 'automations';
 interface ThreadDetails { capabilityId: string; artifact?: OperatorArtifact; step: number; running: boolean; receipt?: string; run?: AgentRunState; runId?: string; runModel?: ChatModel; revisionRequest?: string; native?: NativeFrame; hasOriginal?: boolean }
-export interface OperatorTask { id: string; name: string; capabilityId: string; frequency: 'daily' | 'weekdays' | 'weekly'; time: string; prompt: string; enabled: boolean }
 export const NATIVE_GATEWAY_MODEL: ChatModel = { id: 'server-route', name: '服务端路由', note: '采用服务端当前受权路由' };
 const id = () => crypto.randomUUID();
 function consoleOwner(auth: ReturnType<typeof useAuthStore.getState>) {
@@ -23,6 +23,10 @@ function consoleOwner(auth: ReturnType<typeof useAuthStore.getState>) {
 }
 function useOperatorState() {
   const auth = useAuthStore(), location = useLocation();
+  const language = useAiManagementLocale(), languageRef = useRef(language);
+  languageRef.current = language;
+  const nativeResultText = (frame: NativeFrame) => renderNativeResult(frame, (chinese, english) =>
+    languageRef.current.locale === 'en-US' ? english : languageRef.current.t(chinese));
   const identity = JSON.stringify([auth.tenant?.tenantId, auth.currentWorkspaceId, auth.user?.id]);
   const owner = consoleOwner(auth);
   const permitted = OPERATOR_CAPABILITIES.filter(capability => {
@@ -35,10 +39,12 @@ function useOperatorState() {
   const [chats, setChats] = useState<ChatConversation[]>(() => [fromMessages(id(), '新对话', [], '今天')]);
   const [activeId, setActiveId] = useState(chats[0].id);
   const [details, setDetails] = useState<Record<string, ThreadDetails>>(() => ({ [chats[0].id]: { capabilityId: first.id, running: false, step: 0 } }));
-  const [view, setView] = useState<OperatorView>('chat'), [tasks, setTasks] = useState<OperatorTask[]>([]);
+  const [view, setView] = useState<OperatorView>('chat');
   const [queuedPrompt, setQueuedPrompt] = useState<{ id: string; text: string; chatId: string } | null>(null);
   const [orderId, setOrderId] = useState('');
   const [openingSections, setOpeningSections] = useState<string[]>([]);
+  const [historyPage, setHistoryPage] = useState<{ scene: NativeScene; status: 'active' | 'archived'; next: string | null } | null>(null);
+  const historyRequest = useRef(0);
   const [orderQuestion, setOrderQuestion] = useState<'' | 'status' | 'fees' | 'payments' | 'next_steps'>('');
   const request = useRef<AbortController | null>(null), generation = useRef(0), alive = useRef(true), objectUrls = useRef<string[]>([]);
   const replies = useRef(new Map<string, string>()), startingReply = useRef(new Map<string, string>());
@@ -107,15 +113,6 @@ function useOperatorState() {
       setNotice('原结果当前不可读取，请保留原操作，稍后再次核对。'); } }
     finally { if (request.current === abort) request.current = null; }
   }
-  async function stopTask() {
-    if (!current()) return;
-    const chatId = activeId;
-    cancel(); const abort = new AbortController(); request.current = abort;
-    const selected = () => current() && !abort.signal.aborted && refs.current.activeId === chatId;
-    try { const receipt = await native.stop(chatId, abort.signal); if (selected()) setNotice(receipt.status === 'observed' ? '已记录停止请求。已发生的动作和费用仍须按原收据核对。' : '停止结果待核对，请读取原收据。'); }
-    catch { if (selected()) setNotice('停止结果待核对。未证明任务已停止或费用已释放。'); }
-    finally { if (request.current === abort) request.current = null; }
-  }
   function selectConversation(chatId: string) {
     const target = refs.current.threads.find(thread => thread.id === chatId); if (!target || !available.some(item => item.id === target.capabilityId)) return;
     cancel(); setActiveId(chatId); setView('chat'); setOrderId(''); setOrderQuestion(''); setOpeningSections([]); setNotice(''); lastConversation.current.set(target.capabilityId, chatId);
@@ -126,16 +123,17 @@ function useOperatorState() {
     const previous = refs.current.threads.find(thread => thread.id === lastConversation.current.get(capabilityId));
     if (previous) selectConversation(previous.id); else createConversation(capabilityId);
   }
-  async function history() {
+  async function history(status: 'active' | 'archived' = 'active', beforeId?: string) {
     if (!scene || !current()) return;
-    const abort = new AbortController(), selection = generation.current, chatId = activeId;
-    const selected = () => current() && selection === generation.current && refs.current.activeId === chatId;
-    try { const rows = await native.history(scene, abort.signal); if (!selected()) return;
+    const abort = new AbortController(), selection = generation.current, chatId = activeId, attempt = ++historyRequest.current;
+    const selected = () => current() && selection === generation.current && refs.current.activeId === chatId && attempt === historyRequest.current;
+    try { const rows = await native.history(scene, abort.signal, status, beforeId); if (!selected()) return;
+      setHistoryPage({ scene, status, next: rows.nextBeforeId });
       const originals = native.locatorsSnapshot().filter(row => row.scene === scene);
       const serverItems = rows.items.filter(row => !originals.some(original => original.conversationId === row.conversationId));
       setChats(previous => [...previous, ...originals.filter(row => !previous.some(chat => chat.id === row.chatId)).map(row => fromMessages(row.chatId, '原操作待核对', [], '原操作'))]);
       setDetails(previous => ({ ...previous, ...Object.fromEntries(originals.filter(row => !previous[row.chatId]).map(row => [row.chatId, { capabilityId: capability.id, hasOriginal: true, running: false, step: 0 }])) }));
-      setChats(previous => [...previous, ...serverItems.filter(row => !previous.some(chat => chat.id === row.conversationId)).map(row => fromMessages(row.conversationId, `${capability.name} · ${new Date(row.createdAt).toLocaleString()}`, [], '原对话'))]);
+      setChats(previous => [...previous, ...serverItems.filter(row => !previous.some(chat => chat.id === row.conversationId)).map(row => fromMessages(row.conversationId, `${capability.name} · ${new Date(row.createdAt).toLocaleString()}`, [], status === 'archived' ? '已归档' : '原对话'))]);
       setDetails(previous => ({ ...previous, ...Object.fromEntries(serverItems.filter(row => !previous[row.conversationId]).map(row => [row.conversationId, { capabilityId: capability.id, running: false, step: 0,
         native: { conversationId: row.conversationId, scene, turn: null, result: null, historical: true, phase: 'result' } }])) }));
     } catch { if (selected()) setNotice('原对话当前不可读取。'); }
@@ -218,7 +216,7 @@ function useOperatorState() {
   };
   return { permitted, available, disabled, togglePlugin: (capabilityId: string, next: boolean) => { if (!next && capability.id === capabilityId) cancel(); setDisabled(previous => next ? previous.filter(item => item !== capabilityId) : [...new Set([...previous, capabilityId])]); },
     chats, setChats, objectUrls, activeId, queuedPrompt, setQueuedPrompt, respond, visibleReference, resultChanged,
-    retract: () => withdraw('当前权限或来源已变化，请重新核对原请求。'), canSend, history, openNative, readOriginal, stopTask, identity, current, notice, orderId, setOrderId, orderQuestion, setOrderQuestion, openingSections, setOpeningSections, native,
+    retract: () => withdraw('当前权限或来源已变化，请重新核对原请求。'), canSend, history, historyPage: historyPage?.scene === scene ? historyPage : null, openNative, readOriginal, identity, current, notice, orderId, setOrderId, orderQuestion, setOrderQuestion, openingSections, setOpeningSections, native,
     registerReply: (chatId: string, nodeId: string) => { startingReply.current.set(chatId, nodeId); },
     retryOriginal: (nodeId: string) => {
       const key = `${activeId}:${active.native?.turn?.admissionKey ?? 'unobserved'}`;
@@ -229,7 +227,7 @@ function useOperatorState() {
     setView: (next: OperatorView) => { if (next !== view) cancel(); setView(next); },
     createConversation, selectConversation, openConversation: selectConversation, chooseCapability, cancel,
     confirm: () => false, confirmConversation: (_id: string, _run?: string) => false, requestConversationChanges: (_id: string, _run: string | undefined, _note: string) => false,
-    tasks, setTasks, runTask: (_task: OperatorTask) => setNotice('计划自动运行尚未接入，请到原经营自动化页面办理。') };
+  };
 }
 type OperatorState = ReturnType<typeof useOperatorState>;
 const OperatorContext = createContext<OperatorState | null>(null);

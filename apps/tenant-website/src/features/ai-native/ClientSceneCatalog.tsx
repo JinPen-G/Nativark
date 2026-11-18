@@ -2,7 +2,7 @@
  * recovery never requests it. Current session, visibility and expiry bound the
  * displayed page; no directory row becomes a navigation or execution grant. */
 import { useEffect, useRef, useState } from 'react';
-import type { AiEntrySceneCatalogResponse } from '@rental-os/shared';
+import { entrySceneAvailabilityLabel, type AiEntrySceneCatalogResponse } from '@rental-os/shared';
 import { captureEnterpriseHostSession, subscribeCustomerSession } from '../../data/authClient';
 import { readClientSceneCatalog } from './client-scene-catalog-api';
 
@@ -88,6 +88,7 @@ export function ClientSceneCatalog({ scopeKey, tenantCode, serviceCode, english:
       {!page.entries.length && <p>{text('本页没有场景，普通预约仍可使用。', 'No scenes on this page. Ordinary booking remains available.')}</p>}
       <ul>{page.entries.map(entry => <li key={entry.entryId} style={{ overflowWrap: 'anywhere' }}>
         <strong>{entry.title}</strong>{' · '}{statuses[entry.availability.state]}{' · '}{entry.riskLevel}
+        {entry.availability.state !== 'available' && <p>{entrySceneAvailabilityLabel(entry.availability.reason, en)}</p>}
         <p>{entry.goal}</p><p>{confirmations[entry.confirmation]}</p>
         <details><summary>{text('来源、权限与限制', 'Sources, access and limits')}</summary><dl>
           <dt>{text('已登记工具', 'Registered tools')}</dt><dd>{entry.tools.map(tool => tool.code).join(' · ') || text('沿原人工入口', 'Original manual workflow')}</dd>

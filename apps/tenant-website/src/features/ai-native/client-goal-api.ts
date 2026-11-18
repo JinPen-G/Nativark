@@ -5,9 +5,9 @@ import { API_BASE } from '../../data/apiClient';
 import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientHostCapabilitiesSchema,
   aiClientGoalPreparationRequestSchema, aiClientGoalPreparationReadRequestSchema,
   aiClientGoalPreparationResponseSchema, aiClientGoalCandidatesRequestSchema, aiClientGoalProjectionSchema,
-  aiClientGoalQuoteRequestSchema, aiClientQuotePreparationResponseSchema,
-  aiClientQuotePreparationReadResponseSchema, aiClientQuoteConfirmationRequestSchema,
-  aiClientQuoteResultReadResponseSchema, aiClientQuoteBookingRequestSchema, aiClientQuoteBookingPreparationResponseSchema,
+  aiClientGoalQuoteRequestSchema, aiClientQuotePreparationResponseSchema, aiClientGoalQuoteReferenceSchema, aiClientGoalQuoteReadResponseSchema,
+  aiClientQuoteConfirmationRequestSchema,
+  aiClientQuoteResultReadResponseSchema, aiClientQuoteBookingRequestSchema, aiClientBookingReadRequestSchema, aiClientQuoteBookingPreparationResponseSchema,
   aiClientQuoteBookingOperationResponseSchema, aiEntryActionSchema, aiBookingDraftSchema,
   aiBookingCreateResponseSchema, aiBookingChoiceResponseSchema, aiBookingHandoffResponseSchema,
   aiBookingOperationReadResponseSchema, aiBookingHandoffSchema, type AiClientGoalQuoteRequest } from '@rental-os/shared';
@@ -47,8 +47,8 @@ export function createClientGoalApi(context: { tenantCode: string; current(): bo
     prepareGoalQuote(input: AiClientGoalQuoteRequest, signal?: AbortSignal) {
       return call(AI_CLIENT_ENTRY_HTTP_DRAFT.prepareGoalQuote, aiClientGoalQuoteRequestSchema.parse(input), aiClientQuotePreparationResponseSchema, signal);
     },
-    readGoalQuotePreparation(input: AiClientGoalQuoteRequest, signal?: AbortSignal) {
-      return call(AI_CLIENT_ENTRY_HTTP_DRAFT.readGoalQuotePreparation, aiClientGoalQuoteRequestSchema.parse(input), aiClientQuotePreparationReadResponseSchema, signal);
+    readGoalQuotePreparation(input: ReturnType<typeof aiClientGoalQuoteReferenceSchema.parse>, signal?: AbortSignal) {
+      return call(AI_CLIENT_ENTRY_HTTP_DRAFT.readGoalQuotePreparation, aiClientGoalQuoteReferenceSchema.parse(input), aiClientGoalQuoteReadResponseSchema, signal);
     },
     confirmQuoteParameters(input: ReturnType<typeof aiClientQuoteConfirmationRequestSchema.parse>, signal?: AbortSignal) {
       return call(AI_CLIENT_ENTRY_HTTP_DRAFT.confirmQuoteParameters, aiClientQuoteConfirmationRequestSchema.parse(input), aiClientQuoteResultReadResponseSchema, signal);
@@ -77,7 +77,7 @@ export function createClientGoalBookingApi(context: { tenantCode: string; curren
     prepareBooking: input => call(AI_CLIENT_ENTRY_HTTP_DRAFT.prepareOriginalQuoteBooking,
       aiClientQuoteBookingRequestSchema.parse(input), aiClientQuoteBookingPreparationResponseSchema, signal),
     readBookingPreparation: input => call(AI_CLIENT_ENTRY_HTTP_DRAFT.readOriginalQuoteBookingOperation,
-      aiClientQuoteBookingRequestSchema.parse(input), aiClientQuoteBookingOperationResponseSchema, signal),
+      aiClientBookingReadRequestSchema.parse(input), aiClientQuoteBookingOperationResponseSchema, signal),
     issueBookingAction: input => call(AI_CLIENT_ENTRY_HTTP_DRAFT.issueAction, input, aiEntryActionSchema, signal),
     createBookingDraft: input => call(AI_CLIENT_ENTRY_HTTP_DRAFT.createBookingDraft, input, aiBookingCreateResponseSchema, signal),
     readBookingDraft: input => call(AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingDraft, input, aiBookingDraftSchema, signal),

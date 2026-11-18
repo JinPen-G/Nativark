@@ -10,7 +10,7 @@ import { newKey } from '../../../core/keys';
 import { contextVersion, currentSession, sessionEvents } from '../../../core/session';
 import { writeRequiredStorage } from '../../../core/storage';
 import { formatBusinessDateTime, zoneSupported } from '../../../core/time';
-import { createClientQuoteSession, createClientQuoteBookingSession, clientQuoteStorageKey, clientQuoteBookingStoredRequest,
+import { createClientQuoteSession, createClientQuoteBookingSession, clientQuoteStorageKey,
   type ClientQuoteContext, type ClientQuoteView, type ClientQuoteBookingView } from '../client-quote-session';
 import { projectBookingDraftReview, projectQuoteParameterReview, type BookingDraftReview } from '../booking-draft-review';
 import { projectClientOriginalQuoteFacts } from '../client-original-quote-facts';
@@ -81,13 +81,12 @@ Component({
     },
     async ensureBooking(purpose: 'read' | 'write'): Promise<Booking | null> {
       const quote = quotes.get(this)?.snapshot(), selected = quotes.get(this)?.originalInput(), binding = bindings.get(this);
-      if (!quote?.quote || !quote.material || !selected || !binding?.context.current()) return null;
+      if (!quote?.quote || !quote.material || !binding?.context.current()) return null;
       const key = `${binding.key}:booking`, cached = read(key);
       if (purpose === 'read' && cached === undefined) return null;
-      let selection: AiBookingSelection;
-      if (purpose === 'read') selection = clientQuoteBookingStoredRequest(cached).selection;
-      else {
-        if (!this.data.timeZone || !zoneSupported(this.data.timeZone) || !quote.matchesInput) return null;
+      let selection: AiBookingSelection | null = null;
+      if (purpose === 'write') {
+        if (!selected || !this.data.timeZone || !zoneSupported(this.data.timeZone) || !quote.matchesInput) return null;
         selection = { quoteId: quote.quote.quoteId, timeZone: this.data.timeZone, startAt: selected.startAt, endAt: selected.endAt,
           fulfillmentMode: selected.fulfillmentMode, fulfillmentLocationId: selected.fulfillmentLocationId,
           ...(selected.returnLocationId ? { returnLocationId: selected.returnLocationId } : {}), ...(selected.deliveryAddressId ? { deliveryAddressId: selected.deliveryAddressId } : {}),
@@ -123,7 +122,7 @@ Component({
     },
     onGenerate() { return this.runIntent(async () => {
       const quote = await this.ensureQuote('write'); if (!quote) return;
-      if (quote.originalInput()) await quote.recover(); else await quote.prepare();
+      if (quote.snapshot().canRead) await quote.recover(); else await quote.prepare();
       const state = quote.snapshot(); if (state.status !== 'quoted' || !state.matchesInput || state.readOnly) return;
       await (await this.ensureBooking('write'))?.generateDraft();
     }); },

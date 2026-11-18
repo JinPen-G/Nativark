@@ -19,11 +19,11 @@ export type NativeScene = 'quote_clarification' | 'order_explanation' | 'opening
 export type NativeFrame = { conversationId: string; scene: NativeScene;
   turn: AiConversationTurnObservationDraft | null; result: AiConversationTaskResultDraft | null;
   phase: 'admission' | 'task' | 'model' | 'result' | 'unknown'; historical: boolean;
-  snapshot?: AiTaskSnapshotDraft; observation?: AiConversationObservationDraft; readyForNext?: boolean };
+  snapshot?: AiTaskSnapshotDraft; observation?: AiConversationObservationDraft; readyForNext?: boolean; contextTurns?: number };
 export type NativeSend = { chatId: string; scene: NativeScene; text: string; orderId?: string;
   question?: 'status' | 'fees' | 'payments' | 'next_steps'; sections?: string[] };
 type Locator = { chatId: string; scene: NativeScene; conversationId: string | null; pending: boolean };
-type Options = { api: typeof aiConversationsApi; tasks: Pick<typeof aiTaskCenterApi, 'snapshot' | 'stop' | 'stopReceipt'>;
+type Options = { api: typeof aiConversationsApi; tasks: Pick<typeof aiTaskCenterApi, 'snapshot'>;
   storage: Storage | undefined; identity: string;
   current(): boolean; changed?(chatId: string, frame: NativeFrame): void };
 const version = AI_CONVERSATION_DRAFT_VERSION;
@@ -31,6 +31,7 @@ const id = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9][A
 
 export class NativeOperatorSession {
   private frames = new Map<string, NativeFrame>();
+  private historyLinks = new Map<string, Locator>();
   private busy = false;
   constructor(private readonly d: Options) {}
   private key(suffix: string) { return `ai-native-console:${this.d.identity}:${suffix}`; }
@@ -51,8 +52,10 @@ export class NativeOperatorSession {
     const rows = this.locators(), previous = rows.find(row => row.chatId === locator.chatId);
     if (previous && (previous.scene !== locator.scene || previous.conversationId !== null && previous.conversationId !== locator.conversationId))
       throw Error('AI_ORIGINAL_LOCATOR_CHANGED');
-    const next = [...rows.filter(row => row.chatId !== locator.chatId), locator];
-    if (next.length > 100) throw Error('AI_ORIGINAL_STORAGE_FULL');
+    const next = rows.filter(row => row.chatId !== locator.chatId && (row.pending || !row.conversationId));
+    if (locator.pending) next.push(locator);
+    if (next.length > 100 || JSON.stringify(next).length > 32768) throw Error('AI_ORIGINAL_STORAGE_FULL');
+    for (const row of [...rows, locator]) if (row.conversationId && !row.pending) this.historyLinks.set(row.chatId, row);
     const raw = JSON.stringify(next); this.d.storage!.setItem(this.key('locators'), raw);
     if (this.d.storage!.getItem(this.key('locators')) !== raw) throw Error('AI_ORIGINAL_LOCATOR_CHANGED');
   }
@@ -61,7 +64,10 @@ export class NativeOperatorSession {
   }
   frame(chatId: string) { return this.frames.get(chatId) ?? null; }
   locatorsSnapshot() { return structuredClone(this.locators()); }
-  hasOriginal(chatId: string) { return this.locators().some(row => row.chatId === chatId); }
+  private locate(chatId: string): Locator | undefined {
+    return this.locators().find(row => row.chatId === chatId) ?? this.historyLinks.get(chatId);
+  }
+  hasOriginal(chatId: string) { return !!this.locate(chatId); }
   retract() { this.frames.clear(); }
   private async metadata(locator: Locator, signal: AbortSignal) {
     this.check(signal); if (!locator.conversationId) throw Error('AI_RESULT_UNKNOWN');
@@ -70,9 +76,9 @@ export class NativeOperatorSession {
     if (!validateAiConversationObservationDraft(value, query) || value.capabilityCode !== locator.scene) throw Error('AI_SCOPE_CHANGED');
     return value;
   }
-  async history(scene: NativeScene, signal: AbortSignal) {
+  async history(scene: NativeScene, signal: AbortSignal, status: 'active' | 'archived' = 'active', beforeId?: string) {
     this.check(signal);
-    const value = await this.d.api.list({ draftVersion: version, status: 'active', limit: 20, capabilityCode: scene }, signal);
+    const value = await this.d.api.list({ draftVersion: version, status, ...(beforeId ? { beforeId } : {}), limit: 20, capabilityCode: scene }, signal);
     this.check(signal); return value;
   }
   async open(chatId: string, conversationId: string, scene: NativeScene, signal: AbortSignal) {
@@ -82,20 +88,21 @@ export class NativeOperatorSession {
     this.frames.delete(chatId);
     const detail = await this.d.api.detail({ draftVersion: version, conversationId, limit: 20 }, scene, signal);
     this.check(signal);
-    const previous = this.locators().find(row => row.chatId === chatId);
+    const previous = this.locate(chatId);
     const locator = { chatId, conversationId, scene, pending: previous?.pending ?? false };
-    this.save(locator);
+    if (previous && (previous.conversationId !== conversationId || previous.scene !== scene)) throw Error('AI_ORIGINAL_LOCATOR_CHANGED');
+    this.historyLinks.set(chatId, locator);
     const turn = detail.conversation.currentTurn ?? detail.turns.items[0] ?? null;
     const frame: NativeFrame = { conversationId, scene, turn, result: null, phase: 'unknown',
       historical: detail.conversation.status !== 'active' || detail.conversation.currentTurn === null,
-      observation: detail.conversation };
+      observation: detail.conversation, contextTurns: detail.turns.items.length };
     if (turn?.task) {
       frame.result = await this.d.api.currentResult({ draftVersion: version, conversationId, admissionKey: turn.admissionKey }, turn, signal);
       this.check(signal);
       frame.snapshot = validateTaskCenterSnapshot(await this.d.tasks.snapshot(turn.task.taskId, signal), turn.task.taskId);
       this.check(signal);
       if (frame.result.status === 'observed' && frame.result.result.status !== 'unknown') {
-        frame.phase = 'result'; this.save({ ...locator, pending: false });
+        frame.phase = 'result';
       }
     }
     // Reopening keeps the original close proof only after rechecking its empty head.
@@ -109,7 +116,7 @@ export class NativeOperatorSession {
   }
   async read(chatId: string, signal: AbortSignal) {
     this.check(signal);
-    const locator = this.locators().find(row => row.chatId === chatId); if (!locator) throw Error('AI_ORIGINAL_LOCATOR_MISSING');
+    const locator = this.locate(chatId); if (!locator) throw Error('AI_ORIGINAL_LOCATOR_MISSING');
     const previous = this.frames.get(chatId);
     try {
       if (!locator.conversationId) {
@@ -123,14 +130,16 @@ export class NativeOperatorSession {
       }
       const observed = await this.metadata(locator, signal), turn = observed.currentTurn;
       let selectedTurn = turn ?? previous?.turn ?? null;
+      let contextTurns = previous?.observation?.revision === observed.revision ? previous?.contextTurns : undefined;
       if (!selectedTurn) {
         const detail = await this.d.api.detail({ draftVersion: version, conversationId: locator.conversationId!, limit: 20 }, locator.scene, signal);
         this.check(signal);
         if (JSON.stringify(detail.conversation) !== JSON.stringify(observed)) throw Error('AI_REVISION_CONFLICT');
         selectedTurn = detail.turns.items[0] ?? null;
+        contextTurns = detail.turns.items.length;
       }
       const frame: NativeFrame = { conversationId: locator.conversationId!, scene: locator.scene, turn: selectedTurn,
-        result: null, phase: 'unknown', historical: observed.status !== 'active' || turn === null, observation: observed };
+        result: null, phase: 'unknown', historical: observed.status !== 'active' || turn === null, observation: observed, contextTurns };
       if (frame.turn?.task) {
         const selected = frame.turn;
         frame.result = await this.d.api.currentResult({ draftVersion: version, conversationId: frame.conversationId, admissionKey: selected.admissionKey }, selected, signal);
@@ -146,7 +155,14 @@ export class NativeOperatorSession {
       if (held?.readyForNext && held.conversationId === frame.conversationId && held.scene === frame.scene
         && held.observation?.revision === observed.revision && observed.status === 'active' && !turn)
         frame.readyForNext = true;
-      if (frame.phase === 'result') this.save({ ...locator, pending: false });
+      if (locator.pending && frame.phase === 'result' && turn) {
+        const journal = new ConversationAdmissionSession(frame.conversationId, this.d.api, () => !signal.aborted && this.d.current(), this.d.storage,
+          `ai-conversation-admission:${this.d.identity}:${frame.conversationId}`);
+        try {
+          await journal.reconcile(); this.check(signal);
+          if (journal.snapshot().observation?.result?.admissionKey === turn.admissionKey) this.save({ ...locator, pending: false });
+        } finally { journal.dispose(); }
+      }
       this.publish(chatId, frame, signal); return frame;
     } catch (error) {
       if (this.frames.get(chatId) === previous) this.frames.delete(chatId);
@@ -154,7 +170,7 @@ export class NativeOperatorSession {
     }
   }
   async nextRound(chatId: string, proof: { expectedRevision: number; turnId: string; originalInputRef: string }, signal: AbortSignal) {
-    this.check(signal); const locator = this.locators().find(row => row.chatId === chatId);
+    this.check(signal); const locator = this.locate(chatId);
     if (!locator?.conversationId) throw Error('AI_RESULT_UNKNOWN');
     const observed = await this.metadata(locator, signal);
     if (observed.status !== 'active' || observed.currentTurn !== null || observed.revision !== proof.expectedRevision + 1
@@ -163,29 +179,15 @@ export class NativeOperatorSession {
     const previous = this.frames.get(chatId);
     if (!previous || previous.conversationId !== locator.conversationId || previous.turn?.turnId !== proof.turnId
       || previous.turn.original.inputRef !== proof.originalInputRef) throw Error('AI_RESULT_UNKNOWN');
-    this.save({ ...locator, pending: false });
-    this.publish(chatId, { ...previous, historical: true, observation: observed, readyForNext: true }, signal);
-  }
-  async stop(chatId: string, signal: AbortSignal) {
-    this.check(signal); const taskId = this.frames.get(chatId)?.turn?.task?.taskId;
-    if (!taskId || !this.d.storage) throw Error('尚未取得原任务定位，请先核对原请求。');
-    const key = `ai-task-stop:${this.d.identity}:${taskId}`, raw = this.d.storage.getItem(key);
-    let query: { taskId: string; expectedRevision: number };
-    if (raw !== null) {
-      if (raw.length > 512) throw Error('AI_RESULT_UNKNOWN'); query = JSON.parse(raw);
-      if (!query || Object.keys(query).sort().join(',') !== 'expectedRevision,taskId' || query.taskId !== taskId || !Number.isSafeInteger(query.expectedRevision) || query.expectedRevision < 1) throw Error('AI_RESULT_UNKNOWN');
-    } else {
-      const snapshot = validateTaskCenterSnapshot(await this.d.tasks.snapshot(taskId, signal), taskId); this.check(signal);
-      query = { taskId, expectedRevision: snapshot.revision };
-      if (this.d.storage.getItem(key) !== null) throw Error('AI_RESULT_UNKNOWN');
-      const saved = JSON.stringify(query); this.d.storage.setItem(key, saved);
-      if (this.d.storage.getItem(key) !== saved) throw Error('AI_RESULT_UNKNOWN');
+    let contextTurns: number | undefined;
+    if (observed.revision >= 15) {
+      const detail = await this.d.api.detail({ draftVersion: version, conversationId: locator.conversationId, limit: 9 }, locator.scene, signal);
+      this.check(signal);
+      if (JSON.stringify(detail.conversation) !== JSON.stringify(observed)) throw Error('AI_REVISION_CONFLICT');
+      contextTurns = detail.turns.items.length;
     }
-    this.check(signal);
-    const value = await this.d.tasks[raw === null ? 'stop' : 'stopReceipt'](query, signal); this.check(signal);
-    if (value.taskId !== taskId || value.expectedRevision !== query.expectedRevision || value.cancellation !== 'request_not_rollback'
-      || value.automaticRetry !== false || value.remoteCancellation !== 'not_attested' || value.budgetRelease !== 'not_attempted') throw Error('AI_RESULT_UNKNOWN');
-    return value;
+    this.save({ ...locator, pending: false });
+    this.publish(chatId, { ...previous, historical: true, observation: observed, readyForNext: (contextTurns ?? 0) <= 8, contextTurns }, signal);
   }
   async send(input: NativeSend, signal: AbortSignal, visible?: LiveVisibleObservationSession | null): Promise<NativeFrame> {
     this.check(signal); if (this.busy) throw Error('AI_BUSY');
@@ -196,7 +198,7 @@ export class NativeOperatorSession {
     if (input.scene === 'order_explanation' && !['status', 'fees', 'payments', 'next_steps'].includes(input.question ?? '')) throw Error('请明确选择本次订单问题。');
     if (input.scene === 'opening_diagnosis' && (!input.sections?.length || input.sections.length > 9
       || input.sections.some(section => !id(section)) || new Set(input.sections).size !== input.sections.length)) throw Error('请明确选择开业检查分区。');
-    const existing = this.locators().find(row => row.chatId === input.chatId);
+    const existing = this.locate(input.chatId);
     // Only read()/open() reconcile a prior attempt. A new message is never
     // silently answered with an old result or used to rotate an unknown turn.
     if (existing && (!this.frames.get(input.chatId)?.readyForNext || existing.scene !== input.scene))
@@ -266,23 +268,27 @@ export class NativeOperatorSession {
 
 /** Only persisted sequence/status enters the original run animation. No synthetic
  * tool names, elapsed execution timings or successful business results. */
-export function nativeAgentRun(snapshot: AiTaskSnapshotDraft): AgentRunState {
-  return { status: snapshot.status === 'succeeded' ? 'done' : ['failed', 'cancelled'].includes(snapshot.status) ? 'stopped'
-    : ['paused', 'waiting_approval', 'waiting_input', 'waiting_external'].includes(snapshot.status) ? 'waiting' : 'working',
+type NativeLabel = (chinese: string, english: string) => string;
+const defaultLabel: NativeLabel = chinese => chinese;
+export function nativeAgentRun(snapshot: AiTaskSnapshotDraft, label: NativeLabel = defaultLabel): AgentRunState {
+  const statuses = { queued: 'idle', running: 'working', waiting_input: 'waiting', waiting_confirmation: 'waiting', waiting_external: 'waiting',
+    cancel_requested: 'waiting', partially_succeeded: 'partial', succeeded: 'done', failed: 'stopped', cancelled: 'stopped' } as const satisfies Record<AiTaskSnapshotDraft['status'], AgentRunState['status']>;
+  return { status: statuses[snapshot.status],
     elapsedMs: Math.max(0, Date.parse(snapshot.updatedAt) - Date.parse(snapshot.createdAt)),
     steps: [...snapshot.steps].sort((a, b) => a.sequence - b.sequence).map(step => ({ id: step.stepId,
       mark: step.kind === 'model' ? 'think' : step.kind === 'confirmation' ? 'review' : 'read',
-      verb: step.kind === 'model' ? '模型步骤' : step.kind === 'confirmation' ? '原确认步骤' : '原业务步骤',
-      doneVerb: '原步骤', target: `${step.sequence} · ${step.stepId}`, text: step.status,
-      status: step.status === 'succeeded' ? 'done' : ['failed', 'cancelled', 'rejected'].includes(step.status) ? 'rejected'
-        : ['pending', 'waiting_approval', 'waiting_external', 'waiting_input'].includes(step.status) ? 'waiting' : 'running' })) };
+      verb: step.status === 'unknown' ? label('原步骤结果待核对', 'Step result awaiting verification') : step.status === 'pending' ? label('步骤待执行', 'Step pending')
+        : step.kind === 'model' ? label('模型步骤', 'Model step') : step.kind === 'confirmation' ? label('原确认步骤', 'Confirmation step') : label('原业务步骤', 'Business step'),
+      doneVerb: step.status === 'failed' ? label('步骤失败', 'Failed step') : step.status === 'cancelled' ? label('步骤已取消', 'Cancelled step') : label('步骤已完成', 'Completed step'),
+      target: `${step.sequence} · ${step.stepId}`, text: step.status,
+      status: step.status === 'succeeded' ? 'done' : step.status === 'failed' || step.status === 'cancelled' ? 'rejected' : step.status })) };
 }
 
-export function nativeResultText(frame: NativeFrame): string {
+export function nativeResultText(frame: NativeFrame, label: NativeLabel = defaultLabel): string {
   const result = frame.result;
   if (result?.status === 'observed' && result.result.status === 'available' && result.result.text) return result.result.text.value;
-  if (result?.status === 'material_erased') return '原输入已按保留规则清理，可从原任务核对收据。';
-  if (result?.status === 'observed' && result.result.status === 'stale') return '事实已变化，请回原业务页面核对。';
-  if (result?.status === 'observed' && result.result.status === 'failed') return '原任务失败，请核对原任务记录。';
-  return '原结果待核对，请读取原结果。需要补充条件或业务确认时，请在右侧原任务入口办理。';
+  if (result?.status === 'material_erased') return label('原输入已按保留规则清理，可从原任务核对收据。', 'The original input expired under the retention policy. Check the receipt on the original task.');
+  if (result?.status === 'observed' && result.result.status === 'stale') return label('事实已变化，请回原业务页面核对。', 'The facts have changed. Check the original business page.');
+  if (result?.status === 'observed' && result.result.status === 'failed') return label('原任务失败，请核对原任务记录。', 'The original task failed. Check its record.');
+  return label('原结果待核对，请读取原结果。需要补充条件或业务确认时，请在右侧原任务入口办理。', 'Check the original result. Use the original task to add information or confirm an action.');
 }

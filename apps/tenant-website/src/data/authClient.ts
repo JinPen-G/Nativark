@@ -9,15 +9,16 @@ import type { AiClientHostCapabilities, EnterpriseOwnRentalPolicy, EnterpriseBoo
 import type { IssueEnterpriseOrderDelegation, RevokeEnterpriseOrderDelegation, EnterpriseOrderDelegationOriginal } from '@rental-os/shared';
 import { CLIENT_API_VERSION, AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientQuotePreparationRequestSchema, aiClientQuotePreparationResponseSchema,
   aiClientQuotePreparationReadResponseSchema, aiClientQuoteConfirmationRequestSchema, aiClientQuoteResultReadResponseSchema,
-  type AiClientQuotePreparationRequest, type AiClientQuoteConfirmationRequest } from '@rental-os/shared';
+  aiClientQuoteReadRequestSchema, type AiClientQuoteSelectionRef, type AiClientQuotePreparationRequest, type AiClientQuoteConfirmationRequest } from '@rental-os/shared';
 import { aiClientQuoteBookingRequestSchema, aiClientQuoteBookingPreparationResponseSchema, aiClientQuoteBookingOperationResponseSchema,
-  type AiClientQuoteBookingRequest, type AiEntryActionDraft, aiEntryActionSchema, aiBookingDraftSchema, aiBookingCreateResponseSchema,
+  aiClientBookingReadRequestSchema, type AiClientBookingReadRef, type AiClientQuoteBookingRequest, type AiEntryActionDraft, aiEntryActionSchema, aiBookingDraftSchema, aiBookingCreateResponseSchema,
   aiBookingChoiceResponseSchema, aiBookingHandoffResponseSchema, aiBookingOperationReadResponseSchema } from '@rental-os/shared';
 
 const CLIENT_V1 = `${API_BASE}/api/client/v1`;
 
 import { customerFetch, customerLogin, customerSessionGeneration, loadCustomerSession, logoutCustomerSession, switchCustomerWorkspace, subscribeCustomerSession, ClientTransportError } from '@rental-os/web-client';
 import type { EnterpriseExchangeChoices, EnterpriseExchangeChoicesQuery, EnterpriseExchangeRequestOriginalResult, RequestEnterpriseExchangeApproval, CloseEnterpriseExchangeRequest, ClientOrderView, ClientProfileView, ClientMembershipSessionResponse, ConfirmEnterpriseExchangeExpense, EnterpriseExchangeConfirmationResult, EnterpriseExchangeApprovalView, CloseEnterpriseExtensionRequest, EnterpriseExtensionRequestOriginalResult, EnterpriseExtensionEligibility, EnterpriseExtensionApprovalView, EnterpriseExtensionOriginalResult } from '@rental-os/shared';
+import { minimizeClientRecoveryStorage } from './clientRecoveryStorage';
 export type ClientSession = ClientMembershipSessionResponse;
 
 export interface WorkspaceRef {
@@ -74,8 +75,11 @@ export const authApi = {
   }) {
     return postPublic<{ result: string; customerId: string; membershipStatus: string }>('/auth/register', input);
   },
-  logout(tenantCode: string) {
-    return logoutCustomerSession(tenantCode, CLIENT_V1);
+  async logout(tenantCode: string) {
+    try { return await logoutCustomerSession(tenantCode, CLIENT_V1); }
+    finally {
+      await minimizeClientRecoveryStorage(localStorage);
+    }
   },
 };
 
@@ -166,8 +170,8 @@ export const sessionApi = {
     const value = await authedJson<unknown>(`/ai-native/entry/${AI_CLIENT_ENTRY_HTTP_DRAFT.prepareQuoteParameters}`, { method: 'POST', body: JSON.stringify(command) });
     return aiClientQuotePreparationResponseSchema.parse(value);
   },
-  async readClientQuotePreparation(input: AiClientQuotePreparationRequest) {
-    const command = aiClientQuotePreparationRequestSchema.parse(input);
+  async readClientQuotePreparation(input: AiClientQuoteSelectionRef | AiClientQuotePreparationRequest) {
+    const command = aiClientQuoteReadRequestSchema.parse(input);
     const value = await authedJson<unknown>(`/ai-native/entry/${AI_CLIENT_ENTRY_HTTP_DRAFT.readQuotePreparationOperation}`, { method: 'POST', body: JSON.stringify(command) });
     return aiClientQuotePreparationReadResponseSchema.parse(value);
   },
@@ -185,9 +189,9 @@ export const sessionApi = {
     return aiClientQuoteBookingPreparationResponseSchema.parse(await authedJson<unknown>(`/ai-native/entry/${AI_CLIENT_ENTRY_HTTP_DRAFT.prepareOriginalQuoteBooking}`,
       { method: 'POST', body: JSON.stringify(aiClientQuoteBookingRequestSchema.parse(input)) }));
   },
-  async readOriginalQuoteBookingOperation(input: AiClientQuoteBookingRequest) {
+  async readOriginalQuoteBookingOperation(input: AiClientBookingReadRef | AiClientQuoteBookingRequest) {
     return aiClientQuoteBookingOperationResponseSchema.parse(await authedJson<unknown>(`/ai-native/entry/${AI_CLIENT_ENTRY_HTTP_DRAFT.readOriginalQuoteBookingOperation}`,
-      { method: 'POST', body: JSON.stringify(aiClientQuoteBookingRequestSchema.parse(input)) }));
+      { method: 'POST', body: JSON.stringify(aiClientBookingReadRequestSchema.parse(input)) }));
   },
   async issueBookingAction(input: { materialRef: string; actionCode: 'CREATE_BOOKING_DRAFT' }) {
     return aiEntryActionSchema.parse(await authedJson<unknown>(`/ai-native/entry/${AI_CLIENT_ENTRY_HTTP_DRAFT.issueAction}`, { method: 'POST', body: JSON.stringify(input) }));

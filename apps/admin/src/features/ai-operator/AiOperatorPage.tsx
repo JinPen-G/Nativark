@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { currentSessionEpoch } from '@/app/queryClient';
 import { readConversationNavigation } from '@/features/ai-native/conversation-navigation';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { APP_ROUTES, canAccessRoute } from '@/app/navigation';
 import { useLocale } from '@/app/locale';
-import { Plus, X } from "lucide-react";
-import { Button, Drawer, Input, Modal, Select, Switch } from "@/components/ui";
+import { Button, Drawer, Input, Switch } from "@/components/ui";
 import { AnimatedIcon } from "@/components/ui/AnimatedIcon";
 import { ArcLocale } from "@/components/ui/ArcLocale";
 import { ContentTransition } from "@/components/workspace/ContentTransition";
-import { WorkspacePageActions, WorkspacePageTitle } from "@/components/workspace/WorkspaceHeader";
+import { WorkspacePageTitle } from "@/components/workspace/WorkspaceHeader";
 import { VisibleObservationHost, useVisibleObservationHost } from '@/features/ai-native/VisibleObservationHost';
 import { VisibleObservationBoundary } from '@/features/ai-native/VisibleObservationBoundary';
 import { AI_QUOTE_GOAL_LIMITS } from '@rental-os/shared';
@@ -17,14 +17,12 @@ import { NATIVE_GATEWAY_MODEL } from "./OperatorContext";
 import { NativeOperatorWorkspace } from "./NativeOperatorWorkspace";
 import { ResizablePanels, ResizablePanel } from "@/registry/components/resizable-panels/resizable-panels";
 import { Card } from "@/registry/components/card/card";
-import { useOperator, type OperatorTask } from "./OperatorContext";
-import { OPERATOR_CAPABILITIES } from "./capabilities";
+import { useOperator } from "./OperatorContext";
 import { resolveAdminBrandName } from "@/app/branding";
 import { useAuthStore } from "@/features/auth/authStore";
 import "./ai-operator.css";
 import "./archive-adapter.css";
 
-const frequencyLabels = { daily: "每天", weekdays: "工作日", weekly: "每周一" };
 /** Model selection belongs to the persisted server route, never a local menu. */
 function useConfiguredChatModels() { return { models: [NATIVE_GATEWAY_MODEL], defaultModel: NATIVE_GATEWAY_MODEL.id }; }
 function useNarrow() {
@@ -87,7 +85,7 @@ function OperatorChat() {
             host={{ scope: '原任务', notice: operator.notice || (operator.enabled ? '发送将使用当前受权模型并记录用量，业务动作仍须另行确认。' : '此能力尚未接入，可在工作区打开原业务页面。'),
               maxInputLength: operator.capability.nativeScene === 'quote_clarification' ? AI_QUOTE_GOAL_LIMITS.goalCharacters : undefined,
               preserveInput: operator.capability.nativeScene === 'quote_clarification',
-              modelMenu: '服务端当前路由', modelLocked: true, attachments: false, canSend: operator.canSend, onHistory: () => void operator.history(), onRetry: operator.retryOriginal, onReplyStarted: operator.registerReply, onStop: () => void operator.stopTask(),
+              modelMenu: '服务端当前路由', modelLocked: true, attachments: false, canSend: operator.canSend, onHistory: () => void operator.history(), onRetry: operator.retryOriginal, onReplyStarted: operator.registerReply,
               renderText: (message, body) => {
                 const reference = operator.visibleReference(message);
                 return reference ? <VisibleObservationBoundary reference={reference} kind="text"
@@ -137,41 +135,18 @@ function PluginCatalog() {
     <header className="operator-section-header"><p>选择对话可使用的经营能力</p><span className="operator-demo-tag">当前能力</span></header>
     <div className="operator-catalog-search"><Input allowClear aria-label="搜索插件" placeholder="搜索能力" value={query} onChange={event => setQuery(event.target.value)} /></div>
     <div className="operator-plugin-grid">{operator.permitted.filter(item => `${item.name}${item.description}`.includes(query.trim())).map(item => <Card key={item.id} title={item.name} description={item.description} className="operator-plugin-card"
-      avatar={<span className="operator-plugin-icon"><AnimatedIcon name={item.icon} /></span>} meta={item.nativeScene ? "已接原任务" : "待接入"} action={<Switch aria-label={`启用${item.name}`} checked={!operator.disabled.includes(item.id)} onChange={next => operator.togglePlugin(item.id, next)} />} />)}</div>
+      avatar={<span className="operator-plugin-icon"><AnimatedIcon name={item.icon} /></span>} meta={item.nativeScene ? "在工作台办理" : "在原业务页面办理"} action={<Switch aria-label={`显示${item.name}入口`} checked={!operator.disabled.includes(item.id)} onChange={next => operator.togglePlugin(item.id, next)} />} />)}</div>
     {!operator.permitted.some(item => `${item.name}${item.description}`.includes(query.trim())) && <p className="operator-empty">没有匹配的可用能力</p>}
     <p className="operator-caption">按当前账号权限展示。开关控制本页入口，服务端继续核验实际权限与能力。</p>
   </section>;
 }
 function AutomationTasks() {
-  const operator = useOperator();
-  const [editing, setEditing] = useState<OperatorTask | null>(null), [error, setError] = useState("");
-  const [query, setQuery] = useState("");
-  const visible = operator.tasks.filter(task => task.name.includes(query.trim()));
-  const allowed = (capabilityId: string) => operator.available.some(item => item.id === capabilityId);
-  function create() { const capability = operator.available[0]; if (!capability) return; setError(""); setEditing({ id: crypto.randomUUID(), name: "", capabilityId: capability.id, frequency: "daily", time: "09:00", prompt: capability.prompt, enabled: true }); }
-  function save() {
-    if (!editing) return;
-    if (!editing.name.trim() || !editing.prompt.trim() || !/^([01]\d|2[0-3]):[0-5]\d$/.test(editing.time) || !allowed(editing.capabilityId)) { setError("请填写名称、任务要求和有效时间，并选择已启用的能力。"); return; }
-    operator.setTasks(previous => [...previous.filter(task => task.id !== editing.id), { ...editing, name: editing.name.trim(), prompt: editing.prompt.trim() }]); setEditing(null);
-  }
-  function presets() {
-    const candidates = [{ capabilityId: "brief", name: "晨间经营简报", frequency: "daily", time: "09:00" }, { capabilityId: "orders", name: "归还验收跟进", frequency: "daily", time: "16:00" }, { capabilityId: "review", name: "每周经营复盘", frequency: "weekly", time: "17:00" }] as const;
-    operator.setTasks(previous => [...previous, ...candidates.filter(candidate => allowed(candidate.capabilityId) && !previous.some(task => task.name === candidate.name)).map(candidate => ({ ...candidate, id: crypto.randomUUID(), enabled: true, prompt: OPERATOR_CAPABILITIES.find(item => item.id === candidate.capabilityId)!.prompt }))]);
-  }
+  const auth = useAuthStore(), navigate = useNavigate(), { t } = useLocale();
+  const route = APP_ROUTES.aiTasks;
+  const allowed = canAccessRoute(route, auth.hasPermission, auth.hasCapability, auth.tenant?.categoryCode, !!auth.user?.isSaasAdmin, auth.hasTenantMembershipPermission);
   return <section className="operator-catalog">
-    <WorkspacePageTitle><h1 className="workspace-page-title">自动化任务</h1></WorkspacePageTitle>
-    <WorkspacePageActions><Button type="primary" icon={<Plus size={16} />} disabled onClick={create}>新建任务</Button></WorkspacePageActions>
-    <header className="operator-section-header"><p>设定时间与目标，让重复待办按计划整理</p></header>
-    <div className="operator-automation-note"><AnimatedIcon name="schedule" /><span>此控制台尚未开放计划自动运行，请使用原经营自动化入口。</span></div>
-    {operator.tasks.length ? <><div className="operator-catalog-search"><Input allowClear aria-label="搜索任务" placeholder="搜索任务" value={query} onChange={event => setQuery(event.target.value)} /></div><div className="operator-task-list">{visible.map(task => <article key={task.id} className="operator-task-row"><AnimatedIcon name="schedule" /><div><h2>{task.name}</h2><p>{frequencyLabels[task.frequency]} {task.time} · {OPERATOR_CAPABILITIES.find(item => item.id === task.capabilityId)?.name}</p></div><div className="operator-task-actions"><Switch aria-label={`${task.name}开关`} checked={task.enabled} disabled={!allowed(task.capabilityId)} onChange={enabled => operator.setTasks(previous => previous.map(item => item.id === task.id ? { ...item, enabled } : item))} /><Button disabled={!task.enabled || !allowed(task.capabilityId)} onClick={() => operator.runTask(task)}>运行演示</Button><Button onClick={() => { setEditing({ ...task }); setError(""); }}>编辑</Button><Button type="text" aria-label={`删除${task.name}`} icon={<X size={16} />} onClick={() => operator.setTasks(previous => previous.filter(item => item.id !== task.id))} /></div></article>)}</div>{!visible.length && <p className="operator-empty">没有匹配的任务</p>}</> : <div className="operator-task-empty"><AnimatedIcon name="schedule" /><h2>把重复待办安排好</h2><p>从晨间简报、归还跟进或每周复盘开始。</p><Button disabled onClick={presets}>计划任务尚未接入</Button></div>}
-    <Modal title={editing && operator.tasks.some(task => task.id === editing.id) ? "编辑演示任务" : "新建演示任务"} open={Boolean(editing)} onCancel={() => setEditing(null)} onOk={save} okText="保存演示任务">
-      {editing && <form className="operator-task-form" onSubmit={event => { event.preventDefault(); save(); }}>
-        <label>任务名称<Input maxLength={40} value={editing.name} onChange={event => setEditing({ ...editing, name: event.target.value })} /></label>
-        <label>经营能力<Select aria-label="经营能力" value={editing.capabilityId} options={operator.available.map(item => ({ label: item.name, value: item.id }))} onChange={capabilityId => setEditing({ ...editing, capabilityId })} /></label>
-        <div className="operator-form-pair"><label>重复<Select aria-label="重复频率" value={editing.frequency} options={Object.entries(frequencyLabels).map(([value, label]) => ({ value, label }))} onChange={frequency => setEditing({ ...editing, frequency })} /></label><label>时间<Input type="time" aria-label="运行时间" value={editing.time} onChange={event => setEditing({ ...editing, time: event.target.value })} /></label></div>
-        <label>任务要求<Input.TextArea rows={3} maxLength={1000} value={editing.prompt} onChange={event => setEditing({ ...editing, prompt: event.target.value })} /></label>
-        {error && <p role="alert">{error}</p>}
-      </form>}
-    </Modal>
+    <WorkspacePageTitle><h1 className="workspace-page-title">{t('自动化任务')}</h1></WorkspacePageTitle>
+    <div className="operator-automation-note"><AnimatedIcon name="schedule" /><span>{t('当前工作台尚未开放定时运行。')}</span></div>
+    {allowed && <Button onClick={() => navigate(route.path)}>{t('查看已有 AI 任务')}</Button>}
   </section>;
 }

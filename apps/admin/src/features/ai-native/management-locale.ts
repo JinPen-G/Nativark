@@ -3,6 +3,8 @@ import { useLocale } from '@/app/locale';
 import { platformAiEnglish } from './platform-management-locale';
 
 const english: Record<string, string> = {
+  '下一页币种': 'Next currencies', '下一页空间': 'Next workspaces', '返回第一页': 'Back to the first page',
+  '放弃本页额度修改': 'Discard changes on this page',
   '未发送通知草稿': 'Unsent notification draft',
   '正文已按保留政策清除': 'Content erased under the retention policy',
   '原未发送收据仍保留': 'The original unsent receipt is retained',

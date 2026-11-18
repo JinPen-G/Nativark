@@ -1,7 +1,8 @@
 /** 平台删除标记的独立恢复凭证。固定服务端Ed25519公钥、原快照与
  * PLATFORM/null归属必须一致；工作空间凭证不可复用。签名和读取都不
  * 放行业务、模型或恢复库，重放成功后仍须原恢复屏障逐范围验证。 */
-import { sign, verify, type KeyObject } from 'node:crypto';
+import type { KeyObject } from 'node:crypto';
+import { signManifestPages, verifyManifestPages } from './retention-manifest-pages';
 import { z } from 'zod';
 import { AI_RETENTION_POLICY } from './retention-policy';
 import { retentionPublicKeyHash } from './retention-restore';
@@ -14,7 +15,7 @@ const manifest = z.object({ version: z.literal('ai-platform-restore-tombstones-1
   tenantId: z.null(), workspaceId: z.null(), snapshotId: z.string().uuid(), snapshotSha256: hash,
   snapshotCreatedAt: z.string().datetime(), issuedAt: z.string().datetime(), complete: z.literal(true),
   tombstones: z.array(z.object({ kind: z.enum(platformRetentionKinds), resourceId: id,
-    targetHash: hash }).strict()).max(500) }).strict();
+    targetHash: hash }).strict()) }).strict();
 export type AiPlatformRetentionRestorePermit = Readonly<{ keyHash: string;
   manifest: Readonly<z.infer<typeof manifest>> }>;
 const permits = new WeakSet<object>();
@@ -35,11 +36,7 @@ export class AiPlatformRetentionRestoreVerifier {
   }
   verify(value: unknown): AiPlatformRetentionRestorePermit {
     try {
-      const envelope = z.object({ payload: z.string().max(262144), signature: z.string().max(128) }).strict().parse(value);
-      const signature = Buffer.from(envelope.signature, 'base64');
-      if (signature.toString('base64') !== envelope.signature
-        || !verify(null, Buffer.from(envelope.payload), this.publicKey, signature)) throw unavailable();
-      const parsed = checked(JSON.parse(envelope.payload), this.clock());
+      const parsed = checked(verifyManifestPages(value, this.publicKey), this.clock());
       parsed.tombstones.forEach(Object.freeze); Object.freeze(parsed.tombstones); Object.freeze(parsed);
       const permit = Object.freeze({ keyHash: retentionPublicKeyHash(this.publicKey), manifest: parsed });
       permits.add(permit); return permit;
@@ -56,7 +53,5 @@ export function requirePlatformRestorePermit(value: AiPlatformRetentionRestorePe
 
 export function signPlatformRetentionManifest(value: unknown, privateKey: KeyObject) {
   if (privateKey.type !== 'private' || privateKey.asymmetricKeyType !== 'ed25519') throw unavailable();
-  const payload = JSON.stringify(manifest.parse(value));
-  if (Buffer.byteLength(payload, 'utf8') > 262144) throw unavailable();
-  return { payload, signature: sign(null, Buffer.from(payload), privateKey).toString('base64') };
+  return signManifestPages(manifest.parse(value), privateKey);
 }

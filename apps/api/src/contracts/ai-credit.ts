@@ -22,10 +22,11 @@ export const AI_CREDIT_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   AiCreditRequest: creditRequest,
   AiCreditBalance: balance,
   AiCreditSummary: object({ currencies: array(currency, 8), balances: array(balance, 8), requests: array(creditRequest, 20),
-    workspaces: array(object({ id, name: string }), 64), requestHistoryComplete: { type: 'boolean' } }),
+    workspaces: array(object({ id, name: string }), 64), requestHistoryComplete: { type: 'boolean' }, nextCurrency: { ...currency, nullable: true }, nextWorkspace: { ...id, nullable: true } }),
+  AiCreditPage: object({ afterCurrency: currency, afterWorkspace: id }, []),
   AiCreditApplication: object({ operationKey: key, currency, amount }),
   AiCreditOperationRead: object({ operationKey: key }),
-  AiCreditAllocation: object({ operationKey: key, currency, expectedRevision: revision, allocations: array(allocation, 64) }),
+  AiCreditAllocation: object({ operationKey: key, currency, expectedRevision: revision, allocations: array(allocation, 64), mode: { type: 'string', enum: ['update_listed'] } }, ['operationKey','currency','expectedRevision','allocations']),
   AiCreditAllocated: allocated,
   AiCreditAllocationRead: object({ operationKey: key, currency }),
   AiCreditAllocationReceipt: receipt('AiCreditAllocated', 'result'),
@@ -54,7 +55,7 @@ export const AI_CREDIT_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     observedAt: { type: 'string', format: 'date-time' } })
 };
 const definitions = [
-  ['read', undefined, 'AiCreditSummary', 'Read current tenant approved credit and original-ledger consumption. Tenant administrator only.'],
+  ['read', 'AiCreditPage', 'AiCreditSummary', 'Read current tenant approved credit and original-ledger consumption. Tenant administrator only.'],
   ['request', 'AiCreditApplication', 'AiCreditRequest', 'Request ADDITIONAL money allowance. Does not approve, pay, allocate or dispatch.'],
   ['receipt', 'AiCreditOperationRead', 'AiCreditRequestReceipt', 'Read original own application. Missing is unknown, never retry authority.'],
   ['allocate', 'AiCreditAllocation', 'AiCreditAllocated', 'CAS limits within approved total; same transaction writes original OperationLog receipt.'],

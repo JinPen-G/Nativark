@@ -6,9 +6,10 @@ import { useEffect, useRef, useState } from 'react';
 import { RENTAL_PRICING_UNIT_LABELS, type ClientCreateQuoteRequest, type RentalFulfillmentMode,
   type RentalPricingUnit, type AiClientGoalProjection, type AiBookingHandoff, type ClientGoalBookingSource } from '@rental-os/shared';
 import { captureEnterpriseHostSession, subscribeCustomerSession } from '../../data/authClient';
+import { withClientRecoveryLock } from '../../data/clientRecoveryStorage';
 import { createClientGoalApi, createClientGoalBookingApi } from './client-goal-api';
 import { createClientGoalSession, clientGoalStorageKey, clientGoalTimeOptions, clientGoalBookingSelection,
-  clientGoalBookingStorageKey, clientGoalBookingStoredRequest, createClientGoalBookingSession,
+  clientGoalBookingStorageKey, createClientGoalBookingSession,
   type ClientGoalView, type ClientQuoteBookingView } from './client-goal-session';
 import { createClientTaskCancellationApi } from './client-task-cancellation-api';
 import { createClientTaskCancellationSession, clientTaskCancellationStorageKey,
@@ -102,23 +103,29 @@ export function ClientGoalPicker(props: {
     bookingAbort.current?.abort(); bookingAbort.current = null; setBookingRecord(null);
     setRecord({ scopeKey, view: initial() }); setWorking(false); setError(false); setFormError(false);
     setGoal({ scopeKey, text: '' }); setAnswer({ reference: '', text: '' }); setDraft({ reference: '', form: emptyForm(0) });
-    const close = () => {
+    const close = (preserveDraft = false) => {
       epoch.current++; busy.current = false; owner.current?.dispose(); owner.current = null; ownerCurrent.current = null;
       booking.current?.dispose(); booking.current = null; bookingSource.current = null; bookingKey.current = null;
       bookingAbort.current?.abort(); bookingAbort.current = null; setBookingRecord(null);
       setRecord({ scopeKey, view: initial() }); setWorking(false); setError(false); setFormError(false);
-      setGoal({ scopeKey, text: '' }); setAnswer({ reference: '', text: '' }); setDraft({ reference: '', form: emptyForm(0) });
+      if (!preserveDraft) { setGoal({ scopeKey, text: '' }); setAnswer({ reference: '', text: '' }); setDraft({ reference: '', form: emptyForm(0) }); }
     };
-    const hidden = () => { if (document.hidden) close(); };
-    sessionChanged.current = close;
-    document.addEventListener('visibilitychange', hidden); window.addEventListener('pagehide', close);
+    let hiddenOwner: ReturnType<typeof captureEnterpriseHostSession> = null;
+    const leave = () => close();
+    const hidden = () => {
+      if (document.hidden) { hiddenOwner = captureEnterpriseHostSession(); close(Boolean(hiddenOwner?.current())); }
+      else if (!hiddenOwner?.current()) close();
+      if (!document.hidden) hiddenOwner = null;
+    };
+    sessionChanged.current = leave;
+    document.addEventListener('visibilitychange', hidden); window.addEventListener('pagehide', leave);
     const captured = captureEnterpriseHostSession(); unsubscribe.current?.(); subscribedTenant.current = captured?.tenantCode ?? null;
-    unsubscribe.current = captured ? subscribeCustomerSession(captured.tenantCode, close) : null;
+    unsubscribe.current = captured ? subscribeCustomerSession(captured.tenantCode, leave) : null;
     return () => { epoch.current++; owner.current?.dispose(); owner.current = null; ownerCurrent.current = null; unsubscribe.current?.();
       booking.current?.dispose(); booking.current = null; bookingSource.current = null; bookingKey.current = null;
       bookingAbort.current?.abort(); bookingAbort.current = null;
       unsubscribe.current = null; subscribedTenant.current = null; sessionChanged.current = () => undefined;
-      document.removeEventListener('visibilitychange', hidden); window.removeEventListener('pagehide', close); };
+      document.removeEventListener('visibilitychange', hidden); window.removeEventListener('pagehide', leave); };
   }, [scopeKey]);
   const ensure = async () => {
     if (document.hidden || scope.current !== scopeKey) return null;
@@ -166,13 +173,8 @@ export function ClientGoalPicker(props: {
       customerId: captured.customerId, surface: 'tenant_website' as const, current }, key = clientGoalBookingStorageKey(context, original);
     const cached = localStorage.getItem(key);
     if (purpose === 'read' && cached === null) return null;
-    const request = cached === null ? null : clientGoalBookingStoredRequest(JSON.parse(cached));
-    if (request && (request.original.materialRef !== original.materialRef || request.original.expectedMaterialHash !== original.expectedMaterialHash))
-      throw Error('client_goal_booking_source_changed');
-    const selection = request?.selection ?? (source ? clientGoalBookingSelection(source) : null);
-    if (!selection || source && JSON.stringify(selection) !== JSON.stringify(clientGoalBookingSelection(source))) throw Error('client_goal_booking_selection_changed');
-    if (booking.current && bookingKey.current === key) {
-      if (source) bookingSource.current = source;
+    const selection = source ? clientGoalBookingSelection(source) : null;
+    if (booking.current && bookingKey.current === key && (!source || bookingSource.current === source)) {
       if (purpose === 'read' && booking.current.snapshot().canRead) await booking.current.recover();
       return current() ? booking.current : null;
     }
@@ -189,7 +191,16 @@ export function ClientGoalPicker(props: {
   const work = async (action: (instance: NonNullable<typeof owner.current>) => Promise<unknown>) => {
     if (busy.current || document.hidden || scope.current !== scopeKey) return;
     const generation = epoch.current; busy.current = true; setWorking(true); setError(false);
-    try { const instance = await ensure(); if (instance && generation === epoch.current) await action(instance); }
+    try {
+      const captured = captureEnterpriseHostSession();
+      if (!captured?.current()) throw Error('client_goal_login_required');
+      const run = async () => {
+        if (!captured.current() || generation !== epoch.current || document.hidden) return;
+        const instance = await ensure();
+        if (instance && captured.current() && generation === epoch.current) await action(instance);
+      };
+      await withClientRecoveryLock(captured.operationScope, run);
+    }
     catch { if (generation === epoch.current) setError(true); }
     finally { if (generation === epoch.current) { busy.current = false; setWorking(false); } }
   };

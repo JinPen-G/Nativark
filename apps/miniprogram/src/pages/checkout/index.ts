@@ -26,8 +26,8 @@ import { formatBusinessDate, formatBusinessTime, splitInstant, todayInZone, zone
 import { themeBehavior } from "../../core/theme-behavior";
 import { ROUTES, buildUrl, navigate, redirect, requireSignIn, toast } from "../../core/ui";
 import { rememberZone, zoneOf } from "../../core/zones";
-import { clientQuoteBookingStoredRequest, clientQuoteOwner, clientQuoteSelectedInput, clientQuoteStorageKey } from "../../components/ai-native/client-quote-session";
-import { aiClientQuotePreparationRequestSchema, aiClientQuotePreparationResponseSchema, clientGoalTextHash, enterpriseOrderDelegationMatches } from "../../vendor/shared-ai-client";
+import { clientQuoteOwner, clientQuoteRecoveryLocator, clientQuoteStorageKey } from "../../components/ai-native/client-quote-session";
+import { clientGoalTextHash, enterpriseOrderDelegationMatches } from "../../vendor/shared-ai-client";
 import { clientBookingTransferOwner, clientBookingTransferStorageKey } from "../../components/ai-native/client-booking-transfer-session";
 
 /** Inspect original local phases only. Retaining parameters never enables AI
@@ -45,26 +45,14 @@ function retainedQuoteState() {
     const quoteRaw = raw(key), bookingRaw = raw(`${key}:booking`), hasLocator = quoteRaw !== null || bookingRaw !== null;
     if (!hasLocator) return empty;
     const reference = JSON.stringify([key, quoteRaw, bookingRaw]), owner = clientQuoteOwner(context);
-    let pendingCore = false, preparationOnly = true;
+    let pendingCore = bookingRaw !== null;
     if (quoteRaw !== null) {
-      const row = typeof quoteRaw === 'object' && !Array.isArray(quoteRaw) ? quoteRaw as Record<string, unknown> : null;
       try {
-        if (!row || row.version !== 'client-quote-operation-1' || row.owner !== owner
-          || Object.keys(row).length !== 5 || Object.keys(row).some(field => !['version', 'owner', 'request', 'material', 'phase'].includes(field))) throw Error();
-        const request = aiClientQuotePreparationRequestSchema.parse(row.request);
-        if (JSON.stringify(request.input) !== JSON.stringify(clientQuoteSelectedInput(request.input as ClientCreateQuoteRequest))) throw Error();
-        const material = row.material === null ? null : aiClientQuotePreparationResponseSchema.parse(row.material);
-        if (row.phase === 'preparation_pending' && material === null || row.phase === 'prepared' && material !== null) preparationOnly = true;
-        else if (row.phase === 'confirmation_pending' || row.phase === 'quote_observed') { pendingCore = true; preparationOnly = false; }
-        else throw Error();
-      } catch { pendingCore = row?.version === 'client-quote-operation-1' && row.owner === owner; preparationOnly = !pendingCore; }
+        const { phase } = clientQuoteRecoveryLocator(quoteRaw, owner);
+        pendingCore ||= phase === 'confirmation_pending' || phase === 'quote_observed';
+      } catch { pendingCore = true; }
     }
-    if (bookingRaw !== null) {
-      const row = typeof bookingRaw === 'object' && !Array.isArray(bookingRaw) ? bookingRaw as Record<string, unknown> : null;
-      try { clientQuoteBookingStoredRequest(bookingRaw); if (row?.owner === owner) { pendingCore = true; preparationOnly = false; } }
-      catch { if (row?.version === 'client-quote-booking-operation-1' && row.owner === owner) { pendingCore = true; preparationOnly = false; } }
-    }
-    return { hasLocator, pendingCore, preparationOnly, reference, readable: true };
+    return { hasLocator, pendingCore, preparationOnly: !pendingCore, reference, readable: true };
   } catch { return { ...empty, preparationOnly: false, readable: false }; }
 }
 

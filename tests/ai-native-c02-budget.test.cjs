@@ -552,6 +552,9 @@ function callHistoryMatches(row, where) {
   if (where.AND && !where.AND.every(item => callHistoryMatches(row, item))) return false;
   if (where.OR && !where.OR.some(item => callHistoryMatches(row, item))) return false;
   if (where.scopeId && !where.scopeId.in.includes(row.scopeId)) return false;
+  if (where.run && (row.scopeId !== 'scope-workspace' || where.run.task.scope.tenantId !== 'tenant'
+    || where.run.task.scope.workspace.tenantId !== 'tenant' || where.run.task.scope.kind !== 'WORKSPACE'
+    || where.run.task.scope.workspace.id && where.run.task.scope.workspace.id !== 'workspace')) return false;
   if (typeof where.id === 'string' && row.id !== where.id || where.id?.lt && !(row.id < where.id.lt)) return false;
   if (where.id?.in && !where.id.in.includes(row.id)) return false;
   const time = where.createdAt;
@@ -567,9 +570,10 @@ function callHistoryHarness(rows = [callHistoryRow()]) {
     hasWorkspaces: true, workspaceValid: true, workspaceId: 'workspace' };
   const harness = { rows, trace, current, onAuthorize: null, onList: null, failRead: false, transactions: 0, queries: [], counts: [] };
   const tx = {
-    businessWorkspace: { findMany: async args => { trace.push(['workspaces', args]); return !args.where.id || args.where.id === 'workspace'
+    businessWorkspace: { findFirst: async ({where}) => where.tenantId === 'tenant' && where.id === 'workspace' ? {id:'workspace'} : null,
+      findMany: async args => { trace.push(['workspaces', args]); return args.where.tenantId === 'tenant' && args.where.id.in.includes('workspace')
       ? [{ id: 'workspace', name: '空间一' }] : []; } },
-    aiScope: { findMany: async args => { trace.push(['scopes', args]); return args.where.workspaceId.in.includes('workspace')
+    aiScope: { findMany: async args => { trace.push(['scopes', args]); return args.where.tenantId === 'tenant' && args.where.workspace.tenantId === 'tenant' && args.where.id.in.includes('scope-workspace')
       ? [{ id: 'scope-workspace', workspaceId: 'workspace' }] : []; } },
     aiGatewayInvocation: {
       findFirst: async args => { trace.push(['anchor', args]); return harness.rows.find(row => callHistoryMatches(row, args.where)) ?? null; },
@@ -579,9 +583,9 @@ function callHistoryHarness(rows = [callHistoryRow()]) {
     user: { findMany: async args => { trace.push(['users', args]); return [{ id: 'actor', displayName: '操作人' }]; } },
     $queryRaw: async query => {
       trace.push(['counts', query]);
-      assert.ok(query.sql.includes('FROM OperationLog c LEFT JOIN ai_gateway_invocations g'));
-      assert.ok(query.sql.includes('c.tenantId = ?') && query.sql.includes('c.workspaceId IN'));
-      assert.ok(query.values.includes('tenant') && query.values.includes('scope-workspace') && query.values.includes('workspace'));
+      assert.ok(query.sql.includes('JOIN business_workspaces w ON w.tenantId = c.tenantId AND w.id = c.workspaceId'));
+      assert.ok(query.sql.includes("s.workspaceId = w.id AND s.kind = 'WORKSPACE'") && query.sql.includes('g.scopeId = s.id'));
+      assert.ok(query.sql.includes('c.tenantId = ?') && query.values.includes('tenant'));
       const dates = query.values.filter(value => value instanceof Date), [since, until, position] = dates;
       const mode = query.values.find(value => ['platform_managed', 'tenant_managed'].includes(value));
       const lookup = query.sql.includes('AND c.id = ?'), tuple = query.sql.includes('c.id < ?');
@@ -678,6 +682,32 @@ function creditCommandHarness(platform = false) {
     requestedAmount: new Prisma.Decimal('10.000000'), createdAt: new Date() });
   return Object.assign(h, { store, controller, seedRequest });
 }
+
+test('tenant credit pages keep other workspaces allocated and replay only the matching receipt', async () => {
+  const fixture = creditCommandHarness(), { store, controller, request } = fixture;
+  const currencies = ['AED','AUD','CAD','CHF','CNY','EUR','GBP','JPY','USD'];
+  store.state.aiBudgetPolicy = currencies.map(moneyCurrency => ({scopeKind:'PLATFORM', enabled:true, unitKind:'money', moneyCurrency}));
+  const spaceIds = Array.from({length:65}, (_, index) => `space-${String(index).padStart(3,'0')}`);
+  store.state.businessWorkspace = spaceIds.map(id => ({id, name:id, tenantId:'tenant-a', status:'ACTIVE'}));
+  for (const currency of currencies) store.state.aiTenantAiAllowance.push({tenantId:'tenant-a', currency, revision:1,
+    grantedAmount:new Prisma.Decimal('100'), allocationsJson:Object.fromEntries(spaceIds.map(id => [id,'1.000000']))});
+  const first = await controller.read(request, {});
+  assert.equal(first.currencies.length, 8); assert.equal(first.balances.length, 8); assert.equal(first.nextCurrency,'JPY');
+  assert.equal(first.workspaces.length, 64); assert.equal(first.balances[0].allocations.length, 64);
+  const last = await controller.read(request, {afterCurrency:first.nextCurrency, afterWorkspace:first.nextWorkspace});
+  assert.deepEqual(last.currencies,['USD']); assert.deepEqual(last.workspaces.map(row => row.id),['space-064']);
+  assert.equal(last.nextCurrency,null); assert.equal(last.nextWorkspace,null);
+  const command = {currency:'USD',operationKey:'last-space',expectedRevision:1,allocations:[{workspaceId:'space-064',amount:'2'}]};
+  await assert.rejects(controller.allocate(request,command), callHistoryError('AI_REVISION_CONFLICT'));
+  const update = {...command,mode:'update_listed'};
+  const result = await controller.allocate(request,update);
+  assert.deepEqual(await controller.allocate(request,update),result);
+  assert.deepEqual(await controller.allocationReceipt(request,{currency:'USD',operationKey:command.operationKey}),{state:'recorded',result});
+  const account = store.state.aiTenantAiAllowance.find(row => row.currency === 'USD');
+  assert.equal(Object.keys(account.allocationsJson).length,65); assert.equal(account.allocationsJson['space-000'],'1.000000');
+  assert.equal(account.allocationsJson['space-064'],'2.000000'); assert.equal(account.revision,2);
+  await assert.rejects(controller.allocate(request,{...update,operationKey:'over-all',expectedRevision:2,allocations:[{workspaceId:'space-064',amount:'36.000001'}]}),callHistoryError('AI_CREDIT_ALLOCATION_EXCEEDED'));
+});
 
 test('credit writes keep postcommit authority failures unknown and recover only the original authorized receipt', async () => {
   const prepare = action => {

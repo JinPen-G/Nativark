@@ -2,7 +2,7 @@
  * client. Mount, show and local recovery never read it. Session/service changes,
  * hide and expiry withdraw metadata; rows provide no object or Task authority. */
 import type { AiEntrySceneCatalogEntry, AiEntrySceneCatalogResponse } from '@rental-os/shared';
-import { AI_ENTRY_SCENE_CATALOG_HTTP, isAiEntrySceneCatalogRequest, isAiEntrySceneCatalogResponse } from '../scene-catalog-runtime';
+import { AI_ENTRY_SCENE_CATALOG_HTTP, entrySceneAvailabilityLabel, isAiEntrySceneCatalogRequest, isAiEntrySceneCatalogResponse } from '../scene-catalog-runtime';
 import { request } from '../../../core/http';
 import { currentSession, contextVersion, sessionEvents } from '../../../core/session';
 import { serverNow } from '../../../core/clock';
@@ -37,7 +37,8 @@ const statuses = { available: '已观察原入口', manual_only: '保留人工�
 const confirmations = { read_only: '只读', explicit_prepare_or_save: '明确准备或保存',
   review_approval_and_original_submit: '审核批准后在原入口提交', original_human_submit: '人工在原入口提交' };
 function project(entry: AiEntrySceneCatalogEntry): Row {
-  return { id: entry.entryId, title: entry.title, goal: entry.goal, status: statuses[entry.availability.state], risk: entry.riskLevel,
+  const { state, reason } = entry.availability;
+  return { id: entry.entryId, title: entry.title, goal: entry.goal, status: state === 'available' ? statuses[state] : `${statuses[state]} · ${entrySceneAvailabilityLabel(reason)}`, risk: entry.riskLevel,
     confirmation: confirmations[entry.confirmation], tools: entry.tools.map(tool => tool.code).join(' · ') || '沿原人工入口',
     permissions: entry.requiredPermissions.join(' · ') || '原入口核对本人及资源范围', results: entry.output.maxResults,
     source: entry.availability.source ? `${entry.availability.source.reference} / ${entry.availability.source.revision}` : '未观察到',

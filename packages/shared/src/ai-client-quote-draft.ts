@@ -11,6 +11,18 @@ const date = z.string().datetime({ offset: true });
  * authoritative for fields, business enums and eligibility, not another DSL. */
 export type AiClientQuotePreparationRequest = { operationKey: string; input: ClientCreateQuoteRequest };
 export const aiClientQuotePreparationRequestSchema = z.object({ operationKey: id.max(128), input: z.unknown() }).strict();
+export const aiClientQuoteSelectionRefSchema = z.object({ operationKey: id.max(128), selectionHash: digest }).strict();
+export type AiClientQuoteSelectionRef = z.infer<typeof aiClientQuoteSelectionRefSchema>;
+export const aiClientQuoteReadRequestSchema = z.union([aiClientQuoteSelectionRefSchema, aiClientQuotePreparationRequestSchema]);
+export const aiClientPersonalQuoteSelectionSchema = z.object({
+  bookingIdentity: z.object({ bookingIdentity: z.literal('personal'), enterpriseContractAndPayer: z.literal(false).optional() }).strict().optional(),
+  fulfillmentMode: id, fulfillmentLocationId: id, returnLocationId: id.optional(), startAt: date, endAt: date,
+  pricingPlanId: id.optional(), discountPlanId: id.optional(), customerCouponId: id.optional(), deliveryAddressId: id.optional(),
+  lines: z.array(z.object({ itemGroupId: id, pricingGroupId: id.optional(), quantity: z.number().finite().positive(),
+    pricingUnit: z.enum(RENTAL_PRICING_UNIT_CODES).optional(), usageQuantity: z.number().finite().nonnegative().optional(), note: z.literal('').optional() }).strict()).min(1).max(100),
+  services: z.array(z.object({ serviceId: id, quantity: z.number().finite().positive(), scheduledStartAt: date.optional(),
+    scheduledEndAt: date.optional(), serviceLocationId: id.optional() }).strict()).max(100).optional(),
+}).strict();
 export const aiClientQuoteConfirmationRequestSchema = z.object({ materialRef: z.string().uuid(), expectedMaterialHash: digest }).strict();
 /** A projection of the SAME stored preparation, never today's defaults or a
  * client claim of consent. Confirmation still binds the original material hash. */
@@ -45,7 +57,7 @@ export const aiClientQuotePreparationReadResponseSchema = z.discriminatedUnion('
     quotePersistence: z.literal('not_attempted'), inventoryReservation: z.literal('not_attempted'),
     humanAction: z.literal('explicit_confirmation_required'), freshness: z.literal('recheck_at_confirmation'),
     retryable: z.literal(false), execution: z.literal('read_only'),
-    parameterReview: aiClientQuoteParameterReviewSchema.optional() }).strict(),
+    parameterReview: aiClientQuoteParameterReviewSchema.optional(), originalSelection: aiClientPersonalQuoteSelectionSchema.optional() }).strict(),
   z.object({ contractVersion: z.literal(AI_CLIENT_QUOTE_PREPARATION_VERSION), state: z.literal('unknown'),
     operationKey: id, retryable: z.literal(false), execution: z.literal('read_only') }).strict()
 ]);

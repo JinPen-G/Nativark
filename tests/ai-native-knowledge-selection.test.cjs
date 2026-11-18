@@ -10,7 +10,7 @@ async function setup() {
   const db = dbFactory(), queries = [], state = { denied: new Set(), revoked: false, hook: null };
   db.aiKnowledgeDocument.findMany = async q => {
     queries.push(structuredClone(q));
-    const rows = [...db.state.documents.values()].filter(r => Object.entries(q.where).every(([k,v]) => r[k] === v)).sort((a,b) => a.id.localeCompare(b.id)).slice(0,q.take);
+    const rows = [...db.state.documents.values()].filter(row => Object.entries(q.where).every(([key,value]) => key === 'id' ? row.id > value.gt : row[key] === value)).sort((a,b) => a.id.localeCompare(b.id)).slice(0,q.take);
     return rows.map(r => Object.fromEntries(Object.keys(q.select).map(k => [k,r[k]])));
   };
   const authorization = { async authorize(c, req) {
@@ -19,7 +19,8 @@ async function setup() {
     return { scope: structuredClone(scope), actor: { actorKind: 'user', actorId: 'user-a' }, audience: 'operator', accessKey: 'synthetic-grant' };
   } };
   const bundle = composePersistedKnowledge({ db, authorization, memoryAuthorization: authorization,
-    files: { read: async () => ({ mediaType: 'text/plain', bytes: new TextEncoder().encode('Synthetic camping guide') }) },
+    files: { assertBound: async (current, binding) => { assert.deepEqual(current.scope, scope); assert.equal(binding.workspaceId, scope.workspaceId); assert.equal(binding.attachmentId, `attachment-${binding.documentId}`); },
+      read: async () => ({ mediaType: 'text/plain', bytes: new TextEncoder().encode('Synthetic camping guide') }) },
     clock: { now: () => Date.parse('2026-10-06T00:00:00Z') },
     gateway: { invoke: async () => { throw Error('not allowed'); }, stream: async function* () { throw Error('not allowed'); } },
     cache: { maxEntries: 10, maxBytes: 20000, ttlMs: 1000 }, policy: { sceneCode: 'knowledge', maxOutputTokens: 100 } });
@@ -33,6 +34,21 @@ async function setup() {
   return { db, queries, state, bundle, seed, authorization };
 }
 const recall = (s,c=context) => s.bundle.retrieval.recall(c,{ requestId: 'query-a', query: 'camping', limit: 5 });
+test('recall searches beyond a denied page and rechecks access before returning a cross-page result', async () => {
+  const fixture = await setup();
+  for (let index = 0; index <= 100; index++) {
+    const documentId = `doc-${String(index).padStart(3, '0')}`;
+    await fixture.seed(documentId);
+    if (index < 100) fixture.state.denied.add(documentId);
+  }
+  const query = {requestId:'query-many', query:'ＧＵＩＤＥ synthetic', limit:1};
+  const result = await fixture.bundle.retrieval.recall(context, query);
+  assert.equal(result.status, 'ready'); assert.equal(result.matches[0].source.documentId, 'doc-100');
+  assert.equal(fixture.queries[1].where.id.gt, 'doc-099');
+  const original = fixture.db.aiKnowledgeDocument.findMany;
+  fixture.db.aiKnowledgeDocument.findMany = async request => { const rows = await original(request); if (request.where.id) fixture.state.revoked = true; return rows; };
+  assert.equal((await fixture.bundle.retrieval.recall(context, query)).status, 'unavailable');
+});
 test('default persistent selector drives real publication, repository and lexical recall', async () => {
   const s = await setup(); await s.seed('doc-a');
   assert.equal((await recall(s)).status,'ready');
@@ -75,9 +91,10 @@ test('grant revision change and forged document grant fail closed before body re
   for (const change of ['revision','actor','scope','audience']) {
     const s=await setup(); await s.seed('doc-a'); s.db.queries.length=0;
     const original=s.authorization.authorize;
+    let documentChecks = 0;
     s.authorization.authorize=async(c,req)=> {
       const g=await original(c,req); if (!req.document) return g;
-      return change==='revision'?{...g,accessKey:'new-grant'}:change==='actor'?{...g,actor:{actorKind:'user',actorId:'other'}}:change==='scope'?{...g,scope:{...scope,workspaceId:'other'}}:{...g,audience:'client'};
+      return change==='revision'?{...g,accessKey:`document-revision-${++documentChecks}`}:change==='actor'?{...g,actor:{actorKind:'user',actorId:'other'}}:change==='scope'?{...g,scope:{...scope,workspaceId:'other'}}:{...g,audience:'client'};
     };
     assert.equal((await recall(s)).status,'unavailable'); assert.equal(s.db.queries.length,0);
   }

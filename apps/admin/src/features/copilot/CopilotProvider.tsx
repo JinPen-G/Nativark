@@ -21,7 +21,7 @@ export const ORDER_QUESTIONS = [
   { value: 'status', label: '订单状态' }, { value: 'fees', label: '订单费用' },
   { value: 'payments', label: '收款情况' }, { value: 'next_steps', label: '下一步处理' },
 ] satisfies { value: OrderQuestion; label: string }[];
-export type CopilotReview = { prompt: string; orderId: string; question: OrderQuestion; source: string };
+export type CopilotReview = { prompt: string; orderId: string; question: OrderQuestion | null; source: string };
 export type CopilotTurn = { id: string; prompt: string; contexts: CopilotRecord[]; page: string; text: string;
   textSource: CopilotOrderTextSource | null; status: 'reading' | 'done' | 'stopped' };
 function useCopilotState() {
@@ -133,12 +133,12 @@ function useCopilotState() {
     if (!orderId) { setFeedback('请打开一笔订单后提问。资料或配置请通过原页面办理。'); return; }
     if (order.state.hasOriginal) { setFeedback('请先核对原结果，或在原会话中继续处理。'); return; }
     const selected = ORDER_QUESTIONS.find(item => item.label === prompt.trim() || t(item.label) === prompt.trim());
-    const nextReview = { prompt: prompt.trim(), orderId, question: selected?.value ?? 'next_steps', source };
+    const nextReview = { prompt: prompt.trim(), orderId, question: selected?.value ?? null, source };
     reviewRef.current = nextReview; setReview(nextReview);
     setFeedback('');
   }
   async function confirm() {
-    if (!review || reviewRef.current !== review || review.source !== source || review.orderId !== orderId
+    if (!review?.question || reviewRef.current !== review || review.source !== source || review.orderId !== orderId
       || busy || !open || !available || document.hidden || !navigator.onLine) return;
     const version = viewVersion.current;
     const question = review.question;

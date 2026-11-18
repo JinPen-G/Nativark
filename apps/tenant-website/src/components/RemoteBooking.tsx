@@ -21,8 +21,6 @@ import type {
   RentalQuoteSnapshotV1,
 } from "@rental-os/shared";
 import {
-  aiClientQuotePreparationRequestSchema,
-  aiClientQuotePreparationResponseSchema,
   formatRentalMoney,
   RENTAL_FULFILLMENT_MODES,
 } from "@rental-os/shared";
@@ -35,9 +33,8 @@ import {
 } from "../features/ai-native/booking-handoff";
 import { ClientQuotePreparation } from "../features/ai-native/ClientQuotePreparation";
 import {
-  clientQuoteBookingStoredRequest,
   clientQuoteOwner,
-  clientQuoteSelectedInput,
+  clientQuoteRecoveryLocator,
   clientQuoteStorageKey,
 } from "../features/ai-native/client-quote-session";
 import {
@@ -66,86 +63,17 @@ function retainedQuoteState(
     if (!hasLocator) return empty;
     const reference = JSON.stringify([key, quoteRaw, bookingRaw]),
       owner = clientQuoteOwner(context);
-    let pendingCore = false,
-      preparationOnly = true;
+    let pendingCore = bookingRaw !== null;
     if (quoteRaw !== null) {
-      let row: Record<string, unknown> | null = null;
       try {
-        const value: unknown = JSON.parse(quoteRaw);
-        if (value && typeof value === "object" && !Array.isArray(value))
-          row = value as Record<string, unknown>;
-        if (
-          !row ||
-          row.version !== "client-quote-operation-1" ||
-          row.owner !== owner ||
-          Object.keys(row).length !== 5 ||
-          Object.keys(row).some(
-            (field) =>
-              !["version", "owner", "request", "material", "phase"].includes(
-                field,
-              ),
-          )
-        )
-          throw Error();
-        const request = aiClientQuotePreparationRequestSchema.parse(
-          row.request,
-        );
-        if (
-          JSON.stringify(request.input) !==
-          JSON.stringify(
-            clientQuoteSelectedInput(request.input as ClientCreateQuoteRequest),
-          )
-        )
-          throw Error();
-        const material =
-          row.material === null
-            ? null
-            : aiClientQuotePreparationResponseSchema.parse(row.material);
-        if (
-          (row.phase === "preparation_pending" && material === null) ||
-          (row.phase === "prepared" && material !== null)
-        )
-          preparationOnly = true;
-        else if (
-          row.phase === "confirmation_pending" ||
-          row.phase === "quote_observed"
-        ) {
-          pendingCore = true;
-          preparationOnly = false;
-        } else throw Error();
-      } catch {
-        // A damaged identifiable original may already have crossed confirmation;
-        // an arbitrary cache value is not evidence that the business is pending.
-        pendingCore =
-          row?.version === "client-quote-operation-1" && row.owner === owner;
-        preparationOnly = !pendingCore;
-      }
-    }
-    if (bookingRaw !== null) {
-      let row: Record<string, unknown> | null = null;
-      try {
-        const value: unknown = JSON.parse(bookingRaw);
-        if (value && typeof value === "object" && !Array.isArray(value))
-          row = value as Record<string, unknown>;
-        clientQuoteBookingStoredRequest(value);
-        if (row?.owner === owner) {
-          pendingCore = true;
-          preparationOnly = false;
-        }
-      } catch {
-        if (
-          row?.version === "client-quote-booking-operation-1" &&
-          row.owner === owner
-        ) {
-          pendingCore = true;
-          preparationOnly = false;
-        }
-      }
+        const { phase } = clientQuoteRecoveryLocator(JSON.parse(quoteRaw), owner);
+        pendingCore ||= phase === 'confirmation_pending' || phase === 'quote_observed';
+      } catch { pendingCore = true; }
     }
     return {
       hasLocator,
       pendingCore,
-      preparationOnly,
+      preparationOnly: !pendingCore,
       reference,
       readable: true,
     };
