@@ -2,7 +2,7 @@
  * 本机私有缓存的唯一出入口。所有键都带统一前缀，退出登录时按前缀整体清理，
  * 避免“换了账号还能看到上一个人的草稿/订单缓存”。
  */
-import { minimizeClientRecoveryRecord } from '../vendor/shared-ai-client';
+import { clientRecoveryKey, minimizeClientRecoveryRecord } from '../vendor/shared-ai-client';
 
 const PREFIX = "rental-os:";
 
@@ -59,10 +59,12 @@ export function clearPrivateStorage(): void {
   }
   try {
     for (const key of wx.getStorageInfoSync().keys) {
-      if (!/^rental-os:client-(?:goal|order-task):[^:]+(?::history:[^:]+)?$/u.test(key)) continue;
-      const original = wx.getStorageSync(key);
-      const minimal = minimizeClientRecoveryRecord(key, original);
-      if (JSON.stringify(original) !== JSON.stringify(minimal)) writeRequiredStorage(key, minimal);
+      if (!clientRecoveryKey(key)) continue;
+      try {
+        const original = wx.getStorageSync(key);
+        const minimal = minimizeClientRecoveryRecord(key, original);
+        if (JSON.stringify(original) !== JSON.stringify(minimal)) writeRequiredStorage(key, minimal);
+      } catch { console.warn('client_recovery_storage_cleanup_unavailable'); }
     }
     // Opaque delegation and expense keys remain account-scoped for original
     // result recovery after re-login. They contain no body or credentials.

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { aiClientQuoteParameterReviewSchema, clientGoalSelectedInput, RENTAL_PRICING_UNIT_CODES, type ClientCreateQuoteRequest } from '@rental-os/shared';
+import { aiClientPersonalQuoteSelectionSchema, aiClientQuoteReadRequestSchema, aiClientQuoteParameterReviewSchema,
+  clientGoalSelectedInput, RENTAL_PRICING_UNIT_CODES, type ClientCreateQuoteRequest } from '@rental-os/shared';
 import type { ClientApiService } from '../../client/client-api.service';
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
@@ -156,10 +157,10 @@ export function composeClientOriginalQuotePreparation(input: {
     /** Observe an uncertain material INSERT without attempting another write.
      * Absence is unknown, not evidence that preparation did not commit. */
     async readPreparationOperation(value: unknown, goalHash?: string) {
-      const parsed = z.union([z.object({ operationKey: id, selectionHash: digest }).strict(), z.object({ operationKey: id, input: z.unknown() }).strict()]).safeParse(structuredClone(value));
+      const parsed = aiClientQuoteReadRequestSchema.safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       const bound = await current();
-      await grant(bound, 'read');
+      const permission = await grant(bound, 'read');
       const row = await repository.findOperation(bound.scope, parsed.data.operationKey);
       if (!row) {
         await check(bound);
@@ -169,10 +170,16 @@ export function composeClientOriginalQuotePreparation(input: {
       }
       const command = savedCommand.parse(row.command), material = decode(row);
       const selectionHash = 'selectionHash' in parsed.data ? parsed.data.selectionHash : requestFingerprint(canonical(parsed.data.input));
-      if (command.inputHash !== selectionHash || row.bindingHash !== bound.bindingHash || command.goalHash && goalHash !== command.goalHash) throw stale();
-      await check(bound); await grant(bound, 'read');
+      if (command.inputHash !== selectionHash || row.bindingHash !== bound.bindingHash || goalHash !== command.goalHash) throw stale();
+      const latest = await repository.findOperation(bound.scope, parsed.data.operationKey);
+      if (!latest || requestFingerprint(canonical(latest)) !== requestFingerprint(canonical(row))) throw stale();
+      const closing = await grant(bound, 'read');
+      if (permission.policy.expiresAt <= clock() || closing.policy.expiresAt <= clock()
+        || closing.policyHash !== permission.policyHash) throw denied();
+      await check(bound);
       return { state: 'observed' as const, ...packet(row), retryable: false as const,
-        ...('selectionHash' in parsed.data && goalHash ? { originalSelection: clientGoalSelectedInput(material.input as ClientCreateQuoteRequest) } : {}),
+        ...('selectionHash' in parsed.data ? { originalSelection: goalHash
+          ? clientGoalSelectedInput(material.input as ClientCreateQuoteRequest) : aiClientPersonalQuoteSelectionSchema.parse(material.input) } : {}),
         execution: 'read_only' as const, freshness: 'recheck_at_confirmation' as const };
     },
     async prepare(value: unknown, goalHash?: string) {

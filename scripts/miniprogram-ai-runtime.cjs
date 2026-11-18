@@ -17,6 +17,8 @@ const exportsAllowed = Object.freeze([
   'aiClientGoalCandidatesRequestSchema', 'aiClientGoalProjectionSchema', 'aiClientGoalQuoteRequestSchema',
   'aiClientGoalQuoteReferenceSchema', 'aiClientGoalQuoteReadResponseSchema', 'aiClientTaskInputReferenceRequestSchema', 'clientTaskInputReference', 'minimizeClientRecoveryRecord',
   'createClientGoalSession', 'clientGoalStorageKey', 'clientGoalSelectedInput', 'clientGoalTimeOptions', 'clientGoalTextHash',
+  'createClientQuoteSession', 'createClientQuoteBookingSession', 'clientQuoteStorageKey', 'clientQuoteOwner', 'clientQuoteRecoveryLocator',
+  'aiClientBookingReadRequestSchema', 'aiClientQuoteReadRequestSchema', 'clientRecoveryKey',
   'enterpriseOrderDelegationMatches',
   'AI_CLIENT_ENTRY_HTTP_DRAFT', 'AI_CLIENT_HOST_CAPABILITIES_VERSION', 'AI_CLIENT_QUOTE_PREPARATION_VERSION',
   'AI_CLIENT_QUOTE_BOOKING_VERSION', 'aiClientHostCapabilitiesRequestSchema', 'aiClientHostCapabilitiesSchema',

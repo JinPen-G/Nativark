@@ -8,8 +8,10 @@ export { AI_CLIENT_PUBLIC_HTTP, aiClientPublicSessionRequestSchema, aiClientPubl
 export { createAiClientPublicContinuitySession } from './ai-client-public-session';
 export { aiClientGoalPreparationRequestSchema, aiClientGoalPreparationReadRequestSchema, aiClientGoalPreparationResponseSchema,
   aiClientGoalCandidatesRequestSchema, aiClientGoalProjectionSchema, aiClientGoalQuoteRequestSchema, aiClientGoalQuoteReferenceSchema, aiClientGoalQuoteReadResponseSchema } from './ai-client-goal-draft';
-export { createClientGoalSession, clientGoalStorageKey, clientGoalSelectedInput, clientGoalTimeOptions, minimizeClientRecoveryRecord } from './ai-client-goal-session';
+export { createClientGoalSession, clientGoalStorageKey, clientGoalSelectedInput, clientGoalTimeOptions, clientRecoveryKey, minimizeClientRecoveryRecord } from './ai-client-goal-session';
 export { clientGoalTextHash } from './ai-client-goal-fingerprint';
+export { createClientQuoteSession, createClientQuoteBookingSession, clientQuoteStorageKey, clientQuoteOwner,
+  clientQuoteRecoveryLocator } from './ai-client-quote-session';
 export { enterpriseOrderDelegationMatches } from './enterprise-order-delegation';
 export { AI_TASK_DRAFT_VERSION } from './ai-task-draft';
 export { AI_TASK_INPUT_DRAFT_VERSION, AI_TASK_INPUT_FIELD_IDS_DRAFT,
@@ -24,11 +26,11 @@ export { AI_CLIENT_HOST_CAPABILITIES_VERSION, aiClientHostCapabilitiesRequestSch
   aiClientTaskInputSubmissionReceiptSchema, aiClientTaskInputReceiptReadResponseSchema,
   aiClientTaskCancelRequestSchema, aiClientTaskCancelReceiptSchema, aiClientTaskCancellationObservationSchema,
   aiClientTaskInputCancellationReceiptSchema, aiClientTaskUnstartedCancellationReceiptSchema } from './ai-client-entry-draft-schemas';
-export { AI_CLIENT_QUOTE_PREPARATION_VERSION, aiClientQuotePreparationRequestSchema, aiClientQuoteConfirmationRequestSchema,
+export { AI_CLIENT_QUOTE_PREPARATION_VERSION, aiClientQuoteReadRequestSchema, aiClientQuotePreparationRequestSchema, aiClientQuoteConfirmationRequestSchema,
   aiClientQuotePreparationResponseSchema, aiClientQuotePreparationReadResponseSchema, aiClientQuoteResultReadResponseSchema,
   aiClientQuoteParameterReviewSchema } from './ai-client-quote-draft';
 export { RENTAL_PRICING_UNIT_LABELS } from './core';
-export { AI_CLIENT_QUOTE_BOOKING_VERSION, aiClientQuoteBookingRequestSchema, aiClientQuoteBookingPreparationResponseSchema,
+export { AI_CLIENT_QUOTE_BOOKING_VERSION, aiClientBookingReadRequestSchema, aiClientQuoteBookingRequestSchema, aiClientQuoteBookingPreparationResponseSchema,
   aiClientQuoteBookingOperationResponseSchema } from './ai-client-quote-booking-draft';
 export { aiBookingSelectionSchema } from './ai-booking-draft';
 export { aiEntryActionSchema } from './ai-entry-action-draft';

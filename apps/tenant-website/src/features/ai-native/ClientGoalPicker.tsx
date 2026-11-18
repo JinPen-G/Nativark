@@ -6,9 +6,10 @@ import { useEffect, useRef, useState } from 'react';
 import { RENTAL_PRICING_UNIT_LABELS, type ClientCreateQuoteRequest, type RentalFulfillmentMode,
   type RentalPricingUnit, type AiClientGoalProjection, type AiBookingHandoff, type ClientGoalBookingSource } from '@rental-os/shared';
 import { captureEnterpriseHostSession, subscribeCustomerSession } from '../../data/authClient';
+import { withClientRecoveryLock } from '../../data/clientRecoveryStorage';
 import { createClientGoalApi, createClientGoalBookingApi } from './client-goal-api';
 import { createClientGoalSession, clientGoalStorageKey, clientGoalTimeOptions, clientGoalBookingSelection,
-  clientGoalBookingStorageKey, clientGoalBookingStoredRequest, createClientGoalBookingSession,
+  clientGoalBookingStorageKey, createClientGoalBookingSession,
   type ClientGoalView, type ClientQuoteBookingView } from './client-goal-session';
 import { createClientTaskCancellationApi } from './client-task-cancellation-api';
 import { createClientTaskCancellationSession, clientTaskCancellationStorageKey,
@@ -172,13 +173,8 @@ export function ClientGoalPicker(props: {
       customerId: captured.customerId, surface: 'tenant_website' as const, current }, key = clientGoalBookingStorageKey(context, original);
     const cached = localStorage.getItem(key);
     if (purpose === 'read' && cached === null) return null;
-    const request = cached === null ? null : clientGoalBookingStoredRequest(JSON.parse(cached));
-    if (request && (request.original.materialRef !== original.materialRef || request.original.expectedMaterialHash !== original.expectedMaterialHash))
-      throw Error('client_goal_booking_source_changed');
-    const selection = request?.selection ?? (source ? clientGoalBookingSelection(source) : null);
-    if (!selection || source && JSON.stringify(selection) !== JSON.stringify(clientGoalBookingSelection(source))) throw Error('client_goal_booking_selection_changed');
-    if (booking.current && bookingKey.current === key) {
-      if (source) bookingSource.current = source;
+    const selection = source ? clientGoalBookingSelection(source) : null;
+    if (booking.current && bookingKey.current === key && (!source || bookingSource.current === source)) {
       if (purpose === 'read' && booking.current.snapshot().canRead) await booking.current.recover();
       return current() ? booking.current : null;
     }
@@ -192,7 +188,7 @@ export function ClientGoalPicker(props: {
     booking.current = next; bookingSource.current = source; bookingKey.current = key;
     await next.open(); if (cached !== null && next.snapshot().canRead) await next.recover(); return current() ? next : null;
   };
-  const work = async (action: (instance: NonNullable<typeof owner.current>) => Promise<unknown>, readOnly = false) => {
+  const work = async (action: (instance: NonNullable<typeof owner.current>) => Promise<unknown>) => {
     if (busy.current || document.hidden || scope.current !== scopeKey) return;
     const generation = epoch.current; busy.current = true; setWorking(true); setError(false);
     try {
@@ -203,12 +199,7 @@ export function ClientGoalPicker(props: {
         const instance = await ensure();
         if (instance && captured.current() && generation === epoch.current) await action(instance);
       };
-      if (navigator.locks) await navigator.locks.request(`ai-client-goal:${captured.operationScope}`, { mode: 'exclusive', ifAvailable: true }, async lock => {
-        if (!lock) throw Error('client_goal_in_use');
-        await run();
-      });
-      else if (readOnly) await run();
-      else throw Error('client_goal_lock_unavailable');
+      await withClientRecoveryLock(captured.operationScope, run);
     }
     catch { if (generation === epoch.current) setError(true); }
     finally { if (generation === epoch.current) { busy.current = false; setWorking(false); } }
@@ -246,7 +237,7 @@ export function ClientGoalPicker(props: {
   });
   const refresh = () => work(async instance => {
     await instance.refresh(); await ensureBooking(instance, 'read'); await instance.readCancellationOrigin();
-  }, true);
+  });
   const newGoal = () => work(async instance => {
     // A pending Draft/handoff has its own original operation and must be read
     // first. A new goal never erases or substitutes for that receipt.

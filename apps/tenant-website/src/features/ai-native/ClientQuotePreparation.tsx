@@ -4,7 +4,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AiClientQuoteFacts, AiBookingSelection, AiBookingHandoff, ClientCreateQuoteRequest } from '@rental-os/shared';
 import { captureEnterpriseHostSession, sessionApi, subscribeCustomerSession } from '../../data/authClient';
-import { createClientQuoteSession, createClientQuoteBookingSession, clientQuoteStorageKey, clientQuoteBookingStoredRequest,
+import { withClientRecoveryLock } from '../../data/clientRecoveryStorage';
+import { createClientQuoteSession, createClientQuoteBookingSession, clientQuoteStorageKey,
   type ClientQuoteView, type ClientQuoteBookingView } from './client-quote-session';
 import { BookingDraftReview, QuoteParameterReview } from './BookingDraftReview';
 import { ClientOriginalQuoteFacts } from './ClientOriginalQuoteFacts';
@@ -81,18 +82,17 @@ export function ClientQuotePreparation(props: {
   };
   const ensureBooking = async (purpose: 'read' | 'write') => {
     const quote = quoteRef.current?.snapshot(), originalInput = quoteRef.current?.originalInput(), owner = quoteOwner.current;
-    if (!quote?.quote || !quote.material || !originalInput || !owner?.current()) return null;
+    if (!quote?.quote || !quote.material || !owner?.current()) return null;
     const session = captureEnterpriseHostSession(); if (!session) return null;
     const key = `${owner.key}:booking`, cached = localStorage.getItem(key);
     if (purpose === 'read' && cached === null) return null;
-    const selection = purpose === 'read' ? clientQuoteBookingStoredRequest(JSON.parse(cached!)).selection
-      : await callbacks.current.bookingSelection?.(quote.quote, originalInput);
-    if (!selection || !owner.current()) return null;
+    const selection = purpose === 'write' && originalInput ? await callbacks.current.bookingSelection?.(quote.quote, originalInput) : null;
+    if (purpose === 'write' && !selection || !owner.current()) return null;
     bookingRef.current?.dispose();
     const context = { tenantCode: session.tenantCode, serviceCode: session.workspaceCode, customerId: session.customerId,
       surface: 'tenant_website' as const, current: owner.current };
     const instance = createClientQuoteBookingSession({ context, original: { materialRef: quote.material.materialRef, expectedMaterialHash: quote.material.materialHash },
-      selection: () => selection, readHost: sessionApi.readBookingHostCapabilities, now: Date.now, newKey: () => `booking-${crypto.randomUUID()}`,
+      selection: () => selection ?? null, readHost: sessionApi.readBookingHostCapabilities, now: Date.now, newKey: () => `booking-${crypto.randomUUID()}`,
       api: { prepareBooking: sessionApi.prepareOriginalQuoteBooking, readBookingPreparation: sessionApi.readOriginalQuoteBookingOperation,
         issueBookingAction: sessionApi.issueBookingAction, createBookingDraft: sessionApi.createBookingDraft, readBookingDraft: sessionApi.readBookingDraft,
         chooseBookingDraft: sessionApi.chooseBookingDraft, handoffBookingDraft: sessionApi.handoffBookingDraft, readBookingOperation: sessionApi.readBookingOperation, readHandoff: sessionApi.readBookingHandoff },
@@ -103,12 +103,18 @@ export function ClientQuotePreparation(props: {
   const work = async (action: () => Promise<void>) => {
     if (busy.current || document.hidden || scope.current !== props.scopeKey) return;
     const epoch = generation.current; busy.current = true; setWorking(true); setError(false);
-    try { await action(); } catch { if (epoch === generation.current) setError(true); }
+    try {
+      const captured = captureEnterpriseHostSession();
+      if (!captured?.current()) throw Error('quote_session_unavailable');
+      await withClientRecoveryLock(captured.operationScope, async () => {
+        if (captured.current() && epoch === generation.current && !document.hidden) await action();
+      });
+    } catch { if (epoch === generation.current) setError(true); }
     finally { if (epoch === generation.current) { busy.current = false; setWorking(false); } }
   };
   const generate = () => work(async () => {
     const instance = await ensureQuote('write'); if (!instance) return;
-    if (instance.originalInput()) await instance.recover();
+    if (instance.snapshot().canRead) await instance.recover();
     else {
       const owner = quoteOwner.current, input = selected.current;
       if (!input || !owner?.current()) return;

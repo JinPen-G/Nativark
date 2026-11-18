@@ -5960,6 +5960,10 @@ test('AIN15 original one-time full Booking material receipt remains readable wit
   try {
     const h = await standardCoreBookingApplicationSetup(t, { oneTime: true });
     const command = { operationKey: 'original-one-time-material-history', command: { kind: 'booking_quote', selection: h.selection } };
+    const { AI_BODY_STORAGE, AiBodyStorageCodec } = require('../apps/api/src/modules/ai-native/privacy/ai-body-storage.codec');
+    const { SecretBox } = require('../apps/api/src/common/secret-box');
+    const testKey = require('node:crypto').randomBytes(32).toString('hex');
+    h.db[AI_BODY_STORAGE] = new AiBodyStorageCodec(new SecretBox({ get: key => key === 'INTEGRATION_ENCRYPTION_KEY' ? testKey : undefined }));
     phase = 'actual-material-persistence';
     const material = await h.app.prepare(h.request, command);
     h.advanceClock(700000); h.state.aiClientTaskPolicy[0].allowCreate = 0; h.state.aiBudgetPolicy.forEach(row => { row.enabled = false; });
@@ -5967,6 +5971,10 @@ test('AIN15 original one-time full Booking material receipt remains readable wit
     h.client.getQuote = async () => { throw Error('Original material receipt cannot reload quote'); };
     phase = 'actual-original-operation-receipt';
     const before = h.clone(h.state), result = await h.app.readBookingMaterialReceipt(h.request, command);
+    const reference = { operationKey: command.operationKey, selectionHash: require('../packages/shared/src/ai-client-goal-fingerprint').clientGoalFingerprint(command.command.selection) };
+    assert.deepEqual(await h.app.readBookingSelectionReference(h.request, reference), JSON.parse(JSON.stringify(command.command.selection)));
+    await assert.rejects(h.app.readBookingSelectionReference(h.request, { ...reference, selectionHash: '0'.repeat(64) }));
+    assert.equal(await h.app.readBookingSelectionReference(h.request, { ...reference, operationKey: 'missing-operation' }), null);
     assert.equal(result.state, 'observed'); assert.equal(result.materialRef, material.materialRef);
     assert.equal(result.materialValidity, 'expired'); assert.equal(result.currentUse, 'not_authorized_by_receipt'); assert.equal(result.retryable, false);
     const altered = { ...command, command: { ...command.command, selection: { ...h.selection,

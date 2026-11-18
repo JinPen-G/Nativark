@@ -4,7 +4,7 @@
  * keys; reading never starts a model, continues an answer or confirms a quote. */
 import { AI_TASK_INPUT_DRAFT_VERSION } from './ai-task-input-draft';
 import { RENTAL_FULFILLMENT_MODES, RENTAL_PRICING_UNIT_CODES } from './core';
-import { aiClientHostCapabilitiesSchema, aiClientTaskReadRequestSchema, aiClientTaskCreationReceiptSchema,
+import { aiClientHostCapabilitiesSchema, aiClientOrderMaterialRequestSchema, aiClientTaskReadRequestSchema, aiClientTaskCreationReceiptSchema,
   aiClientTaskSnapshotReadResponseSchema, aiClientTaskModelResultReadResponseSchema, aiClientTaskModelControlResponseSchema,
   aiClientTaskInputReadResponseSchema, aiClientTaskInputSubmissionRequestSchema, aiClientTaskInputSubmissionReceiptSchema,
   aiClientTaskInputReceiptReadResponseSchema, clientTaskInputReference } from './ai-client-entry-draft-schemas';
@@ -18,6 +18,7 @@ import type { ClientCreateQuoteRequest } from './client';
 import type { RentalFulfillmentMode } from './core';
 import type { EnterpriseOwnRentalPolicy } from './enterprise-policy';
 import { clientGoalFingerprint, clientGoalTextHash } from './ai-client-goal-fingerprint';
+import { clientBookingRecoveryLocator, clientQuoteRecoveryLocator } from './ai-client-quote-session';
 
 export interface ClientGoalSignal { readonly aborted: boolean }
 export interface ClientGoalApi {
@@ -213,14 +214,53 @@ export function clientGoalRecoveryLocator(value: unknown, owner: string): Locato
   return { version: row.version, owner, goal, material, task, phase, answer, continued: row.continued, quote };
 }
 
+const recoveryKeyPattern = /^rental-os:client-(goal|quote|order-task):([^:]+)(?::(history|booking)(?::([^:]+))?)?$/u;
+
+export function clientRecoveryKey(key: string) {
+  const match = recoveryKeyPattern.exec(key);
+  if (!match) return null;
+  const [, kind, encoded, suffix, detail] = match;
+  if (suffix && !(kind === 'goal' && detail || kind === 'quote' && suffix === 'booking' && !detail)) return null;
+  let owner = '', scope: string | null = null, orderId: string | undefined;
+  try {
+    owner = decodeURIComponent(encoded);
+    const parts: unknown = JSON.parse(owner);
+    if (Array.isArray(parts) && parts.length === (kind === 'order-task' ? 5 : 4) && parts.every(part => typeof part === 'string' && part.length > 0 && part.length <= 191)) {
+      scope = JSON.stringify([parts[0], parts[2], parts[1]]);
+      if (kind === 'order-task') orderId = parts[4];
+    }
+  } catch { /* Malformed keys still need their private contents removed. */ }
+  return { kind, suffix, detail, encoded, owner, scope, orderId };
+}
+
 export function minimizeClientRecoveryRecord(key: string, value: unknown): unknown {
-  const goal = /^rental-os:client-goal:([^:]+)(?::history:[^:]+)?$/u.exec(key);
-  if (goal && value !== null) return clientGoalRecoveryLocator(value, `rental-os:client-goal:${goal[1]}`);
-  if (/^rental-os:client-order-task:[^:]+$/u.test(key) && value && typeof value === 'object' && 'submission' in value && value.submission) {
-    if (!('owner' in value) || value.owner !== key || !('version' in value) || value.version !== 'client-order-task-operation-1') throw Error('client_task_locator_invalid');
-    return { ...value, submission: clientTaskInputReference(value.submission) };
+  const keyInfo = clientRecoveryKey(key);
+  if (!keyInfo) return value;
+  const { kind, suffix, detail, encoded, owner, scope, orderId } = keyInfo;
+  try {
+    if (!scope) throw Error('client_recovery_owner_invalid');
+    if (suffix === 'booking') {
+      const locator = clientBookingRecoveryLocator(value, owner);
+      if (detail && locator.request.original.materialRef !== detail) throw Error('booking_reference_changed');
+      return locator;
+    }
+    if (kind === 'quote') return clientQuoteRecoveryLocator(value, owner);
+    if (kind === 'goal') {
+      const locator = clientGoalRecoveryLocator(value, `rental-os:client-goal:${encoded}`);
+      if (detail && encodeURIComponent(locator.goal.operationKey) !== detail) throw Error('client_goal_reference_invalid');
+      return locator;
+    }
+    const row = record(value, ['version','owner','material','task','phase','submission','continued']);
+    if (row.version !== 'client-order-task-operation-1' || row.owner !== key || typeof row.continued !== 'boolean'
+      || !['material_pending','material_ready','task_pending','task_created','model_pending','model_active','answer_pending','answered','continuation_pending','complete'].includes(String(row.phase))) throw Error('client_task_locator_invalid');
+    const material = aiClientOrderMaterialRequestSchema.parse(row.material);
+    const task = row.task === null ? null : aiClientTaskReadRequestSchema.parse(row.task);
+    const submission = row.submission === null ? null : clientTaskInputReference(row.submission);
+    if (material.orderId !== orderId || submission && (!task || submission.creationKey !== task.creationKey || submission.materialRef !== task.materialRef)) throw Error('client_task_locator_invalid');
+    return { version: row.version, owner: key, material, task, phase: row.phase, submission, continued: row.continued };
+  } catch {
+    return { version: 'client-recovery-unavailable-1' };
   }
-  return value;
 }
 
 export function createClientGoalSession(input: {

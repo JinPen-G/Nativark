@@ -12,6 +12,14 @@ export declare const aiClientGoalQuoteReadResponseSchema: typeof Runtime.aiClien
 export declare const aiClientTaskInputReferenceRequestSchema: typeof Runtime.aiClientTaskInputReferenceRequestSchema;
 export declare const clientTaskInputReference: typeof Runtime.clientTaskInputReference;
 export declare const minimizeClientRecoveryRecord: typeof Runtime.minimizeClientRecoveryRecord;
+export declare const clientRecoveryKey: typeof Runtime.clientRecoveryKey;
+export declare const createClientQuoteSession: typeof Runtime.createClientQuoteSession;
+export declare const createClientQuoteBookingSession: typeof Runtime.createClientQuoteBookingSession;
+export declare const clientQuoteStorageKey: typeof Runtime.clientQuoteStorageKey;
+export declare const clientQuoteOwner: typeof Runtime.clientQuoteOwner;
+export declare const clientQuoteRecoveryLocator: typeof Runtime.clientQuoteRecoveryLocator;
+export declare const aiClientBookingReadRequestSchema: typeof Runtime.aiClientBookingReadRequestSchema;
+export declare const aiClientQuoteReadRequestSchema: typeof Runtime.aiClientQuoteReadRequestSchema;
 export declare const createClientGoalSession: typeof Runtime.createClientGoalSession;
 export declare const clientGoalStorageKey: typeof Runtime.clientGoalStorageKey;
 export declare const clientGoalSelectedInput: typeof Runtime.clientGoalSelectedInput;

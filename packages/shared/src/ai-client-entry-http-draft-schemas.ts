@@ -103,12 +103,13 @@ export const AI_CLIENT_ENTRY_HTTP_SCHEMAS = {
     action: ref('AiClientOrderActionDraft') }),
   // Keep the nested input on the original CLIENT-01 DTO, not an AI quote DSL.
   AiClientQuotePreparationRequest: object({ operationKey: { ...id, maxLength: 128 }, input: ref('ClientQuoteRequest') }),
+  AiClientQuoteReadRequest: { oneOf: [ref('AiClientQuotePreparationRequest'), object({operationKey: { ...id, maxLength: 128 }, selectionHash: hash})] },
   AiClientQuoteConfirmationRequest: object({ materialRef: uuid, expectedMaterialHash: hash }),
   AiClientQuoteParameterReview: quoteParameterReview,
   AiClientQuotePreparationResponse: object({ ...quotePreparation, replayed: { type: 'boolean' }, parameterReview: quoteParameterReview },
     [...Object.keys(quotePreparation), 'replayed']),
   AiClientQuotePreparationReadResponse: { oneOf: [
-    object({ ...quotePreparation, state: literal('observed'), retryable: literal(false), execution: literal('read_only'), parameterReview: quoteParameterReview },
+    object({ ...quotePreparation, state: literal('observed'), retryable: literal(false), execution: literal('read_only'), parameterReview: quoteParameterReview, originalSelection: ref('ClientQuoteRequest') },
       [...Object.keys(quotePreparation), 'state', 'retryable', 'execution']),
     object({ contractVersion: literal(AI_CLIENT_QUOTE_PREPARATION_VERSION), state: literal('unknown'),
       operationKey: id, retryable: literal(false), execution: literal('read_only') })] },
@@ -123,6 +124,9 @@ export const AI_CLIENT_ENTRY_HTTP_SCHEMAS = {
     object({ ...quoteResult, state: literal('unknown'), quote: { type: 'null' }, quotePersistence: literal('unknown') },
       [...Object.keys(quoteResult).filter(key => key !== 'observedAt'), 'state', 'quote', 'quotePersistence'])] },
   AiClientQuoteBookingRequest: object({ original: ref('AiClientQuoteConfirmationRequest'), selection: ref('AiBookingSelection'), operationKey: id }),
+  AiClientBookingReadRequest: { oneOf: [ref('AiClientQuoteBookingRequest'), object({ original: ref('AiClientQuoteConfirmationRequest'), operationKey: id, selectionHash: hash,
+    legacyShape: object({ returnLocation: { type: 'boolean' }, serviceFields: { anyOf: [{ type: 'null' }, { type: 'array', maxItems: 20,
+      items: { type: 'array', maxItems: 3, items: { enum: ['scheduledStartAt', 'scheduledEndAt', 'serviceLocationId'] } } }] } }) }, ['original', 'operationKey', 'selectionHash'])] },
   AiClientQuoteBookingPreparationResponse: { oneOf: [
     object({ ...quoteBookingPreparation, state: literal('prepared'), material: object(quoteBookingMaterial), action: ref('AiEntryActionDraft') }),
     object({ ...quoteBookingPreparation, state: literal('unknown'), material: { type: 'null' }, action: { type: 'null' },
@@ -130,7 +134,7 @@ export const AI_CLIENT_ENTRY_HTTP_SCHEMAS = {
   AiClientQuoteBookingOperationResponse: { oneOf: [
     object({ ...quoteBookingObservation, state: literal('observed'), material: object({ ...quoteBookingMaterial, revision: literal(1),
       createdAt: date, observedAt: date, materialValidity: { enum: ['expired', 'not_revalidated'] } }),
-      nextAction: literal('revalidate_material_before_action') }),
+      originalSelection: ref('AiBookingSelection'), nextAction: literal('revalidate_material_before_action') }, [...Object.keys(quoteBookingObservation), 'state', 'material', 'nextAction']),
     object({ ...quoteBookingObservation, state: literal('unknown'), material: { type: 'null' },
       nextAction: literal('read_original_quote_booking_operation') })] },
   AiClientTaskCancelReceipt: object({ contractVersion: literal(AI_TASK_DRAFT_VERSION), taskId: { ...id, maxLength: 36 },

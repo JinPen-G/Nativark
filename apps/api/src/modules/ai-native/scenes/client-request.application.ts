@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { waitForTaskApplicationDependency } from '../runner/prisma-task-application';
 import { z } from 'zod';
-import { aiClientOrderExplanationReadRequestSchema, aiClientSourceReadRequestSchema,
+import { originalLegacyBookingSelection, type AiClientBookingReadRef, aiClientOrderExplanationReadRequestSchema, aiClientSourceReadRequestSchema,
   aiClientTaskCancelRequestSchema, aiClientTaskInputRecoveryRequestSchema, aiClientTaskInputSubmissionRequestSchema, AI_TOOL_DRAFT_VERSION,
   aiClientOrderMaterialRequestSchema, aiClientOrderMaterialReceiptSchema, AI_CLIENT_MATERIAL_RECEIPT_VERSION,
   aiClientOrderActionSourceSchema, aiClientOrderActionRevalidationSchema, type AiClientOrderActionSource,
@@ -1784,6 +1784,31 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         if (error instanceof AiClientMaterialError || !submitted) throw error;
         throw new AiClientMaterialError('AI_CLIENT_RESULT_UNKNOWN');
       }
+    },
+    async readBookingSelectionReference(request: AiClientApplicationRequest, reference: AiClientBookingReadRef) {
+      requireEntry();
+      return withBinding(structuredClone(request), true, 'booking_quote', async bound => {
+        if (!taskDependencies || !bound.identity) throw new AiClientEntryError('AI_ACCESS_DENIED', 'client_required');
+        const scope = scopeOf(bound), policy = new AiClientPolicyAuthority(taskDependencies, taskDependencies, randomUUID(), clock);
+        const subject = { ...scope, identity: structuredClone(bound.identity) };
+        const before = await policy.authorize(subject, 'read');
+        const row = await repository.findOperation(scope, reference.operationKey);
+        const saved = row && commandSchema.parse(row.command);
+        if (row && (!saved || saved.kind !== 'booking_quote'
+          || row.inputHash !== requestFingerprint(saved) || row.materialHash !== materialHash(saved, row.material)
+          || row.bindingHash !== bound.bindingHash || row.publicationHash !== requestFingerprint(bound.published.value)
+          || row.publicationHash !== requestFingerprint(row.publication))) return fail('AI_CLIENT_MATERIAL_STALE');
+        let selection = saved?.kind === 'booking_quote' ? saved.selection : null;
+        if (selection && requestFingerprint(selection) !== reference.selectionHash) {
+          const material = row!.material as Partial<AiBookingMaterial>;
+          if (!reference.legacyShape || material.serviceSources !== undefined || !material.selection || jsonHash(material.selection) !== jsonHash(selection)) return fail('AI_CLIENT_MATERIAL_STALE');
+          selection = originalLegacyBookingSelection(selection, reference.legacyShape);
+          if (!selection || requestFingerprint(selection) !== reference.selectionHash) return fail('AI_CLIENT_MATERIAL_STALE');
+        }
+        await bound.assertCurrent();
+        assertReadPolicyUnchanged(before, await policy.authorize(subject, 'read'));
+        return selection && structuredClone(selection);
+      });
     },
     /** Server-host receipt observation only, independent of a new quote or
      * stock query. It cannot supply a Booking Draft, Action or execution grant.

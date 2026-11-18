@@ -9,7 +9,7 @@ import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientTaskCancelReceiptSchema,
   aiClientOrderActionSourceSchema, aiClientOrderActionSchema, aiClientOrderActionRevalidationSchema, aiClientHostCapabilitiesSchema,
   aiClientTaskReadRequestSchema, aiClientTaskCreationReceiptSchema,
   aiClientTaskAccountingRequestSchema, aiClientTaskAccountingResponseSchema,
-  aiClientQuotePreparationResponseSchema, aiClientQuotePreparationReadResponseSchema,
+  aiClientQuotePreparationResponseSchema, aiClientQuotePreparationReadResponseSchema, aiClientQuoteReadRequestSchema, aiClientBookingReadRequestSchema,
   aiClientQuoteResultReadResponseSchema, aiBookingAcceptanceReadRequestSchema, aiBookingAcceptanceReadResponseSchema,
   aiClientQuoteBookingRequestSchema, aiClientQuoteBookingPreparationResponseSchema,
   aiClientQuoteBookingOperationResponseSchema } from '@rental-os/shared';
@@ -237,7 +237,7 @@ export class AiClientEntryController {
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readQuotePreparationOperation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readQuotePreparationOperation(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
     return this.respond(request, async () => {
-      const value = await this.application.readQuotePreparationOperation(request, aiClientQuotePreparationRequestSchema.parse(body));
+      const value = await this.application.readQuotePreparationOperation(request, aiClientQuoteReadRequestSchema.parse(body));
       const response = aiClientQuotePreparationReadResponseSchema.safeParse({ ...value, contractVersion: AI_CLIENT_QUOTE_PREPARATION_VERSION });
       if (!response.success) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       return response.data;
@@ -266,7 +266,7 @@ export class AiClientEntryController {
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readOriginalQuoteBookingOperation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readOriginalQuoteBookingOperation(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
     return this.respond(request, () => withRequestAbort(request, async signal => {
-      const command = aiClientQuoteBookingRequestSchema.parse(body);
+      const command = aiClientBookingReadRequestSchema.parse(body);
       const result = await this.application.readOriginalQuoteBookingOperation(request, command, signal);
       const checked = aiClientQuoteBookingOperationResponseSchema.safeParse(result);
       if (!checked.success) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
