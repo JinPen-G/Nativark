@@ -1,0 +1,291 @@
+{
+  "people": [
+    {
+      "id": "emma-collins",
+      "name": "Emma Collins",
+      "role": "Product designer",
+      "src": "/media/people/emma-collins.svg"
+    },
+    {
+      "id": "marcus-johnson",
+      "name": "Marcus Johnson",
+      "role": "Frontend engineer",
+      "src": "/media/people/marcus-johnson.svg"
+    },
+    {
+      "id": "jasmine-brooks",
+      "name": "Jasmine Brooks",
+      "role": "Design lead",
+      "src": "/media/people/jasmine-brooks.svg"
+    },
+    {
+      "id": "olivia-bennett",
+      "name": "Olivia Bennett",
+      "role": "Platform engineer",
+      "src": "/media/people/olivia-bennett.svg"
+    },
+    {
+      "id": "sofia-ramirez",
+      "name": "Sofia Ramirez",
+      "role": "Operations lead",
+      "src": "/media/people/sofia-ramirez.svg"
+    },
+    {
+      "id": "ryan-sullivan",
+      "name": "Ryan Sullivan",
+      "role": "Account executive",
+      "src": "/media/people/ryan-sullivan.svg"
+    },
+    {
+      "id": "hannah-walsh",
+      "name": "Hannah Walsh",
+      "role": "Customer success",
+      "src": "/media/people/hannah-walsh.svg"
+    },
+    {
+      "id": "chloe-nguyen",
+      "name": "Chloe Nguyen",
+      "role": "Data analyst",
+      "src": "/media/people/chloe-nguyen.svg"
+    },
+    {
+      "id": "ava-mitchell",
+      "name": "Ava Mitchell",
+      "role": "Marketing manager",
+      "src": "/media/people/ava-mitchell.svg"
+    },
+    {
+      "id": "daniel-kim",
+      "name": "Daniel Kim",
+      "role": "Backend engineer",
+      "src": "/media/people/daniel-kim.svg"
+    },
+    {
+      "id": "jordan-reyes",
+      "name": "Jordan Reyes",
+      "role": "Support specialist",
+      "src": "/media/people/jordan-reyes.svg"
+    },
+    {
+      "id": "mateo-alvarez",
+      "name": "Mateo Alvarez",
+      "role": "Mobile engineer",
+      "src": "/media/people/mateo-alvarez.svg"
+    },
+    {
+      "id": "tyler-hayes",
+      "name": "Tyler Hayes",
+      "role": "Sales lead",
+      "src": "/media/people/tyler-hayes.svg"
+    },
+    {
+      "id": "andre-williams",
+      "name": "Andre Williams",
+      "role": "Finance partner",
+      "src": "/media/people/andre-williams.svg"
+    },
+    {
+      "id": "nathan-cole",
+      "name": "Nathan Cole",
+      "role": "Engineering manager",
+      "src": "/media/people/nathan-cole.svg"
+    },
+    {
+      "id": "diane-foster",
+      "name": "Diane Foster",
+      "role": "Chief operating officer",
+      "src": "/media/people/diane-foster.svg"
+    }
+  ],
+  "photos": [
+    {
+      "id": "lounge-chair",
+      "alt": "A woven oak lounge chair with a sheepskin and linen cushion on a concrete floor",
+      "src": "/required-pro/lounge-chair.jpg",
+      "width": 1280,
+      "height": 1600
+    },
+    {
+      "id": "table-lamp",
+      "alt": "A white mushroom table lamp glowing beside books and a small vase",
+      "src": "/required-pro/table-lamp.jpg",
+      "width": 1600,
+      "height": 900
+    },
+    {
+      "id": "linen-throw",
+      "alt": "Folded natural linen throws with fringed edges in soft window light",
+      "src": "/required-pro/linen-throw.jpg",
+      "width": 1067,
+      "height": 1600
+    },
+    {
+      "id": "glass-carafe",
+      "alt": "A hand pouring water from a ribbed glass carafe into tumblers",
+      "src": "/required-pro/glass-carafe.jpg",
+      "width": 1280,
+      "height": 1600
+    },
+    {
+      "id": "stoneware-cups",
+      "alt": "Two speckled stoneware cups with a lid on a pale table",
+      "src": "/required-pro/stoneware-cups.jpg",
+      "width": 1067,
+      "height": 1600
+    },
+    {
+      "id": "stacked-bowls",
+      "alt": "Two stacked speckled ceramic bowls against a dark wall",
+      "src": "/required-pro/stacked-bowls.jpg",
+      "width": 1600,
+      "height": 1067
+    },
+    {
+      "id": "ceramic-lamp",
+      "alt": "A sculptural ceramic lamp with a linen shade on a walnut sideboard",
+      "src": "/required-pro/ceramic-lamp.jpg",
+      "width": 1067,
+      "height": 1600
+    },
+    {
+      "id": "living-room",
+      "alt": "A bright living room with timber beams, arched windows, and cream sofas",
+      "src": "/required-pro/living-room.jpg",
+      "width": 1200,
+      "height": 1600
+    },
+    {
+      "id": "sunroom",
+      "alt": "A sunroom with a round dining table, plants, and windows on three sides",
+      "src": "/required-pro/sunroom.jpg",
+      "width": 1600,
+      "height": 1067
+    },
+    {
+      "id": "home-office",
+      "alt": "A home office with a wooden desk and deep green walls",
+      "src": "/required-pro/home-office.jpg",
+      "width": 1600,
+      "height": 1200
+    },
+    {
+      "id": "reading-chair",
+      "alt": "A grey armchair and ottoman with a knit throw in a dark green room",
+      "src": "/required-pro/reading-chair.jpg",
+      "width": 1600,
+      "height": 900
+    },
+    {
+      "id": "bedroom",
+      "alt": "A made bed with striped linen pillows against an oak headboard",
+      "src": "/required-pro/bedroom.jpg",
+      "width": 1067,
+      "height": 1600
+    },
+    {
+      "id": "pool-house",
+      "alt": "A modern glass house beside a long pool under a clear sky",
+      "src": "/card-to-article/pool-house.jpg",
+      "width": 1600,
+      "height": 900
+    },
+    {
+      "id": "mountain-ridges",
+      "alt": "Layered mountain ridges under a warm evening sky",
+      "src": "/card-to-article/mountain-ridges.jpg",
+      "width": 1600,
+      "height": 1068
+    },
+    {
+      "id": "lisbon-tram",
+      "alt": "A yellow tram on a street lined with historic buildings in Lisbon",
+      "src": "/card-to-article/lisbon-tram.jpg",
+      "width": 1600,
+      "height": 1064
+    },
+    {
+      "id": "chef-plating",
+      "alt": "A chef spooning sauce onto a plated dish in a dark kitchen",
+      "src": "/card-to-article/chef-plating.jpg",
+      "width": 1600,
+      "height": 1600
+    },
+    {
+      "id": "restaurant",
+      "alt": "A warm restaurant dining room with woven pendant lights and a tree",
+      "src": "/media/photos/restaurant.jpg",
+      "width": 1067,
+      "height": 1600
+    },
+    {
+      "id": "wine-bar",
+      "alt": "A glass carafe of red wine on a bar table in low evening light",
+      "src": "/media/photos/wine-bar.jpg",
+      "width": 1600,
+      "height": 1067
+    },
+    {
+      "id": "concert-hall",
+      "alt": "Curved stainless steel panels of the Walt Disney Concert Hall against a blue sky",
+      "src": "/media/photos/concert-hall.jpg",
+      "width": 1600,
+      "height": 1143
+    },
+    {
+      "id": "curved-facade",
+      "alt": "A white tiled building facade with curved balconies",
+      "src": "/media/photos/curved-facade.jpg",
+      "width": 1600,
+      "height": 1067
+    },
+    {
+      "id": "terracotta-waves",
+      "alt": "Wavy terracotta walls rising toward a blue sky",
+      "src": "/media/photos/terracotta-waves.jpg",
+      "width": 1067,
+      "height": 1600
+    },
+    {
+      "id": "alpine-lake",
+      "alt": "A calm alpine lake reflecting a rocky peak at golden hour",
+      "src": "/media/photos/alpine-lake.jpg",
+      "width": 1067,
+      "height": 1600
+    },
+    {
+      "id": "coastline",
+      "alt": "A long coastline with waves rolling onto a beach below green cliffs",
+      "src": "/media/photos/coastline.jpg",
+      "width": 1200,
+      "height": 1600
+    },
+    {
+      "id": "sea-at-dusk",
+      "alt": "A calm sea at dusk with a low island on the horizon",
+      "src": "/media/photos/sea-at-dusk.jpg",
+      "width": 1067,
+      "height": 1600
+    },
+    {
+      "id": "lisbon-bridge",
+      "alt": "The 25 de Abril Bridge crossing the Tagus in Lisbon",
+      "src": "/media/photos/lisbon-bridge.jpg",
+      "width": 1600,
+      "height": 1166
+    },
+    {
+      "id": "lisbon-rooftops",
+      "alt": "Terracotta rooftops of Lisbon running down to the river",
+      "src": "/media/photos/lisbon-rooftops.jpg",
+      "width": 1280,
+      "height": 1600
+    },
+    {
+      "id": "salmon-dinner",
+      "alt": "Seared salmon with a bright herb salsa and a glass of red wine",
+      "src": "/media/photos/salmon-dinner.jpg",
+      "width": 1067,
+      "height": 1600
+    }
+  ]
+}

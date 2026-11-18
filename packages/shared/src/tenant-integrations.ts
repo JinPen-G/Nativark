@@ -6,11 +6,12 @@
  */
 import type { RentalCurrency } from "./core";
 
-export type TenantIntegrationCapability = "sms" | "payment" | "file";
+export type TenantIntegrationCapability = "sms" | "email" | "payment" | "file";
 
 export type TenantIntegrationProvider =
   | "aliyun_sms"
   | "tencent_sms"
+  | "smtp"
   | "alipay"
   | "wechat_pay"
   | "stripe"
@@ -105,6 +106,26 @@ export interface TenantIntegrationTestResult {
 }
 
 export const TENANT_INTEGRATION_PROVIDERS: TenantIntegrationProviderDefinition[] = [
+  {
+    capability: "email",
+    provider: "smtp",
+    name: "SMTP 邮箱",
+    description: "连接租户自己的邮箱服务器，用于运营账号邀请与邮件通知。测试连接只验证加密连接和登录，不发送邮件。",
+    fields: [
+      { key: "host", label: "SMTP Host", secret: false, required: true, inputType: "text", placeholder: "smtp.example.com" },
+      { key: "port", label: "SMTP 端口", secret: false, required: true, inputType: "number", placeholder: "465 / 587" },
+      { key: "secure", label: "直接使用 TLS（通常为 465）", secret: false, required: false, inputType: "boolean", description: "关闭时使用 STARTTLS（通常为 587），仍要求加密连接，不发送明文密码。" },
+      { key: "fromEmail", label: "发件人邮箱", secret: false, required: true, inputType: "text", placeholder: "team@example.com" },
+      { key: "fromName", label: "发件人名称", secret: false, required: false, inputType: "text" },
+      { key: "replyTo", label: "回复邮箱", secret: false, required: false, inputType: "text" },
+      { key: "receiveEnabled", label: "启用客诉邮件接收", secret: false, required: false, inputType: "boolean", description: "客服中心按此邮箱的 IMAP 收件箱读取邮件，不修改或删除服务器上的邮件。" },
+      { key: "imapHost", label: "IMAP Host", secret: false, required: false, inputType: "text", placeholder: "imap.example.com", description: "接收客诉邮件时必填，使用同一邮箱账号与授权码。" },
+      { key: "imapPort", label: "IMAP 端口", secret: false, required: false, inputType: "number", placeholder: "993" },
+      { key: "imapMailbox", label: "客诉收件文件夹", secret: false, required: false, inputType: "text", placeholder: "INBOX", description: "默认为 INBOX；建议使用专门的客服邮箱或文件夹。" },
+      { key: "username", label: "邮箱账号", secret: true, required: true, inputType: "password" },
+      { key: "password", label: "密码或邮箱授权码", secret: true, required: true, inputType: "password", description: "使用邮箱服务商的 SMTP 授权码；保存后不回显，留空保留原值。" }
+    ]
+  },
   {
     capability: "sms",
     provider: "aliyun_sms",

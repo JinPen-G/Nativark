@@ -9,6 +9,7 @@ import { FileStorageRuntimeService } from "./file-storage.runtime.service";
 import { PaymentRuntimeService } from "./payment.runtime.service";
 import { TenantIntegrationRuntimeService } from "./tenant-integration.runtime.service";
 import { TenantIntegrationService } from "./tenant-integration.service";
+import { TenantEmailRuntimeService } from "./tenant-email.runtime.service";
 
 const LIVE_TEST_COOLDOWN_MS = 30_000;
 
@@ -29,7 +30,8 @@ export class TenantIntegrationConnectivityService {
     private readonly integrations: TenantIntegrationService,
     private readonly sms: TenantIntegrationRuntimeService,
     private readonly fileStorage: FileStorageRuntimeService,
-    private readonly payment: PaymentRuntimeService
+    private readonly payment: PaymentRuntimeService,
+    private readonly email: TenantEmailRuntimeService
   ) {}
 
   async test(
@@ -96,7 +98,9 @@ export class TenantIntegrationConnectivityService {
         ? await this.payment.testConnection(config)
         : capability === "sms"
           ? await this.sms.testConnection(config)
-          : await this.fileStorage.testConnection(config);
+          : capability === "email"
+            ? await this.email.testConnection(config)
+            : await this.fileStorage.testConnection(config);
       const recorded = await this.integrations.recordTestResult({
         tenantId: config.tenantId,
         configId: config.id,

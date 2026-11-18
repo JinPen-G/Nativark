@@ -1,4 +1,4 @@
-import { ApartmentOutlined, ApiOutlined, AppstoreOutlined, BgColorsOutlined, BoxPlotOutlined, CalendarOutlined, ControlOutlined, CrownOutlined, DashboardOutlined, FileSearchOutlined, FileTextOutlined, FormOutlined, FundOutlined, GiftOutlined, IdcardOutlined, MobileOutlined, SafetyCertificateOutlined, SettingOutlined, ShopOutlined, TagsOutlined, TeamOutlined, ToolOutlined } from "@/components/ui/icons";
+import { ApartmentOutlined, ApiOutlined, AppstoreOutlined, BgColorsOutlined, BoxPlotOutlined, CalendarOutlined, ControlOutlined, CrownOutlined, CustomerServiceOutlined, DashboardOutlined, FileSearchOutlined, FileTextOutlined, FormOutlined, FundOutlined, GiftOutlined, IdcardOutlined, MobileOutlined, SafetyCertificateOutlined, SendOutlined, SettingOutlined, ShopOutlined, TagsOutlined, TeamOutlined, ToolOutlined } from "@/components/ui/icons";
 import { RentalCategoryCode, type RentalCapability, type RentalCategoryTerminology } from "@rental-os/shared";
 import type { ReactNode } from "react";
 import { applyTenantNavigationLabels } from "./navigation-terminology";
@@ -13,7 +13,7 @@ export interface AppRouteDefinition {
   icon: ReactNode;
   /** 路由所属运行面；租户内全权限不能越过 SaaS/租户边界。 */
   audience: "tenant" | "saas";
-  scope?: "tenant-membership";
+  scope?: "tenant-membership" | "tenant-management";
   capability?: RentalCapability;
   categories?: RentalCategoryCode[];
   menu?: boolean;
@@ -76,6 +76,8 @@ export const APP_ROUTES = {
   tenantAccounts: { path: "/tenant/accounts", label: "运营账号", permission: "system:user:manage", audience: "tenant", icon: <TeamOutlined />, menu: true },
   tenantRoles: { path: "/tenant/roles", label: "角色权限", permission: "system:role:manage", audience: "tenant", icon: <SafetyCertificateOutlined />, menu: true },
   tenantIntegrations: { path: "/tenant/integrations", label: "第三方服务", permission: "system:integration:manage", audience: "tenant", icon: <ApiOutlined />, menu: true },
+  tenantDispatch: { scope: "tenant-management", path: "/tenant/dispatch", label: "寄件中心", permission: "system:integration:manage", audience: "tenant", icon: <SendOutlined />, menu: true },
+  customerSupport: { scope: "tenant-management", path: "/tenant/support", label: "客服中心", permission: "system:integration:manage", audience: "tenant", icon: <CustomerServiceOutlined />, menu: true },
   clientChannel: { path: "/tenant/client-channel", label: "客户端渠道", permission: "system:integration:manage", audience: "tenant", icon: <MobileOutlined />, menu: true },
   // 圆角与本地音效设置；品牌标识、主题色仍在客户端渠道维护。
   appearance: { path: "/settings/appearance", label: "外观与音效", permission: "system:integration:manage", audience: "tenant", icon: <BgColorsOutlined />, menu: true },
@@ -116,7 +118,7 @@ export const APP_NAVIGATION: AppNavigationSection[] = [
   // 混在一个九项长列表里。这里只调整菜单分组，不改变任何路由或权限边界。
   { key: "operations-foundation", label: "经营基础", icon: <SettingOutlined />, routes: [APP_ROUTES.tenantReadiness, APP_ROUTES.rentalSettings, APP_ROUTES.qualificationTypes, APP_ROUTES.rentalCapabilities, APP_ROUTES.subscription] },
   { key: "account-access", label: "账号与权限", icon: <TeamOutlined />, routes: [APP_ROUTES.tenantAccounts, APP_ROUTES.tenantRoles, APP_ROUTES.clientAuthorization] },
-  { key: "service-channels", label: "服务与渠道", icon: <ApiOutlined />, routes: [APP_ROUTES.tenantIntegrations, APP_ROUTES.aiSettings, APP_ROUTES.aiTasks, APP_ROUTES.clientChannel, APP_ROUTES.appearance] },
+  { key: "service-channels", label: "服务与渠道", icon: <ApiOutlined />, routes: [APP_ROUTES.tenantIntegrations, APP_ROUTES.tenantDispatch, APP_ROUTES.customerSupport, APP_ROUTES.aiSettings, APP_ROUTES.aiTasks, APP_ROUTES.clientChannel, APP_ROUTES.appearance] },
   { key: "finance-reconciliation", label: "财务与对账", icon: <FileSearchOutlined />, routes: [APP_ROUTES.paymentReconciliation] },
   { key: "platform-management", label: "平台管理", icon: <SettingOutlined />, routes: [APP_ROUTES.platformTenants, APP_ROUTES.platformDemoRequests, APP_ROUTES.platformSubscriptions, APP_ROUTES.subscriptionCatalog, APP_ROUTES.platformOfficialCalendars, APP_ROUTES.platformUsers, APP_ROUTES.platformAi, APP_ROUTES.platformSystem, APP_ROUTES.platformOperations, APP_ROUTES.platformTools] }
 ];
@@ -175,7 +177,7 @@ export function canAccessRoute(
         hasPermission, hasCapability, categoryCode, isSaasAdmin, hasTenantMembershipPermission));
   }
   const supportsCategory = !route.categories || Boolean(categoryCode && route.categories.includes(categoryCode));
-  const permissionCheck = route.scope === "tenant-membership" ? hasTenantMembershipPermission : hasPermission;
+  const permissionCheck = route.scope === "tenant-membership" || route.scope === "tenant-management" ? hasTenantMembershipPermission : hasPermission;
   const supportsPermission = permissionCheck(route.permission) || Boolean(route.legacyPermissions?.some((permission) => permissionCheck(permission)));
   return supportsPermission && hasCapability(route.capability) && supportsCategory;
 }

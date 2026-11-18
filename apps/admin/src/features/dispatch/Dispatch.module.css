@@ -1,0 +1,10 @@
+.identity { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.identity > span { display: flex; flex: none; color: var(--text-secondary); }
+.detail { display: grid; gap: var(--space-5); min-width: 0; }
+.messageHeading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
+.messageHeading h2 { margin: 0; font-size: 18px; line-height: 26px; font-weight: 500; overflow-wrap: anywhere; }
+.email { width: 100%; height: min(600px, 65dvh); min-height: 360px; border: 1px solid var(--border); border-radius: var(--radius-panel); background: #f7f7f7; }
+.text { padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-panel); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
+.note { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 20px; }
+.failure { margin: 0; color: var(--danger); font-size: 13px; line-height: 20px; }
+@media (max-width: 480px) { .email { min-height: 400px; } .messageHeading { flex-wrap: wrap; } }

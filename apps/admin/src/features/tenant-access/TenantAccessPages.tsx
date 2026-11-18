@@ -26,13 +26,14 @@ import { Alert, Table } from "@/components/ui";
 import { Input, Switch } from "@/components/ui";
 import { Select } from "@/components/ui";
 import { Button, ConfirmAction, CopyButton, DataTableRowActions, Drawer, SaveButton } from "@/components/ui";
-import { Info, KeyRound, Pencil } from "lucide-react";
+import { Info, KeyRound, Mail, Pencil } from "lucide-react";
 import { useMemo, useState } from "react";
 import { api } from "@/api/platform";
 import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
+import { OperatorInvitations } from "./OperatorInvitations";
 
 const DATA_SCOPE_OPTIONS: Array<{ value: SystemDataScope; label: string; description: string }> = [
   { value: "all", label: "当前租户全部数据", description: "可查看当前租户内全部组织和空间数据" },
@@ -102,6 +103,7 @@ export function TenantOperationsAccountPage() {
   const [form] = Form.useForm<TenantOperationsAccountForm>();
   const [editing, setEditing] = useState<SystemUserRow>();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [invitationOpen, setInvitationOpen] = useState(false);
   const [accessRows, setAccessRows] = useState<WorkspaceAccessRow[]>([]);
 
   const activeRoles = (roles.data ?? []).filter((role) => role.isActive);
@@ -202,9 +204,9 @@ export function TenantOperationsAccountPage() {
 
   return <>
     <PageHeader title={t("运营账号管理")} summary={<InsightMetrics items={[{label:t("账号"),value:accountFilter.rows.length},{label:t("已启用"),value:accountFilter.rows.filter(row=>row.isActive).length}]} />} extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>{t("新增运营账号")}</Button>} note={{ title: t("权限分为两层"), description: t("角色决定可以执行哪些操作；数据范围决定在获准操作内可以看哪些数据。经营空间访问权单独授予，不能只靠隐藏菜单代替。") }} />
+    <OperatorInvitations open={invitationOpen} onClose={() => setInvitationOpen(false)} roles={roles.data ?? []} workspaces={workspaces.data ?? []} />
     <QueryState loading={loading} error={error}>
-      <div className={accessStyles.roleTools}><ListFilterBar><ListFilters filter={accountFilter} placeholder="账号、姓名或手机号" options={[{value:"active",label:"已启用"},{value:"disabled",label:"已停用"}]}/></ListFilterBar></div>
-      <ListSection>
+      <ListSection controls={<><ListFilters filter={accountFilter} placeholder="账号、姓名或手机号" options={[{value:"active",label:"已启用"},{value:"disabled",label:"已停用"}]}/><Button icon={<Mail size={16} aria-hidden="true" />} onClick={() => setInvitationOpen(true)}>{t("邀请运营用户")}</Button></>}>
         <Table<SystemUserRow> toolbarNote={false} rowKey="id" onRefresh={() => users.refetch()} loading={users.isLoading} refreshing={users.isFetching} dataSource={accountFilter.rows} pagination={accountFilter.pagination} scroll={{ x: 1120 }} columns={[
           { title: t("账号"), width: 190, render: (_, record) => <DataTableText primary={record.displayName} secondary={record.account}/> },
           { title: t("手机"), dataIndex: "phone", width: 140, render: (value) => value || "-" },
@@ -341,10 +343,9 @@ export function TenantRolePermissionPage() {
   }
 
   return <>
-    <PageHeader title={t("角色权限管理")} summary={<InsightMetrics items={[{label:t("角色"),value:roleView === "matrix" ? roles.data?.length : roleFilter.rows.length},{label:t("权限模块"),value:permissions.data?.length}]} />} extra={<Space wrap>
-      <Segmented aria-label={t("角色视图")} value={roleView} onChange={value=>setRoleView(String(value))} options={[{value:"matrix",label:t("权限对照")},{value:"list",label:t("角色列表")}]}/>
-      <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>{t("新增角色")}</Button>
-    </Space>} />
+    <PageHeader title={t("角色权限管理")} summary={<InsightMetrics items={[{label:t("角色"),value:roleView === "matrix" ? roles.data?.length : roleFilter.rows.length},{label:t("权限模块"),value:permissions.data?.length}]} />}
+      view={<Segmented aria-label={t("角色视图")} value={roleView} onChange={value=>setRoleView(String(value))} options={[{value:"matrix",label:t("权限对照")},{value:"list",label:t("角色列表")}]}/>}
+      extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>{t("新增角色")}</Button>} />
     <QueryState loading={roles.isLoading || permissions.isLoading} error={roles.error ?? permissions.error}>
       <p className={accessStyles.scopeNotice}><Info size={14} aria-hidden="true" />{t("决定操作获准后可访问的数据边界。当前空间隔离已强制生效；组织/本人范围仍需各业务模块逐项接入。")}</p>
       <div hidden={roleView !== "matrix"}><PermissionMatrix roles={roles.data ?? []} modules={permissions.data??[]} onEdit={openEditor} draft={permissionDraft} onDraftChange={setPermissionDraft}

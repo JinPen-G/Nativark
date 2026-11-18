@@ -1,0 +1,63 @@
+:where(.invite-people-local),
+:where(.invite-people-local) * {
+  box-sizing: border-box;
+  border: 0 solid;
+  margin: 0;
+  padding: 0;
+}
+
+:where(.invite-people-local) :where(button, input, select, textarea) {
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  background: transparent;
+  border-radius: 0;
+  opacity: 1;
+}
+
+:where(.invite-people-local) :where(h1, h2, h3, h4, h5, h6) {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: var(--tracking-display);
+  line-height: 1.1 !important;
+}
+
+:where(.invite-people-local) :where(img, svg) {
+  display: block;
+  vertical-align: middle;
+}
+
+:where(.invite-people-local) img {
+  max-width: 100%;
+  height: auto;
+}
+
+:where(.invite-people-local) :focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--accent-strong) 72%, transparent) !important;
+  outline-offset: 2px !important;
+}
+
+:where(.invite-people-local)
+  :where(input, [role='menuitemradio'], [tabindex='-1']):focus {
+  outline: none !important;
+  outline-offset: 0 !important;
+}
+
+.invite-people-configuration {
+  margin-top: 16px;
+}
+
+:where(.invite-people-local) [role='alert'] {
+  margin-top: 16px;
+  white-space: pre-line;
+}
+
+:where(.invite-people-local[data-invite-reduced-motion]),
+:where(.invite-people-local[data-invite-reduced-motion]) *,
+:where(.invite-people-local[data-invite-reduced-motion]) *::before,
+:where(.invite-people-local[data-invite-reduced-motion]) *::after {
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+}

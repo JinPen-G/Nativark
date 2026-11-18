@@ -1,0 +1,43 @@
+.host { display: grid; gap: var(--space-3); min-width: 0; }
+.loadFailure { display: grid; gap: var(--space-2); justify-items: start; }
+.loadFailure > :first-child { width: 100%; }
+.host :global(.invite-people-local) {
+  --font-body: inherit;
+  --font-display: inherit;
+  --radius-control: var(--rental-ui-radius-button);
+  --radius-panel: var(--rental-ui-radius-container);
+  --control-height-sm: var(--rental-control-height-default);
+  --surface: inherit;
+  --surface-muted: inherit;
+  --surface-raised: inherit;
+  --foreground: inherit;
+  --border: inherit;
+  --border-strong: inherit;
+  --border-subtle: inherit;
+  --text-muted: inherit;
+  --text-secondary: inherit;
+  --danger: inherit;
+  --success: inherit;
+  width: 100%;
+  max-width: none;
+  border-radius: var(--rental-ui-radius-container);
+}
+.configuration { display: grid; gap: var(--space-2); container: invitation-access / inline-size; font-size: 14px; line-height: 20px; }
+.configuration h3, .records h3 { margin: 0; font-size: 14px; font-weight: 500; line-height: 20px !important; }
+.configuration p { margin: 0; font-size: 12px; line-height: 20px; color: var(--text-secondary); }
+.access { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); align-items: center; gap: var(--space-3); padding-block: var(--space-2); border-bottom: 1px solid var(--border); }
+.accessFields { min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+.accessFields :global(.ant-form-item) { margin-bottom: 0; }
+.host .previewAction { padding-inline: var(--space-3); }
+.preview { display: grid; gap: var(--space-3); min-width: 0; }
+.preview h3 { margin: 0; font-size: 14px; font-weight: 500; line-height: 20px; overflow-wrap: anywhere; }
+.email { display: block; width: 100%; height: min(640px, calc(100dvh - 180px)); min-height: 280px; border: 1px solid var(--border); border-radius: var(--rental-ui-radius-container); }
+.records { margin-top: var(--space-5); }
+.recordsHeading { display: flex; align-items: center; justify-content: space-between; }
+.record { display: flex; gap: var(--space-3); justify-content: space-between; padding-block: var(--space-3); border-bottom: 1px solid var(--border); font-size: 13px; }
+.record > div { display: grid; gap: var(--space-1); min-width: 0; overflow-wrap: anywhere; }
+.record strong { font-weight: 500; }
+.record small { color: var(--text-secondary); }
+@container invitation-access (max-width: 520px) { .access { grid-template-columns: minmax(0, 1fr); } }
+@container invitation-access (max-width: 340px) { .accessFields { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 560px) { .record { flex-wrap: wrap; } }

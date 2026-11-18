@@ -1236,6 +1236,44 @@ export class PlatformRepository {
     return { ...this.toUserRow(user), temporaryPassword: saved.temporaryPassword };
   }
 
+  /** 邮箱邀请只准备待接受授权；发信和接受都复验原租户角色/空间关系，不提前建账号。 */
+  async validateOperatorInvitationAccess(tx: Prisma.TransactionClient, tenantId: string, actorUserId: string,
+    input: Pick<SaveSystemUserAccessRequest, "roleIds" | "organizationId" | "workspaceAccesses">) {
+    const actor = await this.assertTenantPermissionInTransaction(tx, tenantId, actorUserId, "system:user:manage");
+    if (!Array.isArray(input.roleIds) || !input.roleIds.length || input.roleIds.length > 8 || new Set(input.roleIds).size !== input.roleIds.length)
+      throw new BadRequestException("请选择有效的租户基础角色");
+    const accesses = input.workspaceAccesses;
+    if (!Array.isArray(accesses) || !accesses.length || accesses.length > 100 || accesses.some(row => !row.isActive || !row.roleId)
+      || new Set(accesses.map(row => row.workspaceId)).size !== accesses.length) throw new BadRequestException("邀请需选择至少一个经营空间及对应角色，不能重复选择空间");
+    const roleIds = [...new Set([...input.roleIds, ...accesses.map(row => row.roleId!)])];
+    const [roles, workspaces, organization] = await Promise.all([
+      tx.role.findMany({ where: { tenantId, id: { in: roleIds }, isActive: true }, select: { id: true, name: true, code: true, fixedAllPermissions: true } }),
+      tx.businessWorkspace.findMany({ where: { tenantId, id: { in: accesses.map(row => row.workspaceId) }, status: PrismaWorkspaceStatus.ACTIVE }, select: { id: true, name: true } }),
+      input.organizationId ? tx.organizationUnit.findFirst({ where: { tenantId, id: input.organizationId, status: "enabled" }, select: { id: true } }) : Promise.resolve(undefined)
+    ]);
+    if (roles.length !== roleIds.length || workspaces.length !== accesses.length || input.organizationId && !organization)
+      throw new BadRequestException("角色、组织或经营空间已变更，请重新核对邀请授权");
+    if (roles.some(role => input.roleIds.includes(role.id) && (role.code === "TENANT_ADMIN" || role.fixedAllPermissions)))
+      throw new BadRequestException("运营邀请不能直接授予租户管理员身份，请在加入后通过原账号管理流程设置");
+    if (!actor.isPlatformAdmin && roles.some(role => role.fixedAllPermissions)) throw new ForbiddenException("只有租户管理员可以邀请使用固定全权空间角色的用户");
+    for (const access of accesses) {
+      if (access.dataScope !== undefined && !["all", "organization", "store", "own"].includes(access.dataScope)) throw new BadRequestException("空间数据范围无效");
+      if (access.locationScope !== undefined) await this.validateLocationScope(tx, tenantId, access.workspaceId, access.locationScope);
+    }
+    return { actorName: actor.displayName, roleNames: input.roleIds.map(id => roles.find(row => row.id === id)!.name),
+      workspaceNames: accesses.map(access => workspaces.find(row => row.id === access.workspaceId)!.name) };
+  }
+
+  /** 一次性邀请的账号、租户角色与空间成员关系在调用方同一事务内生效。 */
+  async acceptOperatorInvitationInTransaction(tx: Prisma.TransactionClient, tenantId: string, actorUserId: string,
+    input: SaveSystemUserAccessRequest, passwordHash: string) {
+    await this.validateOperatorInvitationAccess(tx, tenantId, actorUserId, input);
+    const saved = await this.saveUserInTransaction(tx, { ...input, id: undefined, isSaasAdmin: false, isPlatformAdmin: false }, tenantId, actorUserId);
+    await tx.user.update({ where: { id: saved.userId, tenantId }, data: { passwordHash, mustChangePassword: false, passwordChangedAt: new Date() } });
+    await this.saveWorkspaceAccessesInTransaction(tx, tenantId, saved.userId, input.workspaceAccesses);
+    return saved.userId;
+  }
+
   private async saveUserInTransaction(
     tx: Prisma.TransactionClient,
     input: SaveSystemUserRequest,
@@ -1443,6 +1481,12 @@ export class PlatformRepository {
       throw new ForbiddenException(`租户管理操作需要完整租户范围及权限：${permission}`);
     }
     return user;
+  }
+
+  /** 公共租户管理入口复用基础租户角色，不读取空间覆盖权限。 */
+  async assertTenantManagementPermission(tenantId: string, actorUserId: string, permission: string,
+    tx: Prisma.TransactionClient = this.prisma) {
+    return this.assertTenantPermissionInTransaction(tx, tenantId, actorUserId, permission);
   }
 
   private async assertAccountActionInTransaction(

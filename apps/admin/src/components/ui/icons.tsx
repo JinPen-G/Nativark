@@ -1,6 +1,6 @@
 /** Shared UI icon adapter. Legacy export names preserve page contracts; symbols are Lucide, as used by UIArc. Brand marks retain their original assets. */
 import { forwardRef } from 'react';
-import { ArrowLeft, ArrowRight, Bell, Blocks, Boxes, Calculator, CalendarDays, Camera, Car, ChartNoAxesCombined, ChevronLeft, ChevronRight, CircleCheck, CircleMinus, CirclePause, CirclePlay, Crown, Download, FilePenLine, FileSearch, FileText, Flame, Gauge, Gift, History, IdCard, Inbox, Info, KeyRound, LayoutGrid, LockKeyhole, Megaphone, Menu, Network, Paintbrush, Palette, Plus, Printer, RefreshCw, Repeat2, Save, Search, Server, Settings2, ShieldCheck, SlidersHorizontal, Smartphone, SquarePen, Store, Tags, Trash2, TriangleAlert, Upload, UserRound, UsersRound, Volume2, Wrench, X, type LucideIcon, type LucideProps } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Bell, Blocks, Boxes, Calculator, CalendarDays, Camera, Car, ChartNoAxesCombined, ChevronLeft, ChevronRight, CircleCheck, CircleMinus, CirclePause, CirclePlay, Crown, Download, FilePenLine, FileSearch, FileText, Flame, Gauge, Gift, Headphones, History, IdCard, Inbox, Info, KeyRound, LayoutGrid, LockKeyhole, Megaphone, Menu, Network, Paintbrush, Palette, Plus, Printer, RefreshCw, Repeat2, Save, Search, Send, Server, Settings2, ShieldCheck, SlidersHorizontal, Smartphone, SquarePen, Store, Tags, Trash2, TriangleAlert, Upload, UserRound, UsersRound, Volume2, Wrench, X, type LucideIcon, type LucideProps } from 'lucide-react';
 function icon(Symbol: LucideIcon) { return forwardRef<SVGSVGElement, LucideProps>(function AdminIcon({ style, ...props }, ref) { return <Symbol ref={ref} aria-hidden="true" size="1em" strokeWidth="var(--rental-icon-control-stroke, 1.75)" {...props} style={{ flexShrink: 0, ...style }} />; }); }
 export const ApartmentOutlined = icon(Network);
 export const ApiOutlined = icon(Blocks);
@@ -20,6 +20,7 @@ export const CloseOutlined = icon(X);
 export const CloudServerOutlined = icon(Server);
 export const ControlOutlined = icon(SlidersHorizontal);
 export const CrownOutlined = icon(Crown);
+export const CustomerServiceOutlined = icon(Headphones);
 export const DashboardOutlined = icon(Gauge);
 export const DeleteOutlined = icon(Trash2);
 export const DownloadOutlined = icon(Download);
@@ -51,6 +52,7 @@ export const RightOutlined = icon(ChevronRight);
 export const SafetyCertificateOutlined = icon(ShieldCheck);
 export const SaveOutlined = icon(Save);
 export const SearchOutlined = icon(Search);
+export const SendOutlined = icon(Send);
 export const SettingOutlined = icon(Settings2);
 export const ShopOutlined = icon(Store);
 export const SkinOutlined = icon(Palette);

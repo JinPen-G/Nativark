@@ -128,6 +128,8 @@ export const PUBLIC_ROUTES = new Set([
   "/auth/change-password",
   "/auth/switch-workspace",
   "/auth/session-context",
+  "/auth/operator-invitations/inspect",
+  "/auth/operator-invitations/accept",
   // SUB-MP：员工小程序只读订阅/权益上下文——已登录即可读自身租户（金额脱敏），不挂 RBAC 权限，与 session-context 同类（仍需登录态，非匿名）。
   "/rental/v1/subscription/context",
   "/staff/v1/auth/login",
@@ -475,6 +477,12 @@ export function requiredPermissions(method: string, path: string) {
     return ["system:user:manage", "system:role:manage"];
   }
   if (path.startsWith("/platform/integrations")) {
+    return ["system:integration:manage"];
+  }
+  if (path === "/platform/dispatch" || path.startsWith("/platform/dispatch/")) {
+    return ["system:integration:manage"];
+  }
+  if (path === "/platform/support/emails" || path.startsWith("/platform/support/emails/")) {
     return ["system:integration:manage"];
   }
   // MP-01：小程序渠道凭证（AppID/AppSecret）与第三方服务同一权限。
@@ -1113,6 +1121,7 @@ export class ApiAuthGuard implements CanActivate {
       path === "/openapi.json" ||
       path === "/auth/login" ||
       path === "/auth/refresh" ||
+      (request.method.toUpperCase() === "POST" && ["/auth/operator-invitations/inspect", "/auth/operator-invitations/accept"].includes(path)) ||
       // 退出只消费原刷新令牌撤销其会话，不要求已被本地清空的access token，不授予业务访问。
       (request.method.toUpperCase() === "POST" && path === "/auth/logout") ||
       // 支付/退款回调无运营登录态,必须匿名放行到控制器;安全边界是各平台的签名/商户/金额/事件幂等校验。

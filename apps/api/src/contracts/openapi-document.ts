@@ -1,4 +1,5 @@
 import { AI_TASK_OPENING_PROPOSAL_HTTP_DRAFT, AI_TASK_OPENING_PROPOSAL_HTTP_CONTRACTS } from '@rental-os/shared';
+import { TENANT_MESSAGING_OPERATIONS, TENANT_MESSAGING_SCHEMAS } from "./tenant-messaging-schemas";
 import { AI_TASK_READ_POLICY_HTTP, AI_TASK_READ_POLICY_SCHEMAS } from '@rental-os/shared';
 import { ADMIN_UI_CORNER_RADIUS_CONTROL_MAX, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } from '@rental-os/shared';
 import { AI_CATEGORY_PROPOSAL_HTTP, AI_CATEGORY_PROPOSAL_CONTRACTS } from '@rental-os/shared';
@@ -247,6 +248,7 @@ function buildPaths(operations: ContractOperation[]) {
 }
 
 export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
+  ...TENANT_MESSAGING_SCHEMAS,
   ...STAFF_UPLOAD_OBSERVATION_SCHEMAS,
   ...AI_MEMBER_NAME_SCHEMAS,
   ...AI_TASK_RULE_DRAFT_SCHEMAS,
@@ -1110,6 +1112,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       workspaceId: stringSchema,
       roleId: stringSchema,
       dataScope: stringSchema,
+      locationScope: objectOf({ mode: { type: "string", enum: ["all", "selected"] }, locationIds: arrayOf(stringSchema) }, ["mode", "locationIds"]),
       isActive: booleanSchema
     },
     ["workspaceId", "isActive"]
@@ -4130,6 +4133,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   ...rentalBusinessOperations(),
   ...TENANT_INTEGRATION_OPERATIONS,
+  ...TENANT_MESSAGING_OPERATIONS,
   ...INTEGRATION_BACKLOG_OPERATIONS
 ];
 
