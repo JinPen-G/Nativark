@@ -1,4 +1,4 @@
-/** 原集成应用入口。文件、通知、适配日志及作业列表与创建委托公共台账，Rental权限和默认内容由原参加者供给。 */
+/** 原集成应用入口。文件、通知、适配日志及作业编排委托公共应用，Rental权限和执行结果由原参加者供给。 */
 import { BadRequestException, Injectable, NotFoundException, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "node:crypto";
@@ -58,6 +58,11 @@ export class IntegrationsService {
       storage: integrationsRepository,
       usePersistentStorage: () => this.useMysqlDataSource(),
       recordAdapterLog: (input) => this.recordAdapterLog(input),
+      execution: {
+        storage: integrationsRepository,
+        buildRunResult: (job) => this.buildJobRunResult(job),
+        recordRunLog: (job) => this.recordJobRunLog(job)
+      },
       initialJobs: this.jobs,
       jobsByTenant: this.jobsByTenant
     });
@@ -436,55 +441,11 @@ export class IntegrationsService {
   }
 
   async runJob(id: string) {
-    const existingJob = this.useMysqlDataSource()
-      ? await this.integrationsRepository.getJob(id, this.defaultTenantId)
-      : this.memoryJobsForTenant(this.defaultTenantId).find((item) => item.id === id);
-
-    if (!existingJob) {
-      throw new BadRequestException("任务不存在");
-    }
-
-    const result = await this.buildJobRunResult(existingJob);
-
-    if (this.useMysqlDataSource()) {
-      const job = await this.integrationsRepository.finishJob(
-        id,
-        result,
-        this.defaultTenantId
-      );
-      await this.recordJobRunLog(job);
-      return job;
-    }
-
-    const job = existingJob;
-    const now = new Date().toISOString();
-    job.status = "success";
-    job.attempt += 1;
-    job.startedAt ||= now;
-    job.finishedAt = now;
-    job.result = result;
-    job.updatedAt = now;
-    await this.recordJobRunLog(job);
-    return job;
+    return this.jobLedger.runJob(id);
   }
 
   async runDueJobs() {
-    const now = Date.now();
-    const jobs = await this.listJobs();
-    const dueJobs = jobs.filter(
-      (job) =>
-        job.status === "queued" &&
-        (!job.scheduledAt || new Date(job.scheduledAt).getTime() <= now)
-    );
-    const results = [];
-    for (const job of dueJobs.slice(0, 10)) {
-      results.push(await this.runJob(job.id));
-    }
-    return {
-      ranCount: results.length,
-      jobs: results,
-      message: "MVP 阶段未启动常驻 worker，本接口用于手动触发到期任务。"
-    };
+    return this.jobLedger.runDueJobs();
   }
 
   async listPrintJobs() {
@@ -696,17 +657,6 @@ export class IntegrationsService {
     device.lastHeartbeatAt = input.plateNo ? new Date().toISOString() : device.lastHeartbeatAt;
     device.updatedAt = new Date().toISOString();
     return device;
-  }
-
-  private memoryJobsForTenant(tenantId: string) {
-    const existing = this.jobsByTenant.get(tenantId);
-    if (existing) return existing;
-    const seeded = this.jobs.map((item) => ({
-      ...item,
-      id: `${item.id}_${tenantId}`
-    }));
-    this.jobsByTenant.set(tenantId, seeded);
-    return seeded;
   }
 
   private memoryPrintJobsForTenant(tenantId: string) {

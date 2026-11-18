@@ -1,4 +1,4 @@
-/** 原集成数据适配。文件、通知、适配日志及作业列表与创建消费公共存储，原执行与专用场景沿宿主裁定。 */
+/** 原集成数据适配。文件、通知、适配日志及作业消费公共存储，原业务场景由宿主裁定。 */
 import { FileStorageRepository, createSimulationFileAsset } from "@rental-os/platform-server/files";
 import { JobLedgerRepository } from "@rental-os/platform-server/jobs";
 import { NotificationLedgerRepository } from "@rental-os/platform-server/notifications";
@@ -82,8 +82,7 @@ export class IntegrationsRepository {
     id: string,
     tenantId = requireRequestTenantId()
   ): Promise<AsyncJobSummary | undefined> {
-    const row = await this.prisma.asyncJob.findFirst({ where: { id, tenantId } });
-    return row ? toAsyncJobSummary(row) : undefined;
+    return this.jobs.getJob(id, tenantId);
   }
 
   async createJob(
@@ -98,22 +97,7 @@ export class IntegrationsRepository {
     result: Record<string, unknown>,
     tenantId = requireRequestTenantId()
   ): Promise<AsyncJobSummary> {
-    const existing = await this.prisma.asyncJob.findFirst({ where: { id, tenantId } });
-    if (!existing) {
-      throw new NotFoundException(`Job ${id} was not found`);
-    }
-    const now = new Date();
-    const row = await this.prisma.asyncJob.update({
-      where: { id },
-      data: {
-        status: "success",
-        attempt: { increment: 1 },
-        startedAt: existing.startedAt ?? now,
-        finishedAt: now,
-        result: result as Prisma.InputJsonValue
-      }
-    });
-    return toAsyncJobSummary(row);
+    return this.jobs.finishJob(id, result, tenantId);
   }
 
   async listPrintJobs(tenantId = requireRequestTenantId()): Promise<PrintJobSummary[]> {
@@ -261,28 +245,6 @@ function defaultNotificationTemplates(tenantId: string): NotificationTemplateSum
       updatedAt: now
     }
   ];
-}
-
-function toAsyncJobSummary(
-  row: Prisma.AsyncJobGetPayload<Record<string, never>>
-): AsyncJobSummary {
-  return {
-    id: row.id,
-    jobType: row.jobType,
-    businessType: row.businessType ?? undefined,
-    businessId: row.businessId ?? undefined,
-    status: row.status,
-    attempt: row.attempt,
-    maxAttempts: row.maxAttempts,
-    scheduledAt: row.scheduledAt?.toISOString(),
-    startedAt: row.startedAt?.toISOString(),
-    finishedAt: row.finishedAt?.toISOString(),
-    operator: row.operator ?? undefined,
-    payload: recordValue(row.payload),
-    result: row.result ? recordValue(row.result) : undefined,
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString()
-  };
 }
 
 function toPrintJobSummary(

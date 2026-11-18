@@ -1,5 +1,5 @@
-/** 公共 AsyncJob 列表、创建与入队台账。租户沿公共 ALS 读取，任务执行沿宿主同一台账。 */
-import { BadRequestException } from "@nestjs/common";
+/** 公共 AsyncJob 台账和手动运行编排。租户沿公共 ALS 读取，业务结果与运行日志由宿主执行参加者提供。 */
+import { BadRequestException, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import type { AsyncJobSummary, CreateAsyncJobRequest } from "@rental-os/platform-contracts/jobs";
 import type { AdapterLogSummary } from "@rental-os/platform-contracts/notifications";
@@ -13,10 +13,27 @@ export interface JobLedgerStorage {
   createJob(input: CreateAsyncJobRequest, tenantId: string): PromiseLike<AsyncJobSummary>;
 }
 
+export interface JobLedgerExecutionStorage {
+  getJob(id: string, tenantId: string): PromiseLike<AsyncJobSummary | undefined>;
+  finishJob(
+    id: string,
+    result: Record<string, unknown>,
+    tenantId: string
+  ): PromiseLike<AsyncJobSummary>;
+}
+
+/** 执行参加者返回已确认的任务结果，失败和 unknown 沿原操作向外传播。 */
+export interface JobLedgerExecutionParticipants {
+  storage: JobLedgerExecutionStorage;
+  buildRunResult(job: AsyncJobSummary): PromiseLike<Record<string, unknown>>;
+  recordRunLog(job: AsyncJobSummary): PromiseLike<unknown>;
+}
+
 export interface JobLedgerParticipants {
   storage: JobLedgerStorage;
   usePersistentStorage(): boolean;
   recordAdapterLog(input: Omit<AdapterLogSummary, "id" | "createdAt">): PromiseLike<unknown>;
+  execution?: JobLedgerExecutionParticipants;
   initialJobs?: readonly AsyncJobSummary[];
   jobsByTenant?: Map<string, AsyncJobSummary[]>;
 }
@@ -57,6 +74,19 @@ export interface JobLedgerDataStore {
         scheduledAt: Date;
         operator?: string;
         payload: JobJsonObject;
+      };
+    }): PromiseLike<StoredAsyncJob>;
+    findFirst?(query: {
+      where: { id: string; tenantId: string };
+    }): PromiseLike<StoredAsyncJob | null>;
+    update?(query: {
+      where: { id: string };
+      data: {
+        status: "success";
+        attempt: { increment: number };
+        startedAt: Date;
+        finishedAt: Date;
+        result: JobJsonObject;
       };
     }): PromiseLike<StoredAsyncJob>;
   };
@@ -104,6 +134,76 @@ export class JobLedgerApplication {
     return job;
   }
 
+  async runJob(id: string) {
+    const execution = this.requireExecution();
+    const existingJob = this.participants.usePersistentStorage()
+      ? await execution.storage.getJob(id, requireRequestTenantId())
+      : this.memoryJobsForTenant(requireRequestTenantId()).find((item) => item.id === id);
+
+    if (!existingJob) {
+      throw new BadRequestException("任务不存在");
+    }
+
+    const result = await execution.buildRunResult(existingJob);
+    if (result === null || typeof result !== "object" || Array.isArray(result)) {
+      throw new ServiceUnavailableException("宿主未提供有效的任务执行结果");
+    }
+
+    if (this.participants.usePersistentStorage()) {
+      const job = await execution.storage.finishJob(id, result, requireRequestTenantId());
+      await execution.recordRunLog(job);
+      return job;
+    }
+
+    const job = existingJob;
+    const now = new Date().toISOString();
+    job.status = "success";
+    job.attempt += 1;
+    job.startedAt ||= now;
+    job.finishedAt = now;
+    job.result = result;
+    job.updatedAt = now;
+    // 原状态更新先于日志。日志失败仍保留已完成任务，后续核对使用原任务键。
+    await execution.recordRunLog(job);
+    return job;
+  }
+
+  async runDueJobs() {
+    this.requireExecution();
+    const now = Date.now();
+    const jobs = await this.listJobs();
+    const dueJobs = jobs.filter(
+      (job) =>
+        job.status === "queued" &&
+        (!job.scheduledAt || new Date(job.scheduledAt).getTime() <= now)
+    );
+    const results = [];
+    for (const job of dueJobs.slice(0, 10)) {
+      results.push(await this.runJob(job.id));
+    }
+    return {
+      ranCount: results.length,
+      jobs: results,
+      message: "MVP 阶段未启动常驻 worker，本接口用于手动触发到期任务。"
+    };
+  }
+
+  private requireExecution() {
+    const execution = this.participants.execution;
+    // 先核对执行端口，避免缺完成方法时先调用业务结果回调。
+    if (
+      !execution ||
+      !execution.storage ||
+      typeof execution.storage.getJob !== "function" ||
+      typeof execution.storage.finishJob !== "function" ||
+      typeof execution.buildRunResult !== "function" ||
+      typeof execution.recordRunLog !== "function"
+    ) {
+      throw new ServiceUnavailableException("宿主未提供任务执行参加者");
+    }
+    return execution;
+  }
+
   private createMemoryJob(input: CreateAsyncJobRequest) {
     const tenantId = requireRequestTenantId();
     const now = new Date().toISOString();
@@ -137,7 +237,7 @@ export class JobLedgerApplication {
   }
 }
 
-export class JobLedgerRepository implements JobLedgerStorage {
+export class JobLedgerRepository implements JobLedgerStorage, JobLedgerExecutionStorage {
   constructor(private readonly dataStore: JobLedgerDataStore) {}
 
   async listJobs(tenantId = requireRequestTenantId()): Promise<AsyncJobSummary[]> {
@@ -164,6 +264,45 @@ export class JobLedgerRepository implements JobLedgerStorage {
         scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : new Date(),
         operator: input.operator,
         payload: (input.payload ?? {}) as JobJsonObject
+      }
+    });
+    return toAsyncJobSummary(row);
+  }
+
+  async getJob(
+    id: string,
+    tenantId = requireRequestTenantId()
+  ): Promise<AsyncJobSummary | undefined> {
+    const store = this.dataStore.asyncJob;
+    if (!store.findFirst) {
+      throw new ServiceUnavailableException("宿主未提供任务读取能力");
+    }
+    const row = await store.findFirst({ where: { id, tenantId } });
+    return row ? toAsyncJobSummary(row) : undefined;
+  }
+
+  async finishJob(
+    id: string,
+    result: Record<string, unknown>,
+    tenantId = requireRequestTenantId()
+  ): Promise<AsyncJobSummary> {
+    const store = this.dataStore.asyncJob;
+    if (!store.findFirst || !store.update) {
+      throw new ServiceUnavailableException("宿主未提供任务完成能力");
+    }
+    const existing = await store.findFirst({ where: { id, tenantId } });
+    if (!existing) {
+      throw new NotFoundException(`Job ${id} was not found`);
+    }
+    const now = new Date();
+    const row = await store.update({
+      where: { id },
+      data: {
+        status: "success",
+        attempt: { increment: 1 },
+        startedAt: existing.startedAt ?? now,
+        finishedAt: now,
+        result: result as JobJsonObject
       }
     });
     return toAsyncJobSummary(row);
