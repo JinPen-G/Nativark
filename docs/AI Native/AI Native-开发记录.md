@@ -69,6 +69,8 @@
 
 最后回归逐文件执行 `ai-native-credit-publication-boundaries`、`ai-native-c02-budget`、`ai-native-knowledge-selection`、`ai-native-knowledge-persistent-content`、`ai-native-client-recovery-privacy`、`ai-native-retention-pages`、`ai-native-console-history` 七个测试文件，分别通过 3、29、11、15、6、4、4 项，合计 72/72，退出码均为 0。首次七文件同进程运行超过 Node 7 GB 堆上限，随后使用独立进程逐文件复验。另有双端路由、实际材料仓储的过期回读、双实例容量、WAV 原字节和员工端交付／归还页 5 个定向用例通过。
 
+本次验证的临时文件已归集待删除，数量、位置、责任及处理条件见主仓本地 `output/.cleanup-pending/ai-review/review-offline/清理清单.md`。
+
 <a id="ain27-28-main-final-delivery-20261118"></a>
 ## AIN-27／28最终main交付与远端回执（2026-11-18）
 
