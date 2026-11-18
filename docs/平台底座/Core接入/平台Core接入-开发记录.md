@@ -11,6 +11,20 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-main-ai-review-20261119"></a>
+
+## 最新AI Native复查主线的固定接入（2026-11-19）
+
+作业片89f816cf79be0395430e569bea260e42cbbc7c16已普通推送并实际远端回读。跨日核定实际main63964d7fc29554cb1ad0a1116c09038312b899b6后，107个变更路径与共享树42份受控差异、39份未跟踪文件均无交叉，在任务分支形成合并f0c4a879fac94bcc2f50b622d8cca4521e7639e9。没有冲突，dev1作业后续片与dev2订单在制路径仍按原窗口保留，未混入本次合并。
+
+主线22项复查修复涵盖AI额度精度、调用分页、会话历史/取消、知识读取、隐私恢复分页、发布配置及各端目标/报价恢复。107路径中104份内容与固定main一致；自动合并的[OpenAPI](../../../apps/api/src/contracts/openapi-document.ts)、[shared总出口](../../../packages/shared/src/index.ts)和[根命令](../../../package.json)只增加/修正主线内容，PCH已有公共政策、正式出口及独立宿主命令保留。原客户网站与小程序改为复用同一quote-session实现，原AI结果/账/收据读取沿主线保全，本片不重写AI Runtime或接管其原研发验收。[原AI复查证据](<../../AI Native/AI Native-开发记录.md>)
+
+必要类型使用TS5.9.3、现有配置的严格检查和实际当前源码，联合源码noEmit进程27084退出0、stderr空：shared132根/370源、OpenAPI单入口/928源，全部0诊断、磁盘输出0。首轮检查器重复传入已固定的工作目录参数而失败；修该调用后，源别名与原composite/rootDir产物边界不匹配，分别出现61及183项结构诊断。本次明确为跨包源码联合检查，检查器使用共同源码根和非composite的noEmit验证上下文，业务严格选项保持；产品tsconfig、类型和依赖没有变更。此结果只证明合并后的类型衔接，不能称正式包或完整API构建通过。
+
+一次定向冒烟复用原[发布预检用例](../../../tests/ai-native-credit-publication-boundaries.test.cjs)的deployment区段，实际加载[checkPublication](../../../scripts/ops/check-ai-publication.cjs)与主线schema。正确发布、空发布及四类非法输入全部保持原断言。进程19864退出0、stderr空；进程内在加载依赖前使用原prisma-offline-preload，DATABASE_URL固定离线地址，guard及写缓存/TEMP/TMP均指向本树output/.tmp/pch-main-ai-merge。该目录未创建，实际应用启动/DB/网络和新增永久脚本均为0。前次在Node交互上下文使用不可用的process变量导致启动前失败，改为在现有短进程内设置守卫参数；无产品修改或残留。
+
+没有重跑主线整个AI测试集，原固定成果及其既有问题仍由原阶段核收。未进行浏览器/微信、真实HTTP/数据库/模型、迁移、完整安装或发布；原PCH进度没有跨档。推送回读结果随本片资料提交在本对话核定。旧两项集中待清理仍按原记录受阻，本片所有验证短进程已退出，未新增实体临时目录或业务服务。
+
 <a id="core-public-job-ledger-20261118"></a>
 
 ## 公共异步作业台账与独立数据链（2026-11-18）

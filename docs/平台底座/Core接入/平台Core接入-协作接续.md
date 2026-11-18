@@ -12,7 +12,7 @@
 
 Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该Core。未来跨Core协作通过明确对象引用/接口/事件实现，本期不开放共享业务表或隐含读权。先交标准本地包，再接固定GitHub Release获取及Topic发现；底座与Core分别更新，保留下游业务、配置、数据和授权。[包标准](平台Core接入-开发任务.md#core-package-standard) · [独立更新](平台Core接入-开发任务.md#independent-upgrades)
 
-唯一施工树为 C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS，分支 codex/platform-core-extraction。本树由RD、dev1、dev2按文件分工写入；允许修改PCH所需Auth/Guard/ALS、正式包出口、主装配/OpenAPI、schema/迁移/Seed与后台外壳。main索引和其他树仍归其作者。已接固定main 7cf0c4c0401203707fd44f1b3841f3e306264629，合并6528cf2f4afe7356f6e2ec4df18e391875c104d3已普通推送并真实远端回读。九处冲突已处理，公共/零Core/原管理后台类型及原音效/密度冒烟通过。随后远端main前进到63964d7fc29554cb1ad0a1116c09038312b899b6，RD继续核定其差异后接入，不追其他专项活动HEAD。[主线公共壳证据](平台Core接入-开发记录.md#core-main-public-shell-20261118) · [此前主线AI接点](平台Core接入-开发记录.md#core-main-ai-delivery-20261118)
+唯一施工树为 C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS，分支 codex/platform-core-extraction。本树由RD、dev1、dev2按文件分工写入；允许修改PCH所需Auth/Guard/ALS、正式包出口、主装配/OpenAPI、schema/迁移/Seed与后台外壳。main索引和其他树仍归其作者。已接固定main63964d7fc29554cb1ad0a1116c09038312b899b6，合并为f0c4a879fac94bcc2f50b622d8cca4521e7639e9。107路径与共享在制成果无交叉，没有合并冲突；三个自动合并入口保留PCH公共接点，联合源码类型及一次原发布预检冒烟通过，实际结果见[本片记录](平台Core接入-开发记录.md#core-main-ai-review-20261119)。此前公共壳6528的九处冲突、类型及音效/密度证据继续保留；不追其他专项活动HEAD。[主线公共壳证据](平台Core接入-开发记录.md#core-main-public-shell-20261118) · [此前主线AI接点](平台Core接入-开发记录.md#core-main-ai-delivery-20261118)
 
 负责人已将 `[Saas 底座]-dev1` 迁入共享施工，原成果与未完检查点均已保全并迁入；旧树目录及Git登记已移除，源分支留存。Git索引、提交/推送、四册和主装配由RD统一负责，dev1按约定文件边界持续抽取公共能力，实际冲突直接协商。其他对话的模型及推理设置只由负责人修改，RD及助手均不得调整；不为发送消息填写这些设置参数。负责人要求关闭电脑操作造成的黄色边框，三人须结束各自已开启的computer-use会话，不再通过桌面界面发送协作消息或操作聊天设置。当前消息接口参数校验失败，RD停用该入口；作者从本接续和固定提交读取文件窗口及具体依赖。attach_worktree的UI归属关联仍未核定，双方所有命令均显式指定本节唯一共享路径。[迁入与共享证据](平台Core接入-开发记录.md#core-shared-dev1-migration-20261118)
 
@@ -43,7 +43,7 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 
    通知五项合同与公共台账已从platform-contracts/notifications及platform-server/notifications单源提供，原集成五个服务/六个仓储方法已委托；作者固定五路径及必要冒烟/声明结果，RD补35模型/九迁移、正式出口与三步接入并收口。原业务消息/默认模板由Rental宿主提供，新默认模板按租户派生主键，已有ID保持；模拟登记不当真实发送。[当前固定通知片](平台Core接入-开发记录.md#core-public-notification-ledger-20261118)
 
-   公共JobLedgerApplication/Repository、两项原合同、正式/jobs出口和原listJobs/createJob委托已核定，36模型/十迁移/0.1.6及真实数据计划同期补齐。原SQL、jobsByTenant Map、初始模板与日志实例共用；作者原JobsController冒烟/必要类型及RD数据fixture通过，本片由[作业阶段](平台Core接入-开发记录.md#core-public-job-ledger-20261118)和包含该节的提交固定。dev1本片四路径先停写，RD提交后继续同目录的原getJob/finishJob与runJob/runDueJobs迁移，存储复用公共AsyncJob，执行结果/日志由原宿主明确供给；无真实业务执行者不补空成功。原数据交换模板与文件结果、打印和仍有消费者的私有方法保留原链，缺批量/unknown结果证据不得重跑。每完整片只做一次相关冒烟和必要类型。schema、正式包出口、主装配和四册继续由RD负责，不建立第二套调度器或替代AI Runtime。
+   公共JobLedgerApplication/Repository、两项原合同、正式/jobs出口和原listJobs/createJob委托已核定，36模型/十迁移/0.1.6及真实数据计划同期补齐。原SQL、jobsByTenant Map、初始模板与日志实例共用；作者原JobsController冒烟/必要类型及RD数据fixture通过，本片由[作业阶段](平台Core接入-开发记录.md#core-public-job-ledger-20261118)和包含该节的提交固定。作业片89f816cf79be0395430e569bea260e42cbbc7c16已普通推送并实际远端回读，dev1继续同目录的原getJob/finishJob与runJob/runDueJobs迁移，存储复用公共AsyncJob，执行结果/日志由原宿主明确供给；无真实业务执行者不补空成功。原数据交换模板与文件结果、打印和仍有消费者的私有方法保留原链，缺批量/unknown结果证据不得重跑。每完整片只做一次相关冒烟和必要类型。schema、正式包出口、主装配和四册继续由RD负责，不建立第二套调度器或替代AI Runtime。
 
    文件仍保留原合法module/scene与历史记录兼容，知识ACL/清理收据由原AI参加者提供，实名/承运/检查/企业证据沿真实Rental裁定；unknown只核原键和目标，不因TTL重传。计时器与租户发现只有原宿主一份，当前36模型/十迁移不开放零Core通用上传HTTP。Staff五组真实参加者、主体锁早于配置锁以及四项原服务useExisting别名继续复用。[Staff接入](平台Core接入-开发记录.md#core-public-file-application-staff-20261118) · [完整文件运行时](平台Core接入-开发记录.md#core-rental-file-runtime-20261118) · [文件HTTP](平台Core接入-开发记录.md#core-rental-files-http-20261118)
 
