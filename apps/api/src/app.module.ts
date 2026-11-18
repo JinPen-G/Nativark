@@ -134,6 +134,7 @@ import { WorkspaceCapabilityController } from "./modules/rental-core/workspace-c
 import { RENTAL_HTTP_PROVIDERS } from "./modules/rental-core/rental-http.providers";
 import { RENTAL_ENTERPRISE_HTTP_PROVIDERS } from "./modules/enterprise/enterprise-http.providers";
 import { RENTAL_STAFF_HTTP_PROVIDERS } from "./modules/files/staff-http.providers";
+import { RENTAL_FILE_HTTP_PROVIDERS } from "./modules/files/file-http.providers";
 import { RENTAL_CLIENT_HTTP_PROVIDERS } from "./modules/client/client-http.providers";
 import { RENTAL_CHANNEL_HTTP_PROVIDERS } from "./modules/client/channel-http.providers";
 import { WorkspaceCapabilityRepository } from "./modules/rental-core/workspace-capability.repository";
@@ -464,6 +465,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     ...RENTAL_HTTP_PROVIDERS,
     ...RENTAL_ENTERPRISE_HTTP_PROVIDERS,
     ...RENTAL_STAFF_HTTP_PROVIDERS,
+    ...RENTAL_FILE_HTTP_PROVIDERS,
     ...RENTAL_CLIENT_HTTP_PROVIDERS,
     ...RENTAL_CHANNEL_HTTP_PROVIDERS,
     RentalDocumentService,

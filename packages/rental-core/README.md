@@ -200,6 +200,8 @@ HTTP入口从 `/http-workspace-capabilities`、`/http-staff-payments` 导入；`
 
 客户 HTTP 从 `/http-client` 登记同一 Controller，通过 `/http-client-applications` 的 `RENTAL_CLIENT_HTTP` 绑定八项真实实例；[原接线](../../apps/api/src/modules/client/client-http.providers.ts)使用 `useExisting`，原 Guard/ALS 仍在敏感资料返回前复验同一会话绑定。客户 Auth、后台/自助统一注册、限流及官网图片分别从上表的正式子出口使用；[原认证适配](../../apps/api/src/modules/client/client-auth.service.ts)保留旧构造位置与同一数据源，原刷新令牌只消费一次，临时密码沿原改密路径恢复。客户端读取 `/client-contracts`，不加载这些私有 MySQL/Nest 适配。[认证/注册验证](../../tests/customer-registration-unified.test.cjs) · [原安全验证](../../tests/client-api-security.test.cjs)
 
+文件兼容HTTP从 `/http-files` 登记同一Controller，用 `/http-file-applications` 四个令牌绑定原文件台账、存储、数据库及客户范围服务；实名与承运描述从 `/http-file.dto` 使用两项原验证类。公共创建/完成DTO继续单源，普通文件列表复用原业务ACL，实名与承运先核专用对象范围。[原文件接线](../../apps/api/src/modules/files/file-http.providers.ts) · [实名验证入口](../../tests/customer-identity-verification.test.cjs)
+
 员工 HTTP 使用 `/http-staff-auth` 和 `/http-staff-uploads` 的正式Controller及令牌。[原Staff接线](../../apps/api/src/modules/files/staff-http.providers.ts)复用同一Auth、Prisma与文件实例，观察解析器由宿主供给原Ajv/schema，检查参加者缺失时仍拒绝绑定。上传和完成DTO从 `@rental-os/platform-server/file-dto` 取得同一运行时类；员工五组场景继续核地点、交接阶段、本人和原键，原始body含多余选择器不能被全局whitelist剥离后放行。观察合同本身不签发新上传许可。[员工HTTP](src/http-staff-uploads.controller.ts) · [共用上传DTO](../platform-server/src/modules/files/file-upload.dto.ts)
 
 原客户端继续从 `@rental-os/shared` 读取租赁合同。Rental 自身实现可从本包根出口取合同，从 `@rental-os/rental-core/business-day` 取营业日函数。新业务 Core 使用公共平台和 Core 合同，不必依赖 Rental。

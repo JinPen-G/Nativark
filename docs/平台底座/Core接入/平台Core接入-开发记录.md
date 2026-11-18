@@ -11,6 +11,20 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-files-http-20261118"></a>
+
+## Rental文件HTTP与原服务别名（2026-11-18）
+
+固定父版f146ce9e18f533fd3b291d57938535157b5da3bd已普通推送并回读。dev1完成原文件Controller、两项专用DTO、有限HTTP参加者和旧路径转接，原入口曾因缺正式包出口受阻；RD登记三个出口、[四项原服务别名](../../../apps/api/src/modules/files/file-http.providers.ts)和AppModule接线后完成必要原入口核验。dev2订单在制成果及其他原消费者用例另片保留，共同索引仍由RD负责。
+
+[文件HTTP](../../../packages/rental-core/src/http-files.controller.ts)保留原列表、上传/完成、清理、下载及实名/承运专用路由，14方法正文与装饰器逐项对照父版一致，包含12个HTTP操作。[专用DTO](../../../packages/rental-core/src/http-file.dto.ts)只含两项原文件描述，公共创建/完成DTO继续来自platform-server；原Staff观察解析正文不变。[有限参加者](../../../packages/rental-core/src/http-file-applications.ts)由宿主供给同一IntegrationsService、FileStorageRuntimeService、Prisma和CustomerOperationsService。原[Controller出口](../../../apps/api/src/modules/files/files.controller.ts)转接同一类，主AppModule只追加这份provider列表，没有重复Controller或第二个存储/清理执行者。
+
+必要TypeScript5.9.3由stdin `node --no-compilation-cache -` 执行，原AppModule及provider两根2393源0诊断，进程38372退出0。当前238/33模型Prisma5.22官方声明留内存，磁盘生成0，stderr空。一次实际Nest入口冒烟19548退出0、stderr空，核原Controller同源、四别名指向原提供实例、列表委托、承运订单/空间及原键传递、实名客户权威先于下载；容器已close。业务方法/SQL/身份仍为明确fixture，磁盘输出及真实网络0，不是完整HTTP或数据库验收。
+
+两专用DTO字段/装饰器与父版一致，原Staff解析未变化；原customer-identity-verification用例仅由作者改三处实际源码定位，全部原断言保留，本片未重复执行整份用例。作者包内SDK冒烟沿原已通过证据复用，原入口缺出口问题由本片接线解除。Rental导读及API说明v1.24同步三个正式出口与简明接线步骤；五份资料定向核1643链接、200锚点与122表格，0问题，三个正式出口/类型映射与原依赖/lock一致。精确暂存只含本片13路径，限定CRLF空白检查沿本片执行。
+
+新增永久测试脚本0，RD本片没有安装、环境文件、磁盘生成物或业务服务。真实HTTP/MySQL、对象存储、完整标准安装及独立审查未验；作者在用验证目录由作者按既有规则退出清理。公共文件台账/其余基础服务、Rental标准主装配和数据/迁移/Seed继续交付，PCH原任务未据本片跨下一档。正式阶段版本由包含本节的Git提交定位。
+
 <a id="core-rental-membership-http-state-20261118"></a>
 
 ## Rental会员HTTP、客户状态与门户授权（2026-11-18）

@@ -1058,6 +1058,18 @@
     "./http-membership-applications": {
       "types": "./dist/http-membership-applications.d.ts",
       "default": "./dist/http-membership-applications.js"
+    },
+    "./http-files": {
+      "types": "./dist/http-files.controller.d.ts",
+      "default": "./dist/http-files.controller.js"
+    },
+    "./http-file-applications": {
+      "types": "./dist/http-file-applications.d.ts",
+      "default": "./dist/http-file-applications.js"
+    },
+    "./http-file.dto": {
+      "types": "./dist/http-file.dto.d.ts",
+      "default": "./dist/http-file.dto.js"
     }
   },
   "typesVersions": {
@@ -1847,6 +1859,15 @@
       ],
       "http-membership-applications": [
         "dist/http-membership-applications.d.ts"
+      ],
+      "http-files": [
+        "dist/http-files.controller.d.ts"
+      ],
+      "http-file-applications": [
+        "dist/http-file-applications.d.ts"
+      ],
+      "http-file.dto": [
+        "dist/http-file.dto.d.ts"
       ]
     }
   },
