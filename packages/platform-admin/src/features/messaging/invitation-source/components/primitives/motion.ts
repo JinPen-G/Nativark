@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { usePrefersReducedMotion } from '@/lib/usePrefersReducedMotion';
+import { usePrefersReducedMotion } from '../../../../../lib/usePrefersReducedMotion';
 import type { Transition } from 'motion/react';
 
 /** Converts the source's duration/bounce model into physical spring values. */

@@ -1,5 +1,5 @@
 /** 原版组件的宿主语言适配，保留业务姓名、角色与邮箱原文。 */
-import { useLocale } from "@/app/locale";
+import { useLocale } from "../../../app/locale";
 const chinese: Record<string, string> = {
   "People to invite": "待邀请人员", "Emails or names": "邮箱地址", "Suggested": "建议",
   "Suggestions": "邮箱建议", "Invite by email": "通过邮箱邀请",

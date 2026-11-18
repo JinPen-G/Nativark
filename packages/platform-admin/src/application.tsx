@@ -1,6 +1,6 @@
 /** 公共 Web 组合工厂，默认空Core。宿主注入登记页面，身份/权限来自原API。 */
 import { useEffect, useRef, useSyncExternalStore } from "react";
-import { createBrowserRouter, createRoutesFromElements, Navigate, Outlet, RouterProvider } from "react-router-dom";
+import { createBrowserRouter, createRoutesFromElements, Navigate, Outlet, RouterProvider, useParams } from "react-router-dom";
 import { Blocks, Crown, Settings, UserRound } from "lucide-react";
 import { AdminRuntimeProvider } from "./runtime";
 import { AdminUiProvider } from "./AdminUiProvider";
@@ -22,6 +22,8 @@ import { TenantSubscriptionPage, SubscriptionProPage, SubscriptionRequestDetailP
 import { TenantIntegrationsPage, TENANT_INTEGRATIONS_ROUTE, hasTenantIntegrationPermission } from "./features/integrations";
 import { OrganizationsPage, PlatformSecurityPage, PLATFORM_SETTINGS_ROUTES, canReadOrganizations, canReadSecurityBaseline } from "./features/platform-settings";
 import { PlatformToolsPage, PLATFORM_TOOLS_ROUTE, canManagePlatformTools } from "./features/platform-tools";
+import { AcceptOperatorInvitationPage, CustomerSupportPage, TenantDispatchPage, createOperatorInvitationApi,
+  hasTenantMessagingPermission } from "./features/messaging";
 
 function ProtectedLayout() {
   const { session, brandName, brand, pages } = usePlatformApplication();
@@ -41,6 +43,10 @@ function ProtectedLayout() {
     ...(can("system:tenant:manage") ? [{ path: "/settings/tenant", label: en ? "Tenant details" : "租户资料" }] : []),
     ...(can("system:integration:manage") ? [{ path: "/settings/tenant-appearance", label: en ? "Tenant appearance" : "租户外观" }] : []),
     ...(hasTenantIntegrationPermission(state.user) ? [{ path: TENANT_INTEGRATIONS_ROUTE.path, label: en ? "Third-party services" : "第三方服务" }] : []),
+    ...(hasTenantMessagingPermission(state.user, "system:integration:manage") ? [
+      { path: "/settings/dispatch", label: en ? "Dispatch center" : "寄件中心" },
+      { path: "/settings/support", label: en ? "Customer support" : "客服中心" }
+    ] : []),
     ...(can("system:user:manage") ? [{ path: "/settings/member-cores", label: en ? "Member Core access" : "成员 Core 分配" }] : []),
     ...(can("system:user:manage") ? [{ path: "/settings/users", label: en ? "Members" : "人员管理" }] : []),
     ...(can("system:role:manage") ? [{ path: "/settings/roles", label: en ? "Roles" : "角色权限" }] : []),
@@ -65,8 +71,11 @@ function ProtectedLayout() {
 
 function SignIn() {
   const { session, brandName } = usePlatformApplication();
+  const { tenantCode } = useParams();
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
-  return state.sessionVerified ? <Navigate to="/" replace /> : <AdminLoginPage brandName={brandName} onLogin={session.login} />;
+  const sameTenant = !tenantCode || state.tenant?.tenantCode === tenantCode;
+  return state.sessionVerified && sameTenant ? <Navigate to="/" replace />
+    : <AdminLoginPage key={tenantCode} brandName={brandName} tenantCode={tenantCode} onLogin={session.login} />;
 }
 
 function Home() {
@@ -99,14 +108,19 @@ function AccountSecurity() {
 
 export function createPlatformAdminApplication(options: PlatformAdminApplicationOptions) {
   const { session } = options;
+  const invitationApi = createOperatorInvitationApi(session.apiBaseURL);
   const router = createBrowserRouter([
   { path: "/login", element: <SignIn /> },
+  { path: "/login/:tenantCode", element: <SignIn /> },
+  { path: "/invite", element: <AcceptOperatorInvitationPage api={invitationApi} brandName={options.brandName} /> },
   { element: <ProtectedLayout />, children: [
     { path: "/", element: <Home /> }, { path: "/settings/profile", element: <SelfProfilePage /> },
     { path: "/settings/security", element: <AccountSecurity /> },
     { path: "/settings/appearance", element: <AccountAppearancePage /> },
     { path: "/settings/tenant", element: <TenantSetting /> }, { path: "/settings/tenant-appearance", element: <TenantSetting appearance /> },
     { path: TENANT_INTEGRATIONS_ROUTE.path, element: <TenantIntegrationsPage /> },
+    { path: "/settings/dispatch", element: <TenantDispatchPage /> },
+    { path: "/settings/support", element: <CustomerSupportPage /> },
     { path: PLATFORM_SETTINGS_ROUTES.organizations.path, element: <OrganizationsPage /> },
     { path: PLATFORM_SETTINGS_ROUTES.security.path, element: <PlatformSecurityPage /> },
     { path: PLATFORM_TOOLS_ROUTE, element: <PlatformToolsPage /> },

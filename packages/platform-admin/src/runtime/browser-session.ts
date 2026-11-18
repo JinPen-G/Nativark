@@ -91,7 +91,7 @@ export function createBrowserAdminSession({ baseURL, storageKey }: { baseURL: st
     void bootstrap();
   }
   window.addEventListener("storage", stored);
-  return { runtime, ...queries, getSnapshot: () => state, subscribe: runtime.subscribe,
+  return { apiBaseURL: baseURL, runtime, ...queries, getSnapshot: () => state, subscribe: runtime.subscribe,
     bootstrap, login, changePassword, signOut,
     dispose() { window.removeEventListener("storage", stored); queries.clearSessionQueryCache(); listeners.clear(); } };
 }

@@ -7,7 +7,9 @@ import { UnsavedChangesGuard } from "./components/UnsavedChangesGuard";
 import loginStyles from "@/registry/blocks/login-centered/login-centered.module.css";
 import "./session-pages.css";
 
-export function AdminLoginPage({ brandName, onLogin }: { brandName: string; onLogin: (input: LoginRequest) => Promise<unknown> }) {
+export function AdminLoginPage({ brandName, onLogin, tenantCode }: {
+  brandName: string; onLogin: (input: LoginRequest) => Promise<unknown>; tenantCode?: string;
+}) {
   const [form] = Form.useForm<LoginRequest>();
   const [error, setError] = useState(false), [busy, setBusy] = useState(false);
   const pending = useRef<Promise<unknown> | null>(null);
@@ -26,7 +28,7 @@ export function AdminLoginPage({ brandName, onLogin }: { brandName: string; onLo
         <div className="login-form-content"><div className="login-panel-heading"><h2>{english ? "Sign in" : "登录"}</h2>
           <p>{english ? "Use your tenant account to continue." : "使用租户账号进入管理后台。"}</p></div>
           {error && <Alert type="error" showIcon title={english ? "Sign in failed. Check your account or try again." : "登录失败，请核对账号或稍后重试。"} />}
-          <Form form={form} layout="vertical" requiredMark={false} disabled={busy}
+          <Form form={form} initialValues={{ tenantCode }} layout="vertical" requiredMark={false} disabled={busy}
             onFinish={values => { void submit(values).catch(() => undefined); }}>
             <Form.Item name="tenantCode" label={english ? "Tenant code" : "租户编码"} rules={[{ required: true }]}><Input autoComplete="organization" /></Form.Item>
             <Form.Item name="account" label={english ? "Account" : "账号"} rules={[{ required: true }]}><Input autoComplete="username" /></Form.Item>

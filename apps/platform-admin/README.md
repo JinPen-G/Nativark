@@ -10,10 +10,13 @@
 - [Vite配置](vite.config.ts)复用公共适配与原环境白名单。开发端口5176，API代理使用原配置，Core代码不决定代理或读取秘密。
 - 公共应用内置[Core管理目录](../../packages/platform-admin/src/CoreAccessPage.tsx)。SaaS管理员选择租户开通Core，租户管理员选择真实成员分配已开通Core；两层授权分别保存。无Core部署保留目录入口和准确空态。
 - [人员/角色页面](../../packages/platform-admin/src/features/access/PublicManagementPages.tsx)读取公共目录并创建/编辑，角色权限复用原搜索编辑器。无Core也可维护公共角色；Core业务权限需先由部署入口按清单登记。
+- 人员目录的“邀请成员”读取当前租户受权的基础角色和组织，不查询 Rental 空间；关闭弹窗保留原邀请请求，结果待核对时只读取原键。[成员邀请接线](../../packages/platform-admin/src/features/access/PublicMemberInvitations.tsx)
+- 公开 `/invite` 从原邮件凭证预览并接受邀请，使用独立匿名客户端；随后进入 `/login/:tenantCode`，预填对应租户编码。已登录其他租户仍能进入该登录页，服务端继续核验账号和密码。[邀请页面](../../packages/platform-admin/src/features/messaging/AcceptOperatorInvitationPage.tsx)
 - “账号安全”使用当前密码修改本人口令，复用首次改密同一表单和原会话轮换；密码输入不进入公共设置保存接口、缓存或浏览器存储。
 - 人员目录的“重置密码”和普通角色的“删除”进入独立确认页，复用原服务端接口；当前本人、固定角色和越权管理员账号不可操作。保存结果与后续读取分开，一次性口令可在当前页复制。
 - SaaS“租户管理”可创建无Core租户、修改资料及单独变更状态；创建需租户初始化权限，冻结/停用沿原服务端撤销会话，恢复保留Core及成员设置。创建临时密码只在当前保存结果显示。
 - “第三方服务”复用[公共集成页](../../packages/platform-admin/src/features/integrations/README.md)，路径沿原 `/tenant/integrations`。同一应用工厂提供菜单和受保护路由，页面按当前租户身份及原集成权限开放；目录、配置保存和连接测试共用唯一请求与缓存边界。短信、支付和云存储仅显示服务端实际提供的能力。
+- “寄件中心”和“客服中心”位于 `/settings/dispatch` 与 `/settings/support`，读取当前租户的原投递记录和邮件；客服同步等待原请求，未确认结果不自动重做。[公共消息页面](../../packages/platform-admin/src/features/messaging/README.md)
 - “组织管理”位于 `/settings/organizations`，复用原组织列表、筛选、编辑和状态操作；受权只读与全租户维护分别开放。[公共组织页面](../../packages/platform-admin/src/features/platform-settings/README.md)
 - “安全基线”沿原 `/platform/system` 提供原登录限流、密码策略、脱敏和二次确认配置，读取与 SaaS 保存分别授权，保存失败保留草稿并明确重读核对。个人改密使用上方“账号安全”。[同源页面与请求](../../packages/platform-admin/src/features/platform-settings/index.ts)
 - “平台工具”位于 `/platform/tools`，字典与编号分别按当前权限显示，复用同一公共页签、表单及取号结果。零 Core 租户可从空列表创建第一组字典或编号规则；编号保存保留服务端最新流水。[页面与请求](../../packages/platform-admin/src/features/platform-tools/README.md)
@@ -29,4 +32,4 @@ npm run dev:platform-admin
 
 平台账号可登录公共后台；租户管理员或普通账号的可见设置由原权限决定，临时密码先完成改密。未开通 Core 的首页提示联系管理员，侧栏、面包屑/页名、铃铛、休息和面板仍存在。通知默认为空，不提供无 Core 通用业务 Agent。休息组件沿原本地媒体与选择文件行为，默认录音没有随包分发，缺失保持真实失败。
 
-当前源码/类型、Vite内存构建和认证请求围栏已核，浏览器、真实 HTTP/数据库保存重读及完整公共管理功能仍待验。实际证据见[PCH记录](../../docs/平台底座/Core接入/平台Core接入-开发记录.md#core-zero-admin-host-20261115)。构建命令不是安装、迁移或启服务的授权。
+当前入口已有类型与认证请求围栏的离线证据，浏览器、真实 HTTP/数据库保存重读及完整公共管理功能仍待验。公共实现与边界从[后台模块导读](../../packages/platform-admin/README.md)读取。构建命令不是安装、迁移或启服务的授权。

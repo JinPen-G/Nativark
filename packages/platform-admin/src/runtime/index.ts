@@ -15,6 +15,8 @@ export interface AdminRequestOptions {
   params?: unknown;
   headers?: Record<string, string>;
   signal?: AbortSignal;
+  /** 毫秒等待上限；超时后的原业务结果仍须沿原键核对。 */
+  timeout?: number;
   /** false 保留原操作的单次提交语义：401 不刷新后重发，结果沿原查询/收据核对。 */
   retryAuthentication?: boolean;
 }

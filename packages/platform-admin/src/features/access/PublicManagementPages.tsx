@@ -16,6 +16,8 @@ import { formSnapshotFingerprint, notifyFormSaved } from "../../forms";
 import { useLocale } from "../../app/locale";
 import { PermissionEditor } from "./PermissionMatrix";
 import { isFixedRole } from "./permission-matrix-model";
+import { PublicMemberInvitations } from "./PublicMemberInvitations";
+import { hasTenantMessagingPermission } from "../messaging";
 
 const base = { users: "/settings/users", roles: "/settings/roles", tenants: "/platform/tenants" } as const;
 type Kind = keyof typeof base;
@@ -39,13 +41,17 @@ function ManagementGate({ kind, creating, children }: { kind: Kind; creating: bo
 
 function Directory({ kind }: { kind: Kind }) {
   const { brandName } = usePlatformApplication(), { locale } = useLocale(), en = locale === "en-US", navigate = useNavigate();
+  const [inviting, setInviting] = useState(false);
   const { user } = useAdminSession(), query = useDirectory<DirectoryRow[]>(kind);
   const filter = useListFilter(query.data, { fields: row => "tenantCode" in row ? [row.tenantCode, row.tenantName]
     : "account" in row ? [row.account, row.displayName] : [row.code, row.name], status: rowStatus });
   const title = { users: en ? "Members" : "人员管理", roles: en ? "Roles" : "角色权限", tenants: en ? "Tenants" : "租户管理" }[kind];
   const canCreate = kind !== "tenants" || canManagePublicResource(user, "saas", "system:tenant:bootstrap");
-  return <><PageHeading title={title} brandName={brandName} extra={canCreate && <Button onClick={() => navigate(`${base[kind]}/new`)}>
-    {en ? "Create" : "新增"}</Button>} />
+  return <><PageHeading title={title} brandName={brandName} extra={<>
+    {canCreate && <Button onClick={() => navigate(`${base[kind]}/new`)}>{en ? "Create" : "新增"}</Button>}
+    {kind === "users" && hasTenantMessagingPermission(user, "system:user:manage")
+      && <Button onClick={() => setInviting(true)}>{en ? "Invite members" : "邀请成员"}</Button>}
+  </>} />
     <QueryState loading={query.isPending} error={query.error} onRetry={query.refetch}>
       <ListSection controls={<ListFilters filter={filter} placeholder={en ? "Search name or code" : "搜索姓名或编码"}
         options={[{ value: "active", label: en ? "Enabled" : "已启用" }, { value: "disabled", label: en ? "Disabled" : "已停用" },
@@ -70,7 +76,9 @@ function Directory({ kind }: { kind: Kind }) {
             </> }
           ]} />
       </ListSection>
-    </QueryState></>;
+    </QueryState>
+    {kind === "users" && <PublicMemberInvitations open={inviting} onClose={() => setInviting(false)} />}
+  </>;
 }
 
 /** 保存按钮和回车共用一个Promise；失败锁住重发，先明确重新读取，创建口令只留当前页面。 */

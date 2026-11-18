@@ -8,7 +8,7 @@ Nativark 为开发者和开发 AI 提供构建业务应用所需的公共基础�
 
 开源主体是 Nativark 底座。**Rental Core 将作为首个开源业务 Core 示范**，展示如何在公共底座上构建完整业务、接入客户端并向 Agent 提供受控工具。后续可按同一接入边界扩展 CRM、TMS 等业务 Core。
 
-当前仓库正在从 Rental OS 组合工程中抽离公共底座。原开发命令运行底座与 Rental Core 的组合；独立公共 API 与后台已提供初始化、认证、租户 / 人员角色 / 组织管理、安全与外观设置、订阅、字典与编号及 Core 授权接点。完整独立运行、Rental 标准装配和多 Core 验收继续由平台接入专项推进。源码目录、npm 包名及配置变量目前沿用原工程标识。[独立公共 API](apps/platform-api/README.md) · [公共后台](apps/platform-admin/README.md)
+当前仓库正在从 Rental OS 组合工程中抽离公共底座。原开发命令运行底座与 Rental Core 的组合；独立公共 API 与后台已提供初始化、认证、租户 / 人员角色 / 组织管理、安全与外观设置、订阅、字典与编号、成员邀请和邮件目录及 Core 授权接点。完整独立运行、Rental 标准装配和多 Core 验收继续由平台接入专项推进。源码目录、npm 包名及配置变量目前沿用原工程标识。[独立公共 API](apps/platform-api/README.md) · [公共后台](apps/platform-admin/README.md)
 
 - [底座建设范围](#底座建设范围)
 - [理解架构](#理解架构)
