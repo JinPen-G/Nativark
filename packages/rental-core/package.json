@@ -866,6 +866,22 @@
     "./file-access": {
       "types": "./dist/file-access.d.ts",
       "default": "./dist/file-access.js"
+    },
+    "./mysql-client-delivery-address": {
+      "types": "./dist/mysql-client-delivery-address.d.ts",
+      "default": "./dist/mysql-client-delivery-address.js"
+    },
+    "./mysql-client-account-closure": {
+      "types": "./dist/mysql-client-account-closure.d.ts",
+      "default": "./dist/mysql-client-account-closure.js"
+    },
+    "./client-delivery-service-area": {
+      "types": "./dist/client-delivery-service-area.d.ts",
+      "default": "./dist/client-delivery-service-area.js"
+    },
+    "./client-lifecycle-ports": {
+      "types": "./dist/client-lifecycle-ports.d.ts",
+      "default": "./dist/client-lifecycle-ports.js"
     }
   },
   "typesVersions": {
@@ -1511,6 +1527,18 @@
       ],
       "file-access": [
         "dist/file-access.d.ts"
+      ],
+      "mysql-client-delivery-address": [
+        "dist/mysql-client-delivery-address.d.ts"
+      ],
+      "mysql-client-account-closure": [
+        "dist/mysql-client-account-closure.d.ts"
+      ],
+      "client-delivery-service-area": [
+        "dist/client-delivery-service-area.d.ts"
+      ],
+      "client-lifecycle-ports": [
+        "dist/client-lifecycle-ports.d.ts"
       ]
     }
   },

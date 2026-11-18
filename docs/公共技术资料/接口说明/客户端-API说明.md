@@ -4,6 +4,7 @@
 
 | 版本 | 日期 | 编辑 | 变更 |
 | --- | --- | --- | --- |
+| v1.15 | 2026-11-18 | Codex | 补充Rental包中配送地址、历史快照、本人注销与宿主参加者的源码/SDK入口；原客户API v1路径、请求和响应保持兼容。 |
 | v1.14 | 2026-09-20 | Codex | 同步当前 main：客户端渠道后台页、租户级配置、公开文档、微信/短信登录、地址簿、费用响应、JSAPI 支付、地点坐标及小程序展示投影均已进入代码主线；当前剩余任务改由《客户端共用开发任务》和《微信小程序开发任务》维护，重点是真库组合、真实 Provider 与宿主验收。 |
 | v1.13 | 2026-09-19 | Claude | CLIENT-CHANNEL-01：启动配置改读**租户级客户端渠道配置**（品牌/客服/协议/帮助/横幅/发布服务，小程序与 APP 共用），`GET /public/bootstrap` 加 `client=wechat_miniprogram\|app` 参数并返回 `client`、`help`、`banner`、协议 `hasBody`；`wechat_phone` 登录与 `capabilities.wechatPay` 仅小程序且微信凭证就绪时为真。新增公开 `GET /public/documents/{kind}`（`user_agreement`/`privacy_policy`/`help` 正文与 FAQ，游客可读、客户端内渲染）。运营端 `/platform/mini-program-channel` 收窄为微信凭证；租户级配置走 `GET/PUT /platform/client-channel`（`system:integration:manage`）。代码与自动化验收通过，未提交、迁移未应用共享库。 |
 | v1.12 | 2026-09-19 | Claude | 落地小程序首期六项契约（代码与自动化验收，未提交、迁移未应用共享库）：公开启动配置 `GET /public/bootstrap`、公开游客目录 `GET /public/catalog` 与图片、用途化验证码 `POST /auth/challenges`、短信登录 `POST /auth/sms-login`、微信手机号登录 `POST /auth/wechat/phone-login` 与绑定 `POST /auth/wechat/bind`、本人注销三接口、地址簿三接口、检查费用投影与本人确认/异议、小程序 JSAPI 支付（`mini-program-payment-intents` 从预留 503 改为真实创建，缺可信微信身份返回 409 `wechat_identity_required`）；`/config.features` 增 `delivery/feeResponse/accountClosure/wechatBinding`，报价请求增 `deliveryAddressId`，订单视图增 `deliveryAddress` 快照，目录增 `fulfillment`。 |
@@ -191,4 +192,6 @@ Idempotency-Key: <unique-key-for-mutating-action>
 - 客户端可以提交 `evidenceRef`，但引用必须来自受保护文件服务产生的已完成资质附件；客户端不能直接读取本地上传目录，也不能引用其他会员或其他证件类型的文件。
 - 当前 API 版本固定为 `v1`。不兼容变更必须新建版本，不在 v1 中静默改变字段含义。
 
-机器可读契约：`GET /api/openapi.json`。服务端源码中的客户端契约与 DTO 位于 `packages/shared/src/client.ts` 和 `apps/api/src/modules/client/`。
+机器可读契约由 `GET /api/openapi.json` 返回，源码见[组合OpenAPI](../../../apps/api/src/contracts/openapi-document.ts)。客户合同单源位于[Rental客户端合同](../../../packages/rental-core/src/client-contracts.ts)，原[shared客户端出口](../../../packages/shared/src/client.ts)兼容再导出；请求校验见[客户DTO](../../../packages/rental-core/src/http-client-request.dto.ts)。
+
+开发Agent可沿[客户Controller](../../../apps/api/src/modules/client/client-api.controller.ts) → [地址与交付快照](../../../packages/rental-core/src/mysql-client-delivery-address.ts) / [本人注销](../../../packages/rental-core/src/mysql-client-account-closure.ts) → [宿主参加者](../../../packages/rental-core/src/client-lifecycle-ports.ts)阅读这两条链。服务器分别从 `@rental-os/rental-core/mysql-client-delivery-address` 和 `/mysql-client-account-closure` 接入；客户端使用 `/client` 合同。当前客户Auth、同一数据库、业务状态与审计由宿主供给。[包使用说明](../../../packages/rental-core/README.md#使用与构建)

@@ -11,6 +11,25 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-client-address-closure-20261118"></a>
+
+## Rental客户地址、历史快照与本人注销（2026-11-18）
+
+继续共享树施工前，已核分支codex/platform-core-extraction、HEAD与真实任务远端均为5173681861de7c8e391ed418cdb88fca91fac521，暂存区空，无合并/拣选现场；真实main仍为已包含的ba1de9f91860c4e73503eded4e1d05d2307b0e28。中断前PID5000已不在运行，旧输出因内核重置丢失，不补作成功证据。本片客户八路径为RD未完成果，dev1继续约定的Rental文件/地点适配，Git索引和公共配置仍由RD负责。
+
+[地址与交付快照](../../../packages/rental-core/src/mysql-client-delivery-address.ts)、[本人注销](../../../packages/rental-core/src/mysql-client-account-closure.ts)及[精确配送区域](../../../packages/rental-core/src/client-delivery-service-area.ts)实际迁入Rental包，原三路径成为窄Nest适配/再导出。私有[参加者](../../../packages/rental-core/src/client-lifecycle-ports.ts)只要求原地址/快照表与事务、当前配置、客户Auth、状态门禁及公共审计，不引入第二个数据库或认证实例。四项正式子出口与typesVersions同步，依赖未变化。原客户Controller/服务及AI场景继续消费相同签名。
+
+地址保存保留Serializable事务、默认地址规则、本人归属及原修订/CAS；报价按原键固定快照，地址后续修改/删除不覆盖它，订单绑定不覆盖已有订单。客户视图脱敏，运营读取仍核原租户/空间。本人注销保留企业账号拒绝、人工核对确认及证明→会员→账号→会话→审计顺序；已消费证明或已关闭状态不因后续失败自动重发/恢复。[模块导读](../../../packages/rental-core/README.md#使用与构建)、[原业务入口](../../../apps/api/src/modules/rental-core/README.md)及[客户API说明](../../../docs/公共技术资料/接口说明/客户端-API说明.md)同片更新，原API v1路径/字段不变。
+
+| 必要核验 | 实际结果与边界 |
+| --- | --- |
+| 原逻辑对照与一次冒烟 | node --no-compilation-cache -经stdin运行，最终退出0；17个方法/函数正文与517368186固定原源码一致。实际包类及原Nest兼容类覆盖默认地址、坐标精度、旧修订/CAS、跨客户/企业拒绝、配送精确匹配、同报价原快照、订单不改绑、客户脱敏/运营空间，以及注销成功顺序和各步骤失败停下、不自动重做 |
+| 必要类型与直接消费者 | TypeScript5.9.3内存noEmit，最终退出0；四包内源码、三原适配及ClientApiController/ClientApiService共9根/1855源0诊断。Prisma5.22官方WASM/generator从原238模型/35枚举及公共33模型/14枚举生成声明，31,201,345/2,177,556字节全部留内存，没有写client或dist |
+| 首轮失败及修复 | 首次内存依赖映射未覆盖node_modules根目录，2350项诊断；修正只读映射后仅剩审计类型导入名错误。本片实际改为正式PlatformOperationLogService类型，原业务正文不变，随后上述9根复验通过。冒烟初次把原ClientAuth当相对源码加载导致未声明依赖，只更正DI fixture查找顺序后同一冒烟通过 |
+| 验证限制 | Prisma Decimal/错误类与Nest异常复用现有真实运行库；数据库、事务及Auth/状态参加者为明确fixture，未实例化Client、读取环境文件、联网或执行迁移。旧完整服务区脚本的同步配置假设不作为本片通过证据；没有新增永久测试脚本或临时环境 |
+
+七份同片资料定向核对退出0，1717链接、192锚点及119表格无问题；正式需求/任务与固定父版原文一致，新增永久测试0，限定CRLF空白检查通过。当前没有跨原下一进度档。PCH-08仍需完整客户/员工HTTP、Core标准主装配、数据/迁移/Seed、页面及AI/作业实际接点；本片正常/拒绝和类型不代替整项兼容验收。原知识2/6、外观静态失败、API614项问题及既有待清理残留继续沿原记录承接。阶段提交由包含本节的固定Git版本定位，普通推送后以实际远端回读核定；本次两个stdin验证进程均退出，无新临时产物或业务服务。
+
 <a id="core-public-file-application-staff-20261118"></a>
 
 ## 公共文件应用与原Staff实际消费者（2026-11-18）
