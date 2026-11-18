@@ -75,6 +75,7 @@ export function createAdminHttpClient<T extends PlatformLoginResponse>({ baseURL
   });
 
   async function request<Output>(path: string, options: AdminRequestOptions = {}): Promise<Output> {
+    const { retryAuthentication, ...requestOptions } = options;
     const epoch = session.currentSessionEpoch(), originalSignal = session.currentSessionSignal();
     const signals = options.signal ? [options.signal, originalSignal] : [];
     const controller = options.signal ? new AbortController() : undefined;
@@ -82,7 +83,8 @@ export function createAdminHttpClient<T extends PlatformLoginResponse>({ baseURL
     for (const signal of signals) signal.addEventListener("abort", abort, { once: true });
     if (signals.some(signal => signal.aborted)) abort();
     try {
-      const response = await http.request<ApiResult<Output>>({ url: path, method: options.method ?? "get", ...options, signal: controller?.signal ?? originalSignal });
+      const response = await http.request<ApiResult<Output>>({ url: path, method: requestOptions.method ?? "get", ...requestOptions,
+        ...(retryAuthentication === false ? { _authRetry: true } : {}), signal: controller?.signal ?? originalSignal });
       if (originalSignal.aborted || controller?.signal.aborted || session.currentSessionEpoch() !== epoch)
         throw new DOMException("原响应不能写入已变化的会话", "AbortError");
       return response.data.data;

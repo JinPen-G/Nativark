@@ -13,7 +13,7 @@ test('corporate reversal retains only original locators and refuses unavailable 
   const fs = require('node:fs'), path = require('node:path'), ts = require('typescript');
   const helper = {};
   const shared = {};
-  const sharedSource = fs.readFileSync(path.join(__dirname, '../apps/admin/src/features/ai-native/settings-operation-reference.ts'), 'utf8');
+  const sharedSource = fs.readFileSync(path.join(__dirname, '../packages/platform-admin/src/operation-reference.ts'), 'utf8');
   new Function('exports', ts.transpileModule(sharedSource, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(shared);
   const source = fs.readFileSync(path.join(__dirname, '../apps/admin/src/features/membership/corporate-payment-reference.ts'), 'utf8');
   new Function('exports', 'require', ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(helper, () => shared);

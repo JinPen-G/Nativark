@@ -37,6 +37,12 @@
 
 CorePage 的 `title`、`summary` 可显示当前受权对象；`actions` 可声明图标、危险程度、等待状态和等待文案，公共按钮继续等待真实Promise并复验当前操作。`RecordDetailLayout` 接收事实、返回回调及可选Core页头，`RecordDetailStack`提供原内容间距。`KanbanBoard`只映射已经获权的数据和业务回调，宿主调用一次 `platformAdminVite()` 即带入保留看板的严格构建适配。实际接入见[Rental养护工单](../rental-core/admin/work-orders/README.md)。
 
+需要保留原操作的单次提交语义时，使用 `runtime.request<T>(path, { method: "post", data: command, retryAuthentication: false })`。这会禁止401后刷新并重发该请求；普通请求仍沿原规则最多刷新一次。结果不明时调用该Core的原查询或收据接口，不换操作键重发。[请求合同](src/runtime/index.ts) · [唯一执行者](src/runtime/browser-http.ts)
+
+`/forms` 同时提供 `readSettingsReference`、`retainSettingsReference`、`clearSettingsReference` 和对应类型，供页面保留非敏感原操作引用。沿用既有导出名和错误标识；键由业务按当前身份与对象限定，损坏或不可写的存储会阻止新操作，不把本地引用作为权限。[操作引用实现](src/operation-reference.ts)
+
+已呈现动作的定位标识是 `data-core-page`（当前 `page.key`）与 `data-core-action`（声明的 `action.id`）。深链接必须先映射为本页已登记动作，再用两个值一起查找当前入口；只滚动或聚焦，执行继续等待用户操作。禁用按钮有可聚焦容器，原因沿原Tooltip展示，撤权后不会留下动作入口。[页头动作适配](src/core/CorePage.tsx)
+
 无 Core 时传空注册表，壳保留全部公共控件及联系管理员的提示，默认通知为空，不开放通用 Agent。通知内容/详情和可选面板通过宿主端口提供。公共包本身不拥有登录凭据、API 代理或可用权限。
 
 ## 来源与验证

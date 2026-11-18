@@ -2,7 +2,9 @@
 // Real editor lifecycle and source, no DOM, HTTP, provider, keys or database.
 const test = require('node:test'), assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path'), Module = require('node:module'), ts = require('typescript');
 function load(name) {
-  const filename = path.resolve(__dirname, '../apps/admin/src/features/ai-native', name);
+  const filename = name === 'settings-operation-reference.ts'
+    ? path.resolve(__dirname, '../packages/platform-admin/src/operation-reference.ts')
+    : path.resolve(__dirname, '../apps/admin/src/features/ai-native', name);
   const mod = new Module(filename, module); mod.filename = filename; mod.paths = Module._nodeModulePaths(path.dirname(filename));
   const originalRequire = mod.require.bind(mod);
   mod.require = request => request === './settings-operation-reference' ? load('settings-operation-reference.ts') : originalRequire(request);

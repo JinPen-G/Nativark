@@ -11,6 +11,26 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-public-order-operation-boundary-20261118"></a>
+
+## 公共原操作请求、引用与页头定位（2026-11-18）
+
+固定父版187d93f3ae0b795f1de7f71ef47244a6ac9b63ec已普通推送并实际远端回读；同次GitHub main仍为ba1de9f91860c4e73503eded4e1d05d2307b0e28，已在任务祖先。本片先补dev2订单页面需要的公共接点，订单包及dev1文件台账各自的在制成果按约定路径保留，RD只统一公共出口、装配和索引。
+
+[请求合同](../../../packages/platform-admin/src/runtime/index.ts)新增可选retryAuthentication，明确false沿原单次派发；[公共HTTP](../../../packages/platform-admin/src/runtime/browser-http.ts)在唯一客户端中映射原私有_authRetry标记，并从Axios配置移除公共选项。默认401仍只刷新一次，明确false不刷新后重发；原取消信号、会话代次及500/网络不重试语义保留，不将unknown解释为回滚。
+
+[公共引用库](../../../packages/platform-admin/src/operation-reference.ts)实际迁入原非敏感操作引用算法，[原AI设置入口](../../../apps/admin/src/features/ai-native/settings-operation-reference.ts)改为/forms正式出口的窄转接，保留旧导出、错误标识、1024字符限制及不能覆盖较早未决引用的语义。原两份恢复用例只调整实际源码定位，断言保留，没有新增测试脚本。[公共页头](../../../packages/platform-admin/src/core/CorePage.tsx)在实际已授权动作外层提供当前page.key/action.id两项定位标识，禁用入口可聚焦，原确认/校验/真实Promise和权限复验正文不变；定位不自动执行。
+
+一次TypeScript5.9.3定向检查沿实际配置和只读原依赖运行，进程5284退出0、stderr空：公共runtime/forms/CorePage六根1388源、Rental后台四十一根1460源、旧导航/引用转接十根1535源均0诊断。后两组合包含当前在制订单源码，证明当前工作区类型，不将其视为已提交完整订单阶段。编译配置中的正式包出口只在内存映射同源源码，未生成Client、dist或磁盘shim。
+
+一次原请求/引用冒烟进程34264退出0、stderr空，实际本地TypeScript产物配实际Axios及明确transport fixture。默认请求两次派发/一次刷新，单次请求一次派发/零刷新/原会话失效一次；公共retryAuthentication没有传入Axios配置。引用首次保留、原键读取、禁止较新键覆盖、损坏/不可用存储阻止新操作及原键清除通过，去注释后的迁移前后JavaScript产物相等。首次REPL执行在字符串代码生成阶段被运行环境拒绝，随后沿既有stdin Node入口核验，没有在项目落地新运行器。Tooltip按已安装CLI的6.6.0 info/demo核对原生span触发方式，局部lint为0问题、无跳过、非partial。两份仅改源码定位的原恢复用例分别node --check退出0，未执行其整份业务场景。三份本片资料1141链接/167锚点0问题，稀疏未检目标按当前固定Git对象定位。
+
+旧列表用例第349行要求page-top-gap为var(--space-1)，已在固定main及当前[规范3.3](../../公共技术资料/界面规范/管理后台-界面规范.md#33-间距与对齐)核到pageTop=0；4px属于contextOpticalInset。该问题是旧预期与锁定依据不符，不通过改规范或生产几何处理。原订单用例由dev2按该依据收口，本片没有把其整份失败记为通过。
+
+负责人再次明确其他聊天模型/推理设置由其控制，并要求结束电脑操作黄色边框。RD不再使用要求填写设置参数且校验失败的消息入口，具体依赖与结束各自电脑操作会话的要求写共享接续。两次工具调用均在参数校验阶段拒绝，没有成功发送消息；本片未打开电脑捕获，其他会话结束状态尚未核定。
+
+本片完整交付公共接点及简单接入说明，未跨PCH-07下一档；完整订单装配、Rental标准包与其余原任务继续。新增永久测试脚本、磁盘临时产物和业务服务均0；两个既有待清理残留仍沿原责任清单受阻。本片没有浏览器、真实HTTP/数据库、安装、独立更新或正式验收证据，中文提交普通推送后以真实远端回读核收。
+
 <a id="core-rental-files-http-20261118"></a>
 
 ## Rental文件HTTP与原服务别名（2026-11-18）
