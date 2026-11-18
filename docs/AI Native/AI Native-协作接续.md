@@ -26,7 +26,7 @@ AI研发源码固定提交为0e4e6367a27b36f2bde58639a0f2bdd1b00e2476，原28最
 
 ## 写入归属及保全
 
-临时AI-RD为01a1e422-8ae5-7383-9e41-c80cb71bcc70，其固定交付沿上方原阶段保留。当前Root为01a1be68-da55-7f13-9536-79be07cb2093，施工树为D:/工作文件/rental-OS/worktree/ai-native、codex/ai-native，独占AI索引、四册及本片公共协议和服务端设置接点。持续目标仍在执行，无token_budget。
+临时AI-RD为01a1e422-8ae5-7383-9e41-c80cb71bcc70，其固定交付沿上方原阶段保留。当前Root为01a1be68-da55-7f13-9536-79be07cb2093，施工树为D:/工作文件/rental-OS/worktree/ai-native、codex/ai-native，独占AI索引、四册及本片公共协议和服务端设置接点。研发核定与任务分支交付已完成，唯一剩余为PM串行整合main并回读远端，无token_budget。
 
 dev1 01a1bf34-f061-74c2-b588-3e21385c4b49的预算仓储两源及dev2 01a1bf35-1ee5-7400-a97d-c0ebf5f9482c的预算组件／session四源均已冻结交回Root，原作者验证和非作者复验已完成。两位本轮各23项全文核定已交本人最终结论，当前均completed／idle，无剩余源码写权。Root独占AI索引与四册，维护实际回执和后续集成现场。main由PM串行整合，固定版本及验证留原记录供其读取。派工省略model／thinking，保留负责人选择的模型和思考设置。
 
