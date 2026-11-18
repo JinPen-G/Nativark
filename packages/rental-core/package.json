@@ -882,6 +882,26 @@
     "./client-lifecycle-ports": {
       "types": "./dist/client-lifecycle-ports.d.ts",
       "default": "./dist/client-lifecycle-ports.js"
+    },
+    "./mysql-client-application": {
+      "types": "./dist/mysql-client-application.d.ts",
+      "default": "./dist/mysql-client-application.js"
+    },
+    "./client-application-ports": {
+      "types": "./dist/client-application-ports.d.ts",
+      "default": "./dist/client-application-ports.js"
+    },
+    "./category-client-projection": {
+      "types": "./dist/category-client-projection.d.ts",
+      "default": "./dist/category-client-projection.js"
+    },
+    "./file-application-participant": {
+      "types": "./dist/file-application-participant.d.ts",
+      "default": "./dist/file-application-participant.js"
+    },
+    "./business-location-scope": {
+      "types": "./dist/business-location-scope.d.ts",
+      "default": "./dist/business-location-scope.js"
     }
   },
   "typesVersions": {
@@ -1539,6 +1559,21 @@
       ],
       "client-lifecycle-ports": [
         "dist/client-lifecycle-ports.d.ts"
+      ],
+      "mysql-client-application": [
+        "dist/mysql-client-application.d.ts"
+      ],
+      "client-application-ports": [
+        "dist/client-application-ports.d.ts"
+      ],
+      "category-client-projection": [
+        "dist/category-client-projection.d.ts"
+      ],
+      "file-application-participant": [
+        "dist/file-application-participant.d.ts"
+      ],
+      "business-location-scope": [
+        "dist/business-location-scope.d.ts"
       ]
     }
   },

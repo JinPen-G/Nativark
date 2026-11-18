@@ -4,6 +4,7 @@
 
 | 版本 | 日期 | 编辑 | 变更 |
 | --- | --- | --- | --- |
+| v1.16 | 2026-11-18 | Codex | 客户业务应用及目录字段投影单源迁入Rental包，补正式SDK/宿主参加者入口；原95个方法及18项实例顺序保持，检查响应供给原同事务出箱，HTTP v1字段与行为不变。 |
 | v1.15 | 2026-11-18 | Codex | 补充Rental包中配送地址、历史快照、本人注销与宿主参加者的源码/SDK入口；原客户API v1路径、请求和响应保持兼容。 |
 | v1.14 | 2026-09-20 | Codex | 同步当前 main：客户端渠道后台页、租户级配置、公开文档、微信/短信登录、地址簿、费用响应、JSAPI 支付、地点坐标及小程序展示投影均已进入代码主线；当前剩余任务改由《客户端共用开发任务》和《微信小程序开发任务》维护，重点是真库组合、真实 Provider 与宿主验收。 |
 | v1.13 | 2026-09-19 | Claude | CLIENT-CHANNEL-01：启动配置改读**租户级客户端渠道配置**（品牌/客服/协议/帮助/横幅/发布服务，小程序与 APP 共用），`GET /public/bootstrap` 加 `client=wechat_miniprogram\|app` 参数并返回 `client`、`help`、`banner`、协议 `hasBody`；`wechat_phone` 登录与 `capabilities.wechatPay` 仅小程序且微信凭证就绪时为真。新增公开 `GET /public/documents/{kind}`（`user_agreement`/`privacy_policy`/`help` 正文与 FAQ，游客可读、客户端内渲染）。运营端 `/platform/mini-program-channel` 收窄为微信凭证；租户级配置走 `GET/PUT /platform/client-channel`（`system:integration:manage`）。代码与自动化验收通过，未提交、迁移未应用共享库。 |
@@ -194,4 +195,6 @@ Idempotency-Key: <unique-key-for-mutating-action>
 
 机器可读契约由 `GET /api/openapi.json` 返回，源码见[组合OpenAPI](../../../apps/api/src/contracts/openapi-document.ts)。客户合同单源位于[Rental客户端合同](../../../packages/rental-core/src/client-contracts.ts)，原[shared客户端出口](../../../packages/shared/src/client.ts)兼容再导出；请求校验见[客户DTO](../../../packages/rental-core/src/http-client-request.dto.ts)。
 
-开发Agent可沿[客户Controller](../../../apps/api/src/modules/client/client-api.controller.ts) → [地址与交付快照](../../../packages/rental-core/src/mysql-client-delivery-address.ts) / [本人注销](../../../packages/rental-core/src/mysql-client-account-closure.ts) → [宿主参加者](../../../packages/rental-core/src/client-lifecycle-ports.ts)阅读这两条链。服务器分别从 `@rental-os/rental-core/mysql-client-delivery-address` 和 `/mysql-client-account-closure` 接入；客户端使用 `/client` 合同。当前客户Auth、同一数据库、业务状态与审计由宿主供给。[包使用说明](../../../packages/rental-core/README.md#使用与构建)
+开发Agent从[客户Controller](../../../apps/api/src/modules/client/client-api.controller.ts)进入[客户业务应用](../../../packages/rental-core/src/mysql-client-application.ts)，再沿[业务参加者](../../../packages/rental-core/src/client-application-ports.ts)查看真实数据库、客户Auth、会员、付款/文件、订单和同事务出箱；原[Nest接线](../../../apps/api/src/modules/client/client-api.service.ts)供给同一实例。服务端从 `@rental-os/rental-core/mysql-client-application` 导入，客户端使用 `/client-contracts` 合同；目录字段由[同源投影](../../../packages/rental-core/src/category-client-projection.ts)生成，导入源码或取得目录不授予业务权限。
+
+地址和注销分别沿[地址与交付快照](../../../packages/rental-core/src/mysql-client-delivery-address.ts) / [本人注销](../../../packages/rental-core/src/mysql-client-account-closure.ts) → [生命周期参加者](../../../packages/rental-core/src/client-lifecycle-ports.ts)阅读。服务端分别从 `/mysql-client-delivery-address` 和 `/mysql-client-account-closure` 接入；可信身份、业务状态及审计由宿主供给。[包使用说明](../../../packages/rental-core/README.md#使用与构建)

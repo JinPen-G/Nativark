@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { RENTAL_FULFILLMENT_MODES, type RentalFulfillmentMode, type RentalPricingUnit } from './core';
+import type { ClientQuoteOneTimeAddressEvidence } from '@rental-os/rental-core/client-contracts';
 import type { AiCustomerEntryScope, AiCustomerEntrySurface, AiEntryActionDraft } from './ai-entry-action-draft';
 
 export const AI_BOOKING_DRAFT_CONTRACT_VERSION = 'ain-booking-draft-1' as const;
@@ -90,14 +91,7 @@ export interface AiBookingSavedAddressEvidence {
 
 /** Original Core quote snapshot plus current service-area observation. No saved
  * address ID/revision or contact/address content is fabricated or returned. */
-export interface AiBookingOneTimeAddressEvidence {
-  source: 'original_quote_one_time_address';
-  quoteId: string;
-  quoteCreatedAt: string;
-  quoteExpiresAt: string;
-  snapshotFingerprint: string;
-  serviceAreaFingerprint: string;
-}
+export interface AiBookingOneTimeAddressEvidence extends ClientQuoteOneTimeAddressEvidence {}
 
 export type AiBookingAddressEvidence = AiBookingSavedAddressEvidence | AiBookingOneTimeAddressEvidence;
 

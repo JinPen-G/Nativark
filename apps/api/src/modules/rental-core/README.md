@@ -2,6 +2,8 @@
 
 Rental Core维护租赁领域事实，包括经营空间/品类、商品和资产、报价库存、订单履约、检查及金额。它是首个业务Core示范，平台身份、公共后台和原AI机制通过受控适配消费，具体报价、金额与状态仍在原Core裁定。
 
+[客户应用接线](../client/client-api.service.ts)将原18项宿主实例供给[Rental客户应用](../../../../../packages/rental-core/src/mysql-client-application.ts)，目录、本人订单、报价、付款和检查费用响应由同一实现执行。原客户Controller及AI客户场景继续调用原签名；[私有参加者](../../../../../packages/rental-core/src/client-application-ports.ts)保留本人授权、事务和原出箱。Staff文件权威与组织地点范围也已迁入包内，沿当前原Auth lease和实际业务对象复验。[文件参加者](../../../../../packages/rental-core/src/file-application-participant.ts) · [地点投影](../../../../../packages/rental-core/src/business-location-scope.ts) · [客户API说明](../../../../../docs/公共技术资料/接口说明/客户端-API说明.md)
+
 [空间能力Controller](workspace-capability.controller.ts)和[员工收款Controller](staff-offline-payment.controller.ts)已转接Rental包的同一HTTP实现。宿主用正式服务令牌绑定原实例，原Guard/ALS、员工地点范围、DTO、业务事务和原收据沿原链处理；租户、空间及操作人来自已验证身份。[实际HTTP与接线](../../../../../packages/rental-core/README.md#使用与构建) · [原API文档](../../contracts/openapi-document.ts) · [迁出源码发现](../../../../../scripts/controller-sources.cjs)
 
 [主Controller](rental-core.controller.ts)和[业务Controller](rental-business.controller.ts)同样只再导出Rental实际HTTP类。[统一接线](rental-http.providers.ts)通过明确令牌绑定原17项/6项依赖，复用当前业务、资金、数据库与公共日志实例；检查事件只投影原方法，避免重复生命周期执行。两条链共用包内快照/刷新与显式操作键解析，原业务动作仍决定权限、事务、默认键和原结果处理。HTTP/DTO/OpenAPI及客户各端路径保持兼容。[主实现](../../../../../packages/rental-core/src/http-core.controller.ts) · [业务实现](../../../../../packages/rental-core/src/http-business.controller.ts) · [应用接点](../../../../../packages/rental-core/src/http-applications.ts)

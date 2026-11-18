@@ -21,6 +21,16 @@ export type { ClientQuoteServiceRequest, ClientOrderExtensionRequest } from "./c
 export const CLIENT_API_VERSION = "v1" as const;
 export const CLIENT_REGISTRATION_CHANNEL = "app" as const;
 
+/** 原报价地址快照与当前配送区域的只读证据；不返回地址正文或授予下单权限。 */
+export interface ClientQuoteOneTimeAddressEvidence {
+  source: "original_quote_one_time_address";
+  quoteId: string;
+  quoteCreatedAt: string;
+  quoteExpiresAt: string;
+  snapshotFingerprint: string;
+  serviceAreaFingerprint: string;
+}
+
 export const CLIENT_VERIFICATION_METHODS = ["sms", "email"] as const;
 export type ClientVerificationMethod = (typeof CLIENT_VERIFICATION_METHODS)[number];
 

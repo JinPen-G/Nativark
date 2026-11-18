@@ -11,6 +11,28 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-client-application-20261118"></a>
+
+## Rental客户应用与Staff私有文件权威（2026-11-18）
+
+共享树分支codex/platform-core-extraction、HEAD及真实任务远端均核为dc9ed9183b99f0bbb9e1fc9c2a5c4bfa9908fe1f，暂存区空，无MERGE_HEAD/CHERRY_PICK_HEAD；真实main仍为已包含的ba1de9f91860c4e73503eded4e1d05d2307b0e28。客户应用为RD接续成果，dev1明确停写Staff私有参加者及地点六路径，RD统一登记正式出口、核对、资料和提交。原源码及旧接续由本片固定父版保全，不再复制历史稿。
+
+[客户应用](../../../packages/rental-core/src/mysql-client-application.ts)及[客户目录字段投影](../../../packages/rental-core/src/category-client-projection.ts)实际迁入Rental包，原API路径为窄Nest兼容类/再导出。[私有参加者](../../../packages/rental-core/src/client-application-ports.ts)供给同一数据库、客户Auth、会员、核心/订单、资金/容量、文件/付款、地址和企业结算；原18项构造依赖、Optional声明与顺序保留。95个方法中94个正文不变，检查费用响应只把原每次新建PrismaBusinessFailureOutbox的调用改为宿主供给的同事务inspection回调；包内不加载AI运行时，原更新修订和出箱顺序不变。两个原自由函数及四个目录投影函数沿原实现。一次性报价地址的六字段证据归/client-contracts单源，原shared的AiBookingOneTimeAddressEvidence继承该声明，原AI客户场景继续使用同一字段与运行时schema。
+
+[Staff文件参加者](../../../packages/rental-core/src/file-application-participant.ts)与[业务地点投影](../../../packages/rental-core/src/business-location-scope.ts)同源迁入Rental私有包。原Runtime仅改端口类型来源，RENTAL_FILE_AUTHORITY令牌和延迟Auth接线保留；五组固定tuple仍经原StaffController、当前Auth主体lease、地点/组织和业务文件ACL。主体锁先于配置锁，历史原键/文件描述从持久事实读取；其他旧合法module/scene与不匹配历史沿原兼容编排，不按payload创建权威。包配置的五个新正式子出口及typesVersions落盘，无新增依赖。[原Runtime](../../../apps/api/src/modules/integrations/file-storage.runtime.service.ts) · [原Staff入口](../../../apps/api/src/modules/files/staff-uploads.controller.ts)
+
+| 必要核验 | 实际结果与边界 |
+| --- | --- |
+| 客户类型与直接消费者 | node --no-compilation-cache -经stdin，退出0；客户应用/端口/投影、原ClientApiService/Controller及AI client-scene共6根/1857源0诊断。TypeScript5.9.3及Prisma5.22官方WASM/generator，从238模型/35枚举与公共33模型/14枚举生成31,201,345/2,177,556字节声明，全部留内存 |
+| 一次客户应用冒烟 | 退出0；复用client-mini-program-api原5个用例及全部原断言，验证数据库分页/本人最少投影、逐行跨租户/同事拒绝、取消/续租前及回放复验、已取消/已付原结果、五类付款查写本人门禁。另核实际兼容类18项参加者顺序、检查出箱同tx、新实例及出箱失败回滚/不发布缓存，成功返回原批准金额20；数据库、幂等事务及出箱为明确fixture，网络请求/磁盘产物0 |
+| Staff正式装配与原消费者 | dev1沿已落盘的正式包出口复验AppModule单根，2354源0诊断、退出0；原Staff Runtime/Controller五类创建/完成/下载、原键只读观察、旧metadata缺项、撤权/会话/地点拒绝、主体先于配置锁、回滚和PUT失应答后原目标恢复冒烟退出0。两次原离线守卫无违规，专用临时目录已删除，复用通过证据不再扩大测试 |
+| 固定正文及测试定位 | RD核Staff12方法、地点1函数、Runtime41方法及1自由函数、目录4函数正文与dc9父版一致。原客户测试将hasOwnProperty改为可调用且等于包内同一updateProfile，两个PUT/PATCH原调用和其余断言保留；这是继承位置修正，未删有效行为断言 |
+| 首轮失败与更正 | 客户首轮6项诊断，定位为两个待登记正式出口、错误指纹/客户合同出口及未实例化的事务泛型；正式登记及准确类型修正后只复验同一6根，0诊断。初次读取TypeScript误走任务树无依赖入口，改为只读现有锁定依赖；未安装或复制依赖、client或dist |
+
+[Rental包导读](../../../packages/rental-core/README.md#使用与构建)、[原业务导读](../../../apps/api/src/modules/rental-core/README.md)及[客户API说明v1.16](../../../docs/公共技术资料/接口说明/客户端-API说明.md)同片导航实际SDK、Controller→应用→存储/参加者。原HTTP v1路径/字段、DTO、金额及业务状态未调整；正式需求/任务未改。当前PCH-08仍缺剩余客户/员工HTTP、认证/渠道、完整标准装配和数据/迁移/Seed、客户端及AI/作业接点，未跨原下一档。真实HTTP/MySQL/对象服务、浏览器/微信、干净安装与独立升级/回退/接手仍未验，不将本片离线结果称为完整兼容验收。原知识2/6、外观静态失败、API614项及旧待清理环境继续引用原问题。
+
+七份同片资料定向核对退出0，1746链接、196锚点和120表格无问题；包依赖/peer/meta与锁文件一致，正式需求/任务原文保持，限定CRLF空白检查通过。本片统一中文提交、普通推送后读取真实任务远端，固定提交由包含本节的Git版本定位。RD验证全部内存且进程已退出，没有新永久测试脚本、依赖环境或业务服务；dev1继续下一片换货专用影像，Runtime/README在本片固定后按约定释放，索引/包配置/四册仍由RD维护。
+
 <a id="core-rental-client-address-closure-20261118"></a>
 
 ## Rental客户地址、历史快照与本人注销（2026-11-18）

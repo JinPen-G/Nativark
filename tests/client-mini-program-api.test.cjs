@@ -14,6 +14,7 @@ Module._resolveFilename = function (request, ...args) {
 require("ts-node").register({ project: path.join(root, "apps/api/tsconfig.json"), transpileOnly: true });
 const { ValidationPipe, UnauthorizedException, RequestMethod } = require("@nestjs/common");
 const { ClientApiService } = require("../apps/api/src/modules/client/client-api.service");
+const { ClientApiService: RentalClientApiService } = require("@rental-os/rental-core/mysql-client-application");
 const { ClientApiController } = require("../apps/api/src/modules/client/client-api.controller");
 const { ClientMyOrdersQueryDto, ClientMiniProgramPaymentIntentRequestDto } = require("../apps/api/src/modules/client/client-request.dto");
 const { PaymentRuntimeService } = require("../apps/api/src/modules/integrations/payment.runtime.service");
@@ -289,7 +290,8 @@ test("new routes and catalog stay in client auth domain; operational/absent toke
     await controller.updateProfile({ client: context }, { name: "新名字", email: null });
     assert.equal(calls.length, 2);
     assert.deepEqual(calls[0], calls[1]);
-    assert.equal(Object.prototype.hasOwnProperty.call(ClientApiService.prototype, "updateProfile"), true);
+    assert.equal(typeof ClientApiService.prototype.updateProfile, "function");
+    assert.equal(ClientApiService.prototype.updateProfile, RentalClientApiService.prototype.updateProfile);
   }
 });
 

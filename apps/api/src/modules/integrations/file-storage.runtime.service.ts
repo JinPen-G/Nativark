@@ -32,8 +32,7 @@ import { aiRetentionObjectHash } from "../ai-native/privacy/retention-binding";
 import { AI_RETENTION_POLICY } from "../ai-native/privacy/retention-policy";
 import { KnowledgeCommitUnknownError } from '../ai-native/knowledge/knowledge-errors';
 import { knowledgeUploadRevisionSchema, knowledgeUploadKey } from '../ai-native/knowledge/human-knowledge-upload.service';
-import type { AuthService } from "../auth/auth.service";
-import { RENTAL_FILE_AUTHORITY, RentalFileApplicationParticipant, isRentalStaffFileBinding } from "./rental-file-application.participant";
+import { RENTAL_FILE_AUTHORITY, RentalFileApplicationParticipant, isRentalStaffFileBinding, type RentalFileWorkspaceAuthority } from "./rental-file-application.participant";
 
 type JsonRecord = Record<string, unknown>;
 type ExchangeInspectionFrozenEvidence = { sourceId: string; contentHash: string; sizeBytes: number; mimeType: "image/png" | "image/jpeg"; width: number; height: number };
@@ -78,7 +77,7 @@ export class FileStorageRuntimeService extends FileStoragePrimitives implements 
     @Optional() @Inject(INSPECTION_OBJECT_READER) private readonly inspectionObjectReader?: InspectionObjectReader,
     @Optional() @Inject(KNOWLEDGE_FILE_ACCESS) private readonly knowledgeFiles?: KnowledgeFileAccess,
     @Optional() private readonly fileAccess?: FileBusinessAccessService,
-    @Optional() @Inject(RENTAL_FILE_AUTHORITY) auth?: Pick<AuthService, "lockRequestWorkspaceAccess">
+    @Optional() @Inject(RENTAL_FILE_AUTHORITY) auth?: RentalFileWorkspaceAuthority
   ) {
     super();
     this.files = new FileStorageRepository(prisma);
