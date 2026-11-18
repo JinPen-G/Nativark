@@ -9,7 +9,7 @@ const fail = () => { throw Error('AI_RETENTION_EVIDENCE_REQUIRED'); };
 function readRetentionCertificates(file) {
   if (typeof file !== 'string' || !/\.json$/iu.test(file)) fail();
   const stat = fs.lstatSync(file);
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size > 1048576) fail();
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size > 16 * 1024 * 1024) fail();
   const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
   try {
     const opened = fs.fstatSync(fd);
@@ -17,7 +17,7 @@ function readRetentionCertificates(file) {
     const bytes = Buffer.alloc(stat.size + 1), length = fs.readSync(fd, bytes, 0, bytes.length, 0);
     if (length !== stat.size) fail();
     const value = JSON.parse(bytes.subarray(0, length).toString('utf8'));
-    if (!Array.isArray(value) || value.length > 500) fail();
+    if (!Array.isArray(value)) fail();
     return value;
   } finally { fs.closeSync(fd); }
 }
@@ -36,7 +36,7 @@ function verifyRestoredAiScopes({ certificates, publicKey, database, snapshotSha
   const key = publicKey && typeof publicKey === 'object' && publicKey.type === 'public' ? publicKey : crypto.createPublicKey(publicKey);
   if (key.asymmetricKeyType !== 'ed25519') fail();
   if (!/^[A-Za-z0-9_]{1,64}$/u.test(database) || !/^[a-f0-9]{64}$/u.test(snapshotSha256)
-    || !Array.isArray(certificates) || !Array.isArray(scopes) || scopes.length > 500 || certificates.length !== scopes.length
+    || !Array.isArray(certificates) || !Array.isArray(scopes) || certificates.length !== scopes.length
     || !Number.isFinite(now.getTime())) fail();
   const scopeKey = s => {
     if (!s || typeof s !== 'object') fail();
@@ -69,7 +69,7 @@ function assertRestoreAiBarrier(query, database, snapshotSha256, certificates, p
   const hasAi = Number(query(`SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${database}' AND table_name IN ('ai_tasks','ai_task_original_requests','ai_knowledge_documents','ai_structured_memories','ai_client_scene_materials','ai_inspection_drafts')`));
   if (!Number.isSafeInteger(hasAi) || hasAi < 0) fail();
   if (hasAi === 0) return { state: 'no_ai_task_tables' };
-  const scopes = JSON.parse(query(`SELECT COALESCE(JSON_ARRAYAGG(JSON_OBJECT('scopeKind', scopeKind, 'scopeId', scopeId, 'tenantId', tenantId, 'workspaceId', workspaceId)), JSON_ARRAY()) FROM (SELECT 'WORKSPACE' AS scopeKind, NULL AS scopeId, tenantId, id AS workspaceId FROM \`${database}\`.business_workspaces UNION ALL SELECT 'PLATFORM' AS scopeKind, id AS scopeId, tenantId, workspaceId FROM \`${database}\`.ai_scopes WHERE kind='platform' AND scopeKey='platform' AND tenantId IS NULL AND workspaceId IS NULL LIMIT 501) privacy_scopes`));
+  const scopes = JSON.parse(query(`SELECT COALESCE(JSON_ARRAYAGG(JSON_OBJECT('scopeKind', scopeKind, 'scopeId', scopeId, 'tenantId', tenantId, 'workspaceId', workspaceId)), JSON_ARRAY()) FROM (SELECT 'WORKSPACE' AS scopeKind, NULL AS scopeId, tenantId, id AS workspaceId FROM \`${database}\`.business_workspaces UNION ALL SELECT 'PLATFORM' AS scopeKind, id AS scopeId, tenantId, workspaceId FROM \`${database}\`.ai_scopes WHERE kind='platform' AND scopeKey='platform' AND tenantId IS NULL AND workspaceId IS NULL) privacy_scopes`));
   return verifyRestoredAiScopes({ certificates, publicKey, database, snapshotSha256, scopes });
 }
 /** Targeted AI-only backup expiry. Never scans/deletes generic SQL backups,

@@ -247,9 +247,18 @@ export class AiRetentionService {
   async exportRestoreManifest(snapshot: { id: string; sha256: string; createdAt: string }, privateKey: KeyObject) {
     const current = await this.current();
     if (!this.restoreKeyHash || retentionPublicKeyHash(privateKey) !== this.restoreKeyHash) throw unavailable();
-    const rows = await this.db.aiDataErasure.findMany({ where: { tenantId: current.tenantId,
-      workspaceId: current.workspaceId, state: { not: 'superseded' } }, orderBy: { id: 'asc' }, take: 501 });
-    if (rows.length > 500) throw unavailable();
+    const rows = await this.db.$transaction(async tx => {
+      const result = [];
+      let after: string | undefined;
+      do {
+        const page = await tx.aiDataErasure.findMany({ where: { tenantId: current.tenantId, workspaceId: current.workspaceId,
+          state: { not: 'superseded' }, ...(after ? { id: { gt: after } } : {}) }, orderBy: { id: 'asc' }, take: 250,
+          select: { id: true, kind: true, resourceId: true, targetHash: true, state: true } });
+        result.push(...page);
+        after = page.length === 250 ? page[249].id : undefined;
+      } while (after);
+      return result;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     await this.check(current);
     return signRetentionManifest({ version: 'ai-restore-tombstones-1', policyVersion: AI_RETENTION_POLICY.version,
       tenantId: current.tenantId, workspaceId: current.workspaceId, snapshotId: snapshot.id, snapshotSha256: snapshot.sha256, snapshotCreatedAt: snapshot.createdAt,

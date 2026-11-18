@@ -223,7 +223,17 @@ export class AiPlatformRetentionService {
   async exportRestoreManifest(snapshot: { id: string; sha256: string; createdAt: string }, privateKey: KeyObject) {
     const before = await this.current(true);
     if (!this.restoreKeyHash || retentionPublicKeyHash(privateKey) !== this.restoreKeyHash) throw unavailable();
-    const rows = await this.journal(before, 501); if (rows.length > 500) throw unavailable();
+    const rows = await this.db.$transaction(async tx => {
+      const result = [];
+      let after: string | undefined;
+      do {
+        const page = await tx.operationLog.findMany({ where: { action: journalAction, workspaceId: null,
+          detail: { path: '$.scopeId', equals: before.scopeId }, ...(after ? { id: { gt: after } } : {}) }, orderBy: { id: 'asc' }, take: 250 });
+        result.push(...page.map(row => this.checked(row, before.scopeId)));
+        after = page.length === 250 ? page[249].id : undefined;
+      } while (after);
+      return result;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     await this.check(before, true);
     return signPlatformRetentionManifest({ version: 'ai-platform-restore-tombstones-1', policyVersion: AI_RETENTION_POLICY.version,
       scopeKind: 'PLATFORM', scopeId: before.scopeId, tenantId: null, workspaceId: null,
