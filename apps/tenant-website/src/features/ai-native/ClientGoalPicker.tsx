@@ -102,23 +102,29 @@ export function ClientGoalPicker(props: {
     bookingAbort.current?.abort(); bookingAbort.current = null; setBookingRecord(null);
     setRecord({ scopeKey, view: initial() }); setWorking(false); setError(false); setFormError(false);
     setGoal({ scopeKey, text: '' }); setAnswer({ reference: '', text: '' }); setDraft({ reference: '', form: emptyForm(0) });
-    const close = () => {
+    const close = (preserveDraft = false) => {
       epoch.current++; busy.current = false; owner.current?.dispose(); owner.current = null; ownerCurrent.current = null;
       booking.current?.dispose(); booking.current = null; bookingSource.current = null; bookingKey.current = null;
       bookingAbort.current?.abort(); bookingAbort.current = null; setBookingRecord(null);
       setRecord({ scopeKey, view: initial() }); setWorking(false); setError(false); setFormError(false);
-      setGoal({ scopeKey, text: '' }); setAnswer({ reference: '', text: '' }); setDraft({ reference: '', form: emptyForm(0) });
+      if (!preserveDraft) { setGoal({ scopeKey, text: '' }); setAnswer({ reference: '', text: '' }); setDraft({ reference: '', form: emptyForm(0) }); }
     };
-    const hidden = () => { if (document.hidden) close(); };
-    sessionChanged.current = close;
-    document.addEventListener('visibilitychange', hidden); window.addEventListener('pagehide', close);
+    let hiddenOwner: ReturnType<typeof captureEnterpriseHostSession> = null;
+    const leave = () => close();
+    const hidden = () => {
+      if (document.hidden) { hiddenOwner = captureEnterpriseHostSession(); close(Boolean(hiddenOwner?.current())); }
+      else if (!hiddenOwner?.current()) close();
+      if (!document.hidden) hiddenOwner = null;
+    };
+    sessionChanged.current = leave;
+    document.addEventListener('visibilitychange', hidden); window.addEventListener('pagehide', leave);
     const captured = captureEnterpriseHostSession(); unsubscribe.current?.(); subscribedTenant.current = captured?.tenantCode ?? null;
-    unsubscribe.current = captured ? subscribeCustomerSession(captured.tenantCode, close) : null;
+    unsubscribe.current = captured ? subscribeCustomerSession(captured.tenantCode, leave) : null;
     return () => { epoch.current++; owner.current?.dispose(); owner.current = null; ownerCurrent.current = null; unsubscribe.current?.();
       booking.current?.dispose(); booking.current = null; bookingSource.current = null; bookingKey.current = null;
       bookingAbort.current?.abort(); bookingAbort.current = null;
       unsubscribe.current = null; subscribedTenant.current = null; sessionChanged.current = () => undefined;
-      document.removeEventListener('visibilitychange', hidden); window.removeEventListener('pagehide', close); };
+      document.removeEventListener('visibilitychange', hidden); window.removeEventListener('pagehide', leave); };
   }, [scopeKey]);
   const ensure = async () => {
     if (document.hidden || scope.current !== scopeKey) return null;
@@ -186,10 +192,24 @@ export function ClientGoalPicker(props: {
     booking.current = next; bookingSource.current = source; bookingKey.current = key;
     await next.open(); if (cached !== null && next.snapshot().canRead) await next.recover(); return current() ? next : null;
   };
-  const work = async (action: (instance: NonNullable<typeof owner.current>) => Promise<unknown>) => {
+  const work = async (action: (instance: NonNullable<typeof owner.current>) => Promise<unknown>, readOnly = false) => {
     if (busy.current || document.hidden || scope.current !== scopeKey) return;
     const generation = epoch.current; busy.current = true; setWorking(true); setError(false);
-    try { const instance = await ensure(); if (instance && generation === epoch.current) await action(instance); }
+    try {
+      const captured = captureEnterpriseHostSession();
+      if (!captured?.current()) throw Error('client_goal_login_required');
+      const run = async () => {
+        if (!captured.current() || generation !== epoch.current || document.hidden) return;
+        const instance = await ensure();
+        if (instance && captured.current() && generation === epoch.current) await action(instance);
+      };
+      if (navigator.locks) await navigator.locks.request(`ai-client-goal:${captured.operationScope}`, { mode: 'exclusive', ifAvailable: true }, async lock => {
+        if (!lock) throw Error('client_goal_in_use');
+        await run();
+      });
+      else if (readOnly) await run();
+      else throw Error('client_goal_lock_unavailable');
+    }
     catch { if (generation === epoch.current) setError(true); }
     finally { if (generation === epoch.current) { busy.current = false; setWorking(false); } }
   };
@@ -226,7 +246,7 @@ export function ClientGoalPicker(props: {
   });
   const refresh = () => work(async instance => {
     await instance.refresh(); await ensureBooking(instance, 'read'); await instance.readCancellationOrigin();
-  });
+  }, true);
   const newGoal = () => work(async instance => {
     // A pending Draft/handoff has its own original operation and must be read
     // first. A new goal never erases or substitutes for that receipt.

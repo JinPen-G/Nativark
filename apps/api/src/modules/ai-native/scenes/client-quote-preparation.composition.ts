@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { aiClientQuoteParameterReviewSchema, RENTAL_PRICING_UNIT_CODES } from '@rental-os/shared';
+import { aiClientQuoteParameterReviewSchema, clientGoalSelectedInput, RENTAL_PRICING_UNIT_CODES, type ClientCreateQuoteRequest } from '@rental-os/shared';
 import type { ClientApiService } from '../../client/client-api.service';
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
@@ -13,7 +13,7 @@ import { AiClientMaterialError, PrismaClientSceneMaterialRepository, type AiClie
 const id = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const digest = z.string().regex(/^[a-f0-9]{64}$/u);
 const reference = z.object({ materialRef: z.string().uuid(), expectedMaterialHash: digest }).strict();
-const savedCommand = z.object({ kind: z.literal('quote_preparation'), inputHash: digest }).strict();
+const savedCommand = z.object({ kind: z.literal('quote_preparation'), inputHash: digest, goalHash: digest.optional() }).strict();
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const stale = () => new AiTaskRepositoryError('AI_REVISION_CONFLICT');
@@ -155,8 +155,8 @@ export function composeClientOriginalQuotePreparation(input: {
   return Object.freeze({
     /** Observe an uncertain material INSERT without attempting another write.
      * Absence is unknown, not evidence that preparation did not commit. */
-    async readPreparationOperation(value: unknown) {
-      const parsed = z.object({ operationKey: id, input: z.unknown() }).strict().safeParse(structuredClone(value));
+    async readPreparationOperation(value: unknown, goalHash?: string) {
+      const parsed = z.union([z.object({ operationKey: id, selectionHash: digest }).strict(), z.object({ operationKey: id, input: z.unknown() }).strict()]).safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       const bound = await current();
       await grant(bound, 'read');
@@ -167,17 +167,19 @@ export function composeClientOriginalQuotePreparation(input: {
         return { state: 'unknown' as const, operationKey: parsed.data.operationKey,
           retryable: false as const, execution: 'read_only' as const };
       }
-      const command = { kind: 'quote_preparation' as const, inputHash: requestFingerprint(canonical(parsed.data.input)) };
-      if (row.inputHash !== requestFingerprint(command) || row.bindingHash !== bound.bindingHash) throw stale();
-      decode(row); await check(bound); await grant(bound, 'read');
+      const command = savedCommand.parse(row.command), material = decode(row);
+      const selectionHash = 'selectionHash' in parsed.data ? parsed.data.selectionHash : requestFingerprint(canonical(parsed.data.input));
+      if (command.inputHash !== selectionHash || row.bindingHash !== bound.bindingHash || command.goalHash && goalHash !== command.goalHash) throw stale();
+      await check(bound); await grant(bound, 'read');
       return { state: 'observed' as const, ...packet(row), retryable: false as const,
+        ...('selectionHash' in parsed.data && goalHash ? { originalSelection: clientGoalSelectedInput(material.input as ClientCreateQuoteRequest) } : {}),
         execution: 'read_only' as const, freshness: 'recheck_at_confirmation' as const };
     },
-    async prepare(value: unknown) {
+    async prepare(value: unknown, goalHash?: string) {
       const parsed = z.object({ operationKey: id, input: z.unknown() }).strict().safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       const bound = await current(), permission = await grant(bound, 'create');
-      const raw = canonical(parsed.data.input), command = { kind: 'quote_preparation' as const, inputHash: requestFingerprint(raw) };
+      const raw = canonical(parsed.data.input), command = { kind: 'quote_preparation' as const, inputHash: requestFingerprint(raw), ...(goalHash ? { goalHash: digest.parse(goalHash) } : {}) };
       const existing = await repository.findOperation(bound.scope, parsed.data.operationKey);
       if (existing) {
         if (existing.inputHash !== requestFingerprint(command) || existing.bindingHash !== bound.bindingHash) throw stale();

@@ -5,8 +5,8 @@ import { request } from '../core/http';
 import { clientTaskApi } from './ai-tasks';
 import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientHostCapabilitiesSchema,
   aiClientGoalPreparationRequestSchema, aiClientGoalPreparationReadRequestSchema, aiClientGoalPreparationResponseSchema,
-  aiClientGoalCandidatesRequestSchema, aiClientGoalProjectionSchema, aiClientGoalQuoteRequestSchema,
-  aiClientQuotePreparationResponseSchema, aiClientQuotePreparationReadResponseSchema,
+  aiClientGoalCandidatesRequestSchema, aiClientGoalProjectionSchema, aiClientGoalQuoteRequestSchema, aiClientGoalQuoteReferenceSchema, aiClientGoalQuoteReadResponseSchema,
+  aiClientQuotePreparationResponseSchema,
   aiClientQuoteConfirmationRequestSchema, aiClientQuoteResultReadResponseSchema } from '../vendor/shared-ai-client';
 import type { ClientGoalApi, ClientGoalSignal } from '@rental-os/shared';
 
@@ -27,7 +27,7 @@ export function createClientGoalApi(current: () => boolean): ClientGoalApi {
     readGoalPreparation: (input, signal) => call(AI_CLIENT_ENTRY_HTTP_DRAFT.readGoalPreparation, aiClientGoalPreparationReadRequestSchema.parse(input), aiClientGoalPreparationResponseSchema, signal),
     readGoalCandidates: (input, signal) => call(AI_CLIENT_ENTRY_HTTP_DRAFT.readGoalCandidates, aiClientGoalCandidatesRequestSchema.parse(input), aiClientGoalProjectionSchema, signal),
     prepareGoalQuote: (input, signal) => call(AI_CLIENT_ENTRY_HTTP_DRAFT.prepareGoalQuote, aiClientGoalQuoteRequestSchema.parse(input), aiClientQuotePreparationResponseSchema, signal),
-    readGoalQuotePreparation: (input, signal) => call(AI_CLIENT_ENTRY_HTTP_DRAFT.readGoalQuotePreparation, aiClientGoalQuoteRequestSchema.parse(input), aiClientQuotePreparationReadResponseSchema, signal),
+    readGoalQuotePreparation: (input, signal) => call(AI_CLIENT_ENTRY_HTTP_DRAFT.readGoalQuotePreparation, aiClientGoalQuoteReferenceSchema.parse(input), aiClientGoalQuoteReadResponseSchema, signal),
     confirmQuoteParameters: (input, signal) => call(AI_CLIENT_ENTRY_HTTP_DRAFT.confirmQuoteParameters, aiClientQuoteConfirmationRequestSchema.parse(input), aiClientQuoteResultReadResponseSchema, signal),
     readQuoteOriginal: (input, signal) => call(AI_CLIENT_ENTRY_HTTP_DRAFT.readPreparedQuoteOriginal, aiClientQuoteConfirmationRequestSchema.parse(input), aiClientQuoteResultReadResponseSchema, signal),
     readCatalog: signal => read('/catalog', signal),

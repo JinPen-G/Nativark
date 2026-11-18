@@ -2,7 +2,7 @@ import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req } 
 import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientTaskCancelReceiptSchema,
   aiClientTaskUnstartedCancellationReceiptSchema, aiClientTaskCancellationObservationSchema,
   aiClientTaskInputCancellationReceiptSchema, aiClientTaskInputReadResponseSchema, AI_TASK_INPUT_DRAFT_VERSION,
-  aiClientTaskInputSubmissionRequestSchema, aiClientTaskInputSubmissionReceiptSchema,
+  aiClientTaskInputRecoveryRequestSchema, aiClientTaskInputSubmissionReceiptSchema,
   aiClientTaskInputReceiptReadResponseSchema, aiClientTaskModelControlResponseSchema, AI_TASK_DRAFT_VERSION,
   AI_CLIENT_QUOTE_PREPARATION_VERSION, aiClientQuotePreparationRequestSchema, aiClientQuoteConfirmationRequestSchema,
   aiClientOrderMaterialRequestSchema, aiClientOrderMaterialReceiptSchema, AI_CLIENT_MATERIAL_RECEIPT_VERSION,
@@ -14,7 +14,7 @@ import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientTaskCancelReceiptSchema,
   aiClientQuoteBookingRequestSchema, aiClientQuoteBookingPreparationResponseSchema,
   aiClientQuoteBookingOperationResponseSchema } from '@rental-os/shared';
 import { aiClientGoalPreparationRequestSchema, aiClientGoalPreparationReadRequestSchema, aiClientGoalPreparationResponseSchema,
-  aiClientGoalCandidatesRequestSchema, aiClientGoalProjectionSchema, aiClientGoalQuoteRequestSchema } from '@rental-os/shared';
+  aiClientGoalCandidatesRequestSchema, aiClientGoalProjectionSchema, aiClientGoalQuoteRequestSchema, aiClientGoalQuoteRecoverySchema, aiClientGoalQuoteReadResponseSchema } from '@rental-os/shared';
 import { aiClientBookingTransferIssueRequestSchema, aiClientBookingTransferIssueResponseSchema,
   aiClientBookingTransferRequestSchema, aiClientBookingTransferReceiptSchema } from '@rental-os/shared';
 import { z } from 'zod';
@@ -230,8 +230,8 @@ export class AiClientEntryController {
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readGoalQuotePreparation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readGoalQuotePreparation(@Req() request: ClientModelHttpRequest & { body?: unknown }) {
     const body = structuredClone(request.body);
-    return this.respond(request, () => withRequestAbort(request, async signal => aiClientQuotePreparationReadResponseSchema.parse({
-      ...await this.application.readGoalQuotePreparation(request, aiClientGoalQuoteRequestSchema.parse(body), signal), contractVersion: AI_CLIENT_QUOTE_PREPARATION_VERSION }),
+    return this.respond(request, () => withRequestAbort(request, async signal => aiClientGoalQuoteReadResponseSchema.parse({
+      ...await this.application.readGoalQuotePreparation(request, aiClientGoalQuoteRecoverySchema.parse(body), signal), contractVersion: AI_CLIENT_QUOTE_PREPARATION_VERSION }),
     { maxWaitMs: 15000 }), 'read_quote_preparation_operation');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readQuotePreparationOperation) @HttpCode(200) @Header('Cache-Control', 'no-store')
@@ -421,7 +421,7 @@ export class AiClientEntryController {
   readTaskInputReceipt(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
     const current = { headers: { authorization: request?.headers?.authorization } }, input = structuredClone(body);
     return this.respond(request, () => withRequestAbort(request, async signal => {
-      const parsed = aiClientTaskInputSubmissionRequestSchema.parse(input);
+      const parsed = aiClientTaskInputRecoveryRequestSchema.parse(input);
       const { submission, ...command } = parsed;
       const result = await this.application.readOriginalTaskModelInputReceipt(current, command, submission, undefined, signal);
       const receipt = result.state === 'observed' ? { taskId: result.taskId, requestId: result.requestId,

@@ -5,8 +5,8 @@ import { API_BASE } from '../../data/apiClient';
 import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientHostCapabilitiesSchema,
   aiClientGoalPreparationRequestSchema, aiClientGoalPreparationReadRequestSchema,
   aiClientGoalPreparationResponseSchema, aiClientGoalCandidatesRequestSchema, aiClientGoalProjectionSchema,
-  aiClientGoalQuoteRequestSchema, aiClientQuotePreparationResponseSchema,
-  aiClientQuotePreparationReadResponseSchema, aiClientQuoteConfirmationRequestSchema,
+  aiClientGoalQuoteRequestSchema, aiClientQuotePreparationResponseSchema, aiClientGoalQuoteReferenceSchema, aiClientGoalQuoteReadResponseSchema,
+  aiClientQuoteConfirmationRequestSchema,
   aiClientQuoteResultReadResponseSchema, aiClientQuoteBookingRequestSchema, aiClientQuoteBookingPreparationResponseSchema,
   aiClientQuoteBookingOperationResponseSchema, aiEntryActionSchema, aiBookingDraftSchema,
   aiBookingCreateResponseSchema, aiBookingChoiceResponseSchema, aiBookingHandoffResponseSchema,
@@ -47,8 +47,8 @@ export function createClientGoalApi(context: { tenantCode: string; current(): bo
     prepareGoalQuote(input: AiClientGoalQuoteRequest, signal?: AbortSignal) {
       return call(AI_CLIENT_ENTRY_HTTP_DRAFT.prepareGoalQuote, aiClientGoalQuoteRequestSchema.parse(input), aiClientQuotePreparationResponseSchema, signal);
     },
-    readGoalQuotePreparation(input: AiClientGoalQuoteRequest, signal?: AbortSignal) {
-      return call(AI_CLIENT_ENTRY_HTTP_DRAFT.readGoalQuotePreparation, aiClientGoalQuoteRequestSchema.parse(input), aiClientQuotePreparationReadResponseSchema, signal);
+    readGoalQuotePreparation(input: ReturnType<typeof aiClientGoalQuoteReferenceSchema.parse>, signal?: AbortSignal) {
+      return call(AI_CLIENT_ENTRY_HTTP_DRAFT.readGoalQuotePreparation, aiClientGoalQuoteReferenceSchema.parse(input), aiClientGoalQuoteReadResponseSchema, signal);
     },
     confirmQuoteParameters(input: ReturnType<typeof aiClientQuoteConfirmationRequestSchema.parse>, signal?: AbortSignal) {
       return call(AI_CLIENT_ENTRY_HTTP_DRAFT.confirmQuoteParameters, aiClientQuoteConfirmationRequestSchema.parse(input), aiClientQuoteResultReadResponseSchema, signal);

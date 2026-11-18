@@ -18,6 +18,7 @@ const CLIENT_V1 = `${API_BASE}/api/client/v1`;
 
 import { customerFetch, customerLogin, customerSessionGeneration, loadCustomerSession, logoutCustomerSession, switchCustomerWorkspace, subscribeCustomerSession, ClientTransportError } from '@rental-os/web-client';
 import type { EnterpriseExchangeChoices, EnterpriseExchangeChoicesQuery, EnterpriseExchangeRequestOriginalResult, RequestEnterpriseExchangeApproval, CloseEnterpriseExchangeRequest, ClientOrderView, ClientProfileView, ClientMembershipSessionResponse, ConfirmEnterpriseExchangeExpense, EnterpriseExchangeConfirmationResult, EnterpriseExchangeApprovalView, CloseEnterpriseExtensionRequest, EnterpriseExtensionRequestOriginalResult, EnterpriseExtensionEligibility, EnterpriseExtensionApprovalView, EnterpriseExtensionOriginalResult } from '@rental-os/shared';
+import { minimizeClientRecoveryRecord } from '@rental-os/shared';
 export type ClientSession = ClientMembershipSessionResponse;
 
 export interface WorkspaceRef {
@@ -74,8 +75,17 @@ export const authApi = {
   }) {
     return postPublic<{ result: string; customerId: string; membershipStatus: string }>('/auth/register', input);
   },
-  logout(tenantCode: string) {
-    return logoutCustomerSession(tenantCode, CLIENT_V1);
+  async logout(tenantCode: string) {
+    try { return await logoutCustomerSession(tenantCode, CLIENT_V1); }
+    finally {
+      for (const key of Object.keys(localStorage)) {
+        if (!/^rental-os:client-(?:goal|order-task):[^:]+(?::history:[^:]+)?$/u.test(key)) continue;
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+        const original = JSON.parse(raw), minimal = JSON.stringify(minimizeClientRecoveryRecord(key, original));
+        if (raw !== minimal && raw === localStorage.getItem(key)) localStorage.setItem(key, minimal);
+      }
+    }
   },
 };
 

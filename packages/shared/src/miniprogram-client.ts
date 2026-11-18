@@ -7,8 +7,8 @@ export { AI_CLIENT_PUBLIC_HTTP, aiClientPublicSessionRequestSchema, aiClientPubl
   aiClientPublicPreparationResponseSchema, aiClientPublicOperationResponseSchema, aiClientPublicContinuationResponseSchema } from './ai-client-public-draft';
 export { createAiClientPublicContinuitySession } from './ai-client-public-session';
 export { aiClientGoalPreparationRequestSchema, aiClientGoalPreparationReadRequestSchema, aiClientGoalPreparationResponseSchema,
-  aiClientGoalCandidatesRequestSchema, aiClientGoalProjectionSchema, aiClientGoalQuoteRequestSchema } from './ai-client-goal-draft';
-export { createClientGoalSession, clientGoalStorageKey, clientGoalSelectedInput, clientGoalTimeOptions } from './ai-client-goal-session';
+  aiClientGoalCandidatesRequestSchema, aiClientGoalProjectionSchema, aiClientGoalQuoteRequestSchema, aiClientGoalQuoteReferenceSchema, aiClientGoalQuoteReadResponseSchema } from './ai-client-goal-draft';
+export { createClientGoalSession, clientGoalStorageKey, clientGoalSelectedInput, clientGoalTimeOptions, minimizeClientRecoveryRecord } from './ai-client-goal-session';
 export { clientGoalTextHash } from './ai-client-goal-fingerprint';
 export { enterpriseOrderDelegationMatches } from './enterprise-order-delegation';
 export { AI_TASK_DRAFT_VERSION } from './ai-task-draft';
@@ -20,7 +20,7 @@ export { AI_CLIENT_HOST_CAPABILITIES_VERSION, aiClientHostCapabilitiesRequestSch
   aiClientTaskReadRequestSchema, aiClientTaskCreationReceiptSchema,
   aiClientTaskEventsReadRequestSchema, aiClientTaskSnapshotReadResponseSchema, aiClientTaskEventsReadResponseSchema,
   aiClientTaskModelControlResponseSchema, aiClientTaskModelResultReadResponseSchema,
-  aiClientTaskInputReadResponseSchema, aiClientTaskInputSubmissionRequestSchema,
+  aiClientTaskInputReadResponseSchema, aiClientTaskInputSubmissionRequestSchema, aiClientTaskInputReferenceRequestSchema, clientTaskInputReference,
   aiClientTaskInputSubmissionReceiptSchema, aiClientTaskInputReceiptReadResponseSchema,
   aiClientTaskCancelRequestSchema, aiClientTaskCancelReceiptSchema, aiClientTaskCancellationObservationSchema,
   aiClientTaskInputCancellationReceiptSchema, aiClientTaskUnstartedCancellationReceiptSchema } from './ai-client-entry-draft-schemas';

@@ -5,13 +5,13 @@ import { AI_TASK_INPUT_DRAFT_VERSION, aiClientHostCapabilitiesSchema, aiClientOr
   aiClientOrderMaterialReceiptSchema, aiClientTaskReadRequestSchema, aiClientTaskCreationReceiptSchema,
   aiClientTaskModelControlResponseSchema, aiClientTaskModelResultReadResponseSchema, aiClientTaskInputReadResponseSchema,
   aiClientTaskInputSubmissionRequestSchema, aiClientTaskInputSubmissionReceiptSchema, aiClientTaskInputReceiptReadResponseSchema,
-  isAiTaskInputContractDraft, aiClientTaskEventsReadRequestSchema,
+  isAiTaskInputContractDraft, aiClientTaskEventsReadRequestSchema, clientTaskInputReference,
   aiClientTaskSnapshotReadResponseSchema, aiClientTaskEventsReadResponseSchema, aiClientOrderActionSchema } from '@rental-os/shared';
 import type { ClientTaskApi } from './client-task-api';
 
 type MaterialRequest = Parameters<ClientTaskApi['prepareMaterial']>[0];
 type TaskRequest = Parameters<ClientTaskApi['readCreation']>[0];
-type Submission = Parameters<ClientTaskApi['submitInput']>[0];
+type Submission = ReturnType<typeof clientTaskInputReference>;
 type Material = Awaited<ReturnType<ClientTaskApi['readMaterial']>>;
 type Creation = Awaited<ReturnType<ClientTaskApi['readCreation']>>;
 type Question = Awaited<ReturnType<ClientTaskApi['readInput']>>['question'];
@@ -58,7 +58,7 @@ function parseLocator(value: unknown, owner: string, orderId: string): Locator {
     || row.version !== 'client-order-task-operation-1' || row.owner !== owner || !phases.includes(row.phase as Phase)
     || typeof row.continued !== 'boolean') throw Error('client_task_locator_invalid');
   const material = aiClientOrderMaterialRequestSchema.parse(row.material), task = row.task === null ? null : aiClientTaskReadRequestSchema.parse(row.task);
-  const submission = row.submission === null ? null : aiClientTaskInputSubmissionRequestSchema.parse(row.submission), phase = row.phase as Phase;
+  const submission = row.submission === null ? null : clientTaskInputReference(row.submission), phase = row.phase as Phase;
   if (material.orderId !== orderId || (phases.indexOf(phase) < 2 ? task !== null : task === null)
     || (submission && (!task || submission.creationKey !== task.creationKey || submission.materialRef !== task.materialRef))
     || (['answer_pending','answered','continuation_pending'].includes(phase) && !submission)
@@ -351,6 +351,7 @@ export function createClientTaskSession(input: {
           const record = next === undefined ? null : parseLocator(next, owner, input.context.orderId);
           if (saved && !same(saved, record)) throw Error('client_task_original_replaced');
           held = next; saved = record; invalidCache = false;
+          if (record && !same(next, record)) persist(record);
         } catch { invalidCache = true; throw Error('client_task_locator_invalid'); }
         await recheck('read'); status = saved ? 'unknown' : 'ready';
         if (input.api.orderNavigation && saved?.task) {
@@ -416,7 +417,7 @@ export function createClientTaskSession(input: {
         const submission = aiClientTaskInputSubmissionRequestSchema.parse({ ...saved!.task,
           submission: { draftVersion: AI_TASK_INPUT_DRAFT_VERSION, requestId: original.requestId, expectedRevision: original.revision,
             submissionKey: input.newKey(), answers: [{ fieldId: 'clarification_text', value: text }] } });
-        persist({ ...saved!, submission, continued: false, phase: 'answer_pending' });
+        persist({ ...saved!, submission: clientTaskInputReference(submission), continued: false, phase: 'answer_pending' });
         const result = aiClientTaskInputSubmissionReceiptSchema.parse(await input.api.submitInput(copy(submission)));
         if (result.requestId !== original.requestId || result.taskId !== creation?.task?.taskId) throw Error('client_answer_origin_changed');
         receipt = { taskId: result.taskId, requestId: result.requestId, receiptId: result.receiptId, taskRevision: result.taskRevision };

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { waitForTaskApplicationDependency } from '../runner/prisma-task-application';
 import { z } from 'zod';
 import { aiClientOrderExplanationReadRequestSchema, aiClientSourceReadRequestSchema,
-  aiClientTaskCancelRequestSchema, aiClientTaskInputSubmissionRequestSchema, AI_TOOL_DRAFT_VERSION,
+  aiClientTaskCancelRequestSchema, aiClientTaskInputRecoveryRequestSchema, aiClientTaskInputSubmissionRequestSchema, AI_TOOL_DRAFT_VERSION,
   aiClientOrderMaterialRequestSchema, aiClientOrderMaterialReceiptSchema, AI_CLIENT_MATERIAL_RECEIPT_VERSION,
   aiClientOrderActionSourceSchema, aiClientOrderActionRevalidationSchema, type AiClientOrderActionSource,
   aiClientTaskAccountingRequestSchema, aiClientTaskAccountingResponseSchema,
@@ -10,7 +10,7 @@ import { aiClientOrderExplanationReadRequestSchema, aiClientSourceReadRequestSch
   aiBookingAcceptanceReadRequestSchema } from '@rental-os/shared';
 import { AI_CLIENT_GOAL_VERSION, aiClientGoalPreparationRequestSchema, aiClientGoalPreparationReadRequestSchema,
   aiClientGoalPreparationResponseSchema, aiClientGoalCandidatesRequestSchema, aiClientGoalProjectionSchema,
-  aiClientGoalQuoteRequestSchema } from '@rental-os/shared';
+  aiClientGoalQuoteRequestSchema, aiClientGoalQuoteRecoverySchema } from '@rental-os/shared';
 import { ExecutionContextHost } from '@nestjs/core/helpers/execution-context-host';
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
 import { getRequestIdentity, runWithRequestIdentity } from '../../../common/request-identity';
@@ -1053,7 +1053,8 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
           const latest = await readOriginalTaskModelObservation(request, original, configuredResultSource, true);
           if (jsonHash(observed) !== jsonHash(latest)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
           attempted = true;
-          return withQuotePreparation(request, preparation => preparation.prepare(prepared), signal);
+          const goalHash = requestFingerprint({ ...original, expectedMaterialHash: row.materialHash, expectedProjectionHash: command.expectedProjectionHash });
+          return withQuotePreparation(request, preparation => preparation.prepare(prepared, goalHash), signal);
         }, signal);
       } catch (error) {
         if (attempted) throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'original_quote_preparation_requires_recheck');
@@ -1061,8 +1062,11 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       }
     },
     async readGoalQuotePreparation(request: AiClientApplicationRequest, value: unknown, signal?: AbortSignal) {
-      const command = aiClientGoalQuoteRequestSchema.parse(structuredClone(value));
-      return withQuotePreparation(request, preparation => preparation.readPreparationOperation({ operationKey: command.operationKey, input: command.input }), signal);
+      const command = aiClientGoalQuoteRecoverySchema.parse(structuredClone(value));
+      const { creationKey, materialRef, expectedMaterialHash, expectedProjectionHash, operationKey } = command;
+      const goalHash = requestFingerprint({ creationKey, materialRef, expectedMaterialHash, expectedProjectionHash });
+      const query = 'selectionHash' in command ? { operationKey, selectionHash: command.selectionHash } : { operationKey, input: command.input };
+      return withQuotePreparation(request, preparation => preparation.readPreparationOperation(query, goalHash), signal);
     },
     /** Original material INSERT receipt, not refreshed order facts or execution
      * permission. A changed order/expired material must not erase its receipt. */
@@ -1458,24 +1462,30 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     },
     /** Explicit server execution dependencies, exact original answer receipt;
      * never resubmit, select a caller run or automatically start after submit. */
-    continueOriginalTaskModelInput(request: AiClientApplicationRequest, value: unknown,
+    async continueOriginalTaskModelInput(request: AiClientApplicationRequest, value: unknown,
       model: ClientModelServerDependencies = configuredModel(), signal?: AbortSignal) {
-      const { submission, ...command } = parseEntry(aiClientTaskInputSubmissionRequestSchema, structuredClone(value));
-      return runOriginalTaskModel(request, command, model, signal, submission, 'continue');
+      const { submission, ...command } = parseEntry(aiClientTaskInputRecoveryRequestSchema, structuredClone(value));
+      if ('answers' in submission) return runOriginalTaskModel(request, command, model, signal, submission, 'continue');
+      const answers = await withOriginalTaskReceipt(request, command, async (authorized, db) => {
+        if (!db) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_input_dependencies_missing');
+        const grant = await authorized.execution.readOriginalGrant();
+        const original = await PrismaTaskInputRepository.receiptReader(db, authorized.tasks, clock).resolveSubmissionReference({ ...submission, taskId: grant.taskId });
+        const { taskId: _taskId, ...answer } = original.submission!;
+        return answer;
+      }, signal, model.db);
+      return runOriginalTaskModel(request, command, model, signal, answers, 'continue');
     },
     async readOriginalTaskModelInputReceipt(request: AiClientApplicationRequest, value: unknown, answerValue: unknown,
       source = configuredTaskInputSource, signal?: AbortSignal) {
       if (source && source.db !== dependencies.db) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-      const parsed = z.record(z.unknown()).safeParse(structuredClone(answerValue));
-      if (!parsed.success || Object.prototype.hasOwnProperty.call(parsed.data, 'taskId')) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-      const submission = { ...parsed.data, taskId: 'validation-only' };
-      if (!isAiTaskInputSubmissionDraft(submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-      const { taskId: _taskId, ...answers } = submission;
+      const command = parseEntry(clientTaskCommandSchema, structuredClone(value));
+      const { submission } = parseEntry(aiClientTaskInputRecoveryRequestSchema, { ...command, submission: structuredClone(answerValue) });
       return withOriginalTaskReceipt(request, value, async (authorized, db) => {
         if (!db) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_input_dependencies_missing');
         const grant = await authorized.execution.readOriginalGrant();
-        return PrismaTaskInputRepository.receiptReader(db, authorized.tasks, clock)
-          .readSubmission({ ...answers, taskId: grant.taskId });
+        const reader = PrismaTaskInputRepository.receiptReader(db, authorized.tasks, clock);
+        return 'answers' in submission ? reader.readSubmission({ ...submission, taskId: grant.taskId })
+          : reader.readSubmissionReference({ ...submission, taskId: grant.taskId });
       }, signal, source?.db);
     },
     async readHostCapabilities(request: AiClientApplicationRequest, value: unknown): Promise<AiClientHostCapabilities> {

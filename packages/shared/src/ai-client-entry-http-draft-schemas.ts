@@ -113,6 +113,10 @@ export const AI_CLIENT_ENTRY_HTTP_SCHEMAS = {
     object({ contractVersion: literal(AI_CLIENT_QUOTE_PREPARATION_VERSION), state: literal('unknown'),
       operationKey: id, retryable: literal(false), execution: literal('read_only') })] },
   AiClientQuoteFacts: originalQuoteFacts,
+  AiClientGoalQuoteReadResponse: { oneOf: [
+    object({ ...quotePreparation, state: literal('observed'), retryable: literal(false), execution: literal('read_only'), parameterReview: quoteParameterReview, originalSelection: ref('ClientQuoteRequest') },
+      [...Object.keys(quotePreparation), 'state', 'retryable', 'execution']),
+    object({ contractVersion: literal(AI_CLIENT_QUOTE_PREPARATION_VERSION), state: literal('unknown'), operationKey: id, retryable: literal(false), execution: literal('read_only') })] },
   AiClientQuoteResultReadResponse: { oneOf: [
     object({ ...quoteResult, state: literal('observed'), quote: ref('AiClientQuoteFacts'), quotePersistence: literal('saved') },
       [...Object.keys(quoteResult).filter(key => key !== 'observedAt'), 'state', 'quote', 'quotePersistence']),
