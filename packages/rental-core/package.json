@@ -906,6 +906,50 @@
     "./file-application-exchange-inspection": {
       "types": "./dist/file-application-exchange-inspection.d.ts",
       "default": "./dist/file-application-exchange-inspection.js"
+    },
+    "./http-staff-auth": {
+      "types": "./dist/http-staff-auth.controller.d.ts",
+      "default": "./dist/http-staff-auth.controller.js"
+    },
+    "./http-staff-uploads": {
+      "types": "./dist/http-staff-uploads.controller.d.ts",
+      "default": "./dist/http-staff-uploads.controller.js"
+    },
+    "./staff-upload-observation": {
+      "types": "./dist/staff-upload-observation.d.ts",
+      "default": "./dist/staff-upload-observation.js"
+    },
+    "./client-session-ports": {
+      "types": "./dist/client-session-ports.d.ts",
+      "default": "./dist/client-session-ports.js"
+    },
+    "./mysql-client-auth": {
+      "types": "./dist/mysql-client-auth.d.ts",
+      "default": "./dist/mysql-client-auth.js"
+    },
+    "./mysql-customer-registration": {
+      "types": "./dist/mysql-customer-registration.d.ts",
+      "default": "./dist/mysql-customer-registration.js"
+    },
+    "./mysql-customer-registration-transaction": {
+      "types": "./dist/mysql-customer-registration-transaction.d.ts",
+      "default": "./dist/mysql-customer-registration-transaction.js"
+    },
+    "./mysql-client-rate-limit": {
+      "types": "./dist/mysql-client-rate-limit.d.ts",
+      "default": "./dist/mysql-client-rate-limit.js"
+    },
+    "./mysql-client-website-assets": {
+      "types": "./dist/mysql-client-website-assets.d.ts",
+      "default": "./dist/mysql-client-website-assets.js"
+    },
+    "./http-client-applications": {
+      "types": "./dist/http-client-applications.d.ts",
+      "default": "./dist/http-client-applications.js"
+    },
+    "./http-client": {
+      "types": "./dist/http-client.controller.d.ts",
+      "default": "./dist/http-client.controller.js"
     }
   },
   "typesVersions": {
@@ -1581,6 +1625,39 @@
       ],
       "file-application-exchange-inspection": [
         "dist/file-application-exchange-inspection.d.ts"
+      ],
+      "http-staff-auth": [
+        "dist/http-staff-auth.controller.d.ts"
+      ],
+      "http-staff-uploads": [
+        "dist/http-staff-uploads.controller.d.ts"
+      ],
+      "staff-upload-observation": [
+        "dist/staff-upload-observation.d.ts"
+      ],
+      "client-session-ports": [
+        "dist/client-session-ports.d.ts"
+      ],
+      "mysql-client-auth": [
+        "dist/mysql-client-auth.d.ts"
+      ],
+      "mysql-customer-registration": [
+        "dist/mysql-customer-registration.d.ts"
+      ],
+      "mysql-customer-registration-transaction": [
+        "dist/mysql-customer-registration-transaction.d.ts"
+      ],
+      "mysql-client-rate-limit": [
+        "dist/mysql-client-rate-limit.d.ts"
+      ],
+      "mysql-client-website-assets": [
+        "dist/mysql-client-website-assets.d.ts"
+      ],
+      "http-client-applications": [
+        "dist/http-client-applications.d.ts"
+      ],
+      "http-client": [
+        "dist/http-client.controller.d.ts"
       ]
     }
   },

@@ -8,6 +8,7 @@
 | --- | --- |
 | [公共文件应用](file-storage.application.ts) | 按受控登记消费实际权威，沿原键创建/回读、一次冻结及同事务激活；Core不需要导入旧API运行时 |
 | [业务权威合同](file-storage-authority.ts) | module/type/scene绑定、当前权限、原回执和领域激活参加者；登记本身不授予访问权 |
+| [共用上传DTO](file-upload.dto.ts) | 正式 `/file-dto` 与原Staff/文件HTTP共用原创建、完成类和装饰器；实际场景、权限与metadata由所属Core裁定 |
 | [应用事务端口](file-storage.application-store.ts) | 同一文件表与冻结/激活/清理事务能力，业务表由Core参加者访问 |
 | [公共字节原语](file-storage-primitives.ts) | 原文件类型/大小校验、存储键、会话/资产投影、对象删除及精确限长读取；原运行时继承消费 |
 | [内容冻结内核](file-content-freeze.ts) | 原通用上传完成入口委托同一目标占用、单次写入及原目标读取核验；当前授权、配置锁及专用字节由原参加者供给 |
@@ -21,7 +22,7 @@
 | [原冻结合同](../../../../platform-contracts/src/file-content-binding.ts) | 存储位置及已冻结字节指纹，原兼容入口继续消费同源合同 |
 | [Rental 附件权限](../../../../rental-core/src/file-access.ts) | 当前业务对象读取 ACL、已发布商品图、客户敏感附件以及业务引用存在性 |
 
-原 [FilesController](../../../../../apps/api/src/modules/files/files.controller.ts) 混合公共工具及实名、承运等 Rental 专用入口，各自保留原 Guard 和业务授权。原 [员工控制器](../../../../../apps/api/src/modules/files/staff-uploads.controller.ts) 继续校验场景、阶段、地点范围、本人上传和检查绑定。原 [文件 ACL 接线](../../../../../apps/api/src/modules/files/file-business-access.service.ts) 供给同一 Rental 事实仓储、报价读取和客户敏感资料参加者。
+原 [FilesController](../../../../../apps/api/src/modules/files/files.controller.ts) 混合公共工具及实名、承运等 Rental 专用入口，各自保留原 Guard 和业务授权。原 [员工控制器](../../../../../apps/api/src/modules/files/staff-uploads.controller.ts) 再导出 [Rental员工HTTP](../../../../rental-core/src/http-staff-uploads.controller.ts)，继续校验场景、阶段、地点范围、本人上传和检查绑定；[实际接线](../../../../../apps/api/src/modules/files/staff-http.providers.ts)供给同一文件/数据库及原始body解析器。原 [文件 ACL 接线](../../../../../apps/api/src/modules/files/file-business-access.service.ts) 供给同一 Rental 事实仓储、报价读取和客户敏感资料参加者。
 
 ## Core 接入
 

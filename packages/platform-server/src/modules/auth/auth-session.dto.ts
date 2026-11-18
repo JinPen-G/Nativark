@@ -16,3 +16,7 @@ export class ChangePasswordDto implements ChangePasswordRequest {
   @IsString() @IsNotEmpty() currentPassword!: string;
   @IsString() @MinLength(8) newPassword!: string;
 }
+
+export class SwitchWorkspaceDto {
+  @IsString() @IsNotEmpty() workspaceId!: string;
+}

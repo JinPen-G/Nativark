@@ -11,6 +11,48 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-staff-http-20261118"></a>
+
+## Rental员工认证与附件HTTP（2026-11-18）
+
+dev1完成共享树中约定的11个Staff/共用DTO路径后明确停写，RD统一包出口、AppModule、资料、索引与提交；原文由固定父版694ae834323669fffd584d2b8f5137fdda7da178保全。[员工认证](../../../packages/rental-core/src/http-staff-auth.controller.ts)与[附件HTTP](../../../packages/rental-core/src/http-staff-uploads.controller.ts)实际归Rental，旧两个Controller只再导出同一类。[观察合同](../../../packages/rental-core/src/staff-upload-observation.ts)为纯声明，原shared兼容再导出，Ajv/schema与原始body解析仍由原宿主供给。
+
+[实际Staff接线](../../../apps/api/src/modules/files/staff-http.providers.ts)以useExisting复用原Auth、Prisma及文件；缺原检查权威时绑定仍拒绝。7个认证方法固定staff audience，员工不因此取得营运或其他Core权限。上传/完成两DTO从公共/file-dto复用同一运行时类，原Auth DTO转接同一类；字段、装饰器、校验顺序保持。五组tuple继续核地点、交接阶段、本人上传、原键/检查及原冻结对象，原始req.body额外selector即使被whitelist剥离，也不能变成合法请求。
+
+| 必要核验 | 实际结果与边界 |
+| --- | --- |
+| 作者类型终态 | 原验证进程终态回收为2360源/0诊断/退出0；正式exports/typesVersions落盘后仅复验实际2根/2369源，0诊断/退出0，不补进程内出口。RD客户片的AppModule 7根/2370源也覆盖本片实际接线 |
+| 一次原消费者冒烟 | dev1-staff-http-original-consumer-smoke经stdin退出0；实际Nest application context核Auth/Prisma/Storage均为原同实例，7个Auth方法固定staff及原异常，7+5 HTTP路由和参数DTO元数据逐项对照父版相同 |
+| 原上传与拒绝 | 五tuple经原Runtime及实际Rental ACL核创建/完成/下载/原键观察、历史缺metadata兼容、权限/地点/会话撤销、事务回滚、PUT失应答后只读原冻结对象；真实ValidationPipe剥离原始body多余selector后仍拒绝，缺检查参加者拒绝及bind原方法透传通过 |
+| 固定正文 | 原7+10方法、共用DTO字段/装饰器、原Ajv/parser/schema一致。仅注入解析器、私有请求/公共owner类型替换；原权限、SQL选择条件、状态、原键、期限与副作用不改。RD重复定位核7个Auth正文完全一致、上传10正文除两处类型及解析器引用外一致 |
+| 清理与限制 | 作者限定CRLF空白检查退出0，output/.tmp/dev1-staff-http已删除，无网络、环境文件或越界写守卫事件。数据库/并发、文件提供者为明确fixture；真实HTTP、MySQL并发、微信宿主和对象存储未验，无新增永久测试脚本 |
+
+六份同片资料定向核对1752链接、162锚点及98表格，0问题；四份只调整源码定位的原脚本经node --check均退出0。两包依赖/peer/meta与锁文件一致，12个新正式子出口与源码/typesVersions逐项匹配，39路径限定CRLF空白检查通过，正式需求/任务与固定父版原文保持。本片与[客户认证/HTTP](#core-rental-client-auth-http-20261118)共同收口。[Rental导读](../../../packages/rental-core/README.md)、[原业务导读](../../../apps/api/src/modules/rental-core/README.md)、[公共文件说明](../../../packages/platform-server/src/modules/files/README.md)与接续同步实际入口。PCH-06/08的完整标准主装配、授权等价映射、数据/迁移/Seed及事件/作业/回调仍未完成，本片不替代原整项验收或提高原进度。固定阶段提交以包含本节的Git版本定位，普通推送后回读实际远端。
+
+下一窄窗口已释放给dev1：迁入原Runtime中企业授权/回款凭证字节读取、Staff原键观察和检查字节读取，Rental新文件持有原实现，Runtime仅对应委托；README、包出口、AppModule、索引和四册仍由RD负责。知识/隐私的原业务权威边界保留，未知结果只核原事实。
+
+<a id="core-rental-client-auth-http-20261118"></a>
+
+## Rental客户认证、统一注册与HTTP（2026-11-18）
+
+本片在共享树codex/platform-core-extraction继续施工，固定父版694ae834323669fffd584d2b8f5137fdda7da178与实际任务远端一致；实际main仍为已包含的ba1de9f91860c4e73503eded4e1d05d2307b0e28。暂存区空，无合并/拣选现场。RD完成客户片，dev1继续约定Staff文件；AppModule、包出口、索引和四册由RD统一维护，旧原文与接续直接引用固定父版。
+
+[客户HTTP](../../../packages/rental-core/src/http-client.controller.ts)、[认证](../../../packages/rental-core/src/mysql-client-auth.ts)、[统一注册](../../../packages/rental-core/src/mysql-customer-registration.ts)、[注册事务](../../../packages/rental-core/src/mysql-customer-registration-transaction.ts)、[限流](../../../packages/rental-core/src/mysql-client-rate-limit.ts)及[官网图片](../../../packages/rental-core/src/mysql-client-website-assets.ts)实际归Rental，原路径为窄Nest适配/再导出。[八项HTTP接点](../../../packages/rental-core/src/http-client-applications.ts)由[原宿主](../../../apps/api/src/modules/client/client-http.providers.ts)以useExisting供给同一业务、Auth、微信、地址、注销、企业和Guard；原AppModule登记一次，保留八项参数顺序与Optional。敏感资料在读取后仍复验原会话绑定，本人/企业audience没有转成营运授权。
+
+客户认证保留原JWT用途、签名/过期、密码依据、用途证明、会员/账号及refresh一次消费。旧Auth适配保留五项构造位置和同一数据源的缺省客户/注册实例；包内实际实现要求真实客户、注册及短信参加者。[私有端口](../../../packages/rental-core/src/client-session-ports.ts)只暴露本片实际使用的模型/事务能力，MySQL生成类型不进入平台公共合同。后台和自助注册共用同一实现及原客户锁，Serializable只对P2002/P2034按原上限重试；其他错误原样传播。原数据库配额、来源地址、唯一清理实例、图片格式/2MB/租户边界均保留。
+
+| 必要核验 | 实际结果与边界 |
+| --- | --- |
+| 固定正文 | 对照694ae父版，Auth25方法及3自由函数、注册1方法、限流11方法/辅助函数、客户HTTP83方法/辅助函数正文一致；官网字节算法保持。变动为实例接线、正式出口与职责说明 |
+| 必要类型 | node --no-compilation-cache -经stdin，退出0；AppModule、实际HTTP/providers、原Auth/注册/限流/官网共7根/2370源，TypeScript5.9.3零诊断。Prisma5.22官方内存声明由组合238模型/35枚举及公共33/14生成，31,201,345/2,177,556字节，磁盘生成0 |
+| 原消费者 | client-api-security与customer-registration-unified两份原用例及全部原断言通过，后者保留9段原行为。静态读取仅将原Controller/Auth/限流实现定位改到Rental包；client-order-document、enterprise-portal-access、integrations-security三份本片只修源码位置，未另运行其全套 |
+| 补充会话/HTTP冒烟 | 仅复验补充范围，最终退出0；原JWT/密码依据、refresh只消费一次、临时密码改密恢复、logout拒绝原会话、八项实际注入token、PUT/PATCH引用同一DTO类、资料返回前绑定改变拒绝/稳定绑定成功，以及原有限冲突重试通过 |
+| 首轮问题 | 类型首轮3诊断是私有端口漏queryRaw与clientWechatIdentity，准确补齐后复验同一范围。离线加载夹具先漏35个真实枚举且在加载期误挡纯IP校验，补原枚举并仅允许纯函数，DNS调用仍拒绝。两原用例通过后的补充夹具把根存储与事务设为同对象，触发原issueSession的正当递归；更正不同对象后只复验补充范围。前次worker整体退出1的事实保留，不将已通过用例与后续失败混称整段退出0 |
+
+模块导读、[客户端API说明v1.17](../../../docs/公共技术资料/接口说明/客户端-API说明.md)及接续同片导航实际HTTP→应用→私有存储/参加者，原v1路径、字段、DTO与OpenAPI业务规则没有改动。验证全部使用明确数据库、短信、事务和Guard fixture；没有真实HTTP/MySQL/微信、浏览器、安装、迁移或独立审查，也没有新增永久测试脚本、临时环境或后台业务服务。
+
+本片继续完善PCH-06/08的实际服务和消费者。完整事件/作业/回调、Rental标准主装配、原授权等价映射及独立schema/迁移/Seed仍是未完项，不能据局部迁入和冒烟跨原下一档。知识2/6、外观16/17、API614项及旧待清理环境保持原问题归属。中文阶段提交与普通推送在必要资料核对后完成，固定提交由包含本节的Git版本定位。
+
 <a id="core-rental-private-exchange-files-20261118"></a>
 
 ## Rental专用换货影像的文件适配（2026-11-18）

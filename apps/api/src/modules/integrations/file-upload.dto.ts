@@ -1,15 +1,13 @@
-import { IsIn, IsInt, IsObject, IsOptional, IsString, Max, MaxLength, Min } from "class-validator";
-import type { CompleteFileUploadRequest, CreateCarrierEvidenceUploadRequest, CreateCustomerIdentityUploadRequest, CreateFileUploadSessionRequest } from "@rental-os/shared";
+import { IsIn, IsInt, IsString, Max, MaxLength, Min } from "class-validator";
+import type { CreateCarrierEvidenceUploadRequest, CreateCustomerIdentityUploadRequest } from "@rental-os/shared";
 import { STAFF_UPLOAD_OBSERVATION_SCHEMAS, type StaffUploadObservationRequest } from '@rental-os/shared';
 import { BadRequestException } from '@nestjs/common';
 import Ajv from 'ajv';
+export { CompleteFileUploadDto, CreateFileUploadSessionDto } from "@rental-os/platform-server/file-dto";
+export { StaffUploadObservationDto } from "@rental-os/rental-core/http-staff-uploads";
 
 const validStaffObservation = new Ajv({ strict: true, coerceTypes: false, useDefaults: false, removeAdditional: false })
   .compile<StaffUploadObservationRequest>(STAFF_UPLOAD_OBSERVATION_SCHEMAS.StaffUploadObservationRequest);
-export class StaffUploadObservationDto implements StaffUploadObservationRequest {
-  @IsObject() reference!: StaffUploadObservationRequest['reference'];
-  @IsObject() file!: StaffUploadObservationRequest['file'];
-}
 /** Detach the original body before awaiting authority; never strip a supplied
  * actor, workspace or extra selector into an apparently valid observation. */
 export function parseStaffUploadObservation(value: unknown): StaffUploadObservationRequest {
@@ -27,22 +25,6 @@ export function parseStaffUploadObservation(value: unknown): StaffUploadObservat
     }
   } catch { /* A malformed descriptor is not an upload observation. */ }
   throw new BadRequestException('原上传会话引用或文件描述无效');
-}
-
-export class CreateFileUploadSessionDto implements CreateFileUploadSessionRequest {
-  @IsString() businessModule!: string;
-  @IsString() businessType!: string;
-  @IsString() businessId!: string;
-  @IsString() fileName!: string;
-  @IsString() mimeType!: string;
-  @IsInt() @Min(1) @Max(20 * 1024 * 1024) sizeBytes!: number;
-  @IsString() uploadScene!: string;
-  @IsString() idempotencyKey!: string;
-  @IsOptional() @IsObject() metadata?: Record<string, unknown>;
-}
-
-export class CompleteFileUploadDto implements CompleteFileUploadRequest {
-  @IsOptional() @IsString() @MaxLength(191) checksum?: string;
 }
 
 /** 文件业务归属由专用实名路由固定，客户端不能伪造 customerId / scene。 */

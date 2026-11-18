@@ -266,6 +266,10 @@
     "./file-integration-dependencies": {
       "types": "./dist/modules/files/file-integration-dependencies.d.ts",
       "default": "./dist/modules/files/file-integration-dependencies.js"
+    },
+    "./file-dto": {
+      "types": "./dist/modules/files/file-upload.dto.d.ts",
+      "default": "./dist/modules/files/file-upload.dto.js"
     }
   },
   "scripts": {
@@ -481,6 +485,9 @@
       ],
       "file-integration-dependencies": [
         "dist/modules/files/file-integration-dependencies.d.ts"
+      ],
+      "file-dto": [
+        "dist/modules/files/file-upload.dto.d.ts"
       ]
     }
   }

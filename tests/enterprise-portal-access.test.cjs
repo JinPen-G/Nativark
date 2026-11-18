@@ -94,7 +94,7 @@ test('revision conflict has an explicit pre-write rejection; committed original 
 });
 test('all seven portal operations retain matching Controller methods and OpenAPI references', () => {
   const api = fs.readFileSync('apps/api/src/contracts/openapi-document.ts', 'utf8');
-  const client = fs.readFileSync('apps/api/src/modules/client/client-api.controller.ts', 'utf8');
+  const client = fs.readFileSync('packages/rental-core/src/http-client.controller.ts', 'utf8');
   const membership = fs.readFileSync('apps/api/src/modules/platform/membership.controller.ts', 'utf8');
   // 复用原合同检查器的源码加载方式，跨领域引用在实际OpenAPI组合中核对。
   require('ts-node').register({ transpileOnly: true, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });

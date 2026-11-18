@@ -1,10 +1,6 @@
-import type { ResetLocalDemoPasswordRequest, SwitchWorkspaceRequest } from "@rental-os/shared";
-import { IsNotEmpty, IsString, MinLength } from "class-validator";
-export { LoginDto, RefreshSessionDto, ChangePasswordDto } from "./auth-session.dto";
-
-export class SwitchWorkspaceDto implements SwitchWorkspaceRequest {
-  @IsString() @IsNotEmpty() workspaceId!: string;
-}
+import type { ResetLocalDemoPasswordRequest } from "@rental-os/shared";
+import { IsString, MinLength } from "class-validator";
+export { LoginDto, RefreshSessionDto, ChangePasswordDto, SwitchWorkspaceDto } from "./auth-session.dto";
 
 /** 仅本机开发环境使用；密码只在本次请求中传输并立即哈希，不返回、不记录。 */
 export class ResetLocalDemoPasswordDto implements ResetLocalDemoPasswordRequest {

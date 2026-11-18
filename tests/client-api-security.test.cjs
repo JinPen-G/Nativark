@@ -41,7 +41,7 @@ const { ApiAuthGuard } = require("../apps/api/src/common/api-auth.guard");
   );
 
   const source = require("node:fs").readFileSync(
-    require("node:path").join(__dirname, "../apps/api/src/modules/client/client-api-rate-limit.service.ts"),
+    require("node:path").join(__dirname, "../packages/rental-core/src/mysql-client-rate-limit.ts"),
     "utf8"
   );
   assert.match(source, /ON DUPLICATE KEY UPDATE count = count \+ 1/u);
@@ -181,7 +181,7 @@ const { ApiAuthGuard } = require("../apps/api/src/common/api-auth.guard");
   const stored = challenges.get(registered.challengeId).codeHash;
   assert.match(stored, /^[0-9a-f]{64}$/u);
   assert.match(
-    require("node:fs").readFileSync(require("node:path").join(__dirname, "../apps/api/src/modules/client/client-auth.service.ts"), "utf8"),
+    require("node:fs").readFileSync(require("node:path").join(__dirname, "../packages/rental-core/src/mysql-client-auth.ts"), "utf8"),
     /createHmac\("sha256", `\$\{this\.secret\(\)\}:client-challenge`\)/u,
     "验证码哈希必须以 AUTH_TOKEN_SECRET 做 HMAC 密钥"
   );

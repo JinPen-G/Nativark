@@ -1,15 +1,2 @@
-import { Prisma } from "@prisma/client";
-import type { PrismaService } from "../database/prisma.service";
-
-export async function customerRegistrationTransaction<T>(
-  prisma: PrismaService,
-  work: (tx: Prisma.TransactionClient) => Promise<T>
-): Promise<T> {
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      return await prisma.$transaction(work, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-    } catch (error) {
-      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || !["P2002", "P2034"].includes(error.code) || attempt >= 2) throw error;
-    }
-  }
-}
+/** 原注册调用方继续使用同一Serializable事务与冲突重试实现。 */
+export { customerRegistrationTransaction } from "@rental-os/rental-core/mysql-customer-registration-transaction";
