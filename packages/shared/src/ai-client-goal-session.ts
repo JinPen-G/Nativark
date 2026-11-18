@@ -4,20 +4,21 @@
  * keys; reading never starts a model, continues an answer or confirms a quote. */
 import { AI_TASK_INPUT_DRAFT_VERSION } from './ai-task-input-draft';
 import { RENTAL_FULFILLMENT_MODES, RENTAL_PRICING_UNIT_CODES } from './core';
-import { aiClientHostCapabilitiesSchema, aiClientTaskReadRequestSchema, aiClientTaskCreationReceiptSchema,
+import { aiClientHostCapabilitiesSchema, aiClientOrderMaterialRequestSchema, aiClientTaskReadRequestSchema, aiClientTaskCreationReceiptSchema,
   aiClientTaskSnapshotReadResponseSchema, aiClientTaskModelResultReadResponseSchema, aiClientTaskModelControlResponseSchema,
   aiClientTaskInputReadResponseSchema, aiClientTaskInputSubmissionRequestSchema, aiClientTaskInputSubmissionReceiptSchema,
-  aiClientTaskInputReceiptReadResponseSchema } from './ai-client-entry-draft-schemas';
+  aiClientTaskInputReceiptReadResponseSchema, clientTaskInputReference } from './ai-client-entry-draft-schemas';
 import { aiClientGoalPreparationRequestSchema, aiClientGoalPreparationReadRequestSchema, aiClientGoalPreparationResponseSchema,
-  aiClientGoalCandidatesRequestSchema, aiClientGoalProjectionSchema, aiClientGoalQuoteRequestSchema,
+  aiClientGoalCandidatesRequestSchema, aiClientGoalProjectionSchema, aiClientGoalQuoteRequestSchema, aiClientGoalQuoteReferenceSchema, aiClientGoalQuoteReadResponseSchema,
   type AiClientGoalProjection, type AiClientGoalQuoteRequest } from './ai-client-goal-draft';
-import { aiClientQuotePreparationResponseSchema, aiClientQuotePreparationReadResponseSchema,
+import { aiClientQuotePreparationResponseSchema,
   aiClientQuoteConfirmationRequestSchema, aiClientQuoteResultReadResponseSchema, type AiClientQuoteFacts,
   type AiClientQuoteParameterReview } from './ai-client-quote-draft';
 import type { ClientCreateQuoteRequest } from './client';
 import type { RentalFulfillmentMode } from './core';
 import type { EnterpriseOwnRentalPolicy } from './enterprise-policy';
-import { clientGoalTextHash } from './ai-client-goal-fingerprint';
+import { clientGoalFingerprint, clientGoalTextHash } from './ai-client-goal-fingerprint';
+import { clientBookingRecoveryLocator, clientQuoteRecoveryLocator } from './ai-client-quote-session';
 
 export interface ClientGoalSignal { readonly aborted: boolean }
 export interface ClientGoalApi {
@@ -26,7 +27,7 @@ export interface ClientGoalApi {
   readGoalPreparation(input: ReturnType<typeof aiClientGoalPreparationReadRequestSchema.parse>, signal?: ClientGoalSignal): Promise<unknown>;
   readGoalCandidates(input: ReturnType<typeof aiClientGoalCandidatesRequestSchema.parse>, signal?: ClientGoalSignal): Promise<unknown>;
   prepareGoalQuote(input: AiClientGoalQuoteRequest, signal?: ClientGoalSignal): Promise<unknown>;
-  readGoalQuotePreparation(input: AiClientGoalQuoteRequest, signal?: ClientGoalSignal): Promise<unknown>;
+  readGoalQuotePreparation(input: ReturnType<typeof aiClientGoalQuoteReferenceSchema.parse>, signal?: ClientGoalSignal): Promise<unknown>;
   confirmQuoteParameters(input: ReturnType<typeof aiClientQuoteConfirmationRequestSchema.parse>, signal?: ClientGoalSignal): Promise<unknown>;
   readQuoteOriginal(input: ReturnType<typeof aiClientQuoteConfirmationRequestSchema.parse>, signal?: ClientGoalSignal): Promise<unknown>;
   readCatalog(signal?: ClientGoalSignal): Promise<unknown>;
@@ -39,12 +40,12 @@ export interface ClientGoalApi {
   readModelResult(input: ReturnType<typeof aiClientTaskReadRequestSchema.parse>, signal?: ClientGoalSignal): Promise<ReturnType<typeof aiClientTaskModelResultReadResponseSchema.parse>>;
   readInput(input: ReturnType<typeof aiClientTaskReadRequestSchema.parse>, signal?: ClientGoalSignal): Promise<ReturnType<typeof aiClientTaskInputReadResponseSchema.parse>>;
   submitInput(input: ReturnType<typeof aiClientTaskInputSubmissionRequestSchema.parse>, signal?: ClientGoalSignal): Promise<ReturnType<typeof aiClientTaskInputSubmissionReceiptSchema.parse>>;
-  readInputReceipt(input: ReturnType<typeof aiClientTaskInputSubmissionRequestSchema.parse>, signal?: ClientGoalSignal): Promise<ReturnType<typeof aiClientTaskInputReceiptReadResponseSchema.parse>>;
-  continueInput(input: ReturnType<typeof aiClientTaskInputSubmissionRequestSchema.parse>, signal?: ClientGoalSignal): Promise<ReturnType<typeof aiClientTaskModelControlResponseSchema.parse>>;
+  readInputReceipt(input: ReturnType<typeof clientTaskInputReference>, signal?: ClientGoalSignal): Promise<ReturnType<typeof aiClientTaskInputReceiptReadResponseSchema.parse>>;
+  continueInput(input: ReturnType<typeof clientTaskInputReference>, signal?: ClientGoalSignal): Promise<ReturnType<typeof aiClientTaskModelControlResponseSchema.parse>>;
 }
 type GoalRead = Parameters<ClientGoalApi['readGoalPreparation']>[0];
 type TaskRead = Parameters<ClientGoalApi['readCreation']>[0];
-type Submission = Parameters<ClientGoalApi['submitInput']>[0];
+type Submission = ReturnType<typeof clientTaskInputReference>;
 type Creation = Awaited<ReturnType<ClientGoalApi['readCreation']>>;
 type Question = Awaited<ReturnType<ClientGoalApi['readInput']>>['question'];
 type Receipt = Awaited<ReturnType<ClientGoalApi['readInputReceipt']>>['receipt'];
@@ -57,7 +58,7 @@ type Phase = 'goal_pending' | 'goal_ready' | 'task_pending' | 'task_ready' | 'mo
 interface Locator {
   version: 'client-goal-operation-1'; owner: string; goal: GoalRead; material: Material | null;
   task: TaskRead | null; phase: Phase; answer: Submission | null; continued: boolean;
-  quote: { request: AiClientGoalQuoteRequest; material: Material | null; timeZone?: string } | null;
+  quote: { request: ReturnType<typeof aiClientGoalQuoteReferenceSchema.parse>; material: Material | null; timeZone?: string } | null;
 }
 /** Observed original quote and the human selection that produced it. These
  * references are host input; the original Booking service rechecks authority. */
@@ -176,22 +177,28 @@ const materialLocator = (value: unknown): Material => {
   if (typeof row.inputHash !== 'string' || !/^[a-f0-9]{64}$/u.test(row.inputHash) || !date(row.expiresAt)) throw Error('client_goal_reference_invalid');
   return { materialRef: ref.materialRef, materialHash: ref.expectedMaterialHash, inputHash: row.inputHash, expiresAt: row.expiresAt };
 };
-function parseLocator(value: unknown, owner: string): Locator {
+function quoteLocator(value: unknown) {
+  const ref = aiClientGoalQuoteReferenceSchema.safeParse(value);
+  if (ref.success) return ref.data;
+  const { input, decision: _decision, ...original } = aiClientGoalQuoteRequestSchema.parse(value);
+  return aiClientGoalQuoteReferenceSchema.parse({ ...original, selectionHash: clientGoalFingerprint(clientGoalSelectedInput(input as ClientCreateQuoteRequest)) });
+}
+export function clientGoalRecoveryLocator(value: unknown, owner: string): Locator {
   const row = record(value, ['version','owner','goal','material','task','phase','answer','continued','quote']);
   if (Object.keys(row).length !== 9 || row.version !== 'client-goal-operation-1' || row.owner !== owner
     || !phases.includes(row.phase as Phase) || typeof row.continued !== 'boolean') throw Error('client_goal_reference_invalid');
   const goal = aiClientGoalPreparationReadRequestSchema.parse(row.goal), phase = row.phase as Phase;
   const material = row.material === null ? null : materialLocator(row.material);
   const task = row.task === null ? null : aiClientTaskReadRequestSchema.parse(row.task);
-  const answer = row.answer === null ? null : aiClientTaskInputSubmissionRequestSchema.parse(row.answer);
+  const answer = row.answer === null ? null : clientTaskInputReference(row.answer);
   const quoteRow = row.quote === null ? null : record(row.quote, ['request','material','timeZone']);
-  const request = quoteRow ? aiClientGoalQuoteRequestSchema.parse(quoteRow.request) : null;
+  const request = quoteRow ? quoteLocator(quoteRow.request) : null;
   if (quoteRow?.timeZone !== undefined) {
     if (typeof quoteRow.timeZone !== 'string' || !quoteRow.timeZone || quoteRow.timeZone.length > 128) throw Error('client_goal_reference_invalid');
     try { new Intl.DateTimeFormat('en', { timeZone: quoteRow.timeZone }).format(0); }
     catch { throw Error('client_goal_reference_invalid'); }
   }
-  const quote = request ? { request: { ...request, input: clientGoalSelectedInput(request.input as ClientCreateQuoteRequest) },
+  const quote = request ? { request,
     material: quoteRow!.material === null ? null : materialLocator(quoteRow!.material),
     ...(typeof quoteRow!.timeZone === 'string' ? { timeZone: quoteRow!.timeZone } : {}) } : null;
   if ((phase === 'goal_pending' ? material !== null : material === null)
@@ -207,6 +214,55 @@ function parseLocator(value: unknown, owner: string): Locator {
   return { version: row.version, owner, goal, material, task, phase, answer, continued: row.continued, quote };
 }
 
+const recoveryKeyPattern = /^rental-os:client-(goal|quote|order-task):([^:]+)(?::(history|booking)(?::([^:]+))?)?$/u;
+
+export function clientRecoveryKey(key: string) {
+  const match = recoveryKeyPattern.exec(key);
+  if (!match) return null;
+  const [, kind, encoded, suffix, detail] = match;
+  if (suffix && !(kind === 'goal' && detail || kind === 'quote' && suffix === 'booking' && !detail)) return null;
+  let owner = '', scope: string | null = null, orderId: string | undefined;
+  try {
+    owner = decodeURIComponent(encoded);
+    const parts: unknown = JSON.parse(owner);
+    if (Array.isArray(parts) && parts.length === (kind === 'order-task' ? 5 : 4) && parts.every(part => typeof part === 'string' && part.length > 0 && part.length <= 191)) {
+      scope = JSON.stringify([parts[0], parts[2], parts[1]]);
+      if (kind === 'order-task') orderId = parts[4];
+    }
+  } catch { /* Malformed keys still need their private contents removed. */ }
+  return { kind, suffix, detail, encoded, owner, scope, orderId };
+}
+
+export function minimizeClientRecoveryRecord(key: string, value: unknown): unknown {
+  const keyInfo = clientRecoveryKey(key);
+  if (!keyInfo) return value;
+  const { kind, suffix, detail, encoded, owner, scope, orderId } = keyInfo;
+  try {
+    if (!scope) throw Error('client_recovery_owner_invalid');
+    if (suffix === 'booking') {
+      const locator = clientBookingRecoveryLocator(value, owner);
+      if (detail && locator.request.original.materialRef !== detail) throw Error('booking_reference_changed');
+      return locator;
+    }
+    if (kind === 'quote') return clientQuoteRecoveryLocator(value, owner);
+    if (kind === 'goal') {
+      const locator = clientGoalRecoveryLocator(value, `rental-os:client-goal:${encoded}`);
+      if (detail && encodeURIComponent(locator.goal.operationKey) !== detail) throw Error('client_goal_reference_invalid');
+      return locator;
+    }
+    const row = record(value, ['version','owner','material','task','phase','submission','continued']);
+    if (row.version !== 'client-order-task-operation-1' || row.owner !== key || typeof row.continued !== 'boolean'
+      || !['material_pending','material_ready','task_pending','task_created','model_pending','model_active','answer_pending','answered','continuation_pending','complete'].includes(String(row.phase))) throw Error('client_task_locator_invalid');
+    const material = aiClientOrderMaterialRequestSchema.parse(row.material);
+    const task = row.task === null ? null : aiClientTaskReadRequestSchema.parse(row.task);
+    const submission = row.submission === null ? null : clientTaskInputReference(row.submission);
+    if (material.orderId !== orderId || submission && (!task || submission.creationKey !== task.creationKey || submission.materialRef !== task.materialRef)) throw Error('client_task_locator_invalid');
+    return { version: row.version, owner: key, material, task, phase: row.phase, submission, continued: row.continued };
+  } catch {
+    return { version: 'client-recovery-unavailable-1' };
+  }
+}
+
 export function createClientGoalSession(input: {
   context: ClientGoalContext; api: ClientGoalApi; now(): number; newKey(): string;
   storage: { read(): unknown; write(value: unknown): void; archive?(value: unknown): unknown }; changed(view: ClientGoalView): void;
@@ -220,6 +276,7 @@ export function createClientGoalSession(input: {
   let sources: ClientGoalFormSources | null = null, quote: AiClientQuoteFacts | null = null, view = blank();
   let quoteObservedAt: string | null = null;
   let parameterReview: AiClientQuoteParameterReview | null = null;
+  let selectedOriginal: ClientCreateQuoteRequest | null = null;
   let expiryTimer: ReturnType<typeof setTimeout> | undefined;
   const clearExpiry = () => { if (expiryTimer !== undefined) clearTimeout(expiryTimer); expiryTimer = undefined; };
   const current = () => !closed && input.context.current();
@@ -228,7 +285,7 @@ export function createClientGoalSession(input: {
     if (!same(input.storage.read() ?? null, held)) { invalid = true; throw Error('client_goal_original_replaced'); }
   };
   const persist = (value: Locator) => {
-    assertHeld(); const next = parseLocator(value, owner);
+    assertHeld(); const next = clientGoalRecoveryLocator(value, owner);
     // localStorage comparison is not an atomic cross-tab CAS. Verify retention
     // before dispatch and fail closed on any observed replacement.
     input.storage.write(copy(next));
@@ -250,7 +307,7 @@ export function createClientGoalSession(input: {
     const active = !busy && !invalid, write = writable(), task = creation?.task
       ? { ...creation.task, ...(snapshot ? { revision: snapshot.revision, status: snapshot.status } : {}) } : null;
     view = { status, hasLocator: Boolean(saved), task, question, receipt, projection, sources,
-      selection: saved?.quote ? copy(saved.quote.request.input) : null, quote, quoteObservedAt: quote ? quoteObservedAt : null, parameterReview,
+      selection: selectedOriginal ? copy(selectedOriginal) : null, quote, quoteObservedAt: quote ? quoteObservedAt : null, parameterReview,
       canExtract: active && write && status === 'ready' && (!saved || saved.phase === 'goal_ready' && fresh(saved.material?.expiresAt)
         || saved.phase === 'task_ready' && task?.status === 'queued'),
       canRead: active && Boolean(saved && host?.policy.allowRead),
@@ -368,16 +425,18 @@ export function createClientGoalSession(input: {
     return result.state === 'observed' ? 'quoted' as const : 'unknown' as const;
   };
   const readQuote = async (): Promise<ClientGoalView['status']> => {
-    parameterReview = null;
+    parameterReview = null; selectedOriginal = null;
     if (!saved?.quote) return 'unknown';
-    const result = aiClientQuotePreparationReadResponseSchema.parse(await input.api.readGoalQuotePreparation(copy(saved.quote.request), abort.signal)); assertHeld();
+    const result = aiClientGoalQuoteReadResponseSchema.parse(await input.api.readGoalQuotePreparation(copy(saved.quote.request), abort.signal)); assertHeld();
     if (result.state === 'unknown') {
       if (result.operationKey !== saved.quote.request.operationKey) throw Error('client_goal_quote_origin_changed');
       return 'unknown';
     }
+    const selected = clientGoalSelectedInput(result.originalSelection as unknown as ClientCreateQuoteRequest);
+    if (clientGoalFingerprint(selected) !== saved.quote.request.selectionHash) throw Error('client_goal_quote_selection_changed');
+    selectedOriginal = selected;
     acceptQuoteMaterial(materialLocator({ materialRef: result.materialRef, materialHash: result.materialHash, inputHash: result.inputHash, expiresAt: result.expiresAt }));
     if (result.parameterReview) {
-      const selected = saved.quote.request.input;
       if (result.parameterReview.lines.length !== selected.lines.length
         || result.parameterReview.lines.some((line, index) => {
           const original = selected.lines[index];
@@ -444,7 +503,7 @@ export function createClientGoalSession(input: {
     if (busy || !opened || !current() || invalid) return;
     busy = true; emit('working'); let status: ClientGoalView['status'] = 'unavailable';
     try { await recheck(purpose); status = await action(); await recheck('read'); }
-    catch { creation = null; snapshot = null; question = null; receipt = null; projection = null; sources = null; quote = null; quoteObservedAt = null; parameterReview = null;
+    catch { creation = null; snapshot = null; question = null; receipt = null; projection = null; sources = null; quote = null; quoteObservedAt = null; parameterReview = null; selectedOriginal = null;
       status = saved && unresolved(saved.phase) ? 'unknown' : 'unavailable'; }
     finally { busy = false; emit(status); }
   };
@@ -473,7 +532,7 @@ export function createClientGoalSession(input: {
       if (busy || opened || !current()) return;
       busy = true; let status: ClientGoalView['status'] = 'unavailable';
       try { held = copy(input.storage.read() ?? null); if (held !== null) {
-        try { saved = parseLocator(held, owner); } catch { invalid = true; throw Error('client_goal_reference_invalid'); }
+        try { saved = clientGoalRecoveryLocator(held, owner); if (!same(held, saved)) persist(saved); } catch { invalid = true; throw Error('client_goal_reference_invalid'); }
       }
       opened = true; await recheck('read'); status = saved ? 'unknown' : 'ready'; }
       catch { status = 'unavailable'; }
@@ -513,7 +572,7 @@ export function createClientGoalSession(input: {
         if (latest.state !== 'pending' || !same(latest.question, original) || !fresh(original.expiresAt)) throw Error('client_goal_question_changed');
         const answer = aiClientTaskInputSubmissionRequestSchema.parse({ ...saved!.task, submission: { draftVersion: AI_TASK_INPUT_DRAFT_VERSION,
           requestId: original.requestId, expectedRevision: original.revision, submissionKey: input.newKey(), answers: [{ fieldId: 'clarification_text', value: text }] } });
-        persist({ ...saved!, answer, phase: 'answer_pending', continued: false });
+        persist({ ...saved!, answer: clientTaskInputReference(answer), phase: 'answer_pending', continued: false });
         const result = aiClientTaskInputSubmissionReceiptSchema.parse(await input.api.submitInput(copy(answer), abort.signal)); assertHeld();
         if (result.taskId !== creation?.task?.taskId || result.requestId !== original.requestId) throw Error('client_goal_answer_changed');
         persist({ ...saved!, phase: 'answered' }); return readOriginal();
@@ -542,7 +601,7 @@ export function createClientGoalSession(input: {
         await readFormSources(); const selected = validateSelection(selection); await recheck('quote');
         const request: AiClientGoalQuoteRequest = { ...candidatesRequest(), operationKey: input.newKey(), expectedProjectionHash: originalProjection,
           decision: 'prepare_original_quote', input: selected };
-        persist({ ...saved!, quote: { request, material: null, timeZone: latest.context.timeZone }, phase: 'quote_pending' });
+        persist({ ...saved!, quote: { request: quoteLocator(request), material: null, timeZone: latest.context.timeZone }, phase: 'quote_pending' });
         const result = aiClientQuotePreparationResponseSchema.parse(await input.api.prepareGoalQuote(copy(request), abort.signal)); assertHeld();
         acceptQuoteMaterial(materialLocator({ materialRef: result.materialRef, materialHash: result.materialHash, inputHash: result.inputHash, expiresAt: result.expiresAt }));
         return readQuote();
@@ -565,7 +624,7 @@ export function createClientGoalSession(input: {
       if (!view.canSelect) return null;
       let selected: ClientCreateQuoteRequest | null = null;
       await operate('quote', async () => {
-        if (await readQuote() === 'quoted' && fresh(quote?.expiresAt) && saved?.quote) selected = copy(saved.quote.request.input);
+        if (await readQuote() === 'quoted' && fresh(quote?.expiresAt) && selectedOriginal) selected = copy(selectedOriginal);
         return quote ? 'quoted' : 'unknown';
       });
       if (!current() || !view.canSelect) return null;
@@ -586,7 +645,8 @@ export function createClientGoalSession(input: {
         new Intl.DateTimeFormat('en', { timeZone: catalog.timeZone }).format(0);
         if (await readQuote() !== 'quoted' || !quote || !fresh(quote.expiresAt)
           || !same(quote, originalQuote) || !same(saved.quote.material, originalMaterial)) throw Error('client_goal_quote_changed');
-        result = { original: quoteReference(), selection: copy(saved.quote.request.input), timeZone: catalog.timeZone, quote: copy(quote) };
+        if (!selectedOriginal) throw Error('client_goal_quote_selection_changed');
+        result = { original: quoteReference(), selection: copy(selectedOriginal), timeZone: catalog.timeZone, quote: copy(quote) };
         return 'quoted';
       });
       if (!current() || !view.canSelect) return null;
@@ -636,12 +696,12 @@ export function createClientGoalSession(input: {
         if (!same(archived, saved)) throw Error('client_goal_archive_not_retained');
         input.storage.write(null);
         if ((input.storage.read() ?? null) !== null) { invalid = true; throw Error('client_goal_reference_not_retained'); }
-        held = null; saved = null; creation = null; snapshot = null; originalTaskId = null;
+        held = null; saved = null; creation = null; snapshot = null; originalTaskId = null; selectedOriginal = null;
         question = null; receipt = null; projection = null; sources = null; quote = null; quoteObservedAt = null; parameterReview = null;
         return 'ready';
       });
     },
-    dispose() { closed = true; clearExpiry(); abort.cancel(); creation = null; snapshot = null; originalTaskId = null; question = null; receipt = null;
+    dispose() { closed = true; clearExpiry(); abort.cancel(); creation = null; snapshot = null; originalTaskId = null; question = null; receipt = null; selectedOriginal = null;
       projection = null; sources = null; quote = null; quoteObservedAt = null; parameterReview = null; host = null; view = blank(); },
   };
   return Object.freeze(session);

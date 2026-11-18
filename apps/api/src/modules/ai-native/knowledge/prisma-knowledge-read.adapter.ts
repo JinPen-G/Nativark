@@ -128,27 +128,24 @@ export class PrismaKnowledgeReadAdapter implements KnowledgeContentPort, Knowled
     try {
       if (input.grant.scope.kind !== 'workspace') return unavailable();
       const result: Source[] = [], seen = new Set<string>();
-      let chars = 0, examined = 0;
+      const normalize = (text: string) => text.normalize('NFKC').toLowerCase();
+      const terms = [...new Set(normalize(input.query).match(/[\p{L}\p{N}]+/gu) ?? [])];
+      if (!terms.length) return [];
       for (const ref of input.documents) {
         if (seen.has(ref.documentId)) return unavailable();
         seen.add(ref.documentId);
         const before = await this.head(input.grant.scope, ref.documentId), d = before.document;
         if (d.documentVersion !== ref.documentVersion || d.aclRevision !== ref.aclRevision) return unavailable();
-        // Ciphertext cannot support SQL contains. Read only the original
-        // authorized scope/version, then match verified decrypted chunks;
-        // enforce the shared read budget even for non-matching text.
-        const chunks = await this.rows(d, true, undefined, { chunks: 200 - examined, chars: 200000 - chars });
-        examined += chunks.length;
-        if (examined > 200) return unavailable();
+        // Search the verified content of one authorized version at a time.
+        const chunks = await this.rows(d);
         for (const c of chunks) {
-          chars += c.text.length;
-          if (chars > 200000) return unavailable();
-          // Preserve the original literal match. No natural-language instruction
-          // is interpreted; only reference metadata leaves this port.
-          if (c.text.includes(input.query) && result.length < input.limit) result.push({ kind: 'document', documentId: c.documentId, documentVersion: c.documentVersion,
+          const body = normalize(c.text);
+          if (terms.every(term => body.includes(term))) result.push({ kind: 'document', documentId: c.documentId, documentVersion: c.documentVersion,
             chunkId: c.chunkId, scope: c.scope, aclRevision: c.aclRevision, locator: c.locator });
+          if (result.length === input.limit) break;
         }
         if (fingerprint(before) !== fingerprint(await this.head(input.grant.scope, ref.documentId))) return unavailable();
+        if (result.length === input.limit) break;
       }
       return result;
     } catch { return unavailable(); }

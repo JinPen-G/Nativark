@@ -9,6 +9,7 @@ import { AiTaskRepositoryError } from '../ai-task.repository';
 import { fingerprint } from '../knowledge/knowledge-validation';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
 import { AI_RETENTION_POLICY } from './retention-policy';
+import { logRetentionPage, retentionCandidate } from './retention-page-observation';
 import { aiTaskHasUnresolvedEffects } from '../task-unresolved-effects';
 import { aiRetentionObjectHash } from './retention-binding';
 import { z } from 'zod';
@@ -247,9 +248,18 @@ export class AiRetentionService {
   async exportRestoreManifest(snapshot: { id: string; sha256: string; createdAt: string }, privateKey: KeyObject) {
     const current = await this.current();
     if (!this.restoreKeyHash || retentionPublicKeyHash(privateKey) !== this.restoreKeyHash) throw unavailable();
-    const rows = await this.db.aiDataErasure.findMany({ where: { tenantId: current.tenantId,
-      workspaceId: current.workspaceId, state: { not: 'superseded' } }, orderBy: { id: 'asc' }, take: 501 });
-    if (rows.length > 500) throw unavailable();
+    const rows = await this.db.$transaction(async tx => {
+      const result = [];
+      let after: string | undefined;
+      do {
+        const page = await tx.aiDataErasure.findMany({ where: { tenantId: current.tenantId, workspaceId: current.workspaceId,
+          state: { not: 'superseded' }, ...(after ? { id: { gt: after } } : {}) }, orderBy: { id: 'asc' }, take: 250,
+          select: { id: true, kind: true, resourceId: true, targetHash: true, state: true } });
+        result.push(...page);
+        after = page.length === 250 ? page[249].id : undefined;
+      } while (after);
+      return result;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     await this.check(current);
     return signRetentionManifest({ version: 'ai-restore-tombstones-1', policyVersion: AI_RETENTION_POLICY.version,
       tenantId: current.tenantId, workspaceId: current.workspaceId, snapshotId: snapshot.id, snapshotSha256: snapshot.sha256, snapshotCreatedAt: snapshot.createdAt,
@@ -284,36 +294,36 @@ export class AiRetentionService {
     if (!scope) throw unavailable();
     const page = command.after ? { id: { gt: command.after } } : {};
     const where = { tenantId: current.tenantId, workspaceId: current.workspaceId, ...page };
-    let ids: string[];
-    if (command.kind === 'task') ids = (await this.db.aiTask.findMany({ where: { scopeId: scope.id, ...page,
+    let candidates: ReturnType<typeof retentionCandidate>[];
+    if (command.kind === 'task') candidates = (await this.db.aiTask.findMany({ where: { scopeId: scope.id, ...page,
       status: { in: [...terminal] }, updatedAt: { lte: this.cutoff(30) }, archivedAt: null }, orderBy: { id: 'asc' },
-      take: command.limit, select: { id: true } })).map(row => row.id);
-    else if (command.kind === 'request') ids = (await this.db.aiTaskOriginalRequest.findMany({ where: { scopeId: scope.id, ...page,
+      take: command.limit, select: { id: true, updatedAt: true } })).map(row => retentionCandidate(row.id, row.updatedAt));
+    else if (command.kind === 'request') candidates = (await this.db.aiTaskOriginalRequest.findMany({ where: { scopeId: scope.id, ...page,
       erasedAt: null, createdAt: { lte: this.cutoff(30) } }, orderBy: { id: 'asc' },
-      take: command.limit, select: { id: true } })).map(row => row.id);
-    else if (command.kind === 'memory') ids = (await this.db.aiStructuredMemory.findMany({ where: { ...where,
-      status: 'deleted' }, orderBy: { id: 'asc' }, take: command.limit, select: { id: true } })).map(row => row.id);
-    else if (command.kind === 'knowledge') ids = (await this.db.aiKnowledgeDocument.findMany({ where: { ...where,
-      status: 'deleted' }, orderBy: { id: 'asc' }, take: command.limit, select: { id: true } })).map(row => row.id);
-    else if (command.kind === 'material') ids = (await this.db.aiClientSceneMaterial.findMany({ where: { ...where,
+      take: command.limit, select: { id: true, createdAt: true } })).map(row => retentionCandidate(row.id, row.createdAt));
+    else if (command.kind === 'memory') candidates = (await this.db.aiStructuredMemory.findMany({ where: { ...where,
+      status: 'deleted' }, orderBy: { id: 'asc' }, take: command.limit, select: { id: true, deletedAt: true } })).map(row => retentionCandidate(row.id, row.deletedAt, 7));
+    else if (command.kind === 'knowledge') candidates = (await this.db.aiKnowledgeDocument.findMany({ where: { ...where,
+      status: 'deleted' }, orderBy: { id: 'asc' }, take: command.limit, select: { id: true } })).map(row => retentionCandidate(row.id));
+    else if (command.kind === 'material') candidates = (await this.db.aiClientSceneMaterial.findMany({ where: { ...where,
       erasedAt: null, createdAt: { lte: this.cutoff(30) } }, orderBy: { id: 'asc' },
-      take: command.limit, select: { id: true } })).map(row => row.id);
-    else if (command.kind === 'inspection_draft') ids = (await this.db.aiInspectionDraft.findMany({ where: { ...where,
+      take: command.limit, select: { id: true, createdAt: true } })).map(row => retentionCandidate(row.id, row.createdAt));
+    else if (command.kind === 'inspection_draft') candidates = (await this.db.aiInspectionDraft.findMany({ where: { ...where,
       createdAt: { lte: this.cutoff(30) }, expiresAt: { lte: this.now() } }, orderBy: { id: 'asc' },
-      take: command.limit, select: { id: true } })).map(row => row.id);
+      take: command.limit, select: { id: true, createdAt: true, expiresAt: true } })).map(row => retentionCandidate(row.id, row.createdAt, 30, row.expiresAt));
     else if (command.kind === 'notification_draft') {
       if (!this.notificationDraftCipher) throw unavailable();
-      ids = (await this.db.rentalNotificationLog.findMany({ where: { ...where, status: 'draft',
+      candidates = (await this.db.rentalNotificationLog.findMany({ where: { ...where, status: 'draft',
         createdAt: { lte: this.cutoff(30) } }, orderBy: { id: 'asc' }, take: command.limit,
-        select: { id: true } })).map(row => row.id);
+        select: { id: true, createdAt: true } })).map(row => retentionCandidate(row.id, row.createdAt));
     }
-    else ids = (await this.db.fileAsset.findMany({ where: { tenantId: current.tenantId, ...page, businessModule: 'ai-native',
+    else candidates = (await this.db.fileAsset.findMany({ where: { tenantId: current.tenantId, ...page, businessModule: 'ai-native',
       businessType: 'ai_knowledge_document', metadata: { path: '$.workspaceId', equals: current.workspaceId },
       status: { in: ['active', 'failed', 'ai_erasure_pending'] }, createdAt: { lte: this.cutoff(7) } },
-      orderBy: { id: 'asc' }, take: command.limit, select: { id: true } })).map(row => row.id);
+      orderBy: { id: 'asc' }, take: command.limit, select: { id: true, createdAt: true } })).map(row => retentionCandidate(row.id, row.createdAt, 7));
     await this.check(current);
     const results = [];
-    for (const resourceId of ids) {
+    for (const { id: resourceId } of candidates) {
       try { results.push(await this.erase(command.kind, resourceId)); }
       catch (error) {
         if (error instanceof AiTaskRepositoryError && error.code === 'AI_ACCESS_DENIED') throw error;
@@ -322,8 +332,10 @@ export class AiRetentionService {
       }
     }
     await this.check(current);
-    return { policyVersion: AI_RETENTION_POLICY.version, scanned: ids.length, limit: command.limit, results,
-      nextAfter: ids.length === command.limit ? ids[ids.length - 1] : null, coverage: 'bounded_candidate_page',
+    const nextAfter = candidates.length === command.limit ? candidates[candidates.length - 1].id : null;
+    logRetentionPage({ scopeKind: 'workspace', scopeId: scope.id, kind: command.kind, after: command.after }, this.now(), candidates, results, nextAfter);
+    return { policyVersion: AI_RETENTION_POLICY.version, scanned: candidates.length, limit: command.limit, results,
+      nextAfter, coverage: 'bounded_candidate_page',
       businessRecords: 'preserved', backupErasure: 'not_attested' };
   }
   /** Also used ONLY after a trusted restore manifest has been verified. */

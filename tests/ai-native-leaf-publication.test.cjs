@@ -91,14 +91,24 @@ test('both mounted customer surfaces publish every inherited method with exact r
   const http = shared.AI_CLIENT_ENTRY_HTTP_DRAFT;
   const expected = {
     readHostCapabilities: ['AiClientHostCapabilitiesRequest', 'AiClientHostCapabilities'],
+    readOrderTaskHostCapabilities: ['AiClientOrderActionSource', 'AiClientHostCapabilities'],
+    readOrderAction: ['AiClientOrderActionSource', 'AiClientOrderActionDraft'],
+    revalidateOrderAction: ['AiClientOrderActionRevalidation', 'AiClientOrderActionDraft'],
     prepareOrderMaterial: ['AiClientOrderMaterialRequest', 'AiClientOrderMaterialReceipt'],
     readOrderMaterialReceipt: ['AiClientOrderMaterialRequest', 'AiClientOrderMaterialReceipt'],
     createTask: ['AiClientTaskReadRequest', 'AiClientTaskCreationReceipt'],
     readTaskCreation: ['AiClientTaskReadRequest', 'AiClientTaskCreationReceipt'],
     prepareQuoteParameters: ['AiClientQuotePreparationRequest', 'AiClientQuotePreparationResponse'],
-    readQuotePreparationOperation: ['AiClientQuotePreparationRequest', 'AiClientQuotePreparationReadResponse'],
+    prepareGoal: ['AiClientGoalPreparationRequest', 'AiClientGoalPreparationResponse'],
+    readGoalPreparation: ['AiClientGoalPreparationReadRequest', 'AiClientGoalPreparationResponse'],
+    readGoalCandidates: ['AiClientGoalCandidatesRequest', 'AiClientGoalProjection'],
+    prepareGoalQuote: ['AiClientGoalQuoteRequest', 'AiClientQuotePreparationResponse'],
+    readGoalQuotePreparation: ['AiClientGoalQuoteRecoveryRequest', 'AiClientGoalQuoteReadResponse'],
+    readQuotePreparationOperation: ['AiClientQuoteReadRequest', 'AiClientQuotePreparationReadResponse'],
     confirmQuoteParameters: ['AiClientQuoteConfirmationRequest', 'AiClientQuoteResultReadResponse'],
     readPreparedQuoteOriginal: ['AiClientQuoteConfirmationRequest', 'AiClientQuoteResultReadResponse'],
+    prepareOriginalQuoteBooking: ['AiClientQuoteBookingRequest', 'AiClientQuoteBookingPreparationResponse'],
+    readOriginalQuoteBookingOperation: ['AiClientBookingReadRequest', 'AiClientQuoteBookingOperationResponse'],
     readTaskSnapshot: ['AiClientTaskReadRequest', 'AiTaskSnapshotDraft'],
     readTaskEvents: ['AiClientTaskEventsReadRequest', 'AiTaskEventsObservationDraft'],
     requestTaskCancellation: ['AiClientTaskCancelRequest', 'AiClientTaskCancelReceipt'],
@@ -109,8 +119,8 @@ test('both mounted customer surfaces publish every inherited method with exact r
     readTaskModelResult: ['AiClientTaskReadRequest', 'AiClientTaskModelResultReadResponse'],
     readTaskInput: ['AiClientTaskReadRequest', 'AiClientTaskInputReadResponse'],
     submitTaskInput: ['AiClientTaskInputSubmissionRequest', 'AiClientTaskInputSubmissionReceipt'],
-    readTaskInputReceipt: ['AiClientTaskInputSubmissionRequest', 'AiClientTaskInputReceiptReadResponse'],
-    continueTaskInput: ['AiClientTaskInputSubmissionRequest', 'AiClientTaskModelControlResponse'],
+    readTaskInputReceipt: ['AiClientTaskInputRecoveryRequest', 'AiClientTaskInputReceiptReadResponse'],
+    continueTaskInput: ['AiClientTaskInputRecoveryRequest', 'AiClientTaskModelControlResponse'],
     startTaskModel: ['AiClientTaskReadRequest', 'AiClientTaskModelControlResponse'],
     recoverTaskModel: ['AiClientTaskReadRequest', 'AiClientTaskModelControlResponse'],
     reconcileTaskModel: ['AiClientTaskReadRequest', 'AiClientTaskModelControlResponse'],
@@ -125,6 +135,10 @@ test('both mounted customer surfaces publish every inherited method with exact r
     handoffBookingDraft: ['AiBookingActionRequest', 'AiBookingHandoffResponse'],
     readBookingHandoff: ['AiBookingHandoffSelection', 'AiBookingHandoff'],
     readBookingOperation: ['AiBookingOperationReadRequest', 'AiBookingOperationReadResponse'],
+    issueBookingTransfer: ['AiClientBookingTransferIssueRequest', 'AiClientBookingTransferIssueResponse'],
+    readBookingTransferIssue: ['AiClientBookingTransferIssueRequest', 'AiClientBookingTransferIssueResponse'],
+    consumeBookingTransfer: ['AiClientBookingTransferRequest', 'AiClientBookingTransferReceipt'],
+    readBookingTransferReceipt: ['AiClientBookingTransferRequest', 'AiClientBookingTransferReceipt'],
     readBookingAcceptance: ['AiBookingAcceptanceReadRequest', 'AiBookingAcceptanceReadResponse'],
     acceptBookingSubmission: ['AiBookingSubmissionAcceptanceRequest', 'AiBookingSubmissionAcceptance'],
     submitAcceptedBooking: ['AiBookingSubmissionDecision', 'AiBookingSubmissionReceipt'],
@@ -154,7 +168,10 @@ test('both mounted customer surfaces publish every inherited method with exact r
     assert.equal(child.heritageClauses.find(node => node.token === ts.SyntaxKind.ExtendsKeyword).types[0].expression.getText(mounted), 'AiClientEntryController');
     const decorator = ts.getDecorators(child).find(node => ts.isCallExpression(node.expression) && node.expression.expression.getText(mounted) === 'Controller');
     assert.equal(http[decorator.expression.arguments[0].name.text], prefix);
-    const rows = API_CONTRACT_OPERATIONS.filter(row => row.path.startsWith(`/api/${prefix}/`));
+    const allRows = API_CONTRACT_OPERATIONS.filter(row => row.path.startsWith(`/api/${prefix}/`));
+    const publicPaths = Object.keys(shared.AI_CLIENT_PUBLIC_CONTRACTS).map(action => `/api/${prefix}/public/${shared.AI_CLIENT_PUBLIC_HTTP[action]}`);
+    const rows = allRows.filter(row => !publicPaths.includes(row.path));
+    assert.deepEqual(allRows.filter(row => publicPaths.includes(row.path)).map(row => row.path).sort(), publicPaths.sort());
     assert.equal(rows.length, Object.keys(expected).length);
     for (const [method, schemas] of Object.entries(expected)) {
       const route = `/api/${prefix}/${methods[method]}`, row = rows.find(row => row.path === route && row.method === 'post');

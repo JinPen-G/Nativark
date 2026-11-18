@@ -76,7 +76,7 @@ export interface KnowledgeParserPort {
 export type KnowledgeDocumentConstraint = Pick<AiKnowledgeDocumentDraft, 'documentId' | 'documentVersion' | 'aclRevision'>;
 export interface KnowledgeSearchAuthorizationPort {
   /** Enumerate only currently permitted versions, at most 100; missing workspace is denial, never a default. */
-  select(context: AiExecutionContext): Promise<{ grant: KnowledgeGrant; documents: KnowledgeDocumentConstraint[] } | null>;
+  select(context: AiExecutionContext, after?: string): Promise<{ grant: KnowledgeGrant; documents: KnowledgeDocumentConstraint[]; nextAfter?: string } | null>;
 }
 export interface KnowledgeSearchPort {
   /** Apply every supplied scope/identity/version/ACL constraint before searching; return references only, no text/counts from outside it. */

@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { ClientCreateQuoteRequest } from './client';
 import { RENTAL_FULFILLMENT_MODES, RENTAL_PRICING_UNIT_CODES } from './core';
 import { aiClientTaskReadRequestSchema } from './ai-client-entry-draft-schemas';
+import { aiClientQuotePreparationReadResponseSchema } from './ai-client-quote-draft';
 import { leafClosed as object, leafEnum as choice, leafId as leafId, leafInt as integer,
   leafList as list, leafRef as ref, leafTime as time, type AiLeafSchemaDraft } from './ai-gateway-draft-schemas';
 
@@ -53,6 +54,12 @@ export const aiClientGoalProjectionSchema = z.object({ version: z.literal('clien
   });
 export const aiClientGoalQuoteRequestSchema = aiClientGoalCandidatesRequestSchema.extend({ operationKey: key,
   expectedProjectionHash: digest, decision: z.literal('prepare_original_quote'), input: z.unknown() }).strict();
+export const aiClientGoalQuoteReferenceSchema = aiClientGoalQuoteRequestSchema.omit({ input: true, decision: true }).extend({ selectionHash: digest }).strict();
+export const aiClientGoalQuoteRecoverySchema = z.union([aiClientGoalQuoteReferenceSchema, aiClientGoalQuoteRequestSchema]);
+export const aiClientGoalQuoteReadResponseSchema = z.discriminatedUnion('state', [
+  aiClientQuotePreparationReadResponseSchema.options[0].extend({ originalSelection: z.record(z.unknown()).optional() }),
+  aiClientQuotePreparationReadResponseSchema.options[1],
+]);
 export type AiClientGoalPreparationRequest = z.infer<typeof aiClientGoalPreparationRequestSchema>;
 export type AiClientGoalPreparationReadRequest = z.infer<typeof aiClientGoalPreparationReadRequestSchema>;
 export type AiClientGoalPreparationResponse = z.infer<typeof aiClientGoalPreparationResponseSchema>;
@@ -83,6 +90,7 @@ export const AI_CLIENT_GOAL_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
   AiClientGoalCandidatesRequest: object(task),
   AiClientGoalQuoteRequest: object({ ...task, operationKey, expectedProjectionHash: hash,
     decision: choice('prepare_original_quote'), input: ref('ClientQuoteRequest') }),
+  AiClientGoalQuoteRecoveryRequest: { oneOf: [ref('AiClientGoalQuoteRequest'), object({ ...task, operationKey, expectedProjectionHash: hash, selectionHash: hash })] },
   AiClientGoalProjection: object({ version: choice('client-goal-1'),
     original: object({ materialRef: uuid, materialHash: hash, goalHash: hash }),
     model: object({ taskId: { ...identifier, maxLength: 36 }, taskRevision: integer(1, 4294967294), resultId: nullable(identifier), observedAt: nullable(time) }),

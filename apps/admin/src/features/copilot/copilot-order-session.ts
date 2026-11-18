@@ -1,7 +1,7 @@
 /** Current-order adapter for the existing conversation and model sessions.
  * Only explicit submission writes. Recovery keeps the original journals and
  * reads their receipts. Page context supplies an order locator, never facts. */
-import { AI_CONVERSATION_DRAFT_VERSION, validateAiOrderReadFactsDraft,
+import { AI_CONVERSATION_DRAFT_VERSION, validateAiConversationOperationDraft, validateAiConversationAdmissionDraft, validateAiOrderReadFactsDraft,
   type AiConversationTurnObservationDraft, type AiOrderReadFactsDraft, type AiSceneRequestReadDraft, type AiTaskSnapshotDraft } from '@rental-os/shared';
 import type { aiConversationsApi } from '@/api/aiConversations';
 import { ConversationLifecycleSession } from '../ai-native/conversation-lifecycle-session';
@@ -10,6 +10,7 @@ import { ConversationOrderExecutionSession } from '../ai-native/conversation-ord
 import { ConversationTaskCreationSession } from '../ai-native/conversation-task-creation-session';
 import { readConversationOrderResults } from '../ai-native/conversation-order-results-reader';
 import { validateTaskCenterSnapshot } from '../ai-native/task-center-reader';
+import { commandHash } from '../ai-native/budget-settings-session';
 import type { LiveVisibleObservationSession, VisibleOrigin } from '../ai-native/visible-observation-session';
 
 export type OrderQuestion = 'status' | 'fees' | 'payments' | 'next_steps';
@@ -44,6 +45,7 @@ export class CopilotOrderSession {
   private generation = 0;
   private request: AbortController | null = null;
   private held: string | null = null;
+  private completedReference: string | null = null;
   private lifecycle: ConversationLifecycleSession | null = null;
   private admission: ConversationAdmissionSession | null = null;
   private execution: ConversationOrderExecutionSession | null = null;
@@ -143,7 +145,7 @@ export class CopilotOrderSession {
       value.conversationId = receipt.conversationId; this.persist(value); this.sessions(value);
     }
     const detail = await this.ports.detail({ draftVersion: AI_CONVERSATION_DRAFT_VERSION,
-      conversationId: value.conversationId!, limit: 20 }, 'order_explanation', signal);
+      conversationId: value.conversationId!, limit: 20 }, 'order_explanation', signal, true);
     this.check(signal);
     if (detail.conversation.conversationId !== value.conversationId) throw Error('AI_RESOURCE_UNAVAILABLE');
     return detail.conversation;
@@ -161,6 +163,7 @@ export class CopilotOrderSession {
     const task = validateTaskCenterSnapshot(await this.ports.snapshot(turn.task.taskId, signal), turn.task.taskId);
     this.check(signal);
     if (task.sceneCode !== 'order_explanation') throw Error('AI_RESOURCE_UNAVAILABLE');
+    this.completedReference = task.status === 'succeeded' ? JSON.stringify([conversationId, turn.turnId, turn.task.runId]) : null;
     this.publish({ phase: 'observed', conversationId, taskId: turn.task.taskId, runId: result.result.runId,
       textSource: { conversationId, turnId: turn.turnId, taskId: turn.task.taskId, runId: result.result.runId,
         resultId: result.result.resultId },
@@ -170,6 +173,7 @@ export class CopilotOrderSession {
   private async run(work: (signal: AbortSignal) => Promise<void>) {
     this.check(); if (this.request) throw Error('AI_BUSY');
     const controller = new AbortController(), generation = this.generation;
+    this.completedReference = null;
     this.request = controller; this.publish({ phase: 'preparing', text: '', textSource: null, facts: null, steps: [], complete: false });
     try { await work(controller.signal); }
     catch (error) {
@@ -215,13 +219,36 @@ export class CopilotOrderSession {
     this.cancelVisible();
     return this.run(async signal => {
       const conversation = await this.conversation(signal), turn = conversation.currentTurn;
-      if (!turn) throw Error('AI_RESULT_UNKNOWN');
+      if (!turn) {
+        const proof = conversation.closedTurn;
+        if (!proof || conversation.status !== 'active' || conversation.revision !== 3) throw Error('AI_RESULT_UNKNOWN');
+        const hashes = await Promise.all(['status','fees','payments','next_steps'].map(question => commandHash({ sceneCode: 'order_explanation', input: { orderId: this.orderId, question } })));
+        this.check(signal);
+        if (!hashes.includes(proof.requestHash)) throw Error('AI_RESULT_UNKNOWN');
+        const query = { draftVersion: AI_CONVERSATION_DRAFT_VERSION, conversationId: conversation.conversationId, admissionKey: proof.admissionKey };
+        const admission = await this.ports.admission(query, signal); this.check(signal);
+        const receipt = await this.ports.operation({ draftVersion: AI_CONVERSATION_DRAFT_VERSION, operationKey: proof.operationKey }, signal); this.check(signal);
+        if (!validateAiConversationAdmissionDraft(admission, query) || !admission.result || admission.result.capabilityCode !== 'order_explanation' || admission.result.turnId !== proof.turnId
+          || admission.result.original.inputRef !== proof.originalInputRef || admission.result.requestHash !== proof.requestHash
+          || !validateAiConversationOperationDraft(receipt, proof.operationKey) || receipt.status !== 'observed' || receipt.revision !== conversation.revision
+          || receipt.conversationId !== conversation.conversationId || (receipt.operation === 'close_unstarted'
+            ? !('creation' in admission.result) || admission.result.closeOperationKey !== proof.operationKey : receipt.operation !== 'release_turn' || !admission.result.task)) throw Error('AI_RESULT_UNKNOWN');
+        if (JSON.stringify(await this.conversation(signal)) !== JSON.stringify(conversation)) throw Error('AI_REVISION_CONFLICT');
+        this.completedReference = JSON.stringify([conversation.conversationId, proof.turnId, proof.operationKey]);
+        this.publish({ phase: 'observed', complete: true, text: '', facts: null, steps: [], textSource: null, taskId: null, runId: null });
+        return;
+      }
       await this.observe(conversation.conversationId, turn, signal);
     });
   };
-  newChat = () => {
+  newChat = async () => {
     this.check();
     if (this.request || this.state.hasOriginal && !this.state.complete) throw Error('AI_RESULT_UNKNOWN');
+    if (this.state.hasOriginal) {
+      const previous = this.completedReference;
+      await this.read(); this.check();
+      if (!previous || this.completedReference !== previous || !this.state.complete) throw Error('AI_RESULT_UNKNOWN');
+    }
     this.cancelVisible();
     // Retain every previous journal. Only a completed view may release this locator.
     this.storage!.removeItem(this.key);

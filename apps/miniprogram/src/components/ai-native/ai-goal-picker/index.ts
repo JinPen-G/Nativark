@@ -7,7 +7,7 @@ import { RENTAL_PRICING_UNIT_LABELS, createClientGoalSession, clientGoalStorageK
 import { createClientGoalApi } from '../../../api/ai-goals';
 import { clientQuoteApi } from '../../../api/ai-quotes';
 import { readBookingHandoff, readBookingHostCapabilities } from '../../../api/orders';
-import { createClientQuoteBookingSession, clientQuoteBookingStoredRequest, type ClientQuoteBookingView } from '../client-quote-session';
+import { createClientQuoteBookingSession, type ClientQuoteBookingView } from '../client-quote-session';
 import { createClientTaskCancellationSession, clientTaskCancellationStorageKey, type ClientTaskCancellationView } from '../client-task-cancellation-session';
 import { clientTaskCancellationApi } from '../../../api/ai-task-cancellation';
 import { PUBLIC_CONFIG } from '../../../config/public';
@@ -207,18 +207,15 @@ Component({
     }); },
     async ensureBooking(owner: Session, purpose: 'read' | 'write') {
       const binding = currentBindings.get(this); if (!binding?.context.current() || sessions.get(this) !== owner) return null;
-      const existing = bookings.get(this); if (existing) return existing;
-      const reference = purpose === 'write' ? (await owner.selectedQuote())?.original : owner.quoteRecoveryReference();
+      const existing = bookings.get(this);
+      if (existing && purpose === 'read') return existing;
+      const source = purpose === 'write' ? await owner.selectedQuote() : null;
+      const reference = purpose === 'write' ? source?.original : owner.quoteRecoveryReference();
       if (!reference || !binding.context.current()) return null;
       const key = `${binding.key}:booking:${reference.materialRef}`, cached = readGoalStorage(key);
       if (purpose === 'read' && cached === undefined) return null;
-      let selection: AiBookingSelection;
-      if (cached !== undefined) {
-        const request = clientQuoteBookingStoredRequest(cached);
-        if (JSON.stringify(request.original) !== JSON.stringify(reference)) throw Error('booking_origin_changed');
-        selection = request.selection;
-      } else {
-        const source = await owner.selectedQuote(); if (!source || !binding.context.current()) return null;
+      let selection: AiBookingSelection | null = null;
+      if (source) {
         const selected = source.selection, identity = selected.bookingIdentity;
         if (!identity || !identity.bookingIdentity) throw Error('booking_identity_missing');
         selection = { quoteId: source.quote.quoteId, timeZone: source.timeZone, startAt: selected.startAt, endAt: selected.endAt,
@@ -231,6 +228,7 @@ Component({
           lines: selected.lines.map(line => { if (!line.itemGroupId) throw Error('booking_item_missing'); return { itemGroupId: line.itemGroupId, quantity: line.quantity }; }) };
         sources.set(this, source);
       }
+      existing?.dispose();
       const booking = createClientQuoteBookingSession({ context: binding.context, original: reference, selection: () => selection,
         readHost: readBookingHostCapabilities, api: { ...clientQuoteApi, readHandoff: readBookingHandoff }, now: serverNow,
         newKey: () => newKey('goal-booking'), storage: { read: () => readGoalStorage(key), write: value => writeRequiredStorage(key, value) },
@@ -256,7 +254,9 @@ Component({
             }) });
           }
         } });
-      bookings.set(this, booking); await booking.open(); return binding.context.current() ? booking : null;
+      bookings.set(this, booking); await booking.open();
+      if (purpose === 'write' && cached !== undefined && booking.snapshot().canRead) await booking.recover();
+      return binding.context.current() ? booking : null;
     },
     onGenerateDraft() { return this.run(async owner => {
       const booking = await this.ensureBooking(owner, 'write');

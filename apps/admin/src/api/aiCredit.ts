@@ -5,10 +5,10 @@ const post = <T>(action: keyof Omit<typeof AI_CREDIT_HTTP, 'basePath'>, data: un
 export const aiCreditApi = {
   calls: (data: { since: string; until: string; cursor?: string; workspaceId?: string; mode?: 'platform_managed' | 'tenant_managed' }) =>
     post<AiTenantCallRecords>('calls', data),
-  read: () => post<AiCreditSummary>('read', {}),
+  read: (page: { afterCurrency?: string; afterWorkspace?: string } = {}) => post<AiCreditSummary>('read', page),
   request: (data: { operationKey: string; currency: string; amount: string }) => post<AiCreditRequest>('request', data),
   receipt: (operationKey: string) => post<{ state: 'unknown' } | { state: 'recorded'; request: AiCreditRequest }>('receipt', { operationKey }),
-  allocate: (data: { operationKey: string; currency: string; expectedRevision: number; allocations: { workspaceId: string; amount: string }[] }) =>
+  allocate: (data: { operationKey: string; currency: string; expectedRevision: number; mode?: 'update_listed'; allocations: { workspaceId: string; amount: string }[] }) =>
     post<{ state: 'allocated'; revision: number }>('allocate', data),
   allocationReceipt: (data: { operationKey: string; currency: string }) =>
     post<{ state: 'unknown' } | { state: 'recorded'; result: { state: 'allocated'; revision: number } }>('allocationReceipt', data),

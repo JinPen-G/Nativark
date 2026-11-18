@@ -12,6 +12,30 @@ const source = z.object({ materialRef: z.string().uuid(), materialHash: hash }).
 const material = z.object({ materialRef: z.string().uuid(), materialHash: hash, inputHash: hash, expiresAt: date }).strict();
 export const aiClientQuoteBookingRequestSchema = z.object({ original: aiClientQuoteConfirmationRequestSchema,
   selection: aiBookingSelectionSchema, operationKey: id }).strict();
+const serviceFields = ['scheduledStartAt', 'scheduledEndAt', 'serviceLocationId'] as const;
+const legacyShape = z.object({ returnLocation: z.boolean(), serviceFields: z.array(z.array(z.enum(serviceFields)).max(3)).max(20).nullable() }).strict();
+export const aiClientBookingReadRefSchema = z.object({ original: aiClientQuoteConfirmationRequestSchema, operationKey: id,
+  selectionHash: hash, legacyShape: legacyShape.optional() }).strict();
+export const aiClientBookingReadRequestSchema = z.union([aiClientBookingReadRefSchema, aiClientQuoteBookingRequestSchema]);
+export type AiClientBookingReadRef = z.infer<typeof aiClientBookingReadRefSchema>;
+export function clientBookingLegacyShape(selection: AiClientQuoteBookingRequest['selection']): z.infer<typeof legacyShape> {
+  return { returnLocation: selection.returnLocationId !== undefined,
+    serviceFields: selection.services?.map(service => serviceFields.filter(field => service[field] !== undefined)) ?? null };
+}
+export function originalLegacyBookingSelection(stored: AiClientQuoteBookingRequest['selection'], shape: z.infer<typeof legacyShape>) {
+  const selection = aiBookingSelectionSchema.parse(stored);
+  if (!shape.returnLocation) delete selection.returnLocationId;
+  if ((shape.serviceFields?.length ?? 0) !== (selection.services?.length ?? 0)) return null;
+  if (shape.serviceFields === null) delete selection.services;
+  else {
+    const masks = shape.serviceFields;
+    selection.services = (selection.services ?? []).map((service, index) => {
+      for (const field of serviceFields) if (!masks[index].includes(field)) delete service[field];
+      return service;
+    });
+  }
+  return selection;
+}
 const preparation = { contractVersion: z.literal(AI_CLIENT_QUOTE_BOOKING_VERSION), operationKey: id, source,
   draft: z.literal('not_created'), humanSelection: z.literal('required_before_handoff'),
   pageAcceptance: z.literal('not_attempted'), orderExecution: z.literal('not_attempted'), retryable: z.literal(false) };
@@ -32,7 +56,7 @@ const observation = { contractVersion: z.literal(AI_CLIENT_QUOTE_BOOKING_VERSION
 export const aiClientQuoteBookingOperationResponseSchema = z.discriminatedUnion('state', [
   z.object({ ...observation, state: z.literal('observed'), material: material.extend({ revision: z.literal(1),
     createdAt: date, observedAt: date, materialValidity: z.enum(['expired', 'not_revalidated']) }).strict(),
-    nextAction: z.literal('revalidate_material_before_action') }).strict(),
+    originalSelection: aiBookingSelectionSchema.optional(), nextAction: z.literal('revalidate_material_before_action') }).strict(),
   z.object({ ...observation, state: z.literal('unknown'), material: z.null(),
     nextAction: z.literal('read_original_quote_booking_operation') }).strict()
 ]);

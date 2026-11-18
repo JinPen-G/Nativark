@@ -6,7 +6,7 @@ import { authorize, fingerprint, id, sameScope } from './knowledge-validation';
 
 /** Workspace metadata only. The supplied current authorization remains the ACL
  * authority; this adapter neither interprets ACL strings nor grants permission.
- * More than 100 candidates is unavailable, not a silently complete truncated set.
+ * A page cursor covers scanned metadata, including documents denied by the ACL.
  */
 export class PrismaKnowledgeSelectionAdapter implements KnowledgeSearchAuthorizationPort {
   constructor(
@@ -18,7 +18,7 @@ export class PrismaKnowledgeSelectionAdapter implements KnowledgeSearchAuthoriza
     requiredPort(repository, ['read']); requiredPort(authorization, ['authorize']);
   }
 
-  async select(context: AiExecutionContext) {
+  async select(context: AiExecutionContext, after?: string) {
     try {
       const initial = fingerprint(context), snapshot = structuredClone(context);
       const current = () => { if (fingerprint(context) !== initial || fingerprint(snapshot) !== initial) unavailable(); };
@@ -27,15 +27,15 @@ export class PrismaKnowledgeSelectionAdapter implements KnowledgeSearchAuthoriza
       const grant = structuredClone(await authorize(this.authorization, snapshot, { action: 'search', scope }));
       current();
       const rows = await this.db.aiKnowledgeDocument.findMany({
-        where: { tenantId: scope.tenantId, workspaceId: scope.workspaceId, status: 'published' },
+        where: { tenantId: scope.tenantId, workspaceId: scope.workspaceId, status: 'published', ...(after ? { id: { gt: id.parse(after) } } : {}) },
         orderBy: { id: 'asc' }, take: 101,
         select: { id: true, tenantId: true, workspaceId: true, status: true },
       });
       current();
-      if (!Array.isArray(rows) || rows.length > 100) unavailable();
+      if (!Array.isArray(rows) || rows.length > 101 || new Set(rows.map(row => row.id)).size !== rows.length) unavailable();
       const seen = new Set<string>();
       const documents: KnowledgeDocumentConstraint[] = [];
-      for (const row of rows) {
+      for (const row of rows.slice(0, 100)) {
         if (!id.safeParse(row.id).success || seen.has(row.id) || row.tenantId !== scope.tenantId
           || row.workspaceId !== scope.workspaceId || row.status !== 'published') unavailable();
         seen.add(row.id);
@@ -62,7 +62,7 @@ export class PrismaKnowledgeSelectionAdapter implements KnowledgeSearchAuthoriza
       const latest = await authorize(this.authorization, snapshot, { action: 'search', scope });
       current();
       if (fingerprint(latest) !== fingerprint(grant)) unavailable();
-      return { grant, documents };
+      return { grant, documents, ...(rows.length > 100 ? { nextAfter: rows[99].id } : {}) };
     } catch { return unavailable(); }
   }
 }

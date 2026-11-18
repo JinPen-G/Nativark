@@ -100,6 +100,8 @@ async function main() {
   const actionRuntimeFile = path.join(dist, 'components', 'ai-native', 'entry-action-runtime.js');
   fs.mkdirSync(path.dirname(actionRuntimeFile), { recursive: true });
   fs.writeFileSync(actionRuntimeFile, actionRuntime.code);
+  const catalogRuntime = await require('../../../scripts/miniprogram-ai-runtime.cjs').buildSceneCatalogRuntime(root);
+  fs.writeFileSync(path.join(path.dirname(actionRuntimeFile), 'scene-catalog-runtime.js'), catalogRuntime.code);
 
   const configFile = path.join(dist, "config", "public.js");
   if (!fs.existsSync(configFile)) fail("缺少编译产物 config/public.js");

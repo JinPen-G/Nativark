@@ -144,6 +144,15 @@ export const aiClientTaskInputSubmissionRequestSchema = aiClientTaskReadRequestS
     && !Array.isArray(value) && !Object.prototype.hasOwnProperty.call(value, 'taskId')
     && isAiTaskInputSubmissionDraft({ ...value, taskId: 'validation-only' }))
 }).strict();
+export const aiClientTaskInputReferenceRequestSchema = aiClientTaskReadRequestSchema.extend({
+  submission: z.object({ requestId: id.max(36), expectedRevision: z.number().int().min(1).max(4294967294), submissionKey: id }).strict(),
+}).strict();
+export const aiClientTaskInputRecoveryRequestSchema = z.union([aiClientTaskInputReferenceRequestSchema, aiClientTaskInputSubmissionRequestSchema]);
+export function clientTaskInputReference(value: unknown) {
+  const { submission, ...task } = aiClientTaskInputRecoveryRequestSchema.parse(value);
+  const { requestId, expectedRevision, submissionKey } = submission;
+  return { ...task, submission: { requestId, expectedRevision, submissionKey } };
+}
 const clientInputReceipt = z.object({ taskId: id.max(36), requestId: id.max(36), receiptId: id.max(36),
   taskRevision: z.number().int().min(1).max(4294967295) }).strict();
 export const aiClientTaskInputSubmissionReceiptSchema = clientInputReceipt.extend({

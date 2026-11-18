@@ -4,7 +4,7 @@ import { createClientGoalSession as createSharedClientGoalSession, aiBookingSele
   aiClientQuoteConfirmationRequestSchema, clientGoalStorageKey as goalStorageKey, type ClientGoalBookingSource,
   type ClientGoalApi as SharedClientGoalApi } from '@rental-os/shared';
 import type { ClientGoalApi } from './client-goal-api';
-import { createClientQuoteBookingSession, clientQuoteBookingStoredRequest } from './client-quote-session';
+import { createClientQuoteBookingSession } from './client-quote-session';
 export { clientGoalStorageKey, clientGoalTextHash, clientGoalTimeOptions, clientGoalSelectedInput } from '@rental-os/shared';
 export type { ClientGoalContext, ClientGoalFormSources, ClientGoalView } from '@rental-os/shared';
 export type { ClientQuoteBookingView } from './client-quote-session';
@@ -59,4 +59,4 @@ export function clientGoalBookingStorageKey(context: Parameters<typeof goalStora
   const reference = aiClientQuoteConfirmationRequestSchema.parse(original);
   return `${goalStorageKey(context)}:booking:${reference.materialRef}`;
 }
-export { createClientQuoteBookingSession as createClientGoalBookingSession, clientQuoteBookingStoredRequest as clientGoalBookingStoredRequest };
+export { createClientQuoteBookingSession as createClientGoalBookingSession };

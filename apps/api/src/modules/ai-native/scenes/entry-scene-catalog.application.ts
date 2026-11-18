@@ -118,7 +118,7 @@ function projectAvailability(entry: EntrySceneDefinition, current: EntryCatalogC
       observedAt: source.observedAt, expiresAt: source.expiresAt, implementation: source.implementation } : null };
   const manual = source?.authority === 'allowed' && source.manualExit.key === entry.manualExit && source.manualExit.state === 'available';
   const close = (reason: EntryCatalogAvailability['reason']): EntryCatalogAvailability => ({ ...base,
-    state: manual ? 'manual_only' : 'unavailable', reason: manual ? 'original_manual_entry' : reason });
+    state: manual ? 'manual_only' : 'unavailable', reason });
   const permissions = 'access' in current.context ? current.context.access.permissions : 'permissions' in current.context ? current.context.permissions : [];
   const permitted = entry.permissionMode === 'any' ? entry.requiredPermissions.some(permission => hasEffectivePermission(permissions, permission))
     : entry.requiredPermissions.every(permission => hasEffectivePermission(permissions, permission));

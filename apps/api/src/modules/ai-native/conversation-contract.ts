@@ -3,7 +3,7 @@
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 import { AI_CONVERSATION_SCHEMAS, AI_SCENE_REQUEST_DRAFT_SCHEMAS,
-  type AiConversationCreateDraft, type AiConversationReferenceDraft, type AiConversationMutationDraft,
+  type AiConversationCreateDraft, type AiConversationReadDraft, type AiConversationMutationDraft,
   type AiConversationListDraft, type AiConversationTurnAdmissionDraft, type AiConversationTurnReferenceDraft,
   type AiConversationOperationRequestDraft, type AiConversationTurnListDraft, type AiConversationModelResultReadDraft,
   type AiConversationUnstartedCloseDraft, type AiWorkbenchDisplayReadDraft,
@@ -27,7 +27,7 @@ for (const [name, schema] of Object.entries({ ...AI_CONVERSATION_SCHEMAS,
   if (!['AiConversationModelResultResponseDraft', 'AiConversationTaskResultDraft', 'AiWorkbenchDisplayMaterialDraft'].includes(name)) ajv.addSchema(schema, `#/components/schemas/${name}`);
 }
 interface Requests {
-  AiConversationCreateDraft: AiConversationCreateDraft; AiConversationReferenceDraft: AiConversationReferenceDraft;
+  AiConversationCreateDraft: AiConversationCreateDraft; AiConversationReferenceDraft: AiConversationReadDraft;
   AiConversationMutationDraft: AiConversationMutationDraft; AiConversationListDraft: AiConversationListDraft;
   AiConversationTurnAdmissionDraft: AiConversationTurnAdmissionDraft; AiConversationTurnReferenceDraft: AiConversationTurnReferenceDraft;
   AiConversationOperationRequestDraft: AiConversationOperationRequestDraft; AiConversationTurnListDraft: AiConversationTurnListDraft;

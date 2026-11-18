@@ -6,7 +6,7 @@ import { z } from 'zod';
 import type { AiCreditBalance, AiCreditRequest, AiCreditSummary, AiTenantCallRecord, AiTenantCallRecords } from '@rental-os/shared';
 import { PrismaService } from '../../database/prisma.service';
 import { AuthService } from '../../auth/auth.service';
-import { creditAllocations, creditConsumption } from './platform-credit-limit';
+import { creditAllocations, creditAmount, creditAtoms, creditConsumption } from './platform-credit-limit';
 import { isGatewayConfig } from '../gateway-contract-validation';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { modelUsageSchema } from '../model-gateway.ports';
@@ -21,7 +21,7 @@ const decisionSchema = z.object({ requestId: id, operationKey: key, expectedRevi
   decision: z.enum(['approve', 'reject']), amount: amount.optional() }).strict()
   .refine(value => value.decision === 'approve' ? !!value.amount : value.amount === undefined);
 const allocationSchema = z.object({ currency, expectedRevision: z.number().int().positive(),
-  operationKey: key,
+  operationKey: key, mode: z.literal('update_listed').optional(),
   allocations: z.array(z.object({ workspaceId: id, amount: z.string().regex(/^(0|[1-9][0-9]{0,17})(?:\.[0-9]{1,6})?$/u) }).strict()).max(64)
     .refine(rows => new Set(rows.map(row => row.workspaceId)).size === rows.length) }).strict();
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -188,31 +188,42 @@ export class AiCreditService {
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 }); }
     catch (error) { if (!completed && error instanceof HttpException) throw error; fail('AI_RESULT_UNKNOWN'); }
   }
-  private async currencies(db: Pick<Tx, 'aiBudgetPolicy'> = this.db) {
+  private async currencies(db: Pick<Tx, 'aiBudgetPolicy'> = this.db, after?: string, exact?: string) {
     const rows = await db.aiBudgetPolicy.findMany({ where: { scopeKind: 'PLATFORM', enabled: true,
-      unitKind: 'money', moneyCurrency: { not: null } }, distinct: ['moneyCurrency'], select: { moneyCurrency: true }, take: 9 });
-    if (rows.length > 8 || rows.some(row => !currency.safeParse(row.moneyCurrency).success)) fail('AI_RESOURCE_UNAVAILABLE', 503);
+      unitKind: 'money', moneyCurrency: exact ?? { not: null, ...(after ? { gt: after } : {}) } }, distinct: ['moneyCurrency'],
+      orderBy: { moneyCurrency: 'asc' }, select: { moneyCurrency: true }, take: 9 });
+    if (rows.some(row => !currency.safeParse(row.moneyCurrency).success)) fail('AI_RESOURCE_UNAVAILABLE', 503);
     return rows.map(row => row.moneyCurrency!).sort();
   }
   /** One bounded read snapshot: an old allowance/assignment cannot be paired
    * with later committed consumption. Current identity is rechecked separately;
    * this projection grants no admission, allocation or financial mutation. */
-  async read(authorization: string | undefined): Promise<AiCreditSummary> {
+  async read(authorization: string | undefined, raw: unknown = {}): Promise<AiCreditSummary> {
+    const command = this.snapshotCommand(z.object({ afterCurrency: currency.optional(), afterWorkspace: id.optional() }).strict(), raw);
     return this.call(authorization, false, (actor, recheck) => this.db.$transaction(async tx => {
-      const [currencies, accounts, requests, workspaces] = await Promise.all([
-        this.currencies(tx), tx.aiTenantAiAllowance.findMany({ where: { tenantId: actor.tenantId }, take: 9 }),
+      const query = command();
+      const [currencies, accounts, requests, spaces] = await Promise.all([
+        this.currencies(tx, query.afterCurrency), tx.aiTenantAiAllowance.findMany({ where: { tenantId: actor.tenantId,
+          ...(query.afterCurrency ? { currency: { gt: query.afterCurrency } } : {}) }, orderBy: { currency: 'asc' }, take: 9 }),
         tx.aiTenantAiCreditRequest.findMany({ where: { tenantId: actor.tenantId }, include: requestInclude,
           orderBy: [{ createdAt: 'desc' }, { id: 'asc' }], take: 21 }),
-        tx.businessWorkspace.findMany({ where: { tenantId: actor.tenantId }, select: { id: true, name: true }, take: 65 })]);
-      if (accounts.length > 8 || workspaces.length > 64) fail('AI_RESOURCE_UNAVAILABLE', 503);
+        tx.businessWorkspace.findMany({ where: { tenantId: actor.tenantId, ...(query.afterWorkspace ? { id: { gt: query.afterWorkspace } } : {}) },
+          orderBy: { id: 'asc' }, select: { id: true, name: true }, take: 65 })]);
+      if (accounts.length > 9 || new Set(accounts.map(row => row.currency)).size !== accounts.length
+        || accounts.some(row => !currency.safeParse(row.currency).success) || currencies.length > 9
+        || spaces.length > 65 || new Set(spaces.map(row => row.id)).size !== spaces.length) fail('AI_RESOURCE_UNAVAILABLE', 503);
+      const all = [...new Set([...currencies, ...accounts.map(row => row.currency)])].sort(), page = all.slice(0, 8);
+      const workspaces = spaces.slice(0, 64), included = new Set(workspaces.map(row => row.id));
       const balances: AiCreditBalance[] = [];
-      for (const row of accounts) {
+      for (const row of accounts.filter(row => page.includes(row.currency))) {
         const usage = await creditConsumption(tx, actor.tenantId, row.currency);
-        balances.push({ currency: row.currency, grantedAmount: row.grantedAmount.toFixed(6), spentAmount: usage.spent.toFixed(6),
-          heldAmount: usage.held.toFixed(6), availableAmount: Prisma.Decimal.max(0, row.grantedAmount.sub(usage.spent).sub(usage.held)).toFixed(6),
-          revision: row.revision, allocations: Object.entries(creditAllocations(row.allocationsJson)).map(([workspaceId, amount]) => ({ workspaceId, amount })) });
+        const available = creditAtoms(row.grantedAmount) - usage.spent - usage.held;
+        balances.push({ currency: row.currency, grantedAmount: row.grantedAmount.toFixed(6), spentAmount: creditAmount(usage.spent),
+          heldAmount: creditAmount(usage.held), availableAmount: creditAmount(available > 0n ? available : 0n),
+          revision: row.revision, allocations: Object.entries(creditAllocations(row.allocationsJson)).filter(([workspaceId]) => included.has(workspaceId)).map(([workspaceId, amount]) => ({ workspaceId, amount })) });
       }
-      await recheck(); return { currencies, balances, requests: requests.slice(0, 20).map(present), workspaces,
+      await recheck(); return { currencies: currencies.filter(value => page.includes(value)), balances, requests: requests.slice(0, 20).map(present), workspaces,
+        nextCurrency: all.length > 8 ? page[7] : null, nextWorkspace: spaces.length > 64 ? workspaces[63].id : null,
         requestHistoryComplete: requests.length <= 20 };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 }));
   }
@@ -224,7 +235,7 @@ export class AiCreditService {
         const where = { tenantId_requestedBy_operationKey: { tenantId: actor.tenantId, requestedBy: actor.userId, operationKey: input.operationKey } };
         const previous = await tx.aiTenantAiCreditRequest.findUnique({ where, include: requestInclude });
         if (previous) { if (previous.requestHash !== requestHash) fail('AI_REVISION_CONFLICT'); await recheck(); return present(previous); }
-        if (!(await this.currencies(tx)).includes(input.currency)) fail('AI_PLATFORM_PRICING_NOT_CONFIGURED', 503);
+        if (!(await this.currencies(tx, undefined, input.currency)).includes(input.currency)) fail('AI_PLATFORM_PRICING_NOT_CONFIGURED', 503);
         if (await tx.aiTenantAiCreditRequest.findFirst({ where: { tenantId: actor.tenantId, currency: input.currency, state: 'pending' }, select: { id: true } })) fail('AI_CREDIT_REQUEST_PENDING');
         await recheck();
         return present(await tx.aiTenantAiCreditRequest.create({ data: { id: randomUUID(), tenantId: actor.tenantId,
@@ -260,18 +271,22 @@ export class AiCreditService {
         const where = { tenantId_currency: { tenantId: actor.tenantId, currency: input.currency } };
         const account = await tx.aiTenantAiAllowance.findUnique({ where });
         if (!account || account.revision !== input.expectedRevision) fail('AI_REVISION_CONFLICT');
-        const allocations = Object.fromEntries(input.allocations.map(row => [row.workspaceId, new Prisma.Decimal(row.amount).toFixed(6)]));
-        const allowed = await tx.businessWorkspace.findMany({ where: { tenantId: actor.tenantId,
-          id: { in: Object.keys(allocations) } }, select: { id: true, status: true }, take: 65 });
-        if (allowed.length !== Object.keys(allocations).length) fail('AI_ACCESS_DENIED', 403);
-        const total = Object.values(allocations).reduce((sum, value) => sum.add(value), new Prisma.Decimal(0));
-        if (total.gt(account.grantedAmount)) fail('AI_CREDIT_ALLOCATION_EXCEEDED');
+        const changes = Object.fromEntries(input.allocations.map(row => [row.workspaceId, new Prisma.Decimal(row.amount).toFixed(6)]));
         const prior = creditAllocations(account.allocationsJson);
+        if (!input.mode && Object.keys(prior).length > 64) fail('AI_REVISION_CONFLICT');
+        if (!input.mode && await tx.businessWorkspace.count({ where: { tenantId: actor.tenantId } }) > 64) fail('AI_REVISION_CONFLICT');
+        const allocations = input.mode ? { ...prior, ...changes } : changes;
+        const allowed = await tx.businessWorkspace.findMany({ where: { tenantId: actor.tenantId,
+          id: { in: Object.keys(changes) } }, select: { id: true, status: true }, take: 65 });
+        if (allowed.length !== Object.keys(changes).length) fail('AI_ACCESS_DENIED', 403);
+        const total = Object.values(allocations).reduce((sum, value) => sum + creditAtoms(value), 0n);
+        if (total > creditAtoms(account.grantedAmount)) fail('AI_CREDIT_ALLOCATION_EXCEEDED');
         if (allowed.some(row => row.status !== 'ACTIVE'
           && new Prisma.Decimal(allocations[row.id]).gt(new Prisma.Decimal(prior[row.id] ?? 0)))) fail('AI_ACCESS_DENIED', 403);
-        for (const workspaceId of new Set([...Object.keys(prior), ...Object.keys(allocations)])) {
+        for (const workspaceId of input.mode ? Object.keys(changes) : new Set([...Object.keys(prior), ...Object.keys(allocations)])) {
+          if (input.mode && allocations[workspaceId] === prior[workspaceId]) continue;
           const usage = await creditConsumption(tx, actor.tenantId, input.currency, workspaceId);
-          if (usage.spent.add(usage.held).gt(new Prisma.Decimal(allocations[workspaceId] ?? 0))) fail('AI_CREDIT_ALREADY_COMMITTED');
+          if (usage.spent + usage.held > creditAtoms(allocations[workspaceId] ?? '0')) fail('AI_CREDIT_ALREADY_COMMITTED');
         }
         await recheck();
         const updated = await tx.aiTenantAiAllowance.updateMany({ where: { ...where.tenantId_currency, revision: input.expectedRevision },
@@ -318,16 +333,11 @@ export class AiCreditService {
       if (!Number.isFinite(since.getTime()) || !Number.isFinite(until.getTime()) || until <= since
         || until.getTime() - since.getTime() > 31 * 86400000 || until.getTime() > Date.now() + 60000) fail('AI_INVALID_INPUT', 400);
       return this.db.$transaction(async tx => {
-        const spaces = await tx.businessWorkspace.findMany({ where: { tenantId: actor.tenantId,
-          ...(input.workspaceId ? { id: input.workspaceId } : {}) }, select: { id: true, name: true }, take: 65 });
-        if (spaces.length > 64) fail('AI_RESOURCE_UNAVAILABLE', 503);
-        if (input.workspaceId && spaces.length !== 1) fail('AI_ACCESS_DENIED', 403);
-        const scopes = await tx.aiScope.findMany({ where: { tenantId: actor.tenantId, kind: 'WORKSPACE',
-          workspaceId: { in: spaces.map(row => row.id) } }, select: { id: true, workspaceId: true }, take: 65 });
-        if (scopes.length > 64) fail('AI_RESOURCE_UNAVAILABLE', 503);
-        const where: Prisma.AiGatewayInvocationWhereInput = { scopeId: { in: scopes.map(row => row.id) },
+        if (input.workspaceId && !await tx.businessWorkspace.findFirst({ where: { tenantId: actor.tenantId, id: input.workspaceId }, select: { id: true } })) fail('AI_ACCESS_DENIED', 403);
+        const scopeFilter = { kind: 'WORKSPACE' as const, tenantId: actor.tenantId, workspace: { tenantId: actor.tenantId, ...(input.workspaceId ? { id: input.workspaceId } : {}) } };
+        const where: Prisma.AiGatewayInvocationWhereInput = { run: { task: { scope: scopeFilter } },
           createdAt: { gte: since, lt: until }, ...(input.mode ? { configuration: { path: '$.serviceMode', equals: input.mode } } : {}) };
-        const counts = new CountCallHistoryReader(tx), countQuery = { tenantId: actor.tenantId, scopes, since, until,
+        const counts = new CountCallHistoryReader(tx), countQuery = { tenantId: actor.tenantId, workspaceId: input.workspaceId, since, until,
           ...(input.mode ? { mode: input.mode } : {}) };
         // Check the anchor within the same tenant/space/time/source filter, then
         // page by its immutable ordering tuple, not an offset against a live row.
@@ -343,15 +353,16 @@ export class AiCreditService {
           orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 51, select: callSelect });
         if (rows.length > 51) fail('AI_RESOURCE_UNAVAILABLE', 503);
         const counted = await counts.list(countQuery, anchor ?? undefined);
+        const scopes = await tx.aiScope.findMany({ where: { ...scopeFilter, id: { in: [...new Set(rows.map(row => row.scopeId))] } }, select: { id: true, workspaceId: true } });
         const models = rows.map(row => {
-          const scope = scopes.find(scope => scope.id === row.scopeId), space = spaces.find(space => space.id === scope?.workspaceId);
-          if (!scope?.workspaceId || !space || row.accountingReceipts.length > 1) fail('AI_RESOURCE_UNAVAILABLE', 503);
+          const workspaceId = scopes.find(scope => scope.id === row.scopeId)?.workspaceId;
+          if (!workspaceId || row.accountingReceipts.length > 1) fail('AI_RESOURCE_UNAVAILABLE', 503);
           const config = row.configuration, known = isGatewayConfig(config) && requestFingerprint(config) === row.configurationHash
             && 'tenantId' in config && config.tenantId === actor.tenantId
             && (config.configurationScope.kind === 'platform' || config.configurationScope.tenantId === actor.tenantId);
           const mode = known ? config.serviceMode : 'unknown' as const;
           const receipt = row.accountingReceipts[0], reservation = receipt?.reservation;
-          if (receipt && reservation && (receipt.scopeKind !== 'WORKSPACE' || receipt.tenantId !== actor.tenantId || receipt.workspaceId !== space.id
+          if (receipt && reservation && (receipt.scopeKind !== 'WORKSPACE' || receipt.tenantId !== actor.tenantId || receipt.workspaceId !== workspaceId
             || receipt.scopeId !== row.scopeId || receipt.taskId !== row.taskId || receipt.invocationId !== row.id
             || reservation.id !== receipt.reservationId || reservation.scopeKind !== receipt.scopeKind || reservation.scopeId !== row.scopeId
             || reservation.tenantId !== receipt.tenantId || reservation.workspaceId !== receipt.workspaceId
@@ -370,8 +381,8 @@ export class AiCreditService {
             : reservation?.status === 'reserved' && reservation.dispatchState === 'not_dispatched' && receipt.state === 'reserved' ? 'reserved'
             : reservation?.status === 'reserved' && reservation.dispatchState === 'dispatched' && receipt.state === 'dispatched' ? 'dispatched' : 'unknown';
           const money = mode === 'platform_managed' && settlement?.unit === 'money' ? settlement : null;
-          const record = { id: row.id, taskId: row.taskId, callId: row.callId, createdAt: iso(row.createdAt), workspaceId: space.id,
-            workspaceName: space.name, actorName: '', operationKind: 'model' as const,
+          const record = { id: row.id, taskId: row.taskId, callId: row.callId, createdAt: iso(row.createdAt), workspaceId,
+            workspaceName: '', actorName: '', operationKind: 'model' as const,
             calls: associated && receipt && (usage || callCompleted(receipt)) ? '1' : null,
             sceneCode: row.sceneCode, mode, modelLabel: mode === 'tenant_managed' && known ? config.model : mode === 'platform_managed' ? 'Rental OS AI' : '配置待核对',
             state, inputTokens: usage ? receipt!.inputTokens!.toString() : null, outputTokens: usage ? receipt!.outputTokens!.toString() : null,
@@ -388,6 +399,7 @@ export class AiCreditService {
           else merged.push(counted[countIndex++]);
         }
         const page = merged.slice(0, 50), actorIds = [...new Set(page.map(row => row.actorId))];
+        const spaces = await tx.businessWorkspace.findMany({ where: { tenantId: actor.tenantId, id: { in: [...new Set(page.map(row => row.record.workspaceId))] } }, select: { id: true, name: true } });
         const users = await tx.user.findMany({ where: { tenantId: actor.tenantId, id: { in: actorIds } },
           select: { id: true, displayName: true }, take: 50 });
         const records: AiTenantCallRecord[] = page.map(({ actorId, record }) => ({ ...record,
@@ -424,10 +436,10 @@ export class AiCreditService {
         if (input.decision === 'approve') {
           if (row.tenant.status !== 'ACTIVE') fail('AI_ACCESS_DENIED', 403);
           if (input.amount!.gt(row.requestedAmount)) fail('AI_CREDIT_ALLOCATION_EXCEEDED');
-          if (!(await this.currencies(tx)).includes(row.currency)) fail('AI_PLATFORM_PRICING_NOT_CONFIGURED', 503);
+          if (!(await this.currencies(tx, undefined, row.currency)).includes(row.currency)) fail('AI_PLATFORM_PRICING_NOT_CONFIGURED', 503);
           await tx.$queryRaw(Prisma.sql`SELECT tenantId FROM ai_tenant_ai_allowances WHERE tenantId = ${row.tenantId} AND currency = ${row.currency} FOR UPDATE`);
           const current = await tx.aiTenantAiAllowance.findUnique({ where: { tenantId_currency: { tenantId: row.tenantId, currency: row.currency } } });
-          if ((current?.grantedAmount ?? new Prisma.Decimal(0)).add(input.amount!).gt('999999999999999999.999999')) fail('AI_CREDIT_ALLOCATION_EXCEEDED');
+          if (creditAtoms(current?.grantedAmount ?? '0') + creditAtoms(input.amount!) > creditAtoms('999999999999999999.999999')) fail('AI_CREDIT_ALLOCATION_EXCEEDED');
           await tx.aiTenantAiAllowance.upsert({ where: { tenantId_currency: { tenantId: row.tenantId, currency: row.currency } },
             create: { tenantId: row.tenantId, currency: row.currency, grantedAmount: input.amount!, allocationsJson: {} },
             update: { grantedAmount: { increment: input.amount! }, revision: { increment: 1 } } });

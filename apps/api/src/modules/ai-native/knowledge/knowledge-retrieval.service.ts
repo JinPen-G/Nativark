@@ -16,43 +16,51 @@ export class KnowledgeRetrievalService {
     const input = parse(inputSchema, value), base = { draftVersion: AI_KNOWLEDGE_DRAFT_VERSION, requestId: input.requestId };
     try {
       const grant = await authorize(this.documents.ports.authorization, context, { action: 'search', scope: context.scope });
-      const selected = await this.selection.select(context);
-      if (!selected || fingerprint(selected.grant) !== fingerprint(grant)) unavailable();
-      const constraints = parse(constraintsSchema, selected.documents);
-      const ready: KnowledgeDocumentConstraint[] = [];
-      let blocked: 'parsing' | 'not_indexed' | 'parse_failed' | 'index_failed' | undefined;
-      for (const ref of constraints) {
-        const { document: d } = await this.documents.load(context, ref.documentId, 'search');
-        if (d.documentVersion !== ref.documentVersion || d.aclRevision !== ref.aclRevision) unavailable();
-        if (d.publication === 'withdrawn' || d.publication === 'deleted' || Date.parse(d.validFrom) > this.documents.ports.clock.now() || (d.validUntil && Date.parse(d.validUntil) <= this.documents.ports.clock.now())) continue;
-        if (visible(d, this.documents.ports.clock.now())) ready.push(ref);
-        else if (d.parsing === 'failed' || d.parsing === 'rejected') blocked = 'parse_failed';
-        else if (d.indexing === 'failed') blocked = 'index_failed';
-        else if (d.parsing === 'pending') blocked ??= 'parsing';
-        else blocked ??= 'not_indexed';
-      }
-      if (!ready.length) {
-        const current = await authorize(this.documents.ports.authorization, context, { action: 'search', scope: context.scope });
-        if (fingerprint(current) !== fingerprint(grant)) unavailable();
-        if (blocked === 'parse_failed' || blocked === 'index_failed') return { ...base, status: 'failed', reason: blocked };
-        if (blocked) return { ...base, status: 'not_ready', reason: blocked };
-        return { ...base, status: 'no_results' };
-      }
-      const candidates = await this.search.search({ grant, documents: ready, query: input.query, limit: input.limit });
-      if (!Array.isArray(candidates) || candidates.length > input.limit) unavailable();
       const matches: Array<{ source: AiKnowledgeSourceDraft; excerpt: string; trust: 'untrusted_data' }> = [];
-      let chars = 0; const seen = new Set<string>();
-      for (const source of candidates) {
-        if (source.kind !== 'document' || !sameScope(source.scope, context.scope) || !ready.some(ref => ref.documentId === source.documentId && ref.documentVersion === source.documentVersion && ref.aclRevision === source.aclRevision)) unavailable();
-        const chunk = await this.sources.readChunk(context, source);
-        const marker = fingerprint([chunk.documentId, chunk.documentVersion, chunk.chunkId]);
-        if (seen.has(marker)) continue;
-        seen.add(marker); chars += chunk.text.length;
-        if (chars > 12000) unavailable();
-        matches.push({ source: { kind: 'document', scope: chunk.scope, documentId: chunk.documentId, documentVersion: chunk.documentVersion, chunkId: chunk.chunkId, aclRevision: chunk.aclRevision, locator: chunk.locator }, excerpt: chunk.text, trust: 'untrusted_data' });
-      }
+      const seen = new Set<string>(), cursors = new Set<string>();
+      let chars = 0, anyReady = false, after: string | undefined;
+      let blocked: 'parsing' | 'not_indexed' | 'parse_failed' | 'index_failed' | undefined;
+      do {
+        const selected = await this.selection.select(context, after);
+        if (!selected || fingerprint(selected.grant) !== fingerprint(grant)) unavailable();
+        after = selected.nextAfter;
+        if (after !== undefined) {
+          if (!id.safeParse(after).success || cursors.has(after)) unavailable();
+          cursors.add(after);
+        }
+        const constraints = parse(constraintsSchema, selected.documents);
+        const ready: KnowledgeDocumentConstraint[] = [];
+        for (const ref of constraints) {
+          const { document } = await this.documents.load(context, ref.documentId, 'search');
+          if (document.documentVersion !== ref.documentVersion || document.aclRevision !== ref.aclRevision) unavailable();
+          const now = this.documents.ports.clock.now();
+          if (document.publication === 'withdrawn' || document.publication === 'deleted' || Date.parse(document.validFrom) > now || (document.validUntil && Date.parse(document.validUntil) <= now)) continue;
+          if (visible(document, now)) ready.push(ref);
+          else if (document.parsing === 'failed' || document.parsing === 'rejected') blocked = 'parse_failed';
+          else if (document.indexing === 'failed') blocked = 'index_failed';
+          else blocked ??= document.parsing === 'pending' ? 'parsing' : 'not_indexed';
+        }
+        if (!ready.length) continue;
+        anyReady = true;
+        const remaining = input.limit - matches.length;
+        const candidates = await this.search.search({ grant, documents: ready, query: input.query, limit: remaining });
+        if (!Array.isArray(candidates) || candidates.length > remaining) unavailable();
+        for (const source of candidates) {
+          if (source.kind !== 'document' || !sameScope(source.scope, context.scope) || !ready.some(ref => ref.documentId === source.documentId && ref.documentVersion === source.documentVersion && ref.aclRevision === source.aclRevision)) unavailable();
+          const chunk = await this.sources.readChunk(context, source);
+          const marker = fingerprint([chunk.documentId, chunk.documentVersion, chunk.chunkId]);
+          if (seen.has(marker)) continue;
+          seen.add(marker); chars += chunk.text.length;
+          if (chars > 12000) unavailable();
+          matches.push({ source: { kind: 'document', scope: chunk.scope, documentId: chunk.documentId, documentVersion: chunk.documentVersion, chunkId: chunk.chunkId, aclRevision: chunk.aclRevision, locator: chunk.locator }, excerpt: chunk.text, trust: 'untrusted_data' });
+        }
+      } while (after && matches.length < input.limit);
       const currentGrant = await authorize(this.documents.ports.authorization, context, { action: 'search', scope: context.scope });
       if (fingerprint(currentGrant) !== fingerprint(grant)) unavailable();
+      if (!anyReady && blocked) {
+        if (blocked === 'parse_failed' || blocked === 'index_failed') return { ...base, status: 'failed', reason: blocked };
+        return { ...base, status: 'not_ready', reason: blocked };
+      }
       for (const match of matches) await this.sources.resolve(context, match.source);
       return matches.length ? { ...base, status: 'ready', matches } : { ...base, status: 'no_results' };
     } catch { return { ...base, status: 'unavailable', nextAction: 'reauthorize_or_manual' }; }

@@ -218,9 +218,11 @@ export class AiConversationRepository {
     if (command.capabilityCode && !this.capabilities.includes(command.capabilityCode)) throw unavailable();
     // Filtering a client page loses matching history and can expose retired capabilities.
     // Keep the current registered set in the owned database query, including legacy lists.
-    const rows = await this.db.aiConversation.findMany({ where: { ...this.owner(session), status: command.status, deletedAt: null,
-      capabilityCode: command.capabilityCode ?? { in: [...this.capabilities] },
-      ...(command.beforeId ? { id: { lt: command.beforeId } } : {}) }, orderBy: { id: 'desc' }, take: command.limit + 1 });
+    const where = { ...this.owner(session), status: command.status, deletedAt: null, capabilityCode: command.capabilityCode ?? { in: [...this.capabilities] } };
+    const anchor = command.beforeId && await this.db.aiConversation.findFirst({ where: { ...where, id: command.beforeId }, select: { id: true, createdAt: true } });
+    if (command.beforeId && !anchor) throw unavailable();
+    const rows = await this.db.aiConversation.findMany({ where: { ...where, ...(anchor ? { OR: [{ createdAt: { lt: anchor.createdAt } },
+      { createdAt: anchor.createdAt, id: { lt: anchor.id } }] } : {}) }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: command.limit + 1 });
     await this.check(session);
     return { draftVersion: version, items: rows.slice(0, command.limit).map(row => this.summary(row)),
       nextBeforeId: rows.length > command.limit ? rows[command.limit - 1].id : null, coverage: 'page_not_total' };
@@ -280,15 +282,32 @@ export class AiConversationRepository {
     const turn = row.activeTurnId ? await this.db.aiConversationTurn.findFirst({ where: { ...this.owner(session), conversationId: row.id, id: row.activeTurnId } }) : null;
     if (row.activeTurnId && !turn) throw unavailable();
     const currentTurn = turn ? await this.turn(turn) : null;
+    let closedTurn: AiConversationObservationDraft['closedTurn'];
+    if (command.includeClosedTurn && row.status === 'active' && !turn && row.revision >= 3) {
+      const history = { ...this.owner(session), conversationId: row.id };
+      const previous = await this.db.aiConversationTurn.findFirst({ where: { ...history, admissionRevision: row.revision - 2 } });
+      const closure = await this.db.aiConversationOperation.findFirst({ where: { ...history, revision: row.revision, operation: { in: ['release_turn', 'close_unstarted'] } } });
+      if (previous && closure) {
+        const unstarted = closure.operation === 'close_unstarted';
+        const command = { draftVersion: unstarted ? AI_CONVERSATION_UNSTARTED_DRAFT_VERSION : version, conversationId: row.id,
+          operationKey: closure.operationKey, expectedRevision: row.revision - 1, ...(unstarted ? { turnId: previous.id, originalInputRef: previous.originalRequestId } : {}) };
+        if (closure.inputHash !== requestFingerprint({ operation: closure.operation, command })) throw unavailable();
+        closedTurn = { operationKey: closure.operationKey, turnId: previous.id, admissionKey: previous.admissionKey,
+          originalInputRef: previous.originalRequestId, requestHash: previous.inputHash };
+      }
+    }
     const after = await this.row(this.db, session, row.id);
     if (row.revision !== after.revision) throw conflict(); await this.check(session);
-    return { draftVersion: version, ...this.summary(row), currentTurn, taskCancellation: 'separate_original_operation', businessRecords: 'not_modified' };
+    return { draftVersion: version, ...this.summary(row), currentTurn, ...(closedTurn ? { closedTurn } : {}), taskCancellation: 'separate_original_operation', businessRecords: 'not_modified' };
   }
   async turns(value: unknown): Promise<AiConversationTurnPageDraft> {
     const command = conversationCommand('AiConversationTurnListDraft', value), session = await this.current();
     const row = await this.row(this.db, session, command.conversationId);
-    const turns = await this.db.aiConversationTurn.findMany({ where: { ...this.owner(session), conversationId: row.id,
-      ...(command.beforeId ? { id: { lt: command.beforeId } } : {}) }, orderBy: { id: 'desc' }, take: command.limit + 1 });
+    const where = { ...this.owner(session), conversationId: row.id };
+    const anchor = command.beforeId && await this.db.aiConversationTurn.findFirst({ where: { ...where, id: command.beforeId }, select: { id: true, admissionRevision: true } });
+    if (command.beforeId && !anchor) throw unavailable();
+    const turns = await this.db.aiConversationTurn.findMany({ where: { ...where, ...(anchor ? { OR: [{ admissionRevision: { lt: anchor.admissionRevision } },
+      { admissionRevision: anchor.admissionRevision, id: { lt: anchor.id } }] } : {}) }, orderBy: [{ admissionRevision: 'desc' }, { id: 'desc' }], take: command.limit + 1 });
     const items = [];
     for (const turn of turns.slice(0, command.limit)) items.push(await this.turn(turn));
     const after = await this.row(this.db, session, row.id); if (row.revision !== after.revision) throw conflict(); await this.check(session);

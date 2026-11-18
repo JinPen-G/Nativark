@@ -3,7 +3,7 @@
 import { request } from '../core/http';
 import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientOrderMaterialRequestSchema, aiClientOrderMaterialReceiptSchema,
   aiClientTaskReadRequestSchema, aiClientTaskCreationReceiptSchema, aiClientTaskModelControlResponseSchema,
-  aiClientTaskModelResultReadResponseSchema, aiClientTaskInputReadResponseSchema, aiClientTaskInputSubmissionRequestSchema,
+  aiClientTaskModelResultReadResponseSchema, aiClientTaskInputReadResponseSchema, aiClientTaskInputSubmissionRequestSchema, aiClientTaskInputReferenceRequestSchema,
   aiClientTaskInputSubmissionReceiptSchema, aiClientTaskInputReceiptReadResponseSchema,
   aiClientTaskEventsReadRequestSchema, aiClientTaskSnapshotReadResponseSchema, aiClientTaskEventsReadResponseSchema,
   aiClientOrderActionSourceSchema, aiClientOrderActionSchema, aiClientOrderActionRevalidationSchema, aiClientHostCapabilitiesSchema } from '../vendor/shared-ai-client';
@@ -62,11 +62,11 @@ export const clientTaskApi = Object.freeze({
   submitInput(input: ReturnType<typeof aiClientTaskInputSubmissionRequestSchema.parse>) {
     return call(AI_CLIENT_ENTRY_HTTP_DRAFT.submitTaskInput, aiClientTaskInputSubmissionRequestSchema.parse(input), aiClientTaskInputSubmissionReceiptSchema);
   },
-  readInputReceipt(input: ReturnType<typeof aiClientTaskInputSubmissionRequestSchema.parse>) {
-    return call(AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskInputReceipt, aiClientTaskInputSubmissionRequestSchema.parse(input), aiClientTaskInputReceiptReadResponseSchema);
+  readInputReceipt(input: ReturnType<typeof aiClientTaskInputReferenceRequestSchema.parse>) {
+    return call(AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskInputReceipt, aiClientTaskInputReferenceRequestSchema.parse(input), aiClientTaskInputReceiptReadResponseSchema);
   },
-  continueInput(input: ReturnType<typeof aiClientTaskInputSubmissionRequestSchema.parse>) {
-    return call(AI_CLIENT_ENTRY_HTTP_DRAFT.continueTaskInput, aiClientTaskInputSubmissionRequestSchema.parse(input), aiClientTaskModelControlResponseSchema);
+  continueInput(input: ReturnType<typeof aiClientTaskInputReferenceRequestSchema.parse>) {
+    return call(AI_CLIENT_ENTRY_HTTP_DRAFT.continueTaskInput, aiClientTaskInputReferenceRequestSchema.parse(input), aiClientTaskModelControlResponseSchema);
   },
 });
 export type ClientTaskApi = Omit<typeof clientTaskApi, 'orderNavigation'> & { readonly orderNavigation?: ClientOrderNavigationPort };

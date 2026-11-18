@@ -1,17 +1,13 @@
-import { BadRequestException, Body, Controller, Header, HttpCode, Post, Req } from '@nestjs/common';
+import { Body, Controller, Header, HttpCode, Post, Req } from '@nestjs/common';
 import { AiCreditService } from './ai-credit.service';
-import { z } from 'zod';
 type Request = { headers: { authorization?: string } };
-function empty(body: unknown) {
-  if (!z.object({}).strict().safeParse(body).success) throw new BadRequestException({ code: 'AI_INVALID_INPUT' });
-}
 /** Routes mirror shared AI_CREDIT_HTTP. Global ApiAuthGuard performs the exact
  * permission check; the service then re-resolves the current server identity. */
 @Controller('ai-native/credits')
 export class AiCreditController {
   constructor(private readonly service: AiCreditService) {}
   @Post('read') @HttpCode(200) @Header('Cache-Control', 'no-store')
-  read(@Req() req: Request, @Body() body: unknown) { empty(body); return this.service.read(req.headers.authorization); }
+  read(@Req() req: Request, @Body() body: unknown) { return this.service.read(req.headers.authorization, body); }
   @Post('request') @HttpCode(200) @Header('Cache-Control', 'no-store')
   request(@Req() req: Request, @Body() body: unknown) { return this.service.request(req.headers.authorization, body); }
   @Post('receipt') @HttpCode(200) @Header('Cache-Control', 'no-store')

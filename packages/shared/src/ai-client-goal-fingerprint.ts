@@ -19,7 +19,12 @@ const rotate = (word: number, bits: number) => word >>> bits | word << (32 - bit
  * requiring Web Crypto, Buffer or TextEncoder in the native client host. */
 export async function clientGoalTextHash(goalText: string): Promise<string> {
   const goal = aiClientGoalPreparationRequestSchema.parse({ operationKey: 'validation-only', goalText });
-  const text = JSON.stringify({ goalText: goal.goalText, version: 'client-goal-1' }), bytes: number[] = [];
+  return clientGoalFingerprint({ goalText: goal.goalText, version: 'client-goal-1' });
+}
+export function clientGoalFingerprint(value: unknown): string {
+  const text = JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item)
+    ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
+  const bytes: number[] = [];
   for (const character of text) {
     const point = character.codePointAt(0)!;
     if (point < 0x80) bytes.push(point);

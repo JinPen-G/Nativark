@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientOrderActionSourceSchema, aiClientOrderActionRevalidationSchema,
   AI_TASK_DRAFT_VERSION, aiClientTaskReadRequestSchema, aiClientTaskCreationReceiptSchema,
   aiClientGoalPreparationRequestSchema, aiClientGoalPreparationReadRequestSchema,
-  aiClientGoalQuoteRequestSchema, aiClientQuotePreparationRequestSchema } from '@rental-os/shared';
+  aiClientGoalQuoteRecoverySchema, aiClientQuoteReadRequestSchema } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { createAiGuardedClientSession } from '../client-scene.composition';
 import { AiClientEntryError } from './client-entry-action';
@@ -100,7 +100,7 @@ async function readClientEntryAuditOrigin(application: ReturnType<typeof compose
         receipt.state === 'observed' ? { materialRef: receipt.materialRef } : {});
     }
     if (name === 'prepareGoalQuote' || name === 'readGoalQuotePreparation') {
-      const quote = aiClientGoalQuoteRequestSchema.parse(value);
+      const quote = aiClientGoalQuoteRecoverySchema.parse(value);
       const receipt = await application.readGoalQuotePreparation(request, value);
       return origin('material', quote.operationKey, receipt.state,
         receipt.state === 'observed' ? { materialRef: receipt.materialRef } : {});
@@ -116,7 +116,7 @@ async function readClientEntryAuditOrigin(application: ReturnType<typeof compose
         receipt.state === 'observed' ? { materialRef: receipt.materialRef! } : {});
     }
     if (name === 'prepareQuoteParameters' || name === 'readQuotePreparationOperation') {
-      const quote = aiClientQuotePreparationRequestSchema.parse(value);
+      const quote = aiClientQuoteReadRequestSchema.parse(value);
       const receipt = await application.readQuotePreparationOperation(request, value);
       return origin('material', quote.operationKey, receipt.state,
         receipt.state === 'observed' ? { materialRef: receipt.materialRef } : {});

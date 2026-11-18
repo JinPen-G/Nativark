@@ -53,6 +53,19 @@ export interface AiEntrySceneCatalogResponse {
   publicationRevision: string | null; entries: AiEntrySceneCatalogEntry[]; nextAfter: string | null;
   coverage: 'bounded_current_scene_page'; execution: 'not_attempted'; authorization: 'directory_not_action_or_task_authority';
 }
+const availabilityLabels: Record<AiEntrySceneCatalogEntry['availability']['reason'], readonly [string, string]> = {
+  current_original_entry: ['已核对原入口', 'Original entry verified'],
+  original_manual_entry: ['请在原页面人工办理', 'Continue on the original page'],
+  deployment_disabled: ['此环境尚未启用 AI', 'AI is disabled in this environment'],
+  permission_missing: ['当前账号缺少权限', 'Your account lacks the required permission'],
+  source_unavailable: ['暂时无法核对原功能', 'The original service could not be verified'],
+  policy_unavailable: ['当前空间的 AI 政策不可用', 'AI policy is unavailable for this workspace'],
+  capability_unavailable: ['所需模型能力不可用', 'The required model capability is unavailable'],
+  subscription_unavailable: ['当前订阅未提供所需权益', 'The required entitlement is unavailable'],
+};
+export function entrySceneAvailabilityLabel(reason: AiEntrySceneCatalogEntry['availability']['reason'], english = false): string {
+  return availabilityLabels[reason][english ? 1 : 0];
+}
 const nullable = (schema: AiLeafSchemaDraft): AiLeafSchemaDraft => ({ oneOf: [schema, { type: 'null' }] });
 const bool = (value: boolean): AiLeafSchemaDraft => ({ type: 'boolean', const: value });
 const unique = (schema: AiLeafSchemaDraft, maxItems: number, minItems = 0): AiLeafSchemaDraft => ({ ...list(schema, maxItems, minItems), uniqueItems: true });
@@ -121,8 +134,8 @@ export function isAiEntrySceneCatalogResponse(value: unknown): value is AiEntryS
     && row.disable.scopes.join(':') === 'global:tenant_or_platform:scene'
     && new Set(row.tools.map(tool => tool.code)).size === row.tools.length
     && (row.availability.state === 'available' ? row.availability.reason === 'current_original_entry'
-      && row.availability.source?.implementation === 'implemented' : row.availability.state !== 'manual_only'
-        || row.availability.reason === 'original_manual_entry')
+      && row.availability.source?.implementation === 'implemented' : row.availability.reason !== 'current_original_entry'
+        && (row.availability.state !== 'manual_only' || !!row.availability.source && row.availability.reason !== 'permission_missing'))
     && (row.availability.source === null || row.availability.source.kind === row.source.kind
       && Date.parse(row.availability.source.expiresAt) > Date.parse(row.availability.source.observedAt)
       && Date.parse(row.availability.source.expiresAt) >= Date.parse(result.expiresAt)));
