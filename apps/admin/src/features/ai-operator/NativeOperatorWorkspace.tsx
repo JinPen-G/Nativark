@@ -15,7 +15,7 @@ import { TaskCancellation } from '../ai-native/TaskCancellation';
 import { useAiManagementLocale } from '../ai-native/management-locale';
 import { ConversationAdmissionSession } from '../ai-native/conversation-admission-session';
 import { AgentRun } from './archive/agent-run/AgentRun';
-import type { NativeFrame } from './native-session';
+import { nativeAgentRun, type NativeFrame } from './native-session';
 import { useOperator } from './OperatorContext';
 
 export function NativeOperatorWorkspace({ visible }: { visible: boolean }) {
@@ -58,10 +58,10 @@ export function NativeOperatorWorkspace({ visible }: { visible: boolean }) {
       {!frame && operator.active.hasOriginal && <div className="operator-artifact"><Button onClick={() => operator.readOriginal()}>{label('核对原请求', 'Check original request')}</Button></div>}
       {frame && <div className="operator-artifact">
         {frame.phase === 'unknown' && <p role="status">{label('原结果待核对', 'Original result awaiting verification')}</p>}
-        {operator.active.run && <div className="operator-run-host"><AgentRun task={label('原任务步骤', 'Original task steps')}
+        {frame.snapshot && <div className="operator-run-host"><AgentRun task={label('原任务步骤', 'Original task steps')}
           model={{ name: label('模型信息未提供', 'Model information unavailable'), mark: <></> }}
-          statusText={frame.snapshot ? label(...taskLabels[frame.snapshot.status]) : undefined}
-          run={operator.active.run} autoPlay={false} activityOnly /></div>}
+          statusText={label(...taskLabels[frame.snapshot.status])}
+          run={nativeAgentRun(frame.snapshot, label)} autoPlay={false} activityOnly /></div>}
         {frame.historical && <p>{label('后续事项请通过原任务和业务页面办理。', 'Continue on the original task or business page.')}</p>}
         {visible && !frame.historical && frame.turn?.task && <TaskCancellation key={frame.turn.task.taskId} taskId={frame.turn.task.taskId} identity={operator.identity} current={current} onAccessDenied={deny} />}
         {frame.turn && visible && <>

@@ -86,6 +86,38 @@ test('PCM WAV framing is checked by both the original object reader and Gateway 
     assert.equal(modelProtocolRequestSchema.safeParse(request(bytes)).success,false);
   }
 });
+
+test('staff pickup and return retain the manual inspection across photo and recording limits', async () => {
+  const session = require('../apps/staff-miniprogram/src/core/session');
+  const intake = require('../apps/staff-miniprogram/src/components/ai-native/inspection-task-page-binding');
+  const previous = global.wx;
+  const actor = { accessToken:'fixture', refreshToken:'fixture', tenant:{tenantId:'tenant'}, currentWorkspaceId:'shop', user:{id:'employee'} };
+  let format = 'png', size = 524288, duration = 12000, completion;
+  const recorder = { onStop(callback) { completion = callback; }, onError() {}, start(options) { assert.equal(options.format, 'wav'); },
+    stop() { completion({duration, fileSize:size, tempFilePath:'fixture.wav'}); } };
+  global.wx = { getStorageSync: key => key === 'rental-os-staff:session' ? actor : '',
+    showActionSheet: ({success}) => success({tapIndex:0}), chooseImage: ({success}) => success({tempFiles:[{path:'fixture-image',size}]}),
+    getImageInfo: ({success}) => success({type:format}), getRecorderManager: () => recorder };
+  session.resetSessionForTest();
+  try {
+    for (const stage of ['pickup','return']) {
+      const page = { order:{id:'order'}, template:{id:'template',version:1}, inspectionPageShown:true, inspectionPageEpoch:1,
+        inspectionLoadedScope:intake.inspectionPageScopeKey(), data:{id:'order',groups:[{allocationId:'item'}],allocations:[{id:'item'}],
+          signatureFileAssetId:'manual-signature',manualNotes:'original condition'}, setData(patch) { Object.assign(this.data,patch); } };
+      for (const [type, bytes, allowed] of [['png',524288,true],['JPEG',524288,true],['jpg',128,true],['png',524289,false],['heic',1024,false]]) {
+        format = type; size = bytes; await intake.chooseInspectionPageImage(page,stage);
+        assert.equal(page.data.aiInspectionCanUpload,allowed);
+        if (!allowed) assert.match(page.data.aiInspectionMediaMessage,/人工检查/u);
+      }
+      for (const [length, bytes, allowed] of [[12000,524288,true],[12001,524288,false],[12000,524289,false]]) {
+        duration = length; size = bytes; await intake.startInspectionPageRecording(page,stage); intake.stopInspectionPageRecording(page);
+        assert.equal(page.data.aiInspectionCanUpload,allowed);
+        if (!allowed) assert.match(page.data.aiInspectionMediaMessage,/人工检查/u);
+      }
+      assert.equal(page.data.signatureFileAssetId,'manual-signature'); assert.equal(page.data.manualNotes,'original condition');
+    }
+  } finally { session.resetSessionForTest(); if (previous === undefined) delete global.wx; else global.wx = previous; }
+});
 test('frozen WAV inspection uses original audio runner and persisted measured result', {timeout:30000}, async()=>{
   const bytes=wavFixtureBytes();
   const f=mediaFixture(bytes),{modelHostHarness}=require('./fixtures/ai-native/task-model-host.cjs');

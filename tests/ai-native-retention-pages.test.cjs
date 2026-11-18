@@ -7,6 +7,17 @@ const { AiRetentionRestoreVerifier, signRetentionManifest } = require('../apps/a
 const { AiPlatformRetentionRestoreVerifier, signPlatformRetentionManifest } = require('../apps/api/src/modules/ai-native/privacy/platform-retention-restore');
 const { AI_RETENTION_POLICY } = require('../apps/api/src/modules/ai-native/privacy/retention-policy');
 const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+test('retention observations preserve partial coverage, holds, unknown deadlines and cursor continuity', () => {
+  const { retentionCandidate, retentionPageObservation } = require('../apps/api/src/modules/ai-native/privacy/retention-page-observation');
+  const now = new Date('2026-11-18T12:00:00Z'), old = new Date('2026-10-18T12:00:00Z');
+  const scope = { scopeKind: 'workspace', scopeId: 'private-scope', kind: 'material' };
+  const rows = ['erased','withdrawn','held','unknown','unavailable'].map((id, index) => retentionCandidate(id, index === 4 ? null : old));
+  const page = retentionPageObservation(scope, now, rows, rows.map(({id}) => ({state:id})), 'private-cursor');
+  assert.deepEqual([page.scanned,page.erased,page.withdrawn,page.held,page.pending,page.overdue,page.oldestOverdueMs,page.missingDeadline], [5,1,1,1,2,2,86400000,1]);
+  assert.equal(page.coverage,'bounded_candidate_page'); assert.doesNotMatch(JSON.stringify(page), /private-/u);
+  const last = retentionPageObservation({...scope,after:'private-cursor'}, now, [], [], null);
+  assert.equal(last.afterHash, page.nextHash); assert.equal(last.nextHash,null); assert.equal(last.oldestOverdueMs,null);
+});
 test('restore barrier verifies 501 distinct workspaces and the platform in one restored snapshot', () => {
   const { verifyRestoredAiScopes } = require('../scripts/ops/ai-retention.cjs');
   const { sign } = require('node:crypto');

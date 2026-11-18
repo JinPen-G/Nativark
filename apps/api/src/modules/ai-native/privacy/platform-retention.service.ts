@@ -13,6 +13,7 @@ import { isAiStepExecutionContext } from '../task-contract-validation';
 import { aiTaskHasUnresolvedEffects } from '../task-unresolved-effects';
 import { fingerprint } from '../knowledge/knowledge-validation';
 import { AI_RETENTION_POLICY } from './retention-policy';
+import { logRetentionPage, retentionCandidate } from './retention-page-observation';
 import { AiRetentionUnknown, aiRetentionReceiptSchema, aiRetentionReceiptsSchema } from './retention.service';
 import { erasePlatformTaskBodies } from './retention-task-bodies';
 import { AI_BODY_STORAGE_KINDS, protectAiBodyStorageRows, type AiBodyStorageCursor } from './prisma-ai-body-storage';
@@ -193,9 +194,9 @@ export class AiPlatformRetentionService {
     const page = command.after ? { id: { gt: command.after } } : {}, cutoff = new Date(this.now().getTime() - AI_RETENTION_POLICY.conversationDays * 86400000);
     const rows = command.kind === 'task' ? await this.db.aiTask.findMany({ where: { scopeId: before.scopeId, scopeKind: 'PLATFORM',
       ownerKind: 'SAAS_ADMIN', audience: 'OPERATOR', status: { in: [...terminal] }, updatedAt: { lte: cutoff },
-      archivedAt: null, ...page }, select: { id: true }, orderBy: { id: 'asc' }, take: command.limit })
+      archivedAt: null, ...page }, select: { id: true, updatedAt: true }, orderBy: { id: 'asc' }, take: command.limit })
       : await this.db.aiTaskOriginalRequest.findMany({ where: { scopeId: before.scopeId, ownerKind: 'SAAS_ADMIN',
-        audience: 'OPERATOR', createdAt: { lte: cutoff }, erasedAt: null, ...page }, select: { id: true },
+        audience: 'OPERATOR', createdAt: { lte: cutoff }, erasedAt: null, ...page }, select: { id: true, createdAt: true },
         orderBy: { id: 'asc' }, take: command.limit });
     await this.check(before, true); if (rows.length > command.limit) throw unavailable();
     const results = [];
@@ -206,8 +207,11 @@ export class AiPlatformRetentionService {
           retryable: false as const, nextAction: 'list_retention_receipts' as const }); }
     }
     await this.check(before, true);
+    const nextAfter = rows.length === command.limit ? rows[rows.length - 1].id : null;
+    const candidates = rows.map(row => retentionCandidate(row.id, 'updatedAt' in row ? row.updatedAt : row.createdAt));
+    logRetentionPage({ scopeKind: 'platform', scopeId: before.scopeId, kind: command.kind, after: command.after }, this.now(), candidates, results, nextAfter);
     return { policyVersion: AI_RETENTION_POLICY.version, scanned: rows.length, limit: command.limit, results,
-      nextAfter: rows.length === command.limit ? rows[rows.length - 1].id : null,
+      nextAfter,
       coverage: 'bounded_candidate_page' as const, businessRecords: 'preserved' as const, backupErasure: 'not_attested' as const };
   }
   async protectStoredBodies(value: unknown) {

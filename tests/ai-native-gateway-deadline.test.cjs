@@ -8,6 +8,31 @@ const ctx = { tenantId: 'tenant-1', workspaceId: 'space-1', actorId: 'actor-1' }
 const input = { callId: 'call-1', model: 'model-1', messages: [{ role: 'user', content: 'Synthetic only' }], maxOutputTokens: 10 };
 const never = () => new Promise(() => {});
 const tick = () => new Promise(resolve => setImmediate(resolve));
+test('rolling replicas keep independent process and tenant admission limits and preserve waiting deadlines', async () => {
+  const { GatewayCapacityService } = require('../apps/api/src/modules/ai-native/gateway-capacity.service');
+  const { DEFAULT_GATEWAY_CAPACITY_LIMITS: limits } = require('../apps/api/src/modules/ai-native/gateway-capacity.runtime');
+  const timers = new Set(); let time = 1000;
+  const clock = { now: () => time, setTimer(callback) { timers.add(callback); return callback; }, clearTimer: timer => timers.delete(timer) };
+  const gates = [new GatewayCapacityService(limits, clock), new GatewayCapacityService(limits, clock)];
+  const signal = new AbortController().signal;
+  const request = (tenant, callId) => ({ context: { ...ctx, tenantId: tenant }, profile: { id: 'profile', scopeId: 'platform', scopeKind: 'PLATFORM',
+    serviceMode: 'platform_managed', protocol: 'fixture', provider: 'fixture', configRevision: 1 }, callId, expiresAt: new Date(time + 60000) });
+  const leases = [], waiting = [];
+  try {
+    for (const gate of gates) {
+      for (let index = 0; index < 4; index++) leases.push(await gate.acquire(request('active-tenant', `call-${index}`), signal));
+      for (let tenant = 0; tenant < 8; tenant++) {
+        for (let item = 0; item < 4; item++) waiting.push(assert.rejects(gate.acquire(request(`tenant-${tenant}`, `queued-${item}`), signal), {code:'TIMEOUT'}));
+        if (tenant === 0) await assert.rejects(gate.acquire(request('tenant-0','over-tenant'), signal), {code:'RATE_LIMITED'});
+      }
+      await assert.rejects(gate.acquire(request('extra-tenant','over-queue'), signal), {code:'RATE_LIMITED'});
+    }
+    assert.equal(gates.reduce((total, gate) => total + gate.readStatistics().active, 0), 8);
+    assert.equal(gates.reduce((total, gate) => total + gate.readStatistics().queued, 0), 64);
+    time += 15000; for (const callback of [...timers]) callback(); await Promise.all(waiting);
+    for (const gate of gates) { const stats = gate.readStatistics(); assert.equal(stats.queued, 0); assert.equal(stats.totals.timedOut, 32); assert.equal(stats.active, 4); }
+  } finally { for (const lease of leases) lease.release(); }
+});
 function harness(deadline = 30) {
   const events = [], signals = [], profile = { enabled: true, provider: 'synthetic', allowedModels: ['model-1'], credentialRef: 'vault-1', timeoutMs: 1000, maxConcurrent: 1, maxOutputTokens: 100 };
   const ports = { authorize: async (_, signal) => { signals.push(signal); events.push('authorize'); }, profile: async (_, signal) => { signals.push(signal); return profile; }, credential: async (_, __, signal) => { signals.push(signal); return 'synthetic-secret'; }, budget: {

@@ -23,6 +23,18 @@ test('the actual run distinguishes partial completion and an unknown step', () =
   assert.equal(run.status, 'partial'); assert.equal(run.steps[0].status, 'unknown');
 });
 
+test('English task steps, their accessible names and historical results follow the selected locale', () => {
+  const english = (_chinese, text) => text;
+  const { stepLabel } = require('../apps/admin/src/features/ai-operator/archive/agent-run/agent-run-state');
+  const { nativeResultText } = require('../apps/admin/src/features/ai-operator/native-session');
+  const run = nativeAgentRun({ status: 'partially_succeeded', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:05Z',
+    steps: [{ stepId: 'amount', sequence: 1, kind: 'model', status: 'unknown' }, { stepId: 'save', sequence: 2, kind: 'confirmation', status: 'failed' }] }, english);
+  assert.equal(stepLabel(run.steps[0]), 'Step result awaiting verification 1 · amount');
+  assert.equal(stepLabel(run.steps[1]), 'Failed step 2 · save');
+  assert.match(nativeResultText({ result: { status:'material_erased' } }, english), /original input expired/u);
+  assert.equal(nativeResultText({ result: { status:'observed', result:{status:'available',text:{value:'原回执内容'}} } }, english), '原回执内容');
+});
+
 test('Copilot verifies the original order, closure and idle revision before releasing a local conversation', async () => {
   const { CopilotOrderSession } = require('../apps/admin/src/features/copilot/copilot-order-session');
   const { commandHash } = require('../apps/admin/src/features/ai-native/budget-settings-session');

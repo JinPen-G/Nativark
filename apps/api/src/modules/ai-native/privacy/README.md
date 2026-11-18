@@ -39,6 +39,8 @@
 
 积压使用同一空间、种类、政策时间点的受权候选总数，并区分受保留、待核对和待擦除。最老逾期时长按候选原到期日计算。无法获得完整候选视图时，展示已观察下界和采样时间。一次处理 10 项不能推算全库积压。监控接入原值班渠道，收据不可核、对象删除应答不明、权限失效、扫描超过批准调度周期或连续周期积压上升时通知处置人。平台与空间分别记录。日志仅保留最小计数、时间和原收据定位。
 
+授权清理完成当页后，API 写出 `ai.retention.page`，可按范围摘要和材料种类查询。`observedAt` 为服务端观测时刻。`erased`、`withdrawn`、`held` 和 `pending` 分别计数。`overdue`、`oldestOverdueMs` 仅覆盖本页仍保留或待核对且有原到期依据的记录，缺少依据的条数记在 `missingDeadline`。`afterHash` 和 `nextHash` 可串联同一范围、同一种类的页。完整扫描时间由调度宿主在已持久保存末页原收据后登记。`pending` 大于零触发服务端警告。清理请求发生运行故障或结果未知时，HTTP 入口写出 `ai.retention.page_interrupted`，按原范围和原收据核对。值班侧可用原有日志渠道订阅这两个事件。[当页观测](retention-page-observation.ts)
+
 `scripts/ops/ai-retention.cjs` 的 `AiOnlyBackupRetentionStore` 是可选本地AI专用副本适配：显式服务器目录/当前权限/固定公钥，AES-256-GCM加密保存，签名绑定内容hash，指定最多10个原ID清理30天到期副本。不得清理混合业务SQL备份、业务原件、外部tombstone档案、目录、链接或数据卷。混合业务备份仍需原运维保留策略，不能把AI专用适配当作所有备份已完成清理。
 
 ## 装配与替换边界

@@ -268,23 +268,27 @@ export class NativeOperatorSession {
 
 /** Only persisted sequence/status enters the original run animation. No synthetic
  * tool names, elapsed execution timings or successful business results. */
-export function nativeAgentRun(snapshot: AiTaskSnapshotDraft): AgentRunState {
+type NativeLabel = (chinese: string, english: string) => string;
+const defaultLabel: NativeLabel = chinese => chinese;
+export function nativeAgentRun(snapshot: AiTaskSnapshotDraft, label: NativeLabel = defaultLabel): AgentRunState {
   const statuses = { queued: 'idle', running: 'working', waiting_input: 'waiting', waiting_confirmation: 'waiting', waiting_external: 'waiting',
     cancel_requested: 'waiting', partially_succeeded: 'partial', succeeded: 'done', failed: 'stopped', cancelled: 'stopped' } as const satisfies Record<AiTaskSnapshotDraft['status'], AgentRunState['status']>;
   return { status: statuses[snapshot.status],
     elapsedMs: Math.max(0, Date.parse(snapshot.updatedAt) - Date.parse(snapshot.createdAt)),
     steps: [...snapshot.steps].sort((a, b) => a.sequence - b.sequence).map(step => ({ id: step.stepId,
       mark: step.kind === 'model' ? 'think' : step.kind === 'confirmation' ? 'review' : 'read',
-      verb: step.status === 'unknown' ? '原步骤结果待核对' : step.status === 'pending' ? '步骤待执行' : step.kind === 'model' ? '模型步骤' : step.kind === 'confirmation' ? '原确认步骤' : '原业务步骤',
-      doneVerb: '原步骤', target: `${step.sequence} · ${step.stepId}`, text: step.status,
+      verb: step.status === 'unknown' ? label('原步骤结果待核对', 'Step result awaiting verification') : step.status === 'pending' ? label('步骤待执行', 'Step pending')
+        : step.kind === 'model' ? label('模型步骤', 'Model step') : step.kind === 'confirmation' ? label('原确认步骤', 'Confirmation step') : label('原业务步骤', 'Business step'),
+      doneVerb: step.status === 'failed' ? label('步骤失败', 'Failed step') : step.status === 'cancelled' ? label('步骤已取消', 'Cancelled step') : label('步骤已完成', 'Completed step'),
+      target: `${step.sequence} · ${step.stepId}`, text: step.status,
       status: step.status === 'succeeded' ? 'done' : step.status === 'failed' || step.status === 'cancelled' ? 'rejected' : step.status })) };
 }
 
-export function nativeResultText(frame: NativeFrame): string {
+export function nativeResultText(frame: NativeFrame, label: NativeLabel = defaultLabel): string {
   const result = frame.result;
   if (result?.status === 'observed' && result.result.status === 'available' && result.result.text) return result.result.text.value;
-  if (result?.status === 'material_erased') return '原输入已按保留规则清理，可从原任务核对收据。';
-  if (result?.status === 'observed' && result.result.status === 'stale') return '事实已变化，请回原业务页面核对。';
-  if (result?.status === 'observed' && result.result.status === 'failed') return '原任务失败，请核对原任务记录。';
-  return '原结果待核对，请读取原结果。需要补充条件或业务确认时，请在右侧原任务入口办理。';
+  if (result?.status === 'material_erased') return label('原输入已按保留规则清理，可从原任务核对收据。', 'The original input expired under the retention policy. Check the receipt on the original task.');
+  if (result?.status === 'observed' && result.result.status === 'stale') return label('事实已变化，请回原业务页面核对。', 'The facts have changed. Check the original business page.');
+  if (result?.status === 'observed' && result.result.status === 'failed') return label('原任务失败，请核对原任务记录。', 'The original task failed. Check its record.');
+  return label('原结果待核对，请读取原结果。需要补充条件或业务确认时，请在右侧原任务入口办理。', 'Check the original result. Use the original task to add information or confirm an action.');
 }

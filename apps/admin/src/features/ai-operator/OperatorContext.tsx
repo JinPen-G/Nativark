@@ -9,7 +9,8 @@ import { useAuthStore } from '@/features/auth/authStore';
 import { aiTaskCenterApi } from '@/api/aiTaskCenter';
 import { aiConversationsApi } from '@/api/aiConversations';
 import { OPERATOR_CAPABILITIES, type OperatorArtifact } from './capabilities';
-import { NativeOperatorSession, nativeResultText, nativeAgentRun, type NativeFrame, type NativeScene } from './native-session';
+import { NativeOperatorSession, nativeResultText as renderNativeResult, nativeAgentRun, type NativeFrame, type NativeScene } from './native-session';
+import { useAiManagementLocale } from '../ai-native/management-locale';
 import type { LiveVisibleObservationSession, VisibleSourceReference } from '../ai-native/visible-observation-session';
 import { AI_QUOTE_GOAL_DRAFT_VERSION, validateAiQuoteGoalInputDraft } from '@rental-os/shared';
 export type OperatorView = 'chat' | 'plugins' | 'automations';
@@ -22,6 +23,10 @@ function consoleOwner(auth: ReturnType<typeof useAuthStore.getState>) {
 }
 function useOperatorState() {
   const auth = useAuthStore(), location = useLocation();
+  const language = useAiManagementLocale(), languageRef = useRef(language);
+  languageRef.current = language;
+  const nativeResultText = (frame: NativeFrame) => renderNativeResult(frame, (chinese, english) =>
+    languageRef.current.locale === 'en-US' ? english : languageRef.current.t(chinese));
   const identity = JSON.stringify([auth.tenant?.tenantId, auth.currentWorkspaceId, auth.user?.id]);
   const owner = consoleOwner(auth);
   const permitted = OPERATOR_CAPABILITIES.filter(capability => {
