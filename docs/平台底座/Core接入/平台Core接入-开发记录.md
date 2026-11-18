@@ -11,6 +11,18 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-private-exchange-files-20261118"></a>
+
+## Rental专用换货影像的文件适配（2026-11-18）
+
+客户应用/Staff私有片19d36232c352a07318f73e0a22f4b2ba692aa1d0已普通推送并读取真实远端确认。本片dev1在共享树完成并停写专用影像、原Runtime和Rental导读三路径，RD完整读取后登记/file-application-exchange-inspection正式exports/typesVersions、核对并统一提交。没有改动主AppModule、Guard或数据库结构，原方案及旧接续由该固定父版保全。
+
+[专用文件适配](../../../packages/rental-core/src/file-application-exchange-inspection.ts)持有六个原公开方法及两个私有检查，原Runtime保留同签名薄委托。它消费同一文件配置、公共上传事实/签名/受限字节运输及原readInspectionMedia，业务调用方保留订单/来源授权和原事务。冻结先持久化唯一目标再PUT，失应答只读取该目标及原摘要；TTL不删除专用依据，完成仍核资产/会话CAS和同事务事实，已接受照片只返回受限字节。[原业务消费](../../../packages/rental-core/src/mysql-exchange-inspection-media.ts) · [原Runtime](../../../apps/api/src/modules/integrations/file-storage.runtime.service.ts)
+
+RD对照固定父版，八个方法正文只将原公共原语改为受限ports委托、retentionLocationHash改为其原单源fileStorageLocationHash及媒体reader委托，归一化后全部一致。对象键、摘要、状态、字段、TTL、提交和读取顺序保留。dev1原Runtime、换货Media和Consent三根/1855源0诊断；一次原Runtime定向stdin冒烟退出0，跨空间/专用隔离、TTL保留、PUT失应答后只读原冻结目标及完成后同摘要读回通过。作者起初按待登记目标使用进程内映射，正式exports/typesVersions落盘后已补核真实子出口解析并加载实际实现，退出0，无临时残留；这属于正式源码出口验证，干净标准包安装仍未验。
+
+作者离线守卫无违规、专用临时目录已删除；RD没有新增测试脚本、依赖、生成物或后台服务。数据库/并发和对象运输为明确fixture，真实HTTP/MySQL/对象存储与完整业务验收未做。四份同片资料核对1645链接、158锚点与87表格，0问题；正式出口和限定CRLF空白检查通过。模块导读与本册/接续同步，PCH-06/08仍缺完整事件/作业/回调、标准装配和相关实际消费者，未跨原下一档。阶段中文提交、普通推送并回读真实任务远端，固定提交由包含本节的Git版本定位；下一片dev1转Staff HTTP，RD继续客户认证及HTTP。
+
 <a id="core-rental-client-application-20261118"></a>
 
 ## Rental客户应用与Staff私有文件权威（2026-11-18）

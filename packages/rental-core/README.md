@@ -124,6 +124,8 @@ HTTP入口从 `/http-workspace-capabilities`、`/http-staff-payments` 导入；`
 
 员工交接、线下收款和工单凭证从 `/file-application-participant` 接入。宿主供给原数据库事务、当前会话的主体锁及复验、实际文件读取 ACL，并将参加者注册到公共文件应用。参加者按五组固定业务绑定核对权限、地点与原文件回执，主体锁先于文件配置锁。`/business-location-scope` 供原 Guard、Auth 和员工文件共用，按启用组织子树及实际经营空间投影地点范围。[员工文件权威](src/file-application-participant.ts) · [地点投影](src/business-location-scope.ts) · [原宿主接线](../../apps/api/src/modules/integrations/file-storage.runtime.service.ts)
 
+专用换货影像通过 `/file-application-exchange-inspection` 使用同一文件配置、上传事实和受限字节传输。原换货应用先核订单与来源，再把原事务交给文件适配写入暂存记录及完成收据。文件适配先登记冻结目标再写入字节，失应答后只读取该目标，验收后的照片按原摘要读取。通用上传、下载和清理继续隔离该场景。[换货影像文件适配](src/file-application-exchange-inspection.ts) · [原业务入口](src/mysql-exchange-inspection-media.ts)
+
 核心聚合从 `@rental-os/rental-core/mysql-core-runtime` 导入。核心/事实仓储、恢复、Hook、资金与服务容量使用本包的同一实例，会员、企业支出/授信、文件生命周期与企业续租报价按 [实际端口](src/core-runtime-ports.ts) 供给。原Nest provider保留原构造顺序和初始化钩子；恢复在模块初始化读取，配置预热在全部回填之后运行，事务内配置读取不发布进程缓存。历史订单没有能力快照时保留空执行名单，当前新能力不反向影响旧订单。HTTP权限仍由原Guard裁定，业务方法继续接收调用方已有事务。[原Nest接线](../../apps/api/src/modules/rental-core/rental-core.service.ts) · [核心验证](../../tests/rental-core-v01.test.cjs) · [换货/续租历史验证](../../tests/rental-exchange-segment-pricing.test.cjs)
 
 报价/营销服务从 `@rental-os/rental-core/mysql-business-runtime` 导入，配置、事实和核心配置仓储使用同一实例；会员、企业币种核验、密文及短信通过 [实际端口](src/business-runtime-ports.ts) 供给。原API的14项构造顺序与两个初始化钩子保留，适配层另把原通知正文保留读取器传给包内构造末尾的可选接点。配置/事实按同一刷新队列装载，续租事务上下文沿用模块级ALS。报价来源每次从同一公共可信身份读取，detached配置不发布进程缓存；`delivery_uncertain` 只按原投递记录查询，尝试次数与租约仍分别处理。[原Nest接线](../../apps/api/src/modules/rental-core/rental-business.service.ts) · [报价/营销验证](../../tests/rental-business-v1.test.cjs) · [通知恢复验证](../../tests/rental-notification-lease.test.cjs)

@@ -902,6 +902,10 @@
     "./business-location-scope": {
       "types": "./dist/business-location-scope.d.ts",
       "default": "./dist/business-location-scope.js"
+    },
+    "./file-application-exchange-inspection": {
+      "types": "./dist/file-application-exchange-inspection.d.ts",
+      "default": "./dist/file-application-exchange-inspection.js"
     }
   },
   "typesVersions": {
@@ -1574,6 +1578,9 @@
       ],
       "business-location-scope": [
         "dist/business-location-scope.d.ts"
+      ],
+      "file-application-exchange-inspection": [
+        "dist/file-application-exchange-inspection.d.ts"
       ]
     }
   },
