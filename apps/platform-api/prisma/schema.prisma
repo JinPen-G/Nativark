@@ -72,6 +72,7 @@ model Tenant {
   adapterLogs                       ExternalAdapterLog[]
   notificationTemplates             NotificationTemplate[]
   notificationLogs                  NotificationSendLog[]
+  asyncJobs                         AsyncJob[]
   integrationConfigs                TenantIntegrationConfig[]
   files                             FileAsset[]
   fileUploadSessions                FileUploadSession[]
@@ -806,4 +807,28 @@ model OfficialCalendarSourceVersion {
   @@unique([sourceId, year, sequence], map: "official_calendar_source_versions_source_year_sequence_key")
   @@index([year], map: "official_calendar_source_versions_year_idx")
   @@map("official_calendar_source_versions")
+}
+
+model AsyncJob {
+  id           String    @id @default(uuid())
+  tenantId     String
+  tenant       Tenant    @relation(fields: [tenantId], references: [id])
+  jobType      String
+  businessType String?
+  businessId   String?
+  status       String
+  attempt      Int       @default(0)
+  maxAttempts  Int       @default(3)
+  scheduledAt  DateTime?
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  operator     String?
+  payload      Json
+  result       Json?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([tenantId, jobType, status])
+  @@index([tenantId, scheduledAt])
+  @@index([tenantId, businessType, businessId])
 }

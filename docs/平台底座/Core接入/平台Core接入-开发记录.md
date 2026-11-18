@@ -11,6 +11,26 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-public-job-ledger-20261118"></a>
+
+## 公共异步作业台账与独立数据链（2026-11-18）
+
+固定父版6528cf2f4afe7356f6e2ec4df18e391875c104d3已普通推送并实际远端回读。本片由dev1在同一共享树完成公共应用与原消费者委托，RD核对其固定四路径、补正式出口、合同、独立数据链和资料。订单列表/详情及新建候选仍归dev2，不混入本片。RD当日再次读取实际main，107路径修复已固定在63964d7fc29554cb1ad0a1116c09038312b899b6，与当前作业及订单差异无交叉，后续单独接入。
+
+原`AsyncJobSummary`和`CreateAsyncJobRequest`逐字单源移入[公共作业合同](../../../packages/platform-contracts/src/jobs.ts)，从`@rental-os/platform-contracts/jobs`、根及原shared/infrastructure兼容再导出。状态联合、attempt/maxAttempts、各日期、payload及可空结果全部保留；`@rental-os/platform-server/jobs`提供[JobLedgerApplication/Repository](../../../packages/platform-server/src/modules/jobs/job-ledger.ts)及窄存储端口。包的exports/typesVersions同步，依赖未变，未安装或改动锁文件依赖。
+
+原[IntegrationsService](../../../apps/api/src/modules/integrations/integrations.service.ts)的listJobs/createJob委托公共应用，[原仓储](../../../apps/api/src/modules/integrations/integrations.repository.ts)委托同一公共仓储。[JobsController](../../../apps/api/src/modules/jobs/jobs.controller.ts)和原Guard继续使用同一服务，SQL条件只读当前可信租户；内存应用与原runJob/runDueJobs共用原jobsByTenant Map、初始模板和行对象，适配日志也共用原实例。SQL排序及80条上限、SQL短ID和内存UUID短ID沿原算法。创建先记queued事实，再等原日志；日志失败传播而已入队任务保留，不能据此换ID重做。原模拟provider、externalCallSkipped及mock_success继续如实表示模拟登记。
+
+公共schema为36模型/14枚举，数据版本0.1.6、十份迁移。只新增原AsyncJob及Tenant关系，RD核两份模型正文相同；status无默认值、attempt默认0、maxAttempts默认3、原三索引及Tenant RESTRICT/CASCADE外键保持。新[公共迁移](../../../apps/platform-api/prisma/migrations/20261118030000_public_async_jobs/migration.sql)的建表与外键两块保留原迁移字节，共1248字节，SHA-256为fd3ccad20ee14afd431ee347b1ae0da0fdd2e536293cad219aaea9c8fdfe809c。[数据计划](../../../apps/platform-api/src/platform-data.ts)固定该摘要，旧九份公共迁移和原组合schema/迁移未改写；没有把独立公共链套到既有Rental库。
+
+必要验证复用作者既有stdin检查，不新增永久测试脚本。dev1报告原JobsController定向冒烟及内存隔离用例通过：最多10条到期批次、未来任务、历史unknown、原当前租户和同台账保持；API装配5入口/2402源、官方238/36模型声明，0诊断。RD实际读取固定代码并用TS5.9.3 AST对照，原服务其余28方法及仓储其余15方法全部相同；没有重复全库或无关用例。RD两项合同逐字核对与必要类型12根/206源、0诊断已通过，全部产物留内存。
+
+RD数据冒烟进程27800退出0、stderr空，复用原`node --no-compilation-cache -`内存入口和Prisma5.22官方WASM validate/get_dmmf。实际计划核36表/383列/96索引/7CHECK/30外键，15次明确information_schema fixture查询；AsyncJob缺maxAttempts列、错误CASCADE、坏摘要及未知DDL拒绝，零Core迁移准备产生13份内存文件。未生成磁盘客户端、未执行DDL或真实网络。清单/物理结构fixture通过不证明真库升级或运行成功。
+
+接入从[三步作业指南](../../../packages/platform-server/src/modules/jobs/README.md#core-接入)开始，模块导读、公共宿主及API说明同期更新。原runJob/runDueJobs、getJob/finishJob、数据交换和打印暂保留原执行链；独立公共任务HTTP、明确业务执行者、恢复/作业排空和完整Core装配仍须继续交付，台账注册不授予业务执行权限。原PCH-06/08未达到完整主实现及装配门槛，本片不升档；其余任务沿原证据，非按表数或测试数量计分。
+
+2026-11-19跨日收口前再次核工作区、空索引、无MERGE_HEAD/CHERRY_PICK_HEAD及GitHub实际远端，任务6528cf与固定main63964均保持。定向七份资料1326本地链接/187锚点、0问题；本片原SQL工作字节及SHA-256再核一致，格式与索引字节继续按精确暂存核定。接续修改前的在制原文保全为Git blob 9b8aa68cfc736c519ba19045d107f692e482bc1c，未解决事项仍在当前接续定位；其他对话模型/推理设置只由负责人修改，本片没有调整聊天设置。没有新建临时目录、业务服务或依赖环境，旧两项集中待清理受阻沿原记录。固定提交由包含本节的Git历史定位，中文提交到codex/platform-core-extraction，普通推送后必须回读实际远端。
+
 <a id="core-main-public-shell-20261118"></a>
 
 ## 最新主线补片接入公共后台（2026-11-18）

@@ -278,6 +278,10 @@
     "./notifications": {
       "types": "./dist/modules/notifications/notification-ledger.d.ts",
       "default": "./dist/modules/notifications/notification-ledger.js"
+    },
+    "./jobs": {
+      "types": "./dist/modules/jobs/job-ledger.d.ts",
+      "default": "./dist/modules/jobs/job-ledger.js"
     }
   },
   "scripts": {
@@ -502,6 +506,9 @@
       ],
       "notifications": [
         "dist/modules/notifications/notification-ledger.d.ts"
+      ],
+      "jobs": [
+        "dist/modules/jobs/job-ledger.d.ts"
       ]
     }
   }

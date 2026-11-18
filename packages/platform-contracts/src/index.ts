@@ -535,3 +535,4 @@ export * from "./tenant-integrations";
 export * from "./official-calendar";
 
 export type { InfraAdapterCapability, NotificationTemplateSummary, NotificationSendLogSummary, SendMockNotificationRequest, AdapterLogSummary } from "./notifications";
+export type { AsyncJobSummary, CreateAsyncJobRequest } from "./jobs";

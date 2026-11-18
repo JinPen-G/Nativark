@@ -1,5 +1,6 @@
-/** 原集成数据适配。文件、通知及适配日志消费公共存储，Rental默认内容和专用场景由原宿主裁定。 */
+/** 原集成数据适配。文件、通知、适配日志及作业列表与创建消费公共存储，原执行与专用场景沿宿主裁定。 */
 import { FileStorageRepository, createSimulationFileAsset } from "@rental-os/platform-server/files";
+import { JobLedgerRepository } from "@rental-os/platform-server/jobs";
 import { NotificationLedgerRepository } from "@rental-os/platform-server/notifications";
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { createHash } from "node:crypto";
@@ -27,8 +28,10 @@ import { PrismaService } from "../database/prisma.service";
 export class IntegrationsRepository {
   private readonly files: FileStorageRepository;
   private readonly notifications: NotificationLedgerRepository;
+  private readonly jobs: JobLedgerRepository;
   constructor(private readonly prisma: PrismaService) {
     this.files = new FileStorageRepository(prisma);
+    this.jobs = new JobLedgerRepository(prisma);
     this.notifications = new NotificationLedgerRepository(prisma, {
       defaultTemplates: defaultNotificationTemplates,
       defaultOperator: "营运端"
@@ -72,12 +75,7 @@ export class IntegrationsRepository {
   }
 
   async listJobs(tenantId = requireRequestTenantId()): Promise<AsyncJobSummary[]> {
-    const rows = await this.prisma.asyncJob.findMany({
-      where: { tenantId },
-      orderBy: [{ status: "asc" }, { createdAt: "desc" }],
-      take: 80
-    });
-    return rows.map(toAsyncJobSummary);
+    return this.jobs.listJobs(tenantId);
   }
 
   async getJob(
@@ -92,20 +90,7 @@ export class IntegrationsRepository {
     input: CreateAsyncJobRequest,
     tenantId = requireRequestTenantId()
   ): Promise<AsyncJobSummary> {
-    const row = await this.prisma.asyncJob.create({
-      data: {
-        id: `job_${cryptoRandomId()}`,
-        tenantId,
-        jobType: input.jobType,
-        businessType: input.businessType,
-        businessId: input.businessId,
-        status: "queued",
-        scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : new Date(),
-        operator: input.operator,
-        payload: (input.payload ?? {}) as Prisma.InputJsonValue
-      }
-    });
-    return toAsyncJobSummary(row);
+    return this.jobs.createJob(input, tenantId);
   }
 
   async finishJob(

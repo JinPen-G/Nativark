@@ -1,6 +1,6 @@
 # 平台 Core 接入当前协作接续
 
-更新时间：2026-11-18。
+更新时间：2026-11-19。
 
 > 负责人已授权RD统一调配dev1、dev2，三人共用本树持续完成PCH-01～12；冲突由RD核定来源和唯一写入者，Git索引、提交推送和PCH四册由RD统一负责。无Core独立运行、完整Rental标准包及全功能验收仍未完成。正式依据为[需求v1.5](平台Core接入-需求.md)与[开发任务v1.5](平台Core接入-开发任务.md)，进度只由原G1～G4门槛核收。
 
@@ -12,7 +12,7 @@
 
 Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该Core。未来跨Core协作通过明确对象引用/接口/事件实现，本期不开放共享业务表或隐含读权。先交标准本地包，再接固定GitHub Release获取及Topic发现；底座与Core分别更新，保留下游业务、配置、数据和授权。[包标准](平台Core接入-开发任务.md#core-package-standard) · [独立更新](平台Core接入-开发任务.md#independent-upgrades)
 
-唯一施工树为 C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS，分支 codex/platform-core-extraction。本树由RD、dev1、dev2按文件分工写入；允许修改PCH所需Auth/Guard/ALS、正式包出口、主装配/OpenAPI、schema/迁移/Seed与后台外壳。main索引和其他树仍归其作者。当天真实远端main为7cf0c4c0401203707fd44f1b3841f3e306264629，已核其25路径与原在制差异没有交叉；九处冲突由RD将主线补片移到公共单源、保留旧转接与两侧记录，当前正在收口合并。公共/零Core/原管理后台类型通过，主线音效、咖啡图标及顶栏读取顺序沿同一实现。[主线公共壳证据](平台Core接入-开发记录.md#core-main-public-shell-20261118) · [此前主线AI接点](平台Core接入-开发记录.md#core-main-ai-delivery-20261118)
+唯一施工树为 C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS，分支 codex/platform-core-extraction。本树由RD、dev1、dev2按文件分工写入；允许修改PCH所需Auth/Guard/ALS、正式包出口、主装配/OpenAPI、schema/迁移/Seed与后台外壳。main索引和其他树仍归其作者。已接固定main 7cf0c4c0401203707fd44f1b3841f3e306264629，合并6528cf2f4afe7356f6e2ec4df18e391875c104d3已普通推送并真实远端回读。九处冲突已处理，公共/零Core/原管理后台类型及原音效/密度冒烟通过。随后远端main前进到63964d7fc29554cb1ad0a1116c09038312b899b6，RD继续核定其差异后接入，不追其他专项活动HEAD。[主线公共壳证据](平台Core接入-开发记录.md#core-main-public-shell-20261118) · [此前主线AI接点](平台Core接入-开发记录.md#core-main-ai-delivery-20261118)
 
 负责人已将 `[Saas 底座]-dev1` 迁入共享施工，原成果与未完检查点均已保全并迁入；旧树目录及Git登记已移除，源分支留存。Git索引、提交/推送、四册和主装配由RD统一负责，dev1按约定文件边界持续抽取公共能力，实际冲突直接协商。其他对话的模型及推理设置只由负责人修改，RD及助手均不得调整；不为发送消息填写这些设置参数。负责人要求关闭电脑操作造成的黄色边框，三人须结束各自已开启的computer-use会话，不再通过桌面界面发送协作消息或操作聊天设置。当前消息接口参数校验失败，RD停用该入口；作者从本接续和固定提交读取文件窗口及具体依赖。attach_worktree的UI归属关联仍未核定，双方所有命令均显式指定本节唯一共享路径。[迁入与共享证据](平台Core接入-开发记录.md#core-shared-dev1-migration-20261118)
 
@@ -26,7 +26,7 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 
 | 模块 | 当前实现及证据入口 |
 | --- | --- |
-| 公共合同/服务与无Core API | [platform-contracts](../../../packages/platform-contracts/README.md)、[platform-server](../../../packages/platform-server/README.md)、[platform-api](../../../apps/platform-api/README.md)持有认证、会话、外观、初始化、租户/人员角色、订阅、集成与官方来源公共HTTP；35公共模型/九迁移/0.1.5计划已提供，当前核摘要/结构及待部署组合，没有执行迁移。文件与通知各两表归公共，业务文件HTTP仍须真实权威；适配日志复用公共集成表。原API窄转接同一实现，原组合schema/历史迁移保留。[公共宿主](平台Core接入-开发记录.md#core-public-host-packages-20261115) · [文件数据](平台Core接入-开发记录.md#core-public-file-upload-data-20261118) · [通知数据](平台Core接入-开发记录.md#core-public-notification-ledger-20261118) |
+| 公共合同/服务与无Core API | [platform-contracts](../../../packages/platform-contracts/README.md)、[platform-server](../../../packages/platform-server/README.md)、[platform-api](../../../apps/platform-api/README.md)持有认证、会话、外观、初始化、租户/人员角色、订阅、集成与官方来源公共HTTP；36公共模型/十迁移/0.1.6计划已提供，当前核摘要/结构及待部署组合，没有执行迁移。文件与通知各两表、AsyncJob台账一表归公共，业务文件HTTP仍须真实权威；适配日志复用公共集成表。原API窄转接同一实现，原组合schema/历史迁移保留。[公共宿主](平台Core接入-开发记录.md#core-public-host-packages-20261115) · [文件数据](平台Core接入-开发记录.md#core-public-file-upload-data-20261118) · [通知数据](平台Core接入-开发记录.md#core-public-notification-ledger-20261118) |
 | 标准Core宿主 | [core-contracts](../../../packages/core-contracts/README.md)、core-host与[platform-core-host](../../../packages/platform-core-host/README.md)提供正式清单、授权/分配、绑定/原收据、本人目录、范围/就绪、HTTP政策和移除预检。独立公共主装配消费同源Guard/OpenAPI，原Rental总装配仍需迁移。[公共主接点](平台Core接入-开发记录.md#core-public-assembly-20261115) |
 | 期限与实际数据观察 | 公共统一订阅期限reader、固定公共SQL/结构检查、工单实际物理reader及原Prisma账已提供，目录/升级预检消费真实证据接点。当前数据库/迁移尚未实际执行，清单不能补成功。[期限/公共数据](平台Core接入-开发记录.md#core-public-data-term-20261115) · [工单物理与原账](平台Core接入-开发记录.md#core-mysql-data-observation-20261115) |
 | 公共后台 | [platform-admin](../../../packages/platform-admin/README.md)持有原外壳/UIArc、主题/语言/音效、通知/休息/面板、页面/表单/列表和稳定会话/请求/缓存端口；[零Core Web](../../../apps/platform-admin/README.md)与[工单Web](../../../apps/example-tickets-admin/README.md)复用同一应用工厂。Core目录/授权、租户/人员角色、本人安全及组织/安全/订阅/集成已接公共页面。[目录](平台Core接入-开发记录.md#core-access-directory-ui-20261115) · [人员角色](平台Core接入-开发记录.md#core-public-access-pages-20261115) · [租户页面](平台Core接入-开发记录.md#core-public-tenant-pages-20261115) · [恢复口令/角色删除](平台Core接入-开发记录.md#core-public-access-actions-20261115) · [本人安全](平台Core接入-开发记录.md#core-public-self-security-20261115) · [组织/安全](平台Core接入-开发记录.md#core-public-organizations-security-20261118) |
@@ -43,9 +43,9 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 
    通知五项合同与公共台账已从platform-contracts/notifications及platform-server/notifications单源提供，原集成五个服务/六个仓储方法已委托；作者固定五路径及必要冒烟/声明结果，RD补35模型/九迁移、正式出口与三步接入并收口。原业务消息/默认模板由Rental宿主提供，新默认模板按租户派生主键，已有ID保持；模拟登记不当真实发送。[当前固定通知片](平台Core接入-开发记录.md#core-public-notification-ledger-20261118)
 
-   dev1已在packages/platform-server/src/modules/jobs下完成公共JobLedgerApplication/Repository及窄存储端口，原当前租户、字段、queued事实和随后日志失败的冒烟通过。下一依赖是RD将AsyncJobSummary/CreateAsyncJobRequest从原shared单源迁入公共/jobs合同并登记服务正式出口；随后释放原integrations的listJobs/createJob委托窗口。通知固定五路径暂不再写；schema、主装配和其余设备/导入导出/打印由RD维护，runJob沿原唯一执行者，不建立第二套调度器或替代AI Runtime。优先真实调用方与一次必要冒烟，不新增成批脚本。
+   公共JobLedgerApplication/Repository、两项原合同、正式/jobs出口和原listJobs/createJob委托已核定，36模型/十迁移/0.1.6及真实数据计划同期补齐。原SQL、jobsByTenant Map、初始模板与日志实例共用；作者原JobsController冒烟/必要类型及RD数据fixture通过，本片由[作业阶段](平台Core接入-开发记录.md#core-public-job-ledger-20261118)和包含该节的提交固定。dev1本片四路径先停写，RD提交后继续同目录的原getJob/finishJob与runJob/runDueJobs迁移，存储复用公共AsyncJob，执行结果/日志由原宿主明确供给；无真实业务执行者不补空成功。原数据交换模板与文件结果、打印和仍有消费者的私有方法保留原链，缺批量/unknown结果证据不得重跑。每完整片只做一次相关冒烟和必要类型。schema、正式包出口、主装配和四册继续由RD负责，不建立第二套调度器或替代AI Runtime。
 
-   文件仍保留原合法module/scene与历史记录兼容，知识ACL/清理收据由原AI参加者提供，实名/承运/检查/企业证据沿真实Rental裁定；unknown只核原键和目标，不因TTL重传。计时器与租户发现只有原宿主一份，当前35模型/九迁移不开放零Core通用上传HTTP。Staff五组真实参加者、主体锁早于配置锁以及四项原服务useExisting别名继续复用。[Staff接入](平台Core接入-开发记录.md#core-public-file-application-staff-20261118) · [完整文件运行时](平台Core接入-开发记录.md#core-rental-file-runtime-20261118) · [文件HTTP](平台Core接入-开发记录.md#core-rental-files-http-20261118)
+   文件仍保留原合法module/scene与历史记录兼容，知识ACL/清理收据由原AI参加者提供，实名/承运/检查/企业证据沿真实Rental裁定；unknown只核原键和目标，不因TTL重传。计时器与租户发现只有原宿主一份，当前36模型/十迁移不开放零Core通用上传HTTP。Staff五组真实参加者、主体锁早于配置锁以及四项原服务useExisting别名继续复用。[Staff接入](平台Core接入-开发记录.md#core-public-file-application-staff-20261118) · [完整文件运行时](平台Core接入-开发记录.md#core-rental-file-runtime-20261118) · [文件HTTP](平台Core接入-开发记录.md#core-rental-files-http-20261118)
 
    dev2继续订单列表/详情及最小业务闭包到packages/rental-core/admin/orders。四个正式出口、统一Rental页面贡献与同源导航当前在制，原api/rentalCore.ts养护十二方法保留；nav/AppRouter和包配置由RD维护。旧宿主已消费runtime.request的retryAuthentication:false与/forms原引用库；CorePage用data-core-page=当前page.key、data-core-action=原action.id标记获权入口，深链接只定位/聚焦，禁用原因仍可读取。原service-execution直接读取引用算法须定位公共operation-reference.ts并保留断言。当前订单固定后继续原新建订单及必要选择/校验闭包，旧URL、当前权限、金额、原键/历史和异步编辑代次保持；不复制壳、样式或第二套请求。[当前订单源码](../../../packages/rental-core/admin/orders/README.md) · [已固定养护](平台Core接入-开发记录.md#core-public-record-kanban-work-orders-20261118)
 
@@ -68,6 +68,8 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 最新main的公共补片已通过工作区必要类型与一次原音效/密度冒烟，六份TS/TSX正文及咖啡源码与固定main一致。40px选择轨道及同一顶栏时间沿主线保全，后台规则中36px轨道/单独时间行的描述仍须核统一依据，不能以搬迁宣称实页或规范验收。当前Node会话没有开启桌面捕获，其他旧computer-use会话的释放未取得证据。[主线公共壳](平台Core接入-开发记录.md#core-main-public-shell-20261118)
 
 通知SDK沿作者正式声明/下游零诊断与一次原消费者冒烟收口。RD公共数据进程43776退出0，官方Prisma核35模型/14枚举，实际计划核35表/367列/92索引/7CHECK/29外键；15次明确物理库fixture查询核正常/缺列/错误外键，摘要变化和未知DDL拒绝，零Core产生12份内存待部署文件。未执行迁移或真实服务，通知HTTP在独立宿主的接线继续；六份资料1272本地链接/178锚点0问题。[本片证据](平台Core接入-开发记录.md#core-public-notification-ledger-20261118)
+
+公共作业作者固定四路径，API装配5入口/2402源0诊断及原JobsController/内存隔离冒烟通过。RD核原服务其余28方法、仓储其余15方法及AsyncJob模型正文相同；数据进程27800退出0，36模型/14枚举，实际计划36表/383列/96索引/7CHECK/30外键，15次明确物理fixture查询和13份内存待部署文件。缺列、错误外键、坏摘要及未知DDL拒绝，磁盘生成/真实网络/DDL为0，独立任务HTTP和业务执行接线仍须交付。[作业证据](平台Core接入-开发记录.md#core-public-job-ledger-20261118)
 
 客户应用6根/1857源及Staff正式AppModule单根2354源0诊断，两者均用当前238/33模型官方内存声明。客户原5用例、18实例顺序、同事务检查出箱失败回滚及Staff五场景冒烟通过；数据库、事务/Auth lease及对象传输仍为明确fixture，没有真实HTTP/数据库/对象服务或完整Nest运行验收。原95个客户方法只有出箱一行转为实际宿主回调，Staff12方法、地点函数和Runtime正文保持。客户测试仅修继承后的同源方法定位，不删除原调用/行为断言，新增永久测试脚本0。[客户应用/Staff证据](平台Core接入-开发记录.md#core-rental-client-application-20261118)
 

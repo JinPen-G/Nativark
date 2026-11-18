@@ -46,6 +46,10 @@
     "./notifications": {
       "types": "./dist/notifications.d.ts",
       "default": "./dist/notifications.js"
+    },
+    "./jobs": {
+      "types": "./dist/jobs.d.ts",
+      "default": "./dist/jobs.js"
     }
   },
   "scripts": {
@@ -80,6 +84,9 @@
       ],
       "notifications": [
         "dist/notifications.d.ts"
+      ],
+      "jobs": [
+        "dist/jobs.d.ts"
       ]
     }
   },

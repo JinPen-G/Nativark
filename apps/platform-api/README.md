@@ -15,6 +15,7 @@
 | [公共字典与编号](../../packages/platform-server/src/modules/platform-tools/README.md) | 本租户工具权限、最高生效配置、同事务取号和审计；五个原操作共用 DTO 与 OpenAPI |
 | [公共文件数据及依赖](../../packages/platform-server/src/modules/files/README.md) | 原文件/上传/清理收据两模型，存储配置变更在同一事务核真实文件依赖；业务文件 HTTP 另须受控权威 |
 | [公共通知台账](../../packages/platform-server/src/modules/notifications/README.md) | 原通知模板与发送日志两模型，适配日志复用公共集成表；内容、收件范围及真实投递由所属宿主提供 |
+| [公共异步任务](../../packages/platform-server/src/modules/jobs/job-ledger.ts) | 原AsyncJob模型、租户内台账及排期；创建登记与实际执行分开，执行者由所属业务提供 |
 | [基础集成](../../packages/platform-server/src/modules/integrations/README.md) | 原配置、修订、连通性与受控宿主依赖 |
 | [官方日历来源](../../packages/platform-server/src/modules/official-calendars/README.md) | 公共来源维护、年度版本追加与业务只读接点 |
 | [公共 schema](prisma/schema.prisma) | 公共账号、角色、会话、外观与设置表；保留原表名和身份标识，行业关联仅为可空历史引用 |
@@ -30,7 +31,7 @@ npm run lint:platform-api
 npm run api:document:platform
 ```
 
-Client 输出在本宿主 `generated/client`，运行产物从同一宿主目录读取。公共构建消费 `platform-contracts`、`platform-server` 和标准 `core-contracts` / `core-host` / `platform-core-host`。当前 schema 的 35 个模型均属平台，包含 6 个 Core 授权/绑定及原收据表、2 个统一期限表、5 个订阅办理表、2 个基础集成表、2 个官方日历来源表、2 个文件/上传表和 2 个通知表。公共数据版本为 `0.1.5`，九份迁移摘要由数据计划固定；文件与通知的原字段、唯一键、清理收据及外键保留。命令是否可执行取决于当前环境许可。
+Client 输出在本宿主 `generated/client`，运行产物从同一宿主目录读取。公共构建消费 `platform-contracts`、`platform-server` 和标准 `core-contracts` / `core-host` / `platform-core-host`。当前 schema 的 36 个模型均属平台，包含 6 个 Core 授权/绑定及原收据表、2 个统一期限表、5 个订阅办理表、2 个基础集成表、2 个官方日历来源表、2 个文件/上传表、2 个通知表和1个异步任务表。公共数据版本为 `0.1.6`，十份迁移摘要由数据计划固定；文件、通知与任务的原字段、唯一键、清理收据及外键保留。命令是否可执行取决于当前环境许可。
 
 新公共库按 `npm run db:platform:migrate:deploy` 应用本链。**不能把本基线套在已有 Rental 组合库**；已有库切换须先按原迁移来源和数据所有权演练兼容迁移。
 

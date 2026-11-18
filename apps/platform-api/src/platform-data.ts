@@ -6,7 +6,7 @@ import { CoreDataContractSchema } from "@rental-os/core-contracts";
 import { mysqlStructureFromMigrations, readMysqlPhysicalData } from "@rental-os/platform-core-host";
 import type { CoreMysqlDataPlan } from "@rental-os/core-host/mysql-deployment";
 
-export const PUBLIC_PLATFORM_DATA_VERSION = "0.1.5";
+export const PUBLIC_PLATFORM_DATA_VERSION = "0.1.6";
 const migrations = [
   { id: "platform.foundation", name: "20261115000000_public_foundation", sha256: "b220ba5046f16900f7d475351ec466ae56c8b9c02cc5de703c8ded83784a710a" },
   { id: "platform.core-access", name: "20261115010000_core_access", sha256: "ef03bb4bae3ff0337213cb1f87aa2ebeb8338faec016be05de645dfea54c2411" },
@@ -16,7 +16,8 @@ const migrations = [
   { id: "platform.integrations", name: "20261117010000_public_integrations", sha256: "890c05aa5badc36a9be3aa7c6f12792e2c01acdcde65e4e7b53dd384fcb1346c" },
   { id: "platform.official-calendars", name: "20261118000000_public_official_calendars", sha256: "5a9cbd12aeb905da46d332a028460e6f4bc30d96a7b7381c45c497d472d8e568" },
   { id: "platform.files", name: "20261118010000_public_files", sha256: "f64d360bd77e354f95217f31ccb7e340bd8b9d00f82a7a025539d51de2731d38" },
-  { id: "platform.notifications", name: "20261118020000_public_notifications", sha256: "a5b991a6d3cc165b364670ca325c9a15a84f40fc8ba05be1db5ffb4e75c88bfd" }
+  { id: "platform.notifications", name: "20261118020000_public_notifications", sha256: "a5b991a6d3cc165b364670ca325c9a15a84f40fc8ba05be1db5ffb4e75c88bfd" },
+  { id: "platform.async-jobs", name: "20261118030000_public_async_jobs", sha256: "fd3ccad20ee14afd431ee347b1ae0da0fdd2e536293cad219aaea9c8fdfe809c" }
 ] as const;
 
 export function createPublicPlatformDataPlan(): CoreMysqlDataPlan {

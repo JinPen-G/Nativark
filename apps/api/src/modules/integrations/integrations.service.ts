@@ -1,8 +1,9 @@
-/** 原集成应用入口。文件、通知及适配日志委托公共台账，Rental列表ACL和默认消息由原参加者供给。 */
+/** 原集成应用入口。文件、通知、适配日志及作业列表与创建委托公共台账，Rental权限和默认内容由原参加者供给。 */
 import { BadRequestException, Injectable, NotFoundException, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "node:crypto";
 import { FileLedgerApplication } from "@rental-os/platform-server/files";
+import { JobLedgerApplication } from "@rental-os/platform-server/jobs";
 import { NotificationLedgerApplication } from "@rental-os/platform-server/notifications";
 import type {
   AdapterLogSummary,
@@ -53,6 +54,13 @@ export class IntegrationsService {
       notificationLogsByTenant: this.notificationLogsByTenant,
       adapterLogsByTenant: this.adapterLogsByTenant
     });
+    this.jobLedger = new JobLedgerApplication({
+      storage: integrationsRepository,
+      usePersistentStorage: () => this.useMysqlDataSource(),
+      recordAdapterLog: (input) => this.recordAdapterLog(input),
+      initialJobs: this.jobs,
+      jobsByTenant: this.jobsByTenant
+    });
     this.fileLedger = new FileLedgerApplication({
       storage: integrationsRepository,
       authority: fileAccess,
@@ -86,6 +94,7 @@ export class IntegrationsService {
 
   private readonly fileLedger: FileLedgerApplication;
   private readonly notificationLedger: NotificationLedgerApplication;
+  private readonly jobLedger: JobLedgerApplication;
 
   private readonly files: FileAssetSummary[] = [
     {
@@ -338,36 +347,11 @@ export class IntegrationsService {
   }
 
   async listJobs() {
-    if (this.useMysqlDataSource()) {
-      return this.integrationsRepository.listJobs(this.defaultTenantId);
-    }
-    return [...this.memoryJobsForTenant(this.defaultTenantId)];
+    return this.jobLedger.listJobs();
   }
 
   async createJob(input: CreateAsyncJobRequest) {
-    validateRequired(input.jobType, "任务类型不能为空");
-    const job = this.useMysqlDataSource()
-      ? await this.integrationsRepository.createJob(input, this.defaultTenantId)
-      : this.createMemoryJob(input);
-
-    await this.recordAdapterLog({
-      provider: "mock-job-runner",
-      capability: "export",
-      operation: "enqueue_job",
-      businessType: input.businessType,
-      businessId: input.businessId,
-      status: "mock_success",
-      requestJson: {
-        jobType: input.jobType,
-        scheduledAt: job.scheduledAt
-      },
-      responseJson: {
-        externalCallSkipped: true,
-        jobId: job.id
-      }
-    });
-
-    return job;
+    return this.jobLedger.createJob(input);
   }
 
   listDataExchangeTemplates() {
@@ -631,27 +615,6 @@ export class IntegrationsService {
     });
 
     return device;
-  }
-
-  private createMemoryJob(input: CreateAsyncJobRequest) {
-    const tenantId = this.defaultTenantId;
-    const now = new Date().toISOString();
-    const row: AsyncJobSummary = {
-      id: `job_${shortId()}`,
-      jobType: input.jobType,
-      businessType: input.businessType,
-      businessId: input.businessId,
-      status: "queued",
-      attempt: 0,
-      maxAttempts: 3,
-      scheduledAt: input.scheduledAt ?? now,
-      operator: input.operator,
-      payload: input.payload ?? {},
-      createdAt: now,
-      updatedAt: now
-    };
-    this.memoryJobsForTenant(tenantId).unshift(row);
-    return row;
   }
 
   private createMemoryPrintJob(

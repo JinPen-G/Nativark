@@ -8,6 +8,8 @@
 
 import type { InfraAdapterCapability, NotificationTemplateSummary, NotificationSendLogSummary, AdapterLogSummary } from "@rental-os/platform-contracts/notifications";
 export type { InfraAdapterCapability, NotificationTemplateSummary, NotificationSendLogSummary, SendMockNotificationRequest, AdapterLogSummary } from "@rental-os/platform-contracts/notifications";
+import type { AsyncJobSummary } from "@rental-os/platform-contracts/jobs";
+export type { AsyncJobSummary, CreateAsyncJobRequest } from "@rental-os/platform-contracts/jobs";
 
 export interface InfraCapabilityCard {
   capability: InfraAdapterCapability;
@@ -111,33 +113,6 @@ export interface InvokeMockAdapterRequest {
   operation: string;
   businessType?: string;
   businessId?: string;
-  payload?: Record<string, unknown>;
-  operator?: string;
-}
-
-export interface AsyncJobSummary {
-  id: string;
-  jobType: string;
-  businessType?: string;
-  businessId?: string;
-  status: "queued" | "running" | "success" | "failed" | "skipped" | string;
-  attempt: number;
-  maxAttempts: number;
-  scheduledAt?: string;
-  startedAt?: string;
-  finishedAt?: string;
-  operator?: string;
-  payload: Record<string, unknown>;
-  result?: Record<string, unknown>;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface CreateAsyncJobRequest {
-  jobType: string;
-  businessType?: string;
-  businessId?: string;
-  scheduledAt?: string;
   payload?: Record<string, unknown>;
   operator?: string;
 }
