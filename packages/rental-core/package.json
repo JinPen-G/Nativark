@@ -1186,6 +1186,34 @@
     "./admin/catalog/terminology": {
       "types": "./admin/catalog/navigation-terminology.ts",
       "default": "./admin/catalog/navigation-terminology.ts"
+    },
+    "./http-category-governance": {
+      "types": "./dist/http-category-governance.controller.d.ts",
+      "default": "./dist/http-category-governance.controller.js"
+    },
+    "./http-category-adoption-preparation": {
+      "types": "./dist/http-category-adoption-preparation.controller.d.ts",
+      "default": "./dist/http-category-adoption-preparation.controller.js"
+    },
+    "./http-category-governance.dto": {
+      "types": "./dist/http-category-governance.dto.d.ts",
+      "default": "./dist/http-category-governance.dto.js"
+    },
+    "./http-category-adoption.dto": {
+      "types": "./dist/http-category-adoption.dto.d.ts",
+      "default": "./dist/http-category-adoption.dto.js"
+    },
+    "./http-category-preview": {
+      "types": "./dist/http-category-preview.guard.d.ts",
+      "default": "./dist/http-category-preview.guard.js"
+    },
+    "./http-category-applications": {
+      "types": "./dist/http-category-applications.d.ts",
+      "default": "./dist/http-category-applications.js"
+    },
+    "./http-category": {
+      "types": "./dist/http-category.module.d.ts",
+      "default": "./dist/http-category.module.js"
     }
   },
   "typesVersions": {
@@ -2071,6 +2099,27 @@
       ],
       "admin/catalog/terminology": [
         "admin/catalog/navigation-terminology.ts"
+      ],
+      "http-category-governance": [
+        "dist/http-category-governance.controller.d.ts"
+      ],
+      "http-category-adoption-preparation": [
+        "dist/http-category-adoption-preparation.controller.d.ts"
+      ],
+      "http-category-governance.dto": [
+        "dist/http-category-governance.dto.d.ts"
+      ],
+      "http-category-adoption.dto": [
+        "dist/http-category-adoption.dto.d.ts"
+      ],
+      "http-category-preview": [
+        "dist/http-category-preview.guard.d.ts"
+      ],
+      "http-category-applications": [
+        "dist/http-category-applications.d.ts"
+      ],
+      "http-category": [
+        "dist/http-category.module.d.ts"
       ]
     }
   },

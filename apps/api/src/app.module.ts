@@ -145,6 +145,7 @@ import { RENTAL_STAFF_HTTP_PROVIDERS } from "./modules/files/staff-http.provider
 import { RENTAL_FILE_HTTP_PROVIDERS } from "./modules/files/file-http.providers";
 import { RENTAL_CLIENT_HTTP_PROVIDERS } from "./modules/client/client-http.providers";
 import { RENTAL_CHANNEL_HTTP_PROVIDERS } from "./modules/client/channel-http.providers";
+import { RENTAL_CATEGORY_HTTP_PROVIDERS } from "./modules/rental-core/category-http.providers";
 import { WorkspaceCapabilityRepository } from "./modules/rental-core/workspace-capability.repository";
 import { WorkspaceCapabilityService } from "./modules/rental-core/workspace-capability.service";
 import { CapabilityHookRuntime } from "./modules/rental-core/capability-hook.runtime";
@@ -480,6 +481,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     ...RENTAL_FILE_HTTP_PROVIDERS,
     ...RENTAL_CLIENT_HTTP_PROVIDERS,
     ...RENTAL_CHANNEL_HTTP_PROVIDERS,
+    ...RENTAL_CATEGORY_HTTP_PROVIDERS,
     RentalDocumentService,
     RentalOrderConfirmationService,
     RentalServiceCapacityService,
