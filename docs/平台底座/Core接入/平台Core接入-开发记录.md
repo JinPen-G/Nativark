@@ -11,6 +11,28 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-main-public-shell-20261118"></a>
+
+## 最新主线补片接入公共后台（2026-11-18）
+
+固定父版22eb0e8fe687a29dc46c3de96b95bb99894a735c已普通推送并实际远端回读。当天再次读取GitHub，main已前进到7cf0c4c0401203707fd44f1b3841f3e306264629；核其25路径与原37条在制差异没有交叉后，按固定SHA取回并在任务分支合并。dev1的公共作业目录和dev2的订单页面及其未跟踪文件继续按原窗口保留，未混入本阶段。
+
+九处真实冲突来自主线仍在旧源码位置维护公共实现。将八份主线补片应用到[公共token](../../../packages/platform-admin/src/app/designTokens.ts)、[BusinessShell](../../../packages/platform-admin/src/components/BusinessShell.tsx)、[AnimatedIcon](../../../packages/platform-admin/src/components/ui/AnimatedIcon.tsx)、[Segmented](../../../packages/platform-admin/src/components/ui/Segmented.tsx)、[控件几何](../../../packages/platform-admin/src/components/ui/control-metrics.css)、[休息入口](../../../packages/platform-admin/src/features/rest/RestEntry.tsx)、[音效偏好](../../../packages/platform-admin/src/features/sound/soundPreferences.ts)和[公共基础样式](../../../packages/platform-admin/src/base.css)，旧八路径继续窄转接。管理后台记录保留两侧独立新增章节，既有正文和原证据没有删除。[主线发布记录](../../管理后台/管理后台-开发记录.md#nativark-hourly-release-20261118) · [原简称字段记录](../../管理后台/管理后台-开发记录.md#operator-short-name-foundation-20261114)
+
+主线默认交互音效开启，已有显式on/off及新版保存偏好继续优先，通知音效缺省仍关闭。咖啡图标原源码只移入[公共图标目录](../../../packages/platform-admin/src/components/ui/animated-icons/coffee.tsx)，原来源、许可和清单保留；规范化Git换行后的SHA-256为012aadfff8ac06fc5f04a2771af707882a7e763ed2912a519d1821a8656de1c2，与固定main及清单相同。原AppShell的Agent面包屑、登录署名和主线部署脚本按原来源合入，没有执行发布或部署。
+
+[公共PlatformShell](../../../packages/platform-admin/src/PlatformShell.tsx)与原AppShell同用新增headerPanelControl插槽，顶栏读取顺序为时间、公共控件、当前页面主操作、面板收展；窄屏使用主线规则。公共面板入口也复用同一动态图标。Core仍只声明本页动作，当前授权、表单提交、等待Promise、单个活动路由及休息会话清理沿原实现。[简单接入说明](../../../packages/platform-admin/README.md#宿主接入)
+
+必要类型使用TypeScript5.9.3与原三份产品tsconfig，进程7204退出0、stderr空：公共前端297根/2566源、零Core后台5根/2562源、原管理后台655根/4351源，全部noEmit、0诊断。首轮只读检查器使用仅匹配斜线的dist路径替换，Windows路径未映射到实际源码，公共/零Core各184条诊断；停止该验证进程，修正检查器路径归一后复验相同范围，产品配置、类型及依赖未放宽。声明和编译输出均未落盘。
+
+一次必要冒烟复用原音效偏好完整13处断言及表单控件密度8处断言/完整几何区段，原断言文本保持；同时将六份TS/TSX可执行正文去除import/注释后与固定main对照，咖啡字节再核固定main与清单。首次正文比较因Git CRLF与LF留在JSX文本中失败，仅在检查器统一换行后复验，不重写产品源码或删除断言。最终进程38448退出0、stderr空，全部所选断言及六份正文/图标检查通过；没有运行无关表单、列表或音效设备场景，没有新建永久测试脚本。
+
+保留规范差异：本次固定main使用40px Tabs/默认Segmented轨道，并把时间放入同一顶栏；后台规则中仍有36px轨道和单独时间行的旧描述。这里保全已发布主线行为，不改锁定规范或将搬迁视为该界面门槛已验收。该差异继续在当前接续定位，完整实页、规范统一和正式验收仍需证据。
+
+三份本片资料1179个本地链接/177个锚点0问题；管理后台合并新增的三个链接/锚点已核，双方新增章节和共用旧正文逐字保留。对完整管理后台历史记录的附带检查有729个未定位附件，均在该原册的旧输出/旧源码引用中；本任务未复制main输出、修改旧证据或宣称该历史记录全绿，旧正文按两侧固定Git版本解释。
+
+按PCH原门槛复核，完整多Core装配、所有audience、生命周期、标准Rental包及AI仍有缺口，本阶段不凭局部主线合并提高百分比。只读复用既有依赖，新增临时目录、Client/dist和后台业务服务0；旧两项集中待清理残留仍沿原清单受阻。当前Node会话未初始化sky，没有重新捕获屏幕；现有公开computer-use接口没有释放其他旧会话的入口，黄色边框消失尚无本阶段证据。其他聊天模型/推理设置仍仅由负责人管理。
+
 <a id="core-public-locale-compatibility-20261118"></a>
 
 ## 公共翻译器恢复原词条回退（2026-11-18）

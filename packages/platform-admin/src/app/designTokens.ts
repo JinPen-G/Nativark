@@ -34,7 +34,7 @@ export const ADMIN_INPUT_COLORS = { borderDefault: "var(--border)" } as const;
 /** Navigation tabs and segmented criteria share neutral selection ink, never brand accent. */
 export const ADMIN_CHOICE_STYLE = { text: "var(--text-muted)", selectedText: "var(--foreground)", weight: 500 } as const;
 /** One density scale for UIArc and Ant compatibility; settings visibility is irrelevant. */
-export const ADMIN_CONTROL_HEIGHT = { small: 32, default: 36, large: 40, toolbar: 32, filter: 36 } as const;
+export const ADMIN_CONTROL_HEIGHT = { small: 32, default: 36, large: 40, toolbar: 32, filter: 36, pageAction: 36 } as const;
 /** Widths express field roles, not individual pages. Forms may still fill their grid cell. */
 export const ADMIN_CONTROL_WIDTH = { search: 320, searchMin: 240, select: 192, field: 240, wide: 320, number: 160, compact: 96, date: 192, dateRange: 288 } as const;
 /** List queries use compact role widths; form grids retain their existing sizing. */
@@ -43,9 +43,9 @@ export const ADMIN_CONTROL_PADDING = { small: 8, default: 12, large: 16 } as con
 /** Task surfaces: compact decisions, contextual editing, file workflows. */
 export const ADMIN_OVERLAY_METRICS = { dialogWidth: 520, sideWidth: 720, bottomWidth: 720, padding: 24, viewportInset: 32 } as const;
 /** Original segmented track has 3px padding plus a 1px frame on each side. */
-export const ADMIN_SEGMENTED_METRICS = { frameInset: 8 } as const;
-/** Original TabsList has 4px padding and a 1px frame on each side. */
-export const ADMIN_TABS_METRICS = { frameInset: 10 } as const;
+export const ADMIN_SEGMENTED_METRICS = { height: 40, frameInset: 8, compactHeight: 36, iconHeight: 36 } as const;
+/** UIArc Screens use a 40px tab track around 32px labels; the host keeps a 1px frame. */
+export const ADMIN_TABS_METRICS = { height: 40, frameInset: 8, trackPadding: 3 } as const;
 /** Reusable list geometry. Pages consume roles, never private field/column sizes. */
 export const ADMIN_LIST_METRICS = { queryMinWidth: 760, searchWidth: ADMIN_LIST_CONTROL_WIDTH.search, searchMinWidth: ADMIN_LIST_CONTROL_WIDTH.searchMin, statusWidth: ADMIN_LIST_CONTROL_WIDTH.select, statusMinWidth: ADMIN_LIST_CONTROL_WIDTH.select, categoryInlineMinWidth: 400, compactTriggerMaxWidth: 360, moreSearchWidth: 144, moreSearchCompactWidth: 64, filterPopoverWidth: 320, adaptiveSelectMin: 76, adaptiveSelectMax: 280, adaptiveSelectInset: 56 } as const;
 export const ADMIN_TABLE_COLUMN_WIDTH = {
@@ -250,11 +250,17 @@ export function applyAdminTypographyTokens(root: HTMLElement) {
     "--rental-detail-summary-width": px(ADMIN_DETAIL_LAYOUT.summaryWidth),
     "--rental-detail-account-label-width": px(ADMIN_DETAIL_LAYOUT.accountLabelWidth),
     "--rental-segmented-frame-inset": px(ADMIN_SEGMENTED_METRICS.frameInset),
+    "--rental-segmented-height": px(ADMIN_SEGMENTED_METRICS.height),
+    "--rental-segmented-compact-height": px(ADMIN_SEGMENTED_METRICS.compactHeight),
+    "--rental-segmented-icon-height": px(ADMIN_SEGMENTED_METRICS.iconHeight),
     "--rental-tabs-frame-inset": px(ADMIN_TABS_METRICS.frameInset),
+    "--rental-tabs-height": px(ADMIN_TABS_METRICS.height),
+    "--rental-tabs-track-padding": px(ADMIN_TABS_METRICS.trackPadding),
     ...Object.fromEntries(Object.entries(ADMIN_LOADING_METRICS).filter(([role]) => role !== "rows").map(([role, value]) => [
       `--rental-loading-${role.replace(/[A-Z]/g, part => `-${part.toLowerCase()}`)}`, px(value),
     ])),
     "--rental-control-height-toolbar": px(ADMIN_CONTROL_HEIGHT.toolbar),
+    "--rental-control-height-page-action": px(ADMIN_CONTROL_HEIGHT.pageAction),
     "--rental-control-height-filter": px(ADMIN_CONTROL_HEIGHT.filter),
     "--rental-control-height-small": px(ADMIN_CONTROL_HEIGHT.small),
     "--rental-control-height-default": px(ADMIN_CONTROL_HEIGHT.default),

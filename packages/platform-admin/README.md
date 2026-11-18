@@ -37,6 +37,8 @@
 
 CorePage 的 `title`、`summary` 可显示当前受权对象；`actions` 可声明图标、危险程度、等待状态和等待文案，公共按钮继续等待真实Promise并复验当前操作。`RecordDetailLayout` 接收事实、返回回调及可选Core页头，`RecordDetailStack`提供原内容间距。`KanbanBoard`只映射已经获权的数据和业务回调，宿主调用一次 `platformAdminVite()` 即带入保留看板的严格构建适配。实际接入见[Rental养护工单](../rental-core/admin/work-orders/README.md)。
 
+顶栏按时间、休息/通知、当前页面主操作、面板收展排列；窄屏由公共壳安排换行和收展入口。Core 只声明自己的 `actions`，公共壳负责按钮样式和位置。已有自定义宿主用 `BusinessShell.headerPanelControl` 提供末尾面板入口，`headerActions` 保留原页面操作及旧时钟调用的兼容。[公共壳](src/components/BusinessShell.tsx) · [面板入口](src/components/workspace/WorkspacePanel.tsx)
+
 需要保留原操作的单次提交语义时，使用 `runtime.request<T>(path, { method: "post", data: command, retryAuthentication: false })`。这会禁止401后刷新并重发该请求；普通请求仍沿原规则最多刷新一次。结果不明时调用该Core的原查询或收据接口，不换操作键重发。[请求合同](src/runtime/index.ts) · [唯一执行者](src/runtime/browser-http.ts)
 
 `/forms` 同时提供 `readSettingsReference`、`retainSettingsReference`、`clearSettingsReference` 和对应类型，供页面保留非敏感原操作引用。沿用既有导出名和错误标识；键由业务按当前身份与对象限定，损坏或不可写的存储会阻止新操作，不把本地引用作为权限。[操作引用实现](src/operation-reference.ts)

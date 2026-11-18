@@ -1679,8 +1679,8 @@ export function BusinessPreview({ paused = false, initialScene = 'booking' } = {
             'aria-label': text('经营管理方式', 'Management mode'),
           },
           ...[
-            ['ai', text('AI 管理', 'AI mode')],
-            ['business', text('传统管理', 'Console')],
+            ['ai', text('Agent工作台', 'Agent')],
+            ['business', text('管理控制台', 'Admin')],
           ].map(([key, label]) =>
             button('', label, () => switchMode(key), {
               key,

@@ -96,9 +96,9 @@ function ShellContents({ children, brandName, brand, publicSections, pages = noP
       query={query} onNavigate={onNavigate} groupLabel="功能导航" />}
     headerTitleTarget={false} headerContext={<Breadcrumb aria-label={t("面包屑")}
       separator={<RightOutlined size={13} className="workspace-breadcrumb-separator" />} items={items} />}
-    headerUtilities={<><RestEntry /><HeaderNotifications inbox={notifications} renderDetails={notificationDetails} />
-      <WorkspacePanelToggle open={panelOpen} onChange={setPanelOpen} controls="platform-workspace-panel"
-        label={t(panelOpen ? "收起面板" : "展开面板")} /></>}
+    headerUtilities={<><RestEntry /><HeaderNotifications inbox={notifications} renderDetails={notificationDetails} /></>}
+    headerPanelControl={<WorkspacePanelToggle open={panelOpen} onChange={setPanelOpen} controls="platform-workspace-panel"
+      label={t(panelOpen ? "收起面板" : "展开面板")} />}
     wrapContent={column => <WorkspacePanel id="platform-workspace-panel" label={t("业务 Core")} open={panelOpen}
       onClose={closePanel} panel={panel ?? defaultPanel}>{column}</WorkspacePanel>}>
     {children}

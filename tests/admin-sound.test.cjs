@@ -64,6 +64,11 @@ test('sound-1 has nine voices; future registered packs resolve without trigger c
 });
 
 test('old on/off migrates click only; new settings take precedence and invalid data is safe', () => {
+  assert.equal(preferences.parseSoundPreferences(null, null).interactionEnabled, true);
+  assert.equal(preferences.parseSoundPreferences(null, null).notificationEnabled, false);
+  assert.equal(preferences.parseSoundPreferences('{', null).interactionEnabled, true);
+  assert.equal(preferences.parseSoundPreferences(JSON.stringify({ version: 1 }), null).interactionEnabled, true);
+  assert.equal(preferences.parseSoundPreferences(JSON.stringify({ version: 1 }), 'off').interactionEnabled, false);
   assert.equal(preferences.parseSoundPreferences(null, 'on').interactionEnabled, true);
   assert.equal(preferences.parseSoundPreferences(null, 'on').notificationEnabled, false);
   assert.equal(preferences.parseSoundPreferences(null, 'off').interactionEnabled, false);
@@ -79,6 +84,9 @@ test('preferences notify subscribers and synchronize storage events without back
   const store = storage();
   const target = new EventTarget();
   const state = preferences.createSoundPreferencesStore(() => store, target);
+  assert.equal(state.getSnapshot().interactionEnabled, true);
+  state.update({ interactionEnabled: false });
+  assert.equal(preferences.createSoundPreferencesStore(() => store).getSnapshot().interactionEnabled, false);
   let changed = 0;
   const off = state.subscribe(() => changed++);
   state.update({ volume: 0.5, interactionEnabled: true });

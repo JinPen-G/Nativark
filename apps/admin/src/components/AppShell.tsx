@@ -2,7 +2,7 @@ import { Breadcrumb } from "antd";
 import { Tooltip } from "@/components/ui";
 import { RightOutlined } from "@/components/ui/icons";
 import { useQuery } from "@tanstack/react-query";
-import { PanelRightClose, PanelRightOpen } from "lucide-react";
+import { AnimatedIcon } from "./ui/AnimatedIcon";
 import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { matchPath, useLocation, useNavigate } from "react-router-dom";
 import { rentalCoreApi } from "@/api/rentalCore";
@@ -83,7 +83,10 @@ function ShellContents({ children }: { children: ReactNode }) {
   // item or a link to protected content. Tenant terminology still owns permitted routes.
   const deniedLabel = registeredRoute && !detailRoute ? registeredRoute.label : undefined;
   const currentCrumb = (fallback: string) => <WorkspaceBreadcrumbCurrent>{t(fallback)}</WorkspaceBreadcrumbCurrent>;
-  const breadcrumbItems = [
+  const breadcrumbItems = aiMode ? [
+    { title: <span className="breadcrumb-section">{t("Agent工作台")}</span> },
+    { title: currentCrumb("对话") },
+  ] : [
     ...(current.section ? [{ title: <span className="breadcrumb-section">{t(current.section.label)}</span> }] : []),
     { title: detailRoute && detailRoute.path !== current.route?.path && current.route
       ? <button type="button" className="breadcrumb-link" onClick={() => navigate(current.route!.path)}>{t(current.route.label)}</button>
@@ -104,10 +107,10 @@ function ShellContents({ children }: { children: ReactNode }) {
     headerUtilities={<>
       <RestEntry />
       <HeaderNotifications />
-      {!aiMode && copilot?.available && <Tooltip title={t(copilot.open ? "收起 Copilot" : "展开 Copilot")}><button type="button" className="workspace-copilot-entry" aria-label={t(copilot.open ? "收起 Copilot" : "展开 Copilot")} aria-controls="business-copilot" aria-expanded={copilot.open} data-sound="press" onClick={() => copilot.open ? copilot.close() : copilot.show()}>
-        {copilot.open ? <PanelRightClose size={16} aria-hidden /> : <PanelRightOpen size={16} aria-hidden />}
-      </button></Tooltip>}
     </>}
+    headerPanelControl={!aiMode && copilot?.available && <Tooltip title={t(copilot.open ? "收起 Copilot" : "展开 Copilot")}><button type="button" className="workspace-copilot-entry" aria-label={t(copilot.open ? "收起 Copilot" : "展开 Copilot")} aria-controls="business-copilot" aria-expanded={copilot.open} data-sound="press" onClick={() => copilot.open ? copilot.close() : copilot.show()}>
+        <AnimatedIcon key={copilot.open ? "close" : "open"} name={copilot.open ? "panelRightClose" : "panelRightOpen"} style={{ fontSize: 16 }} />
+      </button></Tooltip>}
     headerTime={<WorkspaceClock />} contentClassName={aiMode ? "ai-operator-host" : undefined}
     wrapContent={column => <CopilotLayout suspended={aiMode}>{column}</CopilotLayout>}
     overlay={<SubscriptionExpiryFloatingCard />}>{children}

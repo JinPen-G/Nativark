@@ -14,11 +14,20 @@
 .arc-form.ant-form-inline > [data-rental-arc-action] { align-self: flex-start; height: var(--rental-control-height-default); }
 /* Count the original track padding/frame in the total field height. Only geometry,
  * never override the travelling selection, springs, scroll mask or transitions. */
-.arc-segmented { --control-height-sm: calc(var(--control-height-md) - var(--rental-segmented-frame-inset)); min-width: 0; max-width: 100%; }
-.arc-segmented-icons button[data-value] { display: inline-flex; align-items: center; justify-content: center; width: calc(var(--rental-control-height-default) - var(--rental-segmented-frame-inset)); padding: 0; }
+.arc-segmented { --segmented-height: var(--rental-segmented-height); --control-height-sm: calc(var(--segmented-height) - var(--rental-segmented-frame-inset)); min-width: 0; max-width: 100%; }
+.arc-segmented[data-size="small"] { --segmented-height:var(--rental-segmented-compact-height); }
+.operator-mode-expanded .arc-segmented { --segmented-height:var(--rental-segmented-compact-height); }
+.arc-segmented-icons { --segmented-height:var(--rental-segmented-icon-height); }
+.arc-segmented-icons button[data-value] { display: inline-flex; align-items: center; justify-content: center; width: var(--control-height-sm); padding: 0; }
 .arc-segmented-icons button[data-value] > span:not([aria-hidden]) { display: inline-flex; align-items: center; justify-content: center; }
 /* Limit this to the navigation shell: panel controls keep their own size roles. */
-.rental-tabs > [data-overflow] { --control-height-sm: calc(var(--rental-control-height-default) - var(--rental-tabs-frame-inset)); }
+.rental-tabs > [data-overflow] { --control-height-sm: calc(var(--rental-tabs-height) - var(--rental-tabs-frame-inset)); }
+.rental-tabs > [data-overflow] [role="tablist"] { padding:var(--rental-tabs-track-padding); }
+/* Explicit compatibility branches share geometry without changing their keyboard behavior. */
+.arc-segmented.ant-segmented { padding:var(--rental-tabs-track-padding); border-width:1px; border-style:solid; }
+.arc-segmented.ant-segmented .ant-segmented-item-label { display:flex; align-items:center; justify-content:center; min-height:var(--control-height-sm); }
+.rental-tabs.ant-tabs-top > .ant-tabs-nav .ant-tabs-nav-list { padding:calc(var(--rental-tabs-frame-inset) / 2); }
+.rental-tabs.ant-tabs-top > .ant-tabs-nav .ant-tabs-tab { min-height:calc(var(--rental-tabs-height) - var(--rental-tabs-frame-inset)); padding-block:0; }
 
 /* Clamp to the parent; full-width form grids and narrow drawers must not overflow.
  * Width values are semantic tokens at callers, never inline pixel overrides here. */

@@ -183,7 +183,14 @@ assert.doesNotMatch(designTokens, /ADMIN_CONTROL_HEIGHTS|applyAdminControlHeight
 assert.doesNotMatch(theme, /ADMIN_CONTROL_HEIGHTS/);
 
 // Owner-authorized global density replaces the old page-local 40/44/50 split.
-assert.deepEqual(tokens.ADMIN_CONTROL_HEIGHT, { small: 32, default: 36, large: 40, toolbar: 32, filter: 36 });
+assert.deepEqual(tokens.ADMIN_CONTROL_HEIGHT, { small: 32, default: 36, large: 40, toolbar: 32, filter: 36, pageAction: 36 });
+assert.equal(tokens.ADMIN_TABS_METRICS.height, 40);
+assert.equal(tokens.ADMIN_TABS_METRICS.height - tokens.ADMIN_TABS_METRICS.frameInset, 32);
+assert.equal(tokens.ADMIN_TABS_METRICS.trackPadding * 2 + 2, tokens.ADMIN_TABS_METRICS.frameInset);
+assert.equal(tokens.ADMIN_SEGMENTED_METRICS.height, 40);
+assert.equal(tokens.ADMIN_SEGMENTED_METRICS.height - tokens.ADMIN_SEGMENTED_METRICS.frameInset, 32);
+assert.equal(tokens.ADMIN_SEGMENTED_METRICS.compactHeight, 36);
+assert.equal(tokens.ADMIN_SEGMENTED_METRICS.iconHeight, 36);
 for (const mode of ['default', 'dark', 'compact']) {
   const config = createThemeConfig(mode);
   assert.equal(config.token.controlHeight, tokens.ADMIN_CONTROL_HEIGHT.default);
@@ -210,15 +217,15 @@ const metricsRules = postcss.parse(metrics);
 metricsRules.walkDecls(decl => {
   assert.doesNotMatch(decl.prop, /animation|transition|transform|radius|color|shadow|font|line-height/, 'geometry changes cannot replace original component effects');
   if (/height|padding/.test(decl.prop) || decl.prop === 'width') {
-    // The inner segmented control derives its height from the shared field role
-    // after subtracting the original frame, rather than another raw dimension.
+    // Choice controls have their own screen role; field heights must not compress
+    // their labels. The original frame is still counted in their total height.
     if (decl.parent.selector === '.arc-segmented' && decl.prop === '--control-height-sm') {
-      assert.equal(decl.value, 'calc(var(--control-height-md) - var(--rental-segmented-frame-inset))');
+      assert.equal(decl.value, 'calc(var(--segmented-height) - var(--rental-segmented-frame-inset))');
       assert.equal(tokens.ADMIN_SEGMENTED_METRICS.frameInset, 8);
       return;
     }
     // Parent-relative layout (full-width forms / shrinkable wrappers) is not a pixel size.
-    if (!['0', '100%'].includes(decl.value)) assert.match(decl.value, /var\(--rental-control-/, 'control dimensions come from the central tokens');
+    if (!['0', '100%'].includes(decl.value)) assert.match(decl.value, /var\(--(?:rental-(?:control|tabs|segmented)-|control-height-|segmented-height)/, 'control dimensions come from the central density or choice tokens');
   }
 });
 assert.match(metrics, /\.arc-form-field, \.arc-search-field, \.arc-date-field, \.arc-date-range/);

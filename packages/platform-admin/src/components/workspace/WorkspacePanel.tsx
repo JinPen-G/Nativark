@@ -1,6 +1,6 @@
 /** 公共同级面板及窄屏底部浮层，沿原侧栏尺寸/曲线；正文、业务上下文和 AI 权限由宿主提供。 */
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { PanelRightClose, PanelRightOpen } from "lucide-react";
+import { AnimatedIcon } from "../ui/AnimatedIcon";
 import { Tooltip } from "../ui/Tooltip";
 import { useLocale } from "../../app/locale";
 import "./WorkspacePanel.css";
@@ -10,7 +10,7 @@ export function WorkspacePanelToggle({ open, onChange, label, controls }: {
 }) {
   return <Tooltip title={label}><button type="button" className="workspace-copilot-entry" aria-label={label}
     aria-controls={controls} aria-expanded={open} data-sound="press" onClick={() => onChange(!open)}>
-    {open ? <PanelRightClose size={16} aria-hidden /> : <PanelRightOpen size={16} aria-hidden />}
+    <AnimatedIcon key={open ? "close" : "open"} name={open ? "panelRightClose" : "panelRightOpen"} style={{ fontSize: 16 }} />
   </button></Tooltip>;
 }
 
