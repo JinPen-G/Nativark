@@ -7,7 +7,7 @@ import type {
 } from "@rental-os/platform-contracts/tenant-integrations";
 import type { SystemUserRow } from "@rental-os/platform-contracts";
 import { ObjectStorageProviderService } from "./object-storage.provider.service";
-import { INTEGRATION_PAYMENT_PROBE, type PaymentIntegrationProbe } from "./integration-probe";
+import { INTEGRATION_PAYMENT_PROBE, INTEGRATION_EMAIL_PROBE, type PaymentIntegrationProbe, type EmailIntegrationProbe } from "./integration-probe";
 import { TenantIntegrationRuntimeService } from "./tenant-integration.runtime.service";
 import { TenantIntegrationService } from "./tenant-integration.service";
 
@@ -30,7 +30,8 @@ export class TenantIntegrationConnectivityService {
     private readonly integrations: TenantIntegrationService,
     private readonly sms: TenantIntegrationRuntimeService,
     private readonly fileStorage: ObjectStorageProviderService,
-    @Optional() @Inject(INTEGRATION_PAYMENT_PROBE) private readonly payment?: PaymentIntegrationProbe
+    @Optional() @Inject(INTEGRATION_PAYMENT_PROBE) private readonly payment?: PaymentIntegrationProbe,
+    @Optional() @Inject(INTEGRATION_EMAIL_PROBE) private readonly email?: EmailIntegrationProbe
   ) {}
 
   async test(
@@ -82,6 +83,7 @@ export class TenantIntegrationConnectivityService {
       };
     }
     if (capability === "payment" && !this.payment) throw new ServiceUnavailableException("当前宿主未装配支付连接探针");
+    if (capability === "email" && !this.email) throw new ServiceUnavailableException("当前宿主未装配邮箱连接探针");
     const claimed = await this.integrations.claimLiveTest({
       tenantId: config.tenantId,
       configId: config.id,
@@ -98,7 +100,9 @@ export class TenantIntegrationConnectivityService {
         ? await this.payment!.testConnection(config)
         : capability === "sms"
           ? await this.sms.testConnection(config)
-          : await this.fileStorage.testConnection(config);
+          : capability === "email"
+            ? await this.email!.testConnection(config)
+            : await this.fileStorage.testConnection(config);
       const recorded = await this.integrations.recordTestResult({
         tenantId: config.tenantId,
         configId: config.id,

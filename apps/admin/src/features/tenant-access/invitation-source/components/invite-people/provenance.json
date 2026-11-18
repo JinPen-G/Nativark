@@ -1,0 +1,66 @@
+{
+  "source": "https://uiarc.dev/components/blocks/invite-people",
+  "referenceFrame": "https://uiarc.dev/components/blocks/invite-people/frame",
+  "captured": "2026-11-15",
+  "runtime": {
+    "url": "https://uiarc.dev/_next/static/chunks/52149.e118b43075b1e20d.js",
+    "file": "52149.e118b43075b1e20d.js",
+    "bytes": 43020,
+    "sha256": "0267acd53a9581b400770b077506167af5c7577489e55813ebca357f75db08a0"
+  },
+  "styles": {
+    "url": "https://uiarc.dev/_next/static/css/9d2dd7fd633033fc.css",
+    "file": "9d2dd7fd633033fc.css",
+    "bytes": 20803,
+    "sha256": "7e2c8c169fe885ccd7026217888a00be7b7c9158a3d0f07e0d4df4091779ca27"
+  },
+  "originalStyleSha256": "4ab98ce4610356ccbc61319da197bacb2b51925403fbfe5517ba299a712c4f86",
+  "protectedSource": "Authored Pro TSX was not obtained. This component is reconstructed from the publicly shipped preview, stylesheet, SVG and documented behavior.",
+  "adaptations": [
+    "Native React and Motion imports, readable JSX and typed APIs",
+    "Directory, roles, team, selected, pending and plan support controlled values",
+    "Host send, resend, revoke and upgrade wait for real Promise results",
+    "Default preview keeps the original local demonstration and timing",
+    "Scoped 16px reference tokens and source preflight"
+  ],
+  "licenses": [
+    "Source CSS and source SVG notices retained",
+    "Existing React, Motion and Lucide dependencies"
+  ],
+  "maintainedStyleHashes": {
+    "original.css": "4ab98ce4610356ccbc61319da197bacb2b51925403fbfe5517ba299a712c4f86",
+    "counter.css": "4a956d4eb862ec2d02df019bb431d7689ea7d372c4618da043dabae4b57176bd",
+    "integration.css": "c72f3efbe3aeb3ce2d1f377381f8ef62aae832fe062377f000700d2869fd6f96",
+    "tokens.css": "2acfa2f8315acdd4b238c06f562b55db87fb8317aadc28d351f76a73d349c96b",
+    "demo.css": "d2f674e9f83da670b481b1123dc07d925c3b4ee014e2e4d78f24a71a7343b7ad"
+  },
+  "hostIntegration": {
+    "host": "Rental OS tenant operator invitations",
+    "sourceDirectory": "D:/工作文件/uiarc-pro-archive/preview/src/components/invite-people",
+    "sourceManifest": "D:/工作文件/uiarc-pro-archive/preview/output/invite-people-20261115-source-manifest.json",
+    "sourceTreeSha256": "7c116b812eca1eb2c232028619a312ad0561fb85d42b3c653c039107624799df",
+    "adaptations": [
+      "Shared effective motion preference including CSS",
+      "Host locale, theme and typography",
+      "Optional seats, resend and sendDisabled ports",
+      "Optional team visibility and footer slot for the host email preview action",
+      "Original form padding and status-section margins retained with shared control sizes and radius tokens",
+      "Consumed Escape in suggestions or role menus stays inside the component and restores its original focus target"
+    ],
+    "verificationNote": "The following verification paths and maintained hashes refer to the original UI archive. Host checks are recorded in output/artifacts/admin-header-actions.",
+    "maintainedStyleHashes": {
+      "original.css": "4ab98ce4610356ccbc61319da197bacb2b51925403fbfe5517ba299a712c4f86",
+      "counter.css": "4a956d4eb862ec2d02df019bb431d7689ea7d372c4618da043dabae4b57176bd",
+      "integration.css": "be6277210ac9a79efd34ac36e21443090cde299690a84b71360bf19679fd6a01",
+      "tokens.css": "2acfa2f8315acdd4b238c06f562b55db87fb8317aadc28d351f76a73d349c96b"
+    }
+  },
+  "verification": {
+    "record": "../../../output/invite-people-20261115-checks.json",
+    "referenceStates": 13,
+    "matchedNodes": 2934,
+    "browser": "ChatGPT in-app browser",
+    "nativeTouch": "not verified",
+    "motion": "Original spring parameters and stable geometry matched. Intermediate samples contain browser/runtime phase differences."
+  }
+}

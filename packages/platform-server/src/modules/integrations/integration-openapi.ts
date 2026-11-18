@@ -8,7 +8,7 @@ const strings: Schema = { type: "array", items: text };
 const object = (properties: Record<string, Schema>, required: string[] = [], additionalProperties = false): Schema =>
   ({ type: "object", properties, required, additionalProperties });
 const ref = (name: string): Schema => ({ $ref: `#/components/schemas/Integration.${name}` });
-const capability: Schema = { type: "string", enum: ["sms", "payment", "file"] };
+const capability: Schema = { type: "string", enum: ["sms", "email", "payment", "file"] };
 const provider: Schema = { type: "string", enum: TENANT_INTEGRATION_PROVIDERS.map(item => item.provider) };
 const settings: Schema = { type: "object", additionalProperties: { type: ["string", "boolean", "number", "null"] } };
 

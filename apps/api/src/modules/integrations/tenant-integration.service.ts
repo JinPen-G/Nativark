@@ -22,7 +22,7 @@ export class TenantIntegrationService extends PlatformTenantIntegrationService {
       })
     };
     super(store, secretBox, operationLog, new RentalIntegrationBusinessParticipant(prisma), {
-      aliyun_sms: "sms", tencent_sms: "sms", alipay: "payment", wechat_pay: "payment", stripe: "payment",
+      aliyun_sms: "sms", tencent_sms: "sms", smtp: "email", alipay: "payment", wechat_pay: "payment", stripe: "payment",
       aliyun_oss: "file", tencent_cos: "file", s3_compatible: "file"
     });
   }

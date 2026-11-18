@@ -1,6 +1,6 @@
 # 公共第三方服务接入
 
-本模块维护租户共享的第三方配置、服务端凭据、配置修订和连接测试，并提供原短信发送／回执及对象存储签名／HTTP。业务结算、支付执行、通知 outbox、文件 ACL 和原业务事实由实际宿主供给。
+本模块维护租户共享的第三方配置、服务端凭据、配置修订和连接测试，并提供原短信发送／回执、对象存储签名／HTTP及SMTP/IMAP运输。业务结算、支付执行、通知 outbox、文件 ACL 和原业务事实由实际宿主供给。
 
 | 阅读入口 | 职责 |
 | --- | --- |
@@ -9,6 +9,7 @@
 | [凭据保管](../../common/secret-box.ts)、[出站校验](../../common/outbound-url.ts) | 原 AES-GCM v1/v2 信封、历史密钥与稳定指纹，原 HTTPS／DNS／重定向限制 |
 | [连接测试](tenant-integration.connectivity.service.ts)、[支付探针](integration-probe.ts) | 先核配置与修订，再原子占用 30 秒窗口，供应商错误按原安全投影返回 |
 | [短信运行](tenant-integration.runtime.service.ts)、[投递结果](../../common/notification-delivery.ts) | 阿里云／腾讯云的原发送、确定性 nonce 与原回执查询，unknown 保留原操作 |
+| [邮箱运行](tenant-email.runtime.service.ts)、[SMTP](smtp-transport.ts)、[IMAP](imap-reader.ts)、[安全邮件解析](inbound-mail-codec.ts) | `/integration-email`、`/integration-smtp`、`/integration-imap`、`/integration-inbound-mail`共用原加密连接、投递结果、只读收信和文本投影 |
 | [对象存储](object-storage.provider.service.ts)、[OSS V4](aliyun-oss-v4.ts) | 原 OSS／COS／S3 签名与受控 HTTP，连接测试使用随机对象 HEAD |
 | [微信运输](wechat-mini-program.adapter.ts) | `/integration-wechat` 共用原 code/session、手机号一次性凭证、AppID token 缓存与错误类；不保存客户身份，业务调用者核渠道与水印 |
 | [Rental 参加者](../../../../../apps/api/src/modules/integrations/rental-integration-business.participant.ts) | 在原配置事务核租赁结算、支付／退款、短信队列及文件／上传依赖 |
@@ -20,7 +21,11 @@
 
 宿主通过 `integrationBusiness` 或 `integrationBusinessProvider` 提供结算与依赖核验。停用及更换商户／存储位置均在原配置行锁内读取未完成与历史事实。参加者收到该宿主同一事务，读取范围由所属业务维护。缺参加者的停用或身份更换返回 503。
 
-默认无 Core 宿主从与主装配相同的受控空目录核验业务依赖为空，可以保存和停用公共短信／文件配置。支付启用需要实际结算币种依据。已有支付配置仍留在目录供核对，支付测试需要宿主的 `integrationPaymentProbe`。运行观察的 `integrationRuntimeProviders` 由受控装配声明实际适配，公共默认包含短信和文件。
+默认无 Core 宿主从与主装配相同的受控空目录核验业务依赖，并读取公共文件及通知台账，再裁定配置停用。支付启用需要实际结算币种依据。已有支付配置仍留在目录供核对，支付测试需要宿主的 `integrationPaymentProbe`。运行观察的 `integrationRuntimeProviders` 由受控装配声明实际适配，公共默认包含短信、文件和SMTP邮箱。
+
+公共邮箱运行时与连接探针共用一个实例。测试只验证SMTP加密连接和登录，启用收信时再验证IMAP只读连接，不投递或修改邮件。`receiveEnabled`开启后必须提供完整IMAP配置，已存凭据在保存时沿原合并规则保留。通知发送方继续负责当前授权、原消息和投递台账；提交后结果不明保留原操作，不换键重发。
+
+停用邮箱或改变服务器/发件身份时，在原配置事务内核同租户、同提供方的`NotificationSendLog`；`queued`和`delivery_uncertain`拒绝该变更。密码轮换保持原身份规则。查询失败向上返回，空Core目录不能证明没有待核邮件。原邀请、寄件中心和客服同步仍由各自应用服务裁定。
 
 原 Rental 兼容服务保留业务币种的历史回退、进行中支付／退款、待投递／unknown 通知及文件／上传保护。原文件运行服务继承公共存储接点，继续持有业务归属、ACL、字节冻结、上传完成和删除恢复。原支付运行服务提供自己的连接探针及原资金执行者。
 

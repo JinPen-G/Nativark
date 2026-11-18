@@ -25,6 +25,7 @@ export * from "./enterprise-order-delegation";
 export * from "./enterprise-exchange";
 export * from "./rental-exchange-inspection-preparation";
 export * from "./tenant-integrations";
+export * from "./tenant-messaging";
 export * from "./workspace-names";
 export * from "./rental-rule-defaults";
 export * from "./subscription";

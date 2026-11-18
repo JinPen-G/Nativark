@@ -309,14 +309,14 @@ export function MaintenanceWorkOrdersPage({
   }
 
   const listActions: CoreAdminPageAction<Record<string, unknown>>[] = [{
-    id: "refresh", kind: "command", label: "刷新", intent: "refresh",
+    id: "refresh", kind: "command", slot: "tools", label: "刷新", intent: "refresh",
     pending: workOrders.isFetching || dispositions.isFetching,
     execute: () => Promise.all([
       workOrders.refetch({ throwOnError: true }), dispositions.refetch({ throwOnError: true }),
       assignees.refetch({ throwOnError: true })
     ])
   }];
-  if (canManage) listActions.push({
+  if (canManage && mainView === "work") listActions.push({
     id: "create", kind: "open", label: "新建工单", emphasis: "primary", icon: <Plus size={16} aria-hidden />,
     permissions: [{ resource: "maintenance", action: "manage" }],
     disabled: run.isPending || Boolean(dialog) || dispositions.isLoading || dispositions.isError,
@@ -326,7 +326,7 @@ export function MaintenanceWorkOrdersPage({
   const detailDisabled = run.isPending || Boolean(dialog) || workOrders.isError;
   if (activeWorkOrder) {
     if (canManage && ["pending", "in_progress"].includes(activeWorkOrder.status)) detailActions.push({
-      id: "assign", kind: "open", label: "派工", disabled: detailDisabled,
+      id: "assign", kind: "open", slot: "tools", label: "派工", disabled: detailDisabled,
       permissions: [{ resource: "maintenance", action: "manage" }], open: () => openDialog("assign", activeWorkOrder)
     });
     if (canManage && activeWorkOrder.status === "pending") detailActions.push({
@@ -344,22 +344,20 @@ export function MaintenanceWorkOrdersPage({
       permissions: [{ resource: "maintenance", action: "review" }], open: () => openDialog("review", activeWorkOrder)
     });
     if (canManage && ["pending", "in_progress", "pending_review"].includes(activeWorkOrder.status)) detailActions.push({
-      id: "cancel", kind: "open", label: "取消工单", danger: true, disabled: detailDisabled,
+      id: "cancel", kind: "open", slot: "tools", label: "取消工单", danger: true, disabled: detailDisabled,
       permissions: [{ resource: "maintenance", action: "manage" }], open: () => openDialog("cancel", activeWorkOrder)
     });
   }
-  detailActions.push({ id: "back", kind: "navigate", label: "返回列表", icon: <ArrowLeft size={16} aria-hidden />, to: rentalWorkOrderLocation() });
+  detailActions.push({ id: "back", kind: "navigate", slot: "navigation", label: "返回列表", icon: <ArrowLeft size={16} aria-hidden />, to: rentalWorkOrderLocation() });
 
   return <>
     {!workOrderId && <>
-    <CorePage description={t("异常隔离须完成养护并通过验收后才能恢复库存。")} actions={listActions}>{null}</CorePage>
-      <div className={styles.viewBar}>
-      <Tabs aria-label={t("工单与归还处置")} activeKey={mainView} onChange={setMainView} items={[{key:"work",label:<>{t("养护工单")} {workOrders.data && <AnimatedNumber value={workOrders.data.length}/>}</>},{key:"dispositions",label:<>{t("归还处置")} {dispositions.data && <AnimatedNumber value={dispositions.data.length}/>}</>}]}/>
-      {mainView === "work" && <Segmented iconOnly aria-label={t("工单视图")} value={workView} onChange={value=>setWorkView(String(value))} options={[
+    <CorePage description={t("异常隔离须完成养护并通过验收后才能恢复库存。")} actions={listActions}
+      view={<Tabs aria-label={t("工单与归还处置")} activeKey={mainView} onChange={setMainView} items={[{key:"work",label:<>{t("养护工单")} {workOrders.data && <AnimatedNumber value={workOrders.data.length}/>}</>},{key:"dispositions",label:<>{t("归还处置")} {dispositions.data && <AnimatedNumber value={dispositions.data.length}/>}</>}]}/>}
+      toolsPlacement="view" tools={mainView === "work" && <Segmented iconOnly aria-label={t("工单视图")} value={workView} onChange={value=>setWorkView(String(value))} options={[
         { value:"board", label:<span title={t("任务看板")} aria-label={t("任务看板")}><Columns3 size={16} aria-hidden /></span> },
         { value:"list", label:<span title={t("列表")} aria-label={t("列表")}><List size={16} aria-hidden /></span> },
-      ]}/>}
-      </div>
+      ]}/>}>{null}</CorePage>
       <ContentTransition value={`${mainView}:${workView}`}>
       <div hidden={mainView!=="dispositions"}><QueryState loading={dispositions.isLoading} error={dispositions.error} onRetry={() => dispositions.refetch({ throwOnError: true })}><ListSection>
         <Table<RentalStockDisposition> rowKey="id" onRefresh={() => dispositions.refetch()} loading={dispositions.isLoading} refreshing={dispositions.isFetching} dataSource={dispositions.data ?? []} pagination={{ pageSize: 8 }} scroll={{ x: 1050 }} locale={{ emptyText: <Empty scene="empty" compact description={t("暂无归还处置记录")} /> }} columns={[

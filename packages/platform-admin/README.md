@@ -33,9 +33,13 @@
 2. 入口加载 `@rental-os/platform-admin/styles`。单一 `AdminUiProvider` 提供主题、语言、UI 与同一查询缓存。
 3. `AdminRuntimeProvider` 提供 `AdminRuntime`。快照必须稳定，只有原服务端响应可以置 `sessionVerified`。
 4. 受控组合调用正式 Core 页面注册函数，将同一注册表传给 `PlatformShell.pages` 和 `createCoreRouteElements`。公共菜单由宿主按原权限提供。
-5. 页面通过 `CorePage` 的操作声明复用原主按钮，通过 `useCoreRequest` 消费本 Core 路径和会话/页面围栏。实际例子及 Agent 模板见[接入指南](../../docs/平台底座/Core接入/平台Core接入-开发任务.md#core-quick-start)。
+5. 页面通过 `CorePage` 的操作声明复用原主按钮，通过 `useCoreRequest` 消费本 Core 路径和会话/页面围栏。实际例子及 Agent 模板见[五步接入手册](../core-contracts/README.md#五步快速接入)。
 
 CorePage 的 `title`、`summary` 可显示当前受权对象；`actions` 可声明图标、危险程度、等待状态和等待文案，公共按钮继续等待真实Promise并复验当前操作。`RecordDetailLayout` 接收事实、返回回调及可选Core页头，`RecordDetailStack`提供原内容间距。`KanbanBoard`只映射已经获权的数据和业务回调，宿主调用一次 `platformAdminVite()` 即带入保留看板的严格构建适配。实际接入见[Rental养护工单](../rental-core/admin/work-orders/README.md)。
+
+`CoreAdminPageAction.slot` 省略时进入顶部主操作栏；返回声明 `slot: "navigation"`，刷新等辅助动作声明 `slot: "tools"`。它们共用当前权限、等待状态和卸载保护。页签传入 `CorePage.view`；要把工具放在同一内容行，设置 `toolsPlacement="view"`，无需自行调整页头 CSS。[页面适配](src/core/CorePage.tsx)
+
+使用 `RecordDetailLayout.header` 自定义页头时，第二个参数提供 `actions`、`navigation`、`tools` 三个插槽；原单参数回调仍收到主动作和返回的组合。类型 `RecordDetailHeaderSlots` 从 `/ui` 导出。[详情布局](src/components/RecordDetailLayout.tsx)
 
 顶栏按时间、休息/通知、当前页面主操作、面板收展排列；窄屏由公共壳安排换行和收展入口。Core 只声明自己的 `actions`，公共壳负责按钮样式和位置。已有自定义宿主用 `BusinessShell.headerPanelControl` 提供末尾面板入口，`headerActions` 保留原页面操作及旧时钟调用的兼容。[公共壳](src/components/BusinessShell.tsx) · [面板入口](src/components/workspace/WorkspacePanel.tsx)
 
@@ -49,7 +53,7 @@ CorePage 的 `title`、`summary` 可显示当前受权对象；`actions` 可声�
 
 ## 来源与验证
 
-原 UIArc 源码仍在 [ui-arc](../ui-arc/README.md)，保留来源与许可。侧栏许可及来源随[实际源码](src/components/animate-sidebar/LICENSE.md)移动；[路由动效来源](src/components/workspace/sources.json)、[休息组件来源](src/features/rest/archive/SOURCE.md)及[看板来源/原hash](src/components/kanban-board/SOURCE.md)保留。源码/静态/类型证据和剩余运行缺口见[开发记录](../../docs/平台底座/Core接入/平台Core接入-开发记录.md#core-public-admin-boundary-20261115)。
+原 UIArc 源码仍在 [ui-arc](../ui-arc/README.md)，保留来源与许可。侧栏许可及来源随[实际源码](src/components/animate-sidebar/LICENSE.md)移动；[路由动效来源](src/components/workspace/sources.json)、[休息组件来源](src/features/rest/archive/SOURCE.md)及[看板来源/原hash](src/components/kanban-board/SOURCE.md)保留。
 
 `npm run lint -w @rental-os/platform-admin` 检查源码类型，宿主负责 Vite 产物。只读组件来源核验为 `node scripts/audit-admin-components.cjs --json`。这些命令不证明浏览器、真实 HTTP、数据库保存或独立安装通过。
 

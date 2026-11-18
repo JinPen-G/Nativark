@@ -1,0 +1,28 @@
+.workspace { height: min(740px, calc(100dvh - 148px)); min-height: 500px; border: 1px solid var(--border); border-radius: var(--rental-ui-radius-container); overflow: hidden; margin-top: var(--space-2); --ss-main: var(--surface); --ss-hover: var(--surface-hover); }
+.listColumn { min-height: 0; min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--border); }
+.listMeta { display: flex; gap: var(--space-3); justify-content: space-between; padding: var(--space-3) var(--space-4); color: var(--text-secondary); font-size: 12px; }
+.mailList { flex: 1; min-height: 0; }
+.row { width: 100%; text-align: left; border: 0; background: transparent; cursor: pointer; }
+.row[aria-current="true"] { background: var(--rental-content-hover); }
+.row:focus-visible { outline: 2px solid var(--foreground); outline-offset: -2px; }
+.avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--surface-muted); color: var(--text-secondary); display: grid; place-items: center; flex: none; font-size: 12px; }
+.pagination { border-top: 1px solid var(--border); padding: var(--space-2); }
+.threadColumn { min-width: 0; min-height: 0; overflow: hidden; display: flex; }
+.threadContent { display: flex; flex-direction: column; width: 100%; height: 100%; min-width: 0; min-height: 0; }
+.threadColumn > :global([data-content-view]) { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.messageScroll { min-height: 0; flex: 1; }
+.body { white-space: pre-wrap; overflow-wrap: anywhere; }
+.attachments { display: grid; gap: var(--space-2); margin-top: var(--space-3) !important; }
+.attachments small { display: block; margin-top: 4px; }
+.envelope { display: grid; gap: var(--space-3); margin: var(--space-6) 0 !important; color: var(--text-secondary); font-size: 12px; }
+.envelope > div { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: var(--space-3); }
+.envelope dd { overflow-wrap: anywhere; }
+.note { color: var(--text-secondary); font-size: 12px; line-height: 20px; }
+.emptyDetail { display: grid; place-items: center; flex: 1; width: 100%; }
+@media (max-width: 760px) {
+  .workspace.workspace { height: auto; min-height: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; }
+  .listColumn { max-height: 360px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .threadColumn.threadColumn { min-height: 420px; }
+  .threadContent { min-height: 420px; }
+  .messageScroll { max-height: 620px; }
+}

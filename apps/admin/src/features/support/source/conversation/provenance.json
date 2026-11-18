@@ -1,0 +1,25 @@
+{
+  "source": "https://uiarc.dev/components/screens/support-conversation",
+  "captured": "2026-11-13",
+  "tier": "pro",
+  "runtime": [
+    {
+      "id": "39299",
+      "url": "https://uiarc.dev/_next/static/chunks/39299.6a3044d375c088fc.js",
+      "file": "39299.6a3044d375c088fc.js",
+      "bytes": 73576,
+      "sha256": "98e26157bd5655e787e57b49f3e0d56bdaaa9fac12595698379636859f4dee26"
+    }
+  ],
+  "stylesheets": [
+    {
+      "url": "https://uiarc.dev/_next/static/css/3c1e423f5bcffa7b.css",
+      "file": "3c1e423f5bcffa7b.css",
+      "bytes": 79447,
+      "sha256": "89a3c2e806ee8b2177542c73472c03ec374bb6633e9271ec66d3a0e4e99f7226"
+    }
+  ],
+  "stylesSha256": "011178bf92a95ce26cd917416c81df61d0458a9af6c85688e53ad6f0fb09ac5d",
+  "adaptations": "Readable JSX, typed public entry, standard React and Motion imports, original full Screen Shell and scoped theme tokens. Original sample data, icons and public helpers retained. Optional customer history, activity and notes are handled explicitly. Message types preserve article ids, attachment arrays and delivery status.",
+  "boundary": "Protected authored Pro TSX was not obtained. Compiled public previews and official docs are the implementation reference."
+}

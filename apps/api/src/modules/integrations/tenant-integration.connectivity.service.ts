@@ -5,9 +5,10 @@ import { FileStorageRuntimeService } from "./file-storage.runtime.service";
 import { PaymentRuntimeService } from "./payment.runtime.service";
 import { TenantIntegrationRuntimeService } from "./tenant-integration.runtime.service";
 import { TenantIntegrationService } from "./tenant-integration.service";
+import { TenantEmailRuntimeService } from "./tenant-email.runtime.service";
 
 @Injectable()
 export class TenantIntegrationConnectivityService extends PlatformConnectivityService {
   constructor(integrations: TenantIntegrationService, sms: TenantIntegrationRuntimeService,
-    fileStorage: FileStorageRuntimeService, payment: PaymentRuntimeService) { super(integrations, sms, fileStorage, payment); }
+    fileStorage: FileStorageRuntimeService, payment: PaymentRuntimeService, email: TenantEmailRuntimeService) { super(integrations, sms, fileStorage, payment, email); }
 }

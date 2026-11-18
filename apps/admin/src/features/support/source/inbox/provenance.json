@@ -1,0 +1,25 @@
+{
+  "source": "https://uiarc.dev/components/screens/inbox-triage",
+  "captured": "2026-11-13",
+  "tier": "pro",
+  "runtime": [
+    {
+      "id": "6857",
+      "url": "https://uiarc.dev/_next/static/chunks/6857.8df4c04519271d59.js",
+      "file": "6857.8df4c04519271d59.js",
+      "bytes": 78012,
+      "sha256": "ca1cbe45f0e6723e215bdd785cc8c937fbc23bdc45e8255e78a572a877505f90"
+    }
+  ],
+  "stylesheets": [
+    {
+      "url": "https://uiarc.dev/_next/static/css/6685759ea6043144.css",
+      "file": "6685759ea6043144.css",
+      "bytes": 22495,
+      "sha256": "fd59a5b764be12d0b8244be3c272248d744460290bcbd1b458b4727b01e50330"
+    }
+  ],
+  "stylesSha256": "236901609a1c57379c98c9c3e48ddf127e0eacdbd749b81468d3d0828fbfa91d",
+  "adaptations": "Readable JSX, typed public entry, standard React and Motion imports, original full Screen Shell and scoped theme tokens. Original sample data, icons and public helpers retained.",
+  "boundary": "Protected authored Pro TSX was not obtained. Compiled public previews and official docs are the implementation reference."
+}

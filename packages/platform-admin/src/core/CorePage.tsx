@@ -50,6 +50,8 @@ export function CorePageHostProvider({ host, children }: { host: CorePageHost; c
 
 export type CoreAdminPageAction<Values> = CorePageAction<FormInstance<Values>, Values> & {
   intent?: ActionButtonIntent;
+  /** 缺省进入主操作栏；返回与辅助动作仍经过同一权限和生命周期驱动。 */
+  slot?: "actions" | "navigation" | "tools";
   /** 原按钮呈现由公共适配承担，pending仍来自真实业务Promise。 */
   icon?: ReactNode;
   danger?: boolean;
@@ -81,7 +83,7 @@ function PageAction<Values>({ host, action }: { host: CorePageHost; action: Core
   const confirming = useRef<Promise<unknown> | null>(null);
   let button: ReactNode;
   if (action.kind === "navigate" || action.kind === "open") {
-    button = <Button type={variant === "primary" ? "primary" : "default"} icon={action.icon} danger={action.danger}
+    button = <Button type={action.slot === "navigation" ? "text" : variant === "primary" ? "primary" : "default"} icon={action.icon} danger={action.danger}
       loading={action.pending} disabled={action.disabled} onClick={() => {
       try {
         const value = current(), latest = value.action;
@@ -127,12 +129,14 @@ function PageAction<Values>({ host, action }: { host: CorePageHost; action: Core
 }
 
 /** 路由提供默认标题，Core可呈现当前获权对象的动态页名/摘要；原页头负责portal、清理和Form归属。 */
-export function CorePage<Values = Record<string, unknown>>({ actions = [], title, summary, description, view, note, children }: {
+export function CorePage<Values = Record<string, unknown>>({ actions = [], title, summary, description, view, tools, toolsPlacement, note, children }: {
   actions?: readonly CoreAdminPageAction<Values>[];
   title?: string;
   summary?: ReactNode;
   description?: string;
   view?: ReactNode;
+  tools?: ReactNode;
+  toolsPlacement?: "context" | "view";
   note?: { title: string; description: ReactNode };
   children: ReactNode;
 }) {
@@ -144,8 +148,11 @@ export function CorePage<Values = Record<string, unknown>>({ actions = [], title
     ids.add(action.id);
     if (action.emphasis === "primary" && ++primary > 1) throw new Error("当前Core页面只能声明一个主操作");
   }
-  const buttons = actions.filter(action => access(host, action.permissions)).map(action =>
+  const buttons: Record<"actions" | "navigation" | "tools", ReactNode[]> = { actions: [], navigation: [], tools: [] };
+  for (const action of actions) if (access(host, action.permissions)) buttons[action.slot ?? "actions"].push(
     <PageAction key={JSON.stringify([action.id, action.kind, action.kind === "command" ? action.confirmation : undefined])} host={host} action={action} />);
   return <><PageHeading title={title ?? corePageText(host.page.definition.title, locale)} brandName={host.brandName}
-    summary={summary} description={description} view={view} note={note} extra={buttons} />{children}</>;
+    summary={summary} description={description} view={view} note={note}
+    extra={buttons.actions.length ? buttons.actions : undefined} navigation={buttons.navigation.length ? buttons.navigation : undefined}
+    tools={buttons.tools.length || tools ? <>{buttons.tools}{tools}</> : undefined} toolsPlacement={toolsPlacement} />{children}</>;
 }

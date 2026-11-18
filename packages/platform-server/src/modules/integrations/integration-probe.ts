@@ -6,3 +6,9 @@ export interface PaymentIntegrationProbe {
 }
 
 export const INTEGRATION_PAYMENT_PROBE = Symbol("platform.integration-payment-probe");
+
+/** 邮箱探针只验证加密连接/登录，不投递或修改邮件。 */
+export interface EmailIntegrationProbe {
+  testConnection(config: TenantIntegrationRuntimeConfig): Promise<string>;
+}
+export const INTEGRATION_EMAIL_PROBE = Symbol("platform.integration-email-probe");

@@ -9,6 +9,7 @@ export type { ShellNotifications, ShellNotice } from "./features/notifications/H
 export { RestProvider } from "./features/rest/RestProvider";
 export { RestEntry } from "./features/rest/RestEntry";
 export { PageHeading } from "./components/PageHeading";
+export type { PageHeadingProps } from "./components/PageHeading";
 export { RecordFacts, type RecordFact } from "./components/RecordFacts";
 export { WorkspaceRouteReady } from "./components/workspace/WorkspaceNavigation";
 export { WorkspacePanel, WorkspacePanelToggle } from "./components/workspace/WorkspacePanel";

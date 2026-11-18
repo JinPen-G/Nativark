@@ -31,6 +31,37 @@ test('refreshed header consumers share the retained provider and inactive parent
   assert.equal(renderToStaticMarkup(React.createElement(workspaceHeader.WorkspacePageActions, null, false)), '');
 });
 
+test('page tools remain beside their content while only the primary action enters the shell', () => {
+  const { renderToStaticMarkup } = require('react-dom/server');
+  const { PageHeader } = load('apps/admin/src/components/PageHeader.tsx', {
+    '@/components/ui/icons': { InfoCircleOutlined: () => null },
+    antd: { Space: 'div' }, '@/components/ui': { Button: 'button', InfoPopover: 'span' },
+    'react-router-dom': { useLocation: () => ({ pathname: '/settings/example' }) },
+    '@/app/navigation': { findRouteByPath: () => undefined },
+    '@/app/branding': { resolveAdminBrandName: () => 'Example' },
+    '@/app/locale': { useLocale: () => ({ t: text => text, locale: 'zh-CN' }) },
+    '@/features/auth/authStore': { useAuthStore: selector => selector({}) },
+    './ui/AnimatedIcon': { AnimatedIcon: () => null },
+    '@/app/navigation-icons': { routeIconName: () => 'settings' },
+    './workspace/WorkspaceHeader': { useWorkspaceHeader: () => ({}), WorkspacePageTitle: 'header-title', WorkspacePageActions: 'header-actions' },
+  });
+  const props = { title: '设置', extra: React.createElement('button', null, '保存'), navigation: React.createElement('button', null, '返回'), tools: React.createElement('button', null, '刷新') };
+  const form = React.createElement('form', { id: 'current-draft' }, React.createElement('input', { name: 'draft', defaultValue: 'retain me' }));
+  const markup = renderToStaticMarkup(React.createElement(PageHeader, { ...props, view: form }));
+  assert.match(markup, /<header-actions[^>]*><button>保存<\/button><\/header-actions>/u);
+  assert.doesNotMatch(markup.match(/<header-actions.*?<\/header-actions>/u)[0], /刷新/u);
+  assert.match(markup, /page-context-tools[^]*<button>刷新<\/button>/u);
+  assert.ok(markup.indexOf('page-context-navigation') < markup.indexOf('page-context-tools'), 'Return navigation precedes secondary tools in reading and keyboard order.');
+  assert.match(markup, /<div class="page-toolbar-view"><form id="current-draft">/u,
+    'A complete form keeps its own full-width row instead of sharing a flex row with refresh tools.');
+  assert.equal(markup.match(/retain me/gu).length, 1, 'The draft is rendered once.');
+  const query = renderToStaticMarkup(React.createElement(PageHeader, { ...props, toolsPlacement: 'view', view: React.createElement('input', { name: 'query' }) }));
+  assert.match(query, /page-content-toolbar[^]*page-content-controls[^]*name="query"[^]*page-context-tools/u,
+    'Only an explicitly declared query/view row shares horizontal space with page tools.');
+  const empty = renderToStaticMarkup(React.createElement(PageHeader, { title: '只读页面' }));
+  assert.doesNotMatch(empty, /page-header-compact|page-context-tools/u, 'A page without tools or context does not reserve an empty second row.');
+});
+
 test('sidebar rail changes retain inline submenu nodes, group choices and guarded navigation', () => {
   const sidebar = { state: 'expanded', isMobile: false };
   const state = [], navigated = [];
@@ -393,6 +424,60 @@ test('a list keeps its ready content during loading but hides it after authoriza
   assert.equal(denied.props['value'], 'tenant-a:error');
   assert.equal(denied.props.children.type, 'alert');
   assert.equal(render({ loading: true, transitionKey: 'tenant-b' }).props['value'], 'tenant-b:loading');
+});
+
+test('subscription detail retains its editor through temporary refresh failures and hides it after denial or a record change', () => {
+  const refs = [];
+  let cursor = 0;
+  const { QueryState } = load('apps/admin/src/components/QueryState.tsx', {
+    react: { useState: () => [true, () => {}], useEffect() {}, useRef: value => { const index = cursor++; refs[index] ??= { current: value }; return refs[index]; } },
+    '@/components/ui': { ActionButton: 'retry', Alert: 'alert', EmptyScene: 'empty' },
+    '@/app/queryClient': { isTransientRefreshError: error => error?.response?.status >= 500 },
+    '@/app/locale': { useLocale: () => ({ t: text => text }) },
+    './LoadingState': { LoadingState: 'loading' },
+    './ui/data-table/TableRefreshContext': { useTableRefresh: () => ({}) },
+    './workspace/ContentTransition': { ContentTransition: 'transition' }
+  });
+  let recordId = 'tenant-a';
+  const data = { overview: { revision: 1 }, entitlements: [], requests: [], changeLog: [] };
+  let query = { isLoading: true, isFetching: true, refetch() {} };
+  const { PlatformSubscriptionDetailPage } = load('apps/admin/src/features/subscription/PlatformSubscriptionDetailPage.tsx', {
+    antd: { Space: 'space', Tag: 'tag' },
+    '@/components/ui': new Proxy({}, { get: (_, key) => String(key) }),
+    '@/components/RecordDetailLayout': { RecordFacts: 'facts' },
+    '@/components/ui/useModalDismissal': {},
+    './TenantSubscription.module.css': { default: {} },
+    '@tanstack/react-query': { useQuery: () => query },
+    'react-router-dom': { useNavigate: () => () => {}, useParams: () => ({ id: recordId }) },
+    '@rental-os/shared': { FeatureEntitlementSource: { StandardPublic: 'public', TenantGrant: 'grant', Pro: 'pro' } },
+    '@/components/PageHeader': { PageHeader: 'page' }, '@/components/QueryState': { QueryState },
+    '@/app/locale': { useLocale: () => ({ t: text => text }) },
+    '@/app/navigation': { APP_ROUTES: { platformSubscriptions: { path: '/platform/subscriptions' } } },
+    '@/api/subscription': { subscriptionApi: {} }, './subscriptionLabels': {},
+    './PlatformSubscriptionActionForm': {}, './TenantFeatureGrantModal': {}, './SubscriptionRequestDetails': {}, './subscriptionOperations': {}
+  });
+  const render = () => { cursor = 0; return QueryState(PlatformSubscriptionDetailPage().props.view.props); };
+  const editor = node => {
+    if (!React.isValidElement(node)) return undefined;
+    if (node.props.tenantId) return node;
+    return React.Children.toArray(node.props.children).map(editor).find(Boolean);
+  };
+  assert.equal(render().props.value, 'tenant-a:loading');
+  query = { ...query, isLoading: false, isFetching: false, data };
+  const ready = editor(render());
+  assert.ok(ready, 'The actual page must render its editor after a successful read.');
+  query = { ...query, isFetching: true, error: { response: { status: 503 } } };
+  const retained = editor(render());
+  assert.ok(retained, 'A temporary refresh failure must not replace the editor with an error-only subtree.');
+  assert.equal(retained.type, ready.type);
+  assert.equal(retained.key, ready.key, 'React retains the same record and its unsaved form state.');
+  assert.equal(retained.props.data, data, 'Retained facts must be the original successful response.');
+  query = { ...query, error: { response: { status: 403 } } };
+  assert.equal(editor(render()), undefined, 'Denied reads cannot keep protected content visible.');
+  recordId = 'tenant-b';
+  query = { isLoading: true, isFetching: true, refetch() {} };
+  assert.equal(render().props.value, 'tenant-b:loading');
+  assert.equal(editor(render()), undefined, 'Changing the record cannot reuse another tenant editor.');
 });
 
 test('clear-all handles a separate facet even when the shared keyword and status are empty', () => {

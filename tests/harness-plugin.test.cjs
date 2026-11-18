@@ -8,7 +8,10 @@ const { createRequire, registerHooks } = require("node:module");
 const { pathToFileURL } = require("node:url");
 
 const root = path.resolve(__dirname, "..");
-const harness = path.join(root, "clients/agent-desktop/harness");
+const harness = process.env.HARNESS_ROOT;
+if (!harness || !path.isAbsolute(harness) || !fs.existsSync(path.join(harness, "apps/cli/package.json"))) {
+  throw new Error("Set HARNESS_ROOT to the absolute path of a prepared, compatible Harness checkout");
+}
 const cli = createRequire(path.join(harness, "apps/cli/package.json"));
 const mcp = createRequire(path.join(harness, "packages/mcp/mcp-client/package.json"));
 const ts = require(path.join(harness, "node_modules/typescript/lib/typescript.js"));
@@ -24,7 +27,8 @@ const publicResolve = name => (name.startsWith("@modelcontextprotocol/") ? mcp
 
 const { buildBundle } = require("../clients/harness-plugin/scripts/build-bundle.cjs");
 const { createHash } = require("node:crypto");
-const npmCli = path.join(root, "output/agent-desktop-install-20261023-q16gtnf6/node-extracted/node-v24.21.0-win-x64/node_modules/npm/bin/npm-cli.js");
+const npmCli = process.env.HARNESS_NPM_CLI || path.join(root, ".tools/npm/bin/npm-cli.js");
+if (!path.isAbsolute(npmCli) || !fs.existsSync(npmCli)) throw new Error("Set HARNESS_NPM_CLI to an installed npm-cli.js absolute path");
 const tar = createRequire(npmCli)("tar");
 
 function transportSource(name) {

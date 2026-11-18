@@ -612,7 +612,8 @@ function CorporateMembershipWorkspace({ scope }: { scope: string }) {
     <MemberListInsights rows={corporateFilter.rows} />
     </>}
     {customerId && <RecordDetailLayout title={selected?.corporateName ?? selected?.name ?? t("企业资料")} onBack={() => navigate("/membership/corporate")}
-      actions={selected && <><Button type="primary" disabled={!canManage} onClick={() => openCorporate(selected)}>{t("编辑企业资料")}</Button><Button disabled={!canGrant || selected.membershipStatus !== "active"} onClick={() => { grantForm.resetFields(); grantForm.setFieldsValue({ source: "manual" }); setDrawer("grant"); }}>{t("授予方案")}</Button></>}
+      actions={selected && <Button type="primary" disabled={!canManage} onClick={() => openCorporate(selected)}>{t("编辑企业资料")}</Button>}
+      secondaryActions={selected && <Button disabled={!canGrant || selected.membershipStatus !== "active"} onClick={() => { grantForm.resetFields(); grantForm.setFieldsValue({ source: "manual" }); setDrawer("grant"); }}>{t("授予方案")}</Button>}
       status={selected && <><DataTableStatus variant="soft" tone={selected.membershipStatus === "active" ? "success" : selected.membershipStatus === "pending_activation" ? "warning" : "neutral"}>{t(membershipLabel[selected.membershipStatus] ?? selected.membershipStatus)}</DataTableStatus><span>{t("企业会员")}</span></>}
       facts={selected ? [
         { key: "contact", label: "联系人/简称", value: selected.name },

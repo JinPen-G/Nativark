@@ -30,10 +30,11 @@ import { PlatformOperationLogService, type PlatformOperationLogStorage } from ".
 import { SecretBox } from "./common/secret-box";
 import { TenantIntegrationService } from "./modules/integrations/tenant-integration.service";
 import { TenantIntegrationRuntimeService } from "./modules/integrations/tenant-integration.runtime.service";
+import { TenantEmailRuntimeService } from "./modules/integrations/tenant-email.runtime.service";
 import { TenantIntegrationConnectivityService } from "./modules/integrations/tenant-integration.connectivity.service";
 import { TenantIntegrationController } from "./modules/integrations/tenant-integration.controller";
 import { ObjectStorageProviderService } from "./modules/integrations/object-storage.provider.service";
-import { INTEGRATION_PAYMENT_PROBE, type PaymentIntegrationProbe } from "./modules/integrations/integration-probe";
+import { INTEGRATION_PAYMENT_PROBE, INTEGRATION_EMAIL_PROBE, type PaymentIntegrationProbe } from "./modules/integrations/integration-probe";
 import { INTEGRATION_DATA_STORE, INTEGRATION_BUSINESS_PARTICIPANT, INTEGRATION_RUNTIME_PROVIDERS,
   PUBLIC_INTEGRATION_RUNTIME_PROVIDERS, TENANT_INTEGRATION_APPLICATION, TENANT_INTEGRATION_CONNECTIVITY,
   type TenantIntegrationDataStore, type TenantIntegrationBusinessParticipant, type IntegrationRuntimeProviders } from "./modules/integrations/integration-store";
@@ -74,7 +75,8 @@ export class PlatformServerModule {
         { provide: PlatformAuthenticationRepository, inject: [PLATFORM_AUTH_DATA_STORE], useFactory: (database: PlatformDatabase) => new PlatformAuthenticationRepository(database) },
         TenantAppearanceProfileService, AccountAppearanceService, PlatformAuthService, PlatformAuthGuard, PlatformManagementService, PlatformToolsService, SubscriptionService,
         { provide: SUBSCRIPTION_APPLICATION, useExisting: SubscriptionService },
-        SecretBox, TenantIntegrationService, TenantIntegrationRuntimeService, TenantIntegrationConnectivityService, ObjectStorageProviderService,
+        SecretBox, TenantIntegrationService, TenantIntegrationRuntimeService, TenantEmailRuntimeService, TenantIntegrationConnectivityService, ObjectStorageProviderService,
+        { provide: INTEGRATION_EMAIL_PROBE, useExisting: TenantEmailRuntimeService },
         { provide: TENANT_INTEGRATION_APPLICATION, useExisting: TenantIntegrationService },
         { provide: TENANT_INTEGRATION_CONNECTIVITY, useExisting: TenantIntegrationConnectivityService },
         OfficialCalendarSourceService,

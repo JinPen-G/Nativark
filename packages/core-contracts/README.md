@@ -229,7 +229,9 @@ const route = CorePageDescriptorSchema.parse({
 
 例如“新建工单”是 `kind: "open"`，由本页提供 `open`，`emphasis: "primary"` 表达主操作；无需自行指定CSS。动作可声明附加权限和当前不可用原因。`resolveCorePageLocation`只按已登记目标编码参数，不能导航任意外部URL；注册或路径存在均不授予当前用户访问权。
 
-**当前已实现描述/注册与路径解析，并提供[React页面适配](../../apps/admin/src/core/README.md)。** 适配消费原PageHeading/WorkspaceHeader及Button/SaveButton/ConfirmAction，只需提供页面正文与动作；标题读取单源路由。原AppRouter/导航和真实Core授权尚未装配，后续07接完整左栏、面包屑行、铃铛、休息、收展与统一页面模式；不能把适配源码存在当无Core/多Core后台已实际运行。字段类型、动态动作和既有表单Promise保留在Core/React代码中，不执行JSON表达式。
+React 的 `CoreAdminPageAction` 还可声明 `slot`。省略时使用主操作栏，返回用 `"navigation"`，刷新等工具用 `"tools"`；都保留同一权限与页面生命周期。页签和查询视图交给 `CorePage.view`，需要同行工具时使用 `toolsPlacement="view"`。[按钮与页头接入](../platform-admin/README.md#宿主接入)
+
+**描述、注册、路径解析和[公共React页面适配](../platform-admin/src/core/index.ts)已提供。** 零Core和工单宿主共用同一应用工厂、页面注册表及授权目录；左栏、面包屑行、铃铛、休息和收展由公共壳提供。Rental旧路由仍通过兼容入口使用自身当前身份，完整标准装配继续迁移。字段类型、动态动作和表单Promise留在Core/React代码中；浏览器、真实HTTP/数据库及多Core完整运行仍须实际验收。
 
 ## 分别更新底座或一个 Core
 

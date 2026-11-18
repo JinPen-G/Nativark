@@ -86,7 +86,7 @@ function AccountThemeColorCard() {
         <Form.Item name="themeColor" rules={[{ pattern: /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, message: t("请输入 #RRGGBB 十六进制颜色") }]}>
           <ColorPicker label={t("主题色")} />
         </Form.Item>
-        <WorkspacePageActions><SaveButton label={t("保存主题色")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} /></WorkspacePageActions>
+        <div className="form-actions"><SaveButton label={t("保存主题色")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} /></div>
       </Form>
     </Card>
   );

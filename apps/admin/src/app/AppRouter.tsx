@@ -49,6 +49,9 @@ const CapabilityGovernancePage = lazy(() => import("@/features/rental-core/Capab
 const TenantOperationsAccountPage = lazy(() => import("@/features/tenant-access/TenantAccessPages").then((module) => ({ default: module.TenantOperationsAccountPage })));
 const TenantRolePermissionPage = lazy(() => import("@/features/tenant-access/TenantAccessPages").then((module) => ({ default: module.TenantRolePermissionPage })));
 const TenantIntegrationsPage = lazy(() => import("@/features/settings/TenantIntegrationsPage").then((module) => ({ default: module.TenantIntegrationsPage })));
+const TenantDispatchPage = lazy(() => import("@/features/dispatch/TenantDispatchPage").then((module) => ({ default: module.TenantDispatchPage })));
+const AcceptOperatorInvitationPage = lazy(() => import("@/features/tenant-access/AcceptOperatorInvitationPage").then((module) => ({ default: module.AcceptOperatorInvitationPage })));
+const CustomerSupportPage = lazy(() => import("@/features/support/CustomerSupportPage").then((module) => ({ default: module.CustomerSupportPage })));
 const AiModelSettingsPage = lazy(() => import("@/features/ai-native/AiModelSettingsPage").then((module) => ({ default: module.AiModelSettingsPage })));
 const ClientAuthorizationPage = lazy(() => import("@/features/agent-desktop/ClientAuthorizationPage").then((module) => ({ default: module.ClientAuthorizationPage })));
 const TaskCenterPage = lazy(() => import("@/features/ai-native/TaskCenterPage").then((module) => ({ default: module.TaskCenterPage })));
@@ -145,6 +148,8 @@ function ProtectedRoutes() {
             <Route path={APP_ROUTES.tenantAccounts.path} element={guard(APP_ROUTES.tenantAccounts, <TenantOperationsAccountPage />)} />
             <Route path={APP_ROUTES.tenantRoles.path} element={guard(APP_ROUTES.tenantRoles, <TenantRolePermissionPage />)} />
             <Route path={APP_ROUTES.tenantIntegrations.path} element={guard(APP_ROUTES.tenantIntegrations, <TenantIntegrationsPage />)} />
+            <Route path={APP_ROUTES.tenantDispatch.path} element={guard(APP_ROUTES.tenantDispatch, <TenantDispatchPage />)} />
+            <Route path={APP_ROUTES.customerSupport.path} element={guard(APP_ROUTES.customerSupport, <CustomerSupportPage />)} />
             <Route path={APP_ROUTES.aiSettings.path} element={guard(APP_ROUTES.aiSettings, <AiModelSettingsPage />)} />
             <Route path={APP_ROUTES.clientAuthorization.path} element={guard(APP_ROUTES.clientAuthorization, <ClientAuthorizationPage />)} />
             <Route path={APP_ROUTES.aiTasks.path} element={guard(APP_ROUTES.aiTasks, <TaskCenterPage />)} />
@@ -217,6 +222,7 @@ export function AppRouter() {
         <Route path="/login" element={<LoginPage />} />
         {/* 租户专属登录链接：/login/:tenantCode 直接显示该租户品牌，隐藏租户编码输入。 */}
         <Route path="/login/:tenantCode" element={<LoginPage />} />
+        <Route path="/invite" element={<AcceptOperatorInvitationPage />} />
         {/* 简写入口保留原业务和兼容路由；它只展示公开品牌，不建立会话。 */}
         {isTenantLoginAliasPath(pathname) && <Route path="/:tenantCode" element={<LoginPage />} />}
         <Route path="/*" element={<ProtectedRoutes />} />

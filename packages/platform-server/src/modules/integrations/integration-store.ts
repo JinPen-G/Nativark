@@ -123,7 +123,7 @@ export interface TenantIntegrationBusinessParticipant {
 
 export type IntegrationRuntimeProviders = Readonly<Partial<Record<TenantIntegrationProvider, TenantIntegrationCapability>>>;
 export const PUBLIC_INTEGRATION_RUNTIME_PROVIDERS: IntegrationRuntimeProviders = Object.freeze({
-  aliyun_sms: "sms", tencent_sms: "sms", aliyun_oss: "file", tencent_cos: "file", s3_compatible: "file"
+  aliyun_sms: "sms", tencent_sms: "sms", smtp: "email", aliyun_oss: "file", tencent_cos: "file", s3_compatible: "file"
 });
 
 export const INTEGRATION_DATA_STORE = Symbol("platform.integration-data-store");

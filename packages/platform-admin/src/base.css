@@ -564,7 +564,11 @@ main.app-workspace { background: transparent; }
 .workspace-breadcrumb-current, .workspace-breadcrumb-title, [data-workspace-page-title]:not([hidden]) { display:inline-flex; align-items:center; gap:var(--space-1); min-width:0; max-width:100%; }
 .workspace-header .ant-breadcrumb ol { align-items:center; }
 .workspace-header .ant-breadcrumb li { display:flex; align-items:center; min-width:0; }
-.workspace-header .ant-breadcrumb-separator { margin-inline:6px; }
+/* The Ant wrapper must shrink with the current title while its information control keeps its hit area. */
+.workspace-header .ant-breadcrumb-link { display:inline-flex; align-items:center; min-width:0; max-width:100%; }
+.workspace-header .ant-breadcrumb li:not(:last-child):not(.ant-breadcrumb-separator) .ant-breadcrumb-link { display:block; overflow:hidden; text-overflow:ellipsis; }
+.workspace-header [data-workspace-page-title] > button { flex:none; }
+.workspace-header .ant-breadcrumb-separator { flex:none; margin-inline:6px; }
 .workspace-breadcrumb-separator { display:block; color:var(--text-muted); opacity:0.7; }
 .workspace-breadcrumb-current:has([data-workspace-page-title]:not([hidden])) > .workspace-breadcrumb-fallback { display:none; }
 .workspace-page-title { display:inline; margin:0; font:inherit; color:inherit; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

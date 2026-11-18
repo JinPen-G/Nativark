@@ -282,6 +282,22 @@
     "./jobs": {
       "types": "./dist/modules/jobs/job-ledger.d.ts",
       "default": "./dist/modules/jobs/job-ledger.js"
+    },
+    "./integration-email": {
+      "types": "./dist/modules/integrations/tenant-email.runtime.service.d.ts",
+      "default": "./dist/modules/integrations/tenant-email.runtime.service.js"
+    },
+    "./integration-smtp": {
+      "types": "./dist/modules/integrations/smtp-transport.d.ts",
+      "default": "./dist/modules/integrations/smtp-transport.js"
+    },
+    "./integration-imap": {
+      "types": "./dist/modules/integrations/imap-reader.d.ts",
+      "default": "./dist/modules/integrations/imap-reader.js"
+    },
+    "./integration-inbound-mail": {
+      "types": "./dist/modules/integrations/inbound-mail-codec.d.ts",
+      "default": "./dist/modules/integrations/inbound-mail-codec.js"
     }
   },
   "scripts": {
@@ -509,6 +525,18 @@
       ],
       "jobs": [
         "dist/modules/jobs/job-ledger.d.ts"
+      ],
+      "integration-email": [
+        "dist/modules/integrations/tenant-email.runtime.service.d.ts"
+      ],
+      "integration-smtp": [
+        "dist/modules/integrations/smtp-transport.d.ts"
+      ],
+      "integration-imap": [
+        "dist/modules/integrations/imap-reader.d.ts"
+      ],
+      "integration-inbound-mail": [
+        "dist/modules/integrations/inbound-mail-codec.d.ts"
       ]
     }
   }

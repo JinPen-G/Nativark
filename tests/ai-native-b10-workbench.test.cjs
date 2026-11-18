@@ -782,9 +782,10 @@ test('actual operator workspace keeps server records explicit and retracts on cl
     if (name === '@/features/ai-native/ConversationHistory') return { ConversationHistory: stub('server-history') };
     if (name === '@/features/ai-native/ServerConversationPanel') return { ServerConversationPanel: stub('server-panel') };
     if (name === '@/features/ai-native/conversation-navigation' || name === 'react-router-dom') return {};
-    if (name === '@/components/ui') return { Button: stub('button'), Modal: stub('modal') };
+    if (name === '@/components/ui') return { Button: stub('button'), Modal: stub('modal'), Drawer: stub('drawer') };
     if (name === '@/components/ui/AnimatedIcon') return { AnimatedIcon: stub('icon') };
     if (name === '@/components/workspace/ContentTransition') return { ContentTransition: stub('transition') };
+    if (name === '@/components/workspace/WorkspaceHeader') return { WorkspacePageActions: stub('page-actions'), WorkspacePageTitle: stub('page-title') };
     if (name === './confirmationDetails') return { confirmationDetails: () => ({ description: '示例确认', facts: [] }) };
     if (name === 'lucide-react') return Object.fromEntries(['Copy', 'Download', 'ShieldCheck'].map(key => [key, stub(key)]));
     if (name.endsWith('.css') || ['@/api/aiModelSettings', '@/features/ai-native/model-settings-session',
@@ -796,12 +797,19 @@ test('actual operator workspace keeps server records explicit and retracts on cl
   const nodes = tree => { const out = []; const walk = node => React.Children.toArray(node).forEach(child => {
     if (React.isValidElement(child)) { out.push(child); walk(child.props.children); }
   }); walk(tree); return out; };
-  const render = (visible = true, commit = true) => { cursor = 0; const tree = exports.WorkArea({ visible });
+  const render = (visible = true, commit = true, drawer = false) => { cursor = 0; const tree = exports.WorkArea({ visible, drawer });
     if (commit) pending.splice(0).forEach(effect => effect()); return tree; };
   const toggle = tree => nodes(tree).find(node => typeof node.props['aria-pressed'] === 'boolean');
   const history = tree => nodes(tree).find(node => node.props.identity);
   const open = () => { toggle(render()).props.onClick(); return render(); };
   assert.equal(history(render()), undefined, 'mount never opens or fetches server history');
+  const header = nodes(render()).find(node => node.type === 'header');
+  assert.equal(toggle(header).props['aria-label'], '查看服务端记录', 'the secondary reader belongs in the workspace header with a distinct accessible name');
+  assert.ok(!nodes(render()).some(node => node.props.className === 'operator-result-tools' && nodes(node).includes(toggle(node))), 'the reader does not reserve a separate tools row');
+  const mobile = render(true, true, true);
+  assert.equal(mobile.props.title, 'Agent 工作区');
+  assert.equal(toggle(mobile.props.extra).props['aria-label'], '查看服务端记录');
+  assert.ok(!nodes(mobile).some(node => node.type === 'header'), 'mobile uses the native drawer title and extra slot once');
   let tree = open(), original = history(tree);
   assert.equal(original.props.current(), true); const journalIdentity = original.props.identity;
   assert.equal(nodes(tree).some(node => node.props.icon), false, 'demo copy/download footer is not shown over original records');

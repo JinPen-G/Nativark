@@ -44,6 +44,14 @@ import { TenantIntegrationConnectivityService } from "./modules/integrations/ten
 import { TenantIntegrationService } from "./modules/integrations/tenant-integration.service";
 import { TENANT_INTEGRATION_APPLICATION, TENANT_INTEGRATION_CONNECTIVITY } from "@rental-os/platform-server/integration-store";
 import { TenantIntegrationRuntimeService } from "./modules/integrations/tenant-integration.runtime.service";
+import { TenantEmailRuntimeService } from "./modules/integrations/tenant-email.runtime.service";
+import { TenantDispatchService } from "./modules/notifications/tenant-dispatch.service";
+import { TenantOperatorInvitationsService } from "./modules/notifications/tenant-operator-invitations.service";
+import { AcceptTenantOperatorInvitationController } from "./modules/notifications/accept-operator-invitation.controller";
+import { TenantDispatchController } from "./modules/notifications/tenant-dispatch.controller";
+import { TenantOperatorInvitationsController } from "./modules/notifications/tenant-operator-invitations.controller";
+import { TenantSupportEmailController } from "./modules/notifications/tenant-support-email.controller";
+import { TenantSupportEmailService } from "./modules/notifications/tenant-support-email.service";
 import { FileStorageRuntimeService } from "./modules/integrations/file-storage.runtime.service";
 import { RENTAL_FILE_AUTHORITY } from "./modules/integrations/rental-file-application.participant";
 import { FileBusinessAccessService } from "./modules/files/file-business-access.service";
@@ -327,6 +335,10 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     PaymentOperationsController,
     PaymentReconciliationController,
     NotificationsController,
+    TenantDispatchController,
+    TenantOperatorInvitationsController,
+    AcceptTenantOperatorInvitationController,
+    TenantSupportEmailController,
     JobsController,
     ClientApiController,
     MiniProgramChannelController,
@@ -508,6 +520,10 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
           .lockRequestWorkspaceAccess(transaction)
       })
     },
+    TenantEmailRuntimeService,
+    TenantDispatchService,
+    TenantOperatorInvitationsService,
+    TenantSupportEmailService,
     FileStorageRuntimeService,
     FileBusinessAccessService,
     PaymentRuntimeService,

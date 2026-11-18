@@ -1,6 +1,6 @@
 /** 原第三方目录、配置表单及测试反馈。当前请求与会话由宿主统一供给。 */
 import { motion } from "motion/react";
-import { CreditCard, MessageSquare, HardDrive } from "lucide-react";
+import { CreditCard, MessageSquare, HardDrive, Mail } from "lucide-react";
 import { usePrefersReducedMotion } from "../../lib/usePrefersReducedMotion";
 import { InsightMetrics } from "../../components/InsightMetrics";
 import directory from "./integrations-source/classes.json";
@@ -32,7 +32,7 @@ import { PageHeader } from "./IntegrationPageHeader";
 import { useServerFormSync } from "../../app/useServerFormSync";
 import { isTransientRefreshError } from "../../runtime";
 
-const CAPABILITY_LABELS: Record<TenantIntegrationCapability, string> = { sms: "短信", payment: "支付", file: "云存储" };
+const CAPABILITY_LABELS: Record<TenantIntegrationCapability, string> = { sms: "短信", email: "邮箱", payment: "支付", file: "云存储" };
 
 function ProviderCard({
   definition,
@@ -51,6 +51,7 @@ function ProviderCard({
   const { t, locale } = useLocale();
   const [form] = Form.useForm<SaveTenantIntegrationRequest>();
   const enabled = Form.useWatch("enabled", form);
+  const receiveEnabled = Form.useWatch(["settings", "receiveEnabled"], form) === true;
   const liveVerified = config?.lastTestStatus === "passed" && config.lastTestMode === "live";
   const { message } = App.useApp();
   const queryClient = useQueryClient();
@@ -76,7 +77,7 @@ function ProviderCard({
   });
 
   const configCurrent = useServerFormSync(form, config ?? definition, () => {
-    form.setFieldsValue({ enabled: config?.enabled ?? false, isDefault: config?.isDefault ?? false, settings: config?.settings ?? {}, credentials: {} });
+    form.setFieldsValue({ enabled: config?.enabled ?? false, isDefault: config?.isDefault ?? false, settings: config?.settings ?? (definition.provider === "smtp" ? { port: 465, secure: true, imapPort: 993, imapMailbox: "INBOX" } : {}), credentials: {} });
   });
 
   useEffect(() => {
@@ -106,7 +107,7 @@ function ProviderCard({
           type={config.lastTestStatus === "failed" ? "error" : "warning"}
           style={{ marginBottom: 16 }}
           title={config.lastTestStatus === "failed" ? t("连接测试未通过，业务暂不可用") : t("尚未通过真实连接测试，业务暂不可用")}
-          description={t("配置可以先保存，但支付下单、短信发送和文件上传等新业务调用会被服务端拒绝。请先补齐配置并点击“测试连接”，测试通过后才会进入真实运行链。")}
+          description={t("配置可以先保存，但支付下单、短信和邮件发送、文件上传等新业务调用需先通过连接测试。请补齐配置并点击“测试连接”。")}
         />
       ) : null}
       <Form form={form} layout="vertical" onFinish={(values) => { void save.mutateAsync(values).catch(() => undefined); }} className={directoryStyles.providerForm}>
@@ -129,7 +130,7 @@ function ProviderCard({
           <Form.Item
             name="isDefault"
             label={t("设为该能力默认平台")}
-            tooltip={t("同一种能力可以配置多个平台，但实际支付、短信或文件调用只使用默认平台。")}
+            tooltip={t("同一种能力可以配置多个平台，业务调用使用默认平台。")}
             extra={t("同一能力只能有一个默认平台。")}
             valuePropName="checked"
             style={{ marginBottom: 0 }}
@@ -148,7 +149,9 @@ function ProviderCard({
                 name={[field.secret ? "credentials" : "settings", field.key]}
                 label={t(field.label)}
                 valuePropName={field.inputType === "boolean" ? "checked" : undefined}
-                rules={[{ required: field.required && !field.secret, message: `${t("请输入")}${t(field.label)}` }]}
+                rules={[{ required: (field.required || definition.provider === "smtp" && receiveEnabled && ["imapHost", "imapPort"].includes(field.key))
+                  && (!field.secret || !config?.secrets.fields.includes(field.key)), message: `${t("请输入")}${t(field.label)}` },
+                  ...(["fromEmail", "replyTo"].includes(field.key) ? [{ type: "email" as const, message: t("请输入有效邮箱") }] : [])]}
                 extra={field.secret && config?.secrets.fields.includes(field.key) ? t("已配置；留空保持原密钥不变") : field.description ? t(field.description) : undefined}
               >
                 {field.secret
@@ -212,17 +215,17 @@ function TenantIntegrationsContent() {
   const selected = catalog.data.providers.find(item => selectedKey === item.capability + ":" + item.provider);
   const searched = catalog.data.providers.filter(item => (t(item.name)+" "+t(item.description)).toLocaleLowerCase().includes(keyword.toLocaleLowerCase()));
   const visible = searched.filter(item => filter === "all" || filter === "enabled" && configByProvider.get(item.capability+":"+item.provider)?.enabled || item.capability === filter);
-  const icons = {payment:CreditCard,sms:MessageSquare,file:HardDrive};
+  const icons = {payment:CreditCard,sms:MessageSquare,email:Mail,file:HardDrive};
   return <>
     <PageHeader title={t("第三方服务")} summary={<InsightMetrics items={[{label:t("服务平台"),value:visible.length},{label:t("已启用"),value:visible.filter(item=>configByProvider.get(item.capability+":"+item.provider)?.enabled).length},{label:t("已验证"),value:visible.filter(item=>{const config=configByProvider.get(item.capability+":"+item.provider);return config?.enabled&&config.lastTestStatus==="passed"&&config.lastTestMode==="live";}).length}]}/>}
-      note={{title:t("密钥只在服务端加密保存"),description:t("页面不会回显 AccessKey、私钥、API 密钥等敏感值；停用平台不会删除配置，重新启用时可继续使用。“测试连接”只发起无副作用探针：支付查询随机交易号、短信查询模板、云存储 HEAD 随机不存在对象，不会扣款、发短信或写入文件。")}}/>
+      note={{title:t("密钥只在服务端加密保存"),description:t("页面不回显密钥或邮箱凭据。测试连接只检查服务可用性：邮箱验证加密连接与账号登录，不发送邮件；支付、短信和文件使用原有只读探针。")}}/>
     {catalog.data.configs.some(config=>config.enabled&&!config.isDefault)&&<Alert type="warning" showIcon title={t("已启用但未设为默认")} description={t("业务运行只会使用默认平台，请为该能力指定一个默认平台。")} style={{marginBottom:"var(--space-4)"}}/>}
     <section className={directory.root+" "+directoryStyles.root}>
       <div className={directoryStyles.tools}><SearchField label={t("查找服务平台")} placeholder={t("查找服务平台")} value={keyword} onValueChange={setKeyword}/><Segmented value={layout} onChange={value=>setLayout(String(value))} options={[{value:"cards",label:t("卡片")},{value:"list",label:t("目录")}]}/></div>
       <div className={directoryStyles.tabs}><Segmented value={filter} onChange={value=>setFilter(String(value))} options={[
         {value:"all",label:<>{t("全部")} <AnimatedNumber value={searched.length}/></>},
         {value:"enabled",label:<>{t("已启用")} <AnimatedNumber value={searched.filter(item=>configByProvider.get(item.capability+":"+item.provider)?.enabled).length}/></>},
-        ...(["payment","sms","file"] as TenantIntegrationCapability[]).map(cap=>({value:cap,label:<>{t(CAPABILITY_LABELS[cap])} <AnimatedNumber value={searched.filter(item=>item.capability===cap).length}/></>}))
+        ...(["payment","sms","email","file"] as TenantIntegrationCapability[]).map(cap=>({value:cap,label:<>{t(CAPABILITY_LABELS[cap])} <AnimatedNumber value={searched.filter(item=>item.capability===cap).length}/></>}))
       ]}/></div>
       {(keyword||filter!=="all")&&<Button type="text" onClick={()=>{setKeyword("");setFilter("all");}}>{t("清除筛选")}</Button>}
       <ul className={layout==="cards"?directoryStyles.grid:directory.list}>{visible.map(definition=>{

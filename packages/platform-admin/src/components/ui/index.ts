@@ -70,7 +70,7 @@ export { Statistic } from "./Statistic";
 export { useModalDismissal } from "./useModalDismissal";
 
 export { RecordDetailLayout, RecordDetailStack } from "../RecordDetailLayout";
-export type { RecordDetailLayoutProps } from "../RecordDetailLayout";
+export type { RecordDetailLayoutProps, RecordDetailHeaderSlots } from "../RecordDetailLayout";
 export { RecordDisclosure } from "../RecordDisclosure";
 export { RecordFacts, type RecordFact } from "../RecordFacts";
 export { QueryState } from "../QueryState";

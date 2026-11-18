@@ -1020,7 +1020,7 @@ function RentalOrderDetailContent() {
   };
 
   const pageActions: CoreAdminPageAction<Record<string, unknown>>[] = [{
-    id: "back", kind: "navigate", label: { default: t("返回列表") },
+    id: "back", kind: "navigate", slot: "navigation", label: { default: t("返回列表") },
     icon: <ArrowLeftOutlined />, to: rentalOrderLocation()
   }];
   if (detail?.status === RentalCoreOrderStatus.Draft && canOperate) {

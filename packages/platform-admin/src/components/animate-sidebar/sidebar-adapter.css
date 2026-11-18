@@ -3,6 +3,16 @@
 :root[data-theme="dark"] { --rental-sidebar-surface: oklch(0.205 0 0); }
 .native-admin-shell { background: var(--rental-sidebar-surface); }
 .rental-sidebar-colors { --sidebar: var(--rental-sidebar-surface); }
+/* The same header controls can follow either host palette without changing its frame. */
+:root:has(.app-frame-stage[data-reference-sidebar]) {
+  --rental-shell-foreground: var(--foreground);
+  --rental-shell-secondary: var(--text-secondary);
+  --rental-shell-muted: var(--text-muted);
+  --rental-shell-border: var(--border);
+  --rental-shell-field: var(--background);
+  --rental-shell-selected-icon: var(--foreground);
+  --rental-shell-hover: color-mix(in oklab, var(--foreground) 4.5%, transparent);
+}
 /* Keep the native collapse hit target; the rounded workspace owns the visible edge. */
 .rental-sidebar-colors [data-sidebar="rail"]::after { display: none; }
 /* Brand/search and mode controls stay outside the menu's only scroll region. */
@@ -211,9 +221,9 @@ html[data-reduced-motion="true"] :is(.rental-sidebar-submenu-motion, .rental-sid
 .rental-sidebar-colors [data-sidebar="content"] { gap: var(--rental-sidebar-menu-gap); }
 .rental-sidebar-colors [data-sidebar="menu"] { gap: var(--rental-sidebar-menu-gap); }
 .rental-sidebar-colors [data-sidebar="group-label"] { height: var(--rental-sidebar-group-label-height); }
-.app-frame-stage[data-tenant-console] .rental-sidebar-colors [data-sidebar="group-label"] { transition-property: margin-top, opacity; transition-duration: var(--animate-ui-sidebar-duration), var(--rental-sidebar-label-duration); transition-timing-function: var(--animate-ui-sidebar-easing), var(--rental-sidebar-label-easing); }
-.app-frame-stage[data-tenant-console] .rental-sidebar-colors [data-sidebar="menu-button"] > :is(span:not(.rental-animated-icon), div:not([data-slot="avatar"])) { transition: opacity var(--rental-sidebar-label-duration) var(--rental-sidebar-label-easing); }
-.app-frame-stage[data-tenant-console] [data-slot="sidebar"][data-collapsible="icon"] [data-sidebar="menu-button"] > :is(span:not(.rental-animated-icon):not([data-slot="avatar"]), div:not([data-slot="avatar"]):not([data-sidebar="brand-mark"])) { opacity: 0; }
+.app-frame-stage[data-reference-sidebar] .rental-sidebar-colors [data-sidebar="group-label"] { transition-property: margin-top, opacity; transition-duration: var(--animate-ui-sidebar-duration), var(--rental-sidebar-label-duration); transition-timing-function: var(--animate-ui-sidebar-easing), var(--rental-sidebar-label-easing); }
+.app-frame-stage[data-reference-sidebar] .rental-sidebar-colors [data-sidebar="menu-button"] > :is(span:not(.rental-animated-icon), div:not([data-slot="avatar"])) { transition: opacity var(--rental-sidebar-label-duration) var(--rental-sidebar-label-easing); }
+.app-frame-stage[data-reference-sidebar] [data-slot="sidebar"][data-collapsible="icon"] [data-sidebar="menu-button"] > :is(span:not(.rental-animated-icon):not([data-slot="avatar"]), div:not([data-slot="avatar"]):not([data-sidebar="brand-mark"])) { opacity: 0; }
 .rental-sidebar-colors [data-sidebar="menu-button"][data-size="default"],
 .rental-sidebar-colors [data-sidebar="menu-sub-button"] {
   height: var(--rental-sidebar-menu-height);

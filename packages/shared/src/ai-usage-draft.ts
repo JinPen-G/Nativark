@@ -5,6 +5,7 @@ export type AiUsageQuantityDraft =
   | { unit: "tokens" | "calls"; value: number }
   /** Exactly six decimal places, currency explicit; no exchange rate or pricing default. */
   | { unit: "money"; amount: string; currency: string; scale: 6 };
+export type AiTaskMoneyLimitDraft = Extract<AiUsageQuantityDraft, { unit: "money" }>;
 export type AiBudgetLimitDraft =
   | { state: "not_configured" }
   | { state: "zero"; quantity: { unit: "tokens" | "calls"; value: 0 } | { unit: "money"; amount: "0.000000"; currency: string; scale: 6 } }
@@ -98,6 +99,9 @@ export interface AiUsageSettingsDraft {
   gates: { platform: AiSettingGateDraft; tenant: AiSettingGateDraft; scene: AiSettingGateDraft };
   sceneCode: string; allowedModels: string[]; allowedScenes: string[];
   budget: AiBudgetLimitDraft; maxConcurrent: number; maxCallsPerRun: number;
+  /** All Runs of the same Task share this limit. Missing legacy values do not
+   * authorize new money calls; zero disables them. BYOK is not priced here. */
+  maxMoneyPerTask?: AiTaskMoneyLimitDraft;
 }
 export interface AiUsageAssociationDraft {
   requestId: string; runId: string; stepId: string; actionId: string; idempotencyKey: string;

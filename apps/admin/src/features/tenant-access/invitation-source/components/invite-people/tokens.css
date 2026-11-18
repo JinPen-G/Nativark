@@ -1,0 +1,75 @@
+.invite-people-local {
+  --accent: oklch(33% 0 0);
+  --accent-foreground: oklch(100% 0 0);
+  --accent-strong: oklch(24% 0 0);
+  --border: oklch(93.5% 0 0);
+  --border-strong: oklch(82% 0 0);
+  --border-subtle: oklch(96.5% 0 0);
+  --control-height-sm: 32px;
+  --danger: oklch(53% 0.18 10);
+  --duration-fast: 0.15s;
+  --duration-instant: 0.1s;
+  --duration-standard: 0.2s;
+  --ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
+  --font-body: 'inter', 'inter Fallback', sans-serif;
+  --font-display: 'geist', 'geist Fallback', sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
+  --foreground: oklch(15% 0 0);
+  --leading-body: 1.4;
+  --radius-control: 14px;
+  --radius-panel: 20px;
+  --radius-pill: 9999px;
+  --shadow-floating:
+    0 20px 48px oklch(0% 0 0/0.105), 0 3px 10px oklch(0% 0 0/0.045);
+  --success: oklch(50% 0.12 162);
+  --surface: oklch(100% 0 0);
+  --surface-muted: oklch(97.8% 0 0);
+  --surface-raised: oklch(100% 0 0);
+  --text-base: 15px;
+  --text-muted: oklch(59% 0 0);
+  --text-secondary: oklch(46% 0 0);
+  --text-sm: 13px;
+  --text-xs: 12px;
+  --tracking-body: -0.01em;
+  --tracking-display: -0.03em;
+}
+[data-theme='dark'] .invite-people-local {
+  --accent: oklch(80% 0 0);
+  --accent-foreground: oklch(19% 0 0);
+  --accent-strong: oklch(91% 0 0);
+  --border: oklch(29% 0 0);
+  --border-strong: oklch(40% 0 0);
+  --border-subtle: oklch(25% 0 0);
+  --control-height-sm: 32px;
+  --danger: oklch(71% 0.155 8);
+  --duration-fast: 0.15s;
+  --duration-instant: 0.1s;
+  --duration-standard: 0.2s;
+  --ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
+  --font-body: 'inter', 'inter Fallback', sans-serif;
+  --font-display: 'geist', 'geist Fallback', sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
+  --foreground: oklch(96% 0 0);
+  --leading-body: 1.4;
+  --radius-control: 14px;
+  --radius-panel: 20px;
+  --radius-pill: 9999px;
+  --shadow-floating: 0 22px 55px oklch(0% 0 0/0.34);
+  --success: oklch(79% 0.14 162);
+  --surface: oklch(21.5% 0 0);
+  --surface-muted: oklch(26% 0 0);
+  --surface-raised: oklch(24% 0 0);
+  --text-base: 15px;
+  --text-muted: oklch(64% 0 0);
+  --text-secondary: oklch(77% 0 0);
+  --text-sm: 13px;
+  --text-xs: 12px;
+  --tracking-body: -0.01em;
+  --tracking-display: -0.03em;
+}

@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ArrowRight, RotateCw } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { formatRentalMoney, type RentalWorkbenchTodo, type RentalWorkspaceReportFilter } from "@rental-os/shared";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { APP_ROUTES } from "@/app/navigation";
@@ -13,6 +13,7 @@ import { useAuthStore } from "@/features/auth/authStore";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { ActionButton, Alert, AnimatedNumber, App, Button, DonutChart, Segmented } from "@/components/ui";
+import { AnimatedIcon } from "@/components/ui/AnimatedIcon";
 import { useListQueryIdentity } from "@/components/ui/LiveRefresh";
 import { ContentTransition } from "@/components/workspace/ContentTransition";
 import { InventoryOverview } from "@/components/insights/InventoryOverview";
@@ -85,11 +86,7 @@ function WorkbenchContent({ scope }: { scope: string }) {
 
   return <>
     <PageHeader title="运营概览" description={data ? t("更新于 {time}", { time: new Date(data.generatedAt).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" }) }) : undefined}
-      extra={<div className={styles.toolbar}><Button shape="circle" aria-label={t("刷新经营概览")} icon={<RotateCw size={16} />} loading={report.isFetching || todos.isFetching} onClick={() => void refresh()} />
-        {canReconcilePayments && <ActionButton label={t("核对支付与退款")} pending={reconcilePayments.isPending} onAction={async () => {
-          const result = await reconcilePayments.mutateAsync();
-          if (result.failed > 0 || result.pending > 0) throw new Error("Reconciliation requires attention");
-        }} />}</div>}
+      toolsPlacement="view" tools={<Button type="text" aria-label={t("刷新经营概览")} icon={<AnimatedIcon name="refresh" busy={report.isFetching || todos.isFetching} />} loading={report.isFetching || todos.isFetching} onClick={() => void refresh()} />}
       view={showMetrics ? <div className={styles.periodRow}><Segmented aria-label={t("统计期间")} value={period} onChange={value => setPeriod(value as OverviewPeriod)} options={Object.entries(overviewPeriodLabels).map(([value, label]) => ({ value, label: t(label) }))} />
         <span className={styles.periodCaption} role="status">{report.isPlaceholderData ? t("正在更新所选期间") : t("订单按起租时间统计，待办与库存为当前状态")}</span></div> : undefined} />
     <div className={styles.page}>
@@ -97,10 +94,16 @@ function WorkbenchContent({ scope }: { scope: string }) {
         {data && <WorkbenchMetrics data={data} periodLabel={periodLabel} orders={canViewOrders} assets={canViewAssets} busy={report.isFetching}
           onOpen={target => navigate(target === "orders" ? APP_ROUTES.orders.path : target === "assets" ? APP_ROUTES.assets.path : APP_ROUTES.operationReport.path)} />}
       </QueryState> : <Alert type="info" title={t("当前账号仅可查看工作台待办")} description={t("订单、库存和金额指标需要报表查看权限及相应的数据查看权限。")} />}
+      <section className={styles.todoSection}>
       <QueryState loading={todos.isLoading} error={todos.error} onRetry={() => todos.refetch({ throwOnError: true })}>
         <WorkbenchTodoQueue items={todos.data?.items ?? []} busy={todos.isFetching || todos.isError} formatAmount={money} canOpen={item => Boolean(overviewTodoTarget(item, access))}
           onOpen={openTodo} onRefresh={() => todos.refetch({ throwOnError: true })} />
       </QueryState>
+      {canReconcilePayments && <div className={styles.maintenanceTools}><ActionButton variant="secondary" label={t("核对支付与退款")} pending={reconcilePayments.isPending} onAction={async () => {
+        const result = await reconcilePayments.mutateAsync();
+        if (result.failed > 0 || result.pending > 0) throw new Error("Reconciliation requires attention");
+      }} /></div>}
+      </section>
       {showMetrics && data && <>
         <div className={styles.analysisGrid} aria-busy={report.isFetching}>
           {canViewOrders && <InsightPanel title={t("订单状态")} description={`${periodLabel} · ${t("非草稿")}`}

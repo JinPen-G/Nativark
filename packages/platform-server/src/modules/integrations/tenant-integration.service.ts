@@ -23,6 +23,8 @@ import { INTEGRATION_DATA_STORE, INTEGRATION_BUSINESS_PARTICIPANT, INTEGRATION_R
   type StoredTenantIntegration, type TenantIntegrationDataStore, type TenantIntegrationTransaction,
   type TenantIntegrationBusinessParticipant, type IntegrationTestUpdate, type IntegrationRuntimeProviders } from "./integration-store";
 import type { PlatformJsonValue } from "../platform/platform-auth-data-store";
+import { smtpConnection } from "./smtp-transport";
+import { imapConnection } from "./imap-reader";
 
 const Prisma = { sql: sqltag, join, empty,
   TransactionIsolationLevel: { ReadCommitted: "ReadCommitted" } } as const;
@@ -113,6 +115,13 @@ export class TenantIntegrationService {
 
   /** Conditional provider fields are validated as pairs; UI `required` flags alone are not a security boundary. */
   private conditionalProviderProblem(provider: TenantIntegrationProvider, settings: Record<string, unknown>, credentials: Record<string, string>) {
+    if (provider === "smtp") {
+      try {
+        const account = smtpConnection(settings, credentials);
+        if (settings.receiveEnabled === true) imapConnection(settings, account);
+        return undefined;
+      } catch (error) { return error instanceof Error ? error.message : "SMTP 配置无效"; }
+    }
     if (provider !== "wechat_pay") return undefined;
     const certificateSerial = String(settings.platformCertificateSerial ?? "").trim();
     const certificate = String(credentials.wechatPlatformCertificate ?? "").trim();
@@ -585,7 +594,21 @@ export class TenantIntegrationService {
 
   private async assertCanDisableProvider(tx: TenantIntegrationTransaction, tenantId: string,
     capability: TenantIntegrationCapability, provider: TenantIntegrationProvider) {
+    if (capability === "email") {
+      if (await this.hasPendingEmail(tx, tenantId, provider))
+        throw new ConflictException("该邮箱仍有待提交或结果未知的邮件，请先核对后再停用");
+      return;
+    }
     await this.requireBusinessParticipant().assertCanDisableProvider(tx, tenantId, capability, provider);
+  }
+
+  /** 公共邮件台账不因缺Core而消失；在原配置事务内核对同一租户/提供方的未决结果。 */
+  private async hasPendingEmail(tx: TenantIntegrationTransaction, tenantId: string, provider: TenantIntegrationProvider) {
+    const rows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT id FROM NotificationSendLog WHERE tenantId = ${tenantId} AND provider = ${provider}
+      AND status IN ('queued', 'delivery_uncertain') LIMIT 1
+    `);
+    return rows.length > 0;
   }
 
 
@@ -640,6 +663,14 @@ export class TenantIntegrationService {
     capability: TenantIntegrationCapability, provider: TenantIntegrationProvider,
     settings: Record<string, unknown>, secrets: Record<string, string>) {
     if (capability === 'sms') return;
+    if (capability === 'email') {
+      const previousSettings = (row.settings ?? {}) as Record<string, unknown>, previousSecrets = this.configuredSecrets(row);
+      const changed = ['host', 'port', 'secure', 'fromEmail'].some(key => !isDeepStrictEqual(previousSettings[key], settings[key]))
+        || previousSecrets.username !== secrets.username;
+      if (changed && await this.hasPendingEmail(tx, row.tenantId, provider))
+        throw new ConflictException('邮箱仍有待发送或结果未知记录，不能更换其服务器/发件身份');
+      return;
+    }
     const previousSettings = (row.settings ?? {}) as Record<string, unknown>, previousSecrets = this.configuredSecrets(row);
     const keys = capability === 'file' ? ['endpoint', 'bucket', 'region', 'objectPrefix', 'forcePathStyle']
       : provider === 'alipay' ? ['appId', 'gatewayUrl'] : provider === 'wechat_pay' ? ['mchid', 'appId', 'gatewayUrl'] : [];

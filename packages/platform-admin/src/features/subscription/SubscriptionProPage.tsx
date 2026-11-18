@@ -33,7 +33,7 @@ export function SubscriptionProPage() {
     ? plan === SubscriptionPlan.Pro ? SubscriptionRequestType.RenewPro : SubscriptionRequestType.RenewStandard
     : plan === SubscriptionPlan.Pro ? SubscriptionRequestType.UpgradeConsult : SubscriptionRequestType.NextStandard;
   const pendingRequest = (plan: SubscriptionPlan) => query.data?.requests.find(request => request.type === actionType(plan) && request.status === SubscriptionRequestStatus.Pending);
-  return <PageHeader title="版本对比" extra={<Button onClick={() => navigate(SUBSCRIPTION_ROUTES.subscription.path)}>{t("返回版本与订阅")}</Button>}
+  return <PageHeader title="版本对比" navigation={<Button type="text" onClick={() => navigate(SUBSCRIPTION_ROUTES.subscription.path)}>{t("返回版本与订阅")}</Button>}
     view={<QueryState loading={query.isLoading}>
       {query.error ? <Alert type="error" message={subscriptionError(query.error, t("订阅介绍加载失败"))} action={<Button onClick={() => query.refetch()}>{t("重试")}</Button>} /> : query.data && <div style={{ display: "grid", gap: "var(--rental-layout-section-gap)", minWidth: 0 }}>
         <Alert type="info" showIcon message={t("PRO 暂仅接受咨询或受控试点，正式销售尚未开放。")} />

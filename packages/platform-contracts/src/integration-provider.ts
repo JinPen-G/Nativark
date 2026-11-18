@@ -2,6 +2,7 @@
 export type TenantIntegrationProvider =
   | "aliyun_sms"
   | "tencent_sms"
+  | "smtp"
   | "alipay"
   | "wechat_pay"
   | "stripe"

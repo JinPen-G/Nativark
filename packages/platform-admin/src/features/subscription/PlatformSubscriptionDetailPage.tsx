@@ -35,9 +35,10 @@ export function PlatformSubscriptionDetailPage() {
   const { id = "" } = useParams();
   const query = useQuery({ queryKey: ["subscription", "platform-detail", id], queryFn: () => subscriptionApi.platformDetail(id), enabled: Boolean(id) });
   return <PageHeader title="租户订阅详情" description={t("订阅操作不会解除安全冻结。")}
-    extra={<Button onClick={() => navigate(SUBSCRIPTION_ROUTES.platformSubscriptions.path)}>{t("返回列表")}</Button>}
-    view={<QueryState loading={query.isLoading}>
-      {query.error || !query.data ? <Alert type="error" showIcon message={t("租户订阅详情加载失败")} action={<Button onClick={() => query.refetch()}>{t("重试")}</Button>} />
+    navigation={<Button type="text" onClick={() => navigate(SUBSCRIPTION_ROUTES.platformSubscriptions.path)}>{t("返回列表")}</Button>}
+    view={<QueryState loading={query.isLoading} error={query.error} onRetry={() => query.refetch()} transitionKey={id}>
+      {/* Transient refresh failures retain the editor; QueryState still removes it on denied reads or a different record. */}
+      {!query.data ? <Alert type="error" showIcon message={t("租户订阅详情加载失败")} action={<Button onClick={() => query.refetch()}>{t("重试")}</Button>} />
         : <TableRefreshProvider onRefresh={() => query.refetch()} busy={query.isFetching}><DetailBody key={id} data={query.data} tenantId={id} /></TableRefreshProvider>}
     </QueryState>} />;
 }

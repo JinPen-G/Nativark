@@ -24,6 +24,8 @@ export interface ShellNavigation {
 }
 export interface BusinessShellProps {
   fullWidth?: boolean;
+  /** Share logo-slot controls and reference motion independently of the outer frame. */
+  referenceSidebar?: boolean;
   identity?: string;
   brand: ReactNode;
   account: ReactNode;
@@ -48,6 +50,7 @@ export interface BusinessShellProps {
 
 export function BusinessShell(props: BusinessShellProps) {
   const { mode } = useAppearance();
+  const referenceSidebar = props.referenceSidebar ?? props.fullWidth;
   const sidebarMotion = toCssTiming(useTempoTransition(ADMIN_SIDEBAR_REFERENCE_MOTION.layout));
   const labelMotion = toCssTiming(useTempoTransition(ADMIN_SIDEBAR_REFERENCE_MOTION.label));
   const reduced = useShouldReduceMotion();
@@ -55,12 +58,15 @@ export function BusinessShell(props: BusinessShellProps) {
     "--rental-sidebar-expanded-width": "var(--rental-shell-sidebar-width)",
     "--rental-sidebar-collapsed-width": "var(--rental-shell-sidebar-collapsed-width)",
     "--sidebar-width-icon": "var(--rental-shell-sidebar-collapsed-width)",
+  } : {}), ...(referenceSidebar ? {
+    // The inset frame has a different outer offset; its identity still centres on the 52px header.
+    ...(!props.fullWidth ? { "--rental-shell-top-row-height": "calc(var(--rental-layout-context-height) - 2px)" } : {}),
     "--animate-ui-sidebar-duration": `${reduced ? 0 : sidebarMotion.duration}ms`,
     "--animate-ui-sidebar-easing": sidebarMotion.easing,
     "--rental-sidebar-label-duration": `${reduced ? 0 : labelMotion.duration}ms`,
     "--rental-sidebar-label-easing": labelMotion.easing,
   } : {}) } as CSSProperties;
-  return <TooltipProvider><div className="app-frame-stage" data-tenant-console={props.fullWidth || undefined}>
+  return <TooltipProvider><div className="app-frame-stage" data-tenant-console={props.fullWidth || undefined} data-reference-sidebar={referenceSidebar || undefined}>
     <div className="app-shell native-admin-shell"><SidebarProvider animateOnHover={false} style={style}
       className={`rental-animate-scope relative h-full min-h-0${mode === "dark" ? " dark" : ""}`}>
       <WorkspaceHeaderProvider><BusinessShellContents {...props} /></WorkspaceHeaderProvider>
@@ -68,7 +74,7 @@ export function BusinessShell(props: BusinessShellProps) {
   </div></TooltipProvider>;
 }
 
-function BusinessShellContents({ fullWidth, identity, brand, account, selectedKey, navigation: renderNavigation, sidebarExtra,
+function BusinessShellContents({ fullWidth, referenceSidebar = fullWidth, identity, brand, account, selectedKey, navigation: renderNavigation, sidebarExtra,
   headerContext, headerTitleTarget = true, headerActions, headerUtilities, headerTime, headerPanelControl, headerClassName, contentClassName, wrapContent, overlay, children }: BusinessShellProps) {
   const { state, isMobile, openMobile, setOpenMobile } = useSidebar();
   const { pathname } = useLocation(), { t } = useLocale(), headerSlots = useWorkspaceHeader()!;
@@ -92,7 +98,7 @@ function BusinessShellContents({ fullWidth, identity, brand, account, selectedKe
     const observer = new MutationObserver(reveal); observer.observe(host, { childList: true, subtree: true }); reveal();
     return () => { cancelAnimationFrame(frame); observer.disconnect(); };
   }, [selectedKey, query, identity, state, openMobile]);
-  const triggerProps = { "aria-label": navigationLabel, "aria-expanded": fullWidth ? navigationExpanded : undefined,
+  const triggerProps = { "aria-label": navigationLabel, "aria-expanded": referenceSidebar ? navigationExpanded : undefined,
     "aria-controls": "app-sidebar-navigation", "aria-keyshortcuts": "Control+B Meta+B",
     title: `${navigationLabel} (Ctrl / ⌘ B)`, "data-sound": "press" };
   // The fixed enterprise consumer supplied its clock through the old action slot.
@@ -103,7 +109,7 @@ function BusinessShellContents({ fullWidth, identity, brand, account, selectedKe
   const time = headerTime === undefined ? oldActions.find(isClock) ?? <WorkspaceClock /> : headerTime;
   const header = <header className={`native-workspace-context workspace-header${headerClassName ? ` ${headerClassName}` : ""}`}>
     <div className="workspace-header-location">
-      {(!fullWidth || isMobile) && <><SidebarTrigger className="rental-sidebar-colors -ml-1" {...triggerProps} /><Separator orientation="vertical" className="mr-2 h-4" /></>}
+      {(!referenceSidebar || isMobile) && <><SidebarTrigger className="rental-sidebar-colors -ml-1" {...triggerProps} /><Separator orientation="vertical" className="mr-2 h-4" /></>}
       <div className="workspace-context-location">{headerContext}{headerTitleTarget && <span className="workspace-breadcrumb-extension">
         <RightOutlined size={13} className="workspace-breadcrumb-separator" /><WorkspaceBreadcrumbCurrent />
       </span>}</div>
@@ -121,8 +127,8 @@ function BusinessShellContents({ fullWidth, identity, brand, account, selectedKe
     <div className="content-canvas"><WorkspaceNavigationProvider value={navigation.context}>{children}</WorkspaceNavigationProvider></div>
   </div></>;
   return <>
-    <Sidebar collapsible="icon" className="rental-sidebar-colors" transition={fullWidth ? ADMIN_SIDEBAR_REFERENCE_MOTION.layout : undefined}>
-      <SidebarHeader>{fullWidth ? <TenantSidebarHeader workspace={brand} query={query} onQueryChange={setQuery} /> : <>
+    <Sidebar collapsible="icon" className="rental-sidebar-colors" transition={referenceSidebar ? ADMIN_SIDEBAR_REFERENCE_MOTION.layout : undefined}>
+      <SidebarHeader>{referenceSidebar ? <TenantSidebarHeader workspace={brand} query={query} onQueryChange={setQuery} /> : <>
         {brand}<SidebarInput className="group-data-[collapsible=icon]:hidden" type="search" aria-label={t("搜索菜单")}
           placeholder={t("搜索菜单")} value={query} onChange={event => setQuery(event.target.value)} />
       </>}</SidebarHeader>

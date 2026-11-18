@@ -14,6 +14,7 @@
 | 公共订阅 | [模块接入与 API](src/modules/subscription/README.md)、[办理服务](src/modules/subscription/subscription.service.ts)、[存储参加者](src/modules/subscription/subscription-store.ts)；原申请、线下收费、统一期限、排期、提醒、修订与审计 |
 | 统一期限 | [只读来源](src/modules/subscription/subscription-reader.ts)、[同源状态投影](src/modules/subscription/subscription-state.ts)、[周年/时区](src/modules/subscription/subscription-term.ts)；当前期限与排期，原Rental服务和新Core共同消费 |
 | 基础集成 | [模块导读](src/modules/integrations/README.md)、[配置服务](src/modules/integrations/tenant-integration.service.ts)、[存储与宿主参加者](src/modules/integrations/integration-store.ts)；原配置修订、凭据保护、连通性与实际投递接点 |
+| 邮箱运输 | [邮箱运行时](src/modules/integrations/tenant-email.runtime.service.ts)、[SMTP](src/modules/integrations/smtp-transport.ts)、[IMAP](src/modules/integrations/imap-reader.ts)、[邮件文本解析](src/modules/integrations/inbound-mail-codec.ts)；四个正式子出口共用原算法，测试不投递，业务发送和原台账由调用方维护 |
 | 官方日历来源 | [模块导读](src/modules/official-calendars/README.md)、[来源服务](src/modules/official-calendars/official-calendar-source.service.ts)、[冻结读取器](src/modules/official-calendars/official-calendar-source-reader.ts)；公共主档、只追加年度版本与历史快照 |
 | 字典与编号 | [模块及 API](src/modules/platform-tools/README.md)、[服务](src/modules/platform-tools/platform-tools.service.ts)、[生效配置仓储](src/modules/platform-tools/platform-tools.repository.ts)；当前租户维护、原格式及同事务取号，公共缺省为空 |
 | 文件存储与冻结 | [模块导读](src/modules/files/README.md)、[字节处理](src/modules/files/file-storage-primitives.ts)、[冻结内核](src/modules/files/file-content-freeze.ts)、[文件仓储](src/modules/files/file-storage.repository.ts)；原限长传输、元数据、上传会话和唯一冻结目标，业务 ACL 由所属 Core 提供 |
@@ -67,4 +68,4 @@ const platform = PlatformServerModule.register({
 
 构建使用本包 `build`，类型使用本包 `lint`。已有 [登录保护](../../tests/auth-login-lockout.test.cjs)、[外观](../../tests/admin-appearance-settings.test.cjs) 和 [MCP 原审计](../../tests/mcp-original-audit.test.cjs) 保留；命令先核读写及隔离要求。[验证规则](../../AGENTS.md#修改验证与交付)
 
-当前独立宿主已有公共初始化、认证、人员 / 角色 / 租户 / 组织管理、安全配置、外观、完整订阅和健康 / 文档链，基础集成及 Core 主装配继续按 [PCH 接续](../../docs/平台底座/Core接入/平台Core接入-协作接续.md) 交付。类型及离线行为不等于真实数据库、HTTP、浏览器或部署通过。
+当前独立宿主已有公共初始化、认证、人员 / 角色 / 租户 / 组织管理、安全配置、外观、订阅、基础集成和健康 / 文档链。完整Rental标准装配及各运行组合继续交付，开发入口见[Core接入手册](../core-contracts/README.md#五步快速接入)。类型及离线行为不等于真实数据库、HTTP、浏览器或部署通过。
