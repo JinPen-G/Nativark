@@ -4,7 +4,9 @@
 
 ## 当前收尾
 
-AI完整补片源码提交为已普通推送并回读GitHub的`d7c608864079a9a7759cfba473dcb961f6747ffc`，公共片父版本为`f82ffa04ea8bf874f3677fdbf279ca4509071e77`，原前置为`a4ebf788419ecd5d6426650206861030b771195e`。R1-B01补原Task全部Run共享的累计金额上限，R1-E01补dev2本人对原main交付与本次最终固定组合的复核。公共保存链、仓储25组原生命周期、四源非作者模拟及后继可信释放换币种的两条正向／六条负向均已通过。dev1两源与dev2四源全部冻结交回，最终helper为`8419a790de1eb373ece64459ab5341e843476cf1`，Root固定组合类型14根均零诊断，源码字节已核同。dev2最终本人结论已读取，同时覆盖原main交付继承和本次冻结补片。实际main为`ba1de9f91860c4e73503eded4e1d05d2307b0e28`，本片尚未进入该main，后续由PM按上述两个固定提交整合。[实现、失败、最终回执与上传](<AI Native-开发记录.md#ain-r1-task-money-final-review-20261118>)
+AI完整补片源码提交为已普通推送并回读GitHub的`d7c608864079a9a7759cfba473dcb961f6747ffc`，公共片父版本为`f82ffa04ea8bf874f3677fdbf279ca4509071e77`，任务分支前置回执为`e44cdb177e11cd0639ed23fde23d28707b627396`。R1-B01补同一Task全部Run共享的累计金额上限，R1-E01补dev2本人对原main交付及最终组合的复核，两项均已修复核闭。[实现、原失败与上传](<AI Native-开发记录.md#ain-r1-task-money-final-review-20261118>)
+
+两位助手本人最终结论已读取，dev1核AIN-01～14／ENTRY-01～09，dev2核AIN-15～28／ENTRY-10～18，合计46项全文、生产装配和原证据齐备，无新增确证P1／P2。main固定为`ba1de9f91860c4e73503eded4e1d05d2307b0e28`，已验候选树为`0b3bb6742a3309b93752ef4b17273de019f8e6f4`。12份产品源码逐一与AI固定来源同blob，候选实际依赖类型14根及原文档11/11通过，377个原阶段正文匹配两个固定父版本。本片尚未进入该main，后续由PM按固定提交串行整合。Root本阶段只更新原记录与接续的最终回执和操作定位。[全文结论、候选验证与交付](<AI Native-开发记录.md#ain-r1-fixed-candidate-whole-closeout-20261118>)
 
 ## 已交付固定版本
 
@@ -16,6 +18,8 @@ AI研发源码固定提交为0e4e6367a27b36f2bde58639a0f2bdd1b00e2476，原28最
 
 ## 后续操作入口
 
+平台管理员从`/platform/ai`“平台 AI 配置”进入“平台预算”，选择正式场景并读取当前平台政策，在“额度与计量”配置“单个任务金额上限”和“任务上限币种”。保存unknown先核对原预算保存收据，再读当前政策。[上限操作与实测边界](<AI Native-开发记录.md#ain-r1-fixed-candidate-whole-closeout-20261118>)
+
 负责人按原清单固定提交、构建、schema／迁移、publication／模型／能力／prompt／tool／政策版本和测试数据，分别实施真实数据库／升级恢复、浏览器、微信／设备、平台及BYOK供应商、支付、外部对象／删除／备份及灰度测试。D01～D05的供应商、数据责任、商业额度、无人动作及容量采用归负责人决定，原本地最小留存按需求§17执行。[部署运行与回退](<AI Native-开发记录.md#ain27-operational-delivery-20261117>)、[实测清单](<AI Native-开发记录.md#ain28-user-operation-real-test-handoff-20261117>)
 
 历史会话重开用于原结果核对。无原待核操作时用独立“新对话”承接新输入，同页下一轮沿原关闭收据与当前空闲修订。Copilot空轮次保留原定位和journal，可从“在 Agent 控制台继续”进入同一受权会话。准备、草稿、人工审批、Core执行和原收据分别操作。[已核正常入口](<AI Native-开发记录.md#ain28-four-clause-final-closeout-20261118>)
@@ -24,7 +28,7 @@ AI研发源码固定提交为0e4e6367a27b36f2bde58639a0f2bdd1b00e2476，原28最
 
 临时AI-RD为01a1e422-8ae5-7383-9e41-c80cb71bcc70，其固定交付沿上方原阶段保留。当前Root为01a1be68-da55-7f13-9536-79be07cb2093，施工树为D:/工作文件/rental-OS/worktree/ai-native、codex/ai-native，独占AI索引、四册及本片公共协议和服务端设置接点。持续目标仍在执行，无token_budget。
 
-dev1 01a1bf34-f061-74c2-b588-3e21385c4b49的`prisma-budget.repository.ts`及`task-money-limit.ts`已冻结交回Root，其指定四源的非作者核定已完成。dev2 01a1bf35-1ee5-7400-a97d-c0ebf5f9482c的`PlatformBudgetSettings.tsx`、`TenantBudgetSettings.tsx`及两份budget-settings session已冻结并交回Root，其对Root六源、原main交付及后继最终组合的本人复核已完成。两位助手当前均completed／idle，无剩余源码写权。Root独占AI索引与四册，本片源码已经固定提交上传，当前仅维护实际回执和后续集成现场。main由PM串行整合，固定版本及验证留原记录供其读取。派工省略model／thinking，保留负责人选择的模型和思考设置。
+dev1 01a1bf34-f061-74c2-b588-3e21385c4b49的预算仓储两源及dev2 01a1bf35-1ee5-7400-a97d-c0ebf5f9482c的预算组件／session四源均已冻结交回Root，原作者验证和非作者复验已完成。两位本轮各23项全文核定已交本人最终结论，当前均completed／idle，无剩余源码写权。Root独占AI索引与四册，维护实际回执和后续集成现场。main由PM串行整合，固定版本及验证留原记录供其读取。派工省略model／thinking，保留负责人选择的模型和思考设置。
 
 main原65份已跟踪WIP与61份未跟踪成果已在合并前后核同，Core、企业、Harness、Agent接入和界面由原作者继续维护。旧本地演示界面两份原稿保全于唯一的本地Git补丁refs/codex/ai-native/main-wip-preservation-20261117，blob d47e4c9d3214b53e1dae585d41faae008ba97da7，字节SHA-256为af5fc3f0e6486f971fb7118d89aafd2e5ae0dc819d05048bc5997da16cb67c38。[WIP与原稿去向](<AI Native-开发记录.md#ain27-28-main-final-delivery-20261118>)
 
