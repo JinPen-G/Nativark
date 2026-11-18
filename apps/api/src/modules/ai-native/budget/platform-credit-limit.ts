@@ -6,7 +6,7 @@ const allocationSchema = z.record(z.string().min(1).max(191),
   z.string().regex(/^(0|[1-9][0-9]{0,17})\.[0-9]{6}$/u));
 export function creditAllocations(value: unknown) {
   const parsed = allocationSchema.safeParse(value);
-  if (!parsed.success || Object.keys(parsed.data).length > 64) throw new BudgetError('UNAVAILABLE');
+  if (!parsed.success) throw new BudgetError('UNAVAILABLE');
   return parsed.data;
 }
 export function creditAtoms(value: Prisma.Decimal | string): bigint {

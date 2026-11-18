@@ -71,10 +71,15 @@ export function TenantAiCreditSettings({ identity }: { identity: string }) {
   const allocationUnknown = !!allocationPending || allocationJournal.blocked;
   const selectedCurrency = currency || summary?.currencies[0] || summary?.balances[0]?.currency || '';
   const balance = summary?.balances.find(row => row.currency === selectedCurrency);
-  const load = async () => {
+  const dirty = Object.keys(limits).length > 0;
+  const pageLocked = busy || !!pending || requestJournal.blocked || allocationUnknown || dirty;
+  const page = useRef<{ afterCurrency?: string; afterWorkspace?: string }>({});
+  const load = async (target = page.current) => {
     setBusy(true);
     try {
-      const value = await aiCreditApi.read(); if (!current()) return;
+      const value = await aiCreditApi.read(target); if (!current()) return;
+      page.current = target;
+      if (!value.currencies.includes(selectedCurrency) && !value.balances.some(row => row.currency === selectedCurrency)) setCurrency('');
       setSummary(previous => JSON.stringify(previous) === JSON.stringify(value) ? previous : value);
       setMessage('');
     } catch { if (current()) { setSummary(null); setMessage(t('额度暂不可用，请联系平台管理员检查平台 AI 配置和额度服务。')); } }
@@ -115,7 +120,7 @@ export function TenantAiCreditSettings({ identity }: { identity: string }) {
     const allocationKey = (workspaceId: string) => `${balance.currency}:${balance.revision}:${workspaceId}`;
     const allocations = summary.workspaces.map(space => ({ workspaceId: space.id, amount: limits[allocationKey(space.id)]
       ?? balance.allocations.find(row => row.workspaceId === space.id)?.amount ?? '0' }));
-    const command = { operationKey: window.crypto.randomUUID(), currency: balance.currency, expectedRevision: balance.revision, allocations };
+    const command = { operationKey: window.crypto.randomUUID(), currency: balance.currency, expectedRevision: balance.revision, mode: 'update_listed' as const, allocations };
     let journal: CreditReferenceState<AllocationPending>;
     try { journal = retainCreditOperationReference(referenceStorage(), allocationStorage,
       { operationKey: command.operationKey, currency: command.currency, expectedRevision: command.expectedRevision }); }
@@ -123,7 +128,7 @@ export function TenantAiCreditSettings({ identity }: { identity: string }) {
     setAllocationJournal(journal); setBusy(true);
     const clear = () => { clearCreditOperationReference(referenceStorage(), allocationStorage, journal);
       setAllocationJournal(emptyCreditReference<AllocationPending>()); };
-    try { if (!current()) return; await aiCreditApi.allocate(command); if (current()) { clear(); await load(); } }
+    try { if (!current()) return; await aiCreditApi.allocate(command); if (current()) { clear(); setLimits({}); await load(); } }
     catch (error) { if (current()) {
       if (knownRejection(error)) { clear(); setMessage(t('分配未通过校验，请检查金额、已占用额度及当前设置。')); }
       else setMessage(t('分配结果未确认，请核对原分配收据，不要再次保存。'));
@@ -138,17 +143,23 @@ export function TenantAiCreditSettings({ identity }: { identity: string }) {
       setMessage(t('尚不能确认原分配是否保存，请保留原编号。')); return;
     }
     clearCreditOperationReference(referenceStorage(), allocationStorage, allocationJournal);
-    setAllocationJournal(emptyCreditReference<AllocationPending>()); await load();
+    setAllocationJournal(emptyCreditReference<AllocationPending>()); setLimits({}); await load();
   };
   return <section className={`${styles.editor} ${styles.section}`} aria-label={t('平台 AI 额度')}>
     <p className={styles.help}>{t('额度为累计上限，不按月重置。')}</p>
     {(requestJournal.blocked || allocationJournal.blocked) && <Alert type="warning"
       title={t('原操作引用无法可靠保存或读取，已停止发送。请恢复浏览器存储并核对原保存结果。')} />}
     {message && <Alert type="info" title={message} />}
-    <div className={styles.toolbar}><ActionButton variant="secondary" label={t('刷新额度')} disabled={busy} onAction={load} /></div>
+    <div className={styles.toolbar}><ActionButton variant="secondary" label={t('刷新额度')} disabled={busy || dirty} onAction={() => load()} /></div>
     {summary && <>
+      <div className={styles.toolbar}>
+        {summary.nextCurrency && <ActionButton label={t('下一页币种')} disabled={pageLocked} onAction={() => load({ ...page.current, afterCurrency: summary.nextCurrency! })} />}
+        {summary.nextWorkspace && <ActionButton label={t('下一页空间')} disabled={pageLocked} onAction={() => load({ ...page.current, afterWorkspace: summary.nextWorkspace! })} />}
+        {(page.current.afterCurrency || page.current.afterWorkspace) && <ActionButton label={t('返回第一页')} disabled={pageLocked} onAction={() => load({})} />}
+        {dirty && <ActionButton label={t('放弃本页额度修改')} disabled={busy || allocationUnknown} onAction={async () => setLimits({})} />}
+      </div>
       {(summary.currencies.length > 0 || summary.balances.length > 0) && <div className={`${styles.field} ${styles.compactField}`}><label htmlFor={`${field}-currency`}>{t('计费币种')}</label>
-      <Select id={`${field}-currency`} value={selectedCurrency || undefined} disabled={busy || !!pending || requestJournal.blocked}
+      <Select id={`${field}-currency`} value={selectedCurrency || undefined} disabled={pageLocked}
         options={[...new Set([...summary.currencies, ...summary.balances.map(row => row.currency)])].map(value => ({ value, label: value }))}
         onChange={value => { setCurrency(String(value)); setLimits({}); }} /></div>}
       {balance && <dl className={styles.facts}>
