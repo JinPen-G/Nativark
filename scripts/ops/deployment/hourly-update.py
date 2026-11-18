@@ -23,6 +23,7 @@ OVERRIDE = ROOT / "compose.override.yml"
 ACTIVE = STATE / "active.json"
 JOURNAL = STATE / "rollback.json"
 PENDING = STATE / "pending-migration.json"
+FAILED = STATE / "failed-release.json"
 COMPOSE = ("docker", "compose", "-p", "nativark-demo", "-f", str(ROOT / "compose.yml"))
 SERVICES = ("api", "web")
 PRISMA = ("apps/api/prisma/schema.prisma", "apps/api/prisma/migrations/")
@@ -158,9 +159,10 @@ def switch(tags, expected):
 def restore():
     old = json.loads(JOURNAL.read_text(encoding="utf-8"))
     switch(old["tags"], old["images"])
+    write_json(FAILED, {"commit": old["commit"], "ci": old["ci"]})
     # 回退固定在同一套旧镜像，后续人工 compose up 也会选用它。
     JOURNAL.unlink()
-    status("rolled-back", images=old["images"])
+    status("rolled-back", commit=old["commit"], images=old["images"])
 
 
 def git_source(repo, commit, destination):
@@ -239,6 +241,11 @@ def update(apply):
         if approved is None:
             status("waiting-for-ci", commit=commit)
             return
+        if FAILED.exists() and json.loads(FAILED.read_text(encoding="utf-8")) == {
+            "commit": commit, "ci": approved,
+        }:
+            status("holding-failed-release", commit=commit, ci=approved)
+            return
         if not apply:
             status("ready", commit=commit, ci=approved)
             return
@@ -257,7 +264,7 @@ def update(apply):
                for service, image in images.items()}
         for service in SERVICES:
             run("docker", "image", "tag", images[service], old[service])
-        write_json(JOURNAL, {"images": images, "tags": old})
+        write_json(JOURNAL, {"commit": commit, "ci": approved, "images": images, "tags": old})
         try:
             switch(tags, expected)
             write_json(ACTIVE, {"commit": commit, "ci": approved, "images": expected, "previous": old})

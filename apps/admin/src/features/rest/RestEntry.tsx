@@ -1,7 +1,8 @@
-import { Coffee, Timer } from "lucide-react";
+import { Timer } from "lucide-react";
 import { useRef, useState } from "react";
 import { useLocale } from "@/app/locale";
 import { Button, Tooltip } from "@/components/ui";
+import { AnimatedIcon } from "@/components/ui/AnimatedIcon";
 import { Popover, PopoverContent, PopoverTrigger } from "@/registry/components/popover/popover";
 import { useRest } from "./RestContext";
 import { formatMediaTime, REST_MINUTES } from "./restSession";
@@ -14,11 +15,11 @@ export function RestEntry() {
   const starting = useRef(false);
   if (!rest.available && !rest.session) return null;
   if (rest.session) return <Tooltip title={`${t("打开休息播放器")} · ${rest.remaining ? formatMediaTime(rest.remaining) : t("休息结束")}`}>
-    <Button ref={rest.entryRef} type="text" className={styles.entry} icon={<Coffee size={17} aria-hidden />}
+    <Button ref={rest.entryRef} type="text" className={styles.entry} icon={<AnimatedIcon name="coffee" style={{ fontSize: 17 }} />}
       aria-label={t("打开休息播放器")} aria-controls="rental-rest-player" aria-expanded={rest.expanded} onClick={rest.expand} data-sound-silent />
   </Tooltip>;
   return <Popover open={open} onOpenChange={next => { starting.current = false; setOpen(next); }}>
-    <Tooltip title={t("休息一下")}><PopoverTrigger asChild><Button ref={rest.entryRef} type="text" className={styles.entry} icon={<Coffee size={17} aria-hidden />}
+    <Tooltip title={t("休息一下")}><PopoverTrigger asChild><Button ref={rest.entryRef} type="text" className={styles.entry} icon={<AnimatedIcon name="coffee" style={{ fontSize: 17 }} />}
       aria-label={t("休息一下")} data-sound-silent /></PopoverTrigger></Tooltip>
     <PopoverContent align="end" className={styles.chooser} aria-label={t("选择休息时长")} onCloseAutoFocus={event => {
       // Starting opens a new focus owner; the closing popover must not pull focus
