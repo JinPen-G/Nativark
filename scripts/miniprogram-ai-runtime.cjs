@@ -47,22 +47,29 @@ const inside = (root, file) => {
 const entryActionExports = Object.freeze(['AI_REGISTERED_ENTRY_ACTION_VERSION', 'AI_REGISTERED_ENTRY_ACTION_HTTP',
   'aiRegisteredEntryActionOrderSourceSchema', 'aiRegisteredEntryActionOrderResponseSchema',
   'aiRegisteredEntryActionReadSchema', 'aiRegisteredEntryActionRevalidationSchema']);
+const bundles = {
+  customer: { entry: 'miniprogram-client.ts', output: 'index.js', exports: exportsAllowed },
+  entry_actions: { entry: 'miniprogram-entry-actions.ts', output: 'entry-action-runtime.js', exports: entryActionExports },
+  scene_catalog: { entry: 'miniprogram-scene-catalog.ts', output: 'scene-catalog-runtime.js', exports: [
+    'AI_ENTRY_SCENE_CATALOG_VERSION', 'AI_ENTRY_SCENE_CATALOG_HTTP', 'isAiEntrySceneCatalogRequest',
+    'isAiEntrySceneCatalogResponse', 'entrySceneAvailabilityLabel'] },
+};
 async function buildNativeContractRuntime(appRoot, kind) {
   appRoot = path.resolve(appRoot);
   const projectRoot = path.resolve(appRoot, '../..');
-  if (!['customer', 'entry_actions'].includes(kind)
-    || ![path.join(projectRoot, 'apps', 'miniprogram'), ...(kind === 'entry_actions'
+  if (!Object.hasOwn(bundles, kind)
+    || ![path.join(projectRoot, 'apps', 'miniprogram'), ...(kind !== 'customer'
       ? [path.join(projectRoot, 'apps', 'staff-miniprogram')] : [])].includes(appRoot)) throw Error('Unexpected native contract root');
   const resolve = name => require.resolve(name, { paths: [appRoot, projectRoot] });
   const webpack = require(resolve('webpack')), TerserPlugin = require(resolve('terser-webpack-plugin'));
   const { Volume, createFsFromVolume } = require(resolve('memfs'));
   const sourceRoot = fs.realpathSync(path.join(projectRoot, 'packages/shared/src'));
   const zodRoot = fs.realpathSync(path.dirname(resolve('zod/package.json')));
-  const entry = path.join(sourceRoot, kind === 'customer' ? 'miniprogram-client.ts' : 'miniprogram-entry-actions.ts');
+  const bundle = bundles[kind], entry = path.join(sourceRoot, bundle.entry);
   const license = fs.readFileSync(path.join(zodRoot, 'LICENSE'), 'utf8');
   const outputPath = kind === 'customer' ? path.join(appRoot, 'dist', 'vendor', 'shared-ai-client')
     : path.join(appRoot, 'dist', 'components', 'ai-native');
-  const outputName = kind === 'customer' ? 'index.js' : 'entry-action-runtime.js';
+  const outputName = bundle.output;
   const memory = createFsFromVolume(new Volume());
   memory.join = path.join.bind(path);
   const sources = new Set();
@@ -114,7 +121,7 @@ async function buildNativeContractRuntime(appRoot, kind) {
     Buffer: undefined, process: undefined, window: undefined, document: undefined, structuredClone: undefined };
   vm.runInNewContext(code, sandbox, { timeout: 2000, filename: 'shared-ai-client/index.js' });
   const names = Object.keys(sandbox.module.exports).sort();
-  if (JSON.stringify(names) !== JSON.stringify([...(kind === 'customer' ? exportsAllowed : entryActionExports)].sort()))
+  if (JSON.stringify(names) !== JSON.stringify([...bundle.exports].sort()))
     throw Error('Native contract export whitelist mismatch');
   const sourceHashes = [...sources].sort().map(file => ({ file: inside(sourceRoot, file)
     ? `shared/${path.relative(sourceRoot, file).replace(/\\/g, '/')}`
@@ -124,4 +131,5 @@ async function buildNativeContractRuntime(appRoot, kind) {
 }
 const buildMiniprogramAiRuntime = appRoot => buildNativeContractRuntime(appRoot, 'customer');
 const buildEntryActionRuntime = appRoot => buildNativeContractRuntime(appRoot, 'entry_actions');
-module.exports = { buildMiniprogramAiRuntime, buildEntryActionRuntime, exportsAllowed, entryActionExports };
+const buildSceneCatalogRuntime = appRoot => buildNativeContractRuntime(appRoot, 'scene_catalog');
+module.exports = { buildMiniprogramAiRuntime, buildEntryActionRuntime, buildSceneCatalogRuntime, exportsAllowed, entryActionExports };

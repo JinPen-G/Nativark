@@ -31,6 +31,12 @@ export function NativeOperatorWorkspace({ visible }: { visible: boolean }) {
   const deny = () => { setAnswer(null); setQuote(null); operator.retract(); };
   return <>
     <ContentTransition value={`${binding}:${frame?.phase ?? 'input'}`} className="operator-work-body">
+      {(frame?.contextTurns ?? 0) >= 7 && <div className="operator-artifact">
+        <p role="status">{(frame!.contextTurns! > 8)
+          ? label('已达到本对话的历史上限。可继续查看原结果，或新开对话处理下一个目标。', 'This conversation reached its history limit. Review the original result or start a new goal.')
+          : label('单轮最多参考 8 个前序轮次。建议缩小本次目标，或新开对话。', 'Each request can use up to 8 previous turns. Narrow the goal or start a new conversation.')}</p>
+        <Button onClick={() => operator.createConversation()}>{label('开始独立新目标', 'Start a new goal')}</Button>
+      </div>}
       {operator.capability.nativeScene === 'order_explanation' && (!frame || frame.readyForNext) && <div className="operator-artifact">
         <label>{label('订单编号', 'Order ID')}<Input value={operator.orderId} maxLength={191} onChange={event => operator.setOrderId(event.currentTarget.value)} placeholder={label('填写原订单编号', 'Enter the original order ID')} /></label>
         <label>{label('本次订单问题', 'Order question')}<Select value={operator.orderQuestion || undefined} placeholder={label('明确选择本次问题', 'Choose a question')}

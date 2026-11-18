@@ -19,7 +19,7 @@ export type NativeScene = 'quote_clarification' | 'order_explanation' | 'opening
 export type NativeFrame = { conversationId: string; scene: NativeScene;
   turn: AiConversationTurnObservationDraft | null; result: AiConversationTaskResultDraft | null;
   phase: 'admission' | 'task' | 'model' | 'result' | 'unknown'; historical: boolean;
-  snapshot?: AiTaskSnapshotDraft; observation?: AiConversationObservationDraft; readyForNext?: boolean };
+  snapshot?: AiTaskSnapshotDraft; observation?: AiConversationObservationDraft; readyForNext?: boolean; contextTurns?: number };
 export type NativeSend = { chatId: string; scene: NativeScene; text: string; orderId?: string;
   question?: 'status' | 'fees' | 'payments' | 'next_steps'; sections?: string[] };
 type Locator = { chatId: string; scene: NativeScene; conversationId: string | null; pending: boolean };
@@ -95,7 +95,7 @@ export class NativeOperatorSession {
     const turn = detail.conversation.currentTurn ?? detail.turns.items[0] ?? null;
     const frame: NativeFrame = { conversationId, scene, turn, result: null, phase: 'unknown',
       historical: detail.conversation.status !== 'active' || detail.conversation.currentTurn === null,
-      observation: detail.conversation };
+      observation: detail.conversation, contextTurns: detail.turns.items.length };
     if (turn?.task) {
       frame.result = await this.d.api.currentResult({ draftVersion: version, conversationId, admissionKey: turn.admissionKey }, turn, signal);
       this.check(signal);
@@ -130,14 +130,16 @@ export class NativeOperatorSession {
       }
       const observed = await this.metadata(locator, signal), turn = observed.currentTurn;
       let selectedTurn = turn ?? previous?.turn ?? null;
+      let contextTurns = previous?.observation?.revision === observed.revision ? previous?.contextTurns : undefined;
       if (!selectedTurn) {
         const detail = await this.d.api.detail({ draftVersion: version, conversationId: locator.conversationId!, limit: 20 }, locator.scene, signal);
         this.check(signal);
         if (JSON.stringify(detail.conversation) !== JSON.stringify(observed)) throw Error('AI_REVISION_CONFLICT');
         selectedTurn = detail.turns.items[0] ?? null;
+        contextTurns = detail.turns.items.length;
       }
       const frame: NativeFrame = { conversationId: locator.conversationId!, scene: locator.scene, turn: selectedTurn,
-        result: null, phase: 'unknown', historical: observed.status !== 'active' || turn === null, observation: observed };
+        result: null, phase: 'unknown', historical: observed.status !== 'active' || turn === null, observation: observed, contextTurns };
       if (frame.turn?.task) {
         const selected = frame.turn;
         frame.result = await this.d.api.currentResult({ draftVersion: version, conversationId: frame.conversationId, admissionKey: selected.admissionKey }, selected, signal);
@@ -177,8 +179,15 @@ export class NativeOperatorSession {
     const previous = this.frames.get(chatId);
     if (!previous || previous.conversationId !== locator.conversationId || previous.turn?.turnId !== proof.turnId
       || previous.turn.original.inputRef !== proof.originalInputRef) throw Error('AI_RESULT_UNKNOWN');
+    let contextTurns: number | undefined;
+    if (observed.revision >= 15) {
+      const detail = await this.d.api.detail({ draftVersion: version, conversationId: locator.conversationId, limit: 9 }, locator.scene, signal);
+      this.check(signal);
+      if (JSON.stringify(detail.conversation) !== JSON.stringify(observed)) throw Error('AI_REVISION_CONFLICT');
+      contextTurns = detail.turns.items.length;
+    }
     this.save({ ...locator, pending: false });
-    this.publish(chatId, { ...previous, historical: true, observation: observed, readyForNext: true }, signal);
+    this.publish(chatId, { ...previous, historical: true, observation: observed, readyForNext: (contextTurns ?? 0) <= 8, contextTurns }, signal);
   }
   async send(input: NativeSend, signal: AbortSignal, visible?: LiveVisibleObservationSession | null): Promise<NativeFrame> {
     this.check(signal); if (this.busy) throw Error('AI_BUSY');

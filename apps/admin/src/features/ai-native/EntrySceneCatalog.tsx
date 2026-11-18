@@ -2,7 +2,7 @@
  * and expiry withdraw the page; reopening never restores or requests a page.
  * No generated navigation, execution control or local authorization is derived. */
 import { useEffect, useRef, useState } from 'react';
-import type { AiEntrySceneCatalogResponse } from '@rental-os/shared';
+import { entrySceneAvailabilityLabel, type AiEntrySceneCatalogResponse } from '@rental-os/shared';
 import { ActionButton, Alert } from '@/components/ui';
 import { useAuthStore } from '@/features/auth/authStore';
 import { currentSessionEpoch } from '@/app/queryClient';
@@ -107,6 +107,7 @@ export function EntrySceneCatalog({ identity, enabled, current }: { identity: st
       {!page.entries.length && <p>{text('本页没有场景，继续使用原人工入口。', 'No scenes on this page. Use the original manual workflow.')}</p>}
       <ul>{page.entries.map(entry => <li key={entry.entryId} style={{ overflowWrap: 'anywhere' }}>
         <strong>{safeDisplayText(entry.title, 128)}</strong>{' · '}{status[entry.availability.state]}{' · '}{entry.riskLevel}
+        {entry.availability.state !== 'available' && <p>{entrySceneAvailabilityLabel(entry.availability.reason, locale === 'en-US')}</p>}
         <p>{safeDisplayText(entry.goal, 1000)}</p>
         <p>{confirmation[entry.confirmation]}</p>
         <details><summary>{text('来源、权限与限制', 'Sources, access and limits')}</summary><dl>

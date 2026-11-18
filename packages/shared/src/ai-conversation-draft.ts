@@ -24,6 +24,7 @@ export interface AiConversationUnstartedReceiptDraft {
 }
 export interface AiConversationCreateDraft extends Version { operationKey: string; capabilityCode: AiSceneCode }
 export interface AiConversationReferenceDraft extends Version { conversationId: string }
+export interface AiConversationReadDraft extends AiConversationReferenceDraft { includeClosedTurn?: true }
 export interface AiConversationOperationRequestDraft extends Version { operationKey: string }
 export interface AiConversationTurnListDraft extends AiConversationReferenceDraft { limit: number; beforeId?: string }
 export interface AiConversationMutationDraft extends AiConversationReferenceDraft { operationKey: string; expectedRevision: number }
@@ -65,6 +66,7 @@ export interface AiConversationAdmissionResponseDraft extends AiConversationTurn
 export interface AiConversationObservationDraft extends AiConversationReferenceDraft {
   revision: number; capabilityCode: AiSceneCode; status: 'active' | 'archived';
   currentTurn: AiConversationTurnObservationDraft | null;
+  closedTurn?: { operationKey: string; turnId: string; admissionKey: string; originalInputRef: string; requestHash: string };
   createdAt: string; updatedAt: string;
   taskCancellation: 'separate_original_operation'; businessRecords: 'not_modified';
 }
@@ -131,7 +133,7 @@ export const AI_CONVERSATION_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
     conversationId: id(), operationKey: key, expectedRevision: revision, turnId: id(), originalInputRef: id() }),
   AiConversationUnstartedReceiptDraft: unstartedReceipt,
   AiConversationCreateDraft: object({ ...version, operationKey: key, capabilityCode: capability }),
-  AiConversationReferenceDraft: object(reference),
+  AiConversationReferenceDraft: object({ ...reference, includeClosedTurn: { type: 'boolean', const: true } }, Object.keys(reference)),
   AiConversationOperationRequestDraft: object({ ...version, operationKey: { ...id(), maxLength: 128 } }),
   AiConversationTurnListDraft: object({ ...reference, limit: integer(1, 20), beforeId: id() }, ['draftVersion', 'conversationId', 'limit']),
   AiConversationMutationDraft: object(operation),
@@ -163,7 +165,8 @@ export const AI_CONVERSATION_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
   AiConversationAdmissionResponseDraft: object({ ...reference, admissionKey: key, result: { oneOf: [ref('AiConversationTurnObservationDraft'), nil] },
     absence: choice('not_proof_of_no_commit'), retryable: no }),
   AiConversationObservationDraft: object({ ...version, ...summary, currentTurn: { oneOf: [ref('AiConversationTurnObservationDraft'), nil] },
-    taskCancellation: choice('separate_original_operation'), businessRecords: choice('not_modified') }),
+    closedTurn: object({ operationKey: key, turnId: id(), admissionKey: key, originalInputRef: id(), requestHash: hash }),
+    taskCancellation: choice('separate_original_operation'), businessRecords: choice('not_modified') }, [...Object.keys(version), ...Object.keys(summary), 'currentTurn', 'taskCancellation', 'businessRecords']),
   AiConversationOperationObservationDraft: { oneOf: [unstartedReceipt, object({ ...version, operationKey: key, retryable: no, status: choice('observed'),
     conversationId: id(), revision, operation: choice('create', 'archive', 'delete', 'release_turn'), taskCancellation: choice('not_requested'), businessRecords: choice('not_modified') }),
     object({ ...version, operationKey: key, retryable: no, status: choice('not_observed'), nextAction: choice('read_original_operation'),
@@ -240,12 +243,19 @@ export function validateAiConversationAdmissionDraft(value: unknown, query: AiCo
 }
 
 export function validateAiConversationObservationDraft(value: unknown, query: AiConversationReferenceDraft): value is AiConversationObservationDraft {
+  const hasClosed = !!value && typeof value === 'object' && 'closedTurn' in value;
   if (!conversationClosed(value, ['draftVersion', 'conversationId', 'revision', 'capabilityCode', 'status', 'currentTurn',
-    'createdAt', 'updatedAt', 'taskCancellation', 'businessRecords']) || value.draftVersion !== AI_CONVERSATION_DRAFT_VERSION
+    'createdAt', 'updatedAt', 'taskCancellation', 'businessRecords', ...(hasClosed ? ['closedTurn'] : [])]) || value.draftVersion !== AI_CONVERSATION_DRAFT_VERSION
     || value.conversationId !== query.conversationId || !conversationId(value.conversationId) || !conversationRevision(value.revision)
     || !AI_SCENE_CODES.includes(value.capabilityCode as AiSceneCode) || !['active', 'archived'].includes(value.status as string)
     || !conversationTime(value.createdAt) || !conversationTime(value.updatedAt)
     || value.taskCancellation !== 'separate_original_operation' || value.businessRecords !== 'not_modified') return false;
+  if (hasClosed) {
+    const proof = value.closedTurn;
+    if (value.status !== 'active' || value.currentTurn !== null || !conversationClosed(proof, ['operationKey','turnId','admissionKey','originalInputRef','requestHash'])
+      || ![proof.operationKey,proof.turnId,proof.admissionKey,proof.originalInputRef].every(conversationId)
+      || typeof proof.requestHash !== 'string' || !/^[a-f0-9]{64}$/u.test(proof.requestHash)) return false;
+  }
   return value.currentTurn === null || validateAiConversationTurnDraft(value.currentTurn) && value.currentTurn.capabilityCode === value.capabilityCode;
 }
 export function validateAiConversationTurnPageDraft(value: unknown, query: AiConversationTurnListDraft, capabilityCode: AiSceneCode): value is AiConversationTurnPageDraft {

@@ -282,9 +282,23 @@ export class AiConversationRepository {
     const turn = row.activeTurnId ? await this.db.aiConversationTurn.findFirst({ where: { ...this.owner(session), conversationId: row.id, id: row.activeTurnId } }) : null;
     if (row.activeTurnId && !turn) throw unavailable();
     const currentTurn = turn ? await this.turn(turn) : null;
+    let closedTurn: AiConversationObservationDraft['closedTurn'];
+    if (command.includeClosedTurn && row.status === 'active' && !turn && row.revision >= 3) {
+      const history = { ...this.owner(session), conversationId: row.id };
+      const previous = await this.db.aiConversationTurn.findFirst({ where: { ...history, admissionRevision: row.revision - 2 } });
+      const closure = await this.db.aiConversationOperation.findFirst({ where: { ...history, revision: row.revision, operation: { in: ['release_turn', 'close_unstarted'] } } });
+      if (previous && closure) {
+        const unstarted = closure.operation === 'close_unstarted';
+        const command = { draftVersion: unstarted ? AI_CONVERSATION_UNSTARTED_DRAFT_VERSION : version, conversationId: row.id,
+          operationKey: closure.operationKey, expectedRevision: row.revision - 1, ...(unstarted ? { turnId: previous.id, originalInputRef: previous.originalRequestId } : {}) };
+        if (closure.inputHash !== requestFingerprint({ operation: closure.operation, command })) throw unavailable();
+        closedTurn = { operationKey: closure.operationKey, turnId: previous.id, admissionKey: previous.admissionKey,
+          originalInputRef: previous.originalRequestId, requestHash: previous.inputHash };
+      }
+    }
     const after = await this.row(this.db, session, row.id);
     if (row.revision !== after.revision) throw conflict(); await this.check(session);
-    return { draftVersion: version, ...this.summary(row), currentTurn, taskCancellation: 'separate_original_operation', businessRecords: 'not_modified' };
+    return { draftVersion: version, ...this.summary(row), currentTurn, ...(closedTurn ? { closedTurn } : {}), taskCancellation: 'separate_original_operation', businessRecords: 'not_modified' };
   }
   async turns(value: unknown): Promise<AiConversationTurnPageDraft> {
     const command = conversationCommand('AiConversationTurnListDraft', value), session = await this.current();

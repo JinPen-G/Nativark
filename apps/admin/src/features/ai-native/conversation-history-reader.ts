@@ -133,7 +133,7 @@ export async function readConversationDetail(reads: {
   const latest = await metadata();
   const signature = (value: typeof first) => {
     const turn = value.currentTurn;
-    return JSON.stringify([value.conversationId, value.revision, value.capabilityCode, value.status, value.createdAt, value.updatedAt,
+    return JSON.stringify([value.conversationId, value.revision, value.capabilityCode, value.status, value.createdAt, value.updatedAt, value.closedTurn,
       turn && [turn.turnId, turn.admissionKey, turn.originalRequestKey, turn.requestHash, turn.capabilityCode, turn.capabilityVersion,
         turn.createdAt, turn.original.inputRef, turn.material, turn.task?.taskId, turn.task?.runId,
         'creation' in turn ? turn.creation : null, 'closeOperationKey' in turn ? turn.closeOperationKey : null]]);

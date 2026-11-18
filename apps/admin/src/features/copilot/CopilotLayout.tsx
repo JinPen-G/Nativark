@@ -153,6 +153,7 @@ function CopilotPanel({ narrow, open, background }: { narrow: boolean; open: boo
       {copilot.turns.map(turn => <article key={turn.id} className="asp-turn"><div className="asp-user"><p>{turn.prompt}</p><span>{t(turn.page)} · {turn.contexts.length} {t('条上下文')}</span></div>
         {turn.status === 'reading' ? <p className="asp-reading" role="status">{t('正在读取原任务并运行订单 Agent…')}</p> : <>
           <CopilotModelText turn={turn} />
+          {turn.status === 'done' && copilot.order.complete && !copilot.order.textSource && <p role="status">{t('原轮次已关闭，可开始新对话。')}</p>}
           {turn.status === 'stopped' && <p className="asp-state">{t('原操作待核对')}<button type="button" disabled={copilot.busy} onClick={() => void copilot.readOriginal()}>{t('核对原结果')}</button></p>}
           {!!turn.contexts.length && <details className="copilot-sources"><summary>{t('上下文来源')} · {turn.contexts.length}</summary>{turn.contexts.map(record => <div key={record.key}><strong>{contextLabel(record)}</strong><span>{t(record.source)} · {new Date(record.capturedAt).toLocaleTimeString(locale)}</span>
             <button type="button" onClick={() => { if (copilot.routes.some(route => record.path === route.path || record.path.startsWith(`${route.path}/`))) { navigate(record.path); if (narrow) copilot.close(); } }}>{t('返回来源')}</button></div>)}</details>}
