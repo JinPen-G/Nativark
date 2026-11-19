@@ -1,4 +1,6 @@
 /** 公共权限目录沿原system编码；Core权限由受控注册贡献，不从客户端字段自注册。 */
+export const TENANT_ROLE_READ_PERMISSIONS = ["system:user:manage", "system:role:manage"] as const;
+
 export const PLATFORM_PERMISSIONS = [
   { code: "system:tenant:manage", name: "租户管理", module: "SaaS平台" },
   { code: "system:tenant:bootstrap", name: "租户初始化", module: "SaaS平台" },

@@ -5,6 +5,7 @@ import { OFFICIAL_CALENDAR_HTTP_OPERATIONS } from "./modules/official-calendars/
 import { PLATFORM_SETTINGS_HTTP_OPERATIONS } from "./modules/platform/platform-settings-http-policy";
 import { PLATFORM_TOOLS_HTTP_OPERATIONS } from "./modules/platform-tools/platform-tools-http-policy";
 import { TENANT_MESSAGING_HTTP_OPERATIONS } from "./modules/messaging/tenant-messaging-http-policy";
+import { TENANT_ROLE_READ_PERMISSIONS } from "./modules/platform/platform-permissions";
 export const PLATFORM_HTTP_OPERATIONS = [
   { method: "GET", path: "/health", id: "health", summary: "读取公共宿主健康状态", access: "anonymous", response: "Health" },
   { method: "GET", path: "/openapi.json", id: "openApi", summary: "读取当前宿主接口资料", access: "anonymous", response: "OpenApi" },
@@ -31,7 +32,7 @@ export const PLATFORM_HTTP_OPERATIONS = [
   { method: "PUT", path: "/platform/users/:id", id: "saveUser", summary: "保存本租户账号和角色", access: "tenant", permission: "system:user:manage", request: "SaveUser", response: "SystemUser" },
   { method: "PUT", path: "/platform/users/:id/status", id: "userStatus", summary: "启停账号并撤销旧会话", access: "tenant", permission: "system:user:manage", request: "UserStatus", response: "SystemUser" },
   { method: "POST", path: "/platform/users/:id/reset-password", id: "resetUserPassword", summary: "重置成员密码并撤销旧会话", access: "tenant", permission: "system:user:manage", response: "ResetPassword" },
-  { method: "GET", path: "/platform/roles", id: "listRoles", summary: "读取本租户角色", access: "tenant", permission: "system:role:manage", response: "Roles" },
+  { method: "GET", path: "/platform/roles", id: "listRoles", summary: "读取本租户角色", access: "tenant", permission: TENANT_ROLE_READ_PERMISSIONS, response: "Roles" },
   { method: "POST", path: "/platform/roles", id: "createRole", summary: "创建本租户角色", access: "tenant", permission: "system:role:manage", request: "SaveRole", response: "Role" },
   { method: "PUT", path: "/platform/roles/:id", id: "saveRole", summary: "保存本租户角色权限", access: "tenant", permission: "system:role:manage", request: "SaveRole", response: "Role" },
   { method: "DELETE", path: "/platform/roles/:id", id: "deleteRole", summary: "删除未分配的普通角色", access: "tenant", permission: "system:role:manage", response: "Deleted" },
@@ -49,4 +50,10 @@ export function platformHttpPolicy(method: string, path: string) {
   const segments = path.split("/");
   return PLATFORM_HTTP_OPERATIONS.find(item => item.method === verb && item.path.split("/").length === segments.length
     && item.path.split("/").every((segment, index) => segment.startsWith(":") ? Boolean(segments[index]) : segment === segments[index]));
+}
+
+/** 权限列表沿原 Guard 的任一匹配语义；公开与本人入口分别由 access 判定。 */
+export function platformHttpPermissions(policy: (typeof PLATFORM_HTTP_OPERATIONS)[number] | undefined): readonly string[] {
+  if (!policy || !("permission" in policy)) return [];
+  return typeof policy.permission === "string" ? [policy.permission] : policy.permission;
 }

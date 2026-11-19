@@ -11,7 +11,7 @@ import { PLATFORM_AUTH_DATA_STORE } from "./platform-auth-data-store";
 import { PlatformManagementRepository } from "./platform-management.repository";
 import type { PlatformManagementDatabase, PlatformManagementTransaction } from "./platform-management.store";
 import { PlatformPrincipalAuthority } from "./platform-principal.authority";
-import { managesPlatformTenants, managesTenant } from "./platform-permissions";
+import { managesPlatformTenants, managesTenant, TENANT_ROLE_READ_PERMISSIONS } from "./platform-permissions";
 import { normalizeSecurityBaseline, PLATFORM_SECURITY_TENANT_ID, readPlatformSecurityBaseline, validateSecurityBaseline } from "./platform-security-baseline";
 
 @Injectable()
@@ -195,7 +195,10 @@ export class PlatformManagementService {
 
   listRoles() {
     const actor = this.principals.current();
-    return this.run("system:role:manage", false, undefined, tx => this.repository.roles(tx, actor.tenantId));
+    // 人员管理需要读取可分配角色；读取选项不会授予角色编辑或业务 Core 使用权。
+    return this.run("system:role:manage", false, undefined, tx => this.repository.roles(tx, actor.tenantId), false,
+      user => !user.isSaasAdmin && (user.isPlatformAdmin || user.dataScope === "all"
+        && TENANT_ROLE_READ_PERMISSIONS.some(permission => hasEffectivePermission(user.permissions, permission))));
   }
 
   saveRole(input: SaveSystemRoleRequest) {

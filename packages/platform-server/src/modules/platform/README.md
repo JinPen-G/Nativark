@@ -15,6 +15,8 @@
 | 认证前安全读取 | [PlatformAuthenticationRepository](platform-authentication.source.ts) 委托 [readPlatformSecurityBaseline](platform-security-baseline.ts)，显式读取 `tenant_platform` 的最新 EFFECTIVE `system-rules` |
 | 直接消费者 | [公共宿主](../../../../../apps/platform-api/README.md) 和 [原 PlatformService](../../../../../apps/api/src/modules/platform/platform.service.ts) 使用同一公共实现及数据库 |
 
+角色列表沿原账号管理或角色管理权限读取本租户角色，支持人员表单和邀请中的角色选择；基础成员仍需要全租户数据范围。创建、修改和删除角色继续要求角色管理权限，选择一个角色不会自动授予成员业务 Core。公共 Guard、管理服务的事务前后复验与 OpenAPI 使用同一读取权限声明，文档中的 `x-requiredPermissions` 按 `x-permissionMatch: any` 匹配。[读取声明](platform-permissions.ts) · [公共政策](../../platform-http-policy.ts)
+
 组织读取沿原 `system:user:manage` 及数据投影。组织范围账号只读取当前组织连续启用的子树，缺失或停用组织返回空集合。组织维护要求当前租户、账号管理权限、全租户数据范围及完整地点范围。SaaS 组织接口按原准入拒绝，查询参数仅参与原租户投影。
 
 全平台安全保存要求当前 SaaS 身份及 `system:params:manage`，通过平台租户锁串行化，在写入点匹配原行 ID、版本和生效状态。更新保留原生效版本及 JSON 中其他字段，历史 JSON null 使用原缺省语义。五个数值沿原有限且非负的规则，小数继续兼容。唯一键和事务冲突明确返回，由调用方重读核对。
@@ -41,4 +43,4 @@
 
 原 [组织范围回归](../../../../../tests/access-data-scope-regression.test.cjs) 包含启用子树、缺失组织、数据投影、内存及 Prisma 入口断言。定向验证还需覆盖公共当前主体、组织维护和审计回滚、提交前撤权、安全历史版本及其他字段保留、JSON null、同键冲突和原二次确认结果。Nest 容器可核对 Controller 与服务及数据库实例一致。[验证与隔离规则](../../../../../AGENTS.md#修改验证与交付)
 
-类型、明确 fixture 与 Nest 容器分别记录证据。真实 HTTP、数据库并发、浏览器及完整宿主验收沿专项接续核收。[PCH 当前入口](../../../../../docs/平台底座/Core接入/平台Core接入-协作接续.md)
+类型、明确 fixture 与 Nest 容器分别记录证据。真实 HTTP、数据库并发、浏览器及完整宿主验收按所选部署组合办理。[公共宿主](../../../../../apps/platform-api/README.md)

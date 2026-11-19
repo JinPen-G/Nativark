@@ -2,7 +2,7 @@
 import { Controller, Get, Inject } from "@nestjs/common";
 import type { AuthUser, TenantIdentity, TenantAppearanceProfile, SaveTenantAppearanceRequest, PlatformTenantSummary,
   CreatePlatformTenantRequest, SaveSystemUserRequest, SaveSystemRoleRequest, SystemRoleRow, SystemUserRow } from "@rental-os/platform-contracts";
-import { PLATFORM_HTTP_OPERATIONS } from "./platform-http-policy";
+import { PLATFORM_HTTP_OPERATIONS, platformHttpPermissions } from "./platform-http-policy";
 import { RAW_HTTP_RESPONSE } from "./common/request-id.interceptor";
 import { SUBSCRIPTION_OPENAPI_SCHEMAS, SUBSCRIPTION_OPENAPI_QUERY_SCHEMAS } from "./modules/subscription/subscription-openapi";
 import { INTEGRATION_OPENAPI_SCHEMAS } from "./modules/integrations/integration-openapi";
@@ -107,7 +107,8 @@ export function createPlatformOpenApi() {
       item.response === "Subscription.Void" ? ["requestId"] : ["data", "requestId"]);
     const operation = { operationId: `Platform.${item.id}`, summary: item.summary, tags: ["Platform"],
       security: item.access === "anonymous" ? [] : [{ bearerAuth: [] }],
-      "x-requiredPermissions": "permission" in item ? [item.permission] : [],
+      "x-requiredPermissions": platformHttpPermissions(item),
+      ...("permission" in item ? { "x-permissionMatch": "any" } : {}),
       "x-effect": "effect" in item ? item.effect : item.method === "GET" ? "read" : "write",
       description: item.access === "saas_subscription" ? "沿原SaaS订阅管理身份办理。租户父锁、当前修订、价格版本、申请与审计在原事务中核对；续费后仍需当前Core和成员授权。"
         : item.access === "tenant_summary" ? "仅当前operator本租户的无金额提醒。SaaS身份不能代替租户读取，提醒不授予业务权限。"
