@@ -4,7 +4,7 @@
 
 ## 构建与运行
 
-先在宿主准备锁文件对应的依赖与 Rental 标准包，将 `CORE_DEPLOYMENT_LOCK` 指向与 API 相同的固定部署锁。构建入口核对所选包、清单与公共版本，要求锁内包含一个 Rental Core，随后向应用提供 `virtual:core-manifest`。[构建配置](vite.config.ts) · [标准包核验](../../packages/core-contracts/src/install.ts)
+先在宿主准备锁文件对应的依赖与 Rental 标准包，将 `CORE_DEPLOYMENT_LOCK` 指向与 API 相同的固定部署锁。构建入口核对所选包、清单与公共版本，要求锁内包含一个 Rental Core，随后向应用提供 `virtual:core-manifest`。安装包核验通过 `coreDeploymentHostVersions(lock)` 读取底座和显式选装数据能力的同一版本视图。[构建配置](vite.config.ts) · [标准包核验](../../packages/core-contracts/src/install.ts) · [宿主版本视图](../../packages/core-contracts/src/data-capability.ts)
 
 ```powershell
 npm run lint -w @rental-os/rental-admin
@@ -13,6 +13,21 @@ npm run dev -w @rental-os/rental-admin
 ```
 
 开发端口默认 `5178`，可用进程变量 `PORT` 配置。API 公开基址与代理沿公共环境配置。`ai-offline` 构建模式使用既有离线环境分支。[包命令](package.json) · [环境加载](../../config/environment.cjs)
+
+## 源码取出范围
+
+源码宿主的构建组合包含以下入口。公共包和 Rental 标准包按同一部署锁准备，第三方依赖沿应用包及 Core 的直接依赖声明和锁文件安装。
+
+| 位置 | 构建职责 |
+| --- | --- |
+| `apps/rental-admin/` | 应用、空间选择、登记导航和 Vite 装配 |
+| `packages/core-contracts/`、`packages/platform-contracts/` | 当前注册、范围、部署锁及公共运行时合同 |
+| `packages/platform-admin/` | 公共应用、UI、样式及构建适配 |
+| `packages/ui-arc/`、`packages/ui-motiq/` | 公共组件使用的保留源码、样式与许可 |
+| `packages/rental-core/` | 十二组 31 页、通知、浏览器会话及所选标准包的领域运行时出口 |
+| `config/environment.cjs` | 公开构建参数和原环境加载入口 |
+
+Runtime 导入沿各包正式出口解析。公共 UI 的来源别名由 `platformAdminVite()` 定位到保留组件及公共适配器。日期、订单表格、HTTP 兼容处理和原动效的直接依赖分别由 `dayjs`、`@tanstack/react-table`、`axios` 和 `motion` 提供。[公共构建入口](../../packages/platform-admin/config/vite.ts) · [Core 依赖](../../packages/rental-core/package.json) · [UIArc 来源](../../packages/ui-arc/README.md) · [表格动效来源](../../packages/ui-motiq/README.md)
 
 ## 身份、范围与导航
 
@@ -39,4 +54,4 @@ npm run dev -w @rental-os/rental-admin
 
 ## 验证入口
 
-必要类型检查覆盖独立入口、构建配置、公共壳接点、Rental 通知与页面贡献。定向离线验证覆盖实际工厂、登记导航、会员与经营空间差异、同一缓存和声音范围、个人状态及工单修订与结果未知锁。浏览器、真实 HTTP、数据库、干净标准包安装与正式发布分别取得宿主证据。
+必要类型检查覆盖独立入口、构建配置、公共壳接点、Rental 通知与页面贡献。Core 自身的类型入口直接复用公共包配置并包含浏览器通知。定向离线验证覆盖实际工厂、登记导航、会员与经营空间差异、同一缓存和声音范围、个人状态及工单修订与结果未知锁。内存构建核对真实页面、归档 JavaScript、公共 UI 和样式的编译闭包，使用的依赖映射、部署锁和安装包 fixture 随验证证据说明。浏览器、真实 HTTP、数据库、干净标准包安装与正式发布分别取得宿主证据。[Core 类型入口](../../packages/rental-core/admin/tsconfig.json)

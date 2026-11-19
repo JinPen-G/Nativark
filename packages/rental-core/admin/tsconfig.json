@@ -1,9 +1,10 @@
 {
-  "extends": "../../../apps/platform-admin/tsconfig.json",
+  "extends": "../../platform-admin/tsconfig.json",
   "include": [
     "index.tsx",
     "host-context.tsx",
     "browser.ts",
+    "browser-notifications",
     "orders",
     "work-orders",
     "capabilities",
