@@ -32,6 +32,9 @@
       "github-repository": [
         "dist/github-repository.d.ts"
       ],
+      "github-discovery": [
+        "dist/github-discovery.d.ts"
+      ],
       "platform-source": [
         "dist/platform-source.d.ts"
       ],
@@ -76,6 +79,10 @@
     "./github-repository": {
       "types": "./dist/github-repository.d.ts",
       "default": "./dist/github-repository.js"
+    },
+    "./github-discovery": {
+      "types": "./dist/github-discovery.d.ts",
+      "default": "./dist/github-discovery.js"
     },
     "./platform-source": {
       "types": "./dist/platform-source.d.ts",

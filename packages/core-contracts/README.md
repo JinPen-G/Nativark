@@ -378,6 +378,8 @@ node packages/core-contracts/dist/github-release.js discover [关键词] [页码
 
 宿主从同一 `@rental-os/core-contracts/github` 出口创建一个 `createGitHubCoreDiscovery()` 实例并复用它，再调用 `discover({ text, page }, refresh)`。实例缓存最近50页，每页5分钟；并发相同查询共用一次读取，`refresh=true`跳过缓存。缓存只含公开元数据，进程退出可以丢弃，命令每次运行不会保存磁盘缓存。
 
+只需发现查询与结果时，使用正式子出口 `@rental-os/core-contracts/github-discovery`，其 JavaScript 和类型声明随同一包构建。后台客户端通过 `import type` 复用这些类型，实际查询由服务端的发现入口处理。[发现合同与实现](src/github-discovery.ts)
+
 返回状态为`fresh`、`cached`或`unavailable`。远端不可达/限流/格式错误时，`unavailable.error`保留原因；有原缓存时附带`stale`及其原始查询时间，没有缓存时不伪造空结果。`discover`命令始终将这个结构写stdout，unavailable退出1，成功退出0；用法错误写stderr并退出1。实际已安装Core继续由宿主独立维护，发现失败不触碰它们。
 
 候选仓库通过下面的固定根清单/索引读取核定Core元数据，再由固定Release入口准备包。实际发现/版本/安装管理界面及部署注册按PCH宿主片接线。检索规则依据[GitHub仓库搜索](https://docs.github.com/en/rest/search/search#search-repositories)。
