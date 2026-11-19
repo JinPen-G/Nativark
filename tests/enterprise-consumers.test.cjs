@@ -9,7 +9,7 @@ const vm = require('node:vm');
 const crypto = require('node:crypto');
 const ts = require('typescript');
 const root = path.resolve(__dirname, '..');
-const output = path.join(root, 'output', 'enterprise-offline', 'workflows');
+const output = path.resolve(process.env.AI_OFFLINE_WRITE_ROOT ?? path.join(root, 'output', '.tmp', 'enterprise-offline-workflows'));
 const preload = path.join(root, 'tests', 'fixtures', 'ai-native', 'prisma-offline-preload.cjs');
 assert.equal(process.env.DATABASE_URL, 'mysql://offline:offline@127.0.0.1:1/rental_os_offline');
 for (const name of ['AI_OFFLINE_WRITE_ROOT', 'TEMP', 'TMP']) {
@@ -20,13 +20,70 @@ assert.ok(process.env.AI_OFFLINE_AUDIT && path.isAbsolute(process.env.AI_OFFLINE
 assert.equal(path.dirname(path.resolve(process.env.AI_OFFLINE_AUDIT)), output);
 assert.ok(process.execArgv.some(arg => path.resolve(arg) === preload), 'Use the worktree offline preload explicitly with node -r');
 
+const sourceRevision = require('node:child_process').execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', windowsHide: true }).trim();
+function readSource(relative) {
+  const filename = path.join(root, relative);
+  if (fs.existsSync(filename)) return fs.readFileSync(filename, 'utf8');
+  // 稀疏检出保留已登记源码，缺席文件从同树固定版本读取。
+  return require('node:child_process').execFileSync('git', ['show', sourceRevision + ':' + relative], { cwd: root, encoding: 'utf8', windowsHide: true, maxBuffer: 4 * 1024 * 1024 });
+}
 const sources = new Map();
 const plain = value => value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 const forbidden = name => () => { throw new Error(`Unexpected dependency side effect: ${name}`); };
+// 原商户 fixture 供给抽离后的会话与请求端口，断言仍执行当前业务正文。
+function membershipSource(relative) {
+  if (relative.startsWith('apps/admin/src/features/membership/')) return relative.replace('apps/admin/src/features/membership/', 'packages/rental-core/admin/membership/');
+  if (/^apps\/admin\/src\/components\/(?:EnterprisePolicyFields|enterprise-policy-material|enterprise-application-material|enterprise-management-material)\.(?:ts|tsx)$/.test(relative)) return relative.replace('apps/admin/src/components/', 'packages/rental-core/admin/membership/');
+  return relative;
+}
+function membershipFixture(dependencies, globals) {
+  const authStore = dependencies['@/features/auth/authStore']?.useAuthStore;
+  const query = dependencies['@/app/queryClient'] ?? {};
+  const transport = dependencies['@/api/http']?.http;
+  const getSession = () => {
+    if (!authStore) throw new Error('Original membership auth fixture is required');
+    const auth = authStore.getState();
+    return { ...auth, authenticated: Boolean(auth.token) };
+  };
+  const request = async (url, options = {}) => {
+    if (!transport) throw new Error('Original membership request fixture is required');
+    const { retryAuthentication, ...config } = options;
+    const result = await transport.request({ url, method: 'get', ...config,
+      ...(retryAuthentication === false ? { _authRetry: true } : {}) });
+    return result.data.data;
+  };
+  const runtime = {
+    currentSessionEpoch: query.currentSessionEpoch ?? (() => 0),
+    currentSessionSignal: query.currentSessionSignal ?? (() => new AbortController().signal),
+    request,
+    subscribe: listener => authStore.subscribe(listener),
+  };
+  const files = {
+    application: async (id, fileId, signal) => (await transport.request({
+      url: '/membership/enterprise-workflows/applications/' + encodeURIComponent(id) + '/files/' + encodeURIComponent(fileId),
+      method: 'get', responseType: 'blob', signal,
+    })).data,
+    management: async (id, fileId, signal) => (await transport.request({
+      url: '/membership/enterprise-workflows/management-requests/' + encodeURIComponent(id) + '/files/' + encodeURIComponent(fileId),
+      method: 'get', responseType: 'blob', signal,
+    })).data,
+  };
+  return { session: getSession(), getSession, runtime, request,
+    requestOriginal: (url, options) => request(url, { ...options, retryAuthentication: false }), files };
+}
+function membershipFormHost(dependencies, globals) {
+  const context = membershipFixture(dependencies, globals);
+  return { page: { key: 'rental:merchant-fixture', coreId: 'rental', definition: { permissions: [] } },
+    lifetimeKey: JSON.stringify([context.runtime.currentSessionEpoch(), context.session.tenant, context.session.currentWorkspaceId, context.session.user]),
+    canAccess: () => Boolean(context.getSession().sessionVerified && context.getSession().authenticated),
+  };
+}
 function load(relative, dependencies, globals = {}) {
+  const originalRelative = relative;
+  relative = membershipSource(relative);
   let source = sources.get(relative);
   if (!source) {
-    const filename = path.join(root, relative), text = fs.readFileSync(filename, 'utf8');
+    const filename = path.join(root, relative), text = readSource(relative);
     const result = ts.transpileModule(text, { fileName: filename, reportDiagnostics: true, compilerOptions: {
       module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX,
       experimentalDecorators: true, emitDecoratorMetadata: false,
@@ -39,7 +96,15 @@ function load(relative, dependencies, globals = {}) {
   const exports = {}, module = { exports };
   vm.runInNewContext(source.code, {
     exports, module, require(name) {
-      if (name === '@rental-os/rental-core') return load('packages/rental-core/src/contracts.ts', {}, globals);
+      if (name === '@rental-os/rental-core') return { ...rentalContracts, ...enterpriseContracts, ...enterpriseWorkflowContracts, ...transferDecisionContracts, ...extensionContracts, ...(dependencies['@rental-os/shared'] ?? {}) };
+      if (name.startsWith('@rental-os/rental-core/')) {
+        const manifest = JSON.parse(fs.readFileSync(path.join(root, 'packages/rental-core/package.json'), 'utf8'));
+        const entry = manifest.exports['./' + name.slice('@rental-os/rental-core/'.length)];
+        const target = typeof entry === 'string' ? entry : entry?.default;
+        assert.ok(target, 'Declared Rental export required: ' + name);
+        const filename = path.join(root, 'packages/rental-core', target.replace(/^\.\/dist\//, './src/').replace(/\.js$/, '.ts'));
+        return load(path.relative(root, filename).replaceAll('\\', '/'), dependencies, globals);
+      }
       if (relative === 'packages/rental-core/src/contracts.ts' && name === './rental-category-code') return load('packages/rental-core/src/rental-category-code.ts', {}, globals);
       if (relative === 'packages/shared/src/enterprise-workflows.ts' && name === './enterprise') return enterpriseContracts;
       if (relative === 'packages/shared/src/enterprise-workflows.ts' && name === './core') return load('packages/shared/src/core.ts', {}, globals);
@@ -48,6 +113,23 @@ function load(relative, dependencies, globals = {}) {
         // Only the new region watch: real Form remains the owner in production.
         const ui = dependencies[name]; Object.assign(ui.Form, { useWatch: (field, form) => form.getFieldValue?.(field) }); return ui;
       }
+      const alias = { '@rental-os/platform-admin/ui': '@/components/ui', '../components/ui': '@/components/ui', '@rental-os/platform-admin/locale': '@/app/locale',
+        './EnterprisePolicyFields': '@/components/EnterprisePolicyFields', './enterprise-policy-material': '@/components/enterprise-policy-material' }[name];
+      if (alias && (Object.hasOwn(dependencies, alias) || (alias === '@/components/ui' && dependencies['./ui/customer-entry']))) return { ...(dependencies[alias] ?? dependencies['./ui/customer-entry']),
+        ...(alias === '@/components/ui' ? { useFeedback: (dependencies[alias] ?? dependencies['./ui/customer-entry']).useFeedback ?? (() => ({ toast() {} })) } : {}) };
+      if (relative.startsWith('packages/rental-core/admin/membership/') && name === './page-context') return {
+        useRentalMembershipContext: () => membershipFixture(dependencies, globals),
+        useRentalMembershipSession: select => select ? select(membershipFixture(dependencies, globals).session) : membershipFixture(dependencies, globals).session,
+      };
+      if (relative === 'packages/rental-core/admin/orders/page-context.tsx' && ['react', 'react/jsx-runtime'].includes(name)) return require(name);
+      if (name === '@rental-os/platform-admin/core') return {
+        useCoreForm: options => load('packages/platform-admin/src/core/useCoreForm.ts', dependencies, globals).useCoreForm(options),
+        useCorePageHost: () => membershipFormHost(dependencies, globals), CorePage: 'core-page',
+      };
+      if (relative === 'packages/platform-admin/src/core/useCoreForm.ts' && name === './CorePage') return { useCorePageHost: () => membershipFormHost(dependencies, globals) };
+      if (relative === 'apps/admin/src/app/locale.tsx' && name === '@rental-os/platform-admin/locale') return load('packages/platform-admin/src/app/locale.tsx', dependencies, globals);
+      if (relative === 'packages/platform-admin/src/core/useCoreForm.ts' && name === '../app/locale') return dependencies['@/app/locale'] ?? { useLocale: () => ({ t: value => value, locale: 'zh-CN' }) };
+      if (relative === 'packages/platform-admin/src/core/useCoreForm.ts' && name === '../app/serverFormSnapshot') return load('packages/platform-admin/src/app/serverFormSnapshot.ts', dependencies, globals);
       if (Object.hasOwn(dependencies, name)) return dependencies[name];
       if (['apps/enterprise-portal/src/WorkflowPages.tsx','apps/enterprise-portal/src/OwnRentalHandoffs.tsx'].includes(relative) && name === 'react-router-dom') return { useLocation: () => ({ search: '' }) };
       if (name === '@/components/enterprise-management-material') return load('apps/admin/src/components/enterprise-management-material.ts', dependencies, globals);
@@ -81,13 +163,28 @@ function load(relative, dependencies, globals = {}) {
       if (relative === 'apps/enterprise-portal/src/OwnRentalHandoffOrders.tsx' && name === '@tanstack/react-query') return { useQuery: forbidden('uninvoked original-source child hook') };
       if (relative === 'apps/enterprise-portal/src/OwnRentalHandoffOrders.tsx' && name === 'react-router-dom') return { Link: 'link' };
       if (relative === 'apps/enterprise-portal/src/OwnRentalHandoffOrders.tsx' && name === '@rental-os/web-client') return load('packages/web-client/src/enterprise-entry.ts', {});
-      if (relative === 'apps/admin/src/features/membership/EnterpriseRentalHandoffs.tsx' && name === './EnterpriseRentalHandoffQueue') return load('apps/admin/src/features/membership/EnterpriseRentalHandoffQueue.tsx', dependencies, globals);
+      if (relative === 'packages/rental-core/admin/membership/EnterpriseRentalHandoffs.tsx' && name === './EnterpriseRentalHandoffQueue') return load('apps/admin/src/features/membership/EnterpriseRentalHandoffQueue.tsx', dependencies, globals);
+      if (name.startsWith('.') && (relative.startsWith('packages/rental-core/') || relative.startsWith('packages/platform-admin/src/'))) {
+        const candidate = path.resolve(path.dirname(source.filename), name);
+        const filename = [candidate, candidate + '.ts', candidate + '.tsx'].find(file => fs.existsSync(file) && fs.statSync(file).isFile());
+        if (filename) return load(path.relative(root, filename).replaceAll('\\', '/'), dependencies, globals);
+      }
       if (name === 'node:async_hooks') return require(name);
       throw new Error(`Unexpected runtime import in ${relative}: ${name}`);
-    }, console, Date, Map, Set, JSON, Error, Promise, URLSearchParams, structuredClone, ...globals,
+    }, console, Date, Map, Set, JSON, Error, Promise, DOMException, AbortController, AbortSignal, Blob, URLSearchParams, structuredClone, ...globals,
   }, { filename: source.filename, timeout: 1000 });
+  if (originalRelative === 'apps/admin/src/features/membership/original-enterprise-operation.ts') {
+    const body = module.exports;
+    return { ...body,
+      enterpriseOperatorIdentity: context => body.enterpriseOperatorIdentity(context ?? membershipFixture(dependencies, globals)),
+      useOriginalEnterpriseOperation: (contextOrScope, ...args) => body.useOriginalEnterpriseOperation(
+        typeof contextOrScope === 'object' ? contextOrScope : membershipFixture(dependencies, globals),
+        ...(typeof contextOrScope === 'object' ? args : [contextOrScope, ...args])),
+    };
+  }
   return module.exports;
 }
+const rentalContracts = load('packages/rental-core/src/contracts.ts', {});
 const enterpriseContracts = load('packages/shared/src/enterprise.ts', {});
 const enterpriseWorkflowContracts = load('packages/shared/src/enterprise-workflows.ts', {});
 const transferDecisionContracts = load('packages/shared/src/enterprise-transfer-decision.ts', {});
@@ -111,6 +208,13 @@ function reactHost() {
   const jsx = (type, props) => ({ type, props: props || {} });
   const runtime = {
     useRef(initial) { const n = index++; if (!slots[n]) slots[n] = { current: initial }; return slots[n]; },
+    useLayoutEffect(effect, deps) { return runtime.useEffect(effect, deps); },
+    useMemo(create, deps) {
+      const n = index++, old = slots[n];
+      if (!old || deps.some((value, at) => !Object.is(value, old.deps[at]))) slots[n] = { deps, value: create() };
+      return slots[n].value;
+    },
+    useCallback(callback, deps) { return runtime.useMemo(() => callback, deps); },
     useState(initial) {
       const n = index++;
       if (!slots[n]) slots[n] = { value: typeof initial === 'function' ? initial() : initial };
@@ -724,7 +828,7 @@ check('Management editor preserves the original reviewed object revision until e
     profileRevision: 'current-r2', creditRevision: 1, merchantPolicyRevision: 1, requestTypes: ['profile_change'], unavailable: [] };
   const row = { id: 'request-1', corporateCustomerId: 'company', applicantCustomerId: 'p1', requestType: 'profile_change', state: 'draft', revision: 1, objectRevision: 'original-r1', proposal: { legalName: 'Proposed name' }, reason: 'Original reason', evidenceFileIds: [], decisionReason: null,
     effect: 'review_only_no_business_change', createdAt: '2026-11-05T10:00:00.001Z', updatedAt: '2026-11-05T10:00:00.002Z' };
-  const form = { resetFields() { for (const key of Object.keys(values)) delete values[key]; }, setFieldsValue(next) { Object.assign(values, next); }, getFieldValue(key) { return values[key]; }, setFieldValue(key, value) { values[key] = value; }, validateFields: async () => ({ ...values }) };
+  const form = { resetFields() { for (const key of Object.keys(values)) delete values[key]; }, setFieldsValue(next) { Object.assign(values, next); }, getFieldsValue() { return { ...values }; }, getFieldValue(key) { return values[key]; }, setFieldValue(key, value) { values[key] = value; }, validateFields: async () => ({ ...values }) };
   const operation = { blocked: false, busy: false, assertCurrent() {}, read: forbidden('query substitute must not dispatch'),
     async run(prepare, afterCommit) { const command = await prepare(); commands.push(plain(command)); if (command.input.objectRevision !== profile.profileRevision) throw new Error('original object revision conflict'); await afterCommit({}); } };
   const query = data => ({ data, isFetching: false, refetch: async () => ({ data }) });
@@ -758,7 +862,7 @@ function managementReviewFixture() {
     effect: 'review_only_no_business_change', createdAt: '2026-11-05T10:00:00.001Z', updatedAt: '2026-11-05T10:00:00.002Z' };
   f.managementProfileQuery = { data: f.managementProfile, isFetching: false, refetch: async () => ({ data: f.managementProfile }) };
   f.managementListQuery = { data: [f.managementRow], isFetching: false, refetch: async () => ({ data: [f.managementRow] }) };
-  const form = { resetFields() { f.managementValues = {}; }, setFieldsValue: next => Object.assign(f.managementValues, next), getFieldValue: key => f.managementValues[key], setFieldValue: (key, value) => { f.managementValues[key] = value; },
+  const form = { resetFields() { f.managementValues = {}; }, setFieldsValue: next => Object.assign(f.managementValues, next), getFieldsValue: () => ({ ...f.managementValues }), getFieldValue: key => f.managementValues[key], setFieldValue: (key, value) => { f.managementValues[key] = value; },
     validateFields: () => f.managementValidation ? f.managementValidation() : Promise.resolve(plain(f.managementValues)) };
   const Form = Object.assign('form', { useForm: () => [form], Item: 'field' }), gate = f.makeGate(hooks.runtime);
   const page = load('apps/enterprise-portal/src/ManagementRequestsPage.tsx', { react: hooks.runtime, 'react/jsx-runtime': hooks.jsx,
@@ -1068,7 +1172,7 @@ function merchantApplicationReviewFixture() {
     } } };
     const dependencies = { react: hooks.runtime, 'react/jsx-runtime': hooks.jsx, '@/features/auth/authStore': { useAuthStore }, '@/app/queryClient': { currentSessionEpoch: () => f.epoch, currentSessionSignal: () => new AbortController().signal }, '@/api/http': transport };
     const gate = load('apps/admin/src/features/membership/original-enterprise-operation.ts', dependencies, { localStorage, navigator, AbortController, AbortSignal, crypto: { randomUUID: () => 'merchant-application-K' } });
-    const form = { resetFields() {}, setFieldsValue() {}, getFieldValue() {}, validateFields: forbidden('review does not save invitation policy') }, Form = Object.assign('form', { useForm: () => [form], Item: 'field' });
+    const form = { resetFields() {}, setFieldsValue() {}, getFieldsValue: () => ({}), getFieldValue() {}, validateFields: forbidden('review does not save invitation policy') }, Form = Object.assign('form', { useForm: () => [form], Item: 'field' });
     const page = load('apps/admin/src/features/membership/EnterpriseApplications.tsx', { ...dependencies, '@tanstack/react-query': { useQuery: options => options.queryKey[0] === 'enterprise-merchant-applications' ? f.query : { data: null, isFetching: false } }, './original-enterprise-operation': gate, '@/components/ui': { ActionButton: 'action', Alert: 'alert', Button: 'button', Checkbox: 'checkbox', ConfirmAction: 'confirm', Form, Input: Object.assign('input', { TextArea: 'textarea' }), SaveButton: 'save', Table: 'table' }, '@/app/locale': { useLocale: () => ({ t: value => value }) } }, { URL: { createObjectURL: () => 'blob:original-local', revokeObjectURL() {} }, document: { createElement: () => ({ click() { f.downloads++; } }) } });
     hooks.mount(() => page.EnterpriseApplications()); f.table = () => nodes(hooks.value).find(node => node.type === 'table'); f.actions = row => f.table().props.columns.find(column => column.title === '操作').render(null, row ?? f.table().props.dataSource[0]);
     f.review = () => { const original = nodes(f.actions()).find(node => node.props.label === '核对本条申请').props.onAction(); hooks.flush(); return Promise.resolve(original).finally(() => hooks.flush()); };
@@ -1230,7 +1334,7 @@ check('Policy editor preserves reviewed bounds and refuses a stale save after an
     entry: { corporates: [{ corporateCustomerId: 'company', actions: ['policy:manage'] }] } };
   const query = { data: { revision: 1, merchantRevision: 1, companyRevision: 1, employeeRevision: 0, merchant: policyTestMaterial(), company: policyTestMaterial(), workspaces: [], effectiveWorkspaceIds: ['w1'], effectiveCategoryCodes: ['vehicle'] },
     isFetching: false, refetch: async () => ({}) };
-  const form = { resetFields() { for (const key of Object.keys(values)) delete values[key]; }, setFieldsValue: next => Object.assign(values, next), getFieldValue: name => values[name], validateFields: async () => ({ ...values }) }, Form = Object.assign('form', { useForm: () => [form] });
+  const form = { resetFields() { for (const key of Object.keys(values)) delete values[key]; }, setFieldsValue: next => Object.assign(values, next), getFieldsValue: () => ({ ...values }), getFieldValue: name => values[name], validateFields: async () => ({ ...values }) }, Form = Object.assign('form', { useForm: () => [form] });
   const runtime = policyFormRuntime(hooks, Form);
   const operation = { blocked: false, busy: false, assertCurrent() {}, read: forbidden('query host dispatch'), async run(prepare, afterCommit) { writes.push(plain(await prepare())); await afterCommit({}); } };
   const module = load('apps/enterprise-portal/src/PolicyPage.tsx', { react: hooks.runtime, 'react/jsx-runtime': hooks.jsx, '@tanstack/react-query': { useQuery: options => options.queryKey[0] === 'enterprise-policy' ? query : { data: undefined } },
@@ -1255,7 +1359,7 @@ function policyReviewConsumerFixture() {
     effectiveWorkspaceIds: ['w1'], effectiveCategoryCodes: ['vehicle'], workspaces: [{ id: 'w1', name: 'Original workspace', categoryCode: 'vehicle' }] };
   f.policyQuery = { data: f.policyView, isFetching: false, refetch: async () => { f.policyRefreshes++; if (f.policyRefreshError) throw new Error('current policy unreadable'); return { data: f.policyView }; } };
   f.policyMembers = { data: { items: [f.member], total: 1 }, isFetching: false, refetch: async () => { f.policyMemberRefreshes = (f.policyMemberRefreshes ?? 0) + 1; f.policyMemberRefresh?.(); return { data: f.policyMembers.data }; } };
-  const form = { resetFields() { f.policyValues = {}; }, setFieldsValue(values) { Object.assign(f.policyValues, values); }, getFieldValue: name => f.policyValues[name],
+  const form = { resetFields() { f.policyValues = {}; }, setFieldsValue(values) { Object.assign(f.policyValues, values); }, getFieldsValue: () => ({ ...f.policyValues }), getFieldValue: name => f.policyValues[name],
     validateFields: () => f.policyValidation ? f.policyValidation() : Promise.resolve(plain(f.policyValues)) };
   const Form = Object.assign('form', { useForm: () => [form], Item: 'field' }), runtime = policyFormRuntime(hooks, Form), gate = f.makeGate(hooks.runtime);
   const page = load('apps/enterprise-portal/src/PolicyPage.tsx', { react: hooks.runtime, 'react/jsx-runtime': hooks.jsx,
@@ -1368,15 +1472,15 @@ function merchantPolicyConsumerFixture() {
   const locks = new Map(), navigator = { locks: { request: (key, fn) => { const running = (locks.get(key) ?? Promise.resolve()).then(fn); locks.set(key, running.catch(() => {})); return running; } } };
   f.view = { revision: 1, merchantRevision: 1, companyRevision: 0, employeeRevision: 0, merchant: policyTestMaterial(), effectiveWorkspaceIds: [], effectiveCategoryCodes: [], workspaces: [{ id: 'w1', name: 'Original work', categoryCode: 'vehicle' }] };
   f.query = { data: f.view, isFetching: false, refetch: async () => { if (f.refreshError) throw new Error('Current limits unavailable'); return { data: f.view }; } };
-  const form = { resetFields() { f.values = {}; }, setFieldsValue: values => Object.assign(f.values, values), getFieldValue: name => f.values[name], validateFields: () => f.validation ? f.validation() : Promise.resolve(plain(f.values)) };
+  const form = { resetFields() { f.values = {}; }, setFieldsValue: values => Object.assign(f.values, values), getFieldsValue: () => ({ ...f.values }), getFieldValue: name => f.values[name], validateFields: () => f.validation ? f.validation() : Promise.resolve(plain(f.values)) };
   const Form = Object.assign('form', { useForm: () => [form], Item: 'field' }), runtime = policyFormRuntime(hooks, Form);
   f.receipt = { state: 'not_recorded' };
-  const gate = load('apps/admin/src/features/membership/original-enterprise-operation.ts', { react: hooks.runtime, '@/features/auth/authStore': { useAuthStore },
+  const membershipDependencies = { react: hooks.runtime, '@/features/auth/authStore': { useAuthStore },
     '@/app/queryClient': { currentSessionEpoch: () => f.epoch, currentSessionSignal: () => new AbortController().signal },
     '@/api/http': { http: { request: async config => { if (config.method === 'get') { f.reads.push(config.url); return { data: { data: f.readHandler ? await f.readHandler(config) : plain(f.receipt) } }; }
-      f.writes.push(plain(config)); return { data: { data: f.writeHandler ? await f.writeHandler(config) : { scopeKey: 'merchant', revision: 2, policy: plain(config.data.policy) } } }; } } } },
-    { localStorage, navigator, AbortController, AbortSignal, crypto: { randomUUID: () => 'merchant-policy-key' } });
-  const component = load('apps/admin/src/features/membership/EnterpriseRentalPolicy.tsx', { react: hooks.runtime, 'react/jsx-runtime': hooks.jsx,
+      f.writes.push(plain(config)); return { data: { data: f.writeHandler ? await f.writeHandler(config) : { scopeKey: 'merchant', revision: 2, policy: plain(config.data.policy) } } }; } } } };
+  const gate = load('apps/admin/src/features/membership/original-enterprise-operation.ts', membershipDependencies, { localStorage, navigator, AbortController, AbortSignal, crypto: { randomUUID: () => 'merchant-policy-key' } });
+  const component = load('apps/admin/src/features/membership/EnterpriseRentalPolicy.tsx', { ...membershipDependencies, react: hooks.runtime, 'react/jsx-runtime': hooks.jsx,
     '@tanstack/react-query': { useQuery: () => f.query }, '@/features/auth/authStore': { useAuthStore }, '@/app/locale': { useLocale: () => ({ locale: 'en-US' }) },
     '@/components/ui': { ActionButton: 'action', Alert: 'alert', Button: 'button', Form, SaveButton: 'save' }, '@/components/EnterprisePolicyFields': runtime.fields,
     '@/components/enterprise-policy-material': runtime.material, './original-enterprise-operation': gate });
@@ -1410,7 +1514,7 @@ check('Join review binds one original request and revision; invitation material 
   const hooks = reactHost(), commands = [], context = { identity: 'review-owner', selectedCorporateId: 'company', basePath: '/merchant/enterprise', loading: false, signal: new AbortController().signal, reload() {} };
   const rows = [{ id: 'join-1', kind: 'join_request', corporateCustomerId: 'company', applicantCustomerId: 'p1', state: 'pending', revision: 1, createdAt: '2026-11-01T12:00:00Z', updatedAt: '2026-11-01T12:00:00Z', payload: { inviteId: 'invite-1', noticeHash: 'a'.repeat(64), department: 'Original department', employeeNo: '42', noticeText: 'Original acknowledged notice', agreementVersion: 'original-v1', acknowledgedAt: '2026-11-01T12:00:00Z', privateToken: 'must-not-render' } },
     { id: 'join-2', kind: 'join_request', corporateCustomerId: 'company', applicantCustomerId: 'p2', state: 'pending', revision: 2, createdAt: '2026-11-01T12:00:00Z', updatedAt: '2026-11-01T12:00:00Z', payload: { inviteId: 'invite-2', noticeHash: 'b'.repeat(64), noticeText: 'Original second notice', agreementVersion: 'original-v1', acknowledgedAt: '2026-11-01T12:00:00Z' } }];
-  const form = { resetFields() {}, setFieldValue() {}, setFieldsValue() {}, getFieldValue() {} }, Form = Object.assign('form', { useForm: () => [form], Item: 'field' });
+  const form = { resetFields() {}, setFieldValue() {}, setFieldsValue() {}, getFieldsValue: () => ({}), getFieldValue() {} }, Form = Object.assign('form', { useForm: () => [form], Item: 'field' });
   const operation = { blocked: false, busy: false, assertCurrent() {}, read: forbidden('query host must not dispatch'), async run(prepare, afterCommit) { const command = await prepare(); commands.push(plain(command)); await afterCommit({}); } };
   const review = load('apps/enterprise-portal/src/WorkflowReview.tsx', { 'react/jsx-runtime': hooks.jsx });
   const module = load('apps/enterprise-portal/src/WorkflowPages.tsx', { react: hooks.runtime, 'react/jsx-runtime': hooks.jsx,
@@ -3921,7 +4025,7 @@ check('Invite transfer audit consumer smoke: original workflow rows, legacy unav
     } finally { clearTimeout(timer); }
   }
   for (const [relative, source] of sources) {
-    const current = crypto.createHash('sha256').update(fs.readFileSync(source.filename, 'utf8')).digest('hex');
+    const current = crypto.createHash('sha256').update(readSource(relative)).digest('hex');
     if (current !== source.hash) { failures++; console.log(`SOURCE_CHANGED_DURING_RUN ${relative} loaded=${source.hash} current=${current}; reverify current source explicitly`); }
   }
   console.log(`RESULT ${checks.length - failures}/${checks.length} passed; failures=${failures}`);

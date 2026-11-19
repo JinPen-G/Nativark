@@ -8,11 +8,11 @@ function load(file, deps = {}) {
   const source = fs.readFileSync(path.resolve(file), 'utf8');
   const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true } }).outputText;
   const exports = {};
-  const sandbox = { exports, require: name => { if (name in deps) return deps[name]; if (name.startsWith('node:')) return require(name); if (name === '@nestjs/common') return { Injectable: () => x => x, ForbiddenException: class extends Error {}, BadRequestException: class extends Error {}, ConflictException: class extends Error {}, NotFoundException: class extends Error {} }; throw new Error(`Unexpected dependency ${name}`); }, Date, Map, Set, JSON, console };
+  const sandbox = { exports, require: name => { if (name in deps) return deps[name]; if (name === "@rental-os/rental-core" && "@rental-os/shared" in deps) return deps["@rental-os/shared"]; if (name.startsWith('node:')) return require(name); if (name === '@nestjs/common') return { Injectable: () => x => x, ForbiddenException: class extends Error {}, BadRequestException: class extends Error {}, ConflictException: class extends Error {}, NotFoundException: class extends Error {} }; throw new Error(`Unexpected dependency ${name}`); }, Date, Map, Set, JSON, console };
   vm.runInNewContext(output, sandbox, { filename: file });
   return exports;
 }
-const shared = require('../packages/shared/dist');
+const shared = require('@rental-os/shared');
 const { EnterpriseAccessService } = load('apps/api/src/modules/client/enterprise-access.service.ts', { '@rental-os/rental-core/mysql-enterprise-access': require('@rental-os/rental-core/mysql-enterprise-access') });
 const context = { tenantId: 't1', tenantCode: 'demo', customerId: 'p1', customerType: 'personal', sessionId: 'session', displayName: 'Admin', membershipStatus: 'active' };
 function rows(action = ['portal:enter', 'members:read']) {
@@ -41,7 +41,7 @@ test('member projection excludes private fields and rechecks revoked permissions
   await assert.rejects(fixture(() => ++reads === 1 ? rows() : []).members(context, 'demo', 'c1'));
 });
 test('entry-only grants survive separate action editing and invalid member-only grants refuse', () => {
-  const { portalAccessGrants, isPortalRevisionConflict } = load('apps/admin/src/features/membership/enterprise-portal-config.ts', { '@rental-os/shared': shared });
+  const { portalAccessGrants, isPortalRevisionConflict } = load('packages/rental-core/admin/membership/enterprise-portal-config.ts', { '@rental-os/shared': shared });
   const result = portalAccessGrants({ enabled: true, entryMembershipIds: ['entry', 'reader'], memberMembershipIds: ['reader'], reason: 'Keep independent actions' });
   assert.deepEqual(JSON.parse(JSON.stringify(result)), [{ membershipId: 'entry', actions: ['portal:enter'] }, { membershipId: 'reader', actions: ['portal:enter', 'members:read'] }]);
   assert.throws(() => portalAccessGrants({ entryMembershipIds: [], memberMembershipIds: ['reader'] }));

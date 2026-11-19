@@ -3,8 +3,9 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm'), ts = require('typescript');
 const root = path.resolve(__dirname, '..');
-const feature = file => fs.readFileSync(path.join(root, file.startsWith('../')
-  ? 'apps/admin/src/features/rental-core' : 'packages/rental-core/admin/orders', file), 'utf8');
+const feature = file => fs.readFileSync(path.join(root, (file.startsWith('../membership/') || file.startsWith('../catalog/'))
+  ? 'packages/rental-core/admin/orders' : file.startsWith('../')
+    ? 'apps/admin/src/features/rental-core' : 'packages/rental-core/admin/orders', file), 'utf8');
 function mutation(file, name, context) {
   const source = ts.createSourceFile(file, feature(file), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   let expression;
@@ -112,11 +113,17 @@ test('address editor omits an unchanged blank telephone but preserves explicit r
 test('model save survives a later photo failure and retry skips photos already confirmed', async () => {
   const calls = [], fields = {}, context = { pendingFiles: [
     { uid: 'first', originFileObj: 'first' }, { uid: 'second', originFileObj: 'second' } ],
-    setEditing: group => { context.editing = group; }, form: { setFieldValue: (key, value) => { fields[key] = value; } },
+    scope: 'catalog-scope', permissions: ['rental-os:catalog:manage'],
+    editorGeneration: { current: 1 }, editorState: { generation: 1 },
+    setEditorState: update => { context.editorState = update(context.editorState); context.editing = context.editorState.record; },
+    form: { setFieldValue: (key, value) => { fields[key] = value; } },
     setPendingFiles: update => { context.pendingFiles = update(context.pendingFiles); },
     queryClient: { invalidateQueries: async () => undefined },
     rentalCoreApi: { saveItemGroup: async values => { calls.push(['save', values.id]); return { id: 'committed-model' }; },
       uploadItemGroupImage: async (id, file) => { calls.push(['photo', id, file]); if (file === 'second' && !context.retry) throw Error('photo failed'); return { id }; } } };
+  context.isCurrentScope = () => context.scope === 'catalog-scope';
+  context.allowed = () => context.permissions.includes('rental-os:catalog:manage');
+  context.assertManage = mutation('../catalog/CatalogPage.tsx', 'assertManage', context);
   const command = mutation('../catalog/CatalogPage.tsx', 'save', context);
   await assert.rejects(command.mutationFn({ code: 'MODEL' }), /photo failed/);
   assert.equal(fields.id, 'committed-model'); assert.equal(context.editing.id, 'committed-model');
@@ -704,7 +711,7 @@ function humanReviewConsumer() {
 }
 const boundaryValue = atomicity => ({ kind: 'settings', taskId: 'task', runId: 'run', stepId: 'step', taskRevision: 1,
   review: { proposal: { payload: { contractVersion: require('../packages/shared/src').AI_PROPOSAL_DRAFT_VERSION,
-    taskId: 'task', proposalId: 'proposal', revision: 1, atomicity, failurePolicy: 'stop_and_reconcile',
+    taskId: 'task', proposalId: 'proposal', revision: 1, scope: { kind: 'workspace', tenantId: 'tenant', workspaceId: 'workspace' }, atomicity, failurePolicy: 'stop_and_reconcile',
     actions: atomicity === 'single_action' ? [{}] : [{}, {}], expiresAt: '2099-01-01T00:00:00Z' } },
     change: { diff: { 'notifications.enabledEvents': { before: [], after: ['created'] },
       'notifications.editableChannels': { before: [], after: ['sms'] } }, baseRevision: 1 } } });
@@ -757,6 +764,7 @@ test('AIN07 real refresh and original-result callback retain receipt scope while
   visit(h.source); assert.ok(businessCallback);
   let rows = [], observations = { 'run:first': originalObservation('first', 'committed') }, sent;
   const context = { ...h.context.exports, structuredClone, taskId: 'task', same: () => true, selected: 'run:second', original: null, continuation: null,
+    runId: undefined, requestedProposal: undefined, reviewedOrder: { current: null }, reportOrderReview: () => {},
     steps: h.taskHumanSteps(confirmationSnapshot(), 'task'), run: work => work(new AbortController().signal), t: value => value,
     setReview: () => {}, setReceipt: () => {}, setBusiness: () => {}, setSelected: () => {}, setMessage: () => {},
     setContinuation: () => {}, continueKey: 'held', sessionStorage: { removeItem: () => assert.fail('unknown cannot clear original continuation') },

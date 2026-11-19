@@ -12,6 +12,7 @@ function sourceFile(relative) {
   relative = relative.replace(/\\/g, "/");
   if (relative === "apps/admin/src/app/locale.tsx") return path.resolve(root, relative);
   const candidates = [
+    relative.replace(/^apps\/admin\/src\/features\/membership\//, "packages/rental-core/admin/membership/"),
     relative.replace(/^apps\/admin\/src\/features\/rental-core\//, "packages/rental-core/admin/orders/"),
     relative.replace(/^apps\/admin\/src\//, "packages/platform-admin/src/"),
   ].filter(candidate => candidate !== relative);
@@ -454,16 +455,21 @@ const coreOrderColumns = load("packages/rental-core/admin/orders/rentalOrderColu
 const customerPreviewProps = [];
 const previewSession = { user: { id: "operator", tenantId: "tenant" }, tenant: { tenantId: "tenant" },
   currentWorkspaceId: "workspace", hasPermission: () => false, hasTenantMembershipPermission: () => false };
-const { CustomerPreview: OriginalCustomerPreview } = load("apps/admin/src/features/membership/CustomerPreview.tsx", {
-  "@/registry/components/hover-card/hover-card": { HoverCard: ({ children }) => children, HoverCardProfile: () => null },
-  "@/registry/components/button/button": { Button: ({ variant, size, children, ...props }) => React.createElement("button", props, children) },
-  "@/registry/components/avatar/avatar.module.css": { __esModule: true, default: classes },
-  "@/api/customer": { customerApi: { detail: () => { throw new Error("Closed previews cannot read customer facts"); } } },
+const { CustomerPreview: OriginalCustomerPreview } = load("packages/rental-core/admin/membership/CustomerPreview.tsx", {
+  "@rental-os/platform-admin/native-ui": {
+    HoverCard: ({ children }) => children, HoverCardProfile: () => null,
+    Button: ({ variant, size, children, ...props }) => React.createElement("button", props, children),
+    avatarClasses: classes,
+  },
+  "./page-context": {
+    useRentalMembershipSession: selector => selector(previewSession),
+    useRentalMembershipContext: () => ({ customerApi: { detail: () => { throw new Error("Closed previews cannot read customer facts"); } } }),
+  },
   "@/app/locale": { useLocale: () => ({ t: text => text }) },
-  "@/features/auth/authStore": { useAuthStore: selector => selector(previewSession) },
   "./CustomerPreview.module.css": { __esModule: true, default: classes },
   "./CustomerAvatar": { CustomerAvatar: ({ fallback }) => fallback },
 });
+
 const CustomerPreview = props => {
   customerPreviewProps.push(props);
   return React.createElement(OriginalCustomerPreview, props);
@@ -825,7 +831,7 @@ assert.equal(metricValues.get("--rental-table-identity-size"), "32px");
 assert.equal(metricValues.get("--rental-table-identity-icon-size"), "16px");
 assert.equal(metricValues.get("--rental-table-identity-radius-max"), "8px");
 for (let tone = 1; tone <= 4; tone++) assert.match(metricValues.get(`--rental-table-identity-${tone}`), new RegExp(`var\\(--series-${tone}\\).*var\\(--foreground\\)`));
-const customerPreviewCss = fs.readFileSync(path.join(root, "apps/admin/src/features/membership/CustomerPreview.module.css"), "utf8");
+const customerPreviewCss = fs.readFileSync(path.join(root, "packages/rental-core/admin/membership/CustomerPreview.module.css"), "utf8");
 assert.match(customerPreviewCss, /\.trigger \{[^}]*border-radius: var\(--radius-pill\)/);
 assert.match(customerPreviewCss, /\.trigger\.listTrigger \{[^}]*border: 0;[^}]*background: transparent/);
 assert.match(customerPreviewCss, /\.trigger\.listTrigger \.avatar \{[^}]*width: var\(--rental-table-list-avatar-size\);[^}]*height: var\(--rental-table-list-avatar-size\)/);

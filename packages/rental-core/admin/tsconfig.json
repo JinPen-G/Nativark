@@ -8,6 +8,8 @@
     "locations",
     "catalog",
     "commercial",
+    "governance",
+    "membership",
     "../../platform-admin/src/**/*.d.ts"
   ]
 }

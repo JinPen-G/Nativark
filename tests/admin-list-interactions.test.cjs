@@ -6,9 +6,17 @@ const ts = require('typescript');
 const React = require('react');
 
 function sourceFile(relative) {
+  relative = relative.replaceAll("\\", "/");
   const root = path.resolve(__dirname, '..');
   if (relative === 'apps/admin/src/app/locale.tsx' || relative === 'apps/admin/src/components/ui/LiveRefresh.tsx') return path.resolve(root, relative);
-  const candidates = [relative.replace(/^apps\/admin\/src\//u, 'packages/platform-admin/src/'), relative];
+  const candidates = [
+    relative.replace(/^apps\/admin\/src\/registry\//u, "packages/ui-arc/vendor/registry/"),
+    relative.replace(/^apps\/admin\/src\/features\/membership\//u, 'packages/rental-core/admin/membership/'),
+    relative.replace(/^apps\/admin\/src\/features\/catalog\//u, 'packages/rental-core/admin/catalog/'),
+    relative.replace(/^apps\/admin\/src\/features\/fulfillment\//u, 'packages/rental-core/admin/locations/'),
+    relative.replace(/^apps\/admin\/src\//u, 'packages/platform-admin/src/'),
+  ].filter(candidate => candidate !== relative);
+  candidates.push(relative);
   for (const candidate of candidates) {
     for (const suffix of ['', '.ts', '.tsx', '/index.ts']) {
       const filename = path.resolve(root, candidate + suffix);
@@ -19,7 +27,9 @@ function sourceFile(relative) {
 }
 
 function dependencyFile(name, filename) {
+  if (name === "@/app/locale") return sourceFile("packages/platform-admin/src/app/locale.tsx");
   const root = path.resolve(__dirname, '..');
+  if (name.startsWith('@/') && filename.replaceAll('\\', '/').includes('/packages/ui-arc/vendor/')) return sourceFile('packages/ui-arc/vendor/' + name.slice(2));
   if (name.startsWith('@/')) return sourceFile('apps/admin/src/' + name.slice(2));
   if (name.startsWith('.')) return sourceFile(path.relative(root, path.resolve(path.dirname(filename), name)));
   const packageName = /^@rental-os\/([^/]+)(.*)$/u.exec(name);
@@ -259,16 +269,20 @@ test('modal feedback remains available between retained providers and refreshed 
 test('record screens discard local task snapshots at identity or related grant changes', () => {
   let identity = 'tenant-a:workspace-a:operator', grants = new Set(['rental-os:member:view', 'rental-os:member:review']);
   const boundary = (file, name, child) => {
-    const source = ts.createSourceFile(file, fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), ts.ScriptTarget.Latest, true);
+    const source = ts.createSourceFile(file, fs.readFileSync(sourceFile(file), 'utf8'), ts.ScriptTarget.Latest, true);
     const declaration = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name);
     assert.ok(declaration, name);
     const code = ts.transpileModule(declaration.getText(source), {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
     }).outputText;
     const exports = {};
-    new Function('exports', 'require', 'useListQueryIdentity', 'useAuthStore', child, code)(exports, require,
-      () => identity, select => select({ user: { tenantMembership: { grants: [...grants] } }, hasTenantMembershipPermission: permission => grants.has(permission) }), child);
-    return exports[name];
+    const session = select => select({ user: { tenantMembership: { grants: [...grants] } }, hasTenantMembershipPermission: permission => grants.has(permission) });
+    new Function('exports', 'require', 'useListQueryIdentity', 'useAuthStore', 'useMembershipQueryIdentity', 'useRentalMembershipSession', 'RentalCatalogPageProvider', child, code)(exports, require,
+      () => identity, session, () => identity, session, 'catalog-provider', child);
+    return declaration.parameters[0]?.name.getText(source) === 'context' ? () => {
+      const page = exports[name]({ scopeKey: identity });
+      return page.type === 'catalog-provider' ? page.props.children : page;
+    } : exports[name];
   };
   const Review = boundary('apps/admin/src/features/membership/MembershipReviewPage.tsx', 'MembershipReviewPage', 'MembershipReviewWorkspace');
   const Rewards = boundary('apps/admin/src/features/membership/MembershipRewardsPage.tsx', 'MembershipRewardsPage', 'MembershipRewardsWorkspace');

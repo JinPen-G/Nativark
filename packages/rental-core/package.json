@@ -1298,7 +1298,15 @@
     "./stripe-payment": {
       "types": "./dist/stripe-payment.d.ts",
       "default": "./dist/stripe-payment.js"
-    }
+    },
+    "./admin/membership": "./admin/membership/index.tsx",
+    "./admin/membership/context": "./admin/membership/page-context.tsx",
+    "./admin/membership/pages": "./admin/membership/pages.ts",
+    "./admin/membership/components": "./admin/membership/components.ts",
+    "./admin/membership/logic": "./admin/membership/logic.ts",
+    "./admin/membership/messages": "./admin/membership/messages.ts",
+    "./admin/membership/insights": "./admin/membership/MembershipInsights.tsx",
+    "./admin/membership/list-capabilities": "./admin/membership/list-capabilities.ts"
   },
   "typesVersions": {
     "*": {
@@ -2267,6 +2275,30 @@
       ],
       "stripe-payment": [
         "./dist/stripe-payment.d.ts"
+      ],
+      "admin/membership": [
+        "./admin/membership/index.tsx"
+      ],
+      "admin/membership/context": [
+        "./admin/membership/page-context.tsx"
+      ],
+      "admin/membership/pages": [
+        "./admin/membership/pages.ts"
+      ],
+      "admin/membership/components": [
+        "./admin/membership/components.ts"
+      ],
+      "admin/membership/logic": [
+        "./admin/membership/logic.ts"
+      ],
+      "admin/membership/messages": [
+        "./admin/membership/messages.ts"
+      ],
+      "admin/membership/insights": [
+        "./admin/membership/MembershipInsights.tsx"
+      ],
+      "admin/membership/list-capabilities": [
+        "./admin/membership/list-capabilities.ts"
       ]
     }
   },

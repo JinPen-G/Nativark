@@ -15,7 +15,7 @@ test('corporate reversal retains only original locators and refuses unavailable 
   const shared = {};
   const sharedSource = fs.readFileSync(path.join(__dirname, '../packages/platform-admin/src/operation-reference.ts'), 'utf8');
   new Function('exports', ts.transpileModule(sharedSource, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(shared);
-  const source = fs.readFileSync(path.join(__dirname, '../apps/admin/src/features/membership/corporate-payment-reference.ts'), 'utf8');
+  const source = fs.readFileSync(path.join(__dirname, '../packages/rental-core/admin/membership/corporate-payment-reference.ts'), 'utf8');
   new Function('exports', 'require', ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(helper, () => shared);
   const data = new Map(), storage = { getItem: key => data.get(key) ?? null, setItem: (key, value) => data.set(key, value), removeItem: key => data.delete(key) };
   const reference = { version: 1, scope: 'tenant/workspace/operator', customerId: 'company', paymentId: 'original-payment', key: 'original-reverse-key' };
@@ -30,15 +30,15 @@ test('corporate reversal retains only original locators and refuses unavailable 
   helper.clearCorporatePaymentReference(storage, reference); assert.equal(data.size, 0);
   data.set([...data.keys()][0] ?? `rental.corporate-payment-reversal.v1:${encodeURIComponent(reference.scope)}:${encodeURIComponent(reference.customerId)}`, JSON.stringify({ ...reference, reason: 'sensitive' }));
   assert.equal(helper.readCorporatePaymentReference(storage, reference.scope, reference.customerId).blocked, true);
-  const page = fs.readFileSync(path.join(__dirname, '../apps/admin/src/features/membership/CorporateMembershipPage.tsx'), 'utf8');
+  const page = fs.readFileSync(path.join(__dirname, '../packages/rental-core/admin/membership/CorporateMembershipPage.tsx'), 'utf8');
   assert.match(page, /retainCorporatePaymentReference\(reversalStorage\(\), reference\)/);
-  assert.match(page, /customerApi\.creditPaymentReversal\(reference.customerId, reference.paymentId\)/);
-  assert.match(page, /ConfirmAction label=\{t\("冲销回款"\)\}/);
+  assert.match(page, /customerApi\.creditPaymentReversal\(\s*reference\.customerId,\s*reference\.paymentId,?\s*\)/);
+  assert.match(page, /ConfirmAction\s+label=\{t\("冲销回款"\)\}/);
 });
 
 test('corporate credit input retains the revision from its own read instead of a refreshed query', () => {
   const fs = require('node:fs'), path = require('node:path'), ts = require('typescript');
-  const helperSource = fs.readFileSync(path.join(__dirname, '../apps/admin/src/features/membership/corporate-credit-draft.ts'), 'utf8');
+  const helperSource = fs.readFileSync(path.join(__dirname, '../packages/rental-core/admin/membership/corporate-credit-draft.ts'), 'utf8');
   const exported = {};
   new Function('exports', ts.transpileModule(helperSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(exported);
   const { bindCorporateCreditDraft, corporateCreditDraftChanged, prepareCorporateCreditDraft } = exported;
@@ -57,11 +57,12 @@ test('corporate credit input retains the revision from its own read instead of a
   assert.equal('expectedRevision' in prepareCorporateCreditDraft(newRecord, 'session-a', 'company-a', command.input).input, false);
   assert.equal(corporateCreditDraftChanged(newRecord, original), true);
   assert.throws(() => bindCorporateCreditDraft('session-a', 'company-a', { ...original, customerId: 'other' }));
-  const source = fs.readFileSync(path.join(__dirname, '../apps/admin/src/features/membership/CorporateMembershipPage.tsx'), 'utf8');
+  const source = fs.readFileSync(path.join(__dirname, '../packages/rental-core/admin/membership/CorporateMembershipPage.tsx'), 'utf8');
   assert.doesNotMatch(source, /expectedRevision:\s*creditConfig\.data\?\.revision/);
-  assert.match(source, /onSave=\{saveCreditDraft\}/);
-  assert.match(source, /command\.scope !== currentCreditScope\(\)/);
-  assert.match(source, /creditBaseline\?\.scope === creditScope && creditBaseline.customerId === selected.customerId\) return/);
+  assert.match(source, /onSave=\{creditEditor\.submit\}/);
+  assert.match(source, /onSave:\s*saveCreditDraft/);
+  assert.match(source, /command\.scope !== currentCreditScope\(context\)/);
+  assert.match(source, /creditBaseline\?\.scope === creditScope\s*&&\s*creditBaseline.customerId === selected.customerId\s*\)\s*return/);
 });
 
 const unauthorized = error => error?.status === 401;
@@ -278,7 +279,7 @@ test('customer profile partitions retain visible orders without financial facts 
   assert.equal(operations.find(row => row.operationId === 'getCustomerProfileOverview').responseSchema, 'CustomerProfileOverview');
   assert.ok(schemas.CustomerProfileOverview.properties.access.properties.orderAmounts);
   assert.equal(schemas.CustomerProfileOverview.properties.orders.properties.items.items.required.includes('finalPayableAmount'), false);
-  const sources = require('node:fs').readFileSync(require('node:path').join(__dirname, '../apps/admin/src/features/membership/CustomerProfileDetails.tsx'), 'utf8');
+  const sources = require('node:fs').readFileSync(require('node:path').join(__dirname, '../packages/rental-core/admin/membership/CustomerProfileDetails.tsx'), 'utf8');
   for (const key of ['benefits', 'orders', 'qualifications', 'audit']) assert.ok(sources.includes(`access?.${key} === "restricted"`), `consumer preserves ${key} restriction`);
   await assert.rejects(runWithRequestIdentity({ ...scope, workspaceId: 'foreign' }, () => service.getProfileOverview('t', 'w', 'c', user)), forbidden);
   await assert.rejects(runWithRequestIdentity({ ...scope, userId: 'other' }, () => service.getProfileOverview('t', 'w', 'c', user)), forbidden);
