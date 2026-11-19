@@ -17,6 +17,8 @@ const ts = require("typescript");
 const root = path.resolve(__dirname, "../apps/miniprogram");
 const src = path.join(root, "src");
 const rentalClientRoot = path.resolve(__dirname, "../packages/rental-core/clients/miniprogram");
+const rentalTimeFile = path.resolve(rentalClientRoot, "../time.ts");
+const nativeContractFile = path.join(root, "dist/vendor/shared-ai-client/index.js");
 const read = (file) => fs.readFileSync(path.join(src, file), "utf8");
 const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => (entry.isDirectory() ? walk(path.join(dir, entry.name)) : [path.join(dir, entry.name)]));
 const app = JSON.parse(read("app.json"));
@@ -71,22 +73,33 @@ function runtime(handler) {
     wx, Promise, Date, Math, Map, Set, Number, String, Object, Array, Error, JSON, Intl, Symbol, Reflect, Boolean, RegExp,
     Uint8Array, ArrayBuffer, encodeURIComponent, decodeURIComponent, setTimeout, clearTimeout,
     setInterval: (...args) => { const timer = setInterval(...args); intervals.add(timer); return timer; }, clearInterval, queueMicrotask,
-    getCurrentPages: () => [], Page: value => { page = value; }, Behavior: value => value, Component: () => {}, App: () => {}, console
+    getCurrentPages: () => [], Page: value => { page = { selectComponent: () => undefined, ...value }; }, Behavior: value => value, Component: () => {}, App: () => {}, console
   });
   function load(relative) {
     let absolute = path.resolve(src, relative);
+    // The source vendor contains declarations. Execute the canonical runtime
+    // produced by the original build, with the same isolated wx context.
+    if (absolute === path.join(src, "vendor/shared-ai-client")) absolute = nativeContractFile;
     if ((!fs.existsSync(absolute) || fs.statSync(absolute).isDirectory()) && fs.existsSync(`${absolute}.ts`)) absolute += ".ts";
     if (modules.has(absolute)) return modules.get(absolute).exports;
-    assert.ok(absolute.startsWith(src + path.sep) || absolute.startsWith(rentalClientRoot + path.sep), `模块不能逃出本端或正式Rental客户端：${relative}`);
+    assert.ok(absolute.startsWith(src + path.sep) || absolute.startsWith(rentalClientRoot + path.sep)
+      || absolute === rentalTimeFile || absolute === nativeContractFile, `模块不能逃出本端或正式Rental客户端：${relative}`);
     const module = { exports: {} };
     modules.set(absolute, module);
-    const output = ts.transpileModule(fs.readFileSync(absolute, "utf8"), { compilerOptions: { target: ts.ScriptTarget.ES2019, module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText;
+    const source = fs.readFileSync(absolute, "utf8");
+    const output = absolute === nativeContractFile ? source
+      : ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2019, module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText;
     const fn = vm.runInContext(`(function(require,module,exports){${output}\n})`, context, { filename: absolute });
     fn((specifier) => {
       if (specifier === "@rental-os/rental-core/clients/miniprogram") {
         const declared = JSON.parse(fs.readFileSync(path.resolve(rentalClientRoot, "../../package.json"), "utf8")).exports["./clients/miniprogram"];
         assert.equal(declared.types, "./dist-clients/clients/miniprogram/index.d.ts", "源码宿主必须对应正式包入口");
         return load(path.relative(src, path.join(rentalClientRoot, "index.ts")));
+      }
+      if (specifier === "@rental-os/rental-core/clients/time") {
+        const declared = JSON.parse(fs.readFileSync(path.resolve(rentalClientRoot, "../../package.json"), "utf8")).exports["./clients/time"];
+        assert.equal(declared.default, "./dist-clients/clients/time.js", "时间实现必须对应正式包入口");
+        return load(path.relative(src, rentalTimeFile));
       }
       assert.ok(specifier.startsWith("."), `小程序运行时不得依赖包 ${specifier}（只允许 import type）`);
       return load(path.relative(src, path.resolve(path.dirname(absolute), specifier)));
@@ -174,10 +187,12 @@ test("AI原checkout交接：实例host、人工复读原报价、默认关闭与
     audience: "customer", surface: "client_miniprogram", scope: { kind: "workspace", tenantId: "t", workspaceId: "w" },
     expiresAt: "2035-01-02T00:00:00Z", actionCode: "OPEN_BOOKING", submission: "original_booking_page_required", inventory: "not_reserved",
     fields: { quoteId: "original-quote", timeZone: "Asia/Shanghai", startAt: "2035-01-03T00:00:00Z", endAt: "2035-01-04T00:00:00Z",
-      fulfillmentMode: "store_pickup_return", fulfillmentLocationId: "loc", bookingIdentity: { bookingIdentity: "personal", enterpriseContractAndPayer: false },
+      fulfillmentMode: "store_pickup_return", fulfillmentLocationId: "loc", returnLocationId: "loc", bookingIdentity: { bookingIdentity: "personal", enterpriseContractAndPayer: false },
       lines: [{ itemGroupId: "item", quantity: 2 }] }
   };
   const quote = { id: "original-quote", tenantId: "t", expiresAt: "2035-01-02T00:00:00Z", currency: "CNY", payableAmount: 12, depositAmount: 0, preAuthAmount: 0,
+    membershipSnapshot: { personalCustomerId: "customer-one", bookingIdentity: "personal", enterpriseContractAndPayer: false },
+    pricingContext: { timeZone: "Asia/Shanghai" },
     request: { ...handoff.fields, customerId: "customer-one", customerType: "personal" } };
   const r = runtime(req => { assert.equal(req.method, "GET"); assert.ok(req.url.endsWith("/quotes/original-quote")); ok(req, quote); });
   const session = r.load("core/session"); session.saveSession(sessionResponse(), "camera", "login");
@@ -203,6 +218,30 @@ test("AI原checkout交接：实例host、人工复读原报价、默认关闭与
   let acceptedCalls = 0, submittedCalls = 0, receiptCalls = 0, finishSubmit;
   const receipt = { state: "observed", orderId: "original-order", operationKey: acceptance.operationKey,
     retryable: false, payment: "not_inferred", fulfillment: "not_inferred" };
+  const originalDraft = {
+    contractVersion: "ain-booking-draft-1", bookingDraftId: handoff.bookingDraftId,
+    audience: "customer", surface: "client_miniprogram", scope: handoff.scope,
+    state: "handed_to_booking_page", revision: 1, selectionRevision: acceptance.selectionRevision,
+    inputFingerprint: acceptance.inputFingerprint, materialRef: "44444444-4444-4444-8444-444444444444",
+    createdAt: "2030-01-01T00:00:00Z", expiresAt: handoff.expiresAt,
+    execution: "not_submitted", action: null,
+    material: {
+      selection: handoff.fields,
+      sources: {
+        quoteId: "user_explicit", timeZone: "user_explicit", startAt: "user_explicit", endAt: "user_explicit",
+        fulfillmentMode: "user_explicit", fulfillmentLocationId: "user_explicit", returnLocationId: "user_explicit",
+        bookingIdentity: "user_explicit", lines: "user_explicit", services: "server_default"
+      },
+      quote: {
+        quoteId: quote.id, quoteVersion: "a".repeat(64), pricingPlanVersion: "pricing-1", ruleVersion: "rule-1",
+        priceVersionId: null, calendarVersion: null, categoryVersionId: null, currency: quote.currency,
+        payableAmount: quote.payableAmount, depositAmount: 0, preAuthAmount: 0, chargeLines: [],
+        createdAt: "2030-01-01T00:00:00Z", expiresAt: handoff.expiresAt
+      },
+      catalogVersion: "a".repeat(64), availabilityVersion: "b".repeat(64), identityVersion: "c".repeat(64),
+      availability: "available_at_observation_not_reserved"
+    }
+  };
   const submissionHost = { ...host, acceptBookingSubmission: async input => {
     acceptedCalls++; assert.equal(input.handoffRef, handoff.handoffRef); return acceptance;
   }, submitAcceptedBooking: input => {
@@ -293,6 +332,8 @@ test("AI原checkout交接：实例host、人工复读原报价、默认关闭与
         retryable: false, state: "observed", acceptance, nextAction: "read_original_submission" });
     } else if (req.url.endsWith("/booking-submissions/accept")) {
       same(req.data, { handoffRef: handoff.handoffRef }); ok(req, acceptance);
+    } else if (req.url.endsWith("/booking-drafts/read")) {
+      same(req.data, { bookingDraftId: handoff.bookingDraftId }); ok(req, originalDraft);
     } else if (req.url.endsWith("/booking-submissions/submit")) {
       hostSubmitCalls++; same(req.data, { acceptanceRef: acceptance.acceptanceRef, decision: "submit_original_booking" });
       if (holdSubmission) pendingSubmission = req; else ok(req, { ...receipt, state: "unknown", orderId: null });
