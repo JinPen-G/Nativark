@@ -8,6 +8,8 @@
 2. 邀请应用使用 `TenantInvitationAuthority` 核验当前租户管理权限、角色及业务范围，并在接受邀请的原事务内创建账号和授权。客服应用使用原管理权威、`TenantEmailRuntimeService` 和成功必需的操作审计。寄件应用通过 `TenantDispatchBusinessParticipant` 接入业务查询和详情，业务查询与公共来源进入同一 SQL UNION，共用过滤、全局排序、分页和总数。
 3. 使用 [TenantMessagingHttpModule](tenant-messaging-http.module.ts) 的 `register({ imports, inject, useFactory })` 提供这三个已有应用实例。Factory 返回 [TenantMessagingHttpApplications](tenant-messaging-http.application.ts) 的 `invitations`、`dispatch`、`support`，四个 Controller 共用它们。保留原邀请操作键、投递台账和邮箱 UID 游标，邀请提交后通过 `readByKey` 核对原结果，客服同步显式调用 `sync`。
 
+邀请存储的租户读取使用一个精确 `code/name/status` select，真实 Prisma delegate 可直接满足端口。已接受邀请仍只投影原租户编码和提示，租户当前状态不改变原接受结果。
+
 ## HTTP、请求与接口资料
 
 [HTTP 政策](tenant-messaging-http-policy.ts) 持有 13 个操作的原方法、路径、权限和输入输出名称。宿主将其加入公共 Guard 的同源政策，将 [OpenAPI schemas](tenant-messaging-openapi.ts) 加入同版本文档。操作中已有 `parameters` 时直接使用这组完整元数据，它保留寄件详情的必需 `channel` 和 `source` 枚举。POST 成功状态为 201，GET 为 200。公开 `inspect` 和 `accept` 仅通过 POST 提交原一次性凭证，Controller 先调用原 IP 限流。

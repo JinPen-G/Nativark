@@ -39,7 +39,7 @@ export interface TenantInvitationTransaction extends TenantMessagingSqlTransacti
 
 export interface TenantInvitationDataStore<Transaction extends TenantInvitationTransaction> extends TenantInvitationTransaction {
   tenant: {
-    findUnique(query: { where: { id: string }; select: { code: true } }): PromiseLike<{ code: string } | null>;
+    // 单一精确 select 让真实 Prisma delegate 直接满足端口，不需转换整个 Client。
     findUnique(query: { where: { id: string }; select: { code: true; name: true; status: true } }): PromiseLike<{
       code: string; name: string; status: string;
     } | null>;

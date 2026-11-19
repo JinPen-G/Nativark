@@ -221,7 +221,8 @@ export class PlatformTenantOperatorInvitationsService<Transaction extends Tenant
   }
   private async readAcceptance(row: StoredInvitation) {
     this.assertAccepted(row);
-    const tenant = await this.prisma.tenant.findUnique({ where: { id: row.tenantId }, select: { code: true } });
+    // 租户当前状态不改变原接受结果；公开投影仍只返回原租户码和提示。
+    const tenant = await this.prisma.tenant.findUnique({ where: { id: row.tenantId }, select: { code: true, name: true, status: true } });
     if (!tenant) throw new NotFoundException("邀请所属租户不存在");
     return this.acceptedResult(tenant.code);
   }
