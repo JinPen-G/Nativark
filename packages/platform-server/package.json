@@ -318,6 +318,10 @@
     "./stripe-signature": {
       "types": "./dist/modules/integrations/stripe-signature.d.ts",
       "default": "./dist/modules/integrations/stripe-signature.js"
+    },
+    "./media": {
+      "types": "./dist/modules/media/index.d.ts",
+      "default": "./dist/modules/media/index.js"
     }
   },
   "scripts": {
@@ -572,6 +576,9 @@
       ],
       "stripe-signature": [
         "./dist/modules/integrations/stripe-signature.d.ts"
+      ],
+      "media": [
+        "./dist/modules/media/index.d.ts"
       ]
     }
   }
