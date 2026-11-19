@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const vm = require('node:vm');
+const { declaredSource } = require('./miniprogram-shared-types.cjs');
 
 const exportsAllowed = Object.freeze([
   'AI_CLIENT_PUBLIC_HTTP', 'aiClientPublicSessionRequestSchema', 'aiClientPublicReadRequestSchema',
@@ -67,6 +68,19 @@ async function buildNativeContractRuntime(appRoot, kind) {
   const { Volume, createFsFromVolume } = require(resolve('memfs'));
   const sourceRoot = fs.realpathSync(path.join(projectRoot, 'packages/shared/src'));
   const zodRoot = fs.realpathSync(path.dirname(resolve('zod/package.json')));
+  const rentalEntry = declaredSource(projectRoot, '@rental-os/rental-core', true);
+  const rentalSources = new Set([rentalEntry,
+    path.join(path.dirname(rentalEntry), 'contracts.ts'),
+    path.join(path.dirname(rentalEntry), 'rental-category-code.ts'),
+    declaredSource(projectRoot, '@rental-os/rental-core/client-contracts', true),
+    declaredSource(projectRoot, '@rental-os/rental-core/enterprise-order-delegation', true)].map(file => fs.realpathSync(file)));
+  // Source builds resolve these three actual package exports once. A missing
+  // declaration or canonical source fails before webpack, with no fallback.
+  const rentalExports = new Map([
+    ['@rental-os/rental-core', rentalEntry],
+    ['@rental-os/rental-core/client-contracts', declaredSource(projectRoot, '@rental-os/rental-core/client-contracts', true)],
+    ['@rental-os/rental-core/enterprise-order-delegation', declaredSource(projectRoot, '@rental-os/rental-core/enterprise-order-delegation', true)]
+  ]);
   const bundle = bundles[kind], entry = path.join(sourceRoot, bundle.entry);
   const license = fs.readFileSync(path.join(zodRoot, 'LICENSE'), 'utf8');
   const outputPath = kind === 'customer' ? path.join(appRoot, 'dist', 'vendor', 'shared-ai-client')
@@ -80,9 +94,18 @@ async function buildNativeContractRuntime(appRoot, kind) {
     entry, output: { path: outputPath, filename: outputName, library: { type: 'commonjs2' },
       chunkLoading: false, wasmLoading: false, clean: false },
     resolve: { extensions: ['.ts', '.js', '.mjs', '.cjs'], mainFields: ['module', 'browser', 'main'],
-      conditionNames: ['import', 'module', 'default'] },
-    module: { rules: [{ test: /\.ts$/u, include: sourceRoot,
-      use: [{ loader: path.join(projectRoot, 'apps/miniprogram/scripts/shared-runtime-loader.cjs') }] }] },
+      conditionNames: ['import', 'module', 'default'], modules: [path.dirname(zodRoot), 'node_modules'],
+      plugins: [{ apply(resolver) {
+        resolver.getHook('described-resolve').tapAsync('DeclaredRentalNativeExports', (request, context, callback) => {
+          if (!request.request?.startsWith('@rental-os/rental-core')) return callback();
+          const file = rentalExports.get(request.request);
+          if (!file) return callback(Error('Undeclared Rental export in native contract runtime'));
+          resolver.doResolve(resolver.ensureHook('resolve'), { ...request, request: file }, 'declared Rental native source', context, callback);
+        });
+      } }] },
+    module: { rules: [{ test: /\.ts$/u, include: [sourceRoot, ...rentalSources],
+      use: [{ loader: path.join(projectRoot, 'apps/miniprogram/scripts/shared-runtime-loader.cjs'),
+        options: { rentalEntry } }] }] },
     optimization: { minimize: true, splitChunks: false, runtimeChunk: false,
       minimizer: [new TerserPlugin({ parallel: false, extractComments: false, terserOptions: { format: { comments: /^!/u } } })] },
     plugins: [new webpack.BannerPlugin({ banner: `Canonical Rental OS customer contract runtime.\nIncludes Zod under its original license:\n${license}`,
@@ -94,7 +117,7 @@ async function buildNativeContractRuntime(appRoot, kind) {
               if (module.externalType) { compilation.errors.push(Error('External dependency in native client runtime')); continue; }
               if (!module.resource) continue;
               const real = fs.realpathSync(module.resource.split('?')[0]);
-              if (!inside(sourceRoot, real) && !inside(zodRoot, real))
+              if (!inside(sourceRoot, real) && !inside(zodRoot, real) && !rentalSources.has(real))
                 compilation.errors.push(Error(`Unapproved client runtime source: ${real}`));
               else sources.add(real);
             }
@@ -127,6 +150,7 @@ async function buildNativeContractRuntime(appRoot, kind) {
     throw Error('Native contract export whitelist mismatch');
   const sourceHashes = [...sources].sort().map(file => ({ file: inside(sourceRoot, file)
     ? `shared/${path.relative(sourceRoot, file).replace(/\\/g, '/')}`
+    : rentalSources.has(file) ? `rental-core/${path.relative(path.dirname(rentalEntry), file).replace(/\\/g, '/')}`
     : `zod/${path.relative(zodRoot, file).replace(/\\/g, '/')}`,
   sha256: crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex') }));
   return { code, bytes, sha256: crypto.createHash('sha256').update(code).digest('hex'), sourceHashes };

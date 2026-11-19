@@ -67,7 +67,7 @@ apps/staff-miniprogram
 └─ project.config.json
 ```
 
-页面共 27 个（`src/app.json`），底部 4 个 Tab：工作台 `workbench`、订单 `orders`、扫码 `scan`、我的 `me`；其余为 login、workspace、scanner、order、order-new、allocate、reviews、pickup、return、work-orders、work-order、scan-result、scan-manual、assets、asset、asset-ledger、asset-new、customers、customer、customer-edit、password、history、about。视觉参考 `apps/设计图/` 的员工端设计图。
+页面共 29 个（`src/app.json`）。底部 4 个 Tab 为工作台 `workbench`、订单 `orders`、扫码 `scan`、我的 `me`，其余为 login、workspace、scanner、subscription、order、order-new、allocate、reviews、pickup、return、work-orders、work-order、scan-result、scan-manual、assets、product、asset、asset-ledger、asset-new、customers、customer、customer-edit、password、history、about。视觉参考 `apps/设计图/` 的员工端设计图。
 
 ## 本地开发与预览
 
@@ -78,7 +78,7 @@ npm run test:staff-miniprogram           # 构建 + 静态/沙箱测试
 
 用微信开发者工具导入 `apps/staff-miniprogram/dist`（构建脚本已把 `project.config.json` 复制进 dist、代码根设为当前目录，`libVersion 3.4.0`）。本机联调构建会关闭开发者工具的合法域名校验，仅供模拟器访问本机 `localhost`（真机上 `localhost` 指手机自身，连不到电脑 API）。修改 API 地址改 `src/config/public.ts` 的 `apiOrigin`，或构建时设 `STAFF_MINIPROGRAM_API_ORIGIN`。
 
-构建前置会编译原 Shared 和 Rental 原生客户端。后者使用独立 `dist-clients/` 出口，微信构建将实际相对运行时和原许可写入 `dist/vendor/rental-core/`，七组业务薄入口继续使用同一员工会话及运输。[原生编译步骤](../../packages/rental-core/clients/staff/README.md#原生编译与微信打包) · [构建实现](scripts/build.cjs)
+原构建脚本在本树任务临时目录私有编译当前 Shared 声明和完整 Rental Native 客户端，按正式 `dist-clients/` 出口将七组业务、认证、附件及实际相对运行时和原许可写入 `dist/vendor/rental-core/`。原业务薄入口继续使用同一员工会话及运输，退出时释放私有编译产物。[原生编译步骤](../../packages/rental-core/clients/staff/README.md#原生编译与微信打包) · [构建实现](scripts/build.cjs)
 
 ## 发布构建
 
@@ -91,7 +91,7 @@ npm run build:staff-miniprogram:release  # apiOrigin 必须为 HTTPS，并重新
 ## 配置与安全
 
 - `src/config/public.ts` 仅含公开配置 `{ apiOrigin, appId, allowLocalApi, builtAt }`，无 `tenantCode`、无密钥。API 前缀 `/api/staff/v1` 在 `core/http.ts` 拼接。
-- 密钥不进包：AppSecret、账号口令、租户密钥只在服务端保存。构建门禁与客户端同一套（禁运行时依赖 `@rental-os/shared`、拒密钥形态字符串、校验页面结构与图标完整性）。
+- 密钥不进包。AppSecret、账号口令、租户密钥只在服务端保存。构建门禁拒绝密钥形态字符串，并校验页面结构和图标完整性；最终所有 CommonJS 依赖须落在本包 JS/JSON，未知、动态或越界依赖均拒绝。
 
 ## 后端前置
 

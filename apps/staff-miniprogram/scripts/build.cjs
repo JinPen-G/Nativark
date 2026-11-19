@@ -22,7 +22,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
-const { prepareMiniprogramSharedTypes, releaseMiniprogramSharedTypes, clearMiniprogramBuildOutput, emitMiniprogramRentalClientRuntime } = require('../../../scripts/miniprogram-shared-types.cjs');
+const { prepareMiniprogramSharedTypes, releaseMiniprogramSharedTypes, clearMiniprogramBuildOutput, emitMiniprogramRentalClientRuntime, validateMiniprogramRuntime } = require('../../../scripts/miniprogram-shared-types.cjs');
 
 const root = path.resolve(__dirname, "..");
 const src = path.join(root, "src");
@@ -96,7 +96,7 @@ async function main() {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.copyFileSync(file, target);
   }
-  emitMiniprogramRentalClientRuntime(root, dist);
+  emitMiniprogramRentalClientRuntime(root, dist, privateTypeConfig);
   const actionRuntime = await require('../../../scripts/miniprogram-ai-runtime.cjs').buildEntryActionRuntime(root);
   const actionRuntimeFile = path.join(dist, 'components', 'ai-native', 'entry-action-runtime.js');
   fs.mkdirSync(path.dirname(actionRuntimeFile), { recursive: true });
@@ -116,6 +116,7 @@ async function main() {
   fs.writeFileSync(configFile, replaced);
   fs.writeFileSync(path.join(dist, "config", "public.json"), `${literal}\n`);
 
+  validateMiniprogramRuntime(root, dist);
   const compiled = walk(dist).filter((file) => /\.(js|json|wxml|wxss)$/.test(file));
   for (const file of compiled) {
     const text = fs.readFileSync(file, "utf8");

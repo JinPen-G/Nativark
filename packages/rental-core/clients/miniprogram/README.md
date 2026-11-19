@@ -25,7 +25,7 @@ const orders = createRentalMiniProgramOrdersApi({ request });
 | [catalog](catalog.ts) | 登录／游客目录、可用性、报价、原报价与优惠券 | 客户 Controller → [客户应用](../../src/mysql-client-application.ts)；[原目录缓存](../../../../apps/miniprogram/src/core/catalogStore.ts)与结算页 |
 | [enterprise](enterprise.ts) | 政策、批准、费用确认、续租／换货、委托、原操作与结果读取 | [企业工作流 Controller](../../src/http-enterprise-workflows.controller.ts)及客户 Controller；[续租协调器](../../../../apps/miniprogram/src/core/enterprise-extension-operation.ts)、[换货申请](../../../../apps/miniprogram/src/core/enterprise-exchange-request.ts)、[费用确认](../../../../apps/miniprogram/src/core/enterprise-exchange-confirmation.ts)与原结算页 |
 | [merchant](merchant.ts) | 公开服务、微信小程序渠道启动、公开文档与登录后的配置 | 客户 Controller → 原渠道与公开投影；[原商户缓存](../../../../apps/miniprogram/src/core/merchant.ts)与文档页 |
-| [orders](orders.ts) | 建单、统一本人索引、订单／履约／资金、取消、续租与检查费用响应 | 客户 Controller → 客户应用及原 Core；结算、订单与续租页 |
+| [orders](orders.ts) | 建单、统一本人索引、订单／履约／资金、取消、续租、检查费用响应及六个原 AI 预约请求 | 客户 Controller → 客户应用及原 Core；[原预约宿主](../../../../apps/miniprogram/src/components/ai-native/booking-host.factory.ts)、结算、订单与续租页 |
 | [payments](payments.ts) | 能力与小程序支付单创建、读取、查单、关闭 | 客户 Controller → 原支付服务；[微信支付宿主](../../../../apps/miniprogram/src/core/payment.ts)与支付页 |
 | [profile](profile.ts) | 资料、会员、权益、资质与文件会话／下载地址 | 客户 Controller → 原会员与文件应用；资料、会员与资质页 |
 
@@ -37,19 +37,22 @@ const orders = createRentalMiniProgramOrdersApi({ request });
 
 企业写入保留 `replayAfterRefresh: false`。未知结果沿原操作和可信收据读取，原结束请求沿既有结束键；持久化引用、独占门闸和读取前后复验由上述原操作协调器维护。
 
-原 request 负责上下文变化后的迟到响应丢弃，页面和协调器负责 hide/unload 的寿命复验。旧 orders 入口保留六个原 AI 宿主请求，沿原权限和同一运输执行。
+原 request 负责上下文变化后的迟到响应丢弃，页面和协调器负责 hide/unload 的寿命复验。六个原 AI 预约请求由订单工厂提供，原 orders 入口供给同一 request 并窄导出。能力、交接、接受观察、接受与提交保留 `replayAfterRefresh: false`，原提交结果读取保留原请求选项。能力观察、接受、正式提交与原结果读取分别沿原服务端合同执行，宿主绑定和默认开关由原预约宿主维护。
 
 ## 原生编译与微信打包
 
-准备项目锁定依赖后，编译正式客户端。
+准备项目锁定依赖后，使用原微信宿主构建入口。
 
 ```bash
-npm run build:native-clients -w @rental-os/rental-core
+npm run build:miniprogram
+npm run typecheck -w @rental-os/miniprogram
 ```
 
-[原生配置](../../tsconfig.native-clients.json)单独生成 `dist-clients/` 的 CommonJS 和声明，正式入口为 `dist-clients/clients/miniprogram/index.js` 及同名声明。微信宿主的 `prebuild`、`pretypecheck` 准备原 Shared 声明和这个客户端；七组业务工厂与认证工厂使用同一正式入口，运行时闭包由当前原生配置和包声明生成，业务合同沿类型导入。
+[原生配置](../../tsconfig.native-clients.json)定义 `dist-clients/` 的 CommonJS 和声明，正式入口为 `dist-clients/clients/miniprogram/index.js` 及同名声明。微信构建在本树单一任务临时目录中编译当前 Shared 声明及完整 Native 工厂，并按实际包声明映射到私有产物。七组业务工厂、原 16 方法认证及六个 AI 预约请求消费同一入口，原 time 出口按实际引用打包。构建和 `--check` 退出时释放私有声明与 Native 产物。
 
-[公共打包函数](../../../../scripts/miniprogram-shared-types.cjs)读取已声明入口，将实际 CommonJS 闭包与原 MIT 许可写入微信发布包的 `vendor/rental-core/`，并改写原宿主的正式包导入。未声明入口、外部或动态 `require` 会停止构建。[微信构建入口](../../../../apps/miniprogram/scripts/build.cjs)
+[公共打包函数](../../../../scripts/miniprogram-shared-types.cjs)读取已声明入口，将实际 CommonJS 闭包与原 MIT 许可写入微信发布包的 `vendor/rental-core/`，并改写原宿主的正式包导入。正文解析器和六个原收据／服务选择函数沿 Shared 正式出口追到当前平台／Core 源码，复用原函数体。原 AI webpack 只接受既有 Shared/Zod 和五个已核定 Core 源文件。最终所有 JS 的 `require` 均须解析到本包 JS/JSON；缺出口、缺文件、外部／动态依赖或新 Core 依赖会停止构建。[微信构建入口](../../../../apps/miniprogram/scripts/build.cjs) · [AI 运行时](../../../../scripts/miniprogram-ai-runtime.cjs)
+
+发布仍用 `npm run build:miniprogram:release`，沿原公开 API、商户与 AppID 配置。隔离验证可在原命令后传 `--out-dir`，目标限于本树 `output/.tmp/<任务>/<客户端>`；失败清除本次输出，成功产物由创建者按交付用途保留或清理。真实微信、业务认证与原结果恢复按对应环境验收。
 
 ## 验证入口
 

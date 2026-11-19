@@ -47,7 +47,7 @@ apps/miniprogram
 └─ project.config.json
 ```
 
-页面共 21 个（`src/app.json`），底部 4 个 Tab：首页 `home`、分类 `catalog`、订单 `orders`、我的 `me`；其余为 splash、item、checkout、pay、order、extend、login、register、closure、profile、qualifications、benefits、favorites、coupons、locations、addresses、legal。
+页面共 22 个（`src/app.json`）。底部 4 个 Tab 为首页 `home`、分类 `catalog`、订单 `orders`、我的 `me`，其余为 splash、item、checkout、pay、order、extend、exchange、login、register、closure、profile、qualifications、benefits、favorites、coupons、locations、addresses、legal。
 
 ## 本地开发与预览
 
@@ -66,7 +66,7 @@ npm run build:miniprogram
 
 默认按 `src/config/public.ts` 常量打包（演示租户 `demo` + `http://localhost:3000`），产物在 `apps/miniprogram/dist`，并写入 `allowLocalApi: true` 放宽回环地址（仅供开发者工具本地预览）。
 
-构建前置会编译原 Shared 和 Rental 原生客户端。后者使用独立 `dist-clients/` 出口；微信构建将七组业务工厂的相对运行时和原许可带入 `dist/vendor/rental-core/`，原 API 薄入口继续供给同一客户会话与运输。[原生编译步骤](../../packages/rental-core/clients/miniprogram/README.md#原生编译与微信打包) · [构建实现](scripts/build.cjs)
+原构建脚本在本树任务临时目录私有编译当前 Shared 声明和完整 Rental Native 客户端，按正式 `dist-clients/` 出口将七组业务工厂、原 16 方法认证、time 及其相对运行时和原许可带入 `dist/vendor/rental-core/`。原 API 薄入口继续供给同一客户会话与运输，退出时释放私有编译产物。[原生编译步骤](../../packages/rental-core/clients/miniprogram/README.md#原生编译与微信打包) · [构建实现](scripts/build.cjs)
 
 3. 用微信开发者工具导入 `apps/miniprogram`（工程根含 `project.config.json`，代码目录 `dist/`）。没有正式 AppID 时选「测试号」，并在「详情 → 本地设置」勾选不校验合法域名（`libVersion 3.4.0`）。真机调试时 `localhost` 指手机本身，连不到开发机 API。
 
@@ -82,13 +82,15 @@ npm run build:miniprogram:release
 
 - `src/config/public.ts` 是包内唯一配置，且全部公开：`{ apiOrigin, tenantCode, appId, allowLocalApi, builtAt }`。API 前缀 `/api/client/v1` 在 `core/http.ts` 拼接。
 - 密钥不进包：AppSecret、商户私钥、`session_key`、口令等只在服务端加密保存。构建期硬门禁会拒绝以下情况：编译产物在运行时 `require("@rental-os/shared")`（只允许 `import type`）、出现密钥形态字符串、页面缺少 js/json/wxml/wxss、tabBar 图标缺失。
-- 正文解析器和企业原申请/结束收据匹配函数使用受管声明适配；构建从Shared正式出口核对原函数并生成小程序运行文件。声明复用公共类型，不复制业务判断；收据函数来源缺失、歧义或引入未审核运行依赖时停止构建。
+- 正文解析器和企业原申请/结束收据匹配函数使用受管声明适配。构建从 Shared 正式出口追到当前平台／Core 原函数并生成小程序运行文件，来源缺失、歧义或引入未审核运行依赖时停止构建。最终所有 CommonJS 依赖须落在本包 JS/JSON，未知、动态或越界依赖均拒绝。
 - [客户会话](src/core/session.ts)记录本人及本包租户归属，[请求出口](src/core/http.ts)在返回和重放前核对会话代次。换本人、租户或退出后，旧登录态响应以 `STALE_CONTEXT` 丢弃。同本人/租户切服务仍可读取租户级结果，匿名公开读取沿原范围处理。旧缓存未记录租户时按本包配置补齐，已记录其他租户的缓存清除，授权仍由服务端校验。
 - 401 刷新按本人/租户及原刷新令牌单飞，同账号重新登录后的旧刷新或重放 401 无权覆盖、清空新会话。企业 `replayAfterRefresh: false` 继续禁止自动重放，unknown 写入仍由原消费者用原操作键读取结果。
 
 ## 测试
 
-业务请求沿 [Rental 客户小程序工厂](../../packages/rental-core/clients/miniprogram/README.md)维护，原 `src/api` 七组入口注入同一 `core/http.request` 并窄委托。宿主继续供给公开渠道配置、客户会话、页面寿命及原操作键；微信支付和 AI 宿主请求沿原所属实现消费。
+业务请求沿 [Rental 客户小程序工厂](../../packages/rental-core/clients/miniprogram/README.md)维护，原 `src/api` 七组业务入口注入同一 `core/http.request` 并窄委托。认证入口通过同一正式出口供给原 16 个认证与会话采用方法，注入公开渠道配置、原错误转换、会话保存和退出清理。[认证端口与用法](../../packages/rental-core/clients/miniprogram/auth/README.md)
+
+宿主继续供给公开渠道配置、客户会话、页面寿命及原操作键。六个原 AI 预约请求通过 orders 工厂消费原运输，能力观察、接受、提交和结果读取保留原请求选项；原预约宿主负责绑定及读取寿命。微信支付沿原支付宿主消费。[订单入口](src/api/orders.ts) · [原预约宿主](src/components/ai-native/booking-host.factory.ts)
 
 ```bash
 npm run test:miniprogram

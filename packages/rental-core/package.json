@@ -3336,9 +3336,9 @@
     "build": "tsc -p tsconfig.json",
     "prelint": "npm run build -w @rental-os/platform-server",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "prebuild:native-clients": "npm run build -w @rental-os/platform-contracts",
+    "prebuild:native-clients": "npm run build -w @rental-os/shared",
     "build:native-clients": "tsc -p tsconfig.native-clients.json",
-    "prelint:native-clients": "npm run build -w @rental-os/platform-contracts",
+    "prelint:native-clients": "npm run build -w @rental-os/shared",
     "lint:native-clients": "tsc -p tsconfig.native-clients.json --noEmit"
   },
   "dependencies": {

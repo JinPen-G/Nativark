@@ -37,15 +37,18 @@ sessionEvents.on(assets.invalidateAssets);
 
 ## 原生编译与微信打包
 
-准备项目锁定依赖后，编译正式原生客户端。
+准备项目锁定依赖后，使用原微信宿主构建入口。
 
 ```bash
-npm run build:native-clients -w @rental-os/rental-core
+npm run build:staff-miniprogram
+npm run typecheck -w @rental-os/staff-miniprogram
 ```
 
-[原生配置](../../tsconfig.native-clients.json)单独生成 `dist-clients/` 的 CommonJS 和声明。业务合同导入均为 `import type`，员工运行时使用已登记的业务、认证和附件工厂及其相对依赖，正式包名定位到 `dist-clients/clients/staff/index.js` 和同名声明。
+[原生配置](../../tsconfig.native-clients.json)定义 `dist-clients/` 的 CommonJS 和声明。业务合同导入均为 `import type`，员工运行时使用已登记的七组业务、认证和附件工厂及其相对依赖，正式包名定位到 `dist-clients/clients/staff/index.js` 和同名声明。原收据读取与其他订单方法由同一工厂提供。
 
-员工微信构建的 `prebuild`、`pretypecheck` 准备原 Shared 声明和这个客户端。公共打包函数将已声明入口的相对 CommonJS 闭包及原 MIT 许可带入 `dist/vendor/rental-core/`，原宿主的包导入改为该发布包内路径；不支持未声明入口、外部或动态 `require`。[打包实现](../../../../scripts/miniprogram-shared-types.cjs) · [微信构建入口](../../../../apps/staff-miniprogram/scripts/build.cjs)
+员工微信构建从本树源码与实际包声明在单一任务临时目录编译当前 Shared 声明和完整 Native 工厂。公共打包函数将已声明入口的相对 CommonJS 闭包及原 MIT 许可带入 `dist/vendor/rental-core/`，原宿主的包导入改为该发布包内路径。最终所有 JS 的 `require` 均须解析到本包 JS/JSON，缺出口、缺文件、外部或动态依赖会停止构建。构建和 `--check` 退出时释放私有编译产物。[打包实现](../../../../scripts/miniprogram-shared-types.cjs) · [微信构建入口](../../../../apps/staff-miniprogram/scripts/build.cjs)
+
+发布仍用 `npm run build:staff-miniprogram:release`，沿原公开 API 与 AppID，租户在登录时选择。隔离验证可在原命令后传 `--out-dir`，目标限于本树 `output/.tmp/<任务>/<员工端>`；失败清除本次输出，成功产物由创建者按交付用途保留或清理。原 AI webpack 沿受控源闭包生成动作及目录运行时。[AI 运行时](../../../../scripts/miniprogram-ai-runtime.cjs)
 
 ## 调用链
 
@@ -53,7 +56,7 @@ npm run build:native-clients -w @rental-os/rental-core
 
 订单工厂保留原数组或分页响应处理、查询字段、对象 ID 编码、请求正文、幂等键和操作令牌。报价、建单与续租请求经宿主原准入函数执行。检查、直接交接与分批归还使用 `replayAfterRefresh: false`。线下收款登记的幂等键继续随原正文投递，原资金、资格、计价和执行收据由业务服务提供。[订单客户端](orders.ts)
 
-AI 检查原收据读取继续位于原员工订单入口，按原键读取并校验 `committed` 或 `unknown` 结果。原未知结果、取消和认证失效按宿主原操作与收据处理。[原收据入口](../../../../apps/staff-miniprogram/src/api/orders.ts)
+AI 检查原收据读取由订单工厂提供，原员工订单入口供给同一 request 并窄导出。原输入、原操作引用、版本、执行声明和精确结果字段校验保持，`committed` 校验原订单及检查引用，`unknown` 保留空收据；原错误与 `replayAfterRefresh: false` 保持。原未知结果、取消和认证失效按宿主原操作与收据处理。[订单客户端](orders.ts) · [原收据入口](../../../../apps/staff-miniprogram/src/api/orders.ts)
 
 ## 资产缓存
 

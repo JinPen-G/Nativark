@@ -1,4 +1,13 @@
-/** 本人订单、履约、资金、续租和费用请求，沿调用方原幂等键与读取寿命。 */
+/** 本人订单、履约、资金、续租、费用与 AI 预约请求，沿原宿主身份、操作键和读取寿命。 */
+import type {
+  AiBookingHandoff,
+  AiBookingAcceptanceReadRequest,
+  AiBookingAcceptanceReadResponse,
+  AiBookingSubmissionAcceptance,
+  AiBookingSubmissionDecision,
+  AiBookingSubmissionReceipt,
+  AiClientHostCapabilities,
+} from "@rental-os/shared";
 import type {
   ClientCancellationPreview,
   ClientFeeItemsResponse,
@@ -89,6 +98,36 @@ export function createRentalMiniProgramOrdersApi(ports: RentalMiniProgramClientP
     return request<ClientFeeResponseResult>(`/orders/${encodeURIComponent(orderId)}/fee-items/${encodeURIComponent(inspectionId)}/${exceptionIndex}/response`, { method: "POST", data: input, idempotencyKey });
   }
 
+  function readBookingHostCapabilities(): Promise<AiClientHostCapabilities> {
+    return request("/ai-native/wechat-entry/host-capabilities/read", { method: "POST", data: {}, replayAfterRefresh: false });
+  }
+
+  /** Both explicit page consumers and capability-bound factories use this same read. */
+  function readBookingHandoff(input: string | { handoffRef: string }): Promise<AiBookingHandoff> {
+    const handoffRef = typeof input === "string" ? input : input.handoffRef;
+    return request("/ai-native/wechat-entry/booking-handoffs/read", { method: "POST", data: { handoffRef }, replayAfterRefresh: false });
+  }
+
+  /** Explicit AI page host ports. Exporting these never enables or binds a host.
+   * Routes are the authenticated alias published by AI_CLIENT_ENTRY_HTTP_DRAFT. */
+  function readBookingAcceptance(input: AiBookingAcceptanceReadRequest): Promise<AiBookingAcceptanceReadResponse> {
+    return request("/ai-native/wechat-entry/booking-submissions/acceptance/read", { method: "POST", data: input, replayAfterRefresh: false });
+  }
+
+  function acceptBookingSubmission(input: { handoffRef: string }): Promise<AiBookingSubmissionAcceptance> {
+    return request<AiBookingSubmissionAcceptance>("/ai-native/wechat-entry/booking-submissions/accept", { method: "POST", data: input, replayAfterRefresh: false });
+  }
+
+  function submitAcceptedBooking(input: AiBookingSubmissionDecision): Promise<AiBookingSubmissionReceipt> {
+    // A 401 may be a late current-identity recheck. Never let refresh resend a write.
+    return request<AiBookingSubmissionReceipt>("/ai-native/wechat-entry/booking-submissions/submit",
+      { method: "POST", data: input, replayAfterRefresh: false });
+  }
+
+  function readBookingSubmission(input: { acceptanceRef: string }): Promise<AiBookingSubmissionReceipt> {
+    return request<AiBookingSubmissionReceipt>("/ai-native/wechat-entry/booking-submissions/read", { method: "POST", data: input });
+  }
+
   return {
     createOrder,
     fetchMyOrders,
@@ -103,5 +142,11 @@ export function createRentalMiniProgramOrdersApi(ports: RentalMiniProgramClientP
     activatePaidExtension,
     fetchFeeItems,
     respondToFee,
+    readBookingHostCapabilities,
+    readBookingHandoff,
+    readBookingAcceptance,
+    acceptBookingSubmission,
+    submitAcceptedBooking,
+    readBookingSubmission,
   };
 }

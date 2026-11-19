@@ -147,6 +147,8 @@ Rental HTTP从 `@rental-os/rental-core/http` 的 `RentalHttpModule` 接入，类
 
 网站、门户和部分前端出口继续使用 `@rental-os/shared@0.1.0` 的原运行协议。该包是可选 peer，消费这些出口的宿主仍须安装它；只使用其他出口时可按实际依赖选择。租赁值逐项转到已有 Core 正式出口，AI schema 和协调器当前仍由原 Shared 单源提供。
 
+微信客户端工厂可通过 `npm run build:native-clients -w @rental-os/rental-core` 单独构建，类型检查使用 `npm run lint:native-clients -w @rental-os/rental-core`。前置先准备同版本 Shared 声明，Shared 的前置只构建 Core 主包，再进入 Native 配置，避免缺声明或循环构建。两端微信应用的正常构建与 `--check` 则自带私有声明/Native 编译，退出时释放，不要求先写正式 Shared/Core 产物。[Native配置](tsconfig.native-clients.json) · [客户接入](clients/miniprogram/README.md) · [员工接入](clients/staff/README.md) · [私有准备](../../scripts/miniprogram-shared-types.cjs)
+
 空间切换、开发密码重置和员工订阅上下文由 [独立扩展模块](src/http-extensions.module.ts) 绑定同一认证/订阅实例；它与旧宿主已挂载的三个薄适配路径二选一，公共六项认证继续由公共模块提供。[原 Guard](src/http-auth.ts) 保持角色、客户和空间政策，[application-access](src/application-access.ts) 将当前 Core 授权接入原业务父锁事务；它不代表所有独立写入、媒体流和回调已完成接入。
 
 企业和客户敏感读取的审计各自在独立短事务中复核当前 Core，并在审计提交后、释放数据前再核原授权。已经提交的客户合并仍使用原事后审计入口，保留成功操作与原收据。客户概览只有订单读取权才查询统计，金额聚合另需原财务权限。[读取审计](src/mysql-enterprise-reader-audit.ts) · [客户审计](src/mysql-customer-operations.ts) · [概览权限](src/mysql-customer-governance.ts)

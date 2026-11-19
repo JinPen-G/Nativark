@@ -23,7 +23,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
-const { prepareMiniprogramSharedTypes, releaseMiniprogramSharedTypes, clearMiniprogramBuildOutput, emitMiniprogramSharedReceiptRuntime, emitMiniprogramRentalClientRuntime } = require('../../../scripts/miniprogram-shared-types.cjs');
+const { prepareMiniprogramSharedTypes, releaseMiniprogramSharedTypes, clearMiniprogramBuildOutput, emitMiniprogramSharedReceiptRuntime, emitMiniprogramRichTextRuntime, emitMiniprogramRentalClientRuntime, validateMiniprogramRuntime } = require('../../../scripts/miniprogram-shared-types.cjs');
 
 const root = path.resolve(__dirname, "..");
 const src = path.join(root, "src");
@@ -136,18 +136,13 @@ async function main() {
     }
     validateUses(sourceFile);
     if (parserUses === 0) fail("legal shared parser import is unused");
-    const parserSource = path.resolve(root, "../../packages/shared/src/client-rich-text.ts");
-    runTsc([parserSource, "--target", "ES2019", "--module", "commonjs", "--strict", "--skipLibCheck", "--outDir", path.join(dist, "vendor", "shared-rich-text")]);
     fs.writeFileSync(legalFile, legalSource.replace(sharedRequire, 'require("../../vendor/shared-rich-text/client-rich-text")'));
   }
   // The source-level legal import points at this vendor path too. Compile from
   // the same canonical implementation even when no legacy shared import remains.
-  if (!fs.existsSync(path.join(dist, "vendor", "shared-rich-text", "client-rich-text.js"))) {
-    const parserSource = path.resolve(root, "../../packages/shared/src/client-rich-text.ts");
-    runTsc([parserSource, "--target", "ES2019", "--module", "commonjs", "--strict", "--skipLibCheck", "--outDir", path.join(dist, "vendor", "shared-rich-text")]);
-  }
-  emitMiniprogramSharedReceiptRuntime(root, dist);
-  emitMiniprogramRentalClientRuntime(root, dist);
+  emitMiniprogramRichTextRuntime(root, dist, privateTypeConfig);
+  emitMiniprogramSharedReceiptRuntime(root, dist, privateTypeConfig);
+  emitMiniprogramRentalClientRuntime(root, dist, privateTypeConfig);
 
   // Only the canonical named customer validators and their necessary existing
   // validation code enter this single native bundle. No package runtime import,
@@ -178,6 +173,7 @@ async function main() {
   fs.writeFileSync(path.join(dist, "config", "public.json"), `${literal}\n`);
 
   // 产物校验
+  validateMiniprogramRuntime(root, dist);
   const compiled = walk(dist).filter((file) => /\.(js|json|wxml|wxss)$/.test(file));
   for (const file of compiled) {
     const text = fs.readFileSync(file, "utf8");

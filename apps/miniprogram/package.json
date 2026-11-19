@@ -5,10 +5,8 @@
   "description": "Rental OS 微信小程序客户端（原生 + TypeScript）。包内只含公开配置，不含任何密钥。",
   "scripts": {
     "build": "node scripts/build.cjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test ../../tests/miniprogram-static.test.cjs",
-    "prebuild": "npm run build -w @rental-os/shared && npm run build:native-clients -w @rental-os/rental-core",
-    "pretypecheck": "npm run build -w @rental-os/shared && npm run build:native-clients -w @rental-os/rental-core"
+    "typecheck": "node scripts/build.cjs --check",
+    "test": "node --test ../../tests/miniprogram-static.test.cjs"
   },
   "devDependencies": {
     "memfs": "3.5.3",
