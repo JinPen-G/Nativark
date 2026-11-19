@@ -19,3 +19,6 @@ export type {
   RentalStaffOrdersPorts,
   RentalStaffAssetsPorts,
 } from "./ports";
+export { createRentalStaffAuthApi, type RentalStaffAuthPorts } from "./auth";
+export { createRentalStaffUploadsApi } from "./uploads";
+export type { RentalStaffUploadsPorts, StaffUploadStage, StaffUploadReference, StaffUploadHooks, LocalStaffImage } from "./uploads";
