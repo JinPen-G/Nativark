@@ -82,7 +82,8 @@ export interface AcceptTenantOperatorInvitationRequest extends InspectTenantOper
   displayName: string;
   password: string;
 }
-export interface TenantOperatorInvitationPreview {
+export interface PendingTenantOperatorInvitationPreview {
+  status: "pending";
   tenantName: string;
   tenantCode: string;
   email: string;
@@ -92,6 +93,8 @@ export interface TenantOperatorInvitationPreview {
   expiresAt: string;
   minPasswordLength: number;
 }
+export type TenantOperatorInvitationPreview = PendingTenantOperatorInvitationPreview
+  | (AcceptTenantOperatorInvitationResult & { status: "accepted" });
 export interface TenantOperatorInvitationMailPreview {
   subject: string;
   renderedText: string;
@@ -128,6 +131,7 @@ export interface TenantSupportEmailPage {
 }
 export interface SyncTenantSupportEmailsResult {
   imported: number;
+  quarantined: number;
   checked: number;
   hasMore: boolean;
   syncedAt: string;

@@ -209,11 +209,21 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
     }
   }
 
-  private async lockPolicies(tx: Tx, keys: readonly BudgetPolicyKey[]) {
-    const ordered = [...keys].sort((a, b) => scopeKinds.indexOf(a.scopeKind) - scopeKinds.indexOf(b.scopeKind) || a.scopeId.localeCompare(b.scopeId) || a.sceneCode.localeCompare(b.sceneCode));
+  private taskMoneyPolicyKeys(keys: readonly BudgetPolicyKey[], association: BudgetQuote['association'], quantity: BudgetQuote['quantity'], sceneCode: string) {
+    if (association.config.serviceMode !== 'platform_managed' || quantity.unit !== 'money') return [];
+    return keys.filter(key => key.scopeKind !== 'PLATFORM' && key.sceneCode === platformCreditScene(sceneCode, association))
+      .map(key => ({ ...key, sceneCode }));
+  }
+
+  private async lockPolicies(tx: Tx, keys: readonly BudgetPolicyKey[], optional: readonly BudgetPolicyKey[] = []) {
+    const ordered = [...keys, ...optional].sort((a, b) => scopeKinds.indexOf(a.scopeKind) - scopeKinds.indexOf(b.scopeKind) || a.scopeId.localeCompare(b.scopeId) || a.sceneCode.localeCompare(b.sceneCode));
     const rows: StoredPolicy[] = [];
     for (const key of ordered) {
+      const supplemental = optional.includes(key);
+      if (supplemental) await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_budget_policies
+        WHERE scopeId = ${key.scopeId} AND scopeKind = ${key.scopeKind} AND sceneCode = ${key.sceneCode} FOR UPDATE`);
       const found = structuredClone(await tx.aiBudgetPolicy.findUnique({ where: { scopeId_scopeKind_sceneCode: policyWhere(key) }, select: { id: true, scopeId: true, scopeKind: true, sceneCode: true, configRevision: true, settingsJson: true } }));
+      if (!found && supplemental) continue;
       if (!found) throw new BudgetError('UNAVAILABLE');
       // Locking the policy row is explicit and database-side; a stale update
       // cannot pass if another transaction changed its revision.
@@ -260,7 +270,7 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
   /** All changes to held/charged capacity take admission's same policy locks.
    * Current gates/revisions only control NEW dispatch; old debt and proven
    * unsent releases must still converge after policies have been changed. */
-  private async lockReservationPolicies(tx: Tx, record: BudgetRecord) {
+  private async lockReservationPolicies(tx: Tx, record: BudgetRecord, checkTaskMoney = false) {
     const links = structuredClone(await tx.aiBudgetAllocation.findMany({ where: { reservationId: record.id },
       select: { policyId: true, policyRevision: true }, take: 4 }));
     if (links.length < 1 || links.length > 3 || new Set(links.map(link => link.policyId)).size !== links.length) throw new BudgetError('UNAVAILABLE');
@@ -271,10 +281,12 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
       if (!found || found.id !== link.policyId || !scopeKinds.includes(found.scopeKind)) throw new BudgetError('UNAVAILABLE');
       keys.push({ scopeId: found.scopeId, scopeKind: found.scopeKind, sceneCode: found.sceneCode });
     }
-    const rows = await this.lockPolicies(tx, keys);
+    const moneyPolicies = await this.lockPolicies(tx, keys, checkTaskMoney
+      ? this.taskMoneyPolicyKeys(keys, record.association, record.reserved, record.sceneCode) : []);
+    const rows = moneyPolicies.filter(row => keys.some(key => row.scopeId === key.scopeId && row.scopeKind === key.scopeKind && row.sceneCode === key.sceneCode));
     await this.assertIntersection(tx, rows, record.association, record.sceneCode);
     if (rows.some(row => !links.some(link => link.policyId === row.id))) throw new BudgetError('REVISION_CONFLICT');
-    return { rows, links };
+    return { rows, links, moneyPolicies };
   }
 
   /** Read aggregate rows, never the policy's entire reservation history. The
@@ -349,7 +361,9 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
           // Scope ownership remains checked below before financial insertion.
           await this.lockTenantCapacity(tx, tenantId, tenants[0].scopeId);
         }
-        const rows = await this.lockPolicies(tx, quote.policies);
+        const moneyPolicies = await this.lockPolicies(tx, quote.policies,
+          this.taskMoneyPolicyKeys(quote.policies, quote.association, quote.quantity, command.sceneCode));
+        const rows = moneyPolicies.filter(row => quote.policies.some(key => row.scopeId === key.scopeId && row.scopeKind === key.scopeKind && row.sceneCode === key.sceneCode));
         if (new Set(quote.policies.map(policy => `${policy.scopeKind}:${policy.scopeId}:${policy.sceneCode}`)).size !== quote.policies.length) throw new BudgetError('INVALID');
         if (!rows.some(row => row.scopeId === consumer.scopeId && row.scopeKind === consumer.scopeKind && row.sceneCode === consumer.sceneCode)) throw new BudgetError('FORBIDDEN');
         await this.assertIntersection(tx, rows, quote.association, command.sceneCode);
@@ -397,7 +411,7 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
         }
         if (quote.quantity.unit === 'money') await assertTaskMoneyLimit(tx, {
           association: quote.association, actorId: quote.actorId, sceneCode: command.sceneCode,
-          consumerScope: consumer, quantity: quote.quantity, policies: rows.map(policy), phase: 'reserve'
+          consumerScope: consumer, quantity: quote.quantity, policies: moneyPolicies.map(policy), phase: 'reserve'
         });
         await revalidate();
         assertFresh();
@@ -525,7 +539,7 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
       await revalidate();
       if (record.association.scope.kind !== 'platform')
         await this.lockTenantCapacity(tx, record.association.scope.tenantId);
-      const { rows, links } = await this.lockReservationPolicies(tx, record);
+      const { rows, links, moneyPolicies } = await this.lockReservationPolicies(tx, record, input.action === 'dispatch');
       const current = await this.readRecord(tx, record.id, record.association);
       if (!current || current.scopeId !== record.scopeId || current.scopeKind !== record.scopeKind
         || current.actorId !== record.actorId || current.callId !== record.callId || current.sceneCode !== record.sceneCode) throw new BudgetError('FORBIDDEN');
@@ -555,7 +569,7 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
         if (current.reserved.unit === 'money') await assertTaskMoneyLimit(tx, {
           association: current.association, actorId: current.actorId, sceneCode: current.sceneCode,
           consumerScope: { scopeId: current.scopeId, scopeKind: current.scopeKind, sceneCode: current.sceneCode },
-          quantity: current.reserved, policies: rows.map(policy), phase: 'dispatch'
+          quantity: current.reserved, policies: moneyPolicies.map(policy), phase: 'dispatch'
         });
       }
       const next = input.action === 'dispatch' ? { status: 'reserved', dispatchState: 'dispatched' } : input.action === 'unknown' ? { status: 'pending_reconciliation', dispatchState: 'unknown', unknownReason: input.reason ?? 'result_unknown' } : input.action === 'release' ? { status: 'released', dispatchState: 'not_dispatched' } : { status: 'settled', dispatchState: 'completed', ...(input.usage ? quantityFields(input.usage.quantity, 'actual') : {}) };

@@ -34,14 +34,17 @@ export const TENANT_MESSAGING_SCHEMAS: Record<string, SchemaObject> = {
   InspectTenantOperatorInvitationRequest: object({ token }, ["token"]),
   AcceptTenantOperatorInvitationRequest: object({ token, displayName: { type: "string", minLength: 1, maxLength: 100 },
     password: { type: "string", format: "password", minLength: 8, maxLength: 128 } }, ["token", "displayName", "password"]),
-  TenantOperatorInvitationPreview: object({ tenantName: string, tenantCode: string, email, displayName: string, roleNames: array(string), workspaceNames: array(string),
-    expiresAt: date, minPasswordLength: number }, ["tenantName", "tenantCode", "email", "displayName", "roleNames", "workspaceNames", "expiresAt", "minPasswordLength"]),
+  TenantOperatorInvitationPreview: { oneOf: [
+    object({ status: { type: "string", enum: ["pending"] }, tenantName: string, tenantCode: string, email, displayName: string, roleNames: array(string), workspaceNames: array(string),
+      expiresAt: date, minPasswordLength: number }, ["status", "tenantName", "tenantCode", "email", "displayName", "roleNames", "workspaceNames", "expiresAt", "minPasswordLength"]),
+    object({ status: { type: "string", enum: ["accepted"] }, tenantCode: string, message: string }, ["status", "tenantCode", "message"])
+  ] },
   AcceptTenantOperatorInvitationResult: object({ tenantCode: string, message: string }, ["tenantCode", "message"]),
   TenantSupportEmailRow: object(mail, Object.keys(mail)),
   TenantSupportEmailDetail: object({ ...mail, recipient: string, bodyText: string, messageId: string,
     attachments: array(object({ name: string, contentType: string, size: number }, ["name", "contentType", "size"])) }, [...Object.keys(mail), "recipient", "bodyText", "attachments"]),
   TenantSupportEmailPage: object({ rows: array("TenantSupportEmailRow"), total: number, page: number, pageSize: number, receiverConfigured: bool, lastSyncedAt: date }, ["rows", "total", "page", "pageSize", "receiverConfigured"]),
-  SyncTenantSupportEmailsResult: object({ imported: number, checked: number, hasMore: bool, syncedAt: date }, ["imported", "checked", "hasMore", "syncedAt"])
+  SyncTenantSupportEmailsResult: object({ imported: number, quarantined: number, checked: number, hasMore: bool, syncedAt: date }, ["imported", "quarantined", "checked", "hasMore", "syncedAt"])
 };
 const operation = (method: ContractOperation["method"], path: string, operationId: string, summary: string, permissions: string[], responseSchema: string,
   requestSchema?: string, parameters?: ContractOperation["parameters"], authRequired = true): ContractOperation => ({ method, path, operationId, summary, tag: "TenantMessaging", permissions,
@@ -63,7 +66,7 @@ export const TENANT_MESSAGING_OPERATIONS: ContractOperation[] = [
     [{ name: "key", in: "path", required: true, schema: string }]),
   operation("post", "/api/platform/users/invitations/{id}/revoke", "revokeOperatorInvitation", "撤回尚未接受邀请，原寄件记录保留", ["system:user:manage"], "TenantOperatorInvitationRow", undefined,
     [{ name: "id", in: "path", required: true, schema: string }]),
-  operation("post", "/api/auth/operator-invitations/inspect", "inspectOperatorInvitation", "原随机一次性凭证查看邀请，限流且复验原授权", [], "TenantOperatorInvitationPreview", "InspectTenantOperatorInvitationRequest", undefined, false),
+  operation("post", "/api/auth/operator-invitations/inspect", "inspectOperatorInvitation", "原凭证查看邀请或最小接受结果，未接受时复验原授权", [], "TenantOperatorInvitationPreview", "InspectTenantOperatorInvitationRequest", undefined, false),
   operation("post", "/api/auth/operator-invitations/accept", "acceptOperatorInvitation", "复验邀请和当前权限，原子建立账号及空间成员关系", [], "AcceptTenantOperatorInvitationResult", "AcceptTenantOperatorInvitationRequest", undefined, false),
   operation("get", "/api/platform/support/emails", "listTenantSupportEmails", "查看当前租户客诉邮箱原邮件", ["system:integration:manage"], "TenantSupportEmailPage", undefined, pagination),
   operation("get", "/api/platform/support/emails/{id}", "readTenantSupportEmail", "审计后查看客诉邮件安全正文和附件信息", ["system:integration:manage"], "TenantSupportEmailDetail", undefined,

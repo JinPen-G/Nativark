@@ -102,12 +102,15 @@ test('deterministic BYOK and platform-credit policy keys bind the original busin
 });
 
 test('namespaced admission still reaches original repository locks, policies and platform allowance', async () => {
-  const { Prisma } = require('@prisma/client');
+  const { Prisma } = require('../apps/api/node_modules/@prisma/client');
+  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
   const { PrismaBudgetRepository } = require('../apps/api/src/modules/ai-native/budget/prisma-budget.repository');
   const { byokMeterScene } = require('../apps/api/src/modules/ai-native/budget/byok-usage-meter');
   const { platformCreditScene } = require('../apps/api/src/modules/ai-native/budget/platform-credit-policy');
   for (const mode of ['tenant_managed', 'platform_managed']) {
     const request = command(); request.association.config.serviceMode = mode;
+    request.association.requestId = request.callId; request.association.idempotencyKey = request.callId;
+    if (mode === 'platform_managed') request.association.config.configurationScope = { kind: 'platform' };
     const unit = mode === 'tenant_managed' ? { unit: 'calls', value: 1 } : { unit: 'money', amount: '1.000000', currency: 'USD', scale: 6 };
     const mapped = mode === 'tenant_managed' ? byokMeterScene(request.sceneCode, request.association) : platformCreditScene(request.sceneCode, request.association);
     const keys = ['PLATFORM', 'TENANT', 'WORKSPACE'].map((scopeKind, i) => ({ scopeId: `scope-${i}`, scopeKind,
@@ -115,15 +118,28 @@ test('namespaced admission still reaches original repository locks, policies and
     let writes = 0, accountEnabled = true, policyEnabled = true, locks = 0;
     const rows = keys.map((key, i) => ({ ...key, id: `policy-${i}`, configRevision: 1,
       settingsJson: { ...settings, sceneCode: request.sceneCode, allowedScenes: [request.sceneCode],
+        ...(mode === 'platform_managed' && key.scopeKind === 'PLATFORM' ? { maxMoneyPerTask: { ...unit, amount: '10.000000' } } : {}),
         budget: { state: 'limited', quantity: mode === 'tenant_managed' ? { unit: 'calls', value: 10 } : { ...unit, amount: '10.000000' } } } }));
-    const db = { aiScope: { findUnique: async ({ where }) => { const key = keys.find(row => row.scopeId === where.id); return { id: key.scopeId, kind: key.scopeKind,
+    const empty = () => ({ findFirst: async () => null, findUnique: async () => null });
+    const task = { id: 'task-1', scopeId: keys[2].scopeId, scopeKind: 'WORKSPACE', ownerId: 'actor-1', ownerKind: 'USER', sceneCode: request.sceneCode };
+    const db = { aiScope: { ...empty(), findUnique: async ({ where }) => { const key = keys.find(row => row.scopeId === where.id); return { id: key.scopeId, kind: key.scopeKind,
       tenantId: key.scopeKind === 'PLATFORM' ? null : request.association.scope.tenantId,
       workspaceId: key.scopeKind === 'WORKSPACE' ? request.association.scope.workspaceId : null }; } },
-      aiBudgetPolicy: { findUnique: async ({ where }) => { const row = structuredClone(rows.find(row => row.scopeId === where.scopeId_scopeKind_sceneCode.scopeId));
+      aiBudgetPolicy: { findUnique: async ({ where }) => { const row = structuredClone(rows.find(row => Object.entries(where.scopeId_scopeKind_sceneCode).every(([field, value]) => row[field] === value)));
+        if (!row) return null;
         row.settingsJson.gates.scene.enabled = policyEnabled; return row; } },
-      $queryRaw: async () => { locks++; return []; },
+      $queryRaw: async query => { locks++;
+        if (query.sql.includes('task_money_origin')) return [{ joinedRows: '0', reservationRows: '0', badRows: '0' }];
+        if (query.sql.includes('task_money_sum')) return [{ rowCount: '0', amountCount: '0', currencyErrors: '0', usedMoney: null }];
+        return []; },
+      aiTask: { ...empty(), findFirst: async () => task },
+      aiRun: { ...empty(), findFirst: async () => ({ id: request.association.runId, scopeId: task.scopeId, taskId: task.id, actorId: 'actor-1', actorKind: 'USER' }) },
+      aiGatewayInvocation: { ...empty(), findUnique: async () => ({ id: 'invocation-1', scopeId: task.scopeId, taskId: task.id,
+        actorId: 'actor-1', callId: request.callId, runId: request.association.runId, stepId: request.association.stepId, actionId: request.association.actionId,
+        sceneCode: request.sceneCode, priceVersion: request.association.priceVersion, configuration: request.association.config, configurationHash: requestFingerprint(request.association.config) }) },
+      aiGatewayAccountingReceipt: empty(), aiBudgetLedgerEntry: empty(),
       aiTenantAiAllowance: { findUnique: async () => accountEnabled ? { grantedAmount: new Prisma.Decimal(10), allocationsJson: { 'workspace-1': '10.000000' } } : null },
-      aiBudgetReservation: { findUnique: async () => null, groupBy: async () => [], count: async () => 0,
+      aiBudgetReservation: { ...empty(), groupBy: async () => [], count: async () => 0,
         create: async ({ data }) => { writes++; return { reservedTokens: null, reservedCalls: null, reservedMoney: null,
           actualTokens: null, actualCalls: null, actualMoney: null, moneyCurrency: null, unknownReason: null, updatedAt: now,
           ...data, ...(data.reservedMoney ? { reservedMoney: new Prisma.Decimal(data.reservedMoney) } : {}) }; } },

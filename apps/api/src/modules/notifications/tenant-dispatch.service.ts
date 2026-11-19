@@ -58,7 +58,9 @@ export class TenantDispatchService {
       WHERE n.tenantId = ${tenantId} AND n.channel IN ('sms', 'email')
       UNION ALL
       SELECT id, 'verification' AS source, 'sms' AS channel, JSON_UNQUOTE(JSON_EXTRACT(requestJson, '$.phone')) AS recipient,
-        '验证码短信' AS subject, IF(status = 'success', 'sent', 'failed') AS status, provider,
+        '验证码短信' AS subject, CASE WHEN status = 'success' THEN 'sent'
+          WHEN status = 'failed' AND JSON_UNQUOTE(JSON_EXTRACT(responseJson, '$.deliveryStatus')) = 'failed' THEN 'failed'
+          ELSE 'delivery_uncertain' END AS status, provider,
         NULL AS workspaceName, 'verification' AS businessType, NULL AS businessId, createdAt,
         IF(status = 'success', createdAt, NULL) AS sentAt
       FROM ExternalAdapterLog WHERE tenantId = ${tenantId} AND capability = 'sms' AND operation = 'send_verification_sms'`;
@@ -104,7 +106,8 @@ export class TenantDispatchService {
     if (!row || channel !== "sms") throw new NotFoundException("验证码寄件记录不存在");
     const request = obj(row.requestJson), result = obj(row.responseJson);
     return { ...this.row({ ...row, source, channel, recipient: text(request.phone), subject: "验证码短信",
-      workspaceName: null, status: row.status === "success" ? "sent" : "failed", businessType: "verification", businessId: null,
+      workspaceName: null, status: row.status === "success" ? "sent"
+        : row.status === "failed" && result.deliveryStatus === "failed" ? "failed" : "delivery_uncertain", businessType: "verification", businessId: null,
       sentAt: row.status === "success" ? row.createdAt : null }), renderedText: "验证码正文不在日志中保留。", attempts: 1,
       providerMessageId: text(result.externalRequestId) || undefined, errorMessage: row.errorMessage ?? undefined };
   }

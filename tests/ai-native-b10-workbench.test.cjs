@@ -26,18 +26,31 @@ test('first visible host closes original text/card client reports through existi
   const { AiTaskRepository } = require('../apps/api/src/modules/ai-native/ai-task.repository.ts');
   const h = require('./fixtures/ai-native/contract-consumer.cjs'), shared = require('../packages/shared/src/index');
   const context = structuredClone(h.contexts[0]), taskId = 'visible-task', runId = 'visible-run';
+  const { Prisma } = require('../apps/api/node_modules/@prisma/client');
+  const scope = { id: 'visible-scope', ...require('../apps/api/src/modules/ai-native/persistence-scope.ts').aiPersistenceScopeColumns(context.scope) };
   const originKey = '12345678-1234-4234-8234-123456789012', wall = new Date('2026-11-09T12:02:00Z');
   const task = { id: taskId, scopeId: 'visible-scope', sceneCode: 'order_explanation', sceneVersion: '1', status: 'SUCCEEDED',
-    revision: 2, eventCursor: 0n, createdAt: new Date('2026-11-09T12:00:00Z'), updatedAt: new Date('2026-11-09T12:01:00Z'), cancelRequestedAt: null };
-  const run = { id: runId, scopeId: task.scopeId, taskId, actorKind: 'USER', actorId: context.actor.userId, sequence: 1,
-    status: 'SUCCEEDED', revision: 2, startedAt: task.createdAt, endedAt: task.updatedAt };
+    contractVersion: shared.AI_TASK_DRAFT_VERSION, revision: 2, eventCursor: 0n,
+    scope, scopeKind: 'WORKSPACE', ownerKind: 'USER', ownerId: context.actor.userId, audience: 'OPERATOR', archivedAt: null,
+    inputRef: originKey, inputHash: 'b'.repeat(64), creationKey: 'visible-create',
+    createdAt: new Date('2026-11-09T12:00:00Z'), updatedAt: new Date('2026-11-09T12:01:00Z'), cancelRequestedAt: null };
+  const run = { id: runId, scopeId: task.scopeId, taskId, actorKind: 'USER', actorId: context.actor.userId, sequence: 2,
+    status: 'SUCCEEDED', revision: 2, leaseOwnerId: null, leaseExpiresAt: null, startedAt: task.createdAt, endedAt: task.updatedAt };
+  const inputOrigin = { id: originKey, scopeId: task.scopeId, taskId, runId: 'visible-source-run', status: 'CONSUMED',
+    createdBy: context.actor.userId, planHash: 'a'.repeat(64), expiresAt: wall,
+    basis: { step: { toolCode: shared.AI_TEXT_MODEL_STEP_CODE } },
+    plan: { run: { ...run, id: 'visible-source-run', sequence: 1, resourceOriginRunId: null, _count: { steps: 1 },
+      task: { id: taskId, scopeId: task.scopeId, inputRef: originKey } } },
+    receipt: { id: 'visible-input-receipt', scopeId: task.scopeId, taskId, requestId: originKey, planHash: 'a'.repeat(64),
+      actorKind: 'USER', actorId: context.actor.userId, audience: 'OPERATOR', consumedAt: task.updatedAt,
+      continuationRun: { ...run, inputReceiptId: 'visible-input-receipt', resourceOriginRunId: 'visible-source-run' } } };
   const logs = new Map(), trace = []; let serverCurrent = true, sourceCurrent = true;
   const db = { aiTask: { findFirst: async ({ where }) => { assert.equal(where.id, taskId); return structuredClone(task); } },
     aiRun: { findFirst: async ({ where }) => { assert.equal(where.id, runId); assert.equal(where.taskId, taskId); return { id: runId }; },
-      findMany: async () => [structuredClone(run)] }, aiStep: { findMany: async () => [] },
-    aiTaskExecutionBudget: { findFirst: async () => null }, aiTaskExecutionCharge: { groupBy: async () => [] },
+      findMany: async () => [{ ...structuredClone(run), fencingToken: new Prisma.Decimal(1) }] }, aiStep: { findMany: async () => [] },
+    aiTaskExecutionBudget: { findFirst: async () => null }, aiTaskExecutionCharge: { groupBy: async () => [], findMany: async () => [] },
     aiGatewayInvocation: { findMany: async () => [] }, aiTaskInputRequest: { findFirst: async ({ where }) =>
-      where.id === originKey && where.taskId === taskId ? { id: originKey } : null },
+      where.id === originKey && where.taskId === taskId ? structuredClone(inputOrigin) : null },
     operationLog: { findUnique: async ({ where }) => structuredClone(logs.get(where.id) ?? null),
       findMany: async ({ where }) => [...logs.values()].filter(row => row.action === where.action).map(row => structuredClone(row)),
       create: async ({ data }) => { trace.push('client-log-create'); assert.equal(logs.has(data.id), false); logs.set(data.id, structuredClone(data)); return structuredClone(data); } },
@@ -185,6 +198,7 @@ function taskObservationHost(component) {
       if (name === './safe-display') return { safeDisplayText: value => value };
       if (name === './usage-quantity') return loadModule('apps/admin/src/features/ai-native/usage-quantity.ts');
       if (name === './TaskOutcomeObservation') return { TaskOutcomeObservation: stub('task-outcomes') };
+      if (name === './TaskFaultObservation') return { TaskFaultObservation: stub('task-faults') };
       throw Error('Unexpected observation dependency: ' + name);
     } }); return exports;
   };
@@ -406,7 +420,8 @@ test('conversation Core quote confirms original human parameters once and recove
     assert.ok(input, JSON.stringify({ round, modelCalls: h.execution.sent.length, previousPreparation: preparation?.preparation?.status,
       taskStatus: h.state.aiTask[0].status, failures: h.state.failures }));
     const submission = { draftVersion: shared.AI_TASK_INPUT_DRAFT_VERSION, taskId: h.created.task.taskId, requestId: input.requestId,
-      expectedRevision: input.revision, submissionKey: `quote-consumer-${round}`, answers: input.contract.fields.map(field => ({ fieldId: field.fieldId,
+      expectedRevision: input.revision, submissionKey: `quote-consumer-${round}`,
+      answers: input.contract.fields.filter(field => field.required || field.fieldId !== 'clarification_text').map(field => ({ fieldId: field.fieldId,
         value: field.kind === 'choice' ? field.options[0].value : field.kind === 'integer' ? 1
           : field.fieldId === 'starts_at' ? candidate.start : field.fieldId === 'ends_at' ? candidate.end : 'Human parameters only' })) };
     await app.submitAnswer({ original: h.reference, submission });
@@ -420,7 +435,6 @@ test('conversation Core quote confirms original human parameters once and recove
   // HTTP JSON omits undefined producer properties; the browser receives the
   // wire projection, not the in-process object's additional undefined keys.
   preparation = JSON.parse(JSON.stringify(preparation));
-  if (process.env.AI_OFFLINE_WRITE_ROOT) fs.writeFileSync(path.join(process.env.AI_OFFLINE_WRITE_ROOT, 'synthetic-quote-preparation.json'), JSON.stringify(preparation));
   assert.ok(shared.validateAiSceneQuoteHttpResponse('AiSceneModelQuotePreparationResponseDraft', preparation), JSON.stringify({
     preparation: shared.validateAiSceneQuoteHttpResponse('AiSceneQuotePreparationDraft', preparation.preparation),
     sources: shared.validateAiSceneQuoteHttpResponse('AiSceneQuoteInputSourcesDraft', preparation.sources) }));
@@ -436,6 +450,8 @@ test('conversation Core quote confirms original human parameters once and recove
   const consumerShared = process.env.AI_CONSUMER_SHARED_PACKAGE ? require(process.env.AI_CONSUMER_SHARED_PACKAGE) : shared;
   const api = loadLifecycleSession('../../api/aiConversations.ts', {
     '@rental-os/shared': consumerShared,
+    '@/features/auth/authStore': { useAuthStore: { getState() { throw Error('Unexpected current-result read'); } } },
+    '@/features/ai-native/workbench-model-control-session': {}, '@/features/ai-native/workbench-display-host': {},
     '@/app/queryClient': { currentSessionEpoch: () => 1, currentSessionSignal: () => new AbortController().signal },
     '@/features/ai-native/conversation-history-reader': {}, './aiTaskCenter': {}, './http': { http: { post: async (url, command) => {
       if (url.endsWith('/admission')) return { data: { data: { ...command, result: turn, absence: 'not_proof_of_no_commit', retryable: false } } };
@@ -478,6 +494,8 @@ test('original selection material shares the human approval display without drop
     if (name === 'react/jsx-runtime') return require(name);
     if (name === '@rental-os/shared') return require('@rental-os/shared');
     if (name === '@/api/aiTaskCenter') return { aiTaskCenterApi: {} };
+    if (name === './VisibleObservationBoundary') return { VisibleObservationBoundary: ({ children }) => children };
+    if (name === './OriginalOrderReceiptLink') return { OriginalOrderReceiptLink: stub };
     if (name === '@/components/ui') return { ActionButton: stub, Alert: stub, ConfirmAction: stub, Select: stub };
     if (name === './management-locale') return { useAiManagementLocale: () => ({ t: value => value }) };
     if (name === './safe-display') return { safeDisplayText: value => value ?? '' };
@@ -598,10 +616,12 @@ test('actual platform capability consumer rejects legacy/private replies and ret
     if (name === 'react/jsx-runtime') return require('react/jsx-runtime');
     if (name === '@/api/platformAiSettings') return apiExports;
     if (name === '@/app/locale') return { useLocale: () => ({ t: value => value }) };
+    if (name === './management-locale') return { useAiManagementLocale: () => ({ t: value => value }) };
     if (name === '@/app/queryClient') return { currentSessionEpoch: () => epoch, currentSessionSignal: () => sessionAbort.signal };
     if (name === '@/features/auth/authStore') return { useAuthStore: store };
     if (name === '@/components/ui') return { ActionButton: stub('action'), Alert: stub('alert') };
     if (name === './formatters') return { formatTimestamp };
+    if (name.endsWith('.css')) return { default: {} };
     throw Error(name);
   } });
   const identity = () => JSON.stringify([user, epoch]);
@@ -689,9 +709,10 @@ test('actual conversation history stays explicit, capability-bound and retracts 
     if (name === '@/components/ui') return { ActionButton: stub('action'), Alert: stub('alert'), Select: stub('select'), Button: stub('button') };
     if (name === './ConversationDetail') return { ConversationDetail: stub('conversation-detail') };
     if (name === './ConversationLifecycle') return { ConversationLifecycle: stub('conversation-lifecycle') };
+    if (name === './EntrySceneCatalog') return { EntrySceneCatalog: stub('entry-scenes') };
     if (name === './management-locale') return { useAiManagementLocale: () => ({ t: text => text }) };
     if (name === './ConversationResult') return { ConversationResult: stub('conversation-result') };
-    if (name === './ConversationAdmission') return { ConversationAdmission: stub('conversation-admission') };
+    if (name === './ConversationAdmission') return { ConversationAdmission: stub('conversation-admission'), ConversationOrderContext: React.createContext(null) };
     if (name === './formatters') return { formatTimestamp: time => ({ value: time }) };
     if (name === './safe-display') return { safeDisplayText: text => text };
     if (name.endsWith('.css')) return { default: {} };
@@ -745,95 +766,102 @@ test('actual conversation history stays explicit, capability-bound and retracts 
   const host = fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-native/TaskCenterPage.tsx'), 'utf8');
   assert.match(host, /import \{ ConversationHistory \} from '\.\/ConversationHistory'/u);
   assert.match(host, /enabled=\{historyOpen\.includes\('conversations'\) && visible\}/u);
-  assert.match(host, /<Accordion value=\{historyOpen\} onValueChange=\{setHistoryOpen\}/u);
+  assert.match(host, /<Accordion value=\{historyOpen\} onValueChange=\{value => \{ setHistoryOpen\(value\);/u);
 });
 
-test('actual operator workspace keeps server records explicit and retracts on close, selection, scope and hide', () => {
+test('actual operator workspace wires original reads and retracts native controls on close, selection, scope and hide', () => {
   const source = fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-operator/AiOperatorPage.tsx'), 'utf8');
   assert.match(source, /<WorkArea visible=\{workOpen\}/u);
   assert.match(source, /<WorkArea visible=\{mobileOpen\}/u);
-  const output = ts.transpileModule(`${source}\nexport { WorkArea };`, { compilerOptions: {
-    module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText;
-  const slots = [], pending = [], cleaners = new Map(); let cursor = 0, epoch = 1, permitted = true;
-  const events = new Map(), document = { hidden: false, addEventListener: (name, fn) => events.set(name, fn),
-    removeEventListener: name => events.delete(name) };
+  const slots = [], pending = [], layouts = [], cleaners = new Map(); let cursor = 0, epoch = 1, permitted = true, reads = 0, invalidations = 0;
+  const document = { hidden: false };
+  const schedule = (effect, deps, queue) => { const index = cursor++;
+    if (!slots[index] || deps.some((value, offset) => !Object.is(value, slots[index][offset]))) {
+      slots[index] = deps; queue.push(() => { cleaners.get(index)?.(); cleaners.set(index, effect()); });
+    } };
   const hooks = {
-    useState(initial) { const i = cursor++; if (!(i in slots)) slots[i] = typeof initial === 'function' ? initial() : initial;
-      return [slots[i], value => { slots[i] = typeof value === 'function' ? value(slots[i]) : value; }]; },
-    useRef(initial) { const i = cursor++; if (!(i in slots)) slots[i] = { current: initial }; return slots[i]; },
-    useEffect(effect, deps) { const i = cursor++; if (!slots[i] || deps.some((value, j) => !Object.is(value, slots[i][j]))) {
-      slots[i] = deps; pending.push(() => { cleaners.get(i)?.(); cleaners.set(i, effect()); });
-    } },
+    useState(initial) { const index = cursor++; if (!(index in slots)) slots[index] = typeof initial === 'function' ? initial() : initial;
+      return [slots[index], value => { slots[index] = typeof value === 'function' ? value(slots[index]) : value; }]; },
+    useRef(initial) { const index = cursor++; if (!(index in slots)) slots[index] = { current: initial }; return slots[index]; },
+    useMemo(factory, deps) { const index = cursor++;
+      if (!slots[index] || deps.some((value, offset) => !Object.is(value, slots[index].deps[offset]))) slots[index] = { deps, value: factory() };
+      return slots[index].value; },
+    useEffect: (effect, deps) => schedule(effect, deps, pending),
+    useLayoutEffect: (effect, deps) => schedule(effect, deps, layouts),
   };
-  let auth = { token: 'synthetic', tenant: { tenantId: 'tenant-a' }, currentWorkspaceId: 'space-a',
-    user: { id: 'owner-a', isSaasAdmin: false }, hasPermission: () => permitted };
-  const useAuthStore = () => auth; useAuthStore.getState = () => auth;
-  const operator = { active: { id: 'local-a', artifact: { title: '演示', summary: '示例', columns: [], rows: [], note: '示例', kind: 'list' } },
-    capability: { id: 'orders', action: '确认示例' }, enabled: true };
-  const stub = name => props => React.createElement(name, props), exports = {};
-  vm.runInNewContext(output, { exports, document, require(name) {
-    if (name === 'react') return hooks;
-    if (name === 'react/jsx-runtime') return require('react/jsx-runtime');
-    if (name === '@rental-os/shared') return { AI_TASK_CENTER_ENTRY_PERMISSIONS: ['ai:use'] };
-    if (name === '@/features/auth/authStore') return { useAuthStore };
-    if (name === './OperatorContext') return { useOperator: () => operator };
-    if (name === '@/app/queryClient') return { currentSessionEpoch: () => epoch };
-    if (name === '@/app/locale') return { useLocale: () => ({ locale: 'zh-CN' }) };
-    if (name === '@/features/ai-native/ConversationHistory') return { ConversationHistory: stub('server-history') };
-    if (name === '@/features/ai-native/ServerConversationPanel') return { ServerConversationPanel: stub('server-panel') };
-    if (name === '@/features/ai-native/conversation-navigation' || name === 'react-router-dom') return {};
-    if (name === '@/components/ui') return { Button: stub('button'), Modal: stub('modal'), Drawer: stub('drawer') };
-    if (name === '@/components/ui/AnimatedIcon') return { AnimatedIcon: stub('icon') };
-    if (name === '@/components/workspace/ContentTransition') return { ContentTransition: stub('transition') };
-    if (name === '@/components/workspace/WorkspaceHeader') return { WorkspacePageActions: stub('page-actions'), WorkspacePageTitle: stub('page-title') };
-    if (name === './confirmationDetails') return { confirmationDetails: () => ({ description: '示例确认', facts: [] }) };
-    if (name === 'lucide-react') return Object.fromEntries(['Copy', 'Download', 'ShieldCheck'].map(key => [key, stub(key)]));
-    if (name.endsWith('.css') || ['@/api/aiModelSettings', '@/features/ai-native/model-settings-session',
-      '@/components/ui/ArcLocale', './archive/ai-chat/AiChat', './archive/agent-run/AgentRun', './archive/shared/BrandMark',
-      './demo-response', '@/registry/components/resizable-panels/resizable-panels', '@/registry/components/card/card',
-      './capabilities', '@/app/branding'].includes(name)) return {};
-    throw Error(`unexpected import: ${name}`);
-  } });
-  const nodes = tree => { const out = []; const walk = node => React.Children.toArray(node).forEach(child => {
-    if (React.isValidElement(child)) { out.push(child); walk(child.props.children); }
-  }); walk(tree); return out; };
-  const render = (visible = true, commit = true, drawer = false) => { cursor = 0; const tree = exports.WorkArea({ visible, drawer });
-    if (commit) pending.splice(0).forEach(effect => effect()); return tree; };
-  const toggle = tree => nodes(tree).find(node => typeof node.props['aria-pressed'] === 'boolean');
-  const history = tree => nodes(tree).find(node => node.props.identity);
-  const open = () => { toggle(render()).props.onClick(); return render(); };
-  assert.equal(history(render()), undefined, 'mount never opens or fetches server history');
-  const header = nodes(render()).find(node => node.type === 'header');
-  assert.equal(toggle(header).props['aria-label'], '查看服务端记录', 'the secondary reader belongs in the workspace header with a distinct accessible name');
-  assert.ok(!nodes(render()).some(node => node.props.className === 'operator-result-tools' && nodes(node).includes(toggle(node))), 'the reader does not reserve a separate tools row');
-  const mobile = render(true, true, true);
-  assert.equal(mobile.props.title, 'Agent 工作区');
-  assert.equal(toggle(mobile.props.extra).props['aria-label'], '查看服务端记录');
-  assert.ok(!nodes(mobile).some(node => node.type === 'header'), 'mobile uses the native drawer title and extra slot once');
-  let tree = open(), original = history(tree);
-  assert.equal(original.props.current(), true); const journalIdentity = original.props.identity;
-  assert.equal(nodes(tree).some(node => node.props.icon), false, 'demo copy/download footer is not shown over original records');
-  assert.equal(nodes(tree).find(node => node.props.className === 'operator-confirmation').props.open, false);
-  toggle(tree).props.onClick(); assert.equal(original.props.current(), false, 'close invalidates retained callbacks immediately');
-  tree = render(); assert.equal(history(tree), undefined);
-  tree = open(); assert.equal(original.props.current(), false, 'reopening the same owner does not reactivate callbacks from a closed mount');
-  toggle(tree).props.onClick(); render();
-  original = history(open()); render(false); assert.equal(original.props.current(), false);
-  render(true); assert.equal(history(render()), undefined, 'expanding is not reopening or rereading');
-  for (const change of [() => { operator.active = { ...operator.active, id: 'local-b' }; },
-    () => { operator.capability = { ...operator.capability, id: 'brief' }; },
-    () => { auth = { ...auth, currentWorkspaceId: 'space-b' }; },
-    () => { auth = { ...auth, user: { ...auth.user, id: 'owner-b' } }; }, () => { epoch++; }]) {
-    original = history(open()); change(); assert.equal(history(render(true, false)), undefined, 'changed owner first paint has no records');
-    assert.equal(original.props.current(), false); render(); assert.equal(history(render()), undefined);
+  let identity = 'tenant-a:space-a:owner-a';
+  const frame = { conversationId: 'conversation-a', scene: 'order_explanation', phase: 'result',
+    turn: { turnId: 'turn-a', task: { taskId: 'task-a', runId: 'run-a' } } };
+  const operator = { activeId: 'local-a', active: { native: frame, hasOriginal: true, running: false },
+    capability: { id: 'orders', nativeScene: 'order_explanation' }, identity,
+    current: () => permitted && !document.hidden && identity === operator.identity && epoch === 1,
+    readOriginal: () => { reads++; }, retract: () => { operator.active.native = undefined; } };
+  const stub = name => props => React.createElement(name, props);
+  const leaves = ['ConversationResult', 'ConversationQuoteConfirmation', 'ConversationQuoteSelection', 'ConversationOrderHandoff',
+    'ConversationClosure', 'TaskCancellation', 'ContentTransition', 'AgentRun'];
+  const load = (text, imports = {}) => { const exports = {};
+    const output = ts.transpileModule(text, { compilerOptions: { module: ts.ModuleKind.CommonJS,
+      jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText;
+    vm.runInNewContext(output, { exports, document, require(name) {
+      if (Object.hasOwn(imports, name)) return imports[name];
+      if (name === 'react') return hooks;
+      if (name === 'react/jsx-runtime') return require(name);
+      if (name === '@rental-os/shared') return require('@rental-os/shared');
+      if (name === './OperatorContext') return { useOperator: () => operator };
+      if (name === 'react-router-dom') return { useNavigate: () => () => {} };
+      if (name === '@/app/locale') return { useLocale: () => ({ locale: 'zh-CN', t: value => value }) };
+      if (name === '../ai-native/management-locale') return { useAiManagementLocale: () => ({ locale: 'zh-CN', t: value => value }) };
+      if (name === '@/components/ui') return { Button: stub('button'), Input: stub('input'), Select: stub('select'), Drawer: stub('drawer') };
+      if (name === '@/components/ui/AnimatedIcon') return { AnimatedIcon: stub('icon') };
+      if (name === '@/features/ai-native/VisibleObservationHost') return { useVisibleObservationHost: () => ({ invalidate() { invalidations++; } }) };
+      const leaf = leaves.find(value => name.endsWith(`/${value}`));
+      if (leaf) return { [leaf]: stub(leaf) };
+      if (name.endsWith('.css') || ['@/api/aiConversations', './native-session', '../ai-native/conversation-admission-session',
+        '@/features/auth/authStore', '@/app/queryClient', '@/app/navigation', '@/features/ai-native/conversation-navigation',
+        '@/features/ai-native/VisibleObservationBoundary', '@/components/ui/ArcLocale', './archive/ai-chat/AiChat',
+        '@/registry/components/resizable-panels/resizable-panels', '@/registry/components/card/card',
+        '@/components/workspace/WorkspaceHeader', '@/app/branding'].includes(name)) return {};
+      throw Error(`unexpected import: ${name}`);
+    } }); return exports; };
+  const native = load(fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-operator/NativeOperatorWorkspace.tsx'), 'utf8'));
+  const page = load(`${source}\nexport { WorkArea };`, { './NativeOperatorWorkspace': native });
+  const nodes = observationNodes, readButton = tree => nodes(tree).find(node => node.props['aria-label'] === '读取原结果');
+  const desktop = page.WorkArea({ visible: true }), header = nodes(desktop).find(node => node.type === 'header');
+  assert.equal(reads, 0, 'mounting the workspace header does not issue a read');
+  assert.ok(readButton(header)); assert.equal(readButton(header).props.disabled, false);
+  assert.equal(nodes(desktop).find(node => node.type === native.NativeOperatorWorkspace).props.visible, true);
+  readButton(header).props.onClick(); assert.equal(reads, 1); assert.equal(invalidations, 1);
+  assert.equal(readButton(page.WorkArea({ visible: false })).props.disabled, true);
+  operator.active.running = true; assert.equal(readButton(page.WorkArea({ visible: true })).props.disabled, true); operator.active.running = false;
+  const mobile = page.WorkArea({ visible: true, drawer: true });
+  assert.match(observationText(mobile.props.title), /Agent 工作区/u);
+  assert.ok(readButton(mobile.props.extra)); assert.equal(mobile.props.destroyOnHidden, true);
+  assert.ok(!nodes(mobile).some(node => node.type === 'header'), 'drawer title and actions appear only once');
+  const render = (visible = true) => { cursor = 0; const tree = native.NativeOperatorWorkspace({ visible });
+    layouts.splice(0).forEach(effect => effect()); pending.splice(0).forEach(effect => effect()); return tree; };
+  const result = tree => nodes(tree).find(node => node.props.embedded === true && node.props.turn);
+  let original = result(render()); const journalIdentity = original.props.identity;
+  assert.equal(original.props.current(), true); assert.equal(original.props.autoRead, true);
+  assert.equal(original.props.conversationId, frame.conversationId);
+  render(false); assert.equal(original.props.current(), false);
+  assert.equal(result(render(false)), undefined);
+  render(); assert.equal(original.props.current(), false, 'reopening cannot restore a closed consumer');
+  for (const change of [() => { operator.activeId = 'local-b'; },
+    () => { operator.active.native = { ...frame, conversationId: 'conversation-b' }; },
+    () => { operator.active.native = { ...frame, turn: { ...frame.turn, turnId: 'turn-b' } }; }]) {
+    original = result(render()); change(); render(); assert.equal(original.props.current(), false);
   }
-  original = history(open()); permitted = false; assert.equal(original.props.current(), false);
-  render(); permitted = true; render(); assert.equal(history(render()), undefined, 'permission recovery never restores the panel');
-  original = history(open()); document.hidden = true; events.get('visibilitychange')();
-  assert.equal(original.props.current(), false); document.hidden = false; render(); assert.equal(history(render()), undefined);
-  auth = { ...auth, currentWorkspaceId: 'space-a', user: { ...auth.user, id: 'owner-a' } }; render();
-  original = history(open()); assert.equal(original.props.identity, journalIdentity, 'original operation journal is not rotated per panel');
-  cleaners.forEach(cleanup => cleanup?.()); assert.equal(original.props.current(), false, 'unmount closes stale callbacks');
+  for (const change of [() => { permitted = false; }, () => { document.hidden = true; },
+    () => { identity = 'tenant-a:space-b:owner-a'; }, () => { identity = 'tenant-a:space-a:owner-b'; }, () => { epoch++; }]) {
+    original = result(render()); change(); assert.equal(original.props.current(), false);
+    original.props.onAccessDenied(); assert.equal(result(render()), undefined);
+    permitted = true; document.hidden = false; identity = operator.identity; epoch = 1;
+    assert.equal(result(render()), undefined, 'authority recovery does not restore withdrawn material');
+    operator.active.native = frame; render(); assert.equal(original.props.current(), false);
+  }
+  original = result(render()); assert.equal(original.props.identity, journalIdentity);
+  assert.equal(reads, 1, 'layout, selection and authority changes never invoke the manual reader');
+  cleaners.forEach(cleanup => cleanup?.()); assert.equal(original.props.current(), false);
 });
 
 test('actual conversation detail loads explicitly and retracts on switch, hide, refusal and unmount', async () => {
@@ -849,6 +877,7 @@ test('actual conversation detail loads explicitly and retracts on switch, hide, 
   };
   const document = { hidden: false, addEventListener(_name, handler) { this.change = handler; }, removeEventListener() { this.change = null; } };
   const stub = name => props => React.createElement(name, props), exports = {};
+  const orderExecution = stub('conversation-order-execution'), openingExecution = stub('conversation-opening-execution');
   vm.runInNewContext(output, { exports, document, AbortController, require(name) {
     if (name === 'react') return hooks;
     if (name === 'react/jsx-runtime') return require('react/jsx-runtime');
@@ -860,9 +889,16 @@ test('actual conversation detail loads explicitly and retracts on switch, hide, 
     if (name === './management-locale') return { useAiManagementLocale: () => ({ t: text => text }) };
     if (name === './ConversationResult') return { ConversationResult: stub('conversation-result') };
     if (name === './ConversationAdmission') return { ConversationAdmission: stub('conversation-admission') };
-    if (name === './ConversationOrderExecution') return { ConversationOrderExecution: stub('conversation-order-execution') };
-    if (name === './ConversationOpeningExecution') return { ConversationOpeningExecution: stub('conversation-opening-execution') };
+    if (name === './ConversationOrderExecution') return { ConversationOrderExecution: orderExecution };
+    if (name === './ConversationOpeningExecution') return { ConversationOpeningExecution: openingExecution };
     if (name === './ConversationQuoteExecution') return { ConversationQuoteExecution: stub('conversation-quote-execution') };
+    if (name === './TaskReadPolicy') return { TaskReadPolicy: stub('task-read-policy') };
+    if (name === './VisibleObservationHost') return { VisibleObservationHost: stub('visible-host'), useVisibleObservationHost: () => null };
+    if (name === './conversation-opening-execution-session') return { ConversationSceneExecutionSession: class { constructor() { throw Error('Unexpected scene execution'); } } };
+    if (name === './ConversationQuoteConfirmation') return { ConversationQuoteConfirmation: stub('quote-confirmation') };
+    if (name === './ConversationQuoteSelection') return { ConversationQuoteSelection: stub('quote-selection') };
+    if (name === './ReadinessDiagnosticsCard') return { ReadinessDiagnosticsCard: stub('readiness-diagnostics') };
+    if (name === './TaskCancellation') return { TaskCancellation: stub('task-cancellation') };
     if (name === './formatters') return { formatTimestamp: time => ({ value: time }) };
     if (name === './safe-display') return { safeDisplayText: text => text };
     if (name.endsWith('.css')) return { default: {} };
@@ -893,7 +929,7 @@ test('actual conversation detail loads explicitly and retracts on switch, hide, 
   let tree = render(); tree = render(); assert.equal(calls.length, 0);
   await action(tree, '读取原轮次').props.onAction(); tree = render();
   assert.equal(calls.length, 1); assert.ok(nodes(tree).some(node => node.type === 'time'));
-  const executions = nodes(tree).filter(node => node.props.identity === 'owner-a' && node.props.turn?.task);
+  const executions = nodes(tree).filter(node => [orderExecution, openingExecution].includes(node.type));
   const execution = executions.find(node => node.props.turn.capabilityCode === 'order_explanation');
   const opening = executions.find(node => node.props.turn.capabilityCode === 'opening_diagnosis');
   assert.equal(executions.length, 1, 'only retained original tasks in the current conversation capability expose preparation');
@@ -928,24 +964,50 @@ test('actual conversation detail loads explicitly and retracts on switch, hide, 
 test('actual original-turn result stays explicit and retracts text on refusal, switch, hide and unmount', async () => {
   const output = ts.transpileModule(fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-native/ConversationResult.tsx'), 'utf8'),
     { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText;
-  const slots = [], effects = [], cleaners = new Map(); let cursor = 0, current = true, responder, calls = [];
+  const slots = [], effects = [], cleaners = new Map(); let cursor = 0, current = true, responder, calls = [], epoch = 1, permitted = true;
   const hooks = {
-    useState(initial) { const i = cursor++; if (!(i in slots)) slots[i] = initial; return [slots[i], next => { slots[i] = next; }]; },
+    useState(initial) { const i = cursor++; if (!(i in slots)) slots[i] = typeof initial === 'function' ? initial() : initial;
+      return [slots[i], next => { slots[i] = typeof next === 'function' ? next(slots[i]) : next; }]; },
     useRef(initial) { const i = cursor++; if (!(i in slots)) slots[i] = { current: initial }; return slots[i]; },
+    useMemo(factory, deps) { const index = cursor++;
+      if (!slots[index] || deps.some((value, offset) => !Object.is(value, slots[index].deps[offset]))) slots[index] = { deps, value: factory() };
+      return slots[index].value; },
+    useSyncExternalStore(_subscribe, snapshot) { cursor++; return snapshot(); },
     useEffect(effect, deps) { const i = cursor++; if (!slots[i] || deps.some((value, index) => !Object.is(value, slots[i][index]))) {
       slots[i] = deps; effects.push(() => { cleaners.get(i)?.(); cleaners.set(i, effect()); });
     } },
   };
   const document = { hidden: false, addEventListener(_name, fn) { this.change = fn; }, removeEventListener() { this.change = null; } };
+  const subscribers = new Set(), session = new AbortController();
+  let auth = { token: 'synthetic', sessionVerified: true, tenant: { tenantId: 'tenant-a' }, currentWorkspaceId: 'space-a',
+    user: { id: 'owner-a', isSaasAdmin: false }, hasPermission: () => permitted };
+  const useAuthStore = () => auth; useAuthStore.getState = () => auth;
+  useAuthStore.subscribe = listener => { subscribers.add(listener); return () => subscribers.delete(listener); };
+  const shared = require('@rental-os/shared');
   const stub = name => props => React.createElement(name, props), exports = {};
-  vm.runInNewContext(output, { exports, document, AbortController, require(name) {
+  vm.runInNewContext(output, { exports, document, AbortController, AbortSignal, require(name) {
     if (name === 'react') return hooks;
     if (name === 'react/jsx-runtime') return require('react/jsx-runtime');
-    if (name === '@rental-os/shared') return require('../packages/shared/src/ai-conversation-draft');
-    if (name === '@/api/aiConversations') return { aiConversationsApi: { result: async (query, turn, signal) => {
+    if (name === '@rental-os/shared') return shared;
+    if (name === '@/features/auth/authStore') return { useAuthStore };
+    if (name === '@/app/queryClient') return { currentSessionEpoch: () => epoch, currentSessionSignal: () => session.signal };
+    if (name === '@/api/aiTaskCenter') return { aiTaskCenterApi: {} };
+    if (name === '@/api/aiConversations') return { aiConversationsApi: { currentResult: async (query, turn, signal) => {
       calls.push({ query, turn, signal }); return responder(query, turn);
     } } };
     if (name === '@/components/ui') return { ActionButton: stub('action'), Alert: stub('alert') };
+    if (name === './VisibleObservationBoundary') return { VisibleObservationBoundary: ({ children }) => children };
+    if (name === './VisibleObservationHost') return { useVisibleObservationHost: () => null };
+    if (name === './TaskWorkbenchDisplay') return { TaskWorkbenchDisplay: stub('workbench-display') };
+    if (name === './TaskWorkbenchModelControls') return { TaskWorkbenchModelControlProvider: stub('model-control-provider') };
+    if (name === './TaskClarification') return { TaskClarification: stub('task-clarification') };
+    if (name === './TaskQuoteReprepare') return { TaskQuoteReprepare: stub('task-quote-reprepare') };
+    if (name === './TaskHumanApproval') return { TaskHumanApproval: stub('task-human-approval') };
+    if (name === './conversation-workbench-host') return { createConversationWorkbenchHost: () => {
+      const review = { busy: false, review: null, parameters: null, unavailable: false };
+      return { port: { activate() {}, suspend() {}, dispose() {} }, reviewCurrent: () => false,
+        inputReview: { subscribe: () => () => {}, snapshot: () => review, clear() {} } };
+    } };
     if (name === './ModelText') return { ModelText: stub('model-text') };
     if (name === './management-locale') return { useAiManagementLocale: () => ({ t: value => value }) };
     if (name === './ConversationClosure') return { ConversationClosure: stub('conversation-closure') };
@@ -954,7 +1016,11 @@ test('actual original-turn result stays explicit and retracts text on refusal, s
     if (name.endsWith('.css')) return { default: {} };
     throw Error(name);
   } });
-  const turn = { turnId: 'turn-a', admissionKey: 'admission-a', task: { taskId: 'task-a', runId: 'run-a' }, material: 'retained' };
+  const turn = { turnId: 'turn-a', admissionKey: 'admission-a', originalRequestKey: 'original-a', requestHash: 'a'.repeat(64),
+    capabilityCode: 'order_explanation', capabilityVersion: '1', createdAt: '2026-11-03T00:00:00Z', automaticRetry: false,
+    status: 'original_bound', execution: 'not_inferred_from_association',
+    original: { draftVersion: shared.AI_SCENE_REQUEST_DRAFT_VERSION, inputRef: '11111111-1111-4111-8111-111111111111' },
+    task: { taskId: 'task-a', runId: 'run-a' }, material: 'retained' };
   const render = (conversationId = 'conversation-a', selected = turn) => {
     cursor = 0; const tree = exports.ConversationResult({ conversationId, turn: selected, current: () => current });
     effects.splice(0).forEach(effect => effect()); return tree;
@@ -964,8 +1030,20 @@ test('actual original-turn result stays explicit and retracts text on refusal, s
   }); walk(tree); return out; };
   const action = tree => nodes(tree).find(node => typeof node.props.onAction === 'function');
   const displayed = tree => nodes(tree).find(node => node.props.text !== undefined);
-  const result = { status: 'observed', turn, result: { status: 'available', text: { value: '<script>not executable</script>' } } };
-  responder = async () => result;
+  const packet = (conversationId = 'conversation-a', selected = turn, status = 'available') => ({
+    draftVersion: shared.AI_CONVERSATION_DRAFT_VERSION, conversationId, admissionKey: selected.admissionKey, turn: structuredClone(selected),
+    status: selected.material === 'erased' ? 'material_erased' : 'observed', execution: 'read_only_no_start_no_dispatch',
+    lineage: selected.material === 'erased' ? null : { kind: 'original_run', originRunId: selected.task.runId,
+      runId: selected.task.runId, runSequence: 1, proofHash: 'b'.repeat(64) },
+    result: selected.material === 'erased' ? null : { contractVersion: shared.AI_TASK_DRAFT_VERSION,
+      taskId: selected.task.taskId, runId: selected.task.runId, resultId: 'result-a', sceneCode: selected.capabilityCode, status,
+      text: status === 'available' ? { value: '<script>not executable</script>', trust: 'unverified_model_text_not_execution_evidence' } : null,
+      sources: [], observedAt: '2026-11-03T00:01:00Z', businessExecution: 'not_inferred_from_model_result',
+      execution: 'read_only_no_start_no_reconnect_side_effect' } });
+  const result = packet();
+  assert.equal(shared.validateAiConversationTaskResultDraft(result, {
+    draftVersion: shared.AI_CONVERSATION_DRAFT_VERSION, conversationId: 'conversation-a', admissionKey: turn.admissionKey }, turn), true);
+  responder = async (query, selected) => packet(query.conversationId, selected);
   let tree = render(); tree = render(); assert.equal(calls.length, 0);
   await action(tree).props.onAction(); tree = render(); assert.equal(displayed(tree).props.text, result.result.text.value);
   assert.equal(calls[0].query.admissionKey, turn.admissionKey);
@@ -976,24 +1054,41 @@ test('actual original-turn result stays explicit and retracts text on refusal, s
   await assert.rejects(action(tree).props.onAction(), /denied/); tree = render('conversation-b');
   assert.equal(displayed(tree), undefined); assert.ok(nodes(tree).some(node => node.props.title?.startsWith('原结果当前不可读取')));
   for (const status of ['stale', 'unknown', 'failed']) {
-    responder = async () => ({ ...result, result: { status, text: null } });
+    responder = async query => packet(query.conversationId, turn, status);
     await action(tree).props.onAction(); tree = render('conversation-b'); assert.equal(displayed(tree), undefined);
   }
+  for (const corrupt of [value => { delete value.lineage; }, value => { value.lineage.originRunId = 'foreign-run'; },
+    value => { value.result.runId = 'foreign-run'; }, value => { value.turn.requestHash = 'c'.repeat(64); },
+    value => { value.result.privateNote = 'must-not-display'; }]) {
+    responder = async query => { const value = packet(query.conversationId); corrupt(value); return value; };
+    await assert.rejects(action(tree).props.onAction(), /AI_RESOURCE_UNAVAILABLE/);
+    tree = render('conversation-b'); assert.equal(displayed(tree), undefined);
+  }
   const erased = { ...turn, material: 'erased' }; render('conversation-b', erased); tree = render('conversation-b', erased);
-  responder = async () => ({ status: 'material_erased', turn: erased, result: null });
+  responder = async (query, selected) => packet(query.conversationId, selected);
   await action(tree).props.onAction(); tree = render('conversation-b', erased); assert.equal(displayed(tree), undefined);
   render('conversation-b'); tree = render('conversation-b');
+  for (const change of [() => { permitted = false; }, () => { auth = { ...auth, sessionVerified: false }; },
+    () => { auth = { ...auth, currentWorkspaceId: 'space-b' }; }, () => { auth = { ...auth, tenant: { tenantId: 'tenant-b' } }; },
+    () => { auth = { ...auth, user: { ...auth.user, id: 'owner-b' } }; }, () => { epoch++; }]) {
+    const previousAuth = auth, previousEpoch = epoch, oldRead = action(tree).props.onAction, beforeReads = calls.length;
+    change(); subscribers.forEach(listener => listener());
+    await assert.rejects(oldRead(), /AI_SCOPE_CHANGED/); assert.equal(calls.length, beforeReads);
+    tree = render('conversation-b'); assert.equal(displayed(tree), undefined);
+    auth = previousAuth; epoch = previousEpoch; permitted = true;
+    render('conversation-b'); tree = render('conversation-b'); assert.equal(displayed(tree), undefined);
+  }
   let resolve; responder = () => new Promise(done => { resolve = done; });
   const pending = action(tree).props.onAction(); document.hidden = true; document.change();
-  assert.equal(calls.at(-1).signal.aborted, true); resolve(result); await assert.rejects(pending, /AI_SCOPE_CHANGED/);
+  assert.equal(calls.at(-1).signal.aborted, true); resolve(packet('conversation-b')); await assert.rejects(pending, /AI_SCOPE_CHANGED/);
   tree = render('conversation-b'); assert.equal(displayed(tree), undefined);
   document.hidden = false; document.change(); tree = render('conversation-b');
   const unmounted = action(tree).props.onAction(); cleaners.forEach(fn => fn?.());
-  assert.equal(calls.at(-1).signal.aborted, true); resolve(result); await assert.rejects(unmounted, /AI_SCOPE_CHANGED/);
+  assert.equal(calls.at(-1).signal.aborted, true); resolve(packet('conversation-b')); await assert.rejects(unmounted, /AI_SCOPE_CHANGED/);
   const before = calls.length; await assert.rejects(action(tree).props.onAction(), /AI_SCOPE_CHANGED/); assert.equal(calls.length, before);
   current = false; await assert.rejects(action(tree).props.onAction(), /AI_SCOPE_CHANGED/); assert.equal(calls.length, before);
   const source = fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-native/ConversationDetail.tsx'), 'utf8');
-  assert.match(source, /ConversationResult key=\{turn.turnId\}/u);
+  assert.match(source, /ConversationResult key=\{`\$\{identity\}:\$\{conversationId\}:\$\{capabilityCode\}:\$\{turn.turnId\}:\$\{resultEpochs\[turn.turnId\] \?\? 0\}`\}/u);
 });
 
 test('conversation lifecycle journals before sending and reconciles without replaying unknown writes', async () => {
@@ -1254,7 +1349,9 @@ for (const capability of ['order_explanation', 'opening_diagnosis', 'quote_clari
     { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText;
   const slots = [], effects = [], cleaners = new Map(); let cursor = 0, changed = 0, calls = 0, current = true, headVisible = true;
   const hooks = {
-    useState(initial) { const i = cursor++; if (!(i in slots)) slots[i] = initial; return [slots[i], next => { slots[i] = next; }]; },
+    createContext: React.createContext, useContext: () => null,
+    useState(initial) { const i = cursor++; if (!(i in slots)) slots[i] = typeof initial === 'function' ? initial() : initial;
+      return [slots[i], next => { slots[i] = typeof next === 'function' ? next(slots[i]) : next; }]; },
     useRef(initial) { const i = cursor++; if (!(i in slots)) slots[i] = { current: initial }; return slots[i]; },
     useMemo(factory, deps) { const i = cursor++; if (!slots[i] || deps.some((v, j) => !Object.is(v, slots[i].deps[j]))) slots[i] = { deps, value: factory() }; return slots[i].value; },
     useSyncExternalStore(_subscribe, snapshot) { cursor++; return snapshot(); },
@@ -1267,9 +1364,12 @@ for (const capability of ['order_explanation', 'opening_diagnosis', 'quote_clari
   const hashing = loadLifecycleSession('budget-settings-session.ts');
   const original = loadLifecycleSession('conversation-admission-session.ts', { './budget-settings-session': hashing });
   const shared = require('../packages/shared/src/index'), stub = name => props => React.createElement(name, props), exports = {};
-  vm.runInNewContext(output, { exports, document, window: { sessionStorage: storage }, require(name) {
+  const sessionSignal = new AbortController().signal;
+  vm.runInNewContext(output, { exports, document, structuredClone, window: { sessionStorage: storage }, require(name) {
     if (name === 'react') return hooks;
     if (name === 'react/jsx-runtime') return require('react/jsx-runtime');
+    if (name === '@rental-os/shared') return shared;
+    if (name === '@/app/queryClient') return { currentSessionEpoch: () => 1, currentSessionSignal: () => sessionSignal };
     if (name === '@/api/aiConversations') return { aiConversationsApi: { admit: async () => { calls++; throw Error('lost acknowledgement'); },
       admission: async () => { calls++; throw Error('unavailable'); } } };
     if (name === '@/components/ui') return { ActionButton: stub('action'), Alert: stub('alert'), ConfirmAction: stub('confirm'), Input: stub('input'), Select: stub('select') };
@@ -1292,7 +1392,7 @@ for (const capability of ['order_explanation', 'opening_diagnosis', 'quote_clari
   const nodes = tree => { const out = []; const walk = node => React.Children.toArray(node).forEach(child => { if (React.isValidElement(child)) {
     out.push(child); walk(child.props.children); } }); walk(tree); return out; };
   const find = (tree, label) => nodes(tree).find(node => node.props.label === label || node.props['aria-label'] === label);
-  let tree = render(); assert.equal(calls, 0);
+  let tree = render(); tree = render(); assert.equal(calls, 0);
   const prepareLabel = capability === 'quote_clarification' ? '核对租赁条件' : '保留本轮发送定位';
   if (capability === 'opening_diagnosis') {
     assert.equal(find(tree, '订单标识'), undefined);
@@ -1312,7 +1412,7 @@ for (const capability of ['order_explanation', 'opening_diagnosis', 'quote_clari
   document.hidden = true; document.change(); tree = render();
   assert.equal(find(tree, '明确受理本轮请求'), undefined);
   document.hidden = false; tree = render();
-  await assert.rejects(send(), /AI_RESULT_UNKNOWN/); assert.equal(calls, 0);
+  await assert.rejects(send(), /AI_SCOPE_CHANGED/); assert.equal(calls, 0);
   await assert.rejects(find(tree, '核对原轮次受理').props.onAction(), /unavailable/); assert.equal(calls, 1);
   assert.ok(changed > 0); const old = find(tree, '核对原轮次受理').props.onAction;
   headVisible = true; render('conversation-b'); tree = render('conversation-b');
@@ -1479,15 +1579,33 @@ for (const capability of ['opening_diagnosis', 'quote_clarification']) test(`${c
   const record = () => ({ state: 'observed', receipt: structuredClone(original), task: structuredClone(metadata) });
   const recovery = () => ({ task: structuredClone(metadata), steps: [], hasMore: false, automaticExecution: false, nextAction: 'host_plan_handoff',
     observedResults: 'preserved_even_if_task_cancelled', snapshot: 'bounded_sequential_read' });
+  const source = () => ({ kind: 'original', ...turn.task, originRunId: turn.task.runId,
+    originalInput: { receipt: structuredClone(original) },
+    task: { original: { receipt: structuredClone(original), inputRef: turn.original.inputRef, inputHash: original.contentHash,
+      inputRevision: original.revision, sceneCode: capability, sceneVersion: turn.capabilityVersion, audience: 'operator',
+      scope: { kind: 'workspace', tenantId: 'tenant-a', workspaceId: 'space-a' } },
+      task: structuredClone(metadata), recovery: recovery(), result: { status: 'not_available', execution: 'not_inferred_from_metadata' },
+      execution: 'read_only_no_start_no_reconnect_side_effect' },
+    snapshot: { availability: 'available', value: { contractVersion: shared.AI_TASK_DRAFT_VERSION, taskId: turn.task.taskId,
+      sceneCode: capability, sceneVersion: turn.capabilityVersion, status: 'queued', revision: 1, cursor: '0', steps: [],
+      createdAt: turn.createdAt, updatedAt: turn.createdAt } },
+    consistency: 'independent_authorized_reads', execution: 'read_only_no_start_no_reconnect_side_effect' });
   const reply = { original, ...turn.task, execution: { kind: 'run_outcome', outcome: { status: 'succeeded', completedSteps: 1, cleanupFailed: 0 } },
     businessExecution: 'not_inferred_from_model_result' };
   const values = new Map(), storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
   let starts = 0, current = true; const calls = [];
   const api = loadLifecycleSession('../../api/aiConversations.ts', {
+    '@/features/auth/authStore': { useAuthStore: { getState: () => ({ token: 'synthetic', sessionVerified: true,
+      user: { id: 'owner-a', isSaasAdmin: false }, tenant: { tenantId: 'tenant-a' }, currentWorkspaceId: 'space-a' }) } },
+    '@/features/ai-native/workbench-model-control-session': {}, '@/features/ai-native/workbench-display-host': {},
     '@/app/queryClient': { currentSessionEpoch: () => 1, currentSessionSignal: () => new AbortController().signal },
     '@/features/ai-native/conversation-history-reader': {}, './aiTaskCenter': {}, './http': { http: { post: async (url, command, options) => {
       assert.equal(options.signal.aborted, false); calls.push(url);
       if (url === '/ai-native/conversations/admission') return { data: { data: { ...command, result: structuredClone(turn), absence: 'not_proof_of_no_commit', retryable: false } } };
+      if (url === `/${shared.AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${shared.AI_SCENE_MODEL_HTTP_DRAFT.readTaskScene}`) {
+        assert.equal(JSON.stringify(command), JSON.stringify({ kind: 'original', ...turn.task, original: turn.original }), 'only the original Task/Run/reference is read');
+        return { data: { data: source() } };
+      }
       assert.equal(JSON.stringify(command), JSON.stringify(turn.original), 'only the original reference is sent');
       if (url.endsWith('/reconcile')) return { data: { data: record() } };
       if (url.endsWith('/recovery')) return { data: { data: recovery() } };
@@ -1495,7 +1613,8 @@ for (const capability of ['opening_diagnosis', 'quote_clarification']) test(`${c
       assert.ok(values.has('opening-journal')); starts++; return { data: { data: structuredClone(reply) } };
     } } },
   }).aiConversationsApi;
-  const { ConversationSceneExecutionSession: Session } = loadLifecycleSession('conversation-opening-execution-session.ts');
+  const { ConversationSceneExecutionSession: Session } = loadLifecycleSession('conversation-opening-execution-session.ts', {
+    './task-center-reader': loadLifecycleSession('task-center-reader.ts') });
   const create = () => new Session('conversation-a', api, () => current, storage, 'opening-journal', () => Date.parse('2026-11-09T00:00:00Z'), capability);
   const session = create(); await assert.rejects(session.start(), /AI_RESULT_UNKNOWN/); assert.equal(calls.length, 0);
   await session.inspect(turn); assert.equal(session.snapshot().ready, true); assert.equal(starts, 0);
@@ -1602,6 +1721,7 @@ test('actual order execution requires separate reading and confirmation and reje
     if (name === '@/components/ui') return { ActionButton: stub('action'), ConfirmAction: stub('confirm'), Alert: stub('alert') };
     if (name === './conversation-order-execution-session') return sessions;
     if (name === './ConversationOrderResults') return { ConversationOrderResults: stub('conversation-order-results') };
+    if (name === './VisibleObservationHost') return { useVisibleObservationHost: () => null };
     if (name === './management-locale') return { useAiManagementLocale: () => ({ t: v => v }) };
     throw Error(name);
   } });
@@ -1612,7 +1732,7 @@ test('actual order execution requires separate reading and confirmation and reje
   let tree = render(); assert.equal(reads, 0); assert.equal(sends, 0); assert.equal(find(tree, '明确启动订单解读'), undefined);
   await find(tree, '读取原执行准备').props.onAction(); tree = render(); assert.equal(sends, 0);
   const staleConfirm = find(tree, '明确启动订单解读').props.onConfirm;
-  document.hidden = true; document.change(); assert.throws(staleConfirm, /AI_SCOPE_CHANGED/); assert.equal(sends, 0);
+  document.hidden = true; document.change(); await assert.rejects(staleConfirm(), /AI_SCOPE_CHANGED/); assert.equal(sends, 0);
   document.hidden = false; tree = render(); assert.equal(find(tree, '明确启动订单解读'), undefined);
   await find(tree, '读取原执行准备').props.onAction(); tree = render();
   await assert.rejects(find(tree, '明确启动订单解读').props.onConfirm(), /lost start/); tree = render(); assert.equal(sends, 1);
@@ -1641,6 +1761,8 @@ test('actual original order results read explicitly and retract amounts and text
     if (name === '@/api/aiConversations') return { aiConversationsApi: {} };
     if (name === '@/components/ui') return { ActionButton: stub('action'), Alert: stub('alert') };
     if (name === './conversation-order-results-reader') return { readConversationOrderResults: async (_api, _id, _turn, signal) => { calls++; signals.push(signal); return respond(); } };
+    if (name === './VisibleObservationBoundary') return { VisibleObservationBoundary: ({ children }) => children };
+    if (name === './VisibleObservationHost') return { useVisibleObservationHost: () => null };
     if (name === './ModelText') return { ModelText: stub('model-text') };
     if (name === './ConversationOrderHandoff') return { ConversationOrderHandoff: stub('order-handoff') };
     if (name === './safe-display') return { safeDisplayText: v => v };
@@ -1650,9 +1772,9 @@ test('actual original order results read explicitly and retract amounts and text
   const result = { facts: { result: { status: 'available', facts: { order: { orderNo: 'ORDER-A', status: 'renting', currency: 'CNY',
     amounts: { rental: 0, service: null, discount: 0, coupon: null, deposit: 100, preAuthorization: null, finalPayable: 100 } },
     observedAt: '2026-11-03T00:00:00Z', scope: { workspaceId: 'workspace-a' }, sources: [{ resourceId: 'order-a' }] } } },
-    answer: { result: { status: 'available', text: '<script>untrusted answer</script>' } } };
+    answer: { result: { status: 'available', resultId: 'result-a', text: '<script>untrusted answer</script>' } } };
   const render = (conversationId = 'conversation-a') => { cursor = 0; const tree = exports.ConversationOrderResults({ conversationId,
-    turn: { turnId: 'turn-a' }, current: () => current }); effects.splice(0).forEach(fn => fn()); return tree; };
+    turn: { turnId: 'turn-a', task: { taskId: 'task-a', runId: 'run-a' } }, current: () => current }); effects.splice(0).forEach(fn => fn()); return tree; };
   const nodes = tree => { const out = []; const walk = node => React.Children.toArray(node).forEach(child => { if (React.isValidElement(child)) { out.push(child); walk(child.props.children); } }); walk(tree); return out; };
   const read = tree => nodes(tree).find(node => node.props.label === '读取原订单事实与回答');
   const text = tree => nodes(tree).find(node => node.type?.name === 'model-text' || node.props.text)?.props.text;

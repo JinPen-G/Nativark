@@ -5,7 +5,7 @@ import type { TenantOperatorInvitationPreview } from "@rental-os/shared";
 import { useLocale } from "@/app/locale";
 import { ADMIN_BRAND_NAME, ADMIN_DEFAULT_MARK } from "@/app/branding";
 import { operatorInvitationApi } from "@/api/tenantMessaging";
-import { Alert, Button, Form, Input, PasswordStrength, SaveButton } from "@/components/ui";
+import { ActionButton, Alert, Button, Form, Input, PasswordStrength, SaveButton } from "@/components/ui";
 import { LoadingState } from "@/components/LoadingState";
 import loginStyles from "@/registry/blocks/login-centered/login-centered.module.css";
 
@@ -25,7 +25,10 @@ export function AcceptOperatorInvitationPage() {
     document.title = `${t("接受运营邀请")} · ${ADMIN_BRAND_NAME}`;
     if (!token.current) { setError(t("邀请链接无效，请向邀请人索取原邮件。")); setLoading(false); return; }
     operatorInvitationApi.inspect(token.current, abort.signal).then(data => {
-      setPreview(data); form.setFieldValue("displayName", data.displayName);
+      if (abort.signal.aborted) return;
+      setPreview(data);
+      if (data.status === "accepted") { form.resetFields(); token.current = ""; setAccepted(true); }
+      else form.setFieldValue("displayName", data.displayName);
     }).catch((failure: unknown) => {
       if (!abort.signal.aborted) setError((failure as { response?: { data?: { message?: string } } })?.response?.data?.message ?? t("邀请暂时不可读取，请稍后重试。"));
     }).finally(() => { if (!abort.signal.aborted) setLoading(false); });
@@ -45,19 +48,25 @@ export function AcceptOperatorInvitationPage() {
       setError(message); throw failure;
     } finally { accepting.current = false; setPending(false); }
   };
+  const readAcceptance = async () => {
+    const result = await operatorInvitationApi.inspect(token.current);
+    if (result.status !== "accepted") throw new Error(t("原邀请尚未确认接受，请稍后核对。"));
+    setPreview(result); form.resetFields(); token.current = ""; setAccepted(true); setError(undefined);
+  };
   return <main className={`${loginStyles.screen} ${loginStyles.fullScreen}`}>
     <header className={loginStyles.bar}><span className={loginStyles.mark}><img src={ADMIN_DEFAULT_MARK} alt="" width={24} height={24} />{ADMIN_BRAND_NAME}</span></header>
     <div className={loginStyles.stage}><section className={loginStyles.card}><div className={loginStyles.step}>
       <div className={loginStyles.heading}><h2>{t(accepted ? "你已加入租户" : "接受运营邀请")}</h2>
-        <p>{preview ? `${preview.tenantName} · ${preview.email}` : t("设置你的账号，开始协同工作。")}</p></div>
+        <p>{preview?.status === "pending" ? `${preview.tenantName} · ${preview.email}` : accepted ? t("邀请已接受") : t("设置你的账号，开始协同工作。")}</p></div>
       {loading ? <LoadingState /> : accepted ? <>
-        <p>{t("账号与空间权限已生效，请使用邮箱和刚设置的密码登录。")}</p>
+        <p>{t("请使用邮箱和接受邀请时设置的密码登录。")}</p>
         <Button type="primary" onClick={() => navigate(`/login/${encodeURIComponent(preview!.tenantCode)}`)}>{t("前往登录")}</Button>
       </> : <>
         {error && <Alert type="error" showIcon title={error} />}
-        {preview && <>
+        {preview?.status === "pending" && <>
           <p>{t("租户基础角色")}：{preview.roleNames.join("、")}<br />{t("经营空间")}：{preview.workspaceNames.join("、")}</p>
-          {unconfirmed && <Button onClick={() => navigate(`/login/${encodeURIComponent(preview.tenantCode)}`)}>{t("前往登录核对")}</Button>}
+          {unconfirmed && <><ActionButton label={t("核对原接受结果")} onAction={readAcceptance} />
+            <Button onClick={() => navigate(`/login/${encodeURIComponent(preview.tenantCode)}`)}>{t("前往登录核对")}</Button></>}
           <Form<Values> form={form} layout="vertical" disabled={pending || unconfirmed} onFinish={values => { void accept(values).catch(() => undefined); }}>
             <Form.Item name="displayName" label={t("姓名")} rules={[{ required: true, whitespace: true, max: 100 }]}><Input autoComplete="name" /></Form.Item>
             <Form.Item name="password" label={t("设置密码")} rules={[{ required: true, min: preview.minPasswordLength, max: 128 },
