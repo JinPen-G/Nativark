@@ -1,4 +1,6 @@
 /** 公共权限目录沿原system编码；Core权限由受控注册贡献，不从客户端字段自注册。 */
+import { hasEffectivePermission } from "../../permission-match";
+
 export const TENANT_ROLE_READ_PERMISSIONS = ["system:user:manage", "system:role:manage"] as const;
 
 export const PLATFORM_PERMISSIONS = [
@@ -20,4 +22,4 @@ export const managesPlatformTenants = (user: { isSaasAdmin?: boolean; permission
   user.isSaasAdmin === true && (user.permissions.includes("*") || user.permissions.includes("system:tenant:manage"));
 
 export const managesTenant = (user: { isSaasAdmin?: boolean; isPlatformAdmin: boolean; dataScope: string; permissions: string[] }, permission: string) =>
-  user.isSaasAdmin !== true && (user.isPlatformAdmin || user.dataScope === "all" && user.permissions.includes(permission));
+  user.isSaasAdmin !== true && (user.isPlatformAdmin || user.dataScope === "all" && hasEffectivePermission(user.permissions, permission));

@@ -171,7 +171,8 @@ function RoleEditor() {
 
 function UserEditor() {
   const { id } = useParams(), users = useDirectory<SystemUserRow[]>("users"), { user: actor } = useAdminSession();
-  const rolesAllowed = canManagePublicResource(actor, "tenant", "system:role:manage");
+  const rolesAllowed = canManagePublicResource(actor, "tenant", "system:user:manage")
+    || canManagePublicResource(actor, "tenant", "system:role:manage");
   const { session } = usePlatformApplication(), { locale } = useLocale(), en = locale === "en-US";
   const roles = useQuery({ queryKey: ["public-management", session.currentSessionEpoch(), "roles"], enabled: rolesAllowed,
     queryFn: ({ signal }) => session.runtime.request<SystemRoleRow[]>("/platform/roles", { signal }), meta: { liveRefresh: false } });
@@ -189,7 +190,7 @@ function UserEditor() {
           <Select mode="multiple" showSearch={false} disabled={Boolean(member?.isPlatformAdmin || roles.error || roles.isPending)}
             options={(roles.data ?? []).filter(role => !isFixedRole(role) || member?.roleIds.includes(role.id))
               .map(role => ({ value: role.id, label: role.name, disabled: !role.isActive }))} />
-        </Form.Item></QueryState> : <Alert type="info" title={en ? "Role selection requires current role management access." : "选择角色需要当前角色管理权限。"} />}
+        </Form.Item></QueryState> : <Alert type="info" title={en ? "Role selection requires current member or role management access." : "选择角色需要当前人员或角色管理权限。"} />}
       <Form.Item name="isActive" valuePropName="checked" label={en ? "Enabled" : "启用"}><Switch disabled={id === actor?.id} /></Form.Item>
     </>} />;
 }

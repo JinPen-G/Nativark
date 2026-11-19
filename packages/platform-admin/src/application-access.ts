@@ -8,5 +8,5 @@ export function canManagePublicResource(user: AuthUser | undefined, audience: "s
     && Boolean(user.permissions?.includes("*") || user.permissions?.includes(permission));
   const membership = user.tenantMembership;
   return user.isSaasAdmin !== true && Boolean(membership && (membership.isTenantAdmin
-    || membership.dataScope === "all" && membership.permissions.includes(permission)));
+    || membership.dataScope === "all" && (membership.permissions.includes("*") || membership.permissions.includes(permission))));
 }
