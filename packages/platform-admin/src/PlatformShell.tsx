@@ -35,6 +35,7 @@ export interface PlatformShellProps {
   children: ReactNode;
   brandName: string;
   brand: ReactNode;
+  contextSwitcher?: ReactNode;
   publicSections: ShellNavigationSection[];
   pages?: ReadonlyMap<string, CoreRegisteredPage<CoreRouteComponent>>;
   onSignOut: () => void | Promise<void>;
@@ -52,7 +53,7 @@ export function PlatformShell(props: PlatformShellProps) {
 }
 
 function ShellContents({ children, brandName, brand, publicSections, pages = noPages, onSignOut,
-  notifications = noMessages, notificationDetails, panel, identity }: PlatformShellProps & { identity: string }) {
+  notifications = noMessages, notificationDetails, panel, contextSwitcher, identity }: PlatformShellProps & { identity: string }) {
   const { t: translate, locale } = useLocale(), session = useAdminSession(), cores = useCoreSession();
   const t = (value: string) => locale === "en-US" ? shellMessages[value as keyof typeof shellMessages] ?? translate(value) : value;
   const location = useLocation(), navigate = useNavigate();
@@ -87,7 +88,7 @@ function ShellContents({ children, brandName, brand, publicSections, pages = noP
       ? t("从左侧选择已获授权的业务 Core。") : cores.data?.tenantHasRegisteredGrant
         ? t("请联系租户管理员分配业务 Core。") : t("请联系管理员授权业务 Core。")}</p>;
   return <BusinessShell fullWidth={!session.user?.isSaasAdmin} identity={identity} selectedKey={current?.path ?? location.pathname}
-    brand={<NativeContextSwitcher title={session.tenant?.operatorShortName || session.tenant?.tenantName || brandName}
+    brand={contextSwitcher ?? <NativeContextSwitcher title={session.tenant?.operatorShortName || session.tenant?.tenantName || brandName}
       fullTitle={session.tenant?.tenantName || brandName} subtitle={t(session.user?.isSaasAdmin ? "平台管理" : "管理后台")}
       brand={brand} brandUnframed options={[]} value="" label={t("业务 Core")} onChange={() => undefined} />}
     account={<NativeAccountMenuView name={session.user?.displayName ?? ""} account={session.user?.account ?? ""}

@@ -1,3 +1,5 @@
+export { AnimatedIcon } from "./AnimatedIcon";
+export type { AnimatedIconName } from "./AnimatedIcon";
 export { Button } from "./Button";
 export { ArrowLeftOutlined, CalendarOutlined, DeleteOutlined, EditOutlined, HistoryOutlined, InfoCircleOutlined, LeftOutlined, NotificationOutlined, PlusOutlined, RightOutlined, SafetyCertificateOutlined, TeamOutlined } from "./icons";
 export { ADMIN_TABLE_COLUMN_WIDTH } from "../../app/designTokens";

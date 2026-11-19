@@ -1395,7 +1395,9 @@
     "./manifest": {
       "types": "./dist/manifest.d.ts",
       "default": "./dist/manifest.js"
-    }
+    },
+    "./admin/browser-notifications": "./admin/browser-notifications/index.tsx",
+    "./admin/browser-notifications/model": "./admin/browser-notifications/model.ts"
   },
   "typesVersions": {
     "*": {
@@ -2514,6 +2516,12 @@
       ],
       "manifest": [
         "./dist/manifest.d.ts"
+      ],
+      "admin/browser-notifications": [
+        "admin/browser-notifications/index.tsx"
+      ],
+      "admin/browser-notifications/model": [
+        "admin/browser-notifications/model.ts"
       ]
     }
   },

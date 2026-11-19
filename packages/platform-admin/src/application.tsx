@@ -26,7 +26,7 @@ import { AcceptOperatorInvitationPage, CustomerSupportPage, TenantDispatchPage, 
   hasTenantMessagingPermission } from "./features/messaging";
 
 function ProtectedLayout() {
-  const { session, brandName, brand, pages } = usePlatformApplication();
+  const { session, brandName, brand, pages, Shell = PlatformShell } = usePlatformApplication();
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const { locale } = useLocale(), en = locale === "en-US";
   if (!state.ready) return <LoadingState />;
@@ -63,10 +63,10 @@ function ProtectedLayout() {
     ...(canManagePublicResource(state.user, "saas", "system:tenant:manage")
       ? [{ path: "/platform/core-access", label: en ? "Tenant Core access" : "租户 Core 授权" }] : [])
   ];
-  return <PlatformShell brandName={brandName} brand={brand} pages={pages} onSignOut={session.signOut}
+  return <Shell brandName={brandName} brand={brand} pages={pages} onSignOut={session.signOut}
     publicSections={[{ key: "overview", label: "", routes }]}>
     <Outlet key={session.currentSessionEpoch()} /><SubscriptionExpiryFloatingCard />
-  </PlatformShell>;
+  </Shell>;
 }
 
 function SignIn() {

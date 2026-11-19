@@ -236,7 +236,9 @@
     "./platform-tools": "./src/features/platform-tools/index.ts",
     "./platform-tools/client": "./src/features/platform-tools/client.ts",
     "./source/components/RecordDetailLayout.module.css": "./src/components/RecordDetailLayout.module.css",
-    "./source/components/kanban-board/KanbanBridge": "./src/components/kanban-board/KanbanBridge.tsx"
+    "./source/components/kanban-board/KanbanBridge": "./src/components/kanban-board/KanbanBridge.tsx",
+    "./notifications": "./src/notifications.ts",
+    "./sound": "./src/sound.ts"
   },
   "scripts": {
     "lint": "tsc -p tsconfig.json",
