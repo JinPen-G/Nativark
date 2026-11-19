@@ -78,7 +78,7 @@ void (async () => {
   const genericUiFiles = [
     "packages/rental-core/admin/catalog/CatalogPage.tsx",
     "packages/rental-core/admin/catalog/AssetWorkspacePage.tsx",
-    "apps/admin/src/features/commercial/PricingGroupPage.tsx",
+    "packages/rental-core/admin/commercial/PricingGroupPage.tsx",
     "packages/rental-core/admin/locations/LocationPage.tsx"
   ].map((file) => readFileSync(join(__dirname, "..", file), "utf8")).join("\n");
   for (const vehicleOnlyText of ["舒适轿车组", "车牌/VIN", "具体单车", "车行、摄影合作商"]) {

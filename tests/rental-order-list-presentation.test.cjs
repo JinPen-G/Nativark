@@ -534,8 +534,19 @@ const pageCss = fs.readFileSync(sourceFile("apps/admin/src/features/rental-core/
 const { translateAdminText } = load("apps/admin/src/app/locale.tsx", { "./localeContext": load("apps/admin/src/app/localeContext.ts") });
 const zhCopy = (text, values) => translateAdminText(text, "zh-CN", values);
 const enCopy = (text, values) => translateAdminText(text, "en-US", values);
+assert.match(fs.readFileSync(path.resolve(root, "packages/platform-admin/src/shell.ts"), "utf8"),
+  /export \{ PageHeading \} from "\.\/components\/PageHeading"/);
+const { PageHeading } = load("packages/platform-admin/src/components/PageHeading.tsx", {
+  "antd": { Space: ({ children }) => React.createElement("div", null, children) },
+  "./ui/Button": { Button: ({ children, ...props }) => React.createElement("button", props, children) },
+  "./ui/InfoPopover": { InfoPopover: ({ children }) => children },
+  "./ui/icons": { InfoCircleOutlined: () => null },
+  "../app/locale": { useLocale: () => ({ t: enCopy, locale: "en-US" }) },
+  "./workspace/WorkspaceHeader": { useWorkspaceHeader: () => null },
+});
 // A page needs a name, not a mandatory explanatory sentence or duplicate list title.
 const { PageHeader } = load("apps/admin/src/components/PageHeader.tsx", {
+  "@rental-os/platform-admin/shell": { PageHeading },
   "@ant-design/icons": { InfoCircleOutlined: () => null },
   "antd": { Space: ({ children }) => React.createElement("div", null, children), Popover: ({ children }) => children },
   "@/components/ui": { Button: ({ children, ...props }) => React.createElement("button", props, children) },
@@ -552,7 +563,7 @@ const scopedHeader = renderToStaticMarkup(React.createElement(PageHeader, { titl
 assert.match(scopedHeader, /Member records and status changes apply across all workspaces/);
 assert.match(scopedHeader, /class="page-context" role="note"/);
 assert.doesNotMatch(scopedHeader, /page-subtitle/, "business scope stays visible without a second title row");
-const commercialSource = fs.readFileSync(path.resolve(__dirname, "../apps/admin/src/features/commercial/RentalCommercialPage.tsx"), "utf8");
+const commercialSource = fs.readFileSync(path.resolve(__dirname, "../packages/rental-core/admin/commercial/RentalCommercialPage.tsx"), "utf8");
 assert.doesNotMatch(commercialSource, /className="context-note"|t\("增值服务及保障"\)|t\("自动优惠方案"\)/);
 assert.match(commercialSource, /已有价格须通过调价计划变更/);
 assert.equal(enCopy("新增服务"), "Add service");

@@ -7,6 +7,7 @@ import { createRentalOrderApi } from "@rental-os/rental-core/admin/orders/client
 import { createRentalLocationApi } from "@rental-os/rental-core/admin/locations/client";
 import { createRentalCatalogApi, type RentalCatalogImageRequest } from "@rental-os/rental-core/admin/catalog/client";
 import { createRentalCapabilityApi } from "@rental-os/rental-core/admin/capabilities/client";
+import { createRentalCommercialApi } from "@rental-os/rental-core/admin/commercial/client";
 import type {
   TenantReadinessStatus,
   RentalDocumentType,
@@ -22,11 +23,8 @@ import type {
   RentalCalendarVersionSummary,
   RentalCalendarYear,
   RentalCalendarTimePriceDay,
-  RentalCouponTemplate,
   RentalCurrency,
   RentalCustomerBenefitAccount,
-  RentalCustomerCoupon,
-  RentalDiscountPlan,
   RentalFundingBalance,
   RentalFundingEvent,
   RentalFundingFailureRequest,
@@ -56,16 +54,11 @@ import type {
   RentalNotificationSendLogV1,
   RentalNotificationTemplateV1,
   RentalPricingPlanV1,
-  RentalPricingGroup,
-  RentalPriceAdjustmentPlan,
-  RentalPriceAdjustmentPreviewRow,
-  RentalPriceVersion,
   RentalRewardLedgerEntry,
   RentalRuleVersion,
   RentalRuleVersionAudit,
   RentalRulePublishPreview,
   PublishRentalRuleVersionRequest,
-  RentalValueAddedService,
   RentalWorkspaceOperationReport,
   RentalWorkspaceReportFilter,
   RentalWorkbenchTodos,
@@ -73,7 +66,6 @@ import type {
   PaymentStatementBatchDetail,
   PaymentStatementBatchSummary,
   ReviewPaymentStatementLineRequest,
-  RentalServiceCapacity,
   GrantRentalRewardRequest,
   ApplyOfficialCalendarSourceRequest,
   OfficialCalendarSourceVersionSummary,
@@ -81,7 +73,6 @@ import type {
   VoidRentalCalendarRequest,
   RemoveRentalCalendarDayOverrideRequest,
   RestoreRentalCalendarVersionRequest,
-  RestoreRentalPriceVersionRequest,
   SaveRentalCalendarDayRequest,
   PreviewRentalCalendarRangeOverrideRequest,
   ApplyRentalCalendarRangeOverrideRequest,
@@ -91,18 +82,10 @@ import type {
   ApplyRentalCalendarRangeRemoveRequest,
   ApplyRentalCalendarRangeRemoveResult,
   RentalCalendarRangeRemovePreview,
-  CancelRentalPriceAdjustmentRequest,
-  CreateRentalPriceAdjustmentRequest,
-  SaveRentalDiscountPlanRequest,
   SaveRentalNotificationTemplateRequest,
   SaveRentalRuleVersionRequest,
-  SaveRentalValueAddedServiceRequest,
-  SaveRentalServiceCapacityRequest,
   UpdateRentalServiceOccurrenceRequest,
   SendRentalNotificationRequest,
-  SaveRentalCouponTemplateRequest,
-  SaveRentalPricingGroupRequest,
-  UpdateRentalPricingGroupSecurityRatesRequest,
   SaveTenantRentalBusinessSettingsRequest,
   TenantRentalBusinessSettings,
   TenantRentalProfile,
@@ -130,6 +113,8 @@ export const requestRentalCatalogImage: RentalCatalogImageRequest = async (path,
 
 const rentalLocationApi = createRentalLocationApi(request);
 const rentalCatalogApi = createRentalCatalogApi(request, requestRentalCatalogImage);
+
+const rentalCommercialApi = createRentalCommercialApi(request, requestRentalCatalogImage);
 
 export const rentalCoreApi = {
   categories: rentalLocationApi.categories,
@@ -165,20 +150,20 @@ export const rentalCoreApi = {
   /** TENANT-READY-01：当前空间开业配置状态（服务端权威判定）。 */
   tenantReadiness: () => request<TenantReadinessStatus>("/rental/v1/tenant-readiness"),
   saveBusinessSettings: (data: SaveTenantRentalBusinessSettingsRequest) => request<TenantRentalBusinessSettings>("/rental/v1/business-settings", { method: "put", data }),
-  couponTemplates: () => request<RentalCouponTemplate[]>("/rental/v1/coupon-templates"),
-  saveCouponTemplate: (data: SaveRentalCouponTemplateRequest) => request<RentalCouponTemplate>(data.id ? `/rental/v1/coupon-templates/${data.id}` : "/rental/v1/coupon-templates", { method: data.id ? "put" : "post", data }),
+  couponTemplates: rentalCommercialApi.couponTemplates,
+  saveCouponTemplate: rentalCommercialApi.saveCouponTemplate,
   /** PRICE-03：空间级不可变版本，不按计划拆分。 */
-  priceVersions: (page?: number, pageSize?: number) => request<{ total: number; rows: Array<RentalPriceVersion & { rateCount: number }> }>("/rental/v1/pricing-versions", { params: { page, pageSize } }),
-  priceVersion: (sequence: number) => request<RentalPriceVersion>(`/rental/v1/pricing-versions/${sequence}`),
-  restorePriceVersion: (sequence: number, data: RestoreRentalPriceVersionRequest) => request<{ id: string; sequence: number; version: string; restoredFromVersion: string }>(`/rental/v1/pricing-versions/${sequence}/restore`, { method: "post", data }),
-  priceAdjustments: () => request<RentalPriceAdjustmentPlan[]>("/rental/v1/pricing-adjustments"),
-  createPriceAdjustment: (data: CreateRentalPriceAdjustmentRequest) => request<{ id: string; code: string; name: string; status: string; preview: RentalPriceAdjustmentPreviewRow[] }>("/rental/v1/pricing-adjustments", { method: "post", data }),
-  confirmPriceAdjustment: (adjustmentId: string) => request<unknown>(`/rental/v1/pricing-adjustments/${adjustmentId}/confirm`, { method: "post" }),
-  cancelPriceAdjustment: (adjustmentId: string, data: CancelRentalPriceAdjustmentRequest) => request<unknown>(`/rental/v1/pricing-adjustments/${adjustmentId}/cancel`, { method: "post", data }),
-  saveDiscountPlan: (data: SaveRentalDiscountPlanRequest) => request<RentalDiscountPlan>(data.id ? `/rental/v1/discount-plans/${data.id}` : "/rental/v1/discount-plans", { method: data.id ? "put" : "post", data }),
-  saveValueAddedService: (data: SaveRentalValueAddedServiceRequest) => request<RentalValueAddedService>(data.id ? `/rental/v1/value-added-services/${data.id}` : "/rental/v1/value-added-services", { method: data.id ? "put" : "post", data }),
-  serviceCapacities: (serviceId?: string) => request<RentalServiceCapacity[]>(`/rental/v1/service-capacities${serviceId ? `?serviceId=${encodeURIComponent(serviceId)}` : ""}`),
-  saveServiceCapacity: (data: SaveRentalServiceCapacityRequest) => request<RentalServiceCapacity>(data.id ? `/rental/v1/service-capacities/${data.id}` : "/rental/v1/service-capacities", { method: data.id ? "put" : "post", data }),
+  priceVersions: rentalCommercialApi.priceVersions,
+  priceVersion: rentalCommercialApi.priceVersion,
+  restorePriceVersion: rentalCommercialApi.restorePriceVersion,
+  priceAdjustments: rentalCommercialApi.priceAdjustments,
+  createPriceAdjustment: rentalCommercialApi.createPriceAdjustment,
+  confirmPriceAdjustment: rentalCommercialApi.confirmPriceAdjustment,
+  cancelPriceAdjustment: rentalCommercialApi.cancelPriceAdjustment,
+  saveDiscountPlan: rentalCommercialApi.saveDiscountPlan,
+  saveValueAddedService: rentalCommercialApi.saveValueAddedService,
+  serviceCapacities: rentalCommercialApi.serviceCapacities,
+  saveServiceCapacity: rentalCommercialApi.saveServiceCapacity,
   calendar: (year: number) => request<RentalCalendarYear & { timePriceSummary: RentalCalendarTimePriceDay[] }>(`/rental/v1/calendars/${year}`),
   /**
    * 可引用的公共官方来源版本（需求 4.5.2）。空间侧不再直接提交原始官方日期：
@@ -226,7 +211,7 @@ export const rentalCoreApi = {
   /** 发布前影响预览（需求 4.5.8）。只读推演，不改状态、不触碰未来订单。 */
   calendarPublishPreview: (year: number) =>
     request<RentalCalendarPublishPreview>(`/rental/v1/calendars/${year}/publish-preview`),
-  ruleVersions: () => request<RentalRuleVersion[]>("/rental/v1/rule-versions"),
+  ruleVersions: rentalCommercialApi.ruleVersions,
   ruleVersionAudits: (version?: string) => request<RentalRuleVersionAudit[]>("/rental/v1/rule-versions/audits", { params: { version } }),
   /** 发布前影响预览（需求 4.6.1）。只读推演，不改状态、不动已锁定报价。 */
   ruleVersionPublishPreview: (version: string, effectiveFrom?: string) =>
@@ -239,8 +224,8 @@ export const rentalCoreApi = {
     request<RentalRuleVersion>(`/rental/v1/rule-versions/${version}/publish`, { method: "post", data }),
   voidRuleVersion: (version: string, reason: string) =>
     request<RentalRuleVersion>(`/rental/v1/rule-versions/${version}/void`, { method: "post", data: { reason } }),
-  claimCoupon: (templateId: string, customerId: string) => request<RentalCustomerCoupon>("/rental/v1/customer-coupons/claim", { method: "post", data: { templateId, customerId } }),
-  voidCustomerCoupon: (id: string, reason: string) => request<RentalCustomerCoupon>(`/rental/v1/customer-coupons/${id}/void`, { method: "post", data: { reason } }),
+  claimCoupon: rentalCommercialApi.claimCoupon,
+  voidCustomerCoupon: rentalCommercialApi.voidCustomerCoupon,
   rewards: (customerId?: string) => request<RentalRewardLedgerEntry[]>("/rental/v1/rewards", { params: { customerId } }),
   benefitAccounts: (customerId?: string) => request<RentalCustomerBenefitAccount[]>("/rental/v1/benefit-accounts", { params: { customerId } }),
   grantReward: (data: GrantRentalRewardRequest) => request<RentalRewardLedgerEntry[]>("/rental/v1/rewards/grant", { method: "post", data }),
@@ -259,8 +244,8 @@ export const rentalCoreApi = {
   uploadItemGroupImage: rentalCatalogApi.uploadItemGroupImage,
   removeItemGroupImage: rentalCatalogApi.removeItemGroupImage,
   itemGroupImageBlob: rentalCatalogApi.itemGroupImageBlob,
-  savePricingGroup: (data: SaveRentalPricingGroupRequest) => request<RentalPricingGroup>(data.id ? `/rental/v1/pricing-groups/${data.id}` : "/rental/v1/pricing-groups", { method: data.id ? "put" : "post", data }),
-  updatePricingGroupSecurityRates: (id: string, data: UpdateRentalPricingGroupSecurityRatesRequest) => request<{ id: string; sequence: number; version: string; effectiveFrom: string; changeReason?: string }>(`/rental/v1/pricing-groups/${id}/security-rates`, { method: "patch", data }),
+  savePricingGroup: rentalCommercialApi.savePricingGroup,
+  updatePricingGroupSecurityRates: rentalCommercialApi.updatePricingGroupSecurityRates,
   assets: rentalCatalogApi.assets,
   assetStatusHistory: rentalCatalogApi.assetStatusHistory,
   saveAsset: rentalCatalogApi.saveAsset,

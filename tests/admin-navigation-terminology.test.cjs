@@ -193,6 +193,7 @@ void (() => {
     "@rental-os/rental-core/admin/orders/pages": loadPureTsModule("packages/rental-core/admin/orders/pages.ts"),
     "@rental-os/rental-core/admin/capabilities/pages": loadPureTsModule("packages/rental-core/admin/capabilities/pages.ts"),
     "@rental-os/rental-core/admin/catalog/pages": catalogPages,
+    "@rental-os/rental-core/admin/commercial/pages": loadPureTsModule("packages/rental-core/admin/commercial/pages.ts"),
     "@rental-os/platform-admin/subscription/subscriptionRoutes": loadPureTsModule("packages/platform-admin/src/features/subscription/subscriptionRoutes.ts"),
     "@/components/ui/icons": new Proxy({}, { get: () => () => null }),
     "@rental-os/shared": require("@rental-os/shared"),
@@ -236,7 +237,7 @@ void (() => {
     "资产页标题必须与菜单同源解析，并保留固定回落"
   );
   const catalogPage = read("packages/rental-core/admin/catalog/CatalogPage.tsx");
-  const pricingGroupPage = read("apps/admin/src/features/commercial/PricingGroupPage.tsx");
+  const pricingGroupPage = read("packages/rental-core/admin/commercial/PricingGroupPage.tsx");
   const locationPage = read("packages/rental-core/admin/locations/LocationPage.tsx");
   const { rentalLocationTitle, RENTAL_LOCATION_PAGES } = loadPureTsModule("packages/rental-core/admin/locations/pages.ts", {
     "../work-orders/pages": workOrderPages

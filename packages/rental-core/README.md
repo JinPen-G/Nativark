@@ -7,6 +7,7 @@
 | 入口 | 职责与直接消费者 |
 | --- | --- |
 | [商品与资产前端](admin/catalog/README.md)、[统一页面贡献](admin/index.tsx)、[请求与图片](admin/catalog/client.ts) | `/admin/catalog` 持有商品、资产、库存、照片与状态历史，七个窄出口提供页面、请求、上下文、图片、列表能力及纯术语；统一贡献组合九页，宿主提供当前身份、经营空间及原鉴权传输 |
+| [定价与营销前端](admin/commercial/README.md)、[七页声明](admin/commercial/pages.ts)、[请求与上下文](admin/commercial/client.ts) | `/admin/commercial` 提供定价组、价格版本/调价、优惠、券和服务容量；宿主提供同一会话与经营空间，表单和主操作复用公共呈现，旧地址和价格管理权限保持 |
 | [订单前端](admin/orders/README.md)、[订单请求](admin/orders/client.ts) | `/admin/orders` 提供列表、新建、详情及原配货/资金/检查/单据链；宿主提供当前身份、经营空间、原请求与跨领域组件，旧地址消费同一实现 |
 | [养护工单前端](admin/work-orders/README.md)、[页面贡献](admin/work-orders/index.tsx)、[客户端工厂](admin/work-orders/client.ts) | `/admin/work-orders` 提供原列表/看板/详情与六类表单；宿主供给当前权限/经营空间及唯一请求，旧路由和十二HTTP方法薄适配同一实现 |
 | [履约网络前端](admin/locations/README.md)、[地点贡献](admin/locations/index.tsx)、[客户端与范围](admin/locations/client.ts) | `/admin/locations` 持有地点与经营主体、两表单、原列表/卡片及导入导出；统一贡献供给七页，宿主提供当前范围和原组织查看/映射权限 |
@@ -264,6 +265,6 @@ MySQL 快照与收据子出口使用可选 peer `@prisma/client` 的原 SQL/JSON
 
 规则验证沿原消费者复用，覆盖服务计费/条款、优惠取舍、押金/预授权、换货冻结检查及资产和证据边界。[服务目录](../../tests/rental-service-catalog.test.cjs) · [优惠取舍](../../tests/rental-discount-selection.test.cjs) · [资金规则](../../tests/rental-security-deposit.test.cjs) · [换货检查](../../tests/rental-exchange-inspection.test.cjs) · [资产有效期](../../tests/rental-asset-validity.test.cjs) · [检查证据](../../tests/rental-inspection-evidence.test.cjs)
 
-前端宿主调用 `createRentalAdminContribution(version, contexts)` 一次，分别提供订单、养护、能力、地点和商品资产的当前上下文 Hook。商品资产使用 `useCatalogContext`，由 `createRentalCatalogPageContext` 共用宿主 `AdminRuntime` 和原图片鉴权传输。页面声明、旧路由、菜单与标题使用同一来源；Core 作者复用公共外壳和操作驱动。[商品接入](admin/catalog/README.md#宿主接入) · [统一贡献接口](admin/index.tsx)
+前端宿主调用 `createRentalAdminContribution(version, contexts)` 一次，分别提供订单、养护、能力、地点、商品资产和商业页面的当前上下文 Hook。商品资产使用 `useCatalogContext`，由 `createRentalCatalogPageContext` 共用宿主 `AdminRuntime` 和原图片鉴权传输。商业页面通过 `useCommercialContext` 提供当前 `RentalCommercialPageContext`，由 `createRentalCommercialPageContext` 共用同一运行时及原图片传输。页面声明、旧路由、菜单与标题使用同一来源；Core 作者复用公共外壳和操作驱动。[商品接入](admin/catalog/README.md#宿主接入) · [统一贡献接口](admin/index.tsx)
 
 必要兼容验证覆盖能力执行、条件与历史依据、计价、器材及检查。源码测试优先 `.ts`，正式消费者使用本版构建产物。开发新 Core 从[五步接入手册](../core-contracts/README.md#五步快速接入)开始，商品、订单、养护及地点提供真实页面样例。[原能力执行器](../../tests/capability-hook-runtime.test.cjs) · [条件与历史依据](../../tests/category-capability-conditions.test.cjs) · [原计价测试](../../tests/rental-pricing-strategy.test.cjs) · [原器材测试](../../tests/capability-equipment.test.cjs) · [检查资源](../../tests/rental-inspection-resource.test.cjs) · [用量纠正](../../tests/rental-inspection-usage-correction.test.cjs)

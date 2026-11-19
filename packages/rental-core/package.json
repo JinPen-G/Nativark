@@ -1218,6 +1218,22 @@
     "./http": {
       "types": "./dist/http.module.d.ts",
       "default": "./dist/http.module.js"
+    },
+    "./admin/commercial": {
+      "types": "./admin/commercial/index.tsx",
+      "default": "./admin/commercial/index.tsx"
+    },
+    "./admin/commercial/client": {
+      "types": "./admin/commercial/client.ts",
+      "default": "./admin/commercial/client.ts"
+    },
+    "./admin/commercial/context": {
+      "types": "./admin/commercial/page-context.ts",
+      "default": "./admin/commercial/page-context.ts"
+    },
+    "./admin/commercial/pages": {
+      "types": "./admin/commercial/pages.ts",
+      "default": "./admin/commercial/pages.ts"
     }
   },
   "typesVersions": {
@@ -2127,6 +2143,18 @@
       ],
       "http": [
         "dist/http.module.d.ts"
+      ],
+      "admin/commercial": [
+        "admin/commercial/index.tsx"
+      ],
+      "admin/commercial/client": [
+        "admin/commercial/client.ts"
+      ],
+      "admin/commercial/context": [
+        "admin/commercial/page-context.ts"
+      ],
+      "admin/commercial/pages": [
+        "admin/commercial/pages.ts"
       ]
     }
   },

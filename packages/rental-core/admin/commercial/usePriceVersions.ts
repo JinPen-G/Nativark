@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import dayjs from "dayjs";
-import { rentalCoreApi } from "@/api/rentalCore";
-import { useListQueryIdentity } from "@/components/ui/LiveRefresh";
+import { useRentalCommercialPageContext } from "./page-context";
 
 /**
  * PRICE-03：空间整体价格版本的读取入口，定价分组页与价格版本页共用。
@@ -12,22 +11,23 @@ import { useListQueryIdentity } from "@/components/ui/LiveRefresh";
  * 保存定价分组后的 invalidate 也只需要对准这一组键。
  */
 export const PRICE_VERSIONS_QUERY_KEY = ["rental-core", "price-versions"] as const;
-export const priceVersionQueryKey = (sequence?: number) => ["rental-core", "price-version", sequence] as const;
+export const priceVersionQueryKey = (sequence?: number) =>
+  ["rental-core", "price-version", sequence] as const;
 
 export function usePriceVersions(options: { enabled?: boolean; detailEnabled?: boolean } = {}) {
-  const scope = useListQueryIdentity();
-  const enabled = options.enabled ?? true;
+  const { api: rentalCoreApi, scopeKey: scope } = useRentalCommercialPageContext();
+  const enabled = Boolean(scope) && (options.enabled ?? true);
   const versions = useQuery({
     queryKey: [...PRICE_VERSIONS_QUERY_KEY, scope],
-    queryFn: () => rentalCoreApi.priceVersions(1, 100),
-    enabled
+    queryFn: ({ signal }) => rentalCoreApi.priceVersions(1, 100, { signal }),
+    enabled,
   });
   // 「当前生效」= 生效时间不晚于现在的第一版；列表按 sequence 倒序，因此 find 即最新一版。
   const currentVersion = versions.data?.rows.find((row) => !dayjs(row.effectiveFrom).isAfter(dayjs()));
   const currentVersionDetail = useQuery({
     queryKey: [...priceVersionQueryKey(currentVersion?.sequence), scope],
-    queryFn: () => rentalCoreApi.priceVersion(currentVersion!.sequence),
-    enabled: enabled && (options.detailEnabled ?? true) && Boolean(currentVersion)
+    queryFn: ({ signal }) => rentalCoreApi.priceVersion(currentVersion!.sequence, { signal }),
+    enabled: enabled && (options.detailEnabled ?? true) && Boolean(currentVersion),
   });
   return { versions, currentVersion, currentVersionDetail };
 }

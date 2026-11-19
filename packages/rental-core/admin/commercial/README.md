@@ -1,0 +1,51 @@
+# Rental 商业后台
+
+定价分组、整体价格版本、调价计划、优惠、优惠券和服务容量共用包内页面与客户端。价格、预算、券状态和容量占用读取原服务端事实。[页面贡献](index.tsx) · [七页声明](pages.ts) · [请求工厂](client.ts)
+
+## 宿主接入
+
+宿主通过 createRentalCommercialPageContext 供给当前 AdminRuntime、原鉴权图片读取、包含租户与经营空间的 scopeKey 和当前身份读取函数，再将上下文交给 createRentalCommercialAdminContribution。JSON 与图片传输在请求前后复验同一身份，查询传递取消信号。[上下文](page-context.ts) · [旧宿主上下文](../../../../apps/admin/src/features/commercial/legacy-commercial-context.ts) · [原图片传输](../../../../apps/admin/src/api/rentalCore.ts)
+
+统一 Rental 贡献合并这七页。页面权限为 price/manage，旧宿主继续复验 rental-os:price:manage。版本详情参数由已匹配的宿主路由供给，正整数与安全整数检查沿原页面。页头主操作、价格版本入口与返回动作使用正式 CorePage 声明，版本导航解析当前注册表。[旧路由适配](../../../../apps/admin/src/features/commercial/legacy-commercial-page.tsx) · [统一贡献](../index.tsx)
+
+| 页面 | 声明路径 | 旧兼容路径 |
+| --- | --- | --- |
+| 定价分组 | /pricing-groups | /rental/pricing-groups |
+| 价格与调价 | /pricing | /rental/pricing |
+| 价格版本列表 | /pricing/versions | /rental/pricing/versions |
+| 价格版本详情 | /pricing/versions/:sequence | /rental/pricing/versions/:sequence |
+| 优惠方案 | /discounts | /rental/discounts |
+| 优惠券 | /coupons | /rental/coupons |
+| 增值服务 | /services | /rental/services |
+
+原英文词条由 rentalCommercialMessages 提供，宿主合并到公共 AdminUiProvider.messages。商业字段、枚举与品类导航术语继续通过同一语言 Context 呈现。[商业词典](messages.ts) · [公共语言 Provider](../../../platform-admin/src/AdminUiProvider.tsx)
+
+## 编辑与历史依据
+
+九个保存型表单复用现有编辑驱动，保存按钮与回车共用打开代次的校验和真实请求 Promise。保存期间保留原编辑对象，关闭后再打开的默认值成为新的表单基线。[编辑驱动](../orders/useOrderEditor.ts)
+
+保存期间的 Modal 通过 mask.closable 控制遮罩关闭。优惠编辑沿公共 Drawer 的 maskClosable 契约保护遮罩交互，关闭回调再复验提交代次。[弹窗适配](../../../platform-admin/src/components/ui/Modal.tsx) · [抽屉适配](../../../platform-admin/src/components/ui/Drawer.tsx)
+
+定价组新增时沿原 initialRates 转换，时间费率和用量费率分别保留对应字段。资金费率保存使用原整体版本追加接口。[定价分组](PricingGroupPage.tsx) · [初始费率转换](pricing-group-initial-rate.ts)
+
+调价草稿冻结打开时的版本与费率，提交时只保留操作者改过的价格项。创建草稿后继续核对预览及确认，恢复历史版本使用原原因和追加接口。当前版本列表与详情复用同一查询键及生效时间判据。[商业页面](RentalCommercialPage.tsx) · [版本读取](usePriceVersions.ts)
+
+券模板、发放和作废沿原订单台账请求。券门槛、预算、领用限制和日期绑定保留原载荷。增值服务条款、适用范围与容量时间窗口由同一商业客户端提交。[优惠券](CouponPage.tsx)
+
+## 卡片与来源
+
+定价组、优惠、服务和优惠券卡片保留原只读预览、关闭后操作与样式。头像缓存键绑定当前范围、型号和图片，渲染首帧复验对象 URL 对应的身份及 Blob，替换和卸载时释放 URL。[商业卡片](commercialCards.tsx) · [优惠券卡片](couponCards.tsx) · [头像与卡片呈现](commercialCardParts.tsx)
+
+演示优惠继续由 DISCOUNT_PLAN_DEMO 控制，演示发布与停用留在原页面内存。Spotlight 编译预览的插槽、原样式和来源许可随同迁入。[演示页面](DiscountPlanShowcase.tsx) · [原演示数据](discountPlanDemo.ts) · [来源与许可](archive/spotlight-grid/SOURCE.md)
+
+## 公共整合要求
+
+- Rental 包提供 admin/commercial、admin/commercial/client、admin/commercial/context 和 admin/commercial/pages 的 exports 与 typesVersions，后台类型配置包含 commercial。
+- 统一 Rental 上下文提供 useCommercialContext，统一贡献合并七页，清单登记 price/manage 并沿原价格权限映射。
+- 公共 native-ui 提供 avatarGroupClasses，消费原 Avatar group CSS。公共 motion 提供 motionTokens 和 usePrefersReducedMotion，消费原 UIArc 动效参数与偏好。
+- 公共 ui 提供卡片事实、原图标与列表宽度，shell 提供 SettingsWorkspace；页面使用正式出口，保留来源的编译预览只沿原兼容入口。
+- 宿主合并 rentalCommercialMessages，并将旧菜单、路由和面包屑绑定同一页面声明。
+
+## 验证入口
+
+现有交互用例读取 Core 调价正文，计价用例核初始费率转换和商业英文词条，品类、导航术语与列表呈现用例读取同一通用页面。类型检查同时覆盖 Core 页面和旧消费者。浏览器、真实 HTTP、对象传输与完整标准装配分别验收。[后台类型配置](../tsconfig.json) · [列表交互](../../../../tests/admin-list-interactions.test.cjs) · [用量计价](../../../../tests/rental-usage-pricing-admin.test.cjs) · [品类对齐](../../../../tests/rental-category-core-alignment.test.cjs) · [导航术语](../../../../tests/admin-navigation-terminology.test.cjs) · [列表呈现](../../../../tests/rental-order-list-presentation.test.cjs)

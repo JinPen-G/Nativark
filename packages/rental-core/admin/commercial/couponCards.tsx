@@ -1,9 +1,16 @@
 /** Template previews expose the saved rules. Issued coupons keep their own snapshots and original ledger workflow. */
 import dayjs from "dayjs";
-import type { RentalCouponTemplate, RentalItemGroup } from "@rental-os/shared";
-import { Button } from "@/registry/components/button/button";
-import { CardBadge, CardFacts, CardSecondary, CardSection } from "@/components/ui/data-table/RecordCard";
-import { AnimatedNumber, type ListCard } from "@/components/ui";
+import type { RentalCouponTemplate, RentalItemGroup } from "@rental-os/rental-core";
+import { Button } from "@rental-os/platform-admin/native-ui";
+import {
+  AnimatedNumber,
+  CardBadge,
+  CardFacts,
+  CardSecondary,
+  CardSection,
+  type ListCard,
+} from "@rental-os/platform-admin/ui";
+
 import { SplitMeter, Ticket } from "./commercialCardParts";
 import styles from "./commercialCards.module.css";
 

@@ -383,8 +383,10 @@ test('opening another catalog record clears nested draft fields through the actu
   adjustmentForm.getInternalHooks('RC_FORM_INTERNAL_HOOKS');
   const rate = { itemGroupId: 'group-a', unit: 'calendar_day', baseAmount: 100 };
   let openedSource;
-  const openAdjustment = editor('apps/admin/src/features/commercial/RentalCommercialPage.tsx', 'RentalCommercialWorkspace', 'openAdjustment', {
+  const openAdjustment = editor('packages/rental-core/admin/commercial/RentalCommercialPage.tsx', 'RentalCommercialWorkspace', 'openAdjustment', {
     adjustmentForm, enabledPlans: [{}], adjustmentBusy: false, priceMatrixReady: true,
+    adjustmentPlan: undefined, isCurrentScope: () => true, adjustmentDialog: { visible: true },
+    generations: { current: { adjustment: 0 } }, adjustmentSubmission: { dismiss: close => close(), markClean() {} },
     currentPriceVersionDetail: { data: { version: 'v1', rates: [rate] } },
     setAdjustmentPreview() {}, setCreatedAdjustmentId() {}, setAdjustmentPlan() {},
     setAdjustmentSource: value => { openedSource = value; }, dayjs: require('dayjs'), t: text => text,
@@ -475,7 +477,7 @@ test('catalog photos suppress the prior object URL before effects run for a new 
 });
 
 test('price adjustment submission keeps untouched prices out of a refreshed draft and cannot create it twice', async () => {
-  const file = 'apps/admin/src/features/commercial/RentalCommercialPage.tsx';
+  const file = 'packages/rental-core/admin/commercial/RentalCommercialPage.tsx';
   const source = ts.createSourceFile(file, fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), ts.ScriptTarget.Latest, true);
   const owner = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'RentalCommercialWorkspace');
   const submit = owner.body.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'submitAdjustment');

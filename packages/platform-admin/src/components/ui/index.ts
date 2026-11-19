@@ -1,4 +1,6 @@
 export { Button } from "./Button";
+export { ArrowLeftOutlined, DeleteOutlined, EditOutlined, HistoryOutlined, PlusOutlined } from "./icons";
+export { ADMIN_TABLE_COLUMN_WIDTH } from "../../app/designTokens";
 export { Form, FormField, FormSection } from "./Form";
 export { SidebarMenu } from "./SidebarMenu";
 export { UserMenu } from "./UserMenu";
@@ -21,6 +23,7 @@ export { Input } from "./Input";
 export { SearchField } from "./SearchField";
 export { DataTableLeading } from "./data-table/DataTable";
 export { DataTableText } from "./data-table/DataTableText";
+export { CardBadge, CardFacts, CardList, CardSecondary, CardSection } from "./data-table/RecordCard";
 export { DataTableMoney } from "./data-table/DataTableMoney";
 export { dataTableSelectionColumn, DataTableSelectionSummary, useDataTableSelection } from "./data-table/DataTableSelection";
 export { DataTableStatus, DataTableNote, type DataTableStatusTone } from "./data-table/DataTableStatus";
