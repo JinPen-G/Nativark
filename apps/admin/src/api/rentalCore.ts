@@ -2,6 +2,7 @@
  * 门市租赁核心业务 API（`/rental/v1/*`）：品类与能力、商品与资产、库存、定价与优惠、
  * 日历与规则版本、订单全流程、验机、工单、通知与报表。均按当前会话的经营空间作用。
  */
+import { createRentalOperationsApi } from "@rental-os/rental-core/admin/operations/client";
 import { createRentalGovernanceApi } from "@rental-os/rental-core/admin/governance/client";
 import { createRentalWorkOrderApi } from "@rental-os/rental-core/admin/work-orders/client";
 import { createRentalOrderApi } from "@rental-os/rental-core/admin/orders/client";
@@ -9,7 +10,7 @@ import { createRentalLocationApi } from "@rental-os/rental-core/admin/locations/
 import { createRentalCatalogApi, type RentalCatalogImageRequest } from "@rental-os/rental-core/admin/catalog/client";
 import { createRentalCapabilityApi } from "@rental-os/rental-core/admin/capabilities/client";
 import { createRentalCommercialApi } from "@rental-os/rental-core/admin/commercial/client";
-import type { TenantReadinessStatus, RentalCurrency, RentalCustomerBenefitAccount, RentalOrder, RentalRewardLedgerEntry, RentalWorkspaceOperationReport, RentalWorkspaceReportFilter, RentalWorkbenchTodos, PaymentReconciliationSummary, PaymentStatementBatchDetail, PaymentStatementBatchSummary, ReviewPaymentStatementLineRequest, GrantRentalRewardRequest } from "@rental-os/shared";
+import type { TenantReadinessStatus, RentalCurrency, RentalCustomerBenefitAccount, RentalOrder, RentalRewardLedgerEntry, PaymentStatementBatchDetail, PaymentStatementBatchSummary, ReviewPaymentStatementLineRequest, GrantRentalRewardRequest } from "@rental-os/shared";
 import { useQuery } from "@tanstack/react-query";
 import { currentSessionEpoch, currentSessionSignal } from "@/app/queryClient";
 import { http, request, requestText } from "./http";
@@ -32,6 +33,7 @@ const rentalCatalogApi = createRentalCatalogApi(request, requestRentalCatalogIma
 const rentalCommercialApi = createRentalCommercialApi(request, requestRentalCatalogImage);
 
 const rentalGovernanceApi = createRentalGovernanceApi(request);
+const rentalOperationsApi = createRentalOperationsApi(request, requestText);
 
 export const rentalCoreApi = {
   categories: rentalLocationApi.categories,
@@ -41,10 +43,9 @@ export const rentalCoreApi = {
    * 刻意不接受 workspaceId：空间一律由服务端按会话解析。
    * 让页面传空间等于允许查自己无权进入的空间的经营数据。
    */
-  operationReport: (params?: RentalWorkspaceReportFilter) =>
-    request<RentalWorkspaceOperationReport>("/rental/v1/reports/operations", { params }),
-  workbenchTodos: () => request<RentalWorkbenchTodos>("/rental/v1/workbench/todos"),
-  reconcilePayments: (limit = 50) => request<PaymentReconciliationSummary>(`/rental/v1/payment-reconciliation?limit=${limit}`, { method: "post" }),
+  operationReport: rentalOperationsApi.operationReport,
+  workbenchTodos: rentalOperationsApi.workbenchTodos,
+  reconcilePayments: rentalOperationsApi.reconcilePayments,
   paymentStatementBatches: (limit = 50) => request<PaymentStatementBatchSummary[]>(`/rental/v1/payment-reconciliation/statements?limit=${limit}`),
   paymentStatementBatch: (batchId: string) => request<PaymentStatementBatchDetail>(`/rental/v1/payment-reconciliation/statements/${batchId}`),
   importPaymentStatement: (provider: string, file: File) => {
@@ -61,8 +62,7 @@ export const rentalCoreApi = {
    * 走原始文本请求而不是 `request()`：后者会剥掉 `{ data }` 信封，
    * 而 CSV 本身就不是信封结构。同样不接受 workspaceId——空间取自会话。
    */
-  exportOperationReport: (params?: RentalWorkspaceReportFilter) =>
-    requestText("/rental/v1/reports/operations/export", params),
+  exportOperationReport: rentalOperationsApi.exportOperationReport,
   ...createRentalOrderApi(request),
   /** TENANT-READY-01：当前空间开业配置状态（服务端权威判定）。 */
   tenantReadiness: () => request<TenantReadinessStatus>("/rental/v1/tenant-readiness"),

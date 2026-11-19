@@ -54,7 +54,7 @@
       "source": "D:\\工作文件\\uiarc-pro-archive\\preview\\src\\components\\primitives\\motion.ts",
       "file": "motion.ts",
       "sourceSha256": "14709ce5eb6b399e8735b2b7a8c7722fd680c7b08a98a80f43ca4dfdb6ed8e16",
-      "integrationSha256": "baa8e9133ddab2b2f9130519e6f510c591706482b54922c70e79905552471776"
+      "integrationSha256": "ea270d70f3db320ae205b59bc9b71ba1c05f7ea7f2ccd036a4b216498a7cc4e2"
     }
   ],
   "scope": "Local public-preview reconstruction, not protected authored Pro TSX. Data/examples excluded; original CSS, geometry and motion parameters retained. Import scope/locale/motion preference adapted; reserve the maximum required label lane so hover cannot move legend click targets."

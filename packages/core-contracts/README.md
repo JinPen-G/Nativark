@@ -246,6 +246,8 @@ React 的 `CoreAdminPageAction` 还可声明 `slot`。省略时使用主操作�
 
 **描述、注册、路径解析和[公共React页面适配](../platform-admin/src/core/index.ts)已提供。** 零Core和工单宿主共用同一应用工厂、页面注册表及授权目录；左栏、面包屑行、铃铛、休息和收展由公共壳提供。Rental旧路由仍通过兼容入口使用自身当前身份，完整标准装配继续迁移。字段类型、动态动作和表单Promise留在Core/React代码中；浏览器、真实HTTP/数据库及多Core完整运行仍须实际验收。
 
+Rental 的商品、订单、养护、会员及经营页面通过 `createRentalAdminContribution(version, contexts)` 合入同一 Core。工作台和报表由 `useOperationsContext` 提供当前会话、业务范围、客户预览与已认证的 JSON / CSV 请求，页面复用同一外壳和原按钮；无需修改底座内部。[统一贡献](../rental-core/admin/index.tsx) · [工作台三步接入与原权限](../rental-core/admin/operations/README.md#接入与旧宿主)
+
 ## 组合 Prisma 源码
 
 使用 Prisma 的宿主从 `@rental-os/core-contracts/prisma` 导入 `composeCorePrismaSchema`，传入公共源码和所选 Core 的贡献。

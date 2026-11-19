@@ -1314,7 +1314,14 @@
     "./mysql-data": {
       "types": "./dist/mysql-data.d.ts",
       "default": "./dist/mysql-data.js"
-    }
+    },
+    "./admin/operations": "./admin/operations/index.tsx",
+    "./admin/operations/client": "./admin/operations/client.ts",
+    "./admin/operations/context": "./admin/operations/page-context.tsx",
+    "./admin/operations/pages": "./admin/operations/pages.ts",
+    "./admin/operations/components": "./admin/operations/components.ts",
+    "./admin/operations/logic": "./admin/operations/logic.ts",
+    "./admin/operations/messages": "./admin/operations/messages.ts"
   },
   "typesVersions": {
     "*": {
@@ -2313,6 +2320,27 @@
       ],
       "mysql-data": [
         "./dist/mysql-data.d.ts"
+      ],
+      "admin/operations": [
+        "./admin/operations/index.tsx"
+      ],
+      "admin/operations/client": [
+        "./admin/operations/client.ts"
+      ],
+      "admin/operations/context": [
+        "./admin/operations/page-context.tsx"
+      ],
+      "admin/operations/pages": [
+        "./admin/operations/pages.ts"
+      ],
+      "admin/operations/components": [
+        "./admin/operations/components.ts"
+      ],
+      "admin/operations/logic": [
+        "./admin/operations/logic.ts"
+      ],
+      "admin/operations/messages": [
+        "./admin/operations/messages.ts"
       ]
     }
   },

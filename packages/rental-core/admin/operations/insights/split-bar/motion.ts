@@ -41,7 +41,7 @@ export const motionTokens = {
   blur: { subtle: 2, soft: 4, text: 8 },
 } as const;
 
-export { usePrefersReducedMotion as useReducedMotion } from "@/lib/usePrefersReducedMotion";
+export { usePrefersReducedMotion as useReducedMotion } from "@rental-os/platform-admin/motion";
 const subscribeHydration = () => () => {};
 export function useHydrated() {
   return useSyncExternalStore(

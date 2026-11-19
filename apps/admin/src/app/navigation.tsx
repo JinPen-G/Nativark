@@ -6,6 +6,7 @@ import { RENTAL_CATALOG_PAGES, RENTAL_CATALOG_LEGACY_PERMISSIONS } from "@rental
 import { RENTAL_COMMERCIAL_PAGES, RENTAL_COMMERCIAL_LEGACY_PERMISSION } from "@rental-os/rental-core/admin/commercial/pages";
 import { RENTAL_GOVERNANCE_PAGES, RENTAL_GOVERNANCE_LEGACY_PERMISSIONS } from "@rental-os/rental-core/admin/governance/pages";
 import { RENTAL_MEMBERSHIP_PAGES, RENTAL_MEMBERSHIP_LEGACY_PAGE_ACCESS } from "@rental-os/rental-core/admin/membership/pages";
+import { RENTAL_OPERATIONS_PAGES, RENTAL_OPERATIONS_LEGACY_PAGE_ACCESS } from "@rental-os/rental-core/admin/operations/pages";
 import { SUBSCRIPTION_ROUTES } from "@rental-os/platform-admin/subscription/subscriptionRoutes";
 import { ApartmentOutlined, ApiOutlined, AppstoreOutlined, BgColorsOutlined, BoxPlotOutlined, CalendarOutlined, ControlOutlined, CrownOutlined, CustomerServiceOutlined, DashboardOutlined, FileSearchOutlined, FileTextOutlined, FormOutlined, FundOutlined, GiftOutlined, IdcardOutlined, MobileOutlined, SafetyCertificateOutlined, SendOutlined, SettingOutlined, ShopOutlined, TagsOutlined, TeamOutlined, ToolOutlined } from "@/components/ui/icons";
 import { RentalCategoryCode, type RentalCapability, type RentalCategoryTerminology } from "@rental-os/shared";
@@ -39,11 +40,11 @@ export const APP_ROUTES = {
   aiOperator: { path: "/ai-operator", label: "Agent工作台", permission: "rental-os:report:view", legacyPermissions: ["rental-os:order:view", "rental-core:catalog:view", "rental-core:asset:view", "rental-core:maintenance:view", "rental-os:member:view", "system:integration:manage"], audience: "tenant", icon: <FundOutlined /> },
   // 工作台既承载经营指标，也承载订单/维护待办。维护人员没有报表或订单数据权限时，
   // 仍应能进入页面查看自己的工单待办；页面内部会继续按数据权限隐藏订单和金额指标。
-  workbench: { path: "/workbench", label: "运营概览", permission: "rental-os:report:view", legacyPermissions: ["rental-os:order:view", "rental-core:maintenance:view"], audience: "tenant", icon: <DashboardOutlined />, menu: true },
+  workbench: { path: RENTAL_OPERATIONS_PAGES.workbench.path, label: RENTAL_OPERATIONS_PAGES.workbench.title.default, permission: RENTAL_OPERATIONS_LEGACY_PAGE_ACCESS.workbench[0], legacyPermissions: RENTAL_OPERATIONS_LEGACY_PAGE_ACCESS.workbench.slice(1), audience: "tenant", icon: <DashboardOutlined />, menu: Boolean(RENTAL_OPERATIONS_PAGES.workbench.menu) },
   // REPORT-01A：当前经营空间经营报表。文案固定「经营报表」——指标定义不随品类变化，
   // 只有页面标题内的标的说法用品类术语，菜单名跟着品类变会让人以为指标也变了。
   notifications: { path: "/notifications", label: "消息中心", permission: "", audience: "tenant", icon: <FileTextOutlined />, menu: true },
-  operationReport: { path: "/reports/operations", label: "经营报表", permission: "rental-os:report:view", audience: "tenant", icon: <FundOutlined />, menu: true },
+  operationReport: { path: RENTAL_OPERATIONS_PAGES.operationReport.path, label: RENTAL_OPERATIONS_PAGES.operationReport.title.default, permission: RENTAL_OPERATIONS_LEGACY_PAGE_ACCESS["operation-report"][0], audience: "tenant", icon: <FundOutlined />, menu: Boolean(RENTAL_OPERATIONS_PAGES.operationReport.menu) },
   // 新建订单不进菜单：它是「订单管理」页上的主操作（页面右上角按钮），
   // 菜单里再放一条等于把一个动作伪装成一个板块，也让「租赁交易」多出一层噪音。
   // 路由本身照常注册，权限仍由 permission 把关。
