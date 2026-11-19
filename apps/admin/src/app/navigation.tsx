@@ -4,6 +4,7 @@ import { RENTAL_ORDER_PAGES, RENTAL_ORDER_LEGACY_PERMISSIONS } from "@rental-os/
 import { RENTAL_CAPABILITY_PAGES, RENTAL_CAPABILITY_LEGACY_PERMISSIONS } from "@rental-os/rental-core/admin/capabilities/pages";
 import { RENTAL_CATALOG_PAGES, RENTAL_CATALOG_LEGACY_PERMISSIONS } from "@rental-os/rental-core/admin/catalog/pages";
 import { RENTAL_COMMERCIAL_PAGES, RENTAL_COMMERCIAL_LEGACY_PERMISSION } from "@rental-os/rental-core/admin/commercial/pages";
+import { RENTAL_GOVERNANCE_PAGES, RENTAL_GOVERNANCE_LEGACY_PERMISSIONS } from "@rental-os/rental-core/admin/governance/pages";
 import { SUBSCRIPTION_ROUTES } from "@rental-os/platform-admin/subscription/subscriptionRoutes";
 import { ApartmentOutlined, ApiOutlined, AppstoreOutlined, BgColorsOutlined, BoxPlotOutlined, CalendarOutlined, ControlOutlined, CrownOutlined, CustomerServiceOutlined, DashboardOutlined, FileSearchOutlined, FileTextOutlined, FormOutlined, FundOutlined, GiftOutlined, IdcardOutlined, MobileOutlined, SafetyCertificateOutlined, SendOutlined, SettingOutlined, ShopOutlined, TagsOutlined, TeamOutlined, ToolOutlined } from "@/components/ui/icons";
 import { RentalCategoryCode, type RentalCapability, type RentalCategoryTerminology } from "@rental-os/shared";
@@ -60,7 +61,7 @@ export const APP_ROUTES = {
   discounts: { path: `/rental${RENTAL_COMMERCIAL_PAGES.discounts.path}`, label: RENTAL_COMMERCIAL_PAGES.discounts.title.default, permission: RENTAL_COMMERCIAL_LEGACY_PERMISSION, audience: "tenant", icon: <TagsOutlined />, menu: Boolean(RENTAL_COMMERCIAL_PAGES.discounts.menu) },
   coupons: { path: `/rental${RENTAL_COMMERCIAL_PAGES.coupons.path}`, label: RENTAL_COMMERCIAL_PAGES.coupons.title.default, permission: RENTAL_COMMERCIAL_LEGACY_PERMISSION, audience: "tenant", icon: <TagsOutlined />, menu: Boolean(RENTAL_COMMERCIAL_PAGES.coupons.menu) },
   services: { path: `/rental${RENTAL_COMMERCIAL_PAGES.services.path}`, label: RENTAL_COMMERCIAL_PAGES.services.title.default, permission: RENTAL_COMMERCIAL_LEGACY_PERMISSION, audience: "tenant", icon: <SafetyCertificateOutlined />, menu: Boolean(RENTAL_COMMERCIAL_PAGES.services.menu) },
-  rentalSettings: { path: "/rental/settings", label: "品类与业务规则", permission: "rental-os:price:manage", legacyPermissions: ["rental-os:calendar:edit", "rental-os:calendar:publish", "rental-os:calendar:view-history", "rental-os:rules:manage", "rental-os:rules:publish", "system:integration:manage"], audience: "tenant", icon: <SettingOutlined />, menu: true },
+  rentalSettings: { path: `/rental${RENTAL_GOVERNANCE_PAGES.settings.path}`, label: RENTAL_GOVERNANCE_PAGES.settings.title.default, permission: RENTAL_GOVERNANCE_LEGACY_PERMISSIONS[0], legacyPermissions: RENTAL_GOVERNANCE_LEGACY_PERMISSIONS.slice(1), audience: "tenant", icon: <SettingOutlined />, menu: Boolean(RENTAL_GOVERNANCE_PAGES.settings.menu) },
   // CORE-EXT-02C：能力治理入口。刻意**不**给 capability 门禁——它是治理能力本身的页面，
   // 若也要求某个能力已启用，全新空间就会陷入「没有入口去启用第一个能力」的死锁。
   rentalCapabilities: { path: `/rental${RENTAL_CAPABILITY_PAGES.capabilities.path}`, label: RENTAL_CAPABILITY_PAGES.capabilities.title.default, permission: RENTAL_CAPABILITY_LEGACY_PERMISSIONS.view, legacyPermissions: [RENTAL_CAPABILITY_LEGACY_PERMISSIONS.manage], audience: "tenant", icon: <ControlOutlined />, menu: Boolean(RENTAL_CAPABILITY_PAGES.capabilities.menu) },

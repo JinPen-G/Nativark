@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const ts = require("typescript");
 const { RENTAL_CATEGORY_DEFINITIONS } = require("@rental-os/shared");
-const source = fs.readFileSync("apps/admin/src/features/settings/governance/categoryPreparationFields.ts", "utf8");
+const source = fs.readFileSync("packages/rental-core/admin/governance/categoryPreparationFields.ts", "utf8");
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const exportsObject = {};
 new Function("exports", "require", compiled)(exportsObject, require);
@@ -57,7 +57,7 @@ next.patches[0].values.name = "changed copy";
 assert.deepEqual(queued, queuedBefore, "发送中的批次不能继续引用可变的页面输入");
 assert.throws(() => nextPreparationBatch([{ ...queued[0], values: { name: "🙂".repeat(80000) } }]), /单条预备资料过大/);
 console.log("category-preparation-admin-fields: 作用域同 ID 区分、候选读回、退役/媒体隔离、序列号专列、false/0、失效准备及差异补丁通过");
-const capabilitySource = fs.readFileSync("apps/admin/src/features/settings/governance/categoryPreparationCapabilities.ts", "utf8");
+const capabilitySource = fs.readFileSync("packages/rental-core/admin/governance/categoryPreparationCapabilities.ts", "utf8");
 const capabilityCompiled = ts.transpileModule(capabilitySource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const capExports = {};
 new Function("exports", "require", capabilityCompiled)(capExports, require);
@@ -125,11 +125,11 @@ console.log("category-preparation-new-capabilities: 注册执行器、显式选�
 
 function preparationSaveHarness(api) {
   const cleanups = [];
-  const hookSource = fs.readFileSync("apps/admin/src/features/settings/governance/useCategoryPreparationSave.ts", "utf8");
+  const hookSource = fs.readFileSync("packages/rental-core/admin/governance/useCategoryPreparationSave.ts", "utf8");
   const js = ts.transpileModule(hookSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const result = {};
   const react = { useRef: value => ({ current: value }), useState: value => [value, () => undefined], useEffect: setup => cleanups.push(setup()) };
-  new Function("exports", "require", js)(result, name => name === "react" ? react : name === "@/api/categoryPreparation" ? { categoryPreparationApi: api } : require(name));
+  new Function("exports", "require", js)(result, name => name === "react" ? react : name === "./page-context" ? { useRentalGovernanceContext: () => ({ categoryPreparationApi: api }) } : require(name));
   let current = true;
   return { hook: result.useCategoryPreparationSave(() => current), changeScope: () => { current = false; }, unmount: () => cleanups.forEach(fn => fn?.()) };
 }

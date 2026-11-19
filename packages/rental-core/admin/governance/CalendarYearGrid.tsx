@@ -1,9 +1,9 @@
 import { useMemo, useRef, useState } from "react";
-import type { RentalCalendarDay } from "@rental-os/shared";
+import type { RentalCalendarDay } from "@rental-os/rental-core";
 import { ChevronRight } from "lucide-react";
-import { Button } from "@/components/ui";
-import { useLocale } from "@/app/locale";
-import { calendarDayTypeLabels } from "./governance/ruleOptionLabels";
+import { Button } from "@rental-os/platform-admin/ui";
+import { useLocale } from "@rental-os/platform-admin/locale";
+import { calendarDayTypeLabels } from "./ruleOptionLabels";
 import { calendarYearMonths, moveCalendarDate } from "./calendar-year-model";
 import styles from "./CalendarYearGrid.module.css";
 

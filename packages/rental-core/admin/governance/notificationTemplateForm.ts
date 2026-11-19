@@ -1,4 +1,4 @@
-import type { RentalNotificationTemplateV1 } from "@rental-os/shared";
+import type { RentalNotificationTemplateV1 } from "@rental-os/rental-core";
 
 type VariableSchema = RentalNotificationTemplateV1["variableSchema"];
 export type NotificationVariableRow = { name: string; definition: VariableSchema[string] };

@@ -41,6 +41,8 @@
 
 CorePage 的 `title`、`summary` 可显示当前受权对象；`actions` 可声明图标、危险程度、等待状态和等待文案，公共按钮继续等待真实Promise并复验当前操作。`RecordDetailLayout` 接收事实、返回回调及可选Core页头，`RecordDetailStack`提供原内容间距。`KanbanBoard`只映射已经获权的数据和业务回调，宿主调用一次 `platformAdminVite()` 即带入保留看板的严格构建适配。实际接入见[Rental养护工单](../rental-core/admin/work-orders/README.md)。
 
+多分区配置页从 `/shell` 复用 `SettingsGroups` 和 `WorkspacePageActions`，由当前页声明配置分组及主操作；内容、保存请求和权限由 Core 提供。治理类页面直接使用 `/ui` 的原导航、日历、通知、安全及团队图标出口，复用同一主题与几何。[外壳出口](src/shell.ts) · [UI 出口](src/components/ui/index.ts)
+
 `CoreAdminPageAction.slot` 省略时进入顶部主操作栏；返回声明 `slot: "navigation"`，刷新等辅助动作声明 `slot: "tools"`。它们共用当前权限、等待状态和卸载保护。页签传入 `CorePage.view`；要把工具放在同一内容行，设置 `toolsPlacement="view"`，无需自行调整页头 CSS。[页面适配](src/core/CorePage.tsx)
 
 使用 `RecordDetailLayout.header` 自定义页头时，第二个参数提供 `actions`、`navigation`、`tools` 三个插槽；原单参数回调仍收到主动作和返回的组合。类型 `RecordDetailHeaderSlots` 从 `/ui` 导出。[详情布局](src/components/RecordDetailLayout.tsx)

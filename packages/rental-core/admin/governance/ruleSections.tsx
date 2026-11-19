@@ -1,11 +1,11 @@
-import type { RentalCategoryDefinition, RentalRuleVersion, SaveRentalRuleVersionRequest } from "@rental-os/shared";
+import type { RentalCategoryDefinition, RentalRuleVersion, SaveRentalRuleVersionRequest } from "@rental-os/rental-core";
 import { Col, InputNumber, Row, Typography } from "antd";
-import { Alert, Form as BaseForm, Input, Select, Switch } from "@/components/ui";
+import { Alert, Form as BaseForm, Input, Select, Switch } from "@rental-os/platform-admin/ui";
 import type { FormInstance, FormItemProps } from "antd";
 import type { ReactNode } from "react";
-import { useLocale } from "@/app/locale";
-import { defaultRentalNoShowRule } from "@rental-os/shared";
-import { normalizeSecurityRules } from "@/features/settings/securityRuleForm";
+import { useLocale } from "@rental-os/platform-admin/locale";
+import { defaultRentalNoShowRule } from "@rental-os/rental-core";
+import { normalizeSecurityRules } from "./securityRuleForm";
 import {
   lateFeeTypeLabels,
   overdueFeeModeLabels,

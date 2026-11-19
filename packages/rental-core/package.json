@@ -1242,6 +1242,30 @@
     "./admin/commercial/pages": {
       "types": "./admin/commercial/pages.ts",
       "default": "./admin/commercial/pages.ts"
+    },
+    "./admin/governance": {
+      "types": "./admin/governance/index.tsx",
+      "default": "./admin/governance/index.tsx"
+    },
+    "./admin/governance/client": {
+      "types": "./admin/governance/client.ts",
+      "default": "./admin/governance/client.ts"
+    },
+    "./admin/governance/context": {
+      "types": "./admin/governance/page-context.tsx",
+      "default": "./admin/governance/page-context.tsx"
+    },
+    "./admin/governance/pages": {
+      "types": "./admin/governance/pages.ts",
+      "default": "./admin/governance/pages.ts"
+    },
+    "./admin/governance/logic": {
+      "types": "./admin/governance/logic.ts",
+      "default": "./admin/governance/logic.ts"
+    },
+    "./admin/governance/messages": {
+      "types": "./admin/governance/messages.ts",
+      "default": "./admin/governance/messages.ts"
     }
   },
   "typesVersions": {
@@ -2169,6 +2193,24 @@
       ],
       "admin/commercial/pages": [
         "admin/commercial/pages.ts"
+      ],
+      "admin/governance": [
+        "./admin/governance/index.tsx"
+      ],
+      "admin/governance/client": [
+        "./admin/governance/client.ts"
+      ],
+      "admin/governance/context": [
+        "./admin/governance/page-context.tsx"
+      ],
+      "admin/governance/pages": [
+        "./admin/governance/pages.ts"
+      ],
+      "admin/governance/logic": [
+        "./admin/governance/logic.ts"
+      ],
+      "admin/governance/messages": [
+        "./admin/governance/messages.ts"
       ]
     }
   },

@@ -15,5 +15,6 @@ export { WorkspaceRouteReady } from "./components/workspace/WorkspaceNavigation"
 export { WorkspacePanel, WorkspacePanelToggle } from "./components/workspace/WorkspacePanel";
 export { QueryState } from "./components/QueryState";
 export { LoadingState } from "./components/LoadingState";
-export { SettingsWorkspace } from "./components/settings/SettingsWorkspace";
+export { SettingsWorkspace, SettingsGroups } from "./components/settings/SettingsWorkspace";
+export { WorkspacePageActions } from "./components/workspace/WorkspaceHeader";
 export { useServerFormSync } from "./app/useServerFormSync";

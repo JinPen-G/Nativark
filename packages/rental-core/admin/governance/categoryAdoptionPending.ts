@@ -1,4 +1,4 @@
-import type { AdoptRentalCategoryRequest, CategoryAdoptionResult, CategoryPreparationPreview } from "@rental-os/shared";
+import type { AdoptRentalCategoryRequest, CategoryAdoptionResult, CategoryPreparationPreview } from "@rental-os/rental-core/category-governance";
 
 /** Client recovery metadata only; it grants no action or scope. Never persist
  * free-form reasons, prepared attributes, credentials or a cached success. */

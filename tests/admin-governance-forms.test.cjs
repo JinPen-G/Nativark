@@ -13,7 +13,7 @@ function load(file, dependencies = {}) {
   return result.exports;
 }
 
-const variables = load('apps/admin/src/features/settings/governance/notificationTemplateForm.ts');
+const variables = load('packages/rental-core/admin/governance/notificationTemplateForm.ts');
 
 test('template variable editing preserves names, required flags and existing definition metadata', () => {
   const original = JSON.parse('{"orderNo":{"label":"订单号","required":true},"optional_note":{"label":"","required":false,"source":"legacy","name":"original metadata"},"__proto__":{"label":"原变量","required":false}}');
@@ -39,16 +39,15 @@ test('blank or duplicate names cannot silently discard a template variable', () 
 
 test('manual notification management is independent of rule editing, publishing and pricing', () => {
   let granted = [];
-  const governance = load('apps/admin/src/features/settings/governance/shared.ts', {
+  const governance = load('packages/rental-core/admin/governance/shared.ts', {
     react: { useMemo: compute => compute() },
-    '@/features/auth/authStore': { useAuthStore: select => select({ hasPermission: code => granted.includes(code) }) },
   });
   for (const permission of ['rental-os:rules:manage', 'rental-os:rules:publish', 'rental-os:price:manage', 'system:params:manage']) {
     granted = [permission];
-    assert.equal(governance.useGovernancePermissions().canManageNotifications, false, permission);
+    assert.equal(governance.useGovernancePermissions(code => granted.includes(code)).canManageNotifications, false, permission);
   }
   granted = ['system:integration:manage'];
-  const integration = governance.useGovernancePermissions();
+  const integration = governance.useGovernancePermissions(code => granted.includes(code));
   assert.equal(integration.canManageNotifications, true);
   assert.equal(integration.canEditRules, false);
   assert.equal(integration.canPublishRules, false);

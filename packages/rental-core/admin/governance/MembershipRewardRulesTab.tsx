@@ -1,16 +1,19 @@
-import { ActionButton, FormSection, SaveButton } from "@/components/ui";
-import { SettingsGroups } from "@/components/settings/SettingsWorkspace";
-import { WorkspacePageActions } from "@/components/workspace/WorkspaceHeader";
+import { useMemo } from "react";
+import { UnsavedChangesGuard } from "@rental-os/platform-admin/forms";
+import { useOrderEditor } from "../orders/useOrderEditor";
+import { useRentalGovernanceContext } from "./page-context";
+import { ActionButton, FormSection, SaveButton } from "@rental-os/platform-admin/ui";
+import { SettingsGroups } from "@rental-os/platform-admin/shell";
+import { WorkspacePageActions } from "@rental-os/platform-admin/shell";
 import { useQuery } from "@tanstack/react-query";
-import type { TenantRentalBusinessSettings } from "@rental-os/shared";
+import type { TenantRentalBusinessSettings } from "@rental-os/rental-core";
 import { Col, InputNumber, Row, Space } from "antd";
-import { App, Form } from "@/components/ui";
-import { Alert } from "@/components/ui";
-import { Switch } from "@/components/ui";
-import { Select } from "@/components/ui";
-import { useServerFormSync } from "@/app/useServerFormSync";
-import { rentalCoreApi } from "@/api/rentalCore";
-import { useLocale } from "@/app/locale";
+import { App, Form } from "@rental-os/platform-admin/ui";
+import { Alert } from "@rental-os/platform-admin/ui";
+import { Switch } from "@rental-os/platform-admin/ui";
+import { Select } from "@rental-os/platform-admin/ui";
+import { useServerFormSync } from "@rental-os/platform-admin/forms";
+import { useLocale } from "@rental-os/platform-admin/locale";
 import { rewardTypeLabels } from "./ruleOptionLabels";
 import type { GovernancePermissions, GovernanceTabContext } from "./shared";
 
@@ -32,6 +35,8 @@ export function MembershipRewardRulesTab({
 }: Pick<GovernanceTabContext, "permissions" | "settings" | "saving"> & {
   onSave: (values: MembershipSettingsFormValues) => Promise<unknown>;
 }) {
+  const { api: rentalCoreApi, scopeKey } = useRentalGovernanceContext();
+
   const { t } = useLocale();
   const { message } = App.useApp();
   const [form] = Form.useForm<MembershipSettingsFormValues>();
@@ -55,8 +60,11 @@ export function MembershipRewardRulesTab({
     return onSave(values);
   };
 
+  const editor = useOrderEditor({ form, identity: scopeKey, onSave: saveCurrent, disabled: saving });
+
+  const saveForm = useMemo(() => ({ ...form, validateFields: editor.validate }), [form, editor.key]);
   const couponTemplates = useQuery({
-    queryKey: ["rental-core", "coupon-templates"],
+    queryKey: ["rental-core", "coupon-templates", scopeKey],
     queryFn: rentalCoreApi.couponTemplates,
     enabled: permissions.canSeeSettings && needsCouponTemplates,
   });
@@ -67,8 +75,8 @@ export function MembershipRewardRulesTab({
     ? t("奖励金额（{currency}）", { currency: settings.pricing.currency })
     : t(type === "coupon" ? "奖励券数量" : "奖励积分");
   return (
-    <Form<MembershipSettingsFormValues> form={form} layout="vertical" disabled={saving} onFinish={values => { void saveCurrent(values).catch(() => undefined); }}>
-      <WorkspacePageActions><SaveButton label={t("保存本页")} form={form} pending={saving} onSave={saveCurrent} /></WorkspacePageActions>
+    <Form<MembershipSettingsFormValues> form={form} layout="vertical" disabled={(saving) || editor.busy} {...editor.formProps}>
+      <WorkspacePageActions><SaveButton label={t("保存本页")} form={saveForm} pending={(saving) || editor.busy} onSave={editor.submit} /></WorkspacePageActions>
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <Alert
         type="info"
@@ -194,6 +202,7 @@ export function MembershipRewardRulesTab({
           </FormSection>
       </SettingsGroups>
       </Space>
+      <UnsavedChangesGuard dirty={editor.dirty} busy={saving || editor.busy} />
     </Form>
   );
 }

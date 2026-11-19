@@ -86,7 +86,7 @@ void (async () => {
   }
 
   const categorySettingsUi = readFileSync(
-    join(__dirname, "..", "apps/admin/src/features/settings/governance/CategoryTab.tsx"),
+    join(__dirname, "..", "packages/rental-core/admin/governance/CategoryTab.tsx"),
     "utf8"
   );
   assert.ok(
@@ -98,7 +98,7 @@ void (async () => {
     "经营设置的履约方式必须来自当前品类定义"
   );
   const ruleSectionsUi = readFileSync(
-    join(__dirname, "..", "apps/admin/src/features/settings/governance/ruleSections.tsx"),
+    join(__dirname, "..", "packages/rental-core/admin/governance/ruleSections.tsx"),
     "utf8"
   );
   const qualificationSectionStart = ruleSectionsUi.indexOf('key: "damage-qualification"');

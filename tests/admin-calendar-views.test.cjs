@@ -14,8 +14,8 @@ function load(file, dependencies = {}) {
   return result.exports;
 }
 
-const model = load('apps/admin/src/features/settings/calendar-year-model.ts');
-const labels = load('apps/admin/src/features/settings/governance/ruleOptionLabels.ts');
+const model = load('packages/rental-core/admin/governance/calendar-year-model.ts');
+const labels = load('packages/rental-core/admin/governance/ruleOptionLabels.ts');
 const officialDates = load('apps/admin/src/features/platform/official-calendar-dates.ts');
 const datePanel = load('apps/admin/src/components/ui/date-picker-month.ts');
 
@@ -109,12 +109,12 @@ test('keyboard navigation crosses months, clamps short months, and stays inside 
 
 test('year cells preserve real opening states, distinguish missing data, and open the original record', () => {
   const useState = initial => [initial, () => {}];
-  const { CalendarYearGrid } = load('apps/admin/src/features/settings/CalendarYearGrid.tsx', {
+  const { CalendarYearGrid } = load('packages/rental-core/admin/governance/CalendarYearGrid.tsx', {
     react: { ...React, useMemo: callback => callback(), useRef: () => ({ current: null }), useState },
-    '@/app/locale': { useLocale: () => ({ locale: 'zh-CN', t: (text, values = {}) => text.replace(/\{(\w+)\}/g, (_, name) => values[name]) }) },
-    '@/components/ui': { Button: 'Button' },
+    '@rental-os/platform-admin/locale': { useLocale: () => ({ locale: 'zh-CN', t: (text, values = {}) => text.replace(/\{(\w+)\}/g, (_, name) => values[name]) }) },
+    '@rental-os/platform-admin/ui': { Button: 'Button' },
     './calendar-year-model': model,
-    './governance/ruleOptionLabels': labels,
+    './ruleOptionLabels': labels,
     './CalendarYearGrid.module.css': {},
   });
   const days = [
@@ -171,18 +171,18 @@ function rangeHarness() {
       } };
     } },
     antd: { Space: 'Space', Tag: 'Tag', Typography: { Text: 'Text' } },
-    '@/components/ui': { ...Object.fromEntries(['ActionButton', 'FormSection', 'Modal', 'Checkbox', 'Alert', 'Input', 'Select', 'Button', 'Table', 'TimeInput'].map(name => [name, name])),
+    '@rental-os/platform-admin/ui': { ...Object.fromEntries(['ActionButton', 'FormSection', 'Modal', 'Checkbox', 'Alert', 'Input', 'Select', 'Button', 'Table', 'TimeInput'].map(name => [name, name])),
       Form, DatePicker: { RangePicker: 'RangePicker' }, App: { useApp: () => ({ message: { success: () => {} } }) } },
-    '@/app/locale': { useLocale: () => ({ t: text => text }) },
-    '@/api/rentalCore': { rentalCoreApi: {
+    '@rental-os/platform-admin/locale': { useLocale: () => ({ t: text => text }) },
+    './page-context': { useRentalGovernanceContext: () => ({ scopeKey: 'range-fixture', api: {
       calendarRangePreview: async (year, payload) => { requests.push({ kind: 'preview', year, payload }); return { year, totalDays: 2, conflictCount: 0, days: [] }; },
       calendarRangeApply: async (year, payload) => { requests.push({ kind: 'apply', year, payload }); return { appliedCount: 2, batchId: 'test-only' }; },
-    } },
-    './governance/shared': { errorText: (_, fallback) => fallback },
-    './governance/GovernanceForms.module.css': {},
-    '@rental-os/shared': {},
+    } }) },
+    './shared': { errorText: (_, fallback) => fallback },
+    './GovernanceForms.module.css': {},
+    '@rental-os/rental-core': {},
   };
-  const { CalendarRangeModal } = load('apps/admin/src/features/settings/CalendarRangeModal.tsx', dependencies);
+  const { CalendarRangeModal } = load('packages/rental-core/admin/governance/CalendarRangeModal.tsx', dependencies);
   const render = revision => { cursor = 0; mutationCursor = 0; return CalendarRangeModal({ mode: 'override', year: 2026, currentRevision: revision, open: true, onClose: () => {}, onApplied: () => {} }); };
   const action = node => [...elements(node.props.footer)].find(element => element.type === 'ActionButton');
   return { render, action, requests, values };

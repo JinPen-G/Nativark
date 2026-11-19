@@ -1,6 +1,6 @@
+import { useRentalGovernanceContext } from "./page-context";
 import { useEffect, useRef, useState } from "react";
-import type { AdoptRentalCategoryRequest, CategoryAdoptionResult } from "@rental-os/shared";
-import { categoryPreparationApi } from "@/api/categoryPreparation";
+import type { AdoptRentalCategoryRequest, CategoryAdoptionResult } from "@rental-os/rental-core/category-governance";
 import { assertCategoryAdoptionReceipt, forgetCategoryAdoption, readPendingCategoryAdoption, rememberCategoryAdoption, type PendingCategoryAdoption } from "./categoryAdoptionPending";
 import { preparationErrorMessage } from "./useCategoryPreparationSave";
 
@@ -8,6 +8,8 @@ type Phase = "idle" | "sending" | "unknown" | "adopted_unread";
 /** One confirmed original intent. Recovery performs reads only, including after
  * remount; a missing receipt never clears the key or authorizes another write. */
 export function useCategoryAdoption(scope: string, isCurrent: () => boolean, onAdopted: (result: CategoryAdoptionResult) => Promise<void>) {
+  const { categoryPreparationApi } = useRentalGovernanceContext();
+
   const [phase, setPhase] = useState<Phase>("idle"), [error, setError] = useState("");
   const pending = useRef<PendingCategoryAdoption | undefined>(undefined), receipt = useRef<CategoryAdoptionResult | undefined>(undefined);
   const mounted = useRef(true), busy = useRef(false);

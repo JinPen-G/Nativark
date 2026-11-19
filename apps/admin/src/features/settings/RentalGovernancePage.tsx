@@ -1,227 +1,72 @@
-import { CalendarOutlined, NotificationOutlined, SafetyCertificateOutlined, TeamOutlined } from "@/components/ui/icons";
-import type { SaveTenantRentalBusinessSettingsRequest } from "@rental-os/shared";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App } from "@/components/ui";
-import { Button, Tabs } from "@/components/ui";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { rentalCoreApi } from "@/api/rentalCore";
-import { useLocale } from "@/app/locale";
-import { PageHeader } from "@/components/PageHeader";
-import { QueryState } from "@/components/QueryState";
-import { useListQueryIdentity } from "@/components/ui/LiveRefresh";
-import { CalendarTab } from "./governance/CalendarTab";
-import { CategoryTab } from "./governance/CategoryTab";
-import { MembershipRewardRulesTab } from "./governance/MembershipRewardRulesTab";
-import { NotificationsTab } from "./governance/NotificationsTab";
-import { RulesTab } from "./governance/RulesTab";
-import { useLocation } from "react-router-dom";
-import { navigationTarget } from "@/features/copilot/destinations";
-import { CategoryAssistFlow } from "@/features/ai-native/CategoryAssistFlow";
-import { useAuthStore } from "@/features/auth/authStore";
-import { currentSessionEpoch } from "@/app/queryClient";
+/** 原 /rental/settings 绑定治理声明与同源正文，当前身份复验原入口权限。 */
+import { useNavigate } from "react-router-dom";
+import { corePageKey, type CoreRegisteredPage } from "@rental-os/core-contracts";
+import { CorePageHostProvider } from "@rental-os/platform-admin/core";
 import {
-  useGovernancePermissions,
-  type GovernancePermissions,
-  type GovernanceTabContext,
-} from "./governance/shared";
+  RentalGovernancePage as RentalPage,
+  createRentalGovernanceAdminContribution,
+} from "@rental-os/rental-core/admin/governance";
+import {
+  RENTAL_GOVERNANCE_CORE_ID,
+  RENTAL_GOVERNANCE_PAGES,
+  RENTAL_GOVERNANCE_LEGACY_PERMISSIONS,
+} from "@rental-os/rental-core/admin/governance/pages";
+import { createRentalCommercialAdminContribution } from "@rental-os/rental-core/admin/commercial";
+import {
+  RENTAL_COMMERCIAL_CORE_ID,
+  RENTAL_COMMERCIAL_LEGACY_PERMISSION,
+} from "@rental-os/rental-core/admin/commercial/pages";
+import { useLegacyRentalCommercialContext } from "@/features/commercial/legacy-commercial-context";
+import { rentalCatalogScopeKey } from "@/features/catalog/legacy-catalog-context";
+import { useAuthStore } from "@/features/auth/authStore";
+import { resolveAdminBrandName } from "@/app/branding";
+import { useLegacyRentalGovernanceContext } from "./legacy-governance-context";
 
-type TabKey = "category" | "rules" | "calendar" | "membership" | "notifications";
+const governance = createRentalGovernanceAdminContribution("0.1.0", useLegacyRentalGovernanceContext);
+const commercial = createRentalCommercialAdminContribution("0.1.0", useLegacyRentalCommercialContext);
+const pages = new Map<string, CoreRegisteredPage<unknown>>(
+  [...governance.pages, ...commercial.pages].map((definition) => {
+    const key = corePageKey(RENTAL_GOVERNANCE_CORE_ID, definition.id);
+    return [key, { key, coreId: RENTAL_GOVERNANCE_CORE_ID, path: "/rental" + definition.path, definition }];
+  }),
+);
 
-interface GovernanceTabDefinition {
-  key: TabKey;
-  label: ReactNode;
-  permitted: (permissions: GovernancePermissions) => boolean;
-  render: (context: GovernanceTabContext) => ReactNode;
-}
-
-/**
- * 页签的**唯一**清单：可进入的页签与实际渲染的页签都从这一份派生。
- * 页签与内部查询共用同一权限口径，避免选中空白页或请求注定被原 Guard 拒绝的数据。
- */
-const TABS: GovernanceTabDefinition[] = [
-  {
-    key: "category",
-    label: "品类与租赁方式",
-    permitted: (permissions) => permissions.canSeeSettings,
-    render: ({ category, settings, saveTab, saving }) => <CategoryTab category={category} settings={settings} onSave={saveTab} saving={saving} />,
-  },
-  {
-    key: "rules",
-    label: (
-      <span>
-        <SafetyCertificateOutlined />
-        业务规则
-      </span>
-    ),
-    permitted: (permissions) => permissions.canSeeRules,
-    render: ({ permissions, category }) => <RulesTab permissions={permissions} category={category} />,
-  },
-  {
-    key: "calendar",
-    label: (
-      <span>
-        <CalendarOutlined />
-        营业日历
-      </span>
-    ),
-    permitted: (permissions) => permissions.canSeeCalendar,
-    render: ({ permissions }) => <CalendarTab permissions={permissions} />,
-  },
-  {
-    key: "membership",
-    label: (
-      <span>
-        <TeamOutlined />
-        会员奖励规则
-      </span>
-    ),
-    permitted: (permissions) => permissions.canSeeSettings,
-    render: ({ permissions, settings, saveTab, saving }) => <MembershipRewardRulesTab permissions={permissions} settings={settings} onSave={saveTab} saving={saving} />,
-  },
-  {
-    key: "notifications",
-    label: (
-      <span>
-        <NotificationOutlined />
-        通知模板
-      </span>
-    ),
-    permitted: (permissions) => permissions.canManageNotifications,
-    render: ({ permissions, settings }) => <NotificationsTab permissions={permissions} settings={settings} />,
-  },
-];
-
-/**
- * 「品类与业务规则」外壳：页头与页签导航。每个页签自己持有表单和保存动作，
- * 规则、日历、会员奖励与通知不会再被一个页头按钮混成一次提交。
- */
 export function RentalGovernancePage() {
-  const { message } = App.useApp();
-  const { t } = useLocale();
-  const scope = useListQueryIdentity();
   const auth = useAuthStore();
-  const assistIdentity = JSON.stringify([scope, currentSessionEpoch()]);
-  const [assistScope, setAssistScope] = useState<string>();
-  const assistAllowed = auth.sessionVerified && !!auth.token && !!auth.tenant?.tenantId && !!auth.user
-    && !auth.user.isSaasAdmin && !!auth.currentWorkspaceId && auth.hasPermission("rental-os:category:adopt");
-  const queryClient = useQueryClient();
-  const permissions = useGovernancePermissions();
-  const permittedTabs = useMemo(() => TABS.filter((definition) => definition.permitted(permissions)), [permissions]);
-  const [tab, setTab] = useState<TabKey>(permittedTabs[0]?.key ?? "calendar");
-  const location = useLocation();
-  useEffect(() => {
-    const target = navigationTarget(location.state, location.pathname);
-    if (target?.tab && permittedTabs.some(item => item.key === target.tab)) setTab(target.tab as TabKey);
-  }, [location.key, location.state, location.pathname, permittedTabs]);
-  useEffect(() => {
-    if (permittedTabs.length && !permittedTabs.some((definition) => definition.key === tab)) setTab(permittedTabs[0].key);
-  }, [permittedTabs, tab]);
-  const categories = useQuery({
-    queryKey: ["rental-core", "categories"],
-    queryFn: rentalCoreApi.categories,
-    enabled: permittedTabs.some(definition => definition.key !== 'calendar'),
-  });
-  const profile = useQuery({
-    queryKey: ["rental-core", "profile"],
-    queryFn: rentalCoreApi.profile,
-    enabled: permittedTabs.some(definition => definition.key !== 'calendar'),
-  });
-  const settings = useQuery({
-    queryKey: ["rental-core", "business-settings"],
-    queryFn: rentalCoreApi.businessSettings,
-    enabled: permittedTabs.some(definition => definition.key !== 'calendar'),
-  });
-  const category = useMemo(
-    () =>
-      categories.data?.find((item) => item.code === profile.data?.categoryCode),
-    [categories.data, profile.data?.categoryCode],
-  );
-  const saveSettings = useMutation({
-    mutationFn: (body: SaveTenantRentalBusinessSettingsRequest) => rentalCoreApi.saveBusinessSettings(body),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({
-        queryKey: ["rental-core", "business-settings"],
-      });
-      message.success(t("本页配置已保存"));
-    },
-    onError: (error) =>
-      message.error(
-        (error as { response?: { data?: { message?: string } } })?.response?.data?.message ??
-          t("本页配置保存失败，请检查填写内容"),
-      ),
-  });
-
-  /**
-   * business-settings 仍是服务端的整体快照接口，不能只发一个嵌套分组；
-   * 但 UI 的提交边界按当前页签拆开。每个页签只传自己的 patch，其他分组
-   * 从最近一次服务端快照合并，避免切换页签或保存一个页签时覆盖另一页签。
-   */
-  const saveTab = (patch: Partial<SaveTenantRentalBusinessSettingsRequest>) => {
-    if (!settings.data) return Promise.reject(new Error("Settings unavailable"));
-    const {
-      tenantId: _tenant,
-      categoryCode: _category,
-      configVersion: _version,
-      updatedAt: _updatedAt,
-      updatedBy: _updatedBy,
-      ...current
-    } = settings.data;
-    return saveSettings.mutateAsync({ ...current, ...patch });
-  };
-
-  const localizedTabs = permittedTabs.map((definition) => ({
-    ...definition,
-    label: definition.key === "category"
-      ? t("品类与租赁方式")
-      : definition.key === "rules"
-        ? t("业务规则")
-        : definition.key === "calendar"
-          ? t("营业日历")
-          : definition.key === "membership"
-            ? t("会员奖励规则")
-            : t("通知模板"),
-    icon: definition.key === "rules" ? <SafetyCertificateOutlined /> : definition.key === "calendar" ? <CalendarOutlined /> : definition.key === "membership" ? <TeamOutlined /> : definition.key === "notifications" ? <NotificationOutlined /> : undefined
-  }));
+  const navigate = useNavigate();
+  const context = useLegacyRentalGovernanceContext();
+  const page = pages.get(corePageKey(RENTAL_GOVERNANCE_CORE_ID, RENTAL_GOVERNANCE_PAGES.settings.id))!;
   return (
-    <>
-      <PageHeader
-        title={t("品类与业务规则")}
-        extra={tab === "category" && assistAllowed ? <Button aria-expanded={assistScope === assistIdentity}
-          onClick={() => setAssistScope(assistIdentity)}>{t("品类版本助手")}</Button> : undefined}
-      />
-      <div data-copilot-anchor="governance-view"><Tabs
-        key={scope}
-        aria-label={t("品类与业务规则")}
-        className="standalone-tabs"
-        destroyOnHidden={false}
-        activeKey={tab}
-        onChange={(key) => setTab(key as TabKey)}
-        items={localizedTabs.map(({ key, label, icon, render }) => ({ key, label, icon, children: key === 'calendar'
-          ? <CalendarTab permissions={permissions} /> : <QueryState
-          transitionKey={scope}
-          loading={settings.isLoading || profile.isLoading || categories.isLoading}
-          error={settings.error || profile.error || categories.error}
-          onRetry={() => Promise.all([settings.refetch({ throwOnError: true }), profile.refetch({ throwOnError: true }), categories.refetch({ throwOnError: true })])}
-        >
-        {settings.data && category && <>{render({
-            permissions,
-            category,
-            settings: settings.data,
-            saveTab,
-            saving: saveSettings.isPending,
-          })}
-          {key === "category" && tab === "category" && assistAllowed && assistScope === assistIdentity
-            && <CategoryAssistFlow key={assistIdentity} mode="workspace" code={category.code} identity={assistIdentity}
-              current={() => tab === "category" && assistScope === assistIdentity}
-              onChanged={async () => {
-                await queryClient.invalidateQueries({ queryKey: ["category-adoption"] });
-                await queryClient.invalidateQueries({ queryKey: ["rental-core", "profile"] });
-                await queryClient.invalidateQueries({ queryKey: ["rental-core", "business-settings"] });
-                await queryClient.invalidateQueries({ queryKey: ["rental-core", "categories"] });
-              }} />}
-        </>}
-        </QueryState> }))}
-      /></div>
-    </>
+    <CorePageHostProvider
+      host={{
+        page,
+        pages,
+        navigate,
+        brandName: resolveAdminBrandName(auth.tenant, auth.user),
+        lifetimeKey: context.scopeKey,
+        canAccess: (coreId, permissions) => {
+          const current = useAuthStore.getState();
+          if (
+            !context.scopeKey ||
+            rentalCatalogScopeKey(current) !== context.scopeKey ||
+            coreId !== RENTAL_GOVERNANCE_CORE_ID
+          )
+            return false;
+          return permissions.every((permission) => {
+            if (permission.resource === "governance" && permission.action === "view")
+              return RENTAL_GOVERNANCE_LEGACY_PERMISSIONS.some((code) => current.hasPermission(code));
+            if (
+              coreId === RENTAL_COMMERCIAL_CORE_ID &&
+              permission.resource === "price" &&
+              permission.action === "manage"
+            )
+              return current.hasPermission(RENTAL_COMMERCIAL_LEGACY_PERMISSION);
+            return false;
+          });
+        },
+      }}
+    >
+      <RentalPage {...context} />
+    </CorePageHostProvider>
   );
 }

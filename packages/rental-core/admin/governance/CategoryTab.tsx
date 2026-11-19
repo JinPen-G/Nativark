@@ -1,17 +1,21 @@
-import { SettingsGroups } from "@/components/settings/SettingsWorkspace";
-import { WorkspacePageActions } from "@/components/workspace/WorkspaceHeader";
-import { DeleteOutlined, PlusOutlined } from "@/components/ui/icons";
-import { DEFAULT_RENTAL_PAYMENT_METHODS, RENTAL_CURRENCY_CODES, RENTAL_CURRENCY_META, RENTAL_PAYMENT_METHOD_CODES, RENTAL_PRICING_UNIT_LABELS } from "@rental-os/shared";
-import type { RentalCategoryDefinition, TenantRentalBusinessSettings } from "@rental-os/shared";
+import { useMemo } from "react";
+import { UnsavedChangesGuard } from "@rental-os/platform-admin/forms";
+import { useOrderEditor } from "../orders/useOrderEditor";
+import { useRentalGovernanceContext } from "./page-context";
+import { SettingsGroups } from "@rental-os/platform-admin/shell";
+import { WorkspacePageActions } from "@rental-os/platform-admin/shell";
+import { DeleteOutlined, PlusOutlined } from "@rental-os/platform-admin/ui";
+import { DEFAULT_RENTAL_PAYMENT_METHODS, RENTAL_CURRENCY_CODES, RENTAL_CURRENCY_META, RENTAL_PAYMENT_METHOD_CODES, RENTAL_PRICING_UNIT_LABELS } from "@rental-os/rental-core";
+import type { RentalCategoryDefinition, TenantRentalBusinessSettings } from "@rental-os/rental-core";
 import { Col, InputNumber, Row, Space, Tag, Typography } from "antd";
-import { App, Form, FormSection } from "@/components/ui";
-import { Alert } from "@/components/ui";
-import { Switch } from "@/components/ui";
-import { Input } from "@/components/ui";
-import { Select } from "@/components/ui";
-import { Button, SaveButton } from "@/components/ui";
-import { useServerFormSync } from "@/app/useServerFormSync";
-import { useLocale } from "@/app/locale";
+import { App, Form, FormSection } from "@rental-os/platform-admin/ui";
+import { Alert } from "@rental-os/platform-admin/ui";
+import { Switch } from "@rental-os/platform-admin/ui";
+import { Input } from "@rental-os/platform-admin/ui";
+import { Select } from "@rental-os/platform-admin/ui";
+import { Button, SaveButton } from "@rental-os/platform-admin/ui";
+import { useServerFormSync } from "@rental-os/platform-admin/forms";
+import { useLocale } from "@rental-os/platform-admin/locale";
 import type { GovernanceTabContext } from "./shared";
 import { CategoryPreparationEntry } from "./CategoryPreparationDialog";
 
@@ -53,6 +57,8 @@ export function CategoryTab({
 }: Pick<GovernanceTabContext, "category" | "settings" | "saving"> & {
   onSave: (values: CategorySettingsFormValues) => Promise<unknown>;
 }) {
+  const { scopeKey } = useRentalGovernanceContext();
+
   const { t } = useLocale();
   const { message } = App.useApp();
   const [form] = Form.useForm<CategorySettingsFormValues>();
@@ -86,9 +92,12 @@ export function CategoryTab({
     return onSave(values);
   };
 
+  const editor = useOrderEditor({ form, identity: JSON.stringify([scopeKey, category.code]), onSave: saveCurrent, disabled: saving });
+
+  const saveForm = useMemo(() => ({ ...form, validateFields: editor.validate }), [form, editor.key]);
   return (
-    <Form<CategorySettingsFormValues> form={form} layout="vertical" disabled={saving} onFinish={values => { void saveCurrent(values).catch(() => undefined); }}>
-      <WorkspacePageActions><SaveButton label={t("保存本页")} form={form} pending={saving} onSave={saveCurrent} /></WorkspacePageActions>
+    <Form<CategorySettingsFormValues> form={form} layout="vertical" disabled={(saving) || editor.busy} {...editor.formProps}>
+      <WorkspacePageActions><SaveButton label={t("保存本页")} form={saveForm} pending={(saving) || editor.busy} onSave={editor.submit} /></WorkspacePageActions>
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <CategoryPreparationEntry />
       <Alert
@@ -283,6 +292,7 @@ export function CategoryTab({
             </Space>
           </FormSection></SettingsGroups>
       </Space>
+      <UnsavedChangesGuard dirty={editor.dirty} busy={saving || editor.busy} />
     </Form>
   );
 }

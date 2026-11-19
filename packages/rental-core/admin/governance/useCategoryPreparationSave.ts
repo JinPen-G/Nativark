@@ -1,6 +1,6 @@
+import { useRentalGovernanceContext } from "./page-context";
 import { useEffect, useRef, useState } from "react";
-import type { CategoryPreparationSaveResult, SaveCategoryPreparationBatchRequest } from "@rental-os/shared";
-import { categoryPreparationApi } from "@/api/categoryPreparation";
+import type { CategoryPreparationSaveResult, SaveCategoryPreparationBatchRequest } from "@rental-os/rental-core/category-governance";
 
 type SavePhase = "idle" | "sending" | "unknown" | "saved_unread";
 interface PendingBatch {
@@ -19,6 +19,8 @@ export function preparationErrorMessage(error: unknown): string {
 /** One original batch stays frozen until its receipt or a definite first-attempt
  * rejection is known. A missing read result never creates a replacement key. */
 export function useCategoryPreparationSave(isCurrent: () => boolean) {
+  const { categoryPreparationApi } = useRentalGovernanceContext();
+
   const [phase, setPhase] = useState<SavePhase>("idle");
   const [error, setError] = useState("");
   const mounted = useRef(true);

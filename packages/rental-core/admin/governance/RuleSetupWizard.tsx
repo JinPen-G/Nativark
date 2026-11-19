@@ -1,14 +1,14 @@
-import type { RentalCategoryDefinition, RentalRuleVersion } from "@rental-os/shared";
+import { useRentalGovernanceContext } from "./page-context";
+import type { RentalCategoryDefinition, RentalRuleVersion } from "@rental-os/rental-core";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Space, Typography } from "antd";
-import { ActionButton, App, FormSection, Modal } from "@/components/ui";
-import { Form } from "@/components/ui";
-import { Alert, Steps } from "@/components/ui";
-import { Input } from "@/components/ui";
-import { Button } from "@/components/ui";
+import { ActionButton, App, FormSection, Modal } from "@rental-os/platform-admin/ui";
+import { Form } from "@rental-os/platform-admin/ui";
+import { Alert, Steps } from "@rental-os/platform-admin/ui";
+import { Input } from "@rental-os/platform-admin/ui";
+import { Button } from "@rental-os/platform-admin/ui";
 import { useEffect, useRef, useState } from "react";
-import { rentalCoreApi } from "@/api/rentalCore";
-import { useLocale } from "@/app/locale";
+import { useLocale } from "@rental-os/platform-admin/locale";
 import { RULE_SECTIONS, formToConfig, seedFormFromRule, type RuleForm } from "./ruleSections";
 import { errorText, type GovernancePermissions } from "./shared";
 import styles from "./GovernanceForms.module.css";
@@ -42,6 +42,8 @@ export function RuleSetupWizard({
   onClose: () => void;
   afterClose: () => void;
 }) {
+  const { api: rentalCoreApi } = useRentalGovernanceContext();
+
   const { message } = App.useApp();
   const { t } = useLocale();
   const queryClient = useQueryClient();
@@ -150,7 +152,7 @@ export function RuleSetupWizard({
 
   return (
     <Modal presentation="side" title={t("新建规则向导")} width={760} open={open} onCancel={onClose} afterClose={afterClose} destroyOnHidden
-      closable={!pending} keyboard={!pending} maskClosable={!pending}
+      closable={!pending} keyboard={!pending} mask={{ closable: !pending }}
       footer={<div className={styles.wizardActions}>
         <Button disabled={current === 0 || pending} onClick={() => setCurrent((value) => Math.max(0, value - 1))}>{t("上一步")}</Button>
         <Space wrap>

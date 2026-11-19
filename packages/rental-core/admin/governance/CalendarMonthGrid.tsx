@@ -1,9 +1,9 @@
 import { Tag } from "antd";
-import { Button, Tooltip } from "@/components/ui";
-import { LeftOutlined, RightOutlined } from "@/components/ui/icons";
+import { Button, Tooltip } from "@rental-os/platform-admin/ui";
+import { LeftOutlined, RightOutlined } from "@rental-os/platform-admin/ui";
 import { Clock3, SquarePen } from "lucide-react";
-import type { RentalCalendarDay, RentalCalendarTimePriceDay } from "@rental-os/shared";
-import { useLocale } from "@/app/locale";
+import type { RentalCalendarDay, RentalCalendarTimePriceDay } from "@rental-os/rental-core";
+import { useLocale } from "@rental-os/platform-admin/locale";
 import styles from "./CalendarMonthGrid.module.css";
 
 /**

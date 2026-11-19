@@ -1,5 +1,5 @@
 export { Button } from "./Button";
-export { ArrowLeftOutlined, DeleteOutlined, EditOutlined, HistoryOutlined, PlusOutlined } from "./icons";
+export { ArrowLeftOutlined, CalendarOutlined, DeleteOutlined, EditOutlined, HistoryOutlined, LeftOutlined, NotificationOutlined, PlusOutlined, RightOutlined, SafetyCertificateOutlined, TeamOutlined } from "./icons";
 export { ADMIN_TABLE_COLUMN_WIDTH } from "../../app/designTokens";
 export { Form, FormField, FormSection } from "./Form";
 export { SidebarMenu } from "./SidebarMenu";

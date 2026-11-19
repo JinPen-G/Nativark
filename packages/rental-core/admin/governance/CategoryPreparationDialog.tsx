@@ -1,34 +1,35 @@
+import { useMemo } from "react";
+import { useOrderEditor } from "../orders/useOrderEditor";
+import { useRentalGovernanceContext, type RentalGovernancePageContext } from "./page-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { InputNumber, Space, Typography } from "antd";
-import { ActionButton, Alert, App, Button, ConfirmAction, Form, Input, Modal, SaveButton, Select, Tabs } from "@/components/ui";
+import { ActionButton, Alert, App, Button, ConfirmAction, Form, Input, Modal, SaveButton, Select, Tabs } from "@rental-os/platform-admin/ui";
 import { useEffect, useId, useState } from "react";
-import type { CategoryAdoptionResult, CategoryEntityPreparationPatch, CategoryPreparationSaveResult, RentalCompatibilityRelation, SaveCategoryPreparationBatchRequest } from "@rental-os/shared";
-import { categoryPreparationApi, type CategoryPreparationOperation } from "@/api/categoryPreparation";
-import { useLocale } from "@/app/locale";
-import { QueryState } from "@/components/QueryState";
-import { ContentTransition } from "@/components/workspace/ContentTransition";
-import { UnsavedChangesGuard } from "@/components/UnsavedChangesGuard";
-import { useAuthStore } from "@/features/auth/authStore";
-import { CATEGORY_GOVERNANCE_PREVIEW_ENABLED } from "@/app/categoryGovernancePreview";
+import type { RentalCompatibilityRelation } from "@rental-os/rental-core";
+import type { CategoryAdoptionResult, CategoryEntityPreparationPatch, CategoryPreparationSaveResult, SaveCategoryPreparationBatchRequest } from "@rental-os/rental-core/category-governance";
+import type { CategoryPreparationOperation } from "./category-preparation-client";
+import { useLocale } from "@rental-os/platform-admin/locale";
+import { QueryState } from "@rental-os/platform-admin/ui";
+import { ContentTransition } from "@rental-os/platform-admin/ui";
+import { UnsavedChangesGuard } from "@rental-os/platform-admin/forms";
 import { nextPreparationBatch, preparationEntityKey, preparationEntityValue } from "./categoryPreparationFields";
 import { capabilityPreparationPatches, initialCapabilityDrafts, preparationCapabilityDefinitions, type CapabilityPreparationDrafts } from "./categoryPreparationCapabilities";
 import { preparationErrorMessage, useCategoryPreparationSave } from "./useCategoryPreparationSave";
 import { useCategoryAdoption } from "./useCategoryAdoption";
 import { canAdoptPreparedCategory, readPendingCategoryAdoption } from "./categoryAdoptionPending";
 import { CategoryCompatibilityRelationsEditor } from "./CategoryCompatibilityRelationsEditor";
-import { currentSessionEpoch } from "@/app/queryClient";
-import { rentalCoreApi } from "@/api/rentalCore";
 
-const sessionKey = (state: ReturnType<typeof useAuthStore.getState>) => JSON.stringify([state.tenant?.tenantId ?? "", state.user?.id ?? "", state.currentWorkspaceId ?? ""]);
+const sessionKey = (state: RentalGovernancePageContext["session"]) => JSON.stringify([state.tenant?.tenantId ?? "", state.user?.id ?? "", state.currentWorkspaceId ?? ""]);
 interface EditBasis { versionId: string; sourceRevision: number; preparationRevision: number }
 interface SavedChanges { entityKeys?: string[]; capabilityCodes?: string[]; reset?: boolean }
 const preparationReadPolicy = { staleTime: 0, refetchOnWindowFocus: false, refetchInterval: false, meta: { liveRefresh: false } } as const;
 
 export function CategoryPreparationEntry() {
-  const canPrepare = useAuthStore((state) => state.hasPermission("rental-os:category:adopt"));
-  const workspaceId = useAuthStore((state) => state.currentWorkspaceId);
-  const scopeKey = useAuthStore(sessionKey);
-  const epoch = useAuthStore(() => currentSessionEpoch());
+  const { session, runtime, categoryGovernancePreviewEnabled: CATEGORY_GOVERNANCE_PREVIEW_ENABLED } = useRentalGovernanceContext();
+  const canPrepare = session.hasPermission("rental-os:category:adopt");
+  const workspaceId = session.currentWorkspaceId;
+  const scopeKey = sessionKey(session);
+  const epoch = runtime.currentSessionEpoch();
   let pending = false;
   try { pending = Boolean(readPendingCategoryAdoption(window.sessionStorage, scopeKey)); } catch { pending = true; }
   return workspaceId && (CATEGORY_GOVERNANCE_PREVIEW_ENABLED && canPrepare || pending)
@@ -38,6 +39,9 @@ export function CategoryPreparationEntry() {
 /** Tenant-owned staged editing. Pages retain unsaved patches by entity identity;
  * only a matching server receipt clears them. Adoption remains a separate action. */
 function CategoryPreparationDialog({ workspaceId, scopeKey, epoch, canPrepare }: { workspaceId: string; scopeKey: string; epoch: number; canPrepare: boolean }) {
+  const { api: rentalCoreApi, categoryPreparationApi, runtime, getSession, refreshSession,
+    scopeKey: pageScopeKey, categoryGovernancePreviewEnabled: CATEGORY_GOVERNANCE_PREVIEW_ENABLED } = useRentalGovernanceContext();
+
   const { t } = useLocale();
   const { message, modal } = App.useApp();
   const queryClient = useQueryClient();
@@ -61,10 +65,10 @@ function CategoryPreparationDialog({ workspaceId, scopeKey, epoch, canPrepare }:
   const [readBusy, setReadBusy] = useState(false);
   const [localError, setLocalError] = useState("");
   const inputPrefix = useId();
-  const isCurrent = () => sessionKey(useAuthStore.getState()) === scopeKey && currentSessionEpoch() === epoch && useAuthStore.getState().sessionVerified;
+  const isCurrent = () => sessionKey(getSession()) === scopeKey && runtime.currentSessionEpoch() === epoch && getSession().sessionVerified;
   async function refreshAfterAdoption(result: CategoryAdoptionResult) {
     if (!isCurrent()) throw new Error("会话或经营空间已变化，请重新进入");
-    await useAuthStore.getState().bootstrap();
+    await refreshSession();
     if (!isCurrent()) throw new Error("会话或经营空间已变化，请重新进入");
     const current = await rentalCoreApi.profile();
     if (!isCurrent() || current.categoryAdoptionRevision === undefined || current.categoryAdoptionRevision < result.adoptionRevision ||
@@ -78,9 +82,9 @@ function CategoryPreparationDialog({ workspaceId, scopeKey, epoch, canPrepare }:
   const batch = useCategoryPreparationSave(isCurrent);
   const locked = batch.phase !== "idle" || adoption.locked || readBusy;
   const dirty = Object.keys(edits).length > 0 || dirtyCapabilities.size > 0 || reasonDirty;
-  const candidates = useQuery({ ...preparationReadPolicy, queryKey: ["category-preparation", scopeKey, operation], queryFn: () => categoryPreparationApi.candidates(operation), enabled: open && canPrepare && !adoption.locked });
-  const preview = useQuery({ ...preparationReadPolicy, queryKey: ["category-preparation-metadata", scopeKey, operation, targetId], queryFn: ({ signal }) => categoryPreparationApi.preview(targetId!, operation, { metadataOnly: true, signal }), enabled: open && canPrepare && !adoption.locked && Boolean(targetId) });
-  const page = useQuery({ ...preparationReadPolicy, queryKey: ["category-preparation-entities", scopeKey, operation, targetId, scope, search, cursors.at(-1)], queryFn: ({ signal }) => categoryPreparationApi.entities(targetId!, { operation, entityType: scope, search: search || undefined, after: cursors.at(-1), limit: 20 }, signal), enabled: open && canPrepare && !adoption.locked && Boolean(targetId) && Boolean(preview.data) && tab !== "capabilities" });
+  const candidates = useQuery({ ...preparationReadPolicy, queryKey: ["category-preparation", scopeKey, operation, pageScopeKey], queryFn: () => categoryPreparationApi.candidates(operation), enabled: open && canPrepare && !adoption.locked });
+  const preview = useQuery({ ...preparationReadPolicy, queryKey: ["category-preparation-metadata", scopeKey, operation, targetId, pageScopeKey], queryFn: ({ signal }) => categoryPreparationApi.preview(targetId!, operation, { metadataOnly: true, signal }), enabled: open && canPrepare && !adoption.locked && Boolean(targetId) });
+  const page = useQuery({ ...preparationReadPolicy, queryKey: ["category-preparation-entities", scopeKey, operation, targetId, scope, search, cursors.at(-1), pageScopeKey], queryFn: ({ signal }) => categoryPreparationApi.entities(targetId!, { operation, entityType: scope, search: search || undefined, after: cursors.at(-1), limit: 20 }, signal), enabled: open && canPrepare && !adoption.locked && Boolean(targetId) && Boolean(preview.data) && tab !== "capabilities" });
   const rows = page.data?.rows ?? [];
   const entity = rows.find((row) => row.id === entityId) ?? rows[0];
   const entityKey = entity ? preparationEntityKey(scope, entity.id) : "";
@@ -105,13 +109,13 @@ function CategoryPreparationDialog({ workspaceId, scopeKey, epoch, canPrepare }:
     form.resetFields();
   }
   function guarded(action: () => void) {
-    if (batch.phase === "sending" || batch.phase === "unknown" || adoption.locked || readBusy) return;
+    if (batch.phase === "sending" || batch.phase === "unknown" || adoption.locked || readBusy || editor.busy) return;
     const proceed = () => { batch.clearSettled(); resetLocal(); action(); };
     if (dirty) modal.confirm({ title: t("放弃未保存的预备资料？"), onOk: proceed });
     else proceed();
   }
   function closeDialog() {
-    if (batch.phase === "sending" || batch.phase === "unknown" || adoption.locked || readBusy) return;
+    if (batch.phase === "sending" || batch.phase === "unknown" || adoption.locked || readBusy || editor.busy) return;
     if (dirty) modal.confirm({ title: t("放弃未保存的预备资料？"), onOk: () => setOpen(false) });
     else setOpen(false);
   }
@@ -167,9 +171,8 @@ function CategoryPreparationDialog({ workspaceId, scopeKey, epoch, canPrepare }:
       operation, reason: values.reason
     };
   }
-  async function save() {
+  async function save(values: { reason: string }) {
     try {
-      const values = await form.validateFields();
       if (!preview.data || locked || sourceChanged || revisionChanged || pageChanged || preview.data.stale) throw new Error("请先重新读取并核对准备资料");
       if (tab === "capabilities") {
         const selected = dirtyCapabilities.size ? capabilityPreparationPatches(preview.data, capabilityDrafts).filter((patch) => dirtyCapabilities.has(patch.code)) : [];
@@ -202,6 +205,11 @@ function CategoryPreparationDialog({ workspaceId, scopeKey, epoch, canPrepare }:
     message.success(t(operation === "restore" ? "旧版已明确恢复，历史资料已保留" : "目标品类版本已明确采用")); setOpen(false);
   }
   const hasChangesForTab = reasonDirty || (tab === "capabilities" ? dirtyCapabilities.size > 0 : pendingCount > 0);
+  const editor = useOrderEditor({ form,
+    identity: open ? JSON.stringify([pageScopeKey, operation, targetId]) : undefined,
+    onSave: save, disabled: inputLocked || !reason.trim() || !hasChangesForTab || sourceChanged || revisionChanged || pageChanged || Boolean(preview.data?.stale) });
+  const saveForm = useMemo(() => ({ ...form, validateFields: editor.validate }), [form, editor.key]);
+  const submissionBusy = locked || editor.busy;
   const footer = adoption.locked ? <Space wrap>
     <ActionButton label={adoption.phase === "adopted_unread" ? "刷新当前资料" : "核对采用结果"} intent="review" disabled={!canPrepare || adoption.phase === "sending"} onAction={async () => {
       await adoption.reconcile(); message.success(t("原采用结果已确认，当前资料已刷新")); setOpen(false);
@@ -212,7 +220,7 @@ function CategoryPreparationDialog({ workspaceId, scopeKey, epoch, canPrepare }:
       {batch.phase === "unknown" && <ActionButton label="重试原请求" intent="retry" variant="secondary" onAction={batch.retry} />}
     </> : <>
       <ActionButton label="重新读取并核对" intent="refresh" variant="secondary" disabled={locked} onAction={() => reread()} />
-      <SaveButton form={form} label="保存本批" onSave={save} pending={batch.phase === "sending"} disabled={inputLocked || !reason.trim() || !hasChangesForTab || sourceChanged || revisionChanged || pageChanged || preview.data.stale} />
+      <SaveButton form={saveForm} label="保存本批" onSave={editor.submit} pending={(batch.phase === "sending") || editor.busy} disabled={inputLocked || !reason.trim() || !hasChangesForTab || sourceChanged || revisionChanged || pageChanged || preview.data.stale} />
       <ConfirmAction label={t("重建准备")} prompt={t("清空本目标的预备资料和本地改动，按当前资料重新准备？")} disabled={locked || !reason.trim()} onConfirm={resetPreparation} />
       {preview.data.adoptionImplemented && <ConfirmAction label={t(operation === "restore" ? "恢复旧版" : "采用目标版本")}
         prompt={t("将本空间明确切换到 {version}，已保存的准备资料一并生效？", { version: preview.data.targetVersionLabel })}
@@ -221,10 +229,13 @@ function CategoryPreparationDialog({ workspaceId, scopeKey, epoch, canPrepare }:
   </Space> : null;
 
   return <>
-    <UnsavedChangesGuard dirty={open && dirty} busy={batch.phase === "sending" || batch.phase === "unknown" || adoption.locked || readBusy} />
+    <UnsavedChangesGuard dirty={open && dirty} busy={batch.phase === "sending" || batch.phase === "unknown" || adoption.locked || readBusy || editor.busy} />
     <Button onClick={() => setOpen(true)}>{t(adoption.locked ? "核对品类采用结果" : "准备品类版本资料")}</Button>
-    <Modal presentation="side" title={t("品类版本预备资料")} open={open} footer={footer} width={960} mask={{ closable: false }} onCancel={closeDialog} afterClose={() => { if (!adoption.locked && (batch.phase === "idle" || batch.phase === "saved_unread")) { batch.clearSettled(); resetLocal(); } }}>
-      <Form form={form} name={`category-preparation-${workspaceId}`} layout="vertical" aria-busy={locked} onValuesChange={() => setReasonDirty(true)} onFinish={() => { void save().catch(() => undefined); }}>
+    <Modal presentation="side" title={t("品类版本预备资料")} open={open} footer={footer} width={960} mask={{ closable: false }} onCancel={() => editor.dismiss(closeDialog)} afterClose={() => { if (!adoption.locked && (batch.phase === "idle" || batch.phase === "saved_unread")) { batch.clearSettled(); resetLocal(); } }} closable={!submissionBusy} keyboard={!submissionBusy} cancelButtonProps={{ disabled: submissionBusy }}>
+      <Form form={form} name={`category-preparation-${workspaceId}`} layout="vertical" aria-busy={submissionBusy}
+        {...editor.formProps} disabled={inputLocked || editor.busy} onValuesChange={(changedValues, values) => {
+          editor.formProps.onValuesChange?.(changedValues, values); setReasonDirty(true);
+        }}>
         <Space orientation="vertical" size={16} style={{ width: "100%" }}>
           <Alert type="info" showIcon title={t("保存准备不会改变当前营业版本；明确采用后，已保存的候选资料一并生效。")}/>
           {adoption.error && <Alert type={adoption.phase === "idle" ? "error" : "warning"} showIcon title={t(adoption.error)} />}
@@ -270,7 +281,7 @@ function CategoryPreparationDialog({ workspaceId, scopeKey, epoch, canPrepare }:
                         {field.type === "number" ? <InputNumber id={id} aria-label={label} disabled={inputLocked || !draft} min={field.min} max={field.max} value={typeof value === "number" ? value : null} onChange={(next) => changeConfig(field.key, next ?? undefined)} />
                           : field.type === "boolean" ? <Select id={id} aria-label={label} disabled={inputLocked || !draft} allowClear value={typeof value === "boolean" ? String(value) : undefined} options={[{ value: "true", label: t("是") }, { value: "false", label: t("否") }]} onChange={(next) => changeConfig(field.key, next === undefined ? undefined : next === "true")} />
                             : field.type === "enum" ? <Select id={id} aria-label={label} disabled={inputLocked || !draft} allowClear value={typeof value === "string" && value ? value : undefined} options={field.options?.map((option) => ({ value: option, label: t(option) }))} onChange={(next) => changeConfig(field.key, next)} />
-                              : field.type === "compatibility_relations" ? <CategoryCompatibilityRelationsEditor value={value} disabled={inputLocked || !draft} targetId={targetId!} operation={operation} scopeKey={scopeKey} preview={preview.data!} onChange={relations => changeConfig(field.key, relations)} />
+                              : field.type === "compatibility_relations" ? <CategoryCompatibilityRelationsEditor api={categoryPreparationApi} value={value} disabled={inputLocked || !draft} targetId={targetId!} operation={operation} scopeKey={scopeKey} preview={preview.data!} onChange={relations => changeConfig(field.key, relations)} />
                                 : <Input id={id} aria-label={label} disabled={inputLocked || !draft} value={typeof value === "string" ? value : ""} onChange={(event) => changeConfig(field.key, event.target.value)} />}
                         {field.description && <Typography.Text type="secondary">{t(field.description)}</Typography.Text>}
                       </Space>;

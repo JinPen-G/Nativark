@@ -1,34 +1,34 @@
-import { ActionButton, DataTableRowActions, Dropdown, FormSection, ListSection, SaveButton, Segmented } from "@/components/ui";
-import { RecordFacts } from "@/components/RecordDetailLayout";
+import { useMemo } from "react";
+import { useOrderEditor } from "../orders/useOrderEditor";
+import { resolveCorePageLocation } from "@rental-os/core-contracts";
+import { useCorePageHost } from "@rental-os/platform-admin/core";
+import { RENTAL_COMMERCIAL_CORE_ID, RENTAL_COMMERCIAL_PAGES } from "../commercial/pages";
+import { useRentalGovernanceContext } from "./page-context";
+import { ActionButton, DataTableRowActions, Dropdown, FormSection, ListSection, SaveButton, Segmented } from "@rental-os/platform-admin/ui";
+import { RecordFacts } from "@rental-os/platform-admin/ui";
 import { Ellipsis, FileText, Plus, RotateCcw, XCircle } from "lucide-react";
 import type {
   RentalCalendarDay,
   RentalCalendarVersionSummary,
   SaveRentalCalendarDayRequest,
-} from "@rental-os/shared";
+} from "@rental-os/rental-core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { InputNumber, Space, Tag, Typography } from "antd";
-import { App, Modal } from "@/components/ui";
-import { Form } from "@/components/ui";
-import { Alert, Table } from "@/components/ui";
-import { Switch } from "@/components/ui";
-import { Input } from "@/components/ui";
-import { Select } from "@/components/ui";
-import { Button, Drawer } from "@/components/ui";
+import { App, Modal } from "@rental-os/platform-admin/ui";
+import { Form } from "@rental-os/platform-admin/ui";
+import { Alert, Table } from "@rental-os/platform-admin/ui";
+import { Switch } from "@rental-os/platform-admin/ui";
+import { Input } from "@rental-os/platform-admin/ui";
+import { Select } from "@rental-os/platform-admin/ui";
+import { Button, Drawer } from "@rental-os/platform-admin/ui";
 import dayjs from "dayjs";
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { useAuthStore } from '@/features/auth/authStore';
-import { currentSessionEpoch } from '@/app/queryClient';
-import { CalendarSourceEntry } from '@/features/ai-native/CalendarSourceEntry';
-import { useCalendarDraftLocale } from '@/features/ai-native/CalendarDraftPreparation';
-import { rentalCoreApi } from "@/api/rentalCore";
-import { useLocale } from "@/app/locale";
-import { QueryState } from "@/components/QueryState";
-import { CalendarMonthGrid } from "@/features/settings/CalendarMonthGrid";
-import { CalendarYearGrid } from "@/features/settings/CalendarYearGrid";
-import { ContentTransition } from "@/components/workspace/ContentTransition";
-import { CalendarRangeModal } from "@/features/settings/CalendarRangeModal";
+import { useLocale } from "@rental-os/platform-admin/locale";
+import { QueryState } from "@rental-os/platform-admin/ui";
+import { CalendarMonthGrid } from "./CalendarMonthGrid";
+import { CalendarYearGrid } from "./CalendarYearGrid";
+import { ContentTransition } from "@rental-os/platform-admin/ui";
+import { CalendarRangeModal } from "./CalendarRangeModal";
 import { calendarDayTypeLabels } from "./ruleOptionLabels";
 import type { GovernancePermissions } from "./shared";
 import styles from "./GovernanceForms.module.css";
@@ -70,12 +70,14 @@ const previewFieldLabels: Record<string, string> = {
  * 以及逐日覆盖抽屉、范围覆盖抽屉与作废/恢复/移除覆盖三个原因弹窗。
  */
 export function CalendarTab({ permissions }: { permissions: GovernancePermissions }) {
+  const { api: rentalCoreApi, session: auth, runtime, scopeKey, components, calendarText } = useRentalGovernanceContext();
+
   const { message } = App.useApp();
   const { t, locale } = useLocale();
-  const { t: aiT } = useCalendarDraftLocale();
+  const aiT = calendarText ?? t;
+  const { CalendarSourceEntry } = components;
+  const host = useCorePageHost();
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
-  const auth = useAuthStore();
   const { canManagePrice, canEditCalendar, canPublishCalendar, canViewCalendarHistory, canSeeCalendar } = permissions;
   const [year, setYear] = useState(currentYear);
   // PRICE-02A（需求 4.5.9）：默认按自然月运营日历；全年列表仅作为可选视图保留。
@@ -103,37 +105,37 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
   const [restoreForm] = Form.useForm<{ reason: string }>();
 
   const calendar = useQuery({
-    queryKey: ["rental-core", "calendar", year],
+    queryKey: ["rental-core", "calendar", year, scopeKey],
     queryFn: () => rentalCoreApi.calendar(year),
     enabled: canSeeCalendar,
   });
-  const aiIdentity = JSON.stringify([auth.tenant?.tenantId, auth.currentWorkspaceId, auth.user, currentSessionEpoch(), year,
+  const aiIdentity = JSON.stringify([auth.tenant?.tenantId, auth.currentWorkspaceId, auth.user, runtime.currentSessionEpoch(), year,
     calendar.data?.version, calendar.data?.revision]);
   /** 版本历史只在抽屉打开时拉，且属管理视图。 */
   const calendarVersions = useQuery({
-    queryKey: ["rental-core", "calendar-versions", year],
+    queryKey: ["rental-core", "calendar-versions", year, scopeKey],
     queryFn: () => rentalCoreApi.calendarVersions(year),
     enabled: historyOpen && canViewCalendarHistory,
   });
   const calendarVersionDetail = useQuery({
-    queryKey: ["rental-core", "calendar-version", year, historyVersion],
+    queryKey: ["rental-core", "calendar-version", year, historyVersion, scopeKey],
     queryFn: () => rentalCoreApi.calendarVersion(year, historyVersion!),
     enabled: Boolean(historyOpen && historyVersion && canViewCalendarHistory),
   });
   const calendarAudits = useQuery({
-    queryKey: ["rental-core", "calendar-audits", year, historyVersion],
+    queryKey: ["rental-core", "calendar-audits", year, historyVersion, scopeKey],
     queryFn: () => rentalCoreApi.calendarOverrideAudits(year, historyVersion),
     enabled: historyOpen && canViewCalendarHistory,
   });
   /** 可引用的公共官方来源版本：只在「应用官方来源」抽屉打开时拉。 */
   const officialSourceVersions = useQuery({
-    queryKey: ["rental-core", "official-calendar-sources", year],
+    queryKey: ["rental-core", "official-calendar-sources", year, scopeKey],
     queryFn: () => rentalCoreApi.officialCalendarSourceVersions(year),
     enabled: importOpen && canEditCalendar,
   });
   /** 发布前影响预览：只在发布抽屉打开时拉一次（需求 4.5.8）。 */
   const publishPreview = useQuery({
-    queryKey: ["rental-core", "calendar-publish-preview", year],
+    queryKey: ["rental-core", "calendar-publish-preview", year, scopeKey],
     queryFn: () => rentalCoreApi.calendarPublishPreview(year),
     enabled: publishOpen && canPublishCalendar,
   });
@@ -263,6 +265,29 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
     onError: () => message.error(t("移除失败：该日期没有人工覆盖，或未填写调整原因")),
   });
 
+  const calendarDayEditor = useOrderEditor({ form: calendarDayForm,
+    identity: calendarDay ? JSON.stringify([scopeKey, year, calendarDay.date]) : undefined,
+    onSave: values => saveDay.mutateAsync({ ...values, hours: calendarDay?.hours }), disabled: !canEditCalendar || saveDay.isPending });
+  const calendarPublishEditor = useOrderEditor({ form: publishForm,
+    identity: publishOpen ? JSON.stringify([scopeKey, year, calendar.data?.version, calendar.data?.revision]) : undefined,
+    onSave: values => publishCalendar.mutateAsync(values.changeReason),
+    disabled: !canPublishCalendar || publishCalendar.isPending || publishPreview.isFetching || publishPreview.isError || !publishPreview.data });
+  const calendarVoidEditor = useOrderEditor({ form: voidForm,
+    identity: voidTarget ? JSON.stringify([scopeKey, year, voidTarget.version]) : undefined,
+    onSave: values => voidVersion.mutateAsync({ version: voidTarget!.version, reason: values.reason }), disabled: !canEditCalendar || voidVersion.isPending });
+  const calendarRestoreEditor = useOrderEditor({ form: restoreForm,
+    identity: restoreTarget ? JSON.stringify([scopeKey, year, restoreTarget.version]) : undefined,
+    onSave: values => restoreVersion.mutateAsync({ version: restoreTarget!.version, reason: values.reason }), disabled: !canEditCalendar || restoreVersion.isPending });
+  const calendarRevertEditor = useOrderEditor({ form: revertForm,
+    identity: revertTarget ? JSON.stringify([scopeKey, year, revertTarget.date]) : undefined,
+    onSave: values => removeDayOverride.mutateAsync({ date: revertTarget!.date, overrideReason: values.overrideReason }), disabled: !canEditCalendar || removeDayOverride.isPending });
+  const saveDayPending = saveDay.isPending || calendarDayEditor.busy;
+  const publishCalendarPending = publishCalendar.isPending || calendarPublishEditor.busy;
+  const voidVersionPending = voidVersion.isPending || calendarVoidEditor.busy;
+  const restoreVersionPending = restoreVersion.isPending || calendarRestoreEditor.busy;
+  const removeDayPending = removeDayOverride.isPending || calendarRevertEditor.busy;
+
+  const saveDayForm = useMemo(() => ({ ...calendarDayForm, validateFields: calendarDayEditor.validate }), [calendarDayForm, calendarDayEditor.key]);
   function openDay(row: RentalCalendarDay) {
     // source 由服务端固定为 tenant_override，不作为表单字段提交。
     // hours 也不进表单（结构化对象，无编辑器），提交时从 calendarDay 原样带回。
@@ -519,7 +544,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
 
       <Drawer title={aiT('准备日历提案')} open={!!aiEntry && aiEntry.identity === aiIdentity} destroyOnHidden
         onClose={() => { setAiEntry(undefined); void queryClient.invalidateQueries({ queryKey: ['rental-core', 'calendar', year] }); }}>
-        {aiEntry?.identity === aiIdentity && <CalendarSourceEntry key={`${aiEntry.identity}:${aiEntry.date}`} date={aiEntry.date} identity={aiIdentity}
+        {CalendarSourceEntry && aiEntry?.identity === aiIdentity && <CalendarSourceEntry key={`${aiEntry.identity}:${aiEntry.date}`} date={aiEntry.date} identity={aiIdentity}
           current={() => aiEntry.identity === aiIdentity && auth.hasPermission('rental-os:calendar:edit')}
           onAccessDenied={() => setAiEntry(undefined)}
           onComplete={() => { setAiEntry(undefined); void queryClient.invalidateQueries({ queryKey: ['rental-core', 'calendar', year] }); }} />}
@@ -529,32 +554,28 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
         title={`${t(canEditCalendar ? "覆盖营业日" : "营业日详情")} · ${calendarDay?.date ?? ""}`}
         width={640}
         open={Boolean(calendarDay)}
-        onCancel={() => setCalendarDay(undefined)}
-        closable={!saveDay.isPending}
-        keyboard={!saveDay.isPending}
-        maskClosable={!saveDay.isPending}
+        onCancel={() => calendarDayEditor.dismiss(() => setCalendarDay(undefined))}
+        closable={!saveDayPending}
+        keyboard={!saveDayPending}
+        mask={{ closable: !saveDayPending }}
         forceRender
         destroyOnHidden
-        footer={canEditCalendar ? <><Button disabled={saveDay.isPending} onClick={() => setCalendarDay(undefined)}>{t("取消")}</Button><SaveButton label={t("保存覆盖")} form={calendarDayForm} pending={saveDay.isPending} onSave={values => saveDay.mutateAsync({ ...values, hours: calendarDay?.hours })} /></> : null}
+        footer={canEditCalendar ? <><Button disabled={saveDayPending} onClick={() => setCalendarDay(undefined)}>{t("取消")}</Button><SaveButton label={t("保存覆盖")} form={saveDayForm} pending={(saveDayPending) || calendarDayEditor.busy} onSave={calendarDayEditor.submit} /></> : null}
       >
         {calendarDay && <RecordFacts items={[
           { key: "source", label: "来源", value: t(calendarSourceLabels[calendarDay.source]) },
           { key: "hours", label: "营业时段", value: calendarDay.hours?.windows?.map(window => `${window.start}–${window.end}`).join("、") || t("沿用每周模板") },
           ...(calendarDay.overriddenFrom ? [{ key: "original", label: "被覆盖的原始值", value: `${calendarDay.overriddenFrom.name} · ${t(calendarDayTypeLabels[calendarDay.overriddenFrom.dayType])} · ${t(businessStatusLabels[calendarDay.overriddenFrom.businessStatus ?? (calendarDay.overriddenFrom.closed ? "closed" : "open")])}`, wide: true }] : []),
         ]} />}
-        {calendarDay && auth.hasPermission('rental-os:calendar:edit') && <Button disabled={saveDay.isPending}
+        {calendarDay && CalendarSourceEntry && auth.hasPermission('rental-os:calendar:edit') && <Button disabled={saveDayPending}
           onClick={() => { setAiEntry({ date: calendarDay.date, identity: aiIdentity }); setCalendarDay(undefined); }}>
           {aiT('准备日历提案')}
         </Button>}
         <Form
           form={calendarDayForm}
           layout="vertical"
-          disabled={!canEditCalendar || saveDay.isPending}
-          onFinish={(values) =>
-            // 营业时段原样带回被编辑那一行的值：抽屉里没有时段编辑器，而 PUT 是整日覆盖，
-            // 不带回就会让一次改价把已配置的营业/领取/归还时段清空。
-            saveDay.mutate({ ...values, hours: calendarDay?.hours })
-          }
+          disabled={(!canEditCalendar || saveDayPending) || calendarDayEditor.busy}
+          {...calendarDayEditor.formProps}
         >
           {/* PRICE-02A：范围覆盖的来源信息（批次与日期时间边界），在日期详情里可见。 */}
           {calendarDay?.overrideScope && (
@@ -579,7 +600,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
             <ListSection
               title={t("当日分时价格摘要")}
               style={{ marginBottom: 16 }}
-              extra={canManagePrice ? <Button type="link" onClick={() => navigate("/rental/pricing")}>{t("进入价格版本与调价")}</Button> : undefined}
+              extra={canManagePrice ? <Button type="link" onClick={() => host.navigate(resolveCorePageLocation(host.pages, { coreId: RENTAL_COMMERCIAL_CORE_ID, pageId: RENTAL_COMMERCIAL_PAGES.pricing.id }))}>{t("进入价格版本与调价")}</Button> : undefined}
             >
               <Space orientation="vertical" size={4}>
                 {(calendar.data?.timePriceSummary ?? []).find((row) => row.date === calendarDay.date)!.entries.map((entry, index) => (
@@ -654,7 +675,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
         onCancel={() => setImportOpen(false)}
         closable={!applyOfficialSource.isPending}
         keyboard={!applyOfficialSource.isPending}
-        maskClosable={!applyOfficialSource.isPending}
+        mask={{ closable: !applyOfficialSource.isPending }}
         footer={null}
         destroyOnHidden
       >
@@ -697,13 +718,13 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
       <Modal presentation="side"
         title={t("发布年度营业日历")}
         open={publishOpen}
-        onCancel={() => setPublishOpen(false)}
-        onConfirm={() => publishForm.validateFields().then((values) => publishCalendar.mutateAsync(values.changeReason))}
-        confirmLoading={publishCalendar.isPending}
-        closable={!publishCalendar.isPending}
-        keyboard={!publishCalendar.isPending}
-        maskClosable={!publishCalendar.isPending}
-        cancelButtonProps={{ disabled: publishCalendar.isPending }}
+        onCancel={() => calendarPublishEditor.dismiss(() => setPublishOpen(false))}
+        onConfirm={calendarPublishEditor.confirm}
+        confirmLoading={publishCalendarPending}
+        closable={!publishCalendarPending}
+        keyboard={!publishCalendarPending}
+        mask={{ closable: !publishCalendarPending }}
+        cancelButtonProps={{ disabled: publishCalendarPending }}
         okButtonProps={{ disabled: publishPreview.isLoading || publishPreview.isError || !publishPreview.data }}
         okText={t("发布")}
         width={760}
@@ -713,7 +734,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
         <Form
           form={publishForm}
           layout="vertical"
-          onFinish={(values) => publishCalendar.mutate(values.changeReason)}
+          {...calendarPublishEditor.formProps} disabled={calendarPublishEditor.busy}
         >
           <Alert
             type="info"
@@ -973,20 +994,18 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
       <Modal
         title={voidTarget ? `${t("作废草稿")} v${voidTarget.version}` : t("作废草稿")}
         open={Boolean(voidTarget)}
-        onCancel={() => setVoidTarget(undefined)}
-        onConfirm={() => voidForm.validateFields().then(async values => { const operation = voidTarget && voidVersion.mutateAsync({ version: voidTarget.version, reason: values.reason }); if (!operation) throw new Error("Operation unavailable"); return operation; })}
-        confirmLoading={voidVersion.isPending}
+        onCancel={() => calendarVoidEditor.dismiss(() => setVoidTarget(undefined))}
+        onConfirm={calendarVoidEditor.confirm}
+        confirmLoading={voidVersionPending}
         okText={t("确认作废")}
         okButtonProps={{ danger: true }}
         forceRender
-        destroyOnHidden
+        destroyOnHidden closable={!voidVersionPending} keyboard={!voidVersionPending} mask={{ closable: !voidVersionPending }} cancelButtonProps={{ disabled: voidVersionPending }}
       >
         <Form
           form={voidForm}
           layout="vertical"
-          onFinish={(values) =>
-            voidTarget && voidVersion.mutate({ version: voidTarget.version, reason: values.reason })
-          }
+          {...calendarVoidEditor.formProps} disabled={calendarVoidEditor.busy}
         >
           <Alert
             type="warning"
@@ -1007,19 +1026,17 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
       <Modal
         title={restoreTarget ? `${t("以 v")} ${restoreTarget.version} ${t("的内容建新草稿")}` : t("恢复历史版本")}
         open={Boolean(restoreTarget)}
-        onCancel={() => setRestoreTarget(undefined)}
-        onConfirm={() => restoreForm.validateFields().then(async values => { const operation = restoreTarget && restoreVersion.mutateAsync({ version: restoreTarget.version, reason: values.reason }); if (!operation) throw new Error("Operation unavailable"); return operation; })}
-        confirmLoading={restoreVersion.isPending}
+        onCancel={() => calendarRestoreEditor.dismiss(() => setRestoreTarget(undefined))}
+        onConfirm={calendarRestoreEditor.confirm}
+        confirmLoading={restoreVersionPending}
         okText={t("生成新草稿")}
         forceRender
-        destroyOnHidden
+        destroyOnHidden closable={!restoreVersionPending} keyboard={!restoreVersionPending} mask={{ closable: !restoreVersionPending }} cancelButtonProps={{ disabled: restoreVersionPending }}
       >
         <Form
           form={restoreForm}
           layout="vertical"
-          onFinish={(values) =>
-            restoreTarget && restoreVersion.mutate({ version: restoreTarget.version, reason: values.reason })
-          }
+          {...calendarRestoreEditor.formProps} disabled={calendarRestoreEditor.busy}
         >
           <Alert
             type="info"
@@ -1040,28 +1057,18 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
       <Modal
         title={`${t("移除")} ${revertTarget?.date ?? ""} ${t("的人工覆盖")}`}
         open={Boolean(revertTarget)}
-        onCancel={() => setRevertTarget(undefined)}
-        onConfirm={() => revertForm.validateFields().then(async values => { const operation = revertTarget &&
-            removeDayOverride.mutateAsync({
-              date: revertTarget.date,
-              overrideReason: values.overrideReason,
-            }); if (!operation) throw new Error("Operation unavailable"); return operation; })}
-        confirmLoading={removeDayOverride.isPending}
+        onCancel={() => calendarRevertEditor.dismiss(() => setRevertTarget(undefined))}
+        onConfirm={calendarRevertEditor.confirm}
+        confirmLoading={removeDayPending}
         okText={t("移除覆盖")}
         okButtonProps={{ danger: true }}
         forceRender
-        destroyOnHidden
+        destroyOnHidden closable={!removeDayPending} keyboard={!removeDayPending} mask={{ closable: !removeDayPending }} cancelButtonProps={{ disabled: removeDayPending }}
       >
         <Form
           form={revertForm}
           layout="vertical"
-          onFinish={(values) =>
-            revertTarget &&
-            removeDayOverride.mutate({
-              date: revertTarget.date,
-              overrideReason: values.overrideReason,
-            })
-          }
+          {...calendarRevertEditor.formProps} disabled={calendarRevertEditor.busy}
         >
           <Alert
             type="warning"

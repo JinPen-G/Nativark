@@ -1,24 +1,22 @@
-import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
-import type { RentalCategoryDefinition, RentalRuleVersion } from "@rental-os/shared";
+import { useMemo } from "react";
+import { useOrderEditor } from "../orders/useOrderEditor";
+import { useRentalGovernanceContext } from "./page-context";
+import { SettingsWorkspace } from "@rental-os/platform-admin/shell";
+import type { RentalCategoryDefinition, RentalRuleVersion } from "@rental-os/rental-core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, Descriptions, Space, Tag, Typography } from "antd";
-import { ListSection, App, Modal } from "@/components/ui";
-import { Form, FormSection } from "@/components/ui";
-import { Alert, DatePicker, Table } from "@/components/ui";
-import { Input } from "@/components/ui";
-import { Button, DataTableRowActions, SaveButton, type DataTableRowAction } from "@/components/ui";
+import { ListSection, App, Modal } from "@rental-os/platform-admin/ui";
+import { Form, FormSection } from "@rental-os/platform-admin/ui";
+import { Alert, DatePicker, Table } from "@rental-os/platform-admin/ui";
+import { Input } from "@rental-os/platform-admin/ui";
+import { Button, DataTableRowActions, SaveButton, type DataTableRowAction } from "@rental-os/platform-admin/ui";
 import { Ban, FileText, History, Pencil, Upload } from "lucide-react";
 import dayjs from "dayjs";
 import { useState } from "react";
-import { rentalCoreApi } from "@/api/rentalCore";
-import { useLocale } from "@/app/locale";
-import { useAuthStore } from '@/features/auth/authStore';
-import { currentSessionEpoch } from '@/app/queryClient';
-import { RuleSourceEntry, useRuleSourceLocale } from '@/features/ai-native/RuleSourceEntry';
-import { QueryState } from "@/components/QueryState";
-import { useModalDismissal } from "@/components/ui/useModalDismissal";
+import { useLocale } from "@rental-os/platform-admin/locale";
+import { QueryState } from "@rental-os/platform-admin/ui";
+import { useModalDismissal } from "@rental-os/platform-admin/ui";
 import { RuleSetupWizard } from "./RuleSetupWizard";
-import { CopilotSection } from "@/features/copilot/CopilotSection";
 import { overdueFeeModeLabels, paymentTimingLabels } from "./ruleOptionLabels";
 import { RULE_SECTIONS, formToConfig, seedFormFromRule, type RuleForm } from "./ruleSections";
 import {
@@ -57,15 +55,17 @@ const ruleAuditActionLabels: Record<string, string> = {
  * 规则版本只追加不改写（需求 4.6.1）；编辑草稿与发布分权（需求 4.6.14）。
  */
 export function RulesTab({ permissions, category }: { permissions: GovernancePermissions; category: RentalCategoryDefinition }) {
+  const { api: rentalCoreApi, session: auth, runtime, scopeKey, components, ruleText } = useRentalGovernanceContext();
+
   const { message } = App.useApp();
   const { t } = useLocale();
-  const { t: aiT } = useRuleSourceLocale();
-  const auth = useAuthStore();
+  const aiT = ruleText ?? t;
+  const { CopilotSection, RuleSourceEntry } = components;
   const queryClient = useQueryClient();
   const { canEditRules, canPublishRules, canSeeRules } = permissions;
   const [ruleEditor, setRuleEditor] = useState<RentalRuleVersion>();
   const [aiEntry, setAiEntry] = useState<{ id: string; version: string; identity: string }>();
-  const aiIdentity = JSON.stringify([auth.tenant?.tenantId, auth.currentWorkspaceId, auth.user, currentSessionEpoch()]);
+  const aiIdentity = JSON.stringify([auth.tenant?.tenantId, auth.currentWorkspaceId, auth.user, runtime.currentSessionEpoch()]);
   /** 「新建规则向导」抽屉：首次开业、无版本可编辑时的分步引导入口。 */
   const [wizardOpen, setWizardOpen] = useState(false);
   /** 待发布的草稿。发布原因必填、生效时点可选，因此走独立弹窗并带影响预览。 */
@@ -88,13 +88,13 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
 
   // 每个查询都按权限 gate：没有规则权限的角色不该无条件发请求收一堆 403。
   const rules = useQuery({
-    queryKey: ["rental-core", "rule-versions"],
+    queryKey: ["rental-core", "rule-versions", scopeKey],
     queryFn: rentalCoreApi.ruleVersions,
     enabled: canSeeRules,
   });
   /** 规则版本审计（需求 4.6.14）：发布、恢复、作废的原因与操作者。 */
   const ruleAudits = useQuery({
-    queryKey: ["rental-core", "rule-version-audits"],
+    queryKey: ["rental-core", "rule-version-audits", scopeKey],
     queryFn: () => rentalCoreApi.ruleVersionAudits(),
     enabled: canSeeRules,
   });
@@ -105,7 +105,7 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
       "rule-publish-preview",
       rulePublishTarget?.version,
       rulePublishEffectiveFrom,
-    ],
+      scopeKey],
     queryFn: () =>
       rentalCoreApi.ruleVersionPublishPreview(
         rulePublishTarget!.version,
@@ -171,6 +171,25 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
     onError: (error) => message.error(errorText(error, t("作废失败"))),
   });
 
+  const ruleEditorForm = useOrderEditor({ form: ruleForm,
+    identity: editorDialog.visible && ruleEditor ? JSON.stringify([scopeKey, ruleEditor.id, ruleEditor.version]) : undefined,
+    onSave: values => saveRule.mutateAsync(values), disabled: !canEditRules || saveRule.isPending });
+  const rulePublishEditor = useOrderEditor({ form: rulePublishForm,
+    identity: publishDialog.visible && rulePublishTarget ? JSON.stringify([scopeKey, rulePublishTarget.version, rulePublishEffectiveFrom]) : undefined,
+    onSave: values => publishRule.mutateAsync(values),
+    disabled: !canPublishRules || publishRule.isPending || rulePublishPreview.isFetching || rulePublishPreview.isError || !rulePublishPreview.data });
+  const ruleRestoreEditor = useOrderEditor({ form: ruleRestoreForm,
+    identity: restoreDialog.visible && ruleRestoreTarget ? JSON.stringify([scopeKey, ruleRestoreTarget.version]) : undefined,
+    onSave: values => restoreRule.mutateAsync(values), disabled: !canEditRules || restoreRule.isPending });
+  const ruleVoidEditor = useOrderEditor({ form: ruleVoidForm,
+    identity: voidDialog.visible && ruleVoidTarget ? JSON.stringify([scopeKey, ruleVoidTarget.version]) : undefined,
+    onSave: values => voidRule.mutateAsync(values), disabled: !canPublishRules || voidRule.isPending });
+  const saveRulePending = saveRule.isPending || ruleEditorForm.busy;
+  const publishRulePending = publishRule.isPending || rulePublishEditor.busy;
+  const restoreRulePending = restoreRule.isPending || ruleRestoreEditor.busy;
+  const voidRulePending = voidRule.isPending || ruleVoidEditor.busy;
+
+  const saveRuleForm = useMemo(() => ({ ...ruleForm, validateFields: ruleEditorForm.validate }), [ruleForm, ruleEditorForm.key]);
   /**
    * 打开规则编辑器。优先继续已有草稿；没有草稿时以现有版本为基础另存草稿。
    * 已发布版本不能原地编辑（需求 4.6.1），保存时不会传入它的 versionId。
@@ -345,7 +364,7 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
                     ...(row.status === "draft" && canEditRules ? [{ id: "edit", label: t("编辑"), icon: Pencil, onSelect: () => openRule(row) }] : []),
                     ...(row.status === "draft" && canPublishRules ? [{ id: "publish", label: t("发布"), icon: Upload, onSelect: () => openRulePublish(row) }] : []),
                     ...(row.status !== "draft" && canEditRules ? [{ id: "restore", label: t("恢复为草稿"), icon: History, onSelect: () => { ruleRestoreForm.resetFields(); setRuleRestoreTarget(row); } }] : []),
-                    ...(auth.hasPermission('rental-os:rules:manage') ? [{ id: 'ai-rule', label: aiT('准备规则提案'), icon: FileText,
+                    ...(RuleSourceEntry && auth.hasPermission('rental-os:rules:manage') ? [{ id: 'ai-rule', label: aiT('准备规则提案'), icon: FileText,
                       onSelect: () => setAiEntry({ id: row.id, version: row.version, identity: aiIdentity }) }] : []),
                     ...((row.status === "pending" || row.status === "published") && canPublishRules ? [{ id: "void", label: t("作废"), icon: Ban, danger: true, onSelect: () => { ruleVoidForm.resetFields(); setRuleVoidTarget(row); } }] : []),
                   ].map(action => ({ ...action, disabled: readBlocked }));
@@ -392,7 +411,7 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
 
       <Modal presentation="side" title={aiT('准备规则提案')} open={!!aiEntry && aiEntry.identity === aiIdentity} destroyOnHidden footer={null}
         onCancel={() => { setAiEntry(undefined); void queryClient.invalidateQueries({ queryKey: ['rental-core', 'rule-versions'] }); }}>
-        {aiEntry?.identity === aiIdentity && <RuleSourceEntry key={`${aiIdentity}:${aiEntry.id}`} targetId={aiEntry.id} version={aiEntry.version}
+        {RuleSourceEntry && aiEntry?.identity === aiIdentity && <RuleSourceEntry key={`${aiIdentity}:${aiEntry.id}`} targetId={aiEntry.id} version={aiEntry.version}
           identity={JSON.stringify([aiIdentity, aiEntry.id, aiEntry.version])}
           current={() => aiEntry.identity === aiIdentity && auth.hasPermission('rental-os:rules:manage')}
           onAccessDenied={() => setAiEntry(undefined)} />}
@@ -407,23 +426,23 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
         }
         width={760}
         open={editorDialog.visible}
-        onCancel={editorDialog.dismiss}
+        onCancel={() => ruleEditorForm.dismiss(editorDialog.dismiss)}
         afterClose={editorDialog.afterClose}
-        closable={!saveRule.isPending}
-        keyboard={!saveRule.isPending}
-        maskClosable={!saveRule.isPending}
+        closable={!saveRulePending}
+        keyboard={!saveRulePending}
+        mask={{ closable: !saveRulePending }}
         forceRender
         destroyOnHidden
         footer={
-          <><Button disabled={saveRule.isPending} onClick={editorDialog.dismiss}>{t("取消")}</Button><SaveButton label={t("保存草稿")} form={ruleForm} pending={saveRule.isPending} onSave={(values) => saveRule.mutateAsync(values)} /></>
+          <><Button disabled={saveRulePending} onClick={editorDialog.dismiss}>{t("取消")}</Button><SaveButton label={t("保存草稿")} form={saveRuleForm} pending={(saveRulePending) || ruleEditorForm.busy} onSave={ruleEditorForm.submit} /></>
         }
       >
         <Form
           form={ruleForm}
           className={styles.ruleFields}
           layout="vertical"
-          disabled={saveRule.isPending}
-          onFinish={(values) => saveRule.mutate(values)}
+          disabled={(saveRulePending) || ruleEditorForm.busy}
+          {...ruleEditorForm.formProps}
         >
           <SettingsWorkspace sections={RULE_SECTIONS.map(section => ({key:section.key,label:t(section.title),content:<FormSection title={t(section.title)} description={t(section.description)}>{section.render({form:ruleForm,category,t})}</FormSection>}))}/>
           <Form.Item
@@ -449,12 +468,12 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
       <Modal
         title={`${t("发布规则版本")} v${rulePublishTarget?.version ?? ""}`}
         open={publishDialog.visible}
-        onConfirm={() => rulePublishForm.validateFields().then((values) => publishRule.mutateAsync(values))}
-        confirmLoading={publishRule.isPending}
-        onCancel={publishDialog.dismiss}
+        onConfirm={rulePublishEditor.confirm}
+        confirmLoading={publishRulePending}
+        onCancel={() => rulePublishEditor.dismiss(publishDialog.dismiss)}
         afterClose={publishDialog.afterClose}
-        closable={!publishRule.isPending} keyboard={!publishRule.isPending} maskClosable={!publishRule.isPending}
-        cancelButtonProps={{ disabled: publishRule.isPending }}
+        closable={!publishRulePending} keyboard={!publishRulePending} mask={{ closable: !publishRulePending }}
+        cancelButtonProps={{ disabled: publishRulePending }}
         okButtonProps={{ disabled: rulePublishPreview.isFetching || rulePublishPreview.isError || !rulePublishPreview.data }}
         okText={t("确认发布")}
         forceRender
@@ -464,8 +483,8 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
         <Form
           form={rulePublishForm}
           layout="vertical"
-          disabled={publishRule.isPending}
-          onFinish={(values) => publishRule.mutate(values)}
+          disabled={(publishRulePending) || rulePublishEditor.busy}
+          {...rulePublishEditor.formProps}
         >
           <Form.Item
             name="effectiveFrom"
@@ -526,12 +545,12 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
       <Modal
         title={`${t("恢复规则版本")} v${ruleRestoreTarget?.version ?? ""}`}
         open={restoreDialog.visible}
-        onConfirm={() => ruleRestoreForm.validateFields().then((values) => restoreRule.mutateAsync(values))}
-        confirmLoading={restoreRule.isPending}
-        onCancel={restoreDialog.dismiss}
+        onConfirm={ruleRestoreEditor.confirm}
+        confirmLoading={restoreRulePending}
+        onCancel={() => ruleRestoreEditor.dismiss(restoreDialog.dismiss)}
         afterClose={restoreDialog.afterClose}
-        closable={!restoreRule.isPending} keyboard={!restoreRule.isPending} maskClosable={!restoreRule.isPending}
-        cancelButtonProps={{ disabled: restoreRule.isPending }}
+        closable={!restoreRulePending} keyboard={!restoreRulePending} mask={{ closable: !restoreRulePending }}
+        cancelButtonProps={{ disabled: restoreRulePending }}
         okText={t("生成新草稿")}
         forceRender
         destroyOnHidden
@@ -546,8 +565,8 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
         <Form
           form={ruleRestoreForm}
           layout="vertical"
-          disabled={restoreRule.isPending}
-          onFinish={(values) => restoreRule.mutate(values)}
+          disabled={(restoreRulePending) || ruleRestoreEditor.busy}
+          {...ruleRestoreEditor.formProps}
         >
           <Form.Item
             name="reason"
@@ -561,12 +580,12 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
       <Modal
         title={`${t("作废规则版本")} v${ruleVoidTarget?.version ?? ""}`}
         open={voidDialog.visible}
-        onConfirm={() => ruleVoidForm.validateFields().then((values) => voidRule.mutateAsync(values))}
-        confirmLoading={voidRule.isPending}
-        onCancel={voidDialog.dismiss}
+        onConfirm={ruleVoidEditor.confirm}
+        confirmLoading={voidRulePending}
+        onCancel={() => ruleVoidEditor.dismiss(voidDialog.dismiss)}
         afterClose={voidDialog.afterClose}
-        closable={!voidRule.isPending} keyboard={!voidRule.isPending} maskClosable={!voidRule.isPending}
-        cancelButtonProps={{ disabled: voidRule.isPending }}
+        closable={!voidRulePending} keyboard={!voidRulePending} mask={{ closable: !voidRulePending }}
+        cancelButtonProps={{ disabled: voidRulePending }}
         okText={t("确认作废")}
         okButtonProps={{ danger: true }}
         forceRender
@@ -579,7 +598,7 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
           title={t("作废后该版本不再参与任何租期的规则匹配")}
           description={t("若它是当前唯一生效版本，作废后落在该时段的报价会直接失败而不是回落到旧规则；请先发布替代版本。已锁定的报价与订单按各自快照结算，不受影响。")}
         />
-        <Form form={ruleVoidForm} layout="vertical" disabled={voidRule.isPending} onFinish={(values) => voidRule.mutate(values)}>
+        <Form form={ruleVoidForm} layout="vertical" disabled={(voidRulePending) || ruleVoidEditor.busy} {...ruleVoidEditor.formProps}>
           <Form.Item
             name="reason"
             label={t("作废原因")}

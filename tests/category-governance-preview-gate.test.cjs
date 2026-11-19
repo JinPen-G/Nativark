@@ -26,7 +26,7 @@ try {
     assert.match(routes, new RegExp(`CATEGORY_GOVERNANCE_PREVIEW_ENABLED && <Route path=\\{APP_ROUTES\\.${key}`));
     assert.match(read("apps/admin/src/app/navigation.tsx"), new RegExp(`${key}: \\{[^\\n]+menu: CATEGORY_GOVERNANCE_PREVIEW_ENABLED`));
   }
-  assert.match(read("apps/admin/src/features/settings/governance/CategoryPreparationDialog.tsx"), /return CATEGORY_GOVERNANCE_PREVIEW_ENABLED && workspaceId && hasPermission/);
+  assert.match(read("packages/rental-core/admin/governance/CategoryPreparationDialog.tsx"), /return CATEGORY_GOVERNANCE_PREVIEW_ENABLED && workspaceId && hasPermission/);
   console.log("PASS preview gate: default closed, production closed, explicit nonproduction only; controller/menu/route/preparation gates retained");
 } finally {
   for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
