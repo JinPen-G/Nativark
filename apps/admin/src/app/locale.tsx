@@ -4,6 +4,8 @@ import type { ReactNode } from 'react';
 import { rentalGovernanceMessages } from '@rental-os/rental-core/admin/governance/messages';
 import { rentalMembershipMessages } from '@rental-os/rental-core/admin/membership/messages';
 import { rentalOperationsMessages } from '@rental-os/rental-core/admin/operations/messages';
+import { rentalChannelsMessages } from '@rental-os/rental-core/admin/channels/messages';
+import { rentalSetupMessages } from '@rental-os/rental-core/admin/setup/messages';
 const ENGLISH = {
   "请选择至少一个经营空间": "Select at least one workspace",
   "邀请正在处理中": "Invitations are being processed",
@@ -3975,7 +3977,7 @@ const ENGLISH = {
   "第一行是默认计价单位。": "The first row sets the default billing unit.",
   "已预占或维修隔离的库存不可直接扣减。": "Reserved or quarantined stock cannot be deducted directly.",
 };
-const MESSAGES = { ...ENGLISH, ...rentalGovernanceMessages, ...rentalMembershipMessages, ...rentalOperationsMessages };
+const MESSAGES = { ...ENGLISH, ...rentalGovernanceMessages, ...rentalMembershipMessages, ...rentalOperationsMessages, ...rentalChannelsMessages, ...rentalSetupMessages };
 export { useLocale } from '@rental-os/platform-admin/locale';
 export type { AdminLocale, AdminTranslate } from '@rental-os/platform-admin/locale';
 export type AdminMessageValues = import('@rental-os/platform-admin/locale').AdminMessageValues;

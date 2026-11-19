@@ -1,4 +1,4 @@
-/** 同一Rental Core只登记一份页面贡献；商品、资产、订单、养护、能力、地点、商业、治理、会员与经营页面复用单源上下文。
+/** 同一Rental Core只登记一份页面贡献；业务、渠道与开业页面复用各自单源上下文。
  * 此入口不创建认证客户端或授予权限，宿主仍须经过标准注册和服务端授权。 */
 import type { CoreAdminContribution } from "@rental-os/core-contracts";
 import type { CoreRouteComponent } from "@rental-os/platform-admin/core";
@@ -11,6 +11,8 @@ import { createRentalCommercialAdminContribution, type RentalCommercialPageConte
 import { createRentalGovernanceAdminContribution, type RentalGovernancePageContext } from "./governance";
 import { createRentalMembershipAdminContribution, type RentalMembershipPageContext } from "./membership";
 import { createRentalOperationsAdminContribution, type RentalOperationsPageContext } from "./operations";
+import { createRentalChannelsAdminContribution, type RentalChannelsPageContext } from "./channels";
+import { createRentalSetupAdminContribution, type RentalSetupPageContext } from "./setup";
 
 export interface RentalAdminContexts {
   useOrderContext: () => RentalOrderPageContext;
@@ -22,6 +24,8 @@ export interface RentalAdminContexts {
   useGovernanceContext: () => RentalGovernancePageContext;
   useMembershipContext: () => RentalMembershipPageContext;
   useOperationsContext: () => RentalOperationsPageContext;
+  useChannelsContext: () => RentalChannelsPageContext;
+  useSetupContext: () => RentalSetupPageContext;
 }
 
 export function createRentalAdminContribution(implementationVersion: string,
@@ -35,6 +39,8 @@ export function createRentalAdminContribution(implementationVersion: string,
   const governance = createRentalGovernanceAdminContribution(implementationVersion, contexts.useGovernanceContext);
   const membership = createRentalMembershipAdminContribution(implementationVersion, contexts.useMembershipContext);
   const operations = createRentalOperationsAdminContribution(implementationVersion, contexts.useOperationsContext);
+  const channels = createRentalChannelsAdminContribution(implementationVersion, contexts.useChannelsContext);
+  const setup = createRentalSetupAdminContribution(implementationVersion, contexts.useSetupContext);
   return { coreId: orders.coreId, implementationVersion,
-    pages: [...catalog.pages, ...orders.pages, ...workOrders.pages, ...capabilities.pages, ...locations.pages, ...commercial.pages, ...governance.pages, ...membership.pages, ...operations.pages] };
+    pages: [...catalog.pages, ...orders.pages, ...workOrders.pages, ...capabilities.pages, ...locations.pages, ...commercial.pages, ...governance.pages, ...membership.pages, ...operations.pages, ...channels.pages, ...setup.pages] };
 }

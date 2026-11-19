@@ -7,6 +7,8 @@ import { RENTAL_COMMERCIAL_PAGES, RENTAL_COMMERCIAL_LEGACY_PERMISSION } from "@r
 import { RENTAL_GOVERNANCE_PAGES, RENTAL_GOVERNANCE_LEGACY_PERMISSIONS } from "@rental-os/rental-core/admin/governance/pages";
 import { RENTAL_MEMBERSHIP_PAGES, RENTAL_MEMBERSHIP_LEGACY_PAGE_ACCESS } from "@rental-os/rental-core/admin/membership/pages";
 import { RENTAL_OPERATIONS_PAGES, RENTAL_OPERATIONS_LEGACY_PAGE_ACCESS } from "@rental-os/rental-core/admin/operations/pages";
+import { RENTAL_CHANNELS_PAGES, RENTAL_CHANNELS_LEGACY_PERMISSION } from "@rental-os/rental-core/admin/channels/pages";
+import { RENTAL_SETUP_PAGES, RENTAL_SETUP_LEGACY_PERMISSIONS } from "@rental-os/rental-core/admin/setup/pages";
 import { SUBSCRIPTION_ROUTES } from "@rental-os/platform-admin/subscription/subscriptionRoutes";
 import { ApartmentOutlined, ApiOutlined, AppstoreOutlined, BgColorsOutlined, BoxPlotOutlined, CalendarOutlined, ControlOutlined, CrownOutlined, CustomerServiceOutlined, DashboardOutlined, FileSearchOutlined, FileTextOutlined, FormOutlined, FundOutlined, GiftOutlined, IdcardOutlined, MobileOutlined, SafetyCertificateOutlined, SendOutlined, SettingOutlined, ShopOutlined, TagsOutlined, TeamOutlined, ToolOutlined } from "@/components/ui/icons";
 import { RentalCategoryCode, type RentalCapability, type RentalCategoryTerminology } from "@rental-os/shared";
@@ -82,13 +84,13 @@ export const APP_ROUTES = {
   // 证件类型是当前经营空间的业务配置，与租户级会员资料维护是两种责任；
   // 单独一个权限码，旧的会员管理权限只作过渡期兼容，新授权应使用新码。
   qualificationTypes: { path: `/rental${RENTAL_MEMBERSHIP_PAGES.qualificationTypes.path}`, label: RENTAL_MEMBERSHIP_PAGES.qualificationTypes.title.default, permission: RENTAL_MEMBERSHIP_LEGACY_PAGE_ACCESS["qualification-types"].permissions[0], legacyPermissions: RENTAL_MEMBERSHIP_LEGACY_PAGE_ACCESS["qualification-types"].permissions.slice(1), audience: "tenant", icon: <SafetyCertificateOutlined />, menu: Boolean(RENTAL_MEMBERSHIP_PAGES.qualificationTypes.menu) },
-  tenantReadiness: { path: "/tenant/readiness", label: "开业配置", permission: "rental-os:order:view", legacyPermissions: ["rental-os:price:manage", "system:user:manage", "system:role:manage"], audience: "tenant", icon: <DashboardOutlined />, menu: true },
+  tenantReadiness: { path: `/tenant${RENTAL_SETUP_PAGES.tenantReadiness.path}`, label: RENTAL_SETUP_PAGES.tenantReadiness.title.default, permission: RENTAL_SETUP_LEGACY_PERMISSIONS[0], legacyPermissions: RENTAL_SETUP_LEGACY_PERMISSIONS.slice(1), audience: "tenant", icon: <DashboardOutlined />, menu: Boolean(RENTAL_SETUP_PAGES.tenantReadiness.menu) },
   tenantAccounts: { path: "/tenant/accounts", label: "运营账号", permission: "system:user:manage", audience: "tenant", icon: <TeamOutlined />, menu: true },
   tenantRoles: { path: "/tenant/roles", label: "角色权限", permission: "system:role:manage", audience: "tenant", icon: <SafetyCertificateOutlined />, menu: true },
   tenantIntegrations: { path: "/tenant/integrations", label: "第三方服务", permission: "system:integration:manage", audience: "tenant", icon: <ApiOutlined />, menu: true },
   tenantDispatch: { scope: "tenant-management", path: "/tenant/dispatch", label: "寄件中心", permission: "system:integration:manage", audience: "tenant", icon: <SendOutlined />, menu: true },
   customerSupport: { scope: "tenant-management", path: "/tenant/support", label: "客服中心", permission: "system:integration:manage", audience: "tenant", icon: <CustomerServiceOutlined />, menu: true },
-  clientChannel: { path: "/tenant/client-channel", label: "客户端渠道", permission: "system:integration:manage", audience: "tenant", icon: <MobileOutlined />, menu: true },
+  clientChannel: { path: `/tenant${RENTAL_CHANNELS_PAGES.clientChannel.path}`, label: RENTAL_CHANNELS_PAGES.clientChannel.title.default, permission: RENTAL_CHANNELS_LEGACY_PERMISSION, audience: "tenant", icon: <MobileOutlined />, menu: Boolean(RENTAL_CHANNELS_PAGES.clientChannel.menu) },
   // 圆角与本地音效设置；品牌标识、主题色仍在客户端渠道维护。
   appearance: { path: "/settings/appearance", label: "外观与音效", permission: "system:integration:manage", audience: "tenant", icon: <BgColorsOutlined />, menu: true },
   aiSettings: { path: "/settings/ai", label: "AI 服务设置", permission: "system:params:manage", audience: "tenant", icon: <SettingOutlined />, menu: true },

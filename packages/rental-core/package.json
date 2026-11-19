@@ -1321,7 +1321,19 @@
     "./admin/operations/pages": "./admin/operations/pages.ts",
     "./admin/operations/components": "./admin/operations/components.ts",
     "./admin/operations/logic": "./admin/operations/logic.ts",
-    "./admin/operations/messages": "./admin/operations/messages.ts"
+    "./admin/operations/messages": "./admin/operations/messages.ts",
+    "./admin/channels": "./admin/channels/index.tsx",
+    "./admin/channels/client": "./admin/channels/client.ts",
+    "./admin/channels/website-client": "./admin/channels/website-client.ts",
+    "./admin/channels/context": "./admin/channels/page-context.tsx",
+    "./admin/channels/pages": "./admin/channels/pages.ts",
+    "./admin/channels/messages": "./admin/channels/messages.ts",
+    "./admin/setup": "./admin/setup/index.tsx",
+    "./admin/setup/client": "./admin/setup/client.ts",
+    "./admin/setup/context": "./admin/setup/page-context.tsx",
+    "./admin/setup/pages": "./admin/setup/pages.ts",
+    "./admin/setup/navigation": "./admin/setup/navigation.ts",
+    "./admin/setup/messages": "./admin/setup/messages.ts"
   },
   "typesVersions": {
     "*": {
@@ -2341,6 +2353,42 @@
       ],
       "admin/operations/messages": [
         "./admin/operations/messages.ts"
+      ],
+      "admin/channels": [
+        "./admin/channels/index.tsx"
+      ],
+      "admin/channels/client": [
+        "./admin/channels/client.ts"
+      ],
+      "admin/channels/website-client": [
+        "./admin/channels/website-client.ts"
+      ],
+      "admin/channels/context": [
+        "./admin/channels/page-context.tsx"
+      ],
+      "admin/channels/pages": [
+        "./admin/channels/pages.ts"
+      ],
+      "admin/channels/messages": [
+        "./admin/channels/messages.ts"
+      ],
+      "admin/setup": [
+        "./admin/setup/index.tsx"
+      ],
+      "admin/setup/client": [
+        "./admin/setup/client.ts"
+      ],
+      "admin/setup/context": [
+        "./admin/setup/page-context.tsx"
+      ],
+      "admin/setup/pages": [
+        "./admin/setup/pages.ts"
+      ],
+      "admin/setup/navigation": [
+        "./admin/setup/navigation.ts"
+      ],
+      "admin/setup/messages": [
+        "./admin/setup/messages.ts"
       ]
     }
   },

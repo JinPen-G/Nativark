@@ -3,6 +3,7 @@
  * 日历与规则版本、订单全流程、验机、工单、通知与报表。均按当前会话的经营空间作用。
  */
 import { createRentalOperationsApi } from "@rental-os/rental-core/admin/operations/client";
+import { createRentalSetupApi } from "@rental-os/rental-core/admin/setup/client";
 import { createRentalGovernanceApi } from "@rental-os/rental-core/admin/governance/client";
 import { createRentalWorkOrderApi } from "@rental-os/rental-core/admin/work-orders/client";
 import { createRentalOrderApi } from "@rental-os/rental-core/admin/orders/client";
@@ -10,7 +11,7 @@ import { createRentalLocationApi } from "@rental-os/rental-core/admin/locations/
 import { createRentalCatalogApi, type RentalCatalogImageRequest } from "@rental-os/rental-core/admin/catalog/client";
 import { createRentalCapabilityApi } from "@rental-os/rental-core/admin/capabilities/client";
 import { createRentalCommercialApi } from "@rental-os/rental-core/admin/commercial/client";
-import type { TenantReadinessStatus, RentalCurrency, RentalCustomerBenefitAccount, RentalOrder, RentalRewardLedgerEntry, PaymentStatementBatchDetail, PaymentStatementBatchSummary, ReviewPaymentStatementLineRequest, GrantRentalRewardRequest } from "@rental-os/shared";
+import type { RentalCurrency, RentalCustomerBenefitAccount, RentalOrder, RentalRewardLedgerEntry, PaymentStatementBatchDetail, PaymentStatementBatchSummary, ReviewPaymentStatementLineRequest, GrantRentalRewardRequest } from "@rental-os/shared";
 import { useQuery } from "@tanstack/react-query";
 import { currentSessionEpoch, currentSessionSignal } from "@/app/queryClient";
 import { http, request, requestText } from "./http";
@@ -34,6 +35,7 @@ const rentalCommercialApi = createRentalCommercialApi(request, requestRentalCata
 
 const rentalGovernanceApi = createRentalGovernanceApi(request);
 const rentalOperationsApi = createRentalOperationsApi(request, requestText);
+const rentalSetupApi = createRentalSetupApi(request);
 
 export const rentalCoreApi = {
   categories: rentalLocationApi.categories,
@@ -65,7 +67,7 @@ export const rentalCoreApi = {
   exportOperationReport: rentalOperationsApi.exportOperationReport,
   ...createRentalOrderApi(request),
   /** TENANT-READY-01：当前空间开业配置状态（服务端权威判定）。 */
-  tenantReadiness: () => request<TenantReadinessStatus>("/rental/v1/tenant-readiness"),
+  tenantReadiness: rentalSetupApi.tenantReadiness,
   saveBusinessSettings: rentalGovernanceApi.saveBusinessSettings,
   couponTemplates: rentalCommercialApi.couponTemplates,
   saveCouponTemplate: rentalCommercialApi.saveCouponTemplate,

@@ -11,6 +11,8 @@
     "governance",
     "membership",
     "operations",
+    "channels",
+    "setup",
     "../../platform-admin/src/**/*.d.ts"
   ]
 }

@@ -250,7 +250,7 @@ test('appearance form maps old radii only into its draft and saves the original 
   const tokenModule = { exports: {} };
   new Function('require', 'module', 'exports', tokenCode)(require, tokenModule, tokenModule.exports);
   const { resolveAdminCornerRadius, resolveAdminRadiusGroup, resolveAdminRadii } = tokenModule.exports;
-  const { ADMIN_UI_CORNER_RADIUS_CONTROL_MAX, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } = require('@rental-os/shared');
+  const { ADMIN_UI_CORNER_RADIUS_CONTROL_MAX, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } = require('@rental-os/platform-contracts');
   for (const stored of [{ revision: 7, adminCornerRadius: 999, adminContainerRadius: 24, adminButtonRadius: 40, adminInputRadius: 999 }, { revision: 8, adminCornerRadius: 40 }]) {
     const values = {}, saves = [];
     const form = { setFieldsValue: next => Object.assign(values, next), getFieldValue: key => values[key] };
@@ -282,17 +282,29 @@ test('appearance form maps old radii only into its draft and saves the original 
 });
 
 test('settings are mounted in the requested pages and sound has an unambiguous module path', () => {
+  const ts = require('typescript');
   const read = rel => fs.readFileSync(path.join(__dirname, '..', 'apps/admin/src', rel), 'utf8');
   const appearance = read('features/appearance/AppearancePage.tsx');
-  const channel = read('features/channel/ClientChannelPage.tsx');
+  const appearanceAst = ts.createSourceFile('AppearancePage.tsx', appearance, ts.ScriptTarget.Latest, true);
+  const tenantPage = appearanceAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'AppearancePage');
+  const accountColorCard = appearanceAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'AccountThemeColorCard');
+  assert.ok(tenantPage, 'the tenant appearance page remains available');
+  assert.ok(accountColorCard, 'the account theme color has its own form');
+  const tenantAppearance = tenantPage.getText(appearanceAst);
+  const accountAppearance = accountColorCard.getText(appearanceAst);
+  const channel = fs.readFileSync(path.join(__dirname, '..', 'packages/rental-core/admin/channels/ClientChannelPage.tsx'), 'utf8');
   for (const name of ['brandName', 'brandLogoUrl', 'faviconUrl', 'themeColor']) {
     assert.match(channel, new RegExp('name="' + name + '"'));
-    assert.doesNotMatch(appearance, new RegExp('name="' + name + '"'));
+    assert.doesNotMatch(tenantAppearance, new RegExp('name="' + name + '"'));
   }
   for (const name of ['adminContainerRadius', 'adminButtonRadius', 'adminInputRadius']) {
-    assert.match(appearance, new RegExp('name="' + name + '"'));
+    assert.match(tenantAppearance, new RegExp('name="' + name + '"'));
     assert.doesNotMatch(channel, new RegExp('name="' + name + '"'));
+    assert.doesNotMatch(accountAppearance, new RegExp('name="' + name + '"'));
   }
+  assert.match(accountAppearance, /name="themeColor"/);
+  assert.match(accountAppearance, /accountAppearanceApi\.saveProfile\(\{ themeColor: values\.themeColor \}\)/);
+  assert.doesNotMatch(accountAppearance, /\bappearanceApi\.saveProfile\b/);
   assert.match(appearance, /<SoundSettingCard\s*\/>/);
   assert.doesNotMatch(channel, /SoundSettingCard/);
   assert.match(read('app/navigation.tsx'), /label: "外观与音效"/);
