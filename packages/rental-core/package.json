@@ -1401,6 +1401,186 @@
     "./contracts": {
       "types": "./dist/contracts.d.ts",
       "default": "./dist/contracts.js"
+    },
+    "./application-repositories": {
+      "types": "./dist/application-repositories.d.ts",
+      "default": "./dist/application-repositories.js"
+    },
+    "./mysql-workspace-principal": {
+      "types": "./dist/mysql-workspace-principal.d.ts",
+      "default": "./dist/mysql-workspace-principal.js"
+    },
+    "./application-domain": {
+      "types": "./dist/application-domain.d.ts",
+      "default": "./dist/application-domain.js"
+    },
+    "./application-participants": {
+      "types": "./dist/application-participants.d.ts",
+      "default": "./dist/application-participants.js"
+    },
+    "./application-customers": {
+      "types": "./dist/application-customers.d.ts",
+      "default": "./dist/application-customers.js"
+    },
+    "./application-ai-sources": {
+      "types": "./dist/application-ai-sources.d.ts",
+      "default": "./dist/application-ai-sources.js"
+    },
+    "./package": {
+      "types": "./dist/package.d.ts",
+      "default": "./dist/package.js"
+    },
+    "./data-package": {
+      "types": "./dist/data-package.d.ts",
+      "default": "./dist/data-package.js"
+    },
+    "./initialize-categories": {
+      "types": "./dist/initialize-categories.d.ts",
+      "default": "./dist/initialize-categories.js"
+    },
+    "./application-client": {
+      "types": "./dist/application-client.d.ts",
+      "default": "./dist/application-client.js"
+    },
+    "./application-enterprise": {
+      "types": "./dist/application-enterprise.d.ts",
+      "default": "./dist/application-enterprise.js"
+    },
+    "./auth-service": {
+      "types": "./dist/auth-service.d.ts",
+      "default": "./dist/auth-service.js"
+    },
+    "./auth-source": {
+      "types": "./dist/auth-source.d.ts",
+      "default": "./dist/auth-source.js"
+    },
+    "./trusted-workspace-principal": {
+      "types": "./dist/trusted-workspace-principal.d.ts",
+      "default": "./dist/trusted-workspace-principal.js"
+    },
+    "./trusted-browser-principal": {
+      "types": "./dist/trusted-browser-principal.d.ts",
+      "default": "./dist/trusted-browser-principal.js"
+    },
+    "./trusted-platform-browser-principal": {
+      "types": "./dist/trusted-platform-browser-principal.d.ts",
+      "default": "./dist/trusted-platform-browser-principal.js"
+    },
+    "./application-integrations": {
+      "types": "./dist/application-integrations.d.ts",
+      "default": "./dist/application-integrations.js"
+    },
+    "./mysql-auth-source": {
+      "types": "./dist/mysql-auth-source.d.ts",
+      "default": "./dist/mysql-auth-source.js"
+    },
+    "./http-auth": {
+      "types": "./dist/http-auth.d.ts",
+      "default": "./dist/http-auth.js"
+    },
+    "./auth-guard-contracts": {
+      "types": "./dist/auth-guard-contracts.d.ts",
+      "default": "./dist/auth-guard-contracts.js"
+    },
+    "./staff-api-policy": {
+      "types": "./dist/staff-api-policy.d.ts",
+      "default": "./dist/staff-api-policy.js"
+    },
+    "./platform-ai-access-policy": {
+      "types": "./dist/platform-ai-access-policy.d.ts",
+      "default": "./dist/platform-ai-access-policy.js"
+    },
+    "./application": {
+      "types": "./dist/application.d.ts",
+      "default": "./dist/application.js"
+    },
+    "./application-category": {
+      "types": "./dist/application-category.d.ts",
+      "default": "./dist/application-category.js"
+    },
+    "./application-worker-authority": {
+      "types": "./dist/application-worker-authority.d.ts",
+      "default": "./dist/application-worker-authority.js"
+    },
+    "./core-session": {
+      "types": "./dist/core-session.d.ts",
+      "default": "./dist/core-session.js"
+    },
+    "./application-http": {
+      "types": "./dist/application-http.d.ts",
+      "default": "./dist/application-http.js"
+    },
+    "./application-platform": {
+      "types": "./dist/application-platform.d.ts",
+      "default": "./dist/application-platform.js"
+    },
+    "./staff-routing": {
+      "types": "./dist/staff-routing.d.ts",
+      "default": "./dist/staff-routing.js"
+    },
+    "./application-access": {
+      "types": "./dist/application-access.d.ts",
+      "default": "./dist/application-access.js"
+    },
+    "./http-auth-extensions": {
+      "types": "./dist/http-auth-extensions.controller.d.ts",
+      "default": "./dist/http-auth-extensions.controller.js"
+    },
+    "./http-staff-subscription": {
+      "types": "./dist/http-staff-subscription.controller.d.ts",
+      "default": "./dist/http-staff-subscription.controller.js"
+    },
+    "./http-extensions": {
+      "types": "./dist/http-extensions.module.d.ts",
+      "default": "./dist/http-extensions.module.js"
+    },
+    "./customer-management": {
+      "types": "./dist/application-customer-management.d.ts",
+      "default": "./dist/application-customer-management.js"
+    },
+    "./http-customers": {
+      "types": "./dist/http-customers.controller.d.ts",
+      "default": "./dist/http-customers.controller.js"
+    },
+    "./http-customers-module": {
+      "types": "./dist/http-customers.module.d.ts",
+      "default": "./dist/http-customers.module.js"
+    },
+    "./http-customer-operations-dto": {
+      "types": "./dist/http-customer-operations.dto.d.ts",
+      "default": "./dist/http-customer-operations.dto.js"
+    },
+    "./http-customer-corporate-dto": {
+      "types": "./dist/http-customer-corporate.dto.d.ts",
+      "default": "./dist/http-customer-corporate.dto.js"
+    },
+    "./http-customer-merge-dto": {
+      "types": "./dist/http-customer-merge.dto.d.ts",
+      "default": "./dist/http-customer-merge.dto.js"
+    },
+    "./http-customer-registration-dto": {
+      "types": "./dist/http-customer-registration.dto.d.ts",
+      "default": "./dist/http-customer-registration.dto.js"
+    },
+    "./workspace-management": {
+      "types": "./dist/application-workspace-management.d.ts",
+      "default": "./dist/application-workspace-management.js"
+    },
+    "./mysql-workspace-management": {
+      "types": "./dist/mysql-workspace-management.d.ts",
+      "default": "./dist/mysql-workspace-management.js"
+    },
+    "./http-workspace-management-dto": {
+      "types": "./dist/http-workspace-management.dto.d.ts",
+      "default": "./dist/http-workspace-management.dto.js"
+    },
+    "./http-workspaces": {
+      "types": "./dist/http-workspaces.controller.d.ts",
+      "default": "./dist/http-workspaces.controller.js"
+    },
+    "./http-workspaces-module": {
+      "types": "./dist/http-workspaces.module.d.ts",
+      "default": "./dist/http-workspaces.module.js"
     }
   },
   "typesVersions": {
@@ -2529,6 +2709,141 @@
       ],
       "contracts": [
         "dist/contracts.d.ts"
+      ],
+      "application-repositories": [
+        "./dist/application-repositories.d.ts"
+      ],
+      "mysql-workspace-principal": [
+        "./dist/mysql-workspace-principal.d.ts"
+      ],
+      "application-domain": [
+        "./dist/application-domain.d.ts"
+      ],
+      "application-participants": [
+        "./dist/application-participants.d.ts"
+      ],
+      "application-customers": [
+        "./dist/application-customers.d.ts"
+      ],
+      "application-ai-sources": [
+        "./dist/application-ai-sources.d.ts"
+      ],
+      "package": [
+        "./dist/package.d.ts"
+      ],
+      "data-package": [
+        "./dist/data-package.d.ts"
+      ],
+      "initialize-categories": [
+        "./dist/initialize-categories.d.ts"
+      ],
+      "application-client": [
+        "./dist/application-client.d.ts"
+      ],
+      "application-enterprise": [
+        "./dist/application-enterprise.d.ts"
+      ],
+      "auth-service": [
+        "./dist/auth-service.d.ts"
+      ],
+      "auth-source": [
+        "./dist/auth-source.d.ts"
+      ],
+      "trusted-workspace-principal": [
+        "./dist/trusted-workspace-principal.d.ts"
+      ],
+      "trusted-browser-principal": [
+        "./dist/trusted-browser-principal.d.ts"
+      ],
+      "trusted-platform-browser-principal": [
+        "./dist/trusted-platform-browser-principal.d.ts"
+      ],
+      "application-integrations": [
+        "./dist/application-integrations.d.ts"
+      ],
+      "mysql-auth-source": [
+        "./dist/mysql-auth-source.d.ts"
+      ],
+      "http-auth": [
+        "./dist/http-auth.d.ts"
+      ],
+      "auth-guard-contracts": [
+        "./dist/auth-guard-contracts.d.ts"
+      ],
+      "staff-api-policy": [
+        "./dist/staff-api-policy.d.ts"
+      ],
+      "platform-ai-access-policy": [
+        "./dist/platform-ai-access-policy.d.ts"
+      ],
+      "application": [
+        "./dist/application.d.ts"
+      ],
+      "application-category": [
+        "./dist/application-category.d.ts"
+      ],
+      "application-worker-authority": [
+        "./dist/application-worker-authority.d.ts"
+      ],
+      "core-session": [
+        "dist/core-session.d.ts"
+      ],
+      "application-http": [
+        "dist/application-http.d.ts"
+      ],
+      "application-platform": [
+        "dist/application-platform.d.ts"
+      ],
+      "staff-routing": [
+        "dist/staff-routing.d.ts"
+      ],
+      "application-access": [
+        "dist/application-access.d.ts"
+      ],
+      "http-auth-extensions": [
+        "dist/http-auth-extensions.controller.d.ts"
+      ],
+      "http-staff-subscription": [
+        "dist/http-staff-subscription.controller.d.ts"
+      ],
+      "http-extensions": [
+        "dist/http-extensions.module.d.ts"
+      ],
+      "customer-management": [
+        "dist/application-customer-management.d.ts"
+      ],
+      "http-customers": [
+        "dist/http-customers.controller.d.ts"
+      ],
+      "http-customers-module": [
+        "dist/http-customers.module.d.ts"
+      ],
+      "http-customer-operations-dto": [
+        "dist/http-customer-operations.dto.d.ts"
+      ],
+      "http-customer-corporate-dto": [
+        "dist/http-customer-corporate.dto.d.ts"
+      ],
+      "http-customer-merge-dto": [
+        "dist/http-customer-merge.dto.d.ts"
+      ],
+      "http-customer-registration-dto": [
+        "dist/http-customer-registration.dto.d.ts"
+      ],
+      "workspace-management": [
+        "dist/application-workspace-management.d.ts"
+      ],
+      "mysql-workspace-management": [
+        "dist/mysql-workspace-management.d.ts"
+      ],
+      "http-workspace-management-dto": [
+        "dist/http-workspace-management.dto.d.ts"
+      ],
+      "http-workspaces": [
+        "dist/http-workspaces.controller.d.ts"
+      ],
+      "http-workspaces-module": [
+        "dist/http-workspaces.module.d.ts"
       ]
     }
   },

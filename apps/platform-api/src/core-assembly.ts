@@ -29,7 +29,7 @@ export const publicIntegrationBusiness: TenantIntegrationBusinessParticipant = {
 
 /** 只有目录选择零Core时可走此默认组合，任何未知Core/业务HTTP仍明确拒绝。 */
 export function composePublicCoreApplication(database: PlatformDatabaseClient): CoreHostHttpApplication {
-  return composePlatformCoreApplication<Prisma.TransactionClient>({ ...createPublicCoreDependencies(database), catalogue: publicCoreCatalogue });
+  return composePlatformCoreApplication<Prisma.TransactionClient>({ ...createPublicCoreDependencies<Prisma.TransactionClient>(database), catalogue: publicCoreCatalogue });
 }
 
 export const PUBLIC_CORE_APPLICATION = Symbol("public.core-application");

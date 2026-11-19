@@ -5,7 +5,7 @@
  * 规则版本、日历、通知、客户主档与会员、报表口径。新业务的唯一契约来源。
  */
 
-import type { SystemDataScope } from "@rental-os/platform-contracts";
+import type { SystemDataScope, SaveSystemUserRequest, SaveWorkspaceAccessRequest } from "@rental-os/platform-contracts";
 import type { CalendarDayType, OfficialCalendarDayInput } from "@rental-os/platform-contracts/official-calendar";
 export type {
   OfficialCalendarDayInput, OfficialCalendarSource, OfficialCalendarSourceVersion,
@@ -14,6 +14,11 @@ export type {
 } from "@rental-os/platform-contracts/official-calendar";
 import { RentalCategoryCode } from "./rental-category-code";
 export { RentalCategoryCode, RENTAL_CATEGORY_CODE_PATTERN, isRentalCategoryCode, type BuiltinRentalCategoryCode } from "./rental-category-code";
+
+/** ACCESS-01C：账号、租户角色和经营空间授权沿原事务一次提交。 */
+export interface SaveSystemUserAccessRequest extends SaveSystemUserRequest {
+  workspaceAccesses: SaveWorkspaceAccessRequest[];
+}
 
 // Rental Core v0.1 ---------------------------------------------------------
 

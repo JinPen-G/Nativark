@@ -1,10 +1,10 @@
 /** 独立公共API模块。宿主提供唯一持久化实例，Core及其迁移/业务HTTP另行显式装配。 */
-import { Module, type DynamicModule, type ModuleMetadata, type FactoryProvider } from "@nestjs/common";
+import { Module, type CanActivate, type DynamicModule, type ModuleMetadata, type FactoryProvider } from "@nestjs/common";
 import { ConfigModule, ConfigService } from "@nestjs/config";
 import { APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import { PlatformAuthGuard, REGISTERED_CORE_HTTP_ACCESS, type RegisteredCoreHttpAccess } from "./platform-auth.guard";
 import { PlatformAuthService } from "./modules/auth/platform-auth.service";
-import { AuthSessionController, AUTH_HTTP_APPLICATION } from "./modules/auth/auth-session.controller";
+import { AuthSessionController, AUTH_HTTP_APPLICATION, type AuthHttpApplication } from "./modules/auth/auth-session.controller";
 import { PlatformAuthenticationRepository } from "./modules/platform/platform-authentication.source";
 import { PLATFORM_AUTH_DATA_STORE, type PlatformAuthDataStore } from "./modules/platform/platform-auth-data-store";
 import { PLATFORM_APPEARANCE_DATA_STORE, type PlatformAppearanceDataStore } from "./modules/platform/platform-appearance-data-store";
@@ -51,6 +51,37 @@ import { TENANT_OPERATOR_INVITATIONS_HTTP_APPLICATION, TENANT_DISPATCH_HTTP_APPL
 import { createPublicMessagingApplications, type PublicMessagingDatabase } from "./platform-messaging";
 
 const PUBLIC_MESSAGING_APPLICATIONS = Symbol("platform.messaging.public-applications");
+const HOST_APPLICATIONS = Symbol("platform.host-applications");
+
+/** 所选宿主已构造的唯一实例。默认零 Core 不提供此组，仍使用下方公共实现。
+ * 这是受控装配接点，不能从清单、请求或任意 provider 列表注册运行代码。 */
+export interface PlatformApplicationBindings {
+  auth: AuthHttpApplication;
+  authentication: PlatformAuthenticationRepository;
+  guard: CanActivate;
+  tenantAppearance: TenantAppearanceProfileService;
+  accountAppearance: AccountAppearanceService;
+  secrets: SecretBox;
+  operationLog: PlatformOperationLogService;
+  subscriptions: SubscriptionService;
+  integrationStore: TenantIntegrationDataStore;
+  integrationBusiness: TenantIntegrationBusinessParticipant;
+  integrationRuntimeProviders: IntegrationRuntimeProviders;
+  integrations: TenantIntegrationService;
+  notifications: TenantIntegrationRuntimeService;
+  email: TenantEmailRuntimeService;
+  connectivity: TenantIntegrationConnectivityService;
+  files: ObjectStorageProviderService;
+  payments: PaymentIntegrationProbe;
+  officialCalendarSources: OfficialCalendarSourceService;
+}
+
+function hostApplication<Key extends keyof PlatformApplicationBindings>(provide: FactoryProvider["provide"], key: Key): FactoryProvider {
+  return { provide, inject: [HOST_APPLICATIONS], useFactory: (applications: PlatformApplicationBindings) => {
+    if (applications?.[key] == null) throw new Error(`宿主缺少同一公共应用实例: ${key}`);
+    return applications[key];
+  } };
+}
 
 export type PlatformDatabase = PlatformAuthDataStore & PlatformAppearanceDataStore & PlatformManagementDatabase & PlatformToolsDatabase & SubscriptionDataStore
   & TenantIntegrationDataStore & OfficialCalendarDataStore & PlatformOperationLogStorage & PublicMessagingDatabase;
@@ -68,9 +99,38 @@ export class PlatformServerModule {
     integrationBusinessProvider?: FactoryProvider<TenantIntegrationBusinessParticipant>;
     integrationPaymentProbe?: PaymentIntegrationProbe;
     integrationRuntimeProviders?: IntegrationRuntimeProviders;
+    /** 完整宿主可提供同实例组合；与单项集成选项互斥，避免重复执行者。 */
+    applicationsProvider?: FactoryProvider<PlatformApplicationBindings>;
     openApiDocument?: unknown }): DynamicModule {
     if (options.coreHttp && options.coreHttpProvider) throw new Error("Core HTTP只能登记一个实际准入提供者");
     if (options.integrationBusiness && options.integrationBusinessProvider) throw new Error("集成业务依赖只能登记一个实际参加者");
+    if (options.applicationsProvider && (options.integrationBusiness || options.integrationBusinessProvider
+      || options.integrationPaymentProbe || options.integrationRuntimeProviders || options.subscriptionCategories))
+      throw new Error("完整宿主应用与单项集成/订阅参加者不能重复登记");
+    const applications = options.applicationsProvider ? [
+      { ...options.applicationsProvider, provide: HOST_APPLICATIONS },
+      hostApplication(PlatformAuthService, "auth"), hostApplication(PlatformAuthenticationRepository, "authentication"),
+      hostApplication(PlatformAuthGuard, "guard"), hostApplication(TenantAppearanceProfileService, "tenantAppearance"),
+      hostApplication(AccountAppearanceService, "accountAppearance"), hostApplication(SecretBox, "secrets"),
+      hostApplication(PlatformOperationLogService, "operationLog"), hostApplication(SubscriptionService, "subscriptions"),
+      hostApplication(INTEGRATION_DATA_STORE, "integrationStore"), hostApplication(INTEGRATION_BUSINESS_PARTICIPANT, "integrationBusiness"),
+      hostApplication(INTEGRATION_RUNTIME_PROVIDERS, "integrationRuntimeProviders"), hostApplication(TenantIntegrationService, "integrations"),
+      hostApplication(TenantIntegrationRuntimeService, "notifications"), hostApplication(TenantEmailRuntimeService, "email"),
+      hostApplication(TenantIntegrationConnectivityService, "connectivity"), hostApplication(ObjectStorageProviderService, "files"),
+      hostApplication(INTEGRATION_PAYMENT_PROBE, "payments"), hostApplication(OfficialCalendarSourceService, "officialCalendarSources")
+    ] : [
+      { provide: INTEGRATION_DATA_STORE, useExisting: PLATFORM_AUTH_DATA_STORE },
+      { provide: PlatformOperationLogService, inject: [PLATFORM_AUTH_DATA_STORE], useFactory: (database: PlatformDatabase) => new PlatformOperationLogService(database) },
+      { provide: PlatformAuthenticationRepository, inject: [PLATFORM_AUTH_DATA_STORE], useFactory: (database: PlatformDatabase) => new PlatformAuthenticationRepository(database) },
+      TenantAppearanceProfileService, AccountAppearanceService, PlatformAuthService, PlatformAuthGuard, SubscriptionService,
+      SecretBox, TenantIntegrationService, TenantIntegrationRuntimeService, TenantEmailRuntimeService, TenantIntegrationConnectivityService,
+      ObjectStorageProviderService, OfficialCalendarSourceService,
+      { provide: INTEGRATION_RUNTIME_PROVIDERS, useValue: options.integrationRuntimeProviders ?? PUBLIC_INTEGRATION_RUNTIME_PROVIDERS },
+      ...(options.integrationBusiness ? [{ provide: INTEGRATION_BUSINESS_PARTICIPANT, useValue: options.integrationBusiness }] : []),
+      ...(options.integrationBusinessProvider ? [{ ...options.integrationBusinessProvider, provide: INTEGRATION_BUSINESS_PARTICIPANT }] : []),
+      ...(options.integrationPaymentProbe ? [{ provide: INTEGRATION_PAYMENT_PROBE, useValue: options.integrationPaymentProbe }] : []),
+      ...(options.subscriptionCategories ? [{ provide: SUBSCRIPTION_CATEGORY_PARTICIPANT, useValue: options.subscriptionCategories }] : [])
+    ];
     return { module: PlatformServerModule, imports: [ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }), ...(options.imports ?? [])],
       controllers: [AuthSessionController, TenantAppearanceProfileController, AccountAppearanceController, PlatformHealthController, PlatformOpenApiController, PlatformManagementController,
         TenantSubscriptionController, PlatformSubscriptionController, TenantIntegrationController, OfficialCalendarSourceController, PlatformToolsController,
@@ -79,10 +139,8 @@ export class PlatformServerModule {
         { provide: PLATFORM_AUTH_DATA_STORE, inject: options.inject ?? [], useFactory: options.useFactory },
         { provide: PLATFORM_APPEARANCE_DATA_STORE, useExisting: PLATFORM_AUTH_DATA_STORE },
         { provide: PLATFORM_SUBSCRIPTION_DATA_STORE, useExisting: PLATFORM_AUTH_DATA_STORE },
-        { provide: INTEGRATION_DATA_STORE, useExisting: PLATFORM_AUTH_DATA_STORE },
         { provide: OFFICIAL_CALENDAR_DATA_STORE, useExisting: PLATFORM_AUTH_DATA_STORE },
-        { provide: PlatformOperationLogService, inject: [PLATFORM_AUTH_DATA_STORE], useFactory: (database: PlatformDatabase) => new PlatformOperationLogService(database) },
-        { provide: PlatformAuthenticationRepository, inject: [PLATFORM_AUTH_DATA_STORE], useFactory: (database: PlatformDatabase) => new PlatformAuthenticationRepository(database) },
+        ...applications,
         { provide: PUBLIC_MESSAGING_APPLICATIONS,
           inject: [PLATFORM_AUTH_DATA_STORE, ConfigService, TenantIntegrationService, TenantEmailRuntimeService, PlatformOperationLogService],
           useFactory: createPublicMessagingApplications },
@@ -92,20 +150,13 @@ export class PlatformServerModule {
           useFactory: (applications: TenantMessagingHttpApplications) => applications.dispatch },
         { provide: TENANT_SUPPORT_EMAIL_HTTP_APPLICATION, inject: [PUBLIC_MESSAGING_APPLICATIONS],
           useFactory: (applications: TenantMessagingHttpApplications) => applications.support },
-        TenantAppearanceProfileService, AccountAppearanceService, PlatformAuthService, PlatformAuthGuard, PlatformManagementService, PlatformToolsService, SubscriptionService,
+        PlatformManagementService, PlatformToolsService,
         { provide: SUBSCRIPTION_APPLICATION, useExisting: SubscriptionService },
-        SecretBox, TenantIntegrationService, TenantIntegrationRuntimeService, TenantEmailRuntimeService, TenantIntegrationConnectivityService, ObjectStorageProviderService,
         { provide: INTEGRATION_EMAIL_PROBE, useExisting: TenantEmailRuntimeService },
         { provide: TENANT_INTEGRATION_APPLICATION, useExisting: TenantIntegrationService },
         { provide: TENANT_INTEGRATION_CONNECTIVITY, useExisting: TenantIntegrationConnectivityService },
-        OfficialCalendarSourceService,
         { provide: OFFICIAL_CALENDAR_APPLICATION, useExisting: OfficialCalendarSourceService },
         { provide: OFFICIAL_CALENDAR_SOURCE_READER, inject: [OfficialCalendarSourceService], useFactory: createOfficialCalendarSourceReader },
-        { provide: INTEGRATION_RUNTIME_PROVIDERS, useValue: options.integrationRuntimeProviders ?? PUBLIC_INTEGRATION_RUNTIME_PROVIDERS },
-        ...(options.integrationBusiness ? [{ provide: INTEGRATION_BUSINESS_PARTICIPANT, useValue: options.integrationBusiness }] : []),
-        ...(options.integrationBusinessProvider ? [{ ...options.integrationBusinessProvider, provide: INTEGRATION_BUSINESS_PARTICIPANT }] : []),
-        ...(options.integrationPaymentProbe ? [{ provide: INTEGRATION_PAYMENT_PROBE, useValue: options.integrationPaymentProbe }] : []),
-        ...(options.subscriptionCategories ? [{ provide: SUBSCRIPTION_CATEGORY_PARTICIPANT, useValue: options.subscriptionCategories }] : []),
         { provide: AUTH_HTTP_APPLICATION, useExisting: PlatformAuthService },
         { provide: PLATFORM_OPENAPI_DOCUMENT, useValue: options.openApiDocument ?? createPlatformOpenApi() },
         ...(options.coreHttp ? [{ provide: REGISTERED_CORE_HTTP_ACCESS, useValue: options.coreHttp }] : []),

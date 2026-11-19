@@ -17,7 +17,7 @@ export function composeTicketsApplication(database: PlatformDatabaseClient, inpu
   const lock = CoreDeploymentLockSchema.parse(input);
   const pin = lock.cores.find(core => core.manifest.id === "example-tickets");
   if (!pin || lock.cores.length !== 1) throw new Error("本示范宿主须选择且仅选择example-tickets Core");
-  const dependencies = createPublicCoreDependencies(database), platformPlan = createPublicPlatformDataPlan();
+  const dependencies = createPublicCoreDependencies<PublicDatabaseTransaction>(database), platformPlan = createPublicPlatformDataPlan();
   if (!isDeepStrictEqual(lock.platform.data, platformPlan.data)) throw new Error("部署锁的公共数据基线与当前宿主不一致");
   const { manifest } = requireTicketsDeploymentPackage(pin, lock.platform.versions);
   let catalogue: ReturnType<typeof createCoreDeployedCatalogue>;

@@ -15,13 +15,14 @@
 | [企业Web客户端](clients/enterprise/README.md)、[正式入口](clients/enterprise/index.ts)、[会话协调](clients/enterprise/session.tsx) | `/clients/enterprise` 提供企业会话、请求与原操作门闸；公共web-client仍持有唯一客户会话和网络层，企业授权、单次写入及原键恢复保持 |
 | [官网认证与本人资料](clients/website/auth/README.md)、[登录态业务](clients/website/session/README.md) | `/clients/website` 提供认证、账户与原业务请求工厂；宿主供给同一客户会话、可信请求与原引用清理，业务授权及原收据沿服务端核验 |
 | [客户认证](clients/miniprogram/auth/README.md)、[正式客户入口](clients/miniprogram/index.ts) | `/clients/miniprogram` 提供密码/短信/微信、用途验证码、注册与本人注销；宿主供给原渠道、请求和会话采用，一次性凭证及原错误保持 |
-| [客户认证](src/mysql-client-auth.ts)、[统一注册](src/mysql-customer-registration.ts)、[注册事务](src/mysql-customer-registration-transaction.ts)、[私有参加者](src/client-session-ports.ts) | 客户令牌、用途证明、会员/账号与原客户行锁单源；后台和自助注册共用同一规则，Serializable 冲突只作原有限重试 |
 | [会员请求](admin/membership/client.ts)、[客户请求](admin/membership/customer-client.ts) | `/admin/membership/client` 与 `/admin/membership/customer-client` 提供原57项请求；传入宿主唯一认证请求，保留租户会员、客户主档、账号状态、敏感资料、企业账务及原冲销收据边界 |
 | [订单前端](admin/orders/README.md)、[订单请求](admin/orders/client.ts) | `/admin/orders` 提供列表、新建、详情及原配货/资金/检查/单据链；宿主提供当前身份、经营空间、原请求与跨领域组件，旧地址消费同一实现 |
 | [养护工单前端](admin/work-orders/README.md)、[页面贡献](admin/work-orders/index.tsx)、[客户端工厂](admin/work-orders/client.ts) | `/admin/work-orders` 提供原列表/看板/详情与六类表单；宿主供给当前权限/经营空间及唯一请求，旧路由和十二HTTP方法薄适配同一实现 |
 | [履约网络前端](admin/locations/README.md)、[地点贡献](admin/locations/index.tsx)、[客户端与范围](admin/locations/client.ts) | `/admin/locations` 持有地点与经营主体、两表单、原列表/卡片及导入导出；统一贡献供给七页，宿主提供当前范围和原组织查看/映射权限 |
 | [能力治理前端](admin/capabilities/README.md)、[页面贡献](admin/capabilities/index.tsx)、[请求工厂](admin/capabilities/client.ts) | `/admin/capabilities` 提供原能力目录、配置、升级及审计；宿主供给当前范围和原会话刷新，配置入口保留查看/管理权限与原修订，卡片复用原生 UIArc |
 | [统一HTTP装配](src/http.module.ts)、[服务组合](src/http-assembly.ts)、[原组合宿主](../../apps/api/src/app.module.ts) | `/http` 一次提供19个原Controller与九组应用接线；原宿主已通过正式模块取得同一业务实例，必需服务缺失时拒绝装配，原可选依赖保持 |
+| [客户管理门面](src/application-customer-management.ts)、[客户HTTP](src/http-customers.controller.ts)、[模块](src/http-customers.module.ts) | `/customer-management` 从完整应用选择原客户实例；35条原平台客户路径保留状态权限、敏感审计、合并与企业财务范围。旧 PlatformController 继承同一处理器，不重复挂载新模块 |
+| [空间管理门面](src/application-workspace-management.ts)、[空间仓储](src/mysql-workspace-management.ts)、[空间HTTP](src/http-workspaces.controller.ts)、[模块](src/http-workspaces.module.ts) | `/workspace-management` 与 `/mysql-workspace-management` 保留品类版本、必选能力及空间档案同事务创建，账号/角色/多空间授权仍为原 Serializable 事务。11条路径和原DTO由独立模块供给，旧入口薄适配；公开平台租户管理不依赖此门面 |
 | [支付HTTP模块](src/http-payments.module.ts)、[支付运行](src/mysql-payment-runtime.ts)、[对账文件](src/mysql-payment-reconciliation-file.ts) | `/http-payments` 提供原回调、退款和对账三个Controller；宿主供给同一支付、对账及经营空间解析实例。资金、原操作和回调台账归Rental，签名及供应商请求复用公共运输 |
 | [核心HTTP](src/http-core.controller.ts)、[业务HTTP](src/http-business.controller.ts)、[应用接点](src/http-applications.ts)、[快照与操作键](src/http-context.ts) | `/http-core` 与 `/http-business` 持有原履约、报价、规则和营销HTTP；宿主绑定同一业务/数据库实例，Guard/ALS及原动作继续核权限、事务和原收据 |
 | [空间能力HTTP](src/http-workspace-capabilities.controller.ts)、[员工收款HTTP](src/http-staff-payments.controller.ts)、[服务接点](src/http-service-ports.ts)、[空间能力DTO](src/http-workspace-capability.dto.ts) | 正式HTTP子出口持有原8条路径与校验；宿主Guard先形成可信身份，再通过同一原服务实例处理。原API只再导出，Controller注册不取得额外业务权限 |
@@ -37,6 +38,7 @@
 | [本人地址与交付快照](src/mysql-client-delivery-address.ts)、[本人注销](src/mysql-client-account-closure.ts)、[配送区域](src/client-delivery-service-area.ts)、[宿主参加者](src/client-lifecycle-ports.ts) | 客户地址按租户与本人校验，报价/订单快照保持原值；注销沿原短信证明、会员/账号状态及会话撤销顺序。原客户Controller、报价及AI场景消费同一实现 |
 | [浏览器会话与页面装配](admin/browser/README.md)、[认证合同](src/auth-contracts.ts) | 一个宿主创建一份真实会话、刷新运输和查询缓存，向十二组页面供给当前服务端身份；旧后台消费同一实现，登录、空间切换及本机存储命名空间保持 |
 | [清单与页面权限](src/permissions.ts)、[清单工厂](src/manifest.ts) | `/permissions` 同源声明原权限及页面 OR 准入，`/manifest` 生成固定来源的发行清单；标准码只投影当前原租户/空间权限，声明不授予Core，原HTTP码保持 |
+| [经营空间会话权威](src/mysql-workspace-principal.ts)、[原仓储入口](../../apps/api/src/modules/platform/platform.repository.ts) | `@rental-os/rental-core/mysql-workspace-principal` 提供可进入空间、默认空间、成员权限及会话复验，构造时传入同一数据库与原账号/角色投影回调。原 Auth、Guard 和 MCP 沿六个仓储入口消费同一实例，角色及权限锁沿原事务顺序 |
 | [主应用工厂](src/mysql-primary-application.ts)、[原宿主接线](../../apps/api/src/modules/rental-core/rental-primary-application.providers.ts) | `/mysql-primary-application` 构造同一对核心与报价/营销实例，显式提供真实配置快照、数据库和参加者；旧服务令牌、HTTP及AI消费这两个实例 |
 | [核心聚合](src/mysql-core-runtime.ts)、[宿主接点](src/core-runtime-ports.ts) | `/mysql-core-runtime` 持有原配置、库存、订单、交接及结算裁定；主应用工厂供给原依赖，Controller/AI/企业及各端继续消费原签名 |
 | [报价/营销聚合](src/mysql-business-runtime.ts)、[宿主接点](src/business-runtime-ports.ts) | `/mysql-business-runtime` 维护价格、日历、规则、报价、券、奖励和通知恢复；主应用工厂保留原正文维护读取器，当前与历史价格分别读取 |
@@ -137,6 +139,10 @@
 ## 使用与构建
 
 Rental HTTP从 `@rental-os/rental-core/http` 的 `RentalHttpModule` 接入，类型 `RentalHttpServiceGroups` 列出宿主需要供给的真实应用。
+
+完整实例从 [application](src/application.ts) 构造，经 [application-http](src/application-http.ts) 与 [application-platform](src/application-platform.ts) 分别供给原 Rental HTTP 和公共模块。宿主显式选择 AI 模式：未启用时客户检查出箱传 `null` 且不装配 AI 参加者；启用时必须提供原失败出箱、事务事件和通知草稿读取器。构造不会启服务或启动作业。独立组合及尚未接齐的请求边界见 [Rental API](../../apps/rental-api/README.md)。
+
+空间切换、开发密码重置和员工订阅上下文由 [独立扩展模块](src/http-extensions.module.ts) 绑定同一认证/订阅实例；它与旧宿主已挂载的三个薄适配路径二选一，公共六项认证继续由公共模块提供。[原 Guard](src/http-auth.ts) 保持角色、客户和空间政策，[application-access](src/application-access.ts) 将当前 Core 授权接入原业务父锁事务；它不代表所有独立写入、媒体流和回调已完成接入。
 
 1. 按 `rental`、`enterprise`、`client`、`category`、`channels`、`members`、`files`、`staff` 与 `customerAvatar` 九组提供已有服务；所有业务、文件及审计使用同一数据库和当前身份。
 2. 在宿主 `imports` 中使用 `RentalHttpModule.registerFactory({ imports, inject, useFactory })`，工厂返回上一步的应用集合。已经完成实例装配的宿主可用 `register(services)`；应用集合只创建一次，必需服务缺失时启动失败，原可选服务保持原处理。

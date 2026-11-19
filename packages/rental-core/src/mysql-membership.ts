@@ -1,5 +1,6 @@
 /** Rental租户会员、注册审核、当前资质与方案权益的单源应用。
- * 原主档、政策、风险与客户锁参加者沿同一存储/事务运行；订单金额及资金执行由订单域裁定。 */
+ * 原主档、政策、风险与客户锁参加者沿同一存储/事务运行；写事务先复核所选Core，
+ * 订单金额及资金执行由订单域裁定。 */
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { Prisma, type CustomerMembershipReview as PrismaMembershipReview } from "@prisma/client";
@@ -45,6 +46,7 @@ import { lockActiveCategoryBinding } from "./mysql-category-write";
 import { assertOtherEnterpriseAdministrator } from "./enterprise-administrator-continuity";
 import type { ApprovedOrderBinding } from "./approved-order-transaction.ports";
 import { assertCoreMerchantDelegationProof } from "./merchant-delegation";
+import { assertRentalBusinessTenantAccessAfterLock, lockRentalBusinessTenant } from "./mysql-business-fence";
 
 const mask = (value?: string) => {
   const trimmed = value?.trim();
@@ -158,11 +160,14 @@ export class MembershipService {
     tenantId: string,
     registrationMode: CustomerMembershipRegistrationSettings["registrationMode"]
   ) {
-    const row = await this.prisma.customerMembershipRegistrationSettings.upsert({
-      where: { tenantId },
-      create: { tenantId, registrationMode },
-      update: { registrationMode }
-    });
+    const row = await this.prisma.$transaction(async tx => {
+      await lockRentalBusinessTenant(tx, tenantId);
+      return tx.customerMembershipRegistrationSettings.upsert({
+        where: { tenantId },
+        create: { tenantId, registrationMode },
+        update: { registrationMode }
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     return { registrationMode: row.registrationMode as CustomerMembershipRegistrationSettings["registrationMode"], updatedAt: row.updatedAt.toISOString(), supportsOnlyNewImport: true };
   }
 
@@ -188,31 +193,36 @@ export class MembershipService {
     const phone = input.phone.trim();
     const requestKey = input.idempotencyKey?.trim() || null;
 
-    const result = await customerRegistrationTransaction(this.prisma, (tx) => this.registration.registerPersonal(tx, {
-      tenantId,
-      phone,
-      name: input.name,
-      email: input.email,
-      identityNoMasked: mask(input.identityNo),
-      gender: input.gender,
-      birthday: input.birthday,
-      sourceChannel: input.sourceChannel,
-      region: input.region,
-      automatic,
-      channel: input.channel,
-      requestKey,
-      reviewPayload: { name: input.name.trim(), email: input.email?.trim() || undefined } as Prisma.InputJsonValue,
-      selfService: false,
-      onlyNew: input.onlyNew === true,
-      account: input.temporaryPassword
-        ? {
-            passwordHash: hashPassword(input.temporaryPassword),
-            mustChangePassword: true,
-            lastReason: { create: "后台创建临时密码", update: "后台重置临时密码" },
-            lastOperator: operator
-          }
-        : undefined
-    }));
+    const result = await customerRegistrationTransaction(this.prisma, async tx => {
+      // Every original conflict retry takes fresh current authority before the
+      // registration participant reads or locks a customer in this transaction.
+      await lockRentalBusinessTenant(tx, tenantId);
+      return this.registration.registerPersonal(tx, {
+        tenantId,
+        phone,
+        name: input.name,
+        email: input.email,
+        identityNoMasked: mask(input.identityNo),
+        gender: input.gender,
+        birthday: input.birthday,
+        sourceChannel: input.sourceChannel,
+        region: input.region,
+        automatic,
+        channel: input.channel,
+        requestKey,
+        reviewPayload: { name: input.name.trim(), email: input.email?.trim() || undefined } as Prisma.InputJsonValue,
+        selfService: false,
+        onlyNew: input.onlyNew === true,
+        account: input.temporaryPassword
+          ? {
+              passwordHash: hashPassword(input.temporaryPassword),
+              mustChangePassword: true,
+              lastReason: { create: "后台创建临时密码", update: "后台重置临时密码" },
+              lastOperator: operator
+            }
+          : undefined
+      });
+    });
 
     return {
       customerId: result.customer.id,
@@ -224,7 +234,10 @@ export class MembershipService {
 
   /** 客户端自助改资料的写入口：ClientApiService 不直接写客户模型。主档不存在返回 false。 */
   async updateOwnProfile(tenantId: string, customerId: string, data: Pick<CustomerProfileUpdateData, "name" | "email">) {
-    return Boolean(await this.customers.updateProfile(tenantId, customerId, data));
+    return this.prisma.$transaction(async tx => {
+      await lockRentalBusinessTenant(tx, tenantId);
+      return Boolean(await this.customers.updateProfile(tenantId, customerId, data, tx));
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
   async listReviews(tenantId: string, status?: string, type?: string): Promise<CustomerMembershipReview[]> {
@@ -248,6 +261,7 @@ export class MembershipService {
     const candidate = await this.prisma.customerMembershipReview.findFirst({ where: { tenantId, id: reviewId }, select: { customerId: true } });
     if (!candidate) throw new NotFoundException("审核任务不存在");
     const result = await this.prisma.$transaction(async (tx) => {
+      await lockRentalBusinessTenant(tx, tenantId);
       await this.lockCustomer(tenantId, candidate.customerId, tx);
       const review = await tx.customerMembershipReview.findFirst({ where: { tenantId, id: reviewId } });
       if (!review) throw new NotFoundException("审核任务不存在");
@@ -420,6 +434,7 @@ export class MembershipService {
     const evidenceRef = evidenceRefOrUndefined(input.evidenceRef);
     const now = new Date();
     const result = await this.prisma.$transaction(async (tx) => {
+      await lockRentalBusinessTenant(tx, tenantId);
       await this.lockCustomer(tenantId, customerId, tx);
       await this.requireCustomer(tenantId, customerId, "personal", tx);
       await this.requireMembership(tenantId, customerId, tx);
@@ -663,6 +678,7 @@ export class MembershipService {
 
   async savePersonalMember(tenantId: string, customerId: string, input: SavePersonalMembershipRequest) {
     const row = await this.prisma.$transaction(async (tx) => {
+      await lockRentalBusinessTenant(tx, tenantId);
       await this.lockCustomer(tenantId, customerId, tx);
       await this.requireMembership(tenantId, customerId, tx);
       const customer = await this.requireCustomer(tenantId, customerId, "personal", tx);
@@ -694,6 +710,7 @@ export class MembershipService {
 
   async setTemporaryPassword(tenantId: string, customerId: string, temporaryPassword: string, operator?: string) {
     const account = await this.prisma.$transaction(async (tx) => {
+      await lockRentalBusinessTenant(tx, tenantId);
       await this.lockCustomer(tenantId, customerId, tx);
       await this.requireMembership(tenantId, customerId, tx);
       const customer = await this.requireCustomer(tenantId, customerId, "personal", tx);
@@ -753,6 +770,7 @@ export class MembershipService {
     }
 
     const execute = async () => this.prisma.$transaction(async (tx) => {
+      await lockRentalBusinessTenant(tx, tenantId);
       const existing = input.id ? await tx.customerProfile.findFirst({
         where: { tenantId, id: input.id, customerType: "corporate" },
         include: { membership: true, corporateProfile: true }
@@ -885,6 +903,7 @@ export class MembershipService {
     const row = await this.prisma.$transaction(async tx => {
       // Same tenant lock as portal commands: another entry cannot remove the last admin.
       await tx.$queryRaw`SELECT id FROM Tenant WHERE id=${tenantId} FOR UPDATE`;
+      await assertRentalBusinessTenantAccessAfterLock(tx, tenantId);
       await this.lockBookingCustomers(tenantId, input.personalCustomerId, corporateCustomerId, tx);
       const existing = await tx.customerCorporateMembership.findUnique({ where: { tenantId_corporateCustomerId_personalCustomerId: { tenantId, corporateCustomerId, personalCustomerId: input.personalCustomerId } } });
       const portals = await tx.$queryRaw<Array<{ enabled: boolean }>>`SELECT enabled FROM enterprise_corporate_portals WHERE tenantId=${tenantId} AND corporateCustomerId=${corporateCustomerId}`;
@@ -938,6 +957,7 @@ export class MembershipService {
       throw new BadRequestException("方案失效时间不能早于生效时间");
     }
     const plan = await this.prisma.$transaction(async (tx) => {
+      await lockRentalBusinessTenant(tx, tenantId);
       const existing = input.id
         ? await tx.customerMembershipPlan.findFirst({ where: { tenantId, id: input.id }, include: { versions: { orderBy: { version: "desc" }, take: 1 } } })
         : undefined;
@@ -964,6 +984,7 @@ export class MembershipService {
   async publishPlan(tenantId: string, planId: string, versionId: string, operator?: string) {
     const now = new Date();
     await this.prisma.$transaction(async (tx) => {
+      await lockRentalBusinessTenant(tx, tenantId);
       const version = await tx.customerMembershipPlanVersion.findFirst({ where: { tenantId, planId, id: versionId }, include: { plan: true } });
       if (!version) throw new NotFoundException("会员方案版本不存在");
       if (version.status !== "draft") throw new ConflictException("只有草稿版本可以发布");
@@ -983,6 +1004,7 @@ export class MembershipService {
     const trimmedReason = reason.trim();
     if (!trimmedReason) throw new BadRequestException("停用会员方案必须填写原因");
     await this.prisma.$transaction(async (tx) => {
+      await lockRentalBusinessTenant(tx, tenantId);
       const version = await tx.customerMembershipPlanVersion.findFirst({ where: { tenantId, planId, id: versionId } });
       if (!version) throw new NotFoundException("会员方案版本不存在");
       if (version.status !== "published") throw new ConflictException("只有已发布方案版本可以停用");
@@ -1002,6 +1024,7 @@ export class MembershipService {
     const trimmedReason = reason.trim();
     if (!trimmedReason) throw new BadRequestException("恢复会员方案必须填写原因");
     await this.prisma.$transaction(async (tx) => {
+      await lockRentalBusinessTenant(tx, tenantId);
       const source = await tx.customerMembershipPlanVersion.findFirst({ where: { tenantId, planId, id: versionId } });
       if (!source) throw new NotFoundException("会员方案版本不存在");
       if (!["published", "disabled"].includes(source.status)) throw new ConflictException("只能从已发布或已停用版本恢复");
@@ -1021,31 +1044,34 @@ export class MembershipService {
   }
 
   async assignPlan(tenantId: string, input: AssignCustomerMembershipPlanRequest, operator?: string): Promise<CustomerMembershipPlanAssignment> {
-    const customer = await this.requireCustomer(tenantId, input.customerId);
-    const membership = await this.requireMembership(tenantId, input.customerId);
-    if (membership.status !== "active") {
-      throw new ConflictException(customer.customerType === "corporate" ? "企业会员尚未审核通过，不能获得企业权益" : "会员当前状态不可授予方案");
-    }
-    const source = input.source ?? "manual";
-    const effectiveFrom = dateOrUndefined(input.effectiveFrom) ?? new Date();
-    const effectiveTo = dateOrUndefined(input.effectiveTo);
-    if (effectiveTo && effectiveTo < effectiveFrom) throw new BadRequestException("会员方案失效时间不能早于生效时间");
-    if ((source === "manual" || source === "corporate_contract") && !input.reason?.trim()) {
-      throw new BadRequestException("人工授予或合同授予会员方案必须填写原因");
-    }
-    const version = await this.prisma.customerMembershipPlanVersion.findFirst({
-      where: { tenantId, id: input.planVersionId, status: "published" }, include: { plan: true }
-    });
-    if (!version) throw new NotFoundException("可授予的已发布会员方案版本不存在");
-    if (customer.customerType !== version.plan.targetType) throw new ConflictException("方案目标类型与会员类型不匹配");
-    const row = await this.prisma.customerMembershipPlanAssignment.create({
-      data: {
-        tenantId, customerId: input.customerId, planId: version.planId, planVersionId: version.id,
-        source, effectiveFrom, effectiveTo,
-        reason: input.reason?.trim() || null, grantedBy: operator,
-        snapshot: { planName: version.plan.name, targetType: version.plan.targetType, benefits: version.benefits } as Prisma.InputJsonValue
+    const row = await this.prisma.$transaction(async tx => {
+      await lockRentalBusinessTenant(tx, tenantId);
+      const customer = await this.requireCustomer(tenantId, input.customerId, undefined, tx);
+      const membership = await this.requireMembership(tenantId, input.customerId, tx);
+      if (membership.status !== "active") {
+        throw new ConflictException(customer.customerType === "corporate" ? "企业会员尚未审核通过，不能获得企业权益" : "会员当前状态不可授予方案");
       }
-    });
+      const source = input.source ?? "manual";
+      const effectiveFrom = dateOrUndefined(input.effectiveFrom) ?? new Date();
+      const effectiveTo = dateOrUndefined(input.effectiveTo);
+      if (effectiveTo && effectiveTo < effectiveFrom) throw new BadRequestException("会员方案失效时间不能早于生效时间");
+      if ((source === "manual" || source === "corporate_contract") && !input.reason?.trim()) {
+        throw new BadRequestException("人工授予或合同授予会员方案必须填写原因");
+      }
+      const version = await tx.customerMembershipPlanVersion.findFirst({
+        where: { tenantId, id: input.planVersionId, status: "published" }, include: { plan: true }
+      });
+      if (!version) throw new NotFoundException("可授予的已发布会员方案版本不存在");
+      if (customer.customerType !== version.plan.targetType) throw new ConflictException("方案目标类型与会员类型不匹配");
+      return tx.customerMembershipPlanAssignment.create({
+        data: {
+          tenantId, customerId: input.customerId, planId: version.planId, planVersionId: version.id,
+          source, effectiveFrom, effectiveTo,
+          reason: input.reason?.trim() || null, grantedBy: operator,
+          snapshot: { planName: version.plan.name, targetType: version.plan.targetType, benefits: version.benefits } as Prisma.InputJsonValue
+        }
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     return this.toAssignment(row);
   }
 
@@ -1066,16 +1092,20 @@ export class MembershipService {
   async revokePlanAssignment(tenantId: string, assignmentId: string, reason: string, operator?: string) {
     const trimmedReason = reason.trim();
     if (!trimmedReason) throw new BadRequestException("撤销会员方案必须填写原因");
-    const assignment = await this.prisma.customerMembershipPlanAssignment.findFirst({ where: { tenantId, id: assignmentId } });
-    if (!assignment) throw new NotFoundException("会员方案授予记录不存在");
-    if (assignment.status !== "active") throw new ConflictException("只有当前有效的会员方案授予可以撤销");
-    const updated = await this.prisma.customerMembershipPlanAssignment.updateMany({
-      where: { tenantId, id: assignment.id, status: "active" },
-      data: { status: "revoked", revokedBy: operator, revokedAt: new Date(), revokeReason: trimmedReason }
-    });
-    if (updated.count !== 1) throw new ConflictException("会员方案授予已被其他操作撤销，请刷新后重试");
-    const row = await this.prisma.customerMembershipPlanAssignment.findFirst({ where: { tenantId, id: assignment.id } });
-    if (!row) throw new NotFoundException("会员方案授予记录不存在");
+    const row = await this.prisma.$transaction(async tx => {
+      await lockRentalBusinessTenant(tx, tenantId);
+      const assignment = await tx.customerMembershipPlanAssignment.findFirst({ where: { tenantId, id: assignmentId } });
+      if (!assignment) throw new NotFoundException("会员方案授予记录不存在");
+      if (assignment.status !== "active") throw new ConflictException("只有当前有效的会员方案授予可以撤销");
+      const updated = await tx.customerMembershipPlanAssignment.updateMany({
+        where: { tenantId, id: assignment.id, status: "active" },
+        data: { status: "revoked", revokedBy: operator, revokedAt: new Date(), revokeReason: trimmedReason }
+      });
+      if (updated.count !== 1) throw new ConflictException("会员方案授予已被其他操作撤销，请刷新后重试");
+      const updatedAssignment = await tx.customerMembershipPlanAssignment.findFirst({ where: { tenantId, id: assignment.id } });
+      if (!updatedAssignment) throw new NotFoundException("会员方案授予记录不存在");
+      return updatedAssignment;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     return this.toAssignment(row);
   }
 

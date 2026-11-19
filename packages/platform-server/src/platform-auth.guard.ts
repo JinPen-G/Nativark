@@ -14,7 +14,7 @@ export const REGISTERED_CORE_HTTP_ACCESS = Symbol("platform.registered-core-http
 
 @Injectable()
 export class PlatformAuthGuard implements CanActivate {
-  constructor(private readonly auth: PlatformAuthService,
+  constructor(@Inject(PlatformAuthService) private readonly auth: Pick<PlatformAuthService, "resolveAccessContext">,
     @Optional() @Inject(REGISTERED_CORE_HTTP_ACCESS) private readonly cores?: RegisteredCoreHttpAccess) {}
 
   async canActivate(context: ExecutionContext) {

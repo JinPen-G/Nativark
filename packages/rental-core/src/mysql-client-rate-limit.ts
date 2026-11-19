@@ -83,20 +83,28 @@ export class ClientApiRateLimitService implements OnApplicationBootstrap, OnAppl
   constructor(private readonly prisma: RentalClientRateLimitStorage) {}
 
   private cleanupTimer?: ReturnType<typeof setInterval>;
+  private cleanup?: Promise<void>;
+  private stopping = false;
 
   onApplicationBootstrap() {
-    if (process.env.NODE_ENV === "test" || process.env.CLIENT_API_RATE_LIMIT_CLEANUP_DISABLED === "true") return;
+    if (this.cleanupTimer || this.stopping || process.env.NODE_ENV === "test" || process.env.CLIENT_API_RATE_LIMIT_CLEANUP_DISABLED === "true") return;
     this.cleanupTimer = setInterval(() => {
-      void this.prisma.clientApiRateBucket.deleteMany({
+      if (this.stopping || this.cleanup) return;
+      // 只保留一个在途清理。停机必须等原删除完成，不能先断开唯一数据库连接。
+      const running = this.prisma.clientApiRateBucket.deleteMany({
         where: { bucketStart: { lt: new Date(Date.now() - 2 * 60 * 60 * 1000) } }
-      }).catch(() => undefined);
+      }).then(() => undefined, () => undefined);
+      this.cleanup = running;
+      void running.finally(() => { if (this.cleanup === running) this.cleanup = undefined; });
     }, 10 * 60 * 1000);
     this.cleanupTimer.unref?.();
   }
 
-  onApplicationShutdown() {
+  async onApplicationShutdown() {
+    this.stopping = true;
     if (this.cleanupTimer) clearInterval(this.cleanupTimer);
     this.cleanupTimer = undefined;
+    await this.cleanup;
   }
 
   private async increment(scopeKey: string, bucketStart: Date): Promise<number> {

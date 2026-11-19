@@ -36,6 +36,13 @@ export interface RentalDataRelease {
   readonly migrationSql: readonly string[];
 }
 
+export function readRentalPrismaSchema(bytes: Uint8Array): string {
+  if (!(bytes instanceof Uint8Array) || !bytes.byteLength || bytes.byteLength > 32 * 1024 * 1024
+    || createHash("sha256").update(bytes).digest("hex") !== RENTAL_PRISMA_SCHEMA.sha256)
+    throw new Error("Rental schema 原文与本版数据发行不一致");
+  return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+}
+
 /** 所选数据版本及摘要来自固定发行，迁移顺序同时用于结构核验和原账读取。 */
 export function createRentalDataRelease(input: {
   readonly version: CoreDataContract["version"];

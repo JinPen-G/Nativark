@@ -134,9 +134,7 @@ export function normalizeOperatorShortName(value: unknown): string | null | unde
  * 空间授权也不能留下半套结果。因此管理端编辑账号时必须把这组关系作为
  * 同一个事务边界提交。
  */
-export interface SaveSystemUserAccessRequest extends SaveSystemUserRequest {
-  workspaceAccesses: SaveWorkspaceAccessRequest[];
-}
+export type { SaveSystemUserAccessRequest } from "@rental-os/rental-core/contracts";
 
 export interface SystemRuleGiftConfig {
   enabled: boolean;

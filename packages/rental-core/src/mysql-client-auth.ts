@@ -33,6 +33,7 @@ import { SharedCustomerRepository } from "./mysql-customer-master";
 import type { RentalClientAuthStorage, RentalClientSmsIntegration, RentalClientChallengeRateLimit } from "./client-session-ports";
 import { hashOpaqueToken, hashPassword, verifyPassword } from "@rental-os/platform-server/password";
 import { runWithRequestIdentity } from "@rental-os/platform-server/request-identity";
+import { lockRentalBusinessTenant } from "./mysql-business-fence";
 
 const ACCESS_TTL_SECONDS = 60 * 60;
 const REFRESH_TTL_SECONDS = 60 * 60 * 24 * 30;
@@ -586,6 +587,8 @@ export class ClientAuthService {
     assertPassword(newPassword);
     if (newPassword === currentPassword) throw new BadRequestException("新密码不能与当前密码相同");
     await this.prisma.$transaction(async tx => {
+      // 已登录改密在客户锁前复核当前应用权限，避免持有客户锁后倒取租户父锁。
+      await lockRentalBusinessTenant(tx, context.tenantId);
       await tx.$queryRaw(Prisma.sql`SELECT id FROM customer_profiles WHERE tenantId = ${context.tenantId} AND id = ${context.customerId} FOR UPDATE`);
       const account = await tx.customerAccount.findFirst({ where: { tenantId: context.tenantId, customerId: context.customerId } });
       const session = await tx.clientAuthSession.findFirst({ where: { id: context.sessionId, tenantId: context.tenantId,

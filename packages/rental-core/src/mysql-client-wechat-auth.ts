@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { CLIENT_API_VERSION, type ClientMembershipSessionResponse, type ClientWechatBindRequest, type ClientWechatBindResponse, type ClientWechatPhoneLoginRequest } from "./client-contracts";
 import { runWithRequestIdentity } from "@rental-os/platform-server/request-identity";
 import { customerRegistrationTransaction } from "./mysql-customer-registration-transaction";
+import { lockRentalBusinessTenant } from "./mysql-business-fence";
 import type { ClientRequestContext } from "./client-context";
 import { WechatMiniProgramAdapter } from "@rental-os/platform-server/integration-wechat";
 
@@ -183,6 +184,8 @@ export class ClientWechatAuthService {
       throw error;
     }
     const identity = await this.prisma.$transaction(async (tx) => {
+      // 一次性微信凭证已在事务外交换；当前权限在绑定写入前复核，拒绝后不重放凭证。
+      await lockRentalBusinessTenant(tx, context.tenantId);
       const byOpenId = await tx.clientWechatIdentity.findFirst({ where: { tenantId: context.tenantId, channelId: channel.id, openId: session.openid } });
       if (byOpenId && byOpenId.customerId !== context.customerId) throw new ConflictException("该微信已绑定其他账号，请联系商户处理");
       const byCustomer = await tx.clientWechatIdentity.findFirst({ where: { tenantId: context.tenantId, channelId: channel.id, customerId: context.customerId } });

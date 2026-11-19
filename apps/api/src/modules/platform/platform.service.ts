@@ -1,3 +1,5 @@
+import { RentalWorkspaceManagementApplication } from "@rental-os/rental-core/workspace-management";
+import { RentalCustomerManagementApplication } from "@rental-os/rental-core/customer-management";
 /** 原组合平台的业务适配及内存演示。持久化组织/安全、字典/编号委托同一公共应用；Rental范围与初始化仍由原业务链裁定。 */
 import { createRentalLegacyPermissionModules } from "@rental-os/rental-core/permissions";
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, Optional, ServiceUnavailableException } from "@nestjs/common";
@@ -105,6 +107,30 @@ const MEMORY_MODE_WORKSPACE_ID = "ws_memory_default";
 
 @Injectable()
 export class PlatformService {
+  private workspaceApplication?: RentalWorkspaceManagementApplication;
+  private getWorkspaceApplication() {
+    return this.workspaceApplication ??= new RentalWorkspaceManagementApplication({
+      configService: this.configService, repository: this.platformRepository,
+      rentalCoreService: this.rentalCoreService, workspaceCapabilityService: this.workspaceCapabilityService,
+      logger: this.logger, legacyAccounts: { roles: () => this.roleRows, users: () => this.users }
+    });
+  }
+
+  private customerApplication?: RentalCustomerManagementApplication;
+
+  /** 同一原客户服务由新门面消费；懒绑定保留既有位置构造与内存模式拒绝语义。 */
+  private getCustomerApplication() {
+    return this.customerApplication ??= new RentalCustomerManagementApplication({
+      configService: this.configService,
+      principals: { findWorkspaceScopedUser: (userId, workspaceId, tenantUser, transaction) =>
+        transaction ? this.platformRepository.findWorkspaceScopedUser(userId, workspaceId, tenantUser, transaction)
+          : this.findWorkspaceScopedUser(userId, workspaceId, tenantUser) },
+      sharedCustomers: this.sharedCustomers, customerOperations: this.customerOperations,
+      customerMerge: this.customerMerge, customerCorporate: this.customerCorporate,
+      customerCorporateSettlement: this.customerCorporateSettlement, memberships: this.memberships
+    });
+  }
+
   constructor(
     private readonly configService: ConfigService,
     private readonly platformRepository: PlatformRepository,
@@ -1426,10 +1452,7 @@ export class PlatformService {
   }
 
   async listTenantBusinessWorkspaces(tenantId: string, currentUser?: SystemUserRow) {
-    this.assertSaasAdmin(currentUser);
-    this.requireWorkspaceDataSource();
-    await this.platformRepository.getTenant(tenantId);
-    return this.platformRepository.listBusinessWorkspacesForTenant(tenantId);
+    return this.getWorkspaceApplication().listTenantBusinessWorkspaces(tenantId, currentUser);
   }
 
   async createTenantBusinessWorkspace(
@@ -1437,39 +1460,7 @@ export class PlatformService {
     input: CreateBusinessWorkspaceRequest,
     currentUser?: SystemUserRow
   ) {
-    this.assertSaasAdmin(currentUser);
-    this.requireWorkspaceDataSource();
-    if (!this.rentalCoreService) throw new ConflictException("Rental初始化服务未装配，不能创建租赁空间");
-    await this.platformRepository.getTenant(tenantId);
-    const result = await this.platformRepository.createBusinessWorkspaceForTenant(
-      tenantId,
-      input,
-      async (tx, workspaceId) => {
-        await this.rentalCoreService!.registerWorkspace(workspaceId, tenantId, input.categoryCode, tx);
-        // 与 createBusinessWorkspace 同一口径：必选能力与空间档案原子创建。
-        await this.initializeWorkspaceCapabilities(
-          tenantId,
-          workspaceId,
-          input.categoryCode,
-          tx,
-          undefined,
-          input.runMode ?? "development"
-        );
-        const tenantAdmins = await tx.user.findMany({
-          where: { tenantId, isPlatformAdmin: true, isActive: true },
-          select: { id: true }
-        });
-        if (tenantAdmins.length) {
-          await tx.workspaceMember.createMany({
-            data: tenantAdmins.map((admin) => ({ tenantId, workspaceId, userId: admin.id, isActive: true })),
-            skipDuplicates: true
-          });
-        }
-      },
-      currentUser?.id
-    );
-    await this.rentalCoreService?.onApplicationBootstrap();
-    return result;
+    return this.getWorkspaceApplication().createTenantBusinessWorkspace(tenantId, input, currentUser);
   }
 
   async updateTenantBusinessWorkspace(
@@ -1478,11 +1469,7 @@ export class PlatformService {
     input: UpdateBusinessWorkspaceRequest,
     currentUser?: SystemUserRow
   ) {
-    this.assertSaasAdmin(currentUser);
-    this.requireWorkspaceDataSource();
-    await this.platformRepository.getTenant(tenantId);
-    await this.assertProductionModeAllowed(tenantId, workspaceId, input);
-    return this.platformRepository.updateBusinessWorkspaceForTenant(tenantId, workspaceId, input);
+    return this.getWorkspaceApplication().updateTenantBusinessWorkspace(tenantId, workspaceId, input, currentUser);
   }
 
   findTenantByCode(code: string) {
@@ -1506,382 +1493,94 @@ export class PlatformService {
   }
 
   listBusinessWorkspaces(currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    return this.platformRepository.listBusinessWorkspaces(currentUser);
+    return this.getWorkspaceApplication().listBusinessWorkspaces(currentUser);
   }
 
-  /**
-   * 共享客户主档仓储只在连库时注入（不连库的单元测试用位置参数构造本服务）。
-   * 缺失时明确拒绝，而不是让 `undefined.xxx` 抛成 500。
-   */
-  private requireSharedCustomers(): SharedCustomerRepository {
-    if (!this.sharedCustomers) {
-      throw new BadRequestException("共享客户主档需要 MySQL 数据源，当前为内存演示模式");
-    }
-    return this.sharedCustomers;
-  }
+  listSharedCustomers(currentUser?: SystemUserRow) { return this.getCustomerApplication().listSharedCustomers(currentUser); }
 
-  /* ---------- SPACE-04：租户共享客户主档 ---------- */
+  getCustomerDetail(customerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().getCustomerDetail(customerId, currentUser); }
 
-  listSharedCustomers(currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().listCustomers(tenantId, getRequestWorkspaceId(), currentUser);
-  }
+  async getCustomerProfileOverview(customerId: string, query: CustomerProfileOrderQuery = {}, currentUser?: SystemUserRow) { return this.getCustomerApplication().getCustomerProfileOverview(customerId, query, currentUser); }
 
-  /**
-   * CUSTOMER-01B 的入口一律在这里解析 `tenantId` 与 `workspaceId` 后转交
-   * `CustomerOperationsService`，与本文件其他经营入口同一口径：
-   * 空间只从会话取，客户端传什么都不作数。
-   */
-  private requireCustomerOperations() {
-    if (!this.customerOperations) {
-      throw new ConflictException("客户运营服务未就绪");
-    }
-    return this.customerOperations;
-  }
+  saveCustomerProfileAddress(customerId: string, input: SaveCustomerProfileAddressRequest, currentUser?: SystemUserRow) { return this.getCustomerApplication().saveCustomerProfileAddress(customerId, input, currentUser); }
 
-  getCustomerDetail(customerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().getCustomerDetail(
-      tenantId,
-      getRequestWorkspaceId(),
-      customerId,
-      currentUser
-    );
-  }
+  removeCustomerProfileAddress(customerId: string, addressId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().removeCustomerProfileAddress(customerId, addressId, currentUser); }
 
-  async getCustomerProfileOverview(customerId: string, query: CustomerProfileOrderQuery = {}, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    const workspaceId = requireRequestWorkspaceId();
-    if (!currentUser || currentUser.isSaasAdmin) throw new ForbiddenException("会员经营资料需要当前空间账号授权");
-    const scoped = await this.findWorkspaceScopedUser(currentUser.id, workspaceId);
-    if (!scoped?.isActive || scoped.tenantId !== tenantId) throw new ForbiddenException("当前经营空间访问权已失效");
-    return this.requireCustomerOperations().getProfileOverview(tenantId, workspaceId, customerId, scoped, query);
-  }
+  listSharedCustomersMasked(currentUser?: SystemUserRow) { return this.getCustomerApplication().listSharedCustomersMasked(currentUser); }
 
-  saveCustomerProfileAddress(customerId: string, input: SaveCustomerProfileAddressRequest, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().saveCustomerAddress(tenantId, customerId, input);
-  }
-
-  removeCustomerProfileAddress(customerId: string, addressId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().removeCustomerAddress(tenantId, customerId, addressId);
-  }
-
-  listSharedCustomersMasked(currentUser?: SystemUserRow) {
-    return this.listSharedCustomers(currentUser);
-  }
-
-  ensureCustomerAccount(customerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().ensureAccount(tenantId, customerId, currentUser?.displayName);
-  }
+  ensureCustomerAccount(customerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().ensureCustomerAccount(customerId, currentUser); }
 
   changeCustomerAccountStatus(
     customerId: string,
     input: ChangeCustomerAccountStatusRequest,
     currentUser?: SystemUserRow
-  ) {
-    this.requireWorkspaceDataSource();
-    this.assertCustomerActionPermission(
-      currentUser,
-      input.status === "closed" ? "rental-os:customer:close" : "rental-os:member:account-manage",
-      input.status === "closed" ? "注销客户账号" : "变更客户账号状态"
-    );
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    // 账号级动作**不**解析 workspaceId：它影响全部空间，绑定某个空间会造成误解。
-    return this.requireCustomerOperations().changeAccountStatus(
-      tenantId,
-      customerId,
-      input,
-      currentUser?.displayName
-    );
-  }
+  ) { return this.getCustomerApplication().changeCustomerAccountStatus(customerId, input, currentUser); }
 
   changeCustomerMembershipStatus(
     customerId: string,
     input: ChangeCustomerMembershipStatusRequest,
     currentUser?: SystemUserRow
-  ) {
-    this.requireWorkspaceDataSource();
-    this.assertCustomerActionPermission(
-      currentUser,
-      input.status === "closed"
-        ? "rental-os:customer:close"
-        : input.status === "risk_restricted"
-          ? "rental-os:member:risk-action"
-          : "rental-os:member:manage",
-      input.status === "closed"
-        ? "注销租户会员关系"
-        : input.status === "risk_restricted"
-          ? "限制客户风险状态"
-          : "变更租户会员状态"
-    );
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().changeMembershipStatus(
-      tenantId,
-      customerId,
-      input,
-      currentUser?.displayName
-    );
-  }
+  ) { return this.getCustomerApplication().changeCustomerMembershipStatus(customerId, input, currentUser); }
 
-  listCustomerStatusHistory(customerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().listStatusHistory(
-      tenantId,
-      customerId,
-      getRequestWorkspaceId(),
-      getRequestLocationIds() === undefined
-    );
-  }
+  listCustomerStatusHistory(customerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().listCustomerStatusHistory(customerId, currentUser); }
 
-  listCustomerIdentityVerifications(customerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().listIdentityVerifications(tenantId, customerId, currentUser);
-  }
+  listCustomerIdentityVerifications(customerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().listCustomerIdentityVerifications(customerId, currentUser); }
 
-  saveCustomerIdentityVerification(customerId: string, input: SaveCustomerIdentityVerificationRequest, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().saveIdentityVerification(tenantId, customerId, input, currentUser);
-  }
+  saveCustomerIdentityVerification(customerId: string, input: SaveCustomerIdentityVerificationRequest, currentUser?: SystemUserRow) { return this.getCustomerApplication().saveCustomerIdentityVerification(customerId, input, currentUser); }
 
-  listCustomerRiskRecords(customerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().listRiskRecords(
-      tenantId,
-      getRequestWorkspaceId(),
-      customerId,
-      currentUser
-    );
-  }
+  listCustomerRiskRecords(customerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().listCustomerRiskRecords(customerId, currentUser); }
 
-  createCustomerRiskRecord(customerId: string, input: CreateCustomerRiskRecordRequest, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    this.assertCustomerActionPermission(currentUser, "rental-os:member:risk-action", "登记会员风险");
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().createRiskRecord(
-      tenantId,
-      getRequestWorkspaceId(),
-      customerId,
-      input,
-      currentUser?.displayName,
-      currentUser
-    );
-  }
+  createCustomerRiskRecord(customerId: string, input: CreateCustomerRiskRecordRequest, currentUser?: SystemUserRow) { return this.getCustomerApplication().createCustomerRiskRecord(customerId, input, currentUser); }
 
   reviewCustomerRiskRecord(
     customerId: string,
     riskRecordId: string,
     input: ReviewCustomerRiskRecordRequest,
     currentUser?: SystemUserRow
-  ) {
-    this.requireWorkspaceDataSource();
-    this.assertCustomerActionPermission(currentUser, "rental-os:member:risk-action", "复核会员风险");
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().reviewRiskRecord(
-      tenantId,
-      getRequestWorkspaceId(),
-      customerId,
-      riskRecordId,
-      input,
-      currentUser?.displayName,
-      currentUser
-    );
-  }
+  ) { return this.getCustomerApplication().reviewCustomerRiskRecord(customerId, riskRecordId, input, currentUser); }
 
-  listCustomerSensitiveAccess(customerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().listSensitiveAccess(tenantId, customerId, currentUser);
-  }
+  listCustomerSensitiveAccess(customerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().listCustomerSensitiveAccess(customerId, currentUser); }
 
-  private requireCustomerMerge() {
-    if (!this.customerMerge) throw new ConflictException("客户合并服务未就绪");
-    return this.customerMerge;
-  }
+  findCustomerDuplicates(customerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().findCustomerDuplicates(customerId, currentUser); }
 
-  findCustomerDuplicates(customerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerMerge().findDuplicates(tenantId, customerId);
-  }
+  previewCustomerMerge(customerId: string, targetCustomerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().previewCustomerMerge(customerId, targetCustomerId, currentUser); }
 
-  previewCustomerMerge(customerId: string, targetCustomerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    if (!targetCustomerId?.trim()) throw new BadRequestException("必须指定保留主档 targetCustomerId");
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerMerge().previewMerge(tenantId, customerId, targetCustomerId.trim());
-  }
+  mergeCustomers(input: MergeCustomersRequest, currentUser?: SystemUserRow) { return this.getCustomerApplication().mergeCustomers(input, currentUser); }
 
-  mergeCustomers(input: MergeCustomersRequest, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    // 合并是租户级动作，不绑定空间：被合并方的空间会员关系原样保留，不做跨空间搬迁。
-    return this.requireCustomerMerge().mergeCustomers(tenantId, input, currentUser?.displayName);
-  }
+  getCustomerClosability(customerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().getCustomerClosability(customerId, currentUser); }
 
-  getCustomerClosability(customerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    // 不传 workspaceId：本接口回答「整个租户客户账号能否注销」。
-    // 空间会员注销的检查在改状态时按空间范围各自进行。
-    return this.requireCustomerMerge().assertClosable(tenantId, customerId);
-  }
+  getCustomerMembershipClosability(customerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().getCustomerMembershipClosability(customerId, currentUser); }
 
-  getCustomerMembershipClosability(customerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerMerge().assertClosable(tenantId, customerId);
-  }
+  getCustomerTransactability(customerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().getCustomerTransactability(customerId, currentUser); }
 
-  getCustomerTransactability(customerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().assertTransactable(
-      tenantId,
-      requireRequestWorkspaceId(),
-      customerId
-    );
-  }
-
-  /**
-   * CUSTOMER-01C：企业资料入口。
-   *
-   * 与客户主档一样按 `tenantId` 解析——企业资料属于租户级客户身份，不按空间隔离
-   * （同一家企业在两个空间是同一家企业，开票与合同不该各存一份）。
-   */
-  private requireCustomerCorporate() {
-    if (!this.customerCorporate) {
-      throw new ConflictException("企业客户服务未就绪");
-    }
-    return this.customerCorporate;
-  }
-
-  private requireCustomerCorporateSettlement() {
-    if (!this.customerCorporateSettlement) {
-      throw new ConflictException("企业授信账务服务未就绪");
-    }
-    return this.customerCorporateSettlement;
-  }
-
-  listCustomerInvoiceProfiles(customerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerCorporate().listInvoiceProfiles(tenantId, customerId);
-  }
+  listCustomerInvoiceProfiles(customerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().listCustomerInvoiceProfiles(customerId, currentUser); }
 
   saveCustomerInvoiceProfile(
     customerId: string,
     input: SaveCustomerInvoiceProfileRequest,
     currentUser?: SystemUserRow
-  ) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerCorporate().saveInvoiceProfile(tenantId, customerId, input);
-  }
+  ) { return this.getCustomerApplication().saveCustomerInvoiceProfile(customerId, input, currentUser); }
 
-  listCustomerContracts(customerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerCorporate().listContracts(tenantId, customerId);
-  }
+  listCustomerContracts(customerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().listCustomerContracts(customerId, currentUser); }
 
   saveCustomerContract(
     customerId: string,
     input: SaveCustomerContractRequest,
     currentUser?: SystemUserRow
-  ) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerCorporate().saveContract(tenantId, customerId, input);
-  }
+  ) { return this.getCustomerApplication().saveCustomerContract(customerId, input, currentUser); }
 
-  getCustomerCredit(customerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerCorporate().getCredit(tenantId, customerId);
-  }
+  getCustomerCredit(customerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().getCustomerCredit(customerId, currentUser); }
 
   saveCustomerCredit(
     customerId: string,
     input: SaveCustomerCreditRequest,
     currentUser?: SystemUserRow
-  ) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerCorporate().saveCredit(
-      tenantId,
-      customerId,
-      input,
-      currentUser?.displayName
-    );
-  }
+  ) { return this.getCustomerApplication().saveCustomerCredit(customerId, input, currentUser); }
 
-  async registerSharedCustomer(input: SaveSharedCustomerRequest, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    if (!this.memberships) throw new ConflictException("会员服务未就绪");
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    const customerId = input.customerType === "corporate"
-      ? (await this.memberships.saveCorporateMember(tenantId, {
-          name: input.name,
-          phone: input.phone,
-          email: input.email,
-          corporateName: input.corporateName?.trim() || input.name,
-          unifiedSocialCreditCode: input.unifiedSocialCreditCode,
-          registeredAddress: input.registeredAddress,
-          legalRepName: input.legalRepName,
-          legalRepPhone: input.legalRepPhone,
-          industry: input.industry,
-          scale: input.scale,
-          corporateTaxNo: input.corporateTaxNo
-        })).customerId
-      : (await this.memberships.registerPersonal(tenantId, {
-          name: input.name,
-          phone: input.phone,
-          email: input.email,
-          identityNo: input.identityNo,
-          gender: input.gender,
-          birthday: input.birthday,
-          sourceChannel: input.sourceChannel,
-          region: input.region,
-          channel: "admin"
-        }, currentUser?.displayName)).customerId;
-    return this.requireSharedCustomers().findById(tenantId, customerId);
-  }
+  async registerSharedCustomer(input: SaveSharedCustomerRequest, currentUser?: SystemUserRow) { return this.getCustomerApplication().registerSharedCustomer(input, currentUser); }
 
   async createBusinessWorkspace(input: CreateBusinessWorkspaceRequest, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    if (!this.rentalCoreService) throw new ConflictException("Rental初始化服务未装配，不能创建租赁空间");
-    // 需求 4.1：空间档案与其品类配置同事务创建，任一步失败整体回滚。
-    const result = await this.platformRepository.createBusinessWorkspace(input, currentUser, async (tx, workspaceId, tenantId) => {
-      await this.rentalCoreService!.registerWorkspace(workspaceId, tenantId, input.categoryCode, tx);
-      // Review P1-3：品类必选能力必须与空间档案原子创建。放在同一 tx 里，
-      // 任一步失败则空间与能力实例一起回滚，不会留下「空间已建、能力没开」的半成品
-      // ——那种空间在正式经营模式下连报价都做不了。
-      await this.initializeWorkspaceCapabilities(
-        tenantId,
-        workspaceId,
-        input.categoryCode,
-        tx,
-        currentUser,
-        input.runMode ?? "development"
-      );
-    });
-    // 仓储事务已经提交，才允许将新空间发布到本进程缓存。
-    await this.rentalCoreService?.onApplicationBootstrap();
-    return result;
+    return this.getWorkspaceApplication().createBusinessWorkspace(input, currentUser);
   }
 
   /**
@@ -1898,50 +1597,11 @@ export class PlatformService {
     currentUser?: SystemUserRow,
     runMode: "production" | "demo" | "development" = "development"
   ) {
-    if (!this.workspaceCapabilityService) {
-      if (runMode === "production") {
-        throw new ConflictException("能力服务不可用，不能创建正式经营空间");
-      }
-      return;
-    }
-    const category = this.rentalCoreService
-      ? await this.rentalCoreService.getWorkspaceCategoryInTransaction(tenantId, workspaceId, categoryCode, tx)
-      : RENTAL_CATEGORY_DEFINITIONS.find((row) => row.code === categoryCode);
-    const declared = category?.defaultCapabilities ?? [];
-    const required = category?.requiredCapabilities ?? [];
-    const result = await this.workspaceCapabilityService.initializeRequiredCapabilities(
-      tenantId,
-      workspaceId,
-      categoryCode,
-      declared,
-      tx,
-      { operator: currentUser?.displayName, requiredCodes: required }
-    );
-    if (result.skipped.length) {
-      // 跳过的必选能力不是错误（未实现、或必填配置无默认值），但必须留痕：
-      // 空间会保持非生产就绪，运营需要知道还差什么。
-      this.logger.warn(
-        `空间 ${workspaceId} 初始化必选能力时跳过：` +
-          result.skipped.map((row) => `${row.code}（${row.why}）`).join("；")
-      );
-    }
-    if (runMode === "production") {
-      const enabled = new Set(result.enabled);
-      const missing = required.filter((code) => !enabled.has(code));
-      if (missing.length) {
-        throw new ConflictException(
-          `正式经营空间初始化失败：缺少可自动启用的必选能力 ${missing.join("、")}。` +
-            "请改为演示/开发模式创建，或先补齐能力实现与默认配置。"
-        );
-      }
-    }
+    return this.getWorkspaceApplication().initializeWorkspaceCapabilities(tenantId, workspaceId, categoryCode, tx, currentUser, runMode);
   }
 
   async updateBusinessWorkspace(id: string, input: UpdateBusinessWorkspaceRequest, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    await this.assertProductionModeAllowed(tenantId, id, input);
-    return this.platformRepository.updateBusinessWorkspace(id, input, currentUser);
+    return this.getWorkspaceApplication().updateBusinessWorkspace(id, input, currentUser);
   }
 
   private async assertProductionModeAllowed(
@@ -1962,18 +1622,15 @@ export class PlatformService {
   }
 
   listWorkspaceMembers(workspaceId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    return this.platformRepository.listWorkspaceMembers(workspaceId, currentUser);
+    return this.getWorkspaceApplication().listWorkspaceMembers(workspaceId, currentUser);
   }
 
   listWorkspaceFulfillmentLocations(workspaceId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    return this.platformRepository.listWorkspaceFulfillmentLocations(workspaceId, currentUser);
+    return this.getWorkspaceApplication().listWorkspaceFulfillmentLocations(workspaceId, currentUser);
   }
 
   saveWorkspaceMember(workspaceId: string, input: SaveWorkspaceMemberRequest, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    return this.platformRepository.saveWorkspaceMember(workspaceId, input, currentUser);
+    return this.getWorkspaceApplication().saveWorkspaceMember(workspaceId, input, currentUser);
   }
 
   listOrganizations(tenantId?: string, currentUser?: SystemUserRow) {
@@ -2476,72 +2133,27 @@ export class PlatformService {
     input: SaveSystemUserAccessRequest,
     currentUser?: SystemUserRow
   ) {
-    const targetTenantId = this.resolveTargetTenantId(input.tenantId, currentUser);
-    await this.assertTenantAdminPrivilegeWrite(input, targetTenantId, currentUser);
-    this.requireWorkspaceDataSource();
-    return this.platformRepository.saveUserWithWorkspaceAccess(
-      { ...input, tenantId: targetTenantId, isSaasAdmin: false },
-      targetTenantId,
-      currentUser?.id
-    );
+    return this.getWorkspaceApplication().saveUserWithWorkspaceAccess(input, currentUser);
   }
 
-  getCustomerCreditAccount(customerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerCorporateSettlement().financialAccount(tenantId, customerId);
-  }
+  getCustomerCreditAccount(customerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().getCustomerCreditAccount(customerId, currentUser); }
 
-  listCustomerCreditLedger(customerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerCorporateSettlement().listLedger(tenantId, customerId);
-  }
+  listCustomerCreditLedger(customerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().listCustomerCreditLedger(customerId, currentUser); }
 
-  recordCustomerCreditMaturity(customerId: string, input: RecordCustomerCorporateCreditMaturityRequest, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    if (!currentUser?.id || currentUser.isSaasAdmin || !(currentUser.isPlatformAdmin
-      || currentUser.permissions.includes("rental-os:corporate:manage") || currentUser.permissions.includes("*"))) {
-      throw new ForbiddenException("核定债权到期日需要当前企业管理权限");
-    }
-    if (getRequestDataScope() !== "all" || getRequestLocationIds() !== undefined) throw new ForbiddenException("核定债权须当前完整空间财务范围");
-    return this.requireCustomerCorporateSettlement().recordMaturity(currentUser.tenantId, customerId, input,
-      currentUser.id, requireRequestWorkspaceId());
-  }
+  recordCustomerCreditMaturity(customerId: string, input: RecordCustomerCorporateCreditMaturityRequest, currentUser?: SystemUserRow) { return this.getCustomerApplication().recordCustomerCreditMaturity(customerId, input, currentUser); }
 
-  readCustomerCreditMaturity(customerId: string, ledgerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    if (getRequestDataScope() !== "all" || getRequestLocationIds() !== undefined) throw new ForbiddenException("读取债权到期依据须当前完整空间财务范围");
-    return this.requireCustomerCorporateSettlement().readMaturity(tenantId, customerId, ledgerId, requireRequestWorkspaceId());
-  }
+  readCustomerCreditMaturity(customerId: string, ledgerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().readCustomerCreditMaturity(customerId, ledgerId, currentUser); }
 
-  readCustomerCreditPaymentReversal(customerId: string, paymentId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    return this.requireCustomerCorporateSettlement().readPaymentReversal(currentUser?.tenantId ?? requireRequestTenantId(), customerId, paymentId);
-  }
+  readCustomerCreditPaymentReversal(customerId: string, paymentId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().readCustomerCreditPaymentReversal(customerId, paymentId, currentUser); }
 
   reverseCustomerCreditPayment(customerId: string, paymentId: string, input: ReverseCustomerCorporateCreditPaymentRequest,
-    currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerCorporateSettlement().reversePayment(tenantId, customerId, paymentId, input);
-  }
+    currentUser?: SystemUserRow) { return this.getCustomerApplication().reverseCustomerCreditPayment(customerId, paymentId, input, currentUser); }
 
   recordCustomerCreditPayment(
     customerId: string,
     input: RecordCustomerCorporateCreditPaymentRequest,
     currentUser?: SystemUserRow
-  ) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerCorporateSettlement().recordPayment(
-      tenantId,
-      customerId,
-      input,
-      currentUser?.displayName
-    );
-  }
+  ) { return this.getCustomerApplication().recordCustomerCreditPayment(customerId, input, currentUser); }
 
   async findUserForLogin(tenantCode: string, account: string, password: string) {
     if (this.useMysqlDataSource()) {
@@ -2983,39 +2595,7 @@ export class PlatformService {
     tenantId: string,
     currentUser?: SystemUserRow
   ) {
-    const actorIsTenantAdmin = Boolean(
-      currentUser?.id && currentUser.tenantId === tenantId && currentUser.isPlatformAdmin && !currentUser.isSaasAdmin
-    );
-    let targetIsTenantAdmin = false;
-    const workspaceRoleIds = "workspaceAccesses" in input && Array.isArray(input.workspaceAccesses)
-      ? input.workspaceAccesses.map((access) => access.roleId).filter((roleId): roleId is string => Boolean(roleId))
-      : [];
-    const requestedRoleIds = [...new Set([...(input.roleIds ?? []), ...workspaceRoleIds])];
-    let assignsFixedAllPermissions = false;
-    if (requestedRoleIds.length) {
-      if (this.useMysqlDataSource()) {
-        assignsFixedAllPermissions = await this.platformRepository.hasFixedAllPermissionRole(requestedRoleIds, tenantId);
-      } else {
-        assignsFixedAllPermissions = requestedRoleIds.some((roleId) =>
-          this.roleRows.some((role) => role.id === roleId && role.tenantId === tenantId && role.isActive && role.fixedAllPermissions)
-        );
-      }
-    }
-    if (input.id) {
-      if (this.useMysqlDataSource()) {
-        targetIsTenantAdmin = await this.platformRepository.isTenantAdminUser(input.id, tenantId);
-      } else {
-        const target = this.users.find((user) => user.id === input.id && user.tenantId === tenantId);
-        targetIsTenantAdmin = Boolean(target && (
-          target.isPlatformAdmin || target.roleIds.some((roleId) =>
-            this.roleRows.some((role) => role.id === roleId && role.tenantId === tenantId && role.isActive && role.fixedAllPermissions)
-          )
-        ));
-      }
-    }
-    if (!actorIsTenantAdmin && (input.isPlatformAdmin === true || targetIsTenantAdmin || assignsFixedAllPermissions)) {
-      throw new ForbiddenException("只有当前租户管理员可以新增、修改或撤销租户管理员权限");
-    }
+    return this.getWorkspaceApplication().assertTenantAdminPrivilegeWrite(input, tenantId, currentUser);
   }
 
   private cloneSystemRulesConfig(

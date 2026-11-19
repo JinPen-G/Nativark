@@ -102,6 +102,7 @@ import { getRequestIdentity, runWithRequestIdentity } from "@rental-os/platform-
 import { clientCategoryMetadata, clientItemAttributes, hasLegacyClientCategoryProjection } from "./category-client-projection";
 import { requestFingerprint } from "@rental-os/platform-contracts/request-fingerprint";
 import { evaluateDeliveryServiceArea } from "./client-delivery-service-area";
+import { lockRentalBusinessTenant } from "./mysql-business-fence";
 
 
 const DELIVERY_MODES = new Set<string>(["delivery", "onsite_delivery"]);
@@ -149,13 +150,17 @@ export class ClientApiService {
     private readonly payments: PaymentRuntimeService,
     private readonly files: FileStorageRuntimeService,
     private readonly documents: RentalDocumentService,
-    private readonly failures: RentalClientFailureOutbox,
+    private readonly failures: RentalClientFailureOutbox | null,
     private readonly corporateSettlement?: CustomerCorporateSettlementService,
     private readonly addresses?: ClientDeliveryAddressService,
     private readonly wechat?: ClientWechatAuthService,
     private readonly categoryResolver?: RentalCategoryResolver,
     private readonly handoffFacts?: RentalCoreFactRepository
-  ) {}
+  ) {
+    if (failures !== null && typeof failures?.inspection !== "function") {
+      throw new Error("客户应用须提供原检查出箱，或由未启用 AI 的宿主显式传 null");
+    }
+  }
 
   private async context(tenantId: string): Promise<BusinessContext> {
     if (typeof this.core.readBusinessContext === "function") return this.business.refreshWorkspaceContext(tenantId, await this.core.readBusinessContext(tenantId));
@@ -874,6 +879,8 @@ export class ClientApiService {
     const name = input.name.trim();
     if (!name) throw new BadRequestException("联系人姓名不能为空");
     const saved = await this.prisma.$transaction(async (tx) => {
+      // Guard 后权限仍可能撤销；先在本次写事务的租户父锁内复核，再读取或改写联系人。
+      await lockRentalBusinessTenant(tx, context.tenantId);
       let existing = input.id
         ? await tx.customerContact.findFirst({ where: { tenantId: context.tenantId, customerId: context.customerId, id: input.id, status: "active" } })
         : undefined;
@@ -906,7 +913,10 @@ export class ClientApiService {
   }
 
   async deleteContact(context: ClientRequestContext, contactId: string) {
-    const result = await this.prisma.customerContact.updateMany({ where: { tenantId: context.tenantId, customerId: context.customerId, id: contactId, status: "active" }, data: { status: "inactive", isPrimary: false } });
+    const result = await this.prisma.$transaction(async (tx) => {
+      await lockRentalBusinessTenant(tx, context.tenantId);
+      return tx.customerContact.updateMany({ where: { tenantId: context.tenantId, customerId: context.customerId, id: contactId, status: "active" }, data: { status: "inactive", isPrimary: false } });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     if (result.count !== 1) throw new NotFoundException("联系人不存在");
     return { success: true };
   }
@@ -1664,7 +1674,8 @@ export class ClientApiService {
         Object.assign(exception, { customerResponseStatus: input.decision, customerResponseReason: reason, customerRespondedBy: operator, customerRespondedAt: respondedAt, customerResponseHistory: history });
         await tx.rentalInspectionRecord.update({ where: { id: inspectionId, tenantId: context.tenantId, workspaceId: context.workspaceId, orderId, revision: row.revision },
           data: { exceptions: exceptions as Prisma.InputJsonValue, revision: { increment: 1 } } });
-        await this.failures.inspection(tx, { tenantId: context.tenantId, workspaceId: context.workspaceId }, inspectionId);
+        // 所选宿主未启用 AI 时不登记 AI 出箱；原检查事实和业务收据仍在同一事务提交。
+        if (this.failures !== null) await this.failures.inspection(tx, { tenantId: context.tenantId, workspaceId: context.workspaceId }, inspectionId);
         return { inspectionId, exceptionIndex };
       },
       replay: async () => {

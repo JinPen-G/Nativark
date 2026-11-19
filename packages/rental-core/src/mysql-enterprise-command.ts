@@ -1,5 +1,6 @@
 /** Enterprise commands serialize on the tenant lock and commit original receipts.
- * Customer identity is re-read; this service never grants operator or rental authority. */
+ * Selected Core access is rechecked before facts/receipts; customer identity is
+ * re-read. This service never grants operator or rental authority. */
 import { BadRequestException, ConflictException, ForbiddenException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { enterpriseHash, enterpriseJson } from "./enterprise-receipt";
@@ -9,6 +10,7 @@ import type { SystemUserRow } from "@rental-os/platform-contracts";
 import { requireRequestTenantId, requireRequestUserId } from "@rental-os/platform-server/request-identity";
 import type { RentalEnterpriseCommandStorage } from "./enterprise-read-storage";
 import type { ClientRequestContext } from "./client-context";
+import { assertRentalBusinessTenantAccessAfterLock } from "./mysql-business-fence";
 
 export class EnterpriseCommandService {
   constructor(private readonly prisma: RentalEnterpriseCommandStorage) {}
@@ -40,6 +42,7 @@ export class EnterpriseCommandService {
       // They never mutate grants/policy or upgrade it; policy writes remain exclusive.
       const tenant = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT id FROM Tenant WHERE id=${tenantId} AND status='ACTIVE' ${tenantFence === "shared" ? Prisma.sql`LOCK IN SHARE MODE` : Prisma.sql`FOR UPDATE`}`);
       if (!tenant.length) throw new ForbiddenException("商户不可用");
+      await assertRentalBusinessTenantAccessAfterLock(tx, tenantId);
       if (verify) await verify(tx);
       if (serialize) await serialize(tx);
       const receipts = await tx.$queryRaw<Array<{ actorUserId: string; requestHash: string; result: T | string }>>`SELECT actorUserId, requestHash, result FROM enterprise_portal_operations WHERE tenantId=${tenantId} AND operationKey=${input.operationKey}`;

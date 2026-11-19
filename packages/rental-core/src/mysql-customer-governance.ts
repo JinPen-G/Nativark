@@ -1,5 +1,5 @@
 /** Rental客户治理应用。主档/状态写入者与注销事实由宿主供给同一实例；
- * 当前ALS、空间/地点投影、原锁顺序、状态与历史同事务保持。 */
+ * 当前ALS、空间/地点投影、原锁顺序、状态与历史同事务保持；业务写入在父锁后复核所选Core。 */
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import type {
@@ -26,6 +26,7 @@ import type { RentalCustomerGovernanceStorage, RentalCustomerGovernanceCustomers
 import type { CustomerTx } from "./mysql-customer-operations";
 import { getRequestDataScope, getRequestIdentity, getRequestLocationIds, getRequestUserId, getRequestWorkspaceId } from "@rental-os/platform-server/request-identity";
 import { readCustomerInsights } from "./mysql-customer-insights";
+import { assertRentalBusinessTenantAccessAfterLock, lockRentalBusinessTenant } from "./mysql-business-fence";
 
 /** 敏感字段的解密查看权限。与「查看客户」分开授权（需求 4.8.5）。 */
 export const CUSTOMER_REVEAL_PERMISSION = "rental-os:customer:reveal-sensitive";
@@ -293,7 +294,7 @@ export class CustomerOperationsService {
     // 探测他租户客户是否存在的信道。
     if (!profile) throw new NotFoundException("客户不存在");
     const revealed = this.canReveal(user);
-    await this.operations.recordSensitiveAccess(tenantId, {
+    await this.operations.recordSensitiveReadAccess(tenantId, {
       workspaceId,
       customerId,
       field: "customer_detail",
@@ -330,7 +331,7 @@ export class CustomerOperationsService {
     // 列表只记一条汇总审计：逐客户一条会让一次翻页产生上百行噪声，
     // 反而淹没真正需要追责的单客户明文查看。
     if (rows.length) {
-      await this.operations.recordSensitiveAccess(tenantId, {
+      await this.operations.recordSensitiveReadAccess(tenantId, {
         workspaceId,
         customerId: rows[0].id,
         field: "customer_list",
@@ -357,25 +358,33 @@ export class CustomerOperationsService {
     customerId: string,
     operator?: string
   ): Promise<CustomerAccount> {
-    const profile = await this.customers.findById(tenantId, customerId);
-    if (!profile) throw new NotFoundException("客户不存在");
-    if (profile.mergedIntoCustomerId) {
-      throw new ConflictException("该客户主档已被合并，请为保留主档开通账号");
-    }
-    const existing = await this.operations.findAccountByCustomer(tenantId, customerId);
-    if (existing) return existing;
     try {
-      return await this.operations.createAccount(tenantId, {
-        customerId,
-        loginPhone: profile.phone,
-        loginPhoneMasked: profile.phoneMasked,
-        operator
-      });
+      return await this.prisma.$transaction(async tx => {
+        await lockRentalBusinessTenant(tx, tenantId);
+        const profile = await this.customers.findById(tenantId, customerId, tx);
+        if (!profile) throw new NotFoundException("客户不存在");
+        if (profile.mergedIntoCustomerId) {
+          throw new ConflictException("该客户主档已被合并，请为保留主档开通账号");
+        }
+        const existing = await this.operations.findAccountByCustomer(tenantId, customerId, tx);
+        if (existing) return existing;
+        return this.operations.createAccount(tenantId, {
+          customerId,
+          loginPhone: profile.phone,
+          loginPhoneMasked: profile.phoneMasked,
+          operator
+        }, tx);
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     } catch (error) {
       // 并发开通或登录号已被别的客户占用：前者应幂等返回，后者必须明确拒绝。
       const code = (error as { code?: string }).code;
       if (code !== "P2002") throw error;
-      const mine = await this.operations.findAccountByCustomer(tenantId, customerId);
+      // The failed insert's transaction is over. Re-read its original result with
+      // current authority; a unique conflict never authorizes another account write.
+      const mine = await this.prisma.$transaction(async tx => {
+        await lockRentalBusinessTenant(tx, tenantId);
+        return this.operations.findAccountByCustomer(tenantId, customerId, tx);
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
       if (mine) return mine;
       throw new ConflictException("该登录手机号已被本租户其他客户账号占用");
     }
@@ -385,7 +394,9 @@ export class CustomerOperationsService {
    * customer gate. Do not put this exclusive lock in Core's shared gate or upgrade S→X. */
   private async lockCustomerStatusGate(tenantId: string, customerId: string, tx: CustomerTx) {
     const tenants = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM Tenant WHERE id=${tenantId} FOR UPDATE`;
-    if (!tenants.length || !(await this.operations.lockCustomerBusinessGate(tenantId, customerId, tx))) {
+    if (!tenants.length) throw new NotFoundException("客户不存在");
+    await assertRentalBusinessTenantAccessAfterLock(tx, tenantId);
+    if (!(await this.operations.lockCustomerBusinessGate(tenantId, customerId, tx))) {
       throw new NotFoundException("客户不存在");
     }
   }
@@ -698,7 +709,7 @@ export class CustomerOperationsService {
       where: { tenantId, customerId },
       orderBy: [{ reviewedAt: "desc" }, { createdAt: "desc" }, { id: "desc" }]
     });
-    await this.operations.recordSensitiveAccess(tenantId, {
+    await this.operations.recordSensitiveReadAccess(tenantId, {
       workspaceId: getRequestWorkspaceId(), customerId, field: "customer_identity_verifications", action: "reveal",
       revealed: true, operator: user?.displayName, permission: CUSTOMER_REVEAL_PERMISSION,
       reason: "查看客户实名核验记录", at: stamp()
@@ -736,6 +747,7 @@ export class CustomerOperationsService {
 
     const now = new Date();
     const saved = await this.prisma.$transaction(async (tx) => {
+      await lockRentalBusinessTenant(tx, tenantId);
       if (input.result === "revoked") {
         const latestForCredential = await tx.customerIdentityVerification.findFirst({
           where: { tenantId, customerId, credentialType },
@@ -842,7 +854,9 @@ export class CustomerOperationsService {
       // gate so a concurrent Tenant→customer merge/status write cannot reverse the order.
       // This path never upgrades the shared fence to an exclusive authorization lock.
       const tenants = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM Tenant WHERE id=${tenantId} LOCK IN SHARE MODE`;
-      if (!tenants.length || !(await this.operations.lockCustomerBusinessGate(tenantId, customerId, tx))) {
+      if (!tenants.length) throw new NotFoundException("客户不存在或不属于当前租户");
+      await assertRentalBusinessTenantAccessAfterLock(tx, tenantId);
+      if (!(await this.operations.lockCustomerBusinessGate(tenantId, customerId, tx))) {
         throw new NotFoundException("客户不存在或不属于当前租户");
       }
       return this.operations.createRiskRecord({
@@ -879,6 +893,7 @@ export class CustomerOperationsService {
     await this.assertRiskCustomerVisible(tenantId, workspaceId, customerId, user);
 
     return this.prisma.$transaction(async (tx) => {
+      await lockRentalBusinessTenant(tx, tenantId);
       if (!(await this.operations.lockCustomerBusinessGate(tenantId, customerId, tx))) {
         throw new NotFoundException("客户不存在或不属于当前租户");
       }
@@ -1287,6 +1302,7 @@ export class CustomerOperationsService {
     const customer = await this.prisma.customerProfile.findFirst({ where: { tenantId, id: customerId }, select: { id: true } });
     if (!customer) throw new NotFoundException("客户不存在");
     const saved = await this.prisma.$transaction(async (tx) => {
+      await lockRentalBusinessTenant(tx, tenantId);
       const existing = input.id
         ? await tx.customerDeliveryAddress.findFirst({ where: { tenantId, customerId, id: input.id, status: "active" } })
         : null;
@@ -1336,10 +1352,13 @@ export class CustomerOperationsService {
   }
 
   async removeCustomerAddress(tenantId: string, customerId: string, addressId: string) {
-    const updated = await this.prisma.customerDeliveryAddress.updateMany({
-      where: { tenantId, customerId, id: addressId, status: "active" },
-      data: { status: "deleted", isDefault: false }
-    });
+    const updated = await this.prisma.$transaction(async tx => {
+      await lockRentalBusinessTenant(tx, tenantId);
+      return tx.customerDeliveryAddress.updateMany({
+        where: { tenantId, customerId, id: addressId, status: "active" },
+        data: { status: "deleted", isDefault: false }
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     if (updated.count !== 1) throw new NotFoundException("地址不存在");
     return { success: true as const };
   }

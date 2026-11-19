@@ -28,7 +28,7 @@ import { resolveScopeWorkspaceId } from "./mysql-workspace-scope";
 import { bufferedRentalPeriod, peakReservedQuantity } from "./occupancy";
 import { getRequestIdentity, getRequestTenantId, getRequestWorkspaceId, runWithRequestIdentity } from "@rental-os/platform-server/request-identity";
 import { requestFingerprint } from "@rental-os/platform-contracts/request-fingerprint";
-import type { RentalAllocationTransaction, RentalAllocationStorage, RentalAllocationFailureEvents } from "./allocation-storage";
+import type { RentalAllocationTransaction, RentalAllocationStorage, RentalAllocationFailureEvents, RentalAllocationWorkerAuthority } from "./allocation-storage";
 import {
   ACTIVE_ASSIGNMENTS,
   allocationComplete,
@@ -63,15 +63,21 @@ export class RentalAllocationService<TTransaction extends RentalAllocationTransa
 {
   private timer?: ReturnType<typeof setInterval>;
   private running = false;
+  private stopping = false;
+  private drain?: Promise<void>;
+  private finishDrain?: () => void;
   private readonly logger = new Logger(RentalAllocationService.name);
   constructor(
     private readonly prisma: RentalAllocationStorage<TTransaction>,
     private readonly facts: RentalCoreFactStore<TTransaction>,
     private readonly core: RentalCoreService<TTransaction>,
     private readonly failureEvents?: RentalAllocationFailureEvents<TTransaction>,
+    private readonly workerAuthority?: RentalAllocationWorkerAuthority<TTransaction>,
   ) {}
 
   onApplicationBootstrap() {
+    if (this.timer) return;
+    this.stopping = false;
     this.timer = setInterval(() => {
       void this.runDue().catch(() =>
         this.logger.error("自动分配任务失败，请检查数据库连接"),
@@ -80,7 +86,11 @@ export class RentalAllocationService<TTransaction extends RentalAllocationTransa
     this.timer.unref();
   }
   onModuleDestroy() {
+    this.stopping = true;
     if (this.timer) clearInterval(this.timer);
+    this.timer = undefined;
+    // 停止新扫描后等待已进入的原事务结束；退出不代表其外部结果已经回滚。
+    return this.drain ?? Promise.resolve();
   }
 
   private async occupancies(
@@ -807,9 +817,16 @@ export class RentalAllocationService<TTransaction extends RentalAllocationTransa
 
   /** 无论是否开启自动分配，都检查已有预分配/锁定；异常不自动解除资源锁。 */
   async scanOrder(tenantId: string, orderId: string) {
+    return this.scanOrderInScope(tenantId, orderId);
+  }
+
+  private async scanOrderInScope(tenantId: string, orderId: string,
+    workerScope?: { tenantId: string; workspaceId: string }) {
     return this.prisma.$transaction(
       async (tx) => {
         await this.facts.lockOrder(tenantId, orderId, tx);
+        // 作业准入会持经营空间锁，沿原履约的订单→空间顺序，避免与续租或换货互等。
+        if (workerScope) await this.workerAuthority?.assertCurrent(workerScope, tx);
         const order = await this.facts.findOrder(tenantId, orderId, tx);
         if (
           !order ||
@@ -974,12 +991,22 @@ export class RentalAllocationService<TTransaction extends RentalAllocationTransa
 
   /** 自动操作仅在管理员显式开启时执行；逐订单事务，失败记录待人工处理。 */
   async runDue() {
-    if (this.running) return;
+    if (this.running || this.stopping) return;
     this.running = true;
+    this.drain = new Promise<void>(resolve => { this.finishDrain = resolve; });
     try {
       const settings =
         await this.prisma.rentalTenantBusinessSettings.findMany();
       for (const row of settings) {
+        if (this.stopping) break;
+        const workerScope = { tenantId: row.tenantId, workspaceId: row.workspaceId };
+        try {
+          await this.workerAuthority?.assertCurrent(workerScope);
+        } catch {
+          // 一个租户停用或授权读取失败不阻断其他租户，也不把拒绝写成业务异常。
+          this.logger.warn(`自动分配作业准入不可用 tenant=${row.tenantId} workspace=${row.workspaceId}`);
+          continue;
+        }
         const config = (row.settings as unknown as TenantRentalBusinessSettings)
           .allocation;
         await runWithRequestIdentity(
@@ -996,7 +1023,8 @@ export class RentalAllocationService<TTransaction extends RentalAllocationTransa
                 RentalCoreOrderStatus.ReadyForPickup,
               ].includes(o.status),
             )) {
-              const order = await this.scanOrder(row.tenantId, candidate.id);
+              if (this.stopping) break;
+              const order = await this.scanOrderInScope(row.tenantId, candidate.id, workerScope);
               if (
                 !order ||
                 order.status !== RentalCoreOrderStatus.Reserved ||
@@ -1017,6 +1045,8 @@ export class RentalAllocationService<TTransaction extends RentalAllocationTransa
               try {
                 await this.prisma.$transaction(
                   async (tx) => {
+                    await this.facts.lockOrder(row.tenantId, order.id, tx);
+                    await this.workerAuthority?.assertCurrent(workerScope, tx);
                     let current = order;
                     if (!allocationComplete(current))
                       current = await this.manage(
@@ -1051,7 +1081,9 @@ export class RentalAllocationService<TTransaction extends RentalAllocationTransa
                 );
               } catch (error) {
                 await this.prisma.$transaction(async (tx) => {
+                  // 撤权后不能再为这次自动执行写入失败事实；保留原未知结果供核对。
                   await this.facts.lockOrder(row.tenantId, order.id, tx);
+                  await this.workerAuthority?.assertCurrent(workerScope, tx);
                   const latest = await this.facts.findOrder(
                     row.tenantId,
                     order.id,
@@ -1074,7 +1106,7 @@ export class RentalAllocationService<TTransaction extends RentalAllocationTransa
                   )
                     return;
                   await this.recordIssue(latest, issue, tx);
-                });
+                }, { isolationLevel: "ReadCommitted" });
               }
             }
           },
@@ -1082,6 +1114,9 @@ export class RentalAllocationService<TTransaction extends RentalAllocationTransa
       }
     } finally {
       this.running = false;
+      this.finishDrain?.();
+      this.finishDrain = undefined;
+      this.drain = undefined;
     }
   }
 }

@@ -5,6 +5,7 @@ import { CLIENT_API_VERSION, type ClientDeliveryAddressListResponse, type Client
 import type { RentalClientAddressStorage, RentalClientDeliveryConfiguration } from "./client-lifecycle-ports";
 import type { ClientRequestContext } from "./client-context";
 import { evaluateDeliveryServiceArea, type DeliveryServiceAreaDecision } from "./client-delivery-service-area";
+import { lockRentalBusinessTenant } from "./mysql-business-fence";
 
 /**
  * 本人配送地址簿与订单交付快照（MP-06，需求 §11.1）。
@@ -99,6 +100,8 @@ export class ClientDeliveryAddressService {
     if (context.customerType !== "personal") throw new ForbiddenException("企业账号不能维护本人配送地址");
     const data = this.normalize(input);
     const saved = await this.prisma.$transaction(async (tx) => {
+      // 默认地址和版本校验沿原 Serializable 事务，当前权限在其父锁内先复核。
+      await lockRentalBusinessTenant(tx, context.tenantId);
       const scope = { tenantId: context.tenantId, customerId: context.customerId };
       let existing: AddressRow | null = null;
       if (input.id) {
@@ -128,10 +131,13 @@ export class ClientDeliveryAddressService {
   }
 
   async remove(context: ClientRequestContext, addressId: string): Promise<{ success: true }> {
-    const result = await this.prisma.customerDeliveryAddress.updateMany({
-      where: { tenantId: context.tenantId, customerId: context.customerId, id: addressId, status: "active" },
-      data: { status: "deleted", isDefault: false }
-    });
+    const result = await this.prisma.$transaction(async (tx) => {
+      await lockRentalBusinessTenant(tx, context.tenantId);
+      return tx.customerDeliveryAddress.updateMany({
+        where: { tenantId: context.tenantId, customerId: context.customerId, id: addressId, status: "active" },
+        data: { status: "deleted", isDefault: false }
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     if (result.count !== 1) throw new NotFoundException("地址不存在");
     return { success: true };
   }

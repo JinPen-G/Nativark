@@ -4,21 +4,28 @@ Rental 自己维护121个模型和5个枚举。公共账号、角色、授权、
 
 ## 组合新宿主
 
-1. 读取底座公共 schema 与本包 `prisma/schema.prisma`，调用 `createRentalPrismaContribution(rentalSchema)`，交给公共 `composeCorePrismaSchema`。宿主在自己的目录生成一个组合 Client。原公共关系由本包提供，业务字段无需复制到平台文件。[源码组合](../src/prisma-schema.ts)
-2. 调用 `createRentalMysqlDataPlan()`，将 `publicForeignKeys` 传给公共 `createPublicPlatformDataPlan`。两份计划分别检查公共表和 Rental 表；迁移执行状态从同一数据库的原 `_prisma_migrations` 读取。[Rental 数据计划](../src/mysql-data.ts) · [公共数据计划](../../../apps/platform-api/src/platform-data.ts) · [原账读取](../../core-host/src/mysql-deployment.ts)
+1. 从部署锁和明确的已准备包目录调用 `requireRentalDataPackage(directory, pin, hostVersions)`。它核对实际完整包、清单、实现/数据版本、范围、schema 和原迁移摘要；缺少标准清单的源码目录不能充当安装证明。将返回的 `prisma` 贡献交给公共 `composeCorePrismaSchema`，宿主在自己的目录生成组合 Client。[固定包读取](../src/data-package.ts) · [源码组合](../src/prisma-schema.ts)
+2. 使用同次固定包读取返回的 `dataPlan`，将其 `publicForeignKeys` 传给公共 `createPublicPlatformDataPlan`。两份计划分别检查公共表和 Rental 表；迁移执行状态从同一数据库的原 `_prisma_migrations` 读取。原 `createRentalMysqlDataPlan()` 保留给包内已核定源码消费者，新宿主不从另一作者目录混读迁移。[Rental 数据计划](../src/mysql-data.ts) · [公共数据计划](../../../apps/platform-api/src/platform-data.ts) · [原账读取](../../core-host/src/mysql-deployment.ts)
 3. 固定包和版本后，使用公共 `createCoreMigrationDeployment` 准备公共迁移与所选 Core 的新部署目录，再按部署流程应用、初始化与验证。准备文件、应用迁移和租户授权分别办理。[部署组合](../../core-contracts/src/deployment.ts) · [完整接入步骤](../../core-contracts/README.md#五步快速接入)
 
 ```ts
 import { composeCorePrismaSchema } from "@rental-os/core-contracts/prisma";
-import { createRentalPrismaContribution } from "@rental-os/rental-core/prisma-schema";
-import { createRentalMysqlDataPlan } from "@rental-os/rental-core/mysql-data";
+import { requireRentalDataPackage } from "@rental-os/rental-core/data-package";
 
-const schema = composeCorePrismaSchema(publicSchema, [createRentalPrismaContribution(rentalSchema)]);
-const rentalData = createRentalMysqlDataPlan();
-const platformData = createPublicPlatformDataPlan(rentalData.publicForeignKeys);
+const rental = requireRentalDataPackage(installedDirectory, rentalPin, platformRelease.versions);
+const schema = composeCorePrismaSchema(publicSchema, [rental.prisma]);
+const platformData = createPublicPlatformDataPlan(rental.dataPlan.publicForeignKeys);
 ```
 
-`publicSchema`、`rentalSchema` 为受控安装包读取的源码；`createPublicPlatformDataPlan` 由宿主导入。生成器和输出目录归宿主，同一组合使用同一个数据库与事务。数据计划读取包内固定 SQL 和摘要，不连接数据库、不执行 DDL；调用 `readPhysical` 才读取实际结构。
+`publicSchema` 为固定公共发行的源码，`rentalPin` 来自部署锁；`createPublicPlatformDataPlan` 由宿主导入。生成器和输出目录归宿主，同一组合使用同一个数据库与事务。数据计划读取包内固定 SQL 和摘要，不连接数据库、不执行 DDL；调用 `readPhysical` 才读取实际结构。
+
+## 构建与初始化
+
+[发行工厂](../src/package.ts) `createRentalPackage` 接收已构建代码、声明、客户端、数据和许可的完整字节 Map，以及真实固定 Core 来源、底座来源和公开接入手册。工厂检查 npm 正式出口和相对依赖，按同一数据发行生成 `core.manifest.json`、`CORE_GUIDE.md` 与确定性归档。仅有源码或缺少构建文件时会失败；生成包不代表已经安装、迁移或放行业务。原权限码保留在 HTTP/worker 的真实策略中，清单不新增一套替代授权。
+
+空库完成迁移后，部署人员可在显式事务中调用 [initializeRentalCategories](../src/initialize-categories.ts)。它只维护原四个内置品类、当前库 legacy 快照和不可变内置版本，不创建演示租户、账号、经营空间或 Core 授权。调用方提供操作者与时间，并负责原部署权限和事务提交；失败回滚同一事务。
+
+重复初始化不覆盖已保存品类正文、版本政策或既有推荐；发现同 ID 的发布正文不同则拒绝。已有品类缺少推荐时仍沿原 Seed 指向 legacy 快照，不能把当前代码当作历史运行依据。业务空间和原绑定沿正式业务入口创建，普通升级不重跑业务 Seed。
 
 ## 迁移与历史
 

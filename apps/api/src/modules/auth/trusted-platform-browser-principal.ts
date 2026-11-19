@@ -1,9 +1,2 @@
-/** Internal signed Web session bound to ORIGINAL current SaaS management.
- * No workspace/business authority, credentials, role tree or consent/MFA proof. */
-export interface TrustedPlatformBrowserPrincipal {
-  readonly userId: string;
-  readonly tenantId: string;
-  readonly audience: 'operator';
-  readonly sessionId: string;
-  readonly expiresAt: number;
-}
+/** 原认证票据的兼容出口，与 Rental 标准宿主共用单一合同。 */
+export * from "@rental-os/rental-core/trusted-platform-browser-principal";

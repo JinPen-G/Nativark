@@ -15,6 +15,7 @@ import type {
 import type {
   RentalCorporateCustomers, RentalCorporateGovernanceStorage, RentalCorporateGovernanceTransaction
 } from "./corporate-application-storage";
+import { lockRentalBusinessTenant } from "./mysql-business-fence";
 export type {
   RentalCorporateCustomers, RentalCorporateGovernanceStorage, RentalCorporateGovernanceTransaction
 } from "./corporate-application-storage";
@@ -99,6 +100,7 @@ export class CustomerCorporateService<TTransaction extends RentalCorporateGovern
     const wantDefault = input.isDefault ?? false;
     const id = input.id;
     const saved = await this.prisma.$transaction(async (tx) => {
+      await lockRentalBusinessTenant(tx, tenantId);
       await this.lockOrderSubjectCustomers(tenantId, [customerId], tx);
       await this.requireCorporate(tenantId, customerId, tx);
       const existing = id
@@ -216,6 +218,7 @@ export class CustomerCorporateService<TTransaction extends RentalCorporateGovern
     };
     try {
       const saved = await this.prisma.$transaction(async tx => {
+        await lockRentalBusinessTenant(tx, tenantId);
         await this.lockOrderSubjectCustomers(tenantId, [customerId], tx);
         await this.requireCorporate(tenantId, customerId, tx);
         if (input.id) {
@@ -278,6 +281,7 @@ export class CustomerCorporateService<TTransaction extends RentalCorporateGovern
       approvedAt: new Date()
     };
     const row = await this.prisma.$transaction(async tx => {
+      await lockRentalBusinessTenant(tx, tenantId);
       // 与新增占用共用主档行锁；ReadCommitted确保等到锁后重新汇总最新流水，
       // 不能用事务外敞口或编辑revision代替资金并发控制。
       await tx.$queryRaw(Prisma.sql`
