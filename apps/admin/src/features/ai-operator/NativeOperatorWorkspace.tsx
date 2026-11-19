@@ -1,6 +1,6 @@
 /** Original human controls in the console's existing work area. Sending a chat
  * never adopts candidates, approves an order or substitutes model text for Core. */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { aiConversationsApi } from '@/api/aiConversations';
 import { useNavigate } from 'react-router-dom';
 import { Button, Input, Select } from '@/components/ui';
@@ -24,10 +24,12 @@ export function NativeOperatorWorkspace({ visible }: { visible: boolean }) {
   const label = (chinese: string, english: string) => locale === 'en-US' ? english : t(chinese);
   const [answer, setAnswer] = useState<QuoteAnswerReference | null>(null), [quote, setQuote] = useState<ConfirmedQuoteSource | null>(null);
   const binding = JSON.stringify([operator.activeId, frame?.conversationId, frame?.turn?.turnId]);
+  const lifetime = useMemo(() => ({ mounted: false }), [binding, visible]);
+  useLayoutEffect(() => { lifetime.mounted = true; return () => { lifetime.mounted = false; }; }, [lifetime]);
   useEffect(() => { setAnswer(null); setQuote(null); }, [binding, visible]);
   const live = useRef({ binding, activeId: operator.activeId, visible });
   live.current = { binding, activeId: operator.activeId, visible };
-  const current = () => live.current.visible && live.current.binding === binding && live.current.activeId === operator.activeId && operator.current() && !!frame;
+  const current = () => lifetime.mounted && live.current.visible && live.current.binding === binding && live.current.activeId === operator.activeId && operator.current() && !!frame;
   const deny = () => { setAnswer(null); setQuote(null); operator.retract(); };
   return <>
     <ContentTransition value={`${binding}:${frame?.phase ?? 'input'}`} className="operator-work-body">
@@ -76,7 +78,7 @@ export function NativeOperatorWorkspace({ visible }: { visible: boolean }) {
           {frame.scene === 'order_explanation' && !frame.historical && <ConversationOrderHandoff identity={operator.identity} conversationId={frame.conversationId}
             turn={frame.turn} current={current} />}
         </>}
-        <NativeRoundClosure frame={frame} current={current} />
+        {visible && <NativeRoundClosure key={binding} frame={frame} current={current} />}
       </div>}
       {!frame && operator.capability.nativeScene && <div className="operator-work-empty"><h2>{label('发送后在此查看任务结果', 'Send a request to see the task result here')}</h2></div>}
     </ContentTransition>

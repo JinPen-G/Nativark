@@ -190,10 +190,11 @@ export class TenantIntegrationRuntimeService {
       return { configured: true, provider: config.provider, externalRequestId };
     } catch (error) {
       const message = error instanceof Error ? error.message : "短信平台调用失败";
-      await this.tryLog(tenantId, config, "send_verification_sms", "failed", {
+      const deliveryStatus = error instanceof NotificationDeliveryUnknownError ? "delivery_uncertain" : "failed";
+      await this.tryLog(tenantId, config, "send_verification_sms", deliveryStatus, {
         phone: maskPhone(phone),
         requestId: idempotencyKey
-      }, undefined, message);
+      }, { deliveryStatus }, message);
       throw error instanceof NotificationDeliveryUnknownError || error instanceof ServiceUnavailableException
         ? error
         : new ServiceUnavailableException(`短信发送失败：${message.slice(0, 180)}`);

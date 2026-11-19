@@ -1,5 +1,5 @@
 /** 运营邀请：原租户身份准备权限，发信前查重，原一次性凭证接受后原子建账号。
- * 邮件提交超时不换键重发，列表与寄件预览均不返回令牌、密码或完整激活链接。 */
+ * 邮件提交超时保留原键；已接受凭证仅读最小原结果，账号授权沿原事务办理。 */
 import { BadRequestException, ConflictException, ForbiddenException, HttpException, HttpStatus, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import type { ConfigService } from "@nestjs/config";
 import { PrismaClientKnownRequestError, sqltag } from "@prisma/client/runtime/library";
@@ -204,21 +204,42 @@ export class PlatformTenantOperatorInvitationsService<Transaction extends Tenant
   private async tokenRow(token: string) {
     this.validToken(token);
     const row = (await this.prisma.$queryRaw<StoredInvitation[]>(Prisma.sql`SELECT * FROM tenant_operator_invitations WHERE tokenHash = ${sha(token)} LIMIT 1`))[0];
+    if (row?.status === "accepted") {
+      this.assertAccepted(row);
+      return row;
+    }
     if (!row || row.status !== "pending" || row.expiresAt <= new Date()) throw new NotFoundException("邀请不存在、已到期或已撤回");
     if (await this.existingAccount(row.tenantId, row.email)) throw new ConflictException("该邮箱已有账号，请使用原账号登录；无需接受邀请");
     return row;
   }
+  private assertAccepted(row: StoredInvitation) {
+    if (row.status !== "accepted" || !row.acceptedUserId || !(row.acceptedAt instanceof Date) || !Number.isFinite(row.acceptedAt.getTime()))
+      throw new ServiceUnavailableException("原邀请接受结果暂时无法核对，请稍后读取原邀请");
+  }
+  private acceptedResult(tenantCode: string): AcceptTenantOperatorInvitationResult {
+    return { tenantCode, message: "该邀请已接受，请使用邮箱与接受时设置的密码登录" };
+  }
+  private async readAcceptance(row: StoredInvitation) {
+    this.assertAccepted(row);
+    const tenant = await this.prisma.tenant.findUnique({ where: { id: row.tenantId }, select: { code: true } });
+    if (!tenant) throw new NotFoundException("邀请所属租户不存在");
+    return this.acceptedResult(tenant.code);
+  }
   async inspect(token: string): Promise<TenantOperatorInvitationPreview> {
-    const row = await this.tokenRow(token), access = snapshot(row);
+    const row = await this.tokenRow(token);
+    if (row.status === "accepted") return { status: "accepted", ...await this.readAcceptance(row) };
+    const access = snapshot(row);
     await this.prisma.$transaction(tx => this.accounts.validateOperatorInvitationAccess(tx, row.tenantId, row.invitedBy, access));
     const tenant = await this.prisma.tenant.findUnique({ where: { id: row.tenantId }, select: { code: true, name: true, status: true } });
     if (!tenant || tenant.status !== "ACTIVE") throw new NotFoundException("邀请所属租户当前不可加入");
     const security = await this.platform.getSecurityBaseline();
-    return { tenantName: tenant.name, tenantCode: tenant.code, email: row.email, displayName: row.displayName, roleNames: access.roleNames,
+    return { status: "pending", tenantName: tenant.name, tenantCode: tenant.code, email: row.email, displayName: row.displayName, roleNames: access.roleNames,
       workspaceNames: access.workspaceNames, expiresAt: row.expiresAt.toISOString(), minPasswordLength: Math.max(8, security.passwordPolicy.minLength) };
   }
   async accept(input: AcceptTenantOperatorInvitationRequest): Promise<AcceptTenantOperatorInvitationResult> {
-    const row = await this.tokenRow(input.token), security = await this.platform.getSecurityBaseline();
+    const row = await this.tokenRow(input.token);
+    if (row.status === "accepted") return this.readAcceptance(row);
+    const security = await this.platform.getSecurityBaseline();
     const displayName = input.displayName.trim(), password = input.password;
     if (!displayName || displayName.length > 100 || /[\r\n\0]/u.test(displayName)) throw new BadRequestException("请输入有效的姓名");
     if (password.length < Math.max(8, security.passwordPolicy.minLength) || password.length > 128 || !/[A-Za-z]/u.test(password) || !/\d/u.test(password) || !/[^A-Za-z0-9]/u.test(password))
@@ -229,6 +250,7 @@ export class PlatformTenantOperatorInvitationsService<Transaction extends Tenant
         const tenant = (await tx.$queryRaw<Array<{ code: string; status: string }>>(Prisma.sql`SELECT code, status FROM Tenant WHERE id = ${row.tenantId} FOR UPDATE`))[0];
         if (!tenant || tenant.status.toLowerCase() !== "active") throw new ForbiddenException("当前租户不可加入");
         const locked = (await tx.$queryRaw<StoredInvitation[]>(Prisma.sql`SELECT * FROM tenant_operator_invitations WHERE tenantId = ${row.tenantId} AND id = ${row.id} AND tokenHash = ${sha(input.token)} FOR UPDATE`))[0];
+        if (locked?.status === "accepted") { this.assertAccepted(locked); return tenant.code; }
         if (!locked || locked.status !== "pending" || locked.expiresAt <= new Date()) throw new ConflictException("邀请已使用、到期或撤回");
         if (await this.existingAccount(row.tenantId, row.email, tx)) throw new ConflictException("该邮箱已有账号，无需接受邀请");
         const access = snapshot(locked);
@@ -238,7 +260,7 @@ export class PlatformTenantOperatorInvitationsService<Transaction extends Tenant
         await tx.$executeRaw(Prisma.sql`UPDATE tenant_operator_invitations SET status = 'accepted', acceptedAt = NOW(3), acceptedUserId = ${userId}, updatedAt = NOW(3) WHERE tenantId = ${row.tenantId} AND id = ${row.id}`);
         return tenant.code;
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-      return { tenantCode, message: "邀请已接受，账号及已配置权限已生效，请使用邮箱与刚设置的密码登录" };
+      return this.acceptedResult(tenantCode);
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && ["P2002", "P2034"].includes(error.code)) throw new ConflictException("账号或邀请已变化，请使用邮箱登录核对");
       throw error;

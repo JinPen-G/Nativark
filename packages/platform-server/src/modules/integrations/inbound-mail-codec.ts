@@ -52,9 +52,6 @@ function htmlText(value: string) {
 export function parseInboundMail(raw: Buffer): ParsedInboundMail {
   if (raw.length > 1048576) throw new Error("邮件超过首期 1 MB 正文读取上限");
   const root = splitEntity(raw.toString("latin1"));
-  const from = decodeMailHeader(root.headers.get("from") ?? "");
-  const senderEmail = (/<([^<>]+@[^<>]+)>/u.exec(from)?.[1] ?? /([A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+)/u.exec(from)?.[1] ?? "未知发件地址").slice(0, 320);
-  const senderName = from.replace(/<[^<>]+>/gu, "").replace(/^"|"$/gu, "").trim() || senderEmail;
   const attachments: ParsedInboundMail["attachments"] = [];
   const plain: string[] = [], html: string[] = [];
   let parts = 0;
@@ -90,8 +87,17 @@ export function parseInboundMail(raw: Buffer): ParsedInboundMail {
     (type === "text/html" ? html : plain).push(decoded);
   };
   visit(root, 0);
-  const date = new Date(root.headers.get("date") ?? "");
-  return { senderEmail, senderName: senderName.slice(0, 191), recipient: decodeMailHeader(root.headers.get("to") ?? "").slice(0, 1000),
-    subject: decodeMailHeader(root.headers.get("subject") ?? "").slice(0, 500) || "无主题邮件", messageId: decodeMailHeader(root.headers.get("message-id") ?? "").slice(0, 191) || undefined,
-    sentAt: Number.isFinite(date.getTime()) ? date : undefined, text: (plain.length ? plain.join("\n\n") : htmlText(html.join("\n\n"))).replace(/\0/gu, "").slice(0, 100000), attachments };
+  return { ...mailEnvelope(root.headers), text: (plain.length ? plain.join("\n\n") : htmlText(html.join("\n\n"))).replace(/\0/gu, "").slice(0, 100000), attachments };
+}
+function mailEnvelope(headers: Map<string, string>): Omit<ParsedInboundMail, "text" | "attachments"> {
+  const from = decodeMailHeader(headers.get("from") ?? "");
+  const senderEmail = (/<([^<>]+@[^<>]+)>/u.exec(from)?.[1] ?? /([A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+)/u.exec(from)?.[1] ?? "未知发件地址").slice(0, 320);
+  const senderName = from.replace(/<[^<>]+>/gu, "").replace(/^"|"$/gu, "").trim() || senderEmail;
+  const date = new Date(headers.get("date") ?? "");
+  return { senderEmail, senderName: senderName.slice(0, 191), recipient: decodeMailHeader(headers.get("to") ?? "").slice(0, 1000),
+    subject: decodeMailHeader(headers.get("subject") ?? "").slice(0, 500) || "无主题邮件", messageId: decodeMailHeader(headers.get("message-id") ?? "").slice(0, 191) || undefined,
+    sentAt: Number.isFinite(date.getTime()) ? date : undefined };
+}
+export function parseInboundMailHeaders(raw: Buffer): Omit<ParsedInboundMail, "text" | "attachments"> {
+  return mailEnvelope(splitEntity(raw.subarray(0, 65536).toString("latin1")).headers);
 }

@@ -23,6 +23,105 @@ test('the actual run distinguishes partial completion and an unknown step', () =
   assert.equal(run.status, 'partial'); assert.equal(run.steps[0].status, 'unknown');
 });
 
+test('retracting the console permanently rejects a late original read while a fresh read remains available', async () => {
+  let release, observedSignal, changed = 0, first = true;
+  const delayed = new Promise(resolve => { release = resolve; });
+  const detail = { conversation: { status: 'archived', currentTurn: null }, turns: { items: [] } };
+  const session = new NativeOperatorSession({ identity: 'owner', current: () => true,
+    storage: { getItem: () => null, setItem: () => assert.fail('a historical read changed a journal') }, tasks: {},
+    changed: () => { changed++; }, api: { detail: async (_query, _scene, signal) => {
+      observedSignal = signal;
+      if (first) { first = false; return delayed; }
+      return detail;
+    } } });
+  const pending = session.open('history', 'original', 'order_explanation', new AbortController().signal);
+  session.retract();
+  release(detail);
+  await assert.rejects(pending, /AI_SCOPE_CHANGED/);
+  assert.equal(observedSignal.aborted, true);
+  assert.equal(changed, 0);
+  assert.equal(session.frame('history'), null);
+  await session.open('history', 'original', 'order_explanation', new AbortController().signal);
+  assert.equal(changed, 1);
+  assert.equal(session.frame('history').historical, true);
+});
+
+test('native work area callbacks expire on hide, selection change and unmount without reviving on reopen', () => {
+  const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm'), ts = require('typescript'), React = require('react');
+  const source = fs.readFileSync(path.resolve(__dirname, '../apps/admin/src/features/ai-operator/NativeOperatorWorkspace.tsx'), 'utf8');
+  const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText;
+  const slots = [], effects = [], layouts = [], cleaners = new Map(), admissions = []; let cursor = 0, closureKey;
+  const hooks = {
+    useState(initial) { const index = cursor++; if (!(index in slots)) slots[index] = initial;
+      return [slots[index], value => { slots[index] = value; }]; },
+    useRef(initial) { const index = cursor++; if (!(index in slots)) slots[index] = { current: initial }; return slots[index]; },
+    useMemo(factory, dependencies) { const index = cursor++;
+      if (!slots[index] || dependencies.some((value, offset) => value !== slots[index].dependencies[offset])) slots[index] = { dependencies, value: factory() };
+      return slots[index].value;
+    },
+    useEffect(effect, dependencies) { const index = cursor++;
+      if (!slots[index] || dependencies.some((value, offset) => value !== slots[index][offset])) {
+        slots[index] = dependencies; effects.push(() => { cleaners.get(index)?.(); cleaners.set(index, effect()); });
+      }
+    },
+    useLayoutEffect(effect, dependencies) { const index = cursor++;
+      if (!slots[index] || dependencies.some((value, offset) => value !== slots[index][offset])) {
+        slots[index] = dependencies; layouts.push(() => { cleaners.get(index)?.(); cleaners.set(index, effect()); });
+      }
+    },
+  };
+  const operator = { activeId: 'chat', active: { native: { conversationId: 'conversation', phase: 'result', turn: { turnId: 'turn' } } },
+    capability: { nativeScene: 'order_explanation' }, current: () => true };
+  const exports = {}, leaf = name => props => React.createElement(name, props);
+  const leaves = ['ConversationResult', 'ConversationQuoteConfirmation', 'ConversationQuoteSelection', 'ConversationOrderHandoff',
+    'ConversationClosure', 'TaskCancellation', 'ContentTransition', 'AgentRun'];
+  vm.runInNewContext(output, { exports, sessionStorage: { getItem: () => null }, require(name) {
+    if (name === 'react') return hooks;
+    if (name === 'react/jsx-runtime') return require(name);
+    if (name === './OperatorContext') return { useOperator: () => operator };
+    if (name === 'react-router-dom') return { useNavigate: () => () => {} };
+    if (name === '../ai-native/management-locale') return { useAiManagementLocale: () => ({ locale: 'zh-CN', t: value => value }) };
+    if (name === '@/components/ui') return { Button: leaf('button'), Input: leaf('input'), Select: leaf('select') };
+    if (['@/api/aiConversations', './native-session'].includes(name)) return {};
+    if (name === '../ai-native/conversation-admission-session') return { ConversationAdmissionSession: class {
+      constructor(_conversationId, _api, current) { this.current = current; admissions.push(this); }
+      activate() {} dispose() {} canClose() { return false; }
+    } };
+    const component = leaves.find(value => name.endsWith(`/${value}`));
+    if (component) return { [component]: leaf(component) };
+    throw Error(`Unexpected work area dependency: ${name}`);
+  } });
+  const render = visible => {
+    cursor = 0;
+    const tree = exports.NativeOperatorWorkspace({ visible });
+    let current, closure;
+    const walk = value => React.Children.forEach(value, child => {
+      if (!React.isValidElement(child)) return;
+      if (child.props.conversationId) current = child.props.current;
+      if (child.type.name === 'NativeRoundClosure') closure = child;
+      walk(child.props.children);
+    });
+    walk(tree);
+    if (closureKey !== closure?.key || !closure) {
+      for (const [index, cleanup] of cleaners) if (index >= cursor) { cleanup?.(); cleaners.delete(index); }
+      slots.splice(cursor); closureKey = closure?.key;
+    }
+    if (closure) closure.type(closure.props);
+    layouts.splice(0).forEach(effect => effect());
+    if (visible) assert.equal(current(), true, 'Child passive effects can read the original result before parent passive effects');
+    effects.splice(0).forEach(effect => effect());
+    return current;
+  };
+  const original = render(true); assert.equal(original(), true);
+  render(false); assert.equal(original(), false);
+  const reopened = render(true); assert.equal(reopened(), true); assert.equal(original(), false);
+  assert.equal(admissions.length, 2); assert.equal(admissions[0].current(), false); assert.equal(admissions[1].current(), true);
+  operator.activeId = 'other'; render(true); assert.equal(reopened(), false);
+  operator.activeId = 'chat'; const current = render(true); assert.equal(reopened(), false); assert.equal(current(), true);
+  assert.equal(admissions.length, 4); assert.equal(admissions.at(-1).current(), true);
+  cleaners.forEach(cleaner => cleaner?.()); assert.equal(current(), false);
+});
+
 test('English task steps, their accessible names and historical results follow the selected locale', () => {
   const english = (_chinese, text) => text;
   const { stepLabel } = require('../apps/admin/src/features/ai-operator/archive/agent-run/agent-run-state');

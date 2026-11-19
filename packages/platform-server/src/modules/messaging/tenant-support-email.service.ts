@@ -1,4 +1,4 @@
-/** 租户客服邮箱：受权人员显式同步原IMAP邮件，以原服务器UID幂等保存安全文本。
+/** 租户客服邮箱：受权人员显式同步原IMAP邮件，异常提示、审计和原UID游标同事务保存。
  * 不修改邮箱、不生成客户/订单关联、不自动回复或执行邮件正文中的指令。 */
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { empty, sqltag } from "@prisma/client/runtime/library";
@@ -77,14 +77,14 @@ export class PlatformTenantSupportEmailService<Transaction extends TenantSupport
       const result = await readImapMailbox(connection, { cursor: mailbox.uidValidity ? { uidValidity: mailbox.uidValidity, uid: Number(mailbox.lastUid) } : undefined });
       if (!isDeepStrictEqual(identity, getRequestIdentity())) throw new ForbiddenException("同步期间身份或范围已变化");
       const syncedAt = new Date();
-      const imported = await this.prisma.$transaction(async tx => {
+      const saved = await this.prisma.$transaction(async tx => {
         await this.accounts.assertTenantManagementPermission(actor.tenantId, actor.userId, "system:integration:manage", tx);
         const activeConfig = await tx.tenantIntegrationConfig.findFirst({ where: { id: config.id, tenantId: actor.tenantId, enabled: true, isDefault: true }, select: { updatedAt: true, settings: true } });
         if (!activeConfig || !config.revision || activeConfig.updatedAt.getTime() !== config.revision.updatedAt.getTime()
           || !isDeepStrictEqual(activeConfig.settings, config.settings)) throw new ConflictException("邮箱配置已变化，旧同步结果未保存");
         const ownsLease = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT id FROM tenant_support_mailboxes WHERE tenantId = ${actor.tenantId} AND id = ${mailboxId} AND leaseToken = ${lease} AND leaseUntil > NOW(3) FOR UPDATE`);
         if (!ownsLease.length) throw new ConflictException("本次同步窗口已变化，未更新游标");
-        let count = 0;
+        let imported = 0, quarantined = 0;
         for (const item of result.messages) {
           const id = `mail_${sha(`${actor.tenantId}:${config.id}:${fingerprint}:${item.uidValidity}:${item.uid}`)}`;
           const exists = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT id FROM tenant_support_emails WHERE tenantId = ${actor.tenantId} AND id = ${id} LIMIT 1`);
@@ -92,13 +92,18 @@ export class PlatformTenantSupportEmailService<Transaction extends TenantSupport
           await tx.$executeRaw(Prisma.sql`INSERT INTO tenant_support_emails (id, tenantId, configId, mailboxFingerprint, uidValidity, uid, senderEmail, senderName, recipient, subject, bodyText, attachments, messageId, receivedAt, createdAt)
             VALUES (${id}, ${actor.tenantId}, ${config.id}, ${fingerprint}, ${item.uidValidity}, ${item.uid}, ${item.message.senderEmail}, ${item.message.senderName},
               ${item.message.recipient}, ${item.message.subject}, ${item.message.text}, ${JSON.stringify(item.message.attachments)}, ${item.message.messageId ?? null}, ${item.receivedAt}, ${syncedAt})`);
-          count++;
+          if (item.issue) {
+            await tx.operationLog.create({ data: { id: `quarantine_${id}`, tenantId: actor.tenantId, userId: actor.userId,
+              action: "support.email.import.quarantined", detail: { emailId: id, mailboxId, configId: config.id,
+                uidValidity: item.uidValidity, uid: item.uid, reason: item.issue.reason, sourceSize: item.issue.size }, createdAt: syncedAt } });
+            quarantined++;
+          } else imported++;
         }
         await tx.$executeRaw(Prisma.sql`UPDATE tenant_support_mailboxes SET uidValidity = ${result.uidValidity}, lastUid = ${result.nextUid}, lastSyncedAt = ${syncedAt}, updatedAt = ${syncedAt}
           WHERE tenantId = ${actor.tenantId} AND id = ${mailboxId} AND leaseToken = ${lease}`);
-        return count;
+        return { imported, quarantined };
       });
-      return { imported, checked: result.checked, hasMore: result.hasMore, syncedAt: syncedAt.toISOString() };
+      return { ...saved, checked: result.checked, hasMore: result.hasMore, syncedAt: syncedAt.toISOString() };
     } catch (error) {
       if (error instanceof BadRequestException || error instanceof ConflictException || error instanceof ForbiddenException) throw error;
       throw new ServiceUnavailableException(error instanceof Error ? error.message : "客服邮箱同步失败");

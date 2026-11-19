@@ -4,7 +4,7 @@
 
 `tenantMessagingApi` → `TenantOperatorInvitationsController` → `TenantOperatorInvitationsService` → 原 `PlatformRepository` 账号/授权事务及 `TenantEmailRuntimeService`。发送前查当前租户邮箱登录账号，包含停用账号，已有账号或有效邀请均停止发送。邀请只保存凭证哈希和待接受授权，接受时复验邀请人当前权限、角色和空间，再同事务创建账号与成员。固定全权基础角色沿原账号管理流程授予。
 
-每次提交保留原操作键。投递超时只核对原记录，未知结果不自动重发。SMTP 受理不代表送达。匿名接受页面的令牌来自 URL fragment，仅读取和提交给原认证入口，接受结果未知后引导登录核对。
+每次提交保留原操作键。投递超时只核对原记录，未知结果不自动重发。SMTP 受理不代表送达。匿名接受页面的令牌来自 URL fragment，仅读取和提交给原认证入口。接受结果未知后可用原凭证读取最小接受结果和登录入口；已接受邀请的重复提交只返回原结果，不重建账号、重设密码或再授予权限。历史接受事实不代表当前账号仍有权限。
 
 [公共 invitation-source](../../../../../packages/platform-admin/src/features/messaging/invitation-source/components/invite-people/provenance.json)保存固定来源的最小运行闭包。原样 CSS、图标和状态机留存，宿主适配包括共享动效偏好、语言、主题 / 字体及可选席位和重发端口。来源清单固定树哈希为 `7c116b812eca1eb2c232028619a312ad0561fb85d42b3c653c039107624799df`。组件还原依据公开编译预览，来源和许可见 [UIArc 组件库](../../../../../packages/ui-arc/README.md)。
 

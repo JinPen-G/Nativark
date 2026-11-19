@@ -33,6 +33,7 @@ export class NativeOperatorSession {
   private frames = new Map<string, NativeFrame>();
   private historyLinks = new Map<string, Locator>();
   private busy = false;
+  private lifetime = new AbortController();
   constructor(private readonly d: Options) {}
   private key(suffix: string) { return `ai-native-console:${this.d.identity}:${suffix}`; }
   private check(signal: AbortSignal) { if (signal.aborted || !this.d.current()) throw Error('AI_SCOPE_CHANGED'); }
@@ -68,7 +69,7 @@ export class NativeOperatorSession {
     return this.locators().find(row => row.chatId === chatId) ?? this.historyLinks.get(chatId);
   }
   hasOriginal(chatId: string) { return !!this.locate(chatId); }
-  retract() { this.frames.clear(); }
+  retract() { this.lifetime.abort(); this.lifetime = new AbortController(); this.frames.clear(); }
   private async metadata(locator: Locator, signal: AbortSignal) {
     this.check(signal); if (!locator.conversationId) throw Error('AI_RESULT_UNKNOWN');
     const query = { draftVersion: version, conversationId: locator.conversationId };
@@ -77,11 +78,13 @@ export class NativeOperatorSession {
     return value;
   }
   async history(scene: NativeScene, signal: AbortSignal, status: 'active' | 'archived' = 'active', beforeId?: string) {
+    signal = AbortSignal.any([signal, this.lifetime.signal]);
     this.check(signal);
     const value = await this.d.api.list({ draftVersion: version, status, ...(beforeId ? { beforeId } : {}), limit: 20, capabilityCode: scene }, signal);
     this.check(signal); return value;
   }
   async open(chatId: string, conversationId: string, scene: NativeScene, signal: AbortSignal) {
+    signal = AbortSignal.any([signal, this.lifetime.signal]);
     if (!id(chatId) || !id(conversationId)) throw Error('AI_INVALID_INPUT');
     this.check(signal);
     const previousFrame = this.frames.get(chatId);
@@ -115,6 +118,7 @@ export class NativeOperatorSession {
     this.publish(chatId, frame, signal); return frame;
   }
   async read(chatId: string, signal: AbortSignal) {
+    signal = AbortSignal.any([signal, this.lifetime.signal]);
     this.check(signal);
     const locator = this.locate(chatId); if (!locator) throw Error('AI_ORIGINAL_LOCATOR_MISSING');
     const previous = this.frames.get(chatId);
@@ -170,6 +174,7 @@ export class NativeOperatorSession {
     }
   }
   async nextRound(chatId: string, proof: { expectedRevision: number; turnId: string; originalInputRef: string }, signal: AbortSignal) {
+    signal = AbortSignal.any([signal, this.lifetime.signal]);
     this.check(signal); const locator = this.locate(chatId);
     if (!locator?.conversationId) throw Error('AI_RESULT_UNKNOWN');
     const observed = await this.metadata(locator, signal);
@@ -190,6 +195,7 @@ export class NativeOperatorSession {
     this.publish(chatId, { ...previous, historical: true, observation: observed, readyForNext: (contextTurns ?? 0) <= 8, contextTurns }, signal);
   }
   async send(input: NativeSend, signal: AbortSignal, visible?: LiveVisibleObservationSession | null): Promise<NativeFrame> {
+    signal = AbortSignal.any([signal, this.lifetime.signal]);
     this.check(signal); if (this.busy) throw Error('AI_BUSY');
     if (!id(input.chatId) || !['quote_clarification', 'order_explanation', 'opening_diagnosis'].includes(input.scene) || !input.text.trim()) throw Error('AI_INVALID_INPUT');
     if (input.scene === 'quote_clarification' && !validateAiQuoteGoalInputDraft({ kind: 'quote_goal',

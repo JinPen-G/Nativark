@@ -71,8 +71,11 @@ export function createTenantMessagingOpenApiSchemas(namespace: string, minimumWo
     InspectTenantOperatorInvitationRequest: object({ token }, ["token"]),
     AcceptTenantOperatorInvitationRequest: object({ token, displayName: { type: "string", minLength: 1, maxLength: 100 },
       password: { type: "string", format: "password", writeOnly: true, minLength: 8, maxLength: 128 } }, ["token", "displayName", "password"]),
-    TenantOperatorInvitationPreview: object({ tenantName: string, tenantCode: string, email, displayName: string, roleNames: array(string), workspaceNames: array(string),
-      expiresAt: date, minPasswordLength: number }, ["tenantName", "tenantCode", "email", "displayName", "roleNames", "workspaceNames", "expiresAt", "minPasswordLength"]),
+    TenantOperatorInvitationPreview: { oneOf: [
+      object({ status: { type: "string", enum: ["pending"] }, tenantName: string, tenantCode: string, email, displayName: string, roleNames: array(string), workspaceNames: array(string),
+        expiresAt: date, minPasswordLength: number }, ["status", "tenantName", "tenantCode", "email", "displayName", "roleNames", "workspaceNames", "expiresAt", "minPasswordLength"]),
+      object({ status: { type: "string", enum: ["accepted"] }, tenantCode: string, message: string }, ["status", "tenantCode", "message"])
+    ] },
     AcceptTenantOperatorInvitationResult: object({ tenantCode: string, message: string }, ["tenantCode", "message"]),
     TenantSupportEmailRow: object(mail, Object.keys(mail)),
     TenantSupportEmailDetail: object({ ...mail, recipient: string, bodyText: string, messageId: string,
@@ -80,7 +83,7 @@ export function createTenantMessagingOpenApiSchemas(namespace: string, minimumWo
     [...Object.keys(mail), "recipient", "bodyText", "attachments"]),
     TenantSupportEmailPage: object({ rows: array("TenantSupportEmailRow"), total: number, page: number, pageSize: number,
       receiverConfigured: bool, lastSyncedAt: date }, ["rows", "total", "page", "pageSize", "receiverConfigured"]),
-    SyncTenantSupportEmailsResult: object({ imported: number, checked: number, hasMore: bool, syncedAt: date }, ["imported", "checked", "hasMore", "syncedAt"])
+    SyncTenantSupportEmailsResult: object({ imported: number, quarantined: number, checked: number, hasMore: bool, syncedAt: date }, ["imported", "quarantined", "checked", "hasMore", "syncedAt"])
   };
   return Object.fromEntries(Object.entries(schemas).map(([name, schema]) => [`${namespace}${name}`, schema]));
 }

@@ -21,10 +21,11 @@ export class TenantOperatorInvitationsService extends PlatformTenantOperatorInvi
   ) {
     // 原 ORM 按 select 返回不同投影，窄重载分别保留模板名称和公开租户身份。
     function findTenant(query: { where: { id: string }; select: { name: true } }): PromiseLike<{ name: string } | null>;
+    function findTenant(query: { where: { id: string }; select: { code: true } }): PromiseLike<{ code: string } | null>;
     function findTenant(query: { where: { id: string }; select: { code: true; name: true; status: true } }): PromiseLike<{
       code: string; name: string; status: string;
     } | null>;
-    function findTenant(query: { where: { id: string }; select: { name: true; code?: true; status?: true } }) {
+    function findTenant(query: { where: { id: string }; select: { name?: true; code?: true; status?: true } }) {
       return prisma.tenant.findUnique(query);
     }
     super({

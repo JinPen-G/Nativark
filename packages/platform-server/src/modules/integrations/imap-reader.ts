@@ -1,12 +1,13 @@
 /** 只读 IMAP：EXAMINE + BODY.PEEK，不修改已读标记、删除邮件或发起附件下载。
- * UIDVALIDITY/UID 由服务器提供；加密、固定DNS地址及有界literal由此端口约束。 */
+ * UIDVALIDITY/UID 由服务器提供；异常邮件以有界信封和原UID提示继续同步。 */
 import { connect, type TLSSocket } from "node:tls";
 import { isIP } from "node:net";
 import { pinnedMailAddress, type SmtpConnection } from "./smtp-transport";
-import { parseInboundMail, type ParsedInboundMail } from "./inbound-mail-codec";
+import { parseInboundMail, parseInboundMailHeaders, type ParsedInboundMail } from "./inbound-mail-codec";
 
 export interface ImapConnection { host: string; port: number; mailbox: string; username: string; password: string; }
-export interface ReceivedImapMail { uid: number; uidValidity: string; receivedAt: Date; message: ParsedInboundMail; }
+export interface ReceivedImapMail { uid: number; uidValidity: string; receivedAt: Date; message: ParsedInboundMail;
+  issue?: { reason: "size_limit" | "parse_failed"; size: number }; }
 export class ImapReadError extends Error {}
 export function imapConnection(settings: Record<string, unknown>, account: Pick<SmtpConnection, "username" | "password">): ImapConnection {
   const host = String(settings.imapHost ?? "").trim().toLowerCase(), port = Number(settings.imapPort ?? 993);
@@ -114,12 +115,23 @@ export async function readImapMailbox(config: ImapConnection, options: { cursor?
       const metadata = meta.lines.find(line => new RegExp(`\\bUID ${uid}\\b`, "u").test(line));
       const size = metadata ? Number(/RFC822\.SIZE (\d+)/iu.exec(metadata)?.[1]) : NaN;
       if (!Number.isFinite(size)) throw new ImapReadError("IMAP 邮件大小无法核对");
-      if (size > 1048576) throw new ImapReadError(`邮件 UID ${uid} 超过首期 1 MB 读取上限，请移至其他文件夹后再同步`);
       const receivedAt = new Date(metadata ? /INTERNALDATE "([^"]+)"/iu.exec(metadata)?.[1] ?? "" : "");
-      const packet = await session.command(`UID FETCH ${uid} (UID BODY.PEEK[])`);
+      const oversized = size > 1048576;
+      const packet = await session.command(`UID FETCH ${uid} (UID ${oversized ? "BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT MESSAGE-ID DATE)]<0.65536>" : "BODY.PEEK[]"})`);
       if (packet.literals.length !== 1 || !packet.lines.some(line => new RegExp(`\\bUID ${uid}\\b`, "u").test(line))) throw new ImapReadError("IMAP 邮件正文与原 UID 不一致");
-      const message = parseInboundMail(packet.literals[0]);
-      messages.push({ uid, uidValidity, receivedAt: Number.isFinite(receivedAt.getTime()) ? receivedAt : message.sentAt ?? new Date(), message });
+      if (oversized && packet.literals[0].length > 65536) throw new ImapReadError("IMAP 邮件头超出请求范围");
+      let message: ParsedInboundMail, issue: ReceivedImapMail["issue"];
+      try {
+        if (oversized) throw new ImapReadError("size_limit");
+        message = parseInboundMail(packet.literals[0]);
+      } catch {
+        issue = { reason: oversized ? "size_limit" : "parse_failed", size };
+        let envelope: Omit<ParsedInboundMail, "text" | "attachments">;
+        try { envelope = parseInboundMailHeaders(packet.literals[0]); }
+        catch { envelope = { senderEmail: "未知发件地址", senderName: "未知发件人", recipient: "", subject: "邮件内容待读取" }; }
+        message = { ...envelope, attachments: [], text: `${oversized ? "邮件超过 1 MB 读取上限" : "邮件格式无法安全解析"}，正文和附件未导入。请在原邮箱中处理该邮件（UID ${uid}，${size} 字节）；该邮件不阻断后续同步。` };
+      }
+      messages.push({ uid, uidValidity, receivedAt: Number.isFinite(receivedAt.getTime()) ? receivedAt : message.sentAt ?? new Date(), message, ...(issue ? { issue } : {}) });
       nextUid = uid;
     }
     return { messages, uidValidity, nextUid, checked: uids.length, hasMore: found.length > uids.length };

@@ -33,7 +33,7 @@ export const TENANT_MESSAGING_HTTP_OPERATIONS = [
   { method: "POST", path: "/platform/users/invitations/:id/revoke", id: "revokeOperatorInvitation", summary: "撤回尚未接受的原邀请",
     access: "tenant", permission: "system:user:manage", response: "Messaging.TenantOperatorInvitationRow",
     parameters: [{ name: "id", in: "path", required: true, schema: TENANT_MESSAGING_OPENAPI_PATH_SCHEMAS.id }] },
-  { method: "POST", path: "/auth/operator-invitations/inspect", id: "inspectOperatorInvitation", summary: "经原限流与一次性凭证读取邀请",
+  { method: "POST", path: "/auth/operator-invitations/inspect", id: "inspectOperatorInvitation", summary: "原凭证查看邀请或最小接受结果，未接受时复验原授权",
     access: "anonymous", effect: "read", request: "Messaging.InspectTenantOperatorInvitationRequest", response: "Messaging.TenantOperatorInvitationPreview" },
   { method: "POST", path: "/auth/operator-invitations/accept", id: "acceptOperatorInvitation", summary: "复验原邀请，原子建立账号和已核定授权",
     access: "anonymous", request: "Messaging.AcceptTenantOperatorInvitationRequest", response: "Messaging.AcceptTenantOperatorInvitationResult" },

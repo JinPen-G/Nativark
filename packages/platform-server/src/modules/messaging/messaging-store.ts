@@ -39,6 +39,7 @@ export interface TenantInvitationTransaction extends TenantMessagingSqlTransacti
 
 export interface TenantInvitationDataStore<Transaction extends TenantInvitationTransaction> extends TenantInvitationTransaction {
   tenant: {
+    findUnique(query: { where: { id: string }; select: { code: true } }): PromiseLike<{ code: string } | null>;
     findUnique(query: { where: { id: string }; select: { code: true; name: true; status: true } }): PromiseLike<{
       code: string; name: string; status: string;
     } | null>;
@@ -97,6 +98,12 @@ export interface TenantDispatchDataStore extends Pick<TenantMessagingSqlTransact
 }
 
 export interface TenantSupportEmailTransaction extends TenantMessagingSqlTransaction {
+  operationLog: {
+    create(query: { data: {
+      id: string; tenantId: string; userId: string; action: string;
+      detail: Exclude<PlatformJsonValue, null>; createdAt: Date;
+    } }): PromiseLike<unknown>;
+  };
   tenantIntegrationConfig: {
     findFirst(query: { where: { id: string; tenantId: string; enabled: true; isDefault: true };
       select: { updatedAt: true; settings: true } }): PromiseLike<{ updatedAt: Date; settings: PlatformJsonValue } | null>;

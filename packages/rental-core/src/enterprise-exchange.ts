@@ -3,7 +3,6 @@
 import type { EnterpriseExchangeIntent } from "./exchange-inspection-preparation";
 export type { EnterpriseExchangeIntent } from "./exchange-inspection-preparation";
 import type { EnterpriseChangeRequest } from "./enterprise-workflows";
-import type { RentalOrderExchangePriceBasis } from "./contracts";
 import type { EnterpriseExpenseRequestOriginalResult, EnterpriseExtensionRequestClosureReceipt } from "./enterprise-expense";
 import type { ExecuteApprovedRentalExchangeRequest, RentalExchangeInspectionConsent, RentalExchangeInspectionCustomerMaterial } from "./exchange-inspection-preparation";
 

@@ -28,6 +28,8 @@
 
 停用邮箱或改变服务器/发件身份时，在原配置事务内核同租户、同提供方的`NotificationSendLog`；`queued`和`delivery_uncertain`拒绝该变更。密码轮换保持原身份规则。查询失败向上返回，空Core目录不能证明没有待核邮件。原邀请、寄件中心和客服同步仍由各自应用服务裁定。
 
+IMAP 使用 `EXAMINE` 和 `BODY.PEEK`。超过 1 MB 的邮件只读取最多 64 KiB 的指定信封头，MIME 解析异常沿同一安全信封解析保留提示。结果携带原 UID、UIDVALIDITY、异常原因和源大小，结果文本为原邮箱处理提示，附件元数据为空，后续邮件继续读取。验证码短信异常将结构化 `deliveryStatus` 保存到原适配日志，结果未知保留 `delivery_uncertain` 和原请求键。
+
 原 Rental 兼容服务保留业务币种的历史回退、进行中支付／退款、待投递／unknown 通知及文件／上传保护。原文件运行服务继承公共存储接点，继续持有业务归属、ACL、字节冻结、上传完成和删除恢复。原支付运行服务提供自己的连接探针及原资金执行者。
 
 目录位于 `GET /api/platform/integrations`，保存位于 `PUT /api/platform/integrations/:capability/:provider`，测试位于同一路径的 `/test` POST。当前租户来自 Guard 与 ALS。公开响应只包含非秘密设置、秘密字段配置标记和原测试结果。

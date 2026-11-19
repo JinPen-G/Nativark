@@ -7,7 +7,7 @@
 1. 使用 `@rental-os/platform-admin/messaging` 的正式出口。公共应用工厂已登记 `/invite`、`/login/:tenantCode` 和邮件目录，公共 locale 已接入 `messagingMessages`；宿主只需提供品牌和同一个浏览器会话。已有自定义路由宿主可按下面示例挂载，登录表单接收路由中的租户编码。
 2. 由原 `AdminRuntimeProvider` 和 UI / locale 宿主包裹受权页面。菜单、直接 URL 与人员邀请入口共同使用[消息可见性](messagingAccess.ts)的 `hasTenantMessagingPermission`，沿原 `tenantMembership` 基础成员投影读取完整租户范围、管理员及通配权限。寄件与客服要求 `system:integration:manage`，邀请要求 `system:user:manage`。当前 Core 的角色和范围独立管理，服务端继续核对当前权限。
 3. 人员页面向 `OperatorInvitations` 提供当前服务端角色与组织。公共缺省邀请显式提交 `workspaceAccesses: []`。Core 通过 `businessAccess.render` 提供受控范围配置，`requiredMessage` 指定缺少范围时的校验信息。Rental 宿主沿原经营空间列表供给角色、数据和地点范围。
-4. 匿名 `/invite` 路由提供 `createOperatorInvitationApi(baseURL)`、品牌名及可选品牌图标。接受页从 fragment 读取原凭证，inspect 支持取消，accept 使用原 20 秒时限。匿名客户端清空租户 / 空间认证头，接受结果未确认时通过租户登录核对。
+4. 匿名 `/invite` 路由提供 `createOperatorInvitationApi(baseURL)`、品牌名及可选品牌图标。接受页从 fragment 读取原凭证，inspect 支持取消，accept 使用原 20 秒时限。匿名客户端清空租户 / 空间认证头，接受结果未确认时使用原凭证核对最小接受结果，也可进入租户登录。
 
 公共人员页沿当前会话请求 `/platform/roles` 和 `/platform/organizations`。查询键使用当前会话代次，读取携带取消信号。角色列表按基础成员的完整租户范围核验 `system:user:manage` 或 `system:role:manage`。[邀请选项读取](../access/PublicMemberInvitations.tsx)
 
@@ -32,11 +32,11 @@ const invitationApi = createOperatorInvitationApi("/api");
 
 [邀请表单](OperatorInvitations.tsx)在按宿主实例、租户和账号隔离的内存记录中，按邮箱保存原请求。关闭重开、路由重挂载及 Core / 会话代次切换后，同一主体继续读取原 `idempotencyKey`。网络、408 或 5xx 的未确认结果保留原键。4xx 确定拒绝且原键读取为 404 后才释放该邮箱尝试。取消批次停止后续提交，原已提交项沿原键核对，撤回等待真实确认和原 API。选人、组织或业务配置变动会失效此前的邮件预览，迟到响应按配置代次核对。
 
-[接受页](AcceptOperatorInvitationPage.tsx)让 SaveButton 与回车共用同一次提交 Promise。成功清空表单和内存凭证，显示基础成员授权并进入租户登录。密码长度、字母 / 数字 / 特殊字符和确认密码沿原校验。
+[接受页](AcceptOperatorInvitationPage.tsx)让 SaveButton 与回车共用同一次提交 Promise。成功或原凭证读取确认已接受后，清空表单和内存凭证并进入租户登录。待核对时由“核对原接受结果”调用原 `inspect`，仅待接受结果展示邀请详情和表单。密码长度、字母 / 数字 / 特殊字符和确认密码沿原校验。
 
 [寄件目录](TenantDispatchPage.tsx)与[详情](DispatchDetail.tsx)继续消费原渠道、状态、来源及分页。历史正文和模板保留原缺失状态。邮件预览使用空 sandbox 和 `no-referrer`，HTML 来自服务端安全模板。
 
-[客服邮件](CustomerSupportPage.tsx)保留原搜索防抖、键盘选择、分页、正文和附件元数据。同步完成与随后列表刷新分别反馈。查询键、页面草稿及迟到结果按当前会话代次隔离。
+[客服邮件](CustomerSupportPage.tsx)保留原搜索防抖、键盘选择、分页、正文和附件元数据。同步完成、异常邮件提示和随后列表刷新分别反馈，异常提示保留原邮箱处理入口。查询键、页面草稿及迟到结果按当前会话代次隔离。
 
 ## 来源与验证入口
 

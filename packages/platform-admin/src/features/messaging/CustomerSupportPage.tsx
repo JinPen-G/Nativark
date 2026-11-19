@@ -48,6 +48,7 @@ function SupportWorkspace({ renderHeader }: TenantMessagingPageProps) {
     return api.sync();
   }, onSuccess: async result => {
     if (!isCurrent()) return;
+    if (result.quarantined > 0) message.warning(`${result.quarantined} ${t("封邮件超出读取限制或格式异常，已保留提示，请在原邮箱处理。")}`);
     message.success(result.hasMore ? t("本批邮件已同步，还有待同步邮件，可继续同步。") : t("邮箱同步完成"));
     try { await cache.invalidateQueries({ queryKey: ["tenant-support-emails", epoch] }, { throwOnError: true }); }
     catch { if (isCurrent()) message.warning(t("邮件已同步，列表刷新失败，请重新读取。")); }

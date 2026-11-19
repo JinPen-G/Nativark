@@ -26,6 +26,10 @@
 | [寄件中心](tenant-dispatch.service.ts) | 公共通知和验证码日志、可选业务寄件参加者、原管理权限及审计 | 全局 SQL 分页，原状态归一化，详情经成功必需的审计后投影 |
 | [客服邮件](tenant-support-email.service.ts) | 公共邮件和邮箱台账、原配置及管理权限、IMAP 和审计 | 连接 fingerprint、120 秒租约、UIDVALIDITY/UID 去重，配置复核后同事务保存邮件及游标，仅释放本次租约 |
 
+原凭证读取已接受邀请时，先核对原 `acceptedUserId` 和有效 `acceptedAt`，仅返回租户编码、提示及 `status: "accepted"`。该原结果在邀请有效期结束后仍可读取。待接受邀请保留当前授权复验，账号与权限在原事务提交；并发锁定后已接受则读取原结果。
+
+异常邮件提示、`support.email.import.quarantined` 审计和 UID 游标在同一事务提交。审计失败回滚邮件及游标，已存 UID 跳过重复提示和审计。同步结果分别计数 `imported` 和 `quarantined`。验证码寄件只有原成功日志映射为 `sent`，失败状态与结构化失败证据一致时映射为 `failed`，其余沿 `delivery_uncertain` 核对原操作。
+
 公开预览使用 [固定模板](tenant-mail-templates.ts) 转义事实并隐藏激活链接。客服正文和附件只返回安全文本及元数据。缺表映射由 [存储检查](tenant-messaging-storage.ts) 提供。
 
 ## 原宿主与验证
