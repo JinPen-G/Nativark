@@ -32,6 +32,8 @@ import { OFFICIAL_CALENDAR_SCHEMAS, OFFICIAL_CALENDAR_OPENAPI_QUERY_SCHEMAS } fr
 import { PLATFORM_SETTINGS_HTTP_OPERATIONS } from '@rental-os/platform-server/settings-http-policy';
 import { PLATFORM_SETTINGS_SCHEMAS, PLATFORM_SETTINGS_OPENAPI_QUERY_SCHEMAS } from '@rental-os/platform-server/settings-openapi';
 import { PLATFORM_TOOLS_HTTP_OPERATIONS, PLATFORM_TOOLS_SCHEMAS } from '@rental-os/platform-server/tools';
+import { JOBS_HTTP_OPERATIONS, JOBS_OPENAPI_SCHEMAS } from '@rental-os/platform-server/jobs';
+import { NOTIFICATIONS_HTTP_OPERATIONS, NOTIFICATIONS_OPENAPI_SCHEMAS } from '@rental-os/platform-server/notifications';
 import { SUBSCRIPTION_OPENAPI_SCHEMAS, SUBSCRIPTION_OPENAPI_QUERY_SCHEMAS } from '@rental-os/platform-server/subscription-openapi';
 import { AI_AUTOMATION_REVIEW_HTTP_CONTRACTS, AI_AUTOMATION_REVIEW_GRANT_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_AUTOMATION_EXPLANATION_HTTP, AI_AUTOMATION_EXPLANATION_CONTRACTS } from '@rental-os/shared';
@@ -263,6 +265,8 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ...OFFICIAL_CALENDAR_SCHEMAS,
   ...PLATFORM_SETTINGS_SCHEMAS,
   ...PLATFORM_TOOLS_SCHEMAS,
+  ...JOBS_OPENAPI_SCHEMAS,
+  ...NOTIFICATIONS_OPENAPI_SCHEMAS,
   ...TENANT_MESSAGING_SCHEMAS,
   ...STAFF_UPLOAD_OBSERVATION_SCHEMAS,
   ...AI_MEMBER_NAME_SCHEMAS,
@@ -2081,15 +2085,22 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("post", "/api/integrations/tbox-devices", "Integrations", "saveIntegrationTboxDevice", "Save integration TBox device", ["system:integrations:manage"]),
   backlogOperation("put", "/api/integrations/tbox-devices/{id}", "Integrations", "updateIntegrationTboxDevice", "Update integration TBox device", ["system:integrations:manage"]),
   backlogOperation("post", "/api/integrations/tbox-devices/{id}/bind", "Integrations", "bindIntegrationTboxDevice", "Bind integration TBox device", ["system:integrations:manage"]),
-  backlogOperation("get", "/api/jobs", "Jobs", "listAsyncJobs", "List async jobs", ["system:jobs:manage"]),
-  backlogOperation("post", "/api/jobs", "Jobs", "createAsyncJob", "Create async job", ["system:jobs:manage"]),
-  backlogOperation("post", "/api/jobs/{id}/run", "Jobs", "runAsyncJob", "Run async job", ["system:jobs:manage"]),
-  backlogOperation("get", "/api/jobs/print", "Jobs", "listPrintJobs", "List print jobs", ["system:jobs:manage"]),
-  backlogOperation("post", "/api/jobs/print", "Jobs", "createPrintJob", "Create print job", ["system:jobs:manage"]),
-  backlogOperation("post", "/api/jobs/run-due", "Jobs", "runDueJobs", "Run due jobs", ["system:jobs:manage"]),
-  backlogOperation("get", "/api/notifications/logs", "Notifications", "listNotificationLogs", "List notification logs", ["system:notifications:manage"]),
-  backlogOperation("post", "/api/notifications/send", "Notifications", "sendNotification", "Send notification", ["system:notifications:manage"]),
-  backlogOperation("get", "/api/notifications/templates", "Notifications", "listNotificationTemplates", "List notification templates", ["system:notifications:manage"]),
+  // 作业/通知字段与路由沿公共声明，权限使用原Guard的system:integration:manage。
+  ...JOBS_HTTP_OPERATIONS.map((item): ContractOperation => ({
+    method: item.method.toLowerCase() as HttpMethod,
+    path: `/api${item.path.replace(/:([a-zA-Z]+)/g, "{$1}")}`,
+    tag: "Jobs", operationId: item.id, summary: item.summary,
+    permissions: [item.permission], responseSchema: item.response,
+    ...("request" in item ? { requestSchema: item.request } : {}),
+    ...("parameters" in item ? { parameters: [...item.parameters] } : {})
+  })),
+  ...NOTIFICATIONS_HTTP_OPERATIONS.map((item): ContractOperation => ({
+    method: item.method.toLowerCase() as HttpMethod,
+    path: `/api${item.path.replace(/:([a-zA-Z]+)/g, "{$1}")}`,
+    tag: "Notifications", operationId: item.id, summary: item.summary,
+    permissions: [item.permission], responseSchema: item.response,
+    ...("request" in item ? { requestSchema: item.request } : {})
+  })),
   // MP-01：租户微信小程序渠道（AppID/AppSecret、品牌、协议、发布空间）。AppSecret 只写不读。
   backlogOperation("get", "/api/platform/mini-program-channel", "Platform", "getMiniProgramChannel", "Get the tenant mini-program channel configuration (secret never returned)", ["system:integration:manage"], true, undefined, "MiniProgramChannelSummary"),
   backlogOperation("put", "/api/platform/mini-program-channel", "Platform", "saveMiniProgramChannel", "Save the tenant mini-program channel configuration", ["system:integration:manage"], true, "SaveMiniProgramChannelRequest", "MiniProgramChannelSummary"),

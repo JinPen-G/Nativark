@@ -276,12 +276,12 @@
       "default": "./dist/modules/integrations/wechat-mini-program.adapter.js"
     },
     "./notifications": {
-      "types": "./dist/modules/notifications/notification-ledger.d.ts",
-      "default": "./dist/modules/notifications/notification-ledger.js"
+      "types": "./dist/modules/notifications/index.d.ts",
+      "default": "./dist/modules/notifications/index.js"
     },
     "./jobs": {
-      "types": "./dist/modules/jobs/job-ledger.d.ts",
-      "default": "./dist/modules/jobs/job-ledger.js"
+      "types": "./dist/modules/jobs/index.d.ts",
+      "default": "./dist/modules/jobs/index.js"
     },
     "./integration-email": {
       "types": "./dist/modules/integrations/tenant-email.runtime.service.d.ts",
@@ -529,10 +529,10 @@
         "dist/modules/integrations/wechat-mini-program.adapter.d.ts"
       ],
       "notifications": [
-        "dist/modules/notifications/notification-ledger.d.ts"
+        "dist/modules/notifications/index.d.ts"
       ],
       "jobs": [
-        "dist/modules/jobs/job-ledger.d.ts"
+        "dist/modules/jobs/index.d.ts"
       ],
       "integration-email": [
         "dist/modules/integrations/tenant-email.runtime.service.d.ts"

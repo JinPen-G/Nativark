@@ -42,6 +42,8 @@ import { HealthController } from "./modules/health/health.controller";
 import { IntegrationsController } from "./modules/integrations/integrations.controller";
 import { IntegrationsRepository } from "./modules/integrations/integrations.repository";
 import { IntegrationsService } from "./modules/integrations/integrations.service";
+import { JOBS_HTTP_APPLICATION } from "@rental-os/platform-server/jobs";
+import { NOTIFICATIONS_HTTP_APPLICATION } from "@rental-os/platform-server/notifications";
 import { TenantIntegrationController } from "./modules/integrations/tenant-integration.controller";
 import { TenantIntegrationConnectivityService } from "./modules/integrations/tenant-integration.connectivity.service";
 import { TenantIntegrationService } from "./modules/integrations/tenant-integration.service";
@@ -498,6 +500,8 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     { provide: SUBSCRIPTION_APPLICATION, useExisting: SubscriptionService },
     DemoRequestService,
     IntegrationsService,
+    { provide: JOBS_HTTP_APPLICATION, useExisting: IntegrationsService },
+    { provide: NOTIFICATIONS_HTTP_APPLICATION, useExisting: IntegrationsService },
     IntegrationsRepository,
     TenantIntegrationService,
     TenantIntegrationConnectivityService,
