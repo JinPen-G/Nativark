@@ -5,6 +5,7 @@ import { CoreSessionContextSchema, CoreSessionSummarySchema, MemberCoreAssignmen
   corePermissionCode, type CoreSessionContext } from "@rental-os/core-contracts";
 import type { CoreDeployedCatalogue } from "@rental-os/core-host";
 import { PlatformPrincipalAuthority } from "@rental-os/platform-server/principal";
+import { hasEffectivePermission } from "@rental-os/platform-server/permission-match";
 
 type AccessRow = { coreId: string; state: string; revision: bigint | number; operationId: string };
 export function composePlatformCoreSessionReader<Tx extends PlatformCoreTransaction>(input: {
@@ -18,7 +19,7 @@ export function composePlatformCoreSessionReader<Tx extends PlatformCoreTransact
     const user = lease.user;
     const context: CoreSessionContext = { tenantId: actor.tenantId, subjectId: actor.subjectId, tenantHasRegisteredGrant: false,
       canManageMembers: user.isSaasAdmin !== true && (user.isPlatformAdmin === true
-        || user.dataScope === "all" && user.permissions.includes("system:user:manage")), cores: [], assignable: [] };
+        || user.dataScope === "all" && hasEffectivePermission(user.permissions, "system:user:manage")), cores: [], assignable: [] };
     const registered = input.catalogue.registrations;
     // 无Core组合不依赖行业表或Core授权存储，公共会话仍可返回合法空目录。
     if (registered.size) {
@@ -48,7 +49,7 @@ export function composePlatformCoreSessionReader<Tx extends PlatformCoreTransact
     // 等待授权查询期间角色或权限也可能变化；用返回前的原主体投影过滤精确权限。
     const current = await lease.revalidate();
     context.canManageMembers = current.isSaasAdmin !== true && (current.isPlatformAdmin === true
-      || current.dataScope === "all" && current.permissions.includes("system:user:manage"));
+      || current.dataScope === "all" && hasEffectivePermission(current.permissions, "system:user:manage"));
     if (!context.canManageMembers) context.assignable = [];
     context.cores.forEach(entry => { entry.permissions = entry.permissions.filter(code => current.permissions.includes("*") || current.permissions.includes(code)); });
     return CoreSessionContextSchema.parse(context);

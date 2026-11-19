@@ -1,4 +1,4 @@
-/** Core管理复用原认证HTTP和单源schema；读取原结果不重发变更，不从客户端字段授权。 */
+/** Core管理复用当前会话和单源schema；变更单次派发，结果不明保留原键，原收据沿读取接口核对。 */
 import { CORE_MANAGEMENT_HTTP as routes, CORE_MANAGEMENT_HTTP_BASE, CORE_SESSION_HTTP, CORE_SCOPE_HTTP,
   type BindCoreScope, type ChangeMemberCoreAssignment, type ChangeTenantCoreGrant } from "@rental-os/core-contracts";
 import { useMemo } from "react";
@@ -11,29 +11,30 @@ export function createCoreManagementApi(runtime: AdminRuntime) {
   const { request, currentSessionEpoch, currentSessionSignal } = runtime;
   async function send<Output>(declaration: { path: string; method: "GET" | "POST";
   request?: { parse(value: unknown): unknown }; response: { parse(value: unknown): Output } }, input: unknown,
-  signal: AbortSignal, prefix = `/${CORE_MANAGEMENT_HTTP_BASE}`): Promise<Output> {
+  signal: AbortSignal, options: { prefix?: string; retryAuthentication?: false } = {}): Promise<Output> {
   const epoch = currentSessionEpoch(), active = AbortSignal.any([signal, currentSessionSignal()]);
   if (active.aborted) throw new DOMException("原Core管理请求已失效", "AbortError");
   const data = declaration.request?.parse(input);
+  const prefix = options.prefix ?? `/${CORE_MANAGEMENT_HTTP_BASE}`;
   const response = await request<unknown>(`${prefix}/${declaration.path}`, {
-    method: declaration.method === "GET" ? "get" : "post", data, signal: active });
+    method: declaration.method === "GET" ? "get" : "post", data, signal: active, retryAuthentication: options.retryAuthentication });
   if (active.aborted || currentSessionEpoch() !== epoch) throw new DOMException("原Core管理响应不能写入新会话", "AbortError");
   return declaration.response.parse(response);
 }
 
   return {
   registered: (signal: AbortSignal) => send(routes.registered, undefined, signal),
-  changeTenantGrant: (input: ChangeTenantCoreGrant, signal: AbortSignal) => send(routes.tenantGrant, input, signal),
-  changeMemberAssignment: (input: ChangeMemberCoreAssignment, signal: AbortSignal) => send(routes.memberAssignment, input, signal),
-  bind: (input: BindCoreScope, signal: AbortSignal) => send(routes.bind, input, signal),
+  changeTenantGrant: (input: ChangeTenantCoreGrant, signal: AbortSignal) => send(routes.tenantGrant, input, signal, { retryAuthentication: false }),
+  changeMemberAssignment: (input: ChangeMemberCoreAssignment, signal: AbortSignal) => send(routes.memberAssignment, input, signal, { retryAuthentication: false }),
+  bind: (input: BindCoreScope, signal: AbortSignal) => send(routes.bind, input, signal, { retryAuthentication: false }),
   bindingOperation: (input: Query<"bindingOperation">, signal: AbortSignal) => send(routes.bindingOperation, input, signal),
   tenantGrant: (input: Query<"readTenantGrant">, signal: AbortSignal) => send(routes.readTenantGrant, input, signal),
   memberAssignment: (input: Query<"readMemberAssignment">, signal: AbortSignal) => send(routes.readMemberAssignment, input, signal),
   binding: (input: Query<"readBinding">, signal: AbortSignal) => send(routes.readBinding, input, signal),
   tenantGrantOperation: (input: Query<"readTenantGrantOperation">, signal: AbortSignal) => send(routes.readTenantGrantOperation, input, signal),
   memberAssignmentOperation: (input: Query<"readMemberAssignmentOperation">, signal: AbortSignal) => send(routes.readMemberAssignmentOperation, input, signal),
-  sessionContext: (signal: AbortSignal) => send(CORE_SESSION_HTTP, undefined, signal, ""),
-  scope: (input: ReturnType<typeof CORE_SCOPE_HTTP.request.parse>, signal: AbortSignal) => send(CORE_SCOPE_HTTP, input, signal, "")
+  sessionContext: (signal: AbortSignal) => send(CORE_SESSION_HTTP, undefined, signal, { prefix: "" }),
+  scope: (input: ReturnType<typeof CORE_SCOPE_HTTP.request.parse>, signal: AbortSignal) => send(CORE_SCOPE_HTTP, input, signal, { prefix: "" })
   };
 }
 

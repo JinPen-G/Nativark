@@ -1,4 +1,4 @@
-/** 公共租户/人员/角色页面使用原目录和保存接口；页面权限不替代服务端，Core使用权另外分配。 */
+/** 公共租户/人员/角色沿原目录和保存接口维护；Core入口带返回的对象ID，授权页重读当前目录并单独提交。 */
 import { useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
@@ -11,6 +11,7 @@ import { PageHeading, QueryState, SettingsWorkspace, useServerFormSync } from ".
 import { UnsavedChangesGuard } from "../../components/UnsavedChangesGuard";
 import { useAdminSession } from "../../runtime";
 import { usePlatformApplication } from "../../application-context";
+import { useCoreSession } from "../../core";
 import { canManagePublicResource } from "../../application-access";
 import { formSnapshotFingerprint, notifyFormSaved } from "../../forms";
 import { useLocale } from "../../app/locale";
@@ -20,10 +21,21 @@ import { PublicMemberInvitations } from "./PublicMemberInvitations";
 import { hasTenantMessagingPermission } from "../messaging";
 
 const base = { users: "/settings/users", roles: "/settings/roles", tenants: "/platform/tenants" } as const;
+const coreBase = { users: "/settings/member-cores", tenants: "/platform/core-access" } as const;
 type Kind = keyof typeof base;
 type DirectoryRow = SystemUserRow | SystemRoleRow | PlatformTenantSummary;
 const rowId = (row: DirectoryRow) => "tenantCode" in row ? row.tenantId : row.id;
 const rowStatus = (row: DirectoryRow) => "tenantCode" in row ? row.tenantStatus : row.isActive ? "active" : "disabled";
+const coreAccessPath = (kind: keyof typeof coreBase, target: string) => `${coreBase[kind]}?${new URLSearchParams({ target })}`;
+
+function useCanManageCoreAccess(kind: Kind) {
+  const { user, sessionVerified } = useAdminSession(), context = useCoreSession();
+  const saas = kind === "tenants";
+  return kind !== "roles" && sessionVerified
+    && canManagePublicResource(user, saas ? "saas" : "tenant", saas ? "system:tenant:manage" : "system:user:manage")
+    && (saas || context.data?.canManageMembers === true);
+}
+
 function useDirectory<T>(kind: string, path = `/platform/${kind}`) {
   const { session } = usePlatformApplication();
   return useQuery({ queryKey: ["public-management", session.currentSessionEpoch(), kind],
@@ -43,6 +55,7 @@ function Directory({ kind }: { kind: Kind }) {
   const { brandName } = usePlatformApplication(), { locale } = useLocale(), en = locale === "en-US", navigate = useNavigate();
   const [inviting, setInviting] = useState(false);
   const { user } = useAdminSession(), query = useDirectory<DirectoryRow[]>(kind);
+  const canManageCores = useCanManageCoreAccess(kind);
   const filter = useListFilter(query.data, { fields: row => "tenantCode" in row ? [row.tenantCode, row.tenantName]
     : "account" in row ? [row.account, row.displayName] : [row.code, row.name], status: rowStatus });
   const title = { users: en ? "Members" : "人员管理", roles: en ? "Roles" : "角色权限", tenants: en ? "Tenants" : "租户管理" }[kind];
@@ -68,6 +81,8 @@ function Directory({ kind }: { kind: Kind }) {
               {rowStatus(row) === "active" ? en ? "Enabled" : "已启用" : rowStatus(row) === "frozen" ? en ? "Frozen" : "已冻结" : en ? "Disabled" : "已停用"}</DataTableStatus> },
             { title: en ? "Actions" : "操作", key: "actions", render: (_, row) => <>
               <Button onClick={() => navigate(`${base[kind]}/${encodeURIComponent(rowId(row))}`)}>{en ? "Details / edit" : "查看与编辑"}</Button>
+              {kind !== "roles" && canManageCores && <Button onClick={() => navigate(coreAccessPath(kind, rowId(row)))}>
+                {en ? "Core access" : kind === "tenants" ? "Core 授权" : "Core 分配"}</Button>}
               {kind === "tenants" && <Button onClick={() => navigate(`${base.tenants}/${encodeURIComponent(rowId(row))}/status`)}>{en ? "Change status" : "变更状态"}</Button>}
               {"account" in row && row.id !== user?.id && (!row.isPlatformAdmin || user?.isPlatformAdmin) && <Button
                 onClick={() => navigate(`${base.users}/${encodeURIComponent(row.id)}/reset-password`)}>{en ? "Reset password" : "重置密码"}</Button>}
@@ -87,11 +102,14 @@ function Editor<Values extends object>({ kind, initial, status = false, readOnly
 }) {
   const { id } = useParams(), { session, brandName } = usePlatformApplication(), { locale } = useLocale(), en = locale === "en-US";
   const query = useDirectory<DirectoryRow[]>(kind), navigate = useNavigate();
+  const canManageCores = useCanManageCoreAccess(kind);
   const row = id ? query.data?.find(item => rowId(item) === id) : undefined;
   const [form] = Form.useForm<Values>(), pending = useRef<Promise<unknown> | null>(null), baseline = useRef("");
   const [dirty, setDirty] = useState(false), [busy, setBusy] = useState(false), [failed, setFailed] = useState(false);
   const [saved, setSaved] = useState<DirectoryRow | CreatePlatformTenantResult>(), [reload, setReload] = useState(0);
   const [refreshFailed, setRefreshFailed] = useState(false);
+  const savedRow = saved && ("tenant" in saved ? saved.tenant : saved);
+  const accessRecord = savedRow ?? row;
   const newSource = useRef(initial).current;
   const current = useServerFormSync(form, row ?? (!id && query.data ? newSource : undefined), () => {
     form.setFieldsValue(initial); baseline.current = formSnapshotFingerprint(form.getFieldsValue(true)); setDirty(false);
@@ -102,7 +120,7 @@ function Editor<Values extends object>({ kind, initial, status = false, readOnly
     const submitted = formSnapshotFingerprint(form.getFieldsValue(true));
     setBusy(true);
     const operation = session.runtime.request<DirectoryRow | CreatePlatformTenantResult>(`/platform/${kind}${id ? `/${encodeURIComponent(id)}` : ""}${status ? "/status" : ""}`,
-      { method: id ? "put" : "post", data: payload({ ...initial, ...values }) }).then(async result => {
+      { method: id ? "put" : "post", data: payload({ ...initial, ...values }), retryAuthentication: false }).then(async result => {
       setSaved(result); setDirty(false); notifyFormSaved(form, submitted);
       // 人员创建响应可能含一次性口令，仅放当前编辑器，不写查询缓存或浏览器存储。
       try {
@@ -121,6 +139,10 @@ function Editor<Values extends object>({ kind, initial, status = false, readOnly
     onFinish={values => { void save(values).catch(() => undefined); }}>
     <PageHeading title={title} brandName={brandName} extra={<>
       <Button disabled={busy} onClick={() => navigate(base[kind])}>{en ? "Back" : "返回"}</Button>
+      {kind !== "roles" && canManageCores && accessRecord && <Button
+        disabled={busy || !saved && (dirty || failed || Boolean(query.error))}
+        onClick={() => navigate(coreAccessPath(kind, rowId(accessRecord)))}>
+        {en ? "Core access" : kind === "tenants" ? "Core 授权" : "Core 分配"}</Button>}
       {!saved && <ConfirmAction label={en ? "Reload" : "重新读取"} disabled={busy}
         prompt={en ? "Discard the draft and read the current directory?" : "放弃本地草稿，重新读取当前目录？"}
         onConfirm={async () => { const next = await query.refetch(); if (next.isError) throw next.error; setFailed(false); setReload(x => x + 1); }} />}
@@ -182,6 +204,7 @@ function UserEditor() {
     unavailable={rolesAllowed ? roles.isPending || Boolean(roles.error) : !id}
     payload={values => ({ id, account: values.account, displayName: values.displayName, phone: values.phone?.trim() || undefined,
       organizationId: values.organizationId, roleIds: values.roleIds, isPlatformAdmin: values.isPlatformAdmin, isActive: values.isActive })} fields={<>
+      <Alert type="info" title={en ? "Save account details, then assign Core access separately." : "先保存账号资料，再单独分配 Core。"} />
       <Form.Item name="account" label={en ? "Account" : "账号"} rules={[{ required: true }]}><Input autoComplete="off" /></Form.Item>
       <Form.Item name="displayName" label={en ? "Name" : "姓名"} rules={[{ required: true }]}><Input /></Form.Item>
       <Form.Item name="phone" label={en ? "Phone" : "电话"}><Input autoComplete="tel" /></Form.Item>
@@ -238,7 +261,7 @@ function AccessAction({ kind }: { kind: "users" | "roles" }) {
     setBusy(true);
     const operation = session.runtime.request<ResetUserPasswordResult | { id: string; deleted: true }>(
       `/platform/${kind}/${encodeURIComponent(row.id)}${kind === "users" ? "/reset-password" : ""}`,
-      { method: kind === "users" ? "post" : "delete" }).then(async result => {
+      { method: kind === "users" ? "post" : "delete", retryAuthentication: false }).then(async result => {
       setSaved(result);
       try {
         await session.queryClient.invalidateQueries({ queryKey: ["public-management", session.currentSessionEpoch(), kind] }, { throwOnError: true });

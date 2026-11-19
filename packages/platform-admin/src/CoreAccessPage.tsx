@@ -11,7 +11,7 @@ import { useLocale } from "./app/locale";
 import { usePlatformApplication } from "./application-context";
 import { canManagePublicResource } from "./application-access";
 
-type Target = { id: string; name: string; label: string };
+type Target = { id: string; name: string; label: string; status: "active" | "frozen" | "disabled" };
 
 function AccessDirectory({ audience, cores, targets, loading, error, retry }: {
   audience: "saas" | "tenant"; cores: readonly Pick<CoreSessionContext["assignable"][number], "id" | "name">[];
@@ -31,6 +31,7 @@ function AccessDirectory({ audience, cores, targets, loading, error, retry }: {
   };
   return <><PageHeading title={title} brandName={brandName} />
     <QueryState loading={loading} error={error} onRetry={retry}>
+      {selectionMissing && <Alert type="warning" title={en ? "The selection is outside the current authorized directory. Choose it again." : "所选对象不在当前授权目录中，请重新选择。"} />}
       {!error && !loading && (!cores.length
         ? <Empty description={audience === "saas" ? en ? "No Core is registered in this deployment." : "当前部署尚未注册业务 Core。"
           : en ? "Ask your SaaS administrator to enable a Core for this tenant." : "请联系 SaaS 管理员为租户开通业务 Core。"} />
@@ -47,11 +48,9 @@ function AccessDirectory({ audience, cores, targets, loading, error, retry }: {
               allowClear value={core?.id} options={cores.map(item => ({ value: item.id, label: item.name }))}
               onChange={value => choose("core", value)} />
           </ListFilterBar>
-          {selectionMissing
-            ? <Alert type="warning" title={en ? "The selection is outside the current authorized directory. Choose it again." : "所选对象不在当前授权目录中，请重新选择。"} />
-            : target && core ? audience === "saas" ? <CoreTenantGrantPanel tenant={target} core={core} />
+          {!selectionMissing && (target && core ? audience === "saas" ? <CoreTenantGrantPanel tenant={target} core={core} />
               : <CoreMemberAssignmentPanel member={target} core={core} />
-              : <p>{en ? "Choose a directory entry and Core to read its current access." : "选择目录对象和 Core 后，读取当前授权状态。"}</p>}
+              : <p>{en ? "Choose a directory entry and Core to read its current access." : "选择目录对象和 Core 后，读取当前授权状态。"}</p>)}
         </>)}
     </QueryState></>;
 }
@@ -63,7 +62,7 @@ function TenantDirectory() {
     session.runtime.request<PlatformTenantSummary[]>("/platform/tenants", { signal }), meta: { liveRefresh: false } });
   const cores = useQuery({ queryKey: [...key, "registered"], queryFn: ({ signal }) => api.registered(signal), meta: { liveRefresh: false } });
   return <AccessDirectory audience="saas" cores={cores.data ?? []} targets={(tenants.data ?? []).filter(item => item.tenantCode !== "platform")
-    .map(item => ({ id: item.tenantId, name: item.tenantName, label: `${item.tenantName} (${item.tenantCode})` }))}
+    .map(item => ({ id: item.tenantId, name: item.tenantName, label: `${item.tenantName} (${item.tenantCode})`, status: item.tenantStatus }))}
     loading={tenants.isPending || cores.isPending} error={tenants.error || cores.error}
     retry={() => Promise.all([tenants.refetch(), cores.refetch()])} />;
 }
@@ -75,7 +74,7 @@ function MemberDirectory() {
     enabled: context.data?.canManageMembers === true, meta: { liveRefresh: false } });
   if (context.data && !context.data.canManageMembers) return <Result status="403" title="403" />;
   return <AccessDirectory audience="tenant" cores={context.data?.assignable ?? []} targets={(members.data ?? [])
-    .map(item => ({ id: item.id, name: item.displayName, label: `${item.displayName} (${item.account})` }))}
+    .map(item => ({ id: item.id, name: item.displayName, label: `${item.displayName} (${item.account})`, status: item.isActive ? "active" : "disabled" }))}
     loading={context.isPending || !context.error && members.isPending} error={context.error || members.error}
     retry={async () => {
       const current = await context.refetch();

@@ -30,6 +30,8 @@ const access = createPlatformCoreHttpAccess(application);
 
 标准管理流为注册 → SaaS授权租户 → 租户管理员分配成员 → 绑定 / 配置 → 普通业务。新Core不自动分配给所有成员，Core开通与业务角色分别核验。单Core停用保留成员记录、绑定、配置及原收据；重新开通按当前条件恢复，不重放初始化或业务。已撤回的成员分配不会随重开自动恢复。
 
+成员分配沿公共人员管理的同一权限规则：租户管理员，或当前租户内具有全部数据范围及 `system:user:manage`（或原 `*`）权限的营运主体。会话目录、管理读取和写入均使用同一正式权限匹配函数，并保留原身份、租户锁及返回前复验；`core:rental:*` 等业务权限不能取得公共人员管理权。[公共权限规则](../platform-server/src/modules/platform/platform-permissions.ts) · [唯一匹配函数](../platform-server/src/permission-match.ts)
+
 部署者在核定标准包并应用所选迁移后，显式调用 `registerPlatformCorePermissions(tx, manifests)`，`tx`须来自同一公共库的Serializable事务。它先核全部清单、重复Core与现存权限归属/类型，再登记 `${coreId}:${resource}:${action}`，供原权限树和角色接口消费；不会创建角色、授予成员、初始化Core或删除历史权限。兼容升级可更新声明名称并保留原权限ID/角色关系。不同模块或原BUTTON占用同码时停止，先核清来源。[工单部署命令](../../apps/example-tickets-api/src/register-permissions.ts)展示实际调用。
 
 身份围栏复用 [公共原会话](../platform-server/src/modules/platform/platform-principal.authority.ts)，锁原账号 / 角色 / 租户后进入Core锁。旧签名wid只作为原会话一致性证据；公共workspace为空，业务容器仍由Core自身解析。租户和成员撤权、角色变化、令牌到期及提交条件分别复验。原收据只读核对原主体/原键，不用当前状态代替原结果。

@@ -8,12 +8,13 @@ import { CoreAccessService, CoreAccessError, type CoreAccessReceipt, type CoreDe
 import { createMysqlCoreManagement } from "@rental-os/core-host/mysql";
 import type { SystemUserRow } from "@rental-os/platform-contracts";
 import { PlatformPrincipalAuthority } from "@rental-os/platform-server/principal";
+import { hasEffectivePermission } from "@rental-os/platform-server/permission-match";
 
 function managementAllowed(user: SystemUserRow, receiptKind: CoreAccessReceipt["kind"]): boolean {
   if (receiptKind === "tenant_grant") return user.isSaasAdmin === true
     && (user.permissions.includes("*") || user.permissions.includes("system:tenant:manage"));
   return user.isSaasAdmin !== true && (user.isPlatformAdmin === true
-    || user.dataScope === "all" && user.permissions.includes("system:user:manage"));
+    || user.dataScope === "all" && hasEffectivePermission(user.permissions, "system:user:manage"));
 }
 
 export function composePlatformCoreManagement<Tx extends PlatformCoreTransaction>(input: {

@@ -1,4 +1,4 @@
-/** 平台开通和租户成员分配的聚焦管理面；原结果与后续读取分开，当前本人Core缓存随授权变更重读。 */
+/** 平台开通和租户成员分配的聚焦管理面；目录状态控制新开通，原结果与后续读取分开，原操作引用按对象保留。 */
 import { useLayoutEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient, type QueryFilters } from "@tanstack/react-query";
 import { ChangeMemberCoreAssignmentSchema, ChangeTenantCoreGrantSchema,
@@ -12,7 +12,7 @@ import { UnsavedChangesGuard } from "../components/UnsavedChangesGuard";
 import { canManagePublicResource } from "../application-access";
 
 type CoreLabel = { id: string; name: string };
-type Target = { id: string; name: string };
+type Target = { id: string; name: string; status?: "active" | "frozen" | "disabled" };
 type Panel = { kind: "tenant"; tenant: Target; core: CoreLabel } | { kind: "member"; member: Target; core: CoreLabel };
 type Original = { kind: "tenant"; input: ChangeTenantCoreGrant } | { kind: "member"; input: ChangeMemberCoreAssignment };
 
@@ -62,6 +62,8 @@ function CoreAccessEditor(props: Panel) {
   const target = props.kind === "tenant" ? props.tenant : props.member;
   const canManage = sessionVerified && canManagePublicResource(user, props.kind === "tenant" ? "saas" : "tenant",
     props.kind === "tenant" ? "system:tenant:manage" : "system:user:manage");
+  const targetActive = useRef(true);
+  targetActive.current = target.status === undefined || target.status === "active";
   const live = useRef(canManage); live.current = canManage;
   const lifetime = useRef<AbortController | null>(null);
   useLayoutEffect(() => { const controller = new AbortController(); lifetime.current = controller; return () => controller.abort(); }, []);
@@ -140,6 +142,7 @@ function CoreAccessEditor(props: Panel) {
     await readCurrent();
   };
   const change = (enabling: boolean) => run(enabling ? "enable" : "disable", async signal => {
+    if (enabling && !targetActive.current) throw new Error(text("请先恢复租户或成员账号", "Restore the tenant or member account first"));
     if (originalRef.current || needsRefresh.current || !query.data || query.error || query.isFetching) throw new Error(text("请先读取当前状态", "Read the current state first"));
     const fact = query.data.status === "recorded" ? "grant" in query.data ? query.data.grant : query.data.assignment : undefined;
     const command: Original = props.kind === "tenant"
@@ -199,6 +202,12 @@ function CoreAccessEditor(props: Panel) {
       : failure === "unknown" ? text("未能确认本次操作结果，请核对原操作。", "The result is unconfirmed. Read the original operation.") : undefined;
   return <ListSection title={`${props.core.name} · ${target.name}`}>
     <UnsavedChangesGuard busy={busy} dirty={Boolean(original)} />
+    {!targetActive.current && <Alert type="warning" title={props.kind === "tenant"
+      ? text(target.status === "frozen" ? "租户已冻结" : "租户已停用", target.status === "frozen" ? "The tenant is frozen" : "The tenant is disabled")
+      : text("成员账号已停用", "The member account is disabled")}
+      description={props.kind === "tenant"
+        ? text("原 Core 授权记录保留，恢复租户后按当前权限使用。", "Core access records are retained. Restore the tenant to use its current access.")
+        : text("原 Core 分配记录保留，恢复账号后按当前分配与权限使用。", "Core assignment records are retained. Restore the account to use its current assignments and permissions.")} />}
     <QueryState loading={query.isPending} error={query.error} onRetry={retryRead}>
       <DataTableStatus tone={enabled ? "success" : "neutral"}>{state}</DataTableStatus>
       {enabled
@@ -207,7 +216,7 @@ function CoreAccessEditor(props: Panel) {
             props.kind === "tenant" ? "Data and configuration are retained. Ordinary use by this tenant will close." : "This member will lose Core access. Existing data is retained.")}
           tone="danger" disabled={disabled} onConfirm={() => change(false)} />
         : <ActionButton label={text(props.kind === "tenant" ? "开通 Core" : "分配 Core", props.kind === "tenant" ? "Enable Core" : "Assign Core")}
-          intent="confirm" disabled={disabled} onAction={() => change(true)} />}
+          intent="confirm" disabled={disabled || !targetActive.current} onAction={() => change(true)} />}
     </QueryState>
     {refreshFailure && <Alert type="warning" title={receipt
       ? text("操作已记录，最新状态尚未读到", "The operation is recorded. The latest state is unavailable.")
