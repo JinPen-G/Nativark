@@ -18,6 +18,7 @@ import { inventoryBasisGroups, assertRentalInventoryBasis } from "./quote-invent
 import { selectDamageWaiver } from "./damage-waiver";
 import { inspectionClosureError } from "./inspection-customer-response";
 import { readFrozenInspectionTemplates, snapshotInspectionTemplate } from "./inspection-template-snapshot";
+import { hasRentalBusinessTenantFence } from "./mysql-business-fence";
 import type { RentalBusinessContext as BusinessContext } from "./configuration-basis";
 import { capabilityRequirementRoots, resolveCapabilityRequirements } from "./capability-conditions";
 import { validateQuotedCapabilityRequirements } from "./mysql-quote-capabilities";
@@ -1619,8 +1620,6 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   }
 
   async addItemGroupImage(tenantId: string, itemGroupId: string, file: UploadedItemGroupImage) {
-    const state = this.state(tenantId);
-    const group = this.group(state, itemGroupId);
     const mimeExtensions: Record<string, string> = {
       "image/jpeg": "jpg",
       "image/png": "png",
@@ -1631,6 +1630,10 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
     if (!file.buffer?.length || file.size <= 0) throw new BadRequestException("图片文件为空");
     if (file.size > ITEM_GROUP_IMAGE_MAX_BYTES || file.buffer.length > ITEM_GROUP_IMAGE_MAX_BYTES) throw new BadRequestException("单张图片不能超过 5MB");
     if (!this.matchesImageSignature(file.mimetype, file.buffer)) throw new BadRequestException("图片内容与文件格式不一致");
+    const snapshot = await this.refreshCommittedWorkspace(tenantId);
+    const group = this.group(this.state(tenantId), itemGroupId);
+    if (!this.configStore.updateItemGroupImages && (this.configStore.loadWorkspaceSnapshot || this.categoryResolver || hasRentalBusinessTenantFence()))
+      throw new ServiceUnavailableException("型号图片缺少当前配置的原子写入器");
     const current = this.storedItemGroupImages(group);
     if (current.length >= ITEM_GROUP_IMAGE_LIMIT) throw new BadRequestException(`每个产品型号最多上传 ${ITEM_GROUP_IMAGE_LIMIT} 张图片`);
 
@@ -1644,7 +1647,6 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
     };
     const workspaceId = getRequestWorkspaceId() ?? undefined;
     const useConfiguredProvider = this.fileStorage ? await this.fileStorage.hasEnabledProvider(tenantId) : false;
-    let absolutePath: string | undefined;
     if (useConfiguredProvider) {
       const owner: RentalCoreItemGroupFileOwner = { businessType: "item_group", businessId: group.id, uploadScene: "item-group-image", workspaceId };
       const asset = await this.fileStorage!.uploadBuffer(tenantId, {
@@ -1663,49 +1665,61 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
       if (process.env.NODE_ENV === "production") {
         throw new ServiceUnavailableException("生产环境必须先配置文件存储平台，不能使用本地图片存储");
       }
-      absolutePath = this.itemGroupImagePath(group, nextImage);
+      const absolutePath = this.itemGroupImagePath(group, nextImage);
       await mkdir(dirname(absolutePath), { recursive: true });
       await writeFile(absolutePath, file.buffer);
     }
-    const next: StoredItemGroupImage[] = [...current, nextImage];
     try {
-      await this.persistItemGroupImages(group, next);
+      const saved = await this.persistItemGroupImages(group, observed => {
+        const images = this.storedItemGroupImages(observed);
+        // The upload ran without holding DB locks. Recheck the current album
+        // under its space lock rather than overwriting another upload's result.
+        if (images.length >= ITEM_GROUP_IMAGE_LIMIT) throw new BadRequestException(`每个产品型号最多上传 ${ITEM_GROUP_IMAGE_LIMIT} 张图片`);
+        return [...images, { ...nextImage, isCover: images.length === 0 }];
+      }, snapshot?.binding);
+      return this.publicItemGroup(saved);
     } catch (error) {
-      if (absolutePath) await rm(absolutePath, { force: true });
-      if (nextImage.fileAssetId && this.fileStorage) {
-        await this.fileStorage.deleteFileAsset(tenantId, nextImage.fileAssetId, {
-          businessType: "item_group",
-          businessId: group.id,
-          uploadScene: "item-group-image",
-          workspaceId
-        }).catch(() => undefined);
-      }
+      // A lost COMMIT response is not evidence that the pointer was rolled
+      // back. Retain the original asset/session (or development file) for
+      // comparison with the current album; never delete or upload it again here.
+      try { this.logger.warn({ event: "item_group_image.binding_unconfirmed", tenantId, workspaceId,
+        itemGroupId: group.id, imageId, fileAssetId: nextImage.fileAssetId }); } catch { /* preserve original result */ }
       throw error;
     }
-    return this.publicItemGroup(group);
   }
 
   async removeItemGroupImage(tenantId: string, itemGroupId: string, imageId: string) {
+    const snapshot = await this.refreshCommittedWorkspace(tenantId);
     const group = this.group(this.state(tenantId), itemGroupId);
-    const current = this.storedItemGroupImages(group);
-    const target = current.find((image) => image.id === imageId);
-    if (!target) throw new NotFoundException("产品型号图片不存在");
-    if (process.env.NODE_ENV === "production" && (!this.fileStorage || !target.fileAssetId)) {
-      throw new ServiceUnavailableException("生产环境不能操作本地图片，请先迁移到真实文件存储");
+    let target!: StoredItemGroupImage;
+    const saved = await this.persistItemGroupImages(group, observed => {
+      const current = this.storedItemGroupImages(observed);
+      const found = current.find(image => image.id === imageId);
+      if (!found) throw new NotFoundException("产品型号图片不存在");
+      if (process.env.NODE_ENV === "production" && (!this.fileStorage || !found.fileAssetId))
+        throw new ServiceUnavailableException("生产环境不能操作本地图片，请先迁移到真实文件存储");
+      target = { ...found };
+      return current.filter(image => image.id !== imageId).map((image, index) => ({ ...image, isCover: index === 0 }));
+    }, snapshot?.binding);
+    // The real writer atomically registered provider files for the existing
+    // cleanup worker. Dispatching another delete here would race that worker.
+    if (target.fileAssetId && this.configStore.updateItemGroupImages) return this.publicItemGroup(saved);
+    try {
+      if (target.fileAssetId && this.fileStorage) {
+        await this.fileStorage.deleteFileAsset(tenantId, target.fileAssetId, {
+          businessType: "item_group", businessId: group.id, uploadScene: "item-group-image",
+          workspaceId: getRequestWorkspaceId() ?? undefined
+        });
+      } else {
+        await rm(this.itemGroupImagePath(group, target), { force: true });
+      }
+    } catch {
+      // Legacy/development cleanup is separate from the committed binding.
+      // Report only stable identifiers, never provider errors, URLs or paths.
+      try { this.logger.warn({ event: "item_group_image.cleanup_pending", tenantId,
+        itemGroupId: group.id, imageId, fileAssetId: target.fileAssetId }); } catch { /* preserve committed receipt */ }
     }
-    const remaining = current.filter((image) => image.id !== imageId).map((image, index) => ({ ...image, isCover: index === 0 }));
-    await this.persistItemGroupImages(group, remaining);
-    if (target.fileAssetId && this.fileStorage) {
-      await this.fileStorage.deleteFileAsset(tenantId, target.fileAssetId, {
-        businessType: "item_group",
-        businessId: group.id,
-        uploadScene: "item-group-image",
-        workspaceId: getRequestWorkspaceId() ?? undefined
-      });
-    } else {
-      await rm(this.itemGroupImagePath(group, target), { force: true });
-    }
-    return this.publicItemGroup(group);
+    return this.publicItemGroup(saved);
   }
 
   async readItemGroupImage(tenantId: string, itemGroupId: string, imageId: string) {
@@ -6525,11 +6539,35 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
     };
   }
 
-  private async persistItemGroupImages(group: RentalItemGroup, images: StoredItemGroupImage[]) {
-    group.attributes = { ...group.attributes, [ITEM_GROUP_MEDIA_KEY]: { images } };
-    group.images = this.publicItemGroupImages(group, images);
-    group.updatedAt = now();
-    await this.configStore.upsertItemGroup(group, undefined, undefined, undefined, true);
+  private async persistItemGroupImages(group: RentalItemGroup,
+    transform: (current: Readonly<RentalItemGroup>) => StoredItemGroupImage[], expectedBinding?: CategoryWriteBinding) {
+    const workspaceId = this.workspaceOf(group.tenantId);
+    const write = async () => {
+      let saved: RentalItemGroup;
+      if (this.configStore.updateItemGroupImages) {
+        saved = await this.configStore.updateItemGroupImages(group.tenantId, group.id, transform, expectedBinding);
+      } else {
+        if (this.configStore.loadWorkspaceSnapshot || this.categoryResolver || hasRentalBusinessTenantFence())
+          throw new ServiceUnavailableException("型号图片缺少当前配置的原子写入器");
+        // Explicit legacy/absorbing stores retain their original upsert contract.
+        const current = this.group(this.state(group.tenantId), group.id);
+        const images = transform(structuredClone(current));
+        saved = { ...current, attributes: { ...current.attributes, [ITEM_GROUP_MEDIA_KEY]: { images } },
+          images: this.publicItemGroupImages(current, images), updatedAt: now() };
+        await this.configStore.upsertItemGroup(saved, undefined, undefined, expectedBinding, true);
+      }
+      const state = this.state(group.tenantId), index = state.itemGroups.findIndex(item => item.id === group.id);
+      if (index >= 0) state.itemGroups.splice(index, 1, saved);
+      else state.itemGroups.unshift(saved);
+      return saved;
+    };
+    // Share the existing cache publication queue with committed readers. The DB
+    // space lock still protects cross-process writers; uploads hold neither.
+    const previous = this.configurationReadsByWorkspace.get(workspaceId) ?? Promise.resolve();
+    const writing = previous.catch(() => undefined).then(write), settled = writing.then(() => undefined, () => undefined);
+    this.configurationReadsByWorkspace.set(workspaceId, settled);
+    try { return await writing; }
+    finally { if (this.configurationReadsByWorkspace.get(workspaceId) === settled) this.configurationReadsByWorkspace.delete(workspaceId); }
   }
 
   private itemGroupUploadRoot() {

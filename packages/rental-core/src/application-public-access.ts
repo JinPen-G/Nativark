@@ -290,3 +290,5 @@ export function createRentalPublicApplicationAccess(input: RentalPublicApplicati
 }
 
 export type RentalPublicApplicationAccess = ReturnType<typeof createRentalPublicApplicationAccess>;
+export { createRentalPaymentCallbackAccess, isRentalPaymentCallbackRoute,
+  type RentalPaymentCallbackAccess } from "./application-payment-callback-access";

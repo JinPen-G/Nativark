@@ -109,6 +109,10 @@ export interface RentalRewardGrantFacts {
 /** 领域服务的业务事实端口；原事务由调用方提供，库侧约束/隔离仍需真实持久化验证。 */
 export interface RentalBusinessFactStore<TTransaction extends RentalBusinessFactTransaction = RentalBusinessFactTransaction> {
   loadAll(): Promise<TenantBusinessFactSnapshot[]>;
+  listRewards(tenantId: string, customerId?: string, tx?: TTransaction): Promise<RentalRewardLedgerEntry[]>;
+  listBenefitAccounts(tenantId: string, customerId?: string, tx?: TTransaction): Promise<RentalCustomerBenefitAccount[]>;
+  listCustomerCoupons(tenantId: string, customerId?: string, tx?: TTransaction): Promise<RentalCustomerCoupon[]>;
+  findCustomerCoupon(tenantId: string, couponId: string, customerId?: string, tx?: TTransaction): Promise<RentalCustomerCoupon | undefined>;
   findQuote(tenantId: string, quoteId: string, tx?: TTransaction): Promise<RentalQuoteSnapshotV1 | undefined>;
   /** Minimal immutable quote projection, reachable only by its visible original order. */
   readOrderLinkedQuoteFacts?(tenantId: string, workspaceId: string, orderId: string, quoteId: string): Promise<unknown | undefined>;
@@ -241,6 +245,49 @@ export class RentalBusinessFactRepository<TTransaction extends RentalBusinessFac
         })),
         notificationLogs: mine(logs).map((row) => this.toNotificationLog(row))
       };
+    });
+  }
+
+  /** Current lists and quote preparation read their own persisted facts. Neither
+   * an empty result nor a read failure is permission to reuse a process cache. */
+  private async readCurrentBenefitFacts<T>(tenantId: string, tx: TTransaction | undefined,
+    consume: (client: TTransaction, workspaceId: string) => Promise<T>): Promise<T> {
+    const read = async (client: TTransaction) => {
+      await lockRentalBusinessTenant(client, tenantId);
+      return consume(client, await this.contacts.resolveWorkspaceId(client, tenantId));
+    };
+    return tx ? read(tx) : this.store.$transaction(read, { isolationLevel: "ReadCommitted" });
+  }
+
+  async listRewards(tenantId: string, customerId?: string, tx?: TTransaction): Promise<RentalRewardLedgerEntry[]> {
+    return this.readCurrentBenefitFacts(tenantId, tx, async (client, workspaceId) => {
+      const rows = await client.rentalRewardLedgerEntry.findMany({
+        where: { tenantId, workspaceId, ...(customerId ? { customerId } : {}) }, orderBy: { createdAt: "desc" }
+      });
+      return rows.map(row => this.toRewardEntry(row));
+    });
+  }
+
+  async listBenefitAccounts(tenantId: string, customerId?: string, tx?: TTransaction): Promise<RentalCustomerBenefitAccount[]> {
+    return this.readCurrentBenefitFacts(tenantId, tx, async (client, workspaceId) => {
+      const rows = await client.rentalBenefitAccount.findMany({ where: { tenantId, workspaceId, ...(customerId ? { customerId } : {}) } });
+      return rows.map(row => this.toBenefitAccount(row));
+    });
+  }
+
+  async listCustomerCoupons(tenantId: string, customerId?: string, tx?: TTransaction): Promise<RentalCustomerCoupon[]> {
+    return this.readCurrentBenefitFacts(tenantId, tx, async (client, workspaceId) => {
+      const rows = await client.rentalCustomerCoupon.findMany({
+        where: { tenantId, workspaceId, ...(customerId ? { customerId } : {}) }, orderBy: { claimedAt: "desc" }
+      });
+      return rows.map(row => this.toCoupon(row));
+    });
+  }
+
+  async findCustomerCoupon(tenantId: string, couponId: string, customerId?: string, tx?: TTransaction): Promise<RentalCustomerCoupon | undefined> {
+    return this.readCurrentBenefitFacts(tenantId, tx, async (client, workspaceId) => {
+      const row = await client.rentalCustomerCoupon.findFirst({ where: { id: couponId, tenantId, workspaceId, ...(customerId ? { customerId } : {}) } });
+      return row ? this.toCoupon(row) : undefined;
     });
   }
 

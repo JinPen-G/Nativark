@@ -35,8 +35,10 @@ class RentalAssemblyModule {}
 @Module({})
 export class RentalAppModule {
   static register(options: { lock: CoreDeploymentLock; aiMode: "disabled" }): DynamicModule {
+    if (options?.aiMode !== "disabled") throw new Error("当前独立宿主尚未装配启用 AI 所需的原参加者");
     const authorization = createRentalAuthorization(shared);
-    const policy = compileRentalHttpAccessPolicy({ controllers: RENTAL_HOST_CONTROLLERS, authorization });
+    const policy = compileRentalHttpAccessPolicy({ controllers: RENTAL_HOST_CONTROLLERS, authorization,
+      inspectionEvidence: "unavailable" });
     // 检查只用已加载的真实处理器元数据，不创建 Client、不预热，也不给请求提供跳过开关。
     policy.assertReviewed();
     const assembly: DynamicModule = { module: RentalAssemblyModule,
@@ -49,8 +51,9 @@ export class RentalAppModule {
           useFactory: (host: RentalHostAssembly) => createRentalHttpApplicationViews(host.http) },
         { provide: RENTAL_HTTP_REQUEST_SCOPE, inject: [RENTAL_HOST_ASSEMBLY],
           useFactory: (host: RentalHostAssembly) => createRentalHttpRequestScope({ access: host.access,
-            publicAccess: host.publicAccess, isClientPublicRoute: host.authorization.isClientPublicRoute,
-            policy: compileRentalHttpAccessPolicy({ controllers: RENTAL_HOST_CONTROLLERS, authorization: host.authorization }),
+            publicAccess: host.publicAccess, callbackAccess: host.callbackAccess, isClientPublicRoute: host.authorization.isClientPublicRoute,
+            policy: compileRentalHttpAccessPolicy({ controllers: RENTAL_HOST_CONTROLLERS, authorization: host.authorization,
+              inspectionEvidence: "unavailable" }),
             routesToPlatform: host.platform.routesToPlatform }) },
         { provide: RentalApplicationLifecycle, inject: [RENTAL_HOST_ASSEMBLY],
           useFactory: (host: RentalHostAssembly) => host.lifecycle }

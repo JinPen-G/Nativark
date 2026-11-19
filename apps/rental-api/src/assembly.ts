@@ -19,7 +19,7 @@ import { createRentalApplication } from "@rental-os/rental-core/application";
 import { createRentalHttpApplications } from "@rental-os/rental-core/application-http";
 import { createRentalPlatformApplications } from "@rental-os/rental-core/application-platform";
 import { createRentalApplicationAccess } from "@rental-os/rental-core/application-access";
-import { createRentalPublicApplicationAccess } from "@rental-os/rental-core/application-public-access";
+import { createRentalPublicApplicationAccess, createRentalPaymentCallbackAccess } from "@rental-os/rental-core/application-public-access";
 import { createRentalWorkerAuthority } from "@rental-os/rental-core/application-worker-authority";
 import { composeRentalPlatformHost } from "@rental-os/rental-core/platform-host";
 import { composeRentalCoreSessionReader } from "@rental-os/rental-core/core-session";
@@ -88,7 +88,8 @@ export function composeRentalApplication(input: {
     } }
   });
   const publicAccess = createRentalPublicApplicationAccess({ database, authorization, deploymentForTransaction });
-  return Object.freeze({ rental, catalogue, core, authorization, guard, access, publicAccess,
+  const callbackAccess = createRentalPaymentCallbackAccess({ database, deploymentForTransaction });
+  return Object.freeze({ rental, catalogue, core, authorization, guard, access, publicAccess, callbackAccess,
     http: createRentalHttpApplications(rental, { guard }),
     extensions: { auth: rental.auth, subscriptions: rental.subscriptions },
     customers: createRentalCustomerManagementApplication(rental),

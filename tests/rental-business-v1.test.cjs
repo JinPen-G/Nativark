@@ -328,11 +328,11 @@ await business.loadQuote(tenantId, (await context()), quote.id);
 const consumedQuoteContext = await context();
 assert.throws(() => business.consumeQuote(tenantId, consumedQuoteContext, quote.id), /已用于订单/, "quote snapshots must be single-use");
 await business.lockCoupon(tenantId, (await context()), quote.customerCouponId, orderId);
-assert.equal(business.listCustomerCoupons(tenantId, (await context()), "member_001")[0].status, "locked");
+assert.equal((await business.listCustomerCoupons(tenantId, (await context()), "member_001"))[0].status, "locked");
 await business.redeemCoupon(tenantId, (await context()), orderId);
-assert.equal(business.listCustomerCoupons(tenantId, (await context()), "member_001")[0].status, "redeemed");
+assert.equal((await business.listCustomerCoupons(tenantId, (await context()), "member_001"))[0].status, "redeemed");
 await business.releaseCoupon(tenantId, (await context()), orderId);
-assert.equal(business.listCustomerCoupons(tenantId, (await context()), "member_001")[0].status, "claimed");
+assert.equal((await business.listCustomerCoupons(tenantId, (await context()), "member_001"))[0].status, "claimed");
 
 const settings = (await core.getBusinessSettings(tenantId));
 await core.saveBusinessSettings(tenantId, {
@@ -341,23 +341,23 @@ await core.saveBusinessSettings(tenantId, {
 }, "test");
 const reward = await business.grantReward(tenantId, (await context()), { customerId: "member_001", triggerType: "registration", idempotencyKey: "register:member_001" });
 assert.equal(reward[0].amount, 100);
-assert.equal(business.listBenefitAccounts(tenantId, (await context()), "member_001")[0].pointsBalance, 100, "points rewards must be applied to the tenant benefit account");
+assert.equal((await business.listBenefitAccounts(tenantId, (await context()), "member_001"))[0].pointsBalance, 100, "points rewards must be applied to the tenant benefit account");
 // 奖励幂等已改为以数据库为准（RC-04）：判重查 rental_reward_ledger_entries 的
 // (tenantId, idempotencyKey) 唯一约束与派生子键前缀，而这里注入的是吸收式 stub（读返回空）。
 // 在 stub 上断言幂等只会测到"重写了一遍查询逻辑的假实现"，因此该断言迁至
 // tests/mysql-e2e.test.cjs 第 42 节，用"重启清空内存后同键再发"证伪内存判重。
 await business.reverseReward(tenantId, (await context()), reward[0].id, "测试撤销");
-assert.equal(business.listRewards(tenantId, (await context()))[0].status, "reversed");
-assert.equal(business.listBenefitAccounts(tenantId, (await context()), "member_001")[0].pointsBalance, 0, "reversing a reward must reverse the applied benefit");
+assert.equal((await business.listRewards(tenantId, (await context())))[0].status, "reversed");
+assert.equal((await business.listBenefitAccounts(tenantId, (await context()), "member_001"))[0].pointsBalance, 0, "reversing a reward must reverse the applied benefit");
 const referralReward = await business.grantReward(tenantId, (await context()), { customerId: "member_referrer", relatedCustomerId: "member_invitee", triggerType: "first_order_completed", idempotencyKey: "referral:first-order:member_invitee" });
 assert.equal(referralReward.length, 2, "configured referral trigger must grant both referrer and invitee rewards");
 await business.registerReferral(tenantId, (await context()), "member_event_invitee", "member_event_referrer");
 const eventRewards = await business.handleCustomerEvent(tenantId, (await context()), "member_event_invitee", "first_order_completed");
 assert.equal(eventRewards.length, 2, "first completed order must execute the configured referral trigger");
 assert.equal((await business.handleCustomerEvent(tenantId, (await context()), "member_event_invitee", "first_order_completed")).length, 2, "business event rewards must be idempotent");
-const pointsBeforeOtherTenantRead = business.listBenefitAccounts(tenantId, (await context())).length;
+const pointsBeforeOtherTenantRead = (await business.listBenefitAccounts(tenantId, (await context()))).length;
 const cameraContext = await context("tenant_001");
-assert.equal(business.listBenefitAccounts("tenant_001", cameraContext).length, 0, "benefit accounts must remain isolated by SaaS tenant");
+assert.equal((await business.listBenefitAccounts("tenant_001", cameraContext)).length, 0, "benefit accounts must remain isolated by SaaS tenant");
 
 const couponRewardSettings = (await core.getBusinessSettings(tenantId));
 await core.saveBusinessSettings(tenantId, {
@@ -366,11 +366,11 @@ await core.saveBusinessSettings(tenantId, {
 }, "test");
 const couponRewards = await business.grantReward(tenantId, (await context()), { customerId: "coupon_referrer", relatedCustomerId: "coupon_invitee", triggerType: "first_order_completed", idempotencyKey: "referral:coupon:test" });
 assert.equal(couponRewards.length, 2);
-assert.equal(business.listCustomerCoupons(tenantId, (await context()), "coupon_referrer").length, 1, "coupon rewards must create an actual customer coupon");
-assert.equal(business.listBenefitAccounts(tenantId, (await context()), "coupon_invitee")[0].availableRewardCouponCount, 1);
+assert.equal((await business.listCustomerCoupons(tenantId, (await context()), "coupon_referrer")).length, 1, "coupon rewards must create an actual customer coupon");
+assert.equal((await business.listBenefitAccounts(tenantId, (await context()), "coupon_invitee"))[0].availableRewardCouponCount, 1);
 await business.reverseReward(tenantId, (await context()), couponRewards[0].id, "撤销测试券奖励");
-assert.equal(business.listBenefitAccounts(tenantId, (await context()), "coupon_referrer")[0].availableRewardCouponCount, 0);
-assert.equal(business.listBenefitAccounts(tenantId, (await context())).length >= pointsBeforeOtherTenantRead, true);
+assert.equal((await business.listBenefitAccounts(tenantId, (await context()), "coupon_referrer"))[0].availableRewardCouponCount, 0);
+assert.equal((await business.listBenefitAccounts(tenantId, (await context()))).length >= pointsBeforeOtherTenantRead, true);
 
 const damageWaiver = await business.saveService(tenantId, (await context()), {
   code: "DAMAGE-WAIVER",

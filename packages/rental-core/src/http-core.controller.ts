@@ -2548,7 +2548,9 @@ export class RentalCoreController {
         return current.status === RentalCoreOrderStatus.Completed ? current : undefined;
       }
     });
-    await this.business.refreshFromDatabase();
+    // Order and completion rewards already share the confirmed transaction.
+    // Reward/account/coupon readers query scoped committed facts; a later cache
+    // refresh must not hide this receipt or imply that settlement can be repeated.
     return this.committed(tenantId, order);
   }
 

@@ -10,6 +10,8 @@ export interface RentalCoreConfigurationTransaction {
   rentalFulfillmentOperator: Pick<Prisma.TransactionClient["rentalFulfillmentOperator"], "findFirst" | "findMany" | "findUnique" | "upsert">;
   rentalFulfillmentLocation: Pick<Prisma.TransactionClient["rentalFulfillmentLocation"], "count" | "findFirst" | "findMany" | "findUnique" | "upsert">;
   rentalItemGroup: Pick<Prisma.TransactionClient["rentalItemGroup"], "count" | "findFirst" | "findMany" | "findUnique" | "upsert">;
+  /** Image unlink and its original pending cleanup marker commit together. */
+  fileAsset: Pick<Prisma.TransactionClient["fileAsset"], "findFirst" | "updateMany">;
   rentalPricingGroup: Pick<Prisma.TransactionClient["rentalPricingGroup"], "findMany" | "findUnique" | "upsert">;
   rentalCouponTemplate: Pick<Prisma.TransactionClient["rentalCouponTemplate"], "findMany" | "upsert">;
   rentalInspectionTemplate: Pick<Prisma.TransactionClient["rentalInspectionTemplate"], "findMany" | "findUnique" | "upsert">;

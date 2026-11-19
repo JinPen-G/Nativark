@@ -8,7 +8,7 @@ import { EmptyError, Observable, Subscriber } from "rxjs";
 import { getRequestIdentity } from "@rental-os/platform-server/request-identity";
 import { matchableRequestPath } from "@rental-os/platform-server/request-path";
 import type { RentalApplicationAccess, RentalApplicationAccessRequest } from "@rental-os/rental-core/application-access";
-import type { RentalPublicApplicationAccess } from "@rental-os/rental-core/application-public-access";
+import type { RentalPublicApplicationAccess, RentalPaymentCallbackAccess } from "@rental-os/rental-core/application-public-access";
 import { createRentalNativeResponseBuffer, type RentalHttpAccessPolicy } from "@rental-os/rental-core/http-access-policy";
 import type { RentalPlatformRequest } from "@rental-os/rental-core/application-platform";
 
@@ -30,6 +30,7 @@ type RequestScope = {
   staff: boolean;
   anonymous: boolean;
   identityOnly: boolean;
+  paymentCallback: boolean;
   identity: NonNullable<ReturnType<typeof getRequestIdentity>>;
   resume: Resume;
   stop(error?: unknown): void;
@@ -45,6 +46,7 @@ const ended = () => new Error("Rental HTTP 请求已结束；在途操作结果�
 export function createRentalHttpRequestScope(input: {
   access: Pick<RentalApplicationAccess, "run" | "withRequest">;
   publicAccess?: Pick<RentalPublicApplicationAccess, "run" | "withRequest">;
+  callbackAccess?: Pick<RentalPaymentCallbackAccess, "run" | "withRequest">;
   isClientPublicRoute?(method: string, path: string): boolean;
   policy: RentalHttpAccessPolicy;
   routesToPlatform(request: RentalPlatformRequest): boolean;
@@ -57,7 +59,10 @@ export function createRentalHttpRequestScope(input: {
     || input.publicAccess && (typeof input.publicAccess.run !== "function" || typeof input.publicAccess.withRequest !== "function")) {
     throw new Error("Rental 公开请求须同时供给同实例公开准入和原 Guard 公开路由政策");
   }
-  const { access, publicAccess, isClientPublicRoute, policy, routesToPlatform } = input;
+  if (input.callbackAccess && (typeof input.callbackAccess.run !== "function" || typeof input.callbackAccess.withRequest !== "function")) {
+    throw new Error("Rental 支付回调缺少同实例原验签对象范围");
+  }
+  const { access, publicAccess, callbackAccess, isClientPublicRoute, policy, routesToPlatform } = input;
   const scopes = new WeakMap<RentalRequest, RequestScope>();
   const identities = new WeakSet<object>();
   const assertActive = (request: RentalRequest, scope: RequestScope) => {
@@ -65,6 +70,7 @@ export function createRentalHttpRequestScope(input: {
       || matchableRequestPath(request.url) !== scope.path || (request.staffApiRequest === true) !== scope.staff
       || Boolean(isClientPublicRoute?.(request.method.toUpperCase(), matchableRequestPath(request.url))) !== scope.anonymous
       || Boolean(policy.isIdentityRoute?.(request)) !== scope.identityOnly
+      || Boolean(policy.isPaymentCallbackRoute?.(request)) !== scope.paymentCallback
       || routesToPlatform(request)) throw ended();
   };
   const middleware: NestMiddleware<RentalRequest, RentalResponse> = {
@@ -80,16 +86,18 @@ export function createRentalHttpRequestScope(input: {
           || response.writableEnded || response.destroyed || request.aborted) throw ended();
         const anonymous = Boolean(isClientPublicRoute?.(request.method.toUpperCase(), matchableRequestPath(request.url)));
         const identityOnly = Boolean(policy.isIdentityRoute?.(request));
-        if (identityOnly && anonymous) throw new Error("原身份维护不能借用客户公开业务范围");
+        const paymentCallback = Boolean(policy.isPaymentCallbackRoute?.(request));
+        if (Number(identityOnly) + Number(anonymous) + Number(paymentCallback) > 1) throw new Error("原身份、公开客户和支付回调范围不能混用");
+        if (paymentCallback && !callbackAccess) throw new ServiceUnavailableException("Rental 缺少已验签支付回调接点");
         const run = <T>(consume: () => Promise<T>) => identityOnly ? consume()
-          : anonymous ? publicAccess!.run(consume) : access.run(consume);
+          : paymentCallback ? callbackAccess!.run(consume) : anonymous ? publicAccess!.run(consume) : access.run(consume);
         await run(async () => {
           let release!: () => void;
           const lifetime = new Promise<void>(resolve => { release = resolve; });
           const closed = () => scope!.stop(ended());
           scope = {
             active: true, claimed: false, method: request.method.toUpperCase(), path: matchableRequestPath(request.url),
-            staff: request.staffApiRequest === true, anonymous, identityOnly, identity, resume: AsyncLocalStorage.snapshot(),
+            staff: request.staffApiRequest === true, anonymous, identityOnly, paymentCallback, identity, resume: AsyncLocalStorage.snapshot(),
             stop(error = ended()) {
               if (!scope!.active) return;
               scope!.active = false;
@@ -135,6 +143,9 @@ export function createRentalHttpRequestScope(input: {
         const route = policy.requireHandler(context.getClass(), context.getHandler(), request);
         if ((route.review.ingress === "platform-identity") !== scope.identityOnly) {
           throw new ServiceUnavailableException("Rental 原身份入口与实际处理器不一致");
+        }
+        if ((route.review.ingress === "payment-callback") !== scope.paymentCallback) {
+          throw new ServiceUnavailableException("Rental 支付回调范围与实际处理器不一致");
         }
         const native = route.review.response === "buffered-native"
           ? createRentalNativeResponseBuffer(context.switchToHttp().getResponse()) : undefined;
@@ -187,7 +198,8 @@ export function createRentalHttpRequestScope(input: {
             scope.resume(() => {
               assertActive(request, scope);
               const consumeResponse = native ? () => native.run(consume) : consume;
-              const result = scope.identityOnly ? consumeResponse() : scope.anonymous
+              const result = scope.identityOnly ? consumeResponse() : scope.paymentCallback
+                ? callbackAccess!.withRequest(request, consumeResponse) : scope.anonymous
                 ? publicAccess!.withRequest(request, consumeResponse, route.review.kind === "buffered-read" ? { bufferedRead: true } : undefined)
                 : access.withRequest(request, consumeResponse, route.review.kind === "buffered-read" ? { bufferedRead: true }
                   : route.review.kind === "audited-read" ? { auditedRead: true }

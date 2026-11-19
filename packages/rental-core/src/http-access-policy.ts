@@ -30,6 +30,8 @@ import { PaymentReconciliationController } from "./http-payment-reconciliation.c
 import { StaffOfflinePaymentController } from "./http-staff-payments.controller";
 import { FilesController } from "./http-files.controller";
 import { StaffUploadsController } from "./http-staff-uploads.controller";
+import { PaymentWebhookController } from "./http-payment-webhook.controller";
+import { isRentalPaymentCallbackRoute } from "./application-payment-callback-access";
 export { createRentalNativeResponseBuffer } from "./http-native-response";
 
 export type RentalHttpAccessReview = (
@@ -37,8 +39,9 @@ export type RentalHttpAccessReview = (
   | { readonly kind: "audited-read"; readonly evidence: string }
   | { readonly kind: "maintained-read"; readonly evidence: string }
   | { readonly kind: "transactional-write"; readonly evidence: string }
+  | { readonly kind: "disabled-feature"; readonly feature: "inspection-evidence"; readonly evidence: string }
   | { readonly kind: "pending"; readonly reason: string; readonly evidence: string })
-  & { readonly response?: "buffered-native"; readonly ingress?: "client-public" | "platform-identity" };
+  & { readonly response?: "buffered-native"; readonly ingress?: "client-public" | "platform-identity" | "payment-callback" };
 
 /** These are trusted composition inputs, never request body/query/header metadata.
  * evidence names the original read implementation or every commit participant.
@@ -75,6 +78,9 @@ const enterprise = EnterpriseWorkflowsController.prototype, merchant = Enterpris
 const handoff = EnterpriseRentalHandoffMerchantController.prototype;
 const files = FilesController.prototype, staffFiles = StaffUploadsController.prototype;
 const staffAuth = StaffAuthController.prototype, authExtensions = RentalAuthExtensionsController.prototype;
+const webhook = PaymentWebhookController.prototype;
+const callbackHandlers: readonly Function[] = [webhook.alipay, webhook.wechatPay, webhook.stripe,
+  webhook.alipayRefund, webhook.wechatRefund];
 // Identity/session maintenance must remain available when ordinary Core business is
 // unavailable. Only these existing handlers may use the original Guard/service alone;
 // declarations supplied by another module cannot turn a business handler into identity.
@@ -93,7 +99,7 @@ const auditedEnterpriseReads: readonly Function[] = [
 const auditedCustomerReads: readonly Function[] = [customer.sharedCustomers, customer.customerDetail,
   customer.customerIdentityVerifications, customer.customerProfileOverview];
 
-function reviewed(controller: Type<unknown>, handlers: readonly Function[], kind: Exclude<RentalHttpAccessReview["kind"], "pending">,
+function reviewed(controller: Type<unknown>, handlers: readonly Function[], kind: Exclude<RentalHttpAccessReview["kind"], "pending" | "disabled-feature">,
   evidence: string): readonly RentalHttpAccessDeclaration[] {
   return handlers.map(handler => Object.freeze({ controller, handler, review: Object.freeze({ kind, evidence }) }));
 }
@@ -105,6 +111,9 @@ function unresolved(controller: Type<unknown>, handlers: readonly Function[], re
 /** Only this bounded set has been traced through its current services. Additional
  * declarations must name actual controller functions and their reviewed boundary. */
 export const RENTAL_HTTP_REVIEWED_ACCESS: readonly RentalHttpAccessDeclaration[] = Object.freeze([
+  ...callbackHandlers.map(handler => Object.freeze({ controller: PaymentWebhookController, handler,
+    review: Object.freeze({ kind: "transactional-write" as const, ingress: "payment-callback" as const,
+      evidence: "original signature/merchant/amount verification binds the persisted payment/refund; exact current config, Tenant/Core/binding/deployment and original Order/Workspace precede result consumption; original funding/CAS/idempotency retained, no actor or new dispatch" }) })),
   ...reviewed(FilesController, [files.files], "buffered-read",
     "original FileLedgerApplication list preserves original Rental file business ACL and excludes protected dedicated scenes; no write or provider call"),
   ...reviewed(FilesController, [files.createFile], "transactional-write",
@@ -395,8 +404,8 @@ export const RENTAL_HTTP_REVIEWED_ACCESS: readonly RentalHttpAccessDeclaration[]
     core.saveGroup, core.updateGroup, core.savePricingGroup, core.updatePricingGroup,
     core.updatePricingGroupSecurityRates, core.saveAsset, core.updateAsset], "transactional-write",
     "original normalized configuration/fact write uses lockActiveCategoryBinding -> Tenant/Core before workspace/category/revision checks; composite pricing group and initial rates share original RC transaction; authoritative profile snapshot commits inside upsertProfile and normalized persist is now no-op"),
-  ...unresolved(RentalCoreController, [core.uploadItemGroupImage, core.removeItemGroupImage], "file-participant",
-    "original image file upload/remove and final configuration pointer need complete original file participant gates; no broad response buffering can authorize external transport"),
+  ...reviewed(RentalCoreController, [core.uploadItemGroupImage, core.removeItemGroupImage], "transactional-write",
+    "original file upload gate precedes transport; image delta merges locked current album under RC Tenant/Core -> Workspace with original upsert/opening; only acknowledged commit updates cache, unknown retains original asset/session; unlink and original file delete_pending CAS commit together for the sole cleanup worker"),
   ...reviewed(RentalCoreController, [core.stockOperation, core.saveStock], "transactional-write",
     "mysql-core-facts stock operation/count original RC Tenant/Core transaction returns original balance and reservation projection before commit; runtime consumes this confirmed result without post-commit factContext/re-admission; original key/lock/inventory algorithm retained"),
   ...reviewed(RentalCoreController, [core.restoreDisposition,
@@ -466,28 +475,46 @@ export function compileRentalHttpAccessPolicy(input: {
   /** Same original authorization policy as the sole Rental Guard. */
   authorization: Pick<ReturnType<typeof createRentalAuthorization>, "isClientPublicRoute">;
   declarations?: readonly RentalHttpAccessDeclaration[];
+  /** Trusted host composition only. The disabled host supplies no evidence
+   * participant, and this exact handler is rejected before any service executes. */
+  inspectionEvidence?: "unavailable";
 }) {
   const controllers = new Set(input.controllers);
   if (controllers.size !== input.controllers.length || typeof input.authorization?.isClientPublicRoute !== "function") {
     throw new Error("Rental HTTP 处理器重复或缺少原匿名入口政策");
   }
-  const declarations = [...RENTAL_HTTP_REVIEWED_ACCESS.filter(item => controllers.has(item.controller)), ...(input.declarations ?? [])];
+  const declarations = [...RENTAL_HTTP_REVIEWED_ACCESS.filter(item => controllers.has(item.controller)),
+    ...(input.inspectionEvidence === "unavailable" && controllers.has(StaffUploadsController) ? [{
+      controller: StaffUploadsController, handler: staffFiles.bindInspectionEvidence,
+      review: { kind: "disabled-feature" as const, feature: "inspection-evidence" as const,
+        evidence: "disabled AI host supplies no inspection evidence participant; original Guard still runs and this exact handler returns unavailable before DB or evidence writes" }
+    }] : []), ...(input.declarations ?? [])];
   const routes: RentalHttpAccessRoute[] = [];
   const patterns = new Map<RentalHttpAccessRoute, RegExp>();
   const used = new Set<RentalHttpAccessDeclaration>();
   for (const declaration of declarations) {
     if (!controllers.has(declaration.controller) || typeof declaration.handler !== "function" || !declaration.review?.evidence?.trim()
-      || !["buffered-read", "audited-read", "maintained-read", "transactional-write", "pending"].includes(declaration.review.kind)
+      || !["buffered-read", "audited-read", "maintained-read", "transactional-write", "disabled-feature", "pending"].includes(declaration.review.kind)
       || declaration.review.kind === "pending" && !declaration.review.reason?.trim()) {
       throw new Error("Rental HTTP 审定记录必须绑定已挂载的真实处理器及依据");
-    }
-    if (declarations.some(other => other !== declaration && other.controller === declaration.controller && other.handler === declaration.handler)) {
-      throw new Error("Rental HTTP 同一处理器不能登记两份审定政策");
     }
     if (declaration.review.ingress === "platform-identity"
       && !identityHandlers.get(declaration.controller)?.includes(declaration.handler)) {
       throw new Error("Rental 身份维护包装只接受原认证/本人订阅处理器");
     }
+    if (declaration.review.ingress === "payment-callback"
+      && (declaration.controller !== PaymentWebhookController || !callbackHandlers.includes(declaration.handler))) {
+      throw new Error("Rental 支付回调包装只接受原五个验签处理器");
+    }
+    if (declaration.review.kind === "disabled-feature" && (input.inspectionEvidence !== "unavailable"
+      || declaration.controller !== StaffUploadsController || declaration.handler !== staffFiles.bindInspectionEvidence
+      || declaration.review.feature !== "inspection-evidence")) {
+      throw new Error("Rental 未启用政策只接受本宿主明确缺失的原检查证据接点");
+    }
+  }
+  if (declarations.some(declaration => declarations.some(other => other !== declaration
+    && other.controller === declaration.controller && other.handler === declaration.handler))) {
+    throw new Error("Rental HTTP 同一处理器不能登记两份审定政策");
   }
   for (const controller of controllers) {
     const bases = paths(Reflect.getMetadata(PATH_METADATA, controller));
@@ -516,6 +543,9 @@ export function compileRentalHttpAccessPolicy(input: {
             || controller === StaffAuthController && ["login", "refresh", "logout"].includes(handlerName)
               && review.ingress !== "platform-identity") {
             review = pending("anonymous-ingress", "需原可信租户/渠道/原刷新会话解析及同事务 Core 准入；不可构造成员身份或退回 legacy");
+          } else if (controller === PaymentWebhookController
+            && (review.ingress !== "payment-callback" || !isRentalPaymentCallbackRoute(method, path))) {
+            review = pending("callback-ingress", "支付回调必须使用精确原路径及验签后的原单据范围");
           } else if ((controller === EnterpriseReadController && auditedEnterpriseReads.includes(handler))
             || (controller === RentalCustomersController && auditedCustomerReads.includes(handler))) {
             if (review.kind !== "audited-read") {
@@ -550,6 +580,11 @@ export function compileRentalHttpAccessPolicy(input: {
       return routes.some(route => route.review.kind !== "pending" && route.review.ingress === "platform-identity"
         && (route.method === method || method === "HEAD" && route.method === "GET") && patterns.get(route)?.test(path));
     },
+    isPaymentCallbackRoute(request: { method: string; url: string }): boolean {
+      const method = request.method.toUpperCase(), path = matchableRequestPath(request.url);
+      return isRentalPaymentCallbackRoute(method, path) && routes.some(route => route.review.kind !== "pending"
+        && route.review.ingress === "payment-callback" && route.method === method && route.path === path);
+    },
     /** Before enabling the whole declared controller set. This is coverage evidence,
      * not a claim that service instances/commit participants have been validated. */
     assertReviewed() {
@@ -563,6 +598,9 @@ export function compileRentalHttpAccessPolicy(input: {
       if (!route) throw new ServiceUnavailableException("Rental HTTP 实际处理器/路径未登记当前请求包装");
       if (route.review.kind === "pending") {
         throw new ServiceUnavailableException(`Rental HTTP 待接 ${route.review.reason}：${route.review.evidence}`);
+      }
+      if (route.review.kind === "disabled-feature") {
+        throw new ServiceUnavailableException("检查草稿证据绑定未启用");
       }
       return route;
     }

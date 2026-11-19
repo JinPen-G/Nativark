@@ -6,7 +6,7 @@ export { RentalNotificationDraftUnknownError } from "./notification-draft";
 export type { RentalNotificationDraftInput, RentalNotificationDraftOriginal, RentalNotificationDraftObservation } from "./notification-draft";
 import { hasEffectivePermission } from "@rental-os/platform-server/permission-match";
 import { canManageWorkspaceWideNotifications } from "./workbench";
-import { lockRentalBusinessTenant } from "./mysql-business-fence";
+import { hasRentalBusinessTenantFence, lockRentalBusinessTenant } from "./mysql-business-fence";
 import { isNotificationDraftCacheLog, isVerifiedNotificationDraftCacheLog, readNotificationDraftCacheLog, stripNotificationDraftCacheBody } from "./notification-log-cache";
 import type { RentalBusinessRuntimeTransaction, RentalBusinessRuntimeStorage, RentalBusinessMemberships, RentalBusinessNotifications, RentalBusinessSecretBox, RentalBusinessCorporateSettlement } from "./business-runtime-ports";
 export type { RentalBusinessRuntimeTransaction, RentalBusinessRuntimeStorage, RentalBusinessMemberships, RentalBusinessNotifications, RentalBusinessSecretBox, RentalBusinessCorporateSettlement } from "./business-runtime-ports";
@@ -3834,15 +3834,22 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
     };
   }
 
-  listCustomerCoupons(tenantId: string, context: BusinessContext, customerId?: string) {
+  async listCustomerCoupons(tenantId: string, context: BusinessContext, customerId?: string) {
+    if (typeof this.factStore.listCustomerCoupons === "function") return this.factStore.listCustomerCoupons(tenantId, customerId);
+    if (this.prisma || this.hasAuthoritativeConfiguration() || hasRentalBusinessTenantFence()) {
+      throw new ServiceUnavailableException("客户券缺少当前事实读取接点");
+    }
     return this.state(tenantId, context).customerCoupons.filter((coupon) => !customerId || coupon.customerId === customerId);
   }
 
   async listCurrentCustomerCoupons(tenantId: string, context: BusinessContext, customerId?: string) {
+    if (typeof this.factStore.listCustomerCoupons !== "function"
+      && (this.prisma || this.hasAuthoritativeConfiguration() || hasRentalBusinessTenantFence())) {
+      throw new ServiceUnavailableException("客户券缺少当前事实读取接点");
+    }
     const timestamp = stamp();
     if (this.prisma && (process.env.PLATFORM_DATA_SOURCE ?? "mysql").toLowerCase() === "mysql") {
-      const changed = await this.factStore.expireClaimedCoupons(tenantId, timestamp);
-      if (changed) await this.refreshFromDatabase();
+      await this.factStore.expireClaimedCoupons(tenantId, timestamp);
     } else {
       for (const coupon of this.state(tenantId, context).customerCoupons) {
         if (coupon.status === "claimed" && new Date(coupon.effectiveTo).getTime() < new Date(timestamp).getTime()) {
@@ -4075,11 +4082,19 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
     await this.factStore.releaseCouponForOrder(tenantId, orderId, stamp(), tx);
   }
 
-  listRewards(tenantId: string, context: BusinessContext, customerId?: string) {
+  async listRewards(tenantId: string, context: BusinessContext, customerId?: string) {
+    if (typeof this.factStore.listRewards === "function") return this.factStore.listRewards(tenantId, customerId);
+    if (this.prisma || this.hasAuthoritativeConfiguration() || hasRentalBusinessTenantFence()) {
+      throw new ServiceUnavailableException("奖励流水缺少当前事实读取接点");
+    }
     return this.state(tenantId, context).rewardLedger.filter((row) => !customerId || row.customerId === customerId);
   }
 
-  listBenefitAccounts(tenantId: string, context: BusinessContext, customerId?: string) {
+  async listBenefitAccounts(tenantId: string, context: BusinessContext, customerId?: string) {
+    if (typeof this.factStore.listBenefitAccounts === "function") return this.factStore.listBenefitAccounts(tenantId, customerId);
+    if (this.prisma || this.hasAuthoritativeConfiguration() || hasRentalBusinessTenantFence()) {
+      throw new ServiceUnavailableException("权益账户缺少当前事实读取接点");
+    }
     return this.state(tenantId, context).benefitAccounts.filter((row) => !customerId || row.customerId === customerId);
   }
 
@@ -5748,6 +5763,17 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
     const state = context.categoryVersionId && context.categoryAdoptionRevision !== undefined
       ? await this.refreshWorkspaceConfiguration(tenantId, context, state => this.captureQuoteConfiguration(state, input.customerCouponId))
       : this.captureQuoteConfiguration(this.state(tenantId, context), input.customerCouponId);
+    if (input.customerCouponId) {
+      if (typeof this.factStore.findCustomerCoupon === "function") {
+        const coupon = await this.factStore.findCustomerCoupon(tenantId, input.customerCouponId, input.customerId);
+        // Only this calculation owns the selected persisted coupon. A GET or a
+        // replay must not be required to repair a cache before it can be quoted.
+        // Preparation reserves nothing; final order confirmation still locks/CASes it.
+        state.customerCoupons = coupon ? [structuredClone(coupon)] : [];
+      } else if (this.prisma || this.hasAuthoritativeConfiguration() || hasRentalBusinessTenantFence()) {
+        throw new ServiceUnavailableException("报价所选优惠券缺少当前事实读取接点");
+      }
+    }
     const persisted = await quoteConfigurationContext.run({ owner: this, tenantId, workspaceId, state }, () =>
       this.createQuoteFromConfiguration(tenantId, context, input, sourceSnapshot, preResolvedDeliveryAddress, original, beforePersist));
     // The calculation copy never becomes the current configuration cache.

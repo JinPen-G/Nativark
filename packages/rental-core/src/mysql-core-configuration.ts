@@ -1,7 +1,7 @@
 /** Rental商品/地点/档案与规则配置的MySQL实现；数据库是事实源，当前身份和原事件由宿主供给。
  * 复用调用方事务与原绑定/版本/初始化限制，不从缓存或当前模板重建历史事实。 */
 import { readRentalCategoryCode, rentalCategoryStorageCode, rentalDefaultWorkspaceName } from "./category-identity";
-import { BadRequestException, ConflictException, ForbiddenException, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { createHash } from "node:crypto";
 import { z } from 'zod';
 import { assertCategoryAdoptionAllowed } from "./mysql-category-policy";
@@ -19,6 +19,7 @@ import type {
   RentalFulfillmentOperator,
   RentalInspectionTemplate,
   RentalItemGroup,
+  RentalItemGroupImage,
   RentalPricingGroup,
   RentalLocationType,
   TenantRentalBusinessSettings,
@@ -173,6 +174,11 @@ export interface RentalConfigStore<TTransaction extends RentalCoreConfigurationT
   upsertLocation(location: RentalFulfillmentLocation, tx?: TTransaction, expectedBinding?: CategoryWriteBinding, preserveStatus?: boolean,
     newOperator?: RentalFulfillmentOperator, deferOpeningCapture?: boolean): Promise<RentalFulfillmentLocation['status'] | void>;
   upsertItemGroup(group: RentalItemGroup, tx?: TTransaction, uniqueAttributes?: RentalUniqueAttributeClaim[], expectedBinding?: CategoryWriteBinding, allowMediaWrite?: boolean, deferOpeningCapture?: boolean): Promise<void>;
+  /** The synchronous transform sees the current group under its original space
+   * lock. Only images may change; uploads and cleanup stay outside this transaction. */
+  updateItemGroupImages?(tenantId: string, itemGroupId: string,
+    transform: (current: Readonly<RentalItemGroup>) => Array<Omit<RentalItemGroupImage, "url"> & { fileAssetId?: string }>,
+    expectedBinding?: CategoryWriteBinding): Promise<RentalItemGroup>;
   upsertPricingGroup?(group: RentalPricingGroup, tx?: TTransaction, expectedBinding?: CategoryWriteBinding, deferOpeningCapture?: boolean): Promise<void>;
   upsertCouponTemplate(template: RentalCouponTemplate, tx?: TTransaction, expectedBinding?: CategoryWriteBinding): Promise<void>;
   /** 在领券事务内锁定模板行，串行化不同幂等键对同一配额的竞争。 */
@@ -1307,6 +1313,59 @@ export class RentalCoreConfigRepository<TTransaction extends RentalCoreConfigura
       return status;
     };
     return tx ? write(tx) : this.store.$transaction(write, { isolationLevel: "ReadCommitted" });
+  }
+
+  /** Read/merge/save share adoption's existing lock and commit. A completed
+   * upload supplies an image delta, never a stale full group or an async effect.
+   * Removed provider files enter the original cleanup worker here; callers must
+   * not also dispatch a direct delete after this transaction commits. */
+  async updateItemGroupImages(tenantId: string, itemGroupId: string,
+    transform: (current: Readonly<RentalItemGroup>) => Array<Omit<RentalItemGroupImage, "url"> & { fileAssetId?: string }>,
+    expectedBinding?: CategoryWriteBinding): Promise<RentalItemGroup> {
+    return this.store.$transaction(async tx => {
+      const workspaceId = await this.contacts.resolveWorkspaceId(tx, tenantId);
+      const { definition, binding } = await lockActiveCategoryBinding(tx, tenantId, workspaceId, expectedBinding);
+      const read = async () => {
+        const row = await tx.rentalItemGroup.findFirst({ where: { id: itemGroupId, tenantId, workspaceId },
+          include: { bundleComponents: { include: { componentItemGroup: {
+            select: { id: true, tenantId: true, workspaceId: true, code: true, name: true }
+          } } } } });
+        if (!row) throw new NotFoundException("标的分组不存在");
+        if (row.bundleComponents.some(component => component.componentItemGroup.tenantId !== tenantId
+          || component.componentItemGroup.workspaceId !== workspaceId))
+          throw new ConflictException("套装组成引用了其他租户或经营空间的产品型号");
+        return this.toItemGroup(row);
+      };
+      const current = await read();
+      if (current.categoryCode !== definition.code) throw new ConflictException("经营配置与经营空间品类不一致");
+      // A callback cannot mutate other configuration through the observed object.
+      const images = transform(structuredClone(current));
+      if (!Array.isArray(images)) throw new ConflictException("图片变更必须同步完成，不能在配置事务中派发外部调用");
+      const next = { ...current, attributes: { ...current.attributes, __itemGroupMedia: { images: structuredClone(images) } },
+        updatedAt: new Date().toISOString() };
+      await this.upsertItemGroup(next, tx, undefined, binding, true);
+      const retainedFiles = new Set(images.map(image => image.fileAssetId).filter(Boolean));
+      const removedFiles = [...new Set((current.images ?? []).flatMap(image => "fileAssetId" in image
+        && typeof image.fileAssetId === "string" && image.fileAssetId && !retainedFiles.has(image.fileAssetId)
+        ? [image.fileAssetId] : []))].sort();
+      for (const fileAssetId of removedFiles) {
+        const owner = { id: fileAssetId, tenantId, businessModule: "rental-core", businessType: "item_group",
+          businessId: itemGroupId, uploadScene: "item-group-image" };
+        const asset = await tx.fileAsset.findFirst({ where: owner,
+          select: { status: true, updatedAt: true, storageProvider: true, storageKey: true, metadata: true } });
+        if (!asset || !["active", "delete_pending", "delete_in_progress", "deleted"].includes(asset.status)
+          || asset.metadata && typeof asset.metadata === "object" && !Array.isArray(asset.metadata)
+            && typeof asset.metadata.workspaceId === "string" && asset.metadata.workspaceId !== workspaceId)
+          throw new ConflictException("原产品型号图片文件绑定已变化");
+        // Existing pending/in-progress work retains its original receipt; no
+        // reset, new key or TTL-based resend is introduced by another unlink.
+        if (asset.status !== "active") continue;
+        const pending = await tx.fileAsset.updateMany({ where: { ...owner, status: "active", updatedAt: asset.updatedAt,
+          storageProvider: asset.storageProvider, storageKey: asset.storageKey }, data: { status: "delete_pending" } });
+        if (pending.count !== 1) throw new ConflictException("原产品型号图片文件绑定已变化");
+      }
+      return read();
+    }, { isolationLevel: "ReadCommitted" });
   }
 
   /** 套装组成是独立表，整组替换以免留下已被移除的组件行。 */

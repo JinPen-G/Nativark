@@ -20,7 +20,8 @@ import type { RentalPaymentDataStore, RentalPaymentIntegrationParticipant, Renta
 import { roundMoney, toCents } from "./payment-money";
 import { assertPaymentReconciliationAccess } from "./payment-reconciliation-access";
 import { fromStripeMinorUnits, hasStripeLiveReceipt, mapStripeCheckoutStatus, toStripeMinorUnits } from "./stripe-payment";
-import { assertRentalBusinessOperationAccessAfterLock, lockRentalBusinessTenant } from "./mysql-business-fence";
+import { assertRentalBusinessOperationAccessAfterLock, hasRentalBusinessTenantFence, lockRentalBusinessTenant } from "./mysql-business-fence";
+import { withVerifiedRentalPaymentCallback } from "./application-payment-callback-access";
 
 interface PaymentIntentRow {
   id: string;
@@ -74,7 +75,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
   /**
    * 回调候选配置按平台缓存 30 秒。回调是无鉴权公开入口，每次都全表扫描并解密所有租户
    * 密钥会被伪造请求放大成 DB + 解密压力。30 秒内新启用/新通过测试的配置收不到回调，
-   * 由查单补偿兜底；停用的配置最多多被验签 30 秒，验签通过也只会推进它自己的支付单。
+   * 由查单补偿兜底。标准宿主验签后还会在原对象范围中锁定同一配置修订，旧缓存不能继续写入。
    */
   private callbackConfigs(provider: "alipay" | "wechat_pay" | "stripe") {
     const now = Date.now();
@@ -91,6 +92,30 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
   /** 测试与配置保存后可显式清空缓存。 */
   clearCallbackConfigCache() {
     this.callbackConfigCache.clear();
+  }
+
+  /** Only original provider verification may enter this scope. Its subject comes
+   * from the persisted payment/refund, never callback tenant/workspace fields.
+   * The legacy host retains its original transaction path; the selected host
+   * checks the exact signing configuration before consuming the original result. */
+  private withVerifiedCallback<T>(kind: "payment" | "refund", original: PaymentIntentRow | PaymentRefundRow,
+    config: TenantIntegrationRuntimeConfig & { tenantId: string }, consume: () => Promise<T>): Promise<T> {
+    if (!hasRentalBusinessTenantFence()) return consume();
+    const provider = original.provider;
+    if (!["alipay", "wechat_pay", "stripe"].includes(provider) || config.tenantId !== original.tenantId
+      || config.provider !== provider) throw new UnauthorizedException("支付回调与原单据提供方不一致");
+    return withVerifiedRentalPaymentCallback({ kind, tenantId: original.tenantId, workspaceId: original.workspaceId,
+      orderId: original.orderId, id: original.id, provider: provider as "alipay" | "wechat_pay" | "stripe",
+      method: original.method, currency: original.currency, amount: Number(original.amount),
+      merchantNo: "merchantRefundNo" in original ? original.merchantRefundNo : original.merchantOrderNo,
+      paymentIntentId: "paymentIntentId" in original ? original.paymentIntentId : undefined
+    }, async transaction => {
+      if (!config.revision) throw new ServiceUnavailableException("支付回调缺少原签名配置修订");
+      await this.integrations.assertEnabledInTransaction({
+        $queryRaw: (query, ...values) => transaction.$queryRaw("raw" in query
+          ? Prisma.sql(query, ...values) : Prisma.sql(query.strings, ...query.values))
+      }, original.tenantId, "payment", config.provider, { configRevision: config.revision });
+    }, consume);
   }
 
   /** 新的运输在原事务之外执行；每次派发前复核当前选中的请求，不能把准入失败交给 provider 错误分类。
@@ -921,7 +946,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
       const paidAmount = Number(valueOf(values.total_amount || values.receipt_amount));
       if (tradeStatus === "TRADE_SUCCESS" || tradeStatus === "TRADE_FINISHED") {
         this.assertPaidAmount(paidAmount, Number(intent.amount));
-        await this.settleVerifiedPayment({
+        await this.withVerifiedCallback("payment", intent, config, () => this.settleVerifiedPayment({
           tenantId: config.tenantId,
           provider: "alipay",
           eventId: valueOf(values.notify_id) || `${valueOf(values.trade_no)}:${valueOf(values.gmt_payment)}`,
@@ -930,9 +955,9 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
           originalIntent: intent,
           amount: paidAmount,
           payloadHash: sha256(JSON.stringify(values))
-        });
+        }));
       } else if (["TRADE_CLOSED", "TRADE_PENDING"].includes(tradeStatus)) {
-        await this.prisma.rentalPaymentIntent.updateMany({ where: { ...this.originalIntentWhere(intent), status: "pending" }, data: { status: tradeStatus === "TRADE_CLOSED" ? "closed" : "pending", failureReason: tradeStatus === "TRADE_CLOSED" ? "支付宝交易已关闭" : null } });
+        await this.withVerifiedCallback("payment", intent, config, () => this.prisma.rentalPaymentIntent.updateMany({ where: { ...this.originalIntentWhere(intent), status: "pending" }, data: { status: tradeStatus === "TRADE_CLOSED" ? "closed" : "pending", failureReason: tradeStatus === "TRADE_CLOSED" ? "支付宝交易已关闭" : null } }));
       }
       return "success";
     }
@@ -995,7 +1020,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
       if (valueOf(decrypted.trade_state) === "SUCCESS") {
         const total = Number(((decrypted.amount as JsonRecord | undefined)?.total ?? 0)) / 100;
         this.assertPaidAmount(total, Number(intent.amount));
-        await this.settleVerifiedPayment({
+        await this.withVerifiedCallback("payment", intent, config, () => this.settleVerifiedPayment({
           tenantId: config.tenantId,
           provider: "wechat_pay",
           eventId: valueOf(envelope.id),
@@ -1005,7 +1030,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
           amount: total,
           payloadHash: sha256(rawBody),
           decryptedSummary: { tradeState: valueOf(decrypted.trade_state), transactionId: valueOf(decrypted.transaction_id) }
-        });
+        }));
       }
       return { code: "SUCCESS", message: "成功" };
     }
@@ -1080,7 +1105,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
         if (amount + 0.005 < Number(refund.amount)) {
           throw new ConflictException("微信退款回调当前退款金额不足，保留待核对");
         }
-        await this.applyRefundWebhookOutcome({
+        await this.withVerifiedCallback("refund", refund, config, () => this.applyRefundWebhookOutcome({
           tenantId: refund.tenantId,
           workspaceId: refund.workspaceId,
           orderId: refund.orderId,
@@ -1094,9 +1119,9 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
             externalStatus: refundStatus,
             responseJson: { eventType, refundStatus, refundId: valueOf(decrypted.refund_id), outRefundNo: merchantRefundNo, refundedAmount: amount }
           }
-        });
+        }));
       } else if (eventType === "REFUND.CLOSED" || refundStatus === "CLOSED") {
-        await this.applyRefundWebhookOutcome({
+        await this.withVerifiedCallback("refund", refund, config, () => this.applyRefundWebhookOutcome({
           tenantId: refund.tenantId,
           workspaceId: refund.workspaceId,
           orderId: refund.orderId,
@@ -1105,10 +1130,10 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
           eventId,
           payloadHash,
           outcome: { status: "failed", externalRefundId: valueOf(decrypted.refund_id), externalStatus: refundStatus || eventType, responseJson: { eventType, refundStatus, outRefundNo: merchantRefundNo } }
-        });
+        }));
       } else {
         // REFUND.ABNORMAL 或未知事件只保留在查询/人工处理中，不能推进成功资金事件。
-        await this.applyRefundWebhookOutcome({
+        await this.withVerifiedCallback("refund", refund, config, () => this.applyRefundWebhookOutcome({
           tenantId: refund.tenantId,
           workspaceId: refund.workspaceId,
           orderId: refund.orderId,
@@ -1117,7 +1142,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
           eventId,
           payloadHash,
           outcome: { status: "accepted", externalRefundId: valueOf(decrypted.refund_id), externalStatus: refundStatus || eventType, responseJson: { eventType, refundStatus, outRefundNo: merchantRefundNo } }
-        });
+        }));
       }
       return { code: "SUCCESS", message: "成功" };
     }
@@ -1158,7 +1183,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
       if (!Number.isFinite(refundFee)) throw new ConflictException("支付宝退款通知缺少累计退款金额，已保留待查询");
       const confirmedTotal = await this.confirmedRefundTotal(refund.tenantId, refund.workspaceId, refund.paymentIntentId, refund.id);
       if (refundFee + 0.005 < money(confirmedTotal + Number(refund.amount))) throw new ConflictException("支付宝退款通知金额不足，已保留待查询");
-      await this.applyRefundWebhookOutcome({
+      await this.withVerifiedCallback("refund", refund, config, () => this.applyRefundWebhookOutcome({
         tenantId: refund.tenantId,
         workspaceId: refund.workspaceId,
         orderId: refund.orderId,
@@ -1173,7 +1198,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
           confirmedTotal: refundFee,
           responseJson: { status: status || "REFUND_SUCCESS", outRefundNo: merchantRefundNo, refundFee }
         }
-      });
+      }));
       return "success";
     }
     if (!verified) throw new UnauthorizedException("支付宝退款回调验签失败");
@@ -1816,7 +1841,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
       if (mapStripeCheckoutStatus({ status: valueOf(object.status), payment_status: valueOf(object.payment_status) }).paid) {
         const paidAmount = fromStripeMinorUnits(Number(object.amount_total), intent.currency);
         this.assertPaidAmount(paidAmount, Number(intent.amount));
-        await this.settleVerifiedPayment({
+        await this.withVerifiedCallback("payment", intent, config, () => this.settleVerifiedPayment({
           tenantId: config.tenantId,
           provider: "stripe",
           eventId,
@@ -1826,14 +1851,14 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
           amount: paidAmount,
           stripeReceipt: { livemode: true, sessionId: valueOf(object.id) },
           payloadHash: sha256(rawBody)
-        });
+        }));
       }
       return { received: true };
     }
     if (eventType === "checkout.session.expired") {
       const intent = await this.prisma.rentalPaymentIntent.findFirst({ where: { tenantId: config.tenantId, provider: "stripe", merchantOrderNo: orderNoOf(object) } });
       if (intent) {
-        await this.prisma.rentalPaymentIntent.updateMany({ where: { ...this.originalIntentWhere(intent), status: "pending" }, data: { status: "closed", failureReason: "Stripe 收银台已过期" } });
+        await this.withVerifiedCallback("payment", intent, config, () => this.prisma.rentalPaymentIntent.updateMany({ where: { ...this.originalIntentWhere(intent), status: "pending" }, data: { status: "closed", failureReason: "Stripe 收银台已过期" } }));
       }
       return { received: true };
     }
@@ -1851,7 +1876,8 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
           id: refund.paymentIntentId, tenantId: refund.tenantId, workspaceId: refund.workspaceId, orderId: refund.orderId, provider: "stripe"
         } });
         if (!payment) throw new NotFoundException("Stripe 退款缺少原支付关联");
-        await this.applyRefundWebhookOutcome({
+        const outcome = this.stripeRefundOutcome(refundObject, refund, payment.externalTransactionId);
+        await this.withVerifiedCallback("refund", refund, config, () => this.applyRefundWebhookOutcome({
           tenantId: refund.tenantId,
           workspaceId: refund.workspaceId,
           orderId: refund.orderId,
@@ -1859,8 +1885,8 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
           provider: "stripe",
           eventId: `${eventId}:${valueOf(refundObject.id)}`,
           payloadHash: sha256(rawBody),
-          outcome: this.stripeRefundOutcome(refundObject, refund, payment.externalTransactionId)
-        });
+          outcome
+        }));
       }
       return { received: true };
     }
