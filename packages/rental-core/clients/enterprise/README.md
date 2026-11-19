@@ -1,6 +1,6 @@
 # Rental 企业 Web 客户端
 
-[入口](index.ts)提供企业会话、业务请求工厂与原操作门闸。宿主传入离线模式、登记公共域名和开发模式，页面通过 `useEnterprise()` 消费当前身份、企业选择及请求。[门户配置入口](../../../../apps/enterprise-portal/src/enterprise-session.tsx)沿同一实现供给配置。
+[入口](index.ts)提供企业会话、业务请求工厂、原操作门闸及交接材料与动作名称。宿主传入离线模式、登记公共域名和开发模式，页面通过 `useEnterprise()` 消费当前身份、企业选择及请求。[门户配置入口](../../../../apps/enterprise-portal/src/enterprise-session.tsx)沿同一实现供给配置。
 
 从正式出口导入并包住企业页面。域名列表使用部署时登记的公共入口，配置由宿主提供。
 
@@ -29,8 +29,10 @@ import { EnterpriseSessionProvider } from "@rental-os/rental-core/clients/enterp
 
 结果未知时调用 `recover(afterRead)` 读取登记原路径。`not_recorded`、超时、取消及重新登录均保留原引用。续租、换货和交接的明确结束操作继续核对原 K/C、本人、订单、空间与原用途，结束失应答也只能读取原收据。恢复入口的 `recovery` 限定当前善后权限下的精确只读路径。当前服务端权限、企业付费及自费投影和原 Core 金额、批准、执行、收据契约各沿原业务实现。
 
+[交接材料解码](administrator-transfer-review.ts)供给 `readAdministratorTransferMaterial(row)`，只读取原工作流保存的双方关系修订、权限修订与登记动作集合。UTC 修订须与 `toISOString()` 完全一致，动作数组克隆后返回，旧版、缺项和坏材料继续拒绝。[动作名称](enterprise-action-labels.ts)供给 `enterpriseActionLabel(action, english)`，沿原登记集合显示中文或英文。门户[审阅](../../../../apps/enterprise-portal/src/WorkflowReview.tsx)、[交接决策恢复](../../../../apps/enterprise-portal/src/TransferDecisionRecovery.tsx)、[申请页](../../../../apps/enterprise-portal/src/WorkflowPages.tsx)与[管理员编辑](../../../../apps/enterprise-portal/src/AdministratorEditor.tsx)经原同名转接消费，接受交接仍由服务端复核当前授权和原材料。
+
 ## 契约与验证入口
 
 企业合同从本包的[企业合同](../../src/enterprise.ts)、[工作流](../../src/enterprise-workflows.ts)、[费用](../../src/enterprise-expense.ts)、[换货](../../src/enterprise-exchange.ts)及[交接](../../src/enterprise-transfer-decision.ts)单源消费。页面其他既有合同仍沿 shared 兼容出口。
 
-必要类型检查覆盖本入口、两个门户转接和直接原操作消费者。已有[企业消费者](../../../../tests/enterprise-consumers.test.cjs)提供会话寿命、原写入与恢复的定向行为入口，使用原离线隔离约束与明确替身。浏览器、真实 HTTP、数据库及资金证据按各自环境核验。
+必要类型检查覆盖本入口、门户转接和直接消费者。已有[企业消费者](../../../../tests/enterprise-consumers.test.cjs)提供会话寿命、原写入与恢复的定向行为入口，使用原离线隔离约束与明确替身。浏览器、真实 HTTP、数据库及资金证据按各自环境核验。

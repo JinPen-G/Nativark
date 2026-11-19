@@ -14,3 +14,4 @@ export type {
   RentalMiniProgramCatalogPorts,
   RentalMiniProgramMerchantPorts,
 } from "./ports";
+export { createRentalMiniProgramAuthApi, type RentalMiniProgramAuthPorts } from "./auth";

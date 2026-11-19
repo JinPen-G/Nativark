@@ -33,6 +33,8 @@ const forbidden = name => () => { throw new Error(`Unexpected dependency side ef
 // 原商户 fixture 供给抽离后的会话与请求端口，断言仍执行当前业务正文。
 function membershipSource(relative) {
   if (relative === 'apps/enterprise-portal/src/original-workflow-operation.ts') return 'packages/rental-core/clients/enterprise/original-workflow-operation.ts';
+  if (relative === 'apps/enterprise-portal/src/administrator-transfer-review.ts') return 'packages/rental-core/clients/enterprise/administrator-transfer-review.ts';
+  if (relative === 'apps/enterprise-portal/src/enterprise-action-labels.ts') return 'packages/rental-core/clients/enterprise/enterprise-action-labels.ts';
   if (relative.startsWith('apps/admin/src/features/membership/')) return relative.replace('apps/admin/src/features/membership/', 'packages/rental-core/admin/membership/');
   if (/^apps\/admin\/src\/components\/(?:EnterprisePolicyFields|enterprise-policy-material|enterprise-application-material|enterprise-management-material)\.(?:ts|tsx)$/.test(relative)) return relative.replace('apps/admin/src/components/', 'packages/rental-core/admin/membership/');
   return relative;

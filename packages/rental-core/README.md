@@ -13,6 +13,9 @@
 | [开业配置前端](admin/setup/README.md)、[页面声明](admin/setup/pages.ts)、[受控目标](admin/setup/navigation.ts) | `/admin/setup` 提供当前空间的就绪状态和九项配置入口；状态由服务端裁定，业务目标经登记页面及当前权限解析，公共账号入口由宿主供给 |
 | [支付对账前端](admin/payment-reconciliation/README.md)、[页面声明](admin/payment-reconciliation/pages.ts)、[四请求](admin/payment-reconciliation/client.ts) | `/admin/payment-reconciliation` 共用原批次列表/详情、CSV导入和差异表单；当前财务权限与空间、原支付事实、处理原因及单次异步提交保持 |
 | [企业Web客户端](clients/enterprise/README.md)、[正式入口](clients/enterprise/index.ts)、[会话协调](clients/enterprise/session.tsx) | `/clients/enterprise` 提供企业会话、请求与原操作门闸；公共web-client仍持有唯一客户会话和网络层，企业授权、单次写入及原键恢复保持 |
+| [官网认证与本人资料](clients/website/auth/README.md)、[登录态业务](clients/website/session/README.md) | `/clients/website` 提供认证、账户与原业务请求工厂；宿主供给同一客户会话、可信请求与原引用清理，业务授权及原收据沿服务端核验 |
+| [客户认证](clients/miniprogram/auth/README.md)、[正式客户入口](clients/miniprogram/index.ts) | `/clients/miniprogram` 提供密码/短信/微信、用途验证码、注册与本人注销；宿主供给原渠道、请求和会话采用，一次性凭证及原错误保持 |
+| [客户认证](src/mysql-client-auth.ts)、[统一注册](src/mysql-customer-registration.ts)、[注册事务](src/mysql-customer-registration-transaction.ts)、[私有参加者](src/client-session-ports.ts) | 客户令牌、用途证明、会员/账号与原客户行锁单源；后台和自助注册共用同一规则，Serializable 冲突只作原有限重试 |
 | [会员请求](admin/membership/client.ts)、[客户请求](admin/membership/customer-client.ts) | `/admin/membership/client` 与 `/admin/membership/customer-client` 提供原57项请求；传入宿主唯一认证请求，保留租户会员、客户主档、账号状态、敏感资料、企业账务及原冲销收据边界 |
 | [订单前端](admin/orders/README.md)、[订单请求](admin/orders/client.ts) | `/admin/orders` 提供列表、新建、详情及原配货/资金/检查/单据链；宿主提供当前身份、经营空间、原请求与跨领域组件，旧地址消费同一实现 |
 | [养护工单前端](admin/work-orders/README.md)、[页面贡献](admin/work-orders/index.tsx)、[客户端工厂](admin/work-orders/client.ts) | `/admin/work-orders` 提供原列表/看板/详情与六类表单；宿主供给当前权限/经营空间及唯一请求，旧路由和十二HTTP方法薄适配同一实现 |

@@ -2,12 +2,13 @@
 // 令牌按租户隔离存储（每个租户官网是独立品牌，会话不跨租户），并在 401 时用 refresh token 自动续期一次。
 
 import { API_BASE } from './apiClient';
+import { createRentalWebsiteAccountClient, createRentalWebsiteAuthClient, createRentalWebsiteSessionClient } from '@rental-os/rental-core/clients/website';
 import type { AiBookingHandoff, AiBookingSubmissionAcceptance, AiBookingSubmissionDecision, AiBookingSubmissionReceipt,
   AiBookingAcceptanceReadRequest, AiBookingAcceptanceReadResponse }
   from '@rental-os/shared';
-import type { AiClientHostCapabilities, EnterpriseOwnRentalPolicy, EnterpriseBookingApprovalView, EnterpriseApprovalOriginalResult, EnterpriseOrderOriginalResult } from '@rental-os/shared';
-import type { IssueEnterpriseOrderDelegation, RevokeEnterpriseOrderDelegation, EnterpriseOrderDelegationOriginal } from '@rental-os/shared';
-import { CLIENT_API_VERSION, AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientQuotePreparationRequestSchema, aiClientQuotePreparationResponseSchema,
+import type { AiClientHostCapabilities } from '@rental-os/shared';
+
+import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientQuotePreparationRequestSchema, aiClientQuotePreparationResponseSchema,
   aiClientQuotePreparationReadResponseSchema, aiClientQuoteConfirmationRequestSchema, aiClientQuoteResultReadResponseSchema,
   aiClientQuoteReadRequestSchema, type AiClientQuoteSelectionRef, type AiClientQuotePreparationRequest, type AiClientQuoteConfirmationRequest } from '@rental-os/shared';
 import { aiClientQuoteBookingRequestSchema, aiClientQuoteBookingPreparationResponseSchema, aiClientQuoteBookingOperationResponseSchema,
@@ -17,7 +18,7 @@ import { aiClientQuoteBookingRequestSchema, aiClientQuoteBookingPreparationRespo
 const CLIENT_V1 = `${API_BASE}/api/client/v1`;
 
 import { customerFetch, customerLogin, customerSessionGeneration, loadCustomerSession, logoutCustomerSession, switchCustomerWorkspace, subscribeCustomerSession, ClientTransportError } from '@rental-os/web-client';
-import type { EnterpriseExchangeChoices, EnterpriseExchangeChoicesQuery, EnterpriseExchangeRequestOriginalResult, RequestEnterpriseExchangeApproval, CloseEnterpriseExchangeRequest, ClientOrderView, ClientProfileView, ClientMembershipSessionResponse, ConfirmEnterpriseExchangeExpense, EnterpriseExchangeConfirmationResult, EnterpriseExchangeApprovalView, CloseEnterpriseExtensionRequest, EnterpriseExtensionRequestOriginalResult, EnterpriseExtensionEligibility, EnterpriseExtensionApprovalView, EnterpriseExtensionOriginalResult } from '@rental-os/shared';
+import type { ClientMembershipSessionResponse } from '@rental-os/shared';
 import { minimizeClientRecoveryStorage } from './clientRecoveryStorage';
 export type ClientSession = ClientMembershipSessionResponse;
 
@@ -53,35 +54,13 @@ async function postPublic<T>(path: string, payload: unknown): Promise<T> {
   return parse(response) as Promise<T>;
 }
 
-export const authApi = {
-  /** 发送用途化验证码（登录/注册）；开发环境返回 developmentCode 便于联调。 */
-  createChallenge(input: { tenantCode: string; identifier: string; purpose: 'login' | 'registration'; idempotencyKey: string }) {
-    return postPublic<{ challengeId: string; developmentCode?: string; maskedDestination: string; retryAfterSeconds?: number }>(
-      '/auth/challenges', { ...input, method: 'sms' },
-    );
-  },
-  verifyChallenge(challengeId: string, code: string) {
-    return postPublic<{ verificationToken: string }>(`/auth/registration/challenges/${encodeURIComponent(challengeId)}/verify`, { code });
-  },
-  smsLogin(input: { tenantCode: string; loginIdentifier: string; verificationToken: string }) {
-    return customerLogin(input.tenantCode, CLIENT_V1, '/auth/sms-login', input);
-  },
-  passwordLogin(input: { tenantCode: string; loginIdentifier: string; password: string }) {
-    return customerLogin(input.tenantCode, CLIENT_V1, '/auth/login', input);
-  },
-  register(input: {
-    tenantCode: string; name: string; phone: string; password: string; verificationToken: string;
-    idempotencyKey: string; consent: { userAgreementVersion: string; privacyPolicyVersion: string; agreedAt: string };
-  }) {
-    return postPublic<{ result: string; customerId: string; membershipStatus: string }>('/auth/register', input);
-  },
-  async logout(tenantCode: string) {
-    try { return await logoutCustomerSession(tenantCode, CLIENT_V1); }
-    finally {
-      await minimizeClientRecoveryStorage(localStorage);
-    }
-  },
-};
+export const authApi = createRentalWebsiteAuthClient({
+  clientV1: CLIENT_V1,
+  postPublic,
+  customerLogin,
+  logoutCustomerSession,
+  minimizeRecovery: () => minimizeClientRecoveryStorage(localStorage),
+});
 
 // ---- 登录态请求层 ----
 // AuthContext 订阅共用会话；安全 GET 可续期一次，业务写入不自动重发。
@@ -142,10 +121,7 @@ export function captureOwnProfileReadSession() {
   } };
 }
 
-/** Local field projection of the original ClientProfileView; contacts and
- * corporate records are not retained by the personal read-only account view. */
-export type OwnProfileReadView = Pick<ClientProfileView, 'apiVersion' | 'customerId' | 'customerType' | 'name' | 'phoneMasked'
-  | 'email' | 'identityVerified' | 'identityNoMasked' | 'accountStatus' | 'workspace'>;
+export type { OwnProfileReadView } from '@rental-os/rental-core/clients/website';
 
 export function configureAuthBridge(next: AuthBridge | null): void {
   bridge = next;
@@ -162,6 +138,16 @@ async function authedFetch(path: string, init: RequestInit, retry = true): Promi
 async function authedJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   return parse(await authedFetch(path, init)) as Promise<T>;
 }
+
+const accountApi = createRentalWebsiteAccountClient({
+  clientV1: CLIENT_V1,
+  authedJson,
+  currentTenantCode: () => bridge?.tenantCode,
+  switchCustomerWorkspace,
+  captureOwnProfileReadSession,
+  readOnce: async (path, init) => parse(await authedFetch(path, init, false)),
+  error: (status, message) => new ClientTransportError(status, message),
+});
 
 /** 需要登录的接口。金额、库存、可用性均以服务端为准；前端不自行拼算最终价。 */
 export const sessionApi = {
@@ -219,39 +205,9 @@ export const sessionApi = {
     const handoffRef = typeof input === 'string' ? input : input.handoffRef;
     return parse(await authedFetch('/ai-native/entry/booking-handoffs/read', { method: 'POST', body: JSON.stringify({ handoffRef }) }, false));
   },
-  me() { return authedJson<Record<string, unknown>>('/auth/me'); },
-  switchWorkspace(workspaceCode: string) {
-    const owner = bridge;
-    if (!owner?.tenantCode) throw new ClientTransportError(401, '请先登录当前商户');
-    return switchCustomerWorkspace(owner.tenantCode, CLIENT_V1, workspaceCode);
-  },
-  /** 登录态目录：含履约地点、履约模式与型号（用于下单时取 locationId / fulfillmentMode）。 */
-  catalog() { return authedJson<Record<string, any>>('/catalog'); },
-  availability(payload: unknown) { return authedJson<Record<string, unknown>>('/availability', { method: 'POST', body: JSON.stringify(payload) }); },
-  enterpriseRentalPolicies() { return authedJson<EnterpriseOwnRentalPolicy[]>('/enterprise/my-rental-policies'); },
-  enterpriseApprovals() { return authedJson<EnterpriseBookingApprovalView[]>('/enterprise/my-approvals'); },
-  enterpriseCommand<T>(path: string, payload: unknown) { return authedJson<T>(`/enterprise/${path}`, { method: 'POST', body: JSON.stringify(payload) }); },
-  issueEnterpriseOrderDelegation(input: IssueEnterpriseOrderDelegation) { return authedJson<EnterpriseOrderDelegationOriginal>('/enterprise/order-delegations/issue', { method: 'POST', body: JSON.stringify(input) }); },
-  enterpriseOrderDelegation(key: string) { return authedJson<EnterpriseOrderDelegationOriginal>(`/enterprise/order-delegations/${encodeURIComponent(key)}`, { cache: 'no-store' }); },
-  revokeEnterpriseOrderDelegation(input: RevokeEnterpriseOrderDelegation) { return authedJson<EnterpriseOrderDelegationOriginal>(`/enterprise/order-delegations/${encodeURIComponent(input.delegationKey)}/revoke`, { method: 'POST', body: JSON.stringify(input) }); },
-  enterpriseOperation(key: string) { return authedJson<{ state: string; result?: Record<string, unknown> }>(`/enterprise/operations/${encodeURIComponent(key)}`); },
-  enterpriseExchangeChoices(orderId: string, query: EnterpriseExchangeChoicesQuery = {}) { const search = new URLSearchParams(Object.entries(query).filter(([, value]) => value !== undefined) as [string, string][]); return authedJson<EnterpriseExchangeChoices>(`/enterprise/orders/${encodeURIComponent(orderId)}/exchange-choices?${search}`); },
-  requestEnterpriseExchangeApproval(input: RequestEnterpriseExchangeApproval) { return authedJson(`/enterprise/exchange-approvals`, { method: 'POST', body: JSON.stringify(input) }); },
-  enterpriseExchangeRequestOriginal(orderId: string, key: string) { return authedJson<EnterpriseExchangeRequestOriginalResult>(`/enterprise/orders/${encodeURIComponent(orderId)}/exchange-request-operations/${encodeURIComponent(key)}`); },
-  closeEnterpriseExchangeRequest(orderId: string, key: string, input: CloseEnterpriseExchangeRequest) { return authedJson<EnterpriseExchangeRequestOriginalResult>(`/enterprise/orders/${encodeURIComponent(orderId)}/exchange-request-operations/${encodeURIComponent(key)}/close`, { method: 'POST', body: JSON.stringify(input) }); },
-  originalExchangeOrder(orderId: string) { return authedJson<ClientOrderView>(`/orders/${encodeURIComponent(orderId)}`); },
-  confirmEnterpriseExchangeExpense(id: string, input: ConfirmEnterpriseExchangeExpense) { return authedJson(`/enterprise/exchange-approvals/${encodeURIComponent(id)}/expense-confirmation`, { method: 'POST', body: JSON.stringify(input) }); },
-  enterpriseExchangeConfirmation(id: string) { return authedJson<EnterpriseExchangeConfirmationResult>(`/enterprise/exchange-approvals/${encodeURIComponent(id)}/expense-confirmation`); },
-  enterpriseOrderExchangeApprovals(orderId: string) { return authedJson<EnterpriseExchangeApprovalView[]>(`/enterprise/orders/${encodeURIComponent(orderId)}/exchange-approvals`); },
-  enterpriseExtensionEligibility(orderId: string) { return authedJson<EnterpriseExtensionEligibility>(`/enterprise/orders/${encodeURIComponent(orderId)}/extension-eligibility`); },
-  enterpriseExtensionRequestOriginal(orderId: string, key: string) { return authedJson<EnterpriseExtensionRequestOriginalResult>(`/enterprise/orders/${encodeURIComponent(orderId)}/extension-request-operations/${encodeURIComponent(key)}`); },
-  closeEnterpriseExtensionRequest(orderId: string, key: string, input: CloseEnterpriseExtensionRequest) { return authedJson<EnterpriseExtensionRequestOriginalResult>(`/enterprise/orders/${encodeURIComponent(orderId)}/extension-request-operations/${encodeURIComponent(key)}/close`, { method: 'POST', body: JSON.stringify(input) }); },
-  enterpriseExtensionApprovals() { return authedJson<EnterpriseExtensionApprovalView[]>('/enterprise/my-extension-approvals'); },
-  enterpriseExtensionResult(id: string) { return authedJson<EnterpriseExtensionOriginalResult>(`/enterprise/extension-approvals/${encodeURIComponent(id)}/result`); },
-  enterpriseApprovalResult(id: string) { return authedJson<EnterpriseApprovalOriginalResult>(`/enterprise/approvals/${encodeURIComponent(id)}/result`); },
-  enterpriseOrderOriginal(quoteId: string, key: string) { return authedJson<EnterpriseOrderOriginalResult>(`/enterprise/quotes/${encodeURIComponent(quoteId)}/order-operations/${encodeURIComponent(key)}`); },
-  createQuote(payload: unknown) { return authedJson<Record<string, unknown>>('/quotes', { method: 'POST', body: JSON.stringify(payload) }); },
-  getQuote(id: string) { return authedJson<Record<string, unknown>>(`/quotes/${encodeURIComponent(id)}`); },
+  me: accountApi.me,
+  switchWorkspace: accountApi.switchWorkspace,
+  ...createRentalWebsiteSessionClient(authedJson),
   async readBookingAcceptance(input: AiBookingAcceptanceReadRequest): Promise<AiBookingAcceptanceReadResponse> {
     return parse(await authedFetch('/ai-native/entry/booking-submissions/acceptance/read',
       { method: 'POST', body: JSON.stringify(input) }, false));
@@ -267,53 +223,5 @@ export const sessionApi = {
   readBookingSubmission(input: { acceptanceRef: string }) {
     return authedJson<AiBookingSubmissionReceipt>('/ai-native/entry/booking-submissions/read', { method: 'POST', body: JSON.stringify(input) });
   },
-  createOrder(payload: unknown, idempotencyKey: string) {
-    return authedJson<Record<string, unknown>>('/orders', { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify(payload) });
-  },
-  myOrders(params: { page?: number; pageSize?: number } = {}) {
-    const q = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)])).toString();
-    return authedJson<{ items: any[]; page: number; pageSize: number; total: number }>(`/my/orders${q ? `?${q}` : ''}`);
-  },
-  order(id: string) { return authedJson<Record<string, any>>(`/orders/${encodeURIComponent(id)}`); },
-  paymentCapabilities() { return authedJson<{ methods?: string[]; [k: string]: unknown }>('/payment/capabilities'); },
-  async profile(signal?: AbortSignal): Promise<OwnProfileReadView> {
-    const owner = captureOwnProfileReadSession();
-    if (!owner?.current() || signal?.aborted) throw new ClientTransportError(401, '本人资料会话已变化');
-    const controller = new AbortController(), stop = () => controller.abort(), timer = setTimeout(stop, 15000);
-    signal?.addEventListener('abort', stop, { once: true });
-    try {
-      // Read this original GET once. Refresh or interruption withdraws the
-      // observation; a new explicit read uses the new current session.
-      const value: unknown = await parse(await authedFetch('/profile', { signal: controller.signal }, false));
-      if (controller.signal.aborted || signal?.aborted || !owner.current()) throw new ClientTransportError(401, '本人资料会话已变化');
-      if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ClientTransportError(502, '本人资料返回内容无法核验');
-      const profile = value as Partial<ClientProfileView>, workspace = profile.workspace;
-      if (profile.apiVersion !== CLIENT_API_VERSION || profile.customerId !== owner.customerId || profile.customerType !== 'personal'
-        || typeof profile.name !== 'string' || !profile.name || typeof profile.phoneMasked !== 'string'
-        || profile.email !== undefined && typeof profile.email !== 'string'
-        || typeof profile.identityVerified !== 'boolean' || profile.identityNoMasked !== undefined && typeof profile.identityNoMasked !== 'string'
-        || !['active', 'suspended', 'closed'].includes(String(profile.accountStatus))
-        || !workspace || workspace.workspaceCode !== owner.workspaceCode || typeof workspace.workspaceName !== 'string'
-        || typeof workspace.categoryCode !== 'string' || typeof workspace.membershipStatus !== 'string'
-        || workspace.isDefault !== undefined && typeof workspace.isDefault !== 'boolean') throw new ClientTransportError(502, '本人资料返回内容无法核验');
-      return { apiVersion: CLIENT_API_VERSION, customerId: profile.customerId, customerType: 'personal', name: profile.name,
-        phoneMasked: profile.phoneMasked, identityVerified: profile.identityVerified, accountStatus: profile.accountStatus as OwnProfileReadView['accountStatus'],
-        ...(profile.email !== undefined ? { email: profile.email } : {}),
-        ...(profile.identityNoMasked !== undefined ? { identityNoMasked: profile.identityNoMasked } : {}),
-        workspace: { workspaceCode: workspace.workspaceCode, workspaceName: workspace.workspaceName, categoryCode: workspace.categoryCode,
-          membershipStatus: workspace.membershipStatus, ...(workspace.isDefault !== undefined ? { isDefault: workspace.isDefault } : {}) } };
-    } finally { clearTimeout(timer); signal?.removeEventListener('abort', stop); }
-  },
-  addresses() { return authedJson<Record<string, unknown>>('/profile/addresses'); },
-  saveAddress(payload: unknown) { return authedJson<Record<string, unknown>>('/profile/addresses', { method: 'PUT', body: JSON.stringify(payload) }); },
-  deleteAddress(id: string) { return authedJson<unknown>(`/profile/addresses/${encodeURIComponent(id)}`, { method: 'DELETE' }); },
-  coupons() { return authedJson<Record<string, unknown>>('/coupons'); },
-  notifications(params: { page?: number; pageSize?: number } = {}) {
-    const q = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)])).toString();
-    return authedJson<Record<string, unknown>>(`/notifications${q ? `?${q}` : ''}`);
-  },
-  createPaymentIntent(orderId: string, payload: Record<string, unknown>, idempotencyKey: string) {
-    // idempotencyKey 是请求体必填字段（后端 DTO 从 body 读取）；同时带同名请求头，双保险。
-    return authedJson<Record<string, any>>(`/orders/${encodeURIComponent(orderId)}/payment-intents`, { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({ ...payload, idempotencyKey }) });
-  },
+  profile: accountApi.profile,
 };

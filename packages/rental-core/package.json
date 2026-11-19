@@ -1386,7 +1386,8 @@
       "types": "./dist-clients/clients/miniprogram/index.d.ts",
       "require": "./dist-clients/clients/miniprogram/index.js",
       "default": "./dist-clients/clients/miniprogram/index.js"
-    }
+    },
+    "./clients/website": "./clients/website/index.ts"
   },
   "typesVersions": {
     "*": {
@@ -2496,6 +2497,9 @@
       ],
       "clients/miniprogram": [
         "dist-clients/clients/miniprogram/index.d.ts"
+      ],
+      "clients/website": [
+        "clients/website/index.ts"
       ]
     }
   },

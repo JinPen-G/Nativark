@@ -13,6 +13,11 @@ import type {
 } from "../../src/client-contracts";
 import type { RentalAvailabilityLine } from "../../src/contracts";
 
+export { createRentalWebsiteSessionClient, type RentalWebsiteSessionRequest } from "./session";
+export { createRentalWebsiteAuthClient, createRentalWebsiteAccountClient } from "./auth";
+export type { OwnProfileReadView, RentalWebsiteAuthPorts, RentalWebsiteAccountPorts,
+  RentalWebsiteProfileReadOwner } from "./auth";
+
 export type BootstrapWebsite = ClientWebsiteConfig;
 export type PublicDocumentResponse = ClientPublicDocumentResponse;
 export type BootstrapResponse = ClientChannelBootstrapResponse;
