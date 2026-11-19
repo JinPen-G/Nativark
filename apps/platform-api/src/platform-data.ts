@@ -3,7 +3,8 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { CoreDataContractSchema } from "@rental-os/core-contracts";
-import { mysqlStructureFromMigrations, readMysqlPhysicalData } from "@rental-os/platform-core-host";
+import { mysqlStructureFromMigrations, readMysqlPhysicalData, extendMysqlPublicForeignKeys,
+  type MysqlForeignKeyExtension } from "@rental-os/platform-core-host";
 import type { CoreMysqlDataPlan } from "@rental-os/core-host/mysql-deployment";
 
 export const PUBLIC_PLATFORM_DATA_VERSION = "0.1.7";
@@ -22,7 +23,7 @@ const migrations = [
   { id: "platform.support-email", name: "20261119010000_public_support_email", sha256: "390396ac626f9200c6f84c1822a74b58dffe8ab51a6cbe6ffa871c067a6b4db4" }
 ] as const;
 
-export function createPublicPlatformDataPlan(): CoreMysqlDataPlan {
+export function createPublicPlatformDataPlan(coreForeignKeys: readonly MysqlForeignKeyExtension[] = []): CoreMysqlDataPlan {
   const texts = migrations.map(migration => {
     const file = resolve(__dirname, "../prisma/migrations", migration.name, "migration.sql");
     const content = readFileSync(file);
@@ -30,7 +31,7 @@ export function createPublicPlatformDataPlan(): CoreMysqlDataPlan {
       throw new Error(`公共迁移原文摘要变化：${migration.name}`);
     return content.toString("utf8");
   });
-  const expected = mysqlStructureFromMigrations(texts);
+  const expected = extendMysqlPublicForeignKeys(mysqlStructureFromMigrations(texts), coreForeignKeys);
   const data = CoreDataContractSchema.parse({ version: PUBLIC_PLATFORM_DATA_VERSION,
     readable: { minInclusive: "0.1.0", maxExclusive: "0.2.0" }, migrations: migrations.map(migration => ({ id: migration.id,
       file: `prisma/migrations/${migration.name}/migration.sql`, sha256: migration.sha256 })) });

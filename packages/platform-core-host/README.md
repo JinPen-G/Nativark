@@ -38,8 +38,10 @@ const access = createPlatformCoreHttpAccess(application);
 
 公共宿主的 [数据计划](../../apps/platform-api/src/platform-data.ts) 核固定迁移摘要后提供 `readPhysical`，用于 `createMysqlCoreDeploymentObservation` 读取原Prisma账与实际结构。预期从已登记SQL构造，建表内与后续ALTER的外键共用同一解析，保留引用列和删除/更新规则；未知DDL明确报错。实际MySQL元数据须匹配，不能直接返回清单版本。CHECK保留布尔优先级/NULL/范围含义，额外唯一键或未执行约束不会被当成当前数据版本。构造计划只读源码，真正的物理读取需要数据库许可。
 
-公共文件追加后，数据计划为0.1.4/八迁移，预期33表、341列、85索引、7个CHECK与27外键。引用表名和列括号间的合法空格沿原SQL识别，约束语义及未知DDL拒绝保持。文件/上传两表保留原清理状态和键，缺列、错误外键或迁移摘要变化不能取得当前观察。标准部署准备消费同一完整迁移链，输出仍是待部署文件。[文件迁移](../../apps/platform-api/prisma/migrations/20261118010000_public_files/migration.sql)
+文件、通知、作业及公共邮件数据沿公共宿主的同一迁移链维护，版本和摘要从数据计划读取。引用表名和列括号间的合法空格沿原SQL识别，约束语义及未知DDL拒绝保持。文件/上传两表保留原清理状态和键，缺列、错误外键或迁移摘要变化不能取得当前观察。标准部署准备消费同一完整迁移链，输出仍是待部署文件。[文件迁移](../../apps/platform-api/prisma/migrations/20261118010000_public_files/migration.sql)
+
+所选Core在自己的迁移中给公共表追加外键时，宿主通过 `mysqlForeignKeyExtension(statement)` 解析固定SQL，再把结果交给 `createPublicPlatformDataPlan(extensions)`。`extendMysqlPublicForeignKeys` 返回新的预期，不修改公共基线；只接受已存在的公共列和唯一的约束名称。物理观察继续核对目标表/列、删除和更新规则，缺少约束或出现未声明约束均不就绪。Prisma关系源码沿[公共组合入口](../core-contracts/README.md#组合-prisma-源码)追加。
 
 `createPlatformCoreOpenApi` 先组合标准平台管理 / 目录 / 范围资料，再调用原Core贡献检查；业务路径/schema保留各Core命名空间，缺引用或冲突拒绝。公共宿主通过同一 `/api/openapi.json` 返回组合资料；原Rental文档与客户端路径继续由其兼容装配维护。
 
-本包已有类型、实际Nest容器、明确离线SQL下的授权/成员/绑定/收据与停用恢复证据。真实数据库、选中Core业务HTTP/页面、安装升级和完整独立接手仍按 [PCH](../../docs/平台底座/Core接入/平台Core接入-协作接续.md) 交付，不能将这些定向验证写成全部运行完成。
+本包已有类型、实际Nest容器、明确离线SQL下的授权/成员/绑定/收据与停用恢复证据。真实数据库、选中Core业务HTTP/页面、安装升级和完整独立接手尚未验收。

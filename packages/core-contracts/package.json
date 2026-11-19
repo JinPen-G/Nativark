@@ -12,6 +12,7 @@
       "archive": ["dist/archive.d.ts"],
       "install": ["dist/install.d.ts"],
       "deployment": ["dist/deployment.d.ts"],
+      "prisma": ["dist/prisma.d.ts"],
       "github": ["dist/github.d.ts"],
       "development": ["dist/development.d.ts"],
       "github-repository": ["dist/github-repository.d.ts"],
@@ -38,6 +39,10 @@
     "./deployment": {
       "types": "./dist/deployment.d.ts",
       "default": "./dist/deployment.js"
+    },
+    "./prisma": {
+      "types": "./dist/prisma.d.ts",
+      "default": "./dist/prisma.js"
     },
     "./github": {
       "types": "./dist/github.d.ts",

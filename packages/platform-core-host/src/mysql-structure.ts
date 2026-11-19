@@ -9,6 +9,10 @@ export interface MysqlTableShape {
   checks: Array<{ name: string; clause: string }>;
   foreignKeys: Array<{ name: string; columns: string[]; targetTable: string; targetColumns: string[]; deleteRule: string; updateRule: string }>;
 }
+export interface MysqlForeignKeyExtension {
+  readonly table: string;
+  readonly foreignKey: MysqlTableShape["foreignKeys"][number];
+}
 const names = (list: string) => [...list.matchAll(/`([^`]+)`/g)].map(match => match[1]);
 const sqlType = (value: string) => value.toLowerCase().replace(/^boolean$/, "tinyint(1)").replace(/^integer$/, "int").replace(/,\s+/g, ",");
 const defaultValue = (value: string | undefined): string | null => value === undefined || /^null$/i.test(value) ? null
@@ -26,6 +30,29 @@ function foreignKey(line: string) {
   const match = /^CONSTRAINT `([^`]+)`\s+FOREIGN KEY \(([^)]+)\) REFERENCES `([^`]+)`\s*\(([^)]+)\) ON DELETE (RESTRICT|CASCADE|SET NULL|NO ACTION) ON UPDATE (RESTRICT|CASCADE|SET NULL|NO ACTION)$/i.exec(line);
   if (!match) throw new Error(`未支持的公共外键定义：${line}`);
   return { name: match[1], columns: names(match[2]), targetTable: match[3], targetColumns: names(match[4]), deleteRule: match[5], updateRule: match[6] };
+}
+
+/** 所选Core迁移对公共表的显式外键，采用与建表相同的严格语法。 */
+export function mysqlForeignKeyExtension(statement: string): MysqlForeignKeyExtension {
+  const match = /^ALTER TABLE `([^`]+)`\s+ADD (CONSTRAINT [\s\S]+)$/i.exec(statement.trim().replace(/;$/, ""));
+  if (!match) throw new Error("公共表扩展只接受明确的追加外键");
+  return { table: match[1], foreignKey: foreignKey(match[2]) };
+}
+
+/** 宿主只从已核定的Core迁移提供扩展；不接收客户端的约束或覆盖原表定义。 */
+export function extendMysqlPublicForeignKeys(tables: readonly MysqlTableShape[],
+  extensions: readonly MysqlForeignKeyExtension[]): MysqlTableShape[] {
+  const result = tables.map(table => structuredClone(table));
+  for (const extension of extensions) {
+    const table = result.find(candidate => candidate.name === extension.table);
+    const key = extension.foreignKey;
+    if (!table || table.foreignKeys.some(current => current.name === key.name)
+      || key.columns.some(column => !table.columns.some(current => current.name === column))
+      || !key.columns.length || key.columns.length !== key.targetColumns.length)
+      throw new Error(`公共外键扩展冲突或无效：${extension.table}.${key.name}`);
+    table.foreignKeys.push(structuredClone(key));
+  }
+  return result;
 }
 
 // 原迁移允许多列写在同一行；只在引号和括号外拆逗号，保留ENUM、DECIMAL及复合键原文。

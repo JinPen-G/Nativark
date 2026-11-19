@@ -31,6 +31,10 @@
       "types": "./dist/mysql-state.d.ts",
       "default": "./dist/mysql-state.js"
     },
+    "./prisma-schema": {
+      "types": "./dist/prisma-schema.d.ts",
+      "default": "./dist/prisma-schema.js"
+    },
     "./inspection-object-reader": {
       "types": "./dist/inspection-object-reader.d.ts",
       "default": "./dist/inspection-object-reader.js"
@@ -1312,6 +1316,9 @@
       ],
       "mysql-state": [
         "dist/mysql-state.d.ts"
+      ],
+      "prisma-schema": [
+        "dist/prisma-schema.d.ts"
       ],
       "inspection-object-reader": [
         "dist/inspection-object-reader.d.ts"

@@ -246,6 +246,22 @@ React 的 `CoreAdminPageAction` 还可声明 `slot`。省略时使用主操作�
 
 **描述、注册、路径解析和[公共React页面适配](../platform-admin/src/core/index.ts)已提供。** 零Core和工单宿主共用同一应用工厂、页面注册表及授权目录；左栏、面包屑行、铃铛、休息和收展由公共壳提供。Rental旧路由仍通过兼容入口使用自身当前身份，完整标准装配继续迁移。字段类型、动态动作和表单Promise留在Core/React代码中；浏览器、真实HTTP/数据库及多Core完整运行仍须实际验收。
 
+## 组合 Prisma 源码
+
+使用 Prisma 的宿主从 `@rental-os/core-contracts/prisma` 导入 `composeCorePrismaSchema`，传入公共源码和所选 Core 的贡献。
+
+```ts
+const schema = composeCorePrismaSchema(publicSchema, [
+  { id: manifest.id, schema: coreSchema, publicRelations },
+]);
+```
+
+Core 提供自己的 `model` / `enum`。`publicRelations` 按公共模型名列出需要追加的关系字段，例如 `{ Tenant: ["tickets Ticket[]"] }`；关系目标必须属于这个 Core，公共列、默认值、索引及生成器仍由底座维护。字段、模型或 Core 标识重复，覆盖公共声明或包含未知顶层语句时，组合在生成客户端前拒绝。空贡献数组生成公共源码，多个 Core 复用同一入口。
+
+公共表需要追加真实外键时，宿主从已校验的 Core 迁移调用 `mysqlForeignKeyExtension(sql)`，将结果传给 `createPublicPlatformDataPlan(keys)`。结构观察会核对这些约束的原列、目标与删除/更新规则；额外外键或缺少所选约束都不能冒充就绪。[结构接点](../platform-core-host/src/mysql-structure.ts) · [公共数据计划](../../apps/platform-api/src/platform-data.ts)
+
+组合函数只返回源码。宿主在自己的客户端输出目录执行原 Prisma 校验与生成，部署迁移仍从固定包和版本锁准备；既有组合库继续核原迁移账与历史恢复依据。[源码](src/prisma.ts) · [迁移准备](src/deployment.ts)
+
 ## 分别更新底座或一个 Core
 
 先构建本包，再用实际发行元数据和迁移账快照执行只读预检。

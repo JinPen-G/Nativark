@@ -48,6 +48,8 @@ SaaS管理员通过 `POST /api/platform/tenants` 创建公共租户与首个管�
 
 标准Core管理位于 `/api/platform/core-host`，当前组合已登记管理、本人Core目录和范围HTTP，默认本人目录为空。真正选中Core时提供固定服务、业务HTTP、真实订阅和数据观察；SaaS授权、成员分配与绑定分别成立。[标准宿主用法](../../packages/platform-core-host/README.md)
 
+组合客户端源码使用 `composeCorePrismaSchema(publicSchema, contributions)`，底座生成器与标量定义保持单源。Core迁移对公共表的明确外键通过 `mysqlForeignKeyExtension` 解析，并由 `createPublicPlatformDataPlan(extensions)` 纳入物理观察。默认空数组沿原零Core数据计划；所选关系、包摘要及原迁移账一起核定，不能只增加Prisma关系就判数据库就绪。[数据组合接入](../../packages/core-contracts/README.md#组合-prisma-源码)
+
 运行使用 `npm run start -w @rental-os/platform-api`；调用此命令会监听 API 端口并按请求访问配置的数据库。OpenAPI 从 `/api/openapi.json` 读取公共与Core管理的组合；前述公共离线导出只含公共接口。独立 HTTP、真实持久化及完整公共后台验收尚未完成。公开开发入口为[公共服务](../../packages/platform-server/README.md)、[公共后台](../platform-admin/README.md)和[Core接入手册](../../packages/core-contracts/README.md#五步快速接入)。
 
 公共邀请、寄件和客服邮件由 `PlatformServerModule` 自动装配，使用本宿主唯一公共数据库、邮件集成和审计。邀请与客服数据分别沿[邀请迁移](prisma/migrations/20261119000000_public_operator_invitations/migration.sql)和[邮件迁移](prisma/migrations/20261119010000_public_support_email/migration.sql)保持原 SQL。三张表仅引用公共 Tenant，没有 Rental 业务外键。
