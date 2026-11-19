@@ -13,6 +13,7 @@ import { createRentalMembershipAdminContribution, type RentalMembershipPageConte
 import { createRentalOperationsAdminContribution, type RentalOperationsPageContext } from "./operations";
 import { createRentalChannelsAdminContribution, type RentalChannelsPageContext } from "./channels";
 import { createRentalSetupAdminContribution, type RentalSetupPageContext } from "./setup";
+import { createRentalPaymentReconciliationAdminContribution, type RentalPaymentReconciliationPageContext } from "./payment-reconciliation";
 
 export interface RentalAdminContexts {
   useOrderContext: () => RentalOrderPageContext;
@@ -26,6 +27,7 @@ export interface RentalAdminContexts {
   useOperationsContext: () => RentalOperationsPageContext;
   useChannelsContext: () => RentalChannelsPageContext;
   useSetupContext: () => RentalSetupPageContext;
+  usePaymentReconciliationContext: () => RentalPaymentReconciliationPageContext;
 }
 
 export function createRentalAdminContribution(implementationVersion: string,
@@ -41,6 +43,7 @@ export function createRentalAdminContribution(implementationVersion: string,
   const operations = createRentalOperationsAdminContribution(implementationVersion, contexts.useOperationsContext);
   const channels = createRentalChannelsAdminContribution(implementationVersion, contexts.useChannelsContext);
   const setup = createRentalSetupAdminContribution(implementationVersion, contexts.useSetupContext);
+  const paymentReconciliation = createRentalPaymentReconciliationAdminContribution(implementationVersion, contexts.usePaymentReconciliationContext);
   return { coreId: orders.coreId, implementationVersion,
-    pages: [...catalog.pages, ...orders.pages, ...workOrders.pages, ...capabilities.pages, ...locations.pages, ...commercial.pages, ...governance.pages, ...membership.pages, ...operations.pages, ...channels.pages, ...setup.pages] };
+    pages: [...catalog.pages, ...orders.pages, ...workOrders.pages, ...capabilities.pages, ...locations.pages, ...commercial.pages, ...governance.pages, ...membership.pages, ...operations.pages, ...channels.pages, ...setup.pages, ...paymentReconciliation.pages] };
 }

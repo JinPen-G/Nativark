@@ -9,6 +9,7 @@ import { RENTAL_MEMBERSHIP_PAGES, RENTAL_MEMBERSHIP_LEGACY_PAGE_ACCESS } from "@
 import { RENTAL_OPERATIONS_PAGES, RENTAL_OPERATIONS_LEGACY_PAGE_ACCESS } from "@rental-os/rental-core/admin/operations/pages";
 import { RENTAL_CHANNELS_PAGES, RENTAL_CHANNELS_LEGACY_PERMISSION } from "@rental-os/rental-core/admin/channels/pages";
 import { RENTAL_SETUP_PAGES, RENTAL_SETUP_LEGACY_PERMISSIONS } from "@rental-os/rental-core/admin/setup/pages";
+import { RENTAL_PAYMENT_RECONCILIATION_PAGES, RENTAL_PAYMENT_RECONCILIATION_LEGACY_PERMISSION } from "@rental-os/rental-core/admin/payment-reconciliation/pages";
 import { SUBSCRIPTION_ROUTES } from "@rental-os/platform-admin/subscription/subscriptionRoutes";
 import { ApartmentOutlined, ApiOutlined, AppstoreOutlined, BgColorsOutlined, BoxPlotOutlined, CalendarOutlined, ControlOutlined, CrownOutlined, CustomerServiceOutlined, DashboardOutlined, FileSearchOutlined, FileTextOutlined, FormOutlined, FundOutlined, GiftOutlined, IdcardOutlined, MobileOutlined, SafetyCertificateOutlined, SendOutlined, SettingOutlined, ShopOutlined, TagsOutlined, TeamOutlined, ToolOutlined } from "@/components/ui/icons";
 import { RentalCategoryCode, type RentalCapability, type RentalCategoryTerminology } from "@rental-os/shared";
@@ -98,8 +99,8 @@ export const APP_ROUTES = {
   // Human review discovery has its own resource authority; these entry roles
   // do not widen the original owner TaskCenter reader or grant execution.
   aiTasks: { path: "/ai/tasks", label: "AI 任务中心", permission: "rental-os:order:view", legacyPermissions: ["rental-os:order:create", "rental-os:price:manage", "system:params:manage", "system:integration:manage", "rental-os:finance:view", "rental-os:finance:reconcile"], audience: "tenant", icon: <FileTextOutlined />, menu: true },
-  paymentReconciliation: { path: "/rental/payment-reconciliation", label: "支付对账", permission: "rental-os:finance:reconcile", audience: "tenant", icon: <FileSearchOutlined />, menu: true },
-  paymentReconciliationDetail: { path: "/rental/payment-reconciliation/:batchId", label: "对账批次详情", permission: "rental-os:finance:reconcile", audience: "tenant", icon: <FileSearchOutlined /> },
+  paymentReconciliation: { path: `/rental${RENTAL_PAYMENT_RECONCILIATION_PAGES.batches.path}`, label: RENTAL_PAYMENT_RECONCILIATION_PAGES.batches.title.default, permission: RENTAL_PAYMENT_RECONCILIATION_LEGACY_PERMISSION, audience: "tenant", icon: <FileSearchOutlined />, menu: Boolean(RENTAL_PAYMENT_RECONCILIATION_PAGES.batches.menu) },
+  paymentReconciliationDetail: { path: `/rental${RENTAL_PAYMENT_RECONCILIATION_PAGES.detail.path}`, label: RENTAL_PAYMENT_RECONCILIATION_PAGES.detail.title.default, permission: RENTAL_PAYMENT_RECONCILIATION_LEGACY_PERMISSION, audience: "tenant", icon: <FileSearchOutlined /> },
   platformTenants: { path: "/platform/tenants", label: "SaaS 租户", permission: "system:tenant:manage", audience: "saas", icon: <ShopOutlined />, menu: true },
   platformCategories: { path: "/platform/rental-categories", label: "租赁品类", permission: "system:rental-category:view", audience: "saas", icon: <AppstoreOutlined />, menu: CATEGORY_GOVERNANCE_PREVIEW_ENABLED },
   platformCategoryCapabilities: { path: "/platform/rental-category-capabilities", label: "内核能力目录", permission: "system:rental-category:view", audience: "saas", icon: <ControlOutlined />, menu: CATEGORY_GOVERNANCE_PREVIEW_ENABLED },

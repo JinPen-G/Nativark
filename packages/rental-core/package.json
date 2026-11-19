@@ -1333,7 +1333,12 @@
     "./admin/setup/context": "./admin/setup/page-context.tsx",
     "./admin/setup/pages": "./admin/setup/pages.ts",
     "./admin/setup/navigation": "./admin/setup/navigation.ts",
-    "./admin/setup/messages": "./admin/setup/messages.ts"
+    "./admin/setup/messages": "./admin/setup/messages.ts",
+    "./admin/payment-reconciliation": "./admin/payment-reconciliation/index.tsx",
+    "./admin/payment-reconciliation/client": "./admin/payment-reconciliation/client.ts",
+    "./admin/payment-reconciliation/context": "./admin/payment-reconciliation/page-context.tsx",
+    "./admin/payment-reconciliation/pages": "./admin/payment-reconciliation/pages.ts",
+    "./admin/payment-reconciliation/messages": "./admin/payment-reconciliation/messages.ts"
   },
   "typesVersions": {
     "*": {
@@ -2389,6 +2394,21 @@
       ],
       "admin/setup/messages": [
         "./admin/setup/messages.ts"
+      ],
+      "admin/payment-reconciliation": [
+        "./admin/payment-reconciliation/index.tsx"
+      ],
+      "admin/payment-reconciliation/client": [
+        "./admin/payment-reconciliation/client.ts"
+      ],
+      "admin/payment-reconciliation/context": [
+        "./admin/payment-reconciliation/page-context.tsx"
+      ],
+      "admin/payment-reconciliation/pages": [
+        "./admin/payment-reconciliation/pages.ts"
+      ],
+      "admin/payment-reconciliation/messages": [
+        "./admin/payment-reconciliation/messages.ts"
       ]
     }
   },

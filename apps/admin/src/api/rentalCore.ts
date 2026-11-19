@@ -4,6 +4,7 @@
  */
 import { createRentalOperationsApi } from "@rental-os/rental-core/admin/operations/client";
 import { createRentalSetupApi } from "@rental-os/rental-core/admin/setup/client";
+import { createRentalPaymentReconciliationApi } from "@rental-os/rental-core/admin/payment-reconciliation/client";
 import { createRentalGovernanceApi } from "@rental-os/rental-core/admin/governance/client";
 import { createRentalWorkOrderApi } from "@rental-os/rental-core/admin/work-orders/client";
 import { createRentalOrderApi } from "@rental-os/rental-core/admin/orders/client";
@@ -11,7 +12,7 @@ import { createRentalLocationApi } from "@rental-os/rental-core/admin/locations/
 import { createRentalCatalogApi, type RentalCatalogImageRequest } from "@rental-os/rental-core/admin/catalog/client";
 import { createRentalCapabilityApi } from "@rental-os/rental-core/admin/capabilities/client";
 import { createRentalCommercialApi } from "@rental-os/rental-core/admin/commercial/client";
-import type { RentalCurrency, RentalCustomerBenefitAccount, RentalOrder, RentalRewardLedgerEntry, PaymentStatementBatchDetail, PaymentStatementBatchSummary, ReviewPaymentStatementLineRequest, GrantRentalRewardRequest } from "@rental-os/shared";
+import type { RentalCurrency, RentalCustomerBenefitAccount, RentalOrder, RentalRewardLedgerEntry, GrantRentalRewardRequest } from "@rental-os/shared";
 import { useQuery } from "@tanstack/react-query";
 import { currentSessionEpoch, currentSessionSignal } from "@/app/queryClient";
 import { http, request, requestText } from "./http";
@@ -36,6 +37,7 @@ const rentalCommercialApi = createRentalCommercialApi(request, requestRentalCata
 const rentalGovernanceApi = createRentalGovernanceApi(request);
 const rentalOperationsApi = createRentalOperationsApi(request, requestText);
 const rentalSetupApi = createRentalSetupApi(request);
+const rentalPaymentReconciliationApi = createRentalPaymentReconciliationApi(request);
 
 export const rentalCoreApi = {
   categories: rentalLocationApi.categories,
@@ -48,16 +50,10 @@ export const rentalCoreApi = {
   operationReport: rentalOperationsApi.operationReport,
   workbenchTodos: rentalOperationsApi.workbenchTodos,
   reconcilePayments: rentalOperationsApi.reconcilePayments,
-  paymentStatementBatches: (limit = 50) => request<PaymentStatementBatchSummary[]>(`/rental/v1/payment-reconciliation/statements?limit=${limit}`),
-  paymentStatementBatch: (batchId: string) => request<PaymentStatementBatchDetail>(`/rental/v1/payment-reconciliation/statements/${batchId}`),
-  importPaymentStatement: (provider: string, file: File) => {
-    const data = new FormData();
-    data.append("provider", provider);
-    data.append("file", file);
-    return request<PaymentStatementBatchDetail>("/rental/v1/payment-reconciliation/statements", { method: "post", data });
-  },
-  reviewPaymentStatementLine: (batchId: string, lineId: string, data: ReviewPaymentStatementLineRequest) =>
-    request<PaymentStatementBatchDetail>(`/rental/v1/payment-reconciliation/statements/${batchId}/lines/${lineId}/review`, { method: "post", data }),
+  paymentStatementBatches: rentalPaymentReconciliationApi.paymentStatementBatches,
+  paymentStatementBatch: rentalPaymentReconciliationApi.paymentStatementBatch,
+  importPaymentStatement: rentalPaymentReconciliationApi.importPaymentStatement,
+  reviewPaymentStatementLine: rentalPaymentReconciliationApi.reviewPaymentStatementLine,
   /**
    * REPORT-01B：导出当前经营空间报表（CSV）。
    *
