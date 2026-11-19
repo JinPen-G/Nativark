@@ -295,7 +295,7 @@ void (async () => {
   const personalPage = read("apps/admin/src/features/membership/PersonalMembershipPage.tsx");
   const corporatePage = read("apps/admin/src/features/membership/CorporateMembershipPage.tsx");
   const planPage = read("apps/admin/src/features/membership/MembershipPlanPage.tsx");
-  const api = read("apps/admin/src/api/customer.ts");
+  const api = read("packages/rental-core/admin/membership/customer-client.ts");
 
   // 路由条目可带 `scope: "tenant-membership"` 等前置字段，只钉 key 与 path 的对应，不钉字面顺序。
   const routeEntry = (key, routePath) => new RegExp(`\\b${key}: \\{[^\\n]*path: "${routePath.replace(/\//g, "\\/")}"`, "u");

@@ -1266,6 +1266,14 @@
     "./admin/governance/messages": {
       "types": "./admin/governance/messages.ts",
       "default": "./admin/governance/messages.ts"
+    },
+    "./admin/membership/client": {
+      "types": "./admin/membership/client.ts",
+      "default": "./admin/membership/client.ts"
+    },
+    "./admin/membership/customer-client": {
+      "types": "./admin/membership/customer-client.ts",
+      "default": "./admin/membership/customer-client.ts"
     }
   },
   "typesVersions": {
@@ -2211,6 +2219,12 @@
       ],
       "admin/governance/messages": [
         "./admin/governance/messages.ts"
+      ],
+      "admin/membership/client": [
+        "./admin/membership/client.ts"
+      ],
+      "admin/membership/customer-client": [
+        "./admin/membership/customer-client.ts"
       ]
     }
   },

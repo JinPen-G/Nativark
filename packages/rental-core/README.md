@@ -9,6 +9,7 @@
 | [商品与资产前端](admin/catalog/README.md)、[统一页面贡献](admin/index.tsx)、[请求与图片](admin/catalog/client.ts) | `/admin/catalog` 持有商品、资产、库存、照片与状态历史，七个窄出口提供页面、请求、上下文、图片、列表能力及纯术语；统一贡献组合九页，宿主提供当前身份、经营空间及原鉴权传输 |
 | [定价与营销前端](admin/commercial/README.md)、[七页声明](admin/commercial/pages.ts)、[请求与上下文](admin/commercial/client.ts) | `/admin/commercial` 提供定价组、价格版本/调价、优惠、券和服务容量；宿主提供同一会话与经营空间，表单和主操作复用公共呈现，旧地址和价格管理权限保持 |
 | [品类与业务规则前端](admin/governance/README.md)、[页面声明](admin/governance/pages.ts)、[请求与上下文](admin/governance/page-context.tsx) | `/admin/governance` 提供品类、规则、日历、奖励规则和通知设置；旧页面与 API 消费同一实现，保存、发布、采用和历史读取保持各自原权限与操作收据 |
+| [会员请求](admin/membership/client.ts)、[客户请求](admin/membership/customer-client.ts) | `/admin/membership/client` 与 `/admin/membership/customer-client` 提供原57项请求；传入宿主唯一认证请求，保留租户会员、客户主档、账号状态、敏感资料、企业账务及原冲销收据边界 |
 | [订单前端](admin/orders/README.md)、[订单请求](admin/orders/client.ts) | `/admin/orders` 提供列表、新建、详情及原配货/资金/检查/单据链；宿主提供当前身份、经营空间、原请求与跨领域组件，旧地址消费同一实现 |
 | [养护工单前端](admin/work-orders/README.md)、[页面贡献](admin/work-orders/index.tsx)、[客户端工厂](admin/work-orders/client.ts) | `/admin/work-orders` 提供原列表/看板/详情与六类表单；宿主供给当前权限/经营空间及唯一请求，旧路由和十二HTTP方法薄适配同一实现 |
 | [履约网络前端](admin/locations/README.md)、[地点贡献](admin/locations/index.tsx)、[客户端与范围](admin/locations/client.ts) | `/admin/locations` 持有地点与经营主体、两表单、原列表/卡片及导入导出；统一贡献供给七页，宿主提供当前范围和原组织查看/映射权限 |
