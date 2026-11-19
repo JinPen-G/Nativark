@@ -123,6 +123,7 @@ Rental Core 是首个业务示范，提供商品、资产、库存、报价、�
 | `apps/api/src/modules/rental-core` | 首个业务 Core 的领域实现 | [领域模块](apps/api/src/modules/rental-core) |
 | `apps/tenant-website`、`apps/enterprise-portal` | Rental 客户网站与企业客户门户 | [客户网站](apps/tenant-website/README.md)、[企业门户](apps/enterprise-portal/README.md) |
 | `packages/rental-core/clients/enterprise-portal` | 完整企业门户业务前端；原门户宿主复用公共UI并消费正式页面出口 | [门户接入](packages/rental-core/clients/enterprise-portal/README.md) |
+| `packages/rental-core/clients/website-ui` | 完整客户网站业务前端；原网站薄宿主供给同一客户会话、公开配置和资产 | [网站接入](packages/rental-core/clients/website-ui/README.md) |
 | `apps/miniprogram`、`apps/staff-miniprogram` | Rental 客户与员工微信小程序 | [客户小程序](apps/miniprogram/README.md)、[员工小程序](apps/staff-miniprogram/README.md) |
 | `tests`、`scripts` | 契约、业务、宿主验证与开发、运维脚本 | [命令清单](package.json) |
 

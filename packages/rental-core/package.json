@@ -1624,7 +1624,86 @@
     "./clients/enterprise-portal/pages/TransferDecisionRecovery": "./clients/enterprise-portal/TransferDecisionRecovery.tsx",
     "./clients/enterprise-portal/pages/TransferMessages": "./clients/enterprise-portal/TransferMessages.tsx",
     "./clients/enterprise-portal/pages/WorkflowPages": "./clients/enterprise-portal/WorkflowPages.tsx",
-    "./clients/enterprise-portal/pages/WorkflowReview": "./clients/enterprise-portal/WorkflowReview.tsx"
+    "./clients/enterprise-portal/pages/WorkflowReview": "./clients/enterprise-portal/WorkflowReview.tsx",
+    "./clients/website-ui": "./clients/website-ui/index.ts",
+    "./clients/website-ui/host": "./clients/website-ui/host.ts",
+    "./clients/website-ui/styles": "./clients/website-ui/styles.css",
+    "./clients/website-ui/source/App": "./clients/website-ui/App.tsx",
+    "./clients/website-ui/source/AuthContext": "./clients/website-ui/AuthContext.tsx",
+    "./clients/website-ui/source/SiteContext": "./clients/website-ui/SiteContext.tsx",
+    "./clients/website-ui/source/components/CatalogConditions": "./clients/website-ui/components/CatalogConditions.tsx",
+    "./clients/website-ui/source/components/EnterpriseBookingApproval": "./clients/website-ui/components/EnterpriseBookingApproval.tsx",
+    "./clients/website-ui/source/components/EnterpriseExchangeProgress": "./clients/website-ui/components/EnterpriseExchangeProgress.tsx",
+    "./clients/website-ui/source/components/EnterpriseExchangeRequest": "./clients/website-ui/components/EnterpriseExchangeRequest.tsx",
+    "./clients/website-ui/source/components/EnterpriseExtensionApproval": "./clients/website-ui/components/EnterpriseExtensionApproval.tsx",
+    "./clients/website-ui/source/components/ErrorBoundary": "./clients/website-ui/components/ErrorBoundary.tsx",
+    "./clients/website-ui/source/components/Img": "./clients/website-ui/components/Img.tsx",
+    "./clients/website-ui/source/components/MemberLayout": "./clients/website-ui/components/MemberLayout.tsx",
+    "./clients/website-ui/source/components/PageHeader": "./clients/website-ui/components/PageHeader.tsx",
+    "./clients/website-ui/source/components/PageState": "./clients/website-ui/components/PageState.tsx",
+    "./clients/website-ui/source/components/ProductCard": "./clients/website-ui/components/ProductCard.tsx",
+    "./clients/website-ui/source/components/RemoteBooking": "./clients/website-ui/components/RemoteBooking.tsx",
+    "./clients/website-ui/source/components/RentalFinder": "./clients/website-ui/components/RentalFinder.tsx",
+    "./clients/website-ui/source/components/SiteIcon": "./clients/website-ui/components/SiteIcon.tsx",
+    "./clients/website-ui/source/components/SiteLayout": "./clients/website-ui/components/SiteLayout.tsx",
+    "./clients/website-ui/source/components/StoreDirectory": "./clients/website-ui/components/StoreDirectory.tsx",
+    "./clients/website-ui/source/components/Toast": "./clients/website-ui/components/Toast.tsx",
+    "./clients/website-ui/source/components/enterprise-exchange-confirmation": "./clients/website-ui/components/enterprise-exchange-confirmation.ts",
+    "./clients/website-ui/source/components/enterprise-exchange-request": "./clients/website-ui/components/enterprise-exchange-request.ts",
+    "./clients/website-ui/source/components/useEnterpriseOrderSubmission": "./clients/website-ui/components/useEnterpriseOrderSubmission.ts",
+    "./clients/website-ui/source/data/apiClient": "./clients/website-ui/data/apiClient.ts",
+    "./clients/website-ui/source/data/authClient": "./clients/website-ui/data/authClient.ts",
+    "./clients/website-ui/source/data/catalog": "./clients/website-ui/data/catalog.ts",
+    "./clients/website-ui/source/data/clientRecoveryStorage": "./clients/website-ui/data/clientRecoveryStorage.ts",
+    "./clients/website-ui/source/data/datetime": "./clients/website-ui/data/datetime.ts",
+    "./clients/website-ui/source/data/money": "./clients/website-ui/data/money.ts",
+    "./clients/website-ui/source/data/remoteSite": "./clients/website-ui/data/remoteSite.ts",
+    "./clients/website-ui/source/data/rentalQuery": "./clients/website-ui/data/rentalQuery.ts",
+    "./clients/website-ui/source/data/resolveTenant": "./clients/website-ui/data/resolveTenant.ts",
+    "./clients/website-ui/source/data/siteRepository": "./clients/website-ui/data/siteRepository.ts",
+    "./clients/website-ui/source/features/ai-native/BookingDraftReview": "./clients/website-ui/features/ai-native/BookingDraftReview.tsx",
+    "./clients/website-ui/source/features/ai-native/BookingHandoffBridge": "./clients/website-ui/features/ai-native/BookingHandoffBridge.tsx",
+    "./clients/website-ui/source/features/ai-native/BookingHandoffHost": "./clients/website-ui/features/ai-native/BookingHandoffHost.tsx",
+    "./clients/website-ui/source/features/ai-native/BookingHandoffPanel": "./clients/website-ui/features/ai-native/BookingHandoffPanel.tsx",
+    "./clients/website-ui/source/features/ai-native/ClientBookingTransfer": "./clients/website-ui/features/ai-native/ClientBookingTransfer.tsx",
+    "./clients/website-ui/source/features/ai-native/ClientGoalPicker": "./clients/website-ui/features/ai-native/ClientGoalPicker.tsx",
+    "./clients/website-ui/source/features/ai-native/ClientOriginalQuoteFacts": "./clients/website-ui/features/ai-native/ClientOriginalQuoteFacts.tsx",
+    "./clients/website-ui/source/features/ai-native/ClientPublicBrowse": "./clients/website-ui/features/ai-native/ClientPublicBrowse.tsx",
+    "./clients/website-ui/source/features/ai-native/ClientQuotePreparation": "./clients/website-ui/features/ai-native/ClientQuotePreparation.tsx",
+    "./clients/website-ui/source/features/ai-native/ClientRegisteredEntryActions": "./clients/website-ui/features/ai-native/ClientRegisteredEntryActions.tsx",
+    "./clients/website-ui/source/features/ai-native/ClientSceneCatalog": "./clients/website-ui/features/ai-native/ClientSceneCatalog.tsx",
+    "./clients/website-ui/source/features/ai-native/ClientTaskCancellation": "./clients/website-ui/features/ai-native/ClientTaskCancellation.tsx",
+    "./clients/website-ui/source/features/ai-native/ClientTaskWorkbench": "./clients/website-ui/features/ai-native/ClientTaskWorkbench.tsx",
+    "./clients/website-ui/source/features/ai-native/booking-draft-review": "./clients/website-ui/features/ai-native/booking-draft-review.ts",
+    "./clients/website-ui/source/features/ai-native/booking-handoff": "./clients/website-ui/features/ai-native/booking-handoff.ts",
+    "./clients/website-ui/source/features/ai-native/booking-host.factory": "./clients/website-ui/features/ai-native/booking-host.factory.ts",
+    "./clients/website-ui/source/features/ai-native/client-booking-transfer-api": "./clients/website-ui/features/ai-native/client-booking-transfer-api.ts",
+    "./clients/website-ui/source/features/ai-native/client-booking-transfer-session": "./clients/website-ui/features/ai-native/client-booking-transfer-session.ts",
+    "./clients/website-ui/source/features/ai-native/client-entry-actions-api": "./clients/website-ui/features/ai-native/client-entry-actions-api.ts",
+    "./clients/website-ui/source/features/ai-native/client-goal-api": "./clients/website-ui/features/ai-native/client-goal-api.ts",
+    "./clients/website-ui/source/features/ai-native/client-goal-session": "./clients/website-ui/features/ai-native/client-goal-session.ts",
+    "./clients/website-ui/source/features/ai-native/client-public-api": "./clients/website-ui/features/ai-native/client-public-api.ts",
+    "./clients/website-ui/source/features/ai-native/client-quote-session": "./clients/website-ui/features/ai-native/client-quote-session.ts",
+    "./clients/website-ui/source/features/ai-native/client-quote-time": "./clients/website-ui/features/ai-native/client-quote-time.ts",
+    "./clients/website-ui/source/features/ai-native/client-scene-catalog-api": "./clients/website-ui/features/ai-native/client-scene-catalog-api.ts",
+    "./clients/website-ui/source/features/ai-native/client-task-api": "./clients/website-ui/features/ai-native/client-task-api.ts",
+    "./clients/website-ui/source/features/ai-native/client-task-cancellation-api": "./clients/website-ui/features/ai-native/client-task-cancellation-api.ts",
+    "./clients/website-ui/source/features/ai-native/client-task-cancellation-session": "./clients/website-ui/features/ai-native/client-task-cancellation-session.ts",
+    "./clients/website-ui/source/features/ai-native/client-task-session": "./clients/website-ui/features/ai-native/client-task-session.ts",
+    "./clients/website-ui/source/features/ai-native/customer-order-facts": "./clients/website-ui/features/ai-native/customer-order-facts.ts",
+    "./clients/website-ui/source/hooks/useActiveRail": "./clients/website-ui/hooks/useActiveRail.ts",
+    "./clients/website-ui/source/i18n": "./clients/website-ui/i18n.ts",
+    "./clients/website-ui/source/pages/AccountPage": "./clients/website-ui/pages/AccountPage.tsx",
+    "./clients/website-ui/source/pages/BookingPage": "./clients/website-ui/pages/BookingPage.tsx",
+    "./clients/website-ui/source/pages/DocumentPage": "./clients/website-ui/pages/DocumentPage.tsx",
+    "./clients/website-ui/source/pages/HomePage": "./clients/website-ui/pages/HomePage.tsx",
+    "./clients/website-ui/source/pages/InfoPages": "./clients/website-ui/pages/InfoPages.tsx",
+    "./clients/website-ui/source/pages/LoginPage": "./clients/website-ui/pages/LoginPage.tsx",
+    "./clients/website-ui/source/pages/OrderPages": "./clients/website-ui/pages/OrderPages.tsx",
+    "./clients/website-ui/source/pages/ProductDetailPage": "./clients/website-ui/pages/ProductDetailPage.tsx",
+    "./clients/website-ui/source/pages/ProductsPage": "./clients/website-ui/pages/ProductsPage.tsx",
+    "./clients/website-ui/source/theme": "./clients/website-ui/theme.ts",
+    "./clients/website-ui/source/types": "./clients/website-ui/types.ts"
   },
   "typesVersions": {
     "*": {
@@ -3004,6 +3083,243 @@
       ],
       "clients/enterprise-portal/pages/WorkflowReview": [
         "clients/enterprise-portal/WorkflowReview.tsx"
+      ],
+      "clients/website-ui": [
+        "./clients/website-ui/index.ts"
+      ],
+      "clients/website-ui/host": [
+        "./clients/website-ui/host.ts"
+      ],
+      "clients/website-ui/styles": [
+        "./clients/website-ui/styles.css"
+      ],
+      "clients/website-ui/source/App": [
+        "./clients/website-ui/App.tsx"
+      ],
+      "clients/website-ui/source/AuthContext": [
+        "./clients/website-ui/AuthContext.tsx"
+      ],
+      "clients/website-ui/source/SiteContext": [
+        "./clients/website-ui/SiteContext.tsx"
+      ],
+      "clients/website-ui/source/components/CatalogConditions": [
+        "./clients/website-ui/components/CatalogConditions.tsx"
+      ],
+      "clients/website-ui/source/components/EnterpriseBookingApproval": [
+        "./clients/website-ui/components/EnterpriseBookingApproval.tsx"
+      ],
+      "clients/website-ui/source/components/EnterpriseExchangeProgress": [
+        "./clients/website-ui/components/EnterpriseExchangeProgress.tsx"
+      ],
+      "clients/website-ui/source/components/EnterpriseExchangeRequest": [
+        "./clients/website-ui/components/EnterpriseExchangeRequest.tsx"
+      ],
+      "clients/website-ui/source/components/EnterpriseExtensionApproval": [
+        "./clients/website-ui/components/EnterpriseExtensionApproval.tsx"
+      ],
+      "clients/website-ui/source/components/ErrorBoundary": [
+        "./clients/website-ui/components/ErrorBoundary.tsx"
+      ],
+      "clients/website-ui/source/components/Img": [
+        "./clients/website-ui/components/Img.tsx"
+      ],
+      "clients/website-ui/source/components/MemberLayout": [
+        "./clients/website-ui/components/MemberLayout.tsx"
+      ],
+      "clients/website-ui/source/components/PageHeader": [
+        "./clients/website-ui/components/PageHeader.tsx"
+      ],
+      "clients/website-ui/source/components/PageState": [
+        "./clients/website-ui/components/PageState.tsx"
+      ],
+      "clients/website-ui/source/components/ProductCard": [
+        "./clients/website-ui/components/ProductCard.tsx"
+      ],
+      "clients/website-ui/source/components/RemoteBooking": [
+        "./clients/website-ui/components/RemoteBooking.tsx"
+      ],
+      "clients/website-ui/source/components/RentalFinder": [
+        "./clients/website-ui/components/RentalFinder.tsx"
+      ],
+      "clients/website-ui/source/components/SiteIcon": [
+        "./clients/website-ui/components/SiteIcon.tsx"
+      ],
+      "clients/website-ui/source/components/SiteLayout": [
+        "./clients/website-ui/components/SiteLayout.tsx"
+      ],
+      "clients/website-ui/source/components/StoreDirectory": [
+        "./clients/website-ui/components/StoreDirectory.tsx"
+      ],
+      "clients/website-ui/source/components/Toast": [
+        "./clients/website-ui/components/Toast.tsx"
+      ],
+      "clients/website-ui/source/components/enterprise-exchange-confirmation": [
+        "./clients/website-ui/components/enterprise-exchange-confirmation.ts"
+      ],
+      "clients/website-ui/source/components/enterprise-exchange-request": [
+        "./clients/website-ui/components/enterprise-exchange-request.ts"
+      ],
+      "clients/website-ui/source/components/useEnterpriseOrderSubmission": [
+        "./clients/website-ui/components/useEnterpriseOrderSubmission.ts"
+      ],
+      "clients/website-ui/source/data/apiClient": [
+        "./clients/website-ui/data/apiClient.ts"
+      ],
+      "clients/website-ui/source/data/authClient": [
+        "./clients/website-ui/data/authClient.ts"
+      ],
+      "clients/website-ui/source/data/catalog": [
+        "./clients/website-ui/data/catalog.ts"
+      ],
+      "clients/website-ui/source/data/clientRecoveryStorage": [
+        "./clients/website-ui/data/clientRecoveryStorage.ts"
+      ],
+      "clients/website-ui/source/data/datetime": [
+        "./clients/website-ui/data/datetime.ts"
+      ],
+      "clients/website-ui/source/data/money": [
+        "./clients/website-ui/data/money.ts"
+      ],
+      "clients/website-ui/source/data/remoteSite": [
+        "./clients/website-ui/data/remoteSite.ts"
+      ],
+      "clients/website-ui/source/data/rentalQuery": [
+        "./clients/website-ui/data/rentalQuery.ts"
+      ],
+      "clients/website-ui/source/data/resolveTenant": [
+        "./clients/website-ui/data/resolveTenant.ts"
+      ],
+      "clients/website-ui/source/data/siteRepository": [
+        "./clients/website-ui/data/siteRepository.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/BookingDraftReview": [
+        "./clients/website-ui/features/ai-native/BookingDraftReview.tsx"
+      ],
+      "clients/website-ui/source/features/ai-native/BookingHandoffBridge": [
+        "./clients/website-ui/features/ai-native/BookingHandoffBridge.tsx"
+      ],
+      "clients/website-ui/source/features/ai-native/BookingHandoffHost": [
+        "./clients/website-ui/features/ai-native/BookingHandoffHost.tsx"
+      ],
+      "clients/website-ui/source/features/ai-native/BookingHandoffPanel": [
+        "./clients/website-ui/features/ai-native/BookingHandoffPanel.tsx"
+      ],
+      "clients/website-ui/source/features/ai-native/ClientBookingTransfer": [
+        "./clients/website-ui/features/ai-native/ClientBookingTransfer.tsx"
+      ],
+      "clients/website-ui/source/features/ai-native/ClientGoalPicker": [
+        "./clients/website-ui/features/ai-native/ClientGoalPicker.tsx"
+      ],
+      "clients/website-ui/source/features/ai-native/ClientOriginalQuoteFacts": [
+        "./clients/website-ui/features/ai-native/ClientOriginalQuoteFacts.tsx"
+      ],
+      "clients/website-ui/source/features/ai-native/ClientPublicBrowse": [
+        "./clients/website-ui/features/ai-native/ClientPublicBrowse.tsx"
+      ],
+      "clients/website-ui/source/features/ai-native/ClientQuotePreparation": [
+        "./clients/website-ui/features/ai-native/ClientQuotePreparation.tsx"
+      ],
+      "clients/website-ui/source/features/ai-native/ClientRegisteredEntryActions": [
+        "./clients/website-ui/features/ai-native/ClientRegisteredEntryActions.tsx"
+      ],
+      "clients/website-ui/source/features/ai-native/ClientSceneCatalog": [
+        "./clients/website-ui/features/ai-native/ClientSceneCatalog.tsx"
+      ],
+      "clients/website-ui/source/features/ai-native/ClientTaskCancellation": [
+        "./clients/website-ui/features/ai-native/ClientTaskCancellation.tsx"
+      ],
+      "clients/website-ui/source/features/ai-native/ClientTaskWorkbench": [
+        "./clients/website-ui/features/ai-native/ClientTaskWorkbench.tsx"
+      ],
+      "clients/website-ui/source/features/ai-native/booking-draft-review": [
+        "./clients/website-ui/features/ai-native/booking-draft-review.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/booking-handoff": [
+        "./clients/website-ui/features/ai-native/booking-handoff.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/booking-host.factory": [
+        "./clients/website-ui/features/ai-native/booking-host.factory.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/client-booking-transfer-api": [
+        "./clients/website-ui/features/ai-native/client-booking-transfer-api.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/client-booking-transfer-session": [
+        "./clients/website-ui/features/ai-native/client-booking-transfer-session.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/client-entry-actions-api": [
+        "./clients/website-ui/features/ai-native/client-entry-actions-api.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/client-goal-api": [
+        "./clients/website-ui/features/ai-native/client-goal-api.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/client-goal-session": [
+        "./clients/website-ui/features/ai-native/client-goal-session.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/client-public-api": [
+        "./clients/website-ui/features/ai-native/client-public-api.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/client-quote-session": [
+        "./clients/website-ui/features/ai-native/client-quote-session.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/client-quote-time": [
+        "./clients/website-ui/features/ai-native/client-quote-time.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/client-scene-catalog-api": [
+        "./clients/website-ui/features/ai-native/client-scene-catalog-api.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/client-task-api": [
+        "./clients/website-ui/features/ai-native/client-task-api.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/client-task-cancellation-api": [
+        "./clients/website-ui/features/ai-native/client-task-cancellation-api.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/client-task-cancellation-session": [
+        "./clients/website-ui/features/ai-native/client-task-cancellation-session.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/client-task-session": [
+        "./clients/website-ui/features/ai-native/client-task-session.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/customer-order-facts": [
+        "./clients/website-ui/features/ai-native/customer-order-facts.ts"
+      ],
+      "clients/website-ui/source/hooks/useActiveRail": [
+        "./clients/website-ui/hooks/useActiveRail.ts"
+      ],
+      "clients/website-ui/source/i18n": [
+        "./clients/website-ui/i18n.ts"
+      ],
+      "clients/website-ui/source/pages/AccountPage": [
+        "./clients/website-ui/pages/AccountPage.tsx"
+      ],
+      "clients/website-ui/source/pages/BookingPage": [
+        "./clients/website-ui/pages/BookingPage.tsx"
+      ],
+      "clients/website-ui/source/pages/DocumentPage": [
+        "./clients/website-ui/pages/DocumentPage.tsx"
+      ],
+      "clients/website-ui/source/pages/HomePage": [
+        "./clients/website-ui/pages/HomePage.tsx"
+      ],
+      "clients/website-ui/source/pages/InfoPages": [
+        "./clients/website-ui/pages/InfoPages.tsx"
+      ],
+      "clients/website-ui/source/pages/LoginPage": [
+        "./clients/website-ui/pages/LoginPage.tsx"
+      ],
+      "clients/website-ui/source/pages/OrderPages": [
+        "./clients/website-ui/pages/OrderPages.tsx"
+      ],
+      "clients/website-ui/source/pages/ProductDetailPage": [
+        "./clients/website-ui/pages/ProductDetailPage.tsx"
+      ],
+      "clients/website-ui/source/pages/ProductsPage": [
+        "./clients/website-ui/pages/ProductsPage.tsx"
+      ],
+      "clients/website-ui/source/theme": [
+        "./clients/website-ui/theme.ts"
+      ],
+      "clients/website-ui/source/types": [
+        "./clients/website-ui/types.ts"
       ]
     }
   },
@@ -3045,7 +3361,8 @@
     "dayjs": "1.11.21",
     "axios": "1.19.0",
     "motion": "14.6.0",
-    "@tanstack/react-table": "8.21.3"
+    "@tanstack/react-table": "8.21.3",
+    "@rental-os/shared": "0.1.0"
   },
   "peerDependenciesMeta": {
     "@nestjs/common": {
@@ -3118,6 +3435,9 @@
       "optional": true
     },
     "@tanstack/react-table": {
+      "optional": true
+    },
+    "@rental-os/shared": {
       "optional": true
     }
   }

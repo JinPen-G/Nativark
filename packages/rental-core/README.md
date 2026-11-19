@@ -14,6 +14,7 @@
 | [支付对账前端](admin/payment-reconciliation/README.md)、[页面声明](admin/payment-reconciliation/pages.ts)、[四请求](admin/payment-reconciliation/client.ts) | `/admin/payment-reconciliation` 共用原批次列表/详情、CSV导入和差异表单；当前财务权限与空间、原支付事实、处理原因及单次异步提交保持 |
 | [企业Web客户端](clients/enterprise/README.md)、[正式入口](clients/enterprise/index.ts)、[会话协调](clients/enterprise/session.tsx) | `/clients/enterprise` 提供企业会话、请求与原操作门闸；公共web-client仍持有唯一客户会话和网络层，企业授权、单次写入及原键恢复保持 |
 | [官网认证与本人资料](clients/website/auth/README.md)、[登录态业务](clients/website/session/README.md) | `/clients/website` 提供认证、账户与原业务请求工厂；宿主供给同一客户会话、可信请求与原引用清理，业务授权及原收据沿服务端核验 |
+| [完整客户网站](clients/website-ui/README.md)、[网站入口](clients/website-ui/index.ts)、[浏览器薄宿主](../../apps/tenant-website/README.md) | `/clients/website-ui` 提供原15路由、页面、语言和样式；宿主供给同一客户会话、公开配置、可靠存储与资产映射，官网和AI业务请求继续沿原协议 |
 | [企业门户前端](clients/enterprise-portal/README.md)、[应用入口](clients/enterprise-portal/index.ts)、[原薄宿主](../../apps/enterprise-portal/README.md) | `/clients/enterprise-portal` 提供完整企业门户，页面使用精确子出口；宿主供给同一客户会话和公共UI，企业/本人/空间及原材料权限沿真实服务核验，不依赖旧后台源码 |
 | [营业时区](clients/time.ts)、[微信打包](../../scripts/miniprogram-shared-types.cjs) | `/clients/time` 是原生CommonJS与声明出口，复用原时区/DST/回退算法；微信构建仅在实际引用时带入同一时间模块，费用仍由服务端裁定 |
 | [客户认证](clients/miniprogram/auth/README.md)、[正式客户入口](clients/miniprogram/index.ts) | `/clients/miniprogram` 提供密码/短信/微信、用途验证码、注册与本人注销；宿主供给原渠道、请求和会话采用，一次性凭证及原错误保持 |
@@ -143,6 +144,8 @@
 Rental HTTP从 `@rental-os/rental-core/http` 的 `RentalHttpModule` 接入，类型 `RentalHttpServiceGroups` 列出宿主需要供给的真实应用。
 
 完整实例从 [application](src/application.ts) 构造，经 [application-http](src/application-http.ts) 与 [application-platform](src/application-platform.ts) 分别供给原 Rental HTTP 和公共模块。宿主显式选择 AI 模式：未启用时客户检查出箱传 `null` 且不装配 AI 参加者；启用时必须提供原失败出箱、事务事件和通知草稿读取器。构造不会启服务或启动作业。独立组合及尚未接齐的请求边界见 [Rental API](../../apps/rental-api/README.md)。
+
+网站、门户和部分前端出口继续使用 `@rental-os/shared@0.1.0` 的原运行协议。该包是可选 peer，消费这些出口的宿主仍须安装它；只使用其他出口时可按实际依赖选择。租赁值逐项转到已有 Core 正式出口，AI schema 和协调器当前仍由原 Shared 单源提供。
 
 空间切换、开发密码重置和员工订阅上下文由 [独立扩展模块](src/http-extensions.module.ts) 绑定同一认证/订阅实例；它与旧宿主已挂载的三个薄适配路径二选一，公共六项认证继续由公共模块提供。[原 Guard](src/http-auth.ts) 保持角色、客户和空间政策，[application-access](src/application-access.ts) 将当前 Core 授权接入原业务父锁事务；它不代表所有独立写入、媒体流和回调已完成接入。
 
