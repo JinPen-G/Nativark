@@ -7,6 +7,7 @@ import { ENTERPRISE_PORTAL_ACTIONS, type EnterprisePortalConfiguration, type Sav
 import type { SystemUserRow } from "@rental-os/platform-contracts";
 import { requireRequestTenantId, requireRequestUserId } from "@rental-os/platform-server/request-identity";
 import type { PrismaClient } from "@prisma/client";
+import { assertRentalBusinessTenantAccessAfterLock } from "./mysql-business-fence";
 
 export type RentalEnterprisePortalStorage = Pick<PrismaClient, "$transaction" | "$queryRaw" | "customerProfile">;
 
@@ -46,6 +47,7 @@ export class EnterprisePortalService {
       // One tenant lock orders activation, grants and original receipts across instances.
       const tenants = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM Tenant WHERE id=${tenantId} AND status='ACTIVE' FOR UPDATE`;
       if (!tenants.length) throw new ForbiddenException("商户未启用");
+      await assertRentalBusinessTenantAccessAfterLock(tx, tenantId);
       const receipts = await tx.$queryRaw<ReceiptRow[]>`SELECT actorUserId, requestHash, result FROM enterprise_portal_operations WHERE tenantId=${tenantId} AND operationKey=${input.operationKey}`;
       if (receipts.length) {
         if (receipts[0].actorUserId !== actorId || receipts[0].requestHash !== requestHash) throw new ConflictException("操作键已用于其他请求");

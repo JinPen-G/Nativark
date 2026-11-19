@@ -12,6 +12,7 @@ import type { AdminLoginBranding, SystemUserRow } from "@rental-os/platform-cont
 import type { RentalChannelAudit, RentalClientChannelStorage } from "./client-channel-ports";
 import { assertOutboundUrl, UnsafeOutboundUrlError } from "@rental-os/platform-server/outbound-url";
 import { requireRequestTenantId } from "@rental-os/platform-server/request-identity";
+import { lockRentalBusinessTenant } from "./mysql-business-fence";
 
 /**
  * 租户级客户端渠道配置（CLIENT-CHANNEL-01）：商户品牌、客服、协议正文/版本、帮助、首页横幅、
@@ -287,10 +288,6 @@ export class ClientChannelProfileService {
 
   async save(input: SaveClientChannelProfileRequest, user?: SystemUserRow): Promise<ClientChannelProfileSummary> {
     const tenantId = this.tenantOf(user);
-    const existing = await this.load(tenantId);
-    if (typeof input.expectedRevision === "number" && existing && existing.revision !== input.expectedRevision) {
-      throw new ConflictException("配置已被其他人更新，请刷新后重试");
-    }
     const radiusChanges = {
       ...(input.adminCornerRadius !== undefined ? { adminCornerRadius: normalizeAdminRadiusGroup(input.adminCornerRadius, ADMIN_UI_CORNER_RADIUS_MAX) } : {}),
       ...(input.adminContainerRadius !== undefined ? { adminContainerRadius: normalizeAdminRadiusGroup(input.adminContainerRadius, ADMIN_UI_CORNER_RADIUS_MAX) } : {}),
@@ -298,10 +295,6 @@ export class ClientChannelProfileService {
       ...(input.adminInputRadius !== undefined ? { adminInputRadius: normalizeAdminRadiusGroup(input.adminInputRadius, ADMIN_UI_CORNER_RADIUS_CONTROL_MAX) } : {})
     };
     const requestedWorkspaceIds = Array.from(new Set((input.publishedWorkspaceIds ?? []).map((id) => String(id).trim()).filter(Boolean)));
-    const workspaces = await this.prisma.businessWorkspace.findMany({ where: { tenantId, id: { in: requestedWorkspaceIds } }, select: { id: true, status: true } });
-    const unknown = requestedWorkspaceIds.filter((id) => !workspaces.some((row) => row.id === id));
-    if (unknown.length) throw new BadRequestException("发布服务必须属于当前租户");
-    if (workspaces.some((row) => row.status !== "ACTIVE")) throw new BadRequestException("只能发布已启用的经营空间");
     const defaultWorkspaceId = text(input.defaultWorkspaceId, 191, "默认服务");
     if (defaultWorkspaceId && !requestedWorkspaceIds.includes(defaultWorkspaceId)) throw new BadRequestException("默认服务必须在已发布服务之内");
 
@@ -340,9 +333,27 @@ export class ClientChannelProfileService {
     };
 
     await this.prisma.$transaction(async (tx) => {
-      const row = existing
-        ? await tx.clientChannelProfile.update({ where: { id: existing.id }, data: { ...data, revision: { increment: 1 } } })
-        : await tx.clientChannelProfile.create({ data: { tenantId, ...data } });
+      await lockRentalBusinessTenant(tx, tenantId);
+      const existing = await tx.clientChannelProfile.findUnique({ where: { tenantId } });
+      if (typeof input.expectedRevision === "number" && (existing?.revision ?? 0) !== input.expectedRevision) {
+        throw new ConflictException("配置已被其他人更新，请刷新后重试");
+      }
+      const workspaces = await tx.businessWorkspace.findMany({ where: { tenantId, id: { in: requestedWorkspaceIds } }, select: { id: true, status: true } });
+      if (requestedWorkspaceIds.some(id => !workspaces.some(row => row.id === id))) throw new BadRequestException("发布服务必须属于当前租户");
+      if (workspaces.some(row => row.status !== "ACTIVE")) throw new BadRequestException("只能发布已启用的经营空间");
+      // 修订必须进入实际写条件；事务外读到的版本不能防止两个保存互相覆盖。
+      const row = await (async () => {
+        try {
+          return existing
+            ? await tx.clientChannelProfile.update({ where: { id: existing.id, tenantId, revision: existing.revision }, data: { ...data, revision: { increment: 1 } } })
+            : await tx.clientChannelProfile.create({ data: { tenantId, ...data } });
+        } catch (error) {
+          if (error && typeof error === "object" && ["P2002", "P2025"].includes(String((error as { code?: unknown }).code))) {
+            throw new ConflictException("配置已被其他人更新，请刷新后重试");
+          }
+          throw error;
+        }
+      })();
       // 品牌与主题色仍在客户端配置维护，同时更新登录/启动配置读取的外观记录。
       // 仅传递显式圆角变更，不把渠道里的旧值覆盖回当前外观；null 保持清除语义。
       const branding = { brandName: data.brandName, brandLogoUrl: data.brandLogoUrl, faviconUrl: data.faviconUrl, themeColor: data.themeColor, ...(adminLoginJson !== undefined ? { adminLoginJson } : {}) };

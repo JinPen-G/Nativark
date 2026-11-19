@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException } from "@nestjs/common";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import type {
   ClientChannelReadiness,
   SaveWebsiteChannelProfileRequest,
@@ -13,6 +13,7 @@ import type { SystemUserRow } from "@rental-os/platform-contracts";
 import type { RentalChannelAudit, RentalWebsiteChannelStorage } from "./client-channel-ports";
 import { assertOutboundUrl, UnsafeOutboundUrlError } from "@rental-os/platform-server/outbound-url";
 import { requireRequestTenantId } from "@rental-os/platform-server/request-identity";
+import { lockRentalBusinessTenant } from "./mysql-business-fence";
 
 /**
  * 租户级 web 官网渠道配置（WEBSITE-CHANNEL-01）：只存官网特有设定项（标语、Hero、辅助色、页脚、
@@ -236,10 +237,6 @@ export class WebsiteChannelProfileService {
 
   async save(input: SaveWebsiteChannelProfileRequest, user?: SystemUserRow): Promise<WebsiteChannelProfileSummary> {
     const tenantId = this.tenantOf(user);
-    const existing = await this.load(tenantId);
-    if (typeof input.expectedRevision === "number" && existing && existing.revision !== input.expectedRevision) {
-      throw new ConflictException("配置已被其他人更新，请刷新后重试");
-    }
 
     const heroImageUrl = await this.validatedUrl(text(input.heroImageUrl, 512, "Hero 大图地址"), "Hero 大图地址");
     const categories = await this.categoryOptions(tenantId);
@@ -279,20 +276,32 @@ export class WebsiteChannelProfileService {
       testimonialsJson: normalizeTestimonials(input.testimonials) as unknown as Prisma.InputJsonValue
     };
 
-    const row = await (async () => {
+    const row = await this.prisma.$transaction(async tx => {
+      await lockRentalBusinessTenant(tx, tenantId);
+      const existing = await tx.websiteChannelProfile.findUnique({ where: { tenantId } });
+      if (typeof input.expectedRevision === "number" && (existing?.revision ?? 0) !== input.expectedRevision) {
+        throw new ConflictException("配置已被其他人更新，请刷新后重试");
+      }
+      const currentCategories = await tx.businessWorkspace.findMany({ where: { tenantId, status: "ACTIVE" }, select: { code: true } });
+      if (categoryImages.some(image => !currentCategories.some(category => category.code === image.code))) {
+        throw new BadRequestException("品类入口图只能配置本租户已启用的经营空间");
+      }
       try {
         return existing
-          ? await this.prisma.websiteChannelProfile.update({ where: { id: existing.id }, data: { ...data, revision: { increment: 1 } } })
-          : await this.prisma.websiteChannelProfile.create({ data: { tenantId, ...data } });
+          ? await tx.websiteChannelProfile.update({ where: { id: existing.id, tenantId, revision: existing.revision }, data: { ...data, revision: { increment: 1 } } })
+          : await tx.websiteChannelProfile.create({ data: { tenantId, ...data } });
       } catch (error) {
         // 自定义域名全局唯一：被其他租户占用时 Prisma 抛 P2002。只有确实提交了域名时才归因于域名冲突，
         // 否则（如极窄并发下同租户 tenantId 唯一冲突）用通用冲突提示。
         if (error && typeof error === "object" && (error as { code?: string }).code === "P2002") {
           throw new ConflictException(data.customDomain ? "该自定义域名已被其他租户绑定" : "配置已被其他人更新，请刷新后重试");
         }
+        if (error && typeof error === "object" && (error as { code?: string }).code === "P2025") {
+          throw new ConflictException("配置已被其他人更新，请刷新后重试");
+        }
         throw error;
       }
-    })();
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
 
     await this.operationLog?.record({
       tenantId,

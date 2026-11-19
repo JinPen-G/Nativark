@@ -94,7 +94,10 @@ test('operator and staff tokens must match current session workspace, including 
 
 test('administrator password reset and client-session revocation commit or roll back together', async () => {
   let account = { passwordHash: 'old', mustChangePassword: false }, revoked = false, failRevoke = false;
-  const tx = { clientAuthSession: { updateMany: async ({ where }) => {
+  const tx = { $queryRaw: async query => {
+    assert.match(query.sql, /FROM Tenant WHERE id=\? LOCK IN SHARE MODE/u);
+    assert.deepEqual(query.values, ['t']); return [{ id: 't' }];
+  }, clientAuthSession: { updateMany: async ({ where }) => {
     assert.deepEqual(where, { tenantId: 't', customerId: 'c', revokedAt: null });
     if (failRevoke) throw Error('session write failed'); revoked = true; return { count: 2 };
   } } };
@@ -124,7 +127,12 @@ function clientFixture() {
   const account = { id: 'account', status: 'active', mustChangePassword: false, passwordHash: hashPassword('FixturePass8'),
     passwordUpdatedAt: new Date(now - 1000), customer: { status: 'active' } };
   let created = 0;
-  const tx = { $queryRaw: async query => { assert.match(query.sql, /customer_profiles.*FOR UPDATE/); return [{ id: 'c' }]; },
+  const tx = { $queryRaw: async query => {
+    if (query.sql.includes('FROM Tenant WHERE')) {
+      assert.match(query.sql, /LOCK IN SHARE MODE/u); assert.deepEqual(query.values, ['t']); return [{ id: 't' }];
+    }
+    assert.match(query.sql, /customer_profiles.*FOR UPDATE/); return [{ id: 'c' }];
+  },
     customerAccount: { findFirst: async () => account, updateMany: async ({ data }) => { Object.assign(account, data); return { count: 1 }; } },
     clientAuthSession: { findFirst: async () => session.revokedAt ? null : session, findUnique: async () => session,
       updateMany: async ({ where, data }) => {
@@ -188,6 +196,7 @@ test('logout revokes only the session proved by the original refresh token witho
   const service = Object.create(AuthService.prototype);
   service.platformService = { getAuthSessionByRefreshHash: async () => ({ id: 'original', audience: 'operator' }),
     revokeAuthSession: async id => { revoked = id; } };
+  service.identity = service.platformService;
   assert.deepEqual(await service.logout({ refreshToken: 'fixture-refresh' }), { loggedOut: true });
   assert.equal(revoked, 'original'); revoked = undefined;
   await service.logout({ refreshToken: 'fixture-refresh' }, 'staff'); assert.equal(revoked, undefined);
@@ -197,6 +206,7 @@ test('customer operational overview rejects tenant-only or mismatched identity a
   const permissions = ['rental-os:member:view', 'rental-os:order:view', 'rental-os:marketing:manage', 'rental-os:finance:view'];
   const user = { id: 'u', tenantId: 't', isActive: true, permissions, dataScope: 'all', locationScope: { mode: 'all', locationIds: [] } };
   const platform = Object.create(PlatformService.prototype);
+  platform.configService = { get: () => 'mysql' };
   platform.requireWorkspaceDataSource = () => undefined;
   platform.findWorkspaceScopedUser = async () => undefined;
   platform.requireCustomerOperations = () => { throw Error('business must not be read'); };
@@ -237,16 +247,21 @@ test('customer profile partitions retain visible orders without financial facts 
     rentalRewardLedgerEntry: { findMany: async () => { throw Error('restricted reward read'); } },
     rentalCustomerCoupon: { findMany: async () => { throw Error('restricted coupon read'); } },
     rentalOrder: {
-      findFirst: async ({ where }) => {
+      findFirst: async ({ where, select }) => {
+        if (select?.createdAt) { calls.push(['insights-latest', where]); return { createdAt: now }; }
         visibility.push(where);
         return where.tenantId === 't' && where.workspaceId === 'w'
           && where.AND[0].OR[0].fulfillmentLocationId.in.includes('loc') ? { id: 'visible-order' } : null;
       },
       count: async ({ where }) => { calls.push(['count', where]); return rows.length; },
+      groupBy: async query => {
+        calls.push(['insights', query]);
+        return [{ status: 'RENTING', currency: 'CNY', _count: { _all: 1 }, _sum: { finalPayableAmount: 999 } }];
+      },
       findMany: async query => { calls.push(['orders', query]); return rows; }
     }
   };
-  service.operations = { recordSensitiveAccess: async (_tenant, input) => { assert.equal(input.revealed, false); },
+  service.operations = { recordSensitiveReadAccess: async (_tenant, input) => { assert.equal(input.revealed, false); },
     listStatusHistory: async () => { throw Error('restricted status audit'); },
     listSensitiveAccess: async () => { throw Error('restricted sensitive audit'); } };
   const scope = { tenantId: 't', userId: 'u', workspaceId: 'w', dataScope: 'own', locationScope: { mode: 'selected', locationIds: ['loc'] },
@@ -259,6 +274,10 @@ test('customer profile partitions retain visible orders without financial facts 
   assert.equal(visibility[0].workspaceId, 'w'); assert.equal(visibility[0].tenantId, 't');
   assert.deepEqual(visibility[0].AND[1].OR, [{ createdBy: 'u' }, { workOrders: { some: { OR: [{ createdBy: 'u' }, { assigneeId: 'u' }] } } }]);
   assert.equal(Object.hasOwn(result.orders.items[0], 'finalPayableAmount'), false, 'an ORM substitute returning extra fields cannot leak financial amount');
+  assert.deepEqual(result.insights.amounts, []);
+  assert.ok(result.insights.months.every(month => month.amounts.length === 0));
+  assert.ok(calls.filter(row => row[0] === 'insights').every(row => !Object.hasOwn(row[1], '_sum')),
+    'restricted amount projections must not aggregate financial facts');
   assert.deepEqual(result.access, { orders: 'available', orderAmounts: 'restricted', benefits: 'restricted', qualifications: 'restricted', audit: 'restricted' });
   const query = calls.find(row => row[0] === 'orders')[1];
   assert.equal(query.select.finalPayableAmount, false);
@@ -269,11 +288,13 @@ test('customer profile partitions retain visible orders without financial facts 
   const withFinance = { ...user, permissions: [...user.permissions, 'rental-os:finance:view'] };
   const financial = await runWithRequestIdentity({ ...scope, permissions: withFinance.permissions }, () => service.getProfileOverview('t', 'w', 'c', withFinance));
   assert.equal(financial.orders.items[0].finalPayableAmount, 999);
+  assert.equal(financial.insights.amounts[0].payableAmount, 999);
   assert.equal(financial.access.orderAmounts, 'available'); assert.equal(financial.access.benefits, 'restricted');
   calls.length = 0;
   const memberOnly = { ...user, permissions: ['rental-os:member:view'] };
   const restricted = await runWithRequestIdentity({ ...scope, permissions: memberOnly.permissions }, () => service.getProfileOverview('t', 'w', 'c', memberOnly));
   assert.equal(restricted.access.orders, 'restricted'); assert.deepEqual(calls, [], 'member-only profile must not query orders at all');
+  assert.equal(restricted.insights, undefined, 'order statistics require the original order read permission');
   assert.deepEqual(restricted.benefits, { accounts: [], rewards: [], coupons: [] });
   const { OPENAPI_COMPONENT_SCHEMAS: schemas, API_CONTRACT_OPERATIONS: operations } = require('../apps/api/src/contracts/openapi-document');
   assert.equal(operations.find(row => row.operationId === 'getCustomerProfileOverview').responseSchema, 'CustomerProfileOverview');

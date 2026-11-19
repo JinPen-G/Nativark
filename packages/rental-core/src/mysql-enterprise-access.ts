@@ -57,9 +57,10 @@ export class EnterpriseAccessService {
 
   /** Workspace-bound readers close grants and the original session in one SQL
    * observation; tenant-level entry/member callers retain their own scope. */
-  async requireWorkspaceAction(context: ClientRequestContext, corporateCustomerId: string, action: EnterprisePortalAction) {
+  async requireWorkspaceAction(context: ClientRequestContext, corporateCustomerId: string, action: EnterprisePortalAction,
+    tx?: Prisma.TransactionClient) {
     if (!context.workspaceId || !context.workspaceCode) throw new ForbiddenException("当前客户经营空间缺失");
-    const corporate = this.corporates(await this.access(context, context.tenantCode, undefined, true))
+    const corporate = this.corporates(await this.access(context, context.tenantCode, tx, true))
       .find(row => row.corporateCustomerId === corporateCustomerId && row.actions.includes(action));
     if (!corporate) throw new ForbiddenException("当前客户无此企业经营空间动作授权");
     return corporate;

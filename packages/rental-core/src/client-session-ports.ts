@@ -13,7 +13,7 @@ export type RentalClientSmsIntegration = Pick<TenantIntegrationRuntimeService,
   "hasEnabledProvider" | "sendVerificationSms">;
 export type RentalClientChallengeRateLimit = Pick<ClientApiRateLimitService, "assertChallengeAllowed">;
 export type RentalClientRateLimitStorage = Pick<PrismaClient, "$transaction" | "clientApiRateBucket">;
-export type RentalWebsiteAssetStorage = Pick<PrismaClient, "tenant" | "websiteAsset">;
+export type RentalWebsiteAssetStorage = Pick<PrismaClient, "$transaction" | "tenant" | "websiteAsset">;
 
 export interface RentalCustomerBusinessGate {
   lockCustomerBusinessGate(tenantId: string, customerId: string, transaction: Prisma.TransactionClient): Promise<boolean>;

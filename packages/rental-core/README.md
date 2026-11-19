@@ -146,6 +146,10 @@ Rental HTTP从 `@rental-os/rental-core/http` 的 `RentalHttpModule` 接入，类
 
 空间切换、开发密码重置和员工订阅上下文由 [独立扩展模块](src/http-extensions.module.ts) 绑定同一认证/订阅实例；它与旧宿主已挂载的三个薄适配路径二选一，公共六项认证继续由公共模块提供。[原 Guard](src/http-auth.ts) 保持角色、客户和空间政策，[application-access](src/application-access.ts) 将当前 Core 授权接入原业务父锁事务；它不代表所有独立写入、媒体流和回调已完成接入。
 
+企业和客户敏感读取的审计各自在独立短事务中复核当前 Core，并在审计提交后、释放数据前再核原授权。已经提交的客户合并仍使用原事后审计入口，保留成功操作与原收据。客户概览只有订单读取权才查询统计，金额聚合另需原财务权限。[读取审计](src/mysql-enterprise-reader-audit.ts) · [客户审计](src/mysql-customer-operations.ts) · [概览权限](src/mysql-customer-governance.ts)
+
+品牌、官网和微信渠道保存使用原租户父锁及实际修订条件。微信凭据测试在数据库事务外调用原运输，结果只写回同一配置及原测试记录，期间配置变化须重新读取。[品牌渠道](src/mysql-client-channel-profile.ts) · [官网渠道](src/mysql-website-channel-profile.ts) · [微信渠道](src/mysql-mini-program-channel.ts)
+
 1. 按 `rental`、`enterprise`、`client`、`category`、`channels`、`members`、`files`、`staff` 与 `customerAvatar` 九组提供已有服务；所有业务、文件及审计使用同一数据库和当前身份。
 2. 在宿主 `imports` 中使用 `RentalHttpModule.registerFactory({ imports, inject, useFactory })`，工厂返回上一步的应用集合。已经完成实例装配的宿主可用 `register(services)`；应用集合只创建一次，必需服务缺失时启动失败，原可选服务保持原处理。
 3. 由宿主注册原身份/权限Guard、ALS及Rental HTTP政策，并选择该Core的路由贡献。员工、客户与企业接口沿各自audience和业务范围裁定；HTTP模块与单独品类模块选其一，避免重复Controller。

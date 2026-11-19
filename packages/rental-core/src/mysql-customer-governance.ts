@@ -1104,7 +1104,7 @@ export class CustomerOperationsService {
       this.canReveal(user) && canReadAudit
         ? this.operations.listSensitiveAccess(tenantId, customerId, workspaceId)
         : Promise.resolve(undefined),
-      readCustomerInsights(this.prisma, orderWhere)
+      canReadOrders ? readCustomerInsights(this.prisma, orderWhere, new Date(), canReadAmounts) : Promise.resolve(undefined)
     ]);
 
     return {

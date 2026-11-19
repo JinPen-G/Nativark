@@ -32,7 +32,7 @@ export interface CustomerSensitiveAccessInput {
 }
 
 /** 状态仓储只消费这些表和原SQL运行时；完整业务事务仍由调用方传入。 */
-export type RentalCustomerOperationsStorage = Pick<PrismaClient, "$queryRaw" | "$executeRaw" |
+export type RentalCustomerOperationsStorage = Pick<PrismaClient, "$queryRaw" | "$executeRaw" | "$transaction" |
   "customerAccount" | "customerStatusHistoryEntry" | "customerSensitiveAccessAudit" | "customerRiskRecord">;
 export type RentalCustomerOperationsWriter = Pick<SharedCustomerRepository, "createAccount" | "updateAccount" | "updateMembership">;
 

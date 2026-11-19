@@ -6,8 +6,8 @@ import type { WechatMiniProgramAdapter } from "@rental-os/platform-server/integr
 
 export type RentalClientChannelStorage = Pick<PrismaClient,
   "$transaction" | "clientChannelProfile" | "clientChannelWorkspace" | "businessWorkspace" | "tenantAppearanceProfile" | "websiteAsset">;
-export type RentalWebsiteChannelStorage = Pick<PrismaClient, "websiteChannelProfile" | "businessWorkspace">;
-export type RentalMiniProgramChannelStorage = Pick<PrismaClient, "miniProgramChannel">;
+export type RentalWebsiteChannelStorage = Pick<PrismaClient, "$transaction" | "websiteChannelProfile" | "businessWorkspace">;
+export type RentalMiniProgramChannelStorage = Pick<PrismaClient, "$transaction" | "miniProgramChannel">;
 export type RentalChannelAudit = Pick<PlatformOperationLogService, "record">;
 export type RentalChannelSecretBox = Pick<SecretBox, "encrypt" | "decrypt">;
 export type RentalChannelWechat = Pick<WechatMiniProgramAdapter, "verifyCredentials">;

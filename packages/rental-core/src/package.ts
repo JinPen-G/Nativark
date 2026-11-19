@@ -50,7 +50,12 @@ export function createRentalPackage(input: {
       if (!entry.startsWith("./") || entry.includes("*")) throw new Error("Rental 正式出口必须明确指向实际包内文件");
       required(CorePackagePathSchema.parse(entry.slice(2)));
     } else if (entry && typeof entry === "object" && !Array.isArray(entry)) {
-      for (const value of Object.values(entry)) visit(value);
+      for (const [name, value] of Object.entries(entry)) {
+        // A pattern key can expose unknown modules even when its target is a
+        // single concrete file. Both sides of the public mapping must be exact.
+        if (name.includes("*")) throw new Error("Rental 正式出口名称不能包含通配符");
+        visit(value);
+      }
     } else throw new Error("Rental npm 出口格式不受支持");
   };
   if (!metadata.exports) throw new Error("Rental 标准包须提供正式 npm 出口");

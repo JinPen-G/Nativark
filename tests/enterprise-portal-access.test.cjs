@@ -8,7 +8,7 @@ function load(file, deps = {}) {
   const source = fs.readFileSync(path.resolve(file), 'utf8');
   const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true } }).outputText;
   const exports = {};
-  const sandbox = { exports, require: name => { if (name in deps) return deps[name]; if (name === "@rental-os/rental-core" && "@rental-os/shared" in deps) return deps["@rental-os/shared"]; if (name.startsWith('node:')) return require(name); if (name === '@nestjs/common') return { Injectable: () => x => x, ForbiddenException: class extends Error {}, BadRequestException: class extends Error {}, ConflictException: class extends Error {}, NotFoundException: class extends Error {} }; throw new Error(`Unexpected dependency ${name}`); }, Date, Map, Set, JSON, console };
+  const sandbox = { exports, require: name => { if (name in deps) return deps[name]; if (name === './mysql-business-fence') return require('@rental-os/rental-core/mysql-business-fence'); if (name === "@rental-os/rental-core" && "@rental-os/shared" in deps) return deps["@rental-os/shared"]; if (name.startsWith('node:')) return require(name); if (name === '@nestjs/common') return { Injectable: () => x => x, ForbiddenException: class extends Error {}, BadRequestException: class extends Error {}, ConflictException: class extends Error {}, NotFoundException: class extends Error {} }; throw new Error(`Unexpected dependency ${name}`); }, Date, Map, Set, JSON, console };
   vm.runInNewContext(output, sandbox, { filename: file });
   return exports;
 }

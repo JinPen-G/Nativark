@@ -22,6 +22,11 @@ function setup() {
     && (!where.credentialType || (typeof where.credentialType === "string" ? row.credentialType === where.credentialType : where.credentialType.in.includes(row.credentialType))))
     .sort((a, b) => b.reviewedAt - a.reviewedAt || b.createdAt - a.createdAt || b.id.localeCompare(a.id))[0] ?? null;
   const tx = {
+    async $queryRaw(query) {
+      assert.match(query.sql, /FROM Tenant WHERE id=\? LOCK IN SHARE MODE/u);
+      assert.deepEqual(query.values, ["tenant-1"]);
+      return [{ id: "tenant-1" }];
+    },
     customerIdentityVerification: {
       async create({ data }) {
         const row = { id: `verification-${verifications.length + 1}`, ...data, createdAt: new Date() };
@@ -77,7 +82,7 @@ function setup() {
       return transaction.customerProfile.updateMany({ where: { tenantId, id: customerId }, data: { identityVerified } });
     }
   };
-  const operations = { async recordSensitiveAccess(tenantId, entry) { audits.push({ tenantId, ...entry }); } };
+  const operations = { async recordSensitiveReadAccess(tenantId, entry) { audits.push({ tenantId, ...entry }); } };
   const service = new CustomerOperationsService(prisma, customers, operations);
   const user = { id: "reviewer-1", displayName: "核验管理员", isSaasAdmin: false, isPlatformAdmin: false,
     permissions: ["rental-os:member:view", "rental-os:member:manage", "rental-os:customer:reveal-sensitive"] };

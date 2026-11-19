@@ -14,6 +14,7 @@ import type { ClientRequestContext } from "./client-context";
 import { EnterpriseAccessService } from "./mysql-enterprise-access";
 import type { RentalEnterpriseReadStorage } from "./enterprise-read-storage";
 import { enterpriseHash, enterpriseJson } from "./enterprise-receipt";
+import { lockRentalBusinessTenant } from "./mysql-business-fence";
 
 const permissions: Record<EnterpriseReaderAuditAction, readonly EnterprisePortalAction[]> = {
   "orders.list": ["orders:read"],
@@ -36,10 +37,7 @@ interface AuditRow {
 }
 
 export class EnterpriseReaderAuditService {
-  private readonly log: OperationLogService;
-  constructor(private readonly prisma: RentalEnterpriseReadStorage, private readonly access: EnterpriseAccessService) {
-    this.log = new OperationLogService(prisma);
-  }
+  constructor(private readonly prisma: RentalEnterpriseReadStorage, private readonly access: EnterpriseAccessService) {}
 
   private assertIdentity(context: ClientRequestContext) {
     const current = getRequestIdentity();
@@ -56,22 +54,27 @@ export class EnterpriseReaderAuditService {
     const context = Object.freeze({ ...inputContext });
     this.assertIdentity(context);
     const required = permissions[action];
-    const before = await this.access.requireWorkspaceAction(context, corporateId, required[0]);
-    if (required.some(permission => !before.actions.includes(permission)) || projection.corporateCustomerId !== corporateId
-      || projection.permissionRevision !== before.permissionRevision) throw new ForbiddenException("企业读取审计授权已变化");
-    const event = enterpriseReaderAuditEntrySnapshot({
-      receiptId: randomUUID(), actorCustomerId: context.customerId, membershipId: before.membershipId,
-      permissionRevision: before.permissionRevision, action, objectId, group, itemCount,
-      projectionHash: enterpriseHash(projection), state: "authorized_projection_prepared", createdAt: new Date().toISOString()
-    });
-    if (!event) throw new ServiceUnavailableException("企业读取审计元数据不可核对");
-    this.assertIdentity(context);
-    await this.log.record({
-      tenantId: context.tenantId, action: `enterprise.reader.${action}`, targetType: "enterprise-reader", targetId: objectId,
-      rentalOrderId: ["orders.detail", "finance.order.read", "finance.order.export"].includes(action) ? objectId : undefined,
-      operator: `customer:${context.customerId}`, requireSuccess: true,
-      metadata: { version: "v1", corporateCustomerId: corporateId, workspaceCode: context.workspaceCode, ...event }
-    });
+    // 审计仍独立于读取快照；父锁覆盖本次授权与日志提交，不能把 root 日志另发一条连接。
+    const { before, event } = await this.prisma.$transaction(async tx => {
+      await lockRentalBusinessTenant(tx, context.tenantId);
+      const before = await this.access.requireWorkspaceAction(context, corporateId, required[0], tx);
+      if (required.some(permission => !before.actions.includes(permission)) || projection.corporateCustomerId !== corporateId
+        || projection.permissionRevision !== before.permissionRevision) throw new ForbiddenException("企业读取审计授权已变化");
+      const event = enterpriseReaderAuditEntrySnapshot({
+        receiptId: randomUUID(), actorCustomerId: context.customerId, membershipId: before.membershipId,
+        permissionRevision: before.permissionRevision, action, objectId, group, itemCount,
+        projectionHash: enterpriseHash(projection), state: "authorized_projection_prepared", createdAt: new Date().toISOString()
+      });
+      if (!event) throw new ServiceUnavailableException("企业读取审计元数据不可核对");
+      this.assertIdentity(context);
+      await new OperationLogService(tx).record({
+        tenantId: context.tenantId, action: `enterprise.reader.${action}`, targetType: "enterprise-reader", targetId: objectId,
+        rentalOrderId: ["orders.detail", "finance.order.read", "finance.order.export"].includes(action) ? objectId : undefined,
+        operator: `customer:${context.customerId}`, requireSuccess: true,
+        metadata: { version: "v1", corporateCustomerId: corporateId, workspaceCode: context.workspaceCode, ...event }
+      });
+      return { before, event };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     // The append can succeed even when response delivery later fails. Retain that
     // original preparation event and discard data if grants changed during IO.
     const after = await this.access.requireWorkspaceAction(context, corporateId, required[0]);

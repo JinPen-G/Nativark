@@ -17,6 +17,7 @@ import type {
 import type { CustomerStatusHistoryInput, CustomerSensitiveAccessInput } from "./customer-operations-ports";
 export type { CustomerStatusHistoryInput, CustomerSensitiveAccessInput } from "./customer-operations-ports";
 import type { RentalCustomerOperationsStorage, RentalCustomerOperationsWriter } from "./customer-operations-ports";
+import { lockRentalBusinessTenant } from "./mysql-business-fence";
 
 export type CustomerTx = Prisma.TransactionClient;
 
@@ -263,7 +264,21 @@ export class CustomerOperationsRepository {
   /** 记一条敏感资料访问。刻意**不接受事务**：读取不属于任何业务事务，
    *  跟着业务事务回滚会让「他确实看过」这件事消失。 */
   async recordSensitiveAccess(tenantId: string, input: CustomerSensitiveAccessInput): Promise<void> {
-    await this.prisma.customerSensitiveAccessAudit.create({
+    await this.writeSensitiveAccess(this.prisma, tenantId, input);
+  }
+
+  /** 读取审计独立提交。选中 Core 的权限只覆盖本次审计事务，数据返回仍由请求/原业务复核。
+   * 合并等已提交业务的事后审计继续用原入口，避免把成功动作改报为一次新的准入失败。 */
+  async recordSensitiveReadAccess(tenantId: string, input: CustomerSensitiveAccessInput): Promise<void> {
+    await this.prisma.$transaction(async tx => {
+      await lockRentalBusinessTenant(tx, tenantId);
+      await this.writeSensitiveAccess(tx, tenantId, input);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+  }
+
+  private async writeSensitiveAccess(database: Pick<RentalCustomerOperationsStorage, "customerSensitiveAccessAudit">,
+    tenantId: string, input: CustomerSensitiveAccessInput): Promise<void> {
+    await database.customerSensitiveAccessAudit.create({
       data: {
         tenantId,
         workspaceId: input.workspaceId ?? null,

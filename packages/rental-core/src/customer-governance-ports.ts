@@ -14,7 +14,7 @@ export type RentalCustomerGovernanceCustomers = Pick<SharedCustomerRepository,
   "findById" | "listByTenant" | "invalidatePersonalEnterpriseAuthority" | "findMembership"
   | "invalidateCorporateEnterpriseAuthority" | "findBusinessGate" | "setIdentityVerificationState">;
 export type RentalCustomerGovernanceOperations = Pick<CustomerOperationsRepository,
-  "recordSensitiveAccess" | "findAccountByCustomer" | "createAccount" | "lockCustomerBusinessGate"
+  "recordSensitiveReadAccess" | "findAccountByCustomer" | "createAccount" | "lockCustomerBusinessGate"
   | "updateAccountStatus" | "updateMembershipStatus" | "listRiskRecords" | "createRiskRecord"
   | "findRiskRecord" | "updateRiskRecordDecision" | "listStatusHistory" | "listSensitiveAccess">;
 export type RentalCustomerClosability = Pick<CustomerMergeService, "assertClosable">;
