@@ -2,7 +2,7 @@
  * 保存历史快照及原操作依据，复用调用方事务和金额精度；外部短信执行与批准由原服务负责。 */
 import { matchesRentalCategoryCode, rentalCategoryStorageCode } from "./category-identity";
 import { validateNewQuoteCapabilitySnapshot, validateQuotedCapabilityRequirements } from "./mysql-quote-capabilities";
-import { ConflictException, ForbiddenException } from "@nestjs/common";
+import { ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import type { Prisma, $Enums } from "@prisma/client";
 import { Decimal, sqltag as sql, raw, objectEnumValues, PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { isDeepStrictEqual } from "node:util";
@@ -11,6 +11,7 @@ import type {
   RentalCustomerBenefitAccount,
   RentalCustomerCoupon,
   RentalCustomerCouponStatus,
+  RentalCouponTemplate,
   RentalNotificationSendLogV1,
   RentalNotificationTemplateV1,
   RentalQuoteChargeLine,
@@ -89,6 +90,22 @@ export interface TenantBusinessFactSnapshot {
   notificationLogs: RentalNotificationSendLogV1[];
 }
 
+/** 原全额奖励撤销的锁定事实。模板只投影需原子调整的计数，不重写当前模板配置。 */
+export interface RentalRewardReversalFacts {
+  entry: RentalRewardLedgerEntry;
+  account?: RentalCustomerBenefitAccount;
+  coupons: RentalCustomerCoupon[];
+  couponTemplates: Array<Pick<RentalCouponTemplate, "id" | "claimedQuantity" | "updatedAt">>;
+}
+
+/** 发奖原事务已经持有相关写锁；只读取本次触达事实，不做全空间刷新或另开准入。 */
+export interface RentalRewardGrantFacts {
+  entries: RentalRewardLedgerEntry[];
+  accounts: RentalCustomerBenefitAccount[];
+  coupons: RentalCustomerCoupon[];
+  couponTemplates: RentalRewardReversalFacts["couponTemplates"];
+}
+
 /** 领域服务的业务事实端口；原事务由调用方提供，库侧约束/隔离仍需真实持久化验证。 */
 export interface RentalBusinessFactStore<TTransaction extends RentalBusinessFactTransaction = RentalBusinessFactTransaction> {
   loadAll(): Promise<TenantBusinessFactSnapshot[]>;
@@ -121,6 +138,8 @@ export interface RentalBusinessFactStore<TTransaction extends RentalBusinessFact
    */
   findRewardsByIdempotencyKey(tenantId: string, key: string, tx?: TTransaction): Promise<RentalRewardLedgerEntry[]>;
   upsertRewardEntry(entry: RentalRewardLedgerEntry, tx?: TTransaction): Promise<void>;
+  readRewardGrantFacts(tenantId: string, entries: readonly RentalRewardLedgerEntry[], tx: TTransaction): Promise<RentalRewardGrantFacts>;
+  reverseRewardAtomically(tenantId: string, id: string, apply: (facts: RentalRewardReversalFacts) => void): Promise<RentalRewardReversalFacts>;
   upsertBenefitAccount(account: RentalCustomerBenefitAccount, tx?: TTransaction): Promise<void>;
   incrementBenefitAccount(tenantId: string, customerId: string, delta: { points: number; marketing: number; rewardCoupons: number }, tx: TTransaction): Promise<void>;
   upsertReferral(tenantId: string, referral: RentalReferralRecord): Promise<void>;
@@ -725,8 +744,9 @@ export class RentalBusinessFactRepository<TTransaction extends RentalBusinessFac
       return quote;
     };
     return this.store.$transaction(async (tx) => {
-      // Serialize original-operation creation without applying today's enabled
-      // flags to an already saved receipt; only the create branch admits work.
+      // Keep the current application fence before the original workspace mutex.
+      // Saved receipts below do not reapply today's quote configuration rules.
+      await lockRentalBusinessTenant(tx, quote.tenantId);
       await tx.$queryRaw(sql`SELECT id FROM business_workspaces
         WHERE id = ${workspaceId} AND tenantId = ${quote.tenantId} FOR UPDATE`);
       return persist(tx);
@@ -796,6 +816,114 @@ export class RentalBusinessFactRepository<TTransaction extends RentalBusinessFac
       orderBy: { createdAt: "asc" }
     });
     return rows.map((row) => this.toRewardEntry(row));
+  }
+
+  async readRewardGrantFacts(tenantId: string, entries: readonly RentalRewardLedgerEntry[], tx: TTransaction): Promise<RentalRewardGrantFacts> {
+    const workspaceId = await this.contacts.resolveWorkspaceId(tx, tenantId);
+    const ids = entries.map(entry => entry.id);
+    if (!ids.length || new Set(ids).size !== ids.length || entries.some(entry => entry.tenantId !== tenantId)) {
+      throw new ConflictException("奖励提交结果的原流水范围无效");
+    }
+    const stored = await tx.rentalRewardLedgerEntry.findMany({ where: { tenantId, workspaceId, id: { in: ids } } });
+    if (stored.length !== entries.length) throw new ConflictException("奖励提交结果缺少原流水");
+    const rewards = entries.map(entry => {
+      const row = stored.find(current => current.id === entry.id);
+      if (!row) throw new ConflictException("奖励提交结果缺少原流水");
+      return this.toRewardEntry(row);
+    });
+    const customerIds = [...new Set(rewards.map(row => row.customerId))];
+    const accounts = await tx.rentalBenefitAccount.findMany({ where: { tenantId, workspaceId, customerId: { in: customerIds } } });
+    if (accounts.length !== customerIds.length || customerIds.some(id => !accounts.some(row => row.customerId === id))) {
+      throw new ConflictException("奖励提交结果缺少原权益账户");
+    }
+    const couponIds = [...new Set(rewards.filter(row => row.rewardType === "coupon").flatMap(row => row.benefitReferenceIds ?? []))];
+    const coupons = couponIds.length ? await tx.rentalCustomerCoupon.findMany({ where: { tenantId, workspaceId, id: { in: couponIds } } }) : [];
+    if (coupons.length !== couponIds.length || couponIds.some(id => !coupons.some(row => row.id === id))) {
+      throw new ConflictException("奖励提交结果缺少原奖励券");
+    }
+    const couponTemplates: RentalRewardGrantFacts["couponTemplates"] = [];
+    for (const templateId of [...new Set(coupons.map(row => row.templateId))].sort()) {
+      // 原发奖已按稳定顺序锁模板并写入配额，再写账户；这里不能反向新增模板锁。
+      const templates = await tx.$queryRaw<Array<{ id: string; claimedQuantity: number; updatedAt: Date }>>(sql`
+        SELECT id, claimedQuantity, updatedAt FROM rental_coupon_templates
+        WHERE id = ${templateId} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId}`);
+      if (templates.length !== 1) throw new ConflictException("奖励提交结果缺少原券模板");
+      couponTemplates.push({ ...templates[0], updatedAt: iso(templates[0].updatedAt) });
+    }
+    return { entries: rewards,
+      accounts: accounts.map(row => this.toBenefitAccount(row)), coupons: coupons.map(row => this.toCoupon(row)), couponTemplates };
+  }
+
+  async reverseRewardAtomically(tenantId: string, id: string, apply: (facts: RentalRewardReversalFacts) => void): Promise<RentalRewardReversalFacts> {
+    return this.store.$transaction(async tx => {
+      await lockRentalBusinessTenant(tx, tenantId);
+      const workspaceId = await this.contacts.resolveWorkspaceId(tx, tenantId);
+      const locked = await tx.$queryRaw<Array<{ id: string }>>(sql`
+        SELECT id FROM rental_reward_ledger_entries
+        WHERE id = ${id} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId} FOR UPDATE
+      `);
+      if (locked.length !== 1) throw new NotFoundException("奖励流水不存在");
+      const stored = await tx.rentalRewardLedgerEntry.findUnique({ where: { id } });
+      if (!stored || stored.tenantId !== tenantId || stored.workspaceId !== workspaceId) throw new NotFoundException("奖励流水不存在");
+      const facts: RentalRewardReversalFacts = { entry: this.toRewardEntry(stored), coupons: [], couponTemplates: [] };
+      if (stored.status === "reversed") return facts;
+      if (stored.status !== "granted" || !Number.isFinite(facts.entry.amount) || facts.entry.amount <= 0 ||
+        !["points", "balance", "coupon"].includes(facts.entry.rewardType)) throw new ConflictException("奖励原始依据不可用于全额撤销");
+
+      if (facts.entry.rewardType === "coupon") {
+        const references = facts.entry.benefitReferenceIds;
+        if (!Array.isArray(references) || references.length !== facts.entry.amount ||
+          references.some(reference => typeof reference !== "string" || !reference.trim()) || new Set(references).size !== references.length) {
+          throw new ConflictException("奖励券原始关联不完整，不能撤销");
+        }
+        // 既有券与订单占用/核销/释放保持 coupon→template；grant/claim 的
+        // template→coupon 只创建本次新 UUID 券，原奖励键在其模板锁之前即回放。
+        // 本路径不另锁订单/空间，也不将计数调整升级成整份模板配置写入。
+        for (const couponId of [...references].sort()) {
+          await tx.$queryRaw(sql`SELECT id FROM rental_customer_coupons
+            WHERE id = ${couponId} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId} FOR UPDATE`);
+          const coupon = await tx.rentalCustomerCoupon.findFirst({ where: { id: couponId, tenantId, workspaceId } });
+          if (!coupon || coupon.customerId !== facts.entry.customerId || coupon.status !== "claimed") {
+            throw new ConflictException("奖励券已锁定、核销或不存在，不能撤销");
+          }
+          facts.coupons.push(this.toCoupon(coupon));
+        }
+        const templateIds = [...new Set(facts.coupons.map(coupon => coupon.templateId))];
+        if (templateIds.length !== 1) throw new ConflictException("奖励券模板关联不一致，不能撤销");
+        const templates = await tx.$queryRaw<Array<{ id: string; claimedQuantity: number; updatedAt: Date }>>(sql`
+          SELECT id, claimedQuantity, updatedAt FROM rental_coupon_templates
+          WHERE id = ${templateIds[0]} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId} FOR UPDATE
+        `);
+        if (templates.length !== 1) throw new ConflictException("奖励券原模板不存在，不能撤销配额");
+        // 停用不抹去旧奖励的模板依据；只回收原配额，不把当前状态/价格覆盖为缓存值。
+        facts.couponTemplates = templates.map(template => ({ ...template, updatedAt: iso(template.updatedAt) }));
+      }
+
+      await tx.$queryRaw(sql`SELECT customerId FROM rental_benefit_accounts
+        WHERE tenantId = ${tenantId} AND workspaceId = ${workspaceId} AND customerId = ${facts.entry.customerId} FOR UPDATE`);
+      const accounts = await tx.rentalBenefitAccount.findMany({ where: { tenantId, workspaceId, customerId: facts.entry.customerId } });
+      if (accounts.length !== 1) throw new ConflictException("客户权益账户不存在，不能撤销奖励");
+      facts.account = this.toBenefitAccount(accounts[0]);
+      apply(facts);
+      const { account, entry } = facts;
+      const reversedAt = entry.reversedAt;
+      if (!account || entry.status !== "reversed" || !reversedAt || !Number.isFinite(Date.parse(reversedAt))) {
+        throw new ConflictException("奖励撤销结果不完整，不能提交");
+      }
+      for (const coupon of facts.coupons) {
+        if (!await this.voidClaimedCoupon(tenantId, coupon.id, entry.reason, reversedAt, tx)) {
+          throw new ConflictException("奖励券状态变化，撤销未提交");
+        }
+      }
+      for (const template of facts.couponTemplates) {
+        await tx.$executeRaw(sql`UPDATE rental_coupon_templates
+          SET claimedQuantity = ${template.claimedQuantity}, updatedAt = ${date(template.updatedAt)}
+          WHERE id = ${template.id} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId}`);
+      }
+      await this.upsertBenefitAccount(account, tx);
+      await this.upsertRewardEntry(entry, tx);
+      return facts;
+    }, { isolationLevel: "ReadCommitted" });
   }
 
   async upsertRewardEntry(entry: RentalRewardLedgerEntry, tx?: TTransaction): Promise<void> {

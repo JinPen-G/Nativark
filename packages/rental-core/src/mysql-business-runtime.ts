@@ -21,7 +21,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { EnterpriseExtensionPrice } from "./approved-extension-ports";
 import { requestFingerprint } from "@rental-os/platform-contracts/request-fingerprint";
 import { currentQuoteSource as readCurrentQuoteSource } from "./quote-access";
-import type { RentalQuoteOriginalOperation } from "./mysql-business-facts";
+import type { RentalQuoteOriginalOperation, RentalRewardGrantFacts } from "./mysql-business-facts";
 import { isDeepStrictEqual } from "node:util";
 import { snapshotInspectionTemplate } from "./inspection-template-snapshot";
 import { capabilityRequirementRoots, captureCapabilityRequirements, resolveCapabilityRequirements } from "./capability-conditions";
@@ -4088,7 +4088,7 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
     context: BusinessContext,
     input: GrantRentalRewardRequest,
     tx?: TTransaction,
-    /** MySQL 事务使用隔离副本；提交成功后再用数据库事实刷新共享缓存。 */
+    /** MySQL 事务使用隔离副本；提交成功后仅发布该事务确认的触达事实。 */
     workingState?: RentalBusinessState
   ): Promise<RentalRewardLedgerEntry[]> {
     await this.assertCustomerInCurrentWorkspace(tenantId, input.customerId);
@@ -4103,29 +4103,66 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
         couponTemplates: structuredClone(context.couponTemplates)
       };
       try {
-        const result = await this.prisma.$transaction((transaction) =>
-          this.grantReward(tenantId, transactionContext, input, transaction, transactionState),
+        const result = await this.prisma.$transaction(async transaction => {
+          await lockRentalBusinessTenant(transaction, tenantId);
+          return this.applyRewardGrant(tenantId, transactionContext, input, transaction, transactionState, true);
+        },
           { isolationLevel: "ReadCommitted" }
         );
-        // 只在事务提交后从库重建缓存，绝不以事务开始前的快照回滚共享状态。
-        await this.refreshFromDatabase();
-        await this.refreshCouponTemplateCache(tenantId, context);
-        return result;
+        // 原增量账户和券配额在同一提交内读回；成功后不再读取数据库或重新准入。
+        // 回放只返回原流水，不以较早读到的余额/配额覆盖其他请求的成功事实。
+        this.publishRewardGrant(state, context, result.rows, result.facts);
+        return result.rows;
       } catch (error) {
         if (error instanceof PrismaClientKnownRequestError && error.code === "P2002") {
-          const winner = await this.factStore.findRewardsByIdempotencyKey(tenantId, input.idempotencyKey);
+          const winner = await this.prisma.$transaction(async transaction => {
+            await lockRentalBusinessTenant(transaction, tenantId);
+            return this.factStore.findRewardsByIdempotencyKey(tenantId, input.idempotencyKey, transaction);
+          }, { isolationLevel: "ReadCommitted" });
           if (winner.length) {
-            // 同键并发的落败者回放胜者；刷新来自数据库的缓存即可，不回滚
-            // 或拼接任何请求开始时捕获的内存副本。
-            await this.refreshFromDatabase();
-            await this.refreshCouponTemplateCache(tenantId, context);
+            // 唯一约束只允许原键读取胜者；不能把查询失败解释为可重新发奖。
+            this.publishRewardGrant(state, context, winner);
             return winner;
           }
         }
         throw error;
       }
     }
-    const state = workingState ?? this.state(tenantId, context);
+    if (tx) await lockRentalBusinessTenant(tx, tenantId);
+    return (await this.applyRewardGrant(tenantId, context, input, tx, workingState)).rows;
+  }
+
+  private publishRewardGrant(state: RentalBusinessState, context: BusinessContext, rows: RentalRewardLedgerEntry[], facts?: RentalRewardGrantFacts) {
+    for (const entry of rows) {
+      const index = state.rewardLedger.findIndex(row => row.id === entry.id);
+      if (index < 0) state.rewardLedger.unshift(entry);
+      else state.rewardLedger[index] = entry;
+    }
+    if (!facts) return;
+    for (const account of facts.accounts) {
+      const index = state.benefitAccounts.findIndex(row => row.customerId === account.customerId);
+      if (index < 0) state.benefitAccounts.unshift(account);
+      else state.benefitAccounts[index] = account;
+    }
+    for (const coupon of facts.coupons) {
+      const index = state.customerCoupons.findIndex(row => row.id === coupon.id);
+      if (index < 0) state.customerCoupons.unshift(coupon);
+      else state.customerCoupons[index] = coupon;
+    }
+    for (const template of facts.couponTemplates) {
+      const cached = context.couponTemplates.find(row => row.id === template.id);
+      if (cached) Object.assign(cached, template);
+    }
+  }
+
+  private async applyRewardGrant(tenantId: string, context: BusinessContext, input: GrantRentalRewardRequest,
+    tx?: TTransaction, workingState?: RentalBusinessState, collectFacts = false): Promise<{ rows: RentalRewardLedgerEntry[]; facts?: RentalRewardGrantFacts }> {
+    // 保留原事务内再次校验客户归属；使用调用方已取得的父锁，不另开业务事务。
+    if (tx) {
+      await this.assertCustomerInCurrentWorkspace(tenantId, input.customerId);
+      if (input.relatedCustomerId) await this.assertCustomerInCurrentWorkspace(tenantId, input.relatedCustomerId);
+    }
+    const state = workingState ?? (tx ? structuredClone(this.state(tenantId, context)) : this.state(tenantId, context));
     if (!input.customerId || !input.idempotencyKey) throw new BadRequestException("客户和幂等键不能为空");
     // 判重以库为准，不靠内存 rewardLedger。
     //
@@ -4138,7 +4175,7 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
       for (const row of existing) {
         if (!state.rewardLedger.some((cached) => cached.id === row.id)) state.rewardLedger.unshift(row);
       }
-      return existing;
+      return { rows: existing };
     }
     const membership = context.settings.membership;
     const rows: RentalRewardLedgerEntry[] = [];
@@ -4201,7 +4238,7 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
           for (const row of winner) {
             if (!state.rewardLedger.some((cached) => cached.id === row.id)) state.rewardLedger.unshift(row);
           }
-          return winner;
+          return { rows: winner };
         }
       }
       throw error;
@@ -4211,10 +4248,15 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
     for (const coupon of grantedCoupons) await this.factStore.upsertCustomerCoupon(coupon, tx);
     for (const template of touchedTemplates.values()) await this.coreConfigStore.upsertCouponTemplate(template, tx);
     // MySQL 事务不能用缓存中的绝对余额 upsert：两个不同幂等键并发时会互相覆盖。
-    // 改为库侧原子增量；缓存只会在提交后由调用方重建。
+    // 改为库侧原子增量；独立事务在锁内读回触达事实，确认提交后才发布到缓存。
     if (tx) await this.incrementRewardBenefitAccounts(tenantId, rows, tx);
     else await this.flushBenefitAccounts(state, rows.map((row) => row.customerId));
-    return rows;
+    if (tx && collectFacts) {
+      if (typeof this.factStore.readRewardGrantFacts !== "function") throw new ServiceUnavailableException("奖励发放缺少同事务事实回执接点");
+      const facts = await this.factStore.readRewardGrantFacts(tenantId, rows, tx);
+      return { rows: facts.entries, facts };
+    }
+    return { rows };
   }
 
   /** 奖励发放以数据库增量更新权益账户，避免不同幂等键并发时用旧缓存覆盖余额。 */
@@ -4333,6 +4375,42 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
 
   async reverseReward(tenantId: string, context: BusinessContext, id: string, reason: string) {
     const state = this.state(tenantId, context);
+    if (typeof this.factStore.reverseRewardAtomically === "function") {
+      const result = await this.factStore.reverseRewardAtomically(tenantId, id, facts => {
+        if (!reason?.trim()) throw new BadRequestException("撤销原因不能为空");
+        if (!facts.account) throw new ConflictException("客户权益账户不存在，不能撤销奖励");
+        this.reverseRewardBenefit({ benefitAccounts: [facts.account], customerCoupons: facts.coupons },
+          { couponTemplates: facts.couponTemplates }, facts.entry);
+        facts.entry.status = "reversed";
+        facts.entry.reason = `${facts.entry.reason}；撤销：${reason.trim()}`;
+        facts.entry.reversedAt = stamp();
+        for (const coupon of facts.coupons) {
+          coupon.voidedAt = facts.entry.reversedAt;
+          coupon.voidReason = facts.entry.reason;
+        }
+      });
+      // 只合并同一事务已确认的触达事实；失败/unknown 不修改共享缓存，提交后
+      // 不再开启 refreshFromDatabase 或当前准入，避免把已扣减结果改成事后失败。
+      const rewardIndex = state.rewardLedger.findIndex(row => row.id === result.entry.id);
+      if (rewardIndex < 0) state.rewardLedger.unshift(result.entry);
+      else state.rewardLedger[rewardIndex] = result.entry;
+      if (result.account) {
+        const accountIndex = state.benefitAccounts.findIndex(row => row.customerId === result.account?.customerId);
+        if (accountIndex < 0) state.benefitAccounts.unshift(result.account);
+        else state.benefitAccounts[accountIndex] = result.account;
+      }
+      for (const coupon of result.coupons) {
+        const index = state.customerCoupons.findIndex(row => row.id === coupon.id);
+        if (index < 0) state.customerCoupons.unshift(coupon);
+        else state.customerCoupons[index] = coupon;
+      }
+      for (const template of result.couponTemplates) {
+        const cached = context.couponTemplates.find(row => row.id === template.id);
+        if (cached) Object.assign(cached, template);
+      }
+      return result.entry;
+    }
+    if (this.prisma || this.hasAuthoritativeConfiguration()) throw new ServiceUnavailableException("奖励撤销缺少原子事实事务接点");
     const row = state.rewardLedger.find((item) => item.id === id);
     if (!row) throw new NotFoundException("奖励流水不存在");
     if (row.status === "reversed") return row;
@@ -6941,7 +7019,8 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
     }
   }
 
-  private reverseRewardBenefit(state: RentalBusinessState, context: BusinessContext, row: RentalRewardLedgerEntry) {
+  private reverseRewardBenefit(state: Pick<RentalBusinessState, "benefitAccounts" | "customerCoupons">,
+    context: { couponTemplates: Array<Pick<RentalCouponTemplate, "id" | "claimedQuantity" | "updatedAt">> }, row: RentalRewardLedgerEntry) {
     const account = state.benefitAccounts.find((item) => item.customerId === row.customerId);
     if (!account) throw new ConflictException("客户权益账户不存在，不能撤销奖励");
     if (row.rewardType === "points") {
