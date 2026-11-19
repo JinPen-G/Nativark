@@ -17,6 +17,18 @@ export {
 } from "./original-workflow-operation";
 export { readAdministratorTransferMaterial, type TransferReviewMaterial } from "./administrator-transfer-review";
 export { enterpriseActionLabel } from "./enterprise-action-labels";
+export {
+  createEnterpriseEvidenceUploadClient,
+  readEnterpriseEvidenceReference,
+  readEnterpriseManagementEvidence,
+  readEnterpriseExchangeInspectionPhoto,
+  type EnterpriseEvidenceUploadObservation,
+  type EnterpriseEvidenceUploadReference,
+  type EnterpriseEvidenceUploadOptions,
+  type EnterpriseEvidenceUploadPorts,
+  type EnterpriseManagementEvidencePorts,
+  type EnterpriseInspectionPhotoPorts,
+} from "./file-evidence";
 export type { ClientMembershipSessionResponse } from "../../src/client-contracts";
 export type { EnterpriseEntryResponse, EnterpriseManagedCorporate } from "../../src/enterprise";
 export type { EnterpriseOperationResult } from "../../src/enterprise-workflows";

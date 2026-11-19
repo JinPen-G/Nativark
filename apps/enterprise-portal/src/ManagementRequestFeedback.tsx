@@ -3,6 +3,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { customerFetch } from "@rental-os/web-client";
+import { readEnterpriseManagementEvidence } from "@rental-os/rental-core/clients/enterprise";
 import type { EnterpriseManagementRequestView } from "@rental-os/shared";
 import { ActionButton, Alert } from "@/components/ui/customer-entry";
 import { copyEnterpriseManagementRequest } from "@/components/enterprise-management-material";
@@ -39,14 +40,14 @@ export function EnterpriseManagementRequestFeedback({ requestId, english, onEdit
   const evidence = async (fileId: string) => {
     const original = material;
     const check = () => { assertCurrent(); if (!fileAllowed || !original || currentFileScope.current !== fileScope || !original.evidenceFileIds.includes(fileId)) throw unavailable(); };
-    check();
-    const response = await customerFetch(context.tenantCode, CLIENT_BASE, `/enterprise/management-requests/${encodeURIComponent(original!.id)}/files/${encodeURIComponent(fileId)}`, { signal: context.signal });
-    check();
-    if (!response.ok) throw unavailable();
-    const bytes = await response.blob(); check();
-    if (!["application/pdf", "image/png", "image/jpeg"].includes(bytes.type) || bytes.size < 1 || bytes.size > 20 * 1024 * 1024) throw unavailable();
-    const url = URL.createObjectURL(bytes), link = document.createElement("a"); link.href = url; link.download = "enterprise-payment-proof";
-    try { check(); link.click(); } finally { URL.revokeObjectURL(url); }
+    await readEnterpriseManagementEvidence(original, fileId, {
+      request: path => customerFetch(context.tenantCode, CLIENT_BASE, path, { signal: context.signal }),
+      current: check, unavailable,
+      verified: bytes => {
+        const url = URL.createObjectURL(bytes), link = document.createElement("a"); link.href = url; link.download = "enterprise-payment-proof";
+        try { check(); link.click(); } finally { URL.revokeObjectURL(url); }
+      },
+    });
   };
   const refresh = async () => { assertCurrent(); await query.refetch({ throwOnError: true }); assertCurrent(); };
   const edit = async () => {

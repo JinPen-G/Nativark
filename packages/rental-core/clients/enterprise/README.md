@@ -31,6 +31,10 @@ import { EnterpriseSessionProvider } from "@rental-os/rental-core/clients/enterp
 
 [交接材料解码](administrator-transfer-review.ts)供给 `readAdministratorTransferMaterial(row)`，只读取原工作流保存的双方关系修订、权限修订与登记动作集合。UTC 修订须与 `toISOString()` 完全一致，动作数组克隆后返回，旧版、缺项和坏材料继续拒绝。[动作名称](enterprise-action-labels.ts)供给 `enterpriseActionLabel(action, english)`，沿原登记集合显示中文或英文。门户[审阅](../../../../apps/enterprise-portal/src/WorkflowReview.tsx)、[交接决策恢复](../../../../apps/enterprise-portal/src/TransferDecisionRecovery.tsx)、[申请页](../../../../apps/enterprise-portal/src/WorkflowPages.tsx)与[管理员编辑](../../../../apps/enterprise-portal/src/AdministratorEditor.tsx)经原同名转接消费，接受交接仍由服务端复核当前授权和原材料。
 
+## 文件材料
+
+[文件客户端导读](file-evidence/README.md)连接原授权／回款凭证上传、本人申请附件读取和具体换货检查照片。业务路径、原键与材料核验归本客户端，原浏览器字节 I/O、持久化和生命周期由三个宿主供给。
+
 ## 契约与验证入口
 
 企业合同从本包的[企业合同](../../src/enterprise.ts)、[工作流](../../src/enterprise-workflows.ts)、[费用](../../src/enterprise-expense.ts)、[换货](../../src/enterprise-exchange.ts)及[交接](../../src/enterprise-transfer-decision.ts)单源消费。页面其他既有合同仍沿 shared 兼容出口。

@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { customerFetch, customerSessionGeneration } from "@rental-os/web-client";
+import { readEnterpriseExchangeInspectionPhoto } from "@rental-os/rental-core/clients/enterprise";
 import { enterpriseExchangeInspectionConsentSnapshot, formatRentalMoney, type RentalExchangeInspectionCustomerMaterial, type RentalExchangeInspectionConsent, type EnterpriseExchangeConfirmationResult, type EnterpriseExchangeRequestOriginalResult, type EnterpriseExchangeChoices, type ClientOrderView, type EnterpriseExchangeApprovalView, type EnterpriseExchangeIntent, type EnterpriseOperationResult } from "@rental-os/shared";
 import { ActionButton, Alert, Button, Checkbox, Form, Input, SaveButton, Select, Table } from "@/components/ui/customer-entry";
 import { useLocale } from "@/app/locale";
@@ -43,21 +44,16 @@ function ExchangeInspectionPhoto({ material, photo, english, signal, assertMater
     const controller = new AbortController(); resources.current = { controller };
     setPreview(undefined); setReading(true); setFailure(undefined);
     try {
-      if (![material.orderId, material.preparationId, photo.fileAssetId].every(value => /^[A-Za-z0-9._:-]{1,191}$/u.test(value))
-        || !/^[a-f0-9]{64}$/u.test(photo.contentHash)) throw new Error("原照片引用不可核对");
-      const path = `/enterprise/orders/${encodeURIComponent(material.orderId)}/exchange-inspections/${encodeURIComponent(material.preparationId)}/photos/${encodeURIComponent(photo.fileAssetId)}?preparationHash=${encodeURIComponent(material.preparationHash)}`;
-      const response = await customerFetch(tenantCode, CLIENT_BASE, path,
-        { signal: AbortSignal.any([owner.current.signal, signal ?? owner.current.signal, controller.signal]) });
-      current();
-      const mimeType = response.headers.get("Content-Type")?.split(";")[0].trim();
-      if (!response.ok || !mimeType || !["image/png", "image/jpeg"].includes(mimeType)) throw new Error("原照片读取不可用");
-      const bytes = await response.arrayBuffer(); current();
-      if (controller.signal.aborted || resources.current.controller !== controller || bytes.byteLength < 1 || bytes.byteLength > 20 * 1024 * 1024) throw new Error("原照片读取已取消或超出范围");
-      const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)); current();
-      const contentHash = Array.from(digest, value => value.toString(16).padStart(2, "0")).join("");
-      if (contentHash !== photo.contentHash || controller.signal.aborted || resources.current.controller !== controller) throw new Error("原照片字节与具体检查材料不一致");
-      const url = URL.createObjectURL(new Blob([bytes], { type: mimeType })); resources.current.url = url;
-      setPreview({ scope, url });
+      await readEnterpriseExchangeInspectionPhoto(material, photo, {
+        request: path => customerFetch(tenantCode, CLIENT_BASE, path,
+          { signal: AbortSignal.any([owner.current.signal, signal ?? owner.current.signal, controller.signal]) }),
+        current, isReadCurrent: () => !controller.signal.aborted && resources.current.controller === controller,
+        digest: bytes => crypto.subtle.digest("SHA-256", bytes),
+        verified: (bytes, mimeType) => {
+          const url = URL.createObjectURL(new Blob([bytes], { type: mimeType })); resources.current.url = url;
+          setPreview({ scope, url });
+        },
+      });
     } catch (error) {
       if (mounted.current && latest.current === scope && resources.current.controller === controller) {
         setFailure({ scope, message: english ? "Original inspection photo unavailable" : "原检查照片不可用" });
