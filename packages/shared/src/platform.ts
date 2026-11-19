@@ -4,7 +4,7 @@ import type {
   RentalCategoryCode,
   RentalCurrency
 } from "./core";
-import type { SystemUserRow, SaveSystemUserRequest, SystemSecurityBaselineConfig, SaveWorkspaceAccessRequest } from "./platform-identity";
+import type { SystemUserRow, SystemSecurityBaselineConfig } from "./platform-identity";
 export * from "./platform-identity";
 
 export enum RentalMode {

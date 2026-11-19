@@ -198,7 +198,43 @@ function emitMiniprogramRentalClientRuntime(appRoot, output) {
     || entry !== path.resolve(packageRoot, target)) throw Error('Rental native client does not match its package export');
 
   const ts = require(require.resolve('typescript', { paths: [appRoot, root] }));
-  const modules = new Map(), pending = [entry];
+  const entries = new Map([[specifier, entry]]), applicationFiles = [];
+  const destination = path.join(output, 'vendor', 'rental-core'), directories = [output];
+  // The shared time entry is bundled only when compiled application code uses it.
+  // Resolve each import from the package declaration before writing any vendor files.
+  while (directories.length) {
+    const directory = directories.pop();
+    for (const item of fs.readdirSync(directory, { withFileTypes: true })) {
+      const file = path.join(directory, item.name);
+      if (item.isSymbolicLink()) throw Error('Mini-program build refuses linked artifacts');
+      if (item.isDirectory()) { if (file !== destination) directories.push(file); continue; }
+      if (!file.endsWith('.js')) continue;
+      const text = fs.readFileSync(file, 'utf8');
+      const parsed = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS), bindings = [];
+      const visit = node => {
+        if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'require'
+          && node.arguments.length === 1 && ts.isStringLiteral(node.arguments[0])
+          && node.arguments[0].text.startsWith('@rental-os/rental-core')) {
+          const imported = node.arguments[0].text;
+          if (!entries.has(imported)) {
+            if (imported !== '@rental-os/rental-core/clients/time') throw Error('Mini-program uses an undeclared Rental client export');
+            const timeExport = metadata.exports?.['./clients/time'];
+            const timeTarget = typeof timeExport === 'string' ? timeExport : timeExport?.require ?? timeExport?.default;
+            const timeEntry = require.resolve(imported, { paths: [appRoot, root] });
+            if (timeTarget !== './dist-clients/clients/time.js' || timeEntry !== path.resolve(packageRoot, timeTarget))
+              throw Error('Rental native time does not match its package export');
+            entries.set(imported, timeEntry);
+          }
+          bindings.push({ start: node.arguments[0].getStart(parsed), end: node.arguments[0].end, imported });
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(parsed);
+      if (bindings.length) applicationFiles.push({ file, text, bindings });
+    }
+  }
+
+  const modules = new Map(), pending = [...entries.values()];
   while (pending.length) {
     const file = pending.pop();
     if (modules.has(file)) continue;
@@ -222,7 +258,6 @@ function emitMiniprogramRentalClientRuntime(appRoot, output) {
     visit(parsed);
   }
 
-  const destination = path.join(output, 'vendor', 'rental-core');
   checkPath(root, destination, true);
   for (const [file, text] of modules) {
     const targetFile = path.join(destination, path.relative(dist, file));
@@ -236,35 +271,18 @@ function emitMiniprogramRentalClientRuntime(appRoot, output) {
   checkPath(root, license);
   fs.copyFileSync(license, path.join(destination, 'LICENSE'));
 
-  const bundledEntry = path.join(destination, path.relative(dist, entry)), directories = [output];
-  while (directories.length) {
-    const directory = directories.pop();
-    for (const item of fs.readdirSync(directory, { withFileTypes: true })) {
-      const file = path.join(directory, item.name);
-      if (item.isSymbolicLink()) throw Error('Mini-program build refuses linked artifacts');
-      if (item.isDirectory()) { if (file !== destination) directories.push(file); continue; }
-      if (!file.endsWith('.js')) continue;
-      const text = fs.readFileSync(file, 'utf8');
-      const parsed = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS), replacements = [];
-      const visit = node => {
-        if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'require'
-          && node.arguments.length === 1 && ts.isStringLiteral(node.arguments[0])
-          && node.arguments[0].text.startsWith('@rental-os/rental-core')) {
-          if (node.arguments[0].text !== specifier) throw Error('Mini-program uses an undeclared Rental client export');
-          let relative = path.relative(path.dirname(file), bundledEntry).replace(/\\/g, '/').replace(/\.js$/u, '');
-          if (!relative.startsWith('.')) relative = './' + relative;
-          replacements.push({ start: node.arguments[0].getStart(parsed), end: node.arguments[0].end, text: JSON.stringify(relative) });
-        }
-        ts.forEachChild(node, visit);
-      };
-      visit(parsed);
-      let rewritten = text;
-      for (const replacement of replacements.sort((left, right) => right.start - left.start))
-        rewritten = rewritten.slice(0, replacement.start) + replacement.text + rewritten.slice(replacement.end);
-      if (replacements.length) fs.writeFileSync(file, rewritten);
+  for (const { file, text, bindings } of applicationFiles) {
+    let rewritten = text;
+    for (const binding of bindings.sort((left, right) => right.start - left.start)) {
+      const bundled = path.join(destination, path.relative(dist, entries.get(binding.imported)));
+      let relative = path.relative(path.dirname(file), bundled).replace(/\\/g, '/').replace(/\.js$/u, '');
+      if (!relative.startsWith('.')) relative = './' + relative;
+      rewritten = rewritten.slice(0, binding.start) + JSON.stringify(relative) + rewritten.slice(binding.end);
     }
+    fs.writeFileSync(file, rewritten);
   }
-  return { specifier, modules: modules.size, entry: path.relative(output, bundledEntry).replace(/\\/g, '/') };
+  const bundledEntry = path.join(destination, path.relative(dist, entry));
+  return { specifier, modules: modules.size, entry: path.relative(output, bundledEntry).replace(/\\/g, '/'), exports: [...entries.keys()] };
 }
 
 function releaseMiniprogramSharedTypes(configFile) {

@@ -14,6 +14,8 @@
 | [支付对账前端](admin/payment-reconciliation/README.md)、[页面声明](admin/payment-reconciliation/pages.ts)、[四请求](admin/payment-reconciliation/client.ts) | `/admin/payment-reconciliation` 共用原批次列表/详情、CSV导入和差异表单；当前财务权限与空间、原支付事实、处理原因及单次异步提交保持 |
 | [企业Web客户端](clients/enterprise/README.md)、[正式入口](clients/enterprise/index.ts)、[会话协调](clients/enterprise/session.tsx) | `/clients/enterprise` 提供企业会话、请求与原操作门闸；公共web-client仍持有唯一客户会话和网络层，企业授权、单次写入及原键恢复保持 |
 | [官网认证与本人资料](clients/website/auth/README.md)、[登录态业务](clients/website/session/README.md) | `/clients/website` 提供认证、账户与原业务请求工厂；宿主供给同一客户会话、可信请求与原引用清理，业务授权及原收据沿服务端核验 |
+| [企业门户前端](clients/enterprise-portal/README.md)、[应用入口](clients/enterprise-portal/index.ts)、[原薄宿主](../../apps/enterprise-portal/README.md) | `/clients/enterprise-portal` 提供完整企业门户，页面使用精确子出口；宿主供给同一客户会话和公共UI，企业/本人/空间及原材料权限沿真实服务核验，不依赖旧后台源码 |
+| [营业时区](clients/time.ts)、[微信打包](../../scripts/miniprogram-shared-types.cjs) | `/clients/time` 是原生CommonJS与声明出口，复用原时区/DST/回退算法；微信构建仅在实际引用时带入同一时间模块，费用仍由服务端裁定 |
 | [客户认证](clients/miniprogram/auth/README.md)、[正式客户入口](clients/miniprogram/index.ts) | `/clients/miniprogram` 提供密码/短信/微信、用途验证码、注册与本人注销；宿主供给原渠道、请求和会话采用，一次性凭证及原错误保持 |
 | [会员请求](admin/membership/client.ts)、[客户请求](admin/membership/customer-client.ts) | `/admin/membership/client` 与 `/admin/membership/customer-client` 提供原57项请求；传入宿主唯一认证请求，保留租户会员、客户主档、账号状态、敏感资料、企业账务及原冲销收据边界 |
 | [订单前端](admin/orders/README.md)、[订单请求](admin/orders/client.ts) | `/admin/orders` 提供列表、新建、详情及原配货/资金/检查/单据链；宿主提供当前身份、经营空间、原请求与跨领域组件，旧地址消费同一实现 |

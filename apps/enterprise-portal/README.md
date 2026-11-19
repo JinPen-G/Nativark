@@ -1,6 +1,6 @@
 # Enterprise portal
 
-独立企业客户 Web，供当前商户的企业客户管理者处理成员、邀请、使用政策、预约审批和资料申请。共用原个人客户登录，管理动作逐次核验企业权限。[Rental 企业客户端](../../packages/rental-core/clients/enterprise/README.md)提供会话、请求、原操作门闸及交接材料与动作名称，门户仅提供构建配置和页面。真实环境与资金链按部署组合核验，页面存在不代表整项验收。
+独立企业客户 Web，供当前商户的企业客户管理者处理成员、邀请、使用政策、预约审批和资料申请。共用原个人客户登录，管理动作逐次核验企业权限。[Rental 企业客户端](../../packages/rental-core/clients/enterprise/README.md)提供会话、请求、原操作门闸及交接材料与动作名称。[完整门户前端](../../packages/rental-core/clients/enterprise-portal/README.md)提供原全部页面和组合，应用仅供给构建配置与浏览器挂载。真实环境与资金链按部署组合核验，页面存在不代表整项验收。
 
 视觉和交互沿[UI 适配规则](../admin/AGENTS.md)和[公共后台实现](../../packages/platform-admin/README.md)，复用原 React/UIArc、主题、语言与原生侧栏。订单、财务、全员审计和导出缺正式授权或来源时保持不可用。
 

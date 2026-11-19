@@ -96,7 +96,7 @@ Rental Core 是首个业务示范，提供商品、资产、库存、报价、�
 
 这个示范将展示 Core 如何使用公共身份、租户、后台和 AI 接入机制，同时保有业务模型、事务、金额、幂等与历史快照。客户网站、员工与客户小程序、企业客户门户提供该业务的多端消费样例。
 
-开发者可从实际 Controller、领域服务和客户端调用链开始阅读。[业务源码](apps/api/src/modules/rental-core)
+开发者可从实际 Controller、领域服务和客户端调用链开始阅读。[业务包与接入说明](packages/rental-core/README.md)
 
 ## 项目组成
 
@@ -107,6 +107,7 @@ Rental Core 是首个业务示范，提供商品、资产、库存、报价、�
 | `apps/api` | 身份、公共平台、AI Native、基础服务与现有 Core 的 API 组合；业务及支付 HTTP 通过 Rental 正式模块挂载 | [启动](apps/api/src/main.ts)、[装配](apps/api/src/app.module.ts)、[同一服务组](apps/api/src/application-services.module.ts) |
 | `apps/platform-api` | 默认无 Core 的独立公共 API，初始化 / 认证 / 公共管理 / 组织与安全 / 订阅已提供，完整运行继续交付 | [宿主导读](apps/platform-api/README.md) |
 | `apps/example-tickets-api` | 公共底座与单工单Core受控组合，标准包和迁移准备，真实运行验收继续交付 | [示范导读](apps/example-tickets-api/README.md) |
+| `apps/rental-api` | 公共底座与Rental同实例构造、数据准备和生命周期；完整请求及独立启动继续接入 | [Rental组合导读](apps/rental-api/README.md) |
 | `packages/platform-contracts` | 无行业依赖的公共身份、人员与设置合同；原 shared 兼容再导出 | [正式出口](packages/platform-contracts/README.md) |
 | `packages/platform-server` | 认证、公共管理与订阅、字典/编号、集成、文件原语及公共 HTTP 的唯一实现，存储由宿主提供 | [源码路线](packages/platform-server/README.md) |
 | `packages/platform-core-host` | 真实公共身份、标准Core授权/绑定、目录/范围与HTTP的单源适配 | [接入路线](packages/platform-core-host/README.md) |
@@ -121,6 +122,7 @@ Rental Core 是首个业务示范，提供商品、资产、库存、报价、�
 | `clients/harness-plugin` | Harness 客户端对标准 MCP 的消费 | [插件说明](clients/harness-plugin/README.md) |
 | `apps/api/src/modules/rental-core` | 首个业务 Core 的领域实现 | [领域模块](apps/api/src/modules/rental-core) |
 | `apps/tenant-website`、`apps/enterprise-portal` | Rental 客户网站与企业客户门户 | [客户网站](apps/tenant-website/README.md)、[企业门户](apps/enterprise-portal/README.md) |
+| `packages/rental-core/clients/enterprise-portal` | 完整企业门户业务前端；原门户宿主复用公共UI并消费正式页面出口 | [门户接入](packages/rental-core/clients/enterprise-portal/README.md) |
 | `apps/miniprogram`、`apps/staff-miniprogram` | Rental 客户与员工微信小程序 | [客户小程序](apps/miniprogram/README.md)、[员工小程序](apps/staff-miniprogram/README.md) |
 | `tests`、`scripts` | 契约、业务、宿主验证与开发、运维脚本 | [命令清单](package.json) |
 

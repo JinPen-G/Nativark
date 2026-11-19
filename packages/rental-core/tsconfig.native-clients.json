@@ -3,7 +3,10 @@
   "compilerOptions": {
     "target": "ES2019",
     "module": "commonjs",
-    "lib": ["ES2020", "DOM"],
+    "lib": [
+      "ES2020",
+      "DOM"
+    ],
     "types": [],
     "rootDir": ".",
     "outDir": "dist-clients",
@@ -13,5 +16,9 @@
     "noUnusedParameters": true,
     "incremental": false
   },
-  "include": ["clients/staff/**/*.ts", "clients/miniprogram/**/*.ts"]
+  "include": [
+    "clients/staff/**/*.ts",
+    "clients/miniprogram/**/*.ts",
+    "clients/time.ts"
+  ]
 }

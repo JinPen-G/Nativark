@@ -35,6 +35,10 @@ import { EnterpriseSessionProvider } from "@rental-os/rental-core/clients/enterp
 
 [文件客户端导读](file-evidence/README.md)连接原授权／回款凭证上传、本人申请附件读取和具体换货检查照片。业务路径、原键与材料核验归本客户端，原浏览器字节 I/O、持久化和生命周期由三个宿主供给。
 
+## 完整企业门户
+
+[门户前端贡献](../enterprise-portal/README.md)复用本入口的同一会话、原操作与文件客户端，提供原全部企业页面和浏览器组合。应用宿主供给公开配置与挂载，页面经正式 Rental 出口消费公共 UIArc、主题和运输。
+
 ## 契约与验证入口
 
 企业合同从本包的[企业合同](../../src/enterprise.ts)、[工作流](../../src/enterprise-workflows.ts)、[费用](../../src/enterprise-expense.ts)、[换货](../../src/enterprise-exchange.ts)及[交接](../../src/enterprise-transfer-decision.ts)单源消费。页面其他既有合同仍沿 shared 兼容出口。

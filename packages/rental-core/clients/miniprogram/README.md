@@ -1,6 +1,6 @@
 # Rental 客户小程序业务客户端
 
-[正式模块入口](index.ts)提供七组业务请求工厂。原小程序 [api 入口](../../../../apps/miniprogram/src/api/orders.ts)注入 [request](../../../../apps/miniprogram/src/core/http.ts)，继续导出原方法和返回类型。合同沿 Rental 包内的[客户声明](../../src/client-contracts.ts)、[租赁声明](../../src/contracts.ts)和企业声明单源消费。
+[正式模块入口](index.ts)提供七组业务请求工厂及客户认证工厂。原小程序 [api 入口](../../../../apps/miniprogram/src/api/orders.ts)注入 [request](../../../../apps/miniprogram/src/core/http.ts)，继续导出原方法和返回类型。合同沿 Rental 包内的[客户声明](../../src/client-contracts.ts)、[租赁声明](../../src/contracts.ts)和企业声明单源消费。
 
 ## 宿主接入
 
@@ -14,6 +14,8 @@ const orders = createRentalMiniProgramOrdersApi({ request });
 [端口](ports.ts)保持原请求选项。宿主 request 使用原 `/api/client/v1`、客户会话、响应解包、错误实例、刷新策略和范围复验。每次调用使用运输当前身份；[session](../../../../apps/miniprogram/src/core/session.ts)负责服务切换与单调上下文版本。
 
 [目录工厂](catalog.ts)还注入公开 `tenantCode` 配置对象、原 `contractMissing` 和 `featureUnavailable`；[商户工厂](merchant.ts)注入公开 `tenantCode/appId` 配置对象与原 `contractMissing`。配置沿宿主对象读取，游客目录、渠道启动和文档的原参数与缺能力提示保持。
+
+[认证工厂](auth.ts)使用同一正式出口的 `createRentalMiniProgramAuthApi`。宿主供给公开渠道配置、原 request/错误转换、当前服务、refresh token、会话保存和退出清理；页面通过原 `adoptSession` 采用服务端登录或注册结果。切服务、微信一次凭证、本人注销和退出沿原权限、范围与重放策略。[认证端口与用法](auth/README.md) · [原认证适配](../../../../apps/miniprogram/src/api/auth.ts)
 
 ## 请求归属与调用链
 
@@ -45,10 +47,10 @@ const orders = createRentalMiniProgramOrdersApi({ request });
 npm run build:native-clients -w @rental-os/rental-core
 ```
 
-[原生配置](../../tsconfig.native-clients.json)单独生成 `dist-clients/` 的 CommonJS 和声明，正式入口为 `dist-clients/clients/miniprogram/index.js` 及同名声明。微信宿主的 `prebuild`、`pretypecheck` 准备原 Shared 声明和这个客户端；七组工厂的业务合同为类型导入，运行时只带其相对依赖。
+[原生配置](../../tsconfig.native-clients.json)单独生成 `dist-clients/` 的 CommonJS 和声明，正式入口为 `dist-clients/clients/miniprogram/index.js` 及同名声明。微信宿主的 `prebuild`、`pretypecheck` 准备原 Shared 声明和这个客户端；七组业务工厂与认证工厂使用同一正式入口，运行时闭包由当前原生配置和包声明生成，业务合同沿类型导入。
 
 [公共打包函数](../../../../scripts/miniprogram-shared-types.cjs)读取已声明入口，将实际 CommonJS 闭包与原 MIT 许可写入微信发布包的 `vendor/rental-core/`，并改写原宿主的正式包导入。未声明入口、外部或动态 `require` 会停止构建。[微信构建入口](../../../../apps/miniprogram/scripts/build.cjs)
 
 ## 验证入口
 
-必要类型检查核对七组工厂与原 API 消费者；定向冒烟对照原请求路径、选项、返回与错误，并复用[原小程序测试](../../../../tests/miniprogram-static.test.cjs)的运输、范围、支付单和缓存断言。正式包出口、类型解析和微信构建由实际宿主接线核定，真实 HTTP、微信、数据库与供应商证据按对应环境取得。
+必要类型检查核对七组业务工厂、认证工厂及原 API 消费者；定向冒烟对照原请求路径、选项、返回与错误，并复用[原小程序测试](../../../../tests/miniprogram-static.test.cjs)的运输、范围、支付单和缓存断言。认证片已核原 16 方法、会话采用与退出清理，正式 Native 声明与原客户宿主类型通过；这份证据不代替加入认证后的完整微信发布包验证。正式包出口、类型解析和微信构建由实际宿主接线核定，真实 HTTP、微信、数据库与供应商证据按对应环境取得。

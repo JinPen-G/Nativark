@@ -1581,7 +1581,50 @@
     "./http-workspaces-module": {
       "types": "./dist/http-workspaces.module.d.ts",
       "default": "./dist/http-workspaces.module.js"
-    }
+    },
+    "./clients/enterprise-portal": "./clients/enterprise-portal/index.ts",
+    "./clients/enterprise-portal/styles": "./clients/enterprise-portal/styles.css",
+    "./clients/time": {
+      "types": "./dist-clients/clients/time.d.ts",
+      "require": "./dist-clients/clients/time.js",
+      "default": "./dist-clients/clients/time.js"
+    },
+    "./clients/enterprise-portal/pages/AdministratorEditor": "./clients/enterprise-portal/AdministratorEditor.tsx",
+    "./clients/enterprise-portal/pages/ApplicationReviewMessages": "./clients/enterprise-portal/ApplicationReviewMessages.tsx",
+    "./clients/enterprise-portal/pages/ApprovalDecision": "./clients/enterprise-portal/ApprovalDecision.tsx",
+    "./clients/enterprise-portal/pages/ApprovalNotices": "./clients/enterprise-portal/ApprovalNotices.tsx",
+    "./clients/enterprise-portal/pages/ApprovalReview": "./clients/enterprise-portal/ApprovalReview.tsx",
+    "./clients/enterprise-portal/pages/ApprovalsPage": "./clients/enterprise-portal/ApprovalsPage.tsx",
+    "./clients/enterprise-portal/pages/AuthorityUpload": "./clients/enterprise-portal/AuthorityUpload.tsx",
+    "./clients/enterprise-portal/pages/CorporateStatusMessages": "./clients/enterprise-portal/CorporateStatusMessages.tsx",
+    "./clients/enterprise-portal/pages/EmployeePolicyMessages": "./clients/enterprise-portal/EmployeePolicyMessages.tsx",
+    "./clients/enterprise-portal/pages/EnterpriseShell": "./clients/enterprise-portal/EnterpriseShell.tsx",
+    "./clients/enterprise-portal/pages/ExchangeApprovalsPage": "./clients/enterprise-portal/ExchangeApprovalsPage.tsx",
+    "./clients/enterprise-portal/pages/ExtensionApprovalsPage": "./clients/enterprise-portal/ExtensionApprovalsPage.tsx",
+    "./clients/enterprise-portal/pages/FinancePage": "./clients/enterprise-portal/FinancePage.tsx",
+    "./clients/enterprise-portal/pages/JoinReviewMessages": "./clients/enterprise-portal/JoinReviewMessages.tsx",
+    "./clients/enterprise-portal/pages/ManagementRequestFeedback": "./clients/enterprise-portal/ManagementRequestFeedback.tsx",
+    "./clients/enterprise-portal/pages/ManagementRequestsPage": "./clients/enterprise-portal/ManagementRequestsPage.tsx",
+    "./clients/enterprise-portal/pages/ManagementReviewMessages": "./clients/enterprise-portal/ManagementReviewMessages.tsx",
+    "./clients/enterprise-portal/pages/MemberLifecycle": "./clients/enterprise-portal/MemberLifecycle.tsx",
+    "./clients/enterprise-portal/pages/MemberOperationRecovery": "./clients/enterprise-portal/MemberOperationRecovery.tsx",
+    "./clients/enterprise-portal/pages/MembershipAudit": "./clients/enterprise-portal/MembershipAudit.tsx",
+    "./clients/enterprise-portal/pages/MerchantContact": "./clients/enterprise-portal/MerchantContact.tsx",
+    "./clients/enterprise-portal/pages/OrdersPage": "./clients/enterprise-portal/OrdersPage.tsx",
+    "./clients/enterprise-portal/pages/OwnMessages": "./clients/enterprise-portal/OwnMessages.tsx",
+    "./clients/enterprise-portal/pages/OwnRentalFulfillment": "./clients/enterprise-portal/OwnRentalFulfillment.tsx",
+    "./clients/enterprise-portal/pages/OwnRentalHandoffOrders": "./clients/enterprise-portal/OwnRentalHandoffOrders.tsx",
+    "./clients/enterprise-portal/pages/OwnRentalHandoffs": "./clients/enterprise-portal/OwnRentalHandoffs.tsx",
+    "./clients/enterprise-portal/pages/OwnStatusMessages": "./clients/enterprise-portal/OwnStatusMessages.tsx",
+    "./clients/enterprise-portal/pages/PolicyPage": "./clients/enterprise-portal/PolicyPage.tsx",
+    "./clients/enterprise-portal/pages/RelationshipMessages": "./clients/enterprise-portal/RelationshipMessages.tsx",
+    "./clients/enterprise-portal/pages/RentalHandoffMaterial": "./clients/enterprise-portal/RentalHandoffMaterial.tsx",
+    "./clients/enterprise-portal/pages/RetainedMergeMessages": "./clients/enterprise-portal/RetainedMergeMessages.tsx",
+    "./clients/enterprise-portal/pages/TasksPage": "./clients/enterprise-portal/TasksPage.tsx",
+    "./clients/enterprise-portal/pages/TransferDecisionRecovery": "./clients/enterprise-portal/TransferDecisionRecovery.tsx",
+    "./clients/enterprise-portal/pages/TransferMessages": "./clients/enterprise-portal/TransferMessages.tsx",
+    "./clients/enterprise-portal/pages/WorkflowPages": "./clients/enterprise-portal/WorkflowPages.tsx",
+    "./clients/enterprise-portal/pages/WorkflowReview": "./clients/enterprise-portal/WorkflowReview.tsx"
   },
   "typesVersions": {
     "*": {
@@ -2844,6 +2887,123 @@
       ],
       "http-workspaces-module": [
         "dist/http-workspaces.module.d.ts"
+      ],
+      "clients/enterprise-portal": [
+        "clients/enterprise-portal/index.ts"
+      ],
+      "clients/enterprise-portal/styles": [
+        "clients/enterprise-portal/styles.css"
+      ],
+      "clients/time": [
+        "dist-clients/clients/time.d.ts"
+      ],
+      "clients/enterprise-portal/pages/AdministratorEditor": [
+        "clients/enterprise-portal/AdministratorEditor.tsx"
+      ],
+      "clients/enterprise-portal/pages/ApplicationReviewMessages": [
+        "clients/enterprise-portal/ApplicationReviewMessages.tsx"
+      ],
+      "clients/enterprise-portal/pages/ApprovalDecision": [
+        "clients/enterprise-portal/ApprovalDecision.tsx"
+      ],
+      "clients/enterprise-portal/pages/ApprovalNotices": [
+        "clients/enterprise-portal/ApprovalNotices.tsx"
+      ],
+      "clients/enterprise-portal/pages/ApprovalReview": [
+        "clients/enterprise-portal/ApprovalReview.tsx"
+      ],
+      "clients/enterprise-portal/pages/ApprovalsPage": [
+        "clients/enterprise-portal/ApprovalsPage.tsx"
+      ],
+      "clients/enterprise-portal/pages/AuthorityUpload": [
+        "clients/enterprise-portal/AuthorityUpload.tsx"
+      ],
+      "clients/enterprise-portal/pages/CorporateStatusMessages": [
+        "clients/enterprise-portal/CorporateStatusMessages.tsx"
+      ],
+      "clients/enterprise-portal/pages/EmployeePolicyMessages": [
+        "clients/enterprise-portal/EmployeePolicyMessages.tsx"
+      ],
+      "clients/enterprise-portal/pages/EnterpriseShell": [
+        "clients/enterprise-portal/EnterpriseShell.tsx"
+      ],
+      "clients/enterprise-portal/pages/ExchangeApprovalsPage": [
+        "clients/enterprise-portal/ExchangeApprovalsPage.tsx"
+      ],
+      "clients/enterprise-portal/pages/ExtensionApprovalsPage": [
+        "clients/enterprise-portal/ExtensionApprovalsPage.tsx"
+      ],
+      "clients/enterprise-portal/pages/FinancePage": [
+        "clients/enterprise-portal/FinancePage.tsx"
+      ],
+      "clients/enterprise-portal/pages/JoinReviewMessages": [
+        "clients/enterprise-portal/JoinReviewMessages.tsx"
+      ],
+      "clients/enterprise-portal/pages/ManagementRequestFeedback": [
+        "clients/enterprise-portal/ManagementRequestFeedback.tsx"
+      ],
+      "clients/enterprise-portal/pages/ManagementRequestsPage": [
+        "clients/enterprise-portal/ManagementRequestsPage.tsx"
+      ],
+      "clients/enterprise-portal/pages/ManagementReviewMessages": [
+        "clients/enterprise-portal/ManagementReviewMessages.tsx"
+      ],
+      "clients/enterprise-portal/pages/MemberLifecycle": [
+        "clients/enterprise-portal/MemberLifecycle.tsx"
+      ],
+      "clients/enterprise-portal/pages/MemberOperationRecovery": [
+        "clients/enterprise-portal/MemberOperationRecovery.tsx"
+      ],
+      "clients/enterprise-portal/pages/MembershipAudit": [
+        "clients/enterprise-portal/MembershipAudit.tsx"
+      ],
+      "clients/enterprise-portal/pages/MerchantContact": [
+        "clients/enterprise-portal/MerchantContact.tsx"
+      ],
+      "clients/enterprise-portal/pages/OrdersPage": [
+        "clients/enterprise-portal/OrdersPage.tsx"
+      ],
+      "clients/enterprise-portal/pages/OwnMessages": [
+        "clients/enterprise-portal/OwnMessages.tsx"
+      ],
+      "clients/enterprise-portal/pages/OwnRentalFulfillment": [
+        "clients/enterprise-portal/OwnRentalFulfillment.tsx"
+      ],
+      "clients/enterprise-portal/pages/OwnRentalHandoffOrders": [
+        "clients/enterprise-portal/OwnRentalHandoffOrders.tsx"
+      ],
+      "clients/enterprise-portal/pages/OwnRentalHandoffs": [
+        "clients/enterprise-portal/OwnRentalHandoffs.tsx"
+      ],
+      "clients/enterprise-portal/pages/OwnStatusMessages": [
+        "clients/enterprise-portal/OwnStatusMessages.tsx"
+      ],
+      "clients/enterprise-portal/pages/PolicyPage": [
+        "clients/enterprise-portal/PolicyPage.tsx"
+      ],
+      "clients/enterprise-portal/pages/RelationshipMessages": [
+        "clients/enterprise-portal/RelationshipMessages.tsx"
+      ],
+      "clients/enterprise-portal/pages/RentalHandoffMaterial": [
+        "clients/enterprise-portal/RentalHandoffMaterial.tsx"
+      ],
+      "clients/enterprise-portal/pages/RetainedMergeMessages": [
+        "clients/enterprise-portal/RetainedMergeMessages.tsx"
+      ],
+      "clients/enterprise-portal/pages/TasksPage": [
+        "clients/enterprise-portal/TasksPage.tsx"
+      ],
+      "clients/enterprise-portal/pages/TransferDecisionRecovery": [
+        "clients/enterprise-portal/TransferDecisionRecovery.tsx"
+      ],
+      "clients/enterprise-portal/pages/TransferMessages": [
+        "clients/enterprise-portal/TransferMessages.tsx"
+      ],
+      "clients/enterprise-portal/pages/WorkflowPages": [
+        "clients/enterprise-portal/WorkflowPages.tsx"
+      ],
+      "clients/enterprise-portal/pages/WorkflowReview": [
+        "clients/enterprise-portal/WorkflowReview.tsx"
       ]
     }
   },
