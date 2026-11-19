@@ -1,8 +1,8 @@
 # Enterprise portal
 
-独立企业客户 Web，供当前商户的企业客户管理者处理成员、邀请、使用政策、预约审批和资料申请。共用原个人客户登录，但管理动作逐次核验企业权限；不是商户营运后台，也不在此重建商城、库存或资金业务。生产启用、真实环境与阶段缺口见[企业专项接续](../../docs/企业客户后台/企业客户后台-协作接续.md)，页面存在不代表整项验收。
+独立企业客户 Web，供当前商户的企业客户管理者处理成员、邀请、使用政策、预约审批和资料申请。共用原个人客户登录，管理动作逐次核验企业权限。[Rental 企业客户端](../../packages/rental-core/clients/enterprise/README.md)提供会话、请求与原操作门闸，门户仅提供构建配置和页面。真实环境与资金链按部署组合核验，页面存在不代表整项验收。
 
-视觉和交互沿[管理后台规范](../../docs/公共技术资料/界面规范/管理后台-界面规范.md)及[UI 适配规则](../admin/AGENTS.md)，复用原 React/UIArc、主题、语言与原生侧栏，不修改 vendor。订单、财务、全员审计和导出缺正式授权或来源时保持不可用，不展示假记录或假额度。
+视觉和交互沿[UI 适配规则](../admin/AGENTS.md)和[公共后台实现](../../packages/platform-admin/README.md)，复用原 React/UIArc、主题、语言与原生侧栏。订单、财务、全员审计和导出缺正式授权或来源时保持不可用。
 
 管理端与企业端共用 [BusinessShell](../admin/src/components/BusinessShell.tsx)、[导航](../admin/src/components/animate-sidebar/NativeNavigation.tsx)、[上下文选择器](../admin/src/components/animate-sidebar/NativeContextSwitcher.tsx)及[账号菜单](../admin/src/components/animate-sidebar/NativeAccountMenuView.tsx)。框架布局、侧栏、顶部栏、间距、深浅主题及动效只维护这些共用组件和管理端原样式/token。企业 [Shell](src/EnterpriseShell.tsx)仅提供客户身份、当前企业、受权菜单与原客户动作。修改共用源码后，两端开发入口均使用更新后的实现，发行时重新构建两端产物。
 
@@ -66,6 +66,5 @@ Vite 使用 `envDir:false`，无 API 代理；已批准的 offline 模式不请�
 - [真实审批/命令/政策与 Core 方法组合](../../tests/enterprise-core-execution.test.cjs)：存储、事务与原业务依赖仍是明确替身，不证明 MySQL 锁或资金执行。
 - [原续租/企业批准/政策与幂等组合](../../tests/enterprise-extension-approval.test.cjs)：含真实原试算算法、Nest DTO 管道和 ClientApi 原资金门禁调用顺序；持久配置、付款证据与数据库仍为明确替身，不证明真实资金或 MySQL 锁。
 - [实际前端事件闭包与原结果消费者](../../tests/enterprise-consumers.test.cjs)：不是 React DOM、浏览器、微信宿主或真实 HTTP 联调。
-- [本认领隔离MySQL证据](../../output/enterprise-offline/merchant-application-claim/real-db-result.json)：新自有容器/库、随机loopback端口、库级账号和两真实私有Prisma连接，使用当前schema的原约束依赖闭包。证明本树申请/原仓储/Tenant事务的竞争、原键重放、受保护管理员拒绝/冻结后核验恢复和授权写点回滚；不证明其他链MySQL锁序、完整/历史迁移、真实HTTP/资格材料/OSS、Core资金或发布。隔离前置和实际失败统一见原阶段记录。
-- [本交接申请隔离MySQL证据](../../output/enterprise-offline/rental-handoff-request/real-db-result.json)：新自有库/容器、两条单连接Prisma、原Core事实仓储tx材料与专用创建/receipt/回滚；实际本片迁移和依赖闭包约束保留。不是HTTP/Guard/正常Core配置启动、历史完整迁移或资金/库存验收。[商户意见隔离MySQL](../../output/enterprise-offline/merchant-rental-handoff/real-db-result.json)另证两连接意见竞争、原K/地点范围与意见receipt整笔回滚，[本人请求MySQL证据](../../output/enterprise-offline/own-rental-handoff/real-db-result.json)另证撤回与商户处理竞争、同K/反馈/持久待办及实际撤回receipt回滚；不代替无申请时真实在途/商户队列或完整R05善后。
-- 本应用 [tsconfig](tsconfig.json)、[构建配置](vite.config.ts)；命令及退出码统一记入[现有开发记录](../../docs/企业客户后台/企业客户后台-开发记录.md)，不在模块导读维护测试数量或任务流水。
+- 数据库验证使用自有隔离库与所选 schema、迁移，核对申请认领、交接申请、商户意见和本人撤回的事务竞争、原键回读及回滚。历史隔离快照由维护者保存；当前组合仍须取得对应数据库、HTTP、资金与完整运行证据。
+- 本应用 [tsconfig](tsconfig.json)、[构建配置](vite.config.ts)和[客户端类型入口](../../packages/rental-core/clients/tsconfig.json)；验证结果按类型、离线行为与真实环境分别记录。

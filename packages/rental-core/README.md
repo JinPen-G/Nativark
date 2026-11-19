@@ -124,6 +124,7 @@
 | [原换货批准](src/mysql-approved-exchange.ts)、[企业政策接点](src/approved-exchange-policy.ts)、[参与者合同](src/approved-exchange-ports.ts) | /mysql-approved-exchange 核原费用确认、检查/客户同意和当前企业政策，唯一WeakMap把依据绑定到原事务；调用方不得以JSON或新事务替代 |
 | [规则绑定草稿](src/bound-rule-draft.ts)、[日历绑定草稿](src/bound-calendar-draft.ts)、[私有本表/事务视图](src/bound-draft-storage.ts) | /bound-rule-draft 与 /bound-calendar-draft 保留完整候选复核、精确目标版本/CAS与原操作收据；规则历史恢复为新草稿，草稿保存不发布或授予业务权限 |
 | [批准设置应用](src/mysql-approved-settings.ts)、[真实路由授权桥](src/approved-settings-route-authority.ts)、[参加者合同](src/approved-settings-ports.ts)、[严格输入](src/approved-settings-validation.ts) | /mysql-approved-settings 与 /approved-settings-route-authority 复用原Guard/ALS，通知配置CAS、批准消费与原操作同事务，历史读取不以当前配置或过期重做 |
+| [企业Web客户端](clients/enterprise/README.md)、[正式入口](clients/enterprise/index.ts)、[会话协调](clients/enterprise/session.tsx) | `/clients/enterprise` 提供企业会话、请求与原操作门闸；公共web-client仍持有唯一客户会话和网络层，企业授权、单次写入及原键恢复保持 |
 
 ## 使用与构建
 

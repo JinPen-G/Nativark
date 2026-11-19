@@ -32,6 +32,7 @@ const plain = value => value === undefined ? undefined : JSON.parse(JSON.stringi
 const forbidden = name => () => { throw new Error(`Unexpected dependency side effect: ${name}`); };
 // 原商户 fixture 供给抽离后的会话与请求端口，断言仍执行当前业务正文。
 function membershipSource(relative) {
+  if (relative === 'apps/enterprise-portal/src/original-workflow-operation.ts') return 'packages/rental-core/clients/enterprise/original-workflow-operation.ts';
   if (relative.startsWith('apps/admin/src/features/membership/')) return relative.replace('apps/admin/src/features/membership/', 'packages/rental-core/admin/membership/');
   if (/^apps\/admin\/src\/components\/(?:EnterprisePolicyFields|enterprise-policy-material|enterprise-application-material|enterprise-management-material)\.(?:ts|tsx)$/.test(relative)) return relative.replace('apps/admin/src/components/', 'packages/rental-core/admin/membership/');
   return relative;
@@ -131,6 +132,7 @@ function load(relative, dependencies, globals = {}) {
       if (relative === 'packages/platform-admin/src/core/useCoreForm.ts' && name === '../app/locale') return dependencies['@/app/locale'] ?? { useLocale: () => ({ t: value => value, locale: 'zh-CN' }) };
       if (relative === 'packages/platform-admin/src/core/useCoreForm.ts' && name === '../app/serverFormSnapshot') return load('packages/platform-admin/src/app/serverFormSnapshot.ts', dependencies, globals);
       if (Object.hasOwn(dependencies, name)) return dependencies[name];
+      if (relative.startsWith('packages/rental-core/clients/enterprise/') && name === './session' && dependencies['./enterprise-session']) return dependencies['./enterprise-session'];
       if (['apps/enterprise-portal/src/WorkflowPages.tsx','apps/enterprise-portal/src/OwnRentalHandoffs.tsx'].includes(relative) && name === 'react-router-dom') return { useLocation: () => ({ search: '' }) };
       if (name === '@/components/enterprise-management-material') return load('apps/admin/src/components/enterprise-management-material.ts', dependencies, globals);
       if (name === '@/components/enterprise-application-material') return load('apps/admin/src/components/enterprise-application-material.ts', dependencies, globals);
