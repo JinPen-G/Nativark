@@ -27,6 +27,7 @@ import type {
 } from "./contracts";
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { RULE_VERSION_ISSUED_STATUSES, type RuleVersionTimelineEntry } from './rule-version-chain';
+import { lockRentalBusinessTenant } from "./mysql-business-fence";
 
 // 原生成客户端也导出这个runtime单例；类型采用所选schema的官方空值声明。
 const DbNull = objectEnumValues.instances.DbNull as unknown as typeof Prisma.DbNull;
@@ -1088,9 +1089,14 @@ export class RentalBusinessConfigRepository<TTransaction extends RentalBusinessC
     previous: RentalNotificationTemplateV1,
     next: RentalNotificationTemplateV1
   ): Promise<void> {
+    if (previous.tenantId !== next.tenantId) throw new ConflictException("通知模板换版不能改变原租户");
     const workspaceId = await this.contacts.resolveWorkspaceId(this.store, next.tenantId);
     try {
       await this.store.$transaction(async (tx) => {
+        // Keep the original template lock and two writes together. The selected
+        // Core is rechecked after its parent fence, before reading the old version;
+        // revocation must roll back both disable and create, never hide success later.
+        await lockRentalBusinessTenant(tx, next.tenantId);
         // 锁旧版本，避免两个编辑请求都基于同一版创建相同的新版本号。
         await tx.$queryRaw(sql`
           SELECT id FROM rental_notification_templates
@@ -1108,7 +1114,7 @@ export class RentalBusinessConfigRepository<TTransaction extends RentalBusinessC
         await tx.rentalNotificationTemplate.create({
           data: { workspaceId, id: next.id, ...this.notificationTemplateData(next) }
         });
-      });
+      }, { isolationLevel: "ReadCommitted" });
     } catch (error) {
       if (error instanceof PrismaClientKnownRequestError && error.code === "P2002") {
         throw new ConflictException("通知模板版本已被其他操作推进，请刷新后重试");

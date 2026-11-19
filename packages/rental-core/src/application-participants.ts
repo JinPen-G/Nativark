@@ -11,6 +11,7 @@ import type { RentalCoreService } from "./mysql-core-runtime";
 import type { RentalBusinessService } from "./mysql-business-runtime";
 import type { RentalCoreFactStore } from "./mysql-core-facts";
 import type { IdempotentActionInput } from "./mysql-idempotent-actions";
+import { createRentalBusinessTenantFence } from "./mysql-business-fence";
 
 /** 既有作业的明确身份；版本随实际实现发布，不从队列负载或页面选择推断执行器。 */
 const rentalJobDefinitions = [
@@ -82,6 +83,7 @@ class StandardRentalDueJobs<TTransaction extends RentalApplicationParticipantTra
   extends RentalDueJobScheduler<TTransaction> {
   private stopping = false;
   private readonly active = new Set<Promise<boolean>>();
+  private readonly dispatchFence: ReturnType<typeof createRentalBusinessTenantFence>;
   constructor(dependencies: RentalApplicationParticipantDependencies<TTransaction>,
     private readonly jobContext: AsyncLocalStorage<RentalApplicationJobRequest>,
     private readonly current: (transaction?: TTransaction) => Promise<void>) {
@@ -111,6 +113,14 @@ class StandardRentalDueJobs<TTransaction extends RentalApplicationParticipantTra
       guardedMethods(dependencies.business, ["retryDueNotifications", "runDuePriceAdjustments", "emitNotificationEvent"], () => current()),
       actions, dependencies.serviceCapacities, dependencies.corporateSettlement,
       guardedMethods(dependencies.payments, ["expireStalePaymentIntents"], () => current()));
+    this.dispatchFence = createRentalBusinessTenantFence(async (transaction: TTransaction, tenantId: string) => {
+      const request = jobContext.getStore();
+      if (this.stopping || !request || request.tenantId !== tenantId) {
+        throw new Error("Rental 派发作业已停止或不属于原租户，不能开始新动作");
+      }
+      await current(transaction);
+      if (this.stopping) throw new Error("Rental 派发作业正在退出，不能开始新动作");
+    });
   }
 
   override onApplicationBootstrap(): void {
@@ -133,10 +143,18 @@ class StandardRentalDueJobs<TTransaction extends RentalApplicationParticipantTra
     if (this.stopping) return Promise.resolve(false);
     const request = jobRequest(job.name, tenantId, workspaceId);
     const running = super.runLocked({ name: job.name, run: (currentTenant, currentWorkspace) =>
-      this.jobContext.run(request, async () => {
-        if (this.stopping) throw new Error("Rental 作业正在退出，本次执行尚未开始");
-        await this.current();
-        return job.run(currentTenant, currentWorkspace);
+      this.jobContext.run(request, () => {
+        const consume = async () => {
+          if (this.stopping) throw new Error("Rental 作业正在退出，本次执行尚未开始");
+          await this.current();
+          return job.run(currentTenant, currentWorkspace);
+        };
+        // 通知/payment 的短事务在每次认领或运输前重核同一作业权威。
+        // 逐单作业保留 facts.lockOrder→current(tx)：完整权威会锁空间，
+        // 若提前绑定到幂等执行器的 Tenant fence，就会颠倒原订单→空间锁序。
+        // 嵌套 HTTP scope 由 fence 明确拒绝，不能改绑为系统作业身份。
+        return request.jobId === "retry_due_notifications" || request.jobId === "expire_payment_intents"
+          ? this.dispatchFence.run(consume) : consume();
       }) }, tenantId, workspaceId);
     this.active.add(running);
     return running.finally(() => { this.active.delete(running); });

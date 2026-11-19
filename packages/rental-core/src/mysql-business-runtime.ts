@@ -4835,7 +4835,34 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
     // 事务路径下不动缓存：回滚后内存里会留下库中不存在的幽灵通知记录。
     if (tx) return log;
     state.notificationLogs.unshift(log);
-    return realSms ? this.deliverNotification(tenantId, context, log.id, input.recipient.trim(), false, true) : log;
+    return realSms ? this.dispatchCommittedNotification(tenantId, context, log) : log;
+  }
+
+  /** 只消费原事务已经确认的入队收据。后续派发独立核当前准入，不能将其拒绝
+   * 改写为入队失败；未知只读原记录，不创建另一条通知或重复调用供应商。 */
+  async dispatchCommittedNotification(tenantId: string, context: BusinessContext, committedLog: RentalNotificationSendLogV1): Promise<RentalNotificationSendLogV1> {
+    if (committedLog.tenantId !== tenantId) throw new ConflictException("通知入队收据不属于当前租户");
+    if (committedLog.status !== "queued") return committedLog;
+    const committed = structuredClone(committedLog);
+    let lastConfirmed = committed;
+    try {
+      return await this.deliverNotification(tenantId, context, committed.id, undefined, false, true,
+        log => { lastConfirmed = structuredClone(log); });
+    } catch {
+      // 派发前撤权时通常仍为 queued；begin 提交应答丢失则可能已是 unknown。
+      // 不从异常种类猜是否提交，也不让读回失败遮掉已确认的入队收据。
+      this.logger.warn(`通知已入队，后续派发未直接确认，须按原记录核对 tenant=${tenantId} notification=${committed.id}`);
+      try {
+        const current = await this.factStore.findNotificationDelivery(tenantId, committed.id);
+        if (current) return current.log;
+      } catch {
+        // 此次仅作原记录读回；失去读取条件不能被解释成可重新发送。
+      }
+      // 返回最后一次真正确认的收据字段。begin 应答未知不是已确认 unknown
+      // 事实；只有 begin 已返回的原 observation 才能将 lastConfirmed 推进至该状态。
+      return { ...lastConfirmed,
+        errorMessage: "通知已入队；当前返回最后确认的收据，后续派发状态暂不可读，请按原记录核对，禁止重新发送" };
+    }
   }
 
   /** 事务提交成功后把发送记录落进内存缓存。提交前调用会产生幽灵通知记录。 */
@@ -4855,10 +4882,15 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
     id: string,
     recipient: string | undefined,
     force: boolean,
-    rateReserved = false
+    rateReserved = false,
+    observeConfirmed?: (log: RentalNotificationSendLogV1) => void
   ): Promise<RentalNotificationSendLogV1> {
-    const current = await this.factStore.findNotificationDelivery(tenantId, id);
-    if (!current) throw new NotFoundException("通知发送记录不存在");
+    const initial = await this.factStore.findNotificationDelivery(tenantId, id);
+    if (!initial) throw new NotFoundException("通知发送记录不存在");
+    let current = initial;
+    observeConfirmed?.(current.log);
+    // 到期列表可能已过时。未知或已发送事实不能被后续模板/限频失败改回可重试状态。
+    if (!["queued", "failed", "delivery_failed"].includes(current.log.status)) return current.log;
     const template = this.state(tenantId, context).notificationTemplates.find((item) => item.id === current.log.templateId);
     if (!template || template.channel !== "sms") return current.log;
     let phone = recipient;
@@ -4871,6 +4903,7 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
     if (!template.providerTemplateCode?.trim()) {
       const message = "短信模板未配置服务商模板编码";
       const updated = await this.factStore.updateNotificationDelivery(tenantId, id, {
+        observation: current.observation,
         status: "failed", errorMessage: message, nextAttemptAt: null
       });
       const result = updated ?? current.log;
@@ -4880,15 +4913,28 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
     if (!this.notificationRuntime) return current.log;
     const now = new Date();
     const leaseUntil = new Date(now.getTime() + 10 * 60 * 1000);
-    const claimed = await this.factStore.claimNotificationDelivery(tenantId, id, now.toISOString(), leaseUntil.toISOString(), force);
+    const versionedDispatch = typeof this.factStore.claimNotificationDeliveryForDispatch === "function"
+      && typeof this.factStore.beginNotificationDispatch === "function";
+    // 完整 MySQL 装配必须提供原认领版本与运输前门禁；旧内存宿主保留原端口。
+    if (!versionedDispatch && this.hasAuthoritativeConfiguration()) {
+      throw new ServiceUnavailableException("通知事实仓储缺少当前投递权威接点");
+    }
+    const claimed = versionedDispatch
+      ? await this.factStore.claimNotificationDeliveryForDispatch(tenantId, id, now.toISOString(), leaseUntil.toISOString(), force)
+      : await this.factStore.claimNotificationDelivery(tenantId, id, now.toISOString(), leaseUntil.toISOString(), force);
     if (!claimed) {
       const latest = await this.factStore.findNotificationDelivery(tenantId, id);
       return latest?.log ?? current.log;
+    }
+    if (typeof claimed !== "boolean") {
+      current = claimed;
+      observeConfirmed?.(current.log);
     }
     if (!rateReserved) {
       const rate = await this.factStore.reserveSmsRate(tenantId, this.workspaceOf(tenantId), this.secretBox!.fingerprint(canonicalSmsRecipient(phone)), now.toISOString());
       if (!rate.allowed) {
         const updated = await this.factStore.updateNotificationDelivery(tenantId, id, {
+          observation: current.observation,
           status: "failed",
           errorMessage: "短信发送频率已达到安全上限",
           nextAttemptAt: rate.retryAt,
@@ -4898,6 +4944,12 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
         this.applyNotificationLogToCache(tenantId, context, result);
         return result;
       }
+    }
+    // 认领/限频等待之后、运输调用紧前重新核对；拒绝不是供应商失败，不能
+    // 落入下面的重试分支。短事务结束后才调用供应商，不把外部请求放在持锁事务内。
+    if (versionedDispatch) {
+      current = await this.factStore.beginNotificationDispatch(tenantId, id, current.observation);
+      observeConfirmed?.(current.log);
     }
     let sent: Awaited<ReturnType<RentalBusinessNotifications["sendNotificationSms"]>> | undefined;
     let providerAccepted = false;
@@ -4914,6 +4966,7 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
       providerAccepted = true;
       // attempts 只在这里（记录结果）递增；认领只占租约。
       const updated = await this.factStore.updateNotificationDelivery(tenantId, id, {
+        observation: current.observation,
         status: "sent",
         provider: sent.provider,
         providerMessageId: sent.externalRequestId ?? null,
@@ -4937,6 +4990,7 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
         let updated: RentalNotificationSendLogV1 | undefined;
         try {
           updated = await this.factStore.updateNotificationDelivery(tenantId, id, {
+            observation: current.observation,
             status: "delivery_uncertain",
             provider: sent?.provider ?? undefined,
             providerMessageId: sent?.externalRequestId ?? null,
@@ -4947,6 +5001,7 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
         } catch {
           // 结果本身已经不确定，不能因为写状态再次失败而安排自动重试。
         }
+        if (!updated) this.logger.error(`短信结果持久化未确认，须按原记录核对 tenant=${tenantId} notification=${id}`);
         const result = updated ?? {
           ...current.log,
           status: "delivery_uncertain" as const,
@@ -4965,6 +5020,7 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
       const reason = (error instanceof Error ? error.message : String(error));
       const message = (retryable ? reason : `已达最大重试次数(${current.maxAttempts})，停止自动重试：${reason}`).slice(0, 191);
       const updated = await this.factStore.updateNotificationDelivery(tenantId, id, {
+        observation: current.observation,
         status: "failed",
         errorMessage: message,
         nextAttemptAt: retryAt,
@@ -4973,6 +5029,14 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
       const result = updated ?? { ...current.log, status: "failed" as const, errorMessage: message, attempts, nextAttemptAt: retryAt ?? undefined };
       this.applyNotificationLogToCache(tenantId, context, result);
       return result;
+    }
+  }
+
+  private async assertNotificationReceiptAccess(tenantId: string): Promise<void> {
+    if (this.prisma) {
+      await this.prisma.$transaction(tx => lockRentalBusinessTenant(tx, tenantId), { isolationLevel: "ReadCommitted" });
+    } else if (this.hasAuthoritativeConfiguration()) {
+      throw new ServiceUnavailableException("通知回执查询缺少原事务权威接点");
     }
   }
 
@@ -4987,6 +5051,7 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
     if (!current.recipientEncrypted || !this.secretBox) throw new ServiceUnavailableException("通知收件人密文不可用，无法查询回执");
     if (!this.notificationRuntime) throw new ServiceUnavailableException("短信平台运行组件未就绪");
     const decrypted = this.secretBox.decrypt(current.recipientEncrypted);
+    await this.assertNotificationReceiptAccess(tenantId);
     let queried: Awaited<ReturnType<RentalBusinessNotifications["queryNotificationDelivery"]>>;
     try {
       queried = await this.notificationRuntime.queryNotificationDelivery(
@@ -5000,10 +5065,12 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
       if (!(error instanceof NotificationDeliveryUnknownError)) throw error;
       const message = (error instanceof Error ? error.message : "短信回执查询结果未知").slice(0, 191);
       const updated = await this.factStore.updateNotificationDelivery(tenantId, id, {
+        observation: current.observation,
         status: "delivery_uncertain",
         errorMessage: message,
         nextAttemptAt: null
       });
+      if (!updated && current.observation) throw new ConflictException("短信回执版本已变化，请核对原记录");
       const result = updated ?? { ...current.log, status: "delivery_uncertain" as const, errorMessage: message, nextAttemptAt: undefined };
       this.applyNotificationLogToCache(tenantId, context, result);
       return result;
@@ -5014,6 +5081,7 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
         ? "delivery_failed"
         : "delivery_pending";
     const updated = await this.factStore.updateNotificationDelivery(tenantId, id, {
+      observation: current.observation,
       status,
       errorMessage: queried.status === "failed" ? (queried.detail ?? queried.providerStatus).slice(0, 191) : null,
       nextAttemptAt: null,
@@ -5047,6 +5115,7 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
       let queried: Awaited<ReturnType<RentalBusinessNotifications["queryNotificationDelivery"]>>;
       try {
         const decrypted = this.secretBox.decrypt(row.recipientEncrypted);
+        await this.assertNotificationReceiptAccess(tenantId);
         queried = await this.notificationRuntime.queryNotificationDelivery(
           tenantId,
           decrypted.recipient,
@@ -5057,7 +5126,7 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
       } catch (error) {
         const message = (error instanceof Error ? error.message : String(error)).slice(0, 191);
         if (error instanceof NotificationDeliveryUnknownError) {
-          const updated = await this.factStore.updateNotificationDelivery(tenantId, row.log.id, { status: "delivery_uncertain", errorMessage: message, nextAttemptAt: null, releaseLease: true });
+          const updated = await this.factStore.updateNotificationDelivery(tenantId, row.log.id, { observation: row.observation, status: "delivery_uncertain", errorMessage: message, nextAttemptAt: null, releaseLease: true });
           if (updated) remember(updated);
         } else {
           errors.push({ id: row.log.id, message });
@@ -5066,6 +5135,7 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
       }
       const status = queried.status === "delivered" ? "delivered" : queried.status === "failed" ? "delivery_failed" : "delivery_pending";
       const updated = await this.factStore.updateNotificationDelivery(tenantId, row.log.id, {
+        observation: row.observation,
         status,
         errorMessage: queried.status === "failed" ? (queried.detail ?? queried.providerStatus).slice(0, 191) : null,
         nextAttemptAt: null,
@@ -5175,6 +5245,7 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
           }
         } catch {
           // 失败记录本身不可写时仍不能让订单动作失败；基础设施错误由运维日志处理。
+          this.logger.warn(`订单通知失败记录未确认，须按原事件核对 tenant=${tenantId} event=${eventCode} object=${businessObject?.id ?? "unbound"}`);
         }
       }
     }

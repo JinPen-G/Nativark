@@ -21,6 +21,7 @@ import type {
 } from "./contracts";
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { readRentalFulfillmentAdmission } from './mysql-fulfillment-admission';
+import { lockRentalBusinessTenant } from './mysql-business-fence';
 import { assertRentalInventoryBasis } from './quote-inventory-basis';
 import type { RentalBusinessFactTransaction, RentalBusinessFactStorage, RentalBusinessFactContacts } from "./business-fact-storage";
 export type { RentalBusinessFactTransaction, RentalBusinessFactStorage, RentalBusinessFactContacts } from "./business-fact-storage";
@@ -38,14 +39,25 @@ function quoteOriginalOperation(value: RentalQuoteOriginalOperation): RentalQuot
   return Object.freeze({ key: value.key, inputHash: value.inputHash });
 }
 
+/** 原仓储读取/认领得到的版本依据，只用于同条通知结果 CAS，不授予发送或查询权限。 */
+export interface RentalNotificationDeliveryObservation {
+  readonly tenantId: string;
+  readonly workspaceId: string;
+  readonly id: string;
+  readonly revision: number;
+}
+
 export interface RentalNotificationDeliveryRecord {
   log: RentalNotificationSendLogV1;
   /** 仅服务端重试使用的收件人密文，不进入 RentalNotificationSendLogV1。 */
   recipientEncrypted?: string;
   maxAttempts: number;
+  observation: RentalNotificationDeliveryObservation;
 }
 
 export interface RentalNotificationDeliveryPatch {
+  /** 已派发结果沿原观察版本落库，撤权/请求结束不另开新准入，也不能覆盖后续认领或回执。 */
+  observation?: RentalNotificationDeliveryObservation;
   status?: RentalNotificationSendLogV1["status"];
   provider?: string;
   providerMessageId?: string | null;
@@ -137,6 +149,12 @@ export interface RentalBusinessFactStore<TTransaction extends RentalBusinessFact
   listDueNotificationDeliveries(tenantId: string, at: string, limit: number): Promise<RentalNotificationDeliveryRecord[]>;
   /** 认领只写租约，不消耗 attempts；attempts 由 updateNotificationDelivery({ countAttempt: true }) 递增。 */
   claimNotificationDelivery(tenantId: string, id: string, at: string, leaseUntil: string, force: boolean): Promise<boolean>;
+  /** 同原认领算法返回提交后的原版本，供发送结果 CAS；旧 boolean 接口仍保留。 */
+  claimNotificationDeliveryForDispatch(tenantId: string, id: string, at: string, leaseUntil: string, force: boolean): Promise<RentalNotificationDeliveryRecord | undefined>;
+  /** 运输紧前的短事务复核；不把数据库事务跨越第三方调用。 */
+  assertNotificationDeliveryCurrent(tenantId: string, id: string, observation: RentalNotificationDeliveryObservation): Promise<void>;
+  /** 原记录在运输前持久化为不可重发的 unknown；返回新版本供结果 CAS。提交未知时不得调用供应商。 */
+  beginNotificationDispatch(tenantId: string, id: string, observation: RentalNotificationDeliveryObservation): Promise<RentalNotificationDeliveryRecord>;
   updateNotificationDelivery(tenantId: string, id: string, patch: RentalNotificationDeliveryPatch): Promise<RentalNotificationSendLogV1 | undefined>;
   /** 已受理（sent）且带服务商回执号、尚未取得最终回执的短信，供回执轮询。 */
   listSentNotificationDeliveries(tenantId: string, workspaceId: string, take: number): Promise<RentalNotificationDeliveryRecord[]>;
@@ -502,13 +520,16 @@ export class RentalBusinessFactRepository<TTransaction extends RentalBusinessFac
   }
 
   async expireClaimedCoupons(tenantId: string, expiredAt: string): Promise<number> {
-    const workspaceId = await this.contacts.resolveWorkspaceId(this.store, tenantId);
     const timestamp = date(expiredAt);
-    const result = await this.store.rentalCustomerCoupon.updateMany({
-      where: { tenantId, workspaceId, status: "claimed", effectiveTo: { lt: timestamp } },
-      data: { status: "expired", expiredAt: timestamp }
-    });
-    return result.count;
+    return this.store.$transaction(async tx => {
+      await lockRentalBusinessTenant(tx, tenantId);
+      const workspaceId = await this.contacts.resolveWorkspaceId(tx, tenantId);
+      const result = await tx.rentalCustomerCoupon.updateMany({
+        where: { tenantId, workspaceId, status: "claimed", effectiveTo: { lt: timestamp } },
+        data: { status: "expired", expiredAt: timestamp }
+      });
+      return result.count;
+    }, { isolationLevel: "ReadCommitted" });
   }
 
   async voidClaimedCoupon(
@@ -880,6 +901,7 @@ export class RentalBusinessFactRepository<TTransaction extends RentalBusinessFac
     recipientFingerprint?: string
   ): Promise<"inserted" | "duplicate"> {
     const run = async (client: TTransaction): Promise<"inserted" | "duplicate"> => {
+      await lockRentalBusinessTenant(client, log.tenantId);
       const workspaceId = await this.contacts.resolveWorkspaceId(client, log.tenantId);
       try {
         await client.rentalNotificationLog.create({
@@ -928,7 +950,7 @@ export class RentalBusinessFactRepository<TTransaction extends RentalBusinessFac
       await this.contacts.events?.notification(client, { tenantId: log.tenantId, workspaceId }, log.id);
       return "inserted";
     };
-    return tx ? run(tx) : this.contacts.events ? this.store.$transaction(run) : run(this.store);
+    return tx ? run(tx) : this.store.$transaction(run, { isolationLevel: "ReadCommitted" });
   }
 
   /**
@@ -952,6 +974,7 @@ export class RentalBusinessFactRepository<TTransaction extends RentalBusinessFac
     const recipientLimit = 3;
     const workspaceLimit = 120;
     const run = async (client: RentalBusinessFactTransaction) => {
+      await lockRentalBusinessTenant(client, tenantId);
       const scopedWorkspace = await client.businessWorkspace.findFirst({
         where: { tenantId, id: workspaceId.trim() },
         select: { id: true }
@@ -986,7 +1009,7 @@ export class RentalBusinessFactRepository<TTransaction extends RentalBusinessFac
       }
       return { allowed: true, retryAt: at };
     };
-    return tx ? run(tx) : this.store.$transaction((client) => run(client));
+    return tx ? run(tx) : this.store.$transaction((client) => run(client), { isolationLevel: "ReadCommitted" });
   }
 
   async releaseSmsRate(
@@ -1024,7 +1047,8 @@ export class RentalBusinessFactRepository<TTransaction extends RentalBusinessFac
     return {
       log: this.toNotificationLog(row),
       recipientEncrypted: row.recipientEncrypted ?? undefined,
-      maxAttempts: row.maxAttempts
+      maxAttempts: row.maxAttempts,
+      observation: Object.freeze({ tenantId: row.tenantId, workspaceId: row.workspaceId, id: row.id, revision: row.revision })
     };
   }
 
@@ -1054,25 +1078,86 @@ export class RentalBusinessFactRepository<TTransaction extends RentalBusinessFac
   }
 
   async claimNotificationDelivery(tenantId: string, id: string, at: string, leaseUntil: string, force: boolean): Promise<boolean> {
-    const workspaceId = await this.contacts.resolveWorkspaceId(this.store, tenantId);
-    const current = await this.store.rentalNotificationLog.findFirst({ where: { id, tenantId, workspaceId } });
-    if (!current || current.channel !== "sms" || !["queued", "failed", "delivery_failed"].includes(current.status)) return false;
-    if (current.attempts >= current.maxAttempts) return false;
-    const atMs = new Date(at).getTime();
-    if (!force && current.nextAttemptAt && current.nextAttemptAt.getTime() > atMs) return false;
-    // 认领只占租约，不递增 attempts：崩溃在租约期内的进程不会吃掉一次重试机会。
-    // 未到期的租约只有 force（人工重试）能覆盖。
-    if (!force && current.leaseUntil && current.leaseUntil.getTime() > atMs) return false;
-    const result = await this.store.rentalNotificationLog.updateMany({
-      where: {
-        id, tenantId, workspaceId,
-        status: { in: ["queued", "failed", "delivery_failed"] },
-        attempts: current.attempts,
-        leaseUntil: current.leaseUntil
-      },
-      data: { lastAttemptAt: date(at), leaseUntil: date(leaseUntil), revision: { increment: 1 } }
-    });
-    return result.count === 1;
+    return Boolean(await this.claimNotificationDeliveryForDispatch(tenantId, id, at, leaseUntil, force));
+  }
+
+  async claimNotificationDeliveryForDispatch(tenantId: string, id: string, at: string, leaseUntil: string, force: boolean): Promise<RentalNotificationDeliveryRecord | undefined> {
+    return this.store.$transaction(async tx => {
+      await lockRentalBusinessTenant(tx, tenantId);
+      const workspaceId = await this.contacts.resolveWorkspaceId(tx, tenantId);
+      const current = await tx.rentalNotificationLog.findFirst({ where: { id, tenantId, workspaceId } });
+      if (!current || current.channel !== "sms" || !["queued", "failed", "delivery_failed"].includes(current.status)) return undefined;
+      if (current.attempts >= current.maxAttempts) return undefined;
+      const atMs = new Date(at).getTime();
+      if (!force && current.nextAttemptAt && current.nextAttemptAt.getTime() > atMs) return undefined;
+      // 认领只占原租约，不消耗 attempts；未知结果不进入这个状态集合。
+      // 保留原人工 force 语义，结果 CAS 仍绑定本次认领的 revision。
+      if (!force && current.leaseUntil && current.leaseUntil.getTime() > atMs) return undefined;
+      const result = await tx.rentalNotificationLog.updateMany({
+        where: {
+          id, tenantId, workspaceId,
+          status: { in: ["queued", "failed", "delivery_failed"] },
+          revision: current.revision,
+          attempts: current.attempts,
+          leaseUntil: current.leaseUntil
+        },
+        data: { lastAttemptAt: date(at), leaseUntil: date(leaseUntil), revision: { increment: 1 } }
+      });
+      if (result.count !== 1) return undefined;
+      const claimed = await tx.rentalNotificationLog.findFirst({ where: { id, tenantId, workspaceId } });
+      if (!claimed) throw new ConflictException("通知认领结果不可用");
+      return this.notificationDelivery(claimed);
+    }, { isolationLevel: "ReadCommitted" });
+  }
+
+  private assertNotificationObservation(tenantId: string, id: string, observation: RentalNotificationDeliveryObservation) {
+    if (!observation || observation.tenantId !== tenantId || observation.id !== id ||
+      !observation.workspaceId?.trim() || !Number.isSafeInteger(observation.revision) || observation.revision < 1) {
+      throw new ConflictException("通知结果缺少原记录范围或版本依据");
+    }
+    return Object.freeze({ tenantId, id, workspaceId: observation.workspaceId, revision: observation.revision });
+  }
+
+  async assertNotificationDeliveryCurrent(tenantId: string, id: string, observation: RentalNotificationDeliveryObservation): Promise<void> {
+    const observed = this.assertNotificationObservation(tenantId, id, observation);
+    await this.store.$transaction(async tx => {
+      await lockRentalBusinessTenant(tx, tenantId);
+      const workspaceId = await this.contacts.resolveWorkspaceId(tx, tenantId);
+      if (workspaceId !== observed.workspaceId) throw new ForbiddenException("通知认领不属于当前经营空间");
+      const current = await tx.rentalNotificationLog.findFirst({ where: { id, tenantId, workspaceId, revision: observed.revision } });
+      if (!current || current.channel !== "sms" || !["queued", "failed", "delivery_failed"].includes(current.status) ||
+        current.attempts >= current.maxAttempts || !current.leaseUntil || current.leaseUntil.getTime() <= Date.now()) {
+        throw new ConflictException("通知投递认领已变化，不能继续发送");
+      }
+    }, { isolationLevel: "ReadCommitted" });
+  }
+
+  async beginNotificationDispatch(tenantId: string, id: string, observation: RentalNotificationDeliveryObservation): Promise<RentalNotificationDeliveryRecord> {
+    const observed = this.assertNotificationObservation(tenantId, id, observation);
+    return this.store.$transaction(async tx => {
+      await lockRentalBusinessTenant(tx, tenantId);
+      const workspaceId = await this.contacts.resolveWorkspaceId(tx, tenantId);
+      if (workspaceId !== observed.workspaceId) throw new ForbiddenException("通知认领不属于当前经营空间");
+      const current = await tx.rentalNotificationLog.findFirst({ where: { id, tenantId, workspaceId, revision: observed.revision } });
+      if (!current || current.channel !== "sms" || !["queued", "failed", "delivery_failed"].includes(current.status) ||
+        current.attempts >= current.maxAttempts || !current.leaseUntil || current.leaseUntil.getTime() <= Date.now()) {
+        throw new ConflictException("通知投递认领已变化，不能继续发送");
+      }
+      // 沿原状态和操作键保留运输不确定性。先提交这个不可重发状态，再访问
+      // 供应商；进程退出、响应丢失或随后两次结果写失败都不能把它重新排回队列。
+      // 认领/准备不消耗 attempts，仍由明确的本次结果写入递增并释放租约。
+      const result = await tx.rentalNotificationLog.updateMany({
+        where: { id, tenantId, workspaceId, revision: observed.revision, status: current.status, leaseUntil: current.leaseUntil },
+        // 上次确定失败的回执不属于本次派发，不能拿它结束当前 unknown 后再开新发送。
+        // 新回执只由本次供应商观察结果写入；原操作键与认领版本仍保持不变。
+        data: { status: "delivery_uncertain", nextAttemptAt: null, providerMessageId: null, sentAt: null,
+          errorMessage: "短信投递尚未取得确定结果；请按原记录核对，禁止重新发送", revision: { increment: 1 } }
+      });
+      if (result.count !== 1) throw new ConflictException("通知投递准备版本已变化，不能继续发送");
+      const prepared = await tx.rentalNotificationLog.findFirst({ where: { id, tenantId, workspaceId } });
+      if (!prepared) throw new ConflictException("通知投递准备结果不可用，禁止重新发送");
+      return this.notificationDelivery(prepared);
+    }, { isolationLevel: "ReadCommitted" });
   }
 
   async listSentNotificationDeliveries(tenantId: string, workspaceId: string, take: number): Promise<RentalNotificationDeliveryRecord[]> {
@@ -1085,10 +1170,13 @@ export class RentalBusinessFactRepository<TTransaction extends RentalBusinessFac
   }
 
   async updateNotificationDelivery(tenantId: string, id: string, patch: RentalNotificationDeliveryPatch): Promise<RentalNotificationSendLogV1 | undefined> {
+    const observation = patch.observation ? this.assertNotificationObservation(tenantId, id, patch.observation) : undefined;
     const run = async (tx: TTransaction) => {
-      const workspaceId = await this.contacts.resolveWorkspaceId(tx, tenantId);
+      // 记录已派发结果不产生新的发送权；沿原范围/版本 CAS，不能因撤权或请求
+      // 退出丢失供应商结果，也不能覆盖另一轮认领。未传版本的旧调用保持原范围解析。
+      const workspaceId = observation?.workspaceId ?? await this.contacts.resolveWorkspaceId(tx, tenantId);
       const result = await tx.rentalNotificationLog.updateMany({
-        where: { id, tenantId, workspaceId },
+        where: { id, tenantId, workspaceId, ...(observation ? { revision: observation.revision } : {}) },
         data: {
           revision: { increment: 1 },
           ...(patch.status !== undefined ? { status: patch.status } : {}),
@@ -1107,7 +1195,7 @@ export class RentalBusinessFactRepository<TTransaction extends RentalBusinessFac
       if (row) await this.contacts.events?.notification(tx, { tenantId, workspaceId }, id);
       return row ? this.toNotificationLog(row) : undefined;
     };
-    return this.contacts.events ? this.store.$transaction(run) : run(this.store);
+    return this.store.$transaction(run, { isolationLevel: "ReadCommitted" });
   }
 
   /* ---------- 行 → 领域对象 ---------- */

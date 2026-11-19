@@ -417,8 +417,9 @@ export class RentalBusinessController {
     // 人工发送不带幂等键，正常必得一条日志；`result` 为空只可能是并发回放，跳过入缓存即可。
     if (!replayed && result) this.business.applyNotificationLogToCache(tenantId, context, result);
     // 幂等事务提交后才允许真正调用第三方短信；这样数据库回滚不会产生外部副作用。
+    // 派发的当前准入与已确认入队分开；撤权/未知按原通知回读，不遮掉本次收据。
     const delivered = !replayed && result?.status === "queued"
-      ? await this.business.retryNotification(tenantId, context, result.id, true)
+      ? await this.business.dispatchCommittedNotification(tenantId, context, result)
       : result;
     return this.committed(tenantId, delivered);
   }

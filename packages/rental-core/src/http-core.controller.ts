@@ -2,7 +2,7 @@
 import type { SystemUserRow } from "@rental-os/platform-contracts";
 import { RENTAL_HTTP_CORE, RENTAL_HTTP_ALLOCATION, RENTAL_HTTP_BUSINESS, RENTAL_HTTP_ORDER_CONFIRMATION, RENTAL_HTTP_IDEMPOTENT, RENTAL_HTTP_REPORTS, RENTAL_HTTP_DATABASE, RENTAL_HTTP_SERVICE_CAPACITIES, RENTAL_HTTP_FUNDING, RENTAL_HTTP_DOCUMENTS, RENTAL_HTTP_OPERATION_LOGS, RENTAL_HTTP_CORPORATE_SETTLEMENT, RENTAL_HTTP_MEMBERSHIPS, RENTAL_HTTP_FAILURE_EVENTS, RENTAL_HTTP_EXCHANGE_PREVIEW, RENTAL_HTTP_EXCHANGE_INSPECTIONS, RENTAL_HTTP_EXCHANGE_INSPECTION_MEDIA, type RentalHttpApplications } from "./http-applications";
 import { rentalHttpBusinessContext, rentalHttpIdempotencyKey as idempotencyKeyOf } from "./http-context";
-import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Inject, Optional, Param, Patch, Post, Put, Query, Req, Res, UploadedFile, UseInterceptors } from "@nestjs/common";
+import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Inject, Logger, Optional, Param, Patch, Post, Put, Query, Req, Res, UploadedFile, UseInterceptors } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { Prisma } from "@prisma/client";
 import {
@@ -193,6 +193,7 @@ function returnedQuantitiesOf(
 
 @Controller("rental/v1")
 export class RentalCoreController {
+  private readonly notificationLogger = new Logger(RentalCoreController.name);
   constructor(
     @Inject(RENTAL_HTTP_CORE) private readonly service: RentalHttpApplications["core"],
     @Inject(RENTAL_HTTP_ALLOCATION) private readonly allocation: RentalHttpApplications["allocation"],
@@ -415,11 +416,44 @@ export class RentalCoreController {
   }
   private async emitOrderEvent(tenantId: string, eventCode: string, order: { id: string; orderNo: string; customerName: string; contactPhone?: string; customerId?: string }) {
     // 业务对象随事件传入，服务端据此生成空间级幂等键——同一订单同一事件重放不再二次发信。
-    return await this.business.emitNotificationEvent(
-      tenantId, (await this.context(tenantId)), eventCode, order.contactPhone ?? order.customerId,
-      { customerName: order.customerName, orderNo: order.orderNo },
-      { type: "order", id: order.id }
-    );
+    try {
+      return await this.business.emitNotificationEvent(
+        tenantId, (await this.context(tenantId)), eventCode, order.contactPhone ?? order.customerId,
+        { customerName: order.customerName, orderNo: order.orderNo },
+        { type: "order", id: order.id }
+      );
+    } catch {
+      // 订单已经按原命令提交。通知仍须当前上下文/权威，准备或投递未知只能
+      // 按原通知记录核对，不能把主订单收据改成失败，也不能据此补发或伪记通知。
+      this.notificationLogger.warn(`订单附属通知未确认，请按原记录核对 tenant=${tenantId} order=${order.id} event=${eventCode}`);
+      return [];
+    }
+  }
+
+  private async recordAutomaticNoShowNotice(tenantId: string, order: RentalOrder): Promise<RentalOrder> {
+    if (order.noShowNoticeAt) return order;
+    const logs = await this.emitOrderEvent(tenantId, "order.pickup_overdue", order);
+    if (!logs.length) return order;
+    try {
+      return await this.idempotent.execute({
+        tenantId,
+        action: "order.no_show_notice",
+        key: undefined,
+        fallbackKey: `order.no_show_notice:${order.id}`,
+        request: { orderId: order.id },
+        orderId: order.id,
+        run: (tx) => this.service.recordNoShowNotice(tenantId, order.id, new Date().toISOString(), tx),
+        replay: async () => {
+          const latest = await this.service.getOrder(tenantId, order.id);
+          return latest.noShowNoticeAt ? latest : undefined;
+        }
+      });
+    } catch {
+      // 发送与通知登记是两个原操作。登记拒绝/unknown不撤销先前成功的逾时标记；
+      // 只返回已确认的原订单，保留pending，不把通知已发送解释成登记已提交。
+      this.notificationLogger.warn(`订单附属通知登记未确认，请按原收据核对 tenant=${tenantId} order=${order.id}`);
+      return order;
+    }
   }
   @Get("categories") async categories(@Req() req: AuthenticatedRequest) {
     // 租户业务元数据只展示会话空间已采用的正文；平台全品类管理另走 SaaS 接口。
@@ -1171,26 +1205,8 @@ export class RentalCoreController {
             return latest.status === RentalCoreOrderStatus.PickupOverdue ? latest : undefined;
           }
         });
-        let notice: "recorded" | "pending" | "not_required" = order.noShowNoticeAt ? "recorded" : "pending";
-        if (!order.noShowNoticeAt) {
-          const logs = await this.emitOrderEvent(tenantId, "order.pickup_overdue", order);
-          if (logs.length) {
-            await this.idempotent.execute({
-              tenantId,
-              action: "order.no_show_notice",
-              key: undefined,
-              fallbackKey: `order.no_show_notice:${orderId}`,
-              request: { orderId },
-              orderId,
-              run: (tx) => this.service.recordNoShowNotice(tenantId, orderId, new Date().toISOString(), tx),
-              replay: async () => {
-                const latest = await this.service.getOrder(tenantId, orderId);
-                return latest.noShowNoticeAt ? latest : undefined;
-              }
-            });
-            notice = "recorded";
-          }
-        }
+        const noticed = await this.recordAutomaticNoShowNotice(tenantId, order);
+        const notice = noticed.noShowNoticeAt ? "recorded" : "pending";
         results.push({ orderId, status: "pickup_overdue", notice });
       } catch (error) {
         if (!(error instanceof ConflictException)) throw error;
@@ -1252,26 +1268,7 @@ export class RentalCoreController {
         return latest.status === RentalCoreOrderStatus.PickupOverdue ? latest : undefined;
       }
     });
-    let committedOrder = order;
-    if (!order.noShowNoticeAt) {
-      const logs = await this.emitOrderEvent(tenantId, "order.pickup_overdue", order);
-      if (logs.length) {
-        const noticed = await this.idempotent.execute({
-          tenantId,
-          action: "order.no_show_notice",
-          key: undefined,
-          fallbackKey: `order.no_show_notice:${id}`,
-          request: { orderId: id },
-          orderId: id,
-          run: (tx) => this.service.recordNoShowNotice(tenantId, id, new Date().toISOString(), tx),
-          replay: async () => {
-            const latest = await this.service.getOrder(tenantId, id);
-            return latest.noShowNoticeAt ? latest : undefined;
-          }
-        });
-        committedOrder = noticed;
-      }
-    }
+    const committedOrder = await this.recordAutomaticNoShowNotice(tenantId, order);
     return this.committed(tenantId, committedOrder);
   }
 
