@@ -1,203 +1,82 @@
-/** 原公共平台、Rental与AI Native的兼容组合宿主，Rental HTTP消费正式包中的同一类。
- * 显式供给原数据库、当前身份/Guard及唯一业务/作业实例；环境加载和监听由main负责。 */
-import {
-  StaffAuthController, CategoryGovernanceController, CategoryAdoptionPreparationController, MembershipController, EnterpriseWorkflowsController,
-  EnterpriseReadController, EnterpriseMerchantController, EnterpriseRentalHandoffMerchantController, CustomerAvatarController, RentalCoreController,
-  RentalBusinessController, WorkspaceCapabilityController, FilesController, StaffUploadsController, StaffOfflinePaymentController,
-  ClientApiController, MiniProgramChannelController, ClientChannelProfileController, WebsiteChannelProfileController
-} from "@rental-os/rental-core/http";
+/** 原公共与 AI HTTP 保持原入口，业务 HTTP 通过正式 Rental 模块挂载。
+ * 服务模块只提供一组原实例与全局 Guard/审计；此入口不加载环境、启动计时器或执行迁移。 */
+
 import { AiTaskReadPolicyController } from './modules/ai-native/task-read-policy.application';
 import { AiCategoryProposalController } from './modules/ai-native/category-assist/category-proposal-http.application';
-import { AI_NATIVE_CATEGORY_PROPOSAL_PROVIDER } from './modules/ai-native/ai-native-application.providers';
-import { AI_NATIVE_BODY_DATABASE_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+
+
 import { AutomationExplanationController } from './modules/ai-native/automation/automation-explanation.controller';
-import { AI_NATIVE_AUTOMATION_EXPLANATION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+
 import { TaskOpeningProposalController } from './modules/ai-native/task-opening-proposal.controller';
 import { AiTaskCenterRecoveryController } from './modules/ai-native/task-center-recovery.application';
-import { AI_NATIVE_TASK_CENTER_RECOVERY_PROVIDER } from './modules/ai-native/ai-native-application.providers';
-import { AI_NATIVE_ORIGINAL_ORDER_ANSWER_PROVIDER } from './modules/ai-native/ai-native-application.providers';
-import { AI_NATIVE_TASK_OPENING_PROPOSAL_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+
 import { AiTaskOriginalReadPolicyController } from './modules/ai-native/task-original-read-policy.application';
-import { AI_NATIVE_TASK_ORIGINAL_READ_POLICY_PROVIDER } from './modules/ai-native/ai-native-application.providers';
-import { AI_NATIVE_TASK_READ_POLICY_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+
+
 import { AiTaskOrderHandoffController } from './modules/ai-native/task-order-handoff.application';
-import { AI_NATIVE_TASK_ORDER_HANDOFF_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+
 import { AiTaskCalendarDraftController } from './modules/ai-native/task-calendar-draft.application';
-import { AI_NATIVE_TASK_CALENDAR_DRAFT_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+
 import { AiMemberNameController } from './modules/ai-native/member-name.application';
-import { AI_NATIVE_MEMBER_NAME_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+
 import { Module } from "@nestjs/common";
-import { PLATFORM_APPEARANCE_DATA_STORE, LEGACY_TENANT_APPEARANCE_READER } from "./modules/platform/platform-appearance-data-store";
-import { PrismaService } from "./modules/database/prisma.service";
-import { AiDesktopBusinessModule } from './modules/ai-native/desktop-business/desktop-business.module';
-import { APP_GUARD, APP_INTERCEPTOR, ModuleRef } from "@nestjs/core";
-import { ApiAuthGuard } from "./common/api-auth.guard";
-import { ConfigModule } from "@nestjs/config";
-import { OperationAuditInterceptor } from "./common/operation-audit.interceptor";
-import { OperationLogService } from "./common/operation-log.service";
-import { RequestIdInterceptor } from "./common/request-id.interceptor";
+
 import { AuthController } from "./modules/auth/auth.controller";
-import { AuthService } from "./modules/auth/auth.service";
+
 import { HealthController } from "./modules/health/health.controller";
 import { IntegrationsController } from "./modules/integrations/integrations.controller";
-import { IntegrationsRepository } from "./modules/integrations/integrations.repository";
-import { IntegrationsService } from "./modules/integrations/integrations.service";
-import { JOBS_HTTP_APPLICATION } from "@rental-os/platform-server/jobs";
-import { NOTIFICATIONS_HTTP_APPLICATION } from "@rental-os/platform-server/notifications";
+
 import { TenantIntegrationController } from "./modules/integrations/tenant-integration.controller";
-import { TenantIntegrationConnectivityService } from "./modules/integrations/tenant-integration.connectivity.service";
-import { TenantIntegrationService } from "./modules/integrations/tenant-integration.service";
-import { TENANT_INTEGRATION_APPLICATION, TENANT_INTEGRATION_CONNECTIVITY } from "@rental-os/platform-server/integration-store";
-import { TenantIntegrationRuntimeService } from "./modules/integrations/tenant-integration.runtime.service";
-import { TenantEmailRuntimeService } from "./modules/integrations/tenant-email.runtime.service";
-import { TenantDispatchService } from "./modules/notifications/tenant-dispatch.service";
-import { TenantOperatorInvitationsService } from "./modules/notifications/tenant-operator-invitations.service";
+
 import { AcceptTenantOperatorInvitationController } from "./modules/notifications/accept-operator-invitation.controller";
 import { TenantDispatchController } from "./modules/notifications/tenant-dispatch.controller";
 import { TenantOperatorInvitationsController } from "./modules/notifications/tenant-operator-invitations.controller";
 import { TenantSupportEmailController } from "./modules/notifications/tenant-support-email.controller";
-import { TenantSupportEmailService } from "./modules/notifications/tenant-support-email.service";
-import { FileStorageRuntimeService } from "./modules/integrations/file-storage.runtime.service";
-import { RENTAL_FILE_AUTHORITY } from "./modules/integrations/rental-file-application.participant";
-import { FileBusinessAccessService } from "./modules/files/file-business-access.service";
-import { PaymentRuntimeService } from "./modules/integrations/payment.runtime.service";
-import { PaymentWebhookController } from "./modules/integrations/payment-webhook.controller";
-import { PaymentOperationsController } from "./modules/integrations/payment-operations.controller";
-import { PaymentReconciliationController } from "./modules/integrations/payment-reconciliation.controller";
-import { PaymentReconciliationFileService } from "./modules/integrations/payment-reconciliation-file.service";
-import { SecretBox } from "./common/secret-box";
+
 import { JobsController } from "./modules/jobs/jobs.controller";
 import { NotificationsController } from "./modules/notifications/notifications.controller";
 import { OpenApiController } from "./modules/openapi/openapi.controller";
-import { DatabaseModule } from "./modules/database/database.module";
+
 import { PlatformController } from "./modules/platform/platform.controller";
-import { PlatformRepository } from "./modules/platform/platform.repository";
-import { PLATFORM_AUTH_DATA_STORE } from "@rental-os/platform-server/auth-store";
-import { PlatformManagementService } from "@rental-os/platform-server/management";
-import { PlatformToolsService } from "@rental-os/platform-server/tools";
-import { SharedCustomerRepository } from "./modules/platform/shared-customer.repository";
-import { CustomerOperationsRepository } from "./modules/platform/customer-operations.repository";
-import { CustomerRegistrationService } from "./modules/platform/customer-registration.service";
-import { CustomerOperationsService } from "./modules/platform/customer-operations.service";
-import { CustomerMergeService } from "./modules/platform/customer-merge.service";
-import { CustomerCorporateService } from "./modules/platform/customer-corporate.service";
-import { CustomerCorporateSettlementService } from "./modules/platform/customer-corporate-settlement.service";
-import { MembershipService } from "./modules/platform/membership.service";
-import { EnterprisePortalService } from "./modules/platform/enterprise-portal.service";
-import { EnterpriseAccessService } from "./modules/client/enterprise-access.service";
-import { EnterpriseCommandService } from "./modules/enterprise/enterprise-command.service";
-import { EnterpriseApplicationService } from "./modules/enterprise/enterprise-application.service";
-import { EnterpriseRentalHandoffService } from "./modules/enterprise/enterprise-rental-handoff.service";
-import { EnterpriseMembershipAuditService } from "./modules/enterprise/enterprise-membership-audit.service";
-import { EnterpriseMembersService } from "./modules/enterprise/enterprise-members.service";
-import { EnterprisePolicyService } from "./modules/enterprise/enterprise-policy.service";
-import { EnterpriseApprovalService } from "./modules/enterprise/enterprise-approval.service";
-import { EnterpriseMerchantDelegationService } from "./modules/enterprise/enterprise-merchant-delegation.service";
-import { EnterpriseMerchantOrderSubmissionService } from "./modules/enterprise/enterprise-merchant-order-submission.service";
-import { EnterpriseExchangeApprovalService } from "./modules/enterprise/enterprise-exchange-approval.service";
-import { EnterpriseExtensionApprovalService } from "./modules/enterprise/enterprise-extension-approval.service";
-import { EnterpriseTaskCenterService } from "./modules/enterprise/enterprise-task-center.service";
-import { EnterpriseManagementRequestService } from "./modules/enterprise/enterprise-management-request.service";
-import { EnterpriseOrderReaderService } from "./modules/enterprise/enterprise-order-reader.service";
-import { CustomerAvatarService } from "./modules/platform/customer-avatar.service";
-import { PlatformService } from "./modules/platform/platform.service";
-import { RentalExchangePreviewService } from "./modules/rental-core/rental-exchange-preview.service";
-import { RentalExchangeInspectionPreparationService } from "./modules/rental-core/rental-exchange-inspection-preparation.service";
-import { RentalExchangeInspectionConsentService } from "./modules/rental-core/rental-exchange-inspection-consent.service";
-import { RentalApprovedExchangeService } from "./modules/rental-core/rental-approved-exchange.service";
-import { RentalExchangeInspectionMediaService } from "./modules/rental-core/rental-exchange-inspection-media.service";
-import { RentalCategoryResolver } from "./modules/rental-core/rental-category-resolver.service";
-import { CategoryGovernanceService } from "./modules/rental-core/category-governance.service";
-import { CategoryAdoptionPreparationService } from "./modules/rental-core/category-adoption-preparation.service";
-import { CategoryAdoptionApplication } from "./modules/rental-core/category-adoption.application";
-import { RentalAllocationService } from "./modules/rental-core/rental-allocation.service";
-import { RentalDueJobScheduler } from "./modules/rental-core/rental-due-job.scheduler";
+
 import { OfficialCalendarSourceController } from "./modules/rental-core/official-calendar-source.controller";
-import { OfficialCalendarSourceService } from "./modules/rental-core/official-calendar-source.service";
-import { OFFICIAL_CALENDAR_DATA_STORE, OFFICIAL_CALENDAR_APPLICATION } from "@rental-os/platform-server/official-calendar-store";
-import { OFFICIAL_CALENDAR_SOURCE_READER, createOfficialCalendarSourceReader } from "@rental-os/platform-server/official-calendar-reader";
-import { RentalStateRepository } from "./modules/rental-core/rental-state.repository";
-import { RentalSnapshotBackfillService } from "./modules/rental-core/rental-snapshot-backfill.service";
-import { RentalCoreConfigRepository } from "./modules/rental-core/rental-core-config.repository";
-import { RentalCoreFactRepository } from "./modules/rental-core/rental-core-fact.repository";
-import { RentalWorkspaceReportRepository } from "./modules/rental-core/rental-workspace-report.repository";
-import { RentalBusinessConfigRepository } from "./modules/rental-core/rental-business-config.repository";
-import { RentalBusinessFactRepository } from "./modules/rental-core/rental-business-fact.repository";
-import { RentalIdempotencyRepository } from "./modules/rental-core/rental-idempotency.repository";
-import { RentalIdempotentActionService } from "./modules/rental-core/rental-idempotent-action.service";
-import { RentalFundingService } from "./modules/rental-core/rental-funding.service";
-import { RentalOrderReceivableRepository } from "./modules/rental-core/rental-order-receivable.repository";
-import { StaffOfflinePaymentService } from "./modules/rental-core/staff-offline-payment.service";
-import { RentalDocumentService } from "./modules/rental-core/rental-document.service";
-import { RentalOrderConfirmationService } from "./modules/rental-core/rental-order-confirmation.service";
-import { RENTAL_HTTP_PROVIDERS } from "./modules/rental-core/rental-http.providers";
-import { RENTAL_PRIMARY_APPLICATION_PROVIDERS } from "./modules/rental-core/rental-primary-application.providers";
-import { RENTAL_ENTERPRISE_HTTP_PROVIDERS } from "./modules/enterprise/enterprise-http.providers";
-import { RENTAL_STAFF_HTTP_PROVIDERS } from "./modules/files/staff-http.providers";
-import { RENTAL_FILE_HTTP_PROVIDERS } from "./modules/files/file-http.providers";
-import { RENTAL_CLIENT_HTTP_PROVIDERS } from "./modules/client/client-http.providers";
-import { RENTAL_CHANNEL_HTTP_PROVIDERS } from "./modules/client/channel-http.providers";
-import { RENTAL_CATEGORY_HTTP_PROVIDERS } from "./modules/rental-core/category-http.providers";
-import { WorkspaceCapabilityRepository } from "./modules/rental-core/workspace-capability.repository";
-import { WorkspaceCapabilityService } from "./modules/rental-core/workspace-capability.service";
-import { CapabilityHookRuntime } from "./modules/rental-core/capability-hook.runtime";
-import { CapabilityHookRepository } from "./modules/rental-core/capability-hook.repository";
-import { CapabilityHookRegistrar } from "./modules/rental-core/capability-hook.registrar";
-import { RentalServiceCapacityService } from "./modules/rental-core/rental-service-capacity.service";
 
-import { ClientApiService } from "./modules/client/client-api.service";
-import { ClientAuthService } from "./modules/client/client-auth.service";
-import { ClientApiRateLimitService } from "./modules/client/client-api-rate-limit.service";
-import { ClientAccountClosureService } from "./modules/client/client-account-closure.service";
-import { ClientDeliveryAddressService } from "./modules/client/client-delivery-address.service";
-import { ClientWechatAuthService } from "./modules/client/client-wechat-auth.service";
-import { WechatMiniProgramAdapter } from "./modules/client/wechat-mini-program.adapter";
-
-import { MiniProgramChannelService } from "./modules/client/mini-program-channel.service";
-
-import { ClientChannelProfileService } from "./modules/client/client-channel-profile.service";
 import { TenantAppearanceProfileController } from "./modules/client/tenant-appearance-profile.controller";
-import { TenantAppearanceProfileService } from "./modules/client/tenant-appearance-profile.service";
-import { AccountAppearanceController } from "./modules/client/account-appearance.controller";
-import { AccountAppearanceService } from "./modules/client/account-appearance.service";
 
-import { WebsiteChannelProfileService } from "./modules/client/website-channel-profile.service";
-import { WebsiteAssetService } from "./modules/client/website-asset.service";
+import { AccountAppearanceController } from "./modules/client/account-appearance.controller";
+
 import { TenantSubscriptionController } from "./modules/subscription/subscription.controller";
 import { PlatformSubscriptionController } from "./modules/subscription/subscription-platform.controller";
 import { StaffSubscriptionController } from "./modules/subscription/subscription-staff.controller";
-import { SubscriptionService } from "./modules/subscription/subscription.service";
-import { SUBSCRIPTION_APPLICATION } from "@rental-os/platform-server/subscription-store";
+
+
 import { PublicDemoRequestController } from "./modules/demo-requests/public-demo-request.controller";
 import { PlatformDemoRequestController } from "./modules/demo-requests/platform-demo-request.controller";
-import { DemoRequestService } from "./modules/demo-requests/demo-request.service";
+
 import { AiOriginalScenesController, AiOriginalSceneObservationController, AiOriginalQuoteModelExecutionController, AiOriginalTaskActionPolicyController, AiScenePlanPolicyController } from "./modules/ai-native/scenes/original-scenes.controller";
-import { AI_NATIVE_ORIGINAL_REQUEST_PROVIDER, AI_NATIVE_ORIGINAL_ACCOUNTING_PROVIDER, AI_NATIVE_BUDGET_MANAGEMENT_PROVIDER, AI_NATIVE_CAPABILITY_PROBE_PROVIDER, AI_NATIVE_ORIGINAL_OBSERVATION_PROVIDER, AI_NATIVE_ORIGINAL_READ_POLICY_PROVIDER, AI_NATIVE_ORIGINAL_PLAN_POLICY_PROVIDER, AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER, AI_NATIVE_STAFF_RECEIPT_PROVIDERS, AI_NATIVE_CLIENT_ENTRY_PROVIDERS, AI_NATIVE_RETENTION_PROVIDER } from "./modules/ai-native/ai-native-application.providers";
+
 import { AiOriginalOrderReadController } from "./modules/ai-native/scenes/original-order-read.controller";
 import { AiOriginalTaskAccountingController } from "./modules/ai-native/scenes/original-task-accounting-http.module";
 import { AiBudgetManagementController, AiGatewayPricingHistoryController } from "./modules/ai-native/budget/budget-management.module";
-import { AI_NATIVE_GATEWAY_PRICING_HISTORY_PROVIDER } from "./modules/ai-native/ai-native-application.providers";
+
 import { TextCapabilityProbeController } from "./modules/ai-native/text-capability-probe.controller";
 import { AiInputCountingController } from './modules/ai-native/input-counting/input-counting-request.module';
-import { AI_NATIVE_INPUT_COUNTING_PROVIDER, AI_NATIVE_PLATFORM_PROBE_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+
 import { PlatformCapabilityProbeController } from './modules/ai-native/platform-capability-probe/platform-capability-probe.controller';
 import { AiModelSettingsController } from './modules/ai-native/model-settings.application';
 import { AiTaskRuleDraftController } from './modules/ai-native/task-rule-draft.application';
-import { AI_NATIVE_TASK_RULE_DRAFT_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+
 import { AiTaskCenterController } from './modules/ai-native/task-center.application';
 import { AiConversationController } from './modules/ai-native/conversation.application';
-import { AI_NATIVE_CONVERSATION_PROVIDER, AI_NATIVE_RUNTIME_CONFIGURATION_PROVIDERS } from './modules/ai-native/ai-native-application.providers';
-import { AI_NATIVE_TASK_CENTER_PROVIDER, AI_NATIVE_QUOTE_MODEL_EXECUTION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
-import { AI_NATIVE_OPENING_MODEL_EXECUTION_PROVIDER, AI_NATIVE_WORKBENCH_MODEL_CONTROL_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+
 import { AiOriginalOpeningModelExecutionController } from './modules/ai-native/scenes/opening-model-execution.controller';
-import { AI_NATIVE_MODEL_SETTINGS_PROVIDER, AI_NATIVE_PLATFORM_MODEL_SETTINGS_PROVIDER, AI_NATIVE_MEMORY_MANAGEMENT_PROVIDER,
-  AI_NATIVE_KNOWLEDGE_POLICY_PROVIDER, AI_NATIVE_KNOWLEDGE_MANAGEMENT_PROVIDER, AI_NATIVE_KNOWLEDGE_CONSUMPTION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+
 import { AiPlatformModelSettingsController } from './modules/ai-native/platform-model-settings.application';
 import { HumanMemoryManagementController } from './modules/ai-native/knowledge/human-memory-management.controller';
 import { KnowledgePolicyManagementController } from './modules/ai-native/knowledge/knowledge-policy-management.controller';
 import { HumanKnowledgeManagementController } from './modules/ai-native/knowledge/human-knowledge-management.controller';
 import { HumanKnowledgeConsumptionController } from './modules/ai-native/knowledge/human-knowledge-consumption.controller';
-import { AI_NATIVE_BUSINESS_FAILURE_PROVIDERS, AI_NATIVE_SETTINGS_LIFECYCLE_PROVIDERS, AI_NATIVE_QUOTE_ORDER_PROVIDERS, AI_NATIVE_CLARIFIED_QUOTE_SELECTION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+
 import { AiHumanQuoteSelectionController, AiHumanQuoteOrderController, AiSelectedQuoteTaskController, AiClarifiedQuoteSelectionController } from './modules/ai-native/task-request/human-quote-selection.controller';
 import { AiSettingsChangeController, AiSettingsTaskCreationController, AiSettingsTaskControlController,
   AiSettingsTaskController, AiSettingsTaskReadController } from './modules/ai-native/scenes/settings-task.controller';
@@ -206,35 +85,43 @@ import { HumanAutomationPolicyRequestController } from './modules/ai-native/auto
 import { AiRetentionController, AiPlatformRetentionController } from "./modules/ai-native/privacy/retention.controller";
 import { OperatorEntrySceneCatalogController, StaffEntrySceneCatalogController,
   WebsiteEntrySceneCatalogController, WechatEntrySceneCatalogController } from './modules/ai-native/scenes/entry-scene-catalog.controller';
-import { AI_NATIVE_SCENE_CATALOG_PROVIDERS } from './modules/ai-native/ai-native-application.providers';
-import { AI_NATIVE_ENTRY_ACTION_PROVIDERS } from './modules/ai-native/ai-native-application.providers';
+
+
 import { OperatorRegisteredEntryActionController, StaffRegisteredEntryActionController,
   WebsiteRegisteredEntryActionController, WechatRegisteredEntryActionController,
   OperatorEntryNotificationDraftController } from './modules/ai-native/scenes/registered-entry-action.controller';
-import { AI_NATIVE_PLATFORM_RETENTION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+
 import { AiCategoryDraftController } from './modules/ai-native/category-assist/category-draft.application';
-import { AI_NATIVE_CATEGORY_DRAFT_PROVIDER } from './modules/ai-native/ai-native-application.providers';
-import { AI_NATIVE_STAFF_RECOGNITION_PROVIDERS } from './modules/ai-native/ai-native-application.providers';
+
+
 import { InspectionRecognitionTaskController, StaffInspectionAccountingController } from './modules/ai-native/inspection-assist/inspection-recognition-task.controller';
 import { StaffInspectionTaskPolicyController } from './modules/ai-native/inspection-assist/inspection-task-policy.controller';
 import { ClientTaskPolicyController } from './modules/ai-native/scenes/client-task-policy.controller';
-import { AI_NATIVE_CLIENT_POLICY_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+
 import { StaffInspectionAssistController } from "./modules/ai-native/inspection-assist/staff-inspection-assist.controller";
 import { WebsiteClientEntryController, WechatClientEntryController } from "./modules/ai-native/scenes/standard-client-entry.application";
 import { WebsiteClientPublicController, WechatClientPublicController } from './modules/ai-native/scenes/client-public.controller';
-import { AI_NATIVE_CLIENT_PUBLIC_PROVIDERS } from './modules/ai-native/ai-native-application.providers';
+
 import { AiCreditController } from './modules/ai-native/budget/ai-credit.controller';
-import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
+
+import { RentalHttpModule, type RentalHttpServiceGroups } from "@rental-os/rental-core/http";
+import { OriginalApplicationServicesModule, ORIGINAL_RENTAL_HTTP_APPLICATIONS, ORIGINAL_RENTAL_PAYMENT_HTTP_APPLICATIONS } from "./application-services.module";
+
+import { RentalPaymentsHttpModule, type RentalPaymentHttpApplications } from "@rental-os/rental-core/http-payments";
 
 @Module({
   imports: [
-    AiDesktopBusinessModule,
-    ConfigModule.forRoot({
-      isGlobal: true,
-      // main.ts loads and validates the selected project environment before importing this module.
-      ignoreEnvFile: true
+    OriginalApplicationServicesModule,
+    RentalPaymentsHttpModule.registerFactory({
+      imports: [OriginalApplicationServicesModule],
+      inject: [ORIGINAL_RENTAL_PAYMENT_HTTP_APPLICATIONS],
+      useFactory: (applications: RentalPaymentHttpApplications) => applications,
     }),
-    DatabaseModule
+    RentalHttpModule.registerFactory({
+      imports: [OriginalApplicationServicesModule],
+      inject: [ORIGINAL_RENTAL_HTTP_APPLICATIONS],
+      useFactory: (applications: RentalHttpServiceGroups) => applications,
+    }),
   ],
   controllers: [
     AutomationExplanationController,
@@ -305,237 +192,23 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     HealthController,
     OpenApiController,
     AuthController,
-    StaffAuthController,
     PlatformController,
-    CategoryGovernanceController,
-    CategoryAdoptionPreparationController,
-    MembershipController,
-    EnterpriseWorkflowsController,
-    EnterpriseReadController,
-    EnterpriseMerchantController,
-    EnterpriseRentalHandoffMerchantController,
-    CustomerAvatarController,
-    RentalCoreController,
-    RentalBusinessController,
     OfficialCalendarSourceController,
-    WorkspaceCapabilityController,
     IntegrationsController,
     TenantIntegrationController,
-    FilesController,
-    StaffUploadsController,
-    StaffOfflinePaymentController,
-    PaymentWebhookController,
-    PaymentOperationsController,
-    PaymentReconciliationController,
     NotificationsController,
     TenantDispatchController,
     TenantOperatorInvitationsController,
     AcceptTenantOperatorInvitationController,
     TenantSupportEmailController,
     JobsController,
-    ClientApiController,
-    MiniProgramChannelController,
-    ClientChannelProfileController,
     TenantAppearanceProfileController,
     AccountAppearanceController,
-    WebsiteChannelProfileController,
     TenantSubscriptionController,
     PlatformSubscriptionController,
     StaffSubscriptionController,
     PublicDemoRequestController,
-    PlatformDemoRequestController
+    PlatformDemoRequestController,
   ],
-  providers: [
-    { provide: PLATFORM_APPEARANCE_DATA_STORE, useExisting: PrismaService },
-    { provide: LEGACY_TENANT_APPEARANCE_READER, inject: [PrismaService], useFactory: (database: PrismaService) =>
-      async (tenantId: string) => {
-        const row = await database.clientChannelProfile.findUnique({ where: { tenantId }, select: {
-          brandName: true, brandLogoUrl: true, faviconUrl: true, themeColor: true, adminCornerRadius: true,
-          adminContainerRadius: true, adminButtonRadius: true, adminInputRadius: true
-        } });
-        return row;
-      } },
-    AI_NATIVE_BODY_DATABASE_PROVIDER,
-    AI_NATIVE_AUTOMATION_EXPLANATION_PROVIDER,
-    AI_NATIVE_TASK_OPENING_PROPOSAL_PROVIDER,
-    AiCreditService,
-    ...AI_NATIVE_STAFF_RECOGNITION_PROVIDERS,
-    AI_NATIVE_CLIENT_POLICY_PROVIDER,
-    AI_NATIVE_CATEGORY_DRAFT_PROVIDER,
-    AI_NATIVE_CATEGORY_PROPOSAL_PROVIDER,
-    ...AI_NATIVE_RUNTIME_CONFIGURATION_PROVIDERS,
-    ...AI_NATIVE_SCENE_CATALOG_PROVIDERS,
-    ...AI_NATIVE_ENTRY_ACTION_PROVIDERS,
-    AI_NATIVE_CONVERSATION_PROVIDER,
-    AI_NATIVE_MEMBER_NAME_PROVIDER,
-    ApiAuthGuard,
-    AI_NATIVE_ORIGINAL_REQUEST_PROVIDER,
-    AI_NATIVE_ORIGINAL_ACCOUNTING_PROVIDER,
-    AI_NATIVE_BUDGET_MANAGEMENT_PROVIDER,
-    AI_NATIVE_GATEWAY_PRICING_HISTORY_PROVIDER,
-    AI_NATIVE_MODEL_SETTINGS_PROVIDER,
-    AI_NATIVE_TASK_CENTER_PROVIDER,
-    AI_NATIVE_TASK_CENTER_RECOVERY_PROVIDER,
-    AI_NATIVE_TASK_RULE_DRAFT_PROVIDER,
-    AI_NATIVE_TASK_CALENDAR_DRAFT_PROVIDER,
-    AI_NATIVE_TASK_ORDER_HANDOFF_PROVIDER,
-    AI_NATIVE_TASK_READ_POLICY_PROVIDER,
-    AI_NATIVE_TASK_ORIGINAL_READ_POLICY_PROVIDER,
-    AI_NATIVE_PLATFORM_MODEL_SETTINGS_PROVIDER,
-    AI_NATIVE_MEMORY_MANAGEMENT_PROVIDER,
-    AI_NATIVE_KNOWLEDGE_POLICY_PROVIDER,
-    AI_NATIVE_KNOWLEDGE_MANAGEMENT_PROVIDER,
-    AI_NATIVE_KNOWLEDGE_CONSUMPTION_PROVIDER,
-    ...AI_NATIVE_BUSINESS_FAILURE_PROVIDERS,
-    ...AI_NATIVE_SETTINGS_LIFECYCLE_PROVIDERS,
-    ...AI_NATIVE_QUOTE_ORDER_PROVIDERS,
-    AI_NATIVE_CLARIFIED_QUOTE_SELECTION_PROVIDER,
-    AI_NATIVE_CAPABILITY_PROBE_PROVIDER,
-    AI_NATIVE_INPUT_COUNTING_PROVIDER,
-    AI_NATIVE_PLATFORM_PROBE_PROVIDER,
-    AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER,
-    AI_NATIVE_ORIGINAL_ORDER_ANSWER_PROVIDER,
-    AI_NATIVE_QUOTE_MODEL_EXECUTION_PROVIDER,
-    AI_NATIVE_OPENING_MODEL_EXECUTION_PROVIDER,
-    AI_NATIVE_WORKBENCH_MODEL_CONTROL_PROVIDER,
-    AI_NATIVE_ORIGINAL_PLAN_POLICY_PROVIDER,
-    ...AI_NATIVE_STAFF_RECEIPT_PROVIDERS,
-    ...AI_NATIVE_CLIENT_ENTRY_PROVIDERS,
-    ...AI_NATIVE_CLIENT_PUBLIC_PROVIDERS,
-    AI_NATIVE_RETENTION_PROVIDER,
-    AI_NATIVE_PLATFORM_RETENTION_PROVIDER,
-    AI_NATIVE_ORIGINAL_OBSERVATION_PROVIDER,
-    AI_NATIVE_ORIGINAL_READ_POLICY_PROVIDER,
-    AuthService,
-    { provide: PLATFORM_AUTH_DATA_STORE, useExisting: PrismaService },
-    PlatformManagementService,
-    PlatformToolsService,
-    PlatformService,
-    PlatformRepository,
-    SharedCustomerRepository,
-    CustomerOperationsRepository,
-    CustomerRegistrationService,
-    CustomerOperationsService,
-    CustomerMergeService,
-    CustomerCorporateService,
-    CustomerCorporateSettlementService,
-    MembershipService,
-    EnterprisePortalService,
-    EnterpriseAccessService,
-    EnterpriseCommandService,
-    EnterpriseApplicationService,
-    EnterpriseRentalHandoffService,
-    EnterpriseMembershipAuditService,
-    EnterpriseMembersService,
-    EnterprisePolicyService,
-    EnterpriseApprovalService,
-    EnterpriseMerchantDelegationService,
-    EnterpriseMerchantOrderSubmissionService,
-    EnterpriseExtensionApprovalService,
-    EnterpriseExchangeApprovalService,
-    EnterpriseTaskCenterService,
-    EnterpriseManagementRequestService,
-    EnterpriseOrderReaderService,
-    CustomerAvatarService,
-    OperationLogService,
-    ...RENTAL_PRIMARY_APPLICATION_PROVIDERS,
-    RentalExchangePreviewService,
-    RentalExchangeInspectionPreparationService,
-    RentalExchangeInspectionConsentService,
-    RentalApprovedExchangeService,
-    RentalExchangeInspectionMediaService,
-    RentalCategoryResolver,
-    CategoryGovernanceService,
-    CategoryAdoptionPreparationService,
-    CategoryAdoptionApplication,
-    RentalAllocationService,
-    RentalDueJobScheduler,
-    OfficialCalendarSourceService,
-    { provide: OFFICIAL_CALENDAR_DATA_STORE, useExisting: PrismaService },
-    { provide: OFFICIAL_CALENDAR_APPLICATION, useExisting: OfficialCalendarSourceService },
-    { provide: OFFICIAL_CALENDAR_SOURCE_READER, inject: [OfficialCalendarSourceService], useFactory: createOfficialCalendarSourceReader },
-    RentalStateRepository,
-    RentalSnapshotBackfillService,
-    RentalCoreConfigRepository,
-    RentalCoreFactRepository,
-    RentalWorkspaceReportRepository,
-    RentalBusinessConfigRepository,
-    RentalBusinessFactRepository,
-    RentalIdempotencyRepository,
-    RentalIdempotentActionService,
-    RentalFundingService,
-    RentalOrderReceivableRepository,
-    StaffOfflinePaymentService,
-    ...RENTAL_HTTP_PROVIDERS,
-    ...RENTAL_ENTERPRISE_HTTP_PROVIDERS,
-    ...RENTAL_STAFF_HTTP_PROVIDERS,
-    ...RENTAL_FILE_HTTP_PROVIDERS,
-    ...RENTAL_CLIENT_HTTP_PROVIDERS,
-    ...RENTAL_CHANNEL_HTTP_PROVIDERS,
-    ...RENTAL_CATEGORY_HTTP_PROVIDERS,
-    RentalDocumentService,
-    RentalOrderConfirmationService,
-    RentalServiceCapacityService,
-    WorkspaceCapabilityRepository,
-    WorkspaceCapabilityService,
-    CapabilityHookRuntime,
-    CapabilityHookRegistrar,
-    CapabilityHookRepository,
-    ClientApiService,
-    ClientAuthService,
-    ClientApiRateLimitService,
-    ClientAccountClosureService,
-    ClientDeliveryAddressService,
-    ClientWechatAuthService,
-    WechatMiniProgramAdapter,
-    MiniProgramChannelService,
-    ClientChannelProfileService,
-    TenantAppearanceProfileService,
-    AccountAppearanceService,
-    WebsiteChannelProfileService,
-    WebsiteAssetService,
-    SubscriptionService,
-    { provide: SUBSCRIPTION_APPLICATION, useExisting: SubscriptionService },
-    DemoRequestService,
-    IntegrationsService,
-    { provide: JOBS_HTTP_APPLICATION, useExisting: IntegrationsService },
-    { provide: NOTIFICATIONS_HTTP_APPLICATION, useExisting: IntegrationsService },
-    IntegrationsRepository,
-    TenantIntegrationService,
-    TenantIntegrationConnectivityService,
-    { provide: TENANT_INTEGRATION_APPLICATION, useExisting: TenantIntegrationService },
-    { provide: TENANT_INTEGRATION_CONNECTIVITY, useExisting: TenantIntegrationConnectivityService },
-    TenantIntegrationRuntimeService,
-    {
-      provide: RENTAL_FILE_AUTHORITY,
-      inject: [ModuleRef],
-      // Auth→Platform→Rental→文件已有构造链；调用时才取得同一Auth，避免文件反向构造Auth。
-      useFactory: (modules: ModuleRef): Pick<AuthService, "lockRequestWorkspaceAccess"> => ({
-        lockRequestWorkspaceAccess: transaction => modules.get<AuthService>(AuthService, { strict: false })
-          .lockRequestWorkspaceAccess(transaction)
-      })
-    },
-    TenantEmailRuntimeService,
-    TenantDispatchService,
-    TenantOperatorInvitationsService,
-    TenantSupportEmailService,
-    FileStorageRuntimeService,
-    FileBusinessAccessService,
-    PaymentRuntimeService,
-    PaymentReconciliationFileService,
-    SecretBox,
-    {
-      provide: APP_INTERCEPTOR,
-      useClass: RequestIdInterceptor
-    },
-    {
-      provide: APP_INTERCEPTOR,
-      useClass: OperationAuditInterceptor
-    },
-    {
-      provide: APP_GUARD,
-      useExisting: ApiAuthGuard
-    }
-  ]
 })
 export class AppModule {}

@@ -36,77 +36,6 @@ export type {
 } from "@rental-os/platform-contracts/files";
 
 
-/** EXT-01D：运营端按当前经营空间执行的支付/退款主动对账结果。 */
-export interface PaymentReconciliationSummary {
-  scanned: number;
-  processed: number;
-  paid: number;
-  closed: number;
-  refunded: number;
-  pending: number;
-  failed: number;
-  results: Array<{
-    kind: "payment_intent" | "refund";
-    id: string;
-    orderId: string;
-    previousStatus: string;
-    status: string;
-    error?: string;
-  }>;
-}
-
-/** EXT-01D：生产支付对账文件导入结果。导入只生成证据与差异，不改资金事实。 */
-export type PaymentStatementKind = "payment" | "refund";
-export type PaymentStatementReviewStatus = "not_required" | "open" | "query_pending" | "acknowledged";
-
-export interface PaymentStatementBatchSummary {
-  id: string;
-  workspaceId: string;
-  provider: "alipay" | "wechat_pay" | string;
-  fileName: string;
-  fileSha256: string;
-  status: "matched" | "needs_review" | "reviewed" | string;
-  totalRows: number;
-  matchedRows: number;
-  differenceRows: number;
-  acknowledgedRows: number;
-  importedBy?: string;
-  importedAt: string;
-}
-
-export interface PaymentStatementLineSummary {
-  id: string;
-  batchId: string;
-  rowNumber: number;
-  kind: PaymentStatementKind;
-  merchantOrderNo: string;
-  merchantRefundNo?: string;
-  externalId?: string;
-  statementStatus: string;
-  normalizedStatus: string;
-  amount: number;
-  currency: string;
-  occurredAt?: string;
-  localRecordId?: string;
-  localStatus?: string;
-  differenceCodes: string[];
-  differenceDetail?: string;
-  reviewStatus: PaymentStatementReviewStatus;
-  reviewReason?: string;
-  reviewedBy?: string;
-  reviewedAt?: string;
-}
-
-export interface PaymentStatementBatchDetail extends PaymentStatementBatchSummary {
-  lines: PaymentStatementLineSummary[];
-}
-
-export interface ReviewPaymentStatementLineRequest {
-  decision: "acknowledge" | "query_provider";
-  reason: string;
-}
-
-
 export interface InvokeMockAdapterRequest {
   provider: string;
   capability: InfraAdapterCapability | string;
@@ -203,3 +132,7 @@ export interface InfraDashboardResult {
   printJobs: PrintJobSummary[];
   tboxDevices: TBoxDeviceSummary[];
 }
+
+
+/** 原支付业务合同由 Rental Core 单源提供，保持旧各端导入路径。 */
+export type { PaymentReconciliationSummary, PaymentStatementKind, PaymentStatementReviewStatus, PaymentStatementBatchSummary, PaymentStatementLineSummary, PaymentStatementBatchDetail, ReviewPaymentStatementLineRequest } from "@rental-os/rental-core";

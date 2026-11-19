@@ -306,6 +306,18 @@
     "./member-invitation-authority": {
       "types": "./dist/modules/platform/platform-member-invitation.authority.d.ts",
       "default": "./dist/modules/platform/platform-member-invitation.authority.js"
+    },
+    "./integration-payment": {
+      "types": "./dist/modules/integrations/payment-provider-transport.d.ts",
+      "default": "./dist/modules/integrations/payment-provider-transport.js"
+    },
+    "./payment-webhook-rate-limit": {
+      "types": "./dist/modules/integrations/payment-webhook-rate-limit.d.ts",
+      "default": "./dist/modules/integrations/payment-webhook-rate-limit.js"
+    },
+    "./stripe-signature": {
+      "types": "./dist/modules/integrations/stripe-signature.d.ts",
+      "default": "./dist/modules/integrations/stripe-signature.js"
     }
   },
   "scripts": {
@@ -551,6 +563,15 @@
       ],
       "member-invitation-authority": [
         "dist/modules/platform/platform-member-invitation.authority.d.ts"
+      ],
+      "integration-payment": [
+        "./dist/modules/integrations/payment-provider-transport.d.ts"
+      ],
+      "payment-webhook-rate-limit": [
+        "./dist/modules/integrations/payment-webhook-rate-limit.d.ts"
+      ],
+      "stripe-signature": [
+        "./dist/modules/integrations/stripe-signature.d.ts"
       ]
     }
   }

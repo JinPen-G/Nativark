@@ -14,7 +14,8 @@
 | [养护工单前端](admin/work-orders/README.md)、[页面贡献](admin/work-orders/index.tsx)、[客户端工厂](admin/work-orders/client.ts) | `/admin/work-orders` 提供原列表/看板/详情与六类表单；宿主供给当前权限/经营空间及唯一请求，旧路由和十二HTTP方法薄适配同一实现 |
 | [履约网络前端](admin/locations/README.md)、[地点贡献](admin/locations/index.tsx)、[客户端与范围](admin/locations/client.ts) | `/admin/locations` 持有地点与经营主体、两表单、原列表/卡片及导入导出；统一贡献供给七页，宿主提供当前范围和原组织查看/映射权限 |
 | [能力治理前端](admin/capabilities/README.md)、[页面贡献](admin/capabilities/index.tsx)、[请求工厂](admin/capabilities/client.ts) | `/admin/capabilities` 提供原能力目录、配置、升级及审计；宿主供给当前范围和原会话刷新，配置入口保留查看/管理权限与原修订，卡片复用原生 UIArc |
-| [统一HTTP装配](src/http.module.ts)、[原组合宿主](../../apps/api/src/app.module.ts) | `/http` 一次提供19个原Controller与九组应用接线；宿主供给同一业务实例及当前身份/Guard，必需服务缺失时拒绝装配，原可选依赖保持 |
+| [统一HTTP装配](src/http.module.ts)、[服务组合](src/http-assembly.ts)、[原组合宿主](../../apps/api/src/app.module.ts) | `/http` 一次提供19个原Controller与九组应用接线；原宿主已通过正式模块取得同一业务实例，必需服务缺失时拒绝装配，原可选依赖保持 |
+| [支付HTTP模块](src/http-payments.module.ts)、[支付运行](src/mysql-payment-runtime.ts)、[对账文件](src/mysql-payment-reconciliation-file.ts) | `/http-payments` 提供原回调、退款和对账三个Controller；宿主供给同一支付、对账及经营空间解析实例。资金、原操作和回调台账归Rental，签名及供应商请求复用公共运输 |
 | [核心HTTP](src/http-core.controller.ts)、[业务HTTP](src/http-business.controller.ts)、[应用接点](src/http-applications.ts)、[快照与操作键](src/http-context.ts) | `/http-core` 与 `/http-business` 持有原履约、报价、规则和营销HTTP；宿主绑定同一业务/数据库实例，Guard/ALS及原动作继续核权限、事务和原收据 |
 | [空间能力HTTP](src/http-workspace-capabilities.controller.ts)、[员工收款HTTP](src/http-staff-payments.controller.ts)、[服务接点](src/http-service-ports.ts)、[空间能力DTO](src/http-workspace-capability.dto.ts) | 正式HTTP子出口持有原8条路径与校验；宿主Guard先形成可信身份，再通过同一原服务实例处理。原API只再导出，Controller注册不取得额外业务权限 |
 | [企业读取HTTP](src/http-enterprise-read.controller.ts)、[商户决策HTTP](src/http-enterprise-merchant.controller.ts)、[行政交接HTTP](src/http-enterprise-handoff-merchant.controller.ts)、[客户工作流HTTP](src/http-enterprise-workflows.controller.ts) | 四个正式子出口保留客户与营运两套鉴权、原149操作、材料前后复验和原收据；[21项实际接点](src/http-enterprise-applications.ts)由宿主绑定同一服务/数据库 |
@@ -247,6 +248,10 @@ npm run lint -w @rental-os/rental-core
 构建先生成公共合同与公共服务，再生成本包 JS/声明。根出口提供领域合同与常量，营业日和品类治理按子出口加载。服务端计价、器材及能力执行/条件子出口使用可选 peer `@nestjs/common`，沿用原 HTTP 异常类型，调用宿主和源码构建须提供兼容版本。核心聚合与换货批准子出口使用可选 peer @rental-os/platform-server 的正式 /request-identity，原Guard/API与Rental共用同一ALS实例；领域根出口不加载它。公共请求指纹从 `@rental-os/platform-contracts/request-fingerprint` 复用，已保存的条件 hash 沿用原算法。
 
 HTTP宿主登记 `/http-core` 和 `/http-business` 的两个Controller，从 `/http-applications` 取得明确令牌并绑定同一应用实例。原组合的[接线入口](../../apps/api/src/modules/rental-core/rental-http.providers.ts)使用 `useExisting`，不再创建另一套核心、资金、数据库或生命周期执行者；可选检查事件只绑定原方法。文件上传使用原 `@nestjs/platform-express` 适配，生成模型留在私有HTTP/MySQL边界。公共来源日历由 [platform-server只读接点](../platform-server/src/modules/official-calendars/README.md)提供，业务HTTP不取得来源维护方法；原来源合同和DTO兼容出口转接同一公共声明。日志和业务会员/企业结算分别由实际所有者供给。`/http-context` 复用已选Core的原快照与刷新队列，显式操作键保持191字符边界，各动作仍决定默认键与重放方式。原API再导出同一Controller，路径/字段/权限及原操作读取沿[OpenAPI](../../apps/api/src/contracts/openapi-document.ts)保持。
+
+原组合的[服务模块](../../apps/api/src/application-services.module.ts)集中登记原provider、Guard与审计，并导出一组业务应用。`AppModule`用`RentalHttpModule.registerFactory`消费这组应用，使用`RentalPaymentsHttpModule.registerFactory`消费`{ runtime, statements, core }`；两者取得同一个核心实例。`core.resolveWorkspaceId`继续从可信请求范围解析经营空间，不能由退款参数供给。模块的`imports`须包含导出应用令牌的服务模块；父模块本地provider不会自动进入子模块。使用整组`/http`时，不再另行登记其中的单独Controller。
+
+支付应用使用`/mysql-payment-runtime`和`/mysql-payment-reconciliation-file`，宿主供给原数据库、配置、资金、当前Auth/ALS及失败出箱。公共`@rental-os/platform-server/integration-payment`只负责签名、验签和受控运输。退款额度、实款、原回调键和unknown恢复仍由Rental决定；首响应丢失后只核原操作。客户端金额与对账合同从根出口读取，纯金额和Stripe工具分别使用`/payment-money`、`/stripe-payment`。[原支付入口](../../apps/api/src/modules/integrations/README.md) · [公共支付运输](../platform-server/src/modules/integrations/README.md#支付运输)
 
 企业HTTP按需要登记 `/http-enterprise-read`、`/http-enterprise-merchant`、`/http-enterprise-handoff-merchant` 与 `/http-enterprise-workflows`。从 `/http-enterprise-applications` 的 `RENTAL_ENTERPRISE_HTTP` 取得令牌，并按[原企业接线](../../apps/api/src/modules/enterprise/enterprise-http.providers.ts)绑定实际参加者。客户路径仍使用本人/企业授权，商户与行政交接保留各自营运范围；专用文件读取前后复验，缺真实文件配置继续拒绝。财务读取的可选装配保留原不可用状态，类型/声明在[包配置](package.json)逐项对应；完整标准宿主及独立安装仍按PCH交付。
 

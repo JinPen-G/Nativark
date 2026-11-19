@@ -11,6 +11,7 @@
 | [短信运行](tenant-integration.runtime.service.ts)、[投递结果](../../common/notification-delivery.ts) | 阿里云／腾讯云的原发送、确定性 nonce 与原回执查询，unknown 保留原操作 |
 | [邮箱运行](tenant-email.runtime.service.ts)、[SMTP](smtp-transport.ts)、[IMAP](imap-reader.ts)、[安全邮件解析](inbound-mail-codec.ts) | `/integration-email`、`/integration-smtp`、`/integration-imap`、`/integration-inbound-mail`共用原加密连接、投递结果、只读收信和文本投影 |
 | [对象存储](object-storage.provider.service.ts)、[OSS V4](aliyun-oss-v4.ts) | 原 OSS／COS／S3 签名与受控 HTTP，连接测试使用随机对象 HEAD |
+| [支付运输](payment-provider-transport.ts)、[Stripe验签](stripe-signature.ts)、[回调限流](payment-webhook-rate-limit.ts) | 原RSA/HMAC签名、精确微信验签材料、受控请求、供应商错误分类和只读连接探针，业务资金及回调归属由实际Core裁定 |
 | [微信运输](wechat-mini-program.adapter.ts) | `/integration-wechat` 共用原 code/session、手机号一次性凭证、AppID token 缓存与错误类；不保存客户身份，业务调用者核渠道与水印 |
 | [Rental 参加者](../../../../../apps/api/src/modules/integrations/rental-integration-business.participant.ts) | 在原配置事务核租赁结算、支付／退款、短信队列及文件／上传依赖 |
 | [公共 schema](../../../../../apps/platform-api/prisma/schema.prisma)、[数据计划](../../../../../apps/platform-api/src/platform-data.ts) | 独立公共链的配置和适配日志表，迁移摘要与实际应用账分别核验 |
@@ -39,8 +40,18 @@
 
 凭据使用原 `INTEGRATION_ENCRYPTION_KEY`、密钥 ID／历史环及稳定指纹设置。公共宿主只消费进程配置，密钥由部署人员维护。历史信封、存储前缀和 nonce 前缀沿原格式。
 
+## 支付运输
+
+`PaymentProviderTransport`提供原支付宝查询/关闭、微信签名请求与响应验证、Stripe live REST请求和连接探针。它的实例由所选宿主或业务应用持有，配置来自同一公共集成服务。业务创建请求携带所属Core已经裁定的金额、币种和原操作编号。
+
+微信按精确的证书序列号或公钥ID选择材料，校验原始请求/响应和时间戳。Stripe回调复用原HMAC、v1签名及时间容差。请求保留HTTPS/出站地址校验、重定向限制、超时和响应读取清理。
+
+`PaymentProviderUnknownError`、`PaymentProviderDefinitiveError`和HTTP错误保持原类别，由业务应用保存原结果和占用。Rental支付运行与对账文件应用维护原订单金额、退款额度、当前权限、配置锁、资金事务及回调台账。原回调候选缓存由Rental运行实例持有。
+
 ## 验证入口
 
 复用原 [安全检查](../../../../../tests/integrations-security.test.cjs)、[内存租户隔离](../../../../../tests/integrations-memory-scope.test.cjs)、[连接与修订](../../../../../tests/tenant-integration-connectivity.test.cjs) 和 [默认选择／历史依赖](../../../../../tests/tenant-integration-default.test.cjs)。原 npm 入口会构建 shared 和组合 API，执行前沿 [项目验证规则](../../../../../AGENTS.md#修改验证与交付) 核环境与写入范围。
+
+支付复用原[unknown](../../../../../tests/payment-provider-unknown.test.cjs)、[付款回调](../../../../../tests/payment-callback-integrity.test.cjs)、[退款回调](../../../../../tests/payment-refund-webhook.test.cjs)、[退款终态与过期](../../../../../tests/payment-refund-terminal.test.cjs)、[恢复](../../../../../tests/payment-recovery-review.test.cjs)、[主动对账](../../../../../tests/payment-reconciliation.test.cjs)、[文件对账](../../../../../tests/payment-reconciliation-file.test.cjs)、[Stripe工具](../../../../../tests/stripe-payment.test.cjs)和[匿名回调权限](../../../../../tests/payment-webhook-guard.test.cjs)。
 
 离线 fixture 验证配置、授权、探针请求和恢复边界。真实 HTTP、供应商、数据库并发、迁移与浏览器证据按各宿主实际环境核验。

@@ -104,7 +104,7 @@ Rental Core 是首个业务示范，提供商品、资产、库存、报价、�
 
 | 位置 | 当前内容 | 阅读入口 |
 | --- | --- | --- |
-| `apps/api` | 身份、公共平台、AI Native、基础服务与现有 Core 的 API 组合 | [启动](apps/api/src/main.ts)、[装配](apps/api/src/app.module.ts) |
+| `apps/api` | 身份、公共平台、AI Native、基础服务与现有 Core 的 API 组合；业务及支付 HTTP 通过 Rental 正式模块挂载 | [启动](apps/api/src/main.ts)、[装配](apps/api/src/app.module.ts)、[同一服务组](apps/api/src/application-services.module.ts) |
 | `apps/platform-api` | 默认无 Core 的独立公共 API，初始化 / 认证 / 公共管理 / 组织与安全 / 订阅已提供，完整运行继续交付 | [宿主导读](apps/platform-api/README.md) |
 | `apps/example-tickets-api` | 公共底座与单工单Core受控组合，标准包和迁移准备，真实运行验收继续交付 | [示范导读](apps/example-tickets-api/README.md) |
 | `packages/platform-contracts` | 无行业依赖的公共身份、人员与设置合同；原 shared 兼容再导出 | [正式出口](packages/platform-contracts/README.md) |

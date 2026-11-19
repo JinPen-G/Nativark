@@ -1,6 +1,7 @@
 /** Rental HTTP 的统一装配入口，复用原 Controller、应用令牌和可选依赖语义。
  * 宿主提供同一业务服务、数据库及当前身份/Guard；本模块不创建领域服务、计时器或迁移。
  * 完整模块与单独品类模块二选一，避免重复登记同一 Controller。 */
+import { RENTAL_HTTP_SERVICE_TOKENS } from "./http-assembly";
 import { Module, type DynamicModule, type FactoryProvider, type ModuleMetadata } from "@nestjs/common";
 import { RentalCoreController } from "./http-core.controller";
 import { RentalBusinessController } from "./http-business.controller";
@@ -18,27 +19,17 @@ import { ClientChannelProfileController, MiniProgramChannelController, WebsiteCh
 import { MembershipController } from "./http-membership.controller";
 import { CustomerAvatarController } from "./http-customer-avatar.controller";
 import { FilesController } from "./http-files.controller";
-import { StaffAuthController, RENTAL_STAFF_AUTH_APPLICATION, type RentalStaffAuthHttpApplication } from "./http-staff-auth.controller";
-import { StaffUploadsController, RENTAL_STAFF_UPLOADS_DATABASE, RENTAL_STAFF_UPLOADS_STORAGE,
-  RENTAL_STAFF_UPLOAD_OBSERVATION_PARSER, RENTAL_STAFF_INSPECTION_EVIDENCE,
-  type RentalStaffUploadsDatabase, type RentalStaffUploadsStorage, type RentalStaffUploadObservationParser,
-  type RentalStaffInspectionEvidence } from "./http-staff-uploads.controller";
+import { StaffAuthController, type RentalStaffAuthHttpApplication } from "./http-staff-auth.controller";
+import { StaffUploadsController, type RentalStaffUploadsDatabase, type RentalStaffUploadsStorage, type RentalStaffUploadObservationParser, type RentalStaffInspectionEvidence } from "./http-staff-uploads.controller";
 import * as rental from "./http-applications";
-import { RENTAL_ENTERPRISE_HTTP, type RentalEnterpriseHttpApplications } from "./http-enterprise-applications";
-import { RENTAL_CLIENT_HTTP, type RentalClientHttpApplications } from "./http-client-applications";
-import { RENTAL_HTTP_CATEGORY_GOVERNANCE, RENTAL_HTTP_CATEGORY_PREPARATIONS, RENTAL_HTTP_CATEGORY_ADOPTIONS,
-  type RentalCategoryHttpApplications } from "./http-category-applications";
-import { RENTAL_CLIENT_CHANNEL_APPLICATION, RENTAL_WEBSITE_CHANNEL_APPLICATION, RENTAL_WEBSITE_ASSET_APPLICATION,
-  RENTAL_MINI_PROGRAM_CHANNEL_APPLICATION, type RentalClientChannelHttpApplication,
-  type RentalWebsiteChannelHttpApplication, type RentalWebsiteAssetHttpApplication,
-  type RentalMiniProgramChannelHttpApplication } from "./http-channel-applications";
-import { RENTAL_MEMBERSHIP_APPLICATION, RENTAL_ENTERPRISE_PORTAL_APPLICATION,
-  type RentalMembershipHttpApplication, type RentalEnterprisePortalHttpApplication } from "./http-membership-applications";
-import { RENTAL_CUSTOMER_AVATAR_APPLICATION, type RentalCustomerAvatarHttpApplication } from "./http-customer-avatar-applications";
-import { RENTAL_FILES_LEDGER, RENTAL_FILES_STORAGE, RENTAL_FILES_DATABASE, RENTAL_FILES_CUSTOMER_AUTHORITY,
-  type RentalFileLedgerHttpApplication, type RentalFileStorageHttpApplication, type RentalFileHttpDatabase,
-  type RentalFileCustomerHttpAuthority } from "./http-file-applications";
-import { RENTAL_WORKSPACE_CAPABILITIES_APPLICATION, RENTAL_STAFF_PAYMENTS_APPLICATION } from "./http-service-ports";
+import { type RentalEnterpriseHttpApplications } from "./http-enterprise-applications";
+import { type RentalClientHttpApplications } from "./http-client-applications";
+import { type RentalCategoryHttpApplications } from "./http-category-applications";
+import { type RentalClientChannelHttpApplication, type RentalWebsiteChannelHttpApplication, type RentalWebsiteAssetHttpApplication, type RentalMiniProgramChannelHttpApplication } from "./http-channel-applications";
+import { type RentalMembershipHttpApplication, type RentalEnterprisePortalHttpApplication } from "./http-membership-applications";
+import { type RentalCustomerAvatarHttpApplication } from "./http-customer-avatar-applications";
+import { type RentalFileLedgerHttpApplication, type RentalFileStorageHttpApplication, type RentalFileHttpDatabase, type RentalFileCustomerHttpAuthority } from "./http-file-applications";
+
 
 export interface RentalHttpServiceGroups {
   rental: rental.RentalHttpApplications;
@@ -87,28 +78,7 @@ export const RENTAL_HTTP_CONTROLLERS = [
 
 type TokenMap<T> = { readonly [K in keyof T]-?: symbol };
 const APPLICATIONS = Symbol("rental.http.applications");
-const rentalTokens: TokenMap<rental.RentalHttpApplications> = {
-  core: rental.RENTAL_HTTP_CORE,
-  business: rental.RENTAL_HTTP_BUSINESS,
-  allocation: rental.RENTAL_HTTP_ALLOCATION,
-  orderConfirmation: rental.RENTAL_HTTP_ORDER_CONFIRMATION,
-  idempotent: rental.RENTAL_HTTP_IDEMPOTENT,
-  reports: rental.RENTAL_HTTP_REPORTS,
-  database: rental.RENTAL_HTTP_DATABASE,
-  serviceCapacities: rental.RENTAL_HTTP_SERVICE_CAPACITIES,
-  funding: rental.RENTAL_HTTP_FUNDING,
-  documents: rental.RENTAL_HTTP_DOCUMENTS,
-  operationLogs: rental.RENTAL_HTTP_OPERATION_LOGS,
-  corporateSettlement: rental.RENTAL_HTTP_CORPORATE_SETTLEMENT,
-  memberships: rental.RENTAL_HTTP_MEMBERSHIPS,
-  failureEvents: rental.RENTAL_HTTP_FAILURE_EVENTS,
-  exchangePreview: rental.RENTAL_HTTP_EXCHANGE_PREVIEW,
-  exchangeInspections: rental.RENTAL_HTTP_EXCHANGE_INSPECTIONS,
-  exchangeInspectionMedia: rental.RENTAL_HTTP_EXCHANGE_INSPECTION_MEDIA,
-  officialCalendarSources: rental.RENTAL_HTTP_OFFICIAL_CALENDAR_SOURCES,
-  workspaceCapabilities: RENTAL_WORKSPACE_CAPABILITIES_APPLICATION,
-  staffPayments: RENTAL_STAFF_PAYMENTS_APPLICATION,
-};
+
 
 function bind<T>(group: string, tokens: TokenMap<T>, select: (services: RentalHttpServiceGroups) => T,
   optional: readonly (keyof T)[] = []): FactoryProvider[] {
@@ -123,39 +93,16 @@ function bind<T>(group: string, tokens: TokenMap<T>, select: (services: RentalHt
 }
 
 const applicationProviders = [
-  ...bind("rental", rentalTokens, services => services.rental,
+  ...bind("rental", RENTAL_HTTP_SERVICE_TOKENS.rental, services => services.rental,
     ["corporateSettlement", "memberships", "failureEvents", "exchangePreview", "exchangeInspections", "exchangeInspectionMedia"]),
-  ...bind("enterprise", RENTAL_ENTERPRISE_HTTP, services => services.enterprise),
-  ...bind("client", RENTAL_CLIENT_HTTP, services => services.client),
-  ...bind("category", {
-    governance: RENTAL_HTTP_CATEGORY_GOVERNANCE,
-    preparations: RENTAL_HTTP_CATEGORY_PREPARATIONS,
-    adoptions: RENTAL_HTTP_CATEGORY_ADOPTIONS,
-  }, services => services.category),
-  ...bind("channels", {
-    client: RENTAL_CLIENT_CHANNEL_APPLICATION,
-    website: RENTAL_WEBSITE_CHANNEL_APPLICATION,
-    assets: RENTAL_WEBSITE_ASSET_APPLICATION,
-    miniProgram: RENTAL_MINI_PROGRAM_CHANNEL_APPLICATION,
-  }, services => services.channels),
-  ...bind("members", {
-    membership: RENTAL_MEMBERSHIP_APPLICATION,
-    enterprisePortal: RENTAL_ENTERPRISE_PORTAL_APPLICATION,
-  }, services => services.members, ["enterprisePortal"]),
-  ...bind("files", {
-    ledger: RENTAL_FILES_LEDGER,
-    storage: RENTAL_FILES_STORAGE,
-    database: RENTAL_FILES_DATABASE,
-    customerAuthority: RENTAL_FILES_CUSTOMER_AUTHORITY,
-  }, services => services.files),
-  ...bind("staff", {
-    auth: RENTAL_STAFF_AUTH_APPLICATION,
-    database: RENTAL_STAFF_UPLOADS_DATABASE,
-    storage: RENTAL_STAFF_UPLOADS_STORAGE,
-    observe: RENTAL_STAFF_UPLOAD_OBSERVATION_PARSER,
-    inspectionEvidence: RENTAL_STAFF_INSPECTION_EVIDENCE,
-  }, services => services.staff, ["inspectionEvidence"]),
-  ...bind("customer", { avatar: RENTAL_CUSTOMER_AVATAR_APPLICATION }, services => ({ avatar: services.customerAvatar })),
+  ...bind("enterprise", RENTAL_HTTP_SERVICE_TOKENS.enterprise, services => services.enterprise),
+  ...bind("client", RENTAL_HTTP_SERVICE_TOKENS.client, services => services.client),
+  ...bind("category", RENTAL_HTTP_SERVICE_TOKENS.category, services => services.category),
+  ...bind("channels", RENTAL_HTTP_SERVICE_TOKENS.channels, services => services.channels),
+  ...bind("members", RENTAL_HTTP_SERVICE_TOKENS.members, services => services.members, ["enterprisePortal"]),
+  ...bind("files", RENTAL_HTTP_SERVICE_TOKENS.files, services => services.files),
+  ...bind("staff", RENTAL_HTTP_SERVICE_TOKENS.staff, services => services.staff, ["inspectionEvidence"]),
+  ...bind("customer", RENTAL_HTTP_SERVICE_TOKENS.customer, services => ({ avatar: services.customerAvatar })),
 ];
 
 @Module({})
@@ -186,3 +133,5 @@ export {
   WorkspaceCapabilityController, FilesController, StaffUploadsController, StaffOfflinePaymentController,
   ClientApiController, MiniProgramChannelController, ClientChannelProfileController, WebsiteChannelProfileController,
 };
+
+export { composeRentalHttpServiceGroups, RENTAL_HTTP_DEPENDENCY_TOKENS } from "./http-assembly";
