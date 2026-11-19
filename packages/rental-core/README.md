@@ -18,6 +18,7 @@
 | [企业门户前端](clients/enterprise-portal/README.md)、[应用入口](clients/enterprise-portal/index.ts)、[原薄宿主](../../apps/enterprise-portal/README.md) | `/clients/enterprise-portal` 提供完整企业门户，页面使用精确子出口；宿主供给同一客户会话和公共UI，企业/本人/空间及原材料权限沿真实服务核验，不依赖旧后台源码 |
 | [营业时区](clients/time.ts)、[微信打包](../../scripts/miniprogram-shared-types.cjs) | `/clients/time` 是原生CommonJS与声明出口，复用原时区/DST/回退算法；微信构建仅在实际引用时带入同一时间模块，费用仍由服务端裁定 |
 | [客户认证](clients/miniprogram/auth/README.md)、[正式客户入口](clients/miniprogram/index.ts) | `/clients/miniprogram` 提供密码/短信/微信、用途验证码、注册与本人注销；宿主供给原渠道、请求和会话采用，一次性凭证及原错误保持 |
+| [客户AI请求](clients/miniprogram/README.md)、[员工AI请求](clients/staff/README.md) | 两个原生客户端出口提供任务、取消、报价、目标、预约交接及检查/入口动作工厂；宿主供给同一运输、当前会话和原生成校验器，准备、明确提交、取消与原结果沿各自原协议 |
 | [会员请求](admin/membership/client.ts)、[客户请求](admin/membership/customer-client.ts) | `/admin/membership/client` 与 `/admin/membership/customer-client` 提供原57项请求；传入宿主唯一认证请求，保留租户会员、客户主档、账号状态、敏感资料、企业账务及原冲销收据边界 |
 | [订单前端](admin/orders/README.md)、[订单请求](admin/orders/client.ts) | `/admin/orders` 提供列表、新建、详情及原配货/资金/检查/单据链；宿主提供当前身份、经营空间、原请求与跨领域组件，旧地址消费同一实现 |
 | [养护工单前端](admin/work-orders/README.md)、[页面贡献](admin/work-orders/index.tsx)、[客户端工厂](admin/work-orders/client.ts) | `/admin/work-orders` 提供原列表/看板/详情与六类表单；宿主供给当前权限/经营空间及唯一请求，旧路由和十二HTTP方法薄适配同一实现 |

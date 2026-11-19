@@ -22,3 +22,5 @@ export type {
 export { createRentalStaffAuthApi, type RentalStaffAuthPorts } from "./auth";
 export { createRentalStaffUploadsApi } from "./uploads";
 export type { RentalStaffUploadsPorts, StaffUploadStage, StaffUploadReference, StaffUploadHooks, LocalStaffImage } from "./uploads";
+export { createRentalStaffEntryActionApi, STAFF_ORDER_ENTRY_CODES, type RentalStaffEntryActionPorts, type RentalStaffEntryActionSession, type StaffOrderEntryCode, type StaffEntryActionApi } from "./ai-entry-actions";
+export { createRentalStaffInspectionTaskApi, type RentalStaffInspectionTaskPorts, type StaffInspectionTaskApi } from "./ai-inspection-tasks";

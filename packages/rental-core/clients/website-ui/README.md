@@ -2,6 +2,8 @@
 
 完整租赁客户网站的 React 页面贡献，沿原网站迁入 App、Site/Auth 上下文、页面、组件、语言、主题与样式。原 15 条路由、按需分包和真实／演示数据边界保持。
 
+消费本 UI 入口时，宿主须按其 package 依赖准备 `@rental-os/shared@0.1.0`，与 Rental 包声明的 Shared peer 版本一致。该 peer 的 optional 标记允许未消费这些 UI 出口的宿主省略依赖。
+
 ## 接入
 
 宿主创建一个 [RentalWebsiteHost](host.ts)，交给根组件。原浏览器宿主实现见 [website-host.ts](../../../../apps/tenant-website/src/website-host.ts)。

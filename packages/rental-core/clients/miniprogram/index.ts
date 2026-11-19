@@ -15,3 +15,10 @@ export type {
   RentalMiniProgramMerchantPorts,
 } from "./ports";
 export { createRentalMiniProgramAuthApi, type RentalMiniProgramAuthPorts } from "./auth";
+export { createRentalMiniProgramTaskApi, type RentalMiniProgramTaskPorts, type ClientTaskApi, type ClientOrderNavigationPort } from "./ai-tasks";
+export { createRentalMiniProgramTaskCancellationApi, type RentalMiniProgramTaskCancellationPorts, type ClientTaskCancellationApi } from "./ai-task-cancellation";
+export { createRentalMiniProgramQuoteApi, type RentalMiniProgramQuotePorts } from "./ai-quotes";
+export { createRentalMiniProgramPublicApi, type RentalMiniProgramPublicPorts } from "./ai-public";
+export { createRentalMiniProgramGoalApi, type RentalMiniProgramGoalPorts } from "./ai-goals";
+export { createRentalMiniProgramBookingTransferApi, type RentalMiniProgramBookingTransferPorts, type ClientBookingTransferApi } from "./ai-booking-transfers";
+export { createRentalMiniProgramEntryActionApi, type RentalMiniProgramEntryActionPorts, type RentalMiniProgramEntryActionSession, type ClientOriginalPaymentRecord } from "./ai-entry-actions";

@@ -1,6 +1,6 @@
 # Rental 员工客户端
 
-本入口提供订单、资产与库存、养护工单与归还处置、客户主档与会员、工作台、经营目录和会员审核七组工厂，以及认证和业务附件工厂。每个真实员工宿主创建自己的客户端实例，传入同一员工请求函数，页面继续调用原业务方法。业务类型单源消费 Rental 合同，宿主的 shared 兼容出口引用同一份定义。[客户端入口](index.ts) · [业务合同](../../src/contracts.ts)
+本入口提供订单、资产与库存、养护工单与归还处置、客户主档与会员、工作台、经营目录和会员审核七组工厂，以及认证、业务附件、原 Action 与 AI 检查任务工厂。每个真实员工宿主创建自己的客户端实例，传入同一员工请求函数，页面继续调用原业务方法。业务类型单源消费 Rental 合同，宿主的 shared 兼容出口引用同一份定义。[客户端入口](index.ts) · [业务合同](../../src/contracts.ts)
 
 ## 接入
 
@@ -35,6 +35,14 @@ sessionEvents.on(assets.invalidateAssets);
 
 认证使用 `createRentalStaffAuthApi`，宿主传入原请求、refresh token 读取、会话保存与退出清理。附件使用 `createRentalStaffUploadsApi`，宿主传入原键、观察校验与固定路由、微信读文件和 PUT 字节能力。页面生命周期和阶段回调沿原宿主，未知结果保留原引用，不能重传文件。[认证接入](auth/README.md) · [附件接入](uploads/README.md)
 
+## AI 请求接入
+
+[Action 工厂](ai-entry-actions.ts)接收原员工 request、同一会话对象、上下文版本、`can`、服务器时钟及原生成 [Action 合同值](../../../../apps/staff-miniprogram/src/components/ai-native/entry-action-runtime.d.ts)。[原适配](../../../../apps/staff-miniprogram/src/api/ai-entry-actions.ts)窄导出捕获、API 创建及原动作码；[动作会话](../../../../apps/staff-miniprogram/src/components/ai-native/entry-action-session.ts)继续管理展示寿命。完整 user 投影、会话对象引用、令牌、租户、空间及当前订单查看权限继续前后复验，宿主须返回原会话对象。
+
+[检查任务工厂](ai-inspection-tasks.ts)接收原 request、调用方 `current`、[同一生成注册表](../../../../apps/staff-miniprogram/src/components/ai-native/inspection-wire-schemas.ts)的 `taskContracts/taskHttp` 和[原校验函数](../../../../apps/staff-miniprogram/src/components/ai-native/inspection-wire.ts)。注册表类型沿 Shared 正式导出声明，校验器由真实宿主提供。[原任务适配](../../../../apps/staff-miniprogram/src/api/ai-inspection-tasks.ts)供给这些原值，[原页面绑定](../../../../apps/staff-miniprogram/src/components/ai-native/inspection-task-page-binding.ts)及[检查任务组件](../../../../apps/staff-miniprogram/src/components/ai-native/ai-inspection-task/index.ts)消费。
+
+检查任务路径须属于原 `staff/v1/`，任务写入使用原注册表的 120 秒超时，读取及其他检查请求保留原 15 秒超时。请求及结果沿原 JSON clone，await 前后均核对当前寿命与原校验。`submitAndContinue` 保持原明确保存并继续语义，POST 不在刷新后重放，unknown 保留原引用。正式业务提交和原收据仍由原订单及检查宿主处理。
+
 ## 原生编译与微信打包
 
 准备项目锁定依赖后，使用原微信宿主构建入口。
@@ -44,7 +52,7 @@ npm run build:staff-miniprogram
 npm run typecheck -w @rental-os/staff-miniprogram
 ```
 
-[原生配置](../../tsconfig.native-clients.json)定义 `dist-clients/` 的 CommonJS 和声明。业务合同导入均为 `import type`，员工运行时使用已登记的七组业务、认证和附件工厂及其相对依赖，正式包名定位到 `dist-clients/clients/staff/index.js` 和同名声明。原收据读取与其他订单方法由同一工厂提供。
+[原生配置](../../tsconfig.native-clients.json)定义 `dist-clients/` 的 CommonJS 和声明。业务合同导入均为 `import type`，员工运行时使用已登记的七组业务、认证、附件、原 Action 和 AI 检查任务工厂及其相对依赖，正式包名定位到 `dist-clients/clients/staff/index.js` 和同名声明。原收据读取与其他订单方法由同一工厂提供。
 
 员工微信构建从本树源码与实际包声明在单一任务临时目录编译当前 Shared 声明和完整 Native 工厂。公共打包函数将已声明入口的相对 CommonJS 闭包及原 MIT 许可带入 `dist/vendor/rental-core/`，原宿主的包导入改为该发布包内路径。最终所有 JS 的 `require` 均须解析到本包 JS/JSON，缺出口、缺文件、外部或动态依赖会停止构建。构建和 `--check` 退出时释放私有编译产物。[打包实现](../../../../scripts/miniprogram-shared-types.cjs) · [微信构建入口](../../../../apps/staff-miniprogram/scripts/build.cjs)
 

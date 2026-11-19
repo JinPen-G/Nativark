@@ -9,6 +9,7 @@ export interface RentalMiniProgramRequestOptions {
   idempotencyKey?: string;
   timeoutMs?: number;
   replayAfterRefresh?: boolean;
+  publicSessionCredential?: string;
 }
 
 export type RentalMiniProgramRequest = <T>(path: string, options?: RentalMiniProgramRequestOptions) => Promise<T>;

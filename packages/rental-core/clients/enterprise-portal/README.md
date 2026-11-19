@@ -14,6 +14,8 @@ import "@rental-os/rental-core/clients/enterprise-portal/styles";
 
 宿主先加载公共 UIArc/主题样式，按[原入口](../../../../apps/enterprise-portal/src/main.tsx)捕获邀请、应用动效偏好并挂载。入口保持原 BrowserRouter、QueryClient、Locale/Appearance/MotionProvider 和弹层作用域，面向同一浏览器应用实例。[薄宿主 Vite 配置](../../../../apps/enterprise-portal/vite.config.ts)通过公共 `platformAdminVite()` 复用同一适配，环境公开白名单、企业路径 rewrite 与 operator runtime 拒绝边界沿原规则。公共样式先于门户样式，构建使用锁定依赖。
 
+消费本 UI 入口时，宿主须按其 package 依赖准备 `@rental-os/shared@0.1.0`，与 Rental 包声明的 Shared peer 版本一致。该 peer 的 optional 标记允许未消费这些 UI 出口的宿主省略依赖。
+
 ## 页面与调用链
 
 [App](App.tsx) → [企业会话](enterprise-session.tsx) → [Shell](EnterpriseShell.tsx)与实际页面 → [原操作门闸](../enterprise/original-workflow-operation.ts)／[文件材料客户端](../enterprise/file-evidence/README.md) → 公共客户运输 → Rental 企业 Controller、领域服务与仓储。公共壳、UIArc、语言、主题和原表单快照从 `@rental-os/platform-admin` 已登记出口消费，材料与政策控件复用本包已有会员模块。
