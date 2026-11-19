@@ -397,8 +397,8 @@ export class RentalCoreController {
     });
     return result;
   }
-  // 必须先 await 业务结果再写快照：配置写方法已转为异步，若直接把 Promise 传进来
-  // 就会与快照写入并发，快照可能捕获到变更前的状态。
+  // 原动作失败或 unknown 原样抛出，不重做。持久化宿主已在原事务提交；
+  // persist 只为没有完整权威读取器的旧宿主保存恢复副本，不再次准入已提交动作。
   private async committed<T>(tenantId: string, result: T | Promise<T>): Promise<T> {
     const resolved = await result;
     await Promise.all([this.service.persist(tenantId), this.business.persist(tenantId)]);
@@ -1106,7 +1106,7 @@ export class RentalCoreController {
       }
     }
     await this.business.refreshFromDatabase();
-    await this.business.refreshCouponTemplateCache(tenantId, (await this.context(tenantId)));
+    await this.business.refreshCouponTemplateCache(tenantId, () => this.context(tenantId));
     await this.service.persist(tenantId);
     return {
       scanned: candidates.length,
@@ -1141,7 +1141,7 @@ export class RentalCoreController {
     });
     if (!replayed) await this.emitOrderEvent(tenantId, "order.cancelled", order);
     await this.business.refreshFromDatabase();
-    await this.business.refreshCouponTemplateCache(tenantId, (await this.context(tenantId)));
+    await this.business.refreshCouponTemplateCache(tenantId, () => this.context(tenantId));
     return this.committed(tenantId, order);
   }
 
@@ -1224,7 +1224,7 @@ export class RentalCoreController {
       }
     }
     await this.business.refreshFromDatabase();
-    await this.business.refreshCouponTemplateCache(tenantId, (await this.context(tenantId)));
+    await this.business.refreshCouponTemplateCache(tenantId, () => this.context(tenantId));
     await this.service.persist(tenantId);
     return {
       scanned: overdueCandidates.length + noShowCandidates.length,
@@ -1340,7 +1340,7 @@ export class RentalCoreController {
     });
     if (!replayed) await this.emitOrderEvent(tenantId, "order.no_show", order);
     await this.business.refreshFromDatabase();
-    await this.business.refreshCouponTemplateCache(tenantId, (await this.context(tenantId)));
+    await this.business.refreshCouponTemplateCache(tenantId, () => this.context(tenantId));
     return this.committed(tenantId, order);
   }
 
@@ -1402,7 +1402,7 @@ export class RentalCoreController {
     });
     // 内部权益已与订单同事务提交；此处只发布已提交的数据到进程缓存。
     await this.business.refreshFromDatabase();
-    await this.business.refreshCouponTemplateCache(tenantId, (await this.context(tenantId)));
+    await this.business.refreshCouponTemplateCache(tenantId, () => this.context(tenantId));
     // 回放时跳过通知：通知是外部副作用，同键重试不该让客户收到第二条短信。
     if (!replayed) await this.emitOrderEvent(tenantId, "order.confirmed", order);
     return this.committed(tenantId, order);

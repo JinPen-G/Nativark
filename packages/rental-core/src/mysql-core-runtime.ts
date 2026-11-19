@@ -386,6 +386,8 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   private readonly logger = new Logger(RentalCoreService.name);
   /** 同一空间首次并发读取时，只允许一条请求执行配置与样本补落。 */
   private readonly initializationByWorkspace = new Map<string, Promise<void>>();
+  /** Startup evidence only; normal requests never migrate or re-admit snapshots. */
+  private normalizedRecoveryCheck?: Promise<void>;
 
   // configStore 必填：配置的事实源是数据库，内存 states 只是写穿缓存。
   // 不设为可选，避免生产环境缺少注入时静默退回纯内存而无人察觉。
@@ -590,6 +592,16 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
     const committed = await this.refreshCommittedWorkspace(tenantId);
     if (committed && !committed.effectiveProfile) throw new ConflictException("经营空间档案尚未持久化，不能通过业务访问重新初始化");
     if (committed && !committed.businessSettings) throw new ConflictException("经营设置尚未持久化，不能通过业务访问重新初始化空间");
+    if (committed) {
+      // A real authority reader has already returned the complete committed
+      // configuration. Do not inspect mutable cache flags or enter the legacy
+      // initialization queue from a read; empty collections remain empty.
+      return structuredClone({ profile: committed.effectiveProfile!, businessSettings: committed.businessSettings!,
+        operators: committed.operators, locations: committed.locations, itemGroups: committed.itemGroups,
+        pricingGroups: committed.pricingGroups ?? [], couponTemplates: committed.couponTemplates,
+        inspectionTemplates: committed.inspectionTemplates, sampleAssets: [], sampleStockBalances: [],
+        sampleFactsEnsured: true, configPersisted: true } satisfies TenantRentalState);
+    }
     const workspaceId = this.workspaceOf(tenantId);
     const state = this.state(tenantId);
     let initialization = this.initializationByWorkspace.get(workspaceId);
@@ -610,6 +622,9 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   }
 
   async onModuleInit() {
+    // The normalized host reads the profile facet through its original config
+    // reader after migration checks. It must not publish an aggregate first.
+    if (this.configStore.loadWorkspaceSnapshot) return;
     for (const row of await this.stateRepository?.loadCoreStates() ?? []) {
       const state = row.state as unknown as TenantRentalState;
       // 快照行自带 workspaceId，直接按空间键装载，不再需要事后从 tenantId 迁键。
@@ -650,6 +665,7 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
       if (workspace.isDefault) this.defaultWorkspaceByTenant.set(workspace.tenantId, workspace.id);
     }
     if (this.configStore.loadWorkspaceSnapshot) {
+      await (this.normalizedRecoveryCheck ??= this.stateRepository?.assertNormalizedRecovery("core") ?? Promise.resolve());
       // 启动与采用后的读取使用同一锁定快照；不能先读旧配置，再单独拼接新绑定正文。
       // 原快照里的样本与缺省值不回填当前配置，合法空集也必须覆盖旧缓存。
       for (const workspace of workspaces) await this.loadCommittedWorkspace(workspace.tenantId, workspace.id);
@@ -692,6 +708,11 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   }
 
   async persist(tenantId: string) {
+    // All normalized writes own their transaction before returning. The only
+    // authoritative snapshot facet (a non-default workspace profile) is written
+    // there by configStore.upsertProfile, not by this aggregate recovery copy.
+    // Re-admitting a second write here could hide the original committed receipt.
+    if (this.configStore.loadWorkspaceSnapshot) return;
     // 快照已按经营空间存档，因此直接存**当前**空间的状态，不必再固定挑默认空间。
     const workspaceId = this.workspaceOf(tenantId);
     if (this.missingCommittedProfiles.has(workspaceId)) throw new ConflictException("经营空间档案缺失，不能把模板占位写成恢复资料");

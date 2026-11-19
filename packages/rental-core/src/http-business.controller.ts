@@ -112,8 +112,8 @@ export class RentalBusinessController {
     ].some((code) => permissions.includes(code));
   }
 
-  // 必须先 await 业务结果再写快照：核心服务的配置写方法已转为异步，若直接把 Promise
-  // 传进来就会与快照写入并发，快照可能捕获到变更前的状态。
+  // 原动作失败或 unknown 原样抛出，不重做。持久化宿主已在原事务提交；
+  // persist 只为没有完整权威读取器的旧宿主保存恢复副本，不再次准入已提交动作。
   private async committed<T>(tenantId: string, result: T | Promise<T>): Promise<T> {
     const resolved = await result;
     await Promise.all([this.business.persist(tenantId), this.core.persist(tenantId)]);

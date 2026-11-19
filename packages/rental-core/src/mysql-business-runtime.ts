@@ -472,6 +472,7 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
   private readonly bootstrapCategoryByWorkspace = new Map<string, RentalCategoryCode>();
   /** 运行期提交后刷新串行化，防止较旧数据库快照晚到并覆盖较新缓存。 */
   private refreshQueue: Promise<void> = Promise.resolve();
+  private normalizedRecoveryCheck?: Promise<void>;
   private readonly logger = new Logger(RentalBusinessService.name);
   /** 归还/取消计费改从订单快照取规则与费率时，缺字段回落报价的一次性告警去重。 */
   private readonly warnedMissingOrderSnapshot = new Set<string>();
@@ -522,12 +523,19 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
     private readonly notificationDraftRetention?: RentalNotificationDraftRetention
   ) {}
 
-  /**
-   * 业务配置写穿缓存的启动预热。
-   * 与核心配置同理放在 OnApplicationBootstrap：快照回填是 OnModuleInit，
-   * 在它之前预热会读到还没回填的空表。
-   */
+  private hasAuthoritativeConfiguration() {
+    return typeof this.configStore.loadWorkspaceSnapshot === "function"
+      && typeof this.coreConfigStore.loadWorkspaceSnapshot === "function";
+  }
+
+  /** Startup follows the original legacy backfill, if that host selected it.
+   * Complete normalized readers use persisted configuration and facts, including
+   * empty collections. A recovery aggregate is never their fallback authority. */
   async onApplicationBootstrap() {
+    const authoritative = this.hasAuthoritativeConfiguration();
+    if (authoritative) {
+      await (this.normalizedRecoveryCheck ??= this.stateRepository?.assertNormalizedRecovery("business") ?? Promise.resolve());
+    }
     const [configs, facts, coreConfigs] = await Promise.all([
       this.configStore.loadAll(),
       this.factStore.loadAll(),
@@ -553,10 +561,12 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
     // 全部留空——只恢复了事实，配置照样丢。
     // SPACE-03：改为按**经营空间**处理。空间集合取自两个 loadAll 的并集，
     // 它们都已以 business_workspaces 为基准，因此新建但尚无数据的空间也在内。
-    for (const workspace of await this.coreConfigStore.listWorkspaces()) {
+    const workspaces = await this.coreConfigStore.listWorkspaces();
+    for (const workspace of workspaces) {
       if (workspace.isDefault) this.defaultWorkspaceByTenant.set(workspace.tenantId, workspace.id);
+      if (authoritative) this.bootstrapCategoryByWorkspace.set(workspace.id, workspace.categoryCode);
     }
-    // 只处理**确实有数据可装载**的空间。
+    // 无完整权威读取器的旧宿主只处理**确实有数据可装载**的空间。
     //
     // 不能对所有空间都建状态：loadAll 现在为每个空间都返回一条，而这里会把
     // 内存状态设成库中内容。对一个还没写过任何配置的空间，那等于塞进一个空状态，
@@ -571,7 +581,7 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
           row.referrals.length ||
           row.notificationLogs.length
       );
-    const workspaceIds = new Set<string>([
+    const workspaceIds = new Set<string>(authoritative ? workspaces.map(row => row.id) : [
       ...configs.filter((row) => row.hasPersistedConfig).map((row) => row.workspaceId),
       ...facts.filter(factHasRows).map((row) => row.workspaceId),
       // 已有内存状态的空间也要参与，让库内容覆盖它。
@@ -586,11 +596,16 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
 
     for (const workspaceId of workspaceIds) {
       const tenantId = tenantByWorkspace.get(workspaceId)!;
-      const state = this.states.get(workspaceId) ?? this.stateFromFacts(workspaceId);
+      const state = authoritative ? this.stateFromFacts(workspaceId) : this.states.get(workspaceId) ?? this.stateFromFacts(workspaceId);
       if (!state) continue;
       const config = configByWorkspace.get(workspaceId);
-      // 只有真的写过库的空间才覆盖：否则会把 seedState 的默认配置抹成空。
-      if (config?.hasPersistedConfig) {
+      const fact = factsByWorkspace.get(workspaceId);
+      if (authoritative && (!config || !fact || config.tenantId !== fact.tenantId || config.categoryCode !== state.categoryCode
+        || config.tenantId !== workspaces.find(row => row.id === workspaceId)?.tenantId)) {
+        throw new ServiceUnavailableException("经营空间的完整规范化配置或事实读取缺失，不能回退恢复快照");
+      }
+      // 旧宿主保留未补落的初始配置；权威宿主即使全部为空也必须覆盖，不能回 seed。
+      if (config && (authoritative || config.hasPersistedConfig)) {
         // 无条件覆盖，包括空数组：库里没有就是没有。
         // 「非空才覆盖」会让合法为空的配置继续保留快照或 seedState 的演示数据，
         // 使快照在读路径上静默胜出。
@@ -605,7 +620,6 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
         // 懒初始化空间，才由 createQuote 触发首次补落。
         state.configPersisted = true;
       }
-      const fact = factsByWorkspace.get(workspaceId);
       if (fact) {
         state.quotes = fact.quotes;
         state.customerCoupons = fact.customerCoupons;
@@ -615,6 +629,9 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
         state.notificationLogs = await this.notificationLogsForCache({ tenantId, workspaceId }, fact.notificationLogs);
       }
       this.states.set(workspaceId, state);
+    }
+    if (authoritative) {
+      for (const workspaceId of this.states.keys()) if (!workspaceIds.has(workspaceId)) this.states.delete(workspaceId);
     }
   }
 
@@ -644,6 +661,7 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
   }
 
   async onModuleInit() {
+    if (this.hasAuthoritativeConfiguration()) return;
     for (const row of await this.stateRepository?.loadBusinessStates() ?? []) {
       const state = row.state as unknown as RentalBusinessState;
       // 快照行自带 workspaceId，直接按空间键装载。
@@ -658,6 +676,11 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
   }
 
   async persist(tenantId: string) {
+    // This host's six configuration collections and six fact collections are
+    // already written by their original commands. Startup verifies legacy keys
+    // and reconstructs all of them without this redundant aggregate. Keep the
+    // old snapshot/initialization path only for stores without both readers.
+    if (this.hasAuthoritativeConfiguration()) return;
     // 默认配置准备和写入期间，运行期刷新不得把未完成的保存结果
     // 覆盖回同一内存对象，否则后续配置写入会读到被清空的数组。
     // 与提交后刷新共用队列；失败不阻断后续任务，不改变库缺失时的 fail-closed 行为。
@@ -4208,7 +4231,14 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
   }
 
   /** 奖励会修改核心配置中的券模板配额；业务事实预热不拥有这份缓存，需在提交后单独同步。 */
-  async refreshCouponTemplateCache(tenantId: string, context: BusinessContext) {
+  async refreshCouponTemplateCache(tenantId: string, context: BusinessContext | (() => Promise<BusinessContext>)) {
+    // Controllers pass a lazy context after commit. A normalized Core obtains
+    // the current quota in its next authoritative read; evaluating the supplier
+    // here would perform new admission after the order/receipt already committed.
+    if (typeof context === "function") {
+      if (this.hasAuthoritativeConfiguration()) return;
+      context = await context();
+    }
     const workspaceId = this.workspaceOf(tenantId);
     const config = (await this.coreConfigStore.loadAll()).find((row) => row.workspaceId === workspaceId);
     if (config) context.couponTemplates.splice(0, context.couponTemplates.length, ...config.couponTemplates);
@@ -4282,6 +4312,11 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
     const binding = { categoryVersionId: context.categoryVersionId!, adoptionRevision: context.categoryAdoptionRevision! };
     // 与启动刷新、默认配置补落共用原队列；失败不阻断后续读取，也不发布旧配置。
     const reading = this.refreshQueue.catch(() => undefined).then(async () => {
+      if (this.hasAuthoritativeConfiguration() && this.states.get(workspaceId)?.categoryCode !== context.category.code) {
+        // A workspace created after this process booted also needs its normalized
+        // facts. Never manufacture empty financial/history collections with seed.
+        await this.onApplicationBootstrap();
+      }
       const snapshot = await this.configStore.loadWorkspaceSnapshot!(tenantId, workspaceId, binding);
       if (snapshot.tenantId !== tenantId || snapshot.workspaceId !== workspaceId || snapshot.categoryCode !== context.category.code) {
         throw new ConflictException("业务配置快照的作用域或品类不一致");
@@ -6714,6 +6749,7 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
   private cachedState(tenantId: string, context: BusinessContext, workspaceId = this.workspaceOf(tenantId)) {
     let state = this.states.get(workspaceId);
     if (!state || state.categoryCode !== context.profile.categoryCode) {
+      if (this.hasAuthoritativeConfiguration()) throw new ServiceUnavailableException("经营空间业务事实尚未完成规范化读取，不能使用默认配置或恢复副本");
       state = this.seedState(tenantId, context, this.seedPrefix(tenantId, workspaceId));
       this.states.set(workspaceId, state);
     }

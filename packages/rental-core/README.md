@@ -91,7 +91,7 @@
 | [能力执行器](src/capability-runtime.ts)、[条件依据](src/capability-conditions.ts) | `/capability-runtime` 与 `/capability-conditions` 执行原启用实例、必需能力和冻结版本判定。实例由宿主提供，业务服务持有当前授权及事务 |
 | [空间能力服务](src/workspace-capabilities.ts)、[仓储端口](src/workspace-capability-port.ts) | `/workspace-capabilities` 管理原能力状态、配置、版本、就绪总览及初始化。声明、实现、启用分别判定，存储和当前范围经窄端口供给 |
 | [空间能力仓储](src/workspace-capability-repository.ts)、[存储视图](src/workspace-capability-storage.ts) | `/workspace-capability-repository` 持有实例与生命周期审计读写，保留修订冲突、同事务初始化及原重试分类。宿主供给原空间解析、品类锁和同一数据源 |
-| [恢复快照](src/mysql-state.ts)、[快照存储视图](src/state-storage.ts) | `/mysql-state` 保存原空间恢复副本及行修订，保留参数化 SQL、当前品类绑定锁和调用方事务；恢复副本不替代正式业务事实或授权 |
+| [恢复快照](src/mysql-state.ts)、[快照存储视图](src/state-storage.ts) | `/mysql-state` 保存原空间恢复副本及行修订；规范化宿主启动只核原完整键和关联，缺迁移依据时保留原资料并拒绝开放。恢复副本不替代正式业务事实或授权 |
 | [历史快照回填](src/mysql-snapshot-backfill.ts)、[本表事务视图](src/snapshot-backfill-storage.ts) | `/mysql-snapshot-backfill` 保留原完整键、主档映射、品类来源/修订及单空间原事务；宿主只按原顺序登记一次，错误可见，恢复不重做业务 |
 | [员工线下收款](src/mysql-staff-payments.ts)、[原事务接点](src/staff-payment-storage.ts)、[请求DTO](src/http-staff-payment.dto.ts) | `/mysql-staff-payments`、`/http-staff-payment.dto` 保留原地点/凭证/余额、待确认额度、当前收款方式及原资金收据；登记与确认分开，同键不重复收款 |
 | [归还价格来源](src/return-pricing.ts)、[到期核定收据](src/corporate-maturity-receipt.ts) | `/return-pricing` 只投影原分配的冻结价格段，`/corporate-maturity-receipt` 核原债权与审计，不重新计价、核定或修改原账 |
@@ -209,7 +209,7 @@ HTTP入口从 `/http-workspace-capabilities`、`/http-staff-payments` 导入；`
 
 专用换货影像通过 `/file-application-exchange-inspection` 使用同一文件配置、上传事实和受限字节传输。原换货应用先核订单与来源，再把原事务交给文件适配写入暂存记录及完成收据。文件适配先登记冻结目标再写入字节，失应答后只读取该目标，验收后的照片按原摘要读取。通用上传、下载和清理继续隔离该场景。[换货影像文件适配](src/file-application-exchange-inspection.ts) · [原业务入口](src/mysql-exchange-inspection-media.ts)
 
-核心聚合从 `@rental-os/rental-core/mysql-core-runtime` 导入。核心/事实仓储、恢复、Hook、资金与服务容量使用本包的同一实例，会员、企业支出/授信、文件生命周期与企业续租报价按 [实际端口](src/core-runtime-ports.ts) 供给。原Nest provider保留原构造顺序和初始化钩子；恢复在模块初始化读取，配置预热在全部回填之后运行，事务内配置读取不发布进程缓存。历史订单没有能力快照时保留空执行名单，当前新能力不反向影响旧订单。HTTP权限仍由原Guard裁定，业务方法继续接收调用方已有事务。[原Nest接线](../../apps/api/src/modules/rental-core/rental-core.service.ts) · [核心验证](../../tests/rental-core-v01.test.cjs) · [换货/续租历史验证](../../tests/rental-exchange-segment-pricing.test.cjs)
+核心聚合从 `@rental-os/rental-core/mysql-core-runtime` 导入。核心/事实仓储、恢复、Hook、资金与服务容量使用本包的同一实例，会员、企业支出/授信、文件生命周期与企业续租报价按 [实际端口](src/core-runtime-ports.ts) 供给。原Nest provider保留原构造顺序和初始化钩子。有完整规范化读取器时，启动先核历史迁移依据，再读取已提交的配置与事实；合法空集保持空，不从恢复副本或样本补回。旧快照宿主仍按原回填顺序预热，事务内配置读取不发布进程缓存。历史订单没有能力快照时保留空执行名单，当前新能力不反向影响旧订单。HTTP权限仍由原Guard裁定，业务方法继续接收调用方已有事务。[原Nest接线](../../apps/api/src/modules/rental-core/rental-core.service.ts) · [核心验证](../../tests/rental-core-v01.test.cjs) · [换货/续租历史验证](../../tests/rental-exchange-segment-pricing.test.cjs)
 
 报价/营销服务从 `@rental-os/rental-core/mysql-business-runtime` 导入，配置、事实和核心配置仓储使用同一实例；会员、企业币种核验、密文及短信通过 [实际端口](src/business-runtime-ports.ts) 供给。原API的14项构造顺序与两个初始化钩子保留，适配层另把原通知正文保留读取器传给包内构造末尾的可选接点。配置/事实按同一刷新队列装载，续租事务上下文沿用模块级ALS。报价来源每次从同一公共可信身份读取，detached配置不发布进程缓存；`delivery_uncertain` 只按原投递记录查询，尝试次数与租约仍分别处理。[原Nest接线](../../apps/api/src/modules/rental-core/rental-business.service.ts) · [报价/营销验证](../../tests/rental-business-v1.test.cjs) · [通知恢复验证](../../tests/rental-notification-lease.test.cjs)
 
@@ -301,6 +301,8 @@ HTTP宿主登记 `/http-core` 和 `/http-business` 的两个Controller，从 `/h
 空间能力服务通过仓储的正式方法读当前实例、保存变更和初始化。保存继续核当前品类绑定、依赖、互斥及预期修订，实例和审计由同一事务提交。重复初始化只补缺项，保留管理员后来暂停或停用的状态。原 API 的服务与仓储 provider 供给同一实现。[原服务接线](../../apps/api/src/modules/rental-core/workspace-capability.service.ts) · [原持久适配](../../apps/api/src/modules/rental-core/workspace-capability.repository.ts)
 
 MySQL 快照与收据子出口使用可选 peer `@prisma/client` 的原 SQL/JSON runtime，不加载生成模型或实例化数据库客户端；领域总出口不加载这些适配。宿主提供本表的窄存储视图、真实范围解析及原事务。保存 Core 快照时传入已有事务，品类锁、行修订和原事件捕获一起提交；未传入时才由仓储按原 ReadCommitted 方式开事务。收据 `record` 必须传入业务事务，重试先读原键，缺收据保持未知。[原快照接线](../../apps/api/src/modules/rental-core/rental-state.repository.ts) · [原收据接线](../../apps/api/src/modules/rental-core/rental-idempotency.repository.ts)
+
+完整规范化宿主的命令已在原事务保存业务与配置，提交后的 `persist` 不再重复写聚合恢复副本，也不再次检查新业务准入而把原成功收据变成 403。非默认空间档案仍由原配置事务保存。启动遇到未映射的历史主键、订单子关联或内嵌审计，需按原迁移/恢复流程核对；检查只读，不自动回填、重发或删除快照。缺少完整读取器的旧宿主保留原恢复写入，调用方可把同一事务传给业务快照保存。[恢复核验](src/mysql-state.ts) · [已提交结果](src/http-core.controller.ts) · [报价与配置](src/mysql-business-runtime.ts)
 
 业务动作执行器接收原事务端口和幂等仓储。`executeInTransaction` 参与调用方已有事务，`readReceipt` 只读原操作；`executeWithReplayFlag` 区分首次提交与回放，通知等外部副作用由原调用者处理。唯一约束竞争读原赢家，已证实写冲突按原键有限重试，未分类错误原样抛出。Tenant共享锁保留原企业政策的并发围栏，不替代当前角色、Core准入或业务对象授权。[原动作接线](../../apps/api/src/modules/rental-core/rental-idempotent-action.service.ts)
 
