@@ -120,10 +120,10 @@ node packages/core-contracts/dist/check.js <解包后的Core目录> --host <宿�
 ## 命名、版本与权限
 
 - Core ID 使用小写字母、数字和连字符，例如 `rental`、`example-tickets`，不使用租赁品类编码充当 Core 类型。
-- 当前合同版为 `0.1.0`。首版支持确定的三段数字发行版本；兼容区间使用包含下限的 `minInclusive` 和不含上限的 `maxExclusive`，不解释 `latest`、npm 范围或预发行标签。
+- 当前合同版为 `0.1.1`。支持确定的三段数字发行版本；兼容区间使用包含下限的 `minInclusive` 和不含上限的 `maxExclusive`，不解释 `latest`、npm 范围或预发行标签。
 - 底座发行、Core 实现、合同和数据各有自己的版本。清单和宿主资料先经各自 schema 解析，再调用 `checkCoreCombination` 检查组合；它支持空组合，也拒绝同 ID 的两个实现、缺能力和不兼容版本。
 - Core 权限声明由本地 `resource` 与 `action` 组成，`corePermissionCode` 输出 `<coreId>:<resource>:<action>`。这是权限目录的声明，不会授予任何角色；旧 Rental 权限保持原兼容适配。
-- 业务可以只以租户为范围，也可以声明自己的容器类型。对象键同时包含 Core、租户、容器与对象类型/ID；它只定位对象，不能作为授权证据或替换历史幂等键。
+- 业务可以只以租户为范围，也可以声明自己的容器类型。容器 Core 同时提供租户级业务时，显式声明 `tenantScope: true`，并将合同兼容下限设为 `0.1.1` 或更新版本；省略该字段仍要求提供容器。租户、各容器分别建立绑定，权限不能互相推导。对象键同时包含 Core、租户、容器与对象类型/ID；它只定位对象，不能作为授权证据或替换历史幂等键。
 - `admin`、`openapi`、`ai`、`jobs`、`events` 均为可选入口；未提供 AI 不要求写空工具。已声明入口必须存在。业务是否可用仍由后续真实装配、注册、授权和就绪决定。
 
 ## 给 Core 附上 API 说明
@@ -248,6 +248,8 @@ React 的 `CoreAdminPageAction` 还可声明 `slot`。省略时使用主操作�
 
 Rental 的商品、订单、养护、会员及经营页面通过 `createRentalAdminContribution(version, contexts)` 合入同一 Core。工作台和报表由 `useOperationsContext` 提供当前会话、业务范围、客户预览与已认证的 JSON / CSV 请求，页面复用同一外壳和原按钮；无需修改底座内部。[统一贡献](../rental-core/admin/index.tsx) · [工作台三步接入与原权限](../rental-core/admin/operations/README.md#接入与旧宿主)
 
+Rental 的会员、渠道等页面使用独立租户绑定；订单等空间业务使用 `rental-workspace` 容器绑定。标准 [服务端贡献](../rental-core/src/server.ts) 和 [平台适配](../rental-core/src/platform-host.ts) 共用原当前账号、Core 授权、成员分配及绑定，空间业务额外核原空间成员和已保存配置。宿主供给同一数据库及真实部署观察，组合工厂本身不创建空间或开通租户。[原组合工厂](../../apps/api/src/modules/core-host/original-rental.ts)
+
 ## 组合 Prisma 源码
 
 使用 Prisma 的宿主从 `@rental-os/core-contracts/prisma` 导入 `composeCorePrismaSchema`，传入公共源码和所选 Core 的贡献。
@@ -278,7 +280,7 @@ node packages/core-contracts/dist/plan-update.js <当前锁JSON> <升级请求JS
 
 检查依次核对来源与不可变发行、全部选中模块的版本兼容、数据可读性和迁移历史。已发布迁移只追加，不能改原文件、顺序或摘要。若有新迁移，实际数据须先处于当前发行的完整基线，数据版本必须前进；中断或记录矛盾时先核对原迁移，不自动重做。
 
-普通更新保留Core的业务范围声明及原绑定。租户范围与容器范围互换、容器类型更名都返回 `scope_changed`，即使实现和数据版本前进也不能借这一入口转换。需要改变范围时，先核定原绑定、数据和权限的专门迁移方案；兼容的同范围修复继续按原更新路径办理。
+普通更新保留Core的业务范围声明及原绑定。租户范围与容器范围互换、容器类型更名，以及增加或取消 `tenantScope` 都返回 `scope_changed`，即使实现和数据版本前进也不能借这一入口转换。需要改变范围时，先核定原绑定、数据和权限的专门迁移方案；兼容的同范围修复继续按原更新路径办理。
 
 新宿主的迁移观察还提供 `execution`。原迁移账和物理结构核同后使用 `state: "ready"`，执行中、失败和未知分别使用 `running`、`failed`、`unknown`，携带原迁移标识/摘要，以及已知的语句进度、物理观察摘要和固定恢复SQL。出现未完成状态时预检返回 `migration_incomplete`，原DDL部分提交必须先根据真实结构与原执行收据处理。恢复SQL来源和摘要须核定后按目标环境授权执行，完成物理回读和原迁移账登记后重新观察。旧调用方的缺省字段沿原完整基线约束兼容，新宿主始终显式提供状态。[迁移观察合同](src/update.ts)
 

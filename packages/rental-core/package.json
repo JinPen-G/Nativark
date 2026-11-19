@@ -1322,6 +1322,18 @@
     "./admin/operations/components": "./admin/operations/components.ts",
     "./admin/operations/logic": "./admin/operations/logic.ts",
     "./admin/operations/messages": "./admin/operations/messages.ts",
+    "./core-identity": {
+      "types": "./dist/core-identity.d.ts",
+      "default": "./dist/core-identity.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "default": "./dist/server.js"
+    },
+    "./platform-host": {
+      "types": "./dist/platform-host.d.ts",
+      "default": "./dist/platform-host.js"
+    },
     "./admin/channels": "./admin/channels/index.tsx",
     "./admin/channels/client": "./admin/channels/client.ts",
     "./admin/channels/website-client": "./admin/channels/website-client.ts",
@@ -2359,6 +2371,15 @@
       ],
       "admin/operations/messages": [
         "./admin/operations/messages.ts"
+      ],
+      "core-identity": [
+        "dist/core-identity.d.ts"
+      ],
+      "server": [
+        "dist/server.d.ts"
+      ],
+      "platform-host": [
+        "dist/platform-host.d.ts"
       ],
       "admin/channels": [
         "./admin/channels/index.tsx"

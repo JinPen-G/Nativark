@@ -54,7 +54,7 @@ export function renderCoreGuide(
     quick,
     agent,
     `## 本 Core 的必需与可选入口\n\n[服务端入口](<${manifest.entries.server}>)。${manifest.entries.admin ? `[后台入口](<${manifest.entries.admin}>)。` : "本包没有声明后台入口。"}${manifest.entries.openapi ? `[同版本 API 文档](<${manifest.entries.openapi}>)。` : "本包没有声明 API 文档。"}${manifest.entries.ai ? `[AI贡献](<${manifest.entries.ai}>)，使用仍需发布与当前授权。` : "本包没有AI贡献，Agent不能查询或操作其业务。"}${manifest.entries.jobs ? `[作业入口](<${manifest.entries.jobs}>)，仅由宿主按登记范围启动。` : ""}${manifest.entries.events ? `[事件入口](<${manifest.entries.events}>)，由所属Core处理原事件与重复投递。` : ""}`,
-    `对象范围为${manifest.scope.kind === "tenant" ? "租户" : `本Core的 ${plain(manifest.scope.containerType)} 容器`}。业务字段、状态与操作说明见[本包README](README.md)；许可见[LICENSE](LICENSE)。`,
+    `对象范围为${manifest.scope.kind === "tenant" ? "租户" : `本Core的 ${plain(manifest.scope.containerType)} 容器${manifest.scope.tenantScope ? "，并明确支持独立租户绑定" : ""}`}。业务字段、状态与操作说明见[本包README](README.md)；许可见[LICENSE](LICENSE)。`,
     "安装、部署注册、租户授权、成员分配和业务就绪分别成立。停用保留数据与原收据；重开复用绑定、核对当前权限，不能重放未知原操作。"
   ].join("\n\n") + "\n";
 }

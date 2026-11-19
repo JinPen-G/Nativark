@@ -28,9 +28,11 @@ CoreHostModule.register({
 
 管理收据通过 `OperationLogService.recordCoreAccessReceipt` 使用相同事务保存，审计失败抛出并回滚授权/收据。提交前再读同一会话及原账号权限。`deployment`从实际受控部署提供，包目录及源码清单的状态通过宿主组合后再使用。
 
-API的dev/build/lint前置构建本树platform-core-host及公共身份/Core合同依赖。独立SQL原文单份归公共宿主Prisma迁移链，原组合尚未实际应用。原AppModule/Guard和后台消费者继续按PCH接线，独立无Core AppModule已消费公共Core管理模块及其准入/同源OpenAPI。[PCH当前入口](../../../../../docs/平台底座/Core接入/平台Core接入-协作接续.md)
+API的dev/build/lint前置构建本树platform-core-host及公共身份/Core合同依赖。独立SQL原文单份归公共宿主Prisma迁移链，原组合尚未实际应用。原AppModule/Guard和后台消费者继续接线，独立无Core AppModule已消费公共Core管理模块及其准入/同源OpenAPI。[公开接入手册](../../../../../packages/core-contracts/README.md)
 
 ## 绑定与业务示范
+
+[composeOriginalRentalCore](original-rental.ts) 是 Rental 的原组合适配，只供给同一 Prisma 数据源、当前账号/空间投影、配置仓储、订阅与真实部署可用性，实际贡献来自正式 `@rental-os/rental-core/platform-host`。清单显式支持租户和 `rental-workspace` 容器范围，最低接入合同为 `0.1.1`。会员/渠道等租户业务不依赖品类档案，空间业务仍核原空间成员及保存的租赁配置；每个范围各有原绑定。工厂不会创建空间、补造存量 Core 授权或切换旧 URL 的鉴权链，部署目录和主 Guard 需由宿主实际挂载。[Rental 范围与贡献](../../../../../packages/rental-core/src/server.ts) · [平台适配](../../../../../packages/rental-core/src/platform-host.ts)
 
 [当前Core使用权](original-core-access.ts)在原事务内读取租户授权、成员分配和绑定，原订阅服务在同事务给出新业务期限判断。租户和成员必须分别开通，tenant/Core/成员复合条件用于读取，成员撤权后普通业务入口拒绝。
 

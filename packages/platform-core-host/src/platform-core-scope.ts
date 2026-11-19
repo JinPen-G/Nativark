@@ -1,7 +1,7 @@
 /** 原会话和Core使用权包围真实范围/就绪读取；Core自持事务，宿主不在外层持锁调用它。 */
 import type { CoreHostSqlClient } from "@rental-os/core-host/mysql";
 import type { PlatformCoreTransaction, PlatformCoreUsers, PlatformCoreTermPolicy } from "./ports";
-import { CORE_SCOPE_HTTP, CoreScopeResolutionSchema, CoreReadinessSchema, isCoreVersionSupported,
+import { CORE_SCOPE_HTTP, CoreScopeResolutionSchema, CoreReadinessSchema, isCoreVersionSupported, matchesCoreScope,
   type CoreScopeObservation, type CoreScopeReference } from "@rental-os/core-contracts";
 import { CoreAccessError, coreBindingScopeKey, type CoreDeployedCatalogue } from "@rental-os/core-host";
 import { PlatformPrincipalAuthority } from "@rental-os/platform-server/principal";
@@ -20,8 +20,7 @@ export function composePlatformCoreScopeReader<Tx extends PlatformCoreTransactio
     const scope: CoreScopeReference = { ...parsed, tenantId: actor.tenantId };
     const registration = input.catalogue.registrations.get(scope.coreId);
     if (!registration) throw new CoreAccessError("core_unavailable", "所选Core未在当前部署登记");
-    const domain = registration.manifest.scope;
-    if (domain.kind === "tenant" && scope.container || domain.kind === "container" && scope.container?.type !== domain.containerType)
+    if (!matchesCoreScope(registration.manifest.scope, scope.container))
       throw new CoreAccessError("denied", "范围与当前Core声明不一致");
     const currentBinding = () => input.database.$transaction(async (transaction: Tx) => {
       const lease = await principals.lock(transaction, actor, actor.tenantId);

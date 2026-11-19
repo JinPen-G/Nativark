@@ -3,9 +3,9 @@
  * 清单不授予租户/成员权限，不加载模块，也不代表迁移、业务或 AI 工具已经就绪。
  */
 import { z } from "zod";
-import { CoreReleaseVersionSchema, CoreVersionRangeSchema, isCoreVersionSupported } from "./version";
+import { CoreReleaseVersionSchema, CoreVersionRangeSchema, isCoreVersionSupported, compareCoreReleaseVersions } from "./version";
 
-export const CORE_CONTRACT_VERSION = "0.1.0";
+export const CORE_CONTRACT_VERSION = "0.1.1";
 export const CORE_MANIFEST_FILE = "core.manifest.json";
 export const CoreIdSchema = z.string().min(1).max(64)
   .regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$(?![\s\S])/, "使用小写字母、数字和单个连字符，且以字母开头");
@@ -78,7 +78,9 @@ export const CoreManifestSchema = z.object({
   }).strict()).max(500),
   scope: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("tenant") }).strict(),
-    z.object({ kind: z.literal("container"), containerType: localId }).strict()
+    z.object({ kind: z.literal("container"), containerType: localId,
+      /** 明确同时提供租户级业务绑定；省略时仍必须给出声明的容器。 */
+      tenantScope: z.literal(true).optional() }).strict()
   ]),
   data: CoreDataContractSchema,
   requires: z.array(z.object({
@@ -96,9 +98,19 @@ export const CoreManifestSchema = z.object({
   };
   unique(manifest.permissions.map(p => `${p.resource}:${p.action}`), "permissions");
   unique(manifest.requires.map(item => item.capability), "requires");
+  if (manifest.scope.kind === "container" && manifest.scope.tenantScope
+    && CoreVersionRangeSchema.safeParse(manifest.compatibility.contract).success
+    && compareCoreReleaseVersions(manifest.compatibility.contract.minInclusive, "0.1.1") < 0)
+    context.addIssue({ code: "custom", path: ["compatibility", "contract"], message: "同时提供租户和容器绑定需要接入合同0.1.1或更新版本" });
 });
 
 export type CoreManifest = z.infer<typeof CoreManifestSchema>;
+
+/** 范围由受控清单声明；租户业务与容器业务仍各有独立绑定，不互相推导授权。 */
+export function matchesCoreScope(scope: CoreManifest["scope"], container?: { type: string; id: string }): boolean {
+  if (scope.kind === "tenant") return container === undefined;
+  return container ? container.type === scope.containerType : scope.tenantScope === true;
+}
 
 /** 新贡献使用统一命名空间；旧 Rental 权限码在其兼容适配中保留原语义。 */
 export function corePermissionCode(coreId: string, permission: Pick<CoreManifest["permissions"][number], "resource" | "action">): string {

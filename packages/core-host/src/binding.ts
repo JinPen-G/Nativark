@@ -5,7 +5,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   BindCoreScopeSchema, CoreBindingOperationQuerySchema, CoreBindingSchema, CoreOperationReferenceSchema,
-  isCoreVersionSupported, type CoreBinding, type CoreOperationReference, type CorePrincipal,
+  isCoreVersionSupported, matchesCoreScope, type CoreBinding, type CoreOperationReference, type CorePrincipal,
   type CoreScopeReference, type CoreServerRegistration, type CoreTransaction
 } from "@rental-os/core-contracts";
 import { CoreAccessError, type CoreDeploymentAvailability } from "./access";
@@ -66,8 +66,7 @@ export class CoreBindingService {
       ...(parsed.container ? { container: parsed.container } : {}) };
     const registration = this.registrations.get(scope.coreId);
     if (!registration) throw new CoreAccessError("core_unavailable", "Core服务端贡献尚未注册");
-    const domain = registration.manifest.scope;
-    if (domain.kind === "tenant" && scope.container || domain.kind === "container" && scope.container?.type !== domain.containerType)
+    if (!matchesCoreScope(registration.manifest.scope, scope.container))
       throw new CoreAccessError("denied", "初始化范围与Core声明不一致");
     const request: CoreBindingRequest = { actor, scope, purpose: "initialize" };
     return this.execution.run(request, async (store, lease, transaction) => {
