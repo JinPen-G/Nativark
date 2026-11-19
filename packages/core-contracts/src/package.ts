@@ -5,7 +5,7 @@
 import { lstatSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { createHash } from "node:crypto";
-import { CORE_MANIFEST_FILE, CoreManifestSchema, type CoreManifest } from "./manifest";
+import { CORE_MANIFEST_FILE, CORE_PACKAGE_FILE_LIMIT, CoreManifestSchema, type CoreManifest } from "./manifest";
 import { checkCoreCombination, CoreHostVersionsSchema, type CoreHostVersions } from "./compatibility";
 import { CoreOpenApiContributionSchema, checkCoreOpenApi } from "./openapi";
 
@@ -99,9 +99,11 @@ export function readCorePackageFiles(directory: string, maxFileBytes: number, ma
   };
   const bytes = read(CORE_MANIFEST_FILE, 256 * 1024);
   const manifest = CoreManifestSchema.parse(JSON.parse(Buffer.from(bytes).toString("utf8")));
+  const declaredFiles = corePackageFiles(manifest);
+  if (declaredFiles.length > CORE_PACKAGE_FILE_LIMIT) throw new Error("Core包文件数量超过支持上限");
   const files = new Map<string, Uint8Array>([[CORE_MANIFEST_FILE, bytes]]);
   let total = bytes.length;
-  for (const file of corePackageFiles(manifest)) {
+  for (const file of declaredFiles) {
     if (file === CORE_MANIFEST_FILE) continue;
     if (file.split("/").some(part => /^(?:\.git|node_modules)$/i.test(part) || /^\.env(?:\.|$)/i.test(part) && part !== ".env.example"))
       throw new Error("Core包不能读取仓库元数据、依赖目录或实际环境配置");
@@ -129,9 +131,14 @@ function inspectPackage(reader: PackageReader, issues: CorePackageIssue[], hostI
   }
   const manifest = parsed.data;
   result.manifest = manifest;
+  const declaredFiles = corePackageFiles(manifest);
+  if (declaredFiles.length > CORE_PACKAGE_FILE_LIMIT) {
+    add("file_count_exceeded", CORE_MANIFEST_FILE, "清单、必需资料及声明文件的总数超过支持上限", "assets");
+    return result;
+  }
   const names = new Map<string, string>();
   const migrations = new Map(manifest.data.migrations.map(migration => [migration.file, migration]));
-  for (const file of corePackageFiles(manifest)) {
+  for (const file of declaredFiles) {
     const normalized = file.toLowerCase();
     const previous = names.get(normalized);
     if (previous && previous !== file) { add("path_collision", file, `路径与 ${previous} 仅大小写不同，不能跨平台安装`); continue; }

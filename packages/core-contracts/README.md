@@ -312,7 +312,7 @@ node packages/core-contracts/dist/generate-guide.js <Core清单JSON> <底座来�
 
 打包时复用正式出口 `pinCoreDocumentationLinks(text, sourceFile, source)`，以原源码文件路径解释相对链接并固定到本次提交，保留外链、围栏及行内代码示例。抽出的章节锚点指回公开手册；完整README可传第四参数true保留本页锚点。链接越出固定源码仓库时拒绝，生成过程不访问网络或执行文档命令。[生成源码](src/guide.ts) · [工单打包消费者](../example-tickets-core/src/package.ts)
 
-Node专用出口 `@rental-os/core-contracts/archive` 提供 `createCoreArchive(files)` 与 `readCoreArchive(bytes, expectedSha256)`，采用USTAR+gzip。相同文件按固定排序、权限和时间打包；校验整个压缩包SHA-256后返回内存文件。首版最多5000文件、单文件32MiB、解压总量128MiB，只接普通文件，不接PAX/软硬链接、目录条目、重复或越界路径。包内禁止实际 `.env`、Git元数据和node_modules；保留 `.env.example` 模板入口。
+Node专用出口 `@rental-os/core-contracts/archive` 提供 `createCoreArchive(files)` 与 `readCoreArchive(bytes, expectedSha256)`，采用USTAR+gzip。相同文件按固定排序、权限和时间打包；校验整个压缩包SHA-256后返回内存文件。首版最多5000文件，包含清单、README/LICENSE/CORE_GUIDE.md、入口、迁移与资源的去重集合；清单资源和归档共用同一总数上限。单文件32MiB、解压总量128MiB，只接普通文件，不接PAX/软硬链接、目录条目、重复或越界路径。包内禁止实际 `.env`、Git元数据和node_modules；保留 `.env.example` 模板入口。
 
 ## 打包与本地安装准备
 

@@ -7,6 +7,8 @@ import { CoreReleaseVersionSchema, CoreVersionRangeSchema, isCoreVersionSupporte
 
 export const CORE_CONTRACT_VERSION = "0.1.1";
 export const CORE_MANIFEST_FILE = "core.manifest.json";
+/** 清单及归档共用总文件上限，实际计数包含清单、必需资料与所有声明入口。 */
+export const CORE_PACKAGE_FILE_LIMIT = 5000;
 export const CoreIdSchema = z.string().min(1).max(64)
   .regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$(?![\s\S])/, "使用小写字母、数字和单个连字符，且以字母开头");
 
@@ -87,7 +89,7 @@ export const CoreManifestSchema = z.object({
     capability: localId,
     version: CoreVersionRangeSchema
   }).strict()).max(100),
-  assets: z.array(CorePackagePathSchema).max(1000).optional()
+  assets: z.array(CorePackagePathSchema).max(CORE_PACKAGE_FILE_LIMIT - 1).optional()
 }).strict().superRefine((manifest, context) => {
   const unique = (values: string[], field: string) => {
     const seen = new Set<string>();

@@ -4,9 +4,9 @@
  */
 import { createHash } from "node:crypto";
 import { gunzipSync, gzipSync } from "node:zlib";
-import { CoreArtifactHashSchema, CorePackagePathSchema } from "./manifest";
+import { CORE_PACKAGE_FILE_LIMIT, CoreArtifactHashSchema, CorePackagePathSchema } from "./manifest";
 
-export const CORE_ARCHIVE_LIMITS = Object.freeze({ files: 5000, fileBytes: 32 * 1024 * 1024, totalBytes: 128 * 1024 * 1024 });
+export const CORE_ARCHIVE_LIMITS = Object.freeze({ files: CORE_PACKAGE_FILE_LIMIT, fileBytes: 32 * 1024 * 1024, totalBytes: 128 * 1024 * 1024 });
 export interface CoreArchive { files: ReadonlyMap<string, Uint8Array>; sha256: string }
 const block = 512;
 const digest = (data: Uint8Array) => createHash("sha256").update(data).digest("hex");
