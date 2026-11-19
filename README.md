@@ -245,6 +245,7 @@ API 与后台也可分别通过 `npm run dev:api`、`npm run dev:admin` 启动�
 | 文档检查器 | `npm run test:docs` | 检查规则自身的回归 |
 | 公共接口 | `npm run contract:validate` | Controller、OpenAPI、DTO、路由权限和客户写入归属的静态一致性 |
 | 后台结构 | `npm run test:admin` | 后台约定与结构检查 |
+| 所选 Prisma 源码类型 | [内存类型入口](scripts/check-selected-prisma-types.cjs)，`--mode platform`、`rental` 或 `rental-ai` | 只读原 Prisma 5.22 官方生成器，在内存检查所选组合；支持 `--config` 指定宿主配置、`--deps` 指定只读依赖 |
 | 类型与主工程构建 | `npm run lint`、`npm run build` | 按实际包依赖检查类型并编译 shared、MCP、API、admin |
 | Rental 示范业务 | `npm run test:rental-core`、`npm run test:pricing-strategy` | 原 Core 和计费策略的定向行为 |
 
