@@ -10,7 +10,7 @@
  *      - 默认（本机联调）模式：允许回环 http 地址，并在产物里写 allowLocalApi=true，打印“不可上传”提示；
  *      - `--release` 发布模式：API 地址必须是 HTTPS，任何 http 地址（含回环）一律拒绝，联调开关恒为 false；
  *      - 非回环的 http 地址在任何模式下都拒绝；带路径的地址拒绝；AppID 若填写必须是 wx + 16 位十六进制；
- *   5. 按白名单打包公共富文本及客户AI合同运行时，校验产物不含共享包运行时require或密钥。
+ *   5. 打包正式Rental客户闭包、许可及原公共富文本/客户AI运行时，拒绝剩余裸包require和密钥。
  *
  * 用法：
  *   node scripts/build.cjs              # 本机联调构建
@@ -23,7 +23,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
-const { prepareMiniprogramSharedTypes, releaseMiniprogramSharedTypes, clearMiniprogramBuildOutput, emitMiniprogramSharedReceiptRuntime } = require('../../../scripts/miniprogram-shared-types.cjs');
+const { prepareMiniprogramSharedTypes, releaseMiniprogramSharedTypes, clearMiniprogramBuildOutput, emitMiniprogramSharedReceiptRuntime, emitMiniprogramRentalClientRuntime } = require('../../../scripts/miniprogram-shared-types.cjs');
 
 const root = path.resolve(__dirname, "..");
 const src = path.join(root, "src");
@@ -147,6 +147,7 @@ async function main() {
     runTsc([parserSource, "--target", "ES2019", "--module", "commonjs", "--strict", "--skipLibCheck", "--outDir", path.join(dist, "vendor", "shared-rich-text")]);
   }
   emitMiniprogramSharedReceiptRuntime(root, dist);
+  emitMiniprogramRentalClientRuntime(root, dist);
 
   // Only the canonical named customer validators and their necessary existing
   // validation code enter this single native bundle. No package runtime import,
@@ -182,6 +183,9 @@ async function main() {
     const text = fs.readFileSync(file, "utf8");
     if (file.endsWith(".js") && /require\(["']@rental-os\/shared(?:\/[^"']+)?["']\)/.test(text)) {
       fail(`${path.relative(root, file)} 在运行时依赖 @rental-os/shared；小程序只能使用 import type`);
+    }
+    if (file.endsWith(".js") && /require\(["']@rental-os\/rental-core(?:\/[^"']+)?["']\)/.test(text)) {
+      fail(`${path.relative(root, file)} 未打包正式Rental客户端闭包`);
     }
     if (file.endsWith(".js") && /require\(["']zod(?:\/[^"']+)?["']\)/.test(text)) {
       fail(`${path.relative(root, file)} 直接依赖 zod；客户合同须使用受控 vendor/shared-ai-client 运行时`);

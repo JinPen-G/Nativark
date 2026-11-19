@@ -9,6 +9,8 @@ export { createRentalStaffAssetsApi } from "./assets";
 export { createRentalStaffWorkOrdersApi } from "./workOrders";
 export { createRentalStaffCustomersApi, matchCustomer } from "./customers";
 export { createRentalStaffWorkbenchApi } from "./workbench";
+export { createRentalStaffDirectoryApi } from "./directory";
+export { createRentalStaffReviewsApi } from "./reviews";
 export type {
   RentalStaffRequestOptions,
   RentalStaffRequest,

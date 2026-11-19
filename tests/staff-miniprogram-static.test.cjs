@@ -17,6 +17,7 @@ const { RENTAL_CATEGORY_DEFINITIONS } = require("../packages/shared/dist");
 
 const root = path.resolve(__dirname, "../apps/staff-miniprogram");
 const src = path.join(root, "src");
+const rentalClientRoot = path.resolve(__dirname, "../packages/rental-core/clients/staff");
 const apiSrc = path.resolve(__dirname, "../apps/api/src");
 const read = (file) => fs.readFileSync(path.join(src, file), "utf8");
 const readApi = (file) => fs.readFileSync(path.join(apiSrc, file), "utf8");
@@ -77,12 +78,17 @@ function runtime(handler) {
     let absolute = path.resolve(src, relative);
     if (!path.extname(absolute)) absolute += ".ts";
     if (modules.has(absolute)) return modules.get(absolute).exports;
-    assert.ok(absolute.startsWith(src + path.sep), `模块不能逃出 src：${relative}`);
+    assert.ok(absolute.startsWith(src + path.sep) || absolute.startsWith(rentalClientRoot + path.sep), `模块不能逃出本端或正式Rental客户端：${relative}`);
     const module = { exports: {} };
     modules.set(absolute, module);
     const output = ts.transpileModule(fs.readFileSync(absolute, "utf8"), { compilerOptions: { target: ts.ScriptTarget.ES2019, module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText;
     const fn = vm.runInContext(`(function(require,module,exports){${output}\n})`, context, { filename: absolute });
     fn((specifier) => {
+      if (specifier === "@rental-os/rental-core/clients/staff") {
+        const declared = JSON.parse(fs.readFileSync(path.resolve(rentalClientRoot, "../../package.json"), "utf8")).exports["./clients/staff"];
+        assert.equal(declared.types, "./dist-clients/clients/staff/index.d.ts", "源码宿主必须对应正式包入口");
+        return load(path.relative(src, path.join(rentalClientRoot, "index.ts")));
+      }
       assert.ok(specifier.startsWith("."), `小程序运行时不得依赖包 ${specifier}（只允许 import type）`);
       return load(path.relative(src, path.resolve(path.dirname(absolute), specifier)));
     }, module, module.exports);

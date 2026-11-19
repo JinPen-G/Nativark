@@ -1,7 +1,7 @@
 'use strict';
 // Mini-program build paths and private shared declarations stay in this checkout.
-// Shared declarations are temporary; approved public receipt values are packaged
-// without implementing another matcher or exposing a package loader to WeChat.
+// Shared declarations are temporary; approved receipt values and the selected
+// Rental client closure are packaged without exposing a package loader to WeChat.
 const fs = require('node:fs');
 const path = require('node:path');
 const preparations = new Map();
@@ -179,6 +179,94 @@ function emitMiniprogramSharedReceiptRuntime(appRoot, output) {
   }
 }
 
+/** Read the declared native client without executing it. Only its relative
+ * CommonJS closure and original license enter the selected WeChat output. */
+function emitMiniprogramRentalClientRuntime(appRoot, output) {
+  appRoot = path.resolve(appRoot);
+  const root = workspace(appRoot), kind = path.basename(appRoot) === 'staff-miniprogram' ? 'staff' : 'miniprogram';
+  output = miniprogramBuildOutput(appRoot, ['--out-dir', output]);
+  const specifier = `@rental-os/rental-core/clients/${kind}`;
+  const entry = require.resolve(specifier, { paths: [appRoot, root] });
+  const dist = path.resolve(path.dirname(entry), '../..'), packageRoot = path.dirname(dist);
+  checkPath(root, dist, true);
+  checkPath(root, path.join(packageRoot, 'package.json'));
+  const metadata = JSON.parse(fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf8'));
+  const declared = metadata.exports?.[`./clients/${kind}`];
+  const target = typeof declared === 'string' ? declared : declared?.require ?? declared?.default;
+  if (metadata.name !== '@rental-os/rental-core' || metadata.license !== 'MIT'
+    || target !== `./dist-clients/clients/${kind}/index.js`
+    || entry !== path.resolve(packageRoot, target)) throw Error('Rental native client does not match its package export');
+
+  const ts = require(require.resolve('typescript', { paths: [appRoot, root] }));
+  const modules = new Map(), pending = [entry];
+  while (pending.length) {
+    const file = pending.pop();
+    if (modules.has(file)) continue;
+    checkPath(root, file);
+    if (!inside(dist, file) || !file.endsWith('.js')) throw Error('Rental client dependency leaves its compiled closure');
+    const text = fs.readFileSync(file, 'utf8');
+    const parsed = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+    if (parsed.parseDiagnostics.length) throw Error('Rental native client syntax is invalid');
+    modules.set(file, text);
+    const visit = node => {
+      if (ts.isImportDeclaration(node) || (ts.isExportDeclaration(node) && node.moduleSpecifier)
+        || (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword))
+        throw Error('Rental native client must use its compiled CommonJS closure');
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'require') {
+        if (node.arguments.length !== 1 || !ts.isStringLiteral(node.arguments[0]) || !node.arguments[0].text.startsWith('.'))
+          throw Error('Rental native client refuses external or dynamic require');
+        pending.push(require.resolve(path.resolve(path.dirname(file), node.arguments[0].text)));
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(parsed);
+  }
+
+  const destination = path.join(output, 'vendor', 'rental-core');
+  checkPath(root, destination, true);
+  for (const [file, text] of modules) {
+    const targetFile = path.join(destination, path.relative(dist, file));
+    fs.mkdirSync(path.dirname(targetFile), { recursive: true });
+    fs.writeFileSync(targetFile, text);
+  }
+  const localLicense = path.join(packageRoot, 'LICENSE');
+  const license = fs.existsSync(localLicense) ? localLicense
+    : packageRoot === path.join(root, 'packages', 'rental-core') ? path.join(root, 'LICENSE') : undefined;
+  if (!license) throw Error('Rental client package lacks its original license');
+  checkPath(root, license);
+  fs.copyFileSync(license, path.join(destination, 'LICENSE'));
+
+  const bundledEntry = path.join(destination, path.relative(dist, entry)), directories = [output];
+  while (directories.length) {
+    const directory = directories.pop();
+    for (const item of fs.readdirSync(directory, { withFileTypes: true })) {
+      const file = path.join(directory, item.name);
+      if (item.isSymbolicLink()) throw Error('Mini-program build refuses linked artifacts');
+      if (item.isDirectory()) { if (file !== destination) directories.push(file); continue; }
+      if (!file.endsWith('.js')) continue;
+      const text = fs.readFileSync(file, 'utf8');
+      const parsed = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS), replacements = [];
+      const visit = node => {
+        if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'require'
+          && node.arguments.length === 1 && ts.isStringLiteral(node.arguments[0])
+          && node.arguments[0].text.startsWith('@rental-os/rental-core')) {
+          if (node.arguments[0].text !== specifier) throw Error('Mini-program uses an undeclared Rental client export');
+          let relative = path.relative(path.dirname(file), bundledEntry).replace(/\\/g, '/').replace(/\.js$/u, '');
+          if (!relative.startsWith('.')) relative = './' + relative;
+          replacements.push({ start: node.arguments[0].getStart(parsed), end: node.arguments[0].end, text: JSON.stringify(relative) });
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(parsed);
+      let rewritten = text;
+      for (const replacement of replacements.sort((left, right) => right.start - left.start))
+        rewritten = rewritten.slice(0, replacement.start) + replacement.text + rewritten.slice(replacement.end);
+      if (replacements.length) fs.writeFileSync(file, rewritten);
+    }
+  }
+  return { specifier, modules: modules.size, entry: path.relative(output, bundledEntry).replace(/\\/g, '/') };
+}
+
 function releaseMiniprogramSharedTypes(configFile) {
   if (!configFile) return;
   const owned = preparations.get(configFile);
@@ -250,4 +338,4 @@ process.once('exit', () => {
     catch (error) { process.stderr.write(`[mini-program cleanup] ${error.message}\n`); process.exitCode = 1; }
   }
 });
-module.exports = { prepareMiniprogramSharedTypes, disposeMiniprogramSharedTypes, releaseMiniprogramSharedTypes, miniprogramBuildOutput, clearMiniprogramBuildOutput, emitMiniprogramSharedReceiptRuntime };
+module.exports = { prepareMiniprogramSharedTypes, disposeMiniprogramSharedTypes, releaseMiniprogramSharedTypes, miniprogramBuildOutput, clearMiniprogramBuildOutput, emitMiniprogramSharedReceiptRuntime, emitMiniprogramRentalClientRuntime };

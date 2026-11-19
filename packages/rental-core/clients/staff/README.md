@@ -1,6 +1,6 @@
 # Rental 员工客户端
 
-本入口提供订单、资产与库存、养护工单与归还处置、客户主档与会员、工作台五组工厂。每个真实员工宿主创建自己的客户端实例，传入同一员工请求函数，页面继续调用原业务方法。业务类型单源消费 Rental 合同，宿主的 shared 兼容出口引用同一份定义。[客户端入口](index.ts) · [业务合同](../../src/contracts.ts)
+本入口提供订单、资产与库存、养护工单与归还处置、客户主档与会员、工作台、经营目录和会员审核七组工厂。每个真实员工宿主创建自己的客户端实例，传入同一员工请求函数，页面继续调用原业务方法。业务类型单源消费 Rental 合同，宿主的 shared 兼容出口引用同一份定义。[客户端入口](index.ts) · [业务合同](../../src/contracts.ts)
 
 ## 接入
 
@@ -13,6 +13,8 @@ import {
   createRentalStaffWorkOrdersApi,
   createRentalStaffCustomersApi,
   createRentalStaffWorkbenchApi,
+  createRentalStaffDirectoryApi,
+  createRentalStaffReviewsApi,
 } from "@rental-os/rental-core/clients/staff";
 
 const orders = createRentalStaffOrdersApi({ request, withStaffAction });
@@ -24,12 +26,24 @@ const assets = createRentalStaffAssetsApi({
 const workOrders = createRentalStaffWorkOrdersApi({ request });
 const customers = createRentalStaffCustomersApi({ request });
 const workbench = createRentalStaffWorkbenchApi({ request });
+const directory = createRentalStaffDirectoryApi({ request });
+const reviews = createRentalStaffReviewsApi({ request });
 sessionEvents.on(assets.invalidateAssets);
 ```
 
-示例中的运输、会话、错误类和准入函数来自真实宿主。原微信宿主在模块生命周期内持有一组实例，五个原 API 路径各自导出同一实现的方法。其他宿主按自身生命周期绑定会话失效事件。[订单适配](../../../../apps/staff-miniprogram/src/api/orders.ts) · [资产适配](../../../../apps/staff-miniprogram/src/api/assets.ts) · [工单适配](../../../../apps/staff-miniprogram/src/api/workOrders.ts) · [客户适配](../../../../apps/staff-miniprogram/src/api/customers.ts) · [工作台适配](../../../../apps/staff-miniprogram/src/api/workbench.ts)
+示例中的运输、会话、错误类和准入函数来自真实宿主。原微信宿主在模块生命周期内持有一组实例，七个业务 API 路径各自导出同一实现的方法。其他宿主按自身生命周期绑定会话失效事件。[订单适配](../../../../apps/staff-miniprogram/src/api/orders.ts) · [资产适配](../../../../apps/staff-miniprogram/src/api/assets.ts) · [工单适配](../../../../apps/staff-miniprogram/src/api/workOrders.ts) · [客户适配](../../../../apps/staff-miniprogram/src/api/customers.ts) · [工作台适配](../../../../apps/staff-miniprogram/src/api/workbench.ts) · [目录](directory/README.md) · [审核](reviews/README.md)
 
-微信产物须将本入口及其相对运行时依赖编入同一发布包，并为正式包名提供对应类型定位。工厂的业务合同导入均为 `import type`，运行时闭包由五组工厂和纯客户过滤函数组成。具体构建与包出口由宿主装配维护。[原微信构建入口](../../../../apps/staff-miniprogram/scripts/build.cjs)
+## 原生编译与微信打包
+
+准备项目锁定依赖后，编译正式原生客户端。
+
+```bash
+npm run build:native-clients -w @rental-os/rental-core
+```
+
+[原生配置](../../tsconfig.native-clients.json)单独生成 `dist-clients/` 的 CommonJS 和声明。业务合同导入均为 `import type`，员工运行时只使用七组工厂及其相对依赖，正式包名定位到 `dist-clients/clients/staff/index.js` 和同名声明。
+
+员工微信构建的 `prebuild`、`pretypecheck` 准备原 Shared 声明和这个客户端。公共打包函数将已声明入口的相对 CommonJS 闭包及原 MIT 许可带入 `dist/vendor/rental-core/`，原宿主的包导入改为该发布包内路径；不支持未声明入口、外部或动态 `require`。[打包实现](../../../../scripts/miniprogram-shared-types.cjs) · [微信构建入口](../../../../apps/staff-miniprogram/scripts/build.cjs)
 
 ## 调用链
 
@@ -49,4 +63,4 @@ AI 检查原收据读取继续位于原员工订单入口，按原键读取并�
 
 订单列表、详情、新建、配货、领取和归还，资产列表、详情、登记和库存流水，客户列表、详情与编辑，工单列表与执行页、工作台和扫码均通过原薄入口消费本实现。页面权限和原操作键由既有宿主供给。[员工页面](../../../../apps/staff-miniprogram/src/pages) · [扫码入口](../../../../apps/staff-miniprogram/src/core/scan.ts)
 
-必要类型检查覆盖五组工厂、原薄入口及直接页面。原员工测试中的现场新增与编辑场景验证报价、建单、客户写入和持久幂等键，定向缓存冒烟核会话失效、并发读取及保存后的缓存提交。原测试加载器与微信发布构建须使用正式客户端闭包，类型、离线宿主替身、微信构建和真实服务分别核验。[原员工测试](../../../../tests/staff-miniprogram-static.test.cjs)
+必要类型检查覆盖七组工厂、原薄入口及直接页面。原员工测试中的现场新增与编辑场景验证报价、建单、客户写入和持久幂等键，定向缓存冒烟核会话失效、并发读取及保存后的缓存提交。原测试加载器与微信发布构建须使用正式客户端闭包，类型、离线宿主替身、微信构建和真实服务分别核验。[原员工测试](../../../../tests/staff-miniprogram-static.test.cjs)

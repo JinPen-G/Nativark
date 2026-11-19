@@ -1,6 +1,6 @@
 # Rental OS 员工小程序（微信原生）
 
-面向租户门店、仓库、现场交付人员以及店长/管理员的微信小程序（原生 + TypeScript）。一套包服务所有租户，租户编码在登录页输入；包内只含公开配置、不含任何密钥。需求见 [docs/租户端小程序需求说明.md](../../docs/租户端小程序需求说明.md)。
+面向租户门店、仓库、现场交付人员以及店长/管理员的微信小程序（原生 + TypeScript）。一套包服务所有租户，租户编码在登录页输入；包内只含公开配置、不含任何密钥。业务工厂及接入步骤见[员工客户端](../../packages/rental-core/clients/staff/README.md)。
 
 > 当前是可编译的前端联调版本，尚未满足需求文档的安全验收、未达发布标准（见[后端前置](#后端前置)）。这是员工端；客户使用的是 [`apps/miniprogram`](../miniprogram/README.md)。
 
@@ -78,6 +78,8 @@ npm run test:staff-miniprogram           # 构建 + 静态/沙箱测试
 
 用微信开发者工具导入 `apps/staff-miniprogram/dist`（构建脚本已把 `project.config.json` 复制进 dist、代码根设为当前目录，`libVersion 3.4.0`）。本机联调构建会关闭开发者工具的合法域名校验，仅供模拟器访问本机 `localhost`（真机上 `localhost` 指手机自身，连不到电脑 API）。修改 API 地址改 `src/config/public.ts` 的 `apiOrigin`，或构建时设 `STAFF_MINIPROGRAM_API_ORIGIN`。
 
+构建前置会编译原 Shared 和 Rental 原生客户端。后者使用独立 `dist-clients/` 出口，微信构建将实际相对运行时和原许可写入 `dist/vendor/rental-core/`，七组业务薄入口继续使用同一员工会话及运输。[原生编译步骤](../../packages/rental-core/clients/staff/README.md#原生编译与微信打包) · [构建实现](scripts/build.cjs)
+
 ## 发布构建
 
 ```bash
@@ -93,7 +95,7 @@ npm run build:staff-miniprogram:release  # apiOrigin 必须为 HTTPS，并重新
 
 ## 后端前置
 
-员工门面把白名单请求映射到既有 Rental Core 处理器，并执行会话受众、权限与地点范围校验。以下闭环已接入代码，但仍需部署迁移、配置真实对象存储并完成开发者工具与真机验收才算上线（需求 §11）：
+员工门面把白名单请求映射到既有 Rental Core 处理器，并执行会话受众、权限与地点范围校验。以下闭环已接入代码，但仍需部署迁移、配置真实对象存储并完成开发者工具与真机验收才算上线：
 
 - STAFF-BE-01/02 履约地点数据范围 + 员工独立会话：接口按已授权地点过滤；地点选择器只影响显示，不扩大数据范围。
 - STAFF-BE-03 上传凭证：检查照片、工单证据、线下收款凭证走签名上传；领取与归还引用已完成上传的文件 ID；现场签字绑定订单、交接地点、操作员、阶段与批次，无签字不能推进交接。
@@ -107,5 +109,6 @@ npm run build:staff-miniprogram:release  # apiOrigin 必须为 HTTPS，并重新
 ## 相关文档
 
 - 平台整体说明：仓库根 [README](../../README.md)
-- 需求说明：[docs/租户端小程序需求说明.md](../../docs/租户端小程序需求说明.md)
+- 业务工厂与宿主端口：[员工客户端](../../packages/rental-core/clients/staff/README.md)
+- 服务端准入与接口：[员工门面](../api/src/common/staff-api-routing.ts)、[Rental HTTP](../../packages/rental-core/src/http.module.ts)
 - 客户端小程序：[apps/miniprogram](../miniprogram/README.md)

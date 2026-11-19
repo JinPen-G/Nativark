@@ -1376,7 +1376,17 @@
       "types": "./dist/auth-contracts.d.ts",
       "default": "./dist/auth-contracts.js"
     },
-    "./admin/browser": "./admin/browser.ts"
+    "./admin/browser": "./admin/browser.ts",
+    "./clients/staff": {
+      "types": "./dist-clients/clients/staff/index.d.ts",
+      "require": "./dist-clients/clients/staff/index.js",
+      "default": "./dist-clients/clients/staff/index.js"
+    },
+    "./clients/miniprogram": {
+      "types": "./dist-clients/clients/miniprogram/index.d.ts",
+      "require": "./dist-clients/clients/miniprogram/index.js",
+      "default": "./dist-clients/clients/miniprogram/index.js"
+    }
   },
   "typesVersions": {
     "*": {
@@ -2480,6 +2490,12 @@
       ],
       "admin/browser": [
         "admin/browser.ts"
+      ],
+      "clients/staff": [
+        "dist-clients/clients/staff/index.d.ts"
+      ],
+      "clients/miniprogram": [
+        "dist-clients/clients/miniprogram/index.d.ts"
       ]
     }
   },
@@ -2487,7 +2503,11 @@
     "prebuild": "npm run build -w @rental-os/platform-server",
     "build": "tsc -p tsconfig.json",
     "prelint": "npm run build -w @rental-os/platform-server",
-    "lint": "tsc -p tsconfig.json --noEmit"
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "prebuild:native-clients": "npm run build -w @rental-os/platform-contracts",
+    "build:native-clients": "tsc -p tsconfig.native-clients.json",
+    "prelint:native-clients": "npm run build -w @rental-os/platform-contracts",
+    "lint:native-clients": "tsc -p tsconfig.native-clients.json --noEmit"
   },
   "dependencies": {
     "@rental-os/platform-contracts": "0.1.0",

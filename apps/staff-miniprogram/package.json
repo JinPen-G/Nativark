@@ -6,10 +6,15 @@
   "scripts": {
     "build": "node scripts/build.cjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test ../../tests/staff-miniprogram-static.test.cjs"
+    "test": "node --test ../../tests/staff-miniprogram-static.test.cjs",
+    "prebuild": "npm run build -w @rental-os/shared && npm run build:native-clients -w @rental-os/rental-core",
+    "pretypecheck": "npm run build -w @rental-os/shared && npm run build:native-clients -w @rental-os/rental-core"
   },
   "devDependencies": {
     "miniprogram-api-typings": "5.2.3",
     "typescript": "^5.6.3"
+  },
+  "dependencies": {
+    "@rental-os/rental-core": "0.1.0"
   }
 }

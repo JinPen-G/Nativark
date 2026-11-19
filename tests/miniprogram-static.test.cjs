@@ -16,6 +16,7 @@ const ts = require("typescript");
 
 const root = path.resolve(__dirname, "../apps/miniprogram");
 const src = path.join(root, "src");
+const rentalClientRoot = path.resolve(__dirname, "../packages/rental-core/clients/miniprogram");
 const read = (file) => fs.readFileSync(path.join(src, file), "utf8");
 const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => (entry.isDirectory() ? walk(path.join(dir, entry.name)) : [path.join(dir, entry.name)]));
 const app = JSON.parse(read("app.json"));
@@ -74,14 +75,19 @@ function runtime(handler) {
   });
   function load(relative) {
     let absolute = path.resolve(src, relative);
-    if (!fs.existsSync(absolute) && fs.existsSync(`${absolute}.ts`)) absolute += ".ts";
+    if ((!fs.existsSync(absolute) || fs.statSync(absolute).isDirectory()) && fs.existsSync(`${absolute}.ts`)) absolute += ".ts";
     if (modules.has(absolute)) return modules.get(absolute).exports;
-    assert.ok(absolute.startsWith(src + path.sep), `模块不能逃出 src：${relative}`);
+    assert.ok(absolute.startsWith(src + path.sep) || absolute.startsWith(rentalClientRoot + path.sep), `模块不能逃出本端或正式Rental客户端：${relative}`);
     const module = { exports: {} };
     modules.set(absolute, module);
     const output = ts.transpileModule(fs.readFileSync(absolute, "utf8"), { compilerOptions: { target: ts.ScriptTarget.ES2019, module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText;
     const fn = vm.runInContext(`(function(require,module,exports){${output}\n})`, context, { filename: absolute });
     fn((specifier) => {
+      if (specifier === "@rental-os/rental-core/clients/miniprogram") {
+        const declared = JSON.parse(fs.readFileSync(path.resolve(rentalClientRoot, "../../package.json"), "utf8")).exports["./clients/miniprogram"];
+        assert.equal(declared.types, "./dist-clients/clients/miniprogram/index.d.ts", "源码宿主必须对应正式包入口");
+        return load(path.relative(src, path.join(rentalClientRoot, "index.ts")));
+      }
       assert.ok(specifier.startsWith("."), `小程序运行时不得依赖包 ${specifier}（只允许 import type）`);
       return load(path.relative(src, path.resolve(path.dirname(absolute), specifier)));
     }, module, module.exports);

@@ -64,6 +64,7 @@ export const sessionEvents = new Emitter<SessionEvent>();
 let state: SessionState | undefined;
 let restored = false;
 let contextVersionCounter = 1;
+let principalVersionCounter = 1;
 
 function restore(): void {
   if (restored) return;
@@ -106,6 +107,11 @@ export function currentWorkspace(): SessionWorkspace | undefined {
 /** 当前上下文版本；空间范围的请求在发出时记录它，返回时若已变化则整体丢弃响应。 */
 export function contextVersion(): number {
   return contextVersionCounter;
+}
+
+/** 本人/租户会话代次；同一身份切经营空间或刷新令牌不改变它。 */
+export function principalVersion(): number {
+  return principalVersionCounter;
 }
 
 export function bumpContext(_reason: string): number {
@@ -192,6 +198,7 @@ export function saveSession(response: LoginResponse, reason: string): SessionSta
   const userChanged = !previous || previous.user.id !== state.user.id || previous.tenant.tenantId !== state.tenant.tenantId;
   const workspaceChanged = !previous || previous.currentWorkspaceId !== state.currentWorkspaceId;
   if (userChanged) {
+    principalVersionCounter += 1;
     bumpContext(reason);
     sessionEvents.emit({ type: "signed-in", reason });
   } else if (workspaceChanged) {
@@ -208,6 +215,7 @@ export function applySessionContext(context: SessionContextResponse): SessionSta
   restore();
   if (!state) return undefined;
   const workspaces = toWorkspaces(context.workspaces);
+  const principalChanged = state.user.id !== context.user.id || state.tenant.tenantId !== context.tenant.tenantId;
   const previousWorkspace = state.currentWorkspaceId;
   state = {
     ...state,
@@ -218,7 +226,11 @@ export function applySessionContext(context: SessionContextResponse): SessionSta
     savedAt: Date.now()
   };
   persist();
-  if (previousWorkspace !== state.currentWorkspaceId) {
+  if (principalChanged) {
+    principalVersionCounter += 1;
+    bumpContext("context");
+    sessionEvents.emit({ type: "signed-in", reason: "context" });
+  } else if (previousWorkspace !== state.currentWorkspaceId) {
     bumpContext("context");
     sessionEvents.emit({ type: "workspace-changed", workspaceId: state.currentWorkspaceId, reason: "context" });
   } else {
@@ -234,6 +246,7 @@ export function clearSession(reason: string): void {
   if (state) removeStorage(`${STORAGE_KEYS.scanHistory}:${state.tenant.tenantId}:${state.user.id}`);
   state = undefined;
   clearPrivateStorage();
+  principalVersionCounter += 1;
   bumpContext(reason);
   if (had) sessionEvents.emit({ type: "signed-out", reason });
 }
@@ -247,4 +260,5 @@ export function resetSessionForTest(): void {
   state = undefined;
   restored = false;
   contextVersionCounter = 1;
+  principalVersionCounter = 1;
 }

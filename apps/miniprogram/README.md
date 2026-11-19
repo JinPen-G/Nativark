@@ -66,6 +66,8 @@ npm run build:miniprogram
 
 默认按 `src/config/public.ts` 常量打包（演示租户 `demo` + `http://localhost:3000`），产物在 `apps/miniprogram/dist`，并写入 `allowLocalApi: true` 放宽回环地址（仅供开发者工具本地预览）。
 
+构建前置会编译原 Shared 和 Rental 原生客户端。后者使用独立 `dist-clients/` 出口；微信构建将七组业务工厂的相对运行时和原许可带入 `dist/vendor/rental-core/`，原 API 薄入口继续供给同一客户会话与运输。[原生编译步骤](../../packages/rental-core/clients/miniprogram/README.md#原生编译与微信打包) · [构建实现](scripts/build.cjs)
+
 3. 用微信开发者工具导入 `apps/miniprogram`（工程根含 `project.config.json`，代码目录 `dist/`）。没有正式 AppID 时选「测试号」，并在「详情 → 本地设置」勾选不校验合法域名（`libVersion 3.4.0`）。真机调试时 `localhost` 指手机本身，连不到开发机 API。
 
 ## 发布构建
@@ -81,6 +83,8 @@ npm run build:miniprogram:release
 - `src/config/public.ts` 是包内唯一配置，且全部公开：`{ apiOrigin, tenantCode, appId, allowLocalApi, builtAt }`。API 前缀 `/api/client/v1` 在 `core/http.ts` 拼接。
 - 密钥不进包：AppSecret、商户私钥、`session_key`、口令等只在服务端加密保存。构建期硬门禁会拒绝以下情况：编译产物在运行时 `require("@rental-os/shared")`（只允许 `import type`）、出现密钥形态字符串、页面缺少 js/json/wxml/wxss、tabBar 图标缺失。
 - 正文解析器和企业原申请/结束收据匹配函数使用受管声明适配；构建从Shared正式出口核对原函数并生成小程序运行文件。声明复用公共类型，不复制业务判断；收据函数来源缺失、歧义或引入未审核运行依赖时停止构建。
+- [客户会话](src/core/session.ts)记录本人及本包租户归属，[请求出口](src/core/http.ts)在返回和重放前核对会话代次。换本人、租户或退出后，旧登录态响应以 `STALE_CONTEXT` 丢弃。同本人/租户切服务仍可读取租户级结果，匿名公开读取沿原范围处理。旧缓存未记录租户时按本包配置补齐，已记录其他租户的缓存清除，授权仍由服务端校验。
+- 401 刷新按本人/租户及原刷新令牌单飞，同账号重新登录后的旧刷新或重放 401 无权覆盖、清空新会话。企业 `replayAfterRefresh: false` 继续禁止自动重放，unknown 写入仍由原消费者用原操作键读取结果。
 
 ## 测试
 
@@ -95,6 +99,6 @@ npm run test:miniprogram
 ## 相关文档
 
 - 平台整体说明：仓库根 [README](../../README.md)
-- 需求蓝图：[客户小程序需求](../../docs/小程序/客户小程序/客户小程序-需求.md)；[开发任务](../../docs/小程序/客户小程序/客户小程序-开发任务.md)、[协作接续](../../docs/小程序/客户小程序/客户小程序-协作接续.md)、[开发记录](../../docs/小程序/客户小程序/客户小程序-开发记录.md)
-- 客户端 API 边界：[客户端 API 接口说明](../../docs/公共技术资料/接口说明/客户端-API说明.md)
+- 业务工厂与宿主端口：[客户业务客户端](../../packages/rental-core/clients/miniprogram/README.md)
+- 客户端 API 边界：[客户公开合同](../../packages/rental-core/src/client-contracts.ts)、[客户 HTTP 入口](../../packages/rental-core/src/http-client.controller.ts)
 - 员工端小程序：[apps/staff-miniprogram](../staff-miniprogram/README.md)

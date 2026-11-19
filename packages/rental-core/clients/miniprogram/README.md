@@ -37,6 +37,18 @@ const orders = createRentalMiniProgramOrdersApi({ request });
 
 原 request 负责上下文变化后的迟到响应丢弃，页面和协调器负责 hide/unload 的寿命复验。旧 orders 入口保留六个原 AI 宿主请求，沿原权限和同一运输执行。
 
+## 原生编译与微信打包
+
+准备项目锁定依赖后，编译正式客户端。
+
+```bash
+npm run build:native-clients -w @rental-os/rental-core
+```
+
+[原生配置](../../tsconfig.native-clients.json)单独生成 `dist-clients/` 的 CommonJS 和声明，正式入口为 `dist-clients/clients/miniprogram/index.js` 及同名声明。微信宿主的 `prebuild`、`pretypecheck` 准备原 Shared 声明和这个客户端；七组工厂的业务合同为类型导入，运行时只带其相对依赖。
+
+[公共打包函数](../../../../scripts/miniprogram-shared-types.cjs)读取已声明入口，将实际 CommonJS 闭包与原 MIT 许可写入微信发布包的 `vendor/rental-core/`，并改写原宿主的正式包导入。未声明入口、外部或动态 `require` 会停止构建。[微信构建入口](../../../../apps/miniprogram/scripts/build.cjs)
+
 ## 验证入口
 
 必要类型检查核对七组工厂与原 API 消费者；定向冒烟对照原请求路径、选项、返回与错误，并复用[原小程序测试](../../../../tests/miniprogram-static.test.cjs)的运输、范围、支付单和缓存断言。正式包出口、类型解析和微信构建由实际宿主接线核定，真实 HTTP、微信、数据库与供应商证据按对应环境取得。
