@@ -1,6 +1,6 @@
 # Rental 客户小程序业务客户端
 
-[正式模块入口](index.ts)提供七组业务请求工厂、客户认证工厂及七个 AI 请求工厂。原小程序 [api 入口](../../../../apps/miniprogram/src/api/orders.ts)注入 [request](../../../../apps/miniprogram/src/core/http.ts)，继续导出原方法和返回类型。合同沿 Rental 包内的[客户声明](../../src/client-contracts.ts)、[租赁声明](../../src/contracts.ts)和企业声明单源消费。
+[正式模块入口](index.ts)提供七组业务请求工厂、客户认证工厂及八个 AI 请求工厂。原小程序 [api 入口](../../../../apps/miniprogram/src/api/orders.ts)注入 [request](../../../../apps/miniprogram/src/core/http.ts)，继续导出原方法和返回类型。合同沿 Rental 包内的[客户声明](../../src/client-contracts.ts)、[租赁声明](../../src/contracts.ts)和企业声明单源消费。
 
 ## 宿主接入
 
@@ -52,8 +52,23 @@ const orders = createRentalMiniProgramOrdersApi({ request });
 | [ai-goals](ai-goals.ts) | 注入同一任务实例与调用方 `current`，每次 await 前后核对页面寿命和原 signal；[目标适配](../../../../apps/miniprogram/src/api/ai-goals.ts)及[目标选择器](../../../../apps/miniprogram/src/components/ai-native/ai-goal-picker/index.ts)消费 |
 | [ai-booking-transfers](ai-booking-transfers.ts) | 调用方供给原上下文 `current`，转移签发、消费和收据读取均保留原前后复验；[转移适配](../../../../apps/miniprogram/src/api/ai-booking-transfers.ts)及[原转移会话](../../../../apps/miniprogram/src/components/ai-native/client-booking-transfer-session.ts)消费 |
 | [ai-entry-actions](ai-entry-actions.ts) | 同一会话对象、上下文版本、公开配置和服务器时钟；[动作适配](../../../../apps/miniprogram/src/api/ai-entry-actions.ts)导出原捕获及 API 创建函数，[原动作组件](../../../../apps/miniprogram/src/components/ai-native/ai-entry-actions/index.ts)消费 |
+| [ai-scene-catalog](ai-scene-catalog.ts) | 原场景目录请求、范围及时间校验；[原目录组件](../../../../apps/miniprogram/src/components/ai-native/ai-scene-catalog/index.ts)供给同一会话、时钟、生成校验器与页面寿命，分页和展示继续由组件维护 |
 
 Action 端口返回原会话对象，完整客户与服务投影和对象引用继续参加复验。宿主不得重新投影或复制会话。原动作来源、对象关联、数量、去重、过期和支付字段校验保持。AI POST 保留原超时及 `replayAfterRefresh: false`，unknown 仍沿原操作读取。业务执行、页面挂接及服务端授权分别沿原入口。
+
+## 独立 Native SDK 构建
+
+准备项目锁定依赖后，从仓库执行本包入口。
+
+```bash
+npm run build:native-clients -w @rental-os/rental-core
+```
+
+[共享生产编译器](../../../../scripts/miniprogram-shared-types.cjs)按[原生配置](../../tsconfig.native-clients.json)同时编译客户、员工与时间模块。正式出口为 `@rental-os/rental-core/clients/miniprogram`、`@rental-os/rental-core/clients/staff` 和 `@rental-os/rental-core/clients/time`，均对应本包 `dist-clients/` 的 CommonJS 与同名声明。构建只读取当前 Core、Shared 和公共合同源码，私有编译产物集中到本树任务临时目录，退出时清理。
+
+发行目录包含三个出口的实际相对 JS 闭包、经真实解析重定位的原生成声明和原 MIT 许可。声明中的 Shared/Core 定义引用同一份生成文件，Zod 类型沿本包已有依赖解析。出口、语法、相对依赖或声明缺失时构建失败；声明中的任务临时路径在发行前改为包内相对路径。原生成校验器、request 和会话由真实宿主注入，AI 合同值的必需端口保持。
+
+隔离构建在同一命令后传 `-- --out-dir <本树 output/.tmp/任务/dist-clients>`，创建者负责交付或清理目标。`lint:native-clients` 使用同一编译器的 `--check`，退出时清理本次私有产物。构建完成校验后替换目标，目标占用锁避免并行写入，替换失败恢复原生成目录。
 
 ## 原生编译与微信打包
 
@@ -64,7 +79,7 @@ npm run build:miniprogram
 npm run typecheck -w @rental-os/miniprogram
 ```
 
-[原生配置](../../tsconfig.native-clients.json)定义 `dist-clients/` 的 CommonJS 和声明，正式入口为 `dist-clients/clients/miniprogram/index.js` 及同名声明。微信构建在本树单一任务临时目录中编译当前 Shared 声明及完整 Native 工厂，并按实际包声明映射到私有产物。七组业务工厂、七个 AI 请求工厂、原 16 方法认证及六个 AI 预约请求消费同一入口，原 time 出口按实际引用打包。构建和 `--check` 退出时释放私有声明与 Native 产物。
+[原生配置](../../tsconfig.native-clients.json)定义 `dist-clients/` 的 CommonJS 和声明，正式入口为 `dist-clients/clients/miniprogram/index.js` 及同名声明。微信构建在本树单一任务临时目录中编译当前 Shared 声明及完整 Native 工厂，并按实际包声明映射到私有产物。七组业务工厂、八个 AI 请求工厂、原 16 方法认证及六个 AI 预约请求消费同一入口，原 time 出口按实际引用打包。构建和 `--check` 退出时释放私有声明与 Native 产物。
 
 [公共打包函数](../../../../scripts/miniprogram-shared-types.cjs)读取已声明入口，将实际 CommonJS 闭包与原 MIT 许可写入微信发布包的 `vendor/rental-core/`，并改写原宿主的正式包导入。正文解析器和六个原收据／服务选择函数沿 Shared 正式出口追到当前平台／Core 源码，复用原函数体。原 AI webpack 只接受既有 Shared/Zod 和五个已核定 Core 源文件。最终所有 JS 的 `require` 均须解析到本包 JS/JSON；缺出口、缺文件、外部／动态依赖或新 Core 依赖会停止构建。[微信构建入口](../../../../apps/miniprogram/scripts/build.cjs) · [AI 运行时](../../../../scripts/miniprogram-ai-runtime.cjs)
 
@@ -72,4 +87,4 @@ npm run typecheck -w @rental-os/miniprogram
 
 ## 验证入口
 
-必要类型检查核对七组业务工厂、七个 AI 请求工厂、认证工厂及原 API 消费者；定向冒烟对照原请求路径、选项、返回与错误，并复用[原小程序测试](../../../../tests/miniprogram-static.test.cjs)的运输、范围、支付单和缓存断言。认证片已核原 16 方法、会话采用与退出清理，正式 Native 声明与原客户宿主类型通过；这份证据不代替加入认证后的完整微信发布包验证。正式包出口、类型解析和微信构建由实际宿主接线核定，真实 HTTP、微信、数据库与供应商证据按对应环境取得。
+必要类型检查核对七组业务工厂、八个 AI 请求工厂、认证工厂及原 API 消费者；定向冒烟对照原请求路径、选项、返回与错误，并复用[原小程序测试](../../../../tests/miniprogram-static.test.cjs)的运输、范围、支付单和缓存断言。认证片已核原 16 方法、会话采用与退出清理，正式 Native 声明与原客户宿主类型通过；这份证据不代替加入认证后的完整微信发布包验证。正式包出口、类型解析和微信构建由实际宿主接线核定，真实 HTTP、微信、数据库与供应商证据按对应环境取得。

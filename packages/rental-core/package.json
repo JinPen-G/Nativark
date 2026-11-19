@@ -3350,10 +3350,8 @@
     "build": "tsc -p tsconfig.json",
     "prelint": "npm run build -w @rental-os/platform-server",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "prebuild:native-clients": "npm run build -w @rental-os/shared",
-    "build:native-clients": "tsc -p tsconfig.native-clients.json",
-    "prelint:native-clients": "npm run build -w @rental-os/shared",
-    "lint:native-clients": "tsc -p tsconfig.native-clients.json --noEmit"
+    "build:native-clients": "node ../../scripts/miniprogram-shared-types.cjs --build-native-clients",
+    "lint:native-clients": "node ../../scripts/miniprogram-shared-types.cjs --build-native-clients --check"
   },
   "dependencies": {
     "@rental-os/platform-contracts": "0.1.0",

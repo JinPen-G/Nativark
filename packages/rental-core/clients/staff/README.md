@@ -1,6 +1,6 @@
 # Rental 员工客户端
 
-本入口提供订单、资产与库存、养护工单与归还处置、客户主档与会员、工作台、经营目录和会员审核七组工厂，以及认证、业务附件、原 Action 与 AI 检查任务工厂。每个真实员工宿主创建自己的客户端实例，传入同一员工请求函数，页面继续调用原业务方法。业务类型单源消费 Rental 合同，宿主的 shared 兼容出口引用同一份定义。[客户端入口](index.ts) · [业务合同](../../src/contracts.ts)
+本入口提供订单、资产与库存、养护工单与归还处置、客户主档与会员、工作台、经营目录和会员审核七组工厂，以及认证、业务附件、原 Action、AI 检查任务、检查运输与场景目录工厂。每个真实员工宿主创建自己的客户端实例，传入同一员工请求函数，页面继续调用原业务方法。业务类型单源消费 Rental 合同，宿主的 shared 兼容出口引用同一份定义。[客户端入口](index.ts) · [业务合同](../../src/contracts.ts)
 
 ## 接入
 
@@ -42,6 +42,24 @@ sessionEvents.on(assets.invalidateAssets);
 [检查任务工厂](ai-inspection-tasks.ts)接收原 request、调用方 `current`、[同一生成注册表](../../../../apps/staff-miniprogram/src/components/ai-native/inspection-wire-schemas.ts)的 `taskContracts/taskHttp` 和[原校验函数](../../../../apps/staff-miniprogram/src/components/ai-native/inspection-wire.ts)。注册表类型沿 Shared 正式导出声明，校验器由真实宿主提供。[原任务适配](../../../../apps/staff-miniprogram/src/api/ai-inspection-tasks.ts)供给这些原值，[原页面绑定](../../../../apps/staff-miniprogram/src/components/ai-native/inspection-task-page-binding.ts)及[检查任务组件](../../../../apps/staff-miniprogram/src/components/ai-native/ai-inspection-task/index.ts)消费。
 
 检查任务路径须属于原 `staff/v1/`，任务写入使用原注册表的 120 秒超时，读取及其他检查请求保留原 15 秒超时。请求及结果沿原 JSON clone，await 前后均核对当前寿命与原校验。`submitAndContinue` 保持原明确保存并继续语义，POST 不在刷新后重放，unknown 保留原引用。正式业务提交和原收据仍由原订单及检查宿主处理。
+
+[检查运输](inspection-transport.ts)提供原历史、只读收据宿主及当前检查宿主工厂，宿主注入同一员工 request、原会话、上下文版本及生成注册校验。原输入绑定、完整字段投影、能力组合、写入重放选项和原操作收据匹配均在 Core 单源执行。[原运输适配](../../../../apps/staff-miniprogram/src/components/ai-native/inspection-transport.ts)保留原调用类型，组件和页面继续管理显示、人工意图、挂接及读取寿命。
+
+[场景目录](ai-scene-catalog.ts)沿原员工目录请求和真实生成校验器，捕获同一会话与当前空间，保留目录字段、时间及范围复验。[原目录组件](../../../../apps/staff-miniprogram/src/components/ai-native/ai-scene-catalog/index.ts)只在明确点击后调用工厂，继续管理分页、隐藏、卸载、过期展示与原人工出口。
+
+## 独立 Native SDK 构建
+
+准备项目锁定依赖后，从仓库执行本包入口。
+
+```bash
+npm run build:native-clients -w @rental-os/rental-core
+```
+
+[共享生产编译器](../../../../scripts/miniprogram-shared-types.cjs)按[原生配置](../../tsconfig.native-clients.json)同时编译客户、员工与时间模块。正式出口为 `@rental-os/rental-core/clients/miniprogram`、`@rental-os/rental-core/clients/staff` 和 `@rental-os/rental-core/clients/time`，均对应本包 `dist-clients/` 的 CommonJS 与同名声明。构建只读取当前 Core、Shared 和公共合同源码，私有编译产物集中到本树任务临时目录，退出时清理。
+
+发行目录包含三个出口的实际相对 JS 闭包、经真实解析重定位的原生成声明和原 MIT 许可。声明中的 Shared/Core 定义引用同一份生成文件，Zod 类型沿本包已有依赖解析。出口、语法、相对依赖或声明缺失时构建失败；声明中的任务临时路径在发行前改为包内相对路径。原生成校验器、request 和会话由真实宿主注入，AI 合同值的必需端口保持。
+
+隔离构建在同一命令后传 `-- --out-dir <本树 output/.tmp/任务/dist-clients>`，创建者负责交付或清理目标。`lint:native-clients` 使用同一编译器的 `--check`，退出时清理本次私有产物。构建完成校验后替换目标，目标占用锁避免并行写入，替换失败恢复原生成目录。
 
 ## 原生编译与微信打包
 

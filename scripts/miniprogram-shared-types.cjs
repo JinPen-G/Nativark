@@ -209,6 +209,35 @@ function emitMiniprogramSharedReceiptRuntime(appRoot, output, configFile) {
   }
 }
 
+/** Accept only the compiled relative CommonJS closure selected by real exports. */
+function rentalNativeRuntimeModules(root, dist, entries, ts) {
+  const modules = new Map(), pending = [...entries.values()];
+  while (pending.length) {
+    const file = pending.pop();
+    if (modules.has(file)) continue;
+    checkPath(root, file);
+    if (!inside(dist, file) || !file.endsWith('.js')) throw Error('Rental client dependency leaves its compiled closure');
+    const text = fs.readFileSync(file, 'utf8');
+    const parsed = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+    if (parsed.parseDiagnostics.length) throw Error('Rental native client syntax is invalid');
+    modules.set(file, text);
+    const visit = node => {
+      if (ts.isImportDeclaration(node) || (ts.isExportDeclaration(node) && node.moduleSpecifier)
+        || (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword))
+        throw Error('Rental native client must use its compiled CommonJS closure');
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'require') {
+        if (node.arguments.length !== 1 || !ts.isStringLiteral(node.arguments[0]) || !node.arguments[0].text.startsWith('.'))
+          throw Error('Rental native client refuses external or dynamic require');
+        pending.push(require.resolve(path.resolve(path.dirname(file), node.arguments[0].text)));
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(parsed);
+  }
+
+  return modules;
+}
+
 /** Read the declared native client without executing it. Only its relative
  * CommonJS closure and original license enter the selected WeChat output. */
 function emitMiniprogramRentalClientRuntime(appRoot, output, configFile) {
@@ -267,29 +296,7 @@ function emitMiniprogramRentalClientRuntime(appRoot, output, configFile) {
     }
   }
 
-  const modules = new Map(), pending = [...entries.values()];
-  while (pending.length) {
-    const file = pending.pop();
-    if (modules.has(file)) continue;
-    checkPath(root, file);
-    if (!inside(dist, file) || !file.endsWith('.js')) throw Error('Rental client dependency leaves its compiled closure');
-    const text = fs.readFileSync(file, 'utf8');
-    const parsed = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
-    if (parsed.parseDiagnostics.length) throw Error('Rental native client syntax is invalid');
-    modules.set(file, text);
-    const visit = node => {
-      if (ts.isImportDeclaration(node) || (ts.isExportDeclaration(node) && node.moduleSpecifier)
-        || (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword))
-        throw Error('Rental native client must use its compiled CommonJS closure');
-      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'require') {
-        if (node.arguments.length !== 1 || !ts.isStringLiteral(node.arguments[0]) || !node.arguments[0].text.startsWith('.'))
-          throw Error('Rental native client refuses external or dynamic require');
-        pending.push(require.resolve(path.resolve(path.dirname(file), node.arguments[0].text)));
-      }
-      ts.forEachChild(node, visit);
-    };
-    visit(parsed);
-  }
+  const modules = rentalNativeRuntimeModules(root, dist, entries, ts);
 
   checkPath(root, destination, true);
   for (const [file, text] of modules) {
@@ -322,6 +329,12 @@ function releaseMiniprogramSharedTypes(configFile) {
   if (!configFile) return;
   const owned = preparations.get(configFile);
   if (!owned) throw Error('Private shared declarations are not owned by this process');
+  if (owned.previousOutput && fs.existsSync(owned.previousOutput)) {
+    // Remove only this failed build's new artifacts, preserving the old SDK.
+    for (const name of ['native', 'declarations', 'dist-clients'])
+      removeCheckedDirectory(owned.root, path.join(owned.destination, name));
+    throw Error('Native SDK previous output requires recovery: ' + owned.previousOutput);
+  }
   removeCheckedDirectory(owned.root, owned.destination);
   preparations.delete(configFile);
   if (createdParents.has(owned.parent) && fs.existsSync(owned.parent) && fs.readdirSync(owned.parent).length === 0) {
@@ -388,13 +401,71 @@ function declaredSource(root, specifier, runtime = false) {
   return source;
 }
 
+/** Compile current canonical declarations and both Native entries together.
+ * The package and original WeChat hosts share this compiler and export map. */
+function compileRentalNativeClients(root, destination) {
+  const ts = require(require.resolve('typescript', { paths: [root] }));
+  const source = path.join(root, 'packages/shared/src');
+  const nativeDirectory = path.join(destination, 'native');
+  const config = ts.readConfigFile(path.join(root, 'packages/shared/tsconfig.json'), ts.sys.readFile);
+  if (config.error) throw Error(ts.flattenDiagnosticMessageText(config.error.messageText, '\n'));
+  const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, path.dirname(path.join(source, '../tsconfig.json')), {
+    rootDir: root, outDir: path.join(destination, 'declarations'), declarationDir: path.join(destination, 'declarations'), types: [],
+    composite: false, incremental: false, noEmit: false, declaration: true,
+    emitDeclarationOnly: true, noEmitOnError: true
+  });
+  const paths = {};
+  const dependencyRoot = path.dirname(path.dirname(require.resolve('typescript/package.json', { paths: [root] })));
+  const host = ts.createCompilerHost(parsed.options);
+  host.resolveModuleNames = (names, containing) => names.map(name => {
+    if (name.startsWith('@rental-os/')) {
+      const filename = declaredSource(root, name);
+      paths[name] = [path.join(destination, 'declarations', path.relative(root, filename)).replace(/\.ts$/u, '.d.ts')];
+      return { resolvedFileName: filename, extension: ts.Extension.Ts };
+    }
+    const resolved = ts.resolveModuleName(name, containing, parsed.options, host).resolvedModule
+      ?? ts.resolveModuleName(name, path.join(dependencyRoot, '../package.json'), parsed.options, host).resolvedModule;
+    if (resolved && !name.startsWith('.')) paths[name] = [resolved.resolvedFileName];
+    return resolved;
+  });
+  const program = ts.createProgram(parsed.fileNames, parsed.options, host);
+  const diagnostics = [...parsed.errors, ...ts.getPreEmitDiagnostics(program)];
+  if (diagnostics.length) throw Error(ts.formatDiagnosticsWithColorAndContext(diagnostics, {
+    getCanonicalFileName: f => f, getCurrentDirectory: () => root, getNewLine: () => '\n'
+  }));
+  const emitted = program.emit();
+  if (emitted.emitSkipped || emitted.diagnostics.length) throw Error('Private shared declaration emission failed');
+  const entry = path.join(destination, 'declarations', 'packages/shared/src/index.d.ts');
+  if (!fs.existsSync(entry)) throw Error('Private shared declarations missing index');
+  paths['@rental-os/shared'] = [entry];
+  paths['@rental-os/shared/miniprogram-client'] = [path.join(destination, 'declarations', 'packages/shared/src/miniprogram-client.d.ts')];
+  const nativeConfig = ts.readConfigFile(path.join(root, 'packages/rental-core/tsconfig.native-clients.json'), ts.sys.readFile);
+  if (nativeConfig.error) throw Error(ts.flattenDiagnosticMessageText(nativeConfig.error.messageText, '\n'));
+  const native = ts.parseJsonConfigFileContent(nativeConfig.config, ts.sys, path.join(root, 'packages/rental-core'), {
+    outDir: nativeDirectory, baseUrl: root, paths
+  });
+  const nativeProgram = ts.createProgram(native.fileNames, native.options);
+  const nativeDiagnostics = [...native.errors, ...ts.getPreEmitDiagnostics(nativeProgram)];
+  if (nativeDiagnostics.length) throw Error(ts.formatDiagnosticsWithColorAndContext(nativeDiagnostics, {
+    getCanonicalFileName: f => f, getCurrentDirectory: () => root, getNewLine: () => '\n'
+  }));
+  const nativeEmitted = nativeProgram.emit();
+  if (nativeEmitted.emitSkipped || nativeEmitted.diagnostics.length) throw Error('Private native client emission failed');
+  const rentalMetadata = JSON.parse(fs.readFileSync(path.join(root, 'packages/rental-core/package.json'), 'utf8'));
+  for (const name of ['miniprogram', 'staff', 'time']) {
+    const exported = rentalMetadata.exports?.['./clients/' + name];
+    const expected = './dist-clients/clients/' + name + (name === 'time' ? '.d.ts' : '/index.d.ts');
+    if (exported?.types !== expected) throw Error('Native declaration export changed: ' + name);
+    paths['@rental-os/rental-core/clients/' + name] = [path.join(nativeDirectory, expected.slice('./dist-clients/'.length))];
+  }
+  return { ts, program, paths, nativeDirectory };
+}
+
 // Emit this checkout's declarations and complete native clients into one owned
 // preparation. Published dist and managed dependencies are read-only inputs.
 function prepareMiniprogramSharedTypes(appRoot) {
   appRoot = path.resolve(appRoot);
   const root = workspace(appRoot);
-  const ts = require(require.resolve('typescript', { paths: [appRoot, root] }));
-  const source = path.join(root, 'packages/shared/src');
   const parent = process.env.AI_OFFLINE_WRITE_ROOT ? path.resolve(process.env.AI_OFFLINE_WRITE_ROOT)
     : path.join(root, 'output', '.tmp', 'miniprogram-build');
   if (!inside(path.join(root, 'output', '.tmp'), parent) || parent === path.join(root, 'output', '.tmp')) throw Error('Private shared declarations require a task-temp root');
@@ -408,59 +479,10 @@ function prepareMiniprogramSharedTypes(appRoot) {
   const owned = { root, appRoot, parent, destination, nativeDirectory };
   preparations.set(appConfig, owned);
   try {
-    const config = ts.readConfigFile(path.join(root, 'packages/shared/tsconfig.json'), ts.sys.readFile);
-    if (config.error) throw Error(ts.flattenDiagnosticMessageText(config.error.messageText, '\n'));
-    const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, path.dirname(path.join(source, '../tsconfig.json')), {
-      rootDir: root, outDir: path.join(destination, 'declarations'), declarationDir: path.join(destination, 'declarations'), types: [],
-      composite: false, incremental: false, noEmit: false, declaration: true,
-      emitDeclarationOnly: true, noEmitOnError: true
-    });
-    const paths = {};
+    const { program, paths } = compileRentalNativeClients(root, destination);
+    owned.program = program;
     const dependencyTypes = path.dirname(require.resolve('miniprogram-api-typings/package.json', { paths: [appRoot, root] }));
     const dependencyRoot = path.dirname(dependencyTypes);
-    const host = ts.createCompilerHost(parsed.options);
-    host.resolveModuleNames = (names, containing) => names.map(name => {
-      if (name.startsWith('@rental-os/')) {
-        const filename = declaredSource(root, name);
-        paths[name] = [path.join(destination, 'declarations', path.relative(root, filename)).replace(/\.ts$/u, '.d.ts')];
-        return { resolvedFileName: filename, extension: ts.Extension.Ts };
-      }
-      const resolved = ts.resolveModuleName(name, containing, parsed.options, host).resolvedModule
-        ?? ts.resolveModuleName(name, path.join(dependencyRoot, '../package.json'), parsed.options, host).resolvedModule;
-      if (resolved && !name.startsWith('.')) paths[name] = [resolved.resolvedFileName];
-      return resolved;
-    });
-    const program = ts.createProgram(parsed.fileNames, parsed.options, host);
-    const diagnostics = [...parsed.errors, ...ts.getPreEmitDiagnostics(program)];
-    if (diagnostics.length) throw Error(ts.formatDiagnosticsWithColorAndContext(diagnostics, {
-      getCanonicalFileName: f => f, getCurrentDirectory: () => root, getNewLine: () => '\n'
-    }));
-    const emitted = program.emit();
-    if (emitted.emitSkipped || emitted.diagnostics.length) throw Error('Private shared declaration emission failed');
-    owned.program = program;
-    const entry = path.join(destination, 'declarations', 'packages/shared/src/index.d.ts');
-    if (!fs.existsSync(entry)) throw Error('Private shared declarations missing index');
-    paths['@rental-os/shared'] = [entry];
-    paths['@rental-os/shared/miniprogram-client'] = [path.join(destination, 'declarations', 'packages/shared/src/miniprogram-client.d.ts')];
-    const nativeConfig = ts.readConfigFile(path.join(root, 'packages/rental-core/tsconfig.native-clients.json'), ts.sys.readFile);
-    if (nativeConfig.error) throw Error(ts.flattenDiagnosticMessageText(nativeConfig.error.messageText, '\n'));
-    const native = ts.parseJsonConfigFileContent(nativeConfig.config, ts.sys, path.join(root, 'packages/rental-core'), {
-      outDir: nativeDirectory, baseUrl: root, paths
-    });
-    const nativeProgram = ts.createProgram(native.fileNames, native.options);
-    const nativeDiagnostics = [...native.errors, ...ts.getPreEmitDiagnostics(nativeProgram)];
-    if (nativeDiagnostics.length) throw Error(ts.formatDiagnosticsWithColorAndContext(nativeDiagnostics, {
-      getCanonicalFileName: f => f, getCurrentDirectory: () => root, getNewLine: () => '\n'
-    }));
-    const nativeEmitted = nativeProgram.emit();
-    if (nativeEmitted.emitSkipped || nativeEmitted.diagnostics.length) throw Error('Private native client emission failed');
-    const rentalMetadata = JSON.parse(fs.readFileSync(path.join(root, 'packages/rental-core/package.json'), 'utf8'));
-    for (const name of ['miniprogram', 'staff', 'time']) {
-      const exported = rentalMetadata.exports?.['./clients/' + name];
-      const expected = './dist-clients/clients/' + name + (name === 'time' ? '.d.ts' : '/index.d.ts');
-      if (exported?.types !== expected) throw Error('Native declaration export changed: ' + name);
-      paths['@rental-os/rental-core/clients/' + name] = [path.join(nativeDirectory, expected.slice('./dist-clients/'.length))];
-    }
     fs.writeFileSync(appConfig, JSON.stringify({ extends: path.join(appRoot, 'tsconfig.json'), compilerOptions: {
       baseUrl: root, paths, typeRoots: [dependencyRoot]
     } }, null, 2));
@@ -470,6 +492,172 @@ function prepareMiniprogramSharedTypes(appRoot) {
     throw error;
   }
 }
+/** Relocate emitted declarations through their actual compiler resolutions.
+ * Canonical Shared/Core definitions are emitted once, with Zod kept as the
+ * declared package dependency. No source schemas or private paths are copied. */
+function rentalNativeDeclarationFiles(root, destination, compiled) {
+  const { ts, paths, nativeDirectory } = compiled;
+  const declarations = path.join(destination, 'declarations');
+  const modules = new Map();
+  const pending = ['clients/miniprogram/index.d.ts', 'clients/staff/index.d.ts', 'clients/time.d.ts']
+    .map(file => path.join(nativeDirectory, file));
+  const options = { moduleResolution: ts.ModuleResolutionKind.Node10, baseUrl: root, paths };
+  const canonicalFile = file => {
+    file = path.resolve(file);
+    if (inside(path.join(nativeDirectory, 'src'), file)) {
+      const canonical = path.join(declarations, 'packages/rental-core', path.relative(nativeDirectory, file));
+      if (fs.existsSync(canonical)) return canonical;
+    }
+    return file;
+  };
+  const outputFile = file => inside(nativeDirectory, file)
+    ? path.relative(nativeDirectory, file)
+    : path.join('types', path.relative(declarations, file));
+  while (pending.length) {
+    const file = canonicalFile(pending.pop());
+    if (modules.has(file)) continue;
+    checkPath(root, file);
+    if ((!inside(nativeDirectory, file) && !inside(declarations, file)) || !file.endsWith('.d.ts'))
+      throw Error('Native declaration leaves its canonical emitted closure');
+    const text = fs.readFileSync(file, 'utf8');
+    const parsed = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+    if (parsed.parseDiagnostics.length) throw Error('Native declaration syntax is invalid');
+    if (parsed.referencedFiles.length || parsed.typeReferenceDirectives.length)
+      throw Error('Native declaration has an unreviewed reference directive');
+    const bindings = [];
+    const visit = node => {
+      if (ts.isStringLiteral(node) && (ts.isImportDeclaration(node.parent)
+        || ts.isExportDeclaration(node.parent)
+        || (ts.isLiteralTypeNode(node.parent) && ts.isImportTypeNode(node.parent.parent))
+        || ts.isExternalModuleReference(node.parent))) {
+        const name = node.text;
+        const resolved = ts.resolveModuleName(name, file, options, ts.sys).resolvedModule;
+        if (!resolved) throw Error('Native declaration dependency is missing: ' + name);
+        const dependency = canonicalFile(resolved.resolvedFileName);
+        if (inside(nativeDirectory, dependency) || inside(declarations, dependency)) {
+          pending.push(dependency);
+          let relative = path.relative(path.dirname(outputFile(file)), outputFile(dependency))
+            .replace(/\\/g, '/').replace(/\.d\.ts$/u, '');
+          if (!relative.startsWith('.')) relative = './' + relative;
+          bindings.push({ start: node.getStart(parsed), end: node.end, relative });
+        } else if (name !== 'zod' && !name.startsWith('zod/')) {
+          throw Error('Native declaration has an undeclared external dependency: ' + name);
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(parsed);
+    let rewritten = text;
+    for (const binding of bindings.sort((left, right) => right.start - left.start))
+      rewritten = rewritten.slice(0, binding.start) + JSON.stringify(binding.relative) + rewritten.slice(binding.end);
+    modules.set(file, { file: outputFile(file), text: rewritten });
+  }
+  return [...modules.values()];
+}
+
+/** Build the Native package through the same isolated compiler as WeChat.
+ * Only the exact three JS/declaration closures and original license are
+ * published. Validation finishes before replacing the previous generated SDK. */
+function buildRentalNativeClients(packageRoot, args = []) {
+  packageRoot = path.resolve(packageRoot);
+  const root = path.resolve(packageRoot, '../..');
+  if (packageRoot !== path.join(root, 'packages', 'rental-core'))
+    throw Error('Native SDK build requires the Rental package root');
+  const outputAt = args.indexOf('--out-dir');
+  const checkOnly = args.includes('--check');
+  const allowed = new Set(['--check', '--out-dir']);
+  for (let index = 0; index < args.length; index++) {
+    if (!allowed.has(args[index]) || args.indexOf(args[index]) !== index)
+      throw Error('Unexpected Native SDK build argument');
+    if (args[index] === '--out-dir') {
+      if (!args[index + 1] || args[index + 1].startsWith('--'))
+        throw Error('Native SDK --out-dir requires a path');
+      index++;
+    }
+  }
+  const output = path.resolve(packageRoot, outputAt < 0 ? 'dist-clients' : args[outputAt + 1]);
+  const tempRoot = path.join(root, 'output', '.tmp');
+  if (output !== path.join(packageRoot, 'dist-clients')
+    && (!inside(tempRoot, output) || path.relative(tempRoot, output).split(path.sep).length < 2))
+    throw Error('Native SDK output must be dist-clients or a task-temp child');
+  const parent = process.env.AI_OFFLINE_WRITE_ROOT ? path.resolve(process.env.AI_OFFLINE_WRITE_ROOT)
+    : path.join(tempRoot, 'native-client-build');
+  if (!inside(tempRoot, parent) || parent === tempRoot)
+    throw Error('Native SDK preparation requires a task-temp root');
+  if (process.env.AI_OFFLINE_WRITE_ROOT && !checkOnly && (!inside(parent, output) || parent === output))
+    throw Error('Offline Native SDK output must remain inside its task temp');
+  checkPath(root, parent, true);
+  checkPath(root, output, true);
+  const parentCreated = !fs.existsSync(parent);
+  fs.mkdirSync(parent, { recursive: true });
+  if (parentCreated) createdParents.add(parent);
+  const destination = fs.mkdtempSync(path.join(parent, 'native-sdk-'));
+  const preparation = path.join(destination, 'native-build.json');
+  const owned = { root, parent, destination };
+  preparations.set(preparation, owned);
+  try {
+    const compiled = compileRentalNativeClients(root, destination);
+    const metadata = JSON.parse(fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf8'));
+    if (metadata.name !== '@rental-os/rental-core' || metadata.license !== 'MIT')
+      throw Error('Native SDK package identity or license changed');
+    const entries = new Map();
+    for (const name of ['miniprogram', 'staff', 'time']) {
+      const entry = metadata.exports?.['./clients/' + name];
+      const expected = './dist-clients/clients/' + name + (name === 'time' ? '.js' : '/index.js');
+      if (entry?.types !== expected.replace(/\.js$/u, '.d.ts')
+        || (entry?.require ?? entry?.default) !== expected
+        || (entry?.default && entry.default !== expected))
+        throw Error('Native SDK must publish the same exact JS and declaration entry: ' + name);
+      entries.set(name, path.join(compiled.nativeDirectory, expected.slice('./dist-clients/'.length)));
+    }
+    const runtime = rentalNativeRuntimeModules(root, compiled.nativeDirectory, entries, compiled.ts);
+    const declarations = rentalNativeDeclarationFiles(root, destination, compiled);
+    const stage = path.join(destination, 'dist-clients');
+    fs.mkdirSync(stage);
+    for (const [file, text] of runtime) {
+      const target = path.join(stage, path.relative(compiled.nativeDirectory, file));
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, text);
+    }
+    for (const declaration of declarations) {
+      const target = path.join(stage, declaration.file);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, declaration.text);
+    }
+    const localLicense = path.join(packageRoot, 'LICENSE');
+    const license = fs.existsSync(localLicense) ? localLicense : path.join(root, 'LICENSE');
+    checkPath(root, license);
+    fs.copyFileSync(license, path.join(stage, 'LICENSE'));
+    if (!checkOnly) {
+      fs.mkdirSync(path.dirname(output), { recursive: true });
+      const lock = output + '.lock';
+      checkPath(root, lock);
+      fs.mkdirSync(lock);
+      const backup = path.join(destination, 'previous-dist-clients');
+      try {
+        checkPath(root, output, true);
+        if (fs.existsSync(output)) fs.renameSync(output, backup);
+        try {
+          fs.renameSync(stage, output);
+        } catch (error) {
+          if (fs.existsSync(backup)) {
+            // A failed rollback must retain the previous generated SDK.
+            owned.previousOutput = backup;
+            fs.renameSync(backup, output);
+            delete owned.previousOutput;
+          }
+          throw error;
+        }
+      } finally {
+        removeCheckedDirectory(root, lock);
+      }
+    }
+    return { exports: [...entries.keys()], runtimeModules: runtime.size, declarations: declarations.length, checkOnly };
+  } finally {
+    releaseMiniprogramSharedTypes(preparation);
+  }
+}
+
 // Preserve the original callers' idempotent cleanup name while sharing the
 // stricter owned-path removal with the isolated build lifecycle.
 function disposeMiniprogramSharedTypes(configFile) {
@@ -484,4 +672,14 @@ process.once('exit', () => {
     catch (error) { process.stderr.write(`[mini-program cleanup] ${error.message}\n`); process.exitCode = 1; }
   }
 });
-module.exports = { prepareMiniprogramSharedTypes, disposeMiniprogramSharedTypes, releaseMiniprogramSharedTypes, miniprogramBuildOutput, clearMiniprogramBuildOutput, emitMiniprogramSharedReceiptRuntime, emitMiniprogramRichTextRuntime, emitMiniprogramRentalClientRuntime, validateMiniprogramRuntime, declaredSource };
+module.exports = { prepareMiniprogramSharedTypes, disposeMiniprogramSharedTypes, releaseMiniprogramSharedTypes, miniprogramBuildOutput, clearMiniprogramBuildOutput, emitMiniprogramSharedReceiptRuntime, emitMiniprogramRichTextRuntime, emitMiniprogramRentalClientRuntime, validateMiniprogramRuntime, declaredSource, buildRentalNativeClients };
+
+if (require.main === module) {
+  try {
+    if (process.argv[2] !== '--build-native-clients') throw Error('Expected --build-native-clients');
+    console.log(JSON.stringify(buildRentalNativeClients(process.cwd(), process.argv.slice(3))));
+  } catch (error) {
+    process.stderr.write('[native-sdk] ' + error.message + '\n');
+    process.exitCode = 1;
+  }
+}

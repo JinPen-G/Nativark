@@ -42,4 +42,4 @@ npx --no-install tsc -p packages/rental-core/admin/tsconfig.json
 node --no-compilation-cache --test tests/admin-work-order-board.test.cjs
 ```
 
-[既有冒烟](../../../../tests/admin-work-order-board.test.cjs)覆盖原流转门槛、筛选后个人排序、旧宿主薄适配、弹窗退出与提交、重复提交、迟到校验，以及保留看板的实际键盘处理。浏览器、真实 HTTP/数据库与标准组合验收由 [PCH 原门槛](../../../../docs/平台底座/Core接入/平台Core接入-开发任务.md#compatibility-slices)核收。
+[既有冒烟](../../../../tests/admin-work-order-board.test.cjs)覆盖原流转门槛、筛选后个人排序、旧宿主薄适配、弹窗退出与提交、重复提交、迟到校验，以及保留看板的实际键盘处理。浏览器、真实 HTTP/数据库与标准组合验收按实际环境核对；公共接入步骤见[Core接入手册](../../../core-contracts/README.md#五步快速接入)。

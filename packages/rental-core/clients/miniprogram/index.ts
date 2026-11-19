@@ -22,3 +22,4 @@ export { createRentalMiniProgramPublicApi, type RentalMiniProgramPublicPorts } f
 export { createRentalMiniProgramGoalApi, type RentalMiniProgramGoalPorts } from "./ai-goals";
 export { createRentalMiniProgramBookingTransferApi, type RentalMiniProgramBookingTransferPorts, type ClientBookingTransferApi } from "./ai-booking-transfers";
 export { createRentalMiniProgramEntryActionApi, type RentalMiniProgramEntryActionPorts, type RentalMiniProgramEntryActionSession, type ClientOriginalPaymentRecord } from "./ai-entry-actions";
+export { createRentalMiniProgramSceneCatalogApi, type RentalMiniProgramSceneCatalogPorts } from "./ai-scene-catalog";

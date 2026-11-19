@@ -17,6 +17,7 @@
 | [完整客户网站](clients/website-ui/README.md)、[网站入口](clients/website-ui/index.ts)、[浏览器薄宿主](../../apps/tenant-website/README.md) | `/clients/website-ui` 提供原15路由、页面、语言和样式；宿主供给同一客户会话、公开配置、可靠存储与资产映射，官网和AI业务请求继续沿原协议 |
 | [企业门户前端](clients/enterprise-portal/README.md)、[应用入口](clients/enterprise-portal/index.ts)、[原薄宿主](../../apps/enterprise-portal/README.md) | `/clients/enterprise-portal` 提供完整企业门户，页面使用精确子出口；宿主供给同一客户会话和公共UI，企业/本人/空间及原材料权限沿真实服务核验，不依赖旧后台源码 |
 | [营业时区](clients/time.ts)、[微信打包](../../scripts/miniprogram-shared-types.cjs) | `/clients/time` 是原生CommonJS与声明出口，复用原时区/DST/回退算法；微信构建仅在实际引用时带入同一时间模块，费用仍由服务端裁定 |
+| [标准包工厂](src/package.ts)、[清单工厂](src/manifest.ts) | `/package` 按实际文件形成唯一发行清单；所有随包Markdown的源码链接在计算清单及归档摘要前固定到来源提交，根README本页锚点保留 |
 | [客户认证](clients/miniprogram/auth/README.md)、[正式客户入口](clients/miniprogram/index.ts) | `/clients/miniprogram` 提供密码/短信/微信、用途验证码、注册与本人注销；宿主供给原渠道、请求和会话采用，一次性凭证及原错误保持 |
 | [客户AI请求](clients/miniprogram/README.md)、[员工AI请求](clients/staff/README.md) | 两个原生客户端出口提供任务、取消、报价、目标、预约交接及检查/入口动作工厂；宿主供给同一运输、当前会话和原生成校验器，准备、明确提交、取消与原结果沿各自原协议 |
 | [会员请求](admin/membership/client.ts)、[客户请求](admin/membership/customer-client.ts) | `/admin/membership/client` 与 `/admin/membership/customer-client` 提供原57项请求；传入宿主唯一认证请求，保留租户会员、客户主档、账号状态、敏感资料、企业账务及原冲销收据边界 |
@@ -149,7 +150,7 @@ Rental HTTP从 `@rental-os/rental-core/http` 的 `RentalHttpModule` 接入，类
 
 网站、门户和部分前端出口继续使用 `@rental-os/shared@0.1.0` 的原运行协议。该包是可选 peer，消费这些出口的宿主仍须安装它；只使用其他出口时可按实际依赖选择。租赁值逐项转到已有 Core 正式出口，AI schema 和协调器当前仍由原 Shared 单源提供。
 
-微信客户端工厂可通过 `npm run build:native-clients -w @rental-os/rental-core` 单独构建，类型检查使用 `npm run lint:native-clients -w @rental-os/rental-core`。前置先准备同版本 Shared 声明，Shared 的前置只构建 Core 主包，再进入 Native 配置，避免缺声明或循环构建。两端微信应用的正常构建与 `--check` 则自带私有声明/Native 编译，退出时释放，不要求先写正式 Shared/Core 产物。[Native配置](tsconfig.native-clients.json) · [客户接入](clients/miniprogram/README.md) · [员工接入](clients/staff/README.md) · [私有准备](../../scripts/miniprogram-shared-types.cjs)
+微信客户端工厂可通过 `npm run build:native-clients -w @rental-os/rental-core` 单独构建，类型检查使用 `npm run lint:native-clients -w @rental-os/rental-core`。Native独立入口与两端微信构建复用同一私有声明/Native编译器，读取当前Core、Shared与公共合同源码，不要求先写正式Shared/Core产物。独立入口按真实包出口生成JS、重定位声明与许可，`--check`退出时释放私有产物。[Native配置](tsconfig.native-clients.json) · [客户接入](clients/miniprogram/README.md) · [员工接入](clients/staff/README.md) · [私有准备](../../scripts/miniprogram-shared-types.cjs)
 
 空间切换、开发密码重置和员工订阅上下文由 [独立扩展模块](src/http-extensions.module.ts) 绑定同一认证/订阅实例；它与旧宿主已挂载的三个薄适配路径二选一，公共六项认证继续由公共模块提供。[原 Guard](src/http-auth.ts) 保持角色、客户和空间政策，[application-access](src/application-access.ts) 将当前 Core 授权接入原业务父锁事务；它不代表所有独立写入、媒体流和回调已完成接入。
 

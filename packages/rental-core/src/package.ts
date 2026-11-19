@@ -85,12 +85,17 @@ export function createRentalPackage(input: {
         throw new Error(`Rental 包缺少相对依赖：${file} → ${match[1]}`);
     }
   }
+  // Source documents keep their original relative links in the checkout.
+  // Pin every shipped document before the manifest and archive fingerprint.
+  for (const [file, bytes] of files) {
+    if (!file.endsWith(".md")) continue;
+    files.set(file, Buffer.from(pinCoreDocumentationLinks(text(bytes),
+      `${sourceDirectory}/${file}`, input.source, file === "README.md")));
+  }
   const manifest = createRentalManifest({ source: input.source,
     assets: [...files.keys()].filter(file => !["README.md", "LICENSE"].includes(file)), contributions: input.contributions });
   files.set("core.manifest.json", Buffer.from(JSON.stringify(manifest, null, 2) + "\n"));
   files.set("CORE_GUIDE.md", Buffer.from(renderCoreGuide(manifest, input.platformGuide, input.platformSource)));
-  files.set("README.md", Buffer.from(pinCoreDocumentationLinks(text(required("README.md")),
-    `${sourceDirectory}/README.md`, input.source, true)));
   const declared = new Set(corePackageFiles(manifest));
   if ([...files.keys()].some(file => !declared.has(file))) throw new Error("Rental 文件未纳入唯一发行清单");
   const inspected = inspectCorePackageFiles(files, input.host);

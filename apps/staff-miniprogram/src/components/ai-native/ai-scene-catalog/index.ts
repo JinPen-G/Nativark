@@ -6,6 +6,12 @@ import { AI_ENTRY_SCENE_CATALOG_HTTP, entrySceneAvailabilityLabel, isAiEntryScen
 import { request } from '../../../core/http';
 import { currentSession, contextVersion, sessionEvents } from '../../../core/session';
 import { serverNow } from '../../../core/clock';
+import { createRentalStaffSceneCatalogApi } from "@rental-os/rental-core/clients/staff";
+
+const sceneCatalogApi = createRentalStaffSceneCatalogApi({
+  request, currentSession, contextVersion, serverNow,
+  contracts: { AI_ENTRY_SCENE_CATALOG_HTTP, isAiEntrySceneCatalogRequest, isAiEntrySceneCatalogResponse },
+});
 
 interface Row {
   id: string; title: string; goal: string; status: string; risk: string; confirmation: string;
@@ -19,18 +25,7 @@ const stateFor = (instance: object) => {
   if (!state) { state = { epoch: 0, busy: false, page: null, cursors: [null], current: null, timer: null }; states.set(instance, state); }
   return state;
 };
-function withinWireLimit(value: unknown) {
-  const text = JSON.stringify(value); if (typeof text !== 'string' || text.length > 131072) return false;
-  let bytes = 0;
-  for (let index = 0; index < text.length && bytes <= 131072; index++) {
-    const code = text.charCodeAt(index);
-    if (code < 128) bytes++;
-    else if (code < 2048) bytes += 2;
-    else if (code >= 0xd800 && code <= 0xdbff && text.charCodeAt(index + 1) >= 0xdc00 && text.charCodeAt(index + 1) <= 0xdfff) { bytes += 4; index++; }
-    else bytes += 3;
-  }
-  return bytes <= 131072;
-}
+
 const statuses = { available: '已观察原入口', manual_only: '保留人工路径', unavailable: '当前不可用' };
 const confirmations = { read_only: '只读', explicit_prepare_or_save: '明确准备或保存',
   review_approval_and_original_submit: '审核批准后在原入口提交', original_human_submit: '人工在原入口提交' };
@@ -60,9 +55,14 @@ Component({
       this.setData({ open: false, busy: false, message: '', rows: [], observedAt: '', pageIndex: 0, hasPrevious: false, hasNext: false });
     },
     async readPage(index = 0, paginate = false) {
-      const state = stateFor(this), session = currentSession(), version = contextVersion(), contextKey = this.data.contextKey;
+      const state = stateFor(this), contextKey = this.data.contextKey;
+      let epoch = state.epoch;
+      const context = sceneCatalogApi.captureContext({
+        current: () => shown.has(this) && states.get(this) === state && state.epoch === epoch
+          && this.data.contextKey === contextKey,
+      });
       if (state.busy || !shown.has(this)) return;
-      if (!session?.accessToken || !session.currentWorkspaceId) {
+      if (!context) {
         this.clearCatalog(); this.setData({ message: '请登录当前经营空间后核对场景；原人工办理仍可继续。' }); return;
       }
       if (paginate && (!state.page || !state.current?.() || Date.parse(state.page.expiresAt) <= serverNow())) {
@@ -71,26 +71,16 @@ Component({
       if (!Number.isInteger(index) || index < 0 || index > this.data.pageIndex + 1) return;
       const after = index > this.data.pageIndex ? state.page?.nextAfter : state.cursors[index];
       if (index > 0 && (!after || !state.current?.())) { this.clearCatalog(); return; }
-      const epoch = ++state.epoch, token = session.accessToken, tenantId = session.tenant.tenantId, workspaceId = session.currentWorkspaceId;
-      const identity = JSON.stringify(session.user);
-      const current = () => shown.has(this) && states.get(this) === state && state.epoch === epoch && contextVersion() === version
-        && currentSession() === session && session.accessToken === token && session.tenant.tenantId === tenantId
-        && session.currentWorkspaceId === workspaceId && JSON.stringify(session.user) === identity && this.data.contextKey === contextKey;
+      epoch = ++state.epoch;
+      const current = context.current;
       state.current = current; state.busy = true; state.page = null;
       if (state.timer !== null) clearTimeout(state.timer); state.timer = null;
       this.setData({ open: true, busy: true, message: '', rows: [], observedAt: '', hasPrevious: false, hasNext: false });
       try {
         const command = { limit: 20, ...(after ? { after } : {}) };
-        if (!isAiEntrySceneCatalogRequest(command) || !AI_ENTRY_SCENE_CATALOG_HTTP.staffBasePath.startsWith('staff/v1/'))
-          throw Error('scene_directory_unavailable');
-        const value: unknown = await request(`/${AI_ENTRY_SCENE_CATALOG_HTTP.staffBasePath.slice('staff/v1/'.length)}/${AI_ENTRY_SCENE_CATALOG_HTTP.read}`,
-          { method: 'POST', data: command, timeoutMs: 15000, replayAfterRefresh: false });
-        if (!current()) return;
-        if (!withinWireLimit(value) || !isAiEntrySceneCatalogResponse(value) || value.surface !== 'staff_miniprogram'
-          || value.audience !== 'staff' || value.scope.kind !== 'workspace' || value.scope.tenantId !== tenantId || value.scope.workspaceId !== workspaceId)
-          throw Error('scene_directory_unavailable');
-        const now = serverNow(), remaining = Math.min(30000, Date.parse(value.expiresAt) - now);
-        if (!(remaining > 0) || Date.parse(value.observedAt) > now) throw Error('scene_directory_expired');
+        const observation = await context.readPage(command);
+        if (!observation) return;
+        const { page: value, remaining } = observation;
         state.page = value; state.cursors = [...state.cursors.slice(0, index), after ?? null];
         this.setData({ open: true, rows: value.entries.map(project), observedAt: value.observedAt, pageIndex: index,
           hasPrevious: index > 0, hasNext: value.nextAfter !== null });
