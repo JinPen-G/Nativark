@@ -12,6 +12,9 @@ function makeHarness({ intentStatus = "pending", externalTransactionId = null, e
     orderId: "order-1",
     provider: "alipay",
     method: "alipay",
+    instrument: "rental",
+    merchantOrderNo: "RO-1",
+    currency: "CNY",
     amount: 12.34,
     status: intentStatus,
     externalTransactionId,
@@ -40,6 +43,8 @@ function makeHarness({ intentStatus = "pending", externalTransactionId = null, e
     }
   };
   const tx = {
+    $queryRaw: async (query) => query.sql.includes("FROM rental_payment_intents") ? [{ ...intent }]
+      : [{ id: query.sql.includes("FROM Tenant") ? "tenant-1" : "order-1" }],
     paymentWebhookEvent,
     rentalPaymentIntent: {
       findFirst: async () => intent,
@@ -53,6 +58,7 @@ function makeHarness({ intentStatus = "pending", externalTransactionId = null, e
   const prisma = {
     $transaction: async (callback) => callback(tx),
     rentalPaymentIntent: {
+      findFirst: async () => ({ ...intent }),
       updateMany: async () => ({ count: 0 })
     }
   };

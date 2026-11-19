@@ -11,6 +11,7 @@ import type {
 import { $Enums, Prisma } from "@prisma/client";
 import type { RentalCustomerMergeStorage, RentalCustomerMergeCustomers, RentalCustomerMergeOperations } from "./customer-governance-ports";
 import { assertOtherEnterpriseAdministrator } from "./enterprise-administrator-continuity";
+import { assertRentalBusinessTenantAccessAfterLock } from "./mysql-business-fence";
 import { deriveFundingLedgers, isRealFundingEvent, rentalPaymentBalance, resolveOfflineFundingEvents } from "./funding-events";
 
 const stamp = () => new Date().toISOString();
@@ -249,6 +250,7 @@ export class CustomerMergeService {
       // customer gates, matching member/status writes without upgrading a shared lock.
       const tenants = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM Tenant WHERE id=${tenantId} FOR UPDATE`;
       if (!tenants.length) throw new NotFoundException("租户不存在");
+      await assertRentalBusinessTenantAccessAfterLock(tx, tenantId);
       // 与订单创建共用主档行锁。按 id 排序依次加锁，避免两路反向合并形成死锁。
       for (const customerId of [input.sourceCustomerId, input.targetCustomerId].sort()) {
         if (!(await this.operations.lockCustomerBusinessGate(tenantId, customerId, tx))) {

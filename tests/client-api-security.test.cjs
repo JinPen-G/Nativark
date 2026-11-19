@@ -127,10 +127,16 @@ const { ApiAuthGuard } = require("../apps/api/src/common/api-auth.guard");
     businessWorkspace: { findFirst: async () => workspace },
     customerAccount: { findFirst: async ({ where }) => accounts.get(where.loginPhone) ?? null },
     $transaction: async (callback) => callback({
-      $queryRaw: async () => [],
+      $queryRaw: async (query) => {
+        assert.match(query.sql, /FROM Tenant/u);
+        assert.equal(query.values[0], tenant.id);
+        return [{ id: tenant.id }];
+      },
       clientRegistrationChallenge: {
+        updateMany: (input) => authPrisma.clientRegistrationChallenge.updateMany(input),
         findFirst: async ({ where }) => {
           for (const row of challenges.values()) {
+            if (where.id && row.id === where.id && row.tenantId === where.tenantId) return row;
             if (where.requestKey && row.requestKey === where.requestKey) return row;
             if (where.identifierHash && row.identifierHash === where.identifierHash && row.createdAt > where.createdAt.gt) return row;
           }

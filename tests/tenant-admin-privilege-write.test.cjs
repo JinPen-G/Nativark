@@ -108,7 +108,11 @@ async function main() {
     prisma: {
       $transaction: async (work, options) => {
         isolationLevels.push(options?.isolationLevel);
-        return work({});
+        return work({ $queryRaw: async (query) => {
+          assert.match(query.sql, /SELECT id FROM Tenant.*LOCK IN SHARE MODE/);
+          assert.deepEqual(query.values, [tenantId]);
+          return [{ id: tenantId }];
+        } });
       }
     },
     saveUserInTransaction: async () => ({ userId: "target" }),

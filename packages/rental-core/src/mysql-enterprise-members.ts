@@ -15,6 +15,7 @@ import type { SharedCustomerRepository } from "./mysql-customer-master";
 import type { EnterpriseCommandService } from "./mysql-enterprise-command";
 import { enterpriseHash, enterpriseJson } from "./enterprise-receipt";
 import { assertOtherEnterpriseAdministrator } from "./enterprise-administrator-continuity";
+import { assertRentalBusinessTenantAccessAfterLock, lockRentalBusinessTenant } from "./mysql-business-fence";
 type Invite = { id: string; corporateCustomerId: string; status: "active" | "revoked"; revision: number; expiresAt: Date; maxUses: number; used: number; createdAt: Date };
 type Workflow = { id: string; applicantCustomerId: string; corporateCustomerId: string; kind: string; state: string; revision: number; payload: string | Record<string, unknown>; createdAt: Date; updatedAt: Date; decisionReason?: string };
 /** Persisted server-side handoff basis, not a caller-supplied grant or new login credential. */
@@ -170,9 +171,7 @@ export class EnterpriseMembersService {
     if (!policy.noticeText?.trim()) throw new ConflictException("商户尚未配置加入邀请告知正文，不能以默认文案代替");
     const bucket = new Date(Math.floor(Date.now() / (policy.windowSeconds * 1000)) * policy.windowSeconds * 1000);
     const scope = enterpriseHash(["enterprise-invite-guess", context.tenantId, context.customerId]);
-    await this.prisma.$executeRaw`INSERT INTO client_api_rate_buckets (id,scopeKey,bucketStart,count,createdAt,updatedAt) VALUES (${randomUUID()},${scope},${bucket},1,NOW(3),NOW(3)) ON DUPLICATE KEY UPDATE count=count+1,updatedAt=NOW(3)`;
-    const counts = await this.prisma.$queryRaw<Array<{ count: number }>>`SELECT count FROM client_api_rate_buckets WHERE scopeKey=${scope} AND bucketStart=${bucket}`;
-    if (Number(counts[0]?.count ?? 0) > policy.guessesPerWindow) throw new ForbiddenException("邀请尝试超出商户限额");
+    await this.chargeInviteGuess(context, scope, bucket, policy.guessesPerWindow);
     const rows = await this.prisma.$queryRaw<Array<{ corporateName: string; expiresAt: Date }>>`
       SELECT c.corporateName,i.expiresAt FROM enterprise_invites i
       JOIN customer_profiles c ON c.tenantId=i.tenantId AND c.id=i.corporateCustomerId AND c.customerType='corporate' AND c.status='active' AND c.mergedIntoCustomerId IS NULL
@@ -193,10 +192,7 @@ export class EnterpriseMembersService {
     const configured = await this.policy(context.tenantId, this.prisma as unknown as Prisma.TransactionClient);
     const bucket = new Date(Math.floor(Date.now() / (configured.policy.windowSeconds * 1000)) * configured.policy.windowSeconds * 1000);
     const scope = enterpriseHash(["enterprise-invite-guess", context.tenantId, context.customerId]);
-    // Charge guesses independently: a refused/invalid invite must not roll the rate counter back.
-    await this.prisma.$executeRaw`INSERT INTO client_api_rate_buckets (id,scopeKey,bucketStart,count,createdAt,updatedAt) VALUES (${randomUUID()},${scope},${bucket},1,NOW(3),NOW(3)) ON DUPLICATE KEY UPDATE count=count+1,updatedAt=NOW(3)`;
-    const counts = await this.prisma.$queryRaw<Array<{ count: number }>>`SELECT count FROM client_api_rate_buckets WHERE scopeKey=${scope} AND bucketStart=${bucket}`;
-    if (Number(counts[0]?.count ?? 0) > configured.policy.guessesPerWindow) throw new ForbiddenException("邀请尝试超出商户限额");
+    await this.chargeInviteGuess(context, scope, bucket, configured.policy.guessesPerWindow);
     const result = await this.commands.execute(context.tenantId, `customer:${context.customerId}`, "join.submit", "self", safe, async tx => {
       const rows = await tx.$queryRaw<Invite[]>`SELECT * FROM enterprise_invites WHERE tenantId=${context.tenantId} AND tokenHash=${safe.inviteCode}`;
       const invite = rows[0];
@@ -272,6 +268,7 @@ export class EnterpriseMembersService {
     const rows = await this.prisma.$transaction(async tx => {
       const tenant = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM Tenant WHERE id=${context.tenantId} AND status='ACTIVE' FOR UPDATE`;
       if (!tenant.length) throw new ForbiddenException("商户不可用");
+      await assertRentalBusinessTenantAccessAfterLock(tx, context.tenantId);
       await this.commands.customer(context, tx, false);
       if (corporateId) await this.access.requireAction(context, corporateId, "members:manage", tx);
       const requests = corporateId
@@ -286,6 +283,18 @@ export class EnterpriseMembersService {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     return rows.map(row => ({ id: row.id, kind: row.kind, state: row.state, revision: row.revision, applicantCustomerId: row.applicantCustomerId, corporateCustomerId: row.corporateCustomerId ?? undefined,
       payload: enterpriseJson(row.payload), decisionReason: row.decisionReason ?? undefined, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() }));
+  }
+  private async chargeInviteGuess(context: ClientRequestContext, scope: string, bucket: Date, maximum: number) {
+    // A refused or invalid invite still consumes its original attempt. Commit
+    // this counter independently and reject over-limit only after that commit.
+    const count = await this.prisma.$transaction(async tx => {
+      await lockRentalBusinessTenant(tx, context.tenantId);
+      await this.commands.customer(context, tx, false);
+      await tx.$executeRaw`INSERT INTO client_api_rate_buckets (id,scopeKey,bucketStart,count,createdAt,updatedAt) VALUES (${randomUUID()},${scope},${bucket},1,NOW(3),NOW(3)) ON DUPLICATE KEY UPDATE count=count+1,updatedAt=NOW(3)`;
+      const counts = await tx.$queryRaw<Array<{ count: number }>>`SELECT count FROM client_api_rate_buckets WHERE scopeKey=${scope} AND bucketStart=${bucket}`;
+      return Number(counts[0]?.count ?? 0);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    if (count > maximum) throw new ForbiddenException("邀请尝试超出商户限额");
   }
   async ownRelations(context: ClientRequestContext) {
     await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, false);

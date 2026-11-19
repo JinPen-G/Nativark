@@ -13,6 +13,7 @@ import { sha256 } from "@rental-os/platform-server/integration-payment";
 import type { RentalPaymentStatementDataStore, RentalPaymentRequestContext } from "./payment-storage";
 import { roundMoney } from "./payment-money";
 import { assertPaymentReconciliationAccess } from "./payment-reconciliation-access";
+import { lockRentalBusinessTenant } from "./mysql-business-fence";
 
 export { assertPaymentReconciliationAccess };
 
@@ -240,6 +241,7 @@ export class PaymentReconciliationFileService {
     const differenceRows = lineData.filter((row) => (row.differenceCodes as string[]).length > 0).length;
     try {
       const batch = await this.prisma.$transaction(async (tx) => {
+        await lockRentalBusinessTenant(tx, tenantId);
         assertPaymentReconciliationAccess(tenantId, workspaceId, this.authority);
         const created = await tx.paymentReconciliationBatch.create({
           data: {
@@ -257,7 +259,7 @@ export class PaymentReconciliationFileService {
         });
         await tx.paymentReconciliationLine.createMany({ data: lineData.map((row) => ({ ...row, batchId: created.id })) });
         return created;
-      });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
       return this.getBatch(tenantId, workspaceId, batch.id);
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
@@ -303,6 +305,7 @@ export class PaymentReconciliationFileService {
     if (line.reviewStatus === "acknowledged" && input.decision === "acknowledge") return this.getBatch(tenantId, workspaceId, batchId);
     const nextStatus: PaymentStatementReviewStatus = input.decision === "acknowledge" ? "acknowledged" : "query_pending";
     await this.prisma.$transaction(async (tx) => {
+      await lockRentalBusinessTenant(tx, tenantId);
       assertPaymentReconciliationAccess(tenantId, workspaceId, this.authority);
       const updated = await tx.paymentReconciliationLine.updateMany({
         where: { id: lineId, batchId, reviewStatus: { in: ["open", "query_pending"] } },
@@ -321,7 +324,7 @@ export class PaymentReconciliationFileService {
           data: { acknowledgedRows: { increment: 1 }, status: remaining === 0 ? "reviewed" : "needs_review" }
         });
       }
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     return this.getBatch(tenantId, workspaceId, batchId);
   }
 

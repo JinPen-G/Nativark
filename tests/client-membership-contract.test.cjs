@@ -127,6 +127,20 @@ const workspaces = [
 ];
 const sessions = new Map();
 const prisma = {
+  $transaction: async (work) => work({ ...prisma }),
+  $queryRaw: async (query) => {
+    if (query.sql.includes("FROM Tenant")) return query.values[0] === tenant.id ? [{ id: tenant.id }] : [];
+    if (query.sql.includes("FROM customer_profiles")) return query.values[0] === tenant.id && query.values[1] === customer.id ? [{ id: customer.id }] : [];
+    if (query.sql.includes("FROM business_workspaces")) return workspaces
+      .filter(row => row.tenantId === query.values[0] && row.id === query.values[1])
+      .map(row => ({ ...row, status: row.status.toLowerCase() }));
+    if (query.sql.includes("FROM client_channel_workspaces")) return workspaces
+      .filter(row => row.tenantId === query.values[0] && row.id === query.values[1])
+      .map(row => ({ workspaceId: row.id, enabled: 1 }));
+    throw new Error("unexpected client membership SQL");
+  },
+  clientChannelProfile: { findUnique: async () => null },
+  clientWechatIdentity: { count: async () => 0 },
   tenant: { findFirst: async ({ where }) => where.code === tenant.code && where.status === tenant.status ? tenant : null },
   businessWorkspace: {
     findFirst: async ({ where }) => workspaces.find((row) => row.tenantId === where.tenantId && (!where.code || row.code === where.code) && (!where.id || row.id === where.id) && row.status === where.status) ?? null,

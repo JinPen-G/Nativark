@@ -57,6 +57,10 @@ function serviceFixture() {
   let savedAudit;
   const calls = [];
   const tx = {
+    async $queryRaw(query) {
+      assert.match(query.sql, /SELECT id FROM Tenant.*LOCK IN SHARE MODE/u);
+      return [{ id: query.values[0] }];
+    },
     rentalCategoryGovernanceAudit: {
       findUnique: async ({ where }) => savedAudit?.id === where.id ? savedAudit : null,
       create: async ({ data }) => { calls.push("audit"); savedAudit = structuredClone(data); return data; }

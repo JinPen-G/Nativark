@@ -5,6 +5,7 @@ import { CLIENT_API_VERSION, type ClientMembershipSessionResponse, type ClientWe
 import { runWithRequestIdentity } from "@rental-os/platform-server/request-identity";
 import { customerRegistrationTransaction } from "./mysql-customer-registration-transaction";
 import { lockRentalBusinessTenant } from "./mysql-business-fence";
+import { assertRentalPublicAccessBeforeEffect, enterRentalPublicTarget } from "./application-public-access";
 import type { ClientRequestContext } from "./client-context";
 import { WechatMiniProgramAdapter } from "@rental-os/platform-server/integration-wechat";
 
@@ -26,6 +27,7 @@ interface ChannelRow {
   appId: string;
   appSecretEncrypted: string | null;
   enabled: boolean;
+  revision: number;
 }
 
 const maskPhone = (value: string) => (value.length <= 4 ? "****" : `${value.slice(0, 3)}****${value.slice(-4)}`);
@@ -50,7 +52,7 @@ export class ClientWechatAuthService {
   async resolveChannel(tenantId: string, appId?: string): Promise<ChannelRow & { appSecret: string }> {
     const channel = await this.prisma.miniProgramChannel.findFirst({
       where: { tenantId, ...(appId?.trim() ? { appId: appId.trim() } : {}) },
-      select: { id: true, tenantId: true, appId: true, appSecretEncrypted: true, enabled: true },
+      select: { id: true, tenantId: true, appId: true, appSecretEncrypted: true, enabled: true, revision: true },
       orderBy: { updatedAt: "desc" }
     });
     if (!channel) throw new ServiceUnavailableException(appId?.trim() ? "小程序未绑定到该商户，请联系商户确认渠道配置" : "商户尚未配置小程序渠道，微信手机号登录暂不可用");
@@ -99,12 +101,23 @@ export class ClientWechatAuthService {
       orderBy: [{ isDefault: "desc" }, { code: "asc" }]
     });
     if (!workspace) throw new ForbiddenException("该租户没有可访问的经营空间");
+    await enterRentalPublicTarget({ tenantId: tenant.id, workspaceId: workspace.id,
+      origin: { kind: "tenant-code", tenantCode: tenant.code } });
     const channel = await this.resolveChannel(tenant.id, input.appId);
     // 两个一次性凭证都在服务端换取；任何一步失败都不落库。
+    await assertRentalPublicAccessBeforeEffect();
     const session = await this.exchange(channel, input.loginCode);
+    await assertRentalPublicAccessBeforeEffect();
     const phone = await this.resolvePhone(channel, input.phoneCode);
 
     const result = await runWithRequestIdentity({ tenantId: tenant.id, workspaceId: workspace.id }, () => customerRegistrationTransaction(this.prisma, async (tx) => {
+      await lockRentalBusinessTenant(tx, tenant.id);
+      const currentChannel = await tx.miniProgramChannel.findFirst({ where: { id: channel.id, tenantId: tenant.id },
+        select: { id: true, appId: true, appSecretEncrypted: true, enabled: true, revision: true } });
+      if (!currentChannel || !currentChannel.enabled || currentChannel.appId !== channel.appId
+        || currentChannel.revision !== channel.revision || currentChannel.appSecretEncrypted !== channel.appSecretEncrypted) {
+        throw new ConflictException("小程序渠道配置已变化，本次微信登录未完成");
+      }
       const boundIdentity = await tx.clientWechatIdentity.findFirst({
         where: { tenantId: tenant.id, channelId: channel.id, openId: session.openid },
         include: { customer: { select: { id: true, phone: true, status: true, customerType: true } } }
@@ -186,6 +199,16 @@ export class ClientWechatAuthService {
     const identity = await this.prisma.$transaction(async (tx) => {
       // 一次性微信凭证已在事务外交换；当前权限在绑定写入前复核，拒绝后不重放凭证。
       await lockRentalBusinessTenant(tx, context.tenantId);
+      // 渠道保存持有同一 Tenant 的排他锁；在父锁内核对交换凭证时的配置，避免旧密钥结果绑定到新配置。
+      const currentChannel = await tx.miniProgramChannel.findFirst({
+        where: { id: channel.id, tenantId: context.tenantId },
+        select: { id: true, appId: true, appSecretEncrypted: true, enabled: true, revision: true }
+      });
+      if (!currentChannel || !currentChannel.enabled || currentChannel.id !== channel.id ||
+        currentChannel.appId !== channel.appId || currentChannel.revision !== channel.revision ||
+        currentChannel.appSecretEncrypted !== channel.appSecretEncrypted) {
+        throw new ConflictException("小程序渠道配置已变化，本次绑定未完成");
+      }
       const byOpenId = await tx.clientWechatIdentity.findFirst({ where: { tenantId: context.tenantId, channelId: channel.id, openId: session.openid } });
       if (byOpenId && byOpenId.customerId !== context.customerId) throw new ConflictException("该微信已绑定其他账号，请联系商户处理");
       const byCustomer = await tx.clientWechatIdentity.findFirst({ where: { tenantId: context.tenantId, channelId: channel.id, customerId: context.customerId } });

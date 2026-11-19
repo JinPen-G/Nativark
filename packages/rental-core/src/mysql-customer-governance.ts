@@ -184,8 +184,10 @@ export class CustomerOperationsService {
     workspaceId: string | undefined,
     customerId: string,
     scope: "all" | "organization" | "store" | "own",
-    userId?: string
+    userId?: string,
+    tx?: Pick<Prisma.TransactionClient, "customerProfile" | "rentalOrder">
   ) {
+    const client = tx ?? this.prisma;
     const currentWorkspaceId = workspaceId;
     if (!currentWorkspaceId || (scope === "own" && !userId)) {
       throw new ForbiddenException("客户数据范围缺少已验证的账号或经营空间");
@@ -195,7 +197,7 @@ export class CustomerOperationsService {
       throw new ForbiddenException("组织客户范围未解析为授权履约地点，已拒绝访问");
     }
     const profileVisible = locationIds === undefined && (scope === "own" || scope === "store")
-      ? await this.prisma.customerProfile.findFirst({
+      ? await client.customerProfile.findFirst({
           where: {
             id: customerId,
             tenantId,
@@ -220,7 +222,7 @@ export class CustomerOperationsService {
         { workOrders: { some: { OR: [{ createdBy: currentUserId }, { assigneeId: currentUserId }] } } }
       ] } : { id: "__no_current_user__" });
     }
-    const orderVisible = profileVisible ? true : await this.prisma.rentalOrder.findFirst({
+    const orderVisible = profileVisible ? true : await client.rentalOrder.findFirst({
       where: {
         tenantId,
         workspaceId: currentWorkspaceId,
@@ -240,7 +242,8 @@ export class CustomerOperationsService {
   }
 
   /** 附件不做脱敏投影，因此必须同时具备原资料查看和敏感资料权限。 */
-  async assertCustomerFileReadAccess(tenantId: string, customerId: string, corporate = false) {
+  async assertCustomerFileReadAccess(tenantId: string, customerId: string, corporate = false,
+    tx?: Pick<Prisma.TransactionClient, "customerProfile" | "rentalOrder">) {
     const identity = getRequestIdentity();
     const permissions = new Set(identity?.permissions ?? []);
     const has = (code: string) => identity?.isPlatformAdmin || permissions.has("*") || permissions.has(code);
@@ -252,9 +255,9 @@ export class CustomerOperationsService {
       throw new ForbiddenException("缺少原客户资料查看与敏感附件读取权限");
     }
     if (identity.dataScope !== "all" || getRequestLocationIds() !== undefined) {
-      await this.assertCustomerVisibleInRequestScope(tenantId, identity.workspaceId, customerId, identity.dataScope, identity.userId);
+      await this.assertCustomerVisibleInRequestScope(tenantId, identity.workspaceId, customerId, identity.dataScope, identity.userId, tx);
     }
-    const customer = await this.prisma.customerProfile.findFirst({ where: { tenantId, id: customerId }, select: { id: true } });
+    const customer = await (tx ?? this.prisma).customerProfile.findFirst({ where: { tenantId, id: customerId }, select: { id: true } });
     if (!customer) throw new NotFoundException("客户不存在或不在当前账号的数据范围内");
   }
 

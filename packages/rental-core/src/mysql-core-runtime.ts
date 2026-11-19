@@ -1931,16 +1931,13 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
       this.activeLocation(state, input.locationId, "storage");
     }
 
-    const result = await this.factStore.applyStockOperation({
+    return this.factStore.applyStockOperation({
       ...input,
       batchNo: input.batchNo?.trim() || undefined,
       sourceDocumentNo: input.sourceDocumentNo?.trim() || undefined,
       tenantId,
       operator: operator || input.operator || "系统"
     });
-    const locationIds = new Set(result.entries.map((entry) => entry.locationId));
-    const balances = (await this.listStockBalances(tenantId)).filter((row) => row.itemGroupId === input.itemGroupId && locationIds.has(row.locationId));
-    return { ...result, balances };
   }
 
   async saveStockBalance(tenantId: string, input: SaveRentalStockBalanceRequest) {
@@ -1959,7 +1956,7 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
     // 不在这里 `?? 0`：维修量这一列还记着异常归还的隔离量，省略即清零会让一次
     // 只报在手数量的例行盘点顺手把隔离中的坏货放回可用池。合并与上界校验都在
     // `applyStockCount` 的行锁内完成——读-改-写必须原子，否则并发隔离会被覆盖。
-    const saved = await this.factStore.applyStockCount({
+    return this.factStore.applyStockCount({
       id: id("stock"),
       tenantId,
       itemGroupId: group.id,
@@ -1967,7 +1964,6 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
       onHandQuantity: input.onHandQuantity,
       maintenanceQuantity: input.maintenanceQuantity
     });
-    return (await this.listStockBalances(tenantId)).find((row) => row.id === saved.id)!;
   }
 
   /** R0 availability reads persisted configuration and bounded minimal stock

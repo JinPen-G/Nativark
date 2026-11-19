@@ -418,6 +418,7 @@ export class TenantIntegrationService {
       result.push({
         tenantId: row.tenantId,
         id: row.id,
+        revision: this.configRevision(row),
         capability: "payment" as const,
         provider,
         settings,

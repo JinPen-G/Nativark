@@ -98,6 +98,9 @@ import { redactDeliveryAddressPhone } from "./delivery-address-privacy";
 import { canRecordCarrierShipmentEventDirectly, carrierBillableWindow, carrierShipmentEventError, rentalOrderDueAt } from "./carrier-shipment";
 import { returnPricingSlices } from "./return-pricing";
 import { exchangePickupInspectionRequirements } from "./exchange-inspection";
+import { PlatformOperationLogService } from "@rental-os/platform-server/operation-log";
+import { lockRentalBusinessTenant } from "./mysql-business-fence";
+import { rentalNativeResponse } from "./http-native-response";
 
 interface AuthenticatedRequest { user: SystemUserRow; headers?: Record<string, unknown>; }
 type RentalCoreService = RentalHttpApplications["core"];
@@ -524,6 +527,7 @@ export class RentalCoreController {
     @Query("customerId") customerId?: string,
     @Query("customerType") customerType?: string
   ) {
+    res = rentalNativeResponse(res);
     const tenantId = req.user.tenantId;
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
     const report = await this.workspaceReports.getOperationReport(
@@ -583,6 +587,7 @@ export class RentalCoreController {
   }
   @Get("item-groups/:id/images/:imageId")
   async itemGroupImage(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("imageId") imageId: string, @Res() res: BinaryResponse) {
+    res = rentalNativeResponse(res);
     const image = await this.service.readItemGroupImage(req.user.tenantId, id, imageId);
     if ("redirectUrl" in image) {
       res.redirect(302, image.redirectUrl!);
@@ -1054,16 +1059,21 @@ export class RentalCoreController {
     const permission = "rental-os:customer:reveal-sensitive";
     if (!hasPermissionCode(req.user, permission)) throw new ForbiddenException("查看完整收件电话需要客户敏感资料解密权限");
     const snapshot = await this.service.getDeliveryAddressForReveal(req.user.tenantId, id);
-    await this.operationLogs.record({
-      user: req.user,
-      action: "order.delivery_address.revealed",
-      targetType: "rental-order",
-      targetId: id,
-      rentalOrderId: id,
-      detail: "查看订单完整收件信息（含联系电话）",
-      metadata: { fields: ["recipient", "phone", "address"], permission },
-      requireSuccess: true
-    });
+    // 独立读取审计仍按原 requireSuccess 合同落库；门禁与日志共用短事务，
+    // 返回前由宿主再次复核。审计成功不代表敏感投影一定已经送达客户端。
+    await this.prisma.$transaction(async tx => {
+      await lockRentalBusinessTenant(tx, req.user.tenantId);
+      await new PlatformOperationLogService(tx).record({
+        user: req.user,
+        action: "order.delivery_address.revealed",
+        targetType: "rental-order",
+        targetId: id,
+        rentalOrderId: id,
+        detail: "查看订单完整收件信息（含联系电话）",
+        metadata: { fields: ["recipient", "phone", "address"], permission },
+        requireSuccess: true
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     return snapshot;
   }
   @Get("orders/:id") order(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.service.getOrder(req.user.tenantId, id); }

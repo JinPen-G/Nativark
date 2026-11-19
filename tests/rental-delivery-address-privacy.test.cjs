@@ -24,20 +24,20 @@ assert.equal(original.request.deliveryAddressDraft.phone, "13800000000", "draft 
 assert.equal(original.nested[0].deliveryAddressSnapshot.phone, "13900000000", "nested redaction must not mutate source facts");
 assert.strictEqual(redactDeliveryAddressPhone({ id: "unrelated" }).id, "unrelated");
 
-const guard = source("apps/api/src/common/api-auth.guard.ts");
+const guard = source("packages/rental-core/src/http-auth.ts");
 assert.match(guard, /delivery-address\\\/reveal.*return \["rental-os:customer:reveal-sensitive"\]/u);
-const staffPolicy = source("apps/api/src/common/staff-api-policy.ts");
+const staffPolicy = source("packages/rental-core/src/staff-api-policy.ts");
 assert.doesNotMatch(staffPolicy, /delivery-address\\\/reveal/u, "the staff facade must not expose the PII reveal route");
-const controller = source("apps/api/src/modules/rental-core/rental-core.controller.ts");
+const controller = source("packages/rental-core/src/http-core.controller.ts");
 assert.match(controller, /delivery-address\/reveal/u);
 assert.match(controller, /order\.delivery_address\.revealed/u);
 assert.match(controller, /requireSuccess: true/u, "full delivery details must only return after a durable audit record");
 assert.match(controller, /redactDeliveryAddressPhone\(resolved\)/u);
-const businessController = source("apps/api/src/modules/rental-core/rental-business.controller.ts");
+const businessController = source("packages/rental-core/src/http-business.controller.ts");
 assert.match(businessController, /const quote = await this\.business\.loadQuote/u);
 assert.match(businessController, /assertQuoteReadAccess\(quote\)/u);
 assert.match(businessController, /redactDeliveryAddressPhone\(quote\)/u);
-const page = source("apps/admin/src/features/rental-core/RentalOrderDetailPage.tsx");
+const page = source("packages/rental-core/admin/orders/RentalOrderDetailPage.tsx");
 assert.match(page, /canRevealSensitive && !fullPhoneVisible/u);
 assert.match(page, /address\.phoneMasked/u);
 assert.match(page, /revealOrderDeliveryAddress\(id\)/u);

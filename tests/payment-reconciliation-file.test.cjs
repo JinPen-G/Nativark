@@ -90,8 +90,21 @@ class FakePrisma {
     };
   }
 
-  async $transaction(callback) {
-    return callback(this);
+  async $transaction(callback, options) {
+    assert.equal(options?.isolationLevel, 'ReadCommitted');
+    const before = structuredClone({ batches: this.batches, lines: this.lines });
+    // A transaction is a separate client and cannot open another transaction.
+    const { $transaction: _transaction, ...delegates } = this;
+    const tx = { ...delegates, $queryRaw: async (query) => {
+      assert.match(query.sql, /SELECT id FROM Tenant WHERE id=\? LOCK IN SHARE MODE/u);
+      return query.values[0] === identity.tenantId ? [{ id: identity.tenantId }] : [];
+    } };
+    try { return await callback(tx); }
+    catch (error) {
+      this.batches = before.batches;
+      this.lines = before.lines;
+      throw error;
+    }
   }
 }
 

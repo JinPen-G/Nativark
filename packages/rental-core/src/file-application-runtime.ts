@@ -5,9 +5,9 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { createHash } from "node:crypto";
 import { FileStoragePrimitives, FileStorageRepository, freezeFileUploadContent, createOriginalFileUploadFacts,
   readOriginalFileUploadReceipt, FileStorageCleanup, COMPLETED_STAGING_PENDING, issueFileDownloadReference,
-  FileStorageApplication, type FileStorageOwner } from "@rental-os/platform-server/files";
+  FileStorageApplication, type FileStorageOwner, type FileCleanupTransaction } from "@rental-os/platform-server/files";
 import { fetchObjectStorageWithTimeout as fetchWithTimeout } from "@rental-os/platform-server/object-storage";
-import type { PlatformOperationLogService } from "@rental-os/platform-server/operation-log";
+import { PlatformOperationLogService, type OperationLogInput } from "@rental-os/platform-server/operation-log";
 import { getRequestIdentity } from "@rental-os/platform-server/request-identity";
 import type { TenantIntegrationService, TenantIntegrationRuntimeConfig } from "@rental-os/platform-server/tenant-integration";
 import { requestFingerprint } from "@rental-os/platform-contracts/request-fingerprint";
@@ -21,7 +21,8 @@ import { RentalExchangeInspectionFileStorage, type RentalExchangeInspectionStora
 import { RentalEvidenceFileStorage } from "./file-application-rental-evidence";
 import { RentalStaffUploadObservation } from "./file-application-staff-observation";
 import { RentalEnterprisePaymentProofFileParticipant } from "./file-application-enterprise-payment-proof";
-import { RentalFileApplicationParticipant, isRentalStaffFileBinding, type RentalFileWorkspaceAuthority } from "./file-application-participant";
+import { RentalFileApplicationParticipant, RentalStaffFileStorageApplication, isRentalStaffFileBinding, type RentalFileWorkspaceAuthority } from "./file-application-participant";
+import { lockRentalBusinessTenant } from "./mysql-business-fence";
 import { ENTERPRISE_PAYMENT_PROOF_SCENE } from "./enterprise-workflows";
 import { RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE } from "./exchange-inspection-preparation";
 import type { StaffUploadObservationRequest, StaffUploadObservationResponse } from "./staff-upload-observation";
@@ -87,7 +88,6 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
 
   private readonly files: FileStorageRepository;
   private readonly fileReferences: RentalFileBusinessReferences;
-  private readonly cleanup: FileStorageCleanup<Prisma.TransactionClient>;
   private readonly exchangeInspectionFiles: RentalExchangeInspectionFileStorage<FileBusinessOwner<Revision>>;
   private readonly evidenceFiles: RentalEvidenceFileStorage;
   private readonly staffUploadObservations: RentalStaffUploadObservation;
@@ -164,13 +164,13 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
           },
           allowSimulation: process.env.NODE_ENV !== "production",
           storageKey: (config, currentTenantId, assetId, fileName) => this.storageKey(config, currentTenantId, assetId, fileName),
-          transaction: work => this.prisma.$transaction(work),
+          transaction: work => this.businessTransaction(tenantId, work),
           assertEnabled: (tx, config) => this.integrations.assertEnabledInTransaction(tx, tenantId, "file", config.provider,
             { configRevision: config.revision }),
-          beforePersist: async () => {
+          beforePersist: async tx => {
             if (input.businessType === 'ai_knowledge_document') await this.authorizeKnowledgeUpload(tenantId, input, owner);
             // 配置读取会让出执行，建立上传事实前再次核原业务引用及空间归属。
-            else await this.assertBusinessReference(tenantId, input.businessType, input.businessId, owner?.workspaceId);
+            else await this.assertBusinessReference(tenantId, input.businessType, input.businessId, owner?.workspaceId, tx);
             if (input.businessType === 'ai_knowledge_document') knowledgeWriteAttempted = true;
           },
           persist: (tx, facts, config) => this.persistUploadFacts(tx, tenantId, facts, config)
@@ -275,6 +275,8 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
       throw new ServiceUnavailableException("文件平台未返回可用上传地址");
     }
 
+    await this.assertUploadDispatch(tenantId, session.sessionId, session.fileAssetId, owner, undefined,
+      { url: session.uploadUrl, expiresAt: session.expiresAt, request: input });
     let response: Response;
     try {
       response = await fetchWithTimeout(session.uploadUrl, {
@@ -283,11 +285,11 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
         body: new Uint8Array(content)
       });
     } catch {
-      await this.failSession(tenantId, session.sessionId, "上传到对象存储失败");
+      await this.failSession(tenantId, session.sessionId, "上传到对象存储失败", true);
       throw new ServiceUnavailableException("上传到对象存储失败，请稍后重试");
     }
     if (!response.ok) {
-      await this.failSession(tenantId, session.sessionId, `对象存储返回 HTTP ${response.status}`);
+      await this.failSession(tenantId, session.sessionId, `对象存储返回 HTTP ${response.status}`, true);
       throw new ServiceUnavailableException("上传到对象存储失败，请稍后重试");
     }
     return this.completeUpload(tenantId, session.sessionId, { checksum }, owner);
@@ -308,23 +310,42 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
     if (owner) await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner.workspaceId);
     if (asset.status === "deleted") return { fileAssetId, status: "deleted" as const };
 
+    let config: TenantIntegrationRuntimeConfig | undefined, configurationError: unknown;
+    if (asset.storageProvider !== "local_mock") {
+      try { config = await this.integrations.runtimeConfig("file", tenantId, asset.storageProvider as never, { requireLiveTest: false }); }
+      catch (error) { configurationError = error; }
+    }
+    const original = { id: fileAssetId, tenantId, status: { in: ["active", "delete_pending"] },
+      updatedAt: asset.updatedAt, storageKey: asset.storageKey, storageProvider: asset.storageProvider,
+      businessType: asset.businessType, businessId: asset.businessId };
+    await this.businessTransaction(tenantId, async tx => {
+      const current = await tx.fileAsset.findFirst({ where: original });
+      if (!current) throw new ConflictException("原删除文件绑定已变化");
+      if (owner) await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner.workspaceId, tx);
+      if (config) await this.integrations.assertEnabledInTransaction(tx, tenantId, "file", config.provider, { configRevision: config.revision });
+      if (asset.storageProvider === "local_mock") {
+        const changed = await tx.fileAsset.updateMany({ where: original, data: { status: "deleted" } });
+        if (changed.count !== 1) throw new ConflictException("原删除文件绑定已变化");
+      }
+    });
     if (asset.storageProvider !== "local_mock") {
       try {
-        const config = await this.integrations.runtimeConfig("file", tenantId, asset.storageProvider as never, { requireLiveTest: false });
+        if (configurationError) throw configurationError;
         if (!config || !(await this.deleteObject(config, asset.storageKey, new Date()))) throw new ServiceUnavailableException("对象存储未确认删除文件");
       } catch {
         await this.prisma.fileAsset.updateMany({
-          where: { id: fileAssetId, tenantId, status: { in: ["active", "delete_pending"] } },
+          where: original,
           data: { status: "delete_pending" }
         });
         await this.operationLog?.record({ tenantId, action: "file.delete.pending", targetType: "file", targetId: fileAssetId, detail: "对象存储删除待重试", metadata: { provider: asset.storageProvider } });
         throw new ServiceUnavailableException("对象存储暂不可用，文件删除已进入重试队列");
       }
     }
-    await this.prisma.fileAsset.updateMany({
-      where: { id: fileAssetId, tenantId, status: { in: ["active", "delete_pending"] } },
-      data: { status: "deleted" }
-    });
+    // 已派发删除的原结果只以原定位CAS收口；撤权不改写实际外部效果。
+    if (asset.storageProvider !== "local_mock") {
+      const changed = await this.prisma.fileAsset.updateMany({ where: original, data: { status: "deleted" } });
+      if (changed.count !== 1) throw new ConflictException("原文件删除收据已变化，请核对原对象");
+    }
     await this.operationLog?.record({ tenantId, action: "file.delete", targetType: "file", targetId: fileAssetId, detail: "删除业务文件", metadata: { provider: asset.storageProvider } });
     return { fileAssetId, status: "deleted" as const };
   }
@@ -337,7 +358,7 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
    * cleanupError holds the fixed pending/unknown marker; the upload remains
    * completed and its active evidence is never invalidated by cleanup failure. */
   private async cleanupCompletedStagingObjects(tenantId: string, limit: number): Promise<FileUploadCleanupSummary> {
-    return this.cleanup.cleanupCompletedStagingObjects(tenantId, limit);
+    return this.cleanupForTenant(tenantId).cleanupCompletedStagingObjects(tenantId, limit);
   }
 
   /**
@@ -346,7 +367,7 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
    * freeze_pending 不进入任何过期清理，未知冻结仍只能核对原结果。
    */
   async cleanupExpiredUploadSessions(tenantId: string, limit = 50): Promise<FileUploadCleanupSummary> {
-    return this.cleanup.cleanupExpiredUploadSessions(tenantId, limit);
+    return this.cleanupForTenant(tenantId).cleanupExpiredUploadSessions(tenantId, limit);
   }
 
   /**
@@ -385,7 +406,7 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
 
   /** 删除业务记录已经从页面移除、但 provider 暂时不可达的文件。 */
   async cleanupPendingFileAssetDeletes(tenantId: string, limit = 50) {
-    return this.cleanup.cleanupPendingFileAssetDeletes(tenantId, limit);
+    return this.cleanupForTenant(tenantId).cleanupPendingFileAssetDeletes(tenantId, limit);
   }
 
   async cleanupPendingFileAssetDeletesForAllTenants(limitPerTenant = 50) {
@@ -551,14 +572,16 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
       const result = await freezeFileUploadContent<
         Prisma.FileAssetGetPayload<object>, Prisma.FileUploadSessionGetPayload<object>, Prisma.TransactionClient
       >({ tenantId, asset, session, config, checksum: input.checksum }, {
-        transaction: work => this.prisma.$transaction(work),
-        beforeClaim: async () => {
+        transaction: work => this.businessTransaction(tenantId, work),
+        beforeClaim: async tx => {
           if (knowledgeInput) await this.authorizeKnowledgeUpload(tenantId, knowledgeInput, owner);
+          else await this.assertBusinessReference(tenantId, asset!.businessType, asset!.businessId ?? "", owner?.workspaceId, tx);
         },
         assertConfiguration: (tx, currentConfig) => this.integrations.assertEnabledInTransaction(tx, tenantId, "file", currentConfig.provider,
           { configRevision: currentConfig.revision }),
         readContent: (currentConfig, storageKey, mimeType, sizeBytes) => this.readObjectContent(currentConfig, storageKey, mimeType, sizeBytes),
-        writeContent: (currentConfig, storageKey, mimeType, bytes) => {
+        writeContent: async (currentConfig, storageKey, mimeType, bytes) => {
+          await this.assertUploadDispatch(tenantId, session!.id, pendingAsset.id, owner, { storageKey, config: currentConfig });
           const signed = this.presign(currentConfig, "PUT", storageKey, mimeType, new Date(Date.now() + 60_000));
           return this.objectRequest(signed.url, { method: "PUT", headers: signed.headers, body: new Uint8Array(bytes) });
         },
@@ -586,6 +609,8 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
       ...(input.checksum?.trim() ? { clientChecksum: input.checksum.trim() } : {})
     };
     const updated = await this.prisma.$transaction(async (tx) => {
+      // 已派发的冻结内容只按原收据完成文件结果；本地模拟没有外部结果，仍是新写入。
+      if (!frozen) await lockRentalBusinessTenant(tx, tenantId);
       if (frozen) {
         await this.integrations.assertEnabledInTransaction(tx, tenantId, "file", frozen.config.provider, { configRevision: frozen.config.revision });
         const [currentAsset, currentSession] = await Promise.all([
@@ -595,7 +620,7 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
         if (requestFingerprint(currentAsset) !== requestFingerprint(asset) || requestFingerprint(currentSession) !== requestFingerprint(session)) {
           throw new ConflictException("文件或原上传会话在内容冻结期间已变化");
         }
-        if (!knowledgeInput) await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner?.workspaceId);
+        if (!knowledgeInput) await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner?.workspaceId, tx);
       }
       if (knowledgeInput) {
         await this.authorizeKnowledgeUpload(tenantId, knowledgeInput, owner);
@@ -660,7 +685,7 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
     if (!this.fileAccess || !this.operationLog) throw new ServiceUnavailableException("文件业务读取权威或访问审计未配置");
     return issueFileDownloadReference({ tenantId, fileAssetId, asset }, {
       access: this.fileAccess,
-      recordAudit: input => this.operationLog!.record(input),
+      recordAudit: input => this.recordDownloadAudit(input, asset),
       readAsset: () => this.prisma.fileAsset.findFirst({ where: { id: fileAssetId, tenantId, status: "active" } }),
       runtimeConfig: () => this.integrations.runtimeConfig("file", tenantId, asset.storageProvider as never),
       allowSimulation: process.env.NODE_ENV !== "production",
@@ -733,7 +758,8 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
     session = structuredClone(session); asset = structuredClone(asset);
     return readOriginalFileUploadReceipt({ tenantId, session, asset, owner }, {
       isTenantSharedBinding: file => ["customer", "customer_profile", "membership_review"].includes(file.businessType),
-      assertBusinessReference: () => this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner?.workspaceId),
+      assertBusinessReference: () => this.businessTransaction(tenantId, tx =>
+        this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner?.workspaceId, tx)),
       runtimeConfig: () => this.integrations.runtimeConfig("file", tenantId, session.provider as never, { requireLiveTest: false }),
       readSession: () => this.prisma.fileUploadSession.findFirst({ where: { id: session.id, tenantId } }),
       readAsset: () => this.prisma.fileAsset.findFirst({ where: { id: asset.id, tenantId } }),
@@ -756,15 +782,115 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
       && this.enterprisePaymentProofFiles.matchesUploadRequest(asset, input);
   }
 
-  private async assertBusinessReference(tenantId: string, businessType: string, businessId: string, workspaceId?: string) {
-    return this.fileReferences.assertExists(tenantId, businessType, businessId, workspaceId);
+  private async assertBusinessReference(tenantId: string, businessType: string, businessId: string, workspaceId?: string,
+    tx?: Prisma.TransactionClient) {
+    return (tx ? new RentalFileBusinessReferences(tx) : this.fileReferences).assertExists(tenantId, businessType, businessId, workspaceId);
   }
 
-  private async failSession(tenantId: string, sessionId: string, reason: string) {
-    await this.prisma.$transaction([
-      this.prisma.fileUploadSession.updateMany({ where: { id: sessionId, tenantId, status: "pending_upload" }, data: { status: "failed", failureReason: reason, cleanupError: "待执行过期对象清理" } }),
-      this.prisma.fileAsset.updateMany({ where: { tenantId, uploadSession: { is: { id: sessionId } }, status: "pending_upload" }, data: { status: "failed" } })
-    ]);
+  private businessTransaction<T>(tenantId: string, work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+    return this.prisma.$transaction(async tx => {
+      await lockRentalBusinessTenant(tx, tenantId);
+      return work(tx);
+    });
+  }
+
+  /** 只适配原清理参加者的新占用和DELETE派发；结果CAS、HEAD核对及审计仍记录原已发生效果。 */
+  private cleanupForTenant(tenantId: string) {
+    const prisma = this.prisma;
+    const store: FileCleanupTransaction = {
+      fileAsset: {
+        findFirst: input => prisma.fileAsset.findFirst(input),
+        findMany: input => prisma.fileAsset.findMany(input),
+        updateMany: input => input.data.status === "delete_in_progress"
+          ? this.businessTransaction(tenantId, async tx => tx.fileAsset.updateMany(input)) : prisma.fileAsset.updateMany(input)
+      },
+      fileUploadSession: {
+        findMany: input => prisma.fileUploadSession.findMany(input),
+        update: input => prisma.fileUploadSession.update(input),
+        updateMany: input => input.data.status === "cleanup_in_progress"
+          ? this.businessTransaction(tenantId, async tx => tx.fileUploadSession.updateMany(input)) : prisma.fileUploadSession.updateMany(input)
+      }
+    };
+    return new FileStorageCleanup<Prisma.TransactionClient>({
+      store,
+      transaction: work => this.businessTransaction(tenantId, work),
+      runtimeConfig: (currentTenant, provider) => this.integrations.runtimeConfig("file", currentTenant, provider as never, { requireLiveTest: false }),
+      excludedUploadScene: RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE,
+      deleteObject: async (config, storageKey, at) => {
+        await this.businessTransaction(tenantId, tx => this.integrations.assertEnabledInTransaction(tx, tenantId, "file", config.provider,
+          { configRevision: config.revision }));
+        return this.deleteObject(config, storageKey, at);
+      },
+      presign: (config, method, storageKey, mimeType, expiresAt) => this.presign(config, method, storageKey, mimeType, expiresAt),
+      objectRequest: async (url, init) => {
+        if (init.method === "DELETE") await this.businessTransaction(tenantId, async () => undefined);
+        return this.objectRequest(url, init);
+      },
+      ...(this.operationLog ? { recordAudit: (input: OperationLogInput) => this.operationLog!.record(input) } : {})
+    });
+  }
+
+  /** 新运输在短事务核原目标与配置，事务结束后才派发。拒绝不重写冻结意图或已有结果。 */
+  private async assertUploadDispatch(tenantId: string, sessionId: string, fileAssetId: string,
+    owner?: FileBusinessOwner<Revision>, frozen?: { storageKey: string; config: TenantIntegrationRuntimeConfig },
+    pending?: { url: string; expiresAt: string; request: CreateFileUploadSessionRequest }) {
+    const original = !frozen && await this.prisma.fileUploadSession.findFirst({ where: { id: sessionId, tenantId } });
+    const config = frozen?.config ?? (original
+      ? await this.integrations.runtimeConfig("file", tenantId, original.provider as never, { requireLiveTest: false }) : undefined);
+    await this.prisma.$transaction(async tx => {
+      await lockRentalBusinessTenant(tx, tenantId);
+      const session = await tx.fileUploadSession.findFirst({ where: { id: sessionId, tenantId } });
+      const asset = await tx.fileAsset.findFirst({ where: { id: fileAssetId, tenantId } });
+      const metadata = asset?.metadata as JsonRecord | null;
+      if (!session || !asset || session.fileAssetId !== asset.id || session.provider !== asset.storageProvider
+        || session.storageKey !== asset.storageKey || asset.status !== "pending_upload"
+        || session.status !== (frozen ? "freeze_pending" : "pending_upload")
+        || frozen && asset.storageKey !== frozen.storageKey || !frozen && session.expiresAt.getTime() <= Date.now()
+        || owner && (!this.matchesOwner(asset, owner) || owner.actorUserId && asset.uploadedBy !== owner.actorUserId))
+        throw new ConflictException("原上传派发目标已变化，只能核对原会话");
+      if (!config || config.provider !== asset.storageProvider || metadata?.uploadConfigHash !== requestFingerprint({
+        id: config.id, provider: config.provider, settings: config.settings, credentials: config.credentials }))
+        throw new ConflictException("原上传配置已变化，不能派发旧对象请求");
+      if (pending) {
+        const target = new URL(this.presign(config, "PUT", this.pendingObjectKey(asset.storageKey), asset.mimeType, session.expiresAt).url);
+        const originalTarget = new URL(pending.url);
+        if (target.origin !== originalTarget.origin || target.pathname !== originalTarget.pathname
+          || session.expiresAt.toISOString() !== pending.expiresAt || !this.matchesUploadRequest(asset, pending.request, pending.request.mimeType.trim().toLowerCase()))
+          throw new ConflictException("原上传派发定位已变化，不能发送到旧对象");
+      }
+      await this.integrations.assertEnabledInTransaction(tx, tenantId, "file", config.provider, { configRevision: config.revision });
+      if (asset.businessType !== "ai_knowledge_document")
+        await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner?.workspaceId, tx);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+  }
+
+  private async recordDownloadAudit(input: OperationLogInput, expected: Prisma.FileAssetGetPayload<object>) {
+    if (!this.fileAccess || !this.operationLog || input.tenantId !== expected.tenantId || input.targetId !== expected.id)
+      throw new ServiceUnavailableException("文件业务读取权威或访问审计未配置");
+    const access = this.fileAccess;
+    return this.prisma.$transaction(async tx => {
+      await lockRentalBusinessTenant(tx, expected.tenantId);
+      const asset = await tx.fileAsset.findFirst({ where: { id: expected.id, tenantId: expected.tenantId, status: "active" } });
+      const stable = (row: unknown) => requestFingerprint(JSON.parse(JSON.stringify(row)));
+      if (!asset || stable(asset) !== stable(expected)) throw new ConflictException("文件或读取授权已变化");
+      await access.assertRead(expected.tenantId, asset, false, tx);
+      await new PlatformOperationLogService(tx).record(input);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+  }
+
+  private async failSession(tenantId: string, sessionId: string, reason: string, resultOnly = false) {
+    await this.prisma.$transaction(async tx => {
+      if (!resultOnly) await lockRentalBusinessTenant(tx, tenantId);
+      const session = await tx.fileUploadSession.findFirst({ where: { id: sessionId, tenantId } });
+      if (!session || session.status !== "pending_upload") return;
+      const claimed = await tx.fileUploadSession.updateMany({ where: { id: sessionId, tenantId, status: "pending_upload",
+        updatedAt: session.updatedAt, fileAssetId: session.fileAssetId, storageKey: session.storageKey },
+        data: { status: "failed", failureReason: reason, cleanupError: "待执行过期对象清理" } });
+      // 迟到的运输失败不能把另一完成者已占用的冻结文件改成failed。
+      if (claimed.count !== 1) return;
+      await tx.fileAsset.updateMany({ where: { id: session.fileAssetId, tenantId, storageKey: session.storageKey,
+        status: "pending_upload" }, data: { status: "failed" } });
+    });
   }
   constructor(private readonly prisma: RentalFileRuntimeStorage,
     private readonly integrations: Pick<TenantIntegrationService, "runtimeConfig" | "assertEnabledInTransaction">,
@@ -799,19 +925,9 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
       matchesOwner: (...args) => this.matchesOwner(...args),
       matchesUploadRequest: (...args) => this.matchesUploadRequest(...args)
     });
-    this.cleanup = new FileStorageCleanup<Prisma.TransactionClient>({
-      store: prisma,
-      transaction: work => prisma.$transaction(work),
-      runtimeConfig: (tenantId, provider) => this.integrations.runtimeConfig("file", tenantId, provider as never, { requireLiveTest: false }),
-      excludedUploadScene: RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE,
-      deleteObject: (config, storageKey, at) => this.deleteObject(config, storageKey, at),
-      presign: (config, method, storageKey, mimeType, expiresAt) => this.presign(config, method, storageKey, mimeType, expiresAt),
-      objectRequest: (url, init) => this.objectRequest(url, init),
-      ...(operationLog ? { recordAudit: input => operationLog.record(input) } : {})
-    });
     if (auth && fileAccess) {
       const staff = new RentalFileApplicationParticipant(prisma, auth, fileAccess);
-      this.staffFiles = new FileStorageApplication<FileBusinessOwner<Revision>, Prisma.TransactionClient>({
+      this.staffFiles = new RentalStaffFileStorageApplication<FileBusinessOwner<Revision>>({
         store: prisma,
         transaction: work => staff.transaction(work),
         runtimeConfig: (tenantId, provider, options) => this.integrations.runtimeConfig("file", tenantId, provider as never, options),
@@ -820,8 +936,8 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
         allowSimulation: process.env.NODE_ENV !== "production",
         isUniqueConflict: error => error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002",
         excludedUploadScene: RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE,
-        ...(operationLog ? { recordAudit: input => operationLog.record(input) } : {})
-      }, staff.authorities);
+        ...(operationLog ? { recordAudit: input => staff.recordAudit(input) } : {})
+      }, staff);
     }
   }
 }

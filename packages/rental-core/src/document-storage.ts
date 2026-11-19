@@ -13,6 +13,11 @@ export interface RentalDocumentFacts {
 export interface RentalDocumentFunding {
   listEvents(tenantId: string, workspaceId: string, orderId: string): PromiseLike<RentalFundingBalance>;
 }
-export interface RentalDocumentStorage {
+export interface RentalDocumentTransaction {
+  $queryRaw: Prisma.TransactionClient["$queryRaw"];
   rentalOrderDocumentSnapshot: Pick<Prisma.TransactionClient["rentalOrderDocumentSnapshot"], "findUnique" | "findMany" | "findFirst" | "create">;
+}
+export interface RentalDocumentStorage extends RentalDocumentTransaction {
+  $transaction<T>(consume: (transaction: RentalDocumentTransaction) => Promise<T>,
+    options: { isolationLevel: "ReadCommitted" }): PromiseLike<T>;
 }

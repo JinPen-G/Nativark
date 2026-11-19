@@ -39,6 +39,9 @@ export interface RentalApplicationWorkerAuthority<TTransaction> {
    * settlement 只标明原作业用途，不能据此默认授予停用后的善后权限。
    * 有 transaction 时复用该业务事务及原锁序，不另开事务或重新执行 unknown。 */
   assertCurrent(request: RentalApplicationJobRequest, transaction?: TTransaction): Promise<void>;
+  /** Only the original Tenant/Core/deployment gates. Payment acquires Order next,
+   * then calls assertCurrent before any funding/intent mutation in that same tx. */
+  assertParentCurrent(request: RentalApplicationJobRequest, transaction: TTransaction): Promise<void>;
 }
 
 export type RentalApplicationParticipantTransaction = RentalDueJobTransaction & RentalAllocationTransaction;
@@ -118,6 +121,14 @@ class StandardRentalDueJobs<TTransaction extends RentalApplicationParticipantTra
       if (this.stopping || !request || request.tenantId !== tenantId) {
         throw new Error("Rental 派发作业已停止或不属于原租户，不能开始新动作");
       }
+      if (request.jobId === "expire_payment_intents") await dependencies.authority.assertParentCurrent(request, transaction);
+      else await current(transaction);
+      if (this.stopping) throw new Error("Rental 派发作业正在退出，不能开始新动作");
+    }, undefined, async (transaction: TTransaction, tenantId: string, workspaceId: string) => {
+      const request = jobContext.getStore();
+      if (this.stopping || !request || request.tenantId !== tenantId || request.workspaceId !== workspaceId) {
+        throw new Error("Rental 派发动作已停止或偏离原作业空间");
+      }
       await current(transaction);
       if (this.stopping) throw new Error("Rental 派发作业正在退出，不能开始新动作");
     });
@@ -149,7 +160,8 @@ class StandardRentalDueJobs<TTransaction extends RentalApplicationParticipantTra
           await this.current();
           return job.run(currentTenant, currentWorkspace);
         };
-        // 通知/payment 的短事务在每次认领或运输前重核同一作业权威。
+        // 通知短事务复核完整作业权威；payment 父锁只查 Tenant/Core，
+        // 原 provider 前短事务/入账 Order 锁后再复核完整空间权威。
         // 逐单作业保留 facts.lockOrder→current(tx)：完整权威会锁空间，
         // 若提前绑定到幂等执行器的 Tenant fence，就会颠倒原订单→空间锁序。
         // 嵌套 HTTP scope 由 fence 明确拒绝，不能改绑为系统作业身份。
@@ -171,7 +183,8 @@ export function createRentalApplicationParticipants<TTransaction extends RentalA
     if (!dependencies?.[name]) throw new Error(`Rental 作业装配缺少依赖: ${name}`);
   }
   for (const [service, method] of [
-    [dependencies.authority, "assertCurrent"], [dependencies.corporateSettlement, "settleCancelledOrderCredit"],
+    [dependencies.authority, "assertCurrent"], [dependencies.authority, "assertParentCurrent"],
+    [dependencies.corporateSettlement, "settleCancelledOrderCredit"],
     [dependencies.payments, "expireStalePaymentIntents"], [dependencies.idempotent, "execute"],
     [dependencies.idempotent, "executeWithReplayFlag"],
   ] as const) if (typeof (service as unknown as Record<string, unknown>)[method] !== "function")

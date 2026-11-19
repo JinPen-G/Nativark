@@ -1,4 +1,5 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import type { FileAssetSummary } from '@rental-os/platform-contracts/files';
 import { getRequestIdentity, type RequestIdentity } from '@rental-os/platform-server/request-identity';
 import type { RentalFileAccessStorage, RentalFileFacts, RentalFileQuoteFacts, RentalCustomerFileAccess } from './file-access-ports';
@@ -70,33 +71,34 @@ export class RentalFileBusinessAccessService {
     return visible;
   }
 
-  async assertRead(tenantId: string, file: FileBinding, genericLedger = false): Promise<void> {
+  async assertRead(tenantId: string, file: FileBinding, genericLedger = false, tx?: Prisma.TransactionClient): Promise<void> {
+    const client = tx ?? this.prisma;
     const key = this.authorityKey(tenantId), actor = this.actor(tenantId);
     const type = file.businessType, id = file.businessId;
     if (!id || !file.id || type === 'ai_knowledge_document') throw new ForbiddenException('文件缺少可读取的原业务绑定');
     if (['item_group', 'rental_item_group'].includes(type) && file.uploadScene === 'item-group-image'
       && (!actor.userId || actor.audience === 'client')) {
-      await this.assertPublishedImage(tenantId, actor.workspaceId!, id, file.id);
+      await this.assertPublishedImage(tenantId, actor.workspaceId!, id, file.id, client);
     } else {
       if (actor.audience === 'client') {
         if (!actor.userId || !['customer', 'customer_profile'].includes(type) || id !== actor.userId
           || file.uploadScene !== 'client-qualification') throw new ForbiddenException('文件不属于当前客户可读范围');
-        const customer = await this.prisma.customerProfile.findFirst({ where: { tenantId, id }, select: { id: true } });
+        const customer = await client.customerProfile.findFirst({ where: { tenantId, id }, select: { id: true } });
         if (!customer) throw new NotFoundException('文件关联客户不存在');
       } else {
         if (!actor.userId || !['operator', 'staff'].includes(actor.audience ?? '') || !actor.dataScope) {
           throw new ForbiddenException('缺少原业务附件读取身份');
         }
-        await this.assertOperatorBinding(tenantId, file, actor, new Set(), genericLedger);
+        await this.assertOperatorBinding(tenantId, file, actor, new Set(), genericLedger, tx);
       }
     }
     if (this.authorityKey(tenantId) !== key) throw new ForbiddenException('文件读取期间授权范围已变化');
   }
 
-  private async assertPublishedImage(tenantId: string, workspaceId: string, itemGroupId: string, fileId: string) {
-    const published = await this.prisma.businessWorkspace.findFirst({ where: { id: workspaceId, tenantId, status: 'ACTIVE',
+  private async assertPublishedImage(tenantId: string, workspaceId: string, itemGroupId: string, fileId: string, client: RentalFileAccessStorage = this.prisma) {
+    const published = await client.businessWorkspace.findFirst({ where: { id: workspaceId, tenantId, status: 'ACTIVE',
       tenant: { status: 'ACTIVE' }, clientChannelPublications: { some: { tenantId, enabled: true } } }, select: { id: true } });
-    const group = published && await this.prisma.rentalItemGroup.findFirst({ where: { id: itemGroupId, tenantId, workspaceId, status: 'enabled' },
+    const group = published && await client.rentalItemGroup.findFirst({ where: { id: itemGroupId, tenantId, workspaceId, status: 'enabled' },
       select: { attributes: true } });
     const attributes = group?.attributes;
     const media = attributes && typeof attributes === 'object' && !Array.isArray(attributes) ? attributes.__itemGroupMedia : null;
@@ -105,7 +107,8 @@ export class RentalFileBusinessAccessService {
       && image.fileAssetId === fileId)) throw new NotFoundException('文件不是当前已发布商品图片');
   }
 
-  private async assertOperatorBinding(tenantId: string, file: FileBinding, actor: FileActor, seen: Set<string>, genericLedger: boolean): Promise<void> {
+  private async assertOperatorBinding(tenantId: string, file: FileBinding, actor: FileActor, seen: Set<string>, genericLedger: boolean, tx?: Prisma.TransactionClient): Promise<void> {
+    const client = tx ?? this.prisma;
     const id = file.businessId!, type = file.businessType, binding = `${type}:${id}`;
     if (genericLedger && ['customer', 'customer_profile', 'membership_review', 'ai_knowledge_document'].includes(type)) {
       throw new ForbiddenException('客户资格或知识附件不进入通用台账');
@@ -140,58 +143,58 @@ export class RentalFileBusinessAccessService {
           if (boundStage !== 'pickup' && boundStage !== 'return') throw new ForbiddenException('交接凭证缺少原阶段绑定');
           evidenceStage = boundStage;
         }
-        await this.facts.assertFileOrderReadAccess(tenantId, id, evidenceStage);
+        await this.facts.assertFileOrderReadAccess(tenantId, id, evidenceStage, tx);
         return;
       }
       case 'quote': case 'rental_quote': {
         this.requireOperator(actor, ['rental-os:order:view']);
-        const quote = await this.businessFacts.findQuote(tenantId, id);
+        const quote = await this.businessFacts.findQuote(tenantId, id, tx);
         if (!quote) throw new NotFoundException('文件关联报价不在当前经营空间');
         assertQuoteReadAccess(quote);
         return;
       }
       case 'asset': case 'rental_asset':
         this.requireOperator(actor, ['rental-core:asset:view', 'rental-core:asset:manage']);
-        await this.facts.assertFileAssetReadAccess(tenantId, id);
+        await this.facts.assertFileAssetReadAccess(tenantId, id, tx);
         return;
       case 'work_order': case 'rental_work_order':
         this.requireOperator(actor, ['rental-core:maintenance:view',
           ...(file.uploadScene === 'work-order-evidence' ? ['rental-core:maintenance:manage'] : [])]);
-        await this.facts.assertFileWorkOrderReadAccess(tenantId, id);
+        await this.facts.assertFileWorkOrderReadAccess(tenantId, id, tx);
         return;
       case 'item_group': case 'rental_item_group': {
         this.requireOperator(actor, ['rental-core:catalog:view', 'rental-core:catalog:manage', 'rental-os:order:view', 'rental-os:order:create']);
-        const group = await this.prisma.rentalItemGroup.findFirst({ where: { tenantId, workspaceId: actor.workspaceId, id }, select: { id: true } });
+        const group = await client.rentalItemGroup.findFirst({ where: { tenantId, workspaceId: actor.workspaceId, id }, select: { id: true } });
         if (!group) throw new NotFoundException('文件关联型号不在当前经营空间');
         return;
       }
       case 'customer': case 'customer_profile':
-        await this.customers.assertCustomerFileReadAccess(tenantId, id);
+        await this.customers.assertCustomerFileReadAccess(tenantId, id, false, tx);
         return;
       case 'membership_review': {
-        const review = await this.prisma.customerMembershipReview.findFirst({ where: { tenantId, id }, select: { customerId: true } });
+        const review = await client.customerMembershipReview.findFirst({ where: { tenantId, id }, select: { customerId: true } });
         if (!review) throw new NotFoundException('文件关联审核不存在');
-        await this.customers.assertCustomerFileReadAccess(tenantId, review.customerId);
+        await this.customers.assertCustomerFileReadAccess(tenantId, review.customerId, false, tx);
         return;
       }
       case 'customer_contract': case 'corporate_contract': case 'customer_invoice_profile': case 'invoice_profile': case 'customer_credit': case 'credit': {
         const where = { tenantId, id }, select = { customerId: true };
         const row = ['customer_contract', 'corporate_contract'].includes(type)
-          ? await this.prisma.customerCorporateContract.findFirst({ where, select })
+          ? await client.customerCorporateContract.findFirst({ where, select })
           : ['customer_invoice_profile', 'invoice_profile'].includes(type)
-            ? await this.prisma.customerCorporateInvoiceProfile.findFirst({ where, select })
-            : await this.prisma.customerCorporateCredit.findFirst({ where, select });
+            ? await client.customerCorporateInvoiceProfile.findFirst({ where, select })
+            : await client.customerCorporateCredit.findFirst({ where, select });
         if (!row) throw new NotFoundException('文件关联企业资料不存在');
-        await this.customers.assertCustomerFileReadAccess(tenantId, row.customerId, true);
+        await this.customers.assertCustomerFileReadAccess(tenantId, row.customerId, true, tx);
         return;
       }
       case 'async_job': case 'document_print_job': {
         this.requireOperator(actor, ['system:integration:manage']);
         const row = type === 'async_job'
-          ? await this.prisma.asyncJob.findFirst({ where: { tenantId, id }, select: { businessType: true, businessId: true } })
-          : await this.prisma.documentPrintJob.findFirst({ where: { tenantId, id }, select: { businessType: true, businessId: true } });
+          ? await client.asyncJob.findFirst({ where: { tenantId, id }, select: { businessType: true, businessId: true } })
+          : await client.documentPrintJob.findFirst({ where: { tenantId, id }, select: { businessType: true, businessId: true } });
         if (!row?.businessType || !row.businessId) throw new NotFoundException('文件任务没有可读取的原业务对象');
-        await this.assertOperatorBinding(tenantId, { ...file, businessType: row.businessType, businessId: row.businessId }, actor, seen, genericLedger);
+        await this.assertOperatorBinding(tenantId, { ...file, businessType: row.businessType, businessId: row.businessId }, actor, seen, genericLedger, tx);
         return;
       }
       default: throw new ForbiddenException('文件业务类型没有受控读取规则');

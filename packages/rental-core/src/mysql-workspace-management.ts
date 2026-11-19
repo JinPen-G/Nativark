@@ -12,6 +12,7 @@ import { generateTemporaryPassword, hashPassword } from "@rental-os/platform-ser
 import { requireRequestTenantId } from "@rental-os/platform-server/request-identity";
 import { rentalCategoryStorageCode } from "./category-identity";
 import { assertCategoryAdoptionAllowed } from "./mysql-category-policy";
+import { lockRentalBusinessTenant } from "./mysql-business-fence";
 import type { BusinessWorkspace, BusinessWorkspaceStatus, CreateBusinessWorkspaceRequest, SaveWorkspaceMemberRequest,
   UpdateBusinessWorkspaceRequest, WorkspaceMember, SaveSystemUserAccessRequest, RentalCategoryCode } from "./contracts";
 import type { TenantSummary } from "./auth-contracts";
@@ -77,6 +78,7 @@ export class RentalWorkspaceManagementRepository extends PlatformAuthenticationR
     if (code === "default") throw new BadRequestException("default 为升级兼容层保留编码，请使用其他编码");
     const categoryCode = this.toPrismaCategoryCode(input.categoryCode);
     const created = await this.database.$transaction(async (tx) => {
+      await lockRentalBusinessTenant(tx, tenantId);
       await tx.$queryRaw(Prisma.sql`SELECT code FROM rental_category_definitions WHERE code = ${categoryCode.toLowerCase()} FOR UPDATE`);
       const category = await tx.rentalCategoryDefinition.findUnique({ where: { code: categoryCode } });
       if (!category) {
@@ -145,6 +147,7 @@ export class RentalWorkspaceManagementRepository extends PlatformAuthenticationR
     const name = input.name?.trim();
     if (input.name !== undefined && !name) throw new BadRequestException("空间名称不能为空");
     const updated = await this.database.$transaction(async (tx) => {
+      await lockRentalBusinessTenant(tx, tenantId);
       // 用 tenantId 条件定位，避免越权改到别的租户的空间。
       const current = await tx.businessWorkspace.findFirst({ where: { id, tenantId } });
       if (!current) throw new NotFoundException("经营空间不存在");
@@ -195,6 +198,7 @@ export class RentalWorkspaceManagementRepository extends PlatformAuthenticationR
     const tenantId = this.workspaceTenantId(currentUser);
     if (!input.userId) throw new BadRequestException("账号不能为空");
     const saved = await this.database.$transaction(async (tx) => {
+      await lockRentalBusinessTenant(tx, tenantId);
       await this.assertAccountActionInTransaction(tx, tenantId, input.userId, currentUser?.id);
       await this.assertFixedAllWorkspaceAccessesAllowed(tx, tenantId, [{ ...input, workspaceId, isActive: input.isActive ?? true }], currentUser?.id);
       const workspace = await tx.businessWorkspace.findFirst({ where: { id: workspaceId, tenantId } });
@@ -321,6 +325,7 @@ export class RentalWorkspaceManagementRepository extends PlatformAuthenticationR
   ): Promise<SystemUserRow> {
     const { workspaceAccesses, ...userInput } = input;
     const saved = await this.database.$transaction(async (tx) => {
+      await lockRentalBusinessTenant(tx, tenantId);
       await this.assertFixedAllWorkspaceAccessesAllowed(tx, tenantId, workspaceAccesses, actorUserId);
       const user = await this.saveUserInTransaction(tx, userInput, tenantId, actorUserId);
       await this.saveWorkspaceAccessesInTransaction(tx, tenantId, user.userId, workspaceAccesses);

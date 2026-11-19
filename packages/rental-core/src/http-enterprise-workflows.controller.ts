@@ -1,4 +1,5 @@
 /** Customer enterprise workflows and merchant decisions use separate authentication realms. */
+import { rentalNativeResponse } from "./http-native-response";
 import { RENTAL_ENTERPRISE_HTTP, type RentalEnterpriseHttpApplications } from "./http-enterprise-applications";
 import { BadRequestException, Body, ConflictException, Controller, Inject, ForbiddenException, Get, Param, Post, Put, Query, Req, Res, UnauthorizedException, ServiceUnavailableException } from "@nestjs/common";
 import { ENTERPRISE_PAYMENT_PROOF_SCENE } from "./index";
@@ -46,6 +47,7 @@ export class EnterpriseWorkflowsController {
   }
   @Get("order-delegations/:key") readOrderDelegation(@Req() req: CustomerRequest, @Param("key") key: string,
     @Res({ passthrough: true }) response: { setHeader(name: string, value: string): unknown }) {
+    response = rentalNativeResponse(response);
     response.setHeader("Cache-Control", "no-store"); response.setHeader("Vary", "Authorization");
     return this.delegations.readCustomer(client(req), key);
   }
@@ -65,6 +67,7 @@ export class EnterpriseWorkflowsController {
   async exchangeInspectionPhoto(@Req() req: CustomerRequest, @Param("orderId") orderId: string, @Param("preparationId") preparationId: string,
     @Param("fileAssetId") fileAssetId: string, @Query("preparationHash") preparationHash: unknown,
     @Res() response: { setHeader(name: string, value: string): unknown; send(value: Buffer): unknown }) {
+    response = rentalNativeResponse(response);
     if (typeof preparationHash !== "string" || !/^[a-f0-9]{64}$/u.test(preparationHash)) throw new BadRequestException("原检查准备哈希无效");
     const result = await this.inspectionConsentReader().photo(req.headers?.authorization, client(req), orderId, preparationId, fileAssetId, preparationHash);
     if (!Buffer.isBuffer(result.bytes) || !["image/png", "image/jpeg"].includes(result.mimeType)
@@ -88,18 +91,22 @@ export class EnterpriseWorkflowsController {
   }
   @Get("corporates/:corporateId/profile") profile(@Req() req: CustomerRequest, @Param("corporateId") id: string) { return this.management.profile(client(req), id); }
   @Get("management-requests") managementMine(@Req() req: CustomerRequest, @Res({ passthrough: true }) response?: { setHeader(name: string, value: string): unknown }) {
+    if (response) response = rentalNativeResponse(response);
     response?.setHeader("Cache-Control", "no-store"); response?.setHeader("Vary", "Authorization"); return this.management.mine(client(req));
   }
   @Get("management-requests/:id") managementDetail(@Req() req: CustomerRequest, @Param("id") id: string, @Res({ passthrough: true }) response?: { setHeader(name: string, value: string): unknown }) {
+    if (response) response = rentalNativeResponse(response);
     response?.setHeader("Cache-Control", "no-store"); response?.setHeader("Vary", "Authorization"); return this.management.detail(client(req), id);
   }
   @Get("corporates/:corporateId/management-requests/save-operations/:key") managementSaveOriginal(@Req() req: CustomerRequest, @Param("corporateId") id: string, @Param("key") key: string, @Res({ passthrough: true }) response?: { setHeader(name: string, value: string): unknown }) {
+    if (response) response = rentalNativeResponse(response);
     response?.setHeader("Cache-Control", "no-store"); response?.setHeader("Vary", "Authorization"); return this.management.readSave(client(req), id, key);
   }
   @Post("corporates/:corporateId/management-requests") saveManagement(@Req() req: CustomerRequest, @Param("corporateId") id: string, @Body() input: SaveEnterpriseManagementRequestDto) { return this.management.save(client(req), id, input); }
   @Get("corporates/:corporateId/orders/:orderId/payment-proof-basis")
   async paymentProofBasis(@Req() req: CustomerRequest, @Param("corporateId") corporateId: string, @Param("orderId") orderId: string,
     @Res({ passthrough: true }) response: { setHeader(name: string, value: string): unknown }) {
+    response = rentalNativeResponse(response);
     response.setHeader("Cache-Control", "no-store"); response.setHeader("Vary", "Authorization");
     return this.management.paymentProofBasis(client(req), corporateId, orderId);
   }
@@ -119,6 +126,7 @@ export class EnterpriseWorkflowsController {
   @Get("corporates/:corporateId/orders/:orderId/payment-proof/upload-operations/:key")
   async paymentProofUploadOriginal(@Req() req: CustomerRequest, @Param("corporateId") corporateId: string, @Param("orderId") orderId: string, @Param("key") key: string,
     @Res({ passthrough: true }) response: { setHeader(name: string, value: string): unknown }) {
+    response = rentalNativeResponse(response);
     response.setHeader("Cache-Control", "no-store"); response.setHeader("Vary", "Authorization");
     const context = Object.freeze({ ...client(req) }), basis = await this.management.paymentProofBasis(context, corporateId, orderId);
     const session = await this.prisma.fileUploadSession.findFirst({ where: { tenantId: context.tenantId, idempotencyKey: key }, include: { fileAsset: true } }), asset = session?.fileAsset;
@@ -149,6 +157,7 @@ export class EnterpriseWorkflowsController {
   @Get("management-requests/:id/files/:fileId")
   async paymentProofFile(@Req() req: CustomerRequest, @Param("id") id: string, @Param("fileId") fileId: string,
     @Res() response: { setHeader(name: string, value: string): unknown; send(value: Buffer): unknown }) {
+    response = rentalNativeResponse(response);
     const context = Object.freeze({ ...client(req) }), before = await this.management.customerEvidenceOwner(context, id, fileId);
     const result = await this.files.readPaymentProofBytes(before.tenantId, fileId, before.applicantCustomerId, before.orderId, before.workspaceId, before.contentHash);
     const after = await this.management.customerEvidenceOwner(context, id, fileId);
@@ -158,6 +167,7 @@ export class EnterpriseWorkflowsController {
     return response.send(result.content);
   }
   @Get("management-requests/:id/withdraw-operations/:key") managementWithdrawalOriginal(@Req() req: CustomerRequest, @Param("id") id: string, @Param("key") key: string, @Res({ passthrough: true }) response?: { setHeader(name: string, value: string): unknown }) {
+    if (response) response = rentalNativeResponse(response);
     response?.setHeader("Cache-Control", "no-store"); response?.setHeader("Vary", "Authorization"); return this.management.readWithdrawal(client(req), id, key);
   }
   @Post("management-requests/:id/withdraw") withdrawManagement(@Req() req: CustomerRequest, @Param("id") id: string, @Body() input: EnterpriseChangeRequestDto) { return this.management.withdraw(client(req), id, input); }

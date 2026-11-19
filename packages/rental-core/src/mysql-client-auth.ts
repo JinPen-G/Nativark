@@ -33,7 +33,9 @@ import { SharedCustomerRepository } from "./mysql-customer-master";
 import type { RentalClientAuthStorage, RentalClientSmsIntegration, RentalClientChallengeRateLimit } from "./client-session-ports";
 import { hashOpaqueToken, hashPassword, verifyPassword } from "@rental-os/platform-server/password";
 import { runWithRequestIdentity } from "@rental-os/platform-server/request-identity";
-import { lockRentalBusinessTenant } from "./mysql-business-fence";
+import { assertRentalBusinessTenantAccessAfterLock, lockRentalBusinessTenant } from "./mysql-business-fence";
+import { acknowledgeRentalPublicEmptyResult, assertRentalPublicAccessBeforeEffect, enterRentalPublicTarget } from "./application-public-access";
+import { assertRentalClientWorkspaceTarget } from "./application-access";
 
 const ACCESS_TTL_SECONDS = 60 * 60;
 const REFRESH_TTL_SECONDS = 60 * 60 * 24 * 30;
@@ -216,9 +218,12 @@ export class ClientAuthService {
     wechatIdentityId?: string | null,
     expectedPasswordHash?: string
   ): Promise<ClientMembershipSessionResponse> {
-    if (tx === this.prisma) return this.prisma.$transaction(client =>
-      this.issueSession(tenantId, customerId, workspaceId, client, wechatIdentityId, expectedPasswordHash),
+    if (tx === this.prisma) return this.prisma.$transaction(async client => {
+      await lockRentalBusinessTenant(client, tenantId);
+      return this.issueSession(tenantId, customerId, workspaceId, client, wechatIdentityId, expectedPasswordHash);
+    },
     { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    // 传入事务的刷新调用已在首个客户锁之前持有 Tenant 父锁及门禁，不能在子锁后补取父锁。
     // 与后台重置共用客户行锁：验密后被重置的旧口令不能在撤销之后再签出新会话。
     await tx.$queryRaw(Prisma.sql`SELECT id FROM customer_profiles WHERE tenantId = ${tenantId} AND id = ${customerId} FOR UPDATE`);
     const account = await tx.customerAccount.findFirst({ where: { tenantId, customerId } });
@@ -282,6 +287,7 @@ export class ClientAuthService {
   async listPublicWorkspaces(tenantCode: string) {
     const tenant = await this.prisma.tenant.findFirst({ where: { code: tenantCode.trim(), status: "ACTIVE" }, select: { id: true, code: true, name: true } });
     if (!tenant) throw new NotFoundException("租户不存在或未启用");
+    await enterRentalPublicTarget({ tenantId: tenant.id, origin: { kind: "tenant-code", tenantCode: tenant.code } });
     const workspaces = await this.prisma.businessWorkspace.findMany({
       where: { tenantId: tenant.id, status: "ACTIVE", clientChannelPublications: { some: { tenantId: tenant.id, enabled: true } } },
       select: { code: true, name: true, categoryCode: true, isDefault: true },
@@ -296,8 +302,20 @@ export class ClientAuthService {
    * 冷却与幂等按租户 + 手机号统一，不因换用途而绕过。
    */
   async createChallenge(input: ClientRegistrationChallengeRequest & { purpose?: ClientChallengePurpose }): Promise<ClientRegistrationChallengeResponse> {
+    return this.createChallengeWithContext(input);
+  }
+
+  /** 本人注销复用原挑战算法和提交点，但始终保留 Guard 已绑定的客户身份。 */
+  private async createChallengeWithContext(input: ClientRegistrationChallengeRequest & { purpose?: ClientChallengePurpose },
+    closureContext?: ClientRequestContext): Promise<ClientRegistrationChallengeResponse> {
     const purpose: ClientChallengePurpose = input.purpose ?? "registration";
     const { tenant, workspace } = await this.target(input.tenantCode, input.workspaceCode, purpose === "registration");
+    if (closureContext && (purpose !== "account_closure" || tenant.id !== closureContext.tenantId || workspace.id !== closureContext.workspaceId
+      || normalizeIdentifier(input.identifier) !== normalizeIdentifier(closureContext.phone))) throw new ForbiddenException("注销验证目标与原客户身份不一致");
+    const withTargetIdentity = <T>(consume: () => Promise<T>) => closureContext ? consume()
+      : runWithRequestIdentity({ tenantId: tenant.id, workspaceId: workspace.id }, consume);
+    await enterRentalPublicTarget({ tenantId: tenant.id, workspaceId: workspace.id, requirePublished: purpose === "registration",
+      ...(purpose === "login" ? { loginMethod: "sms" as const } : {}), origin: { kind: "tenant-code", tenantCode: tenant.code } });
     const identifier = normalizeIdentifier(input.identifier);
     if (!identifier) throw new BadRequestException("手机号或邮箱不能为空");
     if (input.method === "sms" && !/^\+?[0-9]{6,20}$/u.test(identifier)) throw new BadRequestException("手机号格式无效");
@@ -321,10 +339,11 @@ export class ClientAuthService {
     }
     // 幂等、验证码身份和冷却均按租户统一；来源空间只用于审计和业务上下文。
     // 锁住租户行，防止两个空间的并发请求用不同 key 绕过同一目标的冷却。
-    const reservation = await runWithRequestIdentity({ tenantId: tenant.id, workspaceId: workspace.id }, () => this.prisma.$transaction(async (tx) => {
+    const reservation = await withTargetIdentity(() => this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw(Prisma.sql`
         SELECT id FROM Tenant WHERE id = ${tenant.id} FOR UPDATE
       `);
+      await assertRentalBusinessTenantAccessAfterLock(tx, tenant.id);
       const now = new Date();
       const existing = await tx.clientRegistrationChallenge.findFirst({
         where: { tenantId: tenant.id, requestKey }
@@ -410,17 +429,30 @@ export class ClientAuthService {
         purpose
       };
     }
+    if (input.method === "sms") {
+      if (closureContext) await this.prisma.$transaction(tx => lockRentalBusinessTenant(tx, tenant.id),
+        { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+      else await assertRentalPublicAccessBeforeEffect();
+    }
     try {
       if (input.method === "sms") {
-        const delivery = await runWithRequestIdentity({ tenantId: tenant.id, workspaceId: workspace.id }, () => this.integrations.sendVerificationSms(tenant.id, identifier, code, `client-registration:${row.id}`));
+        const delivery = await withTargetIdentity(() => this.integrations.sendVerificationSms(tenant.id, identifier, code, `client-registration:${row.id}`));
         if (delivery.configured) deliveryMode = "provider";
         else if (process.env.NODE_ENV === "production") throw new ServiceUnavailableException("短信验证码服务尚未配置，请先启用一个短信平台");
       } else if (process.env.NODE_ENV === "production") {
         throw new ServiceUnavailableException("邮箱验证码服务尚未配置，请先接入邮件 provider");
       }
-      await this.prisma.clientRegistrationChallenge.update({ where: { id: row.id }, data: { deliveryMode } });
+      // 运输已结束：只回写原 reservation 的结果，不再次授予业务权，也不覆盖被同 key 更新的新验证码。
+      await this.prisma.$transaction(async tx => {
+        await tx.$queryRaw(Prisma.sql`SELECT id FROM Tenant WHERE id = ${tenant.id} LOCK IN SHARE MODE`);
+        const written = await tx.clientRegistrationChallenge.updateMany({ where: { id: row.id, tenantId: tenant.id, codeHash: row.codeHash }, data: { deliveryMode } });
+        if (written.count !== 1) throw new ConflictException("验证码挑战已变化，请核对原请求结果");
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     } catch (error) {
-      await this.prisma.clientRegistrationChallenge.updateMany({ where: { id: row.id, status: "pending_verification" }, data: { status: "delivery_failed" } });
+      await this.prisma.$transaction(async tx => {
+        await tx.$queryRaw(Prisma.sql`SELECT id FROM Tenant WHERE id = ${tenant.id} LOCK IN SHARE MODE`);
+        await tx.clientRegistrationChallenge.updateMany({ where: { id: row.id, tenantId: tenant.id, codeHash: row.codeHash, status: "pending_verification" }, data: { status: "delivery_failed" } });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
       throw error;
     }
     return {
@@ -438,40 +470,58 @@ export class ClientAuthService {
   }
 
   async verifyChallenge(input: VerifyClientRegistrationChallengeRequest): Promise<VerifyClientRegistrationChallengeResponse> {
-    const row = await this.prisma.clientRegistrationChallenge.findUnique({ where: { id: input.challengeId } });
-    if (row?.status === "unverifiable") {
-      // 不可登录账号的占位挑战：与验证码错误同一路径、同一文案，避免用 verify 探测账号。
-      await this.prisma.clientRegistrationChallenge.updateMany({ where: { id: row.id, status: "unverifiable", attempts: { lt: MAX_CHALLENGE_ATTEMPTS } }, data: { attempts: { increment: 1 } } });
-      throw new ConflictException("验证码错误或已过期");
-    }
-    if (!row || row.status !== "pending_verification") throw new ConflictException("验证码挑战不存在或已使用");
-    if (row.expiresAt.getTime() <= Date.now()) {
-      await this.prisma.clientRegistrationChallenge.updateMany({ where: { id: row.id, status: "pending_verification", codeHash: row.codeHash, expiresAt: { lte: new Date() } }, data: { status: "expired" } });
-      throw new ConflictException("验证码已过期");
-    }
-    if (row.attempts >= MAX_CHALLENGE_ATTEMPTS) throw new ConflictException("验证码尝试次数过多，请重新获取");
-    const expectedHash = Buffer.from(this.challengeCodeHash(row.id, input.code));
-    const storedHash = Buffer.from(row.codeHash);
-    if (!/^\d{6}$/u.test(input.code) || expectedHash.length !== storedHash.length || !timingSafeEqual(expectedHash, storedHash)) {
-      const attempts = row.attempts + 1;
-      const updated = await this.prisma.clientRegistrationChallenge.updateMany({ where: { id: row.id, status: "pending_verification", codeHash: row.codeHash, attempts: row.attempts }, data: { attempts, status: attempts >= MAX_CHALLENGE_ATTEMPTS ? "expired" : "pending_verification" } });
-      if (updated.count === 0) throw new ConflictException("验证码挑战已被处理，请重新获取");
-      throw new ConflictException("验证码错误或已过期");
-    }
-    const token = randomBytes(32).toString("base64url");
-    const expiresAt = new Date(Date.now() + CHALLENGE_TTL_SECONDS * 1000);
-    const updated = await this.prisma.clientRegistrationChallenge.updateMany({ where: { id: row.id, status: "pending_verification", codeHash: row.codeHash, attempts: row.attempts, expiresAt: { gt: new Date() } }, data: { status: "verified", verifiedAt: new Date(), verificationTokenHash: hashOpaqueToken(token), expiresAt } });
-    if (updated.count === 0) throw new ConflictException("验证码挑战已被处理，请重新获取");
-    return { apiVersion: CLIENT_API_VERSION, verificationToken: token, expiresAt: expiresAt.toISOString() };
+    const source = await this.prisma.clientRegistrationChallenge.findUnique({ where: { id: input.challengeId } });
+    if (!source) throw new ConflictException("验证码挑战不存在或已使用");
+    await enterRentalPublicTarget({ tenantId: source.tenantId, workspaceId: source.sourceWorkspaceId ?? undefined,
+      origin: { kind: "challenge", challengeId: source.id } });
+    const outcome = await this.prisma.$transaction(async tx => {
+      await lockRentalBusinessTenant(tx, source.tenantId);
+      try {
+        const row = await tx.clientRegistrationChallenge.findFirst({ where: { id: input.challengeId, tenantId: source.tenantId } });
+        if (row?.status === "unverifiable") {
+          // 不可登录账号的占位挑战：与验证码错误同一路径、同一文案，避免用 verify 探测账号。
+          await tx.clientRegistrationChallenge.updateMany({ where: { id: row.id, status: "unverifiable", attempts: { lt: MAX_CHALLENGE_ATTEMPTS } }, data: { attempts: { increment: 1 } } });
+          throw new ConflictException("验证码错误或已过期");
+        }
+        if (!row || row.status !== "pending_verification") throw new ConflictException("验证码挑战不存在或已使用");
+        if (row.expiresAt.getTime() <= Date.now()) {
+          await tx.clientRegistrationChallenge.updateMany({ where: { id: row.id, status: "pending_verification", codeHash: row.codeHash, expiresAt: { lte: new Date() } }, data: { status: "expired" } });
+          throw new ConflictException("验证码已过期");
+        }
+        if (row.attempts >= MAX_CHALLENGE_ATTEMPTS) throw new ConflictException("验证码尝试次数过多，请重新获取");
+        const expectedHash = Buffer.from(this.challengeCodeHash(row.id, input.code));
+        const storedHash = Buffer.from(row.codeHash);
+        if (!/^\d{6}$/u.test(input.code) || expectedHash.length !== storedHash.length || !timingSafeEqual(expectedHash, storedHash)) {
+          const attempts = row.attempts + 1;
+          const updated = await tx.clientRegistrationChallenge.updateMany({ where: { id: row.id, status: "pending_verification", codeHash: row.codeHash, attempts: row.attempts }, data: { attempts, status: attempts >= MAX_CHALLENGE_ATTEMPTS ? "expired" : "pending_verification" } });
+          if (updated.count === 0) throw new ConflictException("验证码挑战已被处理，请重新获取");
+          throw new ConflictException("验证码错误或已过期");
+        }
+        const token = randomBytes(32).toString("base64url");
+        const expiresAt = new Date(Date.now() + CHALLENGE_TTL_SECONDS * 1000);
+        const updated = await tx.clientRegistrationChallenge.updateMany({ where: { id: row.id, status: "pending_verification", codeHash: row.codeHash, attempts: row.attempts, expiresAt: { gt: new Date() } }, data: { status: "verified", verifiedAt: new Date(), verificationTokenHash: hashOpaqueToken(token), expiresAt } });
+        if (updated.count === 0) throw new ConflictException("验证码挑战已被处理，请重新获取");
+        return { response: { apiVersion: CLIENT_API_VERSION, verificationToken: token, expiresAt: expiresAt.toISOString() } };
+      } catch (error) {
+        // 尝试次数/过期 CAS 原本在抛业务错误前已提交，不能因接入事务而回滚这些防重事实。
+        if (error instanceof ConflictException) return { error };
+        throw error;
+      }
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    if ("error" in outcome) throw outcome.error;
+    return outcome.response;
   }
 
   async registerPersonal(input: ClientPersonalMembershipRegistrationRequest): Promise<ClientPersonalMembershipRegistrationResponse> {
     assertPassword(input.password);
     const { tenant, workspace } = await this.target(input.tenantCode, input.workspaceCode, true);
+    await enterRentalPublicTarget({ tenantId: tenant.id, workspaceId: workspace.id, requirePublished: true,
+      origin: { kind: "tenant-code", tenantCode: tenant.code } });
     const phone = normalizeIdentifier(input.phone);
     if (!/^\+?[0-9]{6,20}$/u.test(phone)) throw new BadRequestException("手机号格式无效");
     const tokenHash = hashOpaqueToken(input.verificationToken);
     const result = await runWithRequestIdentity({ tenantId: tenant.id, workspaceId: workspace.id }, () => customerRegistrationTransaction(this.prisma, async (tx) => {
+      await lockRentalBusinessTenant(tx, tenant.id);
       const challenge = await tx.clientRegistrationChallenge.findFirst({ where: { tenantId: tenant.id, verificationTokenHash: tokenHash, purpose: "registration" } });
       if (!challenge) throw new ConflictException("注册验证已失效，请重新验证");
       const expectedIdentifier = challenge.method === "sms" ? phone : normalizeIdentifier(input.email ?? "");
@@ -515,7 +565,7 @@ export class ClientAuthService {
   }
 
   async login(input: ClientMembershipLoginRequest) {
-    const tenant = await this.prisma.tenant.findFirst({ where: { code: input.tenantCode.trim(), status: "ACTIVE" }, select: { id: true } });
+    const tenant = await this.prisma.tenant.findFirst({ where: { code: input.tenantCode.trim(), status: "ACTIVE" }, select: { id: true, code: true } });
     if (!tenant) throw new UnauthorizedException("账号或密码错误");
     await this.assertLoginMethodEnabled(tenant.id, "password");
     const account = await this.prisma.customerAccount.findFirst({ where: { tenantId: tenant.id, loginPhone: normalizeIdentifier(input.loginIdentifier) }, include: { customer: true } });
@@ -527,6 +577,8 @@ export class ClientAuthService {
       orderBy: [{ isDefault: "desc" }, { code: "asc" }]
     });
     if (!workspace) throw new ForbiddenException("该租户没有可访问的经营空间");
+    await enterRentalPublicTarget({ tenantId: tenant.id, workspaceId: workspace.id, loginMethod: "password",
+      origin: { kind: "tenant-code", tenantCode: tenant.code } });
     return this.issueSession(tenant.id, account.customerId, workspace.id, undefined, undefined, account.passwordHash);
   }
 
@@ -537,11 +589,14 @@ export class ClientAuthService {
       include: { tenant: { select: { status: true } } }
     });
     if (!session || session.revokedAt || session.expiresAt.getTime() <= Date.now() || session.tenant.status !== "ACTIVE") throw new UnauthorizedException("刷新令牌已失效");
+    await enterRentalPublicTarget({ tenantId: session.tenantId, workspaceId: session.workspaceId,
+      origin: { kind: "session", sessionId: session.id, refreshTokenHash: tokenHash } });
     const account = await this.prisma.customerAccount.findFirst({ where: { tenantId: session.tenantId, customerId: session.customerId }, include: { customer: { select: { status: true } } } });
     const membership = await this.prisma.customerMembership.findFirst({ where: { tenantId: session.tenantId, customerId: session.customerId, status: { notIn: [...BLOCKED_MEMBERSHIP_STATUSES] } } });
     if (!account || account.status !== "active" || account.customer.status !== "active" || !membership
       || (account.passwordUpdatedAt && session.createdAt < account.passwordUpdatedAt)) throw new UnauthorizedException("客户端会话已失效");
     return this.prisma.$transaction(async (tx) => {
+      await lockRentalBusinessTenant(tx, session.tenantId);
       await tx.$queryRaw(Prisma.sql`SELECT id FROM customer_profiles WHERE tenantId = ${session.tenantId} AND id = ${session.customerId} FOR UPDATE`);
       const revoked = await tx.clientAuthSession.updateMany({ where: { id: session.id, revokedAt: null }, data: { revokedAt: new Date(), lastUsedAt: new Date() } });
       if (revoked.count !== 1) throw new UnauthorizedException("刷新令牌已失效");
@@ -550,6 +605,8 @@ export class ClientAuthService {
   }
 
   async logout(refreshToken: string) {
+    // 凭据撤销不授予业务访问；Core 停用仍可退出，未知/重复 token 保留原幂等 success。
+    acknowledgeRentalPublicEmptyResult("logout");
     await this.prisma.clientAuthSession.updateMany({ where: { refreshTokenHash: hashOpaqueToken(refreshToken), revokedAt: null }, data: { revokedAt: new Date(), lastUsedAt: new Date() } });
     return { success: true };
   }
@@ -565,6 +622,7 @@ export class ClientAuthService {
     if (account.mustChangePassword && !(recovery?.method === "POST" && recovery.path === "/client/v1/auth/change-password")) {
       throw new ForbiddenException("临时密码仅可用于修改密码，请先完成改密后重新登录");
     }
+    // 原 Guard 的会话活跃元数据，不是业务动作；不在认证成功后追加可能改变原结果的 Core 门禁。
     void this.prisma.clientAuthSession.updateMany({ where: { id: session.id, revokedAt: null }, data: { lastUsedAt: new Date() } });
     return { tenantId: payload.tid, tenantCode: session.tenant.code, customerId: payload.sub, customerType: session.customer.customerType as "personal" | "corporate", displayName: session.customer.name, phone: session.customer.phone, workspaceId: payload.wid, workspaceCode: session.workspace.code, workspaceName: session.workspace.name, categoryCode: String(session.workspace.categoryCode), membershipStatus: membership.status, sessionId: session.id, wechatIdentityId: session.wechatIdentityId ?? undefined };
   }
@@ -580,7 +638,24 @@ export class ClientAuthService {
       select: { id: true }
     });
     if (!workspace) throw new NotFoundException("经营空间不存在或未启用");
-    return this.issueSession(context.tenantId, context.customerId, workspace.id, undefined, context.wechatIdentityId);
+    return this.prisma.$transaction(async tx => {
+      await lockRentalBusinessTenant(tx, context.tenantId);
+      // id 来自原服务查询；在原会话写事务重验同一 code/归属及发布状态，不追随客户端换目标。
+      const rows = await tx.$queryRaw<Array<{ id: string; tenantId: string; code: string; status: string }>>(Prisma.sql`
+        SELECT id, tenantId, code, status FROM business_workspaces
+        WHERE tenantId = ${context.tenantId} AND id = ${workspace.id} LOCK IN SHARE MODE`);
+      if (rows.length !== 1 || rows[0].tenantId !== context.tenantId || rows[0].id !== workspace.id
+        || rows[0].code !== input.workspaceCode.trim() || rows[0].status !== "active") throw new NotFoundException("经营空间不存在或未启用");
+      const publications = await tx.$queryRaw<Array<{ workspaceId: string; enabled: boolean | number }>>(Prisma.sql`
+        SELECT workspaceId, enabled FROM client_channel_workspaces
+        WHERE tenantId = ${context.tenantId} AND workspaceId = ${workspace.id} LOCK IN SHARE MODE`);
+      if (publications.length !== 1 || publications[0].workspaceId !== workspace.id || ![true, 1].includes(publications[0].enabled)) {
+        throw new NotFoundException("经营空间不存在或未启用");
+      }
+      await assertRentalClientWorkspaceTarget(tx, { tenantId: context.tenantId, customerId: context.customerId,
+        sessionId: context.sessionId, workspaceId: workspace.id });
+      return this.issueSession(context.tenantId, context.customerId, workspace.id, tx, context.wechatIdentityId);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
   async changePassword(context: ClientRequestContext, currentPassword: string, newPassword: string) {
@@ -622,7 +697,7 @@ export class ClientAuthService {
 
   /** 短信验证码登录（MP-02B）：只接受 login 用途的证明，手机号必须已注册；不创建客户、不改会员。 */
   async smsLogin(input: ClientSmsLoginRequest): Promise<ClientMembershipSessionResponse> {
-    const tenant = await this.prisma.tenant.findFirst({ where: { code: input.tenantCode.trim(), status: "ACTIVE" }, select: { id: true } });
+    const tenant = await this.prisma.tenant.findFirst({ where: { code: input.tenantCode.trim(), status: "ACTIVE" }, select: { id: true, code: true } });
     if (!tenant) throw new NotFoundException("租户不存在或未启用");
     await this.assertLoginMethodEnabled(tenant.id, "sms");
     const phone = normalizeIdentifier(input.loginIdentifier);
@@ -635,7 +710,10 @@ export class ClientAuthService {
       orderBy: [{ isDefault: "desc" }, { code: "asc" }]
     });
     if (!workspace) throw new ForbiddenException("该租户没有可访问的经营空间");
+    await enterRentalPublicTarget({ tenantId: tenant.id, workspaceId: workspace.id, loginMethod: "sms",
+      origin: { kind: "tenant-code", tenantCode: tenant.code } });
     const customerId = await this.prisma.$transaction(async (tx) => {
+      await lockRentalBusinessTenant(tx, tenant.id);
       await this.consumeVerifiedChallenge(tx, tenant.id, input.verificationToken, "login", identifierHash);
       const account = await tx.customerAccount.findFirst({ where: { tenantId: tenant.id, loginPhone: phone }, include: { customer: { select: { status: true, customerType: true } } } });
       if (!account) throw new NotFoundException("该手机号尚未注册，请先注册");
@@ -648,14 +726,14 @@ export class ClientAuthService {
   /** 本人注销前的短信核验：目标只能是当前会话账号的手机号，客户端不提交号码。 */
   async createClosureChallenge(context: ClientRequestContext): Promise<ClientRegistrationChallengeResponse> {
     const minute = Math.floor(Date.now() / 60_000);
-    return this.createChallenge({
+    return this.createChallengeWithContext({
       tenantCode: context.tenantCode,
       workspaceCode: context.workspaceCode,
       method: "sms",
       identifier: context.phone,
       idempotencyKey: `closure:${context.sessionId}:${minute}`,
       purpose: "account_closure"
-    });
+    }, context);
   }
 
   /** 消费注销证明（供注销服务在自己的事务里调用）。 */

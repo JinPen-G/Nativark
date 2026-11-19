@@ -1,4 +1,5 @@
 /** Merchant decisions and authority/payment evidence use the original operator realm and current domain permissions. */
+import { rentalNativeResponse } from "./http-native-response";
 import { RENTAL_ENTERPRISE_HTTP, type RentalEnterpriseHttpApplications } from "./http-enterprise-applications";
 import { Body, Controller, Inject, Get, Param, Post, Put, Req, Res, BadRequestException, ForbiddenException, ServiceUnavailableException } from "@nestjs/common";
 import type { SystemUserRow } from "@rental-os/platform-contracts";
@@ -28,23 +29,27 @@ export class EnterpriseMerchantController {
   ) {}
   @Get("order-delegations/:key") async readOrderDelegation(@Req() req: OperatorRequest, @Param("key") key: string,
     @Res({ passthrough: true }) response: { setHeader(name: string, value: string): unknown }) {
+    response = rentalNativeResponse(response);
     response.setHeader("Cache-Control", "no-store"); response.setHeader("Vary", "Authorization");
     return this.delegations.readMerchant({ authorization: req.headers?.authorization, user: req.user! }, key);
   }
   @Post("order-delegations/:key/execute") async executeOrderDelegation(@Req() req: OperatorRequest, @Param("key") key: string,
     @Body() input: ExecuteEnterpriseMerchantOrderDelegationDto, @Res({ passthrough: true }) response: { setHeader(name: string, value: string): unknown }) {
+    response = rentalNativeResponse(response);
     response.setHeader("Cache-Control", "no-store"); response.setHeader("Vary", "Authorization");
     if (input.delegationKey !== key) throw new BadRequestException("地址与本条原委托 D 不一致");
     return this.delegatedOrders.execute({ authorization: req.headers?.authorization, user: req.user! }, input);
   }
   @Get("order-delegations/:key/result") async orderDelegationResult(@Req() req: OperatorRequest, @Param("key") key: string,
     @Res({ passthrough: true }) response: { setHeader(name: string, value: string): unknown }) {
+    response = rentalNativeResponse(response);
     response.setHeader("Cache-Control", "no-store"); response.setHeader("Vary", "Authorization");
     return this.delegatedOrders.readOriginal({ authorization: req.headers?.authorization, user: req.user! }, key);
   }
   @Get("orders/:orderId/exchange-execution-choices")
   async exchangeExecutionChoices(@Req() req: OperatorRequest, @Param("orderId") orderId: string,
     @Res({ passthrough: true }) response: { setHeader(name: string, value: string): unknown }) {
+    response = rentalNativeResponse(response);
     response.setHeader("Cache-Control", "no-store");
     response.setHeader("Vary", "Authorization");
     return this.exchanges.merchantExecutionChoices(req.headers?.authorization, req.user!, orderId);
@@ -72,6 +77,7 @@ export class EnterpriseMerchantController {
   @Get("management-requests/:id/decision-operations/:key") managementDecisionOriginal(@Req() req: OperatorRequest, @Param("id") id: string, @Param("key") key: string) { return this.management.readReview(req.user!, id, key, req.headers?.authorization); }
   @Post("management-requests/:id/decision") managementDecision(@Req() req: OperatorRequest, @Param("id") id: string, @Body() input: ReviewEnterpriseManagementRequestDto) { return this.management.review(req.user!, id, input, req.headers?.authorization); }
   @Get("management-requests/:id/files/:fileId") async managementFile(@Req() req: OperatorRequest, @Param("id") id: string, @Param("fileId") fileId: string, @Res() response: { setHeader: (name: string, value: string) => void; send: (body: Buffer) => void }) {
+    response = rentalNativeResponse(response);
     const before = await this.management.evidenceOwner(req.user!, id, fileId, req.headers?.authorization);
     const result = before.proofFile ? await this.files.readPaymentProofBytes(before.tenantId, fileId, before.applicantCustomerId, before.proofFile.orderId, before.proofFile.workspaceId, before.proofFile.contentHash)
       : await this.files.readAuthorityBytes(before.tenantId, fileId, before.applicantCustomerId);
@@ -99,6 +105,7 @@ export class EnterpriseMerchantController {
     return rows[0] ? { state: "committed", result: enterpriseJson(rows[0].result) } : { state: "not_recorded" };
   }
   @Get("applications/:id/files/:fileId") async authorityFile(@Req() req: OperatorRequest, @Param("id") id: string, @Param("fileId") fileId: string, @Res() response: { setHeader: (name: string, value: string) => void; send: (body: Buffer) => void }) {
+    response = rentalNativeResponse(response);
     const before = await this.applications.merchantEvidenceOwner(req.user!, id, fileId);
     const result = await this.files.readAuthorityBytes(before.tenantId, fileId, before.applicantCustomerId);
     // Storage performs its own asset/byte checks. Recheck the request as well:

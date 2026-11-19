@@ -103,6 +103,7 @@ import { clientCategoryMetadata, clientItemAttributes, hasLegacyClientCategoryPr
 import { requestFingerprint } from "@rental-os/platform-contracts/request-fingerprint";
 import { evaluateDeliveryServiceArea } from "./client-delivery-service-area";
 import { lockRentalBusinessTenant } from "./mysql-business-fence";
+import { acknowledgeRentalPublicEmptyResult, enterRentalPublicTarget } from "./application-public-access";
 
 
 const DELIVERY_MODES = new Set<string>(["delivery", "onsite_delivery"]);
@@ -283,6 +284,8 @@ export class ClientApiService {
       select: { id: true, code: true, name: true, categoryCode: true, isDefault: true }
     });
     if (!workspace) throw new NotFoundException("该服务尚未开放游客浏览");
+    await enterRentalPublicTarget({ tenantId: tenant.id, workspaceId: workspace.id, requirePublished: true,
+      origin: { kind: "tenant-code", tenantCode: tenant.code } });
     return runWithRequestIdentity({ tenantId: tenant.id, workspaceId: workspace.id, isSaasAdmin: false }, () =>
       this.buildCatalog(tenant.id, tenant.code, { workspaceCode: workspace.code, workspaceName: workspace.name, categoryCode: String(workspace.categoryCode), membershipStatus: "guest", isDefault: workspace.isDefault })
     );
@@ -290,13 +293,15 @@ export class ClientApiService {
 
   /** 游客读取已发布服务的商品图片：同一白名单与同一图片读取器，不暴露本地路径。 */
   async readPublicCatalogItemImage(tenantCode: string, serviceCode: string, itemGroupId: string, imageId: string) {
-    const tenant = await this.prisma.tenant.findFirst({ where: { code: tenantCode.trim(), status: "ACTIVE" }, select: { id: true } });
+    const tenant = await this.prisma.tenant.findFirst({ where: { code: tenantCode.trim(), status: "ACTIVE" }, select: { id: true, code: true } });
     if (!tenant) throw new NotFoundException("商户不存在");
     const workspace = await this.prisma.businessWorkspace.findFirst({
       where: { tenantId: tenant.id, code: serviceCode.trim(), status: "ACTIVE", clientChannelPublications: { some: { tenantId: tenant.id, enabled: true } } },
       select: { id: true }
     });
     if (!workspace) throw new NotFoundException("该服务尚未开放游客浏览");
+    await enterRentalPublicTarget({ tenantId: tenant.id, workspaceId: workspace.id, requirePublished: true,
+      origin: { kind: "tenant-code", tenantCode: tenant.code } });
     return runWithRequestIdentity({ tenantId: tenant.id, workspaceId: workspace.id, isSaasAdmin: false }, async () => {
       const business = (await this.context(tenant.id));
       const item = business.groups.find((group) => group.id === itemGroupId && group.status === "enabled");
@@ -314,6 +319,7 @@ export class ClientApiService {
   async channelBootstrap(tenantCode: string, client: ClientChannelKind = "wechat_miniprogram", appId?: string): Promise<ClientChannelBootstrapResponse> {
     const tenant = await this.prisma.tenant.findFirst({ where: { code: tenantCode.trim(), status: "ACTIVE" }, select: { id: true, code: true, name: true } });
     if (!tenant) throw new NotFoundException("商户不存在");
+    await enterRentalPublicTarget({ tenantId: tenant.id, origin: { kind: "tenant-code", tenantCode: tenant.code } });
     const profile = await this.prisma.clientChannelProfile.findUnique({
       where: { tenantId: tenant.id },
       include: { publishedWorkspaces: { where: { enabled: true }, include: { workspace: { select: { code: true, name: true, categoryCode: true, isDefault: true, status: true } } } } }
@@ -449,12 +455,13 @@ export class ClientApiService {
    */
   async resolveWebsiteHost(host: string): Promise<{ tenantCode: string | null }> {
     const normalized = host.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/:\d+$/, "").replace(/\.$/, "");
-    if (!normalized) return { tenantCode: null };
+    if (!normalized) { acknowledgeRentalPublicEmptyResult("site-resolve"); return { tenantCode: null }; }
     const row = await this.prisma.websiteChannelProfile.findFirst({
       where: { customDomain: normalized, enabled: true },
-      select: { tenant: { select: { code: true, status: true } } }
+      select: { tenantId: true, tenant: { select: { code: true, status: true } } }
     });
-    if (!row?.tenant || row.tenant.status !== "ACTIVE") return { tenantCode: null };
+    if (!row?.tenant || row.tenant.status !== "ACTIVE") { acknowledgeRentalPublicEmptyResult("site-resolve"); return { tenantCode: null }; }
+    await enterRentalPublicTarget({ tenantId: row.tenantId, origin: { kind: "website-host", host: normalized } });
     return { tenantCode: row.tenant.code };
   }
 
@@ -462,6 +469,7 @@ export class ClientApiService {
   async publicDocument(tenantCode: string, kind: ClientPublicDocumentKind): Promise<ClientPublicDocumentResponse> {
     const tenant = await this.prisma.tenant.findFirst({ where: { code: tenantCode.trim(), status: "ACTIVE" }, select: { id: true, code: true } });
     if (!tenant) throw new NotFoundException("商户不存在");
+    await enterRentalPublicTarget({ tenantId: tenant.id, origin: { kind: "tenant-code", tenantCode: tenant.code } });
     const profile = await this.prisma.clientChannelProfile.findUnique({ where: { tenantId: tenant.id } });
     if (!profile) throw new NotFoundException("商户尚未配置客户端渠道");
     const base = { apiVersion: CLIENT_API_VERSION, tenantCode: tenant.code, kind, updatedAt: profile.updatedAt.toISOString() } as const;

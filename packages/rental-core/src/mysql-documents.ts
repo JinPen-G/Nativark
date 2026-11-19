@@ -7,6 +7,7 @@ import type { RentalDocumentRenderResult, RentalDocumentSnapshotSummary, RentalD
 import type { RentalDocumentFacts, RentalDocumentFunding, RentalDocumentStorage } from "./document-storage";
 export type { RentalDocumentFacts, RentalDocumentFunding, RentalDocumentStorage } from "./document-storage";
 import { renderRentalDocument } from "./document-renderer";
+import { lockRentalBusinessTenant } from "./mysql-business-fence";
 
 const DOCUMENT_TYPES = new Set<RentalDocumentType>(["quote", "delivery", "return", "settlement"]);
 
@@ -62,13 +63,17 @@ export class RentalDocumentService {
       documentType: type,
       contentHash: rendered.contentHash
     };
-    const existing = await this.prisma.rentalOrderDocumentSnapshot.findUnique({
+    // GET 归档是原有的可重复派生写入。只把唯一键读取和追加移入同一短事务，
+    // 不重算先前读取的订单快照；Core 撤权在追加/重复返回之前裁定。
+    return this.prisma.$transaction(async tx => {
+    await lockRentalBusinessTenant(tx, tenantId);
+    const existing = await tx.rentalOrderDocumentSnapshot.findUnique({
       where: { tenantId_workspaceId_orderId_documentType_contentHash: where }
     });
     if (existing) return this.fromPersisted(existing);
 
     try {
-      const created = await this.prisma.rentalOrderDocumentSnapshot.create({
+      const created = await tx.rentalOrderDocumentSnapshot.create({
         data: {
           tenantId,
           workspaceId,
@@ -88,12 +93,13 @@ export class RentalDocumentService {
       // 两个请求可能同时首次打开同一份凭证；唯一键只允许一个写入，
       // 另一个重新读同一版本，不能向调用方暴露 500 或生成两个历史版本。
       if (!(error instanceof PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
-      const concurrent = await this.prisma.rentalOrderDocumentSnapshot.findUnique({
+      const concurrent = await tx.rentalOrderDocumentSnapshot.findUnique({
         where: { tenantId_workspaceId_orderId_documentType_contentHash: where }
       });
       if (!concurrent) throw error;
       return this.fromPersisted(concurrent);
     }
+    }, { isolationLevel: "ReadCommitted" });
   }
 
   /**

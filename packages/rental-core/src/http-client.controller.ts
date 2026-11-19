@@ -62,6 +62,7 @@ import {
 import { type ClientRequestContext as ClientSessionContext } from "./client-context";
 import { ExecutionContextHost } from '@nestjs/core/helpers/execution-context-host';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
+import { rentalNativeResponse } from './http-native-response';
 
 interface ClientRequest {
   client?: ClientSessionContext;
@@ -144,6 +145,7 @@ export class ClientApiController {
   /** WEBSITE-CHANNEL-04：公开官网品牌图片（Logo/Hero/品类入口图），按 tenantCode + assetId 提供。 */
   @Get("public/website-assets/:tenantCode/:assetId")
   async websiteAsset(@Param("tenantCode") tenantCode: string, @Param("assetId") assetId: string, @Res() res: ClientBinaryResponse) {
+    res = rentalNativeResponse(res);
     const image = await this.websiteAssets.read(tenantCode, assetId);
     res.setHeader("Content-Type", image.mimeType);
     res.setHeader("Cache-Control", "public, max-age=300");
@@ -167,6 +169,7 @@ export class ClientApiController {
 
   @Get("public/catalog/items/:itemGroupId/images/:imageId")
   async publicCatalogImage(@Query("tenantCode") tenantCode: string, @Query("service") service: string, @Param("itemGroupId") itemGroupId: string, @Param("imageId") imageId: string, @Res() res: ClientBinaryResponse) {
+    res = rentalNativeResponse(res);
     if (!tenantCode?.trim() || !service?.trim()) throw new BadRequestException("缺少商户编码或服务编码");
     const image = await this.api.readPublicCatalogItemImage(tenantCode, service, itemGroupId, imageId);
     if ("redirectUrl" in image) {
@@ -415,6 +418,7 @@ export class ClientApiController {
 
   @Get("catalog/items/:itemGroupId/images/:imageId")
   async catalogImage(@Req() req: ClientRequest, @Param("itemGroupId") itemGroupId: string, @Param("imageId") imageId: string, @Res() res: ClientBinaryResponse) {
+    res = rentalNativeResponse(res);
     const image = await this.api.readCatalogItemImage(currentClient(req), itemGroupId, imageId);
     if ("redirectUrl" in image) {
       res.redirect(302, image.redirectUrl!);

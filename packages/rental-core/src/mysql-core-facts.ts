@@ -209,6 +209,8 @@ export interface AppliedStockOperation {
   operationType: RentalStockOperationType;
   idempotent: boolean;
   entries: RentalStockLedgerEntry[];
+  /** 原作业事务内确认的余额投影，提交后不再开启当前配置准入。 */
+  balances: RentalStockBalance[];
 }
 
 /** 领取时一次性消耗的库存。必须与订单写入放在同一事务中。 */
@@ -308,7 +310,7 @@ export interface RentalCoreFactStore<TTransaction extends RentalCoreFactTransact
    * 盘点写入。与 `upsertStockBalance`（只用于建样例数据）分开，因为它必须锁行：
    * `maintenanceQuantity` 现在有第二个写者，见 `saveOrderAggregate` 的异常隔离。
    */
-  applyStockCount(input: StockCountInput): Promise<{ id: string; onHandQuantity: number; maintenanceQuantity: number }>;
+  applyStockCount(input: StockCountInput): Promise<RentalStockBalance>;
   listStockLedger(tenantId: string, filters?: { itemGroupId?: string; locationId?: string; limit?: number }, tx?: TTransaction): Promise<RentalStockLedgerEntry[]>;
   applyStockOperation(input: StockOperationInput): Promise<AppliedStockOperation>;
   /** 锁余额、扣在手、追加 consume 流水；调用方随后在同一事务内保存订单领取事实。 */
@@ -708,29 +710,32 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
   }
 
   /** 文件读取与订单详情共用原范围；凭证额外限定实际取/还阶段地点。 */
-  async assertFileOrderReadAccess(tenantId: string, orderId: string, stage?: "pickup" | "return") {
-    const workspaceId = await this.contacts.resolveWorkspaceId(this.store, tenantId);
+  async assertFileOrderReadAccess(tenantId: string, orderId: string, stage?: "pickup" | "return", tx?: TTransaction) {
+    const client = tx ?? this.store;
+    const workspaceId = await this.contacts.resolveWorkspaceId(client, tenantId);
     const locationIds = this.contacts.getRequestLocationIds();
     const stageWhere = stage && locationIds !== undefined
       ? stage === "pickup" ? { fulfillmentLocationId: { in: locationIds } }
         : { OR: [{ returnLocationId: { in: locationIds } }, { returnLocationId: null, fulfillmentLocationId: { in: locationIds } }] }
       : {};
-    const row = await this.store.rentalOrder.findFirst({ where: { id: orderId, tenantId, workspaceId,
+    const row = await client.rentalOrder.findFirst({ where: { id: orderId, tenantId, workspaceId,
       AND: [this.requestOrderVisibilityWhere(), stageWhere] }, select: { id: true } });
     if (!row) throw new NotFoundException("文件关联订单不在当前业务范围内");
   }
 
-  async assertFileWorkOrderReadAccess(tenantId: string, workOrderId: string) {
-    const workspaceId = await this.contacts.resolveWorkspaceId(this.store, tenantId);
-    const row = await this.store.rentalWorkOrder.findFirst({ where: { id: workOrderId, tenantId, workspaceId,
+  async assertFileWorkOrderReadAccess(tenantId: string, workOrderId: string, tx?: TTransaction) {
+    const client = tx ?? this.store;
+    const workspaceId = await this.contacts.resolveWorkspaceId(client, tenantId);
+    const row = await client.rentalWorkOrder.findFirst({ where: { id: workOrderId, tenantId, workspaceId,
       ...this.workOrderVisibilityWhere() }, select: { id: true } });
     if (!row) throw new NotFoundException("文件关联工单不在当前业务范围内");
   }
 
-  async assertFileAssetReadAccess(tenantId: string, assetId: string) {
-    const workspaceId = await this.contacts.resolveWorkspaceId(this.store, tenantId);
-    const row = await this.store.rentalAsset.findFirst({ where: { id: assetId, tenantId, workspaceId,
-      AND: [await this.assetVisibilityWhere(this.store, tenantId, workspaceId)] }, select: { id: true } });
+  async assertFileAssetReadAccess(tenantId: string, assetId: string, tx?: TTransaction) {
+    const client = tx ?? this.store;
+    const workspaceId = await this.contacts.resolveWorkspaceId(client, tenantId);
+    const row = await client.rentalAsset.findFirst({ where: { id: assetId, tenantId, workspaceId,
+      AND: [await this.assetVisibilityWhere(client, tenantId, workspaceId)] }, select: { id: true } });
     if (!row) throw new NotFoundException("文件关联资产不在当前业务范围内");
   }
 
@@ -1760,8 +1765,27 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
    * 盘点只维护在手量；维修隔离量只能由归还处置的隔离、恢复或核销流水改变。
    * 省略 maintenanceQuantity 表示沿用现值；显式提交不同值必须拒绝，避免绕过来源流水。
    */
-  async applyStockCount(input: StockCountInput): Promise<{ id: string; onHandQuantity: number; maintenanceQuantity: number }> {
+  private async stockBalanceResults(tenantId: string, itemGroupId: string, locationIds: readonly string[], tx: TTransaction): Promise<RentalStockBalance[]> {
+    // 与原列表使用相同的当前有效预占量，仍按原地点范围过滤；只读发生在
+    // 原写事务内，缺少响应依据时回滚，不在提交之后重新读取配置或判定权限。
+    const [balances, reservations] = await Promise.all([
+      this.listStockBalances(tenantId, tx), this.activeReservations(tenantId, tx)
+    ]);
+    const targets = balances.filter(row => row.itemGroupId === itemGroupId && locationIds.includes(row.locationId));
+    if (locationIds.some(locationId => !targets.some(row => row.locationId === locationId))) {
+      throw new ConflictException("库存作业响应缺少原范围的余额依据");
+    }
+    return targets.map(row => {
+      const reservedQuantity = reservations.filter(reservation => reservation.itemGroupId === itemGroupId
+        && reservation.locationId === row.locationId).reduce((sum, reservation) => sum + reservation.quantity, 0);
+      return { ...row, reservedQuantity,
+        availableQuantity: Math.max(0, row.onHandQuantity - row.maintenanceQuantity - reservedQuantity) };
+    });
+  }
+
+  async applyStockCount(input: StockCountInput): Promise<RentalStockBalance> {
     return this.store.$transaction(async (tx) => {
+      await lockRentalBusinessTenant(tx, input.tenantId);
       const workspaceId = await this.contacts.resolveWorkspaceId(tx, input.tenantId);
       await this.lockInventoryTargets(
         input.tenantId,
@@ -1803,8 +1827,10 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
       } else {
         await tx.rentalStockBalance.create({ data: { workspaceId, id, ...data } });
       }
-      return { id, onHandQuantity: input.onHandQuantity, maintenanceQuantity };
-    });
+      const saved = (await this.stockBalanceResults(input.tenantId, input.itemGroupId, [input.locationId], tx)).find(row => row.id === id);
+      if (!saved) throw new ConflictException("库存盘点结果不在原读取范围，不能确认本次写入");
+      return saved;
+    }, { isolationLevel: "ReadCommitted" });
   }
 
   async listStockLedger(
@@ -1856,6 +1882,7 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
     })).digest("hex");
 
     return this.store.$transaction(async (tx) => {
+      await lockRentalBusinessTenant(tx, input.tenantId);
       const workspaceId = await this.contacts.resolveWorkspaceId(tx, input.tenantId);
       const existing = await tx.rentalStockLedgerEntry.findMany({
         where: { tenantId: input.tenantId, workspaceId, idempotencyKey: input.idempotencyKey },
@@ -1870,7 +1897,8 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
           operationId: existing[0].operationId,
           operationType: existing[0].operationType as RentalStockOperationType,
           idempotent: true,
-          entries: existing.map(toStockLedgerEntry)
+          entries: existing.map(toStockLedgerEntry),
+          balances: await this.stockBalanceResults(input.tenantId, input.itemGroupId, existing.map(row => row.locationId), tx)
         };
       }
 
@@ -1969,8 +1997,9 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
         });
         entries.push(toStockLedgerEntry(ledgerRow));
       }
-      return { operationId, operationType: input.type, idempotent: false, entries };
-    });
+      const balances = await this.stockBalanceResults(input.tenantId, input.itemGroupId, locationIds, tx);
+      return { operationId, operationType: input.type, idempotent: false, entries, balances };
+    }, { isolationLevel: "ReadCommitted" });
   }
 
   /**
@@ -2139,7 +2168,7 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
   }
 
   async upsertStockDisposition(disposition: RentalStockDisposition, tx?: TTransaction): Promise<RentalStockDisposition> {
-    if (!tx) return this.store.$transaction(client => this.upsertStockDisposition(disposition, client));
+    if (!tx) return this.store.$transaction(client => this.upsertStockDisposition(disposition, client), { isolationLevel: "ReadCommitted" });
     const client = tx;
     await this.lockOrder(disposition.tenantId, disposition.orderId, client);
     const workspaceId = await this.contacts.resolveWorkspaceId(client, disposition.tenantId);
@@ -2200,7 +2229,7 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
 
   async restoreStockDisposition(tenantId: string, dispositionId: string, operator: string, tx?: TTransaction): Promise<RentalStockDisposition> {
     const run = (client: TTransaction) => this.restoreStockDispositionInClient(client, tenantId, dispositionId, operator);
-    return tx ? run(tx) : this.store.$transaction(run);
+    return tx ? run(tx) : this.store.$transaction(run, { isolationLevel: "ReadCommitted" });
   }
 
   async writeOffStockDisposition(
@@ -2211,6 +2240,7 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
     tx?: TTransaction
   ): Promise<RentalStockDisposition> {
     const run = async (client: TTransaction) => {
+      await lockRentalBusinessTenant(client, tenantId);
       const workspaceId = await this.contacts.resolveWorkspaceId(client, tenantId);
       const normalizedReason = reason.trim();
       if (!normalizedReason) throw new BadRequestException("核销必须填写原因");
@@ -2250,7 +2280,7 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
       if (!refreshed) throw new NotFoundException("库存核销后无法读取归还处置");
       return toStockDisposition(refreshed);
     };
-    return tx ? run(tx) : this.store.$transaction(run);
+    return tx ? run(tx) : this.store.$transaction(run, { isolationLevel: "ReadCommitted" });
   }
 
   private stockDispositionWriteOffFingerprint(row: {
@@ -2320,6 +2350,7 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
   }
 
   private async restoreStockDispositionInClient(client: TTransaction, tenantId: string, dispositionId: string, operator: string) {
+    await lockRentalBusinessTenant(client, tenantId);
     const workspaceId = await this.contacts.resolveWorkspaceId(client, tenantId);
     const visible = await client.rentalStockDisposition.findFirst({
       where: { id: dispositionId, tenantId, workspaceId, ...this.stockDispositionVisibilityWhere() }
@@ -2576,8 +2607,11 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
   }
 
   async upsertWorkOrder(workOrder: RentalWorkOrder, tx?: TTransaction): Promise<RentalWorkOrder> {
-    if (!tx) return this.store.$transaction(client => this.upsertWorkOrder(workOrder, client));
+    if (!tx) return this.store.$transaction(client => this.upsertWorkOrder(workOrder, client), { isolationLevel: "ReadCommitted" });
     const client = tx;
+    // 独立养护工单没有关联订单，仍须在资产/处置锁之前取得同一父门禁。
+    // 有订单时保留原 lockOrder 内的父锁及订单→资产→处置顺序。
+    if (!workOrder.orderId) await lockRentalBusinessTenant(client, workOrder.tenantId);
     if (workOrder.orderId) await this.lockOrder(workOrder.tenantId, workOrder.orderId, client);
     const workspaceId = await this.contacts.resolveWorkspaceId(client, workOrder.tenantId);
     const assets = await this.lockAssetRows(client, workOrder.tenantId, workspaceId, workOrder.assetId ? [workOrder.assetId] : []);
@@ -2646,7 +2680,9 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
   }
 
   async assignWorkOrder(tenantId: string, workOrderId: string, assigneeId?: string, assigneeName?: string, tx?: TTransaction): Promise<RentalWorkOrder> {
-    const client = tx ?? this.store;
+    if (!tx) return this.store.$transaction(client => this.assignWorkOrder(tenantId, workOrderId, assigneeId, assigneeName, client), { isolationLevel: "ReadCommitted" });
+    const client = tx;
+    await lockRentalBusinessTenant(client, tenantId);
     const workspaceId = await this.contacts.resolveWorkspaceId(client, tenantId);
     const row = await client.rentalWorkOrder.findFirst({ where: { id: workOrderId, tenantId, workspaceId } });
     if (!row) throw new NotFoundException("养护工单不存在或不属于当前经营空间");
@@ -2669,6 +2705,7 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
     tx?: TTransaction
   ): Promise<RentalWorkOrder> {
     const run = async (client: TTransaction) => {
+      await lockRentalBusinessTenant(client, tenantId);
       const workspaceId = await this.contacts.resolveWorkspaceId(client, tenantId);
       const visible = await client.rentalWorkOrder.findFirst({ where: { id: workOrderId, tenantId, workspaceId } });
       if (!visible) throw new NotFoundException("养护工单不存在或不属于当前经营空间");
@@ -2747,7 +2784,7 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
       });
       return toWorkOrder({ ...row, ...data, status: to, updatedAt: now });
     };
-    return tx ? run(tx) : this.store.$transaction(run);
+    return tx ? run(tx) : this.store.$transaction(run, { isolationLevel: "ReadCommitted" });
   }
 
   /* ---------- 检查记录 ---------- */

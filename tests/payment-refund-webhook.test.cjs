@@ -56,14 +56,18 @@ async function main() {
   await service.applyRefundWebhookOutcome(input);
   assert.equal(applyCount, 2, "失败事件允许后续通过查单/重试恢复");
 
+  const originalRefund = {
+    id: "refund-1", tenantId: "tenant-1", workspaceId: "workspace-1", orderId: "order-1",
+    paymentIntentId: "intent-1", amount: 10, externalRefundId: "refund-existing", fundedAt: null,
+    reason: "测试退款", provider: "wechat_pay", method: "wechat_pay", currency: "CNY", merchantRefundNo: "RR-1", status: "accepted"
+  };
   const refundIntegrity = new PaymentRuntimeService({
+    rentalPaymentRefund: { findFirst: async () => ({ ...originalRefund }) },
     $transaction: async (callback) => callback({
+      $queryRaw: async (query) => query.sql.includes("FROM rental_payment_refunds") ? [{ ...originalRefund }]
+        : [{ id: query.sql.includes("FROM Tenant") ? "tenant-1" : "order-1" }],
       rentalPaymentRefund: {
-        findFirst: async () => ({
-          id: "refund-1", tenantId: "tenant-1", workspaceId: "workspace-1", orderId: "order-1",
-          paymentIntentId: "intent-1", amount: 10, externalRefundId: "refund-existing", fundedAt: null,
-          reason: "测试退款", provider: "wechat_pay", status: "accepted"
-        }),
+        findFirst: async () => ({ ...originalRefund }),
         update: async () => { throw new Error("不应写入冲突退款结果"); }
       }
     })

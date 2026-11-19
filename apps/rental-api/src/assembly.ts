@@ -14,14 +14,18 @@ import { createPublicPlatformDataPlan } from "@rental-os/platform-api/data-plan"
 import { composePlatformCoreApplication } from "@rental-os/platform-core-host";
 import { readPublicSubscriptionTerm } from "@rental-os/platform-server/subscription-reader";
 import { readBoundedMedia } from "@rental-os/platform-server/media";
+import { PlatformPrincipalAuthority } from "@rental-os/platform-server/principal";
 import { createRentalApplication } from "@rental-os/rental-core/application";
 import { createRentalHttpApplications } from "@rental-os/rental-core/application-http";
 import { createRentalPlatformApplications } from "@rental-os/rental-core/application-platform";
 import { createRentalApplicationAccess } from "@rental-os/rental-core/application-access";
+import { createRentalPublicApplicationAccess } from "@rental-os/rental-core/application-public-access";
 import { createRentalWorkerAuthority } from "@rental-os/rental-core/application-worker-authority";
 import { composeRentalPlatformHost } from "@rental-os/rental-core/platform-host";
 import { composeRentalCoreSessionReader } from "@rental-os/rental-core/core-session";
 import { createRentalAuthorization } from "@rental-os/rental-core/http-auth";
+import { createRentalCustomerManagementApplication } from "@rental-os/rental-core/customer-management";
+import { createRentalWorkspaceManagementApplication } from "@rental-os/rental-core/workspace-management";
 import type { RentalDatabaseClient, RentalDatabaseTransaction } from "./database";
 import { requireRentalDeploymentPackage } from "./deployment-package";
 import { RentalApplicationLifecycle } from "./lifecycle";
@@ -76,18 +80,24 @@ export function composeRentalApplication(input: {
   const guard = new authorization.Guard(rental.auth, rental.foundation.capabilities, rental.client.auth,
     rental.client.rateLimit, database, rental.subscriptions);
   const access = createRentalApplicationAccess({ database, authorization, deploymentForTransaction,
+    managementAuthority: new PlatformPrincipalAuthority({ findUserById: (id, tx) =>
+      rental.authSource.findUserById(id, tx) }),
     term: { async requireNewBusiness(transaction, tenantId) {
       const term = await readPublicSubscriptionTerm(transaction, tenantId);
       if (!term.newBusinessAllowed) throw new ForbiddenException("租户订阅已到期，暂停新增 Core 业务");
     } }
   });
-  return Object.freeze({ rental, catalogue, core, authorization, guard, access,
+  const publicAccess = createRentalPublicApplicationAccess({ database, authorization, deploymentForTransaction });
+  return Object.freeze({ rental, catalogue, core, authorization, guard, access, publicAccess,
     http: createRentalHttpApplications(rental, { guard }),
     extensions: { auth: rental.auth, subscriptions: rental.subscriptions },
+    customers: createRentalCustomerManagementApplication(rental),
+    workspaces: createRentalWorkspaceManagementApplication(rental),
     platform: createRentalPlatformApplications(rental, { core, legacyGuard: guard }),
     payments: { runtime: rental.integrations.payments, statements: rental.integrations.statements, core: rental.primary.core },
     jobs: rental.integrations.ledger, notifications: rental.integrations.ledger,
-    lifecycle: new RentalApplicationLifecycle(rental, () => database.$disconnect()) });
+    lifecycle: new RentalApplicationLifecycle(rental, () => database.$disconnect(),
+      configuration.get<string>("DATABASE_CONNECT_ON_START") === "true" ? () => database.$connect() : undefined) });
 }
 
 export type RentalHostAssembly = ReturnType<typeof composeRentalApplication>;

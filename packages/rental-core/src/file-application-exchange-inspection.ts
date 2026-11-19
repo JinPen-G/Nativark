@@ -10,6 +10,7 @@ import { MAX_FILE_BYTES, type FileStorageOwner, type FileStoragePrimitives, type
 import type { TenantIntegrationRuntimeConfig, TenantIntegrationService } from "@rental-os/platform-server/tenant-integration";
 import type { RentalExchangeInspectionFileProof } from "./exchange-inspection-ports";
 import { RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE } from "./exchange-inspection-preparation";
+import { assertRentalBusinessTenantAccessAfterLock, lockRentalBusinessTenant } from "./mysql-business-fence";
 
 type ExchangeInspectionUploadOwner = FileStorageOwner & { exchangeInspectionSourceId?: string };
 type ExchangeInspectionFrozenEvidence = Pick<RentalExchangeInspectionFileProof, "sourceId" | "contentHash" | "sizeBytes" | "mimeType" | "width" | "height">;
@@ -67,6 +68,8 @@ export class RentalExchangeInspectionFileStorage<Owner extends ExchangeInspectio
       configRowHash: fileFactHash(configRow), storageLocationHash: fileStorageLocationHash(config), uploadUrl: signed.url, uploadHeaders: signed.headers };
   }
   async persistExchangeInspectionUpload(tx: Prisma.TransactionClient, tenantId: string, plan: RentalExchangeInspectionStoragePlan<Owner>) {
+    // 原 mediaOrder 已持 Tenant 父锁和 Order X；这里只复核，不能倒插父锁。
+    await assertRentalBusinessTenantAccessAfterLock(tx, tenantId);
     await this.integrations.assertEnabledInTransaction(tx, tenantId, "file", plan.config.provider, { requireDefault: true });
     const configRow = await tx.tenantIntegrationConfig.findFirst({ where: { id: plan.config.id, tenantId } });
     if (!configRow || fileFactHash(configRow) !== plan.configRowHash || plan.expiresAt.getTime() <= Date.now()) throw new ConflictException("原上传文件配置或会话已变化");
@@ -111,6 +114,7 @@ export class RentalExchangeInspectionFileStorage<Owner extends ExchangeInspectio
         sizeBytes: content.sizeBytes, mimeType: content.mediaType as "image/png" | "image/jpeg", width: content.width, height: content.height };
       const destination = `${asset.storageKey}.committed/${randomUUID()}/${content.contentHash}`;
       const claimed = await this.prisma.$transaction(async tx => {
+        await lockRentalBusinessTenant(tx, tenantId);
         await this.integrations.assertEnabledInTransaction(tx, tenantId, "file", config.provider);
         const currentConfig = await tx.tenantIntegrationConfig.findFirst({ where: { tenantId, capability: "file", provider: asset.storageProvider } });
         const currentAsset = await tx.fileAsset.findFirst({ where: { id: fileAssetId, tenantId }, include: { uploadSession: true } });
@@ -129,6 +133,14 @@ export class RentalExchangeInspectionFileStorage<Owner extends ExchangeInspectio
       });
       // The exact destination is durable before PUT. A lost acknowledgement is
       // reconciled there; never allocate another destination or reread staging.
+      await this.prisma.$transaction(async tx => {
+        await lockRentalBusinessTenant(tx, tenantId);
+        await this.integrations.assertEnabledInTransaction(tx, tenantId, "file", config.provider);
+        const currentConfig = await tx.tenantIntegrationConfig.findFirst({ where: { tenantId, capability: "file", provider: asset.storageProvider } });
+        const currentAsset = await tx.fileAsset.findFirst({ where: { id: fileAssetId, tenantId }, include: { uploadSession: true } });
+        if (!currentConfig || fileFactHash(currentConfig) !== configRowHash || !currentAsset
+          || fileFactHash(currentAsset) !== fileFactHash(claimed.asset)) throw new ConflictException("原影像派发前冻结绑定或配置已变化");
+      }, { isolationLevel: "ReadCommitted" });
       const signed = this.ports.presign(config, "PUT", destination, asset.mimeType, new Date(Date.now() + 60000));
       const written = await this.ports.objectRequest(signed.url, { method: "PUT", headers: signed.headers, body: new Uint8Array(bytes) });
       if (!written.ok) throw new ServiceUnavailableException("原影像内容冻结结果未知，只能核对已登记目标");
@@ -183,6 +195,8 @@ export class RentalExchangeInspectionFileStorage<Owner extends ExchangeInspectio
   }
   async completeExchangeInspectionUpload(tx: Prisma.TransactionClient, tenantId: string, fileAssetId: string, owner: Owner,
     proof: RentalExchangeInspectionFileProof) {
+    // 这一步参加原业务媒体来源的正式绑定，调用方已持 Tenant/Order，原字节冻结回执继续保留。
+    await assertRentalBusinessTenantAccessAfterLock(tx, tenantId);
     const asset = await tx.fileAsset.findFirst({ where: { id: fileAssetId, tenantId, uploadedBy: owner.actorUserId }, include: { uploadSession: true } });
     const metadata = asset?.metadata as JsonRecord | null | undefined;
     if (!owner.exchangeInspectionSourceId || owner.uploadScene !== RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE || !asset?.uploadSession || !metadata || !this.ports.matchesOwner(asset, owner)

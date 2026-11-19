@@ -18,6 +18,7 @@ import { categoryDefinitionDifferences } from "./category-definition-diff";
 import { categoryCreationTemplates, composeCategoryCreation } from "./category-creation-templates";
 import { requestFingerprint } from "@rental-os/platform-contracts/request-fingerprint";
 import { readRentalCategoryCode } from "./category-identity";
+import { lockRentalBusinessTenant } from "./mysql-business-fence";
 import type { RentalCategoryGovernanceStorage, RentalCategoryGovernanceHooks, RentalCategoryGovernanceSessionReader, RentalCategoryGovernancePrincipalReader } from "./category-governance-storage";
 export type { RentalCategoryGovernanceStorage, RentalCategoryGovernanceHooks, RentalCategoryGovernanceSessionReader, RentalCategoryGovernancePrincipalReader } from "./category-governance-storage";
 
@@ -80,6 +81,7 @@ export class CategoryGovernanceService {
     const signal = AbortSignal.timeout(30000);
     try {
       return await this.prisma.$transaction(async tx => {
+        await lockRentalBusinessTenant(tx, user.tenantId);
         const before = await auth.resolveTrustedPlatformBrowserPrincipal(authorization, tx, signal);
         if (!before || before.userId !== user.id || before.tenantId !== user.tenantId) throw new UnauthorizedException("当前平台会话与品类操作人不一致");
         assertCategoryGovernancePermission(await principals.findUserById(before.userId, tx), permission);

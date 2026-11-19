@@ -15,6 +15,7 @@ export type { RentalServiceCapacityStorage, RentalServiceCapacityTransaction, Re
 import { serviceReservationKey } from "./service-occurrence";
 import { lockActiveCategoryBinding } from "./mysql-category-write";
 import { requestFingerprint } from "@rental-os/platform-contracts/request-fingerprint";
+import { lockRentalBusinessTenant } from "./mysql-business-fence";
 
 const iso = (value: Date) => value.toISOString();
 
@@ -646,6 +647,9 @@ export class RentalServiceCapacityService<TTransaction extends RentalServiceCapa
         isolationLevel: "ReadCommitted"
       });
     }
+    // Standalone maintenance/quote owns its parent lock. Original order callers
+    // already hold the same shared lock before their order/reservation locks.
+    await lockRentalBusinessTenant(tx, tenantId);
     const workspaceId = await this.contacts.resolveWorkspaceId(tx, tenantId);
     const now = new Date();
     const ids = await tx.$queryRaw<Array<{ id: string }>>(sql`

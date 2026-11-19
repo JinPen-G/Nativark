@@ -95,6 +95,11 @@ function assetRow(id, status = "pending_upload", assetTenantId = tenantId, asset
 }
 
 const prisma = {
+  $queryRaw: async query => {
+    if (query.sql.includes("FROM Tenant")) return [tenantId, secondTenantId].includes(query.values[0]) ? [{ id: query.values[0] }] : [];
+    throw new Error("unexpected file storage SQL");
+  },
+  operationLog: { create: async () => { if (duringAudit) await duringAudit(); } },
   rentalOrder: lookup(orders), rentalAsset: lookup(inventory), rentalWorkOrder: lookup(workOrders),
   rentalQuote: lookup([{ id: 'quote-file', tenantId, workspaceId, categoryCode: 'CAMERA', createdAt: new Date(), expiresAt: new Date(),
     request: { customerId: 'customer-file-test', fulfillmentLocationId: 'pickup-place', returnLocationId: 'return-place', services: [] },
@@ -168,7 +173,7 @@ const prisma = {
     }
     if (Array.isArray(work)) return Promise.all(work);
     const assetBefore = structuredClone([...assets]), sessionBefore = structuredClone([...sessions]);
-    try { return await work({ fileAsset: prisma.fileAsset, fileUploadSession: prisma.fileUploadSession }); }
+    try { return await work({ ...prisma }); }
     catch (error) {
       assets.clear(); assetBefore.forEach(([id, row]) => assets.set(id, row));
       sessions.clear(); sessionBefore.forEach(([id, row]) => sessions.set(id, row)); throw error;
@@ -519,7 +524,7 @@ void runWithRequestIdentity(operatorIdentity, async () => {
   await assert.rejects(() => runtime.downloadUrl(tenantId, invoiceFile.id), notReadable);
   assert.equal((await inScope({ permissions: [...operatorIdentity.permissions, 'rental-os:finance:view'] }, () => runtime.downloadUrl(tenantId, invoiceFile.id))).fileAssetId, invoiceFile.id);
   duringAudit = () => { throw Error('audit persistence refused'); };
-  await assert.rejects(() => runtime.downloadUrl(tenantId, qualificationSession.fileAssetId), /audit persistence refused/);
+  await assert.rejects(() => runtime.downloadUrl(tenantId, qualificationSession.fileAssetId), /敏感资料审计失败，未返回完整信息/);
   duringAudit = undefined;
   console.log('file business ACL passed: original object, current scope, sensitive credentials, generic ledgers, staff stage, public publication, audited reads and pre-return rechecks');
 
@@ -533,7 +538,8 @@ void runWithRequestIdentity(operatorIdentity, async () => {
       ? { id: where.id, tenantId, customerType: 'personal' } : null },
     customerMembership: { findUnique: async () => ({ id: 'membership-file', status: 'active' }) },
     customerMembershipQualificationType: { findFirst: async ({ where }) => matches(qualificationType, where) ? qualificationType : null },
-    $queryRaw: async sql => { const id = sql.values[1]; const row = assets.get(id);
+    $queryRaw: async sql => { if (sql.sql.includes("FROM Tenant")) return prisma.$queryRaw(sql);
+      const id = sql.values[1]; const row = assets.get(id);
       return row && row.tenantId === sql.values[0] ? [structuredClone(row)] : []; },
     customerMembershipReview: {
       create: async ({ data }) => { const row = { id: `file-review-${membershipState.reviews.length}`, ...data, createdAt: new Date(), updatedAt: new Date() }; membershipState.reviews.push(row); return row; },

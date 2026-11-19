@@ -1,7 +1,10 @@
 import { BadRequestException, NotFoundException, PayloadTooLargeException } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import type { SystemUserRow } from "@rental-os/platform-contracts";
 import { requireRequestTenantId } from "@rental-os/platform-server/request-identity";
 import type { RentalWebsiteAssetStorage } from "./client-session-ports";
+import { assertRentalBusinessTenantAccessAfterLock } from "./mysql-business-fence";
+import { enterRentalPublicTarget } from "./application-public-access";
 
 export interface UploadedWebsiteImage { originalname: string; mimetype: string; size: number; buffer: Buffer; }
 
@@ -38,19 +41,24 @@ export class WebsiteAssetService {
     if (file.size > MAX_BYTES || file.buffer.length > MAX_BYTES) throw new PayloadTooLargeException("单张图片不能超过 2MB");
     if (!matchesSignature(file.mimetype, file.buffer)) throw new BadRequestException("图片内容与文件格式不一致");
 
-    const tenant = await this.prisma.tenant.findFirst({ where: { id: tenantId }, select: { code: true } });
-    if (!tenant) throw new NotFoundException("租户不存在");
-    const asset = await this.prisma.websiteAsset.create({
-      data: { tenantId, scene: useScene, mimeType: file.mimetype, sizeBytes: file.buffer.length, data: file.buffer },
-      select: { id: true }
-    });
-    return { assetId: asset.id, mimeType: file.mimetype, url: `/api/client/v1/public/website-assets/${encodeURIComponent(tenant.code)}/${asset.id}` };
+    return this.prisma.$transaction(async tx => {
+      const tenants = await tx.$queryRaw<Array<{ code: string }>>(Prisma.sql`SELECT code FROM Tenant WHERE id=${tenantId} LOCK IN SHARE MODE`);
+      const tenant = tenants[0];
+      if (!tenant) throw new NotFoundException("租户不存在");
+      await assertRentalBusinessTenantAccessAfterLock(tx, tenantId);
+      const asset = await tx.websiteAsset.create({
+        data: { tenantId, scene: useScene, mimeType: file.mimetype, sizeBytes: file.buffer.length, data: file.buffer },
+        select: { id: true }
+      });
+      return { assetId: asset.id, mimeType: file.mimetype, url: `/api/client/v1/public/website-assets/${encodeURIComponent(tenant.code)}/${asset.id}` };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
   /** 公开读取：按 tenantCode + assetId 取字节，核对归属，返回内容供客户端渲染。 */
   async read(tenantCode: string, assetId: string): Promise<{ content: Buffer; mimeType: string }> {
-    const tenant = await this.prisma.tenant.findFirst({ where: { code: tenantCode.trim(), status: "ACTIVE" }, select: { id: true } });
+    const tenant = await this.prisma.tenant.findFirst({ where: { code: tenantCode.trim(), status: "ACTIVE" }, select: { id: true, code: true } });
     if (!tenant) throw new NotFoundException("图片不存在");
+    await enterRentalPublicTarget({ tenantId: tenant.id, origin: { kind: "tenant-code", tenantCode: tenant.code } });
     const asset = await this.prisma.websiteAsset.findFirst({ where: { id: assetId, tenantId: tenant.id }, select: { data: true, mimeType: true } });
     if (!asset) throw new NotFoundException("图片不存在");
     return { content: Buffer.from(asset.data), mimeType: asset.mimeType };

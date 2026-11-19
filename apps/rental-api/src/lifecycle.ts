@@ -10,13 +10,15 @@ export class RentalApplicationLifecycle implements OnModuleInit, OnApplicationBo
   private closing?: Promise<void>;
   private stopping = false;
 
-  constructor(private readonly application: RentalApplication, private readonly disconnect: () => Promise<void>) {}
+  constructor(private readonly application: RentalApplication, private readonly disconnect: () => Promise<void>,
+    private readonly connect?: () => Promise<void>) {}
 
   onModuleInit(): Promise<void> {
     return this.initialization ??= this.initialize();
   }
 
   private async initialize(): Promise<void> {
+    await this.connect?.();
     await this.application.primary.core.onModuleInit();
     await this.application.primary.business.onModuleInit();
   }

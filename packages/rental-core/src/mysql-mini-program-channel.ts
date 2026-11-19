@@ -127,9 +127,10 @@ export class MiniProgramChannelService {
       const translated = WechatMiniProgramAdapter.translate(error, "credentials");
       message = typeof translated.getResponse() === "string" ? String(translated.getResponse()) : translated.message;
     }
-    // 运输不持有数据库锁，也不重试。结果只可写回原配置和原测试记录，不能覆盖期间换密钥或另一测试的结果。
+    // 运输不持有数据库锁，也不重试。仅记录已派发测试的结果，不重新准入；
+    // 原 Tenant 锁与精确 CAS 防止覆盖期间换密钥或另一测试的记录。
     await this.prisma.$transaction(async tx => {
-      await lockRentalBusinessTenant(tx, tenantId);
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM Tenant WHERE id=${tenantId} LOCK IN SHARE MODE`);
       const current = await this.load(tenantId, tx);
       if (!current || current.id !== row.id) throw new ConflictException("小程序渠道配置或测试记录已变化，请重新读取后再测试");
       const written = await tx.miniProgramChannel.updateMany({ where: { id: row.id, tenantId, revision: row.revision,

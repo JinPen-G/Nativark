@@ -3,6 +3,7 @@ import { ConflictException, ForbiddenException } from "@nestjs/common";
 import { CLIENT_API_VERSION, type ClientAccountClosurePreview, type ClientAccountClosureRequest, type ClientAccountClosureResponse } from "./client-contracts";
 import type { RentalClientClosureStorage, RentalClientClosureAuthority, RentalClientClosureOperations, RentalClientClosureGate, RentalClientClosureAudit } from "./client-lifecycle-ports";
 import type { ClientRequestContext } from "./client-context";
+import { lockRentalBusinessTenant, type RentalBusinessTenantTransaction } from "./mysql-business-fence";
 
 /**
  * 本人在线注销（MP-02B，需求 §5.3/§12.3）。
@@ -12,7 +13,7 @@ import type { ClientRequestContext } from "./client-context";
  * 复用运营端同一条注销门禁（状态机 + 闭包检查在客户锁内执行），客户端不能绕过任何阻断项；
  * 系统无法自动核对的项必须由客户显式确认，确认文本随原因写入审计。
  */
-export class ClientAccountClosureService<Transaction> {
+export class ClientAccountClosureService<Transaction extends RentalBusinessTenantTransaction> {
   constructor(
     private readonly prisma: RentalClientClosureStorage<Transaction>,
     private readonly auth: RentalClientClosureAuthority<Transaction>,
@@ -31,7 +32,10 @@ export class ClientAccountClosureService<Transaction> {
     if (context.customerType !== "personal") throw new ForbiddenException("企业账号请联系商户办理注销");
     if (input.acknowledgedManualChecks !== true) throw new ConflictException("请先确认线下退款、押金退还与争议均已处理");
     // 先消费证明：证明必须绑定注销用途与本人手机号；消费后即使后续失败也需重新核验。
-    await this.prisma.$transaction((tx) => this.auth.consumeClosureProof(tx, context, input.loginIdentifier, input.verificationToken));
+    await this.prisma.$transaction(async (tx) => {
+      await lockRentalBusinessTenant(tx, context.tenantId);
+      return this.auth.consumeClosureProof(tx, context, input.loginIdentifier, input.verificationToken);
+    });
     const operator = `client:${context.customerId}`;
     const reason = `客户自助注销（小程序）${input.reason?.trim() ? `：${input.reason.trim().slice(0, 200)}` : ""}；客户已确认线下退款、押金退还与争议均已处理`;
     // 会员先于账号关闭：会员关闭后新业务立即停止；账号关闭失败时客户仍会被会话校验拒绝，运营可继续处理。

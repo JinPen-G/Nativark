@@ -17,10 +17,15 @@ import type {
 import type { SaveTBoxDeviceRequest, TBoxDeviceSummary } from "./integration-contracts";
 import type { RentalIntegrationStorage } from "./integration-runtime";
 import { requireRequestTenantId } from "@rental-os/platform-server/request-identity";
+import { lockRentalBusinessTenant, type RentalBusinessTenantTransaction } from "./mysql-business-fence";
+
+type RentalIntegrationFileTransaction = FileLedgerMetadataStore & RentalBusinessTenantTransaction;
 
 export type RentalIntegrationDataStore = ConstructorParameters<typeof FileStorageRepository>[0]
   & FileLedgerMetadataStore & JobLedgerDataStore & NotificationLedgerDataStore
-  & Pick<Prisma.TransactionClient, "documentPrintJob" | "tBoxDevice">;
+  & Pick<Prisma.TransactionClient, "documentPrintJob" | "tBoxDevice">
+  & { $transaction<T>(work: (tx: RentalIntegrationFileTransaction) => Promise<T>,
+    options: { isolationLevel: "ReadCommitted" }): Promise<T> };
 
 export class MysqlRentalIntegrationRepository implements RentalIntegrationStorage {
   private readonly files: FileStorageRepository;
@@ -48,7 +53,13 @@ export class MysqlRentalIntegrationRepository implements RentalIntegrationStorag
     tenantId = requireRequestTenantId()
   ): Promise<FileAssetSummary> {
     if (input.uploadScene?.trim() === RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE) throw new BadRequestException("不能直接登记专用换货影像");
-    return createSimulationFileAsset(this.prisma, input, tenantId);
+    // This is still only the original simulation metadata insert. Its parent
+    // gate and insert share one transaction; the original later adapter log
+    // remains outside so a log failure does not erase a committed file receipt.
+    return this.prisma.$transaction(async tx => {
+      await lockRentalBusinessTenant(tx, tenantId);
+      return createSimulationFileAsset(tx, input, tenantId);
+    }, { isolationLevel: "ReadCommitted" });
   }
 
   async listNotificationTemplates(tenantId = requireRequestTenantId()): Promise<NotificationTemplateSummary[]> {

@@ -1705,7 +1705,15 @@
     "./clients/website-ui/source/theme": "./clients/website-ui/theme.ts",
     "./clients/website-ui/source/types": "./clients/website-ui/types.ts",
     "./admin/browser-navigation": "./admin/browser-navigation.ts",
-    "./admin/browser-shell": "./admin/browser-shell.tsx"
+    "./admin/browser-shell": "./admin/browser-shell.tsx",
+    "./http-access-policy": {
+      "types": "./dist/http-access-policy.d.ts",
+      "default": "./dist/http-access-policy.js"
+    },
+    "./application-public-access": {
+      "types": "./dist/application-public-access.d.ts",
+      "default": "./dist/application-public-access.js"
+    }
   },
   "typesVersions": {
     "*": {
@@ -3328,6 +3336,12 @@
       ],
       "admin/browser-shell": [
         "admin/browser-shell.tsx"
+      ],
+      "http-access-policy": [
+        "dist/http-access-policy.d.ts"
+      ],
+      "application-public-access": [
+        "dist/application-public-access.d.ts"
       ]
     }
   },

@@ -35,8 +35,7 @@ export function createRentalWorkerAuthority<Tx extends PlatformCoreTransaction>(
     throw new CoreAccessError("core_unavailable", "Rental 作业缺少真实事务、订阅、配置或部署授权参加者");
   }
 
-  return Object.freeze({
-    async assertCurrent(request: RentalApplicationJobRequest, transaction?: Tx): Promise<void> {
+  const verify = async (request: RentalApplicationJobRequest, transaction: Tx | undefined, includeWorkspace: boolean): Promise<void> => {
       // 先固定原请求，避免等待锁期间可变负载将租户、作业目的或空间替换为另一范围。
       const { coreId, implementationVersion, jobId, purpose, tenantId, workspaceId } = request ?? {};
       const definition = RENTAL_APPLICATION_JOB_DESCRIPTORS.find(job => job.id === jobId);
@@ -89,18 +88,21 @@ export function createRentalWorkerAuthority<Tx extends PlatformCoreTransaction>(
           || !isCoreVersionSupported(binding.data.dataVersion, RENTAL_DATA_READABLE)) {
           throw new CoreAccessError("denied", "Rental 作业原空间绑定缺失、范围不符或数据版本不兼容");
         }
-        // 与原配置写入及品类采用保持同一空间锁；状态不能由订阅兼容或历史档案补成 active。
-        const workspaces = await tx.$queryRaw<Array<{ id: string; tenantId: string; status: string }>>`
-          SELECT id, tenantId, status FROM business_workspaces
-          WHERE tenantId = ${tenantId} AND id = ${workspaceId} FOR UPDATE`;
-        if (workspaces.length !== 1 || workspaces[0].id !== workspaceId || workspaces[0].tenantId !== tenantId
-          || typeof workspaces[0].status !== "string" || workspaces[0].status.toLowerCase() !== "active") {
-          throw new CoreAccessError("denied", "Rental 作业经营空间已不可用或不属于原租户");
-        }
-        const snapshot = await input.configuration.loadWorkspaceSnapshot(tenantId, workspaceId, tx);
-        if (!snapshot || snapshot.tenantId !== tenantId || snapshot.workspaceId !== workspaceId
-          || !snapshot.profile || !snapshot.businessSettings) {
-          throw new CoreAccessError("core_unavailable", "Rental 作业经营空间缺少已保存的原业务配置");
+        if (includeWorkspace) {
+          // 与原配置写入及品类采用保持同一空间锁；付款入账必须先持原订单锁。
+          // 运输前短事务没有订单锁，也仍须检查当前空间和已保存配置。
+          const workspaces = await tx.$queryRaw<Array<{ id: string; tenantId: string; status: string }>>`
+            SELECT id, tenantId, status FROM business_workspaces
+            WHERE tenantId = ${tenantId} AND id = ${workspaceId} FOR UPDATE`;
+          if (workspaces.length !== 1 || workspaces[0].id !== workspaceId || workspaces[0].tenantId !== tenantId
+            || typeof workspaces[0].status !== "string" || workspaces[0].status.toLowerCase() !== "active") {
+            throw new CoreAccessError("denied", "Rental 作业经营空间已不可用或不属于原租户");
+          }
+          const snapshot = await input.configuration.loadWorkspaceSnapshot(tenantId, workspaceId, tx);
+          if (!snapshot || snapshot.tenantId !== tenantId || snapshot.workspaceId !== workspaceId
+            || !snapshot.profile || !snapshot.businessSettings) {
+            throw new CoreAccessError("core_unavailable", "Rental 作业经营空间缺少已保存的原业务配置");
+          }
         }
         const deployment = input.deploymentForTransaction(tx);
         if (typeof deployment?.requireAvailable !== "function") {
@@ -112,6 +114,12 @@ export function createRentalWorkerAuthority<Tx extends PlatformCoreTransaction>(
       };
       if (transaction !== undefined) return check(transaction);
       return input.database.$transaction(check, { isolationLevel: "ReadCommitted" });
+  };
+  return Object.freeze({
+    assertCurrent: (request: RentalApplicationJobRequest, transaction?: Tx) => verify(request, transaction, true),
+    assertParentCurrent: (request: RentalApplicationJobRequest, transaction: Tx) => {
+      if (!transaction) throw new CoreAccessError("denied", "Rental 作业父门禁需要原业务事务");
+      return verify(request, transaction, false);
     }
   });
 }

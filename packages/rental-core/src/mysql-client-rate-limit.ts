@@ -4,6 +4,7 @@ import { HttpException, HttpStatus, OnApplicationBootstrap, OnApplicationShutdow
 import { Prisma } from "@prisma/client";
 import { createHash, randomUUID } from "node:crypto";
 import type { RentalClientRateLimitStorage } from "./client-session-ports";
+import { lockRentalBusinessTenant } from "./mysql-business-fence";
 
 export interface ClientRateLimitRequest {
   method: string;
@@ -107,8 +108,9 @@ export class ClientApiRateLimitService implements OnApplicationBootstrap, OnAppl
     await this.cleanup;
   }
 
-  private async increment(scopeKey: string, bucketStart: Date): Promise<number> {
+  private async increment(scopeKey: string, bucketStart: Date, tenantId?: string): Promise<number> {
     return this.prisma.$transaction(async (tx) => {
+      if (tenantId) await lockRentalBusinessTenant(tx, tenantId);
       await tx.$executeRaw(Prisma.sql`
         INSERT INTO client_api_rate_buckets (id, scopeKey, bucketStart, count, createdAt, updatedAt)
         VALUES (${randomUUID()}, ${scopeKey}, ${bucketStart}, 1, NOW(3), NOW(3))
@@ -123,11 +125,11 @@ export class ClientApiRateLimitService implements OnApplicationBootstrap, OnAppl
     });
   }
 
-  private async consume(rule: ClientRateLimitRule, identity: string, now: number): Promise<number> {
+  private async consume(rule: ClientRateLimitRule, identity: string, now: number, tenantId?: string): Promise<number> {
     const windowMs = rule.windowSeconds * 1000;
     const bucketStart = new Date(Math.floor(now / windowMs) * windowMs);
     const scopeKey = hashScope(`client-api:${rule.code}:${identity}`);
-    return this.increment(scopeKey, bucketStart);
+    return this.increment(scopeKey, bucketStart, tenantId);
   }
 
   /**
@@ -139,15 +141,15 @@ export class ClientApiRateLimitService implements OnApplicationBootstrap, OnAppl
   async assertChallengeAllowed(input: ClientChallengeQuotaInput): Promise<void> {
     const now = Date.now();
     const identity = `identifier:${input.tenantId}:${input.identifierHash}`;
-    if (await this.consume(IDENTIFIER_HOURLY_RULE, identity, now) > IDENTIFIER_HOURLY_RULE.limit) {
+    if (await this.consume(IDENTIFIER_HOURLY_RULE, identity, now, input.tenantId) > IDENTIFIER_HOURLY_RULE.limit) {
       throw new HttpException("验证码请求过于频繁，请稍后重试", HttpStatus.TOO_MANY_REQUESTS);
     }
-    if (await this.consume(IDENTIFIER_DAILY_RULE, identity, now) > IDENTIFIER_DAILY_RULE.limit) {
+    if (await this.consume(IDENTIFIER_DAILY_RULE, identity, now, input.tenantId) > IDENTIFIER_DAILY_RULE.limit) {
       throw new HttpException("该手机号或邮箱今日验证码次数已达上限，请明天再试", HttpStatus.TOO_MANY_REQUESTS);
     }
     if (input.countsTowardSmsBudget) {
       const budget: ClientRateLimitRule = { code: "tenant_sms_challenge_day", windowSeconds: 86400, limit: tenantSmsDailyBudget() };
-      if (await this.consume(budget, `tenant:${input.tenantId}`, now) > budget.limit) {
+      if (await this.consume(budget, `tenant:${input.tenantId}`, now, input.tenantId) > budget.limit) {
         throw new HttpException("短信验证码今日发送额度已用完，请稍后重试或联系商户", HttpStatus.TOO_MANY_REQUESTS);
       }
     }

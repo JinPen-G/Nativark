@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 import type { SystemUserRow } from "@rental-os/platform-contracts";
 import { getRequestDataScope, getRequestIdentity, getRequestLocationIds } from "@rental-os/platform-server/request-identity";
 import type { RentalCategoryAdoptionAuthority, RentalCategoryAdoptionAccessLease } from "./category-adoption-ports";
+import { assertRentalBusinessTenantAccessAfterLock } from "./mysql-business-fence";
 
 export const CATEGORY_ADOPTION_MANAGE = "rental-os:category:adopt";
 
@@ -27,6 +28,9 @@ export async function lockCategoryAdoptionAccess(
   }
   if (!auth) throw new ConflictException("未装配事务内认证复核，品类操作未执行");
   const lease = await auth.lockRequestWorkspaceAccess(tx);
+  // Original Auth has acquired Tenant X before user/session/roles. Check Core
+  // here, before preparation facts or an original receipt, without lock upgrade.
+  await assertRentalBusinessTenantAccessAfterLock(tx, actor.tenantId);
   const check = (current: SystemUserRow) => {
     if (current.id !== actor.id || current.tenantId !== actor.tenantId || current.dataScope !== "all" ||
         (current.locationScope !== undefined && current.locationScope.mode !== "all")) {

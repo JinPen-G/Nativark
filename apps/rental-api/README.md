@@ -1,33 +1,44 @@
-# Rental API 组合
+# Rental API 宿主
 
-本目录持有公共平台与 Rental 标准包的同实例组合。当前提供构造、数据准备和生命周期入口，完整 HTTP 请求管线仍在接入，尚无可独立启动的 `main` 或 `AppModule`。
+本目录组合公共平台与 Rental 标准包，持有唯一数据库、认证、Guard 和业务实例。独立 Nest 根模块和启动入口已提供；启动前必须通过真实挂载处理器的接点核对。未接齐的处理器会在 Client 构造、连接和监听前拒绝，不能通过漏挂路由或关闭核对来启用。
 
-## 入口
+## 入口与生命周期
 
 | 入口 | 职责 |
 | --- | --- |
-| [assembly.ts](src/assembly.ts) | 解析实际部署锁、核定标准 Rental 包，使用唯一数据库构造原认证、业务、HTTP、作业与标准 Core 接点。当前只接受显式 `aiMode: "disabled"`；所选数据能力非空会拒绝。 |
-| [database.ts](src/database.ts) | 公共 40 模型与 Rental 121 模型组成的宿主 Client；公共数据库令牌指向同一连接池。生成目录只归本宿主，导入不连接数据库。 |
-| [lifecycle.ts](src/lifecycle.ts) | 原 Core/业务初始化与预热只运行一次，再启动配货、到期任务、文件清理和限流清理。退出先停新并等待在途工作，HTTP 关闭后断开唯一数据库；排空失败不提前断库。 |
-| [deployment-package.ts](src/deployment-package.ts) | 从实际依赖位置读取固定标准包并校验文件摘要；源码位置、同名版本和准备结果均不能替代实际部署证据。 |
-| [Rental 应用](../../packages/rental-core/src/application.ts) | 组合原领域、客户、企业、支付、文件、渠道、品类和作业。构造不查询数据库、不调用供应商、不启动定时器。 |
+| [main.ts](src/main.ts)、[bootstrap.ts](src/bootstrap.ts) | 显式执行才启动；只消费进程配置和指定的固定部署锁，不加载 `.env`。校验 MySQL、认证密钥、AI 选择、端口、代理及 CORS 配置。 |
+| [app.module.ts](src/app.module.ts) | 挂载公共平台、标准 Core、原 Rental、支付、客户、空间和认证扩展模块；从实际 Controller 元数据核对完整请求政策，再构造同实例服务。 |
+| [assembly.ts](src/assembly.ts) | 核定实际标准包与部署锁，组合原应用、公共分流、业务/公开准入和作业权威；不连接、迁移或派发外部请求。 |
+| [database.ts](src/database.ts) | 公共 40 模型与 Rental 121 模型组成宿主 Client，公共数据库令牌使用同一连接池；生成物仅归本宿主。 |
+| [http-application-views.ts](src/http-application-views.ts) | 向 HTTP 注入原服务方法，隐藏 Nest 生命周期钩子，避免同一业务实例被多个模块重复启动。 |
+| [lifecycle.ts](src/lifecycle.ts) | 唯一初始化、预热、配货/到期/文件/限流作业与数据库退出负责人；先停止新任务并排空，再断开连接，排空失败不提前断库。 |
+| [deployment-package.ts](src/deployment-package.ts) | 从实际依赖读取固定标准包并核对摘要；源码目录、同名版本或准备结果均不能替代实际部署和物理数据证据。 |
 
-`assembly.http` 供给原 `RentalHttpModule` 的九组服务，`assembly.extensions` 供给独立 `RentalHttpExtensionsModule` 的空间切换、开发重置密码及员工订阅上下文。原组合宿主已登记这三个路径的薄适配 Controller，不能再次导入扩展模块。公共六项认证仍使用公共模块，同一认证、订阅和 Guard 实例不得重复构造。
+启动配置须显式提供 `DATABASE_URL`、`AUTH_TOKEN_SECRET`、`RENTAL_AI_MODE=disabled` 和 `RENTAL_DEPLOYMENT_LOCK`。部署锁使用绝对路径，文件上限 8 MiB。可配置 `API_PORT`、`TRUST_PROXY_HOPS`、`CORS_ALLOWED_ORIGINS`；公共数据、Rental 和基础设施数据模式均只接受 MySQL。启动入口本身不授予连接业务库或发布权限。
 
-客户管理通过 [createRentalCustomerManagementApplication](../../packages/rental-core/src/application-customer-management.ts) 选择已构造客户服务，空间管理通过 [createRentalWorkspaceManagementApplication](../../packages/rental-core/src/application-workspace-management.ts) 使用同一数据库、Core 和能力实例。两者分别供给 `RentalCustomersHttpModule`、`RentalWorkspacesHttpModule`；旧 `PlatformController` 已有对应35及11条路径，不能再次挂载。空间档案、品类必选能力及账号复合授权保留原提交边界，SaaS 代建空间与普通租户的 Core 准入仍需按各自真实主体接入。
+原组合宿主的 `PlatformController` 已有客户/空间兼容入口；该宿主不得再次挂载独立客户/空间模块。独立宿主则由本根模块统一挂载。原认证扩展同样不能在同一应用重复登记。
 
-## 请求与事务
+## 请求、事务与响应
 
-[application-access](../../packages/rental-core/src/application-access.ts) 的 `run` 须覆盖原 Guard 和完整请求处理；Guard 成功后才可 `withRequest`，并由原业务的 [Tenant 父锁](../../packages/rental-core/src/mysql-business-fence.ts) 在原事务中复核当前 Core 授权、适用成员分配、绑定和实际部署。该接点不替代原角色、客户、对象、地点或文件权限。
+[请求作用域](src/http-request-scope.ts) 位于原身份/员工路由 middleware 之后、唯一 Guard 之前。Guard 形成原可信身份后绑定一次实际处理器；拦截器位于原响应信封内部。请求不能重复订阅、切换路径或借另一应用的作用域；断线只结束请求范围，不证明在途工作已经回滚。
 
-GET/HEAD 须由宿主代码明确登记：`{ bufferedRead: true }` 用于纯读取，`{ auditedRead: true }` 仅用于原审计是唯一写入的缓冲读取。企业读取审计和客户敏感读取审计在独立短事务中按 Tenant 父锁复核后写入；审计提交后仍须在返回数据前复核，因此拒绝返回时审计可能已经保留。两类读取均不能提交业务动作、直接发送 Response 或打开响应流。普通写请求不在提交后追加拒绝，避免将已成功的原操作收据伪装成失败；客户合并的原提交后审计不借读取审计增加新的业务准入。不得把请求体中的同名字段作为路由登记。
+[处理器政策](../../packages/rental-core/src/http-access-policy.ts) 固定绑定原 Controller/handler、方法与路径，客户端不能声明自己的准入种类。
 
-客户档案统计沿原订单和财务权限分区：没有订单权限不查询统计；可读订单但无财务权限时，仅查询计数和时间，既不请求金额聚合，也不投影存储额外返回的金额。未知金额仍不补零。
+- 身份维护仅限原运营/员工认证和本人订阅入口，保留原 audience、密码、限流、会话与空间切换规则，不要求活跃业务 Core，也不授予业务权。
+- 公开客户入口沿原 Guard 公开清单及[公开准入](../../packages/rental-core/src/application-public-access.ts)，从原可信租户、渠道或刷新会话核定目标，不伪造成员身份。
+- 普通业务沿[应用准入](../../packages/rental-core/src/application-access.ts)，原角色、tenant/workspace、地点、客户/企业对象权和字段投影继续生效。原业务事务的 [Tenant 父锁](../../packages/rental-core/src/mysql-business-fence.ts) 内复核当前 Core 授权、适用成员分配、绑定和实际部署。
+- SaaS 管理沿原 `PlatformPrincipalAuthority`，先锁当前管理主体与有序目标租户，再进入业务父锁。全局品类定义治理不伪造租户授权，目标空间治理不伪造成员分配。
+- 纯读返回前复核；审计读取把原 required audit 和权限复核放在同一短事务；维护型读取仅允许已登记的到期状态或原内容快照归档。审计已提交而最终拒绝返回时，原审计仍可能保留。
+- 写请求保留原事务、幂等键和提交收据，不在提交后增加 Core 拒绝。外部调用只在原派发准入确认后发生，已派发的成功/未知结果沿原定位和 CAS 收口；超时、租约或 TTL 不授权自动重发。
 
-目前企业及客户部分独立事务、公开客户认证、媒体直出、支付与回调仍需逐条衔接。`assembly` 暴露的原 Guard 只是原权限实例，不能单独挂上全部业务接口来代替上述请求管线。Core 停用后的当前善后授权尚未接齐，不能以统一拒绝作为完整兼容验收。
+原图片、附件、CSV 头和跳转使用[有限响应缓冲](../../packages/rental-core/src/http-native-response.ts)，持有原处理器生成的字节、字符串和响应头，复核后一次发送。读取失败、撤权或断线丢弃缓冲；不允许流或提前发送。文件仍沿原对象 ACL、内容指纹、配置和 required audit，不以缓冲替代文件授权。
 
-## 可选 AI 与验证边界
+[作业权威](../../packages/rental-core/src/application-worker-authority.ts) 使用真实系统任务主体。支付先 Tenant/Core，再原 Order，最后工作空间和操作复核；不把 Workspace 锁提前到 Order 之前。通知保留原耐久占用、派发、结果定位及 unknown 语义。
 
-未启用 AI 时选用 161 模型，不提供 AI 出箱、正文维护或工具参加者；客户检查出箱合同使用显式 `null` 表达此选择，`undefined` 和残缺对象会拒绝。启用 AI 的应用工厂必须取得实际失败出箱、同事务事件和通知草稿读取器；此目录尚未提供启用组合，247 模型的类型证据不代表选装数据已经落库或可运行。
+## 组合约束与验证边界
 
-已完成的验证为离线源码组合、原权限/事务行为、所选 schema 类型及虚拟时钟生命周期检查。尚未执行实际数据库迁移、供应商请求、真实 HTTP 服务或生产发布。准备数据只能形成待部署材料，不能写入迁移成功记录。实例作为生命周期 provider 的登记必须只由本目录 `RentalApplicationLifecycle` 统一负责，避免重复预热、计时器和断库。
+本宿主当前显式选择无 AI 的 161 模型；客户检查出箱用 `null` 表达未选择，`undefined` 或残缺参加者会拒绝。启用 AI 必须另外组合实际选装数据、失败出箱、同事务事件和通知草稿等参加者，247 模型的类型检查不能替代启用组合。
+
+支付回调的已验签主体、图片写入的提交/缓存边界和可选 AI 检查绑定仍须完成专用接点，实际缺项由处理器政策列出。Core 停用后的历史读取与善后授权还需按正式业务分类接齐，不能以一律拒绝代替兼容验收。
+
+当前验证覆盖离线原服务/Controller/请求管线、所选 schema 严格类型、模块依赖注入和单次生命周期。真实数据库锁竞争、迁移、供应商调用、HTTP 监听及生产发布须另行验证；准备数据不能写作迁移成功，提交推送也不能写作已部署。
