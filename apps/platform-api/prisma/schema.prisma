@@ -904,3 +904,20 @@ model TenantSupportEmail {
   @@index([tenantId, receivedAt], map: "tenant_support_email_received_idx")
   @@map("tenant_support_emails")
 }
+
+// 平台官网演示申请不依赖业务Core，也不属于租户客户主档。
+model DemoRequest {
+  id           String   @id @db.VarChar(36)
+  requestKey   String   @unique @db.VarChar(36)
+  payloadHash  String   @db.VarChar(64)
+  name         String   @db.VarChar(80)
+  contactType  String   @db.VarChar(16)
+  contactValue String   @db.VarChar(160)
+  company      String   @default("") @db.VarChar(120)
+  message      String   @db.Text
+  language     String   @db.VarChar(8)
+  createdAt    DateTime @default(now()) @db.DateTime(3)
+
+  @@index([createdAt, id])
+  @@map("platform_demo_requests")
+}

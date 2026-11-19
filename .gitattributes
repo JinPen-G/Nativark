@@ -5,3 +5,4 @@ docs/企业客户后台/历史归档/** -text whitespace=cr-at-eol
 package-lock.json -text whitespace=cr-at-eol
 # Migration bytes are release evidence and must not follow checkout-specific EOL conversion.
 apps/platform-api/prisma/migrations/** -text whitespace=cr-at-eol
+packages/rental-core/prisma/migrations/** -text whitespace=cr-at-eol

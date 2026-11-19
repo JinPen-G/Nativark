@@ -7,7 +7,7 @@ import { mysqlStructureFromMigrations, readMysqlPhysicalData, extendMysqlPublicF
   type MysqlForeignKeyExtension } from "@rental-os/platform-core-host";
 import type { CoreMysqlDataPlan } from "@rental-os/core-host/mysql-deployment";
 
-export const PUBLIC_PLATFORM_DATA_VERSION = "0.1.7";
+export const PUBLIC_PLATFORM_DATA_VERSION = "0.1.8";
 const migrations = [
   { id: "platform.foundation", name: "20261115000000_public_foundation", sha256: "b220ba5046f16900f7d475351ec466ae56c8b9c02cc5de703c8ded83784a710a" },
   { id: "platform.core-access", name: "20261115010000_core_access", sha256: "ef03bb4bae3ff0337213cb1f87aa2ebeb8338faec016be05de645dfea54c2411" },
@@ -20,7 +20,8 @@ const migrations = [
   { id: "platform.notifications", name: "20261118020000_public_notifications", sha256: "a5b991a6d3cc165b364670ca325c9a15a84f40fc8ba05be1db5ffb4e75c88bfd" },
   { id: "platform.async-jobs", name: "20261118030000_public_async_jobs", sha256: "fd3ccad20ee14afd431ee347b1ae0da0fdd2e536293cad219aaea9c8fdfe809c" },
   { id: "platform.operator-invitations", name: "20261119000000_public_operator_invitations", sha256: "a6ab2db65a955f38a996b7ea30e2eda3f4da2f16810123fea9922fd30f017441" },
-  { id: "platform.support-email", name: "20261119010000_public_support_email", sha256: "390396ac626f9200c6f84c1822a74b58dffe8ab51a6cbe6ffa871c067a6b4db4" }
+  { id: "platform.support-email", name: "20261119010000_public_support_email", sha256: "390396ac626f9200c6f84c1822a74b58dffe8ab51a6cbe6ffa871c067a6b4db4" },
+  { id: "platform.demo-requests", name: "20261119020000_public_demo_requests", sha256: "89093496ffbffb3be3af1050532911e633cfb41caf7115e0cc3e8d0f46e3a61b" }
 ] as const;
 
 export function createPublicPlatformDataPlan(coreForeignKeys: readonly MysqlForeignKeyExtension[] = []): CoreMysqlDataPlan {

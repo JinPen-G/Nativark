@@ -32,7 +32,7 @@ npm run lint:platform-api
 npm run api:document:platform
 ```
 
-Client 输出在本宿主 `generated/client`，运行产物从同一宿主目录读取。公共构建消费 `platform-contracts`、`platform-server` 和标准 `core-contracts` / `core-host` / `platform-core-host`。当前 schema 的 39 个模型均属平台，包含 6 个 Core 授权/绑定及原收据表、2 个统一期限表、5 个订阅办理表、2 个基础集成表、2 个官方日历来源表、2 个文件/上传表、2 个通知表、1个异步任务表和3个邀请/客服邮件表。公共数据版本为 `0.1.7`，十二份迁移摘要由数据计划固定；文件、通知与任务的原字段、唯一键、清理收据及外键保留。命令是否可执行取决于当前环境许可。
+Client 输出在本宿主 `generated/client`，运行产物从同一宿主目录读取。公共构建消费 `platform-contracts`、`platform-server` 和标准 `core-contracts` / `core-host` / `platform-core-host`。当前 schema 的40个模型均属平台，包含6个 Core 授权/绑定及原收据表、2个统一期限表、5个订阅办理表、2个基础集成表、2个官方日历来源表、2个文件/上传表、2个通知表、1个异步任务表、3个邀请/客服邮件表和1个官网演示申请表。公共数据版本为 `0.1.8`，十三份迁移摘要由数据计划固定；文件、通知与任务的原字段、唯一键、清理收据及外键保留。官网演示申请沿原SQL独立归属公共平台，HTTP装配由相应模块办理。命令是否可执行取决于当前环境许可。
 
 新公共库按 `npm run db:platform:migrate:deploy` 应用本链。**不能把本基线套在已有 Rental 组合库**；已有库切换须先按原迁移来源和数据所有权演练兼容迁移。
 
@@ -49,6 +49,8 @@ SaaS管理员通过 `POST /api/platform/tenants` 创建公共租户与首个管�
 标准Core管理位于 `/api/platform/core-host`，当前组合已登记管理、本人Core目录和范围HTTP，默认本人目录为空。真正选中Core时提供固定服务、业务HTTP、真实订阅和数据观察；SaaS授权、成员分配与绑定分别成立。[标准宿主用法](../../packages/platform-core-host/README.md)
 
 组合客户端源码使用 `composeCorePrismaSchema(publicSchema, contributions)`，底座生成器与标量定义保持单源。Core迁移对公共表的明确外键通过 `mysqlForeignKeyExtension` 解析，并由 `createPublicPlatformDataPlan(extensions)` 纳入物理观察。默认空数组沿原零Core数据计划；所选关系、包摘要及原迁移账一起核定，不能只增加Prisma关系就判数据库就绪。[数据组合接入](../../packages/core-contracts/README.md#组合-prisma-源码)
+
+Rental 提供自己的 schema、公共关系与实际数据计划，宿主按同一接点选择它；默认公共宿主继续只用公共数据。新组合 Client 和存量混合库的迁移分别准备。[Rental数据三步接入](../../packages/rental-core/prisma/README.md)
 
 运行使用 `npm run start -w @rental-os/platform-api`；调用此命令会监听 API 端口并按请求访问配置的数据库。OpenAPI 从 `/api/openapi.json` 读取公共与Core管理的组合；前述公共离线导出只含公共接口。独立 HTTP、真实持久化及完整公共后台验收尚未完成。公开开发入口为[公共服务](../../packages/platform-server/README.md)、[公共后台](../platform-admin/README.md)和[Core接入手册](../../packages/core-contracts/README.md#五步快速接入)。
 

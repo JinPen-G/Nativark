@@ -262,6 +262,8 @@ Core 提供自己的 `model` / `enum`。`publicRelations` 按公共模型名列�
 
 组合函数只返回源码。宿主在自己的客户端输出目录执行原 Prisma 校验与生成，部署迁移仍从固定包和版本锁准备；既有组合库继续核原迁移账与历史恢复依据。[源码](src/prisma.ts) · [迁移准备](src/deployment.ts)
 
+Rental 已提供自己的完整业务 schema、关系贡献和 MySQL 数据计划。宿主用 `createRentalPrismaContribution` 组合源码，将 `createRentalMysqlDataPlan().publicForeignKeys` 交给公共计划，再用两份计划观察原迁移账；Core 作者无需将业务模型复制到平台 schema。[Rental三步数据接入](../rental-core/prisma/README.md)
+
 ## 分别更新底座或一个 Core
 
 先构建本包，再用实际发行元数据和迁移账快照执行只读预检。

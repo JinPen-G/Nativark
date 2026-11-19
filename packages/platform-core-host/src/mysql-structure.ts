@@ -14,14 +14,14 @@ export interface MysqlForeignKeyExtension {
   readonly foreignKey: MysqlTableShape["foreignKeys"][number];
 }
 const names = (list: string) => [...list.matchAll(/`([^`]+)`/g)].map(match => match[1]);
-const sqlType = (value: string) => value.toLowerCase().replace(/^boolean$/, "tinyint(1)").replace(/^integer$/, "int").replace(/,\s+/g, ",");
+const sqlType = (value: string) => value.toLowerCase().replace(/^boolean$/, "tinyint(1)").replace(/^integer\b/, "int").replace(/,\s+/g, ",");
 const defaultValue = (value: string | undefined): string | null => value === undefined || /^null$/i.test(value) ? null
   : /^true$/i.test(value) ? "1" : /^false$/i.test(value) ? "0" : value.replace(/^'(.*)'$/, "$1").toLowerCase();
 
 function column(line: string, table: MysqlTableShape): MysqlColumnShape {
   const match = /^`([^`]+)`\s+((?:enum\([^)]*\)|decimal\([^)]*\)|[a-z]+(?:\(\d+\))?)(?:\s+unsigned)?)\s+(?:COLLATE\s+(\w+)\s+)?(NOT NULL|NULL)(?:\s+DEFAULT\s+(.+))?$/i.exec(line);
   if (!match) throw new Error(`未支持的公共列定义：${table.name} ${line}`);
-  const type = sqlType(match[2]), text = /^(?:varchar|char|text|enum)/.test(type);
+  const type = sqlType(match[2]), text = /^(?:varchar|char|(?:tiny|medium|long)?text|enum)/.test(type);
   return { name: match[1], type, nullable: match[4] === "NULL", collation: text ? match[3] ?? table.collation : null,
     defaultValue: defaultValue(match[5]) };
 }
@@ -108,7 +108,9 @@ export function mysqlStructureFromMigrations(migrations: readonly string[]): Mys
     const alter = /^ALTER TABLE `([^`]+)`\s+([\s\S]+)$/i.exec(statement);
     if (!alter || !tables.has(alter[1])) throw new Error(`未支持的公共DDL或目标表：${statement.slice(0, 100)}`);
     const table = tables.get(alter[1])!;
-    if (alter[2].startsWith("ADD CONSTRAINT")) table.foreignKeys.push(foreignKey(alter[2].replace(/^ADD /, "")));
+    const checkAddition = /^ADD CONSTRAINT `([^`]+)` CHECK \(([\s\S]+)\)$/i.exec(alter[2]);
+    if (checkAddition) table.checks.push({ name: checkAddition[1], clause: checkAddition[2] });
+    else if (alter[2].startsWith("ADD CONSTRAINT")) table.foreignKeys.push(foreignKey(alter[2].replace(/^ADD /, "")));
     else for (const addition of alter[2].split(/,\s*\n/).map(line => line.trim())) {
       if (!addition.startsWith("ADD COLUMN ")) throw new Error(`未支持的公共ALTER：${addition}`);
       table.columns.push(column(addition.slice("ADD COLUMN ".length), table));
@@ -117,10 +119,10 @@ export function mysqlStructureFromMigrations(migrations: readonly string[]): Mys
   return [...tables.values()];
 }
 
-/** 只解析本版平台CHECK的布尔/NULL/范围表达式，保留括号优先级；未知运算拒绝比较。 */
+/** 解析本版平台/Core CHECK的布尔、NULL、范围和修订增量，保留括号优先级；未知运算拒绝比较。 */
 export function mysqlCheckShape(clause: string): string | undefined {
   const text = clause.toLowerCase().replace(/`([a-z_]+)`/g, "$1").replace(/_[a-z0-9]+(?=')/g, "");
-  const tokens = text.match(/'[^']*'|[a-z_]+|[0-9]+|>=|<=|<>|[(),=<>]/g) ?? [];
+  const tokens = text.match(/'[^']*'|[a-z_]+|[0-9]+|>=|<=|<>|[(),=<>+]/g) ?? [];
   if (tokens.join("") !== text.replace(/\s+/g, "")) return;
   type Node = string | Node[];
   let at = 0, depth = 0;
@@ -131,26 +133,31 @@ export function mysqlCheckShape(clause: string): string | undefined {
       take("("); const result = or(); take(")"); depth--; return result;
     }
     const value = tokens[at++];
-    if (!value || !/^(?:state|revision|kind|container_type|container_id|[0-9]+|'[a-z_]+')$/.test(value))
+    if (!value || !/^(?:state|revision|baserevision|resultrevision|configurationrevision|kind|container_type|container_id|[0-9]+|'[a-z_]+')$/.test(value))
       throw new Error("未知CHECK字段");
     return value;
   };
+  const addition = (): Node => {
+    let result = operand();
+    while (tokens[at] === "+") { take("+"); result = ["+", result, operand()]; }
+    return result;
+  };
   const compare = (): Node => {
-    const left = operand(), operator = tokens[at];
+    const left = addition(), operator = tokens[at];
     if (operator === "in") {
       take("in"); take("("); const values = [operand()];
       while (tokens[at] === ",") { take(","); values.push(operand()); }
       take(")"); return ["in", left, values];
     }
     if (operator === "between") {
-      take("between"); const min = operand(); take("and"); const max = operand();
+      take("between"); const min = addition(); take("and"); const max = addition();
       return ["and", [">=", left, min], ["<=", left, max]];
     }
     if (operator === "is") {
       take("is"); const not = tokens[at] === "not";
       if (not) take("not"); take("null"); return [not ? "is_not_null" : "is_null", left];
     }
-    if ([">=", "<=", "=", "<>", "<", ">"].includes(operator)) { at++; return [operator, left, operand()]; }
+    if ([">=", "<=", "=", "<>", "<", ">"].includes(operator)) { at++; return [operator, left, addition()]; }
     return left;
   };
   const and = (): Node => {

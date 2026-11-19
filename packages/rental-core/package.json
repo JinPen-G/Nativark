@@ -1306,7 +1306,15 @@
     "./admin/membership/logic": "./admin/membership/logic.ts",
     "./admin/membership/messages": "./admin/membership/messages.ts",
     "./admin/membership/insights": "./admin/membership/MembershipInsights.tsx",
-    "./admin/membership/list-capabilities": "./admin/membership/list-capabilities.ts"
+    "./admin/membership/list-capabilities": "./admin/membership/list-capabilities.ts",
+    "./data": {
+      "types": "./dist/data.d.ts",
+      "default": "./dist/data.js"
+    },
+    "./mysql-data": {
+      "types": "./dist/mysql-data.d.ts",
+      "default": "./dist/mysql-data.js"
+    }
   },
   "typesVersions": {
     "*": {
@@ -2299,6 +2307,12 @@
       ],
       "admin/membership/list-capabilities": [
         "./admin/membership/list-capabilities.ts"
+      ],
+      "data": [
+        "./dist/data.d.ts"
+      ],
+      "mysql-data": [
+        "./dist/mysql-data.d.ts"
       ]
     }
   },
@@ -2326,7 +2340,9 @@
     "antd": "6.6.0",
     "lucide-react": "^1.49.0",
     "react": "19.2.8",
-    "react-router-dom": "7.18.2"
+    "react-router-dom": "7.18.2",
+    "@rental-os/core-host": "0.1.0",
+    "@rental-os/platform-core-host": "0.1.0"
   },
   "peerDependenciesMeta": {
     "@nestjs/common": {
@@ -2369,6 +2385,12 @@
       "optional": true
     },
     "react-router-dom": {
+      "optional": true
+    },
+    "@rental-os/core-host": {
+      "optional": true
+    },
+    "@rental-os/platform-core-host": {
       "optional": true
     }
   }
