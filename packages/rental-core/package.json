@@ -371,6 +371,10 @@
       "types": "./dist/exchange-inspection-preparation.d.ts",
       "default": "./dist/exchange-inspection-preparation.js"
     },
+    "./mysql-primary-application": {
+      "types": "./dist/mysql-primary-application.d.ts",
+      "default": "./dist/mysql-primary-application.js"
+    },
     "./mysql-core-runtime": {
       "types": "./dist/mysql-core-runtime.d.ts",
       "default": "./dist/mysql-core-runtime.js"
@@ -1507,6 +1511,9 @@
       ],
       "exchange-inspection-preparation": [
         "dist/exchange-inspection-preparation.d.ts"
+      ],
+      "mysql-primary-application": [
+        "dist/mysql-primary-application.d.ts"
       ],
       "mysql-core-runtime": [
         "dist/mysql-core-runtime.d.ts"

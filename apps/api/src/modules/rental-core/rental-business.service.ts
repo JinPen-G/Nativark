@@ -1,5 +1,5 @@
-/** 原Nest业务服务入口；14项原依赖供给Rental同一实现和两个初始化钩子。
- * 继续消费原Guard/ALS、Prisma、通知及密文服务，不创建第二套业务状态或执行者。 */
+/** 原报价/营销服务令牌与直接构造兼容入口，保留原参数与通知正文维护参加者。
+ * 正式宿主从主应用工厂取得同一实例，恢复和预热继续沿 Nest 的两个阶段。 */
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
 import { rentalNotificationDraftRetention } from "./rental-notification-log-cache";

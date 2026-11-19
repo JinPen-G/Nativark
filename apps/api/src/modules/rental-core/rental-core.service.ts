@@ -1,5 +1,5 @@
-/** 原Nest核心provider。按原顺序提供同一仓储、资金、容量、会员/企业及文件服务。
- * 核心算法和两阶段启动钩子继承Rental包的单源实现，不新增第二实例或提前发布事务缓存。 */
+/** 原核心服务令牌与直接构造兼容入口，保留原参数及 Rental 单源算法。
+ * 正式宿主从 rental-primary-application.providers 取得实例，恢复和预热仍由 Nest 执行。 */
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
 import { RentalCoreService as CoreRentalCoreService } from "@rental-os/rental-core/mysql-core-runtime";

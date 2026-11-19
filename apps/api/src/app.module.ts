@@ -106,7 +106,6 @@ import { RentalExchangeInspectionPreparationService } from "./modules/rental-cor
 import { RentalExchangeInspectionConsentService } from "./modules/rental-core/rental-exchange-inspection-consent.service";
 import { RentalApprovedExchangeService } from "./modules/rental-core/rental-approved-exchange.service";
 import { RentalExchangeInspectionMediaService } from "./modules/rental-core/rental-exchange-inspection-media.service";
-import { RentalCoreService } from "./modules/rental-core/rental-core.service";
 import { RentalCategoryResolver } from "./modules/rental-core/rental-category-resolver.service";
 import { CategoryGovernanceService } from "./modules/rental-core/category-governance.service";
 import { CategoryAdoptionPreparationService } from "./modules/rental-core/category-adoption-preparation.service";
@@ -117,7 +116,6 @@ import { OfficialCalendarSourceController } from "./modules/rental-core/official
 import { OfficialCalendarSourceService } from "./modules/rental-core/official-calendar-source.service";
 import { OFFICIAL_CALENDAR_DATA_STORE, OFFICIAL_CALENDAR_APPLICATION } from "@rental-os/platform-server/official-calendar-store";
 import { OFFICIAL_CALENDAR_SOURCE_READER, createOfficialCalendarSourceReader } from "@rental-os/platform-server/official-calendar-reader";
-import { RentalBusinessService } from "./modules/rental-core/rental-business.service";
 import { RentalStateRepository } from "./modules/rental-core/rental-state.repository";
 import { RentalSnapshotBackfillService } from "./modules/rental-core/rental-snapshot-backfill.service";
 import { RentalCoreConfigRepository } from "./modules/rental-core/rental-core-config.repository";
@@ -133,6 +131,7 @@ import { StaffOfflinePaymentService } from "./modules/rental-core/staff-offline-
 import { RentalDocumentService } from "./modules/rental-core/rental-document.service";
 import { RentalOrderConfirmationService } from "./modules/rental-core/rental-order-confirmation.service";
 import { RENTAL_HTTP_PROVIDERS } from "./modules/rental-core/rental-http.providers";
+import { RENTAL_PRIMARY_APPLICATION_PROVIDERS } from "./modules/rental-core/rental-primary-application.providers";
 import { RENTAL_ENTERPRISE_HTTP_PROVIDERS } from "./modules/enterprise/enterprise-http.providers";
 import { RENTAL_STAFF_HTTP_PROVIDERS } from "./modules/files/staff-http.providers";
 import { RENTAL_FILE_HTTP_PROVIDERS } from "./modules/files/file-http.providers";
@@ -439,7 +438,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     EnterpriseOrderReaderService,
     CustomerAvatarService,
     OperationLogService,
-    RentalCoreService,
+    ...RENTAL_PRIMARY_APPLICATION_PROVIDERS,
     RentalExchangePreviewService,
     RentalExchangeInspectionPreparationService,
     RentalExchangeInspectionConsentService,
@@ -451,7 +450,6 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     CategoryAdoptionApplication,
     RentalAllocationService,
     RentalDueJobScheduler,
-    RentalBusinessService,
     OfficialCalendarSourceService,
     { provide: OFFICIAL_CALENDAR_DATA_STORE, useExisting: PrismaService },
     { provide: OFFICIAL_CALENDAR_APPLICATION, useExisting: OfficialCalendarSourceService },
