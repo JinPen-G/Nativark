@@ -2,18 +2,22 @@
  * Draft bodies remain in their separately authorized original reader. Cache
  * and recovery snapshots contain only verified immutable receipt metadata;
  * neither an old preview nor an empty ciphertext proves deletion. */
-import type { PrismaClient } from '@prisma/client';
 import type { RentalNotificationSendLogV1 } from "./contracts";
 import { ServiceUnavailableException } from '@nestjs/common';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import type { RentalBusinessSecretBox } from "./business-runtime-ports";
-import type { RentalNotificationDraftRetention } from "./notification-draft";
+import type { RentalNotificationDraftRetention, RentalNotificationDraftErasureSource, RentalNotificationDraftRow } from "./notification-draft";
 import { requestFingerprint } from "@rental-os/platform-contracts/request-fingerprint";
 export { isNotificationDraftCacheLog, stripNotificationDraftCacheBody } from "./notification-snapshot";
 
 type Owner = { tenantId: string; workspaceId: string };
-export type Source = Pick<PrismaClient, 'rentalNotificationLog' | 'aiDataErasure'>;
+/** 沿稳定的租户、空间及原键条件读取，兼容两种生成客户端的原行结构。 */
+export type Source = RentalNotificationDraftErasureSource & {
+  readonly rentalNotificationLog: {
+    findFirst(input: { where: Owner & { id: string; idempotencyKey?: string } }): PromiseLike<RentalNotificationDraftRow | null>;
+  };
+};
 export type Cipher = Pick<RentalBusinessSecretBox, 'decrypt' | 'fingerprint'>;
 const id = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u;
 const unavailable = () => new ServiceUnavailableException('原通知草稿缓存来源不可核对');

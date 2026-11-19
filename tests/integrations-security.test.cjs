@@ -14,7 +14,11 @@ assert.throws(() => outbound.parseOutboundUrl("https://example.com@public.exampl
 assert.throws(() => outbound.parseOutboundUrl("https://custom.example/gateway", "支付宝网关", { productionHosts: ["openapi.alipay.com"] }), /允许的生产平台/);
 assert.doesNotThrow(() => outbound.parseOutboundUrl("https://openapi.alipay.com/gateway.do", "支付宝网关", { productionHosts: ["openapi.alipay.com"] }));
 
-const paymentSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "modules", "integrations", "payment.runtime.service.ts"), "utf8");
+const paymentSource = [
+  fs.readFileSync(path.join(repo, "apps", "api", "src", "modules", "integrations", "payment.runtime.service.ts"), "utf8"),
+  fs.readFileSync(path.join(repo, "packages", "platform-server", "src", "modules", "integrations", "payment-provider-transport.ts"), "utf8"),
+  fs.readFileSync(path.join(repo, "packages", "rental-core", "src", "mysql-payment-runtime.ts"), "utf8")
+].join("\n");
 const fileSource = [
   fs.readFileSync(path.join(repo, "apps", "api", "src", "modules", "integrations", "file-storage.runtime.service.ts"), "utf8"),
   fs.readFileSync(path.join(repo, "packages", "platform-server", "src", "modules", "integrations", "object-storage.provider.service.ts"), "utf8"),
@@ -33,6 +37,7 @@ const openapiSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "con
 const integrationSource = fs.readFileSync(path.join(repo, "packages", "platform-server", "src", "modules", "integrations", "tenant-integration.service.ts"), "utf8");
 const integrationsServiceSource = [
   fs.readFileSync(path.join(repo, "apps", "api", "src", "modules", "integrations", "integrations.service.ts"), "utf8"),
+  fs.readFileSync(path.join(repo, "packages", "rental-core", "src", "integration-runtime.ts"), "utf8"),
   fs.readFileSync(path.join(repo, "packages", "platform-server", "src", "modules", "files", "file-ledger.ts"), "utf8"),
   fs.readFileSync(path.join(repo, "packages", "platform-server", "src", "modules", "notifications", "notification-ledger.ts"), "utf8")
 ].join("\n");

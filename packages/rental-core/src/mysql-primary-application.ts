@@ -45,7 +45,7 @@ export interface RentalPrimaryDependencies<TTransaction extends RentalPrimaryTra
   enterprisePolicies: RentalCoreEnterprisePolicies<TTransaction>;
   notifications: RentalBusinessNotifications;
   secrets: RentalBusinessSecretBox;
-  notificationDraftRetention: RentalNotificationDraftRetention;
+  notificationDraftRetention?: RentalNotificationDraftRetention;
 }
 
 export interface RentalPrimaryApplications<TTransaction extends RentalPrimaryTransaction> {
@@ -56,11 +56,10 @@ export interface RentalPrimaryApplications<TTransaction extends RentalPrimaryTra
 const dependencyNames = [
   "coreConfiguration", "coreFacts", "businessConfiguration", "businessFacts", "database", "state",
   "capabilityHooks", "capabilities", "capabilityAudits", "memberships", "serviceCapacities", "files",
-  "funding", "categories", "corporateSettlement", "enterprisePolicies", "notifications", "secrets",
-  "notificationDraftRetention"
+  "funding", "categories", "corporateSettlement", "enterprisePolicies", "notifications", "secrets"
 ] as const;
 
-/** 标准宿主须显式提供原生产依赖；旧服务的可选构造参数只保留给直接构造的兼容消费者。 */
+/** 标准宿主显式提供原业务依赖。AI草稿维护读取器可选，涉及草稿时仍由原服务拒绝缺失读取器。 */
 export function createRentalPrimaryApplications<TTransaction extends RentalPrimaryTransaction>(
   dependencies: RentalPrimaryDependencies<TTransaction>
 ): RentalPrimaryApplications<TTransaction> {

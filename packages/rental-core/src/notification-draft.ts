@@ -1,7 +1,7 @@
 /** 未发送通知草稿与原正文保留读取接点。
  * 草稿不授予发送权限；清理策略、删除账与校验仍由宿主的原维护服务裁定。
  * MySQL行类型仅供此私有适配使用，缺原读取器不能补造正文或删除收据。 */
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import type { RentalNotificationTemplateV1 } from "./contracts";
 
 export interface RentalNotificationDraftInput {
@@ -15,6 +15,17 @@ export interface NotificationDraftBodyErasure {
 }
 export interface NotificationDraftBodyRetention {
   state: "erased"; receiptId: string; policyVersion: string; erasedAt: string; erasedRevision: 2;
+}
+/** 原维护者只按稳定收据ID读取删除账；Rental不持有AI表的写入或迁移权。 */
+export interface RentalNotificationErasureReceipt {
+  id: string; tenantId: string; workspaceId: string; kind: string; resourceId: string;
+  policyVersion: string; targetHash: string; state: string; revision: number; erasedAt: Date | null;
+}
+export interface RentalNotificationDraftErasureSource {
+  /** 没有装配AI维护账时，涉及原AI草稿的读取保持不可用。 */
+  readonly aiDataErasure?: {
+    findUnique(input: { where: { id: string } }): PromiseLike<RentalNotificationErasureReceipt | null>;
+  };
 }
 export type RentalNotificationDraftObservation = {
   version: "rental-notification-draft-1"; id: string; key: string; actorId: string;
@@ -45,7 +56,7 @@ export interface RentalNotificationDraftRetention {
     preview?: Record<string, "[已加密保留]" | "" | null>;
   };
   receiptId(owner: { tenantId: string; workspaceId: string }, draftId: string): string;
-  createReader(database: Pick<PrismaClient, "aiDataErasure">): {
+  createReader(database: RentalNotificationDraftErasureSource): {
     readErasure(row: RentalNotificationDraftRow): Promise<NotificationDraftBodyErasure | null>;
   };
 }

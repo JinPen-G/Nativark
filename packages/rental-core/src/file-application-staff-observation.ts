@@ -1,15 +1,37 @@
 /** 员工上传原键观察，复验可信身份、地点ACL和原文件事实，返回已有操作收据。 */
-import { ConflictException, ForbiddenException, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, ServiceUnavailableException } from "@nestjs/common";
+import Ajv from "ajv";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import type { CreateFileUploadSessionRequest } from "@rental-os/platform-contracts/files";
 import { requestFingerprint } from "@rental-os/platform-contracts/request-fingerprint";
 import type { FileStorageOwner, FileStoragePrimitives } from "@rental-os/platform-server/files";
 import { getRequestIdentity } from "@rental-os/platform-server/request-identity";
 import type { RentalFileBusinessAccessService } from "./file-business-access";
-import type { StaffUploadObservationRequest, StaffUploadObservationResponse, StaffUploadObservedSession } from "./staff-upload-observation";
+import { STAFF_UPLOAD_OBSERVATION_SCHEMAS, type StaffUploadObservationRequest,
+  type StaffUploadObservationResponse, type StaffUploadObservedSession } from "./staff-upload-observation";
 
 type JsonRecord = Record<string, unknown>;
 const fileFactHash = (value: unknown) => requestFingerprint(JSON.parse(JSON.stringify(value)));
+
+const validStaffObservation = new Ajv({ strict: true, coerceTypes: false, useDefaults: false, removeAdditional: false })
+  .compile<StaffUploadObservationRequest>(STAFF_UPLOAD_OBSERVATION_SCHEMAS.StaffUploadObservationRequest);
+/** Detach the original body before awaiting authority and validate every supplied owner or selector field. */
+export function parseStaffUploadObservation(value: unknown): StaffUploadObservationRequest {
+  try {
+    const input = structuredClone(value);
+    if (Buffer.byteLength(JSON.stringify(input) ?? '', 'utf8') <= 8192 && validStaffObservation(input)) {
+      if ('idempotencyKey' in input.reference) {
+        // The raw UTF-16 length stays bounded before trimming so a lost create
+        // response remains findable by its original upload key.
+        const original = input.reference.idempotencyKey;
+        if (original.length > 191 || !original.trim()) throw new Error('Invalid original upload key');
+        input.reference.idempotencyKey = original.trim();
+      }
+      return input;
+    }
+  } catch { /* A malformed descriptor is not an upload observation. */ }
+  throw new BadRequestException('原上传会话引用或文件描述无效');
+}
 
 interface RentalStaffUploadObservationPorts {
   parseStaffUploadObservation(value: unknown): StaffUploadObservationRequest;

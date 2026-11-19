@@ -2,7 +2,7 @@
  * The immutable log/key and hashes survive. Only real source associations hold
  * a draft; a workspace's unrelated Tasks never do. Empty ciphertext is not a
  * deletion receipt, and this leaf never sends, retries or creates a Task. */
-import { Prisma, type PrismaClient } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import type { SecretBox } from '../../../common/secret-box';
@@ -14,6 +14,7 @@ import { AI_RETENTION_POLICY } from './retention-policy';
 import { lockRetentionSourceScope } from './retention-model-sources';
 import type { RentalNotificationSendLogV1 } from '@rental-os/shared';
 import { stripNotificationDraftCacheBody } from '../../rental-core/rental-notification-snapshot';
+import type { RentalNotificationDraftErasureSource, RentalNotificationErasureReceipt } from '@rental-os/rental-core/notification-draft';
 
 export const NOTIFICATION_DRAFT_RETENTION_KIND = 'notification_draft' as const;
 type Row = Prisma.RentalNotificationLogGetPayload<object>;
@@ -118,7 +119,7 @@ function verifyOriginalBody(row: Row, cipher: NotificationDraftRetentionCipher) 
   } catch { throw unavailable(); }
 }
 
-function sameReceipt(receipt: NonNullable<Awaited<ReturnType<PrismaClient['aiDataErasure']['findUnique']>>>,
+function sameReceipt(receipt: RentalNotificationErasureReceipt,
   row: Row, targetHash: string) {
   return receipt.id === notificationDraftRetentionReceiptId({ tenantId: row.tenantId, workspaceId: row.workspaceId }, row.id)
     && receipt.tenantId === row.tenantId && receipt.workspaceId === row.workspaceId
@@ -129,7 +130,7 @@ function sameReceipt(receipt: NonNullable<Awaited<ReturnType<PrismaClient['aiDat
 
 /** An old restored ciphertext paired with a deletion journal is unavailable
  * until the trusted restore host reapplies that journal. Reads never erase it. */
-export function createNotificationDraftBodyRetentionReader(db: Pick<PrismaClient, 'aiDataErasure'>,
+export function createNotificationDraftBodyRetentionReader(db: RentalNotificationDraftErasureSource,
   clock: () => Date = () => new Date()) {
   return { async readErasure(row: Row): Promise<NotificationDraftBodyErasure | null> {
     if (typeof db.aiDataErasure?.findUnique !== 'function') throw unavailable();

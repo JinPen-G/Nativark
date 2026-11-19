@@ -14,6 +14,8 @@ import type { RentalPaymentStatementDataStore, RentalPaymentRequestContext } fro
 import { roundMoney } from "./payment-money";
 import { assertPaymentReconciliationAccess } from "./payment-reconciliation-access";
 
+export { assertPaymentReconciliationAccess };
+
 const MAX_STATEMENT_BYTES = 10 * 1024 * 1024;
 const MAX_STATEMENT_ROWS = 10_000;
 const SUPPORTED_PROVIDERS = new Set(["alipay", "wechat_pay"]);

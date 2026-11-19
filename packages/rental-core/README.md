@@ -12,6 +12,7 @@
 | [客户端与官网前端](admin/channels/README.md)、[页面声明](admin/channels/pages.ts)、[当前会话](admin/channels/page-context.tsx) | `/admin/channels` 提供品牌、协议、发布服务、微信凭证和官网配置；同一页面贡献复用原保存 Promise、版本与品牌刷新，登录前 bootstrap 由独立公共传输消费同一请求工厂 |
 | [开业配置前端](admin/setup/README.md)、[页面声明](admin/setup/pages.ts)、[受控目标](admin/setup/navigation.ts) | `/admin/setup` 提供当前空间的就绪状态和九项配置入口；状态由服务端裁定，业务目标经登记页面及当前权限解析，公共账号入口由宿主供给 |
 | [支付对账前端](admin/payment-reconciliation/README.md)、[页面声明](admin/payment-reconciliation/pages.ts)、[四请求](admin/payment-reconciliation/client.ts) | `/admin/payment-reconciliation` 共用原批次列表/详情、CSV导入和差异表单；当前财务权限与空间、原支付事实、处理原因及单次异步提交保持 |
+| [企业Web客户端](clients/enterprise/README.md)、[正式入口](clients/enterprise/index.ts)、[会话协调](clients/enterprise/session.tsx) | `/clients/enterprise` 提供企业会话、请求与原操作门闸；公共web-client仍持有唯一客户会话和网络层，企业授权、单次写入及原键恢复保持 |
 | [会员请求](admin/membership/client.ts)、[客户请求](admin/membership/customer-client.ts) | `/admin/membership/client` 与 `/admin/membership/customer-client` 提供原57项请求；传入宿主唯一认证请求，保留租户会员、客户主档、账号状态、敏感资料、企业账务及原冲销收据边界 |
 | [订单前端](admin/orders/README.md)、[订单请求](admin/orders/client.ts) | `/admin/orders` 提供列表、新建、详情及原配货/资金/检查/单据链；宿主提供当前身份、经营空间、原请求与跨领域组件，旧地址消费同一实现 |
 | [养护工单前端](admin/work-orders/README.md)、[页面贡献](admin/work-orders/index.tsx)、[客户端工厂](admin/work-orders/client.ts) | `/admin/work-orders` 提供原列表/看板/详情与六类表单；宿主供给当前权限/经营空间及唯一请求，旧路由和十二HTTP方法薄适配同一实现 |
@@ -47,10 +48,13 @@
 | [文件兼容应用](src/file-application-runtime.ts) | `/file-application-runtime` 持有原合法上传场景、原键/冻结/下载、专用参加者和按租户清理；原宿主只提供同一数据库、配置、身份与知识/检查参加者及唯一定时器 |
 | [企业凭证/检查字节](src/file-application-rental-evidence.ts)、[员工原键观察](src/file-application-staff-observation.ts) | `/file-application-rental-evidence` 与 `/file-application-staff-observation` 读取原上传者/空间、冻结摘要与当前ACL；观察不续签，检查只消费宿主受控对象reader和原解码器 |
 | [检查对象读取](src/inspection-object-reader.ts)、[原组合入口](../../apps/api/src/modules/integrations/inspection-object-reader.ts) | `/inspection-object-reader` 核原文件/上传会话、订单空间、MIME、精确长度和冻结摘要，返回流前与流末复验；请求签名来自公共 `/files`，当前业务授权由检查与员工文件消费者裁定，宿主提供实际配置和运输 |
+| [运营集成应用](src/integration-runtime.ts)、[私有仓储](src/mysql-integrations.ts)、[设备与交换合同](src/integration-contracts.ts)、[HTTP 装配](src/http-integrations.ts) | Rental 持有打印参加者、TBox、交换模板与结果构建，文件/通知/作业使用同一公共台账；HTTP 消费当前配置、租户身份和业务文件读取权威 |
+| [租户集成业务参加者](src/integration-business-participant.ts)、[原宿主入口](../../apps/api/src/modules/integrations/rental-integration-business.participant.ts) | 结算币种来自原租赁设置，provider 停用与身份变更使用配置行锁所在的同一事务，核支付/退款、短信队列与公共文件/上传依赖 |
 | [凭证合同](src/document-contracts.ts)、[纯渲染](src/document-renderer.ts)、[归档与历史](src/mysql-documents.ts)、[本表读写视图](src/document-storage.ts) | /document-contracts与/document-renderer不依赖数据库；/mysql-documents保留逐字段释放、稳定内容摘要、同内容唯一归档和当前订单/空间/财务历史门禁 |
 | [经营空间边界](src/mysql-workspace-scope.ts) | `/mysql-workspace-scope` 核请求空间所属租户及跨空间写入；原初始化/恢复只读取默认空间，原Guard先裁定请求授权 |
 | [配置运行时DTO](src/config-request.dto.ts) | `/configuration-dto` 与原API共用字段、嵌套校验和装饰器元数据；规则候选采用同一类，审批、业务规则及保存仍由所属服务处理 |
 | [业务请求DTO](src/core-request.dto.ts)、[订单请求DTO](src/order-request.dto.ts)、[企业告知DTO](src/enterprise-disclosure.dto.ts) | `/core-dto`、`/order-dto` 与 `/enterprise-disclosure-dto` 提供原商品/工单、订单/检查/资金请求的同一运行时类；API、客户与企业嵌套告知共用同一元数据，字段校验不替代当前业务授权 |
+| [数据发行与迁移摘要](src/data.ts)、[MySQL 数据计划](src/mysql-data.ts) | `/data` 核发行合同、迁移对应与原始字节摘要，保留包内目录名并生成正式 `deploymentMigrationNames`。`/mysql-data` 用正式账名供给原 Prisma 收据观察，复用公共物理读取核验 Rental 表，跨域外键由宿主传给公共数据计划 |
 | [正式出口](src/index.ts)、[合同](src/contracts.ts) | 原商品/资产、报价订单、履约检查、价格资金、日历与客户会员定义和运行时常量；[shared 兼容出口](../shared/src/core.ts)继续服务原 API、各客户端和 AI |
 | [品类标识](src/rental-category-code.ts) | 原稳定格式及内置常量，格式合法不代表注册、发布或采用权限 |
 | [会员应用](src/mysql-membership.ts)、[私有存储/参加者](src/membership-ports.ts)、[状态审计接点](src/customer-operations-ports.ts) | `/mysql-membership` 持有租户共享会员、注册审核、当前资质、方案版本/授予及报价权益；业务风险、客户锁和企业政策使用同一原实例，金额/订单执行仍由订单域裁定 |
@@ -124,7 +128,6 @@
 | [原换货批准](src/mysql-approved-exchange.ts)、[企业政策接点](src/approved-exchange-policy.ts)、[参与者合同](src/approved-exchange-ports.ts) | /mysql-approved-exchange 核原费用确认、检查/客户同意和当前企业政策，唯一WeakMap把依据绑定到原事务；调用方不得以JSON或新事务替代 |
 | [规则绑定草稿](src/bound-rule-draft.ts)、[日历绑定草稿](src/bound-calendar-draft.ts)、[私有本表/事务视图](src/bound-draft-storage.ts) | /bound-rule-draft 与 /bound-calendar-draft 保留完整候选复核、精确目标版本/CAS与原操作收据；规则历史恢复为新草稿，草稿保存不发布或授予业务权限 |
 | [批准设置应用](src/mysql-approved-settings.ts)、[真实路由授权桥](src/approved-settings-route-authority.ts)、[参加者合同](src/approved-settings-ports.ts)、[严格输入](src/approved-settings-validation.ts) | /mysql-approved-settings 与 /approved-settings-route-authority 复用原Guard/ALS，通知配置CAS、批准消费与原操作同事务，历史读取不以当前配置或过期重做 |
-| [企业Web客户端](clients/enterprise/README.md)、[正式入口](clients/enterprise/index.ts)、[会话协调](clients/enterprise/session.tsx) | `/clients/enterprise` 提供企业会话、请求与原操作门闸；公共web-client仍持有唯一客户会话和网络层，企业授权、单次写入及原键恢复保持 |
 
 ## 使用与构建
 
@@ -138,7 +141,9 @@ Rental HTTP从 `@rental-os/rental-core/http` 的 `RentalHttpModule` 接入，类
 
 微信客户认证从 `/mysql-client-wechat-auth` 接入，实际事务、渠道凭据、同一客户主档/注册、当前会话和审计经 `/client-wechat-ports` 供给。运输使用 `@rental-os/platform-server/integration-wechat` 的同一类和错误身份，保留原AppID缓存及凭据一次刷新；业务绑定核水印，已登录客户的一次性code错误不重试、不视为会话失效。原[微信Nest接线](../../apps/api/src/modules/client/client-wechat-auth.service.ts)保持八项构造位置。
 
-原文件兼容应用从 `@rental-os/rental-core/file-application-runtime` 导入 `RentalFileStorageApplication`。宿主提供同一文件/业务存储、配置锁、当前 Auth/ACL、审计和原知识/检查解析器；原合法任意 module/scene 及历史回执继续沿原权限处理。固定 Staff 场景消费公共文件应用，企业和换货专用依据分别使用所属参加者。原 Nest 类只维护唯一定时器、生命周期与 AI 清理参加者，AI 物理删除仍核原政策和收据。[文件应用](src/file-application-runtime.ts) · [原宿主](../../apps/api/src/modules/integrations/file-storage.runtime.service.ts) · [AI 清理参加者](../../apps/api/src/modules/integrations/file-ai-retention.participant.ts)
+原文件兼容应用从 `@rental-os/rental-core/file-application-runtime` 导入 `RentalFileStorageApplication`。宿主提供同一文件/业务存储、配置锁、当前 Auth/ACL、审计和原检查解析器。知识权限、修订解析、原键及 unknown 错误工厂可按需供给。新知识上传在写入前核定原错误工厂，原键观察在查询前核定原键和修订解析，缺少所需参加者时明确不可用。原合法任意 module/scene 及历史回执继续沿原权限处理。固定 Staff 场景消费公共文件应用，企业和换货专用依据分别使用所属参加者。原 Nest 类只维护唯一定时器、生命周期与 AI 清理参加者，AI 物理删除仍核原政策和收据。[文件应用](src/file-application-runtime.ts) · [原宿主](../../apps/api/src/modules/integrations/file-storage.runtime.service.ts) · [AI 清理参加者](../../apps/api/src/modules/integrations/file-ai-retention.participant.ts)
+
+员工原键观察的请求与回执 schema 从 `@rental-os/rental-core/staff-upload-observation` 读取，服务端从 `@rental-os/rental-core/file-application-staff-observation` 导入 `parseStaffUploadObservation`。解析复用原 Ajv 封闭校验、8KiB 描述上限及原上传键 UTF-16 长度和 trim 规则，宿主继续向同一 HTTP/文件参加者供给解析函数。[观察合同](src/staff-upload-observation.ts) · [原键解析与观察](src/file-application-staff-observation.ts)
 
 企业回款文件绑定从 `/file-application-enterprise-payment-proof` 接入。原企业 Controller 提供当前客户、空间及订单依据，参加者覆盖客户端提交的证明元数据，并核完成与重放的原绑定；原文件编排继续维护同一上传键、冻结对象和事务。其他原合法 module/scene 沿现有兼容入口处理。[企业绑定参加者](src/file-application-enterprise-payment-proof.ts) · [原文件编排](../../apps/api/src/modules/integrations/file-storage.runtime.service.ts)
 
@@ -189,6 +194,8 @@ HTTP入口从 `/http-workspace-capabilities`、`/http-staff-payments` 导入；`
 报价/营销服务从 `@rental-os/rental-core/mysql-business-runtime` 导入，配置、事实和核心配置仓储使用同一实例；会员、企业币种核验、密文及短信通过 [实际端口](src/business-runtime-ports.ts) 供给。原API的14项构造顺序与两个初始化钩子保留，适配层另把原通知正文保留读取器传给包内构造末尾的可选接点。配置/事实按同一刷新队列装载，续租事务上下文沿用模块级ALS。报价来源每次从同一公共可信身份读取，detached配置不发布进程缓存；`delivery_uncertain` 只按原投递记录查询，尝试次数与租约仍分别处理。[原Nest接线](../../apps/api/src/modules/rental-core/rental-business.service.ts) · [报价/营销验证](../../tests/rental-business-v1.test.cjs) · [通知恢复验证](../../tests/rental-notification-lease.test.cjs)
 
 通知草稿的准备、保存和原结果读取仍由同一业务实例执行，发送是另一个授权动作。宿主通过 `/notification-draft` 的窄接点供给原维护读取器；`/notification-log-cache` 只接收核验过的原行与删除账，产生不可变且无正文的缓存，反序列化副本不会获得核验标记。`/notification-snapshot` 在原恢复写入时剥离草稿正文，普通发送记录保持原值；正文已删除时，原结果返回原删除收据与空正文，不能以缓存内容或空密文推断删除成功。[原维护读取器](../../apps/api/src/modules/ai-native/privacy/retention-notification-draft.ts) · [原缓存适配](../../apps/api/src/modules/rental-core/rental-notification-log-cache.ts)
+
+缓存观察的 `Source` 沿 `rentalNotificationLog.findFirst` 的租户、空间、原行 ID 和原键读取，删除账由原 `aiDataErasure.findUnique` 按稳定收据 ID 查询。这两个窄接点兼容独立组合与原 API 的生成客户端。涉及原通知草稿且缺少维护删除账时明确不可用。[原行合同](src/notification-log-cache.ts) · [删除账接点](src/notification-draft.ts)
 
 订单确认从 `@rental-os/rental-core/mysql-order-confirmation` 导入，供给同一核心、业务、事实、幂等、Hook、客户/会员、服务容量和企业政策实例。新订单在原ReadCommitted事务重查客户/资格、责任主体、地点/经营者、库存和企业政策，再一起提交订单、报价消费、券、容量、原幂等及批准；批准事务保留原等待与执行上限。返回的 `replayed` 供调用方判断是否发送首次下单通知。原键恢复只读取原收据和批准消费关联，失应答不换键重做。[确认Nest接线](../../apps/api/src/modules/rental-core/rental-order-confirmation.service.ts) · [确认范围验证](../../tests/rental-order-quote-scope.test.cjs) · [原批准事务验证](../../tests/ai-native-fork-execution-approved-core.test.cjs)
 
@@ -242,7 +249,15 @@ HTTP入口从 `/http-workspace-capabilities`、`/http-staff-payments` 导入；`
 
 原客户端继续从 `@rental-os/shared` 读取租赁合同。Rental 自身实现可从本包根出口取合同，从 `@rental-os/rental-core/business-day` 取营业日函数。新业务 Core 使用公共平台和 Core 合同，不必依赖 Rental。
 
+运营集成应用接收当前配置、同一台账仓储及文件读取权威，初始化一组公共文件、通知和作业应用。`MysqlRentalIntegrationRepository` 从同一数据库供给公共台账及 Rental 的打印/TBox 存储视图，设备更新与绑定先按租户和 ID 核定归属。持久化默认通知模板按租户派生主键，内存模板使用其演示标识，两者分别维护各自初始化语义。[运营应用](src/integration-runtime.ts) · [存储适配](src/mysql-integrations.ts)
+
+`RentalIntegrationsHttpModule.register` 使用宿主工厂提供同一运营应用，挂载九个 `/integrations` 操作。原 Nest 服务、仓储与 Controller 提供构造兼容入口，打印从公共 `/jobs/print` 消费该应用的打印参加者。交换任务的模拟结果包含 `externalCallSkipped`、文件元数据及校验报告字段，生产调用沿应用和公共台账门禁裁定。日志失败向外传播，已登记的文件和任务供原键核对。[HTTP 组合](src/http-integrations.ts) · [原兼容入口](../../apps/api/src/modules/integrations/README.md) · [公共作业](../platform-server/src/modules/jobs/README.md) · [租户隔离验证](../../tests/integrations-memory-scope.test.cjs)
+
 核心/业务配置的私有MySQL声明使用所选宿主schema的生成类型，当前仍对应原API组合schema。准备已配置的独立开发环境后，先沿原宿主执行 `npm run db:generate`，再构建本包；它只生成声明/客户端，不执行迁移。完整Core schema与迁移链继续拆分。领域根出口及公共底座构建不加载这些MySQL适配。[当前schema](../../apps/api/prisma/schema.prisma) · [生成命令](../../apps/api/package.json)
+
+数据发行从 `createRentalDataRelease` 核对受控包的固定版本、可读范围和迁移原文。每项使用 `rental.` 命名空间，文件位于 `prisma/migrations/<name>/migration.sql` 或 `migrations/<name>/migration.sql`，其中 `<name>` 对应原 Prisma `migration_name`。摘要按原始字节计算，换行及编码变化均须作为发行差异处理。结果中的数据合同、账名称和 SQL 保持同一顺序，供宿主接入数据计划。[发行合同与原文核对](src/data.ts)
+
+宿主继续核定 SQL 的表归属、公共关联及实际物理结构，再沿原 Prisma 迁移账读取执行状态。失败和 unknown 保留原迁移、摘要与恢复依据。原 API 的组合迁移涉及公共、Rental 和 AI 数据，存量部署沿其原链及原收据维护，新空库使用所选公共基线与 Rental 自有迁移。[结构核验](../platform-core-host/src/mysql-structure.ts) · [物理观察](../platform-core-host/src/mysql-physical.ts) · [原迁移账读取](../core-host/src/mysql-deployment.ts) · [原组合迁移](../../apps/api/prisma/migrations)
 
 ```sh
 npm run build -w @rental-os/rental-core

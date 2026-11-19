@@ -9,6 +9,8 @@
 3. 人员页面向 `OperatorInvitations` 提供当前服务端角色与组织。公共缺省邀请显式提交 `workspaceAccesses: []`。Core 通过 `businessAccess.render` 提供受控范围配置，`requiredMessage` 指定缺少范围时的校验信息。Rental 宿主沿原经营空间列表供给角色、数据和地点范围。
 4. 匿名 `/invite` 路由提供 `createOperatorInvitationApi(baseURL)`、品牌名及可选品牌图标。接受页从 fragment 读取原凭证，inspect 支持取消，accept 使用原 20 秒时限。匿名客户端清空租户 / 空间认证头，接受结果未确认时通过租户登录核对。
 
+公共人员页沿当前会话请求 `/platform/roles` 和 `/platform/organizations`。查询键使用当前会话代次，读取携带取消信号。角色列表按基础成员的完整租户范围核验 `system:user:manage` 或 `system:role:manage`。[邀请选项读取](../access/PublicMemberInvitations.tsx)
+
 ```tsx
 import {
   AcceptOperatorInvitationPage,

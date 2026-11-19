@@ -1351,7 +1351,27 @@
     "./admin/payment-reconciliation/context": "./admin/payment-reconciliation/page-context.tsx",
     "./admin/payment-reconciliation/pages": "./admin/payment-reconciliation/pages.ts",
     "./admin/payment-reconciliation/messages": "./admin/payment-reconciliation/messages.ts",
-    "./clients/enterprise": "./clients/enterprise/index.ts"
+    "./clients/enterprise": "./clients/enterprise/index.ts",
+    "./integration-contracts": {
+      "types": "./dist/integration-contracts.d.ts",
+      "default": "./dist/integration-contracts.js"
+    },
+    "./integration-runtime": {
+      "types": "./dist/integration-runtime.d.ts",
+      "default": "./dist/integration-runtime.js"
+    },
+    "./mysql-integrations": {
+      "types": "./dist/mysql-integrations.d.ts",
+      "default": "./dist/mysql-integrations.js"
+    },
+    "./http-integrations": {
+      "types": "./dist/http-integrations.d.ts",
+      "default": "./dist/http-integrations.js"
+    },
+    "./integration-business-participant": {
+      "types": "./dist/integration-business-participant.d.ts",
+      "default": "./dist/integration-business-participant.js"
+    }
   },
   "typesVersions": {
     "*": {
@@ -2434,6 +2454,21 @@
       ],
       "clients/enterprise": [
         "./clients/enterprise/index.ts"
+      ],
+      "integration-contracts": [
+        "./dist/integration-contracts.d.ts"
+      ],
+      "integration-runtime": [
+        "./dist/integration-runtime.d.ts"
+      ],
+      "mysql-integrations": [
+        "./dist/mysql-integrations.d.ts"
+      ],
+      "http-integrations": [
+        "./dist/http-integrations.d.ts"
+      ],
+      "integration-business-participant": [
+        "./dist/integration-business-participant.d.ts"
       ]
     }
   },
@@ -2464,7 +2499,8 @@
     "react-router-dom": "7.18.2",
     "@rental-os/core-host": "0.1.0",
     "@rental-os/platform-core-host": "0.1.0",
-    "@rental-os/web-client": "0.1.0"
+    "@rental-os/web-client": "0.1.0",
+    "ajv": "^8.12.0"
   },
   "peerDependenciesMeta": {
     "@nestjs/common": {
@@ -2516,6 +2552,9 @@
       "optional": true
     },
     "@rental-os/web-client": {
+      "optional": true
+    },
+    "ajv": {
       "optional": true
     }
   }

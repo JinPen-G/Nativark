@@ -110,7 +110,7 @@ async function inTenant(tenantId, fn) {
   assert.deepEqual(repositoryLookup, { id: "tbox_other_tenant", tenantId: tenantB });
 
   const repositorySource = fs.readFileSync(
-    path.join(repo, "apps/api/src/modules/integrations/integrations.repository.ts"),
+    path.join(repo, "packages/rental-core/src/mysql-integrations.ts"),
     "utf8"
   );
   assert.match(

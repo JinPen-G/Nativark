@@ -55,7 +55,7 @@ interface RentalKnowledgeFileParticipant<Revision extends FileKnowledgeRevision>
 type RentalEvidencePorts = ConstructorParameters<typeof RentalEvidenceFileStorage>[2];
 type RentalObservationPorts = ConstructorParameters<typeof RentalStaffUploadObservation>[2];
 
-/** 宿主沿原实例供给权限、原修订解析及原 unknown 错误；这些接点不从请求体建立。 */
+/** 宿主沿原实例供给权限。知识操作按需核定原修订、原键和 unknown 参加者。 */
 export interface RentalFileStorageParticipants<Revision extends FileKnowledgeRevision> {
   operationLog?: Pick<PlatformOperationLogService, "record">;
   fileAccess?: Pick<RentalFileBusinessAccessService, "authorityKey" | "assertRead">;
@@ -64,9 +64,9 @@ export interface RentalFileStorageParticipants<Revision extends FileKnowledgeRev
   inspectionObjectReader?: RentalEvidencePorts["inspectionObjectReader"];
   readInspectionMedia: RentalEvidencePorts["readInspectionMedia"];
   parseStaffUploadObservation: RentalObservationPorts["parseStaffUploadObservation"];
-  parseKnowledgeUploadRevision(value: unknown): { success: true; data: Revision } | { success: false };
-  knowledgeUploadKey(documentId: string, targetVersion?: string): string;
-  knowledgeCommitUnknown(): Error;
+  parseKnowledgeUploadRevision?(value: unknown): { success: true; data: Revision } | { success: false };
+  knowledgeUploadKey?(documentId: string, targetVersion?: string): string;
+  knowledgeCommitUnknown?(): Error;
 }
 
 export type RentalFileRuntimeStorage = RentalFileReferenceStorage
@@ -140,8 +140,14 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
       }
       return this.originalUploadSummary(tenantId, existing, existingAsset, owner);
     }
-    if (input.businessType === 'ai_knowledge_document') await this.authorizeKnowledgeUpload(tenantId, input, owner);
-    else await this.assertBusinessReference(tenantId, input.businessType, input.businessId, owner?.workspaceId);
+    let knowledgeCommitUnknown: (() => Error) | undefined;
+    if (input.businessType === 'ai_knowledge_document') {
+      const factory = this.native.knowledgeCommitUnknown;
+      if (typeof factory !== 'function') throw new ServiceUnavailableException('知识上传提交参加者未配置');
+      // 写入前固定原错误工厂与宿主绑定，提交失应答仍能表达原操作的 unknown。
+      knowledgeCommitUnknown = factory.bind(this.native);
+      await this.authorizeKnowledgeUpload(tenantId, input, owner);
+    } else await this.assertBusinessReference(tenantId, input.businessType, input.businessId, owner?.workspaceId);
 
     let knowledgeWriteAttempted = false;
     let created: {
@@ -186,13 +192,13 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
           return this.originalUploadSummary(tenantId, concurrent, concurrentAsset, owner);
         }
       }
-      if (knowledgeWriteAttempted) throw this.native.knowledgeCommitUnknown();
+      if (knowledgeWriteAttempted) throw knowledgeCommitUnknown!();
       throw error;
     }
 
     if (input.businessType === 'ai_knowledge_document') {
       try { return await this.knowledgeUploadSummary(tenantId, input, created.session, created.asset, owner); }
-      catch { throw this.native.knowledgeCommitUnknown(); }
+      catch { throw knowledgeCommitUnknown!(); }
     }
     return this.originalUploadSummary(tenantId, created.session, created.asset, owner);
   }
@@ -455,7 +461,11 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
       || !input.idempotencyKey || owner?.businessId !== input.businessId || owner.businessType !== input.businessType
       || owner.uploadScene !== input.uploadScene || !owner.workspaceId || !owner.actorUserId
       || !this.knowledgeFiles?.authorizeUploadObservation) throw new NotFoundException('知识上传观察权威不可用');
-    if (input.idempotencyKey !== this.native.knowledgeUploadKey(input.businessId, selected?.targetVersion)) throw new BadRequestException('原知识上传键不匹配');
+    const knowledgeUploadKey = this.native.knowledgeUploadKey;
+    const parseKnowledgeUploadRevision = this.native.parseKnowledgeUploadRevision;
+    if (typeof knowledgeUploadKey !== 'function' || typeof parseKnowledgeUploadRevision !== 'function')
+      throw new ServiceUnavailableException('知识上传观察参加者未配置');
+    if (input.idempotencyKey !== knowledgeUploadKey.call(this.native, input.businessId, selected?.targetVersion)) throw new BadRequestException('原知识上传键不匹配');
     const mimeType = this.validateInput(input);
     const authorize = () => this.knowledgeFiles!.authorizeUploadObservation!(tenantId, structuredClone(owner));
     await authorize();
@@ -473,7 +483,7 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
         || session.tenantId !== tenantId || session.idempotencyKey !== input.idempotencyKey
         || session.fileAssetId !== asset.id || session.provider !== asset.storageProvider || session.storageKey !== asset.storageKey)
         throw new ConflictException('原知识上传请求不匹配');
-      const parsed = metadata?.knowledgeRevision === undefined ? undefined : this.native.parseKnowledgeUploadRevision(metadata.knowledgeRevision);
+      const parsed = metadata?.knowledgeRevision === undefined ? undefined : parseKnowledgeUploadRevision.call(this.native, metadata.knowledgeRevision);
       if (selected ? !parsed?.success || parsed.data.expectedRevision !== selected.expectedRevision || parsed.data.targetVersion !== selected.targetVersion
         : parsed !== undefined) throw new ConflictException('原知识上传版本不匹配');
       this.assertKnowledgeUploadAsset(asset, { ...owner, ...(parsed?.success ? { knowledgeRevision: parsed.data } : {}) });

@@ -12,10 +12,12 @@ import type { RentalCoreConfigurationTransaction } from "./core-configuration-st
 import type { RentalServiceCapacityTransaction } from "./service-capacity-storage";
 import type { RentalSnapshotTransaction } from "./state-storage";
 import type { RentalCategoryCreationReader } from "./category-runtime";
+import type { RentalNotificationDraftErasureSource } from "./notification-draft";
 
 export type RentalBusinessRuntimeTransaction = RentalBusinessFactTransaction & RentalBusinessConfigurationTransaction
   & RentalCoreConfigurationTransaction & RentalServiceCapacityTransaction & RentalSnapshotTransaction
-  & RentalCategoryCreationReader & Pick<Prisma.TransactionClient, "customerDeliveryAddress" | "rentalPriceAdjustmentPlan" | "customerProfile" | "rentalNotificationLog" | "rentalNotificationTemplate" | "aiDataErasure">;
+  & RentalCategoryCreationReader & RentalNotificationDraftErasureSource
+  & Pick<Prisma.TransactionClient, "customerDeliveryAddress" | "rentalPriceAdjustmentPlan" | "customerProfile" | "rentalNotificationLog" | "rentalNotificationTemplate">;
 
 export type RentalBusinessRuntimeStorage<TTransaction extends RentalBusinessRuntimeTransaction> = TTransaction & {
   $transaction<TResult>(run: (transaction: TTransaction) => Promise<TResult>,
