@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 import { assertOutboundUrl } from '../../common/outbound-url';
 import type { TenantIntegrationService } from './tenant-integration.service';
-import { s3ObjectReadRequest } from './inspection-object-reader';
+import { s3ObjectReadRequest } from '@rental-os/platform-server/files';
 import { frozenFileContentHash } from './file-content-binding';
 
 export type KnowledgeObjectReference = { tenantId: string; workspaceId: string; documentId: string; fileAssetId: string };

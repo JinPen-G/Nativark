@@ -1,5 +1,6 @@
 /** 公共文件SDK的唯一入口。宿主提供实际业务权威、事务和配置，导入本出口不登记HTTP或启动扫描。 */
 export { FileStoragePrimitives, MAX_FILE_BYTES } from "./file-storage-primitives";
+export { s3ObjectReadRequest } from "./s3-object-read-request";
 export { FileStorageRepository, fileAssetSummary } from "./file-storage.repository";
 export type { FileUploadFacts } from "./file-storage.repository";
 export type { FileStorageOwner, FileStorageTransaction, StoredFileAsset, StoredFileUploadSession } from "./file-storage.store";

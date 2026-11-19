@@ -20,6 +20,7 @@
 | [公共文件台账](file-ledger.ts) | `FileLedgerApplication` 共用原列表过滤、租户模拟元数据和创建日志回调，业务可读范围由实际权威提供；原 IntegrationsService 委托 |
 | [私有存储端口](file-storage.store.ts) | 原 FileAsset 与 FileUploadSession 字段以及本片实际使用的表操作 |
 | [对象存储提供者](../integrations/object-storage.provider.service.ts) | 原 S3/OSS/COS 签名、受控出站请求与连接探针 |
+| [S3 对象读取签名](s3-object-read-request.ts) | 原 GET 路径、请求头签名及配置/键校验，检查与知识对象读取共用；实际出站、字节边界和当前业务授权由消费者处理 |
 | [原冻结合同](../../../../platform-contracts/src/file-content-binding.ts) | 存储位置及已冻结字节指纹，原兼容入口继续消费同源合同 |
 | [Rental 附件权限](../../../../rental-core/src/file-access.ts) | 当前业务对象读取 ACL、已发布商品图、客户敏感附件以及业务引用存在性 |
 
@@ -56,6 +57,8 @@ await files.downloadUrl(tenantId, fileAssetId, owner);
 
 公共字节读取保持原八秒流超时、取消、响应类型、精确声明长度、累计字节上限及最终长度核对。取消时释放 reader 和 timer。签名、网络请求和旧测试注入点沿原提供者实现。原通用完成编排调用 `freezeFileUploadContent` 计算实际字节 SHA-256，先在同事务记录唯一冻结目标再发送 PUT，恢复仅核对原目标。恢复分支从原会话与文件的持久状态决定。原知识授权及其受控字节来源继续在占用前复验，原最终激活事务仍由完成编排执行。专用检查、企业凭证和隐私擦除各自保持原授权及 unknown 收据。
 
+`s3ObjectReadRequest(config, storageKey, at)` 使用服务端实际配置生成同一 S3 GET 和请求头签名。[Rental 检查对象读取](../../../../rental-core/src/inspection-object-reader.ts)沿原文件/会话、订单空间、MIME、精确长度及冻结摘要读取，返回流前和流末复验同一持久事实与配置。[知识正文读取](../../../../../apps/api/src/modules/integrations/knowledge-object-reader.ts)消费同一签名函数，知识 ACL、正文绑定和受控运输继续由原消费者维护。原[检查对象入口](../../../../../apps/api/src/modules/integrations/inspection-object-reader.ts)再导出同一实现，检查媒体、员工文件与既有 AI 消费者沿原调用链使用。
+
 `persistUploadFacts(tx, tenantId, facts, metadata)` 仅接调用方已经使用的原事务，先创建 `pending_upload` 文件，再以同一文件 ID 创建原上传会话。metadata 由原编排过滤客户端保留字段并补入可信操作者、空间、配置和专用证据，仓储保持原内容。`findUploadSession(tenantId, reference)` 只读取当前租户下指定原会话 ID 或原幂等键。
 
 原创建入口先核同一租户/幂等键的既有回执、请求描述及业务归属，再调用 `createOriginalFileUploadFacts`。公共内核创建原标识与有效期，读取原默认配置，在原同一事务锁住配置并调用所属来源的授权/引用复验和事实写入。普通业务引用及知识写入尝试标记由原参加者负责，唯一键冲突重读和知识提交失应答继续由原入口解释。模拟模式由宿主显式允许，公共内核缺此许可时保持配置不可用。
@@ -68,7 +71,7 @@ await files.downloadUrl(tenantId, fileAssetId, owner);
 
 ## 数据与装配
 
-独立公共 [schema](../../../../../apps/platform-api/prisma/schema.prisma) 已追加原 FileAsset 与 `file_upload_sessions` 两模型及 Tenant 反向关系，公共数据版本为 `0.1.4`，八份迁移由 [数据计划](../../../../../apps/platform-api/src/platform-data.ts) 固定。文件字段、默认、原 ID、字符串状态和历史 JSON 保留，`fileAssetId` 唯一、原幂等唯一键、会话状态索引及 FileAsset 两个租户索引均沿原来源。组合 schema 的 AI 检查反向关系仍由其所属模块装配。新 [公共文件迁移](../../../../../apps/platform-api/prisma/migrations/20261118010000_public_files/migration.sql) 仅用于独立公共库，原组合链不覆盖；本阶段没有执行 DDL。
+独立公共 [schema](../../../../../apps/platform-api/prisma/schema.prisma) 持有原 FileAsset 与 `file_upload_sessions` 两模型及 Tenant 反向关系，当前公共版本与迁移链由 [数据计划](../../../../../apps/platform-api/src/platform-data.ts) 固定。文件字段、默认、原 ID、字符串状态和历史 JSON 保留，`fileAssetId` 唯一、原幂等唯一键、会话状态索引及 FileAsset 两个租户索引均沿原来源。组合 schema 的 AI 检查反向关系仍由其所属模块装配。[公共文件迁移](../../../../../apps/platform-api/prisma/migrations/20261118010000_public_files/migration.sql) 用于独立公共库，原组合链不覆盖。
 
 正式包出口 `@rental-os/platform-server/files` 暴露本模块入口。原运行时与仓储使用同一 Prisma 实例，Staff 五组固定场景通过公共应用处理，其他旧合法输入和历史记录由 Rental 的正式 `/file-application-runtime` 保持原兼容编排。根存储仅要求公共文件能力，业务回调仍接调用方的完整原事务。Staff 的原主体权威由 `RENTAL_FILE_AUTHORITY` 窄 token 提供，组合宿主在实际调用时延迟取得同一 AuthService，避免原 Auth→Platform→Rental→文件构造链回环。缺原 Auth 或文件 ACL 时拒绝受控 Staff 场景。Rental ACL 从 `@rental-os/rental-core/file-access` 消费单源业务规则。组合模块/独立宿主的 Provider、Controller、schema 和迁移由装配负责人统一维护。
 

@@ -60,6 +60,7 @@
     "lint:example-tickets-api": "npm run lint -w @rental-os/example-tickets-api",
     "build:platform-api": "npm run build -w @rental-os/platform-api",
     "lint:platform-api": "npm run lint -w @rental-os/platform-api",
+    "export:platform": "npm run export:platform -w @rental-os/core-contracts --",
     "api:document:platform": "node packages/platform-server/dist/platform-openapi.js",
     "db:platform:generate": "npm run prisma:generate -w @rental-os/platform-api",
     "db:platform:initialize": "npm run initialize -w @rental-os/platform-api",

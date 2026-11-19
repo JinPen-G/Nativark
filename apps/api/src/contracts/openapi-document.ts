@@ -3367,7 +3367,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     tag: "Platform",
     operationId: "createRole",
     summary: "Create role",
-    permissions: ["system:user:manage", "system:role:manage"],
+    permissions: ["system:role:manage"],
     requestSchema: "SaveSystemRoleRequest",
     responseSchema: "SystemRoleRow"
   },

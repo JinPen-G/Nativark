@@ -4,6 +4,19 @@
 
 **目前已实现清单/页面/服务端合同、静态包检查、OpenAPI 贡献组合、独立升级预检及本地/固定 GitHub Release 包准备。** [公共宿主适配](../platform-core-host/README.md)已提供真实身份、授权/绑定和HTTP主接点，默认无Core宿主消费空目录；选中Core的完整运行/持久化、页面和安装验证仍在拆分中。开发新Core从下面的五步开始，本手册与代码一起公开发布。
 
+## 单独取出底座源码
+
+已检出的维护者仓库可以从一个完整 Git 提交导出零 Core 源码包。先构建本包，再运行以下命令，将 `<完整SHA>` 替换为要交付的已提交版本。
+
+```sh
+npm run build -w @rental-os/core-contracts
+npm run export:platform -- --repo . --repository https://github.com/JinPen-G/Nativark --commit <完整SHA> --out nativark-platform.tgz
+```
+
+解包后只有公共 API、公共后台、平台包、UIArc 源码和许可、公共数据库链及必要配置。根 workspace、默认构建/启动命令和 npm v3 锁文件按同一闭包生成。包内 README 给出安装、初始化和启动步骤，`platform.source.json` 保存固定来源及文件摘要。现有输出文件会被拒绝，不读取工作区未提交代码。[发行实现](src/platform-source.ts) · [命令入口](src/export-platform.ts)
+
+`@rental-os/core-contracts/platform-source` 也提供文件集与归档接口，可用于源码发行。它只准备源码；运行环境和业务 Core 由使用者按接入说明配置。
+
 <a id="core-quick-start"></a>
 
 ## 五步快速接入

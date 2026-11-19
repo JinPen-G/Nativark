@@ -14,7 +14,8 @@
       "deployment": ["dist/deployment.d.ts"],
       "github": ["dist/github.d.ts"],
       "development": ["dist/development.d.ts"],
-      "github-repository": ["dist/github-repository.d.ts"]
+      "github-repository": ["dist/github-repository.d.ts"],
+      "platform-source": ["dist/platform-source.d.ts"]
     }
   },
   "exports": {
@@ -49,6 +50,10 @@
     "./github-repository": {
       "types": "./dist/github-repository.d.ts",
       "default": "./dist/github-repository.js"
+    },
+    "./platform-source": {
+      "types": "./dist/platform-source.d.ts",
+      "default": "./dist/platform-source.js"
     }
   },
   "scripts": {
@@ -56,7 +61,8 @@
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "node --test test/core-contracts.test.cjs",
     "check": "node dist/check.js",
-    "capabilities": "node dist/capabilities.js"
+    "capabilities": "node dist/capabilities.js",
+    "export:platform": "node dist/export-platform.js"
   },
   "dependencies": {
     "zod": "3.25.76"

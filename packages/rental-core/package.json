@@ -31,6 +31,10 @@
       "types": "./dist/mysql-state.d.ts",
       "default": "./dist/mysql-state.js"
     },
+    "./inspection-object-reader": {
+      "types": "./dist/inspection-object-reader.d.ts",
+      "default": "./dist/inspection-object-reader.js"
+    },
     "./mysql-idempotency": {
       "types": "./dist/mysql-idempotency.d.ts",
       "default": "./dist/mysql-idempotency.js"
@@ -1256,6 +1260,9 @@
       ],
       "mysql-state": [
         "dist/mysql-state.d.ts"
+      ],
+      "inspection-object-reader": [
+        "dist/inspection-object-reader.d.ts"
       ],
       "mysql-idempotency": [
         "dist/mysql-idempotency.d.ts"

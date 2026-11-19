@@ -40,6 +40,7 @@
 | [附件 ACL](src/file-access.ts)、[业务读取](src/file-business-access.ts)、[引用存在性](src/file-business-reference.ts)、[读取参加者](src/file-access-ports.ts) | `/file-access` 持有原商品公开图、客户敏感附件及订单/资产/检查等对象范围；公共文件表和字节存储不能授予 Rental 业务读权 |
 | [文件兼容应用](src/file-application-runtime.ts) | `/file-application-runtime` 持有原合法上传场景、原键/冻结/下载、专用参加者和按租户清理；原宿主只提供同一数据库、配置、身份与知识/检查参加者及唯一定时器 |
 | [企业凭证/检查字节](src/file-application-rental-evidence.ts)、[员工原键观察](src/file-application-staff-observation.ts) | `/file-application-rental-evidence` 与 `/file-application-staff-observation` 读取原上传者/空间、冻结摘要与当前ACL；观察不续签，检查只消费宿主受控对象reader和原解码器 |
+| [检查对象读取](src/inspection-object-reader.ts)、[原组合入口](../../apps/api/src/modules/integrations/inspection-object-reader.ts) | `/inspection-object-reader` 核原文件/上传会话、订单空间、MIME、精确长度和冻结摘要，返回流前与流末复验；请求签名来自公共 `/files`，当前业务授权由检查与员工文件消费者裁定，宿主提供实际配置和运输 |
 | [凭证合同](src/document-contracts.ts)、[纯渲染](src/document-renderer.ts)、[归档与历史](src/mysql-documents.ts)、[本表读写视图](src/document-storage.ts) | /document-contracts与/document-renderer不依赖数据库；/mysql-documents保留逐字段释放、稳定内容摘要、同内容唯一归档和当前订单/空间/财务历史门禁 |
 | [经营空间边界](src/mysql-workspace-scope.ts) | `/mysql-workspace-scope` 核请求空间所属租户及跨空间写入；原初始化/恢复只读取默认空间，原Guard先裁定请求授权 |
 | [配置运行时DTO](src/config-request.dto.ts) | `/configuration-dto` 与原API共用字段、嵌套校验和装饰器元数据；规则候选采用同一类，审批、业务规则及保存仍由所属服务处理 |
