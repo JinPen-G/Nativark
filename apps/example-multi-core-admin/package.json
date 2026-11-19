@@ -1,0 +1,43 @@
+{
+  "name": "@rental-os/example-multi-core-admin",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "公共后台与 Rental、工单两标准 Core 的受控示范宿主",
+  "scripts": {
+    "predev": "npm run build -w @rental-os/core-contracts && npm run build -w @rental-os/platform-contracts",
+    "dev": "vite --host 127.0.0.1 --strictPort",
+    "prebuild": "npm run build -w @rental-os/core-contracts && npm run build -w @rental-os/platform-contracts",
+    "build": "tsc -p tsconfig.json && vite build",
+    "lint": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@rental-os/core-contracts": "0.1.0",
+    "@rental-os/example-tickets-core": "0.1.0",
+    "@rental-os/platform-admin": "0.1.0",
+    "@rental-os/platform-contracts": "0.1.0",
+    "@rental-os/rental-core": "0.1.0",
+    "@tanstack/react-query": "5.101.4",
+    "@tanstack/react-table": "8.21.3",
+    "axios": "1.19.0",
+    "dayjs": "1.11.21",
+    "lucide-react": "^1.49.0",
+    "motion": "14.6.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-router-dom": "7.18.2",
+    "zustand": "5.0.14",
+    "@rental-os/shared": "0.1.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.3",
+    "@types/node": "22.20.1",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@vitejs/plugin-react": "6.0.5",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3",
+    "vite": "8.2.1"
+  }
+}

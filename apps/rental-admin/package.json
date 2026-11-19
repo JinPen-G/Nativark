@@ -26,7 +26,8 @@
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-router-dom": "7.18.2",
-    "zustand": "5.0.14"
+    "zustand": "5.0.14",
+    "@rental-os/shared": "0.1.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.3.3",

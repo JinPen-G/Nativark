@@ -19,6 +19,9 @@ export { createRentalAdminHost } from "./host-context";
 export type { RentalAdminHost, RentalAdminHostOptions, RentalAdminHostState } from "./host-context";
 export { createRentalBrowserAdminHost } from "./browser-host";
 export type { RentalBrowserAdminHostOptions } from "./browser-host";
+export { createRentalNavigation } from "./browser-navigation";
+export { createRentalShell } from "./browser-shell";
+export type { RentalShellOptions } from "./browser-shell";
 
 export interface RentalAdminContexts {
   useOrderContext: () => RentalOrderPageContext;

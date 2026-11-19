@@ -20,7 +20,8 @@
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-router-dom": "7.18.2",
-    "@rental-os/rental-core": "0.1.0"
+    "@rental-os/rental-core": "0.1.0",
+    "@rental-os/shared": "0.1.0"
   },
   "devDependencies": {
     "@types/react": "19.2.18",

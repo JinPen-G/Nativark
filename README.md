@@ -114,6 +114,7 @@ Rental Core 是首个业务示范，提供商品、资产、库存、报价、�
 | `packages/platform-admin` | 公共后台外壳、UIArc、组织/安全/订阅/集成/工具设置与 Core 页面适配，原后台窄转接同一实现 | [公共前端导读](packages/platform-admin/README.md) |
 | `apps/platform-admin` | 默认无Core的公共Web宿主，登录/改密、公共管理、组织/安全/订阅与集成设置，真实运行继续验收 | [公共后台导读](apps/platform-admin/README.md) |
 | `apps/example-tickets-admin` | 复用同一公共应用的工单Web宿主，四页声明接线与标准包构建核验 | [工单后台导读](apps/example-tickets-admin/README.md) |
+| `apps/example-multi-core-admin` | Rental与工单共用一份公共应用、会话和查询缓存，各自按当前授权显示页面与业务范围 | [双Core后台导读](apps/example-multi-core-admin/README.md) |
 | `apps/admin` | SaaS 管理、租户公共后台与现有业务页面 | [入口](apps/admin/src/main.tsx)、[本端规则](apps/admin/AGENTS.md) |
 | `packages/rental-core` | 租赁领域合同、规则、服务、仓储、HTTP与业务、渠道和开业页面贡献；原各端兼容消费，完整标准装配继续迁移 | [Rental包导读](packages/rental-core/README.md) · [会员与客户](packages/rental-core/admin/membership/README.md) · [工作台与报表](packages/rental-core/admin/operations/README.md) · [渠道](packages/rental-core/admin/channels/README.md) · [开业](packages/rental-core/admin/setup/README.md) |
 | `packages/shared` | 既有各端合同兼容总出口，公共和Rental单源分别来自各自包 | [正式出口](packages/shared/src/index.ts)、[包配置](packages/shared/package.json) |

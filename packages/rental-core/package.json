@@ -1703,7 +1703,9 @@
     "./clients/website-ui/source/pages/ProductDetailPage": "./clients/website-ui/pages/ProductDetailPage.tsx",
     "./clients/website-ui/source/pages/ProductsPage": "./clients/website-ui/pages/ProductsPage.tsx",
     "./clients/website-ui/source/theme": "./clients/website-ui/theme.ts",
-    "./clients/website-ui/source/types": "./clients/website-ui/types.ts"
+    "./clients/website-ui/source/types": "./clients/website-ui/types.ts",
+    "./admin/browser-navigation": "./admin/browser-navigation.ts",
+    "./admin/browser-shell": "./admin/browser-shell.tsx"
   },
   "typesVersions": {
     "*": {
@@ -3320,6 +3322,12 @@
       ],
       "clients/website-ui/source/types": [
         "./clients/website-ui/types.ts"
+      ],
+      "admin/browser-navigation": [
+        "admin/browser-navigation.ts"
+      ],
+      "admin/browser-shell": [
+        "admin/browser-shell.tsx"
       ]
     }
   },

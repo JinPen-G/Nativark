@@ -219,7 +219,10 @@
     "build:ai-native-data": "npm run build -w @rental-os/ai-native-data",
     "lint:ai-native-data": "npm run lint -w @rental-os/ai-native-data",
     "build:ai-native-server": "npm run build -w @rental-os/ai-native-server",
-    "lint:ai-native-server": "npm run lint -w @rental-os/ai-native-server"
+    "lint:ai-native-server": "npm run lint -w @rental-os/ai-native-server",
+    "build:example-multi-core-admin": "npm run build -w @rental-os/example-multi-core-admin",
+    "dev:example-multi-core-admin": "npm run dev -w @rental-os/example-multi-core-admin",
+    "lint:example-multi-core-admin": "npm run lint -w @rental-os/example-multi-core-admin"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",

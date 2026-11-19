@@ -72,10 +72,18 @@ export function RentalAdminApplication() {
 
 订单照片直接复用原 `ItemGroupPhoto` 和同一个 `RentalCatalogPageProvider`，图片查询、身份键及对象 URL 释放沿原实现。[原照片组件](catalog/ItemGroupPhoto.tsx) · [商品接点](catalog/page-context.ts) · [工单请求](work-orders/client.ts)
 
+## 浏览器与多个 Core
+
+浏览器宿主创建一次 `createRentalBrowserAdminSession`，把 Rental 与其他 Core 的页面贡献交给同一注册表。`createRentalNavigation(registered.pages, session)` 提供原深链接、通知目标和 `getCoreContainer`；`createRentalShell` 向公共壳提供原经营空间选择与消息。两个工厂从 `@rental-os/rental-core/admin` 或精确子出口 `/admin/browser-navigation`、`/admin/browser-shell` 导入。[同一会话](browser.ts) · [导航工厂](browser-navigation.ts) · [壳工厂](browser-shell.tsx)
+
+公共应用、Rental Provider 和其他 Core 复用这一份会话与 QueryClient。工单使用自己的租户范围，Rental 页面按当前服务端目录和已验证会话取得经营空间；未选经营空间不影响获权工单和公共设置。Core、成员授权或会话变化后，原请求和导航继续复验当前范围。
+
+宿主按当前页面传入 `contextSwitcher`。`undefined` 使用 Rental 原经营空间选择器，`null` 显式留空，也可传入自己的公共上下文组件。同一个 Shell 和通知 Provider 持续挂载，切换页面或撤销其他 Core 时保留当前正文的原操作状态。完整双 Core 装配只需宿主入口、薄壳和固定部署锁。[双Core示范](../../../apps/example-multi-core-admin/README.md) · [单Rental宿主](../../../apps/rental-admin/README.md)
+
 ## 验证入口
 
 `admin/tsconfig.json` 直接复用公共 `platform-admin` 包的配置，覆盖十二组页面、统一宿主、浏览器会话与通知。源码宿主同时准备公共 UI 使用的 `ui-arc` 和 `ui-motiq` 保留源码，入口与取出范围见独立应用导读。[类型配置](tsconfig.json) · [独立应用](../../../apps/rental-admin/README.md#源码取出范围)
 
-直接依赖沿 Rental 包的可选 peer 声明及宿主实际依赖准备。日期使用 `dayjs`，订单列表使用 `@tanstack/react-table`，HTTP 兼容处理使用 `axios`，保留的卡片与报表动效使用 `motion`。[正式包声明](../package.json)
+直接依赖沿 Rental 包的可选 peer 声明及宿主实际依赖准备。使用这些后台出口的宿主声明与 Core 同版本的 `@rental-os/shared`，供给原运行协议。日期使用 `dayjs`，订单列表使用 `@tanstack/react-table`，HTTP 兼容处理使用 `axios`，保留的卡片与报表动效使用 `motion`。[正式包声明](../package.json)
 
 必要类型检查覆盖宿主源码和统一页面贡献。定向离线验证沿实际 Provider 与页面钩子，核对必需输入、租户与经营空间差异、当前会话一致性、取消及迟到响应、登记导航、图片供给和真实刷新委托。内存构建从实际应用入口解析页面、公共组件和样式，依赖与安装包 fixture 在对应证据中明确。浏览器、真实 HTTP、数据库、支付和完整标准装配分别按宿主授权取得证据。
