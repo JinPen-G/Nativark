@@ -2,6 +2,7 @@
   "extends": "../../../apps/platform-admin/tsconfig.json",
   "include": [
     "index.tsx",
+    "host-context.tsx",
     "orders",
     "work-orders",
     "capabilities",

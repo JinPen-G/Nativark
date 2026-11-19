@@ -143,7 +143,9 @@ export function createPlatformAdminApplication(options: PlatformAdminApplication
       { path: `/settings/${kind}/new`, element: <PublicManagementPage kind={kind} edit /> },
       { path: `/settings/${kind}/:id`, element: <PublicManagementPage kind={kind} edit /> }
     ]),
-    ...createRoutesFromElements(createCoreRouteElements(options.pages ?? new Map(), { brandName: options.brandName })),
+    ...createRoutesFromElements(createCoreRouteElements(options.pages ?? new Map(), {
+      brandName: options.brandName, getContainer: options.getCoreContainer
+    })),
     { path: "*", element: <Result status="404" title="404" /> }
   ] }
   ]);

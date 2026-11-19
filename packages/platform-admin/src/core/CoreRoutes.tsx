@@ -1,5 +1,5 @@
 /** 已登记Core路由消费原会话、真实范围与就绪；沿原Router和页头运行，不重建后台外壳。 */
-import type { ComponentType, ReactNode } from "react";
+import { useSyncExternalStore, type ComponentType, type ReactNode } from "react";
 import { Route, useNavigate, useParams } from "react-router-dom";
 import { corePageText, resolveCorePageLocation, type CoreRegisteredPage, type CoreScopeReference } from "@rental-os/core-contracts";
 import { useLocale } from "../app/locale";
@@ -15,6 +15,8 @@ export interface CoreRouteOptions {
   brandName: string;
   /** 原宿主按当前Core业务上下文提供；租户范围Core可以省略，不补Rental空间默认值。 */
   containers?: Readonly<Record<string, CoreScopeReference["container"]>>;
+  /** 动态业务容器来自当前宿主投影，通过同一 Runtime 订阅通知，优先于固定 containers。 */
+  getContainer?: (coreId: string, pageId: string) => CoreScopeReference["container"];
 }
 export type CoreRouteComponent = ComponentType<{ routeParams?: Readonly<Record<string, string>> }>;
 type Pages = ReadonlyMap<string, CoreRegisteredPage<CoreRouteComponent>>;
@@ -26,25 +28,31 @@ export function createCoreRouteElements(pages: Pages, options: CoreRouteOptions)
 }
 
 function RegisteredCoreRoute({ page, pages, options }: { page: CoreRegisteredPage<CoreRouteComponent>; pages: Pages; options: CoreRouteOptions }) {
-  const { currentSessionEpoch } = useAdminRuntime();
+  const { currentSessionEpoch, subscribe } = useAdminRuntime();
+  // Getter 可以返回新对象；订阅其稳定值，避免新引用循环，也不捕获创建 Router 时的旧容器。
+  const readContainer = () => JSON.stringify(options.getContainer
+    ? options.getContainer(page.coreId, page.definition.id) : options.containers?.[page.coreId]);
+  const containerSnapshot = useSyncExternalStore(subscribe, readContainer, readContainer);
+  const container: CoreScopeReference["container"] = containerSnapshot ? JSON.parse(containerSnapshot) : undefined;
   const session = useCoreSession(), { locale } = useLocale();
   const permitted = session.canAccess(page.coreId, page.definition.permissions);
   return <QueryState loading={session.isPending} error={session.error} onRetry={session.refetch}>
     {permitted && session.data
-      ? <ScopedCoreRoute key={JSON.stringify([currentSessionEpoch(), page.key, options.containers?.[page.coreId]])}
-        page={page} pages={pages} options={options} context={session.data} canAccess={session.canAccess} />
+      ? <ScopedCoreRoute key={JSON.stringify([currentSessionEpoch(), page.key, containerSnapshot])}
+        page={page} pages={pages} options={options} container={container} context={session.data} canAccess={session.canAccess} />
       : <><PageHeading title={corePageText(page.definition.title, locale)} brandName={options.brandName} />
         <Result status="403" title={locale === "en-US" ? "This Core page is unavailable" : "当前Core页面不可用"}
           subTitle={locale === "en-US" ? "Ask your tenant administrator to check Core assignment and page access." : "请联系租户管理员核对Core分配及页面权限。"} /></>}
   </QueryState>;
 }
 
-function ScopedCoreRoute({ page, pages, options, context, canAccess }: {
+function ScopedCoreRoute({ page, pages, options, container, context, canAccess }: {
   page: CoreRegisteredPage<CoreRouteComponent>; pages: Pages; options: CoreRouteOptions;
+  container: CoreScopeReference["container"];
   context: NonNullable<ReturnType<typeof useCoreSession>["data"]>; canAccess: ReturnType<typeof useCoreSession>["canAccess"];
 }) {
   const { currentSessionEpoch } = useAdminRuntime();
-  const scope = useCoreScope(page.coreId, options.containers?.[page.coreId]);
+  const scope = useCoreScope(page.coreId, container);
   const navigate = useNavigate(), matched = useParams(), { locale } = useLocale();
   const params = Object.fromEntries([...page.path.matchAll(/:([a-z][a-zA-Z0-9]*)/g)]
     .map(match => [match[1], matched[match[1]]])) as Record<string, string>;

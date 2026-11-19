@@ -15,6 +15,9 @@ import { createRentalChannelsAdminContribution, type RentalChannelsPageContext }
 import { createRentalSetupAdminContribution, type RentalSetupPageContext } from "./setup";
 import { createRentalPaymentReconciliationAdminContribution, type RentalPaymentReconciliationPageContext } from "./payment-reconciliation";
 
+export { createRentalAdminHost } from "./host-context";
+export type { RentalAdminHost, RentalAdminHostOptions, RentalAdminHostState } from "./host-context";
+
 export interface RentalAdminContexts {
   useOrderContext: () => RentalOrderPageContext;
   useWorkOrderContext: () => RentalWorkOrderPageContext;

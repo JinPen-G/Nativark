@@ -90,8 +90,13 @@ export function createBrowserAdminSession({ baseURL, storageKey }: { baseURL: st
     emit({ ready: false, sessionVerified: false });
     void bootstrap();
   }
+  /** 同步采用宿主验证后的业务范围后调用；清旧请求/缓存并通知路由，不改变公共身份或凭据。 */
+  function invalidateBusinessScope() {
+    queries.clearSessionQueryCache();
+    emit({ ...state });
+  }
   window.addEventListener("storage", stored);
   return { apiBaseURL: baseURL, runtime, ...queries, getSnapshot: () => state, subscribe: runtime.subscribe,
-    bootstrap, login, changePassword, signOut,
+    bootstrap, login, changePassword, signOut, invalidateBusinessScope,
     dispose() { window.removeEventListener("storage", stored); queries.clearSessionQueryCache(); listeners.clear(); } };
 }

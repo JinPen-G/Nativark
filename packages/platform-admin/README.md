@@ -29,6 +29,10 @@
 
 普通宿主从 `/runtime` 创建一次 `createBrowserAdminSession`，将它与品牌、可选页面注册表传给 `/application` 的 `createPlatformAdminApplication` 即可挂载。零Core省略 `pages`；增加Core只改宿主组合与Core自身贡献。实际最小组合见[零Core App](../../apps/platform-admin/src/App.tsx)和[工单入口](../../apps/example-tickets-admin/src/main.tsx)。公共应用创建唯一 Data Router，并将同一注册表用于菜单、直接路由和面包屑。
 
+有业务容器的宿主再提供 `getCoreContainer(coreId, pageId)`，返回当前已验证范围的 `{ type, id }`；租户范围页面可返回 `undefined`。路由每次读取当前值，变化后替换旧页面及主动作，同一个 Router 不捕获首次装配的容器。所需范围和配置就绪仍由所属 Core 的服务端贡献裁定。
+
+宿主采用服务端返回的新业务范围后，同步调用 `session.invalidateBusinessScope()`。它中止旧请求、递增会话代次、清除同一查询缓存并通知页面，保留公共登录身份和凭据。已有宿主自行供给 `AdminRuntime` 时，在原切换提交点执行等价的取消、代次、缓存及订阅通知；不要创建第二套缓存。[组合参数](src/application-context.ts) · [范围与路由](src/core/CoreRoutes.tsx) · [公共会话](src/runtime/browser-session.ts)
+
 该应用同时登记 `/invite` 和 `/login/:tenantCode`。公开邀请客户端复用会话创建时的公开 API 基址 `session.apiBaseURL`，与认证请求、租户头和刷新凭据隔离；租户编码只用于表单预填。人员邀请默认提交空业务范围，已有 Rental 宿主从 `/messaging` 提供原经营空间插槽；具体业务授权仍由所属 Core 在原事务裁定。寄件和客服目录按当前集成权限进入，邮件配置目标沿正式公共集成路由。
 
 已有完整宿主可按下面端口逐层接入。
