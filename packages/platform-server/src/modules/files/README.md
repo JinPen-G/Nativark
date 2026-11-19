@@ -67,6 +67,8 @@ await files.downloadUrl(tenantId, fileAssetId, owner);
 
 `FileStorageCleanup` 没有计时器或租户发现。原 Nest 宿主仍持有唯一计时器，Rental 兼容应用发现原租户集合并逐租户委托三个清理方法。[兼容应用](../../../../rental-core/src/file-application-runtime.ts)没有启动钩子或另一套定时器。原完成暂存清理在发送 DELETE 前记录 unknown，失应答及提交结果未知时只 HEAD 原键，保持完成文件与证据不变。原过期 session→asset 两写以同一 callback 事务按原顺序提交或回滚，事务内不请求对象存储。专用保留场景由原宿主明确传入，缺少租户的调用在查询前拒绝。
 
+待删除业务文件先在短事务中按原状态、修订、提供者、对象键和场景占用；只有收到本次 `delete_pending → delete_in_progress` 提交确认的调用方发送一次 DELETE。并发调用、重启和失应答后只 HEAD 原键，404 才能确认删除。结果写入仍匹配原占用修订，迟到响应不能改写新的文件事实。明确在派发前缺配置时可释放自己的占用；DELETE 开始后，Boolean 失败或异常都保留原结果待核对。
+
 `issueFileDownloadReference` 必须接实际业务 ACL 和成功审计参加者，配置/审计让出执行后继续核对原文件绑定及当前权限。模拟引用需宿主显式允许。原组合在进入公共内核前继续执行实名、知识、企业凭证及专用检查的原拒绝或专用读取规则。可公开商品图片仍经 Rental 原发布证据和当前绑定核验，公共内核没有默认公开场景。
 
 ## 数据与装配
@@ -79,4 +81,4 @@ await files.downloadUrl(tenantId, fileAssetId, owner);
 
 ## 验证
 
-本片复用原文件生命周期用例及必要定向类型检查，覆盖存储原语、元数据/原键回执、原上传/冻结、过期及完成暂存清理、拒绝与 ACL。类型和离线 fixture 证据随原专项记录收口，真实数据库、对象存储、HTTP、浏览器与完整安装继续沿原验收入口。[原生命周期用例](../../../../../tests/file-storage-lifecycle.test.cjs) · [知识文件用例](../../../../../tests/ai-native-knowledge-lane-b-file-runtime.test.cjs) · [专项接续](../../../../../docs/平台底座/Core接入/平台Core接入-协作接续.md)
+本片复用原文件生命周期用例及必要定向类型检查，覆盖存储原语、元数据/原键回执、原上传/冻结、过期及完成暂存清理、拒绝与 ACL。待删除文件另核并发单次派发、失应答仅观察、原键修订冲突和提交失应答；这些离线 fixture 不代替真实数据库、对象存储、HTTP、浏览器与完整安装验证。[原生命周期用例](../../../../../tests/file-storage-lifecycle.test.cjs) · [知识文件用例](../../../../../tests/ai-native-knowledge-lane-b-file-runtime.test.cjs) · [Core接入手册](../../../../core-contracts/README.md#五步快速接入)

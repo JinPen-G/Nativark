@@ -24,7 +24,7 @@
 | 公共文件台账 | [列表与模拟元数据](src/modules/files/file-ledger.ts)从 `/files` 提供，原IntegrationsService委托；当前租户、实际业务可读范围、等待后复核及原创建日志保持，实际上传仍走原键应用 |
 | 通知与适配日志 | [三步接入](src/modules/notifications/README.md)、[台账](src/modules/notifications/notification-ledger.ts)与[HTTP模块](src/modules/notifications/notifications-http.module.ts)从 `/notifications` 提供，字段和政策共用正式声明；模板由宿主供给，原租户隔离、模拟登记和日志失败后的事实保留 |
 | 异步任务台账 | [三步接入](src/modules/jobs/README.md)、[应用/仓储](src/modules/jobs/job-ledger.ts)与[HTTP模块](src/modules/jobs/jobs-http.module.ts)从 `/jobs` 提供；共用原租户内任务、排期及尝试次数，业务执行/日志由宿主供给，缺打印参加者明确不可用 |
-| 文件清理与下载 | [按租户清理](src/modules/files/file-cleanup.ts)、[受保护下载](src/modules/files/file-download.ts)；原完成暂存清理先记 unknown，失应答仅核原键；下载沿实际业务 ACL、原绑定复核与成功审计 |
+| 文件清理与下载 | [按租户清理](src/modules/files/file-cleanup.ts)、[受保护下载](src/modules/files/file-download.ts)；原完成暂存及待删除文件先持久占用，失应答仅核原键；下载沿实际业务 ACL、原绑定复核与成功审计 |
 | 文件配置围栏 | [只读文件依赖](src/modules/files/file-integration-dependencies.ts) 从 `/file-integration-dependencies` 提供，原配置同事务读取文件、上传/冻结/清理收据，空 Core 目录不能代替依赖证据 |
 | 公共设置 | [租户外观](src/modules/client/tenant-appearance-profile.service.ts)、[本人外观](src/modules/client/account-appearance.service.ts)、[存储端口](src/modules/platform/platform-appearance-data-store.ts)；修订冲突、省略与清空沿原语义 |
 | 公共审计 | [日志写入与脱敏](src/common/operation-log.service.ts) 从 `/operation-log` 提供；宿主供给原日志表，业务空间来自同一ALS，敏感读取要求持久写入成功。原OAuth/MCP/Core原收据审计仍由各自严格事务入口负责 |
@@ -61,6 +61,8 @@ const platform = PlatformServerModule.register({
 文件服务从 `/files` 消费原字节、格式、原存储键和文件表实现；原运行时与元数据仓储已委托同一实现。`createOriginalFileUploadFacts` 通过原配置锁、授权/引用参加者和同事务建立pending事实，`readOriginalFileUploadReceipt` 仅为仍有效会话续签原暂存键，不延长原有效期。`freezeFileUploadContent` 在原完成链中先提交唯一目标再写一次，恢复只核原目标；最终激活及知识绑定仍在原完成事务。公共文件两模型/迁移已提供，业务HTTP及完整应用装配继续按PCH推进，知识、专用检查、企业证据及附件读取仍须由各自原授权链裁定。[文件入口及数据边界](src/modules/files/README.md)
 
 `FileStorageCleanup` 由原宿主按租户调用，宿主继续持有唯一计时器、租户发现与专用保留场景。过期会话和资产的两次写入在同一 callback 事务内提交或回滚，事务内不访问对象存储。`issueFileDownloadReference` 使用所属业务的实际 ACL 和必须成功的审计，在配置或审计等待后复核当前权限及原文件绑定，再返回短时 GET。原专用入口继续裁定实名、知识、企业证明与检查资料。
+
+待删除业务文件的原状态、修订、提供者、对象键和场景在短事务中共同占用。仅确认本次占用提交的调用方发送一次 DELETE，后续调用和重启只 HEAD 原键；404 与原修订 CAS 一起确认删除，失应答或迟到响应不能重新派发或覆盖新事实。派发前明确缺配置可释放自己的占用，外部请求开始后保留原结果待核对。
 
 新Core使用`FileStorageApplication`，由受控宿主供给真实事务、配置和其`FileStorageAuthority`，按固定module/type/scene调用创建、回执、完成、下载及每租户清理。各来源仍复验当前授权，领域激活可参加同一事务；需要主体锁时先锁主体再执行公共回调中的配置锁。接口和三步接入在[文件模块](src/modules/files/README.md#core-接入)维护，Core不需要导入旧API文件运行时。
 

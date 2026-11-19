@@ -1,5 +1,5 @@
 /** 原每租户文件清理内核，无定时器、租户发现或新的任务执行者。
- * 完成暂存对象在DELETE前先持久unknown，失应答后仅HEAD原键；冻结中的原操作保持不变。 */
+ * DELETE前持久占用，失应答后仅HEAD原键；冻结中的原操作保持不变。 */
 import { ConflictException, ServiceUnavailableException } from "@nestjs/common";
 import type { FileUploadCleanupSummary } from "@rental-os/platform-contracts/files";
 import { fileStorageLocationHash, frozenFileContentHash } from "@rental-os/platform-contracts/file-content-binding";
@@ -11,7 +11,10 @@ type AssetFilter = {
   id?: string;
   tenantId?: string;
   status?: string | { in: string[] };
-  uploadScene?: { not: string };
+  uploadScene?: string | { not: string };
+  updatedAt?: Date;
+  storageKey?: string;
+  storageProvider?: string;
 };
 type SessionFilter = {
   id?: string;
@@ -221,34 +224,62 @@ export class FileStorageCleanup<Transaction extends FileCleanupTransaction> {
 
   async cleanupPendingFileAssetDeletes(tenantId: string, limit = 50) {
     if (!tenantId) throw new ConflictException("文件清理缺少当前租户");
-    const rows = await this.participants.store.fileAsset.findMany({
+    const rows = structuredClone(await this.participants.store.fileAsset.findMany({
       where: { tenantId, status: { in: ["delete_pending", "delete_in_progress"] }, ...this.reservedSceneFilter() },
       orderBy: { updatedAt: "asc" },
       take: Math.max(1, Math.min(limit, 100))
-    });
+    }));
     let deleted = 0;
     let pending = 0;
     for (const row of rows) {
       if (this.isReservedScene(row.uploadScene)) continue;
-      const claimed = await this.participants.store.fileAsset.updateMany({
-        where: { id: row.id, tenantId, status: { in: ["delete_pending", "delete_in_progress"] }, ...this.reservedSceneFilter() },
-        data: { status: "delete_in_progress" }
-      });
-      if (claimed.count !== 1) continue;
+      const ownsDispatch = row.status === "delete_pending";
+      const claim = ownsDispatch ? await this.participants.transaction(async tx => {
+        const claimed = await tx.fileAsset.updateMany({
+          where: { id: row.id, tenantId, status: "delete_pending", updatedAt: row.updatedAt,
+            storageKey: row.storageKey, storageProvider: row.storageProvider, uploadScene: row.uploadScene },
+          data: { status: "delete_in_progress" }
+        });
+        if (claimed.count !== 1) return;
+        const current = await tx.fileAsset.findFirst({ where: { id: row.id, tenantId } });
+        if (!current || current.status !== "delete_in_progress"
+          || requestFingerprint({ ...current, status: row.status, updatedAt: row.updatedAt }) !== requestFingerprint(row))
+          throw new ConflictException("原文件删除占用依据已变化");
+        return structuredClone(current);
+      }) : row;
+      if (!claim) continue;
+      const receipt = { id: claim.id, tenantId, status: "delete_in_progress", updatedAt: claim.updatedAt,
+        storageKey: claim.storageKey, storageProvider: claim.storageProvider, uploadScene: claim.uploadScene };
+      let dispatched = false;
       try {
-        if (row.storageProvider !== "local_mock") {
-          const config = await this.participants.runtimeConfig(tenantId, row.storageProvider);
-          if (!config || !(await this.participants.deleteObject(config, row.storageKey, new Date()))) throw new ServiceUnavailableException("对象存储未确认删除文件");
+        if (claim.storageProvider !== "local_mock") {
+          const config = await this.participants.runtimeConfig(tenantId, claim.storageProvider);
+          if (!config || config.provider !== claim.storageProvider) throw new ServiceUnavailableException("原文件对象存储配置不可用");
+          let absent: boolean;
+          if (ownsDispatch) {
+            // 只有确认提交本次pending占用的调用方能派发；Boolean失败不证明请求未执行。
+            dispatched = true;
+            absent = await this.participants.deleteObject(config, claim.storageKey, new Date());
+          } else {
+            // 同时运行、重启和超时都不能取得第二次DELETE权，只观察原提供方和原对象键。
+            const at = new Date();
+            const signed = this.participants.presign(config, "HEAD", claim.storageKey, claim.mimeType, new Date(at.getTime() + 60_000));
+            const response = await this.participants.objectRequest(signed.url, { method: "HEAD", headers: signed.headers });
+            absent = response.status === 404;
+          }
+          if (!absent) throw new ServiceUnavailableException("原文件删除结果尚未证实");
         }
-        await this.participants.store.fileAsset.updateMany({ where: { id: row.id, tenantId, status: "delete_in_progress" }, data: { status: "deleted" } });
-        deleted += 1;
+        const recorded = await this.participants.store.fileAsset.updateMany({ where: receipt, data: { status: "deleted" } });
+        deleted += recorded.count;
       } catch {
-        await this.participants.store.fileAsset.updateMany({ where: { id: row.id, tenantId, status: "delete_in_progress" }, data: { status: "delete_pending" } });
+        // 配置读取等派发前失败可释放本占用；开始DELETE或仅观察原结果后始终保留unknown。
+        if (ownsDispatch && !dispatched)
+          await this.participants.store.fileAsset.updateMany({ where: receipt, data: { status: "delete_pending" } });
         pending += 1;
       }
     }
     if (deleted || pending) {
-      await this.participants.recordAudit?.({ tenantId, action: "file.delete.cleanup", targetType: "file", detail: "重试待删除业务文件", metadata: { scanned: rows.length, deleted, pending } });
+      await this.participants.recordAudit?.({ tenantId, action: "file.delete.cleanup", targetType: "file", detail: "核对待删除业务文件", metadata: { scanned: rows.length, deleted, pending } });
     }
     return { scanned: rows.length, deleted, pending };
   }
