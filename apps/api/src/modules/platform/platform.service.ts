@@ -1,4 +1,5 @@
 /** 原组合平台的业务适配及内存演示。持久化组织/安全、字典/编号委托同一公共应用；Rental范围与初始化仍由原业务链裁定。 */
+import { createRentalLegacyPermissionModules } from "@rental-os/rental-core/permissions";
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Prisma } from "@prisma/client";
@@ -222,85 +223,7 @@ export class PlatformService {
   ];
 
   private readonly permissionTree: PermissionModule[] = [
-    {
-      code: "rental-core",
-      name: "Rental Core",
-      children: [
-        { code: "rental-core:catalog:view", name: "通用商品目录查看" },
-        { code: "rental-core:catalog:manage", name: "通用商品目录管理" },
-        { code: "rental-core:asset:view", name: "通用资产库存查看" },
-        { code: "rental-core:asset:manage", name: "通用资产库存管理" },
-        { code: "rental-core:maintenance:view", name: "养护工单查看", description: "查看归还处置和养护工单" },
-        { code: "rental-core:maintenance:manage", name: "养护工单处理", description: "创建、派工、开始和提交养护工单" },
-        { code: "rental-core:maintenance:review", name: "养护工单验收", description: "审核养护结果并恢复库存可用状态" },
-        { code: "rental-core:capability:view", name: "经营空间能力查看" },
-        { code: "rental-core:capability:manage", name: "经营空间能力治理" },
-        // CAM-01A：确认能力给出的风险提示（如需转接环的器材组合）才能带风险下单。
-        // 与 :manage 分开：治理能力启停是配置动作，带风险下单是一次经营决策，
-        // 两者的授权对象通常不同（店长可确认风险，但不一定负责能力启停）。
-        { code: "rental-core:capability:override", name: "能力风险例外确认" }
-      ]
-    },
-    {
-      code: "rental-os",
-      name: "租赁业务",
-      children: [
-        { code: "rental-os:rules:manage", name: "业务规则配置" },
-        // RULE-01A：发布与编辑分权（需求 4.6.14）。发布改变对外生效条款，
-        // 与「改草稿」是两个责任；共用一个码会让任何能编辑的人直接对客户生效。
-        { code: "rental-os:rules:publish", name: "业务规则发布", description: "发布或安排规则版本生效、作废已发布或待生效版本" },
-        { code: "rental-os:order:view", name: "订单查看", description: "查看租赁订单列表和详情" },
-        { code: "rental-os:order:operate", name: "订单操作", description: "新建租赁订单、领取检查和归还检查" },
-        { code: "rental-os:order:reassign", name: "资源解锁与改配", description: "解锁、释放及更换订单锁定资源，必须填写原因" },
-        { code: "rental-os:order:settle", name: "订单结算", description: "确认费用、补缴、退款或月结入账" },
-        { code: "rental-os:order:offline-payment", name: "线下收款登记", description: "登记待确认的线下收款；不含确认到账、退款或资金结算" },
-        // ORDER-CLOSE-02：裁定「该收/该退多少」与实际动钱拆成两个权限。此前四类审核
-        // 都认 order:settle，而资金事件也认它，一个权限同时授予定金额和收退款。
-        { code: "rental-os:order:fee-review", name: "费用裁定", description: "裁定逾期人工核价、提前归还退款、续租负差额与检查异常的金额；不含实际收退款" },
-        { code: "rental-os:order:create", name: "按钮-新建订单", description: "显示并执行新建租赁订单入口" },
-        { code: "rental-os:order:pickup", name: "按钮-领取交付", description: "执行领取交付和确认开始履约" },
-        { code: "rental-os:order:return", name: "按钮-归还验收", description: "执行归还验收和提交结算" },
-        { code: "rental-os:order:extend", name: "按钮-延长租期", description: "执行延长租期和逾期补办续租" },
-        { code: "rental-os:order:cancel", name: "按钮-取消/爽约", description: "执行取消订单和标记爽约" },
-        { code: "rental-os:order:close", name: "按钮-关闭/拒绝履约", description: "执行关闭订单和拒绝履约" },
-        { code: "rental-os:order:fee-manage", name: "按钮-费用处理", description: "登记订单费用、收款、退款和减免" },
-        { code: "rental-os:dispatch:manage", name: "调度管理" },
-        { code: "rental-os:price:manage", name: "价格规则" },
-        { code: "rental-os:calendar:edit", name: "营业日历编辑（草稿）", description: "新建和修改营业日历草稿，不含发布" },
-        { code: "rental-os:calendar:publish", name: "营业日历发布", description: "发布年度营业日历版本" },
-        { code: "rental-os:calendar:view-history", name: "营业日历历史只读", description: "查看历史版本、发布差异、覆盖审计与报价命中的日历依据，不得修改" },
-        { code: "rental-os:marketing:manage", name: "行销方案管理" },
-        { code: "rental-os:station:view", name: "履约地点查看" },
-        { code: "rental-os:station:manage", name: "履约地点管理" },
-        { code: "rental-os:member:view", name: "会员查看" },
-        { code: "rental-os:member:manage", name: "会员管理" },
-        // 证件类型是当前经营空间的业务配置，不是租户级会员资料维护：
-        // 空间配置人员不必顺带拿到改会员主档的权限，反之亦然。
-        { code: "rental-os:qualification-type:manage", name: "空间证件类型管理", description: "维护当前经营空间的资质证件类型" },
-        { code: "rental-os:member:review", name: "会员注册审核", description: "处理个人会员注册审核，不含证件审核" },
-        { code: "rental-os:member:qualification-review", name: "会员证件审核", description: "处理身份证件和品类资质审核" },
-        { code: "rental-os:member:account-manage", name: "会员账号与密码管理", description: "开通账号、设置临时密码和管理账号状态" },
-        { code: "rental-os:member:plan:manage", name: "会员方案编辑", description: "编辑个人和企业会员方案草稿、授予方案" },
-        { code: "rental-os:member:plan:publish", name: "会员方案发布", description: "发布会员方案版本" },
-        { code: "rental-os:member:risk-action", name: "会员风险管理", description: "登记与复核风险记录，并执行会员风险限制" },
-        // CUSTOMER-01B：敏感资料解密查看单独授权。必须出现在权限目录里——
-        // 角色管理页的可选项完全来自这棵树，漏了它就没人能被授予该权限。
-        { code: "rental-os:customer:reveal-sensitive", name: "客户敏感资料解密", description: "查看客户证件号等明文，并可查阅敏感访问审计" },
-        { code: "rental-os:customer:merge", name: "客户合并", description: "人工合并重复客户主档，不可逆" },
-        { code: "rental-os:customer:close", name: "客户注销", description: "注销客户账号或空间会员关系，不可逆" },
-        { code: "rental-os:corporate:view", name: "企业客户查看" },
-        { code: "rental-os:corporate:manage", name: "企业客户管理" },
-        { code: "rental-os:corporate:employee-manage", name: "企业员工管理", description: "维护企业管理员和员工关系" },
-        { code: "rental-os:corporate:monthly-settle", name: "按钮-企业月结回款", description: "登记企业账单回款" },
-        { code: "rental-os:finance:view", name: "财务查看", description: "查看资金流水、发票收据、调账和对账" },
-        { code: "rental-os:finance:manage", name: "财务管理", description: "维护财务单据和处理资金状态" },
-        { code: "rental-os:finance:adjust", name: "按钮-手工调账", description: "提交、审核和入账手工调账" },
-        { code: "rental-os:finance:invoice", name: "按钮-发票/收据", description: "开具、发送和作废发票收据" },
-        { code: "rental-os:finance:reconcile", name: "财务对账", description: "查看和处理资金、月结、调账异常" },
-        { code: "rental-os:service:manage", name: "增值服务管理" },
-        { code: "rental-os:report:view", name: "报表查看" }
-      ]
-    },
+    ...createRentalLegacyPermissionModules(),
     {
       code: "system",
       name: "系统设置",

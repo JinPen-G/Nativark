@@ -8,6 +8,11 @@ import { corePrismaMigrationName } from "@rental-os/core-contracts/deployment";
 
 export const RENTAL_DATA_VERSION = "0.1.0";
 export const RENTAL_DATA_READABLE = { minInclusive: "0.1.0", maxExclusive: "0.2.0" } as const;
+/** 与本版数据计划一起发行；宿主从同一固定包取模型，不回读作者工作区。 */
+export const RENTAL_PRISMA_SCHEMA = {
+  file: "prisma/schema.prisma",
+  sha256: "08dd7ecebeb5cc1f4a389ee13e062501e89cd7e5ef86bb821e9d58eaf050f7b1"
+} as const;
 export const RENTAL_DATA_MIGRATIONS = [{
   id: "rental.20261119030000-initial",
   file: "prisma/migrations/20261119030000_rental_initial/migration.sql",

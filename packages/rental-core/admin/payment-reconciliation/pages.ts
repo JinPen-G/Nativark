@@ -1,16 +1,17 @@
 /** 对账列表与批次详情共用标题、父级和原财务准入声明。 */
+import { rentalLegacyPermission, rentalPagePermissions } from "@rental-os/rental-core/permissions";
 import type { CorePageDescriptor, CorePageLocation } from "@rental-os/core-contracts";
 import type { RentalOrderSession } from "../orders/page-context";
 
 export const RENTAL_PAYMENT_RECONCILIATION_CORE_ID = "rental";
-export const RENTAL_PAYMENT_RECONCILIATION_LEGACY_PERMISSION = "rental-os:finance:reconcile";
+export const RENTAL_PAYMENT_RECONCILIATION_LEGACY_PERMISSION = rentalLegacyPermission("finance", "reconcile");
 
 export const RENTAL_PAYMENT_RECONCILIATION_PAGES = {
   batches: {
     id: "payment-reconciliation",
     path: "/payment-reconciliation",
     title: { default: "支付对账", translations: { "en-US": "Reconciliation" } },
-    permissions: [{ resource: "finance", action: "reconcile" }],
+    permissions: rentalPagePermissions("payment-reconciliation"),
     menu: {
       group: { default: "财务与对账", translations: { "en-US": "Finance & reconciliation" } },
       order: 10,
@@ -21,7 +22,7 @@ export const RENTAL_PAYMENT_RECONCILIATION_PAGES = {
     path: "/payment-reconciliation/:batchId",
     title: { default: "对账批次详情", translations: { "en-US": "Batch details" } },
     parent: "payment-reconciliation",
-    permissions: [{ resource: "finance", action: "reconcile" }],
+    permissions: rentalPagePermissions("payment-reconciliation-detail"),
   },
 } satisfies Record<string, CorePageDescriptor>;
 

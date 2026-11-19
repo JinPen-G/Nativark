@@ -1387,7 +1387,15 @@
       "require": "./dist-clients/clients/miniprogram/index.js",
       "default": "./dist-clients/clients/miniprogram/index.js"
     },
-    "./clients/website": "./clients/website/index.ts"
+    "./clients/website": "./clients/website/index.ts",
+    "./permissions": {
+      "types": "./dist/permissions.d.ts",
+      "default": "./dist/permissions.js"
+    },
+    "./manifest": {
+      "types": "./dist/manifest.d.ts",
+      "default": "./dist/manifest.js"
+    }
   },
   "typesVersions": {
     "*": {
@@ -2500,6 +2508,12 @@
       ],
       "clients/website": [
         "clients/website/index.ts"
+      ],
+      "permissions": [
+        "./dist/permissions.d.ts"
+      ],
+      "manifest": [
+        "./dist/manifest.d.ts"
       ]
     }
   },

@@ -36,6 +36,7 @@
 | [企业请求DTO](src/http-enterprise-request.dto.ts)、[订单查询DTO](src/http-enterprise-order-query.dto.ts)、[客户请求DTO](src/http-client-request.dto.ts) | 原企业申请/成员、客户注册/报价/履约及文件完成校验单源；续租、换货、委托与交接DTO各从同名HTTP子出口使用，输入校验不授予执行权 |
 | [本人地址与交付快照](src/mysql-client-delivery-address.ts)、[本人注销](src/mysql-client-account-closure.ts)、[配送区域](src/client-delivery-service-area.ts)、[宿主参加者](src/client-lifecycle-ports.ts) | 客户地址按租户与本人校验，报价/订单快照保持原值；注销沿原短信证明、会员/账号状态及会话撤销顺序。原客户Controller、报价及AI场景消费同一实现 |
 | [浏览器会话与页面装配](admin/browser/README.md)、[认证合同](src/auth-contracts.ts) | 一个宿主创建一份真实会话、刷新运输和查询缓存，向十二组页面供给当前服务端身份；旧后台消费同一实现，登录、空间切换及本机存储命名空间保持 |
+| [清单与页面权限](src/permissions.ts)、[清单工厂](src/manifest.ts) | `/permissions` 同源声明原权限及页面 OR 准入，`/manifest` 生成固定来源的发行清单；标准码只投影当前原租户/空间权限，声明不授予Core，原HTTP码保持 |
 | [主应用工厂](src/mysql-primary-application.ts)、[原宿主接线](../../apps/api/src/modules/rental-core/rental-primary-application.providers.ts) | `/mysql-primary-application` 构造同一对核心与报价/营销实例，显式提供真实配置快照、数据库和参加者；旧服务令牌、HTTP及AI消费这两个实例 |
 | [核心聚合](src/mysql-core-runtime.ts)、[宿主接点](src/core-runtime-ports.ts) | `/mysql-core-runtime` 持有原配置、库存、订单、交接及结算裁定；主应用工厂供给原依赖，Controller/AI/企业及各端继续消费原签名 |
 | [报价/营销聚合](src/mysql-business-runtime.ts)、[宿主接点](src/business-runtime-ports.ts) | `/mysql-business-runtime` 维护价格、日历、规则、报价、券、奖励和通知恢复；主应用工厂保留原正文维护读取器，当前与历史价格分别读取 |
