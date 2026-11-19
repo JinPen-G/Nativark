@@ -34,7 +34,7 @@ const sourceModules = new Set([
   "apps/admin/src/app/navigation.tsx",
   "apps/admin/src/app/navigation-terminology.ts",
   "apps/admin/src/app/categoryGovernancePreview.ts",
-  "apps/admin/src/features/auth/authStore.ts",
+  "packages/rental-core/admin/browser-auth-store.ts",
   "apps/api/src/common/api-auth.guard.ts",
   "apps/api/src/common/staff-api-policy.ts",
   "apps/api/src/common/organization-location-scope.ts",
@@ -121,7 +121,11 @@ function loadSource(relativePath) {
 const shared = loadSource("packages/shared/src/index.ts");
 const { RentalCategoryCode, RoleScope, membershipBenefitScopeMatches } = shared;
 const { APP_ROUTES, canAccessRoute } = loadSource("apps/admin/src/app/navigation.tsx");
-const { useAuthStore } = loadSource("apps/admin/src/features/auth/authStore.ts");
+const { useAuthStore } = loadSource("packages/rental-core/admin/browser-auth-store.ts").createRentalAdminAuthStore({
+  api: noAccess("auth HTTP"),
+  queries: { currentSessionEpoch: () => 0, clearSessionQueryCache() { assert.fail("Unexpected query cache access"); } },
+  onSessionRefreshed() { return () => {}; },
+});
 const { ApiAuthGuard, isTenantMembershipRoute } = loadSource("apps/api/src/common/api-auth.guard.ts");
 const { runWithRequestIdentity, getRequestIdentity } = loadSource("apps/api/src/common/request-identity.ts");
 const { PlatformRepository } = loadSource("apps/api/src/modules/platform/platform.repository.ts");

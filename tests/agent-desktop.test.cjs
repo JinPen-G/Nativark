@@ -80,11 +80,14 @@ function authFixture() {
     current = factory(store.setState, store.getState);
     return store;
   };
-  const store = load("apps/admin/src/features/auth/authStore.ts", { window, api, create,
-    CustomEvent: class extends Event { constructor(type) { super(type); } }, clearSessionQueryCache: () => epoch++, currentSessionEpoch: () => epoch,
-    onSessionRefreshed: fn => { refreshed = fn; return () => {}; } }, [
+  const store = load("packages/rental-core/admin/browser-auth-store.ts", { window, create,
+    CustomEvent: class extends Event { constructor(type) { super(type); } } }, [
     [/^import \{[^\n]*\} from [^\n]+;$/gm, ""], [/import.meta.hot/g, "false"]
-  ]).useAuthStore;
+  ]).createRentalAdminAuthStore({
+    api,
+    queries: { clearSessionQueryCache: () => epoch++, currentSessionEpoch: () => epoch },
+    onSessionRefreshed: fn => { refreshed = fn; return () => {}; },
+  }).useAuthStore;
   const context = () => ({ user: { id: "a", displayName: "Staff", permissions: ["rental-os:order:view"] },
     tenant: { tenantId: "t", tenantName: "Tenant", capabilities: [] }, workspaces: sample().workspaces, currentWorkspaceId: "w1" });
   const login = () => ({ ...context(), accessToken: "access", refreshToken: "refresh" });

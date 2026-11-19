@@ -3,6 +3,7 @@
   "include": [
     "index.tsx",
     "host-context.tsx",
+    "browser.ts",
     "orders",
     "work-orders",
     "capabilities",

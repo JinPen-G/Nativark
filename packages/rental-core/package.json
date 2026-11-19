@@ -1371,7 +1371,12 @@
     "./integration-business-participant": {
       "types": "./dist/integration-business-participant.d.ts",
       "default": "./dist/integration-business-participant.js"
-    }
+    },
+    "./auth-contracts": {
+      "types": "./dist/auth-contracts.d.ts",
+      "default": "./dist/auth-contracts.js"
+    },
+    "./admin/browser": "./admin/browser.ts"
   },
   "typesVersions": {
     "*": {
@@ -2469,6 +2474,12 @@
       ],
       "integration-business-participant": [
         "./dist/integration-business-participant.d.ts"
+      ],
+      "auth-contracts": [
+        "./dist/auth-contracts.d.ts"
+      ],
+      "admin/browser": [
+        "admin/browser.ts"
       ]
     }
   },
@@ -2500,7 +2511,8 @@
     "@rental-os/core-host": "0.1.0",
     "@rental-os/platform-core-host": "0.1.0",
     "@rental-os/web-client": "0.1.0",
-    "ajv": "^8.12.0"
+    "ajv": "^8.12.0",
+    "zustand": "5.0.14"
   },
   "peerDependenciesMeta": {
     "@nestjs/common": {
@@ -2555,6 +2567,9 @@
       "optional": true
     },
     "ajv": {
+      "optional": true
+    },
+    "zustand": {
       "optional": true
     }
   }

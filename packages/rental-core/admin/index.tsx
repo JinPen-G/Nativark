@@ -17,6 +17,8 @@ import { createRentalPaymentReconciliationAdminContribution, type RentalPaymentR
 
 export { createRentalAdminHost } from "./host-context";
 export type { RentalAdminHost, RentalAdminHostOptions, RentalAdminHostState } from "./host-context";
+export { createRentalBrowserAdminHost } from "./browser-host";
+export type { RentalBrowserAdminHostOptions } from "./browser-host";
 
 export interface RentalAdminContexts {
   useOrderContext: () => RentalOrderPageContext;

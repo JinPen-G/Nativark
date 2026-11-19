@@ -17,7 +17,7 @@ function forbidText(source, unexpected, label) {
 const router = read("apps/admin/src/app/AppRouter.tsx");
 const navigation = read("apps/admin/src/app/navigation.tsx");
 const api = read("apps/admin/src/api/platform.ts");
-const httpSource = read("apps/admin/src/api/http.ts");
+const httpSource = read("apps/admin/src/api/http.ts") + "\n" + read("packages/rental-core/admin/browser-http.ts");
 const operations = read("apps/admin/src/api/platformOps.ts");
 const shell = read("apps/admin/src/components/AppShell.tsx");
 const appearanceSwitcher = read("apps/admin/src/components/AppearanceSwitcher.tsx");
@@ -41,8 +41,8 @@ const assetWorkspacePage = read("packages/rental-core/admin/catalog/AssetWorkspa
 const rentalCoreApi = read("apps/admin/src/api/rentalCore.ts");
 const capabilityPage = read("apps/admin/src/features/rental-core/CapabilityGovernancePage.tsx");
 const appRoot = read("apps/admin/src/app/App.tsx");
-const queryClientSource = read("apps/admin/src/app/queryClient.ts");
-const authStoreSource = read("apps/admin/src/features/auth/authStore.ts");
+const queryClientSource = read("apps/admin/src/app/queryClient.ts") + "\n" + read("packages/platform-admin/src/runtime/session-queries.ts");
+const authStoreSource = read("apps/admin/src/features/auth/authStore.ts") + "\n" + read("packages/rental-core/admin/browser-auth-store.ts");
 const themeSource = read("apps/admin/src/app/theme.tsx");
 
 [

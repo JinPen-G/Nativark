@@ -8,15 +8,11 @@
 import type {
   BusinessWorkspace,
   WorkspaceMember,
-  LoginRequest,
-  LoginResponse,
-  ChangePasswordRequest,
   CreateBusinessWorkspaceRequest,
   RefreshSessionRequest,
   ResetUserPasswordResult,
   ResetLocalDemoPasswordRequest,
   ResetLocalDemoPasswordResult,
-  SessionContextResponse,
   PermissionModule,
   PlatformAuditLogRow,
   SaveSystemRoleRequest,
@@ -34,19 +30,19 @@ import type {
   UpdateTenantRequest,
   UpdateTenantStatusRequest
 } from "@rental-os/shared";
-import { request } from "./http";
+import { request, rentalBrowserSession } from "./http";
 import { createPlatformSettingsApi } from "@rental-os/platform-admin/platform-settings/client";
 const platformSettingsApi = createPlatformSettingsApi(request);
 
 export const api = {
   // ---- 会话 ----
-  login: (payload: LoginRequest) => request<LoginResponse>("/auth/login", { method: "post", data: payload }),
+  login: rentalBrowserSession.api.login,
   resetLocalDemoPassword: (payload: ResetLocalDemoPasswordRequest) => request<ResetLocalDemoPasswordResult>("/auth/development/reset-demo-password", { method: "post", data: payload }),
   logout: (payload: RefreshSessionRequest) => request<{ loggedOut: boolean }>("/auth/logout", { method: "post", data: payload }),
-  changePassword: (payload: ChangePasswordRequest) => request<LoginResponse>("/auth/change-password", { method: "post", data: payload }),
+  changePassword: rentalBrowserSession.api.changePassword,
   // SPACE-05：切换当前经营空间。服务端重新校验成员资格与空间状态。
-  switchWorkspace: (payload: { workspaceId: string }) => request<LoginResponse>("/auth/switch-workspace", { method: "post", data: payload }),
-  sessionContext: () => request<SessionContextResponse>("/auth/session-context"),
+  switchWorkspace: rentalBrowserSession.api.switchWorkspace,
+  sessionContext: rentalBrowserSession.api.sessionContext,
 
   // ---- 系统规则与安全基线 ----
   systemRules: () => request<SystemRulesConfig>("/platform/system-rules"),

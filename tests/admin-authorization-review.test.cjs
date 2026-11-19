@@ -13,7 +13,7 @@ test('platform parameter navigation follows explicit server grants without givin
   const fs = require('node:fs');
   const path = require('node:path');
   const ts = require('typescript');
-  const source = ts.createSourceFile('authStore.ts', fs.readFileSync(path.join(__dirname, '../apps/admin/src/features/auth/authStore.ts'), 'utf8'), ts.ScriptTarget.Latest, true);
+  const source = ts.createSourceFile('browser-auth-store.ts', fs.readFileSync(path.join(__dirname, '../packages/rental-core/admin/browser-auth-store.ts'), 'utf8'), ts.ScriptTarget.Latest, true);
   let body;
   function visit(node) {
     if (ts.isMethodDeclaration(node) && node.name.getText(source) === 'hasPermission') body = node.body.getText(source);
