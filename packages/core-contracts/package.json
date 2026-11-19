@@ -8,15 +8,36 @@
   "types": "dist/index.d.ts",
   "typesVersions": {
     "*": {
-      "package": ["dist/package.d.ts"],
-      "archive": ["dist/archive.d.ts"],
-      "install": ["dist/install.d.ts"],
-      "deployment": ["dist/deployment.d.ts"],
-      "prisma": ["dist/prisma.d.ts"],
-      "github": ["dist/github.d.ts"],
-      "development": ["dist/development.d.ts"],
-      "github-repository": ["dist/github-repository.d.ts"],
-      "platform-source": ["dist/platform-source.d.ts"]
+      "package": [
+        "dist/package.d.ts"
+      ],
+      "archive": [
+        "dist/archive.d.ts"
+      ],
+      "install": [
+        "dist/install.d.ts"
+      ],
+      "deployment": [
+        "dist/deployment.d.ts"
+      ],
+      "prisma": [
+        "dist/prisma.d.ts"
+      ],
+      "github": [
+        "dist/github.d.ts"
+      ],
+      "development": [
+        "dist/development.d.ts"
+      ],
+      "github-repository": [
+        "dist/github-repository.d.ts"
+      ],
+      "platform-source": [
+        "dist/platform-source.d.ts"
+      ],
+      "platform-data-package": [
+        "dist/platform-data-package.d.ts"
+      ]
     }
   },
   "exports": {
@@ -59,6 +80,10 @@
     "./platform-source": {
       "types": "./dist/platform-source.d.ts",
       "default": "./dist/platform-source.js"
+    },
+    "./platform-data-package": {
+      "types": "./dist/platform-data-package.d.ts",
+      "default": "./dist/platform-data-package.js"
     }
   },
   "scripts": {

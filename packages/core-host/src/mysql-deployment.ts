@@ -21,6 +21,7 @@ export function createMysqlCoreDeploymentObservation(input: {
   database: Reader;
   platform: CoreMysqlDataPlan;
   cores: readonly (CoreMysqlDataPlan & { coreId: string })[];
+  dataCapabilities?: readonly (CoreMysqlDataPlan & { capabilityId: string })[];
 }): CoreDeploymentObservationSource {
   const plan = (value: CoreMysqlDataPlan) => {
     const data = CoreDataContractSchema.parse(value.data), names = [...value.migrationNames];
@@ -30,8 +31,11 @@ export function createMysqlCoreDeploymentObservation(input: {
     return { names, ids: new Map(names.map((name, index) => [name, data.migrations[index].id])), physical: value.readPhysical.bind(value) };
   };
   const platform = plan(input.platform), cores = input.cores.map(value => ({ ...plan(value), coreId: CoreIdSchema.parse(value.coreId) }));
+  const capabilities = (input.dataCapabilities ?? []).map(value => ({ ...plan(value), capabilityId: CoreIdSchema.parse(value.capabilityId) }));
   if (new Set(cores.map(core => core.coreId)).size !== cores.length)
     throw new CoreAccessError("core_unavailable", "实际数据观察不能重复登记Core");
+  if (new Set(capabilities.map(capability => capability.capabilityId)).size !== capabilities.length)
+    throw new CoreAccessError("core_unavailable", "实际数据观察不能重复登记能力");
   const database: Reader = { $queryRaw: input.database.$queryRaw.bind(input.database) };
   const read = async (module: ReturnType<typeof plan>, receipts: readonly Receipt[]): Promise<CoreDataObservation["platform"] | undefined> => {
     const observed = await module.physical(database);
@@ -67,7 +71,7 @@ export function createMysqlCoreDeploymentObservation(input: {
     const target = coreId === undefined ? undefined : CoreIdSchema.parse(coreId);
     const selected = target === undefined ? cores : cores.filter(core => core.coreId === target);
     if (coreId !== undefined && !selected.length) throw new CoreAccessError("core_unavailable", "目标Core没有登记实际数据观察");
-    const names = [...new Set([platform, ...selected].flatMap(module => module.names))];
+    const names = [...new Set([platform, ...selected, ...capabilities].flatMap(module => module.names))];
     // 一次读取所选模块原账，再由各所有者读取物理结构；查询/驱动失败仍原样向上报告。
     const receipts = names.length ? await database.$queryRaw<Receipt[]>(sql`
       SELECT migration_name AS migrationName, checksum, finished_at AS finishedAt, rolled_back_at AS rolledBackAt,
@@ -79,6 +83,11 @@ export function createMysqlCoreDeploymentObservation(input: {
       const state = await read(core, receipts);
       return state ? { ...state, coreId: core.coreId } : undefined;
     }));
-    return CoreDataObservationSchema.parse({ platform: platformState, cores: coreStates.filter(state => state !== undefined) });
+    const capabilityStates = await Promise.all(capabilities.map(async capability => {
+      const state = await read(capability, receipts);
+      return state ? { ...state, capabilityId: capability.capabilityId } : undefined;
+    }));
+    return CoreDataObservationSchema.parse({ platform: platformState, cores: coreStates.filter(state => state !== undefined),
+      ...(input.dataCapabilities ? { dataCapabilities: capabilityStates.filter(state => state !== undefined) } : {}) });
   } };
 }

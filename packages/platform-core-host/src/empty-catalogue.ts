@@ -9,6 +9,7 @@ export function createEmptyCoreCatalogue(): CoreDeployedCatalogue {
   return Object.freeze({
     get registrations() { return new Map(); },
     http: routes.registry,
+    requireDataCapabilityAvailable: async () => { throw new CoreAccessError("core_unavailable", "当前宿主未选择任何数据能力"); },
     availability: Object.freeze({ requireRegistered: unavailable, requireAvailable: unavailable })
   });
 }

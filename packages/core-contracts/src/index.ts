@@ -7,6 +7,7 @@ export * from "./openapi";
 export * from "./lifecycle";
 export * from "./server";
 export * from "./update";
+export * from "./data-capability";
 export * from "./guide";
 export * from "./admin";
 export * from "./schema";

@@ -276,7 +276,7 @@ Rental 已提供自己的完整业务 schema、关系贡献和 MySQL 数据计�
 node packages/core-contracts/dist/plan-update.js <当前锁JSON> <升级请求JSON> <数据观察JSON> --json
 ```
 
-三份输入分别按[升级合同](src/update.ts)中的 `CoreDeploymentLockSchema`、`CoreUpdateRequestSchema`、`CoreDataObservationSchema` 解析。当前锁固定底座与每个 Core 的发行版本、提交、包摘要及兼容资料；升级请求只选择 `platform` 或一个 `core`。数据观察由目标环境原迁移账提供，包含实际数据版本与有序迁移摘要，不能复制清单当作数据库已完成的证明。本命令不连接数据库。
+三份输入分别按[升级合同](src/update.ts)中的 `CoreDeploymentLockSchema`、`CoreUpdateRequestSchema`、`CoreDataObservationSchema` 解析。当前锁固定底座与每个 Core 的发行版本、提交、包摘要及兼容资料；升级请求选择 `platform`、一个 `core`，或已选装的一个 `platform-capability`。数据观察由目标环境原迁移账提供，包含实际数据版本与有序迁移摘要，不能复制清单当作数据库已完成的证明。本命令不连接数据库。
 
 检查依次核对来源与不可变发行、全部选中模块的版本兼容、数据可读性和迁移历史。已发布迁移只追加，不能改原文件、顺序或摘要。若有新迁移，实际数据须先处于当前发行的完整基线，数据版本必须前进；中断或记录矛盾时先核对原迁移，不自动重做。
 
@@ -284,12 +284,13 @@ node packages/core-contracts/dist/plan-update.js <当前锁JSON> <升级请求JS
 
 新宿主的迁移观察还提供 `execution`。原迁移账和物理结构核同后使用 `state: "ready"`，执行中、失败和未知分别使用 `running`、`failed`、`unknown`，携带原迁移标识/摘要，以及已知的语句进度、物理观察摘要和固定恢复SQL。出现未完成状态时预检返回 `migration_incomplete`，原DDL部分提交必须先根据真实结构与原执行收据处理。恢复SQL来源和摘要须核定后按目标环境授权执行，完成物理回读和原迁移账登记后重新观察。旧调用方的缺省字段沿原完整基线约束兼容，新宿主始终显式提供状态。[迁移观察合同](src/update.ts)
 
-成功结果的 `status` 分为 `unchanged`、`candidate`、`migration_required`。`candidate` 是返回值中的新锁，原输入文件及未选择更新的 Core 保持；`migrations` 指出所属模块和待执行链，不表示已经应用。`owner=platform` 表示底座，`owner=core:<id>` 表示业务 Core，二者即使名称相同也不混用。
+成功结果的 `status` 分为 `unchanged`、`candidate`、`migration_required`。`candidate` 是返回值中的新锁，原输入文件及未选择更新的 Core／能力保持；`migrations` 指出所属模块和待执行链，不表示已经应用。`owner=platform` 表示底座，`owner=core:<id>` 表示业务 Core，`owner=platform-capability:<id>` 表示选装公共数据能力，名称相同也不混用。
 
 | 拒绝结果 | 需要处理的内容 |
 | --- | --- |
 | `source_conflict` / `release_changed` / `release_metadata_changed` | 核对原来源；同版本提交、包摘要或元数据变造须重新发布新版本 |
 | `core_not_installed` / `core_identity` | 新增 Core 先走安装；更新不能换成另一 Core |
+| `capability_not_installed` / `capability_identity` | 新增公共数据能力须先准备固定包和组合，不能借更新更换能力标识 |
 | `scope_changed` | 业务范围或容器类型改变须先核定原绑定、数据和权限迁移，不能作为普通版本更新 |
 | `platform_version` / `contract_version` / `missing_capability` | 核对整个候选组合的兼容范围与必要公共能力 |
 | `data_unavailable` / `data_observation_conflict` | 从真实迁移账取得完整一致的版本与摘要 |
@@ -299,6 +300,16 @@ node packages/core-contracts/dist/plan-update.js <当前锁JSON> <升级请求JS
 | `release_rollback` / `data_rollback` | 使用已有验证的程序/数据恢复方案；这个命令只准备前进升级 |
 
 退出码 `0` 表示预检通过，`1` 表示候选被拒绝，`2` 表示输入/用法或读取失败。这个阶段只输出候选，后续还须核对包摘要、用户改动、在途/历史执行依赖，按授权执行迁移、组合构建与切换并取得实际验证。锁文件不存用户配置、Key 或租户授权；本工具不自动写文件或部署，也不能据此宣称更新已经成功。
+
+### 选装公共数据能力
+
+AI 等公共数据能力通过可省略的 `lock.dataCapabilities` 选择，单独固定版本、实际发行来源、完整包摘要、schema／迁移和公共／Core 数据前置。[能力合同](src/data-capability.ts)不将能力注册成业务 Core，也不发布业务工具或自动启动作业。旧锁省略此字段时保持原组合。
+
+Node 出口 `@rental-os/core-contracts/platform-data-package` 提供 `readPlatformDataCapabilityPackage(directory, release)` 和 `requirePlatformDataCapabilityFiles(files, release)`，只读取明确文件、校验整个归档与逐文件摘要，不执行包代码或 SQL。宿主兼容检查使用 `coreDeploymentHostVersions(lock)`，数据前置使用 `checkPlatformDataCapabilities(lock)`；缺选装能力仍按原 `manifest.requires` 兼容规则拒绝。
+
+`createCoreMigrationDeployment({ lock, platform, cores, dataCapabilities })` 中的能力字节 Map 必须与锁中所选集合完整一致，部署顺序为公共 → `core.*` → `platform-capability.*`。能力迁移用自身 ID 命名空间，保留原摘要与顺序；未选材料、缺包或摘要变化都会拒绝。只有所选数据所有者的真实物理观察和原执行账均就绪，才通过宿主数据门禁。[迁移组合](src/deployment.ts) · [原账观察](../core-host/README.md#读取原迁移账与实际结构)
+
+独立更新请求使用 `{ kind: "platform-capability", capabilityId, release }`，观察项位于 `dataCapabilities` 并包含必需的 `execution`。预检保留底座与其他 Core／能力，拒绝改写已发布迁移、同版本资料变造、降版、缺观察及unknown。[AI数据包示例](../ai-native-data/README.md#显式选装与独立更新)
 
 ## 生成随包指南与归档
 

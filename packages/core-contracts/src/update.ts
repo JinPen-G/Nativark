@@ -9,6 +9,7 @@ import {
 } from "./manifest";
 import { checkCoreCombination, CoreHostVersionsSchema } from "./compatibility";
 import { CoreReleaseVersionSchema, compareCoreReleaseVersions, isCoreVersionSupported } from "./version";
+import { CorePlatformDataCapabilityReleaseSchema, checkPlatformDataCapabilities, coreDeploymentHostVersions } from "./data-capability";
 
 export const CorePackagePinSchema = z.object({
   manifest: CoreManifestSchema,
@@ -25,19 +26,27 @@ export const CorePlatformReleaseSchema = z.object({
 export const CoreDeploymentLockSchema = z.object({
   lockVersion: z.literal(1),
   platform: CorePlatformReleaseSchema,
-  cores: z.array(CorePackagePinSchema)
+  cores: z.array(CorePackagePinSchema),
+  /** 省略时保持原无选装能力的锁；选择不会自动注册 Core、工具或作业。 */
+  dataCapabilities: z.array(CorePlatformDataCapabilityReleaseSchema).max(100).optional()
 }).strict().superRefine((lock, context) => {
   const seen = new Set<string>();
   lock.cores.forEach((pin, index) => {
     if (seen.has(pin.manifest.id)) context.addIssue({ code: "custom", path: ["cores", index], message: "组合存在重复 Core" });
     seen.add(pin.manifest.id);
   });
+  const capabilities = new Set<string>();
+  (lock.dataCapabilities ?? []).forEach((release, index) => {
+    if (capabilities.has(release.id)) context.addIssue({ code: "custom", path: ["dataCapabilities", index], message: "组合存在重复数据能力" });
+    capabilities.add(release.id);
+  });
 });
 export type CoreDeploymentLock = z.infer<typeof CoreDeploymentLockSchema>;
 
 export const CoreUpdateRequestSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("platform"), release: CorePlatformReleaseSchema }).strict(),
-  z.object({ kind: z.literal("core"), coreId: CoreIdSchema, release: CorePackagePinSchema }).strict()
+  z.object({ kind: z.literal("core"), coreId: CoreIdSchema, release: CorePackagePinSchema }).strict(),
+  z.object({ kind: z.literal("platform-capability"), capabilityId: CoreIdSchema, release: CorePlatformDataCapabilityReleaseSchema }).strict()
 ]);
 export type CoreUpdateRequest = z.infer<typeof CoreUpdateRequestSchema>;
 
@@ -75,12 +84,18 @@ const observation = z.object({
 }).strict();
 export const CoreDataObservationSchema = z.object({
   platform: observation,
-  cores: z.array(observation.extend({ coreId: CoreIdSchema }).strict())
+  cores: z.array(observation.extend({ coreId: CoreIdSchema }).strict()),
+  dataCapabilities: z.array(observation.extend({ capabilityId: CoreIdSchema, execution: CoreMigrationExecutionSchema }).strict()).optional()
 }).strict().superRefine((data, context) => {
   const seen = new Set<string>();
   data.cores.forEach((core, index) => {
     if (seen.has(core.coreId)) context.addIssue({ code: "custom", path: ["cores", index], message: "Core 数据观察重复" });
     seen.add(core.coreId);
+  });
+  const capabilities = new Set<string>();
+  (data.dataCapabilities ?? []).forEach((capability, index) => {
+    if (capabilities.has(capability.capabilityId)) context.addIssue({ code: "custom", path: ["dataCapabilities", index], message: "数据能力观察重复" });
+    capabilities.add(capability.capabilityId);
   });
 });
 export type CoreDataObservation = z.infer<typeof CoreDataObservationSchema>;
@@ -118,7 +133,8 @@ export function planCoreUpdate(
   const candidate = structuredClone(current);
   const issues: CoreUpdateIssue[] = [];
   const migrations: Extract<CoreUpdateResult, { ok: true }>["migrations"] = [];
-  const selected = request.kind === "platform" ? "platform" : `core:${request.coreId}`;
+  const selected = request.kind === "platform" ? "platform" : request.kind === "core"
+    ? `core:${request.coreId}` : `platform-capability:${request.capabilityId}`;
   const add = (owner: string, code: string, field: string, message: string) =>
     issues.push({ owner, code, field, message });
   const checkRelease = (owner: string, previous: { version: string; source: z.infer<typeof CoreSourceSchema>; sha256: string },
@@ -138,7 +154,7 @@ export function planCoreUpdate(
       && !sameData(current.platform, request.release))
       add("platform", "release_metadata_changed", "release", "同一底座发行的锁定资料不能被改写");
     candidate.platform = structuredClone(request.release);
-  } else {
+  } else if (request.kind === "core") {
     const index = candidate.cores.findIndex(pin => pin.manifest.id === request.coreId);
     if (index < 0) add(selected, "core_not_installed", "coreId", "只能更新组合中已有的 Core，新 Core 须先走安装准备");
     if (request.release.manifest.id !== request.coreId)
@@ -154,9 +170,22 @@ export function planCoreUpdate(
         add(selected, "scope_changed", "release.manifest.scope", "Core业务范围已变化，须先核定原绑定与数据迁移，不能按普通更新切换");
       candidate.cores[index] = structuredClone(request.release);
     }
+  } else {
+    const index = (candidate.dataCapabilities ?? []).findIndex(release => release.id === request.capabilityId);
+    if (index < 0) add(selected, "capability_not_installed", "capabilityId", "只能更新已选择的数据能力，新增能力须先明确准备部署");
+    if (request.release.id !== request.capabilityId)
+      add(selected, "capability_identity", "release.id", "候选与所选数据能力标识不同");
+    if (index >= 0) {
+      const previous = current.dataCapabilities![index];
+      checkRelease(selected, previous, request.release);
+      if (previous.version === request.release.version && !sameData(previous, request.release))
+        add(selected, "release_metadata_changed", "release", "同一能力发行的锁定资料不能被改写");
+      candidate.dataCapabilities![index] = structuredClone(request.release);
+    }
   }
   if (issues.length) return { ok: false, scope: "update-preflight", issues };
-  for (const issue of checkCoreCombination(candidate.cores.map(pin => pin.manifest), candidate.platform.versions).issues)
+  issues.push(...checkPlatformDataCapabilities(candidate));
+  for (const issue of checkCoreCombination(candidate.cores.map(pin => pin.manifest), coreDeploymentHostVersions(candidate)).issues)
     add(`core:${issue.coreId}`, issue.code, issue.field, issue.message);
 
   const checkData = (owner: string, previous: CoreDataContract, next: CoreDataContract,
@@ -207,6 +236,9 @@ export function planCoreUpdate(
   const dataByCore = new Map(observed.cores.map(core => [core.coreId, core]));
   for (const [index, pin] of candidate.cores.entries())
     checkData(`core:${pin.manifest.id}`, current.cores[index].manifest.data, pin.manifest.data, dataByCore.get(pin.manifest.id));
+  const dataByCapability = new Map((observed.dataCapabilities ?? []).map(capability => [capability.capabilityId, capability]));
+  for (const [index, release] of (candidate.dataCapabilities ?? []).entries())
+    checkData(`platform-capability:${release.id}`, current.dataCapabilities![index].data, release.data, dataByCapability.get(release.id));
   if (issues.length) return { ok: false, scope: "update-preflight", issues };
   const unchanged = sameData(candidate, current);
   return { ok: true, scope: "update-preflight", status: migrations.length ? "migration_required" : unchanged ? "unchanged" : "candidate",

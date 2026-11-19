@@ -215,7 +215,11 @@
     "dev:example-tickets-admin": "npm run dev -w @rental-os/example-tickets-admin",
     "build:rental-admin": "npm run build -w @rental-os/rental-admin",
     "dev:rental-admin": "npm run dev -w @rental-os/rental-admin",
-    "lint:rental-admin": "npm run lint -w @rental-os/rental-admin"
+    "lint:rental-admin": "npm run lint -w @rental-os/rental-admin",
+    "build:ai-native-data": "npm run build -w @rental-os/ai-native-data",
+    "lint:ai-native-data": "npm run lint -w @rental-os/ai-native-data",
+    "build:ai-native-server": "npm run build -w @rental-os/ai-native-server",
+    "lint:ai-native-server": "npm run lint -w @rental-os/ai-native-server"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",

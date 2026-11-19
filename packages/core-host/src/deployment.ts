@@ -4,7 +4,8 @@
  */
 import {
   CoreDataObservationSchema, CoreDeploymentLockSchema, registerCoreServers, registerCoreHttpRoutes,
-  CoreManifestSchema, isCoreVersionSupported, type CoreDeploymentLock, type CoreDataObservation,
+  CoreManifestSchema, isCoreVersionSupported, checkPlatformDataCapabilities, coreDeploymentHostVersions,
+  type CorePlatformDataCapabilityRelease, type CoreDeploymentLock, type CoreDataObservation,
   type CoreServerRegistration, type CoreDataContract, type CoreHttpContribution, type CoreHttpRegistry
 } from "@rental-os/core-contracts";
 import { CoreAccessError, type CoreDeploymentAvailability } from "./access";
@@ -17,6 +18,8 @@ export interface CoreDeployedCatalogue {
   readonly registrations: ReadonlyMap<string, CoreServerRegistration>;
   readonly availability: CoreDeploymentAvailability;
   readonly http: CoreHttpRegistry;
+  /** 可选公共能力的独立准入；只检查所选能力及其数据前置，不授予 Core 或 AI 业务权。 */
+  requireDataCapabilityAvailable(capabilityId: string): Promise<void>;
 }
 
 /** 保存受控组合的方法引用；绑定原服务实例，保留其仓储及运行状态。 */
@@ -51,8 +54,10 @@ export function createCoreDeployedCatalogue(input: {
   http?: readonly CoreHttpContribution[];
 }): CoreDeployedCatalogue {
   const lock = CoreDeploymentLockSchema.parse(input.lock);
+  const capabilityIssues = checkPlatformDataCapabilities(lock);
+  if (capabilityIssues.length) throw new CoreAccessError("core_unavailable", capabilityIssues.map(issue => `${issue.owner}:${issue.field} ${issue.message}`).join("\n"));
   const manifests = input.registrations.map(registration => ({ ...registration, manifest: CoreManifestSchema.parse(registration.manifest) }));
-  const registered = registerCoreServers(manifests, lock.platform.versions);
+  const registered = registerCoreServers(manifests, coreDeploymentHostVersions(lock));
   if (!registered.ok) throw new CoreAccessError("core_unavailable", registered.issues.map(issue => `${issue.coreId}:${issue.field} ${issue.message}`).join("\n"));
   const pins = new Map(lock.cores.map(pin => [pin.manifest.id, pin]));
   if (registered.registrations.size !== pins.size) throw new CoreAccessError("core_unavailable", "实际Core组合与部署锁的集合不一致");
@@ -71,8 +76,25 @@ export function createCoreDeployedCatalogue(input: {
   const requireRegistered = async (coreId: string) => {
     if (!registrations.has(coreId)) throw new CoreAccessError("core_unavailable", "该Core尚未在当前部署注册");
   };
+  const capabilities = new Map((lock.dataCapabilities ?? []).map(release => [release.id, release]));
+  const requireCapabilityData = (release: CorePlatformDataCapabilityRelease, observed: CoreDataObservation) => {
+    const capability = observed.dataCapabilities?.find(item => item.capabilityId === release.id);
+    if (!dataAvailable(lock.platform.data, observed.platform) || !dataAvailable(release.data, capability))
+      throw new CoreAccessError("core_unavailable", "所选平台能力实际数据或原迁移执行状态尚未就绪");
+    for (const prerequisite of release.prerequisites.cores) {
+      const pin = pins.get(prerequisite.coreId);
+      const core = observed.cores.find(item => item.coreId === prerequisite.coreId);
+      if (!pin || !dataAvailable(pin.manifest.data, core))
+        throw new CoreAccessError("core_unavailable", "所选平台能力的 Core 数据前置尚未就绪");
+    }
+  };
   const catalogue: CoreDeployedCatalogue = {
     http: policies.registry,
+    async requireDataCapabilityAvailable(capabilityId) {
+      const release = capabilities.get(capabilityId);
+      if (!release) throw new CoreAccessError("core_unavailable", "该数据能力未在当前部署选择");
+      requireCapabilityData(release, CoreDataObservationSchema.parse(await input.observations.read()));
+    },
     get registrations() {
       // ReadonlyMap只约束类型；返回隔离清单，调用方改副本不能改本次部署。
       return new Map([...registrations].map(([id, registration]) => [id,
@@ -82,13 +104,19 @@ export function createCoreDeployedCatalogue(input: {
       requireRegistered,
       async requireAvailable(coreId) {
         await requireRegistered(coreId);
-        const observed = CoreDataObservationSchema.parse(await input.observations.read(coreId));
+        const pin = pins.get(coreId)!;
+        const required = pin.manifest.requires.flatMap(requirement => {
+          const release = capabilities.get(requirement.capability);
+          return release ? [release] : [];
+        });
+        // 能力可以依赖另一 Core 的数据；仅此情形需要完整组合观察，普通 Core 仍读取原目标。
+        const observed = CoreDataObservationSchema.parse(await input.observations.read(required.length ? undefined : coreId));
         if (!dataAvailable(lock.platform.data, observed.platform))
           throw new CoreAccessError("core_unavailable", "平台实际数据或迁移执行状态尚未就绪");
-        const pin = pins.get(coreId)!;
         const core = observed.cores.find(item => item.coreId === coreId);
         if (!dataAvailable(pin.manifest.data, core))
           throw new CoreAccessError("core_unavailable", "该Core实际数据或迁移执行状态尚未就绪");
+        for (const release of required) requireCapabilityData(release, observed);
       }
     }
   };

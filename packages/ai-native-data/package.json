@@ -1,0 +1,66 @@
+{
+  "name": "@rental-os/ai-native-data",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "AI Native 可选公共能力的固定数据、schema与部署准备",
+  "main": "dist/data.js",
+  "types": "dist/data.d.ts",
+  "files": [
+    "dist",
+    "prisma",
+    "README.md",
+    "LICENSE"
+  ],
+  "typesVersions": {
+    "*": {
+      "data": [
+        "dist/data.d.ts"
+      ],
+      "prisma-schema": [
+        "dist/prisma-schema.d.ts"
+      ],
+      "preparation": [
+        "dist/preparation.d.ts"
+      ],
+      "data-package": [
+        "dist/data-package.d.ts"
+      ]
+    }
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/data.d.ts",
+      "default": "./dist/data.js"
+    },
+    "./data": {
+      "types": "./dist/data.d.ts",
+      "default": "./dist/data.js"
+    },
+    "./prisma-schema": {
+      "types": "./dist/prisma-schema.d.ts",
+      "default": "./dist/prisma-schema.js"
+    },
+    "./preparation": {
+      "types": "./dist/preparation.d.ts",
+      "default": "./dist/preparation.js"
+    },
+    "./data-package": {
+      "types": "./dist/data-package.d.ts",
+      "default": "./dist/data-package.js"
+    }
+  },
+  "scripts": {
+    "prebuild": "npm run build -w @rental-os/core-contracts",
+    "build": "tsc -p tsconfig.json",
+    "prelint": "npm run build -w @rental-os/core-contracts",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@rental-os/core-contracts": "0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "typescript": "5.9.3"
+  }
+}

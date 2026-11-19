@@ -1397,7 +1397,11 @@
       "default": "./dist/manifest.js"
     },
     "./admin/browser-notifications": "./admin/browser-notifications/index.tsx",
-    "./admin/browser-notifications/model": "./admin/browser-notifications/model.ts"
+    "./admin/browser-notifications/model": "./admin/browser-notifications/model.ts",
+    "./contracts": {
+      "types": "./dist/contracts.d.ts",
+      "default": "./dist/contracts.js"
+    }
   },
   "typesVersions": {
     "*": {
@@ -2522,6 +2526,9 @@
       ],
       "admin/browser-notifications/model": [
         "admin/browser-notifications/model.ts"
+      ],
+      "contracts": [
+        "dist/contracts.d.ts"
       ]
     }
   },

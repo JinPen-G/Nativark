@@ -1,0 +1,87 @@
+{
+  "name": "@rental-os/ai-native-server",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "AI Native 原业务失败出箱与通知草稿收据参加者",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "typesVersions": {
+    "*": {
+      "business-events/prisma-business-failure-outbox": [
+        "dist/business-events/prisma-business-failure-outbox.d.ts"
+      ],
+      "business-events/return-exception-source": [
+        "dist/business-events/return-exception-source.d.ts"
+      ],
+      "privacy/notification-draft-reader": [
+        "dist/privacy/notification-draft-reader.d.ts"
+      ],
+      "privacy/retention-policy": [
+        "dist/privacy/retention-policy.d.ts"
+      ],
+      "task-errors": [
+        "dist/task-errors.d.ts"
+      ],
+      "knowledge-fingerprint": [
+        "dist/knowledge-fingerprint.d.ts"
+      ]
+    }
+  },
+  "exports": {
+    "./business-events/prisma-business-failure-outbox": {
+      "types": "./dist/business-events/prisma-business-failure-outbox.d.ts",
+      "default": "./dist/business-events/prisma-business-failure-outbox.js"
+    },
+    "./business-events/return-exception-source": {
+      "types": "./dist/business-events/return-exception-source.d.ts",
+      "default": "./dist/business-events/return-exception-source.js"
+    },
+    "./privacy/notification-draft-reader": {
+      "types": "./dist/privacy/notification-draft-reader.d.ts",
+      "default": "./dist/privacy/notification-draft-reader.js"
+    },
+    "./privacy/retention-policy": {
+      "types": "./dist/privacy/retention-policy.d.ts",
+      "default": "./dist/privacy/retention-policy.js"
+    },
+    "./task-errors": {
+      "types": "./dist/task-errors.d.ts",
+      "default": "./dist/task-errors.js"
+    },
+    "./knowledge-fingerprint": {
+      "types": "./dist/knowledge-fingerprint.d.ts",
+      "default": "./dist/knowledge-fingerprint.js"
+    }
+  },
+  "scripts": {
+    "prebuild": "npm run build -w @rental-os/shared",
+    "build": "tsc -p tsconfig.json",
+    "prelint": "npm run build -w @rental-os/shared",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@rental-os/platform-contracts": "0.1.0",
+    "@rental-os/shared": "0.1.0",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "typescript": "5.9.3"
+  },
+  "peerDependencies": {
+    "@prisma/client": "^5.22.0",
+    "@rental-os/rental-core": "0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@prisma/client": {
+      "optional": true
+    },
+    "@rental-os/rental-core": {
+      "optional": true
+    }
+  }
+}

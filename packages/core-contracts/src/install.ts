@@ -3,33 +3,20 @@
  * 以摘要定目录并用原文件字节核对重复请求；失败只清理本次创建的暂存目录。
  */
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { CORE_ARCHIVE_LIMITS, createCoreArchive, readCoreArchive } from "./archive";
 import type { CoreHostVersions } from "./compatibility";
 import type { CoreManifest } from "./manifest";
 import { CorePackagePinSchema, type CoreDeploymentLock } from "./update";
 import { corePackageFiles, inspectCorePackageFiles, readCorePackageFiles } from "./package";
+import { ordinaryPackageDirectory as ordinaryDirectory } from "./package-directory";
 
 const digest = (data: Uint8Array) => createHash("sha256").update(data).digest("hex");
 const inside = (root: string, target: string) => {
   const part = relative(root, target);
   return part !== ".." && !part.startsWith(`..${sep}`) && !isAbsolute(part);
 };
-
-/** 独占根不能经过链接；调用方选择的位置不由清单或远端包决定。 */
-function ordinaryDirectory(directory: string): string {
-  const absolute = resolve(directory);
-  let current = absolute;
-  while (true) {
-    const stat = lstatSync(current);
-    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("部署目录须为不经过链接的普通目录");
-    const parent = dirname(current);
-    if (parent === current) break;
-    current = parent;
-  }
-  return realpathSync(absolute);
-}
 
 /** 返回完整标准包字节；调用方可写入一个明确的新文件，失败不留下半包。 */
 export function packCoreDirectory(directory: string, host?: CoreHostVersions) {

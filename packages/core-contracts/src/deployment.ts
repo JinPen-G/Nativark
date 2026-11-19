@@ -6,6 +6,8 @@ import { inspectCorePackageFiles } from "./package";
 import { checkCoreCombination } from "./compatibility";
 import { isDeepStrictEqual } from "node:util";
 import { createCoreArchive } from "./archive";
+import { checkPlatformDataCapabilities, coreDeploymentHostVersions } from "./data-capability";
+import { requirePlatformDataCapabilityFiles } from "./platform-data-package";
 
 export function corePrismaMigrationName(coreId: string, migrationId: string): string {
   CoreIdSchema.parse(coreId);
@@ -13,12 +15,23 @@ export function corePrismaMigrationName(coreId: string, migrationId: string): st
   return `core.${coreId}.${migrationId}`;
 }
 
+export function platformCapabilityPrismaMigrationName(capabilityId: string, migrationId: string): string {
+  CoreIdSchema.parse(capabilityId);
+  CoreMigrationSchema.shape.id.parse(migrationId);
+  if (!migrationId.startsWith(`${capabilityId}.`)) throw new Error("能力迁移未使用所属命名空间");
+  return `platform-capability.${migrationId}`;
+}
+
 export function createCoreMigrationDeployment(input: {
   lock: CoreDeploymentLock;
   platform: readonly { name: string; sql: Uint8Array }[];
   cores: ReadonlyMap<string, ReadonlyMap<string, Uint8Array>>;
+  dataCapabilities?: ReadonlyMap<string, ReadonlyMap<string, Uint8Array>>;
 }): ReadonlyMap<string, Uint8Array> {
-  const lock = CoreDeploymentLockSchema.parse(input.lock), compatibility = checkCoreCombination(lock.cores.map(pin => pin.manifest), lock.platform.versions);
+  const lock = CoreDeploymentLockSchema.parse(input.lock), host = coreDeploymentHostVersions(lock);
+  const capabilityIssues = checkPlatformDataCapabilities(lock);
+  if (capabilityIssues.length) throw new Error(capabilityIssues.map(issue => `${issue.owner}:${issue.field} ${issue.message}`).join("\n"));
+  const compatibility = checkCoreCombination(lock.cores.map(pin => pin.manifest), host);
   if (compatibility.issues.length) throw new Error(compatibility.issues.map(issue => `${issue.coreId}:${issue.field} ${issue.message}`).join("\n"));
   const files = new Map<string, Uint8Array>(), names = new Set<string>(), hash = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
   const put = (name: string, sql: Uint8Array) => {
@@ -35,15 +48,25 @@ export function createCoreMigrationDeployment(input: {
   for (const pin of [...lock.cores].sort((a, b) => a.manifest.id.localeCompare(b.manifest.id))) {
     const source = input.cores.get(pin.manifest.id);
     if (!source) throw new Error(`所选Core缺少已核定包：${pin.manifest.id}`);
-    const inspected = inspectCorePackageFiles(source, lock.platform.versions);
+    const inspected = inspectCorePackageFiles(source, host);
     if (!inspected.ok || !inspected.manifest || !isDeepStrictEqual(inspected.manifest, pin.manifest)
       || createCoreArchive(source).sha256 !== pin.sha256)
       throw new Error(`所选Core清单/包文件与部署锁不一致：${pin.manifest.id}`);
     for (const migration of pin.manifest.data.migrations) put(corePrismaMigrationName(pin.manifest.id, migration.id), source.get(migration.file)!);
   }
+  if ((input.dataCapabilities?.size ?? 0) !== (lock.dataCapabilities?.length ?? 0)) throw new Error("能力迁移只能包含显式锁定的能力集合");
+  const capabilities = [...(lock.dataCapabilities ?? [])].sort((a, b) => a.id.localeCompare(b.id));
+  for (const release of capabilities) {
+    const source = input.dataCapabilities?.get(release.id);
+    if (!source) throw new Error(`所选能力缺少固定包：${release.id}`);
+    requirePlatformDataCapabilityFiles(source, release);
+    for (const migration of release.data.migrations)
+      put(platformCapabilityPrismaMigrationName(release.id, migration.id), source.get(migration.file)!);
+  }
   const ordered = [...names].sort();
   const declared = [...input.platform.map(migration => migration.name), ...[...lock.cores].sort((a, b) => a.manifest.id.localeCompare(b.manifest.id))
-    .flatMap(pin => pin.manifest.data.migrations.map(migration => corePrismaMigrationName(pin.manifest.id, migration.id)))];
+    .flatMap(pin => pin.manifest.data.migrations.map(migration => corePrismaMigrationName(pin.manifest.id, migration.id))),
+    ...capabilities.flatMap(release => release.data.migrations.map(migration => platformCapabilityPrismaMigrationName(release.id, migration.id)))];
   if (ordered.some((name, index) => name !== declared[index])) throw new Error("Prisma按目录排序执行迁移，声明顺序与实际顺序不一致");
   files.set("schema.prisma", Buffer.from('datasource db {\n  provider = "mysql"\n  url = env("DATABASE_URL")\n}\n'));
   files.set("migrations/migration_lock.toml", Buffer.from('provider = "mysql"\n'));

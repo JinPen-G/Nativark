@@ -32,12 +32,8 @@ const taskSelect = {
 const runnable = ["QUEUED", "RUNNING"] as const;
 const maxFence = 99999999999999999999n;
 
-export class AiTaskRepositoryError extends Error {
-  constructor(readonly code: "AI_INVALID_INPUT" | "AI_ACCESS_DENIED" | "AI_RESOURCE_UNAVAILABLE" | "AI_REVISION_CONFLICT" | "AI_STORAGE_UNAVAILABLE") {
-    super(code);
-    this.name = "AiTaskRepositoryError";
-  }
-}
+import { AiTaskRepositoryError } from "@rental-os/ai-native-server/task-errors";
+export { AiTaskRepositoryError } from "@rental-os/ai-native-server/task-errors";
 
 /** Bound by the application to the real request/job credential, never supplied by a model. */
 export type AiTaskRepositoryOperation = "read_metadata" | "read_events" | "claim_run" | "claim_recovery_run" | "release_run" | "transition_task" | "read_step_terminal" | "takeover_run" | "request_input" | "submit_input" | "resume_input";

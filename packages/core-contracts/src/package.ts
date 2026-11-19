@@ -5,9 +5,10 @@
 import { lstatSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { createHash } from "node:crypto";
-import { CORE_MANIFEST_FILE, CORE_PACKAGE_FILE_LIMIT, CoreManifestSchema, type CoreManifest } from "./manifest";
+import { CORE_MANIFEST_FILE, CORE_PACKAGE_FILE_LIMIT, CorePackagePathSchema, CoreManifestSchema, type CoreManifest } from "./manifest";
 import { checkCoreCombination, CoreHostVersionsSchema, type CoreHostVersions } from "./compatibility";
 import { CoreOpenApiContributionSchema, checkCoreOpenApi } from "./openapi";
+import { ordinaryPackageDirectory } from "./package-directory";
 
 export interface CorePackageIssue {
   code: string;
@@ -63,6 +64,28 @@ function directoryReader(directory: string, issues: CorePackageIssue[]): Package
     }
   };
   return { check, read: file => readFileSync(resolve(root, file)) };
+}
+
+/** 可选数据包只读取锁中明确列出的普通文件，复用 Core 的路径与字节上限检查。 */
+export function readPackageArtifacts(directory: string, artifacts: readonly { file: string; sha256: string }[],
+  maxFileBytes: number, maxTotalBytes: number): { root: string; files: ReadonlyMap<string, Uint8Array> } {
+  const root = ordinaryPackageDirectory(directory), issues: CorePackageIssue[] = [], reader = directoryReader(root, issues);
+  if (!artifacts.length || artifacts.length > CORE_PACKAGE_FILE_LIMIT) throw new Error("固定包文件数超出支持范围");
+  const files = new Map<string, Uint8Array>();
+  let total = 0;
+  for (const artifact of artifacts) {
+    CorePackagePathSchema.parse(artifact.file);
+    if (files.has(artifact.file)) throw new Error("固定包文件重复");
+    if (artifact.file.split("/").some(part => /^(?:\.git|node_modules)$/i.test(part) || /^\.env(?:\.|$)/i.test(part) && part !== ".env.example"))
+      throw new Error("固定包不能读取仓库元数据、依赖或实际环境配置");
+    const limit = Math.min(maxFileBytes, maxTotalBytes - total);
+    if (!reader.check(artifact.file, limit)) throw new Error(`${artifact.file}: ${issues.at(-1)!.message}`);
+    const bytes = reader.read(artifact.file);
+    if (bytes.length > limit || createHash("sha256").update(bytes).digest("hex") !== artifact.sha256)
+      throw new Error(`${artifact.file}: 固定包字节超限或摘要不一致`);
+    total += bytes.length; files.set(artifact.file, bytes);
+  }
+  return { root, files };
 }
 
 export function inspectCorePackage(directory: string, hostInput?: CoreHostVersions,

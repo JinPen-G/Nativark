@@ -22,9 +22,11 @@ Core有HTTP入口时，组合向 `createCoreDeployedCatalogue`额外传 `http: [
 
 ## 读取原迁移账与实际结构
 
-从 `@rental-os/core-host/mysql-deployment`导入 `createMysqlCoreDeploymentObservation({ database, platform, cores })`，将返回值直接作为部署目录的 `observations`。每个模块提供自己的正式 `data`合同、与迁移ID逐项对应的原Prisma `migrationNames`，以及读取实际表/列/约束的 `readPhysical`。平台与Core均由原数据所有者提供真实检查；不能用清单版本、文件存在或刚执行过迁移代替检查结果。[只读适配](src/mysql-deployment.ts)
+从 `@rental-os/core-host/mysql-deployment`导入 `createMysqlCoreDeploymentObservation({ database, platform, cores, dataCapabilities })`，将返回值直接作为部署目录的 `observations`。每个模块提供自己的正式 `data`合同、与迁移ID逐项对应的原Prisma `migrationNames`，以及读取实际表/列/约束的 `readPhysical`。平台与Core均由原数据所有者提供真实检查；不能用清单版本、文件存在或刚执行过迁移代替检查结果。没有选装平台数据能力时省略 `dataCapabilities`，保持原组合。[只读适配](src/mysql-deployment.ts)
 
-部署准入调用 `observations.read(coreId)`，只读取平台和目标Core的原账及物理结构，避免每次业务请求扫描无关Core。升级预检调用 `read()`读取全组合。读取器一次参数化读取 `_prisma_migrations`，保留原完成收据的checksum和执行顺序。已回退收据不算已应用；未结束收据按原logs标为failed或unknown，不据此声称仍running或推断完成了几条DDL。缺迁移继续保留不完整链，由部署目录和升级预检拒绝。重复未回退收据、损坏摘要或缺物理观察只省略所属Core，其他已就绪Core仍可用；平台缺观察使新Core准入不可用。驱动读取失败向上报告，不吞错变成成功。
+部署准入调用 `observations.read(coreId)`，读取平台、目标Core及显式登记能力的原账和物理结构，避免扫描无关Core。升级预检调用 `read()`读取全组合。读取器一次参数化读取 `_prisma_migrations`，保留原完成收据的checksum和执行顺序。已回退收据不算已应用；未结束收据按原logs标为failed或unknown，不据此声称仍running或推断完成了几条DDL。缺迁移继续保留不完整链，由部署目录和升级预检拒绝。重复未回退收据、损坏摘要或缺物理观察只省略所属模块，其他已就绪Core仍可用；平台缺观察使新Core准入不可用。驱动读取失败向上报告，不吞错变成成功。
+
+可选平台能力通过部署锁的 `dataCapabilities` 独立固定版本与包摘要，观察项使用 `capabilityId`，执行状态必需。`catalogue.requireDataCapabilityAvailable(id)` 核所选能力、公共数据及其Core数据前置；缺项或unknown拒绝。Core只有在 `manifest.requires` 明确要求该能力时才增加对应数据门禁，普通Core不会因能力的未知执行自动停新。所需能力依赖另一Core数据时，目录读取全组合；这仍不授予跨Core业务读取或AI权限。[能力合同](../core-contracts/src/data-capability.ts) · [AI数据示例](../ai-native-data/README.md)
 
 工单已提供 `readTicketsPhysicalData`，可以在受控宿主组合中直接传入。示例中的平台数据检查和原迁移名称必须来自目标部署已核定的真实来源；这里只建立只读观察，不登记或执行迁移。[工单检查](../example-tickets-core/src/mysql.ts)
 
@@ -81,4 +83,4 @@ npm run build -w @rental-os/core-host
 
 [正式出口](src/index.ts) → [部署目录](src/deployment.ts) / [授权服务](src/access.ts) / [绑定服务](src/binding.ts) → [原账与结构观察](src/mysql-deployment.ts) / [授权MySQL](src/mysql.ts) / [绑定MySQL](src/mysql-bindings.ts) → 本包迁移。输入/输出复用[公共生命周期合同](../core-contracts/src/lifecycle.ts)，实际原身份/部署接线沿当前宿主推进。
 
-当前类型及离线正常/拒绝/重复行为通过，MySQL参数/调用顺序经实际适配与事务替身核对；真实数据库锁、原权限生产者、管理HTTP/UI、绑定初始化和缓存通知尚未验收。固定证据和下一接口见[PCH记录](../../docs/平台底座/Core接入/平台Core接入-开发记录.md#core-host-access-20261114)，不把离线授权替身当生产授权。
+验证输入应使用真实授权生产者、所选部署锁和原迁移名称；离线事务替身仅核参数、调用顺序和拒绝行为。真实数据库锁、HTTP/UI、绑定初始化与缓存通知分别验收，不能以离线授权替身证明生产准入。
