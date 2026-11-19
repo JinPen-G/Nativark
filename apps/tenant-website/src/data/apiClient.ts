@@ -1,90 +1,18 @@
-import type { ClientCatalogItem, ClientCatalogPricingGroup, ClientCatalogResponse, ClientChannelBootstrapResponse, ClientPublicDocumentResponse, ClientWebsiteConfig } from "@rental-os/shared";
-// 官网数据访问的底层：调用租户客户端公开接口 `/api/client/v1/*`。
-// 开发环境经 Vite 代理转发到本地 API（见 vite.config.ts）；生产可用 VITE_API_BASE 指向真实网关。
-// 只消费公开（免登录）接口：bootstrap 与 public/catalog；登录态接口留待后续切片。
+/** 官网宿主供给原 VITE_API_BASE，公开请求与合同由 Rental 客户端单源维护。 */
+import { createRentalWebsitePublicClient } from "@rental-os/rental-core/clients/website";
+export {
+  ApiError,
+  type BootstrapWebsite,
+  type PublicDocumentResponse,
+  type BootstrapResponse,
+  type CatalogItem,
+  type CatalogPricingGroup,
+  type PublicCatalogResponse,
+  type PublicAvailabilityRequest,
+  type PublicAvailabilityResponse,
+} from "@rental-os/rental-core/clients/website";
 
-const API_BASE_RAW = (import.meta.env.VITE_API_BASE ?? '').replace(/\/$/, '');
-/** API 网关基址：开发留空走 Vite /api 代理；生产可用 VITE_API_BASE 指向真实网关。供认证层复用。 */
-export const API_BASE = API_BASE_RAW;
-const CLIENT_V1 = `${API_BASE}/api/client/v1`;
-
-export class ApiError extends Error {
-  constructor(public status: number, message: string) {
-    super(message);
-    this.name = 'ApiError';
-  }
-}
-
-async function getJson<T>(path: string, params: Record<string, string>): Promise<T> {
-  const query = new URLSearchParams(params).toString();
-  const response = await fetch(`${CLIENT_V1}${path}?${query}`, { headers: { Accept: 'application/json' } });
-  if (!response.ok) {
-    throw new ApiError(response.status, `请求失败（${response.status}）`);
-  }
-  const body = await response.json();
-  // 系统响应包装：{ data, requestId }。
-  return (body?.data ?? body) as T;
-}
-
-/** 公开（免登录）POST：查询参数带租户识别，业务入参走 JSON body。用于公开可用性检索。 */
-async function postJson<T>(path: string, params: Record<string, string>, payload: unknown): Promise<T> {
-  const query = new URLSearchParams(params).toString();
-  const response = await fetch(`${CLIENT_V1}${path}?${query}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!response.ok) {
-    throw new ApiError(response.status, `请求失败（${response.status}）`);
-  }
-  const body = await response.json();
-  return (body?.data ?? body) as T;
-}
-
-/** bootstrap 响应中官网消费到的字段（对应 shared 的 ClientChannelBootstrapResponse，本地只声明用到的部分）。 */
-export type BootstrapWebsite = ClientWebsiteConfig;
-
-export type PublicDocumentResponse = ClientPublicDocumentResponse;
-
-export type BootstrapResponse = ClientChannelBootstrapResponse;
-
-export type CatalogItem = ClientCatalogItem;
-
-export type CatalogPricingGroup = ClientCatalogPricingGroup;
-
-export type PublicCatalogResponse = ClientCatalogResponse;
-
-/** 公开可用性检索：给定门店 + 时段 + 候选型号，返回各行可租状态（供官网按时段/门店真实过滤商品）。 */
-export interface PublicAvailabilityRequest {
-  locationId?: string;
-  startAt: string;
-  endAt: string;
-  lines: Array<{ itemGroupId: string; quantity: number }>;
-}
-
-/** 后端返回 rental-core 的 RentalAvailabilityResult；此处按过滤所需的行级字段宽松声明，Phase 2 接入后端时对齐。 */
-export interface PublicAvailabilityResponse {
-  lines?: Array<{ itemGroupId: string; available?: boolean; availableQuantity?: number }>;
-  [key: string]: unknown;
-}
-
-export const clientApi = {
-  bootstrap(tenantCode: string): Promise<BootstrapResponse> {
-    return getJson<BootstrapResponse>('/public/bootstrap', { tenantCode, client: 'web' });
-  },
-  publicCatalog(tenantCode: string, service: string): Promise<PublicCatalogResponse> {
-    return getJson<PublicCatalogResponse>('/public/catalog', { tenantCode, service });
-  },
-  /** 公开可用性检索（免登录）：按门店 + 时段过滤某服务下的候选型号。后端 public/availability（Phase 2）。 */
-  publicAvailability(tenantCode: string, service: string, payload: PublicAvailabilityRequest): Promise<PublicAvailabilityResponse> {
-    return postJson<PublicAvailabilityResponse>('/public/availability', { tenantCode, service }, payload);
-  },
-  /** 公开文档：用户协议 / 隐私政策 / 帮助（游客可读）。 */
-  publicDocument(tenantCode: string, kind: 'user_agreement' | 'privacy_policy' | 'help'): Promise<PublicDocumentResponse> {
-    return getJson<PublicDocumentResponse>(`/public/documents/${encodeURIComponent(kind)}`, { tenantCode });
-  },
-  /** 按访问域名反查租户：客户自定义域名在后台「官网配置」绑定；未绑定返回 null。 */
-  resolveHost(host: string): Promise<{ tenantCode: string | null }> {
-    return getJson<{ tenantCode: string | null }>('/public/site-resolve', { host });
-  },
-};
+const API_BASE_RAW = import.meta.env.VITE_API_BASE ?? "";
+/** 原网关基址供现有认证及业务消费者复用。 */
+export const API_BASE = API_BASE_RAW.replace(/\/$/, "");
+export const clientApi = createRentalWebsitePublicClient(API_BASE_RAW);

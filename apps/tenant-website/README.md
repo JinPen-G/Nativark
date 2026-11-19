@@ -38,11 +38,14 @@ npm run dev -- --mode ai-offline --port 4194
 | [CatalogConditions.tsx](src/components/CatalogConditions.tsx) | 目录条件编辑、确认与取消 |
 | [siteRepository.ts](src/data/siteRepository.ts) | 页面目录边界与本地演示记录 |
 | [remoteSite.ts](src/data/remoteSite.ts) | 公开 bootstrap 与目录映射 |
+| [apiClient.ts](src/data/apiClient.ts) | 原网关配置与 Rental 官网公开客户端转接 |
 | [authClient.ts](src/data/authClient.ts) | 现有客户认证和业务接口消费者 |
 | [RemoteBooking.tsx](src/components/RemoteBooking.tsx) | 真实报价与预约入口 |
 | [OrderPages.tsx](src/pages/OrderPages.tsx) | 本人订单、付款意图及原业务恢复消费者 |
 
 `@rental-os/shared` 和 `@rental-os/web-client` 从正式出口导入。Vite 本地源码别名优先解析 TypeScript，避免同目录旧 CommonJS 文件进入浏览器。
+
+五个公开网站请求通过 [Rental 官网客户端工厂](../../packages/rental-core/clients/website/README.md)单源维护。宿主供给 `VITE_API_BASE`，原 `API_BASE` 继续供认证及既有业务消费者使用。公开可用性路径和宽松响应的待核定边界见该模块导读。
 
 ## 租户与数据
 

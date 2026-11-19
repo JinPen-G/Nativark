@@ -84,6 +84,8 @@ npm run build:miniprogram:release
 
 ## 测试
 
+业务请求沿 [Rental 客户小程序工厂](../../packages/rental-core/clients/miniprogram/README.md)维护，原 `src/api` 七组入口注入同一 `core/http.request` 并窄委托。宿主继续供给公开渠道配置、客户会话、页面寿命及原操作键；微信支付和 AI 宿主请求沿原所属实现消费。
+
 ```bash
 npm run test:miniprogram
 ```
