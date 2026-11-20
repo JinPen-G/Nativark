@@ -14,7 +14,7 @@ const hooks = ['onModuleInit', 'onApplicationBootstrap', 'beforeApplicationShutd
   'onModuleDestroy', 'onApplicationShutdown'];
 
 module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, aiFiles, enabled,
-  aiResult, disabled, platformClient }) {
+  aiResult, disabled, platformClient, platformArchive }) {
   assert.equal(build.runtimeAliases.size, 0, 'root integration cannot alias production modules');
   const archive = memory.load(build.exported('@rental-os/core-contracts/archive', true));
   const releaseFiles = archive.readCoreArchive(aiResult.bytes, aiResult.sha256).files;
@@ -34,6 +34,13 @@ module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, a
     if (bytes) assert.deepEqual(JSON.parse(bytes).exports, pkg.metadata.exports,
       'memory package resolution must match installed formal exports');
   }
+  const storage = path.join(root, 'managed-core-packages'), reference = 'current-platform';
+  const sourceMaterials = new Map([
+    [path.join(storage, 'archives/index.json'), Buffer.from(JSON.stringify({ format: 'core-package-archives-1',
+      artifacts: [{ reference, file: 'platform.tgz', artifact: { kind: 'platform', release: enabled.lock.platform } }] }))],
+    [path.join(storage, 'archives/platform.tgz'), platformArchive.bytes]
+  ]);
+  for (const [file, bytes] of sourceMaterials) { installed.set(slash(file), Buffer.from(bytes)); memory.put(file, bytes); }
 
   // Official 5.22 generator, without its filesystem/engine CLI. Both generated
   // clients stay at their own real host paths and only in the existing memfs.
@@ -108,6 +115,25 @@ module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, a
       return value;
     }
     return originalRead(file, ...args);
+  });
+  // Only the archive reader's original readonly FileHandle transport is in
+  // memory. Its path, identity, bounded read and archive checks remain intact.
+  const promises = require('node:fs/promises');
+  replace(promises, 'lstat', async file => memory.fs.lstatSync(file));
+  replace(promises, 'open', async (file, flags) => {
+    assert.equal(flags, 'r');
+    const opened = memory.fs.lstatSync(file), source = installed.get(slash(file));
+    assert(source, 'readonly handle must open an installed archive byte source');
+    // memfs advances ctime on reads (its atime setter also changes ctime),
+    // unlike native readonly handles. Serve this handle from the exact installed
+    // bytes without that transport mutation; original lstat identity checks stay.
+    const content = Buffer.from(source);
+    let closed = false;
+    return { stat: async () => { assert(!closed); return opened; },
+      read: async (buffer, offset, length, position) => {
+        assert(!closed); const bytesRead = Math.max(0, Math.min(length, content.length - position));
+        content.copy(buffer, offset, position, position + bytesRead); return { bytesRead, buffer };
+      }, close: async () => { closed = true; } };
   });
   const nativeLoad = Module._load;
   replace(Module, '_load', function(name, ...args) {
@@ -254,6 +280,34 @@ module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, a
     const publicCore = load('@rental-os/platform-core-host');
     assert.equal(get(findModule(publicCore.CoreHostModule), publicCore.CORE_HOST_APPLICATION), host.core);
     assert.deepEqual([...host.catalogue.registrations.keys()], ['rental'], 'real selected Core catalogue');
+    const packageModule = findModule(publicCore.CorePackageAssemblyModule);
+    assert.equal(get(packageModule, publicCore.CORE_PACKAGE_ASSEMBLY), host.packages);
+    assert.deepEqual(factoryCalls.get(publicCore.CORE_PACKAGE_ASSEMBLY), [[host]], 'one package assembly from actual host');
+    const { PATH_METADATA, METHOD_METADATA } = build.requireDeps('@nestjs/common/constants');
+    const { RequestMethod } = build.requireDeps('@nestjs/common');
+    const document = memory.load(path.join(root, 'apps/rental-api/dist-ai/ai-openapi.js'))
+      .createRentalAiOpenApi(enabled.lock, policy.createRentalAiHttpPolicy(host.authorization));
+    for (const [Controller, token, application] of [
+      [publicCore.CorePackageController, publicCore.CORE_PACKAGE_APPLICATION, host.packages.packages],
+      [publicCore.CorePackagePreflightController, publicCore.CORE_PACKAGE_PREFLIGHT_APPLICATION, host.packages.preflight],
+      [publicCore.CorePackageSelectionController, publicCore.CORE_PACKAGE_SELECTION_APPLICATION, host.packages.releases],
+      [publicCore.CorePackagePreparationController, publicCore.CORE_PACKAGE_PREPARATION_APPLICATION, host.packages.preparation],
+    ]) {
+      assert.equal(get(packageModule, token), application);
+      assert.equal(packageModule.controllers.get(Controller).instance.application, application);
+      const base = Reflect.getMetadata(PATH_METADATA, Controller);
+      for (const name of Object.getOwnPropertyNames(Controller.prototype)) {
+        const handler = Controller.prototype[name], method = Reflect.getMetadata(METHOD_METADATA, handler);
+        if (method === undefined) continue;
+        const url = '/' + [base, Reflect.getMetadata(PATH_METADATA, handler)].filter(Boolean).join('/');
+        const verb = RequestMethod[method];
+        assert(host.platform.routesToPlatform({ method: verb, url }), Controller.name + '.' + name);
+        assert(!host.platform.routesToPlatform({ method: verb, url, staffApiRequest: true }), 'staff cannot borrow public management');
+        assert(!host.platform.routesToPlatform({ method: verb, url: url + '/unexpected' }), 'no broad prefix registration');
+        assert(document.paths['/api' + url]?.[verb.toLowerCase()], 'same-host package OpenAPI ' + url);
+      }
+    }
+    await assert.rejects(host.packages.http.authorize('GET', '/platform/core-packages/catalogue'), /主体/);
     const rentalHttp = load('@rental-os/rental-core/http');
     const httpModule = findModule(rentalHttp.RentalHttpModule);
     const http = rentalHttp.composeRentalHttpServiceGroups(token => get(httpModule, token));
@@ -276,6 +330,7 @@ module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, a
       [adapter('prisma.service', 'PrismaService'), database],
       [adapter('auth.service', 'AuthService'), host.rental.auth],
       [adapter('api-auth.guard', 'ApiAuthGuard'), host.guard],
+      [load('@rental-os/rental-core/mysql-client-auth').ClientAuthService, host.rental.client.auth],
       [adapter('rental-core.service', 'RentalCoreService'), host.rental.primary.core],
       [adapter('rental-business.service', 'RentalBusinessService'), host.rental.primary.business],
     ]) {
@@ -306,6 +361,36 @@ module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, a
       'enabled root contains every public/Rental controller plus exactly the selected AI controllers');
     for (const module of graph.modules) for (const wrapper of module.providers.values())
       assert.equal(wrapper.getInstanceByContextId(STATIC_CONTEXT).isResolved, true, 'unresolved provider ' + String(wrapper.token));
+    const sourceFactory = memory.load(path.join(root, 'apps/rental-api/dist-ai/core-package-sources.js'));
+    const rentalPackage = memory.load(path.join(root, 'apps/rental-api/dist-ai/deployment-package.js'));
+    const aiPackage = load('@rental-os/ai-native-data/data-package');
+    let observations = 0;
+    const sources = sourceFactory.createRentalCorePackageSources({ lock: enabled.lock,
+      configuration: { get: name => ({ CORE_PACKAGE_STORAGE_ROOT: storage, CORE_PLATFORM_PACKAGE_REFERENCE: reference }[name]) },
+      rentalPackage: () => rentalPackage.requireRentalDeploymentPackage(enabled.lock.cores[0], enabled.lock.platform.versions),
+      dataCapabilities: () => [aiPackage.requireAiNativeDataPackage(path.join(root, 'packages/ai-native-data'), enabled.lock.dataCapabilities[0])],
+      observe: async () => { observations++; throw Error('materials preparation must not query a database'); } });
+    const materials = await sources.materials.read();
+    assert.deepEqual(materials.base, enabled.lock);
+    assert.deepEqual(materials.cores.get('rental'), rentalFiles);
+    assert.deepEqual(materials.dataCapabilities.get('ai-native'), aiFiles);
+    assert.equal(materials.platform.length, enabled.lock.platform.data.migrations.length);
+    assert.equal(observations, 0);
+    const contextFile = slash(path.join(root, 'rental-host.context.json'));
+    const contextBytes = installed.get(contextFile);
+    installed.delete(contextFile);
+    assert.equal(await sources.materials.read(), undefined, 'source archive alone is not an installed runtime');
+    installed.set(contextFile, contextBytes);
+    const runtimeFile = slash(path.join(root, 'packages/platform-server/dist/index.js'));
+    const runtimeBytes = installed.get(runtimeFile), altered = Buffer.concat([runtimeBytes, Buffer.from('\nexports.changed = true;\n')]);
+    installed.set(runtimeFile, altered); memory.put(runtimeFile, altered);
+    await assert.rejects(sources.materials.read(), /摘要不一致/);
+    installed.set(runtimeFile, runtimeBytes); memory.put(runtimeFile, runtimeBytes);
+    const forged = JSON.parse(contextBytes.toString('utf8')); forged.platformBuild.release.source.commit = 'f'.repeat(40);
+    const forgedBytes = Buffer.from(JSON.stringify(forged)); installed.set(contextFile, forgedBytes); memory.put(contextFile, forgedBytes);
+    await assert.rejects(sources.materials.read(), /来源.*不一致/);
+    installed.set(contextFile, contextBytes); memory.put(contextFile, contextBytes);
+    assert.equal(observations, 0, 'unverified runtime never reaches data observation');
     assert.deepEqual(effects, [], 'zero database, transport, default client, timer or lifecycle effects');
     const result = { modules: graph.modules.length, controllers: controllers.length,
       providers: graph.modules.reduce((count, item) => count + item.providers.size, 0),

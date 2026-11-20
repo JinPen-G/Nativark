@@ -63,6 +63,7 @@ function fixture(configuration = {}) {
   const config = new ConfigService({ NODE_ENV: 'production', PLATFORM_DATA_SOURCE: 'mysql', INFRA_DATA_SOURCE: 'mysql',
     AUTH_TOKEN_SECRET: 'offline-lifecycle-secret', FILE_UPLOAD_CLEANUP_INTERVAL_MS: 120000, ...configuration });
   const application = createRentalApplication({ database, configuration: config, aiMode: 'disabled',
+    fileCleanupAuthority: { assert: async () => { throw Error('empty lifecycle fixture has no file cleanup grant'); } },
     participants: { readInspectionMedia: async () => { throw Error('lifecycle must not read inspection media'); } },
     workerAuthority: foundation => createRentalWorkerAuthority({ database, configuration: foundation.coreConfiguration,
       term: { requireNewBusiness: async () => { throw Error('empty lifecycle fixture has no business grant'); } },

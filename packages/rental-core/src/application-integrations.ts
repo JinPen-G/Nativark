@@ -57,6 +57,7 @@ export interface RentalIntegrationFoundationDependencies<Revision extends FileKn
   customerOperations: FileAccessDependencies[3];
   funding: PaymentDependencies[2] & DocumentDependencies[1] & StaffPaymentDependencies[1];
   fileAuthority: NonNullable<RentalFileStorageParticipants<Revision>["auth"]>;
+  fileCleanupAuthority: NonNullable<RentalFileStorageParticipants<Revision>["cleanupAuthority"]>;
   readInspectionMedia: RentalFileStorageParticipants<Revision>["readInspectionMedia"];
   failureEvents?: NonNullable<PaymentDependencies[4]>;
   knowledge?: RentalIntegrationKnowledgeParticipants<Revision>;
@@ -111,10 +112,11 @@ export function createRentalIntegrationFoundation<Revision extends FileKnowledge
   input: RentalIntegrationFoundationDependencies<Revision>
 ) {
   for (const name of ["database", "configuration", "secrets", "operationLog", "coreFacts", "businessFacts",
-    "customerOperations", "funding", "fileAuthority", "readInspectionMedia"] as const) {
+    "customerOperations", "funding", "fileAuthority", "fileCleanupAuthority", "readInspectionMedia"] as const) {
     if (input[name] == null) throw new Error(`Rental 集成装配缺少依赖: ${name}`);
   }
   if (typeof input.configuration.get !== "function" || typeof input.fileAuthority.lockRequestWorkspaceAccess !== "function"
+    || typeof input.fileCleanupAuthority.assert !== "function"
     || typeof input.readInspectionMedia !== "function"
     || input.failureEvents !== undefined && typeof input.failureEvents.refund !== "function") {
     throw new Error("Rental 集成装配的原配置、文件权威、媒体读取器或退款失败出箱无效");
@@ -147,7 +149,7 @@ export function createRentalIntegrationFoundation<Revision extends FileKnowledge
   const fileAccess = new RentalFileBusinessAccessService(database, input.coreFacts, input.businessFacts, input.customerOperations);
   const inspectionObjectReader = new TenantInspectionObjectReader(database, integrations);
   const files = new RentalFileStorageApplication<Revision>(database, integrations, {
-    ...input.knowledge, operationLog, fileAccess, auth: input.fileAuthority, inspectionObjectReader,
+    ...input.knowledge, operationLog, fileAccess, auth: input.fileAuthority, cleanupAuthority: input.fileCleanupAuthority, inspectionObjectReader,
     readInspectionMedia: input.readInspectionMedia, parseStaffUploadObservation
   });
   const payments = new PaymentRuntimeService(database, integrations, funding, {

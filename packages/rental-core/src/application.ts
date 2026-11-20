@@ -93,9 +93,11 @@ export function createRentalApplication(input: {
   configuration: ConfigService;
   aiMode: "enabled" | "disabled";
   workerAuthority: ParticipantInput["authority"] | ((foundation: RentalDomainFoundation<Transaction>) => ParticipantInput["authority"]);
+  fileCleanupAuthority: IntegrationInput["fileCleanupAuthority"];
   participants: RentalApplicationParticipants;
 }): RentalApplication {
   if (!input.participants || typeof input.participants.readInspectionMedia !== "function"
+    || typeof input.fileCleanupAuthority?.assert !== "function"
     || !["enabled", "disabled"].includes(input.aiMode)) {
     throw new Error("Rental 应用须提供原媒体读取器并显式选择 AI 模式");
   }
@@ -134,6 +136,7 @@ export function createRentalApplication(input: {
   const integrationFoundation = createRentalIntegrationFoundation({ database, configuration, secrets, operationLog,
     coreFacts: foundation.coreFacts, businessFacts: foundation.businessFacts,
     customerOperations: customers.customerOperations, funding: foundation.funding, fileAuthority: auth,
+    fileCleanupAuthority: input.fileCleanupAuthority,
     readInspectionMedia: participants.readInspectionMedia, failureEvents: participants.failures,
     knowledge: participants.knowledge });
   const primary = createRentalPrimaryApplications<Transaction>({ ...foundation, database,

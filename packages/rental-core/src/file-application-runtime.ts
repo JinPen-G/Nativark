@@ -27,6 +27,7 @@ import { lockRentalBusinessTenant } from "./mysql-business-fence";
 import { ENTERPRISE_PAYMENT_PROOF_SCENE } from "./enterprise-workflows";
 import { RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE } from "./exchange-inspection-preparation";
 import type { StaffUploadObservationRequest, StaffUploadObservationResponse } from "./staff-upload-observation";
+import type { RentalFileCleanupAuthority, RentalFileCleanupBoundary } from "./application-file-cleanup-authority";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -59,6 +60,9 @@ type RentalObservationPorts = ConstructorParameters<typeof RentalStaffUploadObse
 
 /** 宿主沿原实例供给权限。知识操作按需核定原修订、原键和 unknown 参加者。 */
 export interface RentalFileStorageParticipants<Revision extends FileKnowledgeRevision> {
+  /** Only the original all-tenant worker consumes this trusted system port.
+   * Selected hosts require it at composition; the old host retains its own mode. */
+  cleanupAuthority?: RentalFileCleanupAuthority;
   operationLog?: Pick<PlatformOperationLogService, "record">;
   fileAccess?: Pick<RentalFileBusinessAccessService, "authorityKey" | "assertRead">;
   auth?: RentalFileWorkspaceAuthority;
@@ -392,7 +396,7 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
     };
     for (const tenant of tenants) {
       try {
-        const current = await this.cleanupExpiredUploadSessions(tenant.tenantId, limitPerTenant);
+        const current = await this.cleanupForTenant(tenant.tenantId, true).cleanupExpiredUploadSessions(tenant.tenantId, limitPerTenant);
         summary.scanned += current.scanned;
         summary.invalidated += current.invalidated;
         summary.deletedObjects += current.deletedObjects;
@@ -423,7 +427,7 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
     let pending = 0;
     for (const tenant of tenants) {
       try {
-        const result = await this.cleanupPendingFileAssetDeletes(tenant.tenantId, limitPerTenant);
+        const result = await this.cleanupForTenant(tenant.tenantId, true).cleanupPendingFileAssetDeletes(tenant.tenantId, limitPerTenant);
         scanned += result.scanned;
         deleted += result.deleted;
         pending += result.pending;
@@ -795,9 +799,63 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
     });
   }
 
-  /** 只适配原清理参加者的新占用和DELETE派发；结果CAS、HEAD核对及审计仍记录原已发生效果。 */
-  private cleanupForTenant(tenantId: string) {
+  /** Only an acknowledged original claim can dispatch DELETE. The worker's
+   * system authority is separate from HTTP Auth; neither can replace the other.
+   * Result CAS and an already-admitted HEAD never re-enter new business admission. */
+  private cleanupForTenant(tenantId: string, worker = false) {
     const prisma = this.prisma;
+    const authority = worker ? this.native.cleanupAuthority : undefined;
+    const stable = (value: unknown) => requestFingerprint(JSON.parse(JSON.stringify(value)));
+    const changed = () => new ConflictException("原文件清理占用、对象或运输依据已变化");
+    const key = (boundary: RentalFileCleanupBoundary) => `${boundary.operation}:${boundary.asset.id}:${boundary.session?.id ?? ""}`;
+    const content = (boundary: RentalFileCleanupBoundary) => ({ asset: boundary.asset, ...(boundary.session ? { session: boundary.session } : {}) });
+    // Private to one cleanup invocation. A caller string cannot manufacture a
+    // dispatch receipt, and a lost transaction acknowledgement cannot populate it.
+    const receipts = new Map<string, { method: "DELETE" | "HEAD"; hash: string }>();
+    const read = async (tx: Prisma.TransactionClient, boundary: RentalFileCleanupBoundary) => {
+      const asset = await tx.fileAsset.findFirst({ where: { id: boundary.asset.id, tenantId } });
+      if (!asset) throw changed();
+      if (!boundary.session) return { asset };
+      const rows = await tx.fileUploadSession.findMany({ where: { id: boundary.session.id, tenantId }, orderBy: { expiresAt: "asc" }, take: 2 });
+      if (rows.length !== 1) throw changed();
+      return { asset, session: rows[0] };
+    };
+    const lockSnapshot = async (tx: Prisma.TransactionClient, boundary: RentalFileCleanupBoundary, write = false) => {
+      if (boundary.asset.tenantId !== tenantId || boundary.session && boundary.session.tenantId !== tenantId) throw changed();
+      // Keep the original upload freeze/completion order: Tenant/Core first,
+      // then Session, then File. Result-only closure locks just its original rows.
+      if (boundary.session) {
+        const rows = await tx.$queryRaw<Array<{ id: string }>>(prismaRuntime.sql`
+          SELECT id FROM file_upload_sessions WHERE tenantId=${tenantId} AND id=${boundary.session.id}
+          ${write ? prismaRuntime.sql`FOR UPDATE` : prismaRuntime.sql`LOCK IN SHARE MODE`}`);
+        if (rows.length !== 1 || rows[0].id !== boundary.session.id) throw changed();
+      }
+      const assets = await tx.$queryRaw<Array<{ id: string }>>(prismaRuntime.sql`
+        SELECT id FROM FileAsset WHERE tenantId=${tenantId} AND id=${boundary.asset.id}
+        ${write ? prismaRuntime.sql`FOR UPDATE` : prismaRuntime.sql`LOCK IN SHARE MODE`}`);
+      if (assets.length !== 1 || assets[0].id !== boundary.asset.id || stable(await read(tx, boundary)) !== stable(content(boundary))) throw changed();
+    };
+    const authorize = async (tx: Prisma.TransactionClient, boundary: RentalFileCleanupBoundary, beforeFileLocks?: () => Promise<void>) => {
+      if (authority) await authority.assert(tx, boundary, beforeFileLocks);
+      else { await lockRentalBusinessTenant(tx, tenantId); await beforeFileLocks?.(); }
+    };
+    const original = (boundary: RentalFileCleanupBoundary) => {
+      const receipt = receipts.get(key(boundary));
+      if (!receipt || receipt.hash !== stable(content(boundary))) throw changed();
+      return receipt;
+    };
+    const transaction = async <T>(work: (tx: Prisma.TransactionClient) => Promise<T>, value: RentalFileCleanupBoundary) => {
+      const boundary = structuredClone(value);
+      const receipt = ["prepare", "result"].includes(boundary.phase) ? original(boundary) : undefined;
+      const committed = await prisma.$transaction(async tx => {
+        if (!receipt) await authorize(tx, boundary);
+        await lockSnapshot(tx, boundary, true);
+        const result = await work(tx);
+        return { result, hash: stable(await read(tx, boundary)) };
+      }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
+      receipts.set(key(boundary), { method: receipt?.method ?? (boundary.phase === "claim" ? "DELETE" : "HEAD"), hash: committed.hash });
+      return committed.result;
+    };
     const store: FileCleanupTransaction = {
       fileAsset: {
         findFirst: input => prisma.fileAsset.findFirst(input),
@@ -814,18 +872,32 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
     };
     return new FileStorageCleanup<Prisma.TransactionClient>({
       store,
-      transaction: work => this.businessTransaction(tenantId, work),
+      transaction,
+      resultTransaction: transaction,
       runtimeConfig: (currentTenant, provider) => this.integrations.runtimeConfig("file", currentTenant, provider as never, { requireLiveTest: false }),
       excludedUploadScene: RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE,
-      deleteObject: async (config, storageKey, at) => {
-        await this.businessTransaction(tenantId, tx => this.integrations.assertEnabledInTransaction(tx, tenantId, "file", config.provider,
-          { configRevision: config.revision }));
-        return this.deleteObject(config, storageKey, at);
-      },
+      deleteObject: (config, storageKey, at) => this.deleteObject(config, storageKey, at),
       presign: (config, method, storageKey, mimeType, expiresAt) => this.presign(config, method, storageKey, mimeType, expiresAt),
-      objectRequest: async (url, init) => {
-        if (init.method === "DELETE") await this.businessTransaction(tenantId, async () => undefined);
-        return this.objectRequest(url, init);
+      objectRequest: (url, init) => this.objectRequest(url, init),
+      beforeObjectRequest: async (value, request) => {
+        const boundary = structuredClone(value), { asset } = boundary;
+        const receipt = original(boundary);
+        if (receipt.method !== request.method) throw changed();
+        const metadata = asset.metadata as JsonRecord | null;
+        const storageKey = boundary.operation === "completed_staging" ? `${metadata?.stagingStorageKey}.pending-upload`
+          : boundary.operation === "expired_upload" && metadata?.fileUploadVersion === 2 ? `${asset.storageKey}.pending-upload` : asset.storageKey;
+        if (request.storageKey !== storageKey || request.config.provider !== asset.storageProvider
+          || authority && metadata?.storageLocationHash !== fileStorageLocationHash(request.config)) throw changed();
+        await prisma.$transaction(async tx => {
+          // DELETE is checked immediately before its one transport attempt.
+          // An unknown observer was admitted as recovery at its original claim.
+          // HEAD and the result after transport retain that exact original receipt.
+          const configuration = () => this.integrations.assertEnabledInTransaction(tx, tenantId, "file", request.config.provider,
+            { configRevision: request.config.revision, requireLiveTest: false });
+          if (request.method === "DELETE") await authorize(tx, boundary, configuration);
+          else await configuration();
+          await lockSnapshot(tx, boundary);
+        }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
       },
       ...(this.operationLog ? { recordAudit: (input: OperationLogInput) => this.operationLog!.record(input) } : {})
     });
@@ -897,6 +969,8 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
     private readonly integrations: Pick<TenantIntegrationService, "runtimeConfig" | "assertEnabledInTransaction">,
     private readonly native: RentalFileStorageParticipants<Revision>) {
     super();
+    if (native.cleanupAuthority !== undefined && typeof native.cleanupAuthority.assert !== "function")
+      throw new ServiceUnavailableException("Rental 文件清理系统权威未配置");
     this.operationLog = native.operationLog;
     this.knowledgeFiles = native.knowledgeFiles;
     this.fileAccess = native.fileAccess;

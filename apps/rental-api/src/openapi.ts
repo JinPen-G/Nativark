@@ -2,7 +2,7 @@
  * 文档不证明部署/权限可用；未描述字段、未挂路径与停用功能保留明确缺口。 */
 import { composeCoreOpenApi, CoreDeploymentLockSchema, type CoreDeploymentLock } from "@rental-os/core-contracts";
 import { createPlatformOpenApi } from "@rental-os/platform-server";
-import { createPlatformCoreOpenApi } from "@rental-os/platform-core-host";
+import { createPlatformCoreOpenApi, createPlatformCorePackageOpenApi } from "@rental-os/platform-core-host";
 import { createRentalOpenApi, RENTAL_HTTP_DOCUMENTATION_GAPS } from "@rental-os/rental-core/http-openapi";
 import { createRentalHostHttpPolicy } from "./http-policy";
 
@@ -57,7 +57,7 @@ export function createRentalHostOpenApi(lockValue: CoreDeploymentLock, policy: P
   const lock = CoreDeploymentLockSchema.parse(lockValue);
   if (lock.cores.length !== 1 || lock.cores[0].manifest.id !== "rental") throw new Error("Rental 文档须来自实际单 Core 宿主清单");
   const { contribution, legacyRoutes, documentationGaps } = createRentalHostOpenApiContribution(policy);
-  const result = composeCoreOpenApi(createPlatformCoreOpenApi(createPlatformOpenApi()),
+  const result = composeCoreOpenApi(createPlatformCorePackageOpenApi(createPlatformCoreOpenApi(createPlatformOpenApi())),
     [{ manifest: lock.cores[0].manifest, contribution }], { rental: legacyRoutes });
   if (!result.document) throw new Error(result.issues.map(issue => `${issue.field}: ${issue.message}`).join("\n"));
   result.document["x-rentalDocumentationGaps"] = documentationGaps;

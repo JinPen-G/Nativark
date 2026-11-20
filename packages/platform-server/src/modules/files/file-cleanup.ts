@@ -62,7 +62,12 @@ export interface FileCleanupTransaction {
 
 export interface FileCleanupParticipants<Transaction extends FileCleanupTransaction> {
   store: FileCleanupTransaction;
-  transaction<T>(work: (transaction: Transaction) => Promise<T>): Promise<T>;
+  /** The original algorithm supplies the exact persisted target. Hosts can fence
+   * new cleanup work without re-admitting a result already sent to storage. */
+  transaction<T>(work: (transaction: Transaction) => Promise<T>, boundary: FileCleanupBoundary): Promise<T>;
+  /** Optional exact-receipt transaction for hosts with additional snapshot locks.
+   * Existing public hosts retain their original result CAS without new admission. */
+  resultTransaction?<T>(work: (transaction: FileCleanupTransaction) => Promise<T>, boundary: FileCleanupBoundary): Promise<T>;
   runtimeConfig(tenantId: string, provider: string): Promise<TenantIntegrationRuntimeConfig | undefined>;
   /** 所属宿主显式提供原保留场景；公共框架没有Rental场景枚举。 */
   excludedUploadScene: string | undefined;
@@ -72,8 +77,22 @@ export interface FileCleanupParticipants<Transaction extends FileCleanupTransact
     headers: Record<string, string>;
   };
   objectRequest(url: string, init: RequestInit): Promise<Response>;
+  /** A short host transaction immediately before transport; never holds locks
+   * across DELETE/HEAD. This hook does not grant permission to retry DELETE. */
+  beforeObjectRequest?(boundary: FileCleanupBoundary, request: {
+    method: "DELETE" | "HEAD"; config: TenantIntegrationRuntimeConfig; storageKey: string;
+  }): Promise<void>;
   recordAudit?(input: { tenantId: string; action: string; targetType: string; detail: string; metadata: Record<string, number> }): Promise<unknown>;
 }
+
+export type FileCleanupTarget =
+  | { operation: "expired_upload" | "completed_staging"; asset: StoredFileAsset; session: StoredFileUploadSession }
+  | { operation: "pending_delete"; asset: StoredFileAsset; session?: never };
+export type FileCleanupBoundary = FileCleanupTarget & {
+  /** claim/observe establish this invocation's original receipt; prepare only
+   * advances that same claim. result never authorizes a new external effect. */
+  phase: "claim" | "observe" | "prepare" | "result";
+};
 
 export const COMPLETED_STAGING_PENDING = "completed_staging_pending";
 export const COMPLETED_STAGING_UNKNOWN = "completed_staging_unknown";
@@ -98,6 +117,10 @@ const nextVersion = (version: Date, at: Date) => new Date(Math.max(version.getTi
 
 export class FileStorageCleanup<Transaction extends FileCleanupTransaction> {
   constructor(private readonly participants: FileCleanupParticipants<Transaction>) {}
+
+  private result<T>(work: (transaction: FileCleanupTransaction) => Promise<T>, boundary: FileCleanupBoundary) {
+    return this.participants.resultTransaction?.(work, boundary) ?? work(this.participants.store);
+  }
 
   private reservedSceneFilter(): { uploadScene?: { not: string } } {
     return this.participants.excludedUploadScene ? { uploadScene: { not: this.participants.excludedUploadScene } } : {};
@@ -179,23 +202,30 @@ export class FileStorageCleanup<Transaction extends FileCleanupTransaction> {
         // must not become a second DELETE; later owners only observe this key.
         const claimed = await this.participants.transaction(async tx => {
           const current = await tx.fileAsset.findFirst({ where: { id: asset.id, tenantId } });
-          if (requestFingerprint(current) !== requestFingerprint(asset)) throw new ConflictException("原文件清理依据已变化");
-          return tx.fileUploadSession.updateMany({ where: { id: row.id, tenantId, status: "completed",
+          if (!current || requestFingerprint(current) !== requestFingerprint(asset)) throw new ConflictException("原文件清理依据已变化");
+          const changed = await tx.fileUploadSession.updateMany({ where: { id: row.id, tenantId, status: "completed",
             updatedAt: row.updatedAt, storageKey: row.storageKey, provider: row.provider, fileAssetId: asset.id,
             cleanupError: row.cleanupError, expiresAt: row.expiresAt, completedAt: row.completedAt },
             data: { cleanupError: COMPLETED_STAGING_UNKNOWN, cleanupAttempts: { increment: 1 }, lastCleanupAt: now } });
-        });
-        if (claimed.count !== 1) continue;
+          if (changed.count !== 1) return;
+          const sessions = await tx.fileUploadSession.findMany({ where: { id: row.id, tenantId }, orderBy: { expiresAt: "asc" }, take: 2 });
+          if (sessions.length !== 1) throw changedUpload();
+          return { asset: structuredClone(current), session: structuredClone(sessions[0]) };
+        }, { operation: "completed_staging", phase: row.cleanupError === COMPLETED_STAGING_PENDING ? "claim" : "observe", asset, session: row });
+        if (!claimed) continue;
         summary.sessionIds.push(row.id);
         const key = `${staging}.pending-upload`;
         const method = row.cleanupError === COMPLETED_STAGING_PENDING ? "DELETE" : "HEAD";
         const signed = this.participants.presign(config, method, key, "application/octet-stream", new Date(now.getTime() + 60_000));
+        await this.participants.beforeObjectRequest?.({ operation: "completed_staging", phase: "prepare", ...claimed },
+          { method, config, storageKey: key });
         const response = await this.participants.objectRequest(signed.url, { method, headers: signed.headers });
         const absent = method === "DELETE" ? response.ok || response.status === 404 : response.status === 404;
         if (!absent) throw new ServiceUnavailableException("原临时对象清理结果尚未证实");
-        const recorded = await this.participants.store.fileUploadSession.updateMany({ where: { id: row.id, tenantId, status: "completed",
+        const recorded = await this.result(tx => Promise.resolve(tx.fileUploadSession.updateMany({ where: { id: row.id, tenantId, status: "completed",
           storageKey: row.storageKey, fileAssetId: asset.id, cleanupError: COMPLETED_STAGING_UNKNOWN,
-          lastCleanupAt: now }, data: { cleanupError: null } });
+          lastCleanupAt: now, updatedAt: claimed.session.updatedAt, provider: row.provider }, data: { cleanupError: null } })),
+          { operation: "completed_staging", phase: "result", ...claimed });
         if (recorded.count !== 1) throw new ConflictException("原临时对象清理收据已变化");
         summary.deletedObjects += 1;
       } catch {
@@ -249,7 +279,8 @@ export class FileStorageCleanup<Transaction extends FileCleanupTransaction> {
           session: { ...row, status: "cleanup_in_progress", cleanupAttempts: row.cleanupAttempts + 1,
             lastCleanupAt: now, updatedAt: nextVersion(row.updatedAt, now) } };
         claim.session.cleanupError = expiredReceipt(claim, configHash);
-        await this.participants.transaction(tx => this.replaceExpiredUpload(tx, before, claim));
+        await this.participants.transaction(tx => this.replaceExpiredUpload(tx, before, claim),
+          { operation: "expired_upload", phase: ownsDispatch ? "claim" : "observe", ...before });
         sessionIds.push(row.id);
         let deleted = row.provider === "local_mock";
         try {
@@ -261,9 +292,12 @@ export class FileStorageCleanup<Transaction extends FileCleanupTransaction> {
               session: { ...claim.session, updatedAt: nextVersion(claim.session.updatedAt, checkedAt) }
             };
             checked.session.cleanupError = expiredReceipt(checked, configHash);
-            await this.participants.transaction(tx => this.replaceExpiredUpload(tx, claim, checked));
+            await this.participants.transaction(tx => this.replaceExpiredUpload(tx, claim, checked),
+              { operation: "expired_upload", phase: "prepare", ...claim });
             claim = checked;
             const key = (asset.metadata as JsonRecord | null)?.fileUploadVersion === 2 ? `${row.storageKey}.pending-upload` : row.storageKey;
+            await this.participants.beforeObjectRequest?.({ operation: "expired_upload", phase: "prepare", ...claim },
+              { method: ownsDispatch ? "DELETE" : "HEAD", config, storageKey: key });
             if (ownsDispatch) deleted = await this.participants.deleteObject(config, key, now);
             else {
               const signed = this.participants.presign(config, "HEAD", key, asset.mimeType, new Date(Date.now() + 60_000));
@@ -277,7 +311,8 @@ export class FileStorageCleanup<Transaction extends FileCleanupTransaction> {
           session: { ...claim.session, status: "failed", failureReason: "上传会话已过期",
             updatedAt: nextVersion(claim.session.updatedAt, at), cleanupError: null } };
         if (!deleted) result.session.cleanupError = expiredReceipt(result, configHash);
-        await this.participants.transaction(tx => this.replaceExpiredUpload(tx, claim, result));
+        await this.participants.transaction(tx => this.replaceExpiredUpload(tx, claim, result),
+          { operation: "expired_upload", phase: "result", ...claim });
         invalidated += 1;
         if (deleted) deletedObjects += 1;
         else cleanupPending += 1;
@@ -313,7 +348,8 @@ export class FileStorageCleanup<Transaction extends FileCleanupTransaction> {
     for (const row of rows) {
       if (this.isReservedScene(row.uploadScene)) continue;
       const ownsDispatch = row.status === "delete_pending";
-      const claim = ownsDispatch ? await this.participants.transaction(async tx => {
+      let claim: StoredFileAsset | undefined;
+      try { claim = ownsDispatch ? await this.participants.transaction(async tx => {
         const claimed = await tx.fileAsset.updateMany({
           where: { id: row.id, tenantId, status: "delete_pending", updatedAt: row.updatedAt,
             storageKey: row.storageKey, storageProvider: row.storageProvider, uploadScene: row.uploadScene },
@@ -325,7 +361,12 @@ export class FileStorageCleanup<Transaction extends FileCleanupTransaction> {
           || requestFingerprint({ ...current, status: row.status, updatedAt: row.updatedAt }) !== requestFingerprint(row))
           throw new ConflictException("原文件删除占用依据已变化");
         return structuredClone(current);
-      }) : row;
+      }, { operation: "pending_delete", phase: "claim", asset: row }) : await this.participants.transaction(async tx => {
+        const current = await tx.fileAsset.findFirst({ where: { id: row.id, tenantId } });
+        if (!current || cleanupSnapshotHash(current) !== cleanupSnapshotHash(row)) throw changedUpload();
+        return structuredClone(current);
+      }, { operation: "pending_delete", phase: "observe", asset: row }); }
+      catch { pending += 1; continue; }
       if (!claim) continue;
       const receipt = { id: claim.id, tenantId, status: "delete_in_progress", updatedAt: claim.updatedAt,
         storageKey: claim.storageKey, storageProvider: claim.storageProvider, uploadScene: claim.uploadScene };
@@ -338,22 +379,31 @@ export class FileStorageCleanup<Transaction extends FileCleanupTransaction> {
           if (ownsDispatch) {
             // 只有确认提交本次pending占用的调用方能派发；Boolean失败不证明请求未执行。
             dispatched = true;
+            await this.participants.beforeObjectRequest?.({ operation: "pending_delete", phase: "prepare", asset: claim },
+              { method: "DELETE", config, storageKey: claim.storageKey });
             absent = await this.participants.deleteObject(config, claim.storageKey, new Date());
           } else {
             // 同时运行、重启和超时都不能取得第二次DELETE权，只观察原提供方和原对象键。
             const at = new Date();
             const signed = this.participants.presign(config, "HEAD", claim.storageKey, claim.mimeType, new Date(at.getTime() + 60_000));
+            await this.participants.beforeObjectRequest?.({ operation: "pending_delete", phase: "observe", asset: claim },
+              { method: "HEAD", config, storageKey: claim.storageKey });
             const response = await this.participants.objectRequest(signed.url, { method: "HEAD", headers: signed.headers });
             absent = response.status === 404;
           }
           if (!absent) throw new ServiceUnavailableException("原文件删除结果尚未证实");
         }
-        const recorded = await this.participants.store.fileAsset.updateMany({ where: receipt, data: { status: "deleted" } });
+        const recorded = await this.result(tx => Promise.resolve(tx.fileAsset.updateMany({ where: receipt, data: { status: "deleted" } })),
+          { operation: "pending_delete", phase: "result", asset: claim });
         deleted += recorded.count;
       } catch {
         // 配置读取等派发前失败可释放本占用；开始DELETE或仅观察原结果后始终保留unknown。
-        if (ownsDispatch && !dispatched)
-          await this.participants.store.fileAsset.updateMany({ where: receipt, data: { status: "delete_pending" } });
+        if (ownsDispatch && !dispatched) {
+          try {
+            await this.result(tx => Promise.resolve(tx.fileAsset.updateMany({ where: receipt, data: { status: "delete_pending" } })),
+              { operation: "pending_delete", phase: "result", asset: claim });
+          } catch { /* A conflicting/lost release stays an original pending observation, never a fresh DELETE. */ }
+        }
         pending += 1;
       }
     }

@@ -1741,6 +1741,10 @@
     "./http-openapi": {
       "types": "./dist/http-openapi.d.ts",
       "default": "./dist/http-openapi.js"
+    },
+    "./application-file-cleanup-authority": {
+      "types": "./dist/application-file-cleanup-authority.d.ts",
+      "default": "./dist/application-file-cleanup-authority.js"
     }
   },
   "typesVersions": {
@@ -3391,6 +3395,9 @@
       ],
       "http-openapi": [
         "dist/http-openapi.d.ts"
+      ],
+      "application-file-cleanup-authority": [
+        "dist/application-file-cleanup-authority.d.ts"
       ]
     }
   },

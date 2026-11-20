@@ -341,6 +341,7 @@ function compositionFixture() {
     configuration: config,
     aiMode: 'enabled',
     participants: factory.participants,
+    fileCleanupAuthority: { assert: async () => { throw Error('unexpected file cleanup worker'); } },
     workerAuthority: {
       assertCurrent: async () => {
         throw Error('unexpected worker');

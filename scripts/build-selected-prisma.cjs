@@ -95,6 +95,15 @@ function selectedCompilerOptions(ts, project, options, selection, readFile = ts.
     paths: { ...options.paths, '@prisma/client': [client] } }, client, mode: selection.mode, models: models.length };
 }
 
+/** 原 tsc Program 的同一诊断/emit 顺序。调用方只替换文件运输和输出位置，不执行源码。 */
+function compileTypeScriptProgram(ts, parsed, options, host) {
+  const program = ts.createProgram({ rootNames: parsed.fileNames, options, projectReferences: parsed.projectReferences, host });
+  const diagnostics = [...parsed.errors, ...ts.getPreEmitDiagnostics(program)];
+  const emitted = diagnostics.length || options.noEmit ? undefined : program.emit();
+  if (emitted) diagnostics.push(...emitted.diagnostics);
+  return { program, diagnostics, emitted, failed: diagnostics.length > 0 || Boolean(emitted?.emitSkipped) };
+}
+
 function compileProject(input) {
   // Resolve the installed compiler from this project's dependencies. No alternate
   // workspace, generated default Client, runtime import hook or source alias.
@@ -106,14 +115,10 @@ function compileProject(input) {
   const selected = selectedCompilerOptions(ts, input.project, parsed.options, input);
   const options = input.noEmit ? { ...selected.options, noEmit: true, incremental: false, tsBuildInfoFile: undefined } : selected.options;
   const host = ts.createCompilerHost(options);
-  const program = ts.createProgram({ rootNames: parsed.fileNames, options, projectReferences: parsed.projectReferences, host });
-  const diagnostics = [...parsed.errors, ...ts.getPreEmitDiagnostics(program)];
-  const emitted = diagnostics.length || options.noEmit ? undefined : program.emit();
-  if (emitted) diagnostics.push(...emitted.diagnostics);
+  const { diagnostics, failed } = compileTypeScriptProgram(ts, parsed, options, host);
   if (diagnostics.length) console.error(ts.formatDiagnosticsWithColorAndContext(diagnostics, {
     getCanonicalFileName: name => name, getCurrentDirectory: ts.sys.getCurrentDirectory, getNewLine: () => ts.sys.newLine,
   }));
-  const failed = diagnostics.length > 0 || Boolean(emitted?.emitSkipped);
   console.log(JSON.stringify({ project: slash(input.project), client: selected.client, mode: selected.mode,
     models: selected.models, diagnostics: diagnostics.length, noEmit: Boolean(options.noEmit), status: failed ? 'failed' : 'passed' }));
   return failed ? 1 : 0;
@@ -126,4 +131,4 @@ if (require.main === module) {
     else process.exitCode = compileProject(input);
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }
-module.exports = { parseArguments, selectedCompilerOptions, compileProject };
+module.exports = { parseArguments, selectedCompilerOptions, compileTypeScriptProgram, compileProject };

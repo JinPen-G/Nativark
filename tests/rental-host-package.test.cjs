@@ -81,7 +81,8 @@ async function run() {
     const stat = nativeMemoryLstat(file, ...args);
     return slash(file).startsWith(slash(memory.task) + '/') ? stableBirth(stat) : stat;
   };
-  for (const file of ['scripts/package-rental-host.cjs', 'scripts/rental-host-lock.cjs', 'scripts/build-selected-prisma.cjs'])
+  for (const file of ['scripts/package-rental-host.cjs', 'scripts/rental-host-lock.cjs', 'scripts/build-selected-prisma.cjs',
+    'scripts/rental-platform-build.cjs'])
     memory.put(path.join(root, file), fs.readFileSync(path.join(root, file)));
   const packager = memory.load(path.join(root, 'scripts/package-rental-host.cjs'));
   const sourceFiles = new Map([['LICENSE', fs.readFileSync(path.join(root, 'LICENSE'))], ['package-lock.json', fs.readFileSync(path.join(root, 'package-lock.json'))]]);
@@ -93,13 +94,35 @@ async function run() {
   const platform = memory.load(build.exported('@rental-os/platform-api/data-plan', true)).createPublicPlatformDataPlan();
   for (const file of ['prisma/schema.prisma', ...platform.data.migrations.map(item => item.file)])
     sourceFiles.set('apps/platform-api/' + file, fs.readFileSync(path.join(root, 'apps/platform-api', file)));
+  const platformSourceApi = memory.load(build.exported('@rental-os/core-contracts/platform-source', true));
+  const platformInputs = new Map();
+  const collectPlatformSource = relative => {
+    const absolute = path.join(root, relative), info = fs.lstatSync(absolute);
+    assert(!info.isSymbolicLink(), 'fixture source cannot follow links');
+    if (info.isDirectory()) {
+      for (const entry of fs.readdirSync(absolute, { withFileTypes: true })) {
+        if (['node_modules', 'dist', 'generated', '.git', 'test', 'tests'].includes(entry.name)) continue;
+        collectPlatformSource(relative + '/' + entry.name);
+      }
+    } else if (info.isFile()) platformInputs.set(relative, fs.readFileSync(absolute));
+  };
+  for (const relative of [...platformSourceApi.PLATFORM_SOURCE_WORKSPACES, 'packages/ui-arc',
+    'packages/ui-tablecn/LICENSE.md', 'packages/ui-tablecn/README.md', 'packages/ui-motiq/runtime',
+    'packages/ui-motiq/LICENSE', 'packages/ui-motiq/README.md', 'config', 'AGENTS.md', 'CLAUDE.md',
+    'LICENSE', '.gitignore', '.gitattributes', 'tsconfig.base.json', 'package.json',
+    'package-lock.json', 'apps/admin/AGENTS.md']) collectPlatformSource(relative);
+  // The declared archive is a fixture; environmental examples have no compiler
+  // role. Keep the original offline guard closed to every .env* file on disk.
+  platformInputs.set('.env.example', Buffer.from('# Offline source archive fixture; no environment is loaded.\n'));
+  const platformSource = platformSourceApi.createPlatformSource(platformInputs, source);
+  const platformArchive = archive.createCoreArchive(platformSource.files), platformFiles = platformSource.files;
   const deployment = memory.load(path.join(root, 'apps/rental-api/dist/prepare-deployment.js'));
-  const deploymentInput = { release: { versions, source, sha256: 'b'.repeat(64), data: platform.data },
+  const deploymentInput = { release: { versions, source, sha256: platformArchive.sha256, data: platform.data },
     pin: { manifest: packed.manifest, sha256: packed.sha256 }, coreFiles: rentalFiles, publicSchema: platformClient.schema,
     publicMigrations: platform.migrationNames.map((name, index) => ({ name, sql: sourceFiles.get('apps/platform-api/' + platform.data.migrations[index].file) })) };
   const disabled = deployment.createRentalDeploymentFiles(deploymentInput);
   const enabled = deployment.createRentalDeploymentFiles({ ...deploymentInput, ai: { release: aiRelease, files: aiFiles } });
-  const base = { aiMode: 'disabled', sourceFiles, rentalFiles, deploymentFiles: disabled.files,
+  const base = { aiMode: 'disabled', sourceFiles, platformFiles, dependencyDirectory: deps, rentalFiles, deploymentFiles: disabled.files,
     selections: { rental: disabledClient, platform: platformClient }, ts: build.ts };
   let result, aiResult;
   check('真实无AI宿主、完整固定包和原准备材料确定性打包', () => {
@@ -111,6 +134,12 @@ async function run() {
     assert(![...result.files.keys()].some(file => file.startsWith('packages/ai-native-server/')));
     assert(result.receipt.runtime.files > 100); assert.equal(result.receipt.imageBuild, 'not-run');
     assert.equal(result.receipt.deployment, 'pending');
+    assert.deepEqual(result.receipt.platformBuild.release, disabled.lock.platform);
+    assert.equal(result.receipt.platformBuild.sourceArchiveSha256, platformArchive.sha256);
+    for (const item of result.receipt.platformBuild.generated) {
+      assert.equal(require('node:crypto').createHash('sha256').update(result.files.get(item.file)).digest('hex'), item.sha256);
+      assert(result.receipt.files.some(file => file.file === item.file && file.sha256 === item.sha256));
+    }
     assert(![...result.files.keys()].some(file => /(?:^|\/)(?:node_modules|generated|docs|output|\.env)(?:\/|$)/u.test(file)));
   });
   check('真实AI产物闭包、247声明和完整固定AI数据包', () => {
@@ -142,6 +171,15 @@ async function run() {
     assert.throws(() => packager.createRentalHostContext({ ...base, rentalFiles: altered }), /锁定|不一致/);
     const files = new Map(sourceFiles); files.delete('packages/platform-server/dist/index.js');
     assert.throws(() => packager.createRentalHostContext({ ...base, sourceFiles: files }), /未实际构建/);
+  });
+  check('固定底座源码与实际运行字节不同源时拒绝打包', () => {
+    const changedSource = new Map(platformFiles);
+    changedSource.set('packages/core-host/src/index.ts', Buffer.from('export const changed = true;'));
+    assert.throws(() => packager.createRentalHostContext({ ...base, platformFiles: changedSource }), /底座|源码|摘要|发行/);
+    const changedRuntime = new Map(sourceFiles);
+    const target = 'packages/platform-server/dist/index.js';
+    changedRuntime.set(target, Buffer.concat([changedRuntime.get(target), Buffer.from('\nexports.forgedRuntime = true;\n')]));
+    assert.throws(() => packager.createRentalHostContext({ ...base, sourceFiles: changedRuntime }), /编译|产物|同源|运行/);
   });
   check('构建Client与部署schema错配、默认Client拒绝', () => {
     assert.throws(() => packager.createRentalHostContext({ ...base, selections: { ...base.selections,
@@ -192,11 +230,13 @@ async function run() {
   });
   check('CLI真实读写路径在memfs执行，拒绝覆盖并清理失败的独占归档', () => {
     const candidate = path.join(memory.task, 'prepared'), core = path.join(memory.task, 'core'), output = path.join(memory.task, 'host.tgz');
+    const sourceArchive = path.join(memory.task, 'platform.tgz');
+    memory.put(sourceArchive, platformArchive.bytes);
     for (const [file, bytes] of disabled.files) memory.put(path.join(candidate, file), bytes);
     for (const [file, bytes] of rentalFiles) memory.put(path.join(core, file), bytes);
     memory.put(disabledClient.client, disabledClient.declarations);
     memory.put(path.join(path.dirname(disabledClient.client), 'schema.prisma'), disabledClient.schema);
-    const args = ['--ai', 'disabled', '--deployment', candidate, '--rental-package', core, '--client', disabledClient.client,
+    const args = ['--ai', 'disabled', '--deployment', candidate, '--platform-package', sourceArchive, '--rental-package', core, '--client', disabledClient.client,
       '--platform-client', platformClient.client, '--output', output, '--deps', deps];
     const written = packager.main(args); assert.equal(written.status, 'packaged');
     assert.equal(written.sha256, require('node:crypto').createHash('sha256').update(memory.fs.readFileSync(output)).digest('hex'));
@@ -216,7 +256,7 @@ async function run() {
     assert.equal(memory.fs.readFileSync(switched, 'utf8'), 'other writer');
   });
   const rootDi = await require('../apps/rental-api/test/ai-host-root-cases.cjs')({
-    build, memory, rentalFiles, aiFiles, enabled, aiResult, disabled, platformClient });
+    build, memory, rentalFiles, aiFiles, enabled, aiResult, disabled, platformClient, platformArchive });
   assert.equal(fs.existsSync(temporary), false);
   console.log(JSON.stringify({ checks, builds: build.stages.length, disabled: { files: result.files.size, runtimeFiles: result.receipt.runtime.files, sha256: result.sha256 },
     enabled: { files: aiResult.files.size, runtimeFiles: aiResult.receipt.runtime.files, sha256: aiResult.sha256 },

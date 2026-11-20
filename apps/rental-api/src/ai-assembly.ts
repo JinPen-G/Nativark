@@ -7,6 +7,7 @@ import { requireAiNativeDataPackage } from "@rental-os/ai-native-data/data-packa
 import { createAiNativeMysqlDataPlanFromContribution } from "@rental-os/ai-native-data/mysql-data";
 import { createRentalAiParticipants, requireRentalAiSelection } from "./ai-composition";
 import { composeRentalApplication } from "./assembly";
+import { createRentalAiFileCleanupSource } from "./ai-file-cleanup-source";
 import type { RentalDatabaseClient } from "./database";
 
 export function composeRentalAiApplication(input: {
@@ -19,7 +20,9 @@ export function composeRentalAiApplication(input: {
   const installed = requireAiNativeDataPackage(root, lock.dataCapabilities![0]);
   const dataPlan = createAiNativeMysqlDataPlanFromContribution(installed.contribution);
   const participants = createRentalAiParticipants({ ...input, lock });
-  return composeRentalApplication({ ...input, lock, aiMode: "enabled", ai: { ...participants, dataPlan } });
+  return composeRentalApplication({ ...input, lock, aiMode: "enabled", ai: { ...participants, dataPlan,
+    fileCleanupKnowledge: createRentalAiFileCleanupSource(),
+    readDataPackages: () => [requireAiNativeDataPackage(root, lock.dataCapabilities![0])] } });
 }
 
 export type RentalAiHostAssembly = ReturnType<typeof composeRentalAiApplication>;

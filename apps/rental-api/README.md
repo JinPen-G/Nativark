@@ -7,7 +7,7 @@
 | 入口 | 职责 |
 | --- | --- |
 | [main.ts](src/main.ts)、[bootstrap.ts](src/bootstrap.ts) | 显式执行才启动；只消费进程配置和指定的固定部署锁，不加载 `.env`。校验 MySQL、认证密钥、AI 选择、端口、代理及 CORS 配置。 |
-| [app.module.ts](src/app.module.ts) | 挂载公共平台、标准 Core、原 Rental、支付、客户、空间和认证扩展模块；从实际 Controller 元数据核对完整请求政策，再构造同实例服务。 |
+| [app.module.ts](src/app.module.ts) | 挂载公共平台、标准 Core、Core 包管理、原 Rental、支付、客户、空间和认证扩展模块；从实际 Controller 元数据核对完整请求政策，再构造同实例服务。 |
 | [assembly.ts](src/assembly.ts) | 核定实际标准包与部署锁，组合原应用、公共分流、业务/公开准入和作业权威；不连接、迁移或派发外部请求。 |
 | [ai-main.ts](src/ai-main.ts)、[ai-app.module.ts](src/ai-app.module.ts)、[ai-assembly.ts](src/ai-assembly.ts) | 独立的 AI 启用入口；核定锁中的完整选装数据包和原迁移账，组合原 Runtime 与同一 Rental 实例。 |
 | [ai-composition.ts](src/ai-composition.ts)、[ai-inspection-transactions.ts](src/ai-inspection-transactions.ts) | 原 AI 工厂、知识权限、检查事务和生命周期参加者；复用当前 Auth、Guard、Core 和业务实例，构造阶段不执行外部调用。 |
@@ -16,6 +16,7 @@
 | [http-application-views.ts](src/http-application-views.ts) | 向 HTTP 注入原服务方法，隐藏 Nest 生命周期钩子，避免同一业务实例被多个模块重复启动。 |
 | [lifecycle.ts](src/lifecycle.ts) | 唯一初始化、预热、配货/到期/文件/限流作业与数据库退出负责人；先停止新任务并排空，再断开连接，排空失败不提前断库。 |
 | [deployment-package.ts](src/deployment-package.ts) | 从实际依赖读取固定标准包并核对摘要；源码目录、同名版本或准备结果均不能替代实际部署和物理数据证据。 |
+| [core-package-sources.ts](src/core-package-sources.ts) | 为同一 API 的包管理读取当前固定底座归档、实际运行产物、Rental/可选 AI 完整包和原迁移材料；无同源证据保持不可用。 |
 | [http-policy.ts](src/http-policy.ts)、[openapi.ts](src/openapi.ts) | 真实挂载清单同时约束请求包装与旧路径文档许可；逐条核定原方法/处理器，使用 Rental 命名空间并保留原合同缺项。 |
 | [package.ts](src/package.ts)、[prepare-deployment.ts](src/prepare-deployment.ts) | 从已构建字节和固定来源形成标准包及候选部署；同源 OpenAPI、完整摘要和原 SQL 必须一致，不安装或执行迁移。 |
 
@@ -23,11 +24,15 @@
 
 原组合宿主的 `PlatformController` 已有客户/空间兼容入口；该宿主不得再次挂载独立客户/空间模块。独立宿主则由本根模块统一挂载。原认证扩展同样不能在同一应用重复登记。
 
+Core 包目录、预检、版本选择和候选准备的四个原 Controller 挂在同一 API。它们复用当前数据库、管理主体、部署目录和审计，沿唯一公共 Guard 分流；员工路由不能借用管理入口。`CORE_PACKAGE_STORAGE_ROOT` 指定绝对存储目录，`CORE_PLATFORM_PACKAGE_REFERENCE` 指向其中 `archives/index.json` 的当前底座归档记录，前端继续使用本宿主会话与 API。
+
+当前底座安装状态须同时核对完整源码归档与 `rental-host.context.json` 中的原编译证据。打包器从固定源码、原 npm 锁和所选公共 Client 在内存编译六个公共运行包，逐文件匹配实际 JS、声明和元数据；读取器再核对当前加载入口、产物集合和同一部署锁。收据与可执行文件属于受控部署材料，不是外部签名。只有源码归档、版本号或准备目录时保持不可用；原迁移账和物理观察仍单独核定。
+
 `createRentalHostPackage` 接收实际已构建字节、Core/底座固定来源和公开指南，生成同源 `dist/http-openapi.json` 并沿原标准包检查器核对。部署准备和启动再次核对整包摘要、清单与该文档，缺失或不同源时拒绝。旧路径例外仅来自宿主实际挂载处理器；通用打包、安装、迁移准备入口省略许可时仍要求标准 Core 路径，不从包或锁文件自取例外。候选 SQL 保留原字节和原顺序，`prepared` 不代表已经安装、迁移或运行。
 
 `createRentalDeploymentFiles` 与命令共用同一准备入口。省略 AI 数据包得到 161 模型；提供已核固定完整 AI 数据发行与包，得到 247 模型及按原顺序追加的 58 份迁移。命令的新迁移目录必须直接位于本宿主根目录，例如 `apps/rental-api/prisma-candidate`，且尚未存在；其中 schema 的 `../generated/client` 与本宿主编译、运行使用同一个 Client。准备只写新目录，失败清理本次候选，不覆盖有效部署。
 
-公共、Core 管理与 Rental 文档在唯一 OpenAPI 入口组合；576 个已描述操作对应 576 个原处理器。客户头像读/写及员工检查证据绑定已采用同源媒体合同；无 AI 宿主的检查绑定保留明确 503。原未挂的品类选项路径保留为未挂说明；原宽泛合同按 `RENTAL_HTTP_SCHEMA_GAPS` 明确标为 `incomplete`。这些缺口不伪造请求/响应字段，也不将路由挂载视为当前部署或业务授权通过。
+公共、Core 管理、Core 包管理与 Rental 文档在唯一 OpenAPI 入口组合，操作均对应实际挂载处理器。客户头像读/写及员工检查证据绑定已采用同源媒体合同；无 AI 宿主的检查绑定保留明确 503。原未挂的品类选项路径保留为未挂说明；原宽泛合同按 `RENTAL_HTTP_SCHEMA_GAPS` 明确标为 `incomplete`。这些缺口不伪造请求/响应字段，也不将路由挂载视为当前部署或业务授权通过。
 
 ## 请求、事务与响应
 
@@ -50,6 +55,10 @@
 
 [作业权威](../../packages/rental-core/src/application-worker-authority.ts) 使用真实系统任务主体。已登记停用 Core 只允许原配货扫描、待支付到期、领取逾期、支付意图到期及耐久通知重试；原执行器和动作均固定，调价及新增业务继续拒绝。支付先 Tenant/Core，再原 Order，最后工作空间和操作复核；不把 Workspace 锁提前到 Order 之前。通知保留原耐久占用、派发、结果定位及 unknown 语义，停止作业不丢弃已派发原结果。
 
+[文件清理权威](../../packages/rental-core/src/application-file-cleanup-authority.ts) 单独核定原过期上传、已完成暂存对象和待删文件三个执行器，先从持久业务对象确认租户及空间，再锁原授权、绑定、业务对象和文件快照。只有已确认提交的占用可发起一次 DELETE；原 HEAD 核对与结果 CAS 继续使用同一对象收据，失应答不会重新派发删除。配置、知识来源、上传会话及文件按原锁序核定，冻结或未知归属保持原待处理状态。
+
+AI 启用入口额外提供[知识文件来源](src/ai-file-cleanup-source.ts)，从原文档元数据与实际上传会话核对附件，不读取或解密正文。Workspace 锁定后才复核 Document → Session；缺少已保存文档或已从当前文档移出的旧附件没有可逆的归属证据时保持待处理，不能用文件标签或 metadata 中的空间代替原关系。
+
 ## 组合约束与验证边界
 
 普通宿主使用无 AI 的 161 模型；客户检查出箱用 `null` 表达未选择，`undefined` 或残缺参加者会拒绝。AI 启用入口使用 247 模型，通过原实际工厂组合失败出箱、同事务事件、通知草稿、知识读取和原请求服务。公共数据库视图仍限定原 40 模型；两个 Client 的运行时模型图互不覆盖，正文加密沿各自实际模型关系处理嵌套数据。
@@ -64,6 +73,8 @@
 
 `build`/`lint` 与 `build:ai`/`lint:ai` 使用 [所选 Client 编译入口](../../scripts/build-selected-prisma.cjs)。先由宿主按锁定 schema 生成专属 Client，再显式提供绝对 `RENTAL_PRISMA_CLIENT`；同一 npm 前置链共用选择，不回退默认生成物。纯 schema 首次准备见 [准备入口](../../scripts/prepare-selected-prisma-schema.cjs)，独立 Linux 部署上下文见 [打包入口](../../scripts/package-rental-host.cjs)；准备文件与上下文均不表示已执行迁移或镜像构建。
 
+打包命令必须显式传入 `--ai enabled|disabled`、`--deployment`、`--platform-package`、`--rental-package`、`--client`、`--platform-client` 和 `--output`；所有文件或目录参数均为绝对路径。`--platform-package` 为部署锁指定的完整源码 `.tgz`，`--client` 与 `--platform-client` 分别为本宿主及公共宿主的 `generated/client/index.d.ts`。AI 启用时另须 `--ai-data-package`，可用 `--deps` 指定原锁版本的只读编译依赖目录。输出为尚不存在的 `.tgz`，失败只清理本次独占产物；上下文保留原依赖锁、SQL、编译来源及运行闭包，不携带作者依赖目录或环境文件。
+
 无 AI 宿主的原检查证据绑定处理器由固定政策在执行前返回 503；其他处理器仍按真实元数据核对，未知接点继续拒绝。该政策不能证明启用 AI 的检查绑定已接通。同源善后声明当前列出89个读取/收尾处理器，其中新增11个文件/承运证据、单订单员工收款、审批原结果及企业回款凭证GET。宿主须从同一实例供给 `originalHistory` 的文件、批准、续租/换货及回款材料定位者，保留当前原ACL、企业授权和订单范围复核；缺少参加者返回不可用。原材料定位与处理器登记不证明当前已装配、迁移或完成全部兼容验收。
 
-定向验证入口为 [AI 装配与请求回归](test/ai-composition.test.cjs)、[原输入事务回归](../../packages/ai-native-server/test/original-scene-transactions.test.cjs)、[原场景执行回归](../../packages/ai-native-server/test/original-scene-execution.test.cjs)、[所选 Client 编译回归](../../tests/selected-prisma-build.test.cjs) 和 [Linux 部署上下文回归](../../tests/rental-host-package.test.cjs)。覆盖离线原服务/Controller/请求管线、同事务撤权与未知结果、所选 schema 严格类型、实际模块依赖注入和单次生命周期。真实数据库锁竞争、迁移、供应商调用、HTTP 监听及生产发布须另行验证；准备数据不能写作迁移成功，提交推送也不能写作已部署。
+定向验证入口为 [AI 装配与请求回归](test/ai-composition.test.cjs)、[原输入事务回归](../../packages/ai-native-server/test/original-scene-transactions.test.cjs)、[原场景执行回归](../../packages/ai-native-server/test/original-scene-execution.test.cjs)、[生命周期回归](test/lifecycle.test.cjs)、[文件清理权威回归](test/file-cleanup-authority.test.cjs)、[所选 Client 编译回归](../../tests/selected-prisma-build.test.cjs) 和 [Linux 部署上下文回归](../../tests/rental-host-package.test.cjs)。覆盖离线原服务/Controller/请求管线、同事务撤权与未知结果、所选 schema 严格类型、实际模块依赖注入和单次生命周期。真实数据库锁竞争、迁移、供应商调用、HTTP 监听及生产发布须另行验证；准备数据不能写作迁移成功，提交推送也不能写作已部署。

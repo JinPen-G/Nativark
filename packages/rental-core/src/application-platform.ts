@@ -1,7 +1,7 @@
 /** 完整 Rental 宿主复用已构造的公共服务。公共管理与原各端 Guard 分别消费各自政策。
  * 此处仅选择同一实例；legacyGuard 须由宿主接好当前 Core 门禁及原业务提交点，不在此补造授权。 */
 import type { CanActivate, ExecutionContext } from "@nestjs/common";
-import { PlatformAuthGuard, platformHttpPolicy, type PlatformApplicationBindings } from "@rental-os/platform-server";
+import { PlatformAuthGuard, platformHttpPolicy, type PlatformApplicationBindings, type RegisteredCoreHttpAccess } from "@rental-os/platform-server";
 import { matchableRequestPath } from "@rental-os/platform-server/request-path";
 import { createPlatformCoreHttpAccess, type CoreHostHttpApplication } from "@rental-os/platform-core-host";
 import type { RentalApplication } from "./application";
@@ -15,8 +15,10 @@ export interface RentalPlatformRequest {
 export function createRentalPlatformApplications(application: RentalApplication, input: {
   core: CoreHostHttpApplication;
   legacyGuard: CanActivate;
+  /** 宿主将实际挂载的公共 Core 管理/包管理政策组成同一准入；不能来自请求或 Core 清单。 */
+  coreHttp?: RegisteredCoreHttpAccess;
 }): PlatformApplicationBindings & { routesToPlatform(request: RentalPlatformRequest): boolean } {
-  const coreAccess = createPlatformCoreHttpAccess(input.core);
+  const coreAccess = input.coreHttp ?? createPlatformCoreHttpAccess(input.core);
   const publicGuard = new PlatformAuthGuard({
     async resolveAccessContext(authorization, options) {
       const current = await application.auth.resolveAccessContext(authorization, {

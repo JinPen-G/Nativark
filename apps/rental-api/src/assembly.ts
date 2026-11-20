@@ -5,13 +5,14 @@ import { ForbiddenException } from "@nestjs/common";
 import type { ConfigService } from "@nestjs/config";
 import { isDeepStrictEqual } from "node:util";
 import * as shared from "@rental-os/shared";
-import { CoreDeploymentLockSchema, type CoreDeploymentLock } from "@rental-os/core-contracts";
+import { CoreDeploymentLockSchema, type CoreDeploymentLock, type CorePlatformDataCapabilityRelease } from "@rental-os/core-contracts";
 import { createCoreDeployedCatalogue, type CoreDeployedCatalogue } from "@rental-os/core-host";
 import type { CoreHostSqlTransaction } from "@rental-os/core-host/mysql";
 import { createMysqlCoreDeploymentObservation, type CoreMysqlDataPlan } from "@rental-os/core-host/mysql-deployment";
 import { createPublicCoreDependencies } from "@rental-os/platform-api/core-dependencies";
 import { createPublicPlatformDataPlan } from "@rental-os/platform-api/data-plan";
-import { composePlatformCoreApplication } from "@rental-os/platform-core-host";
+import { composePlatformCoreApplication, composePlatformCorePackageAssembly, createPlatformCorePackageAudit,
+  createPlatformCorePackageAssemblyHttpAccess, createPlatformCoreHttpAccess } from "@rental-os/platform-core-host";
 import { readPublicSubscriptionTerm } from "@rental-os/platform-server/subscription-reader";
 import { readBoundedMedia } from "@rental-os/platform-server/media";
 import { PlatformPrincipalAuthority } from "@rental-os/platform-server/principal";
@@ -21,6 +22,7 @@ import { createRentalPlatformApplications } from "@rental-os/rental-core/applica
 import { createRentalApplicationAccess, createRentalRecoveryAuthority } from "@rental-os/rental-core/application-access";
 import { createRentalPublicApplicationAccess, createRentalPaymentCallbackAccess } from "@rental-os/rental-core/application-public-access";
 import { createRentalWorkerAuthority } from "@rental-os/rental-core/application-worker-authority";
+import { createRentalFileCleanupAuthority, type RentalFileCleanupAuthorityDependencies } from "@rental-os/rental-core/application-file-cleanup-authority";
 import { composeRentalPlatformHost } from "@rental-os/rental-core/platform-host";
 import { composeRentalCoreSessionReader } from "@rental-os/rental-core/core-session";
 import { createRentalAuthorization, type RentalAuthorizationGuard } from "@rental-os/rental-core/http-auth";
@@ -29,10 +31,15 @@ import { createRentalWorkspaceManagementApplication } from "@rental-os/rental-co
 import type { RentalDatabaseClient, RentalDatabaseTransaction } from "./database";
 import { requireRentalDeploymentPackage } from "./deployment-package";
 import { RentalApplicationLifecycle } from "./lifecycle";
+import { rentalHostLegacyApiRoutes } from "./openapi";
+import { createRentalCorePackageSources } from "./core-package-sources";
 
 /** 仅受控宿主装配可提供；请求、Core 包清单和环境变量不能注入运行参加者。 */
 export interface RentalHostAiSetup<Binding> {
   dataPlan: CoreMysqlDataPlan;
+  /** 已选能力的原完整安装包读取器；无 AI 宿主不导入能力实现。 */
+  readDataPackages(): readonly { root: string; release: CorePlatformDataCapabilityRelease }[];
+  fileCleanupKnowledge: NonNullable<RentalFileCleanupAuthorityDependencies["knowledge"]>;
   participants: RentalApplicationParticipants;
   bind(input: { rental: RentalApplication; guard: RentalAuthorizationGuard;
     customers: RentalCustomerManagementApplication }): Binding;
@@ -70,6 +77,8 @@ export function composeRentalApplication<Binding = never>(input: {
   });
   const deploymentForTransaction = (transaction: Pick<CoreHostSqlTransaction, "$queryRaw">) => catalogueForTransaction(transaction).availability;
   const rental = createRentalApplication({ database, configuration, aiMode: input.aiMode,
+    fileCleanupAuthority: createRentalFileCleanupAuthority({ deploymentForTransaction,
+      ...(input.aiMode === "enabled" ? { knowledge: input.ai.fileCleanupKnowledge } : {}) }),
     participants: input.aiMode === "enabled" ? input.ai.participants : { readInspectionMedia: readBoundedMedia },
     workerAuthority: foundation => createRentalWorkerAuthority<RentalDatabaseTransaction>({
       database, term: dependencies.term, configuration: foundation.coreConfiguration, deploymentForTransaction
@@ -87,6 +96,15 @@ export function composeRentalApplication<Binding = never>(input: {
   const core = composePlatformCoreApplication({ ...dependencies, catalogue,
     authorizeContainer: platformHost.authorizeContainer });
   core.session = composeRentalCoreSessionReader({ database, authSource: rental.authSource, catalogue });
+  const packages = composePlatformCorePackageAssembly({ database, users: dependencies.users, catalogue,
+    audit: createPlatformCorePackageAudit<RentalDatabaseTransaction>(),
+    storageDirectory: configuration.get<string>("CORE_PACKAGE_STORAGE_ROOT"),
+    legacyApiRoutes: { rental: rentalHostLegacyApiRoutes() },
+    ...createRentalCorePackageSources({ configuration, lock,
+      rentalPackage: () => requireRentalDeploymentPackage(pin, lock.platform.versions),
+      observe: () => observation(database).read(),
+      ...(input.aiMode === "enabled" ? { dataCapabilities: input.ai.readDataPackages } : {}) }) });
+  const coreHttp = createPlatformCorePackageAssemblyHttpAccess(packages, createPlatformCoreHttpAccess(core));
   const authorization = createRentalAuthorization(shared);
   const guard = new authorization.Guard(rental.auth, rental.foundation.capabilities, rental.client.auth,
     rental.client.rateLimit, database, rental.subscriptions);
@@ -119,12 +137,12 @@ export function composeRentalApplication<Binding = never>(input: {
   const callbackAccess = createRentalPaymentCallbackAccess({ database, deploymentForTransaction });
   const customers = createRentalCustomerManagementApplication(rental);
   const ai = input.aiMode === "enabled" ? input.ai.bind({ rental, guard, customers }) : undefined;
-  return Object.freeze({ rental, catalogue, core, authorization, guard, access, publicAccess, callbackAccess, aiAccess, ai,
+  return Object.freeze({ rental, catalogue, core, packages, authorization, guard, access, publicAccess, callbackAccess, aiAccess, ai,
     http: createRentalHttpApplications(rental, { guard }),
     extensions: { auth: rental.auth, subscriptions: rental.subscriptions },
     customers,
     workspaces: createRentalWorkspaceManagementApplication(rental),
-    platform: createRentalPlatformApplications(rental, { core, legacyGuard: guard }),
+    platform: createRentalPlatformApplications(rental, { core, coreHttp, legacyGuard: guard }),
     payments: { runtime: rental.integrations.payments, statements: rental.integrations.statements, core: rental.primary.core },
     jobs: rental.integrations.ledger, notifications: rental.integrations.ledger,
     lifecycle: new RentalApplicationLifecycle(rental, () => database.$disconnect(),

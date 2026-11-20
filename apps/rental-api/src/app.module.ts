@@ -4,7 +4,7 @@ import { Module, type DynamicModule } from "@nestjs/common";
 import { ConfigModule, ConfigService } from "@nestjs/config";
 import type { CoreDeploymentLock } from "@rental-os/core-contracts";
 import { PlatformServerModule } from "@rental-os/platform-server";
-import { CoreHostModule } from "@rental-os/platform-core-host";
+import { CoreHostModule, CorePackageAssemblyModule } from "@rental-os/platform-core-host";
 import { RentalHttpModule } from "@rental-os/rental-core/http";
 import { RentalPaymentsHttpModule } from "@rental-os/rental-core/http-payments";
 import { RentalHttpExtensionsModule } from "@rental-os/rental-core/http-extensions";
@@ -74,8 +74,10 @@ export function createRentalHostModule<Host extends RentalHostAssembly>(input: {
       } }], exports: [HTTP_APPLICATIONS] };
   const core = CoreHostModule.register({ imports: [assembly], inject: [RENTAL_HOST_ASSEMBLY],
     useFactory: (host: Host) => host.core });
-  return { module: RentalAppModule, imports: [assembly, httpApplications, core,
-    PlatformServerModule.register({ imports: [assembly, RentalDatabaseModule, core], inject: [RentalDatabaseClient],
+  const packages = CorePackageAssemblyModule.register({ imports: [assembly], inject: [RENTAL_HOST_ASSEMBLY],
+    useFactory: (host: Host) => host.packages });
+  return { module: RentalAppModule, imports: [assembly, httpApplications, core, packages,
+    PlatformServerModule.register({ imports: [assembly, RentalDatabaseModule, core, packages], inject: [RentalDatabaseClient],
       useFactory: (database: RentalDatabaseClient) => database,
       applicationsProvider: { provide: "rental.platform.applications", inject: [RENTAL_HOST_ASSEMBLY],
         useFactory: (host: Host) => host.platform }, openApiDocument: input.openApi(input.lock, policy) }),
