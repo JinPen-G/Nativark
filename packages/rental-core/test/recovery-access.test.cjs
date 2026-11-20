@@ -17,6 +17,12 @@ const { ClientApiController } = require("../dist/http-client.controller.js");
 const { PaymentOperationsController } = require("../dist/http-payment-operations.controller.js");
 const { PaymentReconciliationController } = require("../dist/http-payment-reconciliation.controller.js");
 const { EnterpriseWorkflowsController } = require("../dist/http-enterprise-workflows.controller.js");
+const { EnterpriseReadController } = require("../dist/http-enterprise-read.controller.js");
+const { EnterpriseAccessService } = require("../dist/mysql-enterprise-access.js");
+const { EnterpriseOrderReaderService } = require("../dist/mysql-enterprise-orders.js");
+const { RentalFundingService } = require("../dist/mysql-funding.js");
+const { RentalOrderReceivableRepository } = require("../dist/mysql-order-receivables.js");
+const { CustomerCorporateSettlementService } = require("../dist/mysql-customer-corporate-settlement.js");
 const { RentalExchangeInspectionPreparationService } = require("../dist/mysql-exchange-inspection-preparation.js");
 const { RentalExchangeInspectionMediaService } = require("../dist/mysql-exchange-inspection-media.js");
 const { RentalExchangeInspectionConsentService } = require("../dist/mysql-exchange-inspection-consent.js");
@@ -36,10 +42,10 @@ const { runWithRequestIdentity, getRequestWorkspaceId, getRequestIdentity } = re
 const shared = require("@rental-os/shared");
 const authorization = createRentalAuthorization(shared);
 const policy = compileRentalHttpAccessPolicy({ controllers: [RentalCoreController, RentalBusinessController, ClientApiController, PaymentOperationsController,
-  EnterpriseWorkflowsController, PaymentReconciliationController], authorization });
+  EnterpriseWorkflowsController, EnterpriseReadController, PaymentReconciliationController], authorization });
 const copy = value => structuredClone(value);
 
-function fixture(audience = "operator") {
+function fixture(audience = "operator", corporateParticipants = false) {
   const user = { id: "user", tenantId: "tenant", isActive: true, isSaasAdmin: false, isPlatformAdmin: false,
     mustChangePassword: false, displayName: "member", account: "member", permissions: ["rental-os:order:view", "rental-os:order:operate",
       "rental-os:order:settle", "rental-os:order:cancel", "rental-os:finance:view", "rental-os:finance:reconcile", "rental-os:report:view"],
@@ -56,12 +62,13 @@ function fixture(audience = "operator") {
     account: { id: "account", status: "active", passwordUpdatedAt: null, mustChangePassword: false },
     membership: { id: "membership", status: "active" } };
   const trace = [], receipts = new Map();
-  const f = { state, trace, writes: 0, dispatches: 0, reads: 0, onQuery: undefined, originalQuery: undefined };
+  const f = { state, trace, writes: 0, dispatches: 0, reads: 0, audits: [], onQuery: undefined, originalQuery: undefined, onCommit: undefined };
   const matches = (row, where) => row && Object.entries(where).every(([key, value]) => {
     if (key === "AND") return value.every(item => matches(row, item));
     if (key === "OR") return value.some(item => matches(row, item));
     if (key === "workOrders") return false;
     if (value && typeof value === "object" && "in" in value) return value.in.includes(row[key]);
+    if (value && typeof value === "object" && "gt" in value) return row[key] > value.gt;
     return row[key] === value;
   });
   const readOrder = async ({ where }) => { f.reads++; return matches(state.order, where) ? copy(state.order) : null; };
@@ -91,9 +98,12 @@ function fixture(audience = "operator") {
     if (result === undefined) throw Error(`unexpected original read ${statement.sql}`);
     return result;
   }, async $transaction(consume, options) {
-    assert.equal(options?.isolationLevel, "ReadCommitted");
-    const number = ++sequence, initialWrites = f.writes;
-    const tx = { ...delegates, async $queryRaw(query, ...values) {
+    assert.ok(options?.isolationLevel === "ReadCommitted" || corporateParticipants && options?.isolationLevel === "RepeatableRead");
+    const number = ++sequence, initialWrites = f.writes, initialAudits = f.audits.length;
+    const tx = { ...delegates, operationLog: { create: async ({ data }) => {
+      if (f.auditFailure) throw Error("original audit unavailable");
+      trace.push({ tx: number, text: "OperationLog.create" }); f.audits.push(copy(data));
+    } }, async $queryRaw(query, ...values) {
       if (Array.isArray(query)) query = sql(query, ...values);
       const text = query.sql.replace(/\s+/gu, " ").trim();
       trace.push({ tx: number, text });
@@ -126,7 +136,10 @@ function fixture(audience = "operator") {
         && query.values.includes(state.refund.orderId) && query.values.includes(state.refund.paymentIntentId) ? [{ id: state.refund.id }] : [];
       throw Error(`unexpected SQL ${text}`);
     } };
-    try { return await consume(tx); } catch (error) { f.writes = initialWrites; throw error; }
+    let result;
+    try { result = await consume(tx); } catch (error) { f.writes = initialWrites; f.audits.length = initialAudits; throw error; }
+    await f.onCommit?.(number, result);
+    return result;
   } };
   const principal = new RentalWorkspacePrincipalRepository(db, { findUserById: async () => copy(state.user),
     projectWorkspace: row => row, projectRoleScope: scope => scope.toLowerCase(), projectDataScope: scope => scope.toLowerCase() });
@@ -144,8 +157,10 @@ function fixture(audience = "operator") {
     iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 60 })).toString("base64url");
   const signature = createHmac("sha256", "synthetic-client-test-secret:client").update(`${header}.${payload}`).digest("base64url");
   const guard = new authorization.Guard(auth, undefined, clientAuth, { assertAllowed: async () => {} }, db);
+  const enterpriseAccess = new EnterpriseAccessService(db), enterpriseOrders = new EnterpriseOrderReaderService(db, enterpriseAccess);
   const access = createRentalApplicationAccess({ database: db, authorization,
-    recoveryAuthority: createRentalRecoveryAuthority({ auth, clientAuth }),
+    recoveryAuthority: createRentalRecoveryAuthority({ auth, clientAuth,
+      ...(corporateParticipants ? { corporateHistory: { access: enterpriseAccess, orders: enterpriseOrders } } : {}) }),
     deploymentForTransaction: () => ({ requireAvailable: async () => { if (!state.available) throw Error("unavailable deployment"); } }),
     term: { requireNewBusiness: async () => {} } });
   const idempotent = new RentalIdempotentActionService(db, { find: async (_tenant, _action, key) => receipts.get(key),
@@ -164,7 +179,7 @@ function fixture(audience = "operator") {
     fallbackKey: "original-key", orderId: "OrderA", request: { orderId: "OrderA" },
     run: async tx => { await facts.lockOrder("tenant", "OrderA", tx); f.writes++; return { original: "receipt" }; },
     replay: async response => response, ...overrides });
-  return Object.assign(f, { db, access, idempotent, facts, receipts, auth, clientAuth });
+  return Object.assign(f, { db, delegates, access, idempotent, facts, receipts, auth, clientAuth, enterpriseAccess, enterpriseOrders });
 }
 
 test("disabled history uses actual original handler and current principal, with Tenant→Core→Order→Workspace", async () => {
@@ -351,14 +366,14 @@ test("the nine history handlers bind exact own-order or workspace subjects; adja
     assert.throws(() => bindRentalRecovery({ ...route.recovery }, { method: "GET", url }));
     if (scope === "order") assert.throws(() => bindRentalRecovery(route.recovery, { method: "GET", url: url.replace("OrderA", "Order%2fA") }));
   }
-  assert.equal(policy.routes.filter(route => route.recovery).length, 70);
+  assert.equal(policy.routes.filter(route => route.recovery).length, 78);
   for (const [controller, handler] of [[RentalCoreController, "prepareExchangeInspection"], [RentalCoreController, "completeExchangeInspectionMedia"],
     [EnterpriseWorkflowsController, "confirmExchangeInspection"], [EnterpriseWorkflowsController, "exchangeInspectionMaterial"],
     [PaymentReconciliationController, "importStatement"], [PaymentReconciliationController, "reviewStatementLine"], [PaymentReconciliationController, "reconcile"]]) {
     assert.equal(policy.routes.find(route => route.controller === controller && route.handlerName === handler).recovery, undefined);
   }
   for (const path of ["/client/v1/enterprise/orders/:orderid/exchange-approvals/execute",
-    "/client/v1/enterprise/corporates/:corporateid/orders", "/rental/v1/reports/other"]) {
+    "/client/v1/enterprise/corporates/:corporateid/orders/:orderid/finance/actions", "/rental/v1/reports/other"]) {
     assert.throws(() => declareRentalRecovery("GET", path, "history"));
   }
   assert.throws(() => declareRentalRecovery("POST", "/rental/v1/payment-reconciliation/statements", "history"));
@@ -548,4 +563,242 @@ test("workspace-history tickets cannot authorize an order action, serve a client
     await assert.rejects(f.run(handler, "POST", url, async () => { f.writes++; }, controller));
   }
   assert.equal(f.writes, 0);
+});
+
+const corporateRoutes = [
+  ["historyWorkspaces", "history-workspaces", ["orders:read"]],
+  ["listOrders", "orders", ["orders:read"]],
+  ["orderDetail", "orders/OrderA", ["orders:read"]],
+  ["exportOrders", "orders/export-rows", ["orders:read", "export:create"]],
+  ["corporateFinance", "finance", ["finance:read"]],
+  ["exportCorporateFinance", "finance/export-rows", ["finance:read", "export:create"]],
+  ["orderFinance", "orders/OrderA/finance", ["orders:read", "finance:read"]],
+  ["exportOrderFinance", "orders/OrderA/finance/export-rows", ["orders:read", "finance:read", "export:create"]]
+];
+
+function corporateFixture() {
+  const f = fixture("client", true), { state } = f;
+  state.corporate = { id: "CorpA", membershipId: "administrator-relation", role: "admin", active: true,
+    tenantEnabled: true, corporateEnabled: true, revision: 1, actions: ["portal:enter", "orders:read", "finance:read", "export:create"] };
+  const at = new Date("2020-01-01T00:00:00.000Z");
+  Object.assign(state.order, { orderNo: "Original-001", group: "enterprise_paid", customerId: "colleague", customerType: "personal",
+    customerName: "Original employee", employeeName: "Original employee", contractSubjectCustomerId: "CorpA",
+    payerSubjectCustomerId: "CorpA", userSubjectCustomerId: "colleague", categoryCode: "camping", fulfillmentMode: "pickup",
+    startAt: at, endAt: new Date("2020-01-02T00:00:00.000Z"), actualRentalStartAt: null, carrierRentalDueAt: null,
+    createdAt: at, updatedAt: at, effectiveEndAt: null, currency: "CNY", payableAmount: 100, finalPayableAmount: 100,
+    discountAmount: 0, rentalAmount: 100, serviceAmount: 0, fulfillmentAmount: 0, couponAmount: 0, adjustmentAmount: 0,
+    taxAmount: 0, depositAmount: 20, preAuthAmount: 0, legacyDepositUnverified: false, chargeLines: [], lines: [],
+    membershipBenefitEvaluations: null, ruleSnapshot: {}, membershipSnapshot: { bookingIdentity: "enterprise_employee",
+      corporateCustomerId: "CorpA", enterpriseContractAndPayer: true, personalCustomerId: "colleague",
+      corporateMembershipId: "historical-employee", corporateCustomerName: "Original corporate",
+      enterpriseBasis: { noticeVersion: "original-v1", acknowledgedAt: "2019-12-31T00:00:00.000Z" } } });
+  state.credit = { id: "credit", tenantId: "tenant", customerId: "CorpA", creditLimit: 500,
+    status: "active", billingCycle: "monthly", settlementTermDays: 10 };
+  state.ledger = [];
+  state.events = [{ id: "original-cash", tenantId: "tenant", workspaceId: "workspace", orderId: "OrderA",
+    instrument: "rental", action: "initiate", amount: 70, balanceAfter: 70, provider: "stripe",
+    paymentMethod: null, idempotencyKey: "original-payment", reason: "original receipt", operator: null,
+    at, createdAt: at }];
+  const subjectMatches = (text, values) => {
+    const row = state.order, membership = row.membershipSnapshot;
+    if (row.tenantId !== "tenant" || row.workspaceId !== "workspace" || !values.includes(state.corporate.id)) return false;
+    const paid = row.contractSubjectCustomerId === state.corporate.id && row.payerSubjectCustomerId === state.corporate.id
+      || row.contractSubjectCustomerId === null && row.payerSubjectCustomerId === null && row.userSubjectCustomerId === null
+        && row.customerType === "corporate" && row.customerId === state.corporate.id;
+    const basis = membership?.enterpriseBasis;
+    const benefit = text.includes("'$.enterpriseBasis.noticeVersion'") && membership?.bookingIdentity === "enterprise_employee"
+      && membership.corporateCustomerId === state.corporate.id && membership.enterpriseContractAndPayer === false
+      && membership.personalCustomerId === row.customerId && row.contractSubjectCustomerId === row.customerId
+      && row.payerSubjectCustomerId === row.customerId && typeof basis?.noticeVersion === "string" && basis.noticeVersion.trim()
+      && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(basis?.acknowledgedAt) && new Date(basis.acknowledgedAt) <= row.createdAt;
+    return Boolean(paid || benefit);
+  };
+  f.originalQuery = async (text, values) => {
+    if (text.includes("FROM customer_corporate_memberships m")) {
+      const grant = state.corporate;
+      for (const clause of ["g.membershipUpdatedAt=m.updatedAt", "personalMember.status='active'", "corporateMember.status='active'",
+        "s.revokedAt IS NULL", "s.expiresAt>NOW(3)", "m.effectiveTo>NOW(3)"]) assert.ok(text.includes(clause), clause);
+      if (text.includes("AND s.workspaceId=")) {
+        assert.ok(values.includes("workspace") && values.includes("main"));
+        assert.ok(text.includes("workspace.status='ACTIVE'"));
+      }
+      assert.ok(values.includes("tenant") && values.includes("customer") && values.includes("client-session"));
+      return grant.active && state.account.status === "active" && state.membership.status === "active" && !state.clientSession.revokedAt
+        && state.clientSession.workspaceId === "workspace" && state.workspaceStatus === "ACTIVE" && state.tenantStatus === "ACTIVE"
+        ? grant.actions.map(action => ({ corporateCustomerId: grant.id, corporateName: "Corporate", membershipId: grant.membershipId,
+          role: grant.role, action, tenantEnabled: grant.tenantEnabled, corporateEnabled: grant.corporateEnabled,
+          tenantRevision: 1, corporateRevision: grant.revision })) : [];
+    }
+    if (text.includes("FROM rental_orders o")) {
+      assert.ok(values.includes("tenant") && values.includes("workspace"));
+      assert.ok(text.includes("o.contractSubjectCustomerId") && text.includes("o.payerSubjectCustomerId"));
+      const visible = subjectMatches(text, values);
+      if (text.includes("COUNT(*)")) return [{ total: visible ? 1n : 0n }];
+      if (text.includes("SELECT DISTINCT")) return visible ? [{ workspaceId: "workspace", workspaceCode: "main", workspaceName: "space" }] : [];
+      if (!visible) return [];
+      const snapshot = state.order.membershipSnapshot;
+      return [{ ...copy(state.order), membership: { ...copy(snapshot), noticeVersion: snapshot.enterpriseBasis?.noticeVersion,
+        acknowledgedAt: snapshot.enterpriseBasis?.acknowledgedAt } }];
+    }
+    if (text.includes("FROM rental_funding_events")) return copy(state.events);
+    if (text.includes("FROM customer_corporate_credits")) return state.credit ? [{ id: state.credit.id }] : [];
+    if (text.includes("FROM customer_corporate_credit_ledger")) return copy(state.ledger);
+  };
+  f.delegates.rentalOrder.findFirstOrThrow = async ({ where }) => {
+    assert.equal(where.id, state.order.id); assert.equal(where.workspaceId, state.order.workspaceId); return copy(state.order);
+  };
+  const more = { rentalOrderExtension: { findMany: async () => [] },
+    rentalFundingEvent: { findMany: async () => copy(state.events) }, rentalOfflinePaymentRegistration: { findMany: async () => [] },
+    customerCorporateCredit: { findFirst: async () => copy(state.credit) },
+    customerCorporateCreditLedger: { aggregate: async () => ({ _sum: { reservedDelta: 0, receivableDelta: 0 } }),
+      findMany: async ({ where }) => copy(state.ledger.filter(row => row.currency !== where.currency.not)) } };
+  Object.assign(f.db, more); Object.assign(f.delegates, more);
+  const funding = new RentalFundingService(f.db, { getRequestWorkspaceId }, new RentalOrderReceivableRepository(f.db));
+  const credit = new CustomerCorporateSettlementService(f.db);
+  f.controller = new EnterpriseReadController(f.enterpriseOrders, f.db, funding, credit);
+  f.read = (handler, after) => {
+    const route = corporateRoutes.find(row => row[0] === handler), suffix = route[1];
+    return f.run(handler, "GET", `/client/v1/enterprise/corporates/CorpA/${suffix}`, async request => {
+      const result = await f.controller[handler](request, "CorpA", suffix.includes("OrderA") ? "OrderA" : {});
+      await after?.(result); return result;
+    }, EnterpriseReadController);
+  };
+  return f;
+}
+
+test("eight original enterprise handlers bind exact corporate/action/order subjects only", () => {
+  for (const [handler, suffix, actions] of corporateRoutes) {
+    const request = { method: "GET", url: `/client/v1/enterprise/corporates/CorpA/${suffix}` };
+    const route = policy.requireHandler(EnterpriseReadController, EnterpriseReadController.prototype[handler], request);
+    const subject = bindRentalRecovery(route.recovery, request);
+    assert.equal(subject.declaration.scope, "corporate-history"); assert.equal(subject.corporateId, "CorpA");
+    assert.equal(subject.orderId, suffix.includes("OrderA") ? "OrderA" : undefined);
+    assert.deepEqual(subject.declaration.corporateActions, actions);
+    assert.equal(route.review.kind, handler === "historyWorkspaces" ? "buffered-read" : "audited-read");
+    assert.throws(() => bindRentalRecovery(route.recovery, { ...request, method: "POST" }));
+    assert.throws(() => bindRentalRecovery(route.recovery, { ...request, url: request.url.replace("CorpA", "Corp%2fA") }));
+  }
+  for (const suffix of ["members", "policy", "requests", "orders/new", "finance/payments"]) {
+    assert.throws(() => declareRentalRecovery("GET", `/client/v1/enterprise/corporates/:corporateid/${suffix}`, "history"));
+  }
+});
+
+test("disabled Core serves all eight original enterprise projections and durable audits, including colleague-owned corporate orders", async () => {
+  const f = corporateFixture();
+  for (const [handler, suffix] of corporateRoutes) {
+    f.trace.length = 0;
+    const result = await f.read(handler);
+    assert.equal(result.corporateCustomerId, "CorpA"); assert.equal(result.permissionRevision, "1:1");
+    if (handler === "historyWorkspaces") {
+      assert.equal(result.crossWorkspaceRead.state, "unavailable"); assert.equal(result.workspaces[0].workspaceId, "workspace");
+    } else if (handler === "orderDetail") assert.equal(result.order.employeeCustomerId, "colleague");
+    else if (["corporateFinance", "exportCorporateFinance"].includes(handler)) {
+      assert.equal(result.credit.account.creditLimit, 500); assert.equal(result.maturities.state, "unavailable");
+    } else if (["orderFinance", "exportOrderFinance"].includes(handler)) {
+      assert.equal(result.rentalCash.collected, 70); assert.equal(result.guarantee.state, "unavailable"); assert.equal(result.statements.state, "unavailable");
+    }
+    for (const tx of new Set(f.trace.filter(row => row.text.includes("platform_core_access_locks")).map(row => row.tx))) {
+      const statements = f.trace.filter(row => row.tx === tx).map(row => row.text);
+      assert.match(statements[0], /FROM Tenant .*FOR UPDATE$/u);
+      const core = statements.findIndex(row => row.includes("platform_core_access_locks"));
+      const workspace = statements.findIndex(row => row.startsWith("SELECT id, status FROM business_workspaces"));
+      const order = statements.findIndex(row => row.startsWith("SELECT id FROM rental_orders"));
+      const enterprise = statements.findIndex(row => row.includes("FROM customer_corporate_memberships m"));
+      assert.ok(core < workspace && workspace < enterprise);
+      if (suffix.includes("OrderA")) assert.ok(core < order && order < workspace);
+      else assert.equal(order, -1);
+      assert.ok(!statements.some(row => row.includes("platform_member_core_assignments")));
+    }
+  }
+  assert.equal(f.audits.length, 7); assert.ok(f.audits.every(row => row.workspaceId === "workspace" && row.userId === undefined));
+  assert.equal(f.writes, 0); assert.equal(f.dispatches, 0);
+});
+
+test("enterprise history retains original paid versus disclosed-benefit object rules and finance never reads personal benefit", async () => {
+  const f = corporateFixture(), row = f.state.order;
+  row.group = "personal_benefit"; row.contractSubjectCustomerId = row.payerSubjectCustomerId = "colleague";
+  row.membershipSnapshot.enterpriseContractAndPayer = false;
+  const detail = await f.read("orderDetail");
+  assert.equal(detail.order.disclosure.noticeVersion, "original-v1"); assert.equal(detail.order.depositAmount, null);
+  await assert.rejects(f.read("orderFinance")); await assert.rejects(f.read("exportOrderFinance"));
+  row.membershipSnapshot.enterpriseBasis = undefined;
+  await assert.rejects(f.read("orderDetail"));
+  row.membershipSnapshot = null;
+  await assert.rejects(f.read("orderDetail"));
+  row.workspaceId = "other"; await assert.rejects(f.read("orderDetail"));
+  assert.equal(f.audits.length, 1);
+});
+
+test("missing original enterprise participants fails closed even when Core is enabled; collections cannot authorize an order", async () => {
+  for (const grant of ["enabled", "disabled"]) {
+    const f = fixture("client"); f.state.grant = grant;
+    await assert.rejects(f.run("listOrders", "GET", "/client/v1/enterprise/corporates/CorpA/orders",
+      async () => { throw Error("must not reach reader"); }, EnterpriseReadController), /缺少同实例企业/u);
+  }
+  const f = corporateFixture();
+  await assert.rejects(f.run("listOrders", "GET", "/client/v1/enterprise/corporates/CorpA/orders", () => f.db.$transaction(async tx => {
+    await lockRentalBusinessTenant(tx, "tenant");
+    await assertRentalBusinessOperationAccessAfterLock(tx, "tenant", "workspace", "OrderA");
+  }, { isolationLevel: "ReadCommitted" }), EnterpriseReadController), /不能切换原绑定订单/u);
+  await assert.rejects(f.run("orderFinance", "GET", "/client/v1/enterprise/corporates/CorpA/orders/OrderA/finance", () => f.db.$transaction(async tx => {
+    await lockRentalBusinessTenant(tx, "tenant");
+    await assertRentalBusinessOperationAccessAfterLock(tx, "tenant", "workspace", "OtherOrder");
+  }, { isolationLevel: "ReadCommitted" }), EnterpriseReadController), /不能切换原绑定订单/u);
+  assert.equal(f.audits.length, 0);
+});
+
+test("current enterprise grants, relationship, exports and tenant/session boundaries remain required before reader IO", async () => {
+  for (const revoke of [f => { f.state.corporate.role = "employee"; }, f => { f.state.corporate.active = false; },
+    f => { f.state.corporate.actions = ["portal:enter"]; }, f => { f.state.corporate.tenantEnabled = false; },
+    f => { f.state.corporate.corporateEnabled = false; }, f => { f.state.corporate.id = "OtherCorp"; },
+    f => { f.state.clientSession.workspaceId = "other"; }, f => { f.state.clientSession.tenantId = "other"; },
+    f => { f.state.grant = null; }, f => { f.state.binding = false; }, f => { f.state.available = false; }]) {
+    const f = corporateFixture(); revoke(f); await assert.rejects(f.read("listOrders")); assert.equal(f.audits.length, 0);
+  }
+  const f = corporateFixture(); f.state.corporate.actions = ["portal:enter", "orders:read", "finance:read"];
+  await f.read("listOrders");
+  for (const handler of ["exportOrders", "exportCorporateFinance", "exportOrderFinance"]) await assert.rejects(f.read(handler));
+  assert.equal(f.audits.length, 1);
+});
+
+test("enterprise audit rejects a grant revision changed after reading and preserves committed audit on failed delivery", async () => {
+  const beforeAudit = corporateFixture();
+  beforeAudit.onCommit = async (_tx, result) => { if (Array.isArray(result?.items)) beforeAudit.state.corporate.revision++; };
+  await assert.rejects(beforeAudit.read("listOrders")); assert.equal(beforeAudit.audits.length, 0);
+  const failure = corporateFixture(); failure.auditFailure = true;
+  await assert.rejects(failure.read("listOrders"), /审计失败/u); assert.equal(failure.audits.length, 0);
+  for (const revoke of [f => { f.state.corporate.actions = []; }, f => { f.state.corporate.revision++; },
+    f => { f.state.corporate.membershipId = "new-relation"; }, f => { f.state.clientSession.revokedAt = new Date(); },
+    f => { f.state.binding = false; }, f => { f.state.order.payerSubjectCustomerId = "OtherCorp"; }]) {
+    const f = corporateFixture();
+    await assert.rejects(f.read("orderDetail", () => revoke(f)));
+    assert.equal(f.audits.length, 1); assert.equal(f.writes, 0);
+  }
+  const afterCommit = corporateFixture();
+  afterCommit.onCommit = async () => { if (afterCommit.audits.length) afterCommit.state.corporate.active = false; };
+  await assert.rejects(afterCommit.read("listOrders")); assert.equal(afterCommit.audits.length, 1);
+});
+
+test("enterprise revocation while awaiting Tenant is current, and the pure history reader rechecks before delivery", async () => {
+  const waiting = corporateFixture();
+  waiting.onQuery = async text => { if (/FROM Tenant .*FOR UPDATE$/u.test(text)) waiting.state.corporate.active = false; };
+  await assert.rejects(waiting.read("listOrders")); assert.equal(waiting.audits.length, 0);
+  assert.ok(!waiting.trace.some(row => row.text.includes("SELECT COUNT(*)")));
+  const pure = corporateFixture();
+  await assert.rejects(pure.read("historyWorkspaces", () => { pure.state.corporate.revision++; }));
+  assert.equal(pure.audits.length, 0);
+});
+
+test("enterprise financial histories keep unknown cash and incomplete workspace account coverage unavailable", async () => {
+  const cash = corporateFixture(); cash.state.events[0].provider = "mock";
+  const financial = await cash.read("orderFinance");
+  assert.deepEqual(financial.rentalCash, { state: "unavailable", reason: "unverified_original_cash_receipt" });
+  const account = corporateFixture();
+  account.state.ledger = [{ id: "original-other-space-debt", tenantId: "tenant", customerId: "CorpA",
+    workspaceId: "other-space", orderId: "OtherOrder", entryType: "reserve", currency: "CNY" }];
+  assert.deepEqual((await account.read("corporateFinance")).credit,
+    { state: "unavailable", reason: "authoritative_account_history_space_scope_not_connected" });
+  account.state.credit = null;
+  assert.deepEqual((await account.read("corporateFinance")).credit,
+    { state: "unavailable", reason: "original_account_configuration_missing_with_ledger" });
 });

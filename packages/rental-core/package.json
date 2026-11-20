@@ -3367,12 +3367,15 @@
     }
   },
   "scripts": {
-    "prebuild": "npm run build -w @rental-os/platform-server",
+    "prebuild": "npm run build -w @rental-os/shared && npm run build -w @rental-os/platform-core-host",
     "build": "tsc -p tsconfig.json",
-    "prelint": "npm run build -w @rental-os/platform-server",
+    "prelint": "npm run build -w @rental-os/shared && npm run build -w @rental-os/platform-core-host",
     "lint": "tsc -p tsconfig.json --noEmit",
     "build:native-clients": "node ../../scripts/miniprogram-shared-types.cjs --build-native-clients",
-    "lint:native-clients": "node ../../scripts/miniprogram-shared-types.cjs --build-native-clients --check"
+    "lint:native-clients": "node ../../scripts/miniprogram-shared-types.cjs --build-native-clients --check",
+    "prebuild:contracts": "npm run build -w @rental-os/platform-contracts",
+    "build:contracts": "tsc -p tsconfig.contracts.json",
+    "postbuild": "npm run build:native-clients"
   },
   "dependencies": {
     "@rental-os/platform-contracts": "0.1.0",

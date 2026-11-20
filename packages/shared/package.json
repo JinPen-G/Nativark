@@ -32,8 +32,8 @@
     }
   },
   "scripts": {
-    "prebuild": "npm run build -w @rental-os/rental-core",
-    "prelint": "npm run build -w @rental-os/rental-core",
+    "prebuild": "npm run build:contracts -w @rental-os/rental-core",
+    "prelint": "npm run build:contracts -w @rental-os/rental-core",
     "build": "tsc -p tsconfig.json && npm run build:agent-desktop",
     "build:agent-desktop": "tsc -p tsconfig.agent-desktop.json",
     "lint": "tsc -p tsconfig.json --noEmit"

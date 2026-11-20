@@ -175,6 +175,8 @@ Rental HTTP从 `@rental-os/rental-core/http` 的 `RentalHttpModule` 接入，类
 
 空间切换、开发密码重置和员工订阅上下文由 [独立扩展模块](src/http-extensions.module.ts) 绑定同一认证/订阅实例；它与旧宿主已挂载的三个薄适配路径二选一，公共六项认证继续由公共模块提供。[原 Guard](src/http-auth.ts) 保持角色、客户和空间政策，[application-access](src/application-access.ts) 将当前 Core 授权接入原业务父锁事务；它不代表所有独立写入、媒体流和回调已完成接入。
 
+企业历史读取通过受控HTTP政策登记的8个企业入口接入同一恢复权威，依次锁当前Tenant、Core、原Order（适用时）与Workspace，再在同一事务消费原`requireWorkspaceAction`和订单谓词。宿主向`createRentalRecoveryAuthority`提供同实例`corporateHistory.access`与`corporateHistory.orders`；当前成员、授权修订或动作集合变化时丢弃未释放的数据。财务只读取企业承担的原订单，本人订单权限不能替代企业授权。企业入口缺原参加者时明确不可用。[企业历史政策](src/application-recovery-policy.ts) · [当前主体与原对象](src/application-recovery-authority.ts) · [原订单谓词](src/mysql-enterprise-orders.ts)
+
 企业和客户敏感读取的审计各自在独立短事务中复核当前 Core，并在审计提交后、释放数据前再核原授权。已经提交的客户合并仍使用原事后审计入口，保留成功操作与原收据。客户概览只有订单读取权才查询统计，金额聚合另需原财务权限。[读取审计](src/mysql-enterprise-reader-audit.ts) · [客户审计](src/mysql-customer-operations.ts) · [概览权限](src/mysql-customer-governance.ts)
 
 品牌、官网和微信渠道保存使用原租户父锁及实际修订条件。微信凭据测试在数据库事务外调用原运输，结果只写回同一配置及原测试记录，期间配置变化须重新读取。[品牌渠道](src/mysql-client-channel-profile.ts) · [官网渠道](src/mysql-website-channel-profile.ts) · [微信渠道](src/mysql-mini-program-channel.ts)
@@ -312,7 +314,9 @@ npm run build -w @rental-os/rental-core
 npm run lint -w @rental-os/rental-core
 ```
 
-构建先生成公共合同与公共服务，再生成本包 JS/声明。根出口提供领域合同与常量，营业日和品类治理按子出口加载。服务端计价、器材及能力执行/条件子出口使用可选 peer `@nestjs/common`，沿用原 HTTP 异常类型，调用宿主和源码构建须提供兼容版本。核心聚合与换货批准子出口使用可选 peer @rental-os/platform-server 的正式 /request-identity，原Guard/API与Rental共用同一ALS实例；领域根出口不加载它。公共请求指纹从 `@rental-os/platform-contracts/request-fingerprint` 复用，已保存的条件 hash 沿用原算法。
+构建前置按公共合同 → Rental基础合同 → Shared兼容声明 → 公共Core宿主 → Rental完整服务的顺序执行；`npm run build:contracts -w @rental-os/rental-core`只生成Shared实际消费的17个正式合同入口及其内部依赖，避免Shared与完整服务循环构建。该入口保留同一运行时值和正式声明，不创建另一套合同。[合同构建配置](tsconfig.contracts.json) · [内存构建检查](../../scripts/check-rental-package-build.cjs)
+
+完整构建生成本包 JS/声明。根出口提供领域合同与常量，营业日和品类治理按子出口加载。服务端计价、器材及能力执行/条件子出口使用可选 peer `@nestjs/common`，沿用原 HTTP 异常类型，调用宿主和源码构建须提供兼容版本。核心聚合与换货批准子出口使用可选 peer @rental-os/platform-server 的正式 /request-identity，原Guard/API与Rental共用同一ALS实例；领域根出口不加载它。公共请求指纹从 `@rental-os/platform-contracts/request-fingerprint` 复用，已保存的条件 hash 沿用原算法。
 
 HTTP宿主登记 `/http-core` 和 `/http-business` 的两个Controller，从 `/http-applications` 取得明确令牌并绑定同一应用实例。原组合的[接线入口](../../apps/api/src/modules/rental-core/rental-http.providers.ts)使用 `useExisting`，不再创建另一套核心、资金、数据库或生命周期执行者；可选检查事件只绑定原方法。文件上传使用原 `@nestjs/platform-express` 适配，生成模型留在私有HTTP/MySQL边界。公共来源日历由 [platform-server只读接点](../platform-server/src/modules/official-calendars/README.md)提供，业务HTTP不取得来源维护方法；原来源合同和DTO兼容出口转接同一公共声明。日志和业务会员/企业结算分别由实际所有者供给。`/http-context` 复用已选Core的原快照与刷新队列，显式操作键保持191字符边界，各动作仍决定默认键与重放方式。原API再导出同一Controller，路径/字段/权限及原操作读取沿[OpenAPI](../../apps/api/src/contracts/openapi-document.ts)保持。
 

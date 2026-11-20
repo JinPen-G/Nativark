@@ -4,7 +4,7 @@ import { ForbiddenException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { ENTERPRISE_PORTAL_ACTIONS } from "./enterprise";
 import { type EnterpriseEntryResponse, type EnterpriseManagedCorporate, type EnterpriseMembersResponse, type EnterprisePortalAction } from "./enterprise";
-import type { RentalEnterpriseAccessStorage } from "./enterprise-read-storage";
+import type { RentalEnterpriseAccessStorage, RentalEnterpriseAuthorityTransaction } from "./enterprise-read-storage";
 import type { ClientRequestContext } from "./client-context";
 
 type AccessRow = { corporateCustomerId: string; corporateName: string; membershipId: string; role: string; action: string | null; tenantRevision: number; corporateRevision: number; tenantEnabled: boolean | number; corporateEnabled: boolean | number };
@@ -12,7 +12,7 @@ type AccessRow = { corporateCustomerId: string; corporateName: string; membershi
 export class EnterpriseAccessService {
   constructor(private readonly prisma: RentalEnterpriseAccessStorage) {}
 
-  private async access(context: ClientRequestContext, tenantCode: string, tx?: Prisma.TransactionClient, currentWorkspace = false): Promise<AccessRow[]> {
+  private async access(context: ClientRequestContext, tenantCode: string, tx?: RentalEnterpriseAuthorityTransaction, currentWorkspace = false): Promise<AccessRow[]> {
     if (context.customerType !== "personal" || !tenantCode || context.tenantCode !== tenantCode) throw new ForbiddenException("企业入口与当前客户商户不一致");
     // One fresh database statement gates the session, both memberships, relation and
     // grants. Neither cached role nor a later restore revives an earlier grant.
@@ -58,7 +58,7 @@ export class EnterpriseAccessService {
   /** Workspace-bound readers close grants and the original session in one SQL
    * observation; tenant-level entry/member callers retain their own scope. */
   async requireWorkspaceAction(context: ClientRequestContext, corporateCustomerId: string, action: EnterprisePortalAction,
-    tx?: Prisma.TransactionClient) {
+    tx?: RentalEnterpriseAuthorityTransaction) {
     if (!context.workspaceId || !context.workspaceCode) throw new ForbiddenException("当前客户经营空间缺失");
     const corporate = this.corporates(await this.access(context, context.tenantCode, tx, true))
       .find(row => row.corporateCustomerId === corporateCustomerId && row.actions.includes(action));

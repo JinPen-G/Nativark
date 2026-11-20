@@ -9,7 +9,7 @@ import { ENTERPRISE_ORDER_EXPORT_LIMIT, ENTERPRISE_ORDER_GROUPS, type Enterprise
 import { getRequestIdentity } from "@rental-os/platform-server/request-identity";
 import type { ClientRequestContext } from "./client-context";
 import { EnterpriseAccessService } from "./mysql-enterprise-access";
-import type { RentalEnterpriseReadStorage } from "./enterprise-read-storage";
+import type { RentalEnterpriseAuthorityTransaction, RentalEnterpriseReadStorage } from "./enterprise-read-storage";
 import { EnterpriseReaderAuditService } from "./mysql-enterprise-reader-audit";
 import { rentalOrderDueAt } from "./carrier-shipment";
 import { enterpriseJson } from "./enterprise-receipt";
@@ -159,6 +159,21 @@ export class EnterpriseOrderReaderService {
     return Prisma.sql`o.tenantId=${context.tenantId} AND o.workspaceId=${context.workspaceId}
       AND EXISTS (SELECT 1 FROM business_workspaces workspace WHERE workspace.tenantId=o.tenantId AND workspace.id=o.workspaceId)
       AND ${responsibility} ${search}`;
+  }
+
+  /** 历史读取门先锁原 Order→Workspace，再在同事务消费本 reader 的原对象谓词。
+   * 这里只核对象，不回投影、不写审计；当前企业动作仍须 requireWorkspaceAction。
+   * 财务仅企业承担；自费详情仍要求原企业身份与当时告知，不能借客户本人谓词代读。 */
+  async assertHistoryOrder(context: ClientRequestContext, corporateId: string, orderId: string,
+    tx: RentalEnterpriseAuthorityTransaction, financialOnly: boolean): Promise<void> {
+    this.principal(context);
+    if (![corporateId, orderId].every(reference) || "$transaction" in tx) throw new BadRequestException("企业历史对象缺少原事务或有效引用");
+    const rows = await tx.$queryRaw<Array<{ id: string; tenantId: string; workspaceId: string }>>(Prisma.sql`
+      SELECT o.id,o.tenantId,o.workspaceId FROM rental_orders o
+      WHERE ${this.predicate(context, corporateId, financialOnly ? "enterprise_paid" : undefined)}
+        AND CAST(o.id AS BINARY)=CAST(${orderId} AS BINARY)`);
+    if (rows.length !== 1 || rows[0].id !== orderId || rows[0].tenantId !== context.tenantId
+      || rows[0].workspaceId !== context.workspaceId) throw new NotFoundException("当前企业无权读取原历史订单");
   }
 
   private columns(corporateId: string) {

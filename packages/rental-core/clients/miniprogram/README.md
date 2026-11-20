@@ -1,6 +1,6 @@
 # Rental 客户小程序业务客户端
 
-[正式模块入口](index.ts)提供七组业务请求工厂、客户认证工厂、八个 AI 请求工厂、三组企业原操作编排和订单展示。原小程序 [api 入口](../../../../apps/miniprogram/src/api/orders.ts)注入 [request](../../../../apps/miniprogram/src/core/http.ts)，继续导出原方法和返回类型。合同沿 Rental 包内的[客户声明](../../src/client-contracts.ts)、[租赁声明](../../src/contracts.ts)和企业声明单源消费。
+[正式模块入口](index.ts)提供七组业务请求工厂、客户认证工厂、八个 AI 请求工厂、三组企业原操作编排、清单与服务切换、支付编排和订单展示。原小程序 [api 入口](../../../../apps/miniprogram/src/api/orders.ts)注入 [request](../../../../apps/miniprogram/src/core/http.ts)，继续导出原方法和返回类型。合同沿 Rental 包内的[客户声明](../../src/client-contracts.ts)、[租赁声明](../../src/contracts.ts)和企业声明单源消费。
 
 ## 宿主接入
 
@@ -42,6 +42,16 @@ const orders = createRentalMiniProgramOrdersApi({ request });
 同一正式入口导出 `presentOrder`、`matchesFilter`、`ORDER_FILTERS` 及对应事实和展示类型。[订单展示](status.ts)组合服务端订单状态、资金、续租事实和校准时间，沿原词条、操作提示与 Tab 分组返回主状态、副状态和可见入口。缺资金保持原未知处理，终态订单继续展示原未结资金。
 
 [原展示入口](../../../../apps/miniprogram/src/core/status.ts)窄再导出同一实现，[订单列表](../../../../apps/miniprogram/src/pages/orders/index.ts)消费原过滤器与展示，[订单详情](../../../../apps/miniprogram/src/pages/order/index.ts)消费原主副状态和操作提示。页面继续持有读取与展示寿命，实际操作资格、金额和执行结果由原服务端裁定。原[客户定向断言](../../../../tests/miniprogram-static.test.cjs)核对分组、续租、逾期和终态资金。
+
+## 清单与服务切换
+
+同一正式入口提供 `createRentalMiniProgramCart` 和 `createRentalMiniProgramServiceFlow`，以及原清单类型、配送判别和两个异常类。[清单工厂](cart.ts)接收原同步存储与清单键、会话事件、校准时钟和键生成器。[原清单入口](../../../../apps/miniprogram/src/core/cart.ts)初始化时绑定一次工厂，原页面继续消费同一缓存、报价绑定和提交引用。宿主结束工厂生命周期时调用 `dispose()` 释放该实例的会话订阅，登录退出仍由原会话清理存储并使清单缓存失效。
+
+清单保持原单服务、商品与选项合并数量、修订号和报价失效处理。报价来自服务端，当前修订和校准时间沿原规则核对。提交引用保持原键、报价 ID 和存储格式，结果未知继续保留原键并锁定修改。原明确结束入口处理释放和清空，配送地址、领取地点与时间缺项沿原判别。[结算页](../../../../apps/miniprogram/src/pages/checkout/index.ts)消费清单与提交引用，[设备页](../../../../apps/miniprogram/src/pages/item/index.ts)维护原选择。
+
+[服务切换工厂](flow.ts)接收同一清单方法、原认证 `switchService`、当前会话与服务选择、代次更新、同步存储和用户确认界面。[原流程入口](../../../../apps/miniprogram/src/core/flow.ts)绑定一次实例，登录客户先取得服务端换发会话，并在成功后按原确认结果清理清单。换发失败时保留原服务与清单。游客仅保存本地选择并更新原上下文代次。未决提交继续阻止跨服务切换，用户取消确认保留清单。
+
+原 `ensureServiceForOrder` 仍经同一切换流程，[本人订单列表](../../../../apps/miniprogram/src/pages/orders/index.ts)与[订单详情](../../../../apps/miniprogram/src/pages/order/index.ts)沿原入口调用。原[清单与切换定向断言](../../../../tests/miniprogram-static.test.cjs)核对退出清理、修订与报价、稳定提交键、确认取消、换发失败和游客选择。真实订单创建和会话授权沿原服务端环境验收。
 
 ## 支付编排
 
