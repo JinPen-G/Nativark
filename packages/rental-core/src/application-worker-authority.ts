@@ -1,7 +1,8 @@
 /** Rental 系统作业的当前准入。沿原租户父锁、Core 门禁和经营空间锁复验，复用宿主部署及订阅政策。
- * 不构造成员身份、不授予停用后的善后权限，也不读取或重发业务操作；原执行器继续负责对象、幂等和 unknown。
+ * 仅原登记执行器的五项历史收尾可消费已登记 disabled 授权；不构造成员身份，原执行器继续负责对象、幂等和 unknown。
  */
 import { createHash } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { CoreBindingSchema, CoreScopeReferenceSchema, TenantCoreGrantSchema, isCoreVersionSupported } from "@rental-os/core-contracts";
 import { CoreAccessError, coreBindingScopeKey, type CoreDeploymentAvailability } from "@rental-os/core-host";
 import type { CoreHostSqlClient } from "@rental-os/core-host/mysql";
@@ -11,6 +12,16 @@ import { RENTAL_APPLICATION_JOB_DESCRIPTORS, type RentalApplicationJobRequest,
 import { RENTAL_CORE_ID, RENTAL_CORE_VERSION, RENTAL_WORKSPACE_CONTAINER_TYPE } from "./core-identity";
 import { RENTAL_DATA_READABLE } from "./data";
 import type { RentalPlatformConfiguration } from "./platform-host";
+
+// PCH-R04.4/.7：这是原执行器的闭集，不从 settlement/original_dispatch 等用途推断许可。
+// 调价会建立新业务依据，不能借保留历史事实继续执行。未知作业同样拒绝。
+const recoveryJobs = new Set<string>([
+  "allocation_scan", "expire_pending_orders", "reconcile_pickup_overdue",
+  "expire_payment_intents", "retry_due_notifications",
+]);
+const orderJobs = new Set<string>([
+  "allocation_scan", "expire_pending_orders", "reconcile_pickup_overdue", "expire_payment_intents",
+]);
 
 export interface RentalWorkerAuthorityDependencies<Tx extends PlatformCoreTransaction> {
   database: CoreHostSqlClient<Tx>;
@@ -23,9 +34,10 @@ export interface RentalWorkerAuthorityDependencies<Tx extends PlatformCoreTransa
   deploymentForTransaction(transaction: Tx): CoreDeploymentAvailability;
 }
 
-/** 只为已登记的六项系统作业开放当前启用范围。没有成员主体的系统作业不冒充原用户委托任务。
+/** 只为原登记系统作业核验当前范围。没有成员主体的系统作业不冒充原用户委托任务。
  * 未传 transaction 时只开一段准入读取事务；传入时必须是业务原事务，调用方继续持锁至提交。
- * Core/租户/空间停用后的专项善后授权尚无公共政策端口，所有用途均拒绝，settlement 不是豁免。
+ * registered disabled 只允许五项原收尾；租户/空间冻结、缺 grant/binding/deployment 仍拒绝。
+ * 批次准入不证明某笔业务可执行：逐单事务核原订单，通知只由原队列/CAS 认领已保存记录。
  */
 export function createRentalWorkerAuthority<Tx extends PlatformCoreTransaction>(
   input: RentalWorkerAuthorityDependencies<Tx>
@@ -34,14 +46,17 @@ export function createRentalWorkerAuthority<Tx extends PlatformCoreTransaction>(
     || typeof input.configuration?.loadWorkspaceSnapshot !== "function" || typeof input.deploymentForTransaction !== "function") {
     throw new CoreAccessError("core_unavailable", "Rental 作业缺少真实事务、订阅、配置或部署授权参加者");
   }
+  const configurationRead = new AsyncLocalStorage<{ readonly transaction: Tx; readonly requestKey: string; readonly parentKey: string; active: boolean }>();
 
   const verify = async (request: RentalApplicationJobRequest, transaction: Tx | undefined, includeWorkspace: boolean): Promise<void> => {
       // 先固定原请求，避免等待锁期间可变负载将租户、作业目的或空间替换为另一范围。
-      const { coreId, implementationVersion, jobId, purpose, tenantId, workspaceId } = request ?? {};
+      const { coreId, implementationVersion, jobId, purpose, tenantId, workspaceId, orderId } = request ?? {};
       const definition = RENTAL_APPLICATION_JOB_DESCRIPTORS.find(job => job.id === jobId);
       if (!definition || coreId !== RENTAL_CORE_ID || implementationVersion !== RENTAL_CORE_VERSION
         || definition.purpose !== purpose || typeof tenantId !== "string" || !tenantId.trim()
-        || typeof workspaceId !== "string" || !workspaceId.trim()) {
+        || typeof workspaceId !== "string" || !workspaceId.trim()
+        || (orderId !== undefined && (typeof orderId !== "string" || !orderId.trim()))
+        || (includeWorkspace && transaction !== undefined && orderJobs.has(jobId) && !orderId)) {
         throw new CoreAccessError("denied", "Rental 作业身份、执行版本、用途或原业务范围不符合登记");
       }
       const parsedScope = CoreScopeReferenceSchema.safeParse({ coreId, tenantId,
@@ -49,6 +64,13 @@ export function createRentalWorkerAuthority<Tx extends PlatformCoreTransaction>(
       if (!parsedScope.success) throw new CoreAccessError("denied", "Rental 作业原业务范围无效");
       const scope = parsedScope.data, scopeKey = coreBindingScopeKey(scope);
       const scopeHash = createHash("sha256").update(scopeKey).digest("hex");
+      const parentKey = JSON.stringify([coreId, implementationVersion, jobId, purpose, tenantId, workspaceId]);
+      const requestKey = JSON.stringify([parentKey, orderId]);
+      const reading = configurationRead.getStore();
+      if (reading && (!reading.active || reading.transaction !== transaction || reading.parentKey !== parentKey
+        || ((includeWorkspace || orderId !== undefined) && reading.requestKey !== requestKey))) {
+        throw new CoreAccessError("denied", "Rental 作业配置读取不能切换原事务、执行器或业务对象");
+      }
 
       const check = async (tx: Tx): Promise<void> => {
         if (typeof tx?.$queryRaw !== "function") throw new CoreAccessError("core_unavailable", "Rental 作业原事务不可用");
@@ -71,8 +93,9 @@ export function createRentalWorkerAuthority<Tx extends PlatformCoreTransaction>(
           WHERE tenant_id = ${tenantId} AND core_id = ${coreId} LOCK IN SHARE MODE`;
         const grant = grants.length === 1 ? TenantCoreGrantSchema.safeParse({ ...grants[0],
           revision: Number(grants[0].revision), tenantId, coreId }) : undefined;
-        if (!grant?.success || grant.data.state !== "enabled") {
-          throw new CoreAccessError("denied", "Rental Core 当前未获租户授权；停用后的作业善后政策尚未登记");
+        if (!grant?.success || (grant.data.state !== "enabled"
+          && !(grant.data.state === "disabled" && recoveryJobs.has(jobId)))) {
+          throw new CoreAccessError("denied", "Rental Core 当前未授权此原作业；停用后不能开始新业务或未知用途");
         }
         // 使用公共绑定键和 schema，锁定读取不受调用方较早的可重复读快照影响。
         const bindings = await tx.$queryRaw<Array<{ bindingId: string; revision: bigint | number; dataVersion: string;
@@ -88,9 +111,19 @@ export function createRentalWorkerAuthority<Tx extends PlatformCoreTransaction>(
           || !isCoreVersionSupported(binding.data.dataVersion, RENTAL_DATA_READABLE)) {
           throw new CoreAccessError("denied", "Rental 作业原空间绑定缺失、范围不符或数据版本不兼容");
         }
-        if (includeWorkspace) {
-          // 与原配置写入及品类采用保持同一空间锁；付款入账必须先持原订单锁。
-          // 运输前短事务没有订单锁，也仍须检查当前空间和已保存配置。
+        if (includeWorkspace && !reading) {
+          // 原逐单执行器已经持此订单锁；运输前短事务则在这里先锁原订单。
+          // 禁止先 Workspace 后 Order，亦不能仅凭作业名称把别的空间/不存在的订单当收尾对象。
+          if (orderId !== undefined) {
+            const orders = await tx.$queryRaw<Array<{ id: string; tenantId: string; workspaceId: string }>>`
+              SELECT id, tenantId, workspaceId FROM rental_orders
+              WHERE tenantId = ${tenantId} AND workspaceId = ${workspaceId} AND id = ${orderId} FOR UPDATE`;
+            if (orders.length !== 1 || orders[0].id !== orderId || orders[0].tenantId !== tenantId
+              || orders[0].workspaceId !== workspaceId) {
+              throw new CoreAccessError("denied", "Rental 收尾作业缺少同租户同空间的原订单事实");
+            }
+          }
+          // 与原配置写入及品类采用保持同一空间锁。批次只读准入没有后续订单锁。
           const workspaces = await tx.$queryRaw<Array<{ id: string; tenantId: string; status: string }>>`
             SELECT id, tenantId, status FROM business_workspaces
             WHERE tenantId = ${tenantId} AND id = ${workspaceId} FOR UPDATE`;
@@ -98,7 +131,14 @@ export function createRentalWorkerAuthority<Tx extends PlatformCoreTransaction>(
             || typeof workspaces[0].status !== "string" || workspaces[0].status.toLowerCase() !== "active") {
             throw new CoreAccessError("denied", "Rental 作业经营空间已不可用或不属于原租户");
           }
-          const snapshot = await input.configuration.loadWorkspaceSnapshot(tenantId, workspaceId, tx);
+          // 原 loadWorkspaceSnapshot→lockActiveCategoryBinding 会重新取 Tenant/Core fence。
+          // 只在这段同事务同对象的同步等待链中重复父门禁，避免完整配置读取递归。
+          // 外层仍须取得并核验真实配置后才返回；不缓存授权、不跳过其他事务/对象复验。
+          const readingScope = { transaction: tx, requestKey, parentKey, active: true };
+          const snapshot = await configurationRead.run(readingScope, async () => {
+            try { return await input.configuration.loadWorkspaceSnapshot(tenantId, workspaceId, tx); }
+            finally { readingScope.active = false; }
+          });
           if (!snapshot || snapshot.tenantId !== tenantId || snapshot.workspaceId !== workspaceId
             || !snapshot.profile || !snapshot.businessSettings) {
             throw new CoreAccessError("core_unavailable", "Rental 作业经营空间缺少已保存的原业务配置");
@@ -109,7 +149,7 @@ export function createRentalWorkerAuthority<Tx extends PlatformCoreTransaction>(
           throw new CoreAccessError("core_unavailable", "Rental 作业缺少同事务的实际部署观察器");
         }
         await deployment.requireAvailable(coreId, tenantId);
-        // 在其他异步读取之后判定自然流逝的期限。配货、到期收尾和原通知投递仍受当前 Core 授权及原业务规则约束。
+        // 在其他异步读取之后判定自然流逝的期限。五项原收尾不新建订单/价格依据，仍由原状态机裁定。
         if (definition.purpose === "new_business") await input.term.requireNewBusiness(tx, tenantId);
       };
       if (transaction !== undefined) return check(transaction);

@@ -5,6 +5,7 @@ import { ConflictException, ForbiddenException, UnauthorizedException } from "@n
 import { Prisma, WorkspaceStatus as PrismaWorkspaceStatus } from "@prisma/client";
 import type { RoleScope, SystemDataScope, SystemUserRow } from "@rental-os/platform-contracts";
 import type { BusinessWorkspace } from "./contracts";
+import type { PlatformAuthTransaction } from "@rental-os/platform-server/auth-store";
 
 /** 原 Auth 提供的会话身份，供同一事务中的读取与撤权复验使用。 */
 export interface WorkspaceSessionIdentity {
@@ -55,6 +56,10 @@ export interface RentalWorkspacePrincipalTransaction {
   };
   $queryRaw<T = unknown>(query: Prisma.Sql): PromiseLike<T>;
 }
+
+/** Original public user projection and workspace/session delegates, without any
+ * dependency on unrelated generated business or optional AI model delegates. */
+export type RentalWorkspaceAccessTransaction = RentalWorkspacePrincipalTransaction & PlatformAuthTransaction;
 
 export interface RentalWorkspacePrincipalParticipants<Transaction extends RentalWorkspacePrincipalTransaction> {
   findUserById(userId: string, transaction?: Transaction): PromiseLike<SystemUserRow | undefined>;

@@ -1149,7 +1149,7 @@ export class RentalCoreController {
         processed.push({ orderId, status: "skipped", reason: error.message });
       }
     }
-    await this.business.refreshFromDatabase();
+    await this.business.refreshFromDatabase("committed_order");
     await this.business.refreshCouponTemplateCache(tenantId, () => this.context(tenantId));
     await this.service.persist(tenantId);
     return {
@@ -1184,7 +1184,7 @@ export class RentalCoreController {
       }
     });
     if (!replayed) await this.emitOrderEvent(tenantId, "order.cancelled", order);
-    await this.business.refreshFromDatabase();
+    await this.business.refreshFromDatabase("committed_order");
     await this.business.refreshCouponTemplateCache(tenantId, () => this.context(tenantId));
     return this.committed(tenantId, order);
   }
@@ -1249,7 +1249,7 @@ export class RentalCoreController {
         results.push({ orderId, status: "skipped", notice: "not_required", reason: error.message });
       }
     }
-    await this.business.refreshFromDatabase();
+    await this.business.refreshFromDatabase("committed_order");
     await this.business.refreshCouponTemplateCache(tenantId, () => this.context(tenantId));
     await this.service.persist(tenantId);
     return {
@@ -1346,7 +1346,7 @@ export class RentalCoreController {
       }
     });
     if (!replayed) await this.emitOrderEvent(tenantId, "order.no_show", order);
-    await this.business.refreshFromDatabase();
+    await this.business.refreshFromDatabase("committed_order");
     await this.business.refreshCouponTemplateCache(tenantId, () => this.context(tenantId));
     return this.committed(tenantId, order);
   }
@@ -1408,7 +1408,7 @@ export class RentalCoreController {
       }
     });
     // 内部权益已与订单同事务提交；此处只发布已提交的数据到进程缓存。
-    await this.business.refreshFromDatabase();
+    await this.business.refreshFromDatabase("committed_order");
     await this.business.refreshCouponTemplateCache(tenantId, () => this.context(tenantId));
     // 回放时跳过通知：通知是外部副作用，同键重试不该让客户收到第二条短信。
     if (!replayed) await this.emitOrderEvent(tenantId, "order.confirmed", order);
@@ -1679,8 +1679,8 @@ export class RentalCoreController {
         return latest.status === RentalCoreOrderStatus.Cancelled ? latest : undefined;
       }
     });
-    await this.business.refreshFromDatabase();
-    await this.business.refreshCouponTemplateCache(req.user.tenantId, context);
+    await this.business.refreshFromDatabase("committed_order");
+    await this.business.refreshCouponTemplateCache(req.user.tenantId, () => this.context(req.user.tenantId));
     if (!cancelReplayed) await this.emitOrderEvent(req.user.tenantId, "order.cancelled", order);
     return this.committed(req.user.tenantId, order);
   }
@@ -1868,7 +1868,7 @@ export class RentalCoreController {
         return existing ? { order: await this.service.getOrder(tenantId, id), change: existing } : undefined;
       }
     });
-    await this.business.refreshFromDatabase();
+    await this.business.refreshFromDatabase("committed_order");
     return { order: await this.committed(tenantId, result.order), change: result.change };
   }
 
@@ -1940,7 +1940,7 @@ export class RentalCoreController {
         return existing ? { order: await this.service.getOrder(tenantId, id), change: existing } : undefined;
       }
     });
-    await this.business.refreshFromDatabase();
+    await this.business.refreshFromDatabase("committed_order");
     return { order: await this.committed(tenantId, result.order), change: result.change };
   }
 
@@ -2396,7 +2396,7 @@ export class RentalCoreController {
         return recorded ? { inspection: recorded, order: latest } : undefined;
       }
     });
-    if (stage === "return" && !partialReturn) await this.business.refreshFromDatabase();
+    if (stage === "return" && !partialReturn) await this.business.refreshFromDatabase("committed_order");
     if (!replayed) {
       if (!partialReturn) await this.emitOrderEvent(tenantId, result.inspection.stage === "pickup" ? "pickup.completed" : "return.completed", result.order);
       // 归还确实逾期（费用 > 0）才发逾期通知——这是真实业务事实，不是凭空造事件。
@@ -2490,7 +2490,7 @@ export class RentalCoreController {
         return latest.status === targetStatus ? latest : undefined;
       }
     });
-    if (stage === "return") await this.business.refreshFromDatabase();
+    if (stage === "return") await this.business.refreshFromDatabase("committed_order");
     if (!replayed) {
       await this.emitOrderEvent(tenantId, stage === "pickup" ? "pickup.completed" : "return.completed", order);
       // 无检查直接交接的归还路径同样按真实逾期费判断是否发逾期通知。

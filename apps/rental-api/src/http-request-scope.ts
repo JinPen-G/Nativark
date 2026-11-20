@@ -203,7 +203,7 @@ export function createRentalHttpRequestScope(input: {
                 ? publicAccess!.withRequest(request, consumeResponse, route.review.kind === "buffered-read" ? { bufferedRead: true } : undefined)
                 : access.withRequest(request, consumeResponse, route.review.kind === "buffered-read" ? { bufferedRead: true }
                   : route.review.kind === "audited-read" ? { auditedRead: true }
-                    : route.review.kind === "maintained-read" ? { maintainedRead: true } : undefined);
+                    : route.review.kind === "maintained-read" ? { maintainedRead: true } : undefined, route.recovery);
               void result.then(value => {
                 // No write authorization check after commit. Reads already passed the
                 // access adapter's pre-return recheck with the original Guard identity.

@@ -11,7 +11,7 @@ import { CoreAccessError, coreBindingScopeKey, type CoreDeploymentAvailability }
 import type { CoreHostSqlTransaction } from "@rental-os/core-host/mysql";
 import type { SystemUserRow } from "@rental-os/platform-contracts";
 import { getRequestIdentity } from "@rental-os/platform-server/request-identity";
-import { matchableRequestPath } from "@rental-os/platform-server/request-path";
+import { matchableRequestPath, normalizeRequestPath } from "@rental-os/platform-server/request-path";
 import type { PublicSubscriptionReader } from "@rental-os/platform-server/subscription-reader";
 import type { PlatformPrincipalAuthority, PlatformPrincipalLease } from "@rental-os/platform-server/principal";
 import type { PlatformAuthTransaction } from "@rental-os/platform-server/auth-store";
@@ -20,6 +20,10 @@ import type { createRentalAuthorization } from "./http-auth";
 import { createRentalBusinessTenantFence, hasRentalBusinessTenantFence, type RentalBusinessTenantTransaction } from "./mysql-business-fence";
 import { RENTAL_CORE_ID, RENTAL_WORKSPACE_CONTAINER_TYPE } from "./core-identity";
 import { RENTAL_DATA_READABLE } from "./data";
+import { createRentalInternalAuthorityScope } from "./application-internal-authority";
+import { bindRentalRecovery, type RentalRecoveryDeclaration, type RentalRecoverySubject } from "./application-recovery-policy";
+import type { RentalRecoveryAuthority, RentalRecoveryLease } from "./application-recovery-authority";
+export { createRentalRecoveryAuthority } from "./application-recovery-authority";
 
 /** These are the server request properties written/used by the original Guard,
  * not a DTO to populate from body/query parameters. Staff routing must run first. */
@@ -70,6 +74,9 @@ export interface RentalApplicationAccessDependencies {
   /** Same original public authority/user repository; SaaS never receives a
    * fabricated member assignment. Optional only for hosts without these routes. */
   managementAuthority?: Pick<PlatformPrincipalAuthority, "lock">;
+  /** Original Auth and ClientAuth from this same assembly; only explicit reviewed
+   * historical/closeout handlers may request this current-principal lease. */
+  recoveryAuthority?: RentalRecoveryAuthority;
 }
 
 type RequestEvidence = {
@@ -77,6 +84,7 @@ type RequestEvidence = {
   request: RentalApplicationAccessRequest;
   method: string;
   path: string;
+  objectPath: string;
   tenantId: string;
   userId: string;
   audience: "operator" | "staff" | "client";
@@ -91,6 +99,8 @@ type RequestEvidence = {
   newBusiness: boolean;
   management?: "catalog" | "tenant";
   leases: WeakMap<object, PlatformPrincipalLease>;
+  recovery?: RentalRecoverySubject;
+  recoveryLeases: WeakMap<object, RentalRecoveryLease>;
 };
 type ApplicationRequestScope = { bound: boolean; evidence?: RequestEvidence };
 const nonempty = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0;
@@ -285,10 +295,10 @@ export function createRentalApplicationAccess(input: RentalApplicationAccessDepe
     const tenantScope = Boolean(management) || audience !== "client" && (policy.isTenantMembershipRoute(path)
       || audience === "operator" && tenantManagementScope(method, path));
     if (!tenantScope && !workspaceId) throw new CoreAccessError("denied", "Rental 经营请求缺少原受权空间，不能退回租户范围");
-    return { active: true, request, method, path, tenantId: management?.tenantId ?? identity.tenantId, userId: identity.userId,
+    return { active: true, request, method, path, objectPath: normalizeRequestPath(request.url), tenantId: management?.tenantId ?? identity.tenantId, userId: identity.userId,
       audience, workspaceId, sessionId, expiresAt, identity: identityFingerprint(),
       sourceIdentity: identity, actor: actorFingerprint(request, audience), tenantScope,
-      newBusiness: policy.isNewBusinessRoute(method, path), management: management?.kind, leases: new WeakMap() };
+      newBusiness: policy.isNewBusinessRoute(method, path), management: management?.kind, leases: new WeakMap(), recoveryLeases: new WeakMap() };
   };
 
   const assertEvidence = (evidence: RequestEvidence) => {
@@ -297,6 +307,7 @@ export function createRentalApplicationAccess(input: RentalApplicationAccessDepe
       || getRequestIdentity() !== evidence.sourceIdentity
       || identityFingerprint() !== evidence.identity || actorFingerprint(evidence.request, evidence.audience) !== evidence.actor
       || evidence.request.method.toUpperCase() !== evidence.method || matchableRequestPath(evidence.request.url) !== evidence.path
+      || normalizeRequestPath(evidence.request.url) !== evidence.objectPath
       || evidence.expiresAt !== undefined && evidence.expiresAt <= Date.now() / 1000) {
       throw new CoreAccessError("denied", "Rental 请求已结束，或原主体、会话、动作和空间已变化");
     }
@@ -304,8 +315,16 @@ export function createRentalApplicationAccess(input: RentalApplicationAccessDepe
 
   const beforeParent = async (transaction: RentalBusinessTenantTransaction, tenantId: string) => {
     const evidence = requests.getStore()?.evidence;
-    if (!evidence?.management) return;
+    if (!evidence?.management && !evidence?.recovery) return;
     assertEvidence(evidence);
+    if (evidence.recovery) {
+      if (tenantId !== evidence.tenantId || "$transaction" in transaction || !input.recoveryAuthority || !evidence.workspaceId)
+        throw new CoreAccessError("denied", "Rental 善后请求缺少原同事务主体与经营空间");
+      if (!evidence.recoveryLeases.has(transaction)) evidence.recoveryLeases.set(transaction,
+        await input.recoveryAuthority.lock(transaction, { tenantId, workspaceId: evidence.workspaceId,
+          audience: evidence.audience, user: evidence.request.user, client: evidence.request.client, subject: evidence.recovery }));
+      return;
+    }
     if (tenantId !== evidence.tenantId || "$transaction" in transaction || !managementTransaction(transaction))
       throw new CoreAccessError("denied", "Rental 管理请求必须使用原同事务身份委托和固定目标租户");
     if (!evidence.leases.has(transaction)) {
@@ -323,6 +342,11 @@ export function createRentalApplicationAccess(input: RentalApplicationAccessDepe
       throw new CoreAccessError("denied", "Rental 事务未绑定本请求的原身份与租户");
     }
     assertEvidence(evidence);
+    if (evidence.recovery) {
+      const lease = evidence.recoveryLeases.get(transaction);
+      if (!lease) throw new CoreAccessError("denied", "Rental 善后主体须先于原 Tenant/Core 父锁复核");
+      await lease.revalidate();
+    }
     if (evidence.management) {
       const lease = evidence.leases.get(transaction);
       if (!lease) throw new CoreAccessError("denied", "Rental 管理主体必须先于业务父锁复核");
@@ -367,8 +391,8 @@ export function createRentalApplicationAccess(input: RentalApplicationAccessDepe
       WHERE tenant_id = ${tenantId} AND core_id = ${RENTAL_CORE_ID} LOCK IN SHARE MODE`);
     const grant = grants.length === 1 ? TenantCoreGrantSchema.safeParse({ ...grants[0],
       revision: Number(grants[0].revision), tenantId, coreId: RENTAL_CORE_ID }) : undefined;
-    if (!grant?.success || grant.data.state !== "enabled") {
-      throw new CoreAccessError("denied", "Rental Core 当前未获租户授权；停用后的善后政策尚未登记");
+    if (!grant?.success || grant.data.state !== "enabled" && !(evidence.recovery && grant.data.state === "disabled")) {
+      throw new CoreAccessError("denied", "Rental Core 当前未获授权，且本处理器不属于已登记历史或善后入口");
     }
     if (evidence.audience !== "client" && !evidence.management) {
       const assignments = await transaction.$queryRaw<AccessRow[]>(sql`
@@ -384,12 +408,39 @@ export function createRentalApplicationAccess(input: RentalApplicationAccessDepe
     // Adapt only SQL call shape/PromiseLike; every query still executes on the same
     // transaction. No whole-client cast, connection swap, ORM proxy or nested commit.
     await deployment.requireAvailable(RENTAL_CORE_ID, tenantId);
+    if (evidence.recovery) await evidence.recoveryLeases.get(transaction)!.lockOriginalSubject(grant.data.state === "disabled");
     if (evidence.newBusiness) {
       await input.term.requireNewBusiness(currentSubscriptionReader(transaction, tenantId), tenantId);
     }
     assertEvidence(evidence);
   };
-  const fence = createRentalBusinessTenantFence(assertCurrent, beforeParent);
+  const assertOrder = async (transaction: RentalBusinessTenantTransaction, tenantId: string, workspaceId: string, orderId?: string) => {
+    const evidence = requests.getStore()?.evidence;
+    if (evidence?.recovery) {
+      assertEvidence(evidence);
+      const lease = evidence.recoveryLeases.get(transaction);
+      if (!lease || !orderId) throw new CoreAccessError("denied", "Rental 善后动作缺少原同事务订单依据");
+      lease.assertOrder(tenantId, workspaceId, orderId);
+      await lease.revalidate();
+    }
+    await assertCurrent(transaction, tenantId);
+  };
+  const readReceipt = async <T>(tenantId: string, orderId: string | null | undefined, read: () => Promise<T>): Promise<T> => {
+    const evidence = requests.getStore()?.evidence;
+    if (!evidence?.recovery) return read();
+    assertEvidence(evidence);
+    if (tenantId !== evidence.tenantId || !orderId || evidence.recovery.orderId !== orderId)
+      throw new CoreAccessError("denied", "原收据不属于本次历史或善后订单");
+    const recheck = () => input.database.$transaction(async transaction => {
+      await beforeParent(transaction, tenantId);
+      await assertCurrent(transaction, tenantId);
+    }, { isolationLevel: "ReadCommitted" });
+    await recheck();
+    const result = await read();
+    await recheck();
+    return result;
+  };
+  const fence = createRentalBusinessTenantFence(assertCurrent, beforeParent, assertOrder, assertOrder, readReceipt);
   const verifyWorkspaceTarget = async (transaction: RentalBusinessTenantTransaction, target: RentalClientWorkspaceTarget) => {
     const evidence = requests.getStore()?.evidence;
     if (!evidence || evidence.audience !== "client" || evidence.method !== "POST"
@@ -412,12 +463,18 @@ export function createRentalApplicationAccess(input: RentalApplicationAccessDepe
         workspaceTargets.run({ verify: verifyWorkspaceTarget }, consume)));
     },
     async withRequest<T>(request: RentalApplicationAccessRequest, consume: () => Promise<T>,
-      read?: RentalApplicationBufferedRead | RentalApplicationAuditedRead | RentalApplicationMaintainedRead): Promise<T> {
+      read?: RentalApplicationBufferedRead | RentalApplicationAuditedRead | RentalApplicationMaintainedRead,
+      recovery?: RentalRecoveryDeclaration): Promise<T> {
       fence.assertBound();
       const scope = requests.getStore();
       if (!scope || scope.bound) throw new CoreAccessError("denied", "Rental 应用请求只能绑定一次原 Guard 身份");
       scope.bound = true;
       const evidence = capture(request);
+      if (recovery) {
+        if (!input.recoveryAuthority || evidence.management || evidence.tenantScope || evidence.newBusiness)
+          throw new CoreAccessError("denied", "Rental 善后政策不能用于新业务、管理或缺失原身份权威的入口");
+        evidence.recovery = bindRentalRecovery(recovery, request);
+      }
       const readMethod = evidence.method === "GET" || evidence.method === "HEAD";
       const buffered = read?.bufferedRead === true, audited = read?.auditedRead === true;
       const maintained = read !== undefined && "maintainedRead" in read && read.maintainedRead === true;
@@ -427,7 +484,8 @@ export function createRentalApplicationAccess(input: RentalApplicationAccessDepe
         throw new CoreAccessError("denied", "Rental GET/HEAD 须明确登记缓冲纯读或独立事务审计读取；其他方法不能借读取回查执行");
       }
       scope.evidence = evidence;
-      try {
+      const internal = createRentalInternalAuthorityScope(() => assertEvidence(evidence));
+      return internal.run(async () => { try {
         const recheck = (transaction: RentalBusinessTenantTransaction) => beforeParent(transaction, evidence.tenantId)
           .then(() => assertCurrent(transaction, evidence.tenantId));
         await input.database.$transaction(recheck,
@@ -438,7 +496,7 @@ export function createRentalApplicationAccess(input: RentalApplicationAccessDepe
         if (isRead) await input.database.$transaction(recheck,
           { isolationLevel: "ReadCommitted" });
         return result;
-      } finally { evidence.active = false; }
+      } finally { evidence.active = false; } });
     },
     assertCurrent
   });

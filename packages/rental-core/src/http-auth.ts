@@ -285,6 +285,12 @@ const originalOrderExecutionRoutes = new Set(([
 ] as const).map(action => `POST /${AI_SCENE_ORDER_READ_HTTP_DRAFT.basePath}/${AI_SCENE_ORDER_READ_HTTP_DRAFT[action]}`));
 
 function requiredPermissions(method: string, path: string) {
+  // Original inspection entry policy is shared with the staff Guard. The action
+  // authority still checks the persisted order and pickup/return stage rights.
+  if (method.toUpperCase() === "POST" && Object.values(AI_STAFF_INSPECTION_HTTP_DRAFT.operations)
+    .some(operation => path === `/${AI_STAFF_INSPECTION_HTTP_DRAFT.basePath}/${operation}`)) {
+    return staffRoutePermissions(method, path) ?? [UNMATCHED_ROUTE_PERMISSION];
+  }
   if (method.toUpperCase() === 'POST' && ['list', 'preview', 'prepare', 'operation'].some(action =>
     path === `/${AI_TASK_OPENING_PROPOSAL_HTTP_DRAFT.basePath}/${action}`)) {
     return path.endsWith('/prepare') ? ['rental-os:price:manage'] : ['rental-os:order:view', 'rental-os:price:manage'];

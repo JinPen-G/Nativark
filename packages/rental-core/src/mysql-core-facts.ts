@@ -3,7 +3,7 @@
 import { readRentalCategoryCode, rentalCategoryStorageCode } from "./category-identity";
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { createHash, randomUUID } from "node:crypto";
-import { lockRentalBusinessTenant } from "./mysql-business-fence";
+import { lockRentalBusinessTenant, assertRentalBusinessOrderAccessAfterLock } from "./mysql-business-fence";
 import { usageDelta } from "./usage-reading";
 import { isDeepStrictEqual } from "node:util";
 import type { Prisma, $Enums } from "@prisma/client";
@@ -962,6 +962,7 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
       }
     }
     if (rows[0]) {
+      await assertRentalBusinessOrderAccessAfterLock(tx, tenantId, rows[0].workspaceId, orderId);
       // 历史换货分配仍有资产外键：在任何处置/工单写入前也锁这些资产，
       // 否则返库晚写历史分配会与另一事务的资产→处置当前读形成锁环。
       const references = await tx.$queryRaw<Array<{ assetId: string }>>(sql`
@@ -1266,7 +1267,7 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
       await write(tx);
       return;
     }
-    await this.store.$transaction(write);
+    await this.store.$transaction(write, { isolationLevel: "ReadCommitted" });
   }
 
   private async applyReturnStockTransfer(client: TTransaction, order: RentalOrder, workspaceId: string, transfer: StockReturnTransfer) {
@@ -2928,7 +2929,7 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
   }
 
   async insertInspection(record: RentalInspectionRecord, tx?: TTransaction): Promise<void> {
-    if (!tx) return this.store.$transaction(client => this.insertInspection(record, client));
+    if (!tx) return this.store.$transaction(client => this.insertInspection(record, client), { isolationLevel: "ReadCommitted" });
     const workspaceId = await this.contacts.resolveWorkspaceId(tx, record.tenantId);
     await (tx ?? this.store).rentalInspectionRecord.create({
       data: {
@@ -2970,7 +2971,7 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
     operator: string,
     tx?: TTransaction
   ): Promise<RentalInspectionRecord> {
-    if (!tx) return this.store.$transaction(client => this.correctInspectionUsage(tenantId, orderId, inspectionId, input, operator, client));
+    if (!tx) return this.store.$transaction(client => this.correctInspectionUsage(tenantId, orderId, inspectionId, input, operator, client), { isolationLevel: "ReadCommitted" });
     const client = tx;
     const workspaceId = await this.contacts.resolveWorkspaceId(client, tenantId);
     const row = await client.rentalInspectionRecord.findFirst({ where: { id: inspectionId, tenantId, workspaceId, orderId } });

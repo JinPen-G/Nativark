@@ -581,24 +581,24 @@ export const AI_NATIVE_STAFF_RECOGNITION_PROVIDERS: FactoryProvider[] = [{
     readStaffRecognitionConfiguration(value).enabled ? new TenantInspectionObjectReader(db, integrations) : undefined
 }, {
   provide: AI_NATIVE_STAFF_RECOGNITION_RUNTIME,
-  inject: [AI_NATIVE_BODY_DATABASE, AuthService, ApiAuthGuard, RentalCoreService, SubscriptionService, SecretBox, FileStorageRuntimeService, ModuleRef,
+  inject: [AI_NATIVE_BODY_DATABASE, AuthService, ApiAuthGuard, RentalCoreService, RentalCoreFactRepository, SubscriptionService, SecretBox, FileStorageRuntimeService, ModuleRef,
     { token: AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION, optional: true }, { token: AI_NATIVE_STAFF_RECOGNITION_ADAPTERS, optional: true }, AI_NATIVE_GATEWAY_CAPACITY],
-  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, core: RentalCoreService, subscriptions: SubscriptionService,
+  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, core: RentalCoreService, orders: RentalCoreFactRepository, subscriptions: SubscriptionService,
     secrets: SecretBox, files: FileStorageRuntimeService, moduleRef: ModuleRef, value?: unknown, adapters?: readonly ModelAdapter[], capacity?: GatewayCapacityPort) =>
-    composeStandardStaffRecognition({ db, auth, guard, core, subscriptions, secrets, files, moduleRef, adapters, capacity }, value)
+    composeStandardStaffRecognition({ db, auth, guard, core, orders, subscriptions, secrets, files, moduleRef, adapters, capacity }, value)
 }, ...([['application', INSPECTION_RECOGNITION_TASKS], ['policies', AI_STAFF_INSPECTION_TASK_POLICIES]] as const).map(([key, provide]) => ({
   provide, inject: [AI_NATIVE_STAFF_RECOGNITION_RUNTIME],
   useFactory: (runtime: ReturnType<typeof composeStandardStaffRecognition>) => runtime[key]
 }))];
 export const AI_NATIVE_STAFF_RECEIPT_PROVIDERS: FactoryProvider[] = [{
   provide: AI_STAFF_INSPECTION_REQUESTS,
-  inject: [AI_NATIVE_BODY_DATABASE, ApiAuthGuard, RentalCoreService, ModuleRef,
+  inject: [AI_NATIVE_BODY_DATABASE, AuthService, ApiAuthGuard, RentalCoreService, RentalCoreFactRepository, ModuleRef,
     { token: AI_NATIVE_STAFF_MANUAL_CONFIGURATION, optional: true }, { token: AI_NATIVE_STAFF_RECOGNITION_RUNTIME, optional: true }],
-  useFactory: (db: PrismaService, guard: ApiAuthGuard, core: RentalCoreService, moduleRef: ModuleRef, value?: unknown,
+  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, core: RentalCoreService, orders: RentalCoreFactRepository, moduleRef: ModuleRef, value?: unknown,
     runtime?: ReturnType<typeof composeStandardStaffRecognition>) => {
     readStaffManualConfiguration(value);
     if (runtime?.enabled) return runtime.staffRequests;
-    return new StaffInspectionRequestFactory({ db, guard, core,
+    return new StaffInspectionRequestFactory({ db, auth, guard, core, orders,
       originalInspection: { controller: { createInspection: (...args: Parameters<RentalCoreController['createInspection']>) =>
         moduleRef.get(RentalCoreController, { strict: false }).createInspection(...args) }, receipts: new RentalIdempotencyRepository(db) } });
   }

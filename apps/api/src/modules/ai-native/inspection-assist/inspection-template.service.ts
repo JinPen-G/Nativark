@@ -4,6 +4,8 @@ import type { ApiAuthGuard } from '../../../common/api-auth.guard';
 import type { RentalCoreService } from '../../rental-core/rental-core.service';
 import { AiOrderRouteContextAuthority, type AiOrderRouteCredentialSource } from '../order-route-context.authority';
 import { InspectionAssistError, inspectionId, inspectionTargetSchema, parseInspectionInput } from './inspection-assist.validation';
+import type { Prisma } from '@prisma/client';
+import type { RentalCoreFactStore } from '../../rental-core/rental-core-fact.repository';
 
 const field = z.object({ code: inspectionId, label: z.string().min(1).max(256),
   type: z.enum(['boolean', 'number', 'text', 'select', 'photo']), required: z.boolean(),
@@ -21,6 +23,7 @@ export class InspectionTemplateService {
   constructor(private readonly dependencies: {
     guard: Pick<ApiAuthGuard, 'canActivate'>; credentials: AiOrderRouteCredentialSource;
     core: Pick<RentalCoreService, 'getOrder' | 'listInspectionTemplates'>;
+    orders?: Pick<RentalCoreFactStore, 'findOrder' | 'lockOrder'>;
   }) {
     if (typeof dependencies?.guard?.canActivate !== 'function'
       || typeof dependencies.credentials?.current !== 'function'
@@ -48,6 +51,17 @@ export class InspectionTemplateService {
   }
 
   async read(value: unknown) {
+    return this.readCurrent(value);
+  }
+
+  /** Caller already holds the original order lock and Auth/Core fences. Read the
+   * same persisted aggregate and frozen/replacement templates on that transaction. */
+  async readInTransaction(value: unknown, tx: Prisma.TransactionClient) {
+    if (!tx || '$transaction' in tx || !this.dependencies.orders) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
+    return this.readCurrent(value, tx);
+  }
+
+  private async readCurrent(value: unknown, tx?: Prisma.TransactionClient) {
     const input = parseInspectionInput(requestSchema, value);
     const authority = new AiOrderRouteContextAuthority(this.dependencies.guard, this.dependencies.credentials, input.orderId);
     try {
@@ -55,10 +69,11 @@ export class InspectionTemplateService {
         if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user') throw new InspectionAssistError('ACCESS_DENIED');
         const scope = context.scope;
         const observe = async () => {
-          const order = await this.dependencies.core.getOrder(scope.tenantId, orderId);
+          const order = tx ? await this.dependencies.orders!.findOrder(scope.tenantId, orderId, tx)
+            : await this.dependencies.core.getOrder(scope.tenantId, orderId);
           // RentalOrder's public contract has no workspaceId; workspace is verified
           // by the real route Guard and Core's ALS-scoped repository, not invented here.
-          if (order.id !== orderId || order.tenantId !== scope.tenantId
+          if (!order || order.id !== orderId || order.tenantId !== scope.tenantId
             || !Array.isArray(order.inspectionTemplateSnapshots) || order.inspectionTemplateSnapshots.length > 32
             || !Array.isArray(order.allocations) || order.allocations.length > 200) throw new InspectionAssistError('TEMPLATE_UNAVAILABLE');
           const locations = 'access' in context ? context.access.locationScope : undefined;
@@ -69,7 +84,7 @@ export class InspectionTemplateService {
             || !inspectionId.safeParse(allocations[0].assetId).success
             || ['released', 'returned'].includes(allocations[0].status)) throw new InspectionAssistError('BINDING_CHANGED');
           // Core resolves replacement-goods snapshots; never substitute current configuration.
-          const templates = await this.dependencies.core.listInspectionTemplates(scope.tenantId, input.stage, order);
+          const templates = await this.dependencies.core.listInspectionTemplates(scope.tenantId, input.stage, order, tx);
           if (!Array.isArray(templates) || templates.length > 32) throw new InspectionAssistError('TEMPLATE_UNAVAILABLE');
           const matches = templates.filter(row => row.id === input.templateId && row.stage === input.stage
             && (!row.allocationIds || row.allocationIds.includes(input.allocationId)));

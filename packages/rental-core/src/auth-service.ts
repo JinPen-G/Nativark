@@ -20,6 +20,7 @@ import { resolveUserBusinessLocationScope } from "./business-location-scope";
 import type { OrganizationLocationScope } from "@rental-os/platform-server/organization-location-scope";
 import { Prisma } from "@prisma/client";
 import { getRequestIdentity } from "@rental-os/platform-server/request-identity";
+import type { RentalWorkspaceAccessTransaction } from "./mysql-workspace-principal";
 
 export interface WorkspaceAccessLease {
   user: SystemUserRow;
@@ -402,7 +403,7 @@ export class RentalAuthService extends AuthSessionService<LoginResponse, AuthAcc
    * Uses the original Guard evidence and platform permission mapping. The lease
    * grants no business action and is valid only in the supplied transaction;
    * callers check their action/scope and revalidate immediately before return. */
-  async lockRequestWorkspaceAccess(tx: Prisma.TransactionClient): Promise<WorkspaceAccessLease> {
+  async lockRequestWorkspaceAccess(tx: RentalWorkspaceAccessTransaction): Promise<WorkspaceAccessLease> {
     const identity = getRequestIdentity();
     const evidence = identity?.accessSession;
     if (!identity?.tenantId || !identity.userId || !identity.workspaceId ||

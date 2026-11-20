@@ -1,7 +1,7 @@
 import { ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
 import { Decimal, sqltag as sql } from "@prisma/client/runtime/library";
-import { lockRentalBusinessTenant } from "./mysql-business-fence";
+import { lockRentalBusinessTenant, assertRentalBusinessOrderAccessAfterLock } from "./mysql-business-fence";
 import { randomUUID } from "node:crypto";
 import type {
   RentalFundingAction,
@@ -336,6 +336,7 @@ export class RentalFundingService<TTransaction extends RentalFundingTransaction 
     `);
     const order = rows[0];
     if (!order) throw new NotFoundException("订单不存在或不属于当前经营空间");
+    await assertRentalBusinessOrderAccessAfterLock(tx, tenantId, workspaceId, orderId);
     const extensions = await tx.rentalOrderExtension.findMany({ where: { tenantId, workspaceId, orderId, status: "effective" } });
     const effective = aggregatePendingExtensionFunding(extensions.map((row) => ({
       payableAmount: Number(row.payableAmount),

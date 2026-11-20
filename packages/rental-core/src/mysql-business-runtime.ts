@@ -4027,7 +4027,7 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
     return coupon;
   }
 
-  /** 订单确认事务内核销；提交后由 refreshFromDatabase 统一发布缓存。 */
+  /** 订单确认事务内核销；规范化宿主下一次读取原持久事实，旧宿主提交后刷新缓存。 */
   async redeemCouponInTransaction(tenantId: string, orderId: string, tx: TTransaction) {
     const result = await this.factStore.redeemCouponForOrder(tenantId, orderId, stamp(), tx);
     if (result === "invalid") throw new ConflictException("订单优惠券已不在锁定状态，不能确认订单");
@@ -4346,8 +4346,12 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
     }, tx, state);
   }
 
-  /** 仅在外层事务成功返回后调用；所有运行期刷新按调用顺序串行发布。 */
-  async refreshFromDatabase() {
+  /** 原订单事务已写穿的事实由规范化读取器负责；旧宿主和显式缓存读取仍串行刷新。 */
+  async refreshFromDatabase(reason?: "committed_order") {
+    // A committed order receipt must survive a later authorization/configuration
+    // change. Its next read loads current facts; rewarming every workspace here
+    // would introduce a new failure after the original transaction committed.
+    if (reason === "committed_order" && this.hasAuthoritativeConfiguration()) return;
     const next = this.refreshQueue.catch(() => undefined).then(() => this.onApplicationBootstrap());
     this.refreshQueue = next;
     await next;

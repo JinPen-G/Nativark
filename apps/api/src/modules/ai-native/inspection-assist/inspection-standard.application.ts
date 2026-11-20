@@ -12,6 +12,7 @@ import type { SubscriptionService } from '../../subscription/subscription.servic
 import type { SecretBox } from '../../../common/secret-box';
 import type { FileStorageRuntimeService } from '../../integrations/file-storage.runtime.service';
 import type { RentalCoreService } from '../../rental-core/rental-core.service';
+import type { RentalCoreFactStore } from '../../rental-core/rental-core-fact.repository';
 import type { ModelAdapter } from '../model-gateway.ports';
 import { RentalCoreController } from '../../rental-core/rental-core.controller';
 import { RentalIdempotencyRepository } from '../../rental-core/rental-idempotency.repository';
@@ -57,12 +58,13 @@ export function readStaffRecognitionConfiguration(value?: unknown) {
   throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 }
 type Dependencies = { db: PrismaService; auth: AuthService; guard: ApiAuthGuard; core: RentalCoreService;
+  orders?: Pick<RentalCoreFactStore, 'findOrder' | 'lockOrder'>;
   subscriptions: SubscriptionService; secrets: SecretBox; files: FileStorageRuntimeService; moduleRef: ModuleRef;
   adapters?: readonly ModelAdapter[]; clock?: () => Date; capacity?: GatewayCapacityPort };
 type InspectionTaskHttpApplication = ConstructorParameters<typeof InspectionRecognitionTaskController>[0];
 export function composeStandardStaffRecognition(d: Dependencies, value?: unknown) {
   const selected = readStaffRecognitionConfiguration(value);
-  const inspection = { db: d.db, guard: d.guard, core: d.core, storage: d.files,
+  const inspection = { db: d.db, auth: d.auth, guard: d.guard, core: d.core, orders: d.orders, storage: d.files,
     originalInspection: { controller: { createInspection: (...args: Parameters<RentalCoreController['createInspection']>) =>
       d.moduleRef.get(RentalCoreController, { strict: false }).createInspection(...args) }, receipts: new RentalIdempotencyRepository(d.db) } };
   const scenes = [{ kind: 'image', code: STAFF_RECOGNITION_SCENES.image, version: '1' },

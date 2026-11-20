@@ -7,6 +7,7 @@ import type { ApiAuthGuard } from '../../common/api-auth.guard';
 import { getRequestIdentity, runWithRequestIdentity } from '../../common/request-identity';
 import { AiScopeResolutionError, type AiCurrentScopeAuthority } from './ai-scope.repository';
 import { isAiStepExecutionContext } from './task-contract-validation';
+import { captureRentalInternalAuthority } from '@rental-os/rental-core/application-internal-authority';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const credentialSchema = z.object({ authorization: z.string().min(1).max(8192), requestId: id, audience: z.enum(['operator', 'staff']) }).strict();
@@ -43,6 +44,7 @@ export class AiOrderRouteContextAuthority implements AiCurrentScopeAuthority {
 
   private async authorized<T>(read: (context: AiExecutionContext, orderId: string) => Promise<T>, recheck: boolean): Promise<T> {
     try {
+      const internal = captureRentalInternalAuthority();
       const credential = credentialSchema.parse(structuredClone(await this.credentials.current()));
       // A fresh ALS store prevents a prior request's role/scope from authorizing this read.
       return await runWithRequestIdentity({}, async () => {
@@ -68,29 +70,35 @@ export class AiOrderRouteContextAuthority implements AiCurrentScopeAuthority {
         };
         if (!isAiStepExecutionContext(candidate)) throw Error();
         const context = structuredClone(candidate);
-        const { requestId: _, authorizedAt: __, ...binding } = context;
-        const fingerprint = requestFingerprint(binding);
-        let value!: T, failure: unknown, failed = false;
-        try { value = await read(structuredClone(context), this.orderId); }
-        catch (error) { failure = error; failed = true; }
-        if (recheck) {
-          const current = await this.resolve();
-          const { requestId: ___, authorizedAt: ____, ...currentBinding } = current;
-          if (requestFingerprint(currentBinding) !== fingerprint) throw Error();
-        }
-        // A Core read failure is not evidence of revoked access. Still check
-        // current access first so fallback cannot hide a concurrent revocation.
-        // Never expose the original database/provider error or its payload.
-        if (failed) {
-          if (failure instanceof AiScopeResolutionError) throw failure;
-          const code = failure && typeof failure === 'object' && 'code' in failure ? failure.code : undefined;
-          if (typeof code === 'string' && ['FORBIDDEN', 'AUTHENTICATION_FAILED', 'AI_ACCESS_DENIED', 'AI_SCOPE_CHANGED'].includes(code))
-            throw new AiScopeResolutionError('AI_ACCESS_DENIED');
-          if (failure instanceof HttpException && [401, 403].includes(failure.getStatus()))
-            throw new AiScopeResolutionError('AI_ACCESS_DENIED');
-          throw new AiScopeResolutionError('AI_RESOURCE_UNAVAILABLE');
-        }
-        return value;
+        const consume = async () => {
+          const { requestId: _, authorizedAt: __, ...binding } = context;
+          const fingerprint = requestFingerprint(binding);
+          let value!: T, failure: unknown, failed = false;
+          try { value = await read(structuredClone(context), this.orderId); }
+          catch (error) { failure = error; failed = true; }
+          if (recheck) {
+            const current = await this.resolve();
+            const { requestId: ___, authorizedAt: ____, ...currentBinding } = current;
+            if (requestFingerprint(currentBinding) !== fingerprint) throw Error();
+          }
+          // A Core read failure is not evidence of revoked access. Still check
+          // current access first so fallback cannot hide a concurrent revocation.
+          // Never expose the original database/provider error or its payload.
+          if (failed) {
+            if (failure instanceof AiScopeResolutionError) throw failure;
+            const code = failure && typeof failure === 'object' && 'code' in failure ? failure.code : undefined;
+            if (typeof code === 'string' && ['FORBIDDEN', 'AUTHENTICATION_FAILED', 'AI_ACCESS_DENIED', 'AI_SCOPE_CHANGED'].includes(code))
+              throw new AiScopeResolutionError('AI_ACCESS_DENIED');
+            if (failure instanceof HttpException && [401, 403].includes(failure.getStatus()))
+              throw new AiScopeResolutionError('AI_ACCESS_DENIED');
+            throw new AiScopeResolutionError('AI_RESOURCE_UNAVAILABLE');
+          }
+          return value;
+        };
+        // Only the real Guard pass above supplies the fresh identity. The bridge
+        // checks the same original session/scope and resumes its captured store;
+        // it never enters the projected AiExecutionContext as an identity.
+        return internal ? internal.runVerified(consume) : consume();
       });
     } catch (error) {
       if (error instanceof AiScopeResolutionError) throw error;

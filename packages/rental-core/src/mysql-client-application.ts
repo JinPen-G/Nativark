@@ -1,6 +1,7 @@
 /** Rental客户各端的真实业务应用。目录、报价、本人订单、付款与文件沿原授权和业务服务。
  * 宿主供给同一数据库/客户Auth/会员及原事务出箱；原结果读取不重发或补造历史。 */
 import { Prisma } from "@prisma/client";
+import { clientOwnsRentalOrder } from "./client-order-ownership";
 import {
   BadRequestException,
   ConflictException,
@@ -184,11 +185,7 @@ export class ClientApiService {
   }
 
   private clientOwnsOrder(context: ClientRequestContext, order: { tenantId: string; customerId?: string | null; membershipSnapshot?: unknown }) {
-    const snapshot = order.membershipSnapshot;
-    const personalCustomerId = snapshot && typeof snapshot === "object" && !Array.isArray(snapshot) && "personalCustomerId" in snapshot
-      ? snapshot.personalCustomerId : undefined;
-    // 不用付款企业、签约企业或当前员工关系扩展范围：同事不是订单本人。
-    return order.tenantId === context.tenantId && (order.customerId === context.customerId || personalCustomerId === context.customerId);
+    return clientOwnsRentalOrder(context, order);
   }
 
   private async assertClientOrder(context: ClientRequestContext, orderId: string) {

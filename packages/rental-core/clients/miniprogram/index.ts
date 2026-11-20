@@ -23,3 +23,6 @@ export { createRentalMiniProgramGoalApi, type RentalMiniProgramGoalPorts } from 
 export { createRentalMiniProgramBookingTransferApi, type RentalMiniProgramBookingTransferPorts, type ClientBookingTransferApi } from "./ai-booking-transfers";
 export { createRentalMiniProgramEntryActionApi, type RentalMiniProgramEntryActionPorts, type RentalMiniProgramEntryActionSession, type ClientOriginalPaymentRecord } from "./ai-entry-actions";
 export { createRentalMiniProgramSceneCatalogApi, type RentalMiniProgramSceneCatalogPorts } from "./ai-scene-catalog";
+export { createRentalMiniProgramExtensionOperation, type RentalMiniProgramExtensionOperationPorts } from "./enterprise-extension-operation";
+export { createRentalMiniProgramExchangeRequest, type RentalMiniProgramExchangeRequestPorts } from "./enterprise-exchange-request";
+export { createRentalMiniProgramExchangeConfirmation, type RentalMiniProgramExchangeConfirmationPorts } from "./enterprise-exchange-confirmation";

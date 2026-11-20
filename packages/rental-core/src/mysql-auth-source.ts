@@ -10,7 +10,7 @@ import type { RentalAuthenticationSource } from "./auth-source";
 import type { TenantSummary } from "./auth-contracts";
 import { RentalCategoryCode, type BusinessWorkspace } from "./contracts";
 import { RentalWorkspacePrincipalRepository, type RentalWorkspacePrincipalStorage,
-  type WorkspaceSessionIdentity } from "./mysql-workspace-principal";
+  type WorkspaceSessionIdentity, type RentalWorkspaceAccessTransaction } from "./mysql-workspace-principal";
 
 interface DemoPasswordTransaction {
   user: Pick<PlatformAuthDataStore["user"], "update">;
@@ -33,11 +33,11 @@ export type RentalMysqlAuthenticationDatabase = PlatformAuthDataStore & RentalWo
 };
 
 export class RentalMysqlAuthenticationRepository extends PlatformAuthenticationRepository implements RentalAuthenticationSource {
-  private readonly workspacePrincipals: RentalWorkspacePrincipalRepository<Prisma.TransactionClient>;
+  private readonly workspacePrincipals: RentalWorkspacePrincipalRepository<RentalWorkspaceAccessTransaction>;
 
   constructor(private readonly database: RentalMysqlAuthenticationDatabase) {
     super(database);
-    this.workspacePrincipals = new RentalWorkspacePrincipalRepository<Prisma.TransactionClient>(database, {
+    this.workspacePrincipals = new RentalWorkspacePrincipalRepository<RentalWorkspaceAccessTransaction>(database, {
       findUserById: (userId, transaction) => this.findUserById(userId, transaction),
       projectWorkspace: row => this.toWorkspace(row),
       projectRoleScope: scope => this.toSharedRoleScope(scope),
@@ -57,10 +57,10 @@ export class RentalMysqlAuthenticationRepository extends PlatformAuthenticationR
     transaction: Prisma.TransactionClient) {
     return this.workspacePrincipals.resolveTrustedWorkspacePrincipal(binding, transaction);
   }
-  lockWorkspaceSessionUser(transaction: Prisma.TransactionClient, expected: WorkspaceSessionIdentity) {
+  lockWorkspaceSessionUser(transaction: RentalWorkspaceAccessTransaction, expected: WorkspaceSessionIdentity) {
     return this.workspacePrincipals.lockWorkspaceSessionUser(transaction, expected);
   }
-  readWorkspaceSessionUser(transaction: Prisma.TransactionClient, expected: WorkspaceSessionIdentity) {
+  readWorkspaceSessionUser(transaction: RentalWorkspaceAccessTransaction, expected: WorkspaceSessionIdentity) {
     return this.workspacePrincipals.readWorkspaceSessionUser(transaction, expected);
   }
 

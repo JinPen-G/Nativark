@@ -1,14 +1,20 @@
 /** 按当前组织及经营空间收窄已认证账号的配置地点范围，供 Guard、Auth 和员工文件权威共用。 */
 import { ForbiddenException } from '@nestjs/common';
-import type { PrismaClient } from '@prisma/client';
 import type { SystemUserRow } from '@rental-os/platform-contracts';
 import { enabledOrganizationSubtreeIds, organizationLocationScope, type OrganizationLocationScope } from '@rental-os/platform-server/organization-location-scope';
+
+export interface RentalBusinessLocationReader {
+  organizationUnit: { findMany(input: { where: { tenantId: string }; select: { id: true; parentId: true; status: true } }):
+    PromiseLike<Array<{ id: string; parentId: string | null; status: string }>> };
+  rentalFulfillmentLocation: { findMany(input: { where: { tenantId: string; workspaceId: string;
+    organizationId: { in: string[] } }; select: { id: true } }): PromiseLike<Array<{ id: string }>> };
+}
 
 export async function resolveUserBusinessLocationScope(
   user: SystemUserRow,
   workspaceId: string | undefined,
   configuredScope: OrganizationLocationScope,
-  db?: Pick<PrismaClient, 'organizationUnit' | 'rentalFulfillmentLocation'>
+  db?: RentalBusinessLocationReader
 ): Promise<OrganizationLocationScope> {
   if (user.dataScope !== 'organization') return structuredClone(configuredScope);
   if (!workspaceId || !user.organizationId || typeof db?.organizationUnit?.findMany !== 'function'

@@ -18,5 +18,5 @@ export interface RentalAllocationFailureEvents<TTransaction> {
 /** 标准宿主的自动作业准入；它不代替人工作业的原 Guard。
  * 事务参数存在时须在同一业务事务内复核当前 Core、空间和该作业的许可。 */
 export interface RentalAllocationWorkerAuthority<TTransaction> {
-  assertCurrent(scope: { tenantId: string; workspaceId: string }, transaction?: TTransaction): Promise<void>;
+  assertCurrent(scope: { tenantId: string; workspaceId: string; orderId?: string }, transaction?: TTransaction): Promise<void>;
 }

@@ -32,6 +32,7 @@ import { FilesController } from "./http-files.controller";
 import { StaffUploadsController } from "./http-staff-uploads.controller";
 import { PaymentWebhookController } from "./http-payment-webhook.controller";
 import { isRentalPaymentCallbackRoute } from "./application-payment-callback-access";
+import { declareRentalRecovery, type RentalRecoveryDeclaration, type RentalRecoveryKind } from "./application-recovery-policy";
 export { createRentalNativeResponseBuffer } from "./http-native-response";
 
 export type RentalHttpAccessReview = (
@@ -56,6 +57,7 @@ export interface RentalHttpAccessRoute extends RentalHttpAccessDeclaration {
   readonly handlerName: string;
   readonly method: string;
   readonly path: string;
+  readonly recovery?: RentalRecoveryDeclaration;
 }
 
 const member = MembershipController.prototype;
@@ -79,6 +81,32 @@ const handoff = EnterpriseRentalHandoffMerchantController.prototype;
 const files = FilesController.prototype, staffFiles = StaffUploadsController.prototype;
 const staffAuth = StaffAuthController.prototype, authExtensions = RentalAuthExtensionsController.prototype;
 const webhook = PaymentWebhookController.prototype;
+// PCH-R04 history/closeout is a closed original-handler list. In particular confirm,
+// new quotes/orders/extensions/exchanges and generic GET routes do not inherit it.
+const recoveryHandlers = new Map<Function, RentalRecoveryKind>([
+  ...[core.orders, core.order, core.inspections, core.extensions, core.changes,
+    core.orderDocument, core.orderDocumentVersions, core.orderDocumentVersion,
+    core.listCarrierShipmentEvents, core.revealOrderDeliveryAddress, core.listInternalOrderNotes,
+    core.getServiceExecutionReceipt, business.fundingEvents,
+    client.listOrders, client.myOrders, client.orderDetail, client.fulfillment, client.orderDocument,
+    client.orderDocumentVersions, client.feeItems, client.extensions, client.funding, client.paymentIntent,
+    PaymentOperationsController.prototype.listPaymentIntents,
+    PaymentOperationsController.prototype.listPaymentRefunds].map(handler => [handler, "history"] as const),
+  ...[core.allocate, core.allocationCandidates, core.manageAllocations, core.operationLock,
+    core.createInspection, core.correctInspectionUsage, core.handover, core.partialReturn,
+    core.createInternalOrderNote, core.createCarrierShipmentEvent, core.updateServiceOccurrence,
+    core.markPickupOverdue, core.sendNoShowNotice, core.confirmNoShow, core.resumePickup]
+    .map(handler => [handler, "fulfillment"] as const),
+  ...[core.cancel, core.expirePendingOrder, core.settle, core.reviewOrderFeeReview, core.reviewExtensionRefund,
+    core.refundServiceOccurrence, core.reviewInspectionException, core.recordInspectionExceptionCustomerResponse,
+    core.reReviewInspectionException, core.previewPartialLineCancellation, core.applyPartialLineCancellation,
+    business.refundFunding, business.releaseFunding, business.failFunding,
+    client.respondToFee, client.previewCancellation, client.cancelOrder]
+    .map(handler => [handler, "settlement"] as const),
+  ...[client.refreshPaymentIntent, client.closePaymentIntent,
+    PaymentOperationsController.prototype.createPaymentRefund, PaymentOperationsController.prototype.refreshPaymentRefund]
+    .map(handler => [handler, "payment-result"] as const)
+]);
 const callbackHandlers: readonly Function[] = [webhook.alipay, webhook.wechatPay, webhook.stripe,
   webhook.alipayRefund, webhook.wechatRefund];
 // Identity/session maintenance must remain available when ordinary Core business is
@@ -561,7 +589,10 @@ export function compileRentalHttpAccessPolicy(input: {
           if (review.kind !== "pending" && (readMethod && !readReview || !readMethod && readReview && !(method === "POST" && review.kind === "buffered-read"))) {
             throw new Error(`Rental HTTP 审定类型与原方法不符：${controller.name}.${handlerName}`);
           }
-          const route = Object.freeze({ controller, handler, handlerName, method, path, review: Object.freeze({ ...review }) });
+          const recoveryKind = recoveryHandlers.get(handler);
+          const recovery = review.kind !== "pending" && recoveryKind ? declareRentalRecovery(method, path, recoveryKind) : undefined;
+          const route = Object.freeze({ controller, handler, handlerName, method, path, review: Object.freeze({ ...review }),
+            ...(recovery ? { recovery } : {}) });
           routes.push(route);
           if (pattern) patterns.set(route, pattern);
         }

@@ -15,7 +15,9 @@ type BusinessFenceScope = {
   active: boolean;
   assertCurrent(transaction: RentalBusinessTenantTransaction, tenantId: string): Promise<void>;
   beforeParent?(transaction: RentalBusinessTenantTransaction, tenantId: string): Promise<void>;
-  assertOperation?(transaction: RentalBusinessTenantTransaction, tenantId: string, workspaceId: string): Promise<void>;
+  assertOperation?(transaction: RentalBusinessTenantTransaction, tenantId: string, workspaceId: string, orderId?: string): Promise<void>;
+  assertOrder?(transaction: RentalBusinessTenantTransaction, tenantId: string, workspaceId: string, orderId: string): Promise<void>;
+  readReceipt?<T>(tenantId: string, orderId: string | null | undefined, read: () => Promise<T>): Promise<T>;
 };
 const businessFenceScope = new AsyncLocalStorage<BusinessFenceScope>();
 
@@ -30,7 +32,8 @@ export function hasRentalBusinessTenantFence(): boolean {
  * There is deliberately no global registration or default authorization callback. */
 export function createRentalBusinessTenantFence(
   assertCurrent: BusinessFenceScope["assertCurrent"], beforeParent?: BusinessFenceScope["beforeParent"],
-  assertOperation?: BusinessFenceScope["assertOperation"]
+  assertOperation?: BusinessFenceScope["assertOperation"], assertOrder?: BusinessFenceScope["assertOrder"],
+  readReceipt?: BusinessFenceScope["readReceipt"]
 ) {
   const owner = Object.freeze({});
   const assertBound = () => {
@@ -45,7 +48,7 @@ export function createRentalBusinessTenantFence(
       // Reject nested selections, including expired inherited contexts. Otherwise
       // a second application could replace the authority already attached to a write.
       if (businessFenceScope.getStore()) throw new ForbiddenException("Rental 请求不能嵌套或切换应用事务权威");
-      const scope: BusinessFenceScope = { owner, active: true, assertCurrent, beforeParent, assertOperation };
+      const scope: BusinessFenceScope = { owner, active: true, assertCurrent, beforeParent, assertOperation, assertOrder, readReceipt };
       return businessFenceScope.run(scope, async () => {
         try { return await consume(); }
         finally { scope.active = false; }
@@ -58,13 +61,34 @@ export function createRentalBusinessTenantFence(
  * short provider-admission transaction that locks no order. A system worker can
  * then lock its workspace without putting Workspace before Order in settlement. */
 export async function assertRentalBusinessOperationAccessAfterLock(tx: RentalBusinessTenantTransaction,
-  tenantId: string, workspaceId: string): Promise<void> {
+  tenantId: string, workspaceId: string, orderId?: string): Promise<void> {
   const scope = businessFenceScope.getStore();
   if (!scope) return;
   if (!scope.active) throw new ForbiddenException("Rental 请求范围已结束，不能开始业务动作");
-  if (scope.assertOperation) await scope.assertOperation(tx, tenantId, workspaceId);
+  if (scope.assertOperation) await scope.assertOperation(tx, tenantId, workspaceId, orderId);
   else await scope.assertCurrent(tx, tenantId);
   if (!scope.active) throw new ForbiddenException("Rental 动作复核期间请求已结束");
+}
+
+/** Exact original order, after its existing row lock. A selected historical
+ * request cannot let a nested participant change the bound aggregate. */
+export async function assertRentalBusinessOrderAccessAfterLock(tx: RentalBusinessTenantTransaction,
+  tenantId: string, workspaceId: string, orderId: string): Promise<void> {
+  const scope = businessFenceScope.getStore();
+  if (!scope) return;
+  if (!scope.active) throw new ForbiddenException("Rental 请求范围已结束，不能继续处理原订单");
+  if (scope.assertOrder) await scope.assertOrder(tx, tenantId, workspaceId, orderId);
+  if (!scope.active) throw new ForbiddenException("Rental 原订单复验期间请求已结束");
+}
+
+/** Original idempotency invokes this only for read-only receipt replay, outside a
+ * business commit. A current-scope denial never turns a committed write into failure. */
+export async function readRentalOriginalReceipt<T>(tenantId: string, orderId: string | null | undefined,
+  read: () => Promise<T>): Promise<T> {
+  const scope = businessFenceScope.getStore();
+  if (!scope) return read();
+  if (!scope.active) throw new ForbiddenException("Rental 请求已结束，不能读取原操作收据");
+  return scope.readReceipt ? scope.readReceipt(tenantId, orderId, read) : read();
 }
 
 /** Revalidate the selected application in the caller's transaction after its

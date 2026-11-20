@@ -4,14 +4,15 @@
 import { ForbiddenException, UnauthorizedException } from "@nestjs/common";
 import type { CoreSessionContext } from "@rental-os/core-contracts";
 import type { CoreDeployedCatalogue } from "@rental-os/core-host";
-import type { CoreHostSqlClient } from "@rental-os/core-host/mysql";
+import type { CoreHostSqlClient, CoreHostSqlTransaction } from "@rental-os/core-host/mysql";
 import { composePlatformCoreSessionReader, type PlatformCoreUsers } from "@rental-os/platform-core-host";
 import type { SystemUserRow } from "@rental-os/platform-contracts";
 import { getRequestIdentity } from "@rental-os/platform-server/request-identity";
 import type { RentalMysqlAuthenticationRepository } from "./mysql-auth-source";
 import { rentalCorePermissionCodes } from "./permissions";
 
-export type RentalCoreSessionTransaction = Parameters<RentalMysqlAuthenticationRepository["lockWorkspaceSessionUser"]>[0];
+export type RentalCoreSessionTransaction = Parameters<RentalMysqlAuthenticationRepository["lockWorkspaceSessionUser"]>[0]
+  & CoreHostSqlTransaction;
 export interface RentalCoreSessionDependencies<Tx extends RentalCoreSessionTransaction> {
   database: CoreHostSqlClient<Tx>;
   authSource: Pick<RentalMysqlAuthenticationRepository,

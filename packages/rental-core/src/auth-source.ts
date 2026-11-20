@@ -4,13 +4,15 @@ import type { Prisma } from "@prisma/client";
 import type { PlatformAuthenticationSource } from "@rental-os/platform-server/auth-session";
 import type { PlatformAuthDataStore } from "@rental-os/platform-server/auth-store";
 import type { TenantSummary } from "./auth-contracts";
-import type { RentalWorkspacePrincipalRepository } from "./mysql-workspace-principal";
+import type { RentalWorkspacePrincipalRepository, RentalWorkspaceAccessTransaction } from "./mysql-workspace-principal";
 import type { resolveUserBusinessLocationScope } from "./business-location-scope";
 
 export type RentalAuthenticationSource = Omit<PlatformAuthenticationSource, "findTenantByIdForAuth" | "getAuthSession">
   & Pick<RentalWorkspacePrincipalRepository<Prisma.TransactionClient>,
     "listUserWorkspaces" | "resolveSessionWorkspaceId" | "findWorkspaceScopedUser"
-    | "resolveTrustedWorkspacePrincipal" | "lockWorkspaceSessionUser" | "readWorkspaceSessionUser">
+    | "resolveTrustedWorkspacePrincipal">
+  & Pick<RentalWorkspacePrincipalRepository<RentalWorkspaceAccessTransaction>,
+    "lockWorkspaceSessionUser" | "readWorkspaceSessionUser">
   & {
     getAuthSession(id: string, transaction?: Prisma.TransactionClient): ReturnType<PlatformAuthenticationSource["getAuthSession"]>;
     findTenantByIdForAuth(id: string): TenantSummary | Promise<TenantSummary>;

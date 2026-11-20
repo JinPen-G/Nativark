@@ -199,8 +199,8 @@ export class RentalDueJobScheduler<TTransaction extends RentalDueJobTransaction 
   }
 
   private async commitScope(tenantId: string) {
-    await this.business.refreshFromDatabase();
-    await this.business.refreshCouponTemplateCache(tenantId, (await this.context(tenantId)));
+    await this.business.refreshFromDatabase("committed_order");
+    await this.business.refreshCouponTemplateCache(tenantId, () => this.context(tenantId));
     await this.core.persist(tenantId);
   }
 

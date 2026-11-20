@@ -2,7 +2,7 @@
  * 本模块只协调原事务和收据，不能把收据存在或重试当成业务授权。 */
 import { ConflictException } from "@nestjs/common";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
-import { lockRentalBusinessTenant, type RentalBusinessTenantTransaction } from "./mysql-business-fence";
+import { hasRentalBusinessTenantFence, lockRentalBusinessTenant, readRentalOriginalReceipt, type RentalBusinessTenantTransaction } from "./mysql-business-fence";
 import type { RentalActionTransactionStore } from "./idempotent-action-storage";
 import {
   assertSameRequest,
@@ -105,12 +105,16 @@ export class RentalIdempotentActionService<TTransaction extends RentalBusinessTe
     tenantId: string; action: string; key: string; orderId: string;
     replay: (response: unknown) => Promise<T | undefined>;
   }, tx?: TTransaction): Promise<T | undefined> {
-    const original = await this.idempotency.find(input.tenantId, input.action, input.key, tx);
-    if (!original) return undefined;
-    if (original.orderId !== input.orderId) throw new ConflictException("原操作收据与当前订单不一致");
-    const result = await input.replay(original.response);
-    if (result === undefined) throw new ConflictException("原操作收据缺少安全恢复依据，禁止重新执行");
-    return result;
+    const read = async () => {
+      const original = await this.idempotency.find(input.tenantId, input.action, input.key, tx);
+      if (!original) return undefined;
+      if (original.orderId !== input.orderId) throw new ConflictException("原操作收据与当前订单不一致");
+      const result = await input.replay(original.response);
+      if (result === undefined) throw new ConflictException("原操作收据缺少安全恢复依据，禁止重新执行");
+      return result;
+    };
+    if (tx) { if (hasRentalBusinessTenantFence()) await lockRentalBusinessTenant(tx, input.tenantId); return read(); }
+    return readRentalOriginalReceipt(input.tenantId, input.orderId, read);
   }
 
   /** Participate in an existing authorized business transaction. No nested COMMIT,
@@ -139,7 +143,7 @@ export class RentalIdempotentActionService<TTransaction extends RentalBusinessTe
     const early = await this.idempotency.find(input.tenantId, input.action, key);
     if (early) {
       assertSameRequest(early, fingerprint);
-      const replayed = await input.replay(early.response);
+      const replayed = await readRentalOriginalReceipt(input.tenantId, input.orderId, () => input.replay(early.response));
       if (replayed !== undefined) return replayed;
       throw new ConflictException("原操作收据缺少安全恢复依据，禁止重新执行");
     }
@@ -174,7 +178,7 @@ export class RentalIdempotentActionService<TTransaction extends RentalBusinessTe
       );
     } catch (error) {
       if (error instanceof IdempotentReplay) {
-        const replayed = await input.replay(error.response);
+        const replayed = await readRentalOriginalReceipt(input.tenantId, input.orderId, () => input.replay(error.response));
         if (replayed !== undefined) return replayed;
         throw new ConflictException("相同幂等键的请求正在处理，请稍后重试");
       }
@@ -186,7 +190,7 @@ export class RentalIdempotentActionService<TTransaction extends RentalBusinessTe
         // 后到者会撞唯一约束落到这里，不比对就会把先到者的结果当成自己的返回。
         // 顺序请求走事务外预检时已有这道校验，并发路径此前漏了。
         assertSameRequest(winner, fingerprint);
-        const replayed = await input.replay(winner.response);
+        const replayed = await readRentalOriginalReceipt(input.tenantId, input.orderId, () => input.replay(winner.response));
         if (replayed !== undefined) return replayed;
         throw new ConflictException("相同幂等键的请求正在处理，请稍后重试");
       }
@@ -217,7 +221,7 @@ export class RentalIdempotentActionService<TTransaction extends RentalBusinessTe
         const winner = await this.idempotency.find(input.tenantId, input.action, key);
         if (!winner) throw error;
         assertSameRequest(winner, fingerprint);
-        const replayed = await input.replay(winner.response);
+        const replayed = await readRentalOriginalReceipt(input.tenantId, input.orderId, () => input.replay(winner.response));
         if (replayed !== undefined) return replayed;
         throw error;
       }

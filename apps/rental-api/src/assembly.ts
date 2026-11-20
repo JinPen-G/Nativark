@@ -18,7 +18,7 @@ import { PlatformPrincipalAuthority } from "@rental-os/platform-server/principal
 import { createRentalApplication } from "@rental-os/rental-core/application";
 import { createRentalHttpApplications } from "@rental-os/rental-core/application-http";
 import { createRentalPlatformApplications } from "@rental-os/rental-core/application-platform";
-import { createRentalApplicationAccess } from "@rental-os/rental-core/application-access";
+import { createRentalApplicationAccess, createRentalRecoveryAuthority } from "@rental-os/rental-core/application-access";
 import { createRentalPublicApplicationAccess, createRentalPaymentCallbackAccess } from "@rental-os/rental-core/application-public-access";
 import { createRentalWorkerAuthority } from "@rental-os/rental-core/application-worker-authority";
 import { composeRentalPlatformHost } from "@rental-os/rental-core/platform-host";
@@ -80,6 +80,7 @@ export function composeRentalApplication(input: {
   const guard = new authorization.Guard(rental.auth, rental.foundation.capabilities, rental.client.auth,
     rental.client.rateLimit, database, rental.subscriptions);
   const access = createRentalApplicationAccess({ database, authorization, deploymentForTransaction,
+    recoveryAuthority: createRentalRecoveryAuthority({ auth: rental.auth, clientAuth: rental.client.auth }),
     managementAuthority: new PlatformPrincipalAuthority({ findUserById: (id, tx) =>
       rental.authSource.findUserById(id, tx) }),
     term: { async requireNewBusiness(transaction, tenantId) {

@@ -1,5 +1,5 @@
 /** Rental客户认证单源，保留原JWT、用途化挑战、刷新一次消费与客户状态锁。
- * 宿主提供实际参加者及兼容构造默认值；本实现不签发营运/员工或通用Core权限。 */
+ * 原认证投影可在调用方事务中建立当前会话租约；不签发营运/员工、Core 或善后权限。 */
 import {
   BadRequestException,
   ConflictException,
@@ -9,7 +9,7 @@ import {
   UnauthorizedException
 } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
-import type { ClientRequestContext } from "./client-context";
+import type { ClientRequestContext, RentalClientSessionLease } from "./client-context";
 import {
   CLIENT_API_VERSION,
   type ClientMembershipLoginRequest,
@@ -32,7 +32,7 @@ import { CustomerRegistrationService } from "./mysql-customer-registration";
 import { SharedCustomerRepository } from "./mysql-customer-master";
 import type { RentalClientAuthStorage, RentalClientSmsIntegration, RentalClientChallengeRateLimit } from "./client-session-ports";
 import { hashOpaqueToken, hashPassword, verifyPassword } from "@rental-os/platform-server/password";
-import { runWithRequestIdentity } from "@rental-os/platform-server/request-identity";
+import { getRequestIdentity, runWithRequestIdentity } from "@rental-os/platform-server/request-identity";
 import { assertRentalBusinessTenantAccessAfterLock, lockRentalBusinessTenant } from "./mysql-business-fence";
 import { acknowledgeRentalPublicEmptyResult, assertRentalPublicAccessBeforeEffect, enterRentalPublicTarget } from "./application-public-access";
 import { assertRentalClientWorkspaceTarget } from "./application-access";
@@ -44,7 +44,19 @@ const CHALLENGE_COOLDOWN_SECONDS = 60;
 const MAX_CHALLENGE_ATTEMPTS = 5;
 const BLOCKED_MEMBERSHIP_STATUSES = new Set(["exited", "closed"]);
 
-export type { ClientRequestContext } from "./client-context";
+export type { ClientRequestContext, RentalClientSessionLease } from "./client-context";
+
+type RentalClientSessionReader = {
+  clientAuthSession: Pick<Prisma.TransactionClient["clientAuthSession"], "findFirst">;
+  customerAccount: Pick<Prisma.TransactionClient["customerAccount"], "findFirst">;
+  customerMembership: Pick<Prisma.TransactionClient["customerMembership"], "findFirst">;
+};
+
+/** 私有 MySQL 参加者：调用方原 ReadCommitted 事务，须在任何父锁/业务锁前调用。
+ * 只有当前身份读取和行锁能力，不提供根 client、事务创建或业务写入。 */
+export type RentalClientSessionTransaction = RentalClientSessionReader & {
+  $queryRaw<T>(query: Prisma.Sql): PromiseLike<T>;
+};
 
 interface ClientTokenPayload {
   typ: "client";
@@ -55,6 +67,19 @@ interface ClientTokenPayload {
   iat: number;
   exp: number;
 }
+
+interface ClientSessionEvidence {
+  readonly identity: ReturnType<typeof getRequestIdentity>;
+  readonly token: Readonly<ClientTokenPayload>;
+  readonly projection: Readonly<ClientRequestContext>;
+}
+
+const clientProjectionKey = (context: Readonly<ClientRequestContext>) => JSON.stringify([
+  context.tenantId, context.tenantCode, context.customerId, context.customerType,
+  context.displayName, context.phone, context.workspaceId, context.workspaceCode,
+  context.workspaceName, context.categoryCode, context.membershipStatus, context.sessionId,
+  context.wechatIdentityId
+]);
 
 const maskPhone = (value: string) => value.length <= 4 ? "****" : `${value.slice(0, 3)}****${value.slice(-4)}`;
 const maskEmail = (value: string) => {
@@ -88,6 +113,8 @@ function asIso(value: Date | null | undefined) {
 export class ClientAuthService {
   private readonly customers: SharedCustomerRepository;
   private readonly registration: CustomerRegistrationService;
+  // 对象引用与原请求一起绑定；复制客户端字段或伪造到期时间不能取得签名会话依据。
+  readonly #authenticatedSessions = new WeakMap<ClientRequestContext, ClientSessionEvidence>();
 
   constructor(
     private readonly prisma: RentalClientAuthStorage,
@@ -613,18 +640,78 @@ export class ClientAuthService {
 
   async authenticate(accessToken: string, recovery?: { method: string; path: string }): Promise<ClientRequestContext> {
     const payload = this.parse(accessToken);
-    const session = await this.prisma.clientAuthSession.findFirst({ where: { id: payload.sid, tenantId: payload.tid, customerId: payload.sub, workspaceId: payload.wid, revokedAt: null }, include: { customer: true, workspace: true, tenant: { select: { code: true, status: true } } } });
+    const identity = getRequestIdentity();
+    const { context } = await this.readCurrentSession(payload, this.prisma, recovery);
+    // 原 Guard 的会话活跃元数据，不是业务动作；不在认证成功后追加可能改变原结果的 Core 门禁。
+    void this.prisma.clientAuthSession.updateMany({ where: { id: context.sessionId, revokedAt: null }, data: { lastUsedAt: new Date() } });
+    this.#authenticatedSessions.set(context, { identity, token: Object.freeze({ ...payload }), projection: Object.freeze({ ...context }) });
+    return context;
+  }
+
+  /** 与 authenticate 共用全部当前会话规则；租约读取不写活跃时间、不签发新身份。 */
+  private async readCurrentSession(payload: Readonly<ClientTokenPayload>, reader: RentalClientSessionReader,
+    recovery?: { method: string; path: string }): Promise<{ context: ClientRequestContext; sessionExpiresAt: number }> {
+    const session = await reader.clientAuthSession.findFirst({ where: { id: payload.sid, tenantId: payload.tid, customerId: payload.sub, workspaceId: payload.wid, revokedAt: null }, include: { customer: true, workspace: true, tenant: { select: { code: true, status: true } } } });
     if (!session || session.expiresAt.getTime() <= Date.now() || session.tenant.status !== "ACTIVE") throw new UnauthorizedException("客户端会话已失效");
-    const account = await this.prisma.customerAccount.findFirst({ where: { tenantId: payload.tid, customerId: payload.sub }, include: { customer: { select: { status: true } } } });
-    const membership = await this.prisma.customerMembership.findFirst({ where: { tenantId: payload.tid, customerId: payload.sub, status: { notIn: [...BLOCKED_MEMBERSHIP_STATUSES] } } });
+    const account = await reader.customerAccount.findFirst({ where: { tenantId: payload.tid, customerId: payload.sub }, include: { customer: { select: { status: true } } } });
+    const membership = await reader.customerMembership.findFirst({ where: { tenantId: payload.tid, customerId: payload.sub, status: { notIn: [...BLOCKED_MEMBERSHIP_STATUSES] } } });
     if (!account || account.status !== "active" || account.customer.status !== "active" || !membership || session.workspace.tenantId !== payload.tid || session.workspace.status !== "ACTIVE") throw new UnauthorizedException("客户端会话已失效");
     if (account.passwordUpdatedAt && session.createdAt < account.passwordUpdatedAt) throw new UnauthorizedException("密码已变更，请重新登录");
     if (account.mustChangePassword && !(recovery?.method === "POST" && recovery.path === "/client/v1/auth/change-password")) {
       throw new ForbiddenException("临时密码仅可用于修改密码，请先完成改密后重新登录");
     }
-    // 原 Guard 的会话活跃元数据，不是业务动作；不在认证成功后追加可能改变原结果的 Core 门禁。
-    void this.prisma.clientAuthSession.updateMany({ where: { id: session.id, revokedAt: null }, data: { lastUsedAt: new Date() } });
-    return { tenantId: payload.tid, tenantCode: session.tenant.code, customerId: payload.sub, customerType: session.customer.customerType as "personal" | "corporate", displayName: session.customer.name, phone: session.customer.phone, workspaceId: payload.wid, workspaceCode: session.workspace.code, workspaceName: session.workspace.name, categoryCode: String(session.workspace.categoryCode), membershipStatus: membership.status, sessionId: session.id, wechatIdentityId: session.wechatIdentityId ?? undefined };
+    return { sessionExpiresAt: session.expiresAt.getTime(), context: { tenantId: payload.tid, tenantCode: session.tenant.code, customerId: payload.sub, customerType: session.customer.customerType as "personal" | "corporate", displayName: session.customer.name, phone: session.customer.phone, workspaceId: payload.wid, workspaceCode: session.workspace.code, workspaceName: session.workspace.name, categoryCode: String(session.workspace.categoryCode), membershipStatus: membership.status, sessionId: session.id, wechatIdentityId: session.wechatIdentityId ?? undefined } };
+  }
+
+  /** 显式历史/收尾参加者在原事务首锁前调用；租约只证明当前客户会话，动作仍由原政策裁定。
+   * Tenant X 先于原客户 gate，兼容改密/重置的 Customer→Account→Session 顺序。
+   * 退出只锁 session，故不能仅靠父锁阻止退出；空间写方先取 Tenant 父锁，这里不锁 Workspace，
+   * 避免引入 Workspace→Order。事务必须为 ReadCommitted，普通读不得沿用早先的 RR 快照。 */
+  async lockCurrentSession(tx: RentalClientSessionTransaction, context: ClientRequestContext): Promise<RentalClientSessionLease> {
+    const evidence = this.#authenticatedSessions.get(context);
+    if (!evidence || !tx || "$transaction" in tx || typeof tx.$queryRaw !== "function"
+      || typeof tx.clientAuthSession?.findFirst !== "function" || typeof tx.customerAccount?.findFirst !== "function"
+      || typeof tx.customerMembership?.findFirst !== "function") {
+      throw new UnauthorizedException("缺少原客户签名会话或调用方事务，不能建立当前会话租约");
+    }
+    const expectedKey = clientProjectionKey(evidence.projection), { token } = evidence;
+    const assertBound = () => {
+      const identity = getRequestIdentity();
+      if (!identity || identity !== evidence.identity || identity.audience !== "client" || identity.isSaasAdmin !== false
+        || identity.staffApi || identity.isPlatformAdmin || identity.accessSession || identity.permissions !== undefined
+        || identity.dataScope !== undefined || identity.organizationId !== undefined || identity.locationScope !== undefined
+        || identity.staffLocationScope !== undefined || identity.tenantId !== token.tid || identity.userId !== token.sub
+        || identity.workspaceId !== token.wid || clientProjectionKey(context) !== expectedKey) {
+        throw new ForbiddenException("原客户请求、会话或经营空间已变化，请重新读取");
+      }
+      if (token.exp <= Math.floor(Date.now() / 1000)) throw new UnauthorizedException("原客户访问令牌已到期，请先核对原操作结果");
+    };
+    assertBound();
+    const tenants = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT id FROM Tenant WHERE id=${token.tid} FOR UPDATE`);
+    assertBound();
+    if (tenants.length !== 1 || tenants[0].id !== token.tid) throw new UnauthorizedException("原客户租户已失效");
+    const customers = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT id FROM customer_profiles WHERE tenantId=${token.tid} AND id=${token.sub} FOR UPDATE`);
+    if (customers.length !== 1 || customers[0].id !== token.sub) throw new UnauthorizedException("原客户主档已失效");
+    const accounts = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT id FROM customer_accounts WHERE tenantId=${token.tid} AND customerId=${token.sub} FOR UPDATE`);
+    if (accounts.length !== 1) throw new UnauthorizedException("原客户账号已失效");
+    const sessions = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT id FROM client_auth_sessions WHERE tenantId=${token.tid} AND customerId=${token.sub} AND id=${token.sid} FOR UPDATE`);
+    if (sessions.length !== 1 || sessions[0].id !== token.sid) throw new UnauthorizedException("原客户会话已失效");
+    const memberships = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT id FROM customer_memberships WHERE tenantId=${token.tid} AND customerId=${token.sub} FOR UPDATE`);
+    if (memberships.length !== 1) throw new UnauthorizedException("原租户会员关系已失效");
+    let valid = true;
+    const revalidate = async (): Promise<Readonly<ClientRequestContext>> => {
+      if (!valid) throw new ForbiddenException("原客户会话租约已失效，请重新读取");
+      try {
+        assertBound();
+        // 不传改密恢复例外：临时密码不能借历史/收尾入口取得业务权。
+        const { context: current, sessionExpiresAt } = await this.readCurrentSession(token, tx);
+        assertBound();
+        if (sessionExpiresAt <= Date.now()) throw new UnauthorizedException("原客户会话已到期，请先核对原操作结果");
+        if (clientProjectionKey(current) !== expectedKey) throw new ConflictException("当前客户资料或会员范围已变化，请重新读取");
+        return Object.freeze(current);
+      } catch (error) { valid = false; throw error; }
+    };
+    return Object.freeze({ current: await revalidate(), revalidate });
   }
 
   async switchWorkspace(context: ClientRequestContext, input: ClientSwitchWorkspaceRequest) {

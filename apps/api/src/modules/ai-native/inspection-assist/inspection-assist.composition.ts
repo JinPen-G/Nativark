@@ -9,7 +9,7 @@ import type { AiTaskInputSource } from '../task-input/task-input.ports';
 import type { PrismaClient } from '@prisma/client';
 import { InspectionActionAuthority } from './inspection-action.authority';
 import { PrismaInspectionDraftRepository } from './prisma-inspection-draft.repository';
-import { PrismaInspectionEvidenceAuthority } from './prisma-inspection-evidence.authority';
+import { PrismaInspectionEvidenceAuthority, type InspectionEvidenceTransactionPorts } from './prisma-inspection-evidence.authority';
 import { InspectionDraftService } from './inspection-draft.service';
 import { InspectionSubmissionService } from './inspection-submission.service';
 import { InspectionRecognitionService, inspectionRecognitionMediaKind } from './inspection-recognition.service';
@@ -64,6 +64,7 @@ export async function composeInspectionRecognitionTaskHost(recognition: Pick<Ins
 type TemplateDependencies = ConstructorParameters<typeof InspectionTemplateService>[0];
 type Dependencies = Omit<TemplateDependencies, 'core'> & {
   core: TemplateDependencies['core'] & Partial<Pick<RentalCoreService, 'readOrderAllocationPickupBasis' | 'listInspections'>>;
+  auth?: InspectionEvidenceTransactionPorts['auth'];
   /** Server-only dependencies; credentials are bound by THIS request factory,
    * never independently supplied by an external result caller. */
   recognitionResults?: Omit<PersistedTaskAuthorizationDependencies, 'credentials'> & {
@@ -250,7 +251,8 @@ export class StaffInspectionRequestFactory {
 export function composeInspectionAssist(dependencies: Dependencies) {
   const templates = new InspectionTemplateService(dependencies);
   const authority = new InspectionActionAuthority(dependencies.guard, dependencies.credentials);
-  const evidence = dependencies.db ? new PrismaInspectionEvidenceAuthority(dependencies.db, authority, templates, dependencies.storage) : undefined;
+  const evidence = dependencies.db ? new PrismaInspectionEvidenceAuthority(dependencies.db, authority, templates, dependencies.storage,
+    dependencies.auth && dependencies.orders ? { auth: dependencies.auth, orders: dependencies.orders } : undefined) : undefined;
   const manual = new InspectionManualPreparationService(templates, evidence);
   const basis = new InspectionRecognitionBasisService(templates, authority,
     dependencies.recognitionBasis?.(dependencies.credentials) ?? createInspectionRecognitionCoreSource(dependencies));

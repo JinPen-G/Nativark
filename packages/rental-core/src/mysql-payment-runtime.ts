@@ -120,10 +120,10 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
 
   /** 新的运输在原事务之外执行；每次派发前复核当前选中的请求，不能把准入失败交给 provider 错误分类。
    * 回调不经过此入口，仍由原签名/商户/金额证明负责。运输后的原收据 CAS 不重新授予业务权。 */
-  private async assertProviderDispatch(tenantId: string, workspaceId: string) {
+  private async assertProviderDispatch(tenantId: string, workspaceId: string, orderId: string) {
     await this.prisma.$transaction(async tx => {
       await lockRentalBusinessTenant(tx, tenantId);
-      await assertRentalBusinessOperationAccessAfterLock(tx, tenantId, workspaceId);
+      await assertRentalBusinessOperationAccessAfterLock(tx, tenantId, workspaceId, orderId);
     }, {
       isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted
     });
@@ -198,7 +198,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
         `);
         const order = rows[0];
         if (!order) throw new NotFoundException("订单不存在或不属于当前经营空间");
-        await assertRentalBusinessOperationAccessAfterLock(tx, tenantId, workspaceId);
+        await assertRentalBusinessOperationAccessAfterLock(tx, tenantId, workspaceId, orderId);
 
         // runtimeConfig 在事务外读取；这里锁同一份配置并重新确认仍启用，
         // 与停用配置的检查形成互斥，避免停用提交后仍落下一笔 pending 支付单。
@@ -264,7 +264,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
     const intent = prepared.intent;
     const orderNo = prepared.orderNo;
     const amount = prepared.amount;
-    await this.assertProviderDispatch(intent.tenantId, intent.workspaceId);
+    await this.assertProviderDispatch(intent.tenantId, intent.workspaceId, intent.orderId);
     let providerReturned = false;
 
     try {
@@ -546,7 +546,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
          WHERE id = ${orderId} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId}
          FOR UPDATE
       `);
-      await assertRentalBusinessOperationAccessAfterLock(tx, intent.tenantId, intent.workspaceId);
+      await assertRentalBusinessOperationAccessAfterLock(tx, intent.tenantId, intent.workspaceId, intent.orderId);
       await tx.$queryRaw(Prisma.sql`
         SELECT id
           FROM rental_payment_intents
@@ -629,7 +629,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
 
     if (prepared.replay) return this.toRefundResponse(prepared.refund);
 
-    await this.assertProviderDispatch(prepared.refund.tenantId, prepared.refund.workspaceId);
+    await this.assertProviderDispatch(prepared.refund.tenantId, prepared.refund.workspaceId, prepared.refund.orderId);
     let result: { status: string; response: unknown; failureReason?: string };
     let providerReturned = false;
     try {
@@ -668,7 +668,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
     const config = await this.integrations.runtimeConfig("payment", tenantId, intent.method as "alipay" | "wechat_pay", { requireLiveTest: false });
     if (!config) throw new ServiceUnavailableException("原支付平台未启用，无法查询退款");
     const confirmedTotal = await this.confirmedRefundTotal(tenantId, workspaceId, intentId, refund.id);
-    await this.assertProviderDispatch(refund.tenantId, refund.workspaceId);
+    await this.assertProviderDispatch(refund.tenantId, refund.workspaceId, refund.orderId);
     let result: { status: string; response: unknown; failureReason?: string };
     try {
       const outcome = await this.queryProviderRefund(config, intent, refund, confirmedTotal);
@@ -803,7 +803,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
     if (intent.status === "closed" || (intent.status === "paid" && (intent.provider !== "stripe" || hasStripeLiveReceipt(intent.responseJson)))) return this.toResponse(intent);
     const config = await this.integrations.runtimeConfig("payment", tenantId, intent.method as "alipay" | "wechat_pay", { requireLiveTest: false });
     if (!config) throw new ServiceUnavailableException("支付平台已停用，无法查询支付状态");
-    await this.assertProviderDispatch(intent.tenantId, intent.workspaceId);
+    await this.assertProviderDispatch(intent.tenantId, intent.workspaceId, intent.orderId);
     const result = intent.method === "alipay"
       ? await this.queryAlipayIntent(config, intent.merchantOrderNo)
       : intent.method === "stripe"
@@ -845,7 +845,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
     // 商户改一次配置之后所有客户都关不掉旧支付单，只能等 15 分钟过期。
     const config = await this.integrations.runtimeConfig("payment", tenantId, intent.method as "alipay" | "wechat_pay", { requireLiveTest: false });
     if (!config) throw new ServiceUnavailableException("支付平台已停用，无法关闭支付单");
-    await this.assertProviderDispatch(intent.tenantId, intent.workspaceId);
+    await this.assertProviderDispatch(intent.tenantId, intent.workspaceId, intent.orderId);
     if (intent.method === "alipay") await this.closeAlipayIntent(config, intent.merchantOrderNo);
     else if (intent.method === "stripe") await this.closeStripeIntent(config, intent);
     else await this.closeWechatIntent(config, intent.merchantOrderNo);
@@ -882,7 +882,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
       try {
         const config = await this.integrations.runtimeConfig("payment", tenantId, intent.method as "alipay" | "wechat_pay", { requireLiveTest: false });
         if (!config) throw new ServiceUnavailableException("支付平台已停用，无法确认过期支付单");
-        await this.assertProviderDispatch(intent.tenantId, intent.workspaceId);
+        await this.assertProviderDispatch(intent.tenantId, intent.workspaceId, intent.orderId);
         const result = intent.method === "alipay"
           ? await this.queryAlipayIntent(config, intent.merchantOrderNo)
           : intent.method === "stripe"
@@ -905,7 +905,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
           continue;
         }
         if (!result.closed) {
-          await this.assertProviderDispatch(intent.tenantId, intent.workspaceId);
+          await this.assertProviderDispatch(intent.tenantId, intent.workspaceId, intent.orderId);
           if (intent.method === "alipay") await this.closeAlipayIntent(config, intent.merchantOrderNo);
           else if (intent.method === "stripe") await this.closeStripeIntent(config, intent);
           else await this.closeWechatIntent(config, intent.merchantOrderNo);
@@ -1413,7 +1413,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
           const orders = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT id FROM rental_orders
             WHERE id = ${original.orderId} AND tenantId = ${original.tenantId} AND workspaceId = ${original.workspaceId} FOR UPDATE`);
           if (!orders.length) throw new NotFoundException("原退款订单不存在或不属于原经营空间");
-          await assertRentalBusinessOperationAccessAfterLock(tx, original.tenantId, original.workspaceId);
+          await assertRentalBusinessOperationAccessAfterLock(tx, original.tenantId, original.workspaceId, original.orderId);
           // 使用锁定当前读，避免 RR 中更早的权限读取让 ORM 复读沿用旧快照。
           const [row] = await tx.$queryRaw<Array<PaymentRefundRow>>(Prisma.sql`SELECT * FROM rental_payment_refunds
             WHERE id = ${original.id} AND tenantId = ${original.tenantId} FOR UPDATE`);
@@ -1919,7 +1919,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
         const orders = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT id FROM rental_orders
           WHERE id = ${original.orderId} AND tenantId = ${original.tenantId} AND workspaceId = ${original.workspaceId} FOR UPDATE`);
         if (!orders.length) throw new NotFoundException("原支付订单不存在或不属于原经营空间");
-        await assertRentalBusinessOperationAccessAfterLock(tx, original.tenantId, original.workspaceId);
+        await assertRentalBusinessOperationAccessAfterLock(tx, original.tenantId, original.workspaceId, original.orderId);
         const [intent] = await tx.$queryRaw<Array<Prisma.RentalPaymentIntentGetPayload<object>>>(Prisma.sql`SELECT * FROM rental_payment_intents
           WHERE id = ${original.id} AND tenantId = ${original.tenantId} FOR UPDATE`);
         if (!intent) throw new NotFoundException("支付单不存在");

@@ -826,7 +826,7 @@ export class RentalAllocationService<TTransaction extends RentalAllocationTransa
       async (tx) => {
         await this.facts.lockOrder(tenantId, orderId, tx);
         // 作业准入会持经营空间锁，沿原履约的订单→空间顺序，避免与续租或换货互等。
-        if (workerScope) await this.workerAuthority?.assertCurrent(workerScope, tx);
+        if (workerScope) await this.workerAuthority?.assertCurrent({ ...workerScope, orderId }, tx);
         const order = await this.facts.findOrder(tenantId, orderId, tx);
         if (
           !order ||
@@ -1046,7 +1046,7 @@ export class RentalAllocationService<TTransaction extends RentalAllocationTransa
                 await this.prisma.$transaction(
                   async (tx) => {
                     await this.facts.lockOrder(row.tenantId, order.id, tx);
-                    await this.workerAuthority?.assertCurrent(workerScope, tx);
+                    await this.workerAuthority?.assertCurrent({ ...workerScope, orderId: order.id }, tx);
                     let current = order;
                     if (!allocationComplete(current))
                       current = await this.manage(
@@ -1081,9 +1081,9 @@ export class RentalAllocationService<TTransaction extends RentalAllocationTransa
                 );
               } catch (error) {
                 await this.prisma.$transaction(async (tx) => {
-                  // 撤权后不能再为这次自动执行写入失败事实；保留原未知结果供核对。
+                  // 当前收尾准入失效后不能为这次自动执行写入失败事实；保留原未知结果供核对。
                   await this.facts.lockOrder(row.tenantId, order.id, tx);
-                  await this.workerAuthority?.assertCurrent(workerScope, tx);
+                  await this.workerAuthority?.assertCurrent({ ...workerScope, orderId: order.id }, tx);
                   const latest = await this.facts.findOrder(
                     row.tenantId,
                     order.id,

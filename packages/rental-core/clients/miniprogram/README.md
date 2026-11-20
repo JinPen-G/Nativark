@@ -1,6 +1,6 @@
 # Rental 客户小程序业务客户端
 
-[正式模块入口](index.ts)提供七组业务请求工厂、客户认证工厂及八个 AI 请求工厂。原小程序 [api 入口](../../../../apps/miniprogram/src/api/orders.ts)注入 [request](../../../../apps/miniprogram/src/core/http.ts)，继续导出原方法和返回类型。合同沿 Rental 包内的[客户声明](../../src/client-contracts.ts)、[租赁声明](../../src/contracts.ts)和企业声明单源消费。
+[正式模块入口](index.ts)提供七组业务请求工厂、客户认证工厂、八个 AI 请求工厂和三组企业原操作编排。原小程序 [api 入口](../../../../apps/miniprogram/src/api/orders.ts)注入 [request](../../../../apps/miniprogram/src/core/http.ts)，继续导出原方法和返回类型。合同沿 Rental 包内的[客户声明](../../src/client-contracts.ts)、[租赁声明](../../src/contracts.ts)和企业声明单源消费。
 
 ## 宿主接入
 
@@ -23,7 +23,7 @@ const orders = createRentalMiniProgramOrdersApi({ request });
 | --- | --- | --- |
 | [addresses](addresses.ts) | 本人地址列表、保存、删除，沿 `scope: tenant` | [客户 Controller](../../src/http-client.controller.ts) → [客户地址仓储](../../src/mysql-client-delivery-address.ts)；地址页与结算页 |
 | [catalog](catalog.ts) | 登录／游客目录、可用性、报价、原报价与优惠券 | 客户 Controller → [客户应用](../../src/mysql-client-application.ts)；[原目录缓存](../../../../apps/miniprogram/src/core/catalogStore.ts)与结算页 |
-| [enterprise](enterprise.ts) | 政策、批准、费用确认、续租／换货、委托、原操作与结果读取 | [企业工作流 Controller](../../src/http-enterprise-workflows.controller.ts)及客户 Controller；[续租协调器](../../../../apps/miniprogram/src/core/enterprise-extension-operation.ts)、[换货申请](../../../../apps/miniprogram/src/core/enterprise-exchange-request.ts)、[费用确认](../../../../apps/miniprogram/src/core/enterprise-exchange-confirmation.ts)与原结算页 |
+| [enterprise](enterprise.ts) | 政策、批准、费用确认、续租／换货、委托、原操作与结果读取 | [企业工作流 Controller](../../src/http-enterprise-workflows.controller.ts)及客户 Controller；[续租协调器](enterprise-extension-operation.ts)、[换货申请](enterprise-exchange-request.ts)、[费用确认](enterprise-exchange-confirmation.ts)与原结算页 |
 | [merchant](merchant.ts) | 公开服务、微信小程序渠道启动、公开文档与登录后的配置 | 客户 Controller → 原渠道与公开投影；[原商户缓存](../../../../apps/miniprogram/src/core/merchant.ts)与文档页 |
 | [orders](orders.ts) | 建单、统一本人索引、订单／履约／资金、取消、续租、检查费用响应及六个原 AI 预约请求 | 客户 Controller → 客户应用及原 Core；[原预约宿主](../../../../apps/miniprogram/src/components/ai-native/booking-host.factory.ts)、结算、订单与续租页 |
 | [payments](payments.ts) | 能力与小程序支付单创建、读取、查单、关闭 | 客户 Controller → 原支付服务；[微信支付宿主](../../../../apps/miniprogram/src/core/payment.ts)与支付页 |
@@ -35,9 +35,19 @@ const orders = createRentalMiniProgramOrdersApi({ request });
 
 建单、取消、续租和费用响应沿调用方原幂等键。小程序支付单的键继续位于原 body，微信 JSAPI 参数、SDK 调起及服务端付款结果核对由原支付宿主完成。资料部分更新沿微信支持的原 PUT 别名。
 
-企业写入保留 `replayAfterRefresh: false`。未知结果沿原操作和可信收据读取，原结束请求沿既有结束键；持久化引用、独占门闸和读取前后复验由上述原操作协调器维护。
+企业写入保留 `replayAfterRefresh: false`。未知结果沿原操作和可信收据读取，原结束请求沿既有结束键；持久化引用、独占门闸和读取前后复验由 Core 原操作编排维护，旧页面入口绑定同一实例。
 
 原 request 负责上下文变化后的迟到响应丢弃，页面和协调器负责 hide/unload 的寿命复验。六个原 AI 预约请求由订单工厂提供，原 orders 入口供给同一 request 并窄导出。能力、交接、接受观察、接受与提交保留 `replayAfterRefresh: false`，原提交结果读取保留原请求选项。能力观察、接受、正式提交与原结果读取分别沿原服务端合同执行，宿主绑定和默认开关由原预约宿主维护。
+
+## 企业原操作编排
+
+同一正式出口提供 `createRentalMiniProgramExtensionOperation`、`createRentalMiniProgramExchangeRequest` 和 `createRentalMiniProgramExchangeConfirmation`。工厂绑定一次宿主端口，返回保留原参数与结果的订单协调器。换货申请和费用确认的独占集合属于工厂实例，宿主须复用该实例。
+
+[共用端口](enterprise-operation-ports.ts)接收原会话、当前服务、单调上下文版本、公开租户配置、原企业存储键前缀、原键生成器及同步存储。`writeRequired` 必须在派发前持久化并回读核实原引用，读取或删除失败继续向调用方抛错。匹配器按正式 Shared 类型供给原 Native 函数，API 端口复用同一企业请求工厂的方法，换货申请另供给原订单读取。
+
+业务正文分别位于[续租编排](enterprise-extension-operation.ts)、[换货申请编排](enterprise-exchange-request.ts)及[费用确认编排](enterprise-exchange-confirmation.ts)。旧[续租入口](../../../../apps/miniprogram/src/core/enterprise-extension-operation.ts)、[申请入口](../../../../apps/miniprogram/src/core/enterprise-exchange-request.ts)和[确认入口](../../../../apps/miniprogram/src/core/enterprise-exchange-confirmation.ts)供给微信 I/O 与原端口，[续租页](../../../../apps/miniprogram/src/pages/extend/index.ts)、[换货页](../../../../apps/miniprogram/src/pages/exchange/index.ts)和[订单页](../../../../apps/miniprogram/src/pages/order/index.ts)继续维护展示和 hide/unload 寿命。
+
+申请、提交、结束和精确回读保持原流程。持久引用沿租户、本人、服务及订单隔离，unknown 保留原键，只有原具名写前 CAS 拒绝允许相应清理。费用确认须匹配原操作、本人订单、空间、确认时间与费用限定范围，实物检查、换货及服务端授权沿原业务链执行。
 
 ## AI 请求接入
 
@@ -87,4 +97,4 @@ npm run typecheck -w @rental-os/miniprogram
 
 ## 验证入口
 
-必要类型检查核对七组业务工厂、八个 AI 请求工厂、认证工厂及原 API 消费者；定向冒烟对照原请求路径、选项、返回与错误，并复用[原小程序测试](../../../../tests/miniprogram-static.test.cjs)的运输、范围、支付单和缓存断言。认证片已核原 16 方法、会话采用与退出清理，正式 Native 声明与原客户宿主类型通过；这份证据不代替加入认证后的完整微信发布包验证。正式包出口、类型解析和微信构建由实际宿主接线核定，真实 HTTP、微信、数据库与供应商证据按对应环境取得。
+必要类型检查核对七组业务工厂、八个 AI 请求工厂、认证工厂、三组原操作编排及原 API／页面消费者；定向冒烟对照原请求路径、选项、返回与错误，并复用[原小程序测试](../../../../tests/miniprogram-static.test.cjs)的运输、范围、支付单和缓存断言。认证片已核原 16 方法、会话采用与退出清理，正式 Native 声明与原客户宿主类型通过；这份证据不代替加入认证后的完整微信发布包验证。正式包出口、类型解析和微信构建由实际宿主接线核定，真实 HTTP、微信、数据库与供应商证据按对应环境取得。
