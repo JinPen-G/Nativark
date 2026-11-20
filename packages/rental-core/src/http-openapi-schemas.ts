@@ -1,6 +1,6 @@
 /** Rental 原 HTTP schema 单源。保留历史宽泛字段，字段完整性缺口由接口贡献明确列出。 */
 import { STAFF_UPLOAD_OBSERVATION_SCHEMAS } from "@rental-os/shared";
-import { RENTAL_LOCATION_TYPES, RENTAL_PRICING_UNIT_CODES } from "./contracts";
+import { RentalInventoryMode, RENTAL_LOCATION_TYPES, RENTAL_PRICING_UNIT_CODES } from "./contracts";
 import { RENTAL_EXCHANGE_INSPECTION_SCHEMAS } from "./http-openapi-rental-exchange-inspection-preparation.schemas";
 import { ENTERPRISE_COMPONENT_SCHEMAS } from "./http-openapi-enterprise-schemas";
 import { ENTERPRISE_ORDER_DELEGATION_SCHEMAS } from "./http-openapi-enterprise-order-delegation-schemas";
@@ -20,6 +20,106 @@ export const RENTAL_HTTP_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ...ENTERPRISE_ORDER_DELEGATION_SCHEMAS,
   ...RENTAL_EXCHANGE_INSPECTION_SCHEMAS,
   GenericObject: objectSchema,
+  RentalBundleComponentInput: {
+    ...objectOf({
+      itemGroupId: { type: "string", minLength: 1, description: "当前空间已建档的单品型号 id。" },
+      quantity: { type: "integer", minimum: 1, description: "原 DTO 接收数字，Core 保存入口核验正整数。" },
+      optional: { type: "boolean", nullable: true, description: "省略或 null 时采用 false。替代候选须填写 substitutionGroup。" },
+      substitutionGroup: { type: "string", nullable: true, description: "原保存入口去除首尾空白。同组至少两个候选，且恰有一个默认组成。" }
+    }, ["itemGroupId", "quantity"]),
+    description: "原 RentalBundleComponentInputDto。组成型号唯一，套装引用及替代组规则沿原 Core 入口核验。"
+  },
+  SaveRentalItemGroupRequest: {
+    ...objectOf({
+      id: { type: "string", minLength: 1, nullable: true, description: "POST 省略 id 时新建，提供已有 id 时更新。PUT 使用路径 id。" },
+      code: { type: "string", minLength: 1, pattern: "\\S" },
+      name: { type: "string", minLength: 1, pattern: "\\S" },
+      inventoryMode: { type: "string", enum: Object.values(RentalInventoryMode), description: "原库存模式，当前经营品类须已支持所选模式。" },
+      unit: { type: "string", nullable: true, description: "原保存入口去除首尾空白，空值采用件。" },
+      description: { type: "string", nullable: true },
+      attributes: { ...objectSchema, nullable: true, description: "原品类字段对象，沿当前已采用定义核验字段、类型、必填和唯一性，并保留原历史字段。" },
+      bundleComponents: { ...arrayOf("RentalBundleComponentInput"), nullable: true, description: "bundle 模式至少一个组成项，其他模式采用空集合。省略或 null 时采用空集合。" },
+      status: { type: "string", enum: ["enabled", "disabled", null], nullable: true, description: "省略或 null 时新增采用 enabled，更新沿原保存入口保留已存状态。" },
+      operator: { type: "string", nullable: true, description: "保留的原 DTO 兼容字段，商品写入与审计归属由当前服务端上下文确定。" }
+    }, ["code", "name", "inventoryMode"]),
+    description: "原 SaveRentalItemGroupDto 输入。原品类绑定、商品建档 Hook、唯一属性和配置写入沿同一 Core 保存入口处理。",
+    example: {
+      code: "CAMERA-KIT",
+      name: "摄影设备套装",
+      inventoryMode: "bundle",
+      unit: "套",
+      bundleComponents: [{ itemGroupId: "item_group_component", quantity: 1 }]
+    }
+  },
+  RentalBundleComponent: objectOf({
+    itemGroupId: stringSchema,
+    itemGroupCode: stringSchema,
+    itemGroupName: stringSchema,
+    quantity: numberSchema,
+    optional: { type: "boolean", description: "原保存结果包含默认值，持久读取可省略 false。" },
+    substitutionGroup: stringSchema
+  }, ["itemGroupId", "itemGroupCode", "itemGroupName", "quantity"], false),
+  RentalItemGroupImage: {
+    ...objectOf({
+      id: stringSchema,
+      fileName: stringSchema,
+      mimeType: { type: "string", description: "原已存图片的媒体类型。" },
+      sizeBytes: numberSchema,
+      isCover: { type: "boolean", description: "原封面标记。历史图片记录可能省略该字段。" },
+      url: { type: "string", description: "通过当前营运会话读取的原型号图片路径。" }
+    }, ["id", "fileName", "mimeType", "sizeBytes", "url"]),
+    description: "原 RentalItemGroupImage 公开投影。原文件资产标识由服务端图片台账保管。"
+  },
+  RentalItemGroup: {
+    ...objectOf({
+      id: stringSchema,
+      tenantId: stringSchema,
+      categoryCode: stringSchema,
+      code: stringSchema,
+      name: stringSchema,
+      inventoryMode: { type: "string", description: "原已存库存模式。" },
+      unit: stringSchema,
+      description: stringSchema,
+      attributes: { ...objectSchema, description: "原公开品类字段及保留的历史字段，内部图片台账由公开映射剔除。" },
+      images: arrayOf("RentalItemGroupImage"),
+      bundleComponents: arrayOf("RentalBundleComponent"),
+      status: { type: "string", description: "原已存启用状态。" },
+      createdAt: { type: "string", format: "date-time" },
+      updatedAt: { type: "string", format: "date-time" }
+    }, ["id", "tenantId", "categoryCode", "code", "name", "inventoryMode", "unit", "attributes", "images", "bundleComponents", "status", "createdAt", "updatedAt"], false),
+    description: "原 RentalItemGroup 与公开映射的完整型号、图片和套装组成投影。",
+    example: {
+      id: "item_group_bundle",
+      tenantId: "tenant_example",
+      categoryCode: "camera",
+      code: "CAMERA-KIT",
+      name: "摄影设备套装",
+      inventoryMode: "bundle",
+      unit: "套",
+      attributes: {},
+      images: [{
+        id: "img_example",
+        fileName: "camera-kit.png",
+        mimeType: "image/png",
+        sizeBytes: 1024,
+        isCover: true,
+        url: "/api/rental/v1/item-groups/item_group_bundle/images/img_example"
+      }],
+      bundleComponents: [{
+        itemGroupId: "item_group_component",
+        itemGroupCode: "CAMERA-A",
+        itemGroupName: "摄影设备型号",
+        quantity: 1,
+        optional: false
+      }],
+      status: "enabled",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z"
+    }
+  },
+  RentalItemGroupImageUploadRequest: objectOf({
+    file: { type: "string", format: "binary", description: "单个 JPEG、PNG 或 WebP 图片，最多 5 MiB。原服务核对文件签名和字节长度，每个型号最多六张。" }
+  }, ["file"]),
   SaveRentalFulfillmentOperatorRequest: {
     ...objectOf({
       id: { type: "string", minLength: 1, nullable: true, description: "POST 省略 id 时新建，提供已有 id 时更新。PUT 使用路径 id。" },

@@ -161,11 +161,12 @@
 node -e "const { createRentalOpenApi } = require('@rental-os/rental-core/http-openapi'); process.stdout.write(JSON.stringify(createRentalOpenApi(), null, 2))"
 ```
 
-独立贡献包含 576 个已有操作及其 356 个 schema。原宽泛字段由 `RENTAL_HTTP_SCHEMA_GAPS` 列出，涉及的 282 项操作带 `x-schemaStatus=incomplete` 和 `x-schemaGaps`，继续按正式 DTO/响应投影补齐。明确路由缺口从 `RENTAL_HTTP_DOCUMENTATION_GAPS` 读取，当前宿主限制从 `RENTAL_HTTP_OPERATION_AVAILABILITY` 读取。
+独立贡献包含 576 个已有操作及其 362 个 schema。原宽泛字段由 `RENTAL_HTTP_SCHEMA_GAPS` 列出，涉及的 276 项操作带 `x-schemaStatus=incomplete` 和 `x-schemaGaps`，继续按正式 DTO/响应投影补齐。明确路由缺口从 `RENTAL_HTTP_DOCUMENTATION_GAPS` 读取，当前宿主限制从 `RENTAL_HTTP_OPERATION_AVAILABILITY` 读取。
 
 | 路由 | 同源描述与当前限制 |
 | --- | --- |
 | `GET/POST /api/rental/v1/fulfillment-operators`、`PUT /api/rental/v1/fulfillment-operators/{id}` | 新建与兼容 id 更新使用原保存入口，省略状态沿原事务保留已存值；请求/响应示例来自同源 schema |
+| `GET/POST/PUT /api/rental/v1/item-groups` 及型号图片操作 | 型号、套装与图片字段沿原 DTO/公开投影；原图字节 200 与受权文件 302/Location 分别描述 |
 | `GET/POST /api/platform/customers/{customerId}/avatar` | 已描述单个 5 MiB 位图 multipart 上传、原保存投影及 PNG/JPEG/WebP 原始响应 |
 | `POST /api/staff/v1/uploads/{fileAssetId}/inspection-binding` | 已描述原检查目标和附件修订。独立贡献保留无 AI 宿主的 503，旧组合保留已装配权威的原成功投影 |
 | `GET /api/platform/tenant-bootstrap/category-options` | 原合同保留，独立 Rental 宿主未挂载，列入未挂原路径缺口 |
@@ -310,16 +311,22 @@ HTTP入口从 `/http-workspace-capabilities`、`/http-staff-payments` 导入；`
 
 `RentalIntegrationsHttpModule.register` 使用宿主工厂提供同一运营应用，挂载九个 `/integrations` 操作。原 Nest 服务、仓储与 Controller 提供构造兼容入口，打印从公共 `/jobs/print` 消费该应用的打印参加者。交换任务的模拟结果包含 `externalCallSkipped`、文件元数据及校验报告字段，生产调用沿应用和公共台账门禁裁定。日志失败向外传播，已登记的文件和任务供原键核对。[HTTP 组合](src/http-integrations.ts) · [原兼容入口](../../apps/api/src/modules/integrations/README.md) · [公共作业](../platform-server/src/modules/jobs/README.md) · [租户隔离验证](../../tests/integrations-memory-scope.test.cjs)
 
-SQL、Decimal、空值单例、错误类和隔离级别通过正式 `@rental-os/platform-server/prisma-runtime` 复用官方运行库。JSON 写入使用 [Rental 空值桥](src/prisma-null-values.ts)的 `/prisma-null-values`，将同一官方单例连接到所选 Client 的输入类型；公共底座不引用业务生成类型。业务枚举保持原字面值并由生成类型约束；核心/业务私有 MySQL 声明仍使用所选宿主 schema 的生成类型。准备已配置的独立开发环境后，先沿原宿主执行 `npm run db:generate`，再构建本包；它只生成声明/客户端，不执行迁移。完整Core schema与迁移链继续拆分。领域根出口及公共底座构建不加载这些MySQL适配。[当前schema](../../apps/api/prisma/schema.prisma) · [生成命令](../../apps/api/package.json)
+SQL、Decimal、空值单例、错误类和隔离级别通过正式 `@rental-os/platform-server/prisma-runtime` 复用官方运行库。JSON 写入使用 [Rental 空值桥](src/prisma-null-values.ts)的 `/prisma-null-values`，将同一官方单例连接到所选 Client 的输入类型；公共底座不引用业务生成类型。业务枚举保持原字面值并由生成类型约束；核心/业务私有 MySQL 声明使用所选宿主 schema 的生成类型。首次源码构建可先运行[纯schema准备入口](../../scripts/prepare-selected-prisma-schema.cjs)，选择 `rental`（161模型）或 `rental-ai`（247模型），将 schema 写到 `apps/rental-api` 根下显式指定且尚不存在的直接子目录；它不依赖 `dist`、不生成Client，也不办理迁移或部署。随后由宿主的独立生成流程产生 `apps/rental-api/generated/client`，再开始编译。完整发行包的[部署准备](../../apps/rental-api/src/prepare-deployment.ts)用于已构建发行的核验，不是首次源码生成的前置。
 
 数据发行从 `createRentalDataRelease` 核对受控包的固定版本、可读范围和迁移原文。每项使用 `rental.` 命名空间，文件位于 `prisma/migrations/<name>/migration.sql` 或 `migrations/<name>/migration.sql`，其中 `<name>` 对应原 Prisma `migration_name`。摘要按原始字节计算，换行及编码变化均须作为发行差异处理。结果中的数据合同、账名称和 SQL 保持同一顺序，供宿主接入数据计划。[发行合同与原文核对](src/data.ts)
 
 宿主继续核定 SQL 的表归属、公共关联及实际物理结构，再沿原 Prisma 迁移账读取执行状态。失败和 unknown 保留原迁移、摘要与恢复依据。原 API 的组合迁移涉及公共、Rental 和 AI 数据，存量部署沿其原链及原收据维护，新空库使用所选公共基线与 Rental 自有迁移。[结构核验](../platform-core-host/src/mysql-structure.ts) · [物理观察](../platform-core-host/src/mysql-physical.ts) · [原迁移账读取](../core-host/src/mysql-deployment.ts) · [原组合迁移](../../apps/api/prisma/migrations)
 
-```sh
+```powershell
+# 从仓库根执行；该文件必须是宿主已经生成的真实声明。
+$env:RENTAL_PRISMA_CLIENT = (Resolve-Path 'apps/rental-api/generated/client/index.d.ts').Path
 npm run build -w @rental-os/rental-core
 npm run lint -w @rental-os/rental-core
 ```
+
+正式[编译入口](../../scripts/build-selected-prisma.cjs)支持 `--project <原tsconfig>`、`--mode rental`、`--client <index.d.ts>` 和 `--noEmit`。npm 前置链通过绝对路径变量 `RENTAL_PRISMA_CLIENT` 继承同一个选择；仅把 `--client` 追加到末端 npm 命令不会传给前置构建。编译器只增加 `@prisma/client` 的精确类型映射，保留原 `rootDir`、输出目录及正式出口；声明、相邻 `schema.prisma`、模型集合或已配置路径不一致时立即失败。编译不读取 `.env`、不生成或运行Client、不启动引擎或连接数据库。发行 `.d.ts` 保留 `@prisma/client`，消费者也须将其解析到自己同一所选Client。
+
+旧 `apps/api` 的原241模型组合沿原生成及运行Client维护；编译依赖包时须显式指定本仓库原默认生成声明，并额外设置 `RENTAL_PRISMA_LEGACY=1`（或CLI传 `--legacy`）。该路径核对生成 schema 与原宿主源码一致，不能把旧241冒充独立247；独立 `rental-api` / `platform-api` 拒绝 legacy。独立构建前应移除该兼容变量。
 
 构建前置按公共合同 → Rental基础合同 → Shared兼容声明 → 公共Core宿主 → Rental完整服务的顺序执行；`npm run build:contracts -w @rental-os/rental-core`只生成Shared实际消费的17个正式合同入口及其内部依赖，避免Shared与完整服务循环构建。该入口保留同一运行时值和正式声明，不创建另一套合同。[合同构建配置](tsconfig.contracts.json) · [内存构建检查](../../scripts/check-rental-package-build.cjs) · [固定版本发行与五端消费核验](../../scripts/verify-rental-distribution.cjs)
 

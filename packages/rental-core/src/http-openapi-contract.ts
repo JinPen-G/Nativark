@@ -60,6 +60,8 @@ export interface ContractOperation {
   requestEncoding?: Record<string, { contentType: string }>;
   rawResponseContentType?: string | readonly string[];
   responseHeaders?: Record<string, { description?: string; schema: SchemaObject }>;
+  /** 原 302 跳转响应，复用既有响应头结构。 */
+  redirectResponse?: { description: string; headers: NonNullable<ContractOperation["responseHeaders"]> };
   errorResponses?: Record<string, { description: string; schema: string | SchemaObject }>;
   rateLimited?: boolean;
   serviceUnavailableReason?: string;
@@ -176,6 +178,10 @@ function operation(config: ContractOperation) {
         }
       }
     };
+  }
+
+  if (config.redirectResponse) {
+    (item.responses as Record<string, unknown>)["302"] = config.redirectResponse;
   }
 
   if (config.serviceUnavailableReason) {

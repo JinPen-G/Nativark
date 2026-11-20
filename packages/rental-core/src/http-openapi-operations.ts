@@ -493,27 +493,75 @@ export const RENTAL_HTTP_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "get", path: "/api/rental/v1/item-groups", tag: "RentalCore", operationId: "listRentalItemGroups",
-    summary: "List generic rental item groups", permissions: ["rental-core:catalog:view"], responseSchema: "GenericObject"
+    summary: "读取当前空间原已提交的产品型号、公开图片和套装组成。", permissions: ["rental-core:catalog:view"],
+    responseSchema: arrayOf("RentalItemGroup")
   },
   {
     method: "post", path: "/api/rental/v1/item-groups", tag: "RentalCore", operationId: "createRentalItemGroup",
-    summary: "Create generic rental item group", permissions: ["rental-core:catalog:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "沿原保存入口建档或按请求 id 更新产品型号，复验品类字段、组成规则和商品建档 Hook。", permissions: ["rental-core:catalog:manage"],
+    successStatus: 201, requestSchema: "SaveRentalItemGroupRequest", responseSchema: "RentalItemGroup",
+    errorResponses: {
+      "400": { description: "原 DTO、品类字段、库存模式或套装组成校验失败。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "请求 id 或组成型号在当前空间不存在。", schema: "RentalHttpErrorResponse" },
+      "409": { description: "原型号编码、唯一属性或品类绑定存在冲突。", schema: "RentalHttpErrorResponse" }
+    }
   },
   {
     method: "put", path: "/api/rental/v1/item-groups/{id}", tag: "RentalCore", operationId: "updateRentalItemGroup",
-    summary: "Update generic rental item group", permissions: ["rental-core:catalog:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "按路径 id 保存原产品型号，沿原配置提交返回公开型号投影。", permissions: ["rental-core:catalog:manage"],
+    requestSchema: "SaveRentalItemGroupRequest", responseSchema: "RentalItemGroup",
+    errorResponses: {
+      "400": { description: "原 DTO、品类字段、库存模式或套装组成校验失败。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "原型号或组成型号在当前空间不存在。", schema: "RentalHttpErrorResponse" },
+      "409": { description: "原型号编码、唯一属性或品类绑定存在冲突。", schema: "RentalHttpErrorResponse" }
+    }
   },
   {
     method: "post", path: "/api/rental/v1/item-groups/{id}/images", tag: "RentalCore", operationId: "uploadRentalItemGroupImage",
-    summary: "Upload an authenticated product-model image", permissions: ["rental-core:catalog:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "上传单个型号图片，沿原空间锁重读图片集合并提交原图片指针。", permissions: ["rental-core:catalog:manage"],
+    authRequired: true, successStatus: 201,
+    requestSchema: "RentalItemGroupImageUploadRequest", requestContentType: "multipart/form-data",
+    requestEncoding: { file: { contentType: "image/jpeg, image/png, image/webp" } }, responseSchema: "RentalItemGroup",
+    errorResponses: {
+      "400": { description: "缺少 file、文件为空、格式或签名不匹配，或图片集合已达六张。", schema: "RentalHttpErrorResponse" },
+      "401": { description: "原会话认证失败。", schema: "RentalHttpErrorResponse" },
+      "403": { description: "原 Guard 或图片存储权威拒绝当前租户、空间或对象访问。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "当前空间型号或原文件对象不存在。", schema: "RentalHttpErrorResponse" },
+      "413": { description: "原 FileInterceptor 拒绝超过 5 MiB 的文件。", schema: "RentalHttpErrorResponse" },
+      "500": { description: "原文件写入或指针提交失败。提交结果未知时保留原文件和图片 id，沿原图片集合核对。", schema: "RentalHttpErrorResponse" },
+      "503": { description: "缺原子图片写入器，或生产模式尚未配置原文件存储。", schema: "RentalHttpErrorResponse" }
+    }
   },
   {
     method: "get", path: "/api/rental/v1/item-groups/{id}/images/{imageId}", tag: "RentalCore", operationId: "getRentalItemGroupImage",
-    summary: "Read an authenticated product-model image", permissions: ["rental-core:catalog:view"], responseSchema: "GenericObject"
+    summary: "按当前营运会话读取型号图片，本地原图返回字节，已配置文件存储沿原读取权威返回 302。", permissions: ["rental-core:catalog:view"],
+    authRequired: true, responseSchema: { type: "string", format: "binary" }, rawResponseContentType: ["image/jpeg", "image/png", "image/webp"],
+    responseHeaders: {
+      "Content-Disposition": { description: "原文件名的 UTF-8 inline 展示头。", schema: stringSchema },
+      "Cache-Control": { schema: { type: "string", enum: ["private, max-age=300"] } }
+    },
+    redirectResponse: {
+      description: "原受控文件读取成功后跳转到当前获权下载地址。",
+      headers: { Location: { description: "原文件读取权威供给的跳转地址。", schema: { type: "string", format: "uri" } } }
+    },
+    errorResponses: {
+      "401": { description: "原会话认证失败。", schema: "RentalHttpErrorResponse" },
+      "403": { description: "原 Guard 或图片存储权威拒绝当前租户、空间或对象访问。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "当前空间型号、图片指针或原图文件不存在。", schema: "RentalHttpErrorResponse" },
+      "500": { description: "原文件读取失败。", schema: "RentalHttpErrorResponse" },
+      "503": { description: "生产模式的原图片尚未迁入受控文件存储。", schema: "RentalHttpErrorResponse" }
+    }
   },
   {
     method: "delete", path: "/api/rental/v1/item-groups/{id}/images/{imageId}", tag: "RentalCore", operationId: "deleteRentalItemGroupImage",
-    summary: "Delete a product-model image", permissions: ["rental-core:catalog:manage"], responseSchema: "GenericObject"
+    summary: "沿原配置事务移除图片指针并重设封面，返回已提交型号，文件清理由原生命周期处理。", permissions: ["rental-core:catalog:manage"],
+    successStatus: 200, responseSchema: "RentalItemGroup",
+    errorResponses: {
+      "401": { description: "原会话认证失败。", schema: "RentalHttpErrorResponse" },
+      "403": { description: "原 Guard 或图片存储权威拒绝当前租户、空间或对象访问。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "当前空间型号或原图片指针不存在。", schema: "RentalHttpErrorResponse" },
+      "503": { description: "缺原子图片写入器，或生产模式的原图片尚未迁入受控文件存储。", schema: "RentalHttpErrorResponse" }
+    }
   },
   {
     method: "get", path: "/api/rental/v1/pricing-groups", tag: "RentalCore", operationId: "listRentalPricingGroups",
