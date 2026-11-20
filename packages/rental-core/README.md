@@ -43,7 +43,7 @@
 | [员工认证HTTP](src/http-staff-auth.controller.ts)、[员工附件HTTP](src/http-staff-uploads.controller.ts)、[原键观察合同](src/staff-upload-observation.ts) | `/http-staff-auth`、`/http-staff-uploads` 与 `/staff-upload-observation` 保留原staff身份、五组上传场景、地点/本人/检查绑定及原始body校验；宿主供给同一会话、文件、数据库和观察解析器 |
 | [客户认证](src/mysql-client-auth.ts)、[统一注册](src/mysql-customer-registration.ts)、[注册事务](src/mysql-customer-registration-transaction.ts)、[私有参加者](src/client-session-ports.ts) | 客户令牌、用途证明、会员/账号与原客户行锁单源；后台和自助注册共用同一规则，Serializable 冲突只作原有限重试 |
 | [微信客户认证](src/mysql-client-wechat-auth.ts)、[私有参加者](src/client-wechat-ports.ts) | `/mysql-client-wechat-auth` 保留原手机号登录/绑定、同一客户与当前会话、渠道和AppID水印核验；微信运输从公共 `/integration-wechat` 供给 |
-| [客户限流](src/mysql-client-rate-limit.ts)、[官网图片](src/mysql-client-website-assets.ts) | 原数据库配额、来源地址和唯一清理实例；图片按原字节/格式/2MB 与租户规则读取，公开路径保持兼容 |
+| [客户限流](src/mysql-client-rate-limit.ts)、[官网图片](src/mysql-client-website-assets.ts) | 原数据库配额、来源地址和唯一清理实例；日桶保留完整24小时窗口，清理不重置当日额度。图片按原字节/格式/2MB 与租户规则读取，公开路径保持兼容 |
 | [企业请求DTO](src/http-enterprise-request.dto.ts)、[订单查询DTO](src/http-enterprise-order-query.dto.ts)、[客户请求DTO](src/http-client-request.dto.ts) | 原企业申请/成员、客户注册/报价/履约及文件完成校验单源；续租、换货、委托与交接DTO各从同名HTTP子出口使用，输入校验不授予执行权 |
 | [本人地址与交付快照](src/mysql-client-delivery-address.ts)、[本人注销](src/mysql-client-account-closure.ts)、[配送区域](src/client-delivery-service-area.ts)、[宿主参加者](src/client-lifecycle-ports.ts) | 客户地址按租户与本人校验，报价/订单快照保持原值；注销沿原短信证明、会员/账号状态及会话撤销顺序。原客户Controller、报价及AI场景消费同一实现 |
 | [浏览器会话与页面装配](admin/browser/README.md)、[认证合同](src/auth-contracts.ts) | 一个宿主创建一份真实会话、刷新运输和查询缓存，向十二组页面供给当前服务端身份；旧后台消费同一实现，登录、空间切换及本机存储命名空间保持 |
@@ -59,7 +59,7 @@
 | [商户委托](src/merchant-delegation.ts)、[服务端报价访问](src/server-quote-access.ts) | `/merchant-delegation` 与 `/server-quote-access` 共用公共Auth/ALS及原封存来源；历史结果只核对原键/原消费关系，字段或JSON复制不能取得执行权 |
 | [配货与扫描](src/mysql-allocation.ts)、[私有存储/事件](src/allocation-storage.ts) | `/mysql-allocation` 保留原候选、预分配/改配/锁定/释放、办理锁、已记录异常及自动扫描；宿主只登记一个执行者，失败事件参加同一事务 |
 | [工作台规则](src/workbench.ts) | `/workbench` 聚合原订单/工单/退款/通知待办并保留角色范围判断；调用方先过滤真实订单/资金，规则不读库或授予权限 |
-| [经营报表](src/mysql-reports.ts)、[只读存储](src/report-storage.ts)、[CSV](src/report-csv.ts) | `/mysql-reports` 读取原订单/资产/数量库存；普通报表保持全区间分页，AI入口有5000单上限，超量不返部分总数。`/report-csv` 仅渲染同一已获权结果 |
+| [经营报表](src/mysql-reports.ts)、[只读存储](src/report-storage.ts)、[CSV](src/report-csv.ts) | `/mysql-reports` 读取原订单/资产/数量库存；普通报表保持全区间分页，AI入口有5000单上限，超量不返部分总数。`/report-csv` 仅渲染同一已获权结果，中和前导空白/控制字符后的文本公式前缀，数字金额保持原值 |
 | [到期作业](src/mysql-due-jobs.ts)、[实际依赖](src/due-job-ports.ts) | `/mysql-due-jobs` 保留五项任务、同连接命名锁、租户/空间ALS及原操作键；宿主只登记一个执行者，未选择Rental时不加载 |
 | [换货候选与试算](src/mysql-exchange-preview.ts)、[事务与服务视图](src/exchange-preview-ports.ts)、[候选合同](src/exchange-choices.ts) | /mysql-exchange-preview在原订单锁内读取当前候选及冻结价格依据，保留容量、整行和币种限制；试算不批准、不执行、不收款 |
 | [换货检查准备](src/mysql-exchange-inspection-preparation.ts)、[准备与照片消费](src/exchange-inspection-preparation.read.ts)、[严格DTO](src/exchange-inspection-preparation.dto.ts) | /mysql-exchange-inspection-preparation、/exchange-inspection-preparation-read与/exchange-inspection-dto保留原操作者、订单锁、冻结模板、照片消费及原收据同事务；检查事实不授予费用、客户同意或履约权 |

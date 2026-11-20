@@ -14,9 +14,9 @@ import { RENTAL_EXCEPTION_CHARGE_TYPES } from "./contracts";
 
 /** 数字字段由我们自己格式化，因此不需要防注入；字符串字段来自用户数据，必须处理。 */
 function escapeText(value: string): string {
-  // 以 = + @ 开头会被 Excel/Sheets 当公式执行（CSV 注入）。前置单引号中和，
+  // 前导空白或控制字符后的 = + @ - 会被 Excel/Sheets 当公式执行（CSV 注入）。前置单引号中和，
   // 这是电子表格里公认的「按文本处理」写法，比静默丢字符可解释。
-  const neutralized = /^[=+@]/u.test(value) ? `'${value}` : value;
+  const neutralized = /^[\s\u0000-\u001f]*[=+@-]/u.test(value) ? `'${value}` : value;
   if (/[",\r\n]/u.test(neutralized)) return `"${neutralized.replace(/"/gu, '""')}"`;
   return neutralized;
 }

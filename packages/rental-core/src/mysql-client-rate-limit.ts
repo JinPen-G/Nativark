@@ -93,8 +93,9 @@ export class ClientApiRateLimitService implements OnApplicationBootstrap, OnAppl
     this.cleanupTimer = setInterval(() => {
       if (this.stopping || this.cleanup) return;
       // 只保留一个在途清理。停机必须等原删除完成，不能先断开唯一数据库连接。
+      // 日桶从当天起点计数，须保留完整日窗口，避免清理后同一天重新取得配额。
       const running = this.prisma.clientApiRateBucket.deleteMany({
-        where: { bucketStart: { lt: new Date(Date.now() - 2 * 60 * 60 * 1000) } }
+        where: { bucketStart: { lt: new Date(Date.now() - IDENTIFIER_DAILY_RULE.windowSeconds * 1000) } }
       }).then(() => undefined, () => undefined);
       this.cleanup = running;
       void running.finally(() => { if (this.cleanup === running) this.cleanup = undefined; });
