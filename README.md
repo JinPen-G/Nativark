@@ -245,9 +245,12 @@ API 与后台也可分别通过 `npm run dev:api`、`npm run dev:admin` 启动�
 | 文档检查器 | `npm run test:docs` | 检查规则自身的回归 |
 | 公共接口 | `npm run contract:validate` | Controller、OpenAPI、DTO、路由权限和客户写入归属的静态一致性 |
 | 后台结构 | `npm run test:admin` | 后台约定与结构检查 |
+| 固定 Rental 发行与客户端消费 | [发行核验](scripts/verify-rental-distribution.cjs)，用 `--commit <完整SHA>` 选择版本 | 标准归档、安装准备、可选AI数据及五端消费只驻内存 |
 | 所选 Prisma 源码类型 | [内存类型入口](scripts/check-selected-prisma-types.cjs)，`--mode platform`、`rental` 或 `rental-ai` | 只读原 Prisma 5.22 官方生成器，在内存检查所选组合；支持 `--config` 指定宿主配置、`--deps` 指定只读依赖 |
 | 类型与主工程构建 | `npm run lint`、`npm run build` | 按实际包依赖检查类型并编译 shared、MCP、API、admin |
 | Rental 示范业务 | `npm run test:rental-core`、`npm run test:pricing-strategy` | 原 Core 和计费策略的定向行为 |
+
+接口扫描从实际 AppModule 的 Nest 登记读取路由，支持继承和动态装饰器，未声明的包出口拒绝。已有依赖环境可运行 `node scripts/validate-api-contracts.cjs --offline-prisma` 在内存提供原官方 Prisma 5.22 元数据；此入口不创建 Client 实例、启动服务或连接数据库。[扫描实现](scripts/controller-sources.cjs)
 
 类型、静态、离线行为、构建、浏览器或微信宿主、真实数据库、外部服务与发布证据分别记录。数据库及供应商测试按对应专项准备独立环境。一次性验证产物集中管理，退出时完成清理。命令与隔离约束沿公共规则查阅。[脚本清单](package.json) · [验证与临时产物规则](AGENTS.md#修改验证与交付)
 
