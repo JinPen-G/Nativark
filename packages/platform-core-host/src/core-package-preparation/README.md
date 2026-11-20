@@ -6,7 +6,7 @@
 
 宿主登记固定 Release pin 或供给已下载包来源。GitHub 读取先后核对原 Release、Tag 提交、资产 ID、长度及摘要，原归档和包检查继续生效。同一固定发行的引用合并在途读取，缓存保留一个已下载固定包。原固定内容可以用于后续准备，新的发行选择由宿主另行登记。
 
-候选准备复用原 `prepareCoreInstall` 与 `createCoreMigrationDeployment`。宿主提供原基础组合、完整平台迁移和当前实际 Core 包文件，新包只替换指定对象。底座迁移采用实际 `prisma/migrations/<原目录>/migration.sql` 映射，全部迁移摘要、Core 包和声明顺序均由原部署生成器核查。
+候选准备复用原 `prepareCoreInstall` 与 `createCoreMigrationDeployment`。宿主提供原基础组合、完整平台迁移和当前实际 Core 包文件，替换前先按当前部署锁核对全部原材料，再用新包替换指定对象。目标包或原迁移材料已修改、缺失及集合冲突均停止候选生成，保留当前组合和用户改动。底座迁移采用实际 `prisma/migrations/<原目录>/migration.sql` 映射，原组合与候选的全部迁移摘要、Core 包和声明顺序均由原部署生成器核查。
 
 旧 API 许可来自宿主可信 `legacyApiRoutes`，按 Core ID 绑定精确方法和路径。固定 GitHub 下载、原预检、候选材料生成、原部署生成器和文件存储共用同一许可，独立文件存储省略许可仍执行原命名空间拒绝。`prepareGitHubCoreRelease` 在原 fetcher 参数之后接受同一精确集合，并传给原 `prepareCoreInstall`。[宿主供给](../core-package-assembly.ts) · [固定发行合同](../../../core-contracts/src/github.ts)
 

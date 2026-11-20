@@ -25,6 +25,9 @@ export async function createCorePackagePreparationBundle(input: {
   const source = await input.materials.read();
   if (!source || !isDeepStrictEqual(CoreDeploymentLockSchema.parse(source.base), input.base))
     throw new Error("当前包材料与原部署组合不一致");
+  // 替换前核对完整原组合，及时发现目标包或迁移源码已修改的冲突。
+  createCoreMigrationDeployment({ lock: input.base, platform: source.platform, cores: source.cores,
+    dataCapabilities: source.dataCapabilities, legacyApiRoutes });
   const { artifact } = input, sha256 = artifact.kind === "core" ? artifact.pin.sha256 : artifact.release.sha256;
   const archive = readCoreArchive(artifact.bytes, sha256), cores = new Map(source.cores);
   const dataCapabilities = new Map(source.dataCapabilities);
