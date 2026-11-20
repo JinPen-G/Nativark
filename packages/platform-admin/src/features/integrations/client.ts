@@ -14,9 +14,9 @@ export function createTenantIntegrationsApi(request: AdminRuntime["request"]) {
   return {
     catalog: () => request<TenantIntegrationCatalogResponse>("/platform/integrations"),
     save: (capability: TenantIntegrationCapability, provider: TenantIntegrationProvider, payload: SaveTenantIntegrationRequest) =>
-      request<TenantIntegrationConfigSummary>(`/platform/integrations/${capability}/${provider}`, { method: "put", data: payload }),
+      request<TenantIntegrationConfigSummary>(`/platform/integrations/${capability}/${provider}`, { method: "put", data: payload, retryAuthentication: false }),
     test: (capability: TenantIntegrationCapability, provider: TenantIntegrationProvider) =>
-      request<TenantIntegrationTestResult>(`/platform/integrations/${capability}/${provider}/test`, { method: "post" })
+      request<TenantIntegrationTestResult>(`/platform/integrations/${capability}/${provider}/test`, { method: "post", retryAuthentication: false })
   };
 }
 

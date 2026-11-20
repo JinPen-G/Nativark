@@ -13,7 +13,7 @@
 | 仓储与持久化 | [PlatformManagementRepository](platform-management.repository.ts) 通过 [存储端口](platform-management.store.ts) 读取及维护公共表，写入和原审计在同一 Serializable 事务 |
 | 组织范围 | [原数据投影](../../common/platform-data-permission.ts) 和 [启用组织子树](../../common/organization-location-scope.ts) 将读取限制在当前租户及受权组织范围 |
 | 认证前安全读取 | [PlatformAuthenticationRepository](platform-authentication.source.ts) 委托 [readPlatformSecurityBaseline](platform-security-baseline.ts)，显式读取 `tenant_platform` 的最新 EFFECTIVE `system-rules` |
-| 直接消费者 | [公共宿主](../../../../../apps/platform-api/README.md) 和 [原 PlatformService](../../../../../apps/api/src/modules/platform/platform.service.ts) 通过 [原 HTTP 适配](../../../../../apps/api/src/modules/platform/public-management.adapter.ts) 使用同一公共实现及数据库 |
+| 直接消费者 | [公共 API 装配](../../../../../apps/platform-api/src/app.module.ts)、[访问管理页](../../../../platform-admin/src/features/access/PublicManagementPages.tsx)、[本人/租户资料页](../../../../platform-admin/src/SettingsPage.tsx)及[组织/安全页](../../../../platform-admin/src/features/platform-settings/README.md)。[原服务装配](../../../../../apps/api/src/application-services.module.ts)将[原 PlatformService](../../../../../apps/api/src/modules/platform/platform.service.ts)的[HTTP 适配](../../../../../apps/api/src/modules/platform/public-management.adapter.ts)接到同一公共实现及数据库 |
 
 角色列表沿原账号管理或角色管理权限读取本租户角色，支持人员表单和邀请中的角色选择；基础成员仍需要全租户数据范围。创建、修改和删除角色继续要求角色管理权限，选择一个角色不会自动授予成员业务 Core。公共 Guard、管理服务的事务前后复验与 OpenAPI 使用同一读取权限声明，文档中的 `x-requiredPermissions` 按 `x-permissionMatch: any` 匹配。[读取声明](platform-permissions.ts) · [公共政策](../../platform-http-policy.ts)
 

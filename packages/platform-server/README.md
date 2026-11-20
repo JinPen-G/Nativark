@@ -7,7 +7,7 @@
 | HTTP 与准入 | [模块](src/platform-server.module.ts)、[公共政策](src/platform-http-policy.ts)、[Guard](src/platform-auth.guard.ts)；未知方法/路径拒绝，行业 HTTP 由受控宿主显式供给 |
 | 权限匹配 | [同源匹配](src/permission-match.ts) 从 `/permission-match` 提供原权限码及通配规则；调用方先取得当前可信权限集合，匹配函数不创建授权 |
 | Prisma SQL运行值 | [官方运行库适配](src/prisma-runtime.ts)从 `/prisma-runtime` 提供 schema 无关的 SQL、Decimal、空值单例、错误类及隔离级别；生成 Client 及其输入类型由所选宿主和业务适配持有 |
-| 公共会话 | [公共认证](src/modules/auth/platform-auth.service.ts)、[共享会话算法](src/modules/auth/auth-session.service.ts)；原签名、失败保护、单次刷新和改密 |
+| 公共会话 | [公共认证](src/modules/auth/platform-auth.service.ts)、[共享会话算法](src/modules/auth/auth-session.service.ts)、[HTTP](src/modules/auth/auth-session.controller.ts)及[Web 登录/改密](../platform-admin/src/session-pages.tsx)，复用原签名、失败保护、单次刷新和改密 |
 | 当前组织范围 | [组织子树与地点交集](src/common/organization-location-scope.ts) 从 `/organization-location-scope` 提供；调用方先限定租户，缺失/停用组织返回空集合，配置地点只缩小已映射范围 |
 | 身份存储 | [仓储](src/modules/platform/platform-identity.repository.ts)、[认证来源](src/modules/platform/platform-authentication.source.ts)、[窄存储端口](src/modules/platform/platform-auth-data-store.ts)；平台账号、角色和会话，业务表不进入端口 |
 | 公共管理 | [模块导读](src/modules/platform/README.md)、[应用服务](src/modules/platform/platform-management.service.ts)、[仓储](src/modules/platform/platform-management.repository.ts)、[存储端口](src/modules/platform/platform-management.store.ts)、[主体围栏](src/modules/platform/platform-principal.authority.ts)；SaaS与租户管理分开，当前原会话 / 角色在同事务复验 |
@@ -27,12 +27,12 @@
 | 异步任务台账 | [三步接入](src/modules/jobs/README.md)、[应用/仓储](src/modules/jobs/job-ledger.ts)与[HTTP模块](src/modules/jobs/jobs-http.module.ts)从 `/jobs` 提供；共用原租户内任务、排期及尝试次数，业务执行/日志由宿主供给，缺打印参加者明确不可用 |
 | 文件清理与下载 | [按租户清理](src/modules/files/file-cleanup.ts)、[受保护下载](src/modules/files/file-download.ts)；原完成暂存及待删除文件先持久占用，失应答仅核原键；下载沿实际业务 ACL、原绑定复核与成功审计 |
 | 文件配置围栏 | [只读文件依赖](src/modules/files/file-integration-dependencies.ts) 从 `/file-integration-dependencies` 提供，原配置同事务读取文件、上传/冻结/清理收据，空 Core 目录不能代替依赖证据 |
-| 公共设置 | [租户外观](src/modules/client/tenant-appearance-profile.service.ts)、[本人外观](src/modules/client/account-appearance.service.ts)、[存储端口](src/modules/platform/platform-appearance-data-store.ts)；修订冲突、省略与清空沿原语义 |
+| 公共设置 | [租户外观](src/modules/client/tenant-appearance-profile.service.ts)、[本人外观](src/modules/client/account-appearance.service.ts)、[存储端口](src/modules/platform/platform-appearance-data-store.ts)及[本人/租户表单](../platform-admin/src/SettingsPage.tsx)，修订冲突、省略与清空沿原语义 |
 | 公共审计 | [日志写入与脱敏](src/common/operation-log.service.ts) 从 `/operation-log` 提供；宿主供给原日志表，业务空间来自同一ALS，敏感读取要求持久写入成功。原OAuth/MCP/Core原收据审计仍由各自严格事务入口负责 |
 | 微信小程序运输 | [原运输适配](src/modules/integrations/wechat-mini-program.adapter.ts) 从 `/integration-wechat` 提供；AppID 缓存、一次凭据刷新和原错误类型共用，客户绑定与渠道授权归所属 Core |
 | 短信结果接点 | [原结果与unknown错误](src/common/notification-delivery.ts) 从 `/notification-delivery` 提供，原Provider及Core共用同一错误身份；实际发送、凭据和回执仍由原通知服务负责 |
 | 接口资料与响应 | [OpenAPI](src/platform-openapi.ts)、[响应信封](src/common/request-id.interceptor.ts)；同一公共政策生成接口资料，信封保持 `data` / `requestId` |
-| 直接消费者 | [无 Core 宿主](../../apps/platform-api/README.md)、[Rental 兼容认证](../../apps/api/src/modules/auth/README.md) |
+| 直接消费者 | [默认 API 装配](../../apps/platform-api/src/app.module.ts)与[公共数据库](../../apps/platform-api/src/database.ts)、[默认 Web 装配](../../apps/platform-admin/src/App.tsx)与[公共页面工厂](../platform-admin/src/application.tsx)。[原 API 服务装配](../../apps/api/src/application-services.module.ts)供给原数据库及公共应用实例，[Rental 认证适配](../../apps/api/src/modules/auth/README.md)解析原业务范围 |
 
 公共 HTTP 清单、访问类别、权限和文档来自同一份政策。构建后执行 `npm run api:document:platform` 输出同版本 OpenAPI JSON；此命令不启动服务、不读环境文件或数据库。HTTP 文档也由宿主在 `/api/openapi.json` 提供。接口存在不代表 Core 工具已发布或当前主体有业务权限。
 

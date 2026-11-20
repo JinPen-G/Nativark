@@ -19,4 +19,4 @@
 
 外观来源经 [公共存储端口](../platform/platform-appearance-data-store.ts) 注入。Rental 组合单独提供旧客户端品牌读取，公共底座不为保存外观查询客户端业务表；省略、显式清空、原修订与失败反馈仍沿原外观服务。
 
-原验证入口为 [登录失败保护](../../../../../tests/auth-login-lockout.test.cjs)、[外观设置](../../../../../tests/admin-appearance-settings.test.cjs) 和 [可信主体 / Guard](../../../../../tests/mcp-trusted-principal.test.cjs)。命令先按 [根规则](../../../../../AGENTS.md#修改验证与交付) 核读写和隔离前置，离线服务行为与实际 HTTP / 数据库分别取证。当前已有 [独立公共宿主](../../../../platform-api/README.md) 的 schema、构建与认证 / 外观装配，真实运行、完整公共管理界面及标准包运行装配仍按 [PCH 接续](../../../../../docs/平台底座/Core接入/平台Core接入-协作接续.md) 继续交付。
+原验证入口为 [登录失败保护](../../../../../tests/auth-login-lockout.test.cjs)、[外观设置](../../../../../tests/admin-appearance-settings.test.cjs) 和 [可信主体 / Guard](../../../../../tests/mcp-trusted-principal.test.cjs)。命令先按 [根规则](../../../../../AGENTS.md#修改验证与交付) 核读写和隔离前置，离线服务行为与实际 HTTP / 数据库分别取证。[公共 API](../../../../platform-api/README.md)与[公共 Web](../../../../platform-admin/README.md)通过正式服务和页面工厂消费同一公共实现，Core 与宿主接入从[公开接入手册](../../../../../packages/core-contracts/README.md#五步快速接入)继续。

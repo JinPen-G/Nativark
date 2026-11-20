@@ -13,6 +13,7 @@
 | [对象存储](object-storage.provider.service.ts)、[OSS V4](aliyun-oss-v4.ts) | 原 OSS／COS／S3 签名与受控 HTTP，连接测试使用随机对象 HEAD |
 | [支付运输](payment-provider-transport.ts)、[Stripe验签](stripe-signature.ts)、[回调限流](payment-webhook-rate-limit.ts) | 原RSA/HMAC签名、精确微信验签材料、受控请求、供应商错误分类和只读连接探针，业务资金及回调归属由实际Core裁定 |
 | [微信运输](wechat-mini-program.adapter.ts) | `/integration-wechat` 共用原 code/session、手机号一次性凭证、AppID token 缓存与错误类；不保存客户身份，业务调用者核渠道与水印 |
+| [公共后台](../../../../platform-admin/src/features/integrations/README.md)、[请求工厂](../../../../platform-admin/src/features/integrations/client.ts) | 默认 Web 登记目录、保存与连接测试，原页面转接同一组件，请求使用宿主唯一认证客户端 |
 | [Rental 参加者](../../../../../apps/api/src/modules/integrations/rental-integration-business.participant.ts) | 在原配置事务核租赁结算、支付／退款、短信队列及文件／上传依赖 |
 | [公共 schema](../../../../../apps/platform-api/prisma/schema.prisma)、[数据计划](../../../../../apps/platform-api/src/platform-data.ts) | 独立公共链的配置和适配日志表，迁移摘要与实际应用账分别核验 |
 

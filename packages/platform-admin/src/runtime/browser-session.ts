@@ -74,7 +74,7 @@ export function createBrowserAdminSession({ baseURL, storageKey }: { baseURL: st
   }
   async function changePassword(input: ChangePasswordRequest) {
     const epoch = queries.currentSessionEpoch();
-    const result = await transport.request<PlatformLoginResponse>("/auth/change-password", { method: "post", data: input });
+    const result = await transport.request<PlatformLoginResponse>("/auth/change-password", { method: "post", data: input, retryAuthentication: false });
     if (epoch !== queries.currentSessionEpoch()) throw new DOMException("会话已变化，请核对原密码操作结果", "AbortError");
     queries.clearSessionQueryCache(); accept(result, result);
   }

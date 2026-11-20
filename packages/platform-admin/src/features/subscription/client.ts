@@ -62,30 +62,30 @@ export function createSubscriptionClient(request: AdminRuntime["request"]) {
     // ===== 写操作（§7/§8）。目标租户走路径参数；金额可空不落 0；平台写响应以失效后重取为准，故多为 void。 =====
     // 租户端（audience tenant，:manage）
     submitRequest: (body: SubmitSubscriptionRequestRequest) =>
-      request<SubscriptionRequestRecord>("/platform/subscription/requests", { method: "post", data: body }),
+      request<SubscriptionRequestRecord>("/platform/subscription/requests", { method: "post", data: body, retryAuthentication: false }),
     cancelRequest: (id: string) =>
-      request<SubscriptionRequestRecord>(`/platform/subscription/requests/${encodeURIComponent(id)}/cancel`, { method: "post" }),
+      request<SubscriptionRequestRecord>(`/platform/subscription/requests/${encodeURIComponent(id)}/cancel`, { method: "post", retryAuthentication: false }),
     // 平台端（audience saas，system:tenant:subscription:manage）
     provision: (tenantId: string, body: ProvisionSubscriptionRequest) =>
-      request<void>(`/platform/subscriptions/${encodeURIComponent(tenantId)}/provision`, { method: "post", data: body }),
+      request<void>(`/platform/subscriptions/${encodeURIComponent(tenantId)}/provision`, { method: "post", data: body, retryAuthentication: false }),
     renew: (tenantId: string, body: RenewSubscriptionRequest) =>
-      request<void>(`/platform/subscriptions/${encodeURIComponent(tenantId)}/renew`, { method: "post", data: body }),
+      request<void>(`/platform/subscriptions/${encodeURIComponent(tenantId)}/renew`, { method: "post", data: body, retryAuthentication: false }),
     upgrade: (tenantId: string, body: UpgradeSubscriptionProRequest) =>
-      request<void>(`/platform/subscriptions/${encodeURIComponent(tenantId)}/upgrade`, { method: "post", data: body }),
+      request<void>(`/platform/subscriptions/${encodeURIComponent(tenantId)}/upgrade`, { method: "post", data: body, retryAuthentication: false }),
     extend: (tenantId: string, body: ExtendSubscriptionRequest) =>
-      request<void>(`/platform/subscriptions/${encodeURIComponent(tenantId)}/extend`, { method: "post", data: body }),
+      request<void>(`/platform/subscriptions/${encodeURIComponent(tenantId)}/extend`, { method: "post", data: body, retryAuthentication: false }),
     scheduleNext: (tenantId: string, body: ScheduleNextSubscriptionRequest) =>
-      request<void>(`/platform/subscriptions/${encodeURIComponent(tenantId)}/schedule-next`, { method: "post", data: body }),
+      request<void>(`/platform/subscriptions/${encodeURIComponent(tenantId)}/schedule-next`, { method: "post", data: body, retryAuthentication: false }),
     grantFeature: (tenantId: string, body: GrantTenantFeatureRequest) =>
-      request<void>(`/platform/subscriptions/${encodeURIComponent(tenantId)}/feature-grants`, { method: "post", data: body }),
+      request<void>(`/platform/subscriptions/${encodeURIComponent(tenantId)}/feature-grants`, { method: "post", data: body, retryAuthentication: false }),
     revokeFeature: (tenantId: string, body: RevokeTenantFeatureRequest) =>
-      request<void>(`/platform/subscriptions/${encodeURIComponent(tenantId)}/feature-grants/revoke`, { method: "post", data: body }),
+      request<void>(`/platform/subscriptions/${encodeURIComponent(tenantId)}/feature-grants/revoke`, { method: "post", data: body, retryAuthentication: false }),
     handleRequest: (id: string, body: HandleSubscriptionRequestRequest) =>
-      request<SubscriptionRequestRecord>(`/platform/subscriptions/requests/${encodeURIComponent(id)}`, { method: "patch", data: body }),
+      request<SubscriptionRequestRecord>(`/platform/subscriptions/requests/${encodeURIComponent(id)}`, { method: "patch", data: body, retryAuthentication: false }),
     upsertFeatureCatalog: (code: string, body: UpsertFeatureCatalogRequest) =>
-      request<void>(`/platform/subscriptions/feature-catalog/${encodeURIComponent(code)}`, { method: "put", data: body }),
+      request<void>(`/platform/subscriptions/feature-catalog/${encodeURIComponent(code)}`, { method: "put", data: body, retryAuthentication: false }),
     setStandardPrice: (plan: SubscriptionPlan, body: SetStandardPriceRequest) =>
-      request<void>(`/platform/subscriptions/standard-prices/${encodeURIComponent(plan)}`, { method: "put", data: body })
+      request<void>(`/platform/subscriptions/standard-prices/${encodeURIComponent(plan)}`, { method: "put", data: body, retryAuthentication: false })
   };
 }
 
