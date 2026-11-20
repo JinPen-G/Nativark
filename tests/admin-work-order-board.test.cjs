@@ -89,7 +89,11 @@ test('work-order forms keep their target through exit, discard cancelled drafts,
   const auth = { sessionVerified: true, tenant: { tenantId: 'tenant' }, user: { id: 'operator', permissions: ['*'] }, currentWorkspaceId: 'workspace', hasPermission: () => true };
   const authStore = Object.assign(select => select(auth), { getState: () => auth });
   const router = { useNavigate: () => () => {}, useParams: () => ({}), useSearchParams: () => [new URLSearchParams(), () => {}] };
-  const pageMetadata = loadSource('packages/rental-core/admin/work-orders/pages.ts');
+  const pageMetadata = loadSource('packages/rental-core/admin/work-orders/pages.ts', {
+    '@rental-os/rental-core/permissions': loadSource('packages/rental-core/src/permissions.ts', {
+      './core-identity': loadSource('packages/rental-core/src/core-identity.ts'),
+    }),
+  });
   const coreContracts = { corePageKey: (coreId, pageId) => `${coreId}:${pageId}`, resolveCorePageLocation: () => '' };
   let pageHost;
   const { useCoreForm } = loadSource('packages/platform-admin/src/core/useCoreForm.ts', {

@@ -1,14 +1,16 @@
-/** 页面读取已获权Core自己的绑定/就绪，当前范围进入缓存键；失败或未验证不提供旧准入结果。 */
-import { useQuery } from "@tanstack/react-query";
-import type { CoreScopeReference } from "@rental-os/core-contracts";
+/** 页面读取已获权Core自己的绑定/就绪，调用时复核原范围投影；失效观察不提供旧准入结果。 */
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { CoreScopeReference, CoreScopeObservation } from "@rental-os/core-contracts";
 import { useAdminSession, useAdminRuntime } from "../runtime";
 import { useCoreManagementApi } from "./management-client";
 
 export function useCoreScope(coreId: string, container?: CoreScopeReference["container"]) {
-  const { currentSessionEpoch } = useAdminRuntime(), coreManagementApi = useCoreManagementApi();
+  const runtime = useAdminRuntime(), client = useQueryClient(), coreManagementApi = useCoreManagementApi();
   const { tenant, user, sessionVerified } = useAdminSession();
+  const epoch = runtime.currentSessionEpoch();
+  const queryKey = ["platform-core-scope", epoch, tenant?.tenantId, user?.id, coreId, container?.type, container?.id];
   const query = useQuery({
-    queryKey: ["platform-core-scope", currentSessionEpoch(), tenant?.tenantId, user?.id, coreId, container?.type, container?.id],
+    queryKey,
     queryFn: async ({ signal }) => {
       const observed = await coreManagementApi.scope({ coreId, ...(container ? { container } : {}) }, signal);
       if (observed.status === "bound" && (observed.binding.tenantId !== tenant?.tenantId || observed.binding.coreId !== coreId
@@ -18,6 +20,15 @@ export function useCoreScope(coreId: string, container?: CoreScopeReference["con
     },
     enabled: sessionVerified && Boolean(tenant && user)
   });
+  const scopeSnapshot = JSON.stringify(query.data);
   return { ...query, data: sessionVerified && !query.error ? query.data : undefined,
+    isCurrent: () => {
+      const current = runtime.getSession();
+      const cached = client.getQueryState<CoreScopeObservation>(queryKey);
+      return Boolean(sessionVerified && current.sessionVerified && runtime.currentSessionEpoch() === epoch
+        && current.tenant?.tenantId === tenant?.tenantId && current.user?.id === user?.id
+        && query.data && !query.error && cached?.status === "success" && !cached.error
+        && scopeSnapshot === JSON.stringify(cached.data));
+    },
     ready: Boolean(sessionVerified && !query.error && query.data?.status === "bound" && query.data.readiness.status === "ready") };
 }

@@ -1,4 +1,5 @@
-/** Core首次设置复用原绑定/收据接口；本机只保留核对引用，结果未知不重发，也不保存初始化配置。 */
+/** Core首次设置复用原绑定/收据接口，派发前核对当前管理资格、分配与绑定观察。
+ * 本机只保留核对引用，结果未知不重发，也不保存初始化配置。 */
 import { useLayoutEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { BindCoreScopeSchema, CoreBindingOperationQuerySchema, type CoreBinding,
@@ -42,17 +43,19 @@ export function useCoreBinding(coreId: string, container?: CoreScopeReference["c
       throw new Error("Core设置结果与当前范围不一致");
     return binding;
   };
+  const queryKey = ["platform-core-binding", epoch, tenant?.tenantId, user?.id, coreId, container?.type, container?.id];
   const query = useQuery({
-    queryKey: ["platform-core-binding", epoch, tenant?.tenantId, user?.id, coreId, container?.type, container?.id],
+    queryKey,
     queryFn: async ({ signal }) => {
       const observation = await coreManagementApi.binding(scope, signal);
       if (observation.status === "recorded") validateBinding(observation.binding);
       return observation;
     }, enabled: canManage, meta: { liveRefresh: false }
   });
+  const bindingSnapshot = JSON.stringify(query.data);
   const current = () => {
     const boundary = lifetime.current;
-    if (!live.current.canManage || currentSessionEpoch() !== epoch || live.current.generation !== generation || boundary?.generation !== generation
+    if (!live.current.canManage || !session.isCurrent() || currentSessionEpoch() !== epoch || live.current.generation !== generation || boundary?.generation !== generation
       || boundary.controller.signal.aborted) throw new DOMException("原Core设置页面已失效", "AbortError");
     return boundary.controller.signal;
   };
@@ -73,7 +76,10 @@ export function useCoreBinding(coreId: string, container?: CoreScopeReference["c
     return pending;
   };
   const initialize = (configuration?: unknown) => run(async signal => {
-    if (!live.current.canInitialize || reference.current || query.isFetching || query.error || !query.data)
+    const observed = client.getQueryState<NonNullable<typeof query.data>>(queryKey);
+    if (!live.current.canInitialize || !session.canAccess(coreId, []) || reference.current || query.isFetching || query.error || !query.data
+      || observed?.status !== "success" || observed.error || observed.fetchStatus === "fetching"
+      || bindingSnapshot !== JSON.stringify(observed.data))
       throw new Error("请先核对当前Core使用权、设置状态及原操作");
     // 已有设置直接读取，不再次初始化；配置更新由Core自己的接口办理。
     if (query.data.status === "recorded") {

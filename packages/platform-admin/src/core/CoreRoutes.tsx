@@ -67,7 +67,7 @@ function ScopedCoreRoute({ page, pages, options, container, context, canAccess }
   let content: ReactNode;
   if (scope.data && (scope.ready || configuration)) content = <CorePageHostProvider host={{ page, pages, brandName: options.brandName,
     lifetimeKey, params, binding, canAccess: (coreId, permissions) => canAccess(coreId, permissions)
-      && (coreId !== page.coreId || scope.ready || configuration), navigate }}><Page routeParams={params} /></CorePageHostProvider>;
+      && (coreId !== page.coreId || scope.isCurrent() && (scope.ready || configuration)), navigate }}><Page routeParams={params} /></CorePageHostProvider>;
   else content = <><PageHeading title={corePageText(page.definition.title, locale)} brandName={options.brandName} />
     {scope.data?.status === "bound" && scope.data.readiness.status === "configuration_required"
       ? <Alert type="warning" title={locale === "en-US" ? "Core configuration is incomplete" : "Core配置尚未完成"}

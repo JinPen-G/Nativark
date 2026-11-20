@@ -1,4 +1,5 @@
-/** Core表单复用原Form、保存快照和离页保护；业务转换、原操作与unknown由Core自己的保存方法负责。 */
+/** Core表单复用原Form、保存快照和离页保护，校验及完成反馈绑定原表单实例/代次。
+ * 业务转换、原操作与unknown由Core自己的保存方法负责，失效不证明原写入已回滚。 */
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import type { FormInstance, FormProps } from "antd";
 import type { CorePageDescriptor } from "@rental-os/core-contracts";
@@ -18,22 +19,27 @@ export function useCoreForm<Values>({ form, onSave, permissions = [], disabled =
   const generation = JSON.stringify([host.lifetimeKey, host.page.key]);
   const live = useRef({ host, onSave, permissions, disabled, active: false });
   Object.assign(live.current, { host, onSave, permissions, disabled });
+  const lifetime = useRef({ form, generation });
+  if (lifetime.current.form !== form || lifetime.current.generation !== generation)
+    lifetime.current = { form, generation };
+  const opening = lifetime.current;
   const baseline = useRef<string | undefined>(undefined);
   const inFlight = useRef<{ request: Promise<unknown>; values: string } | null>(null);
   const [dirty, setDirty] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState<unknown>();
-  const isCurrent = () => live.current.active
+  const isCurrent = () => live.current.active && lifetime.current === opening
     && generation === JSON.stringify([live.current.host.lifetimeKey, live.current.host.page.key]);
 
   useLayoutEffect(() => {
     live.current.active = true;
     baseline.current = formSnapshotFingerprint(form.getFieldsValue(true));
+    inFlight.current = null; setDirty(false); setBusy(false); setError(undefined);
     return () => { live.current.active = false; };
   }, [form, generation]);
 
   const submit = useCallback((values: Values): Promise<unknown> => {
     const current = () => {
       const value = live.current;
-      if (!value.active || generation !== JSON.stringify([value.host.lifetimeKey, value.host.page.key]))
+      if (!isCurrent())
         throw new DOMException("当前Core表单已失效", "AbortError");
       if (!value.host.canAccess(value.host.page.coreId, [...value.host.page.definition.permissions, ...value.permissions]))
         throw new Error(t("当前操作不可用"));
@@ -71,10 +77,10 @@ export function useCoreForm<Values>({ form, onSave, permissions = [], disabled =
     });
     inFlight.current = { request, values: fingerprint };
     return request;
-  }, [form, generation, t]);
+  }, [form, generation, opening, t]);
 
   const formProps: Pick<FormProps<Values>, "onValuesChange" | "onFinish"> = {
-    onValuesChange: () => setDirty(formSnapshotFingerprint(form.getFieldsValue(true)) !== baseline.current),
+    onValuesChange: () => { if (isCurrent()) setDirty(formSnapshotFingerprint(form.getFieldsValue(true)) !== baseline.current); },
     // AntForm不会等待onFinish的Promise；事件出口处理反馈，submit仍向按钮/调用者返回真实拒绝。
     onFinish: values => {
       const existing = inFlight.current;

@@ -1,6 +1,7 @@
 /**
  * 将Core页面/操作声明接到原页头、按钮和Form；不复制外壳、样式或业务请求。
  * 宿主供给当前受权注册表与身份代次，服务端仍独立复核权限及业务结果。
+ * 保留页签沿原活动范围关闭旧动作，异步确认/校验完成时再次核对当前声明。
  */
 import { createContext, useContext, useLayoutEffect, useRef, type ReactNode } from "react";
 import type { FormInstance } from "antd";
@@ -10,6 +11,7 @@ import {
 } from "@rental-os/core-contracts";
 import { useLocale } from "../app/locale";
 import { PageHeading } from "../components/PageHeading";
+import { WorkspaceHeaderActiveContext } from "../components/workspace/WorkspaceHeaderContext";
 import { ActionButton, Button, ConfirmAction, Result, SaveButton, Tooltip, useFeedback, type ActionButtonIntent } from "../components/ui";
 
 export interface CorePageHost {
@@ -61,30 +63,35 @@ export type CoreAdminPageAction<Values> = CorePageAction<FormInstance<Values>, V
   confirmTone?: "neutral" | "danger";
 };
 
-function PageAction<Values>({ host, action }: { host: CorePageHost; action: CoreAdminPageAction<Values> }) {
+function PageAction<Values>({ host, action, visible = true }: { host: CorePageHost; action: CoreAdminPageAction<Values>; visible?: boolean }) {
   const { locale, t } = useLocale();
   const { toast } = useFeedback();
-  const live = useRef({ host, action, active: true });
-  live.current.host = host; live.current.action = action;
+  const live = useRef({ host, action, active: true, visible });
+  live.current.host = host; live.current.action = action; live.current.visible = visible;
+  // 返回同一页签也不能复活退出前的确认/校验；保留按钮实例以守住原在途请求。
+  const visibility = useRef({ visible });
+  if (visibility.current.visible !== visible) visibility.current = { visible };
+  const opening = visibility.current;
   useLayoutEffect(() => { live.current.active = true; return () => { live.current.active = false; }; }, []);
   // 确认面板也可能在原点击后等待；执行前取当前声明/权限，不保留旧回调绕过撤权。
   const current = () => {
     const value = live.current;
-    if (!value.active || value.action.disabled || value.action.pending || !access(value.host, value.action.permissions))
+    if (!value.active || !value.visible || visibility.current !== opening || value.action.disabled || value.action.pending || !access(value.host, value.action.permissions))
       throw new Error(t("当前操作不可用"));
     return value;
   };
   const label = corePageText(action.label, locale), variant = action.emphasis ?? "secondary";
+  const disabled = !visible || action.disabled;
   const reason = action.disabledReason ? corePageText(action.disabledReason, locale) : undefined;
   const reportFailure = (error: unknown) => {
-    if (!live.current.active || error && typeof error === "object" && "errorFields" in error) return;
+    if (!live.current.active || !live.current.visible || visibility.current !== opening || error && typeof error === "object" && "errorFields" in error) return;
     toast({ type: "error", title: t("操作失败") });
   };
   const confirming = useRef<Promise<unknown> | null>(null);
   let button: ReactNode;
   if (action.kind === "navigate" || action.kind === "open") {
     button = <Button type={action.slot === "navigation" ? "text" : variant === "primary" ? "primary" : "default"} icon={action.icon} danger={action.danger}
-      loading={action.pending} disabled={action.disabled} onClick={() => {
+      loading={action.pending} disabled={disabled} onClick={() => {
       try {
         const value = current(), latest = value.action;
         if (latest.kind === "open") latest.open();
@@ -93,10 +100,10 @@ function PageAction<Values>({ host, action }: { host: CorePageHost; action: Core
           if (!target || !value.host.canAccess(target.coreId, target.definition.permissions)) throw new Error(t("当前页面不可用"));
           value.host.navigate(resolveCorePageLocation(value.host.pages, latest.to));
         }
-      } catch { toast({ type: "error", title: t("当前操作不可用") }); }
+      } catch { if (live.current.active && live.current.visible && visibility.current === opening) toast({ type: "error", title: t("当前操作不可用") }); }
     }}>{label}</Button>;
   } else if (action.kind === "save") {
-    button = <SaveButton label={label} variant={variant} disabled={action.disabled} intent={action.intent}
+    button = <SaveButton label={label} variant={variant} disabled={disabled} intent={action.intent}
       icon={action.icon} danger={action.danger} pending={action.pending} pendingLabel={action.pendingLabel} onActionError={reportFailure}
       form={action.form} onSave={values => {
         const latest = current().action;
@@ -112,14 +119,14 @@ function PageAction<Values>({ host, action }: { host: CorePageHost; action: Core
     button = action.confirmation
       ? <ConfirmAction label={label} icon={action.icon} prompt={corePageText(action.confirmation, locale)}
           tone={action.confirmTone ?? (action.danger ? "danger" : "neutral")} pendingLabel={action.pendingLabel}
-          disabled={action.disabled || action.pending} onConfirm={() => {
+          disabled={disabled || action.pending} onConfirm={() => {
             if (confirming.current) return confirming.current;
             const request = Promise.resolve().then(execute);
             confirming.current = request;
             void request.finally(() => { if (confirming.current === request) confirming.current = null; }).catch(() => undefined);
             return request;
           }} />
-      : <ActionButton label={label} variant={variant} disabled={action.disabled} intent={action.intent}
+      : <ActionButton label={label} variant={variant} disabled={disabled} intent={action.intent}
           icon={action.icon} danger={action.danger} pending={action.pending} pendingLabel={action.pendingLabel} onAction={execute} onActionError={reportFailure} />;
   }
   // 深链接只能定位当前页面的已登记动作；包住禁用按钮便于说明原因，不触发业务执行。
@@ -141,6 +148,7 @@ export function CorePage<Values = Record<string, unknown>>({ actions = [], title
   children: ReactNode;
 }) {
   const host = useCorePageHost(), { locale } = useLocale();
+  const active = useContext(WorkspaceHeaderActiveContext);
   const ids = new Set<string>();
   let primary = 0;
   for (const action of actions) {
@@ -150,7 +158,7 @@ export function CorePage<Values = Record<string, unknown>>({ actions = [], title
   }
   const buttons: Record<"actions" | "navigation" | "tools", ReactNode[]> = { actions: [], navigation: [], tools: [] };
   for (const action of actions) if (access(host, action.permissions)) buttons[action.slot ?? "actions"].push(
-    <PageAction key={JSON.stringify([action.id, action.kind, action.kind === "command" ? action.confirmation : undefined])} host={host} action={action} />);
+    <PageAction key={JSON.stringify([action.id, action.kind, action.kind === "command" ? action.confirmation : undefined])} host={host} action={action} visible={active} />);
   return <><PageHeading title={title ?? corePageText(host.page.definition.title, locale)} brandName={host.brandName}
     summary={summary} description={description} view={view} note={note}
     extra={buttons.actions.length ? buttons.actions : undefined} navigation={buttons.navigation.length ? buttons.navigation : undefined}

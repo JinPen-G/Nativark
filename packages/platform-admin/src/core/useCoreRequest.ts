@@ -7,6 +7,7 @@ type Options = AdminRequestOptions;
 
 export function useCoreRequest() {
   const { request, currentSessionEpoch } = useAdminRuntime();
+  const epoch = currentSessionEpoch();
   const host = useCorePageHost();
   const live = useRef(host); live.current = host;
   const generation = JSON.stringify([host.lifetimeKey, host.page.key]);
@@ -15,7 +16,7 @@ export function useCoreRequest() {
     const controller = new AbortController();
     lifecycle.current = { generation, controller };
     return () => controller.abort();
-  }, [generation]);
+  }, [generation, epoch]);
   const send = useCallback(async <T,>(path: string, options: Options = {}): Promise<T> => {
     // 路径由Core自身登记的API拼成，不接受URL、查询或上级目录；参数单独通过options传递。
     const parts = path.split("/");
@@ -25,17 +26,16 @@ export function useCoreRequest() {
     })) throw new Error("Core请求必须使用本Core内的规范路径");
     const current = live.current;
     const boundary = lifecycle.current;
-    if (!boundary || boundary.generation !== generation || generation !== JSON.stringify([current.lifetimeKey, current.page.key]) || boundary.controller.signal.aborted
+    if (currentSessionEpoch() !== epoch || !boundary || boundary.generation !== generation || generation !== JSON.stringify([current.lifetimeKey, current.page.key]) || boundary.controller.signal.aborted
       || !current.canAccess(current.page.coreId, current.page.definition.permissions))
       throw new DOMException("当前Core页面已失效", "AbortError");
-    const epoch = currentSessionEpoch();
     const signal = options.signal ? AbortSignal.any([options.signal, boundary.controller.signal]) : boundary.controller.signal;
     const result = await request<T>(`/cores/${current.page.coreId}${path}`, { ...options, signal });
     if (signal.aborted || currentSessionEpoch() !== epoch || generation !== JSON.stringify([live.current.lifetimeKey, live.current.page.key])
       || !live.current.canAccess(current.page.coreId, current.page.definition.permissions))
       throw new DOMException("原Core请求不能写入已变化的页面", "AbortError");
     return result;
-  }, [generation, request, currentSessionEpoch]);
+  }, [generation, epoch, request, currentSessionEpoch]);
   return {
     request: send,
     queryKey: useMemo(() => ["core", host.page.coreId, host.lifetimeKey, host.page.key] as const,

@@ -18,6 +18,15 @@
 
 源码取出时包含本应用、`config/environment.cjs` 及其类型声明、公共 `core-contracts`、`platform-contracts`、`platform-admin`、`shared`、`ui-arc`、`ui-motiq` 与两个 Core 的已选依赖闭包。依赖声明见[应用包](package.json)，构建接点使用公共正式出口。
 
+## 页面与动作边界
+
+- 宿主接受新的租户或经营空间投影时，通过原会话切换及 `session.invalidateBusinessScope()` 更新同一代次、请求信号和查询缓存。公共路由按登记参数、当前 Core 授权、成员分配与真实绑定生成页面生命周期。[组合参数](../../packages/platform-admin/src/application-context.ts) · [页面路由](../../packages/platform-admin/src/core/CoreRoutes.tsx)
+- 动作执行时即时读取同一 QueryClient 的当前目录、绑定与就绪投影，并复核原会话。当前 Core 的授权或绑定修订变化使旧回调失效，其他 Core 的目录更新保留当前页的草稿和原操作。配置页沿当前获权入口读取首次设置状态。[目录](../../packages/platform-admin/src/core/useCoreSession.ts) · [范围](../../packages/platform-admin/src/core/useCoreScope.ts) · [请求](../../packages/platform-admin/src/core/useCoreRequest.ts)
+- 按钮和表单回车共用一次保存，异步校验值及完成反馈绑定原表单实例与页面代次。替换或卸载后，旧保存结果以 `AbortError` 返回。初始化结果未知时继续保留原操作号，恢复后沿原收据接口核对。[表单](../../packages/platform-admin/src/core/useCoreForm.ts) · [初始化与核对](../../packages/platform-admin/src/core/useCoreBinding.ts)
+- Core 通过页面声明进入原页头、按钮、确认和保存适配。保留标签页沿公共 `WorkspaceHeaderScope` 提供活动状态，非当前页的确认与保存回调在派发前关闭。公共 `PageHeading` 由当前页在 layout 认领浏览器标题，退出时仅释放自己的认领并回退品牌，保留已被下一页认领的标题。标签页中的原表单和操作状态随正文保留。[页面适配](../../packages/platform-admin/src/core/CorePage.tsx) · [页头](../../packages/platform-admin/src/components/PageHeading.tsx) · [活动范围与 portal](../../packages/platform-admin/src/components/workspace/WorkspaceHeader.tsx)
+
 ## 验证边界
 
-本片验收分别记录必要类型检查、真实页面源码内存构建与离线授权、范围、导航和生命周期冒烟。部署锁、已安装包解析、服务端 Core 目录及就绪响应使用明确 fixture。真实双 Core API 装配、持久化、浏览器实页、干净标准包安装与正式多 Core 验收由对应宿主阶段继续完成。
+本片完成公共后台及双 Core 示例的源码类型检查、原工单与订单表单定向用例，以及真实公共组合、路由和 hooks 源码的离线授权、范围与生命周期冒烟。目录及就绪响应、业务请求和 Form 使用明确 fixture，查询缓存使用原 QueryClient。零 Core 与双 Core 均核对同一公共壳、runtime、QueryClient 和唯一 Router。真实双 Core API 装配、持久化、浏览器实页、生产构建、干净标准包安装与正式多 Core 验收由对应宿主阶段继续完成。
+
+页头退出沿上述组合与 hooks 证据，另以四组离线反例核对非当前页写标题、卸页等待下一路由、旧确认及旧保存校验的关闭。标题清理包含 A 与 B 同标题时的 owner 区分，旧动作包含退出再返回同一标签页后的回调失效及当前新操作。该验证使用源码 hook facade 与明确 document fixture。
