@@ -1,7 +1,8 @@
 /** Enterprise exchange expense requests and approvals use original order locks.
  * Core owns execution with this service participating in its bound transaction. */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { rentalExchangePreviewComparable } from "./exchange-inspection-preparation";
 import type { EnterpriseExchangeConfirmationResult, ConfirmEnterpriseExchangeExpense, CloseEnterpriseExchangeRequest, EnterpriseExchangeRequestOriginalResult, EnterpriseExchangeRequestClosureReceipt, EnterpriseExchangeApprovalView, RequestEnterpriseExchangeApproval, DecideEnterpriseExchangeApproval, EnterpriseMerchantExchangeChoices, EnterpriseMerchantExchangePreparation } from "./enterprise-exchange";
@@ -45,7 +46,7 @@ export class EnterpriseExchangeApprovalService {
     private readonly inspectionReceipts?: RentalIdempotentActionService) {}
 
   private rows(context: Pick<ClientRequestContext, "tenantId" | "workspaceId">, id: string, tx?: Prisma.TransactionClient) {
-    return (tx ?? this.prisma).$queryRaw<Approval[]>(Prisma.sql`SELECT * FROM enterprise_exchange_approvals WHERE tenantId=${context.tenantId} AND workspaceId=${context.workspaceId} AND id=${id} ${tx ? Prisma.sql`FOR UPDATE` : Prisma.empty}`);
+    return (tx ?? this.prisma).$queryRaw<Approval[]>(prismaRuntime.sql`SELECT * FROM enterprise_exchange_approvals WHERE tenantId=${context.tenantId} AND workspaceId=${context.workspaceId} AND id=${id} ${tx ? prismaRuntime.sql`FOR UPDATE` : prismaRuntime.empty}`);
   }
   private owns(context: ClientRequestContext, row?: Approval) {
     if (!row || row.applicantCustomerId !== context.customerId || row.workspaceId !== context.workspaceId || requireRequestWorkspaceId() !== context.workspaceId) throw new NotFoundException("本人当前空间换货申请不存在");
@@ -53,7 +54,7 @@ export class EnterpriseExchangeApprovalService {
   /** Lookup does not lock an approval ahead of its original order and does not
    * authorize confirmation or execution. Recovery repeats it after Order/Workspace. */
   async readHistoryReference(context: ClientRequestContext, id: string, tx: RentalEnterpriseAuthorityTransaction) {
-    const rows = await tx.$queryRaw<Approval[]>(Prisma.sql`SELECT * FROM enterprise_exchange_approvals WHERE tenantId=${context.tenantId} AND workspaceId=${context.workspaceId} AND id=${id}`);
+    const rows = await tx.$queryRaw<Approval[]>(prismaRuntime.sql`SELECT * FROM enterprise_exchange_approvals WHERE tenantId=${context.tenantId} AND workspaceId=${context.workspaceId} AND id=${id}`);
     const row = rows[0]; this.owns(context, row);
     if (rows.length !== 1 || !row || row.id !== id || !row.orderId) throw new NotFoundException("原换货批准订单关联缺失");
     return { workspaceId: row.workspaceId, orderId: row.orderId,
@@ -142,7 +143,7 @@ export class EnterpriseExchangeApprovalService {
       if (after.workspaceId !== before.workspaceId || coreScope.workspaceId !== before.workspaceId) throw new ForbiddenException("原换货读取空间已变化");
       return structuredClone({ order, approvals, preparations, consents, scope });
     };
-    const snapshot = await this.prisma.$transaction(capture, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    const snapshot = await this.prisma.$transaction(capture, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
     // Serialize persisted dates before fingerprinting so changes to expiry or
     // confirmation times remain visible alongside the immutable payloads.
     const snapshotHash = requestFingerprint(JSON.parse(JSON.stringify(snapshot)));
@@ -201,7 +202,7 @@ export class EnterpriseExchangeApprovalService {
                 ...(consent && captured ? { consentConfirmedAt: consent.confirmedAt, binding: { approvalId: row.id, expectedApprovalRevision: row.revision,
                   expectedOrderUpdatedAt: row.expectedOrderUpdatedAt, preparationId: material.id, preparationHash: original.payloadHash,
                   consentId: consent.id, consentOperationKey: consent.operationKey } } : {}) };
-            }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+            }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
             checkedPreparations.set(material.id, checked);
           }
           entry.preparations.push({ ...checked, ...(checked.binding ? { binding: { ...checked.binding, approvalId: row.id, expectedApprovalRevision: row.revision } } : {}) });
@@ -210,7 +211,7 @@ export class EnterpriseExchangeApprovalService {
       }
       choices.push(entry);
     }
-    const after = await this.prisma.$transaction(capture, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    const after = await this.prisma.$transaction(capture, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
     if (requestFingerprint(JSON.parse(JSON.stringify(after))) !== snapshotHash) throw new ConflictException("原订单、批准、检查准备或本人同意在读取期间发生变化");
     if (choices.some(entry => entry.approval.state !== this.view(snapshot.approvals.find(row => row.id === entry.approval.id)!).state)) {
       throw new ConflictException("原换货批准在读取期间已到期，请重新读取");
@@ -316,7 +317,7 @@ export class EnterpriseExchangeApprovalService {
       await this.commands.customer(context, tx);
       return { orderId: order.id, orderNo: order.orderNo, expectedOrderUpdatedAt: order.updatedAt, workspaceId: context.workspaceId, applicantCustomerId: context.customerId,
         ...result, selectedAllocationId: query.allocationId, selectedReplacementItemGroupId: query.replacementItemGroupId, reservation: "not_reserved" };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
   }
   private async prepared(context: ClientRequestContext, orderId: string, expected: string, intent: EnterpriseExchangeIntent, tx: Prisma.TransactionClient) {
     const { order, basis } = await this.ownOrder(context, orderId, tx);

@@ -1,10 +1,11 @@
 /** 所选Rental的核心履约HTTP入口。原Guard/ALS形成可信身份，业务、事务和原收据由同一应用实例裁定。 */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import type { SystemUserRow } from "@rental-os/platform-contracts";
 import { RENTAL_HTTP_CORE, RENTAL_HTTP_ALLOCATION, RENTAL_HTTP_BUSINESS, RENTAL_HTTP_ORDER_CONFIRMATION, RENTAL_HTTP_IDEMPOTENT, RENTAL_HTTP_REPORTS, RENTAL_HTTP_DATABASE, RENTAL_HTTP_SERVICE_CAPACITIES, RENTAL_HTTP_FUNDING, RENTAL_HTTP_DOCUMENTS, RENTAL_HTTP_OPERATION_LOGS, RENTAL_HTTP_CORPORATE_SETTLEMENT, RENTAL_HTTP_MEMBERSHIPS, RENTAL_HTTP_FAILURE_EVENTS, RENTAL_HTTP_EXCHANGE_PREVIEW, RENTAL_HTTP_EXCHANGE_INSPECTIONS, RENTAL_HTTP_EXCHANGE_INSPECTION_MEDIA, type RentalHttpApplications } from "./http-applications";
 import { rentalHttpBusinessContext, rentalHttpIdempotencyKey as idempotencyKeyOf } from "./http-context";
 import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Inject, Logger, Optional, Param, Patch, Post, Put, Query, Req, Res, UploadedFile, UseInterceptors } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import {
   RentalCoreOrderStatus,
   type RentalOrderChangePreview,
@@ -648,7 +649,7 @@ export class RentalCoreController {
           preAuthMultiple: row.preAuthMultiple
         }))
       }, req.user.displayName, tx, true);
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
     this.service.commitPricingGroup(group);
     this.business.commitPricingPlan(tenantId, { ...(await this.context(tenantId)), pricingGroups: [group, ...this.service.listPricingGroups(tenantId).filter((row) => row.id !== group.id)] }, plan);
     return this.committed(tenantId, group);
@@ -1073,7 +1074,7 @@ export class RentalCoreController {
         metadata: { fields: ["recipient", "phone", "address"], permission },
         requireSuccess: true
       });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
     return snapshot;
   }
   @Get("orders/:id") order(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.service.getOrder(req.user.tenantId, id); }

@@ -1,8 +1,9 @@
 /** Curated enterprise order reads use original subjects and disclosure evidence.
  * Current grants and client workspace are checked before and after IO. Rental
  * policies govern new use separately. Money, stock and payment states remain Core facts. */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { ENTERPRISE_ORDER_EXPORT_LIMIT, ENTERPRISE_ORDER_GROUPS, type EnterpriseOrderDetail, type EnterpriseOrderDetailResponse,
   type EnterpriseOrderExportQuery, type EnterpriseOrderExportResponse, type EnterpriseOrderGroup,
   type EnterpriseOrderIndex, type EnterpriseOrderReadScope, type EnterpriseOrdersQuery, type EnterpriseOrdersResponse } from "./enterprise";
@@ -81,7 +82,7 @@ export class EnterpriseOrderReaderService {
   }
 
   private paid(corporateId: string) {
-    return Prisma.sql`((o.contractSubjectCustomerId=${corporateId} AND o.payerSubjectCustomerId=${corporateId})
+    return prismaRuntime.sql`((o.contractSubjectCustomerId=${corporateId} AND o.payerSubjectCustomerId=${corporateId})
       OR (o.contractSubjectCustomerId IS NULL AND o.payerSubjectCustomerId IS NULL AND o.userSubjectCustomerId IS NULL
         AND o.customerType='corporate' AND o.customerId=${corporateId}))`;
   }
@@ -91,7 +92,7 @@ export class EnterpriseOrderReaderService {
   async financialRequestOrder(tenantId: string, corporateId: string, workspaceId: string, orderId: string, tx: Prisma.TransactionClient) {
     if (![tenantId, corporateId, workspaceId, orderId].every(reference)) throw new BadRequestException("原回款核对对象引用无效");
     const rows = await tx.$queryRaw<Array<{ id: string; tenantId: string; workspaceId: string; currency: string; updatedAt: Date;
-      customerType: string; customerId: string | null; contractSubjectCustomerId: string | null; payerSubjectCustomerId: string | null; userSubjectCustomerId: string | null }>>(Prisma.sql`
+      customerType: string; customerId: string | null; contractSubjectCustomerId: string | null; payerSubjectCustomerId: string | null; userSubjectCustomerId: string | null }>>(prismaRuntime.sql`
       SELECT o.id,o.tenantId,o.workspaceId,o.currency,o.updatedAt,o.customerType,o.customerId,
         o.contractSubjectCustomerId,o.payerSubjectCustomerId,o.userSubjectCustomerId
       FROM rental_orders o JOIN business_workspaces w ON w.tenantId=o.tenantId AND w.id=o.workspaceId AND w.status='ACTIVE'
@@ -108,7 +109,7 @@ export class EnterpriseOrderReaderService {
   }
 
   private personalBenefit(corporateId: string) {
-    return Prisma.sql`(JSON_UNQUOTE(JSON_EXTRACT(o.membershipSnapshot,'$.bookingIdentity'))='enterprise_employee'
+    return prismaRuntime.sql`(JSON_UNQUOTE(JSON_EXTRACT(o.membershipSnapshot,'$.bookingIdentity'))='enterprise_employee'
       AND JSON_UNQUOTE(JSON_EXTRACT(o.membershipSnapshot,'$.corporateCustomerId'))=${corporateId}
       AND JSON_TYPE(JSON_EXTRACT(o.membershipSnapshot,'$.enterpriseContractAndPayer'))='BOOLEAN'
       AND JSON_UNQUOTE(JSON_EXTRACT(o.membershipSnapshot,'$.enterpriseContractAndPayer'))='false'
@@ -124,14 +125,14 @@ export class EnterpriseOrderReaderService {
   }
 
   private employeeName() {
-    const personId = Prisma.sql`JSON_UNQUOTE(JSON_EXTRACT(o.membershipSnapshot,'$.personalCustomerId'))`;
-    const name = Prisma.sql`JSON_UNQUOTE(JSON_EXTRACT(o.membershipSnapshot,'$.personalCustomerName'))`;
-    const originalPersonal = Prisma.sql`CAST(o.customerType AS BINARY)=CAST('personal' AS BINARY)
+    const personId = prismaRuntime.sql`JSON_UNQUOTE(JSON_EXTRACT(o.membershipSnapshot,'$.personalCustomerId'))`;
+    const name = prismaRuntime.sql`JSON_UNQUOTE(JSON_EXTRACT(o.membershipSnapshot,'$.personalCustomerName'))`;
+    const originalPersonal = prismaRuntime.sql`CAST(o.customerType AS BINARY)=CAST('personal' AS BINARY)
       AND CAST(o.customerId AS BINARY)=CAST(o.userSubjectCustomerId AS BINARY)`;
     // Search and count must use the exact public name projection. A snapshot
     // without its original user linkage cannot reveal a hidden name by a hit.
     // Binary comparisons keep persisted IDs exact under every database collation.
-    return Prisma.sql`CASE
+    return prismaRuntime.sql`CASE
       WHEN JSON_TYPE(JSON_EXTRACT(o.membershipSnapshot,'$.personalCustomerId'))='STRING'
         AND REGEXP_LIKE(${personId},'^[a-zA-Z0-9._:-]{1,191}$','c') THEN
         CASE WHEN CAST(o.userSubjectCustomerId AS BINARY)=CAST(${personId} AS BINARY)
@@ -150,13 +151,13 @@ export class EnterpriseOrderReaderService {
 
   private predicate(context: ClientRequestContext, corporateId: string, group?: EnterpriseOrderGroup, keyword?: string) {
     const paid = this.paid(corporateId), benefit = this.personalBenefit(corporateId);
-    const responsibility = group === "enterprise_paid" ? paid : group === "personal_benefit" ? benefit : Prisma.sql`(${paid} OR ${benefit})`;
-    const search = keyword ? Prisma.sql`AND (LOCATE(${keyword},o.orderNo)>0
+    const responsibility = group === "enterprise_paid" ? paid : group === "personal_benefit" ? benefit : prismaRuntime.sql`(${paid} OR ${benefit})`;
+    const search = keyword ? prismaRuntime.sql`AND (LOCATE(${keyword},o.orderNo)>0
       OR LOCATE(${keyword},${this.employeeName()})>0
-      OR EXISTS (SELECT 1 FROM rental_order_lines line WHERE line.orderId=o.id AND LOCATE(${keyword},line.itemGroupName)>0))` : Prisma.empty;
+      OR EXISTS (SELECT 1 FROM rental_order_lines line WHERE line.orderId=o.id AND LOCATE(${keyword},line.itemGroupName)>0))` : prismaRuntime.empty;
     // The same visibility predicate applies before count, search and pagination.
     // Historical employees need no present-day relationship to remain in the index.
-    return Prisma.sql`o.tenantId=${context.tenantId} AND o.workspaceId=${context.workspaceId}
+    return prismaRuntime.sql`o.tenantId=${context.tenantId} AND o.workspaceId=${context.workspaceId}
       AND EXISTS (SELECT 1 FROM business_workspaces workspace WHERE workspace.tenantId=o.tenantId AND workspace.id=o.workspaceId)
       AND ${responsibility} ${search}`;
   }
@@ -168,7 +169,7 @@ export class EnterpriseOrderReaderService {
     tx: RentalEnterpriseAuthorityTransaction, financialOnly: boolean): Promise<void> {
     this.principal(context);
     if (![corporateId, orderId].every(reference) || "$transaction" in tx) throw new BadRequestException("企业历史对象缺少原事务或有效引用");
-    const rows = await tx.$queryRaw<Array<{ id: string; tenantId: string; workspaceId: string }>>(Prisma.sql`
+    const rows = await tx.$queryRaw<Array<{ id: string; tenantId: string; workspaceId: string }>>(prismaRuntime.sql`
       SELECT o.id,o.tenantId,o.workspaceId FROM rental_orders o
       WHERE ${this.predicate(context, corporateId, financialOnly ? "enterprise_paid" : undefined)}
         AND CAST(o.id AS BINARY)=CAST(${orderId} AS BINARY)`);
@@ -177,7 +178,7 @@ export class EnterpriseOrderReaderService {
   }
 
   private columns(corporateId: string) {
-    return Prisma.sql`o.id,o.tenantId,o.workspaceId,o.orderNo,o.categoryCode,o.status,o.customerType,o.customerName,o.customerId,
+    return prismaRuntime.sql`o.id,o.tenantId,o.workspaceId,o.orderNo,o.categoryCode,o.status,o.customerType,o.customerName,o.customerId,
       o.contractSubjectCustomerId,o.payerSubjectCustomerId,o.userSubjectCustomerId,
       CASE WHEN ${this.paid(corporateId)} THEN 'enterprise_paid' ELSE 'personal_benefit' END AS \`group\`,
       ${this.employeeName()} AS employeeName,
@@ -194,7 +195,7 @@ export class EnterpriseOrderReaderService {
 
   private money(value: Prisma.Decimal | number | string | null | undefined) {
     if (value === null || value === undefined) return null;
-    if (typeof value !== "number" && typeof value !== "string" && !(value instanceof Prisma.Decimal)
+    if (typeof value !== "number" && typeof value !== "string" && !(value instanceof prismaRuntime.Decimal)
       || typeof value === "string" && !/^-?\d+(?:\.\d+)?$/u.test(value)) throw new ServiceUnavailableException("原订单金额类型不可核对");
     const amount = Number(value);
     if (!Number.isFinite(amount)) throw new ServiceUnavailableException("原订单金额不可核对");
@@ -271,13 +272,13 @@ export class EnterpriseOrderReaderService {
       || !Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 50 || keyword && keyword.length > 120) throw new BadRequestException("企业订单查询参数无效");
     const scope = await this.scope(context, corporateId), where = this.predicate(context, corporateId, group, keyword);
     const result = await this.prisma.$transaction(async tx => {
-      const count = await tx.$queryRaw<Array<{ total: bigint }>>(Prisma.sql`SELECT COUNT(*) AS total FROM rental_orders o WHERE ${where}`);
+      const count = await tx.$queryRaw<Array<{ total: bigint }>>(prismaRuntime.sql`SELECT COUNT(*) AS total FROM rental_orders o WHERE ${where}`);
       const total = Number(count[0]?.total);
       if (count.length !== 1 || !Number.isSafeInteger(total) || total < 0) throw new ServiceUnavailableException("企业订单计数不可核对");
-      const rows = await tx.$queryRaw<OrderRow[]>(Prisma.sql`SELECT ${this.columns(corporateId)} FROM rental_orders o WHERE ${where}
+      const rows = await tx.$queryRaw<OrderRow[]>(prismaRuntime.sql`SELECT ${this.columns(corporateId)} FROM rental_orders o WHERE ${where}
         ORDER BY o.createdAt DESC,o.id DESC LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`);
       return { total, items: rows.map(row => this.view(context, corporateId, row)) };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.RepeatableRead });
     await this.recheck(context, corporateId, scope);
     const response = { ...this.readScope(context, corporateId, scope), group, page, pageSize, ...result };
     await this.audit.record(context, corporateId, "orders.list", corporateId, group, result.items.length, response);
@@ -289,7 +290,7 @@ export class EnterpriseOrderReaderService {
     if (!reference(orderId)) throw new BadRequestException("订单引用无效");
     const scope = await this.scope(context, corporateId), where = this.predicate(context, corporateId);
     const order = await this.prisma.$transaction(async tx => {
-      const rows = await tx.$queryRaw<OrderRow[]>(Prisma.sql`SELECT ${this.columns(corporateId)} FROM rental_orders o WHERE ${where} AND o.id=${orderId} LIMIT 1`);
+      const rows = await tx.$queryRaw<OrderRow[]>(prismaRuntime.sql`SELECT ${this.columns(corporateId)} FROM rental_orders o WHERE ${where} AND o.id=${orderId} LIMIT 1`);
       const row = rows[0];
       if (!row) throw new NotFoundException("受权企业订单不存在");
       const index = this.view(context, corporateId, row), snapshot = this.membership(row);
@@ -317,7 +318,7 @@ export class EnterpriseOrderReaderService {
           quantity: line.quantity, cancelledQuantity: line.cancelledQuantity, amount: this.money(line.amount) })),
         chargeLines: this.charges(original.chargeLines, guaranteeRecorded),
         corporateBenefits: this.benefits(original.membershipBenefitEvaluations, guaranteeRecorded) } satisfies EnterpriseOrderDetail;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.RepeatableRead });
     await this.recheck(context, corporateId, scope);
     const response = { ...this.readScope(context, corporateId, scope), order };
     await this.audit.record(context, corporateId, "orders.detail", orderId, order.group, 1, response);
@@ -338,11 +339,11 @@ export class EnterpriseOrderReaderService {
     const items = await this.prisma.$transaction(async tx => {
       // A single snapshot supplies the complete applied filter. The probe rejects
       // oversized exports without combining changing pages or sending partial rows.
-      const rows = await tx.$queryRaw<OrderRow[]>(Prisma.sql`SELECT ${this.columns(corporateId)} FROM rental_orders o WHERE ${where}
+      const rows = await tx.$queryRaw<OrderRow[]>(prismaRuntime.sql`SELECT ${this.columns(corporateId)} FROM rental_orders o WHERE ${where}
         ORDER BY o.createdAt DESC,o.id DESC LIMIT ${ENTERPRISE_ORDER_EXPORT_LIMIT + 1}`);
       if (rows.length > ENTERPRISE_ORDER_EXPORT_LIMIT) throw new BadRequestException(`每次最多导出 ${ENTERPRISE_ORDER_EXPORT_LIMIT} 条，请缩小筛选范围`);
       return rows.map(row => this.view(context, corporateId, row));
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.RepeatableRead });
     await this.recheck(context, corporateId, scope);
     const latestExport = await this.access.requireAction(context, corporateId, "export:create");
     if (latestExport.membershipId !== exportGrant.membershipId || latestExport.permissionRevision !== exportGrant.permissionRevision) {

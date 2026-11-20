@@ -309,7 +309,7 @@ HTTP入口从 `/http-workspace-capabilities`、`/http-staff-payments` 导入；`
 
 `RentalIntegrationsHttpModule.register` 使用宿主工厂提供同一运营应用，挂载九个 `/integrations` 操作。原 Nest 服务、仓储与 Controller 提供构造兼容入口，打印从公共 `/jobs/print` 消费该应用的打印参加者。交换任务的模拟结果包含 `externalCallSkipped`、文件元数据及校验报告字段，生产调用沿应用和公共台账门禁裁定。日志失败向外传播，已登记的文件和任务供原键核对。[HTTP 组合](src/http-integrations.ts) · [原兼容入口](../../apps/api/src/modules/integrations/README.md) · [公共作业](../platform-server/src/modules/jobs/README.md) · [租户隔离验证](../../tests/integrations-memory-scope.test.cjs)
 
-核心/业务配置的私有MySQL声明使用所选宿主schema的生成类型，当前仍对应原API组合schema。准备已配置的独立开发环境后，先沿原宿主执行 `npm run db:generate`，再构建本包；它只生成声明/客户端，不执行迁移。完整Core schema与迁移链继续拆分。领域根出口及公共底座构建不加载这些MySQL适配。[当前schema](../../apps/api/prisma/schema.prisma) · [生成命令](../../apps/api/package.json)
+SQL、Decimal、Null单例、错误类和隔离级别通过正式 `@rental-os/platform-server/prisma-runtime` 复用官方运行库，不加载默认生成Client的运行值。业务枚举保持原字面值并由生成类型约束；核心/业务私有MySQL声明仍使用所选宿主schema的生成类型。准备已配置的独立开发环境后，先沿原宿主执行 `npm run db:generate`，再构建本包；它只生成声明/客户端，不执行迁移。完整Core schema与迁移链继续拆分。领域根出口及公共底座构建不加载这些MySQL适配。[当前schema](../../apps/api/prisma/schema.prisma) · [生成命令](../../apps/api/package.json)
 
 数据发行从 `createRentalDataRelease` 核对受控包的固定版本、可读范围和迁移原文。每项使用 `rental.` 命名空间，文件位于 `prisma/migrations/<name>/migration.sql` 或 `migrations/<name>/migration.sql`，其中 `<name>` 对应原 Prisma `migration_name`。摘要按原始字节计算，换行及编码变化均须作为发行差异处理。结果中的数据合同、账名称和 SQL 保持同一顺序，供宿主接入数据计划。[发行合同与原文核对](src/data.ts)
 

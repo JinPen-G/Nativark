@@ -1,7 +1,8 @@
 /** Original own-order coordination source, requests, merchant opinions and exact receipts.
  * Records an administrative request only; never changes Core, subjects, funds or grants. */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { ENTERPRISE_RENTAL_HANDOFF_REQUEST_STATES, enterpriseRentalHandoffMaterialSnapshot, type EnterpriseRentalHandoffOrder, type EnterpriseRentalHandoffOrderSource, type EnterpriseRentalHandoffMerchantQueue, type CreateEnterpriseRentalHandoffRequest, type EnterpriseRentalHandoffCreated, type EnterpriseRentalHandoffMaterial, type EnterpriseRentalHandoffView, type EnterpriseOperationResult, type EnterpriseRentalHandoffList, type WithdrawEnterpriseRentalHandoffRequest, type EnterpriseRentalHandoffWithdrawn, type EnterpriseRentalHandoffMerchantView, type ReviewEnterpriseRentalHandoffRequest, type EnterpriseRentalHandoffReviewed } from "./enterprise-workflows";
 import type { SystemUserRow } from "@rental-os/platform-contracts";
@@ -75,7 +76,7 @@ export class EnterpriseRentalHandoffService {
     const ids = orders.items.map(row => row.id);
     if (orders.items.length > 50 || !Number.isSafeInteger(orders.total) || orders.total < orders.items.length || ids.some(id => !reference(id))
       || new Set(ids).size !== ids.length || orders.items.some(row => row.tenantId !== owner.tenantId)) throw new ConflictException("受权原订单页不可核对");
-    const rows = ids.length ? await this.prisma.$queryRaw<Row[]>(Prisma.sql`SELECT * FROM enterprise_rental_handoff_requests WHERE tenantId=${owner.tenantId} AND workspaceId=${owner.workspaceId} AND orderId IN (${Prisma.join(ids)}) AND state='pending' ORDER BY createdAt DESC,id DESC LIMIT 201`) : [];
+    const rows = ids.length ? await this.prisma.$queryRaw<Row[]>(prismaRuntime.sql`SELECT * FROM enterprise_rental_handoff_requests WHERE tenantId=${owner.tenantId} AND workspaceId=${owner.workspaceId} AND orderId IN (${prismaRuntime.join(ids)}) AND state='pending' ORDER BY createdAt DESC,id DESC LIMIT 201`) : [];
     assertOwner();
     if (rows.length > 200 || new Set(rows.map(row => row.id)).size !== rows.length) throw new ConflictException("本页交接请求超出有界范围，请按原申请核对");
     const items: EnterpriseRentalHandoffMerchantView[] = [];
@@ -95,7 +96,7 @@ export class EnterpriseRentalHandoffService {
     const assertOwner = () => { this.scope(context); if (JSON.stringify([context.tenantId, context.workspaceId, context.workspaceCode, context.customerId]) !== key) throw new ForbiddenException("原客户或服务已变化"); };
     const result = await this.prisma.$transaction<EnterpriseRentalHandoffOrderSource>(async tx => {
       await this.commands.customer(context, tx, false); assertOwner();
-      const rows = await tx.$queryRaw<Array<{ id: string; status: string; updatedAt: Date }>>(Prisma.sql`SELECT id,status,updatedAt FROM rental_orders WHERE tenantId=${context.tenantId} AND workspaceId=${context.workspaceId} AND (customerId=${context.customerId} OR JSON_UNQUOTE(JSON_EXTRACT(membershipSnapshot,'$.personalCustomerId'))=${context.customerId}) AND JSON_UNQUOTE(JSON_EXTRACT(membershipSnapshot,'$.bookingIdentity'))='enterprise_employee' AND status IN (${Prisma.join([...ENTERPRISE_RENTAL_HANDOFF_REQUEST_STATES])}) ORDER BY createdAt DESC,id DESC LIMIT 201`);
+      const rows = await tx.$queryRaw<Array<{ id: string; status: string; updatedAt: Date }>>(prismaRuntime.sql`SELECT id,status,updatedAt FROM rental_orders WHERE tenantId=${context.tenantId} AND workspaceId=${context.workspaceId} AND (customerId=${context.customerId} OR JSON_UNQUOTE(JSON_EXTRACT(membershipSnapshot,'$.personalCustomerId'))=${context.customerId}) AND JSON_UNQUOTE(JSON_EXTRACT(membershipSnapshot,'$.bookingIdentity'))='enterprise_employee' AND status IN (${prismaRuntime.join([...ENTERPRISE_RENTAL_HANDOFF_REQUEST_STATES])}) ORDER BY createdAt DESC,id DESC LIMIT 201`);
       assertOwner();
       if (rows.length > 200 || new Set(rows.map(row => row.id)).size !== rows.length) throw new ConflictException("原企业身份租赁超出有界范围，请按已知原单核对");
       const items: EnterpriseRentalHandoffOrder[] = [];
@@ -108,7 +109,7 @@ export class EnterpriseRentalHandoffService {
       }
       await this.commands.customer(context, tx, false); assertOwner();
       return { state: "available", coverage: "current_workspace_original_own_enterprise_employee_orders", items };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 10000, timeout: 15000 });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.RepeatableRead, maxWait: 10000, timeout: 15000 });
     // RepeatableRead keeps historical order rows coherent, but cannot attest to a
     // session revoked after its snapshot. Recheck fresh credentials after release,
     // outside the transaction (also safe with a one-connection pool).

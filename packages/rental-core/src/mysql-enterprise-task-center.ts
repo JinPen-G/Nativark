@@ -1,7 +1,8 @@
 /** Current customer's task/receipt projections from durable originals, not a new
  * notification sender. Corporate queues recheck their exact action and workspace. */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, ConflictException, ForbiddenException, ServiceUnavailableException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import type { EnterpriseManagedCorporate } from "./enterprise";
 import { ENTERPRISE_REVIEW_REQUEST_TYPES } from "./enterprise-workflows";
 import { enterpriseOwnEmployeePolicyMessagesSnapshot, ENTERPRISE_EMPLOYEE_POLICY_MESSAGE_UNAVAILABLE, type EnterpriseOwnEmployeePolicyMessages, enterpriseOwnCorporateStatusMessagesSnapshot, type EnterpriseOwnCorporateStatusMessages, enterpriseOwnManagementReviewMessagesSnapshot, type EnterpriseOwnManagementReviewMessages, enterpriseOwnJoinReviewMessagesSnapshot, type EnterpriseOwnJoinReviewMessages, enterpriseOwnApplicationReviewMessagesSnapshot, type EnterpriseOwnApplicationReviewMessages, enterpriseOwnRetainedMergeMessagesSnapshot, type EnterpriseOwnRetainedMergeMessages, enterpriseOwnStatusMessagesSnapshot, type EnterpriseOwnStatusMessages, enterpriseOwnTransferMessagesSnapshot, type EnterpriseOwnTransferMessages, enterpriseOwnRelationshipMessagesSnapshot, type EnterpriseOwnRelationshipMessages, enterpriseApprovalNoticesSnapshot, type EnterpriseApprovalNotices, enterpriseOwnMessagesSnapshot, ENTERPRISE_OWN_MESSAGE_UNAVAILABLE, type EnterpriseOwnMessages, type EnterpriseAuditView, type EnterpriseTaskCenter, type EnterpriseTaskItem } from "./enterprise-workflows";
@@ -237,7 +238,7 @@ export class EnterpriseTaskCenterService {
       WHERE r.tenantId=${context.tenantId} AND r.recipientCustomerId=${context.customerId}
       ORDER BY r.capturedAt DESC,r.historyId DESC LIMIT 201`;
     } catch(error) {
-      if(error instanceof Prisma.PrismaClientKnownRequestError && error.code==="P2010" && ["1146","1054"].includes(String(error.meta?.code)))throw new ServiceUnavailableException("企业状态原接收人消息来源尚未装配");
+      if(error instanceof prismaRuntime.PrismaClientKnownRequestError && error.code==="P2010" && ["1146","1054"].includes(String(error.meta?.code)))throw new ServiceUnavailableException("企业状态原接收人消息来源尚未装配");
       throw error;
     }
     assertScope();await this.commands.customer(context,this.prisma as unknown as Prisma.TransactionClient,false);assertScope();
@@ -261,18 +262,18 @@ export class EnterpriseTaskCenterService {
     const before=corporateId ? await this.access.requireAction(context,corporateId,"approvals:review") : undefined;assertScope();
     // Trusted ownership/current review restrictions are applied before each 201
     // probe. No quote, order, preview, amount or current employee data is selected.
-    const visibility=corporateId ? Prisma.sql`a.corporateCustomerId=${corporateId} AND a.applicantCustomerId<>${context.customerId} AND a.state='pending' AND a.expiresAt>NOW(3)` : Prisma.sql`a.applicantCustomerId=${context.customerId}`;
-    const feedback=corporateId ? Prisma.sql`NULL` : Prisma.sql`a.decisionReason`;
+    const visibility=corporateId ? prismaRuntime.sql`a.corporateCustomerId=${corporateId} AND a.applicantCustomerId<>${context.customerId} AND a.state='pending' AND a.expiresAt>NOW(3)` : prismaRuntime.sql`a.applicantCustomerId=${context.customerId}`;
+    const feedback=corporateId ? prismaRuntime.sql`NULL` : prismaRuntime.sql`a.decisionReason`;
     type Row={tenantId:string;workspaceId:string;corporateCustomerId:string;applicantCustomerId:string;id:string;noticeKind:string;state:string;revision:number;createdAt:Date;expiresAt:Date;decisionReason:string|null};
-    const booking=await this.prisma.$queryRaw<Row[]>(Prisma.sql`
+    const booking=await this.prisma.$queryRaw<Row[]>(prismaRuntime.sql`
       SELECT a.tenantId,a.workspaceId,a.corporateCustomerId,a.applicantCustomerId,a.id,'booking_approval' AS noticeKind,a.state,a.revision,a.createdAt,a.expiresAt,NULL AS decisionReason
       FROM enterprise_booking_approvals a WHERE a.tenantId=${context.tenantId} AND a.workspaceId=${context.workspaceId} AND ${visibility}
       ORDER BY a.createdAt DESC,a.id DESC LIMIT 201`);
-    const extensions=await this.prisma.$queryRaw<Row[]>(Prisma.sql`
+    const extensions=await this.prisma.$queryRaw<Row[]>(prismaRuntime.sql`
       SELECT a.tenantId,a.workspaceId,a.corporateCustomerId,a.applicantCustomerId,a.id,'extension_approval' AS noticeKind,a.state,a.revision,a.createdAt,a.expiresAt,${feedback} AS decisionReason
       FROM enterprise_extension_approvals a WHERE a.tenantId=${context.tenantId} AND a.workspaceId=${context.workspaceId} AND ${visibility}
       ORDER BY a.createdAt DESC,a.id DESC LIMIT 201`);
-    const exchanges=await this.prisma.$queryRaw<Row[]>(Prisma.sql`
+    const exchanges=await this.prisma.$queryRaw<Row[]>(prismaRuntime.sql`
       SELECT a.tenantId,a.workspaceId,a.corporateCustomerId,a.applicantCustomerId,a.id,'exchange_approval' AS noticeKind,a.state,a.revision,a.createdAt,a.expiresAt,${feedback} AS decisionReason
       FROM enterprise_exchange_approvals a WHERE a.tenantId=${context.tenantId} AND a.workspaceId=${context.workspaceId} AND ${visibility}
       ORDER BY a.createdAt DESC,a.id DESC LIMIT 201`);

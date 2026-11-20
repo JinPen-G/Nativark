@@ -1,8 +1,9 @@
 /** Rental preparation and own-receipt reads. Owns authorization/revision
  * transactions; never activates staged entities, capabilities or bindings. */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, ConflictException, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import type { RentalCategoryAdoptionStorage, RentalCategoryAdoptionCapabilities, RentalCategoryAdoptionHooks, RentalCategoryAdoptionCommercial, RentalCategoryAdoptionAuthority, RentalCategoryAdoptionAvailability } from "./category-adoption-ports";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { CATEGORY_PREPARATION_LIMITS, type CategoryCapabilityPreparationPatch, type CategoryEntityPreparationPatch, type CategoryPreparationBatchReadResult, type CategoryPreparationEntitiesQuery, type CategoryPreparationEntityPage, type CategoryPreparationSaveResult, type SaveCategoryPreparationBatchRequest, type SaveCategoryPreparationRequest } from "./category-governance";
 import { RENTAL_CAPABILITY_CODES, type RentalCapability, type RentalCapabilityConfig, type RentalCapabilityLifecycleStatus } from "./contracts";
@@ -44,8 +45,8 @@ export class CategoryAdoptionPreparationService {
       const result = await run(tx);
       await access.revalidate();
       return result;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted }).catch(error => {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted }).catch(error => {
+      if (error instanceof prismaRuntime.PrismaClientKnownRequestError && error.code === "P2034") {
         throw new ConflictException("权限或经营资料发生并发冲突，本事务未完成；请核对原批次收据及当前准备，保留原操作键");
       }
       throw error;
@@ -81,7 +82,7 @@ export class CategoryAdoptionPreparationService {
     if (!identity) throw new NotFoundException("经营空间不存在");
     // Same lock order as governance and final adoption: identity/policy, then space.
     const policy = await assertCategoryAdoptionAllowed(tx, user.tenantId, identity.categoryCode, targetId, operation as "upgrade" | "restore");
-    await tx.$queryRaw(Prisma.sql`SELECT id FROM business_workspaces WHERE tenantId = ${user.tenantId} AND id = ${workspaceId} FOR UPDATE`);
+    await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM business_workspaces WHERE tenantId = ${user.tenantId} AND id = ${workspaceId} FOR UPDATE`);
     const workspace = await tx.businessWorkspace.findFirst({ where: { id: workspaceId, tenantId: user.tenantId, status: "ACTIVE" } });
     if (!workspace?.categoryVersionId) throw new ConflictException("经营空间不可用或尚未绑定版本");
     if (workspace.categoryCode !== identity.categoryCode || workspace.categoryVersionId === targetId) throw new ConflictException("目标版本已采用或品类身份已变化");

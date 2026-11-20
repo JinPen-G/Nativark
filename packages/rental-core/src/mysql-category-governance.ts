@@ -2,8 +2,9 @@
  * Requests are detached before waits so keys, writes and audits share one input.
  * Writes reuse original platform identity/permission reads in one transaction;
  * tenant business facts and production enablement remain outside this service. */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { createHash, randomUUID } from "node:crypto";
 import { RENTAL_CAPABILITY_MODULES, RENTAL_CORE_CAPABILITY_CODES, RENTAL_PRICING_UNIT_CODES, isRentalCategoryCode, type RentalCategoryCode } from "./contracts";
 import { CATEGORY_DRAFT_SECTIONS, CATEGORY_GOVERNANCE_PERMISSIONS as P,
@@ -95,9 +96,9 @@ export class CategoryGovernanceService {
         // Permission reads may wait too; expiry must be checked after the last await.
         if (signal.aborted || after.expiresAt <= Math.floor(Date.now() / 1000)) throw new UnauthorizedException("平台会话已到期，请核对原品类操作结果");
         return result;
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 10000, timeout: 30000 });
+      }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 10000, timeout: 30000 });
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
+      if (error instanceof prismaRuntime.PrismaClientKnownRequestError && error.code === "P2034") {
         throw new ConflictException("平台身份或品类请求发生并发冲突，请保留原输入核对原结果");
       }
       throw error;
@@ -189,11 +190,11 @@ export class CategoryGovernanceService {
   private audit(tx: Prisma.TransactionClient, code: RentalCategoryCode, versionId: string | undefined, action: string, user: SystemUserRow, reason: string, before: unknown, after: unknown, id: string = randomUUID()) {
     if (!reason?.trim() || reason.length > 512) throw new BadRequestException("必须填写变更原因（最多 512 字）");
     return tx.rentalCategoryGovernanceAudit.create({ data: { id, categoryCode: code, versionId, action, actorId: user.id, reason: reason.trim(),
-      before: before === undefined ? Prisma.JsonNull : JSON.parse(JSON.stringify(before)),
-      after: after === undefined ? Prisma.JsonNull : JSON.parse(JSON.stringify(after)) } });
+      before: before === undefined ? prismaRuntime.JsonNull : JSON.parse(JSON.stringify(before)),
+      after: after === undefined ? prismaRuntime.JsonNull : JSON.parse(JSON.stringify(after)) } });
   }
   private async lockedCategory(tx: Prisma.TransactionClient, code: RentalCategoryCode) {
-    await tx.$queryRaw(Prisma.sql`SELECT code FROM rental_category_definitions WHERE code = ${code.toLowerCase()} FOR UPDATE`);
+    await tx.$queryRaw(prismaRuntime.sql`SELECT code FROM rental_category_definitions WHERE code = ${code.toLowerCase()} FOR UPDATE`);
     const row = await tx.rentalCategoryDefinition.findUnique({ where: { code } });
     if (!row) throw new NotFoundException("租赁品类不存在");
     return row;
@@ -262,7 +263,7 @@ export class CategoryGovernanceService {
       await this.audit(tx, categoryCode, created.id, "draft_create", user, input.reason, undefined, { sourceVersionId: source.id, revision: 0 });
       return created;
     }); } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") throw new ConflictException("该品类版本号已存在，请使用新的版本号");
+      if (error instanceof prismaRuntime.PrismaClientKnownRequestError && error.code === "P2002") throw new ConflictException("该品类版本号已存在，请使用新的版本号");
       throw error;
     }
   }
@@ -335,7 +336,7 @@ export class CategoryGovernanceService {
     const categoryCode = categoryIdentity(code);
     return this.platformTransaction(user, P.publish, authorization, async (tx) => {
       await this.lockedCategory(tx, categoryCode);
-      await tx.$queryRaw(Prisma.sql`SELECT id FROM rental_category_versions WHERE id = ${id} AND categoryCode = ${readRentalCategoryCode(categoryCode)} FOR UPDATE`);
+      await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM rental_category_versions WHERE id = ${id} AND categoryCode = ${readRentalCategoryCode(categoryCode)} FOR UPDATE`);
       const row = await this.version(tx, categoryCode, id);
       if (row.status === "published") {
         const audit = await tx.rentalCategoryGovernanceAudit.findUnique({ where: { id: `publish:${id}` } });

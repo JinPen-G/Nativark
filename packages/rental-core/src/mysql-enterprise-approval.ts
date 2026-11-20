@@ -1,7 +1,8 @@
 /** Quote approval is authorization only. A separate, explicit applicant command
  * binds the original Core transaction; unknown execution never dispatches again. */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import type { CloseEnterpriseApprovalExecution, DecideEnterpriseBookingApproval, EnterpriseApprovalOriginalResult, EnterpriseBookingApprovalView, EnterpriseBookingReview, RequestEnterpriseBookingApproval, SubmitEnterpriseApprovedBooking } from "./enterprise-policy";
 import type { CreateRentalOrderRequest, RentalQuoteSnapshotV1 } from "./contracts";
@@ -31,13 +32,13 @@ export class EnterpriseApprovalService {
   constructor(private readonly prisma: PrismaService, private readonly commands: EnterpriseCommandService, private readonly policies: EnterprisePolicyService,
     private readonly access: EnterpriseAccessService, private readonly facts: RentalBusinessFactRepository, private readonly orders: RentalOrderConfirmationService, private readonly clientApi: ClientApiService) {}
   private row(tenantId: string, id: string, tx: Prisma.TransactionClient = this.prisma as unknown as Prisma.TransactionClient) {
-    return tx.$queryRaw<Approval[]>(Prisma.sql`SELECT * FROM enterprise_booking_approvals WHERE tenantId=${tenantId} AND id=${id} ${tx === this.prisma as unknown as Prisma.TransactionClient ? Prisma.empty : Prisma.sql`FOR UPDATE`}`);
+    return tx.$queryRaw<Approval[]>(prismaRuntime.sql`SELECT * FROM enterprise_booking_approvals WHERE tenantId=${tenantId} AND id=${id} ${tx === this.prisma as unknown as Prisma.TransactionClient ? prismaRuntime.empty : prismaRuntime.sql`FOR UPDATE`}`);
   }
   /** Read-only locator for the original applicant history route. The caller holds
    * the current session/Tenant lease and locks any returned Order before Workspace;
    * repeat this lookup after those locks. An absent order is never permission to submit. */
   async readHistoryReference(context: ClientRequestContext, id: string, tx: RentalEnterpriseAuthorityTransaction) {
-    const rows = await tx.$queryRaw<Approval[]>(Prisma.sql`SELECT * FROM enterprise_booking_approvals WHERE tenantId=${context.tenantId} AND id=${id}`);
+    const rows = await tx.$queryRaw<Approval[]>(prismaRuntime.sql`SELECT * FROM enterprise_booking_approvals WHERE tenantId=${context.tenantId} AND id=${id}`);
     const row = rows[0];
     if (rows.length !== 1 || !row || row.id !== id || row.applicantCustomerId !== context.customerId
       || row.workspaceId !== context.workspaceId || requireRequestWorkspaceId() !== context.workspaceId)
@@ -216,13 +217,13 @@ export class EnterpriseApprovalService {
   async readOrderHistoryReference(context: ClientRequestContext, quoteId: string, key: string, tx: RentalEnterpriseAuthorityTransaction) {
     if (!quoteId?.trim() || quoteId.length > 191 || !key?.trim() || key.length > 191 || !context.workspaceId
       || requireRequestWorkspaceId() !== context.workspaceId) throw new NotFoundException("原报价与提交键无效");
-    const receipts = await tx.$queryRaw<Array<{ orderId: string | null; requestHash: string; status: string }>>(Prisma.sql`
+    const receipts = await tx.$queryRaw<Array<{ orderId: string | null; requestHash: string; status: string }>>(prismaRuntime.sql`
       SELECT orderId,requestHash,status FROM rental_order_idempotency_records WHERE tenantId=${context.tenantId}
         AND workspaceId=${context.workspaceId} AND action='rental.order.create' AND idempotencyKey=${key.trim()}`);
     if (receipts.length > 1) throw new ConflictException("原下单收据不唯一");
     const receipt = receipts[0];
     if (receipt?.orderId) {
-      const orders = await tx.$queryRaw<Array<{ id: string; quoteId: string | null; membershipSnapshot: RentalQuoteSnapshotV1["membershipSnapshot"] | string }>>(Prisma.sql`
+      const orders = await tx.$queryRaw<Array<{ id: string; quoteId: string | null; membershipSnapshot: RentalQuoteSnapshotV1["membershipSnapshot"] | string }>>(prismaRuntime.sql`
         SELECT id,quoteId,membershipSnapshot FROM rental_orders WHERE tenantId=${context.tenantId}
           AND workspaceId=${context.workspaceId} AND id=${receipt.orderId}`);
       const order = orders[0], membership = order && enterpriseJson(order.membershipSnapshot);

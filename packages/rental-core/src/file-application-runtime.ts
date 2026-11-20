@@ -1,7 +1,8 @@
 /** Rental 原文件兼容编排，保持原合法 module/scene、对象权限、会话、事务与冻结收据。
  * 公共文件原语供给创建、字节、冻结、清理和签名；宿主供给原知识、检查与审计参加者。 */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, ConflictException, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
-import { Prisma, type PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { createHash } from "node:crypto";
 import { FileStoragePrimitives, FileStorageRepository, freezeFileUploadContent, createOriginalFileUploadFacts,
   readOriginalFileUploadReceipt, FileStorageCleanup, COMPLETED_STAGING_PENDING, issueFileDownloadReference,
@@ -177,7 +178,7 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
         }
       );
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      if (error instanceof prismaRuntime.PrismaClientKnownRequestError && error.code === "P2002") {
         const concurrent = await this.files.findUploadSession(tenantId, { idempotencyKey });
         if (concurrent) {
           const concurrentAsset = await this.prisma.fileAsset.findUniqueOrThrow({ where: { id: concurrent.fileAssetId } });
@@ -861,7 +862,7 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
       await this.integrations.assertEnabledInTransaction(tx, tenantId, "file", config.provider, { configRevision: config.revision });
       if (asset.businessType !== "ai_knowledge_document")
         await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner?.workspaceId, tx);
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
   }
 
   private async recordDownloadAudit(input: OperationLogInput, expected: Prisma.FileAssetGetPayload<object>) {
@@ -875,7 +876,7 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
       if (!asset || stable(asset) !== stable(expected)) throw new ConflictException("文件或读取授权已变化");
       await access.assertRead(expected.tenantId, asset, false, tx);
       await new PlatformOperationLogService(tx).record(input);
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
   }
 
   private async failSession(tenantId: string, sessionId: string, reason: string, resultOnly = false) {
@@ -934,7 +935,7 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
         assertEnabled: (tx, tenantId, config) => this.integrations.assertEnabledInTransaction(tx, tenantId, "file", config.provider,
           { configRevision: config.revision }),
         allowSimulation: process.env.NODE_ENV !== "production",
-        isUniqueConflict: error => error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002",
+        isUniqueConflict: error => error instanceof prismaRuntime.PrismaClientKnownRequestError && error.code === "P2002",
         excludedUploadScene: RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE,
         ...(operationLog ? { recordAudit: input => staff.recordAudit(input) } : {})
       }, staff);

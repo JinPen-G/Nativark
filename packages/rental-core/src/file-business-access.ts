@@ -1,5 +1,6 @@
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import type { Prisma } from "@prisma/client";
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import type { RentalBusinessTenantTransaction } from "./mysql-business-fence";
 import type { FileAssetSummary } from '@rental-os/platform-contracts/files';
@@ -115,7 +116,7 @@ export class RentalFileBusinessAccessService {
   async readHistoryOrderReference(tenantId: string, fileId: string, tx: RentalBusinessTenantTransaction) {
     const actor = this.actor(tenantId);
     type Row = FileBinding & { tenantId: string; status: string; uploadedBy: string | null; updatedAt: Date };
-    const rows = await tx.$queryRaw<Row[]>(Prisma.sql`SELECT * FROM FileAsset WHERE tenantId=${tenantId} AND id=${fileId} AND status='active'`);
+    const rows = await tx.$queryRaw<Row[]>(prismaRuntime.sql`SELECT * FROM FileAsset WHERE tenantId=${tenantId} AND id=${fileId} AND status='active'`);
     const file = rows[0];
     if (rows.length !== 1 || !file || file.id !== fileId || file.tenantId !== tenantId || file.status !== "active")
       throw new NotFoundException("原订单证据文件不存在");
@@ -127,8 +128,8 @@ export class RentalFileBusinessAccessService {
       if (!id || seen.has(key) || seen.size >= 3) throw new ForbiddenException("文件原订单引用不能解析");
       seen.add(key);
       const references = await tx.$queryRaw<Array<{ id: string; tenantId: string; businessType: string; businessId: string | null }>>(binding.businessType === "async_job"
-        ? Prisma.sql`SELECT id,tenantId,businessType,businessId FROM AsyncJob WHERE tenantId=${tenantId} AND id=${id}`
-        : Prisma.sql`SELECT id,tenantId,businessType,businessId FROM DocumentPrintJob WHERE tenantId=${tenantId} AND id=${id}`);
+        ? prismaRuntime.sql`SELECT id,tenantId,businessType,businessId FROM AsyncJob WHERE tenantId=${tenantId} AND id=${id}`
+        : prismaRuntime.sql`SELECT id,tenantId,businessType,businessId FROM DocumentPrintJob WHERE tenantId=${tenantId} AND id=${id}`);
       const row = references[0];
       if (references.length !== 1 || !row || row.id !== id || row.tenantId !== tenantId || !row.businessId)
         throw new NotFoundException("文件任务缺少原订单关联");

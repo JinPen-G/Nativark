@@ -1,9 +1,10 @@
 /** Rental租户会员、注册审核、当前资质与方案权益的单源应用。
  * 原主档、政策、风险与客户锁参加者沿同一存储/事务运行；写事务先复核所选Core，
  * 订单金额及资金执行由订单域裁定。 */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import { Prisma, type CustomerMembershipReview as PrismaMembershipReview } from "@prisma/client";
+import type { Prisma, CustomerMembershipReview as PrismaMembershipReview } from "@prisma/client";
 import type {
   AssignCustomerMembershipPlanRequest,
   BookingMemberOption,
@@ -167,7 +168,7 @@ export class MembershipService {
         create: { tenantId, registrationMode },
         update: { registrationMode }
       });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
     return { registrationMode: row.registrationMode as CustomerMembershipRegistrationSettings["registrationMode"], updatedAt: row.updatedAt.toISOString(), supportsOnlyNewImport: true };
   }
 
@@ -237,7 +238,7 @@ export class MembershipService {
     return this.prisma.$transaction(async tx => {
       await lockRentalBusinessTenant(tx, tenantId);
       return Boolean(await this.customers.updateProfile(tenantId, customerId, data, tx));
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
   }
 
   async listReviews(tenantId: string, status?: string, type?: string): Promise<CustomerMembershipReview[]> {
@@ -390,7 +391,7 @@ export class MembershipService {
       : tx.customerMembershipQualificationType.create({
           data: { tenantId, workspaceId, code: input.code.trim(), name: input.name.trim(), categoryCode: workspace.categoryCode, capabilityCode: input.capabilityCode?.trim() || null, requiredForBooking: input.requiredForBooking ?? false, status: input.status ?? "enabled" }
         });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
     return (await this.listQualificationTypes(tenantId, workspaceId)).find((item) => item.id === row.id)!;
   }
 
@@ -403,7 +404,7 @@ export class MembershipService {
     if (!id || id !== evidenceRef) throw new BadRequestException("资质附件引用无效");
     // MySQL RR：前面的客户读取已建立快照，不能锁后再用普通SELECT读旧文件状态。
     const rows = await tx.$queryRaw<Array<{ id: string; tenantId: string; businessModule: string; businessType: string;
-      businessId: string | null; uploadScene: string; status: string; metadata: Prisma.JsonValue }>>(Prisma.sql`
+      businessId: string | null; uploadScene: string; status: string; metadata: Prisma.JsonValue }>>(prismaRuntime.sql`
       SELECT \`id\`, \`tenantId\`, \`businessModule\`, \`businessType\`, \`businessId\`, \`uploadScene\`, \`status\`, \`metadata\`
       FROM \`FileAsset\` WHERE \`tenantId\` = ${tenantId} AND \`id\` = ${id} FOR UPDATE`);
     const evidence = rows[0];
@@ -868,7 +869,7 @@ export class MembershipService {
       const customerId = await execute();
       return (await this.listCorporateMembers(tenantId)).find((item) => item.customerId === customerId)!;
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      if (error instanceof prismaRuntime.PrismaClientKnownRequestError && error.code === "P2002") {
         throw new ConflictException("手机号或统一社会信用代码已被本租户其他客户使用");
       }
       throw error;
@@ -922,7 +923,7 @@ export class MembershipService {
       if (!personal) throw new ConflictException("个人会员状态已变化");
       const saved = await this.customers.saveEnterpriseRelation(tenantId, corporateCustomerId, input.personalCustomerId, { role: input.role, department: input.department?.trim() || null, employeeNo: input.employeeNo?.trim() || null, status: input.status ?? "active", effectiveFrom, effectiveTo: effectiveTo ?? null, reason: input.reason?.trim() || "商户维护成员关系", createdBy: operator ?? getRequestUserId() ?? "operator" }, tx);
       return { ...saved, personalCustomer: personal };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
     return this.toCorporateMembership(row, row.personalCustomer.name);
   }
 
@@ -976,7 +977,7 @@ export class MembershipService {
             data: { tenantId, planId: base.id, version: (latest?.version ?? 0) + 1, createdBy: operator, ...this.planVersionData(input) }
           });
       return { base, targetVersion };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable });
     const all = await this.listPlans(tenantId);
     return all.find((item) => item.id === plan.base.id)!;
   }
@@ -1039,7 +1040,7 @@ export class MembershipService {
           createdBy: operator, restoredFromVersionId: source.id, restoreReason: trimmedReason
         }
       });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable });
     return (await this.listPlans(tenantId)).find((item) => item.id === planId)!;
   }
 
@@ -1071,7 +1072,7 @@ export class MembershipService {
           snapshot: { planName: version.plan.name, targetType: version.plan.targetType, benefits: version.benefits } as Prisma.InputJsonValue
         }
       });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
     return this.toAssignment(row);
   }
 
@@ -1105,7 +1106,7 @@ export class MembershipService {
       const updatedAssignment = await tx.customerMembershipPlanAssignment.findFirst({ where: { tenantId, id: assignment.id } });
       if (!updatedAssignment) throw new NotFoundException("会员方案授予记录不存在");
       return updatedAssignment;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
     return this.toAssignment(row);
   }
 
@@ -1157,7 +1158,7 @@ export class MembershipService {
       // Qualification-type writers serialize on this workspace. Acquire their
       // mutex before reading target capability acceptance, not afterwards at
       // inventory admission. This order remains customers -> workspace -> stock.
-      const workspace = (await tx.$queryRaw<Array<{ id: string; status: string }>>(Prisma.sql`
+      const workspace = (await tx.$queryRaw<Array<{ id: string; status: string }>>(prismaRuntime.sql`
         SELECT id, status FROM business_workspaces WHERE tenantId = ${tenantId} AND id = ${workspaceId} FOR UPDATE
       `))[0];
       // WorkspaceStatus.ACTIVE is mapped to 'active' in MySQL. Raw SQL does
@@ -1171,7 +1172,7 @@ export class MembershipService {
       db.customerQualificationRef.findMany({
         where: { tenantId, customerId: personalCustomerId }, include: { currentRevision: true }, orderBy: { qualificationType: "asc" }
       }),
-      tx ? tx.$queryRaw<Prisma.CustomerMembershipQualificationTypeGetPayload<object>[]>(Prisma.sql`
+      tx ? tx.$queryRaw<Prisma.CustomerMembershipQualificationTypeGetPayload<object>[]>(prismaRuntime.sql`
         SELECT * FROM customer_membership_qualification_types
         WHERE tenantId = ${tenantId} AND workspaceId = ${workspaceId} AND status = 'enabled' LOCK IN SHARE MODE
       `) : db.customerMembershipQualificationType.findMany({ where: { tenantId, workspaceId, status: "enabled" } })

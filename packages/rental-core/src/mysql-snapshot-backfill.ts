@@ -1,7 +1,8 @@
 /** Rental原聚合快照向规范化事实回填；保持来源绑定、完整键比较、原主档映射与单空间事务。
  * 无Core不登记启动钩子；恢复只投影原快照，不重跑报价、支付或业务操作。 */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { ConflictException, Logger, type OnModuleInit } from "@nestjs/common";
-import { Prisma, type $Enums } from "@prisma/client";
+import type { Prisma, $Enums } from "@prisma/client";
 import type {
   RentalAsset,
   RentalCalendarYear,
@@ -103,7 +104,7 @@ function jsonArray(value: unknown): Prisma.InputJsonValue {
 }
 
 function amount(value: number | undefined) {
-  return new Prisma.Decimal(Number.isFinite(Number(value)) ? Number(value) : 0);
+  return new prismaRuntime.Decimal(Number.isFinite(Number(value)) ? Number(value) : 0);
 }
 
 /**
@@ -371,7 +372,7 @@ export class RentalSnapshotBackfillService<TTransaction extends RentalSnapshotBa
         // 旧快照不能在空间采用新版后重新插入旧版资料或绕开唯一声明。
         await lockRentalBusinessTenant(tx, tenantId);
         const locked = await tx.$queryRaw<Array<{ categoryCode: string; categoryVersionId: string | null; categoryAdoptionRevision: number }>>(
-          Prisma.sql`SELECT categoryCode, categoryVersionId, categoryAdoptionRevision FROM business_workspaces
+          prismaRuntime.sql`SELECT categoryCode, categoryVersionId, categoryAdoptionRevision FROM business_workspaces
             WHERE tenantId = ${tenantId} AND id = ${workspaceId} FOR UPDATE`
         );
         const current = locked[0];
@@ -459,7 +460,7 @@ export class RentalSnapshotBackfillService<TTransaction extends RentalSnapshotBa
           // the actual existing revision, including the default-space owner;
           // an absent rollout column or unreadable row is never assumed to be 1.
           const profiles = await tx.$queryRaw<Array<{ tenantId: string; configurationRevision: unknown }>>(
-            Prisma.sql`SELECT tenantId, configurationRevision FROM tenant_rental_profiles WHERE tenantId = ${tenantId} FOR UPDATE`);
+            prismaRuntime.sql`SELECT tenantId, configurationRevision FROM tenant_rental_profiles WHERE tenantId = ${tenantId} FOR UPDATE`);
           if (profiles.length !== 1 || profiles[0].tenantId !== tenantId) throw new ConflictException("回填档案配置行来源不可核验");
           readRentalConfigurationRevision(profiles[0].configurationRevision, "回填经营档案");
         }
@@ -1413,7 +1414,7 @@ export class RentalSnapshotBackfillService<TTransaction extends RentalSnapshotBa
           );
         }
       },
-      { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 60_000 }
+      { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted, timeout: 60_000 }
     );
 
     const summary = Object.entries(inserted).map(([key, value]) => `${key}=${value}`).join(" ");

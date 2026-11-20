@@ -1,5 +1,6 @@
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, ConflictException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import type {
   ClientChannelReadiness,
   SaveWebsiteChannelProfileRequest,
@@ -301,7 +302,7 @@ export class WebsiteChannelProfileService {
         }
         throw error;
       }
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
 
     await this.operationLog?.record({
       tenantId,

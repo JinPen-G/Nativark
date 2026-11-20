@@ -1,7 +1,8 @@
 /** Customer-only enterprise reads. Personal authentication is necessary, not sufficient:
  * current activation, relationship revision and exact action grants are checked again. */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { ForbiddenException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { ENTERPRISE_PORTAL_ACTIONS } from "./enterprise";
 import { type EnterpriseEntryResponse, type EnterpriseManagedCorporate, type EnterpriseMembersResponse, type EnterprisePortalAction } from "./enterprise";
 import type { RentalEnterpriseAccessStorage, RentalEnterpriseAuthorityTransaction } from "./enterprise-read-storage";
@@ -16,7 +17,7 @@ export class EnterpriseAccessService {
     if (context.customerType !== "personal" || !tenantCode || context.tenantCode !== tenantCode) throw new ForbiddenException("企业入口与当前客户商户不一致");
     // One fresh database statement gates the session, both memberships, relation and
     // grants. Neither cached role nor a later restore revives an earlier grant.
-    return (tx ?? this.prisma).$queryRaw<AccessRow[]>(Prisma.sql`
+    return (tx ?? this.prisma).$queryRaw<AccessRow[]>(prismaRuntime.sql`
       SELECT m.corporateCustomerId, c.name AS corporateName, m.id AS membershipId, m.role,
         g.action, COALESCE(t.revision,0) AS tenantRevision, COALESCE(p.revision,0) AS corporateRevision,
         COALESCE(t.enabled,false) AS tenantEnabled, COALESCE(p.enabled,false) AS corporateEnabled
@@ -26,10 +27,10 @@ export class EnterpriseAccessService {
       JOIN customer_accounts account ON account.tenantId=m.tenantId AND account.customerId=person.id AND account.status='active'
       JOIN customer_memberships personalMember ON personalMember.tenantId=m.tenantId AND personalMember.customerId=person.id AND personalMember.status='active'
       JOIN client_auth_sessions s ON s.tenantId=m.tenantId AND s.customerId=person.id AND s.id=${context.sessionId} AND s.revokedAt IS NULL AND s.expiresAt>NOW(3)
-        ${currentWorkspace ? Prisma.sql`AND s.workspaceId=${context.workspaceId} AND EXISTS (
+        ${currentWorkspace ? prismaRuntime.sql`AND s.workspaceId=${context.workspaceId} AND EXISTS (
           SELECT 1 FROM business_workspaces workspace WHERE workspace.id=s.workspaceId AND workspace.tenantId=s.tenantId
             AND workspace.code=${context.workspaceCode} AND workspace.status='ACTIVE'
-        )` : Prisma.empty}
+        )` : prismaRuntime.empty}
       JOIN customer_profiles c ON c.tenantId=m.tenantId AND c.id=m.corporateCustomerId AND c.customerType='corporate' AND c.status='active' AND c.mergedIntoCustomerId IS NULL
       JOIN customer_memberships corporateMember ON corporateMember.tenantId=m.tenantId AND corporateMember.customerId=c.id AND corporateMember.status='active'
       LEFT JOIN enterprise_portal_tenant_settings t ON t.tenantId=m.tenantId

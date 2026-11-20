@@ -1,7 +1,8 @@
 /** Extension approval authorizes one original Core preview. The applicant's explicit
  * submission consumes it in the extension transaction; payment/effectiveness stay in Core. */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { enterpriseExtensionServiceDetails } from "./enterprise-expense";
 import type { CloseEnterpriseExtensionRequest, EnterpriseExtensionRequestClosureReceipt, CloseEnterpriseExtensionExecution, DecideEnterpriseExtensionApproval, EnterpriseExtensionApprovalView, EnterpriseExtensionOriginalResult, EnterpriseExtensionRequestOriginalResult, RequestEnterpriseExtensionApproval, SubmitEnterpriseExtensionApproval } from "./enterprise-expense";
@@ -32,12 +33,12 @@ export class EnterpriseExtensionApprovalService {
   constructor(private readonly prisma: PrismaService, private readonly commands: EnterpriseCommandService, private readonly policies: EnterprisePolicyService,
     private readonly access: EnterpriseAccessService, private readonly core: RentalCoreService, private readonly clientApi: ClientApiService, private readonly idempotency: RentalIdempotencyRepository) {}
   private row(tenantId: string, id: string, tx?: Prisma.TransactionClient) {
-    return (tx ?? this.prisma).$queryRaw<Approval[]>(Prisma.sql`SELECT * FROM enterprise_extension_approvals WHERE tenantId=${tenantId} AND id=${id} ${tx ? Prisma.sql`FOR UPDATE` : Prisma.empty}`);
+    return (tx ?? this.prisma).$queryRaw<Approval[]>(prismaRuntime.sql`SELECT * FROM enterprise_extension_approvals WHERE tenantId=${tenantId} AND id=${id} ${tx ? prismaRuntime.sql`FOR UPDATE` : prismaRuntime.empty}`);
   }
   /** Locator only: keep Order before the approval row/Workspace, and keep the
    * original result reader's unknown and receipt validation unchanged. */
   async readHistoryReference(context: ClientRequestContext, id: string, tx: RentalEnterpriseAuthorityTransaction) {
-    const rows = await tx.$queryRaw<Approval[]>(Prisma.sql`SELECT * FROM enterprise_extension_approvals WHERE tenantId=${context.tenantId} AND id=${id}`);
+    const rows = await tx.$queryRaw<Approval[]>(prismaRuntime.sql`SELECT * FROM enterprise_extension_approvals WHERE tenantId=${context.tenantId} AND id=${id}`);
     const row = rows[0];
     this.owns(context, row);
     if (rows.length !== 1 || row.id !== id || !row.orderId) throw new NotFoundException("原续租批准订单关联缺失");
@@ -90,7 +91,7 @@ export class EnterpriseExtensionApprovalService {
       if (order.tenantId !== context.tenantId || order.customerId !== context.customerId && snapshot?.personalCustomerId !== context.customerId) throw new NotFoundException("本人订单不存在");
       const basis = snapshot?.enterpriseContractAndPayer ? await this.policies.revalidateOrderExpense(context.tenantId, context.workspaceId, order, tx) : undefined;
       return { orderId: order.id, expectedOrderUpdatedAt: order.updatedAt, approvalRequired: basis?.approvalMode === "per_order", corporateCustomerId: basis ? snapshot?.corporateCustomerId : undefined };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
   }
   async request(context: ClientRequestContext, input: RequestEnterpriseExtensionApproval) {
     if (input.expectedRevision !== 0 || !Number.isFinite(Date.parse(input.expectedOrderUpdatedAt)) || !input.extension || !Number.isFinite(Date.parse(input.extension.newEndAt))) throw new BadRequestException("原订单修订、续租意图或初始修订无效");

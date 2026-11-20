@@ -8,7 +8,7 @@ import type {
   RentalFundingEvent,
   MergeCustomersRequest
 } from "./contracts";
-import { $Enums, Prisma } from "@prisma/client";
+import type { $Enums, Prisma } from "@prisma/client";
 import type { RentalCustomerMergeStorage, RentalCustomerMergeCustomers, RentalCustomerMergeOperations } from "./customer-governance-ports";
 import { assertOtherEnterpriseAdministrator } from "./enterprise-administrator-continuity";
 import { assertRentalBusinessTenantAccessAfterLock } from "./mysql-business-fence";
@@ -18,11 +18,11 @@ const stamp = () => new Date().toISOString();
 
 /** 订单的非终态。落在这些状态上的订单都算「未完成」，注销前必须先处理。 */
 const OPEN_ORDER_STATUSES: $Enums.RentalOrderV1Status[] = [
-  $Enums.RentalOrderV1Status.DRAFT,
-  $Enums.RentalOrderV1Status.RESERVED,
-  $Enums.RentalOrderV1Status.READY_FOR_PICKUP,
-  $Enums.RentalOrderV1Status.RENTING,
-  $Enums.RentalOrderV1Status.RETURN_INSPECTION
+  ("DRAFT" as const),
+  ("RESERVED" as const),
+  ("READY_FOR_PICKUP" as const),
+  ("RENTING" as const),
+  ("RETURN_INSPECTION" as const)
 ];
 
 const mask = (value?: string | null) => {

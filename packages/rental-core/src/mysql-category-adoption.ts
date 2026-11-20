@@ -1,9 +1,10 @@
 /** Rental adoption transaction owner and original receipts. Uses original Auth,
  * scoped idempotency storage and Core validation; no initialization, automatic
  * retry, history rewrite or production enablement. */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, ConflictException, HttpException, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import type { RentalCategoryAdoptionStorage, RentalCategoryAdoptionReceiptStore, RentalCategoryAdoptionAuthority, RentalCategoryAdoptionCapabilities, RentalCategoryAdoptionHooks, RentalCategoryAdoptionCommercial } from "./category-adoption-ports";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import type { AdoptRentalCategoryRequest, CategoryAdoptionReceipt, CategoryAdoptionResult } from "./category-governance";
 import type { SystemUserRow } from "@rental-os/platform-contracts";
 import { requireRequestWorkspaceId } from "@rental-os/platform-server/request-identity";
@@ -74,14 +75,14 @@ export class CategoryAdoptionApplication {
         // before recording still causes rollback of this whole transaction.
         await access.revalidate();
         return result;
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, maxWait: 10000, timeout: 30000 });
+      }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted, maxWait: 10000, timeout: 30000 });
     } catch (error) {
-      const conflict = error instanceof ConflictException || error instanceof Prisma.PrismaClientKnownRequestError && ["P2002", "P2034"].includes(error.code);
+      const conflict = error instanceof ConflictException || error instanceof prismaRuntime.PrismaClientKnownRequestError && ["P2002", "P2034"].includes(error.code);
       if (conflict) {
         // Only read a winner's original result; never rerun the mutation.
         const recovered = await this.readOriginal(user, body.idempotencyKey, fingerprint);
         if (recovered.outcome === "adopted") return recovered.result;
-        if (error instanceof Prisma.PrismaClientKnownRequestError) throw new ConflictException("采用发生并发冲突，请保留原操作键核对原收据和当前准备");
+        if (error instanceof prismaRuntime.PrismaClientKnownRequestError) throw new ConflictException("采用发生并发冲突，请保留原操作键核对原收据和当前准备");
       }
       if (error instanceof HttpException) throw error;
       throw new ServiceUnavailableException("采用结果尚待核对，请保留原输入和原操作键，读取原采用收据后处理");
@@ -100,7 +101,7 @@ export class CategoryAdoptionApplication {
       const result = original ? await this.verifyReceipt(tx, user, workspaceId, key, original, expectedFingerprint) : undefined;
       await access.revalidate();
       return result ? { outcome: "adopted", result } : { outcome: "unknown" };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
   }
 
   private async verifyReceipt(tx: Prisma.TransactionClient, user: SystemUserRow, workspaceId: string, key: string,

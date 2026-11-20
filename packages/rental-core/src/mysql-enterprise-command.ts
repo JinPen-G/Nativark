@@ -1,8 +1,9 @@
 /** Enterprise commands serialize on the tenant lock and commit original receipts.
  * Selected Core access is rechecked before facts/receipts; customer identity is
  * re-read. This service never grants operator or rental authority. */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, ConflictException, ForbiddenException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { enterpriseHash, enterpriseJson } from "./enterprise-receipt";
 export { enterpriseHash, enterpriseJson } from "./enterprise-receipt";
 import type { EnterpriseChangeRequest } from "./enterprise-workflows";
@@ -40,7 +41,7 @@ export class EnterpriseCommandService {
     return this.prisma.$transaction(async tx => {
       // Expense-only commands hold a shared parent fence before the order lock.
       // They never mutate grants/policy or upgrade it; policy writes remain exclusive.
-      const tenant = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT id FROM Tenant WHERE id=${tenantId} AND status='ACTIVE' ${tenantFence === "shared" ? Prisma.sql`LOCK IN SHARE MODE` : Prisma.sql`FOR UPDATE`}`);
+      const tenant = await tx.$queryRaw<Array<{ id: string }>>(prismaRuntime.sql`SELECT id FROM Tenant WHERE id=${tenantId} AND status='ACTIVE' ${tenantFence === "shared" ? prismaRuntime.sql`LOCK IN SHARE MODE` : prismaRuntime.sql`FOR UPDATE`}`);
       if (!tenant.length) throw new ForbiddenException("商户不可用");
       await assertRentalBusinessTenantAccessAfterLock(tx, tenantId);
       if (verify) await verify(tx);
@@ -53,7 +54,7 @@ export class EnterpriseCommandService {
       const result = await apply(tx);
       await tx.$executeRaw`INSERT INTO enterprise_portal_operations (tenantId,operationKey,actorUserId,requestHash,target,reason,result) VALUES (${tenantId},${input.operationKey},${actor},${hash},${`${action}:${target}`},${input.reason.trim()},${JSON.stringify(result)})`;
       return result;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
   }
   conflict() { return new ConflictException({ message: "企业对象修订已变化，请重新读取", code: "enterprise_revision_conflict" }); }
 }

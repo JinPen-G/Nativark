@@ -1,7 +1,8 @@
 /** 原客户地址/会话及验证码配额，原数据库桶、原子递增和生命周期保持。
  * 服务实例由宿主唯一装配；本层不采信客户端转发头或重复开启清理计时器。 */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { HttpException, HttpStatus, OnApplicationBootstrap, OnApplicationShutdown } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { createHash, randomUUID } from "node:crypto";
 import type { RentalClientRateLimitStorage } from "./client-session-ports";
 import { lockRentalBusinessTenant } from "./mysql-business-fence";
@@ -111,12 +112,12 @@ export class ClientApiRateLimitService implements OnApplicationBootstrap, OnAppl
   private async increment(scopeKey: string, bucketStart: Date, tenantId?: string): Promise<number> {
     return this.prisma.$transaction(async (tx) => {
       if (tenantId) await lockRentalBusinessTenant(tx, tenantId);
-      await tx.$executeRaw(Prisma.sql`
+      await tx.$executeRaw(prismaRuntime.sql`
         INSERT INTO client_api_rate_buckets (id, scopeKey, bucketStart, count, createdAt, updatedAt)
         VALUES (${randomUUID()}, ${scopeKey}, ${bucketStart}, 1, NOW(3), NOW(3))
         ON DUPLICATE KEY UPDATE count = count + 1, updatedAt = NOW(3)
       `);
-      const rows = await tx.$queryRaw<Array<{ count: number }>>(Prisma.sql`
+      const rows = await tx.$queryRaw<Array<{ count: number }>>(prismaRuntime.sql`
         SELECT \`count\` FROM \`client_api_rate_buckets\`
         WHERE \`scopeKey\` = ${scopeKey} AND \`bucketStart\` = ${bucketStart}
         LIMIT 1

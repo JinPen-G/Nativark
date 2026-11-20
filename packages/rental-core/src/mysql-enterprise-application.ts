@@ -1,7 +1,8 @@
 /** Applicant drafts are private; merchant review atomically binds a verified first admin.
  * Does not grant credit, category access, payment authority or automatic claim rights. */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import type { EnterpriseApplicationInput, EnterpriseChangeRequest, EnterpriseWorkflowView, ReviewEnterpriseApplicationRequest, SaveEnterpriseApplicationRequest, EnterpriseOperationResult, EnterpriseApplicationClaimView } from "./enterprise-workflows";
 import type { SystemUserRow } from "@rental-os/platform-contracts";
@@ -291,7 +292,7 @@ export class EnterpriseApplicationService {
       this.commands.operator(user, "rental-os:corporate:employee-manage");
       if (current.tenantId !== before.tenantId || current.actor !== before.actor) throw new ForbiddenException("主体核验读取身份已变化");
       return { applicationId: id, applicationRevision: row.revision, corporateCustomerId: existing.id, corporateName: existing.corporateName!, legalIdentifierMasked: masked, ...facts, readOnly: true };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
   }
   async review(user: SystemUserRow, id: string, input: ReviewEnterpriseApplicationRequest) {
     const { tenantId, actor } = this.commands.operator(user, "rental-os:corporate:manage");
@@ -351,7 +352,7 @@ export class EnterpriseApplicationService {
     } catch (error) {
       // Non-enterprise customer writers may race the tenant lock. Roll back the
       // whole approval, then expose no conflicting person's phone/identity or DB metadata.
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") throw new ConflictException("企业主档唯一资料发生冲突，须商户核对独立企业联系方式或现有主体认领");
+      if (error instanceof prismaRuntime.PrismaClientKnownRequestError && error.code === "P2002") throw new ConflictException("企业主档唯一资料发生冲突，须商户核对独立企业联系方式或现有主体认领");
       throw error;
     }
   }

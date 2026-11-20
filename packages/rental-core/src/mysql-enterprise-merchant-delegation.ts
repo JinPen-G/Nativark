@@ -1,7 +1,8 @@
 /** Owns one customer's immutable merchant submission source and original receipts.
  * Core owns order execution and the transaction that consumes this participant. */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { ENTERPRISE_ORDER_DELEGATION_SOURCE_VERSION } from "./enterprise-order-delegation";
 import type { EnterpriseOrderDelegationOriginal, EnterpriseOrderDelegationReceipt, EnterpriseOrderDelegationReference, EnterpriseOrderDelegationRequestReference, EnterpriseOrderDelegationSource, EnterpriseOrderDelegationView, IssueEnterpriseOrderDelegation, RevokeEnterpriseOrderDelegation } from "./enterprise-order-delegation";
 import type { SystemUserRow } from "@rental-os/platform-contracts";
@@ -43,8 +44,8 @@ export class EnterpriseMerchantDelegationService {
     throw new BadRequestException("须引用本人的原批准或持久报价");
   }
   private rows(tenantId: string, key: string, tx?: Prisma.TransactionClient) {
-    return (tx ?? this.prisma).$queryRaw<Row[]>(Prisma.sql`SELECT operationKey,actorUserId,requestHash,target,result
-      FROM enterprise_portal_operations WHERE tenantId=${tenantId} AND operationKey=${key} ${tx ? Prisma.sql`FOR UPDATE` : Prisma.empty}`);
+    return (tx ?? this.prisma).$queryRaw<Row[]>(prismaRuntime.sql`SELECT operationKey,actorUserId,requestHash,target,result
+      FROM enterprise_portal_operations WHERE tenantId=${tenantId} AND operationKey=${key} ${tx ? prismaRuntime.sql`FOR UPDATE` : prismaRuntime.empty}`);
   }
   private stored(row: Row, tenantId: string, key: string): Stored {
     const record = readEnterpriseDelegationSource(row, tenantId, key);

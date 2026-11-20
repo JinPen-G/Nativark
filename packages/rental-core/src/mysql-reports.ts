@@ -1,7 +1,7 @@
 /** Rental经营报表的唯一库侧聚合；当前Auth/ALS范围、草稿排除、分页与AI总扫描上限沿原规则。
  * 只读本Core事实和当前资产/库存快照，不生成历史利用率或提供业务执行权。 */
 import { BadRequestException, ForbiddenException } from "@nestjs/common";
-import { Prisma, RentalOrderV1Status } from "@prisma/client";
+import type { Prisma, RentalOrderV1Status } from "@prisma/client";
 import type {
   RentalCategoryCode,
   RentalCurrency,
@@ -121,7 +121,7 @@ export class RentalWorkspaceReportRepository {
       workspaceId,
       // Prisma 客户端枚举成员名是大写（`DRAFT`），库里存的是 `@map` 后的小写值。
       // 过滤条件必须用客户端枚举，出参再转回共享契约的小写值。
-      status: { not: RentalOrderV1Status.DRAFT },
+      status: { not: ("DRAFT" as const) },
       ...(startAt ? { startAt } : {}),
       ...(filter.locationId ? { fulfillmentLocationId: filter.locationId } : {}),
       ...(filter.customerId ? { customerId: filter.customerId } : {}),

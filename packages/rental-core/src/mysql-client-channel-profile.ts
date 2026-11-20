@@ -1,5 +1,6 @@
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, ConflictException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { ADMIN_UI_CORNER_RADIUS_DEFAULT, ADMIN_UI_CORNER_RADIUS_CONTROL_MAX, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } from "@rental-os/platform-contracts";
 import type {
   ClientChannelFaqItem,
@@ -370,7 +371,7 @@ export class ClientChannelProfileService {
           update: { profileId: row.id, enabled: true }
         });
       }
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable });
 
     await this.operationLog?.record({ tenantId, user, action: "client-channel-profile.save", targetType: "client_channel_profile", targetId: tenantId, detail: "保存客户端渠道配置", metadata: { publishedWorkspaces: requestedWorkspaceIds.length, hasUserAgreementBody: Boolean(userAgreement.body), hasPrivacyBody: Boolean(privacyPolicy.body), faqCount: faq.length } });
     const [row, options, appearance] = await Promise.all([

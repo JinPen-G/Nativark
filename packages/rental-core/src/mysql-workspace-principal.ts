@@ -1,8 +1,9 @@
 /** Rental 经营空间会话与成员权限读取，沿宿主的原账号和角色投影取得当前身份。
  * 会话操作复用调用方原事务，按租户、账号、会话、成员、角色及权限顺序持锁。
  * 明确空间要求启用的成员关系，业务动作和 Core 准入由原 Auth/Guard 裁定。 */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { ConflictException, ForbiddenException, UnauthorizedException } from "@nestjs/common";
-import { Prisma, WorkspaceStatus as PrismaWorkspaceStatus } from "@prisma/client";
+import type { Prisma, WorkspaceStatus as PrismaWorkspaceStatus } from "@prisma/client";
 import type { RoleScope, SystemDataScope, SystemUserRow } from "@rental-os/platform-contracts";
 import type { BusinessWorkspace } from "./contracts";
 import type { PlatformAuthTransaction } from "@rental-os/platform-server/auth-store";
@@ -80,7 +81,7 @@ export class RentalWorkspacePrincipalRepository<Transaction extends RentalWorksp
       where: {
         userId,
         isActive: true,
-        workspace: { status: PrismaWorkspaceStatus.ACTIVE }
+        workspace: { status: ("ACTIVE" as const) }
       },
       include: { workspace: true },
       orderBy: { createdAt: "asc" }
@@ -108,7 +109,7 @@ export class RentalWorkspacePrincipalRepository<Transaction extends RentalWorksp
         userId,
         workspaceId,
         isActive: true,
-        workspace: { status: PrismaWorkspaceStatus.ACTIVE }
+        workspace: { status: ("ACTIVE" as const) }
       },
         include: { role: { include: { permissions: { include: { permission: true } } } } }
     });
@@ -159,7 +160,7 @@ export class RentalWorkspacePrincipalRepository<Transaction extends RentalWorksp
     const tenantUser = await this.native.findUserById(binding.userId, transaction);
     if (!tenantUser || tenantUser.tenantId !== binding.tenantId) return undefined;
     const workspace = await transaction.businessWorkspace.findFirst({
-      where: { id: binding.workspaceId, tenantId: binding.tenantId, status: PrismaWorkspaceStatus.ACTIVE }, select: { id: true }
+      where: { id: binding.workspaceId, tenantId: binding.tenantId, status: ("ACTIVE" as const) }, select: { id: true }
     });
     if (!workspace) return undefined;
     const user = await this.findWorkspaceScopedUser(binding.userId, binding.workspaceId, tenantUser, transaction);
@@ -169,24 +170,24 @@ export class RentalWorkspacePrincipalRepository<Transaction extends RentalWorksp
 
   /** 主体锁先于业务锁，原撤权写入者更新同一组行，角色与权限按原排序持锁。 */
   async lockWorkspaceSessionUser(tx: Transaction, expected: WorkspaceSessionIdentity): Promise<SystemUserRow> {
-    const tenant = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT id FROM Tenant WHERE id = ${expected.tenantId} FOR UPDATE`);
-    const users = await tx.$queryRaw<Array<{ id: string; roleId: string | null }>>(Prisma.sql`SELECT id, roleId FROM \`User\` WHERE id = ${expected.userId} AND tenantId = ${expected.tenantId} FOR UPDATE`);
+    const tenant = await tx.$queryRaw<Array<{ id: string }>>(prismaRuntime.sql`SELECT id FROM Tenant WHERE id = ${expected.tenantId} FOR UPDATE`);
+    const users = await tx.$queryRaw<Array<{ id: string; roleId: string | null }>>(prismaRuntime.sql`SELECT id, roleId FROM \`User\` WHERE id = ${expected.userId} AND tenantId = ${expected.tenantId} FOR UPDATE`);
     if (tenant.length !== 1 || users.length !== 1) throw new UnauthorizedException("账号或租户已失效");
-    const sessions = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT id FROM auth_sessions WHERE id = ${expected.sessionId} AND userId = ${expected.userId} FOR UPDATE`);
+    const sessions = await tx.$queryRaw<Array<{ id: string }>>(prismaRuntime.sql`SELECT id FROM auth_sessions WHERE id = ${expected.sessionId} AND userId = ${expected.userId} FOR UPDATE`);
     if (sessions.length !== 1) throw new UnauthorizedException("原会话已失效");
-    const members = await tx.$queryRaw<Array<{ roleId: string | null }>>(Prisma.sql`SELECT roleId FROM workspace_members WHERE tenantId = ${expected.tenantId} AND workspaceId = ${expected.workspaceId} AND userId = ${expected.userId} FOR UPDATE`);
+    const members = await tx.$queryRaw<Array<{ roleId: string | null }>>(prismaRuntime.sql`SELECT roleId FROM workspace_members WHERE tenantId = ${expected.tenantId} AND workspaceId = ${expected.workspaceId} AND userId = ${expected.userId} FOR UPDATE`);
     if (members.length !== 1) throw new ForbiddenException("当前经营空间访问权已撤销");
-    const assignments = await tx.$queryRaw<Array<{ roleId: string }>>(Prisma.sql`SELECT roleId FROM \`UserRole\` WHERE userId = ${expected.userId} ORDER BY roleId FOR UPDATE`);
+    const assignments = await tx.$queryRaw<Array<{ roleId: string }>>(prismaRuntime.sql`SELECT roleId FROM \`UserRole\` WHERE userId = ${expected.userId} ORDER BY roleId FOR UPDATE`);
     const roleIds = [...new Set([users[0].roleId, members[0].roleId, ...assignments.map(row => row.roleId)].filter((id): id is string => Boolean(id)))].sort();
     const permissionIds = new Set<string>();
     for (const roleId of roleIds) {
-      const roles = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT id FROM \`Role\` WHERE id = ${roleId} AND tenantId = ${expected.tenantId} FOR UPDATE`);
+      const roles = await tx.$queryRaw<Array<{ id: string }>>(prismaRuntime.sql`SELECT id FROM \`Role\` WHERE id = ${roleId} AND tenantId = ${expected.tenantId} FOR UPDATE`);
       if (roles.length !== 1) throw new ForbiddenException("账号角色不属于当前租户或已失效");
-      const permissions = await tx.$queryRaw<Array<{ permissionId: string }>>(Prisma.sql`SELECT permissionId FROM \`RolePermission\` WHERE roleId = ${roleId} ORDER BY permissionId FOR UPDATE`);
+      const permissions = await tx.$queryRaw<Array<{ permissionId: string }>>(prismaRuntime.sql`SELECT permissionId FROM \`RolePermission\` WHERE roleId = ${roleId} ORDER BY permissionId FOR UPDATE`);
       for (const row of permissions) permissionIds.add(row.permissionId);
     }
     for (const permissionId of [...permissionIds].sort()) {
-      await tx.$queryRaw(Prisma.sql`SELECT id FROM \`Permission\` WHERE id = ${permissionId} FOR UPDATE`);
+      await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM \`Permission\` WHERE id = ${permissionId} FOR UPDATE`);
     }
     return this.readWorkspaceSessionUser(tx, expected);
   }

@@ -1,5 +1,6 @@
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, ConflictException, ForbiddenException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import type { MiniProgramChannelSummary, MiniProgramChannelTestResult, SaveMiniProgramChannelRequest } from "./channel-contracts";
 import type { SystemUserRow } from "@rental-os/platform-contracts";
 import type { RentalChannelAudit, RentalChannelSecretBox, RentalChannelWechat, RentalMiniProgramChannelStorage } from "./client-channel-ports";
@@ -76,7 +77,7 @@ export class MiniProgramChannelService {
     const appSecret = text(input.appSecret, 191, "AppSecret");
     const saved = await this.prisma.$transaction(async tx => {
       // 原表没有 tenantId 唯一键；父 X 锁串行同租户首建和改号，不能先取 S 再升级。
-      const tenants = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT id FROM Tenant WHERE id=${tenantId} FOR UPDATE`);
+      const tenants = await tx.$queryRaw<Array<{ id: string }>>(prismaRuntime.sql`SELECT id FROM Tenant WHERE id=${tenantId} FOR UPDATE`);
       if (!tenants.length) throw new ForbiddenException("商户不存在，不能锁定租赁事务");
       await assertRentalBusinessTenantAccessAfterLock(tx, tenantId);
       const existing = await this.load(tenantId, tx);
@@ -100,7 +101,7 @@ export class MiniProgramChannelService {
         if (error && typeof error === "object" && (error as { code?: string }).code === "P2025") throw new ConflictException("配置已被其他人更新，请刷新后重试");
         throw error;
       }
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
     await this.operationLog?.record({ tenantId, user, action: "mini-program-channel.save", targetType: "mini_program_channel", targetId: saved.id, detail: `保存小程序渠道 ${appId}`, metadata: { enabled: Boolean(input.enabled), secretChanged: Boolean(appSecret) } });
     return this.summary(await this.load(tenantId));
   }
@@ -113,7 +114,7 @@ export class MiniProgramChannelService {
       if (!current) throw new BadRequestException("尚未配置小程序渠道");
       if (!current.appSecretEncrypted) throw new BadRequestException("尚未配置 AppSecret");
       return { ...current, appSecretEncrypted: current.appSecretEncrypted };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
     const testedAt = new Date();
     let ok = false;
     let message: string;
@@ -130,7 +131,7 @@ export class MiniProgramChannelService {
     // 运输不持有数据库锁，也不重试。仅记录已派发测试的结果，不重新准入；
     // 原 Tenant 锁与精确 CAS 防止覆盖期间换密钥或另一测试的记录。
     await this.prisma.$transaction(async tx => {
-      await tx.$queryRaw(Prisma.sql`SELECT id FROM Tenant WHERE id=${tenantId} LOCK IN SHARE MODE`);
+      await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM Tenant WHERE id=${tenantId} LOCK IN SHARE MODE`);
       const current = await this.load(tenantId, tx);
       if (!current || current.id !== row.id) throw new ConflictException("小程序渠道配置或测试记录已变化，请重新读取后再测试");
       const written = await tx.miniProgramChannel.updateMany({ where: { id: row.id, tenantId, revision: row.revision,
@@ -138,7 +139,7 @@ export class MiniProgramChannelService {
         lastTestStatus: row.lastTestStatus, lastTestError: row.lastTestError },
         data: { lastTestStatus: ok ? "passed" : "failed", lastTestAt: testedAt, lastTestError: ok ? null : message.slice(0, 500) } });
       if (written.count !== 1) throw new ConflictException("小程序渠道配置或测试记录已变化，请重新读取后再测试");
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
     await this.operationLog?.record({ tenantId, user, action: "mini-program-channel.test", targetType: "mini_program_channel", targetId: row.id, detail: ok ? "小程序凭据测试通过" : `小程序凭据测试失败：${message}` });
     return { ok, message, testedAt: testedAt.toISOString() };
   }

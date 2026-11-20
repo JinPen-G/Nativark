@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import type { CategoryCapabilityPreparationPatch, CategoryEntityPreparationPatch } from "./category-governance";
 import { lockActiveCategoryBinding, type CategoryWriteBinding } from "./mysql-category-write";
 import { assertCategoryAdoptionAllowed } from "./mysql-category-policy";

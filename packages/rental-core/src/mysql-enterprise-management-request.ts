@@ -1,7 +1,8 @@
 /** Proposals and review facts only. Original customer, policy and funding services
  * own actual changes; approving here neither applies a proposal nor confirms payment. */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { ENTERPRISE_REVIEW_REQUEST_TYPES, type EnterpriseChangeRequest, type EnterpriseManagementProposal, type EnterpriseManagementRequestType, type EnterpriseManagementRequestView, type EnterpriseOperationResult, type EnterpriseProfileView, type EnterpriseRequestState, type ReviewEnterpriseManagementRequest, type SaveEnterpriseManagementRequest } from "./enterprise-workflows";
 import { isRentalCategoryCode } from "./contracts";
@@ -96,7 +97,7 @@ export class EnterpriseManagementRequestService {
     } else if (input.requestType === "payment_proof") {
       if (![proposal.orderId, proposal.workspaceId].every(value => typeof value === "string" && /^[a-zA-Z0-9._:-]{1,191}$/u.test(value))
         || typeof proposal.currency !== "string" || !/^[A-Z]{3}$/u.test(proposal.currency) || typeof proposal.reportedAmount !== "string"
-        || !/^(?:0|[1-9]\d{0,9})(?:\.\d{1,2})?$/u.test(proposal.reportedAmount) || !new Prisma.Decimal(proposal.reportedAmount).gt(0)
+        || !/^(?:0|[1-9]\d{0,9})(?:\.\d{1,2})?$/u.test(proposal.reportedAmount) || !new prismaRuntime.Decimal(proposal.reportedAmount).gt(0)
         || proposal.paymentPurpose !== "rental_fee" || input.submit && !input.evidenceFileIds.length) throw new BadRequestException("逐单费用回款申请须原订单、空间、币种、正金额及归档凭证");
     } else if (!Array.isArray(proposal.workspaceIds) || !Array.isArray(proposal.categoryCodes) || proposal.workspaceIds.length > 200 || proposal.categoryCodes.length > 200
       || new Set(proposal.workspaceIds).size !== proposal.workspaceIds.length || new Set(proposal.categoryCodes).size !== proposal.categoryCodes.length
@@ -164,7 +165,7 @@ export class EnterpriseManagementRequestService {
       const original = await this.proofs.readOriginal(context.tenantId, context.customerId, receipt, tx);
       if (await this.proofs.customer(context, corporateId, tx) !== before) throw new ForbiddenException("原回款申请当前权限已变化");
       return original;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
     if (await this.proofs.customer(context, corporateId, db) !== before) throw new ForbiddenException("原回款申请读取期间权限已变化");
     return evidence;
   }
@@ -173,7 +174,7 @@ export class EnterpriseManagementRequestService {
     if (!receipt) throw new ConflictException("原回款申请缺少订单与凭证绑定");
     const before = await this.proofs.merchant(authorization, user, receipt.workspaceId);
     const verify = (db: Prisma.TransactionClient) => mode === "original_receipt" ? this.proofs.readOriginal(user.tenantId, applicant, receipt, db) : this.proofs.verify(user.tenantId, applicant, receipt, db);
-    const evidence = tx ? await verify(tx) : await this.prisma.$transaction(verify, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    const evidence = tx ? await verify(tx) : await this.prisma.$transaction(verify, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
     if (await this.proofs.merchant(authorization, user, receipt.workspaceId) !== before) throw new ForbiddenException("原回款申请核对期间商户权限已变化");
     return evidence;
   }
@@ -366,7 +367,7 @@ export class EnterpriseManagementRequestService {
     tx: RentalEnterpriseAuthorityTransaction) {
     if (![id, fileId].every(value => typeof value === "string" && /^[a-zA-Z0-9_-]{1,191}$/u.test(value)))
       throw new BadRequestException("原申请或凭证引用无效");
-    const rows = await tx.$queryRaw<Row[]>(Prisma.sql`SELECT * FROM enterprise_workflow_requests WHERE tenantId=${context.tenantId} AND id=${id} AND applicantCustomerId=${context.customerId} AND kind='finance_request'`);
+    const rows = await tx.$queryRaw<Row[]>(prismaRuntime.sql`SELECT * FROM enterprise_workflow_requests WHERE tenantId=${context.tenantId} AND id=${id} AND applicantCustomerId=${context.customerId} AND kind='finance_request'`);
     const row = rows[0];
     if (rows.length !== 1 || !row || row.id !== id || row.tenantId !== context.tenantId || row.applicantCustomerId !== context.customerId
       || enterpriseJson(row.payload).requestType !== "payment_proof") throw new NotFoundException("本人原费用回款申请不存在");
@@ -377,7 +378,7 @@ export class EnterpriseManagementRequestService {
     // before/after byte checks. This query supplies immutable material, not a new
     // file permission: original proofs.readOriginal still verifies every binding.
     const files = await tx.$queryRaw<Array<{ id: string; tenantId: string; status: string; uploadedBy: string | null;
-      businessType: string; businessModule: string; businessId: string | null; uploadScene: string }>>(Prisma.sql`
+      businessType: string; businessModule: string; businessId: string | null; uploadScene: string }>>(prismaRuntime.sql`
       SELECT f.*,s.id AS historySessionId,s.status AS historySessionStatus,s.completedAt AS historySessionCompletedAt,
         s.provider AS historySessionProvider,s.storageKey AS historySessionStorageKey
       FROM FileAsset f LEFT JOIN file_upload_sessions s ON s.tenantId=f.tenantId AND s.fileAssetId=f.id

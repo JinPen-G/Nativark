@@ -18,7 +18,7 @@ import type { TenantBrandingSource, AccountAppearanceSource } from "@rental-os/p
 import { WorkspaceCapabilityService } from "./workspace-capabilities";
 import { resolveUserBusinessLocationScope } from "./business-location-scope";
 import type { OrganizationLocationScope } from "@rental-os/platform-server/organization-location-scope";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { getRequestIdentity } from "@rental-os/platform-server/request-identity";
 import type { RentalWorkspaceAccessTransaction } from "./mysql-workspace-principal";
 

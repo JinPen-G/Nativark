@@ -1,5 +1,6 @@
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { ConflictException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { isDeepStrictEqual } from "node:util";
 import type { CategoryCapabilityPreparationPatch } from "./category-governance";
 import type { RentalCapability, RentalCapabilityConfig, RentalCapabilityLifecycleStatus, RentalCategoryDefinition, TenantRentalBusinessSettings } from "./contracts";
@@ -59,7 +60,7 @@ export async function writePreparedCategoryCapabilities(
           revision: 1, implementationVersion: patch.expectedImplementationVersion, configVersion: "v1",
           config: config as Prisma.InputJsonValue, enabledAt: new Date(), updatedBy: actorId } });
       } catch (error) {
-        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") throw new ConflictException("新能力实例已被创建，请重新准备；采用未完成");
+        if (error instanceof prismaRuntime.PrismaClientKnownRequestError && error.code === "P2002") throw new ConflictException("新能力实例已被创建，请重新准备；采用未完成");
         throw error;
       }
       await tx.workspaceCapabilityAuditEntry.create({ data: { ...where, code: patch.code, action: "enable",

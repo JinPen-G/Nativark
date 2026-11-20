@@ -1,6 +1,7 @@
 /** Rental客户状态、风险与访问审计。主档写入委托同一客户仓储，状态与历史沿原事务组合；
  * 敏感访问审计保留独立写入，客户锁与当前业务权限由调用方共同核验。 */
-import { Prisma } from "@prisma/client";
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
+import type { Prisma } from "@prisma/client";
 import type {
   CustomerAccount,
   CustomerAccountStatus,
@@ -50,7 +51,7 @@ export class CustomerOperationsRepository {
    * 以及订单创建的最终门禁，都必须先锁同一条主档记录。
    */
   async lockCustomerBusinessGate(tenantId: string, customerId: string, tx: CustomerTx): Promise<boolean> {
-    const rows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    const rows = await tx.$queryRaw<Array<{ id: string }>>(prismaRuntime.sql`
       SELECT \`id\`
       FROM \`customer_profiles\`
       WHERE \`tenantId\` = ${tenantId} AND \`id\` = ${customerId}
@@ -215,7 +216,7 @@ export class CustomerOperationsRepository {
       // Only these InnoDB errors roll back the failed statement, not the original
       // status transaction. Deadlock, timeout, connection loss and unknown errors
       // propagate: they must never look like a committed safety action.
-      const statementOnly = error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2010" &&
+      const statementOnly = error instanceof prismaRuntime.PrismaClientKnownRequestError && error.code === "P2010" &&
         ["1146", "1054", "1452", "1062"].includes(String(error.meta?.code));
       if (!statementOnly) throw error;
       console.warn("Corporate status recipient capture unavailable; original status action continues without a message capture");
@@ -273,7 +274,7 @@ export class CustomerOperationsRepository {
     await this.prisma.$transaction(async tx => {
       await lockRentalBusinessTenant(tx, tenantId);
       await this.writeSensitiveAccess(tx, tenantId, input);
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
   }
 
   private async writeSensitiveAccess(database: Pick<RentalCustomerOperationsStorage, "customerSensitiveAccessAudit">,

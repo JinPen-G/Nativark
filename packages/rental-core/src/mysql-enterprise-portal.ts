@@ -1,7 +1,7 @@
 /** Portal activation and action grants only; never rental/payment authority.
  * Durable results are audit receipts: replay does not restore revoked grants. */
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { createHash } from "node:crypto";
 import { ENTERPRISE_PORTAL_ACTIONS, type EnterprisePortalConfiguration, type SaveEnterprisePortalConfigurationRequest, type SaveEnterpriseTenantSettingsRequest } from "./enterprise";
 import type { SystemUserRow } from "@rental-os/platform-contracts";

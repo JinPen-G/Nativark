@@ -1,7 +1,8 @@
 /** 企业邀请、成员生命周期与已接受管理员交接，使用原Tenant锁、同事务关系写入和原收据。
  * 保留原关系及撤权事实，不改变个人账号、订单或资金；仅显式审阅的管理动作可重绑新修订。 */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { isISO8601 } from "class-validator";
 import { randomBytes, randomUUID } from "node:crypto";
 import { ENTERPRISE_PORTAL_ACTIONS } from "./enterprise";
@@ -280,7 +281,7 @@ export class EnterpriseMembersService {
       await this.commands.customer(context, tx, false);
       if (corporateId) await this.access.requireAction(context, corporateId, "members:manage", tx);
       return current;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
     return rows.map(row => ({ id: row.id, kind: row.kind, state: row.state, revision: row.revision, applicantCustomerId: row.applicantCustomerId, corporateCustomerId: row.corporateCustomerId ?? undefined,
       payload: enterpriseJson(row.payload), decisionReason: row.decisionReason ?? undefined, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() }));
   }
@@ -293,7 +294,7 @@ export class EnterpriseMembersService {
       await tx.$executeRaw`INSERT INTO client_api_rate_buckets (id,scopeKey,bucketStart,count,createdAt,updatedAt) VALUES (${randomUUID()},${scope},${bucket},1,NOW(3),NOW(3)) ON DUPLICATE KEY UPDATE count=count+1,updatedAt=NOW(3)`;
       const counts = await tx.$queryRaw<Array<{ count: number }>>`SELECT count FROM client_api_rate_buckets WHERE scopeKey=${scope} AND bucketStart=${bucket}`;
       return Number(counts[0]?.count ?? 0);
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
     if (count > maximum) throw new ForbiddenException("邀请尝试超出商户限额");
   }
   async ownRelations(context: ClientRequestContext) {

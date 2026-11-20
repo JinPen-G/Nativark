@@ -1,6 +1,7 @@
 /** 原客户配送地址与报价/订单快照单源。宿主供给原两表、事务和当前配送配置，客户读只返回脱敏历史快照。 */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { CLIENT_API_VERSION, type ClientDeliveryAddressListResponse, type ClientDeliveryAddressRequest, type ClientDeliveryAddressSnapshot, type ClientDeliveryAddressView } from "./client-contracts";
 import type { RentalClientAddressStorage, RentalClientDeliveryConfiguration } from "./client-lifecycle-ports";
 import type { ClientRequestContext } from "./client-context";
@@ -116,7 +117,7 @@ export class ClientDeliveryAddressService {
       if (makeDefault) {
         await tx.customerDeliveryAddress.updateMany({ where: { ...scope, status: "active", isDefault: true, ...(existing ? { id: { not: existing.id } } : {}) }, data: { isDefault: false } });
       }
-      const payload = { ...data, latitude: data.latitude === undefined ? null : new Prisma.Decimal(data.latitude), longitude: data.longitude === undefined ? null : new Prisma.Decimal(data.longitude) };
+      const payload = { ...data, latitude: data.latitude === undefined ? null : new prismaRuntime.Decimal(data.latitude), longitude: data.longitude === undefined ? null : new prismaRuntime.Decimal(data.longitude) };
       if (existing) {
         const updated = await tx.customerDeliveryAddress.updateMany({
           where: { id: existing.id, ...scope, status: "active", revision: existing.revision },
@@ -126,7 +127,7 @@ export class ClientDeliveryAddressService {
         return tx.customerDeliveryAddress.findUniqueOrThrow({ where: { id: existing.id } });
       }
       return tx.customerDeliveryAddress.create({ data: { ...scope, ...payload, isDefault: makeDefault, status: "active" } });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable });
     return this.view(saved);
   }
 
@@ -137,7 +138,7 @@ export class ClientDeliveryAddressService {
         where: { tenantId: context.tenantId, customerId: context.customerId, id: addressId, status: "active" },
         data: { status: "deleted", isDefault: false }
       });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
     if (result.count !== 1) throw new NotFoundException("地址不存在");
     return { success: true };
   }
@@ -189,7 +190,7 @@ export class ClientDeliveryAddressService {
       });
       return created.snapshot as unknown as StoredDeliverySnapshot;
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      if (error instanceof prismaRuntime.PrismaClientKnownRequestError && error.code === "P2002") {
         const existing = await this.prisma.clientOrderDeliverySnapshot.findFirst({ where: { tenantId: context.tenantId, quoteId } });
         if (existing) return existing.snapshot as unknown as StoredDeliverySnapshot;
       }

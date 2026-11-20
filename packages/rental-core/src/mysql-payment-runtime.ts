@@ -1,7 +1,8 @@
 /** Rental支付运行应用持有原订单/退款、资金事务、回调归属及unknown恢复。
  * 公共运输提供原签名和受控请求。宿主供给同一数据库、资金、当前身份和失败出箱。 */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, ConflictException, HttpException, HttpStatus, NotFoundException, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { findTenantIntegrationProvider, paymentProviderSupportsCurrency } from "@rental-os/platform-contracts/tenant-integrations";
 import { requestFingerprint } from "@rental-os/platform-contracts/request-fingerprint";
@@ -113,7 +114,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
       if (!config.revision) throw new ServiceUnavailableException("支付回调缺少原签名配置修订");
       await this.integrations.assertEnabledInTransaction({
         $queryRaw: (query, ...values) => transaction.$queryRaw("raw" in query
-          ? Prisma.sql(query, ...values) : Prisma.sql(query.strings, ...query.values))
+          ? prismaRuntime.sql(query, ...values) : prismaRuntime.sql(query.strings, ...query.values))
       }, original.tenantId, "payment", config.provider, { configRevision: config.revision });
     }, consume);
   }
@@ -125,7 +126,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
       await lockRentalBusinessTenant(tx, tenantId);
       await assertRentalBusinessOperationAccessAfterLock(tx, tenantId, workspaceId, orderId);
     }, {
-      isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted
+      isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted
     });
   }
 
@@ -190,7 +191,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
         await lockRentalBusinessTenant(tx, tenantId);
         // 同一订单的待支付单必须串行创建。仅靠“先查后写”会让两个不同幂等键
         // 同时通过检查，最终产生两笔真实支付单。
-        const rows = await tx.$queryRaw<Array<{ id: string; orderNo: string; finalPayableAmount: Prisma.Decimal; currency: string }>>(Prisma.sql`
+        const rows = await tx.$queryRaw<Array<{ id: string; orderNo: string; finalPayableAmount: Prisma.Decimal; currency: string }>>(prismaRuntime.sql`
           SELECT id, orderNo, finalPayableAmount, currency
             FROM rental_orders
            WHERE id = ${orderId} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId}
@@ -243,7 +244,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
             instrument: input.instrument,
             provider: config.provider,
             method: input.method,
-            amount: new Prisma.Decimal(amount),
+            amount: new prismaRuntime.Decimal(amount),
             currency: order.currency,
             merchantOrderNo,
             idempotencyKey,
@@ -253,9 +254,9 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
           }
         });
         return { intent, orderNo: order.orderNo, amount, replayed: false };
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable });
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
+      if (error instanceof prismaRuntime.PrismaClientKnownRequestError && error.code === "P2034") {
         throw new ConflictException("支付单正在被其他请求创建，请稍后重试");
       }
       throw error;
@@ -540,14 +541,14 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
       await lockRentalBusinessTenant(tx, tenantId);
       // 退款额度属于订单级事实，而不是支付单级事实；同一订单有多个支付单时，
       // 必须锁订单行，避免两笔退款并发各自读到同一笔待退余额。
-      await tx.$queryRaw(Prisma.sql`
+      await tx.$queryRaw(prismaRuntime.sql`
         SELECT id
           FROM rental_orders
          WHERE id = ${orderId} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId}
          FOR UPDATE
       `);
       await assertRentalBusinessOperationAccessAfterLock(tx, intent.tenantId, intent.workspaceId, intent.orderId);
-      await tx.$queryRaw(Prisma.sql`
+      await tx.$queryRaw(prismaRuntime.sql`
         SELECT id
           FROM rental_payment_intents
          WHERE id = ${intentId} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId} AND orderId = ${orderId}
@@ -606,7 +607,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
           paymentIntentId: intentId,
           provider: locked.provider,
           method: locked.method,
-          amount: new Prisma.Decimal(amount),
+          amount: new prismaRuntime.Decimal(amount),
           currency: locked.currency,
           merchantRefundNo,
           idempotencyKey,
@@ -625,7 +626,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
           select: { amount: true }
         })).reduce((sum, row) => sum + Number(row.amount), 0))
       };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable });
 
     if (prepared.replay) return this.toRefundResponse(prepared.refund);
 
@@ -1410,12 +1411,12 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
         const updated = await this.prisma.$transaction(async (tx) => {
           await lockRentalBusinessTenant(tx, tenantId);
           // 目标来自原退款记录；与退款创建保持 Order → Refund，不能先更新退款再反向取得订单锁。
-          const orders = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT id FROM rental_orders
+          const orders = await tx.$queryRaw<Array<{ id: string }>>(prismaRuntime.sql`SELECT id FROM rental_orders
             WHERE id = ${original.orderId} AND tenantId = ${original.tenantId} AND workspaceId = ${original.workspaceId} FOR UPDATE`);
           if (!orders.length) throw new NotFoundException("原退款订单不存在或不属于原经营空间");
           await assertRentalBusinessOperationAccessAfterLock(tx, original.tenantId, original.workspaceId, original.orderId);
           // 使用锁定当前读，避免 RR 中更早的权限读取让 ORM 复读沿用旧快照。
-          const [row] = await tx.$queryRaw<Array<PaymentRefundRow>>(Prisma.sql`SELECT * FROM rental_payment_refunds
+          const [row] = await tx.$queryRaw<Array<PaymentRefundRow>>(prismaRuntime.sql`SELECT * FROM rental_payment_refunds
             WHERE id = ${original.id} AND tenantId = ${original.tenantId} FOR UPDATE`);
           if (!row) throw new NotFoundException("退款单不存在");
           this.assertOriginalRefund(row, original);
@@ -1531,7 +1532,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
           data: { tenantId: input.tenantId, provider: eventProvider, eventId: input.eventId, paymentIntentId: input.refund.paymentIntentId, payloadHash: input.payloadHash, status: "processing" }
         });
       } catch (error) {
-        if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) throw error;
+        if (!(error instanceof prismaRuntime.PrismaClientKnownRequestError && error.code === "P2002")) throw error;
         // 另一并发回调可能已经抢到事件。重新读取并复核事件归属；如果它已经
         // 失败则由当前请求接管重试，只有 processing/processed 才直接返回。
         const concurrent = await this.prisma.paymentWebhookEvent.findUnique({ where: { provider_eventId: { provider: eventProvider, eventId: input.eventId } } });
@@ -1916,11 +1917,11 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
       await this.prisma.$transaction(async (tx) => {
         await lockRentalBusinessTenant(tx, input.tenantId);
         // 原支付单解析订单，锁后只核对同一目标；与新支付/退款创建保持 Order → Intent → event。
-        const orders = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT id FROM rental_orders
+        const orders = await tx.$queryRaw<Array<{ id: string }>>(prismaRuntime.sql`SELECT id FROM rental_orders
           WHERE id = ${original.orderId} AND tenantId = ${original.tenantId} AND workspaceId = ${original.workspaceId} FOR UPDATE`);
         if (!orders.length) throw new NotFoundException("原支付订单不存在或不属于原经营空间");
         await assertRentalBusinessOperationAccessAfterLock(tx, original.tenantId, original.workspaceId, original.orderId);
-        const [intent] = await tx.$queryRaw<Array<Prisma.RentalPaymentIntentGetPayload<object>>>(Prisma.sql`SELECT * FROM rental_payment_intents
+        const [intent] = await tx.$queryRaw<Array<Prisma.RentalPaymentIntentGetPayload<object>>>(prismaRuntime.sql`SELECT * FROM rental_payment_intents
           WHERE id = ${original.id} AND tenantId = ${original.tenantId} FOR UPDATE`);
         if (!intent) throw new NotFoundException("支付单不存在");
         if (intent.workspaceId !== original.workspaceId || intent.orderId !== original.orderId || intent.provider !== original.provider
@@ -1969,7 +1970,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
               data: { tenantId: input.tenantId, provider: input.provider, eventId: input.eventId, paymentIntentId: intent.id, payloadHash: input.payloadHash, status: "processing" }
             });
           } catch (error) {
-            if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) throw error;
+            if (!(error instanceof prismaRuntime.PrismaClientKnownRequestError && error.code === "P2002")) throw error;
             const concurrent = await tx.paymentWebhookEvent.findUnique({ where: { provider_eventId: { provider: input.provider, eventId: input.eventId } } });
             if (!concurrent) throw error;
             if (concurrent.tenantId !== input.tenantId || concurrent.payloadHash !== input.payloadHash || (concurrent.paymentIntentId && concurrent.paymentIntentId !== input.intentId)) {

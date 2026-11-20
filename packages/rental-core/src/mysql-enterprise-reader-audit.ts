@@ -1,7 +1,8 @@
 /** Durable enterprise read metadata uses the original operation log. Current
  * client grants fence response delivery and the curated workspace audit page. */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, ConflictException, ForbiddenException, ServiceUnavailableException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import {
   ENTERPRISE_READER_AUDIT_ACTIONS, enterpriseReaderAuditEntrySnapshot,
@@ -74,7 +75,7 @@ export class EnterpriseReaderAuditService {
         metadata: { version: "v1", corporateCustomerId: corporateId, workspaceCode: context.workspaceCode, ...event }
       });
       return { before, event };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
     // The append can succeed even when response delivery later fails. Retain that
     // original preparation event and discard data if grants changed during IO.
     const after = await this.access.requireWorkspaceAction(context, corporateId, required[0]);
@@ -115,14 +116,14 @@ export class EnterpriseReaderAuditService {
       .filter(permission => permission !== "export:create").every(permission => before.actions.includes(permission)));
     const scope = enterpriseHash({ tenantId: context.tenantId, corporateId, workspaceId: context.workspaceId });
     const cursor = this.cursor(readerCursor, scope);
-    const rows = actions.length ? await this.prisma.$queryRaw<AuditRow[]>(Prisma.sql`
+    const rows = actions.length ? await this.prisma.$queryRaw<AuditRow[]>(prismaRuntime.sql`
       SELECT id,tenantId,workspaceId,userId,rentalOrderId,action,detail,createdAt FROM OperationLog
       WHERE tenantId=${context.tenantId} AND workspaceId=${context.workspaceId} AND userId IS NULL
-        AND action IN (${Prisma.join(actions.map(action => `enterprise.reader.${action}`))})
+        AND action IN (${prismaRuntime.join(actions.map(action => `enterprise.reader.${action}`))})
         AND JSON_UNQUOTE(JSON_EXTRACT(detail,'$.targetType'))='enterprise-reader'
         AND JSON_UNQUOTE(JSON_EXTRACT(detail,'$.metadata.version'))='v1'
         AND JSON_UNQUOTE(JSON_EXTRACT(detail,'$.metadata.corporateCustomerId'))=${corporateId}
-        ${cursor ? Prisma.sql`AND (createdAt<${new Date(cursor.at)} OR (createdAt=${new Date(cursor.at)} AND id<${cursor.id}))` : Prisma.empty}
+        ${cursor ? prismaRuntime.sql`AND (createdAt<${new Date(cursor.at)} OR (createdAt=${new Date(cursor.at)} AND id<${cursor.id}))` : prismaRuntime.empty}
       ORDER BY createdAt DESC,id DESC LIMIT 51`) : [];
     const after = await this.access.requireWorkspaceAction(context, corporateId, "audit:read");
     this.assertIdentity(context);

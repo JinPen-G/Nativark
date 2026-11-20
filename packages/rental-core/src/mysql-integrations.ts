@@ -5,7 +5,7 @@ import { NotificationLedgerRepository, type NotificationLedgerDataStore } from "
 import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { createHash } from "node:crypto";
 import { RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE } from "./exchange-inspection-preparation";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import type { CreateFileAssetRequest, FileAssetQuery, FileAssetSummary } from "@rental-os/platform-contracts/files";
 import type { AsyncJobSummary, CreateAsyncJobRequest, CreatePrintJobRequest, PrintJobSummary } from "@rental-os/platform-contracts/jobs";
 import type {

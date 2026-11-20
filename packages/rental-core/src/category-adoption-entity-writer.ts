@@ -1,5 +1,6 @@
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { ConflictException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { createHash } from "node:crypto";
 import type { CategoryEntityPreparationPatch } from "./category-governance";
 import type { RentalCategoryDefinition } from "./contracts";
@@ -84,7 +85,7 @@ export async function writePreparedCategoryEntities(
           normalizedValue: claim.normalizedValue, entityId: claim.entityId
         } });
       } catch (error) {
-        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") throw new ConflictException(`${claim.label}已存在，采用未完成`);
+        if (error instanceof prismaRuntime.PrismaClientKnownRequestError && error.code === "P2002") throw new ConflictException(`${claim.label}已存在，采用未完成`);
         throw error;
       }
     }

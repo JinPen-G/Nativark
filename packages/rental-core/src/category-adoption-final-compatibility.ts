@@ -1,5 +1,6 @@
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { ConflictException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { CATEGORY_ADOPTION_LIMITS } from "./category-governance";
 import { plainToInstance } from "class-transformer";
 import { validateSync } from "class-validator";
@@ -13,7 +14,7 @@ function measuredBytes(rows: Array<{ bytes: unknown }>) {
     throw new ConflictException("最终采用缺少数据库配置大小依据，不能按零处理");
   }
   const value = rows[0].bytes;
-  if (value !== null && typeof value !== "bigint" && typeof value !== "number" && !(value instanceof Prisma.Decimal)) {
+  if (value !== null && typeof value !== "bigint" && typeof value !== "number" && !(value instanceof prismaRuntime.Decimal)) {
     throw new ConflictException("数据库配置大小依据格式不可读取，不能按零处理");
   }
   const count = Number(value ?? 0);
@@ -29,8 +30,8 @@ export async function assertCategoryAdoptionEntityBounds(tx: Prisma.TransactionC
     throw new ConflictException("当前型号与资产合计超过10000条或规模不可读取，原版与准备资料保留");
   }
   const bytes = await Promise.all([
-    tx.$queryRaw<Array<{ bytes: unknown }>>(Prisma.sql`SELECT SUM(COALESCE(OCTET_LENGTH(attributes), 0)) AS bytes FROM rental_item_groups WHERE tenantId = ${tenantId} AND workspaceId = ${workspaceId}`),
-    tx.$queryRaw<Array<{ bytes: unknown }>>(Prisma.sql`SELECT SUM(COALESCE(OCTET_LENGTH(attributes), 0)) AS bytes FROM rental_assets WHERE tenantId = ${tenantId} AND workspaceId = ${workspaceId}`)
+    tx.$queryRaw<Array<{ bytes: unknown }>>(prismaRuntime.sql`SELECT SUM(COALESCE(OCTET_LENGTH(attributes), 0)) AS bytes FROM rental_item_groups WHERE tenantId = ${tenantId} AND workspaceId = ${workspaceId}`),
+    tx.$queryRaw<Array<{ bytes: unknown }>>(prismaRuntime.sql`SELECT SUM(COALESCE(OCTET_LENGTH(attributes), 0)) AS bytes FROM rental_assets WHERE tenantId = ${tenantId} AND workspaceId = ${workspaceId}`)
   ]);
   const storedEntityBytes = bytes.reduce((sum, rows) => sum + measuredBytes(rows), 0);
   if (storedEntityBytes > CATEGORY_ADOPTION_LIMITS.candidateBytes) throw new ConflictException("当前型号/资产JSON超过16MiB采用范围，原版与准备资料保留");
@@ -75,9 +76,9 @@ async function assertCategoryAdoptionConfigurationBounds(tx: Prisma.TransactionC
     ["rental_discount_plans", ["applicableItemGroupIds", "applicablePricingGroupIds"]],
     ["rental_coupon_templates", ["applicableItemGroupIds"]]
   ] as const;
-  const byteRows = await Promise.all(jsonOwners.map(([table, columns]) => tx.$queryRaw<Array<{ bytes: bigint | null }>>(Prisma.sql`
-    SELECT SUM(${Prisma.join(columns.map(column => Prisma.sql`COALESCE(OCTET_LENGTH(${Prisma.raw(`\`${column}\``)}), 0)`), " + ")}) AS bytes
-    FROM ${Prisma.raw(`\`${table}\``)} WHERE tenantId = ${tenantId} AND workspaceId = ${workspaceId}`)));
+  const byteRows = await Promise.all(jsonOwners.map(([table, columns]) => tx.$queryRaw<Array<{ bytes: bigint | null }>>(prismaRuntime.sql`
+    SELECT SUM(${prismaRuntime.join(columns.map(column => prismaRuntime.sql`COALESCE(OCTET_LENGTH(${prismaRuntime.raw(`\`${column}\``)}), 0)`), " + ")}) AS bytes
+    FROM ${prismaRuntime.raw(`\`${table}\``)} WHERE tenantId = ${tenantId} AND workspaceId = ${workspaceId}`)));
   const configurationBytes = byteRows.reduce((sum, rows) => sum + measuredBytes(rows), 0);
   if (!Number.isSafeInteger(configurationBytes) || configurationBytes < 0 || configurationBytes > CATEGORY_ADOPTION_LIMITS.candidateBytes) {
     throw new ConflictException("经营配置JSON超过16MiB最终采用范围，原版与准备资料保留");

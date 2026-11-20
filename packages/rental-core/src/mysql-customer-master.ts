@@ -1,12 +1,7 @@
 /** Rental租户共享客户、账号和会员的唯一模型写入口，复用原请求身份及调用方事务。
  * 企业关系修订、普通资料CAS与脱敏保持原行为；不授予跨空间业务读取或平台公共客户权限。 */
-import {
-  Prisma,
-  type CustomerAccount as PrismaCustomerAccount,
-  type CustomerMembership as PrismaCustomerMembership,
-  type CustomerMembershipReview as PrismaCustomerMembershipReview,
-  type CustomerProfile as PrismaCustomerProfile
-} from "@prisma/client";
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
+import type { Prisma, CustomerAccount as PrismaCustomerAccount, CustomerMembership as PrismaCustomerMembership, CustomerMembershipReview as PrismaCustomerMembershipReview, CustomerProfile as PrismaCustomerProfile } from "@prisma/client";
 import type {
   CustomerAccountStatus,
   CustomerMembershipStatus,
@@ -274,7 +269,7 @@ export class SharedCustomerRepository {
       return await this.db(tx).customerProfile.update({ where: { id: customerId, tenantId },
         data: { ...data, ordinaryRevision: { increment: 1 } } });
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") return undefined;
+      if (error instanceof prismaRuntime.PrismaClientKnownRequestError && error.code === "P2025") return undefined;
       throw error;
     }
   }
@@ -509,7 +504,7 @@ export class SharedCustomerRepository {
       });
       return this.toMembership(row);
     } catch (error) {
-      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
+      if (!(error instanceof prismaRuntime.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
       const winner = await this.findMembership(tenantId, customerId);
       if (!winner) throw error;
       return winner;

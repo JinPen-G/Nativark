@@ -1,6 +1,7 @@
 /** Rental对账文件的原解析、差异证据和审核应用，使用当前完整经营空间财务权与同一事务。 */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import type {
   PaymentStatementBatchDetail,
   PaymentStatementBatchSummary,
@@ -259,10 +260,10 @@ export class PaymentReconciliationFileService {
         });
         await tx.paymentReconciliationLine.createMany({ data: lineData.map((row) => ({ ...row, batchId: created.id })) });
         return created;
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+      }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
       return this.getBatch(tenantId, workspaceId, batch.id);
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      if (error instanceof prismaRuntime.PrismaClientKnownRequestError && error.code === "P2002") {
         const concurrent = await this.prisma.paymentReconciliationBatch.findFirst({ where: { tenantId, workspaceId, provider: normalizedProvider, fileSha256 } });
         if (concurrent) return this.getBatch(tenantId, workspaceId, concurrent.id);
       }
@@ -324,7 +325,7 @@ export class PaymentReconciliationFileService {
           data: { acknowledgedRows: { increment: 1 }, status: remaining === 0 ? "reviewed" : "needs_review" }
         });
       }
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
     return this.getBatch(tenantId, workspaceId, batchId);
   }
 

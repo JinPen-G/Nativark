@@ -1,5 +1,6 @@
 /** 原注册Serializable事务及有限冲突重试；其他错误原样传播，不重发外部操作。 */
-import { Prisma, type PrismaClient } from "@prisma/client";
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
+import type { Prisma, PrismaClient } from "@prisma/client";
 
 export async function customerRegistrationTransaction<T>(
   prisma: Pick<PrismaClient, "$transaction">,
@@ -7,9 +8,9 @@ export async function customerRegistrationTransaction<T>(
 ): Promise<T> {
   for (let attempt = 0; ; attempt += 1) {
     try {
-      return await prisma.$transaction(work, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return await prisma.$transaction(work, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable });
     } catch (error) {
-      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || !["P2002", "P2034"].includes(error.code) || attempt >= 2) throw error;
+      if (!(error instanceof prismaRuntime.PrismaClientKnownRequestError) || !["P2002", "P2034"].includes(error.code) || attempt >= 2) throw error;
     }
   }
 }

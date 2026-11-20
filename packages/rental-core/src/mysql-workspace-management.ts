@@ -2,8 +2,9 @@
  * 空间档案、已发布品类、必选能力参加者与成员写入保留原事务；身份投影复用公共认证仓储。
  * 事务内方法只供已建立原事务和当前主体的宿主组合，不授予 Core、成员或跨租户访问权。
  */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, ForbiddenException, NotFoundException } from "@nestjs/common";
-import { Prisma, type PrismaClient, WorkspaceStatus as PrismaWorkspaceStatus, SystemDataScope as PrismaSystemDataScope } from "@prisma/client";
+import type { Prisma, PrismaClient, WorkspaceStatus as PrismaWorkspaceStatus, SystemDataScope as PrismaSystemDataScope } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import type { SystemUserRow, SystemDataScope, SaveSystemUserRequest, SaveWorkspaceAccessRequest } from "@rental-os/platform-contracts";
 import { PlatformAuthenticationRepository } from "@rental-os/platform-server/authentication";
@@ -79,7 +80,7 @@ export class RentalWorkspaceManagementRepository extends PlatformAuthenticationR
     const categoryCode = this.toPrismaCategoryCode(input.categoryCode);
     const created = await this.database.$transaction(async (tx) => {
       await lockRentalBusinessTenant(tx, tenantId);
-      await tx.$queryRaw(Prisma.sql`SELECT code FROM rental_category_definitions WHERE code = ${categoryCode.toLowerCase()} FOR UPDATE`);
+      await tx.$queryRaw(prismaRuntime.sql`SELECT code FROM rental_category_definitions WHERE code = ${categoryCode.toLowerCase()} FOR UPDATE`);
       const category = await tx.rentalCategoryDefinition.findUnique({ where: { code: categoryCode } });
       if (!category) {
         throw new BadRequestException("经营品类不存在");
@@ -108,7 +109,7 @@ export class RentalWorkspaceManagementRepository extends PlatformAuthenticationR
           name,
           categoryCode,
           categoryVersionId: categoryVersion.id,
-          status: PrismaWorkspaceStatus.ACTIVE,
+          status: ("ACTIVE" as const),
           isDefault: false,
           defaultMarker: workspaceId,
           // 新建空间默认 development：首期品类能力未全部实现前不能伪装为正式经营。
@@ -203,7 +204,7 @@ export class RentalWorkspaceManagementRepository extends PlatformAuthenticationR
       await this.assertFixedAllWorkspaceAccessesAllowed(tx, tenantId, [{ ...input, workspaceId, isActive: input.isActive ?? true }], currentUser?.id);
       const workspace = await tx.businessWorkspace.findFirst({ where: { id: workspaceId, tenantId } });
       if (!workspace) throw new NotFoundException("经营空间不存在");
-      if (workspace.status !== PrismaWorkspaceStatus.ACTIVE) {
+      if (workspace.status !== ("ACTIVE" as const)) {
         throw new BadRequestException("冻结或停用的经营空间不能变更成员");
       }
       // 复合外键已在库层挡住跨租户成员，这里仍显式校验，为的是给出可读的 400
@@ -228,7 +229,7 @@ export class RentalWorkspaceManagementRepository extends PlatformAuthenticationR
         create: { tenantId, workspaceId, userId: input.userId, ...data },
         update: data
       });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable });
     return this.toWorkspaceMember(saved);
   }
 
@@ -290,9 +291,9 @@ export class RentalWorkspaceManagementRepository extends PlatformAuthenticationR
 
   toPrismaWorkspaceStatus(status: BusinessWorkspaceStatus): PrismaWorkspaceStatus {
     const map = {
-      active: PrismaWorkspaceStatus.ACTIVE,
-      frozen: PrismaWorkspaceStatus.FROZEN,
-      disabled: PrismaWorkspaceStatus.DISABLED
+      active: ("ACTIVE" as const),
+      frozen: ("FROZEN" as const),
+      disabled: ("DISABLED" as const)
     } as const;
     return map[status];
   }
@@ -330,7 +331,7 @@ export class RentalWorkspaceManagementRepository extends PlatformAuthenticationR
       const user = await this.saveUserInTransaction(tx, userInput, tenantId, actorUserId);
       await this.saveWorkspaceAccessesInTransaction(tx, tenantId, user.userId, workspaceAccesses);
       return user;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable });
     const user = await this.findUserWithRoles(saved.userId);
     return { ...this.toUserRow(user), temporaryPassword: saved.temporaryPassword };
   }
@@ -499,7 +500,7 @@ export class RentalWorkspaceManagementRepository extends PlatformAuthenticationR
     if (workspaces.length !== workspaceIds.length) {
       throw new BadRequestException("经营空间不存在或不属于当前租户");
     }
-    if (workspaces.some((workspace) => workspace.status !== PrismaWorkspaceStatus.ACTIVE)) {
+    if (workspaces.some((workspace) => workspace.status !== ("ACTIVE" as const))) {
       throw new BadRequestException("冻结或停用的经营空间不能变更成员");
     }
 
@@ -593,14 +594,14 @@ export class RentalWorkspaceManagementRepository extends PlatformAuthenticationR
 
   toPrismaDataScope(scope?: SystemDataScope): PrismaSystemDataScope {
     if (scope === "all") {
-      return PrismaSystemDataScope.ALL;
+      return ("ALL" as const);
     }
     if (scope === "organization") {
-      return PrismaSystemDataScope.ORGANIZATION;
+      return ("ORGANIZATION" as const);
     }
     if (scope === "own") {
-      return PrismaSystemDataScope.OWN;
+      return ("OWN" as const);
     }
-    return PrismaSystemDataScope.STORE;
+    return ("STORE" as const);
   }
 }

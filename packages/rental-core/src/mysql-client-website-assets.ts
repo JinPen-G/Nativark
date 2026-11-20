@@ -1,5 +1,6 @@
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, NotFoundException, PayloadTooLargeException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import type { SystemUserRow } from "@rental-os/platform-contracts";
 import { requireRequestTenantId } from "@rental-os/platform-server/request-identity";
 import type { RentalWebsiteAssetStorage } from "./client-session-ports";
@@ -42,7 +43,7 @@ export class WebsiteAssetService {
     if (!matchesSignature(file.mimetype, file.buffer)) throw new BadRequestException("图片内容与文件格式不一致");
 
     return this.prisma.$transaction(async tx => {
-      const tenants = await tx.$queryRaw<Array<{ code: string }>>(Prisma.sql`SELECT code FROM Tenant WHERE id=${tenantId} LOCK IN SHARE MODE`);
+      const tenants = await tx.$queryRaw<Array<{ code: string }>>(prismaRuntime.sql`SELECT code FROM Tenant WHERE id=${tenantId} LOCK IN SHARE MODE`);
       const tenant = tenants[0];
       if (!tenant) throw new NotFoundException("租户不存在");
       await assertRentalBusinessTenantAccessAfterLock(tx, tenantId);
@@ -51,7 +52,7 @@ export class WebsiteAssetService {
         select: { id: true }
       });
       return { assetId: asset.id, mimeType: file.mimetype, url: `/api/client/v1/public/website-assets/${encodeURIComponent(tenant.code)}/${asset.id}` };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
   }
 
   /** 公开读取：按 tenantCode + assetId 取字节，核对归属，返回内容供客户端渲染。 */

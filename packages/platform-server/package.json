@@ -11,6 +11,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./prisma-runtime": {
+      "types": "./dist/prisma-runtime.d.ts",
+      "default": "./dist/prisma-runtime.js"
+    },
     "./password": {
       "types": "./dist/common/password.d.ts",
       "default": "./dist/common/password.js"
@@ -346,6 +350,9 @@
   },
   "typesVersions": {
     "*": {
+      "prisma-runtime": [
+        "dist/prisma-runtime.d.ts"
+      ],
       "password": [
         "dist/common/password.d.ts"
       ],

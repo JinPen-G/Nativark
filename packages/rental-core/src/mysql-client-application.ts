@@ -1,6 +1,7 @@
 /** Rental客户各端的真实业务应用。目录、报价、本人订单、付款与文件沿原授权和业务服务。
  * 宿主供给同一数据库/客户Auth/会员及原事务出箱；原结果读取不重发或补造历史。 */
-import { Prisma } from "@prisma/client";
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
+import type { Prisma } from "@prisma/client";
 import { clientOwnsRentalOrder } from "./client-order-ownership";
 import {
   BadRequestException,
@@ -904,7 +905,7 @@ export class ClientApiService {
         });
       }
       return existing;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable });
     return {
       id: saved.id,
       kind: saved.kind as ClientContactView["kind"],
@@ -921,7 +922,7 @@ export class ClientApiService {
     const result = await this.prisma.$transaction(async (tx) => {
       await lockRentalBusinessTenant(tx, context.tenantId);
       return tx.customerContact.updateMany({ where: { tenantId: context.tenantId, customerId: context.customerId, id: contactId, status: "active" }, data: { status: "inactive", isPrimary: false } });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
     if (result.count !== 1) throw new NotFoundException("联系人不存在");
     return { success: true };
   }
@@ -1595,7 +1596,7 @@ export class ClientApiService {
         }
       }
       return { apiVersion: CLIENT_API_VERSION, items, page, pageSize, total };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.RepeatableRead });
   }
 
   async getOrder(context: ClientRequestContext, orderId: string) {

@@ -1,7 +1,8 @@
 /** 企业租赁政策交集、报价/原批准复验及本主体原保存结果；沿原身份和业务事务运行。
  * 历史履约另有边界，政策不提供价格、授信或保证金收据；宿主注入同一存储与资格参加者。 */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, ConflictException, ForbiddenException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { isRentalCategoryCode } from "./rental-category-code";
 import type { EnterpriseBookingBasis } from "./enterprise-booking";
 import type { EnterpriseScopePolicy, EnterpriseScopePolicySaved, EnterpriseScopePolicyView, EnterpriseOwnRentalPolicy, SaveEnterpriseScopePolicyRequest } from "./enterprise-policy";
@@ -45,7 +46,7 @@ export class EnterprisePolicyService {
     }
   }
   private rows(tenantId: string, corporateId: string, db: PolicyDb) {
-    return db.$queryRaw<PolicyRow[]>(Prisma.sql`SELECT scopeKey,revision,policy,membershipUpdatedAt FROM enterprise_scope_policies WHERE tenantId=${tenantId} AND corporateCustomerId=${corporateId} ${db === this.prisma ? Prisma.empty : Prisma.sql`LOCK IN SHARE MODE`}`);
+    return db.$queryRaw<PolicyRow[]>(prismaRuntime.sql`SELECT scopeKey,revision,policy,membershipUpdatedAt FROM enterprise_scope_policies WHERE tenantId=${tenantId} AND corporateCustomerId=${corporateId} ${db === this.prisma ? prismaRuntime.empty : prismaRuntime.sql`LOCK IN SHARE MODE`}`);
   }
   private decoded(row: PolicyRow) { const policy = enterpriseJson(row.policy); this.validate(policy); return policy; }
   private async company(tenantId: string, corporateId: string, db: PolicyDb) {
@@ -78,7 +79,7 @@ export class EnterprisePolicyService {
         || upper.approvalMode === "per_order" && p.enterprisePaymentAllowed && p.approvalMode !== "per_order"
         || scopeKey.startsWith("member:") && p.approvalMode !== upper.approvalMode
         || p.noticeVersion !== disclosure.noticeVersion || p.noticeText !== disclosure.noticeText
-        || p.maxRequestAmount !== undefined && upper.maxRequestAmount !== undefined && (p.currency !== upper.currency || new Prisma.Decimal(p.maxRequestAmount).gt(upper.maxRequestAmount))
+        || p.maxRequestAmount !== undefined && upper.maxRequestAmount !== undefined && (p.currency !== upper.currency || new prismaRuntime.Decimal(p.maxRequestAmount).gt(upper.maxRequestAmount))
         || p.approvalLifetimeMinutes !== undefined && upper.approvalLifetimeMinutes !== undefined && p.approvalLifetimeMinutes > upper.approvalLifetimeMinutes) {
         throw new ForbiddenException("企业/员工政策只能收窄商户上限，不能改写商户告知或放松审批");
       }
@@ -238,7 +239,7 @@ export class EnterprisePolicyService {
       assertScope();
       if (sessions.length !== 1 || sessions[0].id !== context.sessionId) throw new ForbiddenException("企业租赁政策读取期间客户会话或空间已变化");
       return { items, relations, sessionExpiresAt: sessions[0].expiresAt };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, maxWait: 2500, timeout: 15000 });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted, maxWait: 2500, timeout: 15000 });
     assertScope();
     // Locks serialize changes, but time can pass during a query or commit wait.
     // Recheck the original periods after every asynchronous read has finished.
@@ -265,22 +266,22 @@ export class EnterprisePolicyService {
   private async evaluate(tenantId: string, workspaceId: string, personalId: string, input: RentalBookingIdentityInput, tx?: Prisma.TransactionClient): Promise<EnterpriseBookingBasis | undefined> {
     if (input.bookingIdentity !== "enterprise_employee" || !input.corporateCustomerId) return undefined;
     const db: PolicyDb = tx ?? this.prisma;
-    const portals = await db.$queryRaw<Array<{ enabled: boolean }>>(Prisma.sql`SELECT enabled FROM enterprise_corporate_portals WHERE tenantId=${tenantId} AND corporateCustomerId=${input.corporateCustomerId} ${tx ? Prisma.sql`LOCK IN SHARE MODE` : Prisma.empty}`);
+    const portals = await db.$queryRaw<Array<{ enabled: boolean }>>(prismaRuntime.sql`SELECT enabled FROM enterprise_corporate_portals WHERE tenantId=${tenantId} AND corporateCustomerId=${input.corporateCustomerId} ${tx ? prismaRuntime.sql`LOCK IN SHARE MODE` : prismaRuntime.empty}`);
     const rows = await this.rows(tenantId, input.corporateCustomerId, db);
     // Presence is the durable migration marker. Disabling a previously configured
     // portal must never restore legacy, less restrictive business behavior.
     if (!portals.length && !rows.length) return undefined;
     if (!portals[0]?.enabled) throw new ForbiddenException("企业新业务入口已关闭");
-    const tenants = await db.$queryRaw<Array<{ enabled: boolean }>>(Prisma.sql`SELECT enabled FROM enterprise_portal_tenant_settings WHERE tenantId=${tenantId} ${tx ? Prisma.sql`LOCK IN SHARE MODE` : Prisma.empty}`);
+    const tenants = await db.$queryRaw<Array<{ enabled: boolean }>>(prismaRuntime.sql`SELECT enabled FROM enterprise_portal_tenant_settings WHERE tenantId=${tenantId} ${tx ? prismaRuntime.sql`LOCK IN SHARE MODE` : prismaRuntime.empty}`);
     if (!tenants[0]?.enabled) throw new ForbiddenException("企业新业务入口已关闭");
     const now = new Date();
-    const relations = await db.$queryRaw<Array<{ id: string; updatedAt: Date }>>(Prisma.sql`SELECT r.id,r.updatedAt FROM customer_corporate_memberships r JOIN customer_profiles p ON p.tenantId=r.tenantId AND p.id=r.personalCustomerId AND p.customerType='personal' AND p.status='active' AND p.mergedIntoCustomerId IS NULL JOIN customer_accounts a ON a.tenantId=p.tenantId AND a.customerId=p.id AND a.status='active' JOIN customer_memberships pm ON pm.tenantId=p.tenantId AND pm.customerId=p.id AND pm.status='active' JOIN customer_profiles c ON c.tenantId=r.tenantId AND c.id=r.corporateCustomerId AND c.customerType='corporate' AND c.status='active' AND c.mergedIntoCustomerId IS NULL JOIN customer_memberships cm ON cm.tenantId=c.tenantId AND cm.customerId=c.id AND cm.status='active' WHERE r.tenantId=${tenantId} AND r.corporateCustomerId=${input.corporateCustomerId} AND r.personalCustomerId=${personalId} AND r.status='active' AND r.effectiveFrom<=${now} AND (r.effectiveTo IS NULL OR r.effectiveTo>${now}) ${tx ? Prisma.sql`LOCK IN SHARE MODE` : Prisma.empty}`);
+    const relations = await db.$queryRaw<Array<{ id: string; updatedAt: Date }>>(prismaRuntime.sql`SELECT r.id,r.updatedAt FROM customer_corporate_memberships r JOIN customer_profiles p ON p.tenantId=r.tenantId AND p.id=r.personalCustomerId AND p.customerType='personal' AND p.status='active' AND p.mergedIntoCustomerId IS NULL JOIN customer_accounts a ON a.tenantId=p.tenantId AND a.customerId=p.id AND a.status='active' JOIN customer_memberships pm ON pm.tenantId=p.tenantId AND pm.customerId=p.id AND pm.status='active' JOIN customer_profiles c ON c.tenantId=r.tenantId AND c.id=r.corporateCustomerId AND c.customerType='corporate' AND c.status='active' AND c.mergedIntoCustomerId IS NULL JOIN customer_memberships cm ON cm.tenantId=c.tenantId AND cm.customerId=c.id AND cm.status='active' WHERE r.tenantId=${tenantId} AND r.corporateCustomerId=${input.corporateCustomerId} AND r.personalCustomerId=${personalId} AND r.status='active' AND r.effectiveFrom<=${now} AND (r.effectiveTo IS NULL OR r.effectiveTo>${now}) ${tx ? prismaRuntime.sql`LOCK IN SHARE MODE` : prismaRuntime.empty}`);
     const relation = relations[0];
     if (!relation) throw new ForbiddenException("当前个人会员、企业会员或关系不可用");
     const m = rows.find(r => r.scopeKey === "merchant"), c = rows.find(r => r.scopeKey === "company"), e = rows.find(r => r.scopeKey === `member:${relation.id}`);
     if (!m || !c) throw new ForbiddenException("商户和企业使用政策尚未明确");
     const merchant = this.decoded(m), company = this.decoded(c), employee = e && this.decoded(e);
-    const workspaces = await db.$queryRaw<Array<{ categoryCode: string }>>(Prisma.sql`SELECT categoryCode FROM business_workspaces WHERE tenantId=${tenantId} AND id=${workspaceId} AND status='ACTIVE' ${tx ? Prisma.sql`LOCK IN SHARE MODE` : Prisma.empty}`);
+    const workspaces = await db.$queryRaw<Array<{ categoryCode: string }>>(prismaRuntime.sql`SELECT categoryCode FROM business_workspaces WHERE tenantId=${tenantId} AND id=${workspaceId} AND status='ACTIVE' ${tx ? prismaRuntime.sql`LOCK IN SHARE MODE` : prismaRuntime.empty}`);
     const workspace = workspaces[0];
     const policies = [merchant, company, ...(employee ? [employee] : [])];
     if (!workspace || policies.some(p => !p.workspaceIds.includes(workspaceId) || !p.categoryCodes.includes(readRentalCategoryCode(workspace.categoryCode)))) throw new ForbiddenException("不在当前企业品类和空间交集内");
@@ -372,10 +373,10 @@ export class EnterprisePolicyService {
     await this.assertQuoteAmount(tenantId, snapshot.corporateCustomerId!, snapshot.corporateMembershipId!, priced, tx);
     const rows = await tx.$queryRaw<Array<{ id: string; state: string; basis: EnterpriseBookingBasis | string; expiresAt: Date; expectedOrderUpdatedAt: string;
       requestFingerprint: string; previewFingerprint: string; request: ClientOrderExtensionRequest | string; preview: EnterpriseExtensionPrice | string;
-      extensionId: string | null; executionKey: string | null; approvedBy: string | null; reviewerMembershipId: string | null; reviewerMembershipUpdatedAt: Date | null }>>(Prisma.sql`
+      extensionId: string | null; executionKey: string | null; approvedBy: string | null; reviewerMembershipId: string | null; reviewerMembershipUpdatedAt: Date | null }>>(prismaRuntime.sql`
       SELECT * FROM enterprise_extension_approvals WHERE tenantId=${tenantId} AND workspaceId=${workspaceId} AND orderId=${order.id}
         AND corporateCustomerId=${snapshot.corporateCustomerId} AND applicantCustomerId=${snapshot.personalCustomerId}
-        ${binding ? Prisma.sql`AND id=${binding.approvalId}` : Prisma.sql`AND extensionId=${"id" in priced ? priced.id : null}`} FOR UPDATE`);
+        ${binding ? prismaRuntime.sql`AND id=${binding.approvalId}` : prismaRuntime.sql`AND extensionId=${"id" in priced ? priced.id : null}`} FOR UPDATE`);
     const row = rows[0];
     // An existing expense authorization never disappears after a policy switch.
     // Unbound legacy/waived extensions need no invented approval record.
@@ -437,7 +438,7 @@ export class EnterprisePolicyService {
     const rows = await this.rows(tenantId, corporateId, db);
     for (const row of rows.filter(r => ["merchant", "company", `member:${membershipId}`].includes(r.scopeKey))) {
       const policy = this.decoded(row);
-      if (policy.maxRequestAmount !== undefined && (policy.currency !== quote.currency || new Prisma.Decimal(quote.payableAmount).gt(policy.maxRequestAmount))) throw new ForbiddenException("报价租赁应付超过当前企业单笔金额上限或币种不匹配；押金和预授权另列");
+      if (policy.maxRequestAmount !== undefined && (policy.currency !== quote.currency || new prismaRuntime.Decimal(quote.payableAmount).gt(policy.maxRequestAmount))) throw new ForbiddenException("报价租赁应付超过当前企业单笔金额上限或币种不匹配；押金和预授权另列");
     }
   }
 }

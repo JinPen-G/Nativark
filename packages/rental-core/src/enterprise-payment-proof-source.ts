@@ -1,7 +1,8 @@
 /** Current enterprise/payment-evidence admission against original order and frozen files.
  * The management workflow records review facts. Original funding services settle money. */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, ConflictException, ForbiddenException, ServiceUnavailableException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { ENTERPRISE_PAYMENT_PROOF_SCENE, type EnterprisePaymentProofBasis } from "./enterprise-workflows";
 import type { SystemUserRow } from "@rental-os/platform-contracts";
 import { getRequestIdentity } from "@rental-os/platform-server/request-identity";
@@ -46,11 +47,11 @@ export class EnterprisePaymentProofSource {
     if (!["requests:manage", "orders:read", "finance:read"].every(action => grant.actions.includes(action as typeof grant.actions[number]))) {
       throw new ForbiddenException("回款核对须当前申请、订单和财务权限");
     }
-    const sessions = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    const sessions = await tx.$queryRaw<Array<{ id: string }>>(prismaRuntime.sql`
       SELECT s.id FROM client_auth_sessions s JOIN business_workspaces w ON w.id=s.workspaceId AND w.tenantId=s.tenantId AND w.status='ACTIVE'
       WHERE s.tenantId=${context.tenantId} AND s.customerId=${context.customerId} AND s.id=${context.sessionId}
         AND s.workspaceId=${context.workspaceId} AND w.code=${context.workspaceCode} AND s.revokedAt IS NULL AND s.expiresAt>NOW(3)
-      ${tx === this.prisma as unknown as Prisma.TransactionClient ? Prisma.empty : Prisma.sql`FOR UPDATE`}`);
+      ${tx === this.prisma as unknown as Prisma.TransactionClient ? prismaRuntime.empty : prismaRuntime.sql`FOR UPDATE`}`);
     const after = getRequestIdentity();
     if (sessions.length !== 1 || sessions[0].id !== context.sessionId || !after || after.workspaceId !== context.workspaceId || after.tenantId !== context.tenantId
       || after.userId !== context.customerId || after.audience !== "client" || after.isSaasAdmin || after.staffApi || after.dataScope !== undefined) throw new ForbiddenException("回款核对原会话或经营空间已变化");
@@ -73,7 +74,7 @@ export class EnterprisePaymentProofSource {
     const context = Object.freeze({ ...input }), db = this.prisma as unknown as Prisma.TransactionClient;
     const before = await this.customer(context, corporateId, db);
     const order = await this.prisma.$transaction(tx => this.orders.financialRequestOrder(context.tenantId, corporateId, context.workspaceId!, orderId, tx),
-      { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+      { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
     if (await this.customer(context, corporateId, db) !== before) throw new ForbiddenException("回款核对读取期间权限已变化");
     const grant = await this.access.requireAction(context, corporateId, "requests:manage");
     if (enterpriseHash([grant.membershipId, grant.permissionRevision, grant.actions]) !== before) throw new ForbiddenException("回款核对读取期间关系已变化");
@@ -90,8 +91,8 @@ export class EnterprisePaymentProofSource {
   async files(tenantId: string, applicant: string, source: Pick<PaymentProofReceipt, "corporateCustomerId" | "orderId" | "workspaceId" | "objectRevision">,
     ids: string[], tx: Prisma.TransactionClient) {
     if (ids.length && tx !== this.prisma as unknown as Prisma.TransactionClient) {
-      await tx.$queryRaw(Prisma.sql`SELECT f.id FROM FileAsset f JOIN file_upload_sessions s ON s.tenantId=f.tenantId AND s.fileAssetId=f.id
-        WHERE f.tenantId=${tenantId} AND f.id IN (${Prisma.join(ids)}) ORDER BY f.id FOR UPDATE`);
+      await tx.$queryRaw(prismaRuntime.sql`SELECT f.id FROM FileAsset f JOIN file_upload_sessions s ON s.tenantId=f.tenantId AND s.fileAssetId=f.id
+        WHERE f.tenantId=${tenantId} AND f.id IN (${prismaRuntime.join(ids)}) ORDER BY f.id FOR UPDATE`);
     }
     const rows = await tx.fileAsset.findMany({ where: { tenantId, id: { in: ids }, businessModule: "enterprise", businessType: "rental_order", businessId: source.orderId,
       uploadedBy: applicant, uploadScene: ENTERPRISE_PAYMENT_PROOF_SCENE, status: "active", storageProvider: { not: "local_mock" } }, include: { uploadSession: true } });

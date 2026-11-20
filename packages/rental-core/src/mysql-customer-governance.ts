@@ -1,7 +1,8 @@
 /** Rental客户治理应用。主档/状态写入者与注销事实由宿主供给同一实例；
  * 当前ALS、空间/地点投影、原锁顺序、状态与历史同事务保持；业务写入在父锁后复核所选Core。 */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import type {
   ChangeCustomerAccountStatusRequest,
   ChangeCustomerMembershipStatusRequest,
@@ -377,7 +378,7 @@ export class CustomerOperationsService {
           loginPhoneMasked: profile.phoneMasked,
           operator
         }, tx);
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+      }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
     } catch (error) {
       // 并发开通或登录号已被别的客户占用：前者应幂等返回，后者必须明确拒绝。
       const code = (error as { code?: string }).code;
@@ -387,7 +388,7 @@ export class CustomerOperationsService {
       const mine = await this.prisma.$transaction(async tx => {
         await lockRentalBusinessTenant(tx, tenantId);
         return this.operations.findAccountByCustomer(tenantId, customerId, tx);
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+      }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
       if (mine) return mine;
       throw new ConflictException("该登录手机号已被本租户其他客户账号占用");
     }
@@ -787,7 +788,7 @@ export class CustomerOperationsService {
         );
       }
       return row;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable });
     return this.identityVerificationSummary(saved);
   }
 
@@ -1331,8 +1332,8 @@ export class CustomerOperationsService {
         district: this.addressText(input.district, "区/县", 64, false) ?? null,
         detail: this.addressText(input.detail, "详细地址", 255, true)!,
         postalCode: this.addressText(input.postalCode, "邮编", 16, false) ?? null,
-        latitude: input.latitude === undefined ? null : new Prisma.Decimal(input.latitude),
-        longitude: input.longitude === undefined ? null : new Prisma.Decimal(input.longitude)
+        latitude: input.latitude === undefined ? null : new prismaRuntime.Decimal(input.latitude),
+        longitude: input.longitude === undefined ? null : new prismaRuntime.Decimal(input.longitude)
       };
       const makeDefault = input.isDefault === true || (!existing && (await tx.customerDeliveryAddress.count({ where: { tenantId, customerId, status: "active", isDefault: true } })) === 0);
       if (makeDefault) {
@@ -1350,7 +1351,7 @@ export class CustomerOperationsService {
         return tx.customerDeliveryAddress.findUniqueOrThrow({ where: { id: existing.id } });
       }
       return tx.customerDeliveryAddress.create({ data: { tenantId, customerId, ...data, isDefault: makeDefault, status: "active" } });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable });
     return this.addressView(saved);
   }
 
@@ -1361,7 +1362,7 @@ export class CustomerOperationsService {
         where: { tenantId, customerId, id: addressId, status: "active" },
         data: { status: "deleted", isDefault: false }
       });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
     if (updated.count !== 1) throw new NotFoundException("地址不存在");
     return { success: true as const };
   }

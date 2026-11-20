@@ -1,6 +1,7 @@
 /** Rental微信身份登录/绑定单源。宿主供给真实运输、客户/注册/会话及原事务，保留租户渠道、本人绑定和一次性凭证语义。 */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, ConflictException, ForbiddenException, HttpException, NotFoundException, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { CLIENT_API_VERSION, type ClientMembershipSessionResponse, type ClientWechatBindRequest, type ClientWechatBindResponse, type ClientWechatPhoneLoginRequest } from "./client-contracts";
 import { runWithRequestIdentity } from "@rental-os/platform-server/request-identity";
 import { customerRegistrationTransaction } from "./mysql-customer-registration-transaction";
@@ -220,7 +221,7 @@ export class ClientWechatAuthService {
       // 当前会话立刻带上微信身份，支付不必重新登录。
       await tx.clientAuthSession.updateMany({ where: { id: context.sessionId, tenantId: context.tenantId, customerId: context.customerId, revokedAt: null }, data: { wechatIdentityId: saved.id } });
       return saved;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable });
     await this.operationLog?.record({ tenantId: context.tenantId, action: "client.wechat.bind", targetType: "customer", targetId: context.customerId, operator: `client:${context.customerId}`, detail: "绑定微信身份", metadata: { appId: channel.appId } });
     return { apiVersion: CLIENT_API_VERSION, bound: true, appId: identity.appId, boundAt: identity.boundAt.toISOString() };
   }

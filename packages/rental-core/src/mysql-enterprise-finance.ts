@@ -2,8 +2,9 @@
  * Reuses the original enterprise qualifier and rechecks the client session
  * around IO. Does not grant cross-workspace history, mutate money, fabricate
  * statements or borrow an operator identity. */
+import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import type { CustomerCorporateCreditAccountSummary,
   RentalEnterpriseCorporateFinancialProjection, RentalEnterpriseHistoryWorkspaceBasis,
   RentalEnterpriseOrderFinancialProjection, RentalFundingBalance } from "./contracts";
@@ -83,14 +84,14 @@ export class RentalEnterpriseReadPort {
   }
 
   private paid(corporateId: string) {
-    return Prisma.sql`((CAST(o.contractSubjectCustomerId AS BINARY)=CAST(${corporateId} AS BINARY)
+    return prismaRuntime.sql`((CAST(o.contractSubjectCustomerId AS BINARY)=CAST(${corporateId} AS BINARY)
       AND CAST(o.payerSubjectCustomerId AS BINARY)=CAST(${corporateId} AS BINARY))
       OR (o.contractSubjectCustomerId IS NULL AND o.payerSubjectCustomerId IS NULL AND o.userSubjectCustomerId IS NULL
         AND o.customerType='corporate' AND CAST(o.customerId AS BINARY)=CAST(${corporateId} AS BINARY)))`;
   }
 
   private personalBenefit(corporateId: string) {
-    return Prisma.sql`(JSON_UNQUOTE(JSON_EXTRACT(o.membershipSnapshot,'$.bookingIdentity'))='enterprise_employee'
+    return prismaRuntime.sql`(JSON_UNQUOTE(JSON_EXTRACT(o.membershipSnapshot,'$.bookingIdentity'))='enterprise_employee'
       AND CAST(JSON_UNQUOTE(JSON_EXTRACT(o.membershipSnapshot,'$.corporateCustomerId')) AS BINARY)=CAST(${corporateId} AS BINARY)
       AND JSON_TYPE(JSON_EXTRACT(o.membershipSnapshot,'$.enterpriseContractAndPayer'))='BOOLEAN'
       AND JSON_UNQUOTE(JSON_EXTRACT(o.membershipSnapshot,'$.enterpriseContractAndPayer'))='false'
@@ -108,7 +109,7 @@ export class RentalEnterpriseReadPort {
   async historicalWorkspaceBasis(context: ClientRequestContext, corporateId: string): Promise<RentalEnterpriseHistoryWorkspaceBasis> {
     const subject = Object.freeze({ ...context }), actions = ["orders:read"] as const;
     const before = await this.scope(subject, corporateId, actions);
-    const workspaces = await this.prisma.$queryRaw<Array<{ workspaceId: string; workspaceCode: string; workspaceName: string }>>(Prisma.sql`
+    const workspaces = await this.prisma.$queryRaw<Array<{ workspaceId: string; workspaceCode: string; workspaceName: string }>>(prismaRuntime.sql`
       SELECT DISTINCT w.id AS workspaceId,w.code AS workspaceCode,w.name AS workspaceName
       FROM rental_orders o JOIN business_workspaces w ON w.tenantId=o.tenantId AND w.id=o.workspaceId AND w.status='ACTIVE'
       WHERE o.tenantId=${subject.tenantId} AND CAST(o.workspaceId AS BINARY)=CAST(${subject.workspaceId} AS BINARY)
@@ -124,7 +125,7 @@ export class RentalEnterpriseReadPort {
   }
 
   private amount(value: unknown, negative = false): number {
-    if (typeof value !== "number" && !(value instanceof Prisma.Decimal)) throw new ConflictException("原企业金额缺失");
+    if (typeof value !== "number" && !(value instanceof prismaRuntime.Decimal)) throw new ConflictException("原企业金额缺失");
     const amount = Number(value);
     if (!Number.isFinite(amount) || Math.abs(amount) > 9999999999.99 || !negative && amount < 0 || roundMoney(amount) !== amount) {
       throw new ConflictException("原企业金额精度或范围不可核对");
@@ -139,7 +140,7 @@ export class RentalEnterpriseReadPort {
     if (!this.funding) throw new ServiceUnavailableException("原Core资金读取供应未接入");
     const result = await this.prisma.$transaction(async tx => {
       await lockRentalBusinessTenant(tx, subject.tenantId);
-      const rows = await tx.$queryRaw<Array<{ id: string; tenantId: string; workspaceId: string; currency: string; updatedAt: Date }>>(Prisma.sql`
+      const rows = await tx.$queryRaw<Array<{ id: string; tenantId: string; workspaceId: string; currency: string; updatedAt: Date }>>(prismaRuntime.sql`
         SELECT o.id,o.tenantId,o.workspaceId,o.currency,o.updatedAt FROM rental_orders o
         JOIN business_workspaces w ON w.tenantId=o.tenantId AND w.id=o.workspaceId AND w.status='ACTIVE'
         WHERE o.tenantId=${subject.tenantId} AND CAST(o.workspaceId AS BINARY)=CAST(${subject.workspaceId} AS BINARY)
@@ -188,7 +189,7 @@ export class RentalEnterpriseReadPort {
         statements: unavailableStatements() };
       if (Buffer.byteLength(JSON.stringify(output), "utf8") > 65536) throw new ConflictException("企业订单财务超出完整投影上限");
       return output;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, maxWait: 2500, timeout: 5000 });
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted, maxWait: 2500, timeout: 5000 });
     await this.recheck(subject, corporateId, actions, before);
     return result;
   }
@@ -222,7 +223,7 @@ export class RentalEnterpriseReadPort {
           reservedAmount: this.amount(original.reservedAmount), receivableAmount: this.amount(original.receivableAmount),
           availableAmount: this.amount(original.availableAmount, true), currency: original.currency, status: original.status,
           billingCycle: original.billingCycle, settlementTermDays: original.settlementTermDays } };
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, maxWait: 2500, timeout: 5000 });
+      }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted, maxWait: 2500, timeout: 5000 });
     await this.recheck(subject, corporateId, actions, before);
     return { apiVersion: "v1", corporateCustomerId: corporateId, permissionRevision: before.permissionRevision,
       observedAt: new Date().toISOString(), source: "original_tenant_corporate_credit_account", credit,

@@ -4,7 +4,7 @@ import { RENTAL_ENTERPRISE_HTTP, type RentalEnterpriseHttpApplications } from ".
 import { BadRequestException, Body, ConflictException, Controller, Inject, ForbiddenException, Get, Param, Post, Put, Query, Req, Res, UnauthorizedException, ServiceUnavailableException } from "@nestjs/common";
 import { ENTERPRISE_PAYMENT_PROOF_SCENE } from "./index";
 import type { ClientRequestContext } from "./client-context";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 
 import { ClientQualificationUploadCompleteRequestDto } from "./http-client-request.dto";
 
