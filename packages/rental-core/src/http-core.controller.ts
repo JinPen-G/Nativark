@@ -2581,7 +2581,8 @@ export class RentalCoreController {
         || request.executedQuantity !== undefined && segment.quantity !== request.executedQuantity
         || segment.result !== request.result?.trim()
         || request.actualAt && segment.actualEndAt !== request.actualAt
-        || Boolean(segment.customerConfirmedAt) !== request.customerConfirmed
+        // The original DTO accepts null; execution records its false truth value.
+        || Boolean(segment.customerConfirmedAt) !== Boolean(request.customerConfirmed)
         || request.evidenceAttachments && requestFingerprint(segment.evidenceAttachments) !== requestFingerprint(request.evidenceAttachments)) return undefined;
     } else if (request?.action === "start" || !request && receipt.executionStatus === "in_progress") {
       if (!receipt.actualStartAt || occurrence.actualStartAt !== receipt.actualStartAt) return undefined;

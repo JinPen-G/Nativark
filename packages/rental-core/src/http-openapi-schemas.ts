@@ -521,7 +521,7 @@ export const RENTAL_HTTP_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       executedQuantity: { type: "integer", minimum: 1, nullable: true, description: "本段实际数量。complete 省略时完成全部剩余数量，显式 null 由原执行器前校验拒绝，剩余上限由原服务核验。" },
       reason: { type: "string", maxLength: 1000, nullable: true, description: "cancel、fail 和 no_show 须填写有效原因。" },
       evidenceAttachments: { ...arrayOf({ type: "string", maxLength: 500 }), nullable: true, description: "原证据引用。省略或 null 保留该发生项已有引用。" },
-      customerConfirmed: { type: "boolean", nullable: true, description: "complete 须明确提供。false 表示未确认。原 DTO 接受 null，首次提交记录为未确认，同键重试按原确认值核对会返回 409。" },
+      customerConfirmed: { type: "boolean", nullable: true, description: "complete 须明确提供，省略会拒绝。false 或 null 记录为未确认；相同请求与原键重试读取同一执行收据，改为其他确认值仍按原指纹拒绝。" },
       refundAmount: { type: "number", minimum: 0, nullable: true, description: "终止动作的建议退款额，省略或 null 采用原未执行净额，实际建议由原服务限制并生成审核事实。" },
       compensationAmount: { type: "number", minimum: 0, nullable: true, description: "终止动作的补偿金额，省略保留原值，提供时沿原金额工具保存。" }
     } satisfies Record<keyof UpdateRentalServiceOccurrenceRequest, SchemaObject>, ["action"]),
