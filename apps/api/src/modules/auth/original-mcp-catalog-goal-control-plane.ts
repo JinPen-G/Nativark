@@ -13,7 +13,7 @@ export type OriginalMcpCatalogGoalPackageExports = Parameters<typeof createOrigi
   & { createMcpCatalogGoalControlPlane: typeof createMcpCatalogGoalControlPlane };
 export function createOriginalMcpCatalogGoalControlPlane(
   mcp: OriginalMcpCatalogGoalPackageExports,config: McpCatalogGoalControlPlaneConfig,
-  original: Pick<OriginalMcpOAuthCore,'store'|'grantAuthority'>,
+  original: Pick<OriginalMcpOAuthCore,'store'|'grantAuthority'|'coreAccess'>,
   auth: Pick<AuthService,'resolveTrustedBrowserPrincipal'|'withTrustedWorkspacePrincipal'>,
   guard: Pick<ApiAuthGuard,'withTrustedCatalogRead'>,
   logs: Parameters<typeof createOriginalMcpCatalogGoalIntentAuthority>[5],

@@ -57,7 +57,7 @@ export function createOriginalMcpCatalogReadTools(
   const readCore = Object.freeze({ listItemGroupsPageInTransaction: core.listItemGroupsPageInTransaction.bind(core) });
   const currentAuth = Object.freeze({ withTrustedWorkspacePrincipal: auth.withTrustedWorkspacePrincipal.bind(auth) });
   const currentGuard = Object.freeze({ withTrustedCatalogRead: guard.withTrustedCatalogRead.bind(guard) });
-  const context = createOriginalMcpCatalogReadContext();
+  const context = createOriginalMcpCatalogReadContext(original.coreAccess);
   const goals = createOriginalMcpCatalogGoals(runtime, { enabled: config.enabled }, context, logs);
   const authority = createOriginalMcpCatalogReadAuthority(runtime, config, original, currentAuth, currentGuard, context, goals.preparation);
   // This is callback-local invocation linkage, NOT a goal/call counter or an

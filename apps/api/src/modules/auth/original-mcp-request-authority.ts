@@ -27,8 +27,19 @@ export function createOriginalMcpRequestAuthority(context: OriginalMcpCatalogRea
     if (!isDeepStrictEqual(subject, structuredClone(current(call)))) throw new Error('Original MCP request authority unavailable');
   };
   const scopes = createOriginalMcpRequestScopeSource(context, clock);
-  return createNativeOriginalRequestAuthority({
+  const authority = createNativeOriginalRequestAuthority({
     ...input, assertCurrent,
     currentIn: (native, signal) => scopes.currentIn(call, native, signal)
   }, clock);
+  const requireNewBusiness = context.requireNewBusinessIn?.bind(context);
+  return Object.freeze({ bindIn(native: Prisma.TransactionClient, signal: AbortSignal) {
+    const bound = authority.bindIn(native, signal);
+    return Object.freeze({ ...bound, async create(body: AiSceneRequestBody) {
+      bound.assertCurrent();
+      await requireNewBusiness?.(call, native, signal);
+      const result = await bound.create(body);
+      await requireNewBusiness?.(call, native, signal);
+      bound.assertCurrent(); return result;
+    } });
+  } });
 }

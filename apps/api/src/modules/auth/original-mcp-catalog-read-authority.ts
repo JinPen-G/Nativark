@@ -13,6 +13,7 @@ import type { MCP_BUSINESS_CAPABILITIES } from '@rental-os/mcp-server/capability
 import type { createPersistentOAuthAccessReader } from '@rental-os/mcp-server/persistent-oauth-tokens' with { 'resolution-mode': 'import' };
 import type { captureMcpReadInput } from '@rental-os/mcp-server/persistent-read-accounting' with { 'resolution-mode': 'import' };
 import type { OriginalMcpCatalogReadContext } from './original-mcp-read-context';
+import { assertOriginalMcpCoreContext } from './original-mcp-read-context';
 export interface OriginalMcpCatalogAuthorityExports {
   MCP_BUSINESS_CAPABILITIES: typeof MCP_BUSINESS_CAPABILITIES;
   createPersistentOAuthAccessReader: typeof createPersistentOAuthAccessReader;
@@ -35,7 +36,7 @@ function readLimit(input: unknown): number {
 export function createOriginalMcpCatalogReadAuthority(
   mcp: OriginalMcpCatalogAuthorityExports,
   config: Parameters<typeof createPersistentOAuthAccessReader>[0],
-  original: Pick<OriginalMcpOAuthCore, 'store' | 'grantAuthority'>,
+  original: Pick<OriginalMcpOAuthCore, 'store' | 'grantAuthority' | 'coreAccess'>,
   auth: Pick<AuthService, 'withTrustedWorkspacePrincipal'>,
   guard: Pick<ApiAuthGuard, 'withTrustedCatalogRead'>,
   context?: OriginalMcpCatalogReadContext,
@@ -47,6 +48,7 @@ export function createOriginalMcpCatalogReadAuthority(
     || typeof original.grantAuthority?.principal !== 'function' || typeof auth?.withTrustedWorkspacePrincipal !== 'function'
     || typeof guard?.withTrustedCatalogRead !== 'function') throw unavailable();
   if (goals !== undefined && (typeof goals?.prepareIn !== 'function' || typeof context?.withReadNative !== 'function')) throw unavailable();
+  assertOriginalMcpCoreContext(context, original.coreAccess);
   const prepareGoal = goals?.prepareIn.bind(goals);
   const prepareContext = context === undefined ? undefined : (() => {
     if (typeof context.bind !== 'function' || typeof mcp.captureMcpReadInput !== 'function') throw unavailable();
@@ -66,7 +68,10 @@ export function createOriginalMcpCatalogReadAuthority(
           || !isDeepStrictEqual(current.scopes, authorization.scopes) || readLimit(input) !== limit) throw unavailable();
         const nativeTx = native(tx);
         const result = await withPrincipal(nativeTx, () => principal(before.grantId, tx, signal), signal,
-          resolve => withCatalog(limit, resolve, identity => enterContext ? enterContext(before, identity, signal, () => read(nativeTx), nativeTx) : read(nativeTx), signal));
+          resolve => withCatalog(limit, resolve, identity => enterContext ? enterContext(before, identity, signal, () => {
+            context!.requireAcceptingIn?.(nativeTx, signal);
+            return read(nativeTx);
+          }, nativeTx) : read(nativeTx), signal));
         // Principal equality alone cannot attest unchanged credential/grant scopes.
         if (readLimit(input) !== limit || !isDeepStrictEqual(await reader.readIn(tx, authorization.token, signal), before)) throw unavailable();
         return result;

@@ -18,6 +18,7 @@ import type { TrustedBrowserPrincipal } from './trusted-browser-principal';
 import { createOriginalMcpBrowserIdentity } from './original-mcp-browser-identity';
 import { originalMcpCatalogGoalAuthorityHash } from './original-mcp-catalog-goals';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
+import type { OriginalMcpCoreLease } from './original-mcp-core-access';
 
 export interface OriginalCatalogGoalIntentVerification {
   kind: 'satisfied' | 'not_required'; reference: string; revision: number; expiresAt: number;
@@ -37,7 +38,7 @@ export function createOriginalMcpCatalogGoalIntentAuthority(mcp: {
   /** Optional original SQL adoption producer. Missing never becomes a rollover. */
   createPrismaMcpCatalogGoalAdoptions?: typeof createPrismaMcpCatalogGoalAdoptions;
 }, config: { requiredToolScopes: readonly string[]; allowedScopes: readonly string[] },
-  original: Pick<OriginalMcpOAuthCore,'store'|'grantAuthority'>,
+  original: Pick<OriginalMcpOAuthCore,'store'|'grantAuthority'|'coreAccess'>,
   auth: Pick<AuthService,'resolveTrustedBrowserPrincipal'|'withTrustedWorkspacePrincipal'>,
   guard: Pick<ApiAuthGuard,'withTrustedCatalogRead'>,
   logs: Pick<OperationLogService,'recordOriginalMcpReadGoalAudit'|'recordOriginalMcpCatalogGoalIntentAudit'> & Partial<Pick<OperationLogService,'recordOriginalMcpCatalogGoalAdoptionAudit'>>,
@@ -52,6 +53,8 @@ export function createOriginalMcpCatalogGoalIntentAuthority(mcp: {
   const identity = createOriginalMcpBrowserIdentity(auth), capture = mcp.captureMcpReadInput.bind(mcp), run = original.store.transaction.bind(original.store), native = original.store.native.bind(original.store);
   const access = original.grantAuthority.access.current.bind(original.grantAuthority.access), binding = original.grantAuthority.principal.bind(original.grantAuthority);
   const withPrincipal = auth.withTrustedWorkspacePrincipal.bind(auth), withCatalog = guard.withTrustedCatalogRead.bind(guard), verify = verification.current.bind(verification);
+  if (original.coreAccess !== undefined && typeof original.coreAccess?.withCurrent !== 'function') throw fail();
+  const withCore = original.coreAccess?.withCurrent.bind(original.coreAccess), coreLeases = new WeakMap<Prisma.TransactionClient, OriginalMcpCoreLease>();
   const record = logs.recordOriginalMcpReadGoalAudit.bind(logs), intentAudit = logs.recordOriginalMcpCatalogGoalIntentAudit.bind(logs), policyVersion = mcp.ORIGINAL_MCP_CATALOG_GOAL_POLICY_VERSION;
   const goals = mcp.createPrismaMcpCatalogGoals<Prisma.TransactionClient>({ admitted: async () => { throw fail(); }, published: async () => { throw fail(); } });
   const own = (p: TrustedBrowserPrincipal, g: OriginalCatalogGoal) => p.audience === 'operator' && p.userId === g.owner.userId && p.tenantId === g.owner.tenantId && p.workspaceId === g.owner.workspaceId;
@@ -88,6 +91,7 @@ export function createOriginalMcpCatalogGoalIntentAuthority(mcp: {
         || required.some(v => !current.scopes.includes(v))) throw fail();
       const p = await identity.current(browser,sql,stop); if (!p || !isDeepStrictEqual(p,located.p) || !own(p,located.g) || stop.aborted) throw fail();
       const result = await withPrincipal(sql,() => binding(current.id,tx,stop),stop,resolve => withCatalog(parsed.data.limit,resolve,async who => {
+        const read = async (lease?: OriginalMcpCoreLease) => {
         const g = await goals.readOwnerIn(p,sql,stop); if (!g || !isDeepStrictEqual(g,located.g) || stop.aborted) throw fail();
         const authorityHash = originalMcpCatalogGoalAuthorityHash({ ...who,grantId:current.id,grantRevision:current.revision },policyVersion);
         if (g.authorityHash !== authorityHash) throw fail(); await admitted(g,sql,stop);
@@ -101,12 +105,20 @@ export function createOriginalMcpCatalogGoalIntentAuthority(mcp: {
         const view = Object.freeze({ principal:p,goal:g,expiresAt:Math.min(p.expiresAt,current.expiresAt,copy.expiresAt),policyHash:requestFingerprint({ verification:copy,authorityHash }) });
         if (view.expiresAt <= Date.now()/1000) throw fail(); finalExpiresAt = view.expiresAt;
         const lifetime = new AbortController(), callbackSignal = AbortSignal.any([stop,lifetime.signal]); let value: T;
-        try { value = await consume(view,sql,callbackSignal); } finally { lifetime.abort(); }
+        if (lease) coreLeases.set(sql, lease);
+        try { value = await consume(view,sql,callbackSignal); }
+        finally { lifetime.abort(); if (lease) coreLeases.delete(sql); }
         if (stop.aborted || !isDeepStrictEqual(copy,capture(await verify(sql,p,g,operationKey,nextInputHash,stop)).input)
           || !isDeepStrictEqual(p,await identity.current(browser,sql,stop)) || stop.aborted || view.expiresAt <= Date.now()/1000) throw fail();
         if (transition) await adoption!.verifyIn(g,operationKey,nextInputHash,sql,stop);
         else if (!isDeepStrictEqual(g,await goals.readOwnerIn(p,sql,stop))) throw fail();
         if (stop.aborted || view.expiresAt <= Date.now()/1000) throw fail(); return value;
+        };
+        if (!withCore) return read();
+        return withCore(sql, { ...who, grantId: current.id, grantRevision: current.revision }, stop, async lease => {
+          if (coreLeases.has(sql) || typeof lease?.requireAccepting !== 'function') throw fail();
+          return read(lease);
+        });
       },stop));
       if (stop.aborted || current.expiresAt <= Date.now()/1000 || !isDeepStrictEqual(current,await access(current.id,tx,stop))) throw fail(); return result;
     },stop);
@@ -115,6 +127,11 @@ export function createOriginalMcpCatalogGoalIntentAuthority(mcp: {
     if (stop.aborted || finalExpiresAt === undefined || finalExpiresAt <= Date.now()/1000) throw fail(); return result;
   };
   return Object.freeze({
+    ...(withCore ? { requireNewWorkIn(sql: Prisma.TransactionClient, stop: AbortSignal) {
+      const lease = coreLeases.get(sql);
+      if (stop.aborted || !lease) throw fail();
+      lease.requireAccepting();
+    } } : {}),
     async withOwner<T>(browser: Request,signal: AbortSignal,consume: (owner: TrustedBrowserPrincipal,sql: Prisma.TransactionClient,signal: AbortSignal) => Promise<T>): Promise<T> {
       const stop = AbortSignal.any([signal,browser.signal]);
       return run(async tx => {

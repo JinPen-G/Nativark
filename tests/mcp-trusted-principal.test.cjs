@@ -1220,6 +1220,258 @@ test("native order status resources execute original Guard Core repository and p
   assert.equal(late.state.reads.length, lateCount, 'late original Core aggregate cannot continue after its MCP callback ends');
 });
 
+test("selected MCP Core fences new work and preserves exact Native request recovery", async () => {
+  const { createOriginalMcpCoreAccess } = source('apps/api/src/modules/auth/original-mcp-core-access.ts');
+  const { createOriginalMcpCatalogReadContext, assertOriginalMcpCoreContext } = source('apps/api/src/modules/auth/original-mcp-read-context.ts');
+  const { createOriginalMcpRequestAuthority } = source('apps/api/src/modules/auth/original-mcp-request-authority.ts');
+  const { createOriginalMcpRequestScopeSource } = source('apps/api/src/modules/auth/original-mcp-request-scope.ts');
+  const { PrismaOriginalRequestRepository } = source('apps/api/src/modules/ai-native/task-request/prisma-original-request.repository.ts');
+  const { aiPersistenceScopeColumns } = source('apps/api/src/modules/ai-native/persistence-scope.ts');
+  const { prismaRuntime } = source('packages/platform-server/src/prisma-runtime.ts');
+  const f = fixture(), now = new Date('2026-11-20T00:00:00Z'), clock = () => new Date(now);
+  const state = { admission: 'accepting', grant: 'enabled', assignment: 'assigned', bound: true, physical: true,
+    terms: 0, writes: 0, reads: [], requests: [], scopes: 0 };
+  const outside = () => { throw Error('selected MCP may not open another transaction or use a Web/global fallback'); };
+  f.tx.$executeRaw = outside;
+  f.tx.$queryRaw = async (parts, ...values) => {
+    const statement = Array.isArray(parts) ? prismaRuntime.sql(parts, ...values) : parts;
+    const sql = statement.sql.replace(/\s+/gu, ' ').trim(), args = statement.values;
+    assert.match(sql, /^SELECT /u); state.reads.push(sql);
+    if (sql.includes('FROM Tenant WHERE')) {
+      assert.deepEqual(args, ['tenant-a']); assert(sql.endsWith('LOCK IN SHARE MODE'));
+      return [{ id: 'tenant-a', status: 'active' }];
+    }
+    if (sql.includes('FROM platform_tenant_core_grants')) {
+      assert.deepEqual(args, ['tenant-a', 'rental']); assert(sql.endsWith('FOR UPDATE'));
+      return [{ state: state.grant, revision: 1, operationId: 'grant-original' }];
+    }
+    if (sql.includes('FROM platform_member_core_assignments')) {
+      assert.deepEqual(args, ['tenant-a', 'rental', 'user-a']); assert(sql.endsWith('FOR UPDATE'));
+      return [{ state: state.assignment, revision: 1, operationId: 'assignment-original' }];
+    }
+    if (sql.includes('FROM platform_core_bindings')) {
+      assert.deepEqual(args.slice(0, 2), ['tenant-a', 'rental']); assert.match(args[2], /^[a-f0-9]{64}$/u);
+      return state.bound ? [{ bindingId: 'original-binding', revision: 1, dataVersion: '0.1.0',
+        containerType: 'rental-workspace', containerId: 'workspace-a' }] : [];
+    }
+    if (sql.includes('FROM SystemParameterSet')) {
+      assert.deepEqual(args, ['tenant_platform', 'core-deployment-admission:rental']);
+      assert(sql.endsWith('LOCK IN SHARE MODE'));
+      if (state.admission === 'missing') return [];
+      if (state.admission === 'unavailable') throw Error('private driver detail');
+      return [{ id: 'canonical-original', tenantId: 'tenant_platform', module: 'core-deployment-admission:rental',
+        versionNo: 1, status: 'effective', operator: 'original-admin',
+        content: { coreId: 'rental', state: state.admission, revision: 1, operationId: 'stop-original' } }];
+    }
+    throw Error('unexpected selected MCP SQL: ' + sql);
+  };
+  f.tx.aiScope = { async findFirst() {
+    state.scopes++; state.reads.push('aiScope');
+    return { id: 'scope-a', ...aiPersistenceScopeColumns({ kind: 'workspace', tenantId: 'tenant-a', workspaceId: 'workspace-a' }) };
+  } };
+  f.tx.aiTaskPlanPolicy = { async findFirst() { return { scopeId: 'scope-a', sceneCode: 'quote_clarification', sceneVersion: '1',
+    revision: 1, enabled: true, expiresAt: new Date(now.getTime() + 60000), allowedTools: ['rental.catalog.search'], limits: { active_ms: 1000 } }; } };
+  f.tx.aiTaskOriginalRequest = {
+    async findFirst({ where }) { return structuredClone(state.requests.find(row => Object.entries(where).every(([key, value]) => row[key] === value)) ?? null); },
+    async create({ data }) { state.writes++; const row = { erasedAt: null, creationClosedAt: null, creationCloseKey: null, ...structuredClone(data) };
+      state.requests.push(row); return structuredClone(row); }
+  };
+  const selected = createOriginalMcpCoreAccess({ users: { findUserById: (id, native) => {
+    assert.equal(native, f.tx); return f.repository.findUserById(id, native);
+  } }, term: { async requireNewBusiness(native, tenantId) { assert.equal(native, f.tx); assert.equal(tenantId, 'tenant-a'); state.terms++; } },
+    deploymentForTransaction(reader) { assert.equal(typeof reader.$queryRaw, 'function'); return {
+      async requireRegistered(coreId) { assert.equal(coreId, 'rental'); },
+      async requireAvailable(coreId, tenantId) { assert.equal(coreId, 'rental'); assert.equal(tenantId, 'tenant-a'); if (!state.physical) throw Error('physical data unavailable'); }
+    }; } });
+  const context = createOriginalMcpCatalogReadContext(selected), call = { callId: 'existing-call', toolName: 'original-input', inputHash: 'b'.repeat(64),
+    authorization: { subject: 'issuer-not-user', token: 'offline-private-credential', clientId: 'client-a', scopes: ['catalog:read'], resource: 'https://mcp.example.invalid/mcp' } };
+  const body = { sceneCode: 'quote_clarification', input: { candidate: { customerType: 'personal' } } };
+  const command = { ...body, draftVersion: shared.AI_SCENE_REQUEST_DRAFT_VERSION, requestKey: 'original-mcp-request' };
+  const repository = new PrismaOriginalRequestRepository({ $transaction: outside, aiScope: { findFirst: outside },
+    aiTask: { findFirst: outside }, aiTaskOriginalRequest: { findFirst: outside } },
+  { current: outside, read: outside, create: outside }, clock);
+  const run = consume => f.run(who => context.bind(call.authorization, call.toolName, call.inputHash)(
+    { grantId: 'grant-a', grantRevision: 1 }, who, signal(), async () => {
+      const authority = createOriginalMcpRequestAuthority(context, call, {
+        creationRules: [{ sceneCode: body.sceneCode, sceneVersion: '1', revision: 1, audiences: ['operator'],
+          requiredPermissions: ['rental-core:catalog:view'], maxInputAgeMs: 30000 }],
+        entitlements: { async readIn(_tenant, _code, native) { assert.equal(native, f.tx); return { revision: 1, entitlements: [{ code: 'ai.native.use', available: true }] }; } },
+        authorizeResourcesIn: (_body, native, stop) => createOriginalMcpRequestScopeSource(context, clock).currentIn(call, native, stop).then(value => value.context)
+      }, clock);
+      return consume(authority);
+    }, f.tx));
+  assertOriginalMcpCoreContext(context, selected);
+  assert.throws(() => assertOriginalMcpCoreContext(createOriginalMcpCatalogReadContext(), selected));
+  assert.throws(() => createOriginalMcpCoreAccess({}), /unavailable/u);
+  let escaped;
+  const saved = await run(async authority => {
+    escaped = authority.bindIn(f.tx, signal());
+    context.requireAcceptingIn(f.tx, signal());
+    assert.throws(() => context.requireAcceptingIn({ ...f.tx }, signal()));
+    return repository.saveIn(f.tx, command, authority, signal());
+  });
+  assert.equal(saved.state, 'prepared'); assert.equal(saved.commit, 'not_observed'); assert.equal(state.writes, 1);
+  assert(state.terms > 0); assert(state.reads.findIndex(sql => sql.includes('SystemParameterSet')) < state.reads.indexOf('aiScope'));
+  await assert.rejects(() => escaped.create(body), /unavailable|DENIED/u);
+  const originalRows = structuredClone(state.requests), terms = state.terms;
+  for (const admission of ['stopped', 'missing', 'unavailable']) {
+    state.admission = admission;
+    await run(async authority => {
+      const scopeReads = state.scopes;
+      assert.throws(() => context.requireAcceptingIn(f.tx, signal()), /unavailable/u);
+      await assert.rejects(() => repository.saveIn(f.tx, { ...command, requestKey: 'forbidden-new-request' }, authority, signal()));
+      assert.equal(state.scopes, scopeReads, 'stop-new rejects before new AI scope/resource collection');
+      const original = await repository.reconcileIn(f.tx, command, authority, signal());
+      assert.equal(original.state, 'observed'); assert.equal(original.receipt.inputRef, saved.receipt.inputRef);
+      assert.equal(original.retryable, false); assert.equal(original.task, 'not_loaded');
+      await assert.rejects(() => repository.reconcileIn(f.tx, { ...command, input: { candidate: { customerType: 'corporate' } } }, authority, signal()));
+    });
+    assert.deepEqual(state.requests, originalRows); assert.equal(state.writes, 1); assert.equal(state.terms, terms);
+  }
+  for (const [key, invalid] of [['grant', 'disabled'], ['assignment', 'revoked'], ['bound', false], ['physical', false]]) {
+    const previous = state[key]; state[key] = invalid;
+    try { await assert.rejects(() => run(() => { throw Error('must not reach original reader'); })); }
+    finally { state[key] = previous; }
+  }
+  // Actual catalog/availability consumers and original credential reader; only
+  // the persisted credential/grant transport and goal preparation are fixtures.
+  const { createOriginalMcpCatalogReadAuthority } = source('apps/api/src/modules/auth/original-mcp-catalog-read-authority.ts');
+  const { createOriginalMcpAvailabilityReadAuthority } = source('apps/api/src/modules/auth/original-mcp-availability-read-authority.ts');
+  const oauth = source('packages/mcp-server/src/persistent-oauth-tokens.ts');
+  const api = { ...oauth, ...source('packages/mcp-server/src/capability-mapping.ts'),
+    ...source('packages/mcp-server/src/persistent-read-accounting.ts') };
+  const authorization = { ...call.authorization, token: Buffer.alloc(32, 7).toString('base64url'), scopes: ['catalog:read', 'availability:read'] };
+  const expiresAt = Math.floor(Date.now() / 1000) + 600;
+  const grant = { id: 'grant-a', revision: 1, subject: authorization.subject, clientId: authorization.clientId,
+    resource: authorization.resource, scopes: authorization.scopes, expiresAt };
+  const tokenTx = {
+    async readAccess(digest) { assert.equal(digest, oauth.oauthCredentialDigest(authorization.token)); return { digest, grantId: grant.id, familyId: 'family-a', expiresAt }; },
+    async readFamily(id) { assert.equal(id, 'family-a'); return { ...grant, id, grantId: grant.id, grantRevision: grant.revision, revoked: false }; }
+  };
+  const original = { coreAccess: selected, store: { transaction: consume => consume(tokenTx), native(tx) { assert.equal(tx, tokenTx); return f.tx; } },
+    grantAuthority: { access: { current: async () => structuredClone(grant) }, principal: async () => structuredClone(f.binding) } };
+  const settings = { enabled: true, resourceUrl: authorization.resource, allowedScopes: authorization.scopes, requiredToolScopes: ['availability:read'] };
+  const permissions = f.member.role.permissions; f.member.role.permissions = [...permissions, { permission: { code: 'rental-os:order:create' } }];
+  let preparations = 0, delivered = 0;
+  const preparation = { async prepareIn(native) { assert.equal(native, f.tx); preparations++; } };
+  const catalog = createOriginalMcpCatalogReadAuthority(api, settings, original, f.auth, f.guard, context, preparation);
+  const availability = createOriginalMcpAvailabilityReadAuthority(api, settings, original, f.auth, f.guard, context, preparation);
+  const reads = [
+    [catalog, 'rental.catalog.search', { limit: 2 }],
+    [availability, 'rental.availability.check', { locationId: 'loc-a', startAt: '2026-11-20T00:00:00+08:00',
+      endAt: '2026-11-21T00:00:00+08:00', lines: [{ itemGroupId: 'group-a', quantity: 1 }] }]
+  ];
+  const read = ([authority, code, input]) => authority.withRead(authorization,
+    api.MCP_BUSINESS_CAPABILITIES.find(row => row.code === code).name, input, async () => { delivered++; return 'original read'; }, signal());
+  state.admission = 'accepting';
+  for (const value of reads) assert.equal(await read(value), 'original read');
+  assert.equal(preparations, 2); assert.equal(delivered, 2);
+  for (const admission of ['stopped', 'missing', 'unavailable']) {
+    state.admission = admission;
+    for (const value of reads) await assert.rejects(() => read(value));
+  }
+  assert.equal(preparations, 2, 'selected stop-new denies before goal preparation'); assert.equal(delivered, 2);
+  const legacy = { store: original.store, grantAuthority: original.grantAuthority }, legacyContext = createOriginalMcpCatalogReadContext();
+  const legacyCatalog = createOriginalMcpCatalogReadAuthority(api, settings, legacy, f.auth, f.guard, legacyContext);
+  const legacyAvailability = createOriginalMcpAvailabilityReadAuthority(api, settings, legacy, f.auth, f.guard, legacyContext);
+  const queries = state.reads.length;
+  assert.equal(await read([legacyCatalog, ...reads[0].slice(1)]), 'original read');
+  assert.equal(await read([legacyAvailability, ...reads[1].slice(1)]), 'original read');
+  assert.equal(state.reads.length, queries, 'unselected consumers do not acquire selected Core dependencies');
+  assert.throws(() => createOriginalMcpCatalogReadAuthority(api, settings, original, f.auth, f.guard, legacyContext));
+  f.member.role.permissions = permissions;
+  // Goal-intent SQL consumer under the actual selected lease. Original goal,
+  // audit/verification, SQL transport and adoption receipt are explicit fixtures;
+  // this is not a human decision, committed transaction or new goal adoption.
+  const goals = source('packages/mcp-server/src/prisma-mcp-catalog-goals.ts');
+  const { createPrismaMcpCatalogGoalIntents } = source('packages/mcp-server/src/prisma-mcp-catalog-goal-intents.ts');
+  const { createOriginalMcpCatalogGoalIntentAuthority } = source('apps/api/src/modules/auth/original-mcp-catalog-goal-intent-authority.ts');
+  const { originalMcpCatalogGoalAuthorityHash } = source('apps/api/src/modules/auth/original-mcp-catalog-goals.ts');
+  const capture = api.captureMcpReadInput, intentOwner = { userId: 'user-a', tenantId: 'tenant-a', workspaceId: 'workspace-a' };
+  const authorityHash = await f.run(async who => originalMcpCatalogGoalAuthorityHash({ ...who, grantId: 'grant-a', grantRevision: 1 }, 'catalog-admission-1'));
+  const goalBody = { ownerKey: capture({ kind: 'original_catalog_goal', ...intentOwner }).inputHash,
+    owner: { ...intentOwner, grantId: 'grant-a', grantRevision: 1 }, authorityHash,
+    target: { goalId: '11111111-1111-1111-1111-111111111111', goalRevision: 1, grantId: 'grant-a',
+      subject: authorization.subject, clientId: authorization.clientId, resource: authorization.resource, scopes: authorization.scopes,
+      purpose: 'rental.catalog.search', originalInputHash: capture({ limit: 2 }).inputHash, policyVersion: 'catalog-admission-1' } };
+  const goal = goals.captureOriginalMcpCatalogGoal({ ...goalBody, recordHash: capture(goalBody).inputHash });
+  const intentCurrent = { principal: { ...intentOwner, audience: 'operator', sessionId: 'original-web-session', expiresAt },
+    goal, policyHash: 'd'.repeat(64), expiresAt };
+  const intentRows = new Map(), query = f.tx.$queryRaw; let intentWrites = 0, adoptionCalls = 0, adopted;
+  f.tx.$queryRaw = async (parts, ...args) => {
+    if (parts.join(' ').includes('FROM mcp_catalog_goal_intents')) return intentRows.has(args[0]) ? [structuredClone(intentRows.get(args[0]))] : [];
+    if (parts.join(' ').includes('FROM mcp_read_catalog_goals')) {
+      assert.equal(args[0], goal.ownerKey);
+      return [{ ...goal.owner, ownerKey: goal.ownerKey, goalId: goal.target.goalId, authorityHash, recordHash: goal.recordHash, recordJson: JSON.stringify(goalBody) }];
+    }
+    return query(parts, ...args);
+  };
+  f.tx.$executeRaw = async (parts, ...args) => {
+    const sql = parts.join('?').replace(/\s+/gu, ' ').trim();
+    if (sql.startsWith('INSERT INTO mcp_catalog_goal_intents')) {
+      const fields = ['id','operationKey','ownerKey','userId','tenantId','workspaceId','sessionId','goalId','goalRecordHash','nextInputHash','recordHash','nonceHash','revision','state','decidedAt','recordJson'];
+      assert.equal(args.length, fields.length); assert.equal(intentRows.has(args[0]), false);
+      intentRows.set(args[0], Object.fromEntries(fields.map((field, index) => [field, args[index]])));
+    } else {
+      assert.match(sql, /^UPDATE mcp_catalog_goal_intents SET /u); const row = intentRows.get(args[3]);
+      assert.equal(row.revision, args[4]); assert.equal(row.state, args[5]); Object.assign(row, { revision: args[0], state: args[1], decidedAt: args[2] });
+    }
+    intentWrites++; return 1;
+  };
+  const logs = { recordOriginalMcpReadGoalAudit: async () => {}, recordOriginalMcpCatalogGoalIntentAudit: async () => {}, recordOriginalMcpCatalogGoalAdoptionAudit: async () => {} };
+  // Independent Web-owner session observation fixture; it does not convert an
+  // MCP credential into a Web session. Workspace Auth and Guard stay original.
+  const intentAuth = { withTrustedWorkspacePrincipal: f.auth.withTrustedWorkspacePrincipal.bind(f.auth),
+    resolveTrustedBrowserPrincipal: async (_authorization, native) => { assert.equal(native, f.tx); return intentCurrent.principal; } };
+  let afterIntentCallback;
+  const actualGoalAuthority = createOriginalMcpCatalogGoalIntentAuthority({ ...api, ...goals,
+    createPrismaMcpCatalogGoalAdoptions: () => ({ prepareIn: async () => { adoptionCalls++; throw Error('stopped adoption must not dispatch'); }, readIn: async () => adopted, verifyIn: outside }) },
+    { requiredToolScopes: authorization.scopes, allowedScopes: authorization.scopes }, original, intentAuth, f.guard, logs,
+    { current: async (native, who, currentGoal, operationKey, nextInputHash) => {
+      assert.equal(native, f.tx);
+      afterIntentCallback?.();
+      return { kind: 'satisfied', reference: 'original-verification-fixture', revision: 1, expiresAt, ...intentOwner,
+        sessionId: who.sessionId, operationKey, goalRecordHash: currentGoal.recordHash, nextInputHash };
+    } });
+  assert.throws(() => actualGoalAuthority.requireNewWorkIn(f.tx, signal()), 'a Native without its live goal callback is not a permit');
+  const base = 'https://as.example.invalid/intent', endpoints = { prepareEndpoint: base + '/prepare', decideEndpoint: base + '/decide', receiptEndpoint: base + '/receipt', adoptEndpoint: base + '/adopt' };
+  const intents = createPrismaMcpCatalogGoalIntents(endpoints, actualGoalAuthority);
+  const post = (url, value) => new Request(url, { method: 'POST', headers: { origin: 'https://as.example.invalid', 'content-type': 'application/json' }, body: JSON.stringify(value) });
+  const nextInput = { limit: 2, name: 'Camera' }, history = () => new Request(endpoints.receiptEndpoint);
+  const prepare = operationKey => intents.prepare(post(endpoints.prepareEndpoint, { operationKey, nextInput }), signal());
+  const decide = (draft, decision) => intents.decide(post(endpoints.decideEndpoint, { operationKey: draft.operationKey, expectedRevision: 1, decision, nonce: draft.nonce }), nextInput, signal());
+  const adopt = draft => intents.adopt(post(endpoints.adoptEndpoint, { operationKey: draft.operationKey, expectedRevision: 2, nextInput, nonce: draft.nonce }), signal());
+  state.admission = 'accepting';
+  let escapedGoalLease;
+  await actualGoalAuthority.withCurrent(history(), { operationKey: 'lease-probe', nextInput }, signal(), async (_current, native, stop) => {
+    actualGoalAuthority.requireNewWorkIn(native, stop);
+    assert.throws(() => actualGoalAuthority.requireNewWorkIn({ ...native }, stop));
+    escapedGoalLease = () => actualGoalAuthority.requireNewWorkIn(native, signal());
+    afterIntentCallback = () => assert.throws(escapedGoalLease, 'post-callback verification cannot reuse its former goal lease');
+  });
+  assert.throws(escapedGoalLease, 'the original goal lease ends with its owning callback');
+  afterIntentCallback = undefined;
+  const accepted = await prepare('accepted-intent'), pending = await prepare('pending-intent'), denied = await prepare('denied-intent');
+  assert.equal((await decide(accepted, 'accept')).decision, 'accepted'); const writesBeforeStop = intentWrites;
+  for (const admission of ['stopped', 'missing', 'unavailable']) {
+    state.admission = admission;
+    await assert.rejects(() => prepare('new-' + admission)); await assert.rejects(() => decide(pending, 'accept')); await assert.rejects(() => adopt(accepted));
+    assert.equal((await prepare(accepted.operationKey)).decision, 'accepted'); assert.equal((await decide(accepted, 'accept')).decision, 'accepted');
+    assert.equal(intentWrites, writesBeforeStop); assert.equal(adoptionCalls, 0);
+  }
+  assert.equal((await decide(denied, 'deny')).decision, 'denied'); assert.equal(intentWrites, writesBeforeStop + 1);
+  const readsBeforeHistory = state.reads.length;
+  assert.equal((await intents.receipt(accepted.operationKey, history(), signal())).decision, 'accepted');
+  const acceptedRow = [...intentRows.values()].find(row => row.operationKey === accepted.operationKey);
+  adopted = { operationKey: accepted.operationKey, intentRecordHash: acceptedRow.recordHash, oldGoal: goal,
+    newGoal: { ...goal, target: { ...goal.target, goalId: '22222222-2222-2222-2222-222222222222', originalInputHash: capture(nextInput).inputHash } } };
+  assert.equal((await adopt(accepted)).state, 'observed'); assert.equal(state.reads.length, readsBeforeHistory);
+  assert.equal(adoptionCalls, 0); assert.equal(intentWrites, writesBeforeStop + 1);
+  f.member.isActive = false;
+  await assert.rejects(() => run(() => { throw Error('revoked original Guard must not reach Core reader'); }));
+  assert.deepEqual(state.requests, originalRows); assert.equal(f.configReads, 0, 'no Web credential was manufactured');
+});
+
 test("verification records its real type and external-facade scope", () => {
   const scope = {
     strict: "formal Platform/Rental contracts and Shared builds, original principal owner and compatibility export", apiExecution: "original source transpilation; real Nest decorators/exceptions, Prisma/current authority external facades",

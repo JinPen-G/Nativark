@@ -9,6 +9,7 @@ import type { OperationLogService } from '../../common/operation-log.service';
 import { createOriginalMcpOAuthAudit } from './original-mcp-oauth-audit';
 import { createOriginalMcpGrantIdentity } from './original-mcp-grant-identity';
 import { createOriginalMcpBrowserIdentity } from './original-mcp-browser-identity';
+import type { OriginalMcpCoreAccess } from './original-mcp-core-access';
 import type { createRentalMcpService, RentalMcpServiceConfig } from '@rental-os/mcp-server/service' with { 'resolution-mode': 'import' };
 import type { createPrismaOAuthStore, OAuthSqlDatabase, PrismaOAuthStore } from '@rental-os/mcp-server/prisma-oauth-store' with { 'resolution-mode': 'import' };
 import type { createPrismaPublicClientRegistry, PrismaPublicClientRegistry } from '@rental-os/mcp-server/prisma-public-client-registry' with { 'resolution-mode': 'import' };
@@ -25,7 +26,7 @@ import type { createPrismaMcpProtocolTraffic } from '@rental-os/mcp-server/proto
 import type { OriginalMcpTrafficPolicySource } from '@rental-os/mcp-server/original-traffic-meter' with { 'resolution-mode':'import' };
 /** Construction-only original-host hook; not a model tool or request callback.
  * Receives THIS core's ports before its one standard service is constructed. */
-export type OriginalMcpReadCore = Readonly<Pick<OriginalMcpOAuthCore, 'store' | 'grantAuthority'>
+export type OriginalMcpReadCore = Readonly<Pick<OriginalMcpOAuthCore, 'store' | 'grantAuthority' | 'coreAccess'>
   & { database: OAuthSqlDatabase<Prisma.TransactionClient> }>;
 export type OriginalMcpReadToolsFactory = (core: OriginalMcpReadCore) => McpReadTools;
 export interface OriginalMcpOAuthCoreExports {
@@ -44,6 +45,8 @@ export interface OriginalMcpOAuthCoreExports {
 }
 export interface OriginalMcpOAuthCore {
   service: ReturnType<typeof createRentalMcpService>;
+  /** Explicit selected host only. Absence does not claim a Core migration. */
+  coreAccess?: OriginalMcpCoreAccess;
   /** Original-host internal ports only. Never serialize or expose native handles,
    * subject/grant locators, raw factories or Web decision methods as model tools. */
   store: PrismaOAuthStore<Prisma.TransactionClient>;
@@ -62,7 +65,7 @@ export function createOriginalMcpOAuthCore(
   logs: Pick<OperationLogService, 'recordOriginalOAuthAudit'>,
   original: { database: OAuthSqlDatabase<Prisma.TransactionClient>; metadata: OriginalAuthorizationMetadata;
     verification?: OriginalOAuthVerificationSource<Prisma.TransactionClient>; createReadTools?: OriginalMcpReadToolsFactory;
-    protocolTraffic?: OriginalMcpTrafficPolicySource<Prisma.TransactionClient> }
+    protocolTraffic?: OriginalMcpTrafficPolicySource<Prisma.TransactionClient>; coreAccess?: OriginalMcpCoreAccess }
 ): OriginalMcpOAuthCore {
   const runtime: OriginalMcpOAuthCoreExports = Object.freeze({ createRentalMcpService: mcp?.createRentalMcpService,
     createPrismaOAuthStore: mcp?.createPrismaOAuthStore, createPrismaPublicClientRegistry: mcp?.createPrismaPublicClientRegistry,
@@ -81,6 +84,11 @@ export function createOriginalMcpOAuthCore(
     throw new Error('Original MCP OAuth core requires one read-provider owner');
   }
   const createReadTools = original.createReadTools?.bind(original);
+  if (original.coreAccess !== undefined && (typeof original.coreAccess?.withCurrent !== 'function'
+    || !createReadTools || suppliedReadTools !== undefined || config.service.resource.resources !== undefined))
+    throw new Error('Selected MCP Core requires its original controlled read factory');
+  const coreAccess = original.coreAccess === undefined ? undefined
+    : Object.freeze({ withCurrent: original.coreAccess.withCurrent.bind(original.coreAccess) });
   if (suppliedReadTools?.usage !== undefined) throw new Error('Original MCP OAuth core owns completed-read usage');
   const resourceUrl = config.service.resource.resourceUrl, allowedScopes = Object.freeze([...config.service.tokens.allowedScopes]);
   const grantConfig = Object.freeze({ enabled: config.service.enabled, resourceUrl, allowedScopes });
@@ -101,7 +109,8 @@ export function createOriginalMcpOAuthCore(
   // One synchronous hook breaks the store/grant -> business-authority dependency
   // without constructing another core or service. Failure never falls back to old
   // providers; the hook must not perform I/O or return a Promise/partial binding.
-  const readTools = createReadTools ? createReadTools(Object.freeze({ store, grantAuthority, database })) : suppliedReadTools;
+  const readTools = createReadTools ? createReadTools(Object.freeze({ store, grantAuthority, database,
+    ...(coreAccess ? { coreAccess } : {}) })) : suppliedReadTools;
   if (createReadTools && (!readTools || !Array.isArray(readTools.tools)
     || typeof readTools.publication?.allows !== 'function' || typeof readTools.authority?.withRead !== 'function'
     || typeof readTools.accounting?.withCall !== 'function' || typeof readTools.release?.project !== 'function')) {
@@ -119,5 +128,6 @@ export function createOriginalMcpOAuthCore(
   // Web preparation/decision routing remains with the original trusted host.
   const service = runtime.createRentalMcpService({ ...config.service, resource }, { store, registrations, metadata: original.metadata,
     consent: consentAuthority, issuance: grantAuthority.issuance, access: grantAuthority.access });
-  return Object.freeze({ service, store, registrations, admissions, grantAuthority, grantUse, grantAdmission, consentAuthority, webConsent });
+  return Object.freeze({ service, store, registrations, admissions, grantAuthority, grantUse, grantAdmission, consentAuthority, webConsent,
+    ...(coreAccess ? { coreAccess } : {}) });
 }

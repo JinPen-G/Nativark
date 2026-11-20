@@ -8,6 +8,7 @@ import type { AuthService } from './auth.service';
 import type { ApiAuthGuard } from '../../common/api-auth.guard';
 import type { OriginalMcpOAuthCore } from './original-mcp-oauth-core';
 import type { OriginalMcpCatalogReadContext } from './original-mcp-read-context';
+import { assertOriginalMcpCoreContext } from './original-mcp-read-context';
 import { aiAvailabilityReadInputSchema } from '../ai-native/availability-read-facts.service';
 import type { McpReadAuthority, McpReadAuthorization } from '@rental-os/mcp-server' with { 'resolution-mode': 'import' };
 import type { MCP_BUSINESS_CAPABILITIES } from '@rental-os/mcp-server/capability-mapping' with { 'resolution-mode': 'import' };
@@ -27,7 +28,7 @@ const fail = () => new Error('Original MCP availability read unavailable');
 export function createOriginalMcpAvailabilityReadAuthority(
   mcp: OriginalMcpAvailabilityAuthorityExports,
   config: Parameters<typeof createPersistentOAuthAccessReader>[0] & { requiredToolScopes: readonly string[] },
-  original: Pick<OriginalMcpOAuthCore, 'store' | 'grantAuthority'>,
+  original: Pick<OriginalMcpOAuthCore, 'store' | 'grantAuthority' | 'coreAccess'>,
   auth: Pick<AuthService, 'withTrustedWorkspacePrincipal'>,
   guard: Pick<ApiAuthGuard, 'withTrustedAvailabilityRead'>,
   context: OriginalMcpCatalogReadContext,
@@ -46,6 +47,7 @@ export function createOriginalMcpAvailabilityReadAuthority(
     || new Set(config.requiredToolScopes).size !== config.requiredToolScopes.length
     || config.requiredToolScopes.some(scope => typeof scope !== 'string' || !scope || !config.allowedScopes.includes(scope))) throw fail();
   const scopes = Object.freeze([...config.requiredToolScopes]), name = mapping.name;
+  assertOriginalMcpCoreContext(context, original.coreAccess);
   const capture = mcp.captureMcpReadInput.bind(mcp), bind = context.bind.bind(context), prepare = goals?.prepareIn.bind(goals);
   const transaction = original.store.transaction.bind(original.store), native = original.store.native.bind(original.store);
   const principal = original.grantAuthority.principal.bind(original.grantAuthority);
@@ -73,7 +75,10 @@ export function createOriginalMcpAvailabilityReadAuthority(
         const originalNative = native(tx);
         const result = await withPrincipal(originalNative, () => principal(before.grantId, tx, signal), signal,
           resolve => withAvailability(parsed.data.locationId, parsed.data.lines.length, resolve,
-            identity => enter(before, identity, signal, () => read(originalNative), originalNative), signal));
+            identity => enter(before, identity, signal, () => {
+              context.requireAcceptingIn?.(originalNative, signal);
+              return read(originalNative);
+            }, originalNative), signal));
         live();
         if (!isDeepStrictEqual(await reader.readIn(tx, fixed.token, signal), before)) throw fail();
         live(); return result;

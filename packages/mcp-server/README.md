@@ -222,6 +222,14 @@ Core返回原宿主内部store、Web同意及grant / receipt生产者，不是�
 
 宿主须显式供给**正式闭合MCP wire描述符、当前发布、外部字段释放与原分类限流政策源**；组合只固定目录运输名，不从内部投影或enabled推定许可。缺任何政策拒绝构造，未完成能力不开放。目录自动业务类现消费下述原桶参加者，整次调用占用保持；合法下一目标仍只沿原Web采用，不由初始作者自动轮换。其他三类生产入口、完整活跃、其他工具或生产Nest／可信UI／真实DB仍未齐。验证入口为[既有Web组](../../tests/mcp-web-consent.test.cjs)：官方SDK在进程内消费真实原Auth／目标SQL／原审计／预算／Core／facts，SQL锁／commit、MFA、wire／发布／release明确为夹具；不等于真实Host或字段批准。阶段证据与完整边界见[开发记录](../../docs/MCP服务/MCP服务-开发记录.md#阶段原目录单-core-生产者组合2026-11-06)。
 
+### 可选业务 Core 准入
+
+原宿主可通过 `original.coreAccess` 选择 [createOriginalMcpCoreAccess](../../apps/api/src/modules/auth/original-mcp-core-access.ts)，供给真实成员读取、订阅期限及使用当前 Native 事务的物理部署观察。它复用平台 Core 授权、成员分配、原绑定和 canonical 部署停新记录，原 OAuth、Auth、Guard、业务权限与字段释放继续分别裁定。选择此参加者时，业务读取必须由同一 `createReadTools` 工厂构造，不能另挂绕开它的 `readTools` 或资源提供者。
+
+目录与可用量读取要求部署允许新工作；保存新的原请求还须复验订阅期限。目标意图的新建、接受和采用使用同一回调内已持有的准入锁。部署停新后，原键结果、已有决定回执及拒绝操作保留原当前权限路径，不重发旧请求或新建目标。租户 Core 授权、成员分配、原角色或绑定已失效时仍拒绝该通道；必要历史与业务收尾由其已登记的原权限入口办理。
+
+准入租约只在拥有它的原消费回调内有效，后续复核或回调外不能复用。接口与验证可从 [读取上下文](../../apps/api/src/modules/auth/original-mcp-read-context.ts)、[原请求权威](../../apps/api/src/modules/auth/original-mcp-request-authority.ts)、[目标权威](../../apps/api/src/modules/auth/original-mcp-catalog-goal-intent-authority.ts) 和 [现有可信主体用例](../../tests/mcp-trusted-principal.test.cjs)定位。宿主选装、发布和监听分别配置，参加者本身不注册生产端点或授予业务执行权。
+
 ### 准入 CAS 与原管理收据
 
 子出口`@rental-os/mcp-server/prisma-oauth-admission-store`提供[createPrismaOAuthAdmissionStore](src/prisma-oauth-admission-store.ts)，对上一节的最少平台 / 固定空间投影作原管理保存、当前读取和精确原键收据读取。保存 / 当前读取共用`captureOAuthAdmission`闭合校验；resource / scope ceiling固定于服务端配置，客户端不能自报actor、修订后的resource或身份字段。平台与经营空间管理范围来自原当前授权，必须与固定target精确相同，不把平台权限当租户授权，也不让空间管理者扩大到另一空间或平台。

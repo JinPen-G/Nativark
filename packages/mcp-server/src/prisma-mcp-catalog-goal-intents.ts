@@ -30,6 +30,10 @@ export interface OriginalCatalogGoalIntentAuthority<Native extends OAuthSqlTrans
   /** Independent current Web-owner history read, not new issuance/MFA permission. */
   withOwner<T>(browser: Request, signal: AbortSignal,
     consume: (owner: OAuthConsentBrowserPrincipal, native: Native, signal: AbortSignal) => Promise<T>): Promise<T>;
+  /** Selected Core host only: use its already-held original Native lease before
+   * new intent/acceptance/adoption. Existing receipts and denial remain control
+   * reads/actions; never acquire a new parent lock after the goal row locks. */
+  requireNewWorkIn?(native: Native, signal: AbortSignal): void;
   audit(native: Native, input: OriginalCatalogGoalIntentAudit, signal: AbortSignal, requireExisting?: boolean): Promise<void>;
   /** Optional ORIGINAL adoption path; absent never falls back to ordinary intent
    * authority. Final current goal must match the actual history/adoption receipt. */
@@ -98,6 +102,8 @@ export function createPrismaMcpCatalogGoalIntents<Native extends OAuthSqlTransac
   if (new Set(routes.map(u => u.origin)).size !== 1 || new Set(routes.map(u => u.pathname)).size !== routes.length
     || typeof authority?.withCurrent !== 'function' || typeof authority.withOwner !== 'function' || typeof authority.audit !== 'function') throw fail('unavailable');
   const current = authority.withCurrent.bind(authority),owner = authority.withOwner.bind(authority),audit = authority.audit.bind(authority);
+  if (authority.requireNewWorkIn !== undefined && typeof authority.requireNewWorkIn !== 'function') throw fail('unavailable');
+  const requireNewWork = authority.requireNewWorkIn?.bind(authority);
   const enabledAdoption = config.adoptEndpoint !== undefined;
   if (enabledAdoption && (typeof authority.withTransition !== 'function' || typeof authority.adoption?.prepareIn !== 'function'
     || typeof authority.adoption.readIn !== 'function' || typeof authority.adoption.verifyIn !== 'function')) throw fail('unavailable');
@@ -155,6 +161,7 @@ export function createPrismaMcpCatalogGoalIntents<Native extends OAuthSqlTransac
         return await current(browser, input, signal, async (raw, sql, stop) => {
           entered = true; live(sql, stop); const c = checked(raw), existing = await row(sql, input.operationKey, c.principal, stop);
           if (existing) { check(existing, c, input.nextInputHash); await audit(sql, auditInput(existing), stop, true); live(sql, stop); return receipt(existing); }
+          requireNewWork?.(sql, stop);
           const nonce = randomBytes(32).toString('base64url'), nonceHash = createHash('sha256').update(nonce).digest('hex');
           const d: Draft = { operationKey: input.operationKey, owner: fixedOwner(c.principal), goal: c.goal, nextInputHash: input.nextInputHash, policyHash: c.policyHash, expiresAt: c.expiresAt };
           const recordHash = captureMcpReadInput(d).inputHash, value = originalId(input.operationKey, c.principal);
@@ -179,6 +186,7 @@ export function createPrismaMcpCatalogGoalIntents<Native extends OAuthSqlTransac
           // Existing completed rows are historical evidence, not permission to replay.
           await audit(sql, auditInput(saved), stop, true); live(sql, stop);
           if (saved.state === 'pending') {
+            if (decision === 'accepted') requireNewWork?.(sql, stop);
             const count = await sql.$executeRaw`UPDATE mcp_catalog_goal_intents SET revision = ${2}, state = ${decision}, decidedAt = ${Math.floor(Date.now() / 1000)} WHERE id = ${saved.id} AND revision = ${1} AND state = ${'pending'}`;
             live(sql, stop); if (count !== 1) throw fail('conflict'); const recorded = await row(sql, input.operationKey, c.principal, stop);
             if (!recorded || recorded.state !== decision || recorded.recordHash !== saved.recordHash) throw fail('unavailable');
@@ -219,6 +227,7 @@ export function createPrismaMcpCatalogGoalIntents<Native extends OAuthSqlTransac
           await audit(sql,auditInput(r),stop,true);live(sql,stop);
           const intent: OriginalAcceptedCatalogGoalIntent=Object.freeze({ id:r.id,operationKey:r.operationKey,goalId:r.goalId,goalRecordHash:r.goalRecordHash,nextInputHash:r.nextInputHash,
             recordHash:r.recordHash,expiresAt:Math.min(r.draft.expiresAt,c.expiresAt),observation:'trusted_web_intent_not_goal_completion_or_adoption',retryable:false });
+          requireNewWork?.(sql, stop);
           const result=await prepareAdoption!(intent,c.goal,sql,stop);live(sql,stop);
           if (!isDeepStrictEqual(r,await row(sql,input.operationKey,c.principal,stop))) throw fail('unavailable');return result;
         });
