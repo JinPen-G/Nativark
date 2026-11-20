@@ -211,6 +211,39 @@ export const RENTAL_HTTP_OPERATIONS: ContractOperation[] = [
   backlogOperation("get", "/api/platform/tenants/{id}/workspaces", "Platform", "listTenantBusinessWorkspaces", "List target tenant business workspaces", ["system:tenant:manage"]),
   backlogOperation("post", "/api/platform/tenants/{id}/workspaces", "Platform", "createTenantBusinessWorkspace", "Create target tenant business workspace", ["system:tenant:manage"]),
   backlogOperation("put", "/api/platform/tenants/{id}/workspaces/{workspaceId}", "Platform", "updateTenantBusinessWorkspace", "Update target tenant business workspace", ["system:tenant:manage"]),
+  {
+    method: "get", path: "/api/platform/customers/{customerId}/avatar", tag: "Platform", operationId: "readCustomerAvatar",
+    summary: "读取当前获权客户头像，按原指针复验后返回 PNG、JPEG 或 WebP 字节。",
+    permissions: ["rental-os:member:view", "rental-os:member:manage"], authRequired: true,
+    responseSchema: { type: "string", format: "binary" }, rawResponseContentType: ["image/png", "image/jpeg", "image/webp"],
+    responseHeaders: {
+      "X-Content-Type-Options": { schema: { type: "string", enum: ["nosniff"] } },
+      "Cache-Control": { schema: { type: "string", enum: ["private, no-store"] } }
+    },
+    errorResponses: {
+      "401": { description: "原会话认证失败。", schema: "RentalHttpErrorResponse" },
+      "403": { description: "当前租户、经营空间、地点或客户数据范围访问被原 Guard 拒绝。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "客户、头像指针或文件不存在，或读取期间已合并、替换。", schema: "RentalHttpErrorResponse" },
+      "500": { description: "原文件读取或客户指针复验发生错误。", schema: "RentalHttpErrorResponse" },
+      "503": { description: "生产模式尚未装配受控文件存储。", schema: "RentalHttpErrorResponse" }
+    }
+  },
+  {
+    method: "post", path: "/api/platform/customers/{customerId}/avatar", tag: "Platform", operationId: "saveCustomerAvatar",
+    summary: "上传当前获权客户的单个头像位图，在原事务内复验并保存头像指针。",
+    permissions: ["rental-os:member:manage"], authRequired: true, successStatus: 201,
+    requestSchema: "CustomerAvatarUploadRequest", requestContentType: "multipart/form-data",
+    requestEncoding: { file: { contentType: "image/png, image/jpeg, image/webp" } }, responseSchema: "CustomerAvatarSaveResult",
+    errorResponses: {
+      "400": { description: "缺少 file、单文件约束、字节长度或位图格式校验失败。", schema: "RentalHttpErrorResponse" },
+      "401": { description: "原会话认证失败。", schema: "RentalHttpErrorResponse" },
+      "403": { description: "当前租户、经营空间、地点或客户数据范围访问被原 Guard 拒绝。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "客户不存在、已合并，或最终指针写入时已变化。", schema: "RentalHttpErrorResponse" },
+      "413": { description: "原 FileInterceptor 拒绝超过 5 MiB 的文件。", schema: "RentalHttpErrorResponse" },
+      "500": { description: "文件存储或提交发生错误。提交结果未知时保留原文件 key，沿原客户指针核对。", schema: "RentalHttpErrorResponse" },
+      "503": { description: "生产模式尚未装配受控文件存储。", schema: "RentalHttpErrorResponse" }
+    }
+  },
   backlogOperation("get", "/api/platform/customers", "Platform", "listSharedCustomers", "List tenant shared customers", ["rental-os:member:view"]),
   backlogOperation("post", "/api/platform/customers", "Platform", "registerSharedCustomer", "Register a tenant member using the shared review policy", ["rental-os:member:manage"]),
   backlogOperation("get", "/api/platform/customers/{customerId}", "Platform", "getCustomerDetail", "Get customer detail with masked sensitive fields", ["rental-os:member:view"]),
@@ -357,6 +390,21 @@ export const RENTAL_HTTP_OPERATIONS: ContractOperation[] = [
     ['rental-os:order:pickup', 'rental-os:order:return', 'rental-os:order:offline-payment', 'rental-core:maintenance:manage'], true,
     'StaffUploadObservationRequest', 'StaffUploadObservationResponse'),
   backlogOperation("post", "/api/staff/v1/uploads/sessions/{id}/complete", "Files", "completeStaffUpload", "Complete a staff upload after verifying its actor, scope and business owner", ["rental-os:order:pickup", "rental-os:order:return", "rental-os:order:offline-payment", "rental-core:maintenance:manage"], true, "CompleteFileUploadRequest", "GenericObject"),
+  {
+    method: "post", path: "/api/staff/v1/uploads/{fileAssetId}/inspection-binding", tag: "Files", operationId: "bindStaffInspectionEvidence",
+    summary: "原检查权威绑定当前员工上传证据，沿订单、分配、模板与阶段复验原附件修订。",
+    permissions: ["rental-os:order:pickup", "rental-os:order:return"], authRequired: true, successStatus: 201,
+    requestSchema: "StaffInspectionBindingRequest", responseSchema: "StaffInspectionBindingResult",
+    parameters: [{ name: "fileAssetId", in: "path", required: true,
+      schema: { type: "string", minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$" } }],
+    errorResponses: {
+      "400": { description: "原员工附件场景与业务对象匹配校验失败。", schema: "RentalHttpErrorResponse" },
+      "401": { description: "原 Staff 会话认证失败。", schema: "RentalHttpErrorResponse" },
+      "403": { description: "原 Staff 白名单、当前空间/地点/阶段权限或附件员工归属核验拒绝访问。", schema: "RentalHttpErrorResponse" },
+      "500": { description: "原检查权威的绑定、修订或存储异常沿现有 HTTP 异常路径返回。提交结果未知时按原附件、修订及绑定指纹核对。", schema: "RentalHttpErrorResponse" },
+      "503": { description: "检查草稿证据绑定未启用。缺少原 AI 宿主检查权威时，在处理前返回 unavailable。", schema: "RentalHttpErrorResponse" }
+    }
+  },
   backlogOperation("get", "/api/staff/v1/uploads/{fileAssetId}/download-url", "Files", "getStaffFileDownloadUrl", "Create a staff-scoped short-lived file URL", ["rental-os:order:pickup", "rental-os:order:return", "rental-os:order:offline-payment", "rental-core:maintenance:manage"], true, undefined, "FileDownloadUrlSummary"),
   backlogOperation("get", "/api/staff/v1/offline-payments", "RentalCore", "listStaffOfflinePaymentRegistrations", "List pending and confirmed offline payment registrations for an order", ["rental-os:order:view"], true, undefined, "GenericObject", [{ name: "orderId", in: "query", required: true, schema: stringSchema }]),
   backlogOperation("post", "/api/staff/v1/offline-payments", "RentalCore", "registerStaffOfflinePayment", "Register an offline payment for independent confirmation", ["rental-os:order:offline-payment"], true, "GenericObject", "GenericObject"),

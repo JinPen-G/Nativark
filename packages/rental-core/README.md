@@ -155,12 +155,12 @@
 node -e "const { createRentalOpenApi } = require('@rental-os/rental-core/http-openapi'); process.stdout.write(JSON.stringify(createRentalOpenApi(), null, 2))"
 ```
 
-独立贡献包含 573 个已有操作及其 339 个 schema。原宽泛字段由 `RENTAL_HTTP_SCHEMA_GAPS` 列出，涉及的 292 项操作带 `x-schemaStatus=incomplete` 和 `x-schemaGaps`，继续按正式 DTO/响应投影补齐。明确路由缺口从 `RENTAL_HTTP_DOCUMENTATION_GAPS` 读取。
+独立贡献包含 576 个已有操作及其 344 个 schema。原宽泛字段由 `RENTAL_HTTP_SCHEMA_GAPS` 列出，涉及的 292 项操作带 `x-schemaStatus=incomplete` 和 `x-schemaGaps`，继续按正式 DTO/响应投影补齐。明确路由缺口从 `RENTAL_HTTP_DOCUMENTATION_GAPS` 读取，当前宿主限制从 `RENTAL_HTTP_OPERATION_AVAILABILITY` 读取。
 
-| 路由 | 原实现与文档缺口 |
+| 路由 | 同源描述与当前限制 |
 | --- | --- |
-| `GET/POST /api/platform/customers/{customerId}/avatar` | 客户头像两项实际处理器仍缺正式操作/schema |
-| `POST /api/staff/v1/uploads/{fileAssetId}/inspection-binding` | 原检查证据绑定缺正式操作/schema，当前无 AI 宿主在处理前返回 unavailable |
+| `GET/POST /api/platform/customers/{customerId}/avatar` | 已描述单个 5 MiB 位图 multipart 上传、原保存投影及 PNG/JPEG/WebP 原始响应 |
+| `POST /api/staff/v1/uploads/{fileAssetId}/inspection-binding` | 已描述原检查目标和附件修订。独立贡献保留无 AI 宿主的 503，旧组合保留已装配权威的原成功投影 |
 | `GET /api/platform/tenant-bootstrap/category-options` | 原合同保留，独立 Rental 宿主未挂载，列入未挂原路径缺口 |
 
 ## 使用与构建

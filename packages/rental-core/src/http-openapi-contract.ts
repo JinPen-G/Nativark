@@ -55,7 +55,11 @@ export interface ContractOperation {
   responseSchema?: string | SchemaObject;
   successStatus?: 200 | 201;
   parameters?: ParameterObject[];
-  rawResponseContentType?: string;
+  requestContentType?: string;
+  requestEncoding?: Record<string, { contentType: string }>;
+  rawResponseContentType?: string | readonly string[];
+  responseHeaders?: Record<string, { description?: string; schema: SchemaObject }>;
+  errorResponses?: Record<string, { description: string; schema: string | SchemaObject }>;
   rateLimited?: boolean;
   serviceUnavailableReason?: string;
 }
@@ -138,7 +142,9 @@ function pathParameters(path: string, parameters: ParameterObject[] = []) {
 function operation(config: ContractOperation) {
   const parameters = pathParameters(config.path, config.parameters);
   const securityRequired = config.authRequired || config.permissions.length > 0;
-  const responseContentType = config.rawResponseContentType ?? "application/json";
+  const responseContentTypes = typeof config.rawResponseContentType === "string"
+    ? [config.rawResponseContentType]
+    : config.rawResponseContentType ?? ["application/json"];
   const responseSchema = config.rawResponseContentType || config.path === "/api/openapi.json"
     ? toSchema(config.responseSchema)
     : apiResult(config.responseSchema);
@@ -153,9 +159,8 @@ function operation(config: ContractOperation) {
     responses: {
       [String(config.successStatus ?? 200)]: {
         description: "Success",
-        content: {
-          [responseContentType]: { schema: responseSchema }
-        }
+        content: Object.fromEntries(responseContentTypes.map(contentType => [contentType, { schema: responseSchema }])),
+        ...(config.responseHeaders ? { headers: config.responseHeaders } : {})
       }
     }
   };
@@ -164,8 +169,9 @@ function operation(config: ContractOperation) {
     item.requestBody = {
       required: true,
       content: {
-        "application/json": {
-          schema: toSchema(config.requestSchema)
+        [config.requestContentType ?? "application/json"]: {
+          schema: toSchema(config.requestSchema),
+          ...(config.requestEncoding ? { encoding: config.requestEncoding } : {})
         }
       }
     };
@@ -174,6 +180,13 @@ function operation(config: ContractOperation) {
   if (config.serviceUnavailableReason) {
     // 未激活的客户端契约不能在文档中伪装成已经可成功创建真实支付。
     item.responses = { "503": { description: config.serviceUnavailableReason, content: { "application/json": { schema: objectSchema } } } };
+  }
+
+  for (const [status, response] of Object.entries(config.errorResponses ?? {})) {
+    (item.responses as Record<string, unknown>)[status] = {
+      description: response.description,
+      content: { "application/json": { schema: toSchema(response.schema) } }
+    };
   }
 
   if (config.rateLimited) {

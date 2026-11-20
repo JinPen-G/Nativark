@@ -18,26 +18,33 @@ export * from "./http-openapi-rental-exchange-inspection-preparation.schemas";
 export { aiLeafToOpenApi30 } from "./http-openapi-json-schema";
 export { RENTAL_HTTP_OPERATIONS, RENTAL_HTTP_COMPONENT_SCHEMAS };
 
-/** 原实现已有、原文档尚缺正式字段的路由。缺口不会生成成功响应。 */
-export const RENTAL_HTTP_DOCUMENTATION_GAPS = [
-  {
-    method: "GET", path: "/api/platform/customers/{customerId}/avatar",
-    source: "CustomerAvatarController.read", kind: "missing-operation"
-  },
-  {
-    method: "POST", path: "/api/platform/customers/{customerId}/avatar",
-    source: "CustomerAvatarController.save", kind: "missing-operation"
-  },
-  {
-    method: "POST", path: "/api/staff/v1/uploads/{fileAssetId}/inspection-binding",
-    source: "StaffUploadsController.bindInspectionEvidence", kind: "missing-operation",
-    availability: "disabled-ai-host-unavailable"
-  },
+export interface RentalHttpDocumentationGap {
+  method: "GET" | "POST";
+  path: string;
+  source: string;
+  kind: "missing-operation" | "unmounted-legacy-operation";
+  availability?: "disabled-ai-host-unavailable";
+}
+
+/** 路由缺口沿原处理器核对，已补齐操作从清单移除。公共种类保留供宿主核对后续缺项。 */
+export const RENTAL_HTTP_DOCUMENTATION_GAPS: readonly RentalHttpDocumentationGap[] = [
   {
     method: "GET", path: "/api/platform/tenant-bootstrap/category-options",
     source: "getRentalCategoryOpeningOptions", kind: "unmounted-legacy-operation"
   }
+];
+
+/** 独立贡献保留原无 AI 宿主的绑定限制，旧组合沿已装配权威描述原成功投影。 */
+export const RENTAL_HTTP_OPERATION_AVAILABILITY = [
+  {
+    method: "POST", path: "/api/staff/v1/uploads/{fileAssetId}/inspection-binding",
+    source: "StaffUploadsController.bindInspectionEvidence", availability: "disabled-ai-host-unavailable",
+    reason: "检查草稿证据绑定未启用"
+  }
 ] as const;
+
+const unavailableHostRoutes = new Map<string, (typeof RENTAL_HTTP_OPERATION_AVAILABILITY)[number]>(RENTAL_HTTP_OPERATION_AVAILABILITY
+  .map(item => [`${item.method} ${item.path}`, item] as const));
 
 const unmountedLegacyRoutes = new Set<string>(RENTAL_HTTP_DOCUMENTATION_GAPS
   .filter(gap => gap.kind === "unmounted-legacy-operation")
@@ -80,7 +87,10 @@ function namespaceReferences(value: unknown): unknown {
 export function createRentalOpenApi(): CoreOpenApiContribution {
   const operations = RENTAL_HTTP_OPERATIONS.filter(operation =>
     !unmountedLegacyRoutes.has(`${operation.method.toUpperCase()} ${operation.path}`));
-  const legacyPaths = buildPaths(operations);
+  const legacyPaths = buildPaths(operations.map(operation => {
+    const unavailable = unavailableHostRoutes.get(`${operation.method.toUpperCase()} ${operation.path}`);
+    return unavailable ? { ...operation, serviceUnavailableReason: unavailable.reason } : operation;
+  }));
   const paths: CoreOpenApiContribution["paths"] = {};
   for (const [path, methods] of Object.entries(legacyPaths)) {
     const item: Record<string, unknown> = {};
@@ -89,6 +99,8 @@ export function createRentalOpenApi(): CoreOpenApiContribution {
       const contribution = namespaceReferences(original) as Record<string, unknown>;
       contribution.operationId = `rental.${original.operationId}`;
       contribution["x-legacyOperationId"] = original.operationId;
+      const unavailable = unavailableHostRoutes.get(`${method.toUpperCase()} ${path}`);
+      if (unavailable) contribution["x-availability"] = unavailable.availability;
       const gap = RENTAL_HTTP_SCHEMA_GAPS.find(value => value.operationId === original.operationId);
       if (gap) {
         contribution["x-schemaStatus"] = "incomplete";

@@ -19,6 +19,24 @@ export const RENTAL_HTTP_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ...ENTERPRISE_ORDER_DELEGATION_SCHEMAS,
   ...RENTAL_EXCHANGE_INSPECTION_SCHEMAS,
   GenericObject: objectSchema,
+  RentalHttpErrorResponse: objectOf({
+    statusCode: { type: "integer", minimum: 400, maximum: 599 },
+    message: { oneOf: [stringSchema, arrayOf(stringSchema)] },
+    error: stringSchema
+  }, ["statusCode", "message"], false),
+  CustomerAvatarUploadRequest: objectOf({
+    file: { type: "string", format: "binary", description: "单个 PNG、JPEG 或 WebP 位图，最多 5 MiB。原服务核对声明格式、文件签名和字节长度。" }
+  }, ["file"]),
+  CustomerAvatarSaveResult: objectOf({ customerId: stringSchema, avatarUrl: stringSchema }, ["customerId", "avatarUrl"], false),
+  StaffInspectionBindingRequest: objectOf({
+    orderId: { type: "string", minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+    allocationId: { type: "string", minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+    templateId: { type: "string", minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+    stage: { type: "string", enum: ["pickup", "return"] }
+  }, ["orderId", "allocationId", "templateId", "stage"], false),
+  StaffInspectionBindingResult: objectOf({
+    attachmentId: stringSchema, attachmentRevision: { type: "integer", minimum: 1, maximum: 1000 }
+  }, ["attachmentId", "attachmentRevision"], false),
   CustomerProfileOverview: objectOf({ profile: objectSchema, addresses: arrayOf(objectSchema), qualificationRevisions: arrayOf(objectSchema),
     statusHistory: arrayOf(objectSchema), sensitiveAccess: arrayOf(objectSchema), corporateRelations: arrayOf(objectSchema),
     membershipPlanAssignments: arrayOf(objectSchema), access: objectOf({ orders: { type: "string", enum: ["available", "restricted"] },
