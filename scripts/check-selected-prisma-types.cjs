@@ -119,8 +119,16 @@ const directoryExists = file => [...virtual.keys()].some(key => key.startsWith(s
 const configFile = slash(path.resolve(root, configPath)), config = ts.readConfigFile(configFile, readFile);
 if (config.error) throw new Error(ts.flattenDiagnosticMessageText(config.error.messageText, '\n'));
 const parsed = ts.parseJsonConfigFileContent(config.config, { ...ts.sys, readFile, fileExists, directoryExists }, path.dirname(configFile));
+// 检查器统一使用仓库根，继承的paths仍须以原声明目录定位。
+const configuredPathsBase = parsed.options.baseUrl ?? parsed.options.pathsBasePath ?? path.dirname(configFile);
+const configuredPaths = Object.fromEntries(
+  Object.entries(parsed.options.paths ?? {}).map(([alias, targets]) => [
+    alias,
+    targets.map(target => slash(path.resolve(configuredPathsBase, target)))
+  ])
+);
 const options = { ...parsed.options, noEmit: true, incremental: false, declaration: false, rootDir: root, baseUrl: root,
-  paths: { ...parsed.options.paths, ...packageAliases }, typeRoots: [deps + '/@types'] };
+  paths: { ...configuredPaths, ...packageAliases }, typeRoots: [deps + '/@types'] };
 const host = ts.createCompilerHost(options);
 Object.assign(host, { fileExists, readFile, directoryExists, getDirectories: file => ts.sys.getDirectories(mapped(file)),
   realpath: file => slash(file).startsWith(root + '/node_modules/') ? slash(file) : slash(ts.sys.realpath?.(mapped(file)) ?? mapped(file)),

@@ -9,6 +9,7 @@ import {
   Alert, Button, CoreList, CorePage, DataTableText, Form, Input, ListSection, QueryState, SaveButton, Select, UnsavedChangesGuard,
   useCorePageHost, useCoreRequest, useCoreForm, useCoreBinding, useLocale, type CoreAdminPageAction
 } from "@rental-os/platform-admin/core";
+import { formatSubscriptionDate } from "@rental-os/platform-admin/subscription/subscriptionLabels";
 import { TICKETS_CORE_ID, TICKETS_CORE_VERSION, TicketSchema, type Ticket } from "@rental-os/example-tickets-core/contracts";
 import { TICKETS_HTTP } from "@rental-os/example-tickets-core/http";
 
@@ -49,6 +50,8 @@ export function TicketsPage() {
           { title: t("标题"), key: "subject", render: (_, row) => <DataTableText primary={row.subject} secondary={row.description || undefined} /> },
           { title: t("状态"), dataIndex: "state", render: (value: Ticket["state"]) => t(stateNames[value]) },
           { title: t("受派成员"), dataIndex: "assigneeId", render: value => value ?? t("尚未分派") },
+          { title: t("创建时间"), dataIndex: "createdAt", render: (value: Ticket["createdAt"]) => formatSubscriptionDate(value, "UTC", t) },
+          { title: t("更新时间"), dataIndex: "updatedAt", render: (value: Ticket["updatedAt"]) => formatSubscriptionDate(value, "UTC", t) },
           { title: t("操作"), key: "actions", render: (_, row) => <Button onClick={() => navigate("detail", row.id)}>{t("查看")}</Button> }
         ]} />
   </CorePage>;
