@@ -1,3 +1,4 @@
+import { AI_NATIVE_LEGACY_SERVICE_ALIASES } from "./ai-native-legacy.providers";
 /** 原组合宿主的服务依赖模块，保留同一数据库、身份、审计、Rental 和 AI 实例。
  * 只集中已有 provider 与生命周期；业务 HTTP 由正式 Rental 模块挂载，环境加载与监听仍由 main 负责。 */
 
@@ -37,6 +38,8 @@ import { IntegrationsRepository } from "./modules/integrations/integrations.repo
 import { IntegrationsService } from "./modules/integrations/integrations.service";
 import { JOBS_HTTP_APPLICATION } from "@rental-os/platform-server/jobs";
 import { NOTIFICATIONS_HTTP_APPLICATION } from "@rental-os/platform-server/notifications";
+import { RENTAL_INTEGRATIONS_HTTP_APPLICATION } from "@rental-os/rental-core/http-integrations";
+import { RENTAL_CUSTOMERS_HTTP_APPLICATION } from "@rental-os/rental-core/http-customers";
 
 import { TenantIntegrationConnectivityService } from "./modules/integrations/tenant-integration.connectivity.service";
 import { TenantIntegrationService } from "./modules/integrations/tenant-integration.service";
@@ -347,18 +350,29 @@ const originalProviders: Provider[] = [
     AccountAppearanceService,
     WebsiteChannelProfileService,
     WebsiteAssetService,
-    SubscriptionService,
+    // 原 Rental 适配器的构造参数是 Prisma；公共父类的 @Inject 数据令牌不能
+    // 通过继承元数据覆盖它。显式工厂保留这一原实例及其品类参加者。
+    { provide: SubscriptionService, inject: [PrismaService], useFactory: (prisma: PrismaService) => new SubscriptionService(prisma) },
     { provide: SUBSCRIPTION_APPLICATION, useExisting: SubscriptionService },
     DemoRequestService,
     IntegrationsService,
+    // 原控制器继承公共入口；公共令牌继续指向原实例，避免另建领域对象。
+    { provide: RENTAL_INTEGRATIONS_HTTP_APPLICATION, useExisting: IntegrationsService },
+    { provide: RENTAL_CUSTOMERS_HTTP_APPLICATION, useExisting: PlatformService },
     { provide: JOBS_HTTP_APPLICATION, useExisting: IntegrationsService },
     { provide: NOTIFICATIONS_HTTP_APPLICATION, useExisting: IntegrationsService },
     IntegrationsRepository,
-    TenantIntegrationService,
-    TenantIntegrationConnectivityService,
+    { provide: TenantIntegrationService, inject: [PrismaService, SecretBox, OperationLogService],
+      useFactory: (prisma: PrismaService, secrets: SecretBox, logs: OperationLogService) => new TenantIntegrationService(prisma, secrets, logs) },
+    { provide: TenantIntegrationConnectivityService,
+      inject: [TenantIntegrationService, TenantIntegrationRuntimeService, FileStorageRuntimeService, PaymentRuntimeService, TenantEmailRuntimeService],
+      useFactory: (integrations: TenantIntegrationService, sms: TenantIntegrationRuntimeService,
+        files: FileStorageRuntimeService, payments: PaymentRuntimeService, email: TenantEmailRuntimeService) =>
+        new TenantIntegrationConnectivityService(integrations, sms, files, payments, email) },
     { provide: TENANT_INTEGRATION_APPLICATION, useExisting: TenantIntegrationService },
     { provide: TENANT_INTEGRATION_CONNECTIVITY, useExisting: TenantIntegrationConnectivityService },
-    TenantIntegrationRuntimeService,
+    { provide: TenantIntegrationRuntimeService, inject: [PrismaService, TenantIntegrationService],
+      useFactory: (prisma: PrismaService, integrations: TenantIntegrationService) => new TenantIntegrationRuntimeService(prisma, integrations) },
     {
       provide: RENTAL_FILE_AUTHORITY,
       inject: [ModuleRef],
@@ -408,7 +422,7 @@ const paymentApplications: Provider = {
 };
 
 // 公共及 AI Controller 继续消费原实例；全局 Guard/审计注册保持原位置和顺序。
-const exportedProviders = originalProviders.flatMap(provider => {
+const exportedProviders = [...originalProviders, ...AI_NATIVE_LEGACY_SERVICE_ALIASES].flatMap(provider => {
   const token = typeof provider === "function" ? provider : provider.provide;
   return token === APP_GUARD || token === APP_INTERCEPTOR ? [] : [token];
 });
@@ -423,7 +437,7 @@ const exportedProviders = originalProviders.flatMap(provider => {
     }),
     DatabaseModule
   ],
-  providers: [...originalProviders, rentalApplications, paymentApplications],
+  providers: [...originalProviders, ...AI_NATIVE_LEGACY_SERVICE_ALIASES, rentalApplications, paymentApplications],
   exports: [...new Set(exportedProviders), ORIGINAL_RENTAL_HTTP_APPLICATIONS, ORIGINAL_RENTAL_PAYMENT_HTTP_APPLICATIONS],
 })
 export class OriginalApplicationServicesModule {}

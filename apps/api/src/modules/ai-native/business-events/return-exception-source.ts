@@ -1,2 +1,2 @@
-/** 原归还异常来源兼容入口；复用同一来源校验与指纹。 */
-export * from "@rental-os/ai-native-server/business-events/return-exception-source";
+/** 原组合兼容出口；AI Runtime 与运行时标记由正式包单源提供。 */
+export * from "@rental-os/ai-native-server/runtime/business-events/return-exception-source";

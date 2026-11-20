@@ -66,7 +66,12 @@ export function captureRentalInternalAuthority() {
     if (hasRentalBusinessTenantFence()) throw denied();
     return undefined;
   }
-  if (!scope.active || !scope.restore) throw denied();
+  if (!scope.active || !scope.restore || getRequestIdentity() !== scope.source
+    || fingerprint(scope.source) !== scope.fingerprint) throw denied();
+  scope.assertCurrent();
+  // 捕获当前已验证的完整上下文，保留稍后建立的原任务/事务参加者。
+  // 只回到这个同源 store；不能恢复 Guard 之前复制或新建的身份投影。
+  const restoreCurrent = AsyncLocalStorage.snapshot();
   let used = false;
   return Object.freeze({
     async runVerified<T>(consume: () => Promise<T>): Promise<T> {
@@ -74,7 +79,7 @@ export function captureRentalInternalAuthority() {
       if (used || !scope.active || !scope.restore || scopes.getStore() !== scope
         || verified === scope.source || fingerprint(verified) !== scope.fingerprint) throw denied();
       used = true;
-      return scope.restore(async () => {
+      return restoreCurrent(async () => {
         if (!scope.active || getRequestIdentity() !== scope.source || fingerprint(scope.source) !== scope.fingerprint) throw denied();
         scope.assertCurrent();
         return consume();

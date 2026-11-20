@@ -1,11 +1,2 @@
-export { BudgetService } from './budget.service';
-export { PrismaBudgetRepository } from './prisma-budget.repository';
-export { createBudgetSubsystem, createPersistedBudgetSubsystem } from './budget.module';
-export { PrismaSubscriptionBudgetReader } from './prisma-subscription-budget-reader';
-export { createAuthorizedPlatformBudgetSettings } from './platform-budget-settings.composition';
-export { composeRequestBoundBudgetManagement } from './budget-management.application';
-export { AiBudgetManagementModule } from './budget-management.module';
-export { BudgetError } from './budget.ports';
-export * from './budget-dependency-adapters';
-export * from './budget-gateway-contract';
-export type * from './budget.ports';
+/** 原组合兼容出口；AI Runtime 与运行时标记由正式包单源提供。 */
+export * from "@rental-os/ai-native-server/runtime/budget/index";

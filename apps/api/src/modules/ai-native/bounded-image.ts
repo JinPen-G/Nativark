@@ -1,2 +1,2 @@
-/** 原模型与附件入口复用同一有界图片格式检查，不授予文件权限。 */
-export { inspectBoundedImage } from "@rental-os/platform-server/media";
+/** 原组合兼容出口；AI Runtime 与运行时标记由正式包单源提供。 */
+export * from "@rental-os/ai-native-server/runtime/bounded-image";

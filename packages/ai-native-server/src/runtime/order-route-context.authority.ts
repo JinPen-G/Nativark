@@ -1,0 +1,108 @@
+import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { ExecutionContextHost } from '@nestjs/core/helpers/execution-context-host';
+import { HttpException } from '@nestjs/common';
+import { z } from 'zod';
+import { AI_CONTRACT_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
+import type { ApiAuthGuard } from './rental-adapters/api-auth.guard';
+import { getRequestIdentity, runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
+import { AiScopeResolutionError, type AiCurrentScopeAuthority } from './ai-scope.repository';
+import { isAiStepExecutionContext } from './task-contract-validation';
+import { captureRentalInternalAuthority } from '@rental-os/rental-core/application-internal-authority';
+
+const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
+const credentialSchema = z.object({ authorization: z.string().min(1).max(8192), requestId: id, audience: z.enum(['operator', 'staff']) }).strict();
+export interface AiOrderRouteCredentialSource {
+  /** Server-bound session source; not exposed in model/tool input. Read afresh on every resolution. */
+  current(): Promise<z.infer<typeof credentialSchema>>;
+}
+const userSchema = z.object({ id, tenantId: id, isActive: z.literal(true), isSaasAdmin: z.boolean().optional(), permissions: z.array(z.string()) });
+
+/** Identity projection after the EXISTING order-read Guard has run.
+ * This does not read an order or authorize a write/AI feature; Core must still
+ * verify the resource and projection when the eventual tool performs its read.
+ * Each instance is bound to one server-selected order reference and credential source.
+ */
+export class AiOrderRouteContextAuthority implements AiCurrentScopeAuthority {
+  private readonly orderId: string;
+  constructor(private readonly guard: Pick<ApiAuthGuard, 'canActivate'>,
+    private readonly credentials: AiOrderRouteCredentialSource, orderId: string,
+    private readonly clock: () => Date = () => new Date(),
+    private readonly resource: 'order' | 'inspections' = 'order') {
+    if (!guard || typeof guard.canActivate !== 'function' || !credentials || typeof credentials.current !== 'function'
+      || !['order', 'inspections'].includes(resource)
+      || !id.safeParse(orderId).success || ['expire-pending', 'reconcile-pickup-overdue'].includes(orderId.toLowerCase())) throw new AiScopeResolutionError('AI_ACCESS_DENIED');
+    this.orderId = orderId;
+  }
+  async resolve(): Promise<AiExecutionContext> {
+    return this.authorized(async context => context, false);
+  }
+
+  /** Server-only callback executed inside the verified ALS store, not a model tool. */
+  async withOrderRead<T>(read: (context: AiExecutionContext, orderId: string) => Promise<T>): Promise<T> {
+    return this.authorized(read, true);
+  }
+
+  private async authorized<T>(read: (context: AiExecutionContext, orderId: string) => Promise<T>, recheck: boolean): Promise<T> {
+    try {
+      const internal = captureRentalInternalAuthority();
+      const credential = credentialSchema.parse(structuredClone(await this.credentials.current()));
+      // A fresh ALS store prevents a prior request's role/scope from authorizing this read.
+      return await runWithRequestIdentity({}, async () => {
+        const staff = credential.audience === 'staff';
+        const suffix = this.resource === 'inspections' ? '/inspections' : '';
+        const request: { url: string; originalUrl: string; method: string; headers: { authorization: string }; query: object; staffApiRequest: boolean; user?: unknown } = {
+          url: `/api/rental/v1/orders/${this.orderId}${suffix}`,
+          originalUrl: staff ? `/api/staff/v1/orders/${this.orderId}${suffix}` : `/api/rental/v1/orders/${this.orderId}${suffix}`,
+          method: 'GET', headers: { authorization: credential.authorization }, query: {}, staffApiRequest: staff
+        };
+        if (await this.guard.canActivate(new ExecutionContextHost([request])) !== true) throw Error();
+        const user = userSchema.parse(request.user), identity = getRequestIdentity();
+        if (!identity || identity.isSaasAdmin || user.isSaasAdmin || identity.userId !== user.id || identity.tenantId !== user.tenantId
+          || identity.staffApi !== staff || !identity.workspaceId) throw Error();
+        const now = this.clock();
+        if (!(now instanceof Date) || !Number.isFinite(now.getTime())) throw Error();
+        const candidate = {
+          contractVersion: AI_CONTRACT_DRAFT_VERSION, requestId: credential.requestId, authorizedAt: now.toISOString(),
+          audience: credential.audience, actor: { kind: 'user', userId: user.id },
+          scope: { kind: 'workspace', tenantId: identity.tenantId, workspaceId: identity.workspaceId },
+          access: { permissions: user.permissions, dataScope: identity.dataScope, locationScope: identity.locationScope,
+            ...(identity.organizationId ? { organizationId: identity.organizationId } : {}) }
+        };
+        if (!isAiStepExecutionContext(candidate)) throw Error();
+        const context = structuredClone(candidate);
+        const consume = async () => {
+          const { requestId: _, authorizedAt: __, ...binding } = context;
+          const fingerprint = requestFingerprint(binding);
+          let value!: T, failure: unknown, failed = false;
+          try { value = await read(structuredClone(context), this.orderId); }
+          catch (error) { failure = error; failed = true; }
+          if (recheck) {
+            const current = await this.resolve();
+            const { requestId: ___, authorizedAt: ____, ...currentBinding } = current;
+            if (requestFingerprint(currentBinding) !== fingerprint) throw Error();
+          }
+          // A Core read failure is not evidence of revoked access. Still check
+          // current access first so fallback cannot hide a concurrent revocation.
+          // Never expose the original database/provider error or its payload.
+          if (failed) {
+            if (failure instanceof AiScopeResolutionError) throw failure;
+            const code = failure && typeof failure === 'object' && 'code' in failure ? failure.code : undefined;
+            if (typeof code === 'string' && ['FORBIDDEN', 'AUTHENTICATION_FAILED', 'AI_ACCESS_DENIED', 'AI_SCOPE_CHANGED'].includes(code))
+              throw new AiScopeResolutionError('AI_ACCESS_DENIED');
+            if (failure instanceof HttpException && [401, 403].includes(failure.getStatus()))
+              throw new AiScopeResolutionError('AI_ACCESS_DENIED');
+            throw new AiScopeResolutionError('AI_RESOURCE_UNAVAILABLE');
+          }
+          return value;
+        };
+        // Only the real Guard pass above supplies the fresh identity. The bridge
+        // checks the same original session/scope and resumes its captured store;
+        // it never enters the projected AiExecutionContext as an identity.
+        return internal ? internal.runVerified(consume) : consume();
+      });
+    } catch (error) {
+      if (error instanceof AiScopeResolutionError) throw error;
+      throw new AiScopeResolutionError('AI_ACCESS_DENIED');
+    }
+  }
+}

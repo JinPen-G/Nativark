@@ -1,2 +1,2 @@
-/** 原存储与协议入口复用同一PCM格式检查，不证明模型能力。 */
-export { inspectPcmWav } from "@rental-os/platform-server/media";
+/** 原组合兼容出口；AI Runtime 与运行时标记由正式包单源提供。 */
+export * from "@rental-os/ai-native-server/runtime/pcm-wav";
