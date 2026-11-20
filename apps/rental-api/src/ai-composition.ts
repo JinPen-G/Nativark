@@ -41,6 +41,7 @@ import { ApiAuthGuard } from "@rental-os/ai-native-server/runtime/rental-adapter
 import { AuthService } from "@rental-os/ai-native-server/runtime/rental-adapters/auth.service";
 import { SubscriptionService } from "@rental-os/platform-server/subscription";
 import { ClientApiService } from "@rental-os/rental-core/mysql-client-application";
+import { ClientAuthService } from "@rental-os/rental-core/mysql-client-auth";
 import { ClientDeliveryAddressService } from "@rental-os/rental-core/mysql-client-delivery-address";
 import { RentalCoreService } from "@rental-os/ai-native-server/runtime/rental-adapters/rental-core.service";
 import { RentalBusinessService } from "@rental-os/ai-native-server/runtime/rental-adapters/rental-business.service";
@@ -445,6 +446,7 @@ function alias<T extends object>(token: Type<T>, source: (binding: RentalAiBindi
 const serviceAliases: Provider[] = [
   alias(PrismaService, b => b.database), alias(ConfigService, b => b.configuration), alias(SecretBox, b => b.rental.secrets),
   alias(AuthService, b => b.rental.auth), alias(ApiAuthGuard, b => b.guard), alias(ClientApiService, b => b.rental.client.api),
+  alias(ClientAuthService, b => b.rental.client.auth),
   alias(ClientDeliveryAddressService, b => b.rental.client.addresses), alias(RentalCoreService, b => b.rental.primary.core),
   alias(RentalBusinessService, b => b.rental.primary.business), alias(RentalCoreFactRepository, b => b.rental.foundation.coreFacts),
   alias(RentalBusinessFactRepository, b => b.rental.foundation.businessFacts), alias(RentalCoreConfigRepository, b => b.rental.foundation.coreConfiguration),

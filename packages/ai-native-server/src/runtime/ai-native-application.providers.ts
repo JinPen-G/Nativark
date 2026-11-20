@@ -69,6 +69,7 @@ import { MembershipService } from '@rental-os/rental-core/mysql-membership';
 import { PlatformService } from './rental-adapters/platform.service';
 import { PaymentRuntimeService } from './rental-adapters/payment.runtime.service';
 import { ClientApiService } from '@rental-os/rental-core/mysql-client-application';
+import { ClientAuthService } from '@rental-os/rental-core/mysql-client-auth';
 import { composeStandardClientBookingEntry, standardClientModelDependencies, AI_WEBSITE_ENTRY, AI_WECHAT_ENTRY,
   AI_NATIVE_CLIENT_MODEL_CONFIGURATION, AI_NATIVE_CLIENT_MODEL_ADAPTERS } from './scenes/standard-client-entry.application';
 import { randomUUID } from 'node:crypto';
@@ -297,10 +298,12 @@ export const AI_NATIVE_CLIENT_ENTRY_PROVIDERS: FactoryProvider[] = ([
   [AI_WEBSITE_ENTRY, 'web'], [AI_WECHAT_ENTRY, 'wechat_miniprogram'],
 ] as const).map(([provide, channel]) => ({
   provide, inject: [AI_NATIVE_BODY_DATABASE, ApiAuthGuard, SubscriptionService, ClientApiService, SecretBox, ClientDeliveryAddressService,
+    ClientAuthService, RentalCoreFactRepository,
     { token: AI_NATIVE_CLIENT_MODEL_CONFIGURATION, optional: true }, { token: AI_NATIVE_CLIENT_MODEL_ADAPTERS, optional: true }, AI_NATIVE_GATEWAY_CAPACITY],
   useFactory: (db: PrismaService, guard: ApiAuthGuard, subscriptions: SubscriptionService, client: ClientApiService,
-    secrets: SecretBox, addresses: ClientDeliveryAddressService, value?: unknown, adapters?: readonly ModelAdapter[], capacity?: GatewayCapacityPort) =>
-    composeStandardClientBookingEntry({ db, guard, client, addresses,
+    secrets: SecretBox, addresses: ClientDeliveryAddressService, clientAuth: ClientAuthService, orders: RentalCoreFactRepository,
+    value?: unknown, adapters?: readonly ModelAdapter[], capacity?: GatewayCapacityPort) =>
+    composeStandardClientBookingEntry({ db, guard, client, addresses, transactions: { clientAuth, orders },
       ...standardClientModelDependencies(db, secrets, value, adapters, capacity),
       tasks: { db, subscriptions, sceneCode: 'quote_clarification', sceneVersion: '1' },
       quotePreparation: client, bookingSubmission: client }, channel),

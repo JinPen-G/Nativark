@@ -5,6 +5,7 @@ import { clientSqlInitialRevisionSchema } from './client-sql-revisions';
 import { decodeAiClientMaterialBodies, encodeAiClientMaterialBodies } from '../privacy/ai-body-storage.codec';
 import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
 import type { ClientRequestContext } from '@rental-os/rental-core/client-context';
+import { withClientSelectedMaterialTransaction } from './client-selected-transactions';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
@@ -98,7 +99,7 @@ export class PrismaClientSceneMaterialRepository {
     const row = this.decode(structuredClone(value), value);
     let attempted = false;
     try {
-      const persist = async (tx: Prisma.TransactionClient) => {
+      const persist = async (tx: Prisma.TransactionClient) => withClientSelectedMaterialTransaction(this.db, tx, row, async () => {
         const existing = await this.findOperation(row, row.operationKey, tx, true);
         if (existing) {
           if (existing.inputHash !== row.inputHash) throw new AiClientMaterialError('AI_CLIENT_REVISION_CONFLICT');
@@ -114,7 +115,7 @@ export class PrismaClientSceneMaterialRepository {
             ${JSON.stringify(protectedBodies.command)}, ${JSON.stringify(protectedBodies.material)}, ${JSON.stringify(protectedBodies.publication)},
             ${row.revision}, ${row.createdAt}, ${row.expiresAt})`);
         return { row, replayed: false };
-      };
+      }, transaction !== undefined);
       return transaction ? await persist(transaction) : await this.db.$transaction(persist,
         { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     } catch (error) {

@@ -7,6 +7,7 @@ import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { AiClientMaterialScope } from './prisma-client-scene-material.repository';
 import type { AiClientTaskDb } from './client-task.authority';
 import { clientSqlInitialRevisionSchema, clientSqlPolicyRevisionSchema } from './client-sql-revisions';
+import { withClientSelectedInputTransaction } from './client-selected-transactions';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
@@ -67,7 +68,7 @@ export class PrismaClientTaskInputRepository {
     const row = this.decode(structuredClone(value), value);
     let attempted = false;
     try {
-      return await this.db.$transaction(async tx => {
+      return await this.db.$transaction(async tx => withClientSelectedInputTransaction(this.db, tx, row, async () => {
         const existing = await this.findCreation(row, row.creationKey, tx, true);
         if (existing) {
           if (existing.materialRef !== row.materialRef || existing.sceneCode !== row.sceneCode || existing.sceneVersion !== row.sceneVersion) {
@@ -85,7 +86,7 @@ export class PrismaClientTaskInputRepository {
             ${row.bindingHash}, ${row.policyId}, ${row.policyRevision}, ${row.policyHash}, ${row.sceneCode}, ${row.sceneVersion},
             ${row.inputHash}, ${row.revision}, ${row.dispatchState}, ${row.createdAt}, ${row.expiresAt})`);
         return { row, claimed: true };
-      }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+      }), { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     } catch (error) {
       if (error instanceof AiTaskRepositoryError) throw error;
       if (attempted) throw new AiClientTaskUnknownError();

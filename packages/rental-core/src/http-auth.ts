@@ -1149,7 +1149,9 @@ class RentalApiAuthGuard implements CanActivate {
       const token = typeof raw === "string" && raw.startsWith("Bearer ") ? raw.slice(7).trim() : undefined;
       if (!token) throw new UnauthorizedException("请先登录客户端账号");
       if (!this.clientAuth) throw new UnauthorizedException("客户端认证服务未就绪");
-      const client = await this.clientAuth.authenticate(token, { method: request.method.toUpperCase(), path });
+      const client = revalidatingRead
+        ? await this.clientAuth.authenticateReadOnly(token, { method: request.method.toUpperCase(), path })
+        : await this.clientAuth.authenticate(token, { method: request.method.toUpperCase(), path });
       if (!revalidatingRead) await this.clientRateLimit.assertAllowed({
         method: request.method,
         path,

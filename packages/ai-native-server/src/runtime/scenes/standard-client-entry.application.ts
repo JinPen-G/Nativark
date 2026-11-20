@@ -1,5 +1,5 @@
 import { Controller, Inject } from '@nestjs/common';
-import type { PrismaClient } from '@prisma/client';
+import type { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientOrderActionSourceSchema, aiClientOrderActionRevalidationSchema,
   AI_TASK_DRAFT_VERSION, aiClientTaskReadRequestSchema, aiClientTaskCreationReceiptSchema,
@@ -192,7 +192,8 @@ function clientEntryResultUnknown(result: unknown) {
 /** Same publication witness used by the request-bound entry and by an
  * independently authenticated target viewing one original Booking reference.
  * The supplied identity is an internal Auth result, never a wire customer ID. */
-export async function readStandardClientEntryPublication(db: PrismaClient, identity: ClientRequestContext,
+export async function readStandardClientEntryPublication(db: Pick<Prisma.TransactionClient,
+  'aiClientTaskPolicy' | 'clientChannelProfile' | 'clientChannelWorkspace' | 'websiteChannelProfile'>, identity: ClientRequestContext,
   channel: 'web' | 'wechat_miniprogram', scene: { sceneCode: string; sceneVersion: string }, now: Date,
   create = false) {
   const unavailable = (): never => { throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_entry_not_published'); };
@@ -305,6 +306,14 @@ export function composeStandardClientBookingEntry(input: Dependencies, channel: 
         };
         const application = composeRequestBoundClientApplication({ ...input,
           revalidateQuotePublication,
+          revalidateClientPublication: async tx => {
+            check();
+            const current = await readStandardClientEntryPublication(tx, before.identity, channel,
+              { sceneCode, sceneVersion }, clock(), name === 'prepare' || name === 'createTask' || name === 'prepareGoal');
+            if (current.releaseRevision !== before.releaseRevision)
+              throw new AiClientEntryError('AI_ACCESS_DENIED', 'client_publication_changed');
+            check();
+          },
           tasks: { db: input.db, subscriptions: input.tasks!.subscriptions, sceneCode, sceneVersion },
           bookingTransfer: { db: input.db, publication: (identity, originalChannel, create) =>
             readStandardClientEntryPublication(input.db, identity, originalChannel,

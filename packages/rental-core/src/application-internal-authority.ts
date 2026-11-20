@@ -4,6 +4,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { ForbiddenException } from "@nestjs/common";
 import { getRequestIdentity } from "@rental-os/platform-server/request-identity";
 import { hasRentalBusinessTenantFence } from "./mysql-business-fence";
+import type { ClientRequestContext } from "./client-context";
 
 type Identity = NonNullable<ReturnType<typeof getRequestIdentity>>;
 interface InternalAuthorityScope {
@@ -12,6 +13,9 @@ interface InternalAuthorityScope {
   fingerprint: string;
   assertCurrent(): void;
   restore?<T>(consume: () => Promise<T>): Promise<T>;
+  client?: ClientRequestContext;
+  clientFingerprint?: string;
+  clientSource?(): ClientRequestContext | undefined;
 }
 const scopes = new AsyncLocalStorage<InternalAuthorityScope>();
 const denied = () => new ForbiddenException("内部业务调用缺少同一有效请求的原 Guard 复验");
@@ -37,7 +41,8 @@ function fingerprint(identity: Identity | undefined, requireMember = true): stri
 
 /** One instance per application-access owner. assertCurrent must check its captured
  * request/actor/store, not accept an identity supplied by an internal caller. */
-export function createRentalInternalAuthorityScope(assertCurrent: () => void) {
+export function createRentalInternalAuthorityScope(assertCurrent: () => void,
+  clientSource?: () => ClientRequestContext | undefined) {
   if (typeof assertCurrent !== "function") throw denied();
   return Object.freeze({
     async run<T>(consume: () => Promise<T>): Promise<T> {
@@ -46,6 +51,11 @@ export function createRentalInternalAuthorityScope(assertCurrent: () => void) {
       const source = getRequestIdentity();
       if (!source) throw denied();
       const scope: InternalAuthorityScope = { active: true, source, fingerprint: fingerprint(source, false), assertCurrent };
+      if (clientSource) {
+        scope.clientSource = clientSource;
+        scope.client = clientSource();
+        if (scope.client) scope.clientFingerprint = clientFingerprint(scope.client);
+      }
       return scopes.run(scope, async () => {
         // Capture the actual ALS stores, including this scope. No copied identity
         // is entered when a verified internal read returns to its owning request.
@@ -54,6 +64,53 @@ export function createRentalInternalAuthorityScope(assertCurrent: () => void) {
         try { return await consume(); }
         finally { scope.active = false; scope.restore = undefined; }
       });
+    }
+  });
+}
+
+function clientFingerprint(context: ClientRequestContext): string {
+  return JSON.stringify([context.tenantId, context.tenantCode, context.customerId, context.customerType,
+    context.displayName, context.phone, context.workspaceId, context.workspaceCode, context.workspaceName,
+    context.categoryCode, context.membershipStatus, context.sessionId, context.wechatIdentityId]);
+}
+
+function clientIdentity(identity: Identity | undefined, client: ClientRequestContext): string {
+  if (!identity || identity.audience !== "client" || identity.isSaasAdmin !== false
+    || identity.staffApi || identity.isPlatformAdmin || identity.accessSession || identity.permissions !== undefined
+    || identity.dataScope !== undefined || identity.organizationId !== undefined || identity.locationScope !== undefined
+    || identity.staffLocationScope !== undefined || !client.sessionId || !client.customerId || !client.workspaceId
+    || !["personal", "corporate"].includes(client.customerType) || client.membershipStatus !== "active"
+    || identity.tenantId !== client.tenantId || identity.userId !== client.customerId
+    || identity.workspaceId !== client.workspaceId) throw denied();
+  return fingerprint(identity, false);
+}
+
+/** 客户专用一次性桥。只恢复 owning request 的原 ClientAuth 对象及 ALS；
+ * 新 Guard 的完整客户投影必须相同。复制 context 不能成为事务会话租约依据。 */
+export function captureRentalClientInternalAuthority() {
+  const scope = scopes.getStore();
+  if (!scope) {
+    if (hasRentalBusinessTenantFence()) throw denied();
+    return undefined;
+  }
+  const original = scope.client;
+  const assertOriginal = () => {
+    if (!original || !scope.active || !scope.restore || getRequestIdentity() !== scope.source
+      || scope.clientSource?.() !== original || clientFingerprint(original) !== scope.clientFingerprint
+      || clientIdentity(scope.source, original) !== scope.fingerprint) throw denied();
+    scope.assertCurrent();
+  };
+  assertOriginal();
+  const restoreCurrent = AsyncLocalStorage.snapshot();
+  let used = false;
+  return Object.freeze({
+    async runVerified<T>(verifiedClient: ClientRequestContext, consume: (context: ClientRequestContext) => Promise<T>): Promise<T> {
+      if (used || !original || !scope.active || !scope.restore || scopes.getStore() !== scope
+        || getRequestIdentity() === scope.source || verifiedClient === original
+        || clientFingerprint(verifiedClient) !== scope.clientFingerprint
+        || clientIdentity(getRequestIdentity(), verifiedClient) !== scope.fingerprint) throw denied();
+      used = true;
+      return restoreCurrent(async () => { assertOriginal(); return consume(original); });
     }
   });
 }

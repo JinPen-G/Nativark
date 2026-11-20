@@ -14,6 +14,7 @@ import { AI_CLIENT_GOAL_VERSION, aiClientGoalPreparationRequestSchema, aiClientG
 import { ExecutionContextHost } from '@nestjs/core/helpers/execution-context-host';
 import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
 import { getRequestIdentity, runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
+import { hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
 import { composeAiClientScenes, createAiGuardedClientSession } from '../client-scene.composition';
 import type { ClientRequestContext } from '@rental-os/rental-core/client-context';
 import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
@@ -58,7 +59,9 @@ import type { AiBookingMaterial } from '@rental-os/shared';
 import type { ClientApiService } from '@rental-os/rental-core/mysql-client-application';
 import { composeClientOriginalQuotePreparation } from './client-quote-preparation.composition';
 import { BudgetError } from '../budget/budget.ports';
-import type { PrismaClient } from '@prisma/client';
+import type { Prisma, PrismaClient } from '@prisma/client';
+import { withClientSelectedTaskCreation, withClientSelectedTransactions,
+  type ClientSelectedTransactionDependencies } from './client-selected-transactions';
 import { clientGoalCommandSchema, prepareClientGoalMaterial, validateClientGoalMaterial, revalidateClientGoalMaterial,
   type ClientGoalSources } from './client-goal-material';
 import { projectClientGoal, prepareClientGoalQuoteRequest, type ClientGoalHumanClarification } from './client-goal-projection';
@@ -95,6 +98,9 @@ export type AiClientRequestDependencies = {
   db: AiClientMaterialDb;
   tasks?: AiClientTaskDependencies;
   clock?: () => Date;
+  /** Same-instance original ClientAuth and order repository, server assembly only. */
+  transactions?: ClientSelectedTransactionDependencies;
+  revalidateClientPublication?(transaction: Prisma.TransactionClient): Promise<void>;
   /** Explicit same-database server input source for cancellation observation;
    * never accepted as a customer body or used to start a model. */
   taskInputs?: Pick<Parameters<typeof composeClientOriginalTaskInputReader>[0], 'db' | 'inputSource' | 'gatewayScene'>;
@@ -178,7 +184,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     signal?.addEventListener('abort', close, { once: true });
     try {
       if (signal?.aborted) throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'request_interrupted');
-      const work = () => runWithRequestIdentity({}, async () => {
+      const boundWork = async () => {
         if (!member) {
           const path = `/api/client/v1/${kind === 'catalog' ? 'public/catalog' : 'public/documents/help'}`;
           const publicRequest = { method: 'GET', url: path, originalUrl: path, headers: {}, ip: credential.ip,
@@ -206,10 +212,17 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
           assertActive();
           if (bindingHash !== requestFingerprint({ publication: after, identity: current, appId: server.appId ?? null })) return fail('AI_CLIENT_CONTEXT_UNAVAILABLE');
         };
-        const result = await consume({ published: before, identity, bindingHash, scenes, assertCurrent });
+        const bound = { published: before, identity, bindingHash, scenes, assertCurrent };
+        const result = identity ? await withClientSelectedTransactions({ db: dependencies.db, transactions: dependencies.transactions,
+          tasks: taskDependencies ?? undefined, identity, channel: server.channel, appId: server.appId,
+          bindingHash, publicationHash: requestFingerprint(before.value), assertCurrent,
+          revalidatePublication: dependencies.revalidateClientPublication, clock }, () => consume(bound)) : await consume(bound);
         await assertCurrent();
         return result;
-      });
+      };
+      // Selected hosts retain the actual Guard store. The client-only bridge
+      // performs each isolated revalidation and returns to this same request.
+      const work = () => hasRentalBusinessTenantFence() ? boundWork() : runWithRequestIdentity({}, boundWork);
       // Direct API consumers share the HTTP host's bounded wait. Closing this
       // binding stops late reads from continuing into a financial mutation;
       // a write timeout remains unknown and never starts another invocation.
@@ -327,7 +340,9 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
           return { row, identity };
         };
         const tasks = composeClientMaterialTasks(taskDependencies, load, clock);
-        const result = await tasks[operation](command);
+        const result = operation === 'create'
+          ? await withClientSelectedTaskCreation(dependencies.db, command, () => tasks.create(command))
+          : await tasks[operation](command);
         returned = true;
         const material = await load(command.materialRef);
         if (operation === 'readSnapshot' || operation === 'readEvents') return freezeOriginalInput(result);

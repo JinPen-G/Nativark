@@ -8,6 +8,7 @@ import type { ClientMyOrdersQuery } from '@rental-os/shared';
 import type { ApiAuthGuard } from './rental-adapters/api-auth.guard';
 import { ExecutionContextHost } from '@nestjs/core/helpers/execution-context-host';
 import { getRequestIdentity, runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
+import { captureRentalClientInternalAuthority } from '@rental-os/rental-core/application-internal-authority';
 import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
 import { z } from 'zod';
 import { ValidationPipe } from '@nestjs/common';
@@ -43,6 +44,7 @@ export function createAiGuardedClientSession(guard: Pick<ApiAuthGuard, 'canActiv
   credentials: { current(): Promise<{ authorization: string; ip?: string }> }): AiClientSessionSource {
   if (typeof guard?.canActivate !== 'function' || typeof credentials?.current !== 'function') throw new Error('AI_CLIENT_CONTEXT_UNAVAILABLE');
   const authorize = async <T>(method: string, path: string, value: unknown, consume: (context: ClientRequestContext) => Promise<T>) => {
+    const selected = captureRentalClientInternalAuthority();
     const credential = structuredClone(await credentials.current());
     if (typeof credential?.authorization !== 'string' || credential.authorization.length > 8192) throw new Error('AI_CLIENT_CONTEXT_UNAVAILABLE');
     return runWithRequestIdentity({}, async () => {
@@ -59,7 +61,7 @@ export function createAiGuardedClientSession(guard: Pick<ApiAuthGuard, 'canActiv
       const context = assertClientContext(request.client), identity = getRequestIdentity();
       if (!identity || identity.tenantId !== context.tenantId || identity.workspaceId !== context.workspaceId
         || identity.userId !== context.customerId || identity.isSaasAdmin !== false || identity.staffApi === true) throw new Error('AI_CLIENT_CONTEXT_UNAVAILABLE');
-      return consume(context);
+      return selected ? selected.runVerified(request.client, consume) : consume(context);
     });
   };
   return Object.freeze({

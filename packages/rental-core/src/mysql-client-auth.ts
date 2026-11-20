@@ -53,7 +53,7 @@ type RentalClientSessionReader = {
   customerMembership: Pick<Prisma.TransactionClient["customerMembership"], "findFirst">;
 };
 
-/** 私有 MySQL 参加者：调用方原 ReadCommitted 事务，须在任何父锁/业务锁前调用。
+/** 私有 MySQL 参加者：调用方原 ReadCommitted，或首锁前的 Serializable 事务。
  * 只有当前身份读取和行锁能力，不提供根 client、事务创建或业务写入。 */
 export type RentalClientSessionTransaction = RentalClientSessionReader & {
   $queryRaw<T>(query: Prisma.Sql): PromiseLike<T>;
@@ -640,11 +640,18 @@ export class ClientAuthService {
   }
 
   async authenticate(accessToken: string, recovery?: { method: string; path: string }): Promise<ClientRequestContext> {
+    const context = await this.authenticateReadOnly(accessToken, recovery);
+    // 原 Guard 的会话活跃元数据，不是业务动作；不在认证成功后追加可能改变原结果的 Core 门禁。
+    void this.prisma.clientAuthSession.updateMany({ where: { id: context.sessionId, revokedAt: null }, data: { lastUsedAt: new Date() } });
+    return context;
+  }
+
+  /** 固定内部只读 Guard 复验：全部签名/当前会话规则相同，不写活跃元数据。
+   * 调用者可能已持有原 Session 行锁，不能向根连接再排入自己的 lastUsedAt 更新。 */
+  async authenticateReadOnly(accessToken: string, recovery?: { method: string; path: string }): Promise<ClientRequestContext> {
     const payload = this.parse(accessToken);
     const identity = getRequestIdentity();
     const { context } = await this.readCurrentSession(payload, this.prisma, recovery);
-    // 原 Guard 的会话活跃元数据，不是业务动作；不在认证成功后追加可能改变原结果的 Core 门禁。
-    void this.prisma.clientAuthSession.updateMany({ where: { id: context.sessionId, revokedAt: null }, data: { lastUsedAt: new Date() } });
     this.#authenticatedSessions.set(context, { identity, token: Object.freeze({ ...payload }), projection: Object.freeze({ ...context }) });
     return context;
   }
@@ -667,7 +674,8 @@ export class ClientAuthService {
   /** 显式历史/收尾参加者在原事务首锁前调用；租约只证明当前客户会话，动作仍由原政策裁定。
    * Tenant X 先于原客户 gate，兼容改密/重置的 Customer→Account→Session 顺序。
    * 退出只锁 session，故不能仅靠父锁阻止退出；空间写方先取 Tenant 父锁，这里不锁 Workspace，
-   * 避免引入 Workspace→Order。事务必须为 ReadCommitted，普通读不得沿用早先的 RR 快照。 */
+   * 避免引入 Workspace→Order。ReadCommitted 不沿旧 RR 快照；原 Serializable 在首锁前
+   * 进入，MySQL 普通读是 locking current read。不能在已建立 RR 快照后补取租约。 */
   async lockCurrentSession(tx: RentalClientSessionTransaction, context: ClientRequestContext): Promise<RentalClientSessionLease> {
     const evidence = this.#authenticatedSessions.get(context);
     if (!evidence || !tx || "$transaction" in tx || typeof tx.$queryRaw !== "function"
