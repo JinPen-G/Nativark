@@ -19,6 +19,10 @@ const text = (files, file) => {
   return Buffer.from(bytes).toString('utf8');
 };
 const within = (directory, file) => { const rel = path.relative(directory, file); return rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel); };
+const rentalHostDirectory = host => {
+  if (!['rental', 'example-multi-core'].includes(host)) throw Error('未登记的 Rental 宿主组合：' + host);
+  return hostDirectory(host);
+};
 
 function parseArguments(args) {
   const values = {};
@@ -29,7 +33,7 @@ function parseArguments(args) {
     values[option] = value;
   }
   if (!['enabled', 'disabled'].includes(values['--ai'])) throw Error('须显式选择 --ai enabled|disabled');
-  const host = values['--host'] ?? 'rental'; hostDirectory(host);
+  const host = values['--host'] ?? 'rental'; rentalHostDirectory(host);
   if ((host === 'example-multi-core') !== Boolean(values['--tickets-package']))
     throw Error('只有双 Core 示范须显式提供 --tickets-package');
   for (const key of ['--deployment', '--platform-package', '--rental-package', '--client', '--platform-client', '--output'])
@@ -117,7 +121,7 @@ function workspaceExport(metadata, specifier) {
 
 /** 只沿真实启动模块的静态 require/import 检查闭包；不 require 应用、运行 Client 或猜动态入口。
  * 最终 Node exports/外部包的实际解析留给生成的镜像预检，在镜像内安装完成后执行。 */
-function checkRuntimeClosure(files, workspaces, lock, entry, ts) {
+function checkRuntimeClosure(files, workspaces, lock, entry, ts, options = {}) {
   const packages = new Map([...workspaces].map(([directory, metadata]) => [metadata.name, { directory, metadata }]));
   const queue = [entry], seen = new Set(), resolutions = [], clients = new Set(), runtimePeers = new Map();
   const locate = target => [target, target + '.js', target + '.json', target + '/index.js'].find(file => files.has(file));
@@ -175,7 +179,15 @@ function checkRuntimeClosure(files, workspaces, lock, entry, ts) {
       }
     }
   }
-  if (!clients.has('apps/rental-api/generated/client')) throw Error('宿主没有引用所选专属 Client');
+  if (options.expectedClients === undefined) {
+    if (!clients.has('apps/rental-api/generated/client')) throw Error('宿主没有引用所选专属 Client');
+  } else {
+    const expected = options.expectedClients;
+    if (!Array.isArray(expected) || !expected.length || new Set(expected).size !== expected.length
+      || expected.some(directory => !['apps/platform-api/generated/client', 'apps/rental-api/generated/client'].includes(directory))
+      || clients.size !== expected.length || expected.some(directory => !clients.has(directory)))
+      throw Error('实际运行 Client 集合与所选宿主不一致');
+  }
   return { files: seen.size, resolutions, clients: [...clients].sort(), runtimePeers: [...runtimePeers.values()] };
 }
 
@@ -194,11 +206,13 @@ function dockerfile(mode, entry) {
     `RUN node verify-runtime.cjs\nUSER node\nEXPOSE 3000\nCMD ["node", "${entry}"]\n`;
 }
 
-const runtimeVerifier = `'use strict';
+function createRuntimeVerifier(receiptFile = 'rental-host.context.json') {
+  if (!/^[a-z][a-z0-9-]*\.context\.json$/u.test(receiptFile)) throw Error('运行收据须为宿主根内的固定 JSON 文件名');
+  return `'use strict';
 // 镜像构建中的字节与解析预检；不导入应用、不实例化Client、不连接或迁移数据库。
 const fs = require('node:fs'), path = require('node:path');
 const { createHash } = require('node:crypto'), { createRequire } = require('node:module');
-const root = __dirname, receipt = JSON.parse(fs.readFileSync(path.join(root, 'rental-host.context.json'), 'utf8'));
+const root = __dirname, receipt = JSON.parse(fs.readFileSync(path.join(root, '${receiptFile}'), 'utf8'));
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 for (const item of receipt.files) if (digest(fs.readFileSync(path.join(root, item.file))) !== item.sha256)
   throw Error('镜像输入摘要变化：' + item.file);
@@ -212,10 +226,11 @@ if (fs.existsSync(path.join(root, 'node_modules/.prisma/client'))) throw Error('
 for (const item of receipt.runtime.resolutions) createRequire(path.join(root, item.from)).resolve(item.specifier);
 console.log(JSON.stringify({ status: 'image-preflight-passed', aiMode: receipt.aiMode, applicationStarted: false, deployment: 'pending' }));
 `;
+}
 
 function createRentalHostContext(input) {
   const api = publicApi(), { aiMode, sourceFiles, platformFiles, rentalFiles, ticketsFiles, aiFiles, deploymentFiles, ts, selections } = input;
-  const host = input.host ?? 'rental', directory = hostDirectory(host), multi = host === 'example-multi-core';
+  const host = input.host ?? 'rental', directory = rentalHostDirectory(host), multi = host === 'example-multi-core';
   if (!['enabled', 'disabled'].includes(aiMode)) throw Error('须明确选择宿主 AI 模式');
   const lock = api.CoreDeploymentLockSchema.parse(JSON.parse(text(deploymentFiles, 'core.deployment.lock.json')));
   const rentalPin = lock.cores.find(pin => pin.manifest.id === 'rental');
@@ -302,7 +317,7 @@ function createRentalHostContext(input) {
   files.set('package.json', json(projected.root)); files.set('package-lock.json', json(projected.lock));
   files.set('Dockerfile', Buffer.from(dockerfile(aiMode, entry)));
   files.set('.dockerignore', Buffer.from('**/node_modules\n**/generated\n**/.git\n**/.env\n**/.env.*\ndocs\noutput\n'));
-  files.set('verify-runtime.cjs', Buffer.from(runtimeVerifier));
+  files.set('verify-runtime.cjs', Buffer.from(createRuntimeVerifier()));
   files.set('README.md', Buffer.from('# 独立 Rental 宿主镜像上下文\n\n' +
     '本目录消费固定 Rental 包、所选 AI 数据包及原 prepared 锁/迁移。rental-host.context.json 记录实际字节摘要；不将作者工作区或包版本名当作已部署来源。\n\n' +
     '在目标 Linux 平台执行 `docker build --target runtime -t rental-host .`。构建按原 npm 锁安装依赖，并在镜像内用 Prisma 5.22.0 分别生成公共和所选宿主 Client；不会复制 Windows 引擎或默认 Client。外部镜像、apt/npm/引擎下载与实际构建须在部署环境核验。\n\n' +
@@ -404,4 +419,5 @@ if (require.main === module) {
   try { process.stdout.write(JSON.stringify(main(process.argv.slice(2))) + '\n'); }
   catch (error) { process.stderr.write((error instanceof Error ? error.message : '独立宿主打包失败') + '\n'); process.exitCode = 1; }
 }
-module.exports = { parseArguments, createRentalHostContext, collectInputs, checkRuntimeClosure, writeArchive, main };
+module.exports = { parseArguments, createRentalHostContext, collectInputs, checkRuntimeClosure,
+  readOrdinary, readTree, createRuntimeVerifier, writeArchive, main };

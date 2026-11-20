@@ -60,20 +60,21 @@ export const publicCorePackagesModule = CorePackageAssemblyModule.register({
     const localArtifacts = storageDirectory ? createPlatformCorePackageArchiveIndexSource({
       directory: join(storageDirectory, "archives")
     }) : undefined;
-    const moduleDirectory = (name: string) => dirname(dirname(require.resolve(name)));
+    const runtimeEntries = new Map([
+      ["packages/platform-contracts", require.resolve("@rental-os/platform-contracts")],
+      ["packages/core-contracts", require.resolve("@rental-os/core-contracts")],
+      ["packages/core-host", require.resolve("@rental-os/core-host")],
+      ["packages/platform-server", require.resolve("@rental-os/platform-server")],
+      ["packages/platform-core-host", require.resolve("@rental-os/platform-core-host")],
+      ["apps/platform-api", require.resolve("./platform-data")]
+    ]);
     const sources = createPublicCorePackageDeploymentSources({
       database: dependencies.database, artifacts: localArtifacts,
       lockFile: config.get<string>("CORE_DEPLOYMENT_LOCK_FILE"),
       platformReference: config.get<string>("CORE_PLATFORM_PACKAGE_REFERENCE"),
       platformDirectory: resolve(__dirname, "../../.."),
-      runtimeDirectories: new Map([
-        ["packages/platform-contracts", moduleDirectory("@rental-os/platform-contracts")],
-        ["packages/core-contracts", moduleDirectory("@rental-os/core-contracts")],
-        ["packages/core-host", moduleDirectory("@rental-os/core-host")],
-        ["packages/platform-server", moduleDirectory("@rental-os/platform-server")],
-        ["packages/platform-core-host", moduleDirectory("@rental-os/platform-core-host")],
-        ["apps/platform-api", resolve(__dirname, "..")]
-      ]),
+      runtimeDirectories: new Map([...runtimeEntries].map(([directory, entry]) => [directory, dirname(dirname(entry))])),
+      runtimeEntries,
       platformData: createPublicPlatformDataPlan
     });
     return composePlatformCorePackageAssembly({

@@ -141,6 +141,8 @@ async function run() {
   const multi = deployment.createRentalDeploymentFiles({ ...deploymentInput, additionalCores: [ticketsPackage] });
   const multiAi = deployment.createRentalDeploymentFiles({ ...deploymentInput,
     additionalCores: [ticketsPackage], ai: { release: aiRelease, files: aiFiles } });
+  const adminConfigs = await require('./rental-admin-config-cases.cjs')({
+    build, memory: verificationMemory(build), rentalFiles, ticketsPackage, disabled, multi });
   const base = { aiMode: 'disabled', sourceFiles, platformFiles, dependencyDirectory: deps, rentalFiles, deploymentFiles: disabled.files,
     selections: { rental: disabledClient, platform: platformClient }, ts: build.ts };
   let result, aiResult, multiResult, multiAiResult;
@@ -347,11 +349,20 @@ async function run() {
     build, memory: verificationMemory(build), rentalFiles, aiFiles, enabled, aiResult, disabled, platformClient, platformArchive });
   const multiAiRootDi = await verifyRoot({ build, memory: verificationMemory(build), rentalFiles, aiFiles,
     disabled, multi: multiAi, multiResult: multiAiResult, ticketsPackage, platformClient, platformArchive });
+  const { result: platformHostResult, lock: platformHostLock, ...platformHost } = await require('./platform-host-package-cases.cjs')({
+    t, build, memory: verificationMemory(build), sourceFiles, platformFiles, platformClient,
+    platformRelease: deploymentInput.release, archive, selectedLocks: [disabled.lock, enabled.lock] });
+  const platformRootDi = await verifyRoot({ build, memory: verificationMemory(build),
+    platform: { lock: platformHostLock, files: new Map([...platformHostResult.files]
+      .filter(([file]) => file.startsWith('apps/platform-api/prisma/'))
+      .map(([file, bytes]) => [file.slice('apps/platform-api/prisma/'.length), bytes])) },
+    platformResult: platformHostResult, platformClient, platformArchive });
   assert.equal(fs.existsSync(temporary), false);
   console.log(JSON.stringify({ checks, builds: build.stages.length, disabled: { files: result.files.size, runtimeFiles: result.receipt.runtime.files, sha256: result.sha256 },
     enabled: { files: aiResult.files.size, runtimeFiles: aiResult.receipt.runtime.files, sha256: aiResult.sha256 },
     multi: { files: multiResult.files.size, runtimeFiles: multiResult.receipt.runtime.files, sha256: multiResult.sha256 },
     multiAi: { files: multiAiResult.files.size, runtimeFiles: multiAiResult.receipt.runtime.files, sha256: multiAiResult.sha256 },
-    additional, additionalDeployment, multiRootDi, rootDi, multiAiRootDi, fixtureProvenance: true, diskOutputs: 0, imageBuild: 'not-run', database: 'not-connected', deployment: 'pending' }));
+    additional, additionalDeployment, adminConfigs, multiRootDi, rootDi, multiAiRootDi, platformHost, platformRootDi,
+    fixtureProvenance: true, diskOutputs: 0, imageBuild: 'not-run', database: 'not-connected', deployment: 'pending' }));
 }
 run().catch(error => { console.error(error.stack); process.exitCode = 1; });

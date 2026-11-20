@@ -38,6 +38,20 @@ Client 输出在本宿主 `generated/client`，运行产物从同一宿主目录
 
 新公共库按 `npm run db:platform:migrate:deploy` 应用本链。**不能把本基线套在已有 Rental 组合库**；已有库切换须先按原迁移来源和数据所有权演练兼容迁移。
 
+## 独立后端运行包
+
+[离线打包入口](../../scripts/package-platform-host.cjs)消费固定的完整底座源码归档、零 Core 部署锁、本树已构建的六个公共后端包和同一公共 Client 声明。它按原配置在内存重新编译六包、核对实际运行字节，并从原 npm 锁投影所需依赖；复用原迁移生成器输出40模型 schema、13份原 SQL 和完整部署锁。
+
+```powershell
+node scripts/package-platform-host.cjs --lock C:\release\core.deployment.lock.json --platform-package C:\release\platform-source.tgz --platform-client C:\checkout\apps\platform-api\generated\client\index.d.ts --output C:\release\platform-host.tgz --deps C:\checkout\node_modules
+```
+
+输入和输出须为绝对路径，Client 必须属于执行脚本的本树；输出只写尚不存在的 `.tgz`。包内只含公共 API 所需运行材料，唯一启动入口为 `apps/platform-api/dist/main.js`，公共 Web 单独交付。`platform-host.context.json`绑定完整发行、源码/依赖锁、编译输入、唯一 Client 和实际产物；它是受控部署证据，不是外部签名。
+
+目标 Linux 环境解包后可执行 `docker build --target runtime -t platform-host .`。Dockerfile 按原锁安装依赖，并用 Prisma 5.22.0 在目标平台生成唯一公共 Client；`verify-runtime.cjs`只检查包内摘要与模块解析，不启动应用。当前打包不执行安装、下载、镜像构建、数据库迁移或服务启动，结果保持 `imageBuild=not-run`、`configuration=pending`、`deployment=pending`。
+
+部署方提供原数据库、认证与必要集成配置，沿原公共迁移账及物理结构核验办理准备。包内 `apps/platform-api/prisma/core.deployment.lock.json`是候选锁，不能代替迁移收据；版本读取还需下文的固定源码归档登记与存储配置。
+
 构建后，在配置 `SEED_PLATFORM_PASSWORD` 的独立公共库执行 `npm run db:platform:initialize`，创建 `platform` / `admin` 的SaaS账号。初始口令至少8位且包含字母和数字，首次登录必须改密。已有公共库升级后，同一命令核验原管理员并补录当前公共权限目录，角色编辑可选择原订阅权限码。原角色授权与账号口令由既有管理入口维护。主体核验失败时，目录补录随同一事务回滚。命令会访问数据库，口令不进入控制台和审计。
 
 SaaS管理员通过 `POST /api/platform/tenants` 创建公共租户与首个管理员，创建响应返回一次临时口令。租户管理员改密后使用 `/api/platform/tenant`、`users`、`roles`、`permission-tree`；本人资料使用 `/api/platform/self-profile`，外观仍用原正式路径。详细字段、权限、副作用和错误从同版本 OpenAPI读取。
@@ -56,14 +70,14 @@ Core 包管理位于 `/api/platform/core-packages`，包含目录、发现、仓
 
 本地已下载包放入同一根下的 `archives` 普通目录，部署人员按 `CorePackageArchiveIndexSchema` 在 `archives/index.json` 登记固定引用、相对 `.tgz` 文件及完整发行投影。后台的“使用已下载包”发送该引用，服务端沿原包校验读取全部字节。索引首次成功读取后固定到本进程，登记更新通过重启装配采用，读取失败可重试。[登记格式及边界](../../packages/platform-core-host/src/core-package-preflight/README.md)
 
-零 Core 标准底座部署可配置下列进程字段，供给当前版本观察与候选材料。运行目录由本宿主及已加载公共模块的实际路径固定，完整源码须与登记的标准底座包逐文件核同。[当前发行读取](../../packages/platform-core-host/src/core-package-deployment.ts)
+零 Core 标准底座部署可配置下列进程字段，供给当前版本观察与候选材料。运行目录和六个入口由本宿主的静态模块解析固定。独立运行包通过 `platform-host.context.json`核源码发行、编译输入与实际产物；原完整源码目录继续按标准包全部文件核同。已有运行收据损坏时直接不可用。[当前发行读取](../../packages/platform-core-host/src/core-package-deployment.ts)
 
 | 配置 | 来源与用途 |
 | --- | --- |
 | `CORE_DEPLOYMENT_LOCK_FILE` | 本次运行组合的绝对 JSON 锁文件路径，启动时固定完整底座发行，Core 及所选数据能力集合为空 |
 | `CORE_PLATFORM_PACKAGE_REFERENCE` | `archives/index.json` 中当前底座标准包的固定引用，完整发行须与启动锁一致 |
 
-读取时复核启动锁、当前 Node / 已加载合同版本、标准包全部文件、六个公共服务端模块的实际目录和原数据计划，再由原 MySQL 读取器核迁移收据与物理结构。缺配置、缺标准包、运行目录不符、用户源码差异或原数据未就绪时保留 `unavailable`。启动锁更新通过重启装配采用，失败的启动锁读取同样须修复后重启。候选材料只读取已核同的原迁移字节，准备仍为 `pending`。[原数据观察](src/platform-data.ts)
+读取时复核启动锁、当前 Node / 已加载合同版本、完整标准包、六个公共模块及 schema / 迁移的实际字节，再由原 MySQL 读取器核迁移收据与物理结构。缺配置、缺标准包、运行证据或源码差异、原数据未就绪时保留 `unavailable`。启动锁更新通过重启装配采用，失败的启动锁读取同样须修复后重启。候选材料只读取已核同的原迁移字节，准备仍为 `pending`。[原数据观察](src/platform-data.ts)
 
 所选 Core 宿主从实际使用包与原账提供自己的 `deployment`、`materials`，也可显式提供 `localArtifacts`。旧路由许可由该宿主可信策略提供精确方法 / 路径，默认空集合沿原 Core 命名空间检查。[公共装配端口](../../packages/platform-core-host/README.md#core-包管理接入)
 

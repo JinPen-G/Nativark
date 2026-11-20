@@ -2,7 +2,6 @@
  * 不下载、构建、迁移或授权。底座源码归档缺少运行产物证据时保持不可用。 */
 import type { ConfigService } from "@nestjs/config";
 import { createHash } from "node:crypto";
-import { lstatSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
@@ -10,7 +9,7 @@ import {
   type CoreDataObservation, type CoreDeploymentLock, type CoreManifest, type CorePlatformDataCapabilityRelease
 } from "@rental-os/core-contracts";
 import { CORE_ARCHIVE_LIMITS, createCoreArchive, readCoreArchive } from "@rental-os/core-contracts/archive";
-import { readCorePackageFiles, readPackageArtifacts } from "@rental-os/core-contracts/package";
+import { readCorePackageFiles } from "@rental-os/core-contracts/package";
 import { readPlatformDataCapabilityPackage } from "@rental-os/core-contracts/platform-data-package";
 import {
   CorePackageArtifactSchema, createPlatformCorePackageArchiveIndexSource, inspectCorePackageArtifact
@@ -18,6 +17,7 @@ import {
 import type { CorePackageDeploymentSource } from "@rental-os/platform-core-host/core-package-ports";
 import type { CorePackagePreparationMaterialsSource } from "@rental-os/platform-core-host/core-package-preparation";
 import { requireCorePackagePin } from "@rental-os/core-contracts/install";
+import { readPlatformRuntimeEvidence } from "@rental-os/platform-core-host";
 
 /** 参加者只由同一受控宿主提供；reader 必须沿原实际依赖位置读取，不能消费请求中的目录或发行。 */
 export interface RentalCorePackageSourcesInput {
@@ -32,125 +32,18 @@ export interface RentalCorePackageSourcesInput {
 }
 
 const digest = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
-const runtimeFile = (file: string) => /^dist\/.*\.(?:js|cjs|json|d\.ts)$/.test(file);
-
-const record = (value: unknown): Record<string, unknown> => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("宿主编译证据格式无效");
-  return value as Record<string, unknown>;
-};
-const artifactsList = (value: unknown): { file: string; sha256: string }[] => {
-  if (!Array.isArray(value) || !value.length || value.length > CORE_ARCHIVE_LIMITS.files)
-    throw new Error("宿主编译证据文件数无效");
-  const result = value.map(item => {
-    const value = record(item);
-    if (typeof value.file !== "string" || typeof value.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.sha256))
-      throw new Error("宿主编译证据文件摘要无效");
-    return { file: value.file, sha256: value.sha256 };
-  });
-  if (new Set(result.map(item => item.file)).size !== result.length) throw new Error("宿主编译证据文件重复");
-  return result;
-};
-
-/** 原打包器从固定源码和所选 Client 实际重编译后，在原上下文收据记录生成字节。
- * 此处只核部署目录中的原收据、完整发行和已加载模块，不运行编译器。
- * 收据与可执行文件同属受控部署材料；它不是外部签名，也不接受请求提供的路径或声明。 */
+/** 按同一静态装配的正式入口核对公共运行证据，两个宿主共用原完整检查。 */
 function readPlatformRuntime(files: ReadonlyMap<string, Uint8Array>, lock: CoreDeploymentLock): boolean {
   const directories = ["packages/platform-contracts", "packages/core-contracts", "packages/core-host",
     "packages/platform-server", "packages/platform-core-host", "apps/platform-api"] as const;
-  // 使用静态正式出口，避免把源码工作区或配置中的目录冒充当前已加载模块。
   const entries = [require.resolve("@rental-os/platform-contracts"), require.resolve("@rental-os/core-contracts"),
     require.resolve("@rental-os/core-host"), require.resolve("@rental-os/platform-server"),
     require.resolve("@rental-os/platform-core-host"), require.resolve("@rental-os/platform-api/data-plan")];
-  const root = resolve(dirname(entries[5]), "../../..");
-  for (let directory = root; ; directory = dirname(directory)) {
-    const stat = lstatSync(directory);
-    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("宿主上下文须位于不经过链接的实际部署目录");
-    if (dirname(directory) === directory) break;
-  }
-  const contextPath = join(root, "rental-host.context.json");
-  let contextBytes: Buffer;
-  try {
-    const stat = lstatSync(contextPath);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 8 * 1024 * 1024)
-      throw new Error("宿主上下文须为有界普通文件");
-    contextBytes = readFileSync(contextPath);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
-  }
-  if (contextBytes.length > 8 * 1024 * 1024) throw new Error("宿主上下文读取越限");
-  const context = record(JSON.parse(contextBytes.toString("utf8")));
-  if (context.platformBuild === undefined) return false;
-  const build = record(context.platformBuild), compiler = record(build.compiler), client = record(build.client);
-  const sourceLockBytes = files.get("package-lock.json"), schema = files.get("apps/platform-api/prisma/schema.prisma");
-  if (!sourceLockBytes || !schema) throw new Error("固定底座缺少原锁或公共 schema");
-  const sourceLock = record(JSON.parse(Buffer.from(sourceLockBytes).toString("utf8")));
-  const compilerLock = record(record(sourceLock.packages)["node_modules/typescript"]);
-  if (context.format !== "rental-host-context-1" || !isDeepStrictEqual(build.release, lock.platform)
-    || build.sourceArchiveSha256 !== lock.platform.sha256 || build.sourceLockSha256 !== digest(sourceLockBytes)
-    || compiler.name !== "typescript" || compiler.version !== compilerLock.version
-    || typeof compiler.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(compiler.sha256)
-    || client.mode !== "platform" || client.schemaSha256 !== digest(schema)
-    || typeof client.declarationsSha256 !== "string" || !/^[a-f0-9]{64}$/.test(client.declarationsSha256))
-    throw new Error("实际宿主编译来源、版本或公共 Client 与当前发行不一致");
-  const projects = build.projects;
-  if (!Array.isArray(projects) || projects.length !== directories.length
-    || projects.some((item, index) => {
-      const project = record(item);
-      return project.project !== `${directories[index]}/tsconfig.json`
-        || !project.options || typeof project.options !== "object" || Array.isArray(project.options)
-        || typeof project.inputsSha256 !== "string" || !/^[a-f0-9]{64}$/.test(project.inputsSha256);
-    })) throw new Error("宿主编译项目不完整或顺序改变");
-  artifactsList(build.dependencies);
-  const generated = artifactsList(build.generated), contextFiles = new Map(artifactsList(context.files)
-    .map(item => [item.file, item.sha256]));
-  if (generated.some(item => !directories.some(directory => item.file.startsWith(directory + "/"))
-    || contextFiles.get(item.file) !== item.sha256)) throw new Error("同源产物越出公共运行闭包或不属于原上下文");
-  const inventory = directories.map(directory => ({ directory,
-    artifacts: generated.filter(item => item.file.startsWith(directory + "/"))
-      .map(item => ({ file: item.file.slice(directory.length + 1), sha256: item.sha256 })) }));
-  if (inventory.some(item => !item.artifacts.some(file => file.file.endsWith(".js"))
-    || !item.artifacts.some(file => file.file.endsWith(".d.ts"))
-    || !item.artifacts.some(file => file.file === "package.json")
-    || item.artifacts.some(file => file.file !== "package.json" && !runtimeFile(file.file))))
-    throw new Error("宿主编译产物缺失或含非运行材料");
-  for (const [index, item] of inventory.entries()) {
-    const entry = entries[index], directory = resolve(dirname(entry), "..");
-    if (relative(root, directory).split("\\").join("/") !== item.directory)
-      throw new Error("公共运行包不属于同一宿主上下文");
-    const entryFile = relative(directory, entry).split("\\").join("/");
-    if (!runtimeFile(entryFile) || !item.artifacts.some(file => file.file === entryFile)
-      || !item.artifacts.some(file => file.file === entryFile.replace(/\.js$/, ".d.ts")))
-      throw new Error("实际加载入口不属于本次同源编译");
-    const actual = readPackageArtifacts(directory, item.artifacts, CORE_ARCHIVE_LIMITS.fileBytes, CORE_ARCHIVE_LIMITS.totalBytes);
-    if (!Buffer.from(actual.files.get("package.json")!).equals(files.get(`${item.directory}/package.json`)!))
-      throw new Error("实际公共包元数据与固定源码发行不一致");
-    const pending = ["dist"], found = new Set<string>();
-    while (pending.length) {
-      const current = pending.pop()!;
-      for (const child of readdirSync(join(directory, current), { withFileTypes: true })) {
-        const file = `${current}/${child.name}`;
-        if (child.isSymbolicLink()) throw new Error("运行产物不能经过链接");
-        if (child.isDirectory()) pending.push(file);
-        else {
-          if (!child.isFile() || !actual.files.has(file)) throw new Error("实际运行目录包含未声明产物");
-          found.add(file);
-        }
-        if (found.size + pending.length > CORE_ARCHIVE_LIMITS.files) throw new Error("运行产物读取越限");
-      }
-    }
-    if (found.size !== item.artifacts.length - 1) throw new Error("实际运行目录与同源产物集合不一致");
-  }
-  const deploymentFile = "apps/rental-api/prisma-deployment/core.deployment.lock.json";
-  const deploymentSha = contextFiles.get(deploymentFile);
-  if (!deploymentSha || deploymentSha !== context.deploymentLockSha256) throw new Error("原上下文缺少部署锁摘要");
-  const verified = readPackageArtifacts(root, [
-    { file: "rental-host.context.json", sha256: digest(contextBytes) },
-    { file: deploymentFile, sha256: deploymentSha }
-  ], CORE_ARCHIVE_LIMITS.fileBytes, CORE_ARCHIVE_LIMITS.totalBytes);
-  if (!isDeepStrictEqual(CoreDeploymentLockSchema.parse(JSON.parse(Buffer.from(verified.files.get(deploymentFile)!).toString("utf8"))), lock))
-    throw new Error("实际上下文部署锁与当前宿主不一致");
-  return true;
+  return readPlatformRuntimeEvidence({ directory: resolve(dirname(entries[5]), "../../.."),
+    runtimeDirectories: new Map(directories.map((directory, index) => [directory, resolve(dirname(entries[index]), "..")])),
+    runtimeEntries: new Map(directories.map((directory, index) => [directory, entries[index]])),
+    platformFiles: files, lock, receiptFile: "rental-host.context.json",
+    deploymentLockFile: "apps/rental-api/prisma-deployment/core.deployment.lock.json" });
 }
 
 export function createRentalCorePackageSources(input: RentalCorePackageSourcesInput): {
