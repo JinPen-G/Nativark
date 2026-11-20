@@ -9,7 +9,7 @@ const { createRequire, isBuiltin } = require('node:module');
 const { isDeepStrictEqual } = require('node:util');
 const { selectedCompilerOptions } = require('./build-selected-prisma.cjs');
 const { compileRentalPlatformSource, requireMatchingPublicRuntime, publicDirectories } = require('./rental-platform-build.cjs');
-const { selectWorkspaces, projectHostLock, lockedDependency } = require('./rental-host-lock.cjs');
+const { selectWorkspaces, projectHostLock, lockedDependency, hostDirectory } = require('./rental-host-lock.cjs');
 const root = path.resolve(__dirname, '..');
 const json = value => Buffer.from(JSON.stringify(value, null, 2) + '\n');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -24,18 +24,22 @@ function parseArguments(args) {
   const values = {};
   for (let index = 0; index < args.length; index += 2) {
     const option = args[index], value = args[index + 1];
-    if (!['--ai', '--deployment', '--platform-package', '--rental-package', '--ai-data-package', '--client', '--platform-client', '--output', '--deps'].includes(option)
+    if (!['--ai', '--host', '--deployment', '--platform-package', '--rental-package', '--tickets-package', '--ai-data-package', '--client', '--platform-client', '--output', '--deps'].includes(option)
       || Object.hasOwn(values, option) || !value || value.startsWith('--')) throw Error('未知、重复或缺值的打包选项：' + option);
     values[option] = value;
   }
   if (!['enabled', 'disabled'].includes(values['--ai'])) throw Error('须显式选择 --ai enabled|disabled');
+  const host = values['--host'] ?? 'rental'; hostDirectory(host);
+  if ((host === 'example-multi-core') !== Boolean(values['--tickets-package'])
+    || host === 'example-multi-core' && values['--ai'] !== 'disabled')
+    throw Error('双 Core 示范须显式提供 --tickets-package 且当前只选择 AI disabled');
   for (const key of ['--deployment', '--platform-package', '--rental-package', '--client', '--platform-client', '--output'])
     if (!values[key] || !path.isAbsolute(values[key])) throw Error(key + ' 须为显式绝对路径');
   if ((values['--ai'] === 'enabled') !== Boolean(values['--ai-data-package'])) throw Error('只有 AI enabled 必须提供 --ai-data-package');
-  for (const key of ['--ai-data-package', '--deps']) if (values[key] && !path.isAbsolute(values[key])) throw Error(key + ' 须为绝对路径');
+  for (const key of ['--ai-data-package', '--tickets-package', '--deps']) if (values[key] && !path.isAbsolute(values[key])) throw Error(key + ' 须为绝对路径');
   if (!values['--output'].endsWith('.tgz')) throw Error('--output 须为尚不存在的 .tgz 文件');
   if (!values['--platform-package'].endsWith('.tgz')) throw Error('--platform-package 须为锁定的完整底座源码 .tgz');
-  return { aiMode: values['--ai'], deployment: values['--deployment'], rentalPackage: values['--rental-package'],
+  return { aiMode: values['--ai'], host, ticketsPackage: values['--tickets-package'], deployment: values['--deployment'], rentalPackage: values['--rental-package'],
     platformPackage: values['--platform-package'],
     aiDataPackage: values['--ai-data-package'], client: values['--client'], platformClient: values['--platform-client'],
     output: values['--output'], deps: values['--deps'] || path.join(root, 'node_modules') };
@@ -176,8 +180,7 @@ function checkRuntimeClosure(files, workspaces, lock, entry, ts) {
   return { files: seen.size, resolutions, clients: [...clients].sort(), runtimePeers: [...runtimePeers.values()] };
 }
 
-function dockerfile(mode) {
-  const entry = mode === 'enabled' ? 'dist-ai/ai-main.js' : 'dist/main.js';
+function dockerfile(mode, entry) {
   return `# 从本打包上下文构建；不复制作者 node_modules、Windows 引擎或环境文件。\n` +
     `FROM node:24.13.0-bookworm-slim AS base\n` +
     `RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates openssl && rm -rf /var/lib/apt/lists/*\n` +
@@ -189,7 +192,7 @@ function dockerfile(mode) {
     `COPY . .\nRUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund\n` +
     `COPY --from=clients /app/apps/platform-api/generated/client ./apps/platform-api/generated/client\n` +
     `COPY --from=clients /app/apps/rental-api/generated/client ./apps/rental-api/generated/client\n` +
-    `RUN node verify-runtime.cjs\nUSER node\nEXPOSE 3000\nCMD ["node", "apps/rental-api/${entry}"]\n`;
+    `RUN node verify-runtime.cjs\nUSER node\nEXPOSE 3000\nCMD ["node", "${entry}"]\n`;
 }
 
 const runtimeVerifier = `'use strict';
@@ -212,10 +215,14 @@ console.log(JSON.stringify({ status: 'image-preflight-passed', aiMode: receipt.a
 `;
 
 function createRentalHostContext(input) {
-  const api = publicApi(), { aiMode, sourceFiles, platformFiles, rentalFiles, aiFiles, deploymentFiles, ts, selections } = input;
+  const api = publicApi(), { aiMode, sourceFiles, platformFiles, rentalFiles, ticketsFiles, aiFiles, deploymentFiles, ts, selections } = input;
+  const host = input.host ?? 'rental', directory = hostDirectory(host), multi = host === 'example-multi-core';
   if (!['enabled', 'disabled'].includes(aiMode)) throw Error('须明确选择宿主 AI 模式');
   const lock = api.CoreDeploymentLockSchema.parse(JSON.parse(text(deploymentFiles, 'core.deployment.lock.json')));
-  if (lock.cores.length !== 1 || lock.cores[0].manifest.id !== 'rental'
+  const rentalPin = lock.cores.find(pin => pin.manifest.id === 'rental');
+  const ticketsPin = lock.cores.find(pin => pin.manifest.id === 'example-tickets');
+  if (!rentalPin || lock.cores.length !== (multi ? 2 : 1) || multi !== Boolean(ticketsFiles)
+    || multi && (!ticketsPin || aiMode !== 'disabled')
     || (lock.dataCapabilities?.length || 0) !== (aiMode === 'enabled' ? 1 : 0)
     || aiMode === 'enabled' && lock.dataCapabilities[0].id !== 'ai-native'
     || (aiMode === 'enabled') !== Boolean(aiFiles)) throw Error('部署锁、固定包与显式 AI 选择不一致');
@@ -223,10 +230,11 @@ function createRentalHostContext(input) {
   if (publicSchema !== text(platformFiles, 'apps/platform-api/prisma/schema.prisma'))
     throw Error('实际公共 schema 与固定底座源码不同');
   const platform = api.createPublicPlatformDataPlan();
-  const expected = api.createRentalDeploymentFiles({ release: lock.platform, pin: lock.cores[0], coreFiles: rentalFiles,
+  const expected = api.createRentalDeploymentFiles({ release: lock.platform, pin: rentalPin, coreFiles: rentalFiles,
     publicSchema, publicMigrations: platform.migrationNames.map((name, index) => ({ name,
       sql: sourceFiles.get('apps/platform-api/' + platform.data.migrations[index].file) })),
-    ...(aiFiles ? { ai: { release: lock.dataCapabilities[0], files: aiFiles } } : {}) });
+    ...(aiFiles ? { ai: { release: lock.dataCapabilities[0], files: aiFiles } } : {}),
+    ...(multi ? { additionalCores: [{ pin: ticketsPin, files: ticketsFiles }] } : {}) });
   if (!isDeepStrictEqual(expected.lock, lock) || expected.files.size !== deploymentFiles.size)
     throw Error('部署材料与原准备结果不一致');
   for (const [file, bytes] of expected.files) if (!deploymentFiles.has(file) || !Buffer.from(bytes).equals(deploymentFiles.get(file)))
@@ -252,13 +260,17 @@ function createRentalHostContext(input) {
   for (const [file, entry] of Object.entries(platformLock.packages)) if (file.includes('node_modules/') && !entry.link
     && !isDeepStrictEqual(dependencyIdentity(entry), dependencyIdentity(originalLock.packages[file])))
     throw Error('宿主与固定底座的原依赖锁不一致：' + file);
+  const fixedPackages = new Map([['packages/rental-core', rentalFiles],
+    ...(ticketsFiles ? [['packages/example-tickets-core', ticketsFiles]] : []),
+    ...(aiFiles ? [['packages/ai-native-data', aiFiles]] : [])]);
   const workspaces = selectWorkspaces(originalLock, directory => JSON.parse(text(
-    directory === 'packages/rental-core' ? rentalFiles : directory === 'packages/ai-native-data' && aiFiles ? aiFiles
-      : publicDirectories.includes(directory) ? platformFiles : sourceFiles,
-    ['packages/rental-core', ...(aiFiles ? ['packages/ai-native-data'] : [])].includes(directory) ? 'package.json' : directory + '/package.json')), aiMode);
+    fixedPackages.get(directory) ?? (publicDirectories.includes(directory) ? platformFiles : sourceFiles),
+    fixedPackages.has(directory) ? 'package.json' : directory + '/package.json')), aiMode, host);
+  for (const directory of fixedPackages.keys()) if (!workspaces.has(directory))
+    throw Error('固定 Core 包不在实际宿主依赖闭包：' + directory);
   const files = new Map();
   for (const [directory] of workspaces) {
-    const fixed = directory === 'packages/rental-core' ? rentalFiles : directory === 'packages/ai-native-data' && aiFiles ? aiFiles : undefined;
+    const fixed = fixedPackages.get(directory);
     if (fixed) for (const [file, bytes] of fixed) files.set(directory + '/' + file, bytes);
     else for (const [file, bytes] of sourceFiles) if (file.startsWith(directory + '/')) {
       const relative = file.slice(directory.length + 1);
@@ -272,9 +284,9 @@ function createRentalHostContext(input) {
   }
   for (const [file, bytes] of deploymentFiles) files.set('apps/rental-api/prisma-deployment/' + file, bytes);
   files.set('LICENSE', Buffer.from(text(sourceFiles, 'LICENSE')));
-  const entry = aiMode === 'enabled' ? 'apps/rental-api/dist-ai/ai-main.js' : 'apps/rental-api/dist/main.js';
+  const entry = aiMode === 'enabled' ? 'apps/rental-api/dist-ai/ai-main.js' : directory + '/dist/main.js';
   const runtime = checkRuntimeClosure(files, workspaces, originalLock, entry, ts);
-  const projected = projectHostLock(originalLock, workspaces, aiMode, runtime.runtimePeers);
+  const projected = projectHostLock(originalLock, workspaces, aiMode, runtime.runtimePeers, host);
   for (const item of runtime.resolutions) if (!item.specifier.startsWith('.') && !item.specifier.startsWith('@rental-os/')) {
     const name = item.specifier.startsWith('@') ? item.specifier.split('/').slice(0, 2).join('/') : item.specifier.split('/')[0];
     const owner = [...workspaces.keys()].find(directory => item.from.startsWith(directory + '/'));
@@ -288,7 +300,7 @@ function createRentalHostContext(input) {
   requireMatchingPublicRuntime(sourceFiles, platformFiles, platformBuild);
   for (const [file, bytes] of platformBuild.generated) files.set(file, bytes);
   files.set('package.json', json(projected.root)); files.set('package-lock.json', json(projected.lock));
-  files.set('Dockerfile', Buffer.from(dockerfile(aiMode)));
+  files.set('Dockerfile', Buffer.from(dockerfile(aiMode, entry)));
   files.set('.dockerignore', Buffer.from('**/node_modules\n**/generated\n**/.git\n**/.env\n**/.env.*\ndocs\noutput\n'));
   files.set('verify-runtime.cjs', Buffer.from(runtimeVerifier));
   files.set('README.md', Buffer.from('# 独立 Rental 宿主镜像上下文\n\n' +
@@ -296,9 +308,10 @@ function createRentalHostContext(input) {
     '在目标 Linux 平台执行 `docker build --target runtime -t rental-host .`。构建按原 npm 锁安装依赖，并在镜像内用 Prisma 5.22.0 分别生成公共和所选宿主 Client；不会复制 Windows 引擎或默认 Client。外部镜像、apt/npm/引擎下载与实际构建须在部署环境核验。\n\n' +
     `镜像启动入口固定为 ${entry}，AI=${aiMode}。运行前由部署负责人配置 DATABASE_URL、AUTH_TOKEN_SECRET 及必要的原集成配置，沿原迁移账/物理观察办理数据库准备。候选材料位于 apps/rental-api/prisma-deployment；不得用它替代迁移收据。\n\n` +
     '打包和镜像预检均不启动应用、连接数据库、执行迁移或供应商动作。当前 imageBuild=not-run、deployment=pending；真实安装、镜像、数据库及业务验收分别办理。\n'));
-  const receipt = { format: 'rental-host-context-1', aiMode, imageBuild: 'not-run', deployment: 'pending',
+  const receipt = { format: 'rental-host-context-1', host, aiMode, imageBuild: 'not-run', deployment: 'pending',
     target: 'linux-bookworm', prismaVersion: '5.22.0', entry, clients,
-    deploymentLockSha256: hash(deploymentFiles.get('core.deployment.lock.json')), coreSha256: lock.cores[0].sha256,
+    deploymentLockSha256: hash(deploymentFiles.get('core.deployment.lock.json')), coreSha256: rentalPin.sha256,
+    ...(multi ? { additionalCorePackages: [{ id: ticketsPin.manifest.id, sha256: ticketsPin.sha256 }] } : {}),
     ...(aiFiles ? { aiDataSha256: lock.dataCapabilities[0].sha256 } : {}),
     originalNpmLockSha256: hash(sourceFiles.get('package-lock.json')), platformBuild: platformBuild.evidence, runtime,
     files: [...files].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([file, bytes]) => ({ file, sha256: hash(bytes) })) };
@@ -315,15 +328,18 @@ function collectInputs(options) {
   const platformFiles = api.readCoreArchive(readOrdinary(options.platformPackage, api.CORE_ARCHIVE_LIMITS.totalBytes), lock.platform.sha256).files;
   ordinaryDirectories(options.rentalPackage);
   const rentalFiles = api.readCorePackageFiles(options.rentalPackage, api.CORE_ARCHIVE_LIMITS.fileBytes, api.CORE_ARCHIVE_LIMITS.totalBytes);
+  const ticketsFiles = options.ticketsPackage && api.readCorePackageFiles(options.ticketsPackage, api.CORE_ARCHIVE_LIMITS.fileBytes, api.CORE_ARCHIVE_LIMITS.totalBytes);
   const aiFiles = options.aiDataPackage && api.readPlatformDataCapabilityPackage(options.aiDataPackage, lock.dataCapabilities?.[0]).files;
   const workspaces = selectWorkspaces(JSON.parse(text(sourceFiles, 'package-lock.json')), directory => {
     const bytes = directory === 'packages/rental-core' ? rentalFiles.get('package.json')
+      : directory === 'packages/example-tickets-core' && ticketsFiles ? ticketsFiles.get('package.json')
       : directory === 'packages/ai-native-data' && aiFiles ? aiFiles.get('package.json') : readOrdinary(path.join(root, directory, 'package.json'));
     if (!bytes) throw Error('固定包缺少正式 package.json');
     sourceFiles.set(directory + '/package.json', bytes); return JSON.parse(bytes.toString('utf8'));
-  }, options.aiMode);
+  }, options.aiMode, options.host);
   for (const directory of workspaces.keys()) {
-    if (directory === 'packages/rental-core' || directory === 'packages/ai-native-data' && aiFiles) continue;
+    if (directory === 'packages/rental-core' || directory === 'packages/example-tickets-core' && ticketsFiles
+      || directory === 'packages/ai-native-data' && aiFiles) continue;
     const absolute = path.join(root, directory); ordinaryDirectories(absolute);
     for (const entry of fs.readdirSync(absolute, { withFileTypes: true })) {
       if (/^dist(?:-[a-z0-9-]+)?$/u.test(entry.name)) {
@@ -342,7 +358,7 @@ function collectInputs(options) {
   const ts = requireDeps('typescript');
   if (ts.version !== JSON.parse(text(sourceFiles, 'package-lock.json')).packages['node_modules/typescript']?.version)
     throw Error('静态解析器与本树原锁不一致');
-  return { aiMode: options.aiMode, sourceFiles, platformFiles, rentalFiles, aiFiles, deploymentFiles, selections, ts,
+  return { aiMode: options.aiMode, host: options.host, sourceFiles, platformFiles, rentalFiles, ticketsFiles, aiFiles, deploymentFiles, selections, ts,
     dependencyDirectory: options.deps };
 }
 

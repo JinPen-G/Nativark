@@ -484,7 +484,7 @@ export function createRentalApplicationAccess(input: RentalApplicationAccessDepe
         throw new CoreAccessError("denied", "Rental 读取须明确登记缓冲或独立事务审计；POST 仅允许已审定读取，不允许派生维护");
       }
       scope.evidence = evidence;
-      const internal = createRentalInternalAuthorityScope(() => assertEvidence(evidence), () => evidence.request.client);
+      const internal = createRentalInternalAuthorityScope(() => assertEvidence(evidence), () => evidence.request.client, evidence.request);
       return internal.run(async () => { try {
         const recheck = (transaction: RentalBusinessTenantTransaction) => beforeParent(transaction, evidence.tenantId)
           .then(() => assertCurrent(transaction, evidence.tenantId));

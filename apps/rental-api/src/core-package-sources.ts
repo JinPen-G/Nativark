@@ -6,7 +6,7 @@ import { lstatSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
-  CORE_CONTRACT_VERSION, CoreDeploymentLockSchema,
+  CORE_CONTRACT_VERSION, CoreDeploymentLockSchema, coreDeploymentHostVersions,
   type CoreDataObservation, type CoreDeploymentLock, type CoreManifest, type CorePlatformDataCapabilityRelease
 } from "@rental-os/core-contracts";
 import { CORE_ARCHIVE_LIMITS, createCoreArchive, readCoreArchive } from "@rental-os/core-contracts/archive";
@@ -17,12 +17,15 @@ import {
 } from "@rental-os/platform-core-host/core-package-preflight";
 import type { CorePackageDeploymentSource } from "@rental-os/platform-core-host/core-package-ports";
 import type { CorePackagePreparationMaterialsSource } from "@rental-os/platform-core-host/core-package-preparation";
+import { requireCorePackagePin } from "@rental-os/core-contracts/install";
 
 /** 参加者只由同一受控宿主提供；reader 必须沿原实际依赖位置读取，不能消费请求中的目录或发行。 */
 export interface RentalCorePackageSourcesInput {
   configuration: Pick<ConfigService, "get">;
   lock: CoreDeploymentLock;
   rentalPackage(): { root: string; manifest: CoreManifest; sha256: string };
+  /** 同一静态装配已核定的实际 server；每次读材料仍重核完整固定包，不能改成配置路径。 */
+  additionalCorePackages?: readonly { entry: string; root: string; manifest: CoreManifest; sha256: string }[];
   observe(): Promise<CoreDataObservation>;
   /** AI 启用入口持有原 requireAiNativeDataPackage；无 AI 入口不导入能力实现。 */
   dataCapabilities?(): readonly { root: string; release: CorePlatformDataCapabilityRelease }[];
@@ -154,11 +157,18 @@ export function createRentalCorePackageSources(input: RentalCorePackageSourcesIn
   deployment: CorePackageDeploymentSource; materials: CorePackagePreparationMaterialsSource;
 } {
   const lock = CoreDeploymentLockSchema.parse(input.lock);
-  if (lock.cores.length !== 1 || lock.cores[0].manifest.id !== "rental"
+  if (lock.cores.filter(pin => pin.manifest.id === "rental").length !== 1
     || (lock.dataCapabilities?.length ?? 0) > 1
     || lock.dataCapabilities?.some(release => release.id !== "ai-native"))
     throw new Error("Rental 包读取源须与当前 Rental 及可选 AI 组合一致");
-  const pin = lock.cores[0];
+  const pin = lock.cores.find(pin => pin.manifest.id === "rental")!;
+  const additional = (input.additionalCorePackages ?? []).map(item => Object.freeze({ ...item,
+    manifest: structuredClone(item.manifest) }));
+  const extraPins = lock.cores.filter(item => item.manifest.id !== "rental");
+  if (additional.length !== extraPins.length || new Set(additional.map(item => item.manifest.id)).size !== additional.length
+    || additional.some(item => !extraPins.some(pin => isDeepStrictEqual({ manifest: item.manifest, sha256: item.sha256 }, pin))
+      || !isAbsolute(item.root) || !isAbsolute(item.entry) || resolve(item.root, item.manifest.entries.server) !== item.entry))
+    throw new Error("额外 Core 材料须逐项等于实际装配的固定包和正式 server 入口");
   const storage = input.configuration.get<string>("CORE_PACKAGE_STORAGE_ROOT");
   const reference = input.configuration.get<string>("CORE_PLATFORM_PACKAGE_REFERENCE");
   if (storage && !isAbsolute(storage)) throw new Error("Core 包存储根须为宿主配置的绝对目录");
@@ -190,6 +200,14 @@ export function createRentalCorePackageSources(input: RentalCorePackageSourcesIn
     // 原 reader 已完整核包；本次再次读取材料后核同一归档，拒绝两次读取之间的文件变化。
     if (createCoreArchive(rentalFiles).sha256 !== pin.sha256)
       throw new Error("Rental 包材料在读取期间已变化");
+    const coreFiles = new Map([[pin.manifest.id, rentalFiles]]);
+    for (const current of additional) {
+      const expected = extraPins.find(pin => pin.manifest.id === current.manifest.id)!;
+      requireCorePackagePin(current.root, expected, coreDeploymentHostVersions(lock));
+      const files = readCorePackageFiles(current.root, CORE_ARCHIVE_LIMITS.fileBytes, CORE_ARCHIVE_LIMITS.totalBytes);
+      if (createCoreArchive(files).sha256 !== expected.sha256) throw new Error("额外 Core 包材料在读取期间已变化");
+      coreFiles.set(expected.manifest.id, files);
+    }
 
     const capabilities = readCapabilities?.() ?? [];
     const releases = lock.dataCapabilities ?? [];
@@ -211,7 +229,7 @@ export function createRentalCorePackageSources(input: RentalCorePackageSourcesIn
         throw new Error("当前底座缺少与原迁移合同相同的材料");
       return { name: match[1], sql: Buffer.from(sql) };
     });
-    return { platform, cores: new Map([[pin.manifest.id, rentalFiles]]), capabilityFiles };
+    return { platform, cores: coreFiles, capabilityFiles };
   }
 
   return {

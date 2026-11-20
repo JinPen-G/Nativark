@@ -33,6 +33,7 @@ import { requireRentalDeploymentPackage } from "./deployment-package";
 import { RentalApplicationLifecycle } from "./lifecycle";
 import { rentalHostLegacyApiRoutes } from "./openapi";
 import { createRentalCorePackageSources } from "./core-package-sources";
+import { prepareRentalAdditionalCores, type RentalHostCoreSetup } from "./additional-cores";
 
 /** 仅受控宿主装配可提供；请求、Core 包清单和环境变量不能注入运行参加者。 */
 export interface RentalHostAiSetup<Binding> {
@@ -45,11 +46,40 @@ export interface RentalHostAiSetup<Binding> {
     customers: RentalCustomerManagementApplication }): Binding;
 }
 
-export function composeRentalApplication<Binding = never>(input: {
+/** 正式宿主返回契约只引用各包已公开的工厂/应用类型。由消费者继续推断整个
+ * Rental 服务图会把包内恢复票据等私有类型展开成不可导入的 dist 路径。 */
+export interface RentalHostAssembly<Binding = unknown, Additional = unknown> {
+  readonly rental: RentalApplication;
+  readonly catalogue: CoreDeployedCatalogue;
+  readonly core: ReturnType<typeof composePlatformCoreApplication>;
+  readonly packages: ReturnType<typeof composePlatformCorePackageAssembly>;
+  readonly authorization: ReturnType<typeof createRentalAuthorization>;
+  readonly guard: RentalAuthorizationGuard;
+  readonly access: ReturnType<typeof createRentalApplicationAccess>;
+  readonly publicAccess: ReturnType<typeof createRentalPublicApplicationAccess>;
+  readonly callbackAccess: ReturnType<typeof createRentalPaymentCallbackAccess>;
+  readonly aiAccess: ReturnType<typeof createRentalApplicationAccess> | undefined;
+  readonly ai: Binding | undefined;
+  readonly additionalCores: ReadonlyMap<string, Additional>;
+  readonly http: ReturnType<typeof createRentalHttpApplications>;
+  readonly extensions: { auth: RentalApplication["auth"]; subscriptions: RentalApplication["subscriptions"] };
+  readonly customers: RentalCustomerManagementApplication;
+  readonly workspaces: ReturnType<typeof createRentalWorkspaceManagementApplication>;
+  readonly platform: ReturnType<typeof createRentalPlatformApplications>;
+  readonly payments: { runtime: RentalApplication["integrations"]["payments"];
+    statements: RentalApplication["integrations"]["statements"]; core: RentalApplication["primary"]["core"] };
+  readonly jobs: RentalApplication["integrations"]["ledger"];
+  readonly notifications: RentalApplication["integrations"]["ledger"];
+  readonly lifecycle: RentalApplicationLifecycle;
+}
+
+export function composeRentalApplication<Binding = never, Additional = unknown>(input: {
   database: RentalDatabaseClient;
   configuration: ConfigService;
   lock: CoreDeploymentLock;
-} & ({ aiMode: "disabled"; ai?: never } | { aiMode: "enabled"; ai: RentalHostAiSetup<Binding> })) {
+  /** 静态宿主显式选择的租户 Core；缺实际固定包/数据观察/HTTP 合同即拒绝整组。 */
+  additionalCores?: readonly RentalHostCoreSetup<Additional>[];
+} & ({ aiMode: "disabled"; ai?: never } | { aiMode: "enabled"; ai: RentalHostAiSetup<Binding> })): RentalHostAssembly<Binding, Additional> {
   const lock = CoreDeploymentLockSchema.parse(input.lock);
   if (input.aiMode === "disabled" && (input.ai || (lock.dataCapabilities?.length ?? 0) > 0)) {
     throw new Error("当前无 AI 组合不能消费已选择的可选数据能力");
@@ -59,7 +89,8 @@ export function composeRentalApplication<Binding = never>(input: {
     || !isDeepStrictEqual(lock.dataCapabilities[0].data, input.ai.dataPlan.data)))
     throw new Error("启用 AI 须提供同一固定数据包的实际参加者和物理观察");
   const pin = lock.cores.find(core => core.manifest.id === "rental");
-  if (!pin || lock.cores.length !== 1) throw new Error("本 Rental 宿主组合须且仅须选择 Rental Core");
+  if (!pin) throw new Error("本 Rental 宿主组合必须选择 Rental Core");
+  const additional = prepareRentalAdditionalCores(lock, input.additionalCores ?? []);
   const rentalPackage = requireRentalDeploymentPackage(pin, lock.platform.versions);
   const platformPlan = createPublicPlatformDataPlan(rentalPackage.dataPlan.publicForeignKeys);
   if (!isDeepStrictEqual(lock.platform.data, platformPlan.data)) throw new Error("部署锁公共基线与当前宿主不一致");
@@ -67,13 +98,15 @@ export function composeRentalApplication<Binding = never>(input: {
   const dependencies = createPublicCoreDependencies<RentalDatabaseTransaction>(database);
   const observation = (reader: Pick<CoreHostSqlTransaction, "$queryRaw">) => createMysqlCoreDeploymentObservation({
     database: reader, platform: platformPlan,
-    cores: [{ ...rentalPackage.dataPlan, coreId: rentalPackage.manifest.id }],
+    cores: [{ ...rentalPackage.dataPlan, coreId: rentalPackage.manifest.id },
+      ...additional.map(item => ({ ...item.dataPlan, coreId: item.coreId }))],
     ...(input.aiMode === "enabled" ? { dataCapabilities: [{ ...input.ai.dataPlan, capabilityId: "ai-native" }] } : {})
   });
   let catalogue: CoreDeployedCatalogue;
   // 所有回调只在同步组合完成后才会消费；缺观察时原 catalogue 明确拒绝，不提供准备态放行。
   const catalogueForTransaction = (transaction: Pick<CoreHostSqlTransaction, "$queryRaw">) => createCoreDeployedCatalogue({
-    lock, registrations: [...catalogue.registrations.values()], observations: observation(transaction)
+    lock, registrations: [...catalogue.registrations.values()], http: additional.map(item => item.http),
+    observations: observation(transaction)
   });
   const deploymentForTransaction = (transaction: Pick<CoreHostSqlTransaction, "$queryRaw">) => catalogueForTransaction(transaction).availability;
   const rental = createRentalApplication({ database, configuration, aiMode: input.aiMode,
@@ -91,17 +124,26 @@ export function composeRentalApplication<Binding = never>(input: {
       requireAvailable: (coreId, tenantId) => catalogue.availability.requireAvailable(coreId, tenantId)
     }
   });
+  const bound = additional.map(item => ({ item, value: item.bind({ database, users: rental.authSource,
+    audit: dependencies.audit, term: dependencies.term, deployment: {
+      requireRegistered: coreId => catalogue.availability.requireRegistered(coreId),
+      requireAvailable: (coreId, tenantId) => catalogue.availability.requireAvailable(coreId, tenantId)
+    } }) }));
+  const additionalBindings = new Map(bound.map(({ item, value }) => [item.coreId, value.binding]));
   catalogue = createCoreDeployedCatalogue({ lock,
-    registrations: [{ manifest: rentalPackage.manifest, server: platformHost.server }], observations: observation(database) });
-  const core = composePlatformCoreApplication({ ...dependencies, catalogue,
+    registrations: [{ manifest: rentalPackage.manifest, server: platformHost.server },
+      ...bound.map(({ item, value }) => ({ manifest: item.manifest, server: value.server }))],
+    http: additional.map(item => item.http), observations: observation(database) });
+  const core = composePlatformCoreApplication({ ...dependencies, users: rental.authSource, catalogue,
     authorizeContainer: platformHost.authorizeContainer });
   core.session = composeRentalCoreSessionReader({ database, authSource: rental.authSource, catalogue });
-  const packages = composePlatformCorePackageAssembly({ database, users: dependencies.users, catalogue,
+  const packages = composePlatformCorePackageAssembly({ database, users: rental.authSource, catalogue,
     audit: createPlatformCorePackageAudit<RentalDatabaseTransaction>(),
     storageDirectory: configuration.get<string>("CORE_PACKAGE_STORAGE_ROOT"),
     legacyApiRoutes: { rental: rentalHostLegacyApiRoutes() },
     ...createRentalCorePackageSources({ configuration, lock,
       rentalPackage: () => requireRentalDeploymentPackage(pin, lock.platform.versions),
+      additionalCorePackages: additional,
       observe: () => observation(database).read(),
       ...(input.aiMode === "enabled" ? { dataCapabilities: input.ai.readDataPackages } : {}) }) });
   const coreHttp = createPlatformCorePackageAssemblyHttpAccess(packages, createPlatformCoreHttpAccess(core));
@@ -138,6 +180,8 @@ export function composeRentalApplication<Binding = never>(input: {
   const customers = createRentalCustomerManagementApplication(rental);
   const ai = input.aiMode === "enabled" ? input.ai.bind({ rental, guard, customers }) : undefined;
   return Object.freeze({ rental, catalogue, core, packages, authorization, guard, access, publicAccess, callbackAccess, aiAccess, ai,
+    // 隔离映射副本；调用者不能通过修改目录映射替换已注册服务或另一 Core 的绑定。
+    get additionalCores(): ReadonlyMap<string, Additional> { return new Map(additionalBindings); },
     http: createRentalHttpApplications(rental, { guard }),
     extensions: { auth: rental.auth, subscriptions: rental.subscriptions },
     customers,
@@ -148,5 +192,3 @@ export function composeRentalApplication<Binding = never>(input: {
     lifecycle: new RentalApplicationLifecycle(rental, () => database.$disconnect(),
       configuration.get<string>("DATABASE_CONNECT_ON_START") === "true" ? () => database.$connect() : undefined) });
 }
-
-export type RentalHostAssembly = ReturnType<typeof composeRentalApplication>;

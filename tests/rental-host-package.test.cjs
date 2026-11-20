@@ -21,6 +21,24 @@ const json = value => Buffer.from(JSON.stringify(value, null, 2) + '\n');
 let checks = 0;
 const check = (name, action) => { action(); checks++; console.log('PASS ' + name); };
 
+function verificationMemory(build) {
+  const memory = createMemoryBuild(build);
+  // memfs derives birthtime from mutable ctime; retain native file identity
+  // semantics while still checking dev/ino and replacements in every case.
+  const births = new Map(), stableBirth = stat => {
+    const key = stat.dev + ':' + stat.ino;
+    if (!births.has(key)) births.set(key, stat.birthtimeMs);
+    stat.birthtimeMs = births.get(key); return stat;
+  };
+  const lstat = memory.fs.lstatSync, fstat = memory.fs.fstatSync;
+  memory.fs.fstatSync = descriptor => stableBirth(fstat(descriptor));
+  memory.fs.lstatSync = (file, ...args) => {
+    const stat = lstat(file, ...args);
+    return slash(file).startsWith(slash(memory.task) + '/') ? stableBirth(stat) : stat;
+  };
+  return memory;
+}
+
 async function run() {
   const build = createBuild(deps);
   verifyContracts(build); verifyServer(build); verifyNative(build);
@@ -31,6 +49,10 @@ async function run() {
   const platformClient = { client: path.join(root, 'apps/platform-api/generated/client/index.d.ts'),
     declarations: build.virtual.get(slash(path.join(root, 'apps/platform-api/generated/client/index.d.ts'))),
     schema: build.sourceRead(path.join(root, 'apps/platform-api/prisma/schema.prisma')) };
+  build.compile('packages/example-tickets-core/tsconfig.json');
+  build.selectedClients.set(slash(path.join(root, 'apps/example-multi-core-api')),
+    { client: slash(disabledClient.client), mode: 'rental' });
+  build.compile('apps/example-multi-core-api/tsconfig.json');
   const originalFiles = directory => {
     const files = new Map(), absolute = path.join(root, directory);
     const read = (current, prefix) => {
@@ -66,21 +88,7 @@ async function run() {
   for (const directory of ['packages/ai-native-server', 'apps/rental-api']) build.selectedClients.set(slash(path.join(root, directory)), { client: slash(disabledClient.client), mode: 'rental-ai' });
   build.compile('packages/ai-native-server/tsconfig.json');
   build.compile('apps/rental-api/tsconfig.ai.json');
-  const memory = createMemoryBuild(build);
-  // memfs derives birthtime from its mutable ctime. Native files keep birthtime
-  // across writes; normalize that transport quirk without changing production
-  // identity checks (dev/ino are still checked, including replacement cases).
-  const births = new Map(), stableBirth = stat => {
-    const key = stat.dev + ':' + stat.ino;
-    if (!births.has(key)) births.set(key, stat.birthtimeMs);
-    stat.birthtimeMs = births.get(key); return stat;
-  };
-  const nativeMemoryLstat = memory.fs.lstatSync, nativeMemoryFstat = memory.fs.fstatSync;
-  memory.fs.fstatSync = descriptor => stableBirth(nativeMemoryFstat(descriptor));
-  memory.fs.lstatSync = (file, ...args) => {
-    const stat = nativeMemoryLstat(file, ...args);
-    return slash(file).startsWith(slash(memory.task) + '/') ? stableBirth(stat) : stat;
-  };
+  const memory = verificationMemory(build);
   for (const file of ['scripts/package-rental-host.cjs', 'scripts/rental-host-lock.cjs', 'scripts/build-selected-prisma.cjs',
     'scripts/rental-platform-build.cjs'])
     memory.put(path.join(root, file), fs.readFileSync(path.join(root, file)));
@@ -122,9 +130,15 @@ async function run() {
     publicMigrations: platform.migrationNames.map((name, index) => ({ name, sql: sourceFiles.get('apps/platform-api/' + platform.data.migrations[index].file) })) };
   const disabled = deployment.createRentalDeploymentFiles(deploymentInput);
   const enabled = deployment.createRentalDeploymentFiles({ ...deploymentInput, ai: { release: aiRelease, files: aiFiles } });
+  const t = { async test(name, work) { await work(); checks++; console.log('PASS ' + name); } };
+  const { ticketsPackage, ...additional } = await require('../apps/rental-api/test/additional-core-cases.cjs')({
+    t, build, memory, lock: disabled.lock });
+  const additionalDeployment = await require('../apps/rental-api/test/additional-deployment-cases.cjs')({
+    t, load: memory.load, preparationInput: deploymentInput, aiFormatFixture: { release: aiRelease, files: aiFiles }, ticketsPackage });
+  const multi = deployment.createRentalDeploymentFiles({ ...deploymentInput, additionalCores: [ticketsPackage] });
   const base = { aiMode: 'disabled', sourceFiles, platformFiles, dependencyDirectory: deps, rentalFiles, deploymentFiles: disabled.files,
     selections: { rental: disabledClient, platform: platformClient }, ts: build.ts };
-  let result, aiResult;
+  let result, aiResult, multiResult;
   check('真实无AI宿主、完整固定包和原准备材料确定性打包', () => {
     result = packager.createRentalHostContext(base);
     assert.equal(result.sha256, packager.createRentalHostContext(base).sha256);
@@ -150,6 +164,27 @@ async function run() {
     assert.equal(aiResult.receipt.clients.find(client => client.mode === 'rental-ai').models, 247);
     assert.equal(aiResult.receipt.aiDataSha256, aiRelease.sha256);
     assert.match(aiResult.files.get('Dockerfile').toString(), /dist-ai\/ai-main\.js/u);
+  });
+  check('真实双Core宿主独立消费正式声明、保留两份固定包与同一161模型Client', () => {
+    multiResult = packager.createRentalHostContext({ ...base, host: 'example-multi-core',
+      ticketsFiles: ticketsPackage.files, deploymentFiles: multi.files });
+    assert.equal(multiResult.receipt.host, 'example-multi-core');
+    assert.equal(multiResult.receipt.coreSha256, packed.sha256);
+    assert.deepEqual(multiResult.receipt.additionalCorePackages, [{ id: 'example-tickets', sha256: ticketsPackage.pin.sha256 }]);
+    for (const [file, bytes] of ticketsPackage.files)
+      assert.deepEqual(multiResult.files.get('packages/example-tickets-core/' + file), bytes);
+    assert(multiResult.files.has('apps/example-multi-core-api/dist/main.js'));
+    assert(multiResult.files.has('apps/rental-api/dist/assembly.d.ts'));
+    assert(![...multiResult.files.keys()].some(file => file.startsWith('packages/ai-native-server/')));
+    assert.match(multiResult.files.get('Dockerfile').toString(), /apps\/example-multi-core-api\/dist\/main\.js/u);
+    assert.deepEqual(multiResult.receipt.clients.map(client => client.models), [40, 161]);
+    const lock = JSON.parse(multiResult.files.get('package-lock.json'));
+    assert.equal(lock.packages[''].dependencies['@rental-os/example-multi-core-api'], '0.1.0');
+    assert(lock.packages['packages/example-tickets-core']);
+    assert.throws(() => packager.createRentalHostContext({ ...base, host: 'unknown' }), /未登记/);
+    assert.throws(() => packager.createRentalHostContext({ ...base, deploymentFiles: multi.files }), /选择/);
+    assert.throws(() => packager.createRentalHostContext({ ...base, host: 'example-multi-core',
+      ticketsFiles: ticketsPackage.files }), /选择/);
   });
   check('CLI显式选择和路径要求', () => {
     assert.throws(() => packager.parseArguments([]), /显式选择/);
@@ -213,7 +248,7 @@ async function run() {
     const wrong = structuredClone(original); wrong.packages['apps/rental-api'].dependencies.zod = '0.0.0';
     assert.throws(() => selectWorkspaces(wrong, directory => JSON.parse(sourceFiles.get(directory + '/package.json')), 'disabled'), /依赖与原锁/);
     const semver = build.requireDeps('semver');
-    for (const candidate of [result, aiResult]) {
+    for (const candidate of [result, aiResult, multiResult]) {
       const lock = JSON.parse(candidate.files.get('package-lock.json'));
       const resolve = require('../scripts/rental-host-lock.cjs').lockedDependency;
       for (const [owner, metadata] of Object.entries(lock.packages)) {
@@ -241,6 +276,18 @@ async function run() {
     const written = packager.main(args); assert.equal(written.status, 'packaged');
     assert.equal(written.sha256, require('node:crypto').createHash('sha256').update(memory.fs.readFileSync(output)).digest('hex'));
     assert.throws(() => packager.main(args), /已存在/);
+    const multiCandidate = path.join(memory.task, 'multi-prepared'), tickets = path.join(memory.task, 'tickets'),
+      multiOutput = path.join(memory.task, 'multi-host.tgz');
+    for (const [file, bytes] of multi.files) memory.put(path.join(multiCandidate, file), bytes);
+    for (const [file, bytes] of ticketsPackage.files) memory.put(path.join(tickets, file), bytes);
+    const multiArgs = args.map(value => value === candidate ? multiCandidate : value === output ? multiOutput : value)
+      .concat(['--host', 'example-multi-core', '--tickets-package', tickets]);
+    assert.throws(() => packager.parseArguments(multiArgs.filter((value, index) => !['--tickets-package', tickets].includes(value))), /须显式/);
+    assert.throws(() => packager.parseArguments(multiArgs.map(value => value === 'disabled' ? 'enabled' : value)), /只选择/);
+    const multiWritten = packager.main(multiArgs);
+    assert.equal(multiWritten.status, 'packaged');
+    const shipped = archive.readCoreArchive(memory.fs.readFileSync(multiOutput), multiWritten.sha256);
+    assert.equal(JSON.parse(shipped.files.get('rental-host.context.json')).host, 'example-multi-core');
     const write = memory.fs.writeSync, broken = path.join(memory.task, 'broken.tgz');
     memory.fs.writeSync = () => { throw Error('fixture write failure'); };
     try { assert.throws(() => packager.writeArchive(broken, Buffer.from('test')), /fixture write failure/); }
@@ -255,11 +302,15 @@ async function run() {
     finally { memory.fs.writeSync = write; }
     assert.equal(memory.fs.readFileSync(switched, 'utf8'), 'other writer');
   });
-  const rootDi = await require('../apps/rental-api/test/ai-host-root-cases.cjs')({
-    build, memory, rentalFiles, aiFiles, enabled, aiResult, disabled, platformClient, platformArchive });
+  const verifyRoot = require('../apps/rental-api/test/ai-host-root-cases.cjs');
+  const multiRootDi = await verifyRoot({ build, memory: verificationMemory(build), rentalFiles,
+    disabled, multi, multiResult, ticketsPackage, platformClient, platformArchive });
+  const rootDi = await verifyRoot({
+    build, memory: verificationMemory(build), rentalFiles, aiFiles, enabled, aiResult, disabled, platformClient, platformArchive });
   assert.equal(fs.existsSync(temporary), false);
   console.log(JSON.stringify({ checks, builds: build.stages.length, disabled: { files: result.files.size, runtimeFiles: result.receipt.runtime.files, sha256: result.sha256 },
     enabled: { files: aiResult.files.size, runtimeFiles: aiResult.receipt.runtime.files, sha256: aiResult.sha256 },
-    rootDi, fixtureProvenance: true, diskOutputs: 0, imageBuild: 'not-run', database: 'not-connected', deployment: 'pending' }));
+    multi: { files: multiResult.files.size, runtimeFiles: multiResult.receipt.runtime.files, sha256: multiResult.sha256 },
+    additional, additionalDeployment, multiRootDi, rootDi, fixtureProvenance: true, diskOutputs: 0, imageBuild: 'not-run', database: 'not-connected', deployment: 'pending' }));
 }
 run().catch(error => { console.error(error.stack); process.exitCode = 1; });

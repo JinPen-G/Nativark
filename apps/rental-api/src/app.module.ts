@@ -45,6 +45,8 @@ export function createRentalHostModule<Host extends RentalHostAssembly>(input: {
   createPolicy(authorization: ReturnType<typeof createRentalAuthorization>): RentalHttpAccessPolicy;
   openApi(lock: CoreDeploymentLock, policy: RentalHttpAccessPolicy): ReturnType<typeof createRentalHostOpenApi>;
   ai?: RentalAiHostModule<Host>;
+  /** 静态宿主用导出的同一组装令牌接各 Core 自有模块；不重建 Rental 或公共服务。 */
+  additionalHttp?(assembly: DynamicModule): readonly DynamicModule[];
 }): DynamicModule {
   const policy = input.createPolicy(createRentalAuthorization(shared));
   // 核查不创建 Client，不预热；只有真实 handler 与审定接点对应才接受装配。
@@ -87,7 +89,8 @@ export function createRentalHostModule<Host extends RentalHostAssembly>(input: {
       useFactory: (host: Host, http: ReturnType<typeof createRentalHttpApplicationViews>) => ({ ...host.payments, core: http.rental.core }) }),
     RentalHttpExtensionsModule.registerFactory({ imports: [assembly], inject: [RENTAL_HOST_ASSEMBLY], useFactory: (host: Host) => host.extensions }),
     RentalCustomersHttpModule.registerFactory({ imports: [assembly], inject: [RENTAL_HOST_ASSEMBLY], useFactory: (host: Host) => host.customers }),
-    RentalWorkspacesHttpModule.registerFactory({ imports: [assembly], inject: [RENTAL_HOST_ASSEMBLY], useFactory: (host: Host) => host.workspaces })
+    RentalWorkspacesHttpModule.registerFactory({ imports: [assembly], inject: [RENTAL_HOST_ASSEMBLY], useFactory: (host: Host) => host.workspaces }),
+    ...(input.additionalHttp?.(assembly) ?? [])
   ] };
 }
 

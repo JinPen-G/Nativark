@@ -9,6 +9,7 @@ import { RentalAiCompositionModule, RENTAL_AI_INSPECTION_BINDING, type RentalAiI
 import { createRentalAiHttpPolicy, rentalAiRouteSelector, RENTAL_AI_CONTROLLERS, RENTAL_AI_INSPECTION_OPERATIONS,
   RENTAL_AI_MOUNTED_REQUESTS } from "./ai-http-policy";
 import { createRentalAiOpenApi } from "./ai-openapi";
+import { withRentalAiClientRequest } from "./ai-client-request";
 
 @Module({})
 class RentalAiHttpModule {}
@@ -22,8 +23,11 @@ export class RentalAiAppModule {
       ai: {
         requestScope: (host, policy) => {
           if (!host.ai || !host.aiAccess) throw new Error("AI 宿主缺少同实例请求或数据准入");
-          return { access: host.aiAccess, ...rentalAiRouteSelector(policy),
-            withRequest: (request, consume, signal) => host.ai!.withRequest(request, consume, signal) };
+          const selector = rentalAiRouteSelector(policy);
+          return { access: host.aiAccess, ...selector,
+            withRequest: (request, consume, signal) => selector.isClientRoute(request)
+              ? withRentalAiClientRequest(request, consume, signal)
+              : host.ai!.withRequest(request, consume, signal) };
         },
         register: assembly => {
           const composition = RentalAiCompositionModule.registerFactory({ imports: [assembly], inject: [RENTAL_HOST_ASSEMBLY],

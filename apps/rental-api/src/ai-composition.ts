@@ -1,6 +1,7 @@
 /** 可选 Rental + AI Native 的同实例组合。只复用原 AI factories、Gateway/账、ACL 和请求工厂。
  * 本入口不导入旧 AppModule、不启动业务生命周期，也不把数据锁声明当作物理部署就绪。
- * 当前 AI 数据有 Rental 外键；此组合只支持公共 40 + Rental 121 + AI 86 模型。 */
+ * 当前 AI 数据有 Rental 外键，仍使用公共 40 + Rental 121 + AI 86 模型；
+ * 额外 Core 沿原宿主固定包/raw SQL 接点核验，不提供 Rental AI 的身份或权限。 */
 import { Global, Module, type DynamicModule, type FactoryProvider, type ModuleMetadata, type Provider, type Type } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { ModuleRef } from "@nestjs/core";
@@ -8,7 +9,8 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import type { PrismaClient } from "@prisma/client";
-import { CoreDeploymentLockSchema, checkPlatformDataCapabilities, type CoreDeploymentLock } from "@rental-os/core-contracts";
+import { CoreDeploymentLockSchema, checkCoreCombination, checkPlatformDataCapabilities,
+  coreDeploymentHostVersions, type CoreDeploymentLock } from "@rental-os/core-contracts";
 import { AI_NATIVE_DATA_PACKAGE_VERSION } from "@rental-os/ai-native-data/data-package";
 import { AI_NATIVE_DATA_PREREQUISITES } from "@rental-os/ai-native-data/preparation";
 import { PrismaBusinessFailureOutbox, BUSINESS_FAILURE_OUTBOX, type BusinessFailureResourcePorts } from "@rental-os/ai-native-server/business-events/prisma-business-failure-outbox";
@@ -143,14 +145,16 @@ function requireKnowledgeOwner(value: FileBusinessOwner | undefined) {
 
 /** 只核选择合同；宿主仍须校验实际固定包字节、迁移账和物理结构，并在每次准入检查当前部署。 */
 export function requireRentalAiSelection(value: CoreDeploymentLock): CoreDeploymentLock {
-  const lock = CoreDeploymentLockSchema.parse(value), rental = lock.cores[0], ai = lock.dataCapabilities?.[0];
+  const lock = CoreDeploymentLockSchema.parse(value), rentals = lock.cores.filter(pin => pin.manifest.id === "rental");
+  const rental = rentals[0], ai = lock.dataCapabilities?.[0];
   const required = AI_NATIVE_DATA_PREREQUISITES;
-  if (lock.cores.length !== 1 || rental?.manifest.id !== "rental" || lock.dataCapabilities?.length !== 1
+  if (rentals.length !== 1 || lock.dataCapabilities?.length !== 1
     || ai?.id !== "ai-native" || ai.version !== AI_NATIVE_DATA_PACKAGE_VERSION
     || lock.platform.data.version !== required.platform.dataVersion
     || rental.manifest.data.version !== required.rental.dataVersion
     || !rental.manifest.data.migrations.some(item => item.id === required.rental.migrationId && item.sha256 === required.rental.migrationSha256)
-    || checkPlatformDataCapabilities(lock).length) {
+    || checkPlatformDataCapabilities(lock).length
+    || checkCoreCombination(lock.cores.map(pin => pin.manifest), coreDeploymentHostVersions(lock)).issues.length) {
     throw new Error("AI 组合须选择本版公共、Rental 与 ai-native 固定数据贡献");
   }
   return lock;

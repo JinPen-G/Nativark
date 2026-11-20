@@ -164,8 +164,10 @@ function fixture() {
         return data;
       } },
       async $queryRaw(strings, ...values) {
+        if (!Array.isArray(strings)) { values = strings.values; strings = strings.strings; }
         assert(Array.isArray(strings)); const sql = strings.join('?').replace(/\s+/gu, ' ').trim();
         mark('sql', sql);
+        if (controls.beforeQuery) await controls.beforeQuery(snapshot, tx, sql, values);
         if (/FROM Tenant /u.test(sql)) {
           const tenant = snapshot.tenants.find(row => row.id === values[0]);
           if (tenant) held.add('tenant:' + tenant.id);
@@ -187,6 +189,10 @@ function fixture() {
         if (sql.includes('FROM auth_sessions')) {
           assert(held.has('user:' + values[1])); return copy(snapshot.sessions.filter(row => row.id === values[0] && row.userId === values[1]));
         }
+        if (sql.includes('FROM workspace_members')) {
+          assert(held.has('tenant:' + values[0]) && held.has('user:' + values[2]));
+          return copy(snapshot.members.filter(row => row.tenantId === values[0] && row.workspaceId === values[1] && row.userId === values[2]));
+        }
         if (sql.includes('FROM `UserRole`')) return copy(snapshot.users.find(row => row.id === values[0])?.roleAssignments ?? []);
         if (sql.includes('FROM `Role`')) return copy(snapshot.roles.filter(row => row.id === values[0] && row.tenantId === values[1]));
         if (sql.includes('FROM `RolePermission`')) return (role(values[0])?.permissions ?? []).map(row => ({ permissionId: row.permission.id }));
@@ -198,9 +204,11 @@ function fixture() {
         if (sql.includes('FROM platform_core_binding_operations')) {
           mark('receipt:binding'); return copy(snapshot.bindingReceipts.filter(row => row.tenantId === values[0] && row.coreId === values[1] && row.scopeHash === values[2] && row.operationId === values[3]));
         }
-        if (sql.includes('FROM platform_tenant_core_grants')) return copy(snapshot.grants.filter(row => row.tenantId === values[0] && row.coreId === values[1]));
-        if (sql.includes('FROM platform_member_core_assignments')) return copy(snapshot.assignments.filter(row => row.tenantId === values[0] && row.coreId === values[1]
-          && (values.length < 3 || row.userId === values[2])));
+        if (sql.includes('FROM platform_tenant_core_grants')) return copy(snapshot.grants.filter(row => row.tenantId === values[0]
+          && (sql.includes("AND state = 'enabled' ORDER BY core_id") ? row.state === 'enabled' : row.coreId === values[1])));
+        if (sql.includes('FROM platform_member_core_assignments')) return copy(snapshot.assignments.filter(row => row.tenantId === values[0]
+          && (sql.includes('AND user_id = ? ORDER BY core_id') ? row.userId === values[1] : row.coreId === values[1]
+          && (values.length < 3 || row.userId === values[2]))));
         if (sql.includes('FROM platform_core_bindings')) return copy(snapshot.bindings.filter(row => row.tenantId === values[0] && row.coreId === values[1]
           && (values.length < 3 || row.scopeHash === values[2])));
         throw Error('未知SQL: ' + sql);
@@ -430,3 +438,6 @@ test('泛Core未装来源hook保留原行为；已配置hook缺租约必须在�
     { coreId: 'rental', expectedRevision: 0, operationId: 'generic-bind', container: { type: 'rental-workspace', id: 'space' } }));
   assert.equal(binding.container.id, 'space'); assert.equal(f.state.logs.length, 2);
 });
+
+require('./core-session-cases.cjs')({ test, fixture, sourceModule,
+  loadPackage: name => load(aliases.get(name)), lock, source });

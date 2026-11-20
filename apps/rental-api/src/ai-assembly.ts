@@ -5,24 +5,27 @@ import type { ConfigService } from "@nestjs/config";
 import type { CoreDeploymentLock } from "@rental-os/core-contracts";
 import { requireAiNativeDataPackage } from "@rental-os/ai-native-data/data-package";
 import { createAiNativeMysqlDataPlanFromContribution } from "@rental-os/ai-native-data/mysql-data";
-import { createRentalAiParticipants, requireRentalAiSelection } from "./ai-composition";
-import { composeRentalApplication } from "./assembly";
+import { createRentalAiParticipants, requireRentalAiSelection, type RentalAiBinding } from "./ai-composition";
+import { composeRentalApplication, type RentalHostAssembly } from "./assembly";
+import type { RentalHostCoreSetup } from "./additional-cores";
 import { createRentalAiFileCleanupSource } from "./ai-file-cleanup-source";
 import type { RentalDatabaseClient } from "./database";
 
-export function composeRentalAiApplication(input: {
+export function composeRentalAiApplication<Additional = unknown>(input: {
   database: RentalDatabaseClient;
   configuration: ConfigService;
   lock: CoreDeploymentLock;
-}) {
+  /** 静态宿主提供；由原装配逐项核定固定包、数据计划与 HTTP，不授予 AI 权限。 */
+  additionalCores?: readonly RentalHostCoreSetup<Additional>[];
+}): RentalHostAssembly<RentalAiBinding, Additional> {
   const lock = requireRentalAiSelection(input.lock);
   const root = resolve(dirname(require.resolve("@rental-os/ai-native-data/data-package")), "..");
   const installed = requireAiNativeDataPackage(root, lock.dataCapabilities![0]);
   const dataPlan = createAiNativeMysqlDataPlanFromContribution(installed.contribution);
   const participants = createRentalAiParticipants({ ...input, lock });
-  return composeRentalApplication({ ...input, lock, aiMode: "enabled", ai: { ...participants, dataPlan,
+  return composeRentalApplication<RentalAiBinding, Additional>({ ...input, lock, aiMode: "enabled", ai: { ...participants, dataPlan,
     fileCleanupKnowledge: createRentalAiFileCleanupSource(),
     readDataPackages: () => [requireAiNativeDataPackage(root, lock.dataCapabilities![0])] } });
 }
 
-export type RentalAiHostAssembly = ReturnType<typeof composeRentalAiApplication>;
+export type RentalAiHostAssembly<Additional = unknown> = RentalHostAssembly<RentalAiBinding, Additional>;

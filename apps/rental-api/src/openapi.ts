@@ -1,6 +1,7 @@
 /** 宿主从真实 HTTP 政策授予逐条旧路径许可，并与实际发行清单组合文档。
  * 文档不证明部署/权限可用；未描述字段、未挂路径与停用功能保留明确缺口。 */
-import { composeCoreOpenApi, CoreDeploymentLockSchema, type CoreDeploymentLock } from "@rental-os/core-contracts";
+import { composeCoreOpenApi, CoreDeploymentLockSchema, type CoreDeploymentLock, type CoreOpenApiSource } from "@rental-os/core-contracts";
+import { isDeepStrictEqual } from "node:util";
 import { createPlatformOpenApi } from "@rental-os/platform-server";
 import { createPlatformCoreOpenApi, createPlatformCorePackageOpenApi } from "@rental-os/platform-core-host";
 import { createRentalOpenApi, RENTAL_HTTP_DOCUMENTATION_GAPS } from "@rental-os/rental-core/http-openapi";
@@ -53,12 +54,17 @@ export function rentalHostLegacyApiRoutes(): readonly string[] {
   return createRentalHostOpenApiContribution().legacyRoutes;
 }
 
-export function createRentalHostOpenApi(lockValue: CoreDeploymentLock, policy: Policy = createRentalHostHttpPolicy()) {
+export function createRentalHostOpenApi(lockValue: CoreDeploymentLock, policy: Policy = createRentalHostHttpPolicy(),
+  additional: readonly CoreOpenApiSource[] = []) {
   const lock = CoreDeploymentLockSchema.parse(lockValue);
-  if (lock.cores.length !== 1 || lock.cores[0].manifest.id !== "rental") throw new Error("Rental 文档须来自实际单 Core 宿主清单");
+  const rental = lock.cores.find(pin => pin.manifest.id === "rental"), extras = lock.cores.filter(pin => pin.manifest.id !== "rental");
+  if (!rental || additional.length !== extras.length
+    || new Set(additional.map(item => item.manifest.id)).size !== additional.length
+    || additional.some(item => !extras.some(pin => isDeepStrictEqual(pin.manifest, item.manifest))))
+    throw new Error("Rental 文档及额外贡献须逐项来自实际宿主完整清单");
   const { contribution, legacyRoutes, documentationGaps } = createRentalHostOpenApiContribution(policy);
   const result = composeCoreOpenApi(createPlatformCorePackageOpenApi(createPlatformCoreOpenApi(createPlatformOpenApi())),
-    [{ manifest: lock.cores[0].manifest, contribution }], { rental: legacyRoutes });
+    [{ manifest: rental.manifest, contribution }, ...additional], { rental: legacyRoutes });
   if (!result.document) throw new Error(result.issues.map(issue => `${issue.field}: ${issue.message}`).join("\n"));
   result.document["x-rentalDocumentationGaps"] = documentationGaps;
   result.document["x-rentalSchemaStatus"] = "incomplete";

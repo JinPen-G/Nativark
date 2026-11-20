@@ -16,6 +16,22 @@
     "./openapi": {
       "types": "./dist/openapi.d.ts",
       "default": "./dist/openapi.js"
+    },
+    "./assembly": {
+      "types": "./dist/assembly.d.ts",
+      "default": "./dist/assembly.js"
+    },
+    "./app-module": {
+      "types": "./dist/app.module.d.ts",
+      "default": "./dist/app.module.js"
+    },
+    "./additional-cores": {
+      "types": "./dist/additional-cores.d.ts",
+      "default": "./dist/additional-cores.js"
+    },
+    "./bootstrap": {
+      "types": "./dist/bootstrap.d.ts",
+      "default": "./dist/bootstrap.js"
     }
   },
   "typesVersions": {
@@ -28,6 +44,18 @@
       ],
       "openapi": [
         "dist/openapi.d.ts"
+      ],
+      "assembly": [
+        "dist/assembly.d.ts"
+      ],
+      "app-module": [
+        "dist/app.module.d.ts"
+      ],
+      "additional-cores": [
+        "dist/additional-cores.d.ts"
+      ],
+      "bootstrap": [
+        "dist/bootstrap.d.ts"
       ]
     }
   },

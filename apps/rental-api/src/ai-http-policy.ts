@@ -17,6 +17,7 @@ import { AiModelSettingsController, AI_NATIVE_MODEL_SETTINGS_REQUESTS } from "@r
 import { AI_STAFF_INSPECTION_REQUESTS } from "@rental-os/ai-native-server/runtime/inspection-assist/staff-inspection-assist.controller";
 import * as shared from "@rental-os/shared";
 import { RENTAL_HOST_CONTROLLERS } from "./http-policy";
+import { RentalWebsiteClientEntryController, RentalWechatClientEntryController } from "./ai-client-http";
 
 export const RENTAL_AI_INSPECTION_OPERATIONS = Object.freeze([
   "fulfillment-receipt-read", "history-read", "receipt-host-read", "host-read", "template-read",
@@ -27,7 +28,8 @@ export const RENTAL_AI_CONTROLLERS = Object.freeze([
   OperatorEntrySceneCatalogController, StaffEntrySceneCatalogController, StaffInspectionAssistController,
   AiOriginalScenesController, AiOriginalSceneRecoveryController, AiTaskCenterController, AiModelSettingsController,
   AiOriginalQuoteModelExecutionController, AiOriginalOpeningModelExecutionController, AiOriginalOrderReadController,
-  AiScenePlanPolicyController, AiOriginalTaskActionPolicyController
+  AiScenePlanPolicyController, AiOriginalTaskActionPolicyController,
+  RentalWebsiteClientEntryController, RentalWechatClientEntryController
 ]);
 export const RENTAL_AI_MOUNTED_REQUESTS: readonly symbol[] = Object.freeze([
   AI_STAFF_INSPECTION_REQUESTS, AI_ORIGINAL_SCENE_REQUESTS, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS,
@@ -45,6 +47,18 @@ const quote = AiOriginalQuoteModelExecutionController.prototype, opening = AiOri
 const orders = AiOriginalOrderReadController.prototype;
 const plans = AiScenePlanPolicyController.prototype, actions = AiOriginalTaskActionPolicyController.prototype;
 const declarations: readonly RentalHttpAccessDeclaration[] = [
+  ...[RentalWebsiteClientEntryController, RentalWechatClientEntryController].flatMap(controller => [
+    ...reviewed(controller, [controller.prototype.prepareOrderMaterial, controller.prototype.createTask], "transactional-write",
+    "original channel-specific ClientAuth and same customer/tenant/workspace request; original material/task creation transactions hold selected Auth/Tenant/Core before original Order/Workspace/task locks and revalidate before commit; original operation receipts and unknown retained"),
+    ...reviewed(controller, [controller.prototype.readOrderMaterialReceipt, controller.prototype.readTaskCreation], "audited-read",
+    "original client owner and order visibility readers retain standard refusal audit; no task admission, model dispatch or business execution; original same selected client authority and buffered response recheck"),
+    ...reviewed(controller, [controller.prototype.startTaskModel, controller.prototype.submitTaskInput,
+      controller.prototype.continueTaskInput, controller.prototype.recoverTaskModel, controller.prototype.reconcileTaskModel], "transactional-write",
+    "original client order-model runner only; same ClientAuth/Tenant/Core/owner Order and original publication/material before Task/Step/Invocation, original Gateway final locked policy before transport; same-task input and recovery retain original receipts, cumulative resources and unknown, reconciliation may settle the original lease but never creates a new invocation"),
+    ...reviewed(controller, [controller.prototype.readTaskInput, controller.prototype.readTaskInputReceipt,
+      controller.prototype.readTaskModelResult], "audited-read",
+    "original current client owner/model input/result and persisted answer receipt only; original standard refusal/unknown audit retained with selected response recheck, no admission or model dispatch")
+  ]),
   ...reviewed(AiScenePlanPolicyController, [plans.read], "buffered-read",
   "original current scene plan policy and operation receipt only; no Scope creation, plan revision, model call or policy grant; same selected response recheck"),
   ...reviewed(AiScenePlanPolicyController, [plans.change], "transactional-write",
@@ -127,6 +141,9 @@ export function rentalAiRouteSelector(policy: ReturnType<typeof createRentalAiHt
   return Object.freeze({
     isHandler: (controller: Function, handler: Function) => routes.some(route => route.controller === controller && route.handler === handler),
     isRoute: (request: { method: string; url: string }) => patterns.some(({ route, pattern }) =>
-      route.method === request.method.toUpperCase() && pattern.test(matchableRequestPath(request.url)))
+      route.method === request.method.toUpperCase() && pattern.test(matchableRequestPath(request.url))),
+    isClientRoute: (request: { method: string; url: string }) => patterns.some(({ route, pattern }) =>
+      (route.controller === RentalWebsiteClientEntryController || route.controller === RentalWechatClientEntryController)
+      && route.method === request.method.toUpperCase() && pattern.test(matchableRequestPath(request.url)))
   });
 }

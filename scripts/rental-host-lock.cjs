@@ -19,9 +19,15 @@ function lockedDependency(lock, owner, name) {
   }
 }
 
-function selectWorkspaces(lock, readMetadata, aiMode) {
+function hostDirectory(host = 'rental') {
+  if (host === 'rental') return 'apps/rental-api';
+  if (host === 'example-multi-core') return 'apps/example-multi-core-api';
+  throw Error('未登记的静态宿主组合：' + host);
+}
+
+function selectWorkspaces(lock, readMetadata, aiMode, host = 'rental') {
   if (lock.lockfileVersion !== 3 || !lock.packages?.['']) throw Error('独立宿主要求原 npm v3 锁文件');
-  const selected = new Map(), queue = ['apps/rental-api'];
+  const selected = new Map(), queue = [hostDirectory(host)];
   if (aiMode === 'enabled') queue.push('packages/ai-native-server');
   while (queue.length) {
     const directory = queue.shift();
@@ -45,13 +51,15 @@ function selectWorkspaces(lock, readMetadata, aiMode) {
   return selected;
 }
 
-function projectHostLock(lock, workspaces, aiMode, runtimePeers = []) {
+function projectHostLock(lock, workspaces, aiMode, runtimePeers = [], host = 'rental') {
   const generator = lock.packages['node_modules/prisma'], client = lock.packages['node_modules/@prisma/client'];
   if (generator?.version !== '5.22.0' || client?.version !== generator.version)
     throw Error('生成器与运行库须使用原锁同一 Prisma 5.22.0');
-  const root = { name: 'rental-host-runtime', version: '0.1.0', private: true, license: 'MIT',
+  const selectedHost = workspaces.get(hostDirectory(host));
+  if (!selectedHost) throw Error('实际入口宿主未在所选锁闭包');
+  const root = { name: host === 'rental' ? 'rental-host-runtime' : 'example-multi-core-host-runtime', version: '0.1.0', private: true, license: 'MIT',
     workspaces: [...workspaces.keys()].sort(),
-    dependencies: { '@rental-os/rental-api': workspaces.get('apps/rental-api').version,
+    dependencies: { [selectedHost.name]: selectedHost.version,
       ...(aiMode === 'enabled' ? { '@rental-os/ai-native-server': workspaces.get('packages/ai-native-server').version } : {}) },
     devDependencies: { prisma: generator.version } };
   for (const { owner, name } of runtimePeers) {
@@ -120,4 +128,4 @@ function projectHostLock(lock, workspaces, aiMode, runtimePeers = []) {
   return { root, lock: projected };
 }
 
-module.exports = { selectWorkspaces, projectHostLock, lockedDependency };
+module.exports = { selectWorkspaces, projectHostLock, lockedDependency, hostDirectory };

@@ -292,7 +292,7 @@ const lock = {
   cores: [{ manifest, sha256: 'd'.repeat(64) }],
   dataCapabilities: [aiRelease],
 };
-function compositionFixture() {
+function compositionFixture(selectedLock = lock) {
   const trace = { db: [], life: 0 },
     // The fixture owns the exact official 247-model graph; no default Client is loaded.
     db = { _runtimeDataModel: { models: Object.fromEntries(
@@ -335,7 +335,7 @@ function compositionFixture() {
     throw Error('unexpected root query');
   };
   const config = new ConfigService({ NODE_ENV: 'test', AUTH_TOKEN_SECRET: 'synthetic-test-secret' });
-  const factory = createRentalAiParticipants({ database: db, configuration: config, lock });
+  const factory = createRentalAiParticipants({ database: db, configuration: config, lock: selectedLock });
   const rental = createRentalApplication({
     database: db,
     configuration: config,
@@ -390,8 +390,8 @@ const originalTransport = modelTransport.createNativeModelEgressTransport,
 let currentTransport;
 modelTransport.createNativeModelEgressTransport = () => ({ get: (input) => currentTransport(input) });
 outbound.assertOutboundUrl = async (value) => new URL(value);
-function knowledgeFixture() {
-  const f = compositionFixture(),
+function knowledgeFixture(selectedLock = lock) {
+  const f = compositionFixture(selectedLock),
     state = {
       active: true,
       workspace: 'workspace-a',
@@ -1008,6 +1008,8 @@ test('启用宿主的实际 DI、知识权限与原结果边界', async (t) => {
     await require('./knowledge-scene-cases.cjs')({ t, knowledgeFixture });
     await require('./task-center-cases.cjs')({ t, knowledgeFixture });
     await require('./ai-http-cases.cjs')({ t, lock });
+    await require('./ai-client-http-cases.cjs')({ t });
+    await require('./ai-multi-core-cases.cjs')({ t, lock, knowledgeFixture });
     await t.test('官方双 Client 独立运行值与嵌套正文保护', async () => {
       const { prismaRuntime: p } = require('@rental-os/platform-server/prisma-runtime');
       const official = generatedModule.exports.Prisma;

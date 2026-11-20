@@ -16,6 +16,7 @@ interface InternalAuthorityScope {
   client?: ClientRequestContext;
   clientFingerprint?: string;
   clientSource?(): ClientRequestContext | undefined;
+  request?: object;
 }
 const scopes = new AsyncLocalStorage<InternalAuthorityScope>();
 const denied = () => new ForbiddenException("内部业务调用缺少同一有效请求的原 Guard 复验");
@@ -42,7 +43,7 @@ function fingerprint(identity: Identity | undefined, requireMember = true): stri
 /** One instance per application-access owner. assertCurrent must check its captured
  * request/actor/store, not accept an identity supplied by an internal caller. */
 export function createRentalInternalAuthorityScope(assertCurrent: () => void,
-  clientSource?: () => ClientRequestContext | undefined) {
+  clientSource?: () => ClientRequestContext | undefined, request?: object) {
   if (typeof assertCurrent !== "function") throw denied();
   return Object.freeze({
     async run<T>(consume: () => Promise<T>): Promise<T> {
@@ -50,7 +51,7 @@ export function createRentalInternalAuthorityScope(assertCurrent: () => void,
       assertCurrent();
       const source = getRequestIdentity();
       if (!source) throw denied();
-      const scope: InternalAuthorityScope = { active: true, source, fingerprint: fingerprint(source, false), assertCurrent };
+      const scope: InternalAuthorityScope = { active: true, source, fingerprint: fingerprint(source, false), assertCurrent, request };
       if (clientSource) {
         scope.clientSource = clientSource;
         scope.client = clientSource();
@@ -87,7 +88,7 @@ function clientIdentity(identity: Identity | undefined, client: ClientRequestCon
 
 /** 客户专用一次性桥。只恢复 owning request 的原 ClientAuth 对象及 ALS；
  * 新 Guard 的完整客户投影必须相同。复制 context 不能成为事务会话租约依据。 */
-export function captureRentalClientInternalAuthority() {
+export function captureRentalClientInternalAuthority(expectedRequest?: object) {
   const scope = scopes.getStore();
   if (!scope) {
     if (hasRentalBusinessTenantFence()) throw denied();
@@ -95,7 +96,8 @@ export function captureRentalClientInternalAuthority() {
   }
   const original = scope.client;
   const assertOriginal = () => {
-    if (!original || !scope.active || !scope.restore || getRequestIdentity() !== scope.source
+    if (!original || !scope.active || !scope.restore || expectedRequest !== undefined && scope.request !== expectedRequest
+      || getRequestIdentity() !== scope.source
       || scope.clientSource?.() !== original || clientFingerprint(original) !== scope.clientFingerprint
       || clientIdentity(scope.source, original) !== scope.fingerprint) throw denied();
     scope.assertCurrent();

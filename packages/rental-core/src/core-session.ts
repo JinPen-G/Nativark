@@ -5,10 +5,12 @@ import { ForbiddenException, UnauthorizedException } from "@nestjs/common";
 import type { CoreSessionContext } from "@rental-os/core-contracts";
 import type { CoreDeployedCatalogue } from "@rental-os/core-host";
 import type { CoreHostSqlClient, CoreHostSqlTransaction } from "@rental-os/core-host/mysql";
-import { composePlatformCoreSessionReader, type PlatformCoreUsers } from "@rental-os/platform-core-host";
+import { composePlatformCoreSessionReader } from "@rental-os/platform-core-host";
 import type { SystemUserRow } from "@rental-os/platform-contracts";
 import { getRequestIdentity } from "@rental-os/platform-server/request-identity";
 import type { RentalMysqlAuthenticationRepository } from "./mysql-auth-source";
+import { RentalWorkspaceUnavailableError } from "./mysql-workspace-principal";
+import { RENTAL_CORE_ID } from "./core-identity";
 import { rentalCorePermissionCodes } from "./permissions";
 
 export type RentalCoreSessionTransaction = Parameters<RentalMysqlAuthenticationRepository["lockWorkspaceSessionUser"]>[0]
@@ -40,8 +42,8 @@ function currentSession() {
     signedWorkspaceId: evidence.workspaceId, requestWorkspaceId: identity.workspaceId });
 }
 
-/** 仅将返回函数交给 Core session reader；不得用此 users 投影替换租户/SaaS 管理仓储。
- * 每次调用固定一个原会话和事务；返回前再次读取原角色和空间成员，撤权不回退到租户通配。
+/** 公共读取器继续使用原 users；只有 Rental 权限在当前会话、事务和空间下投影。
+ * 空间不可用只收回 Rental 空间权限；会话/账号/角色及存储错误仍拒绝整个目录。
  */
 export function composeRentalCoreSessionReader<Tx extends RentalCoreSessionTransaction>(
   input: RentalCoreSessionDependencies<Tx>
@@ -70,15 +72,15 @@ export function composeRentalCoreSessionReader<Tx extends RentalCoreSessionTrans
       }
       return user;
     };
-    const users: PlatformCoreUsers<Tx> = {
-      async findUserById(userId, transaction) {
+    const result = await composePlatformCoreSessionReader<Tx>({ database: input.database,
+      users: input.authSource, catalogue: input.catalogue, permissionProjection: {
+      coreId: RENTAL_CORE_ID,
+      async project(transaction, tenantUser) {
         assertSession();
-        if (userId !== expected.userId || !transaction || originalTransaction && transaction !== originalTransaction) {
+        if (!transaction || originalTransaction && transaction !== originalTransaction) {
           throw new UnauthorizedException("Rental Core 目录必须复用原主体与同一身份事务");
         }
         originalTransaction = transaction;
-        const tenantUser = await input.authSource.findUserById(userId, transaction);
-        if (!tenantUser) throw new ForbiddenException("Rental Core 目录的原租户账号已不可用");
         assertUser(tenantUser);
         let workspaceUser: SystemUserRow | undefined;
         if (expected.workspaceId) {
@@ -86,20 +88,21 @@ export function composeRentalCoreSessionReader<Tx extends RentalCoreSessionTrans
             sessionId: expected.sessionId, audience: expected.audience };
           // 公共 principal 已锁租户/账号/会话/租户角色；原空间仓储补持成员及空间角色锁。
           // 后续 revalidate 只重读这个原会话，不重新解析默认空间或换身份。
-          workspaceUser = assertUser(workspaceLocked
-            ? await input.authSource.readWorkspaceSessionUser(transaction, binding)
-            : await input.authSource.lockWorkspaceSessionUser(transaction, binding));
-          workspaceLocked = true;
+          try {
+            workspaceUser = assertUser(workspaceLocked
+              ? await input.authSource.readWorkspaceSessionUser(transaction, binding)
+              : await input.authSource.lockWorkspaceSessionUser(transaction, binding));
+            workspaceLocked = true;
+          } catch (error) {
+            // 此类型只由原仓储在复验会话/账号之后产生；未知 403 和存储故障不能降为空目录。
+            if (!(error instanceof RentalWorkspaceUnavailableError)) throw error;
+          }
         }
         assertSession();
-        return { ...tenantUser, permissions: [...new Set([
-          ...tenantUser.permissions.filter(code => code !== "*" && !code.startsWith("rental:")),
-          ...rentalCorePermissionCodes({ audience: expected.audience, tenantUser, workspaceUser,
-            workspaceId: expected.workspaceId })
-        ])] };
+        return rentalCorePermissionCodes({ audience: expected.audience, tenantUser, workspaceUser,
+          workspaceId: expected.workspaceId });
       }
-    };
-    const result = await composePlatformCoreSessionReader({ database: input.database, users, catalogue: input.catalogue })();
+    } })();
     assertSession();
     return result;
   };
