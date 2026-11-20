@@ -534,11 +534,17 @@ export function repositoryApiDocumentation(source: RepositorySource): Map<string
           const symbol = type && ts.isTypeReferenceNode(type) && source.checker.getSymbolAtLocation(type.typeName);
           const declaration = symbol && source.target(symbol).valueDeclaration;
           const dto = declaration && ts.isClassDeclaration(declaration) && isRepositorySourcePath(source.root, declaration.getSourceFile().fileName) ? declaration : undefined;
+          const fields = dto?.members.filter(ts.isPropertyDeclaration).map(parameterDeclaration);
+          const fieldNamesComplete = dto && !dto.typeParameters?.length
+            && !dto.heritageClauses?.some(clause => clause.token === ts.SyntaxKind.ExtendsKeyword)
+            && dto.members.length > 0 && dto.members.every(field => ts.isPropertyDeclaration(field)
+              && ts.isIdentifier(field.name) && !(ts.getCombinedModifierFlags(field) & ts.ModifierFlags.Static));
           parameters.push({ ...parameterDeclaration(parameter), in: binding,
             ...(typeof name === "string" ? { parameterName: name } : { status: "source-reference" }),
             ...(decorator.expression.arguments.length > 1 ? { pipesStatus: "source-reference" } : {}),
             ...(dto ? { declaration: sourceReference(dto, source.root),
-              fields: dto.members.filter(ts.isPropertyDeclaration).map(parameterDeclaration) } : {}) });
+              fields, ...(binding === "query" && decorator.expression.arguments.length === 0
+                ? { fieldNamesStatus: fieldNamesComplete ? "indexed" : "source-reference" } : {}) } : {}) });
         }
       }
       if (!parameters.length) continue;
@@ -561,10 +567,17 @@ export function repositoryApiDocumentation(source: RepositorySource): Map<string
           const described = Array.isArray(description.schema) ? description.schema : [];
           const issues = Array.isArray(description.issues) ? description.issues : [];
           for (const parameter of parameters) {
-            if (typeof parameter.parameterName !== "string") issues.push(`controller:${parameter.in}:source-reference`);
-            else if (!described.some(item => item && typeof item === "object" && !Array.isArray(item)
-              && item.in === parameter.in && item.name === parameter.parameterName)) issues.push(`controller:${parameter.in}:${parameter.parameterName}:not-indexed`);
-            if (parameter.defaultStatus === "source-reference") issues.push(`controller:${parameter.in}:${parameter.parameterName ?? "object"}:default-source-reference`);
+            // DTO 只用于对应已有查询声明，不从类型或装饰器补造另一份 schema。
+            const fields = parameter.fieldNamesStatus === "indexed" && Array.isArray(parameter.fields) ? parameter.fields : undefined;
+            for (const declaration of fields ?? [parameter]) {
+              if (!declaration || typeof declaration !== "object" || Array.isArray(declaration)) continue;
+              const name = fields ? declaration.name : declaration.parameterName;
+              if (typeof name !== "string") issues.push(`controller:${parameter.in}:source-reference`);
+              else if (!described.some(item => item && typeof item === "object" && !Array.isArray(item)
+                && item.in === parameter.in && item.name === name)) issues.push(`controller:${parameter.in}:${name}:not-indexed`);
+              if (declaration.defaultStatus === "source-reference") issues.push(`controller:${parameter.in}:${name ?? "object"}:default-source-reference`);
+            }
+            if (fields && parameter.defaultStatus === "source-reference") issues.push(`controller:${parameter.in}:object:default-source-reference`);
             if (parameter.pipesStatus === "source-reference") issues.push(`controller:${parameter.in}:${parameter.parameterName ?? "object"}:pipes-source-reference`);
           }
           description.issues = [...new Set(issues)];
