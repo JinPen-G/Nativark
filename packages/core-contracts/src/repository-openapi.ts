@@ -70,6 +70,15 @@ class StaticSchemaReader {
       const binding = symbol && bindings.get(symbol);
       if (binding) return this.read(binding.expression, pointer, binding.bindings, binding.seen);
       const target = symbol && this.source.target(symbol).valueDeclaration;
+      if (target && ts.isEnumDeclaration(target) && isRepositorySourcePath(this.source.root, target.getSourceFile().fileName)) {
+        const value: Record<string, SchemaValue> = Object.create(null);
+        for (const member of target.members) {
+          const constant = this.source.checker.getConstantValue(member);
+          if (typeof constant !== "string") return this.unresolved(pointer, "enum-member");
+          value[member.name.getText().replace(/^["']|["']$/g, "")] = constant;
+        }
+        return value;
+      }
       if (target && ts.isVariableDeclaration(target) && target.initializer && ts.isVariableDeclarationList(target.parent)
         && target.parent.flags & ts.NodeFlags.Const && isRepositorySourcePath(this.source.root, target.getSourceFile().fileName))
         return read(target.initializer);
@@ -162,11 +171,12 @@ class StaticSchemaReader {
     if (ts.isCallExpression(node)) {
       if (ts.isPropertyAccessExpression(node.expression) && ts.isIdentifier(node.expression.expression)
         && node.expression.expression.text === "Object" && !this.source.checker.getSymbolAtLocation(node.expression.expression)?.declarations?.length
-        && node.arguments.length === 1 && ["freeze", "keys"].includes(node.expression.name.text)) {
+        && node.arguments.length === 1 && ["freeze", "keys", "values"].includes(node.expression.name.text)) {
         const value = read(node.arguments[0]);
         if (node.expression.name.text === "freeze") return value;
-        return value !== UNRESOLVED && value !== null && typeof value === "object" && !this.partialObjects.has(value)
-          ? Object.keys(value) : this.unresolved(pointer, "dynamic-keys");
+        if (value !== UNRESOLVED && value !== null && typeof value === "object" && !this.partialObjects.has(value))
+          return node.expression.name.text === "keys" ? Object.keys(value) : Object.values(value);
+        return this.unresolved(pointer, node.expression.name.text === "keys" ? "dynamic-keys" : "dynamic-values");
       }
       if (ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "includes" && node.arguments.length === 1) {
         const value = read(node.expression.expression), search = read(node.arguments[0]);
@@ -341,11 +351,150 @@ export function repositoryApiDocumentation(source: RepositorySource): Map<string
     for (const statement of file.statements) {
       if (!ts.isVariableStatement(statement)) continue;
       for (const node of statement.declarationList.declarations) {
-        if (ts.isIdentifier(node.name) && node.initializer && /(?:OPERATIONS|SCHEMAS)$/u.test(node.name.text)) variables.push(node);
+        if (ts.isIdentifier(node.name) && node.initializer) variables.push(node);
       }
     }
   }
   const schemaMaps = variables.filter(node => node.name.getText().endsWith("SCHEMAS"));
+  const pathDefaults = new Map<boolean, ts.Expression>();
+  for (const file of source.program.getSourceFiles()) {
+    const path = repositoryPath(source.root, file.fileName);
+    const platform = path === "packages/platform-server/src/platform-openapi.ts";
+    if (!platform && path !== "packages/rental-core/src/http-openapi-contract.ts") continue;
+    const visit = (node: ts.Node) => {
+      if (ts.isObjectLiteralExpression(node) && source.value(property(node, "in")) === "path"
+        && source.value(property(node, "required")) === true) {
+        const schema = property(node, "schema");
+        if (schema) pathDefaults.set(platform, schema);
+      }
+      ts.forEachChild(node, visit);
+    };
+    for (const statement of file.statements) {
+      if (ts.isFunctionDeclaration(statement) && statement.name?.text === (platform ? "createPlatformOpenApi" : "pathParameters")
+        && statement.body) visit(statement.body);
+    }
+  }
+  const queryMap = variables.find(node => node.name.getText() === "querySchemas"
+    && repositoryPath(source.root, node.getSourceFile().fileName) === "packages/platform-server/src/platform-openapi.ts");
+  const queryReader = new StaticSchemaReader(source);
+  const querySchemas = queryMap?.initializer ? queryReader.read(queryMap.initializer) : UNRESOLVED;
+  const describeParameters = (node: ts.Expression, route: string, platform: boolean,
+    fields: Record<string, ts.Expression | undefined>, maps: ts.Expression[]): Details => {
+    const explicit = fields.parameters && describeRepositorySchema(source, fields.parameters, maps);
+    const value = explicit?.schema;
+    const issues = Array.isArray(explicit?.issues) ? explicit.issues.filter((issue): issue is string => typeof issue === "string") : [];
+    if (explicit && explicit.status !== "indexed") issues.unshift("declared-parameters:source-reference");
+    const parameters: SchemaValue[] = Array.isArray(value) ? value : [];
+    const sources: DevelopmentSourceReference[] = explicit ? [sourceReference(fields.parameters!, source.root)] : [];
+    // 公共生成器显式 parameters 覆盖推导列表，Rental 生成器仅补缺少的路径参数。
+    const supportsRenderer = platform || repositoryPath(source.root, node.getSourceFile().fileName).startsWith("packages/rental-core/");
+    const infer = supportsRenderer && (!fields.parameters || !platform && Array.isArray(value)
+      && value.every(item => item !== null && typeof item === "object" && !Array.isArray(item)
+        && typeof item.name === "string" && typeof item.in === "string"));
+    if (infer) {
+      const names = [...route.matchAll(/\{([^}]+)\}/g)].map(match => match[1]);
+      const expression = pathDefaults.get(platform);
+      const pathSchema = expression && describeRepositorySchema(source, expression, maps);
+      for (const name of names) {
+        if (parameters.some(item => item !== null && typeof item === "object" && !Array.isArray(item) && item.in === "path" && item.name === name)) continue;
+        parameters.push({ name, in: "path", required: true,
+          ...(pathSchema?.schema !== undefined ? { schema: pathSchema.schema } : {}) });
+        if (expression) sources.push(sourceReference(expression, source.root));
+        if (!pathSchema || pathSchema.status !== "indexed") issues.push(`path:${name}:source-reference`);
+      }
+      if (platform && fields.query) {
+        const names = source.value(fields.query);
+        if (!Array.isArray(names) || !names.every(name => typeof name === "string")) issues.push("query-names:source-reference");
+        else for (const name of names as string[]) {
+          const schema = querySchemas !== UNRESOLVED && querySchemas !== null && typeof querySchemas === "object" && !Array.isArray(querySchemas)
+            ? querySchemas[name] : undefined;
+          const pointer = `/${name.replaceAll("~", "~0").replaceAll("/", "~1")}`;
+          const gaps = [...queryReader.issues].filter(issue => issue.startsWith(pointer + "/") || issue.startsWith(pointer + ":") || issue.startsWith("/:"));
+          parameters.push({ name, in: "query", required: false, ...(schema !== undefined ? { schema } : {}) });
+          const location = queryReader.fields.get(pointer);
+          if (location) sources.push(location);
+          if (schema === undefined) issues.push(`query:${name}:not-indexed`);
+          issues.push(...gaps.map(gap => `query:${name}:${gap}`));
+        }
+      }
+    } else if (!platform && route.includes("{")) issues.push("path-parameter-overrides:source-reference");
+    return { ...(explicit ?? {}), source: sourceReference(node, source.root), schema: parameters,
+      sources: [...new Map(sources.map(location => [`${location.path}:${location.line}`, location])).values()],
+      issues, status: issues.length ? "source-reference" : "indexed" };
+  };
+  const parameterDeclaration = (node: ts.ParameterDeclaration | ts.PropertyDeclaration): Details => {
+    const reader = new StaticSchemaReader(source);
+    const value = node.initializer && reader.read(node.initializer);
+    return { source: sourceReference(node, source.root), name: node.name.getText(), optional: Boolean(node.questionToken),
+      ...(node.type ? { declaredType: node.type.getText() } : {}),
+      ...(node.initializer ? { defaultExpression: node.initializer.getText(),
+        ...(value !== UNRESOLVED && value !== undefined ? { declaredDefault: value } : {}),
+        defaultStatus: value === UNRESOLVED || reader.issues.size ? "source-reference" : "indexed", defaultIssues: [...reader.issues] } : {}),
+      decorators: (ts.getDecorators(node) ?? []).map(decorator => ({ expression: decorator.expression.getText(), source: sourceReference(decorator, source.root) })) };
+  };
+  const attachController = (node: ts.ClassDeclaration) => {
+    const controller = (ts.getDecorators(node) ?? []).find(decorator => ts.isCallExpression(decorator.expression)
+      && decorator.expression.expression.getText() === "Controller");
+    if (!controller || !ts.isCallExpression(controller.expression)) return;
+    const prefix = controller.expression.arguments.length ? source.value(controller.expression.arguments[0]) : "";
+    const prefixes = typeof prefix === "string" ? [prefix] : Array.isArray(prefix) && prefix.every(item => typeof item === "string") ? prefix as string[] : [];
+    for (const member of node.members) {
+      if (!ts.isMethodDeclaration(member)) continue;
+      const parameters: Details[] = [];
+      for (const parameter of member.parameters) {
+        for (const decorator of ts.getDecorators(parameter) ?? []) {
+          if (!ts.isCallExpression(decorator.expression) || !["Query", "Param"].includes(decorator.expression.expression.getText())) continue;
+          const name = source.value(decorator.expression.arguments[0]);
+          const binding = decorator.expression.expression.getText() === "Query" ? "query" : "path";
+          const type = parameter.type;
+          const symbol = type && ts.isTypeReferenceNode(type) && source.checker.getSymbolAtLocation(type.typeName);
+          const declaration = symbol && source.target(symbol).valueDeclaration;
+          const dto = declaration && ts.isClassDeclaration(declaration) && isRepositorySourcePath(source.root, declaration.getSourceFile().fileName) ? declaration : undefined;
+          parameters.push({ ...parameterDeclaration(parameter), in: binding,
+            ...(typeof name === "string" ? { parameterName: name } : { status: "source-reference" }),
+            ...(decorator.expression.arguments.length > 1 ? { pipesStatus: "source-reference" } : {}),
+            ...(dto ? { declaration: sourceReference(dto, source.root),
+              fields: dto.members.filter(ts.isPropertyDeclaration).map(parameterDeclaration) } : {}) });
+        }
+      }
+      if (!parameters.length) continue;
+      for (const decorator of ts.getDecorators(member) ?? []) {
+        if (!ts.isCallExpression(decorator.expression)) continue;
+        const method = decorator.expression.expression.getText().toUpperCase();
+        const suffix = decorator.expression.arguments.length ? source.value(decorator.expression.arguments[0]) : "";
+        const suffixes = typeof suffix === "string" ? [suffix] : Array.isArray(suffix) && suffix.every(item => typeof item === "string") ? suffix as string[] : [];
+        for (const prefix of prefixes) for (const suffix of suffixes) {
+          const path = "/" + ["api", prefix, suffix].filter(Boolean).join("/").replace(/\/+/gu, "/").replace(/:([A-Za-z0-9_]+)/gu, "{$1}");
+          const documentation = result.get(`${method} ${path}`);
+          const openapi = documentation?.details.openapiSource;
+          if (!documentation || !openapi || typeof openapi !== "object" || Array.isArray(openapi)) continue;
+          const controllers = Array.isArray(openapi.controllerParameters) ? openapi.controllerParameters : [];
+          controllers.push({ source: sourceReference(member, source.root), parameters });
+          openapi.controllerParameters = controllers;
+          const schemas = openapi.schemas;
+          const description = schemas && typeof schemas === "object" && !Array.isArray(schemas) ? schemas.parameters : undefined;
+          if (!description || typeof description !== "object" || Array.isArray(description)) continue;
+          const described = Array.isArray(description.schema) ? description.schema : [];
+          const issues = Array.isArray(description.issues) ? description.issues : [];
+          for (const parameter of parameters) {
+            if (typeof parameter.parameterName !== "string") issues.push(`controller:${parameter.in}:source-reference`);
+            else if (!described.some(item => item && typeof item === "object" && !Array.isArray(item)
+              && item.in === parameter.in && item.name === parameter.parameterName)) issues.push(`controller:${parameter.in}:${parameter.parameterName}:not-indexed`);
+            if (parameter.defaultStatus === "source-reference") issues.push(`controller:${parameter.in}:${parameter.parameterName ?? "object"}:default-source-reference`);
+            if (parameter.pipesStatus === "source-reference") issues.push(`controller:${parameter.in}:${parameter.parameterName ?? "object"}:pipes-source-reference`);
+          }
+          description.issues = [...new Set(issues)];
+          if (issues.length) {
+            description.status = "source-reference";
+            documentation.details.apiFieldsStatus = "source-reference";
+            const missing = Array.isArray(openapi.issues) ? openapi.issues : [];
+            if (!missing.includes("parameters:source-reference")) missing.push("parameters:source-reference");
+            openapi.issues = missing;
+          }
+        }
+      }
+    }
+  };
   const describe = (node: ts.Expression, method: unknown, path: unknown, fields: Record<string, ts.Expression | undefined>) => {
     if (typeof method !== "string" || typeof path !== "string" || !["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"].includes(method.toUpperCase())) return;
     const file = repositoryPath(source.root, node.getSourceFile().fileName);
@@ -362,14 +511,18 @@ export function repositoryApiDocumentation(source: RepositorySource): Map<string
       const expression = fields[name];
       return expression ? [[name, describeRepositorySchema(source, expression, maps, platform ? "Platform." : "")]] : [];
     }));
+    const parameters = describeParameters(node, route, platform, fields, maps);
+    schemas.parameters = parameters;
     const summary = source.value(fields.summary), id = source.value(fields.id);
     const operationId = platform && typeof id === "string" ? `Platform.${id}` : source.value(fields.operationId);
     const missing = Object.entries(schemas).filter(([, value]) => value.status === "not-indexed").map(([name]) => `${name}:not-indexed`);
     if (!fields.responseSchema) missing.push("responseSchema:source-reference");
-    if (!fields.parameters && (route.includes("{") || fields.query)) missing.push("parameters:source-reference");
+    if (parameters.status !== "indexed") missing.push("parameters:source-reference");
+    const hasFields = Boolean(fields.requestSchema || fields.responseSchema || fields.parameters)
+      || Array.isArray(parameters.schema) && parameters.schema.length > 0;
     result.set(key, { reference: sourceReference(node, source.root),
       ...(typeof summary === "string" ? { summary } : {}), ...(typeof operationId === "string" ? { operationId } : {}),
-      details: { apiFieldsStatus: !Object.keys(schemas).length ? "not-indexed"
+      details: { apiFieldsStatus: !hasFields ? "not-indexed"
         : missing.length || Object.values(schemas).some(schema => schema.status !== "indexed") ? "source-reference" : "indexed",
         openapiSource: { source: { ...sourceReference(node, source.root) }, schemas,
           issues: missing } } });
@@ -396,5 +549,11 @@ export function repositoryApiDocumentation(source: RepositorySource): Map<string
     ts.forEachChild(node, visit);
   };
   for (const variable of variables.filter(node => node.name.getText().endsWith("OPERATIONS"))) visit(variable.initializer!);
+  for (const file of source.program.getSourceFiles()) {
+    if (file.isDeclarationFile || !isRepositorySourcePath(source.root, file.fileName)) continue;
+    for (const statement of file.statements) {
+      if (ts.isClassDeclaration(statement)) attachController(statement);
+    }
+  }
   return result;
 }
