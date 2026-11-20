@@ -29,6 +29,7 @@ const { RentalWorkspacePrincipalRepository } = load('packages/rental-core/src/my
 const { createRentalAuthorization } = load('packages/rental-core/src/http-auth.ts');
 const { createRentalApplicationAccess } = load('packages/rental-core/src/application-access.ts');
 const { RentalCoreFactRepository } = load('packages/rental-core/src/mysql-core-facts.ts');
+const { RentalBusinessFactRepository } = load('packages/rental-core/src/mysql-business-facts.ts');
 const { AiTaskCurrentIdentityAuthority } = load('packages/ai-native-server/src/runtime/task-current-identity.authority.ts');
 const { PrismaOriginalRequestRepository } = load('packages/ai-native-server/src/runtime/task-request/prisma-original-request.repository.ts');
 const { originalIdentityHash } = load('packages/ai-native-server/src/runtime/task-request/original-request.authority.ts');
@@ -36,6 +37,7 @@ const { parseOriginalRequest } = load('packages/ai-native-server/src/runtime/tas
 const { aiPersistenceScopeColumns } = load('packages/ai-native-server/src/runtime/persistence-scope.ts');
 const { requestFingerprint } = load('packages/ai-native-server/src/runtime/rental-adapters/rental-idempotency.repository.ts');
 const { withOriginalSceneTaskTransactions } = load('packages/ai-native-server/src/runtime/scenes/original-scene-transactions.ts');
+const { createOriginalSceneInputTransactions } = load('packages/ai-native-server/src/runtime/scenes/original-scene-input-transactions.ts');
 const { withTaskCenterTransactions } = load('packages/ai-native-server/src/runtime/task-center-transactions.ts');
 const { withAiTaskTransaction } = load('packages/ai-native-server/src/runtime/task-transaction-authority.ts');
 const { composeAiOriginalScenes } = load('packages/ai-native-server/src/runtime/scenes/original-scenes.composition.ts');
@@ -74,7 +76,7 @@ function fixture(body = bodies[0], selectedLocations = false) {
   const store = createTaskInputStore({ aiScope: [scope], aiTaskOriginalRequest: [], aiTask: [], aiRun: [], aiStep: [],
     aiTaskPlanPolicy: [...new Set(bodies.map(body => body.sceneCode))].map(sceneCode => ({ scopeId: scope.id, sceneCode,
       sceneVersion: '1', revision: 1, enabled: true, allowedTools: [], limits: {}, expiresAt })),
-    aiGatewayInvocation: [], aiTaskActionInput: [], aiTaskRunPlan: [], aiTaskExecutionCharge: [], rentalApprovedSettingsChange: [],
+    aiGatewayInvocation: [], aiTaskActionInput: [], aiTaskRunPlan: [], aiTaskExecutionCharge: [], rentalApprovedSettingsChange: [], operationLog: [], rentalQuote: [],
     user: [user], workspaceMember: [member], businessWorkspace: [{ id: 'workspace-a', tenantId: 'tenant-a', status: 'ACTIVE' }],
     authSession: [{ id: 'session-a', userId: user.id, audience: 'operator', currentWorkspaceId: 'workspace-a', revokedAt: null, expiresAt }],
     tenant: [{ id: 'tenant-a', status: 'active', subscription: { startAt: now, endAt: expiresAt }, subscriptionSegments: [] }],
@@ -82,9 +84,10 @@ function fixture(body = bodies[0], selectedLocations = false) {
       createdBy: user.id, fulfillmentLocationId: 'location-a', returnLocationId: 'location-a', orderNo: 'ORDER-A',
       rentalAmount: 100, serviceAmount: 0, discountAmount: 0, couponAmount: 0, depositAmount: 20, preAuthAmount: 0, finalPayableAmount: 100,
       startAt: now, endAt: expiresAt, createdAt: now, updatedAt: now, lines: [], reservations: [], allocations: [], currency: 'CNY' }],
-  }, { aiTask: [['id'], ['scopeId', 'audience', 'ownerKind', 'ownerId', 'creationKey']] });
+  }, { aiTask: [['id'], ['scopeId', 'audience', 'ownerKind', 'ownerId', 'creationKey']],
+    aiTaskOriginalRequest: [['id'], ['scopeId', 'audience', 'ownerKind', 'ownerId', 'requestKey']] });
   const state = { grant: 'enabled', assignment: 'assigned', available: true, credential: '', queries: [],
-    currentTx: undefined, beforeTask: undefined, afterRun: undefined, afterTask: undefined, lateInput: undefined };
+    currentTx: undefined, beforeTask: undefined, afterRun: undefined, afterTask: undefined, lateInput: undefined, onInputWrite: undefined };
   const raw = async (tx, query, ...values) => {
     const q = Array.isArray(query) ? runtime.sql(query, ...values) : query;
     const sql = q.sql.replace(/\s+/gu, ' ').trim(), v = q.values;
@@ -123,6 +126,7 @@ function fixture(body = bodies[0], selectedLocations = false) {
   store.control.beforeWrite = async (table, args, data) => {
     if (table === 'aiTask' && state.beforeTask) await state.beforeTask(state.currentTx, data);
     if (table === 'aiRun' && state.afterRun) await state.afterRun(state.currentTx, data);
+    if (table === 'aiTaskOriginalRequest' && state.onInputWrite) await state.onInputWrite(state.currentTx, data);
   };
   const principals = new RentalWorkspacePrincipalRepository(store.db, {
     findUserById: (id, tx) => (tx ?? store.db).user.findFirst({ where: { id } }),
@@ -141,6 +145,9 @@ function fixture(body = bodies[0], selectedLocations = false) {
     deploymentForTransaction: tx => ({ requireAvailable: async () => { assert(tx.$queryRaw); if (!state.available) throw Error('deployment unavailable'); } }) });
   const orders = new RentalCoreFactRepository(store.db, { ...identity,
     resolveWorkspaceId: async (_tx, tenantId) => { assert.equal(tenantId, identity.getRequestIdentity().tenantId); return identity.getRequestWorkspaceId(); } });
+  const quotes = new RentalBusinessFactRepository(store.db, {
+    resolveWorkspaceId: async (_tx, tenantId) => { assert.equal(tenantId, identity.getRequestIdentity().tenantId); return identity.getRequestWorkspaceId(); }
+  });
   const token = auth.signAccessToken({ sub: user.id, tid: user.tenantId, sid: 'session-a', wid: 'workspace-a', aud: 'operator', exp: Math.floor(expiresAt.getTime() / 1000) });
   state.credential = 'Bearer ' + token;
   const credentials = { current: async () => ({ authorization: state.credential, audience: 'operator', requestId: 'original-scene-test' }) };
@@ -153,13 +160,16 @@ function fixture(body = bodies[0], selectedLocations = false) {
   const originalAuthority = { current, read: current, create: async () => ({ ...await current(), sceneVersion: '1',
     policyRevision: 1, policyHash: 'a'.repeat(64), expiresAt: expiresAt.toISOString() }) };
   const requests = new PrismaOriginalRequestRepository(store.db, originalAuthority);
-  const input = { db: store.db, credentials, transactions: { auth, orders }, creationRules };
-  const invoke = work => identity.runWithRequestIdentity({}, () => access.run(async () => {
-    const request = { method: 'POST', url: '/api/' + shared.AI_SCENE_REQUEST_HTTP_DRAFT.basePath + '/' + shared.AI_SCENE_REQUEST_HTTP_DRAFT.createTask,
+  const input = { db: store.db, credentials, transactions: { auth, orders, quotes }, creationRules };
+  const inputParticipant = createOriginalSceneInputTransactions(input);
+  const inputRequests = new PrismaOriginalRequestRepository(store.db, originalAuthority, undefined, inputParticipant);
+  const invoke = (work, options = {}) => identity.runWithRequestIdentity({}, () => access.run(async () => {
+    const operation = options.operation ?? shared.AI_SCENE_REQUEST_HTTP_DRAFT.createTask;
+    const request = { method: 'POST', url: '/api/' + shared.AI_SCENE_REQUEST_HTTP_DRAFT.basePath + (operation ? '/' + operation : ''),
       headers: { authorization: 'Bearer ' + token }, body: reference, query: {} };
     assert.equal(await guard.canActivate({ switchToHttp: () => ({ getRequest: () => request }) }), true);
     return access.withRequest(request, async () => {
-      if (!store.state.aiTaskOriginalRequest.length) {
+      if (options.seed !== false && !store.state.aiTaskOriginalRequest.length) {
         const parsed = parseOriginalRequest({ ...body, draftVersion: shared.AI_SCENE_REQUEST_DRAFT_VERSION, requestKey: 'request-a' });
         const row = { id: inputRef, scopeId: scope.id, audience: 'OPERATOR', ownerKind: 'USER', ownerId: user.id,
           contractVersion: shared.AI_SCENE_REQUEST_DRAFT_VERSION, sceneCode: parsed.sceneCode, sceneVersion: '1', requestKey: 'request-a',
@@ -202,7 +212,14 @@ function fixture(body = bodies[0], selectedLocations = false) {
     const { credentials: _, ...dependencies } = businessDependencies;
     return composeRequestBoundOriginalScenes(dependencies, { enabled: true, audience: 'operator' }).createTask(request, reference);
   };
-  return { ...store, state, invoke, create, createThroughRequest, participate, input, step, auth, guard, orders, requests };
+  const saveCommand = (key = 'input-save-a', selectedBody = body) => ({ ...structuredClone(selectedBody),
+    draftVersion: shared.AI_SCENE_REQUEST_DRAFT_VERSION, requestKey: key });
+  const requestBound = () => {
+    const { credentials: _, ...dependencies } = businessDependencies;
+    return composeRequestBoundOriginalScenes(dependencies, { enabled: true, audience: 'operator' });
+  };
+  return { ...store, state, invoke, create, createThroughRequest, participate, input, step, auth, guard, orders, requests,
+    inputRequests, inputParticipant, originalAuthority, saveCommand, requestBound };
 }
 
 async function main() {
@@ -288,6 +305,153 @@ async function main() {
     const result = await f.invoke(f.createThroughRequest);
     assert.equal(result.replayed, false); assert.equal(await f.db.aiTask.count({}), 1); assert.equal(await f.db.aiRun.count({}), 1);
     assert(f.trace.some(entry => entry.includes('FROM auth_sessions')));
+  });
+  for (const [i, body] of bodies.entries()) await test('原 INPUT 保存/幂等/重签同事务：' + body.sceneCode + ':' + i, async () => {
+    const f = fixture(body, i === 0);
+    await f.invoke(async () => {
+      const command = f.saveCommand(), receipt = await f.inputRequests.save(command);
+      assert.equal(receipt.replayed, false); assert.equal(receipt.revision, 1);
+      const replay = await f.inputRequests.save(command);
+      assert.equal(replay.replayed, true); assert.equal(replay.inputRef, receipt.inputRef);
+      const reissue = await f.inputRequests.save({ ...f.saveCommand('input-save-b'), previousInputRef: receipt.inputRef }, true);
+      assert.equal(reissue.revision, 2); assert.equal(reissue.previousInputRef, receipt.inputRef);
+      assert.equal(await f.db.aiTaskOriginalRequest.count({}), 2);
+      assert.equal(await f.db.aiTask.count({}), 0, '保存不制造 Task');
+    }, { seed: false, operation: '' });
+    const createAt = f.trace.indexOf('aiTaskOriginalRequest.create');
+    const transactionAt = f.trace.lastIndexOf('transaction.begin', createAt), end = f.trace.indexOf('transaction.commit', createAt);
+    const entries = f.trace.slice(transactionAt, end);
+    const positions = ['FROM Tenant WHERE', 'FROM auth_sessions', 'FROM platform_core_access_locks',
+      ...(i === 0 ? ['FROM `rental_orders`'] : []), 'FROM business_workspaces', 'aiTaskOriginalRequest.read', 'aiTaskOriginalRequest.create']
+      .map(part => entries.findIndex(entry => entry.includes(part)));
+    assert(positions.every(index => index >= 0));
+    for (let n = 1; n < positions.length; n++) assert(positions[n] > positions[n - 1], '保存沿 Auth/Core/资源/input 锁序');
+    assert(entries.some((entry, index) => index > positions.at(-1) && entry.includes('FROM platform_core_access_locks')), '原提交前 Core 复验');
+    assert.equal(f.trace.filter(entry => entry === 'aiTaskOriginalRequest.create').length, 2);
+  });
+  for (const [name, change] of Object.entries(changes).filter(([name]) => !['input', 'closed'].includes(name)))
+    await test('INPUT 最后等待期间撤权回滚：' + name, async () => {
+      const f = fixture();
+      f.state.onInputWrite = change;
+      await assert.rejects(f.invoke(() => f.inputRequests.save(f.saveCommand()), { seed: false, operation: '' }),
+        error => error.code !== 'AI_RESULT_UNKNOWN');
+      assert.equal(await f.db.aiTaskOriginalRequest.count({}), 0);
+      assert(f.trace.includes('aiTaskOriginalRequest.create')); assert(f.trace.includes('transaction.error'));
+      assert.equal(f.trace.filter(entry => entry === 'aiTaskOriginalRequest.create').length, 1);
+    });
+  for (const [name, change] of Object.entries({ core: f => { f.state.grant = 'disabled'; },
+    assignment: f => { f.state.assignment = 'unassigned'; }, deployment: f => { f.state.available = false; },
+    credential: f => { f.state.credential = 'Bearer changed'; } })) await test('INPUT 关联后最终围栏回滚：' + name, async () => {
+    const f = fixture();
+    await assert.rejects(f.invoke(() => f.inputRequests.save(f.saveCommand(), false, async (tx, receipt) => {
+      assert.equal(tx, f.state.currentTx);
+      await tx.operationLog.create({ data: { id: 'associated-a', inputRef: receipt.inputRef } });
+      change(f);
+    }), { seed: false, operation: '' }), error => error.code !== 'AI_RESULT_UNKNOWN');
+    assert.equal(await f.db.aiTaskOriginalRequest.count({}), 0);
+    assert.equal(await f.db.operationLog.count({}), 0);
+    assert.equal(f.trace.filter(entry => entry === 'aiTaskOriginalRequest.create').length, 1);
+  });
+  await test('INPUT 缺 participant/Auth/orders/quotes 不写', async () => {
+    const f = fixture();
+    await f.invoke(async () => {
+      await assert.rejects(f.requests.save(f.saveCommand()), error => error.code === 'AI_RESOURCE_UNAVAILABLE');
+      for (const missing of ['auth', 'orders', 'quotes']) {
+        const participant = createOriginalSceneInputTransactions({ ...f.input, transactions: { ...f.input.transactions, [missing]: undefined } });
+        const repository = new PrismaOriginalRequestRepository(f.db, f.originalAuthority, undefined, participant);
+        await assert.rejects(repository.save(f.saveCommand()), error => error.code === 'AI_RESOURCE_UNAVAILABLE');
+      }
+    }, { seed: false, operation: '' });
+    assert.equal(await f.db.aiTaskOriginalRequest.count({}), 0);
+    assert(!f.trace.includes('aiTaskOriginalRequest.create'));
+  });
+  await test('INPUT 最后资源读取等待后撤 Core 仍回滚', async () => {
+    const f = fixture(), findOrder = f.orders.findOrder.bind(f.orders);
+    f.orders.findOrder = async (...args) => {
+      const order = await findOrder(...args);
+      if (f.trace.includes('aiTaskOriginalRequest.create')) f.state.grant = 'disabled';
+      return order;
+    };
+    await assert.rejects(f.invoke(() => f.inputRequests.save(f.saveCommand()), { seed: false, operation: '' }),
+      error => error.code !== 'AI_RESULT_UNKNOWN');
+    assert.equal(await f.db.aiTaskOriginalRequest.count({}), 0);
+    assert.equal(f.trace.filter(entry => entry === 'aiTaskOriginalRequest.create').length, 1);
+  });
+  await test('INPUT 关联失败原事务回滚且不重试', async () => {
+    const f = fixture();
+    await assert.rejects(f.invoke(() => f.inputRequests.save(f.saveCommand(), false, async () => { throw Error('private association failure'); }),
+      { seed: false, operation: '' }), error => error.code === 'AI_STORAGE_UNAVAILABLE' && !error.message.includes('private'));
+    assert.equal(await f.db.aiTaskOriginalRequest.count({}), 0);
+    assert.equal(f.trace.filter(entry => entry === 'aiTaskOriginalRequest.create').length, 1);
+  });
+  await test('INPUT 失 COMMIT 原 key 观察保留，撤 Core 不重写/重准入', async () => {
+    const f = fixture(), command = f.saveCommand();
+    await f.invoke(async () => {
+      f.control.loseReply = true;
+      await assert.rejects(f.inputRequests.save(command, false, async (tx, receipt) => {
+        await tx.operationLog.create({ data: { id: 'associated-a', inputRef: receipt.inputRef } });
+      }), error => error.code === 'AI_RESULT_UNKNOWN' && error.retryable === false && error.nextAction === 'reconcile');
+      assert.equal(await f.db.aiTaskOriginalRequest.count({}), 1);
+      assert.equal(await f.db.operationLog.count({}), 1);
+      f.state.grant = 'disabled';
+      const at = f.trace.length, observed = await f.inputRequests.reconcile(command);
+      assert.equal(observed.state, 'observed'); assert.equal(observed.receipt.requestKey, command.requestKey);
+      assert(!f.trace.slice(at).some(entry => entry.includes('FOR UPDATE') || entry.includes('platform_core_access_locks') || entry.endsWith('.create')));
+      await assert.rejects(f.inputRequests.save(f.saveCommand('new-key-after-revoke')));
+      assert.equal(await f.db.aiTaskOriginalRequest.count({}), 1);
+      assert.equal(f.trace.filter(entry => entry === 'aiTaskOriginalRequest.create').length, 1);
+    }, { seed: false, operation: '' });
+  });
+  await test('INPUT 已确认提交后撤权不遮蔽原保存收据', async () => {
+    const f = fixture();
+    await f.invoke(async () => {
+      f.control.beforeCommit = async () => { f.state.grant = 'disabled'; };
+      const receipt = await f.inputRequests.save(f.saveCommand());
+      assert.equal(receipt.replayed, false); assert.equal(await f.db.aiTaskOriginalRequest.count({}), 1);
+    }, { seed: false, operation: '' });
+  });
+  await test('INPUT 重签锁前序订单与新订单，等待后前序变更拒绝', async () => {
+    const f = fixture();
+    await f.invoke(async () => {
+      const saved = await f.inputRequests.save(f.saveCommand());
+      const order = await f.db.rentalOrder.findFirst({ where: { id: 'order-a' } });
+      await f.db.rentalOrder.create({ data: { ...order, id: 'order-b' } });
+      const reissue = { ...f.saveCommand('reissue-b', { sceneCode: 'order_explanation', input: { orderId: 'order-b', question: 'status' } }),
+        previousInputRef: saved.inputRef };
+      f.state.lateInput = tx => tx.aiTaskOriginalRequest.updateMany({ where: { id: saved.inputRef }, data: { ownerId: 'other' } });
+      const at = f.trace.length;
+      await assert.rejects(f.inputRequests.save(reissue, true));
+      assert.equal(await f.db.aiTaskOriginalRequest.count({}), 1);
+      const tail = f.trace.slice(at), inputAt = tail.findIndex(entry => entry.includes('FROM ai_task_original_requests'));
+      assert.equal(tail.slice(0, inputAt).filter(entry => entry.includes('FROM `rental_orders`')).length, 2);
+      assert(!tail.includes('aiTaskOriginalRequest.create'));
+    }, { seed: false, operation: '' });
+  });
+  await test('INPUT legacy 无 selected 保留原 save/reissue/reconcile', async () => {
+    const f = fixture();
+    const original = await f.requests.save(f.saveCommand());
+    const reissued = await f.requests.save({ ...f.saveCommand('legacy-reissue'), previousInputRef: original.inputRef }, true);
+    assert.equal(reissued.revision, 2);
+    assert.equal((await f.requests.reconcile(f.saveCommand())).state, 'observed');
+    assert(!f.trace.some(entry => entry.includes('platform_core_access_locks') || entry.includes('FROM Tenant')));
+  });
+  await test('INPUT 事务租约退出后失活，不再次读取原事务', async () => {
+    const f = fixture(); let lease;
+    const repository = new PrismaOriginalRequestRepository(f.db, f.originalAuthority, undefined, {
+      begin: async (tx, target) => { lease = await f.inputParticipant.begin(tx, target); return lease; }
+    });
+    await f.invoke(() => repository.save(f.saveCommand()), { seed: false, operation: '' });
+    const after = f.trace.length;
+    await assert.rejects(lease.revalidate(), error => error.code === 'AI_ACCESS_DENIED');
+    assert.equal(f.trace.length, after);
+  });
+  for (const body of bodies.slice(0, 2)) await test('INPUT 真实 request-bound 首次保存接线：' + body.sceneCode, async () => {
+    const f = fixture(body);
+    const result = await f.invoke(request => f.requestBound().create(request, f.saveCommand()), { seed: false, operation: '' });
+    assert.equal(result.stage, 'task_metadata_created');
+    assert.equal(await f.db.aiTaskOriginalRequest.count({}), 1); assert.equal(await f.db.aiTask.count({}), 1);
+    const write = f.trace.indexOf('aiTaskOriginalRequest.create');
+    assert(write > f.trace.findIndex(entry => entry.includes('platform_core_access_locks')));
   });
   assert.equal(fs.existsSync(temporary), false);
   console.log(JSON.stringify({ checks: count, real: ['Auth', 'Guard', 'WorkspacePrincipal', 'CoreAccess', 'OrderRepository', 'OriginalRequestRepository', 'TaskCreationRepository'],

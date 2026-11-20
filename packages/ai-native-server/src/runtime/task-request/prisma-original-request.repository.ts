@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
+import { hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { AI_SCENE_REQUEST_DRAFT_VERSION, AI_SCENE_CODES, type AiSceneCode, type AiSceneTaskReceiptDraft, type AiSceneRequestReceiptDraft, type AiSceneRequestBody } from '@rental-os/shared';
 import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from '../ai-task.repository';
 import { AiTaskCreationRepository, type AiTaskCreationAuthority } from '../ai-task-creation.repository';
-import { originalIdentityHash, type AiOriginalRequestAuthority, type AiOriginalRequestNativeAuthority, type AiOriginalRequestAccess } from './original-request.authority';
+import { originalIdentityHash, type AiOriginalRequestAuthority, type AiOriginalRequestNativeAuthority, type AiOriginalRequestAccess, type AiOriginalRequestCreationAccess } from './original-request.authority';
 import { freezeOriginalInput, originalBody, originalRequestReferenceSchema, parseOriginalRequest } from './original-request.validation';
 import { AI_RETENTION_POLICY } from '../privacy/retention-policy';
 import { bindAiBodyStorageTransaction } from '../privacy/prisma-ai-body-storage';
@@ -48,11 +49,23 @@ export class AiOriginalRequestResultUnknownError extends Error {
   constructor() { super('AI_RESULT_UNKNOWN'); }
 }
 
+/** Selected-host parent/resource fences in the original save transaction.
+ * This participant neither saves input nor owns COMMIT/unknown reconciliation.
+ * A borrowed Native remains the caller's separate explicit authority contract. */
+export interface AiOriginalRequestSaveParticipant {
+  begin(tx: Prisma.TransactionClient, target: {
+    body: AiSceneRequestBody;
+    access: AiOriginalRequestCreationAccess;
+    previous: { inputRef: string; body: AiSceneRequestBody } | null;
+  }): Promise<{ revalidate(): Promise<void>; close(): void }>;
+}
+
 export class PrismaOriginalRequestRepository implements AiTaskCreationAuthority {
   private readonly tasks: AiTaskCreationRepository;
   constructor(private readonly db: Pick<PrismaClient, '$transaction' | 'aiScope' | 'aiTask' | 'aiTaskOriginalRequest'>
     & Partial<Pick<PrismaClient, 'aiDataErasure'>>,
-    private readonly authority: AiOriginalRequestAuthority, private readonly clock: () => Date = () => new Date()) {
+    private readonly authority: AiOriginalRequestAuthority, private readonly clock: () => Date = () => new Date(),
+    private readonly saveParticipant?: AiOriginalRequestSaveParticipant) {
     this.tasks = new AiTaskCreationRepository(db, this, clock);
   }
   private async stored<T>(operation: () => Promise<T>): Promise<T> {
@@ -260,7 +273,7 @@ export class PrismaOriginalRequestRepository implements AiTaskCreationAuthority 
       const checked = await this.checked(row, initial, true, false, authority); live?.();
       return checked;
     };
-    return { command, body, initial, identity, contentHash, where, verify, authority };
+    return { command, body, initial, identity, contentHash, where, verify, authority, previous };
   }
 
   private async savePreparedIn(tx: Prisma.TransactionClient, prepared: Awaited<ReturnType<PrismaOriginalRequestRepository['prepareSave']>>,
@@ -334,12 +347,38 @@ export class PrismaOriginalRequestRepository implements AiTaskCreationAuthority 
    * Association conflicts roll back the request as well; normal callers omit it. */
   async save(value: unknown, isReissue = false,
     associate?: (tx: Prisma.TransactionClient, receipt: AiSceneRequestReceiptDraft) => Promise<void>) {
+    const selected = hasRentalBusinessTenantFence();
+    const participant = selected ? this.saveParticipant : undefined;
+    if (selected && typeof participant?.begin !== 'function') throw unavailable();
     const prepared = await this.prepareSave(value, isReissue, this.authority, this.db);
     const { where, verify } = prepared;
     let completed = false;
     try {
-      const result = await this.db.$transaction(tx => this.savePreparedIn(tx, prepared, associate, undefined,
-        value => { completed = value; }), { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+      const result = await this.db.$transaction(async tx => {
+        if (!participant) return this.savePreparedIn(tx, prepared, associate, undefined, value => { completed = value; });
+        const lease = await participant.begin(tx, { body: prepared.body, access: prepared.initial,
+          previous: prepared.previous ? { inputRef: prepared.previous.row.id, body: prepared.previous.body } : null });
+        if (!lease || typeof lease.revalidate !== 'function' || typeof lease.close !== 'function') throw unavailable();
+        try {
+          // The predecessor is a locator observed before lock acquisition. Reuse
+          // the original load/visibility algorithm under the participant's locks.
+          const verifyPrevious = async () => {
+            if (!prepared.previous) return;
+            const latest = await this.load(prepared.previous.row.id, false, true, tx);
+            this.sameIdentity(prepared.initial, { scopeId: latest.row.scopeId, context: latest.context });
+            if (this.closureBinding(latest.row) !== this.closureBinding(prepared.previous.row)) throw conflict();
+          };
+          await verifyPrevious();
+          let written = false;
+          const receipt = await this.savePreparedIn(tx, prepared, associate, undefined, value => { written = value; });
+          await verifyPrevious();
+          await lease.revalidate();
+          // A final-fence failure rolls this transaction back. Only the fully
+          // completed callback can have a lost COMMIT reply, using the original key.
+          completed = written;
+          return receipt;
+        } finally { lease.close(); }
+      }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
       return freezeOriginalInput(result);
     } catch (error) {
       // Once the participant completed, a lost COMMIT reply is an unknown

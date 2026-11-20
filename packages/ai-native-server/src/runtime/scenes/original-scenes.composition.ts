@@ -18,6 +18,7 @@ import { AiQuoteGoalProjectionService, type AiQuoteGoalModelReadPort } from './q
 import { AiGuardedQuoteCoreContextSource } from '../tools/quote-route.composition';
 import type { TaskModelPolicy } from '../model-input/task-model-input';
 import { withOriginalSceneTaskTransactions, type OriginalSceneTransactionDependencies } from './original-scene-transactions';
+import { createOriginalSceneInputTransactions } from './original-scene-input-transactions';
 
 type BusinessDependencies = Parameters<typeof composeAiAuthorizedBusinessTools>[0];
 export type AiOriginalSceneDependencies = PersistedTaskAuthorizationDependencies & BusinessDependencies & {
@@ -73,7 +74,8 @@ export function composeAiOriginalScenes(input: AiOriginalSceneDependencies) {
       return withOriginalSceneTaskTransactions(input, value, () => super.createTask(value), 'creation');
     }
   }
-  const requests: PrismaOriginalRequestRepository = new OriginalSceneRequests(input.db, authority, clock);
+  const requests: PrismaOriginalRequestRepository = new OriginalSceneRequests(input.db, authority, clock,
+    createOriginalSceneInputTransactions(input));
   const facts = new AiOriginalSceneFactsService(requests, tools);
   const createHistoryReader = (tasks: Pick<AiTaskRepository, 'resolveAccess'> = composePersistedTaskAuthorization(input).tasks) =>
     new AiConversationContextReader({ db: input.db, originals: requests, tasks,
