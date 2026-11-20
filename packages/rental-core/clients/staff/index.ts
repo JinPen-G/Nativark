@@ -29,3 +29,4 @@ export { createRentalStaffInspectionTransport, type RentalStaffInspectionTranspo
 export { inspectionRows, inspectionResults, type InspectionFieldRow } from "./inspection-form";
 export { createRentalStaffLabels, type RentalStaffLabelsPorts, type Tone, type OrderTabKey } from "./labels";
 export { createRentalStaffPresenters, type RentalStaffPresentersPorts, type OrderCard } from "./presenters";
+export { createRentalStaffScan, type RentalStaffScanPorts, type ScanKind, type ScanResult, type ScanHistoryEntry } from "./scan";

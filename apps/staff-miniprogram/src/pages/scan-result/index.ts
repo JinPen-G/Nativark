@@ -7,7 +7,7 @@ import { resolveImage } from "../../core/images";
 import { assetStatusLabel, assetStatusTone, inventoryModeLabel, orderStatusLabel, orderStatusTone, workOrderStatusLabel, workOrderStatusTone, workOrderTypeLabel, type Tone } from "../../core/labels";
 import { errorState, handleCommonViewAction, loadingState, readyState, type ViewState } from "../../core/page";
 import { itemGroupCover, maskPhone } from "../../core/presenters";
-import { rememberScan, resolveScan, type ScanResult } from "../../core/scan";
+import { assertCurrentResult, rememberScan, resolveScan, type ScanResult } from "../../core/scan";
 import { can, contextVersion, isSignedIn } from "../../core/session";
 import { themeBehavior } from "../../core/theme-behavior";
 import { formatBusinessDate } from "../../core/time";
@@ -90,6 +90,10 @@ Page({
       relaunch(ROUTES.login);
       return;
     }
+    if (this.result) {
+      try { assertCurrentResult(this.result); }
+      catch { this.result = undefined; }
+    }
     if (!this.result) void this.load();
   },
 
@@ -103,8 +107,10 @@ Page({
     const version = contextVersion();
     try {
       await loadContext().catch(() => undefined);
+      if (version !== contextVersion()) return;
       const result = await resolveScan(code);
       if (version !== contextVersion()) return;
+      assertCurrentResult(result);
       this.result = result;
       this.present(result);
     } catch (error) {
@@ -113,6 +119,7 @@ Page({
   },
 
   present(result: ScanResult) {
+    assertCurrentResult(result);
     const t = terms();
     const timeZone = cachedContext()?.locations[0]?.timezone ?? DEFAULT_ZONE;
     const fallbackIcon = categoryIcon();
@@ -202,54 +209,68 @@ Page({
   remember(action: string) {
     const result = this.result;
     if (!result || result.kind === "unknown") return;
+    assertCurrentResult(result);
     rememberScan({ code: result.code, kind: result.kind, id: result.id, title: result.title, subtitle: result.subtitle, action, imageSource: this.data.imageSource || result.imageSource });
   },
 
   async onAction(event: WechatMiniprogram.TouchEvent) {
     const key = String(event.currentTarget.dataset.key ?? "") as QuickAction["key"];
     const result = this.result;
-    if (!result || this.data.busy) return;
-    const t = terms();
-    switch (key) {
-      case "detail":
-        this.remember("查看");
-        navigate(buildUrl(ROUTES.asset, { id: result.id }));
-        return;
-      case "order":
-        this.remember("查看");
-        navigate(buildUrl(ROUTES.order, { id: result.id }));
-        return;
-      case "assets":
-        this.remember("查看");
-        navigate(buildUrl(ROUTES.assets, { itemGroupId: result.id }));
-        return;
-      case "workOrder":
-        this.remember("查看");
-        navigate(buildUrl(ROUTES.workOrder, { id: result.id }));
-        return;
-      case "bind":
-        this.remember("去配货");
-        toast("请在待取货订单详情内为其配货", { duration: 3000 });
-        navigate(buildUrl(ROUTES.orders, { tab: "pending_pickup" }));
-        return;
-      case "pickup":
-      case "return": {
-        if (result.kind === "order") {
+    if (!result || result.kind === "unknown" || this.data.busy) return;
+    try {
+      assertCurrentResult(result);
+      const t = terms();
+      switch (key) {
+        case "detail":
+          this.remember("查看");
+          assertCurrentResult(result);
+          navigate(buildUrl(ROUTES.asset, { id: result.id }));
+          return;
+        case "order":
+          this.remember("查看");
+          assertCurrentResult(result);
+          navigate(buildUrl(ROUTES.order, { id: result.id }));
+          return;
+        case "assets":
+          this.remember("查看");
+          assertCurrentResult(result);
+          navigate(buildUrl(ROUTES.assets, { itemGroupId: result.id }));
+          return;
+        case "workOrder":
+          this.remember("查看");
+          assertCurrentResult(result);
+          navigate(buildUrl(ROUTES.workOrder, { id: result.id }));
+          return;
+        case "bind":
+          this.remember("去配货");
+          toast("请在待取货订单详情内为其配货", { duration: 3000 });
+          assertCurrentResult(result);
+          navigate(buildUrl(ROUTES.orders, { tab: "pending_pickup" }));
+          return;
+        case "pickup":
+        case "return": {
+          if (result.kind === "order") {
+            this.remember(key === "pickup" ? t.pickupLabel : t.returnLabel);
+            assertCurrentResult(result);
+            navigate(buildUrl(key === "pickup" ? ROUTES.pickup : ROUTES.return, { id: result.id }));
+            return;
+          }
+          const order = await this.findOrderForAsset(result.id, key);
+          assertCurrentResult(result);
+          if (!order) {
+            toast(key === "pickup" ? `该${t.assetLabel}没有待${t.pickupLabel}的订单` : `该${t.assetLabel}没有使用中的订单`, { duration: 3000 });
+            return;
+          }
           this.remember(key === "pickup" ? t.pickupLabel : t.returnLabel);
-          navigate(buildUrl(key === "pickup" ? ROUTES.pickup : ROUTES.return, { id: result.id }));
+          assertCurrentResult(result);
+          navigate(buildUrl(key === "pickup" ? ROUTES.pickup : ROUTES.return, { id: order.id }));
           return;
         }
-        const order = await this.findOrderForAsset(result.id, key);
-        if (!order) {
-          toast(key === "pickup" ? `该${t.assetLabel}没有待${t.pickupLabel}的订单` : `该${t.assetLabel}没有使用中的订单`, { duration: 3000 });
+        default:
           return;
-        }
-        this.remember(key === "pickup" ? t.pickupLabel : t.returnLabel);
-        navigate(buildUrl(key === "pickup" ? ROUTES.pickup : ROUTES.return, { id: order.id }));
-        return;
       }
-      default:
-        return;
+    } catch (error) {
+      toast(describeError(error).message, { duration: 3000 });
     }
   },
 

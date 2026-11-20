@@ -51,6 +51,18 @@ sessionEvents.on(assets.invalidateAssets);
 
 原[员工定向断言](../../../../tests/staff-miniprogram-static.test.cjs)覆盖必填、数值和照片字段，严格类型与正式 Native 构建核对旧入口和页面消费者。
 
+## 扫码候选与历史
+
+同一正式入口提供 `createRentalStaffScan`。[扫码实现](scan.ts)接收原订单、资产、型号和工单 API 方法，同一宿主的会话、当前空间、上下文版本、术语、历史存储及本机时钟。原[微信扫码入口](../../../../apps/staff-miniprogram/src/core/scan.ts)绑定一次实例，页面继续使用原函数与结果类型。
+
+纯文本依次查询订单号、资产编号或序列号、型号编码和工单号，具名 `rental-os://` 码只查询对应对象。深链 kind 先转小写再映射原四类，保留原前缀匹配。订单候选仍传原 `pageSize: 20`，当前订单 API 沿原查询字段投递，服务端条数按实际响应读取。匹配字段、普通候选读取失败后的顺序和结果投影保持。每次候选派发、异步结果投影和候选返回均复验原租户、本人、经营空间、上下文版本及本次调用代次，切换后通过宿主原 `STALE_CONTEXT` 错误拒绝，阻止继续混读新主体。候选查询沿原员工运输与服务端权限。
+
+结果归属保存在同一工厂内部的 `WeakMap`。宿主用 `assertCurrentResult(result)` 复验原结果，[相机页](../../../../apps/staff-miniprogram/src/pages/scanner/index.ts)在记历史和跳结果页前调用，[手输实际结果页](../../../../apps/staff-miniprogram/src/pages/scan-result/index.ts)在展示、记录和业务跳转前调用，资产找单的 await 返回也复验原结果。外来、克隆、较早调用或主体失效的结果沿同一错误工厂拒绝。当前 `kind=unknown` 保留原未识别展示与零历史写入，手输页继续只传原码到结果页。
+
+历史沿原 `rental-os-staff:scan-history:<tenantId>:<userId>` 键保存，同种对象 ID 去重、最新优先及 50 条上限保持，时间由宿主供给原 `Date.now()`。退出时沿[同一员工会话](../../../../apps/staff-miniprogram/src/core/session.ts)删除本人历史键。相机采集、历史列表、导航及后续业务动作由[原扫码页面](../../../../apps/staff-miniprogram/src/pages/scanner/index.ts)、[结果页](../../../../apps/staff-miniprogram/src/pages/scan-result/index.ts)和原交接页管理。
+
+原[员工扫码断言](../../../../tests/staff-miniprogram-static.test.cjs)覆盖深链、账号隔离、去重、50 条与退出清理，必要顺序及迟到冒烟核对当前主体复验，正式 Native 构建和 Staff 类型入口核对新工厂与旧页面消费。
+
 ## AI 请求接入
 
 [Action 工厂](ai-entry-actions.ts)接收原员工 request、同一会话对象、上下文版本、`can`、服务器时钟及原生成 [Action 合同值](../../../../apps/staff-miniprogram/src/components/ai-native/entry-action-runtime.d.ts)。[原适配](../../../../apps/staff-miniprogram/src/api/ai-entry-actions.ts)窄导出捕获、API 创建及原动作码；[动作会话](../../../../apps/staff-miniprogram/src/components/ai-native/entry-action-session.ts)继续管理展示寿命。完整 user 投影、会话对象引用、令牌、租户、空间及当前订单查看权限继续前后复验，宿主须返回原会话对象。
