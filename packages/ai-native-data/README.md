@@ -1,20 +1,24 @@
 # AI Native 数据贡献
 
-本包承接原 AI Native 的持久模型和 SQL 材料，供选择 AI 公共能力的宿主在同一数据库、同一 Prisma Client 和原业务事务中使用。它不提供 Runtime、Gateway、Worker、租户授权、种子或新的财务／删除账本，也不注册成业务 Core。
+本包承接原 AI Native 的持久模型和 SQL 材料，供显式选择 AI 的宿主在同一数据库、同一 Prisma Client 和原业务事务中使用。Runtime、Gateway、Worker、租户授权与原财务 / 删除账由各自服务负责，数据贡献归独立平台能力 `ai-native`。
 
-当前产物是可校验的源码与新库数据候选。公共数据仍为 40 模型、`0.1.8`，Rental 仍为 121 模型、`0.1.0`；选择本包再加入原 AI 的 86 模型和 16 枚举，组合结果为 **247 模型、35 枚举**。原 API 的 241 模型与其相差的 6 个对象是新增平台 Core 访问、绑定及操作模型。原 API 与公共／Rental 的模型差集中只有这 86 个 AI 模型，没有旧车辆域模型或未归属业务表。
+本版提供固定数据贡献、完整构建包校验、新库候选及 MySQL 结构计划。公共数据为 40 模型、`0.1.8`，Rental 为 121 模型、`0.1.0`，选择本包再加入原 AI 的 86 模型和 16 枚举，组合为 **247 模型、35 枚举**。原 API 为 241 模型，差出的 6 个对象归平台 Core 访问、绑定及操作。固定材料与前置以 [provenance](prisma/provenance.json) 和 [preparation](src/preparation.ts) 为准。
 
 ## 入口与组合
 
-- [data.ts](src/data.ts)：`createAiNativeDataContribution(files)` 接收同一固定包的字节快照，核对 schema、来源清单和 58 份迁移的路径及 SHA-256，返回独立 `platform-capability / ai-native` 所有者。`AI_NATIVE_DATA_FILES` 列出必需的 60 份数据文件；未知 `prisma/` 材料、缺项、空文件或摘要变化均拒绝。`AI_NATIVE_DATA_SHA256` 是这些有序路径／摘要的指纹，不是整个 npm 包、构建或部署摘要。
-- [prisma-schema.ts](src/prisma-schema.ts)：`composeAiNativePrismaSchema(base, contribution)` 在**已经组合公共与 Rental 的源码**上追加 AI 模型和 [21 条原关系回指](src/prisma-relations.ts)。它使用公共纯 schema 组合器，但不把 AI 加入业务 Core 清单。公共 40 模型单独作为 base 会因缺少 Rental 关系目标而拒绝；重复加入 AI 也拒绝。
-- [preparation.ts](src/preparation.ts)：`createAiNativeDataPreparation({ baseSchema, contribution })` 返回新的内存文件集合：组合 schema、58 份 AI 迁移和 `ai-native.data.candidate.json`。状态固定为 `prepared / pending`，返回实际缺口；不读 `.env`、生成 Client、连接数据库、执行 DDL 或覆盖已有文件。
-- [data-package.ts](src/data-package.ts)：`createAiNativeDataRelease({ files, source })` 锁定完整构建包的文件集合与归档摘要；`readAiNativeDataPackage` 校验字节快照，`requireAiNativeDataPackage` 校验普通安装目录。包须包含 `data`、`prisma-schema`、`preparation`、`data-package`、`mysql-data` 五个正式出口的真实 JS 与声明，以及 schema、SQL、说明和许可；仅有源码或 SQL 指纹不能通过。
-- [mysql-data.ts](src/mysql-data.ts)：正式 `@rental-os/ai-native-data/mysql-data` 的 `createAiNativeMysqlDataPlanFromContribution(contribution)` 从同一固定包形成 MySQL 计划，读取实际表、列、索引、CHECK 和外键，供原迁移账观察器使用。
+- `createAiNativeDataContribution(files)` 接收同一固定包的字节快照，核 schema、来源清单和 58 份迁移的路径 / SHA-256，返回 `platform-capability / ai-native` 所有者。`AI_NATIVE_DATA_FILES` 列出 60 份必需数据文件，未知 `prisma/` 材料、缺项、空文件或摘要变化拒绝。`AI_NATIVE_DATA_SHA256` 仅指这些有序路径 / 摘要的指纹，完整包另有归档摘要。[data.ts](src/data.ts)
+- `composeAiNativePrismaSchema(base, contribution)` 在**已组合公共与 Rental 的源码**上追加 AI 模型及 21 条原关系回指。公共 40 模型单独作为 base 缺少 Rental 关系目标，重复加入 AI 也拒绝。schema 使用公共纯组合器，业务 Core 清单由宿主单独核定。[prisma-schema.ts](src/prisma-schema.ts) · [回指](src/prisma-relations.ts)
+- `createAiNativeDataPreparation({ baseSchema, contribution })` 返回新的内存文件集合，包含组合 schema、58 份迁移和 `ai-native.data.candidate.json`。状态固定 `prepared / pending`，结果给出完整包 / 部署与迁移执行缺口。保存、Client 生成、连接和 DDL 由所属宿主的独立入口办理。[preparation.ts](src/preparation.ts)
+- `createAiNativeDataRelease({ files, source })` 锁定完整构建包与归档摘要，`readAiNativeDataPackage` 核字节快照，`requireAiNativeDataPackage` 核普通安装目录。包须有 data、prisma-schema、preparation、data-package、mysql-data 五个正式出口的真实 JS / 声明及 schema、SQL、说明和许可，缺实际构建入口拒绝。[data-package.ts](src/data-package.ts) · [正式出口](package.json)
+- `createAiNativeMysqlDataPlanFromContribution(contribution)` 从同一固定贡献形成 MySQL 计划，核实际表、列、索引、CHECK / 外键，供原迁移账观察器使用。正式导入为 `@rental-os/ai-native-data/mysql-data`。[mysql-data.ts](src/mysql-data.ts)
 
-宿主顺序如下。数据字节须来自同一固定安装包；公共与 Rental 仍按各自发行核定。宿主保存候选时沿已有“只写新目录、失败清理、不覆盖当前组合”的入口。
+宿主供给所选 publicSchema、已核 Rental 贡献和同一固定包的 aiDataFiles，再按下列顺序组合。保存候选沿已有只写新目录、失败清理的入口，完整锁与当前组合分别保管。
 
 ```ts
+import { composeCorePrismaSchema } from "@rental-os/core-contracts/prisma";
+import { createAiNativeDataContribution } from "@rental-os/ai-native-data/data";
+import { createAiNativeDataPreparation } from "@rental-os/ai-native-data/preparation";
+
 const ai = createAiNativeDataContribution(aiDataFiles);
 const baseSchema = composeCorePrismaSchema(publicSchema, [rental.prisma]);
 const prepared = createAiNativeDataPreparation({ baseSchema, contribution: ai });
@@ -28,10 +32,10 @@ const prepared = createAiNativeDataPreparation({ baseSchema, contribution: ai })
 
 | 原接点 | 直接及必须继续保留的关联 | 数据所有者 |
 | --- | --- | --- |
-| [inspection 失败出箱](../../apps/api/src/modules/ai-native/business-events/prisma-business-failure-outbox.ts) | `RentalInspectionRecord`、`AiBusinessFailureOutbox`；`automationInputs.some` 保留 `AiAutomationInput` 关系和原去重语义 | 检查事实属于 Rental；事件与自动化输入属于 AI |
-| [return-exception-source](../../apps/api/src/modules/ai-native/business-events/return-exception-source.ts) | 读取原检查 JSON、revision、orderId 并计算指纹，不创建表 | Rental 原检查事实 |
-| 通知草稿正文读取 | `RentalNotificationLog` 与 `AiDataErasure` 同一原 ID／哈希删除收据 | 草稿日志属于 Rental，删除账属于 AI |
-| [通知正文清理](../../apps/api/src/modules/ai-native/privacy/retention-notification-draft.ts) | 出箱、自动化输入、Task／Run 的真实关联；[未决效果](../../apps/api/src/modules/ai-native/task-unresolved-effects.ts)继续核 Step、ApprovalConsumption、执行资源、Gateway、admission、reservation 及原账 | 沿原 AI 保留链；不以无关任务无限 hold，也不以空正文伪造删除 |
+| [inspection 失败出箱](../ai-native-server/src/business-events/prisma-business-failure-outbox.ts) | `RentalInspectionRecord`、`AiBusinessFailureOutbox`；`automationInputs.some` 保留 `AiAutomationInput` 关系和原去重语义 | 检查事实属于 Rental；事件与自动化输入属于 AI |
+| [return-exception-source](../ai-native-server/src/business-events/return-exception-source.ts) | 读取原检查 JSON、revision、orderId 并计算指纹，不创建表 | Rental 原检查事实 |
+| [通知草稿正文读取](../ai-native-server/src/privacy/notification-draft-reader.ts) | `RentalNotificationLog` 与 `AiDataErasure` 同一原 ID／哈希删除收据 | 草稿日志属于 Rental，删除账属于 AI |
+| [通知正文清理](../ai-native-server/src/runtime/privacy/retention-notification-draft.ts) | 出箱、自动化输入、Task／Run 的真实关联；[未决效果](../ai-native-server/src/runtime/task-unresolved-effects.ts)继续核 Step、ApprovalConsumption、执行资源、Gateway、admission、reservation 及原账 | 沿原 AI 保留链；不以无关任务无限 hold，也不以空正文伪造删除 |
 | 通知恢复副本 | 同一事务内锁定 `RentalBusinessStateSnapshot`，只处理目标通知 JSON | Rental 快照；AI 维护服务拥有原受权操作 |
 | 平台正文维护 | 原 `AiScope`、Task／Request 与公共 `OperationLog` 删除记录，平台归属仍为 null tenant/workspace | AI 模型与公共审计分别保留原所有者 |
 
@@ -64,7 +68,7 @@ const prepared = createAiNativeDataPreparation({ baseSchema, contribution: ai })
 
 准备本包时按下面三个步骤装配。
 
-1. 构建本包，从同一构建包取得字节集合，以 `createAiNativeDataRelease({ files, source })` 生成固定发行资料。`source` 是实际发行提交；原 SQL 来源仍由 provenance 保存。
+1. 在已有 npm workspace 依赖环境运行 `npm run build -w @rental-os/ai-native-data`，从同一构建包取得完整字节集合，以 `createAiNativeDataRelease({ files, source })` 生成固定发行资料。`source` 是实际发行提交，原 SQL 来源由 provenance 保存。构建前置以 [包脚本](package.json) 为准。
 2. 将发行资料加入所选部署锁的 `dataCapabilities`，使用 `checkPlatformDataCapabilities(lock)` 核数据前置。Core 安装检查使用 `coreDeploymentHostVersions(lock)` 的同一版本视图。本版材料只支持公共数据 `0.1.8` 与 Rental 数据 `0.1.0` 的已声明范围和 initial 摘要。
 3. 以 `createCoreMigrationDeployment({ lock, platform, cores, dataCapabilities })` 准备完整迁移集合。`dataCapabilities` 是能力 ID 到完整已核包字节的 Map，必须覆盖锁中的全部所选能力。另用上面的 schema 组合器形成同一宿主的完整 schema，再沿宿主准备入口保存新的待部署目录。
 
@@ -74,11 +78,22 @@ const prepared = createAiNativeDataPreparation({ baseSchema, contribution: ai })
 
 宿主向[原账观察器](../core-host/src/mysql-deployment.ts)显式登记能力的 `data`、原迁移名称与真实 `readPhysical`，再通过 `catalogue.requireDataCapabilityAvailable("ai-native")` 核准入。Core 的 `manifest.requires` 只声明所需宿主能力版本；业务权限、工具发布、Gateway、预算及批准继续按原入口执行。
 
+## 实际宿主消费者
+
+- 首次 schema 准备使用源码入口的 `rental-ai` 模式，先公共与 Rental，再追加同一 AI 贡献，供本宿主独占 generated/client。数据包与生成声明的模式须一致。[schema 准备](../../scripts/prepare-selected-prisma-schema.cjs) · [所选 Client 编译器](../../scripts/build-selected-prisma.cjs)
+- `createRentalDeploymentFiles` 核固定公共、Rental 及显式 AI 完整包，组合最终 schema / 迁移 / 部署锁。CLI 只写本宿主的新候选目录，结果保持 prepared / pending。[部署准备](../../apps/rental-api/src/prepare-deployment.ts)
+- `composeRentalAiApplication` 从部署锁定位同一安装包，用 requireAiNativeDataPackage 和 MySQL 计划供给实际装配。原账 / 物理观察由同一 Native 提供，AI 请求再核 requireDataCapabilityAvailable("ai-native")，普通 Rental 使用自己的原准入路径。[AI 装配](../../apps/rental-api/src/ai-assembly.ts) · [同一宿主](../../apps/rental-api/src/assembly.ts) · [宿主构建与运行](../../apps/rental-api/README.md)
+
+本版依赖 Rental 的原关联，公共 40 模型宿主须先具备已声明的 Rental 数据前置。选择数据、准备迁移、当前物理 / 原账可用和 AI 工具发布各由对应入口核定。
+
 ## 真实物理观察与旧库边界
 
 通过正式 MySQL 计划把固定贡献交给宿主的同一原账观察器。
 
 ```ts
+import { createAiNativeMysqlDataPlanFromContribution } from "@rental-os/ai-native-data/mysql-data";
+import { createMysqlCoreDeploymentObservation } from "@rental-os/core-host/mysql-deployment";
+
 const aiPlan = createAiNativeMysqlDataPlanFromContribution(ai);
 const observations = createMysqlCoreDeploymentObservation({
   database,
@@ -94,11 +109,17 @@ const observations = createMysqlCoreDeploymentObservation({
 
 候选保持prepared/pending，未执行DDL或初始化；实际宿主必须核固定完整包、部署锁和当前物理/原账，再调用catalogue.requireDataCapabilityAvailable("ai-native")。旧完整库的B02桥接、原迁移名和备份恢复仍走原升级链，不能把旧账改名当新候选已执行。
 
-## 本次验证范围
+## 验证入口与证据范围
 
-- 在原离线守卫下用 Prisma 5.22 官方 WASM 解析组合 schema，并由官方 generator 在内存生成声明：247 模型／35 枚举。86 个原 AI 模型的字段、关系、主键和唯一键语义一致，21 条回指补齐；公共组合器会省略模型级说明，比较将说明与结构分开。
-- 使用真实组合声明及单独公共 40 模型声明完成严格类型核验：26 个入口、2084 个源码单元、0 个诊断。覆盖新数据模块、原出箱和 return 源、完整 privacy 模块与未决效果链，并用真实 `RentalDatabaseClient` 核原保留服务、公共依赖和同事务出箱参数，没有用类型强转掩盖模型差异。
-- 固定来源核对 102 个 schema 原块、58 份 SQL 及所有提取／排除范围；SQL 建表覆盖 86 个模型，没有未知外部表引用。数据准备及 7 个拒绝路径通过，候选输出 60 个文件并保持 pending。
-- 命令为带原 `prisma-offline-preload.cjs` 的短 Node stdin；最终 schema／行为、严格类型和来源核验退出码均为 0。过程中的说明字段比较和虚拟探针相对路径问题已分别修正核验输入后复验。没有落盘 Client／dist、临时文件或后台进程。
+| 现有入口 | 核对内容 | 证据范围 |
+| --- | --- | --- |
+| [所选源码类型](../../scripts/check-selected-prisma-types.cjs) | rental-ai 组合、官方 Prisma 5.22 声明及所选源码 / 出口 | WASM / generator 与严格编译只驻内存，真实 Client 和数据库另验 |
+| [固定发行](../../scripts/verify-rental-distribution.cjs) | 明确 --commit 的真实配置 emit、AI 完整包 / 归档 / 安装准备和正式出口 | 固定 Git 树与内存产物，冷安装 / Docker / OS 部署另验 |
+| [宿主打包](../../tests/rental-host-package.test.cjs) | 普通 / AI 同版包、部署锁、所选 Client 与 CLI 文件运输 | 显式内存文件 / 运输 fixture，真实迁移与启动另验 |
+| [AI 宿主组合](../../apps/rental-api/test/ai-composition.test.cjs) | 同一数据贡献与原 AI / Rental 依赖、HTTP 和恢复消费者 | 依赖、SQL、授权与外部运输按用例明确的 fixture 取证 |
 
-没有执行真实 MySQL DDL、迁移、物理观察、B02 旧库升级或恢复，也没有启动应用／HTTP、模型或供应商调用。完整包／部署合同已提供；真实安装、物理观察、保留清理和生产发布仍须分别取得证据。
+本版 schema 与来源材料可逐字节核 102 个原模型 / 枚举块、58 份 SQL 和所有提取 / 排除范围，组合目标为 247 模型 / 35 枚举。createAiNativeDataPreparation 输出 60 文件并保持 pending，完整构建包以五个真实出口及固定摘要另行校验。阶段执行次数、命令与固定版本保留在原开发记录。
+
+运行前读取上述脚本及其依赖 / 写入范围，按原离线守卫和本树绝对任务目录准备 audit / TEMP / TMP / 缓存。类型、来源、内存构建和结构 fixture 与真实安装 / 数据库证据分别记录。[离线守卫](../../tests/fixtures/ai-native/prisma-offline-preload.cjs) · [验证与清理规则](../../AGENTS.md#修改验证与交付)
+
+候选仍待实际宿主执行 DDL / 迁移与原账 / 物理观察。B02 旧库升级 / 备份恢复、正文保留清理、HTTP / 模型 / 供应商及生产发布分别按原范围取证，prepared / pending 和结构观察各保留自身含义。

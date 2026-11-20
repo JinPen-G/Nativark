@@ -6,6 +6,9 @@
 
 | 入口 | 职责与直接消费者 |
 | --- | --- |
+| [完整应用](src/application.ts)、[仓储组合](src/application-repositories.ts)、[领域基础](src/application-domain.ts)、[独立宿主](../../apps/rental-api/src/assembly.ts) | 完整应用以同一数据库组合仓储、资金、事实和业务服务，事件沿调用方事务传播。独立宿主取得该服务图，分别管理构造、启动与退出。 |
+| [客户应用](src/application-customers.ts)、[客户端应用](src/application-client.ts)、[企业应用](src/application-enterprise.ts)、[品类应用](src/application-category.ts) | 完整应用复用同一客户主档、会员、企业政策和资金，再组合客户端、企业及品类服务。业务读写沿各服务的当前权限、原键和事务执行。 |
+| [HTTP选择器](src/application-http.ts)、[平台选择器](src/application-platform.ts)、[AI业务源](src/application-ai-sources.ts)、[启用AI的宿主组合](../../apps/rental-api/src/ai-composition.ts) | HTTP和平台选择器供独立宿主复用同一实例。AI业务源由完整应用构造并返回，启用AI的宿主通过显式Provider别名选择原业务服务。 |
 | [应用参加者](src/application-participants.ts)、[宿主生命周期](../../apps/rental-api/src/lifecycle.ts) | 原到期作业和后台服务由宿主启动；退出先停止新tick，再等空间枚举、命名锁及已进入业务全部返回，最后断开同一数据库。不会取消已提交操作或重做unknown。 |
 | [HTTP文档贡献](src/http-openapi.ts)、[原操作](src/http-openapi-operations.ts)、[同源schema](src/http-openapi-schemas.ts) | `/http-openapi` 提供平台可组合的 Rental 机器契约、原组合兼容出口与明确字段/路由缺口 |
 | [商品与资产前端](admin/catalog/README.md)、[统一页面贡献](admin/index.tsx)、[请求与图片](admin/catalog/client.ts) | `/admin/catalog` 持有商品、资产、库存、照片与状态历史，七个窄出口提供页面、请求、上下文、图片、列表能力及纯术语；统一贡献组合九页，宿主提供当前身份、经营空间及原鉴权传输 |
@@ -88,7 +91,7 @@
 | [企业政策](src/mysql-enterprise-policy.ts)、[政策合同](src/enterprise-policy.ts)、[预约依据](src/enterprise-booking.ts) | `/mysql-enterprise-policy` 在原事务核商户/企业/成员交集及原报价、建单/续租批准，原键只读保存结果；合同不提供价格、保证金或新的业务权限 |
 | [邀请与成员](src/mysql-enterprise-members.ts)、[管理员连续性](src/enterprise-administrator-continuity.ts)、[原交接结果](src/enterprise-transfer-decision.ts) | `/mysql-enterprise-members` 保留原邀请额度/一次性原码、成员修订和已接受交接；关系写入调用同一客户仓储，不复活旧授权或重放原K/C |
 | [企业申请](src/mysql-enterprise-application.ts)、[管理请求](src/mysql-enterprise-management-request.ts)、[付款证明来源](src/enterprise-payment-proof-source.ts) | 对应正式子出口保留原申请材料、主体映射、首次管理员绑定、明确审核和原订单/冻结附件；管理审核不直接变更政策、授信或确认付款 |
-| [企业待办](src/mysql-enterprise-task-center.ts)、[行政交接](src/mysql-enterprise-rental-handoff.ts)、[成员审计](src/mysql-enterprise-membership-audit.ts)、[原交接投影](src/enterprise-transfer-receipt-projection.ts) | 原持久对象与收据形成待办/历史；同一客户、批准、资格和订单读取参加者经[私有端口](src/enterprise-workflow-ports.ts)接入，读取后继续复验当前权限 |
+| [企业待办](src/mysql-enterprise-task-center.ts)、[行政交接](src/mysql-enterprise-rental-handoff.ts)、[成员审计](src/mysql-enterprise-membership-audit.ts)、[原交接投影](src/enterprise-transfer-receipt-projection.ts) | 原持久对象和收据经[私有端口](src/enterprise-workflow-ports.ts)形成待办与历史。加入待办沿原事务维护到期请求，消息复验当前个人会话，企业队列复验原关系、修订和所需动作。 |
 | [预约批准](src/mysql-enterprise-approval.ts)、[续租费用批准](src/mysql-enterprise-extension-approval.ts)、[换货费用批准](src/mysql-enterprise-exchange-approval.ts) | 三个正式MySQL子出口保留原申请/审核/费用确认和原结果；明确提交才参加Core原事务，费用批准不代替资金、检查同意或履约权限 |
 | [企业商户委托](src/mysql-enterprise-merchant-delegation.ts)、[明确委托提交](src/mysql-enterprise-merchant-order-submission.ts)、[实际参加者](src/enterprise-approval-ports.ts) | 原D/K、持久报价与客户告知绑定同一批准/确认实例；当前商户身份由原Auth供给，unknown及已消费结果只查原来源和收据 |
 | [客户API合同](src/client-contracts.ts)、[续租费用](src/enterprise-expense.ts)、[换货费用](src/enterprise-exchange.ts) | `/client-contracts`、`/enterprise-expense`、`/enterprise-exchange` 是纯业务声明及原运行时投影；原shared兼容再导出，客户无需加载MySQL或Nest服务 |
@@ -125,17 +128,19 @@
 | [配置共同依据](src/configuration-basis.ts)、[规则版本链](src/rule-version-chain.ts) | `/configuration-basis` 维护原绑定修订及读取上限，`/rule-version-chain` 保留租期时点匹配、展示状态、发布/编辑/作废边界及追加版本号；原API转接同一实现 |
 | [审计仓储](src/capability-audit.ts)、[内置能力组合](src/capabilities/index.ts) | `/capability-audit` 通过本表窄端口写放行/拒绝审计和读历史，`/capabilities` 显式登记当前及兼容实现。原 Nest provider 供给同一数据源和调用方事务 |
 | [品类治理服务](src/mysql-category-governance.ts)、[私有存储/身份接点](src/category-governance-storage.ts)、[创建模板](src/category-creation-templates.ts)、[定义差异](src/category-definition-diff.ts) | `/mysql-category-governance` 保留平台草稿/不可变发布、独立开通/采用政策及原收据；当前SaaS身份、角色和原数据源由宿主供给，发布不变更商户绑定 |
-| [采用准备](src/mysql-category-preparation.ts)、[最终采用](src/mysql-category-adoption.ts)、[宿主接点](src/category-adoption-ports.ts) | `/mysql-category-preparation` 保存预备数据和原批次，`/mysql-category-adoption` 持有最终事务及原收据；复用实际Auth/商业读取和同一实例，不重新初始化或改历史 |
+| [采用准备](src/mysql-category-preparation.ts)、[最终采用](src/mysql-category-adoption.ts)、[宿主接点](src/category-adoption-ports.ts)、[当前权限](src/category-adoption-access.ts) | `/mysql-category-preparation` 保存预备数据和原批次，`/mysql-category-adoption` 持有最终事务及原收据。两项从宿主复用同一Auth、商业读取和实际业务实例，准备数据与历史来源沿原键保留。 |
 | [采用提交阶段](src/category-adoption-transaction-phase.ts)、[最终配置校验](src/category-adoption-final-compatibility.ts)、[共同读取](src/category-adoption-compatibility-reader.ts) | 当前身份→商业目录→品类/政策→空间锁，实际候选/完整字段/关联/规模复核后，实体/唯一声明/能力/绑定/审计/原收据同提交 |
-| [准备批次](src/category-preparation-batches.ts)、[候选实体](src/category-adoption-records.ts)、[唯一声明](src/category-adoption-entity-writer.ts) | 只合并明确的预备字段，保留旧批次依据；最终采用才变更活动实体，唯一性只重建受影响字段，历史属性和原绑定保持 |
+| [准备批次](src/category-preparation-batches.ts)、[候选实体](src/category-adoption-records.ts)、[唯一声明](src/category-adoption-entity-writer.ts)、[能力提交](src/category-adoption-capability-writer.ts) | 只合并明确的预备字段，保留旧批次依据。最终采用同事务提交实体、受影响唯一声明和能力配置，历史属性和准备资料保留。 |
 | [配置兼容](src/category-adoption-business-compatibility.ts)、[价格结构](src/category-adoption-price-structure.ts)、[商业依赖](src/category-adoption-commercial.ts) | 以原当前/排期配置和代码登记的依赖核目标兼容，详细检查沿共同reader查找；不改当前规则或给旧报价补今天的配置 |
+| [规则结构](src/category-adoption-rule-structure.ts)、[规则参数](src/category-adoption-rule-parameters.ts)、[营销引用](src/category-adoption-marketing-references.ts)、[价格引用](src/category-adoption-price-references.ts) | 验证原规则结构/参数与当前、排期的价格及营销引用，复用原DTO和执行规则。 |
+| [商品关系](src/category-adoption-product-graph.ts)、[容量配置](src/category-adoption-service-capacity.ts)、[设置执行](src/category-adoption-settings-execution.ts)、[履约引用](src/category-adoption-fulfillment-references.ts)、[能力引用](src/category-adoption-references.ts) | 商品/资产、服务容量、营业日/配货、履约关系与能力引用分别返回局部检查结果，完整门槛由共同读取器和最终采用复核汇总。 |
 | [品类治理合同](src/category-governance.ts) | `/category-governance` 持有原发布、采用、准备和收据声明，原 shared 出口再导出同一对象 |
 | [品类解析](src/category-runtime.ts)、[只读存储端口](src/category-storage.ts) | `/category-runtime` 提供原发布正文校验、历史引用、推荐版本、当前空间绑定和开通选项。各方法只要求自己使用的事务读取项，绑定与采用权限由原调用者核验 |
 | [品类身份](src/category-identity.ts)、[扩展一致性](src/rental-extension-registry.ts)、[空间展示名称](src/workspace-names.ts) | `/category-identity` 和 `/extensions` 供原订阅/会员及发布/启动消费。根出口保留原默认展示名称，旧 shared 再导出同一常量 |
 | [专业商品属性规则](src/item-group-validation.ts) | `/item-group-validation` 登记原露营容量与工程额定载荷限制。原商品保存流程在通用字段校验后调用，品类规则随 Rental 模块维护 |
-| [原业务服务入口](../../apps/api/src/modules/rental-core/README.md) | 当前持久化、事务、Controller、能力和作业，继续逐片移入本包 |
+| [原业务服务入口](../../apps/api/src/modules/rental-core/README.md) | 旧API业务模块转接本包同一持久化服务、Controller、能力与作业，从原导读继续定位合同、调用方和恢复入口。 |
 | [资金事实服务](src/mysql-funding.ts)、[资金事件规则](src/funding-events.ts)、[存储与应收接点](src/funding-storage.ts) | `/mysql-funding` 保留原余额、收退款/保证金门禁、原收据与企业现金核销；`/funding-events` 保留独立账和金额算法。外部支付、原身份/可见范围与企业应收由正式接点供给 |
-| [支付运行](src/mysql-payment-runtime.ts)、[原参加者](src/payment-storage.ts)、[支付合同](src/payment-contracts.ts) | 原支付/退款引用、订单和配置锁、资金同事务、回调缓存、原键与unknown恢复，宿主供给完整Auth/ALS和原资金/失败出箱，签名与受控请求从公共支付运输供给 |
+| [支付运行](src/mysql-payment-runtime.ts)、[原参加者](src/payment-storage.ts)、[支付合同](src/payment-contracts.ts)、[公共支付运输](../platform-server/src/modules/integrations/payment-provider-transport.ts) | 原支付/退款引用、订单和配置锁、资金同事务、回调缓存、原键与unknown恢复，宿主供给当前Auth/ALS、原资金和失败出箱，签名与受控供应商请求沿公共支付运输执行。 |
 | [支付HTTP](src/http-payments.ts)、[退款请求](src/http-payment-refund.dto.ts)、[对账请求](src/http-payment-reconciliation-file.dto.ts)、[对账文件](src/mysql-payment-reconciliation-file.ts) | 原付款/退款回调、运营动作和对账路径，服务实例从明确令牌供给。原CSV解析、批次幂等与差异审核沿当前完整经营空间财务权执行 |
 | [支付精度](src/payment-money.ts)、[Stripe金额/收据](src/stripe-payment.ts)、[对账权限](src/payment-reconciliation-access.ts) | 原舍入、分值、特殊币种、可信收据和完整经营空间财务授权，同一次请求返回前与提交点继续复验 |
 | [服务容量](src/mysql-service-capacity.ts)、[容量存储与身份接点](src/service-capacity-storage.ts) | `/mysql-service-capacity` 管理原服务/地点/时段数量、预留与确认、部分履约和释放收据。报价只读观察不维护账；写入复用原品类锁和调用方事务 |
