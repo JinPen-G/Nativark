@@ -5,6 +5,7 @@ import type { CorePackageCatalogue } from "@rental-os/platform-core-host/core-pa
 import type { CorePackagePreparationPlan, CorePackagePreparationRequest } from "@rental-os/platform-core-host/core-package-preparation/protocol";
 import { ActionButton, Alert, Button, DataTableStatus, DataTableText, Input, ListSection, Modal, RecordFacts, Table } from "../../components/ui";
 import { useLocale } from "../../app/locale";
+import { formSnapshotFingerprint } from "../../app/serverFormSnapshot";
 import type { CorePackagePreparationControls } from "./useCorePackagePreparation";
 
 export type CorePackageUpdateTarget = { kind: "platform" } | { kind: "core"; coreId: string }
@@ -59,8 +60,11 @@ export function CorePackagePreparationDialog({ target, open, catalogue, controls
 }) {
   const { locale } = useLocale(), en = locale === "en-US", referenceId = useId();
   const [reference, setReference] = useState(target.kind === "reference" ? target.reference ?? "" : "");
-  const fixed = target.kind === "release" ? controls.release?.release ?? target.release : undefined;
-  const selected = target.kind === "release" ? controls.selected : undefined;
+  const fixed = target.kind === "release" ? target.release : undefined;
+  const release = fixed && controls.release
+    && formSnapshotFingerprint(controls.release.release) === formSnapshotFingerprint(fixed) ? controls.release : undefined;
+  const selected = fixed && controls.selected
+    && formSnapshotFingerprint(controls.selected.release) === formSnapshotFingerprint(fixed) ? controls.selected : undefined;
   const versions = catalogue?.versions.status === "observed" ? catalogue.versions : undefined;
   const updateTarget = target.kind === "reference" ? target.update
     : fixed && versions?.cores.some(core => core.locked.manifest.id === fixed.coreId) ? { kind: "core" as const, coreId: fixed.coreId } : undefined;
@@ -68,9 +72,13 @@ export function CorePackagePreparationDialog({ target, open, catalogue, controls
   const request: CorePackagePreparationRequest | undefined = packageReference
     ? updateTarget ? { operation: "update", package: { ...updateTarget, reference: packageReference } }
       : { operation: "install", package: { reference: packageReference } } : undefined;
+  const preview = controls.preview && (target.kind === "receipt"
+    || request && formSnapshotFingerprint(controls.preview.plan.request) === formSnapshotFingerprint(request)) ? controls.preview : undefined;
+  const prepared = controls.prepared && (target.kind === "receipt"
+    || request && formSnapshotFingerprint(controls.prepared.plan.request) === formSnapshotFingerprint(request)) ? controls.prepared : undefined;
   const blocked = controls.busy || Boolean(controls.pending) || Boolean(controls.storageError);
-  const plan = controls.prepared?.plan ?? controls.preview?.plan;
-  const hash = controls.prepared?.sha256 ?? controls.preview?.sha256;
+  const plan = prepared?.plan ?? preview?.plan;
+  const hash = prepared?.sha256 ?? preview?.sha256;
   const title = target.kind === "release" ? `${fixed?.coreId} · ${fixed?.version}`
     : target.kind === "reference" ? target.name : en ? "Original result" : "原操作结果";
   return <Modal presentation="side" title={title} open={open} closable={!controls.busy}
@@ -83,11 +91,11 @@ export function CorePackagePreparationDialog({ target, open, catalogue, controls
         { key: "tag", label: "Tag", value: fixed.tag },
         { key: "commit", label: en ? "Release commit" : "发行提交", value: fixed.commit, wide: true },
         { key: "hash", label: en ? "Package SHA-256" : "包 SHA-256", value: fixed.sha256, wide: true },
-        ...(controls.release ? [{ key: "checked", label: en ? "Checked at" : "核对时间", value: controls.release.checkedAt }] : [])
+        ...(release ? [{ key: "checked", label: en ? "Checked at" : "核对时间", value: release.checkedAt }] : [])
       ]} />
-      {!controls.release && <ActionButton label={en ? "Inspect release" : "核对发行"} intent="review" pending={controls.busy}
+      {!release && <ActionButton label={en ? "Inspect release" : "核对发行"} intent="review" pending={controls.busy}
         disabled={blocked} onAction={() => controls.previewRelease(target.kind === "release" ? target.release : fixed)} />}
-      {controls.release && !selected && <ActionButton label={en ? "Save release selection" : "保存发行选择"}
+      {release && !selected && <ActionButton label={en ? "Save release selection" : "保存发行选择"}
         intent="confirm" pending={controls.busy} disabled={blocked} onAction={controls.selectRelease} />}
       {selected && <RecordFacts items={[
         { key: "selection", label: en ? "Selection" : "发行选择", value: en ? "Recorded, package unchecked" : "已保存，包未校验" },
@@ -103,14 +111,14 @@ export function CorePackagePreparationDialog({ target, open, catalogue, controls
     {target.kind !== "receipt" && !versions && <Alert type="warning"
       title={catalogue?.versions.status === "unavailable" ? catalogue.versions.error.message
         : en ? "Current deployment evidence is unavailable" : "当前部署证据尚不可用"} />}
-    {target.kind !== "receipt" && !controls.preview && !controls.prepared && <ActionButton
+    {target.kind !== "receipt" && !preview && !prepared && <ActionButton
       label={en ? "Preview candidate" : "预览候选"} intent="review" pending={controls.busy}
       disabled={blocked || !versions || !request || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(packageReference ?? "")}
       onAction={async () => { if (!request) throw new Error(en ? "Select a package first" : "请先选择包引用"); await controls.previewPreparation(request); }} />}
     {plan && hash && <Candidate plan={plan} hash={hash} en={en} />}
-    {controls.preview && !controls.prepared && !controls.pending && <ActionButton label={en ? "Prepare candidate" : "准备候选"}
+    {target.kind !== "receipt" && preview && !prepared && !controls.pending && <ActionButton label={en ? "Prepare candidate" : "准备候选"}
       intent="confirm" pending={controls.busy} disabled={blocked} onAction={controls.prepare} />}
-    {controls.prepared && <Alert type="info" title={en ? "Candidate prepared, pending deployment" : "候选已准备，待部署"}
+    {prepared && <Alert type="info" title={en ? "Candidate prepared, pending deployment" : "候选已准备，待部署"}
       description={en ? "A deployment operator continues with the fixed combination, required backup, compatibility checks, migrations and runtime verification. Registration and tenant/member access follow their management entries."
         : "部署人员按固定组合继续备份、兼容核查、迁移及运行验证，再沿管理入口办理注册、租户授权和成员分配。"} />}
     {controls.pending && <Alert type="warning" title={en ? "Confirm the original result" : "请核对原操作结果"}
