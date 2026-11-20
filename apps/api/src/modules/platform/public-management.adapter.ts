@@ -1,5 +1,5 @@
 /** 原管理 HTTP 与同一公共应用的字段及方法映射。
- * 当前主体取自公共 ALS，Rental 附加事实由固定服务端适配读取，输入只承载原业务字段。 */
+ * 当前主体取自公共 ALS，固定 Rental 对象补充原事实和精确管理权限限制，输入只承载原业务字段。 */
 import type { SaveSystemRoleRequest, SaveSystemUserRequest, UpdateTenantRequest, UpdateTenantStatusRequest } from "@rental-os/platform-contracts";
 import type { PlatformManagementService } from "@rental-os/platform-server/management";
 import { rentalPublicManagementCompatibility } from "@rental-os/rental-core/public-management-compatibility";

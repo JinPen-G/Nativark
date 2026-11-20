@@ -150,16 +150,16 @@ void (async () => {
   ]) {
     assert.ok(permissionMigration.includes(targetPermission), `存量角色迁移必须补授 ${targetPermission}`);
   }
-  const platformRepository = readFileSync(
-    join(__dirname, "..", "apps/api/src/modules/platform/platform.repository.ts"),
-    "utf8"
-  );
+  const publicManagement = [
+    "packages/platform-server/src/modules/platform/platform-management.repository.ts",
+    "packages/rental-core/src/public-management-compatibility.ts"
+  ].map((file) => readFileSync(join(__dirname, "..", file), "utf8")).join("\n");
   assert.ok(
-    platformRepository.includes("DEPRECATED_RENTAL_PERMISSION_CODES.has(permission.code)"),
+    publicManagement.includes("if (Object.hasOwn(permissionReplacements, permission.code)) return undefined"),
     "数据库权限树必须隐藏旧车辆权限"
   );
   assert.ok(
-    platformRepository.includes("normalizePermissionCodes"),
+    publicManagement.includes("compatibility.normalizePermissionCodes(codes)"),
     "角色保存与读回必须把旧车辆权限转换为 Rental Core 新权限"
   );
 

@@ -39,3 +39,5 @@ export {
   type CartSubmission, type CartState,
 } from "./cart";
 export { createRentalMiniProgramServiceFlow, type RentalMiniProgramServiceFlowPorts } from "./flow";
+export { createRentalMiniProgramCatalogStore, type RentalMiniProgramCatalogStorePorts, type ItemCard } from "./catalog-store";
+export { createRentalMiniProgramMerchantStore, type RentalMiniProgramMerchantStorePorts, type MerchantService, type MerchantInfo } from "./merchant-store";

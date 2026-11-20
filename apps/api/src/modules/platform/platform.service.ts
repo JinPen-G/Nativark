@@ -111,7 +111,30 @@ export class PlatformService {
   private workspaceApplication?: RentalWorkspaceManagementApplication;
   private getWorkspaceApplication() {
     return this.workspaceApplication ??= new RentalWorkspaceManagementApplication({
-      configService: this.configService, repository: this.platformRepository,
+      configService: this.configService,
+      repository: {
+        // SaaS 指定租户读取沿公共管理授权和 Rental 投影，空间行为由原 Core 仓储裁定。
+        getTenant: (tenantId) => this.getPublicManagementAdapter().getTenant(tenantId),
+        listBusinessWorkspacesForTenant: (tenantId) => this.platformRepository.listBusinessWorkspacesForTenant(tenantId),
+        createBusinessWorkspaceForTenant: (tenantId, input, onBeforeCommit, actorId) =>
+          this.platformRepository.createBusinessWorkspaceForTenant(tenantId, input, onBeforeCommit, actorId),
+        updateBusinessWorkspaceForTenant: (tenantId, workspaceId, input) =>
+          this.platformRepository.updateBusinessWorkspaceForTenant(tenantId, workspaceId, input),
+        listBusinessWorkspaces: (currentUser) => this.platformRepository.listBusinessWorkspaces(currentUser),
+        createBusinessWorkspace: (input, currentUser, onBeforeCommit) =>
+          this.platformRepository.createBusinessWorkspace(input, currentUser, onBeforeCommit),
+        updateBusinessWorkspace: (workspaceId, input, currentUser) =>
+          this.platformRepository.updateBusinessWorkspace(workspaceId, input, currentUser),
+        listWorkspaceMembers: (workspaceId, currentUser) => this.platformRepository.listWorkspaceMembers(workspaceId, currentUser),
+        listWorkspaceFulfillmentLocations: (workspaceId, currentUser) =>
+          this.platformRepository.listWorkspaceFulfillmentLocations(workspaceId, currentUser),
+        saveWorkspaceMember: (workspaceId, input, currentUser) =>
+          this.platformRepository.saveWorkspaceMember(workspaceId, input, currentUser),
+        saveUserWithWorkspaceAccess: (input, tenantId, actorId) =>
+          this.platformRepository.saveUserWithWorkspaceAccess(input, tenantId, actorId),
+        hasFixedAllPermissionRole: (roleIds, tenantId) => this.platformRepository.hasFixedAllPermissionRole(roleIds, tenantId),
+        isTenantAdminUser: (userId, tenantId) => this.platformRepository.isTenantAdminUser(userId, tenantId)
+      },
       rentalCoreService: this.rentalCoreService, workspaceCapabilityService: this.workspaceCapabilityService,
       logger: this.logger, legacyAccounts: { roles: () => this.roleRows, users: () => this.users }
     });

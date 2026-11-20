@@ -1,6 +1,6 @@
 # Rental 客户小程序业务客户端
 
-[正式模块入口](index.ts)提供七组业务请求工厂、客户认证工厂、八个 AI 请求工厂、三组企业原操作编排、清单与服务切换、支付编排和订单展示。原小程序 [api 入口](../../../../apps/miniprogram/src/api/orders.ts)注入 [request](../../../../apps/miniprogram/src/core/http.ts)，继续导出原方法和返回类型。合同沿 Rental 包内的[客户声明](../../src/client-contracts.ts)、[租赁声明](../../src/contracts.ts)和企业声明单源消费。
+[正式模块入口](index.ts)提供七组业务请求工厂、客户认证工厂、八个 AI 请求工厂、三组企业原操作编排、清单与服务切换、支付编排、目录／商户缓存和订单展示。原小程序 [api 入口](../../../../apps/miniprogram/src/api/orders.ts)注入 [request](../../../../apps/miniprogram/src/core/http.ts)，继续导出原方法和返回类型。合同沿 Rental 包内的[客户声明](../../src/client-contracts.ts)、[租赁声明](../../src/contracts.ts)和企业声明单源消费。
 
 ## 宿主接入
 
@@ -30,6 +30,16 @@ const orders = createRentalMiniProgramOrdersApi({ request });
 | [profile](profile.ts) | 资料、会员、权益、资质与文件会话／下载地址 | 客户 Controller → 原会员与文件应用；资料、会员与资质页 |
 
 本人订单索引、地址、资料、会员方案／分配和资质列表保留原租户级分面，权益等请求沿当前经营空间。企业请求继续使用原客户运输与服务端专用授权，原 query/body、URL 编码、操作键及字段投影保持。
+
+## 目录展示与商户缓存
+
+同一正式入口提供 `createRentalMiniProgramCatalogStore` 和 `createRentalMiniProgramMerchantStore`。[目录工厂](catalog-store.ts)接收同一目录 API、当前服务和会话代次、原距离函数、图片解析、起价展示与时区记忆。[原目录入口](../../../../apps/miniprogram/src/core/catalogStore.ts)绑定一次工厂，首页、分类、详情和结算继续消费同一缓存与搜索中转状态。
+
+目录缓存保留原两分钟寿命和服务／代次／游客 single-flight 键，返回前复验身份、服务、品类及支持的展示版本。旧请求结束时仅释放自己的进行中引用。商品属性、分类、搜索、租赁选项、门店选择与逐图回调沿原函数，价格和图片事实来自原目录，页面继续复验异步展示寿命。
+
+[商户工厂](merchant-store.ts)接收同一渠道启动与公开服务 API、当前会话、本地上次服务、原公开缓存键与同步存储。[原商户入口](../../../../apps/miniprogram/src/core/merchant.ts)持有并供给同一 `merchantEvents`，工厂发布原商户投影，页面的订阅寿命由宿主维护。渠道缺席时沿原公开服务回退，登录方式与未知能力保持关闭。商户名、品类名、已发布初始服务和默认服务继续取原事实。
+
+两工厂的 `now` 端口使用宿主原 `Date.now()`，商户保留原五分钟内存寿命和公开存储格式。原[商户回退与服务选择断言](../../../../tests/miniprogram-static.test.cjs)核对缺渠道和已下架服务，[首页](../../../../apps/miniprogram/src/pages/home/index.ts)、[目录页](../../../../apps/miniprogram/src/pages/catalog/index.ts)和[登录页](../../../../apps/miniprogram/src/pages/login/index.ts)保持原消费。真实渠道、业务会话与微信环境沿原验收处理。
 
 ## 客户业务词条
 

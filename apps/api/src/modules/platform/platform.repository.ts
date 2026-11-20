@@ -1,3 +1,5 @@
+/** 原组合的公共身份与 Rental 业务仓储接点。
+ * 公共身份沿原身份仓储读取，空间、邀请与开业通过原业务接点办理。 */
 import { RentalWorkspaceManagementRepository } from "@rental-os/rental-core/mysql-workspace-management";
 /** Rental及既有组合平台的仓储；公共登录/账号/会话继承唯一身份仓储。
  * 业务空间、客户与Rental初始化保留本域事务和校验，不成为无Core认证的依赖。 */
@@ -11,7 +13,6 @@ import { rentalCategoryStorageCode } from "../rental-core/category-identity";
 import {
   ConfigStatus,
   OrganizationType as PrismaOrganizationType,
-  PermissionKind,
   Prisma,
   RoleScope as PrismaRoleScope,
   SystemDataScope as PrismaSystemDataScope,
@@ -26,7 +27,6 @@ import type {
   UpdateBusinessWorkspaceRequest,
   WorkspaceMember,
   OrganizationSummary,
-  PermissionModule,
   PlatformAuditLogQuery,
   PlatformAuditLogRow,
   PlatformAuditResult,
@@ -36,26 +36,20 @@ import type {
   PlatformNumberRule,
   SaveOrganizationRequest,
   SavePlatformFilterPresetRequest,
-  SaveSystemRoleRequest,
   SaveSystemUserAccessRequest,
   SaveSystemUserRequest,
   SaveWorkspaceAccessRequest,
-  SystemDataScope,
-  SystemRoleRow,
   SystemRulesConfig,
   SystemUserRow,
   TenantBootstrapPreview,
   TenantBootstrapRequest,
   TenantBootstrapResult,
-  TenantSummary,
-  UpdateTenantRequest,
-  UpdateTenantStatusRequest
+  TenantSummary
 } from "@rental-os/shared";
-import { RentalCategoryCode, RoleScope, TenantStatus } from "@rental-os/shared";
+import { RentalCategoryCode, RoleScope } from "@rental-os/shared";
 import { generateTemporaryPassword, hashPassword } from "../../common/password";
 import {
   buildOrganizationWhere,
-  buildSystemUserWhere,
   isOrganizationScopedUser,
   resolveTenantIdForQuery
 } from "../../common/data-permission";
@@ -63,25 +57,8 @@ import { enabledOrganizationSubtreeIds } from "../../common/organization-locatio
 import { PrismaService } from "../database/prisma.service";
 import { getRequestWorkspaceId, requireRequestTenantId } from "../../common/request-identity";
 
-type RoleWithPermissions = Awaited<
-  ReturnType<PlatformRepository["findRoleWithPermissions"]>
->;
-
 /** Internal authenticated identity, supplied by Auth rather than an HTTP DTO. */
 export type { WorkspaceSessionIdentity } from "@rental-os/rental-core/mysql-workspace-principal";
-
-const DEPRECATED_RENTAL_PERMISSION_CODES = new Set([
-  "rental-os:vehicle-group:manage",
-  "rental-os:vehicle:view",
-  "rental-os:vehicle:manage",
-  "rental-os:vehicle:status-action"
-]);
-const RENTAL_PERMISSION_REPLACEMENTS: Record<string, string[]> = {
-  "rental-os:vehicle-group:manage": ["rental-core:catalog:view", "rental-core:catalog:manage"],
-  "rental-os:vehicle:view": ["rental-core:catalog:view", "rental-core:asset:view", "rental-os:order:view"],
-  "rental-os:vehicle:manage": ["rental-core:asset:manage", "rental-os:order:operate"],
-  "rental-os:vehicle:status-action": ["rental-core:asset:manage"]
-};
 
 @Injectable()
 export class PlatformRepository extends PlatformIdentityRepository {
@@ -104,97 +81,6 @@ export class PlatformRepository extends PlatformIdentityRepository {
 
   /** 登录前没有会话；只读平台主体的原生效安全配置，与独立公共认证共用读取算法。 */
   getSecurityBaseline() { return readPlatformSecurityBaseline(this.prisma); }
-
-  async listTenants(): Promise<TenantSummary[]> {
-    const tenants = await this.prisma.tenant.findMany({
-      where: { code: { not: "platform" } },
-      include: {
-        rentalProfile: { include: { category: true } },
-        businessWorkspaces: { select: { categoryCode: true } },
-        _count: { select: { users: true, organizations: true, rentalOrders: true } }
-      },
-      orderBy: { code: "asc" }
-    });
-
-    return tenants.map((tenant) => this.toTenantSummary(tenant));
-  }
-
-  async getTenant(id: string): Promise<TenantSummary> {
-    const tenant = await this.prisma.tenant.findUnique({
-      where: { id },
-      include: {
-        rentalProfile: { include: { category: true } },
-        businessWorkspaces: { select: { categoryCode: true } },
-        _count: { select: { users: true, organizations: true, rentalOrders: true } }
-      }
-    });
-    if (!tenant) throw new NotFoundException("租户不存在");
-    return this.toTenantSummary(tenant);
-  }
-
-  async updateTenant(id: string, input: UpdateTenantRequest, operator: SystemUserRow) {
-    const name = input.tenantName.trim();
-    if (!name) throw new BadRequestException("租户名称不能为空");
-    await this.prisma.$transaction(async (tx) => {
-      const current = await tx.tenant.findUnique({ where: { id } });
-      if (!current) throw new NotFoundException("租户不存在");
-      if (current.code === "platform") throw new BadRequestException("SaaS 平台主体不能通过租户接口修改");
-      const changed = { name, ...(input.operatorShortName !== undefined ? { operatorShortName: input.operatorShortName } : {}) };
-      await tx.tenant.update({ where: { id }, data: changed });
-      await tx.operationLog.create({
-        data: {
-          tenantId: id,
-          userId: operator.id,
-          action: "tenant.update",
-          detail: {
-            before: { name: current.name, operatorShortName: current.operatorShortName },
-            after: { name, operatorShortName: input.operatorShortName === undefined ? current.operatorShortName : input.operatorShortName },
-            operator: operator.displayName
-          }
-        }
-      });
-    });
-    return this.getTenant(id);
-  }
-
-  async updateTenantStatus(id: string, input: UpdateTenantStatusRequest, operator: SystemUserRow) {
-    const reason = input.reason.trim();
-    if (!reason) throw new BadRequestException("状态变更原因不能为空");
-    const statusMap = {
-      [TenantStatus.Active]: PrismaTenantStatus.ACTIVE,
-      [TenantStatus.Frozen]: PrismaTenantStatus.FROZEN,
-      [TenantStatus.Disabled]: PrismaTenantStatus.DISABLED
-    } as const;
-    await this.prisma.$transaction(async (tx) => {
-      const current = await tx.tenant.findUnique({ where: { id } });
-      if (!current) throw new NotFoundException("租户不存在");
-      if (current.code === "platform") throw new BadRequestException("SaaS 平台主体不能冻结或停用");
-      await tx.tenant.update({
-        where: { id },
-        data: {
-          status: statusMap[input.status],
-          statusReason: reason,
-          statusChangedAt: new Date(),
-          statusChangedBy: operator.displayName
-        }
-      });
-      if (input.status !== TenantStatus.Active) {
-        await tx.authSession.updateMany({
-          where: { user: { tenantId: id }, revokedAt: null },
-          data: { revokedAt: new Date() }
-        });
-      }
-      await tx.operationLog.create({
-        data: {
-          tenantId: id,
-          userId: operator.id,
-          action: "tenant.status.update",
-          detail: { before: current.status, after: input.status, reason, operator: operator.displayName }
-        }
-      });
-    });
-    return this.getTenant(id);
-  }
 
   /** Principal locks precede commercial/category/workspace business locks.
    * Existing revocation writers update these same rows. Lock assignments and
@@ -612,206 +498,6 @@ export class PlatformRepository extends PlatformIdentityRepository {
     return this.toOrganizationSummary(row);
   }
 
-  async listPermissionTree(): Promise<PermissionModule[]> {
-    const permissions = await this.prisma.permission.findMany({
-      orderBy: { code: "asc" }
-    });
-    const modules = new Map<string, PermissionModule>();
-
-    for (const permission of permissions) {
-      if (DEPRECATED_RENTAL_PERMISSION_CODES.has(permission.code)) continue;
-      const module = this.permissionModuleOf(permission.code, permission.module);
-      const display = this.permissionDisplayOf(permission);
-      if (!modules.has(module.code)) {
-        modules.set(module.code, {
-          code: module.code,
-          name: module.name,
-          children: []
-        });
-      }
-      modules.get(module.code)?.children.push({
-        code: permission.code,
-        name: display.name,
-        description: display.description
-      });
-    }
-
-    return [...modules.values()];
-  }
-
-  async listRoles(tenantId: string): Promise<SystemRoleRow[]> {
-    const roles = await this.prisma.role.findMany({
-      where: { tenantId },
-      include: {
-        permissions: {
-          include: {
-            permission: true
-          }
-        }
-      },
-      orderBy: [{ fixedAllPermissions: "desc" }, { code: "asc" }]
-    });
-
-    return roles.map((role) => this.toRoleRow(role));
-  }
-
-  async saveRole(input: SaveSystemRoleRequest, tenantId: string, actorUserId?: string): Promise<SystemRoleRow> {
-    return this.prisma.$transaction(async tx => {
-      await this.assertTenantPermissionInTransaction(tx, tenantId, actorUserId, "system:role:manage");
-      if (input.id) await this.lockRole(tx, input.id, tenantId);
-      return this.saveRoleInTransaction(tx, input, tenantId);
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-  }
-
-  private async lockRole(tx: Prisma.TransactionClient, id: string, tenantId: string) {
-    const rows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT id FROM \`Role\` WHERE id = ${id} AND tenantId = ${tenantId} FOR UPDATE`);
-    if (!rows.length) throw new NotFoundException("角色不存在");
-  }
-
-  private async saveRoleInTransaction(tx: Prisma.TransactionClient, input: SaveSystemRoleRequest, tenantId: string): Promise<SystemRoleRow> {
-    const existing = input.id
-      ? await this.findRoleWithPermissions(input.id, tx)
-      : undefined;
-    const code = input.code.trim().toUpperCase();
-    const name = input.name.trim();
-
-    if (!code || !name) {
-      throw new BadRequestException("角色编码和角色名称不能为空");
-    }
-
-    const duplicated = await tx.role.findFirst({
-      where: {
-        id: { not: existing?.id },
-        tenantId,
-        code
-      }
-    });
-    if (duplicated) {
-      throw new BadRequestException("角色编码已存在");
-    }
-
-    if (existing && existing.tenantId !== tenantId) {
-      throw new NotFoundException("角色不存在");
-    }
-    if (existing?.fixedAllPermissions || code === "TENANT_ADMIN") {
-      throw new BadRequestException("固定全权角色由系统初始化维护，不能通过普通角色编辑修改");
-    }
-    const fixedAllPermissions = false;
-    const requestedPermissions = this.normalizePermissionCodes(input.permissions ?? []);
-    const requestedButtonPermissions = [
-      ...new Set([
-        ...(input.buttonPermissions ?? []),
-        ...requestedPermissions.filter((permission) =>
-          this.isButtonPermission(permission)
-        )
-      ])
-    ];
-    const permissionCodes = [...new Set([...requestedPermissions, ...requestedButtonPermissions])];
-    await this.assertRegisteredPermissions(tx, permissionCodes, requestedButtonPermissions);
-
-    const role = await tx.role.upsert({
-      where: { id: existing?.id ?? input.id ?? `role_${randomUUID()}` },
-      update: {
-        code,
-        name,
-        description: input.description?.trim(),
-        scope: this.toPrismaRoleScope(input.scope),
-        fixedAllPermissions,
-        enabledBusinessScopes: [...new Set(input.enabledBusinessScopes ?? [])],
-        buttonPermissions: fixedAllPermissions ? ["*"] : requestedButtonPermissions,
-        dataScope: fixedAllPermissions
-          ? PrismaSystemDataScope.ALL
-          : this.toPrismaDataScope(
-              input.dataScope ?? this.toSharedDataScope(existing?.dataScope)
-            ),
-        isActive: input.isActive ?? true
-      },
-      create: {
-        id: input.id ?? `role_${randomUUID()}`,
-        tenantId,
-        code,
-        name,
-        description: input.description?.trim(),
-        scope: this.toPrismaRoleScope(input.scope),
-        fixedAllPermissions,
-        enabledBusinessScopes: [...new Set(input.enabledBusinessScopes ?? [])],
-        buttonPermissions: fixedAllPermissions ? ["*"] : requestedButtonPermissions,
-        dataScope: fixedAllPermissions
-          ? PrismaSystemDataScope.ALL
-          : this.toPrismaDataScope(input.dataScope),
-        isActive: input.isActive ?? true
-      }
-    });
-
-    await this.replaceRolePermissions(role.id, permissionCodes, tx);
-    const saved = await this.findRoleWithPermissions(role.id, tx);
-    if (!saved) {
-      throw new NotFoundException(`Role ${role.id} was not found`);
-    }
-    return this.toRoleRow(saved);
-  }
-
-  async saveRolePermissions(id: string, permissions: string[], tenantId: string, actorUserId?: string) {
-    return this.prisma.$transaction(async tx => {
-      await this.assertTenantPermissionInTransaction(tx, tenantId, actorUserId, "system:role:manage");
-      await this.lockRole(tx, id, tenantId);
-      const role = await this.findRoleWithPermissions(id, tx);
-      if (!role || role.tenantId !== tenantId) throw new NotFoundException("角色不存在");
-      if (role.fixedAllPermissions) return this.toRoleRow(role);
-      const nextPermissions = this.normalizePermissionCodes(permissions);
-      const buttons = nextPermissions.filter(permission => this.isButtonPermission(permission));
-      await this.assertRegisteredPermissions(tx, nextPermissions, buttons);
-      await this.replaceRolePermissions(id, nextPermissions, tx);
-      await tx.role.update({ where: { id }, data: { buttonPermissions: buttons } });
-      const saved = await this.findRoleWithPermissions(id, tx);
-      if (!saved) throw new NotFoundException("角色不存在");
-      return this.toRoleRow(saved);
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-  }
-
-  async deleteRole(id: string, tenantId: string, actorUserId?: string) {
-    return this.prisma.$transaction(async tx => {
-      await this.assertTenantPermissionInTransaction(tx, tenantId, actorUserId, "system:role:manage");
-      await this.lockRole(tx, id, tenantId);
-      const role = await tx.role.findUnique({
-        where: { id }, include: { userAssignments: true, users: true, workspaceMembers: true }
-      });
-      if (!role || role.tenantId !== tenantId) throw new NotFoundException("角色不存在");
-      if (role.fixedAllPermissions) throw new BadRequestException("预设角色不能删除");
-      if (role.userAssignments.length || role.users.length || role.workspaceMembers.length) {
-        throw new BadRequestException("该角色已分配给账号，不能删除");
-      }
-      await tx.rolePermission.deleteMany({ where: { roleId: id } });
-      await tx.role.delete({ where: { id } });
-      return { id, deleted: true };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-  }
-
-  async listUsers(
-    tenantId?: string,
-    currentUser?: SystemUserRow
-  ): Promise<SystemUserRow[]> {
-    const where = buildSystemUserWhere(tenantId, currentUser) as Prisma.UserWhereInput;
-    if (isOrganizationScopedUser(currentUser)) {
-      const scopedTenantId = resolveTenantIdForQuery(tenantId, currentUser);
-      if (!scopedTenantId || !currentUser.organizationId) return [];
-      const organizations = await this.prisma.organizationUnit.findMany({
-        where: { tenantId: scopedTenantId },
-        select: { id: true, parentId: true, status: true }
-      });
-      const allowedOrganizationIds = enabledOrganizationSubtreeIds(organizations, currentUser.organizationId);
-      if (!allowedOrganizationIds.length) return [];
-      where.organizationId = { in: allowedOrganizationIds };
-    }
-    const users = await this.prisma.user.findMany({
-      where,
-      include: this.userInclude(),
-      orderBy: [{ tenantId: "asc" }, { account: "asc" }]
-    });
-
-    return users.map((user) => this.toUserRow(user));
-  }
-
   /** 含停用账号；服务层需防止普通账号通过编辑停用管理员来撤销其固定权限。 */
   async isTenantAdminUser(id: string, tenantId: string): Promise<boolean> {
     return this.getWorkspaceManagementRepository().isTenantAdminUser(id, tenantId);
@@ -819,15 +505,6 @@ export class PlatformRepository extends PlatformIdentityRepository {
 
   async hasFixedAllPermissionRole(roleIds: readonly string[], tenantId: string): Promise<boolean> {
     return this.getWorkspaceManagementRepository().hasFixedAllPermissionRole(roleIds, tenantId);
-  }
-
-  async saveUser(input: SaveSystemUserRequest, tenantId: string, actorUserId?: string): Promise<SystemUserRow> {
-    const saved = await this.prisma.$transaction(
-      (tx) => this.saveUserInTransaction(tx, input, tenantId, actorUserId),
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
-    );
-    const user = await this.findUserWithRoles(saved.userId);
-    return { ...this.toUserRow(user), temporaryPassword: saved.temporaryPassword };
   }
 
   async saveUserWithWorkspaceAccess(
@@ -914,61 +591,6 @@ export class PlatformRepository extends PlatformIdentityRepository {
   async assertTenantManagementPermission(tenantId: string, actorUserId: string, permission: string,
     tx: Prisma.TransactionClient = this.prisma) {
     return this.assertTenantPermissionInTransaction(tx, tenantId, actorUserId, permission);
-  }
-
-  private async assertAccountActionInTransaction(
-    tx: Prisma.TransactionClient, tenantId: string, id: string, actorUserId?: string
-  ) {
-    return this.getWorkspaceManagementRepository().assertAccountActionInTransaction(tx, tenantId, id, actorUserId);
-  }
-
-  async setUserStatus(id: string, isActive: boolean, tenantId: string, actorUserId?: string) {
-    return this.prisma.$transaction(async tx => {
-      await this.assertAccountActionInTransaction(tx, tenantId, id, actorUserId);
-      const user = await tx.user.update({ where: { id }, data: { isActive }, include: this.userInclude() });
-      if (!isActive) await tx.authSession.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
-      return this.toUserRow(user);
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-  }
-
-  private async resetPasswordInTransaction(tx: Prisma.TransactionClient, id: string) {
-    const temporaryPassword = generateTemporaryPassword();
-    const user = await tx.user.update({
-      where: { id },
-      data: {
-        passwordHash: hashPassword(temporaryPassword),
-        mustChangePassword: true,
-        passwordChangedAt: new Date(),
-        tokenVersion: { increment: 1 }
-      }
-    });
-    await tx.authSession.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
-    return {
-      userId: user.id,
-      account: user.account,
-      temporaryPassword,
-      message: "密码已重置为一次性临时密码，用户下次登录必须修改。"
-    };
-  }
-
-  async resetUserPassword(id: string, tenantId: string, actorUserId?: string) {
-    return this.prisma.$transaction(async tx => {
-      await this.assertAccountActionInTransaction(tx, tenantId, id, actorUserId);
-      return this.resetPasswordInTransaction(tx, id);
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-  }
-
-  async resetTenantAdminPassword(tenantId: string, actorUserId?: string) {
-    return this.prisma.$transaction(async tx => {
-      const actor = actorUserId && await tx.user.findFirst({ where: { id: actorUserId, isSaasAdmin: true, isActive: true } });
-      if (!actor) throw new ForbiddenException("仅 SaaS 平台管理员可以重置租户管理员密码");
-      const admin = await tx.user.findFirst({
-        where: { tenantId, isPlatformAdmin: true, isSaasAdmin: false },
-        orderBy: { createdAt: "asc" }, select: { id: true }
-      });
-      if (!admin) throw new NotFoundException("租户管理员账号不存在");
-      return this.resetPasswordInTransaction(tx, admin.id);
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
   async getSystemRules(tenantId = requireRequestTenantId()) {
@@ -1546,75 +1168,6 @@ export class PlatformRepository extends PlatformIdentityRepository {
     return tenant.id;
   }
 
-  private async findRoleWithPermissions(id: string, tx?: Prisma.TransactionClient) {
-    return (tx ?? this.prisma).role.findUnique({
-      where: { id },
-      include: {
-        permissions: {
-          include: {
-            permission: true
-          }
-        }
-      }
-    });
-  }
-
-  private async assertRegisteredPermissions(tx: Prisma.TransactionClient, codes: string[], buttons: string[]) {
-    if (codes.some(code => !code || code === "*")) throw new BadRequestException("普通角色不能配置通配权限");
-    const rows = await tx.permission.findMany({ where: { code: { in: codes } }, select: { code: true, kind: true } });
-    const registered = new Map(rows.map(row => [row.code, row]));
-    if (codes.some(code => !registered.has(code)) || buttons.some(code =>
-      registered.get(code)?.kind !== PermissionKind.BUTTON && !this.isButtonPermission(code))) {
-      throw new BadRequestException("角色只能配置已登记的对应类型权限");
-    }
-  }
-
-  private async replaceRolePermissions(roleId: string, permissionCodes: string[], tx: Prisma.TransactionClient) {
-    const permissions = await tx.permission.findMany({
-      where: { code: { in: permissionCodes } }
-    });
-
-    await tx.rolePermission.deleteMany({ where: { roleId } });
-    if (permissions.length > 0) {
-      await tx.rolePermission.createMany({
-        data: permissions.map((permission) => ({
-          roleId,
-          permissionId: permission.id
-        })),
-        skipDuplicates: true
-      });
-    }
-  }
-
-  private toRoleRow(role: NonNullable<RoleWithPermissions>): SystemRoleRow {
-    const permissionCodes = this.normalizePermissionCodes(role.permissions.map((item) => item.permission.code));
-    const buttonPermissionCodes = role.permissions
-      .filter((item) => item.permission.kind === PermissionKind.BUTTON)
-      .map((item) => item.permission.code);
-    const savedButtonPermissions = this.normalizePermissionCodes(
-      (role.buttonPermissions as string[] | null) ?? []
-    );
-
-    return {
-      id: role.id,
-      tenantId: role.tenantId,
-      code: role.code,
-      name: role.name,
-      description: role.description ?? undefined,
-      scope: this.toSharedRoleScope(role.scope),
-      fixedAllPermissions: role.fixedAllPermissions,
-      enabledBusinessScopes: role.enabledBusinessScopes as string[],
-      isActive: role.isActive,
-      permissions: role.fixedAllPermissions
-        ? ["*"]
-        : permissionCodes.filter((code) => !this.isButtonPermission(code)),
-      buttonPermissions: role.fixedAllPermissions
-        ? ["*"]
-        : [...new Set([...buttonPermissionCodes, ...savedButtonPermissions])],
-      dataScope: this.toSharedDataScope(role.dataScope)
-    };
-  }
-
   private async validateLocationScope(
     tx: Prisma.TransactionClient,
     tenantId: string,
@@ -1624,10 +1177,6 @@ export class PlatformRepository extends PlatformIdentityRepository {
     return this.getWorkspaceManagementRepository().validateLocationScope(tx, tenantId, workspaceId, scope);
   }
 
-  private normalizePermissionCodes(codes: string[]) {
-    return [...new Set(codes.flatMap((code) => RENTAL_PERMISSION_REPLACEMENTS[code] ?? [code]))];
-  }
-
   // 读取兼容旧枚举对象；持久化编码及领域契约统一使用稳定的小写标识。
   private toDomainCategoryCode(value: string | null | undefined): TenantSummary["categoryCode"] | undefined {
     return this.getWorkspaceManagementRepository().toDomainCategoryCode(value);
@@ -1635,44 +1184,6 @@ export class PlatformRepository extends PlatformIdentityRepository {
 
   private toPrismaCategoryCode(value: string): RentalCategoryCode {
     return this.getWorkspaceManagementRepository().toPrismaCategoryCode(value);
-  }
-
-  private toTenantSummary(tenant: {
-    id: string;
-    code: string;
-    name: string;
-    operatorShortName: string | null;
-    status: PrismaTenantStatus;
-    statusReason: string | null;
-    createdAt: Date;
-    updatedAt: Date;
-    rentalProfile: null | {
-      categoryCode: string;
-      capabilities: unknown;
-      category: { name: string };
-    };
-    businessWorkspaces: Array<{ categoryCode: string }>;
-    _count: { users: number; organizations: number; rentalOrders: number };
-  }): TenantSummary {
-    return {
-      tenantId: tenant.id,
-      tenantCode: tenant.code,
-      tenantName: tenant.name,
-      operatorShortName: tenant.operatorShortName ?? undefined,
-      tenantStatus: this.toTenantStatus(tenant.status),
-      enabledBusinessLines: ["rental_core"],
-      categoryCode: this.toDomainCategoryCode(tenant.rentalProfile?.categoryCode),
-      categoryName: tenant.rentalProfile?.category.name,
-      capabilities: tenant.rentalProfile?.capabilities as TenantSummary["capabilities"],
-      workspaceCount: tenant.businessWorkspaces.length,
-      workspaceCategoryCodes: [...new Set(tenant.businessWorkspaces.map((workspace) => this.toDomainCategoryCode(workspace.categoryCode)).filter(Boolean))] as TenantSummary["workspaceCategoryCodes"],
-      userCount: tenant._count.users,
-      organizationCount: tenant._count.organizations,
-      orderCount: tenant._count.rentalOrders,
-      statusReason: tenant.statusReason ?? undefined,
-      createdAt: tenant.createdAt.toISOString(),
-      updatedAt: tenant.updatedAt.toISOString()
-    };
   }
 
   private toOrganizationSummary(organization: {
@@ -1695,19 +1206,6 @@ export class PlatformRepository extends PlatformIdentityRepository {
     };
   }
 
-  private toPrismaRoleScope(scope: RoleScope): PrismaRoleScope {
-    if (scope === RoleScope.CarShop) {
-      return PrismaRoleScope.CAR_SHOP;
-    }
-    if (scope === RoleScope.Store) {
-      return PrismaRoleScope.STORE;
-    }
-    if (scope === RoleScope.Station) {
-      return PrismaRoleScope.STATION;
-    }
-    return PrismaRoleScope.OPERATOR;
-  }
-
   private toPrismaOrganizationType(scope: RoleScope): PrismaOrganizationType {
     if (scope === RoleScope.CarShop) {
       return PrismaOrganizationType.CAR_SHOP;
@@ -1719,51 +1217,6 @@ export class PlatformRepository extends PlatformIdentityRepository {
       return PrismaOrganizationType.STATION;
     }
     return PrismaOrganizationType.OPERATOR;
-  }
-
-  private toPrismaDataScope(scope?: SystemDataScope): PrismaSystemDataScope {
-    return this.getWorkspaceManagementRepository().toPrismaDataScope(scope);
-  }
-
-  private isButtonPermission(permission: string) {
-    return (
-      permission.includes(":button:") ||
-      [
-        "rental-os:order:create",
-        "rental-os:order:pickup",
-        "rental-os:order:return",
-        "rental-os:order:extend",
-        "rental-os:order:cancel",
-        "rental-os:order:close",
-        "rental-os:order:fee-manage",
-        "rental-os:member:risk-action",
-        "rental-os:corporate:monthly-settle",
-        "rental-os:finance:adjust",
-        "rental-os:finance:invoice",
-        "system:button:export"
-      ].includes(permission)
-    );
-  }
-
-  /**
-   * 权限显示名只有一个来源：`PlatformService.permissionTree`（seed 由它写入 `permissions` 表）。
-   * 这里不再维护第二份名称/描述映射——存量行怎么写的就怎么返回，措辞要改只改树与 seed。
-   */
-  private permissionDisplayOf(permission: { code: string; name: string; description: string | null }) {
-    return {
-      name: permission.name,
-      description: permission.description ?? undefined
-    };
-  }
-
-  private permissionModuleOf(code: string, moduleName: string) {
-    if (code.startsWith("system:")) {
-      return { code: "system", name: "系统设置" };
-    }
-    if (code.startsWith("rental-os:")) {
-      return { code: "rental-os", name: "租赁业务" };
-    }
-    return { code: moduleName, name: moduleName };
   }
 
 }

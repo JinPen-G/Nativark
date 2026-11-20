@@ -48,7 +48,6 @@ function hasCategoryReader(transaction: SubscriptionTransaction): transaction is
     && "findMany" in transaction.rentalCategoryDefinition && typeof transaction.rentalCategoryDefinition.findMany === "function"
     && "count" in transaction.rentalCategoryDefinition && typeof transaction.rentalCategoryDefinition.count === "function";
 }
-
 /** AI 出箱仍归原参加者和其数据所有者。禁用模式不提供 AI 参加者，启用模式必须有完整原方法。 */
 export interface RentalApplicationParticipants {
   readInspectionMedia: IntegrationInput["readInspectionMedia"];
@@ -60,13 +59,42 @@ export interface RentalApplicationParticipants {
   notificationDraftRetention?: RentalNotificationDraftRetention;
 }
 
+/** 固定各工厂的具名实例类型，避免声明生成跨模块展开私有作业及文件清理状态。
+ * 返回的仍是同一服务图；不重新构造、包装或放宽任何生命周期成员。 */
+export interface RentalApplication {
+  readonly database: RentalApplicationDatabase;
+  readonly configuration: ConfigService;
+  readonly foundation: RentalDomainFoundation<Transaction>;
+  readonly authSource: RentalMysqlAuthenticationRepository;
+  readonly auth: RentalAuthService;
+  readonly tenantAppearance: TenantAppearanceProfileService;
+  readonly accountAppearance: AccountAppearanceService;
+  readonly secrets: SecretBox;
+  readonly operationLog: PlatformOperationLogService;
+  readonly customers: ReturnType<typeof createRentalCustomerApplications>;
+  readonly primary: ReturnType<typeof createRentalPrimaryApplications<Transaction>>;
+  readonly integrations: ReturnType<typeof createRentalIntegrationApplications>;
+  readonly workers: ReturnType<typeof createRentalApplicationParticipants<Transaction>>;
+  readonly orderConfirmation: RentalOrderConfirmationService<Transaction>;
+  readonly client: ReturnType<typeof createRentalClientApplications>;
+  readonly exchangePreview: RentalExchangePreviewService<Transaction>;
+  readonly enterprise: ReturnType<typeof createRentalEnterpriseApplications>;
+  readonly exchangeInspectionMedia: ReturnType<typeof createRentalExchangeInspectionMedia>;
+  readonly aiSources: ReturnType<typeof createRentalAiApplicationSources<Transaction>>;
+  readonly subscriptions: SubscriptionService;
+  readonly officialCalendarSources: OfficialCalendarSourceService;
+  readonly category: ReturnType<typeof createRentalCategoryApplications>;
+  readonly aiMode: "enabled" | "disabled";
+  readonly failureEvents: RentalApplicationParticipants["failures"];
+}
+
 export function createRentalApplication(input: {
   database: RentalApplicationDatabase;
   configuration: ConfigService;
   aiMode: "enabled" | "disabled";
   workerAuthority: ParticipantInput["authority"] | ((foundation: RentalDomainFoundation<Transaction>) => ParticipantInput["authority"]);
   participants: RentalApplicationParticipants;
-}) {
+}): RentalApplication {
   if (!input.participants || typeof input.participants.readInspectionMedia !== "function"
     || !["enabled", "disabled"].includes(input.aiMode)) {
     throw new Error("Rental 应用须提供原媒体读取器并显式选择 AI 模式");
@@ -146,5 +174,3 @@ export function createRentalApplication(input: {
     exchangePreview, enterprise, exchangeInspectionMedia, aiSources, subscriptions, officialCalendarSources, category,
     aiMode: input.aiMode, failureEvents: participants.failures });
 }
-
-export type RentalApplication = ReturnType<typeof createRentalApplication>;

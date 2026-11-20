@@ -83,8 +83,11 @@ export class PlatformManagementService {
       && getRequestIdentity()?.locationScope?.mode !== "selected";
   }
 
-  private canManageTenantAccess(user: SystemUserRow, permission: string) {
-    return managesTenant(user, permission) && getRequestIdentity()?.locationScope?.mode !== "selected";
+  private canManageTenantAccess(user: SystemUserRow, permission: string, compatibility?: LegacyPlatformManagementCompatibility) {
+    const allowsTenantAccess = compatibility?.allowsTenantAccess;
+    // 原兼容条件只收窄公共权限和地点范围，run 在锁内及提交前复用同一授权闭包。
+    return managesTenant(user, permission) && getRequestIdentity()?.locationScope?.mode !== "selected"
+      && (!allowsTenantAccess || allowsTenantAccess(user, permission));
   }
 
   saveOrganization(input: SaveOrganizationRequest) {
@@ -208,7 +211,7 @@ export class PlatformManagementService {
         selfChange ? beforeSelfRevocation : undefined);
       await this.audit(tx, user, actor.tenantId, "system.user.saved", result.id, { active: input.isActive });
       return result;
-    }, false, user => this.canManageTenantAccess(user, "system:user:manage"), {
+    }, false, user => this.canManageTenantAccess(user, "system:user:manage", compatibility), {
       memberId: input.id, selfRevocation: selfChange ? { kind: "user", id: actor.subjectId } : undefined
     });
   }
@@ -227,7 +230,7 @@ export class PlatformManagementService {
       if (!active) await tx.authSession.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
       await this.audit(tx, user, tenantId, "system.user.status", id, { active });
       return this.repository.user(tx, id, tenantId);
-    }, false, user => this.canManageTenantAccess(user, "system:user:manage"), {
+    }, false, user => this.canManageTenantAccess(user, "system:user:manage", compatibility), {
       memberId: id, selfRevocation: selfChange ? { kind: "user", id } : undefined
     });
   }
@@ -255,7 +258,7 @@ export class PlatformManagementService {
       const result = await this.resetPassword(tx, target);
       await this.audit(tx, user, tenantId, "system.user.reset-password", id);
       return result;
-    }, false, user => this.canManageTenantAccess(user, "system:user:manage"), {
+    }, false, user => this.canManageTenantAccess(user, "system:user:manage", compatibility), {
       memberId: id, selfRevocation: selfChange ? { kind: "user", id } : undefined
     });
   }
@@ -288,7 +291,7 @@ export class PlatformManagementService {
         affectedRole ? beforeSelfRevocation : undefined);
       await this.audit(tx, user, tenantId, "system.role.saved", result.id);
       return result;
-    }, false, user => this.canManageTenantAccess(user, "system:role:manage"), {
+    }, false, user => this.canManageTenantAccess(user, "system:role:manage", compatibility), {
       selfRevocation: compatibility && input.id ? { kind: "role", id: input.id } : undefined
     });
   }
@@ -303,7 +306,7 @@ export class PlatformManagementService {
         affectedRole ? beforeSelfRevocation : undefined);
       if (!result.fixedAllPermissions) await this.audit(tx, user, tenantId, "system.role.permissions", id);
       return result;
-    }, false, user => this.canManageTenantAccess(user, "system:role:manage"), {
+    }, false, user => this.canManageTenantAccess(user, "system:role:manage", compatibility), {
       selfRevocation: compatibility ? { kind: "role", id } : undefined
     });
   }
@@ -315,7 +318,7 @@ export class PlatformManagementService {
       const result = await this.repository.deleteRole(tx, id, tenantId, compatibility);
       await this.audit(tx, user, tenantId, "system.role.deleted", id);
       return result;
-    }, false, user => this.canManageTenantAccess(user, "system:role:manage"));
+    }, false, user => this.canManageTenantAccess(user, "system:role:manage", compatibility));
   }
 
   permissionTree(compatibility?: LegacyPlatformManagementCompatibility) {

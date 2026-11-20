@@ -6,7 +6,8 @@ require("ts-node").register({
 });
 
 const { PlatformService } = require("../apps/api/src/modules/platform/platform.service");
-const { PlatformRepository } = require("../apps/api/src/modules/platform/platform.repository");
+const { OriginalPublicManagementAdapter } = require("../apps/api/src/modules/platform/public-management.adapter");
+const { fixture: publicManagementFixture } = require("./fixtures/platform-management.cjs");
 const { RentalWorkspaceManagementApplication } = require("@rental-os/rental-core/workspace-management");
 const { RentalWorkspaceManagementRepository } = require("@rental-os/rental-core/mysql-workspace-management");
 const { Prisma } = require("@prisma/client");
@@ -121,7 +122,16 @@ async function main() {
     findUserWithRoles: async () => ({ id: "target" }),
     toUserRow: (user) => user
   };
-  await PlatformRepository.prototype.saveUser.call(transactionRepo, {}, tenantId, "admin-a");
+  const publicFixture = publicManagementFixture();
+  const management = new OriginalPublicManagementAdapter(publicFixture.service);
+  await publicFixture.as("admin", () => management.saveUser({
+    id: "target", tenantId, account: "target", displayName: "Target",
+    roleIds: ["role-a"], isPlatformAdmin: false, isActive: true
+  }));
+  isolationLevels.push(...publicFixture.options.map((option) => option.isolationLevel));
+  const publicTenantLock = publicFixture.locks.find((query) => query.sql.includes("FROM Tenant"));
+  assert.match(publicTenantLock.sql, /SELECT id, status FROM Tenant.*FOR UPDATE/);
+  assert.deepEqual(publicTenantLock.values, [tenantId]);
   await RentalWorkspaceManagementRepository.prototype.saveUserWithWorkspaceAccess.call(
     { ...transactionRepo, database: transactionRepo.prisma },
     { workspaceAccesses: [] },

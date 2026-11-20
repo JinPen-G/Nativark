@@ -29,6 +29,8 @@ type ParameterContent = { [key: string]: PlatformJsonValue | undefined };
 /** 原组合宿主供给固定代码适配，HTTP 输入不参与选择。
  * 适配只补充读取、历史权限解释及拒绝条件，当前授权和公共写入仍由管理服务执行。 */
 export interface LegacyPlatformManagementCompatibility {
+  /** 固定服务端谓词只收窄租户管理准入，公共权限和地点范围仍先由同一管理闭包校验。 */
+  allowsTenantAccess?(user: SystemUserRow, permission: string): boolean;
   projectTenants(transaction: PlatformManagementTransaction, tenants: PlatformTenantSummary[]): Promise<PlatformTenantSummary[]>;
   normalizePermissionCodes(codes: readonly string[]): string[];
   isButtonPermission(code: string): boolean;

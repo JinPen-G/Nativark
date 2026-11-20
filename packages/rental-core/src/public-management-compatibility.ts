@@ -28,6 +28,11 @@ const legacyButtons = new Set([
 ]);
 
 export const rentalPublicManagementCompatibility: LegacyPlatformManagementCompatibility = {
+  // 原普通管理账号须具有完整租户范围及精确代码，全权管理员沿当前身份标志识别。
+  allowsTenantAccess(user, permission) {
+    return user.isPlatformAdmin || user.dataScope === "all" && user.permissions.includes(permission);
+  },
+
   async projectTenants(transaction, tenants): Promise<TenantSummary[]> {
     const source = transaction as unknown as Pick<Prisma.TransactionClient, "tenant">;
     const rows = await source.tenant.findMany({

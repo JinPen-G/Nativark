@@ -8,8 +8,15 @@ const navigation = read("apps/admin/src/app/navigation.tsx");
 const router = read("apps/admin/src/app/AppRouter.tsx");
 const api = read("apps/admin/src/api/platform.ts");
 const page = read("apps/admin/src/features/tenant-access/TenantAccessPages.tsx");
-const permissionService = read("apps/api/src/modules/platform/platform.service.ts");
-const permissionRepository = read("apps/api/src/modules/platform/platform.repository.ts");
+const permissionService = [
+  "apps/api/src/modules/platform/platform.service.ts",
+  "packages/rental-core/src/permissions.ts"
+].map(read).join("\n");
+const permissionRepository = [
+  "packages/platform-server/src/modules/platform/platform-management.repository.ts",
+  "packages/platform-server/src/modules/platform/platform-management.service.ts",
+  "packages/rental-core/src/public-management-compatibility.ts"
+].map(read).join("\n");
 const permissionMigration = read("apps/api/prisma/migrations/20260913000400_tenant_neutral_permission_labels/migration.sql");
 
 assert.match(navigation, /tenantAccounts: \{ path: "\/tenant\/accounts"[\s\S]*audience: "tenant"/u);
@@ -26,7 +33,9 @@ assert.match(page, /api\.saveUserWithWorkspaceAccess\(payload\)/u, "账号资料
 assert.doesNotMatch(api, /saveWorkspaceMember/u, "空间授权只能经 saveUserWithWorkspaceAccess 单事务写入，不得再暴露独立成员写接口");
 assert.doesNotMatch(page, /audience: "saas"/u);
 assert.match(permissionService, /code: "rental-os",\s*name: "租赁业务"/u, "内存权限目录必须使用租户中立的业务模块名");
+assert.match(permissionService, /createRentalLegacyPermissionModules\(\)/u, "原内存权限目录消费 Rental 的同源目录数据");
 assert.match(permissionRepository, /return \{ code: "rental-os", name: "租赁业务" \}/u, "数据库权限目录必须使用租户中立的业务模块名");
+assert.match(permissionRepository, /compatibility\.permissionModule\(permission\)/u, "原权限目录使用同一公共应用的固定兼容参加者");
 assert.doesNotMatch(permissionService, /code: "rental-os",\s*name: "门市租赁"/u, "权限目录不得回退到旧门市模块名");
 assert.match(permissionMigration, /SET `module` = '租赁业务'/u, "已有数据库的权限模块名必须通过迁移收口");
 
