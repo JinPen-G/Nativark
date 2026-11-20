@@ -177,6 +177,8 @@ node packages/core-contracts/dist/check.js <解包后的Core目录> --host <宿�
 
 `registerCoreServers` 支持空组合和多个不同 Core，检查失败返回 `issues`，不会返回部分注册表；成功返回 `registrations`。注册不会调用上述业务方法，也不会创建数据库记录、路由、定时任务或 AI 工具。实际 Nest 组合与持久化由[公共 Core 宿主](../platform-core-host/README.md)和所选 Core 适配供给。注册函数本身不办理初始化、迁移或代码加载。
 
+需要任务推进的 Core 可以从 `@rental-os/platform-server/ai-runtime` 使用原公共 Runner，把自己的受控工具接到业务效果端口，由宿主供给当前授权、正式计划、原租约、仓储和累计资源。这个入口不依赖 Rental，工具发布、模型 Gateway 和业务批准仍按各自实际接点办理；没有 AI 贡献的 Core 不需要实现这些端口。[公共任务 Runner 接入](../platform-server/src/ai-runtime/README.md)
+
 [授权与生命周期 schema](src/lifecycle.ts)分别定义租户 Core 授权、成员分配、绑定、就绪和原操作引用。已保存事实的修订从 1 开始；变更请求的 `expectedRevision=0` 只表示记录尚不存在。成员分配请求不包含 `tenantId`，由当前租户身份确定管理边界。合同不定义 Core 独立到期日，统一期限继续由原订阅服务维护。
 
 `CorePrincipal` 仅是原认证服务解析后的主体定位，不携带可自报的权限数组。`CoreTransaction` 是宿主事务回调内的临时句柄，适配器只解析成当前 Core 的受限仓储，回调结束后失效；类型标记不能替代运行时校验。[平台绑定适配](../core-host/README.md#首次绑定与原结果)已有同事务初始化及私有句柄解析，实际宿主必须供给原身份与当前部署，缺失时不得以清单或本地缓存补授权。

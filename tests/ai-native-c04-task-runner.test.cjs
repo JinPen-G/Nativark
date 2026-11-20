@@ -54,12 +54,15 @@ test("cancel request stops the next step without inventing rollback or a second 
 
 test("external timeout is persisted as unknown and is never retried", async () => {
   const timers = [];
-  const clock = { now: () => 0, setTimeout: callback => { timers.push(callback); return callback; }, clearTimeout: () => {} };
+  const clock = { now: () => 0, setTimeout: callback => { timers.push(callback); return callback; },
+    clearTimeout: callback => { const index = timers.indexOf(callback); if (index >= 0) timers.splice(index, 1); } };
   let resolveEffect;
   const h = harness({ steps: [step("network", "external_unknown")], clock, effects: { execute: () => new Promise(resolve => { resolveEffect = resolve; }) } });
   const pending = h.runner.run(input);
-  for (let i = 0; i < 8 && timers.length === 0; i++) await Promise.resolve();
-  assert.equal(timers.length > 0, true);
+  // 只触发已派发效果的超时；读取/领取阶段已清除的计时器不是外部副作用。
+  for (let i = 0; i < 100 && !resolveEffect; i++) await Promise.resolve();
+  assert.equal(typeof resolveEffect, "function");
+  assert.equal(timers.length, 1);
   timers.shift()();
   assert.deepEqual(await pending, { status: "unknown", completedSteps: 0, cleanupFailed: 0 });
   assert.deepEqual(h.calls.filter(value => Array.isArray(value)).map(value => value[0]), ["register", "start", "unknown"]);

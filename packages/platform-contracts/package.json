@@ -54,6 +54,10 @@
     "./tenant-messaging": {
       "types": "./dist/tenant-messaging.d.ts",
       "default": "./dist/tenant-messaging.js"
+    },
+    "./ai-task": {
+      "types": "./dist/ai-task.d.ts",
+      "default": "./dist/ai-task.js"
     }
   },
   "scripts": {
@@ -94,6 +98,9 @@
       ],
       "tenant-messaging": [
         "dist/tenant-messaging.d.ts"
+      ],
+      "ai-task": [
+        "dist/ai-task.d.ts"
       ]
     }
   },

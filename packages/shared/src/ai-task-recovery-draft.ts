@@ -1,5 +1,7 @@
 import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, AI_STEP_STATUSES_DRAFT,
   type AiTaskEventDraft, type AiTaskStatusDraft, type AiStepStatusDraft } from './ai-task-draft';
+import type { AiTaskRunnerOutcomeDraft } from '@rental-os/platform-contracts/ai-task';
+export type { AiTaskRunnerOutcomeDraft } from '@rental-os/platform-contracts/ai-task';
 import { validateAiSceneRequestReceiptDraft, type AiSceneRequestReadDraft, type AiSceneRequestReceiptDraft } from './ai-scene-request-draft';
 import type { AiConversationTurnObservationDraft } from './ai-conversation-draft';
 import { AI_ERROR_CODES, type AiErrorCode } from './ai-native';
@@ -40,13 +42,8 @@ export interface AiSceneModelRecoverySnapshotReadResponse {
   resources: 'task_cumulative_not_new_allowance';
 }
 
-/** Wire outcome of the existing runner, not a second state machine. Unknown
- * never implies permission to retry or release the original reservation. */
-export type AiTaskRunnerOutcomeDraft =
-  | { status: 'succeeded' | 'partially_succeeded' | 'paused' | 'cancel_requested' | 'cancelled' | 'unknown'; completedSteps: number; cleanupFailed: number }
-  | { status: 'unavailable'; completedSteps: number; cleanupFailed: number;
-      stopReason?: 'input_limit_reached'; nextAction?: 'manual_handoff' }
-  | { status: 'failed'; completedSteps: number; cleanupFailed: number; errorCode: string };
+/** Scene execution reports the original Runner outcome without granting a new
+ * lease, retry or business approval. Model output is not a business receipt. */
 export type AiSceneModelExecutionDraft =
   | { kind: 'not_started'; reason: 'host_aborted' | 'plan_unavailable' | 'task_not_runnable' | 'lease_held' | 'recovery_lease_unavailable' }
   | { kind: 'run_outcome'; outcome: AiTaskRunnerOutcomeDraft }

@@ -538,3 +538,4 @@ export type { InfraAdapterCapability, NotificationTemplateSummary, NotificationS
 export type { AsyncJobSummary, CreateAsyncJobRequest, PrintJobSummary, CreatePrintJobRequest } from "./jobs";
 
 export * from "./tenant-messaging";
+export * from "./ai-task";

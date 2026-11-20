@@ -326,6 +326,10 @@
     "./media": {
       "types": "./dist/modules/media/index.d.ts",
       "default": "./dist/modules/media/index.js"
+    },
+    "./ai-runtime": {
+      "types": "./dist/ai-runtime/index.d.ts",
+      "default": "./dist/ai-runtime/index.js"
     }
   },
   "scripts": {
@@ -586,6 +590,9 @@
       ],
       "media": [
         "./dist/modules/media/index.d.ts"
+      ],
+      "ai-runtime": [
+        "dist/ai-runtime/index.d.ts"
       ]
     }
   }
