@@ -2,7 +2,7 @@ import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
 import { composePersistedTaskAuthorization, type PersistedTaskAuthorizationDependencies } from '../task-authorization.composition';
 import { AiOriginalSceneRecoveryService } from './original-scene-recovery.service';
 import { AiOriginalSceneFactsService } from './original-scene-facts.service';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiOrderRouteContextAuthority } from '../order-route-context.authority';
 import { AiBusinessReadRouteAuthority } from '../business-read-route.authority';
 import { composeAiAuthorizedBusinessTools } from '../tools/business-tools.composition';

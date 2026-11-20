@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { AiScopeRepository } from '../ai-scope.repository';
 import { aiTaskAccessFromContext, type AiTaskRepositoryAuthority } from '../ai-task.repository';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { isGatewayConfig } from '../gateway-contract-validation';
 import { countTokensCallId, countTokensSceneCode } from '../input-counting/input-count-tokens.receipt';
 import { PrismaGatewayInvocationBindings } from './prisma-gateway-invocation-bindings';

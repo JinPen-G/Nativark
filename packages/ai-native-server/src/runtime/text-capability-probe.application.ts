@@ -23,7 +23,7 @@ import { createPersistedTextCapabilityEvidence, PrismaTextCapabilityReceiptRepos
 import { matchesProbeProfile, probeContextSchema, textProbeCommandSchema, textProbeConfiguration, textProbeDescriptorSchema,
   textProbeEvidenceHash, textProbeIntent, textProbePreparation, hasObjectiveProbeMethod, textProbeCapability, textProbeMethod, textProbeMode, textProbeRequirements, textProbeRouteScene, textProbeProfileIdSchema, textProbeExecutionProtocol, canExecuteTextProbe,
   isPlatformProbeContext, TEXT_PROBE_SCENE, type TextProbeCommand, type TextProbeCapability, type TextProbeContext } from './text-capability-probe';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { capabilityProfileFingerprint } from './capability-verification';
 import type { PersistedBudgetEvidenceSource } from './budget/budget-dependency-adapters';
 import { PrismaTaskGatewayAudit } from './prisma-task-gateway-audit';

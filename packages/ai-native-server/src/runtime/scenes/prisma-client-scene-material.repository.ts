@@ -3,7 +3,7 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { clientSqlInitialRevisionSchema } from './client-sql-revisions';
 import { decodeAiClientMaterialBodies, encodeAiClientMaterialBodies } from '../privacy/ai-body-storage.codec';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import type { ClientRequestContext } from '@rental-os/rental-core/client-context';
 import { withClientSelectedMaterialTransaction } from './client-selected-transactions';
 

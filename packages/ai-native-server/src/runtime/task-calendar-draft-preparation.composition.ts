@@ -29,7 +29,7 @@ import { aiPersistedPlanToolsSchema } from './runner/prisma-task-plan-input.sour
 import { aiTaskRunnerLimitsSchema } from './runner/prisma-task-run-evidence.repository';
 import { waitForTaskApplicationDependency } from './runner/prisma-task-application';
 import { AiTaskRunnerError } from './runner/ai-task-runner.service';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
 
 type Request = { headers: { authorization?: unknown } };

@@ -4,7 +4,7 @@ import { aiTaskAccessFromContext, AiTaskRepositoryError } from '../ai-task.repos
 import type { PrismaOriginalRequestRepository } from '../task-request/prisma-original-request.repository';
 import { freezeOriginalInput, originalRequestReferenceSchema } from '../task-request/original-request.validation';
 import { originalIdentityHash } from '../task-request/original-request.authority';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 const select = { id: true, runId: true, actionId: true, status: true, effect: true, revision: true, resultRef: true } satisfies Prisma.AiStepSelect;
 export class AiOriginalSceneRecoveryService {

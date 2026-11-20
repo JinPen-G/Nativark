@@ -11,7 +11,7 @@ import { visionCapabilityChallenge } from '../vision-capability-challenge';
 import { audioCapabilityChallenge } from '../audio-capability-challenge';
 import { textProbeCommandSchema, textProbeIntent, textProbePreparation, hasObjectiveProbeMethod, textProbeCapability, textProbeMode, textProbeRequirements, textProbeRouteScene, textProbeExecutionProtocol, canExecuteTextProbe,
   isPlatformProbeContext, probeContextSchema, TEXT_PROBE_SCENE, type TextProbeCommand, type TextProbeContext } from '../text-capability-probe';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 export interface PlatformProbeAuthorityDependencies {
   /** Real platform Guard bound to the ONE server-fixed Profile resource. */

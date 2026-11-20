@@ -13,7 +13,7 @@ import {
   aiTaskReadPolicyReference, aiTaskReadPolicyResponse, type AiTaskReadPolicyReference
 } from '@rental-os/shared';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiScopeRepository } from './ai-scope.repository';
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from './ai-task.repository';
 import { AiTaskCurrentIdentityAuthority } from './task-current-identity.authority';

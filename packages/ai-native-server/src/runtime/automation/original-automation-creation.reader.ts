@@ -5,7 +5,7 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { AI_CONTRACT_DRAFT_VERSION, AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT,
   type AiBusinessEventDraft, type AiExecutionContext, type AiAutomationTaskCreationObservationDraft } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskCreationRepository } from '../ai-task-creation.repository';
 import { aiTaskAccessFromContext } from '../ai-task.repository';
 import { aiPersistenceScopeColumns } from '../persistence-scope';

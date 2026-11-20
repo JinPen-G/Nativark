@@ -9,7 +9,7 @@ import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { AI_BOOKING_DRAFT_STATES } from '@rental-os/shared';
-import { requestFingerprint as hash } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiClientEntryError, entryHash, entryId } from './client-entry-action';
 import { clientSqlPolicyRevisionSchema } from './client-sql-revisions';
 import {

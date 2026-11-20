@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { ClientOrderView } from '@rental-os/shared';
 import { freezeOriginalInput } from '../task-request/original-request.validation';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 const fields = ['rentalAmount', 'discountAmount', 'couponAmount', 'serviceAmount', 'fulfillmentAmount',
   'depositAmount', 'preAuthAmount', 'payableAmount', 'adjustmentAmount', 'finalPayableAmount'] as const satisfies readonly (keyof ClientOrderView)[];

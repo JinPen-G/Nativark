@@ -1,7 +1,7 @@
 import type { AiTaskRepository } from '../ai-task.repository';
 import type { AiTaskExecutionLease, AiTaskExecutionPolicySource } from '../task-execution-budget.ports';
 import { AiTaskExecutionBudgetError } from '../task-execution-budget.ports';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import type { PrismaTaskRunEvidenceRepository } from './prisma-task-run-evidence.repository';
 import type { AiTaskRunnerTaskMetadata } from './ai-task-runner.ports';
 

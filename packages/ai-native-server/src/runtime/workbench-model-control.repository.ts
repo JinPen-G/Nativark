@@ -4,7 +4,7 @@
 import type { PrismaClient, Prisma, AiTask, AiRun, AiStep, AiTaskActionInput } from '@prisma/client';
 import { AI_SCENE_REQUEST_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, type AiConversationTurnObservationDraft,
   type AiSceneRequestReceiptDraft } from '@rental-os/shared';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { originalIdentityHash } from './task-request/original-request.authority';
 import { AiTaskRepositoryError, aiTaskAccessFromContext, type AiTaskRepositoryAuthority } from './ai-task.repository';
 import { aiTaskRunPlanSchema } from './runner/prisma-task-run-evidence.repository';

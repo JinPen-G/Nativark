@@ -7,7 +7,7 @@ import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma, PrismaClient, OperationLog } from '@prisma/client';
 import { z } from 'zod';
 import { hasEffectivePermission } from '@rental-os/platform-server/permission-match';
-import { requestFingerprint as fingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint as fingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { HumanAutomationReviewError, type HumanAutomationOriginalGrantTarget,
   type HumanAutomationReviewGrantTarget, type HumanAutomationReviewGrantReadTarget,
   type HumanAutomationReviewService } from './human-automation-review.service';

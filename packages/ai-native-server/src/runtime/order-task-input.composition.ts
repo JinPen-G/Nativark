@@ -1,7 +1,7 @@
 import type { ApiAuthGuard } from './rental-adapters/api-auth.guard';
 import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 import type { RentalOrderConfirmationService } from './rental-adapters/rental-order-confirmation.service';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { AiStepRegistrationRepository } from './ai-step-registration.repository';
 import { composePersistedTaskAuthorization, type PersistedTaskAuthorizationDependencies } from './task-authorization.composition';

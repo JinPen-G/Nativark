@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { AiExecutionContext, RentalOrderInspectionBasisFacts } from '@rental-os/shared';
 import type { RentalCoreService } from '../rental-adapters/rental-core.service';
 import type { AiOrderRouteContextAuthority } from '../order-route-context.authority';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { ModelGatewayError } from '../model-gateway.ports';
 import { assertAiReadContextBinding } from './read-context-binding';
 

@@ -3,7 +3,7 @@ import type { PaymentRuntimeService } from '../rental-adapters/payment.runtime.s
 import type { RentalCoreService } from '../rental-adapters/rental-core.service';
 import type { AiOrderRouteContextAuthority } from '../order-route-context.authority';
 import type { AiBusinessReadAuthority } from '../business-read-route.authority';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import type { AiExecutionContext } from '@rental-os/shared';
 import { ModelGatewayError } from '../model-gateway.ports';
 import { assertAiReadContextBinding } from './read-context-binding';

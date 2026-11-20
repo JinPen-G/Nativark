@@ -10,7 +10,7 @@ import { checkedAiAvailabilityResult } from '../availability-read-facts.service'
 import { freezeOriginalInput } from '../task-request/original-request.validation';
 import { parseQuoteSelection, validateQuoteSelectionHttpRequest } from '../task-request/quote-selection.validation';
 import { approvedOrderReviewMaterial } from '../approval-execution/approved-order-review-material';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import type { AiSceneHttpRequest } from './request-bound-scenes.application';
 import type { composeClarifiedQuoteSelectionRequests } from './request-bound-scenes.application';
 import type { HumanQuoteSelectionDependencies } from '../task-request/prisma-quote-selection.repository';

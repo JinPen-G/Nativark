@@ -11,7 +11,7 @@ import type { PrismaGatewayAccountingFacts } from './budget/prisma-gateway-accou
 import { isGatewayConfig } from './gateway-contract-validation';
 import { ModelGatewayError, type WorkspaceGatewayContext } from './model-gateway.ports';
 import type { GatewayBudgetDenialObservation, GatewayInvocationObservation, UnifiedGatewayAudit } from './unified-ai-gateway.ports';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { aiPersistenceScopeColumns } from './persistence-scope';
 
 type Db = Pick<PrismaClient, '$transaction' | 'operationLog' | 'aiScope' | 'aiTask' | 'aiGatewayInvocation'

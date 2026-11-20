@@ -8,7 +8,7 @@ import { AI_PROPOSAL_DRAFT_VERSION, AI_QUOTE_SELECTION_DRAFT_VERSION, AI_SCENE_R
   type AiHumanQuoteOrderRepreparePreparationInputDraft, type AiHumanQuoteOrderRepreparePreparationDraft,
   type AiQuoteRequestReissuePreparationInputDraft, type AiTaskRecoveryRunQueryDraft } from '@rental-os/shared';
 import { aiTaskRunPlanSchema, aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { composeControlledApprovedOrder, type ControlledApprovedOrderDependencies } from '../approval-execution/controlled-approved-order.composition';
 import { approvedOrderCommandSchema, orderContextHash } from '../approval-execution/prisma-approved-order.source';

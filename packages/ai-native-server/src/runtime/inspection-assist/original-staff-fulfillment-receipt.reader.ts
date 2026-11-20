@@ -8,7 +8,7 @@ import { STAFF_FULFILLMENT_RECEIPT_VERSION, staffFulfillmentReceiptRequest, staf
 import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
 import type { RentalCoreService } from '../rental-adapters/rental-core.service';
 import type { RentalIdempotencyRepository } from '../rental-adapters/rental-idempotency.repository';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiOrderRouteContextAuthority, type AiOrderRouteCredentialSource } from '../order-route-context.authority';
 import { InspectionAssistError } from './inspection-assist.validation';
 

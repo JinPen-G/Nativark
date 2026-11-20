@@ -4,7 +4,7 @@ import { AiTaskRepositoryError, aiTaskAccessFromContext, type AiTaskRepositoryAu
 import type { AiStepTransitionAuthority, AiStepTransitionCommand, AiStepTransitionGrant } from '../ai-step-transition.repository';
 import { PrismaTaskOrderStartAuthority } from './prisma-task-order-start.authority';
 import type { AiTaskPlanEvidenceAuthority, PrismaTaskRunEvidenceRepository, AiConfirmationTool } from './prisma-task-run-evidence.repository';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');

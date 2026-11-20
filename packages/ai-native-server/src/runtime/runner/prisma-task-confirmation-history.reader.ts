@@ -7,7 +7,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, AI_TOOL_DRAFT_VERSION, type AiTaskConfirmationHistoryDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError, type AiTaskRepository } from '../ai-task.repository';
-import { requestFingerprint as hash } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 import { taskExecutionPhaseStore } from './task-execution-phase.store';
 import { waitingPayloadSchema } from './prisma-task-confirmation-checkpoint.source';
 import { aiTaskRunPlanSchema, aiTaskConfirmationPhaseVersion, aiTaskConfirmationPhasePayloadSchema, aiTaskResumedConfirmationSchema } from './prisma-task-run-evidence.repository';

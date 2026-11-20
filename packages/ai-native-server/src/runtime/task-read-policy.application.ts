@@ -23,7 +23,7 @@ import { AiTaskCurrentIdentityAuthority } from './task-current-identity.authorit
 import { AiScopeRepository } from './ai-scope.repository';
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from './ai-task.repository';
 import { TenantModelConfigurationAuthority } from './tenant-model-config.authority';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { freezeOriginalInput } from './task-request/original-request.validation';
 import { originalIdentityHash } from './task-request/original-request.authority';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';

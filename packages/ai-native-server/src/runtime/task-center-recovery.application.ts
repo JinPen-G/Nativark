@@ -21,7 +21,7 @@ import { readTaskCenterRecoveryTarget, snapshotTaskCenterRecoveryFence,
 import { waitForTaskApplicationDependency } from './runner/prisma-task-application';
 import { respondAiScene, validateAiModelRecoveryResponse } from './scenes/original-scenes.controller';
 import { withRequestAbort, type AiRequestAbortSource } from './scenes/request-abort';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { validateAiOrderReadResponse } from './scenes/scene-observation-contracts';
 
 export const AI_TASK_CENTER_RECOVERY_REQUESTS = Symbol('AI_TASK_CENTER_RECOVERY_REQUESTS');

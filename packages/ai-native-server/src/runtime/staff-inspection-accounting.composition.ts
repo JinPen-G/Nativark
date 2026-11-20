@@ -6,7 +6,7 @@ import type { PrismaClient } from '@prisma/client';
 import { AI_TASK_DRAFT_VERSION, aiStaffTaskAccountingRequestSchema, aiTaskAccountingObservationSchema } from '@rental-os/shared';
 import { z } from 'zod';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError, aiTaskAccessFromContext } from './ai-task.repository';
 import { composePersistedTaskAuthorization, type PersistedTaskAuthorizationDependencies } from './task-authorization.composition';
 import { composePersistedTaskAccountingRecovery } from './task-model-gateway.composition';

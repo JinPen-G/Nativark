@@ -9,7 +9,7 @@ import { PrismaService } from '../rental-adapters/prisma.service';
 import { AuthService } from '../rental-adapters/auth.service';
 import { creditAllocations, creditAmount, creditAtoms, creditConsumption } from './platform-credit-limit';
 import { isGatewayConfig } from '../gateway-contract-validation';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { modelUsageSchema } from '../model-gateway.ports';
 import { CountCallHistoryReader, type CallHistoryAnchor } from './count-call-history.reader';
 

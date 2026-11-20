@@ -2,7 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { AI_PROPOSAL_DRAFT_VERSION, type AiExecutionContext, type AiProposalPayloadDraft } from '@rental-os/shared';
 import { z } from 'zod';
 import { getRequestIdentity } from '@rental-os/platform-server/request-identity';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError, aiTaskAccessFromContext } from '../ai-task.repository';
 import { checkAiApprovalBindingDraft, fingerprintAiProposalDraft } from '../proposal-binding-draft';
 import { isAiStepExecutionContext } from '../task-contract-validation';

@@ -5,7 +5,7 @@
 import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma, PrismaClient, AiTaskRunOverhead, AiTaskExecutionCharge } from '@prisma/client';
 import { performance } from 'node:perf_hooks';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskExecutionBudgetError, type AiTaskExecutionBudgetPort, type AiTaskExecutionSettlementRequest } from '../task-execution-budget.ports';
 import type { AiTaskRunnerLease, AiTaskRunnerOverheadTicket } from './ai-task-runner.ports';
 import type { PrismaTaskRunEvidenceRepository } from './prisma-task-run-evidence.repository';

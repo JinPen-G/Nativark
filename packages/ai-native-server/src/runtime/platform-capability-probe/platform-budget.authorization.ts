@@ -1,7 +1,7 @@
 import { hasEffectivePermission } from '@rental-os/platform-server/permission-match';
 import type { PrismaClient } from '@prisma/client';
 import type { AiExecutionContext } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import type { AiScopeRepository } from '../ai-scope.repository';
 import { isGatewayConfig } from '../gateway-contract-validation';
 import { modelRequestSchema, type ModelUsage } from '../model-gateway.ports';

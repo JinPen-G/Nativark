@@ -5,7 +5,7 @@ import { AiClientMaterialError } from './prisma-client-scene-material.repository
 import { bookingSelectionSchema, oneTimeQuoteSnapshotFingerprint } from './client-booking-material';
 import { freezeOriginalInput } from '../task-request/original-request.validation';
 import { aiClientQuoteConfirmationRequestSchema } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 type Application = ReturnType<typeof composeRequestBoundClientApplication>;
 const commandSchema = z.object({ original: aiClientQuoteConfirmationRequestSchema,

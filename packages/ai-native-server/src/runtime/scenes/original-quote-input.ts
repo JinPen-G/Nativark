@@ -3,7 +3,7 @@ import { AI_TASK_INPUT_DRAFT_VERSION, AI_TASK_INPUT_QUOTE_ROW_TARGET_VERSION, RE
   type AiTaskInputContractDraft, type AiTaskInputAnswerDraft, type AiTaskInputFieldDraft, type AiTaskInputQuoteRowTargetDraft } from '@rental-os/shared';
 import { aiQuoteCandidateInputSchema, AI_QUOTE_CANDIDATE_LIMITS } from '../tools/quote-candidate-preparation.service';
 import { AiTaskRepositoryError } from '../ai-task.repository';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 export const ORIGINAL_QUOTE_INITIAL_PARAMETER_CODE = 'original_quote_initial_parameters';
 /** A complete first quote still needs an explicit human parameter receipt.

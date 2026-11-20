@@ -10,7 +10,7 @@ import { validateAiCoreExtensionPreview } from '../scenes/extension-preview-http
 import type { RentalCoreController } from '@rental-os/rental-core/http-core';
 import type { RentalCoreService } from '../rental-adapters/rental-core.service';
 import { RentalOrderExtensionDto } from '@rental-os/rental-core/order-dto';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { rentalOrderDueAt } from '@rental-os/rental-core/carrier-shipment';
 import type { AiBusinessReadRouteAuthority } from '../business-read-route.authority';
 import type { AiOrderRouteContextAuthority } from '../order-route-context.authority';

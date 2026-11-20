@@ -12,7 +12,7 @@ import type { UnifiedGatewayRoutingPort } from '../unified-ai-gateway.ports';
 import type { GatewayContext } from '../model-gateway.ports';
 import { ModelGatewayError } from '../model-gateway.ports';
 import { isGatewayResult, isGatewayOrderExplainRequest } from '../gateway-contract-validation';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { parseTaskModelInput, taskModelFingerprint, taskModelIdentity, taskModelConfiguration,
   TASK_TEXT_MODEL_TOOL, type TaskModelPolicy } from './task-model-input';
 import { nativeToolResultReferenceSchema, type NativeToolCallBindingReader,

@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { AiInspectionActorScope, AiInspectionOperationResult, AiInspectionReceiptLookup, AiInspectionTarget, AiStaffInspectionHistoryItem, AiStaffInspectionHistoryRequest } from '@rental-os/shared';
 import { InspectionAssistError, inspectionId, inspectionTargetSchema, parseInspectionInput } from './inspection-assist.validation';
 import { hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { recognitionSaveAssociationSchema, type RecognitionSaveAssociation, type RecognitionSaveReference } from './inspection-recognition-save.association';
 
 const receiptResult = z.object({ draftId: z.string(), revision: z.number().int().positive(),

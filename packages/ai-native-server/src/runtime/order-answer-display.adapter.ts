@@ -16,7 +16,7 @@ import { readOriginalSceneEnvelope } from './scenes/original-scene-knowledge';
 import { aiTaskRunPlanSchema } from './runner/prisma-task-run-evidence.repository';
 import type { readTaskModelRunOrigin } from './task-input/prisma-task-input.repository';
 import { freezeOriginalInput } from './task-request/original-request.validation';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { aiConversationHistoryContextSchema } from './conversation-context.reader';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);

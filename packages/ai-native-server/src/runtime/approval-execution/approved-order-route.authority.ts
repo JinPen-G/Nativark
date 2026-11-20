@@ -6,7 +6,7 @@ import type { EnterpriseMerchantDelegationActorAuth } from '@rental-os/rental-co
 import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
 import { getRequestIdentity, runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
 import { CreateRentalOrderDto } from '@rental-os/rental-core/order-dto';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import type { ApprovedOrderBinding } from '../rental-adapters/approved-order-transaction.ports';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { AiOrderRouteCredentialSource } from '../order-route-context.authority';

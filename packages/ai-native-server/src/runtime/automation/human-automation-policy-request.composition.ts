@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { AuthService } from '../rental-adapters/auth.service';
 import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
 import { getRequestIdentity, runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
-import { requestFingerprint as hash } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
 import { HumanAutomationPolicyManagementService } from './human-automation-policy-management.service';
 import { AutomationManagementError } from './automation-management.validation';

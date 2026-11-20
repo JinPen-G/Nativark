@@ -22,7 +22,7 @@ import { readOriginalTaskModelProvenance } from './task-request/prisma-original-
 import { originalIdentityHash } from './task-request/original-request.authority';
 import { freezeOriginalInput } from './task-request/original-request.validation';
 import { readTaskModelRunOrigin } from './task-input/prisma-task-input.repository';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { orderAnswerDisplayObservation, readOrderAnswerDisplayEnvelope, readOrderAnswerDisplayLineage } from './order-answer-display.adapter';
 import type { WorkbenchModelControlOriginReader, WorkbenchModelControlOrigin } from './workbench-model-control.contract';
 

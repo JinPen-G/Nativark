@@ -1,7 +1,7 @@
 import { hasEffectivePermission } from '@rental-os/platform-server/permission-match';
 import type { AuthService } from './rental-adapters/auth.service';
 import type { AiExecutionContext } from '@rental-os/shared';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError, type AiTaskRepositoryAuthority, type AiTaskRepositoryOperation } from './ai-task.repository';
 import type { AiStepReplayAuthority } from './ai-step-registration.repository';
 import { AiTaskCurrentIdentityAuthority } from './task-current-identity.authority';

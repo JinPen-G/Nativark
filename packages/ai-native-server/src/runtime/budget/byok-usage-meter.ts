@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma } from '@prisma/client';
 import type { AiUsageAssociationDraft, AiUsageSettingsDraft } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { BudgetError } from './budget.ports';
 import { validateBudgetSettings } from './budget-settings';
 

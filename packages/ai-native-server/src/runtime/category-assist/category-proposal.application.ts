@@ -9,7 +9,7 @@ import { isRentalCategoryCode, RENTAL_CATEGORY_TEMPLATE_IDS, CATEGORY_DRAFT_SECT
 import { CategoryAssistError, type CategoryDraftApplication } from './category-draft.application';
 import { patchCategorySection } from '@rental-os/rental-core/mysql-category-governance';
 import { parsePublishedRentalCategory } from '@rental-os/rental-core/category-runtime';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u);
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);

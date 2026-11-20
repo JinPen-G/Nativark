@@ -5,7 +5,7 @@ import { AI_TASK_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, type AiUsageSettingsDraft
 import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
 import type { PrismaService } from '../rental-adapters/prisma.service';
 import type { RentalCoreService } from '../rental-adapters/rental-core.service';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError, aiTaskAccessFromContext, type AiTaskRepositoryAuthority } from '../ai-task.repository';
 import { composePersistedTaskAuthorization, type PersistedTaskAuthorizationDependencies } from '../task-authorization.composition';
 import { aiPersistenceScopeColumns } from '../persistence-scope';

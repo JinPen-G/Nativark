@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { AiGatewayIntentDraft, AiGatewayFeatureDraft } from '@rental-os/shared';
 import { ModelGatewayError, GATEWAY_MAX_INPUT_BYTES, isBoundedGatewayInput, modelProtocolRequestBaseSchema, modelProtocolRequestSchema, modelRequestSchema, type GatewayContext, type ModelProtocolContent } from './model-gateway.ports';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { nativeToolResultIntentFingerprint, resolvedNativeToolResultSchema,
   type NativeToolResultResolver, type ResolvedNativeToolResult } from './model-input/native-tool-result.ports';
 

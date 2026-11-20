@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { AiTextCapabilityHttpResponsesDraft } from '@rental-os/shared';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { AiTaskCurrentIdentityAuthority } from './task-current-identity.authority';
 import { TenantModelConfigurationAuthority } from './tenant-model-config.authority';

@@ -22,7 +22,7 @@ import { validateAiExtensionPreviewResponse } from './extension-preview-http.con
 import { originalPolicyRequest, originalPolicyResponse } from './original-policy-http.contract';
 import { originalRequestReferenceSchema } from '../task-request/original-request.validation';
 import { AiTaskRepositoryError } from '../ai-task.repository';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { validateAiTaskObservation } from '../task-contract-validation';
 import { validateAiSceneModelObservation, validateAiTaskSceneObservation, parseAiSceneSourceRequest,
   parseAiOpeningSourceRequest, validateAiSceneSourceObservation, validateAiOpeningSourceObservation } from './scene-observation-contracts';

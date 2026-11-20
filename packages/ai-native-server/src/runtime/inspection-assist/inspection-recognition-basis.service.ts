@@ -10,7 +10,7 @@ import type { RentalCoreService } from '../rental-adapters/rental-core.service';
 import type { InspectionTemplateService } from './inspection-template.service';
 import type { InspectionActionAuthority } from './inspection-action.authority';
 import { InspectionAssistError } from './inspection-assist.validation';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { normalizedRentalAttributeValue, validateRentalCategoryAttributes } from '@rental-os/rental-core/category-attributes';
 import { optionalUsageReading, usageDelta } from '@rental-os/rental-core/usage-reading';
 

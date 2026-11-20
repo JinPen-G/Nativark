@@ -11,7 +11,7 @@ import { AiTaskResultRepository } from '../runner/ai-task-result.repository';
 import { aiTaskRunPlanSchema } from '../runner/prisma-task-run-evidence.repository';
 import { parseTaskModelInput, taskModelFingerprint, TASK_TEXT_MODEL_TOOL } from '../model-input/task-model-input';
 import { isGatewayResult } from '../gateway-contract-validation';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskInputLimitError } from '../task-input/task-input.errors';
 
 const contextQuestion = z.object({ kind: z.literal('client-context-question-1'),

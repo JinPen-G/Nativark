@@ -8,7 +8,7 @@ import { AI_TEXT_MODEL_STEP_CODE, AI_IMAGE_MODEL_STEP_CODE, AI_AUDIO_MODEL_STEP_
 import { AiTaskRepositoryError, type AiTaskRepository } from '../ai-task.repository';
 import { AiTaskRunnerError } from '../runner/ai-task-runner.service';
 import { validateAiTaskObservation } from '../task-contract-validation';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { withAiTaskTransaction } from '../task-transaction-authority';
 
 export const CLIENT_VISIBLE_LOG_ACTION = 'ai_task_client_visible';

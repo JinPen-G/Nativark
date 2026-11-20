@@ -10,7 +10,7 @@ import { getRequestDataScope, getRequestIdentity, getRequestLocationIds, runWith
 import type { AuthService } from '../rental-adapters/auth.service';
 import type { RentalCoreService } from '../rental-adapters/rental-core.service';
 import { canManageWorkspaceWideNotifications, canResolveNotificationOrderScope } from '@rental-os/rental-core/workbench';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
 import type { AiTaskCredentialSource } from '../task-current-action.authority';
 import { BusinessFailureError, isResourceFailureEvent, readBusinessFailureResourceBinding, readBusinessFailureResource,

@@ -8,7 +8,7 @@ import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { AI_APPROVED_SETTINGS_TOOL_CODE, AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 import { settingsNotificationsSchema, settingsChangeReferenceSchema } from '@rental-os/rental-core/approved-settings-validation';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { composeApprovedSettingsApplication } from '../approval-execution/approved-settings-application.composition';
 import { ApprovedSettingsTaskAuthority, settingsConflict, settingsDenied, settingsUnavailable,
   type ApprovedSettingsApplicationDependencies } from '../approval-execution/approved-settings-task.authority';

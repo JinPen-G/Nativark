@@ -2,7 +2,7 @@ import { Module, type DynamicModule } from '@nestjs/common';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import type { AiStaffInspectionHostProjection, AiStaffInspectionReceiptHostProjection } from '@rental-os/shared';
 import { recognitionSaveReferenceSchema } from './inspection-recognition-save.association';
 import type { AiTaskInputSource } from '../task-input/task-input.ports';

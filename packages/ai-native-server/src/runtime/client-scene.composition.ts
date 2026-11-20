@@ -9,7 +9,7 @@ import type { ApiAuthGuard } from './rental-adapters/api-auth.guard';
 import { ExecutionContextHost } from '@nestjs/core/helpers/execution-context-host';
 import { getRequestIdentity, runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
 import { captureRentalClientInternalAuthority } from '@rental-os/rental-core/application-internal-authority';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { z } from 'zod';
 import { ValidationPipe } from '@nestjs/common';
 import { ClientAvailabilityRequestDto, ClientMyOrdersQueryDto } from '@rental-os/rental-core/http-client-request.dto';

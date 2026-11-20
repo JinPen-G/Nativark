@@ -3,7 +3,7 @@ import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { parseRentalDesktopBusinessPolicy, type RentalDesktopBusinessBinding, type RentalDesktopBusinessPolicy,
   type RentalDesktopBusinessPolicyRead } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { DesktopBusinessError } from './desktop-business.error';
 

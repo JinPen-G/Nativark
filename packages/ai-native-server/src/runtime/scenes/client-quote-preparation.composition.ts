@@ -4,7 +4,7 @@ import { aiClientPersonalQuoteSelectionSchema, aiClientQuoteReadRequestSchema, a
   clientGoalSelectedInput, RENTAL_PRICING_UNIT_CODES, type ClientCreateQuoteRequest } from '@rental-os/shared';
 import type { ClientApiService } from '@rental-os/rental-core/mysql-client-application';
 import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiClientQuoteResultUnknownError, composeGuardedClientOriginalQuotes } from '../client-quote-original.composition';
 import { createAiGuardedClientSession } from '../client-scene.composition';
 import { AiTaskRepositoryError } from '../ai-task.repository';

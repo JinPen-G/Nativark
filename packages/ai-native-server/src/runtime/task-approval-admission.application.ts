@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { AI_TASK_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, AI_PROPOSAL_DRAFT_VERSION,
   AI_QUOTE_SELECTION_DRAFT_VERSION, AI_SCENE_REQUEST_DRAFT_VERSION,
   type AiProposalPayloadDraft, type AiApprovalReprepareCommandDraft } from '@rental-os/shared';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiScopeRepository } from './ai-scope.repository';
 import { AiTaskCurrentIdentityAuthority } from './task-current-identity.authority';
 import { AiTaskRepository, aiTaskAccessFromContext, AiTaskRepositoryError } from './ai-task.repository';

@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { AI_TOOL_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
 import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
 import type { AuthService } from '../rental-adapters/auth.service';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiScopeRepository, type AiCurrentScopeAuthority } from '../ai-scope.repository';
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
 import type { AiTaskCredentialSource } from '../task-current-action.authority';

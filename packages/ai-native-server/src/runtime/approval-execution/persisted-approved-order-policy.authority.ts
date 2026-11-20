@@ -1,6 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import type { AiExecutionContext, AiProposalActionDraft } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError, aiTaskAccessFromContext } from '../ai-task.repository';
 import { fingerprintAiProposalDraft } from '../proposal-binding-draft';
 import { composePersistedTaskAuthorization, type PersistedTaskAuthorizationDependencies } from '../task-authorization.composition';

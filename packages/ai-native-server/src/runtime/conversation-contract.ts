@@ -15,7 +15,7 @@ import { parseOriginalRequest, originalBody } from './task-request/original-requ
 import { AI_SCENE_REQUEST_DRAFT_VERSION, AI_CONVERSATION_HTTP_DRAFT, validateAiConversationListResponseDraft, validateAiConversationTaskResultDraft,
   type AiConversationOperationObservationDraft, type AiConversationAdmissionResponseDraft,
   type AiConversationObservationDraft, type AiConversationListResponseDraft, type AiConversationTurnPageDraft } from '@rental-os/shared';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiOriginalRequestResultUnknownError } from './task-request/prisma-original-request.repository';
 import { validateAiConversationModelResponse } from './scenes/scene-observation-contracts';
 import { inspectAiWorkbenchDisplayMaterial } from './workbench-display.contract';

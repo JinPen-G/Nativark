@@ -6,7 +6,7 @@ import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { hasEffectivePermission } from '@rental-os/platform-server/permission-match';
-import { requestFingerprint as hash } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 import type { BusinessFailureReadAuthority } from '../business-events/business-failure-read.authority';
 import { AiScopeRepository } from '../ai-scope.repository';
 import { AiTaskRepositoryError } from '../ai-task.repository';

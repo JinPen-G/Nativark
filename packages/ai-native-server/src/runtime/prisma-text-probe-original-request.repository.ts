@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from './ai-task.repository';
 import { AiScopeRepository } from './ai-scope.repository';
 import { AiTaskCurrentIdentityAuthority } from './task-current-identity.authority';

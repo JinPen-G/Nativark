@@ -1,6 +1,6 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import type { AiExecutionContext } from '@rental-os/shared';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError, type AiTaskRepositoryOperation } from './ai-task.repository';
 import { AiTaskCurrentActionAuthority, type AiTaskActionPolicySource, type AiTaskCredentialSource } from './task-current-action.authority';
 import type { AiScopeRepository } from './ai-scope.repository';

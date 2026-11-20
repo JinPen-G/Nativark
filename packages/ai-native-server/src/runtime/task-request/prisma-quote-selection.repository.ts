@@ -9,7 +9,7 @@ import type { ControlledApprovedOrderDependencies } from '../approval-execution/
 import { AiApprovedOrderRouteAuthority } from '../approval-execution/approved-order-route.authority';
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from '../ai-task.repository';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { PrismaOriginalRequestRepository, AiOriginalRequestResultUnknownError } from './prisma-original-request.repository';
 import { originalIdentityHash } from './original-request.authority';
 import { freezeOriginalInput } from './original-request.validation';

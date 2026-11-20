@@ -6,7 +6,7 @@ import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma } from '@prisma/client';
 import type { AiTenantCallRecord } from '@rental-os/shared';
 import { isGatewayConfig } from '../gateway-contract-validation';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { countTokensSupport } from '../input-counting/count-tokens.protocol';
 import { countTokensDispatchClaimSchema, countTokensDispatchOperationId, countTokensOperationId,
   countTokensCallId, countTokensSceneCode, countTokensReceiptSchema, countTokensReceiptDocumentHash,

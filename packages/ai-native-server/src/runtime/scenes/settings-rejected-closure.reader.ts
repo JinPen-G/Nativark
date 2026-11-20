@@ -6,7 +6,7 @@ import type { AiTask, AiRun, Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { AI_APPROVED_SETTINGS_TOOL_CODE, AI_TASK_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 import { settingsChangeReferenceSchema } from '@rental-os/rental-core/approved-settings-validation';
-import { requestFingerprint as hash } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 import { settingsTransactionDb, settingsUnavailable, type ApprovedSettingsApplicationDependencies } from '../approval-execution/approved-settings-task.authority';
 import { AiTaskRepository } from '../ai-task.repository';
 import { aiStepActionId } from '../ai-step-registration.repository';

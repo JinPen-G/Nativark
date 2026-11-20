@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { AI_PROPOSAL_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION,
   type AiApprovalApplicationDecisionDraft, type AiApprovalRecordDraft, type AiProposalDecisionRequestDraft,
   type AiProposalPayloadDraft, type AiProposalRecordDraft } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiApprovalService, AiApprovalRepositoryError, PrismaAiApprovalRepository, type AiApprovalRecord } from '../ai-approval-repository';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { fingerprintAiProposalDraft } from '../proposal-binding-draft';

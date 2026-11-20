@@ -9,7 +9,7 @@ import type { PersistedBudgetEvidenceSource } from '../budget/budget-dependency-
 import { composePersistedTaskModelInput, composeCurrentAuthorizedTaskModelInput } from '../model-input/persisted-task-model-input.composition';
 import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, taskModelMaterialSchema, taskImageMaterialSchema, taskAudioMaterialSchema, parseTaskModelInput, taskModelFingerprint, continueTaskModelMaterial } from '../model-input/task-model-input';
 import { isGatewayResult } from '../gateway-contract-validation';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { aiTaskRunPlanSchema, aiTaskRunnerLimitsSchema } from './prisma-task-run-evidence.repository';
 import { composeCurrentAuthorizedPersistentTaskInputRunner } from './authorized-persistent-task-input.composition';
 import { waitForTaskApplicationDependency, type AiTaskApplicationHost } from './prisma-task-application';

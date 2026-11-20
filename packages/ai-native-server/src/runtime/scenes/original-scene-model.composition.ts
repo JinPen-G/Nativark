@@ -14,7 +14,7 @@ import { aiPersistedPlanToolsSchema } from '../runner/prisma-task-plan-input.sou
 import { AiTaskRunnerError, withAiTaskHeldPreparationDefinition, type AiTaskHeldPreparation } from '../runner/ai-task-runner.service';
 import type { AiTaskPreparationDefinition } from '../runner/task-run-preparation.ports';
 import type { AiTaskRegisteredExecutor } from '../runner/prisma-task-measured-effects';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { originalIdentityHash } from '../task-request/original-request.authority';
 import { originalRequestReferenceSchema, freezeOriginalInput } from '../task-request/original-request.validation';
 import { AI_SCENE_REQUEST_DRAFT_VERSION } from '@rental-os/shared';

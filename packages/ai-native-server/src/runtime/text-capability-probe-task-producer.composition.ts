@@ -1,7 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import type { AiExecutionContext } from '@rental-os/shared';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError, type AiTaskRepository } from './ai-task.repository';
 import { AiTaskCreationRepository, type AiTaskCreationAuthority } from './ai-task-creation.repository';
 import { textProbeCommandSchema, TEXT_CAPABILITY_PROBE_TOOL } from './text-capability-probe';

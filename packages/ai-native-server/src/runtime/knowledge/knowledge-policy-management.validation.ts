@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { fingerprint, id } from './knowledge-validation';
 import { knowledgeUploadInput, knowledgeUploadRevisionSchema, knowledgeUploadKey } from './human-knowledge-upload.service';
 import { AI_KNOWLEDGE_POLICY_MANAGEMENT_VERSION, type AiKnowledgePolicyChangeDraft } from '@rental-os/shared';

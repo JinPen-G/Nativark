@@ -6,7 +6,7 @@ import type { AiTaskPlanEvidenceAuthority } from './runner/prisma-task-run-evide
 import { PrismaTaskStepEvidenceAuthority } from './runner/prisma-task-step-evidence.authority';
 import { isGatewayConfig, isGatewayResult } from './gateway-contract-validation';
 import { textProbeCommandSchema, textProbeIntent, textProbeCapability, textProbeMode, TEXT_CAPABILITY_PROBE_TOOL, TEXT_PROBE_SCENE } from './text-capability-probe';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 type Db = Pick<PrismaClient, 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskRunPlan' | 'aiTaskResultArtifact'
   | 'aiTaskExecutionCharge' | 'aiTaskActionInput' | 'aiGatewayInvocation' | 'aiGatewayAccountingReceipt' | 'aiInvocationAdmission'>;

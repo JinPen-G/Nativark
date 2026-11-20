@@ -10,7 +10,7 @@ import { BusinessOutboxObservationReader } from '../business-events/business-out
 import type { RuntimeTaskFaultAlertPolicySource } from '../observability/task-fault-policy.configuration';
 import { AiScopeRepository } from '../ai-scope.repository';
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
-import { requestFingerprint as hash } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 import { composeAutomationFailureTasks, type AutomationDependencies } from './automation.composition';
 import { AutomationError } from './prisma-automation.authority';
 import { HumanAutomationReviewService } from './human-automation-review.service';

@@ -4,7 +4,7 @@ import { Module, type DynamicModule } from '@nestjs/common';
 import { z } from 'zod';
 import { AI_TOOL_DRAFT_VERSION, isAiTaskInputSubmissionDraft } from '@rental-os/shared';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskCreationRepository } from '../ai-task-creation.repository';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { createInspectionTaskResultReferenceReader } from './inspection-task-result-reference.reader';

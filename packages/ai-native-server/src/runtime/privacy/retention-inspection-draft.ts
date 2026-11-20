@@ -10,7 +10,7 @@ import { AI_INSPECTION_MANUAL_HTTP_SCHEMAS, AI_INSPECTION_DRAFT_SCHEMAS,
   type AiInspectionDraftState } from '@rental-os/shared';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { fingerprint } from '../knowledge/knowledge-validation';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { recognitionSaveAssociationSchema } from '../inspection-assist/inspection-recognition-save.association';
 import { aiTaskHasUnresolvedEffects } from '../task-unresolved-effects';
 import { AI_RETENTION_POLICY } from './retention-policy';

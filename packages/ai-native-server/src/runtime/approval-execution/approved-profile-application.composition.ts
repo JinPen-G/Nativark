@@ -8,7 +8,7 @@ import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { AI_PROPOSAL_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, type AiProposalPayloadDraft,
   type AiApprovalRecordDraft } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { SharedCustomerRepository } from '@rental-os/rental-core/mysql-customer-master';
 import { ApprovedProfileRouteAuthority } from '../profile/approved-profile-route.authority';
 import { ApprovedProfileChangeService } from '../profile/approved-profile-change.service';

@@ -8,7 +8,7 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { RentalCoreOrderStatus, type RentalOrder } from '@rental-os/shared';
 import { getRequestIdentity, getRequestLocationIds } from '@rental-os/platform-server/request-identity';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { ACTIVE_ASSIGNMENTS, allocationComplete } from '@rental-os/rental-core/allocation-policy';
 import { isIssuedRuleVersion, matchRuleVersionAt } from '@rental-os/rental-core/rule-version-chain';
 import { businessDateKey, businessYearFromDateKey } from '@rental-os/rental-core/business-day';

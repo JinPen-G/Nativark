@@ -13,7 +13,7 @@ import { orderAnswerSnapshotSchema } from './order-answer-display.adapter';
 import { buildOrderExplanation, renderOrderReadAnswer } from './tools/order-explanation-renderer';
 import { buildOpeningDiagnosisText } from './scenes/opening-diagnosis-renderer';
 import { applyOriginalQuoteAnswers } from './scenes/original-quote-input';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 const definitions = JSON.parse(JSON.stringify({ ...AI_BUSINESS_MATERIAL_DRAFT_SCHEMAS, ...AI_SCOPE_DRAFT_SCHEMAS })
   .replaceAll('#/components/schemas/', '#/$defs/'));

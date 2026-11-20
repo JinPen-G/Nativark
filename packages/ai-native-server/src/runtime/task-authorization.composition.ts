@@ -3,7 +3,7 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import { AI_TASK_DRAFT_VERSION, type AiExecutionContext, type AiUsageSettingsDraft } from '@rental-os/shared';
 import type { AuthService } from './rental-adapters/auth.service';
 import type { SubscriptionService } from '@rental-os/platform-server/subscription';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiScopeRepository } from './ai-scope.repository';
 import { AiTaskRepository, AiTaskRepositoryError, aiTaskAccessFromContext, type AiTaskRepositoryAuthority } from './ai-task.repository';
 import { AiTaskCurrentActionAuthority, type AiTaskCredentialSource } from './task-current-action.authority';

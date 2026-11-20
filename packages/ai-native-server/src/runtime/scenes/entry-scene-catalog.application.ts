@@ -11,7 +11,7 @@ import { aiClientHostCapabilitiesSchema, AI_TEXT_MODEL_STEP_CODE, AI_IMAGE_MODEL
 import { hasEffectivePermission } from '@rental-os/platform-server/permission-match';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { isAiStepExecutionContext } from '../task-contract-validation';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { readRuntimePublication, type RuntimePublication } from '../runtime-publication.configuration';
 import { ENTRY_SCENE_CATALOG, ENTRY_SCENE_CATALOG_VERSION, ENTRY_SCENE_SURFACES,
   type EntrySceneDefinition, type EntrySceneSurface } from './entry-scene-catalog';

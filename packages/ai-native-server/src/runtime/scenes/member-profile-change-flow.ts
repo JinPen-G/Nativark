@@ -9,7 +9,7 @@ import type { PrismaClient } from '@prisma/client';
 import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
 import type { MembershipService } from '@rental-os/rental-core/mysql-membership';
 import { ApprovedProfileRouteAuthority, type ApprovedProfileActor } from '../profile/approved-profile-route.authority';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { AiTaskRunnerError } from '../runner/ai-task-runner.service';
 import { freezeOriginalInput } from '../task-request/original-request.validation';

@@ -3,7 +3,7 @@
  * seed, lease or approval. Historical reads do not require today's execution gates. */
 import { z } from 'zod';
 import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { ApprovedProfileRouteAuthority } from '../profile/approved-profile-route.authority';
 import { AiTaskCreationRepository } from '../ai-task-creation.repository';
 import { AiScopeRepository } from '../ai-scope.repository';

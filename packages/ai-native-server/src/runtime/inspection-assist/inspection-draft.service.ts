@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
 import type { AiInspectionActorScope, AiInspectionDraftState, AiInspectionTarget, AiInspectionSavedCandidateReview } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { InspectionActionAuthority } from './inspection-action.authority';
 import { InspectionTemplateService } from './inspection-template.service';
 import { InspectionManualPreparationService } from './inspection-manual-preparation.service';

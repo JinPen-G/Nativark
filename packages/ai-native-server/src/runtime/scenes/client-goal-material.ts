@@ -10,7 +10,7 @@ import type { ClientApiService } from '@rental-os/rental-core/mysql-client-appli
 import type { AiClientSceneMaterial } from './prisma-client-scene-material.repository';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { freezeOriginalInput } from '../task-request/original-request.validation';
-import { requestFingerprint as hash } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 
 export const CLIENT_GOAL_MATERIAL_VERSION = 'client-goal-1' as const;
 export const CLIENT_GOAL_LIMITS = Object.freeze({ goalCharacters: 4096, sourceBytes: 65536, materialBytes: 24000, choices: 10, lines: 50 });

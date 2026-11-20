@@ -19,7 +19,7 @@ import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { CurrentPersistentTaskAuthorization } from '../runner/authorized-persistent-task-input.composition';
 import { gatewayBudgetPrincipal } from '../budget/gateway-budget-principal';
 import { isGatewayConfig } from '../gateway-contract-validation';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import type { AiTaskModelInvocationPreparation } from '../runner/prisma-task-runner-resource.source';
 import { AiTaskExecutionBudgetError } from '../task-execution-budget.ports';
 

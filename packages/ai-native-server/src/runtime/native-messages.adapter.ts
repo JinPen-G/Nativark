@@ -10,7 +10,7 @@ import { normalizeTenantModelBaseUrl } from './tenant-model-config.service';
 import { modelEgressEvidence } from './model-egress.transport';
 import { messagesGenerationInputHash } from './input-counting/count-tokens.protocol';
 import { MODEL_REQUEST_BYTES, MODEL_RESPONSE_BYTES } from './model-response-limits';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { encodeNativeToolResultBody, nativeToolResultInputHash } from './native-tool-result.encoding';
 import type { ResolvedNativeToolResult } from './model-input/native-tool-result.ports';
 import type { NativeAdapterResult } from './model-gateway.ports';

@@ -2,7 +2,7 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, type AiExecutionContext, type AiTaskMetadataPageDraft } from '@rental-os/shared';
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from './ai-task.repository';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 const taskId = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const statusSchema = z.enum(AI_TASK_STATUSES_DRAFT);

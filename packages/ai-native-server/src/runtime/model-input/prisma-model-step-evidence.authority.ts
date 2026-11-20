@@ -1,6 +1,6 @@
 import type { PrismaClient, AiTask, AiStep, AiTaskResultArtifact, AiTaskExecutionCharge } from '@prisma/client';
 import { AI_TOOL_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError, aiTaskAccessFromContext, type AiTaskRepositoryAuthority } from '../ai-task.repository';
 import type { PersistedBudgetEvidenceSource } from '../budget/budget-dependency-adapters';
 import type { AiTaskPlanEvidenceAuthority } from '../runner/prisma-task-run-evidence.repository';

@@ -9,7 +9,7 @@ import { CreateRentalOrderDto } from '@rental-os/rental-core/order-dto';
 import type { RentalOrderConfirmationService } from '../rental-adapters/rental-order-confirmation.service';
 import type { AiApprovedOrderRouteAuthority } from '../approval-execution/approved-order-route.authority';
 import type { ApprovedOrderInputAuthority, ApprovedOrderInputReference, ApprovedOrderInputProof } from '../order-task-input.ports';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { gatewayTextIntentPolicySchema } from '../gateway-intent';
 import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, isTaskModelTool, parseTaskModelInput, taskModelFingerprint, taskModelPolicy, type TaskModelPolicy } from '../model-input/task-model-input';
 import { aiCatalogReadInputSchema } from '../catalog-read-facts.service';

@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { AI_TASK_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, type AiToolCode, type AiExecutionContext } from '@rental-os/shared';
 import type { PrismaService } from '../rental-adapters/prisma.service';
 import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from '../ai-task.repository';
 import { composePersistedTaskAuthorization, type PersistedTaskAuthorizationDependencies } from '../task-authorization.composition';
 import { aiPersistedPlanToolsSchema } from '../runner/prisma-task-plan-input.source';

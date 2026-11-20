@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { AI_SCENE_REQUEST_DRAFT_VERSION } from '@rental-os/shared';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { AiTaskRunnerError } from '../runner/ai-task-runner.service';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { freezeOriginalInput, originalBody, originalRequestReferenceSchema, parseOriginalRequest } from '../task-request/original-request.validation';
 import type { AiSceneHttpRequest, composeRequestBoundOriginalScenes, composeRequestBoundSelectedQuoteTask } from './request-bound-scenes.application';
 

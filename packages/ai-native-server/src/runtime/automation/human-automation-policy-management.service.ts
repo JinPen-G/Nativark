@@ -7,7 +7,7 @@ import { z } from 'zod';
 import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
 import type { AuthService } from '../rental-adapters/auth.service';
 import type { AiExecutionContext, AiAutomationPolicyConstraintsDraft, AiAutomationPolicyDiscoveryDraft } from '@rental-os/shared';
-import { requestFingerprint as hash } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
 import type { AiTaskCredentialSource } from '../task-current-action.authority';
 import { TenantModelConfigurationAuthority } from '../tenant-model-config.authority';

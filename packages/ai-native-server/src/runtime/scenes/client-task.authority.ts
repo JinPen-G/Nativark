@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { AI_CONTRACT_DRAFT_VERSION, type AiExecutionContext, type AiUsageSettingsDraft } from '@rental-os/shared';
 import type { ClientRequestContext } from '@rental-os/rental-core/client-context';
 import type { SubscriptionService } from '@rental-os/platform-server/subscription';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { PrismaSubscriptionBudgetReader } from '../budget/prisma-subscription-budget-reader';
 import { validateBudgetSettings } from '../budget/budget-settings';
 import { aiPersistenceScopeColumns } from '../persistence-scope';

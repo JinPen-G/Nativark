@@ -22,7 +22,7 @@ import { AiTaskRunnerError, snapshotAiTaskRunnerRecoveryLease, callAiTaskRunnerD
 import type { AiTaskRunnerRecoveryLease } from '../runner/ai-task-runner.ports';
 import { AiTaskTransitionRepository } from '../ai-task-transition.repository';
 import { aiTaskRunnerLimitsSchema, aiTaskRunPlanSchema } from '../runner/prisma-task-run-evidence.repository';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { aiStepActionId } from '../ai-step-registration.repository';
 import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 import { aiPersistedPlanToolsSchema } from '../runner/prisma-task-plan-input.source';

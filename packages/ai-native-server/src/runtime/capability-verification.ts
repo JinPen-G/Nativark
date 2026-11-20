@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { AiProviderProfileRecord } from './provider-profile.ports';
 import type { RecordCapabilityEvidenceInput } from './provider-capability.ports';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 export const capabilityNameSchema = z.enum(['text', 'streaming', 'tools', 'structured_output', 'vision', 'audio', 'embedding', 'reasoning']);
 export const capabilityVerificationSchema = z.object({

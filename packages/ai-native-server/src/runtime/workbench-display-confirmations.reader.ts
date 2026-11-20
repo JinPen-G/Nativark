@@ -9,7 +9,7 @@ import { AiTaskRepositoryError, type AiTaskRepository } from './ai-task.reposito
 import type { AiWorkbenchDisplayOriginalMaterial } from './workbench-display-original.reader';
 import { approvalApplicationContract } from './approval-execution/approval-application-contracts';
 import { settingsContract } from './approval-execution/approved-settings-contracts';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { originalIdentityHash } from './task-request/original-request.authority';
 
 type Db = Pick<PrismaClient, 'aiTask' | 'aiRun' | 'aiStep'>;

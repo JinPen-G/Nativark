@@ -7,7 +7,7 @@ import { z } from 'zod';
 import type { PrismaClient } from '@prisma/client';
 import { AI_CONVERSATION_DRAFT_VERSION, type AiConversationModelResultReadDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError } from './ai-task.repository';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { originalIdentityHash } from './task-request/original-request.authority';
 import { freezeOriginalInput } from './task-request/original-request.validation';
 import type { AiWorkbenchDisplayOriginalReader, AiWorkbenchDisplayOriginalMaterial } from './workbench-display-original.reader';

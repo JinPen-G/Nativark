@@ -7,7 +7,7 @@ import type { RentalBusinessService } from '../rental-adapters/rental-business.s
 import { RentalReportReadLimitError, type RentalWorkspaceReportRepository } from '@rental-os/rental-core/mysql-reports';
 import { ModelGatewayError } from '../model-gateway.ports';
 import { assertAiReadContextBinding } from './read-context-binding';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 /** In-process provenance only. The original route normalizes unknown faults to
  * PROVIDER_UNAVAILABLE too; that generic code must not authorize partial results. */

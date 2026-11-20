@@ -23,7 +23,7 @@ import { PrismaGatewayInvocationBindings } from './budget/prisma-gateway-invocat
 import { PrismaGatewayAccountingFacts } from './budget/prisma-gateway-accounting-facts';
 import { waitForTaskApplicationDependency } from './runner/prisma-task-application';
 import { inspectAiWorkbenchDisplayMaterial } from './workbench-display.contract';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { originalIdentityHash } from './task-request/original-request.authority';
 import { WorkbenchModelControlRepository } from './workbench-model-control.repository';
 import { createWorkbenchDisplayConfirmationReader } from './workbench-display-confirmations.reader';

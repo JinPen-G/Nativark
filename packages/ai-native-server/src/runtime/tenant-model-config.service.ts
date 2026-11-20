@@ -9,7 +9,7 @@ import { isPrivateOrLocalHost, parseOutboundUrl } from "@rental-os/platform-serv
 import { ModelGatewayError, type WorkspaceGatewayContext, type GatewayProfile } from "./model-gateway.ports";
 import { tenantModelMode, tenantModelServiceEnabled, AiModelConfigurationResultUnknownError,
   AiModelConfigurationRevisionConflictError } from "./model-config-compatibility";
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { capabilityNameSchema } from './capability-verification';
 import type { AiProfileCapability } from './provider-profile.ports';
 import { modelConfigurationOperationKey, type ModelConfigurationOperationWrite } from './model-configuration-operation';

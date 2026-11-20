@@ -5,7 +5,7 @@ import type { AiBusinessReadRouteAuthority, AiCalendarSourceReadTarget } from '.
 import type { AiQuoteCoreContextSource, AiQuotePreviewAuthority } from '../quote-preview.service';
 import { ModelGatewayError } from '../model-gateway.ports';
 import { assertAiReadContextBinding } from './read-context-binding';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiQuotePreviewService } from '../quote-preview.service';
 import type { RentalBusinessService } from '../rental-adapters/rental-business.service';
 import { AiQuoteCandidatePreparationService } from './quote-candidate-preparation.service';

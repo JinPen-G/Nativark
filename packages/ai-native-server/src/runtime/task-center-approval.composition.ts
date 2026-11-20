@@ -11,7 +11,7 @@ import type { ControlledApprovedOrderDependencies } from './approval-execution/c
 import { approvalApplicationContract } from './approval-execution/approval-application-contracts';
 import { composeApprovedSettingsApplication } from './approval-execution/approved-settings-application.composition';
 import type { ApprovedSettingsApplicationDependencies } from './approval-execution/approved-settings-task.authority';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { resolveTaskCenterBusinessTarget, readTaskCenterOrderSelection } from './task-center-business.reader';
 import { parseQuoteSelectionProof, validateQuoteSelectionResponse } from './task-request/quote-selection.validation';
 

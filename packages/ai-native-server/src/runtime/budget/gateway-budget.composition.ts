@@ -5,7 +5,7 @@ import { BudgetError, type BudgetQuotePort, type BudgetPolicyKey } from './budge
 import type { AiUsageSettingsDraft } from '@rental-os/shared';
 import { z } from 'zod';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { isGatewayConfig } from '../gateway-contract-validation';
 import { validateBudgetSettings, presentBudgetSettingsFields } from './budget-settings';
 import type { BudgetAuthorizationSource, BudgetEntitlementSource } from './budget-dependency-adapters';

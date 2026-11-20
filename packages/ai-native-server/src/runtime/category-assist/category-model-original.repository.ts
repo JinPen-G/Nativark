@@ -14,7 +14,7 @@ import { aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.rep
 import type { PlatformTaskPlanPolicyReader } from '../platform-capability-probe/platform-probe.authorization';
 import type { CategoryProposalMaterial, CategoryProposalReference } from './category-proposal.application';
 import { CATEGORY_PROPOSAL_SCENE } from './category-platform-gateway.composition';
-import { requestFingerprint as hash } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const digest = z.string().regex(/^[a-f0-9]{64}$/u);

@@ -22,7 +22,7 @@ import { composeRequestBoundOpeningRuleDraftSave } from './scenes/request-bound-
 import type { AiTaskApplicationHost } from './runner/prisma-task-application';
 import { waitForTaskApplicationDependency } from './runner/prisma-task-application';
 import { AiTaskRunnerError } from './runner/ai-task-runner.service';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { freezeOriginalInput } from './task-request/original-request.validation';
 import { respondAiScene } from './scenes/original-scenes.controller';
 import { withRequestAbort } from './scenes/request-abort';

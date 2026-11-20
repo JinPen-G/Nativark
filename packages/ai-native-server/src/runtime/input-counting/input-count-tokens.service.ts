@@ -13,7 +13,7 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import type { AiExecutionContext, AiGatewayConfigReferenceDraft, AiGatewayIntentDraft, AiUsageAssociationDraft } from '@rental-os/shared';
 import type { AiScopeRepository } from '../ai-scope.repository';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { isGatewayConfig } from '../gateway-contract-validation';
 import { ChatProtocolPolicy, type ChatProtocolOptions, type ModelJsonTransport } from '../chat-completions.adapter';
 import { ModelAdapterError, ModelGatewayError } from '../model-gateway.ports';

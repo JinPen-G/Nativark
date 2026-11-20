@@ -9,7 +9,7 @@ import type { AiExecutionContext } from '@rental-os/shared';
 import { AI_SCENE_CODES, type AiSceneCode, type AiSceneRequestBody } from '@rental-os/shared';
 import type { AuthService } from '../rental-adapters/auth.service';
 import type { SubscriptionService } from '@rental-os/platform-server/subscription';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiScopeRepository } from '../ai-scope.repository';
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
 import type { AiTaskCredentialSource } from '../task-current-action.authority';

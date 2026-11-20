@@ -11,7 +11,7 @@ import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
 import type { SecretBox } from '@rental-os/platform-server/secret-box';
 import type { ClientApiService } from '@rental-os/rental-core/mysql-client-application';
 import type { RentalCoreService } from '../rental-adapters/rental-core.service';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AI_CONTRACT_DRAFT_VERSION, AI_REGISTERED_ENTRY_ACTION_VERSION, AI_ENTRY_ACTION_REGISTRY,
   AI_ENTRY_NOTIFICATION_DRAFT_VERSION, aiEntryNotificationDraftPrepareSchema, aiEntryNotificationDraftSaveSchema,
   aiEntryNotificationDraftReadSchema, aiEntryNotificationDraftMaterialSchema, aiEntryNotificationDraftResponseSchema,

@@ -8,7 +8,7 @@ import { ModelGatewayError, type GatewayContext, type ProtocolToolCall } from '.
 import { isGatewayIntent } from '../gateway-contract-validation';
 import type { GatewayTextIntentBinding } from '../gateway-intent';
 export type NativeToolTaskScene = GatewayTextIntentBinding & { nativeToolResults?: boolean };
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 export const nativeToolResultReferenceSchema = z.object({

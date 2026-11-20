@@ -8,7 +8,7 @@ import {
 } from "@rental-os/shared";
 import { AiTaskRepository, AiTaskRepositoryError, type AiTaskRepositoryAuthority } from "./ai-task.repository";
 import { AI_TASK_TRANSITIONS_DRAFT, evaluateAiTaskTransitionDraft, evaluateAiTaskAdmissionTransitionDraft, evaluateAiTaskConfirmationTransitionDraft, type AiTaskTransitionStateDraft } from "./task-transition-draft";
-import { requestFingerprint } from "./rental-adapters/rental-idempotency.repository";
+import { requestFingerprint } from "@rental-os/platform-contracts/request-fingerprint";
 import { fingerprintAiProposalDraft } from "./proposal-binding-draft";
 import { aiPersistenceScopeColumns } from "./persistence-scope";
 import { aiTaskRunPlanSchema } from "./runner/prisma-task-run-evidence.repository";

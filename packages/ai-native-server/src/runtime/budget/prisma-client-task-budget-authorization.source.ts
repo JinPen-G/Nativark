@@ -1,6 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import type { AiExecutionContext } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { isGatewayConfig } from '../gateway-contract-validation';
 import { composePersistedClientTaskAuthorization } from '../scenes/client-task-execution.composition';
 import type { AiAuthorizedClientMaterial, AiClientTaskDependencies } from '../scenes/client-task.authority';

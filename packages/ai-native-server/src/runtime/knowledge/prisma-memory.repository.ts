@@ -5,7 +5,7 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import type { AiExecutionContext, AiExecutionScope, AiKnowledgeOwnerDraft, AiMemoryDraft } from '@rental-os/shared';
 import type { KnowledgeOperation, MemoryConfirmation, MemoryConfirmationPort, MemoryRepositoryPort } from './knowledge.ports';
 import { KnowledgeCommitUnknownError, KnowledgeError, unavailable } from './knowledge-errors';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { actor, confirmationSchema, memoryConfirmationHash, memoryDraftSchema, parse, parsePersisted, sameScope, scopeSchema } from './knowledge-validation';
 import { AI_RETENTION_POLICY } from '../privacy/retention-policy';
 

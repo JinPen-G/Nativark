@@ -8,7 +8,7 @@ import type { AiOpeningReadFactsService, AiRiskReadFactsService, AiDiagnosticRea
 import { AiDiagnosticSourceUnavailable, aiRiskReadInputSchema } from './diagnostic-read-facts.service';
 import type { AiOpeningConfigurationSource } from './opening-configuration.source';
 import { RENTAL_OPENING_TERMINOLOGY_FIELDS } from '../rental-adapters/rental-core-config.repository';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { ModelGatewayError } from '../model-gateway.ports';
 import { sealBusinessScenario } from './business-scenario-input';
 

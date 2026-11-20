@@ -11,7 +11,7 @@ import type { AiCatalogReadFactsService } from '../catalog-read-facts.service';
 import type { AiMembershipCandidateReadFactsService } from '../membership-candidate-read-facts.service';
 import { aiQuotePreviewInputSchema, aiQuotePersonalBookingIdentitySchema, type AiQuoteCoreContextSource } from '../quote-preview.service';
 import { ModelGatewayError } from '../model-gateway.ports';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { quoteAddressFingerprint, quoteAddressIdentity, type AiQuoteAddressSource } from '../scenes/original-quote-address';
 
 const name = z.string().trim().min(1).max(191);

@@ -1,7 +1,7 @@
 import { hasEffectivePermission } from '@rental-os/platform-server/permission-match';
 import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
 import type { AiExecutionContext } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { isGatewayConfig } from '../gateway-contract-validation';
 import { TenantModelConfigurationAuthority } from '../tenant-model-config.authority';
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';

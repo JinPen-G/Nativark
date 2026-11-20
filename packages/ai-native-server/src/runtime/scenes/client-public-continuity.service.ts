@@ -12,7 +12,7 @@ import type { AiClientPublicSessionIdentity } from './client-public-session.cred
 import { createAiGuardedClientSession } from '../client-scene.composition';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { freezeOriginalInput } from '../task-request/original-request.validation';
-import { requestFingerprint as hash } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 import { composeRequestBoundClientApplication, type AiClientApplicationRequest, type AiClientRequestDependencies,
   type AiClientRequestConfiguration } from './client-request.application';
 import { PrismaClientSceneMaterialRepository, type AiClientSceneMaterial } from './prisma-client-scene-material.repository';

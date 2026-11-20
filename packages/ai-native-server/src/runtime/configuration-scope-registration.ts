@@ -7,7 +7,7 @@ import type { AiTaskCredentialSource } from './task-current-action.authority';
 import { AiTaskCurrentIdentityAuthority } from './task-current-identity.authority';
 import { TenantModelConfigurationAuthority } from './tenant-model-config.authority';
 import { aiPersistenceScopeColumns } from './persistence-scope';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { BudgetError } from './budget/budget.ports';
 import type { PlatformModelConfigurationAuthority } from './platform-model-config.authority';
 import { AiModelConfigurationResultUnknownError } from './model-config-compatibility';

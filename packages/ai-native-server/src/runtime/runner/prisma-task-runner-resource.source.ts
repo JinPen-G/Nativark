@@ -1,6 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import type { AiTaskStatusDraft } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskExecutionBudgetError, type AiTaskExecutionResource, type AiTaskExecutionBudgetPort, type AiTaskExecutionChargeRequest } from '../task-execution-budget.ports';
 import { taskStepChargesValid, isTaskModelCountCharge, reconcileTaskModelCountCharge } from './task-model-count-charge';
 import type { AiTaskExecutionScopeSource } from './prisma-task-execution-budget.repository';

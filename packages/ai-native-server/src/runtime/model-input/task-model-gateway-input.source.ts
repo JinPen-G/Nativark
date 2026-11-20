@@ -9,7 +9,7 @@ import type { AiTaskExecutionAuthorization, AiTaskRegisteredExecutor } from '../
 import type { AiTaskGatewayInputSource } from '../runner/prisma-task-gateway-invocation.preparation';
 import type { AiTaskRunnerLease, AiTaskRunnerStepRef } from '../runner/ai-task-runner.ports';
 import type { PrismaTaskPlanInputSource } from '../runner/prisma-task-plan-input.source';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { readModelNonDispatchEvidence } from './prisma-model-nondispatch.evidence';
 import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, taskModelConfiguration, taskModelIdentity, taskModelIntent,
   parseTaskModelInput, taskModelMaterialSchema, taskImageMaterialSchema, taskAudioMaterialSchema, taskModelMediaSchema, taskModelFingerprint, taskModelPolicy, taskModelCapabilities, type TaskModelInput, type TaskModelKind } from './task-model-input';

@@ -7,7 +7,7 @@ import { AI_EXTENSION_PREVIEW_HTTP_SCHEMAS, AI_SCOPE_DRAFT_SCHEMAS, AI_SCENE_REQ
   type RentalOrderExtensionPreview, type AiSceneOrderExtensionPreviewDraft,
   type AiSceneOrderExtensionPreviewResponseDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError } from '../ai-task.repository';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 const ajv = new Ajv({ strict: true, coerceTypes: false, useDefaults: false, removeAdditional: false });
 addFormats(ajv);

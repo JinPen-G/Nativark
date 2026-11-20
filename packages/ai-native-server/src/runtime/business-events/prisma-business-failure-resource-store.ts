@@ -6,7 +6,7 @@ import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma, AiBusinessFailureOutbox, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { AI_EVENTS_DRAFT_VERSION } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { BusinessFailureError, configurationFailureOriginSchema, type BusinessFailureResourcePorts,
   type FailureScope, type ResourceFailureReference } from './prisma-business-failure-outbox';
 

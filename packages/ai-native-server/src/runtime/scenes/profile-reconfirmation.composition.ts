@@ -7,7 +7,7 @@ import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { composeApprovedProfileApplication } from '../approval-execution/approved-profile-application.composition';
 import { ApprovedProfileTaskAuthority, PROFILE_NAME_TOOL_CODE, profileConflict, profileDenied,
   profileUnavailable, type ApprovedProfileApplicationDependencies } from '../approval-execution/approved-profile-task.authority';

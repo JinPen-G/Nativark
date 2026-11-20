@@ -11,7 +11,7 @@ import { RoutedModelTransport, type GatewayConnectionResolver } from './routed-m
 import { isAiStepExecutionContext } from './task-contract-validation';
 import { UnifiedAiGatewayService } from './unified-ai-gateway.service';
 import type { GatewayInvocationResult, UnifiedGatewayPorts } from './unified-ai-gateway.ports';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 import type { NativeToolResultResolver } from './model-input/native-tool-result.ports';
 

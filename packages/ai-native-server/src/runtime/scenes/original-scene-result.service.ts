@@ -8,7 +8,7 @@ import { AiTaskResultRepository } from '../runner/ai-task-result.repository';
 import { isGatewayResult, isGatewayOrderExplainRequest } from '../gateway-contract-validation';
 import { parseTaskModelInput, TASK_TEXT_MODEL_TOOL, taskModelFingerprint, taskModelPolicy } from '../model-input/task-model-input';
 import type { GatewayTextIntentBinding, GatewayTextIntentPolicy } from '../gateway-intent';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { originalRequestReferenceSchema, freezeOriginalInput } from '../task-request/original-request.validation';
 import { originalIdentityHash } from '../task-request/original-request.authority';
 import type { composeAiOriginalScenes } from './original-scenes.composition';

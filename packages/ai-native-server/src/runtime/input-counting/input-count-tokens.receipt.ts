@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { BudgetError } from '../budget/budget.ports';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { modelRequestSchema } from '../model-gateway.ports';
 
 /** Server-derived request id for a counting admission: one deterministic id

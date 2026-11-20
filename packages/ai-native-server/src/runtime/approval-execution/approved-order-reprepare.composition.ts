@@ -3,7 +3,7 @@ import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { AI_PROPOSAL_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 import { AI_APPROVAL_APPLICATION_DRAFT_VERSION, type AiApprovalReprepareCommandDraft, type AiApprovalReprepareReceiptDraft } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { isAiStepExecutionContext } from '../task-contract-validation';
 import { approvalApplicationContract } from './approval-application-contracts';

@@ -2,7 +2,7 @@ import { withAiTaskTransaction } from './task-transaction-authority';
 import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import type { AiExecutionContext } from '@rental-os/shared';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { isAiStepExecutionContext } from './task-contract-validation';
 import { AiTaskRepositoryError, type AiTaskRepositoryOperation } from './ai-task.repository';
 import type { AiScopeRepository } from './ai-scope.repository';

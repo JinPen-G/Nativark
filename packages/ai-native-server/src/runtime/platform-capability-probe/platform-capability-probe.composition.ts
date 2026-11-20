@@ -4,7 +4,7 @@ import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
 import type { SecretBox } from '@rental-os/platform-server/secret-box';
 import type { SubscriptionService } from '@rental-os/platform-server/subscription';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import type { AiOrderRouteCredentialSource } from '../order-route-context.authority';
 import { AiScopeRepository } from '../ai-scope.repository';
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from '../ai-task.repository';

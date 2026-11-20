@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { ModelGatewayError } from './model-gateway.ports';
 import type { AiProfileCapability, AiProviderProfileRole } from './provider-profile.ports';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { MAX_AI_PROVIDER_PROFILES } from './provider-profile.ports';
 import type { ProviderRouteDecision, ProviderRouteRequest, ProviderRouterPorts, AiRouteScene } from './provider-router.ports';
 

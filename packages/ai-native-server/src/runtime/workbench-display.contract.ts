@@ -13,7 +13,7 @@ import { AI_WORKBENCH_DISPLAY_SCHEMAS, AI_WORKBENCH_DISPLAY_LIMITS, AI_SCENE_REQ
   type AiTaskInputContractDraft, type AiWorkbenchDisplayBindingDraft, type AiWorkbenchMountBindingDraft,
   type AiWorkbenchPresentationDraft, type AiWorkbenchSandboxMessageDraft, type AiWorkbenchMessageObservationDraft,
   type AiApprovalApplicationReferenceDraft, type AiWorkbenchDisplayMaterialDraft } from '@rental-os/shared';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { AI_NATIVE_COMPONENT_SCHEMAS } from './contracts/ai-native-schemas';
 

@@ -6,7 +6,7 @@ import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { aiClientPublicCommandSchema, aiClientPublicContinuationReadRequestSchema } from '@rental-os/shared';
-import { requestFingerprint as hash } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { clientSqlInitialRevisionSchema } from './client-sql-revisions';
 import { PrismaClientSceneMaterialRepository, type AiClientSceneMaterial } from './prisma-client-scene-material.repository';

@@ -4,6 +4,8 @@
 
 通用任务 Runner 已由[公共服务出口](../platform-server/src/ai-runtime/README.md)持有。本包的原 Runner 路径转接同一类和端口；其他 Core 可从公共出口供给自己的受控业务与存储参加者，无需加载 Rental 场景。完整请求工厂、所选数据、Gateway与业务适配继续按下面的实际宿主范围装配。
 
+排序请求摘要从 `@rental-os/platform-contracts/request-fingerprint` 使用，原 Rental 幂等出口再导出同一函数。[公共实现](../platform-contracts/src/request-fingerprint.ts)保留已保存摘要的排序与 JSON 语义。摘要用于内容绑定；当前权限、业务执行和原操作收据仍由各自真实参加者核对。
+
 完整原组合宿主从 [服务装配](../../apps/api/src/application-services.module.ts) 使用这些工厂。[独立 AI 宿主](../../apps/rental-api/src/ai-app.module.ts) 则显式选择 AI 数据贡献，由 [同实例装配](../../apps/rental-api/src/ai-composition.ts) 提供原 Auth、Guard、Core、数据库和文件权限。只有该宿主 [实际登记并审核的处理器](../../apps/rental-api/src/ai-http-policy.ts) 才发布为可调用能力；工厂、类型或合同存在不等于该宿主已开放全部 AI 路由。
 
 ## 入口与调用方

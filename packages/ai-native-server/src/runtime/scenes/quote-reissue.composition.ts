@@ -19,7 +19,7 @@ import { checkedAiAvailabilityResult } from '../availability-read-facts.service'
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { AiTaskRunnerError } from '../runner/ai-task-runner.service';
 import { freezeOriginalInput } from '../task-request/original-request.validation';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 export interface QuoteRequestReissueConfiguration {
   /** Existing current-owner CAS participant. Construction and reads do not

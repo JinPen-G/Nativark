@@ -11,7 +11,7 @@ import { AI_TASK_DRAFT_VERSION, AI_TASK_INPUT_DRAFT_VERSION, AI_TEXT_MODEL_STEP_
   type AiTaskInputSubmissionDraft } from '@rental-os/shared';
 import type { AuthService } from './rental-adapters/auth.service';
 import type { ApiAuthGuard } from './rental-adapters/api-auth.guard';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiScopeRepository } from './ai-scope.repository';
 import { AiTaskCurrentIdentityAuthority } from './task-current-identity.authority';
 import { AiTaskRepository, aiTaskAccessFromContext, AiTaskRepositoryError } from './ai-task.repository';

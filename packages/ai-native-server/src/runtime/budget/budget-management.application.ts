@@ -12,7 +12,7 @@ import type { SecretBox } from '@rental-os/platform-server/secret-box';
 import { createPersistedTenantModelConfiguration } from '../tenant-model-config.composition';
 import { TenantModelConfigurationAuthority } from '../tenant-model-config.authority';
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import type { AiExecutionContext, AiGatewayConfigReferenceDraft, AiUsageSettingsDraft } from '@rental-os/shared';
 import { AI_USAGE_DRAFT_VERSION } from '@rental-os/shared';
 import { registerCurrentAiConfigurationScopes } from '../configuration-scope-registration';

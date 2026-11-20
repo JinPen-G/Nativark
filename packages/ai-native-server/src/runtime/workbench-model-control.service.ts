@@ -2,7 +2,7 @@
  * New generation, original observation and cancellation stay distinct. This
  * service never runs a business tool or retries an existing operation. */
 import { AiTaskRepositoryError } from './ai-task.repository';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { originalIdentityHash, type AiOriginalRequestAuthority } from './task-request/original-request.authority';
 import type { composeTaskModelHost } from './runner/model-task-host.composition';
 import type { WorkbenchModelControlRepository } from './workbench-model-control.repository';

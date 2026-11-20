@@ -1,6 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { composeCurrentAuthorizedTaskModelInput } from '../model-input/persisted-task-model-input.composition';
 import { composeTaskModelHostWithModel, type TaskModelHostDependencies } from '../runner/model-task-host.composition';

@@ -13,7 +13,7 @@ import { gatewayBudgetPrincipal } from './gateway-budget-principal';
 import { reviewedGatewayPriceInput, reviewedGatewayPriceReadInput } from './reviewed-gateway-price.service';
 import { PrismaGatewayPricingRecords, platformReviewedPricePayloadSchema, platformReviewedPriceReference, type GatewayPricingRecordDb,
   type GatewayPricingEvidenceSource } from './prisma-gateway-pricing-records';
-import { requestFingerprint as hash } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 
 type Db = GatewayPricingRecordDb & Pick<PrismaClient, '$transaction' | 'aiTenantModelConfiguration'>;
 const profileSelect = { id: true, scopeId: true, scopeKind: true, serviceMode: true, configRevision: true,

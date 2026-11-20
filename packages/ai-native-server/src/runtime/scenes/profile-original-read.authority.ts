@@ -3,7 +3,7 @@
  * current owner, workspace, immutable change and canonical Run remain binding. */
 import { AI_TASK_DRAFT_VERSION } from '@rental-os/shared';
 import { ApprovedProfileRouteAuthority } from '../profile/approved-profile-route.authority';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { composeProfileTaskCreation } from '../approval-execution/profile-task-creation.composition';
 import { profileDenied, type ApprovedProfileApplicationDependencies } from '../approval-execution/approved-profile-task.authority';
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';

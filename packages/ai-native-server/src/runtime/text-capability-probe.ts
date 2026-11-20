@@ -7,7 +7,7 @@ import type { AiProviderProfileRecord } from './provider-profile.ports';
 import { capabilityProfileFingerprint } from './capability-verification';
 import { prepareGatewayTextIntent, prepareGatewayEmbeddingProbeIntent } from './gateway-intent';
 import { ModelGatewayError, modelUsageSchema, modelReasoningEvidenceSchema, modelEmbeddingEvidenceSchema } from './model-gateway.ports';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { visionCapabilityChallenge, VISION_PROBE_METHOD } from './vision-capability-challenge';
 import { audioCapabilityChallenge, AUDIO_PROBE_METHOD } from './audio-capability-challenge';
 

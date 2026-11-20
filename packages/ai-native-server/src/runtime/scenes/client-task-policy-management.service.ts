@@ -5,7 +5,7 @@ import { ExecutionContextHost } from '@nestjs/core/helpers/execution-context-hos
 import { z } from 'zod';
 import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
 import { getRequestIdentity, runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { AiOrderRouteCredentialSource } from '../order-route-context.authority';
 import { clientTaskSceneSchema, type AiClientTaskScene } from './client-task.authority';

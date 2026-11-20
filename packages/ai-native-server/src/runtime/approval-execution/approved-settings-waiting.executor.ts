@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma } from '@prisma/client';
 import { AI_APPROVED_SETTINGS_DRAFT_VERSION, AI_APPROVED_SETTINGS_TOOL_CODE } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { AiTaskRegisteredExecutor } from '../runner/prisma-task-measured-effects';
 import { composeApprovedSettingsApplication } from './approved-settings-application.composition';

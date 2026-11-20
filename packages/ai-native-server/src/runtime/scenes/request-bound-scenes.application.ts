@@ -34,7 +34,7 @@ import { composeApprovedSettingsApplication } from '../approval-execution/approv
 import { aiTaskRunPlanSchema } from '../runner/prisma-task-run-evidence.repository';
 import { settingsChangeReferenceSchema } from '@rental-os/rental-core/approved-settings-validation';
 import { prepareSettingsChangeSchema } from '@rental-os/rental-core/approved-settings-validation';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { projectOrderExplanationMaterial, projectOrderExplanationMaterialV2,
   assertOrderPublicationV2Available } from '../tools/order-explanation-renderer';
 import { ApprovedSettingsRouteAuthority } from '@rental-os/rental-core/approved-settings-route-authority';

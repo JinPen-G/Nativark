@@ -5,7 +5,7 @@
 import { createHash } from 'node:crypto';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import type { AiExecutionContext, AiRegisteredEntrySurface } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { EntryNotificationDraftError } from './entry-notification-draft.contract';
 type Store = Pick<PrismaClient, 'operationLog'> | Pick<Prisma.TransactionClient, 'operationLog'>;
 const fail = () => new EntryNotificationDraftError('AI_RESOURCE_UNAVAILABLE');

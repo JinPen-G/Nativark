@@ -2,7 +2,7 @@ import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { aiClientTaskReadRequestSchema, aiClientOrderActionSourceSchema, type AiClientOrderActionSource } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { AiClientMaterialScope } from './prisma-client-scene-material.repository';
 import type { AiClientTaskDb } from './client-task.authority';

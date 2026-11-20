@@ -8,7 +8,7 @@ import type { AiBusinessReadAuthority } from '../business-read-route.authority';
 import type { AiQuoteBusinessPreparationService } from '../tools/quote-business-preparation.service';
 import { aiQuoteCandidateInputSchema } from '../tools/quote-candidate-preparation.service';
 import { sealBusinessScenario } from '../tools/business-scenario-input';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { ModelGatewayError } from '../model-gateway.ports';
 import { assertAiReadContextBinding } from '../tools/read-context-binding';
 import { originalQuoteGoalInputSchema } from '../task-request/original-request.validation';

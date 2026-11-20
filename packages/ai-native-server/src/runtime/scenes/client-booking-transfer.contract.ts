@@ -5,7 +5,7 @@
 import { z } from 'zod';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { entryDate, entryHash, entryId } from './client-entry-action';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 export const CLIENT_BOOKING_TRANSFER_LIFETIME_MS = 60000;
 const channel = z.enum(['web', 'wechat_miniprogram']);

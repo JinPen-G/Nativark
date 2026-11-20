@@ -34,7 +34,7 @@ import { composeTaskCenterApproval, taskCenterReviewSchema, taskCenterDecisionSc
 import { readTaskCenterBusiness, type TaskCenterBusinessDependencies } from './task-center-business.reader';
 import { continueTaskCenterOriginal, taskCenterContinueSchema, type TaskCenterContinuationDependencies } from './task-center-continuation.composition';
 import { callAiTaskRunnerDependency, AiTaskRunnerError } from './runner/ai-task-runner.service';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { callTaskCenterInput, taskCenterInputQuery, taskCenterInputAnswer, taskCenterInputReceipt, type TaskCenterInputDependencies } from './task-center-input.composition';
 import { recordTaskVisibleObservation, type TaskVisibleObservationDependencies } from './observability/task-visible-observation.service';
 import { validateAiTaskObservation } from './task-contract-validation';

@@ -1,7 +1,7 @@
 import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 import type { Prisma, RentalApprovedSettingsOperation } from '@prisma/client';
 import { AI_APPROVED_SETTINGS_DRAFT_VERSION, type AiApprovedSettingsReferenceDraft } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { ApprovedSettingsResultUnknownError, type ApprovedSettingsParticipant, type ApprovedSettingsBinding, type ApprovedSettingsOperationReceipt } from '../rental-adapters/approved-settings-change.ports';
 import { settingsContract } from './approved-settings-contracts';
 import { ApprovedSettingsTaskAuthority, settingsConflict, settingsDenied, type ApprovedSettingsExecutionLease } from './approved-settings-task.authority';

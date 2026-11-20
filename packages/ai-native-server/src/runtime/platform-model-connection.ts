@@ -9,7 +9,7 @@ import { ModelGatewayError, type GatewayContext } from './model-gateway.ports';
 import type { GatewayConnectionResolver } from './routed-model-transport';
 import { capabilityNameSchema, capabilityProfileFingerprint } from './capability-verification';
 import { normalizeTenantModelBaseUrl } from './tenant-model-config.service';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { isAiStepExecutionContext } from './task-contract-validation';
 import { AiModelConfigurationResultUnknownError, AiModelConfigurationRevisionConflictError } from './model-config-compatibility';
 import { parseAiProviderProfileRecord } from './provider-profile.repository';

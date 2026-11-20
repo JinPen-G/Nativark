@@ -10,7 +10,7 @@ import { z } from 'zod';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { AI_TOOL_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from '../ai-task.repository';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { parseTaskModelInput, taskModelFingerprint, taskModelIdentity, taskModelPolicy,
   TASK_TEXT_MODEL_TOOL, type TaskModelPolicy } from '../model-input/task-model-input';
 import type { CountTokensFrozenInvocation } from './input-count-tokens.service';

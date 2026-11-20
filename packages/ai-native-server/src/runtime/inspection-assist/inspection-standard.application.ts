@@ -32,7 +32,7 @@ import { composePersistedTaskDispatchEvidence } from '../task-model-gateway.comp
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
 import { inspectionId, inspectionTargetSchema } from './inspection-assist.validation';
 import { randomUUID } from 'node:crypto';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskTransitionRepository } from '../ai-task-transition.repository';
 import { PrismaTaskInputRepository } from '../task-input/prisma-task-input.repository';
 

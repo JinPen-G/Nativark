@@ -17,7 +17,7 @@ import { getRequestIdentity, runWithRequestIdentity } from '@rental-os/platform-
 import { hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
 import { composeAiClientScenes, createAiGuardedClientSession } from '../client-scene.composition';
 import type { ClientRequestContext } from '@rental-os/rental-core/client-context';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { freezeOriginalInput } from '../task-request/original-request.validation';
 import { PrismaClientSceneMaterialRepository, AiClientMaterialError, originalClientMaterialScope, type AiClientMaterialDb,
   type AiClientMaterialScope, type AiClientSceneMaterial } from './prisma-client-scene-material.repository';

@@ -3,7 +3,7 @@
  * resource Guard; this port cannot manage settings or borrow a user identity. */
 import type { PrismaClient } from '@prisma/client';
 import type { AiExecutionContext } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import type { CurrentPersistentTaskAuthorization } from '../runner/authorized-persistent-task-input.composition';
 import { isGatewayConfig } from '../gateway-contract-validation';
 import { gatewayBudgetPrincipal } from './gateway-budget-principal';

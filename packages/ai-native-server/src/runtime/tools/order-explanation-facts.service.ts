@@ -2,7 +2,7 @@ import type { AiOrderRouteContextAuthority } from '../order-route-context.author
 import type { AiOrderReadFactsService } from '../order-read-facts.service';
 import type { AiOrderPaymentFactsService } from './order-payment-facts.service';
 import type { AiOrderFundingFactsService } from './order-funding-facts.service';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { ModelGatewayError } from '../model-gateway.ports';
 import type { AiExecutionContext } from '@rental-os/shared';
 import { assertAiReadContextBinding } from './read-context-binding';

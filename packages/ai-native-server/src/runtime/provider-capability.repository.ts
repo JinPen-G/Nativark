@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { AiProviderProfileRecord } from './provider-profile.ports';
 import type { ProviderCapabilityEvidenceRepository, RecordCapabilityEvidenceInput, AiProviderCapabilityEvidenceRecord } from './provider-capability.ports';
 import { capabilityNameSchema, capabilityProfileFingerprint } from './capability-verification';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 const id = z.string().min(1).max(36), revision = z.number().int().min(1).max(4294967295);
 const capabilityCount = capabilityNameSchema.options.length;

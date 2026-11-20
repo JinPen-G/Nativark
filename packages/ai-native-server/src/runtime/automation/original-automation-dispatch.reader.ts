@@ -3,7 +3,7 @@
  * financial mutation, provider request or replacement reservation is created. */
 import type { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { isGatewayConfig } from '../gateway-contract-validation';
 import type { BudgetEvidenceBinding } from '../budget/budget-dependency-adapters';
 import { BudgetError } from '../budget/budget.ports';

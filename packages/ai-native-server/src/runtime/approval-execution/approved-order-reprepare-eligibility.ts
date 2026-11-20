@@ -9,7 +9,7 @@ import { waitingPayloadSchema } from '../runner/prisma-task-confirmation-checkpo
 import { taskExecutionPhaseStore } from '../runner/task-execution-phase.store';
 import { AI_APPROVAL_APPLICATION_DRAFT_VERSION } from '@rental-os/shared';
 import type { AiApprovalReprepareEligibilityDraft } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { ControlledApprovedOrderDependencies } from './controlled-approved-order.composition';
 import type { composeApprovedOrderHumanApproval } from './approved-order-human.composition';

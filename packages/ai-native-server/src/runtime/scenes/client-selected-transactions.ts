@@ -12,7 +12,7 @@ import { getRequestIdentity } from '@rental-os/platform-server/request-identity'
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { holdAiTaskDeploymentAdmission, withAiTaskTransactionAuthority, type AiTaskTransactionReference } from '../task-transaction-authority';
 import { TASK_TEXT_MODEL_TOOL } from '../model-input/task-model-input';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiClientPolicyAuthority, type AiClientTaskDependencies } from './client-task.authority';
 import { originalClientMaterialScope, PrismaClientSceneMaterialRepository, type AiClientMaterialDb,
   type AiClientMaterialScope, type AiClientSceneMaterial } from './prisma-client-scene-material.repository';

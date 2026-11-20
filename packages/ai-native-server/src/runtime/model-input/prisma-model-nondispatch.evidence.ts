@@ -4,7 +4,7 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import type { AiGatewayConfigReferenceDraft } from '@rental-os/shared';
 import { isGatewayConfig } from '../gateway-contract-validation';
-import { requestFingerprint as hash } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 
 const invocationSelect = { id: true, scopeId: true, taskId: true, runId: true, stepId: true, actionId: true,
   actorId: true, callId: true, registrationHash: true, intentHash: true, configuration: true,

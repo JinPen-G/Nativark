@@ -7,7 +7,7 @@ import { RENTAL_FULFILLMENT_MODES, RENTAL_PRICING_UNIT_CODES, aiClientTaskModelR
   aiClientGoalProjectionSchema, aiClientGoalQuoteRequestSchema,
   type AiClientGoalProjection, type ClientCreateQuoteRequest, type AiClientQuotePreparationRequest } from '@rental-os/shared';
 import { AiTaskRepositoryError } from '../ai-task.repository';
-import { requestFingerprint as hash } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 import { freezeOriginalInput } from '../task-request/original-request.validation';
 import { CLIENT_GOAL_MATERIAL_VERSION, CLIENT_GOAL_LIMITS, revalidateClientGoalMaterial,
   type ClientGoalRecord, type ClientGoalSources } from './client-goal-material';

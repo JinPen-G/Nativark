@@ -4,7 +4,7 @@ import { isGatewayConfig, isGatewayIntent, isGatewayResult } from '../gateway-co
 import { gatewayTextIntentPolicySchema, prepareGatewayTextIntent, type GatewayTextIntentPolicy } from '../gateway-intent';
 import type { GatewayRoutingResolution } from '../gateway-routing.service';
 import { ModelGatewayError } from '../model-gateway.ports';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { gatewayBudgetPrincipal, gatewayPlatformBudgetPrincipal } from '../budget/gateway-budget-principal';
 import { nativeToolResultReferenceSchema, nativeToolResultIntentFingerprint } from './native-tool-result.ports';
 import { taskModelDisplayWitnessSchema, inspectTaskModelDisplayInput, withoutTaskModelDisplayMessages } from './task-model-display-witness';

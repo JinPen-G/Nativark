@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { PrismaClient, AiAutomationInput } from '@prisma/client';
 import { AI_CONTRACT_DRAFT_VERSION, AI_EVENTS_DRAFT_VERSION, AI_TOOL_CODES, AI_TOOL_DRAFT_VERSION,
   type AiExecutionContext, type AiUsageSettingsDraft } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
 import { validateBudgetSettings } from '../budget/budget-settings';
 import type { SubscriptionBudgetEntitlementAdapter } from '../budget/budget-dependency-adapters';

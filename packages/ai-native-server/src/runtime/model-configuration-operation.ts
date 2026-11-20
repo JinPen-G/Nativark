@@ -7,7 +7,7 @@ import addFormats from 'ajv-formats';
 import { z } from 'zod';
 import { AI_USAGE_DRAFT_SCHEMAS, type AiTenantModelSettingsSummaryDraft, type AiPlatformModelSettingsSaveDraft,
   type AiModelConfigurationOperationDraft } from '@rental-os/shared';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { ModelGatewayError } from './model-gateway.ports';
 import { AiModelConfigurationRevisionConflictError } from './model-config-compatibility';
 

@@ -7,7 +7,7 @@ import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma, PrismaClient, AiAutomationReviewOperation, AiBusinessFailureOutbox } from '@prisma/client';
 import { z } from 'zod';
 import { AI_TASK_DRAFT_VERSION, type AiExecutionContext, type AiAutomationReviewDraft, type AiAutomationReviewsForEventDraft } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { hasEffectivePermission } from '@rental-os/platform-server/permission-match';
 import { BusinessFailureReadAuthority, type FailureSource } from '../business-events/business-failure-read.authority';
 import { BusinessFailureError } from '../business-events/prisma-business-failure-outbox';

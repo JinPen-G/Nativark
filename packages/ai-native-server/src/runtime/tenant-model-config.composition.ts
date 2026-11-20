@@ -5,7 +5,7 @@ import { PrismaTenantModelProfileRepository } from './tenant-model-profile.repos
 import { TenantModelConfigService, type TenantModelConfigPorts } from './tenant-model-config.service';
 import type { AiScopeRepository } from './ai-scope.repository';
 import { TenantModelConnectionResolver, type GatewayConnectionResolver } from './routed-model-transport';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { gatewayBudgetPrincipal } from './budget/gateway-budget-principal';
 import type { ModelConfigurationOperationDb } from './model-configuration-operation';
 import type { TenantModelConfigurationTransactionParticipant } from './tenant-model-config-transactions';

@@ -4,7 +4,7 @@ import { AI_CONTRACT_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/s
 import type { ApiAuthGuard } from './rental-adapters/api-auth.guard';
 import { getRequestIdentity, runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
 import { captureRentalInternalAuthority } from '@rental-os/rental-core/application-internal-authority';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import type { AiOrderRouteCredentialSource } from './order-route-context.authority';
 import { isAiStepExecutionContext } from './task-contract-validation';
 import { ModelGatewayError } from './model-gateway.ports';

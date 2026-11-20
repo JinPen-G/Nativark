@@ -27,7 +27,7 @@ import type { UnifiedGatewayAudit } from './unified-ai-gateway.ports';
 import type { AiRouteScene } from './provider-router.ports';
 import { composeTaskModelHost, type TaskModelHostDependencies } from './runner/model-task-host.composition';
 import type { GatewayMediaAttachmentResolver } from './gateway-intent';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { PrismaTaskGatewayAudit } from './prisma-task-gateway-audit';
 import { PrismaGatewayAccountingFacts } from './budget/prisma-gateway-accounting-facts';
 import { PrismaGatewayInvocationBindings } from './budget/prisma-gateway-invocation-bindings';

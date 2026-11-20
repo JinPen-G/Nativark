@@ -9,7 +9,7 @@ import { normalizeTenantModelBaseUrl } from './tenant-model-config.service';
 import { MODEL_REQUEST_BYTES, MODEL_RESPONSE_BYTES } from './model-response-limits';
 import { ModelAdapterError, ModelGatewayError, modelProtocolRequestSchema, modelEmbeddingEvidenceSchema,
   type AdapterResult, type ModelAdapter, type ModelProtocolInvocation, type ModelUsage } from './model-gateway.ports';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 const count = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const inputUsage = z.object({ prompt_tokens: count, total_tokens: count }).strict()

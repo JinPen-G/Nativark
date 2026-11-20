@@ -26,7 +26,7 @@ import { parseAiProviderProfileRecord } from './provider-profile.repository';
 import { capabilityNameSchema, capabilityVerificationSchema, capabilityProfileFingerprint } from './capability-verification';
 import { PrismaProviderCapabilityEvidenceRepository } from './provider-capability.repository';
 import { createPersistedTextCapabilityEvidence } from './prisma-text-capability-receipt.repository';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 type Request = { headers: { authorization?: unknown } } & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
 type Dependencies = Omit<Parameters<typeof createAuthorizedPlatformModelConfiguration>[0], 'credentials' | 'invocation' | 'profileId'>

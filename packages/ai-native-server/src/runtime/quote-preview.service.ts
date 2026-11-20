@@ -4,7 +4,7 @@ import { RENTAL_FULFILLMENT_MODES, RENTAL_PRICING_UNIT_CODES, type AiExecutionCo
   type AiCoreQuotePreviewResultDraft, type AiCoreQuotePreviewFailureDraft } from "@rental-os/shared";
 import type { RentalBusinessService, BusinessContext } from "./rental-adapters/rental-business.service";
 import { ModelGatewayError } from "./model-gateway.ports";
-import { requestFingerprint } from "./rental-adapters/rental-idempotency.repository";
+import { requestFingerprint } from "@rental-os/platform-contracts/request-fingerprint";
 import { assertCurrentQuoteAddress, type AiQuoteAddressSource } from './scenes/original-quote-address';
 
 const id = z.string().trim().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);

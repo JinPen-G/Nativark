@@ -13,7 +13,7 @@ import { InspectionActionAuthority } from './inspection-assist/inspection-action
 import { inspectionId, inspectionTargetSchema } from './inspection-assist/inspection-assist.validation';
 import { freezeOriginalInput } from './task-request/original-request.validation';
 import { originalIdentityHash } from './task-request/original-request.authority';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 const referenceSchema = inspectionTargetSchema.extend({ templateId: inspectionId, draftId: inspectionId,
   inputId: inspectionId, expectedRevision: z.number().int().min(1).max(999) }).strict();

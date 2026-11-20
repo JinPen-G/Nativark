@@ -7,7 +7,7 @@ import type { Prisma } from '@prisma/client';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import type { SecretBox } from '@rental-os/platform-server/secret-box';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { aiTaskHasUnresolvedEffects } from '../task-unresolved-effects';
 import { AI_RETENTION_POLICY } from './retention-policy';

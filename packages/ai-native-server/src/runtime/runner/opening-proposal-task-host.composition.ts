@@ -10,7 +10,7 @@ import { AiStepRegistrationRepository } from '../ai-step-registration.repository
 import { AiStepTransitionRepository } from '../ai-step-transition.repository';
 import { AiTaskTransitionRepository } from '../ai-task-transition.repository';
 import { composePersistedTaskAuthorization } from '../task-authorization.composition';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiGuardedOpeningConfigurationSource } from '../tools/opening-configuration.source';
 import { AiBusinessReadRouteAuthority } from '../business-read-route.authority';
 import { AiOpeningSectionDifferenceService, verifyOpeningSectionMaterial, openingSectionFromMaterial } from '../tools/opening-section-difference.service';

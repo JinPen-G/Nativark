@@ -12,7 +12,7 @@ import { GatewayDeadline } from './gateway-deadline';
 import { ModelGatewayError, modelProtocolRequestSchema, modelRequestSchema, modelUsageSchema, modelReasoningEvidenceSchema, modelEmbeddingEvidenceSchema, type GatewayContext, type ModelProtocolRequest, type ModelRequest, type ModelUsage } from './model-gateway.ports';
 import type { UnifiedGatewayPorts, GatewayInvocationResult, GatewayStreamEvent } from './unified-ai-gateway.ports';
 import { gatewayRoutingBinding } from './gateway-routing.service';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { isGatewayOrderExplainRequest } from './gateway-contract-validation';
 import { gatewayCapacityRequest, type GatewayCapacityLease } from './gateway-capacity.ports';
 import { retainGatewayCapacityPromise, retainGatewayCapacityIterator } from './gateway-capacity.service';

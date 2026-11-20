@@ -9,7 +9,7 @@ import type { AiLiveCapabilityEvidenceVerifier } from './capability-verification
 import type { RecordCapabilityEvidenceInput } from './provider-capability.ports';
 import { capabilityProfileFingerprint, capabilityVerificationSchema } from './capability-verification';
 import { checkedAccountingCall } from './budget/prisma-gateway-accounting-facts';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { isGatewayOrderExplainRequest } from './gateway-contract-validation';
 import { matchesProbeProfile, probeUsageSchema, embeddingProbeUsageSchema, textDigest, textProbeDescriptorSchema, textProbeEvidenceHash,
   textProbeIntent, textProbeObservationSchema, textProbeCapability, textProbeMethod, textProbeMode, hasObjectiveProbeMethod, isPlatformProbeContext, TEXT_PROBE_TTL_MS,

@@ -6,7 +6,7 @@ import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientOrderActionSourceSchema, aiClientOr
   AI_TASK_DRAFT_VERSION, aiClientTaskReadRequestSchema, aiClientTaskCreationReceiptSchema,
   aiClientGoalPreparationRequestSchema, aiClientGoalPreparationReadRequestSchema,
   aiClientGoalQuoteRecoverySchema, aiClientQuoteReadRequestSchema } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { createAiGuardedClientSession } from '../client-scene.composition';
 import { AiClientEntryError } from './client-entry-action';
 import { AiClientEntryController, clientEntryRefusalCode, type AiClientEntryApplication } from './client-entry.controller';

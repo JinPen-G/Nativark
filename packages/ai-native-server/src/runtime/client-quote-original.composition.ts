@@ -6,7 +6,7 @@ import { getRequestIdentity, runWithRequestIdentity } from '@rental-os/platform-
 import type { ClientRequestContext } from '@rental-os/rental-core/client-context';
 import type { ClientApiService } from '@rental-os/rental-core/mysql-client-application';
 import { ClientCreateQuoteRequestDto } from '@rental-os/rental-core/http-client-request.dto';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import type { Prisma } from '@prisma/client';
 
 const reference = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);

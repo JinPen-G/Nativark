@@ -1,6 +1,6 @@
 import type { AiExecutionContext } from '@rental-os/shared';
 import { BudgetError, isOriginalBudgetLifecycleAction, type BudgetAction, type BudgetAuthority, type BudgetGrant, type BudgetPolicyKey, type BudgetRecord, type BudgetUsageEvidence } from './budget.ports';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { isAiStepExecutionContext } from '../task-contract-validation';
 import { quantityAtoms } from './budget-quantity';
 

@@ -14,7 +14,7 @@ import { assertAiReadContextBinding } from '../tools/read-context-binding';
 import { AiOrderCandidatesService } from '../tools/order-candidates.service';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { AiTaskRunnerError } from '../runner/ai-task-runner.service';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { freezeOriginalInput, originalBody, originalRequestReferenceSchema, parseOriginalRequest } from '../task-request/original-request.validation';
 import type { AiSceneHttpRequest, composeRequestBoundOriginalScenes } from './request-bound-scenes.application';
 

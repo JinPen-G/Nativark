@@ -7,7 +7,7 @@ import type { AiProviderProfileRecord } from './provider-profile.ports';
 import type { ProviderRouteDecision } from './provider-router.ports';
 import type { GatewayStreamEvent, GatewayUsageRecorder, GatewayTransportDispatchCheck, UnifiedGatewayTransport } from './unified-ai-gateway.ports';
 import { normalizeTenantModelBaseUrl, type TenantModelConfigService } from './tenant-model-config.service';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { resolvedNativeToolResultSchema, type ResolvedNativeToolResult } from './model-input/native-tool-result.ports';
 import { gatewayTransportTermination, type GatewayTransportIterator } from './gateway-capacity.ports';
 import { retainGatewayCapacityIterator } from './gateway-capacity.service';

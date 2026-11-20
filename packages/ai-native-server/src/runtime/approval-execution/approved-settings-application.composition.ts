@@ -4,7 +4,7 @@ import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma } from '@prisma/client';
 import { AI_PROPOSAL_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, type AiProposalPayloadDraft, type AiApprovalRecordDraft } from '@rental-os/shared';
 import { AI_APPROVED_SETTINGS_DRAFT_VERSION, type AiApprovedSettingsReferenceDraft } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { lockActiveCategoryBinding } from '@rental-os/rental-core/mysql-category-write';
 import { ApprovedSettingsRouteAuthority } from '@rental-os/rental-core/approved-settings-route-authority';
 import { ApprovedSettingsChangeService } from '@rental-os/rental-core/mysql-approved-settings';

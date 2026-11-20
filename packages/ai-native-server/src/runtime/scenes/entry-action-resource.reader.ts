@@ -13,7 +13,7 @@ import { getRequestIdentity, runWithRequestIdentity } from '@rental-os/platform-
 import { isStaffBusinessRouteAllowed } from '../rental-adapters/staff-api-policy';
 import type { RentalCoreService } from '../rental-adapters/rental-core.service';
 import { requestRentalOrderVisibilityWhere } from '../rental-adapters/rental-core-fact.repository';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiCatalogReadFactsService } from '../catalog-read-facts.service';
 import { AiBusinessReadRouteAuthority } from '../business-read-route.authority';
 import type { AiOrderRouteCredentialSource } from '../order-route-context.authority';

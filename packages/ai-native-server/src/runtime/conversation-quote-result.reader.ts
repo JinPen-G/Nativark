@@ -16,7 +16,7 @@ import { parseQuoteSelectionProof, validateQuoteSelectionResponse } from './task
 import { originalIdentityHash } from './task-request/original-request.authority';
 import { resolveTaskCenterBusinessTarget, readTaskCenterOrderSelection } from './task-center-business.reader';
 import { composeApprovedOrderHumanApproval } from './approval-execution/approved-order-human.composition';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');

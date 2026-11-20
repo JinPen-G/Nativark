@@ -10,7 +10,7 @@ import { AiTaskRepositoryError } from './ai-task.repository';
 import { originalQuoteAnswerContract, originalQuoteInitialParameterContract, ORIGINAL_QUOTE_INITIAL_PARAMETER_CODE } from './scenes/original-quote-input';
 import { aiQuoteCandidateInputSchema } from './tools/quote-candidate-preparation.service';
 import { originalIdentityHash } from './task-request/original-request.authority';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { inspectAiWorkbenchFieldMaterial } from './workbench-display.contract';
 
 export interface WorkbenchQuoteFieldInput {

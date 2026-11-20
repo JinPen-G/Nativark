@@ -5,7 +5,7 @@ import type { AiOrderNextStepsService } from './order-next-steps.service';
 import { sealBusinessScenario } from './business-scenario-input';
 import { assertAiReadContextBinding } from './read-context-binding';
 import { ModelGatewayError } from '../model-gateway.ports';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { buildOrderExplanation, projectOrderHistoryFacts, projectOrderInspectionEvidence, projectOrderExplanationMaterialV2,
   parseOrderSourceReopenV2, validateOrderSourceReadV2, assertOrderPublicationV2Available, orderExplanationDisplayBudget,
   orderExplanationSourcesFit } from './order-explanation-renderer';

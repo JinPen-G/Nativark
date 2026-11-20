@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { AiMembershipCandidateReadFactsService } from '../membership-candidate-read-facts.service';
 import type { AiBusinessReadAuthority } from '../business-read-route.authority';
 import { ModelGatewayError } from '../model-gateway.ports';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 const input = z.object({ customerId: z.string().min(1).max(191), expectedName: z.string().min(1).max(191),
   // Keep the existing wire bound and the original SavePersonalMembershipDto's

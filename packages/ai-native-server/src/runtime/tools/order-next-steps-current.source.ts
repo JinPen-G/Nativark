@@ -1,7 +1,7 @@
 import type { AiExecutionContext } from '@rental-os/shared';
 import type { AiOrderRouteContextAuthority } from '../order-route-context.authority';
 import type { AiOrderExplanationFactsService } from './order-explanation-facts.service';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { ModelGatewayError } from '../model-gateway.ports';
 import { assertAiReadContextBinding } from './read-context-binding';
 

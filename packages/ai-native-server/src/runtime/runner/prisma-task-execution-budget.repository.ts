@@ -1,7 +1,7 @@
 import { withAiTaskTransaction } from '../task-transaction-authority';
 import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma, PrismaClient } from '@prisma/client';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import {
   AiTaskExecutionBudgetError, AiTaskExecutionPreReservationLimitError, type AiTaskExecutionBudgetPort, type AiTaskExecutionBudgetSnapshot,
   type AiTaskExecutionChargeEvidence, type AiTaskExecutionChargeReceipt, type AiTaskExecutionChargeRequest,

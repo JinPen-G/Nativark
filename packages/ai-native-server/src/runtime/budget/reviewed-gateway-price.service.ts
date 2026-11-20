@@ -13,7 +13,7 @@ import { BudgetError } from './budget.ports';
 import { gatewayBudgetPrincipal } from './gateway-budget-principal';
 import { gatewayPriceEvidenceSchema, gatewayPriceBillingSchema } from './gateway-pricing-evidence';
 import { PrismaGatewayPricingRecords, type GatewayPricingRecordDb } from './prisma-gateway-pricing-records';
-import { requestFingerprint as hash } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 
 type Db = GatewayPricingRecordDb & Pick<PrismaClient, '$transaction' | 'operationLog' | 'aiTenantModelConfiguration'>;
 const key = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u);

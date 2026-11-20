@@ -4,7 +4,7 @@
 import { z } from 'zod';
 import { RENTAL_PRICING_UNIT_CODES, RENTAL_FULFILLMENT_MODES, type AiExecutionContext } from '@rental-os/shared';
 import { RENTAL_OPENING_TERMINOLOGY_FIELDS } from '../rental-adapters/rental-core-config.repository';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import type { AiBusinessReadAuthority, AiBusinessReadRouteAuthority } from '../business-read-route.authority';
 import type { AiOpeningConfigurationSource } from './opening-configuration.source';
 import { assertAiReadContextBinding } from './read-context-binding';

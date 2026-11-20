@@ -13,7 +13,7 @@ import { visionCapabilityChallenge } from './vision-capability-challenge';
 import { audioCapabilityChallenge } from './audio-capability-challenge';
 import { probeContextSchema, textProbeCommandSchema, textProbeIntent, textProbePreparation, hasObjectiveProbeMethod, textProbeCapability, textProbeMode, textProbeRequirements, textProbeRouteScene, textProbeExecutionProtocol, canExecuteTextProbe,
   isPlatformProbeContext, TEXT_PROBE_SCENE, type TextProbeCommand, type TextProbeContext } from './text-capability-probe';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 export interface TextProbeAuthorityDependencies {
   management: Pick<TenantModelConfigurationAuthority, 'authorize'>;

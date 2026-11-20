@@ -11,7 +11,7 @@ import { AiWorkbenchDisplayOriginalReader, type AiWorkbenchDisplayOriginalMateri
 import { parseTaskModelDisplayWitness, type TaskModelDisplayWitness } from './model-input/task-model-display-witness';
 import { inspectAiWorkbenchContext, inspectAiWorkbenchFieldMaterial, inspectAiWorkbenchPresentation } from './workbench-display.contract';
 import { isGatewayResult } from './gateway-contract-validation';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { freezeOriginalInput } from './task-request/original-request.validation';
 import { buildWorkbenchAuthoritativeSummary } from './workbench-authoritative-summary';
 

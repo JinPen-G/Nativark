@@ -11,7 +11,7 @@ import { aiTaskAccessFromContext, AiTaskRepositoryError } from './ai-task.reposi
 import { composeAiOriginalScenes, type AiOriginalSceneDependencies } from './scenes/original-scenes.composition';
 import { originalIdentityHash } from './task-request/original-request.authority';
 import { freezeOriginalInput } from './task-request/original-request.validation';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { assertAiReadContextBinding } from './tools/read-context-binding';
 import { validateAiOrderReadResponse } from './scenes/scene-observation-contracts';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';

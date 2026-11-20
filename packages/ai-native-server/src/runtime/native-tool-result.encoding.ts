@@ -4,7 +4,7 @@
 import { ModelGatewayError, type ModelProtocolRequest } from './model-gateway.ports';
 import { resolvedNativeToolResultSchema, type ResolvedNativeToolResult } from './model-input/native-tool-result.ports';
 import { MODEL_REQUEST_BYTES } from './model-response-limits';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 type NativeProtocol = 'openai_chat_completions' | 'openai_responses' | 'anthropic_messages';
 

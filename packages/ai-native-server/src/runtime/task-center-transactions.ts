@@ -13,7 +13,7 @@ import { assertRentalBusinessTenantAccessAfterLock, hasRentalBusinessTenantFence
 import type { RentalAuthService } from '@rental-os/rental-core/auth-service';
 import type { RentalCoreFactRepository } from '@rental-os/rental-core/mysql-core-facts';
 import type { RentalBusinessFactRepository } from '@rental-os/rental-core/mysql-business-facts';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import type { AiTaskCredentialSource } from './task-current-action.authority';
 import { readOriginalTaskModelProvenance } from './task-request/prisma-original-request.repository';

@@ -10,7 +10,7 @@ import { resolveUserBusinessLocationScope } from '@rental-os/rental-core/busines
 import { createRentalAuthorization } from '@rental-os/rental-core/http-auth';
 import { assertRentalBusinessTenantAccessAfterLock, hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
 import * as contracts from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { AiTaskCredentialSource } from '../task-current-action.authority';
 import { originalIdentityHash, type AiSceneCreationRule } from '../task-request/original-request.authority';

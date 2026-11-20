@@ -3,7 +3,7 @@
  * approves or executes an order; unavailable stock remains an observation. */
 import { z } from 'zod';
 import type { RentalCoreService } from '../rental-adapters/rental-core.service';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { checkedAiAvailabilityResult } from '../availability-read-facts.service';
 import { AiBusinessReadRouteAuthority } from '../business-read-route.authority';

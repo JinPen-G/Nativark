@@ -14,7 +14,7 @@ import { aiTaskAccessFromContext, AiTaskRepositoryError, type AiTaskRepositoryAu
 import type { TaskLifecycleObservationReader } from './task-lifecycle-observation.reader';
 import type { BusinessFailureReadAuthority } from '../business-events/business-failure-read.authority';
 import { BusinessFailureError } from '../business-events/prisma-business-failure-outbox';
-import { requestFingerprint as hash } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 
 export type TaskFaultObservationDb = Pick<PrismaClient, 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskExecutionCharge'>
   & Partial<Pick<PrismaClient, 'aiTaskEvent' | 'aiBusinessFailureOutbox'>>;

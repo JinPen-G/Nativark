@@ -9,7 +9,7 @@ import { getRequestIdentity } from '@rental-os/platform-server/request-identity'
 import { hasEffectivePermission } from '@rental-os/platform-server/permission-match';
 import type { AiTaskCredentialSource } from './task-current-action.authority';
 import { ModelGatewayError, type WorkspaceGatewayContext } from './model-gateway.ports';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 export interface TenantModelConfigurationTransactionParticipant {
   begin(transaction: Prisma.TransactionClient, context: WorkspaceGatewayContext): Promise<{

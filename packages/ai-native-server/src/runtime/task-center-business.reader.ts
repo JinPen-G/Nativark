@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { PrismaClient } from '@prisma/client';
 import { AI_QUOTE_SELECTION_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, type AiTaskBusinessObservationDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError, type AiTaskRepository } from './ai-task.repository';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { taskCenterReviewSchema } from './task-center-approval.composition';
 import type { TaskCenterApprovalDependencies } from './task-center-approval.composition';
 import type { AiTaskCredentialSource } from './task-current-action.authority';

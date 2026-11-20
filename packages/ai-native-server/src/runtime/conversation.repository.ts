@@ -19,7 +19,7 @@ import { originalIdentityHash } from './task-request/original-request.authority'
 import { PrismaOriginalRequestRepository, AiOriginalRequestResultUnknownError } from './task-request/prisma-original-request.repository';
 import type { AiOriginalSceneDependencies } from './scenes/original-scenes.composition';
 import { conversationCommand } from './conversation-contract';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { aiTaskHasUnresolvedEffects } from './task-unresolved-effects';
 import { validateAiSceneModelObservation } from './scenes/scene-observation-contracts';
 import { originalRequestReferenceSchema, freezeOriginalInput } from './task-request/original-request.validation';

@@ -8,7 +8,7 @@ import { waitForTaskApplicationDependency, type AiTaskApplicationHost } from '..
 import type { AiTaskInputSource } from '../task-input/task-input.ports';
 import { originalRequestReferenceSchema, freezeOriginalInput } from '../task-request/original-request.validation';
 import { originalIdentityHash } from '../task-request/original-request.authority';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from '../ai-task.repository';
 import { AiTaskTransitionRepository } from '../ai-task-transition.repository';
 import type { AiOriginalSceneModelDependencies, AiOriginalSceneRunDependencies } from './original-scene-model.composition';

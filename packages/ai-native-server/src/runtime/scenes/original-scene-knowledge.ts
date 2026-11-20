@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { validateAiQuoteGoalSourceDraft, type AiQuoteGoalSourceDraft, type AiSceneRequestBody } from '@rental-os/shared';
 import { composePrismaFormalHumanKnowledge, type PrismaFormalKnowledgeDependencies } from '../knowledge/prisma-formal-knowledge.composition';
 import { AiTaskRepositoryError } from '../ai-task.repository';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { freezeOriginalInput } from '../task-request/original-request.validation';
 import { taskModelMaterialSchema, type parseTaskModelInput } from '../model-input/task-model-input';
 import { withoutTaskModelDisplayMessages } from '../model-input/task-model-display-witness';

@@ -1,7 +1,7 @@
 import { hasEffectivePermission } from '@rental-os/platform-server/permission-match';
 import type { Prisma } from '@prisma/client';
 import { AI_TASK_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, type AiUsageSettingsDraft } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import type { AiApprovalPrincipal } from '../ai-approval-repository';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { aiPersistenceScopeColumns } from '../persistence-scope';

@@ -26,7 +26,7 @@ import { ProviderRouterService } from '../provider-router.service';
 import type { AiProfileCapability } from '../provider-profile.ports';
 import { aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
 import { aiPersistedPlanToolsSchema } from '../runner/prisma-task-plan-input.source';
-import { requestFingerprint as hash } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 import { originalIdentityHash } from '../task-request/original-request.authority';
 import { readRuntimePublication, type RuntimePublication } from '../runtime-publication.configuration';
 import { createEntrySceneCatalogApplication, entryCatalogIdentityHash,

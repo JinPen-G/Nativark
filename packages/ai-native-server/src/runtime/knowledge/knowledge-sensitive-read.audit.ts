@@ -6,7 +6,7 @@ import { z } from 'zod';
 import type { AiExecutionContext } from '@rental-os/shared';
 import type { OperationLogService } from '../rental-adapters/operation-log.service';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { KnowledgeError, unavailable } from './knowledge-errors';
 
 export type KnowledgeReadOperationLogs = Pick<OperationLogService, 'record'>;

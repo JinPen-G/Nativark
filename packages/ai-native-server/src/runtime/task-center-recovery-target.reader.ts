@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { AI_CONTRACT_DRAFT_VERSION, AI_SCENE_REQUEST_DRAFT_VERSION, AI_TASK_DRAFT_VERSION,
   AI_TOOL_DRAFT_VERSION, type AiSceneRequestReadDraft, type AiSceneModelRecoverySnapshotReadResponse,
   type AiTaskRecoverySnapshot } from '@rental-os/shared';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { aiStepActionId } from './ai-step-registration.repository';
 import { AiTaskRepositoryError, type AiTaskRepository } from './ai-task.repository';
 import { parseTaskModelInput, taskModelFingerprint, taskModelIntent, taskModelMaterialSchema,

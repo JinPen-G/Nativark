@@ -3,7 +3,7 @@ import type { ApiAuthGuard } from './rental-adapters/api-auth.guard';
 import type { RentalCoreService } from './rental-adapters/rental-core.service';
 import { ApprovedSettingsRouteAuthority } from '@rental-os/rental-core/approved-settings-route-authority';
 import { settingsNotificationsSchema } from '@rental-os/rental-core/approved-settings-validation';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { AiStepRegistrationRepository } from './ai-step-registration.repository';
 import { composePersistedTaskAuthorization, type PersistedTaskAuthorizationDependencies } from './task-authorization.composition';

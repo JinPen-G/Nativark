@@ -24,7 +24,7 @@ import { AiOpeningActionListService } from './opening-action-list.service';
 import { AiGuardedOpeningConfigurationSource } from './opening-configuration.source';
 import { AiQuoteBusinessPreparationService } from './quote-business-preparation.service';
 import { AiOrderExplanationPreparationService } from './order-explanation-preparation.service';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiMemberProfileDifferenceService } from './member-profile-difference.service';
 import { AiBusinessScenePreparationService } from '../scenes/business-scene-preparation.service';
 import { composeAiBusinessOrderApplication } from '../scenes/business-order-application';

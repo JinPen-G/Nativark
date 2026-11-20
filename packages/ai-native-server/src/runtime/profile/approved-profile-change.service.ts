@@ -8,7 +8,7 @@ import type { Prisma, CustomerApprovedProfileChange, CustomerApprovedProfileOper
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { PrismaService } from '../rental-adapters/prisma.service';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { SharedCustomerRepository } from '@rental-os/rental-core/mysql-customer-master';
 import { ApprovedProfileRouteAuthority, type ApprovedProfileActor } from './approved-profile-route.authority';
 import { ApprovedProfileResultUnknownError, type ApprovedProfileBinding, type ApprovedProfileParticipant,

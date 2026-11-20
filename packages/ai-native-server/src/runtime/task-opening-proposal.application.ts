@@ -14,7 +14,7 @@ import { AI_TASK_DRAFT_VERSION, AI_SCENE_REQUEST_DRAFT_VERSION, AI_SCENE_REQUEST
   type AiTaskOpeningProposalMaterialDraft } from '@rental-os/shared';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
 import { hasEffectivePermission } from '@rental-os/platform-server/permission-match';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { RENTAL_OPENING_TERMINOLOGY_FIELDS } from './rental-adapters/rental-core-config.repository';
 import { AiTaskCurrentIdentityAuthority } from './task-current-identity.authority';
 import { AiScopeRepository } from './ai-scope.repository';

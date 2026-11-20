@@ -9,7 +9,7 @@ import { aiTaskDraftRejectedOperation, type AiTaskDraftRejectedOperation } from 
 import { z } from 'zod';
 import { getRequestIdentity } from '@rental-os/platform-server/request-identity';
 import { lockRentalBusinessTenant } from '@rental-os/rental-core/mysql-business-fence';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { freezeOriginalInput, originalRequestReferenceSchema } from './task-request/original-request.validation';
 

@@ -11,7 +11,7 @@ import {
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from "./ai-task.repository";
 import { aiPersistenceScopeColumns } from "./persistence-scope";
 import { evaluateAiStepTransitionDraft } from "./task-transition-draft";
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const revision = z.number().int().min(1).max(4294967294);

@@ -10,7 +10,7 @@ import { getRequestIdentity } from '@rental-os/platform-server/request-identity'
 import { ApprovedSettingsRouteAuthority } from '@rental-os/rental-core/approved-settings-route-authority';
 import { ApprovedSettingsChangeService } from '@rental-os/rental-core/mysql-approved-settings';
 import { settingsChangeReferenceSchema } from '@rental-os/rental-core/approved-settings-validation';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiScopeRepository } from '../ai-scope.repository';
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
 import { AiTaskCreationRepository } from '../ai-task-creation.repository';

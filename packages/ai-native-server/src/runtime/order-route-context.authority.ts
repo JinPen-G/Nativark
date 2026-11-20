@@ -1,4 +1,4 @@
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { ExecutionContextHost } from '@nestjs/core/helpers/execution-context-host';
 import { HttpException } from '@nestjs/common';
 import { z } from 'zod';

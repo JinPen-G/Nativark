@@ -3,7 +3,7 @@ import { assertAiReadContextBinding } from './read-context-binding';
 import type { AiBusinessReadAuthority } from '../business-read-route.authority';
 import type { AiAvailabilityReadFactsService } from '../availability-read-facts.service';
 import type { AiQuoteCandidatePreparationService, AiQuotePreparationContextSource } from './quote-candidate-preparation.service';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { ModelGatewayError } from '../model-gateway.ports';
 import { sealBusinessScenario } from './business-scenario-input';
 import { z } from 'zod';

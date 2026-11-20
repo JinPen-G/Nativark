@@ -10,7 +10,7 @@ import { BusinessFailureError } from './prisma-business-failure-outbox';
 import type { BusinessFailureReadAuthority } from './business-failure-read.authority';
 import { taskFaultAlertPolicySchema } from '../observability/task-fault-observation.reader';
 import type { RuntimeTaskFaultAlertPolicySource } from '../observability/task-fault-policy.configuration';
-import { requestFingerprint as hash } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 
 const querySchema = z.object({ limit: z.number().int().min(1).max(20), after: z.string().uuid().optional(),
   eventType: z.enum(['notification.failed', 'refund.failed', 'inspection.return_exception',

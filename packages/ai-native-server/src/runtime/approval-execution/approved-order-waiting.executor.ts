@@ -6,7 +6,7 @@ import { AiApprovedOrderRouteAuthority } from './approved-order-route.authority'
 import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { AiTaskRegisteredExecutor } from '../runner/prisma-task-measured-effects';
 import type { composePersistedOrderTaskInput } from '../order-task-input.composition';

@@ -1,7 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import type { AiExecutionContext } from '@rental-os/shared';
 import type { AiScopeRepository } from '../ai-scope.repository';
-import { requestFingerprint as hash } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
 import { isGatewayConfig } from '../gateway-contract-validation';
 import { modelUsageSchema, type ModelUsage } from '../model-gateway.ports';

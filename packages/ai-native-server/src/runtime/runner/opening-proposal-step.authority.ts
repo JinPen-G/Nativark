@@ -6,7 +6,7 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import { AI_TOOL_DRAFT_VERSION, type AiProposalPayloadDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError, type AiTaskRepositoryAuthority } from '../ai-task.repository';
 import type { AiStepTransitionCommand } from '../ai-step-transition.repository';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { fingerprintAiProposalDraft } from '../proposal-binding-draft';
 import { verifyOpeningSectionMaterial } from '../tools/opening-section-difference.service';
 import { PrismaTaskStepEvidenceAuthority } from './prisma-task-step-evidence.authority';

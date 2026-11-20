@@ -1,6 +1,6 @@
 import type { GatewayAccountingCall, UnifiedGatewayBudget } from '../gateway-accounting.ports';
 import { ModelGatewayError, type ModelUsage } from '../model-gateway.ports';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { BudgetError } from './budget.ports';
 import type { BudgetGatewayLifecycle } from './budget-gateway-adapter';
 import { checkedAccountingCall, type GatewayAccountingFacts } from './prisma-gateway-accounting-facts';

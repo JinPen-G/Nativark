@@ -12,7 +12,7 @@ import type { AiScopeRepository } from './ai-scope.repository';
 import type { PrismaOriginalRequestRepository } from './task-request/prisma-original-request.repository';
 import { freezeOriginalInput } from './task-request/original-request.validation';
 import { originalIdentityHash } from './task-request/original-request.authority';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { taskModelMaterialSchema, type TaskModelInput } from './model-input/task-model-input';
 import { parseTaskModelDisplayWitness, taskModelDisplayWitnessMarker, taskModelDisplayFieldContract,
   type TaskModelDisplayWitness } from './model-input/task-model-display-witness';

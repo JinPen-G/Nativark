@@ -4,7 +4,7 @@ import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { AI_TASK_DRAFT_VERSION, AI_TASK_STEP_CODES, type AiExecutionContext, type AiTaskEventDraft } from "@rental-os/shared";
-import { requestFingerprint } from "./rental-adapters/rental-idempotency.repository";
+import { requestFingerprint } from "@rental-os/platform-contracts/request-fingerprint";
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from "./ai-task.repository";
 import { isAiStepExecutionContext } from "./task-contract-validation";
 import { TEXT_CAPABILITY_PROBE_TOOL } from "./text-capability-probe";

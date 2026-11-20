@@ -8,7 +8,7 @@ import { AI_CONTRACT_DRAFT_VERSION, AI_SCENE_REQUEST_DRAFT_VERSION, AI_TASK_DRAF
   type AiOrderReadFactsDraft } from '@rental-os/shared';
 import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
 import type { RentalCoreService } from '../rental-adapters/rental-core.service';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError, aiTaskAccessFromContext, type AiTaskRepository } from '../ai-task.repository';
 import { aiStepActionId } from '../ai-step-registration.repository';
 import { composePersistedTaskAuthorization, type PersistedTaskAuthorizationDependencies } from '../task-authorization.composition';

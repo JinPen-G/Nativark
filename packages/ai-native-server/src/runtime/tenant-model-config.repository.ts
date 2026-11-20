@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { ModelGatewayError } from './model-gateway.ports';
 import { tenantModelMode } from './model-config-compatibility';
 import { tenantModelSettingsSchema, type TenantModelConfigPorts, type TenantModelRecord } from './tenant-model-config.service';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiModelConfigurationRevisionConflictError } from './model-config-compatibility';
 import type { GatewayContext } from './model-gateway.ports';
 import type { ModelConfigurationOperationWrite } from './model-configuration-operation';

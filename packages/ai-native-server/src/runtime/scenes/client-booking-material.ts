@@ -3,7 +3,7 @@ import { aiBookingSelectionSchema, AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS, RENTAL_PRI
 import type { AiBookingMaterial, AiBookingSelection, AiBookingServiceFieldSources, RentalDeliveryAddressSnapshot } from '@rental-os/shared';
 import type { ClientRequestContext } from '@rental-os/rental-core/client-context';
 import type { composeAiClientScenes } from '../client-scene.composition';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiClientEntryError, entryDate, entryId, parseEntry } from './client-entry-action';
 import { freezeOriginalInput } from '../task-request/original-request.validation';
 

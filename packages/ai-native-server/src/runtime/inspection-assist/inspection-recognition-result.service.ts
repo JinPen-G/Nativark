@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { AI_TOOL_DRAFT_VERSION, AI_TASK_INPUT_DRAFT_VERSION, validateAiTaskInputAnswersDraft, type AiInspectionActorScope } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import type { AiTaskRepository, AiTaskRepositoryAuthority } from '../ai-task.repository';
 import { AiTaskResultRepository, type AiTaskResultProjection } from '../runner/ai-task-result.repository';
 import { parseTaskModelInput, taskModelFingerprint, taskModelIdentity, continueTaskModelMaterial, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, type TaskModelPolicy, type TaskModelInput } from '../model-input/task-model-input';

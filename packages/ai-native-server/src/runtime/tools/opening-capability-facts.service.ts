@@ -10,7 +10,7 @@ import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
 import { hasEffectivePermission } from '@rental-os/platform-server/permission-match';
 import { getRequestIdentity, runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
 import type { WorkspaceCapabilityService } from '../rental-adapters/workspace-capability.service';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import type { AiOrderRouteCredentialSource } from '../order-route-context.authority';
 import { ModelGatewayError } from '../model-gateway.ports';
 import { isAiStepExecutionContext } from '../task-contract-validation';

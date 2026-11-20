@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { AI_KNOWLEDGE_DRAFT_VERSION, type AiExecutionContext, type AiExecutionScope, type AiKnowledgeChunkDraft, type AiKnowledgeDocumentDraft, type AiMemoryDraft } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import type { KnowledgeAuthorizationPort, KnowledgeAuthorizationRequest, KnowledgeGrant, KnowledgeRecord, MemoryConfirmation } from './knowledge.ports';
 import { KnowledgeError, unavailable } from './knowledge-errors';
 

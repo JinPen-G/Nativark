@@ -3,7 +3,7 @@
  * Continuation/recovery require the original application's held server lease. */
 import { z } from 'zod';
 import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { AiStepRegistrationRepository } from '../ai-step-registration.repository';
 import { AiStepTransitionRepository } from '../ai-step-transition.repository';

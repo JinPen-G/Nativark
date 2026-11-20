@@ -11,7 +11,7 @@ import type { SecretBox } from '@rental-os/platform-server/secret-box';
 import type { RentalCoreService } from '../rental-adapters/rental-core.service';
 import type { AiAutomationExplanationObservationDraft, AiAutomationExplanationPreparationDraft,
   AiAutomationExplanationReadDraft, AiAutomationExplanationStartDraft } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
 import { BusinessFailureReadAuthority } from '../business-events/business-failure-read.authority';
 import type { BusinessFailureResourcePorts } from '../business-events/prisma-business-failure-outbox';

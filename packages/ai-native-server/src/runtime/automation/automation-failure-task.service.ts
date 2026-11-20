@@ -4,7 +4,7 @@ import type { Prisma, PrismaClient, AiAutomationInput } from '@prisma/client';
 import { z } from 'zod';
 import { AiTaskCreationRepository } from '../ai-task-creation.repository';
 import { AutomationError, PrismaAutomationAuthority } from './prisma-automation.authority';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 const eventCommand = z.object({ eventId: z.string().uuid() }).strict();
 const inputCommand = z.object({ inputRef: z.string().uuid() }).strict();

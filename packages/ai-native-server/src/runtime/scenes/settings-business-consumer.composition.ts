@@ -6,7 +6,7 @@ import { ApprovedSettingsTaskAuthority, type ApprovedSettingsApplicationDependen
 import { settingsContract, ApprovedSettingsApplicationUnknownError } from '../approval-execution/approved-settings-contracts';
 import type { composeTaskSettingsHost } from '../runner/settings-task-host.composition';
 import { AiTaskRepositoryError } from '../ai-task.repository';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { ApprovedSettingsResultUnknownError } from '../rental-adapters/approved-settings-change.ports';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);

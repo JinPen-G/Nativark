@@ -5,7 +5,7 @@ import type { AiTaskCredentialSource } from './task-current-action.authority';
 import { isAiStepExecutionContext } from './task-contract-validation';
 import { getRequestIdentity } from '@rental-os/platform-server/request-identity';
 import { hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 /** Current workspace identity and shared business-location projection only;
  * this grants neither task/resource access nor permission to execute. */

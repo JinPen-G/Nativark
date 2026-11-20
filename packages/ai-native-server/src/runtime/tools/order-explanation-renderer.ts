@@ -8,7 +8,7 @@ import { sealBusinessScenario } from './business-scenario-input';
 import { aiOrderFundingFactsSchema } from './order-funding-facts.service';
 import { aiOrderCalendarFactsSchema } from '../order-read-facts.service';
 import { aiOrderFrozenInspectionBasisSchema } from './order-inspection-facts.service';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 /** Deterministic display of authorized evidence, never a price/ledger calculator.
  * Model prose and customer descriptions cannot supply claims or success states.

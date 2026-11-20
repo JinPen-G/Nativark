@@ -6,7 +6,7 @@ import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { AiTaskConfirmationCheckpointSource } from '../ai-task-transition.repository';
 import type { composeControlledApprovedOrder } from '../approval-execution/controlled-approved-order.composition';
 import { aiTaskRunPlanSchema, aiTaskConfirmationPhaseVersion, type AiTaskPlanEvidenceAuthority, type AiConfirmationTool } from './prisma-task-run-evidence.repository';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u), shortId = id.max(36);
 const hash = z.string().regex(/^[a-f0-9]{64}$/u), revision = z.number().int().min(1).max(4294967294);

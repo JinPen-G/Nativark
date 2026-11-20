@@ -3,7 +3,7 @@
  * input/plan publication, policy seed or retry of an unknown action is exposed. */
 import { z } from 'zod';
 import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { ControlledApprovedOrderDependencies } from '../approval-execution/controlled-approved-order.composition';
 import { composePersistedTaskAuthorization } from '../task-authorization.composition';

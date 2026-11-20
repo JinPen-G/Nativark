@@ -4,7 +4,7 @@
 import type { Prisma } from '@prisma/client';
 import { modelUsageSchema } from './model-gateway.ports';
 import { isGatewayConfig } from './gateway-contract-validation';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 const terminal = ['SUCCEEDED', 'PARTIALLY_SUCCEEDED', 'FAILED', 'CANCELLED'] as const;
 export async function aiTaskHasUnresolvedEffects(tx: Prisma.TransactionClient, scopeId: string, taskId: string,
   owner: { tenantId: string | null; workspaceId: string | null }): Promise<boolean> {

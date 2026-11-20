@@ -37,7 +37,7 @@ import { isGatewayResult } from '../gateway-contract-validation';
 import type { GatewayCapacityPort } from '../gateway-capacity.ports';
 import type { ModelJsonTransport } from '../chat-completions.adapter';
 import { NATIVE_MODEL_PROTOCOLS } from '../native-model-protocols';
-import { requestFingerprint as hash } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 import { CategoryModelOriginalRepository } from './category-model-original.repository';
 import { CATEGORY_PROPOSAL_SCENE, CATEGORY_PROPOSAL_SCHEMA_HASH, composeCategoryPlatformGateway } from './category-platform-gateway.composition';
 import type { CategoryProposalMaterial, CategoryProposalModelPort, CategoryProposalReference } from './category-proposal.application';

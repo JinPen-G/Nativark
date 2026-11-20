@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { AI_PROPOSAL_DRAFT_VERSION, AI_TOOL_CODES, type AiExecutionContext, type AiExecutionScope, type AiProposalPayloadDraft, type AiApprovalBindingCheckDraft } from "@rental-os/shared";
-import { requestFingerprint } from "./rental-adapters/rental-idempotency.repository";
+import { requestFingerprint } from "@rental-os/platform-contracts/request-fingerprint";
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const revision = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);

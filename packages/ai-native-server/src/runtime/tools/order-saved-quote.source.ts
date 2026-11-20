@@ -3,7 +3,7 @@ import { NotFoundException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import type { RentalCoreService } from '../rental-adapters/rental-core.service';
 import type { AiOrderRouteContextAuthority } from '../order-route-context.authority';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import type { AiWorkspaceScope } from '@rental-os/shared';
 import type { RentalBusinessService } from '../rental-adapters/rental-business.service';
 import { getRequestIdentity } from '@rental-os/platform-server/request-identity';

@@ -6,7 +6,7 @@ import { AI_TASK_DRAFT_VERSION, AI_ERROR_CODES, isAiTaskInputSubmissionDraft, is
 import type { AiTaskEventRepository } from '../ai-task-event.repository';
 import type { PrismaTaskInputRepository } from '../task-input/prisma-task-input.repository';
 import type { AiTaskRecoverySnapshotSource } from './task-recovery-snapshot.ports';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError, type AiTaskRepository } from '../ai-task.repository';
 import { aiTaskRunPlanSchema } from './prisma-task-run-evidence.repository';
 import { AiTaskRunnerError, callAiTaskRunnerDependency, type AiTaskRunner, type AiTaskHeldPreparation } from './ai-task-runner.service';

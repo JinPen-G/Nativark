@@ -11,7 +11,7 @@ import { AiTaskRepositoryError } from './ai-task.repository';
 import { aiStepActionId } from './ai-step-registration.repository';
 import { aiTaskRunPlanSchema } from './runner/prisma-task-run-evidence.repository';
 import { readOriginalTaskModelProvenance } from './task-request/prisma-original-request.repository';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import type { WorkbenchModelControlOrigin } from './workbench-model-control.contract';
 import { readConversationQuoteWaitingResult } from './conversation-quote-result.reader';
 

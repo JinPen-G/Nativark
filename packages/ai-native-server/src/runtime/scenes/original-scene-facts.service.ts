@@ -5,7 +5,7 @@ import type { PrismaOriginalRequestRepository } from '../task-request/prisma-ori
 import { freezeOriginalInput, originalRequestReferenceSchema } from '../task-request/original-request.validation';
 import { originalIdentityHash } from '../task-request/original-request.authority';
 import { AiTaskRepositoryError } from '../ai-task.repository';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { aiCatalogReadInputSchema } from '../catalog-read-facts.service';
 import { aiOrderExtensionPreviewInputSchema } from '../tools/order-extension-preview.service';
 import { AI_ORDER_EXPLANATION_MATERIAL_V2_VERSION, AI_ORDER_EXPLANATION_SOURCE_FIELDS_V2 } from '@rental-os/shared';

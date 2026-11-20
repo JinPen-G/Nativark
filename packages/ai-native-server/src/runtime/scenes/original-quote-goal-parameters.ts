@@ -8,7 +8,7 @@ import { AI_TASK_INPUT_DRAFT_VERSION, AI_TASK_INPUT_QUOTE_ROW_TARGET_VERSION, va
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { isGatewayResult } from '../gateway-contract-validation';
 import { aiQuoteCandidateInputSchema } from '../tools/quote-candidate-preparation.service';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { parseQuoteGoalModelOutput } from './quote-goal-input';
 import { applyOriginalQuoteAnswers } from './original-quote-input';
 

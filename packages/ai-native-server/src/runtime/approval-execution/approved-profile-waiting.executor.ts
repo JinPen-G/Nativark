@@ -5,7 +5,7 @@ import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { AI_TOOL_DRAFT_VERSION, AI_PROPOSAL_DRAFT_VERSION } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import type { AiTaskRegisteredExecutor } from '../runner/prisma-task-measured-effects';
 import { taskExecutionPhaseStore } from '../runner/task-execution-phase.store';
 import { composeApprovedProfileApplication } from './approved-profile-application.composition';

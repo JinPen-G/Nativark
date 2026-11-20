@@ -5,7 +5,7 @@
 import { ConflictException, ForbiddenException } from '@nestjs/common';
 import type { Prisma, CustomerApprovedProfileOperation } from '@prisma/client';
 import { AI_TOOL_DRAFT_VERSION, type AiProposalPayloadDraft } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { fingerprintAiProposalDraft } from '../proposal-binding-draft';
 import { ApprovedProfileResultUnknownError, type ApprovedProfileBinding, type ApprovedProfileOperationReceipt,
   type ApprovedProfileParticipant } from '../profile/approved-profile-change.ports';

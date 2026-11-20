@@ -9,7 +9,7 @@ import { composeTaskCenterApproval, prepareTaskCenterApprovalPolicies, taskCente
   type TaskCenterApprovalDependencies } from './task-center-approval.composition';
 import { resolveTaskCenterBusinessTarget, readTaskCenterOrderSelection } from './task-center-business.reader';
 import { waitForTaskApplicationDependency } from './runner/prisma-task-application';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 type Request = { headers: { authorization?: unknown } };
 export interface TaskCenterContinuationDependencies {

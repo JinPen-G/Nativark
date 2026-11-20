@@ -4,7 +4,7 @@
 import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 import type { ApiAuthGuard } from './rental-adapters/api-auth.guard';
 import type { RentalCoreService } from './rental-adapters/rental-core.service';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import type { AiTaskCredentialSource } from './task-current-action.authority';
 import type { PersistedApprovedOrderPolicyDependencies } from './approval-execution/persisted-approved-order-policy.authority';

@@ -9,7 +9,7 @@ import { AI_QUOTE_GOAL_DRAFT_VERSION, AI_QUOTE_GOAL_LIMITS, AI_TOOL_DRAFT_VERSIO
   type AiQuoteGoalModelOutputDraft, type AiQuoteGoalChoiceGroupDraft, type AiQuoteGoalSourceDraft } from '@rental-os/shared';
 import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma, PrismaClient } from '@prisma/client';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError, type AiTaskRepository } from '../ai-task.repository';
 import type { AiBusinessReadAuthority } from '../business-read-route.authority';
 import type { AiCatalogReadFactsService } from '../catalog-read-facts.service';

@@ -9,7 +9,7 @@ import { AI_CONTRACT_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION } from '@rental-os/sha
 import { AI_NATIVE_COMPONENT_SCHEMAS } from './contracts/ai-native-schemas';
 import type { ModelResponsePolicy, ProtocolToolCall } from './model-gateway.ports';
 import { modelEgressEvidence } from './model-egress.transport';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { encodeNativeToolResultBody, nativeToolResultInputHash } from './native-tool-result.encoding';
 import type { ResolvedNativeToolResult } from './model-input/native-tool-result.ports';
 import type { NativeAdapterResult } from './model-gateway.ports';

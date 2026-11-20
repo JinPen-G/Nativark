@@ -1,6 +1,6 @@
 import type { AiExecutionContext } from '@rental-os/shared';
 import type { BusinessContext } from '../rental-adapters/rental-business.service';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { AiOrderRouteContextAuthority } from '../order-route-context.authority';
 import { PrismaAiApprovalConsumptionRepository } from '../prisma-approval-consumption.repository';

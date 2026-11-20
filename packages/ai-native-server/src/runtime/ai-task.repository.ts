@@ -4,7 +4,7 @@ import type { Prisma, PrismaClient, AiActorKind, AiAudience } from "@prisma/clie
 import { z } from "zod";
 import { AI_CONTRACT_DRAFT_VERSION, AI_TASK_DRAFT_VERSION, type AiExecutionContext } from "@rental-os/shared";
 import { aiPersistenceScopeColumns } from "./persistence-scope";
-import { requestFingerprint } from "./rental-adapters/rental-idempotency.repository";
+import { requestFingerprint } from "@rental-os/platform-contracts/request-fingerprint";
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const revision = z.number().int().min(1).max(4294967294);

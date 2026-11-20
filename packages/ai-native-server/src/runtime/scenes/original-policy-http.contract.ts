@@ -7,7 +7,7 @@ import { AI_ORIGINAL_POLICY_HTTP_CONTRACTS, AI_ORIGINAL_POLICY_HTTP_SCHEMAS, AI_
   type AiOriginalPolicyHttpRequestsDraft, type AiOriginalPolicyHttpResponsesDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { AiOriginalRequestResultUnknownError } from '../task-request/prisma-original-request.repository';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 type Action = keyof typeof AI_ORIGINAL_POLICY_HTTP_CONTRACTS;
 const ajv = new Ajv({ strict: true, coerceTypes: false, useDefaults: false, removeAdditional: false });

@@ -12,7 +12,7 @@ import type { AiScopeRepository } from '../ai-scope.repository';
 import { gatewayBudgetPrincipal } from '../budget/gateway-budget-principal';
 import { isGatewayConfig, isGatewayOrderExplainRequest } from '../gateway-contract-validation';
 import { ModelGatewayError, type GatewayContext, type ProtocolToolCall } from '../model-gateway.ports';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { nativeOrderToolCallSchema, type NativeToolCallBinding, type NativeToolCallBindingReader } from './native-tool-result.ports';
 
 const id = z.string().min(1).max(191);

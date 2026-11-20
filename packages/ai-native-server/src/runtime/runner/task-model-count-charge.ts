@@ -1,4 +1,4 @@
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskExecutionBudgetError, type AiTaskExecutionBudgetPort, type AiTaskExecutionLease } from '../task-execution-budget.ports';
 
 /** A second real request inside one model step. The original invocation stays

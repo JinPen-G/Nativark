@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { AiInspectionRecognitionInput, AiInspectionTarget } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { InspectionActionAuthority } from './inspection-action.authority';
 import { InspectionDraftService } from './inspection-draft.service';
 import { InspectionTemplateService } from './inspection-template.service';

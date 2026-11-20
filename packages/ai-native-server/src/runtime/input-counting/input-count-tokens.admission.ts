@@ -14,7 +14,7 @@ import type { AiScopeRepository } from '../ai-scope.repository';
 import { aiTaskAccessFromContext } from '../ai-task.repository';
 import { isGatewayConfig } from '../gateway-contract-validation';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { composePersistedTaskAuthorization, type PersistedTaskAuthorizationDependencies } from '../task-authorization.composition';
 import { PrismaTaskBudgetAuthorizationSource } from '../budget/prisma-task-budget-authorization.source';
 import { PrismaGatewayInvocationBindings } from '../budget/prisma-gateway-invocation-bindings';

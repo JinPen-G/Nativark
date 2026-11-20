@@ -5,7 +5,7 @@ import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
 import type { RentalCoreService } from '../rental-adapters/rental-core.service';
 import type { RentalBusinessService } from '../rental-adapters/rental-business.service';
 import type { RentalWorkspaceReportRepository } from '@rental-os/rental-core/mysql-reports';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiCatalogReadFactsService, aiCatalogReadInputSchema } from '../catalog-read-facts.service';
 import { AiAvailabilityReadFactsService, aiAvailabilityReadInputSchema } from '../availability-read-facts.service';
 import { AiOrderReadFactsService } from '../order-read-facts.service';

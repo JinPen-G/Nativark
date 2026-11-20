@@ -16,7 +16,7 @@ import { GatewayDeadline } from '../gateway-deadline';
 import { gatewayInputBoundEvidenceSchema } from '../budget/gateway-pricing-evidence';
 import type { AiScopeRepository } from '../ai-scope.repository';
 import { isGatewayConfig } from '../gateway-contract-validation';
-import { requestFingerprint as hash } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 import { PrismaGatewayInvocationBindings } from '../budget/prisma-gateway-invocation-bindings';
 import { GatewayInputBoundNotFoundError, PrismaGatewayPricingRecords, gatewayPricingInvocationSelect } from '../budget/prisma-gateway-pricing-records';
 import { AiTaskExecutionBudgetError, type AiTaskExecutionBudgetPort, type AiTaskExecutionChargeRequest } from '../task-execution-budget.ports';

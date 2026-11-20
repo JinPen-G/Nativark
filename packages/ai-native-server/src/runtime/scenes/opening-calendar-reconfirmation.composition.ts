@@ -6,7 +6,7 @@
  * are rechecked; new Task policies remain the original runtime's responsibility. */
 import { z } from 'zod';
 import { AI_SCENE_REQUEST_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { getRequestIdentity } from '@rental-os/platform-server/request-identity';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { AiTaskRunnerError } from '../runner/ai-task-runner.service';

@@ -11,7 +11,7 @@ import { platformCreditScene } from './platform-credit-policy';
 import { assertBudgetPolicyBinding } from './budget-policy-binding';
 import { assertBudgetSettingsPermit, validateBudgetSettings } from './budget-settings';
 import { assertTaskMoneyLimit } from './task-money-limit';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
 import type { BudgetSettingsOperation } from './budget.ports';
 import { checkedSettingsOperation, budgetSettingsReceiptSchema, settingsOperationId,

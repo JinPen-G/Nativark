@@ -17,7 +17,7 @@ import { PrismaTaskInputRepository } from './task-input/prisma-task-input.reposi
 import { PrismaTaskConfirmationHistoryReader } from './runner/prisma-task-confirmation-history.reader';
 import { aiTaskHasUnresolvedEffects } from './task-unresolved-effects';
 import { AI_RETENTION_POLICY, retentionDeadline } from './privacy/retention-policy';
-import { requestFingerprint as hash } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u), shortId = id.max(36);
 const revision = z.number().int().min(1).max(4294967294), digest = z.string().regex(/^[a-f0-9]{64}$/u);

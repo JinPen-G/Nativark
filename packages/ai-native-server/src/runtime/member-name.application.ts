@@ -13,7 +13,7 @@ import { AI_MEMBER_NAME_HTTP, AI_MEMBER_NAME_VERSION, aiMemberNameAvailabilityIn
   type AiMemberNameLocator, type AiMemberNameResponse } from '@rental-os/shared';
 import type { MembershipService } from '@rental-os/rental-core/mysql-membership';
 import { ApprovedProfileRouteAuthority, type ApprovedProfileActor } from './profile/approved-profile-route.authority';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { composeMemberProfileChangeFlow } from './scenes/member-profile-change-flow';
 import { composeRequestBoundProfileWorkflow, type AiSceneHttpRequest } from './scenes/request-bound-scenes.application';
 import type { ApprovedProfileApplicationDependencies } from './approval-execution/approved-profile-task.authority';

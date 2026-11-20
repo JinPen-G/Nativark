@@ -6,7 +6,7 @@ import type { PrismaClient } from '@prisma/client';
 import { aiBookingMaterialSchema, type AiBookingMaterial } from '@rental-os/shared';
 import type { ClientRequestContext } from '@rental-os/rental-core/client-context';
 import type { composeAiClientScenes } from '../client-scene.composition';
-import { requestFingerprint as hash } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiClientPolicyAuthority, type AiClientTaskDependencies } from './client-task.authority';
 import { AiClientEntryError } from './client-entry-action';
 import { PrismaClientSceneMaterialRepository, type AiClientMaterialDb, type AiClientMaterialScope } from './prisma-client-scene-material.repository';

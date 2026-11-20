@@ -16,7 +16,7 @@ import type { AiOrderRouteCredentialSource } from '../order-route-context.author
 import { getRequestIdentity, runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
 import type { SubscriptionService } from '@rental-os/platform-server/subscription';
 import { BudgetError } from '../budget/budget.ports';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError, type AiTaskRepositoryAuthority } from '../ai-task.repository';
 import { AiScopeResolutionError } from '../ai-scope.repository';
 import { ModelGatewayError } from '../model-gateway.ports';

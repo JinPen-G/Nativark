@@ -3,7 +3,7 @@
  * mutations. No controller, policy mutation, generated action or implicit retry. */
 import { z } from 'zod';
 import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { composeApprovedProfileApplication } from '../approval-execution/approved-profile-application.composition';
 import { composeProfileTaskCreation } from '../approval-execution/profile-task-creation.composition';
 import { ApprovedProfileTaskAuthority, profileDenied, profileConflict, profileUnavailable,

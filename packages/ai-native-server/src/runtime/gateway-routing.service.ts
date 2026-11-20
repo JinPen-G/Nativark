@@ -7,7 +7,7 @@ import type { ProviderRouterService } from './provider-router.service';
 import type { TenantModelConfigService } from './tenant-model-config.service';
 import { ModelGatewayError, type WorkspaceGatewayContext } from './model-gateway.ports';
 import { capabilityNameSchema } from './capability-verification';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 const id = z.string().min(1).max(128).regex(/^[\w.:-]+$/u);
 const contextSchema = z.object({ tenantId: id, workspaceId: id, actorId: id }).strict();

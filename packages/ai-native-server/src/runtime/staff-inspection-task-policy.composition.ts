@@ -14,7 +14,7 @@ import { freezeOriginalInput } from './task-request/original-request.validation'
 import { InspectionActionAuthority } from './inspection-assist/inspection-action.authority';
 import { InspectionRecognitionTaskApplication, type InspectionRecognitionTaskDependencies } from './inspection-assist/inspection-recognition-task.application';
 import { inspectionId, inspectionTargetSchema } from './inspection-assist/inspection-assist.validation';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 // These policies only enable the existing candidate runtime, never inspection
 // submission, approval or an arbitrary business/model tool.

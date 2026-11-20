@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import type { Prisma } from '@prisma/client';
 import { AI_CONTRACT_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, AI_SCENE_REQUEST_DRAFT_VERSION } from '@rental-os/shared';
 import type { RentalCoreService } from '../rental-adapters/rental-core.service';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { isGatewayOrderExplainRequest, isGatewayResult } from '../gateway-contract-validation';
 import { composePersistedTaskModelInput } from './persisted-task-model-input.composition';

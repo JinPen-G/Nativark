@@ -3,7 +3,7 @@ import type { AiExecutionContext } from '@rental-os/shared';
 import type { AiProfileScope, AiProfileServiceMode } from './provider-profile.ports';
 import { aiPersistenceScopeColumns } from './persistence-scope';
 import { isAiStepExecutionContext } from './task-contract-validation';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 export class AiScopeResolutionError extends Error {
   constructor(readonly code: 'AI_ACCESS_DENIED' | 'AI_SCOPE_CHANGED' | 'AI_RESOURCE_UNAVAILABLE' | 'AI_STORAGE_UNAVAILABLE') { super(code); }

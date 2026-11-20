@@ -4,7 +4,7 @@ import type { AiApprovalConsumptionRecord, AiApprovalConsumptionRepository } fro
 import { z } from 'zod';
 import { aiTaskAccessFromContext } from './ai-task.repository';
 import { isAiStepExecutionContext } from './task-contract-validation';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import type { ApprovedOrderBinding, ApprovedOrderTransaction } from './rental-adapters/approved-order-transaction.ports';
 import type { AiApprovedOrderInput, AiApprovedOrderAuthority } from './approval-execution/approved-order.ports';
 import { bindAiBodyStorageTransaction } from './privacy/prisma-ai-body-storage';

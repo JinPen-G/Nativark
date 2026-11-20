@@ -8,7 +8,7 @@ import type { AuthService } from '../rental-adapters/auth.service';
 import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
 import type { RentalCoreService } from '../rental-adapters/rental-core.service';
 import type { OperationLogService } from '../rental-adapters/operation-log.service';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
 import { TenantModelConfigurationAuthority } from '../tenant-model-config.authority';

@@ -6,7 +6,7 @@ import { z } from 'zod';
 import type { PrismaClient } from '@prisma/client';
 import { AI_TOOL_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
 import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError, type AiTaskRepositoryOperation, aiTaskAccessFromContext } from '../ai-task.repository';
 import { aiStepActionId } from '../ai-step-registration.repository';
 import { AiStepRegistrationRepository } from '../ai-step-registration.repository';

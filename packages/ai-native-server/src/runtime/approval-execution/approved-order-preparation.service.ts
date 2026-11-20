@@ -5,7 +5,7 @@ import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { AI_PROPOSAL_DRAFT_VERSION, type AiExecutionContext, type AiProposalPayloadDraft, type CreateRentalOrderRequest, type RentalQuoteSnapshotV1 } from '@rental-os/shared';
 import { getRequestIdentity } from '@rental-os/platform-server/request-identity';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiProposalRepository, AiProposalRepositoryError } from '../ai-proposal-repository';
 import { AiTaskRepositoryError, aiTaskAccessFromContext } from '../ai-task.repository';
 import type { PersistedApprovedOrderDependencies, ApprovedOrderMerchantDelegationSnapshot } from './approved-order-composition.ports';

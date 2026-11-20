@@ -7,7 +7,7 @@ import type { AiOrderRouteCredentialSource } from '../order-route-context.author
 import { PlatformModelConfigurationAuthority } from '../platform-model-config.authority';
 import { AiScopeRepository } from '../ai-scope.repository';
 import { isGatewayConfig } from '../gateway-contract-validation';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { BudgetService } from './budget.service';
 import { PrismaBudgetRepository } from './prisma-budget.repository';
 import { BudgetError, type BudgetAuthority, type BudgetPolicyKey } from './budget.ports';

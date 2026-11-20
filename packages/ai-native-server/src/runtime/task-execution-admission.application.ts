@@ -6,7 +6,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import type { PrismaClient } from '@prisma/client';
 import { AI_TASK_DRAFT_VERSION } from '@rental-os/shared';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from './ai-task.repository';
 import { originalRequestReferenceSchema } from './task-request/original-request.validation';
 import type { PrismaOriginalRequestRepository } from './task-request/prisma-original-request.repository';

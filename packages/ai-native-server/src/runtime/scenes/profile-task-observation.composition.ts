@@ -4,7 +4,7 @@
  * Separate sources are generation-checked, not claimed to be one transaction. */
 import { z } from 'zod';
 import { AI_TOOL_DRAFT_VERSION, type AiTaskRecoverySnapshot, type AiTaskSnapshotDraft } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { composePersistedTaskAuthorization } from '../task-authorization.composition';
 import { AiTaskEventRepository } from '../ai-task-event.repository';
 import { PrismaTaskRecoverySnapshotRepository } from '../runner/prisma-task-recovery-snapshot.repository';

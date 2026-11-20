@@ -10,7 +10,7 @@ import { z } from 'zod';
 import { aiTaskAccessFromContext, AiTaskRepositoryError, type AiTaskRepositoryAuthority } from '../ai-task.repository';
 import type { TaskBudgetUsageReader } from '../budget/task-budget-usage.reader';
 import { BudgetError } from '../budget/budget.ports';
-import { requestFingerprint as hash } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 import { gatewayBudgetDenialLogId, gatewayDeliveryLogId, gatewayDeliveryTimingSchema } from '../prisma-task-gateway-audit';
 import { CLIENT_VISIBLE_LOG_ACTION, parseClientVisibleLog } from './task-visible-observation.service';
 import { PrismaTaskTakeoverRepository } from '../runner/prisma-task-takeover.repository';

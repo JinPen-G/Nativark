@@ -14,7 +14,7 @@ import { PrismaTaskOrderStepAuthority } from './prisma-task-order-step.authority
 import { PrismaTaskExecutionScopeAuthority } from './prisma-task-execution-scope.authority';
 import { PrismaTaskConfirmationCheckpointSource } from './prisma-task-confirmation-checkpoint.source';
 import { aiTaskRunnerLimitsSchema, aiTaskRunPlanSchema, PrismaTaskRunEvidenceRepository } from './prisma-task-run-evidence.repository';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { PrismaTaskApplication, type AiTaskApplicationHost } from './prisma-task-application';
 import { AiTaskRunnerError, callAiTaskRunnerDependency, snapshotAiTaskRunnerRecoveryLease,
   withAiTaskHeldPreparationDefinition, type AiTaskHeldPreparation } from './ai-task-runner.service';

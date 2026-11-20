@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { AI_BOOKING_DRAFT_CONTRACT_VERSION, AI_BOOKING_OPERATION_OBSERVATION_VERSION,
   type AiBookingDraft, type AiBookingHandoff, type AiBookingMaterial, type AiBookingOperationObservationDraft } from '@rental-os/shared';
 import type { AiCustomerEntrySurface, AiEntryActionDraft } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { freezeOriginalInput } from '../task-request/original-request.validation';
 import type { AiClientMaterialScope, AiClientSceneMaterial } from './prisma-client-scene-material.repository';
 import { PrismaClientBookingRepository, type ClientBookingRow } from './prisma-client-booking.repository';

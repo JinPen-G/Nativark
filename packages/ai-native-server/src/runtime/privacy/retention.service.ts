@@ -25,7 +25,7 @@ import { eraseExpiredInspectionDraftBodies } from './retention-inspection-draft'
 import { eraseExpiredNotificationDraftBodies, eraseNotificationDraftSnapshotCopies, type NotificationDraftRetentionCipher } from './retention-notification-draft';
 import { PrismaClientBookingRepository, type ClientBookingOperation } from '../scenes/prisma-client-booking.repository';
 import { PrismaClientSceneMaterialRepository } from '../scenes/prisma-client-scene-material.repository';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { clientMaterialSnapshotHash } from '../scenes/client-entry-action';
 
 export const aiRetentionCleanupSchema = z.object({ kind: z.enum(retentionKinds),

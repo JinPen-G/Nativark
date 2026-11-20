@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { AiQuoteSelectedOrderDraft, CreateRentalOrderRequest, EnterpriseOrderDelegationReference } from '@rental-os/shared';
 import { getRequestIdentity } from '@rental-os/platform-server/request-identity';
 import type { EnterpriseMerchantDelegationService, EnterpriseMerchantDelegationActorAuth } from '@rental-os/rental-core/mysql-enterprise-merchant-delegation';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { ApprovedOrderMerchantDelegationSnapshot } from './approved-order-composition.ports';
 

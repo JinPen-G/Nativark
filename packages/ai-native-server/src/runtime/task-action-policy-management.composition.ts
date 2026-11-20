@@ -2,7 +2,7 @@ import { hasEffectivePermission } from '@rental-os/platform-server/permission-ma
 import type { PrismaClient } from '@prisma/client';
 import type { ApiAuthGuard } from './rental-adapters/api-auth.guard';
 import type { AuthService } from './rental-adapters/auth.service';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiScopeRepository } from './ai-scope.repository';
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from './ai-task.repository';
 import { AiTaskCurrentIdentityAuthority } from './task-current-identity.authority';

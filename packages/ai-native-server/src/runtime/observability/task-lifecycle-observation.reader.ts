@@ -16,7 +16,7 @@ import { PrismaTaskTakeoverRepository } from '../runner/prisma-task-takeover.rep
 import { aiTaskRunPlanSchema, aiTaskConfirmationPhasePayloadSchema } from '../runner/prisma-task-run-evidence.repository';
 import { aiStepActionId } from '../ai-step-registration.repository';
 import { evaluateAiTaskTransitionDraft } from '../task-transition-draft';
-import { requestFingerprint as hash } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 import { isGatewayConfig } from '../gateway-contract-validation';
 import { modelUsageSchema } from '../model-gateway.ports';
 import { isTaskModelCountCharge, taskStepChargesValid } from '../runner/task-model-count-charge';

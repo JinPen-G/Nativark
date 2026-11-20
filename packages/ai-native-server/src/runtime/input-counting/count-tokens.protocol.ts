@@ -12,7 +12,7 @@ import { ChatProtocolPolicy, type ModelJsonTransport } from '../chat-completions
 import { normalizeTenantModelBaseUrl } from '../tenant-model-config.service';
 import { ModelGatewayError, modelProtocolRequestSchema, type ModelProtocolRequest } from '../model-gateway.ports';
 import { MODEL_REQUEST_BYTES } from '../model-response-limits';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { encodeNativeToolResultBody, nativeMessagesCountBody } from '../native-tool-result.encoding';
 import { resolvedNativeToolResultSchema, type ResolvedNativeToolResult } from '../model-input/native-tool-result.ports';
 

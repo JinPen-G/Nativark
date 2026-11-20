@@ -11,7 +11,7 @@ import { parseTaskModelInput, taskModelFingerprint, TASK_TEXT_MODEL_TOOL, TASK_I
 import { readOriginalSceneEnvelope } from '../scenes/original-scene-knowledge';
 import { humanKnowledgePreparedInputSchema } from '../knowledge/human-knowledge-input.service';
 import { fingerprint } from '../knowledge/knowledge-validation';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
 import { AI_RETENTION_POLICY } from './retention-policy';
 

@@ -20,7 +20,7 @@ import { AiTaskRepositoryError } from './ai-task.repository';
 import { AiTaskRunnerError } from './runner/ai-task-runner.service';
 import { waitForTaskApplicationDependency } from './runner/prisma-task-application';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const changed = () => new AiTaskRepositoryError('AI_REVISION_CONFLICT');

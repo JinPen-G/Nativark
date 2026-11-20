@@ -5,7 +5,7 @@ import { AI_QUOTE_GOAL_DRAFT_VERSION, AI_QUOTE_GOAL_LIMITS, AI_QUOTE_GOAL_SCHEMA
   validateAiQuoteGoalInputDraft, validateAiQuoteGoalSourceDraft, validateAiQuoteGoalModelOutputDraft,
   type AiQuoteGoalInputDraft, type AiQuoteGoalSourceDraft, type AiQuoteGoalModelOutputDraft,
   type AiTaskInputAnswerDraft } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { taskModelMaterialSchema, type parseTaskModelInput } from '../model-input/task-model-input';
 import type { PrismaOriginalRequestRepository } from '../task-request/prisma-original-request.repository';

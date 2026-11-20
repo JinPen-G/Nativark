@@ -11,7 +11,7 @@ import type { PrismaQuoteSelectionRepository } from './task-request/prisma-quote
 import type { composeHumanQuoteOrder, composeSelectedQuoteTaskApplication } from './scenes/human-quote-order.composition';
 import { parseQuoteSelectionProof } from './task-request/quote-selection.validation';
 import type { composeAiSettingsBusinessConsumer } from './scenes/settings-business-consumer.composition';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { BudgetError } from './budget/budget.ports';
 
 type OriginalScenes = ReturnType<typeof composeAiOriginalScenes>;

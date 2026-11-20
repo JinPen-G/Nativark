@@ -9,7 +9,7 @@ import { checkedAccountingCall, type PrismaGatewayAccountingFacts } from './budg
 import { isGatewayConfig } from './gateway-contract-validation';
 import { ModelGatewayError } from './model-gateway.ports';
 import type { GatewayAuditPreparation, GatewayBudgetDenialObservation, UnifiedGatewayAudit } from './unified-ai-gateway.ports';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const contextSchema = z.object({ actorId: id }).strict();

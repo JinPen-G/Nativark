@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { getRequestIdentity, runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
-import { requestFingerprint as hash } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { AiScopeResolutionError } from '../ai-scope.repository';

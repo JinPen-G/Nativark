@@ -25,7 +25,7 @@ import { aiTaskRunnerLimitsSchema } from './runner/prisma-task-run-evidence.repo
 import { waitForTaskApplicationDependency } from './runner/prisma-task-application';
 import { AiTaskRunnerError } from './runner/ai-task-runner.service';
 import { AiTaskRepositoryError } from './ai-task.repository';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
 import { createRuleOriginalRequests, createRuleOriginalReadRequests } from './task-rule-original-source.composition';
 import { ruleSourceEntryMarker, ruleSourceEntryOperationId } from './task-rule-source-entry.composition';

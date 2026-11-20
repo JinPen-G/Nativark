@@ -3,7 +3,7 @@ import { composeAuthorizedPlatformCapabilityProbe, type AuthorizedPlatformCapabi
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { randomUUID } from 'node:crypto';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { waitForTaskApplicationDependency } from '../runner/prisma-task-application';
 import { TextProbeOriginalRequestUnknownError } from '../prisma-text-probe-original-request.repository';
 

@@ -3,7 +3,7 @@ import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import { hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { AI_SCENE_REQUEST_DRAFT_VERSION, AI_SCENE_CODES, type AiSceneCode, type AiSceneTaskReceiptDraft, type AiSceneRequestReceiptDraft, type AiSceneRequestBody } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from '../ai-task.repository';
 import { AiTaskCreationRepository, type AiTaskCreationAuthority } from '../ai-task-creation.repository';
 import { originalIdentityHash, type AiOriginalRequestAuthority, type AiOriginalRequestNativeAuthority, type AiOriginalRequestAccess, type AiOriginalRequestCreationAccess } from './original-request.authority';

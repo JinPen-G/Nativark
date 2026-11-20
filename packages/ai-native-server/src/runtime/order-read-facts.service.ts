@@ -4,7 +4,7 @@ import type { RentalCoreService } from './rental-adapters/rental-core.service';
 import { AiOrderRouteContextAuthority } from './order-route-context.authority';
 import type { AiExecutionContext } from '@rental-os/shared';
 import { assertAiReadContextBinding } from './tools/read-context-binding';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const time = z.string().max(40).datetime({ offset: true });

@@ -13,7 +13,7 @@ import { composeApprovedSettingsApplication } from '../approval-execution/approv
 import { composeApprovedSettingsWaiting } from '../approval-execution/approved-settings-waiting.executor';
 import { ApprovedSettingsResultUnknownError } from '../rental-adapters/approved-settings-change.ports';
 import { AI_APPROVED_SETTINGS_DRAFT_VERSION, AI_APPROVED_SETTINGS_TOOL_CODE, AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import type { AiTaskCredentialSource } from '../task-current-action.authority';
 import { composeRequestBoundSettingsTaskCreation, type AiSceneHttpRequest,
   type AiSceneRequestOptions } from './request-bound-scenes.application';

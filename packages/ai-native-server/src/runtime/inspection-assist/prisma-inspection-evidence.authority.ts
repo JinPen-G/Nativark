@@ -6,7 +6,7 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import type { AiInspectionSourceDraft } from '@rental-os/shared';
 import type { AiInspectionActorScope, AiInspectionEvidenceRef, AiInspectionTarget } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { InspectionActionAuthority } from './inspection-action.authority';
 import { InspectionTemplateService } from './inspection-template.service';
 import { InspectionAssistError, inspectionId, inspectionTargetSchema, parseInspectionInput } from './inspection-assist.validation';

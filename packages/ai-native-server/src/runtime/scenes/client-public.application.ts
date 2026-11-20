@@ -10,7 +10,7 @@ import {
   aiClientPublicContinuationReadRequestSchema, AI_CLIENT_PUBLIC_HTTP,
 } from '@rental-os/shared';
 import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
-import { requestFingerprint as hash } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { composeRequestBoundClientApplication, type AiClientRequestDependencies, type AiClientApplicationRequest } from './client-request.application';
 import { ClientPublicContinuityService } from './client-public-continuity.service';

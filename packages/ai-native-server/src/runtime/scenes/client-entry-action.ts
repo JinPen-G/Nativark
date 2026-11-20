@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { AI_ENTRY_ACTION_CONTRACT_VERSION, aiEntryActionSchema, type AiEntryActionDraft,
   type AiEntryFailureDraft, type AiCustomerEntrySurface } from '@rental-os/shared';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import type { AiClientSceneMaterial } from './prisma-client-scene-material.repository';
 
 export const entryId = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);

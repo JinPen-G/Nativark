@@ -11,7 +11,7 @@ import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, AI_TEXT_MODEL_STEP_CODE,
 import type { AuthService } from '../rental-adapters/auth.service';
 import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepository, AiTaskRepositoryError } from '../ai-task.repository';
 import { AiTaskResultRepository } from '../runner/ai-task-result.repository';
 import { readTaskModelRunOrigin } from '../task-input/prisma-task-input.repository';

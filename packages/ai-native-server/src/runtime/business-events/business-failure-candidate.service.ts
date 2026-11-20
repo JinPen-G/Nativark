@@ -9,7 +9,7 @@ import { AI_EVENTS_DRAFT_VERSION, type AiBusinessEventDraft, type AiAutomationCa
   type AiAutomationPendingBatchObservationDraft } from '@rental-os/shared';
 import { BusinessFailureReadAuthority, type FailureSource } from './business-failure-read.authority';
 import { BusinessFailureError, isResourceFailureEvent, type FailureScope } from './prisma-business-failure-outbox';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { PendingCandidateBatchRepository, type PendingCandidateBatchDb, type PendingCandidateBatchJournal,
   type PendingCandidateBatchReference, type PendingCandidateEvent } from './pending-candidate-batch.repository';
 

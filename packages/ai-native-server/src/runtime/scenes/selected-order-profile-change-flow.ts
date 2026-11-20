@@ -11,7 +11,7 @@ import { AiTaskRepositoryError } from '../ai-task.repository';
 import { AiTaskRunnerError } from '../runner/ai-task-runner.service';
 import { ApprovedProfileRouteAuthority, type ApprovedProfileCredentials } from '../profile/approved-profile-route.authority';
 import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { requestRentalOrderVisibilityWhere } from '../rental-adapters/rental-core-fact.repository';
 import { AiOrderRouteContextAuthority } from '../order-route-context.authority';
 import { freezeOriginalInput } from '../task-request/original-request.validation';

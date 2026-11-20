@@ -7,7 +7,7 @@ import type { Prisma } from '@prisma/client';
 import type { AiExecutionContext } from '@rental-os/shared';
 import type { AiOpeningSectionProposalService } from '../tools/opening-section-proposal.service';
 import type { RentalBusinessService } from '../rental-adapters/rental-business.service';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiBusinessReadRouteAuthority } from '../business-read-route.authority';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { originalRequestReferenceSchema, freezeOriginalInput } from '../task-request/original-request.validation';

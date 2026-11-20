@@ -2,7 +2,7 @@ import type { PrismaClient } from '@prisma/client';
 import type { AiExecutionContext } from '@rental-os/shared';
 import type { AiScopeRepository } from '../ai-scope.repository';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { PrismaGatewayInvocationBindings } from './prisma-gateway-invocation-bindings';
 import { BudgetError, type BudgetGrant, type BudgetQuotePort, type BudgetRecord, type BudgetReserveCommand } from './budget.ports';
 import type { GatewayActualUsagePricing } from './prisma-gateway-accounting-facts';

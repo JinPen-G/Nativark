@@ -7,7 +7,7 @@ import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { performance } from 'node:perf_hooks';
 import { z } from 'zod';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskExecutionBudgetError, type AiTaskExecutionBudgetPort, type AiTaskExecutionLease,
   type AiTaskExecutionPolicy, type AiTaskExecutionSettlementRequest } from '../task-execution-budget.ports';
 import { aiTaskRunPlanSchema, type AiTaskPlanEvidenceAuthority, type PrismaTaskRunEvidenceRepository } from './prisma-task-run-evidence.repository';

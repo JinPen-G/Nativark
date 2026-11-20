@@ -25,7 +25,7 @@ import type { ApiAuthGuard } from './rental-adapters/api-auth.guard';
 import { composeAuthorizedTextProbeTaskProducer } from './prisma-text-probe-original-request.repository';
 import { composeTaskActionPolicyManagement } from './task-action-policy-management.composition';
 import type { AiTaskActionPolicyMutation } from './prisma-task-action-policy.repository';
-import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { withAiTaskHeldPreparationDefinition } from './runner/ai-task-runner.service';
 import { composePersistedTaskAccountingRecovery } from './task-model-gateway.composition';
 import { presentTaskBudgetUsageRecord } from './budget/task-budget-usage.reader';

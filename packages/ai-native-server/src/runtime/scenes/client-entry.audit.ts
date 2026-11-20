@@ -8,7 +8,7 @@ import { AI_ENTRY_ACTION_CONTRACT_VERSION } from '@rental-os/shared';
 import type { ClientRequestContext } from '@rental-os/rental-core/client-context';
 import { AiClientEntryError } from './client-entry-action';
 import { originalClientMaterialScope } from './prisma-client-scene-material.repository';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 const identifier = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u;
 const refusalCodes = new Set(['AI_INVALID_INPUT', 'AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE',

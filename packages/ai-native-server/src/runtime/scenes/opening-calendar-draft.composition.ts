@@ -8,7 +8,7 @@ import type { Prisma } from '@prisma/client';
 import type { PreviewRentalCalendarRangeOverrideRequest, ApplyRentalCalendarRangeOverrideRequest, AiExecutionContext } from '@rental-os/shared';
 import { BoundCalendarDraftService, BoundCalendarDraftUnknownError, boundCalendarDraftCommandSchema } from '@rental-os/rental-core/bound-calendar-draft';
 import type { RentalBusinessService } from '../rental-adapters/rental-business.service';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiBusinessReadRouteAuthority } from '../business-read-route.authority';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { originalRequestReferenceSchema, freezeOriginalInput } from '../task-request/original-request.validation';

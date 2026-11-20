@@ -3,7 +3,7 @@
  * or dispatch grant. Original recovery never inserts an input or Step. */
 import { hasEffectivePermission } from '@rental-os/platform-server/permission-match';
 import type { Prisma } from '@prisma/client';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { ApprovedProfileRouteAuthority } from '../profile/approved-profile-route.authority';
 import type { ApprovedProfileOperationReceipt } from '../profile/approved-profile-change.ports';
 import type { AiStepRegistrationCommand, AiStepRegistrationAuthority } from '../ai-step-registration.repository';

@@ -29,7 +29,7 @@ import { gatewayRoutingBinding, type GatewayRoutingResolution } from '../gateway
 import type { AiProfileCapability } from '../provider-profile.ports';
 import type { PublicGatewayRuntime } from '../public-ai-gateway.service';
 import type { GatewayCapacityPort } from '../gateway-capacity.ports';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { modelEgressEvidence } from '../model-egress.transport';
 
 export const CATEGORY_PROPOSAL_SCENE = 'platform.category.propose';

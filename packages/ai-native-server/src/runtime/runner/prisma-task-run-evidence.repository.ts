@@ -7,7 +7,7 @@ import type { Prisma, PrismaClient, AiStepStatus, AiStep } from '@prisma/client'
 import { z } from 'zod';
 import { AI_TOOL_DRAFT_VERSION, AI_PROPOSAL_DRAFT_VERSION, type AiGatewayConfigReferenceDraft } from '@rental-os/shared';
 import { taskExecutionPhaseStore } from './task-execution-phase.store';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskExecutionBudgetError, type AiTaskExecutionEvidenceSource, type AiTaskExecutionSettlementRequest } from '../task-execution-budget.ports';
 import type { AiTaskExecutionScopeSource } from './prisma-task-execution-budget.repository';
 import type { AiTaskRunnerLease, AiTaskRunnerPlan, AiTaskRunnerTaskMetadata, AiTaskRunnerEffectResult, AiTaskRunnerObservedResult, AiTaskRunnerConfirmationContinuation } from './ai-task-runner.ports';

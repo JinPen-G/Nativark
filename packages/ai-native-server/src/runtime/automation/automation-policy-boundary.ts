@@ -8,7 +8,7 @@ import type { AiAutomationPolicy, AiAutomationSubject, Prisma } from '@prisma/cl
 import { z } from 'zod';
 import { AI_AUTOMATION_POLICY_HTTP_SCHEMAS, AI_EVENTS_DRAFT_SCHEMAS, AI_EVENTS_DRAFT_VERSION, AI_SCOPE_DRAFT_SCHEMAS,
   type AiAutomationPolicyConstraintsDraft, type AiAutomationPolicyDraft } from '@rental-os/shared';
-import { requestFingerprint as hash } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
 

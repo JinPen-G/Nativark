@@ -8,7 +8,7 @@ import type { GatewayAccountingCall } from '../gateway-accounting.ports';
 import { dispatchBindingSchema } from '../invocation-dispatch.service';
 import { isGatewayConfig } from '../gateway-contract-validation';
 import { modelUsageSchema, type ModelUsage } from '../model-gateway.ports';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { BudgetError, type BudgetRecord } from './budget.ports';
 import type { BudgetGatewayBindingSource } from './budget-gateway-adapter';
 import type { BudgetEvidenceBinding, PersistedBudgetEvidenceSource } from './budget-dependency-adapters';

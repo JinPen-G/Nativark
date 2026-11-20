@@ -5,7 +5,7 @@
  * model. A blocked preview is a Core decision, not failed/rolled-back execution. */
 import type { RentalCoreController } from '@rental-os/rental-core/http-core';
 import type { RentalCoreService } from '../rental-adapters/rental-core.service';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiOrderExtensionPreviewService, aiOrderExtensionPreviewInputSchema } from '../tools/order-extension-preview.service';
 import { AiOrderRouteContextAuthority } from '../order-route-context.authority';
 import { AiBusinessReadRouteAuthority } from '../business-read-route.authority';

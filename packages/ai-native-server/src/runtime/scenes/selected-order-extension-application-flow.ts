@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { RentalCoreService } from '../rental-adapters/rental-core.service';
 import type { RentalCoreController } from '@rental-os/rental-core/http-core';
 import type { RentalIdempotentActionService } from '../rental-adapters/rental-idempotent-action.service';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { rentalOrderDueAt } from '@rental-os/rental-core/carrier-shipment';
 import { aiOrderExtensionPreviewInputSchema } from '../tools/order-extension-preview.service';
 import { AiOrderRouteContextAuthority, type AiOrderRouteCredentialSource } from '../order-route-context.authority';

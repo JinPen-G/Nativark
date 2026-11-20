@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { AI_PROPOSAL_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, AI_TASK_RULE_DRAFT_FIELDS, type AiProposalPayloadDraft } from '@rental-os/shared';
 import type { PrismaClient } from '@prisma/client';
 import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
-import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { composePersistedTaskAuthorization, type PersistedTaskAuthorizationDependencies } from '../task-authorization.composition';
 import { AiTaskRepositoryError, aiTaskAccessFromContext } from '../ai-task.repository';
 import { AiStepRegistrationRepository, aiStepActionId, type AiStepRegistrationCommand } from '../ai-step-registration.repository';
