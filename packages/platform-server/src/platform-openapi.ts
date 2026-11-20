@@ -83,7 +83,8 @@ export const PLATFORM_OPENAPI_SCHEMAS = {
   "Platform.SaveUser": object({ id: string, tenantId: string, account: string, displayName: string, phone: string,
     organizationId: string, roleIds: strings, isPlatformAdmin: boolean, isSaasAdmin: { type: "boolean", enum: [false] }, isActive: boolean
   } satisfies Record<keyof SaveSystemUserRequest, Schema>, ["account", "displayName", "roleIds", "isActive"]),
-  "Platform.UserStatus": object({ isActive: boolean }, ["isActive"]),
+  "Platform.UserStatus": object({ isActive: boolean, tenantId: string }, ["isActive"]),
+  "Platform.ResetUserPasswordInput": object({ tenantId: string }),
   "Platform.ResetPassword": object({ userId: string, account: string, temporaryPassword: { ...string, readOnly: true }, message: string }, ["userId", "account", "temporaryPassword", "message"]),
   "Platform.Role": object({ id: string, tenantId: string, code: string, name: string, description: string, scope: string,
     fixedAllPermissions: boolean, enabledBusinessScopes: strings, isActive: boolean, permissions: strings, buttonPermissions: strings, dataScope: string
@@ -93,6 +94,7 @@ export const PLATFORM_OPENAPI_SCHEMAS = {
     scope: { type: "string", enum: ["operator", "car_shop", "store", "station"] }, enabledBusinessScopes: strings,
     permissions: strings, buttonPermissions: strings, dataScope: { type: "string", enum: ["all", "organization", "store", "own"] }, isActive: boolean
   } satisfies Record<keyof SaveSystemRoleRequest, Schema>, ["code", "name", "scope", "enabledBusinessScopes", "permissions", "isActive"]),
+  "Platform.RolePermissions": object({ permissions: strings, tenantId: string }),
   "Platform.Deleted": object({ id: string, deleted: { type: "boolean", enum: [true] } }, ["id", "deleted"]),
   "Platform.PermissionTree": { type: "array", items: object({ code: string, name: string, children: { type: "array",
     items: object({ code: string, name: string, description: string }, ["code", "name"]) } }, ["code", "name", "children"]) }
@@ -116,7 +118,9 @@ export function createPlatformOpenApi() {
         : item.access === "saas" ? "仅当前SaaS管理身份与对应权限。平台管理不会获得目标租户业务访问权；创建账号口令只在本响应返回，不记日志。"
         : item.access === "authenticated" ? "当前operator的原系统参数读取权限；由当前会话围栏复验。认证前内部读取使用独立只读接点。"
         : item.access === "self" ? "当前签名会话的本人范围；请求体和查询参数不能指定另一主体。" : "公共传输入口；登录保护及原令牌消费仍由对应服务执行。",
-      ...("request" in item ? { requestBody: { required: true, content: content(ref(item.request)) } } : {}),
+      ...("request" in item ? { requestBody: {
+        required: "requestRequired" in item ? item.requestRequired : true, content: content(ref(item.request))
+      } } : {}),
       parameters: "parameters" in item ? item.parameters : [
         ...item.path.split("/").filter(part => part.startsWith(":"))
           .map(part => ({ name: part.slice(1), in: "path", required: true, schema: string })),

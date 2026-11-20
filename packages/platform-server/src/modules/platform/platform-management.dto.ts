@@ -79,6 +79,16 @@ export class SavePlatformUserDto implements SaveSystemUserRequest {
 
 export class PlatformUserStatusDto implements Pick<SaveSystemUserRequest, "isActive"> {
   @IsBoolean() isActive!: boolean;
+  @IsOptional() @IsString() @IsNotEmpty() tenantId?: string;
+}
+
+export class PlatformUserPasswordResetDto {
+  @IsOptional() @IsString() @IsNotEmpty() tenantId?: string;
+}
+
+export class PlatformRolePermissionsDto {
+  @IsOptional() @IsArray() @IsString({ each: true }) permissions?: string[];
+  @IsOptional() @IsString() @IsNotEmpty() tenantId?: string;
 }
 
 export class SavePlatformSelfProfileDto implements SavePlatformSelfProfileRequest {

@@ -6,6 +6,7 @@
 
 | 入口 | 职责与直接消费者 |
 | --- | --- |
+| [HTTP文档贡献](src/http-openapi.ts)、[原操作](src/http-openapi-operations.ts)、[同源schema](src/http-openapi-schemas.ts) | `/http-openapi` 提供平台可组合的 Rental 机器契约、原组合兼容出口与明确字段/路由缺口 |
 | [商品与资产前端](admin/catalog/README.md)、[统一页面贡献](admin/index.tsx)、[请求与图片](admin/catalog/client.ts) | `/admin/catalog` 持有商品、资产、库存、照片与状态历史，七个窄出口提供页面、请求、上下文、图片、列表能力及纯术语；统一贡献组合九页，宿主提供当前身份、经营空间及原鉴权传输 |
 | [定价与营销前端](admin/commercial/README.md)、[七页声明](admin/commercial/pages.ts)、[请求与上下文](admin/commercial/client.ts) | `/admin/commercial` 提供定价组、价格版本/调价、优惠、券和服务容量；宿主提供同一会话与经营空间，表单和主操作复用公共呈现，旧地址和价格管理权限保持 |
 | [品类与业务规则前端](admin/governance/README.md)、[页面声明](admin/governance/pages.ts)、[请求与上下文](admin/governance/page-context.tsx) | `/admin/governance` 提供品类、规则、日历、奖励规则和通知设置；旧页面与 API 消费同一实现，保存、发布、采用和历史读取保持各自原权限与操作收据 |
@@ -141,6 +142,26 @@
 | [原换货批准](src/mysql-approved-exchange.ts)、[企业政策接点](src/approved-exchange-policy.ts)、[参与者合同](src/approved-exchange-ports.ts) | /mysql-approved-exchange 核原费用确认、检查/客户同意和当前企业政策，唯一WeakMap把依据绑定到原事务；调用方不得以JSON或新事务替代 |
 | [规则绑定草稿](src/bound-rule-draft.ts)、[日历绑定草稿](src/bound-calendar-draft.ts)、[私有本表/事务视图](src/bound-draft-storage.ts) | /bound-rule-draft 与 /bound-calendar-draft 保留完整候选复核、精确目标版本/CAS与原操作收据；规则历史恢复为新草稿，草稿保存不发布或授予业务权限 |
 | [批准设置应用](src/mysql-approved-settings.ts)、[真实路由授权桥](src/approved-settings-route-authority.ts)、[参加者合同](src/approved-settings-ports.ts)、[严格输入](src/approved-settings-validation.ts) | /mysql-approved-settings 与 /approved-settings-route-authority 复用原Guard/ALS，通知配置CAS、批准消费与原操作同事务，历史读取不以当前配置或过期重做 |
+
+## HTTP API 文档
+
+正式出口 `@rental-os/rental-core/http-openapi` 提供 `createRentalOpenApi()`，返回 `CoreOpenApiContribution` 的 `paths` 和 `schemas`。宿主使用现有 `composeCoreOpenApi` 与公共平台文档组合，并按实际挂载集合提供精确的旧路由许可。贡献的 operationId、schema 与本地引用统一使用 `rental.` 命名空间。
+
+接口资料沿 [HTTP 操作](src/http-openapi-operations.ts) → [同源 schema](src/http-openapi-schemas.ts) → 各 HTTP Controller、请求 DTO 和应用接点阅读。用途、鉴权、原权限及参数位于每项 operation，`x-requiredPermissions` 沿原合同声明。业务调用仍经当前身份、租户/经营空间、对象范围与原事务核验，开发 Agent 的业务工具接入沿正式工具发布合同管理。各端模块 SDK 从上方对应客户端入口读取。
+
+[旧组合文档](../../apps/api/src/contracts/openapi-document.ts) 使用同一 `RENTAL_HTTP_OPERATIONS` 和 `RENTAL_HTTP_COMPONENT_SCHEMAS`。服务端文档读取地址沿 `GET /api/openapi.json`，内容取决于该宿主的实际文档装配。使用同次构建的包可离线输出 Rental 贡献。
+
+```powershell
+node -e "const { createRentalOpenApi } = require('@rental-os/rental-core/http-openapi'); process.stdout.write(JSON.stringify(createRentalOpenApi(), null, 2))"
+```
+
+独立贡献包含 573 个已有操作及其 339 个 schema。原宽泛字段由 `RENTAL_HTTP_SCHEMA_GAPS` 列出，涉及的 292 项操作带 `x-schemaStatus=incomplete` 和 `x-schemaGaps`，继续按正式 DTO/响应投影补齐。明确路由缺口从 `RENTAL_HTTP_DOCUMENTATION_GAPS` 读取。
+
+| 路由 | 原实现与文档缺口 |
+| --- | --- |
+| `GET/POST /api/platform/customers/{customerId}/avatar` | 客户头像两项实际处理器仍缺正式操作/schema |
+| `POST /api/staff/v1/uploads/{fileAssetId}/inspection-binding` | 原检查证据绑定缺正式操作/schema，当前无 AI 宿主在处理前返回 unavailable |
+| `GET /api/platform/tenant-bootstrap/category-options` | 原合同保留，独立 Rental 宿主未挂载，列入未挂原路径缺口 |
 
 ## 使用与构建
 

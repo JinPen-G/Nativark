@@ -1,0 +1,1453 @@
+/** Rental 原 HTTP schema 单源。保留历史宽泛字段，字段完整性缺口由接口贡献明确列出。 */
+import { STAFF_UPLOAD_OBSERVATION_SCHEMAS } from "@rental-os/shared";
+import { RENTAL_EXCHANGE_INSPECTION_SCHEMAS } from "./http-openapi-rental-exchange-inspection-preparation.schemas";
+import { ENTERPRISE_COMPONENT_SCHEMAS } from "./http-openapi-enterprise-schemas";
+import { ENTERPRISE_ORDER_DELEGATION_SCHEMAS } from "./http-openapi-enterprise-order-delegation-schemas";
+
+import { RENTAL_CATEGORY_CODE_PATTERN, RENTAL_CATEGORY_ICON_CODES } from "@rental-os/shared";
+import { AI_CATEGORY_DRAFT_HTTP_SCHEMAS, AI_EXTENSION_PREVIEW_HTTP_SCHEMAS } from "@rental-os/shared";
+import { aiLeafToOpenApi30 } from "./http-openapi-json-schema";
+import { adminContainerRadiusInput, adminControlRadiusInput, storedAdminRadiusSchema, stringSchema, numberSchema, booleanSchema, objectSchema, ref, arrayOf, objectOf, type SchemaObject } from "./http-openapi-contract";
+
+export const RENTAL_HTTP_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
+  ...STAFF_UPLOAD_OBSERVATION_SCHEMAS,
+  AiExtensionServiceSnapshotDraft: aiLeafToOpenApi30(AI_EXTENSION_PREVIEW_HTTP_SCHEMAS.AiExtensionServiceSnapshotDraft, "AiExtensionServiceSnapshotDraft"),
+  AiCategoryDraftJson: aiLeafToOpenApi30(AI_CATEGORY_DRAFT_HTTP_SCHEMAS.AiCategoryDraftJson, "AiCategoryDraftJson"),
+  AiCategoryGovernanceAuditWire: aiLeafToOpenApi30(AI_CATEGORY_DRAFT_HTTP_SCHEMAS.AiCategoryGovernanceAuditWire, "AiCategoryGovernanceAuditWire"),
+  AiCategoryGovernanceAuditPage: aiLeafToOpenApi30(AI_CATEGORY_DRAFT_HTTP_SCHEMAS.AiCategoryGovernanceAuditPage, "AiCategoryGovernanceAuditPage"),
+  ...ENTERPRISE_COMPONENT_SCHEMAS,
+  ...ENTERPRISE_ORDER_DELEGATION_SCHEMAS,
+  ...RENTAL_EXCHANGE_INSPECTION_SCHEMAS,
+  GenericObject: objectSchema,
+  CustomerProfileOverview: objectOf({ profile: objectSchema, addresses: arrayOf(objectSchema), qualificationRevisions: arrayOf(objectSchema),
+    statusHistory: arrayOf(objectSchema), sensitiveAccess: arrayOf(objectSchema), corporateRelations: arrayOf(objectSchema),
+    membershipPlanAssignments: arrayOf(objectSchema), access: objectOf({ orders: { type: "string", enum: ["available", "restricted"] },
+      orderAmounts: { type: "string", enum: ["available", "restricted"] }, benefits: { type: "string", enum: ["available", "restricted"] },
+      qualifications: { type: "string", enum: ["available", "restricted"] }, audit: { type: "string", enum: ["available", "restricted"] } },
+    ["orders", "orderAmounts", "benefits", "qualifications", "audit"], false),
+    benefits: objectOf({ accounts: arrayOf(objectSchema), rewards: arrayOf(objectSchema), coupons: arrayOf(objectSchema) }),
+    orders: objectOf({ items: arrayOf(objectOf({ id: stringSchema, orderNo: stringSchema, workspaceId: stringSchema,
+      workspaceName: stringSchema, categoryCode: stringSchema, status: stringSchema, relation: arrayOf(stringSchema), startAt: stringSchema,
+      endAt: stringSchema, effectiveEndAt: stringSchema, finalPayableAmount: numberSchema, currency: stringSchema, createdAt: stringSchema },
+    ["id", "orderNo", "workspaceId", "status", "currency"])), page: numberSchema, pageSize: numberSchema, total: numberSchema }) },
+  ["profile", "addresses", "qualificationRevisions", "statusHistory", "corporateRelations", "membershipPlanAssignments", "benefits", "orders"]),
+  RentalExtensionBalanceBasis: objectOf({ version: { type: "integer", enum: [1] },
+    approvedReductionExtensionIds: { type: "array", items: { type: "string", minLength: 1 }, uniqueItems: true } },
+    ["version", "approvedReductionExtensionIds"], false),
+  RentalExtensionPricingSnapshot: objectOf({ method: { type: "string", enum: ["original_version_difference"] },
+    scope: { type: "string", enum: ["order", "exchange_line"] }, context: objectSchema,
+    balanceBasis: { ...ref("RentalExtensionBalanceBasis"), description: "Frozen approved reduction sources actually consumed; absent on legacy receipts. Never infer or backfill from wall-clock timestamps." },
+    previousPayableAmount: numberSchema, recalculatedPayableAmount: numberSchema,
+    recalculatedRentalAmount: numberSchema, rentalLineAmounts: { type: "object", additionalProperties: numberSchema }, recalculatedServiceAmount: numberSchema,
+    recalculatedDiscountAmount: numberSchema, recalculatedCouponAmount: numberSchema, totalBillableUnits: numberSchema,
+    differenceAmount: numberSchema, fullChargeLines: arrayOf(objectSchema), chargeLines: arrayOf(objectSchema),
+    discountEvaluations: arrayOf(objectSchema), couponEvaluation: objectSchema, membershipBenefitEvaluations: arrayOf(objectSchema),
+    refundReview: objectOf({ amount: numberSchema, status: { type: "string", enum: ["pending", "approved", "rejected", "superseded"] },
+      reason: stringSchema, reviewedBy: stringSchema, reviewedAt: { type: "string", format: "date-time" } }, ["amount", "status"]) }),
+  RentalOrderExtensionRecord: objectOf({ id: stringSchema, tenantId: stringSchema, workspaceId: stringSchema, orderId: stringSchema,
+    sequence: { type: "integer", minimum: 1 }, status: { type: "string", enum: ["pending_payment", "effective", "cancelled", "expired"] },
+    originalEndAt: stringSchema, newEndAt: stringSchema, billableUnits: numberSchema, rentalAmount: numberSchema,
+    serviceAmount: numberSchema, depositDelta: numberSchema, preAuthDelta: numberSchema, payableAmount: numberSchema,
+    currency: stringSchema, settlementMode: { type: "string", enum: ["immediate", "monthly"] }, executionBasis: objectSchema,
+    pricingSnapshot: ref("RentalExtensionPricingSnapshot"), rateSnapshot: arrayOf(objectSchema), ruleSnapshot: objectSchema,
+    calendarSnapshot: arrayOf(objectSchema), serviceSnapshots: arrayOf(objectSchema), priceVersionId: stringSchema, priceVersion: stringSchema,
+    ruleVersion: stringSchema, memo: stringSchema, createdBy: stringSchema, createdAt: stringSchema, paidAt: stringSchema,
+    effectiveAt: stringSchema, idempotencyKey: stringSchema }),
+  RentalOrderExtensionPreview: objectOf({ orderId: stringSchema, originalEndAt: stringSchema, newEndAt: stringSchema,
+    billableUnits: numberSchema, rentalAmount: numberSchema, serviceAmount: numberSchema, depositDelta: numberSchema,
+    preAuthDelta: numberSchema, payableAmount: numberSchema, currency: stringSchema,
+    settlementMode: { type: "string", enum: ["immediate", "monthly"] }, paymentRequired: booleanSchema,
+    executionBasis: objectSchema, pricingSnapshot: ref("RentalExtensionPricingSnapshot"), chargeLines: arrayOf(objectSchema),
+    calendarSnapshot: arrayOf(objectSchema), serviceSnapshots: arrayOf(objectSchema), priceVersionId: stringSchema,
+    priceVersion: stringSchema, ruleVersion: stringSchema }),
+  RentalOrderExtensionResult: objectOf({ order: objectSchema, extension: ref("RentalOrderExtensionRecord") }, ["order", "extension"]),
+  RentalExchangePricingSegment: objectOf({ orderLineId: stringSchema, itemGroupId: stringSchema, pricingGroupId: stringSchema,
+    quantity: { type: "integer", minimum: 1 }, startAt: { type: "string", format: "date-time" }, endAt: { type: "string", format: "date-time" },
+    source: objectOf({ kind: { type: "string", enum: ["quote", "extension", "price_version"] }, id: stringSchema,
+      priceVersionId: stringSchema, priceVersion: stringSchema }, ["kind", "id", "priceVersion"]),
+    rate: objectSchema, context: objectOf({ timeZone: stringSchema, legacyDayTypeMultipliers: booleanSchema,
+      calendars: arrayOf(objectSchema), dayRates: arrayOf(objectSchema) }, ["timeZone", "legacyDayTypeMultipliers", "calendars"]),
+    ruleSnapshot: objectSchema, calendarSnapshot: arrayOf(objectSchema), applyMinimumUnits: booleanSchema,
+    selectedUnitAmount: numberSchema, billableUnits: numberSchema, billedHours: numberSchema, amount: numberSchema,
+    membershipBenefit: objectSchema, couponBenefit: objectSchema, discountBenefit: objectSchema,
+    discountLayers: arrayOf(objectOf({ evaluation: objectSchema,
+      splitBasis: objectOf({ amount: numberSchema, reduction: numberSchema, consumedAmount: numberSchema, consumedReduction: numberSchema },
+        ["amount", "reduction", "consumedAmount", "consumedReduction"]) }, ["evaluation"])),
+    discountSplitBasis: objectOf({ amount: numberSchema, reduction: numberSchema, consumedAmount: numberSchema, consumedReduction: numberSchema },
+      ["amount", "reduction", "consumedAmount", "consumedReduction"]),
+    couponSplitBasis: objectOf({ amount: numberSchema, reduction: numberSchema, consumedAmount: numberSchema, consumedReduction: numberSchema },
+      ["amount", "reduction", "consumedAmount", "consumedReduction"]),
+    membershipSplitBasis: objectOf({ amount: numberSchema, reduction: numberSchema, consumedAmount: numberSchema, consumedReduction: numberSchema },
+      ["amount", "reduction", "consumedAmount", "consumedReduction"]),
+    splitBasis: objectOf({ startAt: { type: "string", format: "date-time" }, endAt: { type: "string", format: "date-time" },
+      amount: numberSchema, billableUnits: numberSchema, billedHours: numberSchema, applyMinimumUnits: booleanSchema,
+      consumedAmount: numberSchema, consumedUnits: numberSchema, consumedHours: numberSchema },
+    ["startAt", "endAt", "amount", "billableUnits", "billedHours", "applyMinimumUnits", "consumedAmount", "consumedUnits", "consumedHours"]) },
+  ["orderLineId", "itemGroupId", "quantity", "startAt", "endAt", "source", "rate", "context", "ruleSnapshot", "calendarSnapshot",
+    "applyMinimumUnits", "selectedUnitAmount", "billableUnits", "billedHours", "amount"]),
+  RentalExchangeExecutionBasis: objectOf({ effectiveFrom: { type: "string", format: "date-time" },
+    priceBasis: { type: "string", enum: ["original_order_price", "replacement_current_price"] },
+    categoryCode: stringSchema, categoryVersionId: stringSchema, adoptionRevision: numberSchema, categoryPolicySnapshot: objectSchema,
+    pricingStrategies: arrayOf(objectOf({ unit: stringSchema, implementationVersion: stringSchema }, ["unit", "implementationVersion"])),
+    rateSnapshot: arrayOf(objectSchema), ruleSnapshot: objectSchema, calendarSnapshot: arrayOf(objectSchema), pricingSnapshot: objectSchema,
+    inspectionTemplateSnapshots: arrayOf(objectSchema), capabilitySnapshot: arrayOf(objectSchema),
+    linePricing: objectOf({ version: { type: "integer", enum: [1] }, orderLineId: stringSchema,
+      originalAmount: numberSchema, replacementAmount: numberSchema, previousSegments: arrayOf("RentalExchangePricingSegment"),
+      segments: arrayOf("RentalExchangePricingSegment"), overdueBasis: ref("RentalExchangePricingSegment"),
+      membershipPricing: objectOf({ version: { type: "integer", enum: [1] }, originalReduction: numberSchema,
+        replacementReduction: numberSchema, originalNetAmount: numberSchema, replacementNetAmount: numberSchema, benefit: objectSchema },
+      ["version", "originalReduction", "replacementReduction", "originalNetAmount", "replacementNetAmount", "benefit"]),
+      couponPricing: objectOf({ version: { type: "integer", enum: [1] }, originalReduction: numberSchema,
+        replacementReduction: numberSchema, originalNetAmount: numberSchema, replacementNetAmount: numberSchema, coupon: objectSchema },
+      ["version", "originalReduction", "replacementReduction", "originalNetAmount", "replacementNetAmount", "coupon"]),
+      discountPricing: { oneOf: [
+        objectOf({ version: { type: "integer", enum: [1] }, originalReduction: numberSchema,
+          replacementReduction: numberSchema, originalNetAmount: numberSchema, replacementNetAmount: numberSchema, evaluation: objectSchema },
+        ["version", "originalReduction", "replacementReduction", "originalNetAmount", "replacementNetAmount", "evaluation"]),
+        objectOf({ version: { type: "integer", enum: [2] }, originalReduction: numberSchema,
+          replacementReduction: numberSchema, originalNetAmount: numberSchema, replacementNetAmount: numberSchema,
+          evaluations: { type: "array", items: objectSchema, minItems: 2 } },
+        ["version", "originalReduction", "replacementReduction", "originalNetAmount", "replacementNetAmount", "evaluations"])
+      ] } },
+    ["version", "orderLineId", "originalAmount", "replacementAmount", "previousSegments", "segments", "overdueBasis"]) },
+  ["effectiveFrom", "priceBasis", "categoryCode", "pricingStrategies", "rateSnapshot", "ruleSnapshot", "calendarSnapshot", "inspectionTemplateSnapshots"]),
+  RentalOrderChangeRecord: objectOf({ id: stringSchema, tenantId: stringSchema, workspaceId: stringSchema, orderId: stringSchema,
+    type: stringSchema, status: stringSchema, sequence: numberSchema, request: objectSchema, beforeSnapshot: objectSchema, afterSnapshot: objectSchema,
+    diff: objectOf({ exchange: objectOf({ executionBasis: ref("RentalExchangeExecutionBasis") }) }),
+    refundAmount: numberSchema, additionalAmount: numberSchema, depositDelta: numberSchema, preAuthDelta: numberSchema,
+    idempotencyKey: stringSchema, requestedBy: stringSchema, appliedBy: stringSchema, requestedAt: stringSchema, appliedAt: stringSchema, createdAt: stringSchema }),
+  RentalExchangeServiceOption: objectOf({ id: stringSchema, tenantId: stringSchema, categoryCode: stringSchema,
+    code: stringSchema, name: stringSchema, serviceType: stringSchema, billingUnit: stringSchema, price: numberSchema,
+    minimumQuantity: numberSchema, maximumQuantity: numberSchema, coverageLimit: numberSchema, deductible: numberSchema,
+    termsVersion: stringSchema, terms: stringSchema, applicableItemGroupIds: arrayOf(stringSchema),
+    applicableFulfillmentModes: arrayOf(stringSchema), applicableLocationIds: arrayOf(stringSchema), customerScope: stringSchema,
+    selectionMode: stringSchema, mandatoryRule: objectSchema, insuranceProviderStatus: stringSchema, insuranceProviderName: stringSchema,
+    requiresCapacity: booleanSchema, status: stringSchema, version: stringSchema, createdAt: stringSchema, updatedAt: stringSchema },
+  ["id", "tenantId", "categoryCode", "code", "name", "serviceType", "billingUnit", "price", "termsVersion", "terms",
+    "applicableItemGroupIds", "applicableFulfillmentModes", "applicableLocationIds", "requiresCapacity", "status", "version"]),
+  RentalExchangeServiceOptions: arrayOf("RentalExchangeServiceOption"),
+  RentalExchangeServiceSelection: objectOf({ serviceId: stringSchema, quantity: { type: "integer", minimum: 1 },
+    scheduledStartAt: { type: "string", format: "date-time" }, scheduledEndAt: { type: "string", format: "date-time" },
+    serviceLocationId: stringSchema }, ["serviceId", "quantity", "scheduledStartAt", "scheduledEndAt", "serviceLocationId"], false),
+  RentalExchangePickupInspectionRequest: objectOf({ templateId: stringSchema, templateVersion: stringSchema,
+    confirmationHash: { type: "string", pattern: "^[a-f0-9]{64}$" }, results: objectSchema,
+    attachments: { type: "array", items: stringSchema, maxItems: 50 }, handoverSignatureFileAssetId: stringSchema,
+    customerConfirmed: booleanSchema }, ["templateId", "templateVersion", "confirmationHash", "results", "customerConfirmed"], false),
+  RentalExchangePickupInspectionRequirements: objectOf({ required: booleanSchema, confirmationHash: stringSchema,
+    templates: arrayOf(objectSchema) }, ["required", "confirmationHash", "templates"]),
+  RentalPostPickupExchangeRequest: objectOf({ type: { type: "string", enum: ["post_pickup_exchange"] }, orderLineId: stringSchema,
+    allocationId: stringSchema, replacementItemGroupId: stringSchema, replacementAssetId: stringSchema, replacementPricingGroupId: stringSchema,
+    priceBasis: { type: "string", enum: ["original_order_price", "replacement_current_price"] },
+    originalDisposition: { type: "string", enum: ["return_to_warehouse", "off_shelf"] }, exchangeLocationId: stringSchema,
+    cancelServiceOccurrenceIds: arrayOf(stringSchema), services: { type: "array", items: ref("RentalExchangeServiceSelection"), maxItems: 20 },
+    serviceConfirmationHash: { type: "string", pattern: "^[a-f0-9]{64}$", description: "Required when confirming new services; never an authorization credential." },
+    inspectionSnapshot: objectSchema, reason: stringSchema, customerConfirmed: booleanSchema, expectedUpdatedAt: stringSchema },
+  ["type", "orderLineId", "allocationId", "replacementItemGroupId"]),
+  RentalPostPickupExchangeApplyRequest: { allOf: [ref("RentalPostPickupExchangeRequest"), {
+    type: "object", properties: { replacementPickupInspection: ref("RentalExchangePickupInspectionRequest") },
+    required: ["reason", "customerConfirmed", "expectedUpdatedAt", "inspectionSnapshot"] }] },
+  RentalPostPickupExchangePreview: objectOf({ orderId: stringSchema, type: { type: "string", enum: ["post_pickup_exchange"] },
+    beforePayableAmount: numberSchema, recalculatedPayableAmount: numberSchema, differenceAmount: numberSchema,
+    additionalAmount: numberSchema, refundAmount: numberSchema, depositDelta: numberSchema, preAuthDelta: numberSchema, currency: stringSchema,
+    exchange: objectOf({ orderLineId: stringSchema, allocationId: stringSchema, originalAmount: numberSchema, replacementAmount: numberSchema,
+      serviceSnapshots: arrayOf("AiExtensionServiceSnapshotDraft"), serviceConfirmationHash: stringSchema,
+      pickupInspection: ref("RentalExchangePickupInspectionRequirements"),
+      executionBasis: ref("RentalExchangeExecutionBasis") }), pricingSnapshot: objectOf({ scope: { type: "string", enum: ["exchange_line"] },
+      fullChargeLines: arrayOf(objectSchema), previousPayableAmount: numberSchema, recalculatedPayableAmount: numberSchema, differenceAmount: numberSchema }) }),
+  RentalPostPickupExchangeResult: objectOf({ order: objectSchema, change: ref("RentalOrderChangeRecord") }, ["order", "change"]),
+  RentalFundingEvent: objectOf({ id: stringSchema, tenantId: stringSchema, workspaceId: stringSchema, orderId: stringSchema,
+    instrument: { type: "string", enum: ["rental", "deposit", "preauthorization"] },
+    action: { type: "string", enum: ["initiate", "append", "capture", "refund", "release", "fail"] },
+    amount: numberSchema, balanceAfter: numberSchema,
+    provider: { type: "string", enum: ["mock", "offline", "alipay", "wechat_pay", "stripe"] },
+    paymentMethod: { type: "string", enum: ["offline_cash", "offline_transfer"] },
+    idempotencyKey: stringSchema, reason: stringSchema, operator: stringSchema, failureCode: stringSchema,
+    at: { type: "string", format: "date-time" }, createdAt: { type: "string", format: "date-time" } },
+    ["id", "tenantId", "workspaceId", "orderId", "instrument", "action", "amount", "balanceAfter", "provider", "idempotencyKey", "reason", "at", "createdAt"]),
+  RentalFundingAmountRequest: objectOf({ instrument: { type: "string", enum: ["rental", "deposit", "preauthorization"] },
+    amount: { type: "number", minimum: 0.01 }, idempotencyKey: stringSchema, reason: stringSchema,
+    paymentMethod: { type: "string", enum: ["offline_cash", "offline_transfer"] },
+    offlineDeposit: objectOf({ sourceEventId: { type: "string", minLength: 1, maxLength: 191 },
+      evidenceFileAssetId: { type: "string", minLength: 1, maxLength: 191 } }, ["sourceEventId", "evidenceFileAssetId"]) },
+    ["instrument", "amount", "idempotencyKey", "reason"]),
+  RentalFundingBalance: objectOf({ orderId: stringSchema, balanceBasis: { type: "string", enum: ["real", "simulated"] },
+    simulationAllowed: booleanSchema,
+    rental: objectOf({ payable: numberSchema, collected: numberSchema, refunded: numberSchema, securityCaptured: numberSchema,
+      corporatePaid: { type: "number", description: "Original corporate repayment allocations reconciled to their aggregate payment; not extra cash. Legacy responses may omit it." },
+      balance: { type: "number", description: "Signed remaining receivable after original cash, security captures and corporate allocations; negative means unresolved overpayment." },
+      pendingExtensionAmount: numberSchema, due: { type: "number", minimum: 0, description: "Server-computed current rental cash demand, including pending payable extensions." } },
+      ["payable", "collected", "refunded", "securityCaptured", "balance", "pendingExtensionAmount", "due"]),
+    deposit: objectOf({ collected: numberSchema, captured: numberSchema, refunded: numberSchema, balance: numberSchema,
+      requiredAmount: numberSchema, pendingExtensionAmount: numberSchema, due: numberSchema },
+      ["collected", "captured", "refunded", "balance", "requiredAmount", "pendingExtensionAmount", "due"]),
+    preauthorization: objectOf({ frozen: numberSchema, captured: numberSchema, released: numberSchema, balance: numberSchema,
+      requiredAmount: numberSchema, pendingExtensionAmount: numberSchema },
+      ["frozen", "captured", "released", "balance", "requiredAmount", "pendingExtensionAmount"]), events: arrayOf("RentalFundingEvent") },
+    ["orderId", "balanceBasis", "simulationAllowed", "rental", "deposit", "preauthorization", "events"]),
+  RegisterPersonalMembershipRequest: objectOf({
+    name: { type: "string", minLength: 1, maxLength: 120 }, phone: { type: "string", minLength: 1, maxLength: 40 },
+    email: { type: "string", maxLength: 160 }, identityNo: { type: "string", maxLength: 80 },
+    gender: stringSchema, birthday: { type: "string", format: "date" }, sourceChannel: stringSchema, region: { type: "string", maxLength: 64 },
+    channel: { type: "string", enum: ["admin", "app"] }, temporaryPassword: { type: "string", minLength: 8, maxLength: 128, writeOnly: true },
+    directApprove: { type: "boolean" }, idempotencyKey: { type: "string", maxLength: 100 },
+    onlyNew: { type: "boolean", description: "Admin import only. Existing membership returns skipped=true under the customer business lock without changing status, profile, review or credentials." },
+  }, ["name", "phone", "channel"]),
+  RegisterPersonalMembershipResponse: objectOf({ customerId: stringSchema, membershipStatus: stringSchema, skipped: { type: "boolean" }, review: objectSchema }, ["customerId", "membershipStatus"]),
+  MembershipRegistrationSettings: objectOf({ registrationMode: { type: "string", enum: ["manual", "automatic"] }, updatedAt: { type: "string", format: "date-time" }, supportsOnlyNewImport: { type: "boolean", description: "Server supports create-only imports. Legacy servers omit this field; clients must hide that import until supported." } }, ["registrationMode"]),
+  RecordCustomerCorporateCreditMaturityRequest: objectOf({ ledgerId: { type: "string", minLength: 1, maxLength: 191 },
+    dueAt: { type: "string", format: "date-time" }, basisRef: { type: "string", minLength: 1, maxLength: 191 },
+    reason: { type: "string", minLength: 1, maxLength: 500 }, idempotencyKey: { type: "string", minLength: 1, maxLength: 191 } },
+    ["ledgerId", "dueAt", "basisRef", "reason", "idempotencyKey"], false),
+  CustomerCorporateCreditMaturityReceipt: objectOf({ ledgerId: stringSchema, orderId: stringSchema, currency: stringSchema,
+    dueAt: { type: "string", format: "date-time" }, basisRef: stringSchema, reason: stringSchema, idempotencyKey: stringSchema,
+    recordedBy: stringSchema, recordedAt: { type: "string", format: "date-time" } },
+    ["ledgerId", "orderId", "currency", "dueAt", "basisRef", "reason", "idempotencyKey", "recordedBy", "recordedAt"], false),
+  ReverseCustomerCorporateCreditPaymentRequest: objectOf({ basisRef: { type: "string", minLength: 1, maxLength: 191 },
+    reason: { type: "string", minLength: 1, maxLength: 500 }, idempotencyKey: { type: "string", minLength: 1, maxLength: 191 } },
+    ["basisRef", "reason", "idempotencyKey"], false),
+  CustomerCorporateCreditPaymentReversalReceipt: objectOf({ paymentId: stringSchema, reversalId: stringSchema, customerId: stringSchema,
+    amount: numberSchema, currency: stringSchema, allocations: arrayOf(objectOf({ allocationId: stringSchema, reversalId: stringSchema,
+      orderId: stringSchema, workspaceId: stringSchema, amount: numberSchema }, ["allocationId", "reversalId", "orderId", "workspaceId", "amount"], false)),
+    basisRef: stringSchema, reason: stringSchema, idempotencyKey: stringSchema, recordedBy: stringSchema, recordedAt: { type: "string", format: "date-time" } },
+    ["paymentId", "reversalId", "customerId", "amount", "currency", "allocations", "basisRef", "reason", "idempotencyKey", "recordedBy", "recordedAt"], false),
+  RentalOperationLockRequest: {
+    oneOf: [
+      { ...objectOf({ action: { type: "string", enum: ["acquire"] }, token: stringSchema, reason: stringSchema }, ["action"], false) },
+      { ...objectOf({ action: { type: "string", enum: ["release"] }, token: stringSchema, reason: stringSchema }, ["action"], false) },
+      { ...objectOf({ action: { type: "string", enum: ["force-release"] }, token: stringSchema, reason: { type: "string", minLength: 3, maxLength: 500 } }, ["action", "reason"], false) }
+    ]
+  },
+  CreateRentalOrderInternalNoteRequest: objectOf(
+    { content: { type: "string", minLength: 1, maxLength: 1000 } },
+    ["content"],
+    false
+  ),
+  RentalOrderInternalNote: objectOf(
+    {
+      id: stringSchema,
+      content: stringSchema,
+      operatorName: stringSchema,
+      operatorId: stringSchema,
+      createdAt: { type: "string", format: "date-time" }
+    },
+    ["id", "content", "operatorName", "createdAt"],
+    false
+  ),
+  CustomerMembershipBenefitScope: {
+    oneOf: [
+      { ...objectOf({ type: { type: "string", enum: ["tenant"] } }, ["type"]), additionalProperties: false },
+      { ...objectOf({ type: { type: "string", enum: ["workspaces"] }, workspaceIds: { type: "array", items: stringSchema, minItems: 1 } }, ["type", "workspaceIds"]), additionalProperties: false },
+      { ...objectOf({ type: { type: "string", enum: ["categories"] }, categoryCodes: { type: "array", items: { type: "string", pattern: RENTAL_CATEGORY_CODE_PATTERN.source, minLength: 2, maxLength: 64 }, minItems: 1 } }, ["type", "categoryCodes"]), additionalProperties: false }
+    ]
+  },
+  CustomerMembershipBenefit: objectOf({
+    type: { type: "string", enum: ["rental_discount", "deposit_reduction", "preauth_reduction", "service_benefit", "priority_reservation", "quote_validity_extension"] },
+    calculation: { type: "string", enum: ["percentage", "amount", "quota", "priority"] },
+    value: numberSchema,
+    maximum: numberSchema,
+    applicableServiceIds: arrayOf(stringSchema),
+    stackable: booleanSchema,
+    conditions: objectSchema,
+    scope: ref("CustomerMembershipBenefitScope")
+  }, ["type", "calculation", "value"]),
+  LoginRequest: objectOf(
+    {
+      tenantCode: stringSchema,
+      account: stringSchema,
+      password: { type: "string", format: "password" }
+    },
+    ["tenantCode", "account", "password"]
+  ),
+  ResetLocalDemoPasswordRequest: objectOf(
+    { password: { type: "string", format: "password" } },
+    ["password"]
+  ),
+  ResetLocalDemoPasswordResult: objectOf(
+    { reset: { type: "boolean" }, accounts: arrayOf(stringSchema) },
+    ["reset", "accounts"]
+  ),
+  LoginResponse: objectOf(
+    {
+      accessToken: stringSchema,
+      refreshToken: stringSchema,
+      expiresIn: numberSchema,
+      tenant: ref("TenantContext"),
+      user: ref("AuthUser"),
+      needsTenantOnboarding: booleanSchema
+    },
+    ["accessToken", "refreshToken", "expiresIn", "tenant", "user"]
+  ),
+  RefreshSessionRequest: objectOf(
+    { refreshToken: stringSchema },
+    ["refreshToken"]
+  ),
+  SwitchWorkspaceRequest: objectOf(
+    { workspaceId: stringSchema },
+    ["workspaceId"]
+  ),
+  ChangePasswordRequest: objectOf(
+    {
+      currentPassword: { type: "string", format: "password" },
+      newPassword: { type: "string", format: "password" }
+    },
+    ["currentPassword", "newPassword"]
+  ),
+  TenantContext: objectOf(
+    {
+      tenantId: stringSchema,
+      tenantCode: stringSchema,
+      tenantName: stringSchema,
+      operatorShortName: { type: "string", maxLength: 64, description: "后台营运商简称；未设置时省略，展示沿原租户全称。" },
+      tenantStatus: stringSchema,
+      brandName: stringSchema,
+      brandLogoUrl: stringSchema,
+      faviconUrl: stringSchema,
+      themeColor: stringSchema,
+      adminCornerRadius: storedAdminRadiusSchema,
+      adminContainerRadius: storedAdminRadiusSchema,
+      adminButtonRadius: storedAdminRadiusSchema,
+      adminInputRadius: storedAdminRadiusSchema,
+      categoryCode: stringSchema,
+      categoryName: stringSchema,
+      capabilities: arrayOf(stringSchema)
+    },
+    ["tenantId", "tenantCode", "tenantName", "tenantStatus"]
+  ),
+  AuthUser: objectOf(
+    {
+      id: stringSchema,
+      tenantId: stringSchema,
+      account: stringSchema,
+      displayName: stringSchema,
+      roleNames: arrayOf(stringSchema),
+      roleIds: arrayOf(stringSchema),
+      scope: stringSchema,
+      dataScope: stringSchema,
+      locationScope: objectOf({ mode: stringSchema, locationIds: arrayOf(stringSchema) }, ["mode", "locationIds"]),
+      organizationId: stringSchema,
+      organizationName: stringSchema,
+      isPlatformAdmin: booleanSchema,
+      isSaasAdmin: booleanSchema,
+      mustChangePassword: booleanSchema,
+      permissions: arrayOf(stringSchema),
+      tenantMembership: objectOf({ permissions: arrayOf(stringSchema), dataScope: stringSchema, isTenantAdmin: booleanSchema }, ["permissions", "dataScope", "isTenantAdmin"])
+    },
+    ["id", "tenantId", "account", "displayName", "roleNames", "scope"]
+  ),
+  MiniProgramChannelSummary: objectOf(
+    {
+      configured: booleanSchema, appId: stringSchema, secretConfigured: booleanSchema, enabled: booleanSchema, revision: numberSchema,
+      lastTestStatus: { type: "string", enum: ["not_tested", "passed", "failed"] }, lastTestAt: { type: "string", format: "date-time" }, lastTestError: stringSchema,
+      identityCount: numberSchema, updatedAt: { type: "string", format: "date-time" }
+    },
+    ["configured", "secretConfigured", "enabled", "revision", "lastTestStatus", "identityCount"],
+    false
+  ),
+  SaveMiniProgramChannelRequest: objectOf(
+    { appId: stringSchema, appSecret: stringSchema, enabled: booleanSchema },
+    ["appId", "enabled"]
+  ),
+  MiniProgramChannelTestResult: objectOf({ ok: booleanSchema, message: stringSchema, testedAt: { type: "string", format: "date-time" } }, ["ok", "message", "testedAt"]),
+  ClientChannelAgreementConfig: objectOf({ name: stringSchema, version: stringSchema, url: stringSchema, body: stringSchema }, ["name", "version"], false),
+  ClientChannelFaqItem: objectOf({ question: stringSchema, answer: stringSchema }, ["question", "answer"], false),
+  ClientChannelWorkspaceOption: objectOf({ id: stringSchema, code: stringSchema, name: stringSchema, categoryCode: stringSchema, status: stringSchema }, ["id", "code", "name", "categoryCode", "status"], false),
+  AdminLoginBranding: objectOf({
+    showTitle: booleanSchema, showDescription: booleanSchema, showHighlights: booleanSchema, showFooter: booleanSchema,
+    backgroundImageUrl: { type: "string", maxLength: 512 },
+    title: { type: "string", maxLength: 80 },
+    description: { type: "string", maxLength: 300 },
+    highlights: { type: "array", maxItems: 3, items: objectOf({ title: { type: "string", maxLength: 24 }, description: { type: "string", maxLength: 80 } }, [], false) },
+    footerText: { type: "string", maxLength: 160 }
+  }, [], false),
+  ClientChannelProfileSummary: objectOf(
+    {
+      configured: booleanSchema, revision: numberSchema,
+      brandName: stringSchema, brandLogoUrl: stringSchema, faviconUrl: stringSchema, customerServicePhone: stringSchema, customerServiceHours: stringSchema,
+      userAgreement: ref("ClientChannelAgreementConfig"), privacyPolicy: ref("ClientChannelAgreementConfig"),
+      helpIntro: stringSchema, helpFaq: arrayOf("ClientChannelFaqItem"), bannerTitle: stringSchema, bannerSubtitle: stringSchema, themeColor: stringSchema,
+      adminLogin: ref("AdminLoginBranding"),
+      adminCornerRadius: storedAdminRadiusSchema,
+      adminContainerRadius: storedAdminRadiusSchema,
+      adminButtonRadius: storedAdminRadiusSchema,
+      adminInputRadius: storedAdminRadiusSchema,
+      smsLoginEnabled: booleanSchema, passwordLoginEnabled: booleanSchema,
+      publishedWorkspaceIds: arrayOf(stringSchema), defaultWorkspaceId: stringSchema,
+      workspaces: arrayOf("ClientChannelWorkspaceOption"),
+      readiness: objectOf({ ready: booleanSchema, missing: arrayOf(stringSchema) }, ["ready", "missing"], false),
+      updatedAt: { type: "string", format: "date-time" }
+    },
+    ["configured", "revision", "adminCornerRadius", "smsLoginEnabled", "passwordLoginEnabled", "publishedWorkspaceIds", "workspaces", "readiness"],
+    false
+  ),
+  SaveClientChannelProfileRequest: objectOf(
+    {
+      expectedRevision: numberSchema, brandName: stringSchema, brandLogoUrl: stringSchema, faviconUrl: stringSchema, customerServicePhone: stringSchema, customerServiceHours: stringSchema,
+      userAgreement: ref("ClientChannelAgreementConfig"), privacyPolicy: ref("ClientChannelAgreementConfig"),
+      helpIntro: stringSchema, helpFaq: arrayOf("ClientChannelFaqItem"), bannerTitle: stringSchema, bannerSubtitle: stringSchema, themeColor: stringSchema,
+      adminLogin: ref("AdminLoginBranding"),
+      adminCornerRadius: adminContainerRadiusInput,
+      adminContainerRadius: adminContainerRadiusInput,
+      adminButtonRadius: adminControlRadiusInput,
+      adminInputRadius: adminControlRadiusInput,
+      smsLoginEnabled: booleanSchema, passwordLoginEnabled: booleanSchema, publishedWorkspaceIds: arrayOf(stringSchema), defaultWorkspaceId: stringSchema
+    },
+    ["smsLoginEnabled", "passwordLoginEnabled", "publishedWorkspaceIds"]
+  ),
+  WebsiteChannelProfileSummary: objectOf(
+    {
+      configured: booleanSchema, revision: numberSchema, enabled: booleanSchema,
+      slogan: stringSchema, heroTitle: stringSchema, heroDescription: stringSchema, heroImageUrl: stringSchema,
+      secondaryColor: stringSchema, footerText: stringSchema, contactAddress: stringSchema,
+      ctaTitle: stringSchema, ctaDescription: stringSchema,
+      seoTitle: stringSchema, seoDescription: stringSchema, seoKeywords: stringSchema,
+      showPoweredBy: booleanSchema, customDomain: stringSchema,
+      categoryImages: arrayOf(objectOf({ code: stringSchema, imageUrl: stringSchema }, ["code", "imageUrl"], false)),
+      advantages: arrayOf(objectOf({ icon: stringSchema, title: stringSchema, description: stringSchema }, ["title"], false)),
+      steps: arrayOf(objectOf({ title: stringSchema, description: stringSchema }, ["title"], false)),
+      testimonials: arrayOf(objectOf({ name: stringSchema, context: stringSchema, text: stringSchema }, ["name", "text"], false)),
+      categories: arrayOf(objectOf({ code: stringSchema, name: stringSchema }, ["code", "name"], false)),
+      readiness: objectOf({ ready: booleanSchema, missing: arrayOf(stringSchema) }, ["ready", "missing"], false),
+      updatedAt: { type: "string", format: "date-time" }
+    },
+    ["configured", "revision", "enabled", "showPoweredBy", "readiness"],
+    false
+  ),
+  SaveWebsiteChannelProfileRequest: objectOf(
+    {
+      expectedRevision: numberSchema, enabled: booleanSchema,
+      slogan: stringSchema, heroTitle: stringSchema, heroDescription: stringSchema, heroImageUrl: stringSchema,
+      secondaryColor: stringSchema, footerText: stringSchema, contactAddress: stringSchema,
+      ctaTitle: stringSchema, ctaDescription: stringSchema,
+      seoTitle: stringSchema, seoDescription: stringSchema, seoKeywords: stringSchema, showPoweredBy: booleanSchema, customDomain: stringSchema,
+      categoryImages: arrayOf(objectOf({ code: stringSchema, imageUrl: stringSchema }, ["code", "imageUrl"], false)),
+      advantages: arrayOf(objectOf({ icon: stringSchema, title: stringSchema, description: stringSchema }, ["title"], false)),
+      steps: arrayOf(objectOf({ title: stringSchema, description: stringSchema }, ["title"], false)),
+      testimonials: arrayOf(objectOf({ name: stringSchema, context: stringSchema, text: stringSchema }, ["name", "text"], false))
+    },
+    ["enabled", "showPoweredBy"]
+  ),
+  CreatePaymentRefundRequest: objectOf(
+    { amount: numberSchema, reason: stringSchema, idempotencyKey: stringSchema },
+    ["amount", "reason", "idempotencyKey"]
+  ),
+  ReviewRentalInspectionExceptionRequest: objectOf(
+    {
+      decision: { type: "string", enum: ["approved", "rejected"] },
+      approvedChargeAmount: { type: "number", minimum: 0 },
+      waiverDecision: { type: "string", enum: ["covered", "excluded"], description: "Required for a positive approved charge when the order has damage waiver services; review frozen terms and record the basis in reason." },
+      incidentAt: { type: "string", format: "date-time", description: "Verified incident time, required with incidentBasis for positive damage assessments on orders with waiver services. Must not be inferred from inspection time." },
+      incidentBasis: { type: "string", minLength: 1, maxLength: 1000 },
+      waiverOccurrenceId: { type: "string", maxLength: 200, description: "Optional explicit occurrence from frozen order services." },
+      liability: { type: "string", enum: ["customer", "normal_wear", "lessor", "third_party", "undetermined"], description: "A positive customer charge requires an explicit customer liability decision supported by reason." },
+      reason: { type: "string", minLength: 1 }
+    },
+    ["decision", "reason"]
+  ),
+  PaymentRefundResponse: objectOf(
+    {
+      refundId: stringSchema,
+      paymentIntentId: stringSchema,
+      orderId: stringSchema,
+      provider: stringSchema,
+      method: stringSchema,
+      amount: numberSchema,
+      currency: stringSchema,
+      merchantRefundNo: stringSchema,
+      status: stringSchema,
+      externalRefundId: stringSchema,
+      externalStatus: stringSchema,
+      reason: stringSchema,
+      failureReason: stringSchema,
+      acceptedAt: { type: "string", format: "date-time" },
+      succeededAt: { type: "string", format: "date-time" },
+      fundedAt: { type: "string", format: "date-time" },
+      createdAt: { type: "string", format: "date-time" },
+      updatedAt: { type: "string", format: "date-time" }
+    },
+    ["refundId", "paymentIntentId", "orderId", "provider", "method", "amount", "currency", "merchantRefundNo", "status", "reason", "createdAt", "updatedAt"]
+  ),
+  PaymentReconciliationSummary: objectOf(
+    {
+      scanned: numberSchema,
+      processed: numberSchema,
+      paid: numberSchema,
+      closed: numberSchema,
+      refunded: numberSchema,
+      pending: numberSchema,
+      failed: numberSchema,
+      results: arrayOf(objectOf({
+        kind: stringSchema,
+        id: stringSchema,
+        orderId: stringSchema,
+        previousStatus: stringSchema,
+        status: stringSchema,
+        error: stringSchema
+      }, ["kind", "id", "orderId", "previousStatus", "status"]))
+    },
+    ["scanned", "processed", "paid", "closed", "refunded", "pending", "failed", "results"]
+  ),
+  ImportPaymentStatementRequest: objectOf(
+    { provider: stringSchema, file: { type: "string", format: "binary" } },
+    ["provider", "file"]
+  ),
+  ReviewPaymentStatementLineRequest: objectOf(
+    { decision: stringSchema, reason: stringSchema },
+    ["decision", "reason"]
+  ),
+  PaymentStatementBatchSummary: objectOf(
+    {
+      id: stringSchema,
+      workspaceId: stringSchema,
+      provider: stringSchema,
+      fileName: stringSchema,
+      fileSha256: stringSchema,
+      status: stringSchema,
+      totalRows: numberSchema,
+      matchedRows: numberSchema,
+      differenceRows: numberSchema,
+      acknowledgedRows: numberSchema,
+      importedBy: stringSchema,
+      importedAt: { type: "string", format: "date-time" }
+    },
+    ["id", "workspaceId", "provider", "fileName", "fileSha256", "status", "totalRows", "matchedRows", "differenceRows", "acknowledgedRows", "importedAt"]
+  ),
+  PaymentStatementLineSummary: objectOf(
+    {
+      id: stringSchema,
+      batchId: stringSchema,
+      rowNumber: numberSchema,
+      kind: stringSchema,
+      merchantOrderNo: stringSchema,
+      merchantRefundNo: stringSchema,
+      externalId: stringSchema,
+      statementStatus: stringSchema,
+      normalizedStatus: stringSchema,
+      amount: numberSchema,
+      currency: stringSchema,
+      occurredAt: { type: "string", format: "date-time" },
+      localRecordId: stringSchema,
+      localStatus: stringSchema,
+      differenceCodes: arrayOf(stringSchema),
+      differenceDetail: stringSchema,
+      reviewStatus: stringSchema,
+      reviewReason: stringSchema,
+      reviewedBy: stringSchema,
+      reviewedAt: { type: "string", format: "date-time" }
+    },
+    ["id", "batchId", "rowNumber", "kind", "merchantOrderNo", "statementStatus", "normalizedStatus", "amount", "currency", "differenceCodes", "reviewStatus"]
+  ),
+  PaymentStatementBatchDetail: objectOf(
+    {
+      id: stringSchema,
+      workspaceId: stringSchema,
+      provider: stringSchema,
+      fileName: stringSchema,
+      fileSha256: stringSchema,
+      status: stringSchema,
+      totalRows: numberSchema,
+      matchedRows: numberSchema,
+      differenceRows: numberSchema,
+      acknowledgedRows: numberSchema,
+      importedBy: stringSchema,
+      importedAt: { type: "string", format: "date-time" },
+      lines: arrayOf("PaymentStatementLineSummary")
+    },
+    ["id", "workspaceId", "provider", "fileName", "fileSha256", "status", "totalRows", "matchedRows", "differenceRows", "acknowledgedRows", "importedAt", "lines"]
+  ),
+  PaymentStatementBatchList: arrayOf("PaymentStatementBatchSummary"),
+  CreateFileUploadSessionRequest: objectOf(
+    {
+      businessModule: stringSchema,
+      businessType: stringSchema,
+      businessId: stringSchema,
+      fileName: stringSchema,
+      mimeType: stringSchema,
+      sizeBytes: numberSchema,
+      uploadScene: stringSchema,
+      idempotencyKey: stringSchema,
+      metadata: objectSchema
+    },
+    ["businessModule", "businessType", "businessId", "fileName", "mimeType", "sizeBytes", "uploadScene", "idempotencyKey"]
+  ),
+  CompleteFileUploadRequest: objectOf({ checksum: stringSchema }),
+  CreateCustomerIdentityUploadRequest: objectOf(
+    { fileName: stringSchema, mimeType: { type: "string", enum: ["image/jpeg", "image/png", "image/webp", "application/pdf"] }, sizeBytes: { type: "integer", minimum: 1, maximum: 20971520 }, idempotencyKey: stringSchema },
+    ["fileName", "mimeType", "sizeBytes", "idempotencyKey"]
+  ),
+  CreateCarrierEvidenceUploadRequest: objectOf(
+    { fileName: { type: "string", maxLength: 180 }, mimeType: { type: "string", enum: ["image/jpeg", "image/png", "image/webp", "application/pdf"] }, sizeBytes: { type: "integer", minimum: 1, maximum: 20971520 }, idempotencyKey: { type: "string", maxLength: 191 } },
+    ["fileName", "mimeType", "sizeBytes", "idempotencyKey"],
+    false
+  ),
+  CreateRentalCarrierShipmentEventRequest: objectOf(
+    {
+      type: { type: "string", enum: ["outbound_dispatched", "customer_handoff"] },
+      occurredAt: { type: "string", format: "date-time" },
+      carrierName: { type: "string", minLength: 1, maxLength: 120 },
+      trackingNumber: { type: "string", minLength: 1, maxLength: 191 },
+      evidenceFileAssetIds: { type: "array", minItems: 1, uniqueItems: true, items: stringSchema }
+    },
+    ["type", "occurredAt", "carrierName", "trackingNumber", "evidenceFileAssetIds"],
+    false
+  ),
+  RentalCarrierShipmentEventSummary: objectOf(
+    {
+      id: stringSchema, tenantId: stringSchema, workspaceId: stringSchema, orderId: stringSchema,
+      type: { type: "string", enum: ["outbound_dispatched", "customer_signed", "customer_handoff", "warehouse_received"] },
+      occurredAt: { type: "string", format: "date-time" }, carrierName: stringSchema, trackingNumber: stringSchema,
+      evidenceFileAssetIds: arrayOf(stringSchema), recordedBy: stringSchema, createdAt: { type: "string", format: "date-time" }
+    },
+    ["id", "tenantId", "workspaceId", "orderId", "type", "occurredAt", "carrierName", "trackingNumber", "evidenceFileAssetIds", "recordedBy", "createdAt"],
+    false
+  ),
+  RentalCarrierShipmentEventList: arrayOf("RentalCarrierShipmentEventSummary"),
+  SaveCustomerIdentityVerificationRequest: objectOf(
+    {
+      credentialType: { type: "string", pattern: "^[a-z][a-z0-9_-]{0,31}$" },
+      result: { type: "string", enum: ["verified", "rejected", "revoked"] },
+      evidenceFileAssetIds: { type: "array", uniqueItems: true, minItems: 0, maxItems: 5, items: stringSchema },
+      reason: { type: "string", minLength: 1, maxLength: 500 }
+    },
+    ["credentialType", "result", "evidenceFileAssetIds", "reason"]
+  ),
+  CustomerIdentityVerificationSummary: objectOf(
+    {
+      id: stringSchema, tenantId: stringSchema, customerId: stringSchema, credentialType: stringSchema,
+      result: { type: "string", enum: ["verified", "rejected", "revoked"] }, evidenceFileAssetIds: { type: "array", items: stringSchema },
+      reason: stringSchema, reviewerUserId: stringSchema, reviewerName: stringSchema,
+      reviewedAt: { type: "string", format: "date-time" }, verifiedAt: { type: "string", format: "date-time" }
+    },
+    ["id", "tenantId", "customerId", "credentialType", "result", "evidenceFileAssetIds", "reason", "reviewerUserId", "reviewerName", "reviewedAt"]
+  ),
+  CustomerIdentityVerificationList: { type: "array", items: ref("CustomerIdentityVerificationSummary") },
+  FileUploadSessionSummary: objectOf(
+    {
+      sessionId: stringSchema,
+      fileAssetId: stringSchema,
+      provider: stringSchema,
+      mode: stringSchema,
+      status: stringSchema,
+      uploadUrl: stringSchema,
+      uploadHeaders: objectSchema,
+      expiresAt: { type: "string", format: "date-time" }
+    },
+    ["sessionId", "fileAssetId", "provider", "mode", "status", "expiresAt"]
+  ),
+  FileDownloadUrlSummary: objectOf(
+    {
+      fileAssetId: stringSchema,
+      provider: stringSchema,
+      mode: stringSchema,
+      downloadUrl: stringSchema,
+      expiresAt: { type: "string", format: "date-time" }
+    },
+    ["fileAssetId", "provider", "mode", "downloadUrl"]
+  ),
+  FileUploadCleanupSummary: objectOf(
+    {
+      scanned: numberSchema,
+      invalidated: numberSchema,
+      deletedObjects: numberSchema,
+      cleanupPending: numberSchema,
+      sessionIds: { type: "array", items: stringSchema }
+    },
+    ["scanned", "invalidated", "deletedObjects", "cleanupPending", "sessionIds"]
+  ),
+  SessionContextResponse: objectOf(
+    {
+      tenant: ref("TenantContext"),
+      user: ref("AuthUser")
+    },
+    ["tenant", "user"]
+  ),
+  SystemUserRow: objectOf(
+    {
+      id: stringSchema,
+      tenantId: stringSchema,
+      account: stringSchema,
+      displayName: stringSchema,
+      phone: stringSchema,
+      organizationId: stringSchema,
+      organizationName: stringSchema,
+      roleIds: arrayOf(stringSchema),
+      roleNames: arrayOf(stringSchema),
+      scope: stringSchema,
+      isPlatformAdmin: booleanSchema,
+      isSaasAdmin: booleanSchema,
+      mustChangePassword: booleanSchema,
+      temporaryPassword: stringSchema,
+      isActive: booleanSchema,
+      permissions: arrayOf(stringSchema),
+      dataScope: stringSchema
+    },
+    [
+      "id",
+      "tenantId",
+      "account",
+      "displayName",
+      "roleIds",
+      "roleNames",
+      "scope",
+      "isPlatformAdmin",
+      "isActive",
+      "permissions",
+      "dataScope"
+    ]
+  ),
+  SaveWorkspaceAccessRequest: objectOf(
+    {
+      workspaceId: stringSchema,
+      roleId: stringSchema,
+      dataScope: stringSchema,
+      locationScope: objectOf({ mode: { type: "string", enum: ["all", "selected"] }, locationIds: arrayOf(stringSchema) }, ["mode", "locationIds"]),
+      isActive: booleanSchema
+    },
+    ["workspaceId", "isActive"]
+  ),
+  SaveSystemUserAccessRequest: objectOf(
+    {
+      id: stringSchema,
+      tenantId: stringSchema,
+      account: stringSchema,
+      displayName: stringSchema,
+      phone: stringSchema,
+      organizationId: stringSchema,
+      roleIds: arrayOf(stringSchema),
+      isPlatformAdmin: booleanSchema,
+      isActive: booleanSchema,
+      workspaceAccesses: arrayOf("SaveWorkspaceAccessRequest")
+    },
+    ["account", "displayName", "roleIds", "isActive", "workspaceAccesses"]
+  ),
+  ClientWorkspaceSummary: objectOf(
+    {
+      workspaceCode: stringSchema,
+      workspaceName: stringSchema,
+      categoryCode: stringSchema,
+      membershipStatus: stringSchema,
+      isDefault: booleanSchema
+    },
+    ["workspaceCode", "workspaceName", "categoryCode", "membershipStatus"]
+  ),
+  ClientWorkspaceDirectory: objectOf(
+    {
+      apiVersion: stringSchema,
+      tenantCode: stringSchema,
+      tenantName: stringSchema,
+      workspaces: arrayOf(ref("ClientWorkspaceSummary"))
+    },
+    ["apiVersion", "tenantCode", "tenantName", "workspaces"]
+  ),
+  ClientRegistrationChallengeRequest: objectOf(
+    {
+      tenantCode: stringSchema,
+      workspaceCode: stringSchema,
+      method: { type: "string", enum: ["sms", "email"] },
+      identifier: stringSchema,
+      idempotencyKey: stringSchema
+    },
+    ["tenantCode", "method", "identifier", "idempotencyKey"]
+  ),
+  ClientRegistrationChallengeResponse: objectOf(
+    {
+      apiVersion: stringSchema,
+      challengeId: stringSchema,
+      status: stringSchema,
+      method: stringSchema,
+      maskedDestination: stringSchema,
+      expiresAt: { type: "string", format: "date-time" },
+      retryAfterSeconds: numberSchema,
+      developmentCode: stringSchema,
+      deliveryMode: stringSchema
+    },
+    ["apiVersion", "challengeId", "status", "method", "maskedDestination", "expiresAt"]
+  ),
+  VerifyClientRegistrationChallengeRequest: objectOf(
+    { code: { type: "string", minLength: 6, maxLength: 6 } },
+    ["code"]
+  ),
+  VerifyClientRegistrationChallengeResponse: objectOf(
+    {
+      apiVersion: stringSchema,
+      verificationToken: stringSchema,
+      expiresAt: { type: "string", format: "date-time" }
+    },
+    ["apiVersion", "verificationToken", "expiresAt"]
+  ),
+  ClientPersonalMembershipRegistrationRequest: objectOf(
+    {
+      tenantCode: stringSchema,
+      workspaceCode: stringSchema,
+      name: stringSchema,
+      phone: stringSchema,
+      email: stringSchema,
+      identityNo: stringSchema,
+      password: { type: "string", format: "password" },
+      verificationToken: stringSchema,
+      consent: objectOf(
+        {
+          userAgreementVersion: stringSchema,
+          privacyPolicyVersion: stringSchema,
+          agreedAt: { type: "string", format: "date-time" }
+        },
+        ["userAgreementVersion", "privacyPolicyVersion", "agreedAt"]
+      ),
+      idempotencyKey: stringSchema
+    },
+    ["tenantCode", "name", "phone", "password", "verificationToken", "consent", "idempotencyKey"]
+  ),
+  ClientPersonalMembershipRegistrationResponse: objectOf(
+    {
+      apiVersion: stringSchema,
+      result: stringSchema,
+      registrationId: stringSchema,
+      customerId: stringSchema,
+      reviewStatus: stringSchema,
+      membershipStatus: stringSchema
+    },
+    ["apiVersion", "result", "registrationId", "reviewStatus", "membershipStatus"]
+  ),
+  ClientMembershipLoginRequest: objectOf(
+    {
+      tenantCode: stringSchema,
+      loginIdentifier: stringSchema,
+      password: { type: "string", format: "password" },
+      workspaceCode: stringSchema,
+      clientId: stringSchema
+    },
+    ["tenantCode", "loginIdentifier", "password"]
+  ),
+  ClientMembershipSessionResponse: objectOf(
+    {
+      apiVersion: stringSchema,
+      accessToken: stringSchema,
+      refreshToken: stringSchema,
+      expiresIn: numberSchema,
+      customer: objectOf(
+        {
+          customerId: stringSchema,
+          customerType: stringSchema,
+          displayName: stringSchema,
+          loginIdentifierMasked: stringSchema
+        },
+        ["customerId", "customerType", "displayName", "loginIdentifierMasked"]
+      ),
+      workspaces: arrayOf(ref("ClientWorkspaceSummary")),
+      workspace: ref("ClientWorkspaceSummary"),
+      wechatBound: booleanSchema
+    },
+    ["apiVersion", "accessToken", "refreshToken", "expiresIn", "customer", "workspaces"]
+  ),
+  ClientRefreshRequest: objectOf({ refreshToken: stringSchema }, ["refreshToken"]),
+  ClientSwitchWorkspaceRequest: objectOf({ workspaceCode: stringSchema }, ["workspaceCode"]),
+  ClientChangePasswordRequest: objectOf(
+    {
+      currentPassword: { type: "string", format: "password" },
+      newPassword: { type: "string", format: "password" }
+    },
+    ["currentPassword", "newPassword"]
+  ),
+  ClientActionResult: objectOf({ success: booleanSchema }),
+  ClientChannelBootstrapResponse: objectOf(
+    {
+      apiVersion: stringSchema,
+      tenantCode: stringSchema,
+      client: { type: "string", enum: ["wechat_miniprogram", "app", "web"] },
+      merchant: objectOf({ name: stringSchema, logoUrl: stringSchema, faviconUrl: stringSchema, servicePhone: stringSchema, serviceHours: stringSchema }, ["name"], false),
+      adminLogin: ref("AdminLoginBranding"),
+      services: arrayOf(objectOf({ code: stringSchema, name: stringSchema, categoryCode: stringSchema, isDefault: booleanSchema, status: { type: "string", enum: ["open", "paused"] } }, ["code", "name", "categoryCode", "status"], false)),
+      categories: arrayOf(objectOf({ code: stringSchema, name: stringSchema }, ["code", "name"], false)),
+      defaultServiceCode: stringSchema,
+      agreements: objectOf({
+        userAgreement: objectOf({ name: stringSchema, version: stringSchema, url: stringSchema, hasBody: booleanSchema }, ["name", "version", "hasBody"], false),
+        privacyPolicy: objectOf({ name: stringSchema, version: stringSchema, url: stringSchema, hasBody: booleanSchema }, ["name", "version", "hasBody"], false)
+      }, ["userAgreement", "privacyPolicy"], false),
+      help: objectOf({ available: booleanSchema, faqCount: numberSchema }, ["available", "faqCount"], false),
+      banner: objectOf({ title: stringSchema, subtitle: stringSchema }, ["title"], false),
+      themeColor: stringSchema,
+      loginMethods: arrayOf({ type: "string", enum: ["wechat_phone", "sms", "password"] }),
+      capabilities: objectOf({ publicCatalog: booleanSchema, wechatPay: booleanSchema, delivery: booleanSchema, feeResponse: booleanSchema, accountClosure: booleanSchema }, ["publicCatalog", "wechatPay", "delivery", "feeResponse", "accountClosure"], false),
+      website: ref("ClientWebsiteConfig"),
+      source: { type: "string", enum: ["channel", "workspace_directory"] }
+    },
+    ["apiVersion", "tenantCode", "client", "merchant", "services", "categories", "help", "loginMethods", "capabilities", "source"],
+    false
+  ),
+  ClientWebsiteConfig: objectOf(
+    {
+      slogan: stringSchema, heroTitle: stringSchema, heroDescription: stringSchema, heroImageUrl: stringSchema,
+      secondaryColor: stringSchema, footerText: stringSchema, contactAddress: stringSchema,
+      ctaTitle: stringSchema, ctaDescription: stringSchema,
+      seoTitle: stringSchema, seoDescription: stringSchema, seoKeywords: stringSchema,
+      categoryImages: arrayOf(objectOf({ code: stringSchema, imageUrl: stringSchema }, ["code", "imageUrl"], false)),
+      advantages: arrayOf(objectOf({ icon: stringSchema, title: stringSchema, description: stringSchema }, ["title"], false)),
+      steps: arrayOf(objectOf({ title: stringSchema, description: stringSchema }, ["title"], false)),
+      testimonials: arrayOf(objectOf({ name: stringSchema, context: stringSchema, text: stringSchema }, ["name", "text"], false)),
+      showPoweredBy: booleanSchema
+    },
+    ["showPoweredBy"],
+    false
+  ),
+  ClientWebsiteHostResolution: objectOf({ tenantCode: { type: "string", nullable: true } }, ["tenantCode"], false),
+  ClientPublicDocumentResponse: objectOf(
+    {
+      apiVersion: stringSchema, tenantCode: stringSchema, kind: { type: "string", enum: ["user_agreement", "privacy_policy", "help"] },
+      name: stringSchema, version: stringSchema, url: stringSchema, body: stringSchema, intro: stringSchema,
+      faq: arrayOf("ClientChannelFaqItem"), updatedAt: { type: "string", format: "date-time" }
+    },
+    ["apiVersion", "tenantCode", "kind", "name"],
+    false
+  ),
+  ClientChallengeRequest: objectOf(
+    { tenantCode: stringSchema, workspaceCode: stringSchema, method: { type: "string", enum: ["sms", "email"] }, identifier: stringSchema, idempotencyKey: stringSchema, purpose: { type: "string", enum: ["registration", "login"] } },
+    ["tenantCode", "method", "identifier", "idempotencyKey", "purpose"]
+  ),
+  ClientSmsLoginRequest: objectOf(
+    { tenantCode: stringSchema, loginIdentifier: stringSchema, verificationToken: stringSchema, workspaceCode: stringSchema, clientId: stringSchema },
+    ["tenantCode", "loginIdentifier", "verificationToken"]
+  ),
+  ClientWechatPhoneLoginRequest: objectOf(
+    { tenantCode: stringSchema, appId: stringSchema, loginCode: stringSchema, phoneCode: stringSchema, consent: objectOf({ userAgreementVersion: stringSchema, privacyPolicyVersion: stringSchema, agreedAt: { type: "string", format: "date-time" } }, ["userAgreementVersion", "privacyPolicyVersion", "agreedAt"]), workspaceCode: stringSchema, clientId: stringSchema },
+    ["tenantCode", "loginCode", "phoneCode", "consent"]
+  ),
+  ClientWechatBindRequest: objectOf({ loginCode: stringSchema, appId: stringSchema }, ["loginCode"]),
+  ClientWechatBindResponse: objectOf({ apiVersion: stringSchema, bound: booleanSchema, appId: stringSchema, boundAt: { type: "string", format: "date-time" } }, ["apiVersion", "bound", "appId", "boundAt"], false),
+  ClientAccountClosurePreview: objectOf(
+    {
+      apiVersion: stringSchema, closable: booleanSchema,
+      blockers: arrayOf(objectOf({ code: stringSchema, message: stringSchema, count: numberSchema }, ["code", "message"])),
+      manualConfirmations: arrayOf(objectOf({ code: stringSchema, message: stringSchema }, ["code", "message"]))
+    },
+    ["apiVersion", "closable", "blockers", "manualConfirmations"], false
+  ),
+  ClientAccountClosureRequest: objectOf(
+    { loginIdentifier: stringSchema, verificationToken: stringSchema, acknowledgedManualChecks: booleanSchema, reason: stringSchema },
+    ["loginIdentifier", "verificationToken", "acknowledgedManualChecks"]
+  ),
+  ClientAccountClosureResponse: objectOf({ apiVersion: stringSchema, closed: booleanSchema, closedAt: { type: "string", format: "date-time" } }, ["apiVersion", "closed", "closedAt"], false),
+  ClientDeliveryAddressRequest: objectOf(
+    {
+      id: stringSchema, revision: numberSchema, recipient: stringSchema, phone: stringSchema, countryCode: stringSchema, province: stringSchema, city: stringSchema,
+      district: stringSchema, detail: stringSchema, postalCode: stringSchema, latitude: numberSchema, longitude: numberSchema, isDefault: booleanSchema
+    },
+    ["recipient", "phone", "province", "city", "detail"]
+  ),
+  ClientDeliveryAddress: objectOf(
+    {
+      id: stringSchema, revision: numberSchema, recipient: stringSchema, phoneMasked: stringSchema, countryCode: stringSchema, province: stringSchema, city: stringSchema,
+      district: stringSchema, detail: stringSchema, postalCode: stringSchema, latitude: numberSchema, longitude: numberSchema, isDefault: booleanSchema, updatedAt: { type: "string", format: "date-time" }
+    },
+    ["id", "revision", "recipient", "phoneMasked", "countryCode", "province", "city", "detail", "isDefault", "updatedAt"],
+    false
+  ),
+  ClientDeliveryAddressList: objectOf({ apiVersion: stringSchema, items: arrayOf(ref("ClientDeliveryAddress")) }, ["apiVersion", "items"], false),
+  ClientDeliveryAddressSnapshot: objectOf(
+    {
+      addressId: stringSchema, recipient: stringSchema, phoneMasked: stringSchema, countryCode: stringSchema, province: stringSchema, city: stringSchema, district: stringSchema,
+      detail: stringSchema, postalCode: stringSchema, latitude: numberSchema, longitude: numberSchema, capturedAt: { type: "string", format: "date-time" }
+    },
+    ["recipient", "phoneMasked", "countryCode", "province", "city", "detail", "capturedAt"],
+    false
+  ),
+  ClientFeeItem: objectOf(
+    {
+      inspectionId: stringSchema, exceptionIndex: numberSchema, stage: { type: "string", enum: ["pickup", "return"] }, code: stringSchema, description: stringSchema,
+      amount: numberSchema, currency: stringSchema, reviewedAt: { type: "string", format: "date-time" },
+      responseStatus: { type: "string", enum: ["pending", "confirmed", "disputed"] }, responseReason: stringSchema, respondedAt: { type: "string", format: "date-time" },
+      adjustments: arrayOf(objectOf({ fromAmount: numberSchema, toAmount: numberSchema, reason: stringSchema, adjustedAt: { type: "string", format: "date-time" } }, ["fromAmount", "toAmount", "reason", "adjustedAt"], false)),
+      history: arrayOf(objectOf({ decision: { type: "string", enum: ["confirmed", "disputed"] }, reason: stringSchema, respondedAt: { type: "string", format: "date-time" } }, ["decision", "reason", "respondedAt"], false)),
+      evidenceCount: numberSchema
+    },
+    ["inspectionId", "exceptionIndex", "stage", "code", "description", "amount", "currency", "responseStatus", "adjustments", "history", "evidenceCount"],
+    false
+  ),
+  ClientFeeItemsResponse: objectOf({ apiVersion: stringSchema, orderId: stringSchema, items: arrayOf(ref("ClientFeeItem")), pendingCount: numberSchema }, ["apiVersion", "orderId", "items", "pendingCount"], false),
+  ClientFeeResponseRequest: objectOf({ decision: { type: "string", enum: ["confirmed", "disputed"] }, reason: stringSchema }, ["decision", "reason"]),
+  ClientFeeResponseResult: objectOf({ apiVersion: stringSchema, item: ref("ClientFeeItem"), replayed: booleanSchema }, ["apiVersion", "item", "replayed"], false),
+  ClientMembershipStatus: objectOf(
+    {
+      apiVersion: stringSchema,
+      customerId: stringSchema,
+      customerType: stringSchema,
+      displayName: stringSchema,
+      phoneMasked: stringSchema,
+      email: stringSchema,
+      accountStatus: stringSchema,
+      workspace: ref("ClientWorkspaceSummary"),
+      workspaces: arrayOf(ref("ClientWorkspaceSummary")),
+      reviews: arrayOf(objectSchema),
+      qualifications: arrayOf(objectSchema)
+    },
+    ["apiVersion", "customerId", "customerType", "displayName", "phoneMasked", "accountStatus", "workspace", "workspaces", "reviews", "qualifications"]
+  ),
+  ClientProfileUpdateRequest: objectOf(
+    {
+      name: stringSchema,
+      email: stringSchema
+    },
+    []
+  ),
+  ClientContactRequest: objectOf(
+    {
+      id: stringSchema,
+      kind: { type: "string", enum: ["emergency", "corporate", "other"] },
+      name: stringSchema,
+      phone: stringSchema,
+      email: stringSchema,
+      relation: stringSchema,
+      isPrimary: booleanSchema
+    },
+    ["kind", "name", "phone"]
+  ),
+  ClientContact: objectOf(
+    {
+      id: stringSchema,
+      kind: { type: "string", enum: ["emergency", "corporate", "other"] },
+      name: stringSchema,
+      phoneMasked: stringSchema,
+      email: stringSchema,
+      relation: stringSchema,
+      isPrimary: booleanSchema,
+      status: stringSchema
+    },
+    ["id", "kind", "name", "phoneMasked", "isPrimary", "status"]
+  ),
+  ClientContacts: objectOf(
+    { apiVersion: stringSchema, items: arrayOf(ref("ClientContact")) },
+    ["apiVersion", "items"]
+  ),
+  ClientProfile: objectOf(
+    {
+      apiVersion: stringSchema,
+      customerId: stringSchema,
+      customerType: stringSchema,
+      name: stringSchema,
+      phoneMasked: stringSchema,
+      email: stringSchema,
+      identityVerified: booleanSchema,
+      identityNoMasked: stringSchema,
+      accountStatus: stringSchema,
+      workspace: ref("ClientWorkspaceSummary"),
+      corporate: objectSchema,
+      contacts: arrayOf(ref("ClientContact"))
+    },
+    ["apiVersion", "customerId", "customerType", "name", "phoneMasked", "identityVerified", "accountStatus", "workspace", "contacts"]
+  ),
+  ClientMembershipPlan: objectOf(
+    {
+      planId: stringSchema,
+      code: stringSchema,
+      name: stringSchema,
+      targetType: stringSchema,
+      versionId: stringSchema,
+      version: numberSchema,
+      levelRank: numberSchema,
+      isDefault: booleanSchema,
+      isRecommended: booleanSchema,
+      benefits: arrayOf(ref("CustomerMembershipBenefit")),
+      effectiveFrom: { type: "string", format: "date-time" },
+      effectiveTo: { type: "string", format: "date-time" }
+    },
+    ["planId", "code", "name", "targetType", "versionId", "version", "levelRank", "isDefault", "isRecommended", "benefits"]
+  ),
+  ClientMembershipPlans: objectOf(
+    { apiVersion: stringSchema, plans: arrayOf(ref("ClientMembershipPlan")) },
+    ["apiVersion", "plans"]
+  ),
+  ClientMembershipAssignment: objectOf(
+    {
+      id: stringSchema,
+      planId: stringSchema,
+      planVersionId: stringSchema,
+      planName: stringSchema,
+      targetType: stringSchema,
+      source: stringSchema,
+      status: stringSchema,
+      effectiveFrom: { type: "string", format: "date-time" },
+      effectiveTo: { type: "string", format: "date-time" },
+      benefits: arrayOf(ref("CustomerMembershipBenefit")),
+      reason: stringSchema,
+      createdAt: { type: "string", format: "date-time" }
+    },
+    ["id", "planId", "planVersionId", "planName", "targetType", "source", "status", "effectiveFrom", "benefits", "createdAt"]
+  ),
+  ClientMembershipAssignments: objectOf(
+    { apiVersion: stringSchema, items: arrayOf(ref("ClientMembershipAssignment")) },
+    ["apiVersion", "items"]
+  ),
+  ClientMembershipBenefits: objectOf(
+    {
+      apiVersion: stringSchema,
+      personal: ref("ClientMembershipAssignment"),
+      corporate: ref("ClientMembershipAssignment")
+    },
+    ["apiVersion"]
+  ),
+  ClientCorporateIdentity: objectOf(
+    {
+      corporateCustomerId: stringSchema,
+      corporateName: stringSchema,
+      legalName: stringSchema,
+      unifiedSocialCreditCodeMasked: stringSchema,
+      registeredAddress: stringSchema,
+      role: stringSchema,
+      department: stringSchema,
+      employeeNo: stringSchema,
+      membershipId: stringSchema,
+      effectiveTo: { type: "string", format: "date-time" }
+    },
+    ["corporateCustomerId", "corporateName", "role", "membershipId"]
+  ),
+  ClientCorporateIdentities: objectOf(
+    { apiVersion: stringSchema, items: arrayOf(ref("ClientCorporateIdentity")) },
+    ["apiVersion", "items"]
+  ),
+  ClientPaymentCapabilities: objectOf(
+    {
+      apiVersion: stringSchema,
+      mode: stringSchema,
+      realPaymentEnabled: { type: "boolean" },
+      methods: arrayOf(stringSchema),
+      instruments: arrayOf(stringSchema)
+    },
+    ["apiVersion", "mode", "realPaymentEnabled", "methods", "instruments"]
+  ),
+  ClientConfig: objectOf(
+    {
+      apiVersion: stringSchema,
+      tenantCode: stringSchema,
+      workspace: ref("ClientWorkspaceSummary"),
+      categoryCode: stringSchema,
+      timeZone: stringSchema,
+      registration: objectOf({ mode: stringSchema, verificationMethods: arrayOf(stringSchema), providerMode: stringSchema }, ["mode", "verificationMethods", "providerMode"]),
+      features: objectOf({ profile: booleanSchema, contacts: booleanSchema, membershipPlans: booleanSchema, qualifications: booleanSchema, coupons: booleanSchema, orderExtensions: booleanSchema, notifications: booleanSchema, delivery: booleanSchema, feeResponse: booleanSchema, accountClosure: booleanSchema, wechatBinding: booleanSchema }, ["profile", "contacts", "membershipPlans", "qualifications", "coupons", "orderExtensions", "notifications", "delivery", "feeResponse", "accountClosure", "wechatBinding"]),
+      payment: ref("ClientPaymentCapabilities")
+    },
+    ["apiVersion", "tenantCode", "workspace", "categoryCode", "timeZone", "registration", "features", "payment"]
+  ),
+  ClientBookingOption: objectOf(
+    {
+      bookingIdentity: stringSchema,
+      corporateCustomerId: stringSchema,
+      corporateName: stringSchema,
+      membershipId: stringSchema,
+      label: stringSchema,
+      eligible: booleanSchema,
+      reason: stringSchema
+    },
+    ["bookingIdentity", "label", "eligible"]
+  ),
+  ClientQualificationRequest: objectOf(
+    {
+      qualificationType: stringSchema,
+      referenceNo: stringSchema,
+      issuedAt: { type: "string", format: "date-time" },
+      expiresAt: { type: "string", format: "date-time" },
+      evidenceRef: stringSchema
+    },
+    ["qualificationType"]
+  ),
+  ClientQualificationUploadSessionRequest: objectOf(
+    {
+      qualificationType: stringSchema,
+      fileName: stringSchema,
+      mimeType: stringSchema,
+      sizeBytes: numberSchema,
+      idempotencyKey: stringSchema
+    },
+    ["qualificationType", "fileName", "mimeType", "sizeBytes", "idempotencyKey"]
+  ),
+  ClientQualificationUploadCompleteRequest: objectOf({ checksum: stringSchema }),
+  ClientCatalog: objectOf(
+    {
+      apiVersion: stringSchema,
+      tenantCode: stringSchema,
+      workspace: ref("ClientWorkspaceSummary"),
+      categoryCode: stringSchema,
+      categoryMetadata: objectOf({
+        structureVersion: { type: "integer", enum: [1] }, categoryVersionId: stringSchema,
+        definitionVersion: stringSchema, name: stringSchema,
+        icon: { type: "string", enum: [...RENTAL_CATEGORY_ICON_CODES] },
+        fields: arrayOf(objectOf({ code: stringSchema, label: stringSchema,
+          type: { type: "string", enum: ["string", "number", "boolean", "date", "select"] }, unit: stringSchema, options: arrayOf(stringSchema)
+        }, ["code", "label", "type"], false))
+      }, ["structureVersion", "definitionVersion", "name", "fields"], false),
+      timeZone: stringSchema,
+      terminology: objectOf({
+        itemLabel: stringSchema,
+        itemGroupLabel: stringSchema,
+        assetLabel: stringSchema,
+        fulfillmentLabel: stringSchema,
+        pickupLabel: stringSchema,
+        returnLabel: stringSchema,
+        deliveryLabel: stringSchema,
+        usageMetricLabel: stringSchema
+      }, ["itemLabel", "itemGroupLabel", "assetLabel", "fulfillmentLabel", "pickupLabel", "returnLabel"], false),
+      pricingUnits: arrayOf(objectOf({ code: stringSchema, label: stringSchema }, ["code", "label"], false)),
+      items: arrayOf(objectOf({ id: stringSchema, code: stringSchema, name: stringSchema, description: stringSchema,
+        inventoryMode: stringSchema, images: arrayOf(objectOf({ url: stringSchema, alt: stringSchema }, ["url"], false)),
+        attributes: objectOf({}, [], { oneOf: [stringSchema, numberSchema, booleanSchema] }),
+        attributeLabels: objectOf({}, [], stringSchema),
+        startingPrice: objectOf({ amount: numberSchema, unit: stringSchema, currency: stringSchema }, ["amount", "unit", "currency"], false)
+      }, ["id", "code", "name", "inventoryMode"], false)),
+      pricingGroups: arrayOf(objectSchema),
+      services: arrayOf(objectSchema),
+      locations: arrayOf(objectOf({ id: stringSchema, code: stringSchema, name: stringSchema, status: stringSchema,
+        address: stringSchema, city: stringSchema, latitude: numberSchema, longitude: numberSchema,
+        businessHours: stringSchema, contactPhone: stringSchema,
+        capabilities: arrayOf({ type: "string", enum: ["pickup", "return", "storage", "delivery"] })
+      }, ["id", "code", "name", "status"], false)),
+      discountPlans: arrayOf(objectSchema),
+      fulfillment: objectOf({
+        enabledModes: arrayOf(stringSchema),
+        allowDifferentReturnLocation: booleanSchema,
+        deliveryDestination: stringSchema,
+        deliveryLabel: stringSchema,
+        pickupLabel: stringSchema,
+        returnLabel: stringSchema
+      }, ["enabledModes", "allowDifferentReturnLocation", "deliveryDestination", "pickupLabel", "returnLabel"], false)
+    },
+    ["apiVersion", "tenantCode", "workspace", "categoryCode", "timeZone", "terminology", "pricingUnits", "items", "pricingGroups", "services", "locations", "discountPlans", "fulfillment"]
+  ),
+  ClientAvailabilityRequest: objectOf(
+    {
+      locationId: stringSchema,
+      startAt: { type: "string", format: "date-time" },
+      endAt: { type: "string", format: "date-time" },
+      lines: arrayOf(objectOf({ itemGroupId: stringSchema, quantity: numberSchema }, ["itemGroupId", "quantity"]))
+    },
+    ["locationId", "startAt", "endAt", "lines"]
+  ),
+  ClientQuoteDeliveryAddressDraft: objectOf(
+    {
+      recipient: { type: "string", minLength: 1, maxLength: 120 },
+      phone: { type: "string", minLength: 1, maxLength: 40, pattern: "^\\+?[0-9][0-9\\s()-]{5,38}$" },
+      countryCode: { type: "string", maxLength: 8 },
+      province: { type: "string", minLength: 1, maxLength: 100 },
+      city: { type: "string", minLength: 1, maxLength: 100 },
+      district: { type: "string", maxLength: 100 },
+      detail: { type: "string", minLength: 1, maxLength: 500 },
+      postalCode: { type: "string", maxLength: 20 }
+    },
+    ["recipient", "phone", "province", "city", "detail"], false
+  ),
+  ClientQuoteRequest: {
+    ...objectOf(
+      {
+        bookingIdentity: { $ref: "#/components/schemas/RentalBookingIdentityInput" },
+        fulfillmentMode: stringSchema,
+        fulfillmentLocationId: stringSchema,
+        returnLocationId: stringSchema,
+        startAt: { type: "string", format: "date-time" },
+        endAt: { type: "string", format: "date-time" },
+        pricingPlanId: stringSchema,
+        discountPlanId: stringSchema,
+        customerCouponId: stringSchema,
+        lines: arrayOf(objectSchema),
+        services: arrayOf(objectSchema),
+        deliveryAddressId: stringSchema,
+        deliveryAddressDraft: ref("ClientQuoteDeliveryAddressDraft")
+      },
+      ["fulfillmentMode", "fulfillmentLocationId", "startAt", "endAt", "lines"], false
+    ),
+    not: { type: "object", properties: { deliveryAddressId: stringSchema,
+      deliveryAddressDraft: ref("ClientQuoteDeliveryAddressDraft") },
+      required: ["deliveryAddressId", "deliveryAddressDraft"] }
+  },
+  RentalQuoteSourceSnapshot: objectOf({
+    version: { type: 'string', enum: ['rental-quote-source-1'], readOnly: true },
+    tenantId: stringSchema, workspaceId: stringSchema,
+    actor: objectOf({ kind: { type: 'string', enum: ['user', 'customer'] }, id: stringSchema }, ['kind', 'id'], false),
+    audience: { type: 'string', enum: ['operator', 'staff', 'client'] }
+  }, ['version', 'tenantId', 'workspaceId', 'actor', 'audience'], false),
+  RentalQuoteInventoryBasis: objectOf({
+    version: { type: 'string', enum: ['rental-quote-inventory-1'], readOnly: true },
+    tenantId: stringSchema, workspaceId: stringSchema,
+    groups: { ...arrayOf(objectOf({
+      id: stringSchema, tenantId: stringSchema, categoryCode: stringSchema, code: stringSchema, name: stringSchema,
+      inventoryMode: { type: 'string', enum: ['serialized', 'quantity', 'consumable', 'bundle'] },
+      unit: stringSchema, status: { type: 'string', enum: ['enabled', 'disabled'] },
+      bundleComponents: { ...arrayOf(objectOf({ itemGroupId: stringSchema, itemGroupCode: stringSchema,
+        itemGroupName: stringSchema, quantity: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
+        optional: { type: 'boolean' }, substitutionGroup: stringSchema
+      }, ['itemGroupId', 'itemGroupCode', 'itemGroupName', 'quantity', 'optional'], false)), maxItems: 256 }
+    }, ['id', 'tenantId', 'categoryCode', 'code', 'name', 'inventoryMode', 'unit', 'status', 'bundleComponents'], false)), minItems: 1, maxItems: 100 }
+  }, ['version', 'tenantId', 'workspaceId', 'groups'], false),
+  RentalQuoteSnapshot: objectOf({
+    id: stringSchema, tenantId: stringSchema, quoteNo: stringSchema, request: objectSchema,
+    inventoryBasis: { ...ref('RentalQuoteInventoryBasis'), readOnly: true, description: 'Core-owned inventory composition; not a reservation or authorization. Legacy records omit it.' },
+    sourceSnapshot: { ...ref('RentalQuoteSourceSnapshot'), readOnly: true,
+      description: 'Server-derived provenance, never authorization. Legacy records may omit it; own-scope access then fails closed.' },
+    deliveryAddressSnapshot: objectSchema, rentalLineAmounts: { type: 'object', additionalProperties: numberSchema },
+    chargeLines: arrayOf(objectSchema), rentalAmount: numberSchema, discountAmount: numberSchema,
+    couponAmount: numberSchema, serviceAmount: numberSchema, fulfillmentAmount: numberSchema,
+    depositAmount: numberSchema, preAuthAmount: numberSchema, payableAmount: numberSchema, receivableAmount: numberSchema,
+    expiresAt: { type: 'string', format: 'date-time' }, createdAt: { type: 'string', format: 'date-time' },
+    consumedAt: { type: 'string', format: 'date-time' }, consumedOrderId: stringSchema
+  }, ['id', 'tenantId', 'quoteNo', 'request', 'chargeLines', 'rentalAmount', 'discountAmount', 'couponAmount',
+    'serviceAmount', 'fulfillmentAmount', 'depositAmount', 'preAuthAmount', 'payableAmount', 'receivableAmount', 'expiresAt', 'createdAt']),
+  ClientQuote: objectOf(
+    {
+      id: stringSchema,
+      quoteNo: stringSchema,
+      sourceSnapshot: { ...ref('RentalQuoteSourceSnapshot'), readOnly: true },
+      rentalLineAmounts: { type: 'object', additionalProperties: numberSchema },
+      request: ref("ClientQuoteRequest"),
+      rentalAmount: numberSchema,
+      discountAmount: numberSchema,
+      couponAmount: numberSchema,
+      serviceAmount: numberSchema,
+      finalPayableAmount: numberSchema,
+      expiresAt: { type: "string", format: "date-time" }
+    },
+    ["id", "request"]
+  ),
+  ClientCreateOrderRequest: objectOf(
+    {
+      quoteId: stringSchema,
+      contactPhone: stringSchema
+    },
+    ["quoteId"]
+  ),
+  ClientOrder: objectOf(
+    {
+      id: stringSchema,
+      orderNo: stringSchema,
+      status: stringSchema,
+      customerName: stringSchema,
+      fulfillmentMode: stringSchema,
+      fulfillmentLocationName: stringSchema,
+      returnLocationName: stringSchema,
+      startAt: { type: "string", format: "date-time" },
+      endAt: { type: "string", format: "date-time" },
+      effectiveEndAt: { type: "string", format: "date-time" },
+      rentalAmount: numberSchema,
+      discountAmount: numberSchema,
+      couponAmount: numberSchema,
+      serviceAmount: numberSchema,
+      fulfillmentAmount: numberSchema,
+      depositAmount: numberSchema,
+      preAuthAmount: numberSchema,
+      payableAmount: numberSchema,
+      adjustmentAmount: numberSchema,
+      finalPayableAmount: numberSchema,
+      currency: stringSchema,
+      lines: arrayOf(objectSchema),
+      chargeLines: arrayOf(objectSchema),
+      allocations: arrayOf(objectSchema),
+      deliveryAddress: ref("ClientDeliveryAddressSnapshot"),
+      createdAt: { type: "string", format: "date-time" },
+      updatedAt: { type: "string", format: "date-time" }
+    },
+    ["id", "orderNo", "status", "customerName", "fulfillmentMode", "fulfillmentLocationName", "startAt", "endAt", "rentalAmount", "discountAmount", "couponAmount", "serviceAmount", "fulfillmentAmount", "depositAmount", "preAuthAmount", "payableAmount", "adjustmentAmount", "finalPayableAmount", "lines", "chargeLines", "createdAt", "updatedAt"]
+  ),
+  MyOrderIndex: objectOf(
+    {
+      orderId: stringSchema, orderNo: stringSchema, tenantCode: stringSchema,
+      workspaceCode: stringSchema, workspaceName: stringSchema, categoryCode: stringSchema, status: stringSchema,
+      startAt: { type: "string", format: "date-time" }, endAt: { type: "string", format: "date-time" },
+      effectiveEndAt: { type: "string", format: "date-time" }, finalPayableAmount: numberSchema, currency: stringSchema,
+      createdAt: { type: "string", format: "date-time" }, updatedAt: { type: "string", format: "date-time" },
+      itemSummary: objectOf(
+        { firstItemGroupId: stringSchema, firstItemName: stringSchema, itemCount: { type: "integer", minimum: 0 }, totalQuantity: { type: "integer", minimum: 0 } },
+        ["firstItemGroupId", "firstItemName", "itemCount", "totalQuantity"],
+        false
+      )
+    },
+    ["orderId", "orderNo", "tenantCode", "workspaceCode", "workspaceName", "categoryCode", "status", "startAt", "endAt", "finalPayableAmount", "currency", "createdAt", "updatedAt"],
+    false
+  ),
+  ClientMyOrdersResponse: objectOf(
+    { apiVersion: stringSchema, items: arrayOf(ref("MyOrderIndex")), page: { type: "integer", minimum: 1, maximum: 1000000 }, pageSize: { type: "integer", minimum: 1, maximum: 50 }, total: { type: "integer", minimum: 0 } },
+    ["apiVersion", "items", "page", "pageSize", "total"], false
+  ),
+  ClientCancellationPreview: objectOf(
+    {
+      apiVersion: stringSchema, orderId: stringSchema, cancellationCharge: numberSchema, currency: stringSchema,
+      calculatedAt: { type: "string", format: "date-time" }, estimated: { type: "boolean", description: "Always true; cancellation rechecks state, time and settlement hooks. Not a refund quote." }
+    },
+    ["apiVersion", "orderId", "cancellationCharge", "currency", "calculatedAt", "estimated"], false
+  ),
+  ClientOrderMutation: objectOf({ order: ref("ClientOrder"), replayed: booleanSchema }, ["order", "replayed"]),
+  ClientOrderList: objectOf({ items: arrayOf(ref("ClientOrder")), page: numberSchema, pageSize: numberSchema, total: numberSchema }, ["items", "page", "pageSize", "total"]),
+  ClientFulfillment: objectOf(
+    {
+      orderId: stringSchema,
+      orderNo: stringSchema,
+      status: stringSchema,
+      fulfillmentMode: stringSchema,
+      fulfillmentLocationName: stringSchema,
+      returnLocationName: stringSchema,
+      startAt: { type: "string", format: "date-time" },
+      endAt: { type: "string", format: "date-time" },
+      effectiveEndAt: { type: "string", format: "date-time" },
+      allocations: arrayOf(objectSchema)
+    },
+    ["orderId", "orderNo", "status", "fulfillmentMode", "fulfillmentLocationName", "startAt", "endAt", "allocations"]
+  ),
+  ClientNotificationList: objectOf(
+    {
+      items: arrayOf(objectSchema),
+      page: numberSchema,
+      pageSize: numberSchema,
+      total: numberSchema
+    },
+    ["items", "page", "pageSize", "total"]
+  ),
+  ClientOrderExtensionRequest: objectOf(
+    {
+      newEndAt: { type: "string", format: "date-time" },
+      services: arrayOf(objectSchema),
+      memo: stringSchema
+    },
+    ["newEndAt"]
+  ),
+  ClientExtensionList: arrayOf("RentalOrderExtensionRecord"),
+  ClientExtensionPreview: ref("RentalOrderExtensionPreview"),
+  ClientCancelOrderRequest: objectOf({ reason: stringSchema }, ["reason"]),
+  ClientFunding: arrayOf(objectSchema),
+  ClientPaymentSimulationRequest: objectOf(
+    {
+      instrument: { type: "string", enum: ["rental", "deposit", "preauthorization"] },
+      action: { type: "string", enum: ["initiate", "append", "capture", "refund", "release", "fail"] },
+      amount: numberSchema,
+      reason: stringSchema,
+      failureCode: stringSchema
+    },
+    ["instrument", "action", "reason"]
+  ),
+  ClientPaymentIntentRequest: objectOf(
+    {
+      instrument: { type: "string", enum: ["rental", "deposit", "preauthorization"] },
+      method: { type: "string", enum: ["alipay", "wechat_pay"] },
+      idempotencyKey: stringSchema
+    },
+    ["instrument", "method", "idempotencyKey"]
+  ),
+  ClientMiniProgramPaymentIntentRequest: objectOf(
+    { instrument: { type: "string", enum: ["rental"] }, idempotencyKey: { type: "string", minLength: 1, maxLength: 191 } },
+    ["instrument", "idempotencyKey"], false
+  ),
+  ClientWechatJsapiParameters: objectOf(
+    { timeStamp: stringSchema, nonceStr: stringSchema, package: stringSchema, signType: { type: "string", enum: ["RSA"] }, paySign: stringSchema },
+    ["timeStamp", "nonceStr", "package", "signType", "paySign"], false
+  ),
+  ClientPaymentIntentResponse: objectOf(
+    {
+      apiVersion: stringSchema,
+      intentId: stringSchema,
+      provider: stringSchema,
+      method: stringSchema,
+      instrument: stringSchema,
+      amount: numberSchema,
+      currency: stringSchema,
+      status: stringSchema,
+      checkoutUrl: stringSchema,
+      jsapi: ref("ClientWechatJsapiParameters"),
+      expiresAt: { type: "string", format: "date-time" },
+      paidAt: { type: "string", format: "date-time" },
+      message: stringSchema
+    },
+    ["apiVersion", "intentId", "provider", "method", "instrument", "amount", "currency", "status", "expiresAt"]
+  )
+};

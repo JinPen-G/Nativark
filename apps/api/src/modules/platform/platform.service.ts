@@ -1,6 +1,6 @@
 import { RentalWorkspaceManagementApplication } from "@rental-os/rental-core/workspace-management";
 import { RentalCustomerManagementApplication } from "@rental-os/rental-core/customer-management";
-/** 原组合平台的业务适配及内存演示。持久化组织/安全、字典/编号委托同一公共应用；Rental范围与初始化仍由原业务链裁定。 */
+/** 原组合平台的业务适配及内存演示。持久化租户/人员/角色、组织/安全与字典/编号委托同一公共应用；Rental范围与初始化由原业务链裁定。 */
 import { createRentalLegacyPermissionModules } from "@rental-os/rental-core/permissions";
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
@@ -82,6 +82,7 @@ import { WorkspaceCapabilityService } from "../rental-core/workspace-capability.
 import { RentalCoreService } from "../rental-core/rental-core.service";
 import { defaultSecurityBaseline, normalizeSecurityBaseline } from "./platform-security-baseline";
 import { PlatformManagementService } from "@rental-os/platform-server/management";
+import { OriginalPublicManagementAdapter } from "./public-management.adapter";
 import { PlatformToolsService, advanceNumberRule, createDictionaryGroup, createNumberRule, formatPlatformNumber } from "@rental-os/platform-server/tools";
 import { assertNoLegacyAiCredentials, closedLegacyAiSettings } from "./legacy-system-ai";
 
@@ -162,8 +163,13 @@ export class PlatformService {
   ) {}
 
   private requirePublicManagement() {
-    if (!this.publicManagement) throw new ServiceUnavailableException("公共组织与安全管理服务未装配");
+    if (!this.publicManagement) throw new ServiceUnavailableException("公共租户、人员、角色与安全管理服务未装配");
     return this.publicManagement;
+  }
+
+  private publicManagementAdapter?: OriginalPublicManagementAdapter;
+  private getPublicManagementAdapter() {
+    return this.publicManagementAdapter ??= new OriginalPublicManagementAdapter(this.requirePublicManagement());
   }
 
   private requirePublicTools() {
@@ -1383,10 +1389,10 @@ export class PlatformService {
   }
 
   listTenants(currentUser?: SystemUserRow) {
-    this.assertSaasAdmin(currentUser);
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.listTenants();
+      return this.getPublicManagementAdapter().listTenants();
     }
+    this.assertSaasAdmin(currentUser);
     return this.tenants
       .filter((tenant) => tenant.tenantCode !== "platform")
       .map((tenant) => ({
@@ -1398,8 +1404,8 @@ export class PlatformService {
   }
 
   getTenant(id: string, currentUser?: SystemUserRow) {
+    if (this.useMysqlDataSource()) return this.getPublicManagementAdapter().getTenant(id);
     this.assertSaasAdmin(currentUser);
-    if (this.useMysqlDataSource()) return this.platformRepository.getTenant(id);
     const tenant = this.tenants.find((item) => item.tenantId === id);
     if (!tenant) throw new NotFoundException("租户不存在");
     if (tenant.tenantCode === "platform") throw new BadRequestException("SaaS 平台主体不属于业务租户列表");
@@ -1407,9 +1413,9 @@ export class PlatformService {
   }
 
   updateTenant(id: string, input: UpdateTenantRequest, currentUser?: SystemUserRow) {
+    if (this.useMysqlDataSource()) return this.getPublicManagementAdapter().updateTenant(id, input);
     this.assertSaasAdmin(currentUser);
     input = { ...input, operatorShortName: this.operatorShortName(input.operatorShortName) };
-    if (this.useMysqlDataSource()) return this.platformRepository.updateTenant(id, input, currentUser!);
     const tenant = this.tenants.find((item) => item.tenantId === id);
     if (!tenant) throw new NotFoundException("租户不存在");
     if (tenant.tenantCode === "platform") throw new BadRequestException("SaaS 平台主体不能通过租户接口修改");
@@ -1434,8 +1440,8 @@ export class PlatformService {
   }
 
   updateTenantStatus(id: string, input: UpdateTenantStatusRequest, currentUser?: SystemUserRow) {
+    if (this.useMysqlDataSource()) return this.getPublicManagementAdapter().updateTenantStatus(id, input);
     this.assertSaasAdmin(currentUser);
-    if (this.useMysqlDataSource()) return this.platformRepository.updateTenantStatus(id, input, currentUser!);
     const tenant = this.tenants.find((item) => item.tenantId === id);
     if (!tenant) throw new NotFoundException("租户不存在");
     if (tenant.tenantCode === "platform") throw new BadRequestException("SaaS 平台主体不能冻结或停用");
@@ -1766,16 +1772,16 @@ export class PlatformService {
 
   listPermissionTree() {
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.listPermissionTree();
+      return this.getPublicManagementAdapter().listPermissionTree();
     }
     return this.permissionTree;
   }
 
   listRoles(tenantId?: string, currentUser?: SystemUserRow) {
-    const targetTenantId = this.resolveTargetTenantId(tenantId, currentUser);
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.listRoles(targetTenantId);
+      return this.getPublicManagementAdapter().listRoles(tenantId);
     }
+    const targetTenantId = this.resolveTargetTenantId(tenantId, currentUser);
     return this.roleRows
       .filter((role) => !role.tenantId || role.tenantId === targetTenantId)
       .map((role) => ({ ...role, tenantId: targetTenantId }));
@@ -1789,11 +1795,9 @@ export class PlatformService {
   }
 
   saveRole(input: SaveSystemRoleRequest, currentUser?: SystemUserRow) {
+    if (this.useMysqlDataSource()) return this.getPublicManagementAdapter().saveRole(input);
     this.assertCustomerActionPermission(currentUser, "system:role:manage", "维护角色");
     const tenantId = this.resolveTargetTenantId(input.tenantId, currentUser);
-    if (this.useMysqlDataSource()) {
-      return this.platformRepository.saveRole(input, tenantId, currentUser?.id);
-    }
     const existing = input.id
       ? this.roleRows.find((role) => role.id === input.id)
       : undefined;
@@ -1864,19 +1868,15 @@ export class PlatformService {
   }
 
   async saveRolePermissions(id: string, permissions: string[], tenantId: string | undefined, currentUser?: SystemUserRow) {
+    if (this.useMysqlDataSource()) return this.getPublicManagementAdapter().saveRolePermissions(id, permissions, tenantId);
     this.assertCustomerActionPermission(currentUser, "system:role:manage", "维护角色权限");
     const targetTenantId = this.resolveTargetTenantId(
-      tenantId ?? (this.useMysqlDataSource()
-        ? await this.platformRepository.getRoleTenantId(id)
-        : this.roleRows.find((role) => role.id === id)?.tenantId),
+      tenantId ?? this.roleRows.find((role) => role.id === id)?.tenantId,
       currentUser
     );
-    if (this.useMysqlDataSource()) {
-      return this.platformRepository.saveRolePermissions(id, permissions, targetTenantId, currentUser?.id);
-    }
     const role = this.roleRows.find((item) => item.id === id);
 
-    if (!role) {
+    if (!role || role.tenantId && role.tenantId !== targetTenantId) {
       throw new NotFoundException(`Role ${id} was not found`);
     }
     if (role.fixedAllPermissions) {
@@ -1895,22 +1895,21 @@ export class PlatformService {
   }
 
   async deleteRole(id: string, tenantId: string | undefined, currentUser?: SystemUserRow) {
+    if (this.useMysqlDataSource()) return this.getPublicManagementAdapter().deleteRole(id, tenantId);
     this.assertCustomerActionPermission(currentUser, "system:role:manage", "删除角色");
     const targetTenantId = this.resolveTargetTenantId(
-      tenantId ?? (this.useMysqlDataSource()
-        ? await this.platformRepository.getRoleTenantId(id)
-        : this.roleRows.find((role) => role.id === id)?.tenantId),
+      tenantId ?? this.roleRows.find((role) => role.id === id)?.tenantId,
       currentUser
     );
-    if (this.useMysqlDataSource()) {
-      return this.platformRepository.deleteRole(id, targetTenantId, currentUser?.id);
-    }
     const index = this.roleRows.findIndex((role) => role.id === id);
     if (index < 0) {
       throw new NotFoundException(`Role ${id} was not found`);
     }
 
     const role = this.roleRows[index];
+    if (role.tenantId && role.tenantId !== targetTenantId) {
+      throw new NotFoundException(`Role ${id} was not found`);
+    }
     if (role.fixedAllPermissions) {
       throw new BadRequestException("预设角色不能删除");
     }
@@ -1926,15 +1925,11 @@ export class PlatformService {
   }
 
   async setUserStatus(id: string, isActive: boolean, tenantId: string | undefined, currentUser?: SystemUserRow) {
+    if (this.useMysqlDataSource()) return this.getPublicManagementAdapter().setUserStatus(id, isActive, tenantId);
     const targetTenantId = this.resolveTargetTenantId(
-      tenantId ?? (this.useMysqlDataSource()
-        ? await this.platformRepository.getUserTenantId(id)
-        : this.users.find((user) => user.id === id)?.tenantId),
+      tenantId ?? this.users.find((user) => user.id === id)?.tenantId,
       currentUser
     );
-    if (this.useMysqlDataSource()) {
-      return this.platformRepository.setUserStatus(id, isActive, targetTenantId, currentUser?.id);
-    }
     const user = this.users.find((item) => item.id === id);
     if (!user || user.tenantId !== targetTenantId) {
       throw new NotFoundException(`User ${id} was not found`);
@@ -1947,15 +1942,11 @@ export class PlatformService {
   }
 
   async resetUserPassword(id: string, tenantId: string | undefined, currentUser?: SystemUserRow) {
+    if (this.useMysqlDataSource()) return this.getPublicManagementAdapter().resetUserPassword(id, tenantId);
     const targetTenantId = this.resolveTargetTenantId(
-      tenantId ?? (this.useMysqlDataSource()
-        ? await this.platformRepository.getUserTenantId(id)
-        : this.users.find((user) => user.id === id)?.tenantId),
+      tenantId ?? this.users.find((user) => user.id === id)?.tenantId,
       currentUser
     );
-    if (this.useMysqlDataSource()) {
-      return this.platformRepository.resetUserPassword(id, targetTenantId, currentUser?.id);
-    }
     const user = this.users.find((item) => item.id === id);
     if (!user || user.tenantId !== targetTenantId) {
       throw new NotFoundException(`User ${id} was not found`);
@@ -1977,10 +1968,8 @@ export class PlatformService {
   }
 
   async resetTenantAdminPassword(tenantId: string, currentUser?: SystemUserRow) {
+    if (this.useMysqlDataSource()) return this.getPublicManagementAdapter().resetTenantAdminPassword(tenantId);
     this.assertSaasAdmin(currentUser);
-    if (this.useMysqlDataSource()) {
-      return this.platformRepository.resetTenantAdminPassword(tenantId, currentUser?.id);
-    }
 
     const tenant = this.tenants.find((item) => item.tenantId === tenantId && item.tenantCode !== "platform");
     if (!tenant) {
@@ -1995,7 +1984,7 @@ export class PlatformService {
 
   listUsers(tenantId?: string, currentUser?: SystemUserRow) {
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.listUsers(tenantId, currentUser);
+      return this.getPublicManagementAdapter().listUsers(tenantId);
     }
     if (isOrganizationScopedUser(currentUser)) {
       const scopedTenantId = resolveTenantIdForQuery(tenantId, currentUser);
@@ -2029,12 +2018,10 @@ export class PlatformService {
   }
 
   async saveUser(input: SaveSystemUserRequest, currentUser?: SystemUserRow) {
+    if (this.useMysqlDataSource()) return this.getPublicManagementAdapter().saveUser(input);
     const targetTenantId = this.resolveTargetTenantId(input.tenantId, currentUser);
     input = { ...input, tenantId: targetTenantId, isSaasAdmin: false };
     await this.assertTenantAdminPrivilegeWrite(input, targetTenantId, currentUser);
-    if (this.useMysqlDataSource()) {
-      return this.platformRepository.saveUser(input, targetTenantId, currentUser?.id);
-    }
     const tenant = this.tenants.find((item) => item.tenantId === input.tenantId);
     const account = input.account.trim();
     const displayName = input.displayName.trim();

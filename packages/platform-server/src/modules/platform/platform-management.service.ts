@@ -1,18 +1,23 @@
 /** 公共管理应用服务：当前原主体→公共事务→仓储→同事务审计。
  * 每次写入和返回前复验当前权限，临时密码只在对应创建/重置响应返回，不记审计。 */
-import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { CreatePlatformTenantRequest, CreatePlatformTenantResult, OrganizationSummary, SaveOrganizationRequest,
   SavePlatformSelfProfileRequest, SaveSystemRoleRequest, SaveSystemUserRequest, SystemSecurityBaselineConfig,
   SystemUserRow, UpdateTenantRequest, UpdateTenantStatusRequest } from "@rental-os/platform-contracts";
 import { generateTemporaryPassword, hashPassword } from "../../common/password";
 import { getRequestIdentity } from "../../common/request-identity";
 import { hasEffectivePermission } from "../../permission-match";
-import { PLATFORM_AUTH_DATA_STORE } from "./platform-auth-data-store";
+import { PLATFORM_AUTH_DATA_STORE, type PlatformJsonValue } from "./platform-auth-data-store";
 import { PlatformManagementRepository } from "./platform-management.repository";
-import type { PlatformManagementDatabase, PlatformManagementTransaction } from "./platform-management.store";
+import type { LegacyPlatformManagementCompatibility, PlatformManagementDatabase, PlatformManagementTransaction } from "./platform-management.store";
 import { PlatformPrincipalAuthority } from "./platform-principal.authority";
 import { managesPlatformTenants, managesTenant, TENANT_ROLE_READ_PERMISSIONS } from "./platform-permissions";
 import { normalizeSecurityBaseline, PLATFORM_SECURITY_TENANT_ID, readPlatformSecurityBaseline, validateSecurityBaseline } from "./platform-security-baseline";
+
+interface ManagementRunOptions {
+  memberId?: string;
+  selfRevocation?: { kind: "user" | "role"; id: string };
+}
 
 @Injectable()
 export class PlatformManagementService {
@@ -24,17 +29,32 @@ export class PlatformManagementService {
   }
 
   private run<T>(permission: string, saas: boolean, target: string | undefined,
-    work: (tx: PlatformManagementTransaction, user: SystemUserRow) => Promise<T>, enabling = false,
-    authorize?: (user: SystemUserRow) => boolean) {
+    work: (tx: PlatformManagementTransaction, user: SystemUserRow, beforeSelfRevocation: () => Promise<void>) => Promise<T>, enabling = false,
+    authorize?: (user: SystemUserRow) => boolean, options?: ManagementRunOptions) {
     const actor = this.principals.current(), tenantId = target ?? actor.tenantId;
     if (!saas && tenantId !== actor.tenantId) throw new ForbiddenException("公共管理不能跨租户");
     const allowed = authorize ?? ((user: SystemUserRow) => saas ? user.isSaasAdmin === true
       && (user.permissions.includes(permission) || user.permissions.includes("*")) : managesTenant(user, permission));
     return this.database.$transaction(async tx => {
-      const lease = await this.principals.lock(tx, actor, tenantId, undefined, enabling);
+      const lease = await this.principals.lock(tx, actor, tenantId, options?.memberId, enabling);
       if (!allowed(lease.user)) throw new ForbiddenException("缺少当前公共管理权限与租户范围");
-      const result = await work(tx, lease.user);
-      if (!allowed(await lease.revalidate())) throw new ForbiddenException("公共管理提交前当前权限已变化");
+      const revalidate = async () => {
+        const user = await lease.revalidate();
+        if (!allowed(user)) throw new ForbiddenException("公共管理提交前当前权限已变化");
+        return user;
+      };
+      let selfRevocationChecked = false;
+      const beforeSelfRevocation = async () => {
+        const user = await revalidate();
+        const change = options?.selfRevocation;
+        const affectsCurrentUser = change?.kind === "user" && change.id === actor.subjectId
+          || change?.kind === "role" && user.roleIds.includes(change.id);
+        if (!affectsCurrentUser) throw new ForbiddenException("原组合撤权提交点只承接当前主体的受权变更");
+        selfRevocationChecked = true;
+      };
+      const result = await work(tx, lease.user, beforeSelfRevocation);
+      // 原组合只在具体自身撤权的写入前调用检查点。行锁保留至提交，预期失权后的返回沿原事务结果。
+      if (!selfRevocationChecked) await revalidate();
       return result;
     }, { isolationLevel: "Serializable" }).catch(error => {
       // 数据库唯一键是并发提交的最终约束；明确冲突后由用户重读，不自动重复管理操作。
@@ -46,7 +66,8 @@ export class PlatformManagementService {
 
   private audit(tx: PlatformManagementTransaction, user: SystemUserRow, tenantId: string, action: string,
     targetId: string, metadata: Record<string, string | boolean | number | undefined> = {},
-    context: { operator?: string; targetType?: string; detail?: string } = {}) {
+    context: { operator?: string; targetType?: string; detail?: string;
+      before?: PlatformJsonValue; after?: PlatformJsonValue; reason?: string } = {}) {
     return tx.operationLog.create({ data: { tenantId, userId: user.id, action,
       detail: { operator: user.id, targetType: "platform", targetId, metadata, ...context } } });
   }
@@ -60,6 +81,10 @@ export class PlatformManagementService {
     return !user.isSaasAdmin && (user.isPlatformAdmin || hasEffectivePermission(user.permissions, "system:user:manage"))
       && (user.isPlatformAdmin || user.permissions.includes("*") || user.dataScope === "all")
       && getRequestIdentity()?.locationScope?.mode !== "selected";
+  }
+
+  private canManageTenantAccess(user: SystemUserRow, permission: string) {
+    return managesTenant(user, permission) && getRequestIdentity()?.locationScope?.mode !== "selected";
   }
 
   saveOrganization(input: SaveOrganizationRequest) {
@@ -116,7 +141,20 @@ export class PlatformManagementService {
     }, false, user => !user.isSaasAdmin && (user.isPlatformAdmin || hasEffectivePermission(user.permissions, "system:params:manage")));
   }
 
-  listTenants() { return this.run("system:tenant:manage", true, undefined, tx => this.repository.tenants(tx)); }
+  private async tenantRows(tx: PlatformManagementTransaction, tenantId?: string,
+    compatibility?: LegacyPlatformManagementCompatibility) {
+    const tenants = await this.repository.tenants(tx, tenantId);
+    if (tenantId && !tenants.length) throw new NotFoundException("租户不存在");
+    return compatibility ? compatibility.projectTenants(tx, tenants) : tenants;
+  }
+
+  listTenants(compatibility?: LegacyPlatformManagementCompatibility) {
+    return this.run("system:tenant:manage", true, undefined, tx => this.tenantRows(tx, undefined, compatibility));
+  }
+
+  getTenant(id: string, compatibility?: LegacyPlatformManagementCompatibility) {
+    return this.run("system:tenant:manage", true, id, async tx => (await this.tenantRows(tx, id, compatibility))[0]);
+  }
 
   createTenant(input: CreatePlatformTenantRequest): Promise<CreatePlatformTenantResult> {
     return this.run("system:tenant:bootstrap", true, undefined, async (tx, user) => {
@@ -128,11 +166,11 @@ export class PlatformManagementService {
     });
   }
 
-  updateTenant(id: string, input: UpdateTenantRequest, saas: boolean) {
+  updateTenant(id: string, input: UpdateTenantRequest, saas: boolean, compatibility?: LegacyPlatformManagementCompatibility) {
     return this.run("system:tenant:manage", saas, id, async (tx, user) => {
-      await this.repository.updateTenant(tx, id, input);
-      await this.audit(tx, user, id, "tenant.update", id);
-      return (await this.repository.tenants(tx, id))[0];
+      const change = await this.repository.updateTenant(tx, id, input);
+      await this.audit(tx, user, id, "tenant.update", id, {}, { ...change, operator: user.displayName, targetType: "tenant" });
+      return (await this.tenantRows(tx, id, compatibility))[0];
     });
   }
 
@@ -141,95 +179,159 @@ export class PlatformManagementService {
     return this.run("system:tenant:manage", false, actor.tenantId, async tx => (await this.repository.tenants(tx, actor.tenantId))[0]);
   }
 
-  tenantStatus(id: string, input: UpdateTenantStatusRequest) {
+  tenantStatus(id: string, input: UpdateTenantStatusRequest, compatibility?: LegacyPlatformManagementCompatibility) {
     return this.run("system:tenant:manage", true, id, async (tx, user) => {
       if (!managesPlatformTenants(user)) throw new ForbiddenException("租户状态需要当前SaaS管理员");
-      await this.repository.tenantStatus(tx, id, input, user.displayName);
-      await this.audit(tx, user, id, "tenant.status.update", id, { state: input.status });
-      return (await this.repository.tenants(tx, id))[0];
+      const change = await this.repository.tenantStatus(tx, id, input, user.displayName);
+      await this.audit(tx, user, id, "tenant.status.update", id, { state: input.status },
+        { ...change, operator: user.displayName, targetType: "tenant" });
+      return (await this.tenantRows(tx, id, compatibility))[0];
     });
   }
 
-  listUsers() {
+  listUsers(tenantId?: string) {
     const actor = this.principals.current();
-    return this.run("system:user:manage", false, undefined, tx => this.repository.users(tx, actor.tenantId));
+    return this.run("system:user:manage", false, undefined,
+      (tx, user) => this.repository.users(tx, tenantId ?? actor.tenantId, user), false,
+      user => !user.isSaasAdmin && (user.isPlatformAdmin || hasEffectivePermission(user.permissions, "system:user:manage")));
   }
 
-  saveUser(input: SaveSystemUserRequest) {
+  saveUser(input: SaveSystemUserRequest, compatibility?: LegacyPlatformManagementCompatibility) {
     const actor = this.principals.current();
-    if (input.id === actor.subjectId && !input.isActive) throw new BadRequestException("不能通过账号管理停用当前登录账号");
-    return this.run("system:user:manage", false, undefined, async (tx, user) => {
-      const result = await this.repository.saveUser(tx, actor.tenantId, input, user.isPlatformAdmin);
+    const tenantId = input.tenantId ?? actor.tenantId;
+    const selfChange = Boolean(compatibility && input.id === actor.subjectId);
+    if (!compatibility && input.id === actor.subjectId && input.isActive === false)
+      throw new BadRequestException("不能通过账号管理停用当前登录账号");
+    return this.run("system:user:manage", false, tenantId, async (tx, user, beforeSelfRevocation) => {
+      if (input.id) await compatibility?.assertUserNotPrivileged(tx, input.id, tenantId, user);
+      const result = await this.repository.saveUser(tx, tenantId, input, user.isPlatformAdmin, compatibility,
+        selfChange ? beforeSelfRevocation : undefined);
       await this.audit(tx, user, actor.tenantId, "system.user.saved", result.id, { active: input.isActive });
       return result;
+    }, false, user => this.canManageTenantAccess(user, "system:user:manage"), {
+      memberId: input.id, selfRevocation: selfChange ? { kind: "user", id: actor.subjectId } : undefined
     });
   }
 
-  userStatus(id: string, active: boolean) {
+  userStatus(id: string, active: boolean, requestedTenantId?: string, compatibility?: LegacyPlatformManagementCompatibility) {
     const actor = this.principals.current();
-    if (id === actor.subjectId) throw new BadRequestException("不能通过账号管理停用当前登录账号");
-    return this.run("system:user:manage", false, undefined, async (tx, user) => {
-      const target = await this.repository.user(tx, id, actor.tenantId);
+    const tenantId = requestedTenantId ?? actor.tenantId;
+    const selfChange = Boolean(compatibility && id === actor.subjectId);
+    if (!compatibility && id === actor.subjectId) throw new BadRequestException("不能通过账号管理停用当前登录账号");
+    return this.run("system:user:manage", false, tenantId, async (tx, user, beforeSelfRevocation) => {
+      const target = await this.repository.user(tx, id, tenantId);
       if (target.isPlatformAdmin && !user.isPlatformAdmin) throw new ForbiddenException("只有租户管理员可以管理管理员账号");
+      await compatibility?.assertUserNotPrivileged(tx, id, tenantId, user);
+      if (selfChange && !active) await beforeSelfRevocation();
       await tx.user.update({ where: { id }, data: { isActive: active } });
       if (!active) await tx.authSession.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
-      await this.audit(tx, user, actor.tenantId, "system.user.status", id, { active });
-      return this.repository.user(tx, id, actor.tenantId);
+      await this.audit(tx, user, tenantId, "system.user.status", id, { active });
+      return this.repository.user(tx, id, tenantId);
+    }, false, user => this.canManageTenantAccess(user, "system:user:manage"), {
+      memberId: id, selfRevocation: selfChange ? { kind: "user", id } : undefined
     });
   }
 
-  resetUserPassword(id: string) {
+  private async resetPassword(tx: PlatformManagementTransaction, target: SystemUserRow) {
+    const temporaryPassword = generateTemporaryPassword();
+    await tx.user.update({ where: { id: target.id }, data: {
+      passwordHash: hashPassword(temporaryPassword), mustChangePassword: true,
+      passwordChangedAt: new Date(), tokenVersion: { increment: 1 }
+    } });
+    await tx.authSession.updateMany({ where: { userId: target.id, revokedAt: null }, data: { revokedAt: new Date() } });
+    return { userId: target.id, account: target.account, temporaryPassword, message: "临时密码只在本响应返回，下次登录必须修改。" };
+  }
+
+  resetUserPassword(id: string, requestedTenantId?: string, compatibility?: LegacyPlatformManagementCompatibility) {
     const actor = this.principals.current();
-    if (id === actor.subjectId) throw new BadRequestException("本人修改密码请使用安全设置");
-    return this.run("system:user:manage", false, undefined, async (tx, user) => {
-      const target = await this.repository.user(tx, id, actor.tenantId);
+    const tenantId = requestedTenantId ?? actor.tenantId;
+    const selfChange = Boolean(compatibility && id === actor.subjectId);
+    if (!compatibility && id === actor.subjectId) throw new BadRequestException("本人修改密码请使用安全设置");
+    return this.run("system:user:manage", false, tenantId, async (tx, user, beforeSelfRevocation) => {
+      const target = await this.repository.user(tx, id, tenantId);
       if (target.isPlatformAdmin && !user.isPlatformAdmin) throw new ForbiddenException("只有租户管理员可以重置管理员密码");
-      const temporaryPassword = generateTemporaryPassword();
-      await tx.user.update({ where: { id }, data: { passwordHash: hashPassword(temporaryPassword), mustChangePassword: true,
-        passwordChangedAt: new Date(), tokenVersion: { increment: 1 } } });
-      await tx.authSession.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
-      await this.audit(tx, user, actor.tenantId, "system.user.reset-password", id);
-      return { userId: id, account: target.account, temporaryPassword, message: "临时密码只在本响应返回，下次登录必须修改。" };
+      await compatibility?.assertUserNotPrivileged(tx, id, tenantId, user);
+      if (selfChange) await beforeSelfRevocation();
+      const result = await this.resetPassword(tx, target);
+      await this.audit(tx, user, tenantId, "system.user.reset-password", id);
+      return result;
+    }, false, user => this.canManageTenantAccess(user, "system:user:manage"), {
+      memberId: id, selfRevocation: selfChange ? { kind: "user", id } : undefined
     });
   }
 
-  listRoles() {
+  resetTenantAdminPassword(tenantId: string) {
+    return this.run("system:tenant:manage", true, tenantId, async (tx, user) => {
+      const target = await this.repository.tenantAdmin(tx, tenantId);
+      const result = await this.resetPassword(tx, target);
+      await this.audit(tx, user, tenantId, "system.user.reset-password", target.id);
+      return result;
+    });
+  }
+
+  listRoles(tenantId?: string, compatibility?: LegacyPlatformManagementCompatibility) {
     const actor = this.principals.current();
+    const targetTenantId = tenantId ?? actor.tenantId;
     // 人员管理需要读取可分配角色；读取选项不会授予角色编辑或业务 Core 使用权。
-    return this.run("system:role:manage", false, undefined, tx => this.repository.roles(tx, actor.tenantId), false,
+    return this.run("system:role:manage", false, targetTenantId, tx => this.repository.roles(tx, targetTenantId, undefined, compatibility), false,
       user => !user.isSaasAdmin && (user.isPlatformAdmin || user.dataScope === "all"
-        && TENANT_ROLE_READ_PERMISSIONS.some(permission => hasEffectivePermission(user.permissions, permission))));
+        && TENANT_ROLE_READ_PERMISSIONS.some(permission => hasEffectivePermission(user.permissions, permission)))
+        && getRequestIdentity()?.locationScope?.mode !== "selected");
   }
 
-  saveRole(input: SaveSystemRoleRequest) {
+  saveRole(input: SaveSystemRoleRequest, compatibility?: LegacyPlatformManagementCompatibility) {
     const actor = this.principals.current();
-    return this.run("system:role:manage", false, undefined, async (tx, user) => {
-      const result = await this.repository.saveRole(tx, actor.tenantId, input);
-      await this.audit(tx, user, actor.tenantId, "system.role.saved", result.id);
+    const tenantId = input.tenantId ?? actor.tenantId;
+    return this.run("system:role:manage", false, tenantId, async (tx, user, beforeSelfRevocation) => {
+      const affectedRole = Boolean(compatibility && input.id && user.roleIds.includes(input.id));
+      const result = await this.repository.saveRole(tx, tenantId, input, compatibility,
+        affectedRole ? beforeSelfRevocation : undefined);
+      await this.audit(tx, user, tenantId, "system.role.saved", result.id);
       return result;
+    }, false, user => this.canManageTenantAccess(user, "system:role:manage"), {
+      selfRevocation: compatibility && input.id ? { kind: "role", id: input.id } : undefined
     });
   }
 
-  deleteRole(id: string) {
+  saveRolePermissions(id: string, permissions: string[], requestedTenantId?: string,
+    compatibility?: LegacyPlatformManagementCompatibility) {
     const actor = this.principals.current();
-    return this.run("system:role:manage", false, undefined, async (tx, user) => {
-      const result = await this.repository.deleteRole(tx, id, actor.tenantId);
-      await this.audit(tx, user, actor.tenantId, "system.role.deleted", id);
+    const tenantId = requestedTenantId ?? actor.tenantId;
+    return this.run("system:role:manage", false, tenantId, async (tx, user, beforeSelfRevocation) => {
+      const affectedRole = Boolean(compatibility && user.roleIds.includes(id));
+      const result = await this.repository.saveRolePermissions(tx, id, permissions, tenantId, compatibility,
+        affectedRole ? beforeSelfRevocation : undefined);
+      if (!result.fixedAllPermissions) await this.audit(tx, user, tenantId, "system.role.permissions", id);
       return result;
+    }, false, user => this.canManageTenantAccess(user, "system:role:manage"), {
+      selfRevocation: compatibility ? { kind: "role", id } : undefined
     });
   }
 
-  permissionTree() {
+  deleteRole(id: string, requestedTenantId?: string, compatibility?: LegacyPlatformManagementCompatibility) {
+    const actor = this.principals.current();
+    const tenantId = requestedTenantId ?? actor.tenantId;
+    return this.run("system:role:manage", false, tenantId, async (tx, user) => {
+      const result = await this.repository.deleteRole(tx, id, tenantId, compatibility);
+      await this.audit(tx, user, tenantId, "system.role.deleted", id);
+      return result;
+    }, false, user => this.canManageTenantAccess(user, "system:role:manage"));
+  }
+
+  permissionTree(compatibility?: LegacyPlatformManagementCompatibility) {
     return this.run("system:role:manage", false, undefined, async tx => {
       const permissions = await tx.permission.findMany({ orderBy: { code: "asc" } });
       const modules = new Map<string, { code: string; name: string; children: Array<{ code: string; name: string; description?: string }> }>();
       for (const permission of permissions) {
-        const group = modules.get(permission.module) ?? { code: permission.module, name: permission.module, children: [] };
+        const module = compatibility ? compatibility.permissionModule(permission)
+          : { code: permission.module, name: permission.module };
+        if (!module) continue;
+        const group = modules.get(module.code) ?? { ...module, children: [] };
         group.children.push({ code: permission.code, name: permission.name, description: permission.description ?? undefined });
-        modules.set(permission.module, group);
+        modules.set(module.code, group);
       }
       return [...modules.values()];
-    });
+    }, false, user => !user.isSaasAdmin && (user.isPlatformAdmin || hasEffectivePermission(user.permissions, "system:role:manage")));
   }
 
   saveSelfProfile(input: SavePlatformSelfProfileRequest) {

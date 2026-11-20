@@ -4,7 +4,8 @@ import { requireRequestTenantId } from "../../common/request-identity";
 import { PlatformManagementService } from "./platform-management.service";
 import { CreatePlatformTenantDto, PlatformTenantStatusDto, PlatformUserStatusDto, SavePlatformRoleDto,
   SavePlatformSelfProfileDto, SavePlatformUserDto, UpdatePlatformTenantDto, SaveOrganizationDto,
-  OrganizationStatusInputDto, SaveSecurityBaselineInputDto, SecondConfirmationInputDto } from "./platform-management.dto";
+  OrganizationStatusInputDto, SaveSecurityBaselineInputDto, SecondConfirmationInputDto,
+  PlatformRolePermissionsDto, PlatformUserPasswordResetDto } from "./platform-management.dto";
 
 @Controller("platform")
 export class PlatformManagementController {
@@ -25,6 +26,7 @@ export class PlatformManagementController {
   }
 
   @Get("tenants") tenants() { return this.service.listTenants(); }
+  @Get("tenants/:id") getTenant(@Param("id") id: string) { return this.service.getTenant(id); }
   @Post("tenants") createTenant(@Body() body: CreatePlatformTenantDto) { return this.service.createTenant(body); }
   @Put("tenants/:id") updateTenant(@Param("id") id: string, @Body() body: UpdatePlatformTenantDto) {
     return this.service.updateTenant(id, body, true);
@@ -32,20 +34,32 @@ export class PlatformManagementController {
   @Put("tenants/:id/status") tenantStatus(@Param("id") id: string, @Body() body: PlatformTenantStatusDto) {
     return this.service.tenantStatus(id, body);
   }
+  @Post("tenants/:id/admin/reset-password") resetTenantAdminPassword(@Param("id") id: string) {
+    return this.service.resetTenantAdminPassword(id);
+  }
   @Get("tenant") tenant() { return this.service.readTenant(); }
   @Put("tenant") updateOwnTenant(@Body() body: UpdatePlatformTenantDto) {
     return this.service.updateTenant(requireRequestTenantId(), body, false);
   }
   @Get("self-profile") selfProfile() { return this.service.readSelfProfile(); }
   @Put("self-profile") saveSelfProfile(@Body() body: SavePlatformSelfProfileDto) { return this.service.saveSelfProfile(body); }
-  @Get("users") users() { return this.service.listUsers(); }
+  @Get("users") users(@Query("tenantId") tenantId?: string) { return this.service.listUsers(tenantId); }
   @Post("users") createUser(@Body() body: SavePlatformUserDto) { return this.service.saveUser(body); }
   @Put("users/:id") saveUser(@Param("id") id: string, @Body() body: SavePlatformUserDto) { return this.service.saveUser({ ...body, id }); }
-  @Put("users/:id/status") userStatus(@Param("id") id: string, @Body() body: PlatformUserStatusDto) { return this.service.userStatus(id, body.isActive); }
-  @Post("users/:id/reset-password") resetPassword(@Param("id") id: string) { return this.service.resetUserPassword(id); }
-  @Get("roles") roles() { return this.service.listRoles(); }
+  @Put("users/:id/status") userStatus(@Param("id") id: string, @Body() body: PlatformUserStatusDto) {
+    return this.service.userStatus(id, body.isActive, body.tenantId);
+  }
+  @Post("users/:id/reset-password") resetPassword(@Param("id") id: string, @Body() body: PlatformUserPasswordResetDto) {
+    return this.service.resetUserPassword(id, body?.tenantId);
+  }
+  @Get("roles") roles(@Query("tenantId") tenantId?: string) { return this.service.listRoles(tenantId); }
   @Post("roles") createRole(@Body() body: SavePlatformRoleDto) { return this.service.saveRole(body); }
   @Put("roles/:id") saveRole(@Param("id") id: string, @Body() body: SavePlatformRoleDto) { return this.service.saveRole({ ...body, id }); }
-  @Delete("roles/:id") deleteRole(@Param("id") id: string) { return this.service.deleteRole(id); }
+  @Put("roles/:id/permissions") saveRolePermissions(@Param("id") id: string, @Body() body: PlatformRolePermissionsDto) {
+    return this.service.saveRolePermissions(id, body?.permissions ?? [], body?.tenantId);
+  }
+  @Delete("roles/:id") deleteRole(@Param("id") id: string, @Query("tenantId") tenantId?: string) {
+    return this.service.deleteRole(id, tenantId);
+  }
   @Get("permission-tree") permissionTree() { return this.service.permissionTree(); }
 }

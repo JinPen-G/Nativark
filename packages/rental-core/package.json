@@ -1713,6 +1713,14 @@
     "./application-public-access": {
       "types": "./dist/application-public-access.d.ts",
       "default": "./dist/application-public-access.js"
+    },
+    "./public-management-compatibility": {
+      "types": "./dist/public-management-compatibility.d.ts",
+      "default": "./dist/public-management-compatibility.js"
+    },
+    "./http-openapi": {
+      "types": "./dist/http-openapi.d.ts",
+      "default": "./dist/http-openapi.js"
     }
   },
   "typesVersions": {
@@ -3342,6 +3350,12 @@
       ],
       "application-public-access": [
         "dist/application-public-access.d.ts"
+      ],
+      "public-management-compatibility": [
+        "dist/public-management-compatibility.d.ts"
+      ],
+      "http-openapi": [
+        "dist/http-openapi.d.ts"
       ]
     }
   },
