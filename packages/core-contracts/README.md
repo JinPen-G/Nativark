@@ -13,7 +13,7 @@ npm run build -w @rental-os/core-contracts
 npm run export:platform -- --repo . --repository https://github.com/JinPen-G/Nativark --commit <完整SHA> --out nativark-platform.tgz
 ```
 
-解包后只有公共 API、公共后台、平台包、UIArc 源码和许可、公共数据库链及必要配置。根 workspace、默认构建/启动命令和 npm v3 锁文件按同一闭包生成。包内 README 给出安装、初始化和启动步骤，`platform.source.json` 保存固定来源及文件摘要。现有输出文件会被拒绝，不读取工作区未提交代码。[发行实现](src/platform-source.ts) · [命令入口](src/export-platform.ts)
+解包后包含公共 API、公共后台、平台包、UIArc 源码和许可、公共数据库链及必要配置。独立后端运行包所需的具名打包脚本也随源码提供，按[公共 API 的运行包步骤](../../apps/platform-api/README.md#独立后端运行包)使用。根 workspace、默认构建/启动命令和 npm v3 锁文件按同一闭包生成。包内 README 给出安装、初始化和启动步骤，`platform.source.json` 保存固定来源及文件摘要。现有输出文件会被拒绝，不读取工作区未提交代码。[发行实现](src/platform-source.ts) · [命令入口](src/export-platform.ts)
 
 `@rental-os/core-contracts/platform-source` 也提供文件集与归档接口，可用于源码发行。它只准备源码；运行环境和业务 Core 由使用者按接入说明配置。
 

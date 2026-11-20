@@ -1,5 +1,6 @@
 /** 从固定 Git 源码生成零 Core 底座发行：保留公共实现、UIArc 与公共数据链。
  * workspace、锁文件和默认命令按同一公共依赖闭包生成，不安装依赖、加载业务或执行迁移。
+ * 公共运行包入口及四个直接脚本助手随同一次源码发行提供。
  * 归档只读取提交中的普通文件；输出和部署由调用方明确办理。 */
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -14,6 +15,11 @@ export const PLATFORM_SOURCE_WORKSPACES = [
 const sourcePaths = [
   ...PLATFORM_SOURCE_WORKSPACES, "packages/ui-arc", "packages/ui-tablecn/LICENSE.md", "packages/ui-tablecn/README.md",
   "packages/ui-motiq/runtime", "packages/ui-motiq/LICENSE", "packages/ui-motiq/README.md",
+  "scripts/package-platform-host.cjs",
+  "scripts/build-selected-prisma.cjs",
+  "scripts/rental-platform-build.cjs",
+  "scripts/rental-host-lock.cjs",
+  "scripts/package-rental-host.cjs",
   "config", "AGENTS.md", "CLAUDE.md", "LICENSE", ".env.example", ".gitignore", ".gitattributes",
   "tsconfig.base.json", "package.json", "package-lock.json", "apps/admin/AGENTS.md"
 ];
