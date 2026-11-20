@@ -10,6 +10,7 @@ import { PlatformCoreAccess, type PlatformCoreTermPolicy, type PlatformCoreTrans
   type PlatformCoreUsers } from "@rental-os/platform-core-host";
 import type { TenantRentalProfile, TenantRentalBusinessSettings } from "./contracts";
 import { createRentalServer, isRentalCoreScope, RENTAL_CORE_ID } from "./server";
+import { readRentalRemoval } from "./mysql-removal";
 
 export interface RentalPlatformUsers<Tx extends PlatformCoreTransaction> extends PlatformCoreUsers<Tx> {
   /** 原空间成员/角色投影；不接受租户级账号权限代替已撤销的空间成员关系。 */
@@ -72,6 +73,8 @@ export function composeRentalPlatformHost<Tx extends PlatformCoreTransaction>(in
       return binding;
     }, { isolationLevel: "ReadCommitted" }),
     readReadiness: binding => input.database.$transaction(transaction => readReadiness(transaction, binding),
+      { isolationLevel: "ReadCommitted" }),
+    assessRemoval: tenantId => input.database.$transaction(transaction => readRentalRemoval(transaction, tenantId),
       { isolationLevel: "ReadCommitted" })
   });
 

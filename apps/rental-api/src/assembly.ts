@@ -5,7 +5,8 @@ import { ForbiddenException } from "@nestjs/common";
 import type { ConfigService } from "@nestjs/config";
 import { isDeepStrictEqual } from "node:util";
 import * as shared from "@rental-os/shared";
-import { CoreDeploymentLockSchema, type CoreDeploymentLock, type CorePlatformDataCapabilityRelease } from "@rental-os/core-contracts";
+import { CoreDeploymentLockSchema, type CoreDeploymentLock, type CorePlatformDataCapabilityRelease,
+  type CorePlatformRemovalObservation } from "@rental-os/core-contracts";
 import { createCoreDeployedCatalogue, type CoreDeployedCatalogue } from "@rental-os/core-host";
 import type { CoreHostSqlTransaction } from "@rental-os/core-host/mysql";
 import { createMysqlCoreDeploymentObservation, type CoreMysqlDataPlan } from "@rental-os/core-host/mysql-deployment";
@@ -34,6 +35,7 @@ import { RentalApplicationLifecycle } from "./lifecycle";
 import { rentalHostLegacyApiRoutes } from "./openapi";
 import { createRentalCorePackageSources } from "./core-package-sources";
 import { prepareRentalAdditionalCores, type RentalHostCoreSetup } from "./additional-cores";
+import { createRentalCoreRemovalSource } from "./core-removal-source";
 
 /** 仅受控宿主装配可提供；请求、Core 包清单和环境变量不能注入运行参加者。 */
 export interface RentalHostAiSetup<Binding> {
@@ -79,6 +81,8 @@ export function composeRentalApplication<Binding = never, Additional = unknown>(
   lock: CoreDeploymentLock;
   /** 静态宿主显式选择的租户 Core；缺实际固定包/数据观察/HTTP 合同即拒绝整组。 */
   additionalCores?: readonly RentalHostCoreSetup<Additional>[];
+  /** 与部署新准入控制同源的可信观察；缺源保持 unknown，移除预检仍保留未完整覆盖的阻碍。 */
+  readAdmission?(coreId: string): Promise<CorePlatformRemovalObservation["admission"]>;
 } & ({ aiMode: "disabled"; ai?: never } | { aiMode: "enabled"; ai: RentalHostAiSetup<Binding> })): RentalHostAssembly<Binding, Additional> {
   const lock = CoreDeploymentLockSchema.parse(input.lock);
   if (input.aiMode === "disabled" && (input.ai || (lock.dataCapabilities?.length ?? 0) > 0)) {
@@ -135,7 +139,9 @@ export function composeRentalApplication<Binding = never, Additional = unknown>(
       ...bound.map(({ item, value }) => ({ manifest: item.manifest, server: value.server }))],
     http: additional.map(item => item.http), observations: observation(database) });
   const core = composePlatformCoreApplication({ ...dependencies, users: rental.authSource, catalogue,
-    authorizeContainer: platformHost.authorizeContainer });
+    authorizeContainer: platformHost.authorizeContainer,
+    platformRemoval: createRentalCoreRemovalSource({ database,
+      ...(input.readAdmission ? { readAdmission: input.readAdmission } : {}) }) });
   core.session = composeRentalCoreSessionReader({ database, authSource: rental.authSource, catalogue });
   const packages = composePlatformCorePackageAssembly({ database, users: rental.authSource, catalogue,
     audit: createPlatformCorePackageAudit<RentalDatabaseTransaction>(),
