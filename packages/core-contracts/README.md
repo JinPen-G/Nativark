@@ -84,6 +84,8 @@ Core 条目读取正式清单声明中的静态标识、版本、范围和依赖
 
 `openapiSource.controllerParameters` 将列表连接到实际 Controller 参数。类型、可选标记、`defaultExpression` 和静态 `declaredDefault` 沿原声明提供，`defaultStatus` 及 `defaultIssues` 说明动态默认值。无参 `@Query()` 引用本仓可静态枚举的平面DTO时，字段名逐一对应已有正式参数，保留原类型、可选标记、校验/转换表达式与源码行号；该对应不从DTO另生成schema。继承、泛型、构造/方法、计算或静态字段、动态Query名、默认与pipe继续标明来源缺口。品类候选 `operation` 的可选string、upgrade/restore及默认upgrade沿正式HTTP声明读取。生成器字段与Controller声明可分别核对，实际输入转换及业务限制继续由原入口执行。[公共订阅参数消费](../platform-server/src/modules/subscription/subscription-platform.controller.ts) · [Rental参数生成规则](../rental-core/src/http-openapi-contract.ts)
 
+`controllerRequestBodies` 定位原 `@Body()` 参数及其 DTO 属性、类型、默认表达式和装饰器，`fieldNamesStatus` 只说明字段名称是否能静态定位。DTO 资料保持 `source-reference`，JSON Schema 的完整性沿 `schemas` 中的 `status` / `issues` 判断。正则字面量的 `.source` 和所选静态约束读取原声明；动态构造、继承、泛型及运行转换保留缺口。未索引引用的 `mapSources` 指向实际 schema 聚合入口，`schema-map:source-reference` 表示聚合尚未展开，`schema-reference:not-indexed` 表示静态集合缺少所选引用。请求体字段资料与返回体、校验和业务运行分别核对。[请求体与引用读取](src/repository-openapi.ts)
+
 `apiFieldsStatus=indexed` 表示已登记字段资料可静态读取。正式接口贡献的 `details.openapi` 保留请求体、参数、响应、递归引用和 JSON Pointer，原 `x-schemaStatus`、`x-schemaGaps` 继续表达字段完整性。Controller/DTO 对照、动态资料与实际运行按各自入口核验。CLI 显示来源、状态和缺口，`--json` 保留完整资料。
 
 CSS 转导出在本仓资产存在时登记 `declarationStatus=source-asset`，`sources` 同时保留资产和转导出位置。外部转导出沿所属包的依赖声明登记 `external-dependency`，`reexport.dependency` 给出包名、版本范围和声明出处。其实现与运行支持由原依赖提供。其余缺少本仓目标的转导出保留正式导入、原模块和本地位置，`declarationStatus=unresolved` 与对应 `issues` 同时出现。

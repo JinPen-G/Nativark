@@ -1,7 +1,7 @@
 /**
  * 静态 HTTP/OpenAPI 声明的字段定位。只读取原 AST、符号和本地引用。
  * 字面量及单一返回表达式按原语法读取，不执行模块、生成器或校验器。
- * DTO、Zod 转换和动态表达式保留原声明，字段展开与运行验收分别表达。
+ * DTO 请求字段只定位原类型和装饰器，不推导校验或响应 schema。Zod 转换和动态表达式保留来源。
  */
 import ts from "typescript";
 import type { DevelopmentCapability, DevelopmentSourceReference } from "./development";
@@ -168,7 +168,25 @@ class StaticSchemaReader {
     }
     if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
       const key = ts.isPropertyAccessExpression(node) ? node.name.text : node.argumentExpression && read(node.argumentExpression);
-      if (selectiveMembers && (typeof key === "string" || typeof key === "number")) {
+      if (key === "source") {
+        let pattern = unwrap(node.expression);
+        const aliases = new Set(chain);
+        while (ts.isIdentifier(pattern) && !aliases.has(pattern)) {
+          aliases.add(pattern);
+          const symbol = this.source.checker.getSymbolAtLocation(pattern);
+          const target = symbol && this.source.target(symbol).valueDeclaration;
+          if (!target || !ts.isVariableDeclaration(target) || !target.initializer
+            || !ts.isVariableDeclarationList(target.parent) || !(target.parent.flags & ts.NodeFlags.Const)
+            || !isRepositorySourcePath(this.source.root, target.getSourceFile().fileName)) break;
+          pattern = unwrap(target.initializer);
+        }
+        // 正则字面量的 source 是原模式文本，不执行 RegExp 构造器或用户 getter。
+        if (ts.isRegularExpressionLiteral(pattern)) {
+          const literal = pattern.getText();
+          return literal.slice(1, literal.lastIndexOf("/"));
+        }
+      }
+      if (typeof key === "string" || typeof key === "number") {
         const selected = this.selectMember(node.expression, [String(key)], bindings, chain);
         if (selected && selected !== UNRESOLVED) return this.read(selected.expression, pointer, selected.bindings, selected.seen, selectiveMembers);
       }
@@ -307,7 +325,7 @@ function property(node: ts.Expression, name: string): ts.Expression | undefined 
 export function describeRepositorySchema(source: RepositorySource, expression: ts.Expression, maps: ts.Expression[] = [], referencePrefix = ""): Details {
   const root = source.root;
   const locations: DevelopmentSourceReference[] = [];
-  const refs: Array<{ ref: string; declaration?: DevelopmentSourceReference; status: string; schema?: SchemaValue;
+  const refs: Array<{ ref: string; declaration?: DevelopmentSourceReference; mapSources?: DevelopmentSourceReference[]; status: string; schema?: SchemaValue;
     fieldSources?: Array<{ pointer: string; source: DevelopmentSourceReference }>; issues?: string[] }> = [];
   const sourceFields: Array<{ name: string; expression: string; source: DevelopmentSourceReference }> = [];
   const seenNodes = new Set<ts.Node>(), seenRefs = new Set<string>();
@@ -356,7 +374,8 @@ export function describeRepositorySchema(source: RepositorySource, expression: t
     refs.push({ ref, ...(target ? { declaration: sourceReference(target, root),
       ...(schema !== UNRESOLVED && schema !== undefined ? { schema } : {}),
       fieldSources: reader.fieldSources(schema ?? UNRESOLVED), issues: [...reader.issues] }
-      : { issues: [found === UNRESOLVED ? "schema-map:source-reference" : "schema-reference:not-indexed"] }),
+      : { mapSources: maps.map(map => sourceReference(map, root)),
+        issues: [found === UNRESOLVED ? "schema-map:source-reference" : "schema-reference:not-indexed"] }),
       status: target ? reader.issues.size ? "source-reference" : "indexed" : "not-indexed" });
     if (schema !== UNRESOLVED && schema !== undefined) visitValue(schema);
     if (target) visit(target);
@@ -524,10 +543,10 @@ export function repositoryApiDocumentation(source: RepositorySource): Map<string
     const prefixes = typeof prefix === "string" ? [prefix] : Array.isArray(prefix) && prefix.every(item => typeof item === "string") ? prefix as string[] : [];
     for (const member of node.members) {
       if (!ts.isMethodDeclaration(member)) continue;
-      const parameters: Details[] = [];
+      const parameters: Details[] = [], requestBodies: Details[] = [];
       for (const parameter of member.parameters) {
         for (const decorator of ts.getDecorators(parameter) ?? []) {
-          if (!ts.isCallExpression(decorator.expression) || !["Query", "Param"].includes(decorator.expression.expression.getText())) continue;
+          if (!ts.isCallExpression(decorator.expression) || !["Query", "Param", "Body"].includes(decorator.expression.expression.getText())) continue;
           const name = source.value(decorator.expression.arguments[0]);
           const binding = decorator.expression.expression.getText() === "Query" ? "query" : "path";
           const type = parameter.type;
@@ -539,6 +558,18 @@ export function repositoryApiDocumentation(source: RepositorySource): Map<string
             && !dto.heritageClauses?.some(clause => clause.token === ts.SyntaxKind.ExtendsKeyword)
             && dto.members.length > 0 && dto.members.every(field => ts.isPropertyDeclaration(field)
               && ts.isIdentifier(field.name) && !(ts.getCombinedModifierFlags(field) & ts.ModifierFlags.Static));
+          if (decorator.expression.expression.getText() === "Body") {
+            requestBodies.push({ ...parameterDeclaration(parameter), binding: "body",
+              ...(typeof name === "string" ? { field: name } : {}),
+              ...(decorator.expression.arguments.length ? { bindingStatus: "source-reference" } : {}),
+              ...(decorator.expression.arguments.length > 1 ? { pipesStatus: "source-reference" } : {}),
+              ...(dto ? { declaration: sourceReference(dto, source.root),
+                fields: dto.members.filter(field => ts.isPropertyDeclaration(field)
+                  && !(ts.getCombinedModifierFlags(field) & ts.ModifierFlags.Static)).map(field => parameterDeclaration(field as ts.PropertyDeclaration)),
+                fieldNamesStatus: fieldNamesComplete ? "indexed" : "source-reference" } : { fieldNamesStatus: "source-reference" }),
+              status: "source-reference" });
+            continue;
+          }
           parameters.push({ ...parameterDeclaration(parameter), in: binding,
             ...(typeof name === "string" ? { parameterName: name } : { status: "source-reference" }),
             ...(decorator.expression.arguments.length > 1 ? { pipesStatus: "source-reference" } : {}),
@@ -547,7 +578,7 @@ export function repositoryApiDocumentation(source: RepositorySource): Map<string
                 ? { fieldNamesStatus: fieldNamesComplete ? "indexed" : "source-reference" } : {}) } : {}) });
         }
       }
-      if (!parameters.length) continue;
+      if (!parameters.length && !requestBodies.length) continue;
       for (const decorator of ts.getDecorators(member) ?? []) {
         if (!ts.isCallExpression(decorator.expression)) continue;
         const method = decorator.expression.expression.getText().toUpperCase();
@@ -555,9 +586,26 @@ export function repositoryApiDocumentation(source: RepositorySource): Map<string
         const suffixes = typeof suffix === "string" ? [suffix] : Array.isArray(suffix) && suffix.every(item => typeof item === "string") ? suffix as string[] : [];
         for (const prefix of prefixes) for (const suffix of suffixes) {
           const path = "/" + ["api", prefix, suffix].filter(Boolean).join("/").replace(/\/+/gu, "/").replace(/:([A-Za-z0-9_]+)/gu, "{$1}");
-          const documentation = result.get(`${method} ${path}`);
+          const key = `${method} ${path}`;
+          let documentation = result.get(key);
+          if (!documentation && requestBodies.length && ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"].includes(method)) {
+            documentation = { reference: sourceReference(member, source.root),
+              details: { apiFieldsStatus: "source-reference",
+                controllerSource: { source: sourceReference(member, source.root), issues: ["responseSchema:source-reference"] } } };
+            result.set(key, documentation);
+          }
+          if (documentation && requestBodies.length) {
+            // 原 DTO 类型/装饰器可定位字段，但不足以证明转换、校验或返回体完整。
+            const bodies = documentation.details.controllerRequestBodies;
+            documentation.details.controllerRequestBodies = [...(Array.isArray(bodies) ? bodies : []), ...requestBodies];
+          }
           const openapi = documentation?.details.openapiSource;
-          if (!documentation || !openapi || typeof openapi !== "object" || Array.isArray(openapi)) continue;
+          if (documentation && requestBodies.length) {
+            const schemas = openapi && typeof openapi === "object" && !Array.isArray(openapi) ? openapi.schemas : undefined;
+            if (!schemas || typeof schemas !== "object" || Array.isArray(schemas) || !schemas.requestSchema)
+              documentation.details.apiFieldsStatus = "source-reference";
+          }
+          if (!parameters.length || !documentation || !openapi || typeof openapi !== "object" || Array.isArray(openapi)) continue;
           const controllers = Array.isArray(openapi.controllerParameters) ? openapi.controllerParameters : [];
           controllers.push({ source: sourceReference(member, source.root), parameters });
           openapi.controllerParameters = controllers;
