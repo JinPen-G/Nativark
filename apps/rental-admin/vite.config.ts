@@ -8,6 +8,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { CoreDeploymentLockSchema, coreDeploymentHostVersions } from "@rental-os/core-contracts";
 import { requireCorePackagePin } from "@rental-os/core-contracts/install";
+import { rentalHostLegacyApiRoutes } from "@rental-os/rental-api/openapi";
 import { platformAdminVite } from "@rental-os/platform-admin/vite";
 import { apiProxyTarget, loadViteEnvironment, publicEnvironmentDefinitions } from "../../config/environment.cjs";
 
@@ -20,7 +21,7 @@ export default defineConfig(({ mode }) => {
     throw new Error("Rental 后台只装配所选 Rental Core");
   const require = createRequire(import.meta.url);
   const root = resolve(dirname(require.resolve("@rental-os/rental-core")), "..");
-  const { manifest } = requireCorePackagePin(root, lock.cores[0], coreDeploymentHostVersions(lock));
+  const { manifest } = requireCorePackagePin(root, lock.cores[0], coreDeploymentHostVersions(lock), rentalHostLegacyApiRoutes());
   const platform = platformAdminVite();
   const virtual = "\0selected-rental-manifest";
   return {

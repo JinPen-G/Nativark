@@ -4,6 +4,8 @@
 
 ## 装配
 
+构建前置沿 Rental API 的原链编译同版 OpenAPI 出口，先按[API 构建说明](../rental-api/README.md)准备所选 Client。Rental API 为开发依赖，许可只在构建时用于 Rental 原接口；工单包仍须满足自己的路由命名空间。
+
 1. 按宿主锁文件准备依赖与 Rental、`example-tickets` 两个固定标准包，API 使用相同的包版本、来源与摘要。
 2. 将 `CORE_DEPLOYMENT_LOCK` 指向同一固定部署锁，`cores` 显式包含这两个包。构建逐包校验实际字节，并核对底座及所选数据能力的 `coreDeploymentHostVersions`。[构建入口](vite.config.ts) · [包校验](../../packages/core-contracts/src/install.ts) · [部署合同](../../packages/core-contracts/src/update.ts)
 3. 在具备对应环境的工程中执行 `npm run build -w @rental-os/example-multi-core-admin`，本地开发使用 `npm run dev -w @rental-os/example-multi-core-admin`。Web API 基址由 `VITE_API_BASE_URL` 提供，默认 `/api`，开发端口默认 `5179`。
@@ -16,7 +18,7 @@
 - [Rental 导航](../../packages/rental-core/admin/browser-navigation.ts)维护原深链接、通知对象定位及已验证的 `rental-workspace` 投影。工单按租户范围进入正式路由，缺经营空间的成员仍可使用获权工单和适用公共设置。
 - [Rental 贡献](../../packages/rental-core/admin/index.tsx)与[工单贡献](../../packages/example-tickets-core/admin/index.tsx)提供真实正文及类型化动作，原写入、权限、历史与 unknown 核对规则沿各自实现运行。
 
-源码取出时包含本应用、`config/environment.cjs` 及其类型声明、公共 `core-contracts`、`platform-contracts`、`platform-admin`、`shared`、`ui-arc`、`ui-motiq` 与两个 Core 的已选依赖闭包。依赖声明见[应用包](package.json)，构建接点使用公共正式出口。
+源码取出时包含本应用、`config/environment.cjs` 及其类型声明、公共 `core-contracts`、`platform-contracts`、`platform-admin`、`shared`、`ui-arc`、`ui-motiq` 与两个 Core 的已选依赖闭包。Rental API 及其所选构建依赖同时供给构建期的原路由许可。依赖声明见[应用包](package.json)，构建接点使用公共正式出口。
 
 ## 页面与动作边界
 

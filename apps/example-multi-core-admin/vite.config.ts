@@ -13,6 +13,7 @@ import {
   coreDeploymentHostVersions,
 } from "@rental-os/core-contracts";
 import { requireCorePackagePin } from "@rental-os/core-contracts/install";
+import { rentalHostLegacyApiRoutes } from "@rental-os/rental-api/openapi";
 import { platformAdminVite } from "@rental-os/platform-admin/vite";
 import { apiProxyTarget, loadViteEnvironment, publicEnvironmentDefinitions } from "../../config/environment.cjs";
 
@@ -40,7 +41,7 @@ export default defineConfig(({ mode }) => {
   const rentalRoot = resolve(dirname(require.resolve("@rental-os/rental-core")), "..");
   const ticketsRoot = resolve(dirname(require.resolve("@rental-os/example-tickets-core")), "..");
   const manifests = {
-    rental: requireCorePackagePin(rentalRoot, rental, host).manifest,
+    rental: requireCorePackagePin(rentalRoot, rental, host, rentalHostLegacyApiRoutes()).manifest,
     tickets: requireCorePackagePin(ticketsRoot, tickets, host).manifest,
   };
   const platform = platformAdminVite();

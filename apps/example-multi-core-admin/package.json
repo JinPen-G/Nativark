@@ -6,12 +6,12 @@
   "type": "module",
   "description": "公共后台与 Rental、工单两标准 Core 的受控示范宿主",
   "scripts": {
-    "predev": "npm run build -w @rental-os/platform-core-host",
+    "predev": "npm run build -w @rental-os/rental-api",
     "dev": "vite --host 127.0.0.1 --strictPort",
-    "prebuild": "npm run build -w @rental-os/platform-core-host",
+    "prebuild": "npm run build -w @rental-os/rental-api",
     "build": "tsc -p tsconfig.json && vite build",
     "lint": "tsc -p tsconfig.json",
-    "prelint": "npm run build -w @rental-os/platform-core-host"
+    "prelint": "npm run build -w @rental-os/rental-api"
   },
   "dependencies": {
     "@rental-os/core-contracts": "0.1.0",
@@ -32,6 +32,7 @@
     "@rental-os/shared": "0.1.0"
   },
   "devDependencies": {
+    "@rental-os/rental-api": "0.1.0",
     "@tailwindcss/vite": "4.3.3",
     "@types/node": "22.20.1",
     "@types/react": "19.2.18",
