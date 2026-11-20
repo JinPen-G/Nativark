@@ -34,7 +34,7 @@
 
 详情页的分派表单也使用 `useCoreForm`，保存与回车共用一次请求。处理/关闭和分派共享等待边界，但不同动作或输入不会复用另一操作的成功结果；unknown只核对原键。处理/关闭的成功或原结果核对保留未保存的分派草稿，只有当前输入仍对应已确认的原分派才清稿。操作收据与详情刷新分别处理，已记录的操作不会因刷新失败变成unknown；读取失败显示重新读取入口，最新工单尚未读到时不继续提交。对象切换释放原表单和操作状态。[详情源码](admin/index.tsx)
 
-列表页使用 `CoreList`及本Core的 `GET ticket-pages`，返回rows/total。默认20条，条数变化沿原分页回首页，状态筛选只改变本查询；总数与正文共用同一个租户/当前成员/状态条件。空末页仍保留真实total，框架只读回有效页。原GET tickets数组合同及10万offset限制继续保留；新分页入口的安全整数offset独立声明。[简明列表写法](../../apps/admin/src/core/README.md#列表只提供业务列和读取结果)
+列表页使用 `CoreList`及本Core的 `GET ticket-pages`，返回rows/total。默认20条，条数、状态或标题搜索变化回首页；总数与正文共用同一个租户/当前成员/状态/标题条件。标题最多160字，去除首尾空白后按原列排序规则作区分大小写的字面包含匹配，空值不筛选；百分号、下划线、引号和反斜线都按普通文字处理。搜索由服务端在分页前完成，不仅过滤已显示的一页。空末页仍保留真实total，框架只读回有效页。原GET tickets数组合同及10万offset限制继续保留；新分页入口的安全整数offset独立声明。[简明列表写法](../../apps/admin/src/core/README.md#列表只提供业务列和读取结果)
 
 `createTicketsHttpContribution()`从TICKETS_HTTP生成原Guard所需的八条政策，登记到当前部署目录的 `http`。创建工单标记startsNewBusiness，原操作收据标记original_receipt，其他查询/处理继续business；权限、分面和OpenAPI扩展来自同一合同。宿主按标准目录接入，Core作者不向原Guard追加工单专用分支。最终对象、幂等、停用/期限和本人原收据仍由工单服务核验。[HTTP合同](src/http.ts) · [平台标准](../core-contracts/README.md#登记core的http政策)
 
@@ -92,7 +92,7 @@ npm run pack:core -w @rental-os/example-tickets-core -- <Core仓库HTTPS地址> 
 | 方法与路径 | 业务权限 | 输入与返回 |
 | --- | --- | --- |
 | `GET /api/cores/example-tickets/tickets` | `example-tickets:ticket:read` | 可选state/offset/limit；当前可见工单数组 |
-| `GET /api/cores/example-tickets/ticket-pages` | 同上 | 可选state/offset/limit；同一次读取的rows/total，总数只计当前可见范围 |
+| `GET /api/cores/example-tickets/ticket-pages` | 同上 | 可选subject/state/offset/limit；subject为标题字面包含搜索，同一次读取的rows/total只计当前可见且匹配的范围 |
 | `GET /api/cores/example-tickets/tickets/{ticketId}` | 同上 | 已登记工单ID；当前可见详情 |
 | `GET /api/cores/example-tickets/operations/{operationId}` | 同上 | 本人的原操作键；recorded原收据或unavailable |
 | `POST /api/cores/example-tickets/tickets` | `example-tickets:ticket:create` | operationId/subject/description；原操作收据 |
@@ -114,7 +114,7 @@ npm run pack:core -w @rental-os/example-tickets-core -- <Core仓库HTTPS地址> 
 
 测试宿主接通后，按“受控注册 → SaaS开通租户 → 租户管理者给成员分配Core → 工单设置 → 创建/分派/处理/关闭”使用。`/cores/example-tickets/setup`是已登记配置页，不要求工单业务先就绪；管理者需已获Core成员分配才能办理首次绑定。工单没有额外初始化配置，设置动作调用平台原绑定服务，已有绑定复用。结果未知只核对原设置收据，刷新或重入保留原键；设置成功后再进入实际工单列表。[平台绑定用法](../../apps/admin/src/core/README.md#core首次设置)
 
-列表支持状态筛选和显式分页，新建用声明式保存主操作，详情按当前状态声明处理/关闭，分派使用原Form/SaveButton。没有新CSS或外壳，页面标题从路由声明读取；普通成员仍经服务端数据范围。首次示范的分派填写已授权成员ID，后续原成员目录适配接通后可改为实名选择，当前不创建假人员列表。
+列表支持标题搜索、状态筛选和显式分页；输入或清除标题后回首页并读取同条件的服务端总数。新建用声明式保存主操作，详情按当前状态声明处理/关闭，分派使用原Form/SaveButton。没有新CSS或外壳，页面标题从路由声明读取；普通成员仍经服务端数据范围。首次示范的分派填写已授权成员ID，后续原成员目录适配接通后可改为实名选择，当前不创建假人员列表。
 
 网络/未知结果保留原输入、键和常显提示，只提供GET原收据核对；已知本Core提交前拒绝允许核正输入/状态再发起新操作。输入未保存、写入中或未知结果沿原UnsavedChangesGuard保护。查询缓存包含Core/会话/页面代次，原HTTP负责凭据与信封，通用Core请求适配负责离页中止及迟到响应拒绝。
 

@@ -26,8 +26,12 @@ export const ListTicketsSchema = z.object({
   limit: z.number().int().min(1).max(100).default(20)
 }).strict();
 export type ListTickets = z.infer<typeof ListTicketsSchema>;
-/** 新分页入口单独接受安全整数偏移；旧数组入口的10万偏移限制继续保留。 */
-export const TicketPageQuerySchema = ListTicketsSchema.extend({ offset: z.number().int().safe().nonnegative().default(0) });
+/** 分页入口独立提供标题包含搜索和安全整数偏移；旧数组入口保持原合同。 */
+export const TicketPageQuerySchema = ListTicketsSchema.extend({
+  subject: z.string().trim().max(160).optional().describe("按标题字面包含搜索，区分大小写；首尾空白去除，空值不筛选"),
+  offset: z.number().int().safe().nonnegative().default(0)
+});
+export type TicketPageQuery = z.infer<typeof TicketPageQuerySchema>;
 /** 当前页和总数使用同一可读范围；旧数组列表合同保持。 */
 export const TicketPageSchema = z.object({ rows: z.array(TicketSchema).max(100), total: z.number().int().safe().nonnegative() }).strict();
 export type TicketPage = z.infer<typeof TicketPageSchema>;

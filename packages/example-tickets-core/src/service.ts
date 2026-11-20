@@ -5,13 +5,13 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { CorePrincipal } from "@rental-os/core-contracts";
 import { AssignTicketSchema, ChangeTicketStateSchema, CreateTicketSchema, ListTicketsSchema, TicketPageQuerySchema, TicketError, TicketIdSchema,
-  type ListTickets, type Ticket, type TicketPage, type TicketPermission, type TicketReceipt } from "./contracts";
+  type ListTickets, type Ticket, type TicketPage, type TicketPageQuery, type TicketPermission, type TicketReceipt } from "./contracts";
 
 export interface TicketStoredReceipt extends TicketReceipt { actorId: string; fingerprint: string }
 export interface TicketRepository {
   list(query: ListTickets, viewerId?: string): Promise<Ticket[]>;
   /** 正文与总数来自同一次数据库观察，不能统计当前成员无权读取的工单。 */
-  page(query: ListTickets, viewerId?: string): Promise<TicketPage>;
+  page(query: TicketPageQuery, viewerId?: string): Promise<TicketPage>;
   find(id: string): Promise<Ticket | undefined>;
   create(ticket: Ticket): Promise<void>;
   update(ticket: Ticket, expectedRevision: number): Promise<void>;

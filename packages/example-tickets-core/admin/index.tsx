@@ -38,15 +38,19 @@ function useTicketNavigation() {
 export function TicketsPage() {
   const { request, queryKey } = useCoreRequest(), navigate = useTicketNavigation(), { t } = useLocale();
   const [offset, setOffset] = useState(0), [limit, setLimit] = useState(20), [state, setState] = useState<string>();
-  const listKey = [...queryKey, "list", offset, limit, state];
+  const [subject, setSubject] = useState("");
+  const searchSubject = subject.trim() || undefined;
+  const listKey = [...queryKey, "list", offset, limit, state, searchSubject];
   const query = useQuery({ queryKey: listKey, queryFn: async ({ signal }) =>
-    TICKETS_HTTP.page.response.parse(await request(pathFor(TICKETS_HTTP.page.path), { params: { offset, limit, state }, signal })), meta: { liveRefresh: false } });
+    TICKETS_HTTP.page.response.parse(await request(pathFor(TICKETS_HTTP.page.path), { params: { offset, limit, state, subject: searchSubject }, signal })), meta: { liveRefresh: false } });
   return <CorePage actions={[{ id: "create", kind: "navigate", label: "新建工单", emphasis: "primary", permissions: permission("create"), to: page("create") }]}>
     <CoreList<Ticket> query={query} queryKey={listKey} rowKey="id"
       pagination={{ offset, limit, onChange: (next, size) => { setOffset(next); setLimit(size); } }}
-      controls={<Select allowClear aria-label={t("工单状态")} placeholder={t("全部状态")} value={state}
+      controls={<><Input allowClear aria-label={t("工单标题")} placeholder={t("搜索标题")} maxLength={160} value={subject}
+        onChange={event => { setSubject(event.target.value); setOffset(0); }} />
+        <Select allowClear aria-label={t("工单状态")} placeholder={t("全部状态")} value={state}
         options={Object.entries(stateNames).map(([value, label]) => ({ value, label: t(label) }))}
-        onChange={value => { setState(value); setOffset(0); }} />} columns={[
+        onChange={value => { setState(value); setOffset(0); }} /></>} columns={[
           { title: t("标题"), key: "subject", render: (_, row) => <DataTableText primary={row.subject} secondary={row.description || undefined} /> },
           { title: t("状态"), dataIndex: "state", render: (value: Ticket["state"]) => t(stateNames[value]) },
           { title: t("受派成员"), dataIndex: "assigneeId", render: value => value ?? t("尚未分派") },

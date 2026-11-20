@@ -5,7 +5,7 @@
 import { createHash } from "node:crypto";
 import { empty, join, sqltag as sql, type Sql } from "@prisma/client/runtime/library";
 import type { CorePhysicalDataObservation, CoreRemovalAssessment } from "@rental-os/core-contracts";
-import { TicketError, TicketIdSchema, TicketSchema, TicketPageSchema, TICKETS_DATA_VERSION, type ListTickets, type Ticket, type TicketPage } from "./contracts";
+import { TicketError, TicketIdSchema, TicketSchema, TicketPageSchema, TICKETS_DATA_VERSION, type ListTickets, type Ticket, type TicketPage, type TicketPageQuery } from "./contracts";
 import type { TicketAccess, TicketExecution, TicketExecutionRequest, TicketRepository, TicketStoredReceipt } from "./service";
 
 interface TicketRow {
@@ -41,10 +41,12 @@ class MysqlTicketRepository implements TicketRepository {
     return rows.map(ticket);
   }
 
-  async page(query: ListTickets, viewerId?: string): Promise<TicketPage> {
+  async page(query: TicketPageQuery, viewerId?: string): Promise<TicketPage> {
     // 一个CTE固定正文和总数的同一范围/语句快照；末页为空仍返回真实total，供页面重读有效页。
+    // LOCATE按原列排序规则匹配字面文本，百分号/下划线不作为通配符，值仍由原SQL模板参数化。
+    const subject = query.subject ? sql`AND LOCATE(${query.subject}, subject) > 0` : empty;
     const rows = await this.tx.$queryRaw<Array<(TicketRow | { id: null }) & { total: bigint | number }>>(sql`
-      WITH visible_tickets AS (SELECT ${columns} FROM example_tickets ${this.visibleWhere(query, viewerId)})
+      WITH visible_tickets AS (SELECT ${columns} FROM example_tickets ${this.visibleWhere(query, viewerId)} ${subject})
       SELECT page.*, totals.total FROM (SELECT COUNT(*) AS total FROM visible_tickets) totals
       LEFT JOIN (SELECT * FROM visible_tickets ORDER BY createdAt DESC, id DESC LIMIT ${query.limit} OFFSET ${query.offset}) page ON TRUE
       ORDER BY page.createdAt DESC, page.id DESC`);
