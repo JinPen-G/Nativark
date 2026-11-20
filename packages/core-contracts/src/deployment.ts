@@ -27,6 +27,8 @@ export function createCoreMigrationDeployment(input: {
   platform: readonly { name: string; sql: Uint8Array }[];
   cores: ReadonlyMap<string, ReadonlyMap<string, Uint8Array>>;
   dataCapabilities?: ReadonlyMap<string, ReadonlyMap<string, Uint8Array>>;
+  /** Trusted host policy, never parsed from a Core package or deployment lock. */
+  legacyApiRoutes?: Readonly<Record<string, readonly string[]>>;
 }): ReadonlyMap<string, Uint8Array> {
   const lock = CoreDeploymentLockSchema.parse(input.lock), host = coreDeploymentHostVersions(lock);
   const capabilityIssues = checkPlatformDataCapabilities(lock);
@@ -48,7 +50,8 @@ export function createCoreMigrationDeployment(input: {
   for (const pin of [...lock.cores].sort((a, b) => a.manifest.id.localeCompare(b.manifest.id))) {
     const source = input.cores.get(pin.manifest.id);
     if (!source) throw new Error(`所选Core缺少已核定包：${pin.manifest.id}`);
-    const inspected = inspectCorePackageFiles(source, host);
+    const inspected = inspectCorePackageFiles(source, host,
+      input.legacyApiRoutes && Object.hasOwn(input.legacyApiRoutes, pin.manifest.id) ? input.legacyApiRoutes[pin.manifest.id] : []);
     if (!inspected.ok || !inspected.manifest || !isDeepStrictEqual(inspected.manifest, pin.manifest)
       || createCoreArchive(source).sha256 !== pin.sha256)
       throw new Error(`所选Core清单/包文件与部署锁不一致：${pin.manifest.id}`);

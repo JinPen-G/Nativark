@@ -13,10 +13,16 @@
 | [http-application-views.ts](src/http-application-views.ts) | 向 HTTP 注入原服务方法，隐藏 Nest 生命周期钩子，避免同一业务实例被多个模块重复启动。 |
 | [lifecycle.ts](src/lifecycle.ts) | 唯一初始化、预热、配货/到期/文件/限流作业与数据库退出负责人；先停止新任务并排空，再断开连接，排空失败不提前断库。 |
 | [deployment-package.ts](src/deployment-package.ts) | 从实际依赖读取固定标准包并核对摘要；源码目录、同名版本或准备结果均不能替代实际部署和物理数据证据。 |
+| [http-policy.ts](src/http-policy.ts)、[openapi.ts](src/openapi.ts) | 真实挂载清单同时约束请求包装与旧路径文档许可；逐条核定原方法/处理器，使用 Rental 命名空间并保留原合同缺项。 |
+| [package.ts](src/package.ts)、[prepare-deployment.ts](src/prepare-deployment.ts) | 从已构建字节和固定来源形成标准包及候选部署；同源 OpenAPI、完整摘要和原 SQL 必须一致，不安装或执行迁移。 |
 
 启动配置须显式提供 `DATABASE_URL`、`AUTH_TOKEN_SECRET`、`RENTAL_AI_MODE=disabled` 和 `RENTAL_DEPLOYMENT_LOCK`。部署锁使用绝对路径，文件上限 8 MiB。可配置 `API_PORT`、`TRUST_PROXY_HOPS`、`CORS_ALLOWED_ORIGINS`；公共数据、Rental 和基础设施数据模式均只接受 MySQL。启动入口本身不授予连接业务库或发布权限。
 
 原组合宿主的 `PlatformController` 已有客户/空间兼容入口；该宿主不得再次挂载独立客户/空间模块。独立宿主则由本根模块统一挂载。原认证扩展同样不能在同一应用重复登记。
+
+`createRentalHostPackage` 接收实际已构建字节、Core/底座固定来源和公开指南，生成同源 `dist/http-openapi.json` 并沿原标准包检查器核对。部署准备和启动再次核对整包摘要、清单与该文档，缺失或不同源时拒绝。旧路径例外仅来自宿主实际挂载处理器；通用打包、安装、迁移准备入口省略许可时仍要求标准 Core 路径，不从包或锁文件自取例外。候选 SQL 保留原字节和原顺序，`prepared` 不代表已经安装、迁移或运行。
+
+公共、Core 管理与 Rental 文档在唯一 OpenAPI 入口组合；573 个已描述操作对应 576 个原处理器。客户头像读/写及员工检查证据绑定三项保留文档缺口，原未挂的品类选项路径保留为未挂说明；292 项原宽泛合同明确标为 `incomplete`。这些缺口不伪造请求/响应字段，也不将路由挂载视为当前部署或业务授权通过。
 
 ## 请求、事务与响应
 

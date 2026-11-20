@@ -21,6 +21,8 @@ export function createRentalPackage(input: {
   platformGuide: string;
   host: CoreHostVersions;
   contributions?: Pick<CoreManifest["entries"], "openapi" | "ai" | "jobs" | "events">;
+  /** Exact compatibility routes supplied by the actual host, never the Core manifest. */
+  legacyApiRoutes?: readonly string[];
 }) {
   const sourceDirectory = CorePackagePathSchema.parse(input.sourceDirectory);
   const files = new Map<string, Uint8Array>();
@@ -98,9 +100,9 @@ export function createRentalPackage(input: {
   files.set("CORE_GUIDE.md", Buffer.from(renderCoreGuide(manifest, input.platformGuide, input.platformSource)));
   const declared = new Set(corePackageFiles(manifest));
   if ([...files.keys()].some(file => !declared.has(file))) throw new Error("Rental 文件未纳入唯一发行清单");
-  const inspected = inspectCorePackageFiles(files, input.host);
+  const inspected = inspectCorePackageFiles(files, input.host, input.legacyApiRoutes);
   if (!inspected.ok) throw new Error(inspected.issues.map(issue => `${issue.file}:${issue.field ?? ""} ${issue.message}`).join("\n"));
   const archive = createCoreArchive(files);
-  const data = readRentalDataPackage(files, { manifest, sha256: archive.sha256 }, input.host);
+  const data = readRentalDataPackage(files, { manifest, sha256: archive.sha256 }, input.host, input.legacyApiRoutes);
   return { ...archive, manifest, fileCount: files.size, data };
 }

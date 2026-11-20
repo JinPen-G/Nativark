@@ -12,6 +12,8 @@ import { readCorePackageFiles } from "@rental-os/core-contracts/package";
 import { CORE_ARCHIVE_LIMITS, createCoreArchive } from "@rental-os/core-contracts/archive";
 import { createPublicPlatformDataPlan } from "@rental-os/platform-api/data-plan";
 import { readRentalDataPackage } from "@rental-os/rental-core/data-package";
+import { createRentalOpenApi } from "@rental-os/rental-core/http-openapi";
+import { rentalHostLegacyApiRoutes } from "./openapi";
 
 /** 内存准备与命令共用；真实已部署状态仍由原迁移账和物理读取判定。 */
 export function createRentalDeploymentFiles(input: {
@@ -22,7 +24,10 @@ export function createRentalDeploymentFiles(input: {
   publicMigrations: readonly { name: string; sql: Uint8Array }[];
 }) {
   const release = CorePlatformReleaseSchema.parse(input.release);
-  const rental = readRentalDataPackage(input.coreFiles, input.pin, release.versions);
+  const legacyApiRoutes = rentalHostLegacyApiRoutes();
+  const rental = readRentalDataPackage(input.coreFiles, input.pin, release.versions, legacyApiRoutes);
+  if (!rental.openapi || !isDeepStrictEqual(rental.openapi, JSON.parse(JSON.stringify(createRentalOpenApi()))))
+    throw new Error("Rental 部署准备缺少与当前实际处理器同源的 OpenAPI 贡献");
   const platform = createPublicPlatformDataPlan(rental.dataPlan.publicForeignKeys);
   if (!isDeepStrictEqual(release.data, platform.data)) throw new Error("底座发行数据与当前公共宿主不一致");
   const publicRoot = resolve(dirname(require.resolve("@rental-os/platform-api/data-plan")), "..");
@@ -33,7 +38,7 @@ export function createRentalDeploymentFiles(input: {
     throw new Error("公共迁移目录名与宿主原账顺序不一致");
   const lock: CoreDeploymentLock = { lockVersion: 1, platform: release, cores: [input.pin] };
   const files = new Map(createCoreMigrationDeployment({ lock, platform: input.publicMigrations,
-    cores: new Map([[rental.manifest.id, input.coreFiles]]) }));
+    cores: new Map([[rental.manifest.id, input.coreFiles]]), legacyApiRoutes: { rental: legacyApiRoutes } }));
   const schema = composeCorePrismaSchema(input.publicSchema, [rental.prisma]);
   // 公共生成器保持单源；仅允许输出到本次新迁移目录旁的专属 generated/client。
   const generators = [...schema.matchAll(/^generator\s+\w+\s*\{([\s\S]*?)^\}/gm)];
@@ -47,7 +52,7 @@ export function createRentalDeploymentFiles(input: {
 function prepare(args: string[]) {
   if (args.length !== 3) throw new Error("用法：prepare-deployment.js <固定底座发行JSON> <已准备Rental包目录> <新迁移目录>");
   const release = CorePlatformReleaseSchema.parse(JSON.parse(readFileSync(args[0], "utf8")));
-  const packed = packCoreDirectory(args[1], release.versions);
+  const packed = packCoreDirectory(args[1], release.versions, rentalHostLegacyApiRoutes());
   const coreFiles = readCorePackageFiles(args[1], CORE_ARCHIVE_LIMITS.fileBytes, CORE_ARCHIVE_LIMITS.totalBytes);
   if (createCoreArchive(coreFiles).sha256 !== packed.sha256) throw new Error("Rental 包在读取期间变化，停止准备");
   const publicRoot = resolve(dirname(require.resolve("@rental-os/platform-api/data-plan")), "..");
