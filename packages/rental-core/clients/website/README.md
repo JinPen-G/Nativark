@@ -1,6 +1,17 @@
-# Rental 官网公开客户端
+# Rental 官网客户端
 
 [工厂与合同入口](index.ts)提供 `createRentalWebsitePublicClient(apiBase)`。宿主传入网关前缀，空字符串使用同源 `/api/client/v1`，末尾斜杠沿原规则处理。原网站[apiClient](../../../../apps/tenant-website/src/data/apiClient.ts)供给 `VITE_API_BASE`，继续导出原 `API_BASE`、`clientApi`、`ApiError` 和兼容类型。
+
+## 按用途接入
+
+四组工厂均从 `@rental-os/rental-core/clients/website` 正式出口导入。
+
+| 工厂与宿主输入 | 接入资料 |
+| --- | --- |
+| `createRentalWebsitePublicClient(apiBase)` | [公开目录、文档与域名解析](#请求与调用链) |
+| `createRentalWebsiteAuthClient(ports)` | [认证与退出](auth/README.md#认证接入) |
+| `createRentalWebsiteAccountClient(ports)` | [本人资料与空间切换](auth/README.md#本人资料接入) |
+| `createRentalWebsiteSessionClient(authedJson)` | [登录态业务与原结果读取](session/README.md#接入) |
 
 ## 请求与调用链
 

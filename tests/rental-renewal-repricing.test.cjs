@@ -18,10 +18,18 @@ const at = hours => new Date(Date.parse(start) + hours * 3600000).toISOString();
   const business = new RentalBusinessService(stores.createAbsorbingBusinessConfigStore(), stores.createAbsorbingBusinessFactStore(), stores.createAbsorbingConfigStore());
   await core.onApplicationBootstrap(); await business.onApplicationBootstrap();
   business.factStore.findQuote = async (_tenant, id) => { const quote = business.getQuote(_tenant, ctx, id); return quote?.id === id ? clone(quote) : undefined; };
-  const profile = core.getProfile(tenant);
-  const ctx = { profile, category: core.listCategories().find(x => x.code === profile.categoryCode), settings: core.getBusinessSettings(tenant), groups: core.listItemGroups(tenant), pricingGroups: core.listPricingGroups(tenant), locations: core.listLocations(tenant), couponTemplates: core.listCouponTemplates(tenant), operators: core.listOperators(tenant) };
+  const profile = await core.getProfile(tenant);
+  const ctx = { profile, category: core.listCategories().find(x => x.code === profile.categoryCode), settings: await core.getBusinessSettings(tenant), groups: core.listItemGroups(tenant), pricingGroups: core.listPricingGroups(tenant), locations: core.listLocations(tenant), couponTemplates: core.listCouponTemplates(tenant), operators: core.listOperators(tenant) };
   const group = ctx.groups.find(x => x.inventoryMode === RentalInventoryMode.Quantity && x.status === 'enabled');
   const location = ctx.locations.find(x => x.status === 'enabled');
+  // 计算专项的经营空间库存夹具，保留单对象读取与空结果。
+  business.coreConfigStore.listItemGroupsPage = async (scopeTenantId, workspaceId, query) => {
+    assert.equal(scopeTenantId, tenant);
+    assert.equal(workspaceId, "ws_tenant_002");
+    assert.equal(query.limit, 1);
+    return { rows: clone(ctx.groups.filter((row) => row.id === query.itemGroupId)),
+      truncated: false, source: "persisted_workspace_configuration" };
+  };
   require('./helpers/fulfillment-admission-fixture.cjs').bindFulfillmentAdmission([core, business], tenant, 'ws_tenant_002', ctx);
   assert.ok(group && location);
   const seed = await business.createQuote(tenant, ctx, { customerType: 'personal', customerName: '续租计算测试', fulfillmentMode: 'store_pickup_return', fulfillmentLocationId: location.id, startAt: start, endAt: at(2), lines: [{ itemGroupId: group.id, quantity: 1 }] });
