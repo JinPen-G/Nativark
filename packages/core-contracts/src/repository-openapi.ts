@@ -28,6 +28,8 @@ type ExpressionBinding = { expression: ts.Expression; bindings: Map<ts.Symbol, E
 class StaticSchemaReader {
   readonly issues = new Set<string>();
   readonly fields = new Map<string, DevelopmentSourceReference>();
+  readonly literalMaps = new Set<ts.CallExpression>();
+  readonly mappedObjects = new Set<ts.ObjectLiteralExpression>();
   private readonly partialObjects = new WeakSet<object>();
 
   constructor(private readonly source: RepositorySource) {}
@@ -55,11 +57,11 @@ class StaticSchemaReader {
     }).map(([pointer, location]) => ({ pointer, source: location }));
   }
 
-  read(expression: ts.Expression, pointer = "", bindings = new Map<ts.Symbol, ExpressionBinding>(), seen = new Set<ts.Node>()): SchemaValue | typeof UNRESOLVED {
+  read(expression: ts.Expression, pointer = "", bindings = new Map<ts.Symbol, ExpressionBinding>(), seen = new Set<ts.Node>(), selectiveMembers = false): SchemaValue | typeof UNRESOLVED {
     const node = unwrap(expression);
     if (seen.has(node) || seen.size > 80) return this.unresolved(pointer, "recursive-expression");
     const chain = new Set(seen).add(node);
-    const read = (child: ts.Expression, location = pointer, scope = bindings) => this.read(child, location, scope, chain);
+    const read = (child: ts.Expression, location = pointer, scope = bindings) => this.read(child, location, scope, chain, selectiveMembers);
     if (ts.isStringLiteralLike(node) || ts.isNumericLiteral(node) || ts.isPrefixUnaryExpression(node)
       || [ts.SyntaxKind.TrueKeyword, ts.SyntaxKind.FalseKeyword, ts.SyntaxKind.NullKeyword].includes(node.kind)) {
       const value = this.source.value(node);
@@ -68,7 +70,7 @@ class StaticSchemaReader {
     if (ts.isIdentifier(node)) {
       const symbol = this.source.checker.getSymbolAtLocation(node);
       const binding = symbol && bindings.get(symbol);
-      if (binding) return this.read(binding.expression, pointer, binding.bindings, binding.seen);
+      if (binding) return this.read(binding.expression, pointer, binding.bindings, binding.seen, selectiveMembers);
       const target = symbol && this.source.target(symbol).valueDeclaration;
       if (target && ts.isEnumDeclaration(target) && isRepositorySourcePath(this.source.root, target.getSourceFile().fileName)) {
         const value: Record<string, SchemaValue> = Object.create(null);
@@ -85,6 +87,7 @@ class StaticSchemaReader {
       return this.unresolved(pointer, "dynamic-identifier");
     }
     if (ts.isObjectLiteralExpression(node)) {
+      if (selectiveMembers) this.mappedObjects.add(node);
       let value: Record<string, SchemaValue> = Object.create(null);
       let partial = false;
       for (const item of node.properties) {
@@ -164,11 +167,39 @@ class StaticSchemaReader {
       return left === UNRESOLVED || right === UNRESOLVED ? UNRESOLVED : left === right;
     }
     if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
-      const value = read(node.expression), key = ts.isPropertyAccessExpression(node) ? node.name.text : node.argumentExpression && read(node.argumentExpression);
+      const key = ts.isPropertyAccessExpression(node) ? node.name.text : node.argumentExpression && read(node.argumentExpression);
+      if (selectiveMembers && (typeof key === "string" || typeof key === "number")) {
+        const selected = this.selectMember(node.expression, [String(key)], bindings, chain);
+        if (selected && selected !== UNRESOLVED) return this.read(selected.expression, pointer, selected.bindings, selected.seen, selectiveMembers);
+      }
+      const value = read(node.expression);
       return value !== UNRESOLVED && value !== null && typeof value === "object" && (typeof key === "string" || typeof key === "number")
         && Object.hasOwn(value, key) ? (value as Record<string, SchemaValue>)[String(key)] : this.unresolved(pointer, "dynamic-member");
     }
     if (ts.isCallExpression(node)) {
+      if (ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "map" && node.arguments.length === 1) {
+        const list = unwrap(node.expression.expression), callback = unwrap(node.arguments[0]);
+        if (ts.isArrayLiteralExpression(list) && list.elements.every(ts.isStringLiteralLike)
+          && ts.isArrowFunction(callback) && !callback.modifiers?.length && callback.parameters.length === 1
+          && ts.isIdentifier(callback.parameters[0].name) && !callback.parameters[0].initializer
+          && !callback.parameters[0].dotDotDotToken && !ts.isBlock(callback.body)) {
+          const symbol = this.source.checker.getSymbolAtLocation(callback.parameters[0].name);
+          if (symbol) {
+            const value: SchemaValue[] = [];
+            // 逐项绑定原名称表达式，再沿现有静态读取器解释映射体。
+            for (const item of list.elements) {
+              const scope = new Map(bindings);
+              scope.set(symbol, { expression: item, bindings, seen: chain });
+              const part = this.read(callback.body, `${pointer}/${value.length}`, scope, chain, true);
+              if (part === UNRESOLVED) return UNRESOLVED;
+              value.push(part);
+            }
+            this.literalMaps.add(node);
+            return value;
+          }
+        }
+        return this.unresolved(pointer, "dynamic-map");
+      }
       if (ts.isPropertyAccessExpression(node.expression) && ts.isIdentifier(node.expression.expression)
         && node.expression.expression.text === "Object" && !this.source.checker.getSymbolAtLocation(node.expression.expression)?.declarations?.length
         && node.arguments.length === 1 && ["freeze", "keys", "values"].includes(node.expression.name.text)) {
@@ -182,25 +213,74 @@ class StaticSchemaReader {
         const value = read(node.expression.expression), search = read(node.arguments[0]);
         return typeof value === "string" && typeof search === "string" ? value.includes(search) : this.unresolved(pointer, "dynamic-includes");
       }
-      const symbol = this.source.checker.getSymbolAtLocation(node.expression);
-      const target = symbol && this.source.target(symbol).valueDeclaration;
-      const callable = target && ts.isVariableDeclaration(target) && target.initializer ? unwrap(target.initializer) : target;
-      if (callable && (ts.isFunctionDeclaration(callable) || ts.isArrowFunction(callable)) && callable.body
-        && isRepositorySourcePath(this.source.root, callable.getSourceFile().fileName)) {
-        const body = ts.isBlock(callable.body) ? callable.body.statements.length === 1 && ts.isReturnStatement(callable.body.statements[0])
-          ? callable.body.statements[0].expression : undefined : callable.body;
-        const scope = new Map(bindings);
-        if (body && !node.arguments.some(ts.isSpreadElement) && callable.parameters.every(parameter => ts.isIdentifier(parameter.name) && !parameter.dotDotDotToken)) {
-          callable.parameters.forEach((parameter, index) => {
-            const name = this.source.checker.getSymbolAtLocation(parameter.name), argument = node.arguments[index];
-            if (name && (argument || parameter.initializer)) scope.set(name, { expression: argument ?? parameter.initializer!, bindings: argument ? bindings : scope, seen: chain });
-          });
-          return read(body, pointer, scope);
-        }
-      }
+      const body = this.callBody(node, bindings, chain);
+      if (body) return this.read(body.expression, pointer, body.bindings, body.seen, selectiveMembers);
       return this.unresolved(pointer, "runtime-call");
     }
     return this.unresolved(pointer, "unsupported-expression");
+  }
+
+  private callBody(node: ts.CallExpression, bindings: Map<ts.Symbol, ExpressionBinding>, seen: Set<ts.Node>): ExpressionBinding | undefined {
+    const symbol = this.source.checker.getSymbolAtLocation(node.expression);
+    const target = symbol && this.source.target(symbol).valueDeclaration;
+    const callable = target && ts.isVariableDeclaration(target) && target.initializer ? unwrap(target.initializer) : target;
+    if (!callable || !(ts.isFunctionDeclaration(callable) || ts.isArrowFunction(callable)) || !callable.body
+      || !isRepositorySourcePath(this.source.root, callable.getSourceFile().fileName)) return;
+    const body = ts.isBlock(callable.body) ? callable.body.statements.length === 1 && ts.isReturnStatement(callable.body.statements[0])
+      ? callable.body.statements[0].expression : undefined : callable.body;
+    if (!body || node.arguments.some(ts.isSpreadElement)
+      || !callable.parameters.every(parameter => ts.isIdentifier(parameter.name) && !parameter.dotDotDotToken)) return;
+    const scope = new Map(bindings);
+    callable.parameters.forEach((parameter, index) => {
+      const name = this.source.checker.getSymbolAtLocation(parameter.name), argument = node.arguments[index];
+      if (name && (argument || parameter.initializer)) scope.set(name, { expression: argument ?? parameter.initializer!, bindings: argument ? bindings : scope, seen });
+    });
+    return { expression: body, bindings: scope, seen };
+  }
+
+  /** 按最后写入语义定位所选成员，避免读入同一聚合中无关 schema 的缺口。 */
+  private selectMember(expression: ts.Expression, keys: string[], bindings: Map<ts.Symbol, ExpressionBinding>, seen: Set<ts.Node>): ExpressionBinding | typeof UNRESOLVED | undefined {
+    if (!keys.length) return { expression, bindings, seen };
+    const node = unwrap(expression);
+    if (seen.has(node) || seen.size > 80) return UNRESOLVED;
+    const chain = new Set(seen).add(node);
+    if (ts.isIdentifier(node)) {
+      const symbol = this.source.checker.getSymbolAtLocation(node), binding = symbol && bindings.get(symbol);
+      if (binding) return this.selectMember(binding.expression, keys, binding.bindings, binding.seen);
+      const target = symbol && this.source.target(symbol).valueDeclaration;
+      if (target && ts.isVariableDeclaration(target) && target.initializer && ts.isVariableDeclarationList(target.parent)
+        && target.parent.flags & ts.NodeFlags.Const && isRepositorySourcePath(this.source.root, target.getSourceFile().fileName))
+        return this.selectMember(target.initializer, keys, bindings, chain);
+    }
+    if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+      const key = ts.isPropertyAccessExpression(node) ? node.name.text : node.argumentExpression && this.read(node.argumentExpression, "", bindings, chain);
+      if (typeof key === "string" || typeof key === "number") return this.selectMember(node.expression, [String(key), ...keys], bindings, chain);
+    }
+    if (ts.isCallExpression(node)) {
+      const body = this.callBody(node, bindings, chain);
+      if (body) return this.selectMember(body.expression, keys, body.bindings, body.seen);
+    }
+    if (ts.isObjectLiteralExpression(node)) {
+      for (const item of [...node.properties].reverse()) {
+        if (ts.isSpreadAssignment(item)) {
+          const found = this.selectMember(item.expression, keys, bindings, chain);
+          if (found !== undefined) return found;
+          continue;
+        }
+        const key = ts.isComputedPropertyName(item.name) ? this.source.value(item.name.expression)
+          : ts.isIdentifier(item.name) || ts.isStringLiteralLike(item.name) || ts.isNumericLiteral(item.name) ? item.name.text : UNRESOLVED;
+        if (key === UNRESOLVED) return UNRESOLVED;
+        if (String(key) !== keys[0]) continue;
+        const symbol = ts.isShorthandPropertyAssignment(item) && this.source.checker.getShorthandAssignmentValueSymbol(item);
+        const target = symbol && this.source.target(symbol).valueDeclaration;
+        const child = ts.isPropertyAssignment(item) ? item.initializer
+          : target && ts.isParameter(target) && ts.isIdentifier(target.name) ? target.name
+          : target && ts.isVariableDeclaration(target) ? target.initializer : undefined;
+        return child ? this.selectMember(child, keys.slice(1), bindings, chain) ?? UNRESOLVED : UNRESOLVED;
+      }
+      return;
+    }
+    return UNRESOLVED;
   }
 
   private unresolved(pointer: string, reason: string): typeof UNRESOLVED {
@@ -294,6 +374,10 @@ export function describeRepositorySchema(source: RepositorySource, expression: t
   const visit = (node: ts.Node) => {
     if (seenNodes.has(node)) return;
     seenNodes.add(node);
+    if (ts.isCallExpression(node) && reader.literalMaps.has(node)) {
+      for (const object of reader.mappedObjects) visit(object);
+      return;
+    }
     if (ts.isPropertyAssignment(node)) {
       const name = node.name.getText().replace(/^["']|["']$/g, "");
       if (["example", "examples", "default", "enum"].includes(name) || name.startsWith("x-")) return;
