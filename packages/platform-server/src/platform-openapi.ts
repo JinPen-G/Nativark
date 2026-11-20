@@ -37,7 +37,11 @@ export const PLATFORM_OPENAPI_SCHEMAS = {
   "Platform.OpenApi": { type: "object", additionalProperties: true },
   "Platform.LoginRequest": object({ tenantCode: string, account: string, password }, ["tenantCode", "account", "password"]),
   "Platform.RefreshSessionRequest": object({ refreshToken: { type: "string", writeOnly: true } }, ["refreshToken"]),
-  "Platform.ChangePasswordRequest": object({ currentPassword: password, newPassword: { ...password, minLength: 8 } }, ["currentPassword", "newPassword"]),
+  "Platform.ChangePasswordRequest": object({
+    currentPassword: { ...password, description: "本人的当前密码，由原账号校验。" },
+    newPassword: { ...password, minLength: 8,
+      description: "长度至少为 max(8, 当前平台 passwordPolicy.minLength)，必须包含字母、数字和特殊字符，且须与当前密码不同。" }
+  }, ["currentPassword", "newPassword"]),
   "Platform.AuthUser": object({
     id: string, tenantId: string, account: string, displayName: string, roleNames: strings, roleIds: strings,
     scope: string, dataScope: { type: "string", enum: ["all", "organization", "store", "own"] }, locationScope: location,
@@ -71,17 +75,29 @@ export const PLATFORM_OPENAPI_SCHEMAS = {
   } satisfies Record<keyof CreatePlatformTenantRequest, Schema>, ["tenantCode", "tenantName", "adminAccount", "adminDisplayName"]),
   "Platform.CreatedTenant": object({ tenant: ref("TenantSummary"), admin: ref("SystemUser"), temporaryPassword: { ...string, readOnly: true, description: "只在创建响应返回一次，不存明文或写入日志。" }, message: string },
     ["tenant", "admin", "temporaryPassword", "message"]),
-  "Platform.UpdateTenant": object({ tenantName: string, operatorShortName: { ...string, maxLength: 64, nullable: true } }, ["tenantName"]),
+  "Platform.UpdateTenant": object({
+    tenantName: { ...string, description: "租户名称，去除首尾空白后须非空。租户本人资料页提交此字段。" },
+    operatorShortName: { ...string, maxLength: 64, nullable: true,
+      description: "后台简称。省略保留原值，空字符串、纯空白或 null 清除。SaaS 租户资料页提供此字段的编辑入口。" }
+  }, ["tenantName"]),
   "Platform.TenantStatus": object({ status: { type: "string", enum: ["active", "frozen", "disabled"] }, reason: string }, ["status", "reason"]),
-  "Platform.SelfProfile": object({ displayName: string, phone: string }, ["displayName"]),
+  "Platform.SelfProfile": object({
+    displayName: { ...string, description: "本人姓名，去除首尾空白后须非空。" },
+    phone: { ...string, description: "本人电话。省略保留原值，空字符串或纯空白清除，其余值去除首尾空白后保存。" }
+  }, ["displayName"]),
   "Platform.SystemUser": object({ id: string, tenantId: string, account: string, displayName: string, phone: string, organizationId: string,
     organizationName: string, roleIds: strings, roleNames: strings, scope: string, isPlatformAdmin: boolean, isSaasAdmin: boolean,
     mustChangePassword: boolean, temporaryPassword: { ...string, readOnly: true }, isActive: boolean, permissions: strings,
     dataScope: string, locationScope: location
   } satisfies Record<keyof SystemUserRow, Schema>, ["id", "tenantId", "account", "displayName", "roleIds", "roleNames", "scope", "isPlatformAdmin", "isActive", "permissions", "dataScope"]),
   "Platform.Users": array("SystemUser"),
-  "Platform.SaveUser": object({ id: string, tenantId: string, account: string, displayName: string, phone: string,
-    organizationId: string, roleIds: strings, isPlatformAdmin: boolean, isSaasAdmin: { type: "boolean", enum: [false] }, isActive: boolean
+  "Platform.SaveUser": object({ id: string,
+    tenantId: { ...string, description: "省略使用当前请求租户，指定其他租户会被拒绝。" }, account: string, displayName: string,
+    phone: { ...string, description: "编辑时省略保留原电话，当前 DTO 拒绝空字符串。人员资料页将空电话省略。" },
+    organizationId: { ...string, description: "编辑时省略保留原组织，填写的组织须属于当前租户。" },
+    roleIds: { ...strings, description: "普通账号至少选择一个本租户启用角色。固定管理员角色由 isPlatformAdmin 按服务端规则分配。Core 使用权另行分配。" },
+    isPlatformAdmin: { ...boolean, description: "租户管理员标识。管理员账号及该标识的管理要求当前租户管理员身份。" },
+    isSaasAdmin: { type: "boolean", enum: [false], description: "仅允许 false。SaaS 主体沿独立平台初始化入口维护。" }, isActive: boolean
   } satisfies Record<keyof SaveSystemUserRequest, Schema>, ["account", "displayName", "roleIds", "isActive"]),
   "Platform.UserStatus": object({ isActive: boolean, tenantId: string }, ["isActive"]),
   "Platform.ResetUserPasswordInput": object({ tenantId: string }),

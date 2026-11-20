@@ -6,7 +6,7 @@
 
 - [main](src/main.tsx)加载正式公共样式和动效，挂载[App](src/App.tsx)。后者选择空Core组合，公共应用沿验证后的身份过滤菜单与直接地址。
 - [session](src/session.ts)创建唯一浏览器会话，实际逻辑在[公共会话](../../packages/platform-admin/src/runtime/browser-session.ts)及[HTTP客户端](../../packages/platform-admin/src/runtime/browser-http.ts)。登录、刷新、改密、退出和 storage 失效共用原取消/代次边界。
-- [公共SettingsPage](../../packages/platform-admin/src/SettingsPage.tsx)调用本人资料、账户主题色、租户名称和品牌名 API。保存等待原 Promise、保留原修订号，后台读取保留草稿，明确重新读取才放弃草稿。菜单隐藏不能替代服务端授权。
+- [公共SettingsPage](../../packages/platform-admin/src/SettingsPage.tsx)调用本人资料、账户主题色、租户名称和品牌名 API。租户本人资料页只编辑名称，SaaS“租户管理”还提供后台简称。保存等待原 Promise，租户外观携带原 `expectedRevision`，本人资料、账户主题与租户名称使用草稿同步保护。后台读取保留草稿，明确重新读取才放弃草稿。设置保存当前沿默认认证处理，401 后可刷新并重发一次。菜单隐藏不能替代服务端授权。
 - [Vite配置](vite.config.ts)复用公共适配与原环境白名单。开发端口5176，API代理使用原配置，Core代码不决定代理或读取秘密。
 - 公共应用内置[Core管理目录](../../packages/platform-admin/src/CoreAccessPage.tsx)。SaaS管理员选择租户开通Core，租户管理员选择真实成员分配已开通Core；两层授权分别保存。无Core部署保留目录入口和准确空态。
 - “Core 包管理”位于 `/platform/core-packages`，同一应用工厂按当前 SaaS 管理权限提供菜单和受保护页面，普通租户及撤权会话在管理查询挂载前拒绝。页面复用原会话、QueryClient 和完整外壳，零 Core 显示实际空注册目录，缺部署或包证据显示不可用。原后台的同名入口通过正式公共出口消费同一页面，品牌沿原解析传入。[页面与客户端](../../packages/platform-admin/src/features/core-packages/README.md)
@@ -31,7 +31,7 @@ npm run build:platform-admin
 npm run dev:platform-admin
 ```
 
-平台账号可登录公共后台；租户管理员或普通账号的可见设置由原权限决定，临时密码先完成改密。未开通 Core 的首页提示联系管理员，侧栏、面包屑/页名、铃铛、休息和面板仍存在。通知默认为空，不提供无 Core 通用业务 Agent。休息组件沿原本地媒体与选择文件行为，默认录音没有随包分发，缺失保持真实失败。
+平台账号可登录公共后台；租户管理员或普通账号的可见设置由原权限决定，临时密码先完成改密。未开通 Core 的首页提示联系管理员，侧栏、面包屑/页名、铃铛和面板仍存在。休息入口向已验证租户会话开放，SaaS 账号隐藏该入口。通知默认为空，不提供无 Core 通用业务 Agent。休息组件沿原本地媒体与选择文件行为，默认录音没有随包分发，缺失保持真实失败。
 
 dev、build 和 lint 的前置脚本构建 `@rental-os/platform-core-host`，准备包管理的同版本协议运行时。对应公共 API 已装配十二个包管理接口。发行与候选存储使用宿主配置的绝对 `CORE_PACKAGE_STORAGE_ROOT`，默认零 Core 的实际版本、部署材料和候选规划按可用证据显示 `unavailable`。[服务端配置与前置](../platform-api/README.md)
 
