@@ -406,9 +406,43 @@ export const RENTAL_HTTP_OPERATIONS: ContractOperation[] = [
     }
   },
   backlogOperation("get", "/api/staff/v1/uploads/{fileAssetId}/download-url", "Files", "getStaffFileDownloadUrl", "Create a staff-scoped short-lived file URL", ["rental-os:order:pickup", "rental-os:order:return", "rental-os:order:offline-payment", "rental-core:maintenance:manage"], true, undefined, "FileDownloadUrlSummary"),
-  backlogOperation("get", "/api/staff/v1/offline-payments", "RentalCore", "listStaffOfflinePaymentRegistrations", "List pending and confirmed offline payment registrations for an order", ["rental-os:order:view"], true, undefined, "GenericObject", [{ name: "orderId", in: "query", required: true, schema: stringSchema }]),
-  backlogOperation("post", "/api/staff/v1/offline-payments", "RentalCore", "registerStaffOfflinePayment", "Register an offline payment for independent confirmation", ["rental-os:order:offline-payment"], true, "GenericObject", "GenericObject"),
-  backlogOperation("post", "/api/staff/v1/offline-payments/{id}/confirm", "RentalCore", "confirmStaffOfflinePayment", "Confirm an offline payment and atomically write the funding event", ["rental-os:order:settle"], true, "GenericObject", "GenericObject"),
+  {
+    method: "get", path: "/api/staff/v1/offline-payments", tag: "RentalCore", operationId: "listStaffOfflinePaymentRegistrations",
+    summary: "读取当前员工获权订单的线下登记数组，按登记时间倒序返回最多 50 条。", permissions: ["rental-os:order:view"], authRequired: true,
+    responseSchema: arrayOf("StaffOfflinePaymentRegistration"),
+    parameters: [{ name: "orderId", in: "query", required: true, schema: { type: "string", minLength: 1 }, description: "订单编号必填，经营空间和员工地点沿原服务端上下文核验。" }],
+    errorResponses: {
+      "401": { description: "原员工会话认证失败。", schema: "RentalHttpErrorResponse" },
+      "403": { description: "原订单查看权限、已验证经营空间、订单编号或员工地点范围缺失。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "订单不存在或不在当前员工授权地点范围内。", schema: "RentalHttpErrorResponse" },
+      "500": { description: "原订单或登记读取失败。", schema: "RentalHttpErrorResponse" }
+    }
+  },
+  {
+    method: "post", path: "/api/staff/v1/offline-payments", tag: "RentalCore", operationId: "registerStaffOfflinePayment",
+    summary: "登记原线下收款并等待确认，复用原幂等键和当前订单可收额度。", permissions: ["rental-os:order:offline-payment"], authRequired: true,
+    requestSchema: "CreateStaffOfflinePaymentRequest", responseSchema: "StaffOfflinePaymentRegistration", successStatus: 201,
+    errorResponses: {
+      "400": { description: "原 DTO、非空字段、两位小数金额、线下方式或本订单凭证校验失败。", schema: "RentalHttpErrorResponse" },
+      "401": { description: "原员工会话认证失败。", schema: "RentalHttpErrorResponse" },
+      "403": { description: "原员工登记权限、已验证经营空间或地点范围缺失。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "订单不存在或不在当前员工授权地点范围内。", schema: "RentalHttpErrorResponse" },
+      "409": { description: "订单已完成或取消、同键内容冲突、可收额度不足或当前方式未启用。", schema: "RentalHttpErrorResponse" },
+      "500": { description: "原登记读取、凭证或事务异常，结果不明时保留原幂等键核对原登记。", schema: "RentalHttpErrorResponse" }
+    }
+  },
+  {
+    method: "post", path: "/api/staff/v1/offline-payments/{id}/confirm", tag: "RentalCore", operationId: "confirmStaffOfflinePayment",
+    summary: "按原登记 ID 确认收款并在同一事务内写入资金事件，重复确认读取原收据。", permissions: ["rental-os:order:settle"], authRequired: true,
+    responseSchema: "StaffOfflinePaymentConfirmation", successStatus: 201,
+    errorResponses: {
+      "401": { description: "原员工会话认证失败。", schema: "RentalHttpErrorResponse" },
+      "403": { description: "原员工确认权限、已验证经营空间或地点范围缺失。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "原登记或获权订单不存在。", schema: "RentalHttpErrorResponse" },
+      "409": { description: "原收据不一致、登记已处理、待收额度变化或订单拒绝新增收款。", schema: "RentalHttpErrorResponse" },
+      "500": { description: "原确认事务或资金读取异常，结果不明时沿原登记 ID 和资金收据核对。", schema: "RentalHttpErrorResponse" }
+    }
+  },
   {
     method: "post",
     path: "/api/platform/users/access",
@@ -1047,14 +1081,53 @@ export const RENTAL_HTTP_OPERATIONS: ContractOperation[] = [
   backlogOperation("post", "/api/rental/v1/orders/{orderId}/funding-events/refund", "RentalBusiness", "refundRentalOrderFundingV1", "Confirm original offline deposit refund, or simulate an eligible refund", ["rental-os:order:settle"], true, "RentalFundingAmountRequest", "RentalFundingEvent"),
   backlogOperation("post", "/api/rental/v1/orders/{orderId}/funding-events/release", "RentalBusiness", "releaseRentalOrderFundingV1", "Release a pre-auth freeze (mock)", ["rental-os:order:settle"]),
   backlogOperation("post", "/api/rental/v1/orders/{orderId}/funding-events/fail", "RentalBusiness", "failRentalOrderFundingV1", "Record a failed deposit/pre-auth funding action (mock)", ["rental-os:order:settle"]),
-  backlogOperation("get", "/api/rental/v1/orders/{orderId}/payment-intents", "Payments", "listRentalPaymentIntents", "List real payment intents for an order", ["rental-os:finance:view", "rental-os:finance:reconcile"]),
-  backlogOperation("get", "/api/rental/v1/orders/{orderId}/payment-intents/{intentId}/refunds", "Payments", "listRentalPaymentRefunds", "List provider refund records for a payment intent", ["rental-os:finance:view", "rental-os:finance:reconcile"]),
+  {
+    method: "get", path: "/api/rental/v1/orders/{orderId}/payment-intents", tag: "Payments", operationId: "listRentalPaymentIntents",
+    summary: "读取原订单支付单数组，按创建时间正序返回租金、押金和预授权的原结果状态。", permissions: ["rental-os:finance:view", "rental-os:finance:reconcile"], authRequired: true,
+    responseSchema: arrayOf("ClientPaymentIntentResponse"),
+    errorResponses: {
+      "401": { description: "原会话认证失败。", schema: "RentalHttpErrorResponse" },
+      "403": { description: "原财务权限或当前订单范围拒绝读取。", schema: "RentalHttpErrorResponse" },
+      "500": { description: "原支付记录读取失败，结果不明时沿原支付单核对状态。", schema: "RentalHttpErrorResponse" }
+    }
+  },
+  {
+    method: "get", path: "/api/rental/v1/orders/{orderId}/payment-intents/{intentId}/refunds", tag: "Payments", operationId: "listRentalPaymentRefunds",
+    summary: "按原支付单读取退款数组，保留原金额、币种及受理、退款成功和入账时间。", permissions: ["rental-os:finance:view", "rental-os:finance:reconcile"], authRequired: true,
+    responseSchema: arrayOf("PaymentRefundResponse"),
+    errorResponses: {
+      "401": { description: "原会话认证失败。", schema: "RentalHttpErrorResponse" },
+      "403": { description: "原财务权限或当前订单范围拒绝读取。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "当前租户、空间和订单内找不到原支付单。", schema: "RentalHttpErrorResponse" },
+      "500": { description: "原支付单或退款记录读取失败，保留原记录与结果状态核对。", schema: "RentalHttpErrorResponse" }
+    }
+  },
   backlogOperation("post", "/api/rental/v1/orders/{orderId}/payment-intents/{intentId}/refunds", "Payments", "createRentalPaymentRefund", "Create a real provider refund after an approved order credit", ["rental-os:finance:reconcile"], true, "CreatePaymentRefundRequest", "PaymentRefundResponse"),
   backlogOperation("post", "/api/rental/v1/orders/{orderId}/payment-intents/{intentId}/refunds/{refundId}/refresh", "Payments", "refreshRentalPaymentRefund", "Query and recover a provider refund", ["rental-os:finance:reconcile"], true, undefined, "PaymentRefundResponse"),
   backlogOperation("post", "/api/rental/v1/payment-reconciliation", "Payments", "reconcileRentalPayments", "Reconcile unresolved payments and refunds; requires current full-workspace financial scope", ["rental-os:finance:reconcile"], true, undefined, "PaymentReconciliationSummary", [queryParam("limit", numberSchema)]),
   backlogOperation("post", "/api/rental/v1/payment-reconciliation/statements", "Payments", "importRentalPaymentStatement", "Import a statement under current full-workspace financial scope without mutating payment facts", ["rental-os:finance:reconcile"], true, "ImportPaymentStatementRequest", "PaymentStatementBatchDetail"),
-  backlogOperation("get", "/api/rental/v1/payment-reconciliation/statements", "Payments", "listRentalPaymentStatements", "List imported statements only under current full-workspace financial scope", ["rental-os:finance:reconcile"], true, undefined, "PaymentStatementBatchList", [queryParam("limit", numberSchema)]),
-  backlogOperation("get", "/api/rental/v1/payment-reconciliation/statements/{batchId}", "Payments", "getRentalPaymentStatement", "Get one statement and its differences only under current full-workspace financial scope", ["rental-os:finance:reconcile"], true, undefined, "PaymentStatementBatchDetail"),
+  {
+    method: "get", path: "/api/rental/v1/payment-reconciliation/statements", tag: "Payments", operationId: "listRentalPaymentStatements",
+    summary: "读取当前完整经营空间获权的对账批次数组，按导入时间倒序返回。", permissions: ["rental-os:finance:reconcile"], authRequired: true,
+    responseSchema: "PaymentStatementBatchList",
+    parameters: [queryParam("limit", { type: "number", description: "原查询默认 50，非有限值采用 50。服务向下取整，0 采用 50，再限制为 1 到 100 条。", example: 50 })],
+    errorResponses: {
+      "401": { description: "原会话认证失败。", schema: "RentalHttpErrorResponse" },
+      "403": { description: "当前主体缺少完整经营空间财务对账权限，或数据范围、地点范围及 audience 不满足原门禁。", schema: "RentalHttpErrorResponse" },
+      "500": { description: "原对账批次读取失败。", schema: "RentalHttpErrorResponse" }
+    }
+  },
+  {
+    method: "get", path: "/api/rental/v1/payment-reconciliation/statements/{batchId}", tag: "Payments", operationId: "getRentalPaymentStatement",
+    summary: "在当前完整经营空间财务权限下读取原对账批次及按行号排序的差异明细。", permissions: ["rental-os:finance:reconcile"], authRequired: true,
+    responseSchema: "PaymentStatementBatchDetail",
+    errorResponses: {
+      "401": { description: "原会话认证失败。", schema: "RentalHttpErrorResponse" },
+      "403": { description: "当前主体缺少完整经营空间财务对账权限，或数据范围、地点范围及 audience 不满足原门禁。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "对账文件批次不存在或不属于当前租户和经营空间。", schema: "RentalHttpErrorResponse" },
+      "500": { description: "原对账批次或明细读取失败。", schema: "RentalHttpErrorResponse" }
+    }
+  },
   backlogOperation("post", "/api/rental/v1/payment-reconciliation/statements/{batchId}/lines/{lineId}/review", "Payments", "reviewRentalPaymentStatementLine", "Acknowledge or query a statement difference under current full-workspace financial scope; funding facts stay unchanged", ["rental-os:finance:reconcile"], true, "ReviewPaymentStatementLineRequest", "PaymentStatementBatchDetail"),
   backlogOperation("get", "/api/rental/v1/customer-coupons", "RentalBusiness", "listRentalCustomerCoupons", "List customer coupons", ["rental-os:marketing:manage"]),
   backlogOperation("post", "/api/rental/v1/customer-coupons/{id}/void", "RentalBusiness", "voidRentalCustomerCoupon", "Void an available customer coupon with a reason", ["rental-os:marketing:manage"]),
