@@ -8,7 +8,7 @@ import { AiTaskRepository, AiTaskRepositoryError, aiTaskAccessFromContext,
   type AiTaskRepositoryAuthority } from '../ai-task.repository';
 import { AiTaskCreationRepository } from '../ai-task-creation.repository';
 import { freezeOriginalInput } from '../task-request/original-request.validation';
-import { AiClientTaskAuthority, clientTaskSceneSchema, type AiAuthorizedClientMaterial,
+import { AiClientPolicyAuthority, clientTaskSceneSchema, type AiAuthorizedClientMaterial,
   type AiClientTaskDependencies } from './client-task.authority';
 import { composeClientMaterialTasks } from './client-task.composition';
 import { clientTaskCommandSchema, clientTaskCreationKey, PrismaClientTaskInputRepository } from './prisma-client-task-input.repository';
@@ -32,16 +32,25 @@ export function composePersistedClientTaskAuthorization(dependencies: AiClientTa
   clock: () => Date = () => new Date()) {
   const command = freezeOriginalInput(clientTaskCommandSchema.parse(structuredClone(value)));
   const scene = clientTaskSceneSchema.parse({ sceneCode: dependencies.sceneCode, sceneVersion: dependencies.sceneVersion });
-  const authority = new AiClientTaskAuthority(dependencies, scene, loadMaterial, randomUUID(), clock);
+  const authority = new AiClientPolicyAuthority(dependencies, scene, randomUUID(), clock);
   const creation = composeClientMaterialTasks(dependencies, loadMaterial, clock);
   const inputs = new PrismaClientTaskInputRepository(dependencies.db);
 
-  const snapshot = async (taskId: string | null, operation: ClientTaskOperation) => {
+  const policyOperation = (operation: ClientTaskOperation) => operation === 'read' || operation === 'accounting' ? 'read'
+    : operation === 'request_input' || operation === 'submit_input' || operation === 'resume_input' || operation === 'cancel' ? operation : 'execute';
+  // Policy needs this current principal/scope, not another deep copy of the
+  // already verified order body. Nothing here caches an authentication/read.
+  const subject = ({ row, identity }: AiAuthorizedClientMaterial) => ({ tenantId: row.tenantId,
+    workspaceId: row.workspaceId, channel: row.channel, principalKind: row.principalKind, identity });
+  const materialProof = ({ row, identity }: AiAuthorizedClientMaterial) => requestFingerprint({ ...row,
+    createdAt: row.createdAt.toISOString(), expiresAt: row.expiresAt.toISOString(), identity });
+  const policyProof = (policy: Awaited<ReturnType<AiClientPolicyAuthority['policy']>>) =>
+    requestFingerprint({ ...policy, expiresAt: policy.expiresAt.toISOString() });
+  const snapshot = async (taskId: string | null, operation: ClientTaskOperation, materialSource: AiAuthorizedClientMaterial) => {
     const observingOriginal = ['read', 'accounting', 'cancel'].includes(operation);
     const originalInputOperation = ['request_input', 'submit_input', 'resume_input'].includes(operation);
     // Original accounting uses current read authority; reserve/dispatch still require execute.
-    const grant = await authority.authorize(command.materialRef, operation === 'read' || operation === 'accounting' ? 'read'
-      : operation === 'request_input' || operation === 'submit_input' || operation === 'resume_input' || operation === 'cancel' ? operation : 'execute');
+    const grant = { ...await authority.authorize(subject(materialSource), policyOperation(operation)), material: materialSource.row };
     const input = await inputs.findCreation(grant.material, command.creationKey);
     const material = grant.material;
     if (!input || input.creationKey !== command.creationKey || input.materialRef !== command.materialRef
@@ -133,15 +142,28 @@ export function composePersistedClientTaskAuthorization(dependencies: AiClientTa
       'WAITING_EXTERNAL', 'CANCEL_REQUESTED'].includes(task.status)) throw denied();
     if (['request_input', 'submit_input', 'resume_input'].includes(operation) && (task.cancelRequestedAt !== null
       || (operation === 'request_input' ? !['RUNNING', 'WAITING_INPUT'].includes(task.status) : task.status !== 'WAITING_INPUT'))) throw denied();
-    return { context: grant.context, taskId: id, expiresAt: new Date(expiresAt),
+    return { policy: grant.policy, context: grant.context, taskId: id, expiresAt: new Date(expiresAt),
       proof: requestFingerprint({ identity: identityHash(grant.context),
       task, originRun, inputHash: input.inputHash, policy: grant.policy,
       gates: grant.policyHash, continuationProof }) };
   };
   const readGrant = async (taskId: string | null, operation: ClientTaskOperation) => {
-    const first = await snapshot(taskId, operation), current = await snapshot(first.taskId, operation);
-    if (first.proof !== current.proof || identityHash(first.context) !== identityHash(current.context)) throw denied();
-    return structuredClone(current);
+    // One closed read, with no mutation/effect between snapshots. Keep fresh
+    // Guard/order/publication reads at entry, between snapshots and after the
+    // second business snapshot, then close with a current policy read. The nested readers
+    // repeated that middle boundary. Each business snapshot still reloads its
+    // policy/gates/input/task/original Run; none of those results is memoized.
+    const before = structuredClone(await loadMaterial(command.materialRef)), beforeProof = materialProof(before);
+    const first = await snapshot(taskId, operation, before);
+    const middle = structuredClone(await loadMaterial(command.materialRef)), middleProof = materialProof(middle);
+    if (beforeProof !== middleProof) throw denied();
+    const current = await snapshot(first.taskId, operation, middle);
+    const after = structuredClone(await loadMaterial(command.materialRef)), afterProof = materialProof(after);
+    const closingPolicy = await authority.policy(subject(after), policyOperation(operation));
+    if (first.proof !== current.proof || identityHash(first.context) !== identityHash(current.context)
+      || middleProof !== afterProof || policyProof(current.policy) !== policyProof(closingPolicy)) throw denied();
+    const { policy: _policy, ...result } = current;
+    return structuredClone(result);
   };
   const authorize = async (taskId: string | null, operation: ClientTaskOperation) =>
     (await readGrant(taskId, operation)).context;

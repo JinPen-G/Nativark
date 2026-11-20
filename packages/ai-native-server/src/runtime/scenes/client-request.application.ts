@@ -130,6 +130,11 @@ type Command = z.infer<typeof commandSchema>;
 const fail = (code: 'AI_CLIENT_INVALID_INPUT' | 'AI_CLIENT_CONTEXT_UNAVAILABLE' | 'AI_CLIENT_CAPABILITY_UNAVAILABLE' | 'AI_CLIENT_MATERIAL_STALE'): never => { throw new Error(code); };
 const maxBytes = 65536, lifetimeMs = 300000;
 const jsonHash = (value: unknown) => requestFingerprint(JSON.parse(JSON.stringify(value)));
+// SQL material bodies are already JSON; only these two columns are Dates.
+// Preserve the original JSON fingerprint without serializing/parsing every
+// nested order field twice. This computes from each fresh repository result.
+const materialRecordHash = (row: AiClientSceneMaterial) => requestFingerprint({ ...row,
+  createdAt: row.createdAt.toISOString(), expiresAt: row.expiresAt.toISOString() });
 
 export function composeRequestBoundClientApplication(dependencies: AiClientRequestDependencies, configuration: AiClientRequestConfiguration) {
   const parsed = configurationSchema.safeParse(structuredClone(configuration));
@@ -267,6 +272,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
   };
   const verify = async (bound: Bound, row: AiClientSceneMaterial, originalTaskObservation = false) => {
     const parsedCommand = commandSchema.safeParse(row.command);
+    const originalRecordHash = materialRecordHash(row);
     // Historical order observation still reloads current owner/visibility;
     // old content and expiry cannot supply permission for a new effect.
     const historicalOrder = originalTaskObservation && parsedCommand.success
@@ -282,7 +288,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       // public catalogue and own enterprise relation equality.
       if (!originalTaskObservation) revalidateClientGoalMaterial(row, await goalSources(bound));
       const latest = await repository.findSource(scopeOf(bound), row.id);
-      if (!latest || jsonHash(row) !== jsonHash(latest)) return fail('AI_CLIENT_MATERIAL_STALE');
+      if (!latest || originalRecordHash !== materialRecordHash(latest)) return fail('AI_CLIENT_MATERIAL_STALE');
       await bound.assertCurrent(); return parsedCommand.data;
     }
     const entryBefore = parsedCommand.data.kind === 'booking_quote' ? await entryGrant(bound, row) : null;
@@ -302,7 +308,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       throw new AiClientEntryError('AI_ACCESS_DENIED', 'entry_policy_changed');
     }
     const latest = await repository.findSource(scopeOf(bound), row.id);
-    if (!latest || jsonHash(row) !== jsonHash(latest) || !historicalOrder && row.expiresAt <= clock()) return fail('AI_CLIENT_MATERIAL_STALE');
+    if (!latest || originalRecordHash !== materialRecordHash(latest) || !historicalOrder && row.expiresAt <= clock()) return fail('AI_CLIENT_MATERIAL_STALE');
     return parsedCommand.data;
   };
   const packet = (row: AiClientSceneMaterial, command: Command) => freezeOriginalInput({

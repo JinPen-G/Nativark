@@ -451,8 +451,10 @@ async function main() {
       await assert.rejects(() => f.invoke('continueTaskInput', { ...command, submission: reference }));
       assert.equal((await f.invoke('readTaskInputReceipt', { ...command, submission: reference })).receipt.receiptId, saved.receiptId);
       assert.equal(f.sent(), 1); f.state.aiClientTaskPolicy[0].allowExecute = true;
+      const continueAt = performance.now(), continueGuards = f.state.guardCalls;
       const continued = await f.invoke('continueTaskInput', { ...command, submission: reference });
       assert.equal(continued.execution.outcome.status, 'paused');
+      console.log(JSON.stringify({ clientContinueMs: Math.round(performance.now() - continueAt), guardReads: f.state.guardCalls - continueGuards }));
       assert.equal(f.sent(), 2); assert.equal(f.state.aiTask.length, 1); assert.equal(f.state.aiRun.length, 2);
       const currentBudget = await assertAccounting(f, taskId, 2);
       assert.equal(currentBudget.policyFingerprint, budget.policyFingerprint); assert.equal(currentBudget.maxCalls, budget.maxCalls);
