@@ -39,6 +39,86 @@ function verificationMemory(build) {
   return memory;
 }
 
+/** 原准备收据交给下一宿主：只在父根的文件/模块守卫退出后构造新根。
+ * 候选版本是明确的格式夹具；真实包校验、编译、装配及原事实读取仍使用正式实现。 */
+async function verifyPreparedUpdates({ build, sourceFiles, platformFiles, platformClient, disabledClient,
+  rentalFiles, ticketsPackage, preparedCandidates, originalFacts }) {
+  assert.equal(preparedCandidates.length, 2, '原准备链必须提供底座和单Core两个候选');
+  assert.deepEqual(preparedCandidates.map(item => item.artifact.kind).sort(), ['core', 'platform']);
+  const verifyRoot = require('../apps/rental-api/test/ai-host-root-cases.cjs');
+  const { verifyOriginalCoreFacts } = require('../apps/rental-api/test/multi-core-recovery-cases.cjs');
+  const beforeSource = new Map(sourceFiles), beforeCore = new Map(ticketsPackage.files), results = [];
+  for (const prepared of preparedCandidates) {
+    const memory = verificationMemory(build), load = name => memory.load(build.exported(name, true));
+    const archive = load('@rental-os/core-contracts/archive'), { artifact, record } = prepared;
+    const { base, candidate } = record.plan;
+    assert.equal(record.plan.deployment, 'pending');
+    assert.deepEqual(record.plan.request, prepared.request);
+    const selectedFiles = archive.readCoreArchive(artifact.bytes,
+      artifact.kind === 'platform' ? artifact.release.sha256 : artifact.pin.sha256).files;
+    const nextPlatformFiles = artifact.kind === 'platform' ? selectedFiles : platformFiles;
+    const nextTickets = artifact.kind === 'core' ? { pin: artifact.pin, files: selectedFiles } : ticketsPackage;
+    if (artifact.kind === 'platform') assert.deepEqual(candidate.cores, base.cores);
+    else {
+      assert.equal(artifact.pin.manifest.id, 'example-tickets');
+      assert.deepEqual(candidate.platform, base.platform);
+      assert.deepEqual(candidate.cores.find(pin => pin.manifest.id === 'rental'),
+        base.cores.find(pin => pin.manifest.id === 'rental'));
+    }
+    const nextSources = new Map(sourceFiles);
+    if (artifact.kind === 'core') {
+      // 新Core版本必须显式进入宿主原锁；不借旧依赖锁静默接纳新版包。
+      for (const [file, bytes] of selectedFiles) nextSources.set('packages/example-tickets-core/' + file, bytes);
+      const npmLock = JSON.parse(nextSources.get('package-lock.json'));
+      const packageMetadata = JSON.parse(selectedFiles.get('package.json'));
+      assert.equal(packageMetadata.version, artifact.pin.manifest.version);
+      const before = structuredClone(npmLock.packages['packages/example-tickets-core']);
+      npmLock.packages['packages/example-tickets-core'] = { ...before, version: packageMetadata.version };
+      nextSources.set('package-lock.json', json(npmLock));
+    }
+    const publicMigrations = candidate.platform.data.migrations.map(migration => {
+      const match = /^prisma\/migrations\/([^/]+)\/migration\.sql$/u.exec(migration.file);
+      assert(match); const sql = nextPlatformFiles.get('apps/platform-api/' + migration.file); assert(sql);
+      return { name: match[1], sql };
+    });
+    const prepare = memory.load(path.join(root, 'apps/rental-api/dist/prepare-deployment.js')).createRentalDeploymentFiles;
+    const deploymentInput = { release: candidate.platform,
+        pin: candidate.cores.find(pin => pin.manifest.id === 'rental'), coreFiles: rentalFiles,
+        publicSchema: platformClient.schema, publicMigrations };
+    const disabled = prepare(deploymentInput);
+    const deployment = prepare({ ...deploymentInput, additionalCores: [nextTickets] });
+    assert.deepEqual(deployment.lock, candidate, '准备收据与目标运行宿主使用同一锁');
+    for (const item of record.plan.files.filter(file => file.file.startsWith('deployment/') && file.file.endsWith('/migration.sql'))) {
+      const bytes = deployment.files.get(item.file.slice('deployment/'.length));
+      assert(bytes); assert.equal(require('node:crypto').createHash('sha256').update(bytes).digest('hex'), item.sha256);
+    }
+    const packager = memory.load(path.join(root, 'scripts/package-rental-host.cjs'));
+    const context = packager.createRentalHostContext({ host: 'example-multi-core', aiMode: 'disabled',
+      sourceFiles: nextSources, platformFiles: nextPlatformFiles, dependencyDirectory: build.deps,
+      rentalFiles, ticketsFiles: nextTickets.files, deploymentFiles: deployment.files,
+      selections: { rental: disabledClient, platform: platformClient }, ts: build.ts });
+    for (const [file, bytes] of rentalFiles) assert.deepEqual(context.files.get('packages/rental-core/' + file), bytes);
+    for (const [file, bytes] of nextTickets.files) assert.deepEqual(context.files.get('packages/example-tickets-core/' + file), bytes);
+    const platformArchive = archive.createCoreArchive(nextPlatformFiles);
+    assert.equal(platformArchive.sha256, candidate.platform.sha256);
+    let factsResult;
+    const rootResult = await verifyRoot({ build, memory: verificationMemory(build), rentalFiles, disabled,
+      multi: deployment, multiResult: context, ticketsPackage: nextTickets, platformClient, platformArchive,
+      preparedUpdate: record,
+      onInstalledHost: async ({ load }) => {
+        assert.equal(load('@rental-os/example-tickets-core').TICKETS_CORE_VERSION,
+          nextTickets.pin.manifest.version, '安装后实际执行的是收据锁定的工单实现');
+        factsResult = await verifyOriginalCoreFacts({ load, facts: originalFacts });
+      } });
+    assert(factsResult, '必须从新安装包实际服务回读同一原事实');
+    results.push({ kind: artifact.kind, sha256: context.sha256, files: context.files.size,
+      runtimeFiles: context.receipt.runtime.files, root: rootResult, facts: factsResult });
+  }
+  assert.deepEqual(sourceFiles, beforeSource, '生成新运行包不覆盖原宿主材料');
+  assert.deepEqual(ticketsPackage.files, beforeCore, '更新不改写原工单包');
+  return { candidates: results, database: 'fixture', diskOutputs: 0, deployment: 'pending' };
+}
+
 async function run() {
   const build = createBuild(deps);
   verifyContracts(build); verifyServer(build); verifyNative(build);
@@ -344,8 +424,16 @@ async function run() {
     assert.equal(memory.fs.readFileSync(switched, 'utf8'), 'other writer');
   });
   const verifyRoot = require('../apps/rental-api/test/ai-host-root-cases.cjs');
+  const { createOriginalCoreFacts, verifyOriginalCoreFacts } = require('../apps/rental-api/test/multi-core-recovery-cases.cjs');
+  const originalFacts = createOriginalCoreFacts(), preparedCandidates = [];
+  let originalFactsResult;
   const multiRootDi = await verifyRoot({ build, memory: verificationMemory(build), rentalFiles,
-    disabled, multi, multiResult, ticketsPackage, platformClient, platformArchive });
+    disabled, multi, multiResult, ticketsPackage, platformClient, platformArchive,
+    onPreparedCandidate: prepared => preparedCandidates.push(prepared),
+    onInstalledHost: async ({ load }) => { originalFactsResult = await verifyOriginalCoreFacts({ load, facts: originalFacts }); } });
+  assert(originalFactsResult);
+  const independentUpdates = await verifyPreparedUpdates({ build, sourceFiles, platformFiles, platformClient,
+    disabledClient, rentalFiles, ticketsPackage, preparedCandidates, originalFacts });
   const rootDi = await verifyRoot({
     build, memory: verificationMemory(build), rentalFiles, aiFiles, enabled, aiResult, disabled, platformClient, platformArchive });
   const multiAiRootDi = await verifyRoot({ build, memory: verificationMemory(build), rentalFiles, aiFiles,
@@ -371,8 +459,9 @@ async function run() {
     enabled: { files: aiResult.files.size, runtimeFiles: aiResult.receipt.runtime.files, sha256: aiResult.sha256 },
     multi: { files: multiResult.files.size, runtimeFiles: multiResult.receipt.runtime.files, sha256: multiResult.sha256 },
     multiAi: { files: multiAiResult.files.size, runtimeFiles: multiAiResult.receipt.runtime.files, sha256: multiAiResult.sha256 },
-    additional, additionalDeployment, adminConfigs, multiRootDi, rootDi, multiAiRootDi, platformHost, platformRootDi,
+    additional, additionalDeployment, adminConfigs, multiRootDi, originalFactsResult, independentUpdates, rootDi, multiAiRootDi, platformHost, platformRootDi,
     ticketsHost, ticketsRootDi,
     fixtureProvenance: true, diskOutputs: 0, imageBuild: 'not-run', database: 'not-connected', deployment: 'pending' }));
 }
-run().catch(error => { console.error(error.stack); process.exitCode = 1; });
+module.exports = { verificationMemory, verifyPreparedUpdates };
+if (require.main === module) run().catch(error => { console.error(error.stack); process.exitCode = 1; });

@@ -24,7 +24,11 @@ Core有HTTP入口时，组合向 `createCoreDeployedCatalogue`额外传 `http: [
 
 从 `@rental-os/core-host/mysql-deployment`导入 `createMysqlCoreDeploymentObservation({ database, platform, cores, dataCapabilities })`，将返回值直接作为部署目录的 `observations`。每个模块提供自己的正式 `data`合同、与迁移ID逐项对应的原Prisma `migrationNames`，以及读取实际表/列/约束的 `readPhysical`。平台与Core均由原数据所有者提供真实检查；不能用清单版本、文件存在或刚执行过迁移代替检查结果。没有选装平台数据能力时省略 `dataCapabilities`，保持原组合。[只读适配](src/mysql-deployment.ts)
 
-部署准入调用 `observations.read(coreId)`，读取平台、目标Core及显式登记能力的原账和物理结构，避免扫描无关Core。升级预检调用 `read()`读取全组合。读取器一次参数化读取 `_prisma_migrations`，保留原完成收据的checksum和执行顺序。已回退收据不算已应用；未结束收据按原logs标为failed或unknown，不据此声称仍running或推断完成了几条DDL。缺迁移继续保留不完整链，由部署目录和升级预检拒绝。重复未回退收据、损坏摘要或缺物理观察只省略所属模块，其他已就绪Core仍可用；平台缺观察使新Core准入不可用。驱动读取失败向上报告，不吞错变成成功。
+部署准入调用 `observations.read(coreId)`，物理检查限于平台、目标Core及显式登记能力；升级预检调用 `read()`检查全组合。读取器每次读取完整 `_prisma_migrations`，保留原完成收据的checksum和执行顺序，不加载logs正文。旧迁移名称按宿主的显式映射归属，正式名称按 `core.<coreId>.` 或 `platform-capability.<capabilityId>.` 精确区分。跨模块重名或冒用别的模块命名空间时拒绝登记。
+
+本版未声明的所属迁移使该模块观察不可用，包括已完成、失败、结果未知或已标记回退的未来迁移。新增表和纯数据回填可能不改变旧表结构；Prisma回退账标记也不证明DDL或数据已恢复，不能据此允许旧实例继续运行。无法归属的公共时间戳或旧混合库记录使公共平台观察不可用；未选择Core或能力的正式命名空间不影响无依赖的其他Core。兼容回退须先核定完整原账、实际结构及历史读取条件，不能只换回旧程序。
+
+有效回退收据不算已应用，也不证明物理DDL已经恢复；未结束收据按原失败标记返回failed或unknown，不据此声称仍running或推断完成了几条DDL。缺迁移继续保留不完整链，由部署目录和升级预检拒绝。重复未回退收据、损坏摘要、物理观察缺失或其读取异常只省略所属模块，其他已就绪且无依赖的Core仍可用；平台缺观察使全部Core新准入不可用。原迁移账读取失败或记录名称无法核定时整体拒绝，任何缺失都不补成ready。
 
 可选平台能力通过部署锁的 `dataCapabilities` 独立固定版本与包摘要，观察项使用 `capabilityId`，执行状态必需。`catalogue.requireDataCapabilityAvailable(id)` 核所选能力、公共数据及其Core数据前置；缺项或unknown拒绝。Core只有在 `manifest.requires` 明确要求该能力时才增加对应数据门禁，普通Core不会因能力的未知执行自动停新。所需能力依赖另一Core数据时，目录读取全组合；这仍不授予跨Core业务读取或AI权限。[能力合同](../core-contracts/src/data-capability.ts) · [AI数据示例](../ai-native-data/README.md)
 
@@ -43,7 +47,7 @@ const observations = createMysqlCoreDeploymentObservation({
 const catalogue = createCoreDeployedCatalogue({ lock, registrations: [tickets], observations });
 ```
 
-当前已验证真实SQL适配与目录/升级预检的离线正常和拒绝路径。原公共平台的完整结构检查、迁移归属及主应用组合仍待PCH对应窗口；没有真实数据库就绪或独立宿主运行证据。
+公共平台、Rental和工单宿主分别提供原迁移链与完整物理检查。[原账恢复回归](../../apps/rental-api/test/multi-core-recovery-cases.cjs)覆盖未知结果、未来所属迁移和可选能力读取失败；[宿主包回归](../../tests/rental-host-package.test.cjs)将原准备收据的底座更新、单Core更新候选重新构建并安装，用安装后的真实服务读取同一份授权、绑定和业务收据。版本候选及SQL/身份存储是明确夹具；内存安装和根模块构造不代表真实数据库迁移、服务启动或程序回退已经完成。
 
 ## 接原身份与事务
 
@@ -81,6 +85,6 @@ npm run build -w @rental-os/core-host
 
 构建先编译本树core-contracts，再编译本包。已有锁文件中的Prisma5是mysql适配的可选peer，只复用驱动SQL接口，无需生成行业模型。当前源码包不等于已发布npm发行。
 
-[正式出口](src/index.ts) → [部署目录](src/deployment.ts) / [授权服务](src/access.ts) / [绑定服务](src/binding.ts) → [原账与结构观察](src/mysql-deployment.ts) / [授权MySQL](src/mysql.ts) / [绑定MySQL](src/mysql-bindings.ts) → 本包迁移。输入/输出复用[公共生命周期合同](../core-contracts/src/lifecycle.ts)，实际原身份/部署接线沿当前宿主推进。
+[正式出口](src/index.ts) → [部署目录](src/deployment.ts) / [授权服务](src/access.ts) / [绑定服务](src/binding.ts) → [原账与结构观察](src/mysql-deployment.ts) / [授权MySQL](src/mysql.ts) / [绑定MySQL](src/mysql-bindings.ts) → [公共宿主迁移](../../apps/platform-api/prisma/migrations)。输入/输出复用[公共生命周期合同](../core-contracts/src/lifecycle.ts)，实际原身份与部署接线由所选宿主提供。
 
 验证输入应使用真实授权生产者、所选部署锁和原迁移名称；离线事务替身仅核参数、调用顺序和拒绝行为。真实数据库锁、HTTP/UI、绑定初始化与缓存通知分别验收，不能以离线授权替身证明生产准入。

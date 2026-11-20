@@ -2,12 +2,17 @@
 /** Standard-package integration: reuse the caller's actual emit/archive bytes and
  * memory filesystem. Scan and construct the real Nest root without starting an
  * application. Only storage/transport and forbidden lifecycle effects are trapped;
- * package validation, Auth, Core, catalogue and all AI factories remain original. */
+ * package validation, Auth, Core, catalogue and all AI factories remain original.
+ * preparedUpdate is an original preparation receipt record for a disabled multi-Core
+ * candidate. It suppresses only creating further update candidates, not root checks.
+ * onInstalledHost consumes the live Rental root before finally restores transports;
+ * onPreparedCandidate only collects detached materials for use after this returns. */
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const Module = require('node:module');
 const { createHash } = require('node:crypto');
+const { createMemoryBuild } = require('../../../scripts/rental-build-memory.cjs');
 const root = path.resolve(__dirname, '../../..');
 const slash = file => path.resolve(file).split(path.sep).join('/');
 const hooks = ['onModuleInit', 'onApplicationBootstrap', 'beforeApplicationShutdown',
@@ -15,13 +20,24 @@ const hooks = ['onModuleInit', 'onApplicationBootstrap', 'beforeApplicationShutd
 
 module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, aiFiles, enabled,
   aiResult, disabled, platformClient, platformArchive, multi, multiResult, ticketsPackage, platform, platformResult,
-  tickets, ticketsResult }) {
+  tickets, ticketsResult, onPreparedCandidate, preparedUpdate, onInstalledHost }) {
   const isPlatform = Boolean(platform), isTickets = Boolean(tickets), isPublic = isPlatform || isTickets,
     isMulti = Boolean(multi), selected = isPlatform ? platform : isTickets ? tickets : isMulti ? multi : enabled,
     isAi = selected.lock.dataCapabilities?.some(capability => capability.id === 'ai-native') === true,
     context = isPlatform ? platformResult : isTickets ? ticketsResult : isMulti ? multiResult : aiResult,
     selectedModelCount = isPublic ? 40 : isAi ? 247 : 161,
     output = isAi ? 'dist-ai' : 'dist';
+  assert(onPreparedCandidate === undefined || typeof onPreparedCandidate === 'function');
+  assert(onInstalledHost === undefined || typeof onInstalledHost === 'function');
+  assert(!isPublic || onInstalledHost === undefined, 'installed host callback requires the actual Rental host composition');
+  const updateRecord = preparedUpdate === undefined ? undefined : structuredClone(preparedUpdate);
+  if (preparedUpdate !== undefined) {
+    assert(isMulti && !isAi, 'prepared update must select the disabled multi-Core candidate');
+    assert(updateRecord?.plan, 'prepared update requires the original receipt record');
+    assert.deepEqual(updateRecord.plan.candidate, selected.lock, 'prepared candidate must equal the installed lock');
+    assert.equal(updateRecord.plan.deployment, 'pending');
+    assert.equal(context.receipt.deployment, 'pending');
+  }
   if (isPlatform) {
     assert(platformResult && !multi && !enabled && !aiResult && !multiResult && !rentalFiles && !aiFiles && !ticketsPackage
       && !tickets && !ticketsResult,
@@ -39,8 +55,12 @@ module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, a
     assert.equal(selected.files.get('schema.prisma').toString(), platformClient.schema);
   }
   assert.equal(build.runtimeAliases.size, 0, 'root integration cannot alias production modules');
-  const archive = memory.load(build.exported('@rental-os/core-contracts/archive', true));
-  const releaseFiles = archive.readCoreArchive(context.bytes, context.sha256).files;
+  // Decode with a separate cache: installing new bytes does not invalidate the
+  // memory loader's modules. The caller's fresh runtime memory must not retain
+  // the build's archive/manifest/version modules before installed-byte checks.
+  const releaseFiles = createMemoryBuild(build)
+    .load(build.exported('@rental-os/core-contracts/archive', true))
+    .readCoreArchive(context.bytes, context.sha256).files;
   assert.deepEqual(releaseFiles, context.files, 'install the actual host archive bytes');
   const installed = new Map();
   for (const [file, bytes] of releaseFiles) {
@@ -197,6 +217,13 @@ module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, a
       restores.push(() => previous === undefined ? delete process.env[name] : process.env[name] = previous);
     }
     const load = name => memory.load(build.exported(name, true));
+    if (updateRecord !== undefined) {
+      const { CorePackagePreparationRecordSchema } = load('@rental-os/platform-core-host/core-package-preparation');
+      const { requestFingerprint } = load('@rental-os/platform-contracts/request-fingerprint');
+      const record = CorePackagePreparationRecordSchema.parse(updateRecord);
+      assert.equal(record.plan.request.operation, 'update');
+      assert.equal(record.sha256, requestFingerprint(record.plan), 'candidate context retains the original preparation fingerprint');
+    }
     const { NestContainer } = build.requireDeps('@nestjs/core/injector/container');
     const { DependenciesScanner } = build.requireDeps('@nestjs/core/scanner');
     const { InstanceLoader } = build.requireDeps('@nestjs/core/injector/instance-loader');
@@ -703,12 +730,15 @@ module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, a
     await assert.rejects(sources.materials.read(), /来源.*不一致/);
     installed.set(contextFile, contextBytes); memory.put(contextFile, contextBytes);
     assert.equal(observations, 0, 'unverified runtime never reaches data observation');
-    const recovery = isMulti && !isAi ? await require('./multi-core-recovery-cases.cjs')({
+    const recovery = isMulti && !isAi && updateRecord === undefined ? await require('./multi-core-recovery-cases.cjs')({
       build, memory, load, root, lock: selected.lock, catalogue: host.catalogue, materials: sources.materials,
-      platformArchive, ticketsPackage,
+      // Collection only: the caller consumes these detached bytes after this
+      // root returns and its installed-module/file transports have been restored.
+      platformArchive, ticketsPackage, onPreparedCandidate,
       rentalPackage: () => rentalPackage.requireRentalDeploymentPackage(
         selected.lock.cores.find(pin => pin.manifest.id === 'rental'), selected.lock.platform.versions)
     }) : undefined;
+    if (onInstalledHost) await onInstalledHost({ load, host, selected, memory });
     assert.deepEqual(effects, [], 'zero database, transport, default client, timer or lifecycle effects');
     const result = { modules: graph.modules.length, controllers: controllers.length,
       providers: graph.modules.reduce((count, item) => count + item.providers.size, 0),

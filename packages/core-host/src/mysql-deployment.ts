@@ -1,5 +1,5 @@
 /** 读取原Prisma迁移收据与模块真实物理观察；无新迁移账、DDL、Client生成或缺数据成功回退。 */
-import { join, sqltag as sql } from "@prisma/client/runtime/library";
+import { sqltag as sql } from "@prisma/client/runtime/library";
 import { CoreDataContractSchema, CoreDataObservationSchema, CoreIdSchema, CorePhysicalDataObservationSchema,
   type CoreDataContract, type CoreDataObservation, type CorePhysicalDataObservation, type CoreMigrationExecution } from "@rental-os/core-contracts";
 import { CoreAccessError } from "./access";
@@ -30,15 +30,42 @@ export function createMysqlCoreDeploymentObservation(input: {
       throw new CoreAccessError("core_unavailable", "模块迁移ID与原Prisma账名称未完整对应");
     return { names, ids: new Map(names.map((name, index) => [name, data.migrations[index].id])), physical: value.readPhysical.bind(value) };
   };
-  const platform = plan(input.platform), cores = input.cores.map(value => ({ ...plan(value), coreId: CoreIdSchema.parse(value.coreId) }));
-  const capabilities = (input.dataCapabilities ?? []).map(value => ({ ...plan(value), capabilityId: CoreIdSchema.parse(value.capabilityId) }));
+  const platform = { ...plan(input.platform), owner: "platform" };
+  const cores = input.cores.map(value => {
+    const coreId = CoreIdSchema.parse(value.coreId);
+    return { ...plan(value), coreId, owner: `core:${coreId}` };
+  });
+  const capabilities = (input.dataCapabilities ?? []).map(value => {
+    const capabilityId = CoreIdSchema.parse(value.capabilityId);
+    return { ...plan(value), capabilityId, owner: `platform-capability:${capabilityId}` };
+  });
   if (new Set(cores.map(core => core.coreId)).size !== cores.length)
     throw new CoreAccessError("core_unavailable", "实际数据观察不能重复登记Core");
   if (new Set(capabilities.map(capability => capability.capabilityId)).size !== capabilities.length)
     throw new CoreAccessError("core_unavailable", "实际数据观察不能重复登记能力");
+  const namespaceOwner = (name: string): string | undefined => {
+    const match = /^(core|platform-capability)\.([a-z][a-z0-9]*(?:-[a-z0-9]+)*)\.(.+)$/u.exec(name);
+    return match && CoreIdSchema.safeParse(match[2]).success ? `${match[1]}:${match[2]}` : undefined;
+  };
+  const owners = new Map<string, string>();
+  for (const module of [platform, ...cores, ...capabilities]) for (const name of module.names) {
+    const namespace = namespaceOwner(name);
+    if (owners.has(name) || namespace !== undefined && namespace !== module.owner)
+      throw new CoreAccessError("core_unavailable", "原Prisma迁移名称跨模块冲突或违背正式命名空间归属");
+    owners.set(name, module.owner);
+  }
+  // 旧名称保持显式映射；正式命名空间也能识别本版未声明的未来迁移。
+  // 公共旧账没有统一前缀，剩余无法归属的记录不能当作无关账而略过。
+  const receiptOwner = (name: string) => owners.get(name) ?? namespaceOwner(name) ?? "platform";
   const database: Reader = { $queryRaw: input.database.$queryRaw.bind(input.database) };
-  const read = async (module: ReturnType<typeof plan>, receipts: readonly Receipt[]): Promise<CoreDataObservation["platform"] | undefined> => {
-    const observed = await module.physical(database);
+  const read = async (module: ReturnType<typeof plan> & { owner: string }, receipts: readonly Receipt[]): Promise<CoreDataObservation["platform"] | undefined> => {
+    let observed: CorePhysicalDataObservation | undefined;
+    try { observed = await module.physical(database); }
+    catch {
+      // 物理读取属于该模块：缺表/驱动失败与缺证据同样省略观察，不能牵连无依赖Core。
+      // 平台缺观察仍由下方整体拒绝；所需能力和更新预检也各自拒绝缺失项，不补ready。
+      return;
+    }
     if (!observed) return;
     const parsed = CorePhysicalDataObservationSchema.safeParse(observed);
     if (!parsed.success) return;
@@ -47,8 +74,14 @@ export function createMysqlCoreDeploymentObservation(input: {
     const seen = new Set<string>();
     let execution: CoreMigrationExecution = { state: "ready" };
     for (const receipt of receipts) {
+      if (receiptOwner(receipt.migrationName) !== module.owner) continue;
       const id = module.ids.get(receipt.migrationName);
-      if (!id || receipt.rolledBackAt !== null) continue;
+      // 标记回退不等于撤销DDL/数据回填；旧实现仍须认识该所属迁移才能评估原链。
+      if (!id) return;
+      if (receipt.rolledBackAt !== null) {
+        if (!(receipt.rolledBackAt instanceof Date) || !Number.isFinite(receipt.rolledBackAt.getTime())) return;
+        continue; // 原回滚收据不计已应用，也不证明物理DDL已恢复。
+      }
       // 损坏的是所属模块的迁移证据，不能据此关闭另一Core；省略后目标准入明确拒绝。
       if (seen.has(receipt.migrationName)) return;
       seen.add(receipt.migrationName);
@@ -71,12 +104,15 @@ export function createMysqlCoreDeploymentObservation(input: {
     const target = coreId === undefined ? undefined : CoreIdSchema.parse(coreId);
     const selected = target === undefined ? cores : cores.filter(core => core.coreId === target);
     if (coreId !== undefined && !selected.length) throw new CoreAccessError("core_unavailable", "目标Core没有登记实际数据观察");
-    const names = [...new Set([platform, ...selected, ...capabilities].flatMap(module => module.names))];
-    // 一次读取所选模块原账，再由各所有者读取物理结构；查询/驱动失败仍原样向上报告。
-    const receipts = names.length ? await database.$queryRaw<Receipt[]>(sql`
+    // 读取完整原账而不是只查本版清单。新增表/纯回填可能不改变旧表的物理摘要；
+    // 完整所属链仍是拒绝旧实例的必要证据。查询失败和无法识别归属的坏行拒绝全部。
+    const receipts = await database.$queryRaw<Receipt[]>(sql`
       SELECT migration_name AS migrationName, checksum, finished_at AS finishedAt, rolled_back_at AS rolledBackAt,
         (logs IS NOT NULL AND logs <> '') AS hasFailure FROM _prisma_migrations
-      WHERE migration_name IN (${join(names)}) ORDER BY started_at, id`) : [];
+      ORDER BY started_at, id`);
+    if (!Array.isArray(receipts) || receipts.some(receipt => !receipt || typeof receipt.migrationName !== "string"
+      || !receipt.migrationName || receipt.migrationName.length > 255 || /[\u0000-\u001f\u007f]/u.test(receipt.migrationName)))
+      throw new CoreAccessError("core_unavailable", "原Prisma迁移账的模块归属不可核定");
     const platformState = await read(platform, receipts);
     if (!platformState) throw new CoreAccessError("core_unavailable", "平台实际物理数据状态尚未核定");
     const coreStates = await Promise.all(selected.map(async core => {
