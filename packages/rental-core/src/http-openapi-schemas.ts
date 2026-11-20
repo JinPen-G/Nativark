@@ -1,7 +1,13 @@
 /** Rental 原 HTTP schema 单源。保留历史宽泛字段，字段完整性缺口由接口贡献明确列出。 */
 import { STAFF_UPLOAD_OBSERVATION_SCHEMAS } from "@rental-os/shared";
-import { RentalInventoryMode, RENTAL_LOCATION_TYPES, RENTAL_PRICING_UNIT_CODES } from "./contracts";
-import type { InitiateRentalFundingRequest, RentalFundingAmountRequest, RentalFundingFailureRequest } from "./contracts";
+import { RentalInventoryMode, RENTAL_LOCATION_TYPES, RENTAL_PRICING_UNIT_CODES, RENTAL_SERVICE_EXECUTION_ACTIONS } from "./contracts";
+import type {
+  InitiateRentalFundingRequest,
+  RefundRentalServiceRequest,
+  RentalFundingAmountRequest,
+  RentalFundingFailureRequest,
+  UpdateRentalServiceOccurrenceRequest
+} from "./contracts";
 import type { RentalFundingReleaseDto } from "./order-request.dto";
 import { RENTAL_EXCHANGE_INSPECTION_SCHEMAS } from "./http-openapi-rental-exchange-inspection-preparation.schemas";
 import { ENTERPRISE_COMPONENT_SCHEMAS } from "./http-openapi-enterprise-schemas";
@@ -507,6 +513,42 @@ export const RENTAL_HTTP_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     idempotencyKey: stringSchema, reason: stringSchema, operator: stringSchema, failureCode: stringSchema,
     at: { type: "string", format: "date-time" }, createdAt: { type: "string", format: "date-time" } },
     ["id", "tenantId", "workspaceId", "orderId", "instrument", "action", "amount", "balanceAfter", "provider", "idempotencyKey", "reason", "at", "createdAt"]),
+  UpdateRentalServiceOccurrenceRequest: {
+    ...objectOf({
+      action: { type: "string", enum: [...RENTAL_SERVICE_EXECUTION_ACTIONS] },
+      actualAt: { type: "string", nullable: true, description: "原 DTO 接受 ISO8601。省略或 null 使用服务端当前时刻，实际时间及先后顺序由原履约服务核验。" },
+      result: { type: "string", maxLength: 2000, nullable: true, description: "complete 须填写有效执行结果，原服务去除首尾空白。" },
+      executedQuantity: { type: "integer", minimum: 1, nullable: true, description: "本段实际数量。complete 省略时完成全部剩余数量，显式 null 由原执行器前校验拒绝，剩余上限由原服务核验。" },
+      reason: { type: "string", maxLength: 1000, nullable: true, description: "cancel、fail 和 no_show 须填写有效原因。" },
+      evidenceAttachments: { ...arrayOf({ type: "string", maxLength: 500 }), nullable: true, description: "原证据引用。省略或 null 保留该发生项已有引用。" },
+      customerConfirmed: { type: "boolean", nullable: true, description: "complete 须明确提供。false 表示未确认。原 DTO 接受 null，首次提交记录为未确认，同键重试按原确认值核对会返回 409。" },
+      refundAmount: { type: "number", minimum: 0, nullable: true, description: "终止动作的建议退款额，省略或 null 采用原未执行净额，实际建议由原服务限制并生成审核事实。" },
+      compensationAmount: { type: "number", minimum: 0, nullable: true, description: "终止动作的补偿金额，省略保留原值，提供时沿原金额工具保存。" }
+    } satisfies Record<keyof UpdateRentalServiceOccurrenceRequest, SchemaObject>, ["action"]),
+    description: "原 UpdateRentalServiceOccurrenceDto。complete 每段使用独立稳定的 Idempotency-Key 请求头，重试保持原键与原请求。原执行器前的完成参数拒绝给出 serviceExecutionNotCommitted，事务及提交后错误沿原收据核对。",
+    example: { action: "complete", executedQuantity: 1, result: "完成本段服务", customerConfirmed: true }
+  },
+  RefundRentalServiceRequest: {
+    ...objectOf({
+      amount: { type: "number", minimum: 0.01, description: "原 DTO 接受不小于 0.01 的数字，原服务按金额工具核对已批准金额及原审核事实。" },
+      idempotencyKey: { type: "string", minLength: 1, maxLength: 191, pattern: "\\S" },
+      reason: { type: "string", minLength: 1, maxLength: 1000, pattern: "\\S" },
+      paymentMethod: { type: "string", enum: ["offline_cash", "offline_transfer", null], nullable: true, description: "省略或 null 采用 offline_cash，原资金事务核验当前空间已启用方式。" }
+    } satisfies Record<keyof RefundRentalServiceRequest, SchemaObject>, ["amount", "idempotencyKey", "reason"]),
+    description: "原 RefundRentalServiceDto。原 Controller 派生服务退款资金键，在同一事务写入模拟资金事件、服务退款事实和操作收据。纯演练准入、当前订单范围及批准金额沿原服务核验。",
+    example: { amount: 90, idempotencyKey: "service-refund-example", reason: "按原服务审核金额退款" }
+  },
+  RentalServiceExecutionResult: {
+    ...objectOf({ order: ref("RentalOrder"), occurrence: ref("RentalOrderServiceOccurrence") }, ["order", "occurrence"]),
+    description: "原履约更新及服务退款响应。order 是当前受权并脱敏的订单投影，履约重试的 occurrence 保留该原操作提交的发生项收据。"
+  },
+  RentalServiceExecutionReceipt: {
+    oneOf: [
+      objectOf({ status: { type: "string", enum: ["committed"] }, order: ref("RentalOrder"), occurrence: ref("RentalOrderServiceOccurrence") }, ["status", "order", "occurrence"]),
+      objectOf({ status: { type: "string", enum: ["unknown"] } }, ["status"], false)
+    ],
+    description: "原 RentalServiceExecutionReceipt。读取前核当前订单范围，committed 保留原段收据和当前受权订单，unknown 仅返回状态并保留原操作等待核对。"
+  },
   InitiateRentalFundingRequest: {
     ...objectOf({
       instrument: { type: "string", enum: ["rental", "deposit", "preauthorization"] },

@@ -879,17 +879,44 @@ export const RENTAL_HTTP_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/services/{occurrenceId}/execution", tag: "RentalCore", operationId: "updateRentalServiceOccurrenceExecution",
-    summary: "Record service execution; each complete segment requires its own stable Idempotency-Key header. Replay returns the original occurrence receipt and current authorized order", permissions: ["rental-os:order:operate"], requestSchema: "GenericObject", responseSchema: "GenericObject",
-    parameters: [{ name: "Idempotency-Key", in: "header", required: false, description: "Required for complete; each new segment uses a new key, retries preserve the original request and key", schema: { type: "string", minLength: 1, maxLength: 191 } }]
+    summary: "记录原服务实际履约。complete 每段使用稳定 Idempotency-Key，重试返回原发生项收据和当前受权订单", permissions: ["rental-os:order:operate"], requestSchema: "UpdateRentalServiceOccurrenceRequest", responseSchema: "RentalServiceExecutionResult", successStatus: 201,
+    parameters: [{ name: "Idempotency-Key", in: "header", required: false, description: "complete 必须携带。每个新段使用独立稳定键，重试保留原请求和原键。", schema: { type: "string", minLength: 1, maxLength: 191 } }],
+    errorResponses: {
+      "400": {
+        description: "原 DTO、操作键或履约输入无效。serviceExecutionNotCommitted 仅由执行器前的 complete 参数校验给出。",
+        schema: objectOf({
+          statusCode: { type: "integer", enum: [400] }, message: { oneOf: [stringSchema, arrayOf(stringSchema)] },
+          error: stringSchema, serviceExecutionNotCommitted: { type: "boolean", enum: [true] }
+        }, ["statusCode", "message"], false)
+      },
+      "403": { description: "当前主体缺少原订单操作权限，或订单超出当前租户和经营空间范围。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "原订单或服务发生项不存在。", schema: "RentalHttpErrorResponse" },
+      "409": { description: "原订单或服务状态冲突，操作键请求不同，或原收据与当前事实核对失败。", schema: "RentalHttpErrorResponse" },
+      "500": { description: "原事务或提交后投影失败，沿原操作和原收据核对。", schema: "RentalHttpErrorResponse" }
+    }
   },
   {
     method: "get", path: "/api/rental/v1/orders/{id}/services/{occurrenceId}/execution-receipt", tag: "RentalCore", operationId: "getRentalServiceExecutionReceipt",
-    summary: "Observe the original service operation using Idempotency-Key header; committed returns the original receipt and current order, unknown never authorizes another execution", permissions: ["rental-os:order:view"], responseSchema: "GenericObject",
-    parameters: [{ name: "Idempotency-Key", in: "header", required: true, schema: { type: "string", minLength: 1, maxLength: 191 } }]
+    summary: "按 Idempotency-Key 读取原服务收据，committed 返回原段及当前受权订单，unknown 保留原操作等待核对", permissions: ["rental-os:order:view"], responseSchema: "RentalServiceExecutionReceipt",
+    parameters: [{ name: "Idempotency-Key", in: "header", required: true, schema: { type: "string", minLength: 1, maxLength: 191 } }],
+    errorResponses: {
+      "400": { description: "读取原服务收据的 Idempotency-Key 缺失或无效。", schema: "RentalHttpErrorResponse" },
+      "403": { description: "当前主体缺少原订单查看权限，或订单超出当前租户和经营空间范围。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "原订单不存在。", schema: "RentalHttpErrorResponse" },
+      "409": { description: "操作键属于另一订单，或原段收据与当前发生项事实核对失败。", schema: "RentalHttpErrorResponse" },
+      "500": { description: "原收据或当前订单投影读取失败。", schema: "RentalHttpErrorResponse" }
+    }
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/services/{occurrenceId}/refund", tag: "RentalCore", operationId: "refundRentalServiceOccurrence",
-    summary: "Record the approved value-added service refund and close its refund state", permissions: ["rental-os:order:settle"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "按已批准金额办理服务模拟退款，原资金事件、服务发生项和操作收据在同一事务提交", permissions: ["rental-os:order:settle"], requestSchema: "RefundRentalServiceRequest", responseSchema: "RentalServiceExecutionResult", successStatus: 201,
+    errorResponses: {
+      "400": { description: "原退款 DTO、操作键或线下方式无效。", schema: "RentalHttpErrorResponse" },
+      "403": { description: "当前主体缺少原订单结算权限，或订单超出当前租户和经营空间范围。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "原订单或服务发生项不存在。", schema: "RentalHttpErrorResponse" },
+      "409": { description: "原批准金额或审核事实不匹配、已经退款、原操作键冲突，或当前订单及经营空间未满足纯演练资金准入。", schema: "RentalHttpErrorResponse" },
+      "500": { description: "原资金和服务事务或提交后投影失败，沿原操作和原收据核对。", schema: "RentalHttpErrorResponse" }
+    }
   },
   {
     method: "get", path: "/api/rental/v1/orders/{id}/extensions", tag: "RentalCore", operationId: "listRentalOrderExtensions",

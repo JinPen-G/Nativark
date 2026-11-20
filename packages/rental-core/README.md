@@ -173,7 +173,7 @@
 node -e "const { createRentalOpenApi } = require('@rental-os/rental-core/http-openapi'); process.stdout.write(JSON.stringify(createRentalOpenApi(), null, 2))"
 ```
 
-独立贡献包含 576 个已有操作及其 393 个 schema。原宽泛字段由 `RENTAL_HTTP_SCHEMA_GAPS` 列出，涉及的 262 项操作带 `x-schemaStatus=incomplete` 和 `x-schemaGaps`，继续按正式 DTO/响应投影补齐。明确路由缺口从 `RENTAL_HTTP_DOCUMENTATION_GAPS` 读取，当前宿主限制从 `RENTAL_HTTP_OPERATION_AVAILABILITY` 读取。
+独立贡献包含 576 个已有操作及其 397 个 schema。原宽泛字段由 `RENTAL_HTTP_SCHEMA_GAPS` 列出，涉及的 259 项操作带 `x-schemaStatus=incomplete` 和 `x-schemaGaps`，继续按正式 DTO/响应投影补齐。明确路由缺口从 `RENTAL_HTTP_DOCUMENTATION_GAPS` 读取，当前宿主限制从 `RENTAL_HTTP_OPERATION_AVAILABILITY` 读取。
 
 订单列表与详情复用 [订单响应 schema](src/http-openapi-rental-order-schemas.ts)。列表保留原数组或分页结果及九项查询字段，详情按原订单投影说明字段、历史省略与可空金额。配送电话按原脱敏结果公开，办理锁不释放令牌。规则、检查、会员及能力快照的内部版本结构继续从原关联对象读取；未展开的字段仍由缺口清单标明。
 
@@ -182,6 +182,8 @@ node -e "const { createRentalOpenApi } = require('@rental-os/rental-core/http-op
 支付单、退款与对账沿 [支付操作](src/http-payment-operations.controller.ts) 和 [对账读取](src/http-payment-reconciliation.controller.ts) 的原投影；员工线下登记与确认沿 [员工入口](src/http-staff-payments.controller.ts) 和 [收据 schema](src/http-openapi-rental-payment-schemas.ts)。登记保留原金额精度、凭证及幂等键，确认返回原登记和对应资金事件，重复确认读取同一收据。未知支付结果由原业务核对，接口资料不代替供应商事实。
 
 订单资金的列表、发起、追加、捕获、退款、释放与失败读取同一 [资金入口](src/http-business.controller.ts)及[同源 schema](src/http-openapi-schemas.ts)。可空支付方式、省略字段和缺省值按原 DTO 解释；普通资金金额与押金金额分别沿原精度工具，不从接口示例推算余额。所有写入保留原 201 状态、业务事务和原操作收据。
+
+服务履约的执行更新、执行收据读取与退款沿 [业务 Controller](src/http-business.controller.ts)和原 DTO，说明服务时间、完成状态、客户确认、退款批准及原键。原退款使用明确的 mock 演练路径，金额核对、当前空间方式、资金键和调用方同一事务分别保留。提交后或 unknown 读取原结果，资料不把演练结果当作供应商实款。
 
 | 路由 | 同源描述与当前限制 |
 | --- | --- |
