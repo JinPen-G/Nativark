@@ -30,3 +30,4 @@ export { inspectionRows, inspectionResults, type InspectionFieldRow } from "./in
 export { createRentalStaffLabels, type RentalStaffLabelsPorts, type Tone, type OrderTabKey } from "./labels";
 export { createRentalStaffPresenters, type RentalStaffPresentersPorts, type OrderCard } from "./presenters";
 export { createRentalStaffScan, type RentalStaffScanPorts, type ScanKind, type ScanResult, type ScanHistoryEntry } from "./scan";
+export { createRentalStaffContext, type RentalStaffContextPorts, type Terminology, type WorkspaceContext } from "./context";

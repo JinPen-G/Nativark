@@ -161,7 +161,7 @@
 node -e "const { createRentalOpenApi } = require('@rental-os/rental-core/http-openapi'); process.stdout.write(JSON.stringify(createRentalOpenApi(), null, 2))"
 ```
 
-独立贡献包含 576 个已有操作及其 344 个 schema。原宽泛字段由 `RENTAL_HTTP_SCHEMA_GAPS` 列出，涉及的 292 项操作带 `x-schemaStatus=incomplete` 和 `x-schemaGaps`，继续按正式 DTO/响应投影补齐。明确路由缺口从 `RENTAL_HTTP_DOCUMENTATION_GAPS` 读取，当前宿主限制从 `RENTAL_HTTP_OPERATION_AVAILABILITY` 读取。
+独立贡献包含 576 个已有操作及其 346 个 schema。原宽泛字段由 `RENTAL_HTTP_SCHEMA_GAPS` 列出，涉及的 289 项操作带 `x-schemaStatus=incomplete` 和 `x-schemaGaps`，继续按正式 DTO/响应投影补齐。明确路由缺口从 `RENTAL_HTTP_DOCUMENTATION_GAPS` 读取，当前宿主限制从 `RENTAL_HTTP_OPERATION_AVAILABILITY` 读取。
 
 | 路由 | 同源描述与当前限制 |
 | --- | --- |

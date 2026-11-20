@@ -1,5 +1,6 @@
 /** Rental 原 HTTP schema 单源。保留历史宽泛字段，字段完整性缺口由接口贡献明确列出。 */
 import { STAFF_UPLOAD_OBSERVATION_SCHEMAS } from "@rental-os/shared";
+import { RENTAL_LOCATION_TYPES } from "./contracts";
 import { RENTAL_EXCHANGE_INSPECTION_SCHEMAS } from "./http-openapi-rental-exchange-inspection-preparation.schemas";
 import { ENTERPRISE_COMPONENT_SCHEMAS } from "./http-openapi-enterprise-schemas";
 import { ENTERPRISE_ORDER_DELEGATION_SCHEMAS } from "./http-openapi-enterprise-order-delegation-schemas";
@@ -19,6 +20,56 @@ export const RENTAL_HTTP_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ...ENTERPRISE_ORDER_DELEGATION_SCHEMAS,
   ...RENTAL_EXCHANGE_INSPECTION_SCHEMAS,
   GenericObject: objectSchema,
+  SaveRentalFulfillmentLocationRequest: {
+    ...objectOf({
+      id: { type: "string", minLength: 1, nullable: true, description: "POST 省略 id 时新建，提供已有 id 时沿原保存入口更新。PUT 使用路径 id。" },
+      organizationId: { type: "string", minLength: 1, nullable: true, description: "省略或空白保留原组织，null 清除归属。提供该字段时原 Guard 另核账号管理权限及全租户、全部地点范围。" },
+      code: { type: "string", minLength: 1, pattern: "\\S" },
+      name: { type: "string", minLength: 1, pattern: "\\S" },
+      type: { type: "string", enum: [...RENTAL_LOCATION_TYPES], description: "原正式经营品类另核支持的地点类型。" },
+      operatorId: { type: "string", nullable: true, description: "引用当前空间已启用的经营主体。" },
+      operatorType: { type: "string", enum: ["self_operated", "partner", null], nullable: true },
+      operatorName: { type: "string", nullable: true, description: "原名称兼容入口可匹配经营主体或在同一地点事务中创建经营主体。" },
+      parentLocationId: { type: "string", nullable: true },
+      capabilities: { type: "array", minItems: 1, items: { type: "string", enum: ["pickup", "return", "storage", "delivery"] } },
+      address: { type: "string", nullable: true },
+      province: { type: "string", maxLength: 64, nullable: true },
+      city: { type: "string", maxLength: 64, nullable: true },
+      district: { type: "string", maxLength: 64, nullable: true },
+      timezone: { type: "string", maxLength: 64, nullable: true },
+      latitude: { type: "number", minimum: -90, maximum: 90, nullable: true, description: "经纬度成对提供，空值表示未填写。沿原坐标流程规范化。" },
+      longitude: { type: "number", minimum: -180, maximum: 180, nullable: true, description: "经纬度成对提供，空值表示未填写。沿原坐标流程规范化。" },
+      contactName: { type: "string", nullable: true },
+      contactPhone: { type: "string", nullable: true },
+      businessHours: { type: "string", nullable: true },
+      status: { type: "string", enum: ["enabled", "disabled"], description: "省略时新增采用 enabled，更新在原事务中保留已存状态。" }
+    }, ["code", "name", "type", "capabilities"]),
+    description: "原 SaveRentalFulfillmentLocationDto 输入。业务对象归属、经营主体、上级地点、成对坐标和当前品类支持由原 Guard 与保存应用核验。"
+  },
+  RentalFulfillmentLocation: objectOf({
+    id: stringSchema,
+    tenantId: stringSchema,
+    organizationId: stringSchema,
+    code: stringSchema,
+    name: stringSchema,
+    type: { type: "string", description: "原地点类型，读取保留历史字符串。" },
+    operatorId: stringSchema,
+    operatorType: { type: "string", description: "原经营主体类型，读取保留历史字符串。" },
+    operatorName: stringSchema,
+    parentLocationId: { type: "string", nullable: true },
+    capabilities: { type: "array", items: stringSchema, description: "原能力数组。保存去重，读取保留历史配置。" },
+    address: stringSchema,
+    province: stringSchema,
+    city: stringSchema,
+    district: stringSchema,
+    timezone: stringSchema,
+    latitude: numberSchema,
+    longitude: numberSchema,
+    contactName: stringSchema,
+    contactPhone: stringSchema,
+    businessHours: stringSchema,
+    status: { type: "string", description: "原地点状态，读取保留历史字符串。" }
+  }, ["id", "tenantId", "code", "name", "type", "capabilities", "status"], false),
   RentalHttpErrorResponse: objectOf({
     statusCode: { type: "integer", minimum: 400, maximum: 599 },
     message: { oneOf: [stringSchema, arrayOf(stringSchema)] },

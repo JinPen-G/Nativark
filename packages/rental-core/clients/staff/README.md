@@ -51,6 +51,18 @@ sessionEvents.on(assets.invalidateAssets);
 
 原[员工定向断言](../../../../tests/staff-miniprogram-static.test.cjs)覆盖必填、数值和照片字段，严格类型与正式 Native 构建核对旧入口和页面消费者。
 
+## 经营空间上下文
+
+同一正式入口提供 `createRentalStaffContext`。[上下文工厂](context.ts)接收原会话上下文、品类和地点 API，同一 `currentWorkspace/currentWorkspaceId/contextVersion/applySessionContext`、会话订阅和 `contextEvents`，以及原地点存储键与本机时钟。[微信上下文入口](../../../../apps/staff-miniprogram/src/core/context.ts)持有一次绑定实例，原页面继续订阅同一个事件对象。
+
+术语、资产字段、检查字段、能力、履约方式及地点来自当前真实 API。未加载前沿原通用术语展示，实际加载缺品类定义明确失败。原缓存命中、single-flight、force 并行代次、地点读取失败和迟到拒绝保持，租户范围的 `sessionContext` 在应用会话权限前核对本次代次，旧读取也无法清除新 inflight。
+
+当前地点沿真实 API 启用集合和当前会话 `locationScope` 重核，`selected` 取两者交集，缺省沿正式合同的旧成员兼容范围。原按空间保存的键和空选择保持，失权或停用的已存地点归空，非法新选择保留当前选择。地点只影响本机筛选，实际数据范围与业务操作仍由员工运输和服务端校验。
+
+`resetContextForTest` 释放当前实际会话订阅并只重绑本实例的一条订阅，保持重置后继续加载的原入口。宿主卸载时调用 `dispose()`，幂等释放自身订阅并作废旧读取。其他宿主和页面监听者沿原事件对象独立管理，通用主题、页面生命周期、品类图标及首页配图在[微信宿主](../../../../apps/staff-miniprogram/src/core/context.ts)维护。
+
+原[员工上下文断言](../../../../tests/staff-miniprogram-static.test.cjs)核对品类术语、字段、地点筛选与切换，必要迟到和生命周期冒烟核对旧会话权限、缺品类、当前地点撤权及订阅解除，正式 Native SDK 和 Staff 类型入口核对工厂与原页面消费。
+
 ## 扫码候选与历史
 
 同一正式入口提供 `createRentalStaffScan`。[扫码实现](scan.ts)接收原订单、资产、型号和工单 API 方法，同一宿主的会话、当前空间、上下文版本、术语、历史存储及本机时钟。原[微信扫码入口](../../../../apps/staff-miniprogram/src/core/scan.ts)绑定一次实例，页面继续使用原函数与结果类型。

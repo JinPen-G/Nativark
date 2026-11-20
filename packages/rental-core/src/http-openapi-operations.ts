@@ -478,15 +478,18 @@ export const RENTAL_HTTP_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "get", path: "/api/rental/v1/locations", tag: "RentalCore", operationId: "listRentalLocations",
-    summary: "List generic fulfillment locations", permissions: ["rental-os:station:view"], responseSchema: "GenericObject"
+    summary: "读取原提交的履约地点配置，沿当前员工地点范围过滤。", permissions: ["rental-os:station:view"],
+    responseSchema: arrayOf("RentalFulfillmentLocation")
   },
   {
     method: "post", path: "/api/rental/v1/locations", tag: "RentalCore", operationId: "createRentalLocation",
-    summary: "Create generic fulfillment location", permissions: ["rental-os:station:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "沿原保存入口新建或按请求 id 更新履约地点，经营主体兼容写入共用原事务。", permissions: ["rental-os:station:manage"],
+    successStatus: 201, requestSchema: "SaveRentalFulfillmentLocationRequest", responseSchema: "RentalFulfillmentLocation"
   },
   {
     method: "put", path: "/api/rental/v1/locations/{id}", tag: "RentalCore", operationId: "updateRentalLocation",
-    summary: "Update generic fulfillment location", permissions: ["rental-os:station:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "以路径 id 更新原履约地点，在原事务内复验品类、经营主体、组织及存量状态。", permissions: ["rental-os:station:manage"],
+    requestSchema: "SaveRentalFulfillmentLocationRequest", responseSchema: "RentalFulfillmentLocation"
   },
   {
     method: "get", path: "/api/rental/v1/item-groups", tag: "RentalCore", operationId: "listRentalItemGroups",
