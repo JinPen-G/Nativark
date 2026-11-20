@@ -1,6 +1,6 @@
 # Rental 客户小程序业务客户端
 
-[正式模块入口](index.ts)提供七组业务请求工厂、客户认证工厂、八个 AI 请求工厂、三组企业原操作编排、清单与服务切换、支付编排、目录／商户缓存和订单展示。原小程序 [api 入口](../../../../apps/miniprogram/src/api/orders.ts)注入 [request](../../../../apps/miniprogram/src/core/http.ts)，继续导出原方法和返回类型。合同沿 Rental 包内的[客户声明](../../src/client-contracts.ts)、[租赁声明](../../src/contracts.ts)和企业声明单源消费。
+[正式模块入口](index.ts)提供七组业务请求工厂、客户认证工厂、八个 AI 请求工厂、三组企业原操作编排、清单与服务切换、支付编排、目录／商户缓存、本机收藏、营业时区和订单展示。原小程序 [api 入口](../../../../apps/miniprogram/src/api/orders.ts)注入 [request](../../../../apps/miniprogram/src/core/http.ts)，继续导出原方法和返回类型。合同沿 Rental 包内的[客户声明](../../src/client-contracts.ts)、[租赁声明](../../src/contracts.ts)和企业声明单源消费。
 
 ## 宿主接入
 
@@ -40,6 +40,18 @@ const orders = createRentalMiniProgramOrdersApi({ request });
 [商户工厂](merchant-store.ts)接收同一渠道启动与公开服务 API、当前会话、本地上次服务、原公开缓存键与同步存储。[原商户入口](../../../../apps/miniprogram/src/core/merchant.ts)持有并供给同一 `merchantEvents`，工厂发布原商户投影，页面的订阅寿命由宿主维护。渠道缺席时沿原公开服务回退，登录方式与未知能力保持关闭。商户名、品类名、已发布初始服务和默认服务继续取原事实。
 
 两工厂的 `now` 端口使用宿主原 `Date.now()`，商户保留原五分钟内存寿命和公开存储格式。原[商户回退与服务选择断言](../../../../tests/miniprogram-static.test.cjs)核对缺渠道和已下架服务，[首页](../../../../apps/miniprogram/src/pages/home/index.ts)、[目录页](../../../../apps/miniprogram/src/pages/catalog/index.ts)和[登录页](../../../../apps/miniprogram/src/pages/login/index.ts)保持原消费。真实渠道、业务会话与微信环境沿原验收处理。
+
+## 本机收藏
+
+同一正式入口提供 `createRentalMiniProgramFavorites` 和原 `FavoriteItem`。[收藏工厂](favorites.ts)接收同一当前客户会话、会话事件、收藏事件对象、原存储键与同步读写，时间由宿主原 `Date.now()` 提供。[原收藏入口](../../../../apps/miniprogram/src/core/favorites.ts)绑定一次工厂并保留原 `favoriteEvents`，设备页、收藏页和个人页继续调用原四个方法。工厂结束生命周期时调用 `dispose()` 释放自己的登录事件订阅。
+
+收藏沿原本人／游客桶保存，登录事件按原商品 ID 去重并合并一次，普通读取保持原无写入行为。切同本人服务、退出和换登录继续沿原桶与原存储保留策略，最新收藏优先且上限为 200 条。`priceText` 保留原列表展示字段，实际价格沿当前服务端目录与报价读取。[设备收藏入口](../../../../apps/miniprogram/src/pages/item/index.ts) · [收藏页](../../../../apps/miniprogram/src/pages/favorites/index.ts)
+
+## 服务营业时区
+
+同一正式入口提供 `createRentalMiniProgramServiceZones`。[时区工厂](zones.ts)接收同一配置 API、当前服务与登录判别，[原时区入口](../../../../apps/miniprogram/src/core/zones.ts)初始化时绑定一次工厂。目录通过原 `rememberZone` 登记响应时区，订单与续租消费者继续读取原 `zoneOf`、`knownZones` 和 `ensureCurrentZone`。
+
+每服务 Map 与配置读取的 single-flight 保持，配置成功后按原响应服务登记，迟到和失败继续沿原运输与缺时区表达。时间显示沿[同源时间模块](../time.ts)，校准倒计时沿[原时钟](../../../../apps/miniprogram/src/core/clock.ts)，时区工厂只维护原时区结果和读取引用。[本人订单列表](../../../../apps/miniprogram/src/pages/orders/index.ts) · [原运输与定向验证](../../../../tests/miniprogram-static.test.cjs)
 
 ## 客户业务词条
 

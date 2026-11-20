@@ -6,7 +6,10 @@
     "declaration": true,
     "types": [
       "node"
-    ]
+    ],
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "strictPropertyInitialization": false
   },
   "include": [
     "src/**/*.ts"

@@ -35,7 +35,7 @@ export interface AiOperatorAccess {
   organizationId?: string;
 }
 
-interface AiContextBase {
+export interface AiContextBase {
   contractVersion: typeof AI_CONTRACT_DRAFT_VERSION;
   requestId: string;
   /** 最近一次由服务端解析授权的时点，不是长期授权凭据。 */

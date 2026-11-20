@@ -41,3 +41,5 @@ export {
 export { createRentalMiniProgramServiceFlow, type RentalMiniProgramServiceFlowPorts } from "./flow";
 export { createRentalMiniProgramCatalogStore, type RentalMiniProgramCatalogStorePorts, type ItemCard } from "./catalog-store";
 export { createRentalMiniProgramMerchantStore, type RentalMiniProgramMerchantStorePorts, type MerchantService, type MerchantInfo } from "./merchant-store";
+export { createRentalMiniProgramFavorites, type RentalMiniProgramFavoritesPorts, type FavoriteItem } from "./favorites";
+export { createRentalMiniProgramServiceZones, type RentalMiniProgramServiceZonePorts } from "./zones";

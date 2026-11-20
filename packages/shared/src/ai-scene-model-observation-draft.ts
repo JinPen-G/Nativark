@@ -27,7 +27,7 @@ export interface AiSceneKnowledgeSnapshotDraft {
     };
   };
 }
-interface ModelObservation<S extends AiSceneRequestReceiptDraft['sceneCode']> {
+export interface ModelObservation<S extends AiSceneRequestReceiptDraft['sceneCode']> {
   original: Omit<AiSceneRequestReceiptDraft, 'sceneCode'> & { sceneCode: S }; sceneCode: S;
   taskId: string; runId: string; resultId: string; observedAt: string; businessExecution: 'not_inferred_from_model_result';
 }

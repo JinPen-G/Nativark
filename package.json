@@ -222,7 +222,11 @@
     "lint:ai-native-server": "npm run lint -w @rental-os/ai-native-server",
     "build:example-multi-core-admin": "npm run build -w @rental-os/example-multi-core-admin",
     "dev:example-multi-core-admin": "npm run dev -w @rental-os/example-multi-core-admin",
-    "lint:example-multi-core-admin": "npm run lint -w @rental-os/example-multi-core-admin"
+    "lint:example-multi-core-admin": "npm run lint -w @rental-os/example-multi-core-admin",
+    "build:rental-api": "npm run build -w @rental-os/rental-api",
+    "build:rental-api:ai": "npm run build:ai -w @rental-os/rental-api",
+    "lint:rental-api": "npm run lint -w @rental-os/rental-api",
+    "lint:rental-api:ai": "npm run lint:ai -w @rental-os/rental-api"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",

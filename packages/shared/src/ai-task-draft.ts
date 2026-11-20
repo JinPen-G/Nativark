@@ -92,7 +92,7 @@ export type AiTaskTransitionDecisionDraft =
   | { allowed: true; nextRevision: number }
   | { allowed: false; reason: "invalid_state" | "revision_conflict" | "transition_denied" | "unresolved_steps" | "outcome_conflict" };
 
-interface AiTaskEventBaseDraft {
+export interface AiTaskEventBaseDraft {
   contractVersion: typeof AI_TASK_DRAFT_VERSION;
   taskId: string;
   /** 服务端落库后分配，严格递增但可有空洞；不是 taskRevision，也不是授权token。 */
