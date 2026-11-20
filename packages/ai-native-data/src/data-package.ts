@@ -18,7 +18,7 @@ function packageEntries(files: ReadonlyMap<string, Uint8Array>): void {
   const metadata = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
   if (metadata.name !== packageName || metadata.version !== AI_NATIVE_DATA_PACKAGE_VERSION || metadata.license !== "MIT")
     throw new Error("AI 数据包身份、实现版本或许可不一致");
-  for (const entry of ["data", "prisma-schema", "preparation", "data-package"]) {
+  for (const entry of ["data", "prisma-schema", "preparation", "data-package", "mysql-data"]) {
     const declared = metadata.exports?.[`./${entry}`];
     for (const [kind, suffix] of [["default", "js"], ["types", "d.ts"]] as const) {
       const target = `dist/${entry}.${suffix}`;

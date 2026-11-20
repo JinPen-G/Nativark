@@ -7,12 +7,15 @@ const fs = require("node:fs"), path = require("node:path");
 const { createRentalHostOpenApi, createRentalHostOpenApiContribution } = require("../dist/openapi.js");
 const { createRentalHostHttpPolicy } = require("../dist/http-policy.js");
 const { createRentalHostPackage } = require("../dist/package.js");
-const { createRentalOpenApi } = require("@rental-os/rental-core/http-openapi");
+const { createRentalDeploymentFiles } = require("../dist/prepare-deployment.js");
+const { createRentalOpenApi, RENTAL_HTTP_SCHEMA_GAPS } = require("@rental-os/rental-core/http-openapi");
 const { readRentalDataPackage } = require("@rental-os/rental-core/data-package");
 const { RENTAL_DATA_MIGRATIONS } = require("@rental-os/rental-core/data");
 const { readCoreArchive, createCoreArchive } = require("@rental-os/core-contracts/archive");
 const { createCoreMigrationDeployment } = require("@rental-os/core-contracts/deployment");
 const { createPublicPlatformDataPlan } = require("@rental-os/platform-api/data-plan");
+const { AI_NATIVE_DATA_FILES } = require("@rental-os/ai-native-data/data");
+const { createAiNativeDataRelease } = require("@rental-os/ai-native-data/data-package");
 const root = path.resolve(__dirname, "../../..");
 const source = { repository: "https://example.invalid/offline/package-fixture", commit: "a".repeat(40) };
 const host = { platform: "0.1.0", contract: "0.1.1", node: "22.12.0", capabilities: {} };
@@ -42,14 +45,23 @@ const lock = { lockVersion: 1, platform: { versions: host, source, sha256: "b".r
 test("宿主逐条核原挂载，贡献保留 namespace、原合同缺项和当前可用性", () => {
   const policy = createRentalHostHttpPolicy();
   assert.equal(policy.routes.length, 576);
-  assert.equal(hostContribution.legacyRoutes.length, 573);
-  assert.equal(hostContribution.documentationGaps.length, 4);
+  assert.equal(hostContribution.legacyRoutes.length, 576);
+  assert.equal(hostContribution.documentationGaps.length, 1);
   const document = createRentalHostOpenApi(lock, policy);
   const operations = Object.values(document.paths).flatMap(Object.values).filter(value => value.operationId?.startsWith("rental."));
-  assert.equal(operations.length, 573);
-  assert.equal(operations.filter(value => value["x-schemaStatus"] === "incomplete").length, 292);
+  assert.equal(operations.length, 576);
+  const expectedIncomplete = RENTAL_HTTP_SCHEMA_GAPS.filter(gap => operations.some(operation => operation["x-legacyOperationId"] === gap.operationId));
+  assert.deepEqual(operations.filter(value => value["x-schemaStatus"] === "incomplete").map(value => value["x-legacyOperationId"]).sort(),
+    expectedIncomplete.map(value => value.operationId).sort());
+  for (const gap of expectedIncomplete)
+    assert.deepEqual(operations.find(value => value["x-legacyOperationId"] === gap.operationId)["x-schemaGaps"], gap.fields);
   assert.equal(document.paths["/api/rental/v1/orders/{id}"].get["x-coreDisabledRecovery"], "history");
-  assert.equal(document["x-rentalDocumentationGaps"].find(item => item.source === "StaffUploadsController.bindInspectionEvidence").availability, "unavailable");
+  const binding = document.paths["/api/staff/v1/uploads/{fileAssetId}/inspection-binding"].post;
+  assert.equal(binding["x-hostHandler"], "StaffUploadsController.bindInspectionEvidence");
+  assert.equal(binding["x-hostAvailability"], "unavailable");
+  assert.ok(binding.responses["503"]);
+  assert.equal(binding.responses["200"], undefined);
+  assert.equal(binding.responses["201"], undefined);
   assert.equal(document.paths["/api/platform/tenant-bootstrap/category-options"], undefined);
 });
 
@@ -92,4 +104,56 @@ test("相同清单但包字节被替换仍拒绝，旧路径许可不放宽摘�
   const tampered = new Map(archived.files); tampered.set("README.md", Buffer.from("changed"));
   assert.notEqual(createCoreArchive(tampered).sha256, packaged.sha256);
   assert.throws(() => readRentalDataPackage(tampered, lock.cores[0], host, hostContribution.legacyRoutes), /不一致/);
+});
+
+function aiFormatFixture() {
+  const entries = ["data", "prisma-schema", "preparation", "data-package", "mysql-data"];
+  const metadata = { name: "@rental-os/ai-native-data", version: "0.1.0", license: "MIT",
+    exports: Object.fromEntries(entries.map(name => [`./${name}`, { types: `./dist/${name}.d.ts`, default: `./dist/${name}.js` }])) };
+  const files = new Map([["package.json", Buffer.from(JSON.stringify(metadata))],
+    ["README.md", Buffer.from("仅格式夹具，不代表已构建发行")], ["LICENSE", Buffer.from("MIT")],
+    ...entries.flatMap(name => [[`dist/${name}.js`, Buffer.from('throw Error("format fixture must not execute");')],
+      [`dist/${name}.d.ts`, Buffer.from("export {};\n")]]),
+    ...AI_NATIVE_DATA_FILES.map(item => [item.file, read(`packages/ai-native-data/${item.file}`)])]);
+  return { release: createAiNativeDataRelease({ files, source }), files };
+}
+
+function preparationInput() {
+  return { release: lock.platform, pin: lock.cores[0], coreFiles: archived.files,
+    publicSchema: read("apps/platform-api/prisma/schema.prisma").toString("utf8"),
+    publicMigrations: platform.migrationNames.map((name, index) => ({ name,
+      sql: read(`apps/platform-api/${platform.data.migrations[index].file}`) })) };
+}
+
+test("同一准备入口按完整固定包选择 161/247 模型，58 份原 AI 迁移字节和顺序保持", () => {
+  const base = createRentalDeploymentFiles(preparationInput()), ai = aiFormatFixture();
+  const enabled = createRentalDeploymentFiles({ ...preparationInput(), ai });
+  const schema = value => value.files.get("schema.prisma").toString("utf8");
+  assert.equal((schema(base).match(/^model /gm) || []).length, 161);
+  assert.equal((schema(enabled).match(/^model /gm) || []).length, 247);
+  assert.equal(base.aiMode, "disabled"); assert.equal(base.lock.dataCapabilities, undefined);
+  assert.equal(enabled.aiMode, "enabled"); assert.equal(enabled.status, "prepared"); assert.equal(enabled.deployment, "pending");
+  assert.deepEqual(enabled.lock.dataCapabilities, [ai.release]);
+  assert.equal(ai.release.data.migrations.length, 58);
+  for (const migration of ai.release.data.migrations)
+    assert.deepEqual(enabled.files.get(`migrations/platform-capability.${migration.id}/migration.sql`), ai.files.get(migration.file));
+  assert.deepEqual(JSON.parse(enabled.files.get("core.deployment.lock.json")), enabled.lock);
+  assert.match(schema(enabled), /output\s*=\s*"\.\.\/generated\/client"/);
+  assert.equal([...enabled.files.keys()].some(name => name.includes("ready") || name.includes("receipt")), false);
+});
+
+test("AI 选择不接受仅材料清单、包替换、未知版本或错误前置；无 AI 准备独立可用", () => {
+  const ai = aiFormatFixture(), prepare = value => createRentalDeploymentFiles({ ...preparationInput(), ai: value });
+  const modified = new Map(ai.files); modified.set("README.md", Buffer.from("changed"));
+  assert.throws(() => prepare({ ...ai, files: modified }), /摘要|不一致/);
+  const missing = new Map(ai.files); missing.delete("dist/data.js");
+  assert.throws(() => prepare({ ...ai, files: missing }), /文件|不一致/);
+  const version = structuredClone(ai.release); version.version = "0.1.1";
+  assert.throws(() => prepare({ ...ai, release: version }), /版本|不一致/);
+  const unknown = structuredClone(ai.release); unknown.id = "unknown-ai";
+  assert.throws(() => prepare({ ...ai, release: unknown }));
+  const wrongPlatform = preparationInput(); wrongPlatform.release = structuredClone(wrongPlatform.release);
+  wrongPlatform.release.data.version = "0.1.7";
+  assert.throws(() => createRentalDeploymentFiles({ ...wrongPlatform, ai }), /底座发行数据/);
+  assert.equal(createRentalDeploymentFiles(preparationInput()).deployment, "pending");
 });

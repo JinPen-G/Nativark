@@ -9,7 +9,7 @@
 - [data.ts](src/data.ts)：`createAiNativeDataContribution(files)` 接收同一固定包的字节快照，核对 schema、来源清单和 58 份迁移的路径及 SHA-256，返回独立 `platform-capability / ai-native` 所有者。`AI_NATIVE_DATA_FILES` 列出必需的 60 份数据文件；未知 `prisma/` 材料、缺项、空文件或摘要变化均拒绝。`AI_NATIVE_DATA_SHA256` 是这些有序路径／摘要的指纹，不是整个 npm 包、构建或部署摘要。
 - [prisma-schema.ts](src/prisma-schema.ts)：`composeAiNativePrismaSchema(base, contribution)` 在**已经组合公共与 Rental 的源码**上追加 AI 模型和 [21 条原关系回指](src/prisma-relations.ts)。它使用公共纯 schema 组合器，但不把 AI 加入业务 Core 清单。公共 40 模型单独作为 base 会因缺少 Rental 关系目标而拒绝；重复加入 AI 也拒绝。
 - [preparation.ts](src/preparation.ts)：`createAiNativeDataPreparation({ baseSchema, contribution })` 返回新的内存文件集合：组合 schema、58 份 AI 迁移和 `ai-native.data.candidate.json`。状态固定为 `prepared / pending`，返回实际缺口；不读 `.env`、生成 Client、连接数据库、执行 DDL 或覆盖已有文件。
-- [data-package.ts](src/data-package.ts)：`createAiNativeDataRelease({ files, source })` 锁定完整构建包的文件集合与归档摘要；`readAiNativeDataPackage` 校验字节快照，`requireAiNativeDataPackage` 校验普通安装目录。包须包含真实 JS、声明、schema、SQL、说明和许可；仅有源码或 SQL 指纹不能通过。
+- [data-package.ts](src/data-package.ts)：`createAiNativeDataRelease({ files, source })` 锁定完整构建包的文件集合与归档摘要；`readAiNativeDataPackage` 校验字节快照，`requireAiNativeDataPackage` 校验普通安装目录。包须包含 `data`、`prisma-schema`、`preparation`、`data-package`、`mysql-data` 五个正式出口的真实 JS 与声明，以及 schema、SQL、说明和许可；仅有源码或 SQL 指纹不能通过。
 - [mysql-data.ts](src/mysql-data.ts)：正式 `@rental-os/ai-native-data/mysql-data` 的 `createAiNativeMysqlDataPlanFromContribution(contribution)` 从同一固定包形成 MySQL 计划，读取实际表、列、索引、CHECK 和外键，供原迁移账观察器使用。
 
 宿主顺序如下。数据字节须来自同一固定安装包；公共与 Rental 仍按各自发行核定。宿主保存候选时沿已有“只写新目录、失败清理、不覆盖当前组合”的入口。
