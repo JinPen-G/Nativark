@@ -213,7 +213,7 @@ Core从实际接口方法/路径及权限声明生成 `CoreHttpContribution`，�
 
 提交管理变更前，页面先使用对应只读入口取得当前修订。返回 `recorded` 时使用事实中的 `revision`，尚未建立记录返回 `unavailable`，初次变更使用0。读取始终核当前主体和管理权限，停用/撤回状态及旧收据仍各自保留。绑定读取按租户/Core/容器定位，原操作核对继续使用单独的原收据入口。
 
-变更结果未知时，保存原operationId并调用对应的原操作只读入口。`recorded`返回原操作结果，之后另读当前事实；`unavailable`只表示暂未取得收据，不证明旧操作未提交，不能自动重发。原结果读取不创建锁行、事实或审计。[后台管理适配](../../apps/admin/src/core/README.md#管理core开通与成员分配)提供相同流程。
+变更结果未知时，保存原operationId并调用对应的原操作只读入口。`recorded`返回原操作结果，之后另读当前事实；`unavailable`只表示暂未取得收据，不证明旧操作未提交，不能自动重发。原结果读取不创建锁行、事实或审计。[后台管理适配](../platform-admin/src/core/README.md#管理core开通与成员分配)提供相同流程。
 
 移除预检读取 `CoreRemovalObservation`，状态为blocked或clear。Core的assessRemoval与平台实际准入/任务/回调/作业/历史依赖共同核对；缺检查器、未确认停新或依赖不完整均blocked。clear只说明当前只读观察无阻碍，实际部署须复核并执行停新/排空，不是删除/迁移许可，也不删除业务数据。[宿主检查](../core-host/README.md#移除代码前读取依赖)
 
@@ -235,7 +235,7 @@ Core从实际接口方法/路径及权限声明生成 `CoreHttpContribution`，�
 
 [页面合同](src/admin.ts)已提供 `CorePageDescriptorSchema`、`CoreAdminContribution`、`CorePageAction` 和 `registerCoreAdminPages`。路由描述中的ID/局部路径、名称、可选父级与菜单、权限是同一份数据；组件由Core代码直接绑定。统一注册后路径位于 `/cores/<id>/...`，重复页面、同形路径、缺上级/循环或清单未声明的权限会拒绝，失败不返回部分注册表。
 
-`purpose: "configuration"`仅用于Core自己的配置页面，获权且范围读取成功后可在未绑定/未就绪时进入；默认页面要求真实ready。`coreNavigationEntries`从当前本人Core/页面权限过滤菜单，`coreBreadcrumbEntries`沿同一父级链生成名称与允许的链接，无权父级不带可访问链接。[导航生成](src/navigation.ts) · [React路由适配](../../apps/admin/src/core/README.md#宿主只装配一次)
+`purpose: "configuration"`仅用于Core自己的配置页面，获权且范围读取成功后可在未绑定/未就绪时进入；默认页面要求真实ready。`coreNavigationEntries`从当前本人Core/页面权限过滤菜单，`coreBreadcrumbEntries`沿同一父级链生成名称与允许的链接，无权父级不带可访问链接。[导航生成](src/navigation.ts) · [React路由适配](../platform-admin/src/core/README.md#宿主只装配一次)
 
 例如，工单的路由元数据可以写成下面这样；这里只演示已实现schema的描述，不是完整可运行页面。
 

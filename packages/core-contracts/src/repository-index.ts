@@ -353,7 +353,7 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
       const sourceDoc = sourceDocuments(root, repositoryPath(root, dirname(asset ?? declaration.getSourceFile().fileName)));
       const documents = sourceDocuments(root, entry.owner);
       if (entry.owner === "apps/admin") {
-        if (entry.visibility === "public") documents.push({ path: "apps/admin/src/core/README.md" });
+        if (entry.visibility === "public") documents.push({ path: "packages/platform-admin/src/core/README.md" });
         else documents.push({ path: "packages/ui-arc/README.md" });
       }
       capabilities.push({ id: `export:${entry.module}:${symbol.name}`, name: symbol.name, kind: entry.ui ? "ui" : "export",

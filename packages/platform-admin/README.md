@@ -18,7 +18,7 @@
 | [正式出口](src/index.ts)、[壳组合](src/PlatformShell.tsx) | Provider、完整侧栏、面包屑/页名、通知、休息和面板，导航由获权 Core 页面声明生成 |
 | [运行时端口](src/runtime/index.ts)、[查询边界](src/runtime/session-queries.ts) | 宿主提供当前服务端会话、请求、订阅及代次；切身份先中止旧请求再清缓存，不推断业务回滚 |
 | [公共浏览器会话](src/runtime/browser-session.ts)、[HTTP](src/runtime/browser-http.ts)、[登录/改密](src/session-pages.tsx) | 独立公共Web宿主使用同一认证执行者；原Rental只适配原存储、空间与刷新收据 |
-| [Core 出口](src/core/index.ts)、[路由](src/core/CoreRoutes.tsx)、[页面](src/core/CorePage.tsx) | 路由、主按钮、真实就绪/范围、表单/列表和原结果管理；服务端继续复核授权 |
+| [页面接入手册](src/core/README.md)、[Core 出口](src/core/index.ts)、[路由](src/core/CoreRoutes.tsx)、[页面](src/core/CorePage.tsx) | 路由、主按钮、真实就绪/范围、表单/列表和原结果管理；服务端继续复核授权 |
 | [UI 出口](src/components/ui/index.ts)、[主题](src/app/theme.tsx)、[语言](src/app/locale.tsx) | 单一 Context 与原组件适配，提供卡片事实、原图标及列表宽度；Core 可提供字典；只读自身登记的词条，未知文案保留原文，原后台保留完整业务字典 |
 | [原生卡片控件](src/native-ui.ts) | `/native-ui` 提供原 UIArc Button / Checkbox、HoverCard / HoverCardProfile、BarChart 及头像样式，保留原变体、命中区域和动效；一般业务 Form / Button 使用 `/ui` |
 | [外壳](src/components/BusinessShell.tsx)、[页头插槽](src/components/workspace/WorkspaceHeader.tsx) | 原几何与动效、单个活动路由、表单原生提交关联及卸载清理 |
