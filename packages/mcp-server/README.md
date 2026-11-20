@@ -203,7 +203,16 @@ Resources 的额度 signal 与 endpoint / 协议信号相交，迟到读取停�
 | [mcp-trusted-principal](../../tests/mcp-trusted-principal.test.cjs) | 原 Auth / Guard / Native / Core、当前主体与可选 Core 准入 | 明确 SQL / ORM / commit fixture，真实运行另验 |
 | [Harness 组合](../../tests/harness-plugin.test.cjs) | 原 Loader / Loop / 私有连接与资源选择消费 | 须外部兼容 Harness 和插件源码，真实模型 / GUI / 最终线包另验 |
 
-公开检出当前缺少 `clients/agent-desktop/harness` 及 `clients/harness-plugin/package.json`。前三类历史测试仍有对 Harness 编译器、typeRoots 或 mcp-client package 的固定引用，foundation 的 MCP_TEST_TOOLCHAIN_ROOT 只覆盖部分路径。Harness 组合另要求明确 HARNESS_ROOT。依赖准备与现有测试路径修复须先由所属作者核定，不能把这些入口写成公开检出可无条件运行的命令。
+前三类测试默认读取本仓 `node_modules`，已有依赖放在其他受管仓库时，将 `MCP_TEST_TOOLCHAIN_ROOT` 指向其仓库根。编译器、`@types/node`、官方 SDK 和 Zod 都从同一明确目录解析，缺包会给出前置错误；测试源码和一次性产物仍属于当前工作树。Web 共用 [原身份夹具](../../tests/fixtures/mcp/original-identity.cjs) 的工具链，产物在 `output/.tmp` 下按进程独占，正常结束、失败和取消会释放自己的产物及钩子。
+
+官方 client 用例另需 `@modelcontextprotocol/client`；原 Harness 发现用例另需本仓 `clients/harness-plugin/src/connection.ts`，完整 Harness 组合使用明确的 `HARNESS_ROOT`。这些依赖只在对应原用例加载，缺失不能被当作已通过。已有工具链可先执行 server/SQL 定向段，原命令例如：
+
+```powershell
+$env:MCP_TEST_TOOLCHAIN_ROOT = '包含既有node_modules的仓库根绝对路径'
+node --test --test-name-pattern="^Prisma OAuth SQL store compiles" tests/mcp-mysql-store.test.cjs
+```
+
+正式包编译版本以 [package.json](package.json) 和锁文件为准；定向测试记录实际使用的工具链版本。离线守卫及写入目录沿本仓规则核定，以上 SQL 用例使用明确的事务替身，不连接 MySQL。公开检出当前仍缺旧 Harness 源码和部分 client/schema 依赖，完整连接验证需准备对应前置。
 
 foundation 还保留实际输入 schema 被 Harness 校验器以 UNSUPPORTED_SCHEMA 拒绝的用例，完整输入约束保持。已有离线或声明证据只对应其固定版本及注入边界，当前客户端兼容、完整 API-Prisma strict、真实登录 / MFA、持久数据库与发布仍须各自取证。
 

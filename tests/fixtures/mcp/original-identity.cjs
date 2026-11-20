@@ -3,17 +3,38 @@
  * Prisma/current-grant fixtures. Real installed Nest plumbing; no API boot or DB. */
 const assert = require("node:assert/strict");
 const fs = require("node:fs"), path = require("node:path");
-const { createRequire, registerHooks } = require("node:module");
+const { createRequire, registerHooks, isBuiltin } = require("node:module");
 const { pathToFileURL } = require("node:url");
 const root = path.resolve(__dirname, "../../..");
 // An explicit existing toolchain may be read for dependencies; all tested sources stay in root.
 const toolchainRoot = path.resolve(process.env.MCP_TEST_TOOLCHAIN_ROOT || root);
 const dependencyDirectory = path.join(toolchainRoot, "node_modules");
-const installed = createRequire(path.join(dependencyDirectory, "typescript/package.json"));
+const dependencyRequire = createRequire(path.join(dependencyDirectory, "typescript/package.json"));
+// Resolve each third-party package from the chosen installation. A missing
+// prerequisite cannot fall through to an ancestor or a private Harness checkout.
+function resolveDependency(specifier) {
+  if (isBuiltin(specifier)) return specifier;
+  const packageName = specifier.split("/").slice(0, specifier.startsWith("@") ? 2 : 1).join("/");
+  const packageDirectory = path.join(dependencyDirectory, packageName);
+  if (!fs.existsSync(path.join(packageDirectory, "package.json"))) {
+    const error = new Error(`MCP test prerequisite ${packageName} is missing from ${dependencyDirectory}. Set MCP_TEST_TOOLCHAIN_ROOT to an existing installation containing this package.`);
+    error.code = "MCP_TEST_PREREQUISITE";
+    throw error;
+  }
+  const resolved = dependencyRequire.resolve(specifier);
+  const relative = path.relative(fs.realpathSync(packageDirectory), fs.realpathSync(resolved));
+  assert.ok(relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative),
+    `MCP test dependency ${specifier} resolved outside its selected package`);
+  return resolved;
+}
+function installed(specifier) { return dependencyRequire(resolveDependency(specifier)); }
+installed.resolve = resolveDependency;
+installed.resolve("typescript");
+installed.resolve("@types/node/package.json");
 const temporaryRoot = path.join(root, "output/.tmp");
-const outputParent = path.resolve(process.env.MCP_TEST_OUTPUT_ROOT || temporaryRoot);
-const owner = path.basename(process.argv[1] || "mcp-original-identity").replace(/[^A-Za-z0-9._-]/gu, "_");
-const output = path.join(outputParent, `mcp-original-identity-${owner}`);
+const owner = path.basename(process.argv[1] || "mcp-tests").replace(/[^A-Za-z0-9._-]/gu, "_");
+const outputParent = path.resolve(process.env.MCP_TEST_OUTPUT_ROOT || path.join(temporaryRoot, `mcp-test-toolchain-${process.pid}`));
+const output = path.join(outputParent, `original-identity-${owner}-${process.pid}`);
 let ownsOutput = false, runtimeHooks;
 function within(directory, file) {
   const relative = path.relative(directory, file);
@@ -41,6 +62,10 @@ function cleanup() {
   fs.rmSync(output, { recursive: true });
   assert.equal(fs.existsSync(output), false, "MCP fixture output was not removed");
   ownsOutput = false;
+  if (!process.env.MCP_TEST_OUTPUT_ROOT) {
+    try { fs.rmdirSync(outputParent); }
+    catch (error) { if (error.code !== "ENOTEMPTY" && error.code !== "ENOENT") throw error; }
+  }
 }
 // Register cleanup before compilation so failed imports and cancelled runs have
 // the same lifecycle as a passing test. Never adopt a previous run's directory.
@@ -460,7 +485,7 @@ function checkNativeCatalogTypes() {
   nativeCatalogTypesChecked = true;
 }
 
-module.exports = { fixture, source, shared, identity, signal, AiCatalogReadFactsService, catalogConsumerUrl, output, runtimeShared, cache, root, toolchainRoot, cleanup,
+module.exports = { fixture, source, shared, identity, signal, AiCatalogReadFactsService, catalogConsumerUrl, output, runtimeShared, cache, root, toolchainRoot, dependencyDirectory, installed, ts, cleanup,
   checkNativeCatalogTypes, nativeCatalogTypesChecked: () => nativeCatalogTypesChecked,
   checkNativeRequestParticipantTypes, nativeRequestParticipantTypesChecked: () => nativeRequestParticipantTypesChecked,
   checkNativeRequestReconcileTypes, nativeRequestReconcileTypesChecked: () => nativeRequestReconcileTypesChecked,
