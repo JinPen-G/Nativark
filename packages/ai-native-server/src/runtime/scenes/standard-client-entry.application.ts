@@ -1,5 +1,6 @@
 import { Controller, Inject } from '@nestjs/common';
 import type { Prisma, PrismaClient } from '@prisma/client';
+import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import { z } from 'zod';
 import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientOrderActionSourceSchema, aiClientOrderActionRevalidationSchema,
   AI_TASK_DRAFT_VERSION, aiClientTaskReadRequestSchema, aiClientTaskCreationReceiptSchema,
@@ -308,6 +309,13 @@ export function composeStandardClientBookingEntry(input: Dependencies, channel: 
           revalidateQuotePublication,
           revalidateClientPublication: async tx => {
             check();
+            // Client policy writers have their own row CAS. Lock that exact
+            // row even in the provider's ReadCommitted pre-dispatch tx. The
+            // original Tenant X already fences channel/workspace publishers.
+            await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_client_task_policies
+              WHERE tenantId = ${before.identity.tenantId} AND workspaceId = ${before.identity.workspaceId}
+              AND channel = ${channel} AND customerType = ${before.identity.customerType}
+              AND sceneCode = ${sceneCode} AND sceneVersion = ${sceneVersion} FOR UPDATE`);
             const current = await readStandardClientEntryPublication(tx, before.identity, channel,
               { sceneCode, sceneVersion }, clock(), name === 'prepare' || name === 'createTask' || name === 'prepareGoal');
             if (current.releaseRevision !== before.releaseRevision)

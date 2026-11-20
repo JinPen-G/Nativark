@@ -1,7 +1,8 @@
-/** 客户原资料与任务创建的同事务参加者。原 ClientAuth/Tenant/Core 先于本人
- * Order、渠道发布、资料和 Task；不创建事务、不提供营运权限、不重发 unknown。 */
+/** 客户原资料、Task 与模型续程的同事务参加者。原 ClientAuth/Tenant/Core 先于
+ * 本人 Order、渠道发布、资料和 Task；不创建事务、不提供营运权限、不重发 unknown。 */
 import { AsyncLocalStorage } from 'node:async_hooks';
-import type { Prisma } from '@prisma/client';
+import type { Prisma, PrismaClient } from '@prisma/client';
+import { AI_TASK_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 import type { ClientAuthService } from '@rental-os/rental-core/mysql-client-auth';
 import type { ClientRequestContext } from '@rental-os/rental-core/client-context';
 import type { RentalCoreFactRepository } from '@rental-os/rental-core/mysql-core-facts';
@@ -9,7 +10,8 @@ import { clientOwnsRentalOrder } from '@rental-os/rental-core/client-order-owner
 import { assertRentalBusinessTenantAccessAfterLock, hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
 import { getRequestIdentity } from '@rental-os/platform-server/request-identity';
 import { AiTaskRepositoryError } from '../ai-task.repository';
-import { withAiTaskTransactionAuthority } from '../task-transaction-authority';
+import { withAiTaskTransactionAuthority, type AiTaskTransactionReference } from '../task-transaction-authority';
+import { TASK_TEXT_MODEL_TOOL } from '../model-input/task-model-input';
 import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
 import { AiClientPolicyAuthority, type AiClientTaskDependencies } from './client-task.authority';
 import { originalClientMaterialScope, PrismaClientSceneMaterialRepository, type AiClientMaterialDb,
@@ -187,6 +189,116 @@ export async function withClientSelectedTaskCreation<T>(db: AiClientMaterialDb,
       if (value.kind !== 'creation' || value.inputRef !== row.id || value.sceneCode !== row.sceneCode) throw denied();
       const latest = await inputs.findCreation(scope.materialScope, command.creationKey, tx, true);
       if (!latest || hash(latest) !== key) throw denied();
+    };
+    await verifyReference(reference);
+    return { verifyReference, revalidate: async () => { await lease.revalidate(); await verifyReference(reference); } };
+  } }, consume);
+}
+
+/** The original client command resolves one persisted CUSTOMER Task. Policy
+ * and immutable source are checked in every original runner/Gateway/input tx;
+ * original recovery admits only its existing Task's bounded observation time,
+ * never a new Step/Invocation or provider dispatch. */
+export async function withClientSelectedOriginalTask<T>(db: PrismaClient,
+  command: { creationKey: string; materialRef: string }, operation: 'execute' | 'submit_input' | 'recover',
+  consume: () => Promise<T>): Promise<T> {
+  if (!hasRentalBusinessTenantFence()) return consume();
+  const scope = selected(db), tasks = scope.input.tasks;
+  if (!tasks || tasks.db !== db || !['execute', 'submit_input', 'recover'].includes(operation)) throw unavailable();
+  const inputs = new PrismaClientTaskInputRepository(tasks.db);
+  const original = await inputs.findCreation(scope.materialScope, command.creationKey);
+  if (!original || original.materialRef !== command.materialRef || original.sceneCode !== tasks.sceneCode
+    || original.sceneVersion !== tasks.sceneVersion) throw denied();
+  const sourceKey = hash(original), policy = new AiClientPolicyAuthority(tasks, tasks, 'client-original-task', scope.input.clock);
+  const readTask = async (reader: Pick<PrismaClient, 'aiScope' | 'aiTask'>) => {
+    current(scope);
+    const { tenantId, workspaceId } = scope.materialScope;
+    const workspace = await reader.aiScope.findFirst({ where: { kind: 'WORKSPACE', tenantId, workspaceId } });
+    if (!workspace || workspace.kind !== 'WORKSPACE' || workspace.tenantId !== tenantId || workspace.workspaceId !== workspaceId) throw denied();
+    const task = await reader.aiTask.findFirst({ where: { scopeId: workspace.id, scopeKind: 'WORKSPACE',
+      audience: 'CLIENT', ownerKind: 'CUSTOMER', ownerId: scope.input.identity.customerId,
+      creationKey: `client-material:${original.id}`, inputRef: original.id, archivedAt: null } });
+    if (!task || task.scopeId !== workspace.id || task.scopeKind !== 'WORKSPACE' || task.audience !== 'CLIENT'
+      || task.ownerKind !== 'CUSTOMER' || task.ownerId !== scope.input.identity.customerId || task.archivedAt !== null
+      || task.contractVersion !== AI_TASK_DRAFT_VERSION || task.creationKey !== `client-material:${original.id}`
+      || task.inputRef !== original.id || task.inputRevision !== original.revision || task.inputHash !== original.inputHash
+      || task.sceneCode !== original.sceneCode || task.sceneVersion !== original.sceneVersion) throw denied();
+    return task;
+  };
+  const task = await readTask(db), owner = scope.input.identity.customerId;
+  // Revision/status/fencing remain the original repositories' atomic duties.
+  const taskKey = (row: typeof task) => hash({ id: row.id, scopeId: row.scopeId, scopeKind: row.scopeKind,
+    audience: row.audience, ownerKind: row.ownerKind, ownerId: row.ownerId, creationKey: row.creationKey,
+    contractVersion: row.contractVersion, inputRef: row.inputRef, inputRevision: row.inputRevision,
+    inputHash: row.inputHash, sceneCode: row.sceneCode, sceneVersion: row.sceneVersion, archivedAt: row.archivedAt });
+  const immutableTask = taskKey(task);
+  // Recovery can meter its current observation, but cannot add an action or
+  // successor. Preserve the original identities across every such transaction;
+  // original repositories still own all status/revision/receipt transitions.
+  const recoveryOrigin = async (reader: Pick<PrismaClient, 'aiRun' | 'aiStep' | 'aiTaskRunPlan'>) => {
+    const where = { scopeId: task.scopeId, taskId: task.id };
+    const runs = await reader.aiRun.findMany({ where, orderBy: { sequence: 'asc' }, take: 1001,
+      select: { id: true, taskId: true, scopeId: true, sequence: true, actorKind: true, actorId: true,
+        resourceOriginRunId: true, inputReceiptId: true } });
+    const steps = await reader.aiStep.findMany({ where, orderBy: { id: 'asc' }, take: 1001,
+      select: { id: true, taskId: true, scopeId: true, runId: true, actionId: true, requestFingerprint: true,
+        inputRef: true, toolCode: true, toolVersion: true, sequence: true } });
+    const plans = await reader.aiTaskRunPlan.findMany({ where, orderBy: { runId: 'asc' }, take: 1001,
+      select: { taskId: true, scopeId: true, runId: true, planHash: true } });
+    if (!runs.length || runs.length > 1000 || steps.length > 1000 || plans.length > 1000
+      || runs.some(run => run.scopeId !== task.scopeId || run.taskId !== task.id
+        || run.actorKind !== 'CUSTOMER' || run.actorId !== owner)
+      || steps.some(step => step.scopeId !== task.scopeId || step.taskId !== task.id
+        || step.toolCode !== TASK_TEXT_MODEL_TOOL || step.toolVersion !== AI_TOOL_DRAFT_VERSION
+        || !runs.some(run => run.id === step.runId))
+      || plans.some(plan => plan.scopeId !== task.scopeId || plan.taskId !== task.id
+        || !runs.some(run => run.id === plan.runId))) throw denied();
+    return hash({ runs, steps, plans });
+  };
+  const originalRecovery = operation === 'recover' ? await recoveryOrigin(db) : undefined;
+  return withAiTaskTransactionAuthority({ binding: hash({ scope: scope.materialScope, command, operation }), begin: async (tx, reference) => {
+    if (reference.kind === 'creation' || reference.kind === 'task_control'
+      || operation !== 'execute' && reference.kind !== 'task') throw denied();
+    const material = await new PrismaClientSceneMaterialRepository(db).findSource(scope.materialScope, original.materialRef);
+    if (!material || material.inputHash !== original.materialInputHash || material.materialHash !== original.materialHash
+      || material.revision !== original.materialRevision || material.bindingHash !== original.bindingHash) throw denied();
+    const lease = await begin(scope, tx, material, true);
+    const verifyTarget = async () => {
+      current(scope);
+      const latestInput = await inputs.findCreation(scope.materialScope, command.creationKey, tx, true);
+      if (!latestInput || hash(latestInput) !== sourceKey || taskKey(await readTask(tx)) !== immutableTask) throw denied();
+      const access = await policy.policy({ ...scope.materialScope, identity: scope.input.identity },
+        operation === 'recover' ? 'read' : operation, tx, true);
+      if (access.id !== original.policyId) throw denied();
+      if (originalRecovery !== undefined && await recoveryOrigin(tx) !== originalRecovery) throw denied();
+      // The atomic answer consumer independently requires both current policies.
+      if (operation === 'submit_input') await policy.policy({ ...scope.materialScope, identity: scope.input.identity }, 'resume_input', tx, true);
+    };
+    const verifyStep = async (stepId: string, runId?: string) => {
+      const step = await tx.aiStep.findFirst({ where: { id: stepId, scopeId: task.scopeId, taskId: task.id } });
+      if (!step || step.id !== stepId || step.scopeId !== task.scopeId || step.taskId !== task.id
+        || runId && step.runId !== runId || step.toolCode !== TASK_TEXT_MODEL_TOOL || step.toolVersion !== AI_TOOL_DRAFT_VERSION) throw denied();
+      const run = await tx.aiRun.findFirst({ where: { id: step.runId, scopeId: task.scopeId, taskId: task.id,
+        actorKind: 'CUSTOMER', actorId: owner } });
+      if (!run || run.id !== step.runId || run.scopeId !== task.scopeId || run.taskId !== task.id
+        || run.actorKind !== 'CUSTOMER' || run.actorId !== owner) throw denied();
+      return step;
+    };
+    const verifyReference = async (key: AiTaskTransactionReference) => {
+      current(scope);
+      if (key.kind === 'creation' || key.kind === 'task_control'
+        || operation !== 'execute' && key.kind !== 'task') throw denied();
+      if (key.kind === 'task') { if (key.taskId !== task.id) throw denied(); }
+      else if (key.kind === 'step') await verifyStep(key.stepId);
+      else {
+        const invocation = await tx.aiGatewayInvocation.findFirst({ where: { callId: key.callId, scopeId: task.scopeId,
+          taskId: task.id, actorId: owner } });
+        if (!invocation || invocation.callId !== key.callId || invocation.scopeId !== task.scopeId
+          || invocation.taskId !== task.id || invocation.actorId !== owner) throw denied();
+        const step = await verifyStep(invocation.stepId, invocation.runId);
+        if (step.actionId !== invocation.actionId || step.requestFingerprint !== invocation.stepFingerprint) throw denied();
+      }
+      await verifyTarget();
     };
     await verifyReference(reference);
     return { verifyReference, revalidate: async () => { await lease.revalidate(); await verifyReference(reference); } };

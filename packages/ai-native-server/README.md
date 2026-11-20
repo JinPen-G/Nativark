@@ -29,6 +29,8 @@
 
 人工回答保存与执行续程分开处理。Core 撤权后可按原收据权限核对已保存回答，恢复当前授权后才可显式续程；重复续程不追加模型调用。每次派发复用唯一 Gateway 预占和结算，任务累计用量不重置。只读观察不取得对原提交事务的隐式共享锁，也不授权写入或重发。[原事务用例](test/original-scene-transactions.test.cjs) · [原执行与续程用例](test/original-scene-execution.test.cjs)
 
+客户的原任务模型启动、恢复、输入读取/保存、同 Task 续程与输入收据，复用 [客户请求应用](src/runtime/scenes/client-request.application.ts)、[标准客户场景](src/runtime/scenes/standard-client-entry.application.ts)和[原执行组合](src/runtime/scenes/client-task-execution.composition.ts)。事务参加者保留原 ClientAuth/请求身份、本人对象、当前发布与政策；Vault 读取后仍复验当前权限，失效时不发送模型请求。续程沿原任务与累计资源、同一 Gateway 预占/结算；unknown 只按原调用/holder/收据核对。宿主仅挂载明确选定方法，这些工厂方法不自动发布全部旧客户报价或 booking 操作。[客户同事务用例](test/client-selected-transactions.test.cjs)
+
 Rental 的通知缓存和草稿仓储通过 `@rental-os/rental-core/notification-draft` 消费以下组合：
 
 ```ts

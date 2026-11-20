@@ -6,11 +6,12 @@ import { requestFingerprint } from '../rental-adapters/rental-idempotency.reposi
 import { AiScopeRepository } from '../ai-scope.repository';
 import { AiTaskRepository, AiTaskRepositoryError, aiTaskAccessFromContext,
   type AiTaskRepositoryAuthority } from '../ai-task.repository';
+import { AiTaskCreationRepository } from '../ai-task-creation.repository';
 import { freezeOriginalInput } from '../task-request/original-request.validation';
 import { AiClientTaskAuthority, clientTaskSceneSchema, type AiAuthorizedClientMaterial,
   type AiClientTaskDependencies } from './client-task.authority';
 import { composeClientMaterialTasks } from './client-task.composition';
-import { clientTaskCommandSchema, PrismaClientTaskInputRepository } from './prisma-client-task-input.repository';
+import { clientTaskCommandSchema, clientTaskCreationKey, PrismaClientTaskInputRepository } from './prisma-client-task-input.repository';
 import { AiTaskTransitionRepository } from '../ai-task-transition.repository';
 import { PrismaTaskInputRepository, readTaskModelRunOrigin } from '../task-input/prisma-task-input.repository';
 
@@ -41,13 +42,30 @@ export function composePersistedClientTaskAuthorization(dependencies: AiClientTa
     // Original accounting uses current read authority; reserve/dispatch still require execute.
     const grant = await authority.authorize(command.materialRef, operation === 'read' || operation === 'accounting' ? 'read'
       : operation === 'request_input' || operation === 'submit_input' || operation === 'resume_input' || operation === 'cancel' ? operation : 'execute');
-    const receipt = await creation.readCreation(command);
-    if (!receipt.task || (taskId !== null && receipt.task.taskId !== taskId)) throw denied();
-    const id = receipt.task.taskId;
     const input = await inputs.findCreation(grant.material, command.creationKey);
-    if (!input || input.id !== receipt.inputRef || input.inputHash !== receipt.inputHash
+    const material = grant.material;
+    if (!input || input.creationKey !== command.creationKey || input.materialRef !== command.materialRef
+      || input.bindingHash !== material.bindingHash || input.principalHash !== material.principalHash
+      || input.principalKind !== material.principalKind || input.tenantId !== material.tenantId
+      || input.workspaceId !== material.workspaceId || input.channel !== material.channel
+      || input.materialInputHash !== material.inputHash || input.materialHash !== material.materialHash
+      || input.materialRevision !== material.revision
       || input.sceneCode !== scene.sceneCode || input.sceneVersion !== scene.sceneVersion
       || input.policyId !== grant.policy.id) throw denied();
+    // The surrounding readGrant takes two CURRENT authorized snapshots. Within
+    // each snapshot, use the original read-only receipt verifier with that
+    // snapshot's immutable input proof; calling the public material task reader
+    // here recursively repeats its authorization tree for every runner read.
+    // No result survives the second snapshot and no creation permission escapes.
+    const receipt = await AiTaskCreationRepository.receiptReader(dependencies.db, {
+      resolve: async (sceneCode, inputRef) => {
+        if (sceneCode !== input.sceneCode || inputRef !== input.id) throw denied();
+        return { context: grant.context, sceneCode: input.sceneCode, sceneVersion: input.sceneVersion,
+          inputRef: input.id, inputRevision: input.revision, inputHash: input.inputHash };
+      }
+    }, clock).readCreation({ creationKey: clientTaskCreationKey(input), sceneCode: input.sceneCode, inputRef: input.id });
+    if (!receipt.task || (taskId !== null && receipt.task.taskId !== taskId)) throw denied();
+    const id = receipt.task.taskId;
     const access = aiTaskAccessFromContext(grant.context, id, clock());
     const task = await dependencies.db.aiTask.findFirst({ where: access.where, select: {
       id: true, scopeId: true, scopeKind: true, scope: true, audience: true, ownerKind: true, ownerId: true,
@@ -61,6 +79,12 @@ export function composePersistedClientTaskAuthorization(dependencies: AiClientTa
       || task.sceneCode !== scene.sceneCode || task.sceneVersion !== scene.sceneVersion
       || task.inputRef !== input.id || task.inputHash !== input.inputHash || task.inputRevision !== input.revision
       || !Number.isSafeInteger(task.revision) || task.revision < 1 || task.revision > 4294967294) throw denied();
+    const originRun = await dependencies.db.aiRun.findFirst({ where: { id: receipt.task.runId,
+      scopeId: task.scopeId, taskId: task.id, sequence: 1 }, select: {
+      id: true, scopeId: true, taskId: true, sequence: true, actorKind: true, actorId: true } });
+    if (!originRun || originRun.id !== receipt.task.runId || originRun.scopeId !== task.scopeId
+      || originRun.taskId !== task.id || originRun.sequence !== 1
+      || originRun.actorKind !== access.actorKind || originRun.actorId !== access.actorId) throw denied();
     let continuationProof: string | null = null;
     let expiresAt = grant.policy.expiresAt.getTime();
     if (!observingOriginal && !originalInputOperation) {
@@ -111,7 +135,8 @@ export function composePersistedClientTaskAuthorization(dependencies: AiClientTa
       || (operation === 'request_input' ? !['RUNNING', 'WAITING_INPUT'].includes(task.status) : task.status !== 'WAITING_INPUT'))) throw denied();
     return { context: grant.context, taskId: id, expiresAt: new Date(expiresAt),
       proof: requestFingerprint({ identity: identityHash(grant.context),
-      task, inputHash: input.inputHash, policy: grant.policy, gates: grant.policyHash, continuationProof }) };
+      task, originRun, inputHash: input.inputHash, policy: grant.policy,
+      gates: grant.policyHash, continuationProof }) };
   };
   const readGrant = async (taskId: string | null, operation: ClientTaskOperation) => {
     const first = await snapshot(taskId, operation), current = await snapshot(first.taskId, operation);

@@ -60,7 +60,7 @@ import type { ClientApiService } from '@rental-os/rental-core/mysql-client-appli
 import { composeClientOriginalQuotePreparation } from './client-quote-preparation.composition';
 import { BudgetError } from '../budget/budget.ports';
 import type { Prisma, PrismaClient } from '@prisma/client';
-import { withClientSelectedTaskCreation, withClientSelectedTransactions,
+import { withClientSelectedTaskCreation, withClientSelectedTransactions, withClientSelectedOriginalTask,
   type ClientSelectedTransactionDependencies } from './client-selected-transactions';
 import { clientGoalCommandSchema, prepareClientGoalMaterial, validateClientGoalMaterial, revalidateClientGoalMaterial,
   type ClientGoalSources } from './client-goal-material';
@@ -751,33 +751,40 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
           await bound.assertCurrent();
           return { row, identity: structuredClone(bound.identity) };
         };
-        const configuration = gatewayServer ? await composeClientTaskModelConfiguration({ ...taskDependencies,
-          db: gatewayServer.db, secrets: gatewayServer.secrets, loadMaterial, clock }, command) : null;
-        const configured = (() => {
-          if (!gatewayServer || !configuration) return null;
-          if ('pricing' in gatewayServer) return 'platformConnection' in gatewayServer
-            ? configuration.createGateway(gatewayServer) : configuration.createPersistedGateway(gatewayServer);
-          return 'platformConnection' in gatewayServer
-            ? configuration.createCallGateway(gatewayServer) : configuration.createPersistedCallGateway(gatewayServer);
-        })();
-        const runtime = configured?.runtime ?? model.runtime, priceVersion = configured?.priceVersion ?? model.priceVersion;
-        const financialEvidence = configured?.financialEvidence ?? model.financialEvidence;
-        if (!runtime || !priceVersion || !financialEvidence) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_model_dependencies_missing');
-        const host = await composeClientOriginalTaskModelHost({ ...model, runtime, priceVersion, financialEvidence,
-          subscriptions: taskDependencies.subscriptions, clientScene: {
-            sceneCode: taskDependencies.sceneCode, sceneVersion: taskDependencies.sceneVersion },
-          loadMaterial, guard: dependencies.guard, clock }, command, control ?? (answers ? 'resume' : 'start'));
-        const result = control === 'recover' ? await host.recover(signal)
-          : control === 'reconcile' ? await host.reconcile(signal)
-          : control === 'continue' && answers ? await host.continueSubmittedInput(answers, signal)
-          : answers ? await host.resume(answers, signal) : await host.start(signal);
-        await bound.assertCurrent();
-        return result;
+        const run = async () => {
+          const configuration = gatewayServer ? await composeClientTaskModelConfiguration({ ...taskDependencies,
+            db: gatewayServer.db, secrets: gatewayServer.secrets, loadMaterial, clock }, command) : null;
+          const configured = (() => {
+            if (!gatewayServer || !configuration) return null;
+            if ('pricing' in gatewayServer) return 'platformConnection' in gatewayServer
+              ? configuration.createGateway(gatewayServer) : configuration.createPersistedGateway(gatewayServer);
+            return 'platformConnection' in gatewayServer
+              ? configuration.createCallGateway(gatewayServer) : configuration.createPersistedCallGateway(gatewayServer);
+          })();
+          const runtime = configured?.runtime ?? model.runtime, priceVersion = configured?.priceVersion ?? model.priceVersion;
+          const financialEvidence = configured?.financialEvidence ?? model.financialEvidence;
+          if (!runtime || !priceVersion || !financialEvidence) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_model_dependencies_missing');
+          const host = await composeClientOriginalTaskModelHost({ ...model, runtime, priceVersion, financialEvidence,
+            subscriptions: taskDependencies.subscriptions, clientScene: {
+              sceneCode: taskDependencies.sceneCode, sceneVersion: taskDependencies.sceneVersion },
+            loadMaterial, guard: dependencies.guard, clock }, command, control ?? (answers ? 'resume' : 'start'));
+          const result = control === 'recover' ? await host.recover(signal)
+            : control === 'reconcile' ? await host.reconcile(signal)
+            : control === 'continue' && answers ? await host.continueSubmittedInput(answers, signal)
+            : answers ? await host.resume(answers, signal) : await host.start(signal);
+          await bound.assertCurrent();
+          return result;
+        };
+        // Recovery/reconcile meter only original observation; their participant
+        // rejects Step/Invocation admission and new run/action/plan identities.
+        return withClientSelectedOriginalTask(model.db, command,
+          control === 'recover' || control === 'reconcile' ? 'recover' : 'execute', run);
       });
   };
   const withOriginalTaskInput = async <T>(request: AiClientApplicationRequest, value: unknown,
     source: Pick<Parameters<typeof composeClientOriginalTaskInputReader>[0], 'db' | 'inputSource' | 'gatewayScene'>,
-    consume: (reader: Awaited<ReturnType<typeof composeClientOriginalTaskInputReader>>) => Promise<T>, signal?: AbortSignal) => {
+    consume: (reader: Awaited<ReturnType<typeof composeClientOriginalTaskInputReader>>) => Promise<T>, signal?: AbortSignal,
+    write = false) => {
     // Original task observation/convergence does not need a booking navigation
     // surface. The server entry gate, current policy and Guard still apply.
     if (!server.entry || !taskDependencies) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'entry_disabled');
@@ -795,12 +802,15 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         await bound.assertCurrent();
         return { row, identity: structuredClone(bound.identity) };
       };
-      const reader = await composeClientOriginalTaskInputReader({ ...source,
-        clientScene: { sceneCode: taskDependencies.sceneCode, sceneVersion: taskDependencies.sceneVersion },
-        subscriptions: taskDependencies.subscriptions, loadMaterial, clock }, command);
-      const result = await consume(reader);
-      await bound.assertCurrent();
-      return result;
+      const consumeInput = async () => {
+        const reader = await composeClientOriginalTaskInputReader({ ...source,
+          clientScene: { sceneCode: taskDependencies.sceneCode, sceneVersion: taskDependencies.sceneVersion },
+          subscriptions: taskDependencies.subscriptions, loadMaterial, clock }, command);
+        const result = await consume(reader);
+        await bound.assertCurrent();
+        return result;
+      };
+      return write ? withClientSelectedOriginalTask(source.db, command, 'submit_input', consumeInput) : consumeInput();
     }, signal);
   };
   const configuredTaskInputSource = dependencies.taskInputs && {
@@ -1473,7 +1483,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       source = configuredTaskInputSource) {
       if (!source) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_input_dependencies_missing');
       const { submission, ...command } = parseEntry(aiClientTaskInputSubmissionRequestSchema, structuredClone(value));
-      return withOriginalTaskInput(request, command, source, reader => reader.submit(submission));
+      return withOriginalTaskInput(request, command, source, reader => reader.submit(submission), undefined, true);
     },
     /** Explicit server execution dependencies, exact original answer receipt;
      * never resubmit, select a caller run or automatically start after submit. */
