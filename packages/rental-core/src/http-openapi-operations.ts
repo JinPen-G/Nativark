@@ -739,15 +739,39 @@ export const RENTAL_HTTP_OPERATIONS: ContractOperation[] = [
   {
     // DOC-PRINT-01：管理端与 APP 共用的客户可读凭证快照；不代表正式 PDF/法定票据。
     method: "get", path: "/api/rental/v1/orders/{id}/documents/{type}", tag: "RentalCore", operationId: "renderRentalOrderDocument",
-    summary: "Render a customer-readable order document snapshot", permissions: ["rental-os:order:view"], responseSchema: "GenericObject"
+    summary: "按原订单事实生成并归档客户凭证，相同内容复用不可变版本。", permissions: ["rental-os:order:view"], responseSchema: "RentalDocumentRenderResult",
+    parameters: [{ name: "type", in: "path", required: true, schema: ref("RentalDocumentType") }],
+    errorResponses: {
+      "400": { description: "原文档类型校验失败。", schema: "RentalHttpErrorResponse" },
+      "401": { description: "原会话认证失败。", schema: "RentalHttpErrorResponse" },
+      "403": { description: "原订单查看权限或当前 Rental 访问条件拒绝读取、归档。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "当前订单范围内找不到订单。", schema: "RentalHttpErrorResponse" },
+      "500": { description: "原订单、检查、资金读取或归档失败，按同一订单和文档类型的原历史目录核对版本。", schema: "RentalHttpErrorResponse" }
+    }
   },
   {
     method: "get", path: "/api/rental/v1/orders/{id}/documents/{type}/versions", tag: "RentalCore", operationId: "listRentalOrderDocumentVersions",
-    summary: "List immutable versions of a customer-readable order document", permissions: ["rental-os:order:view"], responseSchema: "GenericObject"
+    summary: "读取当前订单凭证的历史目录，按快照时间和版本 ID 倒序返回。", permissions: ["rental-os:order:view"], responseSchema: arrayOf("RentalDocumentSnapshotSummary"),
+    parameters: [{ name: "type", in: "path", required: true, schema: ref("RentalDocumentType") }],
+    errorResponses: {
+      "400": { description: "原文档类型校验失败。", schema: "RentalHttpErrorResponse" },
+      "401": { description: "原会话认证失败。", schema: "RentalHttpErrorResponse" },
+      "403": { description: "原订单查看权限或当前 Rental 访问条件拒绝读取。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "当前订单范围内找不到订单。", schema: "RentalHttpErrorResponse" },
+      "500": { description: "原订单或历史目录读取失败。", schema: "RentalHttpErrorResponse" }
+    }
   },
   {
     method: "get", path: "/api/rental/v1/orders/{id}/documents/{type}/versions/{snapshotId}", tag: "RentalCore", operationId: "readRentalOrderDocumentVersion",
-    summary: "Read one immutable order document version", permissions: ["rental-os:order:view"], responseSchema: "GenericObject"
+    summary: "按当前订单范围读取指定历史凭证，含资金明细时核验当前财务权限。", permissions: ["rental-os:order:view"], responseSchema: "RentalDocumentRenderResult",
+    parameters: [{ name: "type", in: "path", required: true, schema: ref("RentalDocumentType") }],
+    errorResponses: {
+      "400": { description: "原文档类型校验失败。", schema: "RentalHttpErrorResponse" },
+      "401": { description: "原会话认证失败。", schema: "RentalHttpErrorResponse" },
+      "403": { description: "原订单访问被拒绝，或当前账号无权读取含资金明细的历史版本。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "当前订单范围内找不到订单或指定历史版本，原无存储场景也返回版本不存在。", schema: "RentalHttpErrorResponse" },
+      "500": { description: "原订单或指定历史版本读取失败。", schema: "RentalHttpErrorResponse" }
+    }
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/expire-pending", tag: "RentalCore", operationId: "expirePendingRentalCoreOrder",

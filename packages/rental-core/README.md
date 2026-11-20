@@ -171,15 +171,18 @@
 node -e "const { createRentalOpenApi } = require('@rental-os/rental-core/http-openapi'); process.stdout.write(JSON.stringify(createRentalOpenApi(), null, 2))"
 ```
 
-独立贡献包含 576 个已有操作及其 384 个 schema。原宽泛字段由 `RENTAL_HTTP_SCHEMA_GAPS` 列出，涉及的 274 项操作带 `x-schemaStatus=incomplete` 和 `x-schemaGaps`，继续按正式 DTO/响应投影补齐。明确路由缺口从 `RENTAL_HTTP_DOCUMENTATION_GAPS` 读取，当前宿主限制从 `RENTAL_HTTP_OPERATION_AVAILABILITY` 读取。
+独立贡献包含 576 个已有操作及其 387 个 schema。原宽泛字段由 `RENTAL_HTTP_SCHEMA_GAPS` 列出，涉及的 271 项操作带 `x-schemaStatus=incomplete` 和 `x-schemaGaps`，继续按正式 DTO/响应投影补齐。明确路由缺口从 `RENTAL_HTTP_DOCUMENTATION_GAPS` 读取，当前宿主限制从 `RENTAL_HTTP_OPERATION_AVAILABILITY` 读取。
 
 订单列表与详情复用 [订单响应 schema](src/http-openapi-rental-order-schemas.ts)。列表保留原数组或分页结果及九项查询字段，详情按原订单投影说明字段、历史省略与可空金额。配送电话按原脱敏结果公开，办理锁不释放令牌。规则、检查、会员及能力快照的内部版本结构继续从原关联对象读取；未展开的字段仍由缺口清单标明。
+
+订单凭证的渲染、历史目录和指定版本复用 [凭证响应 schema](src/http-openapi-rental-order-document-schemas.ts)，支持报价、交付、归还与结算四种原类型。渲染 GET 会复用同内容归档或追加不可变版本；历史读取保留原模板、标题、HTML、摘要和时间，含资金明细时复验当前财务权限。纯内存结果可省略版本 ID，快照正文保持原历史结构，字段说明和示例来自同源投影。
 
 | 路由 | 同源描述与当前限制 |
 | --- | --- |
 | `GET/POST /api/rental/v1/fulfillment-operators`、`PUT /api/rental/v1/fulfillment-operators/{id}` | 新建与兼容 id 更新使用原保存入口，省略状态沿原事务保留已存值；请求/响应示例来自同源 schema |
 | `GET/POST/PUT /api/rental/v1/item-groups` 及型号图片操作 | 型号、套装与图片字段沿原 DTO/公开投影；原图字节 200 与受权文件 302/Location 分别描述 |
 | `GET/POST /api/platform/customers/{customerId}/avatar` | 已描述单个 5 MiB 位图 multipart 上传、原保存投影及 PNG/JPEG/WebP 原始响应 |
+| `GET /api/rental/v1/orders/{id}/documents/{type}` 及其历史目录/指定版本 | 同内容归档复用、事实变化追加版本；指定版本核原订单范围及含资金历史的当前读取权限 |
 | `POST /api/staff/v1/uploads/{fileAssetId}/inspection-binding` | 已描述原检查目标和附件修订。独立贡献保留无 AI 宿主的 503，旧组合保留已装配权威的原成功投影 |
 | `GET /api/platform/tenant-bootstrap/category-options` | 原合同保留，独立 Rental 宿主未挂载，列入未挂原路径缺口 |
 
