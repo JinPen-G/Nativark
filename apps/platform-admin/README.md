@@ -24,15 +24,29 @@
 
 ## 本地使用
 
-在已经按根锁文件准备依赖的独立检出中，按[公共API说明](../platform-api/README.md)配置自己的库、迁移、初始化及API。再运行以下命令。
+从[公共 API 五步](../platform-api/README.md#默认零-core-的五步)取得已构建、迁移和初始化的独立 API，在所选源码根目录继续。
 
-```bash
-npm run build:platform-admin
-npm run dev:platform-admin
+| 步骤 | 操作 | 应看到什么 |
+| --- | --- | --- |
+| 1 | 按同一发行锁准备依赖和 API，保留本树公共 Client | Web 前置公共包可构建，登录请求指向该独立 API |
+| 2 | 提供公开 API 基址与开发代理，构建本宿主 | 产物为本宿主 dist，页面与公共运行时来自同一公共包 |
+| 3 | 启动 Web，使用初始化账号登录并完成首次改密 | SaaS 可创建租户，租户公共设置按角色开放，首页与业务目录显示真实空态 |
+
+`VITE_API_BASE_URL` 默认 `/api`，`API_PROXY_TARGET` 指向同一 API 服务。开发端口由当前进程 `PORT` 指定，默认 5176。Vite 沿[原环境读取器](../../config/environment.cjs)读取配置，仅向浏览器注入公开白名单。部署 Web 时提供同源 API 或受控反向代理。[实际配置](vite.config.ts)
+
+```sh
+npm run build -w @rental-os/platform-admin-app
+npm run dev -w @rental-os/platform-admin-app
 ```
+
+workspace 名来自本宿主 [package.json](package.json)，可直接用于完整检出和零 Core 源码发行。
 
 平台账号可登录公共后台；租户管理员或普通账号的可见设置由原权限决定，临时密码先完成改密。未开通 Core 的首页提示联系管理员，侧栏、面包屑/页名、铃铛和面板仍存在。休息入口向已验证租户会话开放，SaaS 账号隐藏该入口。通知默认为空，不提供无 Core 通用业务 Agent。休息组件沿原本地媒体与选择文件行为，默认录音没有随包分发，缺失保持真实失败。
 
 dev、build 和 lint 的前置脚本构建 `@rental-os/platform-core-host`，准备包管理的同版本协议运行时。对应公共 API 已装配十二个包管理接口。发行与候选存储使用宿主配置的绝对 `CORE_PACKAGE_STORAGE_ROOT`，默认零 Core 的实际版本、部署材料和候选规划按可用证据显示 `unavailable`。[服务端配置与前置](../platform-api/README.md)
 
 当前入口已有类型与认证请求围栏的离线证据，浏览器、真实 HTTP/数据库保存重读及完整公共管理功能仍待验。公共实现与边界从[后台模块导读](../../packages/platform-admin/README.md)读取。构建命令不是安装、迁移或启服务的授权。
+
+## 验证入口
+
+必要类型沿[现有内存类型入口](../../scripts/check-selected-prisma-types.cjs)，选择 `--mode platform --config apps/platform-admin/tsconfig.json`。公共应用的[同一注册和会话出口](../../packages/platform-admin/README.md)提供默认路由、权限与请求验证路线，运行包证据见[公共 API](../platform-api/README.md#验证入口)。浏览器首次改密、公共保存重读、窄屏与双语验收使用各自真实环境证据。

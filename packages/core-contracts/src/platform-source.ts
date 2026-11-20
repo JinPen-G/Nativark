@@ -105,7 +105,7 @@ function platformReadme(source: PlatformSourceIdentity): string {
   return `# Nativark 公共底座\n\n` +
     `这是不包含业务 Core 的底座源码，来源固定于 [${source.commit}](${source.repository}/tree/${source.commit})。\n\n` +
     `公共 API 和后台提供登录、租户/人员/角色、基础设置及 Core 授权入口。侧栏、面包屑、通知、休息和面板属于公共后台。\n\n` +
-    `## 本地运行\n\n使用 Node 22.12 或更新的 LTS 补丁与 npm，准备自己的独立 MySQL。复制 .env.example 为 .env，填写数据库、认证/加密密钥和首次初始化口令。\n\n` +
+    `## 本地运行\n\n使用 Node 22.12 或更新的 LTS 补丁与 npm，准备自己的独立 MySQL。初始化和API启动直接读取当前进程的 DATABASE_URL、AUTH_TOKEN_SECRET 和 SEED_PLATFORM_PASSWORD，配置模板见 .env.example。PowerShell使用 $env:变量名 = '自己的值'，Bash使用 export 变量名='自己的值'；配置、Client与迁移顺序见[公共API五步](apps/platform-api/README.md#默认零-core-的五步)。\n\n` +
     "```sh\nnpm ci\nnpm run db:generate\nnpm run build\nnpm run db:migrate:deploy\nnpm run db:initialize\nnpm run dev\n```\n\n" +
     `命令会使用公共 Prisma schema 和迁移；首次初始化建立平台管理账号，重复执行不重置已有账号。后台默认 5176，API 默认 3000；自己的环境、迁移与服务启动由使用者办理。\n\n` +
     `## 开发 Core\n\n从 [五步接入与 Agent 模板](packages/core-contracts/README.md#五步快速接入)开始。` +

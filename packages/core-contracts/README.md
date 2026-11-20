@@ -432,7 +432,7 @@ node packages/core-contracts/dist/github-release.js repository owner/repo --rele
 
 ## 源码路线与验证
 
-[公共出口](src/index.ts) → [清单](src/manifest.ts) / [版本](src/version.ts) / [组合预检](src/compatibility.ts) / [对象引用](src/reference.ts) / [OpenAPI贡献](src/openapi.ts) / [授权与生命周期](src/lifecycle.ts) / [服务端注册](src/server.ts) / [页面声明](src/admin.ts) / [升级预检](src/update.ts) / [指南生成](src/guide.ts)。[包检查命令](src/check.ts) → [目录/文件检查](src/package.ts) → 同一清单与 OpenAPI schema；[升级命令](src/plan-update.ts) → 升级输入schema与纯预检；[指南命令](src/generate-guide.ts)读取固定Git任务原文。[打包](src/pack.ts)/[安装准备命令](src/prepare-install.ts)及[GitHub命令](src/github-release.ts) → [Topic发现](src/github-discovery.ts)/[固定Release获取](src/github.ts) → [文件准备](src/install.ts) → [归档](src/archive.ts)。发现与发行共用[只读传输](src/github-http.ts)，仅走Node出口；这些入口不加载Core业务代码。
+[公共出口](src/index.ts) → [清单](src/manifest.ts) / [版本](src/version.ts) / [组合预检](src/compatibility.ts) / [对象引用](src/reference.ts) / [OpenAPI贡献](src/openapi.ts) / [授权与生命周期](src/lifecycle.ts) / [服务端注册](src/server.ts) / [页面声明](src/admin.ts) / [升级预检](src/update.ts) / [指南生成](src/guide.ts)。[包检查命令](src/check.ts) → [目录/文件检查](src/package.ts) → 同一清单与 OpenAPI schema；[升级命令](src/plan-update.ts) → 升级输入schema与纯预检；[指南命令](src/generate-guide.ts)读取固定Git提交的本公开手册。[打包](src/pack.ts)/[安装准备命令](src/prepare-install.ts)及[GitHub命令](src/github-release.ts) → [Topic发现](src/github-discovery.ts)/[固定Release获取](src/github.ts) → [文件准备](src/install.ts) → [归档](src/archive.ts)。发现与发行共用[只读传输](src/github-http.ts)，仅走Node出口；这些入口不加载Core业务代码。
 
 ```sh
 npm test -w @rental-os/core-contracts

@@ -1,6 +1,43 @@
 # 独立公共 API 宿主
 
-这个宿主只装配公共 SaaS 服务和公共 schema，不依赖 `apps/api`、`@rental-os/shared`、Rental 或工单源码。默认不安装任何 Core。当前提供公共初始化、登录 / 本人 / 会话 / 改密、租户与人员角色 / 组织管理、安全配置、账户与租户外观、完整订阅办理、字典与编号、邀请 / 寄件 / 客服邮件、健康和 OpenAPI；基础集成、官方日历来源及标准 Core 管理也已接公共模块。独立运行和 Rental 标准装配继续交付。[Core 接入手册](../../packages/core-contracts/README.md#五步快速接入)
+这个宿主只装配公共 SaaS 服务和公共 schema，不依赖 `apps/api`、`@rental-os/shared`、Rental 或工单源码。默认不安装任何 Core。当前提供公共初始化、登录 / 本人 / 会话 / 改密、租户与人员角色 / 组织管理、安全配置、账户与租户外观、完整订阅办理、字典与编号、邀请 / 寄件 / 客服邮件、健康和 OpenAPI，基础集成、官方日历来源及标准 Core 管理也已接公共模块。独立运行包和标准 Core 组合已有正式入口，真实运行验收分别记录。[Core 接入手册](../../packages/core-contracts/README.md#五步快速接入)
+
+## 默认零 Core 的五步
+
+在所选源码根目录执行以下步骤。workspace 命令同时适用于完整源码检出和零 Core 源码发行，实际依赖采用该发行的 npm v3 锁文件。开发环境使用 Node.js 22.12 或更新的受支持 LTS、Prisma 5.22.0 与独立 MySQL，独立 Linux 运行包的固定 Node 版本见下方打包说明。
+
+| 步骤 | 操作 | 应取得的结果 |
+| --- | --- | --- |
+| 1 | 按锁文件准备依赖，并向当前进程提供下表配置 | 独立数据库、认证密钥和首次初始化口令已确定 |
+| 2 | 从本宿主公共 schema 生成 Client | 本树 `apps/platform-api/generated/client`，包含同源声明与 schema |
+| 3 | 构建公共 API | 六个后端 workspace 的 dist 可用，公共 OpenAPI 可离线读取 |
+| 4 | 新公共库应用本宿主迁移，再初始化公共账号 | 原迁移账与物理结构就绪，`platform / admin` 首次账号已创建 |
+| 5 | 启动 API，再按公共 Web 说明登录 | 首次改密后可创建租户，租户成员按当前权限使用公共设置与空 Core 目录 |
+
+`DATABASE_URL`、`AUTH_TOKEN_SECRET`、`SEED_PLATFORM_PASSWORD` 由当前进程提供。PowerShell 使用 `$env:变量名 = '自己的值'`，Bash 使用 `export 变量名='自己的值'`。API 启动和初始化直接读取进程配置，配置文件的读取方式由各工具及宿主明确选择。[启动实现](src/main.ts) · [初始化实现](src/initialize.ts)
+
+| 配置 | 使用位置 |
+| --- | --- |
+| `DATABASE_URL` | Client 生成、迁移、初始化及运行使用同一独立 MySQL |
+| `AUTH_TOKEN_SECRET` | API 启动及公共认证，使用部署方自己的随机密钥 |
+| `SEED_PLATFORM_PASSWORD` | 初始化口令至少 8 位且包含字母和数字，已有账号保留原口令 |
+| `API_PORT` | API 默认 3000，允许 1～65535 的整数 |
+| `DATABASE_CONNECT_ON_START` | 显式设为 `true` 时在数据库模块初始化阶段连接，其他情况下实际请求建立连接 |
+
+`PLATFORM_DATA_SOURCE` 在启动时固定为 `mysql`。邮件、集成及包管理使用各自下文配置。以下命令由使用者在自己的独立环境办理。
+
+```sh
+npm ci
+npm run prisma:generate -w @rental-os/platform-api
+npm run build -w @rental-os/platform-api
+npm run prisma:migrate:deploy -w @rental-os/platform-api
+npm run initialize -w @rental-os/platform-api
+npm run start -w @rental-os/platform-api
+```
+
+构建成功后，可用 `node packages/platform-server/dist/platform-openapi.js` 读取同版本公共接口资料。Web 的代理、首次改密和默认空态见[公共后台步骤](../platform-admin/README.md#本地使用)。已有组合库切换沿下方迁移边界核定。
+
+## 实现与功能入口
 
 | 入口 | 职责 |
 | --- | --- |
@@ -25,18 +62,23 @@
 | [迁移](prisma/migrations/20261115000000_public_foundation/migration.sql) | 新公共数据库的基线；旧 Rental 组合库继续原迁移链 |
 | [公共实现导读](../../packages/platform-server/README.md) | HTTP / Guard → 认证与设置服务 → 仓储端口及直接消费者 |
 
-准备本项目锁定依赖及独立 MySQL 配置后，生成本宿主 Client，再独立构建。
-
-```sh
-npm run db:platform:generate
-npm run build:platform-api
-npm run lint:platform-api
-npm run api:document:platform
-```
+上述公共构建由本宿主的 [package scripts](package.json) 串联原公共依赖。需要类型核对时使用 `npm run lint -w @rental-os/platform-api`，它的 prelint 同样先构建公共依赖。
 
 Client 输出在本宿主 `generated/client`，运行产物从同一宿主目录读取。公共构建消费 `platform-contracts`、`platform-server` 和标准 `core-contracts` / `core-host` / `platform-core-host`。当前 schema 的40个模型均属平台，包含6个 Core 授权/绑定及原收据表、2个统一期限表、5个订阅办理表、2个基础集成表、2个官方日历来源表、2个文件/上传表、2个通知表、1个异步任务表、3个邀请/客服邮件表和1个官网演示申请表。公共数据版本为 `0.1.8`，十三份迁移摘要由数据计划固定；文件、通知与任务的原字段、唯一键、清理收据及外键保留。官网演示申请沿原SQL独立归属公共平台，HTTP装配由相应模块办理。命令是否可执行取决于当前环境许可。
 
-新公共库按 `npm run db:platform:migrate:deploy` 应用本链。**不能把本基线套在已有 Rental 组合库**；已有库切换须先按原迁移来源和数据所有权演练兼容迁移。
+新公共库按 `npm run prisma:migrate:deploy -w @rental-os/platform-api` 应用本链。**不能把本基线套在已有 Rental 组合库**，已有库切换须先按原迁移来源和数据所有权演练兼容迁移。
+
+## 固定发行与部署锁
+
+开发或部署人员从同一次底座源码发行取得归档及其 JSON 回执。公开[导出命令](../../packages/core-contracts/README.md#单独取出底座源码)给出实际 `version`、`source` 与归档 `sha256`，`platform.source.json` 保存固定文件集。组合所需资料按下面的唯一合同核定。
+
+| 材料 | 实际来源与用法 |
+| --- | --- |
+| 固定底座发行 JSON | [`CorePlatformReleaseSchema`](../../packages/core-contracts/src/update.ts)，`source` 和 `sha256`取同次归档，`versions.platform`取发行版本，`versions.contract`取正式 `CORE_CONTRACT_VERSION`，`versions.node`取目标运行版本，必需的 `versions.capabilities` 列实际能力版本。`data`取同版本[公共数据计划](src/platform-data.ts)的 `createPublicPlatformDataPlan().data` |
+| 宿主版本 JSON | 取上述发行的完整 `versions` 子对象，用 [`CoreHostVersionsSchema`](../../packages/core-contracts/src/compatibility.ts)解析，供 Core 检查和安装准备使用 |
+| 零 Core 部署锁 | 用 [`CoreDeploymentLockSchema`](../../packages/core-contracts/src/update.ts)解析 `lockVersion: 1`、上述 `platform` 与空 `cores`，选装数据能力集合保持空。所选 Core 的锁由对应宿主准备命令生成 |
+
+本工单样例的清单 `requires` 为空，宿主能力映射可为 `{}`。这里的发行数据声明与运行中的迁移收据分别由各自来源提供，实际可用性继续读取原账及物理结构。固定包、更新预检和失败恢复见[公开详细参考](../../packages/core-contracts/README.md#分别更新底座或一个-core)。
 
 ## 独立后端运行包
 
@@ -48,11 +90,11 @@ node scripts/package-platform-host.cjs --lock C:\release\core.deployment.lock.js
 
 输入和输出须为绝对路径，Client 必须属于执行脚本的本树；输出只写尚不存在的 `.tgz`。包内只含公共 API 所需运行材料，唯一启动入口为 `apps/platform-api/dist/main.js`，公共 Web 单独交付。`platform-host.context.json`绑定完整发行、源码/依赖锁、编译输入、唯一 Client 和实际产物；它是受控部署证据，不是外部签名。
 
-目标 Linux 环境解包后可执行 `docker build --target runtime -t platform-host .`。Dockerfile 按原锁安装依赖，并用 Prisma 5.22.0 在目标平台生成唯一公共 Client；`verify-runtime.cjs`只检查包内摘要与模块解析，不启动应用。当前打包不执行安装、下载、镜像构建、数据库迁移或服务启动，结果保持 `imageBuild=not-run`、`configuration=pending`、`deployment=pending`。
+当前 Dockerfile 固定 `node:24.13.0-bookworm-slim`，打包器要求发行 `versions.node=24.13.0`，合同版本与本次正式出口一致。目标 Linux 环境解包后可执行 `docker build --target runtime -t platform-host .`。Dockerfile 按原锁安装依赖，并用 Prisma 5.22.0 在目标平台生成唯一公共 Client，`verify-runtime.cjs`只检查包内摘要与模块解析，不启动应用。当前打包不执行安装、下载、镜像构建、数据库迁移或服务启动，结果保持 `imageBuild=not-run`、`configuration=pending`、`deployment=pending`。
 
 部署方提供原数据库、认证与必要集成配置，沿原公共迁移账及物理结构核验办理准备。包内 `apps/platform-api/prisma/core.deployment.lock.json`是候选锁，不能代替迁移收据；版本读取还需下文的固定源码归档登记与存储配置。
 
-构建后，在配置 `SEED_PLATFORM_PASSWORD` 的独立公共库执行 `npm run db:platform:initialize`，创建 `platform` / `admin` 的SaaS账号。初始口令至少8位且包含字母和数字，首次登录必须改密。已有公共库升级后，同一命令核验原管理员并补录当前公共权限目录，角色编辑可选择原订阅权限码。原角色授权与账号口令由既有管理入口维护。主体核验失败时，目录补录随同一事务回滚。命令会访问数据库，口令不进入控制台和审计。
+构建后，在配置 `SEED_PLATFORM_PASSWORD` 的独立公共库执行 `npm run initialize -w @rental-os/platform-api`，创建 `platform` / `admin` 的SaaS账号。初始口令至少8位且包含字母和数字，首次登录必须改密。已有公共库升级后，同一命令核验原管理员并补录当前公共权限目录，角色编辑可选择原订阅权限码。原角色授权与账号口令由既有管理入口维护。主体核验失败时，目录补录随同一事务回滚。命令会访问数据库，口令不进入控制台和审计。
 
 SaaS管理员通过 `POST /api/platform/tenants` 创建公共租户与首个管理员，创建响应返回一次临时口令。租户管理员改密后使用 `/api/platform/tenant`、`users`、`roles`、`permission-tree`；本人资料使用 `/api/platform/self-profile`，外观仍用原正式路径。详细字段、权限、副作用和错误从同版本 OpenAPI读取。
 
@@ -92,3 +134,7 @@ Rental 提供自己的 schema、公共关系与实际数据计划，宿主按同
 使用 `/api/platform/users/invitations` 邀请租户基础成员，显式传入 `workspaceAccesses: []`、普通租户角色和有效组织。接受邀请时，账号、角色、审计及一次性凭证在原事务内提交；Core 使用权另由标准 Core 管理分配。原 Rental 邀请继续其经营空间和角色校验。寄件与客服邮件使用 `/api/platform/dispatch` 和 `/api/platform/support/emails`；公开邀请只经 POST `inspect` / `accept` 传原凭证，先执行原限流。字段、方法、权限、读取 / 写入性质由同版本 OpenAPI 提供。[13 个操作与三步接入](../../packages/platform-server/src/modules/messaging/README.md#http请求与接口资料)
 
 实际发信需要已核定的租户邮件集成和部署方 `ADMIN_PUBLIC_URL`，客服同步显式读取实际 IMAP。没有真实配置时沿原错误处理；链接页面、真实邮件 / 数据库及完整独立宿主验收分别验证。
+
+## 验证入口
+
+在完整源码检出中，所选源码类型使用[内存类型命令](../../scripts/check-selected-prisma-types.cjs)的 `--mode platform` 与本宿主 `--config apps/platform-api/tsconfig.json`。公共合同使用 `npm test -w @rental-os/core-contracts`，零 Core 与单工单运行材料沿[现有运行包用例](../../tests/platform-host-package-cases.cjs)和其[原 runner](../../tests/rental-host-package.test.cjs)读取固定证据。源码发行把未包含的检查资料链接到同一来源提交。类型、内存根装配、真实监听 / 数据库及冷安装分别记录。
