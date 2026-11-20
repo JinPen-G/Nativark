@@ -33,10 +33,15 @@ try {
     for (const source of result.coverage.partial) console.log(`${source.source} [partial] 尚有未读取或未解析范围`);
     for (const capability of result.capabilities) {
       console.log(`\n${capability.name} (${capability.kind})\n${capability.id}`);
+      console.log(`归属 ${capability.owner}，版本 ${capability.version ?? "待核对"}`);
       if (capability.description) console.log(capability.description);
       if (capability.entry?.kind === "import") console.log(`导入 ${capability.entry.module} 的 ${capability.entry.symbol}${capability.entry.typeOnly ? "（类型）" : ""}`);
       if (capability.entry?.kind === "http") console.log(`${capability.entry.method} ${capability.entry.path}`);
       if (capability.entry?.kind === "page") console.log(capability.entry.path);
+      if (capability.details?.declarationStatus === "unresolved") console.log("转导出来源尚未解析，须核对原模块与当前源码。");
+      if (Array.isArray(capability.details?.unresolvedMetadata) && capability.details.unresolvedMetadata.length)
+        console.log(`待核对字段 ${capability.details.unresolvedMetadata.join(", ")}`);
+      if (capability.entry?.kind === "http") console.log(`接口字段资料 ${capability.details?.apiFieldsStatus ?? "not-indexed"}`);
       for (const source of capability.sources) console.log(`${source.path}${source.line ? `:${source.line}` : ""}`);
     }
     if (result.nextOffset !== null) console.log(`\n下一页使用 --offset ${result.nextOffset}`);

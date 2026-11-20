@@ -71,11 +71,14 @@ npm run build -w @rental-os/core-contracts
 node packages/core-contracts/dist/capabilities.js --query SaveButton --json
 node packages/core-contracts/dist/capabilities.js --query 工单 --kind page --json
 node packages/core-contracts/dist/capabilities.js --id "api:GET:/api/auth/me" --json
+node packages/core-contracts/dist/capabilities.js --owner example-tickets --json
 ```
 
 每项结果包含名称、类型、归属、版本、源码路径和行号、正式导入或 HTTP/页面入口，以及可用的文档链接和原声明元数据。公共导出还给出直接导入计数和前5个源码位置，可以从已有消费者了解用法。查询默认返回20项，使用 `--limit`（最多100项）和 `--offset` 分页，`nextOffset` 给出下一页位置。`--owner` 按输出中的准确归属筛选，`--kind` 支持 `module`、`export`、`ui`、`page`、`api`、`extension`。`--repo` 可显式指定本次源码根目录。
 
-索引从 workspace 包出口、TypeScript 导出与源码说明、Controller 路由、后台 `APP_ROUTES`、Core 页面贡献和 UIArc 来源清单读取。workspace 支持 `packages/*` 等一层通配目录，以及底座源码发行中的 `packages/core-contracts` 等显式目录。直接导入统计读取已发现 workspace 的 `src`。源码新增或迁移后再次查询即可反映变化。新增 Core 使用自己的正式包出口、清单、页面和 API 贡献登记能力，宿主可通过 `@rental-os/core-contracts/development` 的 `describeCoreDevelopmentCapabilities` 取得同源目录，查询合同由该出口提供。[能力目录实现](src/development.ts)
+索引从 workspace 包出口、TypeScript 导出与源码说明、Controller 路由、后台 `APP_ROUTES`、Core 清单与页面贡献和 UIArc 来源清单读取。workspace 支持 `packages/*` 等一层通配目录，以及底座源码发行中的 `packages/core-contracts` 等显式目录。正式出口按实际条件和构建目录映射到源码，兼容转接参与符号解析，直接导入统计读取已发现 workspace 的 `src`。局部别名沿导入文件所属的原 TypeScript 配置解析。Controller 与旧后台路由只从本次所选 workspace 取得，零 Core 底座和所选 Core 的来源分别保留。源码新增或迁移后再次查询即可反映变化。新增 Core 使用自己的正式包出口、清单、页面和 API 贡献登记能力，宿主可通过 `@rental-os/core-contracts/development` 的 `describeCoreDevelopmentCapabilities` 取得同源目录，查询合同由该出口提供。[能力目录实现](src/development.ts)
+
+Core 条目读取正式清单声明中的静态标识、版本、范围和依赖，页面与 HTTP 条目附同一清单出处及包版本。构建时注入的来源、动态权限和未解析字段保留在 `unresolvedMetadata`。动态 HTTP 合同给出请求、参数、查询和响应表达式及其源码声明，`apiFieldsStatus=source-reference` 表示需沿这些原声明核对完整字段；未建立字段资料的接口为 `not-indexed`。转导出缺少本仓目标时，保留正式导入、原模块和本地转导出位置，`declarationStatus=unresolved` 与对应 `issues` 同时出现，外部组件及 CSS 模块的值仍需核对原依赖。
 
 输出固定 `audience=development`，`source.snapshot=working-tree` 和当前 Git 修订说明本次读取位置。Git 检出目录同时给出 `source.workingTreeChanged`，表示扫描时是否有未提交修改；当前修订不是这些修改的固定版本。`coverage` 列出实际扫描的来源，并从 Git 跟踪的 workspace 与独立客户端包清单标明未检出的 `notPresent`；已检出但不属于当前扫描范围的独立包标为 `partial`。静态解析缺口通过 `issues` 表达。源码声明、宿主登记和运行验证分别核定，API 的 `registration` 标记源码或明确宿主登记，UIArc 条目标记为保留源码。用途/约束优先读取准确的源码注释和模块 README，缺少说明的条目保留准确入口供后续整改。
 

@@ -15,21 +15,22 @@ import { RepositorySource, UNRESOLVED, isRepositorySourcePath, nodeDocumentation
 interface PublicEntry { owner: string; version: string; module: string; file: string; visibility: "public" | "host"; ui?: boolean }
 interface PackageInfo { directory: string; name: string; version: string; entries: PublicEntry[] }
 
-function exportTarget(value: unknown): string | undefined {
-  if (typeof value === "string") return value;
+function exportTargets(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap(exportTargets);
   if (value && typeof value === "object") {
     const conditions = value as Record<string, unknown>;
-    for (const key of ["source", "types", "import", "require", "default"]) {
-      const target = exportTarget(conditions[key]);
-      if (target) return target;
-    }
+    return ["source", "types", "import", "require", "default"].flatMap(key => exportTargets(conditions[key]));
   }
+  return [];
 }
 
 function packageSource(root: string, directory: string, target: string): string | undefined {
   const absolute = resolve(root, directory, target);
   if (!isRepositorySourcePath(root, absolute)) return undefined;
-  if (/\.(?:tsx?|mts|cts)$/u.test(target) && !/\.d\.ts$/u.test(target) && lstatSync(absolute, { throwIfNoEntry: false })?.isFile()) return absolute;
+  if (/\.(?:tsx?|mts|cts)$/u.test(target) && !/\.d\.[mc]?ts$/u.test(target)
+    && lstatSync(absolute, { throwIfNoEntry: false })?.isFile()) return absolute;
+  let generated = false;
   const configFiles = readdirSync(resolve(root, directory)).filter(file => /^tsconfig(?:\.[^.]+)*\.json$/u.test(file));
   for (const configFile of configFiles) {
     const config = readRepositoryJson(root, `${directory}/${configFile}`);
@@ -38,12 +39,14 @@ function packageSource(root: string, directory: string, target: string): string 
     const output = resolve(root, directory, options.outDir);
     const suffix = repositoryPath(output, absolute);
     if (suffix.startsWith("..")) continue;
+    generated = true;
     const stem = suffix.replace(/(?:\.d)?\.(?:js|ts|mjs|mts|cjs|cts)$/u, "");
     for (const extension of [".ts", ".tsx", ".mts", ".cts"]) {
       const source = resolve(root, directory, options.rootDir, stem + extension);
       if (isRepositorySourcePath(root, source) && lstatSync(source, { throwIfNoEntry: false })?.isFile()) return source;
     }
   }
+  if (!generated && /\.[mc]?jsx?$/u.test(target) && lstatSync(absolute, { throwIfNoEntry: false })?.isFile()) return absolute;
 }
 
 function sourceDocuments(root: string, directory: string): DevelopmentSourceReference[] {
@@ -82,6 +85,7 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
   const rootPackage = readRepositoryJson(root, "package.json");
   const capabilities: DevelopmentCapability[] = [], issues: DevelopmentCapabilityIndex["issues"] = [], coverage: DevelopmentCapabilityIndex["coverage"] = [];
   const packages: PackageInfo[] = [];
+  const paths: Record<string, string[]> = {};
   const hasGit = Boolean(lstatSync(join(root, ".git"), { throwIfNoEntry: false }));
   const addIssue = (code: string, path: string, message: string) => issues.push({ code, path, message });
   const workspaces = Array.isArray(rootPackage.workspaces) ? rootPackage.workspaces : [];
@@ -109,21 +113,24 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
         continue;
       }
       const info: PackageInfo = { directory: packageDirectory, name: manifest.name, version: manifest.version, entries: [] };
-      const exports = typeof manifest.exports === "string" ? { ".": manifest.exports }
-        : manifest.exports && typeof manifest.exports === "object" ? manifest.exports as Record<string, unknown>
+      const exports = typeof manifest.exports === "string" || Array.isArray(manifest.exports) ? { ".": manifest.exports }
+        : manifest.exports && typeof manifest.exports === "object"
+          ? Object.keys(manifest.exports).some(key => key.startsWith(".")) ? manifest.exports as Record<string, unknown> : { ".": manifest.exports }
         : manifest.main || manifest.types ? { ".": { types: manifest.types, default: manifest.main } } : {};
       for (const [subpath, conditions] of Object.entries(exports)) {
-        const target = exportTarget(conditions);
+        const targets = exportTargets(conditions);
+        const module = info.name + (subpath === "." ? "" : subpath.slice(1));
+        const file = targets.map(target => packageSource(root, packageDirectory, target)).find(Boolean);
+        if (file) paths[module] = [file];
         // 样式和兼容源码通配出口不作为单个 TypeScript 模块解析。
         // 原源码转接由同一正式UI出口覆盖，不将兼容别名登记为另一项能力。
-        if (subpath.startsWith("./source/") || subpath.includes("*") || target?.endsWith(".css")) continue;
-        const file = target && packageSource(root, packageDirectory, target);
+        if (subpath.startsWith("./source/") || subpath.includes("*") || targets.length && targets.every(target => target.endsWith(".css"))) continue;
         if (!file) {
           addIssue("export_source", `${packageDirectory}/package.json`, `未找到 ${subpath} 对应的当前源码入口`);
           continue;
         }
         info.entries.push({ owner: packageDirectory, version: info.version,
-          module: info.name + (subpath === "." ? "" : subpath.slice(1)), file, visibility: "public",
+          module, file, visibility: "public",
           ui: info.name === "@rental-os/platform-admin" && subpath === "./ui" });
       }
       packages.push(info);
@@ -159,27 +166,64 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
   const adminPackage = packages.find(info => info.directory === "apps/admin");
   if (adminPackage && lstatSync(uiFile, { throwIfNoEntry: false })?.isFile()) entries.push({ owner: "apps/admin", version: adminPackage.version,
     module: "@/components/ui", file: uiFile, visibility: "host", ui: true });
-  const controllers = repositoryFiles(root, "apps/api/src", file => file.endsWith(".controller.ts"));
-  const packageControllers = packages.filter(info => info.directory.startsWith("packages/")).flatMap(info =>
+  const controllers = packages.flatMap(info =>
     repositoryFiles(root, `${info.directory}/src`, file => file.endsWith(".controller.ts")
       || /[/\\](?:nest|http)\.ts$/u.test(file) || file.endsWith("-http.ts")));
-  controllers.push(...packageControllers);
   const apiModules = resolve(root, "apps/api/src/modules");
-  const moduleDirectories = isRepositorySourcePath(root, apiModules) && lstatSync(apiModules, { throwIfNoEntry: false })?.isDirectory()
+  const moduleDirectories = packages.some(info => info.directory === "apps/api") && isRepositorySourcePath(root, apiModules) && lstatSync(apiModules, { throwIfNoEntry: false })?.isDirectory()
     ? readdirSync(apiModules, { withFileTypes: true }).filter(entry => entry.isDirectory() && !entry.isSymbolicLink()).map(entry => `apps/api/src/modules/${entry.name}`) : [];
   const navigation = resolve(root, "apps/admin/src/app/navigation.tsx");
   const openapi = resolve(root, "apps/api/src/contracts/openapi-document.ts");
   const assembly = resolve(root, "apps/api/src/app.module.ts");
-  const extraSources = [navigation, openapi, assembly].filter(file => isRepositorySourcePath(root, file)
+  const extraSources = [ ...(adminPackage ? [navigation] : []),
+    ...(packages.some(info => info.directory === "apps/api") ? [openapi, assembly] : []) ].filter(file => isRepositorySourcePath(root, file)
     && lstatSync(file, { throwIfNoEntry: false })?.isFile());
-  const paths = Object.fromEntries(entries.map(entry => [entry.module, [entry.file]]));
-  paths["@/*"] = [resolve(root, "apps/admin/src/*")];
+  for (const entry of entries) paths[entry.module] = [entry.file];
   paths["@/registry/*"] = [resolve(root, "packages/ui-arc/vendor/registry/*")];
-  // UIArc 的共享动效别名须定位保留源，避免落入后台的通配路径。
   paths["@/lib/motion-tokens"] = [resolve(root, "packages/ui-arc/vendor/lib/motion-tokens.ts")];
   const consumers = packages.flatMap(info =>
     repositoryFiles(root, `${info.directory}/src`, file => /\.tsx?$/u.test(file) && !file.endsWith(".d.ts")));
   const source = new RepositorySource(root, [...new Set([...entries.map(entry => entry.file), ...controllers, ...extraSources, ...consumers])], paths);
+  for (const diagnostic of source.program.getSyntacticDiagnostics()) {
+    if (diagnostic.file) addIssue("source_syntax", repositoryPath(root, diagnostic.file.fileName), ts.flattenDiagnosticMessageText(diagnostic.messageText, " "));
+  }
+  const corePackages = new Map<string, { id: string; version: string; directory: string; reference: DevelopmentSourceReference }>();
+  for (const file of source.program.getSourceFiles()) {
+    const packageInfo = packages.find(info => repositoryPath(root, file.fileName).startsWith(info.directory + "/"));
+    if (!packageInfo || file.isDeclarationFile) continue;
+    const visit = (node: ts.Node) => {
+      if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "parse"
+        && node.arguments.length === 1) {
+        const symbol = source.checker.getSymbolAtLocation(node.expression.expression);
+        const schema = symbol && source.target(symbol);
+        if (schema?.name === "CoreManifestSchema" && schema.declarations?.some(declaration =>
+          repositoryPath(root, declaration.getSourceFile().fileName) === "packages/core-contracts/src/manifest.ts")
+          && ts.isObjectLiteralExpression(unwrap(node.arguments[0])) && objectProperty(node.arguments[0], "manifestVersion")) {
+          const definition = node.arguments[0], id = source.value(objectProperty(definition, "id")), version = source.value(objectProperty(definition, "version"));
+          if (typeof id !== "string" || typeof version !== "string") {
+            addIssue("core_metadata", repositoryPath(root, file.fileName), "Core 清单标识或版本无法静态解析");
+          } else if (corePackages.has(packageInfo.directory)) {
+            addIssue("core_metadata", repositoryPath(root, file.fileName), "同一包有多个 Core 清单声明，需要核对归属");
+          } else {
+            const reference = sourceReference(definition, root), fields = source.value(definition);
+            const unresolved = source.unresolvedProperties(definition);
+            corePackages.set(packageInfo.directory, { id, version, directory: packageInfo.directory, reference });
+            if (version !== packageInfo.version) addIssue("core_version", reference.path, "Core 清单与包版本不一致");
+            if (unresolved.length) addIssue("core_metadata", reference.path, `Core 清单仍需构建输入或动态解析 ${unresolved.join(", ")}`);
+            coverage.push({ source: reference.path, count: 1, state: unresolved.length || version !== packageInfo.version ? "partial" : "indexed" });
+            const name = source.value(objectProperty(definition, "name")), description = source.value(objectProperty(definition, "description"));
+            capabilities.push({ id: `core:${id}`, name: typeof name === "string" ? name : id, kind: "module", owner: id, version,
+              description: typeof description === "string" ? description : undefined, sources: [reference], documentation: sourceDocuments(root, packageInfo.directory),
+              details: { registration: "source", package: packageInfo.directory, packageVersion: packageInfo.version,
+                ...(fields !== UNRESOLVED && fields && typeof fields === "object" && !Array.isArray(fields) ? { manifest: fields } : {}),
+                unresolvedMetadata: unresolved } });
+          }
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(file);
+  }
   const importConsumers = new Map<ts.Symbol, DevelopmentSourceReference[]>();
   for (const file of source.program.getSourceFiles()) {
     if (file.isDeclarationFile || repositoryPath(root, file.fileName).includes("/vendor/")) continue;
@@ -202,9 +246,12 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
     const before = capabilities.length;
     for (const symbol of source.exports(entry.file)) {
       const target = source.target(symbol);
-      const declaration = target.valueDeclaration ?? target.declarations?.[0];
-      if (!declaration || repositoryPath(root, declaration.getSourceFile().fileName).startsWith("..")) {
-        addIssue("export_symbol", repositoryPath(root, entry.file), `未解析导出 ${symbol.name} 的本仓声明`);
+      const resolvedDeclaration = target.valueDeclaration ?? target.declarations?.[0];
+      const reexport = symbol.declarations?.find(ts.isExportSpecifier);
+      const origin = reexport && ts.isExportDeclaration(reexport.parent.parent) ? reexport.parent.parent.moduleSpecifier : undefined;
+      const declaration = resolvedDeclaration ?? reexport;
+      if (!resolvedDeclaration) addIssue("export_symbol", repositoryPath(root, entry.file), `未解析导出 ${symbol.name} 的本仓声明`);
+      if (!declaration || !isRepositorySourcePath(root, declaration.getSourceFile().fileName)) {
         continue;
       }
       const documentation = ts.displayPartsToString(target.getDocumentationComment(source.checker)).trim();
@@ -217,10 +264,14 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
       }
       capabilities.push({ id: `export:${entry.module}:${symbol.name}`, name: symbol.name, kind: entry.ui ? "ui" : "export",
         owner: entry.owner, version: entry.version, description: documentation || undefined,
-        sources: [{ ...sourceReference(declaration, root), symbol: target.name }],
+        sources: [{ ...sourceReference(declaration, root), symbol: resolvedDeclaration ? target.name : symbol.name }],
         documentation: [...documents, ...sourceDoc.filter(doc => !documents.some(item => item.path === doc.path))],
-        entry: { kind: "import", module: entry.module, symbol: symbol.name, typeOnly: !(target.flags & ts.SymbolFlags.Value), visibility: entry.visibility },
-        details: { directImportCount: callers.length, directImports: callers.slice(0, 5) } });
+        entry: { kind: "import", module: entry.module, symbol: symbol.name,
+          typeOnly: reexport?.isTypeOnly || Boolean(reexport && ts.isExportDeclaration(reexport.parent.parent) && reexport.parent.parent.isTypeOnly)
+            || Boolean(resolvedDeclaration && !(target.flags & ts.SymbolFlags.Value)), visibility: entry.visibility },
+        details: { directImportCount: resolvedDeclaration ? callers.length : 0, directImports: resolvedDeclaration ? callers.slice(0, 5) : [],
+          declarationStatus: resolvedDeclaration ? "resolved-source" : "unresolved",
+          ...(origin && ts.isStringLiteralLike(origin) ? { reexport: { module: origin.text, symbol: reexport?.propertyName?.text ?? reexport?.name.text ?? symbol.name } } : {}) } });
     }
     const file = repositoryPath(root, entry.file);
     coverage.push({ source: file, count: capabilities.length - before, state: issues.some(issue => issue.path === file) ? "partial" : "indexed" });
@@ -233,6 +284,7 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
         const pages = objectProperty(node.expression, "pages");
         const coreId = source.value(objectProperty(node.expression, "coreId"));
         if (pages && ts.isArrayLiteralExpression(unwrap(pages)) && typeof coreId === "string") {
+          const contributionVersion = source.value(objectProperty(node.expression, "implementationVersion"));
           const pageNodes = unwrap(pages) as ts.ArrayLiteralExpression;
           for (const page of pageNodes.elements) {
             const id = source.value(objectProperty(page, "id"));
@@ -243,13 +295,28 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
               addIssue("page_metadata", repositoryPath(root, entry.file), "Core 页面需要可解析的标识、路径和名称");
               continue;
             }
+            const core = corePackages.get(entry.owner), unresolved = source.unresolvedProperties(page, ["component"]);
+            const component = objectProperty(page, "component"), componentSymbol = component && source.checker.getSymbolAtLocation(unwrap(component));
+            const componentDeclaration = componentSymbol && source.target(componentSymbol).valueDeclaration;
+            if (core && (core.id !== coreId || core.version !== entry.version)) addIssue("core_version", repositoryPath(root, entry.file), "页面贡献与 Core 清单或包版本不一致");
+            if (contributionVersion !== entry.version) {
+              unresolved.push("implementationVersion");
+              addIssue("core_version", repositoryPath(root, entry.file), "页面实现版本无法解析或与包版本不一致");
+            }
+            if (unresolved.length) addIssue("page_metadata", repositoryPath(root, entry.file), `页面 ${id} 尚有动态字段 ${unresolved.join(", ")}`);
+            const purposeExpression = objectProperty(page, "purpose"), purpose = source.value(purposeExpression);
             capabilities.push({ id: `page:${coreId}:${id}`, name: corePageText(label.data, "zh-CN"), kind: "page", owner: coreId, version: entry.version,
-              sources: [{ ...sourceReference(page, root), symbol: id }], documentation: sourceDocuments(root, entry.owner),
+              sources: [{ ...sourceReference(page, root), symbol: id },
+                ...(componentDeclaration && isRepositorySourcePath(root, componentDeclaration.getSourceFile().fileName)
+                  ? [{ ...sourceReference(componentDeclaration, root), symbol: componentSymbol?.name }] : []),
+                ...(core ? [core.reference] : [])], documentation: sourceDocuments(root, entry.owner),
               entry: { kind: "page", path: `/cores/${coreId}${path === "/" ? "" : path}` },
-              details: { registration: "source", title: label.data, purpose: source.value(objectProperty(page, "purpose")) === "configuration" ? "configuration" : "business",
-                unresolvedMetadata: source.unresolvedProperties(page, ["component"]) } });
+              details: { registration: "source", title: label.data,
+                ...(purpose === "configuration" || purpose === "business" ? { purpose } : !purposeExpression ? { purpose: "business" } : {}),
+                ...(typeof contributionVersion === "string" ? { implementationVersion: contributionVersion } : {}),
+                package: entry.owner, unresolvedMetadata: unresolved } });
           }
-        }
+        } else if (pages) addIssue("page_metadata", repositoryPath(root, entry.file), "Core 页面列表或归属无法静态解析");
       }
       ts.forEachChild(node, describe);
     };
@@ -324,6 +391,24 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
               const suffix = decorator.expression.arguments.length ? source.value(decorator.expression.arguments[0]) : "";
               const pathArgument = decorator.expression.arguments[0];
               const httpMetadata = pathArgument && ts.isPropertyAccessExpression(pathArgument) ? source.value(pathArgument.expression) : UNRESOLVED;
+              const httpSymbol = pathArgument && ts.isPropertyAccessExpression(pathArgument)
+                ? source.checker.getSymbolAtLocation(pathArgument.expression) : undefined;
+              const httpDeclaration = httpSymbol && source.target(httpSymbol).valueDeclaration;
+              const httpDefinition = httpDeclaration && ts.isPropertyAssignment(httpDeclaration) ? httpDeclaration.initializer : undefined;
+              const unresolved = httpDefinition ? source.unresolvedProperties(httpDefinition) : [];
+              const schemas = Object.fromEntries(["params", "query", "body", "response"].flatMap(name => {
+                const expression = httpDefinition && objectProperty(httpDefinition, name);
+                if (!expression) return [];
+                const symbol = source.checker.getSymbolAtLocation(expression);
+                const declaration = symbol && source.target(symbol).valueDeclaration;
+                return [[name, { expression: expression.getText(), source: sourceReference(expression, root),
+                  ...(declaration && isRepositorySourcePath(root, declaration.getSourceFile().fileName) ? { declaration: sourceReference(declaration, root) } : {}) }]];
+              }));
+              const httpDetails: DevelopmentCapability["details"] = httpDefinition
+                ? { apiFieldsStatus: "source-reference", httpContract: { source: sourceReference(httpDefinition, root), schemas,
+                  ...(httpMetadata !== UNRESOLVED && httpMetadata && typeof httpMetadata === "object" && !Array.isArray(httpMetadata) ? { metadata: httpMetadata } : {}) },
+                  unresolvedMetadata: unresolved }
+                : { apiFieldsStatus: "not-indexed" };
               const httpSummary = httpMetadata !== UNRESOLVED && httpMetadata && typeof httpMetadata === "object"
                 && !Array.isArray(httpMetadata) && typeof httpMetadata.summary === "string" ? httpMetadata.summary : undefined;
               const suffixes = typeof suffix === "string" ? [suffix] : Array.isArray(suffix) && suffix.every(item => typeof item === "string") ? suffix as string[] : [];
@@ -331,28 +416,49 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
               for (const prefix of prefixes) for (const suffix of suffixes) {
                 const path = "/" + ["api", prefix, suffix].filter(Boolean).join("/").replace(/\/+/gu, "/").replace(/:([A-Za-z0-9_]+)/gu, "{$1}");
                 const api = apiDocumentation.get(`${method} ${path}`);
-                const packageInfo = packages.find(info => repositoryPath(root, file).startsWith(info.directory + "/") && info.directory.startsWith("packages/"));
-                const owner = packageInfo?.directory ?? repositoryPath(root, dirname(file));
+                const packageInfo = packages.find(info => repositoryPath(root, file).startsWith(info.directory + "/"));
+                const core = packageInfo && corePackages.get(packageInfo.directory);
+                const owner = core?.id ?? packageInfo?.directory ?? repositoryPath(root, dirname(file));
                 const id = `api:${method}:${path}`;
                 const declaration = { ...sourceReference(member, root), symbol: member.name?.getText() };
                 const existing = apiCapabilities.get(id);
                 const assemblyReference = registeredControllers.get(node.getSourceFile().fileName + ":" + node.getStart());
+                const references = [declaration, ...(assemblyReference ? [assemblyReference] : []),
+                  ...(httpDefinition ? [sourceReference(httpDefinition, root)] : []), ...(core ? [core.reference] : [])];
+                if (unresolved.length) addIssue("api_metadata", repositoryPath(root, file), `接口 ${method} ${path} 尚有动态合同字段 ${unresolved.join(", ")}`);
                 if (existing) {
-                  existing.sources.push(declaration);
-                  existing.details = { ...existing.details, multipleDeclarations: true };
+                  existing.sources.push(...references);
+                  existing.details = { ...existing.details, multipleDeclarations: true,
+                    declarationOwners: [...(Array.isArray(existing.details?.declarationOwners) ? existing.details.declarationOwners : []),
+                      { owner, ...(packageInfo ? { package: packageInfo.directory, version: packageInfo.version } : {}) }] };
+                  if (core) {
+                    if (existing.details.coreId && existing.details.coreId !== core.id) addIssue("api_owner", repositoryPath(root, file), `接口 ${method} ${path} 有不同 Core 声明`);
+                    else {
+                      existing.owner = core.id;
+                      existing.version = core.version;
+                      existing.details.coreId = core.id;
+                      if (httpDefinition) Object.assign(existing.details, httpDetails);
+                      for (const document of sourceDocuments(root, core.directory)) {
+                        if (!existing.documentation.some(item => item.path === document.path)) existing.documentation.push(document);
+                      }
+                    }
+                  }
                   if (assemblyReference) {
-                    existing.sources.push(assemblyReference);
                     existing.details.registration = "declared-in-host";
                   }
                   continue;
                 }
                 const capability: DevelopmentCapability = { id, name: api?.summary || httpSummary || `${method} ${path}`, kind: "api", owner,
-                  description: nodeDocumentation(member), sources: [declaration, ...(assemblyReference ? [assemblyReference] : [])],
+                  version: core?.version ?? packageInfo?.version,
+                  description: nodeDocumentation(member), sources: references,
                   documentation: packageInfo ? sourceDocuments(root, packageInfo.directory)
                     : [...sourceDocuments(root, owner), { path: "apps/api/src/contracts/openapi-document.ts", ...(api?.reference ?? {}) }],
                   entry: { kind: "http", method: method as "GET", path },
                   details: { controller: node.name?.text ?? "Controller", controllerMethod: member.name?.getText() ?? "",
                     registration: assemblyReference ? "declared-in-host" : "source",
+                    ...(core ? { coreId: core.id } : {}),
+                    declarationOwners: [{ owner, ...(packageInfo ? { package: packageInfo.directory, version: packageInfo.version } : {}) }],
+                    ...httpDetails,
                     ...(api?.operationId ? { operationId: api.operationId } : {}) } };
                 capabilities.push(capability);
                 apiCapabilities.set(id, capability);
