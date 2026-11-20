@@ -16,8 +16,9 @@ const hooks = ['onModuleInit', 'onApplicationBootstrap', 'beforeApplicationShutd
 module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, aiFiles, enabled,
   aiResult, disabled, platformClient, platformArchive, multi, multiResult, ticketsPackage }) {
   const isMulti = Boolean(multi), selected = isMulti ? multi : enabled,
-    context = isMulti ? multiResult : aiResult, selectedModelCount = isMulti ? 161 : 247,
-    output = isMulti ? 'dist' : 'dist-ai';
+    isAi = selected.lock.dataCapabilities?.some(capability => capability.id === 'ai-native') === true,
+    context = isMulti ? multiResult : aiResult, selectedModelCount = isAi ? 247 : 161,
+    output = isAi ? 'dist-ai' : 'dist';
   assert.equal(build.runtimeAliases.size, 0, 'root integration cannot alias production modules');
   const archive = memory.load(build.exported('@rental-os/core-contracts/archive', true));
   const releaseFiles = archive.readCoreArchive(context.bytes, context.sha256).files;
@@ -29,7 +30,8 @@ module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, a
     memory.put(absolute, bytes);
   }
   for (const [directory, files] of [['packages/rental-core', rentalFiles],
-    ...(isMulti ? [['packages/example-tickets-core', ticketsPackage.files]] : [['packages/ai-native-data', aiFiles]])])
+    ...(isMulti ? [['packages/example-tickets-core', ticketsPackage.files]] : []),
+    ...(isAi ? [['packages/ai-native-data', aiFiles]] : [])])
     for (const [file, bytes] of files)
       assert.deepEqual(installed.get(slash(path.join(root, directory, file))), bytes, 'installed archive ' + file);
   assert.deepEqual(JSON.parse(context.files.get('apps/rental-api/prisma-deployment/core.deployment.lock.json')), selected.lock);
@@ -205,11 +207,20 @@ module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, a
         '$executeRaw', '$executeRawUnsafe', '$runCommandRaw', '_executeRequest'])
         if (typeof Client.prototype[method] === 'function') replace(Client.prototype, method, forbid('Prisma ' + method));
 
-    const hostModule = memory.load(path.join(root, isMulti ? 'apps/example-multi-core-api/dist/app.module.js' : 'apps/rental-api/dist-ai/ai-app.module.js'));
+    const hostModule = memory.load(path.join(root, isMulti
+      ? `apps/example-multi-core-api/${output}/${isAi ? 'ai-app.module' : 'app.module'}.js`
+      : 'apps/rental-api/dist-ai/ai-app.module.js'));
     const hostTokens = memory.load(path.join(root, 'apps/rental-api', output, 'app.module.js'));
     const hostDatabase = memory.load(path.join(root, 'apps/rental-api', output, 'database.js'));
-    const ai = isMulti ? undefined : memory.load(path.join(root, 'apps/rental-api/dist-ai/ai-composition.js'));
-    const policy = memory.load(path.join(root, 'apps/rental-api', output, isMulti ? 'http-policy.js' : 'ai-http-policy.js'));
+    const ai = isAi ? memory.load(path.join(root, 'apps/rental-api/dist-ai/ai-composition.js')) : undefined;
+    const policy = memory.load(path.join(root, 'apps/rental-api', output, isAi ? 'ai-http-policy.js' : 'http-policy.js'));
+    if (isAi) {
+      const formalAi = load('@rental-os/rental-api/ai-app-module');
+      assert.equal(formalAi.RENTAL_HOST_ASSEMBLY, hostTokens.RENTAL_HOST_ASSEMBLY, 'AI consumer uses same emitted assembly token');
+      assert.equal(formalAi.bootstrapRentalComposition,
+        memory.load(path.join(root, 'apps/rental-api/dist-ai/bootstrap.js')).bootstrapRentalComposition,
+        'AI startup reads request scope from the same emitted root');
+    }
     const publicDatabase = load('@rental-os/platform-api/database');
     class ObservedInjector extends Injector {
       async instantiateClass(instances, wrapper, ...rest) {
@@ -233,7 +244,7 @@ module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, a
         return value;
       }
     }
-    const definition = isMulti ? hostModule.multiCoreApplicationModule(selected.lock)
+    const definition = isMulti ? (isAi ? hostModule.multiCoreAiApplicationModule(selected.lock) : hostModule.multiCoreApplicationModule(selected.lock))
       : hostModule.RentalAiAppModule.register({ lock: selected.lock });
     const graph = await scanner(definition);
     const instanceLoader = new InstanceLoader(graph.container, new ObservedInjector(), graph.graph);
@@ -259,17 +270,17 @@ module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, a
     assert.equal(get(databaseModule, publicDatabase.PlatformDatabaseClient), database);
     assert.equal(Object.keys(database._runtimeDataModel.models).length, selectedModelCount);
     assert.equal(host.rental.database, database);
-    if (!isMulti) {
+    if (isAi) {
     assert.equal(host.ai.database, database);
     assert.equal(host.ai.rental, host.rental);
     assert.equal(host.ai.guard, host.guard);
     assert.equal(host.rental.aiMode, 'enabled');
     assert(host.aiAccess && host.aiAccess !== host.access);
-    assert.deepEqual(host.ai.lock, enabled.lock);
+    assert.deepEqual(host.ai.lock, selected.lock);
     assert.throws(() => ai.requireRentalAiSelection(disabled.lock), /AI 组合须选择/u);
     const disabledAssembly = memory.load(path.join(root, 'apps/rental-api/dist/assembly.js'));
     assert.throws(() => disabledAssembly.composeRentalApplication({ database, configuration: host.rental.configuration,
-      lock: enabled.lock, aiMode: 'disabled' }), /无 AI 组合不能消费/u);
+      lock: selected.lock, aiMode: 'disabled' }), /无 AI 组合不能消费/u);
     } else {
       assert.equal(host.ai, undefined);
       assert.equal(host.aiAccess, undefined);
@@ -296,11 +307,12 @@ module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, a
     assert.deepEqual(factoryCalls.get(publicCore.CORE_PACKAGE_ASSEMBLY), [[host]], 'one package assembly from actual host');
     const { PATH_METADATA, METHOD_METADATA } = build.requireDeps('@nestjs/common/constants');
     const { RequestMethod } = build.requireDeps('@nestjs/common');
-    const document = isMulti ? memory.load(path.join(root, 'apps/rental-api/dist/openapi.js')).createRentalHostOpenApi(
-      selected.lock, policy.createRentalHostHttpPolicy(host.authorization), [{ manifest: ticketsPackage.pin.manifest,
-        contribution: load('@rental-os/example-tickets-core').createTicketsOpenApi() }])
-      : memory.load(path.join(root, 'apps/rental-api/dist-ai/ai-openapi.js'))
-        .createRentalAiOpenApi(selected.lock, policy.createRentalAiHttpPolicy(host.authorization));
+    const additionalOpenApi = isMulti ? [{ manifest: ticketsPackage.pin.manifest,
+      contribution: load('@rental-os/example-tickets-core').createTicketsOpenApi() }] : [];
+    const document = isAi ? memory.load(path.join(root, 'apps/rental-api/dist-ai/ai-openapi.js'))
+        .createRentalAiOpenApi(selected.lock, policy.createRentalAiHttpPolicy(host.authorization), additionalOpenApi)
+      : memory.load(path.join(root, 'apps/rental-api/dist/openapi.js')).createRentalHostOpenApi(
+        selected.lock, policy.createRentalHostHttpPolicy(host.authorization), additionalOpenApi);
     for (const [Controller, token, application] of [
       [publicCore.CorePackageController, publicCore.CORE_PACKAGE_APPLICATION, host.packages.packages],
       [publicCore.CorePackagePreflightController, publicCore.CORE_PACKAGE_PREFLIGHT_APPLICATION, host.packages.preflight],
@@ -332,7 +344,7 @@ module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, a
     assert.equal(http.rental.failureEvents, host.rental.failureEvents);
 
     const extraControllers = [];
-    if (!isMulti) {
+    if (isAi) {
     const aiModule = findModule(ai.RentalAiCompositionModule);
     assert.equal(get(aiModule, ai.RENTAL_AI_BINDING), host.ai);
     const evidenceBinding = get(aiModule, ai.RENTAL_AI_INSPECTION_BINDING);
@@ -361,7 +373,8 @@ module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, a
     const { BUSINESS_FAILURE_OUTBOX } = load('@rental-os/ai-native-server/business-events/prisma-business-failure-outbox');
     assert.equal(get(aiModule, BUSINESS_FAILURE_OUTBOX), host.rental.failureEvents);
     extraControllers.push(...policy.RENTAL_AI_CONTROLLERS);
-    } else {
+    }
+    if (isMulti) {
       const tickets = load('@rental-os/example-tickets-core/nest'), binding = host.additionalCores.get('example-tickets');
       const module = findModule(tickets.TicketsHttpModule), controller = module.controllers.get(tickets.TicketsController).instance;
       assert(binding, 'actual bound tickets Core');
@@ -380,7 +393,7 @@ module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, a
           'tickets in same OpenAPI ' + url);
       }
       extraControllers.push(tickets.TicketsController);
-      assert(![...reads].some(file => file.includes('/packages/ai-native-server/')), 'multi disabled root never imports AI');
+      if (!isAi) assert(![...reads].some(file => file.includes('/packages/ai-native-server/')), 'multi disabled root never imports AI');
     }
 
     const controllers = graph.modules.flatMap(item => [...item.controllers.values()]);
@@ -401,20 +414,20 @@ module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, a
       assert.equal(wrapper.getInstanceByContextId(STATIC_CONTEXT).isResolved, true, 'unresolved provider ' + String(wrapper.token));
     const sourceFactory = memory.load(path.join(root, 'apps/rental-api', output, 'core-package-sources.js'));
     const rentalPackage = memory.load(path.join(root, 'apps/rental-api', output, 'deployment-package.js'));
-    const aiPackage = isMulti ? undefined : load('@rental-os/ai-native-data/data-package');
+    const aiPackage = isAi ? load('@rental-os/ai-native-data/data-package') : undefined;
     let observations = 0;
     const sources = sourceFactory.createRentalCorePackageSources({ lock: selected.lock,
       configuration: { get: name => ({ CORE_PACKAGE_STORAGE_ROOT: storage, CORE_PLATFORM_PACKAGE_REFERENCE: reference }[name]) },
       rentalPackage: () => rentalPackage.requireRentalDeploymentPackage(selected.lock.cores[0], selected.lock.platform.versions),
       ...(isMulti ? { additionalCorePackages: [{ root: path.join(root, 'packages/example-tickets-core'),
-        entry: path.resolve(build.exported('@rental-os/example-tickets-core', true)), ...ticketsPackage.pin }] }
-        : { dataCapabilities: () => [aiPackage.requireAiNativeDataPackage(path.join(root, 'packages/ai-native-data'), selected.lock.dataCapabilities[0])] }),
+        entry: path.resolve(build.exported('@rental-os/example-tickets-core', true)), ...ticketsPackage.pin }] } : {}),
+      ...(isAi ? { dataCapabilities: () => [aiPackage.requireAiNativeDataPackage(path.join(root, 'packages/ai-native-data'), selected.lock.dataCapabilities[0])] } : {}),
       observe: async () => { observations++; throw Error('materials preparation must not query a database'); } });
     const materials = await sources.materials.read();
     assert.deepEqual(materials.base, selected.lock);
     assert.deepEqual(materials.cores.get('rental'), rentalFiles);
     if (isMulti) assert.deepEqual(materials.cores.get('example-tickets'), ticketsPackage.files);
-    else assert.deepEqual(materials.dataCapabilities.get('ai-native'), aiFiles);
+    if (isAi) assert.deepEqual(materials.dataCapabilities.get('ai-native'), aiFiles);
     assert.equal(materials.platform.length, selected.lock.platform.data.migrations.length);
     assert.equal(observations, 0);
     const contextFile = slash(path.join(root, 'rental-host.context.json'));
@@ -432,15 +445,22 @@ module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, a
     await assert.rejects(sources.materials.read(), /来源.*不一致/);
     installed.set(contextFile, contextBytes); memory.put(contextFile, contextBytes);
     assert.equal(observations, 0, 'unverified runtime never reaches data observation');
+    const recovery = isMulti && !isAi ? await require('./multi-core-recovery-cases.cjs')({
+      build, memory, load, root, lock: selected.lock, catalogue: host.catalogue, materials: sources.materials,
+      platformArchive, ticketsPackage,
+      rentalPackage: () => rentalPackage.requireRentalDeploymentPackage(
+        selected.lock.cores.find(pin => pin.manifest.id === 'rental'), selected.lock.platform.versions)
+    }) : undefined;
     assert.deepEqual(effects, [], 'zero database, transport, default client, timer or lifecycle effects');
     const result = { modules: graph.modules.length, controllers: controllers.length,
       providers: graph.modules.reduce((count, item) => count + item.providers.size, 0),
       factories: [...factoryCalls.values()].reduce((count, calls) => count + calls.length, 0),
-      aiControllers: isMulti ? 0 : policy.RENTAL_AI_CONTROLLERS.length, selectedClientsConstructed: constructedClients.length,
+      aiControllers: isAi ? policy.RENTAL_AI_CONTROLLERS.length : 0, selectedClientsConstructed: constructedClients.length,
       disabled: { modules: disabledGraph.modules.length, controllers: disabledControllers.length, phase: 'scanned-without-instantiation' },
       officialClients: clients.map(({ host, models, schemaSha256 }) => ({ host, models, schemaSha256 })),
+      ...(recovery ? { recovery } : {}),
       installedReads: reads.size, diskOutputs: 0, effects: 0, lifecycle: 'not-run', deployment: 'pending' };
-    console.log('PASS installed ' + (isMulti ? 'Rental + tickets' : 'Rental AI') + ' root: ' + JSON.stringify(result));
+    console.log('PASS installed Rental' + (isMulti ? ' + tickets' : '') + (isAi ? ' AI' : '') + ' root: ' + JSON.stringify(result));
     return result;
   } finally {
     for (const restore of restores.reverse()) restore();

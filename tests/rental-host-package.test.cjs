@@ -88,6 +88,9 @@ async function run() {
   for (const directory of ['packages/ai-native-server', 'apps/rental-api']) build.selectedClients.set(slash(path.join(root, directory)), { client: slash(disabledClient.client), mode: 'rental-ai' });
   build.compile('packages/ai-native-server/tsconfig.json');
   build.compile('apps/rental-api/tsconfig.ai.json');
+  build.selectedClients.set(slash(path.join(root, 'apps/example-multi-core-api')),
+    { client: slash(disabledClient.client), mode: 'rental-ai' });
+  build.compile('apps/example-multi-core-api/tsconfig.ai.json');
   const memory = verificationMemory(build);
   for (const file of ['scripts/package-rental-host.cjs', 'scripts/rental-host-lock.cjs', 'scripts/build-selected-prisma.cjs',
     'scripts/rental-platform-build.cjs'])
@@ -136,9 +139,11 @@ async function run() {
   const additionalDeployment = await require('../apps/rental-api/test/additional-deployment-cases.cjs')({
     t, load: memory.load, preparationInput: deploymentInput, aiFormatFixture: { release: aiRelease, files: aiFiles }, ticketsPackage });
   const multi = deployment.createRentalDeploymentFiles({ ...deploymentInput, additionalCores: [ticketsPackage] });
+  const multiAi = deployment.createRentalDeploymentFiles({ ...deploymentInput,
+    additionalCores: [ticketsPackage], ai: { release: aiRelease, files: aiFiles } });
   const base = { aiMode: 'disabled', sourceFiles, platformFiles, dependencyDirectory: deps, rentalFiles, deploymentFiles: disabled.files,
     selections: { rental: disabledClient, platform: platformClient }, ts: build.ts };
-  let result, aiResult, multiResult;
+  let result, aiResult, multiResult, multiAiResult;
   check('真实无AI宿主、完整固定包和原准备材料确定性打包', () => {
     result = packager.createRentalHostContext(base);
     assert.equal(result.sha256, packager.createRentalHostContext(base).sha256);
@@ -176,6 +181,7 @@ async function run() {
     assert(multiResult.files.has('apps/example-multi-core-api/dist/main.js'));
     assert(multiResult.files.has('apps/rental-api/dist/assembly.d.ts'));
     assert(![...multiResult.files.keys()].some(file => file.startsWith('packages/ai-native-server/')));
+    assert(![...multiResult.files.keys()].some(file => file.startsWith('apps/example-multi-core-api/dist-ai/')));
     assert.match(multiResult.files.get('Dockerfile').toString(), /apps\/example-multi-core-api\/dist\/main\.js/u);
     assert.deepEqual(multiResult.receipt.clients.map(client => client.models), [40, 161]);
     const lock = JSON.parse(multiResult.files.get('package-lock.json'));
@@ -185,6 +191,25 @@ async function run() {
     assert.throws(() => packager.createRentalHostContext({ ...base, deploymentFiles: multi.files }), /选择/);
     assert.throws(() => packager.createRentalHostContext({ ...base, host: 'example-multi-core',
       ticketsFiles: ticketsPackage.files }), /选择/);
+  });
+  check('真实双Core与AI宿主保留完整包、同一247模型Client和正确启动入口', () => {
+    multiAiResult = packager.createRentalHostContext({ ...base, host: 'example-multi-core', aiMode: 'enabled',
+      ticketsFiles: ticketsPackage.files, aiFiles, deploymentFiles: multiAi.files,
+      selections: { rental: { ...disabledClient, declarations, schema: aiSchema }, platform: platformClient } });
+    assert.equal(multiAiResult.receipt.host, 'example-multi-core');
+    assert.equal(multiAiResult.receipt.aiMode, 'enabled');
+    assert.equal(multiAiResult.receipt.entry, 'apps/example-multi-core-api/dist-ai/ai-main.js');
+    assert.deepEqual(multiAiResult.receipt.additionalCorePackages, [{ id: 'example-tickets', sha256: ticketsPackage.pin.sha256 }]);
+    assert.deepEqual(multiAiResult.receipt.clients.map(client => client.models), [40, 247]);
+    assert.match(multiAiResult.files.get('Dockerfile').toString(), /apps\/example-multi-core-api\/dist-ai\/ai-main\.js/u);
+    for (const [directory, packageFiles] of [['packages/rental-core', rentalFiles],
+      ['packages/example-tickets-core', ticketsPackage.files], ['packages/ai-native-data', aiFiles]])
+      for (const [file, bytes] of packageFiles) assert.deepEqual(multiAiResult.files.get(directory + '/' + file), bytes);
+    const lock = JSON.parse(multiAiResult.files.get('package-lock.json'));
+    assert(lock.packages['packages/ai-native-server']);
+    assert(lock.packages['packages/example-tickets-core']);
+    assert.throws(() => packager.createRentalHostContext({ ...base, host: 'example-multi-core', aiMode: 'enabled',
+      ticketsFiles: ticketsPackage.files, aiFiles, deploymentFiles: multiAi.files }), /所选 Client 不满足 rental-ai 模式的原模型要求/);
   });
   check('CLI显式选择和路径要求', () => {
     assert.throws(() => packager.parseArguments([]), /显式选择/);
@@ -248,7 +273,7 @@ async function run() {
     const wrong = structuredClone(original); wrong.packages['apps/rental-api'].dependencies.zod = '0.0.0';
     assert.throws(() => selectWorkspaces(wrong, directory => JSON.parse(sourceFiles.get(directory + '/package.json')), 'disabled'), /依赖与原锁/);
     const semver = build.requireDeps('semver');
-    for (const candidate of [result, aiResult, multiResult]) {
+    for (const candidate of [result, aiResult, multiResult, multiAiResult]) {
       const lock = JSON.parse(candidate.files.get('package-lock.json'));
       const resolve = require('../scripts/rental-host-lock.cjs').lockedDependency;
       for (const [owner, metadata] of Object.entries(lock.packages)) {
@@ -283,11 +308,24 @@ async function run() {
     const multiArgs = args.map(value => value === candidate ? multiCandidate : value === output ? multiOutput : value)
       .concat(['--host', 'example-multi-core', '--tickets-package', tickets]);
     assert.throws(() => packager.parseArguments(multiArgs.filter((value, index) => !['--tickets-package', tickets].includes(value))), /须显式/);
-    assert.throws(() => packager.parseArguments(multiArgs.map(value => value === 'disabled' ? 'enabled' : value)), /只选择/);
+    assert.throws(() => packager.parseArguments(multiArgs.map(value => value === 'disabled' ? 'enabled' : value)), /必须提供 --ai-data-package/);
     const multiWritten = packager.main(multiArgs);
     assert.equal(multiWritten.status, 'packaged');
     const shipped = archive.readCoreArchive(memory.fs.readFileSync(multiOutput), multiWritten.sha256);
     assert.equal(JSON.parse(shipped.files.get('rental-host.context.json')).host, 'example-multi-core');
+    const multiAiCandidate = path.join(memory.task, 'multi-ai-prepared'), aiData = path.join(memory.task, 'ai-data'),
+      multiAiOutput = path.join(memory.task, 'multi-ai-host.tgz');
+    for (const [file, bytes] of multiAi.files) memory.put(path.join(multiAiCandidate, file), bytes);
+    for (const [file, bytes] of aiFiles) memory.put(path.join(aiData, file), bytes);
+    memory.put(disabledClient.client, declarations);
+    memory.put(path.join(path.dirname(disabledClient.client), 'schema.prisma'), aiSchema);
+    const multiAiArgs = multiArgs.map(value => value === 'disabled' ? 'enabled'
+      : value === multiCandidate ? multiAiCandidate : value === multiOutput ? multiAiOutput : value)
+      .concat(['--ai-data-package', aiData]);
+    const multiAiWritten = packager.main(multiAiArgs);
+    assert.equal(multiAiWritten.status, 'packaged');
+    const aiShipped = archive.readCoreArchive(memory.fs.readFileSync(multiAiOutput), multiAiWritten.sha256);
+    assert.equal(JSON.parse(aiShipped.files.get('rental-host.context.json')).entry, 'apps/example-multi-core-api/dist-ai/ai-main.js');
     const write = memory.fs.writeSync, broken = path.join(memory.task, 'broken.tgz');
     memory.fs.writeSync = () => { throw Error('fixture write failure'); };
     try { assert.throws(() => packager.writeArchive(broken, Buffer.from('test')), /fixture write failure/); }
@@ -307,10 +345,13 @@ async function run() {
     disabled, multi, multiResult, ticketsPackage, platformClient, platformArchive });
   const rootDi = await verifyRoot({
     build, memory: verificationMemory(build), rentalFiles, aiFiles, enabled, aiResult, disabled, platformClient, platformArchive });
+  const multiAiRootDi = await verifyRoot({ build, memory: verificationMemory(build), rentalFiles, aiFiles,
+    disabled, multi: multiAi, multiResult: multiAiResult, ticketsPackage, platformClient, platformArchive });
   assert.equal(fs.existsSync(temporary), false);
   console.log(JSON.stringify({ checks, builds: build.stages.length, disabled: { files: result.files.size, runtimeFiles: result.receipt.runtime.files, sha256: result.sha256 },
     enabled: { files: aiResult.files.size, runtimeFiles: aiResult.receipt.runtime.files, sha256: aiResult.sha256 },
     multi: { files: multiResult.files.size, runtimeFiles: multiResult.receipt.runtime.files, sha256: multiResult.sha256 },
-    additional, additionalDeployment, multiRootDi, rootDi, fixtureProvenance: true, diskOutputs: 0, imageBuild: 'not-run', database: 'not-connected', deployment: 'pending' }));
+    multiAi: { files: multiAiResult.files.size, runtimeFiles: multiAiResult.receipt.runtime.files, sha256: multiAiResult.sha256 },
+    additional, additionalDeployment, multiRootDi, rootDi, multiAiRootDi, fixtureProvenance: true, diskOutputs: 0, imageBuild: 'not-run', database: 'not-connected', deployment: 'pending' }));
 }
 run().catch(error => { console.error(error.stack); process.exitCode = 1; });

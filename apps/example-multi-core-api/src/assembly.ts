@@ -1,5 +1,5 @@
-/** 同一公共底座同时装配 Rental 与工单。原 Rental 工厂维护完整服务图，
- * 工单只提供已选择的固定包接点，当前示范从源码入口显式选择无 AI 组合。
+/** 普通双 Core 装配沿原 Rental 工厂维护完整服务图，源码固定选择 disabled。
+ * 工单提供已选择的固定包接点，AI 组合由 ai-app.module.ts 接原 AI 正式出口。
  * 构造只核发行材料，实际迁移、物理就绪和业务授权沿原目录与服务判断。 */
 import type { ConfigService } from "@nestjs/config";
 import { CoreDeploymentLockSchema, type CoreDeploymentLock } from "@rental-os/core-contracts";

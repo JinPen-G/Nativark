@@ -32,6 +32,10 @@
     "./bootstrap": {
       "types": "./dist/bootstrap.d.ts",
       "default": "./dist/bootstrap.js"
+    },
+    "./ai-app-module": {
+      "types": "./dist-ai/ai-app.module.d.ts",
+      "default": "./dist-ai/ai-app.module.js"
     }
   },
   "typesVersions": {
@@ -56,6 +60,9 @@
       ],
       "bootstrap": [
         "dist/bootstrap.d.ts"
+      ],
+      "ai-app-module": [
+        "dist-ai/ai-app.module.d.ts"
       ]
     }
   },

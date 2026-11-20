@@ -230,7 +230,9 @@
     "lint:rental-api:ai": "npm run lint:ai -w @rental-os/rental-api",
     "package:rental-host": "node scripts/package-rental-host.cjs",
     "build:example-multi-core-api": "npm run build -w @rental-os/example-multi-core-api",
-    "lint:example-multi-core-api": "npm run lint -w @rental-os/example-multi-core-api"
+    "lint:example-multi-core-api": "npm run lint -w @rental-os/example-multi-core-api",
+    "build:example-multi-core-api:ai": "npm run build:ai -w @rental-os/example-multi-core-api",
+    "lint:example-multi-core-api:ai": "npm run lint:ai -w @rental-os/example-multi-core-api"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",

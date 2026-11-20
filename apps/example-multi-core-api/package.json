@@ -7,9 +7,14 @@
   "scripts": {
     "prebuild": "npm run build -w @rental-os/rental-api && npm run build -w @rental-os/example-tickets-core",
     "build": "node ../../scripts/build-selected-prisma.cjs --project tsconfig.json --mode rental",
+    "prebuild:ai": "npm run build:ai -w @rental-os/rental-api && npm run build -w @rental-os/example-tickets-core",
+    "build:ai": "node ../../scripts/build-selected-prisma.cjs --project tsconfig.ai.json --mode rental-ai",
     "prelint": "npm run prebuild",
     "lint": "node ../../scripts/build-selected-prisma.cjs --project tsconfig.json --mode rental --noEmit",
-    "start": "node dist/main.js"
+    "prelint:ai": "npm run prebuild:ai",
+    "lint:ai": "node ../../scripts/build-selected-prisma.cjs --project tsconfig.ai.json --mode rental-ai --noEmit",
+    "start": "node dist/main.js",
+    "start:ai": "node dist-ai/ai-main.js"
   },
   "dependencies": {
     "@rental-os/core-contracts": "0.1.0",

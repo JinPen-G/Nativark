@@ -83,7 +83,9 @@ AI 启用入口额外提供[知识文件来源](src/ai-file-cleanup-source.ts)�
 
 打包命令必须显式传入 `--ai enabled|disabled`、`--deployment`、`--platform-package`、`--rental-package`、`--client`、`--platform-client` 和 `--output`；所有文件或目录参数均为绝对路径。`--platform-package` 为部署锁指定的完整源码 `.tgz`，`--client` 与 `--platform-client` 分别为本宿主及公共宿主的 `generated/client/index.d.ts`。AI 启用时另须 `--ai-data-package`，可用 `--deps` 指定原锁版本的只读编译依赖目录。输出为尚不存在的 `.tgz`，失败只清理本次独占产物；上下文保留原依赖锁、SQL、编译来源及运行闭包，不携带作者依赖目录或环境文件。
 
-同一打包入口默认 `--host rental`；双 Core 组合显式使用 `--host example-multi-core --ai disabled --tickets-package <完整固定工单包目录>`，并提供对应双 Core 部署材料。打包从该宿主的真实依赖闭包投影原锁，核两份 Core 完整包及同源公共产物，镜像入口为 `apps/example-multi-core-api/dist/main.js`。两个 Core 仍共用 Rental 所选 Client；该示范启动入口尚未选择 AI。
+同一打包入口默认 `--host rental`；双 Core 组合显式使用 `--host example-multi-core --tickets-package <完整固定工单包目录>`，并提供对应双 Core 部署材料。`--ai disabled` 使用 `apps/example-multi-core-api/dist/main.js` 和 161 模型 Client；`--ai enabled` 还须完整 AI 数据包，使用 `apps/example-multi-core-api/dist-ai/ai-main.js` 和 247 模型 Client。打包从所选宿主的真实依赖闭包投影原锁，核两份 Core 完整包及同源公共产物。两个 Core 共用同一个所选 Client，工单仍没有 AI 工具。
+
+AI 扩展宿主从正式出口 `@rental-os/rental-api/ai-app-module` 使用 `createRentalAiHostModule`，以 `additionalCores`、`additionalHttp` 和 `additionalOpenApi` 接入静态 Core。该出口同时提供 `RENTAL_HOST_ASSEMBLY`、`RentalAiHostAssembly` 和 `bootstrapRentalComposition`，使 HTTP 绑定及启动读取同一 `dist-ai` 产物中的令牌；普通入口使用独立的 `dist` 闭包。权限、Runtime、模型账和恢复仍由原 Rental AI 组合裁定，额外 Core 的普通授权不产生工具访问权。
 
 无 AI 宿主的原检查证据绑定处理器由固定政策在执行前返回 503；其他处理器仍按真实元数据核对，未知接点继续拒绝。该政策不能证明启用 AI 的检查绑定已接通。同源善后声明当前列出89个读取/收尾处理器，其中新增11个文件/承运证据、单订单员工收款、审批原结果及企业回款凭证GET。宿主须从同一实例供给 `originalHistory` 的文件、批准、续租/换货及回款材料定位者，保留当前原ACL、企业授权和订单范围复核；缺少参加者返回不可用。原材料定位与处理器登记不证明当前已装配、迁移或完成全部兼容验收。
 

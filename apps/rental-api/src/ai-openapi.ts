@@ -1,6 +1,6 @@
 /** AI 文档从原单源操作裁剪至本宿主真实挂载范围。缺失操作继续显式留缺口，
  * 不把其它宿主或未接完的模型/任务能力放进本发行可调用路径。 */
-import type { CoreDeploymentLock } from "@rental-os/core-contracts";
+import type { CoreDeploymentLock, CoreOpenApiSource } from "@rental-os/core-contracts";
 import { buildPaths, RENTAL_HTTP_OPERATIONS, type SchemaObject } from "@rental-os/rental-core/http-openapi";
 import { matchableRequestPath } from "@rental-os/platform-server/request-path";
 import { AI_HTTP_COMPONENT_SCHEMAS, AI_HTTP_OPERATIONS } from "@rental-os/ai-native-server/runtime/contracts/http-openapi";
@@ -8,10 +8,11 @@ import { AI_STAFF_INSPECTION_HTTP_DRAFT } from "@rental-os/shared";
 import { createRentalHostOpenApi } from "./openapi";
 import { RENTAL_AI_CONTROLLERS, RENTAL_AI_INSPECTION_OPERATIONS, createRentalAiHttpPolicy } from "./ai-http-policy";
 
-export function createRentalAiOpenApi(lock: CoreDeploymentLock, policy = createRentalAiHttpPolicy()) {
+export function createRentalAiOpenApi(lock: CoreDeploymentLock, policy = createRentalAiHttpPolicy(),
+  additional: readonly CoreOpenApiSource[] = []) {
   policy.assertReviewed();
   const rental = createRentalHostOpenApi(lock, { ...policy,
-    routes: Object.freeze(policy.routes.filter(route => !RENTAL_AI_CONTROLLERS.some(controller => route.controller === controller))) });
+    routes: Object.freeze(policy.routes.filter(route => !RENTAL_AI_CONTROLLERS.some(controller => route.controller === controller))) }, additional);
   // 此组合确实装配原检查证据工厂，恢复其同源成功合同；无 AI 的固定 Core
   // 贡献继续保留 503。文档选择来自已审定处理器，不是请求或清单的启用标记。
   const evidencePath = "/api/staff/v1/uploads/{fileAssetId}/inspection-binding";

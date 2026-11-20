@@ -30,9 +30,8 @@ function parseArguments(args) {
   }
   if (!['enabled', 'disabled'].includes(values['--ai'])) throw Error('须显式选择 --ai enabled|disabled');
   const host = values['--host'] ?? 'rental'; hostDirectory(host);
-  if ((host === 'example-multi-core') !== Boolean(values['--tickets-package'])
-    || host === 'example-multi-core' && values['--ai'] !== 'disabled')
-    throw Error('双 Core 示范须显式提供 --tickets-package 且当前只选择 AI disabled');
+  if ((host === 'example-multi-core') !== Boolean(values['--tickets-package']))
+    throw Error('只有双 Core 示范须显式提供 --tickets-package');
   for (const key of ['--deployment', '--platform-package', '--rental-package', '--client', '--platform-client', '--output'])
     if (!values[key] || !path.isAbsolute(values[key])) throw Error(key + ' 须为显式绝对路径');
   if ((values['--ai'] === 'enabled') !== Boolean(values['--ai-data-package'])) throw Error('只有 AI enabled 必须提供 --ai-data-package');
@@ -222,7 +221,7 @@ function createRentalHostContext(input) {
   const rentalPin = lock.cores.find(pin => pin.manifest.id === 'rental');
   const ticketsPin = lock.cores.find(pin => pin.manifest.id === 'example-tickets');
   if (!rentalPin || lock.cores.length !== (multi ? 2 : 1) || multi !== Boolean(ticketsFiles)
-    || multi && (!ticketsPin || aiMode !== 'disabled')
+    || multi && !ticketsPin
     || (lock.dataCapabilities?.length || 0) !== (aiMode === 'enabled' ? 1 : 0)
     || aiMode === 'enabled' && lock.dataCapabilities[0].id !== 'ai-native'
     || (aiMode === 'enabled') !== Boolean(aiFiles)) throw Error('部署锁、固定包与显式 AI 选择不一致');
@@ -274,7 +273,8 @@ function createRentalHostContext(input) {
     if (fixed) for (const [file, bytes] of fixed) files.set(directory + '/' + file, bytes);
     else for (const [file, bytes] of sourceFiles) if (file.startsWith(directory + '/')) {
       const relative = file.slice(directory.length + 1);
-      if (directory === 'apps/rental-api' && aiMode === 'disabled' && relative.startsWith('dist-ai/')) continue;
+      if (['apps/rental-api', 'apps/example-multi-core-api'].includes(directory)
+        && aiMode === 'disabled' && relative.startsWith('dist-ai/')) continue;
       if (['package.json', 'README.md', 'LICENSE'].includes(relative) || /^dist(?:-[a-z0-9-]+)?\/.*\.(?:js|cjs|json|d\.ts)$/u.test(relative)
         || directory === 'apps/platform-api' && relative.startsWith('prisma/')) files.set(file, bytes);
     }
@@ -284,7 +284,7 @@ function createRentalHostContext(input) {
   }
   for (const [file, bytes] of deploymentFiles) files.set('apps/rental-api/prisma-deployment/' + file, bytes);
   files.set('LICENSE', Buffer.from(text(sourceFiles, 'LICENSE')));
-  const entry = aiMode === 'enabled' ? 'apps/rental-api/dist-ai/ai-main.js' : directory + '/dist/main.js';
+  const entry = directory + (aiMode === 'enabled' ? '/dist-ai/ai-main.js' : '/dist/main.js');
   const runtime = checkRuntimeClosure(files, workspaces, originalLock, entry, ts);
   const projected = projectHostLock(originalLock, workspaces, aiMode, runtime.runtimePeers, host);
   for (const item of runtime.resolutions) if (!item.specifier.startsWith('.') && !item.specifier.startsWith('@rental-os/')) {
