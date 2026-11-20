@@ -2,6 +2,14 @@
 
 本模块把 `@rental-os/platform-core-host` 的唯一公共Core应用接到当前组合的真实账号、会话、角色、订阅和审计。原Controller和模块路径是公共包正式出口的兼容转接；具体Rental/工单业务与其数据保持各自适配。宿主从已冻结的组合注册提供Core部署可用性。[公共宿主适配](../../../../../packages/platform-core-host/README.md) · [Core应用合同](../../../../../packages/core-host/README.md)
 
+## Core 包管理
+
+[原包管理装配](original-core-package-assembly.ts)在原服务组登记一个应用实例，复用当前 Prisma、账号仓储、宿主配置及原事务的提交意图审计。[四组模块](original-core-packages.module.ts)从原服务组导入此实例，宿主将其加入 AppModule，并用 `createPlatformCorePackageOpenApi` 合并同源接口资料。
+
+[认证分流](original-core-package-auth.guard.ts)仅把四组包管理的精确合同路径交公共 `PlatformAuthGuard`，使用原 `AuthService` 建立同一 operator 身份。其他请求交原 `ApiAuthGuard` 实例处理，现有业务路由沿原准入。
+
+存储使用 `CORE_PACKAGE_STORAGE_ROOT` 的绝对目录。实际标准锁、包与原注册材料由受控 `ORIGINAL_CORE_PACKAGE_DEPLOYMENT` provider 提供，其中 `catalogue`、`deployment`、`materials` 分别供给真实目录、当前部署与原迁移材料。缺注册目录时相关读取抛 `core_unavailable`，缺当前发行或迁移材料时版本和更新明确 unavailable。来源与原收据检查继续由[公共包管理](../../../../../packages/platform-core-host/src/core-packages/README.md)负责。
+
 ## 从一个应用工厂装配
 
 [composeOriginalCoreApplication](original-core-application.ts)接收原数据库、账号仓储、订阅、同事务审计和单一受控Core部署目录，组合管理/绑定/当前事实、SaaS目录、本人会话目录及范围读取。组合时只创建应用实例，不读取数据库或初始化Core；行业业务HTTP、AI与作业由选中Core另行装配。

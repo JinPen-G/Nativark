@@ -108,10 +108,12 @@ import { RentalHttpModule, type RentalHttpServiceGroups } from "@rental-os/renta
 import { OriginalApplicationServicesModule, ORIGINAL_RENTAL_HTTP_APPLICATIONS, ORIGINAL_RENTAL_PAYMENT_HTTP_APPLICATIONS } from "./application-services.module";
 
 import { RentalPaymentsHttpModule, type RentalPaymentHttpApplications } from "@rental-os/rental-core/http-payments";
+import { originalCorePackagesModule } from "./modules/core-host/original-core-packages.module";
 
 @Module({
   imports: [
     OriginalApplicationServicesModule,
+    originalCorePackagesModule,
     RentalPaymentsHttpModule.registerFactory({
       imports: [OriginalApplicationServicesModule],
       inject: [ORIGINAL_RENTAL_PAYMENT_HTTP_APPLICATIONS],

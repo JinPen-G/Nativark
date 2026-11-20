@@ -11,6 +11,10 @@
 | 实际数据 | [平台数据计划](../platform-api/src/platform-data.ts)、[工单物理检查](../../packages/example-tickets-core/src/mysql.ts)；原Prisma账和实际结构分别核验 |
 | 业务与界面 | [工单README](../../packages/example-tickets-core/README.md)、[业务HTTP](../../packages/example-tickets-core/src/nest.ts)、[四页贡献](../../packages/example-tickets-core/admin/index.tsx) |
 
+SaaS 的四组 Core 包管理 Controller 也从同一[应用工厂](src/assembly.ts)取得数据库、账号和真实工单注册目录。包管理与工单 HTTP 政策通过公共组合接点供给同一个 Guard，包接口资料并入本宿主 OpenAPI。[公共包管理装配](../../packages/platform-core-host/src/core-package-assembly.ts)
+
+配置 `CORE_PACKAGE_STORAGE_ROOT` 为宿主独占的绝对目录，按[包管理存储约定](../../packages/platform-core-host/src/core-packages/README.md)准备原归档、发行和候选目录。当前工单锁及物理观察继续服务原业务准入。包管理的当前版本、安装和更新还需真实底座发行、运行模块来源及原迁移材料，缺失时明确 unavailable。受控组合可通过 `composeTicketsApplication` 的第三个参数提供这些实际来源，候选准备沿原待部署状态保存。
+
 准备项目锁定依赖后，构建示范宿主。
 
 ```sh

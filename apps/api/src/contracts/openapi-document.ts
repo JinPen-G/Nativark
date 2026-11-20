@@ -1,3 +1,4 @@
+import { createCorePackageOpenApi, createPlatformCorePackageOpenApi } from "@rental-os/platform-core-host";
 import { adminContainerRadiusInput, adminControlRadiusInput, storedAdminRadiusSchema, RENTAL_HTTP_OPERATIONS, RENTAL_HTTP_COMPONENT_SCHEMAS, stringSchema, rentalCategoryCodeSchema, numberSchema, booleanSchema, objectSchema, ref, arrayOf, objectOf, queryParam, buildPaths, backlogOperation, type HttpMethod, type SchemaObject, type ContractOperation } from "@rental-os/rental-core/http-openapi";
 import { TENANT_MESSAGING_OPERATIONS, TENANT_MESSAGING_SCHEMAS } from "./tenant-messaging-schemas";
 import { SUBSCRIPTION_HTTP_OPERATIONS } from '@rental-os/platform-server/subscription-http-policy';
@@ -14,6 +15,19 @@ import { SUBSCRIPTION_OPENAPI_SCHEMAS, SUBSCRIPTION_OPENAPI_QUERY_SCHEMAS } from
 import { AI_HTTP_OPERATIONS, AI_HTTP_COMPONENT_SCHEMAS } from "@rental-os/ai-native-server/runtime/contracts/http-openapi";
 
 export type { SchemaObject, ContractOperation } from "@rental-os/rental-core/http-openapi";
+
+// 旧校验器的操作表复用同源包管理片段；请求和响应不另造DTO或字段。
+type CorePackageSchemaContent = { content: { "application/json": { schema: SchemaObject } } };
+const corePackageContractOperations: ContractOperation[] = Object.entries(createCorePackageOpenApi().paths)
+  .flatMap(([path, methods]) => Object.entries(methods).map(([method, value]) => {
+    const operation = value as { operationId: string; summary: string; tags: string[];
+      "x-requiredPermissions": string[]; requestBody?: CorePackageSchemaContent;
+      responses: { "200": CorePackageSchemaContent } };
+    return { method: method as HttpMethod, path, tag: operation.tags[0], operationId: operation.operationId,
+      summary: operation.summary, permissions: operation["x-requiredPermissions"], authRequired: true,
+      responseSchema: operation.responses["200"].content["application/json"].schema,
+      ...(operation.requestBody ? { requestSchema: operation.requestBody.content["application/json"].schema } : {}) };
+  }));
 
 export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ...SUBSCRIPTION_OPENAPI_SCHEMAS,
@@ -751,7 +765,8 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   ...rentalBusinessOperations(),
   ...TENANT_INTEGRATION_OPERATIONS,
   ...TENANT_MESSAGING_OPERATIONS,
-  ...INTEGRATION_BACKLOG_OPERATIONS
+  ...INTEGRATION_BACKLOG_OPERATIONS,
+  ...corePackageContractOperations
 ];
 
 function rentalBusinessOperations(): ContractOperation[] { return [
@@ -793,7 +808,7 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   }))
 ]; }
 
-export const OPENAPI_DOCUMENT = {
+export const OPENAPI_DOCUMENT = createPlatformCorePackageOpenApi({
   openapi: "3.0.3",
   info: {
     title: "Rental OS API",
@@ -818,9 +833,11 @@ export const OPENAPI_DOCUMENT = {
     { name: "Order" },
     { name: "RentalCore" },
     { name: "RentalBusiness" },
-    { name: "Reports" }
+    { name: "Reports" },
+    { name: "Core packages" }
   ],
-  paths: buildPaths(API_CONTRACT_OPERATIONS),
+  // 包管理片段已有原响应包装；旧渲染器仅处理原操作，合并仍核路径/schema冲突。
+  paths: buildPaths(API_CONTRACT_OPERATIONS.filter(operation => !corePackageContractOperations.includes(operation))),
   components: {
     securitySchemes: {
       bearerAuth: {
@@ -828,6 +845,8 @@ export const OPENAPI_DOCUMENT = {
         scheme: "bearer"
       }
     },
-    schemas: OPENAPI_COMPONENT_SCHEMAS
+    schemas: Object.fromEntries<Record<string, unknown>>(
+      Object.entries(OPENAPI_COMPONENT_SCHEMAS).map(([name, schema]) => [name, { ...schema }])
+    )
   }
-};
+});

@@ -26,6 +26,8 @@ import { PrismaService } from "./modules/database/prisma.service";
 import { AiDesktopBusinessModule } from './modules/ai-native/desktop-business/desktop-business.module';
 import { APP_GUARD, APP_INTERCEPTOR, ModuleRef } from "@nestjs/core";
 import { ApiAuthGuard } from "./common/api-auth.guard";
+import { ORIGINAL_CORE_PACKAGE_ASSEMBLY_PROVIDER } from "./modules/core-host/original-core-package-assembly";
+import { ORIGINAL_CORE_PACKAGE_AUTH_GUARD_PROVIDER, OriginalCorePackageAuthGuard } from "./modules/core-host/original-core-package-auth.guard";
 import { ConfigModule } from "@nestjs/config";
 import { OperationAuditInterceptor } from "./common/operation-audit.interceptor";
 import { OperationLogService } from "./common/operation-log.service";
@@ -225,6 +227,8 @@ const originalProviders: Provider[] = [
     AI_NATIVE_CONVERSATION_PROVIDER,
     AI_NATIVE_MEMBER_NAME_PROVIDER,
     ApiAuthGuard,
+    ORIGINAL_CORE_PACKAGE_ASSEMBLY_PROVIDER,
+    ORIGINAL_CORE_PACKAGE_AUTH_GUARD_PROVIDER,
     AI_NATIVE_ORIGINAL_REQUEST_PROVIDER,
     AI_NATIVE_ORIGINAL_ACCOUNTING_PROVIDER,
     AI_NATIVE_BUDGET_MANAGEMENT_PROVIDER,
@@ -401,7 +405,7 @@ const originalProviders: Provider[] = [
     },
     {
       provide: APP_GUARD,
-      useExisting: ApiAuthGuard
+      useExisting: OriginalCorePackageAuthGuard
     }
   ];
 

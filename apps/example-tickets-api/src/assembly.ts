@@ -2,7 +2,9 @@
 import { CoreDeploymentLockSchema, type CoreDeploymentLock } from "@rental-os/core-contracts";
 import { createCoreDeployedCatalogue } from "@rental-os/core-host";
 import { createMysqlCoreDeploymentObservation } from "@rental-os/core-host/mysql-deployment";
-import { composePlatformCoreApplication } from "@rental-os/platform-core-host";
+import {
+  composePlatformCoreApplication, composePlatformCorePackageAssembly, createPlatformCorePackageAudit
+} from "@rental-os/platform-core-host";
 import type { PlatformDatabaseClient, PublicDatabaseTransaction } from "@rental-os/platform-api/database";
 import { createPublicCoreDependencies } from "@rental-os/platform-api/core-dependencies";
 import { createPublicPlatformDataPlan } from "@rental-os/platform-api/data-plan";
@@ -13,7 +15,13 @@ import { isDeepStrictEqual } from "node:util";
 import { requireTicketsDeploymentPackage } from "./deployment-package";
 import { corePrismaMigrationName } from "@rental-os/core-contracts/deployment";
 
-export function composeTicketsApplication(database: PlatformDatabaseClient, input: CoreDeploymentLock) {
+export type TicketsCorePackageOptions = Pick<
+  Parameters<typeof composePlatformCorePackageAssembly<PublicDatabaseTransaction>>[0],
+  "storageDirectory" | "localArtifacts" | "deployment" | "materials" | "fetcher" | "now"
+>;
+
+export function composeTicketsApplication(database: PlatformDatabaseClient, input: CoreDeploymentLock,
+  packageOptions: TicketsCorePackageOptions = {}) {
   const lock = CoreDeploymentLockSchema.parse(input);
   const pin = lock.cores.find(core => core.manifest.id === "example-tickets");
   if (!pin || lock.cores.length !== 1) throw new Error("本示范宿主须选择且仅选择example-tickets Core");
@@ -30,5 +38,12 @@ export function composeTicketsApplication(database: PlatformDatabaseClient, inpu
       migrationNames: manifest.data.migrations.map(migration => corePrismaMigrationName(manifest.id, migration.id)), readPhysical: readTicketsPhysicalData }] });
   catalogue = createCoreDeployedCatalogue({ lock, registrations: [{ manifest, server: tickets.server }],
     http: [createTicketsHttpContribution()], observations });
-  return { tickets, application: composePlatformCoreApplication<PublicDatabaseTransaction>({ ...dependencies, catalogue }) };
+  return {
+    tickets,
+    application: composePlatformCoreApplication<PublicDatabaseTransaction>({ ...dependencies, catalogue }),
+    packages: composePlatformCorePackageAssembly<PublicDatabaseTransaction>({
+      ...packageOptions, database: dependencies.database, users: dependencies.users, catalogue,
+      audit: createPlatformCorePackageAudit<PublicDatabaseTransaction>()
+    })
+  };
 }
