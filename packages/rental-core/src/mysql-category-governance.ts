@@ -3,6 +3,7 @@
  * Writes reuse original platform identity/permission reads in one transaction;
  * tenant business facts and production enablement remain outside this service. */
 import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
+import { rentalPrismaNulls } from "./prisma-null-values";
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
 import { createHash, randomUUID } from "node:crypto";
@@ -190,8 +191,8 @@ export class CategoryGovernanceService {
   private audit(tx: Prisma.TransactionClient, code: RentalCategoryCode, versionId: string | undefined, action: string, user: SystemUserRow, reason: string, before: unknown, after: unknown, id: string = randomUUID()) {
     if (!reason?.trim() || reason.length > 512) throw new BadRequestException("必须填写变更原因（最多 512 字）");
     return tx.rentalCategoryGovernanceAudit.create({ data: { id, categoryCode: code, versionId, action, actorId: user.id, reason: reason.trim(),
-      before: before === undefined ? prismaRuntime.JsonNull : JSON.parse(JSON.stringify(before)),
-      after: after === undefined ? prismaRuntime.JsonNull : JSON.parse(JSON.stringify(after)) } });
+      before: before === undefined ? rentalPrismaNulls.JsonNull : JSON.parse(JSON.stringify(before)),
+      after: after === undefined ? rentalPrismaNulls.JsonNull : JSON.parse(JSON.stringify(after)) } });
   }
   private async lockedCategory(tx: Prisma.TransactionClient, code: RentalCategoryCode) {
     await tx.$queryRaw(prismaRuntime.sql`SELECT code FROM rental_category_definitions WHERE code = ${code.toLowerCase()} FOR UPDATE`);

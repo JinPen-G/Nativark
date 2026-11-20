@@ -1,6 +1,6 @@
 /** Rental 集成的分阶段组合：先文件/支付/通知，再 Core 单据/员工收款，最后企业换货影像。
  * 各阶段复用同一数据库、公共服务与原文件权威；构造不启动清理、连接外部服务或补造业务结果。 */
-import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
+import { rentalPrismaNulls } from "./prisma-null-values";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { TenantIntegrationService } from "@rental-os/platform-server/tenant-integration";
 import { TenantIntegrationRuntimeService } from "@rental-os/platform-server/integration-sms";
@@ -135,7 +135,7 @@ export function createRentalIntegrationFoundation<Revision extends FileKnowledge
     $queryRaw: (query, ...values) => database.$queryRaw(query, ...values),
     $transaction: (work, options) => database.$transaction(work, options),
     updateTestConfiguration: ({ where, data }) => database.tenantIntegrationConfig.updateMany({
-      where: integrationTestWhere(where, prismaRuntime.JsonNull), data
+      where: integrationTestWhere(where, rentalPrismaNulls.JsonNull), data
     })
   };
   const integrationBusiness = new RentalIntegrationBusinessParticipant(database);

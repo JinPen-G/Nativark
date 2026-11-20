@@ -11,6 +11,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./prisma-null-values": {
+      "types": "./dist/prisma-null-values.d.ts",
+      "default": "./dist/prisma-null-values.js"
+    },
     "./business-day": {
       "types": "./dist/business-day.d.ts",
       "default": "./dist/business-day.js"
@@ -1729,6 +1733,9 @@
   },
   "typesVersions": {
     "*": {
+      "prisma-null-values": [
+        "dist/prisma-null-values.d.ts"
+      ],
       "business-day": [
         "dist/business-day.d.ts"
       ],

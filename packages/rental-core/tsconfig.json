@@ -11,6 +11,9 @@
       "@rental-os/rental-core": [
         "./src/index.ts"
       ],
+      "@rental-os/rental-core/prisma-null-values": [
+        "./src/prisma-null-values.ts"
+      ],
       "@rental-os/rental-core/auth-contracts": [
         "./src/auth-contracts.ts"
       ],
