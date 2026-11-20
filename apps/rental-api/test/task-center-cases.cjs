@@ -126,6 +126,13 @@ module.exports = async function taskCenterCases({ t, knowledgeFixture }) {
       tx.$queryRaw = async (value, ...values) => {
         if (Array.isArray(value)) value = prismaRuntime.sql(value, ...values);
         const sql = value.sql.replace(/\s+/gu, ' ').trim(); await phase(sql);
+        if (sql.includes('FROM SystemParameterSet')) {
+          assert.deepEqual(value.values, ['tenant_platform', 'core-deployment-admission:rental']);
+          assert(sql.endsWith('LOCK IN SHARE MODE')); assert.equal(state.depth, 1);
+          return [{ id: 'admission-rental', tenantId: 'tenant_platform', module: 'core-deployment-admission:rental',
+            versionNo: 1, status: 'effective', operator: 'offline-test', content: { coreId: 'rental', state: 'accepting',
+              revision: 1, operationId: 'admission-a' } }];
+        }
         if (sql.includes('FROM Tenant')) return [{ id: 'tenant-a', status: 'active' }];
         if (sql.includes('FROM `User`')) return [{ id: state.user.id, roleId: null }];
         if (sql.includes('FROM auth_sessions')) return state.active ? [{ id: 'session-a' }] : [];

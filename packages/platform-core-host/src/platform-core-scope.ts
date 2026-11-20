@@ -25,6 +25,7 @@ export function composePlatformCoreScopeReader<Tx extends PlatformCoreTransactio
     const currentBinding = () => input.database.$transaction(async (transaction: Tx) => {
       const lease = await principals.lock(transaction, actor, actor.tenantId);
       await access.requireMember(transaction, lease.user, scope.coreId);
+      await access.requireBusinessAdmission(transaction, scope.coreId);
       const binding = await access.binding(transaction, scope);
       await lease.revalidate();
       return binding;

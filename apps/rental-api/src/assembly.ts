@@ -5,11 +5,11 @@ import { ForbiddenException } from "@nestjs/common";
 import type { ConfigService } from "@nestjs/config";
 import { isDeepStrictEqual } from "node:util";
 import * as shared from "@rental-os/shared";
-import { CoreDeploymentLockSchema, type CoreDeploymentLock, type CorePlatformDataCapabilityRelease,
-  type CorePlatformRemovalObservation } from "@rental-os/core-contracts";
+import { CoreDeploymentLockSchema, type CoreDeploymentLock, type CorePlatformDataCapabilityRelease } from "@rental-os/core-contracts";
 import { createCoreDeployedCatalogue, type CoreDeployedCatalogue } from "@rental-os/core-host";
 import type { CoreHostSqlTransaction } from "@rental-os/core-host/mysql";
 import { createMysqlCoreDeploymentObservation, type CoreMysqlDataPlan } from "@rental-os/core-host/mysql-deployment";
+import { createMysqlCoreDeploymentAdmission } from "@rental-os/core-host/mysql-deployment-admission";
 import { createPublicCoreDependencies } from "@rental-os/platform-api/core-dependencies";
 import { createPublicPlatformDataPlan } from "@rental-os/platform-api/data-plan";
 import { composePlatformCoreApplication, composePlatformCorePackageAssembly, createPlatformCorePackageAudit,
@@ -44,6 +44,8 @@ export interface RentalHostAiSetup<Binding> {
   readDataPackages(): readonly { root: string; release: CorePlatformDataCapabilityRelease }[];
   fileCleanupKnowledge: NonNullable<RentalFileCleanupAuthorityDependencies["knowledge"]>;
   participants: RentalApplicationParticipants;
+  /** 从实际 AI Controller/handler 闭集生成；只保留原结果/控制入口，新工作仍在原事务检查。 */
+  deploymentContinuation(method: string, path: string): boolean;
   bind(input: { rental: RentalApplication; guard: RentalAuthorizationGuard;
     customers: RentalCustomerManagementApplication }): Binding;
 }
@@ -81,8 +83,6 @@ export function composeRentalApplication<Binding = never, Additional = unknown>(
   lock: CoreDeploymentLock;
   /** 静态宿主显式选择的租户 Core；缺实际固定包/数据观察/HTTP 合同即拒绝整组。 */
   additionalCores?: readonly RentalHostCoreSetup<Additional>[];
-  /** 与部署新准入控制同源的可信观察；缺源保持 unknown，移除预检仍保留未完整覆盖的阻碍。 */
-  readAdmission?(coreId: string): Promise<CorePlatformRemovalObservation["admission"]>;
 } & ({ aiMode: "disabled"; ai?: never } | { aiMode: "enabled"; ai: RentalHostAiSetup<Binding> })): RentalHostAssembly<Binding, Additional> {
   const lock = CoreDeploymentLockSchema.parse(input.lock);
   if (input.aiMode === "disabled" && (input.ai || (lock.dataCapabilities?.length ?? 0) > 0)) {
@@ -113,12 +113,13 @@ export function composeRentalApplication<Binding = never, Additional = unknown>(
     observations: observation(transaction)
   });
   const deploymentForTransaction = (transaction: Pick<CoreHostSqlTransaction, "$queryRaw">) => catalogueForTransaction(transaction).availability;
+  const admissionForTransaction = createMysqlCoreDeploymentAdmission;
   const rental = createRentalApplication({ database, configuration, aiMode: input.aiMode,
     fileCleanupAuthority: createRentalFileCleanupAuthority({ deploymentForTransaction,
       ...(input.aiMode === "enabled" ? { knowledge: input.ai.fileCleanupKnowledge } : {}) }),
     participants: input.aiMode === "enabled" ? input.ai.participants : { readInspectionMedia: readBoundedMedia },
     workerAuthority: foundation => createRentalWorkerAuthority<RentalDatabaseTransaction>({
-      database, term: dependencies.term, configuration: foundation.coreConfiguration, deploymentForTransaction
+      database, term: dependencies.term, configuration: foundation.coreConfiguration, deploymentForTransaction, admissionForTransaction
     })
   });
   const platformHost = composeRentalPlatformHost<RentalDatabaseTransaction>({ database,
@@ -141,7 +142,8 @@ export function composeRentalApplication<Binding = never, Additional = unknown>(
   const core = composePlatformCoreApplication({ ...dependencies, users: rental.authSource, catalogue,
     authorizeContainer: platformHost.authorizeContainer,
     platformRemoval: createRentalCoreRemovalSource({ database,
-      ...(input.readAdmission ? { readAdmission: input.readAdmission } : {}) }) });
+      readAdmission: coreId => database.$transaction(async transaction =>
+        (await admissionForTransaction(transaction).readCurrent(coreId)).state, { isolationLevel: "ReadCommitted" }) }) });
   core.session = composeRentalCoreSessionReader({ database, authSource: rental.authSource, catalogue });
   const packages = composePlatformCorePackageAssembly({ database, users: rental.authSource, catalogue,
     audit: createPlatformCorePackageAudit<RentalDatabaseTransaction>(),
@@ -156,7 +158,7 @@ export function composeRentalApplication<Binding = never, Additional = unknown>(
   const authorization = createRentalAuthorization(shared);
   const guard = new authorization.Guard(rental.auth, rental.foundation.capabilities, rental.client.auth,
     rental.client.rateLimit, database, rental.subscriptions);
-  const accessInput = { database, authorization,
+  const accessInput = { database, authorization, admissionForTransaction,
     recoveryAuthority: createRentalRecoveryAuthority({ auth: rental.auth, clientAuth: rental.client.auth,
       corporateHistory: { access: rental.enterprise.access, orders: rental.enterprise.orders },
       originalHistory: { files: rental.integrations.fileAccess, approvals: rental.enterprise.approvals,
@@ -173,6 +175,7 @@ export function composeRentalApplication<Binding = never, Additional = unknown>(
   // AI 的数据准入只作用于实际 AI 请求，普通 Rental 不因可选能力未就绪而停业。
   // 两个范围复用同一数据库、Auth/ClientAuth、Guard 和原 Tenant/Core 锁；不能嵌套或相互借用。
   const aiAccess = input.aiMode === "enabled" ? createRentalApplicationAccess({ ...accessInput,
+    deploymentContinuation: input.ai.deploymentContinuation,
     deploymentForTransaction: transaction => {
       const current = catalogueForTransaction(transaction);
       return { requireRegistered: current.availability.requireRegistered,
@@ -181,7 +184,7 @@ export function composeRentalApplication<Binding = never, Additional = unknown>(
           await current.requireDataCapabilityAvailable("ai-native");
         } };
     } }) : undefined;
-  const publicAccess = createRentalPublicApplicationAccess({ database, authorization, deploymentForTransaction });
+  const publicAccess = createRentalPublicApplicationAccess({ database, authorization, deploymentForTransaction, admissionForTransaction });
   const callbackAccess = createRentalPaymentCallbackAccess({ database, deploymentForTransaction });
   const customers = createRentalCustomerManagementApplication(rental);
   const ai = input.aiMode === "enabled" ? input.ai.bind({ rental, guard, customers }) : undefined;

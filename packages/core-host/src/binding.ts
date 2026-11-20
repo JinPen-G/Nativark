@@ -34,6 +34,8 @@ export interface CoreBindingLease {
   canReadOriginal: boolean;
   /** 原收据不存在时核定来源；复用现有绑定也须核定，但不会重新初始化。 */
   beforeMutation?(): Promise<void>;
+  /** 只在当前范围没有绑定时调用，旧绑定复用及原收据读取不重新取得新初始化准入。 */
+  beforeInitialization?(): Promise<void>;
   revalidate(): Promise<void>;
 }
 export interface CoreBindingExecution {
@@ -95,6 +97,7 @@ export class CoreBindingService {
           throw new CoreAccessError("core_unavailable", "原绑定数据版本不在当前Core可读范围");
         binding = existing;
       } else {
+        await lease.beforeInitialization?.();
         binding = CoreBindingSchema.parse({ ...scope, bindingId: randomUUID(), revision: 1,
           dataVersion: registration.manifest.data.version });
         if (registration.server.initialization)

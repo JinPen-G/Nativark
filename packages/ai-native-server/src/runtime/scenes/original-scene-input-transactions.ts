@@ -16,6 +16,7 @@ import type { AiTaskCredentialSource } from '../task-current-action.authority';
 import { originalIdentityHash, type AiSceneCreationRule } from '../task-request/original-request.authority';
 import type { AiOriginalRequestSaveParticipant } from '../task-request/prisma-original-request.repository';
 import type { OriginalSceneTransactionDependencies } from './original-scene-transactions';
+import { holdAiTaskDeploymentAdmission } from '../task-transaction-authority';
 
 interface OriginalSceneInputTransactionDependencies {
   credentials: AiTaskCredentialSource;
@@ -91,6 +92,7 @@ export function createOriginalSceneInputTransactions(input: OriginalSceneInputTr
         await live();
       };
       await current(lease.user);
+      await holdAiTaskDeploymentAdmission(tx, 'new_work');
       for (const orderId of orderIds) await ports.orders.lockOrder(tenantId, orderId, tx);
       const resources = async () => {
         for (const orderId of orderIds) {

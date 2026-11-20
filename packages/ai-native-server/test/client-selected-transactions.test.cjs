@@ -8,7 +8,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { createRequire } = require('node:module');
 const { randomUUID } = require('node:crypto');
-const { load, loader, shared, identity, runtime, aiPersistenceScopeColumns } = require('./original-scene-transactions.test.cjs');
+const { load, loader, shared, identity, runtime, aiPersistenceScopeColumns, deploymentContinuation } = require('./original-scene-transactions.test.cjs');
 const root = path.resolve(__dirname, '../../..');
 // Reuse the original ClientAuth fixture definitions without executing its test
 // main or modifying any assertion. Production code is loaded unmodified.
@@ -31,6 +31,7 @@ const { ClientApiService } = load('packages/rental-core/src/mysql-client-applica
 const { RentalCoreFactRepository } = load('packages/rental-core/src/mysql-core-facts.ts');
 const { createRentalAuthorization } = load('packages/rental-core/src/http-auth.ts');
 const { createRentalApplicationAccess } = load('packages/rental-core/src/application-access.ts');
+const { createMysqlCoreDeploymentAdmission } = load('packages/core-host/src/mysql-deployment-admission.ts');
 const { captureRentalClientInternalAuthority, captureRentalInternalAuthority } = load('packages/rental-core/src/application-internal-authority.ts');
 const { createAiGuardedClientSession } = load('packages/ai-native-server/src/runtime/client-scene.composition.ts');
 const { composeStandardClientBookingEntry, WebsiteClientEntryController, WechatClientEntryController, AI_WEBSITE_ENTRY, AI_WECHAT_ENTRY } =
@@ -73,7 +74,7 @@ function fixture(channel = 'web', options = {}) {
       rentalAmount: 100, serviceAmount: 0, discountAmount: 0, couponAmount: 0, depositAmount: 20, preAuthAmount: 0, finalPayableAmount: 100,
       startAt: now, endAt: expiresAt, createdAt: now, updatedAt: now, lines: [], reservations: [], allocations: [], currency: 'CNY' }],
   }, { aiTask: [['id'], ['scopeId', 'audience', 'ownerKind', 'ownerId', 'creationKey']], aiClientSceneMaterial: [['id']] });
-  const state = { grant: 'enabled', beforeQuery: undefined, beforeWrite: undefined, lost: undefined,
+  const state = { grant: 'enabled', admission: 'accepting', beforeQuery: undefined, beforeWrite: undefined, lost: undefined,
     scope: undefined, authRows, events: [], inWrite: false, guardCalls: 0 };
   const wrap = (reader, authReader, owner, readOnly) => {
     const rawQuery = reader.$queryRaw, rawExecute = reader.$executeRaw;
@@ -85,6 +86,13 @@ function fixture(channel = 'web', options = {}) {
       if (readOnly) assert(!/FOR UPDATE|LOCK IN SHARE MODE/u.test(sql), '只读快照不能取行锁');
       state.events.push({ owner, sql, identity: identity.getRequestIdentity() });
       await state.beforeQuery?.(sql, reader, owner);
+      if (sql.includes('FROM SystemParameterSet') && q.values.includes('core-deployment-admission:rental')) {
+        assert(sql.endsWith('LOCK IN SHARE MODE'));
+        assert.notEqual(owner, 'root', '部署准入锁必须参加原事务');
+        return [{ id: 'admission-rental', tenantId: 'tenant_platform', module: 'core-deployment-admission:rental',
+          versionNo: 1, status: 'effective', operator: 'offline-test', content: { coreId: 'rental',
+            state: state.admission, revision: 1, operationId: 'admission-a' } }];
+      }
       if (/FROM (Tenant|customer_profiles|customer_accounts|client_auth_sessions|customer_memberships) /u.test(sql)
         && sql.endsWith('FOR UPDATE')) {
         assert(authReader, '会话行锁必须在原事务中');
@@ -156,6 +164,8 @@ function fixture(channel = 'web', options = {}) {
   guard.canActivate = (...args) => { state.guardCalls++; return canActivate(...args); };
   const access = createRentalApplicationAccess({ database: db, authorization,
     term: { requireNewBusiness: async () => { throw Error('本片不执行租赁业务'); } },
+    admissionForTransaction: createMysqlCoreDeploymentAdmission,
+    deploymentContinuation: (method, url) => deploymentContinuation.isRoute({ method, url }),
     deploymentForTransaction: () => ({ requireAvailable: async () => {} }) });
   const orders = new RentalCoreFactRepository(db, { ...identity,
     resolveWorkspaceId: async (_tx, tenantId) => { assert.equal(tenantId, identity.getRequestTenantId()); return identity.getRequestWorkspaceId(); } });
@@ -321,6 +331,13 @@ async function main() {
       assert.equal(f.state.aiTask[0].ownerId, 'customer');
       assert.equal(f.state.aiClientSceneMaterial[0].material.__aiBody, 'rental-os-ai-body-1');
       assert.equal((await f.invoke('createTask', taskCommand)).task.taskId, created.task.taskId);
+      f.state.admission = 'stopped';
+      await assert.rejects(f.invoke('prepareOrderMaterial', materialCommand('stopped')));
+      await assert.rejects(f.invoke('createTask', { ...taskCommand, creationKey: 'stopped-task' }));
+      assert.equal((await f.invoke('readOrderMaterialReceipt', command)).materialRef, material.materialRef);
+      assert.equal((await f.invoke('readTaskCreation', taskCommand)).task.taskId, created.task.taskId);
+      assert.equal(f.state.aiTask.length, 1); assert.equal(f.state.aiRun.length, 1);
+      f.state.admission = 'accepting';
       const transactions = [...new Set(f.state.events.filter(event => event.sql?.endsWith('FOR UPDATE')).map(event => event.owner))];
       for (const owner of transactions) {
         const events = f.state.events.filter(event => event.owner === owner && event.sql).map(event => event.sql);
@@ -474,6 +491,7 @@ async function main() {
       const original = f.state.aiGatewayInvocation.filter(row => row.taskId === taskId).map(row => [row.id, row.callId]);
       const reservations = f.state.aiBudgetReservation.filter(row => original.some(([, callId]) => callId === row.callId)).map(row => row.id);
       assert.equal(original.length, 1); assert.equal(reservations.length, 1);
+      f.state.admission = 'stopped';
       f.state.aiClientTaskPolicy[0].allowExecute = false;
       // The original recovery timing writer still requires its transition
       // policy. Revocation may deny recovery; it never authorizes redispatch.

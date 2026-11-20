@@ -7,7 +7,7 @@ module.exports = async function runCases({ t, lock }) {
   const { createRentalAuthorization } = require('@rental-os/rental-core/http-auth');
   const { createRentalStaffPolicy } = require('@rental-os/rental-core/staff-api-policy');
   const { RENTAL_AI_CONTROLLERS, RENTAL_AI_INSPECTION_OPERATIONS, RENTAL_AI_MOUNTED_REQUESTS,
-    createRentalAiHttpPolicy } = require('../src/ai-http-policy.ts');
+    createRentalAiHttpPolicy, rentalAiDeploymentContinuationSelector } = require('../src/ai-http-policy.ts');
   const { AiOriginalQuoteModelExecutionController, AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS,
     AiScenePlanPolicyController, AiOriginalTaskActionPolicyController, AI_SCENE_PLAN_POLICIES, AI_ORIGINAL_TASK_ACTION_POLICIES,
     AiOriginalSceneModelActionsController, AiOriginalSceneModelController } =
@@ -17,6 +17,36 @@ module.exports = async function runCases({ t, lock }) {
   const { AiOriginalOrderReadController, AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS } =
     require('@rental-os/ai-native-server/runtime/scenes/original-order-read.controller');
   const { createRentalAiOpenApi } = require('../src/ai-openapi.ts');
+  await t.test('部署停新只保留原登记历史/控制/收尾路径，普通新工作仍关闭', () => {
+    const policy = createRentalAiHttpPolicy(), selector = rentalAiDeploymentContinuationSelector(policy);
+    const check = (controllerName, name, expected) => {
+      const route = policy.routes.find(route => route.controller.name === controllerName && route.handlerName === name);
+      assert(route, controllerName + '.' + name);
+      const url = '/api' + route.path.replace(/:[^/]+/gu, 'original-a');
+      assert.equal(selector.isHandler(route.controller, route.handler), expected, controllerName + '.' + name);
+      assert.equal(selector.isRoute({ method: route.method, url }), expected, url);
+      assert.equal(selector.isRoute({ method: 'DELETE', url }), false);
+      assert.equal(selector.isRoute({ method: route.method, url: url + '/unexpected' }), false);
+      assert.equal(selector.isRoute({ method: route.method, url: url + '?deploymentContinuation=true&originalRecovery=true' }), expected);
+    };
+    for (const name of ['snapshot', 'stop', 'decision', 'decisionReceipt']) check('AiTaskCenterController', name, true);
+    for (const name of ['continue', 'resumeInput', 'continueInput']) check('AiTaskCenterController', name, false);
+    for (const name of ['recover', 'reconcile', 'requestCancel', 'readExecution']) check('AiOriginalOpeningModelExecutionController', name, true);
+    for (const name of ['start', 'takeover']) check('AiOriginalOpeningModelExecutionController', name, false);
+    for (const name of ['readOrderMaterialReceipt', 'readTaskCreation', 'recoverTaskModel', 'reconcileTaskModel'])
+      check('RentalWebsiteClientEntryController', name, true);
+    for (const name of ['prepareOrderMaterial', 'createTask', 'startTaskModel', 'submitTaskInput', 'continueTaskInput'])
+      check('RentalWebsiteClientEntryController', name, false);
+    const inspection = policy.routes.find(route => route.controller.name === 'StaffInspectionAssistController' && route.handlerName === 'consume');
+    assert(inspection); assert.equal(selector.isHandler(inspection.controller, inspection.handler), false);
+    for (const [operation, expected] of [['draft-read', true], ['submission-read', true], ['submission-preparation', true],
+      ['draft-create', false], ['submission-prepare', false], ['submission-submit', false], ['evidence-bind', false], ['unknown', false]]) {
+      const request = { method: inspection.method, url: '/api' + inspection.path.replace(':operation', operation) };
+      assert.equal(selector.isRoute(request), expected, operation);
+      assert.equal(selector.isHandler(inspection.controller, inspection.handler, request), expected);
+    }
+    assert.equal(selector.isRoute({ method: 'POST', url: '/api/rental/v1/unknown?recover=true' }), false);
+  });
   await t.test('实际 AI 路由具有原权限、正确成功状态和完整文档引用', () => {
     const authorization = createRentalAuthorization(shared), staff = createRentalStaffPolicy(shared);
     const policy = createRentalAiHttpPolicy(authorization);

@@ -537,6 +537,25 @@ async function main() {
       assert.equal(sent(), 2);
     });
   });
+  await test('部署停新后原报价恢复保留同Run/Step/Plan及原计量，不重新派发', async () => {
+    const { f, controller, taskId, sent } = successfulQuote;
+    const identities = async () => ({
+      runs: (await f.db.aiRun.findMany({ where: { taskId }, orderBy: { sequence: 'asc' } })).map(row => row.id),
+      steps: (await f.db.aiStep.findMany({ where: { taskId }, orderBy: { id: 'asc' } })).map(row => row.id),
+      plans: (await f.db.aiTaskRunPlan.findMany({ where: { taskId }, orderBy: { runId: 'asc' } })).map(row => [row.runId, row.planHash]),
+      calls: (await f.db.aiGatewayInvocation.findMany({ where: { taskId }, orderBy: { callId: 'asc' } })).map(row => row.callId)
+    });
+    const before = await identities(), sends = sent();
+    f.state.admission = 'stopped';
+    try {
+      await f.invoke(async request => {
+        const result = await controller.recover(request, reference);
+        assert.equal(result.kind, 'run_outcome');
+        assert.equal(result.outcome.status, 'paused');
+      }, { recovery: true });
+      assert.deepEqual(await identities(), before); assert.equal(sent(), sends);
+    } finally { f.state.admission = 'accepting'; }
+  });
   assert.equal(fs.existsSync(path.resolve(__dirname, '../../../output/.tmp/dev2-original-scene-transactions')), false);
   console.log(JSON.stringify({ checks, database: 'rollback-memory-transport', realModels: 0, diskOutputs: 0 }));
 }

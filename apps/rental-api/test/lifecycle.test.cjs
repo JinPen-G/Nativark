@@ -67,6 +67,7 @@ function fixture(configuration = {}) {
     participants: { readInspectionMedia: async () => { throw Error('lifecycle must not read inspection media'); } },
     workerAuthority: foundation => createRentalWorkerAuthority({ database, configuration: foundation.coreConfiguration,
       term: { requireNewBusiness: async () => { throw Error('empty lifecycle fixture has no business grant'); } },
+      admissionForTransaction: () => { throw Error('empty lifecycle fixture has no deployment admission'); },
       deploymentForTransaction: () => { throw Error('empty lifecycle fixture has no deployment grant'); } }) });
   const lifecycle = new RentalApplicationLifecycle(application,
     async () => { f.trace.push('disconnect'); f.disconnects++; }, async () => { f.trace.push('connect'); f.connects++; });

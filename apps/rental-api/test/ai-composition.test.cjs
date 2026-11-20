@@ -571,6 +571,13 @@ function knowledgeFixture(selectedLock = lock) {
       if (Array.isArray(q)) q = require('@rental-os/platform-server/prisma-runtime').prismaRuntime.sql(q, ...values);
       const text = q.sql.replace(/\s+/gu, ' ').trim();
       state.queries.push(text);
+      if (text.includes('FROM SystemParameterSet') && q.values.includes('core-deployment-admission:rental')) {
+        assert(text.endsWith('LOCK IN SHARE MODE'));
+        assert.equal(state.depth, 1, '部署准入共享锁参加原事务');
+        return [{ id: 'admission-rental', tenantId: 'tenant_platform', module: 'core-deployment-admission:rental',
+          versionNo: 1, status: 'effective', operator: 'offline-test', content: { coreId: 'rental', state: 'accepting',
+            revision: 1, operationId: 'admission-a' } }];
+      }
       if (text.includes('FROM Tenant')) return [{ id: 'tenant-a', status: 'active' }];
       if (text.includes('FROM platform_core_access_locks'))
         return [{ tenantId: 'tenant-a', coreId: 'rental' }];
@@ -611,6 +618,7 @@ function knowledgeFixture(selectedLock = lock) {
   const access = createRentalApplicationAccess({
     database: f.db,
     authorization: f.authorization,
+    admissionForTransaction: require('@rental-os/core-host/mysql-deployment-admission').createMysqlCoreDeploymentAdmission,
     term: {
       requireNewBusiness: async () => {
         throw Error('unexpected term');

@@ -6,7 +6,7 @@ import { getRequestIdentity, runWithRequestIdentity } from '@rental-os/platform-
 import { hasRentalBusinessTenantFence, assertRentalBusinessTenantAccessAfterLock } from '@rental-os/rental-core/mysql-business-fence';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from '../../task-errors';
-import { withAiTaskTransactionAuthority, type AiTaskTransactionReference } from '../task-transaction-authority';
+import { holdAiTaskDeploymentAdmission, withAiTaskTransactionAuthority, type AiTaskTransactionReference } from '../task-transaction-authority';
 import { InspectionActionAuthority } from './inspection-action.authority';
 import { InspectionTemplateService } from './inspection-template.service';
 import { inspectionRecognitionInputSchema } from './inspection-draft.service';
@@ -47,12 +47,14 @@ export async function withInspectionTaskTransactions<T>(dependencies: Dependenci
         await authority.assertTransactionScope(target, scope, user, tx, needsBindPermission ? 'bind' : 'read');
       };
       await current(lease.user);
+      const deploymentAdmission = await holdAiTaskDeploymentAdmission(tx, original.kind === 'task_control' ? 'task_control' : 'new_work');
       await orders.lockOrder(scope.tenantId, target.orderId, tx);
       const order = await orders.findOrder(scope.tenantId, target.orderId, tx), locations = identity.locationScope;
       const location = target.stage === 'pickup' ? order?.fulfillmentLocationId : order?.returnLocationId ?? order?.fulfillmentLocationId;
       if (!order || order.id !== target.orderId || order.tenantId !== scope.tenantId || !location || !locations
         || locations.mode === 'selected' && !locations.locationIds.includes(location)) throw denied();
       const checkReference = async (key: AiTaskTransactionReference) => {
+        if (key.kind !== 'task_control') deploymentAdmission.requireNewWork();
         if (key.kind !== 'task_control' && !needsBindPermission) {
           needsBindPermission = true;
           await current(lease.user);

@@ -133,6 +133,59 @@ export function createRentalAiHttpPolicy(authorization = createRentalAuthorizati
     authorization, declarations });
 }
 
+/** 只免除部署停新检查，不免当前身份、租户/Core、对象或物理可用性。
+ * 明确原处理器和原路径构成闭集；混合 decision 仍由原事务区分拒绝与新批准，
+ * recover/reconcile 仍由原 lease/receipt 仓储裁定，不能据此创建或重新派发。 */
+export function rentalAiDeploymentContinuationSelector(policy: ReturnType<typeof createRentalAiHttpPolicy>) {
+  const selected = new Map<Function, readonly Function[]>([
+    [AiOriginalScenesController, [scene.read, scene.reconcile, scene.reconcileReissue, scene.material,
+      scene.materialV2, scene.sourceV2, scene.recovery, scene.quoteReview, scene.quoteReceipt, scene.compareOriginalQuotes]],
+    [AiOriginalSceneRecoveryController, [recovery.readTaskPage, recovery.readTaskEvents, recovery.readTaskUsage,
+      recovery.readTaskScene, recovery.readTaskPerformance, recovery.readInput, recovery.readRecoverySnapshot,
+      recovery.readTakeoverReceipt, recovery.readCancellationReceipt, recovery.readCancellationSettlementReceipt,
+      recovery.readAnswer, recovery.readModelResult, recovery.readQuoteGoalCandidates, recovery.reopenModelSource,
+      recovery.reopenOpeningModelSource, recovery.requestCancellationIntent, recovery.settleUnstartedCancellation,
+      recovery.settleReleasedInputCancellation]],
+    [AiOriginalQuoteModelExecutionController, [quote.readQuotePreparation, quote.readClarifiedQuoteReceipt,
+      quote.readExecution, quote.reconcile, quote.recover, quote.requestCancel]],
+    [AiOriginalOpeningModelExecutionController, [opening.readExecution, opening.reconcile, opening.recover, opening.requestCancel]],
+    [AiOriginalOrderReadController, [orders.readPreparation, orders.readAnswer, orders.readTakeoverReceipt,
+      orders.readOrderResult, orders.readTaskScene, orders.readNextSteps, orders.readTaskSnapshot,
+      orders.readCancellationReceipt, orders.readCancellationSettlementReceipt, orders.readModelResult,
+      orders.reopenModelSource, orders.recover, orders.requestCancel, orders.settleUnstartedCancellation]],
+    [AiTaskCenterController, [center.list, center.snapshot, center.events, center.stopReceipt, center.usage,
+      center.usageSummary, center.outcomes, center.confirmation, center.review, center.decisionReceipt,
+      center.business, center.inputReceipt, center.result, center.source, center.performance, center.input,
+      center.stop, center.decision]],
+    [AiScenePlanPolicyController, [plans.read]],
+    [AiOriginalTaskActionPolicyController, [actions.read, actions.clear]],
+    [AiModelSettingsController, [settings.operation]],
+    ...[RentalWebsiteClientEntryController, RentalWechatClientEntryController].map(controller => [controller,
+      [controller.prototype.readOrderMaterialReceipt, controller.prototype.readTaskCreation,
+        controller.prototype.readTaskInput, controller.prototype.readTaskInputReceipt,
+        controller.prototype.readTaskModelResult, controller.prototype.recoverTaskModel,
+        controller.prototype.reconcileTaskModel]] as [Function, readonly Function[]])
+  ]);
+  const inspectionReads = new Set(['fulfillment-receipt-read', 'history-read', 'receipt-host-read',
+    'host-read', 'template-read', 'draft-read', 'draft-operation', 'submission-preparation', 'submission-read']);
+  const routes = policy.routes.flatMap(route => {
+    if (selected.get(route.controller)?.includes(route.handler)) return [{ ...route, path: route.path }];
+    if (route.controller !== StaffInspectionAssistController || route.handler !== StaffInspectionAssistController.prototype.consume)
+      return [];
+    return RENTAL_AI_INSPECTION_OPERATIONS.filter(operation => inspectionReads.has(operation))
+      .map(operation => ({ ...route, path: route.path.replace(':operation', operation) }));
+  }).map(route => ({ ...route, pattern: new RegExp(`^${route.path.split('/').map(segment => segment.startsWith(':')
+    ? '[^/]+' : segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('/')}$`, 'u') }));
+  const matches = (route: typeof routes[number], request: { method: string; url: string }) =>
+    route.method === request.method.toUpperCase() && route.pattern.test(matchableRequestPath(request.url));
+  return Object.freeze({
+    isHandler: (controller: Function, handler: Function, request?: { method: string; url: string }) =>
+      routes.some(route => route.controller === controller && route.handler === handler
+        && (request ? matches(route, request) : controller !== StaffInspectionAssistController)),
+    isRoute: (request: { method: string; url: string }) => routes.some(route => matches(route, request))
+  });
+}
+
 export function rentalAiRouteSelector(policy: ReturnType<typeof createRentalAiHttpPolicy>) {
   const routes = policy.routes.filter(route => RENTAL_AI_CONTROLLERS.some(controller => route.controller === controller)
     || route.controller === StaffUploadsController && route.handler === StaffUploadsController.prototype.bindInspectionEvidence);

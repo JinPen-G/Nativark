@@ -1,7 +1,7 @@
 /** 当前登录成员的Core使用目录与租户管理候选；仅投影授权事实，不代替业务范围/就绪核验。 */
 import { z } from "zod";
 import { CoreRegisteredSummarySchema } from "./management-http";
-import { MemberCoreAssignmentSchema, TenantCoreGrantSchema } from "./lifecycle";
+import { MemberCoreAssignmentSchema, TenantCoreGrantSchema, CoreDeploymentAdmissionObservationSchema } from "./lifecycle";
 import { coreOpenApiSchema } from "./schema";
 import type { CoreOpenApiContribution } from "./openapi";
 
@@ -10,6 +10,8 @@ export const CoreSessionEntrySchema = z.object({
   core: CoreSessionSummarySchema,
   grant: TenantCoreGrantSchema,
   assignment: MemberCoreAssignmentSchema,
+  /** 当前逻辑部署准入；保留原授权和权限配置，停新不能伪装为没有成员分配。 */
+  admission: CoreDeploymentAdmissionObservationSchema,
   /** 当前角色持有的本Core精确权限码，不返回平台通配符或其他Core权限。 */
   permissions: z.array(z.string().min(1))
 }).strict();
@@ -24,7 +26,7 @@ export const CoreSessionContextSchema = z.object({
 }).strict().superRefine((context, issues) => {
   const ids = new Set<string>();
   context.cores.forEach((entry, index) => {
-    if (ids.has(entry.core.id) || entry.grant.coreId !== entry.core.id || entry.assignment.coreId !== entry.core.id
+    if (ids.has(entry.core.id) || entry.grant.coreId !== entry.core.id || entry.assignment.coreId !== entry.core.id || entry.admission.coreId !== entry.core.id
       || entry.grant.tenantId !== context.tenantId || entry.assignment.tenantId !== context.tenantId
       || entry.assignment.userId !== context.subjectId || entry.grant.state !== "enabled" || entry.assignment.state !== "assigned"
       || entry.permissions.some(code => !code.startsWith(`${entry.core.id}:`)))
@@ -45,7 +47,8 @@ export const CORE_SESSION_HTTP = { method: "GET", path: "platform/core-host/sess
 /** 页面只按当前目录过滤已登记的操作，最终授权与对象范围仍由原服务端执行。 */
 export function canUseCorePage(context: CoreSessionContext, coreId: string, permissions: readonly { resource: string; action: string }[]): boolean {
   const entry = context.cores.find(item => item.core.id === coreId);
-  return Boolean(entry && permissions.every(permission => entry.permissions.includes(`${coreId}:${permission.resource}:${permission.action}`)));
+  return Boolean(entry?.admission.state === "accepting"
+    && permissions.every(permission => entry.permissions.includes(`${coreId}:${permission.resource}:${permission.action}`)));
 }
 
 export function createCoreSessionOpenApi(): CoreOpenApiContribution {

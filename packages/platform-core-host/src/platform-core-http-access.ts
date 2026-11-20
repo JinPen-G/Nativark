@@ -27,6 +27,7 @@ export function composePlatformCoreHttpAccess<Tx extends PlatformCoreTransaction
         throw new CoreAccessError("denied", "当前成员缺少所登记Core操作的权限");
       if (policy.purpose === "business") {
         await access.requireMember(transaction, user, policy.coreId);
+        await access.requireBusinessAdmission(transaction, policy.coreId);
         if (policy.startsNewBusiness) await access.requireNewBusiness(transaction, actor.tenantId);
       }
       // 原收据不重新开放普通业务；本人对象可见性由Core收据服务核，不借粗准入读取他人结果。

@@ -4,7 +4,7 @@
 import { createHash } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { CoreBindingSchema, CoreScopeReferenceSchema, TenantCoreGrantSchema, isCoreVersionSupported } from "@rental-os/core-contracts";
-import { CoreAccessError, coreBindingScopeKey, type CoreDeploymentAvailability } from "@rental-os/core-host";
+import { CoreAccessError, coreBindingScopeKey, type CoreDeploymentAvailability, type CoreDeploymentAdmission } from "@rental-os/core-host";
 import type { CoreHostSqlClient } from "@rental-os/core-host/mysql";
 import type { PlatformCoreTermPolicy, PlatformCoreTransaction } from "@rental-os/platform-core-host";
 import { RENTAL_APPLICATION_JOB_DESCRIPTORS, type RentalApplicationJobRequest,
@@ -32,6 +32,9 @@ export interface RentalWorkerAuthorityDependencies<Tx extends PlatformCoreTransa
   /** 用传入事务创建原部署观察器的可用性视图。公共 requireAvailable 自身没有事务参数，
    * 因此不能传绑定到另一个数据库连接的 availability 来声称完成同事务复验。 */
   deploymentForTransaction(transaction: Tx): CoreDeploymentAvailability;
+  /** New-work admission holds the canonical row on this original transaction;
+   * the five registered closeout jobs do not acquire an accepting requirement. */
+  admissionForTransaction(transaction: Tx): CoreDeploymentAdmission;
 }
 
 /** 只为原登记系统作业核验当前范围。没有成员主体的系统作业不冒充原用户委托任务。
@@ -43,8 +46,9 @@ export function createRentalWorkerAuthority<Tx extends PlatformCoreTransaction>(
   input: RentalWorkerAuthorityDependencies<Tx>
 ): RentalApplicationWorkerAuthority<Tx> {
   if (typeof input?.database?.$transaction !== "function" || typeof input.term?.requireNewBusiness !== "function"
-    || typeof input.configuration?.loadWorkspaceSnapshot !== "function" || typeof input.deploymentForTransaction !== "function") {
-    throw new CoreAccessError("core_unavailable", "Rental 作业缺少真实事务、订阅、配置或部署授权参加者");
+    || typeof input.configuration?.loadWorkspaceSnapshot !== "function" || typeof input.deploymentForTransaction !== "function"
+    || typeof input.admissionForTransaction !== "function") {
+    throw new CoreAccessError("core_unavailable", "Rental 作业缺少真实事务、订阅、配置或部署/停新参加者");
   }
   const configurationRead = new AsyncLocalStorage<{ readonly transaction: Tx; readonly requestKey: string; readonly parentKey: string; active: boolean }>();
 
@@ -110,6 +114,12 @@ export function createRentalWorkerAuthority<Tx extends PlatformCoreTransaction>(
         if (!binding?.success || coreBindingScopeKey(binding.data) !== scopeKey
           || !isCoreVersionSupported(binding.data.dataVersion, RENTAL_DATA_READABLE)) {
           throw new CoreAccessError("denied", "Rental 作业原空间绑定缺失、范围不符或数据版本不兼容");
+        }
+        if (!recoveryJobs.has(jobId)) {
+          const admission = input.admissionForTransaction(tx);
+          if (typeof admission?.requireAccepting !== "function")
+            throw new CoreAccessError("core_unavailable", "Rental 新业务作业缺少同事务的部署停新读取器");
+          await admission.requireAccepting(coreId);
         }
         if (includeWorkspace && !reading) {
           // 原逐单执行器已经持此订单锁；运输前短事务则在这里先锁原订单。

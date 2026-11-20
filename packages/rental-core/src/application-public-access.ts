@@ -6,7 +6,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import { sqltag as sql, type Sql } from "@prisma/client/runtime/library";
 import { CoreBindingSchema, CoreScopeReferenceSchema, TenantCoreGrantSchema, isCoreVersionSupported } from "@rental-os/core-contracts";
-import { CoreAccessError, coreBindingScopeKey, type CoreDeploymentAvailability } from "@rental-os/core-host";
+import { CoreAccessError, coreBindingScopeKey, type CoreDeploymentAvailability, type CoreDeploymentAdmission } from "@rental-os/core-host";
 import type { CoreHostSqlTransaction } from "@rental-os/core-host/mysql";
 import { getRequestIdentity } from "@rental-os/platform-server/request-identity";
 import { matchableRequestPath } from "@rental-os/platform-server/request-path";
@@ -42,6 +42,9 @@ export interface RentalPublicApplicationAccessDependencies {
   };
   authorization: Pick<ReturnType<typeof createRentalAuthorization>, "isClientPublicRoute">;
   deploymentForTransaction(reader: Pick<CoreHostSqlTransaction, "$queryRaw">): CoreDeploymentAvailability;
+  /** Canonical deployment admission read on the original transaction. No platform
+   * Tenant lock, default accepting state, or physical-availability substitution. */
+  admissionForTransaction(reader: Pick<CoreHostSqlTransaction, "$queryRaw">): CoreDeploymentAdmission;
 }
 
 type Evidence = {
@@ -97,8 +100,8 @@ export function acknowledgeRentalPublicEmptyResult(kind: "site-resolve" | "logou
 
 export function createRentalPublicApplicationAccess(input: RentalPublicApplicationAccessDependencies) {
   if (typeof input?.database?.$transaction !== "function" || typeof input.authorization?.isClientPublicRoute !== "function"
-    || typeof input.deploymentForTransaction !== "function") {
-    throw new CoreAccessError("core_unavailable", "Rental 公开入口缺少原路由政策、真实事务或部署观察器");
+    || typeof input.deploymentForTransaction !== "function" || typeof input.admissionForTransaction !== "function") {
+    throw new CoreAccessError("core_unavailable", "Rental 公开入口缺少原路由政策、真实事务或部署/停新读取器");
   }
   const owned = new WeakSet<PublicScope>();
   const current = () => {
@@ -169,6 +172,11 @@ export function createRentalPublicApplicationAccess(input: RentalPublicApplicati
     };
     const deployment = input.deploymentForTransaction(reader);
     if (typeof deployment?.requireAvailable !== "function") throw new CoreAccessError("core_unavailable", "Rental 公开入口缺少实际部署观察器");
+    const admission = input.admissionForTransaction(reader);
+    if (typeof admission?.requireAccepting !== "function") throw new CoreAccessError("core_unavailable", "Rental 公开入口缺少同事务的部署停新读取器");
+    // A resolved public target enters ordinary Rental business. Original logout
+    // and unknown-host empty results never bind one and retain their exact paths.
+    await admission.requireAccepting(RENTAL_CORE_ID);
     await deployment.requireAvailable(RENTAL_CORE_ID, tenantId);
     if (target.workspaceId) {
       const workspaces = await transaction.$queryRaw<Array<{ id: string; tenantId: string; status: string }>>(sql`

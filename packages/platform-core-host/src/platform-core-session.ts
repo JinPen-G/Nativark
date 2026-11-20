@@ -4,6 +4,7 @@ import type { PlatformCoreTransaction, PlatformCoreUsers } from "./ports";
 import { CoreSessionContextSchema, CoreSessionSummarySchema, MemberCoreAssignmentSchema, TenantCoreGrantSchema,
   corePermissionCode, type CoreSessionContext } from "@rental-os/core-contracts";
 import type { CoreDeployedCatalogue } from "@rental-os/core-host";
+import { createMysqlCoreDeploymentAdmission } from "@rental-os/core-host/mysql-deployment-admission";
 import type { SystemUserRow } from "@rental-os/platform-contracts";
 import { PlatformPrincipalAuthority } from "@rental-os/platform-server/principal";
 import { hasEffectivePermission } from "@rental-os/platform-server/permission-match";
@@ -65,6 +66,7 @@ export function composePlatformCoreSessionReader<Tx extends PlatformCoreTransact
         const assigned = byCore.get(id);
         if (assigned?.state !== "assigned") continue;
         context.cores.push({ core,
+          admission: await createMysqlCoreDeploymentAdmission(transaction).readCurrent(id),
           grant: TenantCoreGrantSchema.parse({ ...row, revision: Number(row.revision), tenantId: actor.tenantId }),
           assignment: MemberCoreAssignmentSchema.parse({ ...assigned, revision: Number(assigned.revision), tenantId: actor.tenantId, userId: actor.subjectId }),
           permissions: registration.manifest.permissions.map(permission => corePermissionCode(id, permission))

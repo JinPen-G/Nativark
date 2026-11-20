@@ -19,7 +19,7 @@ import type { AiTaskCredentialSource } from './task-current-action.authority';
 import { readOriginalTaskModelProvenance } from './task-request/prisma-original-request.repository';
 import { originalIdentityHash } from './task-request/original-request.authority';
 import { originalBody, parseOriginalRequest } from './task-request/original-request.validation';
-import { withAiTaskTransactionAuthority, type AiTaskTransactionReference } from './task-transaction-authority';
+import { holdAiTaskDeploymentAdmission, withAiTaskTransactionAuthority, type AiTaskTransactionReference } from './task-transaction-authority';
 
 export interface TaskCenterTransactionDependencies {
   auth: Pick<RentalAuthService, 'lockRequestWorkspaceAccess'>;
@@ -27,7 +27,7 @@ export interface TaskCenterTransactionDependencies {
   quotes?: Pick<RentalBusinessFactRepository<Prisma.TransactionClient>, 'findQuote'>;
 }
 export type TaskCenterTransactionDb = Pick<PrismaClient, 'aiTask' | 'aiScope' | 'aiStep' | 'aiRun' | 'aiGatewayInvocation'
-  | 'aiTaskOriginalRequest' | 'aiTaskActionInput' | 'rentalApprovedSettingsChange'>;
+  | 'aiTaskOriginalRequest' | 'aiTaskActionInput' | 'aiTaskRunPlan' | 'rentalApprovedSettingsChange'>;
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const routePermissions = createRentalAuthorization(contracts).requiredPermissions;
@@ -59,7 +59,7 @@ function taskKey(task: Prisma.AiTaskGetPayload<{}>) {
  * Serializable's ordinary Task SELECT must not precede Order with a shared lock. */
 export async function withTaskCenterTransactions<T>(dependencies: TaskCenterTransactionDependencies | undefined,
   db: Partial<TaskCenterTransactionDb>, credentials: AiTaskCredentialSource, taskId: string | undefined,
-  consume: () => Promise<T>): Promise<T> {
+  consume: () => Promise<T>, purpose: 'new_work' | 'original_recovery' = 'new_work'): Promise<T> {
   if (!hasRentalBusinessTenantFence()) return consume();
   if (!taskId) return consume(); // Read-only collections cannot supply a transaction grant.
   if (!id(taskId) || !dependencies?.auth || typeof dependencies.auth.lockRequestWorkspaceAccess !== 'function'
@@ -135,14 +135,34 @@ export async function withTaskCenterTransactions<T>(dependencies: TaskCenterTran
     }
     return materials;
   };
-  const binding = hash({ identity: originalIdentity, taskId });
+  // 原恢复可计量观察耗时，不能增加执行身份。仅服务端已登记的恢复调用选择此目的；
+  // 每个参加事务及其提交前均核对同一 Run/Step/Plan 集合，不靠 HTTP body 放行。
+  const recoveryOrigin = async (reader: TaskCenterTransactionDb) => {
+    if (typeof reader.aiRun.findMany !== 'function' || typeof reader.aiTaskRunPlan?.findMany !== 'function') throw unavailable();
+    const task = await readTask(reader), where = { scopeId: task.scopeId, taskId };
+    const runs = await reader.aiRun.findMany({ where, orderBy: { sequence: 'asc' }, take: 1001,
+      select: { id: true, taskId: true, scopeId: true, sequence: true, actorKind: true, actorId: true,
+        resourceOriginRunId: true, inputReceiptId: true } });
+    const steps = await reader.aiStep.findMany({ where, orderBy: { id: 'asc' }, take: 1001,
+      select: { id: true, taskId: true, scopeId: true, runId: true, actionId: true, requestFingerprint: true,
+        inputRef: true, toolCode: true, toolVersion: true, sequence: true } });
+    const plans = await reader.aiTaskRunPlan.findMany({ where, orderBy: { runId: 'asc' }, take: 1001,
+      select: { taskId: true, scopeId: true, runId: true, planHash: true } });
+    if (!runs.length || runs.length > 1000 || steps.length > 1000 || plans.length > 1000
+      || runs.some(run => run.scopeId !== task.scopeId || run.taskId !== taskId || run.actorKind !== 'USER' || run.actorId !== ownerId)
+      || steps.some(step => step.scopeId !== task.scopeId || step.taskId !== taskId || !runs.some(run => run.id === step.runId))
+      || plans.some(plan => plan.scopeId !== task.scopeId || plan.taskId !== taskId || !runs.some(run => run.id === plan.runId))) throw denied();
+    return hash({ runs, steps, plans });
+  };
+  const originalRecovery = purpose === 'original_recovery' ? await recoveryOrigin(db) : undefined;
+  const binding = hash({ identity: originalIdentity, taskId, purpose });
   return withAiTaskTransactionAuthority({ binding, begin: async (tx, reference) => {
     await live();
-    if ('$transaction' in tx || reference.kind === 'creation') throw denied();
+    if ('$transaction' in tx || reference.kind === 'creation' || originalRecovery !== undefined && reference.kind !== 'task') throw denied();
     const task = await readTask(db), source = await readSource(db, task), business = await readBusinessSteps(db, task);
     if (!source && (!business.length || task.sceneCode !== 'quote_clarification')) throw unavailable();
     const immutableTask = taskKey(task), sourceKey = hash(source);
-    let needsExecutionSource = reference.kind !== 'task_control';
+    let needsExecutionSource = originalRecovery === undefined && reference.kind !== 'task_control';
     const assertExecutionSource = () => {
       if (source && (!Number.isFinite(source.expiresAt) || source.expiresAt <= Date.now())) throw denied();
       if (source?.kind === 'scene' && source.authorizationHash !== originalIdentityHash({
@@ -165,6 +185,8 @@ export async function withTaskCenterTransactions<T>(dependencies: TaskCenterTran
       await assertRentalBusinessTenantAccessAfterLock(tx, tenantId);
     };
     await current(lease.user);
+    const deploymentAdmission = await holdAiTaskDeploymentAdmission(tx,
+      originalRecovery !== undefined || reference.kind === 'task_control' ? 'task_control' : 'new_work');
     const route = source?.kind === 'scene' && source.body.sceneCode === 'order_explanation'
       ? '/rental/v1/orders/' + source.body.input.orderId : source?.kind === 'scene' && source.body.sceneCode === 'opening_diagnosis'
         ? '/rental/v1/tenant-readiness' : '/rental/v1/business-settings';
@@ -204,13 +226,17 @@ export async function withTaskCenterTransactions<T>(dependencies: TaskCenterTran
       const latest = await readTask(tx);
       if (taskKey(latest) !== immutableTask || hash(await readSource(tx, latest)) !== sourceKey
         || hash(await readBusinessSteps(tx, latest)) !== hash(business)) throw denied();
+      if (originalRecovery !== undefined && await recoveryOrigin(tx) !== originalRecovery) throw denied();
     };
     const verifyReference = async (key: AiTaskTransactionReference) => {
       await live();
-      if (key.kind === 'creation') throw denied();
+      if (key.kind === 'creation' || originalRecovery !== undefined && key.kind !== 'task') throw denied();
       // Stop/reject has its own original task-control policy. It cannot mint a
       // new run from expired input; nested new-work references must recheck it.
-      if (key.kind !== 'task_control') needsExecutionSource = true;
+      if (originalRecovery === undefined && key.kind !== 'task_control') {
+        deploymentAdmission.requireNewWork();
+        needsExecutionSource = true;
+      }
       if (needsExecutionSource) assertExecutionSource();
       if (key.kind === 'task' || key.kind === 'task_control') { if (key.taskId !== taskId) throw denied(); }
       else if (key.kind === 'step') {

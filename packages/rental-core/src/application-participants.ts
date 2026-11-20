@@ -227,10 +227,13 @@ class StandardRentalDueJobs<TTransaction extends RentalApplicationParticipantTra
         };
         // 通知短事务复核完整作业权威；payment 父锁只查 Tenant/Core，
         // 原 provider 前短事务/入账 Order 锁后再复核完整空间权威。
+        // 调价不取订单锁：原版本写入和失败记录各自从 Tenant/Core 进入，
+        // 必须在这些原事务持部署准入读锁，不能只依赖批次开始的短准入。
         // 逐单作业保留 facts.lockOrder→current(tx)：完整权威会锁空间，
         // 若提前绑定到幂等执行器的 Tenant fence，就会颠倒原订单→空间锁序。
         // 嵌套 HTTP scope 由 fence 明确拒绝，不能改绑为系统作业身份。
         return request.jobId === "retry_due_notifications" || request.jobId === "expire_payment_intents"
+          || request.jobId === "run_due_price_adjustments"
           ? this.dispatchFence.run(consume) : consume();
       }) }, tenantId, workspaceId);
     this.active.add(running);

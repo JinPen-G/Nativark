@@ -13,6 +13,7 @@ export * from "./platform-core-session";
 export * from "./platform-core-scope";
 export * from "./platform-core-http-access";
 export * from "./platform-core-removal";
+export * from "./platform-core-admission";
 export * from "./platform-core-application";
 export * from "./platform-core-http";
 export * from "./empty-catalogue";

@@ -11,6 +11,35 @@ const id = z.string().min(1).max(200);
 const revision = z.number().int().safe().positive();
 const expectedRevision = z.number().int().safe().nonnegative();
 
+/** 同一公共数据库中的部署准入，与租户授权、物理可用性及排空状态分别保存。
+ * 首次登记必须由当前 SaaS 管理主体明确选择状态，缺行不能推断为开放或已停新。
+ * 收据占用原配置表 revision + 1 版本，给有符号 Int 的上限保留一个位置。 */
+export const CORE_DEPLOYMENT_ADMISSION_MAX_REVISION = 2147483646;
+export const CoreDeploymentAdmissionStateSchema = z.object({
+  coreId: CoreIdSchema,
+  state: z.enum(["accepting", "stopped"]),
+  revision: z.number().int().positive().max(CORE_DEPLOYMENT_ADMISSION_MAX_REVISION),
+  operationId: id
+}).strict();
+export type CoreDeploymentAdmissionState = z.infer<typeof CoreDeploymentAdmissionStateSchema>;
+export const CoreDeploymentAdmissionObservationSchema = z.discriminatedUnion("state", [
+  CoreDeploymentAdmissionStateSchema,
+  z.object({ coreId: CoreIdSchema, state: z.literal("unknown"), reason: z.string().min(1).max(500) }).strict()
+]);
+export type CoreDeploymentAdmissionObservation = z.infer<typeof CoreDeploymentAdmissionObservationSchema>;
+export const CoreDeploymentAdmissionQuerySchema = z.object({ coreId: CoreIdSchema }).strict();
+export const ChangeCoreDeploymentAdmissionSchema = z.object({
+  coreId: CoreIdSchema,
+  state: CoreDeploymentAdmissionStateSchema.shape.state,
+  expectedRevision: z.number().int().nonnegative().max(CORE_DEPLOYMENT_ADMISSION_MAX_REVISION),
+  operationId: id
+}).strict();
+export const CoreDeploymentAdmissionOperationQuerySchema = ChangeCoreDeploymentAdmissionSchema.pick({ coreId: true, operationId: true });
+export const CoreDeploymentAdmissionOperationObservationSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("recorded"), admission: CoreDeploymentAdmissionStateSchema }).strict(),
+  z.object({ status: z.literal("unavailable") }).strict()
+]);
+
 export const CoreScopeReferenceSchema = CoreObjectReferenceSchema.pick({
   coreId: true, tenantId: true, container: true
 });

@@ -56,6 +56,7 @@ export function composePlatformCoreBindings<Tx extends PlatformCoreTransaction>(
         let mutation: { revalidate(): Promise<void> } | undefined;
         return { actor: lease.principal, scope: request.scope, canInitialize: request.purpose === "initialize",
           canReadOriginal: request.purpose === "original_receipt",
+          beforeInitialization: () => access.requireBusinessAdmission(transaction, request.scope.coreId),
           beforeMutation: precondition ? async () => {
             const current = await precondition(transaction, request);
             if (!current || typeof current.revalidate !== "function")

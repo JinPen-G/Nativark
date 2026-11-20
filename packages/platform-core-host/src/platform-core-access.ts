@@ -7,6 +7,7 @@ import { ForbiddenException } from "@nestjs/common";
 import { CoreBindingSchema, MemberCoreAssignmentSchema, TenantCoreGrantSchema,
   type CoreBinding, type CoreScopeReference } from "@rental-os/core-contracts";
 import { coreBindingScopeKey, type CoreDeploymentAvailability } from "@rental-os/core-host";
+import { createMysqlCoreDeploymentAdmission } from "@rental-os/core-host/mysql-deployment-admission";
 import type { SystemUserRow } from "@rental-os/platform-contracts";
 import type { PlatformCoreTermPolicy, PlatformCoreTransaction } from "./ports";
 
@@ -34,6 +35,11 @@ export class PlatformCoreAccess<Tx extends PlatformCoreTransaction> {
   /** 原订阅只对新业务裁定期限，读旧结果和原业务收尾沿各Core的正式规则办理。 */
   async requireNewBusiness(transaction: Tx, tenantId: string): Promise<void> {
     await this.term.requireNewBusiness(transaction, tenantId);
+  }
+
+  /** 部署关闭普通业务入口；原收据和明确登记的收尾由各 Core 另行核验，不经过本门禁。 */
+  async requireBusinessAdmission(transaction: Tx, coreId: string): Promise<void> {
+    await createMysqlCoreDeploymentAdmission(transaction).requireAccepting(coreId);
   }
 
   async binding(transaction: Tx, scope: CoreScopeReference): Promise<CoreBinding | undefined> {

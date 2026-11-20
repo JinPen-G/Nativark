@@ -4,7 +4,7 @@
  */
 import { Body, Controller, Get, HttpCode, HttpException, Inject, Module, Post, type DynamicModule } from "@nestjs/common";
 import { CORE_MANAGEMENT_HTTP, CORE_MANAGEMENT_HTTP_BASE, type CorePrincipal, type CoreRemovalObservation } from "@rental-os/core-contracts";
-import { CoreAccessError, type CoreAccessService, type CoreBindingService } from "@rental-os/core-host";
+import { CoreAccessError, type CoreAccessService, type CoreBindingService, type CoreDeploymentAdmissionService } from "@rental-os/core-host";
 import { z } from "zod";
 
 export interface CoreManagementHttpApplication {
@@ -19,6 +19,8 @@ export interface CoreManagementHttpApplication {
   registered(): Promise<z.infer<typeof CORE_MANAGEMENT_HTTP.registered.response>>;
   /** 只有实际平台依赖读取已提供时装配；缺依赖明确不可用，不补空成功。 */
   removal?(input: unknown): Promise<CoreRemovalObservation>;
+  admission?: { service: Pick<CoreDeploymentAdmissionService, "change" | "readCurrent" | "readOperation">;
+    principals: { current(): CorePrincipal } };
   reads: {
     tenantGrant(input: unknown): Promise<z.infer<typeof CORE_MANAGEMENT_HTTP.readTenantGrant.response>>;
     memberAssignment(input: unknown): Promise<z.infer<typeof CORE_MANAGEMENT_HTTP.readMemberAssignment.response>>;
@@ -87,6 +89,35 @@ export class CoreManagementController {
       if (!this.application.removal) throw new CoreAccessError("core_unavailable", "平台移除依赖读取尚未装配");
       return this.application.removal(body);
     });
+  }
+
+  @Post(CORE_MANAGEMENT_HTTP.changeAdmission.path) @HttpCode(200)
+  changeAdmission(@Body() body: unknown) {
+    return this.respond(() => {
+      const admission = this.admission();
+      return admission.service.change(admission.principals.current(), body);
+    });
+  }
+
+  @Post(CORE_MANAGEMENT_HTTP.readAdmission.path) @HttpCode(200)
+  readAdmission(@Body() body: unknown) {
+    return this.respond(() => {
+      const admission = this.admission();
+      return admission.service.readCurrent(admission.principals.current(), body);
+    });
+  }
+
+  @Post(CORE_MANAGEMENT_HTTP.readAdmissionOperation.path) @HttpCode(200)
+  readAdmissionOperation(@Body() body: unknown) {
+    return this.respond(() => {
+      const admission = this.admission();
+      return admission.service.readOperation(admission.principals.current(), body);
+    });
+  }
+
+  private admission() {
+    if (!this.application.admission) throw new CoreAccessError("core_unavailable", "部署准入控制尚未装配");
+    return this.application.admission;
   }
 
   private async respond<T>(work: () => Promise<T>): Promise<T> {

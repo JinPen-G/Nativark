@@ -6,12 +6,13 @@
   "description": "平台 Core 授权、成员分配和生命周期的应用服务",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "typesVersions": { "*": { "mysql": ["dist/mysql.d.ts"], "mysql-bindings": ["dist/mysql-bindings.d.ts"], "mysql-deployment": ["dist/mysql-deployment.d.ts"] } },
+  "typesVersions": { "*": { "mysql": ["dist/mysql.d.ts"], "mysql-bindings": ["dist/mysql-bindings.d.ts"], "mysql-deployment": ["dist/mysql-deployment.d.ts"], "mysql-deployment-admission": ["dist/mysql-deployment-admission.d.ts"] } },
   "exports": {
     ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
     "./mysql": { "types": "./dist/mysql.d.ts", "default": "./dist/mysql.js" },
     "./mysql-bindings": { "types": "./dist/mysql-bindings.d.ts", "default": "./dist/mysql-bindings.js" },
-    "./mysql-deployment": { "types": "./dist/mysql-deployment.d.ts", "default": "./dist/mysql-deployment.js" }
+    "./mysql-deployment": { "types": "./dist/mysql-deployment.d.ts", "default": "./dist/mysql-deployment.js" },
+    "./mysql-deployment-admission": { "types": "./dist/mysql-deployment-admission.d.ts", "default": "./dist/mysql-deployment-admission.js" }
   },
   "scripts": {
     "prebuild": "npm run build -w @rental-os/core-contracts",

@@ -12,6 +12,7 @@ import { composePlatformCoreSessionReader } from "./platform-core-session";
 import { composePlatformCoreScopeReader } from "./platform-core-scope";
 import { composePlatformCoreHttpAccess } from "./platform-core-http-access";
 import { composePlatformCoreRemovalReader } from "./platform-core-removal";
+import { composePlatformCoreAdmission } from "./platform-core-admission";
 
 export type PlatformCoreApplicationInput<Tx extends PlatformCoreTransaction> = PlatformCoreHostDependencies<Tx> & {
   catalogue: CoreDeployedCatalogue;
@@ -24,6 +25,7 @@ export function composePlatformCoreApplication<Tx extends PlatformCoreTransactio
     term: input.term, deployment: input.catalogue.availability };
   return {
     management: {
+      admission: composePlatformCoreAdmission(shared),
       management: composePlatformCoreManagement(shared),
       bindings: composePlatformCoreBindings({ ...shared, registrations: input.catalogue.registrations,
         ...(input.authorizeContainer ? { authorizeContainer: input.authorizeContainer } : {}) }),

@@ -4,6 +4,8 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const { createRentalApplicationAccess, createRentalRecoveryAuthority } = require("../dist/application-access.js");
+const { createRentalPublicApplicationAccess, enterRentalPublicTarget } = require("../dist/application-public-access.js");
+const { createMysqlCoreDeploymentAdmission } = require("@rental-os/core-host/mysql-deployment-admission");
 const { RentalAuthService } = require("../dist/auth-service.js");
 const { ClientAuthService } = require("../dist/mysql-client-auth.js");
 const { createHmac } = require("node:crypto");
@@ -54,12 +56,12 @@ const policy = compileRentalHttpAccessPolicy({ controllers: [RentalCoreControlle
   EnterpriseWorkflowsController, EnterpriseReadController, PaymentReconciliationController, FilesController, StaffOfflinePaymentController], authorization });
 const copy = value => structuredClone(value);
 
-function fixture(audience = "operator", corporateParticipants = false, originalParticipants = false) {
+function fixture(audience = "operator", corporateParticipants = false, originalParticipants = false, deploymentContinuation) {
   const user = { id: "user", tenantId: "tenant", isActive: true, isSaasAdmin: false, isPlatformAdmin: false,
     mustChangePassword: false, displayName: "member", account: "member", permissions: ["rental-os:order:view", "rental-os:order:operate",
       "rental-os:order:settle", "rental-os:order:cancel", "rental-os:finance:view", "rental-os:finance:reconcile", "rental-os:report:view", "rental-os:order:offline-payment", "system:integration:manage"],
     roleIds: [], roleNames: [], dataScope: "all", locationScope: { mode: "all", locationIds: [] } };
-  const state = { user, tenantStatus: "ACTIVE", workspaceStatus: "ACTIVE", assigned: true, grant: "disabled", binding: true,
+  const state = { user, tenantStatus: "ACTIVE", workspaceStatus: "ACTIVE", assigned: true, grant: "disabled", binding: true, admission: "accepting",
     available: true, member: true, session: { audience: "operator", currentWorkspaceId: "workspace", revokedAt: null,
       expiresAt: new Date(Date.now() + 600000) },
     order: { id: "OrderA", tenantId: "tenant", workspaceId: "workspace", status: "RENTING", fulfillmentMode: "pickup", customerId: "customer",
@@ -115,7 +117,7 @@ function fixture(audience = "operator", corporateParticipants = false, originalP
     } }, async $queryRaw(query, ...values) {
       if (Array.isArray(query)) query = sql(query, ...values);
       const text = query.sql.replace(/\s+/gu, " ").trim();
-      trace.push({ tx: number, text });
+      trace.push({ tx: number, text, values: [...query.values] });
       await f.onQuery?.(text, number);
       const original = await f.originalQuery?.(text, query.values);
       if (original !== undefined) return original;
@@ -133,6 +135,13 @@ function fixture(audience = "operator", corporateParticipants = false, originalP
       if (text.includes("platform_member_core_assignments")) return [{ state: state.assigned ? "assigned" : "unassigned", revision: 1, operationId: "assignment" }];
       if (text.includes("platform_core_bindings")) return state.binding ? [{ bindingId: "binding", revision: 1,
         dataVersion: "0.1.0", containerType: "rental-workspace", containerId: "workspace" }] : [];
+      if (text.includes("FROM SystemParameterSet")) {
+        assert.deepEqual(query.values, ["tenant_platform", "core-deployment-admission:rental"]);
+        assert.match(text, /versionNo = 1 LOCK IN SHARE MODE$/u);
+        return state.admission === "unknown" ? [] : [{ id: "admission", tenantId: "tenant_platform",
+          module: "core-deployment-admission:rental", versionNo: 1, status: "effective",
+          content: { coreId: "rental", state: state.admission, revision: 1, operationId: "original-admission" } }];
+      }
       if (text.includes("business_workspaces")) return [{ id: "workspace", status: state.workspaceStatus }];
       if (/FROM `?rental_orders`?/u.test(text)) {
         return query.values.includes(state.order.id) && query.values.includes(state.order.workspaceId)
@@ -183,6 +192,7 @@ function fixture(audience = "operator", corporateParticipants = false, originalP
       ...(originalParticipants ? { originalHistory: originals } : {}),
       ...(corporateParticipants ? { corporateHistory: { access: enterpriseAccess, orders: enterpriseOrders } } : {}) }),
     deploymentForTransaction: () => ({ requireAvailable: async () => { if (!state.available) throw Error("unavailable deployment"); } }),
+    admissionForTransaction: createMysqlCoreDeploymentAdmission, deploymentContinuation,
     term: { requireNewBusiness: async () => {} } });
   const idempotent = new RentalIdempotentActionService(db, { find: async (_tenant, _action, key) => receipts.get(key),
     record: async value => receipts.set(value.key, copy(value)) });
@@ -200,8 +210,121 @@ function fixture(audience = "operator", corporateParticipants = false, originalP
     fallbackKey: "original-key", orderId: "OrderA", request: { orderId: "OrderA" },
     run: async tx => { await facts.lockOrder("tenant", "OrderA", tx); f.writes++; return { original: "receipt" }; },
     replay: async response => response, ...overrides });
-  return Object.assign(f, { db, delegates, access, idempotent, facts, receipts, auth, clientAuth, enterpriseAccess, enterpriseOrders, originals, fileAccess, commands });
+  return Object.assign(f, { db, delegates, access, idempotent, facts, receipts, auth, clientAuth, guard, enterpriseAccess, enterpriseOrders, originals, fileAccess, commands });
 }
+
+test("deployment admission uses the original transaction for operator/client writes and preserves committed receipts", async () => {
+  for (const audience of ["operator", "client"]) {
+    const f = fixture(audience); f.state.grant = "enabled";
+    const invoke = consume => audience === "client"
+      ? f.run("createOrder", "POST", "/client/v1/orders", consume, ClientApiController)
+      : f.run("confirm", "POST", "/rental/v1/orders/OrderA/confirm", consume);
+    assert.equal((await invoke(async () => {
+      const receipt = await f.action(); f.state.admission = "stopped"; return receipt;
+    })).replayed, false);
+    assert.equal(f.writes, 1, "a confirmed write is not changed into a post-commit denial");
+    const actionTx = f.trace.find(row => row.text.includes("rental_orders")).tx;
+    assert.ok(f.trace.some(row => row.tx === actionTx && row.text.includes("FROM SystemParameterSet")), "same original action transaction holds admission");
+    assert.ok(!f.trace.some(row => row.text.includes("FROM Tenant") && row.values.includes("tenant_platform")));
+    for (const state of ["stopped", "unknown"]) {
+      f.state.admission = "accepting";
+      await assert.rejects(invoke(async () => {
+        f.state.admission = state;
+        return f.action({ key: `blocked-${state}`, fallbackKey: `blocked-${state}` });
+      }), error => error.code === "core_unavailable");
+      assert.equal(f.writes, 1); assert.equal(f.receipts.size, 1);
+    }
+    assert.equal(f.trace.some(row => row.text.includes("platform_member_core_assignments")), audience === "operator");
+  }
+});
+
+test("deployment stopped/unknown retains exact history and original refund observation but forbids draft fulfillment", async () => {
+  for (const state of ["stopped", "unknown"]) {
+    const f = fixture(); f.state.grant = "enabled"; f.state.admission = state;
+    f.state.order.status = "DRAFT";
+    await f.run("order", "GET", "/rental/v1/orders/OrderA", async () => ({ draft: true }));
+    await assert.rejects(f.run("allocate", "POST", "/rental/v1/orders/OrderA/allocate", async () => { f.writes++; }));
+    assert.equal(f.writes, 0);
+    f.state.order.status = "RENTING";
+    await f.run("refreshPaymentRefund", "POST", "/rental/v1/orders/OrderA/payment-intents/IntentA/refunds/RefundA/refresh",
+      async () => { f.dispatches++; return { original: "provider-observation" }; }, PaymentOperationsController);
+    assert.equal(f.dispatches, 1);
+    f.state.refund.paymentIntentId = "other";
+    await assert.rejects(f.run("refreshPaymentRefund", "POST", "/rental/v1/orders/OrderA/payment-intents/IntentA/refunds/RefundA/refresh",
+      async () => { f.dispatches++; }, PaymentOperationsController));
+    assert.equal(f.dispatches, 1);
+    assert.ok(f.trace.some(row => row.text.includes("FROM SystemParameterSet")));
+  }
+});
+
+test("deployment continuation uses only the captured server selector and retains grant/member/physical authorization", async () => {
+  const seen = [], selector = (method, path) => { seen.push([method, path]); return method === "GET" && path === "/rental/v1/assets"; };
+  // This fixture selects one original pure read to test the narrow port. The host
+  // owns the separate closed AI handler list; no client field can select it here.
+  const f = fixture("operator", false, false, selector);
+  f.state.grant = "enabled"; f.state.admission = "stopped"; f.state.user.permissions.push("rental-core:asset:view");
+  assert.deepEqual(await f.run("assets", "GET", "/API/RENTAL/v1/assets/?page=1", async () => ({ original: "read" })), { original: "read" });
+  assert.deepEqual(seen, [["GET", "/rental/v1/assets"]]);
+  assert.equal(f.trace.filter(row => row.text.includes("FROM SystemParameterSet")).length, 2, "both read checks retain the canonical S lock");
+  for (const change of [() => { f.state.grant = "disabled"; }, () => { f.state.assigned = false; }, () => { f.state.available = false; }]) {
+    f.state.grant = "enabled"; f.state.assigned = true; f.state.available = true; change();
+    const reads = f.reads;
+    await assert.rejects(f.run("assets", "GET", "/rental/v1/assets", async () => { f.reads++; return { private: true }; }));
+    assert.equal(f.reads, reads);
+  }
+  f.state.grant = "enabled"; f.state.assigned = true; f.state.available = true;
+  await assert.rejects(f.run("confirm", "POST", "/rental/v1/orders/OrderA/confirm", async () => { f.writes++; }));
+  await assert.rejects(f.run("assets", "GET", "/rental/v1/assets", async request => {
+    request.url = "/rental/v1/orders/OrderA"; return { private: true };
+  }));
+  const ordinary = fixture("client"); ordinary.state.grant = "enabled";
+  await assert.rejects(ordinary.run("profile", "GET", "/client/v1/profile", async () => {
+    ordinary.state.admission = "stopped"; return { private: true };
+  }, ClientApiController), error => error.code === "core_unavailable");
+  assert.equal(f.writes, 0);
+});
+
+test("public deployment admission gates original documents and same-transaction writes, while logout/unknown host stay exact", async () => {
+  const f = fixture(); f.state.grant = "enabled";
+  f.originalQuery = text => {
+    if (text.includes("SELECT id, code, status FROM Tenant")) return [{ id: "tenant", code: "merchant", status: "active" }];
+    if (text.includes("platform_core_bindings")) return [{ bindingId: "tenant-binding", revision: 1, dataVersion: "0.1.0", containerType: null, containerId: null }];
+  };
+  const publicAccess = createRentalPublicApplicationAccess({ database: f.db, authorization,
+    admissionForTransaction: createMysqlCoreDeploymentAdmission,
+    deploymentForTransaction: () => ({ requireAvailable: async () => { if (!f.state.available) throw Error("unavailable deployment"); } }) });
+  const run = (method, url, consume) => runWithRequestIdentity({}, () => publicAccess.run(async () => {
+    const request = { method, url, headers: {} };
+    await f.guard.canActivate({ switchToHttp: () => ({ getRequest: () => request }) });
+    return publicAccess.withRequest(request, consume, method === "GET" ? { bufferedRead: true } : undefined);
+  }));
+  const api = Object.create(ClientApiService.prototype);
+  api.prisma = { ...f.db, tenant: { findFirst: async () => ({ id: "tenant", code: "merchant" }) },
+    clientChannelProfile: { findUnique: async () => { f.reads++; return { updatedAt: new Date("2026-01-01"), helpIntro: "original help", helpFaqJson: [] }; } },
+    websiteChannelProfile: { findFirst: async () => null } };
+  assert.equal((await run("GET", "/client/v1/public/documents/help", () => api.publicDocument("merchant", "help"))).intro, "original help");
+  for (const state of ["stopped", "unknown"]) {
+    f.state.admission = state; const reads = f.reads;
+    await assert.rejects(run("GET", "/client/v1/public/documents/help", () => api.publicDocument("merchant", "help")), error => error.code === "core_unavailable");
+    assert.equal(f.reads, reads);
+    f.state.admission = "accepting";
+    await assert.rejects(run("POST", "/client/v1/auth/register", async () => {
+      await enterRentalPublicTarget({ tenantId: "tenant", origin: { kind: "tenant-code", tenantCode: "merchant" } });
+      f.state.admission = state;
+      return f.db.$transaction(async tx => { await lockRentalBusinessTenant(tx, "tenant"); f.writes++; }, { isolationLevel: "ReadCommitted" });
+    }), error => error.code === "core_unavailable");
+    assert.equal(f.writes, 0);
+    const queries = f.trace.length;
+    assert.deepEqual(await run("GET", "/client/v1/public/site-resolve", () => api.resolveWebsiteHost("unknown.example")), { tenantCode: null });
+    assert.deepEqual(await run("POST", "/client/v1/auth/logout", () => f.clientAuth.logout("synthetic-refresh")), { success: true });
+    assert.equal(f.trace.length, queries, "the two exact no-target results perform no Core/admission query");
+  }
+  await assert.rejects(run("POST", "/client/v1/auth/register", async () => ({ success: true })), error => error.code === "denied");
+  assert.throws(() => createRentalPublicApplicationAccess({ database: f.db, authorization,
+    deploymentForTransaction() { throw Error("not called"); } }), error => error.code === "core_unavailable");
+  assert.throws(() => createRentalApplicationAccess({ database: f.db, authorization,
+    term: { requireNewBusiness: async () => {} }, deploymentForTransaction() { throw Error("not called"); } }), error => error.code === "core_unavailable");
+});
 
 test("disabled history uses actual original handler and current principal, with Tenant→Core→Order→Workspace", async () => {
   const f = fixture();

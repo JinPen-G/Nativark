@@ -35,6 +35,7 @@ export function composeTicketsPlatformHost<Tx extends PlatformCoreTransaction>(i
         if (user.isSaasAdmin || !hasPermission(user, request.permission)) throw new TicketError("denied", "当前账号缺少该工单操作权限");
         if (request.purpose === "business") {
           await access.requireMember(transaction, user, TICKETS_CORE_ID);
+          await access.requireBusinessAdmission(transaction, TICKETS_CORE_ID);
           if (request.permission === "create") await access.requireNewBusiness(transaction, user.tenantId);
         } else if (request.permission !== "read") throw new TicketError("denied", "原操作查询只允许工单读取权限");
         const binding = await access.binding(transaction, scope);
@@ -71,6 +72,7 @@ export function composeTicketsPlatformHost<Tx extends PlatformCoreTransaction>(i
     if (lease.user.isSaasAdmin || request.scope.coreId !== TICKETS_CORE_ID || request.scope.container)
       throw new TicketError("denied", "工单Core范围不符合当前主体");
     await access.requireMember(transaction, lease.user, TICKETS_CORE_ID);
+    await access.requireBusinessAdmission(transaction, TICKETS_CORE_ID);
     const binding = await access.binding(transaction, request.scope);
     await lease.revalidate();
     return binding;

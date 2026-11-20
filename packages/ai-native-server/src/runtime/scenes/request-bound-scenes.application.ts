@@ -164,12 +164,13 @@ async function readOriginalTaskSnapshot(scenes: Pick<ReturnType<typeof composeAi
 function bindRequests<D extends object, A>(dependencies: D, options: AiSceneRequestOptions,
   compose: (input: D & { credentials: AiTaskCredentialSource }, command: unknown) => A | Promise<A>,
   defaultLifetime?: { write: boolean },
-  transactionAuthority?: <R>(input: D & { credentials: AiTaskCredentialSource }, command: unknown, consume: () => Promise<R>) => Promise<R>) {
+  transactionAuthority?: <R>(input: D & { credentials: AiTaskCredentialSource }, command: unknown, consume: () => Promise<R>,
+    purpose: 'new_work' | 'original_recovery') => Promise<R>) {
   const parsed = optionsSchema.safeParse(options);
   if (!parsed.success || 'credentials' in dependencies || 'originals' in dependencies) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
   const server = { ...dependencies }, { audience } = parsed.data;
   return async <R>(request: AiSceneHttpRequest, value: unknown, consume: (app: A, command: unknown) => Promise<R>,
-    lifetime: { write: boolean; signal?: AbortSignal; preflightOnly?: true } | undefined = defaultLifetime): Promise<R> => {
+    lifetime: { write: boolean; signal?: AbortSignal; preflightOnly?: true; originalRecovery?: true } | undefined = defaultLifetime): Promise<R> => {
     const header = bearerSchema.safeParse(request?.headers?.authorization);
     if (!header.success) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     const command = structuredClone(value), credential = Object.freeze({ authorization: header.data, audience, requestId: randomUUID() });
@@ -206,7 +207,8 @@ function bindRequests<D extends object, A>(dependencies: D, options: AiSceneRequ
           if (!active) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
           return consume(app, command);
         };
-        return transactionAuthority && lifetime?.write ? transactionAuthority(input, command, execute) : execute();
+        return transactionAuthority && lifetime?.write ? transactionAuthority(input, command, execute,
+          lifetime.originalRecovery ? 'original_recovery' : 'new_work') : execute();
       };
       // 已选宿主持有原 HTTP Guard 的真实 store；不要清空它再拿投影填回。
       // 下层每个实际业务动作仍执行自己的隔离 Guard，并仅由 runVerified 返回
@@ -227,9 +229,10 @@ function bindRequests<D extends object, A>(dependencies: D, options: AiSceneRequ
   };
 }
 
-function originalSceneTransactionAuthority<R>(input: AiOriginalSceneDependencies, command: unknown, consume: () => Promise<R>) {
+function originalSceneTransactionAuthority<R>(input: AiOriginalSceneDependencies, command: unknown, consume: () => Promise<R>,
+  purpose: 'new_work' | 'original_recovery') {
   const reference = command && typeof command === 'object' && 'original' in command ? command.original : command;
-  return withOriginalSceneTaskTransactions(input, reference, consume);
+  return withOriginalSceneTaskTransactions(input, reference, consume, purpose === 'original_recovery' ? 'original_recovery' : 'task');
 }
 
 /** Request-scoped ordinary-name workflow. This exports a server assembly only;
@@ -1569,11 +1572,11 @@ export function composeRequestBoundPersistedOriginalSceneModel(
     continueAnswer: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       callWaiting(request, value, 'explicit_answer_continue', (app, command) => app.continueAnswer(command, signal), signal),
     reconcile: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      call(request, value, async (app, command) => await app.reconcile(command, signal), { write: true, signal, preflightOnly: true }),
+      call(request, value, async (app, command) => await app.reconcile(command, signal), { write: true, signal, preflightOnly: true, originalRecovery: true }),
     recover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal, exact?: Readonly<TaskCenterRecoveryFence>) => {
       const fence = exact === undefined ? undefined : snapshotTaskCenterRecoveryFence(exact);
       return call(request, value, async (app, command) => await app.recover(command, signal, fence),
-        { write: true, signal, preflightOnly: true });
+        { write: true, signal, preflightOnly: true, originalRecovery: true });
     },
     readExecution: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readExecution(command)),
     takeover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal, exact?: Readonly<TaskCenterRecoveryFence>) => {
@@ -1715,10 +1718,11 @@ export function composeRequestBoundOriginalSceneModel(dependencies: RequestBound
     continueAnswer: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       call(request, value, (app, command) => app.application.continueAnswer(command, signal), { write: true, signal, preflightOnly: true }),
     reconcile: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      call(request, value, (app, command) => app.application.reconcile(command, signal), { write: true, signal, preflightOnly: true }),
+      call(request, value, (app, command) => app.application.reconcile(command, signal), { write: true, signal, preflightOnly: true, originalRecovery: true }),
     recover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal, exact?: Readonly<TaskCenterRecoveryFence>) => {
       const fence = exact === undefined ? undefined : snapshotTaskCenterRecoveryFence(exact);
-      return call(request, value, (app, command) => app.application.recover(command, signal, fence), { write: true, signal, preflightOnly: true });
+      return call(request, value, (app, command) => app.application.recover(command, signal, fence),
+        { write: true, signal, preflightOnly: true, originalRecovery: true });
     },
     readExecution: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.application.readExecution(command)),
     takeover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal, exact?: Readonly<TaskCenterRecoveryFence>) => {

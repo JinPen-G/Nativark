@@ -28,6 +28,13 @@ const { RentalAuthService } = load('packages/rental-core/src/auth-service.ts');
 const { RentalWorkspacePrincipalRepository } = load('packages/rental-core/src/mysql-workspace-principal.ts');
 const { createRentalAuthorization } = load('packages/rental-core/src/http-auth.ts');
 const { createRentalApplicationAccess } = load('packages/rental-core/src/application-access.ts');
+const { createMysqlCoreDeploymentAdmission } = load('packages/core-host/src/mysql-deployment-admission.ts');
+const { createRentalAiHttpPolicy, rentalAiDeploymentContinuationSelector } = load('apps/rental-api/src/ai-http-policy.ts');
+const httpPolicy = createRentalAiHttpPolicy(), deploymentContinuation = rentalAiDeploymentContinuationSelector(httpPolicy);
+const stopRoute = httpPolicy.routes.find(route => route.controller.name === 'AiTaskCenterController' && route.handlerName === 'stop');
+assert(stopRoute);
+const recoveryRoute = httpPolicy.routes.find(route => route.controller.name === 'AiOriginalQuoteModelExecutionController' && route.handlerName === 'recover');
+assert(recoveryRoute);
 const { RentalCoreFactRepository } = load('packages/rental-core/src/mysql-core-facts.ts');
 const { RentalBusinessFactRepository } = load('packages/rental-core/src/mysql-business-facts.ts');
 const { AiTaskCurrentIdentityAuthority } = load('packages/ai-native-server/src/runtime/task-current-identity.authority.ts');
@@ -39,7 +46,7 @@ const { requestFingerprint } = load('packages/ai-native-server/src/runtime/renta
 const { withOriginalSceneTaskTransactions } = load('packages/ai-native-server/src/runtime/scenes/original-scene-transactions.ts');
 const { createOriginalSceneInputTransactions } = load('packages/ai-native-server/src/runtime/scenes/original-scene-input-transactions.ts');
 const { withTaskCenterTransactions } = load('packages/ai-native-server/src/runtime/task-center-transactions.ts');
-const { withAiTaskTransaction } = load('packages/ai-native-server/src/runtime/task-transaction-authority.ts');
+const { holdAiTaskDeploymentAdmission, withAiTaskTransaction } = load('packages/ai-native-server/src/runtime/task-transaction-authority.ts');
 const { composeAiOriginalScenes } = load('packages/ai-native-server/src/runtime/scenes/original-scenes.composition.ts');
 const { composeRequestBoundOriginalScenes } = load('packages/ai-native-server/src/runtime/scenes/request-bound-scenes.application.ts');
 const { user: syntheticUser } = require(path.join(root, 'tests/fixtures/ai-native/authorization-baseline.cjs'));
@@ -86,12 +93,22 @@ function fixture(body = bodies[0], selectedLocations = false, extraTables = {}) 
       startAt: now, endAt: expiresAt, createdAt: now, updatedAt: now, lines: [], reservations: [], allocations: [], currency: 'CNY' }],
   }, { aiTask: [['id'], ['scopeId', 'audience', 'ownerKind', 'ownerId', 'creationKey']],
     aiTaskOriginalRequest: [['id'], ['scopeId', 'audience', 'ownerKind', 'ownerId', 'requestKey']] });
-  const state = { grant: 'enabled', assignment: 'assigned', available: true, credential: '', queries: [],
+  const state = { grant: 'enabled', assignment: 'assigned', available: true, admission: 'accepting', credential: '', queries: [],
     currentTx: undefined, beforeTask: undefined, afterRun: undefined, afterTask: undefined, lateInput: undefined, onInputWrite: undefined };
   const raw = async (tx, query, ...values) => {
     const q = Array.isArray(query) ? runtime.sql(query, ...values) : query;
     const sql = q.sql.replace(/\s+/gu, ' ').trim(), v = q.values;
     state.queries.push(sql); store.trace.push('sql:' + sql);
+    if (sql.includes('FROM SystemParameterSet') && v.includes('core-deployment-admission:rental')) {
+      assert(sql.endsWith('LOCK IN SHARE MODE'), '部署准入共享锁须由原事务持有');
+      assert.equal(tx, state.currentTx);
+      if (state.admission === 'failure') throw Error('offline admission read failure');
+      if (state.admission === 'missing') return [];
+      const row = { id: 'admission-rental', tenantId: 'tenant_platform', module: 'core-deployment-admission:rental',
+        versionNo: 1, status: 'effective', operator: 'offline-test', content: { coreId: 'rental',
+          state: state.admission, revision: 1, operationId: 'admission-a' } };
+      return state.admission === 'duplicate' ? [row, row] : [row];
+    }
     if (sql.includes('FROM Tenant')) return [{ id: 'tenant-a', status: 'active' }];
     if (sql.includes('FROM `User`')) return [{ id: user.id, roleId: role.id }];
     if (sql.includes('FROM auth_sessions')) return [{ id: 'session-a' }];
@@ -142,6 +159,8 @@ function fixture(body = bodies[0], selectedLocations = false, extraTables = {}) 
   const guard = new authorization.Guard(auth, undefined, undefined, undefined, store.db);
   const access = createRentalApplicationAccess({ database: store.db, authorization,
     term: { requireNewBusiness: async () => { throw Error('三场景 Task 元数据不是租赁新业务'); } },
+    admissionForTransaction: createMysqlCoreDeploymentAdmission,
+    deploymentContinuation: (method, url) => deploymentContinuation.isRoute({ method, url }),
     deploymentForTransaction: tx => ({ requireAvailable: async () => { assert(tx.$queryRaw); if (!state.available) throw Error('deployment unavailable'); } }) });
   const orders = new RentalCoreFactRepository(store.db, { ...identity,
     resolveWorkspaceId: async (_tx, tenantId) => { assert.equal(tenantId, identity.getRequestIdentity().tenantId); return identity.getRequestWorkspaceId(); } });
@@ -167,6 +186,8 @@ function fixture(body = bodies[0], selectedLocations = false, extraTables = {}) 
     const operation = options.operation ?? shared.AI_SCENE_REQUEST_HTTP_DRAFT.createTask;
     const request = { method: 'POST', url: '/api/' + shared.AI_SCENE_REQUEST_HTTP_DRAFT.basePath + (operation ? '/' + operation : ''),
       headers: { authorization: 'Bearer ' + token }, body: reference, query: {} };
+    if (options.control) { request.method = stopRoute.method; request.url = '/api' + stopRoute.path; }
+    if (options.recovery) { request.method = recoveryRoute.method; request.url = '/api' + recoveryRoute.path; }
     assert.equal(await guard.canActivate({ switchToHttp: () => ({ getRequest: () => request }) }), true);
     return access.withRequest(request, async () => {
       if (options.seed !== false && !store.state.aiTaskOriginalRequest.length) {
@@ -195,6 +216,8 @@ function fixture(body = bodies[0], selectedLocations = false, extraTables = {}) 
   const participate = key => withOriginalSceneTaskTransactions(input, reference, () => store.db.$transaction(tx =>
     withAiTaskTransaction(tx, key, () => tx.aiTask.updateMany({ where: { id: store.state.aiTask[0].id }, data: { revision: { increment: 1 } } })),
   { isolationLevel: 'Serializable' }));
+  const recover = (key, consume = async () => {}) => withOriginalSceneTaskTransactions(input, reference,
+    () => store.db.$transaction(tx => withAiTaskTransaction(tx, key, () => consume(tx)), { isolationLevel: 'Serializable' }), 'original_recovery');
   const unexpected = async () => { throw Error('非本测试场景的业务读取'); };
   const businessDependencies = { ...input, auth, guard,
     subscriptions: { readCategoryCommercialContext: async () => ({ revision: 1, serviceStatus: 'active', newBusinessAllowed: true,
@@ -218,7 +241,7 @@ function fixture(body = bodies[0], selectedLocations = false, extraTables = {}) 
     const { credentials: _, ...dependencies } = businessDependencies;
     return composeRequestBoundOriginalScenes(dependencies, { enabled: true, audience: 'operator' });
   };
-  return { ...store, businessDependencies, state, invoke, create, createThroughRequest, participate, input, step, auth, guard, orders, requests,
+  return { ...store, businessDependencies, state, invoke, create, createThroughRequest, participate, recover, input, step, auth, guard, orders, requests,
     inputRequests, inputParticipant, originalAuthority, saveCommand, requestBound };
 }
 
@@ -233,7 +256,7 @@ async function main() {
     });
     assert.equal(f.trace.filter(row => row === 'aiTask.create').length, 1);
     assert.equal(f.trace.filter(row => row === 'aiRun.create').length, 1);
-    const indices = ['FROM Tenant WHERE', 'FROM auth_sessions', 'FROM platform_core_access_locks',
+    const indices = ['FROM Tenant WHERE', 'FROM auth_sessions', 'FROM platform_core_access_locks', 'FROM SystemParameterSet',
       ...(i === 0 ? ['FROM `rental_orders`'] : []), 'FROM business_workspaces', 'FROM ai_task_original_requests', 'aiTask.create']
       .map(part => f.trace.findIndex((entry, index) => index > f.trace.indexOf('transaction.commit') && entry.includes(part)));
     assert(indices.every(index => index >= 0));
@@ -300,6 +323,52 @@ async function main() {
       await f.participate({ kind: 'task_control', taskId: task.taskId });
     });
   });
+  for (const admission of ['stopped', 'missing', 'malformed', 'duplicate', 'failure']) {
+    await test('部署停新/unknown 拒绝原事务新增并保留控制：' + admission, async () => {
+      const f = fixture();
+      await f.invoke(async () => {
+        const task = await f.create(); await f.step();
+        f.state.admission = admission;
+        try {
+          for (const key of [{ kind: 'task', taskId: task.taskId }, { kind: 'step', stepId: 'step-a' },
+            { kind: 'invocation', callId: 'call-a' }]) {
+            const before = (await f.db.aiTask.findFirst({ where: { id: task.taskId } })).revision;
+            await assert.rejects(f.participate(key), error => error.code === 'AI_RESOURCE_UNAVAILABLE');
+            assert.equal((await f.db.aiTask.findFirst({ where: { id: task.taskId } })).revision, before);
+          }
+          await f.participate({ kind: 'task_control', taskId: task.taskId });
+          await f.recover({ kind: 'task', taskId: task.taskId }, tx => tx.aiTask.updateMany({
+            where: { id: task.taskId }, data: { revision: { increment: 1 } } }));
+          for (const key of [{ kind: 'task', taskId: 'other-task' }, { kind: 'step', stepId: 'step-a' },
+            { kind: 'invocation', callId: 'call-a' }, { kind: 'task_control', taskId: task.taskId }])
+            await assert.rejects(f.recover(key), error => error.code === 'AI_ACCESS_DENIED');
+          const originalRun = await f.db.aiRun.findFirst({ where: { taskId: task.taskId } });
+          for (const [table, data] of [['aiRun', { ...originalRun, id: 'unexpected-run', sequence: 2 }],
+            ['aiStep', { id: 'unexpected-step', scopeId: originalRun.scopeId, taskId: task.taskId, runId: originalRun.id }],
+            ['aiTaskRunPlan', { id: 'unexpected-plan', scopeId: originalRun.scopeId, taskId: task.taskId, runId: originalRun.id, planHash: 'changed' }]]) {
+            const count = await f.db[table].count({});
+            await assert.rejects(f.recover({ kind: 'task', taskId: task.taskId }, tx => tx[table].create({ data })),
+              error => error.code === 'AI_ACCESS_DENIED');
+            assert.equal(await f.db[table].count({}), count, '原恢复不能制造 ' + table);
+          }
+          await assert.rejects(withTaskCenterTransactions(f.input.transactions, f.db, f.input.credentials, task.taskId,
+            () => f.db.$transaction(tx => withAiTaskTransaction(tx, { kind: 'task_control', taskId: task.taskId },
+              () => withAiTaskTransaction(tx, { kind: 'invocation', callId: 'call-a' }, async () => {
+                throw Error('停止分支不能授予新派发');
+              })))), error => error.code === 'AI_RESOURCE_UNAVAILABLE');
+          await assert.rejects(f.inputRequests.save(f.saveCommand()), error => error.code === 'AI_RESOURCE_UNAVAILABLE');
+          assert.equal(await f.db.aiTaskOriginalRequest.count({}), 1);
+        } finally { f.state.admission = 'accepting'; }
+      }, { control: true });
+      const empty = fixture();
+      await empty.invoke(async () => {
+        empty.state.admission = admission;
+        try { await assert.rejects(empty.create(), error => error.code === 'AI_RESOURCE_UNAVAILABLE'); }
+        finally { empty.state.admission = 'accepting'; }
+      }, { control: true });
+      assert.equal(await empty.db.aiTask.count({}), 0); assert.equal(await empty.db.aiRun.count({}), 0);
+    });
+  }
   for (const body of bodies.slice(0, 2)) await test('真实 request-bound composition：' + body.sceneCode, async () => {
     const f = fixture(body);
     const result = await f.invoke(f.createThroughRequest);
@@ -321,7 +390,7 @@ async function main() {
     const createAt = f.trace.indexOf('aiTaskOriginalRequest.create');
     const transactionAt = f.trace.lastIndexOf('transaction.begin', createAt), end = f.trace.indexOf('transaction.commit', createAt);
     const entries = f.trace.slice(transactionAt, end);
-    const positions = ['FROM Tenant WHERE', 'FROM auth_sessions', 'FROM platform_core_access_locks',
+    const positions = ['FROM Tenant WHERE', 'FROM auth_sessions', 'FROM platform_core_access_locks', 'FROM SystemParameterSet',
       ...(i === 0 ? ['FROM `rental_orders`'] : []), 'FROM business_workspaces', 'aiTaskOriginalRequest.read', 'aiTaskOriginalRequest.create']
       .map(part => entries.findIndex(entry => entry.includes(part)));
     assert(positions.every(index => index >= 0));
@@ -428,12 +497,14 @@ async function main() {
     }, { seed: false, operation: '' });
   });
   await test('INPUT legacy 无 selected 保留原 save/reissue/reconcile', async () => {
-    const f = fixture();
+    const f = fixture(); f.state.admission = 'missing';
+    const legacy = await holdAiTaskDeploymentAdmission({ $queryRaw: async () => { throw Error('旧宿主不查询新部署记录'); } }, 'new_work');
+    legacy.requireNewWork();
     const original = await f.requests.save(f.saveCommand());
     const reissued = await f.requests.save({ ...f.saveCommand('legacy-reissue'), previousInputRef: original.inputRef }, true);
     assert.equal(reissued.revision, 2);
     assert.equal((await f.requests.reconcile(f.saveCommand())).state, 'observed');
-    assert(!f.trace.some(entry => entry.includes('platform_core_access_locks') || entry.includes('FROM Tenant')));
+    assert(!f.trace.some(entry => entry.includes('platform_core_access_locks') || entry.includes('FROM Tenant') || entry.includes('FROM SystemParameterSet')));
   });
   await test('INPUT 事务租约退出后失活，不再次读取原事务', async () => {
     const f = fixture(); let lease;
@@ -457,5 +528,5 @@ async function main() {
   console.log(JSON.stringify({ checks: count, real: ['Auth', 'Guard', 'WorkspacePrincipal', 'CoreAccess', 'OrderRepository', 'OriginalRequestRepository', 'TaskCreationRepository'],
     database: 'in-memory rollback transport', modelCalls: 0, diskOutputs: 0 }));
 }
-module.exports = { fixture, bodies, reference, inputRef, load, loader, shared, identity, runtime, aiPersistenceScopeColumns, requestFingerprint };
+module.exports = { fixture, bodies, reference, inputRef, load, loader, shared, identity, runtime, aiPersistenceScopeColumns, requestFingerprint, deploymentContinuation };
 if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1; });

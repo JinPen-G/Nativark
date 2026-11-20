@@ -10,7 +10,7 @@ import { clientOwnsRentalOrder } from '@rental-os/rental-core/client-order-owner
 import { assertRentalBusinessTenantAccessAfterLock, hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
 import { getRequestIdentity } from '@rental-os/platform-server/request-identity';
 import { AiTaskRepositoryError } from '../ai-task.repository';
-import { withAiTaskTransactionAuthority, type AiTaskTransactionReference } from '../task-transaction-authority';
+import { holdAiTaskDeploymentAdmission, withAiTaskTransactionAuthority, type AiTaskTransactionReference } from '../task-transaction-authority';
 import { TASK_TEXT_MODEL_TOOL } from '../model-input/task-model-input';
 import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
 import { AiClientPolicyAuthority, type AiClientTaskDependencies } from './client-task.authority';
@@ -82,7 +82,8 @@ function selected(db: AiClientMaterialDb) {
   return scope;
 }
 
-async function begin(scope: Scope, tx: Prisma.TransactionClient, material: AiClientSceneMaterial, stored: boolean) {
+async function begin(scope: Scope, tx: Prisma.TransactionClient, material: AiClientSceneMaterial, stored: boolean,
+  purpose: 'new_work' | 'original_recovery' = 'new_work') {
   const { input, materialScope } = scope, ports = input.transactions;
   current(scope);
   if ('$transaction' in tx || typeof ports?.clientAuth?.lockCurrentSession !== 'function'
@@ -107,6 +108,8 @@ async function begin(scope: Scope, tx: Prisma.TransactionClient, material: AiCli
     current(scope);
   };
   await principal();
+  // 原恢复只核同一持久 Run/Step/Plan，不取得新步骤或派发能力；实际新工作才要求 accepting。
+  await holdAiTaskDeploymentAdmission(tx, purpose === 'original_recovery' ? 'task_control' : 'new_work');
   await ports.orders.lockOrder(material.tenantId, orderId, tx);
   const resource = async () => {
     const order = await ports.orders.findOrder(material.tenantId, orderId, tx);
@@ -262,7 +265,7 @@ export async function withClientSelectedOriginalTask<T>(db: PrismaClient,
     const material = await new PrismaClientSceneMaterialRepository(db).findSource(scope.materialScope, original.materialRef);
     if (!material || material.inputHash !== original.materialInputHash || material.materialHash !== original.materialHash
       || material.revision !== original.materialRevision || material.bindingHash !== original.bindingHash) throw denied();
-    const lease = await begin(scope, tx, material, true);
+    const lease = await begin(scope, tx, material, true, operation === 'recover' ? 'original_recovery' : 'new_work');
     const verifyTarget = async () => {
       current(scope);
       const latestInput = await inputs.findCreation(scope.materialScope, command.creationKey, tx, true);

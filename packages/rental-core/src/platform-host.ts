@@ -67,13 +67,17 @@ export function composeRentalPlatformHost<Tx extends PlatformCoreTransaction>(in
     resolveAuthorizedBinding: request => input.database.$transaction(async transaction => {
       const lease = await principals.lock(transaction, request.principal, request.scope.tenantId);
       await access.requireMember(transaction, lease.user, RENTAL_CORE_ID);
+      await access.requireBusinessAdmission(transaction, RENTAL_CORE_ID);
       await requireScope(transaction, lease.user, request.scope);
       const binding = await access.binding(transaction, request.scope);
       await requireScope(transaction, await lease.revalidate(), request.scope);
       return binding;
     }, { isolationLevel: "ReadCommitted" }),
-    readReadiness: binding => input.database.$transaction(transaction => readReadiness(transaction, binding),
-      { isolationLevel: "ReadCommitted" }),
+    readReadiness: binding => input.database.$transaction(async transaction => {
+      // 直接业务就绪读取须停新；共用配置读取仍供原绑定复用，不替代首次初始化门禁。
+      await access.requireBusinessAdmission(transaction, RENTAL_CORE_ID);
+      return readReadiness(transaction, binding);
+    }, { isolationLevel: "ReadCommitted" }),
     assessRemoval: tenantId => input.database.$transaction(transaction => readRentalRemoval(transaction, tenantId),
       { isolationLevel: "ReadCommitted" })
   });

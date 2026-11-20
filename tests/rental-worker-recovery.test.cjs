@@ -9,6 +9,9 @@ const { createRentalWorkerAuthority } = require("../packages/rental-core/src/app
 const { createRentalApplicationParticipants, RENTAL_APPLICATION_JOB_DESCRIPTORS } = require("../packages/rental-core/src/application-participants");
 const { RentalCoreFactRepository } = require("../packages/rental-core/src/mysql-core-facts");
 const { RentalCoreConfigRepository } = require("../packages/rental-core/src/mysql-core-configuration");
+const { RentalBusinessConfigRepository } = require("../packages/rental-core/src/mysql-business-configuration");
+const { lockActiveCategoryBinding } = require("../packages/rental-core/src/mysql-category-write");
+const { assertScopedWrite, resolveScopeWorkspaceId } = require("../packages/rental-core/src/mysql-workspace-scope");
 const { RENTAL_CATEGORY_DEFINITIONS } = require("../packages/rental-core/src/contracts");
 const { RentalBusinessFactRepository } = require("../packages/rental-core/src/mysql-business-facts");
 const { RentalBusinessService } = require("../packages/rental-core/src/mysql-business-runtime");
@@ -16,6 +19,7 @@ const { PaymentRuntimeService } = require("../packages/rental-core/src/mysql-pay
 const { RentalIdempotentActionService } = require("../packages/rental-core/src/mysql-idempotent-actions");
 const { getRequestIdentity, getRequestWorkspaceId, runWithRequestIdentity } = require("@rental-os/platform-server/request-identity");
 const { coreBindingScopeKey } = require("@rental-os/core-host");
+const { createMysqlCoreDeploymentAdmission } = require("@rental-os/core-host/mysql-deployment-admission");
 const { PrismaClientKnownRequestError } = require("@prisma/client/runtime/library");
 const { NotificationDeliveryUnknownError } = require("@rental-os/platform-server/notification-delivery");
 
@@ -49,7 +53,7 @@ const change = (row, data) => { for (const [key, value] of Object.entries(data))
 function fixture() {
   const f = { sequence: 0, trace: [], sends: 0, queries: 0, closes: 0, funding: 0, commands: [], termCalls: 0,
     refreshReasons: [], couponContextSuppliers: [], contextReads: 0,
-    tenantStatus: "ACTIVE", workspaceStatus: "ACTIVE", grant: "disabled", gate: true, deployed: true, configured: true,
+    tenantStatus: "ACTIVE", workspaceStatus: "ACTIVE", grant: "disabled", gate: true, deployed: true, configured: true, admission: "accepting",
     binding: { bindingId: "original-binding", revision: 1, dataVersion: "0.1.0", containerType: "rental-workspace", containerId: workspaceId },
     orders: new Map(), notifications: new Map(), buckets: new Map(), intents: new Map(), events: new Map(), receipts: new Map(), held: new Set() };
   const record = (tx, kind, value) => f.trace.push({ tx: tx?.id ?? "root", kind, value });
@@ -119,6 +123,13 @@ function fixture() {
         if (sql.includes("FROM platform_core_access_locks")) { record(tx, "gate"); return f.gate ? [{ tenantId, coreId: "rental" }] : []; }
         if (sql.includes("FROM platform_tenant_core_grants")) { record(tx, "grant"); return f.grant == null ? [] : [{ state: f.grant, revision: 1, operationId: "grant-original" }]; }
         if (sql.includes("FROM platform_core_bindings")) { assert.equal(values[2], scopeHash); record(tx, "binding"); return f.binding ? [copy(f.binding)] : []; }
+        if (sql.includes("FROM SystemParameterSet")) {
+          assert.deepEqual(values, ["tenant_platform", "core-deployment-admission:rental"]);
+          assert.match(sql.trim(), /versionNo = 1 LOCK IN SHARE MODE$/u); record(tx, "admission");
+          return f.admission === "unknown" ? [] : [{ id: "admission", tenantId: "tenant_platform",
+            module: "core-deployment-admission:rental", versionNo: 1, status: "effective",
+            content: { coreId: "rental", state: f.admission, revision: 1, operationId: "original-admission" } }];
+        }
         if (sql.includes("FROM rental_orders")) {
           record(tx, "Order", values); const where = Object.fromEntries([...sql.matchAll(/\b(id|tenantId|workspaceId)\s*=\s*\?/gu)].map((match, i) => [match[1], values[i]]));
           return [...f.orders.values()].filter(row => matches(row, where)).map(copy);
@@ -141,6 +152,7 @@ function fixture() {
   f.database = database;
   const configuration = new RentalCoreConfigRepository(database, {});
   f.authority = createRentalWorkerAuthority({ database,
+    admissionForTransaction: createMysqlCoreDeploymentAdmission,
     term: { requireNewBusiness: async tx => { record(tx, "term"); f.termCalls++; if (f.termDenied) throw new Error("subscription expired"); } },
     configuration: { loadWorkspaceSnapshot: async (tenant, workspace, tx) => {
       assert.equal(tenant, tenantId); assert.equal(workspace, workspaceId); assert.ok(tx.id); record(tx, "configuration");
@@ -239,10 +251,115 @@ function assertOrderBeforeWorkspace(f) {
     }
   }
 }
+
+function priceFixture() {
+  const f = fixture(); f.grant = "enabled";
+  const rate = { id: "rate", itemGroupId: "group", itemGroupCode: "original-group", itemGroupName: "original group",
+    unit: category.businessModel.pricingUnits[0], baseAmount: 100, weekendMultiplier: 1, holidayMultiplier: 1,
+    depositAmount: 0, minimumUnits: 1 };
+  const plan = { id: "plan", tenantId, workspaceId, categoryCode: "camping", code: "original-price", name: "original",
+    currency: "CNY", status: "enabled", version: "1.0", effectiveFrom: "2026-01-01T00:00:00Z", createdAt: "2026-01-01T00:00:00Z", rates: [rate] };
+  f.price = { adjustment: { id: "adjustment", tenantId, workspaceId, planId: "plan", status: "pending",
+    scheduledAt: new Date("2026-01-02T00:00:00Z"), finalRates: [{ ...rate, baseAmount: 120 }], baseVersionId: null,
+    changes: [], changeReason: "original scheduled price", createdBy: "original-operator" }, plan: copy(plan), versions: [] };
+  f.business.state().pricingPlans = [copy(plan)];
+  f.business.configStore = new RentalBusinessConfigRepository(f.database, {
+    resolveWorkspaceId: resolveScopeWorkspaceId, assertScopedWrite, lockCategoryBinding: lockActiveCategoryBinding
+  });
+  f.business.runDuePriceAdjustments = RentalBusinessService.prototype.runDuePriceAdjustments.bind(f.business);
+  const tables = tx => ({
+    rentalPriceAdjustmentPlan: {
+      findMany: async ({ where }) => { await f.afterDueRead?.(); return matches(f.price.adjustment, where) ? [copy(f.price.adjustment)] : []; },
+      findFirst: async ({ where }) => matches(f.price.adjustment, where) ? copy(f.price.adjustment) : null,
+      updateMany: async ({ where, data }) => {
+        if (!matches(f.price.adjustment, where)) return { count: 0 };
+        f.trace.push({ tx: tx.id, kind: "adjustment-write", value: data.status }); change(f.price.adjustment, data); return { count: 1 };
+      }
+    },
+    rentalPricingPlan: {
+      findMany: async ({ where }) => matches(f.price.plan, where) ? [copy(f.price.plan)] : [],
+      findUnique: async ({ where }) => matches(f.price.plan, where) ? copy(f.price.plan) : null,
+      upsert: async ({ where, update }) => {
+        assert.equal(where.id, f.price.plan.id); f.trace.push({ tx: tx.id, kind: "plan-write" }); change(f.price.plan, update); return copy(f.price.plan);
+      }
+    },
+    rentalPriceVersion: {
+      findFirst: async ({ where }) => copy(f.price.versions.find(row => matches(row, where)) ?? null),
+      aggregate: async () => ({ _max: { sequence: f.price.versions.length || null } }),
+      create: async ({ data }) => { const row = { id: `price-version-${f.price.versions.length + 1}`, ...copy(data) };
+        f.price.versions.push(row); f.trace.push({ tx: tx.id, kind: "version-write" }); return copy(row); }
+    }
+  });
+  Object.assign(f.database, tables());
+  f.beforeQuery = tx => { Object.assign(tx, tables(tx)); };
+  const original = f.database.$transaction.bind(f.database);
+  f.database.$transaction = async (consume, options) => {
+    // Only transport rows roll back; the original runtime and both transactions
+    // remain unchanged. The named-lock owner is not an outer business transaction.
+    const snapshot = options?.timeout ? undefined : copy(f.price);
+    try {
+      const value = await original(consume, options);
+      if (snapshot && f.price.versions.length > snapshot.versions.length) await f.afterPriceCommit?.();
+      return value;
+    } catch (error) {
+      if (snapshot) { f.price = snapshot; await f.afterPriceRollback?.(); }
+      throw error;
+    }
+  };
+  return f;
+}
+
 let completed = false, groups = 0;
 process.once("beforeExit", () => assert.ok(completed, "worker 测试不能留下未完成的等待"));
 async function check(name, run) { await run(); groups++; console.log(`PASS ${name}`); }
 async function main() {
+  await check("调价实际 runtime/config 原提交与失败写事务均持 admission，提交后停新不改原结果", async () => {
+    for (const state of ["stopped", "unknown"]) {
+      const f = priceFixture(); f.afterDueRead = () => { f.admission = state; };
+      await assert.rejects(() => f.run("run_due_price_adjustments"), denied);
+      assert.equal(f.price.adjustment.status, "pending"); assert.equal(f.price.versions.length, 0);
+      assert.ok(!f.trace.some(row => row.kind.endsWith("-write")));
+    }
+    const failed = priceFixture(); failed.price.adjustment.baseVersionId = "missing-original-version";
+    failed.afterPriceRollback = () => { failed.admission = "stopped"; };
+    await assert.rejects(() => failed.run("run_due_price_adjustments"), denied);
+    assert.equal(failed.price.adjustment.status, "pending"); assert.equal(failed.price.versions.length, 0);
+    assert.ok(!failed.trace.some(row => row.kind === "adjustment-write"), "the original failure write also rechecks admission");
+    const accepted = priceFixture(); accepted.afterPriceCommit = () => { accepted.admission = "stopped"; };
+    assert.equal(await accepted.run("run_due_price_adjustments"), true);
+    assert.equal(accepted.price.adjustment.status, "applied"); assert.equal(accepted.price.versions.length, 1);
+    assert.equal(accepted.price.plan.rates[0].baseAmount, 120);
+    const txs = new Set(accepted.trace.filter(row => row.kind.endsWith("-write")).map(row => row.tx));
+    assert.equal(txs.size, 1);
+    for (const tx of txs) {
+      const rows = accepted.trace.filter(row => row.tx === tx).map(row => row.kind);
+      assert.ok(rows.indexOf("Tenant") < rows.indexOf("admission"));
+      assert.ok(rows.indexOf("admission") < rows.indexOf("Workspace"));
+      assert.ok(!rows.includes("Order"), "price versions do not pre-lock an unrelated order");
+    }
+  });
+  await check("部署停新实际 reader 在调价原事务复核，五项原收尾不追加 accepting", async () => {
+    const f = fixture(); f.grant = "enabled";
+    await f.database.$transaction(async tx => {
+      await f.authority.assertCurrent(request("run_due_price_adjustments"), tx);
+      assert.ok(f.trace.some(row => row.tx === tx.id && row.kind === "admission"));
+      assert.ok(f.trace.every(row => row.tx === tx.id));
+    });
+    for (const state of ["stopped", "unknown"]) {
+      f.admission = state;
+      await assert.rejects(() => f.run("run_due_price_adjustments"), denied);
+      assert.deepEqual(f.commands, []);
+      f.trace.length = 0;
+      for (const definition of RENTAL_APPLICATION_JOB_DESCRIPTORS.filter(job => job.id !== "run_due_price_adjustments")) {
+        await f.authority.assertCurrent(request(definition.id));
+      }
+      assert.ok(!f.trace.some(row => row.kind === "admission"), "original closeout does not require accepting");
+    }
+    const missing = { database: f.database, term: { requireNewBusiness: async () => {} },
+      configuration: { loadWorkspaceSnapshot: async () => { throw Error("not called"); } },
+      deploymentForTransaction() { throw Error("not called"); } };
+    assert.throws(() => createRentalWorkerAuthority(missing), error => error.code === "core_unavailable");
+  });
   await check("disabled 只接受原五项；未知用途/版本/空间和调价失败关闭", async () => {
     const f = fixture();
     for (const definition of RENTAL_APPLICATION_JOB_DESCRIPTORS) {
@@ -253,7 +370,10 @@ async function main() {
       await assert.rejects(() => f.authority.assertCurrent({ ...request("expire_pending_orders"), ...changes }), denied);
     }
     assert.equal(f.termCalls, 0); f.grant = "enabled"; await f.run("run_due_price_adjustments");
-    assert.equal(f.termCalls, 2); assert.deepEqual(f.commands, ["price-adjustment"]);
+    // 原两段准入的配置 reader 现在各自复入同事务父 fence；没有增加外围事务。
+    assert.equal(f.termCalls, 4);
+    assert.equal(new Set(f.trace.filter(row => row.kind === "term").map(row => row.tx)).size, 2);
+    assert.deepEqual(f.commands, ["price-adjustment"]);
     f.termDenied = true; await assert.rejects(() => f.run("run_due_price_adjustments"), /subscription expired/u);
   });
   await check("缺当前 tenant/grant/gate/binding/deployment/配置仍拒绝", async () => {

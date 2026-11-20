@@ -15,7 +15,7 @@ import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { AiTaskCredentialSource } from '../task-current-action.authority';
 import { originalIdentityHash, type AiSceneCreationRule } from '../task-request/original-request.authority';
 import { originalBody, originalRequestReferenceSchema, parseOriginalRequest } from '../task-request/original-request.validation';
-import { withAiTaskTransactionAuthority } from '../task-transaction-authority';
+import { holdAiTaskDeploymentAdmission, withAiTaskTransactionAuthority } from '../task-transaction-authority';
 import { withTaskCenterTransactions, type TaskCenterTransactionDependencies } from '../task-center-transactions';
 
 export interface OriginalSceneTransactionDependencies extends TaskCenterTransactionDependencies {}
@@ -41,7 +41,7 @@ function identityKey(value: NonNullable<ReturnType<typeof getRequestIdentity>>) 
 /** The reference is only a locator. An existing Task is resolved from its exact
  * persisted original input, never from a request-supplied Task/Order/Quote ID. */
 export async function withOriginalSceneTaskTransactions<T>(input: OriginalSceneTransactionInput,
-  value: unknown, consume: () => Promise<T>, mode: 'creation' | 'task' = 'task'): Promise<T> {
+  value: unknown, consume: () => Promise<T>, mode: 'creation' | 'task' | 'original_recovery' = 'task'): Promise<T> {
   if (!hasRentalBusinessTenantFence()) return consume();
   const parsed = originalRequestReferenceSchema.safeParse(structuredClone(value));
   if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
@@ -78,7 +78,7 @@ export async function withOriginalSceneTaskTransactions<T>(input: OriginalSceneT
     await live();
     return { scope, row, body };
   };
-  if (mode === 'task') {
+  if (mode !== 'creation') {
     const original = await readOriginal(input.db);
     const task = await input.db.aiTask.findFirst({ where: { inputRef: original.row.id, scopeId: original.scope.id,
       scopeKind: 'WORKSPACE', ownerKind: 'USER', ownerId, audience: 'OPERATOR', creationKey: `scene-request:${original.row.id}`, archivedAt: null } });
@@ -89,7 +89,8 @@ export async function withOriginalSceneTaskTransactions<T>(input: OriginalSceneT
     await live();
     // This also resolves business Step -> AiTaskActionInput -> original Quote and
     // assertQuoteReadAccess. Candidate/quote_goal fields cannot stand in for it.
-    return withTaskCenterTransactions(ports, input.db, input.credentials, task.id, consume);
+    return withTaskCenterTransactions(ports, input.db, input.credentials, task.id, consume,
+      mode === 'original_recovery' ? 'original_recovery' : 'new_work');
   }
   return withAiTaskTransactionAuthority({ binding: hash({ identity: originalIdentity, original: reference }), begin: async (tx, key) => {
     if ('$transaction' in tx || key.kind !== 'creation' || key.inputRef !== reference.inputRef) throw denied();
@@ -121,6 +122,7 @@ export async function withOriginalSceneTaskTransactions<T>(input: OriginalSceneT
       await assertRentalBusinessTenantAccessAfterLock(tx, tenantId);
     };
     await current(lease.user);
+    await holdAiTaskDeploymentAdmission(tx, 'new_work');
     const orderId = original.body.sceneCode === 'order_explanation' ? original.body.input.orderId : undefined;
     if (orderId) await ports.orders.lockOrder(tenantId, orderId, tx);
     const verifyOrder = async () => {

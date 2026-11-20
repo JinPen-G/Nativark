@@ -76,6 +76,13 @@ module.exports = async function modelSettingsCases({ t, knowledgeFixture }) {
       const tx = { ...h.db }; delete tx.$transaction;
       tx.$queryRaw = async value => {
         const sql = value.sql.replace(/\s+/gu, ' ').trim();
+        if (sql.includes('FROM SystemParameterSet')) {
+          assert.deepEqual(value.values, ['tenant_platform', 'core-deployment-admission:rental']);
+          assert(sql.endsWith('LOCK IN SHARE MODE')); assert.equal(state.depth, 1);
+          return [{ id: 'admission-rental', tenantId: 'tenant_platform', module: 'core-deployment-admission:rental',
+            versionNo: 1, status: 'effective', operator: 'offline-test', content: { coreId: 'rental', state: 'accepting',
+              revision: 1, operationId: 'admission-a' } }];
+        }
         if (sql.includes('FROM Tenant')) { await phase('tenant-lock'); return [{ id: 'tenant-a', status: 'active' }]; }
         if (sql.includes('FROM platform_core_access_locks')) { await phase('core-lock'); return [{ tenantId: 'tenant-a', coreId: 'rental' }]; }
         if (sql.includes('FROM platform_tenant_core_grants')) return [{ state: state.grant, revision: 1n, operationId: 'grant-a' }];

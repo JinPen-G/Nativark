@@ -2,4 +2,5 @@
 export * from "./access";
 export * from "./binding";
 export * from "./deployment";
+export * from "./deployment-admission";
 export * from "./removal";

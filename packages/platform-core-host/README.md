@@ -31,6 +31,23 @@ const access = createPlatformCoreHttpAccess(application);
 
 标准管理流为注册 → SaaS授权租户 → 租户管理员分配成员 → 绑定 / 配置 → 普通业务。新Core不自动分配给所有成员，Core开通与业务角色分别核验。单Core停用保留成员记录、绑定、配置及原收据；重新开通按当前条件恢复，不重放初始化或业务。已撤回的成员分配不会随重开自动恢复。
 
+## 部署准入与存量切换
+
+[部署准入服务](src/platform-core-admission.ts) 使用当前 SaaS 主体及 `system:tenant:manage` 管理同一公共数据库内的 Core 准入。`accepting` 允许继续按原授权检查普通业务，`stopped` 关闭新绑定、普通业务和新的任务准入；缺失、损坏或读失败是 `unknown`，拒绝新准入。三者都不代表物理数据就绪、租户授权或已经排空。原 [availability](../core-host/src/deployment.ts) 继续只核注册和实际数据；已派发结果、原收据和精确登记的善后仍由原对象与权限裁定。
+
+管理端消费 [唯一 HTTP 合同](../core-contracts/src/management-http.ts) 的 `readAdmission`、`changeAdmission`、`readAdmissionOperation`。首次登记用 `expectedRevision: 0` 和唯一 `operationId` 明确提交目标状态；此后以当前修订做比较更新。应答未知只读原操作，后续状态已变化也返回原不可变收据，未观察到收据不证明未提交。停止、重开及首次登记都不修改租户授权、成员分配、绑定或业务数据，也不触发初始化。
+
+状态复用原公共 `SystemParameterSet`：固定平台租户和 `core-deployment-admission:<coreId>` 模块，版本 1 是当前记录，后续版本保存不可变原收据。控制写先锁原管理主体与平台 Tenant，再锁当前记录；当前状态、原收据和 `OperationLog` 同事务提交。业务通过 [同事务 SQL reader](../core-host/src/mysql-deployment-admission.ts) 持当前记录共享锁直到原提交，不能用另一连接、缓存或进程变量代替。同库 replica 共用同一逻辑部署；升级的发行 SHA 不作为状态 key。原收据版本使用有符号 Int，达到上限拒绝写入，不回绕。
+
+既有部署接入时按以下顺序进行，不能把缺行补成默认开放，也不能直接把尚未登记状态的宿主切到现有流量：
+
+1. 保持原宿主处理现有业务，固定实际发行、已选择 Core、数据观察和原活动／主动停用依据。逐 Core 核定要保留的状态；单租户停用、订阅到期、进程停止或队列为空都不能代替部署状态。缺少可信依据时保留旧组合并核清，不批量停用现有租户。
+2. 在同库受控候选中仅开放当前 SaaS 管理接点，由原管理身份逐 Core 登记明确状态，保存操作键并读回原收据及当前修订。已有记录按原状态和修订继续，禁止覆盖 `stopped` 或重放旧初始化。此步不需要新表、迁移或业务 seed。
+3. 使用 [Rental 原授权对照与单项接管](../rental-core/README.md#历史与业务收尾) 核定原权限等价映射；保留已关闭授权、已撤回成员及原绑定，差异通过原受控事务处理。新 Core 继续按独立授权和初始化办理。
+4. 核定 API、worker、AI 和前端均消费同一持久准入后再切换业务流量；各 Core 普通入口、原收据和收尾分别冒烟。旧进程未全部退出业务消费前，不能宣称部署停新已覆盖全部执行者。失败保留原组合和同一状态／操作记录，不能删记录或自动开放来回退。
+
+会话目录投影当前准入及修订，保留原授权与权限配置；页面及缓存依此撤下普通业务。服务端仍在原事务复核，隐藏菜单不能代替门禁。真实 MySQL 锁等待、实际切换和业务运行须在部署环境按原权限验证。[持久状态回归](../core-host/test/deployment-admission.test.cjs)
+
 成员分配沿公共人员管理的同一权限规则：租户管理员，或当前租户内具有全部数据范围及 `system:user:manage`（或原 `*`）权限的营运主体。会话目录、管理读取和写入均使用同一正式权限匹配函数，并保留原身份、租户锁及返回前复验；`core:rental:*` 等业务权限不能取得公共人员管理权。[公共权限规则](../platform-server/src/modules/platform/platform-permissions.ts) · [唯一匹配函数](../platform-server/src/permission-match.ts)
 
 部署者在核定标准包并应用所选迁移后，显式调用 `registerPlatformCorePermissions(tx, manifests)`，`tx`须来自同一公共库的Serializable事务。它先核全部清单、重复Core与现存权限归属/类型，再登记 `${coreId}:${resource}:${action}`，供原权限树和角色接口消费；不会创建角色、授予成员、初始化Core或删除历史权限。兼容升级可更新声明名称并保留原权限ID/角色关系。不同模块或原BUTTON占用同码时停止，先核清来源。[工单部署命令](../../apps/example-tickets-api/src/register-permissions.ts)展示实际调用。

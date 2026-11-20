@@ -1,5 +1,5 @@
 /** 旧 Rental HTTP 的标准 Core 准入与原业务父锁接点。只消费原 Guard 写入的身份，
- * 在业务原事务复核 Core 授权；不替代角色/对象/文件/客户授权，不包裹外部副作用或改写事务。
+ * 在业务原事务复核 Core 授权与部署停新；不替代角色/对象/文件/客户授权，不包裹外部副作用或改写事务。
  * 未经过 mysql-business-fence 的直接写入和独立事务尚未覆盖，宿主须逐条接入后才能开放。
  */
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { sqltag as sql, type Sql } from "@prisma/client/runtime/library";
 import { CoreBindingSchema, CoreScopeReferenceSchema, MemberCoreAssignmentSchema, TenantCoreGrantSchema,
   isCoreVersionSupported } from "@rental-os/core-contracts";
-import { CoreAccessError, coreBindingScopeKey, type CoreDeploymentAvailability } from "@rental-os/core-host";
+import { CoreAccessError, coreBindingScopeKey, type CoreDeploymentAvailability, type CoreDeploymentAdmission } from "@rental-os/core-host";
 import type { CoreHostSqlTransaction } from "@rental-os/core-host/mysql";
 import type { SystemUserRow } from "@rental-os/platform-contracts";
 import { getRequestIdentity } from "@rental-os/platform-server/request-identity";
@@ -71,6 +71,13 @@ export interface RentalApplicationAccessDependencies {
   /** A read-only SQL view delegating to the exact business transaction. Construct the
    * original deployment observer with this reader, never with the root database. */
   deploymentForTransaction(reader: Pick<CoreHostSqlTransaction, "$queryRaw">): CoreDeploymentAvailability;
+  /** Same original transaction, separate from physical availability. The source
+   * locks only its canonical admission row; it must not acquire a platform Tenant. */
+  admissionForTransaction(reader: Pick<CoreHostSqlTransaction, "$queryRaw">): CoreDeploymentAdmission;
+  /** Trusted assembly's exact continuation route selector only. Receives the
+   * original uppercase method and matchableRequestPath, never request flags.
+   * This waives accepting only; it grants no disabled tenant-Core or object access. */
+  deploymentContinuation?(method: string, path: string): boolean;
   /** Same original public authority/user repository; SaaS never receives a
    * fabricated member assignment. Optional only for hosts without these routes. */
   managementAuthority?: Pick<PlatformPrincipalAuthority, "lock">;
@@ -97,6 +104,7 @@ type RequestEvidence = {
   actor: string;
   tenantScope: boolean;
   newBusiness: boolean;
+  deploymentContinuation: boolean;
   management?: "catalog" | "tenant";
   leases: WeakMap<object, PlatformPrincipalLease>;
   recovery?: RentalRecoverySubject;
@@ -241,11 +249,14 @@ function currentSubscriptionReader(transaction: RentalBusinessTenantTransaction,
  */
 export function createRentalApplicationAccess(input: RentalApplicationAccessDependencies) {
   if (typeof input?.database?.$transaction !== "function" || typeof input.term?.requireNewBusiness !== "function"
-    || typeof input.deploymentForTransaction !== "function" || !input.authorization
+    || typeof input.deploymentForTransaction !== "function" || typeof input.admissionForTransaction !== "function" || !input.authorization
     || (["isNewBusinessRoute", "isTenantMembershipRoute", "isClientRoute", "isClientPublicRoute", "requiredPermissions"] as const)
       .some(method => typeof input.authorization[method] !== "function")) {
-    throw new CoreAccessError("core_unavailable", "Rental HTTP 缺少原路由政策、事务、订阅或实际部署观察器");
+    throw new CoreAccessError("core_unavailable", "Rental HTTP 缺少原路由政策、事务、订阅或实际部署/停新读取器");
   }
+  if (input.deploymentContinuation !== undefined && typeof input.deploymentContinuation !== "function")
+    throw new CoreAccessError("core_unavailable", "Rental 部署续程必须由宿主提供固定路由选择器");
+  const deploymentContinuation = input.deploymentContinuation;
   const requests = new AsyncLocalStorage<ApplicationRequestScope>();
   const policy = input.authorization;
 
@@ -298,7 +309,8 @@ export function createRentalApplicationAccess(input: RentalApplicationAccessDepe
     return { active: true, request, method, path, objectPath: normalizeRequestPath(request.url), tenantId: management?.tenantId ?? identity.tenantId, userId: identity.userId,
       audience, workspaceId, sessionId, expiresAt, identity: identityFingerprint(),
       sourceIdentity: identity, actor: actorFingerprint(request, audience), tenantScope,
-      newBusiness: policy.isNewBusinessRoute(method, path), management: management?.kind, leases: new WeakMap(), recoveryLeases: new WeakMap() };
+      newBusiness: policy.isNewBusinessRoute(method, path), deploymentContinuation: deploymentContinuation?.(method, path) === true,
+      management: management?.kind, leases: new WeakMap(), recoveryLeases: new WeakMap() };
   };
 
   const assertEvidence = (evidence: RequestEvidence) => {
@@ -405,10 +417,29 @@ export function createRentalApplicationAccess(input: RentalApplicationAccessDepe
       }
     }
     await requireCurrentBinding(transaction, tenantId, evidence.tenantScope ? undefined : evidence.workspaceId);
+    let admissionClosed = false;
+    if (!evidence.management) {
+      const admission = input.admissionForTransaction(reader);
+      if (typeof admission?.requireAccepting !== "function" || typeof admission.readCurrent !== "function")
+        throw new CoreAccessError("core_unavailable", "Rental 缺少同事务的部署停新读取器");
+      if (evidence.recovery || evidence.deploymentContinuation) {
+        // Exact history/closeout or a server-registered continuation still reads
+        // the canonical S lock. Only recovery can authorize a disabled tenant
+        // grant; a stopped/unknown deployment cannot let a draft establish work.
+        const current = await admission.readCurrent(RENTAL_CORE_ID);
+        if (!current || current.coreId !== RENTAL_CORE_ID)
+          throw new CoreAccessError("core_unavailable", "Rental 部署停新记录与当前 Core 不符");
+        admissionClosed = current.state !== "accepting";
+      } else {
+        // All ordinary handlers, including reads, require admission. Subscription
+        // newBusiness is a narrower policy and cannot stand in for this gate.
+        await admission.requireAccepting(RENTAL_CORE_ID);
+      }
+    }
     // Adapt only SQL call shape/PromiseLike; every query still executes on the same
     // transaction. No whole-client cast, connection swap, ORM proxy or nested commit.
     await deployment.requireAvailable(RENTAL_CORE_ID, tenantId);
-    if (evidence.recovery) await evidence.recoveryLeases.get(transaction)!.lockOriginalSubject(grant.data.state === "disabled");
+    if (evidence.recovery) await evidence.recoveryLeases.get(transaction)!.lockOriginalSubject(grant.data.state === "disabled" || admissionClosed);
     if (evidence.newBusiness) {
       await input.term.requireNewBusiness(currentSubscriptionReader(transaction, tenantId), tenantId);
     }

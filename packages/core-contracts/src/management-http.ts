@@ -7,7 +7,9 @@ import { CoreManifestSchema } from "./manifest";
 import {
   BindCoreScopeSchema, ChangeMemberCoreAssignmentSchema, ChangeTenantCoreGrantSchema,
   CoreBindingOperationQuerySchema, CoreBindingSchema, CoreOperationReferenceSchema,
-  MemberCoreAssignmentSchema, TenantCoreGrantSchema, CoreRemovalQuerySchema, CoreRemovalObservationSchema
+  MemberCoreAssignmentSchema, TenantCoreGrantSchema, CoreRemovalQuerySchema, CoreRemovalObservationSchema,
+  ChangeCoreDeploymentAdmissionSchema, CoreDeploymentAdmissionQuerySchema, CoreDeploymentAdmissionObservationSchema,
+  CoreDeploymentAdmissionStateSchema, CoreDeploymentAdmissionOperationQuerySchema, CoreDeploymentAdmissionOperationObservationSchema
 } from "./lifecycle";
 
 export const CORE_MANAGEMENT_HTTP_BASE = "platform/core-host";
@@ -65,7 +67,13 @@ export const CORE_MANAGEMENT_HTTP = {
   readMemberAssignmentOperation: { method: "POST", path: "member-assignment-operations/read", summary: "只读核对本人的原成员Core分配操作", permission: "system:user:manage",
     audience: "tenant", request: CoreMemberAssignmentOperationQuerySchema, response: CoreMemberAssignmentObservationSchema },
   assessRemoval: { method: "POST", path: "removal/read", summary: "只读核对当前Core移除阻碍", permission: "system:tenant:manage",
-    audience: "saas", request: CoreRemovalQuerySchema, response: CoreRemovalObservationSchema }
+    audience: "saas", request: CoreRemovalQuerySchema, response: CoreRemovalObservationSchema },
+  changeAdmission: { method: "POST", path: "deployment-admission", summary: "登记或变更当前部署的Core准入", permission: "system:tenant:manage",
+    audience: "saas", request: ChangeCoreDeploymentAdmissionSchema, response: CoreDeploymentAdmissionStateSchema },
+  readAdmission: { method: "POST", path: "deployment-admission/read", summary: "读取当前部署的Core准入及修订", permission: "system:tenant:manage",
+    audience: "saas", request: CoreDeploymentAdmissionQuerySchema, response: CoreDeploymentAdmissionObservationSchema },
+  readAdmissionOperation: { method: "POST", path: "deployment-admission-operations/read", summary: "只读核对本人的原部署准入操作", permission: "system:tenant:manage",
+    audience: "saas", request: CoreDeploymentAdmissionOperationQuerySchema, response: CoreDeploymentAdmissionOperationObservationSchema }
 } as const;
 
 export type CoreManagementHttpOperation = keyof typeof CORE_MANAGEMENT_HTTP;

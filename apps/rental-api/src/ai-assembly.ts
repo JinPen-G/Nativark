@@ -10,6 +10,7 @@ import { composeRentalApplication, type RentalHostAssembly } from "./assembly";
 import type { RentalHostCoreSetup } from "./additional-cores";
 import { createRentalAiFileCleanupSource } from "./ai-file-cleanup-source";
 import type { RentalDatabaseClient } from "./database";
+import { createRentalAiHttpPolicy, rentalAiDeploymentContinuationSelector } from "./ai-http-policy";
 
 export function composeRentalAiApplication<Additional = unknown>(input: {
   database: RentalDatabaseClient;
@@ -23,7 +24,9 @@ export function composeRentalAiApplication<Additional = unknown>(input: {
   const installed = requireAiNativeDataPackage(root, lock.dataCapabilities![0]);
   const dataPlan = createAiNativeMysqlDataPlanFromContribution(installed.contribution);
   const participants = createRentalAiParticipants({ ...input, lock });
+  const continuation = rentalAiDeploymentContinuationSelector(createRentalAiHttpPolicy());
   return composeRentalApplication<RentalAiBinding, Additional>({ ...input, lock, aiMode: "enabled", ai: { ...participants, dataPlan,
+    deploymentContinuation: (method, path) => continuation.isRoute({ method, url: path }),
     fileCleanupKnowledge: createRentalAiFileCleanupSource(),
     readDataPackages: () => [requireAiNativeDataPackage(root, lock.dataCapabilities![0])] } });
 }

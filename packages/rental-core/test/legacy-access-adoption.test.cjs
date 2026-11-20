@@ -104,6 +104,9 @@ function fixture() {
     sessions: ['admin', 'saas'].map(userId => ({ id: userId + '-session', userId, audience: 'operator',
       currentWorkspaceId: null, revokedAt: null, expiresAt: new Date('2099-01-01') })),
     grants: [], assignments: [], bindings: [], accessReceipts: [], bindingReceipts: [], logs: [],
+    parameters: [{ id: 'rental-admission', tenantId: 'tenant_platform', module: 'core-deployment-admission:rental',
+      versionNo: 1, status: 'effective', operator: 'saas',
+      content: { coreId: 'rental', state: 'accepting', revision: 1, operationId: 'admission-original' } }],
     profile: { tenantId: 'tenant', categoryCode: 'camera' }, businessSettings: { tenantId: 'tenant' }
   };
   const trace = [], controls = {}; let sequence = 0, active;
@@ -168,6 +171,17 @@ function fixture() {
         assert(Array.isArray(strings)); const sql = strings.join('?').replace(/\s+/gu, ' ').trim();
         mark('sql', sql);
         if (controls.beforeQuery) await controls.beforeQuery(snapshot, tx, sql, values);
+        if (sql.includes('FROM SystemParameterSet')) {
+          assert.equal(options.isolationLevel, 'ReadCommitted');
+          assert.equal(sql, 'SELECT id, tenantId, module, versionNo, status, content, operator FROM SystemParameterSet '
+            + 'WHERE tenantId = ? AND module = ? AND versionNo = 1 LOCK IN SHARE MODE');
+          assert.equal(values.length, 2); assert.equal(values[0], 'tenant_platform');
+          assert(['core-deployment-admission:rental', 'core-deployment-admission:example-tickets'].includes(values[1]));
+          const found = snapshot.parameters.filter(row => row.tenantId === values[0] && row.module === values[1] && row.versionNo === 1);
+          if (found.length) held.add('admission:' + values[1]);
+          mark('admission', values[1]);
+          return copy(found);
+        }
         if (/FROM Tenant /u.test(sql)) {
           const tenant = snapshot.tenants.find(row => row.id === values[0]);
           if (tenant) held.add('tenant:' + tenant.id);
@@ -235,6 +249,7 @@ function fixture() {
           snapshot.bindingReceipts.push({ tenantId, coreId, scopeHash, operationId, actorTenantId, actorId, fingerprint, operation: JSON.parse(operation), binding: JSON.parse(binding) });
         } else if (sql.includes('INTO platform_core_bindings')) {
           const [tenantId, coreId, scopeHash, containerType, containerId, bindingId, revision, dataVersion] = values;
+          assert(held.has('admission:core-deployment-admission:' + coreId), '首次绑定写入须保留原事务部署准入共享锁');
           snapshot.bindings.push({ tenantId, coreId, scopeHash, containerType, containerId, bindingId, revision, dataVersion });
         } else throw Error('未知写入: ' + sql);
         return 1;
@@ -298,6 +313,9 @@ test('原Auth/Tenant/Core→完整来源锁→原事实/收据/审计，逐项�
   const command = { ...await f.operation('bind-one'), workspaceId: 'space' };
   const binding = await f.withActor('admin', () => f.adoption.bindScope(command));
   assert.equal(binding.container.id, 'space'); assert.equal(binding.revision, 1);
+  const bindingTrace = f.trace.filter(row => row.id === f.trace.find(row => row.event === 'admission').id);
+  assert(bindingTrace.findIndex(row => row.event === 'admission')
+    < bindingTrace.findIndex(row => row.event === 'execute' && row.detail.includes('INTO platform_core_bindings')));
   const after = await f.preparation.prepare('tenant');
   assert.equal(after.sourceFingerprint, sourceBefore.sourceFingerprint);
   assert.deepEqual(after.originalEvidence, sourceBefore.originalEvidence);
@@ -384,16 +402,21 @@ test('绑定原结果与现有绑定复用均不init；缺绑定遇新初始化�
   f.controls.loseCommitReply = true;
   await assert.rejects(f.withActor('admin', () => f.adoption.bindScope(command)), /COMMIT_REPLY_UNKNOWN/u);
   const originalBinding = copy(f.state.bindings[0]);
+  f.state.parameters[0].content.state = 'stopped';
   f.state.users[1].tokenVersion++;
+  const replayIndex = f.trace.length;
   const replay = await f.withActor('admin', () => f.adoption.bindScope(command));
   assert.equal(replay.bindingId, originalBinding.bindingId); assert.equal(f.state.bindings.length, 1); assert.equal(f.state.logs.length, 1);
+  assert(!f.trace.slice(replayIndex).some(row => row.event === 'admission'), '停新不能把已提交原收据变成首次初始化');
   let initialized = 0;
   const registration = f.input.registrations.get('rental');
   const guarded = createRentalLegacyAccessAdoption({ ...f.input, registrations: new Map([['rental', { ...registration,
     server: { ...registration.server, initialization: { async initialize() { initialized++; throw Error('不应初始化'); } } } }]]) });
   const reuse = { ...await f.operation('reuse-existing'), workspaceId: 'space', expectedRevision: 1 };
+  const reuseIndex = f.trace.length;
   assert.equal((await f.withActor('admin', () => guarded.bindScope(reuse))).bindingId, replay.bindingId);
   assert.equal(initialized, 0); assert.equal(f.state.bindings.length, 1); assert.equal(f.state.bindingReceipts.length, 2);
+  assert(!f.trace.slice(reuseIndex).some(row => row.event === 'admission'), '停新不阻止原绑定复用');
   f.state.bindings = []; const fresh = { ...await f.operation('missing-binding'), workspaceId: 'space' };
   await assert.rejects(f.withActor('admin', () => guarded.bindScope(fresh)), { code: 'source_unavailable' }); assert.equal(initialized, 0);
   f.state.subscription.endAt = date;
