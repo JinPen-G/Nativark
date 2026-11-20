@@ -98,10 +98,9 @@ async function main() {
     resource: {
       algorithm: "AEAD_AES_256_GCM",
       original_type: "refund",
-      ciphertext: ciphertext.toString("base64"),
+      ciphertext: Buffer.concat([ciphertext, cipher.getAuthTag()]).toString("base64"),
       associated_data: associatedData,
-      nonce: resourceNonce,
-      tag: cipher.getAuthTag().toString("base64")
+      nonce: resourceNonce
     }
   });
   const timestamp = String(Math.floor(Date.now() / 1000));

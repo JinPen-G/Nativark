@@ -436,8 +436,11 @@ export class PaymentProviderTransport {
     const key = Buffer.from(requiredText(config.credentials.apiV3Key, "API v3 密钥"), "utf8");
     if (key.length !== 32) throw new ServiceUnavailableException("API v3 密钥必须是 32 字节");
     const iv = Buffer.from(requiredText(resource.nonce, "回调 nonce"), "utf8");
-    const ciphertext = Buffer.from(requiredText(resource.ciphertext, "回调密文"), "base64");
-    const tag = Buffer.from(requiredText(resource.tag, "回调认证标签"), "base64");
+    // 微信 V3 将 16 字节 GCM 标签附在密文末尾，两者一起 Base64 编码。
+    const encrypted = Buffer.from(requiredText(resource.ciphertext, "回调密文"), "base64");
+    if (encrypted.length <= 16) throw new ServiceUnavailableException("回调密文缺少内容或认证标签");
+    const ciphertext = encrypted.subarray(0, -16);
+    const tag = encrypted.subarray(-16);
     const decipher = createDecipheriv("aes-256-gcm", key, iv);
     const associatedData = valueOf(resource.associated_data);
     if (associatedData) decipher.setAAD(Buffer.from(associatedData, "utf8"));

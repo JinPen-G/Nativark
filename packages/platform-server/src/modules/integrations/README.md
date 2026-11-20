@@ -49,6 +49,8 @@ IMAP 使用 `EXAMINE` 和 `BODY.PEEK`。超过 1 MB 的邮件只读取最多 64 
 
 微信按精确的证书序列号或公钥ID选择材料，校验原始请求/响应和时间戳。Stripe回调复用原HMAC、v1签名及时间容差。请求保留HTTPS/出站地址校验、重定向限制、超时和响应读取清理。
 
+微信 V3 通知的 `resource.ciphertext` 是密文与末尾16字节 GCM 标签一起 Base64 编码；解包沿这个原格式，AAD可缺省或为空。付款和退款仍先对原始报文验签，再由业务 Core 核金额、原操作和当前事实。[微信官方解密说明](https://pay.wechatpay.cn/doc/v3/merchant/4012071382)
+
 `PaymentProviderUnknownError`、`PaymentProviderDefinitiveError`和HTTP错误保持原类别，由业务应用保存原结果和占用。Rental支付运行与对账文件应用维护原订单金额、退款额度、当前权限、配置锁、资金事务及回调台账。原回调候选缓存由Rental运行实例持有。
 
 ## 验证入口

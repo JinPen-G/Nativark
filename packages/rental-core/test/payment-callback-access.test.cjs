@@ -115,7 +115,7 @@ function wechatInput(refund = false, patch = {}) {
   const cipher = createCipheriv("aes-256-gcm", Buffer.from(apiV3Key), Buffer.from(nonce)); cipher.setAAD(Buffer.from(aad));
   const data = Buffer.concat([cipher.update(JSON.stringify(value)), cipher.final()]);
   const rawBody = Buffer.from(JSON.stringify({ id: "event", event_type: refund ? "REFUND.SUCCESS" : "TRANSACTION.SUCCESS",
-    resource: { algorithm: "AEAD_AES_256_GCM", nonce, associated_data: aad, ciphertext: data.toString("base64"), tag: cipher.getAuthTag().toString("base64") } }));
+    resource: { algorithm: "AEAD_AES_256_GCM", nonce, associated_data: aad, ciphertext: Buffer.concat([data, cipher.getAuthTag()]).toString("base64") } }));
   const timestamp = String(Math.floor(Date.now() / 1000)), callbackNonce = "callback-nonce";
   const signer = createSign("RSA-SHA256"); signer.update(`${timestamp}\n${callbackNonce}\n${rawBody}\n`);
   return { rawBody, headers: { "wechatpay-timestamp": timestamp, "wechatpay-nonce": callbackNonce,
