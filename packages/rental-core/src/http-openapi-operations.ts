@@ -1074,13 +1074,96 @@ export const RENTAL_HTTP_OPERATIONS: ContractOperation[] = [
   backlogOperation("post", "/api/rental/v1/rule-versions/{version}/restore", "RentalBusiness", "restoreRentalRuleVersionV1", "Restore a historical rental rule version as a new draft", ["rental-os:rules:manage"]),
   backlogOperation("post", "/api/rental/v1/rule-versions/{version}/publish", "RentalBusiness", "publishRentalRuleVersionV1", "Publish or schedule a rental rule version", ["rental-os:rules:publish"]),
   backlogOperation("post", "/api/rental/v1/rule-versions/{version}/void", "RentalBusiness", "voidRentalRuleVersionV1", "Void a pending or effective rental rule version", ["rental-os:rules:publish"]),
-  backlogOperation("get", "/api/rental/v1/orders/{orderId}/funding-events", "RentalBusiness", "listRentalOrderFundingEventsV1", "List order cash/security events and balances, with separately reconciled original corporate allocations", ["rental-os:order:view", "rental-os:order:settle"], true, undefined, "RentalFundingBalance"),
-  backlogOperation("post", "/api/rental/v1/orders/{orderId}/funding-events/initiate", "RentalBusiness", "initiateRentalOrderFundingV1", "Initiate a deposit collection or pre-auth freeze (mock)", ["rental-os:order:settle"]),
-  backlogOperation("post", "/api/rental/v1/orders/{orderId}/funding-events/append", "RentalBusiness", "appendRentalOrderFundingV1", "Append to a deposit or pre-auth (mock)", ["rental-os:order:settle"]),
-  backlogOperation("post", "/api/rental/v1/orders/{orderId}/funding-events/capture", "RentalBusiness", "captureRentalOrderFundingV1", "Capture a deposit against original offline evidence, or simulate an eligible security capture", ["rental-os:order:settle"], true, "RentalFundingAmountRequest", "RentalFundingEvent"),
-  backlogOperation("post", "/api/rental/v1/orders/{orderId}/funding-events/refund", "RentalBusiness", "refundRentalOrderFundingV1", "Confirm original offline deposit refund, or simulate an eligible refund", ["rental-os:order:settle"], true, "RentalFundingAmountRequest", "RentalFundingEvent"),
-  backlogOperation("post", "/api/rental/v1/orders/{orderId}/funding-events/release", "RentalBusiness", "releaseRentalOrderFundingV1", "Release a pre-auth freeze (mock)", ["rental-os:order:settle"]),
-  backlogOperation("post", "/api/rental/v1/orders/{orderId}/funding-events/fail", "RentalBusiness", "failRentalOrderFundingV1", "Record a failed deposit/pre-auth funding action (mock)", ["rental-os:order:settle"]),
+  {
+    method: "get", path: "/api/rental/v1/orders/{orderId}/funding-events", tag: "RentalBusiness", operationId: "listRentalOrderFundingEventsV1",
+    summary: "读取原订单三类资金余额与按事件时间正序返回的历史流水，保留实款或演练口径及企业原核销投影。",
+    permissions: ["rental-os:order:view", "rental-os:order:settle"], authRequired: true, responseSchema: "RentalFundingBalance",
+    errorResponses: {
+      "401": { description: "原会话认证失败。", schema: "RentalHttpErrorResponse" },
+      "403": { description: "原订单查看或结算权限、当前租户及经营空间范围拒绝读取。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "订单不存在或不属于当前经营空间。", schema: "RentalHttpErrorResponse" },
+      "409": { description: "原企业应收核销或历史资金确认依据不可核实。", schema: "RentalHttpErrorResponse" },
+      "500": { description: "原订单、资金或应收投影读取失败。", schema: "RentalHttpErrorResponse" }
+    }
+  },
+  {
+    method: "post", path: "/api/rental/v1/orders/{orderId}/funding-events/initiate", tag: "RentalBusiness", operationId: "initiateRentalOrderFundingV1",
+    summary: "按原订单及适用待补款续租金额发起租金、押金或预授权演练，沿纯演练准入和原键读取收据。",
+    permissions: ["rental-os:order:settle"], authRequired: true, requestSchema: "InitiateRentalFundingRequest", responseSchema: "RentalFundingEvent", successStatus: 201,
+    errorResponses: {
+      "400": { description: "原 DTO 或线下方式字段校验失败。", schema: "RentalHttpErrorResponse" },
+      "401": { description: "原会话认证失败。", schema: "RentalHttpErrorResponse" },
+      "403": { description: "原订单结算权限或当前租户、经营空间、地点与数据范围拒绝动作。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "订单不存在或不属于当前经营空间。", schema: "RentalHttpErrorResponse" },
+      "409": { description: "原纯演练准入、当前应收、款项动作、终态或原键来源校验拒绝。", schema: "RentalHttpErrorResponse" },
+      "500": { description: "原资金事务或提交后恢复保存异常，结果不明时沿同一键与原收据核对。", schema: "RentalHttpErrorResponse" }
+    }
+  },
+  {
+    method: "post", path: "/api/rental/v1/orders/{orderId}/funding-events/append", tag: "RentalBusiness", operationId: "appendRentalOrderFundingV1",
+    summary: "沿原纯演练准入追加指定款项金额，保证金须已发起，租金追加受原待收额度约束。",
+    permissions: ["rental-os:order:settle"], authRequired: true, requestSchema: "RentalFundingAmountRequest", responseSchema: "RentalFundingEvent", successStatus: 201,
+    errorResponses: {
+      "400": { description: "原 DTO、金额或线下方式字段校验失败。", schema: "RentalHttpErrorResponse" },
+      "401": { description: "原会话认证失败。", schema: "RentalHttpErrorResponse" },
+      "403": { description: "原订单结算权限或当前业务范围拒绝动作。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "订单不存在或不属于当前经营空间。", schema: "RentalHttpErrorResponse" },
+      "409": { description: "原纯演练准入、保证金发起状态、金额、终态或同键来源与金额不符。", schema: "RentalHttpErrorResponse" },
+      "500": { description: "原资金事务或提交后恢复保存异常，结果不明时沿同一键与原收据核对。", schema: "RentalHttpErrorResponse" }
+    }
+  },
+  {
+    method: "post", path: "/api/rental/v1/orders/{orderId}/funding-events/capture", tag: "RentalBusiness", operationId: "captureRentalOrderFundingV1",
+    summary: "抵扣押金或转扣预授权演练余额，带 offlineDeposit 时沿原实收押金与凭证在同一事务确认线下抵扣。",
+    permissions: ["rental-os:order:settle"], authRequired: true, requestSchema: "RentalFundingAmountRequest", responseSchema: "RentalFundingEvent", successStatus: 201,
+    errorResponses: {
+      "400": { description: "原 DTO 校验失败，或线下处置缺少 deposit 款项及当前操作人。", schema: "RentalHttpErrorResponse" },
+      "401": { description: "原会话认证失败。", schema: "RentalHttpErrorResponse" },
+      "403": { description: "原订单结算权限或当前业务范围拒绝动作。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "订单不存在或不在当前授权范围。", schema: "RentalHttpErrorResponse" },
+      "409": { description: "原纯演练准入、余额与尚未支付应收、线下实收和凭证、精确金额或同键收据不满足。", schema: "RentalHttpErrorResponse" },
+      "500": { description: "原资金及凭证事务或提交后恢复保存异常，结果不明时核对原键、凭证与资金收据。", schema: "RentalHttpErrorResponse" }
+    }
+  },
+  {
+    method: "post", path: "/api/rental/v1/orders/{orderId}/funding-events/refund", tag: "RentalBusiness", operationId: "refundRentalOrderFundingV1",
+    summary: "沿原余额与待退额度办理押金或租金演练退款，带 offlineDeposit 时按原实收方式与凭证确认线下押金退还。",
+    permissions: ["rental-os:order:settle"], authRequired: true, requestSchema: "RentalFundingAmountRequest", responseSchema: "RentalFundingEvent", successStatus: 201,
+    errorResponses: {
+      "400": { description: "原 DTO 或方式校验失败，或线下处置缺少 deposit 款项及当前操作人。", schema: "RentalHttpErrorResponse" },
+      "401": { description: "原会话认证失败。", schema: "RentalHttpErrorResponse" },
+      "403": { description: "原订单结算权限或当前业务范围拒绝动作。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "订单不存在或不在当前授权范围。", schema: "RentalHttpErrorResponse" },
+      "409": { description: "原纯演练准入、可退余额、原线下收款方式、实收与凭证、精确金额或同键收据不满足。", schema: "RentalHttpErrorResponse" },
+      "500": { description: "原资金及凭证事务或提交后恢复保存异常，结果不明时核对原键、凭证与资金收据。", schema: "RentalHttpErrorResponse" }
+    }
+  },
+  {
+    method: "post", path: "/api/rental/v1/orders/{orderId}/funding-events/release", tag: "RentalBusiness", operationId: "releaseRentalOrderFundingV1",
+    summary: "沿原纯演练准入释放预授权冻结额度，省略金额时使用当前全部剩余冻结余额。",
+    permissions: ["rental-os:order:settle"], authRequired: true, requestSchema: "RentalFundingReleaseRequest", responseSchema: "RentalFundingEvent", successStatus: 201,
+    errorResponses: {
+      "400": { description: "原 DTO 的金额、幂等键或原因校验失败。", schema: "RentalHttpErrorResponse" },
+      "401": { description: "原会话认证失败。", schema: "RentalHttpErrorResponse" },
+      "403": { description: "原订单结算权限或当前业务范围拒绝动作。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "订单不存在或不属于当前经营空间。", schema: "RentalHttpErrorResponse" },
+      "409": { description: "原纯演练准入、可释放余额、正金额或同键来源与金额校验拒绝。", schema: "RentalHttpErrorResponse" },
+      "500": { description: "原资金事务或提交后恢复保存异常，结果不明时沿同一键与原收据核对。", schema: "RentalHttpErrorResponse" }
+    }
+  },
+  {
+    method: "post", path: "/api/rental/v1/orders/{orderId}/funding-events/fail", tag: "RentalBusiness", operationId: "failRentalOrderFundingV1",
+    summary: "沿原纯演练准入记录指定款项的失败码与金额为 0 的原事件，保留当前资金余额。",
+    permissions: ["rental-os:order:settle"], authRequired: true, requestSchema: "RentalFundingFailureRequest", responseSchema: "RentalFundingEvent", successStatus: 201,
+    errorResponses: {
+      "400": { description: "原 DTO、失败码或方式字段校验失败。", schema: "RentalHttpErrorResponse" },
+      "401": { description: "原会话认证失败。", schema: "RentalHttpErrorResponse" },
+      "403": { description: "原订单结算权限或当前业务范围拒绝动作。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "订单不存在或不属于当前经营空间。", schema: "RentalHttpErrorResponse" },
+      "409": { description: "原纯演练准入、款项动作、原因、幂等键或同键来源校验拒绝。", schema: "RentalHttpErrorResponse" },
+      "500": { description: "原资金事务或提交后恢复保存异常，结果不明时沿同一键与原收据核对。", schema: "RentalHttpErrorResponse" }
+    }
+  },
   {
     method: "get", path: "/api/rental/v1/orders/{orderId}/payment-intents", tag: "Payments", operationId: "listRentalPaymentIntents",
     summary: "读取原订单支付单数组，按创建时间正序返回租金、押金和预授权的原结果状态。", permissions: ["rental-os:finance:view", "rental-os:finance:reconcile"], authRequired: true,

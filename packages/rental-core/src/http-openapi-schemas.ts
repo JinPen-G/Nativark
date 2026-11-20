@@ -1,6 +1,8 @@
 /** Rental 原 HTTP schema 单源。保留历史宽泛字段，字段完整性缺口由接口贡献明确列出。 */
 import { STAFF_UPLOAD_OBSERVATION_SCHEMAS } from "@rental-os/shared";
 import { RentalInventoryMode, RENTAL_LOCATION_TYPES, RENTAL_PRICING_UNIT_CODES } from "./contracts";
+import type { InitiateRentalFundingRequest, RentalFundingAmountRequest, RentalFundingFailureRequest } from "./contracts";
+import type { RentalFundingReleaseDto } from "./order-request.dto";
 import { RENTAL_EXCHANGE_INSPECTION_SCHEMAS } from "./http-openapi-rental-exchange-inspection-preparation.schemas";
 import { ENTERPRISE_COMPONENT_SCHEMAS } from "./http-openapi-enterprise-schemas";
 import { ENTERPRISE_ORDER_DELEGATION_SCHEMAS } from "./http-openapi-enterprise-order-delegation-schemas";
@@ -505,12 +507,55 @@ export const RENTAL_HTTP_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     idempotencyKey: stringSchema, reason: stringSchema, operator: stringSchema, failureCode: stringSchema,
     at: { type: "string", format: "date-time" }, createdAt: { type: "string", format: "date-time" } },
     ["id", "tenantId", "workspaceId", "orderId", "instrument", "action", "amount", "balanceAfter", "provider", "idempotencyKey", "reason", "at", "createdAt"]),
-  RentalFundingAmountRequest: objectOf({ instrument: { type: "string", enum: ["rental", "deposit", "preauthorization"] },
-    amount: { type: "number", minimum: 0.01 }, idempotencyKey: stringSchema, reason: stringSchema,
-    paymentMethod: { type: "string", enum: ["offline_cash", "offline_transfer"] },
-    offlineDeposit: objectOf({ sourceEventId: { type: "string", minLength: 1, maxLength: 191 },
-      evidenceFileAssetId: { type: "string", minLength: 1, maxLength: 191 } }, ["sourceEventId", "evidenceFileAssetId"]) },
-    ["instrument", "amount", "idempotencyKey", "reason"]),
+  InitiateRentalFundingRequest: {
+    ...objectOf({
+      instrument: { type: "string", enum: ["rental", "deposit", "preauthorization"] },
+      idempotencyKey: { type: "string", minLength: 1, pattern: "\\S", description: "原服务去除首尾空白，按空间、订单、款项、动作及同一键读取原事件。" },
+      reason: { type: "string", minLength: 1, pattern: "\\S" },
+      paymentMethod: { type: "string", enum: ["offline_cash", "offline_transfer", null], nullable: true, description: "省略或 null 采用 offline_cash，沿原资金事务核验当前空间已启用方式。" }
+    } satisfies Record<keyof InitiateRentalFundingRequest, SchemaObject>, ["instrument", "idempotencyKey", "reason"]),
+    description: "原 InitiateRentalFundingDto。首次金额由原订单及适用待补款续租取得。原通用入口使用 mock 来源，沿原服务核验非生产进程、development 空间且订单无真实资金、支付单或线下登记。",
+    example: { instrument: "deposit", idempotencyKey: "funding-initiate-example", reason: "原订单押金演练" }
+  },
+  RentalFundingAmountRequest: {
+    ...objectOf({
+      instrument: { type: "string", enum: ["rental", "deposit", "preauthorization"] },
+      amount: { type: "number", minimum: 0.01, description: "原 DTO 接受不小于 0.01 的数字。模拟动作沿原金额工具及存储精度，原线下押金处置另要求金额精确到分。" },
+      idempotencyKey: { type: "string", minLength: 1, pattern: "\\S" },
+      reason: { type: "string", minLength: 1, pattern: "\\S" },
+      paymentMethod: { type: "string", enum: ["offline_cash", "offline_transfer", null], nullable: true, description: "追加或退款时省略或 null 采用 offline_cash，抵扣时原 Controller 采用 undefined。" },
+      offlineDeposit: {
+        ...objectOf({
+          sourceEventId: { type: "string", minLength: 1, maxLength: 191 },
+          evidenceFileAssetId: { type: "string", minLength: 1, maxLength: 191 }
+        }, ["sourceEventId", "evidenceFileAssetId"]),
+        nullable: true,
+        description: "仅原线下实收押金的退款或抵扣，绑定本订单原 offline 收款事件和同空间已完成的线下凭证。省略或 null 时沿原模拟入口，退款方式须匹配原实收方式。"
+      }
+    } satisfies Record<keyof RentalFundingAmountRequest, SchemaObject>, ["instrument", "amount", "idempotencyKey", "reason"]),
+    description: "原 RentalFundingAmountDto。追加、抵扣和退款分别沿原款项动作矩阵、余额与待收待退门禁。线下实收押金处置保存原凭证与资金事件的同事务收据。",
+    example: { instrument: "deposit", amount: 10, idempotencyKey: "funding-amount-example", reason: "原订单押金动作演练" }
+  },
+  RentalFundingReleaseRequest: {
+    ...objectOf({
+      amount: { type: "number", minimum: 0.01, nullable: true, description: "原 HTTP DTO 的可选金额。省略时由服务端释放当前全部剩余冻结额度，显式 null 沿原正金额门禁拒绝。" },
+      idempotencyKey: { type: "string", minLength: 1, pattern: "\\S" },
+      reason: { type: "string", minLength: 1, pattern: "\\S" }
+    } satisfies Record<keyof RentalFundingReleaseDto, SchemaObject>, ["idempotencyKey", "reason"]),
+    description: "原 RentalFundingReleaseDto，款项固定为 preauthorization。原 SDK 以幂等键和原因请求全额释放，HTTP DTO 同时保留可选部分金额，模拟准入与当前余额由原资金服务核验。",
+    example: { idempotencyKey: "funding-release-example", reason: "释放原演练预授权余额" }
+  },
+  RentalFundingFailureRequest: {
+    ...objectOf({
+      instrument: { type: "string", enum: ["rental", "deposit", "preauthorization"] },
+      failureCode: { type: "string", minLength: 1 },
+      idempotencyKey: { type: "string", minLength: 1, pattern: "\\S" },
+      reason: { type: "string", minLength: 1, pattern: "\\S" },
+      paymentMethod: { type: "string", enum: ["offline_cash", "offline_transfer", null], nullable: true, description: "省略或 null 采用 offline_cash，沿原资金事务核验当前空间已启用方式。" }
+    } satisfies Record<keyof RentalFundingFailureRequest, SchemaObject>, ["instrument", "failureCode", "idempotencyKey", "reason"]),
+    description: "原 RentalFundingFailureDto。沿纯演练准入追加金额为 0 的失败事件并保留原失败码，原款项余额保持原服务计算值。",
+    example: { instrument: "deposit", failureCode: "simulation_failed", idempotencyKey: "funding-failure-example", reason: "记录原演练失败" }
+  },
   RentalFundingBalance: objectOf({ orderId: stringSchema, balanceBasis: { type: "string", enum: ["real", "simulated"] },
     simulationAllowed: booleanSchema,
     rental: objectOf({ payable: numberSchema, collected: numberSchema, refunded: numberSchema, securityCaptured: numberSchema,
