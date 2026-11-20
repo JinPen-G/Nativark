@@ -102,26 +102,28 @@ function BusinessShellContents({ fullWidth, referenceSidebar = fullWidth, identi
     "aria-controls": "app-sidebar-navigation", "aria-keyshortcuts": "Control+B Meta+B",
     title: `${navigationLabel} (Ctrl / ⌘ B)`, "data-sound": "press" };
   // The fixed enterprise consumer supplied its clock through the old action slot.
-  // Keep that public call compatible while placing time before the utility controls.
+  // Keep that public call compatible while placing time on its independent line.
   const oldActions = Children.toArray(headerActions);
   const isClock = (node: ReactNode) => isValidElement(node) && node.type === WorkspaceClock;
   const actions = oldActions.filter(node => !isClock(node));
   const time = headerTime === undefined ? oldActions.find(isClock) ?? <WorkspaceClock /> : headerTime;
   const header = <header className={`native-workspace-context workspace-header${headerClassName ? ` ${headerClassName}` : ""}`}>
-    <div className="workspace-header-location">
-      {(!referenceSidebar || isMobile) && <><SidebarTrigger className="rental-sidebar-colors -ml-1" {...triggerProps} /><Separator orientation="vertical" className="mr-2 h-4" /></>}
-      <div className="workspace-context-location">{headerContext}{headerTitleTarget && <span className="workspace-breadcrumb-extension">
-        <RightOutlined size={13} className="workspace-breadcrumb-separator" /><WorkspaceBreadcrumbCurrent />
-      </span>}</div>
-    </div>
-    <div className="workspace-header-commands">
-      {time != null && <div className="workspace-header-time">{time}</div>}
-      {headerUtilities && <div className="workspace-header-utilities">{headerUtilities}</div>}
-      <div ref={headerSlots.setActions} className="workspace-header-actions" data-admin-content>
-        {!!actions.length && <div className="workspace-page-action-group" data-workspace-page-actions="">{actions}</div>}
+    <div className="workspace-header-main-row">
+      <div className="workspace-header-location">
+        {(!referenceSidebar || isMobile) && <><SidebarTrigger className="rental-sidebar-colors -ml-1" {...triggerProps} /><Separator orientation="vertical" className="mr-2 h-4" /></>}
+        <div className="workspace-context-location">{headerContext}{headerTitleTarget && <span className="workspace-breadcrumb-extension">
+          <RightOutlined size={13} className="workspace-breadcrumb-separator" /><WorkspaceBreadcrumbCurrent />
+        </span>}</div>
       </div>
-      {headerPanelControl && <div className="workspace-header-panel-control">{headerPanelControl}</div>}
+      <div className="workspace-header-commands">
+        {headerUtilities && <div className="workspace-header-utilities">{headerUtilities}</div>}
+        <div ref={headerSlots.setActions} className="workspace-header-actions" data-admin-content>
+          {!!actions.length && <div className="workspace-page-action-group" data-workspace-page-actions="">{actions}</div>}
+        </div>
+        {headerPanelControl && <div className="workspace-header-panel-control">{headerPanelControl}</div>}
+      </div>
     </div>
+    {Children.toArray(time).length > 0 && <div className="workspace-header-time">{time}</div>}
   </header>;
   const column = <>{header}<div ref={contentRef} className={`app-content${contentClassName ? ` ${contentClassName}` : ""}`} data-admin-content style={{ flex: "1 1 auto" }}>
     <div className="content-canvas"><WorkspaceNavigationProvider value={navigation.context}>{children}</WorkspaceNavigationProvider></div>

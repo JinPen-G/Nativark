@@ -44,8 +44,8 @@ export const ADMIN_CONTROL_PADDING = { small: 8, default: 12, large: 16 } as con
 export const ADMIN_OVERLAY_METRICS = { dialogWidth: 520, sideWidth: 720, bottomWidth: 720, padding: 24, viewportInset: 32 } as const;
 /** Original segmented track has 3px padding plus a 1px frame on each side. */
 export const ADMIN_SEGMENTED_METRICS = { height: 40, frameInset: 8, compactHeight: 36, iconHeight: 36 } as const;
-/** UIArc Screens use a 40px tab track around 32px labels; the host keeps a 1px frame. */
-export const ADMIN_TABS_METRICS = { height: 40, frameInset: 8, trackPadding: 3 } as const;
+/** The 36px navigation track includes 3px padding and a 1px frame on each side. */
+export const ADMIN_TABS_METRICS = { height: 36, frameInset: 8, trackPadding: 3 } as const;
 /** Reusable list geometry. Pages consume roles, never private field/column sizes. */
 export const ADMIN_LIST_METRICS = { queryMinWidth: 760, searchWidth: ADMIN_LIST_CONTROL_WIDTH.search, searchMinWidth: ADMIN_LIST_CONTROL_WIDTH.searchMin, statusWidth: ADMIN_LIST_CONTROL_WIDTH.select, statusMinWidth: ADMIN_LIST_CONTROL_WIDTH.select, categoryInlineMinWidth: 400, compactTriggerMaxWidth: 360, moreSearchWidth: 144, moreSearchCompactWidth: 64, filterPopoverWidth: 320, adaptiveSelectMin: 76, adaptiveSelectMax: 280, adaptiveSelectInset: 56 } as const;
 export const ADMIN_TABLE_COLUMN_WIDTH = {

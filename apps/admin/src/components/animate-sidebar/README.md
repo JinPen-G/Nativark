@@ -22,13 +22,13 @@
 
 ## 共用宿主入口
 
-`BusinessShell`沿当前管理主线提取，兼容企业固定`5b4398fa34ba0776e62aad5b8536dbbf1997bf5f`的品牌、账号、导航、时间及身份参数；只参考固定源码，没有覆盖企业工作树。顶栏按时间→休息/通知→页面主操作→辅助面板开关排列；`headerTime`、`headerUtilities`、页头Provider的action目标和`headerPanelControl`分别承接这四种职责。企业原`headerActions={<WorkspaceClock />}`自动归入时间位置，其他操作仍在主按钮区。正文不足600px时操作自然换到下一行，面板开关保持右上角；52px首行与20/12px左右留白保持。默认内容列使用同一圆角面板；`wrapContent`接完整页头/内容列，营运端交给原`CopilotLayout`保持340px独立侧板和原Sheet动效，共用框架不为客户端接入营运Copilot或休息权限。
+`BusinessShell`沿当前管理主线提取，兼容企业固定`5b4398fa34ba0776e62aad5b8536dbbf1997bf5f`的品牌、账号、导航、时间及身份参数；只参考固定源码，没有覆盖企业工作树。面包屑、休息/通知、页面主操作和辅助面板开关共用首行，`headerUtilities`、页头Provider的action目标和`headerPanelControl`分别承接后三种职责；`headerTime`位于下方独立20px时间行，null/false不留空行。企业原`headerActions={<WorkspaceClock />}`自动移到该时间行，其他操作仍在主按钮区。正文不足600px时操作自然换到下一行，面板开关保持右上角；常规52px首行含4px视觉内距，20/12px左右留白保持，窄屏完整页头随操作换行增高。默认内容列使用同一圆角面板；`wrapContent`接完整页头/内容列，营运端交给原`CopilotLayout`保持340px独立侧板和原Sheet动效，共用框架不为客户端接入营运Copilot或休息权限。
 
 `PageHeader.extra`只承接页面主要创建或保存；`navigation`在正文左侧承接返回，`tools`在正文上方右侧放刷新、核对及辅助设置，只有纯筛选/导航视图才用`toolsPlacement="view"`与视图同行。整份表单、资料主体不与工具挤进同一行。`RecordDetailLayout.actions`与`secondaryActions`沿同一规则区分主任务和资料辅助操作；分阶段履约、资金、发送、弹窗确认与局部保存留在各自内容附近。页头Provider继续保留原React/Form关系与可见页签作用域，不改验证、权限或命令语义。
 
-原站Support conversation、Product detail、Project board的主按钮实测32px，页签为40px轨道和32px内按钮。当前中文后台页面主操作采用36px，右上图标控件保持32px；普通Tabs/Segmented外高40px，列表图标切换及显式紧凑Segmented保持36px。只在设计token与适配CSS调整几何，原UIArc选择滑块、按钮和面板动效保持。
+原站Support conversation、Product detail、Project board的主按钮实测32px，原页签为40px轨道和32px内按钮。当前中文后台按锁定规范采用36px主操作和36px Tabs总轨道，Tabs内项28px、两侧padding/frame合计8px；右上图标控件保持32px，普通Segmented外高40px，列表图标切换及显式紧凑Segmented保持36px。只在设计token与适配CSS调整几何，原UIArc选择滑块、按钮和面板动效保持。
 
-顶栏休息入口与右侧面板开关使用Animate UI公开Coffee、PanelRightOpen/PanelRightClose原版动态图标；固定源码及哈希列于[图标来源](../ui/animated-icons/sources.json)，许可沿[保留许可](../ui/animated-icons/LICENSE.md)。完整按钮悬停或聚焦触发原动效，减少动态时保持静态；休息时长、通知、面板开关和业务保存仍使用各自原回调。
+顶栏休息入口与右侧面板开关使用Animate UI公开Coffee、PanelRightOpen/PanelRightClose原版动态图标；固定源码及哈希列于[图标来源](../../../../../packages/platform-admin/src/components/ui/animated-icons/sources.json)，许可沿[保留许可](../../../../../packages/platform-admin/src/components/ui/animated-icons/LICENSE.md)。完整按钮悬停或聚焦触发原动效，减少动态时保持静态；休息时长、通知、面板开关和业务保存仍使用各自原回调。
 
 `PageHeading`在共用外壳里将当前页名/操作送入页头，独立宿主保留原页头。自带面包屑的营运宿主用`headerTitleTarget={false}`及`WorkspaceBreadcrumbCurrent`，企业普通context默认追加当前标题。`identity`变化在绘制前取消原路由快照、释放inert与deadline，查询和客户授权仍由各宿主决定。共用文件与依赖经企业原tsconfig的固定入口覆盖在内存核验，不替代真实企业认证、浏览器或正式验收。
 

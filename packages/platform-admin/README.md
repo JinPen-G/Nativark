@@ -60,7 +60,7 @@ CorePage 的 `title`、`summary` 可显示当前受权对象；`actions` 可声�
 
 使用 `RecordDetailLayout.header` 自定义页头时，第二个参数提供 `actions`、`navigation`、`tools` 三个插槽；原单参数回调仍收到主动作和返回的组合。类型 `RecordDetailHeaderSlots` 从 `/ui` 导出。[详情布局](src/components/RecordDetailLayout.tsx)
 
-顶栏按时间、休息/通知、当前页面主操作、面板收展排列；窄屏由公共壳安排换行和收展入口。Core 只声明自己的 `actions`，公共壳负责按钮样式和位置。已有自定义宿主用 `BusinessShell.headerPanelControl` 提供末尾面板入口，`headerActions` 保留原页面操作及旧时钟调用的兼容。[公共壳](src/components/BusinessShell.tsx) · [面板入口](src/components/workspace/WorkspacePanel.tsx)
+面包屑、休息/通知、当前页面主操作和面板收展共用首行，常规首行52px，4px视觉内距计入其中；可选时间在下方独立20px行，`null` / `false` 不留空行。窄屏由公共壳安排操作换行和收展入口，整个页头按内容增高。Core 只声明自己的 `actions`，公共壳负责按钮样式和位置。已有自定义宿主用 `BusinessShell.headerPanelControl` 提供末尾面板入口，`headerActions` 的旧时钟自动移到独立时间行，其余操作保持。[公共壳](src/components/BusinessShell.tsx) · [面板入口](src/components/workspace/WorkspacePanel.tsx)
 
 需要保留原操作的单次提交语义时，使用 `runtime.request<T>(path, { method: "post", data: command, retryAuthentication: false })`。这会禁止401后刷新并重发该请求；普通请求仍沿原规则最多刷新一次。结果不明时调用该Core的原查询或收据接口，不换操作键重发。[请求合同](src/runtime/index.ts) · [唯一执行者](src/runtime/browser-http.ts)
 

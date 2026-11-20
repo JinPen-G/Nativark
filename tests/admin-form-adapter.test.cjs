@@ -184,8 +184,8 @@ assert.doesNotMatch(theme, /ADMIN_CONTROL_HEIGHTS/);
 
 // Owner-authorized global density replaces the old page-local 40/44/50 split.
 assert.deepEqual(tokens.ADMIN_CONTROL_HEIGHT, { small: 32, default: 36, large: 40, toolbar: 32, filter: 36, pageAction: 36 });
-assert.equal(tokens.ADMIN_TABS_METRICS.height, 40);
-assert.equal(tokens.ADMIN_TABS_METRICS.height - tokens.ADMIN_TABS_METRICS.frameInset, 32);
+assert.equal(tokens.ADMIN_TABS_METRICS.height, 36);
+assert.equal(tokens.ADMIN_TABS_METRICS.height - tokens.ADMIN_TABS_METRICS.frameInset, 28);
 assert.equal(tokens.ADMIN_TABS_METRICS.trackPadding * 2 + 2, tokens.ADMIN_TABS_METRICS.frameInset);
 assert.equal(tokens.ADMIN_SEGMENTED_METRICS.height, 40);
 assert.equal(tokens.ADMIN_SEGMENTED_METRICS.height - tokens.ADMIN_SEGMENTED_METRICS.frameInset, 32);
