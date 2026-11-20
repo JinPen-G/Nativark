@@ -80,6 +80,7 @@ import type { ApprovedProfileApplicationDependencies } from '../approval-executi
 import { snapshotTaskCenterRecoveryFence, type TaskCenterRecoveryFence } from '../task-center-recovery-target.reader';
 import { bindOriginalSettingsRead } from './settings-original-read.authority';
 import { withOriginalSceneTaskTransactions } from './original-scene-transactions';
+import { createTenantModelConfigurationTransactions } from '../tenant-model-config-transactions';
 
 export type AiSceneHttpRequest = { headers: { authorization?: unknown } };
 export type AiSceneRequestOptions = { enabled: boolean; audience: 'operator' | 'staff' };
@@ -786,7 +787,8 @@ export function composeRequestBoundScenePlanPolicies(dependencies: RequestBoundO
       const selected = scenes.find(row => row.scene.code === code);
       if (!selected) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       return new PrismaTaskPlanPolicyRepository(input.db, { auth: input.auth, credentials: input.credentials,
-        guard: input.guard, scene: selected.scene, tool: selected.tools[0], tools: selected.tools, audit: true }, input.clock);
+        guard: input.guard, scene: selected.scene, tool: selected.tools[0], tools: selected.tools, audit: true,
+        transactionParticipant: createTenantModelConfigurationTransactions(input) }, input.clock);
     }
   }));
   return Object.freeze({
@@ -831,7 +833,7 @@ export function composeRequestBoundOriginalTaskActionPolicies(
   const clearSchema = readSchema.extend({ expectedRevision: z.number().int().min(1).max(4294967293) }).strict();
   const call = bindRequests(dependencies, { enabled: options.enabled, audience: 'operator' }, input => ({
     scenes: composeAiOriginalScenes(input), policies: composeTaskActionPolicyManagement(input), clock: input.clock ?? (() => new Date())
-  }));
+  }), { write: false }, originalSceneTransactionAuthority);
   type Root = { scenes: ReturnType<typeof composeAiOriginalScenes>;
     policies: ReturnType<typeof composeTaskActionPolicyManagement>; clock: () => Date };
   const target = async (root: Root, original: z.infer<typeof originalRequestReferenceSchema>, selected: string) => {
@@ -903,7 +905,7 @@ export function composeRequestBoundOriginalTaskActionPolicies(
         await found.verify();
         return { original: input.original, state: 'revoked' as const, policy, retryable: false as const,
           semantics: 'new_task_actions_denied_not_remote_rollback' as const };
-      });
+      }, { write: true });
     },
     configure(request: AiSceneHttpRequest, value: unknown) {
       const parsed = configureSchema.safeParse(structuredClone(value));
@@ -922,7 +924,7 @@ export function composeRequestBoundOriginalTaskActionPolicies(
         await found.verify();
         return { original: input.original, state: 'configured' as const, policy, retryable: false as const,
           semantics: 'action_policy_not_dispatch_or_business_approval' as const };
-      });
+      }, { write: true });
     },
     read(request: AiSceneHttpRequest, value: unknown) {
       const parsed = readSchema.safeParse(structuredClone(value));

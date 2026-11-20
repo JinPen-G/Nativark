@@ -7,6 +7,7 @@ import { matchableRequestPath } from "@rental-os/platform-server/request-path";
 import { OperatorEntrySceneCatalogController, StaffEntrySceneCatalogController } from "@rental-os/ai-native-server/runtime/scenes/entry-scene-catalog.controller";
 import { StaffInspectionAssistController } from "@rental-os/ai-native-server/runtime/inspection-assist/staff-inspection-assist.controller";
 import { AiOriginalScenesController, AiOriginalSceneRecoveryController, AiOriginalQuoteModelExecutionController,
+  AiScenePlanPolicyController, AiOriginalTaskActionPolicyController, AI_SCENE_PLAN_POLICIES, AI_ORIGINAL_TASK_ACTION_POLICIES,
   AI_ORIGINAL_SCENE_REQUESTS, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS,
   AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS } from "@rental-os/ai-native-server/runtime/scenes/original-scenes.controller";
 import { AiOriginalOpeningModelExecutionController, AI_ORIGINAL_OPENING_MODEL_REQUESTS } from "@rental-os/ai-native-server/runtime/scenes/opening-model-execution.controller";
@@ -25,12 +26,14 @@ export const RENTAL_AI_INSPECTION_OPERATIONS = Object.freeze([
 export const RENTAL_AI_CONTROLLERS = Object.freeze([
   OperatorEntrySceneCatalogController, StaffEntrySceneCatalogController, StaffInspectionAssistController,
   AiOriginalScenesController, AiOriginalSceneRecoveryController, AiTaskCenterController, AiModelSettingsController,
-  AiOriginalQuoteModelExecutionController, AiOriginalOpeningModelExecutionController, AiOriginalOrderReadController
+  AiOriginalQuoteModelExecutionController, AiOriginalOpeningModelExecutionController, AiOriginalOrderReadController,
+  AiScenePlanPolicyController, AiOriginalTaskActionPolicyController
 ]);
 export const RENTAL_AI_MOUNTED_REQUESTS: readonly symbol[] = Object.freeze([
   AI_STAFF_INSPECTION_REQUESTS, AI_ORIGINAL_SCENE_REQUESTS, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS,
   AI_NATIVE_TASK_CENTER_REQUESTS, AI_NATIVE_MODEL_SETTINGS_REQUESTS,
-  AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS, AI_ORIGINAL_OPENING_MODEL_REQUESTS, AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS
+  AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS, AI_ORIGINAL_OPENING_MODEL_REQUESTS, AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS,
+  AI_SCENE_PLAN_POLICIES, AI_ORIGINAL_TASK_ACTION_POLICIES
 ]);
 function reviewed(controller: RentalHttpAccessDeclaration["controller"], handlers: readonly Function[],
   kind: "buffered-read" | "audited-read" | "transactional-write", evidence: string): RentalHttpAccessDeclaration[] {
@@ -40,7 +43,16 @@ const scene = AiOriginalScenesController.prototype, recovery = AiOriginalSceneRe
 const center = AiTaskCenterController.prototype, settings = AiModelSettingsController.prototype;
 const quote = AiOriginalQuoteModelExecutionController.prototype, opening = AiOriginalOpeningModelExecutionController.prototype;
 const orders = AiOriginalOrderReadController.prototype;
+const plans = AiScenePlanPolicyController.prototype, actions = AiOriginalTaskActionPolicyController.prototype;
 const declarations: readonly RentalHttpAccessDeclaration[] = [
+  ...reviewed(AiScenePlanPolicyController, [plans.read], "buffered-read",
+  "original current scene plan policy and operation receipt only; no Scope creation, plan revision, model call or policy grant; same selected response recheck"),
+  ...reviewed(AiScenePlanPolicyController, [plans.change], "transactional-write",
+  "original Serializable policy CAS and audit hold current Auth/Tenant/Core before Scope/policy locks and revalidate before commit; original unknown operation receipt retained, no model dispatch"),
+  ...reviewed(AiOriginalTaskActionPolicyController, [actions.read], "buffered-read",
+  "original task policy reader preserves current owner/action and original order visibility; no policy write, task admission or model call; same selected response recheck"),
+  ...reviewed(AiOriginalTaskActionPolicyController, [actions.configure, actions.clear], "transactional-write",
+  "original task action policy transaction locks current Auth/Tenant/Core then original Order/Workspace before policy CAS and required audit; final same-transaction authorization, exact original revision and receipt/unknown semantics retained"),
   ...reviewed(AiOriginalScenesController, [scene.queryOrders, scene.previewOrderExtension, scene.read, scene.reconcile,
     scene.reconcileReissue, scene.material, scene.materialV2, scene.sourceV2, scene.recovery,
     scene.quoteReview, scene.quoteReceipt, scene.compareOriginalQuotes], "buffered-read",

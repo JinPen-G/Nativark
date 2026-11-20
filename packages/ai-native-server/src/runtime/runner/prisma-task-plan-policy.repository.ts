@@ -14,6 +14,9 @@ import { aiTaskRunnerLimitsSchema } from './prisma-task-run-evidence.repository'
 import { aiPersistedPlanToolsSchema, PERSISTED_READONLY_TOOLS, type PersistedTaskInputTool } from './prisma-task-plan-input.source';
 import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL } from '../model-input/task-model-input';
 import { TEXT_CAPABILITY_PROBE_TOOL } from '../text-capability-probe';
+import { hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
+import { ModelGatewayError } from '../model-gateway.ports';
+import { beginTenantModelConfigurationTransaction, type TenantModelConfigurationTransactionParticipant } from '../tenant-model-config-transactions';
 
 const scene = z.object({ code: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u),
   version: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u) }).strict();
@@ -34,6 +37,7 @@ export class AiTaskPlanPolicyResultUnknownError extends Error {
 /** Explicit workspace AI configuration adapter. Uses the existing config Guard,
  * not task ownership as permission to expand execution. Scene is selected by
  * the server composition; callers cannot select scope, tools or a scene.
+ * Selected Rental requests hold original Auth/Core locks before policy CAS.
  * No production registration, policy seed, subscription or dispatch grant. */
 export class PrismaTaskPlanPolicyRepository {
   private readonly scopes: AiScopeRepository;
@@ -47,12 +51,14 @@ export class PrismaTaskPlanPolicyRepository {
       /** New management hosts require audit in the same policy transaction.
        * Existing legacy suppliers remain explicit; no caller can select this. */
       audit?: boolean;
+      transactionParticipant?: TenantModelConfigurationTransactionParticipant;
       /** Explicit server platform manager, already backed by the original
        * platform Guard. No request may choose this identity or scope. */
       platformAuthority?: AiCurrentScopeAuthority },
     private readonly wall: () => Date = () => new Date()) {
     this.selected = scene.parse(structuredClone(input.scene));
     this.audit = input.audit === true;
+    this.transactionParticipant = input.transactionParticipant;
     this.tool = input.tool ?? 'rental.catalog.search';
     if (![...PERSISTED_READONLY_TOOLS, 'rental.order.commit', 'tenant.notifications.commit', 'membership.profile.commit', TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, TEXT_CAPABILITY_PROBE_TOOL].includes(this.tool)) throw unavailable();
     const configured = aiPersistedPlanToolsSchema.safeParse((input.tools ?? [this.tool]).map(code => ({ code, version: AI_TOOL_DRAFT_VERSION })));
@@ -102,6 +108,7 @@ export class PrismaTaskPlanPolicyRepository {
   private readonly tool: PersistedTaskInputTool;
   private readonly platform: boolean;
   private readonly audit: boolean;
+  private readonly transactionParticipant?: TenantModelConfigurationTransactionParticipant;
   private readonly configuredTools: z.infer<typeof aiPersistedPlanToolsSchema>;
   private tools() { return structuredClone(this.configuredTools); }
   async read() {
@@ -154,6 +161,14 @@ export class PrismaTaskPlanPolicyRepository {
     let completed = false;
     try {
       return await this.db.$transaction(async tx => {
+        // The selected workspace authority participates in this existing
+        // transaction before Scope/policy locks. Platform management retains
+        // its original path and cannot borrow a selected tenant's fence.
+        if (before.manager.workspaceId === null && hasRentalBusinessTenantFence()) throw denied();
+        const participant = before.manager.workspaceId === null ? undefined
+          : await beginTenantModelConfigurationTransaction(tx, { tenantId: before.manager.tenantId,
+            workspaceId: before.manager.workspaceId, actorId: before.manager.userId }, this.transactionParticipant);
+        try {
         if (this.audit && typeof tx.operationLog?.create !== 'function') throw unavailable();
         // Scope exists even on first create, so absent policy rows still have a
         // stable lock owner. Existing input publication locks policy afterwards.
@@ -189,12 +204,15 @@ export class PrismaTaskPlanPolicyRepository {
         }
         if ((await this.access()).binding !== before.binding) throw denied();
         if (Date.parse(command.expiresAt) <= this.wall().getTime()) throw denied();
+        await participant?.revalidate();
         completed = true;
         return result;
+        } finally { participant?.close(); }
       }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     } catch (error) {
-      if (error instanceof AiTaskRepositoryError) throw error;
       if (completed) throw new AiTaskPlanPolicyResultUnknownError();
+      if (error instanceof AiTaskRepositoryError) throw error;
+      if (error instanceof ModelGatewayError) throw error.code === 'FORBIDDEN' ? denied() : unavailable();
       throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
     }
   }

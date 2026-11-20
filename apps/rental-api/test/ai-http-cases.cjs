@@ -9,6 +9,7 @@ module.exports = async function runCases({ t, lock }) {
   const { RENTAL_AI_CONTROLLERS, RENTAL_AI_INSPECTION_OPERATIONS, RENTAL_AI_MOUNTED_REQUESTS,
     createRentalAiHttpPolicy } = require('../src/ai-http-policy.ts');
   const { AiOriginalQuoteModelExecutionController, AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS,
+    AiScenePlanPolicyController, AiOriginalTaskActionPolicyController, AI_SCENE_PLAN_POLICIES, AI_ORIGINAL_TASK_ACTION_POLICIES,
     AiOriginalSceneModelActionsController, AiOriginalSceneModelController } =
     require('@rental-os/ai-native-server/runtime/scenes/original-scenes.controller');
   const { AiOriginalOpeningModelExecutionController, AI_ORIGINAL_OPENING_MODEL_REQUESTS } =
@@ -28,6 +29,8 @@ module.exports = async function runCases({ t, lock }) {
       [AiOriginalQuoteModelExecutionController, AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS, 13],
       [AiOriginalOpeningModelExecutionController, AI_ORIGINAL_OPENING_MODEL_REQUESTS, 6],
       [AiOriginalOrderReadController, AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS, 17],
+      [AiScenePlanPolicyController, AI_SCENE_PLAN_POLICIES, 2],
+      [AiOriginalTaskActionPolicyController, AI_ORIGINAL_TASK_ACTION_POLICIES, 3],
     ]) {
       assert(RENTAL_AI_CONTROLLERS.includes(controller));
       assert.equal(RENTAL_AI_MOUNTED_REQUESTS.filter(value => value === token).length, 1);
