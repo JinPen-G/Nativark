@@ -1,6 +1,6 @@
 # Rental 客户小程序业务客户端
 
-[正式模块入口](index.ts)提供七组业务请求工厂、客户认证工厂、八个 AI 请求工厂和三组企业原操作编排。原小程序 [api 入口](../../../../apps/miniprogram/src/api/orders.ts)注入 [request](../../../../apps/miniprogram/src/core/http.ts)，继续导出原方法和返回类型。合同沿 Rental 包内的[客户声明](../../src/client-contracts.ts)、[租赁声明](../../src/contracts.ts)和企业声明单源消费。
+[正式模块入口](index.ts)提供七组业务请求工厂、客户认证工厂、八个 AI 请求工厂、三组企业原操作编排和订单展示。原小程序 [api 入口](../../../../apps/miniprogram/src/api/orders.ts)注入 [request](../../../../apps/miniprogram/src/core/http.ts)，继续导出原方法和返回类型。合同沿 Rental 包内的[客户声明](../../src/client-contracts.ts)、[租赁声明](../../src/contracts.ts)和企业声明单源消费。
 
 ## 宿主接入
 
@@ -30,6 +30,12 @@ const orders = createRentalMiniProgramOrdersApi({ request });
 | [profile](profile.ts) | 资料、会员、权益、资质与文件会话／下载地址 | 客户 Controller → 原会员与文件应用；资料、会员与资质页 |
 
 本人订单索引、地址、资料、会员方案／分配和资质列表保留原租户级分面，权益等请求沿当前经营空间。企业请求继续使用原客户运输与服务端专用授权，原 query/body、URL 编码、操作键及字段投影保持。
+
+## 订单展示
+
+同一正式入口导出 `presentOrder`、`matchesFilter`、`ORDER_FILTERS` 及对应事实和展示类型。[订单展示](status.ts)组合服务端订单状态、资金、续租事实和校准时间，沿原词条、操作提示与 Tab 分组返回主状态、副状态和可见入口。缺资金保持原未知处理，终态订单继续展示原未结资金。
+
+[原展示入口](../../../../apps/miniprogram/src/core/status.ts)窄再导出同一实现，[订单列表](../../../../apps/miniprogram/src/pages/orders/index.ts)消费原过滤器与展示，[订单详情](../../../../apps/miniprogram/src/pages/order/index.ts)消费原主副状态和操作提示。页面继续持有读取与展示寿命，实际操作资格、金额和执行结果由原服务端裁定。原[客户定向断言](../../../../tests/miniprogram-static.test.cjs)核对分组、续租、逾期和终态资金。
 
 ## 幂等、恢复与读取寿命
 

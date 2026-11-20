@@ -26,3 +26,4 @@ export { createRentalStaffEntryActionApi, STAFF_ORDER_ENTRY_CODES, type RentalSt
 export { createRentalStaffInspectionTaskApi, type RentalStaffInspectionTaskPorts, type StaffInspectionTaskApi } from "./ai-inspection-tasks";
 export { createRentalStaffSceneCatalogApi, type RentalStaffSceneCatalogPorts } from "./ai-scene-catalog";
 export { createRentalStaffInspectionTransport, type RentalStaffInspectionTransportPorts } from "./inspection-transport";
+export { inspectionRows, inspectionResults, type InspectionFieldRow } from "./inspection-form";

@@ -105,7 +105,13 @@ function load(relative, dependencies, globals = {}) {
         const entry = manifest.exports['./' + name.slice('@rental-os/rental-core/'.length)];
         const target = typeof entry === 'string' ? entry : entry?.default;
         assert.ok(target, 'Declared Rental export required: ' + name);
-        const filename = path.join(root, 'packages/rental-core', target.replace(/^\.\/dist\//, './src/').replace(/\.js$/, '.ts'));
+        const native = target.startsWith('./dist-clients/');
+        if (native) {
+          const config = JSON.parse(fs.readFileSync(path.join(root, 'packages/rental-core/tsconfig.native-clients.json'), 'utf8'));
+          assert.equal(config.compilerOptions.rootDir, '.', 'Native source root must match its formal export');
+          assert.equal(config.compilerOptions.outDir, 'dist-clients', 'Native output must match its formal export');
+        }
+        const filename = path.join(root, 'packages/rental-core', target.replace(/^\.\/dist-clients\//, './').replace(/^\.\/dist\//, './src/').replace(/\.js$/, '.ts'));
         return load(path.relative(root, filename).replaceAll('\\', '/'), dependencies, globals);
       }
       if (relative === 'packages/rental-core/src/contracts.ts' && name === './rental-category-code') return load('packages/rental-core/src/rental-category-code.ts', {}, globals);
@@ -133,6 +139,14 @@ function load(relative, dependencies, globals = {}) {
       if (relative === 'apps/admin/src/app/locale.tsx' && name === '@rental-os/platform-admin/locale') return load('packages/platform-admin/src/app/locale.tsx', dependencies, globals);
       if (relative === 'packages/platform-admin/src/core/useCoreForm.ts' && name === '../app/locale') return dependencies['@/app/locale'] ?? { useLocale: () => ({ t: value => value, locale: 'zh-CN' }) };
       if (relative === 'packages/platform-admin/src/core/useCoreForm.ts' && name === '../app/serverFormSnapshot') return load('packages/platform-admin/src/app/serverFormSnapshot.ts', dependencies, globals);
+      if (relative === 'apps/miniprogram/src/core/storage.ts' && name === '../vendor/shared-ai-client') return load('packages/shared/src/ai-client-goal-session.ts', {}, globals);
+      if (relative.startsWith('apps/miniprogram/src/core/enterprise-') && name === '../vendor/shared-enterprise-expense/enterprise-expense') return extensionContracts;
+      if (relative.startsWith('packages/shared/src/') && name === 'zod') return require(name);
+      if (relative.startsWith('packages/shared/src/') && name.startsWith('.')) {
+        const filename = path.resolve(path.dirname(source.filename), name + '.ts');
+        assert.ok(filename.startsWith(path.join(root, 'packages/shared/src') + path.sep), 'Shared source boundary');
+        return load(path.relative(root, filename).replaceAll('\\', '/'), {}, globals);
+      }
       if (Object.hasOwn(dependencies, name)) return dependencies[name];
       if (relative.startsWith('packages/rental-core/clients/enterprise/') && name === './session' && dependencies['./enterprise-session']) return dependencies['./enterprise-session'];
       if (['apps/enterprise-portal/src/WorkflowPages.tsx','apps/enterprise-portal/src/OwnRentalHandoffs.tsx'].includes(relative) && name === 'react-router-dom') return { useLocation: () => ({ search: '' }) };
@@ -2887,7 +2901,7 @@ function extensionApproval(state = 'pending') {
     expectedOrderUpdatedAt: '2026-11-01T00:00:00Z', state, revision: 2, expiresAt: '2099-01-01T00:00:00Z', reason: 'Original purpose',
     ...(state === 'consumed' ? { extensionId: 'ext1' } : {}),
     preview: { originalEndAt: '2090-01-02T00:00:00Z', newEndAt: '2090-01-03T00:00:00Z', rentalAmount: 100, serviceAmount: 0,
-      payableAmount: 100, depositDelta: 10, preAuthDelta: 0, currency: 'CNY', settlementMode: 'immediate', paymentRequired: true, chargeLines: [] } };
+      payableAmount: 100, depositDelta: 10, preAuthDelta: 0, currency: 'CNY', settlementMode: 'immediate', paymentRequired: true, chargeLines: [], services: { state: "available", items: [] } } };
 }
 function extensionFixture(web = false) {
   const hooks = reactHost(), events = emitter(), storage = new Map(), calls = [], locks = new Map();
@@ -2966,6 +2980,8 @@ function extensionFixture(web = false) {
       './keys': { newKey: prefix => `${prefix}-${++f.keys}` }, './session': session, './storage': storageModule }, { wx });
     let definition;
     load('apps/miniprogram/src/pages/extend/index.ts', { '../../core/theme-behavior': { themeBehavior: {} }, '../../api/enterprise': api,
+      '../../api/catalog': { fetchCatalog: async () => ({ tenantCode: 'merchant', workspace: { workspaceCode: f.service }, timeZone: 'UTC', services: [], locations: [] }) },
+      '../../config/public': { PUBLIC_CONFIG: { tenantCode: 'merchant' } },
       '../../core/enterprise-extension-operation': helper, '../../core/session': session,
       '../../api/orders': { fetchOrder: (...args) => invoke('order', args, f.order), listExtensions: (...args) => invoke('extensions', args, f.extensions),
         previewExtension: (...args) => invoke('preview', args, extensionApproval().preview), applyExtension: (...args) => invoke('ordinary', args, { extension: { status: 'pending_payment', payableAmount: 100 } }),
@@ -2973,7 +2989,7 @@ function extensionFixture(web = false) {
       '../../core/errors': { describeError: e => ({ message: e.message }) }, '../../core/flow': { ensureServiceForOrder: async () => true }, '../../core/http': { isApiError: (e, code) => e.code === code },
       '../../core/keys': { actionKey: () => 'ordinary-key', releaseActionKey() {} }, '../../core/money': { describeDelta: n => String(n) },
       '../../core/page': { loadingState: () => ({ status: 'loading' }), readyState: () => ({ status: 'ready' }), blockedState: () => ({ status: 'blocked' }), errorState: e => ({ status: 'error', message: e.message }), handleCommonViewAction: () => false },
-      '../../core/payment': { rentalDue: () => 0 }, '../../core/time': { formatBusinessDateTime: s => s, splitInstant: () => ({ date: '2090-01-02', time: '00:00' }), todayInZone: () => '2090-01-01', zoneLabel: () => 'UTC', zonedToInstant: () => '2090-01-03T00:00:00Z' },
+      '../../core/payment': { rentalDue: () => 0 }, '../../core/time': { zoneSupported: zone => zone === 'UTC', formatBusinessDateTime: s => s, splitInstant: () => ({ date: '2090-01-02', time: '00:00' }), todayInZone: () => '2090-01-01', zoneLabel: () => 'UTC', zonedToInstant: () => '2090-01-03T00:00:00Z' },
       '../../core/ui': { ROUTES: { order: '/order', pay: '/pay', extend: '/extend' }, buildUrl: (route, params) => `${route}?id=${params.id}`, navigate: url => calls.push({ name: 'navigate', url }), requireSignIn: () => true, toast: message => calls.push({ name: 'toast', message }) },
       '../../core/zones': { zoneOf: () => 'UTC', ensureCurrentZone: async () => {} } }, { wx, Page: value => { definition = value; } });
     f.page = { ...definition, data: plain(definition.data), patches: [], setData(patch) { this.patches.push(plain(patch)); Object.assign(this.data, patch); } };
@@ -3378,6 +3394,11 @@ function miniExchangeProgressFixture() {
   const order = { id: 'o1', orderNo: 'Order 1', status: 'renting', currency: 'CNY', startAt: '2090-01-01T00:00:00Z', endAt: '2090-01-02T00:00:00Z', lines: [], allocations: [], chargeLines: [], finalPayableAmount: 100 };
   const mutations = { cancelOrder: forbidden('cancel'), respondToFee: forbidden('fee response'), previewCancellation: forbidden('cancellation preview') };
   const dependencies = { '../../core/theme-behavior': { themeBehavior: {} }, '../../api/enterprise': enterprise, '../../core/enterprise-exchange-confirmation': consent,
+    // This fixture exercises expense consent only. Any AI branch must fail explicitly.
+    '../../api/ai-tasks': { clientTaskApi: new Proxy({}, { get: (_target, key) => forbidden('uninvoked AI task API ' + String(key)) }) },
+    '../../components/ai-native/client-task-session': { createClientTaskSession: forbidden('uninvoked AI task session'), clientTaskStorageKey: forbidden('uninvoked AI task key') },
+    '../../api/ai-entry-actions': { captureClientEntryActionContext: forbidden('uninvoked AI action capture'), createClientEntryActionApi: forbidden('uninvoked AI action API') },
+    '../../config/public': { PUBLIC_CONFIG: { tenantCode: 'merchant' } }, '../../core/storage': storageModule,
     '../../api/orders': { ...mutations, fetchOrder: async () => plain(order), fetchFunding: async () => undefined, fetchFulfillment: async () => undefined, listExtensions: async () => [], fetchFeeItems: async () => ({ items: [], pendingCount: 0 }) },
     '../../contracts/planned': { contractMissing: () => false }, '../../core/cart': { isDeliveryMode: () => false }, '../../core/catalogStore': { loadCatalog: async () => ({}) },
     '../../core/clock': { serverNow: () => 0 }, '../../core/errors': { describeError: e => ({ message: e.message }) }, '../../core/flow': { ensureServiceForOrder: async () => true },

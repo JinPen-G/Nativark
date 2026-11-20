@@ -1,6 +1,6 @@
 # Rental 员工客户端
 
-本入口提供订单、资产与库存、养护工单与归还处置、客户主档与会员、工作台、经营目录和会员审核七组工厂，以及认证、业务附件、原 Action、AI 检查任务、检查运输与场景目录工厂。每个真实员工宿主创建自己的客户端实例，传入同一员工请求函数，页面继续调用原业务方法。业务类型单源消费 Rental 合同，宿主的 shared 兼容出口引用同一份定义。[客户端入口](index.ts) · [业务合同](../../src/contracts.ts)
+本入口提供订单、资产与库存、养护工单与归还处置、客户主档与会员、工作台、经营目录和会员审核七组工厂，以及认证、业务附件、原 Action、AI 检查任务、检查运输与场景目录工厂，以及检查表字段转换。每个真实员工宿主创建自己的客户端实例，传入同一员工请求函数，页面继续调用原业务方法。业务类型单源消费 Rental 合同，宿主的 shared 兼容出口引用同一份定义。[客户端入口](index.ts) · [业务合同](../../src/contracts.ts)
 
 ## 接入
 
@@ -34,6 +34,14 @@ sessionEvents.on(assets.invalidateAssets);
 示例中的运输、会话、错误类和准入函数来自真实宿主。原微信宿主在模块生命周期内持有一组实例，七个业务 API 路径各自导出同一实现的方法。其他宿主按自身生命周期绑定会话失效事件。[订单适配](../../../../apps/staff-miniprogram/src/api/orders.ts) · [资产适配](../../../../apps/staff-miniprogram/src/api/assets.ts) · [工单适配](../../../../apps/staff-miniprogram/src/api/workOrders.ts) · [客户适配](../../../../apps/staff-miniprogram/src/api/customers.ts) · [工作台适配](../../../../apps/staff-miniprogram/src/api/workbench.ts) · [目录](directory/README.md) · [审核](reviews/README.md)
 
 认证使用 `createRentalStaffAuthApi`，宿主传入原请求、refresh token 读取、会话保存与退出清理。附件使用 `createRentalStaffUploadsApi`，宿主传入原键、观察校验与固定路由、微信读文件和 PUT 字节能力。页面生命周期和阶段回调沿原宿主，未知结果保留原引用，不能重传文件。[认证接入](auth/README.md) · [附件接入](uploads/README.md)
+
+## 检查表字段
+
+同一正式入口提供 `inspectionRows`、`inspectionResults` 与 `InspectionFieldRow`。[字段转换](inspection-form.ts)沿服务端原模板生成空输入，并核对必填、可选值、有限数值及照片资产 ID。原字段类型、单位、默认值、错误文案和结果映射保持。
+
+旧[检查表入口](../../../../apps/staff-miniprogram/src/core/inspection-form.ts)窄再导出同一实现，[领取页](../../../../apps/staff-miniprogram/src/pages/pickup/index.ts)与[归还页](../../../../apps/staff-miniprogram/src/pages/return/index.ts)消费字段和结果，[原人工检查表](../../../../apps/staff-miniprogram/src/components/ai-native/inspection-human-form.ts)复用字段类型。照片采集、上传、签字和页面寿命由宿主维护，结果只传已经上传的资产 ID，检查准入、提交和履约沿原订单服务校验。
+
+原[员工定向断言](../../../../tests/staff-miniprogram-static.test.cjs)覆盖必填、数值和照片字段，严格类型与正式 Native 构建核对旧入口和页面消费者。
 
 ## AI 请求接入
 
