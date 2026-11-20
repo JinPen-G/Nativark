@@ -9,6 +9,7 @@ import ts from "typescript";
 import { DevelopmentCapabilityIndexSchema, type DevelopmentCapability, type DevelopmentCapabilityIndex,
   type DevelopmentSourceReference } from "./development";
 import { CorePageTextSchema, corePageText } from "./admin";
+import { describeRepositorySchema, repositoryApiDocumentation } from "./repository-openapi";
 import { RepositorySource, UNRESOLVED, isRepositorySourcePath, nodeDocumentation, readRepositoryJson, readRepositoryText,
   repositoryFiles, repositoryPath, sourceReference } from "./repository-source";
 
@@ -340,24 +341,7 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
       sources: entrances, documentation: sourceDocuments(root, moduleDirectory), details: { directory: moduleDirectory } });
   }
 
-  const apiDocumentation = new Map<string, { reference: DevelopmentSourceReference; summary?: string; operationId?: string }>();
-  if (extraSources.includes(openapi)) {
-    const visit = (node: ts.Node) => {
-      if (ts.isObjectLiteralExpression(node)) {
-        const properties = new Map(node.properties.filter(ts.isPropertyAssignment).map(property => [property.name.getText().replace(/^["']|["']$/g, ""), property.initializer]));
-        if (properties.has("method") && properties.has("path")) {
-          const method = source.value(properties.get("method")), path = source.value(properties.get("path"));
-          if (typeof method === "string" && typeof path === "string") {
-            const summary = source.value(properties.get("summary")), operationId = source.value(properties.get("operationId"));
-            apiDocumentation.set(`${method.toUpperCase()} ${path}`, { reference: sourceReference(node, root),
-              summary: typeof summary === "string" ? summary : undefined, operationId: typeof operationId === "string" ? operationId : undefined });
-          }
-        }
-      }
-      ts.forEachChild(node, visit);
-    };
-    visit(source.source(openapi));
-  }
+  const apiDocumentation = repositoryApiDocumentation(source);
   const registeredControllers = new Map<string, DevelopmentSourceReference>();
   if (extraSources.includes(assembly)) {
     const visit = (node: ts.Node) => {
@@ -396,13 +380,10 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
               const httpDeclaration = httpSymbol && source.target(httpSymbol).valueDeclaration;
               const httpDefinition = httpDeclaration && ts.isPropertyAssignment(httpDeclaration) ? httpDeclaration.initializer : undefined;
               const unresolved = httpDefinition ? source.unresolvedProperties(httpDefinition) : [];
-              const schemas = Object.fromEntries(["params", "query", "body", "response"].flatMap(name => {
+              const schemas = Object.fromEntries(["params", "query", "body", "request", "response"].flatMap(name => {
                 const expression = httpDefinition && objectProperty(httpDefinition, name);
                 if (!expression) return [];
-                const symbol = source.checker.getSymbolAtLocation(expression);
-                const declaration = symbol && source.target(symbol).valueDeclaration;
-                return [[name, { expression: expression.getText(), source: sourceReference(expression, root),
-                  ...(declaration && isRepositorySourcePath(root, declaration.getSourceFile().fileName) ? { declaration: sourceReference(declaration, root) } : {}) }]];
+                return [[name, describeRepositorySchema(source, expression)]];
               }));
               const httpDetails: DevelopmentCapability["details"] = httpDefinition
                 ? { apiFieldsStatus: "source-reference", httpContract: { source: sourceReference(httpDefinition, root), schemas,
@@ -423,9 +404,12 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
                 const declaration = { ...sourceReference(member, root), symbol: member.name?.getText() };
                 const existing = apiCapabilities.get(id);
                 const assemblyReference = registeredControllers.get(node.getSourceFile().fileName + ":" + node.getStart());
-                const references = [declaration, ...(assemblyReference ? [assemblyReference] : []),
+                const references = [declaration, ...(assemblyReference ? [assemblyReference] : []), ...(api ? [api.reference] : []),
                   ...(httpDefinition ? [sourceReference(httpDefinition, root)] : []), ...(core ? [core.reference] : [])];
                 if (unresolved.length) addIssue("api_metadata", repositoryPath(root, file), `接口 ${method} ${path} 尚有动态合同字段 ${unresolved.join(", ")}`);
+                const apiIssues = api?.details.openapiSource;
+                if (apiIssues && typeof apiIssues === "object" && !Array.isArray(apiIssues) && Array.isArray(apiIssues.issues))
+                  for (const issue of apiIssues.issues) addIssue("api_schema", api!.reference.path, `接口 ${method} ${path} 的字段资料缺口 ${issue}`);
                 if (existing) {
                   existing.sources.push(...references);
                   existing.details = { ...existing.details, multipleDeclarations: true,
@@ -438,6 +422,7 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
                       existing.version = core.version;
                       existing.details.coreId = core.id;
                       if (httpDefinition) Object.assign(existing.details, httpDetails);
+                      if (api) Object.assign(existing.details, api.details);
                       for (const document of sourceDocuments(root, core.directory)) {
                         if (!existing.documentation.some(item => item.path === document.path)) existing.documentation.push(document);
                       }
@@ -459,6 +444,7 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
                     ...(core ? { coreId: core.id } : {}),
                     declarationOwners: [{ owner, ...(packageInfo ? { package: packageInfo.directory, version: packageInfo.version } : {}) }],
                     ...httpDetails,
+                    ...(api ? api.details : {}),
                     ...(api?.operationId ? { operationId: api.operationId } : {}) } };
                 capabilities.push(capability);
                 apiCapabilities.set(id, capability);

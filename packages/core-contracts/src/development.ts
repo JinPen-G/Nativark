@@ -71,6 +71,52 @@ export const DevelopmentCapabilityQuerySchema = z.object({
 }).strict();
 export type DevelopmentCapabilityQuery = z.input<typeof DevelopmentCapabilityQuerySchema>;
 
+/** 从已登记的纯资料保留请求、响应与本地 schema 引用，不加载引用文件或业务实现。 */
+function describeDevelopmentOpenApiOperation(
+  operation: Record<string, unknown>, schemas: CoreOpenApiContribution["schemas"],
+  source: DevelopmentSourceReference, pointer: string
+): NonNullable<DevelopmentCapability["details"]> {
+  const gaps: string[] = [];
+  const fields: Record<string, JsonValue> = {};
+  for (const name of ["parameters", "requestBody", "responses", "x-schemaStatus", "x-schemaGaps"]) {
+    if (!Object.hasOwn(operation, name)) continue;
+    const parsed = jsonValue.safeParse(operation[name]);
+    if (parsed.success) fields[name] = parsed.data;
+    else gaps.push(`${name}:not-serializable`);
+  }
+  if (!Object.hasOwn(operation, "responses")) gaps.push("responses:not-indexed");
+  const references: JsonValue[] = [];
+  const seen = new Set<string>();
+  const visit = (value: JsonValue, location: string) => {
+    if (!value || typeof value !== "object") return;
+    if (Array.isArray(value)) {
+      value.forEach((child, position) => visit(child, `${location}/${position}`));
+      return;
+    }
+    if (typeof value.$ref === "string" && !seen.has(value.$ref)) {
+      const ref = value.$ref;
+      seen.add(ref);
+      const name = ref.startsWith("#/components/schemas/") ? ref.slice(21).replaceAll("~1", "/").replaceAll("~0", "~") : undefined;
+      const parsed = name && Object.hasOwn(schemas, name) ? jsonValue.safeParse(schemas[name]) : undefined;
+      if (parsed?.success) {
+        references.push({ ref, source, pointer: `/schemas/${name!.replaceAll("~", "~0").replaceAll("/", "~1")}`, schema: parsed.data });
+        visit(parsed.data, ref.slice(1));
+      } else {
+        references.push({ ref, source, pointer: location, status: "not-indexed" });
+        gaps.push(`${ref}:not-indexed`);
+      }
+    }
+    for (const [key, child] of Object.entries(value)) {
+      // 示例/default 和扩展值可能含有名为 $ref 的业务字段，不作为文档依赖读取。
+      if (["example", "examples", "default", "enum"].includes(key) || key.startsWith("x-")) continue;
+      visit(child, `${location}/${key.replaceAll("~", "~0").replaceAll("/", "~1")}`);
+    }
+  };
+  visit(fields, pointer);
+  return { apiFieldsStatus: gaps.length ? "source-reference" : "indexed",
+    openapi: { source, pointer, ...fields, schemas: references, issues: gaps } };
+}
+
 /** 宿主将同一份已登记贡献用于开发资料，组件与业务方法始终由原注册源持有。 */
 export function describeCoreDevelopmentCapabilities(input: {
   manifest: CoreManifest;
@@ -116,7 +162,8 @@ export function describeCoreDevelopmentCapabilities(input: {
     for (const [route, methods] of Object.entries(openapi.paths)) {
       for (const [method, value] of Object.entries(methods)) {
         if (!["get", "post", "put", "patch", "delete", "head", "options"].includes(method)) continue;
-        const operation = value as { summary: string; operationId: string; description?: string };
+        const operation = value as Record<string, unknown> & { summary: string; operationId: string; description?: string };
+        const source = { path: path(manifest.entries.openapi), symbol: operation.operationId };
         capabilities.push({
           id: `api:${method.toUpperCase()}:${route}`,
           name: operation.summary,
@@ -124,10 +171,12 @@ export function describeCoreDevelopmentCapabilities(input: {
           owner: manifest.id,
           version: manifest.version,
           description: operation.description,
-          sources: [{ path: path(manifest.entries.openapi), symbol: operation.operationId }],
+          sources: [source],
           documentation,
           entry: { kind: "http", method: method.toUpperCase() as "GET", path: route },
-          details: { operationId: operation.operationId }
+          details: { operationId: operation.operationId,
+            ...describeDevelopmentOpenApiOperation(operation, openapi.schemas, source,
+              `/paths/${route.replaceAll("~", "~0").replaceAll("/", "~1")}/${method}`) }
         });
       }
     }

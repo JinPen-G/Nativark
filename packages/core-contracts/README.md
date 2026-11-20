@@ -78,7 +78,15 @@ node packages/core-contracts/dist/capabilities.js --owner example-tickets --json
 
 索引从 workspace 包出口、TypeScript 导出与源码说明、Controller 路由、后台 `APP_ROUTES`、Core 清单与页面贡献和 UIArc 来源清单读取。workspace 支持 `packages/*` 等一层通配目录，以及底座源码发行中的 `packages/core-contracts` 等显式目录。正式出口按实际条件和构建目录映射到源码，兼容转接参与符号解析，直接导入统计读取已发现 workspace 的 `src`。局部别名沿导入文件所属的原 TypeScript 配置解析。Controller 与旧后台路由只从本次所选 workspace 取得，零 Core 底座和所选 Core 的来源分别保留。源码新增或迁移后再次查询即可反映变化。新增 Core 使用自己的正式包出口、清单、页面和 API 贡献登记能力，宿主可通过 `@rental-os/core-contracts/development` 的 `describeCoreDevelopmentCapabilities` 取得同源目录，查询合同由该出口提供。[能力目录实现](src/development.ts)
 
-Core 条目读取正式清单声明中的静态标识、版本、范围和依赖，页面与 HTTP 条目附同一清单出处及包版本。构建时注入的来源、动态权限和未解析字段保留在 `unresolvedMetadata`。动态 HTTP 合同给出请求、参数、查询和响应表达式及其源码声明，`apiFieldsStatus=source-reference` 表示需沿这些原声明核对完整字段；未建立字段资料的接口为 `not-indexed`。转导出缺少本仓目标时，保留正式导入、原模块和本地转导出位置，`declarationStatus=unresolved` 与对应 `issues` 同时出现，外部组件及 CSS 模块的值仍需核对原依赖。
+Core 条目读取正式清单声明中的静态标识、版本、范围和依赖，页面与 HTTP 条目附同一清单出处及包版本。构建时注入的来源、动态权限和未解析字段保留在 `unresolvedMetadata`。HTTP 条目给出请求、参数、查询和响应的原表达式、声明位置及本地 schema 引用。`httpContract.schemas` 定位 Controller 使用的合同，`openapiSource.schemas` 定位正式操作表的字段说明。转换和动态表达式保留 `apiFieldsStatus=source-reference`，缺引用标记 `not-indexed` 并列入 `issues`。已登记 OpenAPI 贡献通过 `details.openapi` 保留请求体、参数、响应、递归 schema 引用与 JSON Pointer；字段资料可完整读取时为 `indexed`，原 `x-schemaStatus` 和 `x-schemaGaps` 另行表达字段展开程度。CLI 显示这些来源和状态，`--json` 保留完整字段资料。转导出缺少本仓目标时，保留正式导入、原模块和本地转导出位置，`declarationStatus=unresolved` 与对应 `issues` 同时出现，外部组件及 CSS 模块的值仍需核对原依赖。
+
+例如，查询工单分派接口。
+
+```sh
+node packages/core-contracts/dist/capabilities.js --id "api:POST:/api/cores/example-tickets/tickets/{ticketId}/assign"
+```
+
+结果从 [TicketsController.assign](../example-tickets-core/src/nest.ts) 定位 [TICKETS_HTTP.assign](../example-tickets-core/src/http.ts) 的 params、body 和 response；body 保留 `AssignTicketSchema.omit({ ticketId: true })` 原表达式，并链接 [AssignTicketSchema](../example-tickets-core/src/contracts.ts)。同一合同供 [OpenAPI 生成器](../example-tickets-core/src/openapi.ts) 使用，已登记贡献中的 Request/Response 引用可按 `details.openapi.schemas` 打开。业务调用继续沿 [TicketsService.assign](../example-tickets-core/src/service.ts) → [TicketRepository](../example-tickets-core/src/service.ts) → [MySQL 私有适配](../example-tickets-core/src/mysql.ts)，范围和原操作说明见 [工单模块](../example-tickets-core/README.md)。
 
 输出固定 `audience=development`，`source.snapshot=working-tree` 和当前 Git 修订说明本次读取位置。Git 检出目录同时给出 `source.workingTreeChanged`，表示扫描时是否有未提交修改；当前修订不是这些修改的固定版本。`coverage` 列出实际扫描的来源，并从 Git 跟踪的 workspace 与独立客户端包清单标明未检出的 `notPresent`；已检出但不属于当前扫描范围的独立包标为 `partial`。静态解析缺口通过 `issues` 表达。源码声明、宿主登记和运行验证分别核定，API 的 `registration` 标记源码或明确宿主登记，UIArc 条目标记为保留源码。用途/约束优先读取准确的源码注释和模块 README，缺少说明的条目保留准确入口供后续整改。
 
