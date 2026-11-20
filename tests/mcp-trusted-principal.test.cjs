@@ -1,8 +1,15 @@
 "use strict";
 /** Original identity/Guard regression; shared fixture keeps real source methods. */
-const assert = require("node:assert/strict"), { test } = require("node:test");
+const assert = require("node:assert/strict"), { test, after } = require("node:test");
 const fs = require("node:fs"), path = require("node:path");
-const { fixture, source, shared, identity, signal, AiCatalogReadFactsService, catalogConsumerUrl, output, cache, root } = require("./fixtures/mcp/original-identity.cjs");
+process.env.MCP_TEST_OFFLINE = "1";
+const { fixture, source, shared, identity, signal, AiCatalogReadFactsService, catalogConsumerUrl, output, cache, root, cleanup } = require("./fixtures/mcp/original-identity.cjs");
+after(() => {
+  try {
+    assert.equal(fs.existsSync(path.join(output, "offline-audit.log")), false, "offline guard rejected an operation");
+  } finally { cleanup(); }
+  assert.equal(fs.existsSync(output), false, "original MCP fixture left temporary output");
+});
 
 test("current original principal and Guard establish exact catalog ALS without a Web token or copied role rules", async () => {
   const f = fixture();
@@ -514,6 +521,18 @@ function nativeAvailabilityFixture(mode = 'quantity', lines) {
   f.tx.aiScope = { findFirst:async()=>({ id:'scope-a',...source('apps/api/src/modules/ai-native/persistence-scope.ts').aiPersistenceScopeColumns({ kind:'workspace',tenantId:'tenant-a',workspaceId:'workspace-a' }) }) };
   f.tx.$queryRaw = async query => {
     const sql=query.strings.join('?'),kind=sql.includes('business_workspaces')?'workspace':sql.includes('rental_fulfillment_locations')?'location':'operator';
+    // The original Native configuration reader now uses bounded locking pages;
+    // retain the separate FOR UPDATE assertions for its workspace/inventory fences.
+    if (/^\s*SELECT \* FROM rental_item_groups/.test(sql)) {
+      assert.match(sql.replace(/\s+/g,' ').trim(), /^SELECT \* FROM rental_item_groups WHERE tenantId = \? AND workspaceId = \? AND id = \? ORDER BY id LIMIT \? LOCK IN SHARE MODE$/);
+      assert.equal(query.values.length,4);assert.deepEqual(query.values.slice(0,2),['tenant-a','workspace-a']);assert.equal(query.values[3],2);
+      control.trace.push('config');return structuredClone(control.groups.filter(row=>row.id===query.values[2]).slice(0,2));
+    }
+    if (sql.includes('FROM rental_bundle_components b JOIN rental_item_groups g')) {
+      assert.match(sql.replace(/\s+/g,' ').trim(), /WHERE b.bundleItemGroupId = \? ORDER BY b.componentItemGroupId LIMIT 257 LOCK IN SHARE MODE$/);
+      assert.equal(query.values.length,1);control.trace.push('bundle');
+      return structuredClone((control.groups.find(row=>row.id===query.values[0])?.bundleComponents ?? []).map(part=>({ ...part,...part.componentItemGroup })));
+    }
     assert.match(sql,/FOR UPDATE/);assert.deepEqual(query.values.slice(0,2),['tenant-a','workspace-a']);control.trace.push('sql-'+kind);await control.afterSql?.(kind);
     return structuredClone(kind==='workspace'?[{ status:f.workspace.status }]:kind==='location'?[control.location]:[control.operator]);
   };
@@ -1126,8 +1145,11 @@ test("native order status resources execute original Guard Core repository and p
       async findMany(args) { financeQueries.push(['refund-page', structuredClone(args)]); assert.deepEqual({ ...args.where, paymentIntentId: 'intent-paid' }, { tenantId: 'tenant-a', workspaceId: 'workspace-a', orderId: 'order-a', paymentIntentId: 'intent-paid' });
         assert.ok(args.take >= 2 && args.take <= 51); return structuredClone(refunds.filter(row => row.paymentIntentId === args.where.paymentIntentId).slice(0, args.take)); }
     };
-    const runtime = Object.create(PaymentRuntimeService.prototype); runtime.prisma = { rentalPaymentIntent: { findFirst: paid.outside, findMany: paid.outside }, rentalPaymentRefund: { findFirst: paid.outside, findMany: paid.outside } };
-    runtime.integrations = { runtimeConfig: paid.outside }; runtime.funding = { applyPayment: paid.outside };
+    // The original adapter constructor supplies the same ALS authority to the
+    // extracted payment implementation; every global/provider/write port rejects.
+    const runtime = new PaymentRuntimeService({ rentalPaymentIntent: { findFirst: paid.outside, findMany: paid.outside },
+      rentalPaymentRefund: { findFirst: paid.outside, findMany: paid.outside } },
+      { runtimeConfig: paid.outside }, { applyPayment: paid.outside });
     let paymentResource;
     const configured = owner => createOriginalMcpOrderResources(mcp, owner.context, owner.call, ['order:read'], owner.f.auth, owner.f.guard, owner.core, () => now, undefined, undefined, { source: runtime, guard: owner.f.guard });
     await paid.run(async (_status, stop) => {
@@ -1199,27 +1221,31 @@ test("native order status resources execute original Guard Core repository and p
 });
 
 test("verification records its real type and external-facade scope", () => {
-  fs.writeFileSync(path.join(output, "scope.json"), JSON.stringify({
-    strict: "original shared to isolated output and new internal principal contract", apiExecution: "original source transpilation; Nest plumbing and Prisma/current authority external facades",
+  const scope = {
+    strict: "formal Platform/Rental contracts and Shared builds, original principal owner and compatibility export", apiExecution: "original source transpilation; real Nest decorators/exceptions, Prisma/current authority external facades",
     nativeEntitlementTypes: require('./fixtures/mcp/original-identity.cjs').nativeEntitlementTypesChecked(),
-    nativeEntitlementTypeScope: 'actual reader strict/signature/declaration with named Prisma/service/budget-port type facades; NOT generated Prisma or whole API strict',
+    nativeEntitlementTypeScope: 'original Native/legacy consumer and cancellation negative against complete reader/subscription source and selected Prisma declarations',
     nativeRequestReconcileTypes: require('./fixtures/mcp/original-identity.cjs').nativeRequestReconcileTypesChecked(),
-    nativeRequestReconcileTypeScope: 'exact shared original-key/body helper plus Native reconcile and legacy wrapper strict/declarations with named external ORM/task-receipt facade; original complete repository runtime transpiled, no DB/commit proof',
+    nativeRequestReconcileTypeScope: 'original Native/legacy reconciliation consumer and cancellation negative against the complete formal repository; no DB/commit proof',
     nativeCatalogTypes: require('./fixtures/mcp/original-identity.cjs').nativeCatalogTypesChecked(),
-    nativeCatalogTypeScope: 'complete original catalog resources/facts source plus exact config page and Native Core method strict/declarations; named ORM/conversion/workspace-scope/framework facades, complete original runtime sources transpiled, not DB/commit/production proof',
+    nativeCatalogTypeScope: 'original catalog read/readIn projection consumers and both cancellation negatives against complete formal resources and Core source; no DB/commit/production proof',
     nativeRequestParticipantTypes: require('./fixtures/mcp/original-identity.cjs').nativeRequestParticipantTypesChecked(),
-    nativeRequestParticipantTypeScope: 'actual complete participant source plus exact original save/audit/reconcile methods strict/declarations with named external ORM/framework facades; original complete sources runtime transpiled, transaction/commit substitute not DB proof',
+    nativeRequestParticipantTypeScope: 'original save/reconcile consumers retain cancellation negatives and preparation-not-commit type boundary against the complete participant; runtime transaction substitute is not DB proof',
     nativeRequestAuditTypes: require('./fixtures/mcp/original-identity.cjs').nativeRequestAuditTypesChecked(),
-    nativeRequestAuditTypeScope: 'actual save audit source and exact original Native row-observer/OperationLog method strict and declarations with named external ORM/framework/task/candidate facades; complete original sources runtime transpiled, no DB/commit proof',
+    nativeRequestAuditTypeScope: 'original audit association consumer and cancellation negative against complete audit/OperationLog source and selected Prisma declarations; no DB/commit proof',
     nativeRequestSaveTypes: require('./fixtures/mcp/original-identity.cjs').nativeRequestSaveTypesChecked(),
-    nativeRequestSaveTypeScope: 'exact common load/save methods and Native participant/legacy wrapper plus actual original validator strict/declaration under named ORM/task-access/candidate type facades; complete original class runtime transpiled, not whole API/generated Prisma',
+    nativeRequestSaveTypeScope: 'original save/reissue/legacy consumers retain cancellation and preparation-not-committed-receipt negatives against the complete repository and selected Prisma declarations',
     nativeOrderStatusTypes: require('./fixtures/mcp/original-identity.cjs').nativeOrderStatusTypesChecked(),
-    nativeOrderStatusTypeScope: 'actual resource adapter, order/inspection/payment facts and saved-quote source plus exact Core/Business/payment-read/finance-Guard method fragments and query-parser strict with named external row/type declarations; complete original classes runtime transpiled',
+    nativeOrderStatusTypeScope: 'original order/quote/inspection/payment/refund consumers retain all six owner/cancellation negatives against complete formal implementations and selected Prisma declarations',
     nativeRequestPolicyTypes: require('./fixtures/mcp/original-identity.cjs').nativeRequestPolicyTypesChecked(),
-    nativeRequestPolicyTypeScope: 'exact original authority/MCP adapter/scope/context strict with named external declarations; actual repository behavior transpiled, not full API/Prisma strict',
+    nativeRequestPolicyTypeScope: 'original bound authority consumer retains mandatory Native cancellation/resource-authorizer negatives against complete formal policy/scope/context source',
     nativeRequestScopeTypes: require('./fixtures/mcp/original-identity.cjs').nativeRequestScopeTypesChecked(),
-    nativeRequestScopeTypeScope: 'actual scope source/context/RequestIdentity strict with named ORM/repository/validator/MCP type facades; runtime uses original ScopeRepository and Guard',
-    apiStrict: "not verified: original Nest/Prisma dependency and generated-client combination not installed in this tree",
+    nativeRequestScopeTypeScope: 'original canonical-scope and same-Native callback consumers retain both cancellation negatives against complete formal context, ScopeRepository and Guard source',
+    apiStrict: "not verified by this fixture: complete API/generated Prisma build or Nest bootstrap",
     database: "no real DB, migration, API boot or MCP business publication", sources: [...cache.keys()].map(file => path.relative(root, file))
-  }, null, 2));
+  };
+  fs.writeFileSync(path.join(output, "scope.json"), JSON.stringify(scope, null, 2));
+  // The detailed file belongs to this run; retain its scope in TAP before cleanup.
+  console.log(JSON.stringify({ ...scope, sources: scope.sources.length,
+    sourceHash: require("node:crypto").createHash("sha256").update(scope.sources.join("\n")).digest("hex") }));
 });
