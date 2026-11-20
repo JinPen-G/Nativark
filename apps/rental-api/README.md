@@ -19,6 +19,7 @@
 | [lifecycle.ts](src/lifecycle.ts) | 唯一初始化、预热、配货/到期/文件/限流作业与数据库退出负责人；先停止新任务并排空，再断开连接，排空失败不提前断库。 |
 | [deployment-package.ts](src/deployment-package.ts) | 从实际依赖读取固定标准包并核对摘要；源码目录、同名版本或准备结果均不能替代实际部署和物理数据证据。 |
 | [core-package-sources.ts](src/core-package-sources.ts) | 为同一 API 的包管理读取当前固定底座归档、实际运行产物、Rental/可选 AI 完整包和原迁移材料；无同源证据保持不可用。 |
+| [core-removal-source.ts](src/core-removal-source.ts) | 汇合目标 Core 的公共任务、文件、调用/通知收据及已选 AI 原依赖，与 Rental 自有预检共同报告移除阻碍；不执行排空或删除。 |
 | [http-policy.ts](src/http-policy.ts)、[openapi.ts](src/openapi.ts) | 真实挂载清单同时约束请求包装与旧路径文档许可；逐条核定原方法/处理器，使用 Rental 命名空间并保留原合同缺项。 |
 | [package.ts](src/package.ts)、[prepare-deployment.ts](src/prepare-deployment.ts) | 从已构建字节和固定来源形成标准包及候选部署；同源 OpenAPI、完整摘要和原 SQL 必须一致，不安装或执行迁移。 |
 
@@ -57,6 +58,8 @@ Core 包目录、预检、版本选择和候选准备的四个原 Controller 挂
 
 部署级停新由[公共同库准入](../../packages/platform-core-host/README.md#部署准入与存量切换)统一管理。普通 HTTP、已解析目标的公开客户业务和调价作业在原事务持当前状态共享锁；缺行和未知状态拒绝新准入。双 Core 中每个 Core 单独读取自己的状态，停用 Rental 不改变工单的授权或状态。原支付回调、五项收尾、文件清理和精确历史处理器继续按既有原事实执行，`availability` 仍负责物理数据就绪，不能把部署停止混入该方法。移除预检读取同一持久状态，仍须保留未核全的平台依赖阻碍，不把 `stopped` 当作可卸载。
 
+移除观察分别读取[公共与 AI 依赖](src/core-removal-source.ts)和[Rental 原业务依赖](../../packages/rental-core/src/mysql-removal.ts)。公共表未统一保存 Core ID，只按原写入种类及同租户业务关联确认归属；请求或 JSON 中的 Core 名称不能证明归属。每个来源独立报告，缺表、缺关联或无法确定的历史保留 `unknown`，不抹掉其他来源已查到的阻碍。启用 AI 的装配提供同一数据库的 `removalDependencies`；当前未挂 AI 不证明旧任务、预算或知识数据不存在。只读预检即使返回 `clear`，也不执行停机、删除或授权移除代码。
+
 AI 的普通入口同样关闭；仅[实际处理器闭集](src/ai-http-policy.ts)保留原读取、取消／拒绝、结果核对及已有任务恢复。创建、claim、输入、步骤、调用和派发由原任务参加者在 Auth/Tenant/Core 后、Order/Workspace/Task 前持同一准入锁。控制中嵌套新工作仍须 `accepting`；恢复只保持原 Task/Run/Step/Plan 身份及原计量，不建立新执行或把 unknown 当作重发依据。存量切换先通过当前 SaaS 登记已核定的部署状态并核对原授权与绑定，再切全部执行者，不能让缺记录的新宿主直接承接现有流量。
 
 原图片、附件、CSV 头和跳转使用[有限响应缓冲](../../packages/rental-core/src/http-native-response.ts)，持有原处理器生成的字节、字符串和响应头，复核后一次发送。读取失败、撤权或断线丢弃缓冲；不允许流或提前发送。文件仍沿原对象 ACL、内容指纹、配置和 required audit，不以缓冲替代文件授权。
@@ -74,6 +77,8 @@ AI 启用入口额外提供[知识文件来源](src/ai-file-cleanup-source.ts)�
 普通宿主使用无 AI 的 161 模型；客户检查出箱用 `null` 表达未选择，`undefined` 或残缺参加者会拒绝。AI 启用入口使用 247 模型，通过原实际工厂组合失败出箱、同事务事件、通知草稿、知识读取和原请求服务。公共数据库视图仍限定原 40 模型；两个 Client 的运行时模型图互不覆盖，正文加密沿各自实际模型关系处理嵌套数据。
 
 启用宿主的 HTTP 清单见 [AI 处理器政策](src/ai-http-policy.ts)：运营/员工场景目录、原输入与任务创建、原任务恢复、报价澄清、开业诊断、订单解释、任务中心、场景计划与任务动作策略、租户模型配置及明确列出的手动检查操作。三个执行入口分别消费原专用请求工厂与持久 runner，不同时挂载旧的宽泛模型执行器。每个路由仍通过原 Auth/Guard，后续原场景、owner、对象、能力、任务策略和模型配置分别核定。场景目录只公布确实挂载的请求工厂；原服务端配置未启用、未提供的客户或供应商能力保持不可用。
+
+当前标准根未挂载 MCP 的 OAuth 和 Host router，其实际装配仍在[原组合宿主](../api/src/modules/auth/original-mcp-host.ts)。MCP 的正式合同适配与该入口的运行、切换分别核定；不能以标准 AI 根通过或工具映射存在，宣称旧 MCP 执行者已消费部署停新状态。
 
 原输入保存/换发、Task 变更、可见事件和模型配置在各自原事务中先锁当前 Auth/Tenant，再复核 Core 与原业务来源，保留原 CAS、幂等键及未知收据。模型目录探测沿原有有界运输，调用前后分别复核当前授权，运输不占用数据库事务。原知识结果/来源只将 `ai-sensitive-read` 必需审计接入当前请求的短事务；文件与知识 ACL、同意依据、原身份及返回前复核继续生效，撤权不返回正文、不重复对象 GET。
 

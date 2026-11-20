@@ -5,7 +5,7 @@ import { ForbiddenException } from "@nestjs/common";
 import type { ConfigService } from "@nestjs/config";
 import { isDeepStrictEqual } from "node:util";
 import * as shared from "@rental-os/shared";
-import { CoreDeploymentLockSchema, type CoreDeploymentLock, type CorePlatformDataCapabilityRelease } from "@rental-os/core-contracts";
+import { CoreDeploymentLockSchema, type CoreDeploymentLock, type CorePlatformDataCapabilityRelease, type CoreRemovalAssessment } from "@rental-os/core-contracts";
 import { createCoreDeployedCatalogue, type CoreDeployedCatalogue } from "@rental-os/core-host";
 import type { CoreHostSqlTransaction } from "@rental-os/core-host/mysql";
 import { createMysqlCoreDeploymentObservation, type CoreMysqlDataPlan } from "@rental-os/core-host/mysql-deployment";
@@ -46,6 +46,8 @@ export interface RentalHostAiSetup<Binding> {
   participants: RentalApplicationParticipants;
   /** 从实际 AI Controller/handler 闭集生成；只保留原结果/控制入口，新工作仍在原事务检查。 */
   deploymentContinuation(method: string, path: string): boolean;
+  /** 同一已选数据库内读取原 AI 任务及历史依赖；未选择 AI 不证明旧数据不存在。 */
+  removalDependencies: { read(coreId: string): Promise<{ complete: boolean; blockers: CoreRemovalAssessment["blockers"] }> };
   bind(input: { rental: RentalApplication; guard: RentalAuthorizationGuard;
     customers: RentalCustomerManagementApplication }): Binding;
 }
@@ -143,7 +145,8 @@ export function composeRentalApplication<Binding = never, Additional = unknown>(
     authorizeContainer: platformHost.authorizeContainer,
     platformRemoval: createRentalCoreRemovalSource({ database,
       readAdmission: coreId => database.$transaction(async transaction =>
-        (await admissionForTransaction(transaction).readCurrent(coreId)).state, { isolationLevel: "ReadCommitted" }) }) });
+        (await admissionForTransaction(transaction).readCurrent(coreId)).state, { isolationLevel: "ReadCommitted" }),
+      ...(input.aiMode === "enabled" ? { aiDependencies: input.ai.removalDependencies } : {}) }) });
   core.session = composeRentalCoreSessionReader({ database, authSource: rental.authSource, catalogue });
   const packages = composePlatformCorePackageAssembly({ database, users: rental.authSource, catalogue,
     audit: createPlatformCorePackageAudit<RentalDatabaseTransaction>(),
