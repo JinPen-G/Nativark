@@ -55,7 +55,7 @@ export function useCoreBinding(coreId: string, container?: CoreScopeReference["c
   const bindingSnapshot = JSON.stringify(query.data);
   const current = () => {
     const boundary = lifetime.current;
-    if (!live.current.canManage || !session.isCurrent() || currentSessionEpoch() !== epoch || live.current.generation !== generation || boundary?.generation !== generation
+    if (!live.current.canManage || !session.isCurrent(coreId) || currentSessionEpoch() !== epoch || live.current.generation !== generation || boundary?.generation !== generation
       || boundary.controller.signal.aborted) throw new DOMException("原Core设置页面已失效", "AbortError");
     return boundary.controller.signal;
   };

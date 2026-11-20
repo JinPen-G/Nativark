@@ -32,8 +32,15 @@ export function useCoreSession() {
   return {
     ...query,
     data: sessionVerified && !query.error ? query.data : undefined,
-    /** 目录管理动作绑定整份当前投影，不能沿旧管理资格办理初始化或收据核对。 */
-    isCurrent: () => Boolean(query.data && contextSnapshot === JSON.stringify(currentContext())),
+    /** 目录管理核原投影，指定Core时只绑定当前管理资格及该Core的授权修订。 */
+    isCurrent(coreId?: string): boolean {
+      const current = currentContext();
+      const same = coreId === undefined ? contextSnapshot === JSON.stringify(current)
+        : JSON.stringify(query.data?.cores.find(entry => entry.core.id === coreId))
+          === JSON.stringify(current?.cores.find(entry => entry.core.id === coreId));
+      return Boolean(query.data && current && !query.error
+        && query.data.canManageMembers === current.canManageMembers && same);
+    },
     canAccess(coreId: string, permissions: readonly { resource: string; action: string }[]): boolean {
       const current = currentContext();
       const original = query.data?.cores.find(entry => entry.core.id === coreId);

@@ -138,11 +138,11 @@ node packages/core-contracts/dist/check.js <解包后的Core目录> --host <宿�
 - `$ref` 只使用本地 `#/components/schemas/...`，引用本 Core 或平台公共 schema；不能借另一个 Core 的 schema 隐式取得依赖。检查不访问外部 URL。
 - 包检查会读取该 JSON 并核对归属和最小文档字段。该检查不替代完整 OpenAPI 规范校验、Controller/DTO 对照和实际接口验证。
 
-宿主从正式出口调用 `CoreOpenApiContributionSchema.parse` 和 `composeCoreOpenApi(platformDocument, selectedCores)`。只有所有贡献无冲突时才返回 `document`；失败返回定位明确的 `issues`，不修改原文档。结果可用于原 `/api/openapi.json` 入口与同版本离线输出，现有主应用的实际接线尚待宿主阶段。
+宿主从正式出口调用 `CoreOpenApiContributionSchema.parse` 和 `composeCoreOpenApi(platformDocument, selectedCores)`。只有所有贡献无冲突时才返回 `document`；失败返回定位明确的 `issues`，不修改原文档。结果用于实际 `/api/openapi.json` 与同版本离线输出。公共、Rental 和工单宿主消费同一组合器，挂载集合由宿主提供。[公共文档](../../apps/platform-api/README.md) · [Rental 文档](../../apps/rental-api/src/openapi.ts) · [原组合](../../apps/api/src/contracts/openapi-document.ts)
 
 简单Zod3请求/响应可用正式出口 `coreOpenApiSchema(schema)`生成OpenAPI 3.0字段。当前支持普通对象、字符串/数字/布尔、枚举/基础字面量、数组、判别联合、可选/可空/默认值和已列明的基础校验；未知类型、refine/transform等额外逻辑明确拒绝，不静默丢规则。字段默认值须是可序列化纯值；业务前提仍在操作说明中表达。实际消费者见[工单HTTP合同及生成器](../example-tickets-core/src/openapi.ts)，Controller同片核对路径、输入与输出，生成成功不代表接口已经部署。
 
-保留 Rental 旧路径时，受控宿主可给检查器/组合器传入属于该 Core 的精确 `METHOD /path` 白名单；这个例外由宿主维护，不在 Core 清单中提供，也不会创建或放宽任何路由授权。静态检查命令默认使用新 Core 命名空间。原 operationId/schema 名称的兼容映射尚待实际迁移片核定，目前没有替换原主应用文档。
+保留 Rental 旧路径时，受控宿主可给检查器/组合器传入属于该 Core 的精确 `METHOD /path` 白名单；这个例外由宿主维护，不在 Core 清单中提供，也不会创建或放宽任何路由授权。静态检查命令默认使用新 Core 命名空间。原组合通过[同源文档适配](../../apps/api/src/contracts/openapi-document.ts)维持原 operationId、schema 名称及已挂载旧路径，兼容映射不改变原接口授权。
 
 ## 提供服务端贡献
 
@@ -157,11 +157,11 @@ node packages/core-contracts/dist/check.js <解包后的Core目录> --host <宿�
 | `initialization`，可选 | 仅需要初始业务事实时提供；用 `defineCoreInitializer` 按自己的 schema 解析输入一次 | 锁定原操作、当前权限和候选绑定，在同一事务内写绑定、业务初始事实及审计；提交后发布可见变化 |
 | `assessRemoval`，可选 | 返回在途、unknown、回调、作业和历史读取阻碍 | 汇合平台自身依赖；缺少检查器或存在阻碍时不能移除代码 |
 
-`registerCoreServers` 支持空组合和多个不同 Core，检查失败返回 `issues`，不会返回部分注册表；成功返回 `registrations`。注册不会调用上述业务方法，也不会创建数据库记录、路由、定时任务或 AI 工具。现有 Nest 组合与持久化服务接线仍待宿主切片；当前函数通过不表示主应用已完成拆分。
+`registerCoreServers` 支持空组合和多个不同 Core，检查失败返回 `issues`，不会返回部分注册表；成功返回 `registrations`。注册不会调用上述业务方法，也不会创建数据库记录、路由、定时任务或 AI 工具。实际 Nest 组合与持久化由[公共 Core 宿主](../platform-core-host/README.md)和所选 Core 适配供给。注册函数本身不办理初始化、迁移或代码加载。
 
 [授权与生命周期 schema](src/lifecycle.ts)分别定义租户 Core 授权、成员分配、绑定、就绪和原操作引用。已保存事实的修订从 1 开始；变更请求的 `expectedRevision=0` 只表示记录尚不存在。成员分配请求不包含 `tenantId`，由当前租户身份确定管理边界。合同不定义 Core 独立到期日，统一期限继续由原订阅服务维护。
 
-`CorePrincipal` 仅是原认证服务解析后的主体定位，不携带可自报的权限数组。`CoreTransaction` 是宿主事务回调内的临时句柄，适配器只解析成当前 Core 的受限仓储，回调结束后失效；类型标记不能替代运行时校验。[平台绑定适配](../core-host/README.md#首次绑定与原结果)已有同事务初始化及私有句柄解析，主应用宿主仍需供给原身份与实际部署。
+`CorePrincipal` 仅是原认证服务解析后的主体定位，不携带可自报的权限数组。`CoreTransaction` 是宿主事务回调内的临时句柄，适配器只解析成当前 Core 的受限仓储，回调结束后失效；类型标记不能替代运行时校验。[平台绑定适配](../core-host/README.md#首次绑定与原结果)已有同事务初始化及私有句柄解析，实际宿主必须供给原身份与当前部署，缺失时不得以清单或本地缓存补授权。
 
 停用只关闭对应普通业务和新 Agent 任务；数据、绑定、成员撤权及原收据继续保留。恢复先读取原绑定并复核当前条件，不调用首次初始化。`CoreOperationReference` 只定位原操作，不能根据超时、程序重启或再次开通认定旧操作未执行。
 
@@ -385,7 +385,7 @@ node packages/core-contracts/dist/github-release.js discover [关键词] [页码
 
 返回状态为`fresh`、`cached`或`unavailable`。远端不可达/限流/格式错误时，`unavailable.error`保留原因；有原缓存时附带`stale`及其原始查询时间，没有缓存时不伪造空结果。`discover`命令始终将这个结构写stdout，unavailable退出1，成功退出0；用法错误写stderr并退出1。实际已安装Core继续由宿主独立维护，发现失败不触碰它们。
 
-候选仓库通过下面的固定根清单/索引读取核定Core元数据，再由固定Release入口准备包。实际发现/版本/安装管理界面及部署注册按PCH宿主片接线。检索规则依据[GitHub仓库搜索](https://docs.github.com/en/rest/search/search#search-repositories)。
+候选仓库通过下面的固定根清单/索引读取核定Core元数据，再由固定Release入口准备包。SaaS 管理员通过[公共包管理页](../platform-admin/src/features/core-packages/README.md)和[服务端接点](../platform-core-host/README.md#core-包管理接入)查看来源、许可、底座/Core 版本及固定候选，确认后准备待部署材料；构建、迁移、注册、租户授权和成员分配仍是各自明确步骤。检索规则依据[GitHub仓库搜索](https://docs.github.com/en/rest/search/search#search-repositories)。
 
 ## 从仓库确认 Core 清单
 
