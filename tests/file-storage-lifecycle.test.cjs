@@ -47,6 +47,7 @@ function matches(row, where = {}) {
     if (value instanceof Date) return row[key] instanceof Date && row[key].getTime() === value.getTime();
     if (key === "AND") return value.every(clause => matches(row, clause));
     if (key === "OR") return value.some(clause => matches(row, clause));
+    if (key === "fileAsset" && value?.is) return Boolean(assets.get(row.fileAssetId)) && matches(assets.get(row.fileAssetId), value.is);
     if (value && typeof value === "object" && !Array.isArray(value)) {
       if ("in" in value) return value.in.includes(row[key]);
       if ("lte" in value) return row[key] != null && row[key] <= value.lte;
@@ -83,8 +84,9 @@ function assetRow(id, status = "pending_upload", assetTenantId = tenantId, asset
     mimeType: "application/pdf",
     sizeBytes: 1024,
     storageProvider: "local_mock",
-    storageKey: `tenant-files/${tenantId}/${id}/contract.pdf`,
+    storageKey: `tenant-files/${assetTenantId}/${id}/contract.pdf`,
     publicUrl: null,
+    checksum: null,
     uploadScene: "order-contract",
     status,
     uploadedBy: null,
@@ -132,10 +134,8 @@ const prisma = {
     },
     updateMany: async ({ where, data }) => {
       const row = assets.get(where.id);
-      if (!row || row.tenantId !== where.tenantId || (where.status && row.status !== where.status)
-        || where.storageKey && row.storageKey !== where.storageKey
-        || where.updatedAt && row.updatedAt.getTime() !== where.updatedAt.getTime()) return { count: 0 };
-      Object.assign(row, data, { updatedAt: new Date() });
+      if (!row || !matches(row, where)) return { count: 0 };
+      Object.assign(row, data, { updatedAt: data.updatedAt ?? new Date() });
       return { count: 1 };
     }
   },
@@ -148,7 +148,7 @@ const prisma = {
       return [...sessions.values()].filter(row => matches(row, where)).slice(0, 100);
     },
     create: async ({ data }) => {
-      const row = { ...data, createdAt: new Date(), updatedAt: new Date(), cleanupAttempts: 0, cleanupError: null, lastCleanupAt: null };
+      const row = { ...data, completedAt: null, failureReason: null, createdAt: new Date(), updatedAt: new Date(), cleanupAttempts: 0, cleanupError: null, lastCleanupAt: null };
       sessions.set(row.id, row);
       return row;
     },
@@ -161,7 +161,7 @@ const prisma = {
       const row = sessions.get(where.id);
       const allowed = row && matches(row, where);
       if (!allowed) return { count: 0 };
-      Object.assign(row, data, { updatedAt: new Date(), cleanupAttempts: (row.cleanupAttempts ?? 0) + (data.cleanupAttempts?.increment ?? 0) });
+      Object.assign(row, data, { updatedAt: data.updatedAt ?? new Date(), cleanupAttempts: (row.cleanupAttempts ?? 0) + (data.cleanupAttempts?.increment ?? 0) });
       return { count: 1 };
     }
   },
@@ -188,6 +188,227 @@ const integrations = {
 const access = new FileBusinessAccessService(prisma, new RentalCoreFactRepository(prisma),
   new RentalBusinessFactRepository(prisma), new CustomerOperationsService(prisma, {}, {}));
 const runtime = new FileStorageRuntimeService(prisma, integrations, { record: async () => { if (duringAudit) await duringAudit(); } }, undefined, undefined, access);
+
+/** The real public cleanup and presigner, with only transactional storage and
+ * object transport replaced. Moving the clock never edits a persisted claim. */
+async function expiredCleanupBoundaries() {
+  const { FileStorageCleanup, FileStoragePrimitives } = require('@rental-os/platform-server/files');
+  const { requestFingerprint } = require('@rental-os/platform-contracts/request-fingerprint');
+  const { fileStorageLocationHash } = require('@rental-os/platform-contracts/file-content-binding');
+  const NativeDate = Date;
+  let time = NativeDate.now();
+  globalThis.Date = class extends NativeDate {
+    constructor(...args) { super(...(args.length ? args : [time])); return new NativeDate(this.getTime()); }
+    static now() { return time; }
+    static [Symbol.hasInstance](value) { return value instanceof NativeDate; }
+  };
+  const advance = () => { time += 11 * 60 * 1000; };
+  function fixture() {
+    const config = { id: 'cleanup-original-config', capability: 'file', provider: 's3_compatible',
+      settings: { endpoint: 'https://storage.example.invalid', bucket: 'files', region: 'us-east-1' },
+      credentials: { accessKeyId: 'offline', secretAccessKey: 'offline-only' },
+      revision: { updatedAt: new Date(time - 10000) } };
+    const asset = { ...assetRow('expired-original'), storageProvider: config.provider,
+      storageKey: `tenant-files/${tenantId}/expired-original/blob`, metadata: { fileUploadVersion: 2,
+        storageLocationHash: fileStorageLocationHash(config), uploadConfigHash: requestFingerprint({
+          id: config.id, provider: config.provider, settings: config.settings, credentials: config.credentials }) } };
+    const session = { id: 'expired-original-session', tenantId, fileAssetId: asset.id,
+      provider: config.provider, storageKey: asset.storageKey, status: 'pending_upload', idempotencyKey: 'expired-original-key',
+      expiresAt: new Date(time - 1000), completedAt: null, failureReason: null, cleanupAttempts: 0,
+      cleanupError: null, lastCleanupAt: null, createdAt: new Date(time - 16000), updatedAt: new Date(time - 10000) };
+    const state = { asset, session, config, depth: 0, transactions: 0, requests: [], audits: [], exists: true, trace: [] };
+    const matchSession = where => {
+      const { fileAsset, ...scalar } = where;
+      return matches(state.session, scalar) && (!fileAsset || matches(state.asset, fileAsset.is));
+    };
+    const store = {
+      fileAsset: {
+        findFirst: async ({ where }) => matches(state.asset, where) ? structuredClone(state.asset) : null,
+        findMany: async ({ where }) => matches(state.asset, where) ? [structuredClone(state.asset)] : [],
+        updateMany: async ({ where, data }) => {
+          assert.equal(state.depth, 1, 'asset CAS belongs to original host transaction');
+          state.trace.push('asset');
+          if (!matches(state.asset, where)) return { count: 0 };
+          if (state.failAssetWrite) throw Error('private asset storage failure');
+          Object.assign(state.asset, structuredClone(data)); return { count: 1 };
+        }
+      },
+      fileUploadSession: {
+        findMany: async ({ where }) => matchSession(where) ? [structuredClone(state.session)] : [],
+        update: async () => { throw Error('unconditional session receipt forbidden'); },
+        updateMany: async ({ where, data }) => {
+          assert.equal(state.depth, 1, 'session CAS belongs to original host transaction');
+          state.trace.push('session');
+          if (!matchSession(where)) return { count: 0 };
+          Object.assign(state.session, structuredClone(data), { cleanupAttempts:
+            state.session.cleanupAttempts + (data.cleanupAttempts?.increment ?? 0) });
+          return { count: 1 };
+        }
+      }
+    };
+    let queue = Promise.resolve();
+    const transaction = async work => {
+      const previous = queue; let release;
+      queue = new Promise(resolve => { release = resolve; });
+      await previous;
+      const number = ++state.transactions;
+      try { await state.beforeTransaction?.(number); }
+      catch (error) { release(); throw error; }
+      const before = structuredClone({ asset: state.asset, session: state.session });
+      let result;
+      state.depth++;
+      try { result = await work(store); }
+      catch (error) { state.asset = before.asset; state.session = before.session; throw error; }
+      finally { state.depth--; release(); }
+      // This failure is AFTER persistence, outside the rollback catch.
+      await state.afterCommit?.(number);
+      return result;
+    };
+    const bytes = new FileStoragePrimitives();
+    bytes.objectRequest = async (url, init) => {
+      assert.equal(state.depth, 0, 'object IO remains outside the transaction');
+      const key = decodeURIComponent(new URL(url).pathname).replace(/^\//u, '');
+      state.requests.push({ method: init.method, key });
+      assert.equal(key, `${asset.storageKey}.pending-upload`, 'only the original pending key');
+      if (init.method === 'DELETE') {
+        assert.equal(state.session.status, 'cleanup_in_progress');
+        assert(state.session.cleanupError, 'uncertainty must be durable before DELETE');
+        if (state.deleteFalse) return new Response(null, { status: 503 });
+        state.exists = false;
+        await state.afterDelete?.();
+        if (state.deleteLost) throw Error('private-provider-error-with-credentials');
+        return new Response(null, { status: 204 });
+      }
+      assert.equal(init.method, 'HEAD');
+      if (state.headLost) throw Error('private HEAD failure');
+      return new Response(null, { status: state.exists ? 200 : 404 });
+    };
+    const cleanup = new FileStorageCleanup({ store, transaction, excludedUploadScene: 'reserved-scene',
+      runtimeConfig: async (t, p) => { assert.equal(t, tenantId); assert.equal(p, config.provider);
+        await state.beforeConfig?.(); return structuredClone(state.config); },
+      deleteObject: bytes.deleteObject.bind(bytes), presign: bytes.presign.bind(bytes), objectRequest: bytes.objectRequest,
+      recordAudit: async input => { state.audits.push(structuredClone(input)); } });
+    return { state, run: () => cleanup.cleanupExpiredUploadSessions(tenantId) };
+  }
+  try {
+    {
+      const f = fixture(), result = await f.run();
+      assert.deepEqual(result, { scanned: 1, invalidated: 1, deletedObjects: 1, cleanupPending: 0, sessionIds: ['expired-original-session'] });
+      assert.equal(f.state.session.status, 'failed'); assert.equal(f.state.asset.status, 'failed');
+      assert.equal(f.state.session.cleanupError, null);
+      assert.deepEqual(f.state.trace, ['session', 'asset', 'session', 'asset', 'session', 'asset']);
+      await f.run(); assert.deepEqual(f.state.requests.map(row => row.method), ['DELETE']);
+      const concurrent = fixture();
+      await Promise.all([concurrent.run(), concurrent.run()]);
+      assert.deepEqual(concurrent.state.requests.map(row => row.method), ['DELETE']);
+      assert.equal(concurrent.state.session.cleanupError, null);
+      console.log('expired cleanup: original one-shot DELETE and concurrent single claim passed');
+    }
+    {
+      for (const acknowledgement of [1, 2]) {
+        const f = fixture();
+        f.state.afterCommit = number => { if (number === acknowledgement) throw Error('COMMIT acknowledgement lost'); };
+        assert.equal((await f.run()).cleanupPending, 1);
+        assert.equal(f.state.requests.length, 0);
+        assert.equal(f.state.session.status, 'cleanup_in_progress');
+        f.state.afterCommit = undefined; advance();
+        await f.run(); assert.deepEqual(f.state.requests.map(row => row.method), ['HEAD']);
+        assert(f.state.session.cleanupError, 'HEAD 200 cannot certify deletion or authorize dispatch');
+        f.state.exists = false; await f.run();
+        assert.deepEqual(f.state.requests.map(row => row.method), ['HEAD', 'HEAD']);
+        assert.equal(f.state.session.cleanupError, null);
+      }
+      console.log('expired cleanup: claim/dispatch-CAS lost COMMIT stays HEAD-only after TTL');
+    }
+    {
+      for (const fault of ['deleteLost', 'deleteFalse', 'receiptLost']) {
+        const f = fixture();
+        if (fault === 'receiptLost') f.state.afterCommit = number => { if (number === 3) throw Error('receipt COMMIT lost'); };
+        else f.state[fault] = true;
+        assert.equal((await f.run()).cleanupPending, 1);
+        assert(!JSON.stringify([f.state.session, f.state.audits]).includes('private-provider'));
+        f.state.afterCommit = undefined; advance();
+        await f.run();
+        assert.equal(f.state.requests.filter(row => row.method === 'DELETE').length, 1);
+        if (fault === 'receiptLost') assert.equal(f.state.requests.length, 1, 'already recorded receipt is read without transport');
+        else assert.equal(f.state.requests[1].method, 'HEAD');
+        if (fault === 'deleteFalse') {
+          assert(f.state.session.cleanupError); f.state.exists = false; await f.run();
+        }
+        assert.equal(f.state.session.cleanupError, null);
+      }
+      for (const status of ['failed', 'cleanup_in_progress']) {
+        const f = fixture();
+        Object.assign(f.state.session, { status, cleanupError: 'arbitrary old provider failure',
+          cleanupAttempts: 3, lastCleanupAt: new Date(time - 11 * 60 * 1000) });
+        f.state.asset.status = status === 'failed' ? 'failed' : 'pending_upload';
+        f.state.headLost = true; await f.run(); f.state.headLost = false; advance();
+        await f.run(); f.state.exists = false; await f.run();
+        assert(f.state.requests.every(row => row.method === 'HEAD'));
+        assert.equal(f.state.session.cleanupError, null);
+      }
+      console.log('expired cleanup: DELETE/Boolean unknown, lost result receipt and legacy errors never resend');
+    }
+    {
+      for (const change of [s => { s.config.settings.bucket = 'another-bucket'; },
+        s => { s.config.id = 'another-config'; }, s => { s.config.credentials.secretAccessKey = 'rotated'; },
+        s => { s.config.provider = 'aliyun_oss'; },
+        s => { s.asset.storageProvider = 'aliyun_oss'; }, s => { s.asset.storageKey += '-changed'; },
+        s => { s.asset.metadata = { uploadMode: 'provider' }; }, s => { s.session.completedAt = new Date(); }]) {
+        const f = fixture(); change(f.state);
+        const before = structuredClone({ asset: f.state.asset, session: f.state.session });
+        assert.equal((await f.run()).cleanupPending, 1); assert.equal(f.state.requests.length, 0);
+        assert.deepEqual({ asset: f.state.asset, session: f.state.session }, before);
+      }
+      const missing = fixture(); missing.state.config = undefined;
+      assert.equal((await missing.run()).cleanupPending, 1); assert.equal(missing.state.transactions, 0);
+      for (const phase of ['claim', 'receipt']) {
+        for (const field of ['asset', 'session']) {
+          const f = fixture(); let expected;
+          const change = () => {
+            if (field === 'asset') { f.state.asset.businessId = 'another-owner'; f.state.asset.updatedAt = new Date(time + 5); }
+            else { f.state.session.idempotencyKey = 'another-operation'; f.state.session.updatedAt = new Date(time + 5); }
+            expected = structuredClone({ asset: f.state.asset, session: f.state.session });
+          };
+          if (phase === 'claim') f.state.beforeTransaction = number => { if (number === 1) change(); };
+          else f.state.afterDelete = change;
+          assert.equal((await f.run()).cleanupPending, 1);
+          assert.deepEqual({ asset: f.state.asset, session: f.state.session }, expected, 'CAS rollback never overwrites another writer');
+          assert.equal(f.state.requests.length, phase === 'claim' ? 0 : 1);
+          f.state.beforeTransaction = undefined; f.state.afterDelete = undefined;
+          if (phase === 'receipt') { advance(); await f.run(); assert.equal(f.state.requests.length, 1, 'changed saved digest cannot select another target'); }
+        }
+      }
+      const changedConfig = fixture(); changedConfig.state.deleteLost = true; await changedConfig.run();
+      changedConfig.state.config.revision.updatedAt = new Date(time + 1); advance();
+      assert.equal((await changedConfig.run()).cleanupPending, 1); assert.equal(changedConfig.state.requests.length, 1);
+      const duringConfig = fixture(); let configReads = 0;
+      duringConfig.state.beforeConfig = () => { if (++configReads === 2) duringConfig.state.config.settings.bucket = 'changed-at-dispatch'; };
+      assert.equal((await duringConfig.run()).cleanupPending, 1); assert.equal(duringConfig.state.requests.length, 0);
+      console.log('expired cleanup: exact configuration, provider, asset/session revisions and receipt CAS passed');
+    }
+    {
+      const f = fixture(), before = structuredClone({ asset: f.state.asset, session: f.state.session });
+      f.state.failAssetWrite = true; assert.equal((await f.run()).cleanupPending, 1);
+      assert.deepEqual({ asset: f.state.asset, session: f.state.session }, before);
+      assert.equal(f.state.requests.length, 0, 'session claim and asset failure roll back together');
+      const denied = fixture(); denied.state.beforeTransaction = () => { throw Error('host authority revoked'); };
+      assert.equal((await denied.run()).cleanupPending, 1); assert.equal(denied.state.requests.length, 0);
+      assert.equal(denied.state.session.cleanupAttempts, 0, 'host transaction participant is not bypassed');
+      const local = fixture(); local.state.asset.storageProvider = local.state.session.provider = 'local_mock';
+      assert.equal((await local.run()).deletedObjects, 1); assert.equal(local.state.requests.length, 0);
+      for (const reserved of ['reserved-scene', 'freeze_pending', 'completed']) {
+        const excluded = fixture();
+        if (reserved === 'reserved-scene') excluded.state.asset.uploadScene = reserved;
+        else excluded.state.session.status = reserved;
+        const snapshot = structuredClone({ asset: excluded.state.asset, session: excluded.state.session });
+        await excluded.run(); assert.equal(excluded.state.transactions, 0); assert.equal(excluded.state.requests.length, 0);
+        assert.deepEqual({ asset: excluded.state.asset, session: excluded.state.session }, snapshot);
+      }
+      console.log('expired cleanup: atomic rollback, local_mock and reserved/frozen/completed isolation passed');
+    }
+  } finally { globalThis.Date = NativeDate; }
+}
 
 void runWithRequestIdentity(operatorIdentity, async () => {
   const input = {
@@ -357,6 +578,7 @@ void runWithRequestIdentity(operatorIdentity, async () => {
     status: "pending_upload",
     idempotencyKey: "upload-expired",
     expiresAt: new Date(Date.now() - 1000),
+    completedAt: null, failureReason: null, lastCleanupAt: null, createdAt: new Date(), updatedAt: new Date(),
     cleanupError: null,
     cleanupAttempts: 0
   });
@@ -378,6 +600,7 @@ void runWithRequestIdentity(operatorIdentity, async () => {
     status: "pending_upload",
     idempotencyKey: "upload-expired-second-tenant",
     expiresAt: new Date(Date.now() - 1000),
+    completedAt: null, failureReason: null, lastCleanupAt: null, createdAt: new Date(), updatedAt: new Date(),
     cleanupError: null,
     cleanupAttempts: 0
   });
@@ -858,6 +1081,7 @@ void runWithRequestIdentity(operatorIdentity, async () => {
     assert.ok(requestFingerprint(proof));
   } finally { globalThis.fetch=originalFetch; egress.assertOutboundUrl=originalEgress; }
   console.log("dedicated exchange image bytes, generic isolation and unknown TTL retention passed");
+  await expiredCleanupBoundaries();
   console.log("file storage lifecycle tests passed");
 }).catch((error) => {
   console.error(error);

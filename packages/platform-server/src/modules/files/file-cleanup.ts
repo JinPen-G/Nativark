@@ -1,10 +1,12 @@
 /** 原每租户文件清理内核，无定时器、租户发现或新的任务执行者。
  * DELETE前持久占用，失应答后仅HEAD原键；冻结中的原操作保持不变。 */
 import { ConflictException, ServiceUnavailableException } from "@nestjs/common";
+import { randomUUID } from "node:crypto";
 import type { FileUploadCleanupSummary } from "@rental-os/platform-contracts/files";
 import { fileStorageLocationHash, frozenFileContentHash } from "@rental-os/platform-contracts/file-content-binding";
 import { requestFingerprint } from "@rental-os/platform-contracts/request-fingerprint";
 import type { TenantIntegrationRuntimeConfig } from "../integrations/tenant-integration.service";
+import { safeObjectPrefix } from "../integrations/object-storage.provider.service";
 import type { StoredFileAsset, StoredFileUploadSession } from "./file-storage.store";
 
 type AssetFilter = {
@@ -27,23 +29,28 @@ type SessionFilter = {
   provider?: string;
   fileAssetId?: string;
   cleanupError?: string | null | { not: null };
-  lastCleanupAt?: Date | { lte: Date };
+  cleanupAttempts?: number;
+  failureReason?: string | null;
+  idempotencyKey?: string | null;
+  createdAt?: Date;
+  lastCleanupAt?: Date | null | { lte: Date };
   fileAsset?: { is: { uploadScene?: { not: string } } };
   OR?: SessionFilter[];
 };
 type SessionWrite = {
   status?: string;
-  failureReason?: string;
+  failureReason?: string | null;
   cleanupError?: string | null;
   cleanupAttempts?: { increment: number };
-  lastCleanupAt?: Date;
+  lastCleanupAt?: Date | null;
+  updatedAt?: Date;
 };
 
 export interface FileCleanupTransaction {
   fileAsset: {
     findFirst(query: { where: { id: string; tenantId: string } }): PromiseLike<StoredFileAsset | null>;
     findMany(query: { where: AssetFilter & { tenantId: string }; orderBy: { updatedAt: "asc" }; take: number }): PromiseLike<StoredFileAsset[]>;
-    updateMany(query: { where: AssetFilter & { tenantId: string }; data: { status: string } }): PromiseLike<{ count: number }>;
+    updateMany(query: { where: AssetFilter & { tenantId: string }; data: { status: string; updatedAt?: Date } }): PromiseLike<{ count: number }>;
   };
   fileUploadSession: {
     findMany(query: { where: SessionFilter & { tenantId: string }; orderBy: { expiresAt: "asc" } | Array<{ expiresAt?: "asc"; id?: "asc" }>;
@@ -71,6 +78,22 @@ export interface FileCleanupParticipants<Transaction extends FileCleanupTransact
 export const COMPLETED_STAGING_PENDING = "completed_staging_pending";
 export const COMPLETED_STAGING_UNKNOWN = "completed_staging_unknown";
 type JsonRecord = Record<string, unknown>;
+type ExpiredUpload = { asset: StoredFileAsset; session: StoredFileUploadSession };
+const expiredUnknown = "expired_upload_unknown:1:";
+const changedUpload = () => new ConflictException("原过期上传清理依据已变化，只能核对原会话");
+const uploadConfigHash = (config: TenantIntegrationRuntimeConfig) => requestFingerprint({
+  id: config.id, provider: config.provider, settings: config.settings, credentials: config.credentials
+});
+// The original 500-character receipt field stores only a nonce and digest.
+// Bind the complete versions, not provider errors, credentials or signed URLs.
+// Serialize Dates before the original JSON-key normalizer, which otherwise
+// treats Date objects as empty records and would lose version/expiry evidence.
+const cleanupSnapshotHash = (value: unknown) => requestFingerprint(JSON.parse(JSON.stringify(value)));
+const expiredReceiptHash = ({ asset, session }: ExpiredUpload, configHash: string) =>
+  cleanupSnapshotHash({ asset, session: { ...session, cleanupError: null }, configHash });
+const expiredReceipt = (snapshot: ExpiredUpload, configHash: string) =>
+  `${expiredUnknown}${randomUUID()}:${expiredReceiptHash(snapshot, configHash)}`;
+const nextVersion = (version: Date, at: Date) => new Date(Math.max(version.getTime() + 1, at.getTime()));
 
 
 export class FileStorageCleanup<Transaction extends FileCleanupTransaction> {
@@ -82,6 +105,51 @@ export class FileStorageCleanup<Transaction extends FileCleanupTransaction> {
 
   private isReservedScene(scene: string | undefined) {
     return Boolean(this.participants.excludedUploadScene && scene === this.participants.excludedUploadScene);
+  }
+
+  /** Session -> asset matches the original freeze/completion lock order.
+   * Each CAS advances both versions, including same-millisecond attempts, so
+   * ownership never depends on MySQL's affected-row count for a no-op update.
+   * A mismatch rolls both writes back through the host's original transaction. */
+  private async replaceExpiredUpload(tx: Transaction, before: ExpiredUpload, after: ExpiredUpload) {
+    const session = before.session, asset = before.asset;
+    const claimed = await tx.fileUploadSession.updateMany({ where: { ...session }, data: {
+      status: after.session.status, failureReason: after.session.failureReason, cleanupError: after.session.cleanupError,
+      cleanupAttempts: { increment: after.session.cleanupAttempts - session.cleanupAttempts },
+      lastCleanupAt: after.session.lastCleanupAt, updatedAt: after.session.updatedAt
+    } });
+    if (claimed.count !== 1) throw changedUpload();
+    const locked = await tx.fileAsset.updateMany({ where: { id: asset.id, tenantId: asset.tenantId, status: asset.status,
+      updatedAt: asset.updatedAt, storageKey: asset.storageKey, storageProvider: asset.storageProvider, uploadScene: asset.uploadScene },
+      data: { status: after.asset.status, updatedAt: after.asset.updatedAt } });
+    if (locked.count !== 1) throw changedUpload();
+    const currentAsset = await tx.fileAsset.findFirst({ where: { id: asset.id, tenantId: asset.tenantId } });
+    const currentSessions = await tx.fileUploadSession.findMany({ where: { id: session.id, tenantId: session.tenantId },
+      orderBy: { expiresAt: "asc" }, take: 2 });
+    if (currentSessions.length !== 1 || cleanupSnapshotHash(currentAsset) !== cleanupSnapshotHash(after.asset)
+      || cleanupSnapshotHash(currentSessions[0]) !== cleanupSnapshotHash(after.session)) throw changedUpload();
+  }
+
+  private async expiredUploadConfig(snapshot: ExpiredUpload) {
+    const { asset, session } = snapshot;
+    if (session.tenantId !== asset.tenantId || session.fileAssetId !== asset.id || session.provider !== asset.storageProvider
+      || session.storageKey !== asset.storageKey || session.completedAt !== null
+      || !["pending_upload", "failed"].includes(asset.status) || this.isReservedScene(asset.uploadScene)) throw changedUpload();
+    if (session.provider === "local_mock") return;
+    const config = structuredClone(await this.participants.runtimeConfig(session.tenantId, session.provider));
+    const metadata = asset.metadata as JsonRecord | null;
+    // Old rows without their original configuration cannot identify a safe
+    // destination. They remain pending; cleanup never certifies new metadata.
+    if (!config || config.provider !== session.provider || !metadata
+      || metadata.storageLocationHash !== fileStorageLocationHash(config)
+      || metadata.uploadConfigHash !== uploadConfigHash(config)
+      || metadata.fileContentVersion !== undefined || metadata.stagingStorageKey !== undefined) throw changedUpload();
+    const prefix = safeObjectPrefix(config.settings.objectPrefix ?? "tenant-files");
+    const suffix = metadata.fileUploadVersion === 2 ? "blob"
+      : asset.fileName.trim().replace(/[^a-zA-Z0-9._-]/gu, "_").slice(0, 180) || "file";
+    if (metadata.fileUploadVersion !== undefined && metadata.fileUploadVersion !== 2
+      || session.storageKey !== `${prefix ? `${prefix}/` : ""}${asset.tenantId}/${asset.id}/${suffix}`) throw changedUpload();
+    return config;
   }
 
   async cleanupCompletedStagingObjects(tenantId: string, limit: number): Promise<FileUploadCleanupSummary> {
@@ -143,7 +211,7 @@ export class FileStorageCleanup<Transaction extends FileCleanupTransaction> {
     if (!tenantId) throw new ConflictException("文件清理缺少当前租户");
     const now = new Date();
     const staleCleanupBefore = new Date(now.getTime() - 10 * 60 * 1000);
-    const rows = await this.participants.store.fileUploadSession.findMany({
+    const rows = structuredClone(await this.participants.store.fileUploadSession.findMany({
       where: {
         tenantId,
         expiresAt: { lte: now },
@@ -156,57 +224,68 @@ export class FileStorageCleanup<Transaction extends FileCleanupTransaction> {
       },
       orderBy: { expiresAt: "asc" },
       take: Math.max(1, Math.min(limit, 100))
-    });
+    }));
     let invalidated = 0;
     let deletedObjects = 0;
     let cleanupPending = 0;
     const sessionIds: string[] = [];
     for (const row of rows) {
-      const source = await this.participants.store.fileAsset.findFirst({ where: { id: row.fileAssetId, tenantId } });
-      if (this.isReservedScene(source?.uploadScene)) continue;
-      const claimed = await this.participants.store.fileUploadSession.updateMany({
-        where: {
-          id: row.id,
-          tenantId,
-          fileAsset: { is: { ...this.reservedSceneFilter() } },
-          OR: [
-            { status: "pending_upload" },
-            { status: "failed", cleanupError: { not: null } },
-            { status: "cleanup_in_progress", lastCleanupAt: { lte: staleCleanupBefore } }
-          ]
-        },
-        data: { status: "cleanup_in_progress", cleanupAttempts: { increment: 1 }, lastCleanupAt: now }
-      });
-      if (claimed.count !== 1) continue;
-      sessionIds.push(row.id);
-      let cleanupError: string | undefined;
-      let deleted = row.provider === "local_mock";
       try {
-        if (!deleted) {
-          const config = await this.participants.runtimeConfig(tenantId, row.provider);
-          if (!config) throw new ServiceUnavailableException("文件平台已停用，无法清理过期对象");
-          const asset = await this.participants.store.fileAsset.findFirst({ where: { id: row.fileAssetId, tenantId } });
-          const metadata = asset?.metadata as JsonRecord | null;
-          const staged = metadata?.fileUploadVersion === 2;
-          if (staged && metadata.storageLocationHash !== fileStorageLocationHash(config)) throw new ConflictException("原上传存储位置已变化，不能清理其他位置的对象");
-          deleted = await this.participants.deleteObject(config, staged ? `${row.storageKey}.pending-upload` : row.storageKey, now);
-          if (!deleted) throw new ServiceUnavailableException("对象存储未确认删除过期对象");
-        }
-      } catch (error) {
-        cleanupError = (error instanceof Error ? error.message : String(error)).slice(0, 500);
+        const asset = structuredClone(await this.participants.store.fileAsset.findFirst({ where: { id: row.fileAssetId, tenantId } }));
+        if (this.isReservedScene(asset?.uploadScene)) continue;
+        if (!asset || row.tenantId !== tenantId || row.expiresAt > now || !Number.isSafeInteger(row.cleanupAttempts)
+          || row.cleanupAttempts < 0 || row.cleanupAttempts >= 2147483647) throw changedUpload();
+        const before: ExpiredUpload = { asset, session: row }, config = await this.expiredUploadConfig(before);
+        const configHash = config ? cleanupSnapshotHash(config) : "local_mock";
+        if (row.cleanupError?.startsWith(expiredUnknown)
+          && (!/^expired_upload_unknown:1:[a-f0-9-]{36}:[a-f0-9]{64}$/u.test(row.cleanupError)
+            || row.cleanupError.slice(-64) !== expiredReceiptHash(before, configHash))) throw changedUpload();
+        // Only a pristine pending row authorizes one DELETE. Every prior
+        // attempt, including legacy arbitrary errors and expired claims, is
+        // unknown. Neither a TTL nor HEAD 200 can authorize another DELETE.
+        const ownsDispatch = row.status === "pending_upload" && row.cleanupError === null
+          && row.cleanupAttempts === 0 && row.lastCleanupAt === null;
+        let claim: ExpiredUpload = { asset: { ...asset, updatedAt: nextVersion(asset.updatedAt, now) },
+          session: { ...row, status: "cleanup_in_progress", cleanupAttempts: row.cleanupAttempts + 1,
+            lastCleanupAt: now, updatedAt: nextVersion(row.updatedAt, now) } };
+        claim.session.cleanupError = expiredReceipt(claim, configHash);
+        await this.participants.transaction(tx => this.replaceExpiredUpload(tx, before, claim));
+        sessionIds.push(row.id);
+        let deleted = row.provider === "local_mock";
+        try {
+          if (config) {
+            const currentConfig = await this.expiredUploadConfig(claim);
+            if (!currentConfig || cleanupSnapshotHash(currentConfig) !== configHash) throw changedUpload();
+            const checkedAt = new Date(), checked: ExpiredUpload = {
+              asset: { ...claim.asset, updatedAt: nextVersion(claim.asset.updatedAt, checkedAt) },
+              session: { ...claim.session, updatedAt: nextVersion(claim.session.updatedAt, checkedAt) }
+            };
+            checked.session.cleanupError = expiredReceipt(checked, configHash);
+            await this.participants.transaction(tx => this.replaceExpiredUpload(tx, claim, checked));
+            claim = checked;
+            const key = (asset.metadata as JsonRecord | null)?.fileUploadVersion === 2 ? `${row.storageKey}.pending-upload` : row.storageKey;
+            if (ownsDispatch) deleted = await this.participants.deleteObject(config, key, now);
+            else {
+              const signed = this.participants.presign(config, "HEAD", key, asset.mimeType, new Date(Date.now() + 60_000));
+              const response = await this.participants.objectRequest(signed.url, { method: "HEAD", headers: signed.headers });
+              deleted = response.status === 404;
+            }
+          }
+        } catch { /* The original claim remains unknown; never persist a provider error. */ }
+        const at = new Date();
+        const result: ExpiredUpload = { asset: { ...claim.asset, status: "failed", updatedAt: nextVersion(claim.asset.updatedAt, at) },
+          session: { ...claim.session, status: "failed", failureReason: "上传会话已过期",
+            updatedAt: nextVersion(claim.session.updatedAt, at), cleanupError: null } };
+        if (!deleted) result.session.cleanupError = expiredReceipt(result, configHash);
+        await this.participants.transaction(tx => this.replaceExpiredUpload(tx, claim, result));
+        invalidated += 1;
+        if (deleted) deletedObjects += 1;
+        else cleanupPending += 1;
+      } catch {
+        // A lost COMMIT acknowledgement never grants dispatch or a new receipt.
+        // Snapshot conflicts leave the other writer's session and asset intact.
+        cleanupPending += 1;
       }
-      await this.participants.transaction(async tx => {
-        await tx.fileUploadSession.update({
-          where: { id: row.id },
-          data: { status: "failed", failureReason: "上传会话已过期", cleanupError: cleanupError ?? null }
-        });
-        await tx.fileAsset.updateMany({
-          where: { id: row.fileAssetId, tenantId, status: "pending_upload" }, data: { status: "failed" }
-        });
-      });
-      invalidated += 1;
-      if (deleted) deletedObjects += 1;
-      else cleanupPending += 1;
     }
     const completed = await this.cleanupCompletedStagingObjects(tenantId, limit);
     deletedObjects += completed.deletedObjects;

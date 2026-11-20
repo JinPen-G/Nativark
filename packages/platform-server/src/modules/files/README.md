@@ -65,7 +65,9 @@ await files.downloadUrl(tenantId, fileAssetId, owner);
 
 `readOriginalFileUploadReceipt` 保留原会话、文件、配置指纹和有效期。仅仍有效的 `pending_upload` 可以取得原暂存键的 PUT，返回前再核原业务引用、原会话、原文件及当前配置。已完成、过期、失败或 `freeze_pending` 返回原回执，续签不会延长有效期或另建目标。租户共享客户资料与空间业务的区别由 Rental 原参加者判断，公共框架没有 Rental 场景枚举。
 
-`FileStorageCleanup` 没有计时器或租户发现。原 Nest 宿主仍持有唯一计时器，Rental 兼容应用发现原租户集合并逐租户委托三个清理方法。[兼容应用](../../../../rental-core/src/file-application-runtime.ts)没有启动钩子或另一套定时器。原完成暂存清理在发送 DELETE 前记录 unknown，失应答及提交结果未知时只 HEAD 原键，保持完成文件与证据不变。原过期 session→asset 两写以同一 callback 事务按原顺序提交或回滚，事务内不请求对象存储。专用保留场景由原宿主明确传入，缺少租户的调用在查询前拒绝。
+`FileStorageCleanup` 没有计时器或租户发现。原 Nest 宿主仍持有唯一计时器，Rental 兼容应用发现原租户集合并逐租户委托三个清理方法。[兼容应用](../../../../rental-core/src/file-application-runtime.ts)没有启动钩子或另一套定时器。原完成暂存清理在发送 DELETE 前记录 unknown，失应答及提交结果未知时只 HEAD 原键，保持完成文件与证据不变。专用保留场景由原宿主明确传入，缺少租户的调用在查询前拒绝。
+
+过期未完成上传只有原 `pending_upload`、零次清理且首次占用提交已确认的调用方发送一次 DELETE。session→asset 按原锁序在同一事务内核完整版本、配置和原对象键；冲突一起回滚，事务内不请求对象存储。占用、删除或结果提交失应答，以及 TTL 后恢复或旧失败记录，均只 HEAD 原键，404 才确认删除。未知收据只保存随机标识与证据摘要，供应商错误、凭据和签名地址不落入该字段。
 
 待删除业务文件先在短事务中按原状态、修订、提供者、对象键和场景占用；只有收到本次 `delete_pending → delete_in_progress` 提交确认的调用方发送一次 DELETE。并发调用、重启和失应答后只 HEAD 原键，404 才能确认删除。结果写入仍匹配原占用修订，迟到响应不能改写新的文件事实。明确在派发前缺配置时可释放自己的占用；DELETE 开始后，Boolean 失败或异常都保留原结果待核对。
 
