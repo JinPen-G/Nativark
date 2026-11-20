@@ -14,7 +14,7 @@ import { RepositorySource, UNRESOLVED, isRepositorySourcePath, nodeDocumentation
   repositoryFiles, repositoryPath, sourceReference } from "./repository-source";
 
 interface PublicEntry { owner: string; version: string; module: string; file: string; visibility: "public" | "host"; ui?: boolean }
-interface PackageInfo { directory: string; name: string; version: string; entries: PublicEntry[] }
+interface PackageInfo { directory: string; name: string; version: string; entries: PublicEntry[]; dependencies: Record<string, string> }
 
 function exportTargets(value: unknown): string[] {
   if (typeof value === "string") return [value];
@@ -80,6 +80,91 @@ function headerDescription(root: string, file: string): string | undefined {
   return comment?.[1].split("\n").map(line => line.replace(/^\s*\*\s?/u, "").trim()).filter(Boolean).join("\n");
 }
 
+/** 只记录可定位到具体导出的静态导入，namespace 不按整个模块展开使用量。 */
+function importConsumers(source: RepositorySource, paths: Record<string, string[]>) {
+  const consumers = new Map<ts.Symbol, Map<ts.Node, DevelopmentSourceReference>>();
+  const namespaces = new Map<ts.Symbol, { exports: Map<string, ts.Symbol>; reference: ts.Node }>();
+  const members: Array<ts.PropertyAccessExpression | ts.ElementAccessExpression> = [];
+  const add = (symbol: ts.Symbol | undefined, reference: ts.Node) => {
+    if (!symbol) return;
+    const target = source.target(symbol);
+    if (!target.declarations?.length) return;
+    const references = consumers.get(target) ?? new Map<ts.Node, DevelopmentSourceReference>();
+    references.set(reference, sourceReference(reference, source.root));
+    consumers.set(target, references);
+  };
+  const moduleExports = (literal: ts.StringLiteralLike) => {
+    let symbol = source.checker.getSymbolAtLocation(literal);
+    if (!symbol) {
+      // TS 源码中的无类型 require 仍可沿正式路径定位，不能因此执行模块。
+      const candidates = paths[literal.text] ?? (literal.text.startsWith(".")
+        ? [resolve(dirname(literal.getSourceFile().fileName), literal.text)] : []);
+      for (const candidate of candidates) {
+        const file = [candidate, candidate + ".ts", candidate + ".tsx", candidate + ".js", join(candidate, "index.ts")]
+          .map(path => source.program.getSourceFile(path)).find(Boolean);
+        if (file) { symbol = source.checker.getSymbolAtLocation(file); break; }
+      }
+    }
+    return new Map(symbol ? source.checker.getExportsOfModule(source.target(symbol)).map(item => [item.name, item]) : []);
+  };
+  const importedModule = (expression: ts.Expression): ts.CallExpression | undefined => {
+    const value = unwrap(ts.isAwaitExpression(unwrap(expression)) ? (unwrap(expression) as ts.AwaitExpression).expression : expression);
+    if (!ts.isCallExpression(value) || value.arguments.length !== 1 || !ts.isStringLiteralLike(value.arguments[0])) return;
+    if (value.expression.kind === ts.SyntaxKind.ImportKeyword) return value;
+    if (ts.isIdentifier(value.expression) && value.expression.text === "require"
+      && !source.checker.getSymbolAtLocation(value.expression)?.declarations?.length) return value;
+  };
+  const bind = (name: ts.BindingName, exports: Map<string, ts.Symbol>, reference: ts.Node) => {
+    if (ts.isIdentifier(name)) {
+      const symbol = source.checker.getSymbolAtLocation(name);
+      if (symbol) namespaces.set(symbol, { exports, reference });
+    } else if (ts.isObjectBindingPattern(name)) {
+      for (const element of name.elements) {
+        const property = element.propertyName ?? element.name;
+        if (!element.dotDotDotToken && (ts.isIdentifier(property) || ts.isStringLiteralLike(property)))
+          add(exports.get(property.text), element);
+      }
+    }
+  };
+  for (const file of source.program.getSourceFiles()) {
+    if (file.isDeclarationFile || repositoryPath(source.root, file.fileName).includes("/vendor/")) continue;
+    const visit = (node: ts.Node) => {
+      if (ts.isImportDeclaration(node) && node.importClause && ts.isStringLiteralLike(node.moduleSpecifier)) {
+        const clause = node.importClause;
+        if (clause.name) add(source.checker.getSymbolAtLocation(clause.name), clause.name);
+        const bindings = clause.namedBindings;
+        if (bindings && ts.isNamedImports(bindings))
+          bindings.elements.forEach(binding => add(source.checker.getSymbolAtLocation(binding.name), binding));
+        else if (bindings) bind(bindings.name, moduleExports(node.moduleSpecifier), bindings);
+      } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)
+        && node.moduleReference.expression && ts.isStringLiteralLike(node.moduleReference.expression)) {
+        bind(node.name, moduleExports(node.moduleReference.expression), node);
+      } else if (ts.isVariableDeclaration(node) && node.initializer) {
+        const imported = importedModule(node.initializer);
+        if (imported) bind(node.name, moduleExports(imported.arguments[0] as ts.StringLiteralLike), imported);
+      } else if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "then") {
+        const imported = importedModule(node.expression.expression), callback = node.arguments[0];
+        if (imported && callback && (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback)) && callback.parameters[0])
+          bind(callback.parameters[0].name, moduleExports(imported.arguments[0] as ts.StringLiteralLike), imported);
+      }
+      if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) members.push(node);
+      ts.forEachChild(node, visit);
+    };
+    visit(file);
+  }
+  // 导入可出现在使用点后面。收齐绑定再读取成员，每个绑定/导出只计一次。
+  for (const member of members) {
+    const receiver = unwrap(member.expression), symbol = source.checker.getSymbolAtLocation(receiver);
+    const imported = importedModule(receiver);
+    const namespace = symbol && namespaces.get(symbol) || (imported
+      ? { exports: moduleExports(imported.arguments[0] as ts.StringLiteralLike), reference: imported } : undefined);
+    const name = ts.isPropertyAccessExpression(member) ? member.name.text
+      : ts.isStringLiteralLike(member.argumentExpression) ? member.argumentExpression.text : undefined;
+    if (namespace && name) add(namespace.exports.get(name), namespace.reference);
+  }
+  return new Map([...consumers].map(([symbol, references]) => [symbol, [...references.values()]]));
+}
+
 export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCapabilityIndex {
   const root = resolve(directory);
   if (lstatSync(root).isSymbolicLink()) throw new Error("源码根目录须为真实检出目录");
@@ -113,7 +198,14 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
         addIssue("package_metadata", `${packageDirectory}/package.json`, "包缺少名称或版本");
         continue;
       }
-      const info: PackageInfo = { directory: packageDirectory, name: manifest.name, version: manifest.version, entries: [] };
+      const dependencyList = manifest.dependencies && typeof manifest.dependencies === "object"
+        ? manifest.dependencies as Record<string, string> : {};
+      const peerDependencies = manifest.peerDependencies && typeof manifest.peerDependencies === "object"
+        ? manifest.peerDependencies as Record<string, string> : {};
+      const optionalDependencies = manifest.optionalDependencies && typeof manifest.optionalDependencies === "object"
+        ? manifest.optionalDependencies as Record<string, string> : {};
+      const info: PackageInfo = { directory: packageDirectory, name: manifest.name, version: manifest.version, entries: [],
+        dependencies: { ...peerDependencies, ...dependencyList, ...optionalDependencies } };
       const exports = typeof manifest.exports === "string" || Array.isArray(manifest.exports) ? { ".": manifest.exports }
         : manifest.exports && typeof manifest.exports === "object"
           ? Object.keys(manifest.exports).some(key => key.startsWith(".")) ? manifest.exports as Record<string, unknown> : { ".": manifest.exports }
@@ -135,8 +227,6 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
           ui: info.name === "@rental-os/platform-admin" && subpath === "./ui" });
       }
       packages.push(info);
-      const dependencyList = manifest.dependencies && typeof manifest.dependencies === "object"
-        ? manifest.dependencies as Record<string, string> : {};
       capabilities.push({ id: `module:${packageDirectory}`, name: info.name, kind: "module", owner: packageDirectory,
         version: info.version, description: typeof manifest.description === "string" && manifest.description ? manifest.description : undefined,
         sources: [{ path: `${packageDirectory}/package.json` }, ...info.entries.map(item => ({ path: repositoryPath(root, item.file) }))],
@@ -225,23 +315,7 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
     };
     visit(file);
   }
-  const importConsumers = new Map<ts.Symbol, DevelopmentSourceReference[]>();
-  for (const file of source.program.getSourceFiles()) {
-    if (file.isDeclarationFile || repositoryPath(root, file.fileName).includes("/vendor/")) continue;
-    for (const node of file.statements) {
-      if (!ts.isImportDeclaration(node)) continue;
-      const bindings = node.importClause?.namedBindings;
-      if (!bindings || !ts.isNamedImports(bindings)) continue;
-      for (const binding of bindings.elements) {
-        const symbol = source.checker.getSymbolAtLocation(binding.name);
-        if (!symbol) continue;
-        const target = source.target(symbol);
-        const callers = importConsumers.get(target) ?? [];
-        callers.push(sourceReference(binding, root));
-        importConsumers.set(target, callers);
-      }
-    }
-  }
+  const consumersBySymbol = importConsumers(source, paths);
 
   for (const entry of entries) {
     const before = capabilities.length;
@@ -251,13 +325,32 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
       const reexport = symbol.declarations?.find(ts.isExportSpecifier);
       const origin = reexport && ts.isExportDeclaration(reexport.parent.parent) ? reexport.parent.parent.moduleSpecifier : undefined;
       const declaration = resolvedDeclaration ?? reexport;
-      if (!resolvedDeclaration) addIssue("export_symbol", repositoryPath(root, entry.file), `未解析导出 ${symbol.name} 的本仓声明`);
+      const moduleName = origin && ts.isStringLiteralLike(origin) ? origin.text : undefined;
+      const candidates = moduleName?.endsWith(".css") ? moduleName.startsWith(".")
+        ? [resolve(dirname(origin!.getSourceFile().fileName), moduleName)]
+        : Object.entries(paths).flatMap(([pattern, targets]) => {
+          const [prefix, suffix] = pattern.split("*");
+          if (suffix === undefined) return pattern === moduleName ? targets : [];
+          if (!moduleName.startsWith(prefix) || !moduleName.endsWith(suffix)) return [];
+          const matched = moduleName.slice(prefix.length, moduleName.length - suffix.length);
+          return targets.map(target => target.replace("*", matched));
+        }) : [];
+      const asset = candidates.find(file => isRepositorySourcePath(root, file) && lstatSync(file, { throwIfNoEntry: false })?.isFile());
+      const declaringPackage = declaration && packages.find(info => repositoryPath(root, declaration.getSourceFile().fileName).startsWith(info.directory + "/"));
+      const dependencyName = moduleName?.startsWith("@") ? moduleName.split("/").slice(0, 2).join("/") : moduleName?.split("/")[0];
+      const externalDependency = dependencyName && declaringPackage?.dependencies[dependencyName]
+        && !packages.some(info => info.name === dependencyName) ? {
+          name: dependencyName, versionRange: declaringPackage.dependencies[dependencyName],
+          source: { path: `${declaringPackage.directory}/package.json` }
+        } : undefined;
+      if (!resolvedDeclaration && !asset && !externalDependency)
+        addIssue("export_symbol", repositoryPath(root, entry.file), `未解析导出 ${symbol.name} 的本仓声明`);
       if (!declaration || !isRepositorySourcePath(root, declaration.getSourceFile().fileName)) {
         continue;
       }
       const documentation = ts.displayPartsToString(target.getDocumentationComment(source.checker)).trim();
-      const callers = importConsumers.get(target) ?? [];
-      const sourceDoc = sourceDocuments(root, repositoryPath(root, dirname(declaration.getSourceFile().fileName)));
+      const callers = consumersBySymbol.get(target) ?? [];
+      const sourceDoc = sourceDocuments(root, repositoryPath(root, dirname(asset ?? declaration.getSourceFile().fileName)));
       const documents = sourceDocuments(root, entry.owner);
       if (entry.owner === "apps/admin") {
         if (entry.visibility === "public") documents.push({ path: "apps/admin/src/core/README.md" });
@@ -265,14 +358,18 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
       }
       capabilities.push({ id: `export:${entry.module}:${symbol.name}`, name: symbol.name, kind: entry.ui ? "ui" : "export",
         owner: entry.owner, version: entry.version, description: documentation || undefined,
-        sources: [{ ...sourceReference(declaration, root), symbol: resolvedDeclaration ? target.name : symbol.name }],
+        sources: [...(asset ? [{ path: repositoryPath(root, asset) }] : []),
+          { ...sourceReference(declaration, root), symbol: resolvedDeclaration ? target.name : symbol.name },
+          ...(externalDependency && !resolvedDeclaration ? [externalDependency.source] : [])],
         documentation: [...documents, ...sourceDoc.filter(doc => !documents.some(item => item.path === doc.path))],
         entry: { kind: "import", module: entry.module, symbol: symbol.name,
           typeOnly: reexport?.isTypeOnly || Boolean(reexport && ts.isExportDeclaration(reexport.parent.parent) && reexport.parent.parent.isTypeOnly)
             || Boolean(resolvedDeclaration && !(target.flags & ts.SymbolFlags.Value)), visibility: entry.visibility },
         details: { directImportCount: resolvedDeclaration ? callers.length : 0, directImports: resolvedDeclaration ? callers.slice(0, 5) : [],
-          declarationStatus: resolvedDeclaration ? "resolved-source" : "unresolved",
-          ...(origin && ts.isStringLiteralLike(origin) ? { reexport: { module: origin.text, symbol: reexport?.propertyName?.text ?? reexport?.name.text ?? symbol.name } } : {}) } });
+          directImportsStatus: resolvedDeclaration ? "resolved-source" : "not-indexed",
+          declarationStatus: resolvedDeclaration ? "resolved-source" : asset ? "source-asset" : externalDependency ? "external-dependency" : "unresolved",
+          ...(moduleName ? { reexport: { module: moduleName, symbol: reexport?.propertyName?.text ?? reexport?.name.text ?? symbol.name,
+            ...(externalDependency && !resolvedDeclaration ? { dependency: externalDependency } : {}) } } : {}) } });
     }
     const file = repositoryPath(root, entry.file);
     coverage.push({ source: file, count: capabilities.length - before, state: issues.some(issue => issue.path === file) ? "partial" : "indexed" });
