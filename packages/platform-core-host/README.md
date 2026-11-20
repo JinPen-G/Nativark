@@ -10,6 +10,7 @@
 | 部署权限登记 | [登记函数](src/platform-core-permissions.ts)只消费所选Core清单及窄Permission事务；登记业务角色可选择的精确权限，保留原ID/关联，冲突先拒绝 |
 | 当前读取 | [目录](src/platform-core-session.ts)、[范围](src/platform-core-scope.ts)、[管理事实](src/platform-core-management-reads.ts)；当前角色和修订在返回前复验 |
 | HTTP和资料 | [准入与OpenAPI组合](src/platform-core-http.ts)、[业务粗准入](src/platform-core-http-access.ts)、[Controller](src/core-management.controller.ts)；政策/字段沿唯一合同，具体对象和提交点仍由所属Core核验 |
+| Core包管理 | [公共装配](src/core-package-assembly.ts)、[提交意图审计](src/core-package-audit.ts)、[接口资料](src/core-packages/openapi.ts)供给发现、固定发行、包预检、候选及原结果读取 |
 | 移除与审计 | [移除预检](src/platform-core-removal.ts)、[审计](src/platform-core-audit.ts)；缺平台依赖读取拒绝移除，原收据的引用同事务保存 |
 | MySQL结构观察 | [不可变SQL预期](src/mysql-structure.ts)、[实际物理读取](src/mysql-physical.ts)；核表/列/默认值/键/CHECK/外键，缺数据保持不可用 |
 | 直接消费者 | [公共宿主](../../apps/platform-api/src/core-assembly.ts)、[原组合兼容适配](../../apps/api/src/modules/core-host/README.md) |
@@ -47,5 +48,21 @@ const access = createPlatformCoreHttpAccess(application);
 所选Core在自己的迁移中给公共表追加外键时，宿主通过 `mysqlForeignKeyExtension(statement)` 解析固定SQL，再把结果交给 `createPublicPlatformDataPlan(extensions)`。`extendMysqlPublicForeignKeys` 返回新的预期，不修改公共基线；只接受已存在的公共列和唯一的约束名称。物理观察继续核对目标表/列、删除和更新规则，缺少约束或出现未声明约束均不就绪。Prisma关系源码沿[公共组合入口](../core-contracts/README.md#组合-prisma-源码)追加。
 
 `createPlatformCoreOpenApi` 先组合标准平台管理 / 目录 / 范围资料，再调用原Core贡献检查；业务路径/schema保留各Core命名空间，缺引用或冲突拒绝。公共宿主通过同一 `/api/openapi.json` 返回组合资料；原Rental文档与客户端路径继续由其兼容装配维护。
+
+## Core 包管理接入
+
+`composePlatformCorePackageAssembly` 共用当前 Core 应用的 `database`、`users` 和 `catalogue`，由 `CorePackageAssemblyModule.register` 在同一 Nest 容器供给四组 Controller。通过 `createPlatformCorePackageAssemblyHttpAccess(packages, coreHttp)` 合并原 Core 准入，再交给唯一 `coreHttpProvider`。当前主体经过原签名 Guard 和应用事务复验，重复或未登记路径拒绝。[完整读取路线](src/core-packages/README.md)
+
+宿主使用 `createPlatformCorePackageAudit<HostTransaction>()` 写入原 `operationLog` 事务。发行与候选发布前记录 `requested` 提交意图并复验当前主体，文件发布后的提交失应答或撤权沿原引用 / SHA 返回 `unknown`。发行引用与候选分别保存到 `storageDirectory/releases` 和 `storageDirectory/candidates`。根目录使用宿主配置的绝对路径，部署方须预先准备普通目录与服务账户访问权。[发行存储](src/core-package-selection/README.md) · [候选准备](src/core-package-preparation/README.md)
+
+`localArtifacts` 供给已下载的固定包，`deployment` 供给实际活动组合、使用包和原迁移账，`materials` 供给该组合的完整原包与迁移。未供给的来源保留 `unavailable`。旧 API 兼容许可通过 `legacyApiRoutes` 从宿主可信策略按 Core ID 供给精确的 `METHOD /api/path` 集合，同一集合用于下载检查、预检、迁移组合和候选写入。请求与包清单的额外许可字段沿原严格 schema 拒绝。[预检端口](src/core-package-preflight/README.md)
+
+配置 `storageDirectory` 时，本地包默认从 `archives/index.json` 的正式登记读取，归档位于同一普通目录。部署人员准备 `.tgz`、原完整发行投影和唯一引用，后台通过“使用已下载包”进入原校验链。首次成功读取固定本进程登记，原文件路径和字节每次复核；宿主显式提供 `localArtifacts` 时消费该来源。[登记与读取](src/core-package-preflight/README.md)
+
+`createPublicCorePackageDeploymentSources` 为零 Core 标准底座读取启动锁及本地底座引用。宿主从当前运行入口固定底座根和六个服务端模块目录，读取器核当前 Node / 已加载合同版本，复用原发行检查及 `readPackageArtifacts` 核完整标准包，再核数据计划与锁定合同。版本读取委托原 `createMysqlCoreDeploymentObservation`，候选材料供给同一原迁移字节。缺证据、目录/源码差异及原账失败保留不可用，启动锁固定到本次进程。[源码](src/core-package-deployment.ts) · [默认宿主配置](../../apps/platform-api/README.md)
+
+装配四组模块后，调用 `createPlatformCorePackageOpenApi(createPlatformCoreOpenApi(createPlatformOpenApi()))` 组合实际接口资料，路径或 schema 冲突立即拒绝。浏览器从正式协议子出口读取路径常量，五个 Web 宿主在 dev、build 和 lint 前构建本包，准备同版本运行时出口。[公共 API 装配](../../apps/platform-api/src/app.module.ts) · [页面接入](../platform-admin/src/features/core-packages/README.md)
+
+纯 MySQL 数据计划从 `@rental-os/platform-core-host/mysql-structure` 与 `@rental-os/platform-core-host/mysql-physical` 消费结构解析和物理读取，两个窄出口直接对应原实现，类型与运行时出口保持同版本。[结构解析](src/mysql-structure.ts) · [物理读取](src/mysql-physical.ts)
 
 本包已有类型、实际Nest容器、明确离线SQL下的授权/成员/绑定/收据与停用恢复证据。真实数据库、选中Core业务HTTP/页面、安装升级和完整独立接手尚未验收。

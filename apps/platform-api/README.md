@@ -7,6 +7,8 @@
 | [启动](src/main.ts) | 消费进程 `DATABASE_URL`、`AUTH_TOKEN_SECRET`、可选 `API_PORT`；不自动加载环境文件 |
 | [装配](src/app.module.ts) | 默认空 Core，只选择公共服务和唯一公共数据库 |
 | [Core装配](src/core-assembly.ts) | 同一实际工厂供给标准Core管理、本人目录、范围和Guard；默认零Core，未知业务拒绝 |
+| [Core包管理装配](../../packages/platform-core-host/src/core-package-assembly.ts) | 共用公共数据库和当前账号，实际审计与宿主文件配置供给四组 Controller，原部署及包材料按实际来源提供 |
+| [当前底座发行读取](../../packages/platform-core-host/src/core-package-deployment.ts) | 固定启动锁，核对当前模块目录和标准包全部字节，沿原 MySQL 观察供给版本及候选材料 |
 | [数据计划](src/platform-data.ts) | 固定迁移摘要、唯一数据版本、实际物理结构读取；清单和真实已应用账分别核验 |
 | [初始化](src/initialize.ts) | 显式命令创建公共SaaS账号，口令来自进程；重复执行不重置已有账号，失败不补默认账号 |
 | [数据库](src/database.ts) | 由本宿主 schema 生成的单一 Client；导入不连接，实际请求按 Prisma 建立连接 |
@@ -48,11 +50,28 @@ SaaS管理员通过 `POST /api/platform/tenants` 创建公共租户与首个管�
 
 标准Core管理位于 `/api/platform/core-host`，当前组合已登记管理、本人Core目录和范围HTTP，默认本人目录为空。真正选中Core时提供固定服务、业务HTTP、真实订阅和数据观察；SaaS授权、成员分配与绑定分别成立。[标准宿主用法](../../packages/platform-core-host/README.md)
 
+Core 包管理位于 `/api/platform/core-packages`，包含目录、发现、仓库、包检查、安装 / 更新预检、固定发行预览 / 保存 / 回读，以及候选预览 / 准备 / 回读十二个接口。四组 Controller 使用同一公共主体和数据库，原 Guard 的唯一 Core HTTP provider 合并标准管理与包管理政策。访问要求当前 SaaS 管理身份及 `system:tenant:manage` 或 `*`，保存与准备在原事务写入提交意图审计。[接口及状态](../../packages/platform-core-host/src/core-packages/README.md)
+
+发行引用与候选存储读取进程配置 `CORE_PACKAGE_STORAGE_ROOT`。部署方指定绝对根，并预先建立 `releases`、`candidates` 普通子目录及服务账户访问权。留空时相应存储返回 `unavailable`，目录与父路径由原文件存储核查。准备结果保持 `pending`，发布后结果不明沿原引用或 SHA 读取原记录。[实际配置供给](src/core-assembly.ts) · [存储边界](../../packages/platform-core-host/src/core-package-preparation/README.md)
+
+本地已下载包放入同一根下的 `archives` 普通目录，部署人员按 `CorePackageArchiveIndexSchema` 在 `archives/index.json` 登记固定引用、相对 `.tgz` 文件及完整发行投影。后台的“使用已下载包”发送该引用，服务端沿原包校验读取全部字节。索引首次成功读取后固定到本进程，登记更新通过重启装配采用，读取失败可重试。[登记格式及边界](../../packages/platform-core-host/src/core-package-preflight/README.md)
+
+零 Core 标准底座部署可配置下列进程字段，供给当前版本观察与候选材料。运行目录由本宿主及已加载公共模块的实际路径固定，完整源码须与登记的标准底座包逐文件核同。[当前发行读取](../../packages/platform-core-host/src/core-package-deployment.ts)
+
+| 配置 | 来源与用途 |
+| --- | --- |
+| `CORE_DEPLOYMENT_LOCK_FILE` | 本次运行组合的绝对 JSON 锁文件路径，启动时固定完整底座发行，Core 及所选数据能力集合为空 |
+| `CORE_PLATFORM_PACKAGE_REFERENCE` | `archives/index.json` 中当前底座标准包的固定引用，完整发行须与启动锁一致 |
+
+读取时复核启动锁、当前 Node / 已加载合同版本、标准包全部文件、六个公共服务端模块的实际目录和原数据计划，再由原 MySQL 读取器核迁移收据与物理结构。缺配置、缺标准包、运行目录不符、用户源码差异或原数据未就绪时保留 `unavailable`。启动锁更新通过重启装配采用，失败的启动锁读取同样须修复后重启。候选材料只读取已核同的原迁移字节，准备仍为 `pending`。[原数据观察](src/platform-data.ts)
+
+所选 Core 宿主从实际使用包与原账提供自己的 `deployment`、`materials`，也可显式提供 `localArtifacts`。旧路由许可由该宿主可信策略提供精确方法 / 路径，默认空集合沿原 Core 命名空间检查。[公共装配端口](../../packages/platform-core-host/README.md#core-包管理接入)
+
 组合客户端源码使用 `composeCorePrismaSchema(publicSchema, contributions)`，底座生成器与标量定义保持单源。Core迁移对公共表的明确外键通过 `mysqlForeignKeyExtension` 解析，并由 `createPublicPlatformDataPlan(extensions)` 纳入物理观察。默认空数组沿原零Core数据计划；所选关系、包摘要及原迁移账一起核定，不能只增加Prisma关系就判数据库就绪。[数据组合接入](../../packages/core-contracts/README.md#组合-prisma-源码)
 
 Rental 提供自己的 schema、公共关系与实际数据计划，宿主按同一接点选择它；默认公共宿主继续只用公共数据。新组合 Client 和存量混合库的迁移分别准备。[Rental数据三步接入](../../packages/rental-core/prisma/README.md)
 
-运行使用 `npm run start -w @rental-os/platform-api`；调用此命令会监听 API 端口并按请求访问配置的数据库。OpenAPI 从 `/api/openapi.json` 读取公共与Core管理的组合；前述公共离线导出只含公共接口。独立 HTTP、真实持久化及完整公共后台验收尚未完成。公开开发入口为[公共服务](../../packages/platform-server/README.md)、[公共后台](../platform-admin/README.md)和[Core接入手册](../../packages/core-contracts/README.md#五步快速接入)。
+运行使用 `npm run start -w @rental-os/platform-api`；调用此命令会监听 API 端口并按请求访问配置的数据库。OpenAPI 从 `/api/openapi.json` 读取公共、Core 管理及包管理的组合，前述公共离线导出继续使用其公共文档入口。独立 HTTP、真实持久化及完整公共后台验收尚未完成。公开开发入口为[公共服务](../../packages/platform-server/README.md)、[公共后台](../platform-admin/README.md)和[Core接入手册](../../packages/core-contracts/README.md#五步快速接入)。
 
 公共邀请、寄件和客服邮件由 `PlatformServerModule` 自动装配，使用本宿主唯一公共数据库、邮件集成和审计。邀请与客服数据分别沿[邀请迁移](prisma/migrations/20261119000000_public_operator_invitations/migration.sql)和[邮件迁移](prisma/migrations/20261119010000_public_support_email/migration.sql)保持原 SQL。三张表仅引用公共 Tenant，没有 Rental 业务外键。
 

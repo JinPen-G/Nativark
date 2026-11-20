@@ -6,11 +6,12 @@
   "type": "module",
   "description": "公共后台与完整 Rental Core 页面贡献的独立宿主",
   "scripts": {
-    "predev": "npm run build -w @rental-os/core-contracts && npm run build -w @rental-os/platform-contracts",
+    "predev": "npm run build -w @rental-os/platform-core-host",
     "dev": "vite --host 127.0.0.1 --strictPort",
-    "prebuild": "npm run build -w @rental-os/core-contracts && npm run build -w @rental-os/platform-contracts",
+    "prebuild": "npm run build -w @rental-os/platform-core-host",
     "build": "tsc -p tsconfig.json && vite build",
-    "lint": "tsc -p tsconfig.json"
+    "lint": "tsc -p tsconfig.json",
+    "prelint": "npm run build -w @rental-os/platform-core-host"
   },
   "dependencies": {
     "@rental-os/core-contracts": "0.1.0",

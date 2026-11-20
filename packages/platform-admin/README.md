@@ -8,6 +8,7 @@
 | --- | --- |
 | [公共应用工厂](src/application.tsx)、[组合参数](src/application-context.ts) | `/application` 为零Core及工单宿主提供同一登录/设置/受保护路由，宿主只传品牌、唯一会话和已登记页面 |
 | [Core授权目录](src/CoreAccessPage.tsx)、[可见性口径](src/application-access.ts) | SaaS选择真实租户和已登记Core；租户选择真实成员和服务端可分配Core，复用同一授权面板与原操作核对 |
+| [Core包管理](src/features/core-packages/README.md) | `/core-packages` 提供同一 SaaS 页面与请求，发现、版本、固定发行及 pending 候选共用原会话和查询缓存 |
 | [公共订阅](src/features/subscription/README.md) | 六条原路由、版本对比、申请与办理、目录与年费、无金额到期浮窗，复用同一宿主会话和请求 |
 | [公共第三方服务](src/features/integrations/README.md) | 原目录、配置抽屉和测试反馈；零Core与工单宿主共用同一路由、权限、请求及双语文案 |
 | [公共租户/人员/角色](src/features/access/PublicManagementPages.tsx)、[权限编辑器](src/features/access/PermissionMatrix.tsx) | SaaS租户创建/资料/状态与本租户人员角色管理；共用原目录、保存、草稿与权限组件，旧Rental入口转接 |
@@ -38,6 +39,10 @@
 宿主采用服务端返回的新业务范围后，同步调用 `session.invalidateBusinessScope()`。它中止旧请求、递增会话代次、清除同一查询缓存并通知页面，保留公共登录身份和凭据。已有宿主自行供给 `AdminRuntime` 时，在原切换提交点执行等价的取消、代次、缓存及订阅通知；不要创建第二套缓存。[组合参数](src/application-context.ts) · [范围与路由](src/core/CoreRoutes.tsx) · [公共会话](src/runtime/browser-session.ts)
 
 该应用同时登记 `/invite` 和 `/login/:tenantCode`。公开邀请客户端复用会话创建时的公开 API 基址 `session.apiBaseURL`，与认证请求、租户头和刷新凭据隔离；租户编码只用于表单预填。人员邀请默认提交空业务范围，已有 Rental 宿主从 `/messaging` 提供原经营空间插槽；具体业务授权仍由所属 Core 在原事务裁定。寄件和客服目录按当前集成权限进入，邮件配置目标沿正式公共集成路由。
+
+公共应用在 `/platform/core-packages` 登记 Core 包管理页面和菜单，要求已验证的 SaaS 身份及 `system:tenant:manage` 或 `*`。原后台通过 `/core-packages` 消费同一页面，并传入原品牌解析结果。公共语言 Provider 合并同源包管理词条，页面继续使用宿主唯一 AdminRuntime 和 QueryClient。[页面与操作状态](src/features/core-packages/README.md)
+
+浏览器路径常量及投影类型来自 `platform-core-host` 的三个正式协议子出口。公共、Rental、工单、双 Core 和原 Web 宿主均在 dev、build、lint 前构建 `@rental-os/platform-core-host`，随后按原入口运行。实际 API 对应公共包管理装配，缺实际部署证据或原包材料显示 `unavailable`。[公共 API 接入](../../apps/platform-api/README.md)
 
 已有完整宿主可按下面端口逐层接入。
 

@@ -40,6 +40,9 @@
       ],
       "platform-data-package": [
         "dist/platform-data-package.d.ts"
+      ],
+      "github-http": [
+        "dist/github-http.d.ts"
       ]
     }
   },
@@ -91,6 +94,10 @@
     "./platform-data-package": {
       "types": "./dist/platform-data-package.d.ts",
       "default": "./dist/platform-data-package.js"
+    },
+    "./github-http": {
+      "types": "./dist/github-http.d.ts",
+      "default": "./dist/github-http.js"
     }
   },
   "scripts": {

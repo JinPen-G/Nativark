@@ -185,6 +185,7 @@ const ENGLISH: Readonly<Record<string, string>> = {
   "网络连接已断开": "You are offline",
   "搜索菜单": "Search menus",
   "业务管理": "Business",
+  "Core 包管理": "Core packages",
   "没有匹配的菜单": "No matching menus",
   "关闭详情": "Close details",
   "展开面板": "Expand details",

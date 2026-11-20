@@ -7,11 +7,11 @@
     "./core": "./src/core/index.ts"
   },
   "scripts": {
-    "predev": "npm run build -w @rental-os/core-contracts",
+    "predev": "npm run build -w @rental-os/platform-core-host",
     "dev": "vite --host 127.0.0.1 --strictPort",
-    "prebuild": "npm run build -w @rental-os/core-contracts",
+    "prebuild": "npm run build -w @rental-os/platform-core-host",
     "build": "tsc -b && vite build",
-    "prelint": "npm run build -w @rental-os/core-contracts",
+    "prelint": "npm run build -w @rental-os/platform-core-host",
     "lint": "tsc -b --noEmit",
     "preview": "vite preview --host 127.0.0.1 --port 4175"
   },

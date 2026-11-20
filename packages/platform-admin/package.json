@@ -238,7 +238,8 @@
     "./source/components/RecordDetailLayout.module.css": "./src/components/RecordDetailLayout.module.css",
     "./source/components/kanban-board/KanbanBridge": "./src/components/kanban-board/KanbanBridge.tsx",
     "./notifications": "./src/notifications.ts",
-    "./sound": "./src/sound.ts"
+    "./sound": "./src/sound.ts",
+    "./core-packages": "./src/features/core-packages/index.ts"
   },
   "scripts": {
     "lint": "tsc -p tsconfig.json",
@@ -277,7 +278,8 @@
     "@radix-ui/react-tabs": "^1.1.21",
     "@radix-ui/react-tooltip": "^1.2.16",
     "postcss": "8.5.26",
-    "axios": "1.19.0"
+    "axios": "1.19.0",
+    "@rental-os/platform-core-host": "0.1.0"
   },
   "peerDependencies": {
     "react": "19.2.8",

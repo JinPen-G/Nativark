@@ -90,6 +90,8 @@ Core 的 AI 工具为可选贡献。普通业务通过页面和 API 按权限运
 
 跨 Core 数据协作将在具体场景中设计受控对象引用、接口和事件，数据由所属 Core 维护。
 
+SaaS 管理区的 Core 包管理页提供注册目录、GitHub Topic 发现和独立版本视图。管理员选择固定发行或已下载包，沿同一校验链预览并准备安装、底座更新或单 Core 更新；结果保留为待部署，随后按固定材料办理构建、迁移和注册，再分别授权租户与成员。[Core 包管理与宿主接入](packages/platform-core-host/README.md#core-包管理接入) · [后台操作说明](packages/platform-admin/src/features/core-packages/README.md)
+
 ## Rental Core 示范
 
 Rental Core 是首个业务示范，提供商品、资产、库存、报价、订单、交付、归还、检查和结算等租赁业务。摄影设备、露营装备、车辆载具和工程设备通过品类定义、计费策略及能力扩展共用租赁业务链。

@@ -13,6 +13,7 @@ import { createCoreRouteElements, useCoreSession } from "./core";
 import { PlatformApplicationContext, usePlatformApplication, type PlatformAdminApplicationOptions } from "./application-context";
 import { AccountAppearancePage, SelfProfilePage, TenantAppearancePage, TenantProfilePage } from "./SettingsPage";
 import { CoreAccessPage } from "./CoreAccessPage";
+import { CorePackagesPage } from "./features/core-packages";
 import { canManagePublicResource } from "./application-access";
 import { useAdminSession } from "./runtime";
 import { PublicManagementPage } from "./features/access/PublicManagementPages";
@@ -61,7 +62,9 @@ function ProtectedLayout() {
     ...(canManagePublicResource(state.user, "saas", "system:tenant:manage")
       ? [{ path: "/platform/tenants", label: en ? "Tenants" : "租户管理" }] : []),
     ...(canManagePublicResource(state.user, "saas", "system:tenant:manage")
-      ? [{ path: "/platform/core-access", label: en ? "Tenant Core access" : "租户 Core 授权" }] : [])
+      ? [{ path: "/platform/core-access", label: en ? "Tenant Core access" : "租户 Core 授权" }] : []),
+    ...(canManagePublicResource(state.user, "saas", "system:tenant:manage")
+      ? [{ path: "/platform/core-packages", label: en ? "Core packages" : "Core 包管理" }] : [])
   ];
   return <Shell brandName={brandName} brand={brand} pages={pages} onSignOut={session.signOut}
     publicSections={[{ key: "overview", label: "", routes }]}>
@@ -131,6 +134,7 @@ export function createPlatformAdminApplication(options: PlatformAdminApplication
     { path: SUBSCRIPTION_ROUTES.platformSubscriptionDetail.path, element: <SubscriptionRoute permission="system:tenant:subscription:manage"><PlatformSubscriptionDetailPage /></SubscriptionRoute> },
     { path: SUBSCRIPTION_ROUTES.subscriptionCatalog.path, element: <SubscriptionRoute permission="system:tenant:subscription:manage"><SubscriptionCatalogPage /></SubscriptionRoute> },
     { path: "/platform/core-access", element: <CoreAccessPage audience="saas" /> },
+    { path: "/platform/core-packages", element: <CorePackagesPage brandName={options.brandName} /> },
     { path: "/settings/member-cores", element: <CoreAccessPage audience="tenant" /> },
     { path: "/platform/tenants", element: <PublicManagementPage kind="tenants" /> },
     { path: "/platform/tenants/new", element: <PublicManagementPage kind="tenants" edit /> },

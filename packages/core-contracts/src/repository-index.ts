@@ -4,7 +4,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { lstatSync, readdirSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import ts from "typescript";
 import { DevelopmentCapabilityIndexSchema, type DevelopmentCapability, type DevelopmentCapabilityIndex,
   type DevelopmentSourceReference } from "./development";
@@ -85,19 +85,23 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
   const hasGit = Boolean(lstatSync(join(root, ".git"), { throwIfNoEntry: false }));
   const addIssue = (code: string, path: string, message: string) => issues.push({ code, path, message });
   const workspaces = Array.isArray(rootPackage.workspaces) ? rootPackage.workspaces : [];
+  const workspacePattern = /^[^*\\]+(?:\/\*)?$/u;
   for (const workspace of workspaces) {
-    if (typeof workspace !== "string" || !workspace.endsWith("/*")) {
-      addIssue("workspace_pattern", "package.json", "当前源码索引支持一层 workspace 通配目录");
+    if (typeof workspace !== "string" || !workspacePattern.test(workspace)) {
+      addIssue("workspace_pattern", "package.json", "当前源码索引支持一层 workspace 通配或显式目录");
       continue;
     }
-    const parent = workspace.slice(0, -2);
-    if (!lstatSync(resolve(root, parent), { throwIfNoEntry: false })?.isDirectory()) {
-      coverage.push({ source: parent, count: 0, state: "not_present" });
+    const parent = dirname(workspace), selected = basename(workspace);
+    const directory = selected === "*" ? parent : workspace;
+    if (!isRepositorySourcePath(root, resolve(root, parent)) || !isRepositorySourcePath(root, resolve(root, directory))
+      || !lstatSync(resolve(root, directory), { throwIfNoEntry: false })?.isDirectory()) {
+      coverage.push({ source: directory, count: 0, state: "not_present" });
       continue;
     }
     for (const entry of readdirSync(resolve(root, parent), { withFileTypes: true })) {
-      if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
-      const packageDirectory = `${parent}/${entry.name}`;
+      if (!entry.isDirectory() || entry.isSymbolicLink() || selected !== "*" && entry.name !== selected) continue;
+      const packageDirectory = repositoryPath(root, resolve(root, parent, entry.name));
+      if (packages.some(info => info.directory === packageDirectory)) continue;
       if (!lstatSync(resolve(root, packageDirectory, "package.json"), { throwIfNoEntry: false })?.isFile()) continue;
       const manifest = readRepositoryJson(root, `${packageDirectory}/package.json`);
       if (typeof manifest.name !== "string" || typeof manifest.version !== "string") {
@@ -135,7 +139,7 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
   if (hasGit) {
     // 独立客户端不一定属于npm workspace，稀疏检出时也须明确它们的未读范围。
     const packagePatterns = new Set(["clients/*", ...workspaces.filter((workspace): workspace is string =>
-      typeof workspace === "string" && workspace.endsWith("/*"))]);
+      typeof workspace === "string" && workspacePattern.test(workspace))]);
     const patterns = [...packagePatterns].map(workspace => `:(glob)${workspace}/package.json`);
     if (patterns.length) {
       const trackedPackages = execFileSync("git", ["ls-files", "-z", "--cached", "--", ...patterns],
@@ -157,7 +161,8 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
     module: "@/components/ui", file: uiFile, visibility: "host", ui: true });
   const controllers = repositoryFiles(root, "apps/api/src", file => file.endsWith(".controller.ts"));
   const packageControllers = packages.filter(info => info.directory.startsWith("packages/")).flatMap(info =>
-    repositoryFiles(root, `${info.directory}/src`, file => file.endsWith(".controller.ts") || /[/\\]nest\.ts$/u.test(file)));
+    repositoryFiles(root, `${info.directory}/src`, file => file.endsWith(".controller.ts")
+      || /[/\\](?:nest|http)\.ts$/u.test(file) || file.endsWith("-http.ts")));
   controllers.push(...packageControllers);
   const apiModules = resolve(root, "apps/api/src/modules");
   const moduleDirectories = isRepositorySourcePath(root, apiModules) && lstatSync(apiModules, { throwIfNoEntry: false })?.isDirectory()
@@ -170,8 +175,10 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
   const paths = Object.fromEntries(entries.map(entry => [entry.module, [entry.file]]));
   paths["@/*"] = [resolve(root, "apps/admin/src/*")];
   paths["@/registry/*"] = [resolve(root, "packages/ui-arc/vendor/registry/*")];
-  const consumers = ["apps/api/src", "apps/admin/src"].flatMap(directory =>
-    repositoryFiles(root, directory, file => /\.tsx?$/u.test(file) && !file.endsWith(".d.ts")));
+  // UIArc 的共享动效别名须定位保留源，避免落入后台的通配路径。
+  paths["@/lib/motion-tokens"] = [resolve(root, "packages/ui-arc/vendor/lib/motion-tokens.ts")];
+  const consumers = packages.flatMap(info =>
+    repositoryFiles(root, `${info.directory}/src`, file => /\.tsx?$/u.test(file) && !file.endsWith(".d.ts")));
   const source = new RepositorySource(root, [...new Set([...entries.map(entry => entry.file), ...controllers, ...extraSources, ...consumers])], paths);
   const importConsumers = new Map<ts.Symbol, DevelopmentSourceReference[]>();
   for (const file of source.program.getSourceFiles()) {

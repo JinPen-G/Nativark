@@ -75,7 +75,10 @@ export async function inspectGitHubCoreRelease(selection: GitHubCoreReleaseSelec
   return readPin(GitHubCoreReleaseSelectionSchema.parse(selection), fetcher);
 }
 
-export async function prepareGitHubCoreRelease(input: GitHubCoreReleasePin, directory: string, host: CoreHostVersions, fetcher: GitHubFetcher = fetch) {
+/** 旧路径许可由真实宿主供给，固定发行检查和本地准备共用同一精确集合。 */
+export async function prepareGitHubCoreRelease(input: GitHubCoreReleasePin, directory: string, host: CoreHostVersions,
+  fetcher: GitHubFetcher = fetch, legacyApiRoutes: readonly string[] = []) {
+  const allowedRoutes = [...legacyApiRoutes];
   const pin = GitHubCoreReleasePinSchema.parse(input);
   const { repository, coreId, version, tag } = pin;
   const selection = { repository, coreId, version, tag };
@@ -91,5 +94,5 @@ export async function prepareGitHubCoreRelease(input: GitHubCoreReleasePin, dire
   // 所有远端/来源检查完成后才写候选，沿用本地安装的摘要、兼容、重复核对与失败清理。
   return { ...prepareCoreInstall(bytes, pin.sha256, directory, host, {
     id: coreId, version, source: { repository, commit: pin.commit }
-  }), release: pin };
+  }, allowedRoutes), release: pin };
 }

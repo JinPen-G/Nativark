@@ -16,6 +16,7 @@ import { RentalCategoryCode, type RentalCapability, type RentalCategoryTerminolo
 import type { ReactNode } from "react";
 import { applyTenantNavigationLabels } from "./navigation-terminology";
 import { CATEGORY_GOVERNANCE_PREVIEW_ENABLED } from "./categoryGovernancePreview";
+import { adminRuntime } from "./adminRuntime";
 
 export interface AppRouteDefinition {
   path: string;
@@ -102,6 +103,7 @@ export const APP_ROUTES = {
   paymentReconciliation: { path: `/rental${RENTAL_PAYMENT_RECONCILIATION_PAGES.batches.path}`, label: RENTAL_PAYMENT_RECONCILIATION_PAGES.batches.title.default, permission: RENTAL_PAYMENT_RECONCILIATION_LEGACY_PERMISSION, audience: "tenant", icon: <FileSearchOutlined />, menu: Boolean(RENTAL_PAYMENT_RECONCILIATION_PAGES.batches.menu) },
   paymentReconciliationDetail: { path: `/rental${RENTAL_PAYMENT_RECONCILIATION_PAGES.detail.path}`, label: RENTAL_PAYMENT_RECONCILIATION_PAGES.detail.title.default, permission: RENTAL_PAYMENT_RECONCILIATION_LEGACY_PERMISSION, audience: "tenant", icon: <FileSearchOutlined /> },
   platformTenants: { path: "/platform/tenants", label: "SaaS 租户", permission: "system:tenant:manage", audience: "saas", icon: <ShopOutlined />, menu: true },
+  platformCorePackages: { path: "/platform/core-packages", label: "Core 包管理", permission: "system:tenant:manage", audience: "saas", icon: <AppstoreOutlined />, menu: true },
   platformCategories: { path: "/platform/rental-categories", label: "租赁品类", permission: "system:rental-category:view", audience: "saas", icon: <AppstoreOutlined />, menu: CATEGORY_GOVERNANCE_PREVIEW_ENABLED },
   platformCategoryCapabilities: { path: "/platform/rental-category-capabilities", label: "内核能力目录", permission: "system:rental-category:view", audience: "saas", icon: <ControlOutlined />, menu: CATEGORY_GOVERNANCE_PREVIEW_ENABLED },
   platformDemoRequests: { path: "/platform/demo-requests", label: "演示预约", permission: "system:demo-request:view", audience: "saas", icon: <CalendarOutlined />, menu: true },
@@ -133,7 +135,7 @@ export const APP_NAVIGATION: AppNavigationSection[] = [
   { key: "account-access", label: "账号与权限", icon: <TeamOutlined />, routes: [APP_ROUTES.tenantAccounts, APP_ROUTES.tenantRoles, APP_ROUTES.clientAuthorization] },
   { key: "service-channels", label: "服务与渠道", icon: <ApiOutlined />, routes: [APP_ROUTES.tenantIntegrations, APP_ROUTES.tenantDispatch, APP_ROUTES.customerSupport, APP_ROUTES.aiSettings, APP_ROUTES.aiTasks, APP_ROUTES.clientChannel, APP_ROUTES.appearance] },
   { key: "finance-reconciliation", label: "财务与对账", icon: <FileSearchOutlined />, routes: [APP_ROUTES.paymentReconciliation] },
-  { key: "platform-management", label: "平台管理", icon: <SettingOutlined />, routes: [APP_ROUTES.platformTenants, APP_ROUTES.platformDemoRequests, APP_ROUTES.platformSubscriptions, APP_ROUTES.subscriptionCatalog, APP_ROUTES.platformOfficialCalendars, APP_ROUTES.platformUsers, APP_ROUTES.platformAi, APP_ROUTES.platformSystem, APP_ROUTES.platformOperations, APP_ROUTES.platformTools] }
+  { key: "platform-management", label: "平台管理", icon: <SettingOutlined />, routes: [APP_ROUTES.platformTenants, APP_ROUTES.platformCorePackages, APP_ROUTES.platformDemoRequests, APP_ROUTES.platformSubscriptions, APP_ROUTES.subscriptionCatalog, APP_ROUTES.platformOfficialCalendars, APP_ROUTES.platformUsers, APP_ROUTES.platformAi, APP_ROUTES.platformSystem, APP_ROUTES.platformOperations, APP_ROUTES.platformTools] }
 ];
 
 /**
@@ -180,6 +182,12 @@ export function canAccessRoute(
   hasTenantMembershipPermission: (permission?: string) => boolean = () => false
 ): boolean {
   if ((route.audience === "saas") !== isSaasAdmin) return false;
+  // 原 SaaS hasPermission 按租户权限前缀放行，包管理须核当前已验证会话的明确管理权。
+  if (route.path === APP_ROUTES.platformCorePackages.path) {
+    const { sessionVerified, user } = adminRuntime.getSession();
+    return sessionVerified && user?.isSaasAdmin === true
+      && Boolean(user.permissions?.includes("*") || user.permissions?.includes(route.permission));
+  }
   // This frontend entry grants no business authority. Reuse each capability's
   // existing page gate, including tenant-wide membership scope, rather than
   // accidentally excluding price-only or membership-only operators.

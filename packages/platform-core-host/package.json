@@ -71,10 +71,6 @@
       "types": "./dist/platform-core-scope.d.ts",
       "default": "./dist/platform-core-scope.js"
     },
-    "./platform-core-session": {
-      "types": "./dist/platform-core-session.d.ts",
-      "default": "./dist/platform-core-session.js"
-    },
     "./mysql-structure": {
       "types": "./dist/mysql-structure.d.ts",
       "default": "./dist/mysql-structure.js"
@@ -82,6 +78,54 @@
     "./mysql-physical": {
       "types": "./dist/mysql-physical.d.ts",
       "default": "./dist/mysql-physical.js"
+    },
+    "./platform-core-session": {
+      "types": "./dist/platform-core-session.d.ts",
+      "default": "./dist/platform-core-session.js"
+    },
+    "./core-package-ports": {
+      "types": "./dist/core-package-ports.d.ts",
+      "default": "./dist/core-package-ports.js"
+    },
+    "./core-package-selection/protocol": {
+      "types": "./dist/core-package-selection/protocol.d.ts",
+      "default": "./dist/core-package-selection/protocol.js"
+    },
+    "./core-package-preparation/protocol": {
+      "types": "./dist/core-package-preparation/protocol.d.ts",
+      "default": "./dist/core-package-preparation/protocol.js"
+    },
+    "./core-package-http": {
+      "types": "./dist/core-package-http.d.ts",
+      "default": "./dist/core-package-http.js"
+    },
+    "./platform-core-package-management": {
+      "types": "./dist/platform-core-package-management.d.ts",
+      "default": "./dist/platform-core-package-management.js"
+    },
+    "./core-package-preflight": {
+      "types": "./dist/core-package-preflight/index.d.ts",
+      "default": "./dist/core-package-preflight/index.js"
+    },
+    "./core-package-selection": {
+      "types": "./dist/core-package-selection/index.d.ts",
+      "default": "./dist/core-package-selection/index.js"
+    },
+    "./core-package-preparation": {
+      "types": "./dist/core-package-preparation/index.d.ts",
+      "default": "./dist/core-package-preparation/index.js"
+    },
+    "./core-package-audit": {
+      "types": "./dist/core-package-audit.d.ts",
+      "default": "./dist/core-package-audit.js"
+    },
+    "./core-package-assembly": {
+      "types": "./dist/core-package-assembly.d.ts",
+      "default": "./dist/core-package-assembly.js"
+    },
+    "./core-packages/openapi": {
+      "types": "./dist/core-packages/openapi.d.ts",
+      "default": "./dist/core-packages/openapi.js"
     }
   },
   "typesVersions": {
@@ -131,14 +175,47 @@
       "platform-core-scope": [
         "dist/platform-core-scope.d.ts"
       ],
-      "platform-core-session": [
-        "dist/platform-core-session.d.ts"
-      ],
       "mysql-structure": [
         "dist/mysql-structure.d.ts"
       ],
       "mysql-physical": [
         "dist/mysql-physical.d.ts"
+      ],
+      "platform-core-session": [
+        "dist/platform-core-session.d.ts"
+      ],
+      "core-package-ports": [
+        "dist/core-package-ports.d.ts"
+      ],
+      "core-package-selection/protocol": [
+        "dist/core-package-selection/protocol.d.ts"
+      ],
+      "core-package-preparation/protocol": [
+        "dist/core-package-preparation/protocol.d.ts"
+      ],
+      "core-package-http": [
+        "dist/core-package-http.d.ts"
+      ],
+      "platform-core-package-management": [
+        "dist/platform-core-package-management.d.ts"
+      ],
+      "core-package-preflight": [
+        "dist/core-package-preflight/index.d.ts"
+      ],
+      "core-package-selection": [
+        "dist/core-package-selection/index.d.ts"
+      ],
+      "core-package-preparation": [
+        "dist/core-package-preparation/index.d.ts"
+      ],
+      "core-package-audit": [
+        "dist/core-package-audit.d.ts"
+      ],
+      "core-package-assembly": [
+        "dist/core-package-assembly.d.ts"
+      ],
+      "core-packages/openapi": [
+        "dist/core-packages/openapi.d.ts"
       ]
     }
   },
