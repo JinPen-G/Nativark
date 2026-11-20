@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --strictPort",
     "build": "tsc --noEmit && vite build",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "prebuild": "npm run build -w @rental-os/rental-api"
   },
   "dependencies": {
     "@rental-os/shared": "0.1.0",
@@ -30,6 +31,8 @@
     "@vitejs/plugin-react": "6.0.5",
     "@tailwindcss/vite": "4.3.3",
     "typescript": "7.0.2",
-    "vite": "8.2.1"
+    "vite": "8.2.1",
+    "@rental-os/core-contracts": "0.1.0",
+    "@rental-os/rental-api": "0.1.0"
   }
 }

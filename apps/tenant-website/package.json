@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "check:render": "node scripts/check-storefront-render.mjs",
     "preview": "vite preview --host 127.0.0.1",
-    "prebuild": "npm run build -w @rental-os/platform-contracts",
+    "prebuild": "npm run build -w @rental-os/rental-api",
     "predev": "npm run build -w @rental-os/platform-contracts"
   },
   "dependencies": {
@@ -28,6 +28,8 @@
     "@types/react-dom": "19.2.4",
     "@vitejs/plugin-react": "6.0.5",
     "typescript": "7.0.2",
-    "vite": "8.2.1"
+    "vite": "8.2.1",
+    "@rental-os/core-contracts": "0.1.0",
+    "@rental-os/rental-api": "0.1.0"
   }
 }

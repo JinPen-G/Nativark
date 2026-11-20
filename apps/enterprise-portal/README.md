@@ -6,6 +6,24 @@
 
 管理端与企业端共用 [BusinessShell](../admin/src/components/BusinessShell.tsx)、[导航](../admin/src/components/animate-sidebar/NativeNavigation.tsx)、[上下文选择器](../admin/src/components/animate-sidebar/NativeContextSwitcher.tsx)及[账号菜单](../admin/src/components/animate-sidebar/NativeAccountMenuView.tsx)。框架布局、侧栏、顶部栏、间距、深浅主题及动效只维护这些共用组件和管理端原样式/token。企业 [Shell](src/EnterpriseShell.tsx)仅提供客户身份、当前企业、受权菜单与原客户动作。修改共用源码后，两端开发入口均使用更新后的实现，发行时重新构建两端产物。
 
+## 标准包发布
+
+发布须显式提供本工作树内的 Rental 标准包目录 `RENTAL_CORE_PACKAGE` 和与 API 相同的 `CORE_DEPLOYMENT_LOCK`。构建前准备公共 Shared、`core-contracts/install`、`core-contracts/package` 和 `rental-api/openapi` 的正式运行出口，前置沿[原 Rental API 构建链](../rental-api/README.md)。
+
+两端 `npm run build` 的 `prebuild` 复用完整 Rental API 正式构建链。先准备公共 API 自身的 40 模型 Client，再按所选组合准备 Rental Client 并设置绝对 `RENTAL_PRISMA_CLIENT`；公共 API 的 tsc 继续使用自身生成物。具体生成与选择步骤见[公共 API](../platform-api/README.md)和[Rental 构建说明](../rental-api/README.md)。
+
+在仓库根使用原宿主命令。
+
+```powershell
+$env:RENTAL_CORE_PACKAGE = "<待部署目录>"
+$env:CORE_DEPLOYMENT_LOCK = "<组合锁.json>"
+npm run build -w @rental-os/enterprise-portal
+```
+
+[构建接点](../../scripts/rental-client-vite.ts)复用原安装校验，核对来源、版本、摘要和正式客户端出口。包内门户、共用字段组件与相对依赖均须属于锁定清单，产物生成时再次校验包摘要。正式入口须提供宿主实际消费的运行值，纯类型或缺失的重导出目标会拒绝。缺包、错锁、未声明出口或文件会终止发布。
+
+客户端贡献按本宿主的 target、JSX 与 class-field 设置通过原 Vite/Oxc 编译，合同相对依赖复用锁内同一编译 JS。Shared 保留完整 Rental Root 的合同与纯函数，public web-client 继续提供客户会话，原企业授权、营运运行时边界和 UIArc 插件沿现有接点执行。开发及原 `offline` 源码路径沿现有入口，显式选择包时进入同一安装包校验链。
+
 ## 阅读路线
 
 | 领域 | 入口 → 应用服务 → 原来源与消费者 |
