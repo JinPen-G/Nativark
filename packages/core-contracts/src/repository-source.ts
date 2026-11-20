@@ -77,15 +77,30 @@ export class RepositorySource {
     };
     const options: ts.CompilerOptions = { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext,
       moduleResolution: ts.ModuleResolutionKind.Bundler, jsx: ts.JsxEmit.Preserve, noLib: true, types: [],
-      noEmit: true, baseUrl: root, paths };
+      noEmit: true, allowJs: true, baseUrl: root, paths };
     const host = ts.createCompilerHost(options);
     host.readFile = file => readable(file) ? ts.sys.readFile(file) : undefined;
     host.fileExists = file => readable(file) && ts.sys.fileExists(file);
     host.directoryExists = file => readable(file) && ts.sys.directoryExists(file);
     host.getDirectories = file => readable(file) ? ts.sys.getDirectories(file) : [];
-    host.readDirectory = (file, extensions, exclude, include, depth) => readable(file)
+    const readDirectory: ts.System["readDirectory"] = (file, extensions, exclude, include, depth) => readable(file)
       ? ts.sys.readDirectory(file, extensions, exclude, include, depth).filter(readable) : [];
+    host.readDirectory = readDirectory;
     host.writeFile = () => { throw new Error("源码索引只允许读取"); };
+    const configurations = new Map<string, ts.CompilerOptions>();
+    host.resolveModuleNames = (names, importer) => {
+      const config = ts.findConfigFile(resolve(importer, ".."), host.fileExists);
+      let local = config ? configurations.get(config) : undefined;
+      if (config && !local) {
+        const json = ts.readConfigFile(config, host.readFile);
+        const parsed = ts.parseJsonConfigFileContent(json.config ?? {}, { ...host, readDirectory, useCaseSensitiveFileNames: ts.sys.useCaseSensitiveFileNames }, resolve(config, ".."));
+        const base = parsed.options.baseUrl ?? (typeof parsed.options.pathsBasePath === "string" ? parsed.options.pathsBasePath : resolve(config, ".."));
+        local = { ...options, paths: { ...paths, ...Object.fromEntries(Object.entries(parsed.options.paths ?? {})
+          .map(([name, targets]) => [name, targets.map(target => resolve(base, target))])) } };
+        configurations.set(config, local);
+      }
+      return names.map(name => ts.resolveModuleName(name, importer, local ?? options, host).resolvedModule);
+    };
     this.program = ts.createProgram(files, options, host);
     this.checker = this.program.getTypeChecker();
   }
@@ -182,11 +197,26 @@ export class RepositorySource {
   }
 
   /** 字段存在但表达式需要运行时值时，将缺口显式交给目录调用方。 */
-  unresolvedProperties(node: ts.Expression, ignored: readonly string[] = []): string[] {
+  unresolvedProperties(node: ts.Expression, ignored: readonly string[] = [], visited = new Set<ts.Node>()): string[] {
+    if (visited.has(node)) return [node.getText()];
+    const chain = new Set(visited).add(node);
     while (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node)) node = node.expression;
+    if (ts.isIdentifier(node)) {
+      const symbol = this.checker.getSymbolAtLocation(node), declaration = symbol && this.target(symbol).valueDeclaration;
+      if (declaration && ts.isVariableDeclaration(declaration) && declaration.initializer
+        && ts.isVariableDeclarationList(declaration.parent) && declaration.parent.flags & ts.NodeFlags.Const)
+        return this.unresolvedProperties(declaration.initializer, ignored, chain);
+    }
     if (!ts.isObjectLiteralExpression(node)) return [];
-    return node.properties.filter(ts.isPropertyAssignment).filter(property => !ignored.includes(property.name.getText())
-      && this.value(property.initializer) === UNRESOLVED).map(property => property.name.getText());
+    return node.properties.flatMap(property => {
+      if (ts.isSpreadAssignment(property)) return this.value(property.expression) === UNRESOLVED
+        || this.unresolvedProperties(property.expression, [], chain).length ? [property.getText()] : [];
+      if (!ts.isPropertyAssignment(property) && !ts.isShorthandPropertyAssignment(property)) return [property.getText()];
+      const name = ts.isIdentifier(property.name) || ts.isStringLiteralLike(property.name) ? property.name.text : property.name.getText();
+      if (ignored.includes(name)) return [];
+      const expression = ts.isPropertyAssignment(property) ? property.initializer : property.name;
+      return this.value(expression) === UNRESOLVED || this.unresolvedProperties(expression, [], chain).length ? [name] : [];
+    });
   }
 }
 
