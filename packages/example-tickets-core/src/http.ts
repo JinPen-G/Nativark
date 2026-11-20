@@ -1,7 +1,7 @@
 /** 工单HTTP方法/路径与schema的单源映射，Nest入口和OpenAPI都从这里取合同。 */
 import { z } from "zod";
 import { CoreHttpContributionSchema, type CoreHttpContribution } from "@rental-os/core-contracts";
-import { AssignTicketSchema, ChangeTicketStateSchema, CreateTicketSchema, ListTicketsSchema, TicketPageQuerySchema, TicketIdSchema, TicketSchema, TicketPageSchema,
+import { AssignTicketSchema, ChangeTicketStateSchema, CreateTicketSchema, ListTicketsSchema, TicketPageQuerySchema, TicketStatusCountsQuerySchema, TicketStatusCountsSchema, TicketIdSchema, TicketSchema, TicketPageSchema,
   TICKETS_CORE_ID, TICKETS_CORE_VERSION } from "./contracts";
 
 export const TICKETS_HTTP_BASE = "cores/example-tickets";
@@ -15,6 +15,7 @@ export const TicketReceiptLookupSchema = z.discriminatedUnion("status", [
 export const TICKETS_HTTP = {
   list: { method: "GET", path: "tickets", permission: "read", purpose: "business", startsNewBusiness: false, summary: "读取当前成员可见工单", query: ListTicketsSchema, response: z.array(TicketSchema) },
   page: { method: "GET", path: "ticket-pages", permission: "read", purpose: "business", startsNewBusiness: false, summary: "读取当前可见工单页与同范围总数", query: TicketPageQuerySchema, response: TicketPageSchema },
+  counts: { method: "GET", path: "ticket-status-counts", permission: "read", purpose: "business", startsNewBusiness: false, summary: "读取当前可见全部工单的总数及状态计数", query: TicketStatusCountsQuerySchema, response: TicketStatusCountsSchema },
   get: { method: "GET", path: "tickets/:ticketId", permission: "read", purpose: "business", startsNewBusiness: false, summary: "读取当前可见工单详情", params: TicketParamsSchema, response: TicketSchema },
   receipt: { method: "GET", path: "operations/:operationId", permission: "read", purpose: "original_receipt", startsNewBusiness: false, summary: "只读核对本人的原工单操作收据", params: z.object({ operationId: TicketIdSchema }).strict(), response: TicketReceiptLookupSchema },
   create: { method: "POST", path: "tickets", permission: "create", purpose: "business", startsNewBusiness: true, summary: "创建工单", body: CreateTicketSchema, response: TicketReceiptSchema },

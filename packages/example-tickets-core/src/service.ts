@@ -4,14 +4,16 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import type { CorePrincipal } from "@rental-os/core-contracts";
-import { AssignTicketSchema, ChangeTicketStateSchema, CreateTicketSchema, ListTicketsSchema, TicketPageQuerySchema, TicketError, TicketIdSchema,
-  type ListTickets, type Ticket, type TicketPage, type TicketPageQuery, type TicketPermission, type TicketReceipt } from "./contracts";
+import { AssignTicketSchema, ChangeTicketStateSchema, CreateTicketSchema, ListTicketsSchema, TicketPageQuerySchema, TicketStatusCountsQuerySchema, TicketError, TicketIdSchema,
+  type ListTickets, type Ticket, type TicketPage, type TicketPageQuery, type TicketStatusCounts, type TicketPermission, type TicketReceipt } from "./contracts";
 
 export interface TicketStoredReceipt extends TicketReceipt { actorId: string; fingerprint: string }
 export interface TicketRepository {
   list(query: ListTickets, viewerId?: string): Promise<Ticket[]>;
   /** 正文与总数来自同一次数据库观察，不能统计当前成员无权读取的工单。 */
   page(query: TicketPageQuery, viewerId?: string): Promise<TicketPage>;
+  /** 全量计数沿原成员可读范围；旧仓储仍可使用原接口，未提供时汇总明确失败。 */
+  statusCounts?(viewerId?: string): Promise<TicketStatusCounts>;
   find(id: string): Promise<Ticket | undefined>;
   create(ticket: Ticket): Promise<void>;
   update(ticket: Ticket, expectedRevision: number): Promise<void>;
@@ -52,6 +54,14 @@ export class TicketsService {
   page(principal: CorePrincipal, input: unknown = {}): Promise<TicketPage> {
     const query = TicketPageQuerySchema.parse(input);
     return this.withAccess(principal, "read", (store, access) => store.page(query, access.readAll ? undefined : access.userId));
+  }
+
+  statusCounts(principal: CorePrincipal, input: unknown = {}): Promise<TicketStatusCounts> {
+    TicketStatusCountsQuerySchema.parse(input);
+    return this.withAccess(principal, "read", (store, access) => {
+      if (!store.statusCounts) throw new Error("当前工单仓储未提供状态汇总读取");
+      return store.statusCounts(access.readAll ? undefined : access.userId);
+    });
   }
 
   get(principal: CorePrincipal, ticketId: string): Promise<Ticket> {

@@ -9,6 +9,7 @@
 | 方法 | 当前规则 |
 | --- | --- |
 | `list/page/get` | 当前权限下读取；普通成员限定创建者/受派者范围，不可见对象与不存在同样处理；page正文和总数同范围 |
+| `statusCounts` | 当前可见全部工单的total及open/in_progress/closed计数，沿read/read.all范围；不受列表分页、标题和状态筛选影响 |
 | `create` | 标题必填、说明可空；初始open、修订1、创建者取可信主体 |
 | `assign` | 管理者分派open工单；受派者须已是本租户可使用Core的成员 |
 | `start` | 已分派的open工单变为in_progress；当前受派者或获权管理者执行 |
@@ -36,7 +37,7 @@
 
 列表页使用 `CoreList`及本Core的 `GET ticket-pages`，返回rows/total。默认20条，条数、状态或标题搜索变化回首页；总数与正文共用同一个租户/当前成员/状态/标题条件。标题最多160字，去除首尾空白后按原列排序规则作区分大小写的字面包含匹配，空值不筛选；百分号、下划线、引号和反斜线都按普通文字处理。搜索由服务端在分页前完成，不仅过滤已显示的一页。空末页仍保留真实total，框架只读回有效页。原GET tickets数组合同及10万offset限制继续保留；新分页入口的安全整数offset独立声明。[简明列表写法](../platform-admin/src/core/README.md#列表只提供业务列和读取结果)
 
-`createTicketsHttpContribution()`从TICKETS_HTTP生成原Guard所需的八条政策，登记到当前部署目录的 `http`。创建工单标记startsNewBusiness，原操作收据标记original_receipt，其他查询/处理继续business；权限、分面和OpenAPI扩展来自同一合同。宿主按标准目录接入，Core作者不向原Guard追加工单专用分支。最终对象、幂等、停用/期限和本人原收据仍由工单服务核验。[HTTP合同](src/http.ts) · [平台标准](../core-contracts/README.md#登记core的http政策)
+`createTicketsHttpContribution()`从TICKETS_HTTP生成原Guard所需的九条政策，登记到当前部署目录的 `http`。创建工单标记startsNewBusiness，原操作收据标记original_receipt，其他查询/处理继续business；权限、分面和OpenAPI扩展来自同一合同。宿主按标准目录接入，Core作者不向原Guard追加工单专用分支。最终对象、幂等、停用/期限和本人原收据仍由工单服务核验。[HTTP合同](src/http.ts) · [平台标准](../core-contracts/README.md#登记core的http政策)
 
 业务创建 `new TicketsService(execution)`。`TicketExecution.run`在每次调用时使用原认证、当前租户/Core/成员及业务权限，并将只有本Core方法的仓储交给业务服务。不能用恒真权限或内存演示数据代替真实宿主。
 
@@ -54,7 +55,7 @@ authority返回的`revalidate()`在提交前复核同一原会话/订阅等期�
 
 `readTicketsPhysicalData(reader)`由同一MySQL正式出口提供，读取三表的真实列类型/空值/排序规则、InnoDB、复合主键和查询索引、受执行的状态/修订CHECK及原操作外键。只有本版所需结构全部满足才返回数据版本、观察时间与结构摘要，缺项返回undefined；不读业务数据或执行DDL。MySQL的冗余括号、字符引入符及原CHECK包装按表达式结构核对，不能只删字符后误把不同约束当等价。额外非唯一索引可用于调优，额外唯一/业务约束须按数据版本处理。[检查源码](src/mysql.ts)
 
-宿主把该函数传给[原迁移账读取器](../core-host/README.md#读取原迁移账与实际结构)的本Core `readPhysical`，同时提供已登记的Prisma迁移名称。完成收据与物理观察分别核对，未完/缺失/错误迁移都不能据此开放业务。当前只读链已有类型及离线目录消费证据，真实数据库和主应用装配仍待实施。
+宿主把该函数传给[原迁移账读取器](../core-host/README.md#读取原迁移账与实际结构)的本Core `readPhysical`，同时提供已登记的Prisma迁移名称。独立工单及双Core宿主消费这一适配，完成收据与物理观察分别核对；未完/缺失/错误迁移都不能据此开放业务，包校验不代替真实数据库观察。
 
 ## 构建与打包
 
@@ -64,7 +65,16 @@ authority返回的`revalidate()`在提交前复核同一原会话/订阅等期�
 npm run build -w @rental-os/example-tickets-core
 ```
 
-构建准备公共platform-core-host及其合同依赖，然后编译本Core，不构建Rental或后台。Prisma5/Nest10和平台宿主是可选适配peer；领域入口不导入它们，使用对应适配时才需要准备。`createTicketsManifest({ repository, commit })`返回可由标准检查器读取的清单；source必须是此次真实固定发行来源，不在源码内填写占位提交。可用下列命令向stdout输出包清单和API文档。
+构建准备公共platform-core-host及其合同依赖，然后编译本Core，不构建Rental或后台。Prisma5/Nest10和平台宿主是可选适配peer；领域入口不导入它们，使用对应适配时才需要准备。`createTicketsManifest({ repository, commit })`返回可由标准检查器读取的清单；source必须是此次真实固定发行来源，不在源码内填写占位提交。
+
+只读检查源码类型时，可使用仓库的现有内存类型入口。准备根锁文件依赖后，显式选择配置并省略源码位置参数，检查器会采用该配置的完整文件集，包含后台所需的Vite/CSS声明；依赖放在其他受管目录时用`--deps <node_modules目录>`指定。检查不生成Client、dist或连接数据库。[类型入口](../../scripts/check-selected-prisma-types.cjs) · [Core配置](tsconfig.json) · [后台配置](admin/tsconfig.json)
+
+```sh
+node scripts/check-selected-prisma-types.cjs --mode platform --config packages/example-tickets-core/tsconfig.json
+node scripts/check-selected-prisma-types.cjs --mode platform --config packages/example-tickets-core/admin/tsconfig.json
+```
+
+清单和API文档可向stdout输出。
 
 ```sh
 node packages/example-tickets-core/dist/metadata.js manifest <仓库HTTPS地址> <固定提交>
@@ -87,12 +97,13 @@ npm run pack:core -w @rental-os/example-tickets-core -- <Core仓库HTTPS地址> 
 
 ## HTTP 与 API 文档
 
-宿主从 `@rental-os/example-tickets-core/nest`导入`TicketsHttpModule.register(service, principalAccessor)`，或用 `registerFactory` 消费公共宿主导出的同一服务；`principalAccessor.current()`仅从原Guard/ALS当前身份取值。[独立API组合](../../apps/example-tickets-api/src/assembly.ts)已将八条工单政策登记到公共Guard目录，原Rental宿主是否选择本Core由自身组合决定。[HTTP合同](src/http.ts)同时生成政策与API资料。
+宿主从 `@rental-os/example-tickets-core/nest`导入`TicketsHttpModule.register(service, principalAccessor)`，或用 `registerFactory` 消费公共宿主导出的同一服务；`principalAccessor.current()`仅从原Guard/ALS当前身份取值。[独立API组合](../../apps/example-tickets-api/src/assembly.ts)按同一贡献登记九条工单政策到公共Guard目录，原Rental宿主是否选择本Core由自身组合决定。[HTTP合同](src/http.ts)同时生成政策与API资料。
 
 | 方法与路径 | 业务权限 | 输入与返回 |
 | --- | --- | --- |
 | `GET /api/cores/example-tickets/tickets` | `example-tickets:ticket:read` | 可选state/offset/limit；当前可见工单数组 |
 | `GET /api/cores/example-tickets/ticket-pages` | 同上 | 可选subject/state/offset/limit；subject为标题字面包含搜索，同一次读取的rows/total只计当前可见且匹配的范围 |
+| `GET /api/cores/example-tickets/ticket-status-counts` | 同上 | 无查询输入；当前可见全部工单的total/open/in_progress/closed计数 |
 | `GET /api/cores/example-tickets/tickets/{ticketId}` | 同上 | 已登记工单ID；当前可见详情 |
 | `GET /api/cores/example-tickets/operations/{operationId}` | 同上 | 本人的原操作键；recorded原收据或unavailable |
 | `POST /api/cores/example-tickets/tickets` | `example-tickets:ticket:create` | operationId/subject/description；原操作收据 |
@@ -105,6 +116,8 @@ npm run pack:core -w @rental-os/example-tickets-core -- <Core仓库HTTPS地址> 
 [生成器](src/openapi.ts)从相同Zod/HTTP合同生成OpenAPI贡献，复用公共`coreOpenApiSchema`，不手工维护另一套字段。输出可给平台`composeCoreOpenApi`组合，也可随包离线阅读；标准包检查会核路径/schema命名空间和本地引用。Controller装配与真实HTTP权限仍待宿主验证。
 
 分页实现使用单条MySQL8 CTE，正文和COUNT共用可见集合及语句快照；成员读取和总数均限定创建者/受派者，read.all只扩大到本租户。LEFT JOIN保留空末页的真实总数，total单独解析，不混入严格工单对象。读取不创建Core锁行、工单、收据或审计。[分页合同](src/contracts.ts) · [仓储](src/mysql.ts)
+
+0.1.1增加状态数量汇总，数据版本仍为0.1.0。汇总复用原租户及创建者/受派者条件，在同一SQL语句内计数全部可读工单。空范围返回零，计数必须为非负安全整数，读取失败明确报错。旧仓储适配仍可使用原接口，缺少汇总端口时明确报错。路径使用独立的`ticket-status-counts`，遵守静态路径不能与`tickets/:ticketId`重叠的注册规则。列表页通过原`CorePage.summary`显示总数及三个状态计数，标题和状态筛选仍只作用于列表；原列表刷新同时重读汇总，汇总失败提供自己的只读重试。汇总和分页各自是一份读取观察。[汇总合同](src/http.ts) · [列表呈现](admin/index.tsx)
 
 <a id="后台三页面"></a>
 

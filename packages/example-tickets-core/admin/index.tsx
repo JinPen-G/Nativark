@@ -43,8 +43,14 @@ export function TicketsPage() {
   const listKey = [...queryKey, "list", offset, limit, state, searchSubject];
   const query = useQuery({ queryKey: listKey, queryFn: async ({ signal }) =>
     TICKETS_HTTP.page.response.parse(await request(pathFor(TICKETS_HTTP.page.path), { params: { offset, limit, state, subject: searchSubject }, signal })), meta: { liveRefresh: false } });
-  return <CorePage actions={[{ id: "create", kind: "navigate", label: "新建工单", emphasis: "primary", permissions: permission("create"), to: page("create") }]}>
-    <CoreList<Ticket> query={query} queryKey={listKey} rowKey="id"
+  const counts = useQuery({ queryKey: [...queryKey, "status-counts"], queryFn: async ({ signal }) =>
+    TICKETS_HTTP.counts.response.parse(await request(pathFor(TICKETS_HTTP.counts.path), { signal })), meta: { liveRefresh: false } });
+  const summary = <QueryState loading={counts.isPending} error={counts.error} onRetry={() => counts.refetch()}>
+    {counts.data && <span>{t("当前可见工单")} {counts.data.total} · {t("待处理")} {counts.data.open} · {t("处理中")} {counts.data.in_progress} · {t("已关闭")} {counts.data.closed}</span>}
+  </QueryState>;
+  const refresh = () => Promise.all([query.refetch(), counts.refetch()]);
+  return <CorePage summary={summary} actions={[{ id: "create", kind: "navigate", label: "新建工单", emphasis: "primary", permissions: permission("create"), to: page("create") }]}>
+    <CoreList<Ticket> query={{ ...query, refetch: refresh }} queryKey={listKey} rowKey="id"
       pagination={{ offset, limit, onChange: (next, size) => { setOffset(next); setLimit(size); } }}
       controls={<><Input allowClear aria-label={t("工单标题")} placeholder={t("搜索标题")} maxLength={160} value={subject}
         onChange={event => { setSubject(event.target.value); setOffset(0); }} />

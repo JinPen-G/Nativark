@@ -33,6 +33,11 @@ export class TicketsController {
     return this.invoke(who => this.service.page(who, listInput(query)));
   }
 
+  @Get(TICKETS_HTTP.counts.path)
+  statusCounts(@Query() query: Record<string, unknown>) {
+    return this.invoke(who => this.service.statusCounts(who, TICKETS_HTTP.counts.query.parse(query)));
+  }
+
   @Get(TICKETS_HTTP.get.path)
   get(@Param() params: unknown) {
     return this.invoke(who => this.service.get(who, TICKETS_HTTP.get.params.parse(params).ticketId));

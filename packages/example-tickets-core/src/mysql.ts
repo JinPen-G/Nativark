@@ -5,7 +5,8 @@
 import { createHash } from "node:crypto";
 import { empty, join, sqltag as sql, type Sql } from "@prisma/client/runtime/library";
 import type { CorePhysicalDataObservation, CoreRemovalAssessment } from "@rental-os/core-contracts";
-import { TicketError, TicketIdSchema, TicketSchema, TicketPageSchema, TICKETS_DATA_VERSION, type ListTickets, type Ticket, type TicketPage, type TicketPageQuery } from "./contracts";
+import { TicketError, TicketIdSchema, TicketSchema, TicketPageSchema, TicketStatusCountsSchema, TICKETS_DATA_VERSION,
+  type ListTickets, type Ticket, type TicketPage, type TicketPageQuery, type TicketStatusCounts } from "./contracts";
 import type { TicketAccess, TicketExecution, TicketExecutionRequest, TicketRepository, TicketStoredReceipt } from "./service";
 
 interface TicketRow {
@@ -58,7 +59,22 @@ class MysqlTicketRepository implements TicketRepository {
     }) });
   }
 
-  private visibleWhere(query: ListTickets, viewerId?: string): Sql {
+  async statusCounts(viewerId?: string): Promise<TicketStatusCounts> {
+    // COUNT在同一语句快照读取全量可见范围；空集合也返回四个零，不受当前列表筛选/分页影响。
+    const rows = await this.tx.$queryRaw<Array<Record<keyof TicketStatusCounts, bigint | number>>>(sql`
+      SELECT COUNT(*) AS total,
+        COUNT(CASE WHEN state = 'open' THEN 1 END) AS open,
+        COUNT(CASE WHEN state = 'in_progress' THEN 1 END) AS in_progress,
+        COUNT(CASE WHEN state = 'closed' THEN 1 END) AS closed
+      FROM example_tickets ${this.visibleWhere({}, viewerId)}`);
+    if (!rows.length) throw new Error("工单状态汇总缺少计数观察");
+    const row = rows[0];
+    return TicketStatusCountsSchema.parse({
+      total: Number(row.total), open: Number(row.open), in_progress: Number(row.in_progress), closed: Number(row.closed)
+    });
+  }
+
+  private visibleWhere(query: Pick<ListTickets, "state">, viewerId?: string): Sql {
     return sql`WHERE tenant_id = ${this.tenantId}
       ${viewerId === undefined ? empty : sql`AND (created_by = ${viewerId} OR assignee_id = ${viewerId})`}
       ${query.state ? sql`AND state = ${query.state}` : empty}`;

@@ -2,6 +2,7 @@
  * client generator 只在内存生成声明，compilerHost 禁止落盘。不启动 Client、引擎、
  * 应用或连接数据库；此检查不代替独立包构建或实际数据库结构验收。
  * node scripts/check-selected-prisma-types.cjs --deps <node_modules> --mode rental|rental-ai|platform <入口.ts>...
+ * 显式传 --config 且省略源码入口时，使用该 tsconfig 的完整文件集，包含继承的声明。
  */
 const fs = require('node:fs');
 const path = require('node:path');
@@ -10,17 +11,17 @@ const { createRequire } = require('node:module');
 const slash = file => path.resolve(file).split(path.sep).join('/');
 const root = slash(path.resolve(__dirname, '..'));
 const args = process.argv.slice(2);
-let dependencyDirectory = path.join(root, 'node_modules'), mode = 'rental', configPath = 'apps/api/tsconfig.json';
+let dependencyDirectory = path.join(root, 'node_modules'), mode = 'rental', configPath = 'apps/api/tsconfig.json', explicitConfig = false;
 const entries = [];
 for (let index = 0; index < args.length; index++) {
   if (args[index] === '--deps') dependencyDirectory = args[++index];
   else if (args[index] === '--mode') mode = args[++index];
-  else if (args[index] === '--config') configPath = args[++index];
+  else if (args[index] === '--config') { configPath = args[++index]; explicitConfig = true; }
   else if (args[index].startsWith('--')) throw new Error(`未知选项 ${args[index]}`);
   else entries.push(args[index]);
 }
-if (!['rental', 'rental-ai', 'platform'].includes(mode) || !dependencyDirectory || !entries.length) {
-  throw new Error('须指定 rental/rental-ai/platform、只读依赖目录和源码入口');
+if (!['rental', 'rental-ai', 'platform'].includes(mode) || !dependencyDirectory || !configPath || (!entries.length && !explicitConfig)) {
+  throw new Error('须指定 rental/rental-ai/platform、只读依赖目录及源码入口或明确的 --config');
 }
 const deps = slash(dependencyDirectory), requireDeps = createRequire(deps + '/typescript/package.json');
 const ts = requireDeps('typescript');
@@ -135,9 +136,10 @@ Object.assign(host, { fileExists, readFile, directoryExists, getDirectories: fil
   writeFile: () => { throw new Error('禁止 compilerHost 落盘'); },
   getSourceFile: (file, version) => { const text = readFile(file); return text === undefined ? undefined : ts.createSourceFile(file, text, version, true); }
 });
-const program = ts.createProgram({ rootNames: entries.map(file => slash(path.resolve(root, file))), options, host });
+const rootNames = entries.length ? entries.map(file => slash(path.resolve(root, file))) : parsed.fileNames;
+const program = ts.createProgram({ rootNames, options, host });
 const diagnostics = [...parsed.errors, ...ts.getPreEmitDiagnostics(program)];
-console.log(JSON.stringify({ typescript: ts.version, prisma: '5.22.0', schemas, roots: entries.length,
+console.log(JSON.stringify({ typescript: ts.version, prisma: '5.22.0', schemas, roots: rootNames.length,
   sources: program.getSourceFiles().length, diagnostics: diagnostics.length, diskOutputs: 0 }));
 for (const diagnostic of diagnostics.slice(0, 40)) {
   const position = diagnostic.file && diagnostic.start != null ? diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start) : undefined;

@@ -189,7 +189,7 @@ Core从实际接口方法/路径及权限声明生成 `CoreHttpContribution`，�
 
 结果成功时提供 `registry.resolve(method, path, audience)`，path为原宿主归一、剥离 `/api`后的路径。未知方法/路径/分面不返回政策；同一路径参数与静态段重叠、重复标识、未声明权限或错误Core/版本拒绝，失败不返回部分目录。大小写匹配和GET的隐式HEAD沿原Express语义，GET/HEAD政策不得重叠；参数值仍由所属Controller/schema校验。旧Rental路径沿原兼容政策，新Core不声明旧路由例外。
 
-[工单示范](../example-tickets-core/src/http.ts)的 `createTicketsHttpContribution()`直接从TICKETS_HTTP生成八条政策，Nest和OpenAPI仍消费同一声明；分页与旧数组读取共享本Core读取权限。实际部署目录在创建时通过可选 `http`接收贡献，主应用Guard统一消费目录及当前原身份准入；新增Core无需修改Guard内的逐业务判断。未知政策或无贡献的路径保持原默认拒绝。[宿主接线](../../apps/api/src/modules/core-host/README.md#core业务http准入)
+[工单示范](../example-tickets-core/src/http.ts)的 `createTicketsHttpContribution()`直接从TICKETS_HTTP生成九条政策，Nest和OpenAPI仍消费同一声明；分页与旧数组读取共享本Core读取权限。实际部署目录在创建时通过可选 `http`接收贡献，主应用Guard统一消费目录及当前原身份准入；新增Core无需修改Guard内的逐业务判断。未知政策或无贡献的路径保持原默认拒绝。[宿主接线](../../apps/api/src/modules/core-host/README.md#core业务http准入)
 
 ## Core 管理 HTTP 合同
 
@@ -367,7 +367,7 @@ node packages/core-contracts/dist/prepare-install.js <Core包.tgz> <SHA256> <既
 
 ## 从 GitHub 固定发行准备
 
-Core 作者先按前面的命令生成标准包，文件命名为 `<Core ID>-<版本>.tgz`，例如 `example-tickets-0.1.0.tgz`。在公开仓库创建 `v0.1.0` Tag 和非预发行 Release，将这个包作为 Release 资产上传。同仓多个 Core 使用 `example-tickets/v0.1.0` 形式的独立 Tag；清单中的 `source.repository` 和 `source.commit` 对应该仓库和 Tag 实际指向的提交。包内清单可在构建阶段注入固定来源，避免用未提交工作区或 `target_commitish` 的分支名替代提交。
+Core 作者先按前面的命令生成标准包，文件命名为 `<Core ID>-<版本>.tgz`，例如 `example-tickets-0.1.1.tgz`。在公开仓库创建 `v0.1.1` Tag 和非预发行 Release，将这个包作为 Release 资产上传。同仓多个 Core 使用 `example-tickets/v0.1.1` 形式的独立 Tag；清单中的 `source.repository` 和 `source.commit` 对应该仓库和 Tag 实际指向的提交。包内清单可在构建阶段注入固定来源，避免用未提交工作区或 `target_commitish` 的分支名替代提交。
 
 部署者先读取选定发行，将输出 JSON 保存为一份固定来源记录。下面的命令显式访问公开 GitHub，无需本机 Key；首版不读取环境变量或 Git 凭据来访问私有仓库。
 

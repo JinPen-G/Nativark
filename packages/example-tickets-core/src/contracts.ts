@@ -2,7 +2,7 @@
 import { z } from "zod";
 
 export const TICKETS_CORE_ID = "example-tickets";
-export const TICKETS_CORE_VERSION = "0.1.0";
+export const TICKETS_CORE_VERSION = "0.1.1";
 export const TICKETS_DATA_VERSION = "0.1.0";
 /** 当前工单实现可读取的原绑定版本范围；物理数据版本和迁移账由宿主另行核验。 */
 export const TICKETS_DATA_READABLE = Object.freeze({ minInclusive: "0.1.0", maxExclusive: "0.2.0" });
@@ -35,6 +35,15 @@ export type TicketPageQuery = z.infer<typeof TicketPageQuerySchema>;
 /** 当前页和总数使用同一可读范围；旧数组列表合同保持。 */
 export const TicketPageSchema = z.object({ rows: z.array(TicketSchema).max(100), total: z.number().int().safe().nonnegative() }).strict();
 export type TicketPage = z.infer<typeof TicketPageSchema>;
+/** 汇总读取当前可见的全部工单，不接受分页、筛选或客户端范围。 */
+export const TicketStatusCountsQuerySchema = z.object({}).strict();
+export const TicketStatusCountsSchema = z.object({
+  total: z.number().int().safe().nonnegative(),
+  open: z.number().int().safe().nonnegative(),
+  in_progress: z.number().int().safe().nonnegative(),
+  closed: z.number().int().safe().nonnegative()
+}).strict();
+export type TicketStatusCounts = z.infer<typeof TicketStatusCountsSchema>;
 export type TicketPermission = "read" | "read.all" | "create" | "assign" | "start" | "close";
 export interface TicketReceipt { operationId: string; ticket: Ticket }
 

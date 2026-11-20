@@ -198,7 +198,7 @@ async function run() {
       }
     } else if (info.isFile()) platformInputs.set(relative, fs.readFileSync(absolute));
   };
-  for (const relative of [...platformSourceApi.PLATFORM_SOURCE_WORKSPACES, 'packages/ui-arc',
+  for (const relative of [...platformSourceApi.PLATFORM_SOURCE_WORKSPACES, ...platformSourceApi.PLATFORM_SOURCE_SCRIPTS, 'packages/ui-arc',
     'packages/ui-tablecn/LICENSE.md', 'packages/ui-tablecn/README.md', 'packages/ui-motiq/runtime',
     'packages/ui-motiq/LICENSE', 'packages/ui-motiq/README.md', 'config', 'AGENTS.md', 'CLAUDE.md',
     'LICENSE', '.gitignore', '.gitattributes', 'tsconfig.base.json', 'package.json',
@@ -207,6 +207,10 @@ async function run() {
   // role. Keep the original offline guard closed to every .env* file on disk.
   platformInputs.set('.env.example', Buffer.from('# Offline source archive fixture; no environment is loaded.\n'));
   const platformSource = platformSourceApi.createPlatformSource(platformInputs, source);
+  for (const script of platformSourceApi.PLATFORM_SOURCE_SCRIPTS)
+    assert.deepEqual(platformSource.files.get(script), platformInputs.get(script));
+  assert.equal(JSON.parse(platformSource.files.get('package.json')).scripts['check:types'],
+    'node scripts/check-selected-prisma-types.cjs --mode platform --config apps/platform-api/tsconfig.json');
   const platformArchive = archive.createCoreArchive(platformSource.files), platformFiles = platformSource.files;
   const deployment = memory.load(path.join(root, 'apps/rental-api/dist/prepare-deployment.js'));
   const deploymentInput = { release: { versions, source, sha256: platformArchive.sha256, data: platform.data },
