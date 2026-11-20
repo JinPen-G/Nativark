@@ -1,5 +1,6 @@
 /** 原历史/善后入口的当前主体与原对象租约。先原 Auth 的 Tenant X/主体锁，
- * 再由 application-access 锁 Core，随后原 Order→Workspace→单据；只复用原权限与
+ * 再由 application-access 锁 Core，随后原 Order→Workspace→单据；空间历史只锁
+ * 当前 Workspace，不进入订单动作。只复用原权限与
  * 可见性，不替代原状态机、资金算法、业务幂等或提供方结果判断。 */
 import { sqltag as sql } from "@prisma/client/runtime/library";
 import type { Prisma } from "@prisma/client";
@@ -61,8 +62,8 @@ export interface RentalRecoveryRequest {
 export interface RentalRecoveryLease {
   /** Recheck expiry/current projection; the original row locks remain in this tx. */
   revalidate(): Promise<void>;
-  /** Called after Tenant/Core. It locks only the server-bound original order,
-   * then workspace/current original object, before any action participant. */
+  /** Called after Tenant/Core. It locks the bound original order before workspace;
+   * an explicit workspace-history read has no order and cannot become an action. */
   lockOriginalSubject(coreDisabled: boolean): Promise<void>;
   assertOrder(tenantId: string, workspaceId: string, orderId: string): void;
 }
@@ -76,9 +77,12 @@ export function createRentalRecoveryAuthority(input: {
   }
   return Object.freeze({
     async lock(transaction: RentalBusinessTenantTransaction, request: RentalRecoveryRequest): Promise<RentalRecoveryLease> {
-      if ("$transaction" in transaction || !request.workspaceId || !request.tenantId || !orderTransaction(transaction)) {
-        throw denied("Rental 善后必须使用原事务、当前空间和原订单读取器");
+      if ("$transaction" in transaction || !request.workspaceId || !request.tenantId
+        || request.subject.declaration.scope === "order" && !orderTransaction(transaction)) {
+        throw denied("Rental 善后必须使用原事务、当前空间及所需原对象读取器");
       }
+      if (request.subject.declaration.scope === "workspace-history" && request.audience === "client")
+        throw denied("经营空间报表与对账历史须沿原成员权限，不能借客户身份代读");
       const identity = getRequestIdentity();
       if (!identity || identity.isSaasAdmin || identity.tenantId !== request.tenantId || identity.workspaceId !== request.workspaceId
         || identity.audience !== request.audience) throw denied("Rental 善后主体与原 Guard 证据不一致");
@@ -115,23 +119,28 @@ export function createRentalRecoveryAuthority(input: {
       }
       await revalidate();
       const assertOrder = (tenantId: string, workspaceId: string, orderId: string) => {
-        if (!request.subject.orderId || tenantId !== request.tenantId || workspaceId !== request.workspaceId
+        if (request.subject.declaration.scope !== "order" || !request.subject.orderId || tenantId !== request.tenantId || workspaceId !== request.workspaceId
           || orderId !== request.subject.orderId) throw denied("Rental 善后事务不能切换原绑定订单");
       };
       return Object.freeze({ revalidate, assertOrder, async lockOriginalSubject(coreDisabled: boolean) {
         await revalidate();
         const { subject, tenantId, workspaceId } = request;
-        if (subject.orderId) {
+        if (subject.declaration.scope === "order") {
+          if (!subject.orderId || !orderTransaction(transaction)) throw denied("善后动作缺少原持久订单读取器");
           const rows = await transaction.$queryRaw<Array<{ id: string }>>(sql`SELECT id FROM rental_orders
             WHERE id = ${subject.orderId} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId} FOR UPDATE`);
           if (rows.length !== 1 || rows[0].id !== subject.orderId) throw denied("原订单不存在或已不属于当前经营空间");
-        } else if (!subject.declaration.collection || subject.declaration.kind !== "history") throw denied("善后动作缺少原持久订单");
-        // Workspace follows the original order; never acquire it in beforeParent.
+        } else if (!["order-collection", "workspace-history"].includes(subject.declaration.scope)
+          || subject.declaration.kind !== "history" || subject.orderId || subject.intentId || subject.refundId)
+          throw denied("空间历史只允许已登记的读取，不能绑定订单或资金动作");
+        // Workspace follows the bound order. The reviewed workspace/collection
+        // readers take no Order locks; assertOrder grants them no order actions.
         const spaces = await transaction.$queryRaw<Array<{ id: string; status: string }>>(sql`SELECT id, status FROM business_workspaces
           WHERE id = ${workspaceId} AND tenantId = ${tenantId} FOR UPDATE`);
         if (spaces.length !== 1 || spaces[0].id !== workspaceId || spaces[0].status.toLowerCase() !== "active")
           throw denied("当前经营空间已冻结或停用");
         if (subject.orderId) {
+          if (!orderTransaction(transaction)) throw denied("原订单读取器不可用");
           const order = await transaction.rentalOrder.findFirst({ where: { id: subject.orderId, tenantId, workspaceId,
             ...requestRentalOrderVisibilityWhere({ getRequestDataScope, getRequestLocationIds, getRequestUserId }) },
             select: { id: true, tenantId: true, workspaceId: true, status: true, customerId: true, membershipSnapshot: true } });

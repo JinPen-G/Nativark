@@ -18,6 +18,7 @@ const { RENTAL_CATEGORY_DEFINITIONS } = require("../packages/shared/dist");
 const root = path.resolve(__dirname, "../apps/staff-miniprogram");
 const src = path.join(root, "src");
 const rentalClientRoot = path.resolve(__dirname, "../packages/rental-core/clients/staff");
+const rentalTimeFile = path.resolve(rentalClientRoot, "../time.ts");
 const apiSrc = path.resolve(__dirname, "../apps/api/src");
 const read = (file) => fs.readFileSync(path.join(src, file), "utf8");
 const readApi = (file) => fs.readFileSync(path.join(apiSrc, file), "utf8");
@@ -78,7 +79,7 @@ function runtime(handler) {
     let absolute = path.resolve(src, relative);
     if (!path.extname(absolute)) absolute += ".ts";
     if (modules.has(absolute)) return modules.get(absolute).exports;
-    assert.ok(absolute.startsWith(src + path.sep) || absolute.startsWith(rentalClientRoot + path.sep), `模块不能逃出本端或正式Rental客户端：${relative}`);
+    assert.ok(absolute.startsWith(src + path.sep) || absolute.startsWith(rentalClientRoot + path.sep) || absolute === rentalTimeFile, `模块不能逃出本端或正式Rental客户端：${relative}`);
     const module = { exports: {} };
     modules.set(absolute, module);
     const output = ts.transpileModule(fs.readFileSync(absolute, "utf8"), { compilerOptions: { target: ts.ScriptTarget.ES2019, module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText;

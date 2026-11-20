@@ -35,6 +35,14 @@ sessionEvents.on(assets.invalidateAssets);
 
 认证使用 `createRentalStaffAuthApi`，宿主传入原请求、refresh token 读取、会话保存与退出清理。附件使用 `createRentalStaffUploadsApi`，宿主传入原键、观察校验与固定路由、微信读文件和 PUT 字节能力。页面生命周期和阶段回调沿原宿主，未知结果保留原引用，不能重传文件。[认证接入](auth/README.md) · [附件接入](uploads/README.md)
 
+## 业务词条与订单卡片
+
+同一正式入口提供 `createRentalStaffLabels` 和 `createRentalStaffPresenters`。[员工词条](labels.ts)接收原 `terms` 函数，每次沿当前空间术语读取，保留原订单页签、状态、色调、资产／工单词条与未知值。宿主初始化时绑定一次实例，[原词条入口](../../../../apps/staff-miniprogram/src/core/labels.ts)继续导出原名称。
+
+[卡片投影](presenters.ts)供给原订单字段、手机号脱敏、有效归还时间、数量、金额与媒体来源。宿主传入同一词条实例的状态函数及原目录 `itemGroupImagePath`，时间直接复用[同源 Core 时间](../time.ts)。原零金额、缺金额、未知状态及封面选择保持，[原展示入口](../../../../apps/staff-miniprogram/src/core/presenters.ts)绑定一次工厂。
+
+订单、客户和资产页面继续消费原入口。实际媒体地址、下载、令牌和失败占位沿[原图片宿主](../../../../apps/staff-miniprogram/src/core/images.ts)，页面展示和业务操作仍经原会话、准入及服务端裁定。[原员工定向断言](../../../../tests/staff-miniprogram-static.test.cjs)核对页签和词条，卡片定向冒烟核对原字段、脱敏、媒体路径及下载失败。
+
 ## 检查表字段
 
 同一正式入口提供 `inspectionRows`、`inspectionResults` 与 `InspectionFieldRow`。[字段转换](inspection-form.ts)沿服务端原模板生成空输入，并核对必填、可选值、有限数值及照片资产 ID。原字段类型、单位、默认值、错误文案和结果映射保持。

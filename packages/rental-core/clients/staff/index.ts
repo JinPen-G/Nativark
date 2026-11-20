@@ -27,3 +27,5 @@ export { createRentalStaffInspectionTaskApi, type RentalStaffInspectionTaskPorts
 export { createRentalStaffSceneCatalogApi, type RentalStaffSceneCatalogPorts } from "./ai-scene-catalog";
 export { createRentalStaffInspectionTransport, type RentalStaffInspectionTransportPorts } from "./inspection-transport";
 export { inspectionRows, inspectionResults, type InspectionFieldRow } from "./inspection-form";
+export { createRentalStaffLabels, type RentalStaffLabelsPorts, type Tone, type OrderTabKey } from "./labels";
+export { createRentalStaffPresenters, type RentalStaffPresentersPorts, type OrderCard } from "./presenters";

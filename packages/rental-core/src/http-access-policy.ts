@@ -86,6 +86,10 @@ const webhook = PaymentWebhookController.prototype;
 const recoveryHandlers = new Map<Function, RentalRecoveryKind>([
   ...[core.orders, core.order, core.inspections, core.extensions, core.changes,
     core.orderDocument, core.orderDocumentVersions, core.orderDocumentVersion,
+    core.originalExchangeInspectionMedia, core.readExchangeInspection, core.originalExchangeInspection,
+    enterprise.exchangeInspectionConsentOriginal, enterprise.orderExchangeApprovals,
+    core.operationReport, core.exportOperationReport,
+    PaymentReconciliationController.prototype.listStatements, PaymentReconciliationController.prototype.getStatement,
     core.listCarrierShipmentEvents, core.revealOrderDeliveryAddress, core.listInternalOrderNotes,
     core.getServiceExecutionReceipt, business.fundingEvents,
     client.listOrders, client.myOrders, client.orderDetail, client.fulfillment, client.orderDocument,
