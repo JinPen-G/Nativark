@@ -6,7 +6,15 @@ module.exports = async function runCases({ t, lock }) {
   const { HTTP_CODE_METADATA } = require('@nestjs/common/constants');
   const { createRentalAuthorization } = require('@rental-os/rental-core/http-auth');
   const { createRentalStaffPolicy } = require('@rental-os/rental-core/staff-api-policy');
-  const { RENTAL_AI_CONTROLLERS, RENTAL_AI_INSPECTION_OPERATIONS, createRentalAiHttpPolicy } = require('../src/ai-http-policy.ts');
+  const { RENTAL_AI_CONTROLLERS, RENTAL_AI_INSPECTION_OPERATIONS, RENTAL_AI_MOUNTED_REQUESTS,
+    createRentalAiHttpPolicy } = require('../src/ai-http-policy.ts');
+  const { AiOriginalQuoteModelExecutionController, AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS,
+    AiOriginalSceneModelActionsController, AiOriginalSceneModelController } =
+    require('@rental-os/ai-native-server/runtime/scenes/original-scenes.controller');
+  const { AiOriginalOpeningModelExecutionController, AI_ORIGINAL_OPENING_MODEL_REQUESTS } =
+    require('@rental-os/ai-native-server/runtime/scenes/opening-model-execution.controller');
+  const { AiOriginalOrderReadController, AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS } =
+    require('@rental-os/ai-native-server/runtime/scenes/original-order-read.controller');
   const { createRentalAiOpenApi } = require('../src/ai-openapi.ts');
   await t.test('实际 AI 路由具有原权限、正确成功状态和完整文档引用', () => {
     const authorization = createRentalAuthorization(shared), staff = createRentalStaffPolicy(shared);
@@ -14,6 +22,21 @@ module.exports = async function runCases({ t, lock }) {
     policy.assertReviewed();
     const document = createRentalAiOpenApi(lock, policy);
     const routes = policy.routes.filter(route => RENTAL_AI_CONTROLLERS.includes(route.controller));
+    // A published execution must resolve its original dedicated factory. Mounting
+    // the broad legacy controller alongside it would give the same task two drivers.
+    for (const [controller, token, count] of [
+      [AiOriginalQuoteModelExecutionController, AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS, 13],
+      [AiOriginalOpeningModelExecutionController, AI_ORIGINAL_OPENING_MODEL_REQUESTS, 6],
+      [AiOriginalOrderReadController, AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS, 17],
+    ]) {
+      assert(RENTAL_AI_CONTROLLERS.includes(controller));
+      assert.equal(RENTAL_AI_MOUNTED_REQUESTS.filter(value => value === token).length, 1);
+      assert.equal(routes.filter(route => route.controller === controller).length, count);
+    }
+    assert(!RENTAL_AI_CONTROLLERS.includes(AiOriginalSceneModelActionsController));
+    assert(!RENTAL_AI_CONTROLLERS.includes(AiOriginalSceneModelController));
+    const identities = routes.map(route => route.method + ' ' + route.path);
+    assert.equal(new Set(identities).size, identities.length, 'each original path has one mounted handler');
     let operations = 0, references = 0;
     for (const route of routes) {
       const paths = route.handlerName === 'consume'

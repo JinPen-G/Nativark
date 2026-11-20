@@ -18,6 +18,7 @@ import type { PrismaOriginalRequestRepository } from './task-request/prisma-orig
 import { PrismaTaskActionPolicyRepository, type AiTaskActionPolicyMutationAuthority,
   type AiTaskActionPolicyMutationResult } from './prisma-task-action-policy.repository';
 import type { TaskExecutionAdmissionReference } from './task-execution-admission.application';
+import { withAiTaskTransaction } from './task-transaction-authority';
 
 export interface TaskExecutionAdmissionSigningDependencies {
   db: Pick<PrismaClient, '$transaction' | 'aiScope' | 'aiTask' | 'aiTaskActionPolicy' | 'aiTaskPlanPolicy' | 'operationLog' | 'rentalRuleVersion'>
@@ -127,8 +128,10 @@ export class TaskExecutionAdmissionAuthority implements AiTaskActionPolicyMutati
     // The original writer still owns every create/update/CAS and original log.
     // This adapter only locks/rechecks its real publication in that transaction.
     // The original writer records its original CAS; no table write is added here.
+    // Enter selected Auth/Core/resource participants before the first AI lock;
+    // the repository's later same-Task join reuses this exact transaction.
     const transaction = (work: (tx: Prisma.TransactionClient) => Promise<AiTaskActionPolicyMutationResult>, options?: object) =>
-      this.d.db.$transaction(async tx => {
+      this.d.db.$transaction(tx => withAiTaskTransaction(tx, { kind: 'task', taskId: reference.task.taskId }, async () => {
         await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_scopes WHERE id = ${reference.task.scopeId} FOR UPDATE`);
         await tx.$queryRaw(prismaRuntime.sql`SELECT revision FROM ai_task_plan_policies WHERE scopeId = ${reference.task.scopeId}
           AND sceneCode = ${reference.task.sceneCode} AND sceneVersion = ${reference.task.sceneVersion} FOR UPDATE`);
@@ -138,7 +141,7 @@ export class TaskExecutionAdmissionAuthority implements AiTaskActionPolicyMutati
           await this.resolve(reference.task.taskId, 'configure_action_policy');
           return result;
         });
-      }, options as Parameters<PrismaClient['$transaction']>[1]);
+      }), options as Parameters<PrismaClient['$transaction']>[1]);
     const db = this.purpose === 'issue' ? { aiTask: this.d.db.aiTask, aiTaskActionPolicy: this.d.db.aiTaskActionPolicy,
       operationLog: this.d.db.operationLog, $transaction: transaction } : this.d.db;
     const authority = this.purpose === 'issue' ? this : { resolve: (taskId: string, operation: 'configure_action_policy') =>

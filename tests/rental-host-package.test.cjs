@@ -1,7 +1,7 @@
 'use strict';
 /** 独立宿主打包回归：真实配置 emit、正式包/部署准备及 CLI 文件运输全部驻内存。
  * 包来源使用明确的测试 fixture 身份，不伪称活动源码已在历史提交发布。
- * 不执行 Docker/npm安装/Client构造/迁移，所有产物随进程释放。 */
+ * 官方 Client 仅供根模块构造，禁止连接/查询/运输/生命周期；不执行 Docker/npm安装/迁移。所有产物随进程释放。 */
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..'), args = process.argv.slice(2);
 if (args.length && (args.length !== 2 || args[0] !== '--deps' || !path.isAbsolute(args[1] || '')))
@@ -215,9 +215,11 @@ async function run() {
     finally { memory.fs.writeSync = write; }
     assert.equal(memory.fs.readFileSync(switched, 'utf8'), 'other writer');
   });
+  const rootDi = await require('../apps/rental-api/test/ai-host-root-cases.cjs')({
+    build, memory, rentalFiles, aiFiles, enabled, aiResult, disabled, platformClient });
   assert.equal(fs.existsSync(temporary), false);
   console.log(JSON.stringify({ checks, builds: build.stages.length, disabled: { files: result.files.size, runtimeFiles: result.receipt.runtime.files, sha256: result.sha256 },
     enabled: { files: aiResult.files.size, runtimeFiles: aiResult.receipt.runtime.files, sha256: aiResult.sha256 },
-    fixtureProvenance: true, diskOutputs: 0, imageBuild: 'not-run', database: 'not-connected', deployment: 'pending' }));
+    rootDi, fixtureProvenance: true, diskOutputs: 0, imageBuild: 'not-run', database: 'not-connected', deployment: 'pending' }));
 }
 run().catch(error => { console.error(error.stack); process.exitCode = 1; });

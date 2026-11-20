@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 import type { AiSceneCode } from '@rental-os/shared';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
+import { captureRentalInternalAuthority } from '@rental-os/rental-core/application-internal-authority';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { AiTaskRunnerError, callAiTaskRunnerDependency } from './runner/ai-task-runner.service';
 import { composeAiOriginalScenes, type AiOriginalSceneDependencies } from './scenes/original-scenes.composition';
@@ -13,6 +14,7 @@ import { composeTaskExecutionAdmission } from './task-execution-admission.applic
 import { originalRequestReferenceSchema } from './task-request/original-request.validation';
 import { createCalendarOriginalRequests } from './task-calendar-original-source.composition';
 import { createRuleOriginalRequests } from './task-rule-original-source.composition';
+import { withOriginalSceneTaskTransactions } from './scenes/original-scene-transactions';
 
 type Dependencies = Omit<AiOriginalSceneDependencies, 'credentials' | 'db'> & { db: PrismaClient };
 type Request = { headers: { authorization?: unknown } };
@@ -34,7 +36,8 @@ export function createOriginalTaskStartAdmission(d: Dependencies, scene: AiScene
       return { authorization, audience: 'operator' as const, requestId };
     } };
     try {
-      await callAiTaskRunnerDependency(() => runWithRequestIdentity({}, async () => {
+      const selected = captureRentalInternalAuthority();
+      const consume = async () => {
         const originals = preparation?.kind === 'business_calendar'
           ? createCalendarOriginalRequests({ ...d, credentials }, { year: preparation.year, date: preparation.date })
           : preparation?.kind === 'business_rule' && preparation.version !== undefined
@@ -63,12 +66,20 @@ export function createOriginalTaskStartAdmission(d: Dependencies, scene: AiScene
         // host below remains mandatory; this is not an authorization by replay.
         if (prepared.admission === 'existing_policies_available') return;
         issuanceAttempted = true;
-        const issued = await admission.issue({ reference: prepared.reference, intent }, signal);
+        const issue = () => admission.issue({ reference: prepared.reference, intent }, signal);
+        // Keep the selected HTTP Guard's actual store and bind policy CAS to
+        // the original Task. Each existing repository transaction owns its
+        // Auth → Core → resource → Task locks; no outer transaction is opened.
+        const issued = !preparation
+          ? await withOriginalSceneTaskTransactions({ ...d, credentials }, parsed.data, issue)
+          : await issue();
         if (issued.phase !== 'policy_admission_recorded'
           || issued.admission !== 'current_publication_and_role_revalidated')
           throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'Original task admission requires its original receipts');
         if (!active || signal?.aborted) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
-      }), 15000, 'original_task_admission', signal);
+      };
+      await callAiTaskRunnerDependency(() => selected ? consume() : runWithRequestIdentity({}, consume),
+        15000, 'original_task_admission', signal);
     } catch (error) {
       if (issuanceAttempted) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'Original task admission requires its original receipts');
       if (error instanceof AiTaskRunnerError && (error.code === 'AI_RUN_LIMIT' || error.code === 'AI_RESULT_UNKNOWN'))

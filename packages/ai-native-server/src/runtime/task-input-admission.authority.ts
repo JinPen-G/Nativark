@@ -12,6 +12,7 @@ import { aiTaskAccessFromContext, AiTaskRepositoryError } from './ai-task.reposi
 import { PrismaTaskActionPolicyRepository, type AiTaskActionPolicyMutationAuthority,
   type AiTaskActionPolicyMutationResult } from './prisma-task-action-policy.repository';
 import type { TaskInputAdmissionDependencies, TaskInputAdmissionReference } from './task-input-admission.application';
+import { withAiTaskTransaction } from './task-transaction-authority';
 
 type Action = TaskInputAdmissionReference['actions'][number];
 type Purpose = 'issue' | 'observe';
@@ -55,8 +56,10 @@ export class TaskInputAdmissionAuthority implements AiTaskActionPolicyMutationAu
     const reference = this.reference;
     if (this.purpose === 'issue' && (!action || action.mode !== 'configure'
       || !reference.actions.some(row => isDeepStrictEqual(row, action)))) throw denied();
+    // The selected parent's Auth/Core/resource locks must precede these AI
+    // locks; the original policy repository rejoins the same Task transaction.
     const transaction = (work: (tx: Prisma.TransactionClient) => Promise<AiTaskActionPolicyMutationResult>, options?: object) =>
-      this.d.db.$transaction(async tx => {
+      this.d.db.$transaction(tx => withAiTaskTransaction(tx, { kind: 'task', taskId: reference.task.taskId }, async () => {
         await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_scopes WHERE id = ${reference.task.scopeId} FOR UPDATE`);
         await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_tasks WHERE scopeId = ${reference.task.scopeId} AND id = ${reference.task.taskId} FOR UPDATE`);
         await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_runs WHERE scopeId = ${reference.task.scopeId}
@@ -71,7 +74,7 @@ export class TaskInputAdmissionAuthority implements AiTaskActionPolicyMutationAu
           await this.resolve(reference.task.taskId, 'configure_action_policy');
           return result;
         });
-      }, options as Parameters<PrismaClient['$transaction']>[1]);
+      }), options as Parameters<PrismaClient['$transaction']>[1]);
     const db = this.purpose === 'issue' ? { aiTask: this.d.db.aiTask, aiTaskActionPolicy: this.d.db.aiTaskActionPolicy,
       operationLog: this.d.db.operationLog, $transaction: transaction } : this.d.db;
     const authority = this.purpose === 'issue' ? this : { resolve: (taskId: string, operation: 'configure_action_policy') => this.authorize(taskId, operation) };

@@ -643,6 +643,10 @@
       "types": "./dist/client-context.d.ts",
       "default": "./dist/client-context.js"
     },
+    "./client-order-ownership": {
+      "types": "./dist/client-order-ownership.d.ts",
+      "default": "./dist/client-order-ownership.js"
+    },
     "./enterprise": {
       "types": "./dist/enterprise.d.ts",
       "default": "./dist/enterprise.js"
@@ -2214,6 +2218,9 @@
       ],
       "client-context": [
         "dist/client-context.d.ts"
+      ],
+      "client-order-ownership": [
+        "dist/client-order-ownership.d.ts"
       ],
       "enterprise": [
         "dist/enterprise.d.ts"

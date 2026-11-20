@@ -1,13 +1,16 @@
-/** 可选 AI 宿主的真实处理器与提交接点。原输入、任务中心、恢复、配置和手动检查
- * 各用明确原事务；模型执行开关与客户入口不因 provider 存在而成为可调用路由。 */
+/** 可选 AI 宿主的真实处理器与提交接点。原输入、三条持久执行链、任务中心、恢复、配置
+ * 和手动检查各用明确原事务；HTTP 发布不替代原模型/任务开关与当前调用授权。 */
 import { compileRentalHttpAccessPolicy, type RentalHttpAccessDeclaration } from "@rental-os/rental-core/http-access-policy";
 import { createRentalAuthorization } from "@rental-os/rental-core/http-auth";
 import { StaffUploadsController } from "@rental-os/rental-core/http-staff-uploads";
 import { matchableRequestPath } from "@rental-os/platform-server/request-path";
 import { OperatorEntrySceneCatalogController, StaffEntrySceneCatalogController } from "@rental-os/ai-native-server/runtime/scenes/entry-scene-catalog.controller";
 import { StaffInspectionAssistController } from "@rental-os/ai-native-server/runtime/inspection-assist/staff-inspection-assist.controller";
-import { AiOriginalScenesController, AiOriginalSceneRecoveryController,
-  AI_ORIGINAL_SCENE_REQUESTS, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS } from "@rental-os/ai-native-server/runtime/scenes/original-scenes.controller";
+import { AiOriginalScenesController, AiOriginalSceneRecoveryController, AiOriginalQuoteModelExecutionController,
+  AI_ORIGINAL_SCENE_REQUESTS, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS,
+  AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS } from "@rental-os/ai-native-server/runtime/scenes/original-scenes.controller";
+import { AiOriginalOpeningModelExecutionController, AI_ORIGINAL_OPENING_MODEL_REQUESTS } from "@rental-os/ai-native-server/runtime/scenes/opening-model-execution.controller";
+import { AiOriginalOrderReadController, AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS } from "@rental-os/ai-native-server/runtime/scenes/original-order-read.controller";
 import { AiTaskCenterController, AI_NATIVE_TASK_CENTER_REQUESTS } from "@rental-os/ai-native-server/runtime/task-center.application";
 import { AiModelSettingsController, AI_NATIVE_MODEL_SETTINGS_REQUESTS } from "@rental-os/ai-native-server/runtime/model-settings.application";
 import { AI_STAFF_INSPECTION_REQUESTS } from "@rental-os/ai-native-server/runtime/inspection-assist/staff-inspection-assist.controller";
@@ -21,11 +24,13 @@ export const RENTAL_AI_INSPECTION_OPERATIONS = Object.freeze([
 ]);
 export const RENTAL_AI_CONTROLLERS = Object.freeze([
   OperatorEntrySceneCatalogController, StaffEntrySceneCatalogController, StaffInspectionAssistController,
-  AiOriginalScenesController, AiOriginalSceneRecoveryController, AiTaskCenterController, AiModelSettingsController
+  AiOriginalScenesController, AiOriginalSceneRecoveryController, AiTaskCenterController, AiModelSettingsController,
+  AiOriginalQuoteModelExecutionController, AiOriginalOpeningModelExecutionController, AiOriginalOrderReadController
 ]);
 export const RENTAL_AI_MOUNTED_REQUESTS: readonly symbol[] = Object.freeze([
   AI_STAFF_INSPECTION_REQUESTS, AI_ORIGINAL_SCENE_REQUESTS, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS,
-  AI_NATIVE_TASK_CENTER_REQUESTS, AI_NATIVE_MODEL_SETTINGS_REQUESTS
+  AI_NATIVE_TASK_CENTER_REQUESTS, AI_NATIVE_MODEL_SETTINGS_REQUESTS,
+  AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS, AI_ORIGINAL_OPENING_MODEL_REQUESTS, AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS
 ]);
 function reviewed(controller: RentalHttpAccessDeclaration["controller"], handlers: readonly Function[],
   kind: "buffered-read" | "audited-read" | "transactional-write", evidence: string): RentalHttpAccessDeclaration[] {
@@ -33,6 +38,8 @@ function reviewed(controller: RentalHttpAccessDeclaration["controller"], handler
 }
 const scene = AiOriginalScenesController.prototype, recovery = AiOriginalSceneRecoveryController.prototype;
 const center = AiTaskCenterController.prototype, settings = AiModelSettingsController.prototype;
+const quote = AiOriginalQuoteModelExecutionController.prototype, opening = AiOriginalOpeningModelExecutionController.prototype;
+const orders = AiOriginalOrderReadController.prototype;
 const declarations: readonly RentalHttpAccessDeclaration[] = [
   ...reviewed(AiOriginalScenesController, [scene.queryOrders, scene.previewOrderExtension, scene.read, scene.reconcile,
     scene.reconcileReissue, scene.material, scene.materialV2, scene.sourceV2, scene.recovery,
@@ -53,6 +60,26 @@ const declarations: readonly RentalHttpAccessDeclaration[] = [
   ...reviewed(AiOriginalSceneRecoveryController, [recovery.requestCancellationIntent, recovery.settleUnstartedCancellation,
     recovery.settleReleasedInputCancellation], "transactional-write",
   "original task transaction authority locks Auth/Tenant/Core and persisted original Order/Workspace before Task mutation; original cancellation/answer CAS and receipts remain, cancel is never proof of remote cancellation or refund"),
+  ...reviewed(AiOriginalQuoteModelExecutionController, [quote.readQuotePreparation, quote.readClarifiedQuoteReceipt,
+    quote.readExecution], "buffered-read",
+  "original frozen quote preparation, confirmation receipt and task recovery snapshot; current original owner/action/source authorization and selected access recheck before response, no quote creation or model dispatch"),
+  ...reviewed(AiOriginalQuoteModelExecutionController, [quote.start, quote.refreshInput, quote.submitAnswer, quote.resume,
+    quote.continueAnswer, quote.reconcile, quote.recover, quote.takeover, quote.requestCancel, quote.confirmClarifiedQuote], "transactional-write",
+  "one original quote runner and Gateway; original request identity survives start/input admission, same-task Auth/Tenant/Core participant runs before original scope/task locks; original plan, lease, answer, budget and confirmation CAS/receipts remain; transport outside database transactions and unknown never authorizes redispatch"),
+  ...reviewed(AiOriginalOpeningModelExecutionController, [opening.readExecution], "buffered-read",
+  "original opening task recovery snapshot under current original owner/provenance authority and selected response recheck; no settings publication, proposal approval or task start"),
+  ...reviewed(AiOriginalOpeningModelExecutionController, [opening.start, opening.recover, opening.reconcile,
+    opening.takeover, opening.requestCancel], "transactional-write",
+  "dedicated original opening diagnosis provider and persisted runner; same original request/tenant/Core/task transaction authority, admission policy, Gateway accounting and recovery fences; opening execution does not approve or publish business settings"),
+  ...reviewed(AiOriginalOrderReadController, [orders.readPreparation, orders.readAnswer, orders.readTakeoverReceipt,
+    orders.readOrderResult, orders.readTaskScene, orders.readNextSteps, orders.readTaskSnapshot,
+    orders.readCancellationReceipt, orders.readCancellationSettlementReceipt], "buffered-read",
+  "original dedicated order explanation readers expose persisted same-task preparation, answer, business projection and receipts; current original order visibility and owner/action provenance plus selected response recheck, no execution admission"),
+  ...reviewed(AiOriginalOrderReadController, [orders.readModelResult, orders.reopenModelSource], "audited-read",
+  "dedicated original order result/source reader preserves original knowledge ACL and consent; required sensitive-read audit uses current same Auth/Tenant/Core transaction, with final selected access recheck and no new model call"),
+  ...reviewed(AiOriginalOrderReadController, [orders.start, orders.recover, orders.resumePrepared,
+    orders.takeover, orders.requestCancel, orders.settleUnstartedCancellation], "transactional-write",
+  "one dedicated original order explanation chain, never the legacy single-model driver; same-task Auth/Tenant/Core and original order locks precede original admission/plan/run writes; preparation repair, takeover and cancellation retain exact persisted fences, original receipts and no unknown replay"),
   ...reviewed(AiTaskCenterController, [center.list, center.snapshot, center.events, center.stopReceipt, center.usage,
     center.usageSummary, center.outcomes, center.confirmation, center.review, center.decisionReceipt, center.business,
     center.inputReceipt], "buffered-read",

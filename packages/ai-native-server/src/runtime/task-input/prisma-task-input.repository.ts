@@ -197,11 +197,17 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
   }
   private async transaction<T>(work: (tx: Tx) => Promise<T>, mayWrite = false): Promise<T> {
     let callbackCompleted = false;
+    // A source/receipt observer can run while this request's original submit
+    // holds Task/Run locks. Its independent snapshot must not acquire implicit
+    // Serializable shared locks against that owner. Observation grants no write;
+    // the original write transaction still rechecks identity/input/source/plan/CAS.
+    const isolationLevel = this.receiptOnly ? prismaRuntime.TransactionIsolationLevel.RepeatableRead
+      : prismaRuntime.TransactionIsolationLevel.Serializable;
     try { return await this.db.$transaction(async tx => {
       const result = await work(tx);
       callbackCompleted = true;
       return result;
-    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 }); }
+    }, { isolationLevel, maxWait: 2500, timeout: 5000 }); }
     catch (error) {
       if (error instanceof AiTaskRepositoryError) throw error;
       if (mayWrite && callbackCompleted) throw new AiTaskInputResultUnknownError();

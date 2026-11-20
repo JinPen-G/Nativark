@@ -974,6 +974,13 @@ test('启用宿主的实际 DI、知识权限与原结果边界', async (t) => {
         await assert.rejects(center.stop({ headers: {} }, { taskId: 'task-a', expectedRevision: 1 }),
           error => error.code === 'AI_ACCESS_DENIED');
         assert.equal(typeof get(RENTAL_AI_INSPECTION_BINDING).bindInspectionEvidence, 'function');
+        for (const provider of [providers.AI_NATIVE_QUOTE_MODEL_EXECUTION_PROVIDER,
+          providers.AI_NATIVE_OPENING_MODEL_EXECUTION_PROVIDER, providers.AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER]) {
+          // HTTP publication cannot enable a model driver without its original
+          // server configuration, capability evidence and current task admission.
+          await assert.rejects(get(provider.provide).start({ headers: {} }, {}),
+            error => error.code === 'AI_RESOURCE_UNAVAILABLE');
+        }
         assert.deepEqual(get(AI_STAFF_INSPECTION_OPERATIONS), [
           'history-read', 'receipt-host-read', 'draft-operation', 'submission-preparation',
           'submission-read', 'fulfillment-receipt-read',

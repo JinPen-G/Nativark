@@ -64,7 +64,7 @@ const reference = { draftVersion: shared.AI_SCENE_REQUEST_DRAFT_VERSION, inputRe
 const required = [...new Set(['system:params:manage', 'rental-os:order:view', 'rental-os:order:operate',
   ...['/rental/v1/business-settings', '/rental/v1/tenant-readiness', '/rental/v1/item-groups', '/rental/v1/booking-members']
     .flatMap(route => authorization.requiredPermissions('GET', route))])];
-function fixture(body = bodies[0], selectedLocations = false) {
+function fixture(body = bodies[0], selectedLocations = false, extraTables = {}) {
   const now = new Date(), expiresAt = new Date(now.getTime() + 600000);
   const scope = { id: 'scope-a', ...aiPersistenceScopeColumns({ kind: 'workspace', tenantId: 'tenant-a', workspaceId: 'workspace-a' }) };
   const user = syntheticUser({ permissions: [...required] });
@@ -73,7 +73,7 @@ function fixture(body = bodies[0], selectedLocations = false) {
   const member = { userId: user.id, workspaceId: 'workspace-a', tenantId: 'tenant-a', isActive: true,
     workspace: { status: 'ACTIVE' }, role, dataScope: null,
     locationScope: selectedLocations ? { mode: 'selected', locationIds: ['location-a'] } : { mode: 'all', locationIds: [] } };
-  const store = createTaskInputStore({ aiScope: [scope], aiTaskOriginalRequest: [], aiTask: [], aiRun: [], aiStep: [],
+  const store = createTaskInputStore({ ...extraTables, aiScope: [scope], aiTaskOriginalRequest: [], aiTask: [], aiRun: [], aiStep: [],
     aiTaskPlanPolicy: [...new Set(bodies.map(body => body.sceneCode))].map(sceneCode => ({ scopeId: scope.id, sceneCode,
       sceneVersion: '1', revision: 1, enabled: true, allowedTools: [], limits: {}, expiresAt })),
     aiGatewayInvocation: [], aiTaskActionInput: [], aiTaskRunPlan: [], aiTaskExecutionCharge: [], rentalApprovedSettingsChange: [], operationLog: [], rentalQuote: [],
@@ -218,7 +218,7 @@ function fixture(body = bodies[0], selectedLocations = false) {
     const { credentials: _, ...dependencies } = businessDependencies;
     return composeRequestBoundOriginalScenes(dependencies, { enabled: true, audience: 'operator' });
   };
-  return { ...store, state, invoke, create, createThroughRequest, participate, input, step, auth, guard, orders, requests,
+  return { ...store, businessDependencies, state, invoke, create, createThroughRequest, participate, input, step, auth, guard, orders, requests,
     inputRequests, inputParticipant, originalAuthority, saveCommand, requestBound };
 }
 
@@ -457,4 +457,5 @@ async function main() {
   console.log(JSON.stringify({ checks: count, real: ['Auth', 'Guard', 'WorkspacePrincipal', 'CoreAccess', 'OrderRepository', 'OriginalRequestRepository', 'TaskCreationRepository'],
     database: 'in-memory rollback transport', modelCalls: 0, diskOutputs: 0 }));
 }
-main().catch(error => { console.error(error); process.exitCode = 1; });
+module.exports = { fixture, bodies, reference, inputRef, load, loader, shared, identity, runtime, aiPersistenceScopeColumns, requestFingerprint };
+if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1; });
