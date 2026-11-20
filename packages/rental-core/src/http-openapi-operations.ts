@@ -961,11 +961,27 @@ export const RENTAL_HTTP_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/fee-reviews/{reviewId}/review", tag: "RentalCore", operationId: "reviewRentalOrderFeeReview",
-    summary: "Decide a pending fee review; an unknown refund suggestion requires an explicit assessed amount bounded by its original snapshot, not a cash refund", permissions: ["rental-os:order:fee-review"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "裁定原订单费用审核，已知建议额与待核定金额分别按原依据处理，批准核减沿原应收和审核事实落账", permissions: ["rental-os:order:fee-review"], requestSchema: "ReviewRentalOrderFeeReviewRequest", responseSchema: "RentalOrder", successStatus: 201,
+    parameters: [{ name: "Idempotency-Key", in: "header", required: false, description: "提供时沿原键读取收据，省略时采用原审核单后备键。重试保留原键或省略方式及原请求。", schema: { type: "string", minLength: 1, maxLength: 191 } }],
+    errorResponses: {
+      "400": { description: "原审核 DTO、原因或金额无效，认定金额超出原建议额或快照上限，或待核定金额缺少显式数字与原依据。", schema: "RentalHttpErrorResponse" },
+      "403": { description: "当前主体缺少原费用裁定权限，或订单超出当前租户和经营空间范围。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "原订单不存在。", schema: "RentalHttpErrorResponse" },
+      "409": { description: "原审核单不存在或已处理、订单状态冲突、原来源已核减、当前剩余应收不足，或原操作键与请求冲突。", schema: "RentalHttpErrorResponse" },
+      "500": { description: "原审核事务、券同步或提交后投影失败，沿原操作和原单记录核对。", schema: "RentalHttpErrorResponse" }
+    }
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/extensions/{extensionId}/refund-review", tag: "RentalCore", operationId: "reviewRentalExtensionRefund",
-    summary: "Review an extension price reduction without issuing a cash refund", permissions: ["rental-os:order:fee-review"], requestSchema: "GenericObject", responseSchema: "RentalOrderExtensionResult"
+    summary: "审核原续租重算负差额，批准按原快照核减应收并同步原券，实际退款沿原资金入口办理", permissions: ["rental-os:order:fee-review"], requestSchema: "ReviewRentalExtensionRefundRequest", responseSchema: "RentalExtensionRefundReviewResult", successStatus: 201,
+    parameters: [{ name: "Idempotency-Key", in: "header", required: false, description: "提供时沿原键读取收据，省略时采用原续租审核后备键。重试保留原键或省略方式及原请求。", schema: { type: "string", minLength: 1, maxLength: 191 } }],
+    errorResponses: {
+      "400": { description: "原审核 DTO 或退款审核原因无效。", schema: "RentalHttpErrorResponse" },
+      "403": { description: "当前主体缺少原费用裁定权限，或订单超出当前租户和经营空间范围。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "原订单不存在。", schema: "RentalHttpErrorResponse" },
+      "409": { description: "订单已关闭或取消、续租未生效或已被替代、原退款待审事实不成立、原费用依据或当前应收冲突，或原操作键与请求冲突。", schema: "RentalHttpErrorResponse" },
+      "500": { description: "原续租审核事务、券同步或提交后投影失败，沿原操作和原续租记录核对。", schema: "RentalHttpErrorResponse" }
+    }
   },
   {
     method: "get", path: "/api/rental/v1/inspection-templates", tag: "RentalCore", operationId: "listRentalInspectionTemplates",

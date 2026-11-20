@@ -6,6 +6,8 @@ import type {
   RefundRentalServiceRequest,
   RentalFundingAmountRequest,
   RentalFundingFailureRequest,
+  ReviewRentalExtensionRefundRequest,
+  ReviewRentalOrderFeeReviewRequest,
   UpdateRentalServiceOccurrenceRequest
 } from "./contracts";
 import type { RentalFundingReleaseDto } from "./order-request.dto";
@@ -513,6 +515,27 @@ export const RENTAL_HTTP_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     idempotencyKey: stringSchema, reason: stringSchema, operator: stringSchema, failureCode: stringSchema,
     at: { type: "string", format: "date-time" }, createdAt: { type: "string", format: "date-time" } },
     ["id", "tenantId", "workspaceId", "orderId", "instrument", "action", "amount", "balanceAfter", "provider", "idempotencyKey", "reason", "at", "createdAt"]),
+  ReviewRentalOrderFeeReviewRequest: {
+    ...objectOf({
+      decision: { type: "string", enum: ["approved", "rejected"] },
+      reason: { type: "string", minLength: 1, pattern: "\\S", description: "原服务去除首尾空白并记录审核原因。" },
+      amount: { type: "number", minimum: 0, nullable: true, description: "已知建议额批准时可省略，采用原建议。待核定金额批准须显式提供数字（含零），由原快照上限和当前应收核验。批准时 null 被原服务拒绝，驳回按原逻辑忽略认定金额。" }
+    } satisfies Record<keyof ReviewRentalOrderFeeReviewRequest, SchemaObject>, ["decision", "reason"]),
+    description: "原 ReviewRentalOrderFeeReviewDto。原待审单、订单状态、来源费用和金额由同一订单事务复核。批准按原类型记费用或核减应收，refund_due 批准只记审核事实，资金动作由原资金权限办理。原有来源的提前退款在同一事务同步券，正额逾期批准后走原通知入口。",
+    example: { decision: "approved", reason: "依据原审核单裁定", amount: 80 }
+  },
+  ReviewRentalExtensionRefundRequest: {
+    ...objectOf({
+      decision: { type: "string", enum: ["approved", "rejected"] },
+      reason: { type: "string", minLength: 1, pattern: "\\S", description: "原服务去除首尾空白并记录退款审核原因。" }
+    } satisfies Record<keyof ReviewRentalExtensionRefundRequest, SchemaObject>, ["decision", "reason"]),
+    description: "原 ReviewRentalExtensionRefundDto。认定金额取原生效续租 pricingSnapshot.refundReview，批准时复核同源费用依据和当前应收，原券同步及审核事实在同一事务完成。",
+    example: { decision: "approved", reason: "核对原续租负差额" }
+  },
+  RentalExtensionRefundReviewResult: {
+    ...objectOf({ order: ref("RentalOrder"), extension: ref("RentalOrderExtensionRecord") }, ["order", "extension"]),
+    description: "原续租差额审核响应，返回原提交后订单投影及同一续租审核快照。配送电话沿原映射脱敏，批准后的实际退款仍由原资金入口办理。"
+  },
   UpdateRentalServiceOccurrenceRequest: {
     ...objectOf({
       action: { type: "string", enum: [...RENTAL_SERVICE_EXECUTION_ACTIONS] },
