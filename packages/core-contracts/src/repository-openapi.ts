@@ -1,6 +1,7 @@
 /**
  * 静态 HTTP/OpenAPI 声明的字段定位。只读取原 AST、符号和本地引用。
- * 不运行生成器或推导 DTO 字段，转换、动态表达式和缺失引用保留准确来源与缺口。
+ * 字面量及单一返回表达式按原语法读取，不执行模块、生成器或校验器。
+ * DTO、Zod 转换和动态表达式保留原声明，字段展开与运行验收分别表达。
  */
 import ts from "typescript";
 import type { DevelopmentCapability, DevelopmentSourceReference } from "./development";
@@ -15,8 +16,193 @@ export interface RepositoryApiDocumentation {
 }
 
 function unwrap(node: ts.Expression): ts.Expression {
-  while (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node)) node = node.expression;
+  while (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node)
+    || ts.isTypeAssertionExpression(node) || ts.isNonNullExpression(node)) node = node.expression;
   return node;
+}
+
+type SchemaValue = null | boolean | number | string | SchemaValue[] | { [key: string]: SchemaValue };
+type ExpressionBinding = { expression: ts.Expression; bindings: Map<ts.Symbol, ExpressionBinding>; seen: Set<ts.Node> };
+
+/** 只解释纯声明语法。未知展开会遮蔽前面的属性，不能保留可能被覆盖的旧字段。 */
+class StaticSchemaReader {
+  readonly issues = new Set<string>();
+  readonly fields = new Map<string, DevelopmentSourceReference>();
+  private readonly partialObjects = new WeakSet<object>();
+
+  constructor(private readonly source: RepositorySource) {}
+
+  schema(expression: ts.Expression): SchemaValue | typeof UNRESOLVED {
+    const value = this.read(expression);
+    if (value !== UNRESOLVED && value !== null && typeof value === "object" && !Array.isArray(value)) {
+      if (value.type === "object" && value.additionalProperties === true && !value.properties) this.issues.add("/:unspecified-object-fields");
+      if (value["x-schemaStatus"] === "incomplete" || Array.isArray(value["x-schemaGaps"]) && value["x-schemaGaps"].length)
+        this.issues.add("/:declared-schema-gap");
+    }
+    return value;
+  }
+
+  fieldSources(value: SchemaValue | typeof UNRESOLVED): Array<{ pointer: string; source: DevelopmentSourceReference }> {
+    if (value === UNRESOLVED) return [];
+    return [...this.fields].filter(([pointer]) => {
+      let current: SchemaValue = value;
+      for (const segment of pointer.slice(1).split("/")) {
+        const key = segment.replaceAll("~1", "/").replaceAll("~0", "~");
+        if (current === null || typeof current !== "object" || !Object.hasOwn(current, key)) return false;
+        current = (current as Record<string, SchemaValue>)[key];
+      }
+      return true;
+    }).map(([pointer, location]) => ({ pointer, source: location }));
+  }
+
+  read(expression: ts.Expression, pointer = "", bindings = new Map<ts.Symbol, ExpressionBinding>(), seen = new Set<ts.Node>()): SchemaValue | typeof UNRESOLVED {
+    const node = unwrap(expression);
+    if (seen.has(node) || seen.size > 80) return this.unresolved(pointer, "recursive-expression");
+    const chain = new Set(seen).add(node);
+    const read = (child: ts.Expression, location = pointer, scope = bindings) => this.read(child, location, scope, chain);
+    if (ts.isStringLiteralLike(node) || ts.isNumericLiteral(node) || ts.isPrefixUnaryExpression(node)
+      || [ts.SyntaxKind.TrueKeyword, ts.SyntaxKind.FalseKeyword, ts.SyntaxKind.NullKeyword].includes(node.kind)) {
+      const value = this.source.value(node);
+      return value === UNRESOLVED ? this.unresolved(pointer, "literal") : value;
+    }
+    if (ts.isIdentifier(node)) {
+      const symbol = this.source.checker.getSymbolAtLocation(node);
+      const binding = symbol && bindings.get(symbol);
+      if (binding) return this.read(binding.expression, pointer, binding.bindings, binding.seen);
+      const target = symbol && this.source.target(symbol).valueDeclaration;
+      if (target && ts.isVariableDeclaration(target) && target.initializer && ts.isVariableDeclarationList(target.parent)
+        && target.parent.flags & ts.NodeFlags.Const && isRepositorySourcePath(this.source.root, target.getSourceFile().fileName))
+        return read(target.initializer);
+      return this.unresolved(pointer, "dynamic-identifier");
+    }
+    if (ts.isObjectLiteralExpression(node)) {
+      let value: Record<string, SchemaValue> = Object.create(null);
+      let partial = false;
+      for (const item of node.properties) {
+        if (ts.isSpreadAssignment(item)) {
+          const spread = read(item.expression);
+          if (spread !== UNRESOLVED && spread !== null && typeof spread === "object" && !Array.isArray(spread)) {
+            if (this.partialObjects.has(spread)) {
+              value = Object.create(null);
+              partial = true;
+              this.clearFields(pointer);
+            }
+            Object.assign(value, spread);
+          } else {
+            value = Object.create(null);
+            partial = true;
+            this.clearFields(pointer);
+            this.unresolved(pointer, "dynamic-spread");
+          }
+          continue;
+        }
+        const key = ts.isComputedPropertyName(item.name) ? read(item.name.expression)
+          : ts.isIdentifier(item.name) || ts.isStringLiteralLike(item.name) || ts.isNumericLiteral(item.name) ? item.name.text : UNRESOLVED;
+        if (typeof key !== "string" && typeof key !== "number") {
+          value = Object.create(null);
+          partial = true;
+          this.clearFields(pointer);
+          this.unresolved(pointer, "dynamic-key");
+          continue;
+        }
+        const location = `${pointer}/${String(key).replaceAll("~", "~0").replaceAll("/", "~1")}`;
+        this.fields.set(location, sourceReference(item, this.source.root));
+        const shorthand = ts.isShorthandPropertyAssignment(item) && this.source.checker.getShorthandAssignmentValueSymbol(item);
+        const target = shorthand && this.source.target(shorthand).valueDeclaration;
+        const child = ts.isPropertyAssignment(item) ? item.initializer
+          : target && ts.isParameter(target) && ts.isIdentifier(target.name) ? target.name
+          : target && ts.isVariableDeclaration(target) ? target.initializer : undefined;
+        const part = child ? read(child, location) : this.unresolved(location, "dynamic-property");
+        delete value[String(key)];
+        if (part !== UNRESOLVED) value[String(key)] = part;
+        else partial = true;
+      }
+      if (partial) this.partialObjects.add(value);
+      return value;
+    }
+    if (ts.isArrayLiteralExpression(node)) {
+      const value: SchemaValue[] = [];
+      for (const item of node.elements) {
+        if (ts.isOmittedExpression(item)) return this.unresolved(pointer, "array-hole");
+        const part = read(ts.isSpreadElement(item) ? item.expression : item, `${pointer}/${value.length}`);
+        if (part === UNRESOLVED) return UNRESOLVED;
+        if (ts.isSpreadElement(item)) {
+          if (!Array.isArray(part)) return this.unresolved(pointer, "dynamic-array-spread");
+          value.push(...part);
+        } else value.push(part);
+      }
+      return value;
+    }
+    if (ts.isTemplateExpression(node)) {
+      let value = node.head.text;
+      for (const span of node.templateSpans) {
+        const part = read(span.expression);
+        if (typeof part !== "string" && typeof part !== "number") return this.unresolved(pointer, "dynamic-template");
+        value += part + span.literal.text;
+      }
+      return value;
+    }
+    if (ts.isConditionalExpression(node)) {
+      const condition = read(node.condition);
+      return condition === UNRESOLVED ? this.unresolved(pointer, "dynamic-condition") : read(condition ? node.whenTrue : node.whenFalse);
+    }
+    if (ts.isTypeOfExpression(node)) {
+      const value = read(node.expression);
+      return value === UNRESOLVED ? UNRESOLVED : typeof value;
+    }
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken) {
+      const left = read(node.left), right = read(node.right);
+      return left === UNRESOLVED || right === UNRESOLVED ? UNRESOLVED : left === right;
+    }
+    if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+      const value = read(node.expression), key = ts.isPropertyAccessExpression(node) ? node.name.text : node.argumentExpression && read(node.argumentExpression);
+      return value !== UNRESOLVED && value !== null && typeof value === "object" && (typeof key === "string" || typeof key === "number")
+        && Object.hasOwn(value, key) ? (value as Record<string, SchemaValue>)[String(key)] : this.unresolved(pointer, "dynamic-member");
+    }
+    if (ts.isCallExpression(node)) {
+      if (ts.isPropertyAccessExpression(node.expression) && ts.isIdentifier(node.expression.expression)
+        && node.expression.expression.text === "Object" && !this.source.checker.getSymbolAtLocation(node.expression.expression)?.declarations?.length
+        && node.arguments.length === 1 && ["freeze", "keys"].includes(node.expression.name.text)) {
+        const value = read(node.arguments[0]);
+        if (node.expression.name.text === "freeze") return value;
+        return value !== UNRESOLVED && value !== null && typeof value === "object" && !this.partialObjects.has(value)
+          ? Object.keys(value) : this.unresolved(pointer, "dynamic-keys");
+      }
+      if (ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "includes" && node.arguments.length === 1) {
+        const value = read(node.expression.expression), search = read(node.arguments[0]);
+        return typeof value === "string" && typeof search === "string" ? value.includes(search) : this.unresolved(pointer, "dynamic-includes");
+      }
+      const symbol = this.source.checker.getSymbolAtLocation(node.expression);
+      const target = symbol && this.source.target(symbol).valueDeclaration;
+      const callable = target && ts.isVariableDeclaration(target) && target.initializer ? unwrap(target.initializer) : target;
+      if (callable && (ts.isFunctionDeclaration(callable) || ts.isArrowFunction(callable)) && callable.body
+        && isRepositorySourcePath(this.source.root, callable.getSourceFile().fileName)) {
+        const body = ts.isBlock(callable.body) ? callable.body.statements.length === 1 && ts.isReturnStatement(callable.body.statements[0])
+          ? callable.body.statements[0].expression : undefined : callable.body;
+        const scope = new Map(bindings);
+        if (body && !node.arguments.some(ts.isSpreadElement) && callable.parameters.every(parameter => ts.isIdentifier(parameter.name) && !parameter.dotDotDotToken)) {
+          callable.parameters.forEach((parameter, index) => {
+            const name = this.source.checker.getSymbolAtLocation(parameter.name), argument = node.arguments[index];
+            if (name && (argument || parameter.initializer)) scope.set(name, { expression: argument ?? parameter.initializer!, bindings: argument ? bindings : scope, seen: chain });
+          });
+          return read(body, pointer, scope);
+        }
+      }
+      return this.unresolved(pointer, "runtime-call");
+    }
+    return this.unresolved(pointer, "unsupported-expression");
+  }
+
+  private unresolved(pointer: string, reason: string): typeof UNRESOLVED {
+    this.issues.add(`${pointer || "/"}:${reason}`);
+    return UNRESOLVED;
+  }
+
+  private clearFields(pointer: string): void {
+    for (const key of this.fields.keys()) {
+      if (key.startsWith(pointer + "/")) this.fields.delete(key);
+    }
+  }
 }
 
 function property(node: ts.Expression, name: string): ts.Expression | undefined {
@@ -27,11 +213,13 @@ function property(node: ts.Expression, name: string): ts.Expression | undefined 
   return found && ts.isPropertyAssignment(found) ? found.initializer : undefined;
 }
 
-/** 请求修饰器、响应和 Zod 转换沿原表达式定位，不展开或执行方法。 */
-export function describeRepositorySchema(source: RepositorySource, expression: ts.Expression, maps: ts.Expression[] = []): Details {
+/** OpenAPI 字段可由纯声明展开，Zod/DTO 仍沿原表达式定位，不执行校验或转换。 */
+export function describeRepositorySchema(source: RepositorySource, expression: ts.Expression, maps: ts.Expression[] = [], referencePrefix = ""): Details {
   const root = source.root;
   const locations: DevelopmentSourceReference[] = [];
-  const refs: Array<{ ref: string; declaration?: DevelopmentSourceReference; status: string }> = [];
+  const refs: Array<{ ref: string; declaration?: DevelopmentSourceReference; status: string; schema?: SchemaValue;
+    fieldSources?: Array<{ pointer: string; source: DevelopmentSourceReference }>; issues?: string[] }> = [];
+  const sourceFields: Array<{ name: string; expression: string; source: DevelopmentSourceReference }> = [];
   const seenNodes = new Set<ts.Node>(), seenRefs = new Set<string>();
   const declaration = (node: ts.Node) => {
     const symbol = source.checker.getSymbolAtLocation(node);
@@ -42,27 +230,56 @@ export function describeRepositorySchema(source: RepositorySource, expression: t
     if (seen.has(node)) return UNRESOLVED;
     seen.add(node);
     node = unwrap(node);
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.expression.getText() === "Object"
+      && node.expression.name.text === "freeze" && node.arguments.length === 1
+      && !source.checker.getSymbolAtLocation(node.expression.expression)?.declarations?.length) return lookup(node.arguments[0], name, new Set(seen));
     if (ts.isIdentifier(node)) {
       const target = declaration(node);
       if (target && ts.isVariableDeclaration(target) && target.initializer && ts.isVariableDeclarationList(target.parent)
-        && target.parent.flags & ts.NodeFlags.Const) return lookup(target.initializer, name, seen);
+        && target.parent.flags & ts.NodeFlags.Const) return lookup(target.initializer, name, new Set(seen));
     }
     if (!ts.isObjectLiteralExpression(node)) return UNRESOLVED;
     // 与对象展开的最后写入语义一致，不拿早期同名定义覆盖后面的真实声明。
     for (const item of [...node.properties].reverse()) {
       if (ts.isSpreadAssignment(item)) {
-        const found = lookup(item.expression, name, seen);
+        const found = lookup(item.expression, name, new Set(seen));
         if (found !== undefined) return found;
-      } else if (ts.isPropertyAssignment(item) && item.name.getText().replace(/^["']|["']$/g, "") === name) return item.initializer;
+      } else {
+        const key = ts.isComputedPropertyName(item.name) ? source.value(item.name.expression) : item.name.getText().replace(/^["']|["']$/g, "");
+        if (key === UNRESOLVED) return UNRESOLVED;
+        if (key !== name) continue;
+        if (ts.isPropertyAssignment(item)) return item.initializer;
+        const symbol = ts.isShorthandPropertyAssignment(item) && source.checker.getShorthandAssignmentValueSymbol(item);
+        const target = symbol && source.target(symbol).valueDeclaration;
+        return target && ts.isVariableDeclaration(target) ? target.initializer : UNRESOLVED;
+      }
     }
   };
   const addReference = (ref: string) => {
     if (seenRefs.has(ref)) return;
     seenRefs.add(ref);
-    const name = ref.startsWith("#/components/schemas/") ? ref.slice(21) : undefined;
-    const target = name ? maps.map(map => lookup(map, name)).find(value => value !== undefined && value !== UNRESOLVED) : undefined;
-    refs.push({ ref, ...(target ? { declaration: sourceReference(target, root) } : {}), status: target ? "source-reference" : "not-indexed" });
+    const name = ref.startsWith("#/components/schemas/") ? ref.slice(21).replaceAll("~1", "/").replaceAll("~0", "~") : undefined;
+    const found = name ? maps.map(map => lookup(map, name)).find(value => value !== undefined) : undefined;
+    const target = found !== UNRESOLVED ? found : undefined;
+    const reader = new StaticSchemaReader(source);
+    const schema = target && reader.schema(target);
+    refs.push({ ref, ...(target ? { declaration: sourceReference(target, root),
+      ...(schema !== UNRESOLVED && schema !== undefined ? { schema } : {}),
+      fieldSources: reader.fieldSources(schema ?? UNRESOLVED), issues: [...reader.issues] }
+      : { issues: [found === UNRESOLVED ? "schema-map:source-reference" : "schema-reference:not-indexed"] }),
+      status: target ? reader.issues.size ? "source-reference" : "indexed" : "not-indexed" });
+    if (schema !== UNRESOLVED && schema !== undefined) visitValue(schema);
     if (target) visit(target);
+  };
+  const visitValue = (value: SchemaValue) => {
+    if (value === null || typeof value !== "object") return;
+    if (Array.isArray(value)) {
+      value.forEach(visitValue);
+      return;
+    }
+    if (typeof value.$ref === "string") addReference(value.$ref);
+    for (const [key, child] of Object.entries(value))
+      if (!["example", "examples", "default", "enum"].includes(key) && !key.startsWith("x-")) visitValue(child);
   };
   const visit = (node: ts.Node) => {
     if (seenNodes.has(node)) return;
@@ -70,6 +287,7 @@ export function describeRepositorySchema(source: RepositorySource, expression: t
     if (ts.isPropertyAssignment(node)) {
       const name = node.name.getText().replace(/^["']|["']$/g, "");
       if (["example", "examples", "default", "enum"].includes(name) || name.startsWith("x-")) return;
+      sourceFields.push({ name, expression: node.initializer.getText(), source: sourceReference(node, root) });
       if (name === "$ref") {
         const ref = source.value(node.initializer);
         if (typeof ref === "string") addReference(ref);
@@ -95,16 +313,23 @@ export function describeRepositorySchema(source: RepositorySource, expression: t
     }
     ts.forEachChild(node, visit);
   };
+  const reader = new StaticSchemaReader(source);
+  const schema = reader.schema(expression);
   const name = source.value(expression);
-  if (typeof name === "string") addReference(`#/components/schemas/${name}`);
+  if (typeof name === "string") addReference(`#/components/schemas/${name.includes(".") ? name : referencePrefix + name}`);
+  else if (schema !== UNRESOLVED) visitValue(schema);
   visit(expression);
   const target = declaration(expression);
   return { expression: expression.getText(), source: { ...sourceReference(expression, root) },
     ...(target ? { declaration: { ...sourceReference(target, root) } } : {}),
     sources: [...new Map(locations.map(location => [`${location.path}:${location.line}`, location])).values()],
+    sourceFields,
     references: refs.map(ref => ({ ...ref, ...(ref.declaration ? { declaration: { ...ref.declaration } } : {}) })),
-    issues: source.value(expression) === UNRESOLVED || source.unresolvedProperties(expression).length ? ["schema-expansion:source-reference"] : [],
-    status: refs.some(ref => ref.status === "not-indexed") ? "not-indexed" : "source-reference" };
+    ...(schema !== UNRESOLVED && typeof name !== "string" ? { schema } : {}),
+    fieldSources: reader.fieldSources(schema),
+    issues: reader.issues.size ? ["schema-expansion:source-reference", ...reader.issues] : [],
+    status: refs.some(ref => ref.status === "not-indexed") ? "not-indexed"
+      : reader.issues.size || refs.some(ref => ref.status !== "indexed") ? "source-reference" : "indexed" };
 }
 
 /** 正式操作列表只补当前 Controller 的资料，不将未执行的生成器当作已挂载接口。 */
@@ -123,30 +348,38 @@ export function repositoryApiDocumentation(source: RepositorySource): Map<string
   const schemaMaps = variables.filter(node => node.name.getText().endsWith("SCHEMAS"));
   const describe = (node: ts.Expression, method: unknown, path: unknown, fields: Record<string, ts.Expression | undefined>) => {
     if (typeof method !== "string" || typeof path !== "string" || !["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"].includes(method.toUpperCase())) return;
-    const key = `${method.toUpperCase()} ${path}`;
-    if (result.has(key)) return;
     const file = repositoryPath(source.root, node.getSourceFile().fileName);
     const packageDirectory = file.split("/").slice(0, 2).join("/");
+    const platform = packageDirectory === "packages/platform-server";
+    const route = platform ? `/api${path.replace(/:([A-Za-z0-9_]+)/g, "{$1}")}` : path;
+    const key = `${method.toUpperCase()} ${route}`;
+    if (result.has(key)) return;
     const ownMaps = schemaMaps.filter(map => repositoryPath(source.root, map.getSourceFile().fileName).startsWith(packageDirectory + "/"));
+    const aggregateMaps = ownMaps.filter(map => map.name.getText() === (platform ? "PLATFORM_OPENAPI_SCHEMAS" : "RENTAL_HTTP_COMPONENT_SCHEMAS"));
     const componentMaps = ownMaps.filter(map => map.name.getText().endsWith("COMPONENT_SCHEMAS"));
-    const maps = (componentMaps.length ? componentMaps : ownMaps).map(map => map.initializer!);
+    const maps = (aggregateMaps.length ? aggregateMaps : componentMaps.length ? componentMaps : ownMaps).map(map => map.initializer!);
     const schemas = Object.fromEntries(["requestSchema", "responseSchema", "parameters"].flatMap(name => {
       const expression = fields[name];
-      return expression ? [[name, describeRepositorySchema(source, expression, maps)]] : [];
+      return expression ? [[name, describeRepositorySchema(source, expression, maps, platform ? "Platform." : "")]] : [];
     }));
-    const summary = source.value(fields.summary), operationId = source.value(fields.operationId);
+    const summary = source.value(fields.summary), id = source.value(fields.id);
+    const operationId = platform && typeof id === "string" ? `Platform.${id}` : source.value(fields.operationId);
     const missing = Object.entries(schemas).filter(([, value]) => value.status === "not-indexed").map(([name]) => `${name}:not-indexed`);
     if (!fields.responseSchema) missing.push("responseSchema:source-reference");
+    if (!fields.parameters && (route.includes("{") || fields.query)) missing.push("parameters:source-reference");
     result.set(key, { reference: sourceReference(node, source.root),
       ...(typeof summary === "string" ? { summary } : {}), ...(typeof operationId === "string" ? { operationId } : {}),
-      details: { apiFieldsStatus: Object.keys(schemas).length ? "source-reference" : "not-indexed",
+      details: { apiFieldsStatus: !Object.keys(schemas).length ? "not-indexed"
+        : missing.length || Object.values(schemas).some(schema => schema.status !== "indexed") ? "source-reference" : "indexed",
         openapiSource: { source: { ...sourceReference(node, source.root) }, schemas,
           issues: missing } } });
   };
   const visit = (node: ts.Node) => {
     if (ts.isObjectLiteralExpression(node)) {
       describe(node, source.value(property(node, "method")), source.value(property(node, "path")),
-        Object.fromEntries(["summary", "operationId", "requestSchema", "responseSchema", "parameters"].map(name => [name, property(node, name)])));
+        { ...Object.fromEntries(["summary", "operationId", "id", "parameters", "query"].map(name => [name, property(node, name)])),
+          requestSchema: property(node, "requestSchema") ?? property(node, "request"),
+          responseSchema: property(node, "responseSchema") ?? property(node, "response") });
     } else if (ts.isCallExpression(node)) {
       const symbol = source.checker.getSymbolAtLocation(node.expression), target = symbol && source.target(symbol).valueDeclaration;
       if (target && ts.isFunctionDeclaration(target) && ["clientOperation", "backlogOperation"].includes(target.name?.text ?? "")

@@ -78,7 +78,13 @@ node packages/core-contracts/dist/capabilities.js --owner example-tickets --json
 
 索引从 workspace 包出口、TypeScript 导出与源码说明、Controller 路由、后台 `APP_ROUTES`、Core 清单与页面贡献和 UIArc 来源清单读取。workspace 支持 `packages/*` 等一层通配目录，以及底座源码发行中的 `packages/core-contracts` 等显式目录。正式出口按实际条件和构建目录映射到源码，兼容转接参与符号解析，直接导入统计读取已发现 workspace 的 `src`。局部别名沿导入文件所属的原 TypeScript 配置解析。Controller 与旧后台路由只从本次所选 workspace 取得，零 Core 底座和所选 Core 的来源分别保留。源码新增或迁移后再次查询即可反映变化。新增 Core 使用自己的正式包出口、清单、页面和 API 贡献登记能力，宿主可通过 `@rental-os/core-contracts/development` 的 `describeCoreDevelopmentCapabilities` 取得同源目录，查询合同由该出口提供。[能力目录实现](src/development.ts)
 
-Core 条目读取正式清单声明中的静态标识、版本、范围和依赖，页面与 HTTP 条目附同一清单出处及包版本。构建时注入的来源、动态权限和未解析字段保留在 `unresolvedMetadata`。HTTP 条目给出请求、参数、查询和响应的原表达式、声明位置及本地 schema 引用。`httpContract.schemas` 定位 Controller 使用的合同，`openapiSource.schemas` 定位正式操作表的字段说明。转换和动态表达式保留 `apiFieldsStatus=source-reference`，缺引用标记 `not-indexed` 并列入 `issues`。已登记 OpenAPI 贡献通过 `details.openapi` 保留请求体、参数、响应、递归 schema 引用与 JSON Pointer；字段资料可完整读取时为 `indexed`，原 `x-schemaStatus` 和 `x-schemaGaps` 另行表达字段展开程度。CLI 显示这些来源和状态，`--json` 保留完整字段资料。CSS 转导出在本仓资产存在时登记 `declarationStatus=source-asset`，`sources` 同时保留资产和转导出位置。外部转导出沿所属包的依赖声明登记 `external-dependency`，`reexport.dependency` 给出包名、版本范围和声明出处。其实现与运行支持由原依赖提供。其余缺少本仓目标的转导出保留正式导入、原模块和本地位置，`declarationStatus=unresolved` 与对应 `issues` 同时出现。
+Core 条目读取正式清单声明中的静态标识、版本、范围和依赖，页面与 HTTP 条目附同一清单出处及包版本。构建时注入的来源、动态权限和未解析字段保留在 `unresolvedMetadata`。`httpContract.schemas` 定位 Controller 使用的合同，`openapiSource.schemas` 定位正式操作表的请求、参数和响应说明。公共操作表按同源 `/api` 路径及 `Platform.*` schema 名连接资料，公共与 Rental 各使用自己的正式 schema 聚合。
+
+字段读取保留原 `expression`、声明和引用。字面量、静态对象/数组、常量及本仓单一返回表达式可给出 `schema`，`fieldSources` 用 JSON Pointer 定位其中已有字段的源码行，引用条目同时提供递归 schema 和各自缺口。原必填、可空、默认值、单位及描述随声明读取。`sourceFields` 列出原 AST 的字段表达式和出处，Zod 的 `omit`、校验或转换仍沿原表达式核对。动态调用、展开、计算键、递归表达式及原宽泛对象分别列出原因，状态为 `source-reference`。未知展开可能覆盖的早期属性从已展开结果移除。缺少本地引用时标记 `not-indexed`。路径/查询参数仍待生成器展开时另列 `parameters:source-reference`。[静态字段读取](src/repository-openapi.ts)
+
+`apiFieldsStatus=indexed` 表示已登记字段资料可静态读取。正式接口贡献的 `details.openapi` 保留请求体、参数、响应、递归引用和 JSON Pointer，原 `x-schemaStatus`、`x-schemaGaps` 继续表达字段完整性。Controller/DTO 对照、动态资料与实际运行按各自入口核验。CLI 显示来源、状态和缺口，`--json` 保留完整资料。
+
+CSS 转导出在本仓资产存在时登记 `declarationStatus=source-asset`，`sources` 同时保留资产和转导出位置。外部转导出沿所属包的依赖声明登记 `external-dependency`，`reexport.dependency` 给出包名、版本范围和声明出处。其实现与运行支持由原依赖提供。其余缺少本仓目标的转导出保留正式导入、原模块和本地位置，`declarationStatus=unresolved` 与对应 `issues` 同时出现。
 
 例如，查询工单分派接口。
 
