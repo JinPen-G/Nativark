@@ -43,6 +43,14 @@ const orders = createRentalMiniProgramOrdersApi({ request });
 
 [原展示入口](../../../../apps/miniprogram/src/core/status.ts)窄再导出同一实现，[订单列表](../../../../apps/miniprogram/src/pages/orders/index.ts)消费原过滤器与展示，[订单详情](../../../../apps/miniprogram/src/pages/order/index.ts)消费原主副状态和操作提示。页面继续持有读取与展示寿命，实际操作资格、金额和执行结果由原服务端裁定。原[客户定向断言](../../../../tests/miniprogram-static.test.cjs)核对分组、续租、逾期和终态资金。
 
+## 支付编排
+
+同一正式入口提供 `createRentalMiniProgramPaymentFlow`、`PaymentOutcome`、`PaymentVerification` 及原 `VERIFY_SCHEDULE_MS`。[支付编排](payment.ts)接收同一订单／支付 API 方法、原时钟、操作键、同步存储、`ApiError` 类与判别器，以及微信 `requestPayment`。宿主初始化时绑定一次工厂，[原支付入口](../../../../apps/miniprogram/src/core/payment.ts)继续导出原函数，[收银台](../../../../apps/miniprogram/src/pages/pay/index.ts)保持原调用。
+
+支付单引用保留原订单键和存储格式。旧单查询失败仅原具名 404 可继续原新建路径，未知查询或关闭失败保留原引用并拒绝盲目新建。已支付单、可用待支付单和可信结束结果沿原流程处理，创建继续使用原操作键。JSAPI 只使用服务端原五字段，签名随当前调用传递，持久存储只记原支付单 ID 与时间。
+
+微信成功回调返回原客户端流程结果。支付确认继续读取原支付单及资金事实，原立即读取、退避次数与结束状态保持。[原定向支付断言](../../../../tests/miniprogram-static.test.cjs)核对 JSAPI 拒绝、客户端回调、服务端收款依据与支付单复用，真实微信、提供方及资金结果按原业务环境验收。
+
 ## 幂等、恢复与读取寿命
 
 建单、取消、续租和费用响应沿调用方原幂等键。小程序支付单的键继续位于原 body，微信 JSAPI 参数、SDK 调起及服务端付款结果核对由原支付宿主完成。资料部分更新沿微信支持的原 PUT 别名。

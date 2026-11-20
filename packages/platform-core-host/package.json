@@ -74,6 +74,14 @@
     "./platform-core-session": {
       "types": "./dist/platform-core-session.d.ts",
       "default": "./dist/platform-core-session.js"
+    },
+    "./mysql-structure": {
+      "types": "./dist/mysql-structure.d.ts",
+      "default": "./dist/mysql-structure.js"
+    },
+    "./mysql-physical": {
+      "types": "./dist/mysql-physical.d.ts",
+      "default": "./dist/mysql-physical.js"
     }
   },
   "typesVersions": {
@@ -125,6 +133,12 @@
       ],
       "platform-core-session": [
         "dist/platform-core-session.d.ts"
+      ],
+      "mysql-structure": [
+        "dist/mysql-structure.d.ts"
+      ],
+      "mysql-physical": [
+        "dist/mysql-physical.d.ts"
       ]
     }
   },

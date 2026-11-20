@@ -10,6 +10,7 @@
 - [prisma-schema.ts](src/prisma-schema.ts)：`composeAiNativePrismaSchema(base, contribution)` 在**已经组合公共与 Rental 的源码**上追加 AI 模型和 [21 条原关系回指](src/prisma-relations.ts)。它使用公共纯 schema 组合器，但不把 AI 加入业务 Core 清单。公共 40 模型单独作为 base 会因缺少 Rental 关系目标而拒绝；重复加入 AI 也拒绝。
 - [preparation.ts](src/preparation.ts)：`createAiNativeDataPreparation({ baseSchema, contribution })` 返回新的内存文件集合：组合 schema、58 份 AI 迁移和 `ai-native.data.candidate.json`。状态固定为 `prepared / pending`，返回实际缺口；不读 `.env`、生成 Client、连接数据库、执行 DDL 或覆盖已有文件。
 - [data-package.ts](src/data-package.ts)：`createAiNativeDataRelease({ files, source })` 锁定完整构建包的文件集合与归档摘要；`readAiNativeDataPackage` 校验字节快照，`requireAiNativeDataPackage` 校验普通安装目录。包须包含真实 JS、声明、schema、SQL、说明和许可；仅有源码或 SQL 指纹不能通过。
+- [mysql-data.ts](src/mysql-data.ts)：正式 `@rental-os/ai-native-data/mysql-data` 的 `createAiNativeMysqlDataPlanFromContribution(contribution)` 从同一固定包形成 MySQL 计划，读取实际表、列、索引、CHECK 和外键，供原迁移账观察器使用。
 
 宿主顺序如下。数据字节须来自同一固定安装包；公共与 Rental 仍按各自发行核定。宿主保存候选时沿已有“只写新目录、失败清理、不覆盖当前组合”的入口。
 
@@ -75,9 +76,23 @@ const prepared = createAiNativeDataPreparation({ baseSchema, contribution: ai })
 
 ## 真实物理观察与旧库边界
 
-[现有 MySQL 结构解析](../platform-core-host/src/mysql-structure.ts)仅覆盖建表和少量 ADD，未覆盖本原链所需的 CREATE INDEX、MODIFY、ALTER COLUMN DROP DEFAULT、DROP／ADD CHECK 和外键替换、COMMENT 等语法。现有 CHECK 比较器也只接受少量字段与表达式，AI 原约束包含 `JSON_VALID`、`CHAR_LENGTH`、多字段状态关联等；[物理观察](../platform-core-host/src/mysql-physical.ts)不能据此判定 AI ready。需要原语义的物理版本观察与原 Prisma 执行收据后，才能参与正式准入。
+通过正式 MySQL 计划把固定贡献交给宿主的同一原账观察器。
 
-候选因此不写 `core.deployment.lock.json`，不构造 `CoreMysqlDataPlan` 的空成功，也没有初始化种子、默认政策、模拟租户或内存回退。未知执行、部分 DDL 和恢复仍由正式宿主保留为未知，不能重派迁移或改写原账。
+```ts
+const aiPlan = createAiNativeMysqlDataPlanFromContribution(ai);
+const observations = createMysqlCoreDeploymentObservation({
+  database,
+  platform: publicPlan,
+  cores: [{ ...rentalPlan, coreId: "rental" }],
+  dataCapabilities: [{ ...aiPlan, capabilityId: "ai-native" }]
+});
+```
+
+[严格结构解析](../platform-core-host/src/mysql-structure.ts)和[物理读取](../platform-core-host/src/mysql-physical.ts)覆盖本版 86 表、1271 列、271 索引、77 CHECK 与128外键；支持原CREATE INDEX、MODIFY/DROP、复杂CHECK与provenance注释，未知结构或未执行约束仍拒绝。数据包使用两个窄MySQL出口，避免把HTTP/Nest目录引入纯数据合同。
+
+唯一billingMode UPDATE按原迁移ID和语句摘要明确识别，只从结构分析分开，原SQL仍完整保留在58项迁移合同中。物理观察只证明结构；[同一原账](../core-host/src/mysql-deployment.ts)的全链checksum、实际执行顺序、finishedAt、未回滚及unknown状态共同决定准入。未匹配的legacy_unknown继续保留，不读取今天数据反推历史回填，也不自动重做或建立第二本执行账。
+
+候选保持prepared/pending，未执行DDL或初始化；实际宿主必须核固定完整包、部署锁和当前物理/原账，再调用catalogue.requireDataCapabilityAvailable("ai-native")。旧完整库的B02桥接、原迁移名和备份恢复仍走原升级链，不能把旧账改名当新候选已执行。
 
 ## 本次验证范围
 

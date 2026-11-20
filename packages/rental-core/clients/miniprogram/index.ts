@@ -32,3 +32,4 @@ export {
   type OrderFacts, type OrderAction, type OrderPresentation,
 } from "./status";
 export { fulfillmentLabel, inventoryLabel, pricingUnitLabel, membershipLabel, reviewLabel, qualificationLabel, chargeLabel, extensionLabel, paymentMethodLabel, categoryIcon, categoryImage } from "./labels";
+export { createRentalMiniProgramPaymentFlow, VERIFY_SCHEDULE_MS, type RentalMiniProgramPaymentFlowPorts, type PaymentOutcome, type PaymentVerification } from "./payment";

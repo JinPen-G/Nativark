@@ -18,8 +18,6 @@ export const AI_NATIVE_DATA_PREREQUISITES = {
 export const AI_NATIVE_DATA_PREPARATION_GAPS = [
   { code: "locked-package-deployment-required",
     detail: "本结果只含 AI 材料；完整宿主须核定 dataCapabilities 的固定完整包，并通过正式迁移部署组合公共和 Core 材料。" },
-  { code: "ai-physical-observer-missing",
-    detail: "现有 MySQL 结构解析/观察器未覆盖原 AI 的索引、MODIFY/DROP、复杂 CHECK 和 B02 provenance 注释；不可据材料清单判 ready。" },
   { code: "migration-execution-unverified",
     detail: "本候选未执行 DDL，尚无所选宿主原 Prisma 迁移收据、实际物理观察或升级恢复证据。" }
 ] as const;
