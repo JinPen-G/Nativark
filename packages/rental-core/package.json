@@ -1396,6 +1396,10 @@
       "types": "./dist/permissions.d.ts",
       "default": "./dist/permissions.js"
     },
+    "./legacy-access-preparation": {
+      "types": "./dist/legacy-access-preparation.d.ts",
+      "default": "./dist/legacy-access-preparation.js"
+    },
     "./manifest": {
       "types": "./dist/manifest.d.ts",
       "default": "./dist/manifest.js"
@@ -2848,6 +2852,9 @@
       ],
       "permissions": [
         "./dist/permissions.d.ts"
+      ],
+      "legacy-access-preparation": [
+        "./dist/legacy-access-preparation.d.ts"
       ],
       "manifest": [
         "./dist/manifest.d.ts"

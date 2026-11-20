@@ -44,6 +44,7 @@
 | [本人地址与交付快照](src/mysql-client-delivery-address.ts)、[本人注销](src/mysql-client-account-closure.ts)、[配送区域](src/client-delivery-service-area.ts)、[宿主参加者](src/client-lifecycle-ports.ts) | 客户地址按租户与本人校验，报价/订单快照保持原值；注销沿原短信证明、会员/账号状态及会话撤销顺序。原客户Controller、报价及AI场景消费同一实现 |
 | [浏览器会话与页面装配](admin/browser/README.md)、[认证合同](src/auth-contracts.ts) | 一个宿主创建一份真实会话、刷新运输和查询缓存，向十二组页面供给当前服务端身份；旧后台消费同一实现，登录、空间切换及本机存储命名空间保持 |
 | [清单与页面权限](src/permissions.ts)、[清单工厂](src/manifest.ts) | `/permissions` 同源声明原权限及页面 OR 准入，`/manifest` 生成固定来源的发行清单；标准码只投影当前原租户/空间权限，声明不授予Core，原HTTP码保持 |
+| [存量授权准备](src/legacy-access-preparation.ts) | `/legacy-access-preparation` 在同库只读快照中对照原身份、空间权限与现有 Rental 授权/绑定，给出缺失候选和差异；实际变更仍需原管理事务 |
 | [经营空间会话权威](src/mysql-workspace-principal.ts)、[原仓储入口](../../apps/api/src/modules/platform/platform.repository.ts) | `@rental-os/rental-core/mysql-workspace-principal` 提供可进入空间、默认空间、成员权限及会话复验，构造时传入同一数据库与原账号/角色投影回调。原 Auth、Guard 和 MCP 沿六个仓储入口消费同一实例，角色及权限锁沿原事务顺序 |
 | [主应用工厂](src/mysql-primary-application.ts)、[原宿主接线](../../apps/api/src/modules/rental-core/rental-primary-application.providers.ts) | `/mysql-primary-application` 构造同一对核心与报价/营销实例，显式提供真实配置快照、数据库和参加者；旧服务令牌、HTTP及AI消费这两个实例 |
 | [独立API宿主](../../apps/rental-api/README.md)、[唯一根模块](../../apps/rental-api/src/app.module.ts)、[请求政策](src/http-access-policy.ts) | 组合公共平台与同一Rental应用、身份和数据库；按真实处理器区分身份维护、公开、业务与管理准入，未接齐的必要处理器在连接和监听前拒绝。原事务、提交收据和返回前字段复验分别保留 |
@@ -144,6 +145,8 @@
 | [批准设置应用](src/mysql-approved-settings.ts)、[真实路由授权桥](src/approved-settings-route-authority.ts)、[参加者合同](src/approved-settings-ports.ts)、[严格输入](src/approved-settings-validation.ts) | /mysql-approved-settings 与 /approved-settings-route-authority 复用原Guard/ALS，通知配置CAS、批准消费与原操作同事务，历史读取不以当前配置或过期重做 |
 
 ## 历史与业务收尾
+
+现有 Rental 租户接入标准授权前，从 `/legacy-access-preparation` 的 `createRentalLegacyAccessPreparation({ database, authentication })` 取得准备器，再调用 `prepare(tenantId)` 和 `compare(previous)`。宿主提供同一数据库与原身份仓储；输出固定原角色、空间/地点、品类修订、订阅及 Core 记录，保留已停用授权、已撤销成员与原绑定。`prepared` 或 `unchanged` 只说明只读对照结果，后续授权、成员分配和绑定须在原管理事务重新核验来源及原收据。[实现与返回类型](src/legacy-access-preparation.ts) · [必要行为用例](test/legacy-access-preparation.test.cjs)
 
 [善后声明](src/application-recovery-policy.ts)与[当前权威](src/application-recovery-authority.ts)只接实际登记处理器。89个原读取/收尾入口分别绑定订单、空间或企业历史，新增的文件/承运证据、审批原结果及企业回款凭证通过原材料定位订单。员工收款历史绑定本次真实 `orderId` 查询；旧操作和 unknown 不取得新订单权。
 
