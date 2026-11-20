@@ -45,6 +45,7 @@
 | [浏览器会话与页面装配](admin/browser/README.md)、[认证合同](src/auth-contracts.ts) | 一个宿主创建一份真实会话、刷新运输和查询缓存，向十二组页面供给当前服务端身份；旧后台消费同一实现，登录、空间切换及本机存储命名空间保持 |
 | [清单与页面权限](src/permissions.ts)、[清单工厂](src/manifest.ts) | `/permissions` 同源声明原权限及页面 OR 准入，`/manifest` 生成固定来源的发行清单；标准码只投影当前原租户/空间权限，声明不授予Core，原HTTP码保持 |
 | [存量授权准备](src/legacy-access-preparation.ts) | `/legacy-access-preparation` 在同库只读快照中对照原身份、空间权限与现有 Rental 授权/绑定，给出缺失候选和差异；实际变更仍需原管理事务 |
+| [存量单项接管](src/legacy-access-adoption.ts) | `/legacy-access-adoption` 将确认的单项候选交回原管理服务，在同一事务复验来源、当前身份和修订，沿原操作键保存授权/分配/绑定及审计 |
 | [经营空间会话权威](src/mysql-workspace-principal.ts)、[原仓储入口](../../apps/api/src/modules/platform/platform.repository.ts) | `@rental-os/rental-core/mysql-workspace-principal` 提供可进入空间、默认空间、成员权限及会话复验，构造时传入同一数据库与原账号/角色投影回调。原 Auth、Guard 和 MCP 沿六个仓储入口消费同一实例，角色及权限锁沿原事务顺序 |
 | [主应用工厂](src/mysql-primary-application.ts)、[原宿主接线](../../apps/api/src/modules/rental-core/rental-primary-application.providers.ts) | `/mysql-primary-application` 构造同一对核心与报价/营销实例，显式提供真实配置快照、数据库和参加者；旧服务令牌、HTTP及AI消费这两个实例 |
 | [独立API宿主](../../apps/rental-api/README.md)、[唯一根模块](../../apps/rental-api/src/app.module.ts)、[请求政策](src/http-access-policy.ts) | 组合公共平台与同一Rental应用、身份和数据库；按真实处理器区分身份维护、公开、业务与管理准入，未接齐的必要处理器在连接和监听前拒绝。原事务、提交收据和返回前字段复验分别保留 |
@@ -147,6 +148,12 @@
 ## 历史与业务收尾
 
 现有 Rental 租户接入标准授权前，从 `/legacy-access-preparation` 的 `createRentalLegacyAccessPreparation({ database, authentication })` 取得准备器，再调用 `prepare(tenantId)` 和 `compare(previous)`。宿主提供同一数据库与原身份仓储；输出固定原角色、空间/地点、品类修订、订阅及 Core 记录，保留已停用授权、已撤销成员与原绑定。`prepared` 或 `unchanged` 只说明只读对照结果，后续授权、成员分配和绑定须在原管理事务重新核验来源及原收据。[实现与返回类型](src/legacy-access-preparation.ts) · [必要行为用例](test/legacy-access-preparation.test.cjs)
+
+确认单项候选后，宿主从 `/legacy-access-adoption` 创建 `createRentalLegacyAccessAdoption({ database, authentication, audit, term, deployment, registrations, authorizeContainer })`。这些依赖须与原平台管理和 Rental 宿主同源：`authentication` 为原 `RentalMysqlAuthenticationRepository`，容器授权使用原 `platformHost.authorizeContainer`。调用 `grantTenant`、`assignMember` 或 `bindScope`，传入 `confirmed: { tenantId, sourceFingerprint, coreFingerprint }`、本次 `operationId`、`expectedRevision` 及该单项的 `userId` 或 `workspaceId`；管理主体由当前原会话取得。每次完成后重新准备和确认下一单项，原已停用授权、已撤销成员及既有绑定保持原处理。
+
+接管沿原 ReadCommitted 管理事务：先核原身份和 Tenant/Core 锁及原收据，再锁定并核对完整来源，授权事实、操作收据与审计共同提交。来源账号使用 MySQL `FOR UPDATE NOWAIT`；锁冲突或不支持该语法时操作失败，不自动重试。仅补标准映射；既有绑定复用原实例，缺失绑定遇新增行业初始化器时拒绝。源码离线验证不替代真实 MySQL 锁行为与部署验收。[单项应用与参数](src/legacy-access-adoption.ts) · [原事务行为验证](test/legacy-access-adoption.test.cjs)
+
+应答未知时使用 `readTenantGrantOperation`、`readMemberAssignmentOperation` 或 `readBindingOperation` 查询原 `operationId`。原结果仍受当前原管理权限约束，来源之后发生变化不会触发第二次写入或初始化；收据未观察到不证明未提交。接管只提供服务器装配接口，现有管理 HTTP 不接受准备指纹，也不自动批量应用。
 
 [善后声明](src/application-recovery-policy.ts)与[当前权威](src/application-recovery-authority.ts)只接实际登记处理器。89个原读取/收尾入口分别绑定订单、空间或企业历史，新增的文件/承运证据、审批原结果及企业回款凭证通过原材料定位订单。员工收款历史绑定本次真实 `orderId` 查询；旧操作和 unknown 不取得新订单权。
 

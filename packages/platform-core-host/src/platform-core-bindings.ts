@@ -5,7 +5,7 @@
 import type { CoreHostSqlClient } from "@rental-os/core-host/mysql";
 import type { PlatformCoreTransaction, PlatformCoreUsers, PlatformCoreTermPolicy, PlatformCoreAudit } from "./ports";
 import type { CoreServerRegistration } from "@rental-os/core-contracts";
-import { CoreBindingService, CoreAccessError, type CoreDeploymentAvailability } from "@rental-os/core-host";
+import { CoreBindingService, CoreAccessError, type CoreDeploymentAvailability, type CoreBindingRequest } from "@rental-os/core-host";
 import { createMysqlCoreBindings } from "@rental-os/core-host/mysql-bindings";
 import type { SystemUserRow } from "@rental-os/platform-contracts";
 import { PlatformPrincipalAuthority } from "@rental-os/platform-server/principal";
@@ -27,7 +27,10 @@ export function composePlatformCoreBindings<Tx extends PlatformCoreTransaction>(
   /** 有容器的Core由自身适配在同一原事务核定容器归属及可初始化范围。 */
   authorizeContainer?(transaction: Tx, user: SystemUserRow,
     scope: import("@rental-os/core-contracts").CoreScopeReference): Promise<void>;
+  /** 服务端来源约束只在原收据缺失后进入，租约留在原绑定事务；不能由客户端自证。 */
+  mutationPrecondition?(transaction: Tx, request: CoreBindingRequest): Promise<{ revalidate(): Promise<void> }>;
 }) {
+  const precondition = input.mutationPrecondition;
   const principals = new PlatformPrincipalAuthority<Tx>(input.users);
   const access = new PlatformCoreAccess<Tx>(input.term, input.deployment);
   const runtime = createMysqlCoreBindings<Tx>(input.database, {
@@ -50,8 +53,16 @@ export function composePlatformCoreBindings<Tx extends PlatformCoreTransaction>(
       };
       return async () => {
         await authorize();
+        let mutation: { revalidate(): Promise<void> } | undefined;
         return { actor: lease.principal, scope: request.scope, canInitialize: request.purpose === "initialize",
-          canReadOriginal: request.purpose === "original_receipt", revalidate: async () => { await authorize(); } };
+          canReadOriginal: request.purpose === "original_receipt",
+          beforeMutation: precondition ? async () => {
+            const current = await precondition(transaction, request);
+            if (!current || typeof current.revalidate !== "function")
+              throw new CoreAccessError("core_unavailable", "Core绑定来源参加者未返回有效同事务租约");
+            mutation = current;
+          } : undefined,
+          revalidate: async () => { await mutation?.revalidate(); await authorize(); } };
       };
     },
     audit: (transaction, receipt) => input.audit.recordCoreBindingReceipt(transaction, receipt)

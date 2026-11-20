@@ -1400,6 +1400,10 @@
       "types": "./dist/legacy-access-preparation.d.ts",
       "default": "./dist/legacy-access-preparation.js"
     },
+    "./legacy-access-adoption": {
+      "types": "./dist/legacy-access-adoption.d.ts",
+      "default": "./dist/legacy-access-adoption.js"
+    },
     "./manifest": {
       "types": "./dist/manifest.d.ts",
       "default": "./dist/manifest.js"
@@ -2855,6 +2859,9 @@
       ],
       "legacy-access-preparation": [
         "./dist/legacy-access-preparation.d.ts"
+      ],
+      "legacy-access-adoption": [
+        "./dist/legacy-access-adoption.d.ts"
       ],
       "manifest": [
         "./dist/manifest.d.ts"

@@ -32,6 +32,8 @@ export interface CoreBindingLease {
   scope: CoreScopeReference;
   canInitialize: boolean;
   canReadOriginal: boolean;
+  /** 原收据不存在时核定来源；复用现有绑定也须核定，但不会重新初始化。 */
+  beforeMutation?(): Promise<void>;
   revalidate(): Promise<void>;
 }
 export interface CoreBindingExecution {
@@ -78,6 +80,7 @@ export class CoreBindingService {
         if (original.fingerprint !== hash) throw new CoreAccessError("operation_conflict", "原初始化操作键已用于不同输入");
         return original.binding;
       }
+      await lease.beforeMutation?.();
       await this.deployment.requireAvailable(scope.coreId, scope.tenantId);
       const existing = await store.binding();
       if ((existing?.revision ?? 0) !== parsed.expectedRevision)

@@ -94,7 +94,7 @@ const roleSelect = { id: true, tenantId: true, isActive: true, fixedAllPermissio
   permissions: { select: { permission: { select: { id: true, code: true } } }, orderBy: { permissionId: "asc" } } } as const;
 
 async function readSource(tx: Prisma.TransactionClient, tenantId: string) {
-  // RR 的普通读取形成固定快照，不取得业务锁，不更改 Order → Workspace 的原锁序。
+  // 只作普通读取。独立准备由RR固定快照；应用方先持原管理/来源锁，不在这里改变业务锁序。
   const tenant = await tx.tenant.findUnique({ where: { id: tenantId }, select: { id: true, status: true, updatedAt: true } });
   if (!tenant) throw new RentalLegacyAccessPreparationError("source_unavailable", "原租户不存在，未生成候选");
   ensure(tenant.id === tenantId, "原租户身份不符");
@@ -189,104 +189,111 @@ async function readCoreRecords(tx: Prisma.TransactionClient, tenantId: string) {
   return { grant, assignments: [...assignmentMap.values()], bindings: [...bindingMap.values()] };
 }
 
+/** 复用同一来源读取与投影。调用者拥有事务；本函数不取得锁、不授予权限。
+ * 独立准备由下方RR事务承载，应用参加者必须先持原管理父锁及完整来源锁。 */
+export async function readRentalLegacyAccessPreparation(transaction: Prisma.TransactionClient,
+  authentication: RentalLegacyAccessPreparationInput["authentication"], tenantId: string) {
+  identifier(tenantId);
+  const tx = transaction;
+  const source = await readSource(tx, tenantId), core = await readCoreRecords(tx, tenantId);
+  const scope = (workspaceId?: string): CoreScopeReference => ({ coreId: RENTAL_CORE_ID, tenantId,
+    ...(workspaceId ? { container: { type: RENTAL_WORKSPACE_CONTAINER_TYPE, id: workspaceId } } : {}) });
+  const prepareMember = async (user: typeof source.users[number]) => {
+    const current = core.assignments.find(row => row.userId === user.id) ?? null;
+    const original = await authentication.findUserById(user.id, tx);
+    ensure(!original || original.id === user.id && original.tenantId === tenantId, "原身份仓储返回另一租户/账号");
+    ensure(Boolean(original) === (source.tenant.status === "ACTIVE" && user.isActive), "原身份有效性与同事务事实不符");
+    const reasons: string[] = [];
+    if (source.tenant.status !== "ACTIVE") reasons.push("tenant_inactive");
+    if (!user.isActive) reasons.push("user_inactive");
+    if (user.isSaasAdmin) reasons.push("saas_identity_not_rental_member");
+    // 改密是当次使用门槛，不是永久撤销：已有 assignment 无论状态均原样保留。
+    if (user.mustChangePassword) reasons.push("password_change_required_reprepare_later");
+    const tenantProjection = original ? originalProjection(original) : null;
+    const tenantCodes = original ? rentalCorePermissionCodes({ audience: "operator", tenantUser: original }) : [];
+    const workspaces = [];
+    for (const member of source.members.filter(row => row.userId === user.id)) {
+      const workspace = source.workspaces.find(row => row.id === member.workspaceId)!;
+      const scoped = original ? await authentication.findWorkspaceScopedUser(user.id, workspace.id, original, tx) : undefined;
+      ensure(!scoped || scoped.id === user.id && scoped.tenantId === tenantId, "原空间投影返回另一租户/账号");
+      ensure(Boolean(scoped) === Boolean(original && member.isActive && workspace.status === "ACTIVE"), "原空间成员投影与同事务事实不符");
+      let businessLocationScope = null;
+      if (scoped) {
+        businessLocationScope = await resolveUserBusinessLocationScope(scoped, workspace.id,
+          scoped.locationScope ?? { mode: "all", locationIds: [] }, tx);
+      }
+      const projected = scoped ? originalProjection(scoped) : null;
+      const codes = original && scoped ? rentalCorePermissionCodes({ audience: "operator", tenantUser: original,
+        workspaceUser: scoped, workspaceId: workspace.id }).filter(code => !tenantCodes.includes(code)) : [];
+      workspaces.push({ workspaceId: workspace.id, memberActive: member.isActive, workspaceStatus: workspace.status,
+        roleId: member.roleId, original: projected, businessLocationScope, operatorDirectoryCodes: codes });
+    }
+    const eligible = reasons.length === 0 && (tenantCodes.length > 0 || workspaces.some(row => row.operatorDirectoryCodes.length > 0));
+    if (!eligible && !reasons.length) reasons.push("no_current_registered_rental_permission");
+    if (core.grant?.state === "disabled") reasons.push("current_core_disabled_preserved");
+    if (current?.state === "revoked") reasons.push("current_assignment_revoked_preserved");
+    const difference = accessDifference(current, eligible && core.grant?.state !== "disabled", reasons);
+    return { userId: user.id, original: tenantProjection, tenantDirectoryCodes: tenantCodes, workspaces, ...difference,
+      management: managementEntry("memberAssignment"),
+      proposal: difference.difference === "propose_missing" ? { coreId: RENTAL_CORE_ID, userId: user.id,
+        state: "assigned" as const, expectedRevision: 0 } : null };
+  };
+  const members: Awaited<ReturnType<typeof prepareMember>>[] = [];
+  for (const user of source.users) members.push(await prepareMember(user));
+  // 不因缺失/停用账号自动撤销历史 assignment；孤立记录只列为待核证据。
+  const unlocatedAssignments = core.assignments.filter(row => !source.users.some(user => user.id === row.userId));
+  const tenantEligible = source.tenant.status === "ACTIVE" && members.some(member =>
+    member.difference === "propose_missing" || member.current?.state === "assigned"
+      && (member.tenantDirectoryCodes.length > 0 || member.workspaces.some(row => row.operatorDirectoryCodes.length > 0)));
+  const grant = { ...accessDifference(core.grant, tenantEligible, tenantEligible ? [] : ["no_current_legacy_rental_authority"]),
+    management: managementEntry("tenantGrant"),
+    proposal: !core.grant && tenantEligible ? { tenantId, coreId: RENTAL_CORE_ID, state: "enabled" as const, expectedRevision: 0 } : null };
+  const scopes = [scope(), ...source.workspaces.map(workspace => scope(workspace.id))];
+  const bindings = scopes.map(target => {
+    const current = core.bindings.find(binding => coreBindingScopeKey(binding) === coreBindingScopeKey(target)) ?? null;
+    const eligible = core.grant?.state !== "disabled" && members.some(member => member.current?.state !== "revoked"
+      && (target.container ? member.workspaces.some(row => row.workspaceId === target.container?.id && row.operatorDirectoryCodes.length)
+        : member.tenantDirectoryCodes.length));
+    return { scope: target, current, expectedRevision: current?.revision ?? 0,
+      difference: (current ? "preserve_existing" : eligible ? "propose_missing" : "defer") as Difference,
+      management: managementEntry("bind"),
+      // 不提供 configuration 或新的品类；原空间及其采纳修订已在 source 中固定。
+      proposal: !current && eligible ? { coreId: RENTAL_CORE_ID, ...(target.container ? { container: target.container } : {}), expectedRevision: 0 } : null };
+  });
+  const comparisons = members.flatMap(member => [
+    { scope: scope(), codes: member.tenantDirectoryCodes, original: member.original },
+    ...member.workspaces.map(workspace => ({ scope: scope(workspace.workspaceId), codes: workspace.operatorDirectoryCodes,
+      original: { user: workspace.original, businessLocationScope: workspace.businessLocationScope } }))
+  ].map(item => {
+    const binding = bindings.find(row => coreBindingScopeKey(row.scope) === coreBindingScopeKey(item.scope))!;
+    const currentOpen = grant.current?.state === "enabled" && member.current?.state === "assigned" && Boolean(binding.current);
+    const proposedOpen = (grant.current?.state === "enabled" || Boolean(grant.proposal))
+      && (member.current?.state === "assigned" || Boolean(member.proposal)) && Boolean(binding.current || binding.proposal);
+    return { userId: member.userId, scope: item.scope, originalScopeFingerprint: fingerprint(item.original),
+      originalDirectoryCodes: item.codes, currentMappingCodes: currentOpen ? item.codes : [],
+      conditionalPreparedMappingCodes: proposedOpen ? item.codes : [],
+      difference: item.codes.length === 0 || currentOpen ? "unchanged" : proposedOpen ? "missing_mapping_candidate" : "restricted_preserved" };
+  }));
+  const originalEvidence = evidence(source), currentCoreEvidence = evidence(core);
+  // 投影也进入原事实指纹，原投影算法/范围变化同样使旧候选失效。
+  const sourceFingerprint = fingerprint({ source: originalEvidence, projections: members.map(member => ({ userId: member.userId,
+    original: member.original, tenantDirectoryCodes: member.tenantDirectoryCodes, workspaces: member.workspaces })) });
+  const coreFingerprint = fingerprint(currentCoreEvidence);
+  return { status: "prepared" as const, formatVersion: 1 as const, coreId: RENTAL_CORE_ID, tenantId,
+    sourceFingerprint, coreFingerprint, originalEvidence, currentCoreEvidence, grant, members, bindings, unlocatedAssignments,
+    unlocatedBindings: core.bindings.filter(binding => !scopes.some(target => coreBindingScopeKey(target) === coreBindingScopeKey(binding))),
+    comparison: { scope: "grant_assignment_binding_only" as const, projection: "original_operator_directory" as const,
+      // 每行比较的只是附加 Core 映射；不把 operator 目录当 staff/client 路由的准入证据。
+      routeAuthorizationVerified: false as const, rows: comparisons },
+    execution: { supported: false as const, runtimeAuthority: false as const,
+      required: ["original_management_identity_and_same_transaction_source_revalidation", "current_expected_revision_and_original_operation_receipt",
+        "registered_core_deployment_data_version_and_readiness", "original_auth_guard_audience_resource_and_subscription_policy"] as const } };
+}
+
 export function createRentalLegacyAccessPreparation(input: RentalLegacyAccessPreparationInput) {
   async function prepare(tenantId: string) {
     identifier(tenantId);
-    return input.database.$transaction(async tx => {
-      const source = await readSource(tx, tenantId), core = await readCoreRecords(tx, tenantId);
-      const scope = (workspaceId?: string): CoreScopeReference => ({ coreId: RENTAL_CORE_ID, tenantId,
-        ...(workspaceId ? { container: { type: RENTAL_WORKSPACE_CONTAINER_TYPE, id: workspaceId } } : {}) });
-      const prepareMember = async (user: typeof source.users[number]) => {
-        const current = core.assignments.find(row => row.userId === user.id) ?? null;
-        const original = await input.authentication.findUserById(user.id, tx);
-        ensure(!original || original.id === user.id && original.tenantId === tenantId, "原身份仓储返回另一租户/账号");
-        ensure(Boolean(original) === (source.tenant.status === "ACTIVE" && user.isActive), "原身份有效性与同事务事实不符");
-        const reasons: string[] = [];
-        if (source.tenant.status !== "ACTIVE") reasons.push("tenant_inactive");
-        if (!user.isActive) reasons.push("user_inactive");
-        if (user.isSaasAdmin) reasons.push("saas_identity_not_rental_member");
-        // 改密是当次使用门槛，不是永久撤销：已有 assignment 无论状态均原样保留。
-        if (user.mustChangePassword) reasons.push("password_change_required_reprepare_later");
-        const tenantProjection = original ? originalProjection(original) : null;
-        const tenantCodes = original ? rentalCorePermissionCodes({ audience: "operator", tenantUser: original }) : [];
-        const workspaces = [];
-        for (const member of source.members.filter(row => row.userId === user.id)) {
-          const workspace = source.workspaces.find(row => row.id === member.workspaceId)!;
-          const scoped = original ? await input.authentication.findWorkspaceScopedUser(user.id, workspace.id, original, tx) : undefined;
-          ensure(!scoped || scoped.id === user.id && scoped.tenantId === tenantId, "原空间投影返回另一租户/账号");
-          ensure(Boolean(scoped) === Boolean(original && member.isActive && workspace.status === "ACTIVE"), "原空间成员投影与同事务事实不符");
-          let businessLocationScope = null;
-          if (scoped) {
-            businessLocationScope = await resolveUserBusinessLocationScope(scoped, workspace.id,
-              scoped.locationScope ?? { mode: "all", locationIds: [] }, tx);
-          }
-          const projected = scoped ? originalProjection(scoped) : null;
-          const codes = original && scoped ? rentalCorePermissionCodes({ audience: "operator", tenantUser: original,
-            workspaceUser: scoped, workspaceId: workspace.id }).filter(code => !tenantCodes.includes(code)) : [];
-          workspaces.push({ workspaceId: workspace.id, memberActive: member.isActive, workspaceStatus: workspace.status,
-            roleId: member.roleId, original: projected, businessLocationScope, operatorDirectoryCodes: codes });
-        }
-        const eligible = reasons.length === 0 && (tenantCodes.length > 0 || workspaces.some(row => row.operatorDirectoryCodes.length > 0));
-        if (!eligible && !reasons.length) reasons.push("no_current_registered_rental_permission");
-        if (core.grant?.state === "disabled") reasons.push("current_core_disabled_preserved");
-        if (current?.state === "revoked") reasons.push("current_assignment_revoked_preserved");
-        const difference = accessDifference(current, eligible && core.grant?.state !== "disabled", reasons);
-        return { userId: user.id, original: tenantProjection, tenantDirectoryCodes: tenantCodes, workspaces, ...difference,
-          management: managementEntry("memberAssignment"),
-          proposal: difference.difference === "propose_missing" ? { coreId: RENTAL_CORE_ID, userId: user.id,
-            state: "assigned" as const, expectedRevision: 0 } : null };
-      };
-      const members: Awaited<ReturnType<typeof prepareMember>>[] = [];
-      for (const user of source.users) members.push(await prepareMember(user));
-      // 不因缺失/停用账号自动撤销历史 assignment；孤立记录只列为待核证据。
-      const unlocatedAssignments = core.assignments.filter(row => !source.users.some(user => user.id === row.userId));
-      const tenantEligible = source.tenant.status === "ACTIVE" && members.some(member =>
-        member.difference === "propose_missing" || member.current?.state === "assigned"
-          && (member.tenantDirectoryCodes.length > 0 || member.workspaces.some(row => row.operatorDirectoryCodes.length > 0)));
-      const grant = { ...accessDifference(core.grant, tenantEligible, tenantEligible ? [] : ["no_current_legacy_rental_authority"]),
-        management: managementEntry("tenantGrant"),
-        proposal: !core.grant && tenantEligible ? { tenantId, coreId: RENTAL_CORE_ID, state: "enabled" as const, expectedRevision: 0 } : null };
-      const scopes = [scope(), ...source.workspaces.map(workspace => scope(workspace.id))];
-      const bindings = scopes.map(target => {
-        const current = core.bindings.find(binding => coreBindingScopeKey(binding) === coreBindingScopeKey(target)) ?? null;
-        const eligible = core.grant?.state !== "disabled" && members.some(member => member.current?.state !== "revoked"
-          && (target.container ? member.workspaces.some(row => row.workspaceId === target.container?.id && row.operatorDirectoryCodes.length)
-            : member.tenantDirectoryCodes.length));
-        return { scope: target, current, expectedRevision: current?.revision ?? 0,
-          difference: (current ? "preserve_existing" : eligible ? "propose_missing" : "defer") as Difference,
-          management: managementEntry("bind"),
-          // 不提供 configuration 或新的品类；原空间及其采纳修订已在 source 中固定。
-          proposal: !current && eligible ? { coreId: RENTAL_CORE_ID, ...(target.container ? { container: target.container } : {}), expectedRevision: 0 } : null };
-      });
-      const comparisons = members.flatMap(member => [
-        { scope: scope(), codes: member.tenantDirectoryCodes, original: member.original },
-        ...member.workspaces.map(workspace => ({ scope: scope(workspace.workspaceId), codes: workspace.operatorDirectoryCodes,
-          original: { user: workspace.original, businessLocationScope: workspace.businessLocationScope } }))
-      ].map(item => {
-        const binding = bindings.find(row => coreBindingScopeKey(row.scope) === coreBindingScopeKey(item.scope))!;
-        const currentOpen = grant.current?.state === "enabled" && member.current?.state === "assigned" && Boolean(binding.current);
-        const proposedOpen = (grant.current?.state === "enabled" || Boolean(grant.proposal))
-          && (member.current?.state === "assigned" || Boolean(member.proposal)) && Boolean(binding.current || binding.proposal);
-        return { userId: member.userId, scope: item.scope, originalScopeFingerprint: fingerprint(item.original),
-          originalDirectoryCodes: item.codes, currentMappingCodes: currentOpen ? item.codes : [],
-          conditionalPreparedMappingCodes: proposedOpen ? item.codes : [],
-          difference: item.codes.length === 0 || currentOpen ? "unchanged" : proposedOpen ? "missing_mapping_candidate" : "restricted_preserved" };
-      }));
-      const originalEvidence = evidence(source), currentCoreEvidence = evidence(core);
-      // 投影也进入原事实指纹，原投影算法/范围变化同样使旧候选失效。
-      const sourceFingerprint = fingerprint({ source: originalEvidence, projections: members.map(member => ({ userId: member.userId,
-        original: member.original, tenantDirectoryCodes: member.tenantDirectoryCodes, workspaces: member.workspaces })) });
-      const coreFingerprint = fingerprint(currentCoreEvidence);
-      return { status: "prepared" as const, formatVersion: 1 as const, coreId: RENTAL_CORE_ID, tenantId,
-        sourceFingerprint, coreFingerprint, originalEvidence, currentCoreEvidence, grant, members, bindings, unlocatedAssignments,
-        unlocatedBindings: core.bindings.filter(binding => !scopes.some(target => coreBindingScopeKey(target) === coreBindingScopeKey(binding))),
-        comparison: { scope: "grant_assignment_binding_only" as const, projection: "original_operator_directory" as const,
-          // 每行比较的只是附加 Core 映射；不把 operator 目录当 staff/client 路由的准入证据。
-          routeAuthorizationVerified: false as const, rows: comparisons },
-        execution: { supported: false as const, runtimeAuthority: false as const,
-          required: ["original_management_identity_and_same_transaction_source_revalidation", "current_expected_revision_and_original_operation_receipt",
-            "registered_core_deployment_data_version_and_readiness", "original_auth_guard_audience_resource_and_subscription_policy"] as const } };
-    }, { isolationLevel: "RepeatableRead" });
+    return input.database.$transaction(tx => readRentalLegacyAccessPreparation(tx, input.authentication, tenantId), { isolationLevel: "RepeatableRead" });
   }
   return {
     prepare,
