@@ -11,6 +11,7 @@ import type { RentalOrderChangePreview } from "./contracts";
 import type { EnterpriseBookingBasis } from "./enterprise-booking";
 import type { SystemUserRow } from "@rental-os/platform-contracts";
 import { getRequestIdentity, requireRequestWorkspaceId } from "@rental-os/platform-server/request-identity";
+import type { RentalEnterpriseAuthorityTransaction } from "./enterprise-read-storage";
 import type { ClientRequestContext } from "./client-context";
 import type { RentalEnterpriseExchangeClient as ClientApiService } from "./enterprise-approval-ports";
 import type { RentalExchangeInspectionAuthority as AuthService } from "./exchange-inspection-ports";
@@ -48,6 +49,15 @@ export class EnterpriseExchangeApprovalService {
   }
   private owns(context: ClientRequestContext, row?: Approval) {
     if (!row || row.applicantCustomerId !== context.customerId || row.workspaceId !== context.workspaceId || requireRequestWorkspaceId() !== context.workspaceId) throw new NotFoundException("本人当前空间换货申请不存在");
+  }
+  /** Lookup does not lock an approval ahead of its original order and does not
+   * authorize confirmation or execution. Recovery repeats it after Order/Workspace. */
+  async readHistoryReference(context: ClientRequestContext, id: string, tx: RentalEnterpriseAuthorityTransaction) {
+    const rows = await tx.$queryRaw<Approval[]>(Prisma.sql`SELECT * FROM enterprise_exchange_approvals WHERE tenantId=${context.tenantId} AND workspaceId=${context.workspaceId} AND id=${id}`);
+    const row = rows[0]; this.owns(context, row);
+    if (rows.length !== 1 || !row || row.id !== id || !row.orderId) throw new NotFoundException("原换货批准订单关联缺失");
+    return { workspaceId: row.workspaceId, orderId: row.orderId,
+      materialKey: requestFingerprint(JSON.parse(JSON.stringify(row))) };
   }
   private confirmationFingerprint(row: Approval) {
     return requestFingerprint({ approvalId: row.id, orderId: row.orderId, workspaceId: row.workspaceId, applicantCustomerId: row.applicantCustomerId,

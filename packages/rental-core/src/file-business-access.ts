@@ -1,5 +1,7 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
+import type { RentalBusinessTenantTransaction } from "./mysql-business-fence";
 import type { FileAssetSummary } from '@rental-os/platform-contracts/files';
 import { getRequestIdentity, type RequestIdentity } from '@rental-os/platform-server/request-identity';
 import type { RentalFileAccessStorage, RentalFileFacts, RentalFileQuoteFacts, RentalCustomerFileAccess } from './file-access-ports';
@@ -107,6 +109,68 @@ export class RentalFileBusinessAccessService {
       && image.fileAssetId === fileId)) throw new NotFoundException('文件不是当前已发布商品图片');
   }
 
+  /** Query-only original-order locator. The current subject/Tenant lease precedes
+   * this read; recovery locks its returned Order before Workspace and repeats it.
+   * The download path still executes assertRead and its original same-tx audit. */
+  async readHistoryOrderReference(tenantId: string, fileId: string, tx: RentalBusinessTenantTransaction) {
+    const actor = this.actor(tenantId);
+    type Row = FileBinding & { tenantId: string; status: string; uploadedBy: string | null; updatedAt: Date };
+    const rows = await tx.$queryRaw<Row[]>(Prisma.sql`SELECT * FROM FileAsset WHERE tenantId=${tenantId} AND id=${fileId} AND status='active'`);
+    const file = rows[0];
+    if (rows.length !== 1 || !file || file.id !== fileId || file.tenantId !== tenantId || file.status !== "active")
+      throw new NotFoundException("原订单证据文件不存在");
+    const material: unknown[] = [file], seen = new Set<string>();
+    let binding: FileBinding = file;
+    while (["async_job", "document_print_job"].includes(binding.businessType)) {
+      this.requireOperator(actor, ["system:integration:manage"]);
+      const id = binding.businessId, key = binding.businessType + ":" + id;
+      if (!id || seen.has(key) || seen.size >= 3) throw new ForbiddenException("文件原订单引用不能解析");
+      seen.add(key);
+      const references = await tx.$queryRaw<Array<{ id: string; tenantId: string; businessType: string; businessId: string | null }>>(binding.businessType === "async_job"
+        ? Prisma.sql`SELECT id,tenantId,businessType,businessId FROM AsyncJob WHERE tenantId=${tenantId} AND id=${id}`
+        : Prisma.sql`SELECT id,tenantId,businessType,businessId FROM DocumentPrintJob WHERE tenantId=${tenantId} AND id=${id}`);
+      const row = references[0];
+      if (references.length !== 1 || !row || row.id !== id || row.tenantId !== tenantId || !row.businessId)
+        throw new NotFoundException("文件任务缺少原订单关联");
+      material.push(row); binding = { ...file, businessType: row.businessType, businessId: row.businessId };
+    }
+    const orderId = ["order", "rental_order", "order_contract"].includes(binding.businessType) ? binding.businessId ?? undefined : undefined;
+    const evidenceStage = orderId ? this.orderReadStage(binding, actor) : undefined;
+    return { evidenceStage, orderId, workspaceId: actor.workspaceId!, uploadedBy: file.uploadedBy,
+      businessType: file.businessType, uploadScene: file.uploadScene,
+      materialKey: requestFingerprint(JSON.parse(JSON.stringify(material))) };
+  }
+
+  private orderReadStage(file: FileBinding, actor: FileActor): "pickup" | "return" | undefined {
+    if (!['order-contract', 'contract_mock', 'pickup-evidence', 'return-evidence', 'handover-signature',
+      'offline-payment-proof', 'carrier-shipment-evidence', 'print_mock'].includes(file.uploadScene)) {
+      throw new ForbiddenException('订单附件场景没有受控读取规则');
+    }
+    const stage = file.uploadScene === 'pickup-evidence' ? 'pickup' : file.uploadScene === 'return-evidence' ? 'return' : undefined;
+    const scenePermissions = stage === 'pickup' ? ['rental-os:order:pickup'] : stage === 'return' ? ['rental-os:order:return']
+      : file.uploadScene === 'handover-signature' ? ['rental-os:order:pickup', 'rental-os:order:return'] : [];
+    this.requireOperator(actor, ['rental-os:order:view', ...scenePermissions,
+      ...(file.uploadScene === 'offline-payment-proof' ? ['rental-os:order:offline-payment'] : [])]);
+    const metadata = file.metadata && typeof file.metadata === 'object' && !Array.isArray(file.metadata)
+      ? file.metadata as Record<string, unknown> : {};
+    const documentType = typeof metadata.documentType === 'string' ? metadata.documentType : '';
+    if (file.uploadScene === 'print_mock' && !['pickup_sheet', 'return_sheet', 'rental_contract', 'invoice',
+      'quote', 'delivery', 'return', 'settlement'].includes(documentType)) throw new ForbiddenException('文件缺少受控原单据类型');
+    if (file.uploadScene === 'offline-payment-proof' || ['invoice', 'settlement'].includes(documentType)) {
+      this.requireOperator(actor, ['rental-os:finance:view', 'rental-os:finance:reconcile',
+        ...(actor.audience === 'staff' && file.uploadScene === 'offline-payment-proof' ? ['rental-os:order:offline-payment'] : [])]);
+    }
+    let evidenceStage: 'pickup' | 'return' | undefined = stage;
+    if (file.uploadScene === 'handover-signature') {
+      const metadata = file.metadata;
+      const boundStage = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+        ? (metadata as Record<string, unknown>).handoverStage : undefined;
+      if (boundStage !== 'pickup' && boundStage !== 'return') throw new ForbiddenException('交接凭证缺少原阶段绑定');
+      evidenceStage = boundStage;
+    }
+    return evidenceStage;
+  }
+
   private async assertOperatorBinding(tenantId: string, file: FileBinding, actor: FileActor, seen: Set<string>, genericLedger: boolean, tx?: Prisma.TransactionClient): Promise<void> {
     const client = tx ?? this.prisma;
     const id = file.businessId!, type = file.businessType, binding = `${type}:${id}`;
@@ -117,32 +181,7 @@ export class RentalFileBusinessAccessService {
     seen.add(binding);
     switch (type) {
       case 'order': case 'rental_order': case 'order_contract': {
-        if (!['order-contract', 'contract_mock', 'pickup-evidence', 'return-evidence', 'handover-signature',
-          'offline-payment-proof', 'carrier-shipment-evidence', 'print_mock'].includes(file.uploadScene)) {
-          throw new ForbiddenException('订单附件场景没有受控读取规则');
-        }
-        const stage = file.uploadScene === 'pickup-evidence' ? 'pickup' : file.uploadScene === 'return-evidence' ? 'return' : undefined;
-        const scenePermissions = stage === 'pickup' ? ['rental-os:order:pickup'] : stage === 'return' ? ['rental-os:order:return']
-          : file.uploadScene === 'handover-signature' ? ['rental-os:order:pickup', 'rental-os:order:return'] : [];
-        this.requireOperator(actor, ['rental-os:order:view', ...scenePermissions,
-          ...(file.uploadScene === 'offline-payment-proof' ? ['rental-os:order:offline-payment'] : [])]);
-        const metadata = file.metadata && typeof file.metadata === 'object' && !Array.isArray(file.metadata)
-          ? file.metadata as Record<string, unknown> : {};
-        const documentType = typeof metadata.documentType === 'string' ? metadata.documentType : '';
-        if (file.uploadScene === 'print_mock' && !['pickup_sheet', 'return_sheet', 'rental_contract', 'invoice',
-          'quote', 'delivery', 'return', 'settlement'].includes(documentType)) throw new ForbiddenException('文件缺少受控原单据类型');
-        if (file.uploadScene === 'offline-payment-proof' || ['invoice', 'settlement'].includes(documentType)) {
-          this.requireOperator(actor, ['rental-os:finance:view', 'rental-os:finance:reconcile',
-            ...(actor.audience === 'staff' && file.uploadScene === 'offline-payment-proof' ? ['rental-os:order:offline-payment'] : [])]);
-        }
-        let evidenceStage: 'pickup' | 'return' | undefined = stage;
-        if (file.uploadScene === 'handover-signature') {
-          const metadata = file.metadata;
-          const boundStage = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
-            ? (metadata as Record<string, unknown>).handoverStage : undefined;
-          if (boundStage !== 'pickup' && boundStage !== 'return') throw new ForbiddenException('交接凭证缺少原阶段绑定');
-          evidenceStage = boundStage;
-        }
+        const evidenceStage = this.orderReadStage(file, actor);
         await this.facts.assertFileOrderReadAccess(tenantId, id, evidenceStage, tx);
         return;
       }

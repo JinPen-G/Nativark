@@ -8,11 +8,12 @@ import { isRentalCategoryCode } from "./contracts";
 import type { SystemUserRow } from "@rental-os/platform-contracts";
 import type { ClientRequestContext } from "./client-context";
 import { EnterpriseAccessService } from "./mysql-enterprise-access";
-import type { RentalEnterpriseManagementStorage } from "./enterprise-read-storage";
-import { EnterpriseCommandService, enterpriseJson } from "./mysql-enterprise-command";
+import type { RentalEnterpriseManagementStorage, RentalEnterpriseAuthorityTransaction } from "./enterprise-read-storage";
+import { EnterpriseCommandService, enterpriseHash, enterpriseJson } from "./mysql-enterprise-command";
 import { assertPublishedRentalCategoryIdentities } from "./category-identity";
 import type { RentalExchangeInspectionAuthority } from "./exchange-inspection-ports";
 import { getRequestIdentity } from "@rental-os/platform-server/request-identity";
+import { lockRentalBusinessTenant } from "./mysql-business-fence";
 import { ENTERPRISE_PAYMENT_PROOF_SCENE, EnterprisePaymentProofSource, type PaymentProofReceipt } from "./enterprise-payment-proof-source";
 
 type Stored = { requestType: EnterpriseManagementRequestType; objectRevision: string; proposal: EnterpriseManagementProposal; evidenceFileIds: string[]; reason: string; paymentProof?: PaymentProofReceipt };
@@ -156,7 +157,14 @@ export class EnterpriseManagementRequestService {
     context = Object.freeze({ ...context });
     if (receipt?.corporateCustomerId !== corporateId || receipt.workspaceId !== context.workspaceId) throw new ForbiddenException("原回款申请企业或空间不一致");
     const db = this.prisma as unknown as Prisma.TransactionClient, before = await this.proofs.customer(context, corporateId, db);
-    const evidence = await this.prisma.$transaction(tx => this.proofs.readOriginal(context.tenantId, context.customerId, receipt, tx), { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    const evidence = await this.prisma.$transaction(async tx => {
+      await lockRentalBusinessTenant(tx, context.tenantId);
+      // Original proof takes Order then Workspace/files. Do not move its session
+      // join (which locks Workspace) ahead of that aggregate on legacy callers.
+      const original = await this.proofs.readOriginal(context.tenantId, context.customerId, receipt, tx);
+      if (await this.proofs.customer(context, corporateId, tx) !== before) throw new ForbiddenException("原回款申请当前权限已变化");
+      return original;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     if (await this.proofs.customer(context, corporateId, db) !== before) throw new ForbiddenException("原回款申请读取期间权限已变化");
     return evidence;
   }
@@ -349,6 +357,38 @@ export class EnterpriseManagementRequestService {
       proofFile = { orderId: proof.orderId, workspaceId: proof.workspaceId, contentHash: file.contentHash };
     }
     return { tenantId, actor: after.actor, applicantCustomerId: row.applicantCustomerId, revision: row.revision, materialKey: JSON.stringify(view), ...(proofFile ? { proofFile, uploadScene: ENTERPRISE_PAYMENT_PROOF_SCENE } : {}) };
+  }
+
+  /** Original request/file linkage only. No new proof or financial claim is made.
+   * Recovery first locates without locks, then holds Order/Workspace and rereads
+   * this exact material before the original proof reader checks grants/files. */
+  async readEvidenceHistoryReference(context: ClientRequestContext, id: string, fileId: string,
+    tx: RentalEnterpriseAuthorityTransaction) {
+    if (![id, fileId].every(value => typeof value === "string" && /^[a-zA-Z0-9_-]{1,191}$/u.test(value)))
+      throw new BadRequestException("原申请或凭证引用无效");
+    const rows = await tx.$queryRaw<Row[]>(Prisma.sql`SELECT * FROM enterprise_workflow_requests WHERE tenantId=${context.tenantId} AND id=${id} AND applicantCustomerId=${context.customerId} AND kind='finance_request'`);
+    const row = rows[0];
+    if (rows.length !== 1 || !row || row.id !== id || row.tenantId !== context.tenantId || row.applicantCustomerId !== context.customerId
+      || enterpriseJson(row.payload).requestType !== "payment_proof") throw new NotFoundException("本人原费用回款申请不存在");
+    const proof = this.storedProof(row);
+    if (proof.workspaceId !== context.workspaceId || !proof.evidenceFileIds.includes(fileId))
+      throw new ForbiddenException("原凭证不属于本人当前空间申请");
+    // Close the final buffered-response window as well as the controller's own
+    // before/after byte checks. This query supplies immutable material, not a new
+    // file permission: original proofs.readOriginal still verifies every binding.
+    const files = await tx.$queryRaw<Array<{ id: string; tenantId: string; status: string; uploadedBy: string | null;
+      businessType: string; businessModule: string; businessId: string | null; uploadScene: string }>>(Prisma.sql`
+      SELECT f.*,s.id AS historySessionId,s.status AS historySessionStatus,s.completedAt AS historySessionCompletedAt,
+        s.provider AS historySessionProvider,s.storageKey AS historySessionStorageKey
+      FROM FileAsset f LEFT JOIN file_upload_sessions s ON s.tenantId=f.tenantId AND s.fileAssetId=f.id
+      WHERE f.tenantId=${context.tenantId} AND f.id=${fileId}`);
+    const file = files[0];
+    if (files.length !== 1 || !file || file.id !== fileId || file.tenantId !== context.tenantId || file.status !== "active"
+      || file.uploadedBy !== context.customerId || file.businessType !== "rental_order" || file.businessModule !== "enterprise"
+      || file.businessId !== proof.orderId || file.uploadScene !== ENTERPRISE_PAYMENT_PROOF_SCENE)
+      throw new ForbiddenException("原费用回款凭证已失效或不属于原申请");
+    return { orderId: proof.orderId, workspaceId: proof.workspaceId, corporateId: row.corporateCustomerId,
+      materialKey: enterpriseHash(JSON.parse(JSON.stringify([this.view(row), file]))) };
   }
 
   async customerEvidenceOwner(context: ClientRequestContext, id: string, fileId: string) {

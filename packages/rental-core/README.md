@@ -143,6 +143,12 @@
 | [规则绑定草稿](src/bound-rule-draft.ts)、[日历绑定草稿](src/bound-calendar-draft.ts)、[私有本表/事务视图](src/bound-draft-storage.ts) | /bound-rule-draft 与 /bound-calendar-draft 保留完整候选复核、精确目标版本/CAS与原操作收据；规则历史恢复为新草稿，草稿保存不发布或授予业务权限 |
 | [批准设置应用](src/mysql-approved-settings.ts)、[真实路由授权桥](src/approved-settings-route-authority.ts)、[参加者合同](src/approved-settings-ports.ts)、[严格输入](src/approved-settings-validation.ts) | /mysql-approved-settings 与 /approved-settings-route-authority 复用原Guard/ALS，通知配置CAS、批准消费与原操作同事务，历史读取不以当前配置或过期重做 |
 
+## 历史与业务收尾
+
+[善后声明](src/application-recovery-policy.ts)与[当前权威](src/application-recovery-authority.ts)只接实际登记处理器。89个原读取/收尾入口分别绑定订单、空间或企业历史，新增的文件/承运证据、审批原结果及企业回款凭证通过原材料定位订单。员工收款历史绑定本次真实 `orderId` 查询；旧操作和 unknown 不取得新订单权。
+
+宿主从同一业务实例供给 `originalHistory` 和企业授权参加者，按当前身份、Tenant/Core、原Order与Workspace复核，再由原ACL/审批/资金服务处理。材料/归属或当前授权变化时拒绝，缺参加者明确不可用。代码登记、租户停用后的善后与当前部署分别核定，不能把读取原结果当成新业务授权。[文件定位](src/file-business-access.ts) · [宿主接入](../../apps/rental-api/README.md#请求事务与响应)
+
 ## HTTP API 文档
 
 正式出口 `@rental-os/rental-core/http-openapi` 提供 `createRentalOpenApi()`，返回 `CoreOpenApiContribution` 的 `paths` 和 `schemas`。宿主使用现有 `composeCoreOpenApi` 与公共平台文档组合，并按实际挂载集合提供精确的旧路由许可。贡献的 operationId、schema 与本地引用统一使用 `rental.` 命名空间。

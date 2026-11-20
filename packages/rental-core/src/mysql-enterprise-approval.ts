@@ -10,6 +10,7 @@ import type { EnterpriseOrderDelegationRequestReference, EnterpriseOrderDelegati
 import { requireRequestWorkspaceId } from "@rental-os/platform-server/request-identity";
 import type { RentalEnterpriseApprovalStorage as PrismaService } from "./enterprise-approval-ports";
 import type { RentalEnterpriseBookingClient as ClientApiService } from "./enterprise-approval-ports";
+import type { RentalEnterpriseAuthorityTransaction } from "./enterprise-read-storage";
 import type { ClientRequestContext } from "./client-context";
 import { EnterpriseAccessService } from "./mysql-enterprise-access";
 import type { RentalEnterpriseApprovalFacts as RentalBusinessFactRepository } from "./enterprise-approval-ports";
@@ -31,6 +32,18 @@ export class EnterpriseApprovalService {
     private readonly access: EnterpriseAccessService, private readonly facts: RentalBusinessFactRepository, private readonly orders: RentalOrderConfirmationService, private readonly clientApi: ClientApiService) {}
   private row(tenantId: string, id: string, tx: Prisma.TransactionClient = this.prisma as unknown as Prisma.TransactionClient) {
     return tx.$queryRaw<Approval[]>(Prisma.sql`SELECT * FROM enterprise_booking_approvals WHERE tenantId=${tenantId} AND id=${id} ${tx === this.prisma as unknown as Prisma.TransactionClient ? Prisma.empty : Prisma.sql`FOR UPDATE`}`);
+  }
+  /** Read-only locator for the original applicant history route. The caller holds
+   * the current session/Tenant lease and locks any returned Order before Workspace;
+   * repeat this lookup after those locks. An absent order is never permission to submit. */
+  async readHistoryReference(context: ClientRequestContext, id: string, tx: RentalEnterpriseAuthorityTransaction) {
+    const rows = await tx.$queryRaw<Approval[]>(Prisma.sql`SELECT * FROM enterprise_booking_approvals WHERE tenantId=${context.tenantId} AND id=${id}`);
+    const row = rows[0];
+    if (rows.length !== 1 || !row || row.id !== id || row.applicantCustomerId !== context.customerId
+      || row.workspaceId !== context.workspaceId || requireRequestWorkspaceId() !== context.workspaceId)
+      throw new NotFoundException("本人审批原结果不存在");
+    return { workspaceId: row.workspaceId, orderId: row.orderId ?? undefined,
+      materialKey: requestFingerprint(JSON.parse(JSON.stringify(row))) };
   }
   private view(row: Approval): EnterpriseBookingApprovalView {
     const quote = enterpriseJson(row.quote);
@@ -197,6 +210,28 @@ export class EnterpriseApprovalService {
       await tx.$executeRaw`UPDATE enterprise_booking_approvals SET state=${state},revision=revision+1 WHERE tenantId=${context.tenantId} AND id=${id}`;
       return { id, state, revision: row.revision + 1, execution: "not_submitted" };
     }, tx => this.commands.customer(context, tx));
+  }
+  /** Original regular creation receipt locator. An absent/unknown row yields no
+   * order authority; only the original reader may report that observation. */
+  async readOrderHistoryReference(context: ClientRequestContext, quoteId: string, key: string, tx: RentalEnterpriseAuthorityTransaction) {
+    if (!quoteId?.trim() || quoteId.length > 191 || !key?.trim() || key.length > 191 || !context.workspaceId
+      || requireRequestWorkspaceId() !== context.workspaceId) throw new NotFoundException("原报价与提交键无效");
+    const receipts = await tx.$queryRaw<Array<{ orderId: string | null; requestHash: string; status: string }>>(Prisma.sql`
+      SELECT orderId,requestHash,status FROM rental_order_idempotency_records WHERE tenantId=${context.tenantId}
+        AND workspaceId=${context.workspaceId} AND action='rental.order.create' AND idempotencyKey=${key.trim()}`);
+    if (receipts.length > 1) throw new ConflictException("原下单收据不唯一");
+    const receipt = receipts[0];
+    if (receipt?.orderId) {
+      const orders = await tx.$queryRaw<Array<{ id: string; quoteId: string | null; membershipSnapshot: RentalQuoteSnapshotV1["membershipSnapshot"] | string }>>(Prisma.sql`
+        SELECT id,quoteId,membershipSnapshot FROM rental_orders WHERE tenantId=${context.tenantId}
+          AND workspaceId=${context.workspaceId} AND id=${receipt.orderId}`);
+      const order = orders[0], membership = order && enterpriseJson(order.membershipSnapshot);
+      if (orders.length !== 1 || !order || order.id !== receipt.orderId || order.quoteId !== quoteId
+        || membership?.bookingIdentity !== "enterprise_employee" || membership.personalCustomerId !== context.customerId)
+        throw new NotFoundException("本人企业原提交不存在");
+    }
+    return { workspaceId: context.workspaceId, orderId: receipt?.orderId ?? undefined,
+      materialKey: requestFingerprint({ quoteId, operationKey: key.trim(), receipt: receipt ?? null }) };
   }
   async orderOriginal(context: ClientRequestContext, quoteId: string, key: string) {
     await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, false);

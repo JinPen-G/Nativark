@@ -27,6 +27,15 @@ const { RentalExchangeInspectionPreparationService } = require("../dist/mysql-ex
 const { RentalExchangeInspectionMediaService } = require("../dist/mysql-exchange-inspection-media.js");
 const { RentalExchangeInspectionConsentService } = require("../dist/mysql-exchange-inspection-consent.js");
 const { EnterpriseExchangeApprovalService } = require("../dist/mysql-enterprise-exchange-approval.js");
+const { EnterpriseApprovalService } = require("../dist/mysql-enterprise-approval.js");
+const { EnterpriseExtensionApprovalService } = require("../dist/mysql-enterprise-extension-approval.js");
+const { EnterpriseManagementRequestService } = require("../dist/mysql-enterprise-management-request.js");
+const { RentalFileBusinessAccessService } = require("../dist/file-business-access.js");
+const { RentalFileStorageApplication } = require("../dist/file-application-runtime.js");
+const { RentalFileBusinessReferences } = require("../dist/file-access.js");
+const { FilesController } = require("../dist/http-files.controller.js");
+const { StaffOfflinePaymentController } = require("../dist/http-staff-payments.controller.js");
+const { StaffOfflinePaymentService } = require("../dist/mysql-staff-payments.js");
 const { EnterpriseCommandService } = require("../dist/mysql-enterprise-command.js");
 const { ClientApiService } = require("../dist/mysql-client-application.js");
 const { RentalWorkspaceReportRepository } = require("../dist/mysql-reports.js");
@@ -42,18 +51,18 @@ const { runWithRequestIdentity, getRequestWorkspaceId, getRequestIdentity } = re
 const shared = require("@rental-os/shared");
 const authorization = createRentalAuthorization(shared);
 const policy = compileRentalHttpAccessPolicy({ controllers: [RentalCoreController, RentalBusinessController, ClientApiController, PaymentOperationsController,
-  EnterpriseWorkflowsController, EnterpriseReadController, PaymentReconciliationController], authorization });
+  EnterpriseWorkflowsController, EnterpriseReadController, PaymentReconciliationController, FilesController, StaffOfflinePaymentController], authorization });
 const copy = value => structuredClone(value);
 
-function fixture(audience = "operator", corporateParticipants = false) {
+function fixture(audience = "operator", corporateParticipants = false, originalParticipants = false) {
   const user = { id: "user", tenantId: "tenant", isActive: true, isSaasAdmin: false, isPlatformAdmin: false,
     mustChangePassword: false, displayName: "member", account: "member", permissions: ["rental-os:order:view", "rental-os:order:operate",
-      "rental-os:order:settle", "rental-os:order:cancel", "rental-os:finance:view", "rental-os:finance:reconcile", "rental-os:report:view"],
+      "rental-os:order:settle", "rental-os:order:cancel", "rental-os:finance:view", "rental-os:finance:reconcile", "rental-os:report:view", "rental-os:order:offline-payment", "system:integration:manage"],
     roleIds: [], roleNames: [], dataScope: "all", locationScope: { mode: "all", locationIds: [] } };
   const state = { user, tenantStatus: "ACTIVE", workspaceStatus: "ACTIVE", assigned: true, grant: "disabled", binding: true,
     available: true, member: true, session: { audience: "operator", currentWorkspaceId: "workspace", revokedAt: null,
       expiresAt: new Date(Date.now() + 600000) },
-    order: { id: "OrderA", tenantId: "tenant", workspaceId: "workspace", status: "RENTING", customerId: "customer",
+    order: { id: "OrderA", tenantId: "tenant", workspaceId: "workspace", status: "RENTING", fulfillmentMode: "pickup", customerId: "customer",
       membershipSnapshot: null, createdBy: "user", fulfillmentLocationId: "location", returnLocationId: "location" },
     intent: { id: "IntentA", tenantId: "tenant", workspaceId: "workspace", orderId: "OrderA" },
     refund: { id: "RefundA", tenantId: "tenant", workspaceId: "workspace", orderId: "OrderA", paymentIntentId: "IntentA" },
@@ -158,8 +167,20 @@ function fixture(audience = "operator", corporateParticipants = false) {
   const signature = createHmac("sha256", "synthetic-client-test-secret:client").update(`${header}.${payload}`).digest("base64url");
   const guard = new authorization.Guard(auth, undefined, clientAuth, { assertAllowed: async () => {} }, db);
   const enterpriseAccess = new EnterpriseAccessService(db), enterpriseOrders = new EnterpriseOrderReaderService(db, enterpriseAccess);
+  const commands = new EnterpriseCommandService(db);
+  const fileFacts = Object.create(RentalCoreFactRepository.prototype);
+  fileFacts.store = db;
+  fileFacts.contacts = { resolveWorkspaceId: async () => getRequestWorkspaceId(), getRequestWorkspaceId,
+    getRequestLocationIds: () => getRequestIdentity().locationScope?.mode === "selected" ? getRequestIdentity().locationScope.locationIds : undefined,
+    getRequestDataScope: () => getRequestIdentity().dataScope, getRequestUserId: () => getRequestIdentity().userId };
+  const fileAccess = new RentalFileBusinessAccessService(db, fileFacts, {}, {});
+  const originals = { files: fileAccess, approvals: new EnterpriseApprovalService(db, commands, {}, enterpriseAccess, {}, {}, {}),
+    extensions: new EnterpriseExtensionApprovalService(db, commands, {}, enterpriseAccess, {}, {}, {}),
+    exchanges: new EnterpriseExchangeApprovalService(db, commands, {}, enterpriseAccess, {}, {}, {}, {}),
+    management: new EnterpriseManagementRequestService(db, commands, enterpriseAccess) };
   const access = createRentalApplicationAccess({ database: db, authorization,
     recoveryAuthority: createRentalRecoveryAuthority({ auth, clientAuth,
+      ...(originalParticipants ? { originalHistory: originals } : {}),
       ...(corporateParticipants ? { corporateHistory: { access: enterpriseAccess, orders: enterpriseOrders } } : {}) }),
     deploymentForTransaction: () => ({ requireAvailable: async () => { if (!state.available) throw Error("unavailable deployment"); } }),
     term: { requireNewBusiness: async () => {} } });
@@ -168,7 +189,7 @@ function fixture(audience = "operator", corporateParticipants = false) {
   const facts = Object.create(RentalCoreFactRepository.prototype);
   facts.contacts = { getRequestWorkspaceId };
   f.run = (handler, method, url, consume, controller = RentalCoreController, mutateBeforeAdmission) => runWithRequestIdentity({}, () => access.run(async () => {
-    const request = { method, url, headers: { authorization: audience === "client" ? `Bearer ${header}.${payload}.${signature}` : "fixture-original-token" } };
+    const request = { method, url, originalUrl: url, staffApiRequest: audience === "staff", query: Object.fromEntries(new URLSearchParams(url.split("?", 2)[1] ?? "")), headers: { authorization: audience === "client" ? `Bearer ${header}.${payload}.${signature}` : "fixture-original-token" } };
     await guard.canActivate({ switchToHttp: () => ({ getRequest: () => request }) });
     const route = policy.requireHandler(controller, controller.prototype[handler], request);
     mutateBeforeAdmission?.(request, route);
@@ -179,7 +200,7 @@ function fixture(audience = "operator", corporateParticipants = false) {
     fallbackKey: "original-key", orderId: "OrderA", request: { orderId: "OrderA" },
     run: async tx => { await facts.lockOrder("tenant", "OrderA", tx); f.writes++; return { original: "receipt" }; },
     replay: async response => response, ...overrides });
-  return Object.assign(f, { db, delegates, access, idempotent, facts, receipts, auth, clientAuth, enterpriseAccess, enterpriseOrders });
+  return Object.assign(f, { db, delegates, access, idempotent, facts, receipts, auth, clientAuth, enterpriseAccess, enterpriseOrders, originals, fileAccess, commands });
 }
 
 test("disabled history uses actual original handler and current principal, with Tenant→Core→Order→Workspace", async () => {
@@ -366,7 +387,7 @@ test("the nine history handlers bind exact own-order or workspace subjects; adja
     assert.throws(() => bindRentalRecovery({ ...route.recovery }, { method: "GET", url }));
     if (scope === "order") assert.throws(() => bindRentalRecovery(route.recovery, { method: "GET", url: url.replace("OrderA", "Order%2fA") }));
   }
-  assert.equal(policy.routes.filter(route => route.recovery).length, 78);
+  assert.equal(policy.routes.filter(route => route.recovery).length, 89);
   for (const [controller, handler] of [[RentalCoreController, "prepareExchangeInspection"], [RentalCoreController, "completeExchangeInspectionMedia"],
     [EnterpriseWorkflowsController, "confirmExchangeInspection"], [EnterpriseWorkflowsController, "exchangeInspectionMaterial"],
     [PaymentReconciliationController, "importStatement"], [PaymentReconciliationController, "reviewStatementLine"], [PaymentReconciliationController, "reconcile"]]) {
@@ -576,8 +597,8 @@ const corporateRoutes = [
   ["exportOrderFinance", "orders/OrderA/finance/export-rows", ["orders:read", "finance:read", "export:create"]]
 ];
 
-function corporateFixture() {
-  const f = fixture("client", true), { state } = f;
+function corporateFixture(originalParticipants = false) {
+  const f = fixture("client", true, originalParticipants), { state } = f;
   state.corporate = { id: "CorpA", membershipId: "administrator-relation", role: "admin", active: true,
     tenantEnabled: true, corporateEnabled: true, revision: 1, actions: ["portal:enter", "orders:read", "finance:read", "export:create"] };
   const at = new Date("2020-01-01T00:00:00.000Z");
@@ -801,4 +822,282 @@ test("enterprise financial histories keep unknown cash and incomplete workspace 
   account.state.credit = null;
   assert.deepEqual((await account.read("corporateFinance")).credit,
     { state: "unavailable", reason: "original_account_configuration_missing_with_ledger" });
+});
+
+
+const evidenceRoutes = [
+  [FilesController, "carrierEvidenceDownloadUrl", "/files/rental-orders/OrderA/carrier-evidence/FileA/download-url", "file-history"],
+  [FilesController, "downloadUrl", "/files/FileA/download-url", "file-history"],
+  [StaffOfflinePaymentController, "list", "/staff/v1/offline-payments?orderId=OrderA", "order"],
+  [EnterpriseWorkflowsController, "paymentProofFile", "/client/v1/enterprise/management-requests/RequestA/files/FileA", "payment-proof-history"],
+  [EnterpriseWorkflowsController, "exchangeOriginal", "/client/v1/enterprise/exchange-approvals/ApprovalA", "approval-history"],
+  [EnterpriseWorkflowsController, "exchangeConfirmationOriginal", "/client/v1/enterprise/exchange-approvals/ApprovalA/expense-confirmation", "approval-history"],
+  [EnterpriseWorkflowsController, "extensionOriginal", "/client/v1/enterprise/extension-approvals/ApprovalA/result", "approval-history"],
+  [EnterpriseWorkflowsController, "approvalResult", "/client/v1/enterprise/approvals/ApprovalA/result", "approval-history"],
+  [EnterpriseWorkflowsController, "extensionRequestOriginal", "/client/v1/enterprise/orders/OrderA/extension-request-operations/KeyA", "order"],
+  [EnterpriseWorkflowsController, "exchangeRequestOriginal", "/client/v1/enterprise/orders/OrderA/exchange-request-operations/KeyA", "order"],
+  [EnterpriseWorkflowsController, "orderOriginal", "/client/v1/enterprise/quotes/QuoteA/order-operations/KeyA", "approval-history"]
+];
+
+test("eleven evidence and original-receipt handlers have exact closed subjects; new operations stay unregistered", () => {
+  for (const [controller, handler, url, scope] of evidenceRoutes) {
+    const request = { method: "GET", url, query: Object.fromEntries(new URLSearchParams(url.split("?")[1] ?? "")) };
+    const route = policy.requireHandler(controller, controller.prototype[handler], request);
+    const subject = bindRentalRecovery(route.recovery, request);
+    assert.equal(subject.declaration.scope, scope); assert.equal(subject.declaration.kind, "history");
+    assert.throws(() => bindRentalRecovery(route.recovery, { ...request, method: "POST" }));
+  }
+  for (const [controller, handler, url] of [
+    [StaffOfflinePaymentController, "confirm", "/staff/v1/offline-payments/PayA/confirm"],
+    [EnterpriseWorkflowsController, "confirmExchangeExpense", "/client/v1/enterprise/exchange-approvals/ApprovalA/expense-confirmation"],
+    [EnterpriseWorkflowsController, "submitApproval", "/client/v1/enterprise/approvals/submit"],
+    [EnterpriseWorkflowsController, "submitExtensionApproval", "/client/v1/enterprise/extension-approvals/submit"],
+    [FilesController, "createUploadSession", "/files/upload-sessions"]
+  ]) assert.equal(policy.requireHandler(controller, controller.prototype[handler], { method: "POST", url }).recovery, undefined);
+});
+
+function originalEvidenceFixture(audience = "operator") {
+  const f = fixture(audience, false, true), at = new Date("2020-01-01T00:00:00.000Z");
+  f.state.session.audience = audience;
+  f.state.file = { id: "FileA", tenantId: "tenant", businessModule: "rental-core", businessType: "rental_order", businessId: "OrderA",
+    uploadScene: "pickup-evidence", status: "active", uploadedBy: "user", storageProvider: "local_mock", storageKey: "original",
+    mimeType: "image/png", sizeBytes: 8, updatedAt: at, metadata: { workspaceId: "workspace" } };
+  const fileAsset = { findFirst: async ({ where }) => Object.entries(where).every(([key, value]) => f.state.file[key] === value) ? copy(f.state.file) : null };
+  const asyncJob = { findFirst: async () => copy(f.state.job) }, documentPrintJob = { findFirst: async () => copy(f.state.job) };
+  const rentalItemGroup = { findFirst: async () => ({ id: "GroupA" }) };
+  Object.assign(f.db, { fileAsset, asyncJob, documentPrintJob, rentalItemGroup });
+  Object.assign(f.delegates, { fileAsset, asyncJob, documentPrintJob, rentalItemGroup });
+  f.originalQuery = async (text, values) => {
+    if (text.includes("FROM FileAsset")) return values.includes(f.state.file.id) && values.includes(f.state.file.tenantId) ? [copy(f.state.file)] : [];
+    if (/FROM (AsyncJob|DocumentPrintJob)/u.test(text)) return f.state.job ? [copy(f.state.job)] : [];
+  };
+  const storage = Object.create(RentalFileStorageApplication.prototype);
+  Object.assign(storage, { prisma: f.db, fileAccess: f.fileAccess, operationLog: {}, fileReferences: new RentalFileBusinessReferences(f.db) });
+  const controller = new FilesController({}, storage, f.db, {});
+  f.download = (carrier = false, after) => f.run(carrier ? "carrierEvidenceDownloadUrl" : "downloadUrl", "GET",
+    carrier ? "/files/rental-orders/OrderA/carrier-evidence/FileA/download-url" : "/files/FileA/download-url", async request => {
+      const result = carrier ? await controller.carrierEvidenceDownloadUrl(request, "OrderA", "FileA") : await controller.downloadUrl(request, "FileA");
+      await after?.(result); return result;
+    }, FilesController);
+  return f;
+}
+
+test("original FileAsset and carrier downloads retain actual ACL/audit and Order before Workspace", async () => {
+  for (const carrier of [false, true]) {
+    const f = originalEvidenceFixture();
+    if (carrier) { f.state.order.fulfillmentMode = "carrier_shipping"; f.state.file.uploadScene = "carrier-shipment-evidence"; }
+    assert.equal((await f.download(carrier)).fileAssetId, "FileA"); assert.equal(f.audits.length, 1);
+    for (const tx of new Set(f.trace.map(row => row.tx))) {
+      const rows = f.trace.filter(row => row.tx === tx).map(row => row.text);
+      const order = rows.findIndex(text => /FROM rental_orders .*FOR UPDATE$/u.test(text));
+      const space = rows.findIndex(text => /SELECT id, status FROM business_workspaces/u.test(text));
+      assert.ok(order >= 0 && order < space);
+    }
+  }
+  const task = originalEvidenceFixture(); task.state.file.businessType = "document_print_job"; task.state.file.businessId = "JobA";
+  task.state.job = { tenantId: "tenant", id: "JobA", businessType: "rental_order", businessId: "OrderA" };
+  assert.equal((await task.download()).fileAssetId, "FileA"); assert.equal(task.audits.length, 1);
+});
+
+test("file history rejects relinking, revoked access, foreign/cyclic jobs and stage mismatch; enabled non-order ACL remains usable", async () => {
+  const deniedCases = [f => { f.state.file.businessId = "OtherOrder"; }, f => { f.state.file.tenantId = "other"; },
+    f => { f.state.user.permissions = ["system:integration:manage"]; },
+    f => { f.state.user.locationScope = { mode: "selected", locationIds: ["location"] }; f.state.order.fulfillmentLocationId = "other"; },
+    f => { f.state.file.businessType = "async_job"; f.state.file.businessId = "JobA";
+      f.state.job = { id: "JobA", tenantId: "tenant", businessType: "async_job", businessId: "JobA" }; }];
+  for (const change of deniedCases) { const f = originalEvidenceFixture(); change(f); await assert.rejects(f.download()); assert.equal(f.audits.length, 0); }
+  const nonOrder = originalEvidenceFixture(); nonOrder.state.file.businessType = "rental_item_group"; nonOrder.state.file.businessId = "GroupA";
+  nonOrder.state.file.uploadScene = "item-group-image";
+  await assert.rejects(nonOrder.download()); nonOrder.state.grant = "enabled"; assert.equal((await nonOrder.download()).fileAssetId, "FileA");
+  const changed = originalEvidenceFixture();
+  await assert.rejects(changed.download(false, () => { changed.state.file.storageKey = "replaced"; })); assert.equal(changed.audits.length, 1);
+  const stageChanged = originalEvidenceFixture(); stageChanged.state.user.locationScope = { mode: "selected", locationIds: ["location"] };
+  await assert.rejects(stageChanged.download(false, () => { stageChanged.state.order.fulfillmentLocationId = "other"; }));
+  assert.equal(stageChanged.audits.length, 1);
+  const revoked = originalEvidenceFixture();
+  await assert.rejects(revoked.download(false, () => { revoked.state.assigned = false; })); assert.equal(revoked.audits.length, 1);
+});
+
+test("staff original payments list binds one exact query order and never confirms or changes the receipt", async () => {
+  const f = fixture("staff"); f.state.session.audience = "staff";
+  const row = { id: "PayA", tenantId: "tenant", workspaceId: "workspace", orderId: "OrderA", instrument: "rental", amount: 30,
+    paymentMethod: "offline_cash", reason: "original", evidenceFileAssetId: null, status: "pending", idempotencyKey: "old-key",
+    registeredBy: "user", registeredAt: new Date("2020-01-01T00:00:00.000Z"), confirmedBy: null, confirmedAt: null, fundingEventId: null };
+  f.db.rentalOfflinePaymentRegistration = { findMany: async ({ where }) => { assert.deepEqual(where, { tenantId: "tenant", workspaceId: "workspace", orderId: "OrderA" }); return [copy(row)]; } };
+  const controller = new StaffOfflinePaymentController(new StaffOfflinePaymentService(f.db, {}, {}));
+  const run = (url, after, mutate) => f.run("list", "GET", url, async request => {
+    const result = await controller.list(request, request.query.orderId); await after?.(request); return result;
+  }, StaffOfflinePaymentController, mutate);
+  assert.equal((await run("/staff/v1/offline-payments?orderId=OrderA"))[0].status, "pending");
+  for (const url of ["/staff/v1/offline-payments", "/staff/v1/offline-payments?orderId=OrderA&orderId=Other",
+    "/staff/v1/offline-payments?orderId[]=OrderA", "/staff/v1/offline-payments?orderId=Other",
+    "/staff/v1/offline-payments?order%49d=OrderA"]) await assert.rejects(run(url));
+  await assert.rejects(run("/staff/v1/offline-payments?orderId=OrderA", request => { request.query.orderId = "Other"; }));
+  await assert.rejects(run("/staff/v1/offline-payments?orderId=OrderA", undefined, request => { request.query.orderId = ["OrderA"]; }));
+  assert.equal(f.writes, 0); assert.equal(row.status, "pending");
+});
+
+function approvalHistoryFixture() {
+  const f = fixture("client", false, true), at = new Date("2020-01-01T00:00:00.000Z");
+  const preview = { originalEndAt: at.toISOString(), newEndAt: at.toISOString(), rentalAmount: 10, serviceAmount: 0, depositDelta: 0,
+    preAuthDelta: 0, payableAmount: 10, currency: "CNY", settlementMode: "pay_now", paymentRequired: true, chargeLines: [], serviceSnapshots: [],
+    additionalAmount: 10, refundAmount: 0, exchange: { originalItemGroupName: "Original", replacementItemGroupName: "Replacement" } };
+  f.state.approval = { id: "ApprovalA", corporateCustomerId: "CorpA", applicantCustomerId: "customer", workspaceId: "workspace", orderId: "OrderA",
+    quoteId: "QuoteA", state: "pending", revision: 1, expiresAt: at, purpose: "old", reason: "old", amount: 10, currency: "CNY",
+    executionKey: null, extensionId: null, closedOperationKey: null, requestFingerprint: "original-request", previewFingerprint: "original-preview",
+    expectedOrderUpdatedAt: at.toISOString(), request: {}, preview, basis: {},
+    quote: { quoteNo: "old", request: { lines: [] }, chargeLines: [], membershipSnapshot: {} } };
+  f.originalQuery = async (text, values) => {
+    if (/FROM enterprise_(?:booking|extension|exchange)_approvals/u.test(text)) return values.includes(f.state.approval.id) ? [copy(f.state.approval)] : [];
+    if (text.includes("FROM customer_profiles p JOIN customer_accounts")) return f.state.account.status === "active" && !f.state.clientSession.revokedAt ? [{ id: "customer" }] : [];
+    if (text.includes("FROM enterprise_portal_operations")) return [];
+    if (text.includes("FROM rental_order_idempotency_records")) return f.state.creationReceipt ? [copy(f.state.creationReceipt)] : [];
+  };
+  const controller = Object.create(EnterpriseWorkflowsController.prototype);
+  Object.assign(controller, { approvals: f.originals.approvals, extensions: f.originals.extensions, exchanges: f.originals.exchanges });
+  f.read = (handler, after) => {
+    const route = evidenceRoutes.find(row => row[1] === handler), url = route[2];
+    return f.run(handler, "GET", url, async request => {
+      const result = await controller[handler](request, handler.endsWith("RequestOriginal") ? "OrderA" : "ApprovalA", "KeyA");
+      await after?.(result); return result;
+    }, EnterpriseWorkflowsController);
+  };
+  return f;
+}
+
+test("original approval IDs and request keys read the original applicant records without renewing or executing approvals", async () => {
+  for (const handler of ["exchangeOriginal", "exchangeConfirmationOriginal", "extensionOriginal", "approvalResult", "extensionRequestOriginal", "exchangeRequestOriginal"]) {
+    const f = approvalHistoryFixture();
+    const result = await f.read(handler);
+    assert.ok(result); assert.equal(f.writes, 0); assert.equal(f.dispatches, 0);
+    if (handler.endsWith("RequestOriginal")) assert.deepEqual(result, { state: "not_recorded", retryable: false });
+    else assert.equal((result.approval ?? result).id, "ApprovalA");
+  }
+  const noOrder = approvalHistoryFixture(); noOrder.state.approval.orderId = null;
+  assert.equal((await noOrder.read("approvalResult")).original.state, "not_submitted");
+  assert.equal(noOrder.trace.some(row => /FROM rental_orders .*FOR UPDATE$/u.test(row.text)), false);
+});
+
+test("original approval material is immutable across the buffered read and cannot authorize a different applicant or order", async () => {
+  for (const change of [f => { f.state.approval.applicantCustomerId = "colleague"; }, f => { f.state.approval.workspaceId = "other"; },
+    f => { f.state.approval.orderId = "OtherOrder"; }, f => { f.state.order.customerId = "colleague"; }]) {
+    const f = approvalHistoryFixture(); change(f); await assert.rejects(f.read("exchangeOriginal"));
+  }
+  const changed = approvalHistoryFixture(); await assert.rejects(changed.read("exchangeOriginal", () => { changed.state.approval.revision++; }));
+  const revoked = approvalHistoryFixture(); await assert.rejects(revoked.read("extensionOriginal", () => { revoked.state.clientSession.revokedAt = new Date(); }));
+  const missing = fixture("client"); missing.state.grant = "enabled";
+  await assert.rejects(missing.run("exchangeOriginal", "GET", "/client/v1/enterprise/exchange-approvals/ApprovalA", async () => {}, EnterpriseWorkflowsController), error => error.code === "core_unavailable");
+});
+
+
+test("original quote/key read preserves not_observed, unknown and observed without giving an order to absent receipts", async () => {
+  for (const status of ["absent", "unknown", "observed"]) {
+    const f = approvalHistoryFixture(), clientApi = Object.create(ClientApiService.prototype);
+    Object.assign(f.state.order, { quoteId: "QuoteA", membershipSnapshot: { bookingIdentity: "enterprise_employee", personalCustomerId: "customer" } });
+    if (status !== "absent") f.state.creationReceipt = { orderId: status === "observed" ? "OrderA" : null, requestHash: "original", status: "succeeded" };
+    f.db.rentalOrderIdempotencyRecord = { findFirst: async ({ where }) => {
+      assert.deepEqual(where, { tenantId: "tenant", workspaceId: "workspace", action: "rental.order.create", idempotencyKey: "KeyA" });
+      return copy(f.state.creationReceipt ?? null);
+    } };
+    const beforeQuery = f.originalQuery;
+    f.originalQuery = async (text, values) => text.includes("SELECT id,quoteId,membershipSnapshot FROM rental_orders")
+      ? [copy(f.state.order)] : beforeQuery(text, values);
+    clientApi.prisma = f.db; clientApi.core = { getOrder: async () => copy(f.state.order) };
+    f.originals.approvals.clientApi = clientApi;
+    const read = after => f.run("orderOriginal", "GET", "/client/v1/enterprise/quotes/QuoteA/order-operations/KeyA", async request => {
+      const result = await f.originals.approvals.orderOriginal(request.client, "QuoteA", "KeyA"); await after?.(); return result;
+    }, EnterpriseWorkflowsController);
+    assert.deepEqual(await read(), { state: status === "absent" ? "not_observed" : status, orderId: status === "observed" ? "OrderA" : null, retryable: false });
+    assert.equal(f.writes, 0); assert.equal(f.dispatches, 0);
+    if (status !== "observed") assert.equal(f.trace.some(row => /FROM rental_orders .*FOR UPDATE$/u.test(row.text)), false);
+    if (status === "observed") {
+      await assert.rejects(read(() => { f.state.creationReceipt.requestHash = "changed"; }));
+      f.state.order.membershipSnapshot.personalCustomerId = "colleague";
+      await assert.rejects(read());
+    }
+  }
+});
+
+async function paymentProofHistoryFixture() {
+  const f = corporateFixture(true), state = f.state, at = new Date("2020-01-01T00:00:00.000Z");
+  state.corporate.actions.push("requests:manage");
+  state.proofFile = { id: "FileA", tenantId: "tenant", businessModule: "enterprise", businessType: "rental_order", businessId: "OrderA",
+    uploadedBy: "customer", uploadScene: "enterprise-payment-proof", status: "active", storageProvider: "s3", storageKey: "frozen-object",
+    checksum: "a".repeat(64), mimeType: "application/pdf", sizeBytes: 8, updatedAt: at,
+    metadata: { workspaceId: "workspace", fileUploadVersion: 2, fileContentVersion: 1, contentHash: "a".repeat(64),
+      enterprisePaymentProof: { corporateCustomerId: "CorpA", orderId: "OrderA", objectRevision: at.toISOString(), purpose: "rental_fee" } },
+    uploadSession: { id: "UploadA", status: "completed", completedAt: at, provider: "s3", storageKey: "frozen-object" } };
+  const fileAsset = { findMany: async ({ where }) => {
+    assert.equal(where.tenantId, "tenant"); assert.equal(where.businessId, "OrderA"); assert.equal(where.uploadedBy, "customer");
+    return state.proofFile.status === "active" ? [copy(state.proofFile)] : [];
+  } };
+  Object.assign(f.db, { fileAsset }); Object.assign(f.delegates, { fileAsset });
+  const proof = { corporateCustomerId: "CorpA", orderId: "OrderA", workspaceId: "workspace", currency: "CNY",
+    objectRevision: at.toISOString(), evidenceFileIds: ["FileA"], purpose: "rental_fee" };
+  proof.evidenceHash = (await f.originals.management.proofs.files("tenant", "customer", proof, ["FileA"], f.db)).evidenceHash;
+  state.proofRequest = { tenantId: "tenant", id: "RequestA", corporateCustomerId: "CorpA", applicantCustomerId: "customer", state: "pending",
+    revision: 1, createdAt: at, updatedAt: at, decisionReason: null,
+    payload: { requestType: "payment_proof", objectRevision: at.toISOString(), reason: "original", evidenceFileIds: ["FileA"], paymentProof: proof,
+      proposal: { orderId: "OrderA", workspaceId: "workspace", currency: "CNY", reportedAmount: "70.00", paymentPurpose: "rental_fee" } } };
+  const beforeQuery = f.originalQuery;
+  f.originalQuery = async (text, values) => {
+    if (text.includes("FROM enterprise_workflow_requests")) return values.includes(state.proofRequest.id) ? [copy(state.proofRequest)] : [];
+    if (text.includes("FROM customer_profiles p JOIN customer_accounts")) return state.account.status === "active" && !state.clientSession.revokedAt ? [{ id: "customer" }] : [];
+    if (text.includes("FROM client_auth_sessions s JOIN business_workspaces")) return !state.clientSession.revokedAt ? [{ id: "client-session" }] : [];
+    if (text.includes("FROM FileAsset f LEFT JOIN file_upload_sessions")) {
+      const { uploadSession: session, ...asset } = copy(state.proofFile);
+      return [{ ...asset, historySessionId: session.id, historySessionStatus: session.status, historySessionCompletedAt: session.completedAt,
+        historySessionProvider: session.provider, historySessionStorageKey: session.storageKey }];
+    }
+    if (text.includes("FROM FileAsset f JOIN file_upload_sessions")) return [{ id: "FileA" }];
+    return beforeQuery(text, values);
+  };
+  const controller = Object.create(EnterpriseWorkflowsController.prototype);
+  controller.management = f.originals.management;
+  // Provider bytes are the transport fixture; all request/grant/order/frozen-file
+  // predicates below execute the original services, with no network request.
+  controller.files = { readPaymentProofBytes: async (...args) => {
+    assert.deepEqual(args, ["tenant", "FileA", "customer", "OrderA", "workspace", "a".repeat(64)]);
+    await f.duringBytes?.(); return { mimeType: "application/pdf", content: Buffer.from("%PDF-old") };
+  } };
+  f.readProof = async after => {
+    const sent = [], target = { setHeader: (...args) => sent.push(args), send: bytes => sent.push(bytes.toString()) };
+    f.sent = sent; const buffer = createRentalNativeResponseBuffer(target);
+    await buffer.run(() => f.run("paymentProofFile", "GET", "/client/v1/enterprise/management-requests/RequestA/files/FileA", async request => {
+      const result = await controller.paymentProofFile(request, "RequestA", "FileA", target); await after?.(); return result;
+    }, EnterpriseWorkflowsController));
+    assert.deepEqual(sent, []); buffer.flush(); return sent;
+  };
+  return f;
+}
+
+test("payment proof history reuses original applicant, current corporate finance and immutable file receipt even for another employee order", async () => {
+  const f = await paymentProofHistoryFixture();
+  assert.equal(f.state.order.membershipSnapshot.personalCustomerId, "colleague");
+  assert.equal((await f.readProof()).at(-1), "%PDF-old"); assert.equal(f.writes, 0); assert.equal(f.audits.length, 0);
+  for (const tx of new Set(f.trace.map(row => row.tx))) {
+    const rows = f.trace.filter(row => row.tx === tx).map(row => row.text);
+    assert.ok(rows[0].includes("FROM Tenant") && rows[0].endsWith("FOR UPDATE"));
+    const core = rows.findIndex(text => text.includes("platform_core_access_locks"));
+    const order = rows.findIndex(text => /SELECT id FROM rental_orders/u.test(text));
+    const workspace = rows.findIndex(text => /SELECT id, status FROM business_workspaces/u.test(text));
+    assert.ok(core >= 0 && order > core && workspace > order);
+  }
+});
+
+test("payment proof history rejects source/file/grant changes before any buffered bytes escape", async () => {
+  const changes = [f => { f.state.proofRequest.applicantCustomerId = "colleague"; },
+    f => { f.state.proofRequest.payload.paymentProof.workspaceId = "other"; },
+    f => { f.state.corporate.actions = f.state.corporate.actions.filter(action => action !== "finance:read"); },
+    f => { f.state.order.contractSubjectCustomerId = "OtherCorp"; },
+    f => { f.state.proofFile.metadata.contentHash = "b".repeat(64); }];
+  for (const change of changes) { const f = await paymentProofHistoryFixture(); change(f); await assert.rejects(f.readProof()); assert.deepEqual(f.sent, []); }
+  const revoke = await paymentProofHistoryFixture(); revoke.duringBytes = () => { revoke.state.corporate.revision++; };
+  await assert.rejects(revoke.readProof()); assert.deepEqual(revoke.sent, []);
+  const returned = await paymentProofHistoryFixture();
+  await assert.rejects(returned.readProof(() => { returned.state.corporate.revision++; })); assert.deepEqual(returned.sent, []);
+  const lateFile = await paymentProofHistoryFixture();
+  await assert.rejects(lateFile.readProof(() => { lateFile.state.proofFile.uploadSession.status = "revoked"; })); assert.deepEqual(lateFile.sent, []);
+  const lost = await paymentProofHistoryFixture(); lost.duringBytes = () => { lost.state.proofFile.status = "deleted"; };
+  await assert.rejects(lost.readProof()); assert.deepEqual(lost.sent, []);
 });

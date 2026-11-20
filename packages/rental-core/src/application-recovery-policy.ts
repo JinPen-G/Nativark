@@ -10,7 +10,7 @@ export interface RentalRecoveryDeclaration {
   readonly path: string;
   readonly kind: RentalRecoveryKind;
   readonly collection: boolean;
-  readonly scope: "order" | "order-collection" | "workspace-history" | "corporate-history";
+  readonly scope: "order" | "order-collection" | "workspace-history" | "corporate-history" | "file-history" | "approval-history" | "payment-proof-history";
   readonly corporateActions?: readonly EnterprisePortalAction[];
 }
 export interface RentalRecoverySubject {
@@ -19,14 +19,22 @@ export interface RentalRecoverySubject {
   readonly intentId?: string;
   readonly refundId?: string;
   readonly corporateId?: string;
+  readonly fileId?: string;
+  readonly referenceId?: string;
+  readonly quoteId?: string;
+  readonly operationKey?: string;
+  readonly approvalKind?: "booking" | "extension" | "exchange";
 }
 const declarations = new WeakSet<RentalRecoveryDeclaration>();
+const bindings = new WeakMap<RentalRecoverySubject, () => void>();
 const denied = () => new CoreAccessError("denied", "Rental 历史或善后入口未绑定本处理器的原对象");
 // These customer routes still read the caller's own original order. Enterprise
 // administrator projections and preparation/approval commands are separate powers.
 const ownEnterpriseHistory = new Set([
   "/client/v1/enterprise/orders/:orderid/exchange-inspection-consents/operations/:key",
-  "/client/v1/enterprise/orders/:orderid/exchange-approvals"
+  "/client/v1/enterprise/orders/:orderid/exchange-approvals",
+  "/client/v1/enterprise/orders/:orderid/extension-request-operations/:key",
+  "/client/v1/enterprise/orders/:orderid/exchange-request-operations/:key"
 ]);
 // Reports and statement batches contain workspace facts, including unmatched
 // statement lines. They cannot invent an order binding or authorize a command.
@@ -51,16 +59,28 @@ const corporateHistory = new Map<string, readonly EnterprisePortalAction[]>([
   [`${corporatePrefix}/orders/:orderid/finance/export-rows`, ["orders:read", "finance:read", "export:create"]]
 ]);
 
+const fileHistory = new Set(["/files/:id/download-url", "/files/rental-orders/:orderid/carrier-evidence/:fileassetid/download-url"]);
+const approvalHistory = new Map<string, "booking" | "extension" | "exchange">([
+  ["/client/v1/enterprise/approvals/:id/result", "booking"],
+  ["/client/v1/enterprise/extension-approvals/:id/result", "extension"],
+  ["/client/v1/enterprise/exchange-approvals/:id", "exchange"],
+  ["/client/v1/enterprise/exchange-approvals/:id/expense-confirmation", "exchange"]
+]);
+const quoteOrderHistory = "/client/v1/enterprise/quotes/:quoteid/order-operations/:key";
+const proofHistory = "/client/v1/enterprise/management-requests/:id/files/:fileid";
+const staffPaymentsHistory = "/staff/v1/offline-payments";
+
 /** Private package composition input. The HTTP compiler calls this only for its
  * closed map of actual original controller functions, never arbitrary declarations. */
 export function declareRentalRecovery(method: string, path: string, kind: RentalRecoveryKind): RentalRecoveryDeclaration {
   const collection = path === "/rental/v1/orders" || path === "/client/v1/orders" || path === "/client/v1/my/orders";
   const workspace = workspaceHistory.has(path), enterprise = ownEnterpriseHistory.has(path);
   const corporateActions = corporateHistory.get(path);
+  const file = fileHistory.has(path), approval = approvalHistory.has(path) || path === quoteOrderHistory, proof = path === proofHistory, staffPayments = path === staffPaymentsHistory;
   if (!/^(?:GET|POST)$/u.test(method) || !/^(?:history|fulfillment|settlement|payment-result)$/u.test(kind)
-    || (collection || workspace || enterprise || corporateActions) && (kind !== "history" || method !== "GET")
-    || !collection && !workspace && !enterprise && !corporateActions && !/^\/(?:rental|client)\/v1\/orders\/:(?:id|orderid)(?:\/|$)/u.test(path)) throw denied();
-  const scope = corporateActions ? "corporate-history" : workspace ? "workspace-history" : collection ? "order-collection" : "order";
+    || (collection || workspace || enterprise || corporateActions || file || approval || proof || staffPayments) && (kind !== "history" || method !== "GET")
+    || !collection && !workspace && !enterprise && !corporateActions && !file && !approval && !proof && !staffPayments && !/^\/(?:rental|client)\/v1\/orders\/:(?:id|orderid)(?:\/|$)/u.test(path)) throw denied();
+  const scope = file ? "file-history" : approval ? "approval-history" : proof ? "payment-proof-history" : corporateActions ? "corporate-history" : workspace ? "workspace-history" : collection ? "order-collection" : "order";
   const declaration = Object.freeze({ method, path, kind, collection, scope,
     ...(corporateActions ? { corporateActions: Object.freeze([...corporateActions]) } : {}) });
   declarations.add(declaration);
@@ -68,7 +88,7 @@ export function declareRentalRecovery(method: string, path: string, kind: Rental
 }
 
 export function bindRentalRecovery(declaration: RentalRecoveryDeclaration,
-  request: { method: string; url: string }): RentalRecoverySubject {
+  request: { method: string; url: string; query?: unknown }): RentalRecoverySubject {
   if (!declarations.has(declaration) || request.method.toUpperCase() !== declaration.method
     && !(request.method.toUpperCase() === "HEAD" && declaration.method === "GET")) throw denied();
   const actual = normalizeRequestPath(request.url).split("/"), expected = declaration.path.split("/");
@@ -83,10 +103,38 @@ export function bindRentalRecovery(declaration: RentalRecoveryDeclaration,
     parameters.set(segment.slice(1), value);
   }
   if (parameters.has("stage") && !["pickup", "return"].includes(parameters.get("stage")!)) throw denied();
-  const orderId = parameters.get("id") ?? parameters.get("orderid");
+  let orderId = declaration.scope === "order" ? parameters.get("id") ?? parameters.get("orderid") : parameters.get("orderid");
+  const readStaffOrder = () => {
+    // Bind the exact value consumed by Nest @Query, not merely the method/path.
+    // Duplicate, bracket/array and encoded-key ambiguity must never pick another order.
+    const search = request.url.split("?", 2)[1] ?? "", entries = [...new URLSearchParams(search)];
+    if (entries.length !== 1 || entries[0][0] !== "orderId" || !/^[^?#]*\?orderId=/u.test(request.url)) throw denied();
+    const value = entries[0][1], query = request.query;
+    if (!value || /[\/\\\u0000-\u001f]/u.test(value) || !query || typeof query !== "object" || Array.isArray(query)
+      || Object.keys(query).length !== 1 || Reflect.get(query, "orderId") !== value) throw denied();
+    return value;
+  };
+  if (declaration.path === staffPaymentsHistory) orderId = readStaffOrder();
   const corporateId = parameters.get("corporateid");
-  const requiresOrder = declaration.scope === "order"
+  const requiresOrder = declaration.scope === "order" || declaration.scope === "file-history" && declaration.path.includes(":orderid")
     || declaration.scope === "corporate-history" && declaration.path.includes("/:orderid");
   if (requiresOrder !== Boolean(orderId) || (declaration.scope === "corporate-history") !== Boolean(corporateId)) throw denied();
-  return Object.freeze({ declaration, orderId, intentId: parameters.get("intentid"), refundId: parameters.get("refundid"), corporateId });
+  const subject: RentalRecoverySubject = Object.freeze({ declaration, orderId, intentId: parameters.get("intentid"), refundId: parameters.get("refundid"), corporateId,
+    ...(declaration.scope === "file-history" ? { fileId: parameters.get("fileassetid") ?? parameters.get("id") } : {}),
+    ...(declaration.scope === "approval-history" ? { referenceId: parameters.get("id"), approvalKind: approvalHistory.get(declaration.path),
+      quoteId: parameters.get("quoteid"), operationKey: parameters.get("key") } : {}),
+    ...(declaration.scope === "payment-proof-history" ? { referenceId: parameters.get("id"), fileId: parameters.get("fileid") } : {}) });
+  const originalUrl = request.url, originalMethod = request.method;
+  bindings.set(subject, () => {
+    if (request.url !== originalUrl || request.method !== originalMethod
+      || declaration.path === staffPaymentsHistory && readStaffOrder() !== orderId) throw denied();
+  });
+  return subject;
+}
+
+/** Reused at every same-tx authority check, including return after a slow read. */
+export function assertRentalRecoveryBinding(subject: RentalRecoverySubject): void {
+  const check = bindings.get(subject);
+  if (!check) throw denied();
+  check();
 }

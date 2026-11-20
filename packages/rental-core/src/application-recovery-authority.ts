@@ -15,15 +15,21 @@ import { resolveUserBusinessLocationScope, type RentalBusinessLocationReader } f
 import { requestRentalOrderVisibilityWhere } from "./mysql-core-facts";
 import { clientOwnsRentalOrder } from "./client-order-ownership";
 import type { RentalBusinessTenantTransaction } from "./mysql-business-fence";
-import type { RentalRecoverySubject } from "./application-recovery-policy";
+import { assertRentalRecoveryBinding, type RentalRecoverySubject } from "./application-recovery-policy";
+import type { EnterpriseApprovalService } from "./mysql-enterprise-approval";
+import type { EnterpriseExtensionApprovalService } from "./mysql-enterprise-extension-approval";
+import type { EnterpriseExchangeApprovalService } from "./mysql-enterprise-exchange-approval";
+import type { EnterpriseManagementRequestService } from "./mysql-enterprise-management-request";
+import type { RentalFileBusinessAccessService } from "./file-business-access";
+import type { EnterprisePortalAction } from "./enterprise";
 import type { EnterpriseAccessService } from "./mysql-enterprise-access";
 import type { EnterpriseOrderReaderService } from "./mysql-enterprise-orders";
 
 interface RecoveryOrderReader {
   rentalOrder: { findFirst(input: { where: Prisma.RentalOrderWhereInput; select: {
-    id: true; tenantId: true; workspaceId: true; status: true; customerId: true; membershipSnapshot: true;
+    id: true; tenantId: true; workspaceId: true; status: true; fulfillmentMode: true; customerId: true; membershipSnapshot: true;
   } }): PromiseLike<{ id: string; tenantId: string; workspaceId: string; status: string;
-    customerId: string | null; membershipSnapshot: unknown } | null> };
+    fulfillmentMode: string; customerId: string | null; membershipSnapshot: unknown } | null> };
 }
 const denied = (message: string) => new CoreAccessError("denied", message);
 const methods = (value: unknown, names: readonly string[]): boolean => value !== null && typeof value === "object"
@@ -79,6 +85,13 @@ export function createRentalRecoveryAuthority(input: {
     access: Pick<EnterpriseAccessService, "requireWorkspaceAction">;
     orders: Pick<EnterpriseOrderReaderService, "assertHistoryOrder">;
   };
+  originalHistory?: {
+    files: Pick<RentalFileBusinessAccessService, "readHistoryOrderReference">;
+    approvals: Pick<EnterpriseApprovalService, "readHistoryReference" | "readOrderHistoryReference">;
+    extensions: Pick<EnterpriseExtensionApprovalService, "readHistoryReference">;
+    exchanges: Pick<EnterpriseExchangeApprovalService, "readHistoryReference">;
+    management: Pick<EnterpriseManagementRequestService, "readEvidenceHistoryReference">;
+  };
 }) {
   if (typeof input.auth?.lockRequestWorkspaceAccess !== "function" || typeof input.clientAuth?.lockCurrentSession !== "function") {
     throw new CoreAccessError("core_unavailable", "Rental 善后缺少原同实例当前身份权威");
@@ -87,8 +100,10 @@ export function createRentalRecoveryAuthority(input: {
   // original audit/funding transactions and delivery. A restore with a newer
   // revision must not release data prepared under an earlier corporate grant.
   const corporateGrants = new WeakMap<RentalRecoverySubject, string>();
+  const originalMaterials = new WeakMap<RentalRecoverySubject, string>();
   return Object.freeze({
     async lock(transaction: RentalBusinessTenantTransaction, request: RentalRecoveryRequest): Promise<RentalRecoveryLease> {
+      assertRentalRecoveryBinding(request.subject);
       if ("$transaction" in transaction || !request.workspaceId || !request.tenantId
         || request.subject.declaration.scope === "order" && !orderTransaction(transaction)) {
         throw denied("Rental 善后必须使用原事务、当前空间及所需原对象读取器");
@@ -96,10 +111,49 @@ export function createRentalRecoveryAuthority(input: {
       if (request.subject.declaration.scope === "workspace-history" && request.audience === "client")
         throw denied("经营空间报表与对账历史须沿原成员权限，不能借客户身份代读");
       const corporate = request.subject.declaration.scope === "corporate-history";
+      const file = request.subject.declaration.scope === "file-history", approval = request.subject.declaration.scope === "approval-history";
+      const proof = request.subject.declaration.scope === "payment-proof-history";
+      const indirect = file || approval || proof;
+      const originals = input.originalHistory;
+      if (file && (request.audience === "client" || !request.subject.fileId)
+        || (approval || proof) && (request.audience !== "client" || !request.client || !request.subject.referenceId && !request.subject.quoteId)
+        || proof && !request.subject.fileId || request.subject.declaration.path === "/staff/v1/offline-payments" && request.audience !== "staff")
+        throw denied("原文件、审批或员工收款历史主体不一致");
+      if (file && typeof originals?.files?.readHistoryOrderReference !== "function"
+        || approval && (request.subject.quoteId ? typeof originals?.approvals?.readOrderHistoryReference !== "function" : !request.subject.approvalKind || typeof (request.subject.approvalKind === "booking" ? originals?.approvals
+          : request.subject.approvalKind === "extension" ? originals?.extensions : originals?.exchanges)?.readHistoryReference !== "function")
+        || proof && typeof originals?.management?.readEvidenceHistoryReference !== "function")
+        throw new CoreAccessError("core_unavailable", "原证据历史缺少同实例原对象定位参加者");
+      type Located = { workspaceId: string; orderId?: string; materialKey: string; corporateId?: string;
+        evidenceStage?: "pickup" | "return"; uploadedBy?: string | null; businessType?: string; uploadScene?: string };
+      let located: Located | undefined, boundOrderId = request.subject.orderId, boundCorporateId = request.subject.corporateId;
+      const locate = async (): Promise<Located> => {
+        const subject = request.subject;
+        if (file && originals && subject.fileId) return originals.files.readHistoryOrderReference(request.tenantId, subject.fileId, transaction);
+        if (proof && originals && request.client && subject.referenceId && subject.fileId)
+          return originals.management.readEvidenceHistoryReference(request.client, subject.referenceId, subject.fileId, transaction);
+        if (approval && originals && request.client && subject.quoteId && subject.operationKey)
+          return originals.approvals.readOrderHistoryReference(request.client, subject.quoteId, subject.operationKey, transaction);
+        if (approval && originals && request.client && subject.referenceId) {
+          const reader = subject.approvalKind === "booking" ? originals.approvals : subject.approvalKind === "extension" ? originals.extensions : originals.exchanges;
+          return reader.readHistoryReference(request.client, subject.referenceId, transaction);
+        }
+        throw denied("原证据定位参数已变化");
+      };
+      const remember = (value: Located) => {
+        const key = JSON.stringify(value), prior = originalMaterials.get(request.subject);
+        if (value.workspaceId !== request.workspaceId || prior !== undefined && key !== prior)
+          throw denied("原证据或审批关联已变化，请重新读取");
+        if (request.subject.orderId && value.orderId !== request.subject.orderId) throw denied("文件不属于本次原订单");
+        if (file && request.subject.orderId && (value.businessType !== "rental_order" || value.uploadScene !== "carrier-shipment-evidence"
+          || value.uploadedBy !== request.user?.id)) throw denied("原承运证据不属于当前上传主体");
+        originalMaterials.set(request.subject, key);
+        located = value; boundOrderId = value.orderId; boundCorporateId = value.corporateId;
+      };
       if (corporate && (request.audience !== "client" || !request.client || !request.subject.corporateId
         || request.subject.declaration.kind !== "history" || request.subject.intentId || request.subject.refundId))
         throw denied("企业历史必须绑定原客户、企业及已登记读取动作");
-      if (corporate && (typeof input.corporateHistory?.access?.requireWorkspaceAction !== "function"
+      if ((corporate || proof) && (typeof input.corporateHistory?.access?.requireWorkspaceAction !== "function"
         || typeof input.corporateHistory?.orders?.assertHistoryOrder !== "function"))
         throw new CoreAccessError("core_unavailable", "企业历史缺少同实例企业授权与原订单读取参加者");
       const identity = getRequestIdentity();
@@ -108,17 +162,17 @@ export function createRentalRecoveryAuthority(input: {
       let userLease: WorkspaceAccessLease | undefined, clientLease: RentalClientSessionLease | undefined;
       let corporateValidated = false;
       const checkCorporate = async () => {
-        if (!corporate) return;
+        if (!corporate && !proof) return;
         const { subject, client } = request, participant = input.corporateHistory;
-        const required = subject.declaration.corporateActions;
-        if (!participant || !client || !subject.corporateId || !required?.length)
+        const required: readonly EnterprisePortalAction[] | undefined = proof ? ["requests:manage", "orders:read", "finance:read"] : subject.declaration.corporateActions;
+        if (!participant || !client || !boundCorporateId || !required?.length)
           throw denied("企业历史缺少原动作与对象依据");
         // The original qualifier checks current session, relationship, enabled
         // portals, exact action grants and their relationship revision together.
-        const grant = await participant.access.requireWorkspaceAction(client, subject.corporateId, required[0], transaction);
-        if (grant.corporateCustomerId !== subject.corporateId || required.some(action => !grant.actions.includes(action)))
+        const grant = await participant.access.requireWorkspaceAction(client, boundCorporateId, required[0], transaction);
+        if (grant.corporateCustomerId !== boundCorporateId || required.some(action => !grant.actions.includes(action)))
           throw denied("企业历史当前动作权限不完整");
-        const current = JSON.stringify([request.tenantId, request.workspaceId, client.customerId, subject.corporateId,
+        const current = JSON.stringify([request.tenantId, request.workspaceId, client.customerId, boundCorporateId,
           grant.membershipId, grant.permissionRevision, [...grant.actions].sort()]);
         const original = corporateGrants.get(subject);
         if (original !== undefined && original !== current) throw denied("企业历史授权已变化，请重新读取");
@@ -127,6 +181,7 @@ export function createRentalRecoveryAuthority(input: {
       };
       const originalMember = request.user ? memberKey(request.user) : undefined;
       const revalidate = async () => {
+        assertRentalRecoveryBinding(request.subject);
         if (getRequestIdentity() !== identity || identity.tenantId !== request.tenantId || identity.workspaceId !== request.workspaceId)
           throw denied("Rental 善后主体上下文已变化");
         if (request.audience === "client") {
@@ -158,18 +213,23 @@ export function createRentalRecoveryAuthority(input: {
       }
       await revalidate();
       const assertOrder = (tenantId: string, workspaceId: string, orderId: string) => {
-        if ((request.subject.declaration.scope !== "order" && !corporate) || !request.subject.orderId || tenantId !== request.tenantId || workspaceId !== request.workspaceId
-          || orderId !== request.subject.orderId) throw denied("Rental 善后事务不能切换原绑定订单");
+        if ((request.subject.declaration.scope !== "order" && !corporate && !indirect) || !boundOrderId || tenantId !== request.tenantId || workspaceId !== request.workspaceId
+          || orderId !== boundOrderId) throw denied("Rental 善后事务不能切换原绑定订单");
       };
       return Object.freeze({ revalidate, assertOrder, async lockOriginalSubject(coreDisabled: boolean) {
         await revalidate();
         const { subject, tenantId, workspaceId } = request;
-        if (subject.declaration.scope === "order" || corporate && subject.orderId) {
-          if (!subject.orderId || !corporate && !orderTransaction(transaction)) throw denied("善后动作缺少原持久订单读取器");
+        if (indirect) {
+          remember(await locate());
+          if (!boundOrderId && (proof || approval && !subject.quoteId && subject.approvalKind !== "booking" || file && coreDisabled))
+            throw denied("原对象未关联已存订单，不能使用停用后的订单证据读取");
+        }
+        if (subject.declaration.scope === "order" || (corporate || indirect) && boundOrderId) {
+          if (!boundOrderId || !corporate && !proof && !orderTransaction(transaction)) throw denied("善后动作缺少原持久订单读取器");
           const rows = await transaction.$queryRaw<Array<{ id: string }>>(sql`SELECT id FROM rental_orders
-            WHERE id = ${subject.orderId} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId} FOR UPDATE`);
-          if (rows.length !== 1 || rows[0].id !== subject.orderId) throw denied("原订单不存在或已不属于当前经营空间");
-        } else if (!["order-collection", "workspace-history", "corporate-history"].includes(subject.declaration.scope)
+            WHERE id = ${boundOrderId} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId} FOR UPDATE`);
+          if (rows.length !== 1 || rows[0].id !== boundOrderId) throw denied("原订单不存在或已不属于当前经营空间");
+        } else if (!indirect && !["order-collection", "workspace-history", "corporate-history"].includes(subject.declaration.scope)
           || subject.declaration.kind !== "history" || subject.orderId || subject.intentId || subject.refundId)
           throw denied("空间历史只允许已登记的读取，不能绑定订单或资金动作");
         // Workspace follows the bound order. The reviewed workspace/collection
@@ -178,37 +238,43 @@ export function createRentalRecoveryAuthority(input: {
           WHERE id = ${workspaceId} AND tenantId = ${tenantId} FOR UPDATE`);
         if (spaces.length !== 1 || spaces[0].id !== workspaceId || spaces[0].status.toLowerCase() !== "active")
           throw denied("当前经营空间已冻结或停用");
-        if (corporate) {
+        if (indirect) remember(await locate());
+        if (corporate || proof) {
           await checkCorporate();
-          if (subject.orderId) {
-            const participant = input.corporateHistory, client = request.client, required = subject.declaration.corporateActions;
-            if (!participant || !client || !subject.corporateId || !required?.length) throw denied("企业历史对象参加者已缺失");
-            await participant.orders.assertHistoryOrder(client, subject.corporateId, subject.orderId, transaction,
+          if (boundOrderId) {
+            const participant = input.corporateHistory, client = request.client, required = proof ? ["finance:read"] : subject.declaration.corporateActions;
+            if (!participant || !client || !boundCorporateId || !required?.length) throw denied("企业历史对象参加者已缺失");
+            await participant.orders.assertHistoryOrder(client, boundCorporateId, boundOrderId, transaction,
               required.includes("finance:read"));
           }
           await revalidate();
           return;
         }
-        if (subject.orderId) {
+        if (boundOrderId) {
           if (!orderTransaction(transaction)) throw denied("原订单读取器不可用");
-          const order = await transaction.rentalOrder.findFirst({ where: { id: subject.orderId, tenantId, workspaceId,
-            ...requestRentalOrderVisibilityWhere({ getRequestDataScope, getRequestLocationIds, getRequestUserId }) },
-            select: { id: true, tenantId: true, workspaceId: true, status: true, customerId: true, membershipSnapshot: true } });
-          if (!order || order.id !== subject.orderId || order.tenantId !== tenantId || order.workspaceId !== workspaceId
+          const locations = getRequestLocationIds(), stage = located?.evidenceStage;
+          const stageWhere = stage && locations !== undefined ? stage === "pickup"
+            ? { fulfillmentLocationId: { in: locations } }
+            : { OR: [{ returnLocationId: { in: locations } }, { returnLocationId: null, fulfillmentLocationId: { in: locations } }] } : {};
+          const order = await transaction.rentalOrder.findFirst({ where: { id: boundOrderId, tenantId, workspaceId,
+            AND: [stageWhere, requestRentalOrderVisibilityWhere({ getRequestDataScope, getRequestLocationIds, getRequestUserId })] },
+            select: { id: true, tenantId: true, workspaceId: true, status: true, fulfillmentMode: true, customerId: true, membershipSnapshot: true } });
+          if (!order || order.id !== boundOrderId || order.tenantId !== tenantId || order.workspaceId !== workspaceId
             || request.audience === "client" && !clientOwnsRentalOrder(request.client!, order)) throw denied("当前主体无权读取或处理原订单");
+          if (file && subject.orderId && order.fulfillmentMode !== "carrier_shipping") throw denied("原承运证据必须属于承运订单");
           // A persisted draft is historical data, but does not prove an established
           // rental commitment. The original action still checks every later state.
           if (coreDisabled && subject.declaration.kind === "fulfillment" && order.status.toLowerCase() === "draft") throw denied("草稿订单不能借停用善后成立新业务");
           if (subject.intentId) {
             const intents = await transaction.$queryRaw<Array<{ id: string }>>(sql`SELECT id FROM rental_payment_intents
               WHERE id = ${subject.intentId} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId}
-                AND orderId = ${subject.orderId} FOR UPDATE`);
+                AND orderId = ${boundOrderId} FOR UPDATE`);
             if (intents.length !== 1 || intents[0].id !== subject.intentId) throw denied("原支付单不属于本次绑定订单");
           }
           if (subject.refundId) {
             const refunds = await transaction.$queryRaw<Array<{ id: string }>>(sql`SELECT id FROM rental_payment_refunds
               WHERE id = ${subject.refundId} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId}
-                AND orderId = ${subject.orderId} AND paymentIntentId = ${subject.intentId} FOR UPDATE`);
+                AND orderId = ${boundOrderId} AND paymentIntentId = ${subject.intentId} FOR UPDATE`);
             if (refunds.length !== 1 || refunds[0].id !== subject.refundId) throw denied("原退款单不属于本次绑定支付");
           }
         }

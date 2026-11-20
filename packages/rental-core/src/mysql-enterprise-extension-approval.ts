@@ -10,6 +10,7 @@ import type { EnterpriseBookingBasis } from "./enterprise-booking";
 import type { RentalOrder } from "./contracts";
 import { requireRequestWorkspaceId } from "@rental-os/platform-server/request-identity";
 import type { RentalEnterpriseExtensionClient as ClientApiService } from "./enterprise-approval-ports";
+import type { RentalEnterpriseAuthorityTransaction } from "./enterprise-read-storage";
 import type { ClientRequestContext } from "./client-context";
 import { EnterpriseAccessService } from "./mysql-enterprise-access";
 import type { RentalEnterpriseApprovalStorage as PrismaService } from "./enterprise-approval-ports";
@@ -32,6 +33,16 @@ export class EnterpriseExtensionApprovalService {
     private readonly access: EnterpriseAccessService, private readonly core: RentalCoreService, private readonly clientApi: ClientApiService, private readonly idempotency: RentalIdempotencyRepository) {}
   private row(tenantId: string, id: string, tx?: Prisma.TransactionClient) {
     return (tx ?? this.prisma).$queryRaw<Approval[]>(Prisma.sql`SELECT * FROM enterprise_extension_approvals WHERE tenantId=${tenantId} AND id=${id} ${tx ? Prisma.sql`FOR UPDATE` : Prisma.empty}`);
+  }
+  /** Locator only: keep Order before the approval row/Workspace, and keep the
+   * original result reader's unknown and receipt validation unchanged. */
+  async readHistoryReference(context: ClientRequestContext, id: string, tx: RentalEnterpriseAuthorityTransaction) {
+    const rows = await tx.$queryRaw<Approval[]>(Prisma.sql`SELECT * FROM enterprise_extension_approvals WHERE tenantId=${context.tenantId} AND id=${id}`);
+    const row = rows[0];
+    this.owns(context, row);
+    if (rows.length !== 1 || row.id !== id || !row.orderId) throw new NotFoundException("原续租批准订单关联缺失");
+    return { workspaceId: row.workspaceId, orderId: row.orderId,
+      materialKey: requestFingerprint(JSON.parse(JSON.stringify(row))) };
   }
   private async lockedRow(context: ClientRequestContext, id: string, tx: Prisma.TransactionClient) {
     const original = (await this.row(context.tenantId, id))[0];
