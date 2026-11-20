@@ -25,11 +25,16 @@ import { AI_PROVIDER_DISCOVERY_INPUT_SCHEMA, AI_PROVIDER_DISCOVERY_RESULT_SCHEMA
 import type { ModelEgressTransport } from './model-egress.transport';
 import { discoverProviderMetadata } from './provider-discovery.service';
 import { callAiTaskRunnerDependency } from './runner/ai-task-runner.service';
+import { captureRentalInternalAuthority } from '@rental-os/rental-core/application-internal-authority';
+import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
+import { beginTenantModelConfigurationTransaction, createTenantModelConfigurationTransactions,
+  type TenantModelConfigurationTransactions } from './tenant-model-config-transactions';
 
 type Request = { headers: { authorization?: unknown } } & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
 type Dependencies = Omit<Parameters<typeof createPersistedTenantModelConfiguration>[0], 'authorize'> & {
   auth: Pick<AuthService, 'resolveAccessContext'>; guard: Pick<ApiAuthGuard, 'canActivate'>;
   discovery?: Pick<ModelEgressTransport, 'getModelDirectory'>;
+  transactions?: TenantModelConfigurationTransactions;
 };
 const bearer = z.string().max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u);
 const ajv = new Ajv({ strict: true, coerceTypes: false, useDefaults: false, removeAdditional: false });
@@ -79,19 +84,22 @@ export function composeRequestBoundModelSettings(dependencies: Dependencies) {
     signal?.addEventListener('abort', close, { once: true });
     if (signal?.aborted) close();
     try {
-      return await wait(() => runWithRequestIdentity({}, async () => {
+      const selected = captureRentalInternalAuthority();
+      const consume = async () => {
         const identity = new AiTaskCurrentIdentityAuthority(dependencies.auth, credentials);
         const initial = await identity.resolve();
         if (initial.scope.kind !== 'workspace' || initial.actor.kind !== 'user' || initial.audience !== 'operator') throw new ModelGatewayError('FORBIDDEN');
         const context = { tenantId: initial.scope.tenantId, workspaceId: initial.scope.workspaceId, actorId: initial.actor.userId };
+        const transactionParticipant = createTenantModelConfigurationTransactions({ transactions: dependencies.transactions, credentials });
         const authority = new TenantModelConfigurationAuthority(dependencies.guard, credentials, identity);
         await authority.authorize(context, write || discovery ? 'manage' : 'read');
         if (write) {
           if ((command as { configId: string }).configId !== context.tenantId) throw new ModelGatewayError('FORBIDDEN');
-          const registered = await registerCurrentAiConfigurationScopes({ ...dependencies, credentials });
+          const registered = await registerCurrentAiConfigurationScopes({ ...dependencies, credentials, transactionParticipant });
           if (originalIdentityHash(initial) !== originalIdentityHash(registered)) throw new ModelGatewayError('FORBIDDEN');
         }
-        const configuration = createPersistedTenantModelConfiguration({ ...dependencies, authorize: authority.authorize.bind(authority) });
+        const configuration = createPersistedTenantModelConfiguration({ ...dependencies,
+          authorize: authority.authorize.bind(authority), transactionParticipant });
         if (discovery) {
           if (!dependencies.discovery) throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
           admitDiscovery(context.tenantId);
@@ -100,7 +108,14 @@ export function composeRequestBoundModelSettings(dependencies: Dependencies) {
           try {
             const input = command as AiProviderDiscoveryInputDraft;
             const result = await configuration.inspectProvider(context, input, (key, current) => discoverProviderMetadata(input,
-              action === 'discoverModels' ? 'models' : 'detect', key, dependencies.discovery!, current, bounded));
+              action === 'discoverModels' ? 'models' : 'detect', key, dependencies.discovery!, async () => {
+                await current();
+                if (selected) await dependencies.db.$transaction(async tx => {
+                  const participant = await beginTenantModelConfigurationTransaction(tx, context, transactionParticipant);
+                  try { await participant?.revalidate(); } finally { participant?.close(); }
+                }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted, maxWait: 2500, timeout: 5000 });
+                await current();
+              }, bounded));
             if (!active || bounded.aborted || originalIdentityHash(await identity.resolve()) !== originalIdentityHash(initial)) throw new ModelGatewayError('FORBIDDEN');
             if (!validDiscoveryResult(result)) throw new ModelGatewayError('INVALID_RESPONSE');
             return structuredClone(result);
@@ -119,7 +134,10 @@ export function composeRequestBoundModelSettings(dependencies: Dependencies) {
           if (write) throw new AiModelConfigurationResultUnknownError();
           throw error;
         }
-      }), write, signal);
+      };
+      // Selected hosts retain the actual Guard store. Fresh Auth and the original
+      // management Guard verify it; no identity projection is written back to ALS.
+      return await wait(() => selected ? consume() : runWithRequestIdentity({}, consume), write, signal);
     } finally {
       active = false;
       signal?.removeEventListener('abort', close);

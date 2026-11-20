@@ -229,6 +229,7 @@ const originalOrderReadRoutes = new Set(['', AI_SCENE_REQUEST_HTTP_DRAFT.read,
   // Task metadata creation uses the same original scene intake gate. The
   // original owner, current scene/resource policy and creation fence remain required.
   AI_SCENE_REQUEST_HTTP_DRAFT.queryOrders, AI_SCENE_REQUEST_HTTP_DRAFT.createTask,
+  AI_SCENE_REQUEST_HTTP_DRAFT.reissue, AI_SCENE_REQUEST_HTTP_DRAFT.reconcileReissue,
   AI_SCENE_REQUEST_HTTP_DRAFT.reconcile, AI_SCENE_REQUEST_HTTP_DRAFT.material,
   AI_SCENE_REQUEST_HTTP_DRAFT.recovery].map(action =>
   `POST /${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}${action ? `/${action}` : ''}`));
@@ -259,6 +260,14 @@ const originalTaskObservationRoutes = new Set([
   AI_SCENE_MODEL_HTTP_DRAFT.readCancellationReceipt, AI_SCENE_MODEL_HTTP_DRAFT.readCancellationSettlementReceipt,
   AI_SCENE_MODEL_HTTP_DRAFT.readAnswer, AI_SCENE_MODEL_HTTP_DRAFT.readModelResult, AI_SCENE_MODEL_HTTP_DRAFT.readQuoteGoalCandidates,
   AI_SCENE_MODEL_HTTP_DRAFT.reopenModelSource, AI_SCENE_MODEL_HTTP_DRAFT.reopenOpeningModelSource,
+].map(action => `POST /${AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${action}`));
+
+// Original cancellation is a separate, explicitly mounted recovery entry.
+// The transition authority still checks the current owner, original scene,
+// action policy and settlement witness; this does not authorize execution.
+const originalTaskRecoveryRoutes = new Set([
+  AI_SCENE_MODEL_HTTP_DRAFT.requestCancellationIntent, AI_SCENE_MODEL_HTTP_DRAFT.settleUnstartedCancellation,
+  AI_SCENE_MODEL_HTTP_DRAFT.settleReleasedInputCancellation,
 ].map(action => `POST /${AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${action}`));
 
 // Original AI budget bookkeeping only. The application still verifies the
@@ -386,6 +395,7 @@ function requiredPermissions(method: string, path: string) {
     return ['rental-os:order:view', 'rental-os:order:create'];
   if (originalQuoteModelRoutes.has(`${method.toUpperCase()} ${path}`)) return ['rental-os:order:create'];
   if (originalTaskObservationRoutes.has(`${method.toUpperCase()} ${path}`)) return ['rental-os:order:view'];
+  if (originalTaskRecoveryRoutes.has(`${method.toUpperCase()} ${path}`)) return ['rental-os:order:view'];
   if (method === 'POST' && [AI_SCENE_PLAN_POLICY_HTTP_DRAFT.read, AI_SCENE_PLAN_POLICY_HTTP_DRAFT.change]
     .some(action => path === `/${AI_SCENE_PLAN_POLICY_HTTP_DRAFT.basePath}/${action}`)) return ['system:params:manage'];
   if (method === 'POST' && [AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT.configure, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT.read,

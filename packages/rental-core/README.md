@@ -330,6 +330,16 @@ npm run lint -w @rental-os/rental-core
 
 构建前置按公共合同 → Rental基础合同 → Shared兼容声明 → 公共Core宿主 → Rental完整服务的顺序执行；`npm run build:contracts -w @rental-os/rental-core`只生成Shared实际消费的17个正式合同入口及其内部依赖，避免Shared与完整服务循环构建。该入口保留同一运行时值和正式声明，不创建另一套合同。[合同构建配置](tsconfig.contracts.json) · [内存构建检查](../../scripts/check-rental-package-build.cjs) · [固定版本发行与五端消费核验](../../scripts/verify-rental-distribution.cjs)
 
+独立 Linux 镜像使用[宿主打包入口](../../scripts/package-rental-host.cjs)。先完成正式源码构建、完整 Rental 标准包及[原部署准备](../../apps/rental-api/src/prepare-deployment.ts)，再从仓库根执行以下命令；参数均为实际绝对路径，输出父目录须存在且归档不能已存在。
+
+```text
+node scripts/package-rental-host.cjs --ai disabled --deployment <原prepared目录> --rental-package <完整固定Rental包目录> --client <本树apps/rental-api/generated/client/index.d.ts> --platform-client <本树apps/platform-api/generated/client/index.d.ts> --output <新归档绝对路径.tgz>
+```
+
+打包核对原锁、完整包摘要、全部迁移原文、所选声明与schema，并沿实际启动入口检查正式运行出口。包内保留原固定Rental全部资产；其他工作区仅带已构建产物、公开说明、许可与公共数据材料，不带依赖目录、作者Client、环境文件或私有资料。原 npm v3 锁按所选宿主依赖闭包投影，保留第三方版本及完整性摘要。AI关闭时实际入口不得强制引用AI运行包，缺文件或错版直接拒绝。
+
+解包后由部署环境执行 `docker build --target runtime -t rental-host .`。Docker构建按原锁安装依赖，在目标Linux内由同一Prisma 5.22生成公共与Rental两个专属Client，避免携带Windows引擎；最终镜像只安装生产依赖并核实际Node解析。镜像不自动迁移；运行配置、原迁移账和物理观察继续由部署负责人办理。打包结果保持 `imageBuild=not-run`、`deployment=pending`，文件摘要记录在随包 `rental-host.context.json`。[离线打包回归](../../tests/rental-host-package.test.cjs)只在内存验证真实产物、固定包与CLI文件运输，不替代Docker、磁盘安装或业务验收。
+
 完整构建生成本包 JS/声明。根出口提供领域合同与常量，营业日和品类治理按子出口加载。服务端计价、器材及能力执行/条件子出口使用可选 peer `@nestjs/common`，沿用原 HTTP 异常类型，调用宿主和源码构建须提供兼容版本。核心聚合与换货批准子出口使用可选 peer @rental-os/platform-server 的正式 /request-identity，原Guard/API与Rental共用同一ALS实例；领域根出口不加载它。公共请求指纹从 `@rental-os/platform-contracts/request-fingerprint` 复用，已保存的条件 hash 沿用原算法。
 
 HTTP宿主登记 `/http-core` 和 `/http-business` 的两个Controller，从 `/http-applications` 取得明确令牌并绑定同一应用实例。原组合的[接线入口](../../apps/api/src/modules/rental-core/rental-http.providers.ts)使用 `useExisting`，不再创建另一套核心、资金、数据库或生命周期执行者；可选检查事件只绑定原方法。文件上传使用原 `@nestjs/platform-express` 适配，生成模型留在私有HTTP/MySQL边界。公共来源日历由 [platform-server只读接点](../platform-server/src/modules/official-calendars/README.md)提供，业务HTTP不取得来源维护方法；原来源合同和DTO兼容出口转接同一公共声明。日志和业务会员/企业结算分别由实际所有者供给。`/http-context` 复用已选Core的原快照与刷新队列，显式操作键保持191字符边界，各动作仍决定默认键与重放方式。原API再导出同一Controller，路径/字段/权限及原操作读取沿[OpenAPI](../../apps/api/src/contracts/openapi-document.ts)保持。

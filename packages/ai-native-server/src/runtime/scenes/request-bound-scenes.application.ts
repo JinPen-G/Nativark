@@ -1038,9 +1038,10 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
       transitions: new AiTaskTransitionRepository(input.db, authorization.authority, input.clock),
       takeovers: new PrismaTaskTakeoverRepository(input.db, authorization.authority, input.clock) };
     // This root only observes old work or submits the three explicit cancel
-    // mutations below. A stalled read must close its own request credentials;
-    // it must not occupy a host indefinitely or continue after an outer timeout.
-  }, { write: false });
+    // mutations below. Their original repository transactions use the persisted
+    // original/task binding; settlement still requires its original witness.
+    // A stalled read closes its credentials and never leaves a lasting grant.
+  }, { write: false }, originalSceneTransactionAuthority);
   const cancellation = (request: AiSceneHttpRequest, value: unknown, settled: boolean) => {
     const parsed = cancellationSchema.safeParse(structuredClone(value));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');

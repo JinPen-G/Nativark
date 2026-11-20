@@ -54,9 +54,16 @@ for (const top of ['packages', 'apps']) {
     const pkg = JSON.parse(fs.readFileSync(manifest, 'utf8'));
     for (const [subkey, contract] of Object.entries(pkg.exports || {})) {
       const target = typeof contract === 'string' ? contract : contract.types || contract.import || contract.default || contract.require;
-      if (!target || subkey.includes('*') || !pkg.name) continue;
+      if (!target || !pkg.name) continue;
       let source = target.replace(/^\.\/dist\//u, './src/').replace(/\.d\.ts$/u, '.ts').replace(/\.js$/u, '.ts');
       let file = slash(path.resolve(directory, source));
+      // 仅沿 package.json 已公开的单通配出口核类型；不会为未公开路径加源码捷径。
+      if (subkey.includes('*')) {
+        if (subkey.split('*').length !== 2 || source.split('*').length !== 2) throw new Error(`不支持的正式出口 ${pkg.name}${subkey}`);
+        if (fs.existsSync(path.dirname(file.slice(0, file.indexOf('*')) + 'entry.ts')))
+          packageAliases[pkg.name + subkey.slice(1)] = [file];
+        continue;
+      }
       if (!fs.existsSync(file) && fs.existsSync(file + 'x')) file += 'x';
       if (fs.existsSync(file)) packageAliases[pkg.name + (subkey === '.' ? '' : subkey.slice(1))] = [file];
     }

@@ -9,6 +9,7 @@ import { AiTaskRepositoryError, type AiTaskRepository } from '../ai-task.reposit
 import { AiTaskRunnerError } from '../runner/ai-task-runner.service';
 import { validateAiTaskObservation } from '../task-contract-validation';
 import { requestFingerprint } from '../rental-adapters/rental-idempotency.repository';
+import { withAiTaskTransaction } from '../task-transaction-authority';
 
 export const CLIENT_VISIBLE_LOG_ACTION = 'ai_task_client_visible';
 type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiRun' | 'operationLog' | 'aiTaskInputRequest'
@@ -109,7 +110,10 @@ export async function recordTaskVisibleObservation(d: TaskVisibleObservationDepe
   let scopeId: string | undefined;
   let attempted = false;
   try {
-    const recorded = await d.db.$transaction(async tx => {
+    // Join the original log transaction before any task read/lock. The selected
+    // host resolves its persisted task source; a client report grants no access.
+    const recorded = await d.db.$transaction(async tx => withAiTaskTransaction(tx,
+      { kind: 'task', taskId: report.taskId }, async () => {
       const task = await tx.aiTask.findFirst({ where: before.where, select: { id: true, scopeId: true, revision: true } });
       if (!task || task.id !== report.taskId || !task.scopeId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
       scopeId = task.scopeId;
@@ -134,7 +138,7 @@ export async function recordTaskVisibleObservation(d: TaskVisibleObservationDepe
       return tx.operationLog.create({ data: { id, tenantId: before.scope.tenantId, workspaceId: before.scope.workspaceId,
         userId: before.actorId, action: CLIENT_VISIBLE_LOG_ACTION, detail: detail as unknown as Prisma.InputJsonValue,
         createdAt: now } });
-    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+    }), { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     // Log acknowledgement is not authority to deliver stale source data. A
     // committed log is retained on loss/revocation; never retry or erase it.
     if ((await current()).bindingKey !== before.bindingKey || await d.sourceBinding(structuredClone(report)) !== binding)

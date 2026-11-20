@@ -4,7 +4,9 @@
   "private": true,
   "description": "Rental OS 微信小程序客户端（原生 + TypeScript）。包内只含公开配置，不含任何密钥。",
   "scripts": {
+    "prebuild": "npm run build -w @rental-os/rental-api",
     "build": "node scripts/build.cjs",
+    "pretypecheck": "npm run build -w @rental-os/rental-api",
     "typecheck": "node scripts/build.cjs --check",
     "test": "node --test ../../tests/miniprogram-static.test.cjs"
   },

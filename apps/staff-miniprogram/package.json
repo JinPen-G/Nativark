@@ -4,7 +4,9 @@
   "private": true,
   "description": "Rental OS 租户员工微信小程序（原生 + TypeScript）。一套小程序服务所有租户：租户编码在登录时输入，不打进包内；包内只含公开配置，不含任何密钥。",
   "scripts": {
+    "prebuild": "npm run build -w @rental-os/rental-api",
     "build": "node scripts/build.cjs",
+    "pretypecheck": "npm run build -w @rental-os/rental-api",
     "typecheck": "node scripts/build.cjs --check",
     "test": "node --test ../../tests/staff-miniprogram-static.test.cjs"
   },

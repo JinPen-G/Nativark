@@ -12,6 +12,7 @@ import { BudgetError } from './budget/budget.ports';
 import type { PlatformModelConfigurationAuthority } from './platform-model-config.authority';
 import { AiModelConfigurationResultUnknownError } from './model-config-compatibility';
 import { ModelGatewayError } from './model-gateway.ports';
+import { beginTenantModelConfigurationTransaction, type TenantModelConfigurationTransactionParticipant } from './tenant-model-config-transactions';
 
 /** Current tenant configuration metadata only. Same canonical keys/unique index
  * as task creation; never creates a task, policy, lease, entitlement or grant.
@@ -22,6 +23,7 @@ export async function registerCurrentAiConfigurationScopes(input: {
   guard: Pick<ApiAuthGuard, 'canActivate'>;
   credentials: AiTaskCredentialSource;
   clock?: () => Date;
+  transactionParticipant?: TenantModelConfigurationTransactionParticipant;
 }) {
   const identity = new AiTaskCurrentIdentityAuthority(input.auth, input.credentials, input.clock);
   const management = new TenantModelConfigurationAuthority(input.guard, input.credentials, identity);
@@ -43,6 +45,10 @@ export async function registerCurrentAiConfigurationScopes(input: {
   let callbackCompleted = false;
   try {
     await input.db.$transaction(async tx => {
+      const participant = await beginTenantModelConfigurationTransaction(tx, {
+        tenantId: scope.tenantId, workspaceId: scope.workspaceId, actorId: initial.context.actor.userId
+      }, input.transactionParticipant);
+      try {
       // Fixed TENANT -> WORKSPACE order; never writes PLATFORM metadata here.
       for (const key of keys) {
         const row = await tx.aiScope.upsert({ where: { scopeKey: key.scopeKey }, create: { id: randomUUID(), ...key }, update: {},
@@ -52,7 +58,9 @@ export async function registerCurrentAiConfigurationScopes(input: {
         await recheck();
       }
       await recheck();
+      await participant?.revalidate();
       callbackCompleted = true;
+      } finally { participant?.close(); }
     }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
   } catch (error) {
     if (callbackCompleted) throw new BudgetError('PENDING_RECONCILIATION');

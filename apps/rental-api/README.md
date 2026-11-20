@@ -9,6 +9,9 @@
 | [main.ts](src/main.ts)、[bootstrap.ts](src/bootstrap.ts) | 显式执行才启动；只消费进程配置和指定的固定部署锁，不加载 `.env`。校验 MySQL、认证密钥、AI 选择、端口、代理及 CORS 配置。 |
 | [app.module.ts](src/app.module.ts) | 挂载公共平台、标准 Core、原 Rental、支付、客户、空间和认证扩展模块；从实际 Controller 元数据核对完整请求政策，再构造同实例服务。 |
 | [assembly.ts](src/assembly.ts) | 核定实际标准包与部署锁，组合原应用、公共分流、业务/公开准入和作业权威；不连接、迁移或派发外部请求。 |
+| [ai-main.ts](src/ai-main.ts)、[ai-app.module.ts](src/ai-app.module.ts)、[ai-assembly.ts](src/ai-assembly.ts) | 独立的 AI 启用入口；核定锁中的完整选装数据包和原迁移账，组合原 Runtime 与同一 Rental 实例。 |
+| [ai-composition.ts](src/ai-composition.ts)、[ai-inspection-transactions.ts](src/ai-inspection-transactions.ts) | 原 AI 工厂、知识权限、检查事务和生命周期参加者；复用当前 Auth、Guard、Core 和业务实例，构造阶段不执行外部调用。 |
+| [ai-http-policy.ts](src/ai-http-policy.ts)、[ai-openapi.ts](src/ai-openapi.ts) | 对实际 AI 处理器逐条登记读取/审计/原事务边界；发布相同挂载范围和原成功状态，不以 provider 存在开放路由。 |
 | [database.ts](src/database.ts) | 公共 40 模型与 Rental 121 模型组成宿主 Client，公共数据库令牌使用同一连接池；生成物仅归本宿主。 |
 | [http-application-views.ts](src/http-application-views.ts) | 向 HTTP 注入原服务方法，隐藏 Nest 生命周期钩子，避免同一业务实例被多个模块重复启动。 |
 | [lifecycle.ts](src/lifecycle.ts) | 唯一初始化、预热、配货/到期/文件/限流作业与数据库退出负责人；先停止新任务并排空，再断开连接，排空失败不提前断库。 |
@@ -16,7 +19,7 @@
 | [http-policy.ts](src/http-policy.ts)、[openapi.ts](src/openapi.ts) | 真实挂载清单同时约束请求包装与旧路径文档许可；逐条核定原方法/处理器，使用 Rental 命名空间并保留原合同缺项。 |
 | [package.ts](src/package.ts)、[prepare-deployment.ts](src/prepare-deployment.ts) | 从已构建字节和固定来源形成标准包及候选部署；同源 OpenAPI、完整摘要和原 SQL 必须一致，不安装或执行迁移。 |
 
-启动配置须显式提供 `DATABASE_URL`、`AUTH_TOKEN_SECRET`、`RENTAL_AI_MODE=disabled` 和 `RENTAL_DEPLOYMENT_LOCK`。部署锁使用绝对路径，文件上限 8 MiB。可配置 `API_PORT`、`TRUST_PROXY_HOPS`、`CORS_ALLOWED_ORIGINS`；公共数据、Rental 和基础设施数据模式均只接受 MySQL。启动入口本身不授予连接业务库或发布权限。
+启动配置须显式提供 `DATABASE_URL`、`AUTH_TOKEN_SECRET`、`RENTAL_AI_MODE` 和 `RENTAL_DEPLOYMENT_LOCK`。普通 `main.ts` 只接受 `disabled`；`ai-main.ts` 只接受 `enabled`，并要求所选 247 模型 Client 和固定完整 AI 数据包。部署锁使用绝对路径，文件上限 8 MiB。可配置 `API_PORT`、`TRUST_PROXY_HOPS`、`CORS_ALLOWED_ORIGINS`；公共数据、Rental 和基础设施数据模式均只接受 MySQL。启动入口本身不授予连接业务库或发布权限。
 
 原组合宿主的 `PlatformController` 已有客户/空间兼容入口；该宿主不得再次挂载独立客户/空间模块。独立宿主则由本根模块统一挂载。原认证扩展同样不能在同一应用重复登记。
 
@@ -49,8 +52,14 @@
 
 ## 组合约束与验证边界
 
-本宿主当前显式选择无 AI 的 161 模型；客户检查出箱用 `null` 表达未选择，`undefined` 或残缺参加者会拒绝。启用 AI 必须另外组合实际选装数据、失败出箱、同事务事件和通知草稿等参加者，247 模型的类型检查不能替代启用组合。
+普通宿主使用无 AI 的 161 模型；客户检查出箱用 `null` 表达未选择，`undefined` 或残缺参加者会拒绝。AI 启用入口使用 247 模型，通过原实际工厂组合失败出箱、同事务事件、通知草稿、知识读取和原请求服务。公共数据库视图仍限定原 40 模型；两个 Client 的运行时模型图互不覆盖，正文加密沿各自实际模型关系处理嵌套数据。
+
+启用宿主的 HTTP 清单见 [AI 处理器政策](src/ai-http-policy.ts)：运营/员工场景目录、原输入与任务创建、原任务恢复、任务中心、租户模型配置及明确列出的手动检查操作。每个路由仍通过原 Auth/Guard，后续原场景、owner、对象、能力、任务策略和模型配置分别核定。场景目录只公布确实挂载的请求工厂；未装配的执行、客户或供应商能力保持不可用。
+
+原输入保存/换发、Task 变更、可见事件和模型配置在各自原事务中先锁当前 Auth/Tenant，再复核 Core 与原业务来源，保留原 CAS、幂等键及未知收据。模型目录探测沿原有有界运输，调用前后分别复核当前授权，运输不占用数据库事务。原知识结果/来源只将 `ai-sensitive-read` 必需审计接入当前请求的短事务；文件与知识 ACL、同意依据、原身份及返回前复核继续生效，撤权不返回正文、不重复对象 GET。
+
+`build`/`lint` 与 `build:ai`/`lint:ai` 使用 [所选 Client 编译入口](../../scripts/build-selected-prisma.cjs)。先由宿主按锁定 schema 生成专属 Client，再显式提供绝对 `RENTAL_PRISMA_CLIENT`；同一 npm 前置链共用选择，不回退默认生成物。纯 schema 首次准备见 [准备入口](../../scripts/prepare-selected-prisma-schema.cjs)，独立 Linux 部署上下文见 [打包入口](../../scripts/package-rental-host.cjs)；准备文件与上下文均不表示已执行迁移或镜像构建。
 
 无 AI 宿主的原检查证据绑定处理器由固定政策在执行前返回 503；其他处理器仍按真实元数据核对，未知接点继续拒绝。该政策不能证明启用 AI 的检查绑定已接通。同源善后声明当前列出89个读取/收尾处理器，其中新增11个文件/承运证据、单订单员工收款、审批原结果及企业回款凭证GET。宿主须从同一实例供给 `originalHistory` 的文件、批准、续租/换货及回款材料定位者，保留当前原ACL、企业授权和订单范围复核；缺少参加者返回不可用。原材料定位与处理器登记不证明当前已装配、迁移或完成全部兼容验收。
 
-当前验证覆盖离线原服务/Controller/请求管线、所选 schema 严格类型、模块依赖注入和单次生命周期。真实数据库锁竞争、迁移、供应商调用、HTTP 监听及生产发布须另行验证；准备数据不能写作迁移成功，提交推送也不能写作已部署。
+定向验证入口为 [AI 装配与请求回归](test/ai-composition.test.cjs)、[原输入事务回归](../../packages/ai-native-server/test/original-scene-transactions.test.cjs)、[所选 Client 编译回归](../../tests/selected-prisma-build.test.cjs) 和 [Linux 部署上下文回归](../../tests/rental-host-package.test.cjs)。覆盖离线原服务/Controller/请求管线、同事务撤权与未知结果、所选 schema 严格类型、实际模块依赖注入和单次生命周期。真实数据库锁竞争、迁移、供应商调用、HTTP 监听及生产发布须另行验证；准备数据不能写作迁移成功，提交推送也不能写作已部署。

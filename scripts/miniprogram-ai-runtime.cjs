@@ -68,12 +68,27 @@ async function buildNativeContractRuntime(appRoot, kind) {
   const { Volume, createFsFromVolume } = require(resolve('memfs'));
   const sourceRoot = fs.realpathSync(path.join(projectRoot, 'packages/shared/src'));
   const zodRoot = fs.realpathSync(path.dirname(resolve('zod/package.json')));
-  const rentalEntry = declaredSource(projectRoot, '@rental-os/rental-core', true);
+  const rentalRootEntry = declaredSource(projectRoot, '@rental-os/rental-core', true);
+  const compiledRental = rentalRootEntry.endsWith('.js');
+  // The installed contracts export contains the same public values without
+  // evaluating the Core root's server and administrative contributions.
+  const rentalEntry = compiledRental
+    ? declaredSource(projectRoot, '@rental-os/rental-core/contracts', true) : rentalRootEntry;
+  const rentalExtension = compiledRental ? '.js' : '.ts';
   const rentalSources = new Set([rentalEntry,
-    path.join(path.dirname(rentalEntry), 'contracts.ts'),
-    path.join(path.dirname(rentalEntry), 'rental-category-code.ts'),
+    path.join(path.dirname(rentalEntry), 'contracts' + rentalExtension),
+    path.join(path.dirname(rentalEntry), 'rental-category-code' + rentalExtension),
     declaredSource(projectRoot, '@rental-os/rental-core/client-contracts', true),
     declaredSource(projectRoot, '@rental-os/rental-core/enterprise-order-delegation', true)].map(file => fs.realpathSync(file)));
+  if (compiledRental) {
+    const packageRoot = path.dirname(path.dirname(rentalEntry));
+    const { corePackageFiles } = require('@rental-os/core-contracts/package');
+    const lockedFiles = new Set(corePackageFiles(JSON.parse(fs.readFileSync(path.join(packageRoot, 'core.manifest.json'), 'utf8'))));
+    for (const file of rentalSources) {
+      if (!lockedFiles.has(path.relative(packageRoot, file).replace(/\\/g, '/')))
+        throw Error('Native contract runtime source is absent from the locked package');
+    }
+  }
   // Source builds resolve these three actual package exports once. A missing
   // declaration or canonical source fails before webpack, with no fallback.
   const rentalExports = new Map([
@@ -103,7 +118,7 @@ async function buildNativeContractRuntime(appRoot, kind) {
           resolver.doResolve(resolver.ensureHook('resolve'), { ...request, request: file }, 'declared Rental native source', context, callback);
         });
       } }] },
-    module: { rules: [{ test: /\.ts$/u, include: [sourceRoot, ...rentalSources],
+    module: { rules: [{ test: /\.(?:ts|js)$/u, include: [sourceRoot, ...rentalSources],
       use: [{ loader: path.join(projectRoot, 'apps/miniprogram/scripts/shared-runtime-loader.cjs'),
         options: { rentalEntry } }] }] },
     optimization: { minimize: true, splitChunks: false, runtimeChunk: false,

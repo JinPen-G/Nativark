@@ -14,7 +14,8 @@
  *
  * 用法：
  *   node scripts/build.cjs              # 本机联调构建
- *   node scripts/build.cjs --release    # 发布构建（拒绝 http）
+ *   node scripts/build.cjs --release --rental-package <待部署目录> --rental-lock <组合锁.json>
+ *                                     # 固定标准包发布构建（拒绝 http）
  *   node scripts/build.cjs --check      # 只做类型检查
  *   node scripts/build.cjs --out-dir <本树 output/.tmp/任务/客户端> # 隔离构建
  * 兼容旧开关：MINIPROGRAM_ALLOW_LOCAL_API=1 在发布模式下**不再**放行回环地址。
@@ -56,7 +57,7 @@ function resolveTsc() {
 let privateTypeConfig;
 function runTsc(args) {
   if (args[0] === '-p' && args[1] === 'tsconfig.json') {
-    privateTypeConfig ??= prepareMiniprogramSharedTypes(root);
+    privateTypeConfig ??= prepareMiniprogramSharedTypes(root, process.argv.slice(2));
     args = ['-p', privateTypeConfig, ...args.slice(2)];
   }
   const result = spawnSync(process.execPath, [resolveTsc(), ...args], { cwd: root, stdio: "inherit" });
@@ -89,6 +90,7 @@ function publicConfig(defaults) {
 }
 
 async function main() {
+  privateTypeConfig = prepareMiniprogramSharedTypes(root, process.argv.slice(2));
   if (checkOnly) {
     runTsc(["-p", "tsconfig.json", "--noEmit"]);
     process.stdout.write("[miniprogram build] 类型检查通过\n");
@@ -215,7 +217,7 @@ async function main() {
   catch (error) { process.stderr.write(`[miniprogram build] ${error.message}\n`); process.exitCode = 1; }
   finally {
     try { releaseMiniprogramSharedTypes(privateTypeConfig); }
-    catch (error) { process.stderr.write(`[miniprogram cleanup] ${error.message}\n`); process.exitCode = 1; }
+    catch (error) { process.stderr.write(`[miniprogram cleanup] ${error.message}\n`); buildCompleted = false; process.exitCode = 1; }
     if (outputPrepared && !buildCompleted) {
       try { clearMiniprogramBuildOutput(root, process.argv.slice(2)); }
       catch (error) { process.stderr.write(`[miniprogram cleanup] ${error.message}\n`); process.exitCode = 1; }

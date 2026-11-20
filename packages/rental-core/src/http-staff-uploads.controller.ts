@@ -29,7 +29,17 @@ export interface RentalStaffUploadsStorage {
 }
 
 export interface RentalStaffInspectionEvidence {
-  bind(value: unknown): Promise<{ attachmentId: string; attachmentRevision: number }>;
+  /** 请求凭据只交给同宿主原请求工厂，不并入业务字段、持久化或模型输入。 */
+  bind(value: unknown, request: RentalStaffEvidenceRequest): Promise<{ attachmentId: string; attachmentRevision: number }>;
+}
+
+export interface RentalStaffEvidenceRequest {
+  method: string;
+  url: string;
+  originalUrl?: string;
+  staffApiRequest?: boolean;
+  headers: { authorization?: unknown };
+  aborted?: boolean;
 }
 
 export class StaffUploadObservationDto implements StaffUploadObservationRequest {
@@ -37,7 +47,7 @@ export class StaffUploadObservationDto implements StaffUploadObservationRequest 
   @IsObject() file!: StaffUploadObservationRequest["file"];
 }
 
-interface StaffUploadRequest {
+interface StaffUploadRequest extends RentalStaffEvidenceRequest {
   user: SystemUserRow;
   body?: unknown;
   staffLocationScope?: { mode: "all" | "selected"; locationIds: string[] };
@@ -76,7 +86,7 @@ export class StaffUploadsController {
     if (!asset) throw new ForbiddenException("附件不存在或不属于当前员工");
     this.assertPermission(req.user, this.scenePermission(asset.uploadScene, asset.businessType));
     await this.assertOwnerInScope(req, asset.businessType, asset.businessId ?? "", workspaceId, asset.uploadScene, this.metadataRecord(asset.metadata));
-    return this.inspectionEvidence.bind({ ...body, attachmentId: fileAssetId });
+    return this.inspectionEvidence.bind({ ...body, attachmentId: fileAssetId }, req);
   }
 
   @Post("sessions")

@@ -10,6 +10,7 @@ import { capabilityNameSchema } from './capability-verification';
 import type { AiProfileCapability } from './provider-profile.ports';
 import { readModelConfigurationOperation, appendModelConfigurationOperation, type ModelConfigurationOperationWrite,
   type ModelConfigurationOperationDb } from './model-configuration-operation';
+import { beginTenantModelConfigurationTransaction, type TenantModelConfigurationTransactionParticipant } from './tenant-model-config-transactions';
 
 type Db = Pick<PrismaClient, '$transaction' | 'aiTenantModelConfiguration' | 'systemParameterSet' | 'aiScope' | 'aiProviderProfile'> & ModelConfigurationOperationDb;
 type Repository = TenantModelConfigPorts['repository'];
@@ -22,7 +23,8 @@ const contextSchema = z.object({ tenantId: identifier, workspaceId: identifier, 
  */
 export class PrismaTenantModelProfileRepository implements Repository {
   private readonly records: PrismaTenantModelConfigRepository;
-  constructor(private readonly db: Db, private readonly authorize: TenantModelConfigPorts['authorize']) {
+  constructor(private readonly db: Db, private readonly authorize: TenantModelConfigPorts['authorize'],
+    private readonly transactionParticipant?: TenantModelConfigurationTransactionParticipant) {
     if ([db?.$transaction, db?.aiScope?.findFirst, db?.aiProviderProfile?.findFirst,
       db?.aiProviderProfile?.updateMany, db?.aiProviderProfile?.create, authorize]
       .some(method => typeof method !== 'function')) throw new ModelGatewayError('CONFIG_INVALID');
@@ -91,6 +93,8 @@ export class PrismaTenantModelProfileRepository implements Repository {
     let callbackCompleted = false;
     try {
       const committed = await this.db.$transaction(async tx => {
+        const participant = await beginTenantModelConfigurationTransaction(tx, context, this.transactionParticipant);
+        try {
         // Config CAS is the common write lock for all saves/mode changes. The
         // existing config-only adapter is reused ONLY inside this transaction.
         const records = new PrismaTenantModelConfigRepository(tx);
@@ -117,14 +121,16 @@ export class PrismaTenantModelProfileRepository implements Repository {
             serviceMode: 'tenant_managed', protocol: next.settings.protocol, provider: next.settings.protocol,
             model: next.settings.model, allowedCapabilities: [...(capabilities ?? [])] } });
         }
-        // Revocation during any preceding await aborts this transaction. These
-        // are sequential fresh authority checks, NOT atomic business admission.
+        // Original CAS and operation receipt keep their existing transaction;
+        // selected hosts hold the same Auth/Core locks through its last check.
         if (operation) await appendModelConfigurationOperation(tx, { scopeId: scope.id, scopeKind: 'TENANT',
           targetId: tenantId, actorId: context.actorId, workspaceId: context.workspaceId }, operation);
         if (legacy) await records.assertLegacySource(tenantId, legacy);
         await current();
+        await participant?.revalidate();
         callbackCompleted = true;
         return true;
+        } finally { participant?.close(); }
       }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
       if (committed) await current();
       return committed;

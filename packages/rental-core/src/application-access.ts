@@ -42,7 +42,7 @@ export interface RentalApplicationBufferedRead {
   auditedRead?: never;
 }
 
-/** 原读取审计在自己的短事务提交，返回数据前仍复核当前准入。
+/** 原 GET/HEAD 或显式登记的 POST 读取审计在自己的短事务提交，返回数据前仍复核当前准入。
  * 审计可能已持久化而返回被拒；此类型不适用于含业务动作或外部调用的 GET。 */
 export interface RentalApplicationAuditedRead {
   auditedRead: true;
@@ -234,7 +234,7 @@ function currentSubscriptionReader(transaction: RentalBusinessTenantTransaction,
 
 /** Create once per createRentalApplication. run belongs around the request pipeline;
  * after the original Guard succeeds, withRequest encloses the awaited controller work.
- * Registered buffered GET/HEAD reads receive admission and pre-return transactions.
+ * Registered buffered/audited GET/HEAD/POST reads receive admission and pre-return transactions.
  * Existing writes re-enter assertCurrent
  * through their original parent fence, holding Core locks until THEIR commit.
  * This does not claim that request admission revalidates an uncovered write at commit.
@@ -480,8 +480,8 @@ export function createRentalApplicationAccess(input: RentalApplicationAccessDepe
       const maintained = read !== undefined && "maintainedRead" in read && read.maintainedRead === true;
       const isRead = buffered || audited || maintained;
       if (Number(buffered) + Number(audited) + Number(maintained) > 1 || readMethod && !isRead
-        || !readMethod && isRead && (!buffered || evidence.method !== "POST")) {
-        throw new CoreAccessError("denied", "Rental GET/HEAD 须明确登记缓冲纯读或独立事务审计读取；其他方法不能借读取回查执行");
+        || !readMethod && isRead && (maintained || evidence.method !== "POST")) {
+        throw new CoreAccessError("denied", "Rental 读取须明确登记缓冲或独立事务审计；POST 仅允许已审定读取，不允许派生维护");
       }
       scope.evidence = evidence;
       const internal = createRentalInternalAuthorityScope(() => assertEvidence(evidence));

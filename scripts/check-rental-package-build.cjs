@@ -8,6 +8,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const { createRequire } = require('node:module');
+const { selectedCompilerOptions } = require('./build-selected-prisma.cjs');
 const root = path.resolve(__dirname, '..');
 const slash = file => path.resolve(file).split(path.sep).join('/');
 const inside = (directory, file) => file === directory || file.startsWith(directory + '/');
@@ -17,6 +18,7 @@ function createBuild(dependencyDirectory, settings = {}) {
   const requireDeps = createRequire(deps + '/typescript/package.json');
   const ts = requireDeps('typescript');
   const outputs = new Map(), virtual = new Map(), packages = new Map(), stages = [], runtimeAliases = new Map();
+  const selectedClients = new Map();
   let generatedDirectories = new Set();
   const workspaceRoot = slash(root);
   const snapshot = settings.commit && require('./rental-build-snapshot.cjs').readBuildSnapshot(settings.commit);
@@ -49,11 +51,13 @@ function createBuild(dependencyDirectory, settings = {}) {
   };
   const fileExists = file => {
     file = mapped(file);
+    if (/(?:^|\/)\.prisma\/client(?:\/|$)/u.test(file)) return false;
     return outputs.has(file) || virtual.has(file) || (!generated(file)
       && (snapshot && inside(workspaceRoot, file) ? snapshot.files.has(file) : ts.sys.fileExists(file)));
   };
   const readFile = file => {
     file = mapped(file);
+    if (/(?:^|\/)\.prisma\/client(?:\/|$)/u.test(file)) return undefined;
     return outputs.get(file) ?? virtual.get(file) ?? (generated(file) ? undefined : sourceRead(file));
   };
   const directoryExists = file => {
@@ -118,8 +122,10 @@ function createBuild(dependencyDirectory, settings = {}) {
     const parsed = ts.parseJsonConfigFileContent(config.config, {
       ...ts.sys, readFile, fileExists, directoryExists, readDirectory
     }, path.dirname(configFile));
-    const options = { ...parsed.options, noEmitOnError: true, ...extraOptions,
+    let options = { ...parsed.options, noEmitOnError: true, ...extraOptions,
       typeRoots: [deps + '/@types'] };
+    const selection = selectedClients.get(slash(path.dirname(configFile)));
+    if (selection) options = selectedCompilerOptions(ts, configFile, options, selection, readFile).options;
     const outputDirectory = options.outDir && slash(options.outDir);
     const host = ts.createCompilerHost(options);
     Object.assign(host, {
@@ -132,6 +138,8 @@ function createBuild(dependencyDirectory, settings = {}) {
       }
     });
     host.resolveModuleNames = (names, containing) => names.map(name => {
+      if (name === '@prisma/client' && !Object.hasOwn(options.paths || {}, name))
+        throw Error('编译必须显式选择宿主 Client 声明：' + configName);
       if (Object.hasOwn(options.paths || {}, name) && !name.startsWith('@rental-os/')) {
         const configured = ts.resolveModuleName(name, containing, options, host).resolvedModule;
         if (!configured) throw Error('正式类型映射目标不存在：' + name);
@@ -210,14 +218,17 @@ function createBuild(dependencyDirectory, settings = {}) {
       }
       return requireDeps.resolve(name);
     };
-    const requireBuilt = name => runtimeAliases.has(name) || name.startsWith('@rental-os/') || name.startsWith('.')
-      ? load(resolve(name)) : requireDeps(name);
+    const requireBuilt = name => {
+      if (name === '@prisma/client' || /(?:^|\/)\.prisma\/client(?:\/|$)/u.test(name))
+        throw Error('正式包运行时禁止默认生成 Client：' + name);
+      return runtimeAliases.has(name) || name.startsWith('@rental-os/') || name.startsWith('.') ? load(resolve(name)) : requireDeps(name);
+    };
     requireBuilt.resolve = resolve;
     new vm.Script(`(function(require,module,exports,__dirname,__filename){${text}\n})`, { filename: file })
       .runInThisContext()(requireBuilt, module, module.exports, path.dirname(file), file);
     return module.exports;
   }
-  return { ts, outputs, virtual, packages, stages, runtimeAliases, compile, exported, load, requireDeps, deps,
+  return { ts, outputs, virtual, packages, stages, runtimeAliases, selectedClients, compile, exported, load, requireDeps, deps,
     snapshot, sourceRead, readDirectory };
 }
 

@@ -8,6 +8,7 @@ import { TenantModelConnectionResolver, type GatewayConnectionResolver } from '.
 import { requestFingerprint } from './rental-adapters/rental-idempotency.repository';
 import { gatewayBudgetPrincipal } from './budget/gateway-budget-principal';
 import type { ModelConfigurationOperationDb } from './model-configuration-operation';
+import type { TenantModelConfigurationTransactionParticipant } from './tenant-model-config-transactions';
 
 /** Explicit server composition only. No AppModule registration, credential default
  * or actor inferred from caller-supplied tenant/workspace IDs. The authority must
@@ -17,11 +18,12 @@ export function createPersistedTenantModelConfiguration(input: {
   db: Pick<PrismaClient, '$transaction' | 'aiTenantModelConfiguration' | 'systemParameterSet' | 'aiScope' | 'aiProviderProfile'> & ModelConfigurationOperationDb;
   authorize: TenantModelConfigPorts['authorize'];
   secrets: SecretBox;
+  transactionParticipant?: TenantModelConfigurationTransactionParticipant;
 }): TenantModelConfigService {
   if (!input || typeof input.authorize !== 'function' || typeof input.secrets?.encrypt !== 'function'
     || typeof input.secrets?.decrypt !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
   return new TenantModelConfigService({ authorize: input.authorize,
-    repository: new PrismaTenantModelProfileRepository(input.db, input.authorize) }, input.secrets);
+    repository: new PrismaTenantModelProfileRepository(input.db, input.authorize, input.transactionParticipant) }, input.secrets);
 }
 
 /** Adds canonical scope ownership to the EXISTING encrypted BYOK resolver.

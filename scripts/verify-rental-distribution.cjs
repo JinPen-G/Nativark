@@ -56,13 +56,13 @@ function selectedPrisma(build) {
     const dmmf = JSON.parse(wasm.get_dmmf(JSON.stringify({ prismaSchema: text, noColor: true })));
     const types = generator.dmmfToTypes(generator.externalToInternalDmmf(dmmf))
       .replace(/(['"])(?:\.\/runtime\/library|@prisma\/client\/library)\1/gu, '"@prisma/client/runtime/library"');
+    const directory = slash(path.join(root, `apps/${label === 'public' ? 'platform' : 'rental'}-api/generated/client`));
+    virtual.set(directory + '/index.d.ts', types);
+    virtual.set(directory + '/schema.prisma', text);
     if (label === 'rental') {
-      for (const directory of [deps, slash(path.join(root, 'node_modules'))]) {
-        virtual.set(directory + '/.prisma/client/index.d.ts', types);
-        virtual.set(directory + '/.prisma/client/default.d.ts', 'export * from "./index";');
-      }
-    }
-    virtual.set(slash(path.join(root, `apps/${label === 'public' ? 'platform' : 'rental'}-api/generated/client/index.d.ts`)), types);
+      for (const pkg of ['packages/rental-core', 'apps/rental-api']) build.selectedClients.set(slash(path.join(root, pkg)),
+        { client: directory + '/index.d.ts', mode: 'rental' });
+    } else build.selectedClients.set(slash(path.join(root, 'apps/platform-api')), { client: directory + '/index.d.ts', mode: 'platform' });
     declarations.push({ schema: label, models: dmmf.datamodel.models.length,
       sha256: createHash('sha256').update(text).digest('hex') });
   }
@@ -95,7 +95,6 @@ async function attachPrismaRuntime(build) {
     envPaths: { rootEnvPath: null, schemaEnvPath: undefined } });
   for (const [file, text] of Object.entries(result.fileMap)) if (file.endsWith('.js'))
     build.outputs.set(directory + '/' + file, text);
-  build.runtimeAliases.set('@prisma/client', directory + '/index.js');
   const runtime = build.load(directory + '/index.js');
   assert.equal(runtime.Prisma.TransactionIsolationLevel.Serializable, 'Serializable');
   console.log(JSON.stringify({ prismaRuntime: 'official-5.22.0', clientInstantiated: false, enginesCopied: 0, diskOutputs: 0 }));

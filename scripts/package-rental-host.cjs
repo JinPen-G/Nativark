@@ -1,0 +1,363 @@
+'use strict';
+/** 独立 Rental 宿主的离线打包入口。消费已构建字节、固定完整包及原 prepared 部署材料。
+ * 输出确定性 Linux Docker 上下文；镜像构建才安装原锁依赖并生成目标平台 Client。
+ * 本命令不读 .env、不安装、不生成 Client、不启动进程/服务、不连接库或办理迁移。 */
+const fs = require('node:fs'), path = require('node:path');
+const { createHash } = require('node:crypto');
+const { createRequire, isBuiltin } = require('node:module');
+const { isDeepStrictEqual } = require('node:util');
+const { selectedCompilerOptions } = require('./build-selected-prisma.cjs');
+const { selectWorkspaces, projectHostLock, lockedDependency } = require('./rental-host-lock.cjs');
+const root = path.resolve(__dirname, '..');
+const json = value => Buffer.from(JSON.stringify(value, null, 2) + '\n');
+const hash = bytes => createHash('sha256').update(bytes).digest('hex');
+const text = (files, file) => {
+  const bytes = files.get(file);
+  if (!bytes?.byteLength) throw Error('打包缺少实际文件：' + file);
+  return Buffer.from(bytes).toString('utf8');
+};
+const within = (directory, file) => { const rel = path.relative(directory, file); return rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel); };
+
+function parseArguments(args) {
+  const values = {};
+  for (let index = 0; index < args.length; index += 2) {
+    const option = args[index], value = args[index + 1];
+    if (!['--ai', '--deployment', '--rental-package', '--ai-data-package', '--client', '--platform-client', '--output', '--deps'].includes(option)
+      || Object.hasOwn(values, option) || !value || value.startsWith('--')) throw Error('未知、重复或缺值的打包选项：' + option);
+    values[option] = value;
+  }
+  if (!['enabled', 'disabled'].includes(values['--ai'])) throw Error('须显式选择 --ai enabled|disabled');
+  for (const key of ['--deployment', '--rental-package', '--client', '--platform-client', '--output'])
+    if (!values[key] || !path.isAbsolute(values[key])) throw Error(key + ' 须为显式绝对路径');
+  if ((values['--ai'] === 'enabled') !== Boolean(values['--ai-data-package'])) throw Error('只有 AI enabled 必须提供 --ai-data-package');
+  for (const key of ['--ai-data-package', '--deps']) if (values[key] && !path.isAbsolute(values[key])) throw Error(key + ' 须为绝对路径');
+  if (!values['--output'].endsWith('.tgz')) throw Error('--output 须为尚不存在的 .tgz 文件');
+  return { aiMode: values['--ai'], deployment: values['--deployment'], rentalPackage: values['--rental-package'],
+    aiDataPackage: values['--ai-data-package'], client: values['--client'], platformClient: values['--platform-client'],
+    output: values['--output'], deps: values['--deps'] || path.join(root, 'node_modules') };
+}
+
+function ordinaryDirectories(directory) {
+  for (let current = path.resolve(directory); ; current = path.dirname(current)) {
+    const stat = fs.lstatSync(current);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw Error('打包路径不能经过链接或非普通目录');
+    if (path.dirname(current) === current) break;
+  }
+}
+function readOrdinary(file, maxBytes = 32 * 1024 * 1024) {
+  ordinaryDirectories(path.dirname(file));
+  const stat = fs.lstatSync(file);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > maxBytes) throw Error('打包输入须为有界普通文件');
+  const bytes = fs.readFileSync(file);
+  if (bytes.length > maxBytes) throw Error('输入在读取期间超过大小上限');
+  return bytes;
+}
+function readTree(directory, allowed) {
+  ordinaryDirectories(directory);
+  const files = new Map(); let bytes = 0;
+  const visit = (current, prefix = '') => {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const relative = prefix + entry.name, file = path.join(current, entry.name);
+      if (entry.isSymbolicLink()) throw Error('打包目录中存在链接：' + relative);
+      if (entry.isDirectory()) visit(file, relative + '/');
+      else {
+        if (!allowed(relative)) throw Error('打包目录中存在未声明材料：' + relative);
+        const content = readOrdinary(file); bytes += content.length;
+        if (files.size >= 20000 || bytes > 128 * 1024 * 1024) throw Error('打包目录超过资源上限');
+        files.set(relative, content);
+      }
+    }
+  };
+  visit(directory); return files;
+}
+
+function publicApi() {
+  // These are this checkout's already-built formal modules, never executable
+  // code loaded from the caller's candidate package directory.
+  return {
+    ...require('@rental-os/core-contracts'),
+    ...require('@rental-os/core-contracts/archive'),
+    ...require('@rental-os/core-contracts/package'),
+    ...require('@rental-os/core-contracts/platform-data-package'),
+    ...require('@rental-os/platform-api/data-plan'),
+    ...require(path.join(root, 'apps/rental-api/dist/prepare-deployment.js')),
+  };
+}
+
+function workspaceExport(metadata, specifier) {
+  const name = metadata.name, key = specifier === name ? '.' : '.' + specifier.slice(name.length);
+  let entry = metadata.exports?.[key], replacement;
+  if (entry === undefined) {
+    const patterns = Object.keys(metadata.exports || {}).filter(value => value.split('*').length === 2)
+      .sort((a, b) => b.indexOf('*') - a.indexOf('*') || b.length - a.length);
+    for (const pattern of patterns) {
+      const [prefix, suffix] = pattern.split('*');
+      if (key.startsWith(prefix) && key.endsWith(suffix) && key.length > prefix.length + suffix.length) {
+        entry = metadata.exports[pattern]; replacement = key.slice(prefix.length, suffix.length ? -suffix.length : undefined); break;
+      }
+    }
+  }
+  const pick = value => typeof value === 'string' ? value : value && pick(value.node ?? value.require ?? value.default);
+  let target = pick(entry);
+  if (!metadata.exports && key === '.') target = metadata.main;
+  if (replacement !== undefined) target = target?.replace('*', replacement);
+  if (!target || /[\\%:*]/u.test(target) || target.split('/').some(part => part === '..' || part === 'node_modules'))
+    throw Error('运行依赖缺少正式 CommonJS 出口：' + specifier);
+  return target.replace(/^\.\//u, '');
+}
+
+/** 只沿真实启动模块的静态 require/import 检查闭包；不 require 应用、运行 Client 或猜动态入口。
+ * 最终 Node exports/外部包的实际解析留给生成的镜像预检，在镜像内安装完成后执行。 */
+function checkRuntimeClosure(files, workspaces, lock, entry, ts) {
+  const packages = new Map([...workspaces].map(([directory, metadata]) => [metadata.name, { directory, metadata }]));
+  const queue = [entry], seen = new Set(), resolutions = [], clients = new Set(), runtimePeers = new Map();
+  const locate = target => [target, target + '.js', target + '.json', target + '/index.js'].find(file => files.has(file));
+  while (queue.length) {
+    const file = queue.shift(); if (seen.has(file)) continue;
+    const source = text(files, file); seen.add(file);
+    if (file.endsWith('.json')) { JSON.parse(source); continue; }
+    const owner = [...workspaces.keys()].find(directory => file.startsWith(directory + '/'));
+    if (!owner) throw Error('运行代码越出所选工作区：' + file);
+    const metadata = workspaces.get(owner), tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+    if (tree.parseDiagnostics.length) throw Error('运行产物语法无效：' + file);
+    const imports = new Set();
+    function inspect(node) {
+      if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier))
+        imports.add(node.moduleSpecifier.text);
+      if (ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword
+        || ts.isIdentifier(node.expression) && node.expression.text === 'require'
+        || ts.isPropertyAccessExpression(node.expression) && ts.isIdentifier(node.expression.expression)
+          && node.expression.expression.text === 'require' && node.expression.name.text === 'resolve')) {
+        if (node.arguments.length !== 1 || !ts.isStringLiteralLike(node.arguments[0]))
+          throw Error('运行产物含未核定的动态模块路径：' + file);
+        imports.add(node.arguments[0].text);
+      }
+      ts.forEachChild(node, inspect);
+    }
+    inspect(tree);
+    for (const specifier of imports) {
+      if (isBuiltin(specifier)) continue;
+      if (specifier === '@prisma/client' || specifier.includes('.prisma/client')) throw Error('运行代码仍引用默认 Client：' + file);
+      resolutions.push({ from: file, specifier });
+      if (specifier.startsWith('.')) {
+        const target = path.posix.normalize(path.posix.join(path.posix.dirname(file), specifier));
+        if (['apps/platform-api/generated/client', 'apps/rental-api/generated/client'].includes(target)) {
+          clients.add(target); continue;
+        }
+        if (!target.startsWith(owner + '/')) throw Error('运行代码跨工作区深层导入：' + file);
+        const resolved = locate(target);
+        if (!resolved) throw Error('运行产物缺少内部依赖：' + file + ' -> ' + specifier);
+        queue.push(resolved); continue;
+      }
+      const name = specifier.startsWith('@') ? specifier.split('/').slice(0, 2).join('/') : specifier.split('/')[0];
+      const declared = { ...metadata.dependencies, ...metadata.optionalDependencies, ...metadata.peerDependencies };
+      if (name !== metadata.name && !Object.hasOwn(declared, name)) throw Error('运行代码使用未声明的依赖：' + file + ' -> ' + name);
+      if (name.startsWith('@rental-os/')) {
+        const pkg = packages.get(name);
+        if (!pkg) throw Error('运行代码引用未选工作区：' + name);
+        const target = pkg.directory + '/' + workspaceExport(pkg.metadata, specifier);
+        if (!files.has(target)) throw Error('正式运行出口未实际构建：' + specifier + ' -> ' + target);
+        queue.push(target);
+      } else {
+        const dependency = lockedDependency(lock, owner, name), locked = lock.packages[dependency];
+        if (!locked) throw Error('运行依赖不在原锁闭包：' + name);
+        if (!metadata.dependencies?.[name] && metadata.peerDependenciesMeta?.[name]?.optional)
+          runtimePeers.set(owner + ':' + name, { owner, name });
+      }
+    }
+  }
+  if (!clients.has('apps/rental-api/generated/client')) throw Error('宿主没有引用所选专属 Client');
+  return { files: seen.size, resolutions, clients: [...clients].sort(), runtimePeers: [...runtimePeers.values()] };
+}
+
+function dockerfile(mode) {
+  const entry = mode === 'enabled' ? 'dist-ai/ai-main.js' : 'dist/main.js';
+  return `# 从本打包上下文构建；不复制作者 node_modules、Windows 引擎或环境文件。\n` +
+    `FROM node:24.13.0-bookworm-slim AS base\n` +
+    `RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates openssl && rm -rf /var/lib/apt/lists/*\n` +
+    `WORKDIR /app\nFROM base AS clients\nCOPY . .\n` +
+    `RUN npm ci --include=dev --ignore-scripts --no-audit --no-fund\n` +
+    `RUN DATABASE_URL=mysql://offline:offline@127.0.0.1:1/rental_os_offline node node_modules/prisma/build/index.js generate --schema apps/platform-api/prisma/schema.prisma && \\\n` +
+    `    DATABASE_URL=mysql://offline:offline@127.0.0.1:1/rental_os_offline node node_modules/prisma/build/index.js generate --schema apps/rental-api/prisma-deployment/schema.prisma\n` +
+    `FROM base AS runtime\nENV NODE_ENV=production RENTAL_AI_MODE=${mode} RENTAL_DEPLOYMENT_LOCK=/app/apps/rental-api/prisma-deployment/core.deployment.lock.json\n` +
+    `COPY . .\nRUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund\n` +
+    `COPY --from=clients /app/apps/platform-api/generated/client ./apps/platform-api/generated/client\n` +
+    `COPY --from=clients /app/apps/rental-api/generated/client ./apps/rental-api/generated/client\n` +
+    `RUN node verify-runtime.cjs\nUSER node\nEXPOSE 3000\nCMD ["node", "apps/rental-api/${entry}"]\n`;
+}
+
+const runtimeVerifier = `'use strict';
+// 镜像构建中的字节与解析预检；不导入应用、不实例化Client、不连接或迁移数据库。
+const fs = require('node:fs'), path = require('node:path');
+const { createHash } = require('node:crypto'), { createRequire } = require('node:module');
+const root = __dirname, receipt = JSON.parse(fs.readFileSync(path.join(root, 'rental-host.context.json'), 'utf8'));
+const digest = bytes => createHash('sha256').update(bytes).digest('hex');
+for (const item of receipt.files) if (digest(fs.readFileSync(path.join(root, item.file))) !== item.sha256)
+  throw Error('镜像输入摘要变化：' + item.file);
+for (const item of receipt.clients) {
+  if (digest(fs.readFileSync(path.join(root, item.directory, 'schema.prisma'))) !== item.schemaSha256)
+    throw Error('镜像生成 Client 与核定 schema 不一致');
+  const metadata = JSON.parse(fs.readFileSync(path.join(root, item.directory, 'package.json'), 'utf8'));
+  if (metadata.version !== receipt.prismaVersion) throw Error('镜像 Client 版本不一致');
+}
+if (fs.existsSync(path.join(root, 'node_modules/.prisma/client'))) throw Error('镜像不接受默认 Client');
+for (const item of receipt.runtime.resolutions) createRequire(path.join(root, item.from)).resolve(item.specifier);
+console.log(JSON.stringify({ status: 'image-preflight-passed', aiMode: receipt.aiMode, applicationStarted: false, deployment: 'pending' }));
+`;
+
+function createRentalHostContext(input) {
+  const api = publicApi(), { aiMode, sourceFiles, rentalFiles, aiFiles, deploymentFiles, ts, selections } = input;
+  if (!['enabled', 'disabled'].includes(aiMode)) throw Error('须明确选择宿主 AI 模式');
+  const lock = api.CoreDeploymentLockSchema.parse(JSON.parse(text(deploymentFiles, 'core.deployment.lock.json')));
+  if (lock.cores.length !== 1 || lock.cores[0].manifest.id !== 'rental'
+    || (lock.dataCapabilities?.length || 0) !== (aiMode === 'enabled' ? 1 : 0)
+    || aiMode === 'enabled' && lock.dataCapabilities[0].id !== 'ai-native'
+    || (aiMode === 'enabled') !== Boolean(aiFiles)) throw Error('部署锁、固定包与显式 AI 选择不一致');
+  const publicSchema = text(sourceFiles, 'apps/platform-api/prisma/schema.prisma');
+  const platform = api.createPublicPlatformDataPlan();
+  const expected = api.createRentalDeploymentFiles({ release: lock.platform, pin: lock.cores[0], coreFiles: rentalFiles,
+    publicSchema, publicMigrations: platform.migrationNames.map((name, index) => ({ name,
+      sql: sourceFiles.get('apps/platform-api/' + platform.data.migrations[index].file) })),
+    ...(aiFiles ? { ai: { release: lock.dataCapabilities[0], files: aiFiles } } : {}) });
+  if (!isDeepStrictEqual(expected.lock, lock) || expected.files.size !== deploymentFiles.size)
+    throw Error('部署材料与原准备结果不一致');
+  for (const [file, bytes] of expected.files) if (!deploymentFiles.has(file) || !Buffer.from(bytes).equals(deploymentFiles.get(file)))
+    throw Error('部署材料缺失或摘要不一致：' + file);
+  const clients = [];
+  for (const [host, mode, schema] of [['platform', 'platform', publicSchema], ['rental', aiMode === 'enabled' ? 'rental-ai' : 'rental', text(deploymentFiles, 'schema.prisma')]]) {
+    const directory = `apps/${host}-api/generated/client`, selected = selections[host];
+    if (!selected || path.resolve(selected.client) !== path.join(root, directory, 'index.d.ts'))
+      throw Error('须选用本宿主实际 generated/client 声明：' + host);
+    const read = file => path.resolve(file) === path.resolve(selected.client) ? selected.declarations
+      : path.resolve(file) === path.join(root, directory, 'schema.prisma') ? selected.schema : undefined;
+    const checked = selectedCompilerOptions(ts, path.join(root, `apps/${host}-api/tsconfig.json`), {}, { client: selected.client, mode }, read);
+    if (selected.schema !== schema) throw Error('构建所选 Client 与部署 schema 不一致：' + host);
+    clients.push({ directory, mode, models: checked.models, schemaSha256: hash(Buffer.from(schema)) });
+  }
+  const originalLock = JSON.parse(text(sourceFiles, 'package-lock.json'));
+  const workspaces = selectWorkspaces(originalLock, directory => JSON.parse(text(
+    directory === 'packages/rental-core' ? rentalFiles : directory === 'packages/ai-native-data' && aiFiles ? aiFiles : sourceFiles,
+    ['packages/rental-core', ...(aiFiles ? ['packages/ai-native-data'] : [])].includes(directory) ? 'package.json' : directory + '/package.json')), aiMode);
+  const files = new Map();
+  for (const [directory] of workspaces) {
+    const fixed = directory === 'packages/rental-core' ? rentalFiles : directory === 'packages/ai-native-data' && aiFiles ? aiFiles : undefined;
+    if (fixed) for (const [file, bytes] of fixed) files.set(directory + '/' + file, bytes);
+    else for (const [file, bytes] of sourceFiles) if (file.startsWith(directory + '/')) {
+      const relative = file.slice(directory.length + 1);
+      if (directory === 'apps/rental-api' && aiMode === 'disabled' && relative.startsWith('dist-ai/')) continue;
+      if (['package.json', 'README.md', 'LICENSE'].includes(relative) || /^dist(?:-[a-z0-9-]+)?\/.*\.(?:js|cjs|json|d\.ts)$/u.test(relative)
+        || directory === 'apps/platform-api' && relative.startsWith('prisma/')) files.set(file, bytes);
+    }
+    if (!files.has(directory + '/LICENSE')) files.set(directory + '/LICENSE', Buffer.from(text(sourceFiles, 'LICENSE')));
+  }
+  for (const [file, bytes] of deploymentFiles) files.set('apps/rental-api/prisma-deployment/' + file, bytes);
+  files.set('LICENSE', Buffer.from(text(sourceFiles, 'LICENSE')));
+  const entry = aiMode === 'enabled' ? 'apps/rental-api/dist-ai/ai-main.js' : 'apps/rental-api/dist/main.js';
+  const runtime = checkRuntimeClosure(files, workspaces, originalLock, entry, ts);
+  const projected = projectHostLock(originalLock, workspaces, aiMode, runtime.runtimePeers);
+  for (const item of runtime.resolutions) if (!item.specifier.startsWith('.') && !item.specifier.startsWith('@rental-os/')) {
+    const name = item.specifier.startsWith('@') ? item.specifier.split('/').slice(0, 2).join('/') : item.specifier.split('/')[0];
+    const owner = [...workspaces.keys()].find(directory => item.from.startsWith(directory + '/'));
+    const locked = projected.lock.packages[lockedDependency(projected.lock, owner, name)];
+    if (!locked || locked.dev) throw Error('运行依赖不在生产锁闭包：' + name);
+  }
+  files.set('package.json', json(projected.root)); files.set('package-lock.json', json(projected.lock));
+  files.set('Dockerfile', Buffer.from(dockerfile(aiMode)));
+  files.set('.dockerignore', Buffer.from('**/node_modules\n**/generated\n**/.git\n**/.env\n**/.env.*\ndocs\noutput\n'));
+  files.set('verify-runtime.cjs', Buffer.from(runtimeVerifier));
+  files.set('README.md', Buffer.from('# 独立 Rental 宿主镜像上下文\n\n' +
+    '本目录消费固定 Rental 包、所选 AI 数据包及原 prepared 锁/迁移。rental-host.context.json 记录实际字节摘要；不将作者工作区或包版本名当作已部署来源。\n\n' +
+    '在目标 Linux 平台执行 `docker build --target runtime -t rental-host .`。构建按原 npm 锁安装依赖，并在镜像内用 Prisma 5.22.0 分别生成公共和所选宿主 Client；不会复制 Windows 引擎或默认 Client。外部镜像、apt/npm/引擎下载与实际构建须在部署环境核验。\n\n' +
+    `镜像启动入口固定为 ${entry}，AI=${aiMode}。运行前由部署负责人配置 DATABASE_URL、AUTH_TOKEN_SECRET 及必要的原集成配置，沿原迁移账/物理观察办理数据库准备。候选材料位于 apps/rental-api/prisma-deployment；不得用它替代迁移收据。\n\n` +
+    '打包和镜像预检均不启动应用、连接数据库、执行迁移或供应商动作。当前 imageBuild=not-run、deployment=pending；真实安装、镜像、数据库及业务验收分别办理。\n'));
+  const receipt = { format: 'rental-host-context-1', aiMode, imageBuild: 'not-run', deployment: 'pending',
+    target: 'linux-bookworm', prismaVersion: '5.22.0', entry, clients,
+    deploymentLockSha256: hash(deploymentFiles.get('core.deployment.lock.json')), coreSha256: lock.cores[0].sha256,
+    ...(aiFiles ? { aiDataSha256: lock.dataCapabilities[0].sha256 } : {}),
+    originalNpmLockSha256: hash(sourceFiles.get('package-lock.json')), runtime,
+    files: [...files].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([file, bytes]) => ({ file, sha256: hash(bytes) })) };
+  files.set('rental-host.context.json', json(receipt));
+  return { files, receipt, ...api.createCoreArchive(files) };
+}
+
+function collectInputs(options) {
+  const api = publicApi(), sourceFiles = new Map([['package-lock.json', readOrdinary(path.join(root, 'package-lock.json'))],
+    ['LICENSE', readOrdinary(path.join(root, 'LICENSE'))]]);
+  const deploymentFiles = readTree(options.deployment, file => file === 'schema.prisma' || file === 'core.deployment.lock.json'
+    || file === 'migrations/migration_lock.toml' || /^migrations\/[^/]+\/migration\.sql$/u.test(file));
+  const lock = api.CoreDeploymentLockSchema.parse(JSON.parse(text(deploymentFiles, 'core.deployment.lock.json')));
+  ordinaryDirectories(options.rentalPackage);
+  const rentalFiles = api.readCorePackageFiles(options.rentalPackage, api.CORE_ARCHIVE_LIMITS.fileBytes, api.CORE_ARCHIVE_LIMITS.totalBytes);
+  const aiFiles = options.aiDataPackage && api.readPlatformDataCapabilityPackage(options.aiDataPackage, lock.dataCapabilities?.[0]).files;
+  const workspaces = selectWorkspaces(JSON.parse(text(sourceFiles, 'package-lock.json')), directory => {
+    const bytes = directory === 'packages/rental-core' ? rentalFiles.get('package.json')
+      : directory === 'packages/ai-native-data' && aiFiles ? aiFiles.get('package.json') : readOrdinary(path.join(root, directory, 'package.json'));
+    if (!bytes) throw Error('固定包缺少正式 package.json');
+    sourceFiles.set(directory + '/package.json', bytes); return JSON.parse(bytes.toString('utf8'));
+  }, options.aiMode);
+  for (const directory of workspaces.keys()) {
+    if (directory === 'packages/rental-core' || directory === 'packages/ai-native-data' && aiFiles) continue;
+    const absolute = path.join(root, directory); ordinaryDirectories(absolute);
+    for (const entry of fs.readdirSync(absolute, { withFileTypes: true })) {
+      if (/^dist(?:-[a-z0-9-]+)?$/u.test(entry.name)) {
+        if (entry.isSymbolicLink() || !entry.isDirectory()) throw Error('编译产物须为普通目录');
+        for (const [file, bytes] of readTree(path.join(absolute, entry.name), file => /\.(?:js|cjs|json|d\.ts)$/u.test(file)))
+          sourceFiles.set(directory + '/' + entry.name + '/' + file, bytes);
+      } else if (['LICENSE', 'README.md'].includes(entry.name)) sourceFiles.set(directory + '/' + entry.name, readOrdinary(path.join(absolute, entry.name)));
+    }
+  }
+  for (const file of ['prisma/schema.prisma', ...api.createPublicPlatformDataPlan().data.migrations.map(item => item.file)])
+    sourceFiles.set('apps/platform-api/' + file, readOrdinary(path.join(root, 'apps/platform-api', file)));
+  const selections = {};
+  for (const [host, client] of [['rental', options.client], ['platform', options.platformClient]]) selections[host] = {
+    client: path.resolve(client), declarations: readOrdinary(client).toString('utf8'), schema: readOrdinary(path.join(path.dirname(client), 'schema.prisma')).toString('utf8') };
+  const requireDeps = createRequire(path.join(options.deps, 'typescript/package.json'));
+  const ts = requireDeps('typescript');
+  if (ts.version !== JSON.parse(text(sourceFiles, 'package-lock.json')).packages['node_modules/typescript']?.version)
+    throw Error('静态解析器与本树原锁不一致');
+  return { aiMode: options.aiMode, sourceFiles, rentalFiles, aiFiles, deploymentFiles, selections, ts };
+}
+
+function writeArchive(output, bytes) {
+  const file = path.resolve(output); ordinaryDirectories(path.dirname(file));
+  if (!file.endsWith('.tgz')) throw Error('输出须为新的 .tgz 文件');
+  let descriptor, identity, completed = false;
+  try {
+    descriptor = fs.openSync(file, 'wx'); identity = fs.fstatSync(descriptor);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const written = fs.writeSync(descriptor, bytes, offset, bytes.length - offset);
+      if (!written) throw Error('归档写入未前进');
+      offset += written;
+    }
+    fs.closeSync(descriptor); descriptor = undefined;
+    ordinaryDirectories(path.dirname(file));
+    const current = fs.lstatSync(file);
+    if (current.isSymbolicLink() || current.dev !== identity.dev || current.ino !== identity.ino
+      || current.birthtimeMs !== identity.birthtimeMs || hash(readOrdinary(file, 128 * 1024 * 1024)) !== hash(bytes)) throw Error('输出身份或内容变化');
+    completed = true;
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+    if (identity && !completed) {
+      ordinaryDirectories(path.dirname(file)); const current = fs.lstatSync(file);
+      if (current.isSymbolicLink() || current.dev !== identity.dev || current.ino !== identity.ino || current.birthtimeMs !== identity.birthtimeMs)
+        throw Error('输出身份变化，停止清理');
+      fs.unlinkSync(file);
+    }
+  }
+}
+
+function main(args) {
+  const options = parseArguments(args);
+  ordinaryDirectories(path.dirname(options.output));
+  if (fs.existsSync(options.output)) throw Error('目标归档已存在，不覆盖用户产物');
+  if (within(path.join(root, 'docs'), options.output)) throw Error('发行产物不能写入私有资料目录');
+  const result = createRentalHostContext(collectInputs(options)); writeArchive(options.output, result.bytes);
+  return { status: 'packaged', aiMode: options.aiMode, output: options.output, sha256: result.sha256,
+    files: result.files.size, bytes: result.bytes.length, imageBuild: 'not-run', deployment: 'pending' };
+}
+if (require.main === module) {
+  try { process.stdout.write(JSON.stringify(main(process.argv.slice(2))) + '\n'); }
+  catch (error) { process.stderr.write((error instanceof Error ? error.message : '独立宿主打包失败') + '\n'); process.exitCode = 1; }
+}
+module.exports = { parseArguments, createRentalHostContext, collectInputs, checkRuntimeClosure, writeArchive, main };

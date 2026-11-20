@@ -68,6 +68,23 @@ const SETTINGS_TASK_CONTRACTS: Record<string, readonly [string, string]> = {
   readSettingsTaskPolicyOperation: ['AiApprovedSettingsTaskPolicyOperationReadDraft', 'AiApprovedSettingsTaskPolicyOperationDraft']
 };
 
+// Recovery uses the original transition receipts, without constructing model
+// admission or claiming that cancellation reverses a business operation.
+const cancellationIntentReceipt = AI_LEAF_COMPONENT_SCHEMAS.AiSceneModelCancelResponseDraft.properties!.receipt;
+const cancellationSettledReceipt = AI_LEAF_COMPONENT_SCHEMAS.AiSceneModelReconcileResponseDraft.oneOf![1].properties!.receipt;
+const RECOVERY_RESPONSE_SCHEMAS: Record<string, SchemaObject> = {
+  AiOriginalCancellationIntentResponse: objectOf({ receipt: cancellationIntentReceipt,
+    cancellation: { type: 'string', enum: ['requested_not_rollback'] }, settlement: { nullable: true, enum: [null] },
+    settlementState: { type: 'string', enum: ['not_attempted'] } }, ['receipt', 'cancellation', 'settlement', 'settlementState'], false),
+  AiOriginalUnstartedCancellationResponse: objectOf({ original: ref('AiSceneRequestReadDraft'), receipt: cancellationSettledReceipt,
+    cancellation: { type: 'string', enum: ['unstarted_task_cancelled_not_business_rollback'] },
+    automaticRetry: { type: 'boolean', enum: [false] } }, ['original', 'receipt', 'cancellation', 'automaticRetry'], false),
+  AiOriginalInputWaitCancellationResponse: objectOf({ original: ref('AiSceneRequestReadDraft'), receipt: cancellationSettledReceipt,
+    cancellation: { type: 'string', enum: ['released_input_wait_cancelled_not_business_rollback'] },
+    resourceRelease: { type: 'string', enum: ['not_attempted'] }, automaticRetry: { type: 'boolean', enum: [false] } },
+    ['original', 'receipt', 'cancellation', 'resourceRelease', 'automaticRetry'], false)
+};
+
 export const AI_HTTP_OPERATIONS: ContractOperation[] = [
 ...Object.entries(AI_TASK_OPENING_PROPOSAL_HTTP_CONTRACTS).map(([action, contract]) => ({
     method: 'post' as const, path: `/api/${AI_TASK_OPENING_PROPOSAL_HTTP_DRAFT.basePath}/${action}`, tag: 'AI Native',
@@ -775,6 +792,15 @@ export const AI_HTTP_OPERATIONS: ContractOperation[] = [
     permissions: ['rental-os:order:create'], authRequired: true,
     summary: 'Explicit original quote clarification host, separately enabled by server configuration. Uses the existing persistent input runner, current owner/action/plan policy, Gateway and single ledger; no caller prompt/provider/lease. Answers and model completion are not quote selection or order approval. Confirmation uses original Core quote operation; order execution remains the independent human-selection/approval host. All quote execution/input/review/confirmation/original-receipt actions have named closed responses. The review carries current guarded parameters and unconfirmed field provenance; a malformed post-confirmation reply remains unknown and is read by its original clarified-quote receipt. Recovery never redispatches unknown calls.' })),
 ...([
+    [AI_SCENE_MODEL_HTTP_DRAFT.requestCancellationIntent, 'AiOriginalCancellationIntentResponse'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.settleUnstartedCancellation, 'AiOriginalUnstartedCancellationResponse'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.settleReleasedInputCancellation, 'AiOriginalInputWaitCancellationResponse']
+  ] as const).map(([action, responseSchema]) => ({ method: 'post' as const,
+    path: `/api/${AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${action}`, tag: 'AI Native',
+    operationId: `recoverOriginalAiTask_${action.replace(/\//gu, '_')}`, requestSchema: 'AiSceneModelCancelDraft', responseSchema,
+    successStatus: 200 as const, authRequired: true, permissions: ['rental-os:order:view'],
+    summary: '按原请求和预期修订写入取消意图或收口原未启动/已释放输入等待任务。当前原身份、场景、资源和 transition_task 策略仍须通过；不新建模型准入，不释放资金，不把取消视为业务回滚。失回复只读取同一原取消收据。' })),
+...([
     [AI_SCENE_MODEL_HTTP_DRAFT.readTaskPage, AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readTaskPage.request],
     [AI_SCENE_MODEL_HTTP_DRAFT.readTaskEvents, AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readTaskEvents.request],
     [AI_SCENE_MODEL_HTTP_DRAFT.readTaskUsage, 'AiSceneTaskUsageReadDraft'],
@@ -822,6 +848,7 @@ export const AI_HTTP_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
 ...AI_NATIVE_COMPONENT_SCHEMAS,
 ...AI_TASK_DRAFT_COMPONENT_SCHEMAS,
 ...AI_LEAF_COMPONENT_SCHEMAS,
+...RECOVERY_RESPONSE_SCHEMAS,
 ...DESKTOP_BUSINESS_SCHEMAS,
 ...AI_CREDIT_COMPONENT_SCHEMAS
 };

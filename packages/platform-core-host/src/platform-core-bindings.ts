@@ -9,11 +9,12 @@ import { CoreBindingService, CoreAccessError, type CoreDeploymentAvailability } 
 import { createMysqlCoreBindings } from "@rental-os/core-host/mysql-bindings";
 import type { SystemUserRow } from "@rental-os/platform-contracts";
 import { PlatformPrincipalAuthority } from "@rental-os/platform-server/principal";
+import { hasEffectivePermission } from "@rental-os/platform-server/permission-match";
 import { PlatformCoreAccess } from "./platform-core-access";
 
 function managesTenantCores(user: SystemUserRow): boolean {
   return user.isSaasAdmin !== true && (user.isPlatformAdmin === true
-    || user.dataScope === "all" && user.permissions.includes("system:user:manage"));
+    || user.dataScope === "all" && hasEffectivePermission(user.permissions, "system:user:manage"));
 }
 
 export function composePlatformCoreBindings<Tx extends PlatformCoreTransaction>(input: {

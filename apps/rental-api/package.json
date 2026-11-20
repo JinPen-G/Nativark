@@ -33,13 +33,13 @@
   },
   "scripts": {
     "prebuild": "npm run build -w @rental-os/platform-api && npm run build -w @rental-os/rental-core && npm run build -w @rental-os/ai-native-data",
-    "build": "tsc -p tsconfig.json",
+    "build": "node ../../scripts/build-selected-prisma.cjs --project tsconfig.json --mode rental",
     "prebuild:ai": "npm run prebuild && npm run build -w @rental-os/ai-native-server",
-    "build:ai": "tsc -p tsconfig.ai.json",
+    "build:ai": "node ../../scripts/build-selected-prisma.cjs --project tsconfig.ai.json --mode rental-ai",
     "prelint": "npm run prebuild",
-    "lint": "tsc -p tsconfig.json --noEmit",
+    "lint": "node ../../scripts/build-selected-prisma.cjs --project tsconfig.json --mode rental --noEmit",
     "prelint:ai": "npm run prebuild:ai",
-    "lint:ai": "tsc -p tsconfig.ai.json --noEmit",
+    "lint:ai": "node ../../scripts/build-selected-prisma.cjs --project tsconfig.ai.json --mode rental-ai --noEmit",
     "start": "node dist/main.js",
     "start:ai": "node dist-ai/ai-main.js",
     "prepare:deployment": "node dist/prepare-deployment.js"

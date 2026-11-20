@@ -72,9 +72,15 @@ npm run build:miniprogram
 
 ## 发布构建
 
+发布前由受控发行和安装准备流程提供本树内的完整 Rental 标准包目录与正式 `CoreDeploymentLock`。构建工具使用已构建的公共合同与 Rental 宿主正式出口，复用原 `requireCorePackagePin` 和宿主逐条旧路径许可，校验包摘要、来源、版本及三个 Native 的 JS／声明入口。包选择与锁必须同时提供，缺失或不一致时在清理输出前拒绝。
+
 ```bash
-npm run build:miniprogram:release
+npm run build -w @rental-os/miniprogram -- --release --rental-package <待部署目录> --rental-lock <组合锁.json>
 ```
+
+同一选择也可用于 `--check` 或本机联调。Native 声明直接定位到安装包的 `dist-clients/`，微信输出按原正式出口复制同一 JS 闭包与 MIT 许可。Shared 公共声明保持任务内私有编译，企业收据匹配函数取锁定包的已编译实现。实例、会话、公开配置、页面资源与微信 I/O 继续由本端供给。
+
+标准包模式的 AI 合同从正式 `./contracts`、`./client-contracts` 和 `./enterprise-order-delegation` JS 出口及其已编译相对依赖打包，读取文件须在锁定清单内。原 Shared 白名单、公开出口、资源上限和无宿主全局变量的运行检查继续生效。发布收尾重新校验安装包摘要，失败时清理本次输出与私有声明。
 
 发布构建强制 `apiOrigin` 为 HTTPS 根地址（任何 `http`、含回环一律拒绝），且不带 `allowLocalApi`。换租户或正式发布时，修改 `src/config/public.ts` 的 `tenantCode`、`apiOrigin`、`appId`，或用环境变量 `MINIPROGRAM_TENANT_CODE` / `MINIPROGRAM_API_ORIGIN` / `MINIPROGRAM_APP_ID`（仅在显式设置时覆盖，供 CI 批量打包）。
 

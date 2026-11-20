@@ -106,6 +106,8 @@ function createMemoryBuild(build) {
     if (file.endsWith('.json')) return JSON.parse(api.readFileSync(file, 'utf8'));
     const module = { exports: {} }; modules.set(file, module);
     const requireMemory = name => {
+      if (name === '@prisma/client' || /(?:^|\/)\.prisma\/client(?:\/|$)/u.test(name))
+        throw Error('正式发行运行时禁止默认生成 Client：' + name);
       if (['fs', 'node:fs'].includes(name)) return api;
       if (['child_process', 'node:child_process'].includes(name)) return new Proxy({}, {
         get: () => () => { throw Error('内存构建拒绝启动进程'); }

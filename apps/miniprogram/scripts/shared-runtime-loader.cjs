@@ -2,6 +2,7 @@
 // Only the build's allowlisted shared source reaches this loader. Type safety
 // is checked separately by the original private-declaration/mini tsc pipeline.
 module.exports = function compileSharedRuntime(source) {
+  if (this.resourcePath.endsWith('.js')) return source;
   const ts = require('typescript');
   const { rentalEntry } = this.getOptions();
   if (this.resourcePath === rentalEntry) {

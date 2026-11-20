@@ -329,7 +329,7 @@ export const AI_NATIVE_CLIENT_PUBLIC_PROVIDERS: FactoryProvider[] = ([
 export const AI_NATIVE_MODEL_SETTINGS_PROVIDER: FactoryProvider = {
   provide: AI_NATIVE_MODEL_SETTINGS_REQUESTS, inject: [AI_NATIVE_BODY_DATABASE, AuthService, ApiAuthGuard, SecretBox],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, secrets: SecretBox) =>
-    composeRequestBoundModelSettings({ db, auth, guard, secrets, discovery: createNativeModelEgressTransport(5000) })
+    composeRequestBoundModelSettings({ db, auth, guard, secrets, transactions: { auth }, discovery: createNativeModelEgressTransport(5000) })
 };
 export const AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION = Symbol('AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION');
 export const AI_NATIVE_TASK_CENTER_PROVIDER: FactoryProvider = {

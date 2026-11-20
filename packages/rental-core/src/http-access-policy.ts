@@ -597,7 +597,8 @@ export function compileRentalHttpAccessPolicy(input: {
           }
           const readMethod = method === "GET" || method === "HEAD";
           const readReview = review.kind === "buffered-read" || review.kind === "audited-read" || review.kind === "maintained-read";
-          if (review.kind !== "pending" && (readMethod && !readReview || !readMethod && readReview && !(method === "POST" && review.kind === "buffered-read"))) {
+          if (review.kind !== "pending" && (readMethod && !readReview || !readMethod && readReview
+            && !(method === "POST" && (review.kind === "buffered-read" || review.kind === "audited-read")))) {
             throw new Error(`Rental HTTP 审定类型与原方法不符：${controller.name}.${handlerName}`);
           }
           const recoveryKind = recoveryHandlers.get(handler);

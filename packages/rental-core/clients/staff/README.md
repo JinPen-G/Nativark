@@ -126,7 +126,19 @@ npm run typecheck -w @rental-os/staff-miniprogram
 
 员工微信构建从本树源码与实际包声明在单一任务临时目录编译当前 Shared 声明和完整 Native 工厂。公共打包函数将已声明入口的相对 CommonJS 闭包及原 MIT 许可带入 `dist/vendor/rental-core/`，原宿主的包导入改为该发布包内路径。最终所有 JS 的 `require` 均须解析到本包 JS/JSON，缺出口、缺文件、外部或动态依赖会停止构建。构建和 `--check` 退出时释放私有编译产物。[打包实现](../../../../scripts/miniprogram-shared-types.cjs) · [微信构建入口](../../../../apps/staff-miniprogram/scripts/build.cjs)
 
-发布仍用 `npm run build:staff-miniprogram:release`，沿原公开 API 与 AppID，租户在登录时选择。隔离验证可在原命令后传 `--out-dir`，目标限于本树 `output/.tmp/<任务>/<员工端>`；失败清除本次输出，成功产物由创建者按交付用途保留或清理。原 AI webpack 沿受控源闭包生成动作及目录运行时。[AI 运行时](../../../../scripts/miniprogram-ai-runtime.cjs)
+发布从完整标准包与正式组合锁读取 Native 产物。先经同一[安装准备](../../../core-contracts/src/install.ts)校验并保留待部署目录，公共合同及 Rental 宿主正式工具出口须完成构建。在仓库根执行下面的原宿主入口。
+
+```bash
+npm run build -w @rental-os/staff-miniprogram -- --release --rental-package <待部署目录> --rental-lock <组合锁.json>
+```
+
+`--rental-package` 和 `--rental-lock` 路径相对当前工作树根解析，目录与锁须留在本树且为普通路径。原 `requireCorePackagePin` 核对同一标准清单、归档摘要、来源和版本，旧 API 许可来自真实 Rental 宿主。三个 Native 的 JS／声明须匹配正式 `dist-clients/` 出口，缺包或不匹配时在清理输出前拒绝。
+
+带包选择的 `--check` 与构建直接消费安装包声明，微信运行闭包逐字节复制同一包内 JS 与原许可。公共 Shared 声明仍在任务内私有生成，其 Rental 合同引用定位到锁定包声明，客户原收据函数从锁定包已编译文件提取。构建结束再次核包摘要，防止准备后字节变化。
+
+标准包模式的 AI 合同从正式 `./contracts`、`./client-contracts` 和 `./enterprise-order-delegation` JS 出口及其已编译相对依赖打包，读取文件须在锁定清单内。原 Shared 白名单、公开出口、资源上限和无宿主全局变量的运行检查继续生效。发布收尾重新校验安装包摘要，失败时清理本次输出与私有声明。
+
+发布沿原公开 API 与 AppID 配置，客户端保留商户配置，员工租户在登录时选择。隔离验证可在原命令后传 `--out-dir`，目标限于本树 `output/.tmp/<任务>/<员工端>`；失败清除本次输出，成功产物由创建者按交付用途保留或清理。原 AI webpack 沿受控源闭包生成动作及目录运行时。[AI 运行时](../../../../scripts/miniprogram-ai-runtime.cjs)
 
 ## 调用链
 

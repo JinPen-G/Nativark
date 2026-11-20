@@ -11,10 +11,12 @@ import { RentalHttpExtensionsModule } from "@rental-os/rental-core/http-extensio
 import { RentalCustomersHttpModule } from "@rental-os/rental-core/http-customers-module";
 import { RentalWorkspacesHttpModule } from "@rental-os/rental-core/http-workspaces-module";
 import { createRentalAuthorization } from "@rental-os/rental-core/http-auth";
+import { RENTAL_STAFF_INSPECTION_EVIDENCE, type RentalStaffInspectionEvidence } from "@rental-os/rental-core/http-staff-uploads";
+import type { RentalHttpAccessPolicy } from "@rental-os/rental-core/http-access-policy";
 import * as shared from "@rental-os/shared";
 import { RentalDatabaseClient, RentalDatabaseModule } from "./database";
 import { composeRentalApplication, type RentalHostAssembly } from "./assembly";
-import { createRentalHttpRequestScope } from "./http-request-scope";
+import { createRentalHttpRequestScope, type RentalAiHttpRequestScope } from "./http-request-scope";
 import { createRentalHttpApplicationViews } from "./http-application-views";
 import { RentalApplicationLifecycle } from "./lifecycle";
 import { createRentalHostHttpPolicy } from "./http-policy";
@@ -29,49 +31,70 @@ const HTTP_APPLICATIONS = Symbol("rental.host.http-applications");
 class RentalAssemblyModule {}
 
 @Module({})
+class RentalHttpApplicationsModule {}
+
+/** 仅独立 AI 宿主提供此组合；公共与无 AI 入口不导入可选 Runtime。 */
+export interface RentalAiHostModule<Host extends RentalHostAssembly> {
+  register(assembly: DynamicModule): DynamicModule;
+  requestScope(host: Host, policy: RentalHttpAccessPolicy): RentalAiHttpRequestScope;
+}
+
+export function createRentalHostModule<Host extends RentalHostAssembly>(input: {
+  lock: CoreDeploymentLock;
+  assemble(database: RentalDatabaseClient, configuration: ConfigService): Host;
+  createPolicy(authorization: ReturnType<typeof createRentalAuthorization>): RentalHttpAccessPolicy;
+  openApi(lock: CoreDeploymentLock, policy: RentalHttpAccessPolicy): ReturnType<typeof createRentalHostOpenApi>;
+  ai?: RentalAiHostModule<Host>;
+}): DynamicModule {
+  const policy = input.createPolicy(createRentalAuthorization(shared));
+  // 核查不创建 Client，不预热；只有真实 handler 与审定接点对应才接受装配。
+  policy.assertReviewed();
+  const assembly: DynamicModule = { module: RentalAssemblyModule,
+    imports: [ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }), RentalDatabaseModule],
+    providers: [
+      { provide: RENTAL_HOST_ASSEMBLY, inject: [RentalDatabaseClient, ConfigService], useFactory: input.assemble },
+      { provide: RENTAL_HTTP_REQUEST_SCOPE, inject: [RENTAL_HOST_ASSEMBLY],
+        useFactory: (host: Host) => {
+          const currentPolicy = input.createPolicy(host.authorization);
+          return createRentalHttpRequestScope({ access: host.access, publicAccess: host.publicAccess,
+            callbackAccess: host.callbackAccess, isClientPublicRoute: host.authorization.isClientPublicRoute,
+            policy: currentPolicy, routesToPlatform: host.platform.routesToPlatform,
+            ...(input.ai ? { ai: input.ai.requestScope(host, currentPolicy) } : {}) });
+        } },
+      { provide: RentalApplicationLifecycle, inject: [RENTAL_HOST_ASSEMBLY], useFactory: (host: Host) => host.lifecycle }
+    ], exports: [RENTAL_HOST_ASSEMBLY, RENTAL_HTTP_REQUEST_SCOPE] };
+  const ai = input.ai?.register(assembly);
+  const httpApplications: DynamicModule = { module: RentalHttpApplicationsModule,
+    imports: [assembly, ...(ai ? [ai] : [])], providers: [{ provide: HTTP_APPLICATIONS,
+      inject: [RENTAL_HOST_ASSEMBLY, { token: RENTAL_STAFF_INSPECTION_EVIDENCE, optional: true }],
+      useFactory: (host: Host, evidence?: RentalStaffInspectionEvidence) => {
+        if (Boolean(evidence) !== Boolean(ai)) throw new Error("Rental HTTP 与可选 AI 检查参加者不属于同一组合");
+        return createRentalHttpApplicationViews({ ...host.http,
+          staff: { ...host.http.staff, inspectionEvidence: evidence } });
+      } }], exports: [HTTP_APPLICATIONS] };
+  const core = CoreHostModule.register({ imports: [assembly], inject: [RENTAL_HOST_ASSEMBLY],
+    useFactory: (host: Host) => host.core });
+  return { module: RentalAppModule, imports: [assembly, httpApplications, core,
+    PlatformServerModule.register({ imports: [assembly, RentalDatabaseModule, core], inject: [RentalDatabaseClient],
+      useFactory: (database: RentalDatabaseClient) => database,
+      applicationsProvider: { provide: "rental.platform.applications", inject: [RENTAL_HOST_ASSEMBLY],
+        useFactory: (host: Host) => host.platform }, openApiDocument: input.openApi(input.lock, policy) }),
+    RentalHttpModule.registerFactory({ imports: [httpApplications], inject: [HTTP_APPLICATIONS],
+      useFactory: (http: ReturnType<typeof createRentalHttpApplicationViews>) => http }),
+    RentalPaymentsHttpModule.registerFactory({ imports: [assembly, httpApplications], inject: [RENTAL_HOST_ASSEMBLY, HTTP_APPLICATIONS],
+      useFactory: (host: Host, http: ReturnType<typeof createRentalHttpApplicationViews>) => ({ ...host.payments, core: http.rental.core }) }),
+    RentalHttpExtensionsModule.registerFactory({ imports: [assembly], inject: [RENTAL_HOST_ASSEMBLY], useFactory: (host: Host) => host.extensions }),
+    RentalCustomersHttpModule.registerFactory({ imports: [assembly], inject: [RENTAL_HOST_ASSEMBLY], useFactory: (host: Host) => host.customers }),
+    RentalWorkspacesHttpModule.registerFactory({ imports: [assembly], inject: [RENTAL_HOST_ASSEMBLY], useFactory: (host: Host) => host.workspaces })
+  ] };
+}
+
+@Module({})
 export class RentalAppModule {
   static register(options: { lock: CoreDeploymentLock; aiMode: "disabled" }): DynamicModule {
     if (options?.aiMode !== "disabled") throw new Error("当前独立宿主尚未装配启用 AI 所需的原参加者");
-    const authorization = createRentalAuthorization(shared);
-    const policy = createRentalHostHttpPolicy(authorization);
-    // 检查只用已加载的真实处理器元数据，不创建 Client、不预热，也不给请求提供跳过开关。
-    policy.assertReviewed();
-    const assembly: DynamicModule = { module: RentalAssemblyModule,
-      imports: [ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }), RentalDatabaseModule],
-      providers: [
-        { provide: RENTAL_HOST_ASSEMBLY, inject: [RentalDatabaseClient, ConfigService],
-          useFactory: (database: RentalDatabaseClient, configuration: ConfigService) =>
-            composeRentalApplication({ database, configuration, ...options }) },
-        { provide: HTTP_APPLICATIONS, inject: [RENTAL_HOST_ASSEMBLY],
-          useFactory: (host: RentalHostAssembly) => createRentalHttpApplicationViews(host.http) },
-        { provide: RENTAL_HTTP_REQUEST_SCOPE, inject: [RENTAL_HOST_ASSEMBLY],
-          useFactory: (host: RentalHostAssembly) => createRentalHttpRequestScope({ access: host.access,
-            publicAccess: host.publicAccess, callbackAccess: host.callbackAccess, isClientPublicRoute: host.authorization.isClientPublicRoute,
-            policy: createRentalHostHttpPolicy(host.authorization),
-            routesToPlatform: host.platform.routesToPlatform }) },
-        { provide: RentalApplicationLifecycle, inject: [RENTAL_HOST_ASSEMBLY],
-          useFactory: (host: RentalHostAssembly) => host.lifecycle }
-      ], exports: [RENTAL_HOST_ASSEMBLY, HTTP_APPLICATIONS, RENTAL_HTTP_REQUEST_SCOPE] };
-    const core = CoreHostModule.register({ imports: [assembly], inject: [RENTAL_HOST_ASSEMBLY],
-      useFactory: (host: RentalHostAssembly) => host.core });
-    return { module: RentalAppModule, imports: [
-      assembly, core,
-      PlatformServerModule.register({ imports: [assembly, RentalDatabaseModule, core], inject: [RentalDatabaseClient],
-        useFactory: (database: RentalDatabaseClient) => database,
-        applicationsProvider: { provide: "rental.platform.applications", inject: [RENTAL_HOST_ASSEMBLY],
-          useFactory: (host: RentalHostAssembly) => host.platform },
-        openApiDocument: createRentalHostOpenApi(options.lock, policy) }),
-      RentalHttpModule.registerFactory({ imports: [assembly], inject: [HTTP_APPLICATIONS],
-        useFactory: (http: ReturnType<typeof createRentalHttpApplicationViews>) => http }),
-      RentalPaymentsHttpModule.registerFactory({ imports: [assembly], inject: [RENTAL_HOST_ASSEMBLY, HTTP_APPLICATIONS],
-        useFactory: (host: RentalHostAssembly, http: ReturnType<typeof createRentalHttpApplicationViews>) =>
-          ({ ...host.payments, core: http.rental.core }) }),
-      RentalHttpExtensionsModule.registerFactory({ imports: [assembly], inject: [RENTAL_HOST_ASSEMBLY],
-        useFactory: (host: RentalHostAssembly) => host.extensions }),
-      RentalCustomersHttpModule.registerFactory({ imports: [assembly], inject: [RENTAL_HOST_ASSEMBLY],
-        useFactory: (host: RentalHostAssembly) => host.customers }),
-      RentalWorkspacesHttpModule.registerFactory({ imports: [assembly], inject: [RENTAL_HOST_ASSEMBLY],
-        useFactory: (host: RentalHostAssembly) => host.workspaces })
-    ] };
+    return createRentalHostModule({ lock: options.lock,
+      assemble: (database, configuration) => composeRentalApplication({ database, configuration, ...options }),
+      createPolicy: createRentalHostHttpPolicy, openApi: createRentalHostOpenApi });
   }
 }

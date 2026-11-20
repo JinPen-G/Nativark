@@ -8,7 +8,7 @@ Nativark 为开发者和开发 AI 提供构建业务应用所需的公共基础�
 
 开源主体是 Nativark 底座。**Rental Core 将作为首个开源业务 Core 示范**，展示如何在公共底座上构建完整业务、接入客户端并向 Agent 提供受控工具。后续可按同一接入边界扩展 CRM、TMS 等业务 Core。
 
-当前仓库正在从 Rental OS 组合工程中抽离公共底座。原开发命令运行底座与 Rental Core 的组合；独立公共 API 与后台已提供初始化、认证、租户 / 人员角色 / 组织管理、安全与外观设置、订阅、字典与编号、成员邀请和邮件目录及 Core 授权接点。完整独立运行、Rental 标准装配和多 Core 验收继续由平台接入专项推进。源码目录、npm 包名及配置变量目前沿用原工程标识。[独立公共 API](apps/platform-api/README.md) · [公共后台](apps/platform-admin/README.md)
+公共底座、Rental Core 和宿主装配分别维护。默认公共 API 与后台提供初始化、认证、租户 / 人员角色 / 组织管理、安全与外观设置、订阅、字典与编号、成员邀请和邮件目录；业务 Core 由宿主显式选择。Rental 示范提供独立 API、各端页面与客户端，可另外选择 AI Native 组合。原 Rental OS 开发入口继续消费这些包的同一实现。源码目录、npm 包名及配置变量目前沿用原工程标识，完整运行与兼容验收仍在推进。[独立公共 API](apps/platform-api/README.md) · [公共后台](apps/platform-admin/README.md) · [Rental 宿主](apps/rental-api/README.md)
 
 - [底座建设范围](#底座建设范围)
 - [理解架构](#理解架构)
@@ -40,7 +40,7 @@ Nativark 将可复用的 SaaS 能力与行业业务分开维护，使新业务�
 
 ## 理解架构
 
-下图展示抽离后的目标职责关系，实际模块与构建边界随 Core 接入实施逐步落地。
+下图展示公共底座与业务 Core 的职责关系，实际构建和数据选择见各宿主说明。
 
 ```mermaid
 flowchart TD
@@ -107,11 +107,13 @@ Rental Core 是首个业务示范，提供商品、资产、库存、报价、�
 | `apps/api` | 身份、公共平台、AI Native、基础服务与现有 Core 的 API 组合；业务及支付 HTTP 通过 Rental 正式模块挂载 | [启动](apps/api/src/main.ts)、[装配](apps/api/src/app.module.ts)、[同一服务组](apps/api/src/application-services.module.ts) |
 | `apps/platform-api` | 默认无 Core 的独立公共 API，初始化 / 认证 / 公共管理 / 组织与安全 / 订阅已提供，完整运行继续交付 | [宿主导读](apps/platform-api/README.md) |
 | `apps/example-tickets-api` | 公共底座与单工单Core受控组合，标准包和迁移准备，真实运行验收继续交付 | [示范导读](apps/example-tickets-api/README.md) |
-| `apps/rental-api` | 公共底座与Rental同实例构造、数据准备和生命周期；完整请求及独立启动继续接入 | [Rental组合导读](apps/rental-api/README.md) |
+| `apps/rental-api` | 公共底座与 Rental 的独立组合；共用同一身份、数据库与业务实例，提供常规及可选 AI 的构建、启动和数据准备入口 | [Rental组合导读](apps/rental-api/README.md) |
 | `packages/platform-contracts` | 无行业依赖的公共身份、人员与设置合同；原 shared 兼容再导出 | [正式出口](packages/platform-contracts/README.md) |
 | `packages/platform-server` | 认证、公共管理与订阅、字典/编号、集成、文件原语及公共 HTTP 的唯一实现，存储由宿主提供 | [源码路线](packages/platform-server/README.md) |
 | `packages/platform-core-host` | 真实公共身份、标准Core授权/绑定、目录/范围与HTTP的单源适配 | [接入路线](packages/platform-core-host/README.md) |
 | `packages/platform-admin` | 公共后台外壳、UIArc、组织/安全/订阅/集成/工具设置与 Core 页面适配，原后台窄转接同一实现 | [公共前端导读](packages/platform-admin/README.md) |
+| `packages/ai-native-server` | 已支持 AI Runtime、任务与恢复、Gateway 和原权限事务的单源实现，由选用 AI 的宿主装配 | [AI 服务端导读](packages/ai-native-server/README.md) |
+| `packages/ai-native-data` | 可选 AI 数据、原迁移字节及物理观察贡献，与所属宿主的所选 Client 和部署锁一致 | [AI 数据导读](packages/ai-native-data/README.md) |
 | `apps/platform-admin` | 默认无Core的公共Web宿主，登录/改密、公共管理、组织/安全/订阅与集成设置，真实运行继续验收 | [公共后台导读](apps/platform-admin/README.md) |
 | `apps/example-tickets-admin` | 复用同一公共应用的工单Web宿主，四页声明接线与标准包构建核验 | [工单后台导读](apps/example-tickets-admin/README.md) |
 | `apps/example-multi-core-admin` | Rental与工单共用一份公共应用、会话和查询缓存，各自按当前授权显示页面与业务范围 | [双Core后台导读](apps/example-multi-core-admin/README.md) |
@@ -121,7 +123,7 @@ Rental Core 是首个业务示范，提供商品、资产、库存、报价、�
 | `packages/ui-arc` | 组件源码、来源与许可 | [组件说明](packages/ui-arc/README.md) |
 | `packages/mcp-server` | 受控 MCP 传输和工具适配 | [包说明](packages/mcp-server/README.md) |
 | `clients/harness-plugin` | Harness 客户端对标准 MCP 的消费 | [插件说明](clients/harness-plugin/README.md) |
-| `apps/api/src/modules/rental-core` | 首个业务 Core 的领域实现 | [领域模块](apps/api/src/modules/rental-core) |
+| `apps/api/src/modules/rental-core` | 旧组合宿主的兼容入口，转接 Rental 包中的同一领域实现 | [业务包](packages/rental-core/README.md) |
 | `apps/tenant-website`、`apps/enterprise-portal` | Rental 客户网站与企业客户门户 | [客户网站](apps/tenant-website/README.md)、[企业门户](apps/enterprise-portal/README.md) |
 | `packages/rental-core/clients/enterprise-portal` | 完整企业门户业务前端；原门户宿主复用公共UI并消费正式页面出口 | [门户接入](packages/rental-core/clients/enterprise-portal/README.md) |
 | `packages/rental-core/clients/website-ui` | 完整客户网站业务前端；原网站薄宿主供给同一客户会话、公开配置和资产 | [网站接入](packages/rental-core/clients/website-ui/README.md) |
@@ -132,7 +134,9 @@ Rental Core 是首个业务示范，提供商品、资产、库存、报价、�
 
 ## 本地运行
 
-当前步骤运行底座与 Rental Core 的组合工程。准备独立开发数据库后，可以体验公共后台和首个业务示范。无 Core API 的独立构建、接口资料和数据库链见 [公共宿主导读](apps/platform-api/README.md)，完整无 Core 后台与实际运行仍按 Core 接入专项验收。
+只使用公共底座时，按[公共 API 初始化与构建](apps/platform-api/README.md)及[公共后台](apps/platform-admin/README.md)准备自己的数据库和配置；业务 Core 的源码、表和作业不作为公共登录的前置。接入新 Core 从[五步手册](packages/core-contracts/README.md#五步快速接入)开始。
+
+下面保留原底座与 Rental Core 组合工程的开发步骤。Rental 独立宿主的首次 schema 选择、专属 Client、常规或可选 AI 构建和固定部署包见[示范宿主](apps/rental-api/README.md)及[Core 构建说明](packages/rental-core/README.md#使用与构建)。运行与持久化验收分别记录。
 
 ### 1. 环境要求
 
@@ -202,6 +206,15 @@ npm run db:seed
 
 ### 4. 启动 API 与管理后台
 
+旧组合宿主使用自己按上一节生成的原 Client。先显式指定它，供 Rental 和 AI 包的构建前置共用；PowerShell 在仓库根执行：
+
+```powershell
+$env:RENTAL_PRISMA_CLIENT = (Resolve-Path 'node_modules/.prisma/client/index.d.ts').Path
+$env:RENTAL_PRISMA_LEGACY = '1'
+```
+
+独立公共或 Rental 宿主使用各自 `generated/client/index.d.ts`，并清除上述 legacy 选择。所选编译器核声明与同目录 schema，缺失、错模式或冲突会给出错误。[Client 选择规则](scripts/build-selected-prisma.cjs)
+
 ```bash
 npm run dev
 ```
@@ -247,6 +260,8 @@ API 与后台也可分别通过 `npm run dev:api`、`npm run dev:admin` 启动�
 | 后台结构 | `npm run test:admin` | 后台约定与结构检查 |
 | 固定 Rental 发行与客户端消费 | [发行核验](scripts/verify-rental-distribution.cjs)，用 `--commit <完整SHA>` 选择版本 | 标准归档、安装准备、可选AI数据及五端消费只驻内存 |
 | 所选 Prisma 源码类型 | [内存类型入口](scripts/check-selected-prisma-types.cjs)，`--mode platform`、`rental` 或 `rental-ai` | 只读原 Prisma 5.22 官方生成器，在内存检查所选组合；支持 `--config` 指定宿主配置、`--deps` 指定只读依赖 |
+| 首次所选 schema 与正式包编译 | `npm run prepare:prisma:schema -- --mode <模式> --output <新目录绝对路径>`；[所选 Client 编译器](scripts/build-selected-prisma.cjs) | schema 准备不依赖业务 dist；正式编译使用宿主已生成的同一 Client，不自动生成或连接数据库 |
+| 独立 Rental 部署包 | `npm run package:rental-host -- <明确的包、部署、Client 与输出参数>`，参数见[构建说明](packages/rental-core/README.md#使用与构建) | 固定 Linux Docker 上下文；打包结果分别标明镜像未构建和部署待办理 |
 | 类型与主工程构建 | `npm run lint`、`npm run build` | 按实际包依赖检查类型并编译 shared、MCP、API、admin |
 | Rental 示范业务 | `npm run test:rental-core`、`npm run test:pricing-strategy` | 原 Core 和计费策略的定向行为 |
 

@@ -86,6 +86,7 @@
     "test:tenant-website-resolve": "node --test tests/tenant-website-resolve.test.cjs",
     "lint": "npm run lint -w @rental-os/shared && npm run build -w @rental-os/shared && npm run build -w @rental-os/mcp-server && npm run lint -w @rental-os/api && npm run lint -w @rental-os/admin",
     "db:generate": "node scripts/run-api-with-root-env.cjs prisma:generate",
+    "prepare:prisma:schema": "node scripts/prepare-selected-prisma-schema.cjs",
     "db:validate": "node scripts/run-api-with-root-env.cjs prisma:validate",
     "db:migrate": "node scripts/run-api-with-root-env.cjs prisma:migrate",
     "db:migrate:deploy": "node scripts/run-api-with-root-env.cjs prisma:migrate:deploy",
@@ -226,7 +227,8 @@
     "build:rental-api": "npm run build -w @rental-os/rental-api",
     "build:rental-api:ai": "npm run build:ai -w @rental-os/rental-api",
     "lint:rental-api": "npm run lint -w @rental-os/rental-api",
-    "lint:rental-api:ai": "npm run lint:ai -w @rental-os/rental-api"
+    "lint:rental-api:ai": "npm run lint:ai -w @rental-os/rental-api",
+    "package:rental-host": "node scripts/package-rental-host.cjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",

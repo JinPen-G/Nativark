@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const preparations = new Map();
 const createdParents = new Set();
+const installedRentalPackages = new Map();
 
 function workspace(appRoot) {
   appRoot = path.resolve(appRoot);
@@ -100,12 +101,23 @@ function sharedRuntimeSource(appRoot, configFile, names) {
     const declaration = symbol.valueDeclaration;
     if (declaration && ts.isVariableDeclaration(declaration) && declaration.initializer && ts.isIdentifier(declaration.initializer))
       symbol = checker.getSymbolAtLocation(declaration.initializer);
+    if (owned.installed && declaration?.getSourceFile().isDeclarationFile
+      && inside(owned.installed.root, declaration.getSourceFile().fileName))
+      return declaration.getSourceFile().fileName.replace(/\.d\.ts$/u, '.js');
     const declarations = symbol?.declarations?.filter(ts.isFunctionDeclaration);
     if (declarations?.length !== 1) throw Error('Shared receipt export is not a canonical function');
     return declarations[0].getSourceFile().fileName;
   });
   if (new Set(sources).size !== 1) throw Error('Shared receipt exports have no unambiguous canonical module');
   checkPath(root, sources[0]);
+  if (owned.installed && inside(owned.installed.root, sources[0])) {
+    const selected = owned.installed.requireCorePackagePin(owned.installed.root, owned.installed.pin,
+      owned.installed.host, owned.installed.legacyApiRoutes);
+    const { corePackageFiles } = require('@rental-os/core-contracts/package');
+    if (!corePackageFiles(selected.manifest).includes(path.relative(selected.root, sources[0]).replace(/\\/g, '/')))
+      throw Error('Shared receipt runtime is absent from the locked package');
+    return { ts, source: fs.readFileSync(sources[0], 'utf8') };
+  }
   return { ts, source: ts.transpileModule(fs.readFileSync(sources[0], 'utf8'), {
     compilerOptions: { target: ts.ScriptTarget.ES2019, module: ts.ModuleKind.CommonJS }
   }).outputText };
@@ -212,11 +224,15 @@ function emitMiniprogramSharedReceiptRuntime(appRoot, output, configFile) {
 /** Accept only the compiled relative CommonJS closure selected by real exports. */
 function rentalNativeRuntimeModules(root, dist, entries, ts) {
   const modules = new Map(), pending = [...entries.values()];
+  const installed = installedRentalPackages.get(root);
+  const lockedFiles = installed && new Set(require('@rental-os/core-contracts/package').corePackageFiles(installed.pin.manifest));
   while (pending.length) {
     const file = pending.pop();
     if (modules.has(file)) continue;
     checkPath(root, file);
     if (!inside(dist, file) || !file.endsWith('.js')) throw Error('Rental client dependency leaves its compiled closure');
+    if (installed && !lockedFiles.has(path.relative(installed.root, file).replace(/\\/g, '/')))
+      throw Error('Rental native dependency is absent from the locked package');
     const text = fs.readFileSync(file, 'utf8');
     const parsed = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
     if (parsed.parseDiagnostics.length) throw Error('Rental native client syntax is invalid');
@@ -247,7 +263,11 @@ function emitMiniprogramRentalClientRuntime(appRoot, output, configFile) {
   const specifier = `@rental-os/rental-core/clients/${kind}`;
   const owned = preparations.get(configFile);
   if (!owned || owned.root !== root || owned.appRoot !== appRoot) throw Error('Rental native preparation is not owned by this build');
-  const packageRoot = path.join(root, 'packages', 'rental-core'), dist = owned.nativeDirectory;
+  const packageRoot = owned.installed?.root ?? path.join(root, 'packages', 'rental-core'), dist = owned.nativeDirectory;
+  if (owned.installed) {
+    const installed = owned.installed;
+    installed.requireCorePackagePin(installed.root, installed.pin, installed.host, installed.legacyApiRoutes);
+  }
   const entry = path.join(dist, 'clients', kind, 'index.js');
   checkPath(root, dist, true);
   checkPath(root, path.join(packageRoot, 'package.json'));
@@ -335,8 +355,17 @@ function releaseMiniprogramSharedTypes(configFile) {
       removeCheckedDirectory(owned.root, path.join(owned.destination, name));
     throw Error('Native SDK previous output requires recovery: ' + owned.previousOutput);
   }
-  removeCheckedDirectory(owned.root, owned.destination);
-  preparations.delete(configFile);
+  try {
+    if (owned.installed) {
+      const installed = owned.installed;
+      installed.requireCorePackagePin(installed.root, installed.pin, installed.host, installed.legacyApiRoutes);
+    }
+  } finally {
+    removeCheckedDirectory(owned.root, owned.destination);
+    preparations.delete(configFile);
+    if (owned.installed && installedRentalPackages.get(owned.root) === owned.installed)
+      installedRentalPackages.delete(owned.root);
+  }
   if (createdParents.has(owned.parent) && fs.existsSync(owned.parent) && fs.readdirSync(owned.parent).length === 0) {
     checkPath(owned.root, owned.parent);
     fs.rmdirSync(owned.parent);
@@ -382,7 +411,72 @@ function validateMiniprogramRuntime(appRoot, output) {
 // Resolve only declared workspace exports to their canonical source during the
 // private compiler pass. The resulting declarations keep package imports, with
 // exact temporary paths supplied to the native and host compiler configurations.
+/** Select a prepared standard package through the existing deployment lock.
+ * Read only the selected ordinary directory, before clearing host output. */
+function selectMiniprogramRentalPackage(root, args) {
+  const values = new Map();
+  for (const flag of ['--rental-package', '--rental-lock']) {
+    const at = args.indexOf(flag);
+    if (at < 0) continue;
+    if (!args[at + 1] || args[at + 1].startsWith('--') || args.indexOf(flag, at + 1) >= 0)
+      throw Error('Invalid mini-program ' + flag);
+    values.set(flag, path.resolve(root, args[at + 1]));
+  }
+  if (!values.size && !args.includes('--release')) return undefined;
+  if (values.size !== 2) throw Error('Standard package builds require --rental-package and --rental-lock');
+  const packageRoot = values.get('--rental-package'), lockFile = values.get('--rental-lock');
+  checkPath(root, packageRoot, true);
+  checkPath(root, lockFile);
+  if (packageRoot === path.join(root, 'packages', 'rental-core')
+    || inside(path.join(root, 'packages', 'rental-core'), packageRoot))
+    throw Error('Rental standard package cannot be the author package directory');
+  const { CoreDeploymentLockSchema, coreDeploymentHostVersions } = require('@rental-os/core-contracts');
+  const { requireCorePackagePin } = require('@rental-os/core-contracts/install');
+  const { rentalHostLegacyApiRoutes } = require('@rental-os/rental-api/openapi');
+  const lock = CoreDeploymentLockSchema.parse(JSON.parse(fs.readFileSync(lockFile, 'utf8')));
+  const pin = lock.cores.find(value => value.manifest.id === 'rental');
+  if (!pin) throw Error('The deployment lock does not select Rental');
+  const host = { ...coreDeploymentHostVersions(lock), node: process.versions.node };
+  const legacyApiRoutes = rentalHostLegacyApiRoutes();
+  const selected = requireCorePackagePin(packageRoot, pin, host, legacyApiRoutes);
+  const lockedFiles = new Set(require('@rental-os/core-contracts/package').corePackageFiles(selected.manifest));
+  const metadata = JSON.parse(fs.readFileSync(path.join(selected.root, 'package.json'), 'utf8'));
+  if (metadata.name !== '@rental-os/rental-core' || metadata.version !== selected.manifest.version
+    || metadata.license !== 'MIT') throw Error('Rental installed package metadata does not match its lock');
+  for (const name of ['miniprogram', 'staff', 'time']) {
+    const entry = metadata.exports?.['./clients/' + name];
+    const target = './dist-clients/clients/' + name + (name === 'time' ? '.js' : '/index.js');
+    if (entry?.types !== target.replace(/\.js$/u, '.d.ts')
+      || (entry?.require ?? entry?.default) !== target || (entry?.default && entry.default !== target))
+      throw Error('Installed Native JS and declaration exports do not match: ' + name);
+    for (const file of [target, entry.types]) {
+      const filename = path.resolve(selected.root, file);
+      checkPath(root, filename);
+      if (!lockedFiles.has(path.relative(selected.root, filename).replace(/\\/g, '/')))
+        throw Error('Installed Native export is absent from the locked package: ' + name);
+      if (!fs.lstatSync(filename).isFile()) throw Error('Installed Native export is not a file: ' + name);
+    }
+  }
+  return { root: selected.root, metadata, pin, host, legacyApiRoutes, requireCorePackagePin };
+}
+
 function declaredSource(root, specifier, runtime = false) {
+  const installed = installedRentalPackages.get(root);
+  if (installed && (specifier === '@rental-os/rental-core' || specifier.startsWith('@rental-os/rental-core/'))) {
+    const key = specifier === '@rental-os/rental-core' ? '.' : './' + specifier.slice('@rental-os/rental-core/'.length);
+    const entry = installed.metadata.exports?.[key];
+    const target = runtime ? entry?.require ?? entry?.default : entry?.types;
+    if (typeof target !== 'string' || !target.startsWith('./dist/'))
+      throw Error('Installed Rental contract lacks its formal export: ' + specifier);
+    const filename = path.resolve(installed.root, target);
+    checkPath(root, filename);
+    if (!inside(path.join(installed.root, 'dist'), filename) || !fs.lstatSync(filename).isFile())
+      throw Error('Installed Rental contract leaves its compiled package: ' + specifier);
+    if (!require('@rental-os/core-contracts/package').corePackageFiles(installed.pin.manifest)
+      .includes(path.relative(installed.root, filename).replace(/\\/g, '/')))
+      throw Error('Installed Rental contract is absent from the locked package: ' + specifier);
+    return filename;
+  }
   const parts = specifier.split('/'), packageName = parts.slice(0, 2).join('/');
   const packageRoot = path.join(root, 'packages', parts[1]);
   checkPath(root, packageRoot);
@@ -403,7 +497,7 @@ function declaredSource(root, specifier, runtime = false) {
 
 /** Compile current canonical declarations and both Native entries together.
  * The package and original WeChat hosts share this compiler and export map. */
-function compileRentalNativeClients(root, destination) {
+function compileRentalNativeClients(root, destination, installed) {
   const ts = require(require.resolve('typescript', { paths: [root] }));
   const source = path.join(root, 'packages/shared/src');
   const nativeDirectory = path.join(destination, 'native');
@@ -420,8 +514,9 @@ function compileRentalNativeClients(root, destination) {
   host.resolveModuleNames = (names, containing) => names.map(name => {
     if (name.startsWith('@rental-os/')) {
       const filename = declaredSource(root, name);
-      paths[name] = [path.join(destination, 'declarations', path.relative(root, filename)).replace(/\.ts$/u, '.d.ts')];
-      return { resolvedFileName: filename, extension: ts.Extension.Ts };
+      paths[name] = [installed && inside(installed.root, filename) ? filename
+        : path.join(destination, 'declarations', path.relative(root, filename)).replace(/\.ts$/u, '.d.ts')];
+      return { resolvedFileName: filename, extension: filename.endsWith('.d.ts') ? ts.Extension.Dts : ts.Extension.Ts };
     }
     const resolved = ts.resolveModuleName(name, containing, parsed.options, host).resolvedModule
       ?? ts.resolveModuleName(name, path.join(dependencyRoot, '../package.json'), parsed.options, host).resolvedModule;
@@ -439,6 +534,12 @@ function compileRentalNativeClients(root, destination) {
   if (!fs.existsSync(entry)) throw Error('Private shared declarations missing index');
   paths['@rental-os/shared'] = [entry];
   paths['@rental-os/shared/miniprogram-client'] = [path.join(destination, 'declarations', 'packages/shared/src/miniprogram-client.d.ts')];
+  if (installed) {
+    for (const name of ['miniprogram', 'staff', 'time'])
+      paths['@rental-os/rental-core/clients/' + name] = [path.join(installed.root,
+        installed.metadata.exports['./clients/' + name].types)];
+    return { ts, program, paths, nativeDirectory: path.join(installed.root, 'dist-clients') };
+  }
   const nativeConfig = ts.readConfigFile(path.join(root, 'packages/rental-core/tsconfig.native-clients.json'), ts.sys.readFile);
   if (nativeConfig.error) throw Error(ts.flattenDiagnosticMessageText(nativeConfig.error.messageText, '\n'));
   const native = ts.parseJsonConfigFileContent(nativeConfig.config, ts.sys, path.join(root, 'packages/rental-core'), {
@@ -463,9 +564,11 @@ function compileRentalNativeClients(root, destination) {
 
 // Emit this checkout's declarations and complete native clients into one owned
 // preparation. Published dist and managed dependencies are read-only inputs.
-function prepareMiniprogramSharedTypes(appRoot) {
+function prepareMiniprogramSharedTypes(appRoot, args = []) {
   appRoot = path.resolve(appRoot);
   const root = workspace(appRoot);
+  const installed = selectMiniprogramRentalPackage(root, args);
+  if (installedRentalPackages.has(root)) throw Error('This process already owns a Rental package preparation');
   const parent = process.env.AI_OFFLINE_WRITE_ROOT ? path.resolve(process.env.AI_OFFLINE_WRITE_ROOT)
     : path.join(root, 'output', '.tmp', 'miniprogram-build');
   if (!inside(path.join(root, 'output', '.tmp'), parent) || parent === path.join(root, 'output', '.tmp')) throw Error('Private shared declarations require a task-temp root');
@@ -476,10 +579,12 @@ function prepareMiniprogramSharedTypes(appRoot) {
   const destination = fs.mkdtempSync(path.join(parent, 'miniprogram-shared-types-'));
   const appConfig = path.join(destination, `${path.basename(appRoot)}.json`);
   const nativeDirectory = path.join(destination, 'native');
-  const owned = { root, appRoot, parent, destination, nativeDirectory };
+  const owned = { root, appRoot, parent, destination, nativeDirectory, installed };
   preparations.set(appConfig, owned);
   try {
-    const { program, paths } = compileRentalNativeClients(root, destination);
+    if (installed) installedRentalPackages.set(root, installed);
+    const { program, paths, nativeDirectory: compiledDirectory } = compileRentalNativeClients(root, destination, installed);
+    owned.nativeDirectory = compiledDirectory;
     owned.program = program;
     const dependencyTypes = path.dirname(require.resolve('miniprogram-api-typings/package.json', { paths: [appRoot, root] }));
     const dependencyRoot = path.dirname(dependencyTypes);
