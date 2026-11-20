@@ -6,6 +6,7 @@
 
 | 入口 | 职责与直接消费者 |
 | --- | --- |
+| [应用参加者](src/application-participants.ts)、[宿主生命周期](../../apps/rental-api/src/lifecycle.ts) | 原到期作业和后台服务由宿主启动；退出先停止新tick，再等空间枚举、命名锁及已进入业务全部返回，最后断开同一数据库。不会取消已提交操作或重做unknown。 |
 | [HTTP文档贡献](src/http-openapi.ts)、[原操作](src/http-openapi-operations.ts)、[同源schema](src/http-openapi-schemas.ts) | `/http-openapi` 提供平台可组合的 Rental 机器契约、原组合兼容出口与明确字段/路由缺口 |
 | [商品与资产前端](admin/catalog/README.md)、[统一页面贡献](admin/index.tsx)、[请求与图片](admin/catalog/client.ts) | `/admin/catalog` 持有商品、资产、库存、照片与状态历史，七个窄出口提供页面、请求、上下文、图片、列表能力及纯术语；统一贡献组合九页，宿主提供当前身份、经营空间及原鉴权传输 |
 | [定价与营销前端](admin/commercial/README.md)、[七页声明](admin/commercial/pages.ts)、[请求与上下文](admin/commercial/client.ts) | `/admin/commercial` 提供定价组、价格版本/调价、优惠、券和服务容量；宿主提供同一会话与经营空间，表单和主操作复用公共呈现，旧地址和价格管理权限保持 |

@@ -73,6 +73,7 @@ class StandardRentalDueJobs<TTransaction extends RentalApplicationParticipantTra
   extends RentalDueJobScheduler<TTransaction> {
   private stopping = false;
   private readonly active = new Set<Promise<boolean>>();
+  private readonly ticks = new Set<Promise<void>>();
   private readonly dispatchFence: ReturnType<typeof createRentalBusinessTenantFence>;
   private readonly registeredJobs = new Map<RentalDueJob, Readonly<RentalDueJob>>();
   constructor(dependencies: RentalApplicationParticipantDependencies<TTransaction>,
@@ -197,12 +198,17 @@ class StandardRentalDueJobs<TTransaction extends RentalApplicationParticipantTra
   override async onModuleDestroy(): Promise<void> {
     this.stopping = true;
     super.onModuleDestroy();
-    // 不取消已进入的原业务或换键重做；等其返回后才让宿主释放数据库。
-    await Promise.allSettled([...this.active]);
+    // Tick 的空间枚举也使用同一连接池；不能只等待已进入 runLocked 的事务。
+    // stopping 先阻止后续任务，已在等待的枚举/命名锁/原业务全部返回后才可断库。
+    // 不取消已进入的原业务、改变其超时或换键重做未知结果。
+    await Promise.allSettled([...this.ticks, ...this.active]);
   }
 
   override runTick(): Promise<void> {
-    return this.stopping ? Promise.resolve() : super.runTick();
+    if (this.stopping) return Promise.resolve();
+    const running = super.runTick();
+    this.ticks.add(running);
+    return running.finally(() => { this.ticks.delete(running); });
   }
 
   override runLocked(job: RentalDueJob, tenantId: string, workspaceId: string): Promise<boolean> {
