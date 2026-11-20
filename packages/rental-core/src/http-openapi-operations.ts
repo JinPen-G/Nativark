@@ -690,16 +690,16 @@ export const RENTAL_HTTP_OPERATIONS: ContractOperation[] = [
     // ORDER-LIST-01：筛选与分页在服务端执行。不带 page/pageSize 返回纯数组（兼容旧调用方），
     // 带任一分页参数返回 { items, page, pageSize, total } 信封。空间取自会话。
     method: "get", path: "/api/rental/v1/orders", tag: "RentalCore", operationId: "listRentalCoreOrders",
-    summary: "List Rental Core orders (server-side filters and sorting before pagination; paged envelope when page/pageSize given)", permissions: ["rental-os:order:view"], responseSchema: "GenericObject",
+    summary: "List Rental Core orders (server-side filters and sorting before pagination; paged envelope when page/pageSize given)", permissions: ["rental-os:order:view"], responseSchema: "RentalOrderListResponse",
     parameters: [
       queryParam("page", { type: "integer", minimum: 1, maximum: 1000000 }),
       queryParam("pageSize", { type: "integer", minimum: 1, maximum: 200 }),
       queryParam("status", { type: "string", enum: ["draft", "reserved", "pickup_overdue", "ready_for_pickup", "renting", "return_inspection", "settling", "completed", "cancelled", "no_show"] }),
       queryParam("keyword", { type: "string", maxLength: 100 }),
-      queryParam("from", { type: "string", format: "date-time" }),
-      queryParam("to", { type: "string", format: "date-time" }),
+      queryParam("from", { type: "string", description: "原 DTO 接收 ISO8601 日期或时间，筛选当前归还时点晚于 from 的订单。" }),
+      queryParam("to", { type: "string", description: "原 DTO 接收 ISO8601 日期或时间，筛选起租时点早于 to 的订单。" }),
       queryParam("assignment", { type: "string", enum: ["pending", "partial", "unlocked", "locked", "issue"] }),
-      queryParam("pendingFeeOnly", { type: "boolean" }),
+      queryParam("pendingFeeOnly", { oneOf: [{ type: "boolean" }, { type: "string" }], description: "原 DTO 将 true、字符串 true 或 1 转为 true，其余请求值转为 false。" }),
       queryParam("sort", { type: "string", maxLength: 256, description: "Ordered unique field.asc/field.desc priorities, comma-separated, max 8. Fields: createdAt, orderNo, customerName, startAt, endAt, payableAmount, quoteNo, status. Applied before pagination with an id tie-breaker." })
     ]
   },
@@ -721,7 +721,7 @@ export const RENTAL_HTTP_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "get", path: "/api/rental/v1/orders/{id}", tag: "RentalCore", operationId: "getRentalCoreOrder",
-    summary: "Get Rental Core order", permissions: ["rental-os:order:view"], responseSchema: "GenericObject"
+    summary: "Get Rental Core order", permissions: ["rental-os:order:view"], responseSchema: "RentalOrder"
   },
   {
     method: "get", path: "/api/rental/v1/orders/{id}/carrier-shipment/events", tag: "RentalCore", operationId: "listRentalCarrierShipmentEvents",

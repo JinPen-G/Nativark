@@ -4,6 +4,7 @@ import { RentalInventoryMode, RENTAL_LOCATION_TYPES, RENTAL_PRICING_UNIT_CODES }
 import { RENTAL_EXCHANGE_INSPECTION_SCHEMAS } from "./http-openapi-rental-exchange-inspection-preparation.schemas";
 import { ENTERPRISE_COMPONENT_SCHEMAS } from "./http-openapi-enterprise-schemas";
 import { ENTERPRISE_ORDER_DELEGATION_SCHEMAS } from "./http-openapi-enterprise-order-delegation-schemas";
+import { RENTAL_ORDER_COMPONENT_SCHEMAS } from "./http-openapi-rental-order-schemas";
 
 import { RENTAL_CATEGORY_CODE_PATTERN, RENTAL_CATEGORY_ICON_CODES } from "@rental-os/shared";
 import { AI_CATEGORY_DRAFT_HTTP_SCHEMAS, AI_EXTENSION_PREVIEW_HTTP_SCHEMAS } from "@rental-os/shared";
@@ -19,6 +20,7 @@ export const RENTAL_HTTP_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ...ENTERPRISE_COMPONENT_SCHEMAS,
   ...ENTERPRISE_ORDER_DELEGATION_SCHEMAS,
   ...RENTAL_EXCHANGE_INSPECTION_SCHEMAS,
+  ...RENTAL_ORDER_COMPONENT_SCHEMAS,
   GenericObject: objectSchema,
   RentalBundleComponentInput: {
     ...objectOf({

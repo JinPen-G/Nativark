@@ -161,7 +161,9 @@
 node -e "const { createRentalOpenApi } = require('@rental-os/rental-core/http-openapi'); process.stdout.write(JSON.stringify(createRentalOpenApi(), null, 2))"
 ```
 
-独立贡献包含 576 个已有操作及其 362 个 schema。原宽泛字段由 `RENTAL_HTTP_SCHEMA_GAPS` 列出，涉及的 276 项操作带 `x-schemaStatus=incomplete` 和 `x-schemaGaps`，继续按正式 DTO/响应投影补齐。明确路由缺口从 `RENTAL_HTTP_DOCUMENTATION_GAPS` 读取，当前宿主限制从 `RENTAL_HTTP_OPERATION_AVAILABILITY` 读取。
+独立贡献包含 576 个已有操作及其 384 个 schema。原宽泛字段由 `RENTAL_HTTP_SCHEMA_GAPS` 列出，涉及的 274 项操作带 `x-schemaStatus=incomplete` 和 `x-schemaGaps`，继续按正式 DTO/响应投影补齐。明确路由缺口从 `RENTAL_HTTP_DOCUMENTATION_GAPS` 读取，当前宿主限制从 `RENTAL_HTTP_OPERATION_AVAILABILITY` 读取。
+
+订单列表与详情复用 [订单响应 schema](src/http-openapi-rental-order-schemas.ts)。列表保留原数组或分页结果及九项查询字段，详情按原订单投影说明字段、历史省略与可空金额。配送电话按原脱敏结果公开，办理锁不释放令牌。规则、检查、会员及能力快照的内部版本结构继续从原关联对象读取；未展开的字段仍由缺口清单标明。
 
 | 路由 | 同源描述与当前限制 |
 | --- | --- |
