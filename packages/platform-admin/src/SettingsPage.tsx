@@ -31,7 +31,7 @@ function SettingsEditor<Values extends object>({ path, title, fields, project, p
     if (!current()) return Promise.reject(new Error(english ? "Settings changed. Reload before saving." : "服务端设置已变化，请重新核对后保存。"));
     setBusy(true);
     const submitted = formSnapshotFingerprint(form.getFieldsValue(true));
-    const promise = session.runtime.request<unknown>(path, { method: "put", data: payload ? payload(values) : values })
+    const promise = session.runtime.request<unknown>(path, { method: "put", data: payload ? payload(values) : values, retryAuthentication: false })
       .then(async result => {
         baseline.current = submitted;
         setDirty(formSnapshotFingerprint(form.getFieldsValue(true)) !== submitted);
