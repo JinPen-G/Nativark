@@ -20,6 +20,47 @@ export const RENTAL_HTTP_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ...ENTERPRISE_ORDER_DELEGATION_SCHEMAS,
   ...RENTAL_EXCHANGE_INSPECTION_SCHEMAS,
   GenericObject: objectSchema,
+  SaveRentalFulfillmentOperatorRequest: {
+    ...objectOf({
+      id: { type: "string", minLength: 1, nullable: true, description: "POST 省略 id 时新建，提供已有 id 时更新。PUT 使用路径 id。" },
+      code: { type: "string", minLength: 1, pattern: "\\S" },
+      name: { type: "string", minLength: 1, pattern: "\\S" },
+      type: { type: "string", enum: ["self_operated", "partner"] },
+      contactName: { type: "string", nullable: true },
+      contactPhone: { type: "string", nullable: true },
+      settlementMode: { type: "string", enum: ["self", "monthly", "per_order", null], nullable: true, description: "省略或 null 时，自营采用 self，合作经营主体采用 monthly。" },
+      status: { type: "string", enum: ["enabled", "disabled"], description: "省略时新增采用 enabled，更新在原事务内读取并保留已存状态。" }
+    }, ["code", "name", "type"]),
+    description: "原 SaveRentalFulfillmentOperatorDto 输入。原保存入口规范化编码、名称和联系人，仓储核验当前品类绑定与租户、空间归属。",
+    example: { code: "SELF", name: "自营经营主体", type: "self_operated" }
+  },
+  RentalFulfillmentOperator: {
+    ...objectOf({
+      id: stringSchema,
+      tenantId: stringSchema,
+      code: stringSchema,
+      name: stringSchema,
+      type: { type: "string", description: "原已存主体类型。" },
+      contactName: stringSchema,
+      contactPhone: stringSchema,
+      settlementMode: { type: "string", description: "原已存结算模式。" },
+      status: { type: "string", description: "原已存状态。" },
+      createdAt: { type: "string", format: "date-time" },
+      updatedAt: { type: "string", format: "date-time" }
+    }, ["id", "tenantId", "code", "name", "type", "status", "createdAt", "updatedAt"], false),
+    description: "原 RentalFulfillmentOperator 与保存、读取映射的完整经营主体投影。",
+    example: {
+      id: "operator_example",
+      tenantId: "tenant_example",
+      code: "SELF",
+      name: "自营经营主体",
+      type: "self_operated",
+      settlementMode: "self",
+      status: "enabled",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z"
+    }
+  },
   RentalPricingTier: objectOf({
     minUnits: { type: "integer", minimum: 1, description: "阶梯起始单位数，含该单位。累进阶梯的首档从 1 开始，各档起点唯一。" },
     unitAmount: { type: "number", minimum: 0, description: "原业务币种下的阶梯单价。" }

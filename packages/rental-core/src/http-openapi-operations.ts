@@ -890,9 +890,33 @@ export const RENTAL_HTTP_OPERATIONS: ContractOperation[] = [
     summary: "List workspace capability lifecycle audit events",
     permissions: ["rental-core:capability:view", "rental-core:capability:manage"], responseSchema: "GenericObject"
   },
-  backlogOperation("get", "/api/rental/v1/fulfillment-operators", "RentalCore", "listRentalFulfillmentOperators", "List fulfillment operators", ["rental-os:station:view"]),
-  backlogOperation("post", "/api/rental/v1/fulfillment-operators", "RentalCore", "createRentalFulfillmentOperator", "Create fulfillment operator", ["rental-os:station:manage"]),
-  backlogOperation("put", "/api/rental/v1/fulfillment-operators/{id}", "RentalCore", "updateRentalFulfillmentOperator", "Update fulfillment operator", ["rental-os:station:manage"]),
+  {
+    method: "get", path: "/api/rental/v1/fulfillment-operators", tag: "RentalCore", operationId: "listRentalFulfillmentOperators",
+    summary: "读取当前空间原已提交的经营主体配置。", permissions: ["rental-os:station:view"],
+    responseSchema: arrayOf("RentalFulfillmentOperator")
+  },
+  {
+    method: "post", path: "/api/rental/v1/fulfillment-operators", tag: "RentalCore", operationId: "createRentalFulfillmentOperator",
+    summary: "沿原保存入口新建或按请求 id 更新经营主体，提交后返回原保存投影。", permissions: ["rental-os:station:manage"],
+    successStatus: 201, requestSchema: "SaveRentalFulfillmentOperatorRequest", responseSchema: "RentalFulfillmentOperator",
+    errorResponses: {
+      "400": { description: "输入或经营主体状态未通过原 DTO、保存与仓储校验。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "请求 id 对应的经营主体不存在。", schema: "RentalHttpErrorResponse" },
+      "409": { description: "编码、当前品类绑定、空间归属或原状态读取发生冲突。", schema: "RentalHttpErrorResponse" },
+      "503": { description: "更新省略状态时，原事务无法返回应保留的已存状态。", schema: "RentalHttpErrorResponse" }
+    }
+  },
+  {
+    method: "put", path: "/api/rental/v1/fulfillment-operators/{id}", tag: "RentalCore", operationId: "updateRentalFulfillmentOperator",
+    summary: "以路径 id 更新经营主体，省略状态时使用原事务锁定的已存状态。", permissions: ["rental-os:station:manage"],
+    requestSchema: "SaveRentalFulfillmentOperatorRequest", responseSchema: "RentalFulfillmentOperator",
+    errorResponses: {
+      "400": { description: "输入或经营主体状态未通过原 DTO、保存与仓储校验。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "路径 id 对应的经营主体不存在。", schema: "RentalHttpErrorResponse" },
+      "409": { description: "编码、当前品类绑定、空间归属或原状态读取发生冲突。", schema: "RentalHttpErrorResponse" },
+      "503": { description: "省略状态时，原事务无法返回应保留的已存状态。", schema: "RentalHttpErrorResponse" }
+    }
+  },
   backlogOperation("get", "/api/rental/v1/pricing-plans", "RentalBusiness", "listRentalPricingPlans", "List generic pricing plans", ["rental-os:price:manage"]),
   backlogOperation("post", "/api/rental/v1/pricing-plans", "RentalBusiness", "createRentalPricingPlan", "Create generic pricing plan", ["rental-os:price:manage"]),
   backlogOperation("put", "/api/rental/v1/pricing-plans/{id}", "RentalBusiness", "updateRentalPricingPlan", "Update generic pricing plan", ["rental-os:price:manage"]),
