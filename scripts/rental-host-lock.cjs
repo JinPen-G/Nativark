@@ -21,6 +21,7 @@ function lockedDependency(lock, owner, name) {
 
 function hostDirectory(host = 'rental') {
   if (host === 'platform') return 'apps/platform-api';
+  if (host === 'example-tickets') return 'apps/example-tickets-api';
   if (host === 'rental') return 'apps/rental-api';
   if (host === 'example-multi-core') return 'apps/example-multi-core-api';
   throw Error('未登记的静态宿主组合：' + host);
@@ -28,7 +29,7 @@ function hostDirectory(host = 'rental') {
 
 function selectWorkspaces(lock, readMetadata, aiMode, host = 'rental') {
   if (lock.lockfileVersion !== 3 || !lock.packages?.['']) throw Error('独立宿主要求原 npm v3 锁文件');
-  if (host === 'platform' && aiMode !== 'disabled') throw Error('零 Core 公共宿主不能选装 AI');
+  if (['platform', 'example-tickets'].includes(host) && aiMode !== 'disabled') throw Error('公共及工单独立宿主不能选装 AI');
   const selected = new Map(), queue = [hostDirectory(host)];
   if (aiMode === 'enabled') queue.push('packages/ai-native-server');
   while (queue.length) {
@@ -54,13 +55,14 @@ function selectWorkspaces(lock, readMetadata, aiMode, host = 'rental') {
 }
 
 function projectHostLock(lock, workspaces, aiMode, runtimePeers = [], host = 'rental') {
-  if (host === 'platform' && aiMode !== 'disabled') throw Error('零 Core 公共宿主不能选装 AI');
+  if (['platform', 'example-tickets'].includes(host) && aiMode !== 'disabled') throw Error('公共及工单独立宿主不能选装 AI');
   const generator = lock.packages['node_modules/prisma'], client = lock.packages['node_modules/@prisma/client'];
   if (generator?.version !== '5.22.0' || client?.version !== generator.version)
     throw Error('生成器与运行库须使用原锁同一 Prisma 5.22.0');
   const selectedHost = workspaces.get(hostDirectory(host));
   if (!selectedHost) throw Error('实际入口宿主未在所选锁闭包');
   const root = { name: host === 'platform' ? 'platform-host-runtime'
+    : host === 'example-tickets' ? 'example-tickets-host-runtime'
     : host === 'rental' ? 'rental-host-runtime' : 'example-multi-core-host-runtime', version: '0.1.0', private: true, license: 'MIT',
     workspaces: [...workspaces.keys()].sort(),
     dependencies: { [selectedHost.name]: selectedHost.version,

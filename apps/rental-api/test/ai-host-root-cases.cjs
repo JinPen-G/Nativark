@@ -14,15 +14,27 @@ const hooks = ['onModuleInit', 'onApplicationBootstrap', 'beforeApplicationShutd
   'onModuleDestroy', 'onApplicationShutdown'];
 
 module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, aiFiles, enabled,
-  aiResult, disabled, platformClient, platformArchive, multi, multiResult, ticketsPackage, platform, platformResult }) {
-  const isPlatform = Boolean(platform), isMulti = Boolean(multi), selected = isPlatform ? platform : isMulti ? multi : enabled,
+  aiResult, disabled, platformClient, platformArchive, multi, multiResult, ticketsPackage, platform, platformResult,
+  tickets, ticketsResult }) {
+  const isPlatform = Boolean(platform), isTickets = Boolean(tickets), isPublic = isPlatform || isTickets,
+    isMulti = Boolean(multi), selected = isPlatform ? platform : isTickets ? tickets : isMulti ? multi : enabled,
     isAi = selected.lock.dataCapabilities?.some(capability => capability.id === 'ai-native') === true,
-    context = isPlatform ? platformResult : isMulti ? multiResult : aiResult, selectedModelCount = isPlatform ? 40 : isAi ? 247 : 161,
+    context = isPlatform ? platformResult : isTickets ? ticketsResult : isMulti ? multiResult : aiResult,
+    selectedModelCount = isPublic ? 40 : isAi ? 247 : 161,
     output = isAi ? 'dist-ai' : 'dist';
   if (isPlatform) {
-    assert(platformResult && !multi && !enabled && !aiResult && !multiResult && !rentalFiles && !aiFiles && !ticketsPackage,
+    assert(platformResult && !multi && !enabled && !aiResult && !multiResult && !rentalFiles && !aiFiles && !ticketsPackage
+      && !tickets && !ticketsResult,
       'platform root explicitly selects only its actual runtime package');
     assert.equal(selected.lock.cores.length, 0);
+    assert.equal(selected.lock.dataCapabilities?.length ?? 0, 0);
+    assert.equal(selected.files.get('schema.prisma').toString(), platformClient.schema);
+  }
+  if (isTickets) {
+    assert(ticketsResult && ticketsPackage && !platform && !platformResult && !multi && !enabled && !aiResult
+      && !multiResult && !rentalFiles && !aiFiles, 'tickets root explicitly selects its non-Rental single-Core runtime');
+    assert.deepEqual(selected.lock.cores, [ticketsPackage.pin]);
+    assert.equal(ticketsPackage.pin.manifest.id, 'example-tickets');
     assert.equal(selected.lock.dataCapabilities?.length ?? 0, 0);
     assert.equal(selected.files.get('schema.prisma').toString(), platformClient.schema);
   }
@@ -36,13 +48,14 @@ module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, a
     installed.set(absolute, Buffer.from(bytes));
     memory.put(absolute, bytes);
   }
-  for (const [directory, files] of [...(isPlatform ? [] : [['packages/rental-core', rentalFiles]]),
-    ...(isMulti ? [['packages/example-tickets-core', ticketsPackage.files]] : []),
+  for (const [directory, files] of [...(isPublic ? [] : [['packages/rental-core', rentalFiles]]),
+    ...(isMulti || isTickets ? [['packages/example-tickets-core', ticketsPackage.files]] : []),
     ...(isAi ? [['packages/ai-native-data', aiFiles]] : [])])
     for (const [file, bytes] of files)
       assert.deepEqual(installed.get(slash(path.join(root, directory, file))), bytes, 'installed archive ' + file);
   assert.deepEqual(JSON.parse(context.files.get(isPlatform ? 'apps/platform-api/prisma/core.deployment.lock.json'
-    : 'apps/rental-api/prisma-deployment/core.deployment.lock.json')), selected.lock);
+    : isTickets ? 'apps/example-tickets-api/prisma-deployment/core.deployment.lock.json'
+      : 'apps/rental-api/prisma-deployment/core.deployment.lock.json')), selected.lock);
   for (const [, pkg] of build.packages) {
     const bytes = installed.get(slash(path.join(pkg.directory, 'package.json')));
     if (bytes) assert.deepEqual(JSON.parse(bytes).exports, pkg.metadata.exports,
@@ -65,7 +78,7 @@ module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, a
     Module.createRequire(generatorFile), generatedModule, generatedModule.exports, generatorFile, path.dirname(generatorFile));
   const clients = [];
   for (const [host, schema, models] of [
-    ...(isPlatform ? [] : [['rental-api', selected.files.get('schema.prisma').toString(), selectedModelCount]]),
+    ...(isPublic ? [] : [['rental-api', selected.files.get('schema.prisma').toString(), selectedModelCount]]),
     ['platform-api', platformClient.schema, 40]
   ]) {
     const parsed = JSON.parse(build.prismaWasm.get_config(JSON.stringify({ prismaSchema: schema, ignoreEnvVarErrors: true })));
@@ -88,7 +101,7 @@ module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, a
     clients.push({ host, models, directory, schemaSha256: createHash('sha256').update(schema).digest('hex') });
   }
 
-  const effects = [], reads = new Set(), restores = [], factoryCalls = new Map(), constructedClients = [];
+  const effects = [], reads = new Set(), executed = new Set(), restores = [], factoryCalls = new Map(), constructedClients = [];
   const replace = (target, name, value) => {
     const descriptor = Object.getOwnPropertyDescriptor(target, name);
     Object.defineProperty(target, name, { configurable: true, writable: true, value });
@@ -161,6 +174,7 @@ module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, a
       if (options?.filename && inWorkspace(options.filename)) {
         assert(/\.(?:js|cjs)$/u.test(options.filename), 'root must execute emitted JavaScript only');
         assert(installed.has(slash(options.filename)), 'root executed outside installed archive');
+        executed.add(slash(options.filename));
       }
       super(code, options);
     }
@@ -177,6 +191,11 @@ module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, a
       replace(owner, method, forbid('DNS ' + method));
 
   try {
+    if (isTickets) for (const [name, value] of Object.entries({ CORE_PACKAGE_STORAGE_ROOT: storage,
+      CORE_PLATFORM_PACKAGE_REFERENCE: reference })) {
+      const previous = process.env[name]; process.env[name] = value;
+      restores.push(() => previous === undefined ? delete process.env[name] : process.env[name] = previous);
+    }
     const load = name => memory.load(build.exported(name, true));
     const { NestContainer } = build.requireDeps('@nestjs/core/injector/container');
     const { DependenciesScanner } = build.requireDeps('@nestjs/core/scanner');
@@ -193,7 +212,7 @@ module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, a
       await dependencies.scan(definition);
       return { container, configuration, graph, dependencies, modules: [...container.getModules().values()] };
     };
-    if (isPlatform) {
+    if (isPublic) {
       // This branch runs before any Rental module is loaded. It shares the
       // installed-file boundary, official generator, scanner and effect traps.
       assert.equal(clients.length, 1);
@@ -202,9 +221,11 @@ module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, a
       for (const method of ['$connect', '$disconnect', '$transaction', '$queryRaw', '$queryRawUnsafe',
         '$executeRaw', '$executeRawUnsafe', '$runCommandRaw', '_executeRequest'])
         if (typeof PrismaClient.prototype[method] === 'function') replace(PrismaClient.prototype, method, forbid('Prisma ' + method));
-      const { PlatformAppModule } = memory.load(path.join(root, 'apps/platform-api/dist/app.module.js'));
+      const definition = isPlatform
+        ? memory.load(path.join(root, 'apps/platform-api/dist/app.module.js')).PlatformAppModule
+        : memory.load(path.join(root, 'apps/example-tickets-api/dist/app.module.js')).ticketsApplicationModule(selected.lock);
       const databaseModule = load('@rental-os/platform-api/database');
-      const assembly = memory.load(path.join(root, 'apps/platform-api/dist/core-assembly.js'));
+      const assembly = isPlatform ? memory.load(path.join(root, 'apps/platform-api/dist/core-assembly.js')) : undefined;
       const publicApi = load('@rental-os/platform-server'), publicCore = load('@rental-os/platform-core-host');
       class PlatformObservedInjector extends Injector {
         async instantiateClass(instances, wrapper, ...rest) {
@@ -224,7 +245,7 @@ module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, a
           return value;
         }
       }
-      const graph = await scanner(PlatformAppModule);
+      const graph = await scanner(definition);
       const loader = new InstanceLoader(graph.container, new PlatformObservedInjector(), graph.graph);
       loader.setLogger({ log() {} });
       await loader.createInstancesOfDependencies(); graph.dependencies.applyApplicationProviders();
@@ -255,22 +276,38 @@ module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, a
       assert.equal(auth.identity, identity); assert.equal(auth.prisma, database); assert.equal(identity.prisma, database);
       assert.equal(guard.auth, auth); assert.equal(get(platformModule, publicApi.AUTH_HTTP_APPLICATION), auth);
       assert.deepEqual(graph.configuration.getGlobalGuards(), [guard], 'one original public global guard');
-      const dependencies = factoryCalls.get(assembly.PUBLIC_CORE_APPLICATION);
-      assert.equal(dependencies.length, 1); assert.equal(dependencies[0][0], database);
-      const publicDependencies = dependencies[0][1];
-      assert.equal(publicDependencies.database, database); assert.equal(publicDependencies.users.prisma, database);
       const core = get(findModule(publicCore.CoreHostModule), publicCore.CORE_HOST_APPLICATION);
       const packagesModule = findModule(publicCore.CorePackageAssemblyModule);
       const packages = get(packagesModule, publicCore.CORE_PACKAGE_ASSEMBLY);
       assert.equal(factoryCalls.get(publicCore.CORE_HOST_APPLICATION).length, 1);
-      assert.equal(factoryCalls.get(publicCore.CORE_HOST_APPLICATION)[0][0], core);
       assert.equal(factoryCalls.get(publicCore.CORE_PACKAGE_ASSEMBLY).length, 1);
-      assert.equal(factoryCalls.get(publicCore.CORE_PACKAGE_ASSEMBLY)[0][0], publicDependencies);
+      let ticketsAssembly, packageConfiguration;
+      if (isPlatform) {
+        const dependencies = factoryCalls.get(assembly.PUBLIC_CORE_APPLICATION);
+        assert.equal(dependencies.length, 1); assert.equal(dependencies[0][0], database);
+        const publicDependencies = dependencies[0][1];
+        assert.equal(publicDependencies.database, database); assert.equal(publicDependencies.users.prisma, database);
+        assert.equal(factoryCalls.get(publicCore.CORE_HOST_APPLICATION)[0][0], core);
+        assert.equal(factoryCalls.get(publicCore.CORE_PACKAGE_ASSEMBLY)[0][0], publicDependencies);
+      } else {
+        ticketsAssembly = factoryCalls.get(publicCore.CORE_HOST_APPLICATION)[0][0];
+        assert.equal(ticketsAssembly.application, core); assert.equal(ticketsAssembly.packages, packages);
+        assert.deepEqual(factoryCalls.get(publicCore.CORE_PACKAGE_ASSEMBLY), [[ticketsAssembly]]);
+        const providers = graph.modules.flatMap(item => [...item.providers.values()])
+          .filter(wrapper => wrapper.instance === ticketsAssembly);
+        assert.equal(providers.length, 1, 'one original tickets application factory');
+        const calls = factoryCalls.get(providers[0].token);
+        assert.equal(calls.length, 1); assert.equal(calls[0][0], database);
+        packageConfiguration = calls[0][1];
+        assert(packageConfiguration instanceof build.requireDeps('@nestjs/config').ConfigService);
+        assert.equal(packageConfiguration.get('CORE_PACKAGE_STORAGE_ROOT'), storage);
+        assert.equal(packageConfiguration.get('CORE_PLATFORM_PACKAGE_REFERENCE'), reference);
+      }
       const access = get(platformModule, publicApi.REGISTERED_CORE_HTTP_ACCESS);
       assert.equal(guard.cores, access);
       assert.deepEqual(factoryCalls.get(publicApi.REGISTERED_CORE_HTTP_ACCESS), [[core, packages]], 'one original Core/package dispatcher');
-      for (const url of ['/rental/orders', '/cores/rental/orders', '/cores/example-tickets/tickets', '/unknown/business']) {
-        assert.equal(core.http.resolve('GET', url, 'operator'), undefined, 'zero Core business routes');
+      for (const url of ['/rental/orders', '/cores/rental/orders', ...(isPlatform ? ['/cores/example-tickets/tickets'] : []), '/unknown/business']) {
+        assert.equal(core.http.resolve('GET', url, 'operator'), undefined, 'unselected Core business routes');
         assert.equal(access.registered('GET', url, 'operator'), false, 'unselected business not registered');
       }
       const { PATH_METADATA, METHOD_METADATA } = build.requireDeps('@nestjs/common/constants');
@@ -294,6 +331,30 @@ module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, a
           assert(document.paths['/api' + url]?.[verb.toLowerCase()], 'same public package OpenAPI ' + url);
         }
       }
+      if (isTickets) {
+        const business = load('@rental-os/example-tickets-core'), http = load('@rental-os/example-tickets-core/nest');
+        const module = findModule(http.TicketsHttpModule), service = get(module, business.TicketsService);
+        const controller = module.controllers.get(http.TicketsController).instance;
+        assert(service instanceof business.TicketsService && service === ticketsAssembly.tickets.service);
+        assert.equal(controller.service, service); assert.equal(controller.principal, ticketsAssembly.tickets.principals);
+        assert.deepEqual(factoryCalls.get(business.TicketsService), [[ticketsAssembly.tickets]]);
+        for (const name of Object.getOwnPropertyNames(http.TicketsController.prototype)) {
+          const handler = http.TicketsController.prototype[name], method = Reflect.getMetadata(METHOD_METADATA, handler);
+          if (method === undefined) continue;
+          const url = '/' + [Reflect.getMetadata(PATH_METADATA, http.TicketsController),
+            Reflect.getMetadata(PATH_METADATA, handler)].filter(Boolean).join('/'), verb = RequestMethod[method];
+          assert(core.http.resolve(verb, url, 'operator'), 'real tickets Core HTTP ' + url);
+          assert.equal(access.registered(verb, url, 'operator'), true);
+          assert.equal(access.registered(verb, url, 'client'), false);
+          assert.equal(access.registered(verb, url + '/unregistered/extra', 'operator'), false);
+          assert(document.paths['/api' + url.replace(/:([a-zA-Z][a-zA-Z0-9]*)/gu, '{$1}')]?.[verb.toLowerCase()],
+            'same tickets/package OpenAPI ' + url);
+        }
+        await assert.rejects(guard.canActivate({ switchToHttp: () => ({ getRequest: () => ({
+          method: 'GET', url: '/api/cores/example-tickets/tickets', headers: {}
+        }) }) }), /请先登录/);
+        await assert.rejects(access.authorize('GET', '/cores/example-tickets/tickets'), /主体/);
+      }
       await assert.rejects(guard.canActivate({ switchToHttp: () => ({ getRequest: () => ({
         method: 'GET', url: '/api/platform/core-packages/catalogue', headers: {}
       }) }) }), /请先登录/);
@@ -310,15 +371,76 @@ module.exports = async function verifyAiHostRoot({ build, memory, rentalFiles, a
       }
       for (const module of graph.modules) for (const wrapper of module.providers.values())
         assert.equal(wrapper.getInstanceByContextId(STATIC_CONTEXT).isResolved, true, 'unresolved provider ' + String(wrapper.token));
-      assert(![...reads].some(file => /\/(?:apps\/(?:rental-api|api)|packages\/(?:rental-core|shared|ai-native[^/]*|example-tickets-core))\//u.test(file)));
-      assert(![...reads].some(file => file.endsWith('/apps/platform-api/dist/main.js')), 'startup entry never executed');
+      if (isTickets) {
+        const sourceFactory = memory.load(path.join(root, 'apps/example-tickets-api/dist/core-package-sources.js'));
+        let observations = 0;
+        const observationFailure = Error('original observation remains unavailable without a database');
+        const input = { lock: selected.lock,
+          storageDirectory: packageConfiguration.get('CORE_PACKAGE_STORAGE_ROOT'),
+          platformReference: packageConfiguration.get('CORE_PLATFORM_PACKAGE_REFERENCE'),
+          observe: async () => { observations++; throw observationFailure; } };
+        const sources = sourceFactory.createTicketsCorePackageSources(input), materials = await sources.materials.read();
+        assert.deepEqual(materials.base, selected.lock);
+        assert.deepEqual([...materials.cores.keys()], ['example-tickets']);
+        assert.deepEqual(materials.cores.get('example-tickets'), ticketsPackage.files);
+        assert.equal(materials.platform.length, 13);
+        assert.equal(materials.dataCapabilities?.size ?? 0, 0);
+        const sourceFiles = archive.readCoreArchive(platformArchive.bytes, selected.lock.platform.sha256).files;
+        for (const [index, migration] of materials.platform.entries())
+          assert.deepEqual(migration.sql, sourceFiles.get('apps/platform-api/' + selected.lock.platform.data.migrations[index].file));
+        assert.equal(observations, 0, 'preparation materials do not query an observation');
+        await assert.rejects(sources.deployment.read(), error => error === observationFailure);
+        assert.equal(observations, 1, 'verified bytes still require the original data observation');
+        console.log('PASS installed tickets source: complete fixed materials and original observation boundary');
+
+        for (const options of [{ storageDirectory: undefined }, { platformReference: undefined }, { platformReference: 'absent-platform' }]) {
+          const unavailable = sourceFactory.createTicketsCorePackageSources({ ...input, ...options });
+          assert.equal(await unavailable.materials.read(), undefined);
+          assert.equal(await unavailable.deployment.read(), undefined);
+        }
+        const contextFile = slash(path.join(root, 'platform-host.context.json')), contextBytes = installed.get(contextFile);
+        installed.delete(contextFile);
+        try {
+          assert.equal(await sources.materials.read(), undefined);
+          assert.equal(await sources.deployment.read(), undefined);
+        } finally { installed.set(contextFile, contextBytes); }
+        assert.equal(observations, 1, 'missing evidence never reaches data observation');
+        console.log('PASS installed tickets source: missing configuration, reference and receipt unavailable');
+
+        const originalContext = JSON.parse(contextBytes.toString('utf8'));
+        const changedHost = { ...originalContext, host: 'platform' };
+        const missingBuild = { ...originalContext }; delete missingBuild.platformBuild;
+        const changedRelease = structuredClone(originalContext); changedRelease.platformBuild.release.source.commit = 'f'.repeat(40);
+        const deploymentFile = 'apps/example-tickets-api/prisma-deployment/core.deployment.lock.json';
+        const coreFile = 'packages/example-tickets-core/' + ticketsPackage.pin.manifest.entries.server;
+        const mutations = [[contextFile, Buffer.from(JSON.stringify(changedHost))],
+          [contextFile, Buffer.from(JSON.stringify(missingBuild))], [contextFile, Buffer.from(JSON.stringify(changedRelease))],
+          ...['packages/platform-server/dist/index.js', coreFile, deploymentFile].map(file => {
+            const absolute = slash(path.join(root, file));
+            return [absolute, Buffer.concat([installed.get(absolute), Buffer.from('\nchanged')])];
+          })];
+        for (const [file, changed] of mutations) {
+          const original = installed.get(file); installed.set(file, changed); memory.put(file, changed);
+          try {
+            await assert.rejects(sources.materials.read(), /不一致|编译证据|工单组合|摘要/);
+            await assert.rejects(sources.deployment.read(), /不一致|编译证据|工单组合|摘要/);
+          } finally { installed.set(file, original); memory.put(file, original); }
+        }
+        assert.equal(observations, 1, 'invalid receipt, lock or actual package never reaches data observation');
+        console.log('PASS installed tickets source: altered receipt, runtime, Core package and lock rejected');
+      }
+      assert(![...reads].some(file => /\/(?:apps\/(?:rental-api|api)|packages\/(?:rental-core|shared|ai-native[^/]*))\//u.test(file)));
+      if (isPlatform) assert(![...reads].some(file => file.includes('/packages/example-tickets-core/')));
+      assert(![...executed].some(file => file.endsWith('/apps/platform-api/dist/main.js')), 'startup entry never executed');
+      assert(![...executed].some(file => file.endsWith('/apps/example-tickets-api/dist/main.js')), 'tickets startup entry never executed');
       assert.deepEqual(effects, [], 'zero database, transport, default client, timer or lifecycle effects');
       const result = { modules: graph.modules.length, controllers: controllers.length,
         providers: graph.modules.reduce((count, item) => count + item.providers.size, 0),
         factories: [...factoryCalls.values()].reduce((count, calls) => count + calls.length, 0),
         selectedClientsConstructed: constructedClients.length, publicModels: 40,
-        installedReads: reads.size, diskOutputs: 0, effects: 0, lifecycle: 'not-run', deployment: 'pending' };
-      console.log('PASS installed zero Core public root: ' + JSON.stringify(result));
+        ...(isTickets ? { coreIds: ['example-tickets'], sourceCases: 3 } : {}),
+        installedReads: reads.size, installedScripts: executed.size, diskOutputs: 0, effects: 0, lifecycle: 'not-run', deployment: 'pending' };
+      console.log('PASS installed ' + (isTickets ? 'single tickets Core' : 'zero Core public') + ' root: ' + JSON.stringify(result));
       return result;
     }
     const { RentalAppModule } = memory.load(path.join(root, 'apps/rental-api/dist/app.module.js'));

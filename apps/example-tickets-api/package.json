@@ -14,6 +14,7 @@
     "register:permissions": "node dist/register-permissions.js"
   },
   "dependencies": {
+    "@rental-os/platform-contracts": "0.1.0",
     "@rental-os/platform-api": "0.1.0",
     "@rental-os/platform-server": "0.1.0",
     "@rental-os/platform-core-host": "0.1.0",
@@ -30,5 +31,7 @@
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
   },
-  "devDependencies": { "@types/node": "^22.9.0" }
+  "devDependencies": {
+    "@types/node": "^22.9.0"
+  }
 }

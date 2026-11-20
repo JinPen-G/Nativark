@@ -13,18 +13,20 @@ import { composeTicketsPlatformHost } from "@rental-os/example-tickets-core/plat
 import { readTicketsPhysicalData } from "@rental-os/example-tickets-core/mysql";
 import { isDeepStrictEqual } from "node:util";
 import { requireTicketsDeploymentPackage } from "./deployment-package";
+import { createTicketsCorePackageSources } from "./core-package-sources";
 import { corePrismaMigrationName } from "@rental-os/core-contracts/deployment";
 
 export type TicketsCorePackageOptions = Pick<
   Parameters<typeof composePlatformCorePackageAssembly<PublicDatabaseTransaction>>[0],
   "storageDirectory" | "localArtifacts" | "deployment" | "materials" | "fetcher" | "now"
->;
+> & { platformReference?: string };
 
 export function composeTicketsApplication(database: PlatformDatabaseClient, input: CoreDeploymentLock,
   packageOptions: TicketsCorePackageOptions = {}) {
   const lock = CoreDeploymentLockSchema.parse(input);
   const pin = lock.cores.find(core => core.manifest.id === "example-tickets");
-  if (!pin || lock.cores.length !== 1) throw new Error("本示范宿主须选择且仅选择example-tickets Core");
+  if (!pin || lock.cores.length !== 1 || lock.dataCapabilities?.length)
+    throw new Error("本示范宿主须且仅选择 example-tickets Core，不选择数据能力");
   const dependencies = createPublicCoreDependencies<PublicDatabaseTransaction>(database), platformPlan = createPublicPlatformDataPlan();
   if (!isDeepStrictEqual(lock.platform.data, platformPlan.data)) throw new Error("部署锁的公共数据基线与当前宿主不一致");
   const { manifest } = requireTicketsDeploymentPackage(pin, lock.platform.versions);
@@ -38,11 +40,15 @@ export function composeTicketsApplication(database: PlatformDatabaseClient, inpu
       migrationNames: manifest.data.migrations.map(migration => corePrismaMigrationName(manifest.id, migration.id)), readPhysical: readTicketsPhysicalData }] });
   catalogue = createCoreDeployedCatalogue({ lock, registrations: [{ manifest, server: tickets.server }],
     http: [createTicketsHttpContribution()], observations });
+  const { platformReference, ...options } = packageOptions;
+  const sources = createTicketsCorePackageSources({ lock, storageDirectory: options.storageDirectory,
+    platformReference, observe: () => observations.read() });
   return {
     tickets,
     application: composePlatformCoreApplication<PublicDatabaseTransaction>({ ...dependencies, catalogue }),
     packages: composePlatformCorePackageAssembly<PublicDatabaseTransaction>({
-      ...packageOptions, database: dependencies.database, users: dependencies.users, catalogue,
+      ...options, deployment: options.deployment ?? sources.deployment, materials: options.materials ?? sources.materials,
+      database: dependencies.database, users: dependencies.users, catalogue,
       audit: createPlatformCorePackageAudit<PublicDatabaseTransaction>()
     })
   };

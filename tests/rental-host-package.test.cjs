@@ -50,6 +50,7 @@ async function run() {
     declarations: build.virtual.get(slash(path.join(root, 'apps/platform-api/generated/client/index.d.ts'))),
     schema: build.sourceRead(path.join(root, 'apps/platform-api/prisma/schema.prisma')) };
   build.compile('packages/example-tickets-core/tsconfig.json');
+  build.compile('apps/example-tickets-api/tsconfig.json');
   build.selectedClients.set(slash(path.join(root, 'apps/example-multi-core-api')),
     { client: slash(disabledClient.client), mode: 'rental' });
   build.compile('apps/example-multi-core-api/tsconfig.json');
@@ -357,12 +358,21 @@ async function run() {
       .filter(([file]) => file.startsWith('apps/platform-api/prisma/'))
       .map(([file, bytes]) => [file.slice('apps/platform-api/prisma/'.length), bytes])) },
     platformResult: platformHostResult, platformClient, platformArchive });
+  const { result: ticketsHostResult, lock: ticketsHostLock, ...ticketsHost } = await require('./platform-host-package-cases.cjs').verifyTicketsHostPackage({
+    t, build, memory: verificationMemory(build), sourceFiles, platformFiles, platformClient,
+    platformRelease: deploymentInput.release, archive, ticketsPackage, selectedLocks: [disabled.lock, enabled.lock] });
+  const ticketsRootDi = await verifyRoot({ build, memory: verificationMemory(build),
+    tickets: { lock: ticketsHostLock, files: new Map([...ticketsHostResult.files]
+      .filter(([file]) => file.startsWith('apps/example-tickets-api/prisma-deployment/'))
+      .map(([file, bytes]) => [file.slice('apps/example-tickets-api/prisma-deployment/'.length), bytes])) },
+    ticketsResult: ticketsHostResult, ticketsPackage, platformClient, platformArchive });
   assert.equal(fs.existsSync(temporary), false);
   console.log(JSON.stringify({ checks, builds: build.stages.length, disabled: { files: result.files.size, runtimeFiles: result.receipt.runtime.files, sha256: result.sha256 },
     enabled: { files: aiResult.files.size, runtimeFiles: aiResult.receipt.runtime.files, sha256: aiResult.sha256 },
     multi: { files: multiResult.files.size, runtimeFiles: multiResult.receipt.runtime.files, sha256: multiResult.sha256 },
     multiAi: { files: multiAiResult.files.size, runtimeFiles: multiAiResult.receipt.runtime.files, sha256: multiAiResult.sha256 },
     additional, additionalDeployment, adminConfigs, multiRootDi, rootDi, multiAiRootDi, platformHost, platformRootDi,
+    ticketsHost, ticketsRootDi,
     fixtureProvenance: true, diskOutputs: 0, imageBuild: 'not-run', database: 'not-connected', deployment: 'pending' }));
 }
 run().catch(error => { console.error(error.stack); process.exitCode = 1; });

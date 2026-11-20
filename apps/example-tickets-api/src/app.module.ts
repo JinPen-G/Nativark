@@ -20,7 +20,8 @@ export function ticketsApplicationModule(lock: CoreDeploymentLock) {
   @Module({ imports: [PlatformDatabaseModule, ConfigModule], providers: [{
     provide: assembledToken, inject: [PlatformDatabaseClient, ConfigService],
     useFactory: (database: PlatformDatabaseClient, config: ConfigService) => composeTicketsApplication(database, lock, {
-      storageDirectory: config.get<string>("CORE_PACKAGE_STORAGE_ROOT")
+      storageDirectory: config.get<string>("CORE_PACKAGE_STORAGE_ROOT"),
+      platformReference: config.get<string>("CORE_PLATFORM_PACKAGE_REFERENCE")
     })
   }], exports: [assembledToken] })
   class TicketsDependenciesModule {}

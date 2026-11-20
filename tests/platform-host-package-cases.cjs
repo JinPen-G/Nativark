@@ -82,8 +82,12 @@ module.exports = async function verifyPlatformHostPackage({ t, build, memory, so
   await t.test('零CoreCLI拒绝业务选装、缺参、相对路径和重复参数', () => {
     assert.throws(() => packager.parseArguments([]), /须提供/);
     assert.throws(() => packager.parseArguments(['--lock', 'relative.json']), /绝对路径/);
-    for (const option of ['--ai', '--host', '--client', '--rental-package', '--tickets-package', '--ai-data-package'])
+    for (const option of ['--ai', '--client', '--rental-package', '--ai-data-package'])
       assert.throws(() => packager.parseArguments([option, 'enabled']), /未知/);
+    assert.throws(() => packager.parseArguments(['--host', 'unregistered']), /未登记/);
+    assert.throws(() => packager.parseArguments(['--host', 'example-tickets']), /须显式提供 --tickets-package/);
+    for (const host of [[], ['--host', 'platform']])
+      assert.throws(() => packager.parseArguments([...host, '--tickets-package', path.join(memory.task, 'tickets')]), /只有工单宿主/);
     assert.throws(() => packager.parseArguments(['--lock', path.join(memory.task, 'lock.json'), '--lock', path.join(memory.task, 'lock.json')]), /重复/);
   });
   await t.test('零Core拒绝选装能力、错版锁、迁移或schema变化', () => {
@@ -154,6 +158,188 @@ module.exports = async function verifyPlatformHostPackage({ t, build, memory, so
   return { files: result.files.size, runtimeFiles: result.receipt.runtime.files, sha256: result.sha256,
     models: result.receipt.clients[0].models, migrations: lock.platform.data.migrations.length,
     fixtureProvenance: true, diskOutputs: 0, imageBuild: 'not-run', configuration: 'pending', deployment: 'pending', result, lock };
+};
+
+// 独立导出供同一打包 runner 复用实际工单包；默认零 Core 用例不隐式选装业务。
+module.exports.verifyTicketsHostPackage = async function verifyTicketsHostPackage({
+  t, build, memory, sourceFiles, platformFiles, platformClient, platformRelease, archive, ticketsPackage, selectedLocks
+}) {
+  assert(ticketsPackage?.pin && ticketsPackage.files?.size, '须提供原打包器生成的完整工单固定包');
+  for (const file of ['scripts/package-platform-host.cjs', 'scripts/package-rental-host.cjs', 'scripts/rental-host-lock.cjs',
+    'scripts/build-selected-prisma.cjs', 'scripts/rental-platform-build.cjs'])
+    memory.put(path.join(root, file), fs.readFileSync(path.join(root, file)));
+  const packager = memory.load(path.join(root, 'scripts/package-platform-host.cjs'));
+  const contracts = memory.load(build.exported('@rental-os/core-contracts', true));
+  const { corePrismaMigrationName } = memory.load(build.exported('@rental-os/core-contracts/deployment', true));
+  const platformPlan = memory.load(build.exported('@rental-os/platform-api/data-plan', true)).createPublicPlatformDataPlan();
+  const lock = contracts.CoreDeploymentLockSchema.parse({ lockVersion: 1, platform: platformRelease, cores: [ticketsPackage.pin] });
+  const host = 'apps/example-tickets-api', core = 'packages/example-tickets-core', deployment = host + '/prisma-deployment/';
+  const workspaces = [...publicDirectories, host, core].sort();
+  const base = { host: 'example-tickets', lock, ticketsFiles: ticketsPackage.files, sourceFiles, platformFiles,
+    selection: platformClient, ts: build.ts, dependencyDirectory: build.deps };
+  let result;
+
+  await t.test('工单运行包保留完整固定包、八工作区、公共40Client及原13加1迁移', () => {
+    result = packager.createPlatformHostContext(base);
+    const decoded = archive.readCoreArchive(result.bytes, result.sha256);
+    assert.equal(decoded.files.size, result.files.size);
+    for (const [file, bytes] of result.files) assert.deepEqual(Buffer.from(decoded.files.get(file)), Buffer.from(bytes), file);
+    assert.deepEqual(result.receipt.clients.map(item => [item.directory, item.mode, item.models]),
+      [['apps/platform-api/generated/client', 'platform', 40]]);
+    assert.deepEqual(result.receipt.runtime.clients, ['apps/platform-api/generated/client']);
+    assert.equal(result.receipt.entry, host + '/dist/main.js');
+    assert.equal(result.receipt.host, 'example-tickets');
+    assert.equal(result.receipt.format, 'platform-host-context-1');
+    assert.equal(result.receipt.imageBuild, 'not-run');
+    assert.equal(result.receipt.configuration, 'pending');
+    assert.equal(result.receipt.deployment, 'pending');
+    assert.deepEqual(result.receipt.corePackages, [{ id: 'example-tickets', sha256: ticketsPackage.pin.sha256 }]);
+    const metadata = JSON.parse(result.files.get('package.json'));
+    assert.equal(metadata.name, 'example-tickets-host-runtime');
+    assert.deepEqual(metadata.workspaces, workspaces);
+    assert.equal(metadata.dependencies['@rental-os/example-tickets-api'], JSON.parse(sourceFiles.get(host + '/package.json')).version);
+    const installedCore = new Map([...result.files].filter(([file]) => file.startsWith(core + '/'))
+      .map(([file, bytes]) => [file.slice(core.length + 1), bytes]));
+    assert.equal(installedCore.size, ticketsPackage.files.size);
+    for (const [file, bytes] of ticketsPackage.files) assert.deepEqual(installedCore.get(file), bytes, file);
+    assert.equal(archive.createCoreArchive(installedCore).sha256, ticketsPackage.pin.sha256);
+    // admin/source 是完整 Core 包的声明材料，不因此加入宿主运行依赖，也不在打包时丢弃。
+    assert.deepEqual(installedCore.get(ticketsPackage.pin.manifest.entries.admin),
+      ticketsPackage.files.get(ticketsPackage.pin.manifest.entries.admin));
+    assert.deepEqual(JSON.parse(result.files.get(deployment + 'core.deployment.lock.json')), lock);
+    assert.equal(result.receipt.deploymentLockSha256, hash(result.files.get(deployment + 'core.deployment.lock.json')));
+    assert.equal(lock.platform.data.migrations.length, 13);
+    assert.equal(ticketsPackage.pin.manifest.data.migrations.length, 1);
+    assert.deepEqual(platformPlan.data, lock.platform.data);
+    const expectedMigrations = platformPlan.migrationNames.map(name => deployment + 'migrations/' + name + '/migration.sql');
+    for (const [index, migration] of lock.platform.data.migrations.entries()) {
+      const original = 'apps/platform-api/' + migration.file, bytes = platformFiles.get(original);
+      assert.deepEqual(result.files.get(original), bytes, '原公共观察路径 ' + original);
+      assert.deepEqual(result.files.get(expectedMigrations[index]), bytes, '组合部署路径 ' + expectedMigrations[index]);
+      assert.equal(hash(bytes), migration.sha256);
+    }
+    for (const migration of ticketsPackage.pin.manifest.data.migrations) {
+      const file = deployment + 'migrations/' + corePrismaMigrationName(ticketsPackage.pin.manifest.id, migration.id) + '/migration.sql';
+      expectedMigrations.push(file);
+      assert.deepEqual(result.files.get(file), ticketsPackage.files.get(migration.file));
+      assert.equal(hash(result.files.get(file)), migration.sha256);
+    }
+    assert.deepEqual([...result.files.keys()].filter(file => file.startsWith(deployment) && file.endsWith('/migration.sql')).sort(),
+      expectedMigrations.sort());
+    assert.equal([...result.files.keys()].filter(file => file.startsWith('apps/platform-api/prisma/') && file.endsWith('/migration.sql')).length, 13);
+    for (const file of ['apps/platform-api/prisma/schema.prisma', deployment + 'schema.prisma'])
+      assert.deepEqual(result.files.get(file), platformFiles.get('apps/platform-api/prisma/schema.prisma'));
+    assert.equal(result.receipt.clients[0].schemaSha256, hash(result.files.get(deployment + 'schema.prisma')));
+    assert.match(result.files.get(deployment + 'migrations/migration_lock.toml').toString(), /provider = "mysql"/u);
+    for (const file of result.files.keys()) {
+      if (/^(?:apps|packages)\//u.test(file)) assert(workspaces.some(directory => file.startsWith(directory + '/')), file);
+      if (!file.startsWith(core + '/'))
+        assert(!/(?:^|\/)(?:node_modules|generated|docs|output|src|admin|\.env)(?:\/|$)/u.test(file), file);
+    }
+  });
+
+  await t.test('工单锁投影保留原版本与完整性，运行闭包不引入Rental、AI或后台依赖', () => {
+    const original = JSON.parse(sourceFiles.get('package-lock.json')), projected = JSON.parse(result.files.get('package-lock.json'));
+    assert.deepEqual(Object.keys(projected.packages).filter(file => /^(?:apps|packages)\//u.test(file)).sort(), workspaces);
+    for (const file of ['packages/rental-core', 'packages/shared', 'packages/ai-native-server', 'packages/ai-native-data',
+      'apps/rental-api', 'apps/example-multi-core-api', 'packages/platform-admin', 'apps/platform-admin', 'node_modules/react'])
+      assert.equal(projected.packages[file], undefined, file);
+    const semver = build.requireDeps('semver'), { lockedDependency } = memory.load(path.join(root, 'scripts/rental-host-lock.cjs'));
+    for (const [owner, metadata] of Object.entries(projected.packages)) {
+      if (metadata.link) { assert.deepEqual(metadata, original.packages[owner], owner); continue; }
+      if (owner.includes('node_modules/')) for (const field of ['version', 'integrity', 'resolved'])
+        assert.equal(metadata[field], original.packages[owner][field], owner + ' ' + field);
+      for (const [name, range] of Object.entries({ ...metadata.dependencies, ...metadata.devDependencies, ...metadata.optionalDependencies, ...metadata.peerDependencies })) {
+        let dependency = projected.packages[lockedDependency(projected, owner, name)];
+        if (!dependency && (metadata.optionalDependencies?.[name] || metadata.peerDependenciesMeta?.[name]?.optional)) continue;
+        assert(dependency, owner + ' missing ' + name);
+        if (dependency.link) dependency = projected.packages[dependency.resolved];
+        assert(semver.satisfies(dependency.version, range), owner + ' wrong version ' + name);
+      }
+    }
+    assert.equal(projected.packages['node_modules/prisma'].dev, true);
+    assert.equal(projected.packages['node_modules/@nestjs/core'].dev, undefined);
+    assert.equal(result.receipt.originalNpmLockSha256, hash(sourceFiles.get('package-lock.json')));
+    assert.deepEqual(result.receipt.platformBuild.release, lock.platform);
+    assert.equal(result.receipt.platformBuild.sourceArchiveSha256, lock.platform.sha256);
+    const packageNames = new Set(workspaces.map(directory => JSON.parse(result.files.get(directory + '/package.json')).name));
+    assert(result.receipt.runtime.resolutions.some(item => item.from.startsWith(core + '/dist/')));
+    for (const item of result.receipt.runtime.resolutions) {
+      assert(workspaces.some(directory => item.from.startsWith(directory + '/dist/')), item.from);
+      assert.notEqual(item.specifier, '@prisma/client', '只使用所选公共 Client；官方 runtime/library 可保留');
+      if (item.specifier.startsWith('@rental-os/')) assert(packageNames.has(item.specifier.split('/').slice(0, 2).join('/')), item.specifier);
+    }
+    const docker = result.files.get('Dockerfile').toString('utf8');
+    assert.equal((docker.match(/generate --schema/gu) || []).length, 1);
+    assert.match(docker, /generate --schema apps\/platform-api\/prisma\/schema\.prisma/u);
+    assert.match(docker, /CORE_DEPLOYMENT_LOCK=\/app\/apps\/example-tickets-api\/prisma-deployment\/core\.deployment\.lock\.json/u);
+    assert.match(docker, /CMD \["node", "apps\/example-tickets-api\/dist\/main\.js"\]/u);
+    assert(!/rental-api|ai-native|packages\/shared/u.test(docker));
+  });
+
+  await t.test('工单宿主拒绝零Core、额外Core、AI和不完整或摘要不符的固定包', () => {
+    const other = selectedLocks?.flatMap(selected => selected.cores).find(pin => pin.manifest.id !== 'example-tickets');
+    const ai = selectedLocks?.find(selected => selected.dataCapabilities?.length)?.dataCapabilities;
+    assert(other && ai, '复用真实 Rental 和 AI 部署锁作为反例');
+    for (const selected of [{ ...lock, cores: [] }, { ...lock, cores: [other] },
+      { ...lock, cores: [...lock.cores, other] }, { ...lock, dataCapabilities: ai }])
+      assert.throws(() => packager.createPlatformHostContext({ ...base, lock: selected }), /只选择一个完整工单包且无选装数据能力/);
+    assert.throws(() => packager.createPlatformHostContext({ ...base, ticketsFiles: undefined }), /完整工单包/);
+    assert.throws(() => packager.createPlatformHostContext({ ...base, host: 'platform', lock: { ...lock, cores: [] } }), /零 Core/);
+    assert.throws(() => packager.createPlatformHostContext({ ...base, host: 'unregistered' }), /未登记/);
+    const incomplete = new Map(ticketsPackage.files); incomplete.delete(ticketsPackage.pin.manifest.entries.server);
+    const changed = new Map(ticketsPackage.files);
+    changed.set('README.md', Buffer.concat([changed.get('README.md'), Buffer.from('\nchanged\n')]));
+    for (const files of [new Map(), incomplete, changed])
+      assert.throws(() => packager.createPlatformHostContext({ ...base, ticketsFiles: files }), /清单\/包文件与部署锁不一致/);
+    const wrongHash = structuredClone(lock);
+    wrongHash.cores[0].sha256 = (lock.cores[0].sha256[0] === '0' ? '1' : '0') + lock.cores[0].sha256.slice(1);
+    assert.throws(() => packager.createPlatformHostContext({ ...base, lock: wrongHash }), /清单\/包文件与部署锁不一致/);
+  });
+
+  await t.test('显式工单CLI读取同一完整包生成同字节归档，拒绝错选、缺参和覆盖', () => {
+    const directory = path.resolve(memory.task, 'tickets-platform-package'), relative = path.relative(path.resolve(memory.task), directory);
+    assert(relative && relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative));
+    assert.equal(memory.fs.existsSync(directory), false, '本次内存 fixture 不覆盖已有材料');
+    assert.equal(fs.existsSync(directory), false, '本次不创建磁盘目录');
+    const output = path.join(directory, 'tickets-host.tgz'), lockFile = path.join(directory, 'lock.json');
+    const sourceArchive = path.join(directory, 'platform.tgz'), tickets = path.join(directory, 'tickets');
+    try {
+      memory.put(lockFile, json(lock)); memory.put(sourceArchive, archive.createCoreArchive(platformFiles).bytes);
+      for (const [file, bytes] of ticketsPackage.files) memory.put(path.join(tickets, file), bytes);
+      memory.put(platformClient.client, platformClient.declarations);
+      memory.put(path.join(path.dirname(platformClient.client), 'schema.prisma'), platformClient.schema);
+      const args = ['--host', 'example-tickets', '--lock', lockFile, '--platform-package', sourceArchive,
+        '--platform-client', platformClient.client, '--tickets-package', tickets, '--output', output, '--deps', build.deps];
+      assert.deepEqual(packager.parseArguments(args), { host: 'example-tickets', ticketsPackage: tickets,
+        lock: lockFile, platformPackage: sourceArchive, platformClient: platformClient.client, output, deps: build.deps });
+      assert.throws(() => packager.parseArguments(args.filter((_, index) => index !== 8 && index !== 9)), /须显式提供 --tickets-package/);
+      assert.throws(() => packager.parseArguments(args.map(value => value === 'example-tickets' ? 'platform' : value)), /只有工单宿主/);
+      assert.throws(() => packager.parseArguments(args.map(value => value === 'example-tickets' ? 'unregistered' : value)), /未登记/);
+      assert.throws(() => packager.parseArguments(args.map(value => value === tickets ? 'relative-tickets' : value)), /绝对路径/);
+      assert.throws(() => packager.parseArguments([...args, '--tickets-package', tickets]), /重复/);
+      const written = packager.main(args);
+      assert.equal(written.status, 'packaged'); assert.equal(written.host, 'example-tickets');
+      assert.equal(written.sha256, result.sha256);
+      assert.deepEqual(memory.fs.readFileSync(output), Buffer.from(result.bytes));
+      assert.equal(written.files, result.files.size); assert.equal(written.bytes, result.bytes.length);
+      assert.equal(written.imageBuild, 'not-run'); assert.equal(written.configuration, 'pending'); assert.equal(written.deployment, 'pending');
+      assert.throws(() => packager.main(args), /已存在/);
+      assert.deepEqual(memory.fs.readFileSync(output), Buffer.from(result.bytes), '覆盖拒绝保留原归档');
+    } finally {
+      if (memory.fs.existsSync(directory)) {
+        assert(!memory.fs.lstatSync(directory).isSymbolicLink());
+        memory.fs.rmSync(directory, { recursive: true, force: true });
+      }
+      assert.equal(memory.fs.existsSync(directory), false);
+      assert.equal(fs.existsSync(directory), false);
+    }
+  });
+  return { result, lock, groups: 4, workspaces: workspaces.length, files: result.files.size,
+    runtimeFiles: result.receipt.runtime.files, sha256: result.sha256, models: result.receipt.clients[0].models,
+    platformMigrations: lock.platform.data.migrations.length, coreMigrations: ticketsPackage.pin.manifest.data.migrations.length,
+    migrations: lock.platform.data.migrations.length + ticketsPackage.pin.manifest.data.migrations.length,
+    fixtureProvenance: true, diskOutputs: 0, imageBuild: 'not-run', configuration: 'pending', deployment: 'pending' };
 };
 
 async function verifyRuntimeEvidence({ t, build, memory, platformFiles, result, lock, archive }) {

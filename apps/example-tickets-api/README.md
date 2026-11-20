@@ -9,11 +9,22 @@
 | 受控组合 | [装配](src/assembly.ts)、[Nest模块](src/app.module.ts)；只选择一个Core，版本与包摘要固定，公共与业务使用一个数据库实例 |
 | 当前准入 | [公共Core宿主](../../packages/platform-core-host/README.md)、[工单标准宿主](../../packages/example-tickets-core/src/platform-host.ts)；当前账号 / Core授权 / 成员分配 / 订阅 / 绑定与业务权限 |
 | 实际数据 | [平台数据计划](../platform-api/src/platform-data.ts)、[工单物理检查](../../packages/example-tickets-core/src/mysql.ts)；原Prisma账和实际结构分别核验 |
+| 当前版本与更新材料 | [实际读取源](src/core-package-sources.ts)；核固定底座归档、六公共运行包、完整工单包及原迁移观察 |
 | 业务与界面 | [工单README](../../packages/example-tickets-core/README.md)、[业务HTTP](../../packages/example-tickets-core/src/nest.ts)、[四页贡献](../../packages/example-tickets-core/admin/index.tsx) |
 
 SaaS 的四组 Core 包管理 Controller 也从同一[应用工厂](src/assembly.ts)取得数据库、账号和真实工单注册目录。包管理与工单 HTTP 政策通过公共组合接点供给同一个 Guard，包接口资料并入本宿主 OpenAPI。[公共包管理装配](../../packages/platform-core-host/src/core-package-assembly.ts)
 
-配置 `CORE_PACKAGE_STORAGE_ROOT` 为宿主独占的绝对目录，按[包管理存储约定](../../packages/platform-core-host/src/core-packages/README.md)准备原归档、发行和候选目录。当前工单锁及物理观察继续服务原业务准入。包管理的当前版本、安装和更新还需真实底座发行、运行模块来源及原迁移材料，缺失时明确 unavailable。受控组合可通过 `composeTicketsApplication` 的第三个参数提供这些实际来源，候选准备沿原待部署状态保存。
+配置 `CORE_PACKAGE_STORAGE_ROOT` 为宿主独占的绝对目录，按[包管理存储约定](../../packages/platform-core-host/src/core-packages/README.md)准备原归档、发行和候选目录。`CORE_PLATFORM_PACKAGE_REFERENCE` 指向该目录 `archives/index.json` 中与启动锁完全相同的底座源码归档引用；实际 Nest 装配将两项配置传给当前版本及更新材料读取源。
+
+读取源从六个公共包的正式静态入口核 `platform-host.context.json` 同源编译证据，要求 `host=example-tickets` 及 `apps/example-tickets-api/prisma-deployment/core.deployment.lock.json` 等于当前锁。实际公共 schema / 13份原SQL和完整工单包须与固定归档逐字节一致；只允许一个工单Core和空数据能力集合。版本读取复用本宿主的原Prisma账及物理观察，更新材料读取本身不查库。缺配置、固定引用或运行收据保持 unavailable，已有但不一致的材料拒绝读取。受控组合仍可通过 `composeTicketsApplication` 的第三个参数显式注入来源，生产默认不使用替代证据；候选准备沿原待部署状态保存。
+
+独立运行包由 [公共宿主打包器](../../scripts/package-platform-host.cjs) 选择此组合。完成下述构建及部署锁准备后，在本仓库根目录执行；把示例绝对路径替换成同一固定组合的实际材料路径。
+
+```sh
+node scripts/package-platform-host.cjs --host example-tickets --lock "/absolute/prepared-tickets/core.deployment.lock.json" --platform-package "/absolute/releases/platform-source.tgz" --platform-client "/absolute/rental-OS/apps/platform-api/generated/client/index.d.ts" --tickets-package "/absolute/prepared/example-tickets" --output "/absolute/releases/example-tickets-host.tgz"
+```
+
+全部材料及输出路径须为绝对路径，`--platform-client` 必须指向执行脚本的本树 `apps/platform-api/generated/client/index.d.ts`，`--tickets-package` 使用已核定的完整工单包目录，`--output` 必须是尚不存在的 `.tgz`。依赖默认读取本树 `node_modules`；需指定已有依赖目录时追加 `--deps "/absolute/managed/node_modules"`。包保留完整工单包、组合迁移和公共观察所需原SQL，不加载Rental或AI；打包与材料核验不代表真实迁移、镜像构建或部署已经完成。
 
 准备项目锁定依赖后，构建示范宿主。
 
@@ -45,4 +56,4 @@ npm run register:permissions -w @rental-os/example-tickets-api
 
 SaaS管理员先创建测试租户，再使用 `/api/platform/core-host/tenant-grants` 开通工单；租户管理员给本人及需要的成员分配Core与工单角色，再办理首次绑定。业务入口是 `/api/cores/example-tickets/...`，支持创建 / 分派 / 开始 / 关闭及分页 / 原收据。包 / 注册、租户授权、成员分配、绑定 / 数据就绪分别成立。[同源接口资料](../../packages/example-tickets-core/src/openapi.ts) · [快速指南](../../packages/core-contracts/README.md#五步快速接入)
 
-当前已有实际Nest组合、内存类型、必要离线SQL业务及部署迁移组合证据；严格包核验接入后的干净包运行、真实数据库 / HTTP / 后台页面仍待验证。
+正式包内的实际根装配与材料校验已离线验证，包括唯一公共40模型Client、工单服务 / HTTP 与包管理装配、完整材料及原观察调用边界、缺失和篡改材料拒绝。验证没有执行应用生命周期；真实环境的首次 npm 安装、镜像构建、数据库 / HTTP / 后台页面及部署验收仍须另验。
