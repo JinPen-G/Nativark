@@ -813,9 +813,9 @@ export const AI_NATIVE_ORIGINAL_OBSERVATION_PROVIDER: FactoryProvider = {
   }
 };
 
-/** Server DI only. No environment/model/request setting can publish this token.
- * Omitted by the standard root, so registration alone grants no execution.
- * Operators still need real current task/action/plan policies and all Gateway
+/** Server DI configuration from the standard root's deployment publication.
+ * A missing orderModel section keeps execution disabled; model or request
+ * content cannot enable it. Operators still need current task/action/plan policies and all Gateway
  * capability, connection, entitlement and financial evidence dependencies. */
 export const AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION = Symbol('AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION');
 const orderExecutionConfiguration = z.discriminatedUnion('enabled', [
