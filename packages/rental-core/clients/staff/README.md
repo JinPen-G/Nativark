@@ -51,6 +51,18 @@ sessionEvents.on(assets.invalidateAssets);
 
 原[员工定向断言](../../../../tests/staff-miniprogram-static.test.cjs)覆盖必填、数值和照片字段，严格类型与正式 Native 构建核对旧入口和页面消费者。
 
+## 业务动作与专业权益准入
+
+同一正式入口提供 `createRentalStaffSubscriptionAccess`。[准入工厂](subscription-access.ts)接收原 `can/currentSession/currentWorkspace`、同一经营上下文缓存与刷新、公共订阅缓存、加载、失效及 owner，还有宿主原 `ApiError/isApiError` 与权益文案函数。[微信薄入口](../../../../apps/staff-miniprogram/src/core/subscription-access.ts)绑定一次实例，原订单 API 和页面继续消费同一准入函数。
+
+`STAFF_ACTIONS` 保留报价、建单和续租的新业务意图，以及履约、归还、资金与养护善后的原动作权限。专业权益继续按 `STAFF_FEATURE_BINDINGS` 的真实岗位权限、已发布目录、当前品类、来源和空间 capability 判定，未知绑定、未发布、缺配置或缺当前事实时沿原拒绝原因返回。原角色与品类筛选、权益行投影及文案保持。
+
+`freshFacts` 沿原 force 经营上下文刷新 → force 订阅刷新，前后复验同一 owner 和当前订阅对象。写入前再次核当前权限与 owner，当前 owner 的授权或冲突拒绝沿原失效与一次订阅重读，旧 owner 的错误保持原结果。实际业务操作、幂等键及支付结果仍由原运输和 Rental 服务端裁定。
+
+Core 模块载入及工厂创建只绑定宿主函数，调用准入时沿原事实链读取。公共订阅状态、事件、代次、提醒与资源寿命由[原订阅宿主](../../../../apps/staff-miniprogram/src/core/subscription.ts)维护，经营上下文销毁与迟到拒绝沿[同一上下文工厂](context.ts)。原[订单宿主](../../../../apps/staff-miniprogram/src/api/orders.ts)及[专业权益页](../../../../apps/staff-miniprogram/src/pages/subscription/index.ts)消费原函数和投影。
+
+原[员工行为断言](../../../../tests/staff-miniprogram-static.test.cjs)覆盖到期新业务拒绝、履约善后和现场写入幂等键，必要权限、专业权益、force 顺序与 owner 晚返冒烟及正式 Native SDK／Staff 类型入口核对原业务链。
+
 ## 经营空间上下文
 
 同一正式入口提供 `createRentalStaffContext`。[上下文工厂](context.ts)接收原会话上下文、品类和地点 API，同一 `currentWorkspace/currentWorkspaceId/contextVersion/applySessionContext`、会话订阅和 `contextEvents`，以及原地点存储键与本机时钟。[微信上下文入口](../../../../apps/staff-miniprogram/src/core/context.ts)持有一次绑定实例，原页面继续订阅同一个事件对象。

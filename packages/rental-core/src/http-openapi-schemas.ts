@@ -1,6 +1,6 @@
 /** Rental 原 HTTP schema 单源。保留历史宽泛字段，字段完整性缺口由接口贡献明确列出。 */
 import { STAFF_UPLOAD_OBSERVATION_SCHEMAS } from "@rental-os/shared";
-import { RENTAL_LOCATION_TYPES } from "./contracts";
+import { RENTAL_LOCATION_TYPES, RENTAL_PRICING_UNIT_CODES } from "./contracts";
 import { RENTAL_EXCHANGE_INSPECTION_SCHEMAS } from "./http-openapi-rental-exchange-inspection-preparation.schemas";
 import { ENTERPRISE_COMPONENT_SCHEMAS } from "./http-openapi-enterprise-schemas";
 import { ENTERPRISE_ORDER_DELEGATION_SCHEMAS } from "./http-openapi-enterprise-order-delegation-schemas";
@@ -20,6 +20,131 @@ export const RENTAL_HTTP_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ...ENTERPRISE_ORDER_DELEGATION_SCHEMAS,
   ...RENTAL_EXCHANGE_INSPECTION_SCHEMAS,
   GenericObject: objectSchema,
+  RentalPricingTier: objectOf({
+    minUnits: { type: "integer", minimum: 1, description: "阶梯起始单位数，含该单位。累进阶梯的首档从 1 开始，各档起点唯一。" },
+    unitAmount: { type: "number", minimum: 0, description: "原业务币种下的阶梯单价。" }
+  }, ["minUnits", "unitAmount"]),
+  RentalPricingGroupInitialRate: {
+    ...objectOf({
+      unit: { type: "string", enum: [...RENTAL_PRICING_UNIT_CODES], description: "当前品类已启用的计价单位，每个单位提交一条基本价。" },
+      baseAmount: { type: "number", minimum: 0, description: "原业务币种下每单位基本租金，沿所属业务金额精度。" },
+      depositAmount: { type: "number", minimum: 0, nullable: true, description: "固定押金模式的每件金额，省略或 null 由原创建入口采用 0。" },
+      depositMultiple: { type: "number", minimum: 0, description: "押金租金倍数，是否必需由当前生效规则核验。" },
+      preAuthAmount: { type: "number", minimum: 0, nullable: true, description: "固定预授权模式的每件冻结额度，省略或 null 由原创建入口采用 0。" },
+      preAuthMultiple: { type: "number", minimum: 0, description: "预授权租金倍数或风险附加倍数，由当前生效规则核验。" },
+      includedUsage: { type: "number", minimum: 0, description: "使用量计价包含量，单位来自当前品类。" },
+      excessUsageAmount: { type: "number", minimum: 0, description: "使用量的统一超额单价，与累进阶梯分别配置。" },
+      usagePrecision: { type: "integer", enum: [0, 1, 2], description: "使用量向上进位精度，0 为整数、1 为 0.1、2 为 0.01，原缺省为 0。" },
+      tierMode: { type: "string", enum: ["progressive", null], nullable: true },
+      tiers: { ...arrayOf("RentalPricingTier"), nullable: true },
+      maxAmount: { type: "number", minimum: 0, description: "单行租金封顶，0 表示免租，省略表示未设置封顶。" }
+    }, ["unit", "baseAmount"]),
+    description: "原 RentalPricingGroupInitialRateInputDto 输入。使用量单位提供统一超额单价，或选择 progressive 并提供从 1 开始的累进阶梯。包含量、超额单价和精度沿原保存校验仅用于 usage。"
+  },
+  SaveRentalPricingGroupRequest: {
+    ...objectOf({
+      id: { type: "string", minLength: 1, nullable: true, description: "省略时创建，提供已有 id 时原保存入口更新。PUT 使用路径 id。" },
+      code: { type: "string", minLength: 1, pattern: "\\S" },
+      name: { type: "string", minLength: 1, pattern: "\\S" },
+      description: { type: "string", nullable: true },
+      defaultPricingUnit: { type: "string", enum: [...RENTAL_PRICING_UNIT_CODES, null], nullable: true, description: "当前品类已启用的计价单位。POST 省略或 null 时采用首条基本价的单位。" },
+      initialRates: { ...arrayOf("RentalPricingGroupInitialRate"), nullable: true, description: "POST 入口同时保存基本价。PUT 沿原保存入口维护分组配置。" },
+      memberItemGroupIds: { type: "array", minItems: 1, uniqueItems: true, items: stringSchema, description: "当前空间已启用且库存方式相同的产品型号，至少选择一个。" },
+      status: { type: "string", enum: ["enabled", "disabled", null], nullable: true, description: "省略或 null 时新增采用 enabled，更新采用已存状态。" }
+    }, ["code", "name", "memberItemGroupIds"]),
+    description: "原 SaveRentalPricingGroupDto。品类绑定、型号归属、唯一编码和原提交边界由原 Guard、Core 保存及仓储核验。"
+  },
+  CreateRentalPricingGroupRequest: {
+    allOf: [
+      ref("SaveRentalPricingGroupRequest"),
+      objectOf({ initialRates: { ...arrayOf("RentalPricingGroupInitialRate"), minItems: 1 } }, ["initialRates"])
+    ],
+    description: "原 POST 入口要求至少一条基本价，并在同一事务内保存分组和基本价计划。",
+    example: {
+      code: "CAMERA-DAY",
+      name: "摄影设备日租",
+      memberItemGroupIds: ["item_group_example"],
+      initialRates: [{ unit: "day_24h", baseAmount: 100 }]
+    }
+  },
+  RentalPricingGroup: {
+    ...objectOf({
+      id: stringSchema,
+      tenantId: stringSchema,
+      categoryCode: stringSchema,
+      code: stringSchema,
+      name: stringSchema,
+      description: stringSchema,
+      defaultPricingUnit: { type: "string", nullable: true, description: "原已存计价单位，保存结果可包含 null。" },
+      memberItemGroupIds: arrayOf(stringSchema),
+      members: arrayOf(objectOf({
+        id: stringSchema,
+        code: stringSchema,
+        name: stringSchema,
+        inventoryMode: stringSchema,
+        unit: stringSchema,
+        status: stringSchema
+      }, ["id", "code", "name", "inventoryMode", "unit", "status"], false)),
+      status: { type: "string", description: "原已存状态。" },
+      version: { type: "integer" },
+      createdAt: { type: "string", format: "date-time" },
+      updatedAt: { type: "string", format: "date-time" }
+    }, ["id", "tenantId", "categoryCode", "code", "name", "memberItemGroupIds", "members", "status", "version", "createdAt", "updatedAt"], false),
+    description: "原 RentalPricingGroup 与 toPricingGroup / savePricingGroup 返回的完整分组及型号投影。",
+    example: {
+      id: "pricing_group_example",
+      tenantId: "tenant_example",
+      categoryCode: "camera",
+      code: "CAMERA-DAY",
+      name: "摄影设备日租",
+      defaultPricingUnit: "day_24h",
+      memberItemGroupIds: ["item_group_example"],
+      members: [{
+        id: "item_group_example",
+        code: "CAMERA-A",
+        name: "摄影设备型号",
+        inventoryMode: "serialized",
+        unit: "台",
+        status: "enabled"
+      }],
+      status: "enabled",
+      version: 1,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z"
+    }
+  },
+  RentalPricingGroupSecurityRateOverride: {
+    ...objectOf({
+      unit: { type: "string", enum: [...RENTAL_PRICING_UNIT_CODES] },
+      depositAmount: { type: "number", minimum: 0, description: "每件固定押金，省略沿用当前费率。" },
+      depositMultiple: { type: "number", minimum: 0, description: "押金租金倍数，省略沿用当前费率。" },
+      preAuthAmount: { type: "number", minimum: 0, description: "每件预授权冻结额度，省略沿用当前费率。" },
+      preAuthMultiple: { type: "number", minimum: 0, description: "预授权倍数，省略沿用当前费率。" }
+    }, ["unit"]),
+    description: "原 RentalPricingGroupSecurityRateOverrideDto。资金字段沿原业务金额或倍率精度，由当前生效规则核验。"
+  },
+  UpdateRentalPricingGroupSecurityRatesRequest: {
+    ...objectOf({ rates: { ...arrayOf("RentalPricingGroupSecurityRateOverride"), minItems: 1 } }, ["rates"]),
+    description: "计价单位唯一，完整覆盖该组当前空间价格版本的单位集合。原服务在同一事务内追加通过当前资金规则校验的空间价格版本。",
+    example: { rates: [{ unit: "day_24h", depositAmount: 500 }] }
+  },
+  RentalPricingGroupSecurityRatesResult: {
+    ...objectOf({
+      id: stringSchema,
+      sequence: { type: "integer" },
+      version: stringSchema,
+      effectiveFrom: { type: "string", format: "date-time" },
+      changeReason: { type: "string", nullable: true }
+    }, ["id", "sequence", "version", "effectiveFrom"], false),
+    description: "原 updatePricingGroupSecurityRates 返回的已追加空间价格版本摘要。",
+    example: {
+      id: "price_version_example",
+      sequence: 2,
+      version: "v2",
+      effectiveFrom: "2026-01-02T00:00:00.000Z",
+      changeReason: "维护定价分组的押金与预授权费率"
+    }
+  },
   SaveRentalFulfillmentLocationRequest: {
     ...objectOf({
       id: { type: "string", minLength: 1, nullable: true, description: "POST 省略 id 时新建，提供已有 id 时沿原保存入口更新。PUT 使用路径 id。" },

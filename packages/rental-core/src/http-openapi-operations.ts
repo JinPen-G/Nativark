@@ -517,34 +517,38 @@ export const RENTAL_HTTP_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "get", path: "/api/rental/v1/pricing-groups", tag: "RentalCore", operationId: "listRentalPricingGroups",
-    summary: "List tenant-defined pricing groups and their product-model members", permissions: ["rental-os:price:manage", "rental-os:order:view", "rental-os:order:create"], responseSchema: "GenericObject"
+    summary: "读取当前空间原已提交的定价分组和产品型号成员。", permissions: ["rental-os:price:manage", "rental-os:order:view", "rental-os:order:create"],
+    responseSchema: arrayOf("RentalPricingGroup")
   },
   {
     method: "post", path: "/api/rental/v1/pricing-groups", tag: "RentalCore", operationId: "createRentalPricingGroup",
-    summary: "Create a tenant pricing group", permissions: ["rental-os:price:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "沿原保存入口提交定价分组与基本价计划，共用原事务和品类绑定复验。", permissions: ["rental-os:price:manage"],
+    successStatus: 201, requestSchema: "CreateRentalPricingGroupRequest", responseSchema: "RentalPricingGroup",
+    errorResponses: {
+      "400": { description: "输入、基本价或型号成员未满足原 DTO、品类和价格校验。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "请求 id 对应的定价分组或成员型号不存在。", schema: "RentalHttpErrorResponse" },
+      "409": { description: "分组编码或原价格提交条件冲突。", schema: "RentalHttpErrorResponse" }
+    }
   },
   {
     method: "put", path: "/api/rental/v1/pricing-groups/{id}", tag: "RentalCore", operationId: "updateRentalPricingGroup",
-    summary: "Update a tenant pricing group and its member models", permissions: ["rental-os:price:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "以路径 id 保存定价分组及成员配置，沿原提交入口返回已保存分组。", permissions: ["rental-os:price:manage"],
+    requestSchema: "SaveRentalPricingGroupRequest", responseSchema: "RentalPricingGroup",
+    errorResponses: {
+      "400": { description: "输入、成员状态、库存方式或默认计价单位未通过原校验。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "路径 id 对应的定价分组或成员型号不存在。", schema: "RentalHttpErrorResponse" },
+      "409": { description: "分组编码或当前品类绑定发生冲突。", schema: "RentalHttpErrorResponse" }
+    }
   },
   {
     method: "patch", path: "/api/rental/v1/pricing-groups/{id}/security-rates", tag: "RentalCore", operationId: "updateRentalPricingGroupSecurityRates",
-    summary: "Append a space price version with updated deposit and pre-authorization rates for one pricing group",
-    permissions: ["rental-os:price:manage"],
-    requestSchema: objectOf({
-      rates: {
-        type: "array",
-        minItems: 1,
-        items: objectOf({
-          unit: stringSchema,
-          depositAmount: numberSchema,
-          depositMultiple: numberSchema,
-          preAuthAmount: numberSchema,
-          preAuthMultiple: numberSchema
-        }, ["unit"], false)
-      }
-    }, ["rates"], false),
-    responseSchema: "GenericObject"
+    summary: "按原完整单位集合维护该组押金与预授权费率，并追加空间价格版本。", permissions: ["rental-os:price:manage"],
+    requestSchema: "UpdateRentalPricingGroupSecurityRatesRequest", responseSchema: "RentalPricingGroupSecurityRatesResult",
+    errorResponses: {
+      "400": { description: "单位集合或资金费率未通过校验，或原数据源不支持该空间价格版本操作。", schema: "RentalHttpErrorResponse" },
+      "404": { description: "当前空间不存在该定价分组。", schema: "RentalHttpErrorResponse" },
+      "409": { description: "待生效调价、缺失当前价格版本、相同费率、品类绑定或并发版本写入发生冲突。", schema: "RentalHttpErrorResponse" }
+    }
   },
   {
     method: "get", path: "/api/rental/v1/assets", tag: "RentalCore", operationId: "listRentalAssets",

@@ -31,3 +31,4 @@ export { createRentalStaffLabels, type RentalStaffLabelsPorts, type Tone, type O
 export { createRentalStaffPresenters, type RentalStaffPresentersPorts, type OrderCard } from "./presenters";
 export { createRentalStaffScan, type RentalStaffScanPorts, type ScanKind, type ScanResult, type ScanHistoryEntry } from "./scan";
 export { createRentalStaffContext, type RentalStaffContextPorts, type Terminology, type WorkspaceContext } from "./context";
+export { createRentalStaffSubscriptionAccess, STAFF_ACTIONS, STAFF_FEATURE_BINDINGS, type RentalStaffSubscriptionAccessPorts, type StaffAction, type AccessDecision, type FeatureBinding } from "./subscription-access";
