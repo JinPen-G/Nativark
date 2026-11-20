@@ -1,4 +1,4 @@
-/** 公共邀请、寄件与客服邮件请求沿宿主会话端口，保留原操作键与长请求时限。 */
+/** 公共邀请、寄件与客服邮件沿宿主会话端口；写入单次派发，保留原键与长请求时限。 */
 import axios from "axios";
 import { useMemo } from "react";
 import type {
@@ -41,11 +41,11 @@ export function createTenantMessagingApi(request: MessagingRequest) {
     invitationPreview: (data: InviteTenantOperatorRequest, signal?: AbortSignal) =>
       request<TenantOperatorInvitationMailPreview>("/platform/users/invitations/preview", { method: "post", data, signal }),
     invite: (data: InviteTenantOperatorRequest) =>
-      request<TenantOperatorInvitationRow>("/platform/users/invitations", { method: "post", data, timeout: 55_000 }),
+      request<TenantOperatorInvitationRow>("/platform/users/invitations", { method: "post", data, timeout: 55_000, retryAuthentication: false }),
     invitationByKey: (key: string, signal?: AbortSignal) =>
       request<TenantOperatorInvitationRow>(`/platform/users/invitations/by-key/${encodeURIComponent(key)}`, { signal }),
     revokeInvitation: (id: string) =>
-      request<TenantOperatorInvitationRow>(`/platform/users/invitations/${encodeURIComponent(id)}/revoke`, { method: "post" })
+      request<TenantOperatorInvitationRow>(`/platform/users/invitations/${encodeURIComponent(id)}/revoke`, { method: "post", retryAuthentication: false })
   };
 }
 
@@ -60,7 +60,7 @@ export function createTenantSupportApi(request: MessagingRequest) {
       request<TenantSupportEmailPage>("/platform/support/emails", { params, signal }),
     detail: (id: string, signal?: AbortSignal) =>
       request<TenantSupportEmailDetail>(`/platform/support/emails/${encodeURIComponent(id)}`, { signal }),
-    sync: () => request<SyncTenantSupportEmailsResult>("/platform/support/emails/sync", { method: "post", data: {}, timeout: 110_000 })
+    sync: () => request<SyncTenantSupportEmailsResult>("/platform/support/emails/sync", { method: "post", data: {}, timeout: 110_000, retryAuthentication: false })
   };
 }
 

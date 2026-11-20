@@ -30,6 +30,8 @@ const invitationApi = createOperatorInvitationApi("/api");
 
 [请求工厂](client.ts)沿宿主唯一认证请求发送，读取方法传递查询取消信号。邀请提交保留原 55 秒时限，邮箱同步保留原 110 秒时限，宿主将 `MessagingRequestOptions.timeout` 传给现有客户端。
 
+发送邀请、撤回邀请和邮箱同步设置 `retryAuthentication: false`，401直接返回本次失败，不刷新凭据后重发写入。邮箱查重和邀请预览是只读POST，仍可沿原会话刷新重读；请求方法不决定是否可重发。
+
 [邀请表单](OperatorInvitations.tsx)在按宿主实例、租户和账号隔离的内存记录中，按邮箱保存原请求。关闭重开、路由重挂载及 Core / 会话代次切换后，同一主体继续读取原 `idempotencyKey`。网络、408 或 5xx 的未确认结果保留原键。4xx 确定拒绝且原键读取为 404 后才释放该邮箱尝试。取消批次停止后续提交，原已提交项沿原键核对，撤回等待真实确认和原 API。选人、组织或业务配置变动会失效此前的邮件预览，迟到响应按配置代次核对。
 
 [接受页](AcceptOperatorInvitationPage.tsx)让 SaveButton 与回车共用同一次提交 Promise。成功或原凭证读取确认已接受后，清空表单和内存凭证并进入租户登录。待核对时由“核对原接受结果”调用原 `inspect`，仅待接受结果展示邀请详情和表单。密码长度、字母 / 数字 / 特殊字符和确认密码沿原校验。
