@@ -1,6 +1,6 @@
 # 平台 Core 宿主服务
 
-`@rental-os/core-host`维护平台自己的Core授权、成员分配和初始化绑定。当前已有管理/绑定服务、MySQL事务适配及独立迁移源码，原Auth/管理入口、实际部署注册及无Core运行宿主按PCH接线。[当前实施入口](../../docs/平台底座/Core接入/平台Core接入-协作接续.md)
+`@rental-os/core-host`维护平台自己的Core授权、成员分配和初始化绑定。当前已有管理/绑定服务、MySQL事务适配及独立迁移源码，原Auth/管理入口、实际部署注册及无Core运行宿主按PCH接线。[公共宿主接线](../platform-core-host/README.md)
 
 ## 授权和成员分配分别办理
 
