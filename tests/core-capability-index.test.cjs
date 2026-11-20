@@ -43,6 +43,70 @@ test("标准底座显式 workspace 能定位公共能力及独立 API 消费者"
   }
 });
 
+test("继承配置定位真实AI出口，越界、链接和不可读配置保留未解析", () => {
+  const root = path.resolve(__dirname, "..");
+  const packageFile = path.join(root, "package.json");
+  const rentalPackageFile = path.join(root, "apps/rental-api/package.json");
+  const aiConfigFile = path.join(root, "apps/rental-api/tsconfig.ai.json");
+  const baseConfigFile = path.join(root, "apps/rental-api/tsconfig.json");
+  const emittedFile = path.join(root, "apps/rental-api/dist-ai/ai-app.module.js");
+  const originalRead = fs.readFileSync, originalStat = fs.statSync, originalLstat = fs.lstatSync;
+  const metadata = JSON.parse(originalRead(packageFile, "utf8"));
+  const rentalMetadata = JSON.parse(originalRead(rentalPackageFile, "utf8"));
+  const aiConfig = JSON.parse(originalRead(aiConfigFile, "utf8"));
+  const fileStat = originalStat(baseConfigFile);
+  let scenario, forbiddenReads = 0;
+  fs.statSync = (file, ...args) => typeof file === "string" && path.resolve(file) === scenario?.extends
+    ? fileStat : originalStat(file, ...args);
+  fs.lstatSync = (file, ...args) => {
+    const resolved = typeof file === "string" ? path.resolve(file) : undefined;
+    if (resolved === emittedFile) return fileStat;
+    if (scenario?.linked && resolved === baseConfigFile) return { isSymbolicLink: () => true };
+    return originalLstat(file, ...args);
+  };
+  fs.readFileSync = (file, options) => {
+    if (typeof file !== "string") return originalRead(file, options);
+    const resolved = path.resolve(file);
+    let text;
+    if (resolved === packageFile) text = JSON.stringify({ ...metadata, workspaces: ["apps/rental-api"] });
+    else if (resolved === rentalPackageFile) text = JSON.stringify({ ...rentalMetadata,
+      exports: { "./ai-app-module": rentalMetadata.exports["./ai-app-module"] } });
+    else if (resolved === aiConfigFile && scenario?.extends) text = JSON.stringify({ ...aiConfig, extends: scenario.extends });
+    else if (resolved === scenario?.extends) {
+      forbiddenReads++;
+      text = JSON.stringify({ compilerOptions: { rootDir: path.join(root, "apps/rental-api/src") } });
+    } else if (resolved === baseConfigFile && scenario?.unreadable) {
+      throw Object.assign(new Error("配置读取被拒绝"), { code: "EACCES" });
+    } else if (resolved === emittedFile) text = "throw new Error('生成物不能作为源码或执行');";
+    else return originalRead(file, options);
+    const encoding = typeof options === "string" ? options : options?.encoding;
+    return encoding ? Buffer.from(text).toString(encoding) : Buffer.from(text);
+  };
+  try {
+    const index = buildRepositoryCapabilityIndex(root);
+    const capability = index.capabilities.find(item =>
+      item.id === "export:@rental-os/rental-api/ai-app-module:RentalAiAppModule");
+    assert.ok(capability);
+    assert.equal(capability.sources[0].path, "apps/rental-api/src/ai-app.module.ts");
+    assert.equal(index.issues.some(issue => issue.code === "export_source"), false);
+    for (scenario of [
+      { extends: path.resolve(root, "../outside-tsconfig.json") },
+      { extends: path.join(root, "node_modules/blocked-tsconfig.json") },
+      { linked: true },
+      { unreadable: true }
+    ]) {
+      const rejected = buildRepositoryCapabilityIndex(root);
+      assert.ok(rejected.issues.some(issue => issue.code === "export_source"), JSON.stringify(scenario));
+      assert.equal(rejected.capabilities.some(item => item.entry?.module === "@rental-os/rental-api/ai-app-module"), false);
+    }
+    assert.equal(forbiddenReads, 0);
+  } finally {
+    fs.readFileSync = originalRead;
+    fs.statSync = originalStat;
+    fs.lstatSync = originalLstat;
+  }
+});
+
 test("静态API资料定位正则原文与DTO字段，动态校验和缺失引用保持来源", () => {
   const ts = require("typescript");
   const { RepositorySource } = require("../packages/core-contracts/dist/repository-source.js");

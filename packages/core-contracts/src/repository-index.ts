@@ -26,17 +26,39 @@ function exportTargets(value: unknown): string[] {
   return [];
 }
 
+function packageCompilerOptions(root: string, file: string): ts.CompilerOptions | undefined {
+  const host: ts.ParseConfigHost = {
+    useCaseSensitiveFileNames: ts.sys.useCaseSensitiveFileNames,
+    fileExists: path => isRepositorySourcePath(root, path) && ts.sys.fileExists(path),
+    readFile: path => isRepositorySourcePath(root, path) ? ts.sys.readFile(path) : undefined,
+    readDirectory: () => []
+  };
+  try {
+    const config = ts.readConfigFile(file, host.readFile);
+    if (config.error) return;
+    const parsed = ts.parseJsonConfigFileContent(config.config, host, dirname(file), undefined, file);
+    // 这里只读取输出路径，不枚举编译输入；无输入诊断不影响配置继承的解析。
+    if (parsed.errors.some(diagnostic => ![18002, 18003].includes(diagnostic.code))) return;
+    return parsed.options;
+  } catch {
+    return;
+  }
+}
+
 function packageSource(root: string, directory: string, target: string): string | undefined {
   const absolute = resolve(root, directory, target);
   if (!isRepositorySourcePath(root, absolute)) return undefined;
   if (/\.(?:tsx?|mts|cts)$/u.test(target) && !/\.d\.[mc]?ts$/u.test(target)
     && lstatSync(absolute, { throwIfNoEntry: false })?.isFile()) return absolute;
-  let generated = false;
+  let generated = false, configurationUnavailable = false;
   const configFiles = readdirSync(resolve(root, directory)).filter(file => /^tsconfig(?:\.[^.]+)*\.json$/u.test(file));
   for (const configFile of configFiles) {
-    const config = readRepositoryJson(root, `${directory}/${configFile}`);
-    const options = config.compilerOptions as Record<string, unknown> | undefined;
-    if (!options || typeof options.outDir !== "string" || typeof options.rootDir !== "string") continue;
+    const options = packageCompilerOptions(root, resolve(root, directory, configFile));
+    if (!options) {
+      configurationUnavailable = true;
+      continue;
+    }
+    if (typeof options.outDir !== "string" || typeof options.rootDir !== "string") continue;
     const output = resolve(root, directory, options.outDir);
     const suffix = repositoryPath(output, absolute);
     if (suffix.startsWith("..")) continue;
@@ -47,7 +69,9 @@ function packageSource(root: string, directory: string, target: string): string 
       if (isRepositorySourcePath(root, source) && lstatSync(source, { throwIfNoEntry: false })?.isFile()) return source;
     }
   }
-  if (!generated && /\.[mc]?jsx?$/u.test(target) && lstatSync(absolute, { throwIfNoEntry: false })?.isFile()) return absolute;
+  // 缺配置时无法排除历史生成物，保留未解析出口而不将其当作源码。
+  if (!generated && !configurationUnavailable && /\.[mc]?jsx?$/u.test(target)
+    && lstatSync(absolute, { throwIfNoEntry: false })?.isFile()) return absolute;
 }
 
 function sourceDocuments(root: string, directory: string): DevelopmentSourceReference[] {

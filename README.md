@@ -36,7 +36,7 @@ Nativark 将可复用的 SaaS 能力与行业业务分开维护，使新业务�
 | 基础服务 | 文件存储、通知、审计及事件、作业的公共接点 | 裁定业务文件 ACL、释放字段、消息内容和事件事实 |
 | Core 生命周期 | 受控注册、兼容检查、租户授权、成员分配、绑定与停用接点 | 维护领域配置、初始化、迁移、历史读取和在途业务收尾 |
 
-已有公共实现可从当前组合工程的 [API 模块](apps/api/src/modules)和[公共契约](packages/shared/src/index.ts)查阅。开发新业务Core先读[五步接入手册与Agent模板](packages/core-contracts/README.md#五步快速接入)，再按需查看真实工单示例及公共模块。
+公共实现可从[平台服务](packages/platform-server/README.md)、[公共后台](packages/platform-admin/README.md)和[公共契约](packages/platform-contracts/README.md)查阅。开发新业务Core先读[五步接入手册与Agent模板](packages/core-contracts/README.md#五步快速接入)，再按需查看真实工单示例及公共模块。
 
 ## 理解架构
 
@@ -71,7 +71,7 @@ Core 持有业务事实与最终裁定。Agent 通过明确发布的工具读取
 
 ## 业务 Core 接入
 
-接入设计围绕以下步骤组织，合同与示例代码随实施阶段交付。
+Core 通过正式清单、合同和受控宿主接入，按以下步骤使用。
 
 1. 开发者声明 Core 标识、实现与合同版本、公共依赖、业务资源、页面和迁移归属。
 2. 宿主通过受控构建入口装配 Core，核对命名空间、必需依赖及数据兼容。
@@ -120,7 +120,7 @@ Rental Core 是首个业务示范，提供商品、资产、库存、报价、�
 | `apps/example-tickets-admin` | 复用同一公共应用的工单Web宿主，四页声明接线与标准包构建核验 | [工单后台导读](apps/example-tickets-admin/README.md) |
 | `apps/example-multi-core-admin` | Rental与工单共用一份公共应用、会话和查询缓存，各自按当前授权显示页面与业务范围 | [双Core后台导读](apps/example-multi-core-admin/README.md) |
 | `apps/admin` | SaaS 管理、租户公共后台与现有业务页面 | [入口](apps/admin/src/main.tsx)、[本端规则](apps/admin/AGENTS.md) |
-| `packages/rental-core` | 租赁领域合同、规则、服务、仓储、HTTP与业务、渠道和开业页面贡献；原各端兼容消费，完整标准装配继续迁移 | [Rental包导读](packages/rental-core/README.md) · [会员与客户](packages/rental-core/admin/membership/README.md) · [工作台与报表](packages/rental-core/admin/operations/README.md) · [渠道](packages/rental-core/admin/channels/README.md) · [开业](packages/rental-core/admin/setup/README.md) |
+| `packages/rental-core` | 租赁领域合同、规则、服务、仓储、HTTP及各端贡献；原各端消费同一实现，独立宿主按标准包与部署锁装配 | [Rental包导读](packages/rental-core/README.md) · [会员与客户](packages/rental-core/admin/membership/README.md) · [工作台与报表](packages/rental-core/admin/operations/README.md) · [渠道](packages/rental-core/admin/channels/README.md) · [开业](packages/rental-core/admin/setup/README.md) |
 | `packages/shared` | 既有各端合同兼容总出口，公共和Rental单源分别来自各自包 | [正式出口](packages/shared/src/index.ts)、[包配置](packages/shared/package.json) |
 | `packages/ui-arc` | 组件源码、来源与许可 | [组件说明](packages/ui-arc/README.md) |
 | `packages/mcp-server` | 受控 MCP 传输和工具适配 | [包说明](packages/mcp-server/README.md) |
@@ -240,12 +240,12 @@ API 与后台也可分别通过 `npm run dev:api`、`npm run dev:admin` 启动�
 
 | 开发内容 | 实际入口 | 需要同时核对 |
 | --- | --- | --- |
-| 公共身份、租户与权限 | [Auth](apps/api/src/modules/auth/auth.service.ts)、[Guard](apps/api/src/common/api-auth.guard.ts)、[请求上下文](apps/api/src/common/request-identity.ts)、[平台服务](apps/api/src/modules/platform/platform.service.ts) | 当前身份、角色、租户及业务范围、会话撤销、审计 |
-| Core 接入与底座抽离 | [应用装配](apps/api/src/app.module.ts)、[公共契约](packages/shared/src/index.ts) | 数据所有者、正式出口、版本、构建组合和初始化事务 |
-| 管理后台与页面接入 | [后台规则](apps/admin/AGENTS.md)、[导航](apps/admin/src/app/navigation.tsx)、[路由](apps/admin/src/app/AppRouter.tsx) | 服务端授权、主题与语言、空错态、请求与缓存隔离 |
-| 公共 API 与运行时契约 | [shared 出口](packages/shared/src/index.ts)、[OpenAPI](apps/api/src/contracts/openapi-document.ts) | DTO、schema、生产者、各端消费者及产物版本 |
-| AI Native | [应用组合](apps/api/src/modules/ai-native/ai-native-application.providers.ts) | 工具发布、当前权限、Gateway、预算、批准与原收据 |
-| Rental 业务示范 | [Core 源码](apps/api/src/modules/rental-core) | 业务规则、历史快照、库存与金额、幂等及事务 |
+| 公共身份、租户与权限 | [认证](packages/platform-server/src/modules/auth/platform-auth.service.ts)、[公共Guard](packages/platform-server/src/platform-auth.guard.ts)、[请求上下文](packages/platform-server/src/common/request-identity.ts)、[平台服务导读](packages/platform-server/README.md) | 当前身份、角色、租户及业务范围、会话撤销、审计；原组合兼容入口继续沿同一实现 |
+| Core 接入与底座抽离 | [公共Core应用](packages/platform-core-host/src/platform-core-application.ts)、[公共宿主](apps/platform-api/src/app.module.ts)、[正式合同](packages/core-contracts/README.md) | 数据所有者、正式出口、版本、构建组合和初始化事务 |
+| 管理后台与页面接入 | [公共应用](packages/platform-admin/src/application.tsx)、[Core路由](packages/platform-admin/src/core/CoreRoutes.tsx)、[页面接入手册](packages/platform-admin/src/core/README.md)、[后台规则](apps/admin/AGENTS.md) | 服务端授权、主题与语言、空错态、请求与缓存隔离 |
+| 公共 API 与运行时契约 | [公共合同](packages/platform-contracts/README.md)、[公共OpenAPI](packages/platform-server/src/platform-openapi.ts)、[Core HTTP合同](packages/core-contracts/README.md#登记core的http政策)、[shared兼容出口](packages/shared/src/index.ts) | DTO、schema、生产者、各端消费者及产物版本 |
+| AI Native | [服务端导读](packages/ai-native-server/README.md)、[选装AI组合](apps/rental-api/src/ai-composition.ts) | 工具发布、当前权限、Gateway、预算、批准与原收据；当前组合使用明确所选数据与业务参加者 |
+| Rental 业务示范 | [领域应用](packages/rental-core/src/application.ts)、[HTTP组合](packages/rental-core/src/application-http.ts)、[独立宿主](apps/rental-api/src/assembly.ts) | 业务规则、历史快照、库存与金额、幂等及事务 |
 | 外部 Agent 客户端 | [MCP 服务](packages/mcp-server/README.md)、[Harness 插件](clients/harness-plugin/README.md) | 原身份、目标授权、数据投影和工具可用性 |
 
 阅读一项功能时，沿页面或调用方 → API 封装 → Controller / Guard → 应用与领域服务 → 仓储 / 外部适配 → 原结果读取追踪。
