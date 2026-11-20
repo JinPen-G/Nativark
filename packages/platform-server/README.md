@@ -51,7 +51,7 @@ const platform = PlatformServerModule.register({
 
 公共邀请、寄件和客服邮件也由本模块装配到同一数据库与邮件运行时。默认 [成员邀请权威](src/modules/platform/platform-member-invitation.authority.ts)只授普通租户角色和有效组织，显式接受空业务范围；账号、角色、审计与一次性凭证在原接受事务中提交。Core 使用权另行分配，原 Rental 邀请继续原经营空间规则。HTTP、DTO 与 OpenAPI 从同一消息声明产生，查重、预览和 `inspect` 明确为读取。[接口与接入](src/modules/messaging/README.md)
 
-登录、刷新与改密沿原认证算法；刷新旧会话的撤销与新会话创建同事务，改密和会话撤销同事务。租户外观权限沿 `system:integration:manage`，本人外观仅取当前签名主体；SaaS 身份不能借公共设置接口代替租户操作。旧品牌读取由 Rental 组合另外注入，公共服务不查询客户端业务表。
+登录、刷新与改密沿原认证算法。刷新旧会话的撤销与新会话创建同事务。本人改密在原事务匹配已校验的密码哈希与令牌版本，冲突返回 409，密码、状态、版本递增及旧会话撤销共同提交或回滚。本次提交版本作为私有认证回执，替代会话创建在自身事务锁定用户行并精确匹配该版本，后续改密或重置会使旧回执失效。原组合的 demo 数据源在既有会话撤销入口推进私有版本，历史记录省略版本时从 1 开始，改密回执在首次等待前固定。租户外观权限沿 `system:integration:manage`，本人外观仅取当前签名主体。SaaS 身份不能借公共设置接口代替租户操作。旧品牌读取由 Rental 组合另外注入，公共服务不查询客户端业务表。[改密与会话围栏](src/modules/platform/platform-identity.repository.ts) · [共用认证调用](src/modules/auth/auth-session.service.ts) · [原组合适配](../../apps/api/src/modules/platform/platform.service.ts)
 
 公共管理使用原 `system:tenant:manage/bootstrap`、`system:user:manage` 与 `system:role:manage`。租户成员管理还要求当前租户管理员或明确全租户数据范围；固定全权角色和SaaS身份不能经普通角色输入创建。权限码须已登记，角色不自动赋予Core使用权。管理员创建、状态与密码重置、权限修改和对应审计同事务，唯一键 / 事务冲突明确返回，错误不重做。本人资料只改姓名和联系方式。
 

@@ -32,9 +32,11 @@ type StoredUserWrite = { lastLoginAt?: Date; passwordHash?: string; mustChangePa
 export interface PlatformUserStore {
   findFirst(query: { where: { id?: string; tenantId?: string; account?: string; isActive?: boolean;
     tenant?: { status: StoredTenantStatus } }; include: UserRolesInclude }): PromiseLike<StoredPlatformUser | null>;
-  findUnique(query: { where: { id: string } }): PromiseLike<{ passwordHash: string } | null>;
+  findUnique(query: { where: { id: string } }): PromiseLike<{ passwordHash: string; tokenVersion: number } | null>;
   findUniqueOrThrow(query: { where: { id: string }; include: UserRolesInclude }): PromiseLike<StoredPlatformUser>;
   update(query: { where: { id: string }; data: StoredUserWrite }): PromiseLike<unknown>;
+  updateMany(query: { where: { id: string; passwordHash: string; tokenVersion: number };
+    data: StoredUserWrite }): PromiseLike<{ count: number }>;
 }
 export interface PlatformSessionStore {
   create(query: { data: NewPlatformAuthenticationSession }): PromiseLike<PlatformAuthenticationSession>;

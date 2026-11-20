@@ -96,10 +96,11 @@ export interface PlatformAuthenticationSource {
     | Promise<PlatformAuthenticationSession | null | undefined>;
   createAuthSession(
     input: NewPlatformAuthenticationSession,
+    expectedVersion?: number,
   ): PlatformAuthenticationSession | Promise<PlatformAuthenticationSession>;
   rotateAuthSession(previousId: string, input: NewPlatformAuthenticationSession): Promise<boolean>;
   revokeAuthSession(id: string): boolean | Promise<boolean>;
-  changeUserPassword(id: string, currentPassword: string, nextPassword: string): Promise<void>;
+  changeUserPassword(id: string, currentPassword: string, nextPassword: string): Promise<number>;
   findTenantByIdForAuth(id: string): PlatformTenantSummary | Promise<PlatformTenantSummary>;
   getSecurityBaseline(): Promise<SystemSecurityBaselineConfig>;
   recordSecurityAudit(input: {
@@ -271,7 +272,8 @@ export abstract class AuthSessionService<
     if (input.currentPassword === input.newPassword) {
       throw new BadRequestException("新密码不能与当前密码相同");
     }
-    await this.identity.changeUserPassword(user.id, input.currentPassword, input.newPassword);
+    const expectedVersion = await this.identity.changeUserPassword(user.id, input.currentPassword, input.newPassword);
+    if (!Number.isSafeInteger(expectedVersion)) throw new InternalServerErrorException("密码变更版本回执不可用");
     const refreshedUser = await this.identity.findUserById(user.id);
     if (!refreshedUser) throw new UnauthorizedException("账号已停用");
     const tenant = await this.identity.findTenantByIdForAuth(refreshedUser.tenantId);
@@ -282,7 +284,7 @@ export abstract class AuthSessionService<
       targetId: refreshedUser.id,
       detail: "用户已修改密码，其他会话全部失效。",
     });
-    return this.issueSession(refreshedUser, tenant, undefined, false, audience);
+    return this.issueSession(refreshedUser, tenant, undefined, false, audience, expectedVersion);
   }
 
   async getCurrentUser(authorization?: string, audience: AuthAudience = "operator"): Promise<AuthUser> {
@@ -304,12 +306,12 @@ export abstract class AuthSessionService<
     requestedWorkspaceId?: string | null,
     needsTenantOnboarding = false,
     audience: AuthAudience = "operator",
+    expectedVersion?: number,
   ): Promise<TLogin> {
     const sessionId = randomUUID();
     const refreshToken = randomBytes(48).toString("base64url");
-    // SPACE-02：登录即解析当前经营空间（默认空间优先，否则第一个可进入空间）。
-    // 平台管理租户没有成员关系，解析结果为 undefined —— 那是合法状态，
-    // 但其会话访问经营接口会被 fail-closed 拒绝。
+    // 受控宿主解析可进入的业务空间。公共 operator 会话允许无空间，
+    // staff 入口继续要求并复验当前经营空间。
     const workspaceId = await this.resolveSessionWorkspaceId(user.id, requestedWorkspaceId ?? undefined);
     if (audience === "staff" && (!workspaceId || user.isSaasAdmin)) {
       throw new UnauthorizedException("该账号没有可进入的员工经营空间");
@@ -324,7 +326,7 @@ export abstract class AuthSessionService<
       expiresAt: new Date(Date.now() + this.refreshTtlMs),
       currentWorkspaceId: workspaceId ?? null,
       audience,
-    });
+    }, expectedVersion);
     // 权限必须按解析出的空间重算：成员关系上的角色与数据范围优先于租户级默认值。
     const scoped = (await this.findWorkspaceScopedUser(user.id, workspaceId)) ?? user;
     return this.buildLoginResponse(

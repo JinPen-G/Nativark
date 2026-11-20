@@ -1,7 +1,7 @@
 /** 公共租户、账号角色与原签名会话的持久化仓储。
  * 登录/刷新/撤权仅访问平台表，业务空间和品类由Core适配补充。
  * 保留原角色映射与刷新事务；本仓储不创建业务绑定或授予Core使用权。 */
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import {
   RoleScope,
   TenantStatus,
@@ -78,6 +78,7 @@ export class PlatformIdentityRepository {
     return user;
   }
 
+  /** 改密回执的版本须在会话创建事务的用户行锁内核对，防止重置后继续签发。 */
   async createAuthSession(input: {
     id: string;
     userId: string;
@@ -85,8 +86,16 @@ export class PlatformIdentityRepository {
     expiresAt: Date;
     currentWorkspaceId?: string | null;
     audience?: "operator" | "staff";
-  }) {
-    return this.prisma.authSession.create({ data: input });
+  }, expectedVersion?: number) {
+    if (expectedVersion === undefined) return this.prisma.authSession.create({ data: input });
+    return this.prisma.$transaction(async transaction => {
+      const users = await transaction.$queryRaw<Array<{ tokenVersion: number }>>`
+        SELECT tokenVersion FROM User WHERE id = ${input.userId} FOR UPDATE`;
+      if (users.length !== 1 || users[0].tokenVersion !== expectedVersion) {
+        throw new ConflictException("密码已变化，请重新登录");
+      }
+      return transaction.authSession.create({ data: input });
+    });
   }
 
   /** 单次刷新令牌的消费和新会话创建必须同事务完成，避免旧令牌已作废却没有替代会话。 */
@@ -153,9 +162,11 @@ export class PlatformIdentityRepository {
     if (!user || !verifyPassword(user.passwordHash, currentPassword)) {
       throw new BadRequestException("当前密码不正确");
     }
-    await this.prisma.$transaction(async transaction => {
-      await transaction.user.update({
-        where: { id: userId },
+    if (!Number.isSafeInteger(user.tokenVersion)) throw new ConflictException("密码版本不可用，请重新登录");
+    return this.prisma.$transaction(async transaction => {
+      // 旧密码在事务外校验，写入仍须匹配该次哈希和版本，防止并发旧校验覆盖。
+      const changed = await transaction.user.updateMany({
+        where: { id: userId, passwordHash: user.passwordHash, tokenVersion: user.tokenVersion },
         data: {
           passwordHash: hashPassword(nextPassword),
           mustChangePassword: false,
@@ -164,10 +175,12 @@ export class PlatformIdentityRepository {
           tokenVersion: { increment: 1 },
         },
       });
+      if (changed.count !== 1) throw new ConflictException("密码已变化，请重新登录后重试");
       await transaction.authSession.updateMany({
         where: { userId, revokedAt: null },
         data: { revokedAt: new Date() },
       });
+      return user.tokenVersion + 1;
     });
   }
 

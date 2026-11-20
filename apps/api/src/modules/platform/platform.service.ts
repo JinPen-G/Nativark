@@ -90,6 +90,8 @@ interface StoredUser extends Omit<SaveSystemUserRequest, "tenantId"> {
   id: string;
   tenantId: string;
   password: string;
+  /** 历史 demo 记录省略时从1开始，仅用于认证内部撤销围栏。 */
+  tokenVersion?: number;
   mustChangePassword?: boolean;
   needsTenantOnboarding?: boolean;
 }
@@ -2201,8 +2203,12 @@ export class PlatformService {
     return user && tenant?.tenantStatus === TenantStatus.Active ? this.toUserRow(user) : undefined;
   }
 
-  createAuthSession(input: { id: string; userId: string; refreshTokenHash: string; expiresAt: Date; currentWorkspaceId?: string | null; audience?: "operator" | "staff" }) {
-    if (this.useMysqlDataSource()) return this.platformRepository.createAuthSession(input);
+  createAuthSession(input: { id: string; userId: string; refreshTokenHash: string; expiresAt: Date; currentWorkspaceId?: string | null; audience?: "operator" | "staff" }, expectedVersion?: number) {
+    if (this.useMysqlDataSource()) return this.platformRepository.createAuthSession(input, expectedVersion);
+    if (expectedVersion !== undefined) {
+      const user = this.users.find(item => item.id === input.userId);
+      if (!user || (user.tokenVersion ?? 1) !== expectedVersion) throw new ConflictException("密码已变化，请重新登录");
+    }
     const session = { ...input, audience: input.audience ?? "operator" as const };
     this.authSessions.set(input.id, session);
     return session;
@@ -2380,6 +2386,8 @@ export class PlatformService {
 
   revokeUserSessions(userId: string) {
     if (this.useMysqlDataSource()) return this.platformRepository.revokeUserSessions(userId);
+    const user = this.users.find(item => item.id === userId);
+    if (user) user.tokenVersion = (user.tokenVersion ?? 1) + 1;
     for (const session of this.authSessions.values()) {
       if (session.userId === userId) session.revokedAt = new Date();
     }
@@ -2391,10 +2399,13 @@ export class PlatformService {
     }
     const user = this.users.find((item) => item.id === userId);
     if (!user || user.password !== currentPassword) throw new BadRequestException("当前密码不正确");
+    // 本次同步改密和撤销固定一个版本，await之后不能借后续重置的版本继续签发。
+    const expectedVersion = (user.tokenVersion ?? 1) + 1;
     user.password = nextPassword;
     user.mustChangePassword = false;
     user.needsTenantOnboarding = false;
     await this.revokeUserSessions(userId);
+    return expectedVersion;
   }
 
   /** 仅由本机开发环境入口调用；详情与环境限制由 AuthService 负责。 */
