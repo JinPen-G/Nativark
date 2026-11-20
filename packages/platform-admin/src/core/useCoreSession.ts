@@ -1,4 +1,4 @@
-/** 登录成员的Core目录沿原认证和缓存读取，旧回调即时核对当前主体及本Core授权修订。
+/** 登录成员的Core目录沿原认证和缓存读取，旧回调即时核对当前主体、本Core授权及部署准入修订。
  * 页面就绪/对象范围仍由宿主及所属Core处理，目录不授予服务端业务执行权。 */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { canUseCorePage, type CoreSessionContext } from "@rental-os/core-contracts";

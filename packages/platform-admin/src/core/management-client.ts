@@ -33,6 +33,10 @@ export function createCoreManagementApi(runtime: AdminRuntime) {
   binding: (input: Query<"readBinding">, signal: AbortSignal) => send(routes.readBinding, input, signal),
   tenantGrantOperation: (input: Query<"readTenantGrantOperation">, signal: AbortSignal) => send(routes.readTenantGrantOperation, input, signal),
   memberAssignmentOperation: (input: Query<"readMemberAssignmentOperation">, signal: AbortSignal) => send(routes.readMemberAssignmentOperation, input, signal),
+  admission: (input: Query<"readAdmission">, signal: AbortSignal) => send(routes.readAdmission, input, signal),
+  changeAdmission: (input: Query<"changeAdmission">, signal: AbortSignal) => send(routes.changeAdmission, input, signal, { retryAuthentication: false }),
+  admissionOperation: (input: Query<"readAdmissionOperation">, signal: AbortSignal) => send(routes.readAdmissionOperation, input, signal),
+  assessRemoval: (input: Query<"assessRemoval">, signal: AbortSignal) => send(routes.assessRemoval, input, signal),
   sessionContext: (signal: AbortSignal) => send(CORE_SESSION_HTTP, undefined, signal, { prefix: "" }),
   scope: (input: ReturnType<typeof CORE_SCOPE_HTTP.request.parse>, signal: AbortSignal) => send(CORE_SCOPE_HTTP, input, signal, { prefix: "" })
   };

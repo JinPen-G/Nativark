@@ -5,7 +5,7 @@ import type { CoreSessionContext } from "@rental-os/core-contracts";
 import type { PlatformTenantSummary, SystemUserRow } from "@rental-os/platform-contracts";
 import { Alert, Empty, ListFilterBar, ListFilterItem, Result, Select } from "./components/ui";
 import { PageHeading, QueryState } from "./shell";
-import { CoreMemberAssignmentPanel, CoreTenantGrantPanel, useCoreManagementApi, useCoreSession } from "./core";
+import { CoreDeploymentAdmissionPanel, CoreMemberAssignmentPanel, CoreTenantGrantPanel, useCoreManagementApi, useCoreSession } from "./core";
 import { useAdminSession } from "./runtime";
 import { useLocale } from "./app/locale";
 import { usePlatformApplication } from "./application-context";
@@ -35,20 +35,22 @@ function AccessDirectory({ audience, cores, targets, loading, error, retry }: {
       {!error && !loading && (!cores.length
         ? <Empty description={audience === "saas" ? en ? "No Core is registered in this deployment." : "当前部署尚未注册业务 Core。"
           : en ? "Ask your SaaS administrator to enable a Core for this tenant." : "请联系 SaaS 管理员为租户开通业务 Core。"} />
-        : !targets.length ? <Empty description={en ? "No authorized directory entries." : "当前没有可管理的目录对象。"} /> : <>
+        : <>
           <ListFilterBar>
-            <ListFilterItem width="selectWide" label={targetLabel}>
+            {targets.length > 0 && <ListFilterItem width="selectWide" label={targetLabel}>
               <Select<string> showSearch={{ optionFilterProp: "label" }} allowClear
                 aria-label={targetLabel}
                 placeholder={audience === "saas" ? en ? "Choose a tenant" : "选择租户" : en ? "Choose a member" : "选择成员"}
                 value={target?.id} options={targets.map(item => ({ value: item.id, label: item.label }))}
                 onChange={value => choose("target", value)} />
-            </ListFilterItem>
+            </ListFilterItem>}
             <Select<string> aria-label={en ? "Business Core" : "业务 Core"} placeholder={en ? "Choose a Core" : "选择 Core"}
               allowClear value={core?.id} options={cores.map(item => ({ value: item.id, label: item.name }))}
               onChange={value => choose("core", value)} />
           </ListFilterBar>
-          {!selectionMissing && (target && core ? audience === "saas" ? <CoreTenantGrantPanel tenant={target} core={core} />
+          {audience === "saas" && core && <CoreDeploymentAdmissionPanel core={core} />}
+          {!targets.length ? <Empty description={en ? "No authorized directory entries." : "当前没有可管理的目录对象。"} />
+            : !selectionMissing && (target && core ? audience === "saas" ? <CoreTenantGrantPanel tenant={target} core={core} />
               : <CoreMemberAssignmentPanel member={target} core={core} />
               : <p>{en ? "Choose a directory entry and Core to read its current access." : "选择目录对象和 Core 后，读取当前授权状态。"}</p>)}
         </>)}

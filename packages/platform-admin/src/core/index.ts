@@ -5,7 +5,7 @@ export { useCoreRequest } from "./useCoreRequest";
 export { useCoreForm } from "./useCoreForm";
 export { CoreList } from "./CoreList";
 export type { CoreListQuery } from "./CoreList";
-export { CoreTenantGrantPanel, CoreMemberAssignmentPanel } from "./CoreAccessPanel";
+export { CoreTenantGrantPanel, CoreMemberAssignmentPanel, CoreDeploymentAdmissionPanel } from "./CoreAccessPanel";
 export { createCoreManagementApi, useCoreManagementApi } from "./management-client";
 export { useCoreSession } from "./useCoreSession";
 export { useCoreScope } from "./useCoreScope";

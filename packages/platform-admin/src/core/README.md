@@ -135,6 +135,14 @@ import { CoreTenantGrantPanel, CoreMemberAssignmentPanel } from "@rental-os/plat
 
 `coreManagementApi`提供登记目录、变更、绑定、当前事实、原收据及会话/范围的类型化方法，使用 `@rental-os/core-contracts` 唯一路径/schema和原HTTP信封。请求与迟到响应受当前会话代次和中止信号限制。可单独在自己的管理页使用这些方法，但不得根据本地缓存或清单开放服务端权限。公共应用的租户Core授权与成员分配页、同源Controller/Guard已经接通，独立与原组合宿主共用此管理实现。浏览器与真实数据库结果按实际验证另记。
 
+## 部署停新与移除预检
+
+SaaS管理员在公共Core管理页使用 `CoreDeploymentAdmissionPanel`，读取该Core的部署准入、停止或恢复新工作，并查看移除预检。自定义管理页可从同一正式出口导入面板并传入当前登记的 `core`；服务端继续复验平台管理权。[管理面板](CoreAccessPanel.tsx) · [公共管理页](../CoreAccessPage.tsx)
+
+部署准入、租户授权、成员分配和业务绑定分别保存。首次登记明确使用修订0，缺失或损坏状态显示unknown；管理请求沿原operationId单次派发，失应答只核对原收据。移除预检只展示已观察阻碍与覆盖缺口，不能据此自动删除代码、数据或执行迁移。[单源状态与收据](management-client.ts)
+
+目标Core状态变化先取消其旧目录、范围和绑定请求，并使所属页面与业务缓存失效；其他Core的草稿、缓存和原操作继续保留。菜单和直接URL共用当前服务端目录与准入修订，迟到响应不能恢复旧页面。停止新工作后的原结果、控制和必要善后仍由原服务端权限与所属Core裁定。[本人目录](useCoreSession.ts) · [范围](useCoreScope.ts) · [路由](CoreRoutes.tsx)
+
 ## Core首次设置
 
 Core在自己的配置页使用 `useCoreBinding(coreId, container?)`。Hook先读原绑定，当前租户管理权与成员Core使用权满足后调用 `initialize(configuration?)`；没有初始业务配置的Core省略参数。已有绑定直接复用，业务配置更新仍走Core自己的接口。[绑定Hook](useCoreBinding.ts)

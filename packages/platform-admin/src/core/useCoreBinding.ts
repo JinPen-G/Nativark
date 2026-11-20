@@ -14,7 +14,10 @@ export function useCoreBinding(coreId: string, container?: CoreScopeReference["c
   const epoch = currentSessionEpoch();
   const scope = { coreId, ...(container ? { container } : {}) };
   const journalKey = JSON.stringify(["core-binding-operation", tenant?.tenantId, user?.id, coreId, container?.type, container?.id]);
-  const generation = JSON.stringify([epoch, journalKey]);
+  const admission = session.data?.cores.find(entry => entry.core.id === coreId)?.admission;
+  const admissionSnapshot = JSON.stringify(admission);
+  // 准入变化释放旧派发，原核对引用继续按原成员与业务范围保留。
+  const generation = JSON.stringify([epoch, journalKey, admissionSnapshot]);
   const canManage = Boolean(sessionVerified && session.data?.canManageMembers);
   const canInitialize = canManage && session.canAccess(coreId, []);
   const loadReference = () => {
@@ -43,7 +46,7 @@ export function useCoreBinding(coreId: string, container?: CoreScopeReference["c
       throw new Error("Core设置结果与当前范围不一致");
     return binding;
   };
-  const queryKey = ["platform-core-binding", epoch, tenant?.tenantId, user?.id, coreId, container?.type, container?.id];
+  const queryKey = ["platform-core-binding", epoch, tenant?.tenantId, user?.id, coreId, container?.type, container?.id, admissionSnapshot];
   const query = useQuery({
     queryKey,
     queryFn: async ({ signal }) => {
@@ -63,7 +66,8 @@ export function useCoreBinding(coreId: string, container?: CoreScopeReference["c
   const refresh = async () => {
     await query.refetch();
     // 配置页的绑定代次变化会释放旧页面；失效观察只标脏，下一次访问按原query取真实状态。
-    await client.invalidateQueries({ queryKey: ["platform-core-scope"], refetchType: "none" });
+    await client.invalidateQueries({ queryKey: ["platform-core-scope", epoch, tenant?.tenantId, user?.id, coreId,
+      container?.type, container?.id], refetchType: "none" });
   };
   const run = (work: (signal: AbortSignal) => Promise<CoreBinding>) => {
     if (inFlight.current) return inFlight.current;

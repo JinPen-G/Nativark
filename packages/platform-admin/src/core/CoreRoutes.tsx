@@ -36,13 +36,23 @@ function RegisteredCoreRoute({ page, pages, options }: { page: CoreRegisteredPag
   const container: CoreScopeReference["container"] = containerSnapshot ? JSON.parse(containerSnapshot) : undefined;
   const session = useCoreSession(), { locale } = useLocale();
   const permitted = session.canAccess(page.coreId, page.definition.permissions);
+  const admission = session.data?.cores.find(entry => entry.core.id === page.coreId)?.admission;
+  let unavailableTitle = locale === "en-US" ? "This Core page is unavailable" : "当前Core页面不可用";
+  let unavailableDescription = locale === "en-US" ? "Ask your tenant administrator to check Core assignment and page access." : "请联系租户管理员核对Core分配及页面权限。";
+  if (admission?.state === "stopped") {
+    unavailableTitle = locale === "en-US" ? "New business is paused for this Core" : "该Core已暂停新业务";
+    unavailableDescription = locale === "en-US" ? "Your SaaS administrator manages deployment admission. Existing Core assignments and bindings are retained." : "部署准入由SaaS管理员管理，原Core分配与绑定保留。";
+  } else if (admission?.state === "unknown") {
+    unavailableTitle = locale === "en-US" ? "Core deployment admission is unavailable" : "无法确认Core部署准入";
+    unavailableDescription = admission.reason;
+  }
   return <QueryState loading={session.isPending} error={session.error} onRetry={session.refetch}>
     {permitted && session.data
-      ? <ScopedCoreRoute key={JSON.stringify([currentSessionEpoch(), page.key, containerSnapshot])}
+      ? <ScopedCoreRoute key={JSON.stringify([currentSessionEpoch(), page.key, containerSnapshot, admission])}
         page={page} pages={pages} options={options} container={container} context={session.data} canAccess={session.canAccess} />
       : <><PageHeading title={corePageText(page.definition.title, locale)} brandName={options.brandName} />
-        <Result status="403" title={locale === "en-US" ? "This Core page is unavailable" : "当前Core页面不可用"}
-          subTitle={locale === "en-US" ? "Ask your tenant administrator to check Core assignment and page access." : "请联系租户管理员核对Core分配及页面权限。"} /></>}
+        <Result status={admission?.state === "stopped" || admission?.state === "unknown" ? "warning" : "403"}
+          title={unavailableTitle} subTitle={unavailableDescription} /></>}
   </QueryState>;
 }
 
@@ -61,7 +71,7 @@ function ScopedCoreRoute({ page, pages, options, container, context, canAccess }
   const granted = context.cores.find(entry => entry.core.id === page.coreId)!;
   const binding = scope.data?.status === "bound" ? scope.data.binding : undefined;
   const lifetimeKey = JSON.stringify([currentSessionEpoch(), context.tenantId, context.subjectId, page.coreId,
-    granted.grant.revision, granted.assignment.revision, granted.permissions, params, binding?.bindingId, binding?.revision]);
+    granted.grant.revision, granted.assignment.revision, granted.admission, granted.permissions, params, binding?.bindingId, binding?.revision]);
   const Page = page.definition.component;
   const configuration = page.definition.purpose === "configuration";
   let content: ReactNode;
