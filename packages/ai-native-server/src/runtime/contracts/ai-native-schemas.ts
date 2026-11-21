@@ -2,9 +2,10 @@
  * AIN-C01/C02 草案 schema：只并入 OpenAPI components，不公布可调用 paths。
  * JSON 结构校验不是身份验证、资源授权或业务校验；没有任何执行 handler。
  */
-import { AI_CONTRACT_DRAFT_VERSION, AI_ERROR_CODES, AI_TOOL_CODES, AI_TOOL_DRAFT_VERSION, AI_SCOPE_DRAFT_SCHEMAS } from "@rental-os/shared";
+import { AI_EXECUTION_CONTEXT_SCHEMAS } from "@rental-os/platform-contracts/ai-gateway";
+import { AI_CONTRACT_DRAFT_VERSION, AI_ERROR_CODES, AI_TOOL_CODES, AI_TOOL_DRAFT_VERSION } from "@rental-os/shared";
 import { aiLeafToOpenApi30 } from '@rental-os/rental-core/http-openapi';
-import type { AiOperatorAccess, AiToolContractDraft } from "@rental-os/shared";
+import type { AiToolContractDraft } from "@rental-os/shared";
 import type { SchemaObject } from "@rental-os/rental-core/http-openapi";
 
 const ref = (name: string): SchemaObject => ({ $ref: `#/components/schemas/${name}` });
@@ -17,8 +18,6 @@ const closed = (properties: Record<string, SchemaObject>, required = Object.keys
 });
 const timestamp: SchemaObject = { type: "string", format: "date-time" };
 const version = choice(AI_CONTRACT_DRAFT_VERSION);
-const tenantOrWorkspace: SchemaObject = { oneOf: [ref("AiTenantScope"), ref("AiWorkspaceScope")] };
-const contextBase = { contractVersion: version, requestId: id(), authorizedAt: timestamp };
 const positiveInteger: SchemaObject = { type: "integer", minimum: 1 };
 const checks = ["current_identity", "audience", "scope", "membership", "permission", "data_scope", "location_scope", "resource_ownership", "field_visibility", "capability", "subscription", "controller_preconditions"];
 const errorProperties = {
@@ -29,12 +28,6 @@ const errorProperties = {
 
 const knownError = closed({ ...errorProperties, code: choice(...AI_ERROR_CODES.filter(code => code !== "AI_RESULT_UNKNOWN")) });
 const unknownError = closed({ ...errorProperties, code: choice("AI_RESULT_UNKNOWN"), retryable: { type: "boolean", enum: [false] }, nextAction: choice("reconcile") });
-
-const accessProperties = {
-  permissions: list(text(128), 0, 256),
-  dataScope: choice("all", "organization", "store", "own"),
-  locationScope: ref("AiLocationScope"), organizationId: id()
-} satisfies Record<keyof AiOperatorAccess, SchemaObject>;
 
 const toolProperties = {
   contractVersion: version, contractStatus: choice("draft"), code: choice(...AI_TOOL_CODES),
@@ -55,23 +48,7 @@ const toolProperties = {
 } satisfies Record<keyof AiToolContractDraft, SchemaObject>;
 
 export const AI_NATIVE_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
-  ...Object.fromEntries(Object.entries(AI_SCOPE_DRAFT_SCHEMAS).map(([name, schema]) => [name, aiLeafToOpenApi30(schema, name)])),
-  AiLocationScope: {
-    oneOf: [
-      closed({ mode: choice("all"), locationIds: list(id(), 0, 0) }),
-      closed({ mode: choice("selected"), locationIds: list(id(), 0, 1000) })
-    ]
-  },
-  AiOperatorAccess: closed(accessProperties, ["permissions", "dataScope", "locationScope"]),
-  AiExecutionContext: {
-    description: "DRAFT: server-established context only; schema validity grants no authority. Reauthorize before every step and replay.",
-    oneOf: [
-      closed({ ...contextBase, audience: choice("operator"), actor: closed({ kind: choice("saas_admin"), userId: id() }), scope: ref("AiPlatformScope"), permissions: list(text(128), 0, 256) }),
-      closed({ ...contextBase, audience: choice("operator", "staff"), actor: closed({ kind: choice("user"), userId: id() }), scope: tenantOrWorkspace, access: ref("AiOperatorAccess") }),
-      closed({ ...contextBase, audience: choice("client"), actor: closed({ kind: choice("customer"), customerId: id() }), scope: tenantOrWorkspace }),
-      closed({ ...contextBase, audience: choice("automation"), actor: closed({ kind: choice("automation"), subjectId: id(), policyId: id(), policyRevision: positiveInteger, expiresAt: timestamp }), scope: tenantOrWorkspace, access: ref("AiOperatorAccess") })
-    ]
-  },
+  ...Object.fromEntries(Object.entries(AI_EXECUTION_CONTEXT_SCHEMAS).map(([name, schema]) => [name, aiLeafToOpenApi30(schema, name)])),
   AiOrderExplainInput: closed({ orderId: id() }),
   AiOrderExplainRequestDraft: {
     ...closed({ contractVersion: version, toolCode: choice("rental.order.explain"), toolVersion: choice(AI_TOOL_DRAFT_VERSION), input: ref("AiOrderExplainInput") }),

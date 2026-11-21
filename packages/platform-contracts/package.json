@@ -58,6 +58,10 @@
     "./ai-task": {
       "types": "./dist/ai-task.d.ts",
       "default": "./dist/ai-task.js"
+    },
+    "./ai-gateway": {
+      "types": "./dist/ai-gateway.d.ts",
+      "default": "./dist/ai-gateway.js"
     }
   },
   "scripts": {
@@ -101,6 +105,9 @@
       ],
       "ai-task": [
         "dist/ai-task.d.ts"
+      ],
+      "ai-gateway": [
+        "dist/ai-gateway.d.ts"
       ]
     }
   },
