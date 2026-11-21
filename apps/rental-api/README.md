@@ -23,7 +23,7 @@
 | [http-policy.ts](src/http-policy.ts)、[openapi.ts](src/openapi.ts) | 真实挂载清单同时约束请求包装与旧路径文档许可；逐条核定原方法/处理器，使用 Rental 命名空间并保留原合同缺项。 |
 | [package.ts](src/package.ts)、[prepare-deployment.ts](src/prepare-deployment.ts) | 从已构建字节和固定来源形成标准包及候选部署；同源 OpenAPI、完整摘要和原 SQL 必须一致，不安装或执行迁移。 |
 
-启动配置须显式提供 `DATABASE_URL`、`AUTH_TOKEN_SECRET`、`RENTAL_AI_MODE` 和 `RENTAL_DEPLOYMENT_LOCK`。普通 `main.ts` 只接受 `disabled`；`ai-main.ts` 只接受 `enabled`，并要求所选 247 模型 Client 和固定完整 AI 数据包。部署锁使用绝对路径，文件上限 8 MiB。可配置 `API_PORT`、`TRUST_PROXY_HOPS`、`CORS_ALLOWED_ORIGINS`；公共数据、Rental 和基础设施数据模式均只接受 MySQL。启动入口本身不授予连接业务库或发布权限。
+启动配置须显式提供 `DATABASE_URL`、`AUTH_TOKEN_SECRET`、`RENTAL_AI_MODE` 和 `RENTAL_DEPLOYMENT_LOCK`。普通 `main.ts` 只接受 `disabled`；`ai-main.ts` 只接受 `enabled`，并要求所选 247 模型 Client 和固定完整 AI 数据包。部署锁使用绝对路径，文件上限 8 MiB。锁中 Node 和 Core 合同版本须与当前进程实际版本一致，宿主在装配前拒绝不匹配的锁。可配置 `API_PORT`、`TRUST_PROXY_HOPS`、`CORS_ALLOWED_ORIGINS`；公共数据、Rental 和基础设施数据模式均只接受 MySQL。启动入口本身不授予连接业务库或发布权限。
 
 原组合宿主的 `PlatformController` 已有客户/空间兼容入口；该宿主不得再次挂载独立客户/空间模块。独立宿主则由本根模块统一挂载。原认证扩展同样不能在同一应用重复登记。
 

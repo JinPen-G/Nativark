@@ -16,7 +16,7 @@
 
 工单三张业务表由本 Core 的参数化 SQL 适配读写，两条宿主路径均从 `apps/platform-api/prisma/schema.prisma` 生成公共 Client。准备目录中的 `schema.prisma` 为原迁移命令提供数据源，Client 的生成来源仍为上述公共 schema。[公共数据库](../platform-api/src/database.ts) · [组合迁移生成器](../../packages/core-contracts/src/deployment.ts) · [工单 SQL 适配](../../packages/example-tickets-core/src/mysql.ts)
 
-API 启动读取当前进程 `DATABASE_URL`、`AUTH_TOKEN_SECRET`、`CORE_DEPLOYMENT_LOCK`。权限登记读取同一进程的 `DATABASE_URL` 与 `CORE_DEPLOYMENT_LOCK`，初始化口令沿公共宿主步骤提供。锁路径取步骤 3 返回的实际 `core.deployment.lock.json`，包管理的归档存储及当前底座引用见下方配置。Web 的公开基址和代理另按[工单后台](../example-tickets-admin/README.md#本地使用)供给。
+API 启动读取当前进程 `DATABASE_URL`、`AUTH_TOKEN_SECRET`、`CORE_DEPLOYMENT_LOCK`。锁中 Node 和 Core 合同版本须与当前进程实际版本一致，宿主在装配前拒绝不匹配的锁。权限登记读取同一进程的 `DATABASE_URL` 与 `CORE_DEPLOYMENT_LOCK`，初始化口令沿公共宿主步骤提供。锁路径取步骤 3 返回的实际 `core.deployment.lock.json`，包管理的归档存储及当前底座引用见下方配置。Web 的公开基址和代理另按[工单后台](../example-tickets-admin/README.md#本地使用)供给。
 
 | 阅读路线 | 入口 |
 | --- | --- |

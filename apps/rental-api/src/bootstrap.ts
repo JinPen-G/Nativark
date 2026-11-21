@@ -6,7 +6,7 @@ import { NestFactory } from "@nestjs/core";
 import type { NestExpressApplication } from "@nestjs/platform-express";
 import { readFileSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
-import { CoreDeploymentLockSchema, type CoreDeploymentLock } from "@rental-os/core-contracts";
+import { CORE_CONTRACT_VERSION, CoreDeploymentLockSchema, type CoreDeploymentLock } from "@rental-os/core-contracts";
 import { requestIdentityMiddleware } from "@rental-os/platform-server";
 import { createRentalStaffApiRouting } from "@rental-os/rental-core/staff-routing";
 import { AI_STAFF_INSPECTION_HTTP_DRAFT, AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT } from "@rental-os/shared";
@@ -66,6 +66,8 @@ export async function bootstrapRentalComposition(aiMode: "enabled" | "disabled",
   const stat = statSync(settings.lockPath);
   if (!stat.isFile() || stat.size > 8 * 1024 * 1024) throw new Error("Rental 部署锁须为不超过 8 MiB 的实际文件");
   const lock = CoreDeploymentLockSchema.parse(JSON.parse(readFileSync(settings.lockPath, "utf8")));
+  if (lock.platform.versions.node !== process.versions.node || lock.platform.versions.contract !== CORE_CONTRACT_VERSION)
+    throw new Error(`Rental 部署锁须与当前 Node ${process.versions.node} 和 Core 合同 ${CORE_CONTRACT_VERSION} 一致`);
   const { RENTAL_HTTP_REQUEST_SCOPE } = await import("./app.module.js");
   // 注册全量原路由前核定各接点，失败发生在 Client 构造/连接/监听之前。
   const module = await register(lock);
