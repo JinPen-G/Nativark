@@ -1,6 +1,7 @@
 /** Rental 原 HTTP 操作单源。宿主挂载、当前权限、事务与原收据仍由原实现裁定。 */
 import { STAFF_UPLOAD_OBSERVATION_HTTP } from "@rental-os/shared";
 import { RENTAL_EXCHANGE_INSPECTION_OPERATIONS } from "./http-openapi-rental-exchange-inspection-preparation.schemas";
+import { RENTAL_INTEGRATION_LEDGER_HTTP_OPERATIONS } from "./http-openapi-integration-operations";
 import { ENTERPRISE_COMPONENT_SCHEMAS } from "./http-openapi-enterprise-schemas";
 
 import { CATEGORY_PREPARATION_PREVIEW_SCHEMA, CATEGORY_PREPARATION_BATCH_READ_SCHEMA, CATEGORY_PREPARATION_BATCH_REQUEST_SCHEMA, CATEGORY_PREPARATION_ENTITY_PAGE_SCHEMA, CATEGORY_PREPARATION_REQUEST_SCHEMA, CATEGORY_PREPARATION_SAVE_RESULT_SCHEMA, CATEGORY_CREATION_REQUEST_SCHEMA, CATEGORY_CREATION_PREVIEW_REQUEST_SCHEMA, CATEGORY_CREATED_VERSION_SCHEMA, CATEGORY_CREATION_PREVIEW_SCHEMA, CATEGORY_CREATION_RECEIPT_SCHEMA, CATEGORY_ADOPTION_REQUEST_SCHEMA, CATEGORY_ADOPTION_RESULT_SCHEMA, CATEGORY_ADOPTION_RECEIPT_SCHEMA } from "./http-openapi-category-governance-schemas";
@@ -1407,5 +1408,6 @@ export const RENTAL_HTTP_OPERATIONS: ContractOperation[] = [
     responseSchema: objectOf({ structureVersion: { type: "integer", enum: [1] }, source: { type: "string", enum: ["published", "builtin_demo"] }, truncated: booleanSchema,
       options: { type: "array", maxItems: 100, items: objectOf({ categoryCode: rentalCategoryCodeSchema, name: { type: "string", maxLength: 100 }, nameEn: { type: "string", maxLength: 100 },
         versionId: { type: "string", maxLength: 191 }, versionLabel: { type: "string", maxLength: 64 }, recommended: booleanSchema, defaultWorkspaceName: { type: "string", maxLength: 100 } },
-      ["categoryCode", "name", "recommended", "defaultWorkspaceName"], false) } }, ["structureVersion", "source", "truncated", "options"], false) }
+      ["categoryCode", "name", "recommended", "defaultWorkspaceName"], false) } }, ["structureVersion", "source", "truncated", "options"], false) },
+  ...RENTAL_INTEGRATION_LEDGER_HTTP_OPERATIONS
 ];

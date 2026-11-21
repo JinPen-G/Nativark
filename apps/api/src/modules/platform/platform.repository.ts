@@ -6,7 +6,8 @@ import { RentalWorkspaceManagementRepository } from "@rental-os/rental-core/mysq
  * 业务空间、客户与Rental初始化保留本域事务和校验，不成为无Core认证的依赖。 */
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { PlatformIdentityRepository } from "./platform-identity.repository";
-import { RentalWorkspacePrincipalRepository, type WorkspaceSessionIdentity } from "@rental-os/rental-core/mysql-workspace-principal";
+import { RentalWorkspacePrincipalRepository, type WorkspaceSessionIdentity, type RentalMemberSessionIdentity,
+  type RentalWorkspaceAccessTransaction } from "@rental-os/rental-core/mysql-workspace-principal";
 import { readPlatformSecurityBaseline } from "@rental-os/platform-server/security";
 import { randomUUID } from "node:crypto";
 import { assertCategoryAdoptionAllowed } from "../rental-core/category-governance-policy";
@@ -59,7 +60,7 @@ import { PrismaService } from "../database/prisma.service";
 import { getRequestWorkspaceId, requireRequestTenantId } from "../../common/request-identity";
 
 /** Internal authenticated identity, supplied by Auth rather than an HTTP DTO. */
-export type { WorkspaceSessionIdentity } from "@rental-os/rental-core/mysql-workspace-principal";
+export type { WorkspaceSessionIdentity, RentalMemberSessionIdentity, RentalWorkspaceAccessTransaction } from "@rental-os/rental-core/mysql-workspace-principal";
 
 @Injectable()
 export class PlatformRepository extends PlatformIdentityRepository {
@@ -68,11 +69,11 @@ export class PlatformRepository extends PlatformIdentityRepository {
     return this.workspaceManagement ??= new RentalWorkspaceManagementRepository(this.prisma);
   }
 
-  private readonly workspacePrincipals: RentalWorkspacePrincipalRepository<Prisma.TransactionClient>;
+  private readonly workspacePrincipals: RentalWorkspacePrincipalRepository<RentalWorkspaceAccessTransaction>;
 
   constructor(protected readonly prisma: PrismaService) {
     super(prisma);
-    this.workspacePrincipals = new RentalWorkspacePrincipalRepository<Prisma.TransactionClient>(prisma, {
+    this.workspacePrincipals = new RentalWorkspacePrincipalRepository<RentalWorkspaceAccessTransaction>(prisma, {
       findUserById: (userId, transaction) => this.findUserById(userId, transaction),
       projectWorkspace: row => this.toWorkspace(row),
       projectRoleScope: scope => this.toSharedRoleScope(scope),
@@ -94,6 +95,15 @@ export class PlatformRepository extends PlatformIdentityRepository {
   /** Read under the principal locks held by lockWorkspaceSessionUser. */
   async readWorkspaceSessionUser(tx: Prisma.TransactionClient, expected: WorkspaceSessionIdentity): Promise<SystemUserRow> {
     return this.workspacePrincipals.readWorkspaceSessionUser(tx, expected);
+  }
+
+  lockMemberSessionUser(tx: RentalWorkspaceAccessTransaction, expected: RentalMemberSessionIdentity,
+    parentLock: "exclusive" | "shared" = "exclusive") {
+    return this.workspacePrincipals.lockMemberSessionUser(tx, expected, parentLock);
+  }
+
+  readMemberSessionUser(tx: RentalWorkspaceAccessTransaction, expected: RentalMemberSessionIdentity) {
+    return this.workspacePrincipals.readMemberSessionUser(tx, expected);
   }
 
   /** Original current account/role mapping in the caller's existing transaction.

@@ -20,12 +20,17 @@ import { resolveUserBusinessLocationScope } from "./business-location-scope";
 import type { OrganizationLocationScope } from "@rental-os/platform-server/organization-location-scope";
 import type { Prisma } from "@prisma/client";
 import { getRequestIdentity } from "@rental-os/platform-server/request-identity";
-import type { RentalWorkspaceAccessTransaction } from "./mysql-workspace-principal";
+import type { RentalWorkspaceAccessTransaction, RentalMemberSessionPrincipal } from "./mysql-workspace-principal";
 
 export interface WorkspaceAccessLease {
   user: SystemUserRow;
   /** Same transaction and original session; expiry still needs a final check. */
   revalidate: () => Promise<SystemUserRow>;
+}
+
+export interface RentalMemberAccessLease {
+  principal: RentalMemberSessionPrincipal;
+  revalidate(): Promise<RentalMemberSessionPrincipal>;
 }
 
 import { snapshotTrustedWorkspacePrincipal } from './trusted-workspace-principal';
@@ -428,6 +433,33 @@ export class RentalAuthService extends AuthSessionService<LoginResponse, AuthAcc
     return { user: assertUser(user), revalidate: async () => {
       assertNotExpired();
       return assertUser(await this.platformService.readWorkspaceSessionUser(tx, expected));
+    } };
+  }
+
+  /** 普通 Core 提交在调用方原事务复用当前会话/角色投影，Tenant 使用原业务共享父锁。
+   * 这两个选项只来自原 Guard 的路由选择；不赋予权限，不读取请求中的投影或空间字段。 */
+  async lockRequestMemberAccess(tx: RentalWorkspaceAccessTransaction,
+    options: { projection: "tenant" | "workspace"; allowInvalidWorkspace: boolean }): Promise<RentalMemberAccessLease> {
+    const identity = getRequestIdentity(), session = identity?.accessSession;
+    if (!identity?.tenantId || !identity.userId || !["operator", "staff"].includes(identity.audience ?? "")
+      || !session?.sessionId || !Number.isSafeInteger(session.expiresAt)
+      || !options.allowInvalidWorkspace && !identity.workspaceId)
+      throw new UnauthorizedException("缺少原认证会话依据，不能执行业务事务");
+    const expected = { tenantId: identity.tenantId, userId: identity.userId,
+      workspaceId: session.workspaceId === undefined ? identity.workspaceId ?? null : session.workspaceId,
+      sessionId: session.sessionId, audience: identity.audience as AuthAudience, ...options };
+    const expiresAt = session.expiresAt;
+    const assertNotExpired = () => {
+      if (expiresAt <= Math.floor(Date.now() / 1000)) throw new UnauthorizedException("原访问令牌已到期，请先核对原操作结果");
+    };
+    assertNotExpired();
+    const principal = await this.platformService.lockMemberSessionUser(tx, expected, "shared");
+    assertNotExpired();
+    return { principal, revalidate: async () => {
+      assertNotExpired();
+      const current = await this.platformService.readMemberSessionUser(tx, expected);
+      assertNotExpired();
+      return current;
     } };
   }
 

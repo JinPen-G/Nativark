@@ -33,6 +33,7 @@ import { StaffUploadsController } from "./http-staff-uploads.controller";
 import { PaymentWebhookController } from "./http-payment-webhook.controller";
 import { isRentalPaymentCallbackRoute } from "./application-payment-callback-access";
 import { declareRentalRecovery, type RentalRecoveryDeclaration, type RentalRecoveryKind } from "./application-recovery-policy";
+import { RENTAL_INTEGRATION_HTTP_ACCESS } from "./http-integration-access";
 export { createRentalNativeResponseBuffer } from "./http-native-response";
 
 export type RentalHttpAccessReview = (
@@ -150,6 +151,7 @@ function unresolved(controller: Type<unknown>, handlers: readonly Function[], re
 /** Only this bounded set has been traced through its current services. Additional
  * declarations must name actual controller functions and their reviewed boundary. */
 export const RENTAL_HTTP_REVIEWED_ACCESS: readonly RentalHttpAccessDeclaration[] = Object.freeze([
+  ...RENTAL_INTEGRATION_HTTP_ACCESS,
   ...callbackHandlers.map(handler => Object.freeze({ controller: PaymentWebhookController, handler,
     review: Object.freeze({ kind: "transactional-write" as const, ingress: "payment-callback" as const,
       evidence: "original signature/merchant/amount verification binds the persisted payment/refund; exact current config, Tenant/Core/binding/deployment and original Order/Workspace precede result consumption; original funding/CAS/idempotency retained, no actor or new dispatch" }) })),

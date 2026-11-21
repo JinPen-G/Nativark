@@ -23,7 +23,9 @@ import { RENTAL_DATA_READABLE } from "./data";
 import { createRentalInternalAuthorityScope } from "./application-internal-authority";
 import { bindRentalRecovery, type RentalRecoveryDeclaration, type RentalRecoverySubject } from "./application-recovery-policy";
 import type { RentalRecoveryAuthority, RentalRecoveryLease } from "./application-recovery-authority";
+import type { RentalMemberAuthority, RentalMemberAuthorityLease } from "./application-member-authority";
 export { createRentalRecoveryAuthority } from "./application-recovery-authority";
+export { createRentalMemberAuthority } from "./application-member-authority";
 
 /** These are the server request properties written/used by the original Guard,
  * not a DTO to populate from body/query parameters. Staff routing must run first. */
@@ -81,6 +83,8 @@ export interface RentalApplicationAccessDependencies {
   /** Same original public authority/user repository; SaaS never receives a
    * fabricated member assignment. Optional only for hosts without these routes. */
   managementAuthority?: Pick<PlatformPrincipalAuthority, "lock">;
+  /** 同一原 Auth/Guard 的普通成员权威，复验角色、会话和地点，不用旧请求快照代替当前授权。 */
+  memberAuthority?: RentalMemberAuthority;
   /** Original Auth and ClientAuth from this same assembly; only explicit reviewed
    * historical/closeout handlers may request this current-principal lease. */
   recoveryAuthority?: RentalRecoveryAuthority;
@@ -107,6 +111,7 @@ type RequestEvidence = {
   deploymentContinuation: boolean;
   management?: "catalog" | "tenant";
   leases: WeakMap<object, PlatformPrincipalLease>;
+  memberLeases: WeakMap<object, RentalMemberAuthorityLease>;
   recovery?: RentalRecoverySubject;
   recoveryLeases: WeakMap<object, RentalRecoveryLease>;
 };
@@ -310,7 +315,7 @@ export function createRentalApplicationAccess(input: RentalApplicationAccessDepe
       audience, workspaceId, sessionId, expiresAt, identity: identityFingerprint(),
       sourceIdentity: identity, actor: actorFingerprint(request, audience), tenantScope,
       newBusiness: policy.isNewBusinessRoute(method, path), deploymentContinuation: deploymentContinuation?.(method, path) === true,
-      management: management?.kind, leases: new WeakMap(), recoveryLeases: new WeakMap() };
+      management: management?.kind, leases: new WeakMap(), memberLeases: new WeakMap(), recoveryLeases: new WeakMap() };
   };
 
   const assertEvidence = (evidence: RequestEvidence) => {
@@ -327,7 +332,7 @@ export function createRentalApplicationAccess(input: RentalApplicationAccessDepe
 
   const beforeParent = async (transaction: RentalBusinessTenantTransaction, tenantId: string) => {
     const evidence = requests.getStore()?.evidence;
-    if (!evidence?.management && !evidence?.recovery) return;
+    if (!evidence) return;
     assertEvidence(evidence);
     if (evidence.recovery) {
       if (tenantId !== evidence.tenantId || "$transaction" in transaction || !input.recoveryAuthority || !evidence.workspaceId)
@@ -335,6 +340,17 @@ export function createRentalApplicationAccess(input: RentalApplicationAccessDepe
       if (!evidence.recoveryLeases.has(transaction)) evidence.recoveryLeases.set(transaction,
         await input.recoveryAuthority.lock(transaction, { tenantId, workspaceId: evidence.workspaceId,
           audience: evidence.audience, user: evidence.request.user, client: evidence.request.client, subject: evidence.recovery }));
+      return;
+    }
+    if (evidence.audience === "client") return;
+    if (!evidence.management) {
+      if (tenantId !== evidence.tenantId || !input.memberAuthority || !evidence.request.user)
+        throw new CoreAccessError("denied", "Rental 普通成员缺少原同事务身份权威");
+      if (!evidence.memberLeases.has(transaction)) evidence.memberLeases.set(transaction,
+        await input.memberAuthority.lock(transaction, { tenantId, workspaceId: evidence.workspaceId,
+          audience: evidence.audience, user: evidence.request.user, method: evidence.method, path: evidence.path,
+          projection: policy.isTenantMembershipRoute(evidence.path) ? "tenant" : "workspace",
+          allowInvalidWorkspace: evidence.tenantScope }));
       return;
     }
     if (tenantId !== evidence.tenantId || "$transaction" in transaction || !managementTransaction(transaction))
@@ -354,6 +370,12 @@ export function createRentalApplicationAccess(input: RentalApplicationAccessDepe
       throw new CoreAccessError("denied", "Rental 事务未绑定本请求的原身份与租户");
     }
     assertEvidence(evidence);
+    if (!evidence.recovery && !evidence.management && evidence.audience !== "client") {
+      // 原直接调用者可能已持 Tenant X；普通权威只取 Tenant S，不升级父锁。
+      // 仍在原 Core/对象提交前锁定成员，会话/角色租约不跨事务缓存。
+      if (!evidence.memberLeases.has(transaction)) await beforeParent(transaction, tenantId);
+      await evidence.memberLeases.get(transaction)!.revalidate();
+    }
     if (evidence.recovery) {
       const lease = evidence.recoveryLeases.get(transaction);
       if (!lease) throw new CoreAccessError("denied", "Rental 善后主体须先于原 Tenant/Core 父锁复核");

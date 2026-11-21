@@ -10,8 +10,7 @@ import { getRequestIdentity, getRequestDataScope, getRequestLocationIds, getRequ
 import type { RentalAuthService, WorkspaceAccessLease } from "./auth-service";
 import type { ClientAuthService, RentalClientSessionTransaction } from "./mysql-client-auth";
 import type { ClientRequestContext, RentalClientSessionLease } from "./client-context";
-import type { RentalWorkspaceAccessTransaction } from "./mysql-workspace-principal";
-import { resolveUserBusinessLocationScope, type RentalBusinessLocationReader } from "./business-location-scope";
+import { resolveUserBusinessLocationScope } from "./business-location-scope";
 import { requestRentalOrderVisibilityWhere } from "./mysql-core-facts";
 import { clientOwnsRentalOrder } from "./client-order-ownership";
 import type { RentalBusinessTenantTransaction } from "./mysql-business-fence";
@@ -24,6 +23,8 @@ import type { RentalFileBusinessAccessService } from "./file-business-access";
 import type { EnterprisePortalAction } from "./enterprise";
 import type { EnterpriseAccessService } from "./mysql-enterprise-access";
 import type { EnterpriseOrderReaderService } from "./mysql-enterprise-orders";
+import { isRentalMemberTransaction as memberTransaction, memberLocationKey as locationKey,
+  memberProjectionKey as memberKey } from "./application-member-authority";
 
 interface RecoveryOrderReader {
   rentalOrder: { findFirst(input: { where: Prisma.RentalOrderWhereInput; select: {
@@ -35,14 +36,6 @@ const denied = (message: string) => new CoreAccessError("denied", message);
 const methods = (value: unknown, names: readonly string[]): boolean => value !== null && typeof value === "object"
   && names.every(name => name in value && typeof Reflect.get(value, name) === "function");
 
-function memberTransaction(tx: RentalBusinessTenantTransaction): tx is RentalBusinessTenantTransaction & RentalWorkspaceAccessTransaction & RentalBusinessLocationReader {
-  return "user" in tx && methods(tx.user, ["findFirst", "findUnique", "findUniqueOrThrow", "update"])
-    && "authSession" in tx && methods(tx.authSession, ["findFirst", "create", "updateMany"])
-    && "workspaceMember" in tx && methods(tx.workspaceMember, ["findFirst"])
-    && "businessWorkspace" in tx && methods(tx.businessWorkspace, ["findFirst"])
-    && "organizationUnit" in tx && methods(tx.organizationUnit, ["findMany"])
-    && "rentalFulfillmentLocation" in tx && methods(tx.rentalFulfillmentLocation, ["findMany"]);
-}
 function clientTransaction(tx: RentalBusinessTenantTransaction): tx is RentalBusinessTenantTransaction & RentalClientSessionTransaction {
   return "clientAuthSession" in tx && methods(tx.clientAuthSession, ["findFirst"])
     && "customerAccount" in tx && methods(tx.customerAccount, ["findFirst"])
@@ -50,13 +43,6 @@ function clientTransaction(tx: RentalBusinessTenantTransaction): tx is RentalBus
 }
 function orderTransaction(tx: RentalBusinessTenantTransaction): tx is RentalBusinessTenantTransaction & RecoveryOrderReader {
   return "rentalOrder" in tx && methods(tx.rentalOrder, ["findFirst"]);
-}
-function locationKey(scope: SystemUserRow["locationScope"]) {
-  return scope && JSON.stringify([scope.mode, [...scope.locationIds].sort()]);
-}
-function memberKey(user: SystemUserRow) {
-  return JSON.stringify([user.id, user.tenantId, user.isActive, Boolean(user.mustChangePassword), Boolean(user.isSaasAdmin),
-    Boolean(user.isPlatformAdmin), [...user.permissions].sort(), user.dataScope, user.organizationId, locationKey(user.locationScope)]);
 }
 
 export interface RentalRecoveryRequest {

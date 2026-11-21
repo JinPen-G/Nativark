@@ -4,12 +4,15 @@ import { Module, type DynamicModule } from "@nestjs/common";
 import { ConfigModule, ConfigService } from "@nestjs/config";
 import type { CoreDeploymentLock } from "@rental-os/core-contracts";
 import { PlatformServerModule } from "@rental-os/platform-server";
+import { JobsHttpModule } from "@rental-os/platform-server/jobs";
+import { NotificationsHttpModule } from "@rental-os/platform-server/notifications";
 import { CoreHostModule, CorePackageAssemblyModule } from "@rental-os/platform-core-host";
 import { RentalHttpModule } from "@rental-os/rental-core/http";
 import { RentalPaymentsHttpModule } from "@rental-os/rental-core/http-payments";
 import { RentalHttpExtensionsModule } from "@rental-os/rental-core/http-extensions";
 import { RentalCustomersHttpModule } from "@rental-os/rental-core/http-customers-module";
 import { RentalWorkspacesHttpModule } from "@rental-os/rental-core/http-workspaces-module";
+import { RentalIntegrationsHttpModule } from "@rental-os/rental-core/http-integrations";
 import { createRentalAuthorization } from "@rental-os/rental-core/http-auth";
 import { RENTAL_STAFF_INSPECTION_EVIDENCE, type RentalStaffInspectionEvidence } from "@rental-os/rental-core/http-staff-uploads";
 import type { RentalHttpAccessPolicy } from "@rental-os/rental-core/http-access-policy";
@@ -87,6 +90,10 @@ export function createRentalHostModule<Host extends RentalHostAssembly>(input: {
       useFactory: (http: ReturnType<typeof createRentalHttpApplicationViews>) => http }),
     RentalPaymentsHttpModule.registerFactory({ imports: [assembly, httpApplications], inject: [RENTAL_HOST_ASSEMBLY, HTTP_APPLICATIONS],
       useFactory: (host: Host, http: ReturnType<typeof createRentalHttpApplicationViews>) => ({ ...host.payments, core: http.rental.core }) }),
+    RentalIntegrationsHttpModule.register({ imports: [assembly], inject: [RENTAL_HOST_ASSEMBLY],
+      useFactory: (host: Host) => host.rental.integrations.ledger }),
+    JobsHttpModule.register({ imports: [assembly], inject: [RENTAL_HOST_ASSEMBLY], useFactory: (host: Host) => host.jobs }),
+    NotificationsHttpModule.register({ imports: [assembly], inject: [RENTAL_HOST_ASSEMBLY], useFactory: (host: Host) => host.notifications }),
     RentalHttpExtensionsModule.registerFactory({ imports: [assembly], inject: [RENTAL_HOST_ASSEMBLY], useFactory: (host: Host) => host.extensions }),
     RentalCustomersHttpModule.registerFactory({ imports: [assembly], inject: [RENTAL_HOST_ASSEMBLY], useFactory: (host: Host) => host.customers }),
     RentalWorkspacesHttpModule.registerFactory({ imports: [assembly], inject: [RENTAL_HOST_ASSEMBLY], useFactory: (host: Host) => host.workspaces }),

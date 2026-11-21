@@ -10,7 +10,7 @@ import type { RentalAuthenticationSource } from "./auth-source";
 import type { TenantSummary } from "./auth-contracts";
 import { RentalCategoryCode, type BusinessWorkspace } from "./contracts";
 import { RentalWorkspacePrincipalRepository, type RentalWorkspacePrincipalStorage,
-  type WorkspaceSessionIdentity, type RentalWorkspaceAccessTransaction } from "./mysql-workspace-principal";
+  type WorkspaceSessionIdentity, type RentalMemberSessionIdentity, type RentalWorkspaceAccessTransaction } from "./mysql-workspace-principal";
 
 interface DemoPasswordTransaction {
   user: Pick<PlatformAuthDataStore["user"], "update">;
@@ -62,6 +62,13 @@ export class RentalMysqlAuthenticationRepository extends PlatformAuthenticationR
   }
   readWorkspaceSessionUser(transaction: RentalWorkspaceAccessTransaction, expected: WorkspaceSessionIdentity) {
     return this.workspacePrincipals.readWorkspaceSessionUser(transaction, expected);
+  }
+  lockMemberSessionUser(transaction: RentalWorkspaceAccessTransaction, expected: RentalMemberSessionIdentity,
+    parentLock: "exclusive" | "shared" = "exclusive") {
+    return this.workspacePrincipals.lockMemberSessionUser(transaction, expected, parentLock);
+  }
+  readMemberSessionUser(transaction: RentalWorkspaceAccessTransaction, expected: RentalMemberSessionIdentity) {
+    return this.workspacePrincipals.readMemberSessionUser(transaction, expected);
   }
 
   /** 品类取当前空间，不能用同租户另一空间的档案补齐缺失信息。 */

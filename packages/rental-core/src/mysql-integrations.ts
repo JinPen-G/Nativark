@@ -17,14 +17,18 @@ import type {
 import type { SaveTBoxDeviceRequest, TBoxDeviceSummary } from "./integration-contracts";
 import type { RentalIntegrationStorage } from "./integration-runtime";
 import { requireRequestTenantId } from "@rental-os/platform-server/request-identity";
-import { lockRentalBusinessTenant, type RentalBusinessTenantTransaction } from "./mysql-business-fence";
+import { hasRentalBusinessTenantFence, lockRentalBusinessTenant, type RentalBusinessTenantTransaction } from "./mysql-business-fence";
 
-type RentalIntegrationFileTransaction = FileLedgerMetadataStore & RentalBusinessTenantTransaction;
+type RentalIntegrationLedgerStore = JobLedgerDataStore & NotificationLedgerDataStore
+  & Pick<Prisma.TransactionClient, "documentPrintJob" | "tBoxDevice">;
+type RentalIntegrationTransaction = FileLedgerMetadataStore & RentalBusinessTenantTransaction & RentalIntegrationLedgerStore;
+
+const notificationDefaults = { defaultTemplates: defaultNotificationTemplates, defaultOperator: "营运端" };
 
 export type RentalIntegrationDataStore = ConstructorParameters<typeof FileStorageRepository>[0]
   & FileLedgerMetadataStore & JobLedgerDataStore & NotificationLedgerDataStore
   & Pick<Prisma.TransactionClient, "documentPrintJob" | "tBoxDevice">
-  & { $transaction<T>(work: (tx: RentalIntegrationFileTransaction) => Promise<T>,
+  & { $transaction<T>(work: (tx: RentalIntegrationTransaction) => Promise<T>,
     options: { isolationLevel: "ReadCommitted" }): Promise<T> };
 
 export class MysqlRentalIntegrationRepository implements RentalIntegrationStorage {
@@ -34,10 +38,27 @@ export class MysqlRentalIntegrationRepository implements RentalIntegrationStorag
   constructor(private readonly prisma: RentalIntegrationDataStore) {
     this.files = new FileStorageRepository(prisma);
     this.jobs = new JobLedgerRepository(prisma);
-    this.notifications = new NotificationLedgerRepository(prisma, {
-      defaultTemplates: defaultNotificationTemplates,
-      defaultOperator: "营运端"
-    });
+    this.notifications = new NotificationLedgerRepository({
+      notificationTemplate: {
+        findMany: query => prisma.notificationTemplate.findMany(query),
+        // 原默认模板各自 upsert，保留独立提交和历史主键。每次维护使用同事务准入。
+        upsert: query => this.withLedgerMutation(query.where.tenantId_code.tenantId,
+          transaction => transaction.notificationTemplate.upsert(query))
+      },
+      notificationSendLog: prisma.notificationSendLog,
+      externalAdapterLog: prisma.externalAdapterLog
+    }, notificationDefaults);
+  }
+
+  /** 所选 Rental 请求在原写入事务内持有 Tenant/Core 围栏。原兼容宿主继续使用原存储。
+   * 不合并任务/文件/通知与随后日志，不重发或用后续失败撤销已提交事实。 */
+  private async withLedgerMutation<Result>(tenantId: string,
+    consume: (storage: RentalIntegrationLedgerStore) => PromiseLike<Result>): Promise<Result> {
+    if (!hasRentalBusinessTenantFence()) return consume(this.prisma);
+    return this.prisma.$transaction(async transaction => {
+      await lockRentalBusinessTenant(transaction, tenantId);
+      return consume(transaction);
+    }, { isolationLevel: "ReadCommitted" });
   }
 
   async ensureDefaultNotificationTemplates(tenantId = requireRequestTenantId()) {
@@ -71,7 +92,8 @@ export class MysqlRentalIntegrationRepository implements RentalIntegrationStorag
   }
 
   async recordNotification(input: SendMockNotificationRequest, tenantId = requireRequestTenantId()): Promise<NotificationSendLogSummary> {
-    return this.notifications.recordNotification(input, tenantId);
+    return this.withLedgerMutation(tenantId, transaction =>
+      new NotificationLedgerRepository(transaction, notificationDefaults).recordNotification(input, tenantId));
   }
 
   async listAdapterLogs(tenantId = requireRequestTenantId()): Promise<AdapterLogSummary[]> {
@@ -79,7 +101,8 @@ export class MysqlRentalIntegrationRepository implements RentalIntegrationStorag
   }
 
   async recordAdapterLog(input: Omit<AdapterLogSummary, "id" | "createdAt">, tenantId = requireRequestTenantId()): Promise<AdapterLogSummary> {
-    return this.notifications.recordAdapterLog(input, tenantId);
+    return this.withLedgerMutation(tenantId, transaction =>
+      new NotificationLedgerRepository(transaction, notificationDefaults).recordAdapterLog(input, tenantId));
   }
 
   async listJobs(tenantId = requireRequestTenantId()): Promise<AsyncJobSummary[]> {
@@ -97,7 +120,7 @@ export class MysqlRentalIntegrationRepository implements RentalIntegrationStorag
     input: CreateAsyncJobRequest,
     tenantId = requireRequestTenantId()
   ): Promise<AsyncJobSummary> {
-    return this.jobs.createJob(input, tenantId);
+    return this.withLedgerMutation(tenantId, transaction => new JobLedgerRepository(transaction).createJob(input, tenantId));
   }
 
   async finishJob(
@@ -105,7 +128,7 @@ export class MysqlRentalIntegrationRepository implements RentalIntegrationStorag
     result: Record<string, unknown>,
     tenantId = requireRequestTenantId()
   ): Promise<AsyncJobSummary> {
-    return this.jobs.finishJob(id, result, tenantId);
+    return this.withLedgerMutation(tenantId, transaction => new JobLedgerRepository(transaction).finishJob(id, result, tenantId));
   }
 
   async listPrintJobs(tenantId = requireRequestTenantId()): Promise<PrintJobSummary[]> {
@@ -123,27 +146,29 @@ export class MysqlRentalIntegrationRepository implements RentalIntegrationStorag
     documentNo: string,
     tenantId = requireRequestTenantId()
   ): Promise<PrintJobSummary> {
-    const row = await this.prisma.documentPrintJob.create({
-      data: {
-        id: `print_${cryptoRandomId()}`,
-        tenantId,
-        documentNo,
-        documentType: input.documentType,
-        templateCode: input.templateCode,
-        businessType: input.businessType,
-        businessId: input.businessId,
-        status: "mock_generated",
-        fileAssetId,
-        operator: input.operator,
-        payload: (input.payload ?? {}) as Prisma.InputJsonValue,
-        result: {
-          externalCallSkipped: true,
+    return this.withLedgerMutation(tenantId, async transaction => {
+      const row = await transaction.documentPrintJob.create({
+        data: {
+          id: `print_${cryptoRandomId()}`,
+          tenantId,
+          documentNo,
+          documentType: input.documentType,
+          templateCode: input.templateCode,
+          businessType: input.businessType,
+          businessId: input.businessId,
+          status: "mock_generated",
           fileAssetId,
-          message: "MVP 阶段仅生成 mock 单据记录，不渲染真实 PDF。"
+          operator: input.operator,
+          payload: (input.payload ?? {}) as Prisma.InputJsonValue,
+          result: {
+            externalCallSkipped: true,
+            fileAssetId,
+            message: "MVP 阶段仅生成 mock 单据记录，不渲染真实 PDF。"
+          }
         }
-      }
+      });
+      return toPrintJobSummary(row);
     });
-    return toPrintJobSummary(row);
   }
 
   async listTBoxDevices(
@@ -160,35 +185,37 @@ export class MysqlRentalIntegrationRepository implements RentalIntegrationStorag
     input: SaveTBoxDeviceRequest,
     tenantId = requireRequestTenantId()
   ): Promise<TBoxDeviceSummary> {
-    const id = input.id ?? `tbox_${cryptoRandomId()}`;
-    if (input.id) {
-      const existing = await this.prisma.tBoxDevice.findFirst({ where: { id, tenantId } });
-      if (!existing) {
-        throw new NotFoundException(`TBox device ${id} was not found`);
+    return this.withLedgerMutation(tenantId, async transaction => {
+      const id = input.id ?? `tbox_${cryptoRandomId()}`;
+      if (input.id) {
+        const existing = await transaction.tBoxDevice.findFirst({ where: { id, tenantId } });
+        if (!existing) {
+          throw new NotFoundException(`TBox device ${id} was not found`);
+        }
       }
-    }
-    const data = {
-      cid: input.cid,
-      simNo: input.simNo,
-      model: input.model,
-      status: input.status ?? "unbound",
-      firmwareVersion: input.firmwareVersion,
-      appVersion: input.appVersion,
-      warrantyExpireAt: input.warrantyExpireAt ? new Date(input.warrantyExpireAt) : undefined,
-      supportsIButton: Boolean(input.supportsIButton),
-      iButtonCode: input.iButtonCode
-    };
-    const row = input.id
-      ? await this.prisma.tBoxDevice.update({ where: { id }, data })
-      : await this.prisma.tBoxDevice.create({
-          data: {
-            id,
-            tenantId,
-            ...data,
-            telemetry: {}
-          }
-        });
-    return toTBoxDeviceSummary(row);
+      const data = {
+        cid: input.cid,
+        simNo: input.simNo,
+        model: input.model,
+        status: input.status ?? "unbound",
+        firmwareVersion: input.firmwareVersion,
+        appVersion: input.appVersion,
+        warrantyExpireAt: input.warrantyExpireAt ? new Date(input.warrantyExpireAt) : undefined,
+        supportsIButton: Boolean(input.supportsIButton),
+        iButtonCode: input.iButtonCode
+      };
+      const row = input.id
+        ? await transaction.tBoxDevice.update({ where: { id }, data })
+        : await transaction.tBoxDevice.create({
+            data: {
+              id,
+              tenantId,
+              ...data,
+              telemetry: {}
+            }
+          });
+      return toTBoxDeviceSummary(row);
+    });
   }
 
   async bindTBoxDevice(
@@ -196,21 +223,23 @@ export class MysqlRentalIntegrationRepository implements RentalIntegrationStorag
     input: { vehicleId?: string; plateNo?: string; vehicleModel?: string },
     tenantId = requireRequestTenantId()
   ): Promise<TBoxDeviceSummary> {
-    const existing = await this.prisma.tBoxDevice.findFirst({ where: { id, tenantId } });
-    if (!existing) {
-      throw new NotFoundException(`TBox device ${id} was not found`);
-    }
-    const row = await this.prisma.tBoxDevice.update({
-      where: { id },
-      data: {
-        status: input.plateNo ? "bound" : "unbound",
-        boundVehicleId: input.vehicleId,
-        boundPlateNo: input.plateNo,
-        vehicleModel: input.vehicleModel,
-        lastHeartbeatAt: input.plateNo ? new Date() : existing.lastHeartbeatAt
+    return this.withLedgerMutation(tenantId, async transaction => {
+      const existing = await transaction.tBoxDevice.findFirst({ where: { id, tenantId } });
+      if (!existing) {
+        throw new NotFoundException(`TBox device ${id} was not found`);
       }
+      const row = await transaction.tBoxDevice.update({
+        where: { id },
+        data: {
+          status: input.plateNo ? "bound" : "unbound",
+          boundVehicleId: input.vehicleId,
+          boundPlateNo: input.plateNo,
+          vehicleModel: input.vehicleModel,
+          lastHeartbeatAt: input.plateNo ? new Date() : existing.lastHeartbeatAt
+        }
+      });
+      return toTBoxDeviceSummary(row);
     });
-    return toTBoxDeviceSummary(row);
   }
 }
 

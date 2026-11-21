@@ -6,12 +6,16 @@ import { RentalAuthExtensionsController } from "@rental-os/rental-core/http-auth
 import { StaffSubscriptionController } from "@rental-os/rental-core/http-staff-subscription";
 import { RentalCustomersController } from "@rental-os/rental-core/http-customers";
 import { RentalWorkspacesController } from "@rental-os/rental-core/http-workspaces";
+import { IntegrationsController } from "@rental-os/rental-core/http-integrations";
+import { JobsController } from "@rental-os/platform-server/jobs";
+import { NotificationsController } from "@rental-os/platform-server/notifications";
 import { compileRentalHttpAccessPolicy } from "@rental-os/rental-core/http-access-policy";
 import { createRentalAuthorization } from "@rental-os/rental-core/http-auth";
 import * as shared from "@rental-os/shared";
 
 export const RENTAL_HOST_CONTROLLERS = Object.freeze([...RENTAL_HTTP_CONTROLLERS, ...RENTAL_PAYMENT_HTTP_CONTROLLERS,
-  RentalAuthExtensionsController, StaffSubscriptionController, RentalCustomersController, RentalWorkspacesController]);
+  RentalAuthExtensionsController, StaffSubscriptionController, RentalCustomersController, RentalWorkspacesController,
+  IntegrationsController, JobsController, NotificationsController]);
 
 export function createRentalHostHttpPolicy(authorization = createRentalAuthorization(shared)) {
   return compileRentalHttpAccessPolicy({ controllers: RENTAL_HOST_CONTROLLERS, authorization, inspectionEvidence: "unavailable" });

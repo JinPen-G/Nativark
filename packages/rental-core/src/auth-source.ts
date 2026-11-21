@@ -12,7 +12,7 @@ export type RentalAuthenticationSource = Omit<PlatformAuthenticationSource, "fin
     "listUserWorkspaces" | "resolveSessionWorkspaceId" | "findWorkspaceScopedUser"
     | "resolveTrustedWorkspacePrincipal">
   & Pick<RentalWorkspacePrincipalRepository<RentalWorkspaceAccessTransaction>,
-    "lockWorkspaceSessionUser" | "readWorkspaceSessionUser">
+    "lockWorkspaceSessionUser" | "readWorkspaceSessionUser" | "lockMemberSessionUser" | "readMemberSessionUser">
   & {
     getAuthSession(id: string, transaction?: Prisma.TransactionClient): ReturnType<PlatformAuthenticationSource["getAuthSession"]>;
     findTenantByIdForAuth(id: string): TenantSummary | Promise<TenantSummary>;

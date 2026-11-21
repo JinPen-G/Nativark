@@ -20,7 +20,7 @@ import { PlatformPrincipalAuthority } from "@rental-os/platform-server/principal
 import { createRentalApplication, type RentalApplication, type RentalApplicationParticipants } from "@rental-os/rental-core/application";
 import { createRentalHttpApplications } from "@rental-os/rental-core/application-http";
 import { createRentalPlatformApplications } from "@rental-os/rental-core/application-platform";
-import { createRentalApplicationAccess, createRentalRecoveryAuthority } from "@rental-os/rental-core/application-access";
+import { createRentalApplicationAccess, createRentalRecoveryAuthority, createRentalMemberAuthority } from "@rental-os/rental-core/application-access";
 import { createRentalPublicApplicationAccess, createRentalPaymentCallbackAccess } from "@rental-os/rental-core/application-public-access";
 import { createRentalWorkerAuthority } from "@rental-os/rental-core/application-worker-authority";
 import { createRentalFileCleanupAuthority, type RentalFileCleanupAuthorityDependencies } from "@rental-os/rental-core/application-file-cleanup-authority";
@@ -162,6 +162,7 @@ export function composeRentalApplication<Binding = never, Additional = unknown>(
   const guard = new authorization.Guard(rental.auth, rental.foundation.capabilities, rental.client.auth,
     rental.client.rateLimit, database, rental.subscriptions);
   const accessInput = { database, authorization, admissionForTransaction,
+    memberAuthority: createRentalMemberAuthority({ auth: rental.auth, authorization }),
     recoveryAuthority: createRentalRecoveryAuthority({ auth: rental.auth, clientAuth: rental.client.auth,
       corporateHistory: { access: rental.enterprise.access, orders: rental.enterprise.orders },
       originalHistory: { files: rental.integrations.fileAccess, approvals: rental.enterprise.approvals,

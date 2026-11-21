@@ -11,7 +11,7 @@ import type { WorkspaceCapabilityService } from "./workspace-capabilities";
 import type { SubscriptionService } from "@rental-os/platform-server/subscription";
 import { enterRequestIdentity, getRequestIdentity, runWithRequestIdentity, type RequestIdentity } from "@rental-os/platform-server/request-identity";
 import { matchableRequestPath } from "@rental-os/platform-server/request-path";
-import { resolveUserBusinessLocationScope } from "./business-location-scope";
+import { resolveUserBusinessLocationScope, type RentalBusinessLocationReader } from "./business-location-scope";
 import type { TrustedWorkspaceAccess } from "./trusted-workspace-principal";
 import type { ClientRequestContext } from "./client-context";
 import type { RentalGuardContracts } from "./auth-guard-contracts";
@@ -185,6 +185,26 @@ function isClientPublicRoute(method: string, path: string) {
   if (method === "GET" && /^\/client\/v1\/public\/documents\/[^/]+$/u.test(path)) return true;
   if (method === "POST" && /^\/client\/v1\/auth\/registration\/challenges\/[^/]+\/verify$/u.test(path)) return true;
   return false;
+}
+
+/** Guard 与提交前复验共用原地点投影。员工URL会被原路由器改写，须沿可信员工标记判定，
+ * 不能从改写后的路径推断管理权限；配置继续由原主体来源供给。 */
+async function resolveMemberLocationScope(staffApiRequest: boolean, path: string, user: SystemUserRow,
+  workspaceId: string | undefined, configuredScope: NonNullable<SystemUserRow["locationScope"]>,
+  database?: RentalBusinessLocationReader) {
+  const tenantWideDataScope = user.isSaasAdmin || user.isPlatformAdmin || user.permissions.includes("*") || user.dataScope === "all";
+  const canManageOrganizationMapping = !staffApiRequest
+    && /^\/rental\/v1\/locations(?:\/[^/]+)?$/u.test(path)
+    && tenantWideDataScope && user.locationScope?.mode !== "selected" && hasAnyPermission(user, ["system:user:manage"]);
+  const needsLocationScope =
+    (path.startsWith("/rental/v1/") && path !== "/rental/v1/categories") ||
+    (path.startsWith("/staff/v1/") && !isStaffAuthPath(path)) ||
+    path.startsWith("/reports") || path.startsWith("/files") || path.startsWith("/integrations") ||
+    /^\/membership\/enterprise-workflows\/order-delegations\/[^/]+(?:\/(?:execute|result))?$/u.test(path) ||
+    /^\/platform\/customers\/[^/]+\/(?:profile|credit\/(?:account|ledger|payments(?:\/[^/]+\/reverse)?|maturities(?:\/[^/]+)?))$/u.test(path) ||
+    path === "/platform/workspace-customers" || path.startsWith("/platform/workspace-customers/");
+  return canManageOrganizationMapping ? { mode: "all" as const, locationIds: [] }
+    : needsLocationScope ? resolveUserBusinessLocationScope(user, workspaceId, configuredScope, database) : configuredScope;
 }
 
 function isTenantMembershipRoute(path: string) {
@@ -1429,21 +1449,8 @@ class RentalApiAuthGuard implements CanActivate {
     }
 
     const configuredLocationScope = accessContext?.user.locationScope ?? { mode: "all" as const, locationIds: [] };
-    const canManageOrganizationMapping = !staffApiRequest && locationConfigurationRoute &&
-      tenantWideDataScope && unrestrictedLocationScope && hasAnyPermission(user, ["system:user:manage"]);
-    const needsLocationScope =
-      (path.startsWith("/rental/v1/") && path !== "/rental/v1/categories") ||
-      (path.startsWith("/staff/v1/") && !isStaffAuthPath(path)) ||
-      path.startsWith("/reports") || path.startsWith("/files") || path.startsWith("/integrations") ||
-      /^\/membership\/enterprise-workflows\/order-delegations\/[^/]+(?:\/(?:execute|result))?$/u.test(path) ||
-      /^\/platform\/customers\/[^/]+\/(?:profile|credit\/(?:account|ledger|payments(?:\/[^/]+\/reverse)?|maturities(?:\/[^/]+)?))$/u.test(path) ||
-      path === "/platform/workspace-customers" ||
-      path.startsWith("/platform/workspace-customers/");
-    const locationScope = canManageOrganizationMapping
-      ? { mode: "all" as const, locationIds: [] }
-      : needsLocationScope
-        ? await this.resolveLocationScope(user, workspaceId, configuredLocationScope, scopedDatabase)
-        : configuredLocationScope;
+    const locationScope = await resolveMemberLocationScope(staffApiRequest, path, user, workspaceId,
+      configuredLocationScope, scopedDatabase);
     const operationalRentalPath = path.startsWith("/rental/v1/") || path.startsWith("/staff/v1/");
     const scopedRentalPath = operationalRentalPath && path !== "/rental/v1/categories" && path !== "/rental/v1/subscription/context";
     const restrictedRentalRequest = scopedRentalPath && (
@@ -1771,5 +1778,5 @@ class RentalApiAuthGuard implements CanActivate {
 }
 
 const Guard: RentalAuthGuardConstructor = RentalApiAuthGuard;
-return { Guard, isNewBusinessRoute, UNMATCHED_ROUTE_PERMISSION, PUBLIC_ROUTES, PUBLIC_ROUTE_PREFIXES, CLIENT_ROUTE_PREFIXES, isClientRoute, isClientPublicRoute, isTenantMembershipRoute, requiredPermissions };
+return { Guard, isNewBusinessRoute, UNMATCHED_ROUTE_PERMISSION, PUBLIC_ROUTES, PUBLIC_ROUTE_PREFIXES, CLIENT_ROUTE_PREFIXES, isClientRoute, isClientPublicRoute, isTenantMembershipRoute, requiredPermissions, resolveMemberLocationScope };
 }

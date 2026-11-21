@@ -9,8 +9,8 @@ import { OFFICIAL_CALENDAR_SCHEMAS, OFFICIAL_CALENDAR_OPENAPI_QUERY_SCHEMAS } fr
 import { PLATFORM_SETTINGS_HTTP_OPERATIONS } from '@rental-os/platform-server/settings-http-policy';
 import { PLATFORM_SETTINGS_SCHEMAS, PLATFORM_SETTINGS_OPENAPI_QUERY_SCHEMAS } from '@rental-os/platform-server/settings-openapi';
 import { PLATFORM_TOOLS_HTTP_OPERATIONS, PLATFORM_TOOLS_SCHEMAS } from '@rental-os/platform-server/tools';
-import { JOBS_HTTP_OPERATIONS, JOBS_OPENAPI_SCHEMAS } from '@rental-os/platform-server/jobs';
-import { NOTIFICATIONS_HTTP_OPERATIONS, NOTIFICATIONS_OPENAPI_SCHEMAS } from '@rental-os/platform-server/notifications';
+import { JOBS_OPENAPI_SCHEMAS } from '@rental-os/platform-server/jobs';
+import { NOTIFICATIONS_OPENAPI_SCHEMAS } from '@rental-os/platform-server/notifications';
 import { SUBSCRIPTION_OPENAPI_SCHEMAS, SUBSCRIPTION_OPENAPI_QUERY_SCHEMAS } from '@rental-os/platform-server/subscription-openapi';
 import { AI_HTTP_OPERATIONS, AI_HTTP_COMPONENT_SCHEMAS } from "@rental-os/ai-native-server/runtime/contracts/http-openapi";
 
@@ -337,31 +337,6 @@ const TENANT_INTEGRATION_OPERATIONS: ContractOperation[] = INTEGRATION_HTTP_OPER
 
 const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   ...RENTAL_HTTP_OPERATIONS,
-  backlogOperation("get", "/api/integrations/adapter-logs", "Integrations", "listAdapterLogs", "List adapter logs", ["system:integration:manage"]),
-  backlogOperation("post", "/api/integrations/adapters/mock-call", "Integrations", "invokeMockAdapter", "Invoke mock adapter", ["system:integration:manage"]),
-  backlogOperation("get", "/api/integrations/data-exchange/templates", "Integrations", "listDataExchangeTemplates", "List data exchange templates", ["system:integration:manage"]),
-  backlogOperation("post", "/api/integrations/data-exchange/jobs", "Integrations", "createDataExchangeJob", "Create data exchange job", ["system:integration:manage"]),
-  backlogOperation("get", "/api/integrations/dashboard", "Integrations", "getInfraDashboard", "Get integrations dashboard with files filtered by their original business ACL", ["system:integration:manage"]),
-  backlogOperation("get", "/api/integrations/tbox-devices", "Integrations", "listIntegrationTboxDevices", "List integration TBox devices", ["system:integration:manage"]),
-  backlogOperation("post", "/api/integrations/tbox-devices", "Integrations", "saveIntegrationTboxDevice", "Save integration TBox device", ["system:integration:manage"]),
-  backlogOperation("put", "/api/integrations/tbox-devices/{id}", "Integrations", "updateIntegrationTboxDevice", "Update integration TBox device", ["system:integration:manage"]),
-  backlogOperation("post", "/api/integrations/tbox-devices/{id}/bind", "Integrations", "bindIntegrationTboxDevice", "Bind integration TBox device", ["system:integration:manage"]),
-  // 作业/通知字段与路由沿公共声明，权限使用原Guard的system:integration:manage。
-  ...JOBS_HTTP_OPERATIONS.map((item): ContractOperation => ({
-    method: item.method.toLowerCase() as HttpMethod,
-    path: `/api${item.path.replace(/:([a-zA-Z]+)/g, "{$1}")}`,
-    tag: "Jobs", operationId: item.id, summary: item.summary,
-    permissions: [item.permission], responseSchema: item.response,
-    ...("request" in item ? { requestSchema: item.request } : {}),
-    ...("parameters" in item ? { parameters: [...item.parameters] } : {})
-  })),
-  ...NOTIFICATIONS_HTTP_OPERATIONS.map((item): ContractOperation => ({
-    method: item.method.toLowerCase() as HttpMethod,
-    path: `/api${item.path.replace(/:([a-zA-Z]+)/g, "{$1}")}`,
-    tag: "Notifications", operationId: item.id, summary: item.summary,
-    permissions: [item.permission], responseSchema: item.response,
-    ...("request" in item ? { requestSchema: item.request } : {})
-  })),
   // APPEARANCE-01：租户级「品牌与外观」（管理后台 UI 身份：品牌标识/主题色/圆角），从客户端渠道拆出的独立领域。
   backlogOperation("get", "/api/platform/appearance", "Platform", "getTenantAppearance", "Get the tenant-level brand & appearance profile (brand identity, theme color, corner radii)", ["system:integration:manage"], true, undefined, "TenantAppearanceProfile"),
   backlogOperation("put", "/api/platform/appearance", "Platform", "saveTenantAppearance", "Save the tenant-level brand & appearance profile with optimistic revision check", ["system:integration:manage"], true, "SaveTenantAppearanceRequest", "TenantAppearanceProfile"),

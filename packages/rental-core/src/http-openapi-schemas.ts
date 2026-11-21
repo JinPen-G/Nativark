@@ -17,6 +17,8 @@ import { ENTERPRISE_ORDER_DELEGATION_SCHEMAS } from "./http-openapi-enterprise-o
 import { RENTAL_ORDER_COMPONENT_SCHEMAS } from "./http-openapi-rental-order-schemas";
 import { RENTAL_ORDER_DOCUMENT_COMPONENT_SCHEMAS } from "./http-openapi-rental-order-document-schemas";
 import { RENTAL_PAYMENT_COMPONENT_SCHEMAS } from "./http-openapi-rental-payment-schemas";
+import { JOBS_OPENAPI_SCHEMAS } from "@rental-os/platform-server/jobs";
+import { NOTIFICATIONS_OPENAPI_SCHEMAS } from "@rental-os/platform-server/notifications";
 
 import { RENTAL_CATEGORY_CODE_PATTERN, RENTAL_CATEGORY_ICON_CODES } from "@rental-os/shared";
 import { AI_CATEGORY_DRAFT_HTTP_SCHEMAS, AI_EXTENSION_PREVIEW_HTTP_SCHEMAS } from "@rental-os/shared";
@@ -24,6 +26,8 @@ import { aiLeafToOpenApi30 } from "./http-openapi-json-schema";
 import { adminContainerRadiusInput, adminControlRadiusInput, storedAdminRadiusSchema, stringSchema, numberSchema, booleanSchema, objectSchema, ref, arrayOf, objectOf, type SchemaObject } from "./http-openapi-contract";
 
 export const RENTAL_HTTP_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
+  ...JOBS_OPENAPI_SCHEMAS,
+  ...NOTIFICATIONS_OPENAPI_SCHEMAS,
   ...STAFF_UPLOAD_OBSERVATION_SCHEMAS,
   AiExtensionServiceSnapshotDraft: aiLeafToOpenApi30(AI_EXTENSION_PREVIEW_HTTP_SCHEMAS.AiExtensionServiceSnapshotDraft, "AiExtensionServiceSnapshotDraft"),
   AiCategoryDraftJson: aiLeafToOpenApi30(AI_CATEGORY_DRAFT_HTTP_SCHEMAS.AiCategoryDraftJson, "AiCategoryDraftJson"),

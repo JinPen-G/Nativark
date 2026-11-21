@@ -74,7 +74,8 @@ import {
   resolveTenantIdForQuery
 } from "../../common/data-permission";
 import { enabledOrganizationSubtreeIds } from "../../common/organization-location-scope";
-import { PlatformRepository, type WorkspaceSessionIdentity } from "./platform.repository";
+import { PlatformRepository, type WorkspaceSessionIdentity, type RentalMemberSessionIdentity,
+  type RentalWorkspaceAccessTransaction } from "./platform.repository";
 import { MembershipService } from "./membership.service";
 import { SharedCustomerRepository } from "./shared-customer.repository";
 import { CustomerOperationsService } from "./customer-operations.service";
@@ -2280,6 +2281,17 @@ export class PlatformService {
   readWorkspaceSessionUser(tx: Prisma.TransactionClient, expected: WorkspaceSessionIdentity) {
     if (!this.useMysqlDataSource()) throw new ForbiddenException("空间事务授权需要持久化身份来源");
     return this.platformRepository.readWorkspaceSessionUser(tx, expected);
+  }
+
+  lockMemberSessionUser(tx: RentalWorkspaceAccessTransaction, expected: RentalMemberSessionIdentity,
+    parentLock: "exclusive" | "shared" = "exclusive") {
+    if (!this.useMysqlDataSource()) throw new ForbiddenException("业务事务授权需要持久化身份来源，演示身份不能替代");
+    return this.platformRepository.lockMemberSessionUser(tx, expected, parentLock);
+  }
+
+  readMemberSessionUser(tx: RentalWorkspaceAccessTransaction, expected: RentalMemberSessionIdentity) {
+    if (!this.useMysqlDataSource()) throw new ForbiddenException("业务事务授权需要持久化身份来源");
+    return this.platformRepository.readMemberSessionUser(tx, expected);
   }
 
   /** External current grants must use original persistent identity, never the

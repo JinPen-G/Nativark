@@ -14,6 +14,17 @@ export interface WorkspaceSessionIdentity {
   audience: "operator" | "staff";
 }
 
+/** 原 Guard 的投影选择，由宿主代码决定；不能从请求字段指定。 */
+export interface RentalMemberSessionIdentity extends Omit<WorkspaceSessionIdentity, "workspaceId"> {
+  workspaceId: string | null;
+  projection: "tenant" | "workspace";
+  allowInvalidWorkspace: boolean;
+}
+export interface RentalMemberSessionPrincipal {
+  user: SystemUserRow;
+  configuredLocationScope: NonNullable<SystemUserRow["locationScope"]>;
+}
+
 /** 原会话及账号已复验，但经营空间/成员不可用。业务入口仍返回原 403；
  * 只有 Core 目录读取器可将它收缩为无 Rental 空间权限，不能吞掉其他身份或存储错误。 */
 export class RentalWorkspaceUnavailableError extends ForbiddenException {
@@ -176,12 +187,21 @@ export class RentalWorkspacePrincipalRepository<Transaction extends RentalWorksp
 
   /** 主体锁先于业务锁，原撤权写入者更新同一组行，角色与权限按原排序持锁。 */
   async lockWorkspaceSessionUser(tx: Transaction, expected: WorkspaceSessionIdentity): Promise<SystemUserRow> {
-    const tenant = await tx.$queryRaw<Array<{ id: string }>>(prismaRuntime.sql`SELECT id FROM Tenant WHERE id = ${expected.tenantId} FOR UPDATE`);
+    return (await this.lockMemberSessionUser(tx, { ...expected, projection: "workspace", allowInvalidWorkspace: false })).user;
+  }
+
+  /** 普通业务共用原主体锁及角色投影。Tenant S 沿原业务父锁，可在已持 Tenant X 时复用，
+   * 不升级 S→X；原空间会话事务仍默认 Tenant X。其余身份锁保持原排序及强度。 */
+  async lockMemberSessionUser(tx: Transaction, expected: RentalMemberSessionIdentity,
+    parentLock: "exclusive" | "shared" = "exclusive"): Promise<RentalMemberSessionPrincipal> {
+    const tenant = await tx.$queryRaw<Array<{ id: string }>>(parentLock === "shared"
+      ? prismaRuntime.sql`SELECT id FROM Tenant WHERE id = ${expected.tenantId} LOCK IN SHARE MODE`
+      : prismaRuntime.sql`SELECT id FROM Tenant WHERE id = ${expected.tenantId} FOR UPDATE`);
     const users = await tx.$queryRaw<Array<{ id: string; roleId: string | null }>>(prismaRuntime.sql`SELECT id, roleId FROM \`User\` WHERE id = ${expected.userId} AND tenantId = ${expected.tenantId} FOR UPDATE`);
     if (tenant.length !== 1 || users.length !== 1) throw new UnauthorizedException("账号或租户已失效");
     const sessions = await tx.$queryRaw<Array<{ id: string }>>(prismaRuntime.sql`SELECT id FROM auth_sessions WHERE id = ${expected.sessionId} AND userId = ${expected.userId} FOR UPDATE`);
     if (sessions.length !== 1) throw new UnauthorizedException("原会话已失效");
-    const members = await tx.$queryRaw<Array<{ roleId: string | null }>>(prismaRuntime.sql`SELECT roleId FROM workspace_members WHERE tenantId = ${expected.tenantId} AND workspaceId = ${expected.workspaceId} AND userId = ${expected.userId} FOR UPDATE`);
+    const members = expected.workspaceId === null ? [] : await tx.$queryRaw<Array<{ roleId: string | null }>>(prismaRuntime.sql`SELECT roleId FROM workspace_members WHERE tenantId = ${expected.tenantId} AND workspaceId = ${expected.workspaceId} AND userId = ${expected.userId} FOR UPDATE`);
     if (members.length > 1) throw new ForbiddenException("当前经营空间成员关系不唯一");
     const assignments = await tx.$queryRaw<Array<{ roleId: string }>>(prismaRuntime.sql`SELECT roleId FROM \`UserRole\` WHERE userId = ${expected.userId} ORDER BY roleId FOR UPDATE`);
     const roleIds = [...new Set([users[0].roleId, members[0]?.roleId, ...assignments.map(row => row.roleId)].filter((id): id is string => Boolean(id)))].sort();
@@ -196,14 +216,21 @@ export class RentalWorkspacePrincipalRepository<Transaction extends RentalWorksp
       await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM \`Permission\` WHERE id = ${permissionId} FOR UPDATE`);
     }
     // 即使没有成员行，也先复验原会话及租户角色，不能用空间不可用掩盖撤销/切换。
-    const scoped = await this.readWorkspaceSessionUser(tx, expected);
+    const scoped = await this.readMemberSessionUser(tx, expected);
     // 缺原成员锁时，后续读到的新成员不能使本次操作获得业务权。
-    if (members.length !== 1) throw new ForbiddenException("当前经营空间访问权已撤销");
+    if (members.length !== 1 && expected.projection === "workspace" && !expected.allowInvalidWorkspace)
+      throw new ForbiddenException("当前经营空间访问权已撤销");
     return scoped;
   }
 
   /** 在原主体锁下复验会话受众、当前空间、账号和成员，返回当前空间的角色投影。 */
   async readWorkspaceSessionUser(tx: Transaction, expected: WorkspaceSessionIdentity): Promise<SystemUserRow> {
+    return (await this.readMemberSessionUser(tx, { ...expected, projection: "workspace", allowInvalidWorkspace: false })).user;
+  }
+
+  /** 原租户会员使用 tenantUser，其余路由使用当前空间投影；允许无效空间的精确管理路由
+   * 沿原 Guard 返回租户主体。配置地点仍来自原 accessContext.user，避免改变租户会员投影。 */
+  async readMemberSessionUser(tx: Transaction, expected: RentalMemberSessionIdentity): Promise<RentalMemberSessionPrincipal> {
     const session = await tx.authSession.findFirst({ where: {
       id: expected.sessionId, userId: expected.userId, revokedAt: null, expiresAt: { gt: new Date() }
     }, select: { audience: true, currentWorkspaceId: true } });
@@ -212,8 +239,10 @@ export class RentalWorkspacePrincipalRepository<Transaction extends RentalWorksp
     const base = await this.native.findUserById(expected.userId, tx);
     if (!base || base.id !== expected.userId || base.tenantId !== expected.tenantId || !base.isActive || base.mustChangePassword)
       throw new UnauthorizedException("账号或租户已停用或需要重新验证");
-    const scoped = await this.findWorkspaceScopedUser(expected.userId, expected.workspaceId, base, tx);
-    if (!scoped) throw new RentalWorkspaceUnavailableError();
-    return scoped;
+    const scoped = expected.workspaceId === null ? undefined
+      : await this.findWorkspaceScopedUser(expected.userId, expected.workspaceId, base, tx);
+    if (!scoped && !expected.allowInvalidWorkspace) throw new RentalWorkspaceUnavailableError();
+    return { user: expected.projection === "tenant" ? base : scoped ?? base,
+      configuredLocationScope: (scoped ?? base).locationScope ?? { mode: "all", locationIds: [] } };
   }
 }
