@@ -89,6 +89,7 @@ function membershipFormHost(dependencies, globals) {
 function load(relative, dependencies, globals = {}) {
   const originalRelative = relative;
   relative = membershipSource(relative);
+  const portalSource = relative.replace(/^packages\/rental-core\/clients\/enterprise-portal\//u, 'apps/enterprise-portal/src/');
   let source = sources.get(relative);
   if (!source) {
     const filename = path.join(root, relative), text = readSource(relative);
@@ -106,11 +107,19 @@ function load(relative, dependencies, globals = {}) {
     exports, module, require(name) {
       if (name === '@rental-os/rental-core') return { ...rentalContracts, ...enterpriseContracts, ...enterpriseWorkflowContracts, ...transferDecisionContracts, ...extensionContracts, ...(dependencies['@rental-os/shared'] ?? {}) };
       if (name === '@rental-os/shared') return { ...enterpriseContracts, ...enterpriseWorkflowContracts, ...transferDecisionContracts, ...extensionContracts, ...(dependencies[name] ?? {}) };
-      if (relative === 'apps/enterprise-portal/src/WorkflowPages.tsx' && name === '@/components/ui/customer-entry' && dependencies[name]?.Form && !dependencies[name].Form.useWatch) {
-        // Only the new region watch: real Form remains the owner in production.
-        const ui = dependencies[name]; Object.assign(ui.Form, { useWatch: (field, form) => form.getFieldValue?.(field) }); return ui;
+      if (['apps/enterprise-portal/src/WorkflowPages.tsx', 'apps/enterprise-portal/src/ManagementRequestsPage.tsx'].includes(portalSource) && name === '@rental-os/platform-admin/ui' && dependencies['@/components/ui/customer-entry']?.Form && !dependencies['@/components/ui/customer-entry'].Form.useWatch) {
+        // Expose the current value from the existing form fixture for fields watched by the source.
+        const ui = dependencies['@/components/ui/customer-entry']; Object.assign(ui.Form, { useWatch: (field, form) => form.getFieldValue?.(field) ?? form.getFieldsValue?.()[field] });
       }
+      if (relative === 'packages/rental-core/admin/orders/page-context.tsx' && name === 'react') return { ...require(name), ...dependencies[name] };
       if (Object.hasOwn(dependencies, name)) return dependencies[name];
+      if (relative.startsWith('packages/rental-core/clients/enterprise-portal/') && name === '../enterprise') return {
+        ...transferReview, ...actionLabels, ...load('packages/rental-core/clients/enterprise/file-evidence.ts', dependencies, globals),
+      };
+      if (portalSource.startsWith('apps/enterprise-portal/src/') && name === '@rental-os/web-client') return {
+        ...load('packages/web-client/src/enterprise-entry.ts', {}, globals),
+        customerFetch: forbidden('unconfigured portal file transport'),
+      };
       if (name.startsWith('@rental-os/rental-core/')) {
         const manifest = JSON.parse(readSource('packages/rental-core/package.json'));
         const entry = manifest.exports['./' + name.slice('@rental-os/rental-core/'.length)];
@@ -161,14 +170,16 @@ function load(relative, dependencies, globals = {}) {
       if (['../../miniprogram/src/core/time', '../../../miniprogram/src/core/time'].includes(name)) return load('apps/miniprogram/src/core/time.ts', {}, globals);
       if (name === '@/app/serverFormSnapshot') return load('packages/platform-admin/src/app/serverFormSnapshot.ts', dependencies, globals);
       const alias = { '@rental-os/platform-admin/ui': '@/components/ui', '../components/ui': '@/components/ui', '@rental-os/platform-admin/locale': '@/app/locale',
-        './EnterprisePolicyFields': '@/components/EnterprisePolicyFields', './enterprise-policy-material': '@/components/enterprise-policy-material' }[name];
+        './EnterprisePolicyFields': '@/components/EnterprisePolicyFields', './enterprise-policy-material': '@/components/enterprise-policy-material',
+        '../../admin/membership/EnterprisePolicyFields': '@/components/EnterprisePolicyFields',
+        '../../admin/membership/enterprise-policy-material': '@/components/enterprise-policy-material' }[name];
       if (alias && (Object.hasOwn(dependencies, alias) || (alias === '@/components/ui' && (dependencies['./ui/customer-entry'] || dependencies['@/components/ui/customer-entry'])))) return { ...(dependencies[alias] ?? dependencies['./ui/customer-entry'] ?? dependencies['@/components/ui/customer-entry']),
         ...(alias === '@/components/ui' ? { useFeedback: (dependencies[alias] ?? dependencies['./ui/customer-entry'] ?? dependencies['@/components/ui/customer-entry']).useFeedback ?? (() => ({ toast() {} })) } : {}) };
       if (relative.startsWith('packages/rental-core/admin/membership/') && name === './page-context') return {
         useRentalMembershipContext: () => membershipFixture(dependencies, globals),
         useRentalMembershipSession: select => select ? select(membershipFixture(dependencies, globals).session) : membershipFixture(dependencies, globals).session,
       };
-      if (relative === 'packages/rental-core/admin/orders/page-context.tsx' && ['react', 'react/jsx-runtime'].includes(name)) return require(name);
+      if (relative === 'packages/rental-core/admin/orders/page-context.tsx' && name === 'react/jsx-runtime') return require(name);
       if (name === '@rental-os/platform-admin/core') return {
         useCoreForm: options => load('packages/platform-admin/src/core/useCoreForm.ts', dependencies, globals).useCoreForm(options),
         useCorePageHost: () => membershipFormHost(dependencies, globals), CorePage: 'core-page',
@@ -179,6 +190,11 @@ function load(relative, dependencies, globals = {}) {
       if (relative === 'packages/platform-admin/src/core/useCoreForm.ts' && name === '../app/serverFormSnapshot') return load('packages/platform-admin/src/app/serverFormSnapshot.ts', dependencies, globals);
       if (relative === 'apps/miniprogram/src/core/storage.ts' && name === '../vendor/shared-ai-client') return load('packages/shared/src/ai-client-goal-session.ts', {}, globals);
       if (relative.startsWith('apps/miniprogram/src/core/enterprise-') && name === '../vendor/shared-enterprise-expense/enterprise-expense') return extensionContracts;
+      if (relative.startsWith('packages/platform-contracts/src/ai-') && name.startsWith('./ai-')) {
+        const filename = path.resolve(path.dirname(source.filename), name + '.ts');
+        assert.equal(path.dirname(filename), path.join(root, 'packages/platform-contracts/src'), 'Platform AI contract source boundary');
+        return load(path.relative(root, filename).replaceAll('\\', '/'), {}, globals);
+      }
       if (relative.startsWith('packages/shared/src/') && name === 'zod') return require(name);
       if (relative.startsWith('packages/shared/src/') && name.startsWith('.')) {
         const filename = path.resolve(path.dirname(source.filename), name + '.ts');
@@ -186,10 +202,10 @@ function load(relative, dependencies, globals = {}) {
         return load(path.relative(root, filename).replaceAll('\\', '/'), {}, globals);
       }
       if (relative.startsWith('packages/rental-core/clients/enterprise/') && name === './session' && dependencies['./enterprise-session']) return dependencies['./enterprise-session'];
-      if (['apps/enterprise-portal/src/WorkflowPages.tsx','apps/enterprise-portal/src/OwnRentalHandoffs.tsx'].includes(relative) && name === 'react-router-dom') return { useLocation: () => ({ search: '' }) };
+      if (['apps/enterprise-portal/src/WorkflowPages.tsx','apps/enterprise-portal/src/OwnRentalHandoffs.tsx'].includes(portalSource) && name === 'react-router-dom') return { useLocation: () => ({ search: '' }) };
       if (name === '@/components/enterprise-management-material') return load('apps/admin/src/components/enterprise-management-material.ts', dependencies, globals);
       if (name === '@/components/enterprise-application-material') return load('apps/admin/src/components/enterprise-application-material.ts', dependencies, globals);
-      if (relative.startsWith('apps/enterprise-portal/src/')) {
+      if (portalSource.startsWith('apps/enterprise-portal/src/')) {
         if (name === './administrator-transfer-review') return transferReview;
         if (name === './enterprise-action-labels') return actionLabels;
         if (name === './TransferDecisionRecovery') return load('apps/enterprise-portal/src/TransferDecisionRecovery.tsx', dependencies, globals);
@@ -214,10 +230,9 @@ function load(relative, dependencies, globals = {}) {
         if (name === './MemberOperationRecovery') return load('apps/enterprise-portal/src/MemberOperationRecovery.tsx', dependencies, globals);
       }
       if (relative === 'apps/api/src/modules/client/client-api.service.ts' && name === '../rental-core/rental-core-fact.repository') return {}; // Read-only non-tx fixtures never invoke this new port.
-      if (relative === 'apps/enterprise-portal/src/OwnRentalFulfillment.tsx' && name === 'react-router-dom') return { useLocation: () => ({ search: '' }) };
-      if (relative === 'apps/enterprise-portal/src/OwnRentalHandoffOrders.tsx' && name === '@tanstack/react-query') return { useQuery: forbidden('uninvoked original-source child hook') };
-      if (relative === 'apps/enterprise-portal/src/OwnRentalHandoffOrders.tsx' && name === 'react-router-dom') return { Link: 'link' };
-      if (relative === 'apps/enterprise-portal/src/OwnRentalHandoffOrders.tsx' && name === '@rental-os/web-client') return load('packages/web-client/src/enterprise-entry.ts', {});
+      if (portalSource === 'apps/enterprise-portal/src/OwnRentalFulfillment.tsx' && name === 'react-router-dom') return { useLocation: () => ({ search: '' }) };
+      if (portalSource === 'apps/enterprise-portal/src/OwnRentalHandoffOrders.tsx' && name === '@tanstack/react-query') return { useQuery: forbidden('uninvoked original-source child hook') };
+      if (portalSource === 'apps/enterprise-portal/src/OwnRentalHandoffOrders.tsx' && name === 'react-router-dom') return { Link: 'link' };
       if (relative === 'packages/rental-core/admin/membership/EnterpriseRentalHandoffs.tsx' && name === './EnterpriseRentalHandoffQueue') return load('apps/admin/src/features/membership/EnterpriseRentalHandoffQueue.tsx', dependencies, globals);
       if (name.startsWith('.') && (relative.startsWith('packages/rental-core/') || relative.startsWith('packages/platform-admin/src/'))) {
         const candidate = path.resolve(path.dirname(source.filename), name);
@@ -676,9 +691,13 @@ for (const [name, status] of [['BadRequestException', 400], ['ConflictException'
   ['ServiceUnavailableException', 503], ['UnauthorizedException', 401]]) common[name] = class extends Error {
   constructor(message) { super(typeof message === 'string' ? message : JSON.stringify(message)); this.status = status; }
 };
+const publicIngressOutsideReadFixture = {
+  acknowledgeRentalPublicEmptyResult: forbidden('uninvoked public empty result'),
+  enterRentalPublicTarget: forbidden('uninvoked public target'),
+};
 check('Handoff material smoke: original own DB/Core snapshot and relationship basis, legacy/partial subjects, current scope and late UI isolation never create a request or grant', async () => {
   const identity = load('apps/api/src/common/request-identity.ts',{'@nestjs/common':common});
-  const dependencies = {'@nestjs/common':common,'@rental-os/shared':{},'@prisma/client':{Prisma:{}},'../../common/request-identity':identity,'../rental-core/rental-idempotency.repository':{requestFingerprint:forbidden('no fingerprint')},'../rental-core/rental-inspection-customer-response':{validateInspectionCustomerResponse:forbidden('no inspection')}};
+  const dependencies = {'@nestjs/common':common,'@rental-os/shared':{},'@prisma/client':{Prisma:{}},'../../common/request-identity':identity,'@rental-os/platform-server/request-identity':identity,'./application-public-access':publicIngressOutsideReadFixture,'../rental-core/rental-idempotency.repository':{requestFingerprint:forbidden('no fingerprint')},'../rental-core/rental-inspection-customer-response':{validateInspectionCustomerResponse:forbidden('no inspection')}};
   for(const name of ['../ai-native/business-events/prisma-business-failure-outbox','../database/prisma.service','../platform/membership.service','../rental-core/rental-core.service','../rental-core/rental-category-resolver.service','../rental-core/rental-business.service','../rental-core/rental-order-confirmation.service','../rental-core/rental-idempotent-action.service','../rental-core/rental-funding.service','../rental-core/rental-service-capacity.service','../integrations/tenant-integration.service','../integrations/payment.runtime.service','../integrations/file-storage.runtime.service','./client-auth.service','../rental-core/rental-document.service','../platform/customer-corporate-settlement.service','./client-delivery-address.service','./client-wechat-auth.service'])dependencies[name]={};
   const {ClientApiService}=load('apps/api/src/modules/client/client-api.service.ts',dependencies);
   const setup=()=>{const f={calls:[]},snapshot={bookingIdentity:'enterprise_employee',personalCustomerId:'p1',corporateCustomerId:'company',corporateMembershipId:'original-relation',enterpriseContractAndPayer:true,resolvedAt:'2026-11-01T00:00:00.000Z',enterpriseBasis:{membershipUpdatedAt:'2026-10-31T00:00:00.000Z'},personalCustomerName:'must-not-render',qualifications:['must-not-render']};f.context={tenantId:'t1',workspaceId:'w1',workspaceCode:'service-1',customerId:'p1',customerType:'personal',membershipStatus:'suspended'};f.scope={tenantId:'t1',workspaceId:'w1',userId:'p1',isSaasAdmin:false};f.row={id:'order-1',tenantId:'t1',workspaceId:'w1',customerId:'p1',orderNo:'Original rental',status:'renting',updatedAt:new Date('2026-11-02T00:00:00.000Z'),membershipSnapshot:snapshot,contractSubjectCustomerId:'company',payerSubjectCustomerId:'company',userSubjectCustomerId:'p1'};f.coreOrder={...f.row,updatedAt:f.row.updatedAt.toISOString()};const db={rentalOrder:{findFirst:async query=>{f.calls.push(plain(query));f.afterDb?.();return f.row;}},$transaction:forbidden('read does not write')},core={getOrder:async()=>f.coreOrder,persist:forbidden('no persist')};f.service=new ClientApiService(db,{}, {},core,{}, {},{}, {},{}, {},{}, {},{});f.read=scope=>identity.runWithRequestIdentity(scope??f.scope,()=>f.service.rentalHandoffMaterial(f.context,'order-1'));return f;};
@@ -723,7 +742,7 @@ check('Handoff request smoke: explicit frozen confirmation, same self scope and 
 check('ClientApiService original reader: actual ALS and private ownership, scoped DB/Core reads, missing/unknown/foreign fail closed', async () => {
   const identity = load('apps/api/src/common/request-identity.ts', { '@nestjs/common': common });
   const dependencies = { '@nestjs/common': common, '@rental-os/shared': {}, '@prisma/client': { Prisma: {} }, '../../common/request-identity': identity, '@rental-os/platform-server/request-identity': identity,
-    './application-public-access': { acknowledgeRentalPublicEmptyResult: forbidden('uninvoked public empty result'), enterRentalPublicTarget: forbidden('uninvoked public target') },
+    './application-public-access': publicIngressOutsideReadFixture,
     '../rental-core/rental-idempotency.repository': { requestFingerprint: forbidden('new fingerprint') },
     '../rental-core/rental-inspection-customer-response': { validateInspectionCustomerResponse: forbidden('inspection') } };
   for (const name of ['../ai-native/business-events/prisma-business-failure-outbox', '../database/prisma.service', '../platform/membership.service',
@@ -2172,7 +2191,7 @@ check('Own recovery remains accessible with no selected company or member-list g
   assert.equal(f.reads.at(-1), '/enterprise/corporates/company/transfers/request-operations/original-transfer-key');
   assert.equal(f.lockNames[0], originalKey + ':dispatch'); assert.ok(f.lockNames.every(name => name === originalKey + ':dispatch'));
   assert.deepEqual([f.storage.get(joinKey), f.storage.get(foreignKey)], preserved); assert.equal(f.context.selectedCorporateId, ''); assert.deepEqual(f.context.entry.corporates, []);
-  assert.ok(sources.get('apps/enterprise-portal/src/WorkflowPages.tsx').text.includes('<EnterpriseMemberOperationRecovery english={en}/>'), 'the actual own join page mounts the independent recovery entry'); f.dispose();
+  assert.ok(sources.get('packages/rental-core/clients/enterprise-portal/WorkflowPages.tsx').text.includes('<EnterpriseMemberOperationRecovery english={en}/>'), 'the actual own join page mounts the independent recovery entry'); f.dispose();
 });
 
 check('Read-only member recovery cannot dispatch writes/closure commands or generic GETs; replacing the discovered K cannot read or retire another reference', async () => {
@@ -4092,6 +4111,18 @@ check('Invite transfer audit consumer smoke: original workflow rows, legacy unav
  const reply={tenantCode:'merchant',corporateCustomerId:'company',permissionRevision:'1:1',coverage:'original_member_and_administrator_commands',workflowCoverage:'original_invite_and_administrator_transfer_commands',unavailable:['approvals','profile_requests','order_and_financial_audit'],items:[],workflowItems:[{operationKey:'inv-K',objectId:'invite-1',objectType:'invite',actorCustomerId:'admin',action:'invite.revoke',reason:'Original revoke',createdAt:'2026-11-01T00:00:00.000Z',result:{id:'invite-1',status:'revoked',revision:2,privateField:'not-shared'},privateField:'not-shared'},{operationKey:'close-C',objectId:'transfer-1',objectType:'administrator_transfer',actorCustomerId:'recipient',action:'administrator.decision.close',reason:'Original closure',createdAt:'2026-11-01T00:00:00.000Z',result:{id:'transfer-1',state:'rejected',revision:2,outcome:'closed'}}]};let options,reads=0;const q={isFetching:false,data:undefined,refetch:async()=>{q.data=await options.queryFn({signal:new AbortController().signal});h.rerender();}};ctx.read=async()=>{reads++;return plain(reply);};ctx.write=forbidden('audit write');const page=load('apps/enterprise-portal/src/MembershipAudit.tsx',{react:h.runtime,'react/jsx-runtime':h.jsx,'./enterprise-session':{useEnterprise:()=>ctx},'@tanstack/react-query':{useQuery:o=>{options=o;return q;}},'@/components/ui/customer-entry':{ActionButton:'action',Alert:'alert',Table:'table'}},{AbortSignal});h.mount(()=>page.EnterpriseMembershipAuditRecords({english:true}));await q.refetch();const tables=nodes(h.value).filter(n=>n.type==='table');assert.equal(tables.length,2);assert.equal(tables[1].props.dataSource[0].privateField,undefined);assert.equal(tables[1].props.dataSource[0].result.privateField,undefined);assert.equal(tables[1].props.dataSource[1].result.outcome,'closed');assert.equal(ctx.selectedCorporateId,'company');assert.deepEqual(ctx.entry.corporates[0].actions,['audit:read']);const held=nodes(h.value).find(n=>n.props.label==='Read membership audit again');ctx.entry.corporates[0].actions=[];h.rerender();await assert.rejects(held.props.onAction());assert.equal(reads,1);h.unmount();
 });
 
+check('Handoff order source smoke: original task link, bounded projection, authorized queue pagination and stale read isolation', async () => {
+  const h=reactHost(),context={identity:'source-owner',basePath:'/merchant/enterprise',loading:false,signal:new AbortController().signal,session:{customer:{customerType:'personal'},workspace:{workspaceCode:'s1'}}};
+  const material={orderId:'order-a',orderNo:'Original rental',orderUpdatedAt:'2026-11-02T00:00:00.000Z',workspaceCode:'s1',corporateCustomerId:'company',corporateMembershipId:'original-relation',membershipResolvedAt:'2026-11-01T00:00:00.000Z',membershipUpdatedAt:null,enterpriseContractAndPayer:true,subjects:{contract:'corporate',payer:'corporate',user:'self'},subjectBasis:'recorded_columns',scope:'current_workspace_original_own_order',readOnly:true,privateField:'must-not-render'};
+  const source={state:'available',coverage:'current_workspace_original_own_enterprise_employee_orders',items:[{status:'renting',material,privateField:'must-not-render'}]};
+  const page=load('apps/enterprise-portal/src/OwnRentalHandoffOrders.tsx',{react:h.runtime,'react/jsx-runtime':h.jsx,'./enterprise-session':{useEnterprise:()=>context},'react-router-dom':{Link:'link'},'@rental-os/web-client':load('packages/web-client/src/enterprise-entry.ts',{}),'@tanstack/react-query':{useQuery:()=>({})},'@/components/ui/customer-entry':{ActionButton:'action',Alert:'alert',Table:'table'}});
+  h.mount(()=>page.EnterpriseRentalHandoffOrderTable({source,english:true}));let table=nodes(h.value).find(n=>n.type==='table');assert.equal(table.props.dataSource[0].privateField,undefined);assert.equal(table.props.dataSource[0].material.privateField,undefined);assert.equal(table.props.columns.at(-1).render(null,table.props.dataSource[0]).props.to,'/merchant/enterprise/join?handoffOrderId=order-a');source.items.push(source.items[0]);h.rerender();assert.equal(nodes(h.value).some(n=>n.type==='table'),false);h.unmount();
+  const hooks=reactHost(),auth={sessionVerified:true,currentWorkspaceId:'w1',user:{dataScope:'all'},hasPermission:()=>true},useAuthStore=()=>auth;useAuthStore.getState=()=>auth;
+  let identity='merchant-one',reads=[],located=[],allowed=true;const gate={useOriginalEnterpriseOperation:()=>({identity,busy:false,assertCurrent:()=>{if(!allowed)throw new Error('authority changed');},read:async path=>{reads.push(path);const p=Number(path.split('=').at(-1));return{coverage:'current_workspace_authorized_original_order_page',orderPage:{page:p,pageSize:50,total:51},items:p===1?[]:[{id:'handoff-a',orderId:'order-a',applicantCustomerId:'p1',state:'pending',revision:1,reason:'Original reason',material,createdAt:'2026-11-01T00:00:00.000Z',updatedAt:'2026-11-01T00:00:00.000Z',effect:'request_only_no_business_change'}]};}})};
+  const queue=load('apps/admin/src/features/membership/EnterpriseRentalHandoffQueue.tsx',{react:hooks.runtime,'react/jsx-runtime':hooks.jsx,'@/features/auth/authStore':{useAuthStore},'./original-enterprise-operation':gate,'@/app/locale':{useLocale:()=>({t:s=>s})},'@/components/ui':{ActionButton:'action',Alert:'alert',Table:'table'}});
+  hooks.mount(()=>queue.EnterpriseRentalHandoffQueue({onLocate:id=>located.push(id)}));const button=label=>{const b=nodes(hooks.value).find(n=>n.props.label===label);assert(b,label);return b;};await button('读取首个受权订单页').props.onAction();assert.equal(button('下一受权订单页').props.disabled,false);assert.equal(button('上一受权订单页').props.disabled,true);assert(text(hooks.value).includes('本订单页没有待核对申请'));await button('下一受权订单页').props.onAction();table=nodes(hooks.value).find(n=>n.type==='table');const locate=nodes(table.props.columns.at(-1).render(null,table.props.dataSource[0])).find(n=>n.type==='action');await locate.props.onAction();assert.deepEqual(located,['handoff-a']);assert.deepEqual(reads,['/rental/v1/enterprise-handoff-requests?page=1','/rental/v1/enterprise-handoff-requests?page=2']);identity='merchant-two';hooks.rerender();await assert.rejects(locate.props.onAction());assert.equal(located.length,1);allowed=false;await assert.rejects(button('读取首个受权订单页').props.onAction());assert.equal(reads.length,2);hooks.unmount();
+});
+
 (async () => {
   console.log(`Enterprise consumers run=${new Date().toISOString()} tests=${checks.length} audit=${process.env.AI_OFFLINE_AUDIT}`);
   let failures = 0;
@@ -4113,15 +4144,3 @@ check('Invite transfer audit consumer smoke: original workflow rows, legacy unav
   console.log('NOT_COVERED real React DOM/browser/WeChat runtime, actual HTTP/auth adapter refresh, Prisma/MySQL locking, Core writes/inventory/payment, external services, full typecheck/build, existing 35 enterprise combinations, formal acceptance.');
   process.exitCode = failures ? 1 : 0;
 })().catch(error => { console.error(error.stack || error); process.exitCode = 1; });
-
-check('Handoff order source smoke: original task link, bounded projection, authorized queue pagination and stale read isolation', async () => {
-  const h=reactHost(),context={identity:'source-owner',basePath:'/merchant/enterprise',loading:false,signal:new AbortController().signal,session:{customer:{customerType:'personal'},workspace:{workspaceCode:'s1'}}};
-  const material={orderId:'order-a',orderNo:'Original rental',orderUpdatedAt:'2026-11-02T00:00:00.000Z',workspaceCode:'s1',corporateCustomerId:'company',corporateMembershipId:'original-relation',membershipResolvedAt:'2026-11-01T00:00:00.000Z',membershipUpdatedAt:null,enterpriseContractAndPayer:true,subjects:{contract:'corporate',payer:'corporate',user:'self'},subjectBasis:'recorded_columns',scope:'current_workspace_original_own_order',readOnly:true,privateField:'must-not-render'};
-  const source={state:'available',coverage:'current_workspace_original_own_enterprise_employee_orders',items:[{status:'renting',material,privateField:'must-not-render'}]};
-  const page=load('apps/enterprise-portal/src/OwnRentalHandoffOrders.tsx',{react:h.runtime,'react/jsx-runtime':h.jsx,'./enterprise-session':{useEnterprise:()=>context},'react-router-dom':{Link:'link'},'@rental-os/web-client':load('packages/web-client/src/enterprise-entry.ts',{}),'@tanstack/react-query':{useQuery:()=>({})},'@/components/ui/customer-entry':{ActionButton:'action',Alert:'alert',Table:'table'}});
-  h.mount(()=>page.EnterpriseRentalHandoffOrderTable({source,english:true}));let table=nodes(h.value).find(n=>n.type==='table');assert.equal(table.props.dataSource[0].privateField,undefined);assert.equal(table.props.dataSource[0].material.privateField,undefined);assert.equal(table.props.columns.at(-1).render(null,table.props.dataSource[0]).props.to,'/merchant/enterprise/join?handoffOrderId=order-a');source.items.push(source.items[0]);h.rerender();assert.equal(nodes(h.value).some(n=>n.type==='table'),false);h.unmount();
-  const hooks=reactHost(),auth={sessionVerified:true,currentWorkspaceId:'w1',user:{dataScope:'all'},hasPermission:()=>true},useAuthStore=()=>auth;useAuthStore.getState=()=>auth;
-  let identity='merchant-one',reads=[],located=[],allowed=true;const gate={useOriginalEnterpriseOperation:()=>({identity,busy:false,assertCurrent:()=>{if(!allowed)throw new Error('authority changed');},read:async path=>{reads.push(path);const p=Number(path.split('=').at(-1));return{coverage:'current_workspace_authorized_original_order_page',orderPage:{page:p,pageSize:50,total:51},items:p===1?[]:[{id:'handoff-a',orderId:'order-a',applicantCustomerId:'p1',state:'pending',revision:1,reason:'Original reason',material,createdAt:'2026-11-01T00:00:00.000Z',updatedAt:'2026-11-01T00:00:00.000Z',effect:'request_only_no_business_change'}]};}})};
-  const queue=load('apps/admin/src/features/membership/EnterpriseRentalHandoffQueue.tsx',{react:hooks.runtime,'react/jsx-runtime':hooks.jsx,'@/features/auth/authStore':{useAuthStore},'./original-enterprise-operation':gate,'@/app/locale':{useLocale:()=>({t:s=>s})},'@/components/ui':{ActionButton:'action',Alert:'alert',Table:'table'}});
-  hooks.mount(()=>queue.EnterpriseRentalHandoffQueue({onLocate:id=>located.push(id)}));const button=label=>{const b=nodes(hooks.value).find(n=>n.props.label===label);assert(b,label);return b;};await button('读取首个受权订单页').props.onAction();assert.equal(button('下一受权订单页').props.disabled,false);assert.equal(button('上一受权订单页').props.disabled,true);assert(text(hooks.value).includes('本订单页没有待核对申请'));await button('下一受权订单页').props.onAction();table=nodes(hooks.value).find(n=>n.type==='table');const locate=nodes(table.props.columns.at(-1).render(null,table.props.dataSource[0])).find(n=>n.type==='action');await locate.props.onAction();assert.deepEqual(located,['handoff-a']);assert.deepEqual(reads,['/rental/v1/enterprise-handoff-requests?page=1','/rental/v1/enterprise-handoff-requests?page=2']);identity='merchant-two';hooks.rerender();await assert.rejects(locate.props.onAction());assert.equal(located.length,1);allowed=false;await assert.rejects(button('读取首个受权订单页').props.onAction());assert.equal(reads.length,2);hooks.unmount();
-});
