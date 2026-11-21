@@ -527,7 +527,7 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
               if (mapped && Array.isArray(mapped.schema)) {
                 // 数组映射只保留本页的值、指针与缺口，不把其他表项放进页面查询资料。
                 const prefix = `/${index}`;
-                const fieldSources = Array.isArray(mapped.fieldSources) ? mapped.fieldSources.flatMap(field =>
+                const cropFieldSources = (fields: NonNullable<DevelopmentCapability["details"]>[string]) => Array.isArray(fields) ? fields.flatMap(field =>
                   field && typeof field === "object" && !Array.isArray(field) && typeof field.pointer === "string"
                     && (field.pointer === prefix || field.pointer.startsWith(prefix + "/"))
                     ? [{ ...field, pointer: field.pointer.slice(prefix.length) }] : []) : [];
@@ -535,7 +535,8 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
                   && (item.startsWith(prefix + ":") || item.startsWith(prefix + "/") || item.startsWith("/:")))
                   .map(item => item.startsWith(prefix) ? item.slice(prefix.length) : item) : [];
                 descriptorSource = { expression: mapped.expression, source: mapped.source, arrayIndex: index,
-                  schema: mapped.schema[index], fieldSources, issues: fieldIssues,
+                  schema: mapped.schema[index], fieldSources: cropFieldSources(mapped.fieldSources),
+                  unresolvedFieldSources: cropFieldSources(mapped.unresolvedFieldSources), issues: fieldIssues,
                   status: fieldIssues.length ? "source-reference" : "indexed" };
               }
               // sourceFields 枚举原整张 AST 表；页面查询仅保留实际所选字段，避免未引用项进入搜索。
@@ -590,7 +591,8 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
               capabilities.push({ id: `page:${coreId}:${id}`, name: corePageText(label.data, "zh-CN"), kind: "page", owner: coreId, version: entry.version,
                 sources: [{ ...sourceReference(page, root), symbol: id },
                   ...locations.map(location => sourceReference(location, root)),
-                  ...(traced && Array.isArray(descriptorSource.fieldSources) ? descriptorSource.fieldSources.flatMap(field => field && typeof field === "object"
+                  ...(traced ? [...(Array.isArray(descriptorSource.fieldSources) ? descriptorSource.fieldSources : []),
+                    ...(Array.isArray(descriptorSource.unresolvedFieldSources) ? descriptorSource.unresolvedFieldSources : [])].flatMap(field => field && typeof field === "object"
                     && !Array.isArray(field) && field.source && typeof field.source === "object" && !Array.isArray(field.source)
                     ? [field.source as DevelopmentSourceReference] : []) : []),
                   ...(componentDeclaration && isRepositorySourcePath(root, componentDeclaration.getSourceFile().fileName)

@@ -218,6 +218,11 @@ test("Rental页面聚合追实际订单描述，直接数组定位而控制流�
         && field.source.path === `packages/rental-core/admin/${group}/pages.ts` && field.source.line === line));
       assert.equal(descriptor.fieldSources.some(field => /^\/\d+(?:\/|$)/u.test(field.pointer)), false);
       assert.ok(descriptor.issues.some(issue => issue.startsWith("/permissions:") || issue.startsWith("/permissions/")));
+      const componentLine = { "work-orders": 26, "payment-reconciliation": 28, membership: 41, operations: 28 }[group];
+      assert.ok(descriptor.unresolvedFieldSources.some(field => field.pointer === "/component"
+        && field.source.path === `packages/rental-core/admin/${group}/index.tsx` && field.source.line === componentLine));
+      assert.ok(descriptor.unresolvedFieldSources.some(field => field.pointer === "/permissions" && field.source.path.endsWith(`/${group}/pages.ts`)));
+      assert.equal(descriptor.unresolvedFieldSources.some(field => /^\/\d+(?:\/|$)/u.test(field.pointer)), false);
       assert.equal(Object.hasOwn(descriptor, "sourceFields"), false);
       for (const field of ["permissions", "component", "implementationVersion"]) assert.ok(page.details.unresolvedMetadata.includes(field));
     }

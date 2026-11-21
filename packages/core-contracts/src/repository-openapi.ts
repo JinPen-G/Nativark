@@ -67,6 +67,14 @@ class StaticSchemaReader {
     }).map(([pointer, location]) => ({ pointer, source: location }));
   }
 
+  /** 只保留当前已跟踪且自身或子字段仍有缺口的属性，不从整表 AST 补造出处。 */
+  unresolvedFieldSources(): Array<{ pointer: string; source: DevelopmentSourceReference }> {
+    // 指针中的键可以含冒号，缺口原因由最后一个冒号分隔。
+    const locations = [...this.issues].map(issue => issue.slice(0, issue.lastIndexOf(":")));
+    return [...this.fields].filter(([pointer]) => locations.some(location => location === pointer || location.startsWith(pointer + "/")))
+      .map(([pointer, location]) => ({ pointer, source: location }));
+  }
+
   read(expression: ts.Expression, pointer = "", bindings = new Map<ts.Symbol, ExpressionBinding>(), seen = new Set<ts.Node>(), selectiveMembers = false): SchemaValue | typeof UNRESOLVED {
     const node = unwrap(expression);
     if (seen.has(node) || seen.size > 80) return this.unresolved(pointer, "recursive-expression");
@@ -655,7 +663,8 @@ export function describeRepositorySchema(source: RepositorySource, expression: t
   const root = source.root;
   const locations: DevelopmentSourceReference[] = [];
   const refs: Array<{ ref: string; declaration?: DevelopmentSourceReference; mapSources?: DevelopmentSourceReference[]; status: string; schema?: SchemaValue;
-    fieldSources?: Array<{ pointer: string; source: DevelopmentSourceReference }>; issues?: string[] }> = [];
+    fieldSources?: Array<{ pointer: string; source: DevelopmentSourceReference }>;
+    unresolvedFieldSources?: Array<{ pointer: string; source: DevelopmentSourceReference }>; issues?: string[] }> = [];
   const sourceFields: Array<{ name: string; expression: string; source: DevelopmentSourceReference }> = [];
   const seenNodes = new Set<ts.Node>(), seenRefs = new Set<string>();
   const declaration = (node: ts.Node) => {
@@ -674,7 +683,7 @@ export function describeRepositorySchema(source: RepositorySource, expression: t
     const schema = target && reader.schema(target.expression, target.bindings, target.seen);
     refs.push({ ref, ...(target ? { declaration: sourceReference(target.expression, root),
       ...(schema !== UNRESOLVED && schema !== undefined ? { schema } : {}),
-      fieldSources: reader.fieldSources(schema ?? UNRESOLVED), issues: [...reader.issues] }
+      fieldSources: reader.fieldSources(schema ?? UNRESOLVED), unresolvedFieldSources: reader.unresolvedFieldSources(), issues: [...reader.issues] }
       : { mapSources: [...maps, ...resolver.compositions].map(map => sourceReference(map, root)),
         issues: [found === UNRESOLVED ? "schema-map:source-reference" : "schema-reference:not-indexed"] }),
       status: target ? reader.issues.size ? "source-reference" : "indexed" : "not-indexed" });
@@ -743,6 +752,7 @@ export function describeRepositorySchema(source: RepositorySource, expression: t
     references: refs.map(ref => ({ ...ref, ...(ref.declaration ? { declaration: { ...ref.declaration } } : {}) })),
     ...(schema !== UNRESOLVED && typeof name !== "string" ? { schema } : {}),
     fieldSources: reader.fieldSources(schema),
+    unresolvedFieldSources: reader.unresolvedFieldSources(),
     issues: reader.issues.size ? ["schema-expansion:source-reference", ...reader.issues] : [],
     status: refs.some(ref => ref.status === "not-indexed") ? "not-indexed"
       : reader.issues.size || refs.some(ref => ref.status !== "indexed") ? "source-reference" : "indexed" };
