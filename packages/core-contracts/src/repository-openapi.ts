@@ -385,21 +385,20 @@ class StaticSchemaReader {
       objectMutationIndexes.set(this.source, index);
     }
     const mutations = index.get(target) ?? [];
+    const deferred = (node: ts.Node) => {
+      for (let current: ts.Node | undefined = node; current && !ts.isSourceFile(current); current = current.parent)
+        if (ts.isFunctionLike(current)) return true;
+      return false;
+    };
     let statement: ts.Node = usage;
-    let deferred = false;
-    while (statement.parent && !ts.isSourceFile(statement.parent)) {
-      deferred ||= ts.isFunctionLike(statement);
-      statement = statement.parent;
-    }
+    while (statement.parent && !ts.isSourceFile(statement.parent)) statement = statement.parent;
     const finalName = ts.isVariableDeclaration(usage.parent) && usage.parent.name === usage;
-    const cutoff = finalName || usage.getSourceFile() !== target.getSourceFile() ? Infinity : statement.getStart();
-    const current = mutations.filter(mutation => mutation.node.getSourceFile() !== target.getSourceFile() || mutation.node.getStart() < cutoff);
+    const cutoff = finalName || usage.getSourceFile() !== target.getSourceFile() ? Infinity : statement.end;
+    // 与基础常量读取一致：同语句不重放顺序，延迟读写不凭文本位置裁定发生时间。
+    const current = mutations.filter(mutation => deferred(usage) || deferred(mutation.node)
+      || mutation.node.getSourceFile() !== target.getSourceFile() || mutation.node.getStart() < cutoff);
     for (const mutation of current) this.compositions.add(mutation.node);
-    if (deferred && mutations.length) {
-      this.compositions.add(mutations[0].node);
-      return [{ node: mutations[0].node }];
-    }
-    return current;
+    return current.map(mutation => deferred(usage) || deferred(mutation.node) ? { node: mutation.node } : mutation);
   }
 
   private pureCall(node: ts.CallExpression, seen = new Set<ts.Node>()): boolean {

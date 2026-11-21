@@ -340,6 +340,9 @@ const beforeMap = { ...postMap };
 Object.assign(alias, { Result: assigned }, { Added: { type: "boolean" } });
 const statementMap = { Result: { type: "string" } };
 const statementWrite = Object.assign(statementMap, { Result: { type: "number" } }), statementSnapshot = { ...statementMap };
+const delayedMap = { Result: { type: "string" } };
+const delayedSnapshot = { ...delayedMap };
+function mutateLater() { Object.assign(delayedMap, { Result: { type: "number" } }); }
 const STATIC_COMPOSE_SCHEMAS = postMap;
 const STATIC_COMPOSE_OPERATIONS = [{ method: "POST", path: "/api/static-compositions", responseSchema: { $ref: "#/components/schemas/Result" } }];
 const resultReference = { $ref: "#/components/schemas/Result" };
@@ -389,6 +392,12 @@ Object.assign(sharedMap, { Result: { type: "number" } });
     assert.equal(source.value(declaration("statementSnapshot").name).Result, undefined);
     const statementUsage = declaration("statementSnapshot").initializer.properties[0].expression;
     assert.ok(source.unresolvedProperties(statementUsage).includes(`post-write:packages/core-contracts/src/repository-openapi.ts:${line("const statementWrite")}`));
+    for (const [name, write] of [["statementSnapshot", "const statementWrite"], ["delayedSnapshot", "function mutateLater"]]) {
+      const result = describe(name);
+      assert.equal(result.status, "source-reference", name);
+      assert.equal(result.schema.Result, undefined, name);
+      assert.ok(result.sources.some(location => location.line === line(write)), name);
+    }
     for (const [name, keys] of [["unknownSpread", []], ["unsupportedSpread", ["type"]], ["knownAfterSpread", ["type"]],
       ["unknownProperty", ["properties"]], ["nestedUnknownProperty", ["properties"]],
       ["unknownComputed", ["type"]], ["getterOverwrite", ["properties"]],
