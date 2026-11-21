@@ -299,6 +299,8 @@ Rental 已提供自己的完整业务 schema、关系贡献和 MySQL 数据计�
 
 先构建本包，再用实际发行元数据和迁移账快照执行只读预检。
 
+底座源码发行版本取[根包](../../package.json)的 `version`；Core 实现版本取自己的正式清单，Rental 的来源是[发行身份](../rental-core/src/core-identity.ts)。源码或产物变化时使用新发行版本，合同与数据版本按各自变化维护。只更新底座时复用原 Core 包、提交和摘要；只更新一个 Core 时保留原底座与其他 Core 的固定引用，避免把未变更模块按新仓库提交重新打包。
+
 ```sh
 node packages/core-contracts/dist/plan-update.js <当前锁JSON> <升级请求JSON> <数据观察JSON> --json
 ```
