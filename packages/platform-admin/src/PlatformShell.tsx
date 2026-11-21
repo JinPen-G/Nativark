@@ -1,7 +1,7 @@
 /** 公共后台外壳组合。业务路由、菜单和面包屑来自同一受控注册表，当前使用权来自服务端目录。 */
 import { Breadcrumb } from "antd";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
-import { matchPath, useLocation, useNavigate } from "react-router-dom";
+import { matchRoutes, useLocation, useNavigate } from "react-router-dom";
 import { coreBreadcrumbEntries, coreNavigationEntries, type CoreRegisteredPage } from "@rental-os/core-contracts";
 import { BusinessShell } from "./components/BusinessShell";
 import { NativeNavigation, type ShellNavigationSection } from "./components/animate-sidebar/NativeNavigation";
@@ -71,14 +71,19 @@ function ShellContents({ children, brandName, brand, publicSections, pages = noP
     }
     return [...publicSections, ...groups.values()];
   }, [publicSections, cores.data, pages, locale]);
-  const registered = [...pages.values()].find(page => matchPath(page.path, location.pathname));
-  const matched = registered ? matchPath(registered.path, location.pathname) : undefined;
+  const matched = matchRoutes(
+    [...pages.values()].map(page => ({ path: page.path, handle: page })),
+    location.pathname,
+  )?.at(-1);
+  const registered = matched?.route.handle;
   const publicRoute = publicSections.flatMap(section => section.routes)
     .filter(route => route.path === location.pathname || location.pathname.startsWith(`${route.path}/`))
     .sort((left, right) => right.path.length - left.path.length)[0];
   const breadcrumbs = registered && cores.data ? coreBreadcrumbEntries(pages, registered,
     Object.fromEntries(Object.entries(matched?.params ?? {}).filter((entry): entry is [string, string] => typeof entry[1] === "string")), cores.data, locale) : [];
-  const current = sections.flatMap(section => section.routes).filter(route => location.pathname === route.path || location.pathname.startsWith(`${route.path}/`))
+  // 菜单沿 Router 已匹配的路径定位，编码后的 Core 和静态页片段也对应同一登记项。
+  const currentPathname = matched?.pathname ?? location.pathname;
+  const current = sections.flatMap(section => section.routes).filter(route => currentPathname === route.path || currentPathname.startsWith(`${route.path}/`))
     .sort((a, b) => b.path.length - a.path.length)[0];
   const items = breadcrumbs.length ? breadcrumbs.map((crumb, index) => ({ key: crumb.key, title: crumb.path
     ? <button type="button" className="breadcrumb-link" onClick={() => navigate(crumb.path!)}>{crumb.label}</button>
@@ -96,7 +101,7 @@ function ShellContents({ children, brandName, brand, publicSections, pages = noP
     account={<NativeAccountMenuView name={session.user?.displayName ?? ""} account={session.user?.account ?? ""}
       compact={!session.user?.isSaasAdmin} onSignOut={onSignOut} />}
     navigation={({ query, onNavigate }) => <NativeNavigation sections={sections} selectedKey={current?.path ?? location.pathname}
-      query={query} onNavigate={onNavigate} groupLabel="功能导航" />}
+      query={query} onNavigate={onNavigate} groupLabel={t("功能导航")} />}
     headerTitleTarget={false} headerContext={<Breadcrumb aria-label={t("面包屑")}
       separator={<RightOutlined size={13} className="workspace-breadcrumb-separator" />} items={items} />}
     headerUtilities={<><RestEntry /><HeaderNotifications inbox={notifications} renderDetails={notificationDetails} /></>}

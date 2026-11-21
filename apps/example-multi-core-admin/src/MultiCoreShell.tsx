@@ -1,6 +1,6 @@
 /** 当前 Rental 页面取得经营空间选择器，工单与公共页保留公共上下文。
  * 同一薄壳与通知 Provider 持续挂载，其他 Core 撤权时保留工单原操作状态。 */
-import { matchPath, useLocation } from "react-router-dom";
+import { matchRoutes, useLocation } from "react-router-dom";
 import type { CoreRegisteredPage } from "@rental-os/core-contracts";
 import type { PlatformShellProps } from "@rental-os/platform-admin";
 import { NativeContextSwitcher } from "@rental-os/platform-admin/shell";
@@ -28,7 +28,11 @@ export function createMultiCoreShell(
     const { pathname } = useLocation();
     const { locale } = useLocale();
     const en = locale === "en-US";
-    const page = [...pages.values()].find(entry => matchPath(entry.path, pathname));
+    const matched = matchRoutes(
+      [...pages.values()].map(entry => ({ path: entry.path, handle: entry })),
+      pathname,
+    )?.at(-1);
+    const page = matched?.route.handle;
     const rentalContext = page?.coreId === RENTAL_CORE_ID
       && cores.canAccess(RENTAL_CORE_ID, page.definition.permissions);
     const contextSwitcher = rentalContext ? undefined : <NativeContextSwitcher
