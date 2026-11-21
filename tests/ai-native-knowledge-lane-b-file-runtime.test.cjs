@@ -7,7 +7,9 @@ const { HumanKnowledgeModule } = h.load('human-knowledge.module');
 const { HumanKnowledgeUploadService, knowledgeUploadRequest } = h.load('human-knowledge-upload.service');
 const { fingerprint } = h.load('knowledge-validation');
 const { composeOriginalSceneKnowledge } = require('../apps/api/src/modules/ai-native/scenes/original-scene-knowledge');
-const { FileStorageRuntimeService } = require('../apps/api/src/modules/integrations/file-storage.runtime.service');
+const { RentalFileStorageApplication } = require('@rental-os/rental-core/file-application-runtime');
+const { PlatformOperationLogService } = require('@rental-os/platform-server/operation-log');
+const { retentionModelTools } = require('../apps/api/src/modules/ai-native/privacy/retention-model-sources');
 const { TenantKnowledgeObjectReader } = require('../apps/api/src/modules/integrations/knowledge-object-reader');
 const { Prisma } = require('../apps/api/node_modules/@prisma/client');
 test.after(() => assert.deepEqual(h.attempts, []));
@@ -62,7 +64,63 @@ function fileFixture() {
       return new Response(new ReadableStream({ start(controller) { controller.enqueue(state.body);
         if (state.afterBody) state.afterBody(); controller.close(); } }),
         { headers: { 'content-type': 'text/plain', 'content-length': String(text.length) } }); } };
-  const deps = { ...f.ports, db, integrations, objectIO };
+  const owner = { tenantId: 'tenant-1', workspaceId: 'space-1' };
+  const scope = { ...owner, id: 'scope-1', kind: 'WORKSPACE', scopeKey: 'workspace:8:tenant-1:7:space-1' };
+  db.aiScope = { async findFirst({ where }) { return match(scope, where) ? clone(scope) : null; } };
+  db.$queryRaw = async query => {
+    const sql = query.sql.replace(/\s+/g, ' ').trim();
+    if (sql === 'SELECT id FROM Tenant WHERE id=? LOCK IN SHARE MODE') {
+      assert.deepEqual(query.values, [owner.tenantId]);
+      return [{ id: owner.tenantId }];
+    }
+    assert.equal(sql, "SELECT id FROM ai_scopes WHERE id = ? AND kind = 'workspace' AND tenantId = ? AND workspaceId = ? FOR UPDATE");
+    assert.deepEqual(query.values, [scope.id, owner.tenantId, owner.workspaceId]);
+    return [{ id: scope.id }];
+  };
+  // The lifecycle fixture has no tasks, effect reservations or copied model inputs.
+  const empty = where => ({ async findMany(input) {
+    assert.deepEqual(input.where, where);
+    assert.equal(input.take, 51);
+    return [];
+  } });
+  const open = statuses => ({ scopeId: scope.id, status: { in: statuses } });
+  db.aiTask = empty({ scopeId: scope.id, status: { notIn: ['SUCCEEDED', 'PARTIALLY_SUCCEEDED', 'FAILED', 'CANCELLED'] } });
+  db.aiStep = empty({ scopeId: scope.id, OR: [{ status: { in: ['RUNNING', 'UNKNOWN'] } }, { effect: 'POSSIBLE' }] });
+  db.aiApprovalConsumption = empty(open(['RESERVED', 'UNKNOWN']));
+  db.aiTaskExecutionCharge = empty(open(['RESERVED', 'UNKNOWN']));
+  db.aiBudgetReservation = empty({ ...open(['reserved', 'pending_reconciliation']), scopeKind: 'WORKSPACE' });
+  db.aiInvocationAdmission = empty({ ...owner, status: { notIn: ['completed', 'cancelled', 'revoked'] } });
+  db.aiUsageReservation = empty({ ...owner, status: { in: ['reserved', 'unknown', 'pending_reconciliation'] } });
+  db.aiTaskActionInput = empty({ scopeId: scope.id, toolCode: { in: [...retentionModelTools] } });
+  db.aiKnowledgeChunk.deleteMany = async ({ where }) => {
+    assert.deepEqual(where, { version: { documentId: 'doc-1', document: owner } });
+    const document = db.state.documents.get(where.version.documentId);
+    let count = 0;
+    for (const [id, chunk] of db.state.chunks) {
+      if (document && match(document, owner) && db.state.versions.get(chunk.versionId)?.documentId === document.id) {
+        db.state.chunks.delete(id);
+        count++;
+      }
+    }
+    return { count };
+  };
+  db.aiDataErasure.updateMany = async ({ where, data }) => {
+    const row = db.state.erasures.get(where.id);
+    if (!row || !match(row, where)) return { count: 0 };
+    assert.equal(data.state, 'erased');
+    assert.deepEqual(data.revision, { increment: 1 });
+    Object.assign(row, { state: data.state, erasedAt: clone(data.erasedAt), revision: row.revision + 1 });
+    return { count: 1 };
+  };
+  db.state.audit = [];
+  db.operationLog = { async create({ data }) {
+    assert.equal(data.tenantId, owner.tenantId);
+    assert.equal(data.workspaceId, owner.workspaceId);
+    assert.equal(data.userId, 'user-1');
+    db.state.audit.push(clone(data));
+  } };
+  const operationLogs = new PlatformOperationLogService(db);
+  const deps = { ...f.ports, db, integrations, objectIO, operationLogs };
   function allow(action, resource = {}, workspaceId = 'space-1', domain = 'knowledge') {
     const key = { tenantId: 'tenant-1', workspaceId, actorKind: 'user', actorId: 'user-1', audience: 'operator', domain, action, resourceKey: fingerprint(resource) };
     grants.set(JSON.stringify(key), { ...key, resource: clone(resource), revision: 1, enabled: true, expiresAt: new Date(h.now + 3600000), requiredPermissions: ['synthetic-policy'] });
@@ -82,7 +140,7 @@ test('memory management request uses persisted human consent and fails closed wi
   const { HumanMemoryManagementRequestFactory } = h.load('human-memory-management.composition');
   const { HumanMemoryManagementController } = h.load('human-memory-management.controller');
   assert.deepEqual(HumanKnowledgeModule.registerMemoryManagementHttp().controllers, []);
-  const deps = { db: f.db, auth: f.identity.auth, clock: f.ports.clock };
+  const deps = { db: f.db, auth: f.identity.auth, clock: f.ports.clock, operationLogs: f.deps.operationLogs };
   const serverModule = HumanKnowledgeModule.registerMemoryManagementRequests({ enabled: true, dependencies: deps });
   assert.deepEqual(serverModule.controllers, []); assert.ok(serverModule.exports.includes(HumanMemoryManagementRequestFactory));
   assert.deepEqual(HumanKnowledgeModule.registerMemoryManagementRequests().providers, []);
@@ -139,6 +197,7 @@ test('memory management request uses persisted human consent and fails closed wi
   assert.equal((await controller.resumeConfirmation(request, original)).memory.revision, 2);
   assert.equal((await controller.state(request, { memoryId })).usable, true);
   assert.deepEqual((await controller.read(request, { memoryId })).memory.preference, { kind: 'locale', value: 'zh-CN' });
+  assert.ok(f.db.state.audit.some(row => row.action === 'ai.memory.read' && row.detail.metadata.references[0]?.memoryId === memoryId));
   const consumer = serverModule.providers.find(row => row.provide === HumanMemoryManagementRequestFactory).useValue.open(request);
   const selected = await consumer.selectPreferences({ kinds: ['locale'], limit: 3 });
   assert.equal(selected.items.length, 1); assert.equal(selected.scope.workspaceId, 'space-1');
@@ -176,8 +235,9 @@ test('memory management request uses persisted human consent and fails closed wi
 });
 
 async function completed(f, t) {
-  const old = FileStorageRuntimeService.prototype.objectRequest;
-  FileStorageRuntimeService.prototype.objectRequest = async function (url, init) {
+  const prototype = RentalFileStorageApplication.prototype;
+  const old = Object.getOwnPropertyDescriptor(prototype, 'objectRequest');
+  prototype.objectRequest = async function (url, init) {
     const key = decodeURIComponent(new URL(url).pathname).replace(/^\//, '');
     if (init.method === 'PUT') {
       assert.ok(key.includes('.committed/')); assert.deepEqual(Buffer.from(init.body), f.text);
@@ -186,7 +246,10 @@ async function completed(f, t) {
     assert.ok(key.includes('.committed/'));
     return new Response(Buffer.from(f.state.body), { headers: { 'content-type': 'text/plain', 'content-length': String(f.text.length) } });
   };
-  t.after(() => { FileStorageRuntimeService.prototype.objectRequest = old; });
+  t.after(() => {
+    if (old) Object.defineProperty(prototype, 'objectRequest', old);
+    else delete prototype.objectRequest;
+  });
   f.allowUpload();
   const upload = await f.api.uploads.begin(f.input);
   return { upload, bound: await f.api.uploads.complete({ documentId: 'doc-1', sessionId: upload.sessionId }) };
@@ -283,7 +346,7 @@ test('first creation uses original upload receipt then real create parse index p
   f.state.body = Buffer.alloc(f.text.length, 120);
   const fileAccess = new (h.load('prisma-knowledge-file-access').PrismaKnowledgeFileAccess)(f.db,
     new (h.load('knowledge-current-session').KnowledgeCurrentSession)(f.identity.auth, f.identity.credentials, f.ports.clock),
-    f.ports.authorization, new TenantKnowledgeObjectReader(f.db, f.integrations, f.objectIO.transport, f.objectIO.egress));
+    f.ports.authorization, new TenantKnowledgeObjectReader(f.db, f.integrations, f.objectIO.transport, f.objectIO.egress), f.deps.operationLogs);
   await assert.rejects(fileAccess.read('tenant-1', bound.attachmentId, { businessType: 'ai_knowledge_document', businessId: 'doc-1',
     workspaceId: 'space-1', actorUserId: 'user-1', uploadScene: 'ai-knowledge' }, 262144), { code: 'unavailable' });
   f.state.body = f.text;
@@ -365,6 +428,8 @@ test('first creation uses original upload receipt then real create parse index p
   f.allowDocument(bound.attachmentId, 3);
   const deleted = await lifecycle.delete({ confirmation: 'delete', command: { documentId: 'doc-1', expectedRevision: removed.revision, operationId: 'delete-1' } });
   assert.equal(deleted.document.publication, 'deleted'); assert.equal(deleted.document.physicalIndexDeletion, 'not_verified');
+  assert.equal(f.db.state.chunks.size, 0);
+  assert.ok([...f.db.state.erasures.values()].some(row => row.kind === 'knowledge' && row.resourceId === 'doc-1' && row.state === 'erased'));
   lifecycle.close(); await assert.rejects(lifecycle.indexStatus({ documentId: 'doc-1' }), { code: 'unavailable' });
 });
 
@@ -435,9 +500,10 @@ test('revision uploads preserve frozen source identity, reject retargeting and c
   };
   await assert.rejects(f.api.uploads.completeRevision(completion), /reply lost/);
   f.db.$transaction = completionTransaction;
-  const transaction = f.db.$transaction, objectExists = FileStorageRuntimeService.prototype.objectExists;
+  const prototype = RentalFileStorageApplication.prototype;
+  const transaction = f.db.$transaction, objectExists = Object.getOwnPropertyDescriptor(prototype, 'objectExists');
   f.db.$transaction = async () => { throw Error('observation must not write'); };
-  FileStorageRuntimeService.prototype.objectExists = async () => { throw Error('observation must not access storage'); };
+  prototype.objectExists = async () => { throw Error('observation must not access storage'); };
   try {
     const observed = await http.observeRevisionUpload(requestHeader, completion);
     const schemas = require('../packages/shared/src/ai-knowledge-management-http-draft').AI_KNOWLEDGE_MANAGEMENT_HTTP_SCHEMAS;
@@ -448,7 +514,11 @@ test('revision uploads preserve frozen source identity, reject retargeting and c
     assert.equal('uploadUrl' in observed, false); assert.equal('uploadHeaders' in observed, false);
     assert.equal((await f.api.management.versionStatus('doc-1')).currentVersion, 'v1');
     await assert.rejects(http.observeRevisionUpload(requestHeader, { ...completion, targetVersion: 'v3' }));
-  } finally { f.db.$transaction = transaction; FileStorageRuntimeService.prototype.objectExists = objectExists; }
+  } finally {
+    f.db.$transaction = transaction;
+    if (objectExists) Object.defineProperty(prototype, 'objectExists', objectExists);
+    else delete prototype.objectExists;
+  }
   const uploaded = await http.completeRevisionUpload(requestHeader, completion); assert.equal(uploaded.attachmentId, a.fileAssetId);
   assert.equal(uploaded.semantics, 'uploaded_not_revised_or_published');
   f.allowDocument(uploaded.attachmentId); f.allowDocument(uploaded.attachmentId, 1, 'v2');
