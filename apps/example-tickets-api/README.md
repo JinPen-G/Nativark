@@ -82,10 +82,10 @@ npm run register:permissions -w @rental-os/example-tickets-api
 
 部署准入、实际数据、租户授权、成员分配和绑定分别核定。完成部署准入登记后，SaaS管理员先创建测试租户，再使用 `/api/platform/core-host/tenant-grants` 开通工单，租户管理员给本人及需要的成员分配Core与工单角色，再办理首次绑定。业务入口是 `/api/cores/example-tickets/...`，支持创建 / 分派 / 开始 / 关闭及分页 / 原收据。包 / 注册、租户授权、成员分配、绑定 / 数据就绪分别成立。[同源接口资料](../../packages/example-tickets-core/src/openapi.ts) · [快速指南](../../packages/core-contracts/README.md#五步快速接入)
 
-正式包内的实际根装配与材料校验已离线验证，包括唯一公共40模型Client、工单服务 / HTTP 与包管理装配、完整材料及原观察调用边界、缺失和篡改材料拒绝。验证没有执行应用生命周期；真实环境的首次 npm 安装、镜像构建、数据库 / HTTP / 后台页面及部署验收仍须另验。
+正式包已在独立 Windows 宿主完成按锁文件安装、唯一公共40模型Client、公共与工单原迁移、真实 API 启动和业务冒烟。验证覆盖 SaaS 授权、成员分配、首次绑定、创建/分派/开始/关闭、修订及同键冲突、租户隔离、成员撤权、Core停用/重开和原收据；数据库与 API 重启后原绑定、业务和操作结果保留。包检查仍独立核缺失及篡改材料，不以业务成功放宽来源或摘要。工单完整后台、同宿主双Core、Linux镜像和发布分别验收。
 
 ## 验证入口与前置卡点
 
 公开标准包使用 `node packages/core-contracts/dist/check.js <已准备工单目录> --host <同版宿主版本JSON> --json` 核清单、入口和兼容。必要类型沿[内存类型入口](../../scripts/check-selected-prisma-types.cjs)的 `--mode platform --config apps/example-tickets-api/tsconfig.json`。完整源码中的[原运行包 runner](../../tests/rental-host-package.test.cjs)复用[单工单材料用例](../../tests/platform-host-package-cases.cjs)，覆盖完整包、唯一公共 Client、实际根装配、缺失及篡改材料拒绝，它的运行范围及隔离前置以源码为准。
 
-首次绑定或普通业务因部署准入 unknown 拒绝时，先按上述 SaaS 管理步骤读取并核定原状态。缺 Client 先回公共 schema 生成步骤，缺清单或包摘要不符核同一待部署包与实际解析目录，公共数据版本不符核固定发行与本宿主原计划，权限目录缺项使用同一部署锁登记。绑定和原操作返回未知时保留原键，沿[只读结果及当前事实](../../packages/core-contracts/README.md#core-管理-http-合同)核对。真实冷安装、迁移、持久重启、HTTP 与浏览器的完整验收继续按各自证据核收。
+首次绑定或普通业务因部署准入 unknown 拒绝时，先按上述 SaaS 管理步骤读取并核定原状态。缺 Client 先回公共 schema 生成步骤，缺清单或包摘要不符核同一待部署包与实际解析目录，公共数据版本不符核固定发行与本宿主原计划，权限目录缺项使用同一部署锁登记。绑定和原操作返回未知时保留原键，沿[只读结果及当前事实](../../packages/core-contracts/README.md#core-管理-http-合同)核对。单工单的独立安装、原迁移、业务HTTP及持久重启已有实际冒烟；完整工单Web、双Core和独立升级继续按各自组合核收。

@@ -1,6 +1,6 @@
 # 轻量工单 Core 示范
 
-`@rental-os/example-tickets-core`示范一条非租赁业务链，使用租户范围，不需要经营空间、品类、金额或库存。它已有业务服务、清单/API文档生成、MySQL/Nest适配、标准平台宿主及首次设置/列表/新建/详情四页贡献；[独立示范宿主](../../apps/example-tickets-api/README.md)已接授权/HTTP与部署准备，真实包安装 / 数据库 / 完整后台仍待验证。
+`@rental-os/example-tickets-core`示范一条非租赁业务链，使用租户范围，不需要经营空间、品类、金额或库存。它已有业务服务、清单/API文档生成、MySQL/Nest适配、标准平台宿主及首次设置/列表/新建/详情四页贡献；[独立示范宿主](../../apps/example-tickets-api/README.md)已接授权/HTTP与部署准备，独立标准包安装、MySQL原迁移、授权与业务HTTP、停用重开及持久重启已有实际冒烟，完整工单后台与双Core继续核收。
 
 ## 业务范围
 
@@ -113,7 +113,7 @@ npm run pack:core -w @rental-os/example-tickets-core -- <Core仓库HTTPS地址> 
 
 全部成功返回200，沿原平台`{ data, requestId }`信封；输入不符400、当前授权不足403、对象不在可读范围404、修订/状态/原操作冲突409；会话失败和未处理存储异常仍走原宿主401/500。请求不接tenantId、创建者和body里的ticketId，路径标识与body分别校验。HTTP200只说明本次请求返回，收据中的工单状态是原操作时状态；当前状态另读详情。
 
-[生成器](src/openapi.ts)从相同Zod/HTTP合同生成OpenAPI贡献，复用公共`coreOpenApiSchema`，不手工维护另一套字段。输出可给平台`composeCoreOpenApi`组合，也可随包离线阅读；标准包检查会核路径/schema命名空间和本地引用。Controller装配与真实HTTP权限仍待宿主验证。
+[生成器](src/openapi.ts)从相同Zod/HTTP合同生成OpenAPI贡献，复用公共`coreOpenApiSchema`，不手工维护另一套字段。输出可给平台`composeCoreOpenApi`组合，也可随包离线阅读；标准包检查会核路径/schema命名空间和本地引用。单工单宿主已通过真实Controller装配、授权/成员分配、普通业务、原收据及跨租户拒绝冒烟；其他宿主按自己的组合核验。
 
 分页实现使用单条MySQL8 CTE，正文和COUNT共用可见集合及语句快照；成员读取和总数均限定创建者/受派者，read.all只扩大到本租户。LEFT JOIN保留空末页的真实总数，total单独解析，不混入严格工单对象。读取不创建Core锁行、工单、收据或审计。[分页合同](src/contracts.ts) · [仓储](src/mysql.ts)
 
@@ -131,10 +131,10 @@ npm run pack:core -w @rental-os/example-tickets-core -- <Core仓库HTTPS地址> 
 
 网络/未知结果保留原输入、键和常显提示，只提供GET原收据核对；已知本Core提交前拒绝允许核正输入/状态再发起新操作。输入未保存、写入中或未知结果沿原UnsavedChangesGuard保护。查询缓存包含Core/会话/页面代次，原HTTP负责凭据与信封，通用Core请求适配负责离页中止及迟到响应拒绝。
 
-在已经具备对应React后台peer与原锁文件依赖的源码组合中，可运行`npm run lint:admin -w @rental-os/example-tickets-core`，先构建服务端合同/产物，再按当前后台tsconfig检查页面。它不是完整独立前端发行构建；实际AppRouter/导航、后端授权、持久化和实页仍待公共宿主片。
+在已经具备对应React后台peer与原锁文件依赖的源码组合中，可运行`npm run lint:admin -w @rental-os/example-tickets-core`，先构建服务端合同/产物，再按当前后台tsconfig检查页面。它不是完整独立前端发行构建；正式公共应用已消费同一页面注册表；独立API已验证授权、业务和持久化，完整工单React实页继续按对应Web宿主验收。
 
 ## 源码与验证入口
 
 [index](src/index.ts) → [业务schema](src/contracts.ts)/[服务](src/service.ts)/[服务端注册](src/server.ts)/[发行清单](src/manifest.ts)。[Nest入口](src/nest.ts) → 同一[HTTP合同](src/http.ts)与服务，[OpenAPI](src/openapi.ts)及[元数据命令](src/metadata.ts)供离线资料。[MySQL私有适配](src/mysql.ts) → [独立迁移](migrations/001-tickets.sql)。公开领域出口不依赖Rental/Nest/Prisma；私有mysql/nest出口才读取对应依赖。
 
-当前类型和反向依赖检查通过，离线SQL事务替身核过完整业务链、当前权限/租户拒绝、修订与同键收据、审计失败回滚和参数化；没有运行真实MySQL、HTTP或后台。不新增专用测试运行器，继续复用必要类型检查及原定向验证。
+类型与反向依赖检查、原SQL事务定向验证覆盖完整业务链、当前权限/租户拒绝、修订/同键收据、审计失败回滚及参数化。同一0.1.1标准包已在独立Windows宿主安装，使用真实MySQL8.4和公共40模型Client完成授权、绑定、创建/分派/开始/关闭、跨租户拒绝、撤权及停用重开。API和数据库重启后原业务、绑定及原操作收据保持，重读或复用原键不递增修订、不再次初始化。完整工单Web、同宿主Rental并存、独立更新和Linux镜像另按对应组合核验。验证复用必要类型和定向冒烟。
