@@ -188,8 +188,11 @@ export interface AiTaskRunnerClock {
 }
 
 export interface AiTaskRunnerInputPort {
-  /** input_limit_reached attests no new question/transition was written. */
-  afterSucceeded(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): Promise<AiTaskRunnerStepCommit | { kind: 'input_limit_reached' } | null>;
+  /** input_limit_reached attests no new question/transition was written.
+   * input_wait_commit_observed authorizes closing the original local meter
+   * with the observed CAS tuple while the caller still receives unknown. */
+  afterSucceeded(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): Promise<AiTaskRunnerStepCommit
+    | { kind: 'input_limit_reached' } | { kind: 'input_wait_commit_observed'; commit: AiTaskRunnerStepCommit } | null>;
 }
 
 export interface AiTaskRunnerDependencies {

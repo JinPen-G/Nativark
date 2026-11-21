@@ -576,6 +576,24 @@ export class AiTaskRunner {
         }, Math.min(plan.limits.maxStepMs, remaining), 'input_wait'));
         if (!committed) return false;
         if ('kind' in committed) {
+          if (committed.kind === 'input_wait_commit_observed') {
+            // The input port read the exact question and transition it tried to
+            // commit. Use that tuple only to record the still-live measurement.
+            // The missing reply does not authorize releasing the holder.
+            const unknown = Object.assign(new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'input wait commit acknowledgement was lost'),
+              { nextAction: 'reconcile', retryable: false });
+            if (committed.commit?.taskRevision !== taskRevision + 1) throw unknown;
+            advance(committed.commit);
+            const meter = this.deps.resources?.overhead;
+            if (overheadTicket && meter) {
+              try {
+                await this.callWriteBounded(() => meter.complete(structuredClone(overheadTicket!),
+                  structuredClone(lease)), overheadReplyMs, 'overhead_record');
+                overheadTicket = undefined;
+              } catch { throw unknown; }
+            }
+            throw unknown;
+          }
           if (committed.kind !== 'input_limit_reached' || Object.keys(committed).length !== 1)
             throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
           // All registered steps may have succeeded without satisfying the

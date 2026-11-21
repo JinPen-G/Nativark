@@ -33,6 +33,8 @@ import { createPersistentAiTaskRunner, type AiTaskRunnerDependencies }
 
 `unknown`、取消和等待超时均不证明回滚或可以重发。恢复仍使用原 task/run/action、当前权限、fencing、工具版本及原收据；累计资源不能清零。`readInterrupted` 只读原持久化收据，`reconcile` 也不能被替换成第二次执行。
 
+人工输入的等待提交失去应答时，`inputs.afterSucceeded` 只能在当前权限下读回原问题摘要、原转换、Task/Run 修订及仍持有的同一 fencing 租约后，返回 `input_wait_commit_observed`。Runner 据此关闭当前仍在运行的原计量段，调用仍返回 `AI_RESULT_UNKNOWN` 并要求核对原收据；不释放租约或重提问题。原证据不可读或已变化时，计量占用保持未知，不生成新的完成事实。相关行为见[输入持久化与恢复用例](../../../../tests/ai-native-task-input-persistence.test.cjs)。
+
 此出口覆盖通用任务推进。现有完整 AI 请求工厂、模型 Gateway、数据与场景适配的装配范围分别见 [AI 服务端](../../../ai-native-server/README.md)；Core 的 AI 贡献仍须受控发布和当前授权，不能通过 Runner 扫描 API 自动补工具。
 
 验证复用 [原七项 Runner 用例](../../../../tests/ai-native-c04-task-runner.test.cjs)及 [所选源码类型入口](../../../../scripts/check-selected-prisma-types.cjs)。公共包按自己的 `tsconfig.json` 构建；持久化、模型和真实业务环境的验证按所选宿主办理。

@@ -320,11 +320,13 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
     return receipt;
   }
 
-  async afterSucceeded(ref: AiTaskRunnerStepRef, lease: AiTaskRunnerLease) {
+  async afterSucceeded(ref: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): ReturnType<AiTaskRunnerInputPort['afterSucceeded']> {
     ref = structuredClone(ref); lease = structuredClone(lease);
     const before = await this.tasks.resolveAccess(lease.taskId, 'read_step_terminal');
     const newRequest = Symbol('original_task_input_required');
     type Result = Awaited<ReturnType<AiTaskRunnerInputPort['afterSucceeded']>>;
+    let attempted: { scopeId: string; id: string; hash: string; cursor: bigint; actorId: string;
+      actorKind: Access['actorKind']; commit: { taskRevision: number; lease: AiTaskRunnerLease } } | undefined;
     const work = async (tx: Tx, mayCreate: boolean): Promise<Result | typeof newRequest> => {
       const task = await this.task(tx, lease.taskId, before), run = await this.run(tx, task.id, task.scopeId, lease.runId, before);
       this.held(run, lease);
@@ -395,21 +397,56 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
         allowedFields: structuredClone(requirement.contract.fields) as unknown as Prisma.InputJsonValue, basisResultRef: facts.artifact.id,
         createdBy: current.actorId, leaseOwnerId: lease.holderId, fencingToken: new prismaRuntime.Decimal(lease.fencingToken), waitingTaskRevision: task.revision + 1,
         expiresAt: new Date(requirement.expiresAt) };
-      await tx.aiTaskInputRequest.create({ data: { ...data, requestHash: requestDigest(data as Omit<AiTaskInputRequest, 'requestHash' | 'createdAt' | 'status' | 'revision'>), status: 'PENDING', revision: 1 } });
+      const hash = requestDigest(data as Omit<AiTaskInputRequest, 'requestHash' | 'createdAt' | 'status' | 'revision'>);
+      await tx.aiTaskInputRequest.create({ data: { ...data, requestHash: hash, status: 'PENDING', revision: 1 } });
       if ((await tx.aiRun.updateMany({ where: { id: run.id, scopeId: task.scopeId, taskId: task.id, revision: run.revision, fencingToken: run.fencingToken,
         leaseOwnerId: lease.holderId, leaseExpiresAt: { gt: this.clock() }, actorKind: current.actorKind, actorId: current.actorId, status: run.status }, data: { revision: { increment: 1 } } })).count !== 1) throw conflict();
       await this.publish(tx, task, current, 'waiting_input', 'input_required', { requestId: data.id }, lease.holderId);
-      return { taskRevision: task.revision + 1, lease: { ...lease, revision: run.revision + 1 } };
+      const commit = { taskRevision: task.revision + 1, lease: { ...lease, revision: run.revision + 1 } };
+      attempted = { scopeId: task.scopeId, id: data.id, hash, cursor: task.eventCursor + 1n,
+        actorId: current.actorId, actorKind: current.actorKind, commit };
+      return commit;
     };
     const create = async (tx: Tx): Promise<Result> => {
       const result = await work(tx, true);
       if (result === newRequest) throw conflict();
       return result;
     };
-    if (!hasAiTaskTransactionAuthority()) return this.writeTransaction(create);
-    const observed = await this.transaction(tx => work(tx, false));
-    if (observed !== newRequest) return observed;
-    return this.writeTransaction(tx => withAiTaskTransaction(tx, { kind: 'task', taskId: lease.taskId }, () => create(tx)));
+    try {
+      if (!hasAiTaskTransactionAuthority()) return await this.writeTransaction(create);
+      const observed = await this.transaction(tx => work(tx, false));
+      if (observed !== newRequest) return observed;
+      return await this.writeTransaction(tx => withAiTaskTransaction(tx, { kind: 'task', taskId: lease.taskId }, () => create(tx)));
+    } catch (error) {
+      const original = attempted;
+      if (!(error instanceof AiTaskInputResultUnknownError) || !original) throw error;
+      // A completed callback is only a candidate, not a COMMIT receipt.
+      // Check this exact question, transition and holder under current read
+      // authority. A changed or unreadable tuple leaves the original unknown.
+      const observed = await this.transaction(async tx => {
+        const current = await this.access(lease.taskId, 'read_step_terminal', before);
+        const task = await this.task(tx, lease.taskId, current);
+        if (task.scopeId !== original.scopeId || task.status !== 'WAITING_INPUT' || task.cancelRequestedAt !== null
+          || task.revision !== original.commit.taskRevision || task.eventCursor !== original.cursor
+          || current.actorId !== original.actorId || current.actorKind !== original.actorKind) return false;
+        const run = await this.run(tx, task.id, task.scopeId, lease.runId, current);
+        this.held(run, original.commit.lease);
+        if (run.status !== 'RUNNING' || run.leaseExpiresAt?.toISOString() !== lease.expiresAt) return false;
+        const key = { scopeId: task.scopeId, taskId: task.id };
+        const pending = await tx.aiTaskInputRequest.findUnique({ where: { scopeId_taskId_id: { ...key, id: original.id } } });
+        if (!pending || pending.status !== 'PENDING' || pending.revision !== 1 || pending.requestHash !== original.hash
+          || requestDigest(pending) !== original.hash) return false;
+        const transition = await tx.aiTaskEvent.findFirst({ where: { ...key, cursor: original.cursor,
+          taskRevision: task.revision, type: 'task.transition' } });
+        const payload = { data: { from: 'running', to: 'waiting_input', reason: 'input_required' },
+          input: { requestId: original.id }, initiator: { kind: 'worker', id: lease.holderId,
+            actorKind: current.actorKind, actorId: current.actorId } };
+        await this.access(task.id, 'read_step_terminal', before);
+        return transition !== null && requestFingerprint(transition.payload) === requestFingerprint(payload);
+      }).catch(() => false);
+      if (!observed) throw error;
+      return { kind: 'input_wait_commit_observed' as const, commit: original.commit };
+    }
   }
 
   private transition(task: { id: string; status: string; revision: number; eventCursor: bigint }, steps: Array<{ id: string; runId: string; sequence: number; revision: number; actionId: string; status: string; effect: string }>,
