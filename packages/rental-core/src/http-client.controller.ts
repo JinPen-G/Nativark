@@ -30,6 +30,7 @@ import {
 } from "@nestjs/common";
 import { CLIENT_PUBLIC_DOCUMENT_KINDS, type ClientChannelKind, type ClientPublicDocumentKind } from "./client-contracts";
 import {
+  ClientAccountClosureChallengeRequestDto,
   ClientAccountClosureRequestDto,
   ClientAvailabilityRequestDto,
   ClientCancelOrderRequestDto,
@@ -213,8 +214,8 @@ export class ClientApiController {
 
   @Post("auth/closure/challenge")
   @HttpCode(201)
-  closureChallenge(@Req() req: ClientRequest) {
-    return this.auth.createClosureChallenge(currentClient(req));
+  closureChallenge(@Req() req: ClientRequest, @Body() body: ClientAccountClosureChallengeRequestDto) {
+    return this.auth.createClosureChallenge(currentClient(req), body);
   }
 
   @Post("auth/closure")

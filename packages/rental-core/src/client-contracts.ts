@@ -1009,6 +1009,13 @@ export interface ClientAccountClosurePreview {
   manualConfirmations: Array<{ code: string; message: string }>;
 }
 
+/** 本人注销验证码。新请求使用独立键，重试保留原键；旧无键调用沿原会话挑战。 */
+export interface ClientAccountClosureChallengeRequest {
+  idempotencyKey?: string;
+  /** 恢复只读原请求；缺原记录时拒绝，不重新生成验证码或发送短信。 */
+  recoverOnly?: boolean;
+}
+
 export interface ClientAccountClosureRequest {
   /** 必须与当前账号手机号一致，再次证明本人。 */
   loginIdentifier: string;

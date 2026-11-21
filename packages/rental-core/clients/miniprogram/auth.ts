@@ -1,6 +1,7 @@
 /** Rental 客户小程序认证客户端。路径、凭证用途、会话采用与错误沿原客户端，
  * 服务端核验身份、注册、微信绑定及本人注销，宿主维护原会话与请求围栏。 */
 import type {
+  ClientAccountClosureChallengeRequest,
   ClientAccountClosurePreview,
   ClientAccountClosureRequest,
   ClientAccountClosureResponse,
@@ -149,8 +150,10 @@ export function createRentalMiniProgramAuthApi(ports: RentalMiniProgramAuthPorts
     return request<ClientAccountClosurePreview>("/auth/closure/preview", { scope: "tenant" });
   }
 
-  async function closureChallenge(): Promise<ClientRegistrationChallengeResponse> {
-    return request<ClientRegistrationChallengeResponse>("/auth/closure/challenge", { method: "POST", scope: "tenant" });
+  async function closureChallenge(input?: ClientAccountClosureChallengeRequest): Promise<ClientRegistrationChallengeResponse> {
+    return request<ClientRegistrationChallengeResponse>("/auth/closure/challenge", {
+      method: "POST", ...(input === undefined ? {} : { data: input }), scope: "tenant", replayAfterRefresh: false
+    });
   }
 
   async function closeAccount(input: ClientAccountClosureRequest): Promise<ClientAccountClosureResponse> {

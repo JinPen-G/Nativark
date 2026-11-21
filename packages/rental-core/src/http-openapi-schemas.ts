@@ -1375,6 +1375,13 @@ export const RENTAL_HTTP_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     },
     ["apiVersion", "closable", "blockers", "manualConfirmations"], false
   ),
+  ClientAccountClosureChallengeRequest: objectOf(
+    {
+      idempotencyKey: { type: "string", minLength: 1, maxLength: 191, pattern: "\\S", description: "同一次请求和恢复沿原键；明确重新获取才使用新键。省略时沿原会话回读旧挑战。" },
+      recoverOnly: { type: "boolean", description: "只回读原请求；缺原记录时拒绝，不生成或发送新验证码。" }
+    },
+    [], false
+  ),
   ClientAccountClosureRequest: objectOf(
     { loginIdentifier: stringSchema, verificationToken: stringSchema, acknowledgedManualChecks: booleanSchema, reason: stringSchema },
     ["loginIdentifier", "verificationToken", "acknowledgedManualChecks"]

@@ -54,6 +54,8 @@ export interface ContractOperation {
   permissions: string[];
   authRequired?: boolean;
   requestSchema?: string | SchemaObject;
+  /** 缺省仍要求请求正文；false 用于兼容原无正文调用。 */
+  requestRequired?: boolean;
   responseSchema?: string | SchemaObject;
   successStatus?: 200 | 201;
   parameters?: ParameterObject[];
@@ -171,7 +173,7 @@ function operation(config: ContractOperation) {
 
   if (config.requestSchema) {
     item.requestBody = {
-      required: true,
+      required: config.requestRequired ?? true,
       content: {
         [config.requestContentType ?? "application/json"]: {
           schema: toSchema(config.requestSchema),

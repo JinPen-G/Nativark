@@ -57,6 +57,11 @@
 
       <view wx:if="{{formError}}" class="section section--tight"><view class="notice notice--danger">{{formError}}</view></view>
 
+      <view wx:if="{{hasChallengeRequest}}" class="section section--tight">
+        <text class="link small" bindtap="onRecoverCode">核对原验证码请求</text>
+        <text wx:if="{{retryAfter === 0}}" class="link small ml-12" bindtap="onResendCode">重新获取验证码</text>
+      </view>
+
       <view wx:if="{{closable}}" class="bottom-bar">
         <button class="btn btn--danger btn--cta btn--block" hover-class="btn-hover" bindtap="onSendCode" disabled="{{submitting || !acknowledgedAll}}">{{submitting ? '发送中…' : '获取验证码并继续'}}</button>
       </view>
@@ -66,7 +71,8 @@
       <view class="section">
         <view class="card">
           <view class="subtitle">验证码确认</view>
-          <view class="muted mt-8">已向 {{maskedDestination}} 发送验证码。请输入本账号手机号与验证码以确认注销。</view>
+          <view wx:if="{{deliveryPending}}" class="muted mt-8">短信发送结果尚未确认。你可以填写已收到的验证码，或核对原请求。</view>
+          <view wx:else class="muted mt-8">已向 {{maskedDestination}} 发送验证码。请输入本账号手机号与验证码以确认注销。</view>
           <view wx:if="{{developmentCode}}" class="muted small mt-8">开发环境验证码：{{developmentCode}}</view>
           <view class="field mt-16">
             <view class="field__label">本账号手机号</view>
@@ -80,7 +86,8 @@
           </view>
           <view class="row mt-12">
             <text wx:if="{{retryAfter > 0}}" class="muted small">{{retryAfter}}s 后可重新发送</text>
-            <text wx:else class="link small" bindtap="onSendCode">重新发送验证码</text>
+            <text wx:else class="link small" bindtap="onResendCode">重新获取验证码</text>
+            <text class="link small ml-12" bindtap="onRecoverCode">核对原请求</text>
           </view>
         </view>
       </view>

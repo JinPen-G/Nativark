@@ -13,6 +13,7 @@ import type { ClientRegistrationChallenge, Prisma } from "@prisma/client";
 import type { ClientRequestContext, RentalClientSessionLease } from "./client-context";
 import {
   CLIENT_API_VERSION,
+  type ClientAccountClosureChallengeRequest,
   type ClientMembershipLoginRequest,
   type ClientMembershipQualificationStatus,
   type ClientMembershipSessionResponse,
@@ -336,7 +337,7 @@ export class ClientAuthService {
 
   /** 本人注销复用原挑战算法和提交点，但始终保留 Guard 已绑定的客户身份。 */
   private async createChallengeWithContext(input: ClientRegistrationChallengeRequest & { purpose?: ClientChallengePurpose },
-    closureContext?: ClientRequestContext): Promise<ClientRegistrationChallengeResponse> {
+    closureContext?: ClientRequestContext, recoverOnly = false): Promise<ClientRegistrationChallengeResponse> {
     const purpose: ClientChallengePurpose = input.purpose ?? "registration";
     const { tenant, workspace } = await this.target(input.tenantCode, input.workspaceCode, purpose === "registration");
     if (closureContext && (purpose !== "account_closure" || tenant.id !== closureContext.tenantId || workspace.id !== closureContext.workspaceId
@@ -388,6 +389,7 @@ export class ClientAuthService {
         return { kind: "response" as const, response: this.challengeResponse(existing,
           Math.max(0, Math.ceil((existing.expiresAt.getTime() - now.getTime()) / 1000))) };
       }
+      if (recoverOnly) throw new NotFoundException("原验证码请求不存在，请核对原请求或明确重新获取");
       const recent = await tx.clientRegistrationChallenge.findFirst({
         where: {
           tenantId: tenant.id,
@@ -804,17 +806,37 @@ export class ClientAuthService {
     return this.issueSession(tenant.id, customerId, workspace.id);
   }
 
-  /** 本人注销前的短信核验：目标只能是当前会话账号的手机号，客户端不提交号码。 */
-  async createClosureChallenge(context: ClientRequestContext): Promise<ClientRegistrationChallengeResponse> {
-    const minute = Math.floor(Date.now() / 60_000);
+  /** 本人注销前的短信核验：当前会话决定目标；重试和旧无键调用只恢复原挑战。 */
+  async createClosureChallenge(context: ClientRequestContext,
+    input: ClientAccountClosureChallengeRequest = {}): Promise<ClientRegistrationChallengeResponse> {
+    let requestKey = input.idempotencyKey;
+    if (requestKey === undefined) {
+      const legacyKey = `closure:${context.sessionId}`;
+      // 旧客户端没有请求键。回读旧按分钟生成的记录，不能因冷却或到期再派一次短信。
+      requestKey = await this.prisma.$transaction(async tx => {
+        await lockRentalBusinessTenant(tx, context.tenantId);
+        const original = await tx.clientRegistrationChallenge.findFirst({
+          where: {
+            tenantId: context.tenantId,
+            method: "sms",
+            purpose: "account_closure",
+            identifierHash: hashOpaqueToken(`${context.tenantId}:sms:${normalizeIdentifier(context.phone)}`),
+            OR: [{ requestKey: legacyKey }, { requestKey: { startsWith: `${legacyKey}:` } }]
+          },
+          orderBy: { createdAt: "desc" },
+          select: { requestKey: true }
+        });
+        return original?.requestKey ?? legacyKey;
+      }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
+    }
     return this.createChallengeWithContext({
       tenantCode: context.tenantCode,
       workspaceCode: context.workspaceCode,
       method: "sms",
       identifier: context.phone,
-      idempotencyKey: `closure:${context.sessionId}:${minute}`,
+      idempotencyKey: requestKey,
       purpose: "account_closure"
-    }, context);
+    }, context, input.recoverOnly);
   }
 
   /** 消费注销证明（供注销服务在自己的事务里调用）。 */

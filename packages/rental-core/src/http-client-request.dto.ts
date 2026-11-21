@@ -46,6 +46,7 @@ import {
   type ClientPersonalMembershipRegistrationRequest,
   type ClientRefreshRequest,
   type ClientRegistrationChallengeRequest,
+  type ClientAccountClosureChallengeRequest,
   type ClientAccountClosureRequest,
   type ClientChallengeRequest,
   type ClientDeliveryAddressRequest,
@@ -455,6 +456,17 @@ export class ClientChallengeRequestDto implements ClientChallengeRequest {
 
   @IsIn(["registration", "login"])
   purpose!: ClientChallengeRequest["purpose"];
+}
+
+/** 只接受请求键，注销对象和用途仍由已认证的本人会话确定。 */
+export class ClientAccountClosureChallengeRequestDto implements ClientAccountClosureChallengeRequest {
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsString() @IsNotEmpty() @MaxLength(191) @Matches(/\S/u)
+  idempotencyKey?: string;
+
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsBoolean()
+  recoverOnly?: boolean;
 }
 
 export class ClientSmsLoginRequestDto implements ClientSmsLoginRequest {

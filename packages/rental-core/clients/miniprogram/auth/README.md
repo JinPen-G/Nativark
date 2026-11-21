@@ -8,4 +8,18 @@
 
 调用链为原页面 → 薄入口 → 本工厂 → 原客户 request/会话 → [客户 HTTP](../../../src/http-client.controller.ts) → 原客户认证与本人注销服务。客户端输入和本地会话采用沿原服务端权限与事实核验。
 
+## 注销验证码恢复
+
+`closureChallenge` 使用 `POST /api/client/v1/auth/closure/challenge`，对象和手机号由服务端当前本人会话决定。首次发送前，宿主保存本人和租户对应的请求键；丢应答或重启后使用同一键读取原挑战。
+
+```ts
+// requestKey 在首次请求前持久保存；恢复时从原记录读取。
+await auth.closureChallenge({ idempotencyKey: requestKey });
+await auth.closureChallenge({ idempotencyKey: requestKey, recoverOnly: true });
+```
+
+`recoverOnly: true` 在原记录不存在时返回 404，不创建或发送新验证码。页面核对响应的 `status`、`expiresAt` 和 `deliveryMode`；`provider_pending` 表示投递结果未确认，仍保留原键。冷却或过期后也不自动换键。用户明确选择重新获取时，才保存新的独立请求键；[原注销页面](../../../../../apps/miniprogram/src/pages/closure/index.ts)提供恢复与重新获取两个动作。
+
+旧 `closureChallenge()` 无正文调用继续有效，服务端沿当前会话读取原挑战，包括旧按分钟生成的键。两种调用均关闭认证自动重放。字段以[客户合同](../../../src/client-contracts.ts)和[同源 DTO](../../../src/http-client-request.dto.ts)为准，OpenAPI 的请求正文可省略。
+
 定向验证复用原 16 方法的请求和结果，核对会话采用、退出失败、微信备用入口及错误对象。原[小程序验证入口](../../../../../tests/miniprogram-static.test.cjs)继续核对运输与服务切换，类型沿[原生客户端配置](../../../tsconfig.native-clients.json)和宿主配置。微信宿主、真实认证与数据库需对应环境证据。

@@ -58,6 +58,20 @@ for (const top of ['packages', 'apps']) {
       if (!target || !pkg.name) continue;
       let source = target.replace(/^\.\/dist(?:-ai|-mcp)?\//u, './src/').replace(/\.d\.ts$/u, '.ts').replace(/\.js$/u, '.ts');
       let file = slash(path.resolve(directory, source));
+      // 客户端等正式出口使用同包的不同 rootDir/outDir；沿实际构建配置定位，不伪造 dist 声明。
+      if (!subkey.includes('*') && !fs.existsSync(file) && !fs.existsSync(file + 'x')) {
+        for (const name of fs.readdirSync(directory).filter(name => /^tsconfig(?:\.[\w-]+)?\.json$/u.test(name)).sort()) {
+          const configFile = path.join(directory, name), config = ts.readConfigFile(configFile, ts.sys.readFile);
+          if (config.error) throw new Error(ts.flattenDiagnosticMessageText(config.error.messageText, '\n'));
+          const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, directory);
+          if (!parsed.options.rootDir || !parsed.options.outDir) continue;
+          const relative = path.relative(parsed.options.outDir, path.resolve(directory, target));
+          if (relative.startsWith('..') || path.isAbsolute(relative)) continue;
+          const candidate = slash(path.resolve(parsed.options.rootDir, relative)).replace(/\.d\.ts$/u, '.ts').replace(/\.js$/u, '.ts');
+          if (!candidate.startsWith(directory + '/')) throw new Error(`正式出口源码越出包目录 ${pkg.name}${subkey}`);
+          if (fs.existsSync(candidate) || fs.existsSync(candidate + 'x')) { file = candidate; break; }
+        }
+      }
       // 仅沿 package.json 已公开的单通配出口核类型；不会为未公开路径加源码捷径。
       if (subkey.includes('*')) {
         if (subkey.split('*').length !== 2 || source.split('*').length !== 2) throw new Error(`不支持的正式出口 ${pkg.name}${subkey}`);
@@ -129,7 +143,9 @@ const configuredPaths = Object.fromEntries(
   ])
 );
 const options = { ...parsed.options, noEmit: true, incremental: false, declaration: false, rootDir: root, baseUrl: root,
-  paths: { ...configuredPaths, ...packageAliases }, typeRoots: [deps + '/@types'] };
+  paths: { ...configuredPaths, ...packageAliases },
+  // 微信声明以普通包发布；仅显式 types 时补该根，避免把所有依赖自动当作全局类型库。
+  typeRoots: parsed.options.types?.length ? [deps + '/@types', deps] : [deps + '/@types'] };
 const host = ts.createCompilerHost(options);
 Object.assign(host, { fileExists, readFile, directoryExists, getDirectories: file => ts.sys.getDirectories(mapped(file)),
   realpath: file => slash(file).startsWith(root + '/node_modules/') ? slash(file) : slash(ts.sys.realpath?.(mapped(file)) ?? mapped(file)),
