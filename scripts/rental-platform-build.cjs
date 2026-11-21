@@ -6,7 +6,7 @@ const fs = require('node:fs'), path = require('node:path');
 const { createHash } = require('node:crypto');
 const { createRequire } = require('node:module');
 const { isDeepStrictEqual } = require('node:util');
-const { selectedCompilerOptions, compileTypeScriptProgram } = require('./build-selected-prisma.cjs');
+const { selectedCompilerOptions, compileTypeScriptProgram, samePrismaSchema } = require('./build-selected-prisma.cjs');
 const root = path.resolve(__dirname, '..');
 const slash = file => path.resolve(file).split(path.sep).join('/');
 const inside = (parent, file) => file === parent || file.startsWith(parent + '/');
@@ -44,7 +44,7 @@ function compileRentalPlatformSource(input) {
   const workspace = slash(root), modules = workspace + '/node_modules';
   const clientDirectory = workspace + '/apps/platform-api/generated/client';
   if (!selection || slash(selection.client) !== clientDirectory + '/index.d.ts'
-    || selection.schema !== readSource('apps/platform-api/prisma/schema.prisma'))
+    || !samePrismaSchema(selection.schema, readSource('apps/platform-api/prisma/schema.prisma')))
     throw Error('底座所选 Client 与固定归档原公共 schema 不一致');
   const virtual = new Map([...platformFiles].map(([file, bytes]) => [workspace + '/' + file, Buffer.from(bytes).toString('utf8')]));
   virtual.set(clientDirectory + '/index.d.ts', selection.declarations);
@@ -106,17 +106,20 @@ function compileRentalPlatformSource(input) {
       if (current === deps) break;
     }
   }
+  // Client 伴随声明与 index/schema 使用同一文件运输，不能混用编译器的磁盘探测。
+  const clientFileExists = file => inside(clientDirectory, file) && /\.(?:d\.ts|json)$/u.test(file)
+    && fs.existsSync(file) && fs.statSync(file).isFile();
   const fileExists = file => {
     file = mapped(file);
     return outputs.has(file) || virtual.has(file) || canReadDependency(file) && ts.sys.fileExists(file)
-      || inside(clientDirectory, file) && /\.(?:d\.ts|json)$/u.test(file) && ts.sys.fileExists(file);
+      || clientFileExists(file);
   };
   const readFile = file => {
     file = mapped(file);
     if (outputs.has(file)) return outputs.get(file).toString('utf8');
     if (virtual.has(file)) return virtual.get(file);
     if (canReadDependency(file) && ts.sys.fileExists(file)) return readDependency(file);
-    if (inside(clientDirectory, file) && /\.(?:d\.ts|json)$/u.test(file) && ts.sys.fileExists(file)) {
+    if (clientFileExists(file)) {
       const bytes = fs.readFileSync(file); clientFiles.set(file.slice(workspace.length + 1), bytes); return bytes.toString('utf8');
     }
     return undefined;
@@ -125,7 +128,7 @@ function compileRentalPlatformSource(input) {
     file = mapped(file);
     return file === modules || file === modules + '/@rental-os' || hasDirectory(file)
       || (dependencyParents.has(file) || canReadDependency(file)) && ts.sys.directoryExists(file)
-      || inside(clientDirectory, file) && ts.sys.directoryExists(file);
+      || inside(clientDirectory, file) && fs.existsSync(file) && fs.statSync(file).isDirectory();
   };
   function entries(directory) {
     const files = new Set(), directories = new Set(), prefix = mapped(directory) + '/';
@@ -208,7 +211,8 @@ function compileRentalPlatformSource(input) {
     release: structuredClone(release), sourceArchiveSha256: archive.sha256,
     sourceLockSha256: hash(platformFiles.get('package-lock.json')),
     compiler: { name: 'typescript', version: ts.version, sha256: hash(dependencies.get('node_modules/typescript/lib/typescript.js')) },
-    client: { mode: 'platform', schemaSha256: hash(Buffer.from(selection.schema)), declarationsSha256: hash(Buffer.from(selection.declarations)),
+    client: { mode: 'platform', schemaSha256: hash(platformFiles.get('apps/platform-api/prisma/schema.prisma')),
+      generatedSchemaSha256: hash(Buffer.from(selection.schema)), declarationsSha256: hash(Buffer.from(selection.declarations)),
       files: sortedHashes(clientFiles) },
     projects, dependencies: sortedHashes(dependencies), generated: sortedHashes(generated)
   } };

@@ -127,7 +127,7 @@ Core 包管理位于 `/api/platform/core-packages`，包含目录、发现、仓
 
 Rental 提供自己的 schema、公共关系与实际数据计划，宿主按同一接点选择它；默认公共宿主继续只用公共数据。新组合 Client 和存量混合库的迁移分别准备。[Rental数据三步接入](../../packages/rental-core/prisma/README.md)
 
-运行使用 `npm run start -w @rental-os/platform-api`；调用此命令会监听 API 端口并按请求访问配置的数据库。OpenAPI 从 `/api/openapi.json` 读取公共、Core 管理及包管理的组合，前述公共离线导出继续使用其公共文档入口。独立 HTTP、真实持久化及完整公共后台验收尚未完成。公开开发入口为[公共服务](../../packages/platform-server/README.md)、[公共后台](../platform-admin/README.md)和[Core接入手册](../../packages/core-contracts/README.md#五步快速接入)。
+运行使用 `npm run start -w @rental-os/platform-api`；调用此命令会监听 API 端口并按请求访问配置的数据库。OpenAPI 从 `/api/openapi.json` 读取公共、Core 管理及包管理的组合，前述公共离线导出继续使用其公共文档入口。零 Core 的独立安装、HTTP、公共保存和重启已取得下方实际证据；其他组合与完整公共功能分别验证。公开开发入口为[公共服务](../../packages/platform-server/README.md)、[公共后台](../platform-admin/README.md)和[Core接入手册](../../packages/core-contracts/README.md#五步快速接入)。
 
 公共邀请、寄件和客服邮件由 `PlatformServerModule` 自动装配，使用本宿主唯一公共数据库、邮件集成和审计。邀请与客服数据分别沿[邀请迁移](prisma/migrations/20261119000000_public_operator_invitations/migration.sql)和[邮件迁移](prisma/migrations/20261119010000_public_support_email/migration.sql)保持原 SQL。三张表仅引用公共 Tenant，没有 Rental 业务外键。
 
@@ -136,5 +136,9 @@ Rental 提供自己的 schema、公共关系与实际数据计划，宿主按同
 实际发信需要已核定的租户邮件集成和部署方 `ADMIN_PUBLIC_URL`，客服同步显式读取实际 IMAP。没有真实配置时沿原错误处理；链接页面、真实邮件 / 数据库及完整独立宿主验收分别验证。
 
 ## 验证入口
+
+已在独立 Windows 源码根使用 Node 24.13.0、原 npm 锁、Prisma 5.22.0 和专用 MySQL 8.4 验证零 Core 组合。依赖独立安装后生成本根公共 Client，公共 API 与 Web 实际构建通过；13 份公共迁移形成40张公共表，未安装业务 Core。真实 HTTP 验证初始化、改密、两个租户登录、本人/租户/品牌/主题保存、旧修订409、跨租户403、匿名401及受限成员403。API 与数据库重启后五组保存快照保持一致，重复初始化不重置原密码。对应前端登录、公共外壳与设置回读见[公共后台证据](../platform-admin/README.md#验证入口)。邮件、供应商交易、其他 Core 及 Linux 镜像分别验证，此结果不代表发布或生产启用。
+
+独立运行包保留源码 schema 的原字节摘要。官方生成的 Client schema 可以整理空白，打包和运行预检使用同一 token 比较；标识符、类型、属性和字符串默认值变化仍拒绝，迁移 SQL 的摘要规则保持原样。[共同核验](../../scripts/build-selected-prisma.cjs)
 
 在完整源码检出中，所选源码类型使用[内存类型命令](../../scripts/check-selected-prisma-types.cjs)的 `--mode platform` 与本宿主 `--config apps/platform-api/tsconfig.json`。公共合同使用 `npm test -w @rental-os/core-contracts`，零 Core 与单工单运行材料沿[现有运行包用例](../../tests/platform-host-package-cases.cjs)和其[原 runner](../../tests/rental-host-package.test.cjs)读取固定证据。源码发行把未包含的检查资料链接到同一来源提交。类型、内存根装配、真实监听 / 数据库及冷安装分别记录。

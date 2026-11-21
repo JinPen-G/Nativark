@@ -9,6 +9,25 @@ const modes = ['platform', 'rental', 'rental-ai'];
 const slash = value => path.resolve(value).split(path.sep).join('/');
 const samePath = (a, b) => process.platform === 'win32' ? slash(a).toLowerCase() === slash(b).toLowerCase() : slash(a) === slash(b);
 
+/** Prisma 生成器会整理对齐空白；比较词法 token，保留标识符边界和字符串原值。
+ * 发行源码/SQL 摘要仍比较原字节。本函数也直接嵌入运行包预检，避免两套判断。 */
+function prismaSchemaTokens(schema) {
+  if (typeof schema !== 'string' || !schema.trim()) throw Error('Prisma schema 缺失或为空');
+  const token = /\s+|\/\/[^\r\n]*|"(?:[^"\\\r\n]|\\[^\r\n])*"|[A-Za-z_][A-Za-z0-9_]*|[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|@@|[\[\]{}():,?.=@+\-]/uy;
+  const tokens = [];
+  while (token.lastIndex < schema.length) {
+    const offset = token.lastIndex, match = token.exec(schema);
+    if (!match) throw Error('Prisma schema 包含未支持或未闭合的 token：' + offset);
+    if (!/^\s|^\/\//u.test(match[0])) tokens.push(match[0]);
+  }
+  if (!tokens.length) throw Error('Prisma schema 缺少实际声明');
+  return JSON.stringify(tokens);
+}
+
+function samePrismaSchema(actual, expected) {
+  return prismaSchemaTokens(actual) === prismaSchemaTokens(expected);
+}
+
 function parseArguments(args, environment = process.env, cwd = process.cwd()) {
   const values = {}, flags = new Set();
   for (let index = 0; index < args.length; index++) {
@@ -84,7 +103,7 @@ function selectedCompilerOptions(ts, project, options, selection, readFile = ts.
       .map(relative => path.join(workspace, relative));
     if (!permitted.some(file => samePath(file, client))) throw Error('legacy Client 不属于本仓库原 apps/api 的生成目录');
     const original = readRequired(readFile, path.join(workspace, 'apps/api/prisma/schema.prisma'), '旧宿主正式 schema');
-    if (schema.replace(/\r\n/gu, '\n').trim() !== original.replace(/\r\n/gu, '\n').trim())
+    if (!samePrismaSchema(schema, original))
       throw Error('legacy Client schema 与本仓库原 apps/api 源码不一致');
   }
   const configured = options.paths?.['@prisma/client'];
@@ -131,4 +150,4 @@ if (require.main === module) {
     else process.exitCode = compileProject(input);
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }
-module.exports = { parseArguments, selectedCompilerOptions, compileTypeScriptProgram, compileProject };
+module.exports = { parseArguments, selectedCompilerOptions, compileTypeScriptProgram, compileProject, prismaSchemaTokens, samePrismaSchema };

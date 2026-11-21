@@ -7,7 +7,7 @@ const fs = require('node:fs'), path = require('node:path');
 const { createHash } = require('node:crypto');
 const { createRequire, isBuiltin } = require('node:module');
 const { isDeepStrictEqual } = require('node:util');
-const { selectedCompilerOptions } = require('./build-selected-prisma.cjs');
+const { selectedCompilerOptions, samePrismaSchema, prismaSchemaTokens } = require('./build-selected-prisma.cjs');
 const { compileRentalPlatformSource, requireMatchingPublicRuntime, publicDirectories } = require('./rental-platform-build.cjs');
 const { selectWorkspaces, projectHostLock, lockedDependency, hostDirectory } = require('./rental-host-lock.cjs');
 const root = path.resolve(__dirname, '..');
@@ -215,10 +215,16 @@ const fs = require('node:fs'), path = require('node:path');
 const { createHash } = require('node:crypto'), { createRequire } = require('node:module');
 const root = __dirname, receipt = JSON.parse(fs.readFileSync(path.join(root, '${receiptFile}'), 'utf8'));
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
+const schemaTokens = ${prismaSchemaTokens.toString()};
 for (const item of receipt.files) if (digest(fs.readFileSync(path.join(root, item.file))) !== item.sha256)
   throw Error('镜像输入摘要变化：' + item.file);
 for (const item of receipt.clients) {
-  if (digest(fs.readFileSync(path.join(root, item.directory, 'schema.prisma'))) !== item.schemaSha256)
+  const schemaFile = item.directory === 'apps/platform-api/generated/client' ? 'apps/platform-api/prisma/schema.prisma'
+    : item.directory === 'apps/rental-api/generated/client' ? 'apps/rental-api/prisma-deployment/schema.prisma' : undefined;
+  if (!schemaFile) throw Error('镜像 Client 目录未登记');
+  const source = fs.readFileSync(path.join(root, schemaFile), 'utf8');
+  if (digest(Buffer.from(source)) !== item.schemaSha256
+    || schemaTokens(fs.readFileSync(path.join(root, item.directory, 'schema.prisma'), 'utf8')) !== schemaTokens(source))
     throw Error('镜像生成 Client 与核定 schema 不一致');
   const metadata = JSON.parse(fs.readFileSync(path.join(root, item.directory, 'package.json'), 'utf8'));
   if (metadata.version !== receipt.prismaVersion) throw Error('镜像 Client 版本不一致');
@@ -264,7 +270,7 @@ function createRentalHostContext(input) {
     const read = file => path.resolve(file) === path.resolve(selected.client) ? selected.declarations
       : path.resolve(file) === path.join(root, directory, 'schema.prisma') ? selected.schema : undefined;
     const checked = selectedCompilerOptions(ts, path.join(root, `apps/${host}-api/tsconfig.json`), {}, { client: selected.client, mode }, read);
-    if (selected.schema !== schema) throw Error('构建所选 Client 与部署 schema 不一致：' + host);
+    if (!samePrismaSchema(selected.schema, schema)) throw Error('构建所选 Client 与部署 schema 不一致：' + host);
     clients.push({ directory, mode, models: checked.models, schemaSha256: hash(Buffer.from(schema)) });
   }
   const originalLock = JSON.parse(text(sourceFiles, 'package-lock.json'));

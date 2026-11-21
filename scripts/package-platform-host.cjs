@@ -6,7 +6,7 @@ const fs = require('node:fs'), path = require('node:path');
 const { createHash } = require('node:crypto');
 const { createRequire } = require('node:module');
 const { isDeepStrictEqual } = require('node:util');
-const { selectedCompilerOptions } = require('./build-selected-prisma.cjs');
+const { selectedCompilerOptions, samePrismaSchema } = require('./build-selected-prisma.cjs');
 const { compileRentalPlatformSource, requireMatchingPublicRuntime, publicDirectories } = require('./rental-platform-build.cjs');
 const { selectWorkspaces, projectHostLock, lockedDependency, hostDirectory } = require('./rental-host-lock.cjs');
 const { readOrdinary, readTree, checkRuntimeClosure, createRuntimeVerifier, writeArchive } = require('./package-rental-host.cjs');
@@ -110,7 +110,7 @@ function createPlatformHostContext(input) {
     : path.resolve(file) === path.join(root, clientDirectory, 'schema.prisma') ? selection.schema : undefined;
   const checked = selectedCompilerOptions(ts, path.join(root, host, 'tsconfig.json'), {},
     { client: selection.client, mode: 'platform' }, read);
-  if (selection.schema !== schema) throw Error('公共 Client 与固定公共 schema 不一致');
+  if (!samePrismaSchema(selection.schema, schema)) throw Error('公共 Client 与固定公共 schema 不一致');
   const plan = api.createPublicPlatformDataPlan();
   if (!isDeepStrictEqual(plan.data, lock.platform.data)) throw Error('公共数据计划与完整发行锁不一致');
   const migrations = plan.migrationNames.map((name, index) => {

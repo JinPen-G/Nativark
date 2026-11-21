@@ -45,8 +45,10 @@ workspace 名来自本宿主 [package.json](package.json)，可直接用于完�
 
 dev、build 和 lint 的前置脚本构建 `@rental-os/platform-core-host`，准备包管理的同版本协议运行时。对应公共 API 已装配十二个包管理接口。发行与候选存储使用宿主配置的绝对 `CORE_PACKAGE_STORAGE_ROOT`，默认零 Core 的实际版本、部署材料和候选规划按可用证据显示 `unavailable`。[服务端配置与前置](../platform-api/README.md)
 
-当前入口已有类型与认证请求围栏的离线证据，浏览器、真实 HTTP/数据库保存重读及完整公共管理功能仍待验。公共实现与边界从[后台模块导读](../../packages/platform-admin/README.md)读取。构建命令不是安装、迁移或启服务的授权。
+当前入口已有类型、认证请求围栏和下方零 Core 浏览器/真实保存回读证据，完整公共管理与业务 Core 页面分别验收。公共实现与边界从[后台模块导读](../../packages/platform-admin/README.md)读取。构建命令不是安装、迁移或启服务的授权。
 
 ## 验证入口
+
+零 Core 源码发行已在独立依赖根实际构建，并由 headless Chromium 149 连接同根公共 API 和专用 MySQL 验证。真实登录后可见原侧栏、面包屑/页名与空 Core 提示；侧栏收展、Core面板开关、休息时长选择、通知弹层、本人资料保存后刷新、中英文切换及600px英文窄屏面板均通过。浏览器异常与外部请求为零。API/数据库重启后本人、租户、品牌和主题等已保存快照保持；这里只核所列行为，其他公共页面、Core业务主操作与多Core切换另行验证。[服务端组合与前置](../platform-api/README.md#验证入口)
 
 必要类型沿[现有内存类型入口](../../scripts/check-selected-prisma-types.cjs)，选择 `--mode platform --config apps/platform-admin/tsconfig.json`。公共应用的[同一注册和会话出口](../../packages/platform-admin/README.md)提供默认路由、权限与请求验证路线，运行包证据见[公共 API](../platform-api/README.md#验证入口)。浏览器首次改密、公共保存重读、窄屏与双语验收使用各自真实环境证据。
