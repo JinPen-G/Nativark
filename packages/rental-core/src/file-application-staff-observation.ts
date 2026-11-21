@@ -91,16 +91,18 @@ export class RentalStaffUploadObservation {
           throw new ConflictException('原上传交接阶段或批次不一致');
         }
       }
+      // 员工观察沿原只读合同显示待删除，内部排队或unknown不提供重发许可。
+      const fileStatus = ['delete_queued', 'delete_in_progress'].includes(asset.status) ? 'delete_pending' : asset.status;
       if (!['pending_upload', 'freeze_pending', 'completed', 'failed'].includes(session.status)
-        || !['pending_upload', 'active', 'failed', 'delete_pending', 'deleted'].includes(asset.status)
+        || !['pending_upload', 'active', 'failed', 'delete_pending', 'deleted'].includes(fileStatus)
         || ['pending_upload', 'freeze_pending'].includes(session.status) && asset.status !== 'pending_upload'
-        || session.status === 'completed' && !['active', 'delete_pending', 'deleted'].includes(asset.status)
+        || session.status === 'completed' && !['active', 'delete_pending', 'deleted'].includes(fileStatus)
         || session.status === 'failed' && !['failed', 'deleted'].includes(asset.status)
         || !(session.expiresAt instanceof Date) || !Number.isFinite(session.expiresAt.getTime())
         || session.completedAt != null && (!(session.completedAt instanceof Date) || !Number.isFinite(session.completedAt.getTime()))) {
         throw new ServiceUnavailableException('原上传状态暂不可核对');
       }
-      return { session, asset };
+      return { session, asset, fileStatus };
     };
     const before = structuredClone(await load());
     if (before) await access.assertRead(tenantId, before.asset);
@@ -116,7 +118,7 @@ export class RentalStaffUploadObservation {
     return { ...semantics, state: 'observed', session: {
       sessionId: before.session.id, fileAssetId: before.asset.id,
       status: before.session.status as StaffUploadObservedSession['status'],
-      fileStatus: before.asset.status as StaffUploadObservedSession['fileStatus'],
+      fileStatus: before.fileStatus as StaffUploadObservedSession['fileStatus'],
       mode: before.session.provider === 'local_mock' ? 'simulation' : 'provider',
       expiresAt: before.session.expiresAt.toISOString(), completedAt: before.session.completedAt?.toISOString() ?? null,
     } };

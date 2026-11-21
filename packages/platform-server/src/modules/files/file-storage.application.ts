@@ -5,14 +5,15 @@ import { fileStorageLocationHash } from "@rental-os/platform-contracts/file-cont
 import { requestFingerprint } from "@rental-os/platform-contracts/request-fingerprint";
 import type { CompleteFileUploadRequest, CreateFileUploadSessionRequest, FileUploadSessionSummary } from "@rental-os/platform-contracts/files";
 import type { TenantIntegrationRuntimeConfig } from "../integrations/tenant-integration.service";
-import type { PlatformJsonValue } from "../platform/platform-auth-data-store";
 import { FileStoragePrimitives } from "./file-storage-primitives";
 import { FileStorageRepository } from "./file-storage.repository";
 import type { FileStorageOwner, StoredFileAsset, StoredFileUploadSession } from "./file-storage.store";
 import { createOriginalFileUploadFacts } from "./file-upload-session";
 import { readOriginalFileUploadReceipt } from "./file-upload-receipt";
 import { freezeFileUploadContent } from "./file-content-freeze";
-import { COMPLETED_STAGING_PENDING, FileStorageCleanup, type FileCleanupParticipants } from "./file-cleanup";
+import { FileStorageCleanup, type FileCleanupParticipants, type FileCleanupBoundary } from "./file-cleanup";
+import { createOriginalFileUploadSession, completeOriginalFileUpload, type FileUploadCompletionSnapshot } from "./file-upload-workflow";
+import { activateOriginalFileUpload } from "./file-upload-activation";
 import { issueFileDownloadReference, type FileDownloadAudit } from "./file-download";
 import type { FileStorageApplicationTransaction } from "./file-storage.application-store";
 import type { FileStorageAuthority, FileStorageBinding, FileUploadAuthorityContext, FileCompletionAuthorityContext } from "./file-storage-authority";
@@ -23,7 +24,8 @@ type UploadRows = { asset: StoredFileAsset; session: StoredFileUploadSession };
 export interface FileStorageApplicationParticipants<Transaction extends FileStorageApplicationTransaction> {
   /** 根存储只需公共文件能力；业务参加者仍接收调用方的完整原事务。 */
   store: FileStorageApplicationTransaction;
-  transaction<T>(work: (transaction: Transaction) => Promise<T>): Promise<T>;
+  /** 清理携带原目标与阶段，所属宿主在运输前复验对应权限。 */
+  transaction<T>(work: (transaction: Transaction) => Promise<T>, boundary?: FileCleanupBoundary): Promise<T>;
   runtimeConfig(tenantId: string, provider?: string, options?: { requireLiveTest: false }): Promise<TenantIntegrationRuntimeConfig | undefined>;
   assertEnabled(transaction: Transaction, tenantId: string, config: TenantIntegrationRuntimeConfig): Promise<void>;
   allowSimulation: boolean;
@@ -35,6 +37,8 @@ export interface FileStorageApplicationParticipants<Transaction extends FileStor
 const bindingKey = (binding: FileStorageBinding) => JSON.stringify([
   binding.businessModule.trim(), binding.businessType.trim(), binding.uploadScene.trim()
 ]);
+// 日期先按原JSON规范化，保留占用版本与原有效期。
+const snapshotFingerprint = (value: unknown) => requestFingerprint(JSON.parse(JSON.stringify(value)));
 const reservedMetadata = new Set([
   "fileUploadVersion", "fileContentVersion", "contentHash", "stagingStorageKey", "storageLocationHash", "uploadConfigHash",
   "knowledgeUploadVersion", "knowledgeContentHash", "knowledgeRevision", "uploadMode", "workspaceId", "uploadedByUserId", "enterprisePaymentProof"
@@ -60,7 +64,21 @@ export class FileStorageApplication<Owner extends FileStorageOwner, Transaction 
       this.authorities.set(key, authority);
     }
     const cleanup: FileCleanupParticipants<Transaction> = {
-      store: participants.store, transaction: work => participants.transaction(work),
+      store: participants.store, transaction: (work, boundary) => participants.transaction(work, boundary),
+      beforeObjectRequest: (boundary, request) => participants.transaction(async tx => {
+        await participants.assertEnabled(tx, boundary.asset.tenantId, request.config);
+        const metadata = boundary.asset.metadata as Record<string, unknown> | null;
+        if (request.config.provider !== boundary.asset.storageProvider
+          || metadata?.storageLocationHash !== fileStorageLocationHash(request.config))
+          throw new ConflictException("原文件清理对象或配置依据已变化");
+        const [asset, session] = await Promise.all([
+          tx.fileAsset.findFirst({ where: { id: boundary.asset.id, tenantId: boundary.asset.tenantId } }),
+          boundary.session ? tx.fileUploadSession.findFirst({ where: { id: boundary.session.id, tenantId: boundary.asset.tenantId } }) : undefined
+        ]);
+        if (snapshotFingerprint(asset) !== snapshotFingerprint(boundary.asset)
+          || boundary.session && snapshotFingerprint(session) !== snapshotFingerprint(boundary.session))
+          throw new ConflictException("原文件清理占用或会话已变化");
+      }, boundary),
       runtimeConfig: (tenantId, provider) => participants.runtimeConfig(tenantId, provider, { requireLiveTest: false }),
       excludedUploadScene: participants.excludedUploadScene,
       deleteObject: (config, key, at) => this.deleteObject(config, key, at),
@@ -96,9 +114,7 @@ export class FileStorageApplication<Owner extends FileStorageOwner, Transaction 
     const mimeType = this.validateInput(context.request);
     if (context.owner && !this.matchesOwner(context.request, context.owner)) throw new ConflictException("上传业务对象与当前业务归属不一致");
     const idempotencyKey = context.request.idempotencyKey.trim();
-    const replay = async (session: StoredFileUploadSession) => {
-      const asset = await this.participants.store.fileAsset.findFirst({ where: { id: session.fileAssetId, tenantId } });
-      if (!asset) throw new NotFoundException("上传会话不存在或不属于当前租户");
+    const replay = async ({ asset, session }: UploadRows) => {
       this.assertOwner(asset, context.owner);
       if (asset.businessModule !== context.request.businessModule.trim() || asset.businessType !== context.request.businessType.trim()
         || asset.businessId !== context.request.businessId.trim() || asset.uploadScene !== context.request.uploadScene.trim()
@@ -108,13 +124,18 @@ export class FileStorageApplication<Owner extends FileStorageOwner, Transaction 
       await authority.assertUpload(context);
       return this.receipt(context, authority, { asset, session });
     };
-    const existing = await this.files.findUploadSession(tenantId, { idempotencyKey });
-    if (existing) return replay(existing);
-    await authority.assertUpload(context);
     let writeAttempted = false;
-    let created: UploadRows;
-    try {
-      created = await createOriginalFileUploadFacts<Owner, Transaction, UploadRows>(
+    return createOriginalFileUploadSession<UploadRows>({
+      findOriginal: async () => {
+        const session = await this.files.findUploadSession(tenantId, { idempotencyKey });
+        if (!session) return;
+        const asset = await this.participants.store.fileAsset.findFirst({ where: { id: session.fileAssetId, tenantId } });
+        if (!asset) throw new NotFoundException("上传会话不存在或不属于当前租户");
+        return { asset, session };
+      },
+      replay,
+      authorizeCreation: () => authority.assertUpload(context),
+      createFacts: () => createOriginalFileUploadFacts<Owner, Transaction, UploadRows>(
         { tenantId, request: context.request, owner: context.owner, mimeType }, {
           runtimeConfig: () => this.participants.runtimeConfig(tenantId),
           validateConfiguration: config => authority.validateConfiguration?.(context, config),
@@ -133,17 +154,11 @@ export class FileStorageApplication<Owner extends FileStorageOwner, Transaction 
               uploadConfigHash: requestFingerprint({ id: config.id, provider: config.provider, settings: config.settings, credentials: config.credentials }) } : {}),
             uploadMode: facts.mode
           })
-        });
-    } catch (error) {
-      if (this.participants.isUniqueConflict(error)) {
-        const concurrent = await this.files.findUploadSession(tenantId, { idempotencyKey });
-        if (concurrent) return replay(concurrent);
-      }
-      authority.creationFailed?.(error, "persist", writeAttempted);
-      throw error;
-    }
-    try { return await this.receipt(context, authority, created); }
-    catch (error) { authority.creationFailed?.(error, "receipt", writeAttempted); throw error; }
+        }),
+      readCreatedReceipt: rows => this.receipt(context, authority, rows),
+      isUniqueConflict: error => this.participants.isUniqueConflict(error),
+      creationFailed: (error, stage) => authority.creationFailed?.(error, stage, writeAttempted)
+    });
   }
 
   private async receipt(context: FileUploadAuthorityContext<Owner>, authority: FileStorageAuthority<Owner, Transaction>, rows: UploadRows) {
@@ -182,87 +197,79 @@ export class FileStorageApplication<Owner extends FileStorageOwner, Transaction 
   async completeUpload(tenantId: string, sessionId: string, request: CompleteFileUploadRequest, owner?: Owner) {
     request = structuredClone(request); owner = structuredClone(owner);
     if (!tenantId?.trim()) throw new ConflictException("文件操作缺少当前租户");
-    let session = structuredClone(await this.files.findUploadSession(tenantId, { id: sessionId }));
+    const session = structuredClone(await this.files.findUploadSession(tenantId, { id: sessionId }));
     if (!session) throw new NotFoundException("上传会话不存在");
-    let asset = structuredClone(await this.participants.store.fileAsset.findFirst({ where: { id: session.fileAssetId, tenantId } }));
+    const asset = structuredClone(await this.participants.store.fileAsset.findFirst({ where: { id: session.fileAssetId, tenantId } }));
     if (!asset) throw new NotFoundException("上传会话不存在或不属于当前业务对象");
     const authority = this.authority(tenantId, asset);
     this.assertOwner(asset, owner);
-    const context = (): FileCompletionAuthorityContext<Owner> => ({ tenantId, asset: asset!, session: session!, owner, request,
-      operation: "complete", contentHash: frozen?.checksum });
-    let frozen: { storageKey: string; checksum: string; config: TenantIntegrationRuntimeConfig } | undefined;
-    await authority.assertAsset(context());
+    const context = (snapshot: FileUploadCompletionSnapshot<StoredFileAsset, StoredFileUploadSession>): FileCompletionAuthorityContext<Owner> => ({
+      tenantId, asset: snapshot.asset, session: snapshot.session, owner, request, operation: "complete", contentHash: snapshot.frozen?.checksum
+    });
+    await authority.assertAsset(context({ asset, session }));
     if (session.fileAssetId !== asset.id || session.provider !== asset.storageProvider || session.storageKey !== asset.storageKey)
       throw new ConflictException("原上传会话与文件绑定不一致");
-    if (session.status === "completed") {
-      if (asset.status !== "active") throw new ConflictException("上传结果不可用");
-      if ((asset.metadata as Record<string, unknown> | null)?.fileUploadVersion === 2 && request.checksum?.trim() && request.checksum.trim() !== asset.checksum)
-        throw new ConflictException("原完成收据与文件摘要不一致，不能重写内容");
-      await authority.afterComplete?.(context());
-      return this.assetSummary(asset);
-    }
-    const resuming = session.status === "freeze_pending" && asset.status === "pending_upload"
-      && (asset.metadata as Record<string, unknown> | null)?.fileUploadVersion === 2;
-    if (session.status !== "pending_upload" && !resuming) throw new ConflictException("上传会话已失效");
-    if (!resuming && session.expiresAt.getTime() <= Date.now()) {
-      await this.participants.transaction(async tx => {
-        const claim = await tx.fileUploadSession.updateMany({ where: { id: session!.id, tenantId, status: "pending_upload" },
+    const updated = await completeOriginalFileUpload({ asset, session, request }, {
+      allowSimulation: this.participants.allowSimulation,
+      runtimeConfig: provider => this.participants.runtimeConfig(tenantId, provider, { requireLiveTest: false }),
+      expireUpload: original => this.participants.transaction(async tx => {
+        const claim = await tx.fileUploadSession.updateMany({ where: { id: original.id, tenantId, status: "pending_upload" },
           data: { status: "failed", failureReason: "上传会话已过期", cleanupError: "待执行过期对象清理" } });
         if (claim.count !== 1) throw new ConflictException("上传会话已变化，请读取原结果");
-        await tx.fileAsset.updateMany({ where: { id: asset!.id, tenantId, status: "pending_upload" }, data: { status: "failed" } });
-      });
-      throw new ConflictException("上传会话已过期，请重新上传");
-    }
-    if (session.provider === "local_mock" && !this.participants.allowSimulation)
-      throw new ServiceUnavailableException("生产环境禁止完成模拟文件上传，请先配置并验证文件存储平台");
-    if (session.provider !== "local_mock") {
-      const config = await this.participants.runtimeConfig(tenantId, session.provider, { requireLiveTest: false });
-      if (!config) throw new ConflictException("原上传缺少有效临时对象或文件配置依据，不能确认完成");
-      const result = await freezeFileUploadContent<StoredFileAsset, StoredFileUploadSession, Transaction>({ tenantId, asset, session, config, checksum: request.checksum }, {
+        await tx.fileAsset.updateMany({ where: { id: asset.id, tenantId, status: "pending_upload" }, data: { status: "failed" } });
+      }),
+      freeze: (snapshot, config) => freezeFileUploadContent<StoredFileAsset, StoredFileUploadSession, Transaction>({
+        tenantId, asset: snapshot.asset, session: snapshot.session, config, checksum: request.checksum
+      }, {
         transaction: work => this.participants.transaction(work),
-        beforeClaim: tx => authority.assertAsset(context(), tx),
+        beforeClaim: tx => authority.assertAsset(context(snapshot), tx),
         assertConfiguration: (tx, current) => this.participants.assertEnabled(tx, tenantId, current),
+        beforeWrite: (snapshot, current) => this.participants.transaction(async tx => {
+          await authority.assertAsset(context(snapshot), tx);
+          await this.participants.assertEnabled(tx, tenantId, current);
+          const [asset, session] = await Promise.all([
+            tx.fileAsset.findFirst({ where: { id: snapshot.asset.id, tenantId } }),
+            tx.fileUploadSession.findFirst({ where: { id: snapshot.session.id, tenantId } })
+          ]);
+          if (snapshotFingerprint(asset) !== snapshotFingerprint(snapshot.asset)
+            || snapshotFingerprint(session) !== snapshotFingerprint(snapshot.session))
+            throw new ConflictException("原文件派发占用或会话已变化");
+        }),
         readContent: (current, key, mimeType, sizeBytes) => this.readObjectContent(current, key, mimeType, sizeBytes),
         writeContent: (current, key, mimeType, bytes) => {
           const signed = this.presign(current, "PUT", key, mimeType, new Date(Date.now() + 60_000));
           return this.objectRequest(signed.url, { method: "PUT", headers: signed.headers, body: new Uint8Array(bytes) });
         },
-        ...(authority.readPendingContent ? { readPendingContent: () => authority.readPendingContent!(context()) } : {})
-      });
-      asset = result.asset; session = result.session; frozen = result.frozen;
-    }
-    const metadata = { ...((asset.metadata ?? {}) as Record<string, unknown>), ...authority.completionMetadata?.(context()),
-      completedAt: new Date().toISOString(), ...(frozen ? { fileContentVersion: 1, contentHash: frozen.checksum } : {}),
-      ...(request.checksum?.trim() ? { clientChecksum: request.checksum.trim() } : {}) };
-    const updated = await this.participants.transaction(async tx => {
-      if (frozen) await this.participants.assertEnabled(tx, tenantId, frozen.config);
-      const [currentAsset, currentSession] = await Promise.all([
-        tx.fileAsset.findFirst({ where: { id: asset!.id, tenantId } }),
-        tx.fileUploadSession.findFirst({ where: { id: session!.id, tenantId } })
-      ]);
-      if (requestFingerprint(currentAsset) !== requestFingerprint(asset) || requestFingerprint(currentSession) !== requestFingerprint(session))
-        throw new ConflictException("文件或原上传会话在内容冻结期间已变化");
-      await authority.assertAsset(context(), tx);
-      await authority.beforeActivate?.(context(), tx);
-      const sessionClaim = await tx.fileUploadSession.updateMany({
-        where: { id: session!.id, tenantId, status: frozen ? "freeze_pending" : "pending_upload", updatedAt: session!.updatedAt,
-          fileAssetId: asset!.id, provider: asset!.storageProvider, storageKey: asset!.storageKey },
-        data: { status: "completed", completedAt: new Date(), failureReason: null,
-          ...(frozen ? { storageKey: frozen.storageKey, cleanupError: COMPLETED_STAGING_PENDING } : {}) }
-      });
-      if (sessionClaim.count !== 1) throw new ConflictException("上传会话已失效，请重新上传");
-      const assetClaim = await tx.fileAsset.updateMany({
-        where: { id: asset!.id, tenantId, status: "pending_upload", updatedAt: asset!.updatedAt,
-          storageProvider: asset!.storageProvider, storageKey: asset!.storageKey, uploadedBy: asset!.uploadedBy },
-        data: { status: "active", metadata: metadata as { [key: string]: PlatformJsonValue | undefined },
-          ...(frozen ? { storageKey: frozen.storageKey, checksum: frozen.checksum } : {}) }
-      });
-      if (assetClaim.count !== 1) throw new ConflictException("上传文件已失效，请重新上传");
-      const current = await tx.fileAsset.findUniqueOrThrow({ where: { id: asset!.id } });
-      await authority.afterActivate?.({ ...context(), asset: current }, tx);
-      return current;
+        ...(authority.readPendingContent ? { readPendingContent: () => authority.readPendingContent!(context(snapshot)) } : {})
+      }),
+      completionMetadata: snapshot => authority.completionMetadata?.(context(snapshot)) ?? {},
+      activate: (snapshot, metadata) => {
+        const { asset: currentAsset, session: currentSession, frozen } = snapshot;
+        return activateOriginalFileUpload<StoredFileAsset, Transaction>({
+          tenantId, assetId: currentAsset.id, sessionId: currentSession.id, metadata, frozen,
+          sessionVersion: { updatedAt: currentSession.updatedAt, fileAssetId: currentAsset.id,
+            provider: currentAsset.storageProvider, storageKey: currentAsset.storageKey },
+          assetVersion: { updatedAt: currentAsset.updatedAt, storageProvider: currentAsset.storageProvider,
+            storageKey: currentAsset.storageKey, uploadedBy: currentAsset.uploadedBy }
+        }, {
+          transaction: work => this.participants.transaction(work),
+          beforeActivate: async tx => {
+            if (frozen) await this.participants.assertEnabled(tx, tenantId, frozen.config);
+            const [latestAsset, latestSession] = await Promise.all([
+              tx.fileAsset.findFirst({ where: { id: currentAsset.id, tenantId } }),
+              tx.fileUploadSession.findFirst({ where: { id: currentSession.id, tenantId } })
+            ]);
+            if (snapshotFingerprint(latestAsset) !== snapshotFingerprint(currentAsset)
+              || snapshotFingerprint(latestSession) !== snapshotFingerprint(currentSession))
+              throw new ConflictException("文件或原上传会话在内容冻结期间已变化");
+            await authority.assertAsset(context(snapshot), tx);
+            await authority.beforeActivate?.(context(snapshot), tx);
+          },
+          afterActivate: (current, tx) => authority.afterActivate?.({ ...context(snapshot), asset: current }, tx) ?? Promise.resolve()
+        });
+      },
+      afterComplete: snapshot => authority.afterComplete?.(context(snapshot)) ?? Promise.resolve()
     });
-    await authority.afterComplete?.({ ...context(), asset: updated });
     return this.assetSummary(updated);
   }
 

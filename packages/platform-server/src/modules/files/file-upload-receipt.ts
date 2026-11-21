@@ -53,8 +53,10 @@ export async function readOriginalFileUploadReceipt<Asset extends ReceiptAsset, 
   const currentSession = await participants.readSession();
   const currentAsset = await participants.readAsset();
   const currentConfig = await participants.runtimeConfig();
-  if (!currentSession || !currentAsset || requestFingerprint(currentSession) !== requestFingerprint(session)
-    || requestFingerprint(currentAsset) !== requestFingerprint(asset) || session.expiresAt.getTime() <= Date.now()
+  // 原会话有效期与Date版本参与续签复验，授权等待期间的变化不能返回旧上传地址。
+  const originalHash = requestFingerprint(JSON.parse(JSON.stringify({ session, asset })));
+  const currentHash = requestFingerprint(JSON.parse(JSON.stringify({ session: currentSession, asset: currentAsset })));
+  if (!currentSession || !currentAsset || currentHash !== originalHash || session.expiresAt.getTime() <= Date.now()
     || !currentConfig || metadata.uploadConfigHash !== requestFingerprint({ id: currentConfig.id, provider: currentConfig.provider,
       settings: currentConfig.settings, credentials: currentConfig.credentials })) {
     throw new ConflictException("原上传会话在续签期间已变化");

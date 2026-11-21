@@ -4,10 +4,10 @@ import type { FileCleanupTransaction } from "./file-cleanup";
 import type { FileContentFreezeTransaction } from "./file-content-freeze";
 import type { FileStorageTransaction, StoredFileAsset, StoredFileUploadSession } from "./file-storage.store";
 
-interface FileActivationTransaction {
+export interface FileActivationTransaction<Asset extends StoredFileAsset = StoredFileAsset> {
   fileAsset: {
-    findFirst(query: { where: { id: string; tenantId: string; status?: string } }): PromiseLike<StoredFileAsset | null>;
-    findUniqueOrThrow(query: { where: { id: string } }): PromiseLike<StoredFileAsset>;
+    findFirst(query: { where: { id: string; tenantId: string; status?: string } }): PromiseLike<Asset | null>;
+    findUniqueOrThrow(query: { where: { id: string } }): PromiseLike<Asset>;
     updateMany(query: {
       where: { id: string; tenantId: string; status: string; updatedAt?: Date; storageProvider?: string; storageKey?: string; uploadedBy?: string | null };
       data: { status: string; storageKey?: string; checksum?: string; metadata?: { [key: string]: PlatformJsonValue | undefined } };

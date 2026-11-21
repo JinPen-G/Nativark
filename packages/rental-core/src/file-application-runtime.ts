@@ -1,11 +1,12 @@
-/** Rental 原文件兼容编排，保持原合法 module/scene、对象权限、会话、事务与冻结收据。
- * 公共文件原语供给创建、字节、冻结、清理和签名；宿主供给原知识、检查与审计参加者。 */
+/** Rental 原文件兼容适配，核原合法 module/scene、对象权限、知识、检查和企业凭证。
+ * 创建重放、完成/失败、删除及清理收据委托公共流程，原宿主继续供给业务事务与审计参加者。 */
 import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, ConflictException, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import type { Prisma, PrismaClient } from "@prisma/client";
-import { createHash } from "node:crypto";
 import { FileStoragePrimitives, FileStorageRepository, freezeFileUploadContent, createOriginalFileUploadFacts,
-  readOriginalFileUploadReceipt, FileStorageCleanup, COMPLETED_STAGING_PENDING, issueFileDownloadReference,
+  readOriginalFileUploadReceipt, FileStorageCleanup, issueFileDownloadReference,
+  createOriginalFileUploadSession, completeOriginalFileUpload, activateOriginalFileUpload, failOriginalFileUpload,
+  uploadOriginalFileBuffer, assertOriginalFileUploadSnapshot, createOriginalFileCleanupTransactions,
   FileStorageApplication, type FileStorageOwner, type FileCleanupTransaction } from "@rental-os/platform-server/files";
 import { fetchObjectStorageWithTimeout as fetchWithTimeout } from "@rental-os/platform-server/object-storage";
 import { PlatformOperationLogService, type OperationLogInput } from "@rental-os/platform-server/operation-log";
@@ -27,7 +28,7 @@ import { lockRentalBusinessTenant } from "./mysql-business-fence";
 import { ENTERPRISE_PAYMENT_PROOF_SCENE } from "./enterprise-workflows";
 import { RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE } from "./exchange-inspection-preparation";
 import type { StaffUploadObservationRequest, StaffUploadObservationResponse } from "./staff-upload-observation";
-import type { RentalFileCleanupAuthority, RentalFileCleanupBoundary } from "./application-file-cleanup-authority";
+import type { RentalFileCleanupAuthority } from "./application-file-cleanup-authority";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -120,92 +121,78 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
   ): Promise<FileUploadSessionSummary> {
     if (isRentalStaffFileBinding(tenantId, input)) return this.requireStaffFiles().createUploadSession(tenantId, input, owner);
     input = structuredClone(input); owner = structuredClone(owner);
-    if (input.uploadScene?.trim() === RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE) throw new BadRequestException("换货检查影像必须经专用原业务入口上传");
+    if (input.uploadScene?.trim() === RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE)
+      throw new BadRequestException("换货检查影像必须经专用原业务入口上传");
     input = this.enterprisePaymentProofFiles.prepareUpload(input, owner);
     const mimeType = this.validateInput(input);
     const idempotencyKey = input.idempotencyKey.trim();
-    if (owner && !this.matchesOwner({ businessType: input.businessType, businessId: input.businessId, uploadScene: input.uploadScene }, owner)) {
-      throw new BadRequestException("上传业务对象与当前业务归属不一致");
-    }
-    const existing = await this.files.findUploadSession(tenantId, { idempotencyKey });
-    if (existing) {
-      const existingAsset = await this.prisma.fileAsset.findUniqueOrThrow({ where: { id: existing.fileAssetId } });
-      if (existingAsset.tenantId !== tenantId) throw new NotFoundException("上传会话不存在或不属于当前租户");
-      if (owner && !this.matchesOwner(existingAsset, owner)) throw new ConflictException("幂等键已被其他业务对象使用，请更换幂等键");
-      if (owner?.actorUserId && existingAsset.uploadedBy !== owner.actorUserId) throw new ConflictException("上传幂等键已由其他员工使用，请重新选择文件");
-      if (!this.matchesUploadRequest(existingAsset, input, mimeType)) {
-        throw new ConflictException("幂等键已用于不同文件上传请求，请更换幂等键");
-      }
-      // 幂等重放仍重新验证业务归属：客户资料在租户内共享，订单等事实按空间隔离。
-      // owner 的客户 ID / 上传场景匹配不能因重放而跳过。
-      if (input.businessType === 'ai_knowledge_document') return this.knowledgeUploadSummary(tenantId, input, existing, existingAsset, owner);
-      await this.assertBusinessReference(tenantId, existingAsset.businessType, existingAsset.businessId ?? "", owner?.workspaceId);
-      if (existing.provider === "local_mock" && process.env.NODE_ENV === "production") {
-        throw new ServiceUnavailableException("生产环境禁止重放模拟文件上传，请先配置并验证文件存储平台");
-      }
-      return this.originalUploadSummary(tenantId, existing, existingAsset, owner);
-    }
+    if (owner && !this.matchesOwner(input, owner)) throw new BadRequestException("上传业务对象与当前业务归属不一致");
     let knowledgeCommitUnknown: (() => Error) | undefined;
-    if (input.businessType === 'ai_knowledge_document') {
-      const factory = this.native.knowledgeCommitUnknown;
-      if (typeof factory !== 'function') throw new ServiceUnavailableException('知识上传提交参加者未配置');
-      // 写入前固定原错误工厂与宿主绑定，提交失应答仍能表达原操作的 unknown。
-      knowledgeCommitUnknown = factory.bind(this.native);
-      await this.authorizeKnowledgeUpload(tenantId, input, owner);
-    } else await this.assertBusinessReference(tenantId, input.businessType, input.businessId, owner?.workspaceId);
-
     let knowledgeWriteAttempted = false;
-    let created: {
-      asset: Prisma.FileAssetGetPayload<object>;
-      session: Prisma.FileUploadSessionGetPayload<object>;
-    };
-    try {
-      created = await createOriginalFileUploadFacts<FileBusinessOwner<Revision>, Prisma.TransactionClient, typeof created>(
-        { tenantId, request: input, owner, mimeType }, {
-          runtimeConfig: () => this.integrations.runtimeConfig("file", tenantId),
-          validateConfiguration: config => {
-            if (input.businessType === 'ai_knowledge_document' && config?.provider !== 's3_compatible')
-              throw new ServiceUnavailableException('知识首建需要可读取的受控存储');
-          },
-          allowSimulation: process.env.NODE_ENV !== "production",
-          storageKey: (config, currentTenantId, assetId, fileName) => this.storageKey(config, currentTenantId, assetId, fileName),
-          transaction: work => this.businessTransaction(tenantId, work),
-          assertEnabled: (tx, config) => this.integrations.assertEnabledInTransaction(tx, tenantId, "file", config.provider,
-            { configRevision: config.revision }),
-          beforePersist: async tx => {
-            if (input.businessType === 'ai_knowledge_document') await this.authorizeKnowledgeUpload(tenantId, input, owner);
-            // 配置读取会让出执行，建立上传事实前再次核原业务引用及空间归属。
-            else await this.assertBusinessReference(tenantId, input.businessType, input.businessId, owner?.workspaceId, tx);
-            if (input.businessType === 'ai_knowledge_document') knowledgeWriteAttempted = true;
-          },
-          persist: (tx, facts, config) => this.persistUploadFacts(tx, tenantId, facts, config)
-        }
-      );
-    } catch (error) {
-      if (error instanceof prismaRuntime.PrismaClientKnownRequestError && error.code === "P2002") {
-        const concurrent = await this.files.findUploadSession(tenantId, { idempotencyKey });
-        if (concurrent) {
-          const concurrentAsset = await this.prisma.fileAsset.findUniqueOrThrow({ where: { id: concurrent.fileAssetId } });
-          if (concurrentAsset.tenantId !== tenantId) throw new NotFoundException("上传会话不存在或不属于当前租户");
-          if (owner && !this.matchesOwner(concurrentAsset, owner)) throw new ConflictException("幂等键已被其他业务对象使用，请更换幂等键");
-          if (owner?.actorUserId && concurrentAsset.uploadedBy !== owner.actorUserId) throw new ConflictException("上传幂等键已由其他员工使用，请重新选择文件");
-          if (!this.matchesUploadRequest(concurrentAsset, input, mimeType)) {
-            throw new ConflictException("幂等键已用于不同文件上传请求，请更换幂等键");
-          }
-          if (input.businessType === 'ai_knowledge_document') return this.knowledgeUploadSummary(tenantId, input, concurrent, concurrentAsset, owner);
-          await this.assertBusinessReference(tenantId, concurrentAsset.businessType, concurrentAsset.businessId ?? "", owner?.workspaceId);
-          return this.originalUploadSummary(tenantId, concurrent, concurrentAsset, owner);
-        }
+    return createOriginalFileUploadSession({
+      findOriginal: async () => {
+        const session = await this.files.findUploadSession(tenantId, { idempotencyKey });
+        return session ? { session, asset: await this.prisma.fileAsset.findUniqueOrThrow({ where: { id: session.fileAssetId } }) } : undefined;
+      },
+      replay: (rows, source) => this.replayUploadSession(tenantId, input, mimeType, rows, owner, source),
+      authorizeCreation: async () => {
+        if (input.businessType === "ai_knowledge_document") {
+          const factory = this.native.knowledgeCommitUnknown;
+          if (typeof factory !== "function") throw new ServiceUnavailableException("知识上传提交参加者未配置");
+          // 写入前固定原错误工厂与宿主绑定，提交失应答仍表达原操作的unknown。
+          knowledgeCommitUnknown = factory.bind(this.native);
+          await this.authorizeKnowledgeUpload(tenantId, input, owner);
+        } else await this.assertBusinessReference(tenantId, input.businessType, input.businessId, owner?.workspaceId);
+      },
+      createFacts: () => createOriginalFileUploadFacts<FileBusinessOwner<Revision>, Prisma.TransactionClient, {
+        asset: Prisma.FileAssetGetPayload<object>; session: Prisma.FileUploadSessionGetPayload<object>;
+      }>({ tenantId, request: input, owner, mimeType }, {
+        runtimeConfig: () => this.integrations.runtimeConfig("file", tenantId),
+        validateConfiguration: config => {
+          if (input.businessType === "ai_knowledge_document" && config?.provider !== "s3_compatible")
+            throw new ServiceUnavailableException("知识首建需要可读取的受控存储");
+        },
+        allowSimulation: process.env.NODE_ENV !== "production",
+        storageKey: (config, currentTenant, assetId, fileName) => this.storageKey(config, currentTenant, assetId, fileName),
+        transaction: work => this.businessTransaction(tenantId, work),
+        assertEnabled: (tx, config) => this.integrations.assertEnabledInTransaction(tx, tenantId, "file", config.provider,
+          { configRevision: config.revision }),
+        beforePersist: async tx => {
+          if (input.businessType === "ai_knowledge_document") {
+            await this.authorizeKnowledgeUpload(tenantId, input, owner);
+            knowledgeWriteAttempted = true;
+          } else await this.assertBusinessReference(tenantId, input.businessType, input.businessId, owner?.workspaceId, tx);
+        },
+        persist: (tx, facts, config) => this.persistUploadFacts(tx, tenantId, facts, config)
+      }),
+      readCreatedReceipt: ({ asset, session }) => input.businessType === "ai_knowledge_document"
+        ? this.knowledgeUploadSummary(tenantId, input, session, asset, owner)
+        : this.originalUploadSummary(tenantId, session, asset, owner),
+      isUniqueConflict: error => error instanceof prismaRuntime.PrismaClientKnownRequestError && error.code === "P2002",
+      creationFailed: (_error, stage) => {
+        if (input.businessType === "ai_knowledge_document" && (knowledgeWriteAttempted || stage === "receipt"))
+          throw knowledgeCommitUnknown!();
       }
-      if (knowledgeWriteAttempted) throw knowledgeCommitUnknown!();
-      throw error;
-    }
+    });
+  }
 
-    if (input.businessType === 'ai_knowledge_document') {
-      try { return await this.knowledgeUploadSummary(tenantId, input, created.session, created.asset, owner); }
-      catch { throw knowledgeCommitUnknown!(); }
-    }
-    return this.originalUploadSummary(tenantId, created.session, created.asset, owner);
+  /** 原重放仍核租户、上传者、请求描述及领域归属，知识沿其原版本与unknown入口读取。 */
+  private async replayUploadSession(tenantId: string, input: CreateFileUploadSessionRequest, mimeType: string,
+    rows: { asset: Prisma.FileAssetGetPayload<object>; session: Prisma.FileUploadSessionGetPayload<object> },
+    owner: FileBusinessOwner<Revision> | undefined, source: "existing" | "unique_conflict") {
+    const { asset, session } = rows;
+    if (asset.tenantId !== tenantId) throw new NotFoundException("上传会话不存在或不属于当前租户");
+    if (owner && !this.matchesOwner(asset, owner)) throw new ConflictException("幂等键已被其他业务对象使用，请更换幂等键");
+    if (owner?.actorUserId && asset.uploadedBy !== owner.actorUserId)
+      throw new ConflictException("上传幂等键已由其他员工使用，请重新选择文件");
+    if (!this.matchesUploadRequest(asset, input, mimeType))
+      throw new ConflictException("幂等键已用于不同文件上传请求，请更换幂等键");
+    if (input.businessType === "ai_knowledge_document") return this.knowledgeUploadSummary(tenantId, input, session, asset, owner);
+    await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner?.workspaceId);
+    // 原首次命中与唯一键竞争沿各自的兼容重放分支。
+    if (source === "existing" && session.provider === "local_mock" && process.env.NODE_ENV === "production")
+      throw new ServiceUnavailableException("生产环境禁止重放模拟文件上传，请先配置并验证文件存储平台");
+    return this.originalUploadSummary(tenantId, session, asset, owner);
   }
 
   private async persistUploadFacts(tx: Prisma.TransactionClient, tenantId: string, facts: UploadFacts<Revision>, configured?: TenantIntegrationRuntimeConfig) {
@@ -263,93 +250,40 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
    * 自己拿租户密钥直连对象存储。该入口只接受已配置的真实 provider；没有配置
    * 时由调用方决定是否保留开发环境的本地模拟路径。
    */
-  async uploadBuffer(
-    tenantId: string,
-    input: CreateFileUploadSessionRequest,
-    content: Buffer,
-    owner?: FileBusinessOwner<Revision>
-  ) {
-    if (!Buffer.isBuffer(content) || content.length !== input.sizeBytes) {
-      throw new ConflictException("上传文件内容与声明大小不一致");
-    }
-    const checksum = createHash("sha256").update(content).digest("hex");
-    const session = await this.createUploadSession(tenantId, input, owner);
-    if (session.status === "completed" || session.status === "freeze_pending") return this.completeUpload(tenantId, session.sessionId, { checksum }, owner);
-    if (session.mode !== "provider" || !session.uploadUrl) {
-      await this.failSession(tenantId, session.sessionId, "文件平台未返回可用上传地址");
-      throw new ServiceUnavailableException("文件平台未返回可用上传地址");
-    }
-
-    await this.assertUploadDispatch(tenantId, session.sessionId, session.fileAssetId, owner, undefined,
-      { url: session.uploadUrl, expiresAt: session.expiresAt, request: input });
-    let response: Response;
-    try {
-      response = await fetchWithTimeout(session.uploadUrl, {
-        method: "PUT",
-        headers: session.uploadHeaders ?? { "Content-Type": input.mimeType },
-        body: new Uint8Array(content)
-      });
-    } catch {
-      await this.failSession(tenantId, session.sessionId, "上传到对象存储失败", true);
-      throw new ServiceUnavailableException("上传到对象存储失败，请稍后重试");
-    }
-    if (!response.ok) {
-      await this.failSession(tenantId, session.sessionId, `对象存储返回 HTTP ${response.status}`, true);
-      throw new ServiceUnavailableException("上传到对象存储失败，请稍后重试");
-    }
-    return this.completeUpload(tenantId, session.sessionId, { checksum }, owner);
+  async uploadBuffer(tenantId: string, input: CreateFileUploadSessionRequest, content: Buffer,
+    owner?: FileBusinessOwner<Revision>) {
+    return uploadOriginalFileBuffer(input, content, {
+      createUpload: () => this.createUploadSession(tenantId, input, owner),
+      assertDispatch: session => this.assertUploadDispatch(tenantId, session.sessionId, session.fileAssetId, owner, undefined,
+        { url: session.uploadUrl!, expiresAt: session.expiresAt, request: input }),
+      put: (session, bytes) => fetchWithTimeout(session.uploadUrl!, { method: "PUT",
+        headers: session.uploadHeaders ?? { "Content-Type": input.mimeType }, body: new Uint8Array(bytes) }),
+      fail: (sessionId, reason, resultOnly) => this.failSession(tenantId, sessionId, reason, resultOnly),
+      complete: (sessionId, checksum) => this.completeUpload(tenantId, sessionId, { checksum }, owner)
+    });
   }
 
-  /**
-   * 删除业务文件时使用。先在 provider 侧确认删除，再把 FileAsset 标为 deleted；
-   * provider 暂不可用时标记 delete_pending，避免把一个实际上仍存在的对象伪装成
-   * 已删除。后台清理循环会继续重试 pending 状态。
-   */
+  /** 原业务对象与当前权限参加删除事务，排队、占用和原键恢复由公共文件内核办理。 */
   async deleteFileAsset(tenantId: string, fileAssetId: string, owner?: FileBusinessOwner<Revision>) {
+    owner = structuredClone(owner);
     const asset = await this.prisma.fileAsset.findFirst({ where: { id: fileAssetId, tenantId } });
     if (asset?.uploadScene === RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE) throw new ServiceUnavailableException("专用换货影像保留原引用，不使用通用删除");
     if (asset?.businessType === 'ai_knowledge_document') throw new ServiceUnavailableException('知识附件保留原上传证据；文档删除走知识生命周期');
-    if (!asset || (owner && !this.matchesOwner(asset, owner)) || !["active", "delete_pending", "deleted"].includes(asset.status)) {
+    if (!asset || (owner && !this.matchesOwner(asset, owner))
+      || !["active", "delete_queued", "delete_pending", "delete_in_progress", "deleted"].includes(asset.status)) {
       throw new NotFoundException("文件不存在或不属于当前业务对象");
     }
     if (owner) await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner.workspaceId);
     if (asset.status === "deleted") return { fileAssetId, status: "deleted" as const };
 
-    let config: TenantIntegrationRuntimeConfig | undefined, configurationError: unknown;
-    if (asset.storageProvider !== "local_mock") {
-      try { config = await this.integrations.runtimeConfig("file", tenantId, asset.storageProvider as never, { requireLiveTest: false }); }
-      catch (error) { configurationError = error; }
-    }
-    const original = { id: fileAssetId, tenantId, status: { in: ["active", "delete_pending"] },
-      updatedAt: asset.updatedAt, storageKey: asset.storageKey, storageProvider: asset.storageProvider,
-      businessType: asset.businessType, businessId: asset.businessId };
-    await this.businessTransaction(tenantId, async tx => {
-      const current = await tx.fileAsset.findFirst({ where: original });
-      if (!current) throw new ConflictException("原删除文件绑定已变化");
-      if (owner) await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner.workspaceId, tx);
-      if (config) await this.integrations.assertEnabledInTransaction(tx, tenantId, "file", config.provider, { configRevision: config.revision });
-      if (asset.storageProvider === "local_mock") {
-        const changed = await tx.fileAsset.updateMany({ where: original, data: { status: "deleted" } });
-        if (changed.count !== 1) throw new ConflictException("原删除文件绑定已变化");
+    try {
+      await this.cleanupForTenant(tenantId, false, { fileAssetId, owner }).deleteFileAsset(tenantId, asset);
+    } catch (error) {
+      if (error instanceof ServiceUnavailableException) {
+        await this.operationLog?.record({ tenantId, action: "file.delete.pending", targetType: "file", targetId: fileAssetId,
+          detail: "原文件删除结果待核对", metadata: { provider: asset.storageProvider } });
       }
-    });
-    if (asset.storageProvider !== "local_mock") {
-      try {
-        if (configurationError) throw configurationError;
-        if (!config || !(await this.deleteObject(config, asset.storageKey, new Date()))) throw new ServiceUnavailableException("对象存储未确认删除文件");
-      } catch {
-        await this.prisma.fileAsset.updateMany({
-          where: original,
-          data: { status: "delete_pending" }
-        });
-        await this.operationLog?.record({ tenantId, action: "file.delete.pending", targetType: "file", targetId: fileAssetId, detail: "对象存储删除待重试", metadata: { provider: asset.storageProvider } });
-        throw new ServiceUnavailableException("对象存储暂不可用，文件删除已进入重试队列");
-      }
-    }
-    // 已派发删除的原结果只以原定位CAS收口；撤权不改写实际外部效果。
-    if (asset.storageProvider !== "local_mock") {
-      const changed = await this.prisma.fileAsset.updateMany({ where: original, data: { status: "deleted" } });
-      if (changed.count !== 1) throw new ConflictException("原文件删除收据已变化，请核对原对象");
+      throw error;
     }
     await this.operationLog?.record({ tenantId, action: "file.delete", targetType: "file", targetId: fileAssetId, detail: "删除业务文件", metadata: { provider: asset.storageProvider } });
     return { fileAssetId, status: "deleted" as const };
@@ -416,7 +350,7 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
 
   async cleanupPendingFileAssetDeletesForAllTenants(limitPerTenant = 50) {
     const tenants = await this.prisma.fileAsset.findMany({
-      where: { status: { in: ["delete_pending", "delete_in_progress"] } },
+      where: { status: { in: ["delete_queued", "delete_pending", "delete_in_progress"] } },
       select: { tenantId: true },
       distinct: ["tenantId"],
       orderBy: { tenantId: "asc" },
@@ -470,10 +404,10 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
       businessType: before.asset.businessType, businessId: before.asset.businessId ?? '', uploadScene: before.asset.uploadScene,
       fileName: before.asset.fileName, mimeType: before.asset.mimeType, sizeBytes: before.asset.sizeBytes,
       idempotencyKey: before.session.idempotencyKey ?? '' };
-    await this.authorizeKnowledgeUpload(tenantId, input, boundOwner);
-    if (requestFingerprint(before) !== requestFingerprint(await load())) throw new ConflictException('知识上传观察期间已变化');
-    await this.authorizeKnowledgeUpload(tenantId, input, boundOwner);
-    if (requestFingerprint(before) !== requestFingerprint(await load())) throw new ConflictException('知识上传观察期间已变化');
+    const authorize = () => this.authorizeKnowledgeUpload(tenantId, input, boundOwner);
+    const changed = () => new ConflictException('知识上传观察期间已变化');
+    await assertOriginalFileUploadSnapshot(before, load, authorize, changed);
+    await assertOriginalFileUploadSnapshot(before, load, authorize, changed);
     return this.sessionSummary(before.session, before.asset, 'provider');
   }
 
@@ -518,148 +452,113 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
       return { session, asset };
     };
     const before = structuredClone(await load());
-    await authorize();
-    if (requestFingerprint(before) !== requestFingerprint(await load())) throw new ConflictException('原知识上传观察期间已变化');
+    await assertOriginalFileUploadSnapshot(before, load, authorize, () => new ConflictException('原知识上传观察期间已变化'));
     await authorize();
     return before ? this.sessionSummary(before.session, before.asset, 'provider') : null;
   }
 
-  async completeUpload(
-    tenantId: string,
-    sessionId: string,
-    input: CompleteFileUploadRequest,
-    owner?: FileBusinessOwner<Revision>
-  ) {
+  async completeUpload(tenantId: string, sessionId: string, input: CompleteFileUploadRequest,
+    owner?: FileBusinessOwner<Revision>) {
     input = structuredClone(input); owner = structuredClone(owner);
-    let session = structuredClone(await this.prisma.fileUploadSession.findFirst({ where: { id: sessionId, tenantId } }));
+    const session = structuredClone(await this.prisma.fileUploadSession.findFirst({ where: { id: sessionId, tenantId } }));
     if (!session) throw new NotFoundException("上传会话不存在");
-    let asset = structuredClone(await this.prisma.fileAsset.findFirst({ where: { id: session.fileAssetId, tenantId } }));
+    const asset = structuredClone(await this.prisma.fileAsset.findFirst({ where: { id: session.fileAssetId, tenantId } }));
     if (asset && isRentalStaffFileBinding(tenantId, asset)) return this.requireStaffFiles().completeUpload(tenantId, sessionId, input, owner);
-    if (asset?.uploadScene === RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE) throw new BadRequestException("专用换货影像只能核验原业务完成入口");
+    if (asset?.uploadScene === RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE)
+      throw new BadRequestException("专用换货影像只能核验原业务完成入口");
     this.enterprisePaymentProofFiles.assertComplete(asset, owner);
-    if (!asset || (owner && (!this.matchesOwner(asset, owner) || (owner.actorUserId && asset.uploadedBy !== owner.actorUserId)))) throw new NotFoundException("上传会话不存在或不属于当前业务对象");
-    const knowledgeInput: CreateFileUploadSessionRequest | undefined = asset.businessType === 'ai_knowledge_document' ? {
-      businessModule: asset.businessModule, businessType: asset.businessType, businessId: asset.businessId ?? '', uploadScene: asset.uploadScene,
-      fileName: asset.fileName, mimeType: asset.mimeType, sizeBytes: asset.sizeBytes, idempotencyKey: session.idempotencyKey ?? '' } : undefined;
+    if (!asset || owner && (!this.matchesOwner(asset, owner) || owner.actorUserId && asset.uploadedBy !== owner.actorUserId))
+      throw new NotFoundException("上传会话不存在或不属于当前业务对象");
+    const knowledgeInput: CreateFileUploadSessionRequest | undefined = asset.businessType === "ai_knowledge_document" ? {
+      businessModule: asset.businessModule, businessType: asset.businessType, businessId: asset.businessId ?? "", uploadScene: asset.uploadScene,
+      fileName: asset.fileName, mimeType: asset.mimeType, sizeBytes: asset.sizeBytes, idempotencyKey: session.idempotencyKey ?? "" } : undefined;
     if (knowledgeInput) {
       owner = structuredClone(owner);
       this.assertKnowledgeUploadAsset(asset, owner);
-      if (session.provider !== asset.storageProvider || session.storageKey !== asset.storageKey || session.fileAssetId !== asset.id) throw new ConflictException('知识上传绑定已变化');
+      if (session.provider !== asset.storageProvider || session.storageKey !== asset.storageKey || session.fileAssetId !== asset.id)
+        throw new ConflictException("知识上传绑定已变化");
       await this.authorizeKnowledgeUpload(tenantId, knowledgeInput, owner);
     } else if (owner) await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner.workspaceId);
-    if (session.status === "completed") {
-      if (asset.status !== 'active') throw new ConflictException('上传结果不可用');
-      if (session.provider !== asset.storageProvider || session.storageKey !== asset.storageKey) throw new ConflictException("原已完成文件绑定不一致");
-      if ((asset.metadata as JsonRecord | null)?.fileUploadVersion === 2 && input.checksum?.trim() && input.checksum.trim() !== asset.checksum) {
-        throw new ConflictException("原完成收据与文件摘要不一致，不能重写内容");
-      }
-      if (knowledgeInput) await this.assertKnowledgeBinding(tenantId, asset.id, owner!, owner?.knowledgeRevision ? {
-        documentVersion: owner.knowledgeRevision.targetVersion, expectedRevision: owner.knowledgeRevision.expectedRevision } : undefined);
-      return this.assetSummary(asset);
-    }
-    const resumingFreeze = session.status === "freeze_pending" && asset.status === "pending_upload"
-      && (asset.metadata as JsonRecord | null)?.fileUploadVersion === 2;
-    if (session.status !== "pending_upload" && !resumingFreeze) throw new ConflictException("上传会话已失效");
-    if (!resumingFreeze && session.expiresAt.getTime() <= Date.now()) {
-      await this.failSession(tenantId, session.id, "上传会话已过期");
-      throw new ConflictException("上传会话已过期，请重新上传");
-    }
-    if (session.provider === "local_mock" && process.env.NODE_ENV === "production") {
-      throw new ServiceUnavailableException("生产环境禁止完成模拟文件上传，请先配置并验证文件存储平台");
-    }
-    // The client receives only a staging PUT. Read those actual bounded bytes,
-    // then write a fresh server-only destination; no original PUT can alter it.
-    let frozen: { storageKey: string; checksum: string; config: TenantIntegrationRuntimeConfig } | undefined;
-    if (session.provider !== "local_mock") {
-      const config = await this.integrations.runtimeConfig("file", tenantId, session.provider as never, { requireLiveTest: false });
-      if (!config) throw new ConflictException("原上传缺少有效临时对象或文件配置依据，不能确认完成");
-      const pendingAsset = asset;
-      const result = await freezeFileUploadContent<
+    const updated = await completeOriginalFileUpload({ asset, session, request: input }, {
+      allowSimulation: process.env.NODE_ENV !== "production",
+      runtimeConfig: provider => this.integrations.runtimeConfig("file", tenantId, provider as never, { requireLiveTest: false }),
+      expireUpload: original => this.failSession(tenantId, original.id, "上传会话已过期"),
+      freeze: (snapshot, config) => freezeFileUploadContent<
         Prisma.FileAssetGetPayload<object>, Prisma.FileUploadSessionGetPayload<object>, Prisma.TransactionClient
-      >({ tenantId, asset, session, config, checksum: input.checksum }, {
+      >({ tenantId, asset: snapshot.asset, session: snapshot.session, config, checksum: input.checksum }, {
         transaction: work => this.businessTransaction(tenantId, work),
         beforeClaim: async tx => {
           if (knowledgeInput) await this.authorizeKnowledgeUpload(tenantId, knowledgeInput, owner);
-          else await this.assertBusinessReference(tenantId, asset!.businessType, asset!.businessId ?? "", owner?.workspaceId, tx);
+          else await this.assertBusinessReference(tenantId, snapshot.asset.businessType, snapshot.asset.businessId ?? "", owner?.workspaceId, tx);
         },
-        assertConfiguration: (tx, currentConfig) => this.integrations.assertEnabledInTransaction(tx, tenantId, "file", currentConfig.provider,
-          { configRevision: currentConfig.revision }),
-        readContent: (currentConfig, storageKey, mimeType, sizeBytes) => this.readObjectContent(currentConfig, storageKey, mimeType, sizeBytes),
-        writeContent: async (currentConfig, storageKey, mimeType, bytes) => {
-          await this.assertUploadDispatch(tenantId, session!.id, pendingAsset.id, owner, { storageKey, config: currentConfig });
-          const signed = this.presign(currentConfig, "PUT", storageKey, mimeType, new Date(Date.now() + 60_000));
+        assertConfiguration: (tx, current) => this.integrations.assertEnabledInTransaction(tx, tenantId, "file", current.provider,
+          { configRevision: current.revision }),
+        readContent: (current, key, mimeType, sizeBytes) => this.readObjectContent(current, key, mimeType, sizeBytes),
+        writeContent: async (current, key, mimeType, bytes) => {
+          await this.assertUploadDispatch(tenantId, snapshot.session.id, snapshot.asset.id, owner, { storageKey: key, config: current });
+          const signed = this.presign(current, "PUT", key, mimeType, new Date(Date.now() + 60_000));
           return this.objectRequest(signed.url, { method: "PUT", headers: signed.headers, body: new Uint8Array(bytes) });
         },
         ...(knowledgeInput ? { readPendingContent: async () => {
-          const content = await this.knowledgeFiles?.readUploadContent?.(tenantId, pendingAsset.id, owner!);
-          if (!content || !(content.bytes instanceof Uint8Array) || content.bytes.byteLength !== pendingAsset.sizeBytes)
+          const content = await this.knowledgeFiles?.readUploadContent?.(tenantId, snapshot.asset.id, owner!);
+          if (!content || !(content.bytes instanceof Uint8Array) || content.bytes.byteLength !== snapshot.asset.sizeBytes)
             throw new ServiceUnavailableException("知识上传原字节读取未配置或不可用");
           return content;
         } } : {})
-      });
-      asset = result.asset;
-      session = result.session;
-      frozen = result.frozen;
-    }
-    let knowledgeContentHash: string | undefined;
-    if (knowledgeInput) {
-      if (!frozen) throw new ServiceUnavailableException('知识上传正式内容冻结证据未配置');
-      knowledgeContentHash = frozen.checksum;
-    }
-    const metadata = {
-      ...((asset.metadata ?? {}) as JsonRecord),
-      completedAt: new Date().toISOString(),
-      ...(knowledgeContentHash ? { knowledgeContentHash } : {}),
-      ...(frozen ? { fileContentVersion: 1, contentHash: frozen.checksum } : {}),
-      ...(input.checksum?.trim() ? { clientChecksum: input.checksum.trim() } : {})
-    };
-    const updated = await this.prisma.$transaction(async (tx) => {
-      // 已派发的冻结内容只按原收据完成文件结果；本地模拟没有外部结果，仍是新写入。
-      if (!frozen) await lockRentalBusinessTenant(tx, tenantId);
-      if (frozen) {
-        await this.integrations.assertEnabledInTransaction(tx, tenantId, "file", frozen.config.provider, { configRevision: frozen.config.revision });
-        const [currentAsset, currentSession] = await Promise.all([
-          tx.fileAsset.findFirst({ where: { id: asset.id, tenantId } }),
-          tx.fileUploadSession.findFirst({ where: { id: session.id, tenantId } })
-        ]);
-        if (requestFingerprint(currentAsset) !== requestFingerprint(asset) || requestFingerprint(currentSession) !== requestFingerprint(session)) {
-          throw new ConflictException("文件或原上传会话在内容冻结期间已变化");
-        }
-        if (!knowledgeInput) await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner?.workspaceId, tx);
+      }),
+      completionMetadata: snapshot => {
+        if (!knowledgeInput) return {};
+        if (!snapshot.frozen) throw new ServiceUnavailableException("知识上传正式内容冻结证据未配置");
+        return { knowledgeContentHash: snapshot.frozen.checksum };
+      },
+      activate: (snapshot, metadata) => {
+        const { asset: currentAsset, session: currentSession, frozen } = snapshot;
+        return activateOriginalFileUpload<Prisma.FileAssetGetPayload<object>, Prisma.TransactionClient>({
+          tenantId, assetId: currentAsset.id, sessionId: currentSession.id, metadata, frozen,
+          ...(knowledgeInput || frozen ? {
+            sessionVersion: { updatedAt: currentSession.updatedAt, fileAssetId: currentAsset.id,
+              provider: currentAsset.storageProvider, storageKey: currentAsset.storageKey },
+            assetVersion: { updatedAt: currentAsset.updatedAt, storageProvider: currentAsset.storageProvider,
+              storageKey: currentAsset.storageKey, uploadedBy: currentAsset.uploadedBy }
+          } : {})
+        }, {
+          transaction: work => this.prisma.$transaction(async tx => {
+            // 已派发的冻结结果只收口原文件收据，模拟仍按原新写入锁租户。
+            if (!frozen) await lockRentalBusinessTenant(tx, tenantId);
+            return work(tx);
+          }),
+          beforeActivate: async tx => {
+            if (frozen) {
+              await assertOriginalFileUploadSnapshot({ asset: currentAsset, session: currentSession }, async () => {
+                const [latestAsset, latestSession] = await Promise.all([
+                  tx.fileAsset.findFirst({ where: { id: currentAsset.id, tenantId } }),
+                  tx.fileUploadSession.findFirst({ where: { id: currentSession.id, tenantId } })
+                ]);
+                return { asset: latestAsset, session: latestSession };
+              }, () => this.integrations.assertEnabledInTransaction(tx, tenantId, "file", frozen.config.provider,
+                { configRevision: frozen.config.revision }),
+              () => new ConflictException("文件或原上传会话在内容冻结期间已变化"));
+              if (!knowledgeInput) await this.assertBusinessReference(tenantId, currentAsset.businessType, currentAsset.businessId ?? "", owner?.workspaceId, tx);
+            }
+            if (knowledgeInput) {
+              await this.authorizeKnowledgeUpload(tenantId, knowledgeInput, owner);
+              const [latestAsset, latestSession] = await Promise.all([
+                tx.fileAsset.findFirst({ where: { id: currentAsset.id, tenantId } }),
+                tx.fileUploadSession.findFirst({ where: { id: currentSession.id, tenantId } })
+              ]);
+              if (JSON.stringify(latestAsset) !== JSON.stringify(currentAsset) || JSON.stringify(latestSession) !== JSON.stringify(currentSession))
+                throw new ConflictException("知识上传绑定在读取正文后已变化");
+            }
+          }
+        });
+      },
+      afterComplete: async (snapshot, originallyCompleted) => {
+        if (!knowledgeInput) return;
+        if (!originallyCompleted) await this.authorizeKnowledgeUpload(tenantId, knowledgeInput, owner);
+        await this.assertKnowledgeBinding(tenantId, snapshot.asset.id, owner!, owner?.knowledgeRevision ? {
+          documentVersion: owner.knowledgeRevision.targetVersion, expectedRevision: owner.knowledgeRevision.expectedRevision } : undefined);
       }
-      if (knowledgeInput) {
-        await this.authorizeKnowledgeUpload(tenantId, knowledgeInput, owner);
-        const [currentAsset, currentSession] = await Promise.all([
-          tx.fileAsset.findFirst({ where: { id: asset.id, tenantId } }),
-          tx.fileUploadSession.findFirst({ where: { id: session.id, tenantId } })
-        ]);
-        const stable = (row: unknown) => JSON.stringify(row);
-        if (stable(currentAsset) !== stable(asset) || stable(currentSession) !== stable(session))
-          throw new ConflictException('知识上传绑定在读取正文后已变化');
-      }
-      const sessionClaim = await tx.fileUploadSession.updateMany({
-        where: { id: session.id, tenantId, status: frozen ? "freeze_pending" : "pending_upload",
-          ...(knowledgeInput || frozen ? { updatedAt: session.updatedAt, fileAssetId: asset.id,
-            provider: asset.storageProvider, storageKey: asset.storageKey } : {}) },
-        data: { status: "completed", completedAt: new Date(), failureReason: null,
-          ...(frozen ? { storageKey: frozen.storageKey, cleanupError: COMPLETED_STAGING_PENDING } : {}) }
-      });
-      if (sessionClaim.count !== 1) throw new ConflictException("上传会话已失效，请重新上传");
-      const assetClaim = await tx.fileAsset.updateMany({
-        where: { id: asset.id, tenantId, status: "pending_upload",
-          ...(knowledgeInput || frozen ? { updatedAt: asset.updatedAt, storageProvider: asset.storageProvider,
-            storageKey: asset.storageKey, uploadedBy: asset.uploadedBy } : {}) },
-        data: { status: "active", metadata: metadata as Prisma.InputJsonValue,
-          ...(frozen ? { storageKey: frozen.storageKey, checksum: frozen.checksum } : {}) }
-      });
-      if (assetClaim.count !== 1) throw new ConflictException("上传文件已失效，请重新上传");
-      return tx.fileAsset.findUniqueOrThrow({ where: { id: asset.id } });
     });
-    if (knowledgeInput) {
-      await this.authorizeKnowledgeUpload(tenantId, knowledgeInput, owner);
-      await this.assertKnowledgeBinding(tenantId, asset.id, owner!, owner?.knowledgeRevision ? {
-        documentVersion: owner.knowledgeRevision.targetVersion, expectedRevision: owner.knowledgeRevision.expectedRevision } : undefined);
-    }
     return this.assetSummary(updated);
   }
 
@@ -802,60 +701,40 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
   /** Only an acknowledged original claim can dispatch DELETE. The worker's
    * system authority is separate from HTTP Auth; neither can replace the other.
    * Result CAS and an already-admitted HEAD never re-enter new business admission. */
-  private cleanupForTenant(tenantId: string, worker = false) {
+  private cleanupForTenant(tenantId: string, worker = false,
+    deletion?: { fileAssetId: string; owner?: FileBusinessOwner<Revision> }) {
     const prisma = this.prisma;
     const authority = worker ? this.native.cleanupAuthority : undefined;
-    const stable = (value: unknown) => requestFingerprint(JSON.parse(JSON.stringify(value)));
-    const changed = () => new ConflictException("原文件清理占用、对象或运输依据已变化");
-    const key = (boundary: RentalFileCleanupBoundary) => `${boundary.operation}:${boundary.asset.id}:${boundary.session?.id ?? ""}`;
-    const content = (boundary: RentalFileCleanupBoundary) => ({ asset: boundary.asset, ...(boundary.session ? { session: boundary.session } : {}) });
-    // Private to one cleanup invocation. A caller string cannot manufacture a
-    // dispatch receipt, and a lost transaction acknowledgement cannot populate it.
-    const receipts = new Map<string, { method: "DELETE" | "HEAD"; hash: string }>();
-    const read = async (tx: Prisma.TransactionClient, boundary: RentalFileCleanupBoundary) => {
-      const asset = await tx.fileAsset.findFirst({ where: { id: boundary.asset.id, tenantId } });
-      if (!asset) throw changed();
-      if (!boundary.session) return { asset };
-      const rows = await tx.fileUploadSession.findMany({ where: { id: boundary.session.id, tenantId }, orderBy: { expiresAt: "asc" }, take: 2 });
-      if (rows.length !== 1) throw changed();
-      return { asset, session: rows[0] };
-    };
-    const lockSnapshot = async (tx: Prisma.TransactionClient, boundary: RentalFileCleanupBoundary, write = false) => {
-      if (boundary.asset.tenantId !== tenantId || boundary.session && boundary.session.tenantId !== tenantId) throw changed();
-      // Keep the original upload freeze/completion order: Tenant/Core first,
-      // then Session, then File. Result-only closure locks just its original rows.
-      if (boundary.session) {
-        const rows = await tx.$queryRaw<Array<{ id: string }>>(prismaRuntime.sql`
-          SELECT id FROM file_upload_sessions WHERE tenantId=${tenantId} AND id=${boundary.session.id}
-          ${write ? prismaRuntime.sql`FOR UPDATE` : prismaRuntime.sql`LOCK IN SHARE MODE`}`);
-        if (rows.length !== 1 || rows[0].id !== boundary.session.id) throw changed();
+    const transactions = createOriginalFileCleanupTransactions<Prisma.TransactionClient>(tenantId, {
+      transaction: work => prisma.$transaction(work, {
+        isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted
+      }),
+      authorize: async (tx, boundary, beforeFileLocks) => {
+        if (authority) {
+          await authority.assert(tx, boundary, beforeFileLocks);
+        } else {
+          await lockRentalBusinessTenant(tx, tenantId);
+          if (deletion) {
+            const asset = boundary.asset;
+            if (boundary.operation !== "pending_delete" || asset.id !== deletion.fileAssetId
+              || deletion.owner && !this.matchesOwner(asset, deletion.owner)) {
+              throw new ConflictException("原删除文件业务归属已变化");
+            }
+            await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", deletion.owner?.workspaceId, tx);
+          }
+          await beforeFileLocks?.();
+        }
+      },
+      assertConfiguration: (tx, config) => this.integrations.assertEnabledInTransaction(
+        tx, tenantId, "file", config.provider, { configRevision: config.revision, requireLiveTest: false }
+      ),
+      assertObjectBinding: (boundary, request) => {
+        const metadata = boundary.asset.metadata as JsonRecord | null;
+        if ((authority || deletion) && metadata?.storageLocationHash !== fileStorageLocationHash(request.config)) {
+          throw new ConflictException("原文件清理占用、对象或运输依据已变化");
+        }
       }
-      const assets = await tx.$queryRaw<Array<{ id: string }>>(prismaRuntime.sql`
-        SELECT id FROM FileAsset WHERE tenantId=${tenantId} AND id=${boundary.asset.id}
-        ${write ? prismaRuntime.sql`FOR UPDATE` : prismaRuntime.sql`LOCK IN SHARE MODE`}`);
-      if (assets.length !== 1 || assets[0].id !== boundary.asset.id || stable(await read(tx, boundary)) !== stable(content(boundary))) throw changed();
-    };
-    const authorize = async (tx: Prisma.TransactionClient, boundary: RentalFileCleanupBoundary, beforeFileLocks?: () => Promise<void>) => {
-      if (authority) await authority.assert(tx, boundary, beforeFileLocks);
-      else { await lockRentalBusinessTenant(tx, tenantId); await beforeFileLocks?.(); }
-    };
-    const original = (boundary: RentalFileCleanupBoundary) => {
-      const receipt = receipts.get(key(boundary));
-      if (!receipt || receipt.hash !== stable(content(boundary))) throw changed();
-      return receipt;
-    };
-    const transaction = async <T>(work: (tx: Prisma.TransactionClient) => Promise<T>, value: RentalFileCleanupBoundary) => {
-      const boundary = structuredClone(value);
-      const receipt = ["prepare", "result"].includes(boundary.phase) ? original(boundary) : undefined;
-      const committed = await prisma.$transaction(async tx => {
-        if (!receipt) await authorize(tx, boundary);
-        await lockSnapshot(tx, boundary, true);
-        const result = await work(tx);
-        return { result, hash: stable(await read(tx, boundary)) };
-      }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
-      receipts.set(key(boundary), { method: receipt?.method ?? (boundary.phase === "claim" ? "DELETE" : "HEAD"), hash: committed.hash });
-      return committed.result;
-    };
+    });
     const store: FileCleanupTransaction = {
       fileAsset: {
         findFirst: input => prisma.fileAsset.findFirst(input),
@@ -872,33 +751,14 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
     };
     return new FileStorageCleanup<Prisma.TransactionClient>({
       store,
-      transaction,
-      resultTransaction: transaction,
-      runtimeConfig: (currentTenant, provider) => this.integrations.runtimeConfig("file", currentTenant, provider as never, { requireLiveTest: false }),
+      ...transactions,
+      runtimeConfig: (currentTenant, provider) => this.integrations.runtimeConfig(
+        "file", currentTenant, provider as never, { requireLiveTest: false }
+      ),
       excludedUploadScene: RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE,
       deleteObject: (config, storageKey, at) => this.deleteObject(config, storageKey, at),
       presign: (config, method, storageKey, mimeType, expiresAt) => this.presign(config, method, storageKey, mimeType, expiresAt),
       objectRequest: (url, init) => this.objectRequest(url, init),
-      beforeObjectRequest: async (value, request) => {
-        const boundary = structuredClone(value), { asset } = boundary;
-        const receipt = original(boundary);
-        if (receipt.method !== request.method) throw changed();
-        const metadata = asset.metadata as JsonRecord | null;
-        const storageKey = boundary.operation === "completed_staging" ? `${metadata?.stagingStorageKey}.pending-upload`
-          : boundary.operation === "expired_upload" && metadata?.fileUploadVersion === 2 ? `${asset.storageKey}.pending-upload` : asset.storageKey;
-        if (request.storageKey !== storageKey || request.config.provider !== asset.storageProvider
-          || authority && metadata?.storageLocationHash !== fileStorageLocationHash(request.config)) throw changed();
-        await prisma.$transaction(async tx => {
-          // DELETE is checked immediately before its one transport attempt.
-          // An unknown observer was admitted as recovery at its original claim.
-          // HEAD and the result after transport retain that exact original receipt.
-          const configuration = () => this.integrations.assertEnabledInTransaction(tx, tenantId, "file", request.config.provider,
-            { configRevision: request.config.revision, requireLiveTest: false });
-          if (request.method === "DELETE") await authorize(tx, boundary, configuration);
-          else await configuration();
-          await lockSnapshot(tx, boundary);
-        }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
-      },
       ...(this.operationLog ? { recordAudit: (input: OperationLogInput) => this.operationLog!.record(input) } : {})
     });
   }
@@ -954,15 +814,7 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
   private async failSession(tenantId: string, sessionId: string, reason: string, resultOnly = false) {
     await this.prisma.$transaction(async tx => {
       if (!resultOnly) await lockRentalBusinessTenant(tx, tenantId);
-      const session = await tx.fileUploadSession.findFirst({ where: { id: sessionId, tenantId } });
-      if (!session || session.status !== "pending_upload") return;
-      const claimed = await tx.fileUploadSession.updateMany({ where: { id: sessionId, tenantId, status: "pending_upload",
-        updatedAt: session.updatedAt, fileAssetId: session.fileAssetId, storageKey: session.storageKey },
-        data: { status: "failed", failureReason: reason, cleanupError: "待执行过期对象清理" } });
-      // 迟到的运输失败不能把另一完成者已占用的冻结文件改成failed。
-      if (claimed.count !== 1) return;
-      await tx.fileAsset.updateMany({ where: { id: session.fileAssetId, tenantId, storageKey: session.storageKey,
-        status: "pending_upload" }, data: { status: "failed" } });
+      await failOriginalFileUpload(tx, tenantId, sessionId, reason);
     });
   }
   constructor(private readonly prisma: RentalFileRuntimeStorage,

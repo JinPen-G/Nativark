@@ -1,5 +1,5 @@
-/** 原每租户文件清理内核，无定时器、租户发现或新的任务执行者。
- * DELETE前持久占用，失应答后仅HEAD原键；冻结中的原操作保持不变。 */
+/** 原每租户文件删除和清理内核，无定时器、租户发现或新的任务执行者。
+ * delete_queued只记录尚未派发的意图，确认占用后DELETE一次。旧pending及失应答只HEAD原键。 */
 import { ConflictException, ServiceUnavailableException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import type { FileUploadCleanupSummary } from "@rental-os/platform-contracts/files";
@@ -194,7 +194,7 @@ export class FileStorageCleanup<Transaction extends FileCleanupTransaction> {
         const staging = metadata?.stagingStorageKey;
         if (!asset || !config || row.provider === "local_mock" || config.provider !== row.provider
           || asset.storageProvider !== row.provider || asset.storageKey !== row.storageKey
-          || !["active", "delete_pending", "delete_in_progress", "deleted"].includes(asset.status)
+          || !["active", "delete_queued", "delete_pending", "delete_in_progress", "deleted"].includes(asset.status)
           || !row.completedAt || typeof staging !== "string" || !frozenFileContentHash(asset, config)) {
           throw new ConflictException("已完成上传缺少原临时对象与存储位置依据，不能清理");
         }
@@ -336,29 +336,69 @@ export class FileStorageCleanup<Transaction extends FileCleanupTransaction> {
     return { scanned: rows.length + completed.scanned, invalidated, deletedObjects, cleanupPending, sessionIds };
   }
 
+  /** 所属业务先授权原文件，排队提交失应答不会派发。恢复沿相同文件和提供者处理。 */
+  async deleteFileAsset(tenantId: string, value: StoredFileAsset) {
+    let asset = structuredClone(value);
+    if (!tenantId || asset.tenantId !== tenantId || this.isReservedScene(asset.uploadScene)
+      || !["active", "delete_queued", "delete_pending", "delete_in_progress", "deleted"].includes(asset.status)) {
+      throw new ConflictException("原删除文件或当前业务依据不可用");
+    }
+    if (asset.status === "deleted") return { fileAssetId: asset.id, status: "deleted" as const };
+    if (asset.status === "active") {
+      const original = asset;
+      asset = await this.participants.transaction(async tx => {
+        const queued = await tx.fileAsset.updateMany({
+          where: { id: original.id, tenantId, status: "active", updatedAt: original.updatedAt,
+            storageKey: original.storageKey, storageProvider: original.storageProvider, uploadScene: original.uploadScene },
+          data: { status: "delete_queued", updatedAt: nextVersion(original.updatedAt, new Date()) }
+        });
+        if (queued.count !== 1) throw changedUpload();
+        const current = await tx.fileAsset.findFirst({ where: { id: original.id, tenantId } });
+        if (!current || current.status !== "delete_queued"
+          || cleanupSnapshotHash({ ...current, status: original.status, updatedAt: original.updatedAt }) !== cleanupSnapshotHash(original)) {
+          throw changedUpload();
+        }
+        return structuredClone(current);
+      }, { operation: "pending_delete", phase: "claim", asset: original });
+    }
+    const result = await this.deleteFileAssets(tenantId, [asset]);
+    if (result.deleted !== 1) throw new ServiceUnavailableException("原文件删除结果尚未证实，请核对原文件");
+    return { fileAssetId: asset.id, status: "deleted" as const };
+  }
+
   async cleanupPendingFileAssetDeletes(tenantId: string, limit = 50) {
     if (!tenantId) throw new ConflictException("文件清理缺少当前租户");
     const rows = structuredClone(await this.participants.store.fileAsset.findMany({
-      where: { tenantId, status: { in: ["delete_pending", "delete_in_progress"] }, ...this.reservedSceneFilter() },
+      where: { tenantId, status: { in: ["delete_queued", "delete_pending", "delete_in_progress"] }, ...this.reservedSceneFilter() },
       orderBy: { updatedAt: "asc" },
       take: Math.max(1, Math.min(limit, 100))
     }));
+    const result = await this.deleteFileAssets(tenantId, rows);
+    if (result.deleted || result.pending) {
+      await this.participants.recordAudit?.({ tenantId, action: "file.delete.cleanup", targetType: "file",
+        detail: "核对待删除业务文件", metadata: result });
+    }
+    return result;
+  }
+
+  private async deleteFileAssets(tenantId: string, rows: StoredFileAsset[]) {
     let deleted = 0;
     let pending = 0;
     for (const row of rows) {
       if (this.isReservedScene(row.uploadScene)) continue;
-      const ownsDispatch = row.status === "delete_pending";
+      // 旧delete_pending混合了未派发与失应答来源，不能据状态或缺日志取得DELETE权。
+      const ownsDispatch = row.status === "delete_queued";
       let claim: StoredFileAsset | undefined;
       try { claim = ownsDispatch ? await this.participants.transaction(async tx => {
         const claimed = await tx.fileAsset.updateMany({
-          where: { id: row.id, tenantId, status: "delete_pending", updatedAt: row.updatedAt,
+          where: { id: row.id, tenantId, status: "delete_queued", updatedAt: row.updatedAt,
             storageKey: row.storageKey, storageProvider: row.storageProvider, uploadScene: row.uploadScene },
-          data: { status: "delete_in_progress" }
+          data: { status: "delete_in_progress", updatedAt: nextVersion(row.updatedAt, new Date()) }
         });
         if (claimed.count !== 1) return;
         const current = await tx.fileAsset.findFirst({ where: { id: row.id, tenantId } });
         if (!current || current.status !== "delete_in_progress"
-          || requestFingerprint({ ...current, status: row.status, updatedAt: row.updatedAt }) !== requestFingerprint(row))
+          || cleanupSnapshotHash({ ...current, status: row.status, updatedAt: row.updatedAt }) !== cleanupSnapshotHash(row))
           throw new ConflictException("原文件删除占用依据已变化");
         return structuredClone(current);
       }, { operation: "pending_delete", phase: "claim", asset: row }) : await this.participants.transaction(async tx => {
@@ -368,7 +408,7 @@ export class FileStorageCleanup<Transaction extends FileCleanupTransaction> {
       }, { operation: "pending_delete", phase: "observe", asset: row }); }
       catch { pending += 1; continue; }
       if (!claim) continue;
-      const receipt = { id: claim.id, tenantId, status: "delete_in_progress", updatedAt: claim.updatedAt,
+      const receipt = { id: claim.id, tenantId, status: claim.status, updatedAt: claim.updatedAt,
         storageKey: claim.storageKey, storageProvider: claim.storageProvider, uploadScene: claim.uploadScene };
       let dispatched = false;
       try {
@@ -377,10 +417,10 @@ export class FileStorageCleanup<Transaction extends FileCleanupTransaction> {
           if (!config || config.provider !== claim.storageProvider) throw new ServiceUnavailableException("原文件对象存储配置不可用");
           let absent: boolean;
           if (ownsDispatch) {
-            // 只有确认提交本次pending占用的调用方能派发；Boolean失败不证明请求未执行。
-            dispatched = true;
+            // 只有确认提交本次排队占用的调用方能派发，Boolean失败不证明请求未执行。
             await this.participants.beforeObjectRequest?.({ operation: "pending_delete", phase: "prepare", asset: claim },
               { method: "DELETE", config, storageKey: claim.storageKey });
+            dispatched = true;
             absent = await this.participants.deleteObject(config, claim.storageKey, new Date());
           } else {
             // 同时运行、重启和超时都不能取得第二次DELETE权，只观察原提供方和原对象键。
@@ -400,15 +440,12 @@ export class FileStorageCleanup<Transaction extends FileCleanupTransaction> {
         // 配置读取等派发前失败可释放本占用；开始DELETE或仅观察原结果后始终保留unknown。
         if (ownsDispatch && !dispatched) {
           try {
-            await this.result(tx => Promise.resolve(tx.fileAsset.updateMany({ where: receipt, data: { status: "delete_pending" } })),
+            await this.result(tx => Promise.resolve(tx.fileAsset.updateMany({ where: receipt, data: { status: "delete_queued" } })),
               { operation: "pending_delete", phase: "result", asset: claim });
           } catch { /* A conflicting/lost release stays an original pending observation, never a fresh DELETE. */ }
         }
         pending += 1;
       }
-    }
-    if (deleted || pending) {
-      await this.participants.recordAudit?.({ tenantId, action: "file.delete.cleanup", targetType: "file", detail: "核对待删除业务文件", metadata: { scanned: rows.length, deleted, pending } });
     }
     return { scanned: rows.length, deleted, pending };
   }

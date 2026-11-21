@@ -6,6 +6,7 @@ import { fileStorageLocationHash } from "@rental-os/platform-contracts/file-cont
 import { requestFingerprint } from "@rental-os/platform-contracts/request-fingerprint";
 import type { TenantIntegrationRuntimeConfig } from "../integrations/tenant-integration.service";
 import type { PlatformJsonValue } from "../platform/platform-auth-data-store";
+import { MAX_FILE_BYTES } from "./file-storage-primitives";
 
 export interface FileContentFreezeAsset {
   id: string;
@@ -53,6 +54,8 @@ export interface FileContentFreezeParticipants<Asset, Session, Transaction exten
   assertConfiguration(transaction: Transaction, config: TenantIntegrationRuntimeConfig): Promise<void>;
   readContent(config: TenantIntegrationRuntimeConfig, storageKey: string, mimeType: string, sizeBytes: number): Promise<Buffer>;
   writeContent(config: TenantIntegrationRuntimeConfig, storageKey: string, mimeType: string, bytes: Buffer): Promise<Response>;
+  /** 原占用提交确认后、唯一PUT派发前复验，拒绝时保留原目标，恢复只读取原结果。 */
+  beforeWrite?(snapshot: { asset: Asset; session: Session }, config: TenantIntegrationRuntimeConfig): Promise<void>;
   /** 已有知识等专用字节来源由所属授权链提供。普通文件沿原暂存对象读取。 */
   readPendingContent?(): Promise<{ bytes: Uint8Array; contentHash: string }>;
 }
@@ -97,6 +100,9 @@ export async function freezeFileUploadContent<
     const supplied = participants.readPendingContent ? await participants.readPendingContent() : undefined;
     const bytes = supplied ? Buffer.from(supplied.bytes)
       : await participants.readContent(config, `${session.storageKey}.pending-upload`, asset.mimeType, asset.sizeBytes);
+    if (bytes.length !== asset.sizeBytes || bytes.length < 1 || bytes.length > MAX_FILE_BYTES) {
+      throw new ConflictException("原上传字节与声明大小不一致");
+    }
     checksum = createHash("sha256").update(bytes).digest("hex");
     if (supplied && supplied.contentHash !== checksum) throw new ConflictException("知识原字节与摘要不一致");
     if (input.checksum?.trim() && input.checksum.trim() !== checksum)
@@ -111,7 +117,10 @@ export async function freezeFileUploadContent<
         tx.fileAsset.findFirst({ where: { id: asset.id, tenantId } }),
         tx.fileUploadSession.findFirst({ where: { id: session.id, tenantId } })
       ]);
-      if (requestFingerprint(currentAsset) !== requestFingerprint(asset) || requestFingerprint(currentSession) !== requestFingerprint(session)
+      // Date值须先按JSON语义保留，占用前复核原有效期和日期版本。
+      const expectedFingerprint = requestFingerprint(JSON.parse(JSON.stringify({ asset, session })));
+      const currentFingerprint = requestFingerprint(JSON.parse(JSON.stringify({ asset: currentAsset, session: currentSession })));
+      if (currentFingerprint !== expectedFingerprint
         || session.expiresAt.getTime() <= Date.now()) throw new ConflictException("原上传会话在内容读取期间已变化");
       const sessionClaim = await tx.fileUploadSession.updateMany({
         where: { id: session.id, tenantId, status: "pending_upload", updatedAt: session.updatedAt, storageKey: session.storageKey, fileAssetId: asset.id },
@@ -130,6 +139,7 @@ export async function freezeFileUploadContent<
     if (!claimed.session) throw new ConflictException("原内容冻结会话缺失");
     asset = structuredClone(claimed.asset);
     session = structuredClone(claimed.session);
+    await participants.beforeWrite?.({ asset: structuredClone(asset), session: structuredClone(session) }, config);
     const response = await participants.writeContent(config, destination, asset.mimeType, bytes);
     if (!response.ok) throw new ServiceUnavailableException("正式文件存储未确认写入，只能核对原内容冻结结果");
   }

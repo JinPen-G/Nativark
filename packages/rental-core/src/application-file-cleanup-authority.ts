@@ -148,12 +148,12 @@ export function createRentalFileCleanupAuthority(input: RentalFileCleanupAuthori
     if (boundary.operation !== "pending_delete" && (!session || session.tenantId !== tenantId || session.fileAssetId !== asset.id
       || session.storageKey !== asset.storageKey || session.provider !== asset.storageProvider)) throw denied();
     // An operation name cannot promote an active file into a deletion target.
-    if (boundary.operation === "pending_delete" && !["delete_pending", "delete_in_progress"].includes(asset.status)
+    if (boundary.operation === "pending_delete" && !["delete_queued", "delete_pending", "delete_in_progress"].includes(asset.status)
       || boundary.operation === "expired_upload" && (!session || session.completedAt !== null
         || session.expiresAt.getTime() > Date.now() || !["pending_upload", "failed"].includes(asset.status)
         || !["pending_upload", "failed", "cleanup_in_progress"].includes(session.status))
       || boundary.operation === "completed_staging" && (!session || session.status !== "completed" || !session.completedAt
-        || !["active", "delete_pending", "delete_in_progress", "deleted"].includes(asset.status))) throw denied();
+        || !["active", "delete_queued", "delete_pending", "delete_in_progress", "deleted"].includes(asset.status))) throw denied();
     const tenants = await tx.$queryRaw<Array<{ id: string; status: string }>>(prismaRuntime.sql`
       SELECT id, status FROM Tenant WHERE id=${tenantId} LOCK IN SHARE MODE`);
     if (tenants.length !== 1 || tenants[0].id !== tenantId || !active(tenants[0].status)) throw denied();

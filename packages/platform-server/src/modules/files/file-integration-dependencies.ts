@@ -23,7 +23,7 @@ export async function assertFileProviderCanDisable(
     transaction.$queryRaw<DependencyRow[]>(sqltag`
       SELECT id FROM \`FileAsset\`
        WHERE tenantId = ${tenantId} AND storageProvider = ${provider}
-         AND status IN ('active', 'pending_upload', 'delete_pending', 'delete_in_progress')
+         AND status IN ('active', 'pending_upload', 'delete_queued', 'delete_pending', 'delete_in_progress')
        LIMIT 1`),
     transaction.$queryRaw<DependencyRow[]>(sqltag`
       SELECT id FROM file_upload_sessions
