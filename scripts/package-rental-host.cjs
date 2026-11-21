@@ -11,6 +11,7 @@ const { selectedCompilerOptions } = require('./build-selected-prisma.cjs');
 const { compileRentalPlatformSource, requireMatchingPublicRuntime, publicDirectories } = require('./rental-platform-build.cjs');
 const { selectWorkspaces, projectHostLock, lockedDependency, hostDirectory } = require('./rental-host-lock.cjs');
 const root = path.resolve(__dirname, '..');
+const targetNodeVersion = '24.13.0';
 const json = value => Buffer.from(JSON.stringify(value, null, 2) + '\n');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const text = (files, file) => {
@@ -193,7 +194,7 @@ function checkRuntimeClosure(files, workspaces, lock, entry, ts, options = {}) {
 
 function dockerfile(mode, entry) {
   return `# 从本打包上下文构建；不复制作者 node_modules、Windows 引擎或环境文件。\n` +
-    `FROM node:24.13.0-bookworm-slim AS base\n` +
+    `FROM node:${targetNodeVersion}-bookworm-slim AS base\n` +
     `RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates openssl && rm -rf /var/lib/apt/lists/*\n` +
     `WORKDIR /app\nFROM base AS clients\nCOPY . .\n` +
     `RUN npm ci --include=dev --ignore-scripts --no-audit --no-fund\n` +
@@ -233,6 +234,8 @@ function createRentalHostContext(input) {
   const host = input.host ?? 'rental', directory = rentalHostDirectory(host), multi = host === 'example-multi-core';
   if (!['enabled', 'disabled'].includes(aiMode)) throw Error('须明确选择宿主 AI 模式');
   const lock = api.CoreDeploymentLockSchema.parse(JSON.parse(text(deploymentFiles, 'core.deployment.lock.json')));
+  if (lock.platform.versions.node !== targetNodeVersion || lock.platform.versions.contract !== api.CORE_CONTRACT_VERSION)
+    throw Error(`Rental 宿主锁须与实际合同和目标 Node ${targetNodeVersion} 一致`);
   const rentalPin = lock.cores.find(pin => pin.manifest.id === 'rental');
   const ticketsPin = lock.cores.find(pin => pin.manifest.id === 'example-tickets');
   if (!rentalPin || lock.cores.length !== (multi ? 2 : 1) || multi !== Boolean(ticketsFiles)
