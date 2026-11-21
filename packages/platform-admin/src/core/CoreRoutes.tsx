@@ -21,9 +21,10 @@ export interface CoreRouteOptions {
 export type CoreRouteComponent = ComponentType<{ routeParams?: Readonly<Record<string, string>> }>;
 type Pages = ReadonlyMap<string, CoreRegisteredPage<CoreRouteComponent>>;
 
-/** 在原Routes内部直接展开返回的Route元素；注册表由受控组合创建，身份/容器变化时重新取当前参数。 */
+/** 在原Routes内部展开登记页面，使用Core键固定全局路由ID，避免Data Router合并时与宿主自动ID冲突。
+ * 注册表由受控组合创建，身份/容器变化时重新取当前参数。 */
 export function createCoreRouteElements(pages: Pages, options: CoreRouteOptions) {
-  return [...pages.values()].map(page => <Route key={page.key} path={page.path}
+  return [...pages.values()].map(page => <Route key={page.key} id={`core:${page.key}`} path={page.path}
     element={<RegisteredCoreRoute page={page} pages={pages} options={options} />} />);
 }
 

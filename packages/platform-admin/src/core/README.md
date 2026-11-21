@@ -166,7 +166,7 @@ const readOriginal = () => setup.reconcile();
 
 ## 宿主只装配一次
 
-默认宿主使用上面的公共应用工厂，它负责同一注册表、会话、壳和路由。已有完整宿主需保留自己的Router时，才在已认证Routes中展开 `createCoreRouteElements(pages, { brandName, getContainer? })`，沿同一AdminRuntime与WorkspaceHeaderProvider提供当前身份和页头。新Core仍只加自身贡献到组合。[路由适配](CoreRoutes.tsx)
+默认宿主使用上面的公共应用工厂，它负责同一注册表、会话、壳和路由。已有完整宿主需保留自己的Router时，才在已认证Routes中展开 `createCoreRouteElements(pages, { brandName, getContainer? })`，沿同一AdminRuntime与WorkspaceHeaderProvider提供当前身份和页头。新Core仍只加自身贡献到组合。路由ID按带Core前缀的登记键生成，组合到Data Router时保持全局唯一。[路由适配](CoreRoutes.tsx)
 
 ```tsx
 // pages是受控registerCoreAdminPages的成功结果；放在原已认证Routes内部。
