@@ -124,6 +124,7 @@ Rental Core 是首个业务示范，提供商品、资产、库存、报价、�
 | `packages/shared` | 既有各端合同兼容总出口，公共和Rental单源分别来自各自包 | [正式出口](packages/shared/src/index.ts)、[包配置](packages/shared/package.json) |
 | `packages/ui-arc` | 组件源码、来源与许可 | [组件说明](packages/ui-arc/README.md) |
 | `packages/mcp-server` | 受控 MCP 传输和工具适配 | [包说明](packages/mcp-server/README.md) |
+| `packages/rental-mcp-host` | 显式选装的 Rental OAuth、Web 控制面、原读取与事务审计参加者，旧组合路径消费相同实现 | [原宿主接入](packages/rental-mcp-host/README.md) · [独立启动](apps/rental-api/src/mcp-bootstrap.ts) |
 | `clients/harness-plugin` | Harness 客户端对标准 MCP 的消费 | [插件说明](clients/harness-plugin/README.md) |
 | `apps/api/src/modules/rental-core` | 旧组合宿主的兼容入口，转接 Rental 包中的同一领域实现 | [业务包](packages/rental-core/README.md) |
 | `apps/tenant-website`、`apps/enterprise-portal` | Rental 客户网站与企业客户门户 | [客户网站](apps/tenant-website/README.md)、[企业门户](apps/enterprise-portal/README.md) |

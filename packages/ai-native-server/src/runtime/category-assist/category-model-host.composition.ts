@@ -28,11 +28,11 @@ import { createAiTaskRunnerOutcomePort } from '../runner/ai-task-runner-outcome-
 import { PrismaTaskRecoverySnapshotRepository } from '../runner/prisma-task-recovery-snapshot.repository';
 import { PrismaTaskInputRepository } from '../task-input/prisma-task-input.repository';
 import { PrismaTaskApplication } from '../runner/prisma-task-application';
-import { withAiTaskHeldPreparationDefinition } from '../runner/ai-task-runner.service';
+import { withAiTaskHeldPreparationDefinition } from '@rental-os/platform-server/ai-runtime';
 import { TASK_TEXT_MODEL_TOOL, taskModelIdentity, taskModelMaterialSchema, parseTaskModelInput, taskModelFingerprint } from '../model-input/task-model-input';
 import { PrismaTaskPlanInputSource } from '../runner/prisma-task-plan-input.source';
 import { aiTaskRunPlanSchema } from '../runner/prisma-task-run-evidence.repository';
-import type { AiTaskRunnerClock } from '../runner/ai-task-runner.ports';
+import type { AiTaskRunnerClock } from '@rental-os/platform-server/ai-runtime';
 import { isGatewayResult } from '../gateway-contract-validation';
 import type { GatewayCapacityPort } from '../gateway-capacity.ports';
 import type { ModelJsonTransport } from '../chat-completions.adapter';

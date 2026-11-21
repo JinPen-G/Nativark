@@ -22,8 +22,8 @@ import { aiTaskRunPlanSchema, aiTaskRunnerLimitsSchema } from '../runner/prisma-
 import { taskExecutionPhaseStore } from '../runner/task-execution-phase.store';
 import { waitingPayloadSchema } from '../runner/prisma-task-confirmation-checkpoint.source';
 import { PrismaTaskApplication, waitForTaskApplicationDependency } from '../runner/prisma-task-application';
-import { AiTaskRunnerError } from '../runner/ai-task-runner.service';
-import type { AiTaskRunnerClock } from '../runner/ai-task-runner.ports';
+import { AiTaskRunnerError } from '@rental-os/platform-server/ai-runtime';
+import type { AiTaskRunnerClock } from '@rental-os/platform-server/ai-runtime';
 import type { AiTaskActionPolicyOperation, AiTaskActionPolicyMutationResult } from '../prisma-task-action-policy.repository';
 import { ApprovedSettingsTaskAuthority, settingsTransactionDb, type ApprovedSettingsApplicationDependencies } from './approved-settings-task.authority';
 import { PrismaApprovedSettingsParticipant } from './prisma-approved-settings.participant';

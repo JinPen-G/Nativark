@@ -2,7 +2,7 @@
  * before its first read policy is required. This only issues bounded policies;
  * the original settings host still owns publication, leases and execution. */
 import { AiTaskRepositoryError } from '../ai-task.repository';
-import { AiTaskRunnerError, callAiTaskRunnerDependency } from '../runner/ai-task-runner.service';
+import { AiTaskRunnerError, callAiTaskRunnerDependency } from '@rental-os/platform-server/ai-runtime';
 import type { ApprovedSettingsApplicationDependencies } from './approved-settings-task.authority';
 import { composeSettingsStartAdmission, type SettingsStartAdmissionDependencies } from './settings-start-admission.application';
 

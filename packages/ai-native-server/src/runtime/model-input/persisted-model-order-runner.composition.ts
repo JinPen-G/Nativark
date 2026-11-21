@@ -16,7 +16,7 @@ import { composeCurrentAuthorizedPersistentTaskInputRunner } from '../runner/aut
 import { PrismaTaskStepEvidenceAuthority } from '../runner/prisma-task-step-evidence.authority';
 import { aiTaskRunPlanSchema, aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
 import type { AiTaskPlanEvidenceAuthority } from '../runner/prisma-task-run-evidence.repository';
-import { withAiTaskHeldPreparationWindow, withAiTaskHeldPreparationDefinition, inheritAiTaskHeldPreparation, type AiTaskHeldPreparation } from '../runner/ai-task-runner.service';
+import { withAiTaskHeldPreparationWindow, withAiTaskHeldPreparationDefinition, inheritAiTaskHeldPreparation, type AiTaskHeldPreparation } from '@rental-os/platform-server/ai-runtime';
 import { taskPreparationNonEffectChargeIds } from '../runner/prisma-task-run-preparation';
 import type { AiTaskRegisteredExecutor } from '../runner/prisma-task-measured-effects';
 import type { AiStepTransitionAuthority } from '../ai-step-transition.repository';

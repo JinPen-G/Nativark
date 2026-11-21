@@ -1,3 +1,5 @@
+import type { GatewayBudgetReserveRequest } from '@rental-os/platform-server/ai-gateway';
+export type { GatewayBudgetReserveRequest } from '@rental-os/platform-server/ai-gateway';
 import type { AiUsageAssociationDraft } from '@rental-os/shared';
 import { modelRequestSchema, type GatewayContext, type ModelUsage } from '../model-gateway.ports';
 import { BudgetError, type BudgetRecord } from './budget.ports';
@@ -21,12 +23,6 @@ export interface BudgetGatewayInvocationBinding {
 export type { PlatformGatewayContext } from '../model-gateway.ports';
 export type BudgetGatewayContext = GatewayContext;
 export { isPlatformGatewayContext } from '../model-gateway.ports';
-
-export interface GatewayBudgetReserveRequest {
-  callId: string; model: string; maxOutputTokens: number; intentHash: string;
-  /** Computed from the actual server adapter's generation serialization. */
-  countRequestHash?: string;
-}
 export interface BudgetGatewayBindingSource {
   resolveForReserve(context: Readonly<BudgetGatewayContext>, request: Readonly<GatewayBudgetReserveRequest>): Promise<BudgetGatewayInvocationBinding>;
   resolveForReservation(context: Readonly<BudgetGatewayContext>, reservationId: string): Promise<BudgetGatewayInvocationBinding>;

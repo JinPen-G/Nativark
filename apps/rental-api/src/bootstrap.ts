@@ -11,6 +11,11 @@ import { requestIdentityMiddleware } from "@rental-os/platform-server";
 import { createRentalStaffApiRouting } from "@rental-os/rental-core/staff-routing";
 import { AI_STAFF_INSPECTION_HTTP_DRAFT, AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT } from "@rental-os/shared";
 import type { createRentalHttpRequestScope } from "./http-request-scope";
+import { attachRentalBootstrapIngress, type RentalBootstrapIngress } from "./bootstrap-ingress";
+
+export interface RentalBootstrapExtension {
+  createIngress(application: NestExpressApplication): RentalBootstrapIngress | Promise<RentalBootstrapIngress>;
+}
 
 /** 与原宿主相同的完整 origin 约束；CORS 从不代替业务权限。 */
 export function rentalCorsOrigins(value = ""): Array<string | RegExp> {
@@ -48,23 +53,28 @@ export function readRentalStartupConfiguration<Mode extends "enabled" | "disable
 
 export async function bootstrapRental() {
   return bootstrapRentalComposition("disabled", async lock => {
-    const { RentalAppModule } = await import("./app.module");
+    const { RentalAppModule } = await import("./app.module.js");
     return RentalAppModule.register({ lock, aiMode: "disabled" });
   });
 }
 
 /** 同一 HTTP/生命周期实现，选择由源码入口固定。包路径、请求和环境不能加载任意模块。 */
 export async function bootstrapRentalComposition(aiMode: "enabled" | "disabled",
-  register: (lock: CoreDeploymentLock) => DynamicModule | Promise<DynamicModule>) {
+  register: (lock: CoreDeploymentLock) => DynamicModule | Promise<DynamicModule>,
+  extension?: RentalBootstrapExtension) {
   const settings = readRentalStartupConfiguration(process.env, aiMode);
   const stat = statSync(settings.lockPath);
   if (!stat.isFile() || stat.size > 8 * 1024 * 1024) throw new Error("Rental 部署锁须为不超过 8 MiB 的实际文件");
   const lock = CoreDeploymentLockSchema.parse(JSON.parse(readFileSync(settings.lockPath, "utf8")));
-  const { RENTAL_HTTP_REQUEST_SCOPE } = await import("./app.module");
+  const { RENTAL_HTTP_REQUEST_SCOPE } = await import("./app.module.js");
   // 注册全量原路由前核定各接点，失败发生在 Client 构造/连接/监听之前。
   const module = await register(lock);
   const app = await NestFactory.create<NestExpressApplication>(module, { rawBody: true });
   try {
+    // 选装入口先消费原始流，再进入 Nest 的 body parser、CORS 或业务中间件。
+    // 它与原请求使用同一模块实例，在 app.close / 进程信号时先于 Native 和 DB 排空。
+    const ingress = await extension?.createIngress(app);
+    if (ingress) attachRentalBootstrapIngress(app, ingress);
     if (settings.trustProxyHops > 0) app.set("trust proxy", settings.trustProxyHops);
     app.use(requestIdentityMiddleware);
     app.use(createRentalStaffApiRouting({ AI_STAFF_INSPECTION_HTTP_DRAFT, AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT }));
@@ -75,7 +85,7 @@ export async function bootstrapRentalComposition(aiMode: "enabled" | "disabled",
     app.setGlobalPrefix("api");
     app.enableCors({ credentials: true, origin: settings.origins });
     app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
-    app.enableShutdownHooks();
+    if (!ingress) app.enableShutdownHooks();
     await app.listen(settings.port);
     return app;
   } catch (error) {

@@ -19,7 +19,7 @@ import { RENTAL_OPENING_TERMINOLOGY_FIELDS } from './rental-adapters/rental-core
 import { AiTaskCurrentIdentityAuthority } from './task-current-identity.authority';
 import { AiScopeRepository } from './ai-scope.repository';
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from './ai-task.repository';
-import { AiTaskRunnerError } from './runner/ai-task-runner.service';
+import { AiTaskRunnerError } from '@rental-os/platform-server/ai-runtime';
 import { waitForTaskApplicationDependency, type AiTaskApplicationHost } from './runner/prisma-task-application';
 import { aiPersistedPlanToolsSchema } from './runner/prisma-task-plan-input.source';
 import { aiTaskRunnerLimitsSchema } from './runner/prisma-task-run-evidence.repository';

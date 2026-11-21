@@ -24,10 +24,10 @@ import type { CurrentPersistentTaskAuthorization } from '../runner/authorized-pe
 import { composePersistentTaskRunner } from '../runner/persistent-task-runner.composition';
 import { createAiTaskRunnerOutcomePort } from '../runner/ai-task-runner-outcome-adapter';
 import { AiTaskResultRepository } from '../runner/ai-task-result.repository';
-import { withAiTaskHeldPreparationDefinition, type AiTaskHeldPreparation } from '../runner/ai-task-runner.service';
+import { withAiTaskHeldPreparationDefinition, type AiTaskHeldPreparation } from '@rental-os/platform-server/ai-runtime';
 import { aiTaskRunPlanSchema } from '../runner/prisma-task-run-evidence.repository';
-import type { AiTaskRunnerClock, AiTaskRunnerClaimInput, AiTaskRunnerOutcome } from '../runner/ai-task-runner.ports';
-import type { AiTaskPreparationDefinition } from '../runner/task-run-preparation.ports';
+import type { AiTaskRunnerClock, AiTaskRunnerClaimInput, AiTaskRunnerOutcome } from '@rental-os/platform-server/ai-runtime';
+import type { AiTaskPreparationDefinition } from '@rental-os/platform-server/ai-runtime';
 import { readModelNonDispatchEvidence } from '../model-input/prisma-model-nondispatch.evidence';
 import { taskStepChargesValid } from '../runner/task-model-count-charge';
 import { AutomationTaskModelAuthority, automationTaskModelReferenceSchema, type AutomationTaskModelAuthorityDependencies,

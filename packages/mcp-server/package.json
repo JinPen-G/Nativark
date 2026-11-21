@@ -203,9 +203,20 @@
     "./conversation-list-read": {
       "types": "./dist/conversation-list-read.d.ts",
       "import": "./dist/conversation-list-read.js"
+    },
+    "./http-host": {
+      "types": "./dist/http-host.d.ts",
+      "import": "./dist/http-host.js"
     }
   },
-  "files": ["dist", "mysql-oauth-schema.sql", "mysql-read-budget-schema.sql", "mysql-catalog-goal-schema.sql", "mysql-catalog-goal-intent-schema.sql", "mysql-catalog-goal-adoption-schema.sql"],
+  "files": [
+    "dist",
+    "mysql-oauth-schema.sql",
+    "mysql-read-budget-schema.sql",
+    "mysql-catalog-goal-schema.sql",
+    "mysql-catalog-goal-intent-schema.sql",
+    "mysql-catalog-goal-adoption-schema.sql"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
@@ -217,7 +228,9 @@
     "@rental-os/shared": "0.1.0"
   },
   "peerDependenciesMeta": {
-    "@rental-os/shared": { "optional": true }
+    "@rental-os/shared": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/node": "22.20.1",
@@ -372,6 +385,9 @@
       ],
       "conversation-list-read": [
         "dist/conversation-list-read.d.ts"
+      ],
+      "http-host": [
+        "dist/http-host.d.ts"
       ]
     }
   }

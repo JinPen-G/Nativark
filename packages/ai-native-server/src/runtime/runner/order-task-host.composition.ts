@@ -17,8 +17,8 @@ import { aiTaskRunnerLimitsSchema, aiTaskRunPlanSchema, PrismaTaskRunEvidenceRep
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { PrismaTaskApplication, type AiTaskApplicationHost } from './prisma-task-application';
 import { AiTaskRunnerError, callAiTaskRunnerDependency, snapshotAiTaskRunnerRecoveryLease,
-  withAiTaskHeldPreparationDefinition, type AiTaskHeldPreparation } from './ai-task-runner.service';
-import type { AiTaskRunnerClaimInput, AiTaskRunnerClock } from './ai-task-runner.ports';
+  withAiTaskHeldPreparationDefinition, type AiTaskHeldPreparation } from '@rental-os/platform-server/ai-runtime';
+import type { AiTaskRunnerClaimInput, AiTaskRunnerClock } from '@rental-os/platform-server/ai-runtime';
 import type { AiTaskRunnerRepositoryCommandFactory } from './ai-task-runner.repository-adapter';
 import { AiTaskTakeoverCommitUnknownError, PrismaTaskTakeoverRepository } from './prisma-task-takeover.repository';
 

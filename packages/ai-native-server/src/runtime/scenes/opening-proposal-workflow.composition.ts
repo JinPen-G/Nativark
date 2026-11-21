@@ -18,8 +18,8 @@ import { AiGuardedOpeningConfigurationSource } from '../tools/opening-configurat
 import { AiOpeningSectionDifferenceService, openingSectionChangeSchema, verifyOpeningSectionMaterial } from '../tools/opening-section-difference.service';
 import { AiOpeningSectionProposalService } from '../tools/opening-section-proposal.service';
 import { AiOpeningVersionFieldSource } from '../tools/opening-version-fields.source';
-import { AiTaskRunnerError, snapshotAiTaskRunnerRecoveryLease, callAiTaskRunnerDependency } from '../runner/ai-task-runner.service';
-import type { AiTaskRunnerRecoveryLease } from '../runner/ai-task-runner.ports';
+import { AiTaskRunnerError, snapshotAiTaskRunnerRecoveryLease, callAiTaskRunnerDependency } from '@rental-os/platform-server/ai-runtime';
+import type { AiTaskRunnerRecoveryLease } from '@rental-os/platform-server/ai-runtime';
 import { AiTaskTransitionRepository } from '../ai-task-transition.repository';
 import { aiTaskRunnerLimitsSchema, aiTaskRunPlanSchema } from '../runner/prisma-task-run-evidence.repository';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';

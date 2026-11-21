@@ -11,7 +11,7 @@ import { TextCapabilityProbeApplication, type TextCapabilityProbeDependencies } 
 import { composePersistedTextProbeWorkflow } from './text-capability-probe-task.composition';
 import { PrismaGatewayCallPricing } from './budget/prisma-gateway-call-pricing';
 import { ModelGatewayError } from './model-gateway.ports';
-import type { AiTaskRunnerClock } from './runner/ai-task-runner.ports';
+import type { AiTaskRunnerClock } from '@rental-os/platform-server/ai-runtime';
 
 export type AuthorizedTextProbeWorkflowDependencies = Omit<PersistedTaskAuthorizationDependencies, 'db'> & {
   db: PrismaClient;

@@ -4,7 +4,7 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { SECRET_BOX_ENVELOPE_PATTERN, type SecretBox } from '@rental-os/platform-server/secret-box';
 import type { AiScopeRepository } from './ai-scope.repository';
-import type { AiProviderProfileRecord } from './provider-profile.ports';
+import type { AiProfileCapability, AiProviderProfileRecord } from './provider-profile.ports';
 import { ModelGatewayError, type GatewayContext } from './model-gateway.ports';
 import type { GatewayConnectionResolver } from './routed-model-transport';
 import { capabilityNameSchema, capabilityProfileFingerprint } from './capability-verification';
@@ -132,7 +132,7 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
     if (requestFingerprint(first) !== requestFingerprint(latest)) throw new ModelGatewayError('CONFIG_INVALID');
     return { profileId, revision: latest.profile.configRevision, enabled: latest.profile.enabled && latest.profile.disabledAt === null,
       mode: 'platform_managed' as const, protocol: latest.profile.protocol, model: latest.profile.model,
-      allowedCapabilities: [...latest.profile.allowedCapabilities],
+      allowedCapabilities: [...latest.profile.allowedCapabilities] as AiProfileCapability[],
       ...(latest.connection ? { baseUrl: latest.connection.baseUrl, maxOutputTokens: latest.connection.maxOutputTokens } : {}),
       credentialConfigured: Boolean(latest.connection?.credentialsEncrypted),
       verification: 'not_assessed_by_configuration_read' as const,

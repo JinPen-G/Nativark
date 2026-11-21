@@ -1,3 +1,5 @@
+/** 原组合后台的薄宿主入口。连接公共运行时、主题、语言、反馈及同一查询缓存，
+ * 挂载原登记路由，身份切换继续使用原会话与缓存代次。 */
 import { App as AntdApp, ConfigProvider } from "antd";
 import { Provider as AntMotionProvider } from "@rc-component/motion";
 import enUS from "antd/locale/en_US";

@@ -1,4 +1,4 @@
-import { ModelGatewayError, type WorkspaceGatewayContext } from './model-gateway.ports';
+import { ModelGatewayError, type GatewayProfile, type WorkspaceGatewayContext } from './model-gateway.ports';
 import { TenantModelConfigService, type TenantModelConfigPorts } from './tenant-model-config.service';
 import { SecretBox } from '@rental-os/platform-server/secret-box';
 
@@ -45,6 +45,6 @@ export class PlatformModelConfigService {
   }
   async selection(context: WorkspaceGatewayContext) { return this.tenant.selection(context); }
   async selectionForInvocation(context: WorkspaceGatewayContext) { return this.tenant.selectionForInvocation(context); }
-  async tenantProfile(context: WorkspaceGatewayContext) { return this.tenant.profile(context); }
+  async tenantProfile(context: WorkspaceGatewayContext): Promise<GatewayProfile> { return this.tenant.profile(context); }
   async tenantCredential(reference: string, context: WorkspaceGatewayContext) { return this.tenant.credential(reference, context); }
 }

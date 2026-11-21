@@ -22,7 +22,7 @@ import { GatewayInputBoundNotFoundError, PrismaGatewayPricingRecords, gatewayPri
 import { AiTaskExecutionBudgetError, type AiTaskExecutionBudgetPort, type AiTaskExecutionChargeRequest } from '../task-execution-budget.ports';
 import { taskModelCountChargeId } from '../runner/task-model-count-charge';
 import type { AiTaskModelInvocationPreparation } from '../runner/prisma-task-runner-resource.source';
-import type { AiTaskRunnerStepRef, AiTaskRunnerLease } from '../runner/ai-task-runner.ports';
+import type { AiTaskRunnerStepRef, AiTaskRunnerLease } from '@rental-os/platform-server/ai-runtime';
 import type { CountTokensReceiptDb } from './input-count-tokens.receipt';
 import type { CountTokensResult } from './input-count-tokens.service';
 import { countTokensOperationId, countTokensReference } from './input-count-tokens.receipt';

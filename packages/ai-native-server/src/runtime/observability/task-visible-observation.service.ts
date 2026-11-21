@@ -6,7 +6,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { AI_TEXT_MODEL_STEP_CODE, AI_IMAGE_MODEL_STEP_CODE, AI_AUDIO_MODEL_STEP_CODE,
   type AiTaskClientVisibleReportDraft, type AiTaskClientVisibleReceiptDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError, type AiTaskRepository } from '../ai-task.repository';
-import { AiTaskRunnerError } from '../runner/ai-task-runner.service';
+import { AiTaskRunnerError } from '@rental-os/platform-server/ai-runtime';
 import { validateAiTaskObservation } from '../task-contract-validation';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { withAiTaskTransaction } from '../task-transaction-authority';

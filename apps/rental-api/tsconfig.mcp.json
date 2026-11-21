@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.ai.json",
+  "compilerOptions": {
+    "outDir": "dist-mcp",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["dist", "dist-ai", "dist-mcp", "node_modules"]
+}

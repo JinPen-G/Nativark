@@ -55,7 +55,7 @@ import { composePersistedTaskCallGateway, composePersistedTaskGateway, composePe
   type PersistedTaskCallGatewayDependencies, type PersistedTaskGatewayDependencies } from '../task-model-gateway.composition';
 import { BudgetError } from '../budget/budget.ports';
 import { presentTaskBudgetUsageRecord } from '../budget/task-budget-usage.reader';
-import { AiTaskRunnerError, callAiTaskRunnerDependency, inheritAiTaskHeldPreparation } from '../runner/ai-task-runner.service';
+import { AiTaskRunnerError, callAiTaskRunnerDependency, inheritAiTaskHeldPreparation } from '@rental-os/platform-server/ai-runtime';
 import type { AiTaskInputSource } from '../task-input/task-input.ports';
 import { parseQuoteSelection, parseClarifiedQuoteSelection, validateQuoteSelectionHttpRequest } from '../task-request/quote-selection.validation';
 import { composeTaskActionPolicyManagement } from '../task-action-policy-management.composition';

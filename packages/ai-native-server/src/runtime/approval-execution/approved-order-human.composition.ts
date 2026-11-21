@@ -13,7 +13,7 @@ import { ApprovedOrderHumanAuthority } from './approved-order-human.authority';
 import { AiApprovedOrderRouteAuthority } from './approved-order-route.authority';
 import { PrismaApprovedOrderSnapshotSource } from './prisma-approved-order-snapshot.source';
 import { deniedOrder, orderContextHash } from './prisma-approved-order.source';
-import { AiTaskRunnerError, callAiTaskRunnerDependency } from '../runner/ai-task-runner.service';
+import { AiTaskRunnerError, callAiTaskRunnerDependency } from '@rental-os/platform-server/ai-runtime';
 import { approvedOrderReviewMaterial } from './approved-order-review-material';
 import { assertQuoteReadAccess } from '@rental-os/rental-core/server-quote-access';
 import type { RentalQuoteSnapshotV1 } from '@rental-os/shared';

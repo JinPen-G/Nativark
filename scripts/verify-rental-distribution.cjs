@@ -72,8 +72,9 @@ function selectedPrisma(build) {
   return { schema, publicSchema, publicRelations: relationModule.exports.RENTAL_PRISMA_PUBLIC_RELATIONS };
 }
 
-async function attachPrismaRuntime(build) {
-  if (!build.prismaSchema) selectedPrisma(build);
+async function attachPrismaRuntime(build, selection = {}) {
+  if (!selection.schema && !build.prismaSchema) selectedPrisma(build);
+  const schema = selection.schema ?? build.prismaSchema;
   const generatorFile = build.deps + '/@prisma/client/generator-build/index.js';
   const officialSource = fs.readFileSync(generatorFile, 'utf8');
   const generatedModule = { exports: {} };
@@ -81,15 +82,15 @@ async function attachPrismaRuntime(build) {
     officialSource + '\nreturn buildClient;')(createRequire(generatorFile), generatedModule,
     generatedModule.exports, generatorFile, path.dirname(generatorFile));
   const parsedConfiguration = JSON.parse(build.prismaWasm.get_config(JSON.stringify({
-    prismaSchema: build.prismaSchema, ignoreEnvVarErrors: true
+    prismaSchema: schema, ignoreEnvVarErrors: true
   })));
   assert.deepEqual(parsedConfiguration.errors, []);
   const configuration = parsedConfiguration.config;
-  const directory = slash(path.join(root, 'apps/rental-api/generated/client'));
-  const result = await buildClient({ schemaPath: path.join(root, 'apps/rental-api/prisma/schema.prisma'),
-    runtimeBase: '@prisma/client/runtime', datamodel: build.prismaSchema, binaryPaths: {}, outputDir: directory,
+  const directory = slash(selection.directory ?? path.join(root, 'apps/rental-api/generated/client'));
+  const result = await buildClient({ schemaPath: selection.schemaPath ?? path.join(root, 'apps/rental-api/prisma/schema.prisma'),
+    runtimeBase: '@prisma/client/runtime', datamodel: schema, binaryPaths: {}, outputDir: directory,
     generator: configuration.generators[0], datasources: configuration.datasources,
-    dmmf: JSON.parse(build.prismaWasm.get_dmmf(JSON.stringify({ prismaSchema: build.prismaSchema, noColor: true }))),
+    dmmf: JSON.parse(build.prismaWasm.get_dmmf(JSON.stringify({ prismaSchema: schema, noColor: true }))),
     clientVersion: '5.22.0', engineVersion: build.requireDeps('@prisma/engines-version').enginesVersion,
     activeProvider: 'mysql', copyEngine: false, postinstall: false,
     envPaths: { rootEnvPath: null, schemaEnvPath: undefined } });

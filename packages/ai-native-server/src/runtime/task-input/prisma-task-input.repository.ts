@@ -12,7 +12,7 @@ import { AiTaskRepositoryError, aiTaskAccessFromContext, type AiTaskRepository, 
 import { evaluateAiTaskTransitionDraft, type AiTaskTransitionStateDraft } from '../task-transition-draft';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { aiTaskRunPlanSchema, type AiTaskPlanEvidenceAuthority } from '../runner/prisma-task-run-evidence.repository';
-import type { AiTaskRunnerInputPort, AiTaskRunnerLease, AiTaskRunnerStepRef } from '../runner/ai-task-runner.ports';
+import type { AiTaskRunnerInputPort, AiTaskRunnerLease, AiTaskRunnerStepRef } from '@rental-os/platform-server/ai-runtime';
 import type { AiTaskInputBinding, AiTaskInputContext, AiTaskInputReader, AiTaskInputSource } from './task-input.ports';
 import { AiTaskInputResultUnknownError, AiTaskInputLimitError } from './task-input.errors';
 import { taskStepChargesValid } from '../runner/task-model-count-charge';

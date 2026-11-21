@@ -11,7 +11,7 @@ import type { MembershipService } from '@rental-os/rental-core/mysql-membership'
 import { ApprovedProfileRouteAuthority, type ApprovedProfileActor } from '../profile/approved-profile-route.authority';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from '../ai-task.repository';
-import { AiTaskRunnerError } from '../runner/ai-task-runner.service';
+import { AiTaskRunnerError } from '@rental-os/platform-server/ai-runtime';
 import { freezeOriginalInput } from '../task-request/original-request.validation';
 import type { AiSceneHttpRequest, composeRequestBoundProfileWorkflow } from './request-bound-scenes.application';
 

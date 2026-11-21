@@ -19,8 +19,8 @@ import { PrismaTaskExecutionScopeAuthority } from './prisma-task-execution-scope
 import { PrismaTaskConfirmationCheckpointSource } from './prisma-task-confirmation-checkpoint.source';
 import { aiTaskRunnerLimitsSchema, PrismaTaskRunEvidenceRepository } from './prisma-task-run-evidence.repository';
 import { PrismaTaskApplication, type AiTaskApplicationHost } from './prisma-task-application';
-import { AiTaskRunnerError, callAiTaskRunnerDependency, snapshotAiTaskRunnerRecoveryLease, withAiTaskHeldPreparationDefinition, type AiTaskHeldPreparation } from './ai-task-runner.service';
-import type { AiTaskRunnerClock, AiTaskRunnerLease } from './ai-task-runner.ports';
+import { AiTaskRunnerError, callAiTaskRunnerDependency, snapshotAiTaskRunnerRecoveryLease, withAiTaskHeldPreparationDefinition, type AiTaskHeldPreparation } from '@rental-os/platform-server/ai-runtime';
+import type { AiTaskRunnerClock, AiTaskRunnerLease } from '@rental-os/platform-server/ai-runtime';
 import type { AiTaskRunnerRepositoryCommandFactory } from './ai-task-runner.repository-adapter';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 

@@ -26,8 +26,8 @@ import { PrismaTaskApplication, waitForTaskApplicationDependency } from './runne
 import { PrismaTaskConfirmationHistoryReader } from './runner/prisma-task-confirmation-history.reader';
 import { waitingPayloadSchema } from './runner/prisma-task-confirmation-checkpoint.source';
 import { taskExecutionPhaseStore } from './runner/task-execution-phase.store';
-import { AiTaskRunnerError } from './runner/ai-task-runner.service';
-import type { AiTaskRunnerClock } from './runner/ai-task-runner.ports';
+import { AiTaskRunnerError } from '@rental-os/platform-server/ai-runtime';
+import type { AiTaskRunnerClock } from '@rental-os/platform-server/ai-runtime';
 import { TaskApprovalAdmissionAuthority } from './task-approval-admission.authority';
 import type { AiTaskActionPolicyOperation, AiTaskActionPolicyMutationResult } from './prisma-task-action-policy.repository';
 

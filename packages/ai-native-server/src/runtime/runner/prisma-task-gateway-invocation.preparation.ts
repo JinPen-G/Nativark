@@ -1,6 +1,6 @@
 import type { PrismaGatewayInvocationBindings, RegisterGatewayInvocation } from '../budget/prisma-gateway-invocation-bindings';
 import { AiTaskExecutionBudgetError } from '../task-execution-budget.ports';
-import type { AiTaskRunnerLease, AiTaskRunnerStepRef } from './ai-task-runner.ports';
+import type { AiTaskRunnerLease, AiTaskRunnerStepRef } from '@rental-os/platform-server/ai-runtime';
 import type { AiTaskModelInvocationPreparation } from './prisma-task-runner-resource.source';
 
 export interface AiTaskGatewayInputSource {

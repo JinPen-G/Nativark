@@ -1,3 +1,6 @@
+/** 原组合宿主的平台与 Rental 管理适配，公共能力消费正式平台出口。
+ * Rental 空间/客户与 MCP 管理委托所属实现，保留原身份、事务和历史兼容。 */
+import { assertOriginalMcpManagedSubject, assertOriginalMcpManagedWorkspace } from "@rental-os/rental-mcp-host/workspace-management";
 import { RentalWorkspaceManagementApplication } from "@rental-os/rental-core/workspace-management";
 import { RentalCustomerManagementApplication } from "@rental-os/rental-core/customer-management";
 /** 原组合平台的业务适配及内存演示。持久化租户/人员/角色、组织/安全与字典/编号委托同一公共应用；Rental范围与初始化由原业务链裁定。 */
@@ -2287,24 +2290,14 @@ export class PlatformService {
   }
 
   async assertTrustedWorkspaceIntegrationManagement(binding: { userId: string; tenantId: string; workspaceId: string }, transaction: Prisma.TransactionClient) {
-    if (!this.useMysqlDataSource()) throw new ForbiddenException('可信空间集成管理需要原持久身份系统');
-    return this.platformRepository.assertTrustedWorkspaceIntegrationManagement(binding, transaction);
+    return assertOriginalMcpManagedWorkspace({ useMysqlDataSource: () => this.useMysqlDataSource(), repository: this.platformRepository }, binding, transaction);
   }
 
   /** Original tenant metadata governance, not target workspace/business access.
    * Reuses full-tenant integration rights and the original persistent account;
    * SaaS identity never becomes a tenant actor or a tenant subject target. */
   async assertTrustedWorkspaceSubjectManagement(binding: { userId: string; tenantId: string; workspaceId: string }, targetUserId: string, transaction: Prisma.TransactionClient) {
-    if (!this.useMysqlDataSource() || !transaction?.user || typeof targetUserId !== 'string'
-      || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/.test(targetUserId)) throw new ForbiddenException('可信主体管理需要原持久身份系统');
-    const actor = await this.assertTrustedWorkspaceIntegrationManagement(binding, transaction);
-    const user = await this.platformRepository.findUserById(targetUserId, transaction);
-    if (!user || typeof user !== 'object') throw new ForbiddenException('缺少当前租户主体');
-    const descriptors = Object.getOwnPropertyDescriptors(user);
-    const value = (name: string) => { const field = descriptors[name]; if (!field?.enumerable || !Object.hasOwn(field, 'value')) throw new ForbiddenException('缺少当前租户主体'); return field.value; };
-    if (value('id') !== targetUserId || value('tenantId') !== binding.tenantId || value('isActive') !== true
-      || value('isSaasAdmin') !== false || actor.id !== binding.userId || actor.tenantId !== binding.tenantId) throw new ForbiddenException('缺少当前租户主体');
-    return Object.freeze({ actorId: actor.id, tenantId: binding.tenantId, userId: targetUserId, workspaceId: binding.workspaceId });
+    return assertOriginalMcpManagedSubject({ useMysqlDataSource: () => this.useMysqlDataSource(), repository: this.platformRepository }, binding, targetUserId, transaction);
   }
 
   /** Internal PLATFORM management only. Re-read the original persistent account

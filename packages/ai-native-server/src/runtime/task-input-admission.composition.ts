@@ -6,7 +6,7 @@ import { z } from 'zod';
 import type { PrismaClient } from '@prisma/client';
 import { isAiTaskInputSubmissionDraft, type AiTaskInputSubmissionDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError } from './ai-task.repository';
-import { AiTaskRunnerError, callAiTaskRunnerDependency } from './runner/ai-task-runner.service';
+import { AiTaskRunnerError, callAiTaskRunnerDependency } from '@rental-os/platform-server/ai-runtime';
 import { composeTaskInputAdmission, type TaskInputAdmissionIntent } from './task-input-admission.application';
 import { taskInputReceiptReferenceSchema } from './task-input/prisma-task-input.repository';
 import { originalRequestReferenceSchema } from './task-request/original-request.validation';

@@ -17,7 +17,7 @@ import { RentalNotificationDraftUnknownError } from '../rental-adapters/rental-b
 import { canManageWorkspaceWideNotifications } from '@rental-os/rental-core/workbench';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { hasEffectivePermission } from '@rental-os/platform-server/permission-match';
-import { callAiTaskRunnerDependency, AiTaskRunnerError } from '../runner/ai-task-runner.service';
+import { callAiTaskRunnerDependency, AiTaskRunnerError } from '@rental-os/platform-server/ai-runtime';
 import { ENTRY_NOTIFICATION_DRAFT_VERSION, EntryNotificationDraftError, entryNotificationDraftPrepareSchema,
   entryNotificationDraftSaveSchema, entryNotificationDraftReadSchema, entryNotificationDraftResourceSchema, parseEntryNotificationDraft,
   type EntryNotificationDraftCredentials, type EntryNotificationDraftResponse } from './entry-notification-draft.contract';

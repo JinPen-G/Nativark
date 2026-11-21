@@ -11,8 +11,8 @@ import { readTaskModelRunOrigin, taskInputReceiptReferenceSchema, PrismaTaskInpu
 import { isGatewayResult } from '../gateway-contract-validation';
 import { aiTaskRunPlanSchema, aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
 import { aiPersistedPlanToolsSchema } from '../runner/prisma-task-plan-input.source';
-import { AiTaskRunnerError, withAiTaskHeldPreparationDefinition, type AiTaskHeldPreparation } from '../runner/ai-task-runner.service';
-import type { AiTaskPreparationDefinition } from '../runner/task-run-preparation.ports';
+import { AiTaskRunnerError, withAiTaskHeldPreparationDefinition, type AiTaskHeldPreparation } from '@rental-os/platform-server/ai-runtime';
+import type { AiTaskPreparationDefinition } from '@rental-os/platform-server/ai-runtime';
 import type { AiTaskRegisteredExecutor } from '../runner/prisma-task-measured-effects';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { originalIdentityHash } from '../task-request/original-request.authority';
@@ -373,7 +373,7 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         if (before.original.request.input.kind === 'quote_goal') {
           const latest = basis.provenance.history.at(-1);
           if (!latest || !isGatewayResult(latest.result) || latest.result.status !== 'completed') throw denied();
-          const { parseQuoteGoalModelOutput } = await import('./quote-goal-input');
+          const { parseQuoteGoalModelOutput } = await import('./quote-goal-input.js');
           const partial = originalQuoteGoalParameters(parseQuoteGoalModelOutput(latest.result.text).conditions, basis.provenance.history);
           const parsed = aiQuoteCandidateInputSchema.safeParse(partial);
           if (!parsed.success) return false;
@@ -846,7 +846,7 @@ export function composeOriginalSceneClarificationSource(input: {
         const basis = await readClarificationBasis(command);
         if (basis.original.request.sceneCode !== 'quote_clarification' || basis.original.request.input.kind !== 'quote_goal'
           || !isGatewayResult(basis.resultPayload) || basis.resultPayload.status !== 'completed') throw denied();
-        const { parseQuoteGoalModelOutput } = await import('./quote-goal-input');
+        const { parseQuoteGoalModelOutput } = await import('./quote-goal-input.js');
         originalQuoteGoalParameters(parseQuoteGoalModelOutput(basis.resultPayload.text).conditions, [...basis.history,
           { contract: submittedContract, answers: submittedAnswers, result: basis.resultPayload }]);
         return { disposition: 'business_parameters' as const, planHash: command.planHash,

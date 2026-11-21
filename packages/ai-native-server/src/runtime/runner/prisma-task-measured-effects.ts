@@ -3,7 +3,8 @@ import { requestFingerprint } from '@rental-os/platform-contracts/request-finger
 import { aiTaskAccessFromContext, type AiTaskRepository } from '../ai-task.repository';
 import type { AiExecutionContext } from '@rental-os/shared';
 import { AiTaskExecutionBudgetError } from '../task-execution-budget.ports';
-import type { AiTaskRunnerEffectPort, AiTaskRunnerStepPlan, AiTaskRunnerLease, AiTaskRunnerObservedResult, AiTaskRunnerConfirmationContinuation } from './ai-task-runner.ports';
+import type { AiTaskRunnerEffectPort, AiTaskRunnerStepPlan, AiTaskRunnerLease, AiTaskRunnerConfirmationContinuation } from '@rental-os/platform-server/ai-runtime';
+import type { AiTaskRunnerObservedResult } from './ai-task-runner.ports';
 import type { PrismaTaskRunEvidenceRepository } from './prisma-task-run-evidence.repository';
 import type { AiTaskInputContext, AiTaskInputReader } from '../task-input/task-input.ports';
 export interface AiTaskExecutionAuthorization {

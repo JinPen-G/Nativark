@@ -7,7 +7,7 @@ import { gatewayRoutingBinding, type GatewayRoutingResolution } from '../gateway
 import { PublicAiGatewayService, type PublicGatewayRuntime } from '../public-ai-gateway.service';
 import type { AiTaskExecutionAuthorization, AiTaskRegisteredExecutor } from '../runner/prisma-task-measured-effects';
 import type { AiTaskGatewayInputSource } from '../runner/prisma-task-gateway-invocation.preparation';
-import type { AiTaskRunnerLease, AiTaskRunnerStepRef } from '../runner/ai-task-runner.ports';
+import type { AiTaskRunnerLease, AiTaskRunnerStepRef } from '@rental-os/platform-server/ai-runtime';
 import type { PrismaTaskPlanInputSource } from '../runner/prisma-task-plan-input.source';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { readModelNonDispatchEvidence } from './prisma-model-nondispatch.evidence';

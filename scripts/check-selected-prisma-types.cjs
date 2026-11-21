@@ -56,7 +56,7 @@ for (const top of ['packages', 'apps']) {
     for (const [subkey, contract] of Object.entries(pkg.exports || {})) {
       const target = typeof contract === 'string' ? contract : contract.types || contract.import || contract.default || contract.require;
       if (!target || !pkg.name) continue;
-      let source = target.replace(/^\.\/dist(?:-ai)?\//u, './src/').replace(/\.d\.ts$/u, '.ts').replace(/\.js$/u, '.ts');
+      let source = target.replace(/^\.\/dist(?:-ai|-mcp)?\//u, './src/').replace(/\.d\.ts$/u, '.ts').replace(/\.js$/u, '.ts');
       let file = slash(path.resolve(directory, source));
       // 仅沿 package.json 已公开的单通配出口核类型；不会为未公开路径加源码捷径。
       if (subkey.includes('*')) {

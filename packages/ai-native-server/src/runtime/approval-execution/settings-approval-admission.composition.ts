@@ -5,7 +5,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { AI_APPROVED_SETTINGS_DRAFT_VERSION, AI_APPROVED_SETTINGS_TOOL_CODE } from '@rental-os/shared';
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from '../ai-task.repository';
-import { AiTaskRunnerError, callAiTaskRunnerDependency } from '../runner/ai-task-runner.service';
+import { AiTaskRunnerError, callAiTaskRunnerDependency } from '@rental-os/platform-server/ai-runtime';
 import { taskCenterDecisionSchema } from '../task-center-approval.composition';
 import { taskCenterContinueSchema } from '../task-center-continuation.composition';
 import { settingsContract } from './approved-settings-contracts';

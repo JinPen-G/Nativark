@@ -1,9 +1,9 @@
-import type { AiTaskRunnerDependencies, AiTaskRunnerLease, AiTaskRunnerPlanPort, AiTaskRunnerStepCommit, AiTaskRunnerStepPlan, AiTaskRunnerStepPort, AiTaskRunnerStepRef, AiTaskRunnerConfirmationContinuation } from "./ai-task-runner.ports";
+import type { AiTaskRunnerDependencies, AiTaskRunnerLease, AiTaskRunnerPlanPort, AiTaskRunnerStepCommit, AiTaskRunnerStepPlan, AiTaskRunnerStepPort, AiTaskRunnerStepRef, AiTaskRunnerConfirmationContinuation } from "@rental-os/platform-server/ai-runtime";
 import type { AiTaskRepository } from "../ai-task.repository";
 import { AiStepOriginalRegistrationUnavailableError, type AiStepRegistrationCommand, type AiStepRegistrationRepository } from "../ai-step-registration.repository";
 import type { AiStepTransitionCommand, AiStepTransitionRepository } from "../ai-step-transition.repository";
 import { AI_STEP_STATUSES_DRAFT, AI_TASK_STATUSES_DRAFT, AI_TASK_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, type AiTaskStatusDraft, type AiTaskEventDraft, type AiStepStatusDraft } from "@rental-os/shared";
-import { AiTaskRunnerError, AiTaskRunnerOriginalStepUnavailableError } from './ai-task-runner.service';
+import { AiTaskRunnerError, AiTaskRunnerOriginalStepUnavailableError } from '@rental-os/platform-server/ai-runtime';
 
 /**
  * The only runner-to-persistence wiring point. The command factory belongs to the

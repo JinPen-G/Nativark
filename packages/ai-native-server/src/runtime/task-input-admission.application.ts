@@ -20,7 +20,7 @@ import type { AiTaskCredentialSource } from './task-current-action.authority';
 import { aiPersistedPlanToolsSchema } from './runner/prisma-task-plan-input.source';
 import { aiTaskRunPlanSchema, aiTaskRunnerLimitsSchema } from './runner/prisma-task-run-evidence.repository';
 import { waitForTaskApplicationDependency } from './runner/prisma-task-application';
-import { AiTaskRunnerError } from './runner/ai-task-runner.service';
+import { AiTaskRunnerError } from '@rental-os/platform-server/ai-runtime';
 import { PrismaTaskInputRepository, taskInputReceiptReferenceSchema } from './task-input/prisma-task-input.repository';
 import type { AiTaskInputBinding, AiTaskInputSource } from './task-input/task-input.ports';
 import type { PrismaOriginalRequestRepository } from './task-request/prisma-original-request.repository';

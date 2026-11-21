@@ -28,7 +28,7 @@ import { composeOpeningProposalWorkflow } from './scenes/opening-proposal-workfl
 import { aiPersistedPlanToolsSchema } from './runner/prisma-task-plan-input.source';
 import { aiTaskRunnerLimitsSchema } from './runner/prisma-task-run-evidence.repository';
 import { waitForTaskApplicationDependency } from './runner/prisma-task-application';
-import { AiTaskRunnerError } from './runner/ai-task-runner.service';
+import { AiTaskRunnerError } from '@rental-os/platform-server/ai-runtime';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
 

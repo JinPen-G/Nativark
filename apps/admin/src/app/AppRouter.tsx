@@ -1,3 +1,5 @@
+/** 原管理后台路由装配。按当前会话和登记的 Core、业务范围及页面权限选择页面，
+ * 复用公共外壳与原懒加载贡献，详情入口继承对应业务路由的准入。 */
 import { lazy, Suspense, type ReactNode } from "react";
 import { Button, Result } from "@/components/ui";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";

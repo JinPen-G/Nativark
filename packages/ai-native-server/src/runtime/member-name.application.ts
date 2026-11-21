@@ -18,7 +18,7 @@ import { composeMemberProfileChangeFlow } from './scenes/member-profile-change-f
 import { composeRequestBoundProfileWorkflow, type AiSceneHttpRequest } from './scenes/request-bound-scenes.application';
 import type { ApprovedProfileApplicationDependencies } from './approval-execution/approved-profile-task.authority';
 import { AiTaskRepositoryError } from './ai-task.repository';
-import { AiTaskRunnerError } from './runner/ai-task-runner.service';
+import { AiTaskRunnerError } from '@rental-os/platform-server/ai-runtime';
 import { waitForTaskApplicationDependency, type AiTaskApplicationHost } from './runner/prisma-task-application';
 import { freezeOriginalInput } from './task-request/original-request.validation';
 import { respondAiScene } from './scenes/original-scenes.controller';

@@ -11,9 +11,9 @@ import { requestFingerprint } from '@rental-os/platform-contracts/request-finger
 import { AiTaskExecutionBudgetError, type AiTaskExecutionBudgetPort, type AiTaskExecutionLease,
   type AiTaskExecutionPolicy, type AiTaskExecutionSettlementRequest } from '../task-execution-budget.ports';
 import { aiTaskRunPlanSchema, type AiTaskPlanEvidenceAuthority, type PrismaTaskRunEvidenceRepository } from './prisma-task-run-evidence.repository';
-import { taskPreparationDefinitionSchema, type AiTaskPreparationDefinition, type AiTaskPreparationTicket,
-  type AiTaskControlResourceOrigin } from './task-run-preparation.ports';
-import type { AiTaskRunnerLease } from './ai-task-runner.ports';
+import { type AiTaskPreparationDefinition, type AiTaskPreparationTicket } from '@rental-os/platform-server/ai-runtime';
+import { taskPreparationDefinitionSchema, type AiTaskControlResourceOrigin } from './task-run-preparation.ports';
+import type { AiTaskRunnerLease } from '@rental-os/platform-server/ai-runtime';
 import { readOriginalRunTimeCharges, taskOverheadNonEffectChargeIds } from './prisma-task-run-overhead';
 
 type Db = Pick<PrismaClient, 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskRunPlan' | 'aiTaskExecutionCharge' | 'aiTaskInputReceipt' | 'aiTaskInputRequest'>

@@ -13,7 +13,7 @@ import { PrismaTaskPlanInputSource, profileChangeInputSchema, type ProfileInputD
 import { PrismaTaskPlanPolicyRepository } from '../runner/prisma-task-plan-policy.repository';
 import { PrismaTaskRunEvidenceRepository, type AiTaskPlanEvidenceAuthority } from '../runner/prisma-task-run-evidence.repository';
 import { PrismaTaskExecutionScopeAuthority } from '../runner/prisma-task-execution-scope.authority';
-import type { AiTaskRunnerLease, AiTaskRunnerPlan } from '../runner/ai-task-runner.ports';
+import type { AiTaskRunnerLease, AiTaskRunnerPlan } from '@rental-os/platform-server/ai-runtime';
 import { composeApprovedProfileApplication } from './approved-profile-application.composition';
 import { ApprovedProfileTaskAuthority, PROFILE_NAME_TOOL_CODE, profileTransactionDb, profileConflict, profileDenied,
   type ApprovedProfileApplicationDependencies } from './approved-profile-task.authority';

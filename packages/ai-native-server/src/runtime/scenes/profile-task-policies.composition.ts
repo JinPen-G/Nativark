@@ -18,7 +18,7 @@ import { profileTransactionDb, profileConflict, profileDenied, profileUnavailabl
   type ApprovedProfileApplicationDependencies } from '../approval-execution/approved-profile-task.authority';
 import { profileChangeInputSchema, aiPersistedPlanToolsSchema } from '../runner/prisma-task-plan-input.source';
 import { aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
-import { AiTaskRunnerError } from '../runner/ai-task-runner.service';
+import { AiTaskRunnerError } from '@rental-os/platform-server/ai-runtime';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { freezeOriginalInput } from '../task-request/original-request.validation';
 import { PrismaTaskActionPolicyRepository, type AiTaskActionPolicyOperation,

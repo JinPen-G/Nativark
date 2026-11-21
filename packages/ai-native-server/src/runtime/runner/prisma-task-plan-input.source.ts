@@ -22,7 +22,7 @@ import { aiStepActionId, AiStepOriginalRegistrationUnavailableError, type AiStep
   type AiStepOriginalRegistrationGrant } from '../ai-step-registration.repository';
 import type { AiTaskExecutionAuthorization } from './prisma-task-measured-effects';
 import { aiTaskRunPlanSchema, aiTaskRunnerLimitsSchema, type AiTaskPlanEvidenceAuthority } from './prisma-task-run-evidence.repository';
-import type { AiTaskRunnerLease, AiTaskRunnerPlan } from './ai-task-runner.ports';
+import type { AiTaskRunnerLease, AiTaskRunnerPlan } from '@rental-os/platform-server/ai-runtime';
 import { settingsChangeReferenceSchema } from '@rental-os/rental-core/approved-settings-validation';
 import { textProbeCommandSchema, TEXT_CAPABILITY_PROBE_TOOL } from '../text-capability-probe';
 import { verifyOpeningSectionMaterial } from '../tools/opening-section-difference.service';
@@ -421,9 +421,9 @@ return withAiTaskTransaction(tx, { kind: 'task', taskId: command.taskId }, async
 
   /** Quota-only admission. No input is fabricated/read as an execution grant;
    * the ordinary authorize() below still verifies every published input. */
-  async authorizePreparation(value: import('./task-run-preparation.ports').AiTaskPreparationDefinition,
+  async authorizePreparation(value: import('@rental-os/platform-server/ai-runtime').AiTaskPreparationDefinition,
     presented: AiTaskRunnerLease, db: Omit<Db, '$transaction'> = this.db) {
-    const { taskPreparationDefinitionSchema } = await import('./task-run-preparation.ports');
+    const { taskPreparationDefinitionSchema } = await import('./task-run-preparation.ports.js');
     const definition = taskPreparationDefinitionSchema.parse(structuredClone(value));
     const lease = leaseSchema.parse(structuredClone(presented));
     if (definition.taskId !== lease.taskId || definition.steps.length === 0) throw denied();

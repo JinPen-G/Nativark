@@ -18,14 +18,14 @@ import { PrismaQuoteSelectionRepository, fingerprintAiQuoteSelection, type Human
 import { parseQuoteSelectionProof, validateQuoteSelectionHttpRequest } from '../task-request/quote-selection.validation';
 import { PersistedApprovedOrderPolicyAuthority } from '../approval-execution/persisted-approved-order-policy.authority';
 import { PrismaTaskApplication } from '../runner/prisma-task-application';
-import type { AiTaskRunnerLease } from '../runner/ai-task-runner.ports';
+import type { AiTaskRunnerLease } from '@rental-os/platform-server/ai-runtime';
 import { composeTaskOrderHost, type TaskOrderHostDependencies } from '../runner/order-task-host.composition';
 import { taskExecutionPhaseStore } from '../runner/task-execution-phase.store';
 import { freezeOriginalInput } from '../task-request/original-request.validation';
 import { AiApprovedOrderResultUnknownError } from '../approval-execution/approved-order.errors';
 import { waitForTaskApplicationDependency } from '../runner/prisma-task-application';
-import { AiTaskRunnerError, callAiTaskRunnerDependency, snapshotAiTaskRunnerClaimLease } from '../runner/ai-task-runner.service';
-import type { AiTaskRunnerClock } from '../runner/ai-task-runner.ports';
+import { AiTaskRunnerError, callAiTaskRunnerDependency, snapshotAiTaskRunnerClaimLease } from '@rental-os/platform-server/ai-runtime';
+import type { AiTaskRunnerClock } from '@rental-os/platform-server/ai-runtime';
 import { readTaskModelRunOrigin } from '../task-input/prisma-task-input.repository';
 import { applyOriginalQuoteAnswers } from './original-quote-input';
 import { originalQuoteCandidateFromAnswers } from './original-quote-goal-parameters';

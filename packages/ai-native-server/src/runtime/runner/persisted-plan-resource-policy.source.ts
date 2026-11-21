@@ -3,7 +3,7 @@ import type { AiTaskExecutionLease, AiTaskExecutionPolicySource } from '../task-
 import { AiTaskExecutionBudgetError } from '../task-execution-budget.ports';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import type { PrismaTaskRunEvidenceRepository } from './prisma-task-run-evidence.repository';
-import type { AiTaskRunnerTaskMetadata } from './ai-task-runner.ports';
+import type { AiTaskRunnerTaskMetadata } from '@rental-os/platform-server/ai-runtime';
 
 /** New reservations require today's execution policy. Original accounting
  * reads the immutable saved bounds under current task/lease authorization.

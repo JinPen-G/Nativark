@@ -1,5 +1,5 @@
 import type { AiTaskInputAnswerDraft, AiTaskInputContractDraft } from '@rental-os/shared';
-import type { AiTaskRunnerLease } from '../runner/ai-task-runner.ports';
+import type { AiTaskRunnerLease } from '@rental-os/platform-server/ai-runtime';
 
 export interface AiTaskInputBinding {
   scopeId: string;

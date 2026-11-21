@@ -1,7 +1,7 @@
 import type { AiTaskExecutionBudgetPort, AiTaskExecutionChargeRequest, AiTaskExecutionMutation, AiTaskExecutionSettlementRequest } from '../task-execution-budget.ports';
 import { AiTaskExecutionBudgetError, AiTaskExecutionPreReservationLimitError } from '../task-execution-budget.ports';
-import { AiTaskRunnerPreReservationLimitError } from './ai-task-runner.service';
-import type { AiTaskRunnerLease, AiTaskRunnerResourcePort, AiTaskRunnerResourceTicket, AiTaskRunnerStepRef } from './ai-task-runner.ports';
+import { AiTaskRunnerPreReservationLimitError } from '@rental-os/platform-server/ai-runtime';
+import type { AiTaskRunnerLease, AiTaskRunnerResourcePort, AiTaskRunnerResourceTicket, AiTaskRunnerStepRef } from '@rental-os/platform-server/ai-runtime';
 
 /** Only a server composition may implement this source. It reads persisted
  * step/action/invocation and resource measurement references, not model text.
@@ -22,8 +22,8 @@ function freshReservation(receipt: AiTaskExecutionMutation | null | undefined, r
 }
 
 export class PersistentTaskRunnerResourceGate implements AiTaskRunnerResourcePort {
-  readonly preparation?: import('./task-run-preparation.ports').AiTaskPreparationResources;
-  readonly overhead?: import('./ai-task-runner.ports').AiTaskRunnerOverheadPort;
+  readonly preparation?: import('@rental-os/platform-server/ai-runtime').AiTaskPreparationResources;
+  readonly overhead?: import('@rental-os/platform-server/ai-runtime').AiTaskRunnerOverheadPort;
   constructor(private readonly budget: AiTaskExecutionBudgetPort, private readonly source: AiTaskRunnerResourceEvidenceSource,
     preparation?: import('./prisma-task-run-preparation').PrismaTaskRunPreparation,
     overhead?: import('./prisma-task-run-overhead').PrismaTaskRunOverhead) {
@@ -52,7 +52,7 @@ export class PersistentTaskRunnerResourceGate implements AiTaskRunnerResourcePor
     if (preparation) this.preparation = {
       begin: (lease, definition, maximumMs, signal) => preparation.begin(lease, definition, maximumMs, budget, signal),
       complete: (ticket, lease) => preparation.complete(ticket, lease, budget),
-      ...(overhead ? { handoff: (ticket: import('./task-run-preparation.ports').AiTaskPreparationTicket,
+      ...(overhead ? { handoff: (ticket: import('@rental-os/platform-server/ai-runtime').AiTaskPreparationTicket,
         lease: AiTaskRunnerLease, recovery: boolean, retainStepAllowance: boolean) =>
         preparation.handoff(ticket, lease, overhead, budget, recovery, retainStepAllowance) } : {}),
       abandon: (ticket, lease) => preparation.abandon(ticket, lease, budget)

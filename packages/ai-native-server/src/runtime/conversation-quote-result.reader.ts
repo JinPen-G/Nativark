@@ -7,7 +7,7 @@ import { AiTaskRepositoryError, type AiTaskRepository } from './ai-task.reposito
 import { aiStepActionId } from './ai-step-registration.repository';
 import type { AiOriginalSceneDependencies, composeAiOriginalScenes } from './scenes/original-scenes.composition';
 import type { WorkbenchModelControlOrigin } from './workbench-model-control.contract';
-import type { AiTaskRunnerPlan } from './runner/ai-task-runner.ports';
+import type { AiTaskRunnerPlan } from '@rental-os/platform-server/ai-runtime';
 import { PrismaTaskApplication } from './runner/prisma-task-application';
 import { taskExecutionPhaseStore } from './runner/task-execution-phase.store';
 import { PrismaTaskInputRepository } from './task-input/prisma-task-input.repository';

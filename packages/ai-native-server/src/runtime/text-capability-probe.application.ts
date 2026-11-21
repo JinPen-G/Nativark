@@ -10,14 +10,14 @@ import { InvocationAdmissionService } from './invocation-admission.service';
 import { InvocationDispatchService } from './invocation-dispatch.service';
 import { PrismaProviderProfileRepository } from './provider-profile.repository';
 import { PrismaProviderCapabilityEvidenceRepository } from './provider-capability.repository';
-import { ProviderCapabilityService } from './provider-capability.service';
+import { ProviderCapabilityService, type CapabilityPreflight } from './provider-capability.service';
 import { createPersistedGatewayBudget } from './budget/gateway-budget.composition';
 import type { RegisterGatewayInvocation } from './budget/prisma-gateway-invocation-bindings';
 import type { TenantModelConfigurationAuthority } from './tenant-model-config.authority';
 import type { TenantModelConfigService } from './tenant-model-config.service';
 import type { AiScopeRepository } from './ai-scope.repository';
 import type { UnifiedGatewayAudit } from './unified-ai-gateway.ports';
-import { ModelGatewayError, modelAdapterSupportsCapabilities, type GatewayContext } from './model-gateway.ports';
+import { ModelGatewayError, modelAdapterSupportsCapabilities, type GatewayContext, type GatewayErrorCode } from './model-gateway.ports';
 import { TextCapabilityProbeAuthority } from './text-capability-probe.authority';
 import { createPersistedTextCapabilityEvidence, PrismaTextCapabilityReceiptRepository, type TextProbeReceiptDb } from './prisma-text-capability-receipt.repository';
 import { matchesProbeProfile, probeContextSchema, textProbeCommandSchema, textProbeConfiguration, textProbeDescriptorSchema,
@@ -188,7 +188,7 @@ export class TextCapabilityProbeApplication {
     const snapshot = textProbeCommandSchema.parse(structuredClone(command));
     return this.forCurrentRequest(context => this.reconcile(context, snapshot));
   }
-  preflightCurrent(command: TextProbeCommand) {
+  preflightCurrent(command: TextProbeCommand): Promise<CapabilityPreflight> {
     const snapshot = textProbeCommandSchema.parse(structuredClone(command));
     return this.forCurrentRequest(context => this.preflight(context, snapshot));
   }
@@ -370,14 +370,14 @@ export class TextCapabilityProbeApplication {
     catch (error) {
       if (signal?.aborted || error instanceof ModelGatewayError && error.code === 'FORBIDDEN') throw error;
       await authority.assertCurrent(context, resolution);
-      return { ...await this.collect(context, command), errorCode: error instanceof ModelGatewayError ? error.code : 'ACCOUNTING_PENDING' };
+      return { ...await this.collect(context, command), errorCode: (error instanceof ModelGatewayError ? error.code : 'ACCOUNTING_PENDING') as GatewayErrorCode };
     }
     return this.collect(context, command);
   }
   async reconcile(context: TextProbeContext, command: TextProbeCommand) {
     return this.collect(probeContextSchema.parse(structuredClone(context)), textProbeCommandSchema.parse(structuredClone(command)));
   }
-  async preflight(context: TextProbeContext, command: TextProbeCommand) {
+  async preflight(context: TextProbeContext, command: TextProbeCommand): Promise<CapabilityPreflight> {
     context = probeContextSchema.parse(structuredClone(context));
     command = textProbeCommandSchema.parse(structuredClone(command));
     const authority = this.authority(context, command), current = await authority.resolve(context, textProbeRequirements(command));

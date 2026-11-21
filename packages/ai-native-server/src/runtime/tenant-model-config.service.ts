@@ -1,3 +1,5 @@
+import { normalizeModelBaseUrl as normalizeTenantModelBaseUrl } from '@rental-os/platform-server/ai-gateway';
+export { normalizeModelBaseUrl as normalizeTenantModelBaseUrl } from '@rental-os/platform-server/ai-gateway';
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import Ajv from 'ajv';
@@ -56,15 +58,6 @@ export interface TenantModelConfigPorts {
  * Profile projection. Never a credential, permission or live capability proof. */
 export function tenantModelCredentialReference(tenantId: string, revision: number) {
   return `tenant-model:${createHash("sha256").update(tenantId).digest("hex")}:${revision}`;
-}
-
-/** Pure validation only. DNS/connection pinning must additionally happen in the egress transport. */
-export function normalizeTenantModelBaseUrl(value: string) {
-  try {
-    const url = parseOutboundUrl(value, "Model Base URL", { allowPrivateInDevelopment: false });
-    if (url.protocol !== "https:" || isPrivateOrLocalHost(url.hostname)) throw new Error();
-    return url.toString().replace(/\/+$/u, "");
-  } catch { throw new ModelGatewayError("CONFIG_INVALID"); }
 }
 
 /** Server-only encrypted settings service. No public credential getter or automatic activation. */

@@ -9,7 +9,7 @@ import { AiDiagnosticSourceUnavailable, aiRiskReadInputSchema } from './diagnost
 import type { AiOpeningConfigurationSource } from './opening-configuration.source';
 import { RENTAL_OPENING_TERMINOLOGY_FIELDS } from '../rental-adapters/rental-core-config.repository';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
-import { ModelGatewayError } from '../model-gateway.ports';
+import { ModelGatewayError, type GatewayErrorCode } from '../model-gateway.ports';
 import { sealBusinessScenario } from './business-scenario-input';
 
 const inputSchema = z.object({ risks: aiRiskReadInputSchema.optional() }).strict();
@@ -337,7 +337,7 @@ export class AiOpeningActionListService {
             // Original callback provenance or the exact protected null-profile
             // predicate only; generic PROVIDER_UNAVAILABLE still aborts the batch.
             rows.push({ status: 'unavailable' as const, key: section.key, expectedVersion: section.expectedVersion,
-              reason: 'section_source_unavailable' as const, sourceError: error.code,
+              reason: 'section_source_unavailable' as const, sourceError: error.code as GatewayErrorCode,
               nextAction: 'reconcile' as const, persistence: 'not_attempted' as const, publication: 'not_attempted' as const });
           } else throw error;
         }

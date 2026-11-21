@@ -13,7 +13,7 @@ import { requestFingerprint } from '@rental-os/platform-contracts/request-finger
 import { aiTaskRunPlanSchema, aiTaskRunnerLimitsSchema } from './prisma-task-run-evidence.repository';
 import { composeCurrentAuthorizedPersistentTaskInputRunner } from './authorized-persistent-task-input.composition';
 import { waitForTaskApplicationDependency, type AiTaskApplicationHost } from './prisma-task-application';
-import { withAiTaskHeldPreparationDefinition, inheritAiTaskHeldPreparation, type AiTaskHeldPreparation } from './ai-task-runner.service';
+import { withAiTaskHeldPreparationDefinition, inheritAiTaskHeldPreparation, type AiTaskHeldPreparation } from '@rental-os/platform-server/ai-runtime';
 import { readTaskModelRunOrigin } from '../task-input/prisma-task-input.repository';
 import { taskPreparationNonEffectChargeIds } from './prisma-task-run-preparation';
 

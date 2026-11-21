@@ -11,7 +11,7 @@ import { ApprovedProfileTaskAuthority, profileDenied, profileConflict, profileUn
 import { profileChangeInputSchema, aiPersistedPlanToolsSchema } from '../runner/prisma-task-plan-input.source';
 import { aiTaskRunPlanSchema, aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
 import { composeTaskProfileHost } from '../runner/profile-task-host.composition';
-import { snapshotAiTaskRunnerRecoveryLease, AiTaskRunnerError, callAiTaskRunnerDependency } from '../runner/ai-task-runner.service';
+import { snapshotAiTaskRunnerRecoveryLease, AiTaskRunnerError, callAiTaskRunnerDependency } from '@rental-os/platform-server/ai-runtime';
 import { waitForTaskApplicationDependency, type AiTaskApplicationHost } from '../runner/prisma-task-application';
 import { composeAiProfileBusinessConsumer } from './profile-business-consumer.composition';
 import { composeProfileReconfirmation } from './profile-reconfirmation.composition';
@@ -19,7 +19,7 @@ import { composeProfileTaskObservation } from './profile-task-observation.compos
 import { composeProfileTaskActionPolicies } from './profile-task-policies.composition';
 import { composePersistedTaskAuthorization } from '../task-authorization.composition';
 import { AiTaskTransitionRepository } from '../ai-task-transition.repository';
-import type { AiTaskRunnerClaimInput, AiTaskRunnerRecoveryLease } from '../runner/ai-task-runner.ports';
+import type { AiTaskRunnerClaimInput, AiTaskRunnerRecoveryLease } from '@rental-os/platform-server/ai-runtime';
 import { composeOriginalProfileReadAuthority } from './profile-original-read.authority';
 
 export function composeProfileWorkflow(d: ApprovedProfileApplicationDependencies, host: AiTaskApplicationHost,

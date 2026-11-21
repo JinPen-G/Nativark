@@ -8,7 +8,7 @@ import type { AiSceneCode } from '@rental-os/shared';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
 import { captureRentalInternalAuthority } from '@rental-os/rental-core/application-internal-authority';
 import { AiTaskRepositoryError } from './ai-task.repository';
-import { AiTaskRunnerError, callAiTaskRunnerDependency } from './runner/ai-task-runner.service';
+import { AiTaskRunnerError, callAiTaskRunnerDependency } from '@rental-os/platform-server/ai-runtime';
 import { composeAiOriginalScenes, type AiOriginalSceneDependencies } from './scenes/original-scenes.composition';
 import { composeTaskExecutionAdmission } from './task-execution-admission.application';
 import { originalRequestReferenceSchema } from './task-request/original-request.validation';

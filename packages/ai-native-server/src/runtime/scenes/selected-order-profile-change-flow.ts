@@ -8,7 +8,7 @@ import { HttpException } from '@nestjs/common';
 import type { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { AiTaskRepositoryError } from '../ai-task.repository';
-import { AiTaskRunnerError } from '../runner/ai-task-runner.service';
+import { AiTaskRunnerError } from '@rental-os/platform-server/ai-runtime';
 import { ApprovedProfileRouteAuthority, type ApprovedProfileCredentials } from '../profile/approved-profile-route.authority';
 import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';

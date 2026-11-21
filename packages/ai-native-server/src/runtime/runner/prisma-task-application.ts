@@ -9,8 +9,8 @@ import type { AiTaskRecoverySnapshotSource } from './task-recovery-snapshot.port
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError, type AiTaskRepository } from '../ai-task.repository';
 import { aiTaskRunPlanSchema } from './prisma-task-run-evidence.repository';
-import { AiTaskRunnerError, callAiTaskRunnerDependency, type AiTaskRunner, type AiTaskHeldPreparation } from './ai-task-runner.service';
-import type { AiTaskRunnerClock, AiTaskRunnerOutcome } from './ai-task-runner.ports';
+import { AiTaskRunnerError, callAiTaskRunnerDependency, type AiTaskRunner, type AiTaskHeldPreparation } from '@rental-os/platform-server/ai-runtime';
+import type { AiTaskRunnerClock, AiTaskRunnerOutcome } from '@rental-os/platform-server/ai-runtime';
 import { taskExecutionPhaseStore } from './task-execution-phase.store';
 import { waitingPayloadSchema } from './prisma-task-confirmation-checkpoint.source';
 import { PrismaTaskConfirmationHistoryReader } from './prisma-task-confirmation-history.reader';

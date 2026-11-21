@@ -20,11 +20,11 @@ import type { AiTaskInputSource } from '../task-input/task-input.ports';
 import { PrismaTaskPlanInputSource, aiPersistedOrderExplainInputSchema, PERSISTED_READONLY_TOOLS, type PersistedReadonlyTool } from './prisma-task-plan-input.source';
 import { composeAuthorizedReadonlyPersistentTaskInputRunner } from './authorized-persistent-task-input.composition';
 import type { AiTaskRunnerRepositoryCommandFactory } from './ai-task-runner.repository-adapter';
-import type { AiTaskRunnerClock } from './ai-task-runner.ports';
+import type { AiTaskRunnerClock } from '@rental-os/platform-server/ai-runtime';
 import type { AiTaskRegisteredExecutor } from './prisma-task-measured-effects';
 import { aiTaskRunnerLimitsSchema, aiTaskRunPlanSchema } from './prisma-task-run-evidence.repository';
 import type { AiTaskApplicationHost } from './prisma-task-application';
-import { withAiTaskHeldPreparationDefinition, type AiTaskHeldPreparation } from './ai-task-runner.service';
+import { withAiTaskHeldPreparationDefinition, type AiTaskHeldPreparation } from '@rental-os/platform-server/ai-runtime';
 import { PrismaTaskPlanPolicyRepository } from './prisma-task-plan-policy.repository';
 
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');

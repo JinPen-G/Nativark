@@ -30,7 +30,7 @@ import { NATIVE_MODEL_PROTOCOLS } from '../native-model-protocols';
 import type { ModelAdapter } from '../model-gateway.ports';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { HumanAutomationHttpRequest } from './human-automation-request.composition';
-import type { AiTaskRunnerClock } from '../runner/ai-task-runner.ports';
+import type { AiTaskRunnerClock } from '@rental-os/platform-server/ai-runtime';
 import type { GatewayCapacityPort } from '../gateway-capacity.ports';
 import { prepareAutomationExplanationAdmission, admitOriginalAutomationExplanationStart,
   readOriginalAutomationExplanationAdmission } from './automation-explanation-start-admission';

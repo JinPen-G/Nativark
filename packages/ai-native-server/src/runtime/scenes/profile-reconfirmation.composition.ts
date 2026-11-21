@@ -13,7 +13,7 @@ import { ApprovedProfileTaskAuthority, PROFILE_NAME_TOOL_CODE, profileConflict, 
   profileUnavailable, type ApprovedProfileApplicationDependencies } from '../approval-execution/approved-profile-task.authority';
 import { profileChangeInputSchema } from '../runner/prisma-task-plan-input.source';
 import { aiStepActionId } from '../ai-step-registration.repository';
-import { AiTaskRunnerError } from '../runner/ai-task-runner.service';
+import { AiTaskRunnerError } from '@rental-os/platform-server/ai-runtime';
 import { composePersistedTaskAuthorization } from '../task-authorization.composition';
 import { PrismaTaskConfirmationHistoryReader } from '../runner/prisma-task-confirmation-history.reader';
 import { aiTaskResumedConfirmationSchema } from '../runner/prisma-task-run-evidence.repository';

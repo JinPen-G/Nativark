@@ -20,7 +20,7 @@ import { requestFingerprint } from '@rental-os/platform-contracts/request-finger
 import { AiTaskRepositoryError, type AiTaskRepositoryAuthority } from '../ai-task.repository';
 import { AiScopeResolutionError } from '../ai-scope.repository';
 import { ModelGatewayError } from '../model-gateway.ports';
-import { AiTaskRunnerError } from '../runner/ai-task-runner.service';
+import { AiTaskRunnerError } from '@rental-os/platform-server/ai-runtime';
 import { createPersistedBudgetSubsystem } from '../budget/budget.module';
 import { GatewayPricingRecordManagement } from '../budget/prisma-gateway-pricing-records';
 import { presentGatewayInputBoundSummary, presentGatewayPriceSummary } from '../budget/gateway-pricing-request.composition';

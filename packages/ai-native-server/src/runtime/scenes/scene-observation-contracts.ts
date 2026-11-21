@@ -17,7 +17,7 @@ import { AI_BUSINESS_MATERIAL_DRAFT_SCHEMAS, AI_SCOPE_DRAFT_SCHEMAS, AI_SCENE_MO
   AI_CONVERSATION_SCHEMAS, type AiConversationModelResultResponseDraft } from '@rental-os/shared';
 import { AI_NATIVE_COMPONENT_SCHEMAS } from '../contracts/ai-native-schemas';
 import { AiTaskRepositoryError } from '../ai-task.repository';
-import { AiTaskRunnerError } from '../runner/ai-task-runner.service';
+import { AiTaskRunnerError } from '@rental-os/platform-server/ai-runtime';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 const ajv = new Ajv({ strict: true, coerceTypes: false, useDefaults: false, removeAdditional: false });

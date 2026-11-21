@@ -8,7 +8,7 @@ import { requestFingerprint } from '@rental-os/platform-contracts/request-finger
 import { originalIdentityHash } from './task-request/original-request.authority';
 import { AiTaskRepositoryError, aiTaskAccessFromContext, type AiTaskRepositoryAuthority } from './ai-task.repository';
 import { aiTaskRunPlanSchema } from './runner/prisma-task-run-evidence.repository';
-import type { AiTaskRunnerPlan } from './runner/ai-task-runner.ports';
+import type { AiTaskRunnerPlan } from '@rental-os/platform-server/ai-runtime';
 import { taskStepChargesValid } from './runner/task-model-count-charge';
 import { parseTaskModelInput, taskModelFingerprint, TASK_TEXT_MODEL_TOOL } from './model-input/task-model-input';
 import { parseTaskModelDisplayWitness } from './model-input/task-model-display-witness';

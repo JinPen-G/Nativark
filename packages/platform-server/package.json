@@ -330,6 +330,10 @@
     "./ai-runtime": {
       "types": "./dist/ai-runtime/index.d.ts",
       "default": "./dist/ai-runtime/index.js"
+    },
+    "./ai-gateway": {
+      "types": "./dist/ai-gateway/index.d.ts",
+      "default": "./dist/ai-gateway/index.js"
     }
   },
   "scripts": {
@@ -347,7 +351,8 @@
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "@prisma/client": "^5.22.0",
-    "class-transformer": "^0.5.1"
+    "class-transformer": "^0.5.1",
+    "zod": "3.25.76"
   },
   "devDependencies": {
     "@types/node": "^22.9.0"
@@ -593,6 +598,9 @@
       ],
       "ai-runtime": [
         "dist/ai-runtime/index.d.ts"
+      ],
+      "ai-gateway": [
+        "dist/ai-gateway/index.d.ts"
       ]
     }
   }

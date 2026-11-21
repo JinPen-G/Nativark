@@ -3,7 +3,7 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import { AiTaskExecutionBudgetError } from '../task-execution-budget.ports';
 import { taskStepChargesValid } from './task-model-count-charge';
 import type { AiTaskExecutionScopeSource } from './prisma-task-execution-budget.repository';
-import type { AiTaskRunnerLease, AiTaskRunnerStepRef } from './ai-task-runner.ports';
+import type { AiTaskRunnerLease, AiTaskRunnerStepRef } from '@rental-os/platform-server/ai-runtime';
 
 /** Reads original receipts only; never reserves resources or issues dispatch.
  * Recovery stays in the original run. Cross-run migration needs a separately

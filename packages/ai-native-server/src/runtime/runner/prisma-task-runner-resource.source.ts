@@ -4,7 +4,7 @@ import { requestFingerprint } from '@rental-os/platform-contracts/request-finger
 import { AiTaskExecutionBudgetError, type AiTaskExecutionResource, type AiTaskExecutionBudgetPort, type AiTaskExecutionChargeRequest } from '../task-execution-budget.ports';
 import { taskStepChargesValid, isTaskModelCountCharge, reconcileTaskModelCountCharge } from './task-model-count-charge';
 import type { AiTaskExecutionScopeSource } from './prisma-task-execution-budget.repository';
-import type { AiTaskRunnerLease, AiTaskRunnerStepRef, AiTaskRunnerResourceTicket } from './ai-task-runner.ports';
+import type { AiTaskRunnerLease, AiTaskRunnerStepRef, AiTaskRunnerResourceTicket } from '@rental-os/platform-server/ai-runtime';
 import type { AiTaskRunnerResourceEvidenceSource } from './persistent-task-runner-resource-gate';
 import type { PrismaTaskRunEvidenceRepository } from './prisma-task-run-evidence.repository';
 import { PrismaTaskResourceRecoverySource } from './prisma-task-resource-recovery.source';

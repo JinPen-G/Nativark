@@ -16,7 +16,7 @@ import { AiScopeRepository } from '../ai-scope.repository';
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from '../ai-task.repository';
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
 import { originalIdentityHash } from '../task-request/original-request.authority';
-import { AiTaskRunnerError, callAiTaskRunnerDependency } from '../runner/ai-task-runner.service';
+import { AiTaskRunnerError, callAiTaskRunnerDependency } from '@rental-os/platform-server/ai-runtime';
 import { composeStaffInspectionTaskPolicies, type StaffInspectionTaskPolicyOptions } from '../staff-inspection-task-policy.composition';
 import { InspectionRecognitionTaskApplication, type InspectionRecognitionTaskDependencies } from './inspection-recognition-task.application';
 import { inspectionTargetSchema, inspectionId } from './inspection-assist.validation';

@@ -72,13 +72,30 @@ AI 的普通入口同样关闭；仅[实际处理器闭集](src/ai-http-policy.t
 
 AI 启用入口额外提供[知识文件来源](src/ai-file-cleanup-source.ts)，从原文档元数据与实际上传会话核对附件，不读取或解密正文。Workspace 锁定后才复核 Document → Session；缺少已保存文档或已从当前文档移出的旧附件没有可逆的归属证据时保持待处理，不能用文件标签或 metadata 中的空间代替原关系。
 
+## 可选 MCP HTTP 参加者
+
+显式选择 `createRentalMcpHttpContribution` 的 Rental 或双 Core 启动入口，从当前 Rental 装配创建同一原 MCP 总路由。原参加者使用该装配的 Native 数据库、Auth、Guard、部署准入和审计。业务发布、字段许可和适用验证仍由其原政策裁定。普通启动入口无需载入 MCP。[选装组合](src/mcp-composition.ts) · [MCP 宿主约定](../../packages/mcp-server/README.md#选装-node-http-宿主)
+
+宿主以固定路径挂载原路由，确保 MCP 先于全局 body parser 和业务路由接收请求。HTTP 层承担流式转发、断连取消和关停，先完成 MCP 排空，再停止共用的 Native 数据库。上线前须按所选组合验收 TLS、代理、数据材料、真实身份、客户端与原政策。
+
+静态启动源码从 `@rental-os/rental-api/mcp-bootstrap` 调用 `bootstrapRentalAiMcp(selection)`。`selection.cores` 使用原额外 Core 装配选项，`selection.createOriginalHost(host, dependencies)` 接收同一 `RENTAL_HOST_ASSEMBLY`、数据库和配置。该函数调用 `@rental-os/rental-mcp-host` 的原 `createOriginalMcpHost`，绑定真实 Auth、Guard、空间管理、审计与原政策，返回同一总路由。参数与实际实现见 [启动入口](src/mcp-bootstrap.ts)和[原参加者包](../../packages/rental-mcp-host/README.md)。
+
+所选 Client 与 AI 数据准备完成后，在仓库根构建这组明确选装的产物。
+
+```powershell
+npm run build:rental-api:mcp
+npm run lint:rental-api:mcp
+```
+
+这一组源码、启动令牌和入口统一来自 `dist-mcp`。需要扩展 HTTP 时，从同一 `/mcp-bootstrap` 出口取得 `RENTAL_HOST_ASSEMBLY`、`createRentalAiHostModule`、`RentalDatabaseClient` 及对应类型，随后以同一 `close()` 链处理主动关闭和进程信号。运行前继续提供原 Rental 启动配置、固定部署锁及服务端明确的 MCP 配置。[构建配置](tsconfig.mcp.json) · [排空实现](src/bootstrap-ingress.ts)
+
 ## 组合约束与验证边界
 
 普通宿主使用无 AI 的 161 模型；客户检查出箱用 `null` 表达未选择，`undefined` 或残缺参加者会拒绝。AI 启用入口使用 247 模型，通过原实际工厂组合失败出箱、同事务事件、通知草稿、知识读取和原请求服务。公共数据库视图仍限定原 40 模型；两个 Client 的运行时模型图互不覆盖，正文加密沿各自实际模型关系处理嵌套数据。
 
 启用宿主的 HTTP 清单见 [AI 处理器政策](src/ai-http-policy.ts)：运营/员工场景目录、原输入与任务创建、原任务恢复、报价澄清、开业诊断、订单解释、任务中心、场景计划与任务动作策略、租户模型配置及明确列出的手动检查操作。三个执行入口分别消费原专用请求工厂与持久 runner，不同时挂载旧的宽泛模型执行器。每个路由仍通过原 Auth/Guard，后续原场景、owner、对象、能力、任务策略和模型配置分别核定。场景目录只公布确实挂载的请求工厂；原服务端配置未启用、未提供的客户或供应商能力保持不可用。
 
-当前标准根未挂载 MCP 的 OAuth 和 Host router，其实际装配仍在[原组合宿主](../api/src/modules/auth/original-mcp-host.ts)。MCP 的正式合同适配与该入口的运行、切换分别核定；不能以标准 AI 根通过或工具映射存在，宣称旧 MCP 执行者已消费部署停新状态。
+MCP 的 OAuth、Host router 与原 Web 参加者由独立的 `rental-mcp-host` 包提供，旧组合路径转接相同实现。明确选择 MCP 的宿主沿上面的静态启动入口绑定原 Auth、Native/Core 与部署准入，实际运行和切换按所选组合验收。[原参加者路线](../../packages/rental-mcp-host/README.md)
 
 原输入保存/换发、Task 变更、可见事件和模型配置在各自原事务中先锁当前 Auth/Tenant，再复核 Core 与原业务来源，保留原 CAS、幂等键及未知收据。模型目录探测沿原有有界运输，调用前后分别复核当前授权，运输不占用数据库事务。原知识结果/来源只将 `ai-sensitive-read` 必需审计接入当前请求的短事务；文件与知识 ACL、同意依据、原身份及返回前复核继续生效，撤权不返回正文、不重复对象 GET。
 

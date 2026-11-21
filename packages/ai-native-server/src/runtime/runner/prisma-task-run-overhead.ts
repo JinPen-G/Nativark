@@ -7,7 +7,7 @@ import type { Prisma, PrismaClient, AiTaskRunOverhead, AiTaskExecutionCharge } f
 import { performance } from 'node:perf_hooks';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskExecutionBudgetError, type AiTaskExecutionBudgetPort, type AiTaskExecutionSettlementRequest } from '../task-execution-budget.ports';
-import type { AiTaskRunnerLease, AiTaskRunnerOverheadTicket } from './ai-task-runner.ports';
+import type { AiTaskRunnerLease, AiTaskRunnerOverheadTicket } from '@rental-os/platform-server/ai-runtime';
 import type { PrismaTaskRunEvidenceRepository } from './prisma-task-run-evidence.repository';
 
 type Row = AiTaskRunOverhead;
@@ -163,7 +163,7 @@ export class PrismaTaskRunOverhead {
    * prove that only its first PENDING identity exists and no effect was started.
    * Keep old time debt intact; never use this observation to re-time it. */
   private async admitPending(tx: Prisma.TransactionClient, scopeId: string, lease: AiTaskRunnerLease,
-    plan: import('./ai-task-runner.ports').AiTaskRunnerPlan,
+    plan: import('@rental-os/platform-server/ai-runtime').AiTaskRunnerPlan,
     intervals: Row[], debts: Map<string, string>, originHash: string, policyHash: string) {
       const key = { scopeId, taskId: lease.taskId, runId: lease.runId };
       const steps = await tx.aiStep.findMany({ where: key, take: 2 }), first = plan.steps[0];

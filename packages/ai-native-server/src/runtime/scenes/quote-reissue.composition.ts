@@ -17,7 +17,7 @@ import { parseQuoteSelection, validateQuoteSelectionHttpRequest, validateQuoteSe
 import { approvedOrderReviewMaterial } from '../approval-execution/approved-order-review-material';
 import { checkedAiAvailabilityResult } from '../availability-read-facts.service';
 import { AiTaskRepositoryError } from '../ai-task.repository';
-import { AiTaskRunnerError } from '../runner/ai-task-runner.service';
+import { AiTaskRunnerError } from '@rental-os/platform-server/ai-runtime';
 import { freezeOriginalInput } from '../task-request/original-request.validation';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 

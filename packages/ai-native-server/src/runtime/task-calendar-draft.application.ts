@@ -23,7 +23,7 @@ import { verifyOpeningSectionMaterial } from './tools/opening-section-difference
 import { composeRequestBoundOpeningCalendarDraftSave } from './scenes/request-bound-scenes.application';
 import type { AiTaskApplicationHost } from './runner/prisma-task-application';
 import { waitForTaskApplicationDependency } from './runner/prisma-task-application';
-import { AiTaskRunnerError } from './runner/ai-task-runner.service';
+import { AiTaskRunnerError } from '@rental-os/platform-server/ai-runtime';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { freezeOriginalInput } from './task-request/original-request.validation';
 import { respondAiScene } from './scenes/original-scenes.controller';

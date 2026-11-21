@@ -14,8 +14,8 @@ import type { PersistentTaskRunnerComposition } from './persistent-task-runner.c
 import { createAiTaskRunnerOutcomePort } from './ai-task-runner-outcome-adapter';
 import { PrismaTaskStepEvidenceAuthority } from './prisma-task-step-evidence.authority';
 import { AiTaskTakeoverCommitUnknownError, PrismaTaskTakeoverRepository } from './prisma-task-takeover.repository';
-import type { AiTaskRunnerClaimInput, AiTaskRunnerOutcome } from './ai-task-runner.ports';
-import { AiTaskRunnerError, callAiTaskRunnerDependency, snapshotAiTaskRunnerRecoveryLease, type AiTaskHeldPreparation } from './ai-task-runner.service';
+import type { AiTaskRunnerClaimInput, AiTaskRunnerOutcome } from '@rental-os/platform-server/ai-runtime';
+import { AiTaskRunnerError, callAiTaskRunnerDependency, snapshotAiTaskRunnerRecoveryLease, type AiTaskHeldPreparation } from '@rental-os/platform-server/ai-runtime';
 import { PrismaTaskApplication, type AiTaskApplicationHost } from './prisma-task-application';
 
 export interface AuthorizedPersistentTaskInputComposition extends Omit<PersistentTaskRunnerComposition,

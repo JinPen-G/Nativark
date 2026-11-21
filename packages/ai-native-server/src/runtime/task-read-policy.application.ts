@@ -28,7 +28,7 @@ import { freezeOriginalInput } from './task-request/original-request.validation'
 import { originalIdentityHash } from './task-request/original-request.authority';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
 import { waitForTaskApplicationDependency } from './runner/prisma-task-application';
-import { AiTaskRunnerError } from './runner/ai-task-runner.service';
+import { AiTaskRunnerError } from '@rental-os/platform-server/ai-runtime';
 import { respondAiScene } from './scenes/original-scenes.controller';
 import { withRequestAbort } from './scenes/request-abort';
 export const AI_TASK_READ_POLICY_REQUESTS = Symbol('AI_TASK_READ_POLICY_REQUESTS');

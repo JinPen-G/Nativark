@@ -21,8 +21,8 @@ import { PrismaTaskConfirmationCheckpointSource } from './prisma-task-confirmati
 import { PrismaTaskRecoverySnapshotRepository } from './prisma-task-recovery-snapshot.repository';
 import { createAiTaskRunnerOutcomePort } from './ai-task-runner-outcome-adapter';
 import { PrismaTaskApplication, type AiTaskApplicationHost } from './prisma-task-application';
-import { withAiTaskHeldPreparationDefinition, AiTaskRunnerError, type AiTaskHeldPreparation } from './ai-task-runner.service';
-import type { AiTaskRunnerClock } from './ai-task-runner.ports';
+import { withAiTaskHeldPreparationDefinition, AiTaskRunnerError, type AiTaskHeldPreparation } from '@rental-os/platform-server/ai-runtime';
+import type { AiTaskRunnerClock } from '@rental-os/platform-server/ai-runtime';
 import type { AiTaskRunnerRepositoryCommandFactory } from './ai-task-runner.repository-adapter';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);

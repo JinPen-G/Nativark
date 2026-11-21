@@ -17,7 +17,7 @@ import { assertAiReadContextBinding } from './tools/read-context-binding';
 import { createCalendarOriginalRequests } from './task-calendar-original-source.composition';
 import { originalIdentityHash } from './task-request/original-request.authority';
 import { AiTaskRepositoryError } from './ai-task.repository';
-import { AiTaskRunnerError } from './runner/ai-task-runner.service';
+import { AiTaskRunnerError } from '@rental-os/platform-server/ai-runtime';
 import { waitForTaskApplicationDependency } from './runner/prisma-task-application';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';

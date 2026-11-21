@@ -13,7 +13,7 @@ import { PrismaApprovedOrderReprepareRepository, type ApprovedOrderReprepareRow 
 import { approvedOrderCommandSchema, deniedOrder, orderContextHash } from './prisma-approved-order.source';
 import { AiApprovedOrderResultUnknownError } from './approved-order.errors';
 import type { ApprovedOrderReprepareApplication, ApprovedOrderReprepareServices } from './approved-order-reprepare.ports';
-import { callAiTaskRunnerDependency } from '../runner/ai-task-runner.service';
+import { callAiTaskRunnerDependency } from '@rental-os/platform-server/ai-runtime';
 import { taskExecutionPhaseStore } from '../runner/task-execution-phase.store';
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);

@@ -18,7 +18,7 @@ import { AiScopeRepository } from './ai-scope.repository';
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from './ai-task.repository';
 import { AiTaskCurrentIdentityAuthority } from './task-current-identity.authority';
 import { PrismaTaskActionPolicyRepository } from './prisma-task-action-policy.repository';
-import { AiTaskRunnerError } from './runner/ai-task-runner.service';
+import { AiTaskRunnerError } from '@rental-os/platform-server/ai-runtime';
 import { waitForTaskApplicationDependency } from './runner/prisma-task-application';
 import { composeAiOriginalScenes, type AiOriginalSceneDependencies } from './scenes/original-scenes.composition';
 import { respondAiScene } from './scenes/original-scenes.controller';

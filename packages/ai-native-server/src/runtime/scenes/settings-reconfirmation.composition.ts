@@ -14,7 +14,7 @@ import { ApprovedSettingsTaskAuthority, settingsConflict, settingsDenied, settin
   type ApprovedSettingsApplicationDependencies } from '../approval-execution/approved-settings-task.authority';
 import { aiStepActionId } from '../ai-step-registration.repository';
 import { aiTaskRunPlanSchema } from '../runner/prisma-task-run-evidence.repository';
-import { AiTaskRunnerError } from '../runner/ai-task-runner.service';
+import { AiTaskRunnerError } from '@rental-os/platform-server/ai-runtime';
 import { readSettingsRejectedClosure } from './settings-rejected-closure.reader';
 
 const key = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);

@@ -33,7 +33,7 @@ import { composeTaskCenterApproval, taskCenterReviewSchema, taskCenterDecisionSc
   type TaskCenterApprovalDependencies } from './task-center-approval.composition';
 import { readTaskCenterBusiness, type TaskCenterBusinessDependencies } from './task-center-business.reader';
 import { continueTaskCenterOriginal, taskCenterContinueSchema, type TaskCenterContinuationDependencies } from './task-center-continuation.composition';
-import { callAiTaskRunnerDependency, AiTaskRunnerError } from './runner/ai-task-runner.service';
+import { callAiTaskRunnerDependency, AiTaskRunnerError } from '@rental-os/platform-server/ai-runtime';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { callTaskCenterInput, taskCenterInputQuery, taskCenterInputAnswer, taskCenterInputReceipt, type TaskCenterInputDependencies } from './task-center-input.composition';
 import { recordTaskVisibleObservation, type TaskVisibleObservationDependencies } from './observability/task-visible-observation.service';

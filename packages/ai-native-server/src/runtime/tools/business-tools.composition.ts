@@ -194,7 +194,7 @@ export function composeAiAuthorizedBusinessTools(input: {
         return sectionProposals.readReceipt(value);
       } }),
     openingSection: (value: unknown, expectedContext?: AiExecutionContext) => openingActions.readSection(value, expectedContext),
-    openingSectionDifferences: (value: unknown, expectedContext?: AiExecutionContext) => openingActions.prepareSections(value, expectedContext),
+    openingSectionDifferences: (value: unknown, expectedContext?: AiExecutionContext): ReturnType<AiOpeningActionListService['prepareSections']> => openingActions.prepareSections(value, expectedContext),
     riskRecheck: (value: unknown) => openingActions.recheckRisk(value),
     quote: Object.freeze({ ...quote, businessPreparation: quotePreparation,
       bookingIdentityOptions: (value: unknown) => reads.membershipCandidates.readBookingOptions(value),

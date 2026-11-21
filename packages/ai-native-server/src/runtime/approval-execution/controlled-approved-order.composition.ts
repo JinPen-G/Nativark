@@ -13,7 +13,7 @@ import { composeApprovedOrderApplication } from './approved-order-application.co
 import { composeApprovedOrderReprepare } from './approved-order-reprepare.composition';
 import type { ApprovedOrderReprepareServicesFactory } from './approved-order-reprepare.ports';
 import type { PersistedTaskInputTool } from '../runner/prisma-task-plan-input.source';
-import type { AiTaskRunnerClock } from '../runner/ai-task-runner.ports';
+import type { AiTaskRunnerClock } from '@rental-os/platform-server/ai-runtime';
 import type { composeAiGuardedQuoteTools } from '../tools/quote-route.composition';
 
 export type ControlledApprovedOrderDependencies = Omit<PersistedApprovedOrderDependencies, 'inputSource' | 'executionInput' | 'toolVersion'> & {

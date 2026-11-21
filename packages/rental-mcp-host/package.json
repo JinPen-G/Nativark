@@ -1,0 +1,257 @@
+{
+  "name": "@rental-os/rental-mcp-host",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Rental 所选 MCP 的原 OAuth、Auth、Native 和同事务审计组合",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./operation-log": {
+      "types": "./dist/operation-log.service.d.ts",
+      "default": "./dist/operation-log.service.js"
+    },
+    "./workspace-management": {
+      "types": "./dist/workspace-management.d.ts",
+      "default": "./dist/workspace-management.js"
+    },
+    "./original-mcp-host": {
+      "types": "./dist/original-mcp-host.d.ts",
+      "default": "./dist/original-mcp-host.js"
+    },
+    "./original-mcp-oauth-core": {
+      "types": "./dist/original-mcp-oauth-core.d.ts",
+      "default": "./dist/original-mcp-oauth-core.js"
+    },
+    "./original-mcp-catalog-read-tools": {
+      "types": "./dist/original-mcp-catalog-read-tools.d.ts",
+      "default": "./dist/original-mcp-catalog-read-tools.js"
+    },
+    "./original-mcp-review-control-plane": {
+      "types": "./dist/original-mcp-review-control-plane.d.ts",
+      "default": "./dist/original-mcp-review-control-plane.js"
+    },
+    "./original-mcp-grant-control-plane": {
+      "types": "./dist/original-mcp-grant-control-plane.d.ts",
+      "default": "./dist/original-mcp-grant-control-plane.js"
+    },
+    "./original-mcp-admission-control-plane": {
+      "types": "./dist/original-mcp-admission-control-plane.d.ts",
+      "default": "./dist/original-mcp-admission-control-plane.js"
+    },
+    "./original-mcp-reviewed-governance-control-plane": {
+      "types": "./dist/original-mcp-reviewed-governance-control-plane.d.ts",
+      "default": "./dist/original-mcp-reviewed-governance-control-plane.js"
+    },
+    "./original-mcp-subject-control-plane": {
+      "types": "./dist/original-mcp-subject-control-plane.d.ts",
+      "default": "./dist/original-mcp-subject-control-plane.js"
+    },
+    "./original-mcp-catalog-goal-control-plane": {
+      "types": "./dist/original-mcp-catalog-goal-control-plane.d.ts",
+      "default": "./dist/original-mcp-catalog-goal-control-plane.js"
+    },
+    "./original-mcp-catalog-goal-intent-authority": {
+      "types": "./dist/original-mcp-catalog-goal-intent-authority.d.ts",
+      "default": "./dist/original-mcp-catalog-goal-intent-authority.js"
+    },
+    "./original-mcp-client-review-management": {
+      "types": "./dist/original-mcp-client-review-management.d.ts",
+      "default": "./dist/original-mcp-client-review-management.js"
+    },
+    "./original-mcp-notice-review-management": {
+      "types": "./dist/original-mcp-notice-review-management.d.ts",
+      "default": "./dist/original-mcp-notice-review-management.js"
+    },
+    "./original-mcp-oauth-audit": {
+      "types": "./dist/original-mcp-oauth-audit.d.ts",
+      "default": "./dist/original-mcp-oauth-audit.js"
+    },
+    "./original-mcp-grant-identity": {
+      "types": "./dist/original-mcp-grant-identity.d.ts",
+      "default": "./dist/original-mcp-grant-identity.js"
+    },
+    "./original-mcp-browser-identity": {
+      "types": "./dist/original-mcp-browser-identity.d.ts",
+      "default": "./dist/original-mcp-browser-identity.js"
+    },
+    "./original-mcp-core-access": {
+      "types": "./dist/original-mcp-core-access.d.ts",
+      "default": "./dist/original-mcp-core-access.js"
+    },
+    "./original-mcp-read-context": {
+      "types": "./dist/original-mcp-read-context.d.ts",
+      "default": "./dist/original-mcp-read-context.js"
+    },
+    "./original-mcp-catalog-read-authority": {
+      "types": "./dist/original-mcp-catalog-read-authority.d.ts",
+      "default": "./dist/original-mcp-catalog-read-authority.js"
+    },
+    "./original-mcp-catalog-goals": {
+      "types": "./dist/original-mcp-catalog-goals.d.ts",
+      "default": "./dist/original-mcp-catalog-goals.js"
+    },
+    "./original-mcp-catalog-resources": {
+      "types": "./dist/original-mcp-catalog-resources.d.ts",
+      "default": "./dist/original-mcp-catalog-resources.js"
+    },
+    "./original-mcp-request-scope": {
+      "types": "./dist/original-mcp-request-scope.d.ts",
+      "default": "./dist/original-mcp-request-scope.js"
+    },
+    "./original-mcp-grant-management": {
+      "types": "./dist/original-mcp-grant-management.d.ts",
+      "default": "./dist/original-mcp-grant-management.js"
+    },
+    "./original-mcp-platform-management": {
+      "types": "./dist/original-mcp-platform-management.d.ts",
+      "default": "./dist/original-mcp-platform-management.js"
+    },
+    "./original-mcp-workspace-management": {
+      "types": "./dist/original-mcp-workspace-management.d.ts",
+      "default": "./dist/original-mcp-workspace-management.js"
+    },
+    "./original-mcp-public-client-management": {
+      "types": "./dist/original-mcp-public-client-management.d.ts",
+      "default": "./dist/original-mcp-public-client-management.js"
+    },
+    "./original-mcp-consent-policy-management": {
+      "types": "./dist/original-mcp-consent-policy-management.d.ts",
+      "default": "./dist/original-mcp-consent-policy-management.js"
+    },
+    "./original-mcp-subject-management": {
+      "types": "./dist/original-mcp-subject-management.d.ts",
+      "default": "./dist/original-mcp-subject-management.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "operation-log": [
+        "dist/operation-log.service.d.ts"
+      ],
+      "workspace-management": [
+        "dist/workspace-management.d.ts"
+      ],
+      "original-mcp-host": [
+        "dist/original-mcp-host.d.ts"
+      ],
+      "original-mcp-oauth-core": [
+        "dist/original-mcp-oauth-core.d.ts"
+      ],
+      "original-mcp-catalog-read-tools": [
+        "dist/original-mcp-catalog-read-tools.d.ts"
+      ],
+      "original-mcp-review-control-plane": [
+        "dist/original-mcp-review-control-plane.d.ts"
+      ],
+      "original-mcp-grant-control-plane": [
+        "dist/original-mcp-grant-control-plane.d.ts"
+      ],
+      "original-mcp-admission-control-plane": [
+        "dist/original-mcp-admission-control-plane.d.ts"
+      ],
+      "original-mcp-reviewed-governance-control-plane": [
+        "dist/original-mcp-reviewed-governance-control-plane.d.ts"
+      ],
+      "original-mcp-subject-control-plane": [
+        "dist/original-mcp-subject-control-plane.d.ts"
+      ],
+      "original-mcp-catalog-goal-control-plane": [
+        "dist/original-mcp-catalog-goal-control-plane.d.ts"
+      ],
+      "original-mcp-catalog-goal-intent-authority": [
+        "dist/original-mcp-catalog-goal-intent-authority.d.ts"
+      ],
+      "original-mcp-client-review-management": [
+        "dist/original-mcp-client-review-management.d.ts"
+      ],
+      "original-mcp-notice-review-management": [
+        "dist/original-mcp-notice-review-management.d.ts"
+      ],
+      "original-mcp-oauth-audit": [
+        "dist/original-mcp-oauth-audit.d.ts"
+      ],
+      "original-mcp-grant-identity": [
+        "dist/original-mcp-grant-identity.d.ts"
+      ],
+      "original-mcp-browser-identity": [
+        "dist/original-mcp-browser-identity.d.ts"
+      ],
+      "original-mcp-core-access": [
+        "dist/original-mcp-core-access.d.ts"
+      ],
+      "original-mcp-read-context": [
+        "dist/original-mcp-read-context.d.ts"
+      ],
+      "original-mcp-catalog-read-authority": [
+        "dist/original-mcp-catalog-read-authority.d.ts"
+      ],
+      "original-mcp-catalog-goals": [
+        "dist/original-mcp-catalog-goals.d.ts"
+      ],
+      "original-mcp-catalog-resources": [
+        "dist/original-mcp-catalog-resources.d.ts"
+      ],
+      "original-mcp-request-scope": [
+        "dist/original-mcp-request-scope.d.ts"
+      ],
+      "original-mcp-grant-management": [
+        "dist/original-mcp-grant-management.d.ts"
+      ],
+      "original-mcp-platform-management": [
+        "dist/original-mcp-platform-management.d.ts"
+      ],
+      "original-mcp-workspace-management": [
+        "dist/original-mcp-workspace-management.d.ts"
+      ],
+      "original-mcp-public-client-management": [
+        "dist/original-mcp-public-client-management.d.ts"
+      ],
+      "original-mcp-consent-policy-management": [
+        "dist/original-mcp-consent-policy-management.d.ts"
+      ],
+      "original-mcp-subject-management": [
+        "dist/original-mcp-subject-management.d.ts"
+      ]
+    }
+  },
+  "scripts": {
+    "prebuild": "npm run build -w @rental-os/mcp-server && npm run build -w @rental-os/ai-native-server",
+    "build": "node ../../scripts/build-selected-prisma.cjs --project tsconfig.json --mode rental-ai",
+    "prelint": "npm run prebuild",
+    "lint": "node ../../scripts/build-selected-prisma.cjs --project tsconfig.json --mode rental-ai --noEmit"
+  },
+  "dependencies": {
+    "@rental-os/ai-native-server": "0.1.0",
+    "@rental-os/rental-core": "0.1.0",
+    "@rental-os/mcp-server": "0.1.0",
+    "@rental-os/platform-contracts": "0.1.0",
+    "@rental-os/platform-server": "0.1.0",
+    "@rental-os/platform-core-host": "0.1.0",
+    "@rental-os/core-contracts": "0.1.0",
+    "@rental-os/core-host": "0.1.0",
+    "@rental-os/shared": "0.1.0",
+    "@nestjs/common": "^10.4.15"
+  },
+  "peerDependencies": {
+    "@prisma/client": "^5.22.0"
+  },
+  "peerDependenciesMeta": {
+    "@prisma/client": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "typescript": "5.9.3"
+  }
+}

@@ -24,7 +24,7 @@ import { validModelConfigurationOperation } from './model-configuration-operatio
 import { AI_PROVIDER_DISCOVERY_INPUT_SCHEMA, AI_PROVIDER_DISCOVERY_RESULT_SCHEMA, type AiProviderDiscoveryInputDraft } from '@rental-os/shared';
 import type { ModelEgressTransport } from './model-egress.transport';
 import { discoverProviderMetadata } from './provider-discovery.service';
-import { callAiTaskRunnerDependency } from './runner/ai-task-runner.service';
+import { callAiTaskRunnerDependency } from '@rental-os/platform-server/ai-runtime';
 import { captureRentalInternalAuthority } from '@rental-os/rental-core/application-internal-authority';
 import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import { beginTenantModelConfigurationTransaction, createTenantModelConfigurationTransactions,

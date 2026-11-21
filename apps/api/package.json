@@ -3,11 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "predev": "npm run build -w @rental-os/platform-core-host && npm run build -w @rental-os/example-tickets-core && npm run build -w @rental-os/rental-core && npm run build -w @rental-os/ai-native-server",
+    "predev": "npm run build -w @rental-os/platform-core-host && npm run build -w @rental-os/example-tickets-core && npm run build -w @rental-os/rental-core && npm run build -w @rental-os/ai-native-server && npm run build -w @rental-os/rental-mcp-host",
     "dev": "nest start --watch",
-    "prebuild": "npm run build -w @rental-os/platform-core-host && npm run build -w @rental-os/example-tickets-core && npm run build -w @rental-os/rental-core && npm run build -w @rental-os/ai-native-server",
+    "prebuild": "npm run build -w @rental-os/platform-core-host && npm run build -w @rental-os/example-tickets-core && npm run build -w @rental-os/rental-core && npm run build -w @rental-os/ai-native-server && npm run build -w @rental-os/rental-mcp-host",
     "build": "nest build",
-    "prelint": "npm run build -w @rental-os/platform-core-host && npm run build -w @rental-os/example-tickets-core && npm run build -w @rental-os/rental-core && npm run build -w @rental-os/ai-native-server",
+    "prelint": "npm run build -w @rental-os/platform-core-host && npm run build -w @rental-os/example-tickets-core && npm run build -w @rental-os/rental-core && npm run build -w @rental-os/ai-native-server && npm run build -w @rental-os/rental-mcp-host",
     "lint": "tsc -p tsconfig.json --noEmit",
     "prisma:generate": "prisma generate",
     "prisma:validate": "prisma validate",
@@ -38,7 +38,8 @@
     "zod": "^3.23.8",
     "@rental-os/rental-core": "0.1.0",
     "@rental-os/platform-contracts": "0.1.0",
-    "@rental-os/ai-native-server": "0.1.0"
+    "@rental-os/ai-native-server": "0.1.0",
+    "@rental-os/rental-mcp-host": "0.1.0"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.4.8",

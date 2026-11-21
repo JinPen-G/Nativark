@@ -24,7 +24,7 @@ import { composePersistentTaskRunner } from './persistent-task-runner.compositio
 import { PrismaTaskApplication, type AiTaskApplicationHost } from './prisma-task-application';
 import { PrismaTaskRecoverySnapshotRepository } from './prisma-task-recovery-snapshot.repository';
 import { AiTaskEventRepository } from '../ai-task-event.repository';
-import { withAiTaskHeldPreparationDefinition, type AiTaskHeldPreparation } from './ai-task-runner.service';
+import { withAiTaskHeldPreparationDefinition, type AiTaskHeldPreparation } from '@rental-os/platform-server/ai-runtime';
 import type { AiTaskRunnerRepositoryCommandFactory } from './ai-task-runner.repository-adapter';
 
 export function composeOpeningProposalTaskHost(input: AiOriginalSceneDependencies & {

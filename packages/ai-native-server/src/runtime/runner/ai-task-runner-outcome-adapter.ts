@@ -1,9 +1,9 @@
 import type { AiTaskTransitionRepository } from '../ai-task-transition.repository';
 import type { AiTaskRepository } from '../ai-task.repository';
-import type { AiTaskRunnerOutcomePort, AiTaskRunnerTaskOutcome } from './ai-task-runner.ports';
+import type { AiTaskRunnerOutcomePort, AiTaskRunnerTaskOutcome } from '@rental-os/platform-server/ai-runtime';
 import { AI_TASK_DRAFT_VERSION, type AiTaskEventDraft } from '@rental-os/shared';
 import { isDeepStrictEqual } from 'node:util';
-import { AiTaskRunnerError } from './ai-task-runner.service';
+import { AiTaskRunnerError } from '@rental-os/platform-server/ai-runtime';
 
 export interface AiTaskRunnerOutcomeCommandFactory {
   transition(input: Readonly<{
@@ -63,7 +63,7 @@ export function createAiTaskRunnerOutcomePort(adapters: AiTaskRunnerOutcomeAdapt
     async commit(input) {
       input = structuredClone(input);
       if (input.taskId !== input.lease.taskId) throw new AiTaskRunnerError('AI_INVALID_INPUT');
-      let resumeReceipt: import('./ai-task-runner.ports').AiTaskRunnerStepCommit | undefined;
+      let resumeReceipt: import('@rental-os/platform-server/ai-runtime').AiTaskRunnerStepCommit | undefined;
       if (adapters.tasks && (input.outcome.status === 'succeeded' || input.outcome.status === 'failed')) {
         const metadata = await adapters.tasks.readMetadata(input.taskId);
         if (metadata.taskId !== input.taskId || metadata.revision !== input.taskRevision) throw new Error('AI_STORAGE_UNAVAILABLE');

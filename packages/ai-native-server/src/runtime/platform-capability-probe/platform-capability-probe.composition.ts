@@ -22,7 +22,7 @@ import { composeTextCapabilityProbeTaskProducer } from '../text-capability-probe
 import { TEXT_PROBE_SCENE, TEXT_CAPABILITY_PROBE_TOOL, type TextProbeCommand, type TextProbeContext } from '../text-capability-probe';
 import type { UnifiedGatewayAudit } from '../unified-ai-gateway.ports';
 import { PrismaPlatformGatewayAudit } from '../prisma-platform-gateway-audit';
-import type { AiTaskRunnerClock } from '../runner/ai-task-runner.ports';
+import type { AiTaskRunnerClock } from '@rental-os/platform-server/ai-runtime';
 import { PlatformTaskIdentityAuthority, composePlatformTaskAuthorization, PlatformTaskPlanPolicyReader } from './platform-probe.authorization';
 import { PlatformBudgetAuthorizationSource, PlatformPolicyEntitlementSource, PlatformGatewayCallPricing } from './platform-budget.authorization';
 import { PlatformCapabilityProbeAuthority } from './platform-probe.authority';

@@ -10,7 +10,7 @@ import { AiTaskRepositoryError, type AiTaskRepository } from './ai-task.reposito
 import type { AiTaskCredentialSource } from './task-current-action.authority';
 import { readOriginalTaskModelProvenance } from './task-request/prisma-original-request.repository';
 import { waitForTaskApplicationDependency } from './runner/prisma-task-application';
-import { AiTaskRunnerError } from './runner/ai-task-runner.service';
+import { AiTaskRunnerError } from '@rental-os/platform-server/ai-runtime';
 import { taskInputReceiptReferenceSchema } from './task-input/prisma-task-input.repository';
 
 type Request = { headers: { authorization?: unknown } };

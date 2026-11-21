@@ -20,6 +20,8 @@
     "dist",
     "dist-ai",
     "generated",
-    "src/ai-*.ts"
+    "src/ai-*.ts",
+    "src/mcp-*.ts",
+    "dist-mcp"
   ]
 }

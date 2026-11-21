@@ -13,7 +13,7 @@ import type { PrismaOriginalRequestRepository } from './task-request/prisma-orig
 import { aiPersistedPlanToolsSchema } from './runner/prisma-task-plan-input.source';
 import { aiTaskRunnerLimitsSchema } from './runner/prisma-task-run-evidence.repository';
 import { waitForTaskApplicationDependency } from './runner/prisma-task-application';
-import { AiTaskRunnerError } from './runner/ai-task-runner.service';
+import { AiTaskRunnerError } from '@rental-os/platform-server/ai-runtime';
 import { taskActionPolicyOperations, type AiTaskActionPolicyOperation,
   type PrismaTaskActionPolicyRepository, type AiTaskActionPolicyMutationResult } from './prisma-task-action-policy.repository';
 import { TaskExecutionAdmissionAuthority, type TaskExecutionAdmissionSigningDependencies } from './task-execution-admission.authority';

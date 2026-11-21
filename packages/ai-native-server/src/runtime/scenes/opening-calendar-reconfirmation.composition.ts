@@ -9,7 +9,7 @@ import { AI_SCENE_REQUEST_DRAFT_VERSION, type AiExecutionContext } from '@rental
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { getRequestIdentity } from '@rental-os/platform-server/request-identity';
 import { AiTaskRepositoryError } from '../ai-task.repository';
-import { AiTaskRunnerError } from '../runner/ai-task-runner.service';
+import { AiTaskRunnerError } from '@rental-os/platform-server/ai-runtime';
 import { originalRequestReferenceSchema, freezeOriginalInput } from '../task-request/original-request.validation';
 import { AiBusinessReadRouteAuthority } from '../business-read-route.authority';
 import { AiOpeningSectionDifferenceService, openingSectionChangeSchema, openingSectionFromMaterial, verifyOpeningSectionMaterial } from '../tools/opening-section-difference.service';

@@ -6,7 +6,7 @@ import type { AiRetentionService } from './retention.service';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
 import { withRequestAbort, type AiRequestAbortSource } from '../scenes/request-abort';
-import { callAiTaskRunnerDependency } from '../runner/ai-task-runner.service';
+import { callAiTaskRunnerDependency } from '@rental-os/platform-server/ai-runtime';
 import { retentionHttpRequest, retentionHttpResponse, platformRetentionHttpRequest, platformRetentionHttpResponse } from './retention-http.contract';
 import type { AiPlatformRetentionService } from './platform-retention.service';
 

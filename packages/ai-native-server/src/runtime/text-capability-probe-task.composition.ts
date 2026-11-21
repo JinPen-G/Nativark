@@ -20,17 +20,17 @@ import type { AiTaskRunnerRepositoryCommandFactory } from './runner/ai-task-runn
 import type { AiTaskInputSource } from './task-input/task-input.ports';
 import type { AiTaskRegisteredExecutor } from './runner/prisma-task-measured-effects';
 import { aiTaskRunnerLimitsSchema } from './runner/prisma-task-run-evidence.repository';
-import type { AiTaskRunnerClock, AiTaskRunnerLease, AiTaskRunnerStepRef } from './runner/ai-task-runner.ports';
+import type { AiTaskRunnerClock, AiTaskRunnerLease, AiTaskRunnerStepRef } from '@rental-os/platform-server/ai-runtime';
 import type { ApiAuthGuard } from './rental-adapters/api-auth.guard';
 import { composeAuthorizedTextProbeTaskProducer } from './prisma-text-probe-original-request.repository';
 import { composeTaskActionPolicyManagement } from './task-action-policy-management.composition';
 import type { AiTaskActionPolicyMutation } from './prisma-task-action-policy.repository';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
-import { withAiTaskHeldPreparationDefinition } from './runner/ai-task-runner.service';
+import { withAiTaskHeldPreparationDefinition } from '@rental-os/platform-server/ai-runtime';
 import { composePersistedTaskAccountingRecovery } from './task-model-gateway.composition';
 import { presentTaskBudgetUsageRecord } from './budget/task-budget-usage.reader';
 import { BudgetError } from './budget/budget.ports';
-import { AiTaskRunnerError } from './runner/ai-task-runner.service';
+import { AiTaskRunnerError } from '@rental-os/platform-server/ai-runtime';
 
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');

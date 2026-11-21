@@ -3,7 +3,7 @@
  * It names the original resource origin; current inputs still authorize the plan.
  */
 import { z } from 'zod';
-import type { AiTaskRunnerPlan } from './ai-task-runner.ports';
+import type { AiTaskRunnerPlan } from '@rental-os/platform-server/ai-runtime';
 export type { AiTaskPreparationDefinition, AiTaskPreparationTicket, AiTaskPreparationResources } from '@rental-os/platform-server/ai-runtime';
 import { aiTaskRunPlanSchema, isAiTaskRunPlanBounded } from './prisma-task-run-evidence.repository';
 import type { AiTaskExecutionLease, AiTaskExecutionPolicy, AiTaskExecutionSettlementRequest, AiTaskExecutionChargeEvidence } from '../task-execution-budget.ports';

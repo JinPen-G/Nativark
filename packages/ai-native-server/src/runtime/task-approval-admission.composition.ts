@@ -7,7 +7,7 @@ import type { AiHumanQuoteOrderDecisionRequestDraft, AiHumanQuoteOrderReprepareR
   AiSelectedQuoteTaskContinueRequestDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError, aiTaskAccessFromContext } from './ai-task.repository';
 import { AiTaskCurrentIdentityAuthority } from './task-current-identity.authority';
-import { AiTaskRunnerError, callAiTaskRunnerDependency } from './runner/ai-task-runner.service';
+import { AiTaskRunnerError, callAiTaskRunnerDependency } from '@rental-os/platform-server/ai-runtime';
 import { composeTaskApprovalAdmission, type TaskApprovalAdmissionIntent, type TaskApprovalAdmissionReference } from './task-approval-admission.application';
 import type { HumanQuoteSelectionDependencies } from './task-request/prisma-quote-selection.repository';
 import { validateQuoteSelectionHttpRequest } from './task-request/quote-selection.validation';

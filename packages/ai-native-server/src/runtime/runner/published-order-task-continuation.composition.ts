@@ -11,7 +11,7 @@ import { taskCenterContinueSchema } from '../task-center-continuation.compositio
 import { composeTaskOrderHost, type TaskOrderHostDependencies } from './order-task-host.composition';
 import { aiTaskRunPlanSchema, aiTaskRunnerLimitsSchema } from './prisma-task-run-evidence.repository';
 import { waitForTaskApplicationDependency } from './prisma-task-application';
-import { AiTaskRunnerError, callAiTaskRunnerDependency, snapshotAiTaskRunnerRecoveryLease } from './ai-task-runner.service';
+import { AiTaskRunnerError, callAiTaskRunnerDependency, snapshotAiTaskRunnerRecoveryLease } from '@rental-os/platform-server/ai-runtime';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const configurationSchema = z.object({ host: z.object({ holderId: id, leaseMs: z.number().int().min(1).max(120000) }).strict(),

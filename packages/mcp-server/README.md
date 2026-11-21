@@ -1,6 +1,6 @@
 # MCP 服务接入
 
-本包提供 Web-standard `fetch(Request) / close()`、OAuth 传输、受控只读注册及原 Native 事务适配。原 API 已提供同一 OAuth Core、Web 控制面和 Rental 读取参加者的装配工厂，生产 HTTP / Nest 监听接入仍待完成。监听、TLS、代理、可信登录与人类界面由宿主负责。
+本包提供 Web-standard `fetch(Request) / close()`、OAuth 传输、受控只读注册及原 Native 事务适配。选装宿主通过 Node HTTP 中间件消费独立的 Rental OAuth Core、Web 控制面和业务读取参加者，原组合 API 继续转接这些相同实现。监听、TLS、代理、可信登录与人类界面由宿主负责。[Rental 参加者包](../rental-mcp-host/README.md)
 
 业务开放须同时具备当前资源身份、原 Auth / Guard / ALS、Core 准入、持久计量、工具发布及外发字段许可。缺真实依赖或证据时保持 `unavailable`，原操作核对沿原键办理。下面的源码和验证入口随公开检出提供。
 
@@ -30,15 +30,21 @@ npm run typecheck -w @rental-os/mcp-server
 
 `createRentalMcpService` 组合 AS 元数据、授权回调、token / refresh / 撤销及受保护 MCP。宿主显式提供同一 Serializable 仓储、当前客户端登记、AS 元数据、已完成可信同意、签发与当前 grant 读取作者。issuer、resource、端点和 scope ceiling 须一致，所有路由互异。业务 `readTools` 中的原权限、计量和 release 分别注入。[统一服务](src/service.ts)
 
-`createOriginalMcpOAuthCore` 用原数据库和 Auth 构造唯一 store、登记、准入、同意、grant、token 及审计链。内部 `createReadTools` 同步工厂取得本 Core 的 store / grantAuthority，原目录组合可用该端口接上持久目标、预算与 Native facts。它与直接 `resource.readTools` 互斥，异步或不完整返回、自带 usage 和重复使用观察均拒绝。[原 OAuth Core](../../apps/api/src/modules/auth/original-mcp-oauth-core.ts) · [目录组合](../../apps/api/src/modules/auth/original-mcp-catalog-read-tools.ts)
+`createOriginalMcpOAuthCore` 用原数据库和 Auth 构造唯一 store、登记、准入、同意、grant、token 及审计链。内部 `createReadTools` 同步工厂取得本 Core 的 store / grantAuthority，原目录组合可用该端口接上持久目标、预算与 Native facts。它与直接 `resource.readTools` 互斥，异步或不完整返回、自带 usage 和重复使用观察均拒绝。[原 OAuth Core](../rental-mcp-host/src/original-mcp-oauth-core.ts) · [目录组合](../rental-mcp-host/src/original-mcp-catalog-read-tools.ts)
 
 ### 原 API host 与固定总路由
 
-`createOriginalMcpHost` 将同一 Core 接到用户同意、登记 / 通知审查、grant 管理、平台 / 空间准入、已审查投影、subject 和可选目标控制面。配置逐项核 enabled / resource / scopes 与实际工厂身份。缺独立审查验证来源时，已声明审查路保持不可用，已有投影只允许原精确收紧。[原宿主工厂](../../apps/api/src/modules/auth/original-mcp-host.ts)
+`createOriginalMcpHost` 将同一 Core 接到用户同意、登记 / 通知审查、grant 管理、平台 / 空间准入、已审查投影、subject 和可选目标控制面。配置逐项核 enabled / resource / scopes 与实际工厂身份。缺独立审查验证来源时，已声明审查路保持不可用，已有投影只允许原精确收紧。[原宿主工厂](../rental-mcp-host/src/original-mcp-host.ts)
 
-总路由按固定 HTTPS origin / pathname 分派原组件，保留原 Response。query、method 和 body 继续由所属组件校验。原 API 启动入口当前尚未调用此工厂，生产 Nest / Guard 路由、TLS 和可信 UI 仍须宿主接入。[路由器](src/host-router.ts) · [API 启动入口](../../apps/api/src/main.ts)
+总路由按固定 HTTPS origin / pathname 分派原组件，并公开同一份冻结的 `routeUrls` 供选装 HTTP 入口使用。query、method 和 body 继续由所属组件校验。[路由器](src/host-router.ts)
 
 关闭先停止新请求，取消并等待已接受的原 handler 和组件 close。同一组件只关闭一次，重复 close 共用同一 Promise，关闭失败保留错误。迟到同意停止交付 code，已提交或 unknown 的原操作仍按原收据核对。
+
+### 选装 Node HTTP 宿主
+
+`createMcpHttpHost` 接收原总路由。Nest Express 宿主在 CORS、body parser 和业务路由之前，以 `app.use(mcp.middleware)` 接管清单内的精确路径。未登记路径交还原中间件链。入口代理按固化的 HTTPS 地址转发并保留对应 `Host`、原始路径和请求体。中间件用配置中的 authority 与 `Host` 匹配，目的地不受 `Forwarded` 和 `X-Forwarded-*` 影响。原 Origin、Authorization、协议版本和内容类型继续由所属组件检查。[HTTP 适配](src/http-host.ts)
+
+响应保持原状态、认证挑战、重定向和流式字节。断线取消传输。停机时先等待 `mcp.close()` 排空原 handler 和响应流，再释放它们共用的业务数据库。若原操作已提交或结果未知，继续按原键读取收据。生产验收仍需在所选宿主完成 TLS、代理、真实数据库及客户端往返。
 
 ### 原用户同意 Web 控制面
 
@@ -104,15 +110,15 @@ public-client 登记 / 审查由原当前 SaaS 管理身份办理。通知与准
 
 通知 / 验证由当前两级已批准政策裁定。只有两级都明确 verificationRequired:false 且有原依据才返回 not_required，否则须原已完成 MFA 证据，绑定账号、会话、空间、resource、请求 / policy hash、修订与期限。普通登录、实名、Origin、nonce 或模型确认均不能补该证据。[同意政策读取](src/prisma-oauth-consent-review.ts)
 
-原 OAuth、管理与业务日志沿同一 OperationLog 写入，缺原关联、失败或缺日志 ID 在原事务拒绝。事件仅保留原键、引用和修订，凭据、nonce、正文及私人政策由各自原存储保管。历史收据按独立当前读权读取，政策停新与历史读取分别核定。[原 OAuth 审计](../../apps/api/src/modules/auth/original-mcp-oauth-audit.ts) · [原日志服务](../../apps/api/src/common/operation-log.service.ts)
+原 OAuth、管理与业务日志沿同一 OperationLog 写入，缺原关联、失败或缺日志 ID 在原事务拒绝。事件仅保留原键、引用和修订，凭据、nonce、正文及私人政策由各自原存储保管。历史收据按独立当前读权读取，政策停新与历史读取分别核定。[原 OAuth 审计](../rental-mcp-host/src/original-mcp-oauth-audit.ts) · [原日志服务](../../apps/api/src/common/operation-log.service.ts)
 
 ### 可选业务 Core 准入
 
-原宿主可通过 `original.coreAccess` 选择 [createOriginalMcpCoreAccess](../../apps/api/src/modules/auth/original-mcp-core-access.ts)，供给真实成员读取、订阅期限及使用当前 Native 事务的物理部署观察。它复用平台 Core 授权、成员分配、原绑定和 canonical 部署停新记录，原 OAuth、Auth、Guard、业务权限与字段释放继续分别裁定。选择此参加者时，业务读取必须由同一 `createReadTools` 工厂构造，不能另挂绕开它的 `readTools` 或资源提供者。
+原宿主可通过 `original.coreAccess` 选择 [createOriginalMcpCoreAccess](../rental-mcp-host/src/original-mcp-core-access.ts)，供给真实成员读取、订阅期限及使用当前 Native 事务的物理部署观察。它复用平台 Core 授权、成员分配、原绑定和 canonical 部署停新记录，原 OAuth、Auth、Guard、业务权限与字段释放继续分别裁定。选择此参加者时，业务读取必须由同一 `createReadTools` 工厂构造，不能另挂绕开它的 `readTools` 或资源提供者。
 
 目录与可用量读取要求部署允许新工作。保存新的原请求还须复验订阅期限。目标意图的新建、接受和采用使用同一回调内已持有的准入锁。部署停新后，原键结果、已有决定回执及拒绝操作保留原当前权限路径，不重发旧请求或新建目标。租户 Core 授权、成员分配、原角色或绑定已失效时仍拒绝该通道。必要历史与业务收尾由其已登记的原权限入口办理。
 
-准入租约只在拥有它的原消费回调内有效，后续复核或回调外不能复用。接口与验证可从 [读取上下文](../../apps/api/src/modules/auth/original-mcp-read-context.ts)、[原请求权威](../../apps/api/src/modules/auth/original-mcp-request-authority.ts)、[目标权威](../../apps/api/src/modules/auth/original-mcp-catalog-goal-intent-authority.ts) 和 [现有可信主体用例](../../tests/mcp-trusted-principal.test.cjs)定位。宿主选装、发布和监听分别配置，参加者本身不注册生产端点或授予业务执行权。
+准入租约只在拥有它的原消费回调内有效，后续复核或回调外不能复用。接口与验证可从 [读取上下文](../rental-mcp-host/src/original-mcp-read-context.ts)、[原请求权威](../../apps/api/src/modules/auth/original-mcp-request-authority.ts)、[目标权威](../rental-mcp-host/src/original-mcp-catalog-goal-intent-authority.ts) 和 [现有可信主体用例](../../tests/mcp-trusted-principal.test.cjs)定位。宿主选装、发布和监听分别配置，参加者本身不注册生产端点或授予业务执行权。
 
 ## 原目标、计量与核对
 
@@ -134,15 +140,15 @@ public-client 登记 / 审查由原当前 SaaS 管理身份办理。通知与准
 
 ### 初始目标与可信切换
 
-首个目录 frontier 由原 Auth / Guard、目标 SQL、bindings 和 OperationLog 同事务建立。goal UUID 由服务端生成，ownerKey 保持 user / tenant / workspace 范围。查询、token、Host 或 adapter 变化保留原目标，换 grant / client / 范围 / policy 拒绝。旧预算存在、缺行 / 审计或占用满时拒绝 bootstrap。[原目标作者](../../apps/api/src/modules/auth/original-mcp-catalog-goals.ts) · [目标 store](src/prisma-mcp-catalog-goals.ts) · [结构](mysql-catalog-goal-schema.sql)
+首个目录 frontier 由原 Auth / Guard、目标 SQL、bindings 和 OperationLog 同事务建立。goal UUID 由服务端生成，ownerKey 保持 user / tenant / workspace 范围。查询、token、Host 或 adapter 变化保留原目标，换 grant / client / 范围 / policy 拒绝。旧预算存在、缺行 / 审计或占用满时拒绝 bootstrap。[原目标作者](../rental-mcp-host/src/original-mcp-catalog-goals.ts) · [目标 store](src/prisma-mcp-catalog-goals.ts) · [结构](mysql-catalog-goal-schema.sql)
 
-目标意图先按原键准备下一输入 hash 与 nonce，再由独立当前 Web owner / grant / Guard / 适用验证作一次决定。accepted 只说明该意图已接受。采用需显式 adopt POST、同实例 withTransition 参加者和新鲜完整 settled 证据。reserved / unknown、缺预算或调用、忙锁拒绝采用，GET 和缓存意图不能发起转换。[意图](src/prisma-mcp-catalog-goal-intents.ts) · [Web 控制面](src/catalog-goal-control-plane.ts) · [原目标 authority](../../apps/api/src/modules/auth/original-mcp-catalog-goal-intent-authority.ts)
+目标意图先按原键准备下一输入 hash 与 nonce，再由独立当前 Web owner / grant / Guard / 适用验证作一次决定。accepted 只说明该意图已接受。采用需显式 adopt POST、同实例 withTransition 参加者和新鲜完整 settled 证据。reserved / unknown、缺预算或调用、忙锁拒绝采用，GET 和缓存意图不能发起转换。[意图](src/prisma-mcp-catalog-goal-intents.ts) · [Web 控制面](src/catalog-goal-control-plane.ts) · [原目标 authority](../rental-mcp-host/src/original-mcp-catalog-goal-intent-authority.ts)
 
 采用在同一原事务保存原键收据、旧目标 history，CAS 更新 frontier，并写 admitted / adopted 日志。旧预算、calls、bindings 和审计完整保留，新 goal 首次读仍须准备原输入关联后进独立预算。settled / adopted 均只描述原计量或 frontier 证据，业务完成与执行批准另沿原链核定。[采用参加者](src/prisma-mcp-catalog-goal-adoptions.ts) · [意图 SQL](mysql-catalog-goal-intent-schema.sql) · [采用 SQL](mysql-catalog-goal-adoption-schema.sql)
 
 ### 原调用键只读核对
 
-原 Web 可显式声明 readCallReceipt / readCallList 路，并供给 receiptTraffic 独立原政策源。当前本人在短事务定位原 grant / call，后续独立事务按原 grant / 身份 → goal → call 核完整关联。租户管理权不自动取得他人 call，游标只表示当前范围的位置。本人页最多 20 条、ASCII callId 顺序与 limit+1，翻页保留非完整历史快照语义。[原收据 store](src/prisma-mcp-read-receipt.ts) · [原 grant 工厂](../../apps/api/src/modules/auth/original-mcp-grant-control-plane.ts)
+原 Web 可显式声明 readCallReceipt / readCallList 路，并供给 receiptTraffic 独立原政策源。当前本人在短事务定位原 grant / call，后续独立事务按原 grant / 身份 → goal → call 核完整关联。租户管理权不自动取得他人 call，游标只表示当前范围的位置。本人页最多 20 条、ASCII callId 顺序与 limit+1，翻页保留非完整历史快照语义。[原收据 store](src/prisma-mcp-read-receipt.ts) · [原 grant 工厂](../rental-mcp-host/src/original-mcp-grant-control-plane.ts)
 
 返回原 call / goal、callsConsumed、reserved / unknown / returned / failed 及 held / settled 活跃摘要。returned 只表示 callback 计量结算，not_observed 保持 retryable:false。该读取只核原证据，reserve、settle、占用释放、业务重发及正文由各自原操作负责。独立当前 Web owner 可核已撤销 / 到期 grant 的历史。
 
@@ -154,15 +160,15 @@ public-client 登记 / 审查由原当前 SaaS 管理身份办理。通知与准
 
 ## 业务资源与历史结果
 
-原 MCP 主体只在真实 Auth / Guard 消费回调内取得当前 user / tenant / workspace / dataScope / locationScope。context、Native 和 call 绑定在回调结束 / 取消后失效，异步迟到读取拒绝。原 issuer subject 由原 grant / Auth 关联定位，调用输入仅定位受权事实。[读取上下文](../../apps/api/src/modules/auth/original-mcp-read-context.ts) · [目录 authority](../../apps/api/src/modules/auth/original-mcp-catalog-read-authority.ts)
+原 MCP 主体只在真实 Auth / Guard 消费回调内取得当前 user / tenant / workspace / dataScope / locationScope。context、Native 和 call 绑定在回调结束 / 取消后失效，异步迟到读取拒绝。原 issuer subject 由原 grant / Auth 关联定位，调用输入仅定位受权事实。[读取上下文](../rental-mcp-host/src/original-mcp-read-context.ts) · [目录 authority](../rental-mcp-host/src/original-mcp-catalog-read-authority.ts)
 
 | 读取或参加者 | 原入口与领域消费 |
 | --- | --- |
-| 目录 | 同 Native 原目录 GET Guard、Core 配置分页与正式目录 facts，保留 partial / cursor / configurationVersion。[资源](../../apps/api/src/modules/auth/original-mcp-catalog-resources.ts) · [Core 运行时](../rental-core/src/mysql-core-runtime.ts) |
+| 目录 | 同 Native 原目录 GET Guard、Core 配置分页与正式目录 facts，保留 partial / cursor / configurationVersion。[资源](../rental-mcp-host/src/original-mcp-catalog-resources.ts) · [Core 运行时](../rental-core/src/mysql-core-runtime.ts) |
 | 可用性 | 原专属 scope 与 availability POST Guard，复用原履约准入、库存快照及 computeAvailability。[授权](../../apps/api/src/modules/auth/original-mcp-availability-read-authority.ts) · [资源](../../apps/api/src/modules/auth/original-mcp-availability-resources.ts) |
 | 原订单问题 | status / fees / payments / next_steps 按原请求选择消费历史订单、报价与检查，保留缺项和不可执行候选。[订单资源](../../apps/api/src/modules/auth/original-mcp-order-status-resources.ts) · [业务运行时](../rental-core/src/mysql-business-runtime.ts) |
 | 支付 / 退款事实 | 专用财务 Guard 与原 Native 分页，金额 / 状态来自原 PaymentRuntime，缺记录、缺资金事实保持原 unavailable / not_loaded。[固定 Guard](../../apps/api/src/common/api-auth.guard.ts) · [支付兼容入口](../../apps/api/src/modules/integrations/payment.runtime.service.ts) |
-| 原请求 scope / 政策 | canonical scope 只查已有行，订阅与当前资源 policy 在同 Native 复验。[scope](../../apps/api/src/modules/auth/original-mcp-request-scope.ts) · [请求 authority](../../apps/api/src/modules/auth/original-mcp-request-authority.ts) |
+| 原请求 scope / 政策 | canonical scope 只查已有行，订阅与当前资源 policy 在同 Native 复验。[scope](../rental-mcp-host/src/original-mcp-request-scope.ts) · [请求 authority](../../apps/api/src/modules/auth/original-mcp-request-authority.ts) |
 | 原请求保存 / 核对 | 必需同 Native association 审计，saveIn 返回 prepared / commit:not_observed，reconcileIn 按原键只读且 Task 为 not_loaded。[统一参加者](../../apps/api/src/modules/auth/original-mcp-request-participant.ts) · [保存审计](../../apps/api/src/modules/auth/original-mcp-request-save-audit.ts) |
 
 Native 读取复用原领域与仓储算法，活动 owner、当前授权及 signal 在实际派发前后检查。原 API / Core 目录和可用性明细上限 100，MCP 接点上限 50。库存用 10,001 溢出哨兵拒绝部分计算，内部完整有界事实按原算法求可用量。可用性观察与预占 / 下单分别执行，历史报价读取与当前计价分别取源。[Rental 包路线](../rental-core/README.md)

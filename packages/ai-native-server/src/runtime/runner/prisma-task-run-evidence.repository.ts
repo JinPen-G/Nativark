@@ -10,7 +10,8 @@ import { taskExecutionPhaseStore } from './task-execution-phase.store';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskExecutionBudgetError, type AiTaskExecutionEvidenceSource, type AiTaskExecutionSettlementRequest } from '../task-execution-budget.ports';
 import type { AiTaskExecutionScopeSource } from './prisma-task-execution-budget.repository';
-import type { AiTaskRunnerLease, AiTaskRunnerPlan, AiTaskRunnerTaskMetadata, AiTaskRunnerEffectResult, AiTaskRunnerObservedResult, AiTaskRunnerConfirmationContinuation } from './ai-task-runner.ports';
+import type { AiTaskRunnerLease, AiTaskRunnerPlan, AiTaskRunnerTaskMetadata, AiTaskRunnerEffectResult, AiTaskRunnerConfirmationContinuation } from '@rental-os/platform-server/ai-runtime';
+import type { AiTaskRunnerObservedResult } from './ai-task-runner.ports';
 import type { PersistedBudgetEvidenceSource } from '../budget/budget-dependency-adapters';
 import { isGatewayConfig } from '../gateway-contract-validation';
 import { readModelNonDispatchEvidence } from '../model-input/prisma-model-nondispatch.evidence';
@@ -69,7 +70,7 @@ export interface AiTaskPlanEvidenceAuthority {
   /** Server-owned action/limits/configuration policy. A model cannot attest its own plan. */
   authorize(plan: Readonly<AiTaskRunnerPlan>, lease: Readonly<AiTaskRunnerLease>): Promise<z.infer<typeof proofSchema>>;
   /** Resource-definition admission before input publication, NOT plan authorization. */
-  authorizePreparation?: (definition: import('./task-run-preparation.ports').AiTaskPreparationDefinition,
+  authorizePreparation?: (definition: import('@rental-os/platform-server/ai-runtime').AiTaskPreparationDefinition,
     lease: AiTaskRunnerLease, db?: Prisma.TransactionClient) => Promise<z.infer<typeof proofSchema>>;
   /** Current-authorized binding of an existing step, never a start grant. */
   resolveOriginal?: (command: import('../ai-step-registration.repository').AiStepRegistrationCommand,

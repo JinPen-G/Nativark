@@ -1,5 +1,6 @@
 /** 原组合的公共身份与 Rental 业务仓储接点。
  * 公共身份沿原身份仓储读取，空间、邀请与开业通过原业务接点办理。 */
+import { assertOriginalMcpWorkspaceIntegrationManagement } from "@rental-os/rental-mcp-host/workspace-management";
 import { RentalWorkspaceManagementRepository } from "@rental-os/rental-core/mysql-workspace-management";
 /** Rental及既有组合平台的仓储；公共登录/账号/会话继承唯一身份仓储。
  * 业务空间、客户与Rental初始化保留本域事务和校验，不成为无Core认证的依赖。 */
@@ -107,13 +108,10 @@ export class PlatformRepository extends PlatformIdentityRepository {
    * Identity/session verification remains in original Auth; caller owns the same
    * Serializable transaction and commit fences, not a model-supplied binding. */
   async assertTrustedWorkspaceIntegrationManagement(binding: { userId: string; tenantId: string; workspaceId: string }, transaction: Prisma.TransactionClient) {
-    const actor = await this.assertTenantPermissionInTransaction(transaction, binding.tenantId, binding.userId, 'system:integration:manage');
-    if (!actor.isActive || actor.mustChangePassword !== false || actor.id !== binding.userId || actor.tenantId !== binding.tenantId) {
-      throw new ForbiddenException('缺少当前租户集成管理身份');
-    }
-    const context = await this.resolveTrustedWorkspacePrincipal(binding, transaction);
-    if (!context?.workspaceValid || context.workspaceId !== binding.workspaceId) throw new ForbiddenException('缺少当前经营空间管理范围');
-    return actor;
+    return assertOriginalMcpWorkspaceIntegrationManagement({
+      assertTenantPermissionInTransaction: this.assertTenantPermissionInTransaction.bind(this),
+      resolveTrustedWorkspacePrincipal: this.resolveTrustedWorkspacePrincipal.bind(this),
+    }, binding, transaction);
   }
 
   /** 本机开发演示账号的统一重置；调用方已完成非生产环境与密码策略校验。 */
