@@ -385,10 +385,10 @@ npm run lint -w @rental-os/rental-core
 
 构建前置按公共合同 → Rental基础合同 → Shared兼容声明 → 公共Core宿主 → Rental完整服务的顺序执行；`npm run build:contracts -w @rental-os/rental-core`只生成Shared实际消费的17个正式合同入口及其内部依赖，避免Shared与完整服务循环构建。该入口保留同一运行时值和正式声明，不创建另一套合同。[合同构建配置](tsconfig.contracts.json) · [内存构建检查](../../scripts/check-rental-package-build.cjs) · [固定版本发行与五端消费核验](../../scripts/verify-rental-distribution.cjs)
 
-独立 Linux 镜像使用[宿主打包入口](../../scripts/package-rental-host.cjs)。先完成正式源码构建、完整 Rental 标准包及[原部署准备](../../apps/rental-api/src/prepare-deployment.ts)，再从仓库根执行以下命令；参数均为实际绝对路径，输出父目录须存在且归档不能已存在。
+独立 Linux 镜像使用[宿主打包入口](../../scripts/package-rental-host.cjs)。先完成正式源码构建、完整 Rental 标准包及[原部署准备](../../apps/rental-api/src/prepare-deployment.ts)，再从仓库根执行以下命令；参数均为实际绝对路径，输出父目录须存在且归档不能已存在。底座 `.tgz` 须使用与原 prepared 锁的 `platform.sha256` 一致的固定源码归档，不能用候选 `platform/` 目录代替。
 
 ```text
-node scripts/package-rental-host.cjs --ai disabled --deployment <原prepared目录> --rental-package <完整固定Rental包目录> --client <本树apps/rental-api/generated/client/index.d.ts> --platform-client <本树apps/platform-api/generated/client/index.d.ts> --output <新归档绝对路径.tgz>
+node scripts/package-rental-host.cjs --ai disabled --deployment <原prepared目录> --platform-package <原固定底座.tgz绝对路径> --rental-package <完整固定Rental包目录> --client <本树apps/rental-api/generated/client/index.d.ts> --platform-client <本树apps/platform-api/generated/client/index.d.ts> --output <新归档绝对路径.tgz>
 ```
 
 打包核对原锁、完整包摘要、全部迁移原文、所选声明与schema，并沿实际启动入口检查正式运行出口。包内保留原固定Rental全部资产；其他工作区仅带已构建产物、公开说明、许可与公共数据材料，不带依赖目录、作者Client、环境文件或私有资料。原 npm v3 锁按所选宿主依赖闭包投影，保留第三方版本及完整性摘要。AI关闭时实际入口不得强制引用AI运行包，缺文件或错版直接拒绝。

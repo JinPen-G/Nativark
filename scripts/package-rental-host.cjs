@@ -235,6 +235,48 @@ console.log(JSON.stringify({ status: 'image-preflight-passed', aiMode: receipt.a
 `;
 }
 
+/** 仅整理公共包与宿主 README 副本的资料链接；不改完整 Core/AI 包或扩大运行文件集合。
+ * 两宿主原 rootDir=src，普通/AI outDir=dist/dist-ai；只有实际入包输出才能替代源码链接。 */
+function runtimePackageReadme(source, file, files, aiMode, platformFiles, platformSource, pinLinks) {
+  const missing = new Set(), directory = path.posix.dirname(file);
+  let fence, compiled = 0, pinned = 0;
+  // 沿公开指南的链接语法保留围栏、行内代码、外链和本页锚点。
+  const readme = source.split('\n').map(line => {
+    const marker = /^\s{0,3}(`{3,}|~{3,})/u.exec(line);
+    if (fence) {
+      if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && !line.slice(marker[0].length).trim()) fence = undefined;
+      return line;
+    }
+    if (marker) { fence = marker[1]; return line; }
+    return line.replace(/(`+).*?\1|\[([^\]\n]+)\]\((?:<([^>\n]+)>|([^\s)]+))\)/gu, (link, code, label, angled, plain) => {
+      if (code) return link;
+      const target = angled ?? plain;
+      if (/^(?:[a-z][a-z0-9+.-]*:|#|\/\/)/iu.test(target)) return link;
+      const [name, fragment] = target.split('#'), resolved = path.posix.normalize(path.posix.join(directory, name));
+      if (files.has(resolved) || [...files.keys()].some(file => file.startsWith(resolved + '/'))) return link;
+      const hostSource = /^(apps\/(?:rental-api|example-multi-core-api))\/src\/(.+)\.ts$/u.exec(resolved);
+      if (hostSource && !resolved.endsWith('.d.ts') && !fragment) {
+        const outputs = aiMode === 'enabled' ? ['dist-ai', 'dist'] : ['dist'];
+        const module = outputs.flatMap(output => ['.js', '.d.ts'].map(extension =>
+          hostSource[1] + '/' + output + '/' + hostSource[2] + extension)).find(file => files.has(file));
+        if (module) { compiled++; return `[${label}](${path.posix.relative(directory, module)})`; }
+      }
+      // 固定归档内的源码与公共包嵌套 README 才可外指；生成根 README/platform.source.json 不在此集合。
+      const nestedReadme = resolved.endsWith('/README.md') && publicDirectories.some(directory =>
+        resolved.startsWith(directory + '/') && resolved !== directory + '/README.md');
+      if (!hostSource && (/\.(?:[cm]?js|tsx?)$/u.test(resolved) || nestedReadme) && platformFiles.has(resolved)) {
+        pinned++; return pinLinks(link, file, platformSource, true);
+      }
+      missing.add(target); return label;
+    });
+  }).join('\n');
+  if (!compiled && !pinned && !missing.size) return readme;
+  return readme.trimEnd() + '\n\n## 运行包内的资料定位\n\n' +
+    '本 README 的包内链接定位实际入包文件；替换后的宿主源码链接定位编译模块（JS 或声明），不代表原 TypeScript 源码。源码包另取原发行；底座源码外链仅使用已核固定归档内的文件及该发行来源，不为宿主源码猜提交。\n' +
+    (missing.size ? '\n以下原相对路径未入包且没有已核对应输出或固定源码链接，保留为接手缺口；须从原发行另取并核对来源：\n\n' +
+      [...missing].map(target => '- `' + target.replace(/`/gu, '\\`') + '`').join('\n') + '\n' : '');
+}
+
 function createRentalHostContext(input) {
   const api = publicApi(), { aiMode, sourceFiles, platformFiles, rentalFiles, ticketsFiles, aiFiles, deploymentFiles, ts, selections } = input;
   const host = input.host ?? 'rental', directory = rentalHostDirectory(host), multi = host === 'example-multi-core';
@@ -305,6 +347,9 @@ function createRentalHostContext(input) {
     }
     if (publicDirectories.includes(directory))
       files.set(directory + '/package.json', Buffer.from(text(platformFiles, directory + '/package.json')));
+    // 公共导读与已核底座发行同源，仅替换原本入包的 README，不新增文件。
+    if (publicDirectories.includes(directory) && files.has(directory + '/README.md'))
+      files.set(directory + '/README.md', Buffer.from(text(platformFiles, directory + '/README.md')));
     if (!files.has(directory + '/LICENSE')) files.set(directory + '/LICENSE', Buffer.from(text(sourceFiles, 'LICENSE')));
   }
   for (const [file, bytes] of deploymentFiles) files.set('apps/rental-api/prisma-deployment/' + file, bytes);
@@ -332,7 +377,14 @@ function createRentalHostContext(input) {
     '本目录消费固定 Rental 包、所选 AI 数据包及原 prepared 锁/迁移。rental-host.context.json 记录实际字节摘要；不将作者工作区或包版本名当作已部署来源。\n\n' +
     '在目标 Linux 平台执行 `docker build --target runtime -t rental-host .`。构建按原 npm 锁安装依赖，并在镜像内用 Prisma 5.22.0 分别生成公共和所选宿主 Client；不会复制 Windows 引擎或默认 Client。外部镜像、apt/npm/引擎下载与实际构建须在部署环境核验。\n\n' +
     `镜像启动入口固定为 ${entry}，AI=${aiMode}。运行前由部署负责人配置 DATABASE_URL、AUTH_TOKEN_SECRET 及必要的原集成配置，沿原迁移账/物理观察办理数据库准备。候选材料位于 apps/rental-api/prisma-deployment；不得用它替代迁移收据。\n\n` +
+    '版本与候选材料读取另须配置 CORE_PACKAGE_STORAGE_ROOT 为受管绝对目录，在其 archives/index.json 登记同一固定底座完整源码 .tgz 及发行资料；CORE_PLATFORM_PACKAGE_REFERENCE 选取其中与当前启动锁 platform 完全一致的引用。缺配置或原材料保持不可用，已有归档或发行不匹配时拒绝读取。[宿主配置](apps/rental-api/README.md)\n\n' +
+    '兼容程序恢复须使用上次已验证的完整运行包及原锁，同时保留并选取该锁对应的完整底座归档和原登记，先核当前数据与原迁移链仍符合该锁。索引成功读取后固定于本进程，变更登记或配置选择须重新启动装配后采用；实际归档每次读取仍核原路径和字节。运行包和原锁不代替数据兼容、当前授权与原操作收据的实际验证。\n\n' +
     '打包和镜像预检均不启动应用、连接数据库、执行迁移或供应商动作。当前 imageBuild=not-run、deployment=pending；真实安装、镜像、数据库及业务验收分别办理。\n'));
+  for (const directory of [...publicDirectories, 'apps/rental-api', 'apps/example-multi-core-api']) {
+    const file = directory + '/README.md';
+    if (files.has(file)) files.set(file, Buffer.from(runtimePackageReadme(text(files, file), file, files, aiMode,
+      platformFiles, lock.platform.source, api.pinCoreDocumentationLinks)));
+  }
   const receipt = { format: 'rental-host-context-1', host, aiMode, imageBuild: 'not-run', deployment: 'pending',
     target: 'linux-bookworm', prismaVersion: '5.22.0', entry, clients,
     deploymentLockSha256: hash(deploymentFiles.get('core.deployment.lock.json')), coreSha256: rentalPin.sha256,

@@ -27,7 +27,7 @@ npm run export:platform -- --repo . --repository https://github.com/JinPen-G/Nat
 2. **提供同源服务与API。** 参考[服务](../example-tickets-core/src/service.ts)、[HTTP合同](../example-tickets-core/src/http.ts)、[服务端贡献](../example-tickets-core/src/server.ts)和[Nest适配](../example-tickets-core/src/nest.ts)。复用公共当前身份、Core授权与成员范围，业务再校验角色、对象及提交条件；OpenAPI从同一请求/响应schema生成。Core可以省略AI贡献，普通业务仍按原权限工作。
 3. **声明页面和本页主按钮。** 参考[工单四页](../example-tickets-core/admin/index.tsx)，从 `@rental-os/platform-admin/core` 使用 `CorePage`、`useCoreForm`、`CoreList` 和 `useCoreRequest`。声明路由、父级、权限和页面动作，复用框架侧栏、面包屑、主按钮、表单反馈及缓存隔离。页面通过已注册映射导航，避免自行复制外壳或请求客户端。宿主接入见[工单Web的三处装配](../../apps/example-tickets-admin/README.md#接入只看这三处)。
 4. **构建并检查固定标准包。** 包含 `core.manifest.json`、实际入口、同版本 `openapi.json`、生成的 `CORE_GUIDE.md`、README、LICENSE及所声明迁移。先提交自己的源码，再按[工单打包说明](../example-tickets-core/README.md)构建并生成一个新包；用下面的共用检查核清单、路径、入口和兼容。安装准备和更新预检分别见本文后面的说明，未知结果沿原包或操作读取。
-5. **只在宿主装配，然后授权使用。** 参考[工单API装配](../../apps/example-tickets-api/src/assembly.ts)和[Web入口](../../apps/example-tickets-admin/src/main.tsx)，将受控Core贡献交给公共宿主，两端使用同一标准包和部署锁。按[服务端步骤](../../apps/example-tickets-api/README.md)准备迁移、初始化公共账号并登记精确权限；SaaS管理员授权租户，租户管理员分配成员及业务角色，再完成Core绑定与业务设置。包、租户授权、成员分配和业务就绪分别成立。
+5. **只在宿主装配，然后授权使用。** 参考[工单API装配](../../apps/example-tickets-api/src/assembly.ts)和[Web入口](../../apps/example-tickets-admin/src/main.tsx)，将受控Core贡献交给公共宿主，两端使用同一标准包和部署锁。按[服务端步骤](../../apps/example-tickets-api/README.md)准备迁移、初始化公共账号并登记精确权限。首次部署由SaaS管理员先读取 `deployment-admission/read`；仅确认尚无记录时，以唯一 `operationId` 和 `expectedRevision: 0` 登记已核定的 `accepting`，再读当前修订及原操作收据。已有状态或未知应答按[正式部署准入步骤](../../apps/example-tickets-api/README.md)核对，不自动覆盖或重发；同源入口见下方[管理HTTP合同](#core-管理-http-合同)。随后SaaS管理员授权租户，租户管理员分配成员及业务角色，再完成Core绑定与业务设置。部署准入、包、租户授权、成员分配和业务就绪分别成立。
 
 ```sh
 npm run build -w @rental-os/core-contracts
@@ -209,7 +209,7 @@ Core从实际接口方法/路径及权限声明生成 `CoreHttpContribution`，�
 
 ## Core 管理 HTTP 合同
 
-`CORE_MANAGEMENT_HTTP`给出当前平台管理面的十一个操作，Controller和 `createCoreManagementOpenApi()` 共用同一份方法/路径与schema。前缀为 `/api/platform/core-host`，目录、授权/成员/绑定变更、当前事实、原操作收据及移除预检分别有自己的入口。[HTTP合同](src/management-http.ts) · [接口资料生成器](src/management-openapi.ts)
+`CORE_MANAGEMENT_HTTP`给出当前平台管理面的十四个操作，Controller和 `createCoreManagementOpenApi()` 共用同一份方法/路径与schema。前缀为 `/api/platform/core-host`，目录、授权/成员/绑定变更、部署准入、当前事实、原操作收据及移除预检分别有自己的入口。[HTTP合同](src/management-http.ts) · [接口资料生成器](src/management-openapi.ts)
 
 | 操作 | 方法与相对路径 | 原管理要求 |
 | --- | --- | --- |
@@ -224,6 +224,9 @@ Core从实际接口方法/路径及权限声明生成 `CoreHttpContribution`，�
 | 原租户Core授权操作只读核对 | POST `tenant-grant-operations/read` | 当前SaaS管理权与本人原操作 |
 | 原成员Core分配操作只读核对 | POST `member-assignment-operations/read` | 当前租户管理权与本人对该成员的原操作 |
 | Core移除阻碍只读预检 | POST `removal/read` | 当前SaaS管理员与租户管理权限 |
+| 登记/变更当前部署的Core准入 | POST `deployment-admission` | 当前SaaS主体与 `system:tenant:manage` |
+| 当前部署的Core准入及修订 | POST `deployment-admission/read` | 当前SaaS主体与 `system:tenant:manage` |
+| 原部署准入操作只读核对 | POST `deployment-admission-operations/read` | 当前SaaS主体、`system:tenant:manage` 与本人原操作 |
 
 `coreManagementHttpPolicy`用于原Guard消费准确方法/路径的管理政策。当前API有对应Controller/原主体服务组合，实际主Guard/AppModule接线沿PCH宿主片办理。[API适配](../../apps/api/src/modules/core-host/README.md)
 
@@ -338,7 +341,7 @@ node packages/core-contracts/dist/plan-update.js <当前锁JSON> <升级请求JS
 | `other_module_not_ready` | 当前其他模块的迁移未完成，不能借此次更新一并隐式升级 |
 | `release_rollback` / `data_rollback` | 使用已有验证的程序/数据恢复方案；这个命令只准备前进升级 |
 
-退出码 `0` 表示预检通过，`1` 表示候选被拒绝，`2` 表示输入/用法或读取失败。这个阶段只输出候选，后续还须核对包摘要、用户改动、在途/历史执行依赖，按授权执行迁移、组合构建与切换并取得实际验证。锁文件不存用户配置、Key 或租户授权；本工具不自动写文件或部署，也不能据此宣称更新已经成功。
+退出码 `0` 表示预检通过，`1` 表示候选被拒绝，`2` 表示输入/用法或读取失败。这个阶段只输出候选，后续沿[已有四步部署交接](../platform-core-host/src/core-package-preparation/README.md)回读原准备SHA、保留原完整包与候选锁、生成宿主完整schema并核锁一致，再交原打包器；还须核对用户改动、在途/历史执行依赖，按授权执行迁移、组合构建与切换并取得实际验证。锁文件不存用户配置、Key 或租户授权；本工具不自动写文件或部署，也不能据此宣称更新已经成功。
 
 ### 选装公共数据能力
 

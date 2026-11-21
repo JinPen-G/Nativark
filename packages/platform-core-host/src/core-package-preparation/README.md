@@ -36,6 +36,33 @@
 
 存储调用返回 `unavailable` 时，准备应用保留原错误并转换为携带原 SHA 的 `unknown`，页面继续使用原指针核对回执。客户端取消等待或连接中断后，已派发准备的结果沿原摘要读取，当前授权在读取时重新核验。下载超时及发布前缺少来源、材料或存储由发布前准入返回具体失败。
 
-候选记录及 HTTP 结果中的 `deployment` 一直为 `pending`。部署者继续核当前数据与原迁移执行，完成所需构建、迁移、切换和注册，再进入租户授权及成员分配。完整独立运行、真实数据库和宿主验收沿原专项门槛核收。
+候选记录及 HTTP 结果中的 `deployment` 一直为 `pending`。部署交接沿以下四步办理；命令在与固定发行相符、已完成正式源码构建和所选 Client 准备的仓库根执行。示例中的 `C:\checkout`、`C:\release`、原准备 SHA 和完整包目录须替换成实际绝对路径；新文件的父目录须存在，输出文件及新迁移目录不得已存在。
+
+1. 用 `POST /platform/core-packages/preparation-receipt` 和 `{"sha256":"<原准备SHA>"}` 回读原候选，重新核当前管理权限、记录和全部文件。失应答或 `unknown` 继续核同一 SHA；准备摘要与平台/Core 包摘要各有用途，不能互换。回执成功只证明原 pending 材料可核定。
+2. 保留候选 `deployment/core.deployment.lock.json`、所选完整包及锁中未变对象的原固定材料。Core 更新的目标包取自候选 `package/<Core ID>-<版本>-<包 SHA>/`，未更新 Core 继续用与候选 pin 一致的原完整包；数据能力同样使用候选保存的完整固定包。底座更新在候选 `platform/` 保存文件，打包仍须提供最初预检的完整底座 `.tgz`，其摘要须等于候选锁的 `platform.sha256`。将锁中的 `platform` 对象单独导出给原准备入口，不能把整份部署锁当发行 JSON：
+
+   ```powershell
+   $candidateLock = 'C:\release\candidates\<原准备SHA>\deployment\core.deployment.lock.json'
+   node -e "const fs=require('node:fs'); const lock=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); fs.writeFileSync(process.argv[2],JSON.stringify(lock.platform,null,2)+'\n',{flag:'wx'});" $candidateLock C:\release\platform.release.json
+   ```
+
+3. Rental 或双 Core 先用[原部署准备](../../../../apps/rental-api/src/prepare-deployment.ts)生成完整 schema、迁移和锁。通用候选的 `deployment/schema.prisma` 仅含数据源，不能直接当作 Rental 打包材料。下面是关闭 AI 的 Rental 命令；双 Core 在末尾加 `--additional-core C:\release\example-tickets-core`，所选完整包及顺序须与候选锁一致。新迁移目录须是实际 `apps/rental-api` 根的直接子目录，使生成器指向同一 `../generated/client`。生成后比较完整锁，失败即停止交包：
+
+   ```powershell
+   node apps/rental-api/dist/prepare-deployment.js C:\release\platform.release.json C:\release\rental-core C:\checkout\apps\rental-api\prisma-update
+   node -e "const fs=require('node:fs'); const read=p=>JSON.parse(fs.readFileSync(p,'utf8')); require('node:assert/strict').deepEqual(read(process.argv[1]),read(process.argv[2]));" $candidateLock C:\checkout\apps\rental-api\prisma-update\core.deployment.lock.json
+   ```
+
+   已选 AI 时，在三个位置参数后、`--additional-core` 前再传候选 `dataCapabilities` 中的固定 AI 数据发行 JSON 和完整 AI 包目录；打包对应使用 `--ai enabled --ai-data-package <同一完整AI包绝对目录>`。此步骤不生成 Client、不执行 SQL、不证明实际迁移就绪；所选 Client 仍按[宿主构建步骤](../../../../apps/rental-api/README.md)准备并核对同一 schema。
+4. 完整材料与候选锁一致后交原打包器。零 Core 公共宿主直接用候选锁，打包器自行核原公共 schema/迁移；单工单宿主在公共命令后加 `--host example-tickets --tickets-package C:\release\example-tickets-core`。Rental 使用上一步的新完整部署目录，双 Core 在 Rental 命令后加 `--host example-multi-core --tickets-package C:\release\example-tickets-core`：
+
+   ```powershell
+   node scripts/package-platform-host.cjs --lock $candidateLock --platform-package C:\release\platform-source.tgz --platform-client C:\checkout\apps\platform-api\generated\client\index.d.ts --output C:\release\platform-host.tgz --deps C:\checkout\node_modules
+   node scripts/package-rental-host.cjs --ai disabled --deployment C:\checkout\apps\rental-api\prisma-update --platform-package C:\release\platform-source.tgz --rental-package C:\release\rental-core --client C:\checkout\apps\rental-api\generated\client\index.d.ts --platform-client C:\checkout\apps\platform-api\generated\client\index.d.ts --output C:\release\rental-host.tgz --deps C:\checkout\node_modules
+   ```
+
+   按实际组合选择其中一个命令，使用本仓库已生成的专属 Client 和固定完整包。[公共打包器](../../../../scripts/package-platform-host.cjs)与[Rental 打包器](../../../../scripts/package-rental-host.cjs)核源码/包、依赖锁、完整部署材料与启动出口；打包不办理镜像构建、迁移、切换或注册，结果继续为 pending。
+
+前进更新仍由[原更新规划](../../../core-contracts/src/update.ts)拒绝程序或数据降版。兼容程序恢复须使用上次已验证的完整运行包及其原部署锁，先确认当前数据可由旧程序读取、原迁移链和物理结构符合该锁，全部所选底座/Core/能力及合同相互兼容，并核历史与在途操作、当前授权/分配/绑定的保留。同一数据版本不自动证明这些条件；部分迁移或 unknown 继续按原收据核对。旧候选、修改锁、倒写数据版本或放宽包校验均不能作为回退依据。本链没有通用程序回退执行器，实际恢复及不兼容拒绝须由目标环境验证。部署者继续办理当前数据核验、原迁移、切换和注册，租户授权及成员分配沿原入口保持。完整独立运行、真实数据库和宿主验收沿原专项门槛核收。
 
 GitHub 传输复用正式 `@rental-os/core-contracts/github-http`。本模块通过 `@rental-os/platform-core-host/core-package-preparation` 导出，公共 API 使用统一装配供给 Guard、OpenAPI 和宿主文件配置。新候选的存储派发前缺少来源、材料或存储适配时返回 unavailable。源码类型、受控运输/文件 fixture 与真实 GitHub、文件系统、HTTP 和部署验证分别记录。[公共宿主](../../../../apps/platform-api/README.md)
