@@ -184,6 +184,8 @@ const ENGLISH: Readonly<Record<string, string>> = {
   "核对结果": "Reconciliation",
   "网络连接已断开": "You are offline",
   "搜索菜单": "Search menus",
+  "导航菜单": "Navigation menu",
+  "导航到当前获准访问的页面。": "Navigate to pages you currently have access to.",
   "业务管理": "Business",
   "Core 包管理": "Core packages",
   "没有匹配的菜单": "No matching menus",

@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { LocaleContext } from "../../../app/localeContext"
 import { mergeProps, useRender } from "@animate-ui/react/primitives/base-ui"
 import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "cn"
@@ -117,6 +118,8 @@ function Sidebar({
   transition?: React.ComponentProps<typeof SidebarPrimitive.Gap>["transition"]
 }) {
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar()
+  // 独立使用侧栏时保留原中文，宿主语言沿同一上下文。
+  const locale = React.useContext(LocaleContext)
   const referenceTransition = useTempoTransition(transition)
   const reduceMotion = useShouldReduceMotion()
   // A reference-driven host owns its row/label motion; the native default remains available.
@@ -155,8 +158,8 @@ function Sidebar({
           side={side}
         >
           <SheetHeader className="sr-only">
-            <SheetTitle>导航菜单</SheetTitle>
-            <SheetDescription>导航到当前获准访问的页面。</SheetDescription>
+            <SheetTitle>{locale?.t("导航菜单") ?? "导航菜单"}</SheetTitle>
+            <SheetDescription>{locale?.t("导航到当前获准访问的页面。") ?? "导航到当前获准访问的页面。"}</SheetDescription>
           </SheetHeader>
           <SidebarContentRoot className="flex h-full w-full flex-col">
             {children}
