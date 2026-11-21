@@ -17,3 +17,7 @@
 查询键与表单失效范围保持原逻辑。切换账号、租户或权限后，宿主中止旧请求并清理同一缓存。浮窗跨普通页面导航保持当前关闭状态，到期计时与旧请求各自清理。申请按钮只保存原申请，实际开通/续费、收费依据和审计由 [公共服务](../../../../platform-server/src/modules/subscription/README.md) 办理。
 
 已有宿主可继续导入原页面位置，或使用 `@rental-os/platform-admin/subscription`。单独使用客户端时注入已有 `request`。字段来自 `@rental-os/platform-contracts/subscription`，资料与验证见 [公共后台包](../../../README.md) 和 [订阅服务验证](../../../../platform-server/src/modules/subscription/README.md#接口与验证)。
+
+## 语言资源
+
+公共 `LocaleProvider` 合并 `subscriptionMessages`，提供统一语言状态和翻译函数。订阅列表、申请、办理及功能目录沿页面原有的 `t` 调用读取界面词条。[词条资源](messages.ts) · [公共语言入口](../../app/locale.tsx) · [功能目录弹层](FeatureCatalogModal.tsx)
