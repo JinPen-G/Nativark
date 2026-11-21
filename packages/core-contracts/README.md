@@ -125,6 +125,8 @@ node packages/core-contracts/dist/check.js <解包后的Core目录> --host <宿�
 
 `@rental-os/core-contracts/deployment` 提供 `createCoreMigrationDeployment`，将固定底座原迁移与锁中Core标准包组为一份新的Prisma迁移目录。它核包摘要、版本、全部声明文件和原SQL，Core原账名称由 `corePrismaMigrationName` 单源生成，排序不符合原链会拒绝。结果仅内存文件，由明确部署准备命令写入独占新目录；不执行SQL、不补账、不覆盖活动组合。[源码](src/deployment.ts) · [工单准备命令](../../apps/example-tickets-api/src/prepare-deployment.ts)
 
+`writeCoreMigrationDeployment(directory, files)` 将这些文件排他写入绝对路径下的新目录，最后写部署锁。两个宿主的准备命令共用这个写入器。写入失败时只清理本次创建、身份和内容仍一致的文件及空目录，保留并行写入或被改写的内容；全部写成后即使结果输出失应答，也保留原候选，按原目录和锁核对。[Rental准备命令](../../apps/rental-api/src/prepare-deployment.ts)
+
 输出中的 `scope` 固定为 `package-static`。`compatibilityChecked=false` 表示未指定宿主资料。退出码 `0` 表示所选静态检查通过，`1` 表示包不合格，`2` 表示命令用法或读取失败。机器读取时使用上面的 `node ... --json`，标准输出只有一份 JSON。
 
 | 常见结果 | 处理方式 |

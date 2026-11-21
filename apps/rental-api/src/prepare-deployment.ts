@@ -1,12 +1,12 @@
 /** 只准备固定公共发行、Rental 与显式所选 tenant Core 的候选迁移/schema/锁；不安装、连接、执行迁移或生成 Client。
  * 新目录完整写成才报告 prepared，已有部署及用户配置始终不覆盖。 */
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { CorePackagePinSchema, CorePlatformReleaseSchema, CorePlatformDataCapabilityReleaseSchema, coreDeploymentHostVersions,
   type CoreDeploymentLock, type CorePlatformDataCapabilityRelease } from "@rental-os/core-contracts";
-import { createCoreMigrationDeployment } from "@rental-os/core-contracts/deployment";
+import { createCoreMigrationDeployment, writeCoreMigrationDeployment } from "@rental-os/core-contracts/deployment";
 import { composeCorePrismaSchema } from "@rental-os/core-contracts/prisma";
 import { packCoreDirectory } from "@rental-os/core-contracts/install";
 import { corePackageFiles, inspectCorePackageFiles, readCorePackageFiles } from "@rental-os/core-contracts/package";
@@ -150,33 +150,11 @@ function prepare(args: string[]) {
   // 生成到另一位置，留下通过准备却无法启动的部署，因此写入前固定目标关系。
   if (resolve(target, "../generated/client") !== resolve(__dirname, "../generated/client"))
     throw new Error("迁移目录须位于本宿主根目录，使生成器输出到同一 generated/client");
-  for (let current = dirname(target); ; current = dirname(current)) {
-    const stat = lstatSync(current);
-    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("迁移目录父路径须为不经过链接的普通目录");
-    if (dirname(current) === current) break;
-  }
-  if (existsSync(target)) throw new Error("迁移目录已存在，不覆盖当前组合或用户配置");
-  let created = false;
-  try {
-    mkdirSync(target); created = true;
-    for (const [file, bytes] of prepared.files) {
-      const destination = resolve(target, file), part = relative(target, destination);
-      if (part === ".." || part.startsWith("../") || part.startsWith("..\\") || isAbsolute(part))
-        throw new Error("部署文件越出本次新迁移目录");
-      mkdirSync(dirname(destination), { recursive: true });
-      writeFileSync(destination, bytes, { flag: "wx" });
-    }
-    process.stdout.write(JSON.stringify({ status: prepared.status, deployment: prepared.deployment, aiMode: prepared.aiMode, directory: target,
-      schema: resolve(target, "schema.prisma"), clientOutput: resolve(target, "../generated/client"),
-      lock: resolve(target, "core.deployment.lock.json"), coreSha256: packed.sha256,
-      lockSha256: createHash("sha256").update(prepared.files.get("core.deployment.lock.json")!).digest("hex") }) + "\n");
-  } catch (error) {
-    if (created) {
-      if (resolve(target) !== target || lstatSync(target).isSymbolicLink()) throw new Error("本次候选清理路径发生变化，停止清理");
-      rmSync(target, { recursive: true });
-    }
-    throw error;
-  }
+  writeCoreMigrationDeployment(target, prepared.files);
+  process.stdout.write(JSON.stringify({ status: prepared.status, deployment: prepared.deployment, aiMode: prepared.aiMode, directory: target,
+    schema: resolve(target, "schema.prisma"), clientOutput: resolve(target, "../generated/client"),
+    lock: resolve(target, "core.deployment.lock.json"), coreSha256: packed.sha256,
+    lockSha256: createHash("sha256").update(prepared.files.get("core.deployment.lock.json")!).digest("hex") }) + "\n");
 }
 
 if (require.main === module) {

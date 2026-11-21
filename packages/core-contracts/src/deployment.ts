@@ -1,5 +1,8 @@
-/** 将已核定的平台迁移和Core包组合为一份Prisma部署目录。只生成新文件，不连接库或执行DDL。 */
+/** 将已核定的平台迁移和 Core 包组合为候选目录。只准备新文件，不连接库或执行 DDL。 */
 import { createHash } from "node:crypto";
+import { closeSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, rmdirSync, unlinkSync, writeFileSync,
+  type Stats } from "node:fs";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { CoreDeploymentLockSchema, type CoreDeploymentLock } from "./update";
 import { CoreIdSchema, CoreMigrationSchema, CorePackagePathSchema } from "./manifest";
 import { inspectCorePackageFiles } from "./package";
@@ -75,4 +78,83 @@ export function createCoreMigrationDeployment(input: {
   files.set("migrations/migration_lock.toml", Buffer.from('provider = "mysql"\n'));
   files.set("core.deployment.lock.json", Buffer.from(JSON.stringify(lock, null, 2) + "\n"));
   return files;
+}
+
+/** 独占创建候选路径，最后写锁。失败时只清理仍属本次且内容未被接手的文件和空目录。 */
+export function writeCoreMigrationDeployment(directory: string, files: ReadonlyMap<string, Uint8Array>): void {
+  if (!isAbsolute(directory)) throw new Error("部署目标须为绝对路径");
+  const target = resolve(directory), lockFile = "core.deployment.lock.json", lock = files.get(lockFile);
+  if (!lock) throw new Error("部署候选缺少锁");
+  const planned = [...files].filter(([file]) => file !== lockFile).concat([[lockFile, lock]]).map(([file, bytes]) => {
+    CorePackagePathSchema.parse(file);
+    const destination = resolve(target, file), part = relative(target, destination);
+    if (!part || part === ".." || part.startsWith(".." + sep) || isAbsolute(part))
+      throw new Error("部署文件越出本次候选目录");
+    return { destination, bytes };
+  });
+  const directories = new Map<string, Stats>();
+  const written: (typeof planned[number] & { identity: Stats })[] = [];
+  const sameIdentity = (left: Stats, right: Stats) =>
+    left.dev === right.dev && left.ino === right.ino && left.birthtimeMs === right.birthtimeMs;
+  const errorCode = (error: unknown) => (error as NodeJS.ErrnoException | undefined)?.code;
+
+  function verifyDirectories(directory: string): void {
+    const parent = dirname(directory);
+    if (parent !== directory) verifyDirectories(parent);
+    const stat = lstatSync(directory), owned = directories.get(directory);
+    if (!stat.isDirectory() || stat.isSymbolicLink() || (owned && !sameIdentity(stat, owned)))
+      throw new Error("部署路径不是原普通目录，停止处理该路径");
+  }
+  function createDirectory(directory: string): void {
+    verifyDirectories(dirname(directory));
+    mkdirSync(directory);
+    let stat: Stats;
+    try { stat = lstatSync(directory); }
+    catch (error) { throw new Error("无法确认刚创建的候选目录归属，保留该路径", { cause: error }); }
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("新候选路径已变化，保留该路径");
+    directories.set(directory, stat);
+  }
+  function ensureDirectory(directory: string): void {
+    if (directories.has(directory)) { verifyDirectories(directory); return; }
+    ensureDirectory(dirname(directory));
+    createDirectory(directory);
+  }
+
+  try { createDirectory(target); }
+  catch (error) {
+    if (errorCode(error) === "EEXIST") throw new Error("部署目标已存在，不覆盖当前组合或用户配置", { cause: error });
+    throw error;
+  }
+  try {
+    for (const entry of planned) {
+      ensureDirectory(dirname(entry.destination));
+      const descriptor = openSync(entry.destination, "wx");
+      try {
+        written.push({ ...entry, identity: fstatSync(descriptor) });
+        writeFileSync(descriptor, entry.bytes);
+      } finally { closeSync(descriptor); }
+    }
+  } catch (failure) {
+    const cleanupErrors: unknown[] = [];
+    function attempt(action: () => void): void {
+      try { action(); }
+      catch (error) { if (errorCode(error) !== "ENOENT") cleanupErrors.push(error); }
+    }
+    for (const { destination, identity, bytes } of written.reverse()) attempt(() => {
+      verifyDirectories(dirname(destination));
+      const current = lstatSync(destination);
+      // 写入可能只落了前半段。经其他写入者换掉或改写的内容不能视为本次输出。
+      if (!current.isFile() || current.isSymbolicLink() || !sameIdentity(current, identity) || current.size > bytes.length
+        || !readFileSync(destination).equals(bytes.subarray(0, current.size)))
+        throw new Error("候选文件身份或内容发生变化");
+      unlinkSync(destination);
+    });
+    for (const directory of [...directories.keys()].reverse()) attempt(() => {
+      verifyDirectories(directory);
+      rmdirSync(directory);
+    });
+    if (cleanupErrors.length)
+      throw new AggregateError([failure, ...cleanupErrors], "部署准备失败，保留无法确认的候选内容");
+    throw failure;
+  }
 }

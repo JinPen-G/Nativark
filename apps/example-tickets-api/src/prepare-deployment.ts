@@ -1,10 +1,10 @@
 /** 工单受控部署准备命令：只在指定新目录生成锁和Prisma迁移组合，不安装/连接/执行代码。 */
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, resolve, relative, isAbsolute } from "node:path";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { CorePlatformReleaseSchema } from "@rental-os/core-contracts";
-import { createCoreMigrationDeployment } from "@rental-os/core-contracts/deployment";
+import { createCoreMigrationDeployment, writeCoreMigrationDeployment } from "@rental-os/core-contracts/deployment";
 import { packCoreDirectory } from "@rental-os/core-contracts/install";
 import { readCorePackageFiles } from "@rental-os/core-contracts/package";
 import { CORE_ARCHIVE_LIMITS } from "@rental-os/core-contracts/archive";
@@ -23,29 +23,10 @@ function prepare() {
   const files = createCoreMigrationDeployment({ lock, cores: new Map([[core.manifest.id, source]]),
     platform: plan.migrationNames.map((name, at) => ({ name, sql: readFileSync(resolve(platformRoot, plan.data.migrations[at].file)) })) });
   const target = resolve(args[2]);
-  for (let parent = dirname(target); ; parent = dirname(parent)) {
-    const stat = lstatSync(parent);
-    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("部署目录父路径须为普通目录且不经过链接");
-    if (dirname(parent) === parent) break;
-  }
-  if (existsSync(target)) throw new Error("部署目标已存在，不覆盖当前组合或用户配置");
-  let created = false;
-  try {
-    mkdirSync(target); created = true;
-    for (const [file, bytes] of files) {
-      const destination = resolve(target, file), part = relative(target, destination);
-      if (part.startsWith("..") || isAbsolute(part)) throw new Error("部署文件越出目标");
-      mkdirSync(dirname(destination), { recursive: true });
-      writeFileSync(destination, bytes, { flag: "wx" });
-    }
-    process.stdout.write(JSON.stringify({ status: "prepared", deployment: "pending", directory: target,
-      lock: resolve(target, "core.deployment.lock.json"), coreSha256: core.sha256,
-      lockSha256: createHash("sha256").update(files.get("core.deployment.lock.json")!).digest("hex") }) + "\n");
-  } catch (error) {
-    // 只移除本命令刚创建且没有发布的候选，绝不覆盖/删除原活动组合。
-    if (created) rmSync(target, { recursive: true });
-    throw error;
-  }
+  writeCoreMigrationDeployment(target, files);
+  process.stdout.write(JSON.stringify({ status: "prepared", deployment: "pending", directory: target,
+    lock: resolve(target, "core.deployment.lock.json"), coreSha256: core.sha256,
+    lockSha256: createHash("sha256").update(files.get("core.deployment.lock.json")!).digest("hex") }) + "\n");
 }
 
 try { prepare(); }
