@@ -468,6 +468,117 @@ async function pendingFileDeleteBoundaries() {
   }
 }
 
+/** 原宿主创建入口续签知识上传，使用真实签名器及明确的知识授权和存储夹具。 */
+async function knowledgeUploadRenewalBoundaries() {
+  const { requestFingerprint } = require("@rental-os/platform-contracts/request-fingerprint");
+  const savedAssets = [...assets];
+  const savedSessions = [...sessions];
+  const owner = {
+    businessType: "ai_knowledge_document", businessId: "knowledge-renewal", uploadScene: "ai-knowledge",
+    actorUserId: "knowledge-user", workspaceId
+  };
+  const request = {
+    businessModule: "ai-native", businessType: owner.businessType, businessId: owner.businessId,
+    uploadScene: owner.uploadScene, fileName: "knowledge.pdf", mimeType: "application/pdf",
+    sizeBytes: 1024, idempotencyKey: "knowledge-original-renewal"
+  };
+  let config;
+  let signatures = 0;
+  let configurationReads = 0;
+  let authorized = true;
+  let duringSigning = () => {};
+  let afterConfigurationRead = () => {};
+  const knowledge = new FileStorageRuntimeService(prisma, {
+    runtimeConfig: async () => {
+      configurationReads += 1;
+      afterConfigurationRead(configurationReads);
+      return structuredClone(config);
+    },
+    assertEnabledInTransaction: integrations.assertEnabledInTransaction
+  }, undefined, undefined, {
+    authorizeUpload: async (currentTenant, input, currentOwner) => {
+      assert.equal(currentTenant, tenantId);
+      assert.equal(input.idempotencyKey, request.idempotencyKey);
+      assert.equal(currentOwner.actorUserId, owner.actorUserId);
+      assert.equal(currentOwner.workspaceId, owner.workspaceId);
+      if (!authorized) throw new Error("知识上传授权已变化");
+    }
+  }, access);
+  const originalPresign = knowledge.presign.bind(knowledge);
+  knowledge.presign = (...args) => {
+    const signed = originalPresign(...args);
+    signatures += 1;
+    duringSigning();
+    return signed;
+  };
+  function fixture() {
+    assets.clear();
+    sessions.clear();
+    signatures = 0;
+    configurationReads = 0;
+    authorized = true;
+    duringSigning = () => {};
+    afterConfigurationRead = () => {};
+    config = {
+      id: "knowledge-original-config", capability: "file", provider: "s3_compatible",
+      settings: { endpoint: "https://storage.example.invalid", bucket: "files", region: "us-east-1" },
+      credentials: { accessKeyId: "offline", secretAccessKey: "offline-only" },
+      revision: { updatedAt: new Date(1) }
+    };
+    const asset = {
+      ...assetRow("knowledge-original-file"), businessModule: request.businessModule,
+      businessType: request.businessType, businessId: request.businessId, uploadScene: request.uploadScene,
+      fileName: request.fileName, storageProvider: config.provider, uploadedBy: owner.actorUserId,
+      metadata: { workspaceId, knowledgeUploadVersion: 1, fileUploadVersion: 2,
+        uploadConfigHash: requestFingerprint({ id: config.id, provider: config.provider,
+          settings: config.settings, credentials: config.credentials }) }
+    };
+    const session = {
+      id: "knowledge-original-session", tenantId, fileAssetId: asset.id, idempotencyKey: request.idempotencyKey,
+      provider: config.provider, storageKey: asset.storageKey, status: "pending_upload",
+      expiresAt: new Date(Date.now() + 15 * 60 * 1000), createdAt: new Date(), updatedAt: new Date()
+    };
+    assets.set(asset.id, asset); sessions.set(session.id, session);
+    return { asset, session };
+  }
+  try {
+    const original = fixture();
+    const grant = await knowledge.createUploadSession(tenantId, request, owner);
+    assert.equal(grant.sessionId, original.session.id);
+    assert.equal(grant.fileAssetId, original.asset.id);
+    assert.equal(grant.expiresAt, original.session.expiresAt.toISOString());
+    assert.equal(signatures, 1);
+    assert.ok(grant.uploadUrl);
+
+    const changes = [
+      state => { state.session.expiresAt = new Date(0); },
+      state => { state.session.updatedAt = new Date(state.session.updatedAt.getTime() + 1); },
+      state => { state.asset.updatedAt = new Date(state.asset.updatedAt.getTime() + 1); },
+      () => { config.revision.updatedAt = new Date(2); }
+    ];
+    for (const change of changes) {
+      const state = fixture();
+      duringSigning = () => change(state);
+      await assert.rejects(knowledge.createUploadSession(tenantId, request, owner), /知识原上传在签发期间已变化/u);
+      assert.equal(signatures, 1);
+      assert.equal(assets.size, 1);
+      assert.equal(sessions.size, 1);
+    }
+    fixture();
+    afterConfigurationRead = calls => {
+      if (calls === 2) authorized = false;
+    };
+    await assert.rejects(knowledge.createUploadSession(tenantId, request, owner), /知识上传授权已变化/u);
+    assert.equal(signatures, 1);
+  } finally {
+    assets.clear();
+    savedAssets.forEach(([id, row]) => assets.set(id, row));
+    sessions.clear();
+    savedSessions.forEach(([id, row]) => sessions.set(id, row));
+  }
+  console.log("知识文件原键续签在返回前复验日期版本及读取等待后的当前授权");
+}
+
 /** The real public cleanup and presigner, with only transactional storage and
  * object transport replaced. Moving the clock never edits a persisted claim. */
 async function expiredCleanupBoundaries() {
@@ -1425,6 +1536,7 @@ void runWithRequestIdentity(operatorIdentity, async () => {
   console.log("dedicated exchange image bytes, generic isolation and unknown TTL retention passed");
   await expiredCleanupBoundaries();
   await pendingFileDeleteBoundaries();
+  await knowledgeUploadRenewalBoundaries();
   console.log("file storage lifecycle tests passed");
 }).catch((error) => {
   console.error(error);

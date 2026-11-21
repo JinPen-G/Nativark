@@ -648,8 +648,15 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
       this.prisma.fileAsset.findFirst({ where: { id: asset.id, tenantId } }),
       this.integrations.runtimeConfig('file', tenantId, session.provider as never)
     ]);
-    if (requestFingerprint(currentSession) !== requestFingerprint(session) || requestFingerprint(currentAsset) !== requestFingerprint(asset)
-      || !currentConfig || requestFingerprint(currentConfig) !== requestFingerprint(config) || session.expiresAt.getTime() <= Date.now()) {
+    // 存储和配置读取让出执行后，沿原知识权威复核当前授权。
+    await this.authorizeKnowledgeUpload(tenantId, input, owner);
+    // Date版本及有效期须先按JSON语义保留，续签等待后仍比较完整的原快照。
+    const snapshotFingerprint = (value: unknown) =>
+      requestFingerprint(JSON.parse(JSON.stringify(value) ?? "null"));
+    if (snapshotFingerprint(currentSession) !== snapshotFingerprint(session)
+      || snapshotFingerprint(currentAsset) !== snapshotFingerprint(asset)
+      || !currentConfig || snapshotFingerprint(currentConfig) !== snapshotFingerprint(config)
+      || session.expiresAt.getTime() <= Date.now()) {
       throw new ConflictException('知识原上传在签发期间已变化');
     }
     return { ...this.sessionSummary(session, asset, 'provider'), uploadUrl: signed.url, uploadHeaders: signed.headers };
