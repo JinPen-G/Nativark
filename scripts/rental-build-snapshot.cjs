@@ -1,6 +1,6 @@
 'use strict';
 /** 从固定 Git 树读取发行验证源码，tar 只在内存解析，避免并行作者改动混入本次产物。
- * 不检出/复制工作树、不读取私有 docs，不接受归档中的链接或包外路径。 */
+ * 归档保持 Git 原字节，不采用本机检出换行；不读取私有 docs 或接受链接、包外路径。 */
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
@@ -16,7 +16,8 @@ const selections = ['LICENSE', 'package.json', 'package-lock.json', 'tsconfig.ba
 
 function readBuildSnapshot(commit) {
   if (!/^[a-f0-9]{40}$/u.test(commit)) throw Error('构建快照须使用完整固定提交 SHA');
-  const tar = execFileSync('git', ['archive', '--format=tar', commit, '--', ...selections],
+  // git archive 也会应用 core.autocrlf；发行摘要与迁移必须比较原提交，不能归一已发布字节。
+  const tar = execFileSync('git', ['-c', 'core.autocrlf=false', 'archive', '--format=tar', commit, '--', ...selections],
     { cwd: root, maxBuffer: 256 * 1024 * 1024, windowsHide: true });
   const files = new Map();
   let extra = {};
