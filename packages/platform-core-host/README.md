@@ -56,7 +56,7 @@ const access = createPlatformCoreHttpAccess(application);
 
 公共平台的授权与绑定迁移单份归 [公共宿主迁移链](../../apps/platform-api/README.md)，原SQL字节保留。这里不自动应用迁移；原组合库须按固定数据版本和部署顺序引入相同增量，不能使用新公共基线覆盖已有库。Core自身迁移继续归Core。[授权SQL](../../apps/platform-api/prisma/migrations/20261115010000_core_access/migration.sql) · [绑定SQL](../../apps/platform-api/prisma/migrations/20261115020000_core_bindings/migration.sql)
 
-公共宿主的 [数据计划](../../apps/platform-api/src/platform-data.ts) 核固定迁移摘要后提供 `readPhysical`，用于 `createMysqlCoreDeploymentObservation` 读取原Prisma账与实际结构。预期从已登记SQL构造，建表内与后续ALTER的外键共用同一解析，保留引用列和删除/更新规则；未知DDL明确报错。实际MySQL元数据须匹配，不能直接返回清单版本。CHECK保留布尔优先级/NULL/范围含义，额外唯一键或未执行约束不会被当成当前数据版本。构造计划只读源码，真正的物理读取需要数据库许可。
+公共宿主的 [数据计划](../../apps/platform-api/src/platform-data.ts) 核固定迁移摘要后提供 `readPhysical`，用于 `createMysqlCoreDeploymentObservation` 读取原Prisma账与实际结构。预期从已登记SQL构造，建表内与后续ALTER的外键共用同一解析，保留引用列和删除/更新规则；未知DDL明确报错。实际MySQL元数据须匹配，不能直接返回清单版本。CHECK保留布尔优先级/NULL/范围含义，额外唯一键或未执行约束不会被当成当前数据版本。 MySQL返回的已知字符集简单字面量可使用转义定界引号；读取器只还原这层格式，保留字面量值及ASCII/BINARY语义，内部未知转义仍拒绝。构造计划只读源码，真正的物理读取需要数据库许可。
 
 结构解释器支持固定迁移使用的列与表注释、独立索引、列修改、默认值移除及 CHECK / 外键增删；引号内的逗号和分号保持原含义。CHECK 使用有限表达式解析，覆盖原 JSON、长度、正则、CAST 和范围约束，保留业务字符串大小写、BINARY 及混合 AND / OR 的优先级。MySQL 显示附加的 utf8mb4 修饰可以归一，ENUM、普通默认值及生成默认表达式中的业务字面量仍须精确匹配。未支持的函数、索引表达式、可执行 SQL 注释和数据回填均拒绝进入结构预期；数据回填及迁移账必须由对应部署方案另行核定。
 

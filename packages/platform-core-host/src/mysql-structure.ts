@@ -187,7 +187,7 @@ export function mysqlCheckShape(clause: string): string | undefined {
   type Token = { kind: "word" | "field" | "text" | "number" | "symbol"; value: string };
   type Node = string | Node[];
   const tokens: Token[] = [];
-  const pattern = /\s+|`(?:``|[^`])+`|'(?:\\.|''|[^'\\])*'|[A-Za-z_][A-Za-z_0-9]*|[0-9]+(?:\.[0-9]+)?|>=|<=|<>|!=|[(),=<>+\-]/gy;
+  const pattern = /\s+|`(?:``|[^`])+`|_(?:utf8mb4|ascii|binary)\\'[^'\\]*\\'|'(?:\\.|''|[^'\\])*'|[A-Za-z_][A-Za-z_0-9]*|[0-9]+(?:\.[0-9]+)?|>=|<=|<>|!=|[(),=<>+\-]/giy;
   let offset = 0;
   while (offset < clause.length) {
     pattern.lastIndex = offset;
@@ -196,9 +196,14 @@ export function mysqlCheckShape(clause: string): string | undefined {
     const raw = match[0];
     offset = pattern.lastIndex;
     if (/^\s/.test(raw)) continue;
-    const kind = raw.startsWith("`") ? "field" : raw.startsWith("'") ? "text"
-      : /^[0-9]/.test(raw) ? "number" : /^[A-Za-z_]/.test(raw) ? "word" : "symbol";
-    tokens.push({ kind, value: kind === "word" ? raw.toLowerCase() : raw });
+    // CHECK_CLAUSE可将字符集字面量的外层引号返回为\'；只还原无内部转义的定界符，保留原值。
+    const quoted = /^(_utf8mb4|_ascii|_binary)\\'([^'\\]*)\\'$/i.exec(raw);
+    if (quoted) tokens.push({ kind: "word", value: quoted[1].toLowerCase() }, { kind: "text", value: `'${quoted[2]}'` });
+    else {
+      const kind = raw.startsWith("`") ? "field" : raw.startsWith("'") ? "text"
+        : /^[0-9]/.test(raw) ? "number" : /^[A-Za-z_]/.test(raw) ? "word" : "symbol";
+      tokens.push({ kind, value: kind === "word" ? raw.toLowerCase() : raw });
+    }
     if (tokens.length > 4096) return;
   }
   let at = 0, depth = 0;
