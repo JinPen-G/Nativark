@@ -109,6 +109,8 @@ MCP 的 OAuth、Host router 与原 Web 参加者由独立的 `rental-mcp-host` �
 
 打包命令必须显式传入 `--ai enabled|disabled`、`--deployment`、`--platform-package`、`--rental-package`、`--client`、`--platform-client` 和 `--output`；所有文件或目录参数均为绝对路径。`--platform-package` 为部署锁指定的完整源码 `.tgz`，`--client` 与 `--platform-client` 分别为本宿主及公共宿主的 `generated/client/index.d.ts`。AI 启用时另须 `--ai-data-package`，可用 `--deps` 指定原锁版本的只读编译依赖目录。输出为尚不存在的 `.tgz`，失败只清理本次独占产物；上下文保留原依赖锁、SQL、编译来源及运行闭包，不携带作者依赖目录或环境文件。
 
+标准 Rental 与双 Core 镜像上下文均排除 `dist-mcp`；提前执行 MCP 构建也不会改变这两种标准组合的包内容。MCP 使用上面的显式选装入口及对应部署依赖。
+
 同一打包入口默认 `--host rental`；双 Core 组合显式使用 `--host example-multi-core --tickets-package <完整固定工单包目录>`，并提供对应双 Core 部署材料。`--ai disabled` 使用 `apps/example-multi-core-api/dist/main.js` 和 161 模型 Client；`--ai enabled` 还须完整 AI 数据包，使用 `apps/example-multi-core-api/dist-ai/ai-main.js` 和 247 模型 Client。打包从所选宿主的真实依赖闭包投影原锁，核两份 Core 完整包及同源公共产物。两个 Core 共用同一个所选 Client，工单仍没有 AI 工具。
 
 AI 扩展宿主从正式出口 `@rental-os/rental-api/ai-app-module` 使用 `createRentalAiHostModule`，以 `additionalCores`、`additionalHttp` 和 `additionalOpenApi` 接入静态 Core。该出口同时提供 `RENTAL_HOST_ASSEMBLY`、`RentalAiHostAssembly` 和 `bootstrapRentalComposition`，使 HTTP 绑定及启动读取同一 `dist-ai` 产物中的令牌；普通入口使用独立的 `dist` 闭包。权限、Runtime、模型账和恢复仍由原 Rental AI 组合裁定，额外 Core 的普通授权不产生工具访问权。

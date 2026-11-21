@@ -288,6 +288,7 @@ function createRentalHostContext(input) {
     if (fixed) for (const [file, bytes] of fixed) files.set(directory + '/' + file, bytes);
     else for (const [file, bytes] of sourceFiles) if (file.startsWith(directory + '/')) {
       const relative = file.slice(directory.length + 1);
+      if (relative.startsWith('dist-mcp/')) continue;
       if (['apps/rental-api', 'apps/example-multi-core-api'].includes(directory)
         && aiMode === 'disabled' && relative.startsWith('dist-ai/')) continue;
       if (['package.json', 'README.md', 'LICENSE'].includes(relative) || /^dist(?:-[a-z0-9-]+)?\/.*\.(?:js|cjs|json|d\.ts)$/u.test(relative)
@@ -357,6 +358,7 @@ function collectInputs(options) {
       || directory === 'packages/ai-native-data' && aiFiles) continue;
     const absolute = path.join(root, directory); ordinaryDirectories(absolute);
     for (const entry of fs.readdirSync(absolute, { withFileTypes: true })) {
+      if (entry.name === 'dist-mcp') continue;
       if (/^dist(?:-[a-z0-9-]+)?$/u.test(entry.name)) {
         if (entry.isSymbolicLink() || !entry.isDirectory()) throw Error('编译产物须为普通目录');
         for (const [file, bytes] of readTree(path.join(absolute, entry.name), file => /\.(?:js|cjs|json|d\.ts)$/u.test(file)))
