@@ -1,7 +1,7 @@
 /** Enterprise order pages consume dedicated readers under current customer grants.
  * URL references only locate an order. Monetary values and identities stay tied
  * to original server facts, while changed sessions discard old responses. */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ENTERPRISE_ORDER_EXPORT_LIMIT, formatRentalMoney, type EnterpriseOrderDetail, type EnterpriseOrderDetailResponse,
@@ -30,10 +30,16 @@ export function EnterpriseOrdersPage() {
   const corporate = context.entry?.corporates.find(row => row.corporateCustomerId === context.selectedCorporateId);
   const workspaceCode = context.session?.workspace?.workspaceCode;
   const allowed = Boolean(corporate?.actions.includes("orders:read") && workspaceCode);
+  const exportAllowed = allowed && Boolean(corporate?.actions.includes("export:create"));
   const identity = JSON.stringify([context.identity, workspaceCode, allowed]);
   const currentIdentity = useRef(identity); currentIdentity.current = identity;
-  const filterIdentity = JSON.stringify([identity, group, keyword]);
-  const currentFilter = useRef(filterIdentity); currentFilter.current = filterIdentity;
+  const exportView = useMemo(() => ({ identity, group, keyword, orderId, invalidReference, exportAllowed }),
+    [identity, group, keyword, orderId, invalidReference, exportAllowed]);
+  const currentExportView = useRef<typeof exportView | null>(null);
+  useLayoutEffect(() => {
+    currentExportView.current = exportView;
+    return () => { currentExportView.current = null; };
+  }, [exportView]);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -86,12 +92,18 @@ export function EnterpriseOrdersPage() {
     { label: english ? "Adjusted payable" : "调整后应付", value: row => row.finalPayableAmount },
     { label: english ? "Currency" : "币种", value: row => row.currency }
   ] };
+  function verifyExport() {
+    if (!exportAllowed || orderId || invalidReference || context.signal.aborted || currentExportView.current !== exportView) {
+      throw new Error("企业导出权限或条件已变化");
+    }
+  }
   const loadExportRows = async () => {
-    if (currentFilter.current !== filterIdentity || !corporate?.actions.includes("export:create")) throw new Error("企业导出权限或条件已变化");
+    verifyExport();
     const query = new URLSearchParams({ group, keyword });
     const result = await context.read<EnterpriseOrderExportResponse>(`${base}/export-rows?${query}`, context.signal);
+    verifyExport();
     verify(result, context.signal);
-    if (currentFilter.current !== filterIdentity || result.group !== group || result.maxRows !== ENTERPRISE_ORDER_EXPORT_LIMIT
+    if (result.group !== group || result.maxRows !== ENTERPRISE_ORDER_EXPORT_LIMIT
       || !Array.isArray(result.items) || result.total !== result.items.length || result.total > result.maxRows
       || result.items.some(row => !reference(row.orderId) || row.group !== group)) throw new Error("完整企业订单导出结果无法核对");
     return result.items;

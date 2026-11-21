@@ -24,6 +24,8 @@ import "@rental-os/rental-core/clients/enterprise-portal/styles";
 
 [申请／加入／邀请](WorkflowPages.tsx)、[政策](PolicyPage.tsx)、[预约审批](ApprovalsPage.tsx)、[订单](OrdersPage.tsx)、[财务](FinancePage.tsx)、[换货](ExchangeApprovalsPage.tsx)、[续租](ExtensionApprovalsPage.tsx)、[成员](MemberLifecycle.tsx)与[管理员](AdministratorEditor.tsx)保留现有完整交互。当前企业授权、audience、空间和字段投影由原服务端复核，父锁、金额、库存、批准、执行和原收据继续沿 Core 事实。
 
+财务导出在读取前后核对发起时的页面。切换订单、企业或空间，或者离开财务页后，迟到的结果不会生成下载。应收、实款和核销仍分别读取原财务投影。
+
 [原营业时区模块](../time.ts)由门户续租与客户小程序共用，保留 Intl、DST 拒绝与原设备回退，租期及费用由服务端裁定。
 
 unknown 沿同一键、存储命名空间与 Web Lock 回读；页面隐藏、卸载、身份或材料变更保持原迟到结果隔离。浏览器 File/Blob、fetch、crypto、DOM、URL 和 img 回调在原组件中执行，具体字节核验仍委托已抽出的文件客户端。

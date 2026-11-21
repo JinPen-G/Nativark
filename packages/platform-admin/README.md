@@ -26,6 +26,21 @@
 | [构建适配](config/vite.ts)、[样式](src/styles.css) | 同源 UIArc 别名、动效偏好、按钮图标与严格看板适配；环境/代理由宿主管理 |
 | [原后台适配](../../apps/admin/src/app/adminRuntime.ts) | 原 authStore/request/queryClient 消费端口，旧源码入口窄转接同一公共实现 |
 
+## 宿主与业务贡献
+
+| 消费者 | 职责与依赖入口 |
+| --- | --- |
+| [零 Core](../../apps/platform-admin/README.md) | 以公共浏览器会话和空页面注册表组装公共应用，保留公共管理、设置与个人入口 |
+| [Rental](../../apps/rental-admin/README.md)、[双 Core](../../apps/example-multi-core-admin/README.md) | 宿主登记所选页面。两者共用 [Rental 浏览器装配](../rental-core/admin/browser/README.md)，由已验证会话提供经营范围、原深链接和业务通知。双 Core 另登记工单贡献 |
+| [工单](../../apps/example-tickets-admin/README.md) | 公共浏览器会话加 [工单页面贡献](../example-tickets-core/admin/index.tsx)，页面与操作使用所属 Core 的绑定、就绪和访问状态 |
+| [原管理后台](../../apps/admin/src/app/App.tsx)、[原路由](../../apps/admin/src/app/AppRouter.tsx) | 保留原会话、路由和业务组合，逐项转接公共组件和 Rental 页面。AI Native、AI 运营、Copilot 和桌面 Agent 页面仍由原后台装配 |
+
+业务页面从 [Rental 后台导读](../rental-core/admin/README.md) 进入。统一登记订单、工单、能力、地点、商品资产、商业、治理、会员、工作台与报表、渠道、开业、支付对账十二组页面。各组导读给出业务数据、操作和权限来源。页面贡献使用公共 UI、宿主请求与查询缓存，服务端按身份、经营范围及业务权限裁定。
+
+Rental 客户入口分别由[租户网站](../../apps/tenant-website/README.md)、[企业门户](../../apps/enterprise-portal/README.md)、[客户小程序](../../apps/miniprogram/README.md)和[员工小程序](../../apps/staff-miniprogram/README.md)装配。可复用页面、会话和业务客户端分别进入 [网站 UI](../rental-core/clients/website-ui/README.md)、[网站请求](../rental-core/clients/website/README.md)、[企业门户页面](../rental-core/clients/enterprise-portal/README.md)、[企业请求](../rental-core/clients/enterprise/README.md)、[客户原生贡献](../rental-core/clients/miniprogram/README.md)及[员工原生贡献](../rental-core/clients/staff/README.md)。Web 宿主提供构建、站点入口与会话运输，原生宿主负责原页面、设备运输及存储。服务端对应 [Rental HTTP 入口](../../apps/rental-api/README.md)。
+
+[静态官网](../../apps/website/README.md)与 [Next.js 官网](../../apps/website-next/README.md)承载公开营销内容和演示预约。预约提交到原[公开演示申请入口](../../apps/api/src/modules/demo-requests/public-demo-request.controller.ts)。租户商城的商品、预约和订单页面在租户网站宿主。第三方组件和保留适配从 [UIArc](../ui-arc/README.md) 及本页的来源说明追溯。
+
 ## 宿主接入
 
 普通宿主从 `/runtime` 创建一次 `createBrowserAdminSession`，将它与品牌、可选页面注册表传给 `/application` 的 `createPlatformAdminApplication` 即可挂载。零Core省略 `pages`；增加Core只改宿主组合与Core自身贡献。实际最小组合见[零Core App](../../apps/platform-admin/src/App.tsx)和[工单入口](../../apps/example-tickets-admin/src/main.tsx)。公共应用创建唯一 Data Router，并将同一注册表用于菜单、直接路由和面包屑。
@@ -35,6 +50,8 @@
 需要经营空间选择、业务通知或详情的宿主，可向 `/application` 提供 `Shell` 组件。它接收 `PlatformShellProps` 并包装同一 `PlatformShell`，传递公共菜单、页面、退出和正文。`contextSwitcher` 供给当前已验证业务上下文的控件，`notifications` 与 `notificationDetails` 供给真实通知和详情。原空间切换仍提交服务端响应并推进同一会话的请求与缓存代次。[组合参数](src/application-context.ts) · [公共壳及插槽](src/PlatformShell.tsx)
 
 通知文案从 `/notifications` 使用 `useNotificationText`。结果声音从 `/sound` 使用 `captureSoundScope` 和 `emitSoundEvent`，沿用宿主唯一 UI Provider 的已验证身份范围、原偏好和跨标签去重。[通知文案](src/notifications.ts) · [声音出口](src/sound.ts)
+
+通知铃铛由 [HeaderNotifications](src/features/notifications/HeaderNotifications.tsx) 消费宿主的消息、读状态更新、刷新和详情投影。Rental 组合经 [业务通知适配](../rental-core/admin/browser-notifications/README.md) 读取原待办与事件，并按当前身份重新建立范围。休息计时与播放器由 [RestProvider](src/features/rest/RestProvider.tsx) 按当前租户会话挂载。声音由 [交互监听](src/features/sound/GlobalInteractionSounds.tsx) 和 [结果事件服务](src/features/sound/soundService.ts) 使用本机偏好与同一身份范围。验证入口见[原休息播放器行为](../../tests/admin-rest-player.test.cjs)和[原声音行为](../../tests/admin-sound.test.cjs)。
 
 宿主采用服务端返回的新业务范围后，同步调用 `session.invalidateBusinessScope()`。它中止旧请求、递增会话代次、清除同一查询缓存并通知页面，保留公共登录身份和凭据。已有宿主自行供给 `AdminRuntime` 时，在原切换提交点执行等价的取消、代次、缓存及订阅通知；不要创建第二套缓存。[组合参数](src/application-context.ts) · [范围与路由](src/core/CoreRoutes.tsx) · [公共会话](src/runtime/browser-session.ts)
 

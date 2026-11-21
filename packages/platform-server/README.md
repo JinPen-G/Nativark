@@ -10,6 +10,7 @@
 | Prisma SQL运行值 | [官方运行库适配](src/prisma-runtime.ts)从 `/prisma-runtime` 提供 schema 无关的 SQL、Decimal、空值单例、错误类及隔离级别；生成 Client 及其输入类型由所选宿主和业务适配持有 |
 | 公共会话 | [公共认证](src/modules/auth/platform-auth.service.ts)、[共享会话算法](src/modules/auth/auth-session.service.ts)、[HTTP](src/modules/auth/auth-session.controller.ts)及[Web 登录/改密](../platform-admin/src/session-pages.tsx)，复用原签名、失败保护、单次刷新和改密 |
 | 当前组织范围 | [组织子树与地点交集](src/common/organization-location-scope.ts) 从 `/organization-location-scope` 提供；调用方先限定租户，缺失/停用组织返回空集合，配置地点只缩小已映射范围 |
+| 公共数据与原账 | [公共 schema](../../apps/platform-api/prisma/schema.prisma)、[固定数据计划](../../apps/platform-api/src/platform-data.ts)、[原账观察](../core-host/src/mysql-deployment.ts)与[物理读取](../platform-core-host/src/mysql-physical.ts)；公共表、迁移原文及当前结构分别核定，Core 外键由所选宿主供给 |
 | 身份存储 | [仓储](src/modules/platform/platform-identity.repository.ts)、[认证来源](src/modules/platform/platform-authentication.source.ts)、[窄存储端口](src/modules/platform/platform-auth-data-store.ts)；平台账号、角色和会话，业务表不进入端口 |
 | 公共管理 | [模块导读](src/modules/platform/README.md)、[应用服务](src/modules/platform/platform-management.service.ts)、[仓储](src/modules/platform/platform-management.repository.ts)、[存储端口](src/modules/platform/platform-management.store.ts)、[主体围栏](src/modules/platform/platform-principal.authority.ts)；SaaS与租户管理分开，当前原会话 / 角色在同事务复验 |
 | 部署初始化 | [公共初始化](src/modules/platform/platform-initialization.ts)；首次创建SaaS主体，重复执行不重置账号，不运行Core初始化 |
@@ -34,6 +35,8 @@
 | 短信结果接点 | [原结果与unknown错误](src/common/notification-delivery.ts) 从 `/notification-delivery` 提供，原Provider及Core共用同一错误身份；实际发送、凭据和回执仍由原通知服务负责 |
 | 接口资料与响应 | [OpenAPI](src/platform-openapi.ts)、[响应信封](src/common/request-id.interceptor.ts)；同一公共政策生成接口资料，信封保持 `data` / `requestId` |
 | 直接消费者 | [默认 API 装配](../../apps/platform-api/src/app.module.ts)与[公共数据库](../../apps/platform-api/src/database.ts)、[默认 Web 装配](../../apps/platform-admin/src/App.tsx)与[公共页面工厂](../platform-admin/src/application.tsx)。[原 API 服务装配](../../apps/api/src/application-services.module.ts)供给原数据库及公共应用实例，[Rental 认证适配](../../apps/api/src/modules/auth/README.md)解析原业务范围 |
+
+默认公共根模块挂载认证、公共管理、外观、订阅、集成、官方日历、工具与消息应用。文件业务 HTTP、通知台账和作业台账由所选宿主分别登记实际应用，打印还需要真实业务参加者。Rental 组合通过[平台选择器](../rental-core/src/application-platform.ts)复用同一服务实例，原组合从[服务模块](../../apps/api/src/application-services.module.ts)供给原数据库与业务参加者。[通知模块](src/modules/notifications/notifications-http.module.ts) · [作业模块](src/modules/jobs/jobs-http.module.ts) · [文件业务 HTTP](../rental-core/src/http-files.controller.ts)
 
 公共 HTTP 清单、访问类别、权限和文档来自同一份政策。构建后执行 `npm run api:document:platform` 输出同版本 OpenAPI JSON；此命令不启动服务、不读环境文件或数据库。HTTP 文档也由宿主在 `/api/openapi.json` 提供。接口存在不代表 Core 工具已发布或当前主体有业务权限。
 
@@ -60,7 +63,7 @@ const platform = PlatformServerModule.register({
 
 字典与编号从 `/tools` 使用同一 `PlatformToolsService`，请求类从 `/tools-dto` 复用。公共模块已登记五个原 HTTP 操作与同源 OpenAPI；独立公共宿主注册公共 Controller，原组合只保留原 Controller 和同一服务实例。取号与保存先锁租户，再核当前主体、生效配置与审计，失败由调用方读取核对。两个工具权限通过公共初始化补录，不自动授予成员。普通 Core 可消费公共工具，业务本身的编号规则继续由其领域决定。[接入与原子性](src/modules/platform-tools/README.md)
 
-文件服务从 `/files` 消费原字节、格式、原存储键和文件表实现；原运行时与元数据仓储已委托同一实现。`createOriginalFileUploadFacts` 通过原配置锁、授权/引用参加者和同事务建立pending事实，`readOriginalFileUploadReceipt` 仅为仍有效会话续签原暂存键，不延长原有效期。`freezeFileUploadContent` 在原完成链中先提交唯一目标再写一次，恢复只核原目标；最终激活及知识绑定仍在原完成事务。公共文件两模型/迁移已提供，业务HTTP及完整应用装配继续按PCH推进，知识、专用检查、企业证据及附件读取仍须由各自原授权链裁定。[文件入口及数据边界](src/modules/files/README.md)
+文件服务从 `/files` 消费原字节、格式、原存储键和文件表实现；原运行时与元数据仓储已委托同一实现。`createOriginalFileUploadFacts` 通过原配置锁、授权/引用参加者和同事务建立pending事实，`readOriginalFileUploadReceipt` 仅为仍有效会话续签原暂存键，不延长原有效期。`freezeFileUploadContent` 在原完成链中先提交唯一目标再写一次，恢复只核原目标；最终激活及知识绑定仍在原完成事务。公共文件两模型及迁移已提供，原组合和 Rental 标准宿主已通过同一文件应用供给实际业务 HTTP。知识、专用检查、企业证据及附件读取仍由各自原授权链裁定。[文件入口及数据边界](src/modules/files/README.md)
 
 `FileStorageCleanup` 由原宿主按租户调用，宿主继续持有唯一计时器、租户发现与专用保留场景。过期会话和资产的两次写入在同一 callback 事务内提交或回滚，事务内不访问对象存储。`issueFileDownloadReference` 使用所属业务的实际 ACL 和必须成功的审计，在配置或审计等待后复核当前权限及原文件绑定，再返回短时 GET。原专用入口继续裁定实名、知识、企业证明与检查资料。
 
@@ -76,4 +79,4 @@ const platform = PlatformServerModule.register({
 
 构建使用本包 `build`，类型使用本包 `lint`。已有 [登录保护](../../tests/auth-login-lockout.test.cjs)、[外观](../../tests/admin-appearance-settings.test.cjs) 和 [MCP 原审计](../../tests/mcp-original-audit.test.cjs) 保留；命令先核读写及隔离要求。[验证规则](../../AGENTS.md#修改验证与交付)
 
-当前独立宿主已有公共初始化、认证、人员 / 角色 / 租户 / 组织管理、安全配置、外观、订阅、基础集成和健康 / 文档链。完整Rental标准装配及各运行组合继续交付，开发入口见[Core接入手册](../core-contracts/README.md#五步快速接入)。类型及离线行为不等于真实数据库、HTTP、浏览器或部署通过。
+当前独立宿主已有公共初始化、认证、人员 / 角色 / 租户 / 组织管理、安全配置、外观、订阅、基础集成和健康 / 文档链。公共、单 Rental、单工单和双 Core 已各有受控根装配，分别沿[公共 API](../../apps/platform-api/src/app.module.ts)、[Rental API](../../apps/rental-api/src/app.module.ts)、[工单 API](../../apps/example-tickets-api/src/app.module.ts)与[双 Core API](../../apps/example-multi-core-api/src/app.module.ts)读取实际选择。可选 AI 从[独立 AI 根](../../apps/rental-api/src/ai-app.module.ts)装配所选数据与原业务参加者。开发入口见[Core接入手册](../core-contracts/README.md#五步快速接入)。类型及离线行为不等于真实数据库、HTTP、浏览器或部署通过。

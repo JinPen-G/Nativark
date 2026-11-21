@@ -1,6 +1,6 @@
 /** Current customer grants consume original Core financial projections. Reads
  * discard changed identities, and cash receipts and allocations stay separate. */
-import { useRef } from "react";
+import { useLayoutEffect, useMemo, useRef } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { formatRentalMoney, type RentalEnterpriseCorporateFinancialProjection, type RentalEnterpriseHistoryWorkspaceBasis,
@@ -42,6 +42,12 @@ export function EnterpriseFinancePage() {
   const exportAllowed = Boolean(allowed && corporate?.actions.includes("export:create"));
   const identity = JSON.stringify([context.identity, workspace?.workspaceCode, allowed, orderAllowed, exportAllowed]);
   const currentIdentity = useRef(identity); currentIdentity.current = identity;
+  const exportView = useMemo(() => ({ identity, orderId, invalidReference }), [identity, orderId, invalidReference]);
+  const currentExportView = useRef<typeof exportView | null>(null);
+  useLayoutEffect(() => {
+    currentExportView.current = exportView;
+    return () => { currentExportView.current = null; };
+  }, [exportView]);
   const base = `/enterprise/corporates/${encodeURIComponent(corporateId)}`;
 
   function verifyScope(result: RentalEnterpriseCorporateFinancialProjection | RentalEnterpriseOrderFinancialProjection | RentalEnterpriseHistoryWorkspaceBasis, signal: AbortSignal) {
@@ -135,7 +141,7 @@ export function EnterpriseFinancePage() {
   });
 
   function verifyExport() {
-    if (!exportAllowed || context.signal.aborted || currentIdentity.current !== identity) {
+    if (!exportAllowed || invalidReference || context.signal.aborted || currentExportView.current !== exportView) {
       throw new Error(english ? "Financial export authority changed." : "财务导出权限已变化");
     }
   }

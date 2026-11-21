@@ -203,7 +203,7 @@ node -e "const { createRentalOpenApi } = require('@rental-os/rental-core/http-op
 
 Rental HTTP从 `@rental-os/rental-core/http` 的 `RentalHttpModule` 接入，类型 `RentalHttpServiceGroups` 列出宿主需要供给的真实应用。
 
-完整实例从 [application](src/application.ts) 构造，经 [application-http](src/application-http.ts) 与 [application-platform](src/application-platform.ts) 分别供给原 Rental HTTP 和公共模块。宿主显式选择 AI 模式：未启用时客户检查出箱传 `null` 且不装配 AI 参加者；启用时必须提供原失败出箱、事务事件和通知草稿读取器。构造不会启服务或启动作业。独立组合及尚未接齐的请求边界见 [Rental API](../../apps/rental-api/README.md)。
+完整实例从 [application](src/application.ts) 构造，经 [application-http](src/application-http.ts) 与 [application-platform](src/application-platform.ts) 分别供给原 Rental HTTP 和公共模块。宿主显式选择 AI 模式：未启用时客户检查出箱传 `null` 且不装配 AI 参加者；启用时必须提供原失败出箱、事务事件和通知草稿读取器。构造不会启服务或启动作业。独立组合的实际挂载集合及明确路由缺口见 [Rental API](../../apps/rental-api/README.md)。
 
 网站、门户和部分前端出口继续使用 `@rental-os/shared@0.1.0` 的原运行协议。该包是可选 peer，消费这些出口的宿主仍须安装它；只使用其他出口时可按实际依赖选择。租赁值逐项转到已有 Core 正式出口，AI schema 和协调器当前仍由原 Shared 单源提供。
 
@@ -221,7 +221,7 @@ Rental HTTP从 `@rental-os/rental-core/http` 的 `RentalHttpModule` 接入，类
 2. 在宿主 `imports` 中使用 `RentalHttpModule.registerFactory({ imports, inject, useFactory })`，工厂返回上一步的应用集合。已经完成实例装配的宿主可用 `register(services)`；应用集合只创建一次，必需服务缺失时启动失败，原可选服务保持原处理。
 3. 由宿主注册原身份/权限Guard、ALS及Rental HTTP政策，并选择该Core的路由贡献。员工、客户与企业接口沿各自audience和业务范围裁定；HTTP模块与单独品类模块选其一，避免重复Controller。
 
-原组合AppModule从 `/http` 导入同一19个Controller，保留原Controller列表和provider接线；服务、数据、作业和AI的完整独立装配继续沿正式Core边界供给。字段、请求验证类和政策从下面各HTTP出口及[OpenAPI源码](../../apps/api/src/contracts/openapi-document.ts)查阅。[统一模块](src/http.module.ts) · [原服务绑定](../../apps/api/src/modules/rental-core/rental-http.providers.ts)
+原组合AppModule从 `/http` 导入同一19个Controller，保留原Controller列表和provider接线；独立宿主从[完整应用](src/application.ts)取得同一服务图、数据和作业，可选 AI 从[独立 AI 组合](../../apps/rental-api/src/ai-composition.ts)供给原参加者。字段、请求验证类和政策从下面各HTTP出口及[OpenAPI源码](../../apps/api/src/contracts/openapi-document.ts)查阅。[统一模块](src/http.module.ts) · [原服务绑定](../../apps/api/src/modules/rental-core/rental-http.providers.ts)
 
 微信客户认证从 `/mysql-client-wechat-auth` 接入，实际事务、渠道凭据、同一客户主档/注册、当前会话和审计经 `/client-wechat-ports` 供给。运输使用 `@rental-os/platform-server/integration-wechat` 的同一类和错误身份，保留原AppID缓存及凭据一次刷新；业务绑定核水印，已登录客户的一次性code错误不重试、不视为会话失效。原[微信Nest接线](../../apps/api/src/modules/client/client-wechat-auth.service.ts)保持八项构造位置。
 
@@ -277,7 +277,7 @@ HTTP入口从 `/http-workspace-capabilities`、`/http-staff-payments` 导入；`
 
 报价/营销服务从 `@rental-os/rental-core/mysql-business-runtime` 导入，配置、事实和核心配置仓储使用同一实例；会员、企业币种核验、密文及短信通过 [实际端口](src/business-runtime-ports.ts) 供给。原API的14项构造顺序与两个初始化钩子保留，适配层另把原通知正文保留读取器传给包内构造末尾的可选接点。配置/事实按同一刷新队列装载，续租事务上下文沿用模块级ALS。报价来源每次从同一公共可信身份读取，detached配置不发布进程缓存；`delivery_uncertain` 只按原投递记录查询，尝试次数与租约仍分别处理。[原Nest接线](../../apps/api/src/modules/rental-core/rental-business.service.ts) · [报价/营销验证](../../tests/rental-business-v1.test.cjs) · [通知恢复验证](../../tests/rental-notification-lease.test.cjs)
 
-真实短信沿同一事实仓储认领原通知，核当前租户/Core/空间与原修订，再先提交 `delivery_uncertain`，确认后才调用供应商。结果按该次观察的原范围与修订 CAS 落库；提交失应答、结果写失败、重启或租约过期均只核原记录。HTTP 用 `dispatchCommittedNotification` 消费已确认的入队收据，后续撤权或查询失败时返回最后确认的原收据并提示核对，不把入队改成失败。订单附属通知不能遮盖已提交的订单结果，显式通知重试仍遵守原错误合同。完整作业装配与付款锁序继续由宿主提供。[通知事实](src/mysql-business-facts.ts) · [业务消费](src/mysql-business-runtime.ts) · [HTTP入队结果](src/http-business.controller.ts)
+真实短信沿同一事实仓储认领原通知，核当前租户/Core/空间与原修订，再先提交 `delivery_uncertain`，确认后才调用供应商。结果按该次观察的原范围与修订 CAS 落库；提交失应答、结果写失败、重启或租约过期均只核原记录。HTTP 用 `dispatchCommittedNotification` 消费已确认的入队收据，后续撤权或查询失败时返回最后确认的原收据并提示核对，不把入队改成失败。订单附属通知不能遮盖已提交的订单结果，显式通知重试仍遵守原错误合同。原通知作业已由[标准参加者](src/application-participants.ts)登记，并在原认领、限频和派发事务复验当前作业权威。支付作业沿同一参加者先核父级准入，再由原支付事务锁订单并复核完整空间范围。[通知事实](src/mysql-business-facts.ts) · [业务消费](src/mysql-business-runtime.ts) · [HTTP入队结果](src/http-business.controller.ts)
 
 通知草稿的准备、保存和原结果读取仍由同一业务实例执行，发送是另一个授权动作。宿主通过 `/notification-draft` 的窄接点供给原维护读取器；`/notification-log-cache` 只接收核验过的原行与删除账，产生不可变且无正文的缓存，反序列化副本不会获得核验标记。`/notification-snapshot` 在原恢复写入时剥离草稿正文，普通发送记录保持原值；正文已删除时，原结果返回原删除收据与空正文，不能以缓存内容或空密文推断删除成功。[原维护读取器](../../apps/api/src/modules/ai-native/privacy/retention-notification-draft.ts) · [原缓存适配](../../apps/api/src/modules/rental-core/rental-notification-log-cache.ts)
 
@@ -293,7 +293,16 @@ HTTP入口从 `/http-workspace-capabilities`、`/http-staff-payments` 导入；`
 
 报表从 `@rental-os/rental-core/mysql-reports` 创建，宿主仅提供本表的只读方法，原Auth/ALS供给当前地点及数据范围。每次查询保留租户/空间、草稿排除、订单归属和地点过滤；仅本人范围不能读取混合空间库存快照的整份报表。AI使用固定 `getBoundedOperationReport`，数量或分页证据冲突明确拒绝，不能把部分统计当总数。CSV从 `/report-csv` 复用，币种、筛选和历史口径说明跟随同一结果，导出不重新查询。[原报表Nest接点](../../apps/api/src/modules/rental-core/rental-workspace-report.repository.ts) · [原导出接点](../../apps/api/src/modules/rental-core/rental-workspace-report.csv.ts)
 
-到期作业从 `@rental-os/rental-core/mysql-due-jobs` 接入，原Nest provider供给同一数据库、Core、业务、动作幂等、容量、企业核销及支付实例。GET_LOCK、任务与RELEASE_LOCK仍在同一交互式事务连接，内部业务沿原短事务和操作键；失败释放锁并继续其他任务/空间，不以本地支付过期代替原渠道核验。宿主只登记一个provider并继承原启动/销毁钩子；企业/支付保持原Optional接线，启用相应生产任务须提供原参加者，不能用空成功替代。完整标准Core作业贡献仍随正式装配交付。[原作业接点](../../apps/api/src/modules/rental-core/rental-due-job.scheduler.ts) · [原离线作业验证](../../tests/rental-due-job-scheduler.test.cjs)
+到期作业从 `@rental-os/rental-core/mysql-due-jobs` 接入，原Nest provider供给同一数据库、Core、业务、动作幂等、容量、企业核销及支付实例。GET_LOCK、任务与RELEASE_LOCK仍在同一交互式事务连接，内部业务沿原短事务和操作键；失败释放锁并继续其他任务/空间，不以本地支付过期代替原渠道核验。宿主只登记一个provider并继承原启动/销毁钩子；企业/支付保持原Optional接线，启用相应生产任务须提供原参加者，不能用空成功替代。标准宿主从[应用参加者](src/application-participants.ts)构造同一 allocation 与 dueJobs，并由[唯一生命周期](../../apps/rental-api/src/lifecycle.ts)统一启动和排空。[原作业接点](../../apps/api/src/modules/rental-core/rental-due-job.scheduler.ts) · [原离线作业验证](../../tests/rental-due-job-scheduler.test.cjs)
+
+| 宿主启动的原执行者 | 业务与存储接点 | 退出及恢复边界 |
+| --- | --- | --- |
+| `workers.allocation` | [配货](src/mysql-allocation.ts)、[事实/事件](src/allocation-storage.ts)与[当前作业权威](src/application-worker-authority.ts)，同一实例供 HTTP、AI 及自动扫描消费 | 停止扫描并等待原在途工作，原订单、配置开关与失败事件保持原事务边界 |
+| `workers.dueJobs` | [五项到期任务](src/mysql-due-jobs.ts)、[服务端口](src/due-job-ports.ts)及[标准参加者](src/application-participants.ts)，涵盖待确认订单、领取逾期、原通知、调价和支付到期 | 停止新 tick，等待空间枚举、同连接命名锁及已进入业务完整返回，unknown 沿原操作核对 |
+| `integrations.fileCleanup` | [集成生命周期](src/application-integrations.ts)、[文件应用](src/file-application-runtime.ts)与[清理权威](src/application-file-cleanup-authority.ts)，处理原过期上传、完成暂存及待删除对象 | 等待当前清理批次，删除失应答只观察原对象键与修订，AI 知识依赖沿显式选装参加者 |
+| `client.rateLimit` | [唯一限流实例](src/mysql-client-rate-limit.ts)，HTTP、客户认证及清理共用原配额表 | 等待当前清理，完整日窗口和原原子递增保留，退出后由宿主关闭同一数据库 |
+
+上述执行者由[宿主生命周期验证](../../apps/rental-api/test/lifecycle.test.cjs)和[原到期任务验证](../../tests/rental-due-job-scheduler.test.cjs)覆盖所选正常、拒绝及排空分支。业务事件从[仓储组合](src/application-repositories.ts)参加原调用方事务，启用 AI 时使用同一[失败出箱](../ai-native-server/src/business-events/prisma-business-failure-outbox.ts)。真实数据库锁、外部运输、进程重启及完整卸载沿各自实际环境核验。
 
 换货候选/试算从 @rental-os/rental-core/mysql-exchange-preview接入，供给同一核心、报价/营销、配货和原事务，使用[私有服务视图](src/exchange-preview-ports.ts)。已有事务原样传入；没有事务时由原数据源开启。候选只释放当前受权商品及可用资产，预留和费用批准分别由原业务入口执行。旧Nest provider保留五项依赖和可选容量；需容量的新服务缺组件时明确拒绝。[原试算接线](../../apps/api/src/modules/rental-core/rental-exchange-preview.service.ts) · [换货计价/历史验证](../../tests/rental-exchange-segment-pricing.test.cjs)
 
@@ -376,7 +385,7 @@ HTTP宿主登记 `/http-core` 和 `/http-business` 的两个Controller，从 `/h
 
 支付应用使用`/mysql-payment-runtime`和`/mysql-payment-reconciliation-file`，宿主供给原数据库、配置、资金、当前Auth/ALS及失败出箱。公共`@rental-os/platform-server/integration-payment`只负责签名、验签和受控运输。退款额度、实款、原回调键和unknown恢复仍由Rental决定；首响应丢失后只核原操作。客户端金额与对账合同从根出口读取，纯金额和Stripe工具分别使用`/payment-money`、`/stripe-payment`。[原支付入口](../../apps/api/src/modules/integrations/README.md) · [公共支付运输](../platform-server/src/modules/integrations/README.md#支付运输)
 
-企业HTTP按需要登记 `/http-enterprise-read`、`/http-enterprise-merchant`、`/http-enterprise-handoff-merchant` 与 `/http-enterprise-workflows`。从 `/http-enterprise-applications` 的 `RENTAL_ENTERPRISE_HTTP` 取得令牌，并按[原企业接线](../../apps/api/src/modules/enterprise/enterprise-http.providers.ts)绑定实际参加者。客户路径仍使用本人/企业授权，商户与行政交接保留各自营运范围；专用文件读取前后复验，缺真实文件配置继续拒绝。财务读取的可选装配保留原不可用状态，类型/声明在[包配置](package.json)逐项对应；完整标准宿主及独立安装仍按PCH交付。
+企业HTTP按需要登记 `/http-enterprise-read`、`/http-enterprise-merchant`、`/http-enterprise-handoff-merchant` 与 `/http-enterprise-workflows`。从 `/http-enterprise-applications` 的 `RENTAL_ENTERPRISE_HTTP` 取得令牌，并按[原企业接线](../../apps/api/src/modules/enterprise/enterprise-http.providers.ts)绑定实际参加者。客户路径仍使用本人/企业授权，商户与行政交接保留各自营运范围；专用文件读取前后复验，缺真实文件配置继续拒绝。财务读取的可选装配保留原不可用状态，类型/声明在[包配置](package.json)逐项对应；普通与可选 AI 的[标准根装配](../../apps/rental-api/src/app.module.ts)已供给实际企业应用和 HTTP，[AI 根](../../apps/rental-api/src/ai-app.module.ts)另行选择原参加者。独立冷安装、真实业务运行和完整兼容验收分别取证。
 
 品类解析和身份子出口同样使用服务端 peer。宿主供给本表只读方法后创建 `RentalCategoryResolver`，普通读取使用同一数据源，业务提交点传入自己的事务视图。`forVersion` 定位原发布引用，`forWorkspace` 每次重读当前绑定，`openingOptions` 返回最多100项及明确截断状态。旧 API 的 Nest provider 继续承担这条装配。[原 provider](../../apps/api/src/modules/rental-core/rental-category-resolver.service.ts)
 

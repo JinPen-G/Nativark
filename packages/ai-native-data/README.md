@@ -28,6 +28,25 @@ const prepared = createAiNativeDataPreparation({ baseSchema, contribution: ai })
 
 `AI_NATIVE_DATA_PREREQUISITES` 记录本版材料依赖的公共／Rental 数据版本、Rental schema 和 initial 摘要。它是部署前置要求，不是已经检查过数据库的证明。base 的摘要写入候选，固定包、可选能力版本及迁移顺序仍须由宿主的正式部署合同共同锁定。
 
+## 持久模型与服务消费者
+
+完整模型及关系以[本包 schema](prisma/schema.prisma)和[来源清单](prisma/provenance.json)为准。按服务接点阅读下列模型族，再沿[原请求工厂](../ai-native-server/src/runtime/ai-native-application.providers.ts)和[独立 AI 装配](../../apps/rental-api/src/ai-composition.ts)定位实际调用方。表中导航覆盖原持久职责，方法是否发布由所选宿主的 HTTP 与工具政策裁定。
+
+| 持久职责 | 仓储与服务入口 | 提交及读取边界 |
+| --- | --- | --- |
+| 模型配置、供应商与能力证据 | [租户模型配置](../ai-native-server/src/runtime/tenant-model-config.repository.ts)、[Provider 主档](../ai-native-server/src/runtime/provider-profile.repository.ts)与[模型设置工厂](../ai-native-server/src/runtime/model-settings.application.ts) | 原配置修订、凭据与能力证据由服务端核定，历史调用继续使用原配置引用 |
+| 调用准入、用量预占及结算 | [准入仓储](../ai-native-server/src/runtime/invocation-admission.repository.ts)、[用量仓储](../ai-native-server/src/runtime/usage-settlement.repository.ts)与[Gateway 绑定](../ai-native-server/src/runtime/budget/prisma-gateway-invocation-bindings.ts) | 原 holder、调用键、派发与结算收据保持关联，unknown 只核原调用 |
+| 模型财务预算、额度与价格依据 | [预算仓储](../ai-native-server/src/runtime/budget/prisma-budget.repository.ts)、[租户额度](../ai-native-server/src/runtime/budget/ai-credit.service.ts)与[冻结价格](../ai-native-server/src/runtime/budget/prisma-gateway-pricing-records.ts) | 预占、结算和原财务账由唯一 Gateway 消费，金额、tokens 与 calls 沿各自原契约 |
+| 任务、Run、Step、计划、结果及累计资源 | [任务仓储](../ai-native-server/src/runtime/ai-task.repository.ts)、[计划依据](../ai-native-server/src/runtime/runner/prisma-task-plan-policy.repository.ts)、[累计资源](../ai-native-server/src/runtime/runner/prisma-task-execution-budget.repository.ts)与[恢复快照](../ai-native-server/src/runtime/runner/prisma-task-recovery-snapshot.repository.ts) | 原租约、修订、执行阶段和资源占用随同一 Task 保留，恢复读取原效果及收据 |
+| 提案、批准与原业务消费 | [提案仓储](../ai-native-server/src/runtime/ai-proposal-repository.ts)、[批准仓储](../ai-native-server/src/runtime/ai-approval-repository.ts)与[批准消费](../ai-native-server/src/runtime/prisma-approval-consumption.repository.ts) | 材料、决定、重准备和 Core 消费分别核验，原批准消费参加原业务事务 |
+| 会话、原请求、报价选择及人工回答 | [会话仓储](../ai-native-server/src/runtime/conversation.repository.ts)、[原请求](../ai-native-server/src/runtime/task-request/prisma-original-request.repository.ts)、[报价选择](../ai-native-server/src/runtime/task-request/prisma-quote-selection.repository.ts)与[回答收据](../ai-native-server/src/runtime/task-input/prisma-task-input.repository.ts) | 当前主体读取原请求和回答，保存与显式续程分开，释放会话前继续核未决效果 |
+| 客户场景、政策、输入和预约交接 | [场景材料](../ai-native-server/src/runtime/scenes/prisma-client-scene-material.repository.ts)、[预约仓储](../ai-native-server/src/runtime/scenes/prisma-client-booking.repository.ts)与[客户请求应用](../ai-native-server/src/runtime/scenes/client-request.application.ts) | 同一客户会话、本人对象和已发布来源复验，草稿、交接及原操作分别保存 |
+| 自动化政策、授权、失败输入与原事件 | [政策管理](../ai-native-server/src/runtime/automation/human-automation-policy-management.service.ts)、[失败输入](../ai-native-server/src/runtime/automation/automation-failure-task.service.ts)与[失败出箱](../ai-native-server/src/business-events/prisma-business-failure-outbox.ts) | 原主体、授权、材料和去重依据保留，业务事实与出箱共同提交，执行另核当前权威 |
+| 知识、版本、分块、ACL、索引与结构化记忆 | [知识组合](../ai-native-server/src/runtime/knowledge/persistent-knowledge.composition.ts)、[知识仓储](../ai-native-server/src/runtime/knowledge/prisma-knowledge.repository.ts)与[记忆仓储](../ai-native-server/src/runtime/knowledge/prisma-memory.repository.ts) | 原文件绑定、版本、当前 ACL、操作与确认收据共同裁定读取和写入，索引代次由知识服务维护 |
+| 检查草稿、操作与冻结影像绑定 | [检查仓储](../ai-native-server/src/runtime/inspection-assist/prisma-inspection-draft.repository.ts)与[影像权威](../ai-native-server/src/runtime/inspection-assist/prisma-inspection-evidence.authority.ts) | 原检查目标、文件摘要及当前员工范围复验，识别材料与正式检查执行分别办理 |
+| 本地业务政策及原保存收据 | [政策仓储](../ai-native-server/src/runtime/desktop-business/desktop-business-policy.repository.ts)与[请求应用](../ai-native-server/src/runtime/desktop-business/desktop-business.application.ts) | 参数化 SQL 保存当前租户/空间的修订和原键，业务工具继续核正式授权 |
+| 正文保留、删除账与未决效果 | [保留服务](../ai-native-server/src/runtime/privacy/retention.service.ts)、[平台保留](../ai-native-server/src/runtime/privacy/platform-retention.service.ts)与[未决效果](../ai-native-server/src/runtime/task-unresolved-effects.ts) | 原密文、未决占用、删除 CAS 和稳定收据由维护事务处理，缺证据保持不可用 |
+
 ## 原业务与维护链的表归属
 
 | 原接点 | 直接及必须继续保留的关联 | 数据所有者 |
