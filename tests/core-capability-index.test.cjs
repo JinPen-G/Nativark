@@ -43,6 +43,62 @@ test("标准底座显式 workspace 能定位公共能力及独立 API 消费者"
   }
 });
 
+test("工单清单静态资产沿正式schema展开，动态无效与覆盖保持缺口", () => {
+  const root = path.resolve(__dirname, "..");
+  const packageFile = path.join(root, "package.json");
+  const manifestFile = path.join(root, "packages/example-tickets-core/src/manifest.ts");
+  const originalRead = fs.readFileSync;
+  const metadata = JSON.parse(originalRead(packageFile, "utf8"));
+  let manifestFixture;
+  fs.readFileSync = (file, options) => {
+    const resolved = typeof file === "string" ? path.resolve(file) : undefined;
+    const text = resolved === packageFile
+      ? JSON.stringify({ ...metadata, workspaces: ["packages/core-contracts", "packages/example-tickets-core"] })
+      : resolved === manifestFile ? manifestFixture : undefined;
+    if (text === undefined) return originalRead(file, options);
+    const encoding = typeof options === "string" ? options : options?.encoding;
+    return encoding ? Buffer.from(text).toString(encoding) : Buffer.from(text);
+  };
+  try {
+    const index = buildRepositoryCapabilityIndex(root);
+    const core = index.capabilities.find(item => item.id === "core:example-tickets");
+    const names = ["contracts", "service", "server", "manifest", "mysql", "http", "nest", "openapi", "metadata", "package", "platform-host"];
+    assert.deepEqual(core.details.manifest.assets, ["package.json", ...names.map(name => `dist/${name}.js`),
+      ...["index", ...names].map(name => `dist/${name}.d.ts`)]);
+    assert.equal(core.details.manifest.assets.length, 24);
+    assert.equal(core.details.assetsSource.status, "indexed");
+    assert.deepEqual(core.details.assetsSource.issues, []);
+    assert.equal(core.details.assetsSource.source.path, "packages/example-tickets-core/src/manifest.ts");
+    assert.equal(core.details.unresolvedMetadata.includes("assets"), false);
+    assert.ok(core.details.unresolvedMetadata.includes("source"));
+    assert.ok(index.issues.some(issue => issue.code === "core_metadata" && issue.path === "packages/example-tickets-core/src/manifest.ts"));
+    for (const [name, declaration, valid] of [["empty", "assets: []", true],
+      ["dynamic", "assets: unavailable()", false], ["invalid", 'assets: ["../escape.js"]', false],
+      ["covered", 'assets: ["safe.js"], ...unavailable()', false],
+      ["duplicate", 'assets: ["old.js"], assets: ["latest.js"]', false]]) {
+      manifestFixture = `
+import { CoreManifestSchema } from "@rental-os/core-contracts";
+import { TICKETS_CORE_ID, TICKETS_CORE_VERSION } from "./contracts";
+export function createTicketsManifest(source) {
+  throw new Error("queried Core function must not execute");
+  return CoreManifestSchema.parse({ manifestVersion: 1, id: TICKETS_CORE_ID, version: TICKETS_CORE_VERSION,
+    name: "资产fixture", source, ${declaration} });
+}`;
+      const fixtureIndex = buildRepositoryCapabilityIndex(root);
+      const fixtureCore = fixtureIndex.capabilities.find(item => item.id === "core:example-tickets");
+      assert.ok(fixtureCore, name);
+      assert.equal(Object.hasOwn(fixtureCore.details.manifest, "assets"), valid, name);
+      assert.equal(fixtureCore.details.unresolvedMetadata.includes("assets"), !valid, name);
+      assert.ok(fixtureCore.details.unresolvedMetadata.includes("source"), name);
+      assert.ok(fixtureCore.details.assetsSource.expression, name);
+      if (valid) assert.deepEqual(fixtureCore.details.manifest.assets, []);
+      if (name === "dynamic") assert.equal(fixtureCore.details.assetsSource.status, "source-reference");
+    }
+  } finally {
+    fs.readFileSync = originalRead;
+  }
+});
+
 test("工单页面静态权限沿正式schema展开，动态和无效权限保留来源", () => {
   const root = path.resolve(__dirname, "..");
   const packageFile = path.join(root, "package.json");

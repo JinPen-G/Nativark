@@ -80,6 +80,8 @@ node packages/core-contracts/dist/capabilities.js --owner example-tickets --json
 
 Core 条目读取正式清单声明中的静态标识、版本、范围和依赖，页面与 HTTP 条目附同一清单出处及包版本。构建时注入的来源、动态权限和未解析字段保留在 `unresolvedMetadata`。`httpContract.schemas` 定位 Controller 使用的合同，`openapiSource.schemas` 定位正式操作表的请求、参数和响应说明。公共操作表按同源 `/api` 路径及 `Platform.*` schema 名连接资料，公共与 Rental 各使用自己的正式 schema 聚合。
 
+清单的唯一直接 `assets` 属性经完整静态读取（`indexed` 且无 `issues`）和原清单资产 schema 校验后，登记在 `details.manifest.assets`，表达式与出处保留在 `details.assetsSource`。工单清单的字面量数组及字符串映射可按原声明展开；动态资产、无效路径和可能发生的未知覆盖仍保留缺口。构建时注入的 `source` 及其他动态字段分别核对，资产目录不代表实际归档、安装或运行已经验证。[资产合同](src/manifest.ts)
+
 页面的唯一直接 `permissions` 属性经完整静态读取（`indexed` 且无 `issues`）和正式页面权限 schema 校验后，以 `details.permissions` 提供原权限数组；空数组同样保留。`details.permissionsSource` 保存该表达式、声明及可定位的字段出处。动态 action、无效权限或页面对象可能发生的未知覆盖继续留在 `unresolvedMetadata`；表达式能读取不代表整个页面属性已确定，索引结果也不授予访问权限。[页面权限合同](src/admin.ts)
 
 字段读取保留原 `expression`、声明和引用。字面量、静态对象/数组、常量及本仓单一返回表达式可给出 `schema`，`fieldSources` 用 JSON Pointer 定位其中已有字段的源码行，引用条目同时提供递归 schema 和各自缺口。原必填、可空、默认值、单位及描述随声明读取。`sourceFields` 列出原 AST 的字段表达式和出处，Zod 的 `omit`、校验或转换仍沿原表达式核对。动态调用、展开、计算键、递归表达式及原宽泛对象分别列出原因，状态为 `source-reference`。未知展开可能覆盖的早期属性从已展开结果移除。缺少本地引用时标记 `not-indexed`。`schemas.parameters.schema` 给出从正式参数声明和同源生成器规则读取的路径/查询列表。公共显式列表覆盖推导，Rental 显式路径参数保留自己的限制，生成器只补缺少的路径项。查询 schema 的原枚举、范围和默认值随资料提供；来源见 `sources`。字符串字面量数组经单参数同步箭头函数 `map` 生成的参数列表也可静态读取，并只追踪所选字段的 schema；读取器不执行表达式，其他动态映射继续保留来源缺口。未知列表、schema 或覆盖继续列入 `parameters:source-reference`。[静态字段读取](src/repository-openapi.ts)

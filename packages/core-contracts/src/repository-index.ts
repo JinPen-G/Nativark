@@ -9,6 +9,7 @@ import ts from "typescript";
 import { DevelopmentCapabilityIndexSchema, type DevelopmentCapability, type DevelopmentCapabilityIndex,
   type DevelopmentSourceReference } from "./development";
 import { CorePageDescriptorSchema, CorePageTextSchema, corePageText } from "./admin";
+import { CoreManifestSchema } from "./manifest";
 import { describeRepositorySchema, repositoryApiDocumentation } from "./repository-openapi";
 import { RepositorySource, UNRESOLVED, isRepositorySourcePath, nodeDocumentation, readRepositoryJson, readRepositoryText,
   repositoryFiles, repositoryPath, sourceReference } from "./repository-source";
@@ -321,7 +322,25 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
             addIssue("core_metadata", repositoryPath(root, file.fileName), "同一包有多个 Core 清单声明，需要核对归属");
           } else {
             const reference = sourceReference(definition, root), fields = source.value(definition);
-            const unresolved = source.unresolvedProperties(definition);
+            let unresolved = source.unresolvedProperties(definition);
+            const assetsExpression = objectProperty(definition, "assets"), manifestObject = unwrap(definition);
+            const directAssets = ts.isObjectLiteralExpression(manifestObject)
+              && manifestObject.properties.every(property => (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property))
+                && !ts.isComputedPropertyName(property.name))
+              && manifestObject.properties.filter(property => property.name?.getText().replace(/^["']|["']$/g, "") === "assets").length === 1;
+            const assetsSource = assetsExpression ? describeRepositorySchema(source, assetsExpression) : undefined;
+            const assets = directAssets && assetsSource?.status === "indexed"
+              && Array.isArray(assetsSource.issues) && assetsSource.issues.length === 0
+              ? CoreManifestSchema.innerType().shape.assets.unwrap().safeParse(assetsSource.schema) : undefined;
+            const manifestFields = fields !== UNRESOLVED && fields && typeof fields === "object" && !Array.isArray(fields) ? { ...fields } : undefined;
+            // 原始部分清单不能绕过资产校验；未知覆盖和构建输入仍保留各自缺口。
+            const hadAssets = manifestFields && Object.hasOwn(manifestFields, "assets");
+            if (manifestFields) {
+              delete manifestFields.assets;
+              if (assets?.success) manifestFields.assets = assets.data;
+            }
+            if (assets?.success) unresolved = unresolved.filter(field => field !== "assets");
+            else if ((assetsExpression || hadAssets) && !unresolved.includes("assets")) unresolved.push("assets");
             corePackages.set(packageInfo.directory, { id, version, directory: packageInfo.directory, reference });
             if (version !== packageInfo.version) addIssue("core_version", reference.path, "Core 清单与包版本不一致");
             if (unresolved.length) addIssue("core_metadata", reference.path, `Core 清单仍需构建输入或动态解析 ${unresolved.join(", ")}`);
@@ -330,7 +349,8 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
             capabilities.push({ id: `core:${id}`, name: typeof name === "string" ? name : id, kind: "module", owner: id, version,
               description: typeof description === "string" ? description : undefined, sources: [reference], documentation: sourceDocuments(root, packageInfo.directory),
               details: { registration: "source", package: packageInfo.directory, packageVersion: packageInfo.version,
-                ...(fields !== UNRESOLVED && fields && typeof fields === "object" && !Array.isArray(fields) ? { manifest: fields } : {}),
+                ...(manifestFields ? { manifest: manifestFields } : {}),
+                ...(assetsSource ? { assetsSource } : {}),
                 unresolvedMetadata: unresolved } });
           }
         }
