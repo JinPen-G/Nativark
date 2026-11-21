@@ -2,13 +2,17 @@ import { themeBehavior } from "../../core/theme-behavior";
 import { adoptSession, createRegistrationChallenge, loginWithPassword, registerPersonal, verifyRegistrationChallenge } from "../../api/auth";
 import { describeError } from "../../core/errors";
 import { newKey } from "../../core/keys";
+import { PUBLIC_CONFIG } from "../../config/public";
+import { STORAGE_KEYS, writeRequiredStorage } from "../../core/storage";
+import { serverNow } from "../../core/clock";
 import { cachedMerchant, loadMerchant, preferredServiceCode, type MerchantInfo } from "../../core/merchant";
 import { type FieldErrors } from "../../core/page";
-import { ROUTES, buildUrl, navigate, redirect, safeRoute, toast } from "../../core/ui";
+import { ROUTES, buildUrl, confirmDialog, navigate, redirect, safeRoute, toast } from "../../core/ui";
 
 /**
  * 注册（现有契约：验证码挑战 → 一次性证明 → 注册）。这是密码账号的兼容路径；
  * 微信手机号主路径就绪后，新用户不需要来这里设密码。
+ * 先保存原请求引用，丢应答或重启沿原键恢复，重新获取须用户明确选择。
  * 验证码有效期、重发时点由服务端返回；开发环境的 developmentCode 只用于本机联调提示，不进日志。
  */
 interface RegisterData {
@@ -59,11 +63,16 @@ Page({
 
   redirectTo: ROUTES.home as string,
   challengeId: "" as string,
-  challengeKey: "" as string,
+  challengeExpiresAt: "" as string,
+  challengeScope: "" as string,
+  sending: false,
+  challengeGeneration: 0,
+  unloaded: false,
   registrationKey: "" as string,
   countdown: undefined as number | undefined,
 
   onLoad(options: Record<string, string | undefined>) {
+    this.unloaded = false;
     this.redirectTo = safeRoute(options.redirect, ROUTES.home);
     const cached = cachedMerchant();
     if (cached) this.applyMerchant(cached);
@@ -71,6 +80,8 @@ Page({
   },
 
   onUnload() {
+    this.unloaded = true;
+    this.challengeGeneration++;
     if (this.countdown) clearInterval(this.countdown);
   },
 
@@ -86,6 +97,13 @@ Page({
 
   onInput(event: WechatMiniprogram.Input) {
     const field = String(event.currentTarget.dataset.field);
+    if (field === "phone") {
+      this.challengeGeneration++;
+      this.challengeId = "";
+      this.challengeExpiresAt = "";
+      this.startCountdown(0);
+      this.setData({ code: "", developmentCode: "", deliveryMode: "", step: "form" });
+    }
     this.setData({ [field]: String(event.detail.value ?? ""), [`errors.${field}`]: "", formError: "" });
   },
 
@@ -128,24 +146,74 @@ Page({
     }, 1000) as unknown as number;
   },
 
+  challengeStorageKey(): string {
+    return `${STORAGE_KEYS.actionKeys}:registration-challenge:${JSON.stringify([PUBLIC_CONFIG.tenantCode, preferredServiceCode(), this.normalizedPhone()])}`;
+  },
+
   async onSendCode() {
-    if (this.data.submitting || this.data.retryAfter > 0) return;
+    if (this.sending || this.data.submitting || this.data.retryAfter > 0) return;
     if (!this.validateForm()) return;
+    this.sending = true;
     this.setData({ submitting: true, formError: "" });
+    const scope = this.challengeStorageKey();
+    const identifier = this.normalizedPhone();
+    const serviceCode = preferredServiceCode();
+    const generation = this.challengeGeneration;
+    const current = () => !this.unloaded && this.challengeGeneration === generation && this.challengeStorageKey() === scope;
     try {
-      // 同一手机号的重试复用同一个幂等键；换号码才换键。
-      const fingerprint = `sms:${this.normalizedPhone()}`;
-      if (!this.challengeKey.startsWith(`${fingerprint}|`)) this.challengeKey = `${fingerprint}|${newKey("challenge")}`;
-      const challenge = await createRegistrationChallenge({ method: "sms", identifier: this.normalizedPhone(), idempotencyKey: this.challengeKey.split("|")[1], serviceCode: preferredServiceCode() });
+      // 原引用不按冷却或有效期清除，存储异常也不能当作第一次发送。
+      const stored = wx.getStorageSync(scope) as unknown;
+      if (stored !== "" && stored !== null && stored !== undefined &&
+        (typeof stored !== "string" || !stored.trim() || stored.length > 191)) {
+        throw new Error("原验证码请求无法读取，请联系商户核对");
+      }
+      let key = typeof stored === "string" && stored ? stored : undefined;
+      if (key) {
+        const confirmed = await confirmDialog({ title: "重新获取验证码", content: "原验证码可能已经发送。重新获取会申请一条新的验证码，也可以核对原请求。", confirmText: "重新获取", cancelText: "核对原请求" });
+        if (!current()) return;
+        if (confirmed) key = undefined;
+      }
+      if (!key) {
+        key = newKey("challenge");
+        writeRequiredStorage(scope, key);
+        this.challengeId = "";
+        this.challengeExpiresAt = "";
+        this.setData({ code: "", developmentCode: "", deliveryMode: "" });
+      }
+      const challenge = await createRegistrationChallenge({ method: "sms", identifier, idempotencyKey: key, serviceCode });
+      if (!current()) return;
+      const expiry = Date.parse(challenge.expiresAt);
+      const pending = challenge.deliveryMode === "provider_pending";
+      if (typeof challenge.challengeId !== "string" || !challenge.challengeId || challenge.status !== "pending_verification" || !Number.isFinite(expiry) || expiry <= serverNow() || pending ||
+        !["provider", "development"].includes(challenge.deliveryMode ?? "")) {
+        this.challengeId = "";
+        this.challengeExpiresAt = "";
+        this.setData({ step: "form", deliveryMode: "", developmentCode: "", formError: pending
+          ? "原短信投递结果待核对。再次获取可核对原请求，或明确选择重新获取。"
+          : "原验证码已失效或无法验证，请明确选择重新获取。" });
+        this.startCountdown(challenge.retryAfterSeconds ?? 0);
+        return;
+      }
       this.challengeId = challenge.challengeId;
-      this.setData({ step: "code", maskedDestination: challenge.maskedDestination, developmentCode: challenge.developmentCode ?? "", deliveryMode: challenge.deliveryMode ?? "", code: "" });
-      this.startCountdown(challenge.retryAfterSeconds ?? 60);
+      this.challengeExpiresAt = challenge.expiresAt;
+      this.challengeScope = scope;
+      this.setData({ step: "code", maskedDestination: challenge.maskedDestination,
+        developmentCode: challenge.developmentCode ?? this.data.developmentCode,
+        deliveryMode: challenge.deliveryMode ?? "" });
+      this.startCountdown(challenge.retryAfterSeconds ?? 0);
     } catch (error) {
+      if (!current()) return;
       const presented = describeError(error);
+      if (presented.code === "CONFLICT") {
+        this.challengeId = "";
+        this.challengeExpiresAt = "";
+        this.setData({ step: "form", developmentCode: "" });
+      }
       if (presented.code === "RATE_LIMITED") this.startCountdown((error as { retryAfterSeconds?: number }).retryAfterSeconds ?? 60);
       this.setData({ formError: presented.message });
     } finally {
-      this.setData({ submitting: false });
+      this.sending = false;
+      if (!this.unloaded) this.setData({ submitting: false });
     }
   },
 
@@ -155,14 +223,25 @@ Page({
 
   async onSubmit() {
     if (this.data.submitting) return;
+    if (!this.challengeId || this.challengeScope !== this.challengeStorageKey() ||
+      !Number.isFinite(Date.parse(this.challengeExpiresAt)) || Date.parse(this.challengeExpiresAt) <= serverNow()) {
+      this.setData({ step: "form", formError: "原验证码已失效，请明确选择重新获取。" });
+      return;
+    }
     if (!/^\d{6}$/.test(this.data.code.trim())) {
       this.setData({ errors: { ...this.data.errors, code: "请输入 6 位验证码" } });
       return;
     }
     this.setData({ submitting: true, formError: "" });
+    const generation = this.challengeGeneration;
+    const scope = this.challengeStorageKey();
     let registered: Awaited<ReturnType<typeof registerPersonal>> | undefined;
     try {
       const verified = await verifyRegistrationChallenge(this.challengeId, this.data.code.trim());
+      if (this.unloaded || this.challengeGeneration !== generation || this.challengeStorageKey() !== scope) {
+        if (!this.unloaded) this.setData({ submitting: false });
+        return;
+      }
       if (!this.registrationKey) this.registrationKey = newKey("register");
       registered = await registerPersonal({
         name: this.data.name.trim(),

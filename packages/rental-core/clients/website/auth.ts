@@ -27,8 +27,7 @@ export interface RentalWebsiteAuthPorts {
 }
 
 type ChallengeInput = Pick<ClientChallengeRequest, "tenantCode" | "identifier" | "idempotencyKey" | "purpose">;
-type ChallengeResult = Pick<ClientRegistrationChallengeResponse,
-  "challengeId" | "developmentCode" | "maskedDestination" | "retryAfterSeconds">;
+type ChallengeResult = ClientRegistrationChallengeResponse;
 type RegistrationInput = Pick<ClientPersonalMembershipRegistrationRequest,
   "tenantCode" | "name" | "phone" | "password" | "verificationToken" | "idempotencyKey" | "consent">;
 type RegistrationResult = Required<Pick<ClientPersonalMembershipRegistrationResponse,

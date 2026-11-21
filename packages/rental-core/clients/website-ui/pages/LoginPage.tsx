@@ -6,6 +6,7 @@ import { Img } from "../components/Img";
 import { useSite } from "../SiteContext";
 import { useAuth } from "../AuthContext";
 import { authApi } from "../data/authClient";
+import { websiteTransientStorage } from "../host";
 import { useToast } from "../components/Toast";
 import { safeDocumentHref } from "@rental-os/shared";
 import {
@@ -20,6 +21,16 @@ type LoginMode = "sms" | "password";
 
 function phoneValid(phone: string) {
   return /^1\d{10}$/.test(phone.trim());
+}
+
+// 只存原请求键，不存验证码或证明。读取失败保留原意图，不新建请求。
+function readChallengeKey(scope: string): string | null {
+  let stored: string | null;
+  try { stored = websiteTransientStorage().getItem(scope); }
+  catch { throw new Error("challenge_reference_unavailable"); }
+  if (stored !== null && (!stored.trim() || stored.length > 191))
+    throw new Error("challenge_reference_unavailable");
+  return stored;
 }
 
 export function LoginPage() {
@@ -60,17 +71,28 @@ export function LoginPage() {
   const [agree, setAgree] = useState(false);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  const [hasChallengeRequest, setHasChallengeRequest] = useState(false);
+  const challengeExpiry = useRef<string | null>(null);
+  const active = useRef(true);
+  const operationPending = useRef(false);
+  const scope = `rental-os:website-challenge:${JSON.stringify([tenantCode, view, phone.trim()])}`;
+  const requestContext = useRef({ scope, generation: 0 });
+  if (requestContext.current.scope !== scope)
+    requestContext.current = { scope, generation: requestContext.current.generation + 1 };
   const timer = useRef<number | null>(null);
   const registrationKey = useRef<string | null>(null);
-  const currentTenant = useRef(tenantCode);
-  currentTenant.current = tenantCode;
 
   useEffect(() => {
     if (isAuthenticated) returnToTarget();
   }, [isAuthenticated]);
   useEffect(
-    () => () => {
-      if (timer.current) window.clearInterval(timer.current);
+    () => {
+      active.current = true;
+      return () => {
+        active.current = false;
+        requestContext.current.generation++;
+        if (timer.current) window.clearInterval(timer.current);
+      };
     },
     [],
   );
@@ -113,6 +135,21 @@ export function LoginPage() {
     registrationKey.current = null;
     if (timer.current) window.clearInterval(timer.current);
   }, [tenantCode]);
+  useEffect(() => {
+    setChallengeId(null);
+    challengeExpiry.current = null;
+    setDevCode(null);
+    setCode("");
+    setCountdown(0);
+    if (timer.current) window.clearInterval(timer.current);
+    try {
+      setHasChallengeRequest(Boolean(tenantCode && phoneValid(phone) && readChallengeKey(scope)));
+    } catch {
+      setHasChallengeRequest(true);
+      setError(en ? "The original code request could not be read. Check storage access before continuing."
+        : "原验证码请求无法读取，请恢复存储访问后继续。");
+    }
+  }, [scope]);
   function switchView(next: View) {
     const query = new URLSearchParams(params);
     if (next === "register") query.set("view", "register");
@@ -125,9 +162,10 @@ export function LoginPage() {
     if (timer.current) window.clearInterval(timer.current);
     setCountdown(0);
   }
-  function startCountdown() {
-    setCountdown(60);
+  function startCountdown(seconds: number) {
+    setCountdown(seconds);
     if (timer.current) window.clearInterval(timer.current);
+    if (seconds <= 0) return;
     timer.current = window.setInterval(
       () =>
         setCountdown((value) => {
@@ -141,47 +179,85 @@ export function LoginPage() {
     );
   }
 
-  async function sendCode() {
+  async function sendCode(newRequest = false) {
+    if (!isRemote || !tenantCode || operationPending.current || countdown > 0 ||
+      !methods.includes("sms") || (isRegister && !canRegister)) return;
     setError("");
-    if (
-      !isRemote ||
-      !tenantCode ||
-      pending ||
-      !methods.includes("sms") ||
-      (isRegister && !canRegister)
-    )
-      return;
     if (!phoneValid(phone)) {
       setError(t("requiredPhone"));
       return;
     }
+    operationPending.current = true;
     setPending(true);
+    const generation = requestContext.current.generation;
+    const current = () => active.current && requestContext.current.generation === generation;
     try {
-      const challenge = await authApi.createChallenge({
-        tenantCode,
-        identifier: phone.trim(),
-        purpose: isRegister ? "registration" : "login",
-        idempotencyKey: `chal-${Date.now()}`,
-      });
-      if (currentTenant.current !== tenantCode) return;
+      let key = readChallengeKey(scope);
+      if (newRequest || !key) {
+        key = `chal-${crypto.randomUUID()}`;
+        const storage = websiteTransientStorage();
+        storage.setItem(scope, key);
+        if (readChallengeKey(scope) !== key) throw new Error(en
+          ? "The original request could not be saved. The code request was stopped."
+          : "无法保留原请求引用，未派发验证码请求。");
+        setChallengeId(null);
+        challengeExpiry.current = null;
+        setCode("");
+        setDevCode(null);
+      }
+      setHasChallengeRequest(true);
+      const challenge = await authApi.createChallenge({ tenantCode, identifier: phone.trim(),
+        purpose: isRegister ? "registration" : "login", idempotencyKey: key });
+      if (!current()) return;
+      startCountdown(challenge.retryAfterSeconds ?? 0);
+      const expiry = Date.parse(challenge.expiresAt);
+      const deliveryPending = challenge.deliveryMode === "provider_pending";
+      if (typeof challenge.challengeId !== "string" || !challenge.challengeId || challenge.status !== "pending_verification" || !Number.isFinite(expiry) || expiry <= Date.now() || deliveryPending ||
+        !["provider", "development"].includes(challenge.deliveryMode ?? "")) {
+        setChallengeId(null);
+        challengeExpiry.current = null;
+        setDevCode(null);
+        setError(deliveryPending
+          ? en ? "Delivery is awaiting confirmation. Check the original request or choose Get a new code."
+            : "原短信投递结果待核对，可核对原请求或选择重新获取。"
+          : en ? "The original code is no longer valid for verification. Choose Get a new code."
+            : "原验证码已失效或无法验证，请选择重新获取。");
+        return;
+      }
       setChallengeId(challenge.challengeId);
-      setDevCode(challenge.developmentCode ?? null);
-      startCountdown();
+      challengeExpiry.current = challenge.expiresAt;
+      setDevCode(challenge.developmentCode ?? devCode);
     } catch (e: any) {
-      if (currentTenant.current === tenantCode)
-        setError(e?.message || t("loginFailed"));
+      if (current()) {
+        if (e?.status === 409 || e?.code === "CONFLICT") {
+          setChallengeId(null);
+          challengeExpiry.current = null;
+          setDevCode(null);
+        }
+        setError(e?.message === "challenge_reference_unavailable"
+          ? en ? "The original code request could not be read. Check storage access before continuing."
+            : "原验证码请求无法读取，请恢复存储访问后继续。"
+          : e?.message || t("loginFailed"));
+      }
     } finally {
-      if (currentTenant.current === tenantCode) setPending(false);
+      operationPending.current = false;
+      if (active.current) setPending(false);
     }
   }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     setError("");
-    if (!isRemote || !tenantCode || pending || (!isRegister && !canLogin))
+    if (!isRemote || !tenantCode || operationPending.current || (!isRegister && !canLogin))
       return;
+    operationPending.current = true;
     setPending(true);
+    const generation = requestContext.current.generation;
+    const current = () => active.current && requestContext.current.generation === generation;
     try {
+      if (needsCode && (!challengeId || !challengeExpiry.current || !Number.isFinite(Date.parse(challengeExpiry.current)) || Date.parse(challengeExpiry.current) <= Date.now()))
+        throw new Error(en ? "Check the original request or get a new code before continuing."
+          : "请先核对原请求或重新获取验证码。");
       if (isRegister) {
         if (!canRegister || !userAgreement || !privacyPolicy)
           throw new Error(
@@ -198,7 +274,7 @@ export function LoginPage() {
           challengeId,
           code.trim(),
         );
-        if (currentTenant.current !== tenantCode) return;
+        if (!current()) return;
         registrationKey.current ??= `reg-${crypto.randomUUID()}`;
         const registration = await authApi.register({
           tenantCode,
@@ -213,7 +289,7 @@ export function LoginPage() {
             agreedAt: new Date().toISOString(),
           },
         });
-        if (currentTenant.current !== tenantCode) return;
+        if (!current()) return;
         if (!registration.customerId) throw new Error(t("loginFailed"));
         if (methods.includes("password")) {
           await authApi.passwordLogin({
@@ -243,7 +319,7 @@ export function LoginPage() {
           challengeId,
           code.trim(),
         );
-        if (currentTenant.current !== tenantCode) return;
+        if (!current()) return;
         await authApi.smsLogin({
           tenantCode,
           loginIdentifier: phone.trim(),
@@ -251,10 +327,10 @@ export function LoginPage() {
         });
       }
     } catch (e: any) {
-      if (currentTenant.current === tenantCode)
-        setError(e?.message || t("loginFailed"));
+      if (current()) setError(e?.message || t("loginFailed"));
     } finally {
-      if (currentTenant.current === tenantCode) setPending(false);
+      operationPending.current = false;
+      if (active.current) setPending(false);
     }
   }
   return (
@@ -403,11 +479,23 @@ export function LoginPage() {
                         !phoneValid(phone) ||
                         (isRegister && !canRegister)
                       }
-                      onClick={sendCode}
+                      onClick={() => void sendCode()}
                     >
-                      {countdown > 0 ? countdown + "s" : t("loginSendCode")}
+                      {countdown > 0 ? countdown + "s" : hasChallengeRequest
+                        ? en ? "Check original request" : "核对原请求"
+                        : t("loginSendCode")}
                     </button>
                   </span>
+                  {hasChallengeRequest && (
+                    <button
+                      type="button"
+                      className="login-switch-link"
+                      disabled={!isRemote || pending || countdown > 0 || !phoneValid(phone) || !methods.includes("sms") || (isRegister && !canRegister)}
+                      onClick={() => void sendCode(true)}
+                    >
+                      {en ? "Get a new code" : "重新获取验证码"}
+                    </button>
+                  )}
                 </label>
               )}
               {devCode && (

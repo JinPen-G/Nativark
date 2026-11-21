@@ -29,6 +29,8 @@ const authApi = createRentalWebsiteAuthClient({
 | `register` | 原 POST `/auth/register`，保留本人输入、证明、原幂等键及协议版本／同意时间 |
 | `logout` | 原 `logoutCustomerSession`，在 `finally` 清理为最小原引用，原退出错误继续传播 |
 
+`createChallenge` 返回原 `ClientRegistrationChallengeResponse`，页面消费原状态、期限、投递方式和服务端冷却。同一请求的恢复保留原键，`provider_pending`、过期或终态回执由页面明确分流。原期限和未知投递不能触发自动换键。
+
 方法 → 原客户 HTTP → 原客户认证／注册服务 → 当前租户、渠道、空间、资格及供应商裁定。验证码证明的用途、消费与幂等由原服务端校验。[客户 HTTP](../../../src/http-client.controller.ts) · [客户认证](../../../src/mysql-client-auth.ts)
 
 ## 本人资料接入
@@ -41,7 +43,7 @@ const authApi = createRentalWebsiteAuthClient({
 
 ## 合同与兼容
 
-请求和返回类型从本包客户合同做窄投影。验证码请求使用现有 `ClientChallengeRequest` 的 `purpose`，真实 `/auth/challenges` 经同一合同的 DTO 校验，旧 `registration/challenges` 沿原注册用途。原官网注册返回声明要求 `customerId`，本模块用正式响应的 `Required<Pick<...>>` 保留这一消费形状，缺字段仍由原登录页拒绝。[客户合同](../../../src/client-contracts.ts) · [客户 DTO](../../../src/http-client-request.dto.ts) · [原登录页](../../../../../apps/tenant-website/src/pages/LoginPage.tsx)
+请求和本人资料类型从本包客户合同做窄投影，验证码返回复用完整原响应。验证码请求使用现有 `ClientChallengeRequest` 的 `purpose`，真实 `/auth/challenges` 经同一合同的 DTO 校验，旧 `registration/challenges` 沿原注册用途。原官网注册返回声明要求 `customerId`，本模块用正式响应的 `Required<Pick<...>>` 保留这一消费形状，缺字段仍由原登录页拒绝。[客户合同](../../../src/client-contracts.ts) · [客户 DTO](../../../src/http-client-request.dto.ts) · [原登录页](../../../../../apps/tenant-website/src/pages/LoginPage.tsx)
 
 AuthBridge、三个 `capture*`、原 JSON／Fetch 请求层及 AI／Booking 宿主方法继续由原官网接线。认证与读取工厂每次调用宿主真实端口，原 Storage 命名空间、刷新与租户身份来自同一公共会话。[原官网接线](../../../../../apps/tenant-website/src/data/authClient.ts)
 

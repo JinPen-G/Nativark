@@ -43,6 +43,12 @@ createRoot(document.getElementById("root")!).render(
 
 [styles.css](styles.css)、[theme.ts](theme.ts)和[i18n.ts](i18n.ts)沿原视觉与语言实现。[目录演示](data/catalog.ts)与本地演示订单保留明确隔离，正式订单读取原 API。
 
+## 验证码请求恢复
+
+[登录与注册页](pages/LoginPage.tsx)按当前商户、手机号和用途，在原宿主 `sessionStorage` 保存原请求键后派发。该引用在页面离开或刷新后保留，保存／读取失败时停止派发；引用不含验证码、密码或一次性证明。核对原请求使用同一键，用户点击“重新获取验证码”才产生新键。倒计时沿服务端返回，冷却结束或原挑战到期均保留原引用。
+
+只有原状态为待验证、期限有效且投递方式已确认的挑战可进入验证。未知投递、过期、失败与已消费回执显示相应恢复入口。当前商户／手机号／用途代次变化或卸载会隔离迟到结果，快速重复点击沿同一执行占用控制；恢复原请求保留用户已输入验证码。
+
 ## 路由
 
 `/`、`/products`、`/category/:categoryId`、`/product/:productId`、`/booking/:productId`、`/login`、`/account`、`/orders`、`/orders/:orderId`、`/about`、`/guide`、`/help`、`/agreement`、`/privacy`和缺失页 `*`。
