@@ -86,7 +86,7 @@ Core 条目读取正式清单声明中的静态标识、版本、范围和依赖
 
 字段读取保留原 `expression`、声明和引用。字面量、静态对象/数组、常量及本仓单一返回表达式可给出 `schema`，`fieldSources` 用 JSON Pointer 定位其中已有字段的源码行，引用条目同时提供递归 schema 和各自缺口。原必填、可空、默认值、单位及描述随声明读取。`sourceFields` 列出原 AST 的字段表达式和出处，Zod 的 `omit`、校验或转换仍沿原表达式核对。动态调用、展开、计算键、递归表达式及原宽泛对象分别列出原因，状态为 `source-reference`。未知展开可能覆盖的早期属性从已展开结果移除。缺少本地引用时标记 `not-indexed`。`schemas.parameters.schema` 给出从正式参数声明和同源生成器规则读取的路径/查询列表。公共显式列表覆盖推导，Rental 显式路径参数保留自己的限制，生成器只补缺少的路径项。查询 schema 的原枚举、范围和默认值随资料提供；来源见 `sources`。字符串字面量数组经单参数同步箭头函数 `map` 生成的参数列表也可静态读取，并只追踪所选字段的 schema；读取器不执行表达式，其他动态映射继续保留来源缺口。未知列表、schema 或覆盖继续列入 `parameters:source-reference`。[静态字段读取](src/repository-openapi.ts)
 
-可确定的 `Object.assign`、同模块顺序明确的顶层后置组合、本地同步纯函数和成员引用按最后覆盖顺序读取，字段出处跟随最终声明。未知来源可能覆盖的旧字段会失效，后续明确字段仍可定位；循环、未知写入、访问器或无法确定的组合保留实际来源与缺口。扫描不会执行这些调用。
+可确定的 `Object.assign`、同模块顺序明确的顶层后置组合、本地同步纯函数和成员引用按最后覆盖顺序读取，字段出处跟随最终声明。未知来源可能覆盖的旧字段会失效，后续明确字段仍可定位；循环、未知写入、访问器或无法确定的组合保留实际来源与缺口。基础常量读取不重放 const 对象的后置写入，以 `post-write:<源码路径>:<行号>` 保留实际出处，并移除不能证明为最终值的初始化结果；写入前可证明的快照保留，同语句、跨模块和延迟读写的时序保持未解析。上述有限组合继续由静态字段读取器解释。扫描不会执行这些调用。
 
 `openapiSource.controllerParameters` 将列表连接到实际 Controller 参数。类型、可选标记、`defaultExpression` 和静态 `declaredDefault` 沿原声明提供，`defaultStatus` 及 `defaultIssues` 说明动态默认值。无参 `@Query()` 引用本仓可静态枚举的平面DTO时，字段名逐一对应已有正式参数，保留原类型、可选标记、校验/转换表达式与源码行号；该对应不从DTO另生成schema。继承、泛型、构造/方法、计算或静态字段、动态Query名、默认与pipe继续标明来源缺口。品类候选 `operation` 的可选string、upgrade/restore及默认upgrade沿正式HTTP声明读取。生成器字段与Controller声明可分别核对，实际输入转换及业务限制继续由原入口执行。[公共订阅参数消费](../platform-server/src/modules/subscription/subscription-platform.controller.ts) · [Rental参数生成规则](../rental-core/src/http-openapi-contract.ts)
 

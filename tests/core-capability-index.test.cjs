@@ -297,7 +297,7 @@ class GenericDto<T> { value!: T; }
 
 test("静态对象组合保留最后覆盖与出处，后置写入和未知来源准确失效", () => {
   const ts = require("typescript");
-  const { RepositorySource } = require("../packages/core-contracts/dist/repository-source.js");
+  const { RepositorySource, UNRESOLVED } = require("../packages/core-contracts/dist/repository-source.js");
   const { describeRepositorySchema, repositoryApiDocumentation } = require("../packages/core-contracts/dist/repository-openapi.js");
   const root = path.resolve(__dirname, "..");
   const file = path.join(root, "packages/core-contracts/src/repository-openapi.ts");
@@ -338,6 +338,8 @@ Object.hasOwn(postMap, "Result");
 const alias = postMap;
 const beforeMap = { ...postMap };
 Object.assign(alias, { Result: assigned }, { Added: { type: "boolean" } });
+const statementMap = { Result: { type: "string" } };
+const statementWrite = Object.assign(statementMap, { Result: { type: "number" } }), statementSnapshot = { ...statementMap };
 const STATIC_COMPOSE_SCHEMAS = postMap;
 const STATIC_COMPOSE_OPERATIONS = [{ method: "POST", path: "/api/static-compositions", responseSchema: { $ref: "#/components/schemas/Result" } }];
 const resultReference = { $ref: "#/components/schemas/Result" };
@@ -378,6 +380,15 @@ Object.assign(sharedMap, { Result: { type: "number" } });
     const declaration = name => declarations.find(node => node.name.getText() === name);
     const describe = name => describeRepositorySchema(source, declaration(name).name);
     const line = text => fixture.slice(0, fixture.indexOf(text)).split(/\r?\n/).length;
+    for (const name of ["postMap", "alias", "loopMap", "escapedMap", "parentMap", "destructuredMap", "importedMap"]) {
+      assert.equal(source.value(declaration(name).name), UNRESOLVED, name);
+      assert.ok(source.unresolvedProperties(declaration(name).name).some(issue => issue.startsWith("post-write:")), name);
+    }
+    assert.equal(source.value(declaration("beforeMap").name).Result.type, "string");
+    assert.ok(source.unresolvedProperties(declaration("alias").name).includes(`post-write:packages/core-contracts/src/repository-openapi.ts:${line("Object.assign(alias")}`));
+    assert.equal(source.value(declaration("statementSnapshot").name).Result, undefined);
+    const statementUsage = declaration("statementSnapshot").initializer.properties[0].expression;
+    assert.ok(source.unresolvedProperties(statementUsage).includes(`post-write:packages/core-contracts/src/repository-openapi.ts:${line("const statementWrite")}`));
     for (const [name, keys] of [["unknownSpread", []], ["unsupportedSpread", ["type"]], ["knownAfterSpread", ["type"]],
       ["unknownProperty", ["properties"]], ["nestedUnknownProperty", ["properties"]],
       ["unknownComputed", ["type"]], ["getterOverwrite", ["properties"]],
@@ -444,6 +455,15 @@ Object.assign(sharedMap, { Result: { type: "number" } });
       assert.equal(result.status, "source-reference");
       assert.equal(Object.hasOwn(result, "schema"), false);
     }
+    const rentalFile = path.join(root, "packages/rental-core/src/http-openapi-rental-exchange-inspection-preparation.schemas.ts");
+    const rental = new RepositorySource(root, [rentalFile], {});
+    const rentalDeclaration = rental.source(rentalFile).statements.filter(ts.isVariableStatement)
+      .flatMap(statement => [...statement.declarationList.declarations])
+      .find(node => node.name.getText() === "RENTAL_EXCHANGE_INSPECTION_SCHEMAS");
+    assert.equal(rental.value(rentalDeclaration.name), UNRESOLVED);
+    const rentalIssues = rental.unresolvedProperties(rentalDeclaration.name);
+    for (const line of [52, 70]) assert.ok(rentalIssues.includes(`post-write:packages/rental-core/src/http-openapi-rental-exchange-inspection-preparation.schemas.ts:${line}`));
+    assert.equal(Object.keys(describeRepositorySchema(rental, rentalDeclaration.name).schema).length, 17);
   } finally {
     fs.readFileSync = originalRead;
   }
