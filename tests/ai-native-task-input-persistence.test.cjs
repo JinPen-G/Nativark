@@ -353,12 +353,16 @@ test('tampering a consumed receipt cannot feed later tools or replay a response'
   assert.deepEqual(h.executions, ['input-clarify']);
 });
 
-test('seeded persisted unknown recovery keeps original receipt and never executes a tool or consumes input', async () => {
-  const h = await setup(); await h.run();
-  h.state.aiTask[0].status = 'WAITING_EXTERNAL';
-  h.state.aiStep[0].status = 'UNKNOWN'; h.state.aiStep[0].effect = 'POSSIBLE'; h.state.aiStep[0].errorCode = 'AI_RESULT_UNKNOWN';
-  h.state.aiTaskResultArtifact[0].outcome = 'UNKNOWN'; h.state.aiTaskResultArtifact[0].completeMeasurement = false;
-  for (const charge of h.state.aiTaskExecutionCharge) charge.status = 'UNKNOWN';
+test('persisted unknown recovery keeps original receipt and never executes a tool or consumes input', async () => {
+  const h = await setup();
+  // Persist an interrupted read through the real runner. Rewriting a successful
+  // result would leave its completed measurements inconsistent with the budget.
+  h.control.execute = async () => { throw Error('synthetic lost read response'); };
+  assert.equal((await h.run()).status, 'unknown');
+  assert.equal(h.state.aiTask[0].status, 'WAITING_EXTERNAL');
+  assert.equal(h.state.aiTaskResultArtifact.length, 1);
+  assert.equal(h.state.aiTaskResultArtifact[0].completeMeasurement, false);
+  h.control.execute = async () => assert.fail('recovery cannot execute the original tool again');
   const artifact = h.clone(h.state.aiTaskResultArtifact);
   assert.equal((await h.make(h.inputs()).runner.run({ ...h.claim(), recovery: true })).status, 'unknown');
   assert.deepEqual(h.executions, ['input-clarify']); assert.deepEqual(h.state.aiTaskResultArtifact, artifact);
