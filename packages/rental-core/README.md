@@ -295,6 +295,8 @@ HTTP入口从 `/http-workspace-capabilities`、`/http-staff-payments` 导入；`
 
 到期作业从 `@rental-os/rental-core/mysql-due-jobs` 接入，原Nest provider供给同一数据库、Core、业务、动作幂等、容量、企业核销及支付实例。GET_LOCK、任务与RELEASE_LOCK仍在同一交互式事务连接，内部业务沿原短事务和操作键；失败释放锁并继续其他任务/空间，不以本地支付过期代替原渠道核验。宿主只登记一个provider并继承原启动/销毁钩子；企业/支付保持原Optional接线，启用相应生产任务须提供原参加者，不能用空成功替代。标准宿主从[应用参加者](src/application-participants.ts)构造同一 allocation 与 dueJobs，并由[唯一生命周期](../../apps/rental-api/src/lifecycle.ts)统一启动和排空。[原作业接点](../../apps/api/src/modules/rental-core/rental-due-job.scheduler.ts) · [原离线作业验证](../../tests/rental-due-job-scheduler.test.cjs)
 
+支付到期与手动关单共用 [原支付执行器](src/mysql-payment-runtime.ts)的唯一关单运输收据。准备记录按原支付单派生固定键，在原租户、订单和支付单锁下先提交，再复核当前派发权。收据保存原空间、商户单号、提供方、方式、金额及 Stripe 原 Session。查询和关闭结果提交均核同一快照，原支付状态和渠道应答继续决定结果。准备提交失应答、运输超时或结果落库未确认时，恢复仅查询同一支付单；可信已关闭结果同时收口原意图与关单收据，可信已付结果沿原入账。手动重试和重建 worker 共用该观察，进程退出仍等待已进入运输的原结果。[原作业恢复验证](../../tests/rental-worker-recovery.test.cjs)
+
 | 宿主启动的原执行者 | 业务与存储接点 | 退出及恢复边界 |
 | --- | --- | --- |
 | `workers.allocation` | [配货](src/mysql-allocation.ts)、[事实/事件](src/allocation-storage.ts)与[当前作业权威](src/application-worker-authority.ts)，同一实例供 HTTP、AI 及自动扫描消费 | 停止扫描并等待原在途工作，原订单、配置开关与失败事件保持原事务边界 |

@@ -69,8 +69,8 @@ export class RentalDueJobScheduler<TTransaction extends RentalDueJobTransaction 
   private readonly logger = new Logger(RentalDueJobScheduler.name);
 
   /**
-   * 固定注册表，按此顺序执行。扩展点：追加一项 `{ name, run }` 即可，
-   * 例如后续的 `expire_payment_intents`（支付意图过期）。
+   * 固定注册表，按此顺序执行，包含五项原业务任务。
+   * 标准宿主同时核定已登记的原执行器和当前作业权威。
    * 公开可写只为让无库测试替换成 fake；业务代码不得在运行期改动它。
    */
   jobs: RentalDueJob[];
@@ -82,8 +82,8 @@ export class RentalDueJobScheduler<TTransaction extends RentalDueJobTransaction 
     private readonly idempotent: RentalDueJobActions<TTransaction>,
     private readonly serviceCapacities: RentalDueJobServiceCapacities<TTransaction>,
     private readonly corporateSettlement?: RentalDueJobCorporateSettlement<TTransaction>,
-    // 支付意图过期核对：模拟支付域的到期动作。可选仅为保留无库测试直接构造调度器；
-    // 生产 AppModule 与其余服务同一模块，Nest 必然注入。未注入时该任务为 no-op。
+    // 支付意图过期核对沿原支付执行器。可选仅为保留旧离线测试直接构造调度器；
+    // 完整标准宿主在参加者工厂核定该依赖；旧构造未传入时跳过此任务。
     private readonly payments?: RentalDueJobPayments,
   ) {
     this.jobs = [
@@ -319,9 +319,9 @@ export class RentalDueJobScheduler<TTransaction extends RentalDueJobTransaction 
   }
 
   /**
-   * 支付意图过期核对：对本空间已过期仍 pending 的模拟支付单逐笔先查平台再关单，
+   * 支付意图过期核对：对本空间已过期仍 pending 的原支付单逐笔先查平台再处理关闭，
    * 平台确认已付则按同一入账路径补入账，绝不因本地过期把已收的钱标成关闭。
-   * 支付运行时未注入（无库测试直接构造调度器）时静默跳过——该任务本身即幂等、可回放。
+   * 未定关单沿原持久化收据查询恢复；旧离线构造未传支付参加者时跳过本项。
    */
   private async expirePaymentIntents(tenantId: string, workspaceId: string) {
     if (!this.payments) return;

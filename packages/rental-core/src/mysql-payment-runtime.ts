@@ -802,6 +802,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
     const intent = await this.prisma.rentalPaymentIntent.findFirst({ where: { id: intentId, tenantId, workspaceId, orderId } });
     if (!intent) throw new NotFoundException("支付单不存在");
     if (intent.status === "closed" || (intent.status === "paid" && (intent.provider !== "stripe" || hasStripeLiveReceipt(intent.responseJson)))) return this.toResponse(intent);
+    await this.assertPaymentCloseRead(intent);
     const config = await this.integrations.runtimeConfig("payment", tenantId, intent.method as "alipay" | "wechat_pay", { requireLiveTest: false });
     if (!config) throw new ServiceUnavailableException("支付平台已停用，无法查询支付状态");
     await this.assertProviderDispatch(intent.tenantId, intent.workspaceId, intent.orderId);
@@ -825,13 +826,100 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
       });
     } else if (result.closed) {
       // 查询与异步回调可能并发；关闭结果不能覆盖已经入账的支付。
-      await this.prisma.rentalPaymentIntent.updateMany({
-        where: { ...this.originalIntentWhere(intent), status: "pending" },
-        data: { status: "closed", failureReason: "第三方支付单已关闭" }
-      });
+      await this.recordPaymentIntentClosed(intent, "第三方支付单已关闭");
     }
     await this.log(tenantId, config, "query_payment_intent", "success", { intentId, merchantOrderNo: intent.merchantOrderNo }, { state: result.state });
     return this.getPaymentIntent(tenantId, workspaceId, orderId, intentId, jsapiOpenId);
+  }
+
+  /** 原关单使用唯一运输收据，提交准备后即可能已派发。重建进程只查询原支付单，
+   * 不能用待支付状态、超时或新的准入重新取得派发权。 */
+  private paymentCloseRequest(intent: PaymentIntentRow & { responseJson?: unknown }) {
+    const stripeSessionId = valueOf((intent.responseJson as JsonRecord | undefined)?.sessionId);
+    if (intent.method === "stripe" && !stripeSessionId) {
+      throw new PaymentProviderUnknownError("缺少 Stripe 原 Session 收据，不能准备或核对关单");
+    }
+    return { ...this.originalIntentWhere(intent), amount: Number(intent.amount),
+      ...(intent.method === "stripe" ? { stripeSessionId } : {}) };
+  }
+
+  private paymentCloseReceiptId(intent: PaymentIntentRow) {
+    return `rental-payment-close:${sha256(JSON.stringify([intent.tenantId, intent.id]))}`;
+  }
+
+  private assertPaymentCloseReceipt(receipt: Prisma.ExternalAdapterLogGetPayload<object>, intent: PaymentIntentRow) {
+    if (receipt.tenantId !== intent.tenantId || receipt.provider !== intent.provider || receipt.capability !== "payment"
+      || receipt.operation !== "close_payment_intent" || receipt.businessType !== "rental_order"
+      || receipt.businessId !== intent.orderId || requestFingerprint(receipt.requestJson) !== requestFingerprint(this.paymentCloseRequest(intent))) {
+      throw new ConflictException("关单收据与原支付单不一致，请核对原操作");
+    }
+  }
+
+  private async assertPaymentCloseRead(intent: PaymentIntentRow) {
+    const receipt = await this.prisma.externalAdapterLog.findUnique({ where: { id: this.paymentCloseReceiptId(intent) } });
+    if (receipt) this.assertPaymentCloseReceipt(receipt, intent);
+  }
+
+  private async recordPaymentIntentClosed(intent: PaymentIntentRow, reason: string) {
+    // 已确认的运输结果沿原凭据落库，不能因等待期间撤权丢失收据，也不能覆盖已入账状态。
+    return this.prisma.$transaction(async tx => {
+      const [current] = await tx.$queryRaw<Array<Prisma.RentalPaymentIntentGetPayload<object>>>(prismaRuntime.sql`SELECT * FROM rental_payment_intents
+        WHERE id = ${intent.id} AND tenantId = ${intent.tenantId} FOR UPDATE`);
+      if (!current) throw new NotFoundException("支付单不存在");
+      if (requestFingerprint(this.paymentCloseRequest(current)) !== requestFingerprint(this.paymentCloseRequest(intent))) {
+        throw new ConflictException("原支付凭据或 Stripe Session 已变化，请核对原关单收据");
+      }
+      const receipt = await tx.externalAdapterLog.findUnique({ where: { id: this.paymentCloseReceiptId(intent) } });
+      if (receipt) this.assertPaymentCloseReceipt(receipt, intent);
+      const updated = await tx.rentalPaymentIntent.updateMany({
+        where: { ...this.originalIntentWhere(intent), status: "pending" },
+        data: { status: "closed", failureReason: reason }
+      });
+      if (receipt) await tx.externalAdapterLog.updateMany({
+        where: { id: receipt.id, tenantId: intent.tenantId, status: "pending" },
+        data: { status: "success", responseJson: { closed: true }, errorMessage: null }
+      });
+      return updated.count;
+    });
+  }
+
+  private async closeOriginalPaymentIntent(intent: PaymentIntentRow, config: TenantIntegrationRuntimeConfig, reason: string) {
+    const prepared = await this.prisma.$transaction(async tx => {
+      await lockRentalBusinessTenant(tx, intent.tenantId);
+      const orders = await tx.$queryRaw<Array<{ id: string }>>(prismaRuntime.sql`SELECT id FROM rental_orders
+        WHERE id = ${intent.orderId} AND tenantId = ${intent.tenantId} AND workspaceId = ${intent.workspaceId} FOR UPDATE`);
+      if (!orders.length) throw new NotFoundException("原支付订单不存在或不属于原经营空间");
+      await assertRentalBusinessOperationAccessAfterLock(tx, intent.tenantId, intent.workspaceId, intent.orderId);
+      const [current] = await tx.$queryRaw<Array<Prisma.RentalPaymentIntentGetPayload<object>>>(prismaRuntime.sql`SELECT * FROM rental_payment_intents
+        WHERE id = ${intent.id} AND tenantId = ${intent.tenantId} FOR UPDATE`);
+      if (!current) throw new NotFoundException("支付单不存在");
+      if (requestFingerprint(this.paymentCloseRequest(current)) !== requestFingerprint(this.paymentCloseRequest(intent))) {
+        throw new ConflictException("原支付凭据已变化，请核对原支付收据");
+      }
+      if (current.status === "closed") return { intent: current, dispatch: false };
+      if (current.status !== "pending") throw new ConflictException("原支付单已不在待支付状态，请核对原支付收据");
+      const receipt = await tx.externalAdapterLog.findUnique({ where: { id: this.paymentCloseReceiptId(current) } });
+      if (receipt) {
+        this.assertPaymentCloseReceipt(receipt, current);
+        return { intent: current, dispatch: false };
+      }
+      await tx.externalAdapterLog.create({ data: {
+        id: this.paymentCloseReceiptId(current), tenantId: current.tenantId, provider: current.provider, capability: "payment",
+        operation: "close_payment_intent", businessType: "rental_order", businessId: current.orderId, status: "pending",
+        requestJson: this.paymentCloseRequest(current)
+      } });
+      await tx.rentalPaymentIntent.updateMany({
+        where: { ...this.originalIntentWhere(current), status: "pending" },
+        data: { failureReason: "关单请求结果未定，请查询原支付状态，不可重复派发关单" }
+      });
+      return { intent: current, dispatch: true };
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
+    if (!prepared.dispatch) return prepared.intent.status === "closed" ? 0 : undefined;
+    await this.assertProviderDispatch(intent.tenantId, intent.workspaceId, intent.orderId);
+    if (prepared.intent.method === "alipay") await this.closeAlipayIntent(config, prepared.intent.merchantOrderNo);
+    else if (prepared.intent.method === "stripe") await this.closeStripeIntent(config, prepared.intent);
+    else await this.closeWechatIntent(config, prepared.intent.merchantOrderNo);
+    return this.recordPaymentIntentClosed(prepared.intent, reason);
   }
 
   async closePaymentIntent(tenantId: string, workspaceId: string, orderId: string, intentId: string) {
@@ -846,16 +934,8 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
     // 商户改一次配置之后所有客户都关不掉旧支付单，只能等 15 分钟过期。
     const config = await this.integrations.runtimeConfig("payment", tenantId, intent.method as "alipay" | "wechat_pay", { requireLiveTest: false });
     if (!config) throw new ServiceUnavailableException("支付平台已停用，无法关闭支付单");
-    await this.assertProviderDispatch(intent.tenantId, intent.workspaceId, intent.orderId);
-    if (intent.method === "alipay") await this.closeAlipayIntent(config, intent.merchantOrderNo);
-    else if (intent.method === "stripe") await this.closeStripeIntent(config, intent);
-    else await this.closeWechatIntent(config, intent.merchantOrderNo);
-    // 关闭请求和支付回调之间存在竞态；只允许从未入账状态转为 closed，
-    // 不能把回调已经推进的 paid 状态覆盖掉。
-    await this.prisma.rentalPaymentIntent.updateMany({
-      where: { ...this.originalIntentWhere(intent), status: "pending" },
-      data: { status: "closed", failureReason: "客户主动关闭支付" }
-    });
+    const closed = await this.closeOriginalPaymentIntent(intent, config, "客户主动关闭支付");
+    if (closed === undefined) return this.refreshPaymentIntent(tenantId, workspaceId, orderId, intentId);
     const updated = await this.prisma.rentalPaymentIntent.findFirst({ where: { id: intent.id, tenantId, workspaceId, orderId } });
     if (!updated) throw new NotFoundException("支付单不存在");
     await this.log(tenantId, config, "close_payment_intent", "success", { intentId, merchantOrderNo: intent.merchantOrderNo });
@@ -881,6 +961,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
     const summary = { scanned: stale.length, closed: 0, paid: 0, errors: [] as Array<{ intentId: string; error: string }> };
     for (const intent of stale) {
       try {
+        await this.assertPaymentCloseRead(intent);
         const config = await this.integrations.runtimeConfig("payment", tenantId, intent.method as "alipay" | "wechat_pay", { requireLiveTest: false });
         if (!config) throw new ServiceUnavailableException("支付平台已停用，无法确认过期支付单");
         await this.assertProviderDispatch(intent.tenantId, intent.workspaceId, intent.orderId);
@@ -905,17 +986,11 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
           summary.paid += 1;
           continue;
         }
-        if (!result.closed) {
-          await this.assertProviderDispatch(intent.tenantId, intent.workspaceId, intent.orderId);
-          if (intent.method === "alipay") await this.closeAlipayIntent(config, intent.merchantOrderNo);
-          else if (intent.method === "stripe") await this.closeStripeIntent(config, intent);
-          else await this.closeWechatIntent(config, intent.merchantOrderNo);
-        }
-        const updated = await this.prisma.rentalPaymentIntent.updateMany({
-          where: { ...this.originalIntentWhere(intent), status: "pending" },
-          data: { status: "closed", failureReason: "expired" }
-        });
-        if (updated.count === 1) summary.closed += 1;
+        const closed = result.closed
+          ? await this.recordPaymentIntentClosed(intent, "expired")
+          : await this.closeOriginalPaymentIntent(intent, config, "expired");
+        if (closed === undefined) throw new PaymentProviderUnknownError("原关单结果未定，请继续查询原支付单，不可重复关单");
+        summary.closed += closed;
       } catch (error) {
         summary.errors.push({ intentId: intent.id, error: (error instanceof Error ? error.message : String(error)).slice(0, 240) });
       }
