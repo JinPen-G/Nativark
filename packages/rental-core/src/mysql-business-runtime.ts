@@ -1979,14 +1979,34 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
         results.push({ id: adjustment.id, status: "applied", versionId });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        await prisma.$transaction(async (tx) => {
+        const observed = await prisma.$transaction(async (tx) => {
+          // 提交应答丢失不证明回滚；沿原调价行和完整版本回读，不能生成另一条价格版本。
+          // 读取已提交的原收据不重新申请新业务准入；下面实际失败写入仍复验原锁与权限。
+          const current = await tx.rentalPriceAdjustmentPlan.findFirst({
+            where: { id: adjustment.id, tenantId, workspaceId, planId: adjustment.planId }
+          });
+          if (!current) return { id: adjustment.id, status: "unknown" };
+          if (current.status === "applied") {
+            const version = current.resultVersionId ? await tx.rentalPriceVersion.findFirst({
+              where: { id: current.resultVersionId, tenantId, workspaceId },
+              select: { id: true }
+            }) : null;
+            return version ? { id: adjustment.id, status: "applied", versionId: version.id }
+              : { id: adjustment.id, status: "unknown" };
+          }
+          if (current.status !== "pending") return { id: adjustment.id, status: current.status };
           await lockActiveCategoryBinding(tx, tenantId, workspaceId);
-          await tx.rentalPriceAdjustmentPlan.updateMany({
-            where: { id: adjustment.id, tenantId, workspaceId, status: "pending" },
+          // 只有原业务明确拒绝才记失败；无法核定的事务错误保留原计划和结果未定。
+          if (!(error instanceof HttpException) || ![400, 404, 409].includes(error.getStatus())) {
+            return { id: adjustment.id, status: "unknown" };
+          }
+          const failed = await tx.rentalPriceAdjustmentPlan.updateMany({
+            where: { id: adjustment.id, tenantId, workspaceId, planId: adjustment.planId, status: "pending" },
             data: { status: "failed", failureReason: message.slice(0, 191) }
           });
+          return { id: adjustment.id, status: failed.count === 1 ? "failed" : "unknown" };
         });
-        results.push({ id: adjustment.id, status: "failed" });
+        results.push(observed);
       }
     }
     return { ranCount: results.length, results };

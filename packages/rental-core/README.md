@@ -297,6 +297,8 @@ HTTP入口从 `/http-workspace-capabilities`、`/http-staff-payments` 导入；`
 
 支付到期与手动关单共用 [原支付执行器](src/mysql-payment-runtime.ts)的唯一关单运输收据。准备记录按原支付单派生固定键，在原租户、订单和支付单锁下先提交，再复核当前派发权。收据保存原空间、商户单号、提供方、方式、金额及 Stripe 原 Session。查询和关闭结果提交均核同一快照，原支付状态和渠道应答继续决定结果。准备提交失应答、运输超时或结果落库未确认时，恢复仅查询同一支付单；可信已关闭结果同时收口原意图与关单收据，可信已付结果沿原入账。手动重试和重建 worker 共用该观察，进程退出仍等待已进入运输的原结果。[原作业恢复验证](../../tests/rental-worker-recovery.test.cjs)
 
+调价作业遇到提交应答丢失时，按原租户、空间、价格组和调价计划回读原状态；已执行的计划须关联同范围的原价格版本，返回同一个版本。缺少可信版本或事务结果未定时返回 `unknown`，保留原事实。仍待执行的计划在原锁和当前权限下，只将明确业务拒绝记为失败；读取已提交结果不重新申请新业务执行权限。[调价运行时](src/mysql-business-runtime.ts) · [原作业恢复验证](../../tests/rental-worker-recovery.test.cjs)
+
 | 宿主启动的原执行者 | 业务与存储接点 | 退出及恢复边界 |
 | --- | --- | --- |
 | `workers.allocation` | [配货](src/mysql-allocation.ts)、[事实/事件](src/allocation-storage.ts)与[当前作业权威](src/application-worker-authority.ts)，同一实例供 HTTP、AI 及自动扫描消费 | 停止扫描并等待原在途工作，原订单、配置开关与失败事件保持原事务边界 |

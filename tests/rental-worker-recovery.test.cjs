@@ -298,7 +298,11 @@ function priceFixture() {
     // remain unchanged. The named-lock owner is not an outer business transaction.
     const snapshot = options?.timeout ? undefined : copy(f.price);
     try {
-      const value = await original(consume, options);
+      const value = await original(async tx => {
+        // Prisma 的模型委托在事务创建时即存在，读取收据不必先发原始 SQL。
+        Object.assign(tx, tables(tx));
+        return consume(tx);
+      }, options);
       if (snapshot && f.price.versions.length > snapshot.versions.length) await f.afterPriceCommit?.();
       return value;
     } catch (error) {
