@@ -105,7 +105,8 @@ export function createRentalApplication(input: {
   if (input.aiMode === "disabled" && aiKeys.some(key => input.participants[key] !== undefined)) {
     throw new Error("未启用 AI 的 Rental 应用不能装配 AI 数据或运行参加者");
   }
-  if (input.aiMode === "enabled" && (typeof input.participants.failures?.inspection !== "function"
+  if (input.aiMode === "enabled" && (typeof input.participants.allocationFailures?.fulfillment !== "function"
+    || typeof input.participants.failures?.inspection !== "function"
     || typeof input.participants.failures?.refund !== "function"
     || typeof input.participants.events?.inspection !== "function"
     || typeof input.participants.events?.notification !== "function"

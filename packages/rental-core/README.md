@@ -227,6 +227,8 @@ Rental HTTP从 `@rental-os/rental-core/http` 的 `RentalHttpModule` 接入，类
 
 原文件兼容应用从 `@rental-os/rental-core/file-application-runtime` 导入 `RentalFileStorageApplication`。宿主提供同一文件/业务存储、配置锁、当前 Auth/ACL、审计和原检查解析器。知识权限、修订解析、原键及 unknown 错误工厂可按需供给。新知识上传在写入前核定原错误工厂，原键观察在查询前核定原键和修订解析，缺少所需参加者时明确不可用。原合法任意 module/scene 及历史回执继续沿原权限处理。固定 Staff 场景消费公共文件应用，企业和换货专用依据分别使用所属参加者。原 Nest 类只维护唯一定时器、生命周期与 AI 清理参加者，AI 物理删除仍核原政策和收据。[文件应用](src/file-application-runtime.ts) · [原宿主](../../apps/api/src/modules/integrations/file-storage.runtime.service.ts) · [AI 清理参加者](../../apps/api/src/modules/integrations/file-ai-retention.participant.ts)
 
+型号图片首次解绑在原图片事务中把 active 文件排为 `delete_queued`；已有排队、未定、在途或已删事实保持原收据。唯一清理器占用后才派发删除，Core 移除观察保留未完成作业与 unknown 阻碍。[图片事务](src/mysql-core-configuration.ts) · [移除观察](../../apps/rental-api/src/core-removal-source.ts)
+
 员工原键观察的请求与回执 schema 从 `@rental-os/rental-core/staff-upload-observation` 读取，服务端从 `@rental-os/rental-core/file-application-staff-observation` 导入 `parseStaffUploadObservation`。解析复用原 Ajv 封闭校验、8KiB 描述上限及原上传键 UTF-16 长度和 trim 规则，宿主继续向同一 HTTP/文件参加者供给解析函数。[观察合同](src/staff-upload-observation.ts) · [原键解析与观察](src/file-application-staff-observation.ts)
 
 企业回款文件绑定从 `/file-application-enterprise-payment-proof` 接入。原企业 Controller 提供当前客户、空间及订单依据，参加者覆盖客户端提交的证明元数据，并核完成与重放的原绑定；原文件编排继续维护同一上传键、冻结对象和事务。其他原合法 module/scene 沿现有兼容入口处理。[企业绑定参加者](src/file-application-enterprise-payment-proof.ts) · [原文件编排](../../apps/api/src/modules/integrations/file-storage.runtime.service.ts)
@@ -343,6 +345,8 @@ HTTP入口从 `/http-workspace-capabilities`、`/http-staff-payments` 导入；`
 客户应用从 `/mysql-client-application` 接入目录、报价、本人订单、费用响应和付款等原方法。宿主按 `/client-application-ports` 提供同一数据库及原18项业务实例，检查费用响应另供给同事务出箱；每次调用沿原出箱实例化规则，不在包内加载AI运行时。`/category-client-projection` 提供同一客户字段白名单，原shared的AI一次性地址证据复用 `/client-contracts` 的六字段声明。原客户Auth仍负责可信会话，业务应用继续核本人对象和原收据。[客户应用](src/mysql-client-application.ts) · [实际参加者](src/client-application-ports.ts) · [原Nest接线](../../apps/api/src/modules/client/client-api.service.ts) · [API源码与组合文档](../../apps/api/src/contracts/openapi-document.ts)
 
 客户 HTTP 从 `/http-client` 登记同一 Controller，通过 `/http-client-applications` 的 `RENTAL_CLIENT_HTTP` 绑定八项真实实例；[原接线](../../apps/api/src/modules/client/client-http.providers.ts)使用 `useExisting`，原 Guard/ALS 仍在敏感资料返回前复验同一会话绑定。客户 Auth、后台/自助统一注册、限流及官网图片分别从上表的正式子出口使用；[原认证适配](../../apps/api/src/modules/client/client-auth.service.ts)保留旧构造位置与同一数据源，原刷新令牌只消费一次，临时密码沿原改密路径恢复。客户端读取 `/client-contracts`，不加载这些私有 MySQL/Nest 适配。[认证/注册验证](../../tests/customer-registration-unified.test.cjs) · [原安全验证](../../tests/client-api-security.test.cjs)
+
+验证码先保存原挑战和发送准备，再调用同一短信运输。提供方失应答或已受理后的结果提交失应答，保留原 `provider_pending`；同键只回读原 ID、期限和送达状态，旧失败或到期记录也不重派。明确失败仍返回原错误，已验证或已使用的挑战拒绝重复申请；客户端需区分原结果恢复与明确获取新的挑战。启用 AI 的完整应用须供给原配货失败出箱等真实参加者，缺方法时在构造服务图前拒绝。[验证码应用](src/mysql-client-auth.ts) · [完整装配](src/application.ts)
 
 文件兼容HTTP从 `/http-files` 登记同一Controller，用 `/http-file-applications` 四个令牌绑定原文件台账、存储、数据库及客户范围服务；实名与承运描述从 `/http-file.dto` 使用两项原验证类。公共创建/完成DTO继续单源，普通文件列表复用原业务ACL，实名与承运先核专用对象范围。[原文件接线](../../apps/api/src/modules/files/file-http.providers.ts) · [实名验证入口](../../tests/customer-identity-verification.test.cjs)
 

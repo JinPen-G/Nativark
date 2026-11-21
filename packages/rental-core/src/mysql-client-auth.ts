@@ -9,7 +9,7 @@ import {
   ServiceUnavailableException,
   UnauthorizedException
 } from "@nestjs/common";
-import type { Prisma } from "@prisma/client";
+import type { ClientRegistrationChallenge, Prisma } from "@prisma/client";
 import type { ClientRequestContext, RentalClientSessionLease } from "./client-context";
 import {
   CLIENT_API_VERSION,
@@ -32,6 +32,7 @@ import { customerRegistrationTransaction } from "./mysql-customer-registration-t
 import { CustomerRegistrationService } from "./mysql-customer-registration";
 import { SharedCustomerRepository } from "./mysql-customer-master";
 import type { RentalClientAuthStorage, RentalClientSmsIntegration, RentalClientChallengeRateLimit } from "./client-session-ports";
+import { NotificationDeliveryUnknownError } from "@rental-os/platform-server/notification-delivery";
 import { hashOpaqueToken, hashPassword, verifyPassword } from "@rental-os/platform-server/password";
 import { getRequestIdentity, runWithRequestIdentity } from "@rental-os/platform-server/request-identity";
 import { assertRentalBusinessTenantAccessAfterLock, lockRentalBusinessTenant } from "./mysql-business-fence";
@@ -382,21 +383,10 @@ export class ClientAuthService {
       if (existing && ["verified", "consumed"].includes(existing.status)) {
         throw new ConflictException("验证码挑战已验证或已使用，请继续注册或更换幂等键");
       }
-      if (existing && existing.expiresAt > now && ["pending_verification", "unverifiable"].includes(existing.status)) {
-        return {
-          kind: "response" as const,
-          response: {
-            apiVersion: CLIENT_API_VERSION,
-            challengeId: existing.id,
-            status: "pending_verification" as const,
-            method: existing.method as ClientRegistrationChallengeResponse["method"],
-            maskedDestination: existing.maskedDestination,
-            expiresAt: existing.expiresAt.toISOString(),
-            retryAfterSeconds: Math.max(0, Math.ceil((existing.expiresAt.getTime() - now.getTime()) / 1000)),
-            deliveryMode: existing.deliveryMode as ClientRegistrationChallengeResponse["deliveryMode"],
-            purpose: existing.purpose as ClientChallengePurpose
-          }
-        };
+      if (existing) {
+        // 同键只读原挑战，包括旧失败记录和到期记录；冷却或 TTL 不证明原短信未发送。
+        return { kind: "response" as const, response: this.challengeResponse(existing,
+          Math.max(0, Math.ceil((existing.expiresAt.getTime() - now.getTime()) / 1000))) };
       }
       const recent = await tx.clientRegistrationChallenge.findFirst({
         where: {
@@ -409,31 +399,18 @@ export class ClientAuthService {
       });
       if (recent) {
         const retryAfterSeconds = Math.max(1, Math.ceil((recent.createdAt.getTime() + CHALLENGE_COOLDOWN_SECONDS * 1000 - now.getTime()) / 1000));
-        return {
-          kind: "response" as const,
-          response: {
-            apiVersion: CLIENT_API_VERSION,
-            challengeId: recent.id,
-            status: (recent.status === "unverifiable" ? "pending_verification" : recent.status) as ClientRegistrationChallengeResponse["status"],
-            method: recent.method as ClientRegistrationChallengeResponse["method"],
-            maskedDestination: recent.maskedDestination,
-            expiresAt: recent.expiresAt.toISOString(),
-            retryAfterSeconds,
-            deliveryMode: recent.deliveryMode as ClientRegistrationChallengeResponse["deliveryMode"],
-            purpose: recent.purpose as ClientChallengePurpose
-          }
-        };
+        return { kind: "response" as const, response: this.challengeResponse(recent, retryAfterSeconds) };
       }
-      const id = existing?.id ?? randomBytes(16).toString("hex");
+      const id = randomBytes(16).toString("hex");
       const code = String(randomInt(100000, 1000000));
       const expiresAt = new Date(now.getTime() + CHALLENGE_TTL_SECONDS * 1000);
       // 不可投递的挑战：codeHash 存随机值且状态为 unverifiable，任何验证码都无法命中，
       // 但行仍参与冷却/幂等，让不可登录号码的响应与正常号码一致。
       const status = deliverable ? "pending_verification" : "unverifiable";
       const codeHash = deliverable ? this.challengeCodeHash(id, code) : randomBytes(32).toString("hex");
-      const row = existing
-        ? await tx.clientRegistrationChallenge.update({ where: { id }, data: { sourceWorkspaceId: workspace.id, method: input.method, purpose, identifierHash, maskedDestination: input.method === "sms" ? maskPhone(identifier) : maskEmail(identifier), codeHash, status, deliveryMode: "development", attempts: 0, createdAt: now, expiresAt, verifiedAt: null, verificationTokenHash: null, consumedAt: null, registrationId: null, registeredCustomerId: null, registrationResult: null } })
-        : await tx.clientRegistrationChallenge.create({ data: { id, tenantId: tenant.id, sourceWorkspaceId: workspace.id, method: input.method, purpose, identifierHash, maskedDestination: input.method === "sms" ? maskPhone(identifier) : maskEmail(identifier), codeHash, requestKey, status, deliveryMode: "development", expiresAt } });
+      // 先持久化未定准备，再允许运输。进程退出或丢应答后只回读这一挑战，不重新生成验证码。
+      const deliveryMode = input.method === "sms" && deliverable ? "provider_pending" : "development";
+      const row = await tx.clientRegistrationChallenge.create({ data: { id, tenantId: tenant.id, sourceWorkspaceId: workspace.id, method: input.method, purpose, identifierHash, maskedDestination: input.method === "sms" ? maskPhone(identifier) : maskEmail(identifier), codeHash, requestKey, status, deliveryMode, expiresAt } });
       return { kind: "send" as const, row, code };
     }));
 
@@ -445,27 +422,21 @@ export class ClientAuthService {
       // 与可投递路径保持相同响应形状；已配置短信平台时 deliveryMode 同样回 provider，不暴露"未发送"。
       const configured = input.method === "sms" ? await this.integrations.hasEnabledProvider(tenant.id).catch(() => false) : false;
       deliveryMode = configured ? "provider" : "development";
-      return {
-        apiVersion: CLIENT_API_VERSION,
-        challengeId: row.id,
-        status: "pending_verification",
-        method: input.method,
-        maskedDestination: row.maskedDestination,
-        expiresAt: row.expiresAt.toISOString(),
-        retryAfterSeconds: 60,
-        deliveryMode,
-        purpose
-      };
+      return this.challengeResponse(row, CHALLENGE_COOLDOWN_SECONDS, deliveryMode);
     }
     if (input.method === "sms") {
       if (closureContext) await this.prisma.$transaction(tx => lockRentalBusinessTenant(tx, tenant.id),
         { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
       else await assertRentalPublicAccessBeforeEffect();
     }
+    let providerAccepted = false;
     try {
       if (input.method === "sms") {
         const delivery = await withTargetIdentity(() => this.integrations.sendVerificationSms(tenant.id, identifier, code, `client-registration:${row.id}`));
-        if (delivery.configured) deliveryMode = "provider";
+        if (delivery.configured) {
+          providerAccepted = true;
+          deliveryMode = "provider";
+        }
         else if (process.env.NODE_ENV === "production") throw new ServiceUnavailableException("短信验证码服务尚未配置，请先启用一个短信平台");
       } else if (process.env.NODE_ENV === "production") {
         throw new ServiceUnavailableException("邮箱验证码服务尚未配置，请先接入邮件 provider");
@@ -477,6 +448,9 @@ export class ClientAuthService {
         if (written.count !== 1) throw new ConflictException("验证码挑战已变化，请核对原请求结果");
       }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
     } catch (error) {
+      // 运输未知或已受理后的结果写入失应答，都保留原未定准备，不补写确定失败。
+      if (providerAccepted || error instanceof NotificationDeliveryUnknownError)
+        return this.challengeResponse(row, CHALLENGE_COOLDOWN_SECONDS, "provider_pending");
       await this.prisma.$transaction(async tx => {
         await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM Tenant WHERE id = ${tenant.id} LOCK IN SHARE MODE`);
         await tx.clientRegistrationChallenge.updateMany({ where: { id: row.id, tenantId: tenant.id, codeHash: row.codeHash, status: "pending_verification" }, data: { status: "delivery_failed" } });
@@ -484,16 +458,27 @@ export class ClientAuthService {
       throw error;
     }
     return {
+      ...this.challengeResponse(row, CHALLENGE_COOLDOWN_SECONDS, deliveryMode),
+      ...(deliveryMode === "development" ? { developmentCode: code } : {})
+    };
+  }
+
+  private challengeResponse(row: Pick<ClientRegistrationChallenge,
+    "id" | "status" | "method" | "maskedDestination" | "expiresAt" | "deliveryMode" | "purpose">,
+    retryAfterSeconds: number, deliveryMode = row.deliveryMode): ClientRegistrationChallengeResponse {
+    const pending = ["pending_verification", "unverifiable"].includes(row.status);
+    const status = pending && row.expiresAt.getTime() <= Date.now() ? "expired"
+      : row.status === "unverifiable" ? "pending_verification" : row.status;
+    return {
       apiVersion: CLIENT_API_VERSION,
       challengeId: row.id,
-      status: "pending_verification",
-      method: input.method,
+      status: status as ClientRegistrationChallengeResponse["status"],
+      method: row.method as ClientRegistrationChallengeResponse["method"],
       maskedDestination: row.maskedDestination,
       expiresAt: row.expiresAt.toISOString(),
-      retryAfterSeconds: 60,
-      ...(deliveryMode === "development" ? { developmentCode: code } : {}),
-      deliveryMode,
-      purpose
+      retryAfterSeconds,
+      deliveryMode: deliveryMode as ClientRegistrationChallengeResponse["deliveryMode"],
+      purpose: row.purpose as ClientChallengePurpose
     };
   }
 

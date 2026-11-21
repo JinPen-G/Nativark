@@ -446,7 +446,7 @@ export const RENTAL_HTTP_REVIEWED_ACCESS: readonly RentalHttpAccessDeclaration[]
     core.updatePricingGroupSecurityRates, core.saveAsset, core.updateAsset], "transactional-write",
     "original normalized configuration/fact write uses lockActiveCategoryBinding -> Tenant/Core before workspace/category/revision checks; composite pricing group and initial rates share original RC transaction; authoritative profile snapshot commits inside upsertProfile and normalized persist is now no-op"),
   ...reviewed(RentalCoreController, [core.uploadItemGroupImage, core.removeItemGroupImage], "transactional-write",
-    "original file upload gate precedes transport; image delta merges locked current album under RC Tenant/Core -> Workspace with original upsert/opening; only acknowledged commit updates cache, unknown retains original asset/session; unlink and original file delete_pending CAS commit together for the sole cleanup worker"),
+    "original file upload gate precedes transport; image delta merges locked current album under RC Tenant/Core -> Workspace with original upsert/opening; only acknowledged commit updates cache, unknown retains original asset/session; unlink and original file delete_queued CAS commit together for the sole cleanup worker"),
   ...reviewed(RentalCoreController, [core.stockOperation, core.saveStock], "transactional-write",
     "mysql-core-facts stock operation/count original RC Tenant/Core transaction returns original balance and reservation projection before commit; runtime consumes this confirmed result without post-commit factContext/re-admission; original key/lock/inventory algorithm retained"),
   ...reviewed(RentalCoreController, [core.restoreDisposition,

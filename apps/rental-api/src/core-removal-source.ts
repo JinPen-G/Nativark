@@ -74,7 +74,7 @@ export function createRentalCoreRemovalSource<Tx extends CoreHostSqlTransaction>
             active: sql`r.status NOT IN ('success', 'failed', 'skipped')`, kind: "job" as const },
           { table: "FileAsset", code: "platform_files", label: "公共文件及上传/清理", owner: sql`(${owned} OR r.businessModule IN ('rental-core', 'rental-os')
               OR (r.businessModule = 'ai-native' AND r.businessType = 'ai_knowledge_document'))`,
-            active: sql`(r.status IN ('pending_upload', 'delete_pending', 'delete_in_progress') OR EXISTS(SELECT 1 FROM file_upload_sessions u
+            active: sql`(r.status IN ('pending_upload', 'delete_queued', 'delete_pending', 'delete_in_progress') OR EXISTS(SELECT 1 FROM file_upload_sessions u
               WHERE u.fileAssetId = r.id AND u.tenantId = r.tenantId
                 AND (u.status NOT IN ('completed', 'failed') OR u.cleanupError IS NOT NULL)))`, kind: "job" as const },
           { table: "ExternalAdapterLog", code: "platform_adapter_receipts", label: "原外部适配调用收据", owner: owned,

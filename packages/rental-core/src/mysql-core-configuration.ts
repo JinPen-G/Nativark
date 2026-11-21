@@ -1353,15 +1353,15 @@ export class RentalCoreConfigRepository<TTransaction extends RentalCoreConfigura
           businessId: itemGroupId, uploadScene: "item-group-image" };
         const asset = await tx.fileAsset.findFirst({ where: owner,
           select: { status: true, updatedAt: true, storageProvider: true, storageKey: true, metadata: true } });
-        if (!asset || !["active", "delete_pending", "delete_in_progress", "deleted"].includes(asset.status)
+        if (!asset || !["active", "delete_queued", "delete_pending", "delete_in_progress", "deleted"].includes(asset.status)
           || asset.metadata && typeof asset.metadata === "object" && !Array.isArray(asset.metadata)
             && typeof asset.metadata.workspaceId === "string" && asset.metadata.workspaceId !== workspaceId)
           throw new ConflictException("原产品型号图片文件绑定已变化");
-        // Existing pending/in-progress work retains its original receipt; no
-        // reset, new key or TTL-based resend is introduced by another unlink.
+        // 首次解绑只排队，由原清理 worker 占用后派发；旧未定记录保留原收据。
+        // 另一轮解绑不会重置占用、换键或因 TTL 重新发送删除。
         if (asset.status !== "active") continue;
         const pending = await tx.fileAsset.updateMany({ where: { ...owner, status: "active", updatedAt: asset.updatedAt,
-          storageProvider: asset.storageProvider, storageKey: asset.storageKey }, data: { status: "delete_pending" } });
+          storageProvider: asset.storageProvider, storageKey: asset.storageKey }, data: { status: "delete_queued" } });
         if (pending.count !== 1) throw new ConflictException("原产品型号图片文件绑定已变化");
       }
       return read();
