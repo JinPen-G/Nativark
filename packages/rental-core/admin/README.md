@@ -14,6 +14,8 @@ import {
   createRentalAdminHost,
 } from "@rental-os/rental-core/admin";
 
+import { rentalAdminMessages } from "@rental-os/rental-core/admin/messages";
+
 const rentalHost = createRentalAdminHost(rentalPorts);
 const contribution = createRentalAdminContribution(manifest.version, rentalHost.contexts);
 const registered = registerCoreAdminPages([{ manifest, contribution }]);
@@ -25,6 +27,7 @@ const App = createPlatformAdminApplication({
   brand,
   session,
   pages: registered.pages,
+  messages: rentalAdminMessages,
   getCoreContainer: currentRentalContainer,
 });
 const RentalProvider = rentalHost.Provider;
@@ -35,6 +38,10 @@ export function RentalAdminApplication() {
 ```
 
 `rentalPorts.runtime` 与公共应用的 `session.runtime` 使用同一对象。`currentRentalContainer(coreId, pageId)` 来自原宿主当前已验证的业务投影；按页面返回原 Rental 容器或租户范围，不能从地址参数或本地缓存授予范围。宿主采用服务端新范围后，同步调用 `session.invalidateBusinessScope()`，让同一请求、缓存及页面代次失效。工厂提供上下文和登记目标导航，各页面及服务端继续核验自己的准入和业务条件。[标准路由范围](../../platform-admin/src/core/CoreRoutes.tsx) · [组合输入](../../platform-admin/src/application-context.ts) · [登记位置解析](../../core-contracts/src/admin.ts)
+
+## 语言资源
+
+`rentalAdminMessages` 汇集原组合宿主和六组业务模块的词条。原后台语言入口及两个标准宿主从同一 `/admin/messages` 正式出口取资源，通过公共应用的 `messages` 接点供给同一 `LocaleProvider`。语言状态和变量翻译由公共提供器维护，业务录入事实由原页面展示。[词条资源](messages.ts) · [原宿主薄适配](../../../apps/admin/src/app/locale.tsx) · [公共语言提供器](../../platform-admin/src/AdminUiProvider.tsx)
 
 ## 真实输入
 

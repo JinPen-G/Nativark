@@ -14,6 +14,7 @@ import {
   createRentalNavigation,
 } from "@rental-os/rental-core/admin";
 import { createRentalBrowserAdminSession } from "@rental-os/rental-core/admin/browser";
+import { rentalAdminMessages } from "@rental-os/rental-core/admin/messages";
 import manifests from "virtual:core-manifests";
 import { createMultiCoreShell } from "./MultiCoreShell";
 
@@ -53,6 +54,7 @@ const App = createPlatformAdminApplication({
   brand: <Blocks aria-hidden />,
   session,
   pages: registered.pages,
+  messages: rentalAdminMessages,
   getCoreContainer: navigation.getCoreContainer,
   Shell,
 });

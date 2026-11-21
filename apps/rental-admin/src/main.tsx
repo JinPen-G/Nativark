@@ -9,6 +9,7 @@ import { createPlatformAdminApplication } from "@rental-os/platform-admin/applic
 import { applyMotionPreference, isMotionReduced } from "@rental-os/platform-admin/motion";
 import { createRentalAdminContribution, createRentalBrowserAdminHost } from "@rental-os/rental-core/admin";
 import { createRentalBrowserAdminSession } from "@rental-os/rental-core/admin/browser";
+import { rentalAdminMessages } from "@rental-os/rental-core/admin/messages";
 import manifest from "virtual:core-manifest";
 import { createRentalNavigation } from "./navigation";
 import { createRentalShell } from "./RentalShell";
@@ -51,6 +52,7 @@ const App = createPlatformAdminApplication({
   brand: <Blocks aria-hidden />,
   session,
   pages: registered.pages,
+  messages: rentalAdminMessages,
   getCoreContainer: navigation.getCoreContainer,
   Shell,
 });

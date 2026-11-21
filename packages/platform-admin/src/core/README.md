@@ -168,6 +168,8 @@ const readOriginal = () => setup.reconcile();
 
 默认宿主使用上面的公共应用工厂，它负责同一注册表、会话、壳和路由。已有完整宿主需保留自己的Router时，才在已认证Routes中展开 `createCoreRouteElements(pages, { brandName, getContainer? })`，沿同一AdminRuntime与WorkspaceHeaderProvider提供当前身份和页头。新Core仍只加自身贡献到组合。路由ID按带Core前缀的登记键生成，组合到Data Router时保持全局唯一。[路由适配](CoreRoutes.tsx)
 
+宿主将所选 Core 的词条通过 `messages` 传给 `createPlatformAdminApplication`，由同一 `AdminUiProvider` 供给语言状态和翻译。公共词典维护壳级文案，Core 资源供给业务文案及原宿主兼容词条，业务录入事实沿原页面展示。[应用组合输入](../application-context.ts) · [公共语言提供器](../AdminUiProvider.tsx)
+
 公共壳和双Core上下文沿Router的路由优先级与URI解码选择登记页，面包屑参数取该次匹配，菜单选中沿已匹配路径定位当前有权入口。静态页与对象页并列时，壳和正文按相同优先级选择页面。壳级标题和控制文案由壳已有语言字典转换，Core维护自己的业务标题与语言资源。
 
 ```tsx
