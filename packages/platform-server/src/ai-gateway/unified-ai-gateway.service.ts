@@ -415,6 +415,8 @@ export class UnifiedAiGatewayService {
     if (signal?.aborted) throw new ModelGatewayError('CANCELLED');
     this.assertBudget();
     request = structuredClone(request); context = structuredClone(context);
+    // Streaming requires the same registered tool participant before any admission or accounting effect.
+    if (request.features?.includes('tools') && !this.toolPolicy) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
     const life = intentLife ?? this.deadline(signal);
     let scope!: AiProfileScope;
     let binding: AiDispatchBinding | undefined;

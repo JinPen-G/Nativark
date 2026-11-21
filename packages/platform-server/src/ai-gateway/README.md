@@ -13,7 +13,7 @@
 
 ## 业务参加者
 
-[工具格式端口](gateway-tool-policy.ports.ts)提供原严格请求 schema、所需定义、`validateToolRequest(value)` 与 `validateNativeToolCall(value)`。前者返回类型谓词，后者返回布尔值。工具能力请求需要真实注册的参加者，缺少参加者时在准入前拒绝。
+[工具格式端口](gateway-tool-policy.ports.ts)提供原严格请求 schema、所需定义、`validateToolRequest(value)` 与 `validateNativeToolCall(value)`。前者返回类型谓词，后者返回布尔值。统一执行器的 `invoke` 与 `stream` 在路由、准入和预算预留前确认工具参加者，缺少时返回 `CAPABILITY_UNSUPPORTED`。C03 facade 继续按受控场景声明允许的调用方式。
 
 [Native 结果端口](model-input/native-tool-result.ports.ts)携带原计划选择器、调用身份、配置与结果摘要。原结果读取器在 `resolve` 与 `assertCurrent` 中核对当前权限、原模型结果和业务收据。Gateway 按该材料执行一次已准入的后继调用，恢复继续核对原操作与原收据。
 
