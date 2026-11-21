@@ -101,17 +101,23 @@ export function prepareCoreInstall(bytes: Uint8Array, sha256: string, directory:
     // 仅在完整包已写成后发布候选；并发同包的另一准备者可由字节核对复用。
     try { renameSync(temporary, target); moved = true; }
     catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (!["EEXIST", "ENOTEMPTY", "EPERM"].includes(code ?? "") || !existsSync(target)) throw error;
+      // 发布可能已完成却未收到结果。只读同一目标的完整原包，不重试 rename。
+      if (!existsSync(target)) throw error;
       assertExisting(target, archive.files);
       return { ...result, status: "already_prepared" };
     }
     return { ...result, status: "prepared" };
   } finally {
     if (!moved) {
-      const current = ordinaryDirectory(temporary);
-      if (!inside(root, current) || current === root) throw new Error("暂存清理路径不属于本次部署准备");
-      rmSync(current, { recursive: true });
+      let current: string | undefined;
+      try { current = ordinaryDirectory(temporary); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+      if (current) {
+        if (!inside(root, current) || current === root) throw new Error("暂存清理路径不属于本次部署准备");
+        rmSync(current, { recursive: true });
+      }
     }
   }
 }
