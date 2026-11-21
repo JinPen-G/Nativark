@@ -162,6 +162,7 @@ export function createPlatformAdminApplication(options: PlatformAdminApplication
     state.user?.locationScope, state.user?.organizationId, session.currentSessionEpoch(), state.sessionVerified]);
   const currentIdentity = useRef(identity); currentIdentity.current = identity;
   return <AdminUiProvider queryClient={session.queryClient} scope={{ identity, currentIdentity: () => currentIdentity.current }}
+    messages={options.messages}
     soundScope={state.sessionVerified && state.user ? { key: JSON.stringify([state.tenant?.tenantId, state.user.id]), epoch: session.currentSessionEpoch() } : null}
     accountThemeColor={state.sessionVerified ? state.user?.accountThemeColor : undefined}
     radii={state.sessionVerified ? { container: state.tenant?.adminContainerRadius, button: state.tenant?.adminButtonRadius,

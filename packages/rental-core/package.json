@@ -995,6 +995,10 @@
       "types": "./admin/index.tsx",
       "default": "./admin/index.tsx"
     },
+    "./admin/messages": {
+      "types": "./admin/messages.ts",
+      "default": "./admin/messages.ts"
+    },
     "./admin/capabilities": {
       "types": "./admin/capabilities/index.tsx",
       "default": "./admin/capabilities/index.tsx"
@@ -2486,6 +2490,9 @@
       ],
       "admin": [
         "admin/index.tsx"
+      ],
+      "admin/messages": [
+        "admin/messages.ts"
       ],
       "admin/orders": [
         "admin/orders/index.tsx"

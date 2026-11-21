@@ -4,10 +4,13 @@ import type { CoreRegisteredPage, CoreScopeReference } from "@rental-os/core-con
 import type { CoreRouteComponent } from "./core/CoreRoutes";
 import type { createBrowserAdminSession } from "./runtime/browser-session";
 import type { PlatformShellProps } from "./PlatformShell";
+import type { AdminMessages } from "./app/locale";
 
 export interface PlatformAdminApplicationOptions {
   brandName: string;
   brand: ReactNode;
+  /** 宿主合并 Core 词条，沿同一语言上下文呈现。 */
+  messages?: AdminMessages;
   session: ReturnType<typeof createBrowserAdminSession>;
   pages?: ReadonlyMap<string, CoreRegisteredPage<CoreRouteComponent>>;
   /** 宿主向同一公共外壳供给业务上下文、通知和详情。 */

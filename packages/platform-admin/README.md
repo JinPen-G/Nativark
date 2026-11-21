@@ -45,6 +45,8 @@ Rental 客户入口分别由[租户网站](../../apps/tenant-website/README.md)�
 
 普通宿主从 `/runtime` 创建一次 `createBrowserAdminSession`，将它与品牌、可选页面注册表传给 `/application` 的 `createPlatformAdminApplication` 即可挂载。零Core省略 `pages`；增加Core只改宿主组合与Core自身贡献。实际最小组合见[零Core App](../../apps/platform-admin/src/App.tsx)和[工单入口](../../apps/example-tickets-admin/src/main.tsx)。公共应用创建唯一 Data Router，并将同一注册表用于菜单、直接路由和面包屑。
 
+Core 的界面词条通过可选 `messages` 传给同一应用工厂，沿原语言 Context 与公共词条合并。多个 Core 由宿主按受控顺序合并资源。Rental 组合从 `@rental-os/rental-core/admin/messages` 导入 `rentalAdminMessages`；[实际资源](../rental-core/admin/messages.ts)保留原词条及六模块合并顺序，Core 作者可以用相同接点提供自己的词条。[组合参数](src/application-context.ts)
+
 有业务容器的宿主再提供 `getCoreContainer(coreId, pageId)`，返回当前已验证范围的 `{ type, id }`；租户范围页面可返回 `undefined`。路由每次读取当前值，变化后替换旧页面及主动作，同一个 Router 不捕获首次装配的容器。所需范围和配置就绪仍由所属 Core 的服务端贡献裁定。
 
 需要经营空间选择、业务通知或详情的宿主，可向 `/application` 提供 `Shell` 组件。它接收 `PlatformShellProps` 并包装同一 `PlatformShell`，传递公共菜单、页面、退出和正文。`contextSwitcher` 供给当前已验证业务上下文的控件，`notifications` 与 `notificationDetails` 供给真实通知和详情。原空间切换仍提交服务端响应并推进同一会话的请求与缓存代次。[组合参数](src/application-context.ts) · [公共壳及插槽](src/PlatformShell.tsx)
