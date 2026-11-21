@@ -421,63 +421,173 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
 
   for (const entry of entries.filter(entry => entry.module.endsWith("/admin"))) {
     const before = capabilities.length;
-    const describe = (node: ts.Node) => {
-      if (ts.isReturnStatement(node) && node.expression) {
-        const pages = objectProperty(node.expression, "pages");
-        const coreId = source.value(objectProperty(node.expression, "coreId"));
-        if (pages && ts.isArrayLiteralExpression(unwrap(pages)) && typeof coreId === "string") {
-          const contributionVersion = source.value(objectProperty(node.expression, "implementationVersion"));
-          const pageNodes = unwrap(pages) as ts.ArrayLiteralExpression;
-          for (const page of pageNodes.elements) {
-            const id = source.value(objectProperty(page, "id"));
-            const path = source.value(objectProperty(page, "path"));
-            const title = source.value(objectProperty(page, "title"));
-            const label = CorePageTextSchema.safeParse(title);
-            if (typeof id !== "string" || typeof path !== "string" || !label.success) {
-              addIssue("page_metadata", repositoryPath(root, entry.file), "Core 页面需要可解析的标识、路径和名称");
-              continue;
-            }
-            const core = corePackages.get(entry.owner);
-            let unresolved = source.unresolvedProperties(page, ["component"]);
-            const permissionsExpression = objectProperty(page, "permissions"), pageObject = unwrap(page);
-            // 这里只展开唯一的直接属性；页面对象的未知覆盖仍交回原源码缺口。
-            const directPermissions = ts.isObjectLiteralExpression(pageObject)
-              && pageObject.properties.every(property => (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property))
-                && !ts.isComputedPropertyName(property.name))
-              && pageObject.properties.filter(property => property.name?.getText().replace(/^["']|["']$/g, "") === "permissions").length === 1;
-            const permissionsSource = permissionsExpression ? describeRepositorySchema(source, permissionsExpression) : undefined;
-            const permissions = directPermissions && permissionsSource?.status === "indexed"
-              && Array.isArray(permissionsSource.issues) && permissionsSource.issues.length === 0
-              ? CorePageDescriptorSchema.shape.permissions.safeParse(permissionsSource.schema) : undefined;
-            if (permissions?.success) unresolved = unresolved.filter(field => field !== "permissions");
-            else if (!unresolved.includes("permissions")) unresolved.push("permissions");
-            const component = objectProperty(page, "component"), componentSymbol = component && source.checker.getSymbolAtLocation(unwrap(component));
-            const componentDeclaration = componentSymbol && source.target(componentSymbol).valueDeclaration;
-            if (core && (core.id !== coreId || core.version !== entry.version)) addIssue("core_version", repositoryPath(root, entry.file), "页面贡献与 Core 清单或包版本不一致");
-            if (contributionVersion !== entry.version) {
-              unresolved.push("implementationVersion");
-              addIssue("core_version", repositoryPath(root, entry.file), "页面实现版本无法解析或与包版本不一致");
-            }
-            if (unresolved.length) addIssue("page_metadata", repositoryPath(root, entry.file), `页面 ${id} 尚有动态字段 ${unresolved.join(", ")}`);
-            const purposeExpression = objectProperty(page, "purpose"), purpose = source.value(purposeExpression);
-            capabilities.push({ id: `page:${coreId}:${id}`, name: corePageText(label.data, "zh-CN"), kind: "page", owner: coreId, version: entry.version,
-              sources: [{ ...sourceReference(page, root), symbol: id },
-                ...(componentDeclaration && isRepositorySourcePath(root, componentDeclaration.getSourceFile().fileName)
-                  ? [{ ...sourceReference(componentDeclaration, root), symbol: componentSymbol?.name }] : []),
-                ...(core ? [core.reference] : [])], documentation: sourceDocuments(root, entry.owner),
-              entry: { kind: "page", path: `/cores/${coreId}${path === "/" ? "" : path}` },
-              details: { registration: "source", title: label.data,
-                ...(purpose === "configuration" || purpose === "business" ? { purpose } : !purposeExpression ? { purpose: "business" } : {}),
-                ...(typeof contributionVersion === "string" ? { implementationVersion: contributionVersion } : {}),
-                ...(permissions?.success ? { permissions: permissions.data } : {}),
-                ...(permissionsSource ? { permissionsSource } : {}),
-                package: entry.owner, unresolvedMetadata: unresolved } });
-          }
-        } else if (pages) addIssue("page_metadata", repositoryPath(root, entry.file), "Core 页面列表或归属无法静态解析");
-      }
-      ts.forEachChild(node, describe);
+    const issue = (node: ts.Node, message: string) => {
+      const location = sourceReference(node, root);
+      addIssue("page_metadata", repositoryPath(root, entry.file), `${message} (${location.path}:${location.line}: ${node.getText()})`);
     };
-    describe(source.source(entry.file));
+    const structuralBody = (body: ts.Block) => body.statements.every(statement => ts.isReturnStatement(statement)
+      || ts.isVariableStatement(statement) && statement.declarationList.flags & ts.NodeFlags.Const
+      && statement.declarationList.declarations.every(declaration => {
+        const initial = declaration.initializer && unwrap(declaration.initializer);
+        if (initial && ts.isArrowFunction(initial)) return true;
+        if (!initial || !ts.isCallExpression(initial) || initial.arguments.some(ts.isSpreadElement)) return false;
+        const symbol = source.checker.getSymbolAtLocation(initial.expression), factory = symbol && source.target(symbol).valueDeclaration;
+        const type = factory && ts.isFunctionDeclaration(factory) && factory.type;
+        const contract = type && ts.isTypeReferenceNode(type) && source.checker.getSymbolAtLocation(type.typeName);
+        return Boolean(contract && source.target(contract).declarations?.some(node =>
+          repositoryPath(root, node.getSourceFile().fileName) === "packages/core-contracts/src/admin.ts" && ts.isInterfaceDeclaration(node)
+          && node.name.text === "CoreAdminContribution"));
+      }));
+    // 这里只追正式出口实际引用的贡献结构。字段值仍由同源读取器解释，不调用工厂。
+    const locate = (expression: ts.Expression, key?: string, seen = new Set<ts.Node>()): { expression: ts.Expression; via: ts.Node[] } | undefined => {
+      const node = unwrap(expression);
+      if (seen.has(node) || seen.size > 80) return;
+      const chain = new Set(seen).add(node);
+      if (ts.isIdentifier(node)) {
+        const symbol = source.checker.getSymbolAtLocation(node), declaration = symbol && source.target(symbol).valueDeclaration;
+        if (declaration && ts.isVariableDeclaration(declaration) && declaration.initializer
+          && ts.isVariableDeclarationList(declaration.parent) && declaration.parent.flags & ts.NodeFlags.Const
+          && repositoryPath(root, declaration.getSourceFile().fileName).startsWith(entry.owner + "/")) {
+          if (source.unresolvedProperties(node).some(message => message.startsWith("post-write:")))
+            return key ? undefined : { expression: node, via: [declaration] };
+          const found = locate(declaration.initializer, key, chain);
+          return found && { expression: found.expression, via: [declaration, ...found.via] };
+        }
+      }
+      if (ts.isPropertyAccessExpression(node)) {
+        const selected = locate(node.expression, node.name.text, chain);
+        const found = selected && locate(selected.expression, key, chain);
+        return found && { expression: found.expression, via: [node, ...selected!.via, ...found.via] };
+      }
+      if (ts.isCallExpression(node)) {
+        const unresolved = key ? undefined : { expression: node, via: [] };
+        const symbol = source.checker.getSymbolAtLocation(node.expression), declaration = symbol && source.target(symbol).valueDeclaration;
+        const callable = declaration && ts.isVariableDeclaration(declaration) && declaration.initializer ? unwrap(declaration.initializer) : declaration;
+        if (!callable || !(ts.isFunctionDeclaration(callable) || ts.isArrowFunction(callable)) || !callable.body
+          || !repositoryPath(root, callable.getSourceFile().fileName).startsWith(entry.owner + "/")
+          || callable.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.AsyncKeyword)
+          || ts.isFunctionDeclaration(callable) && callable.asteriskToken || node.arguments.some(ts.isSpreadElement)) return unresolved;
+        const body = callable.body;
+        const returns = ts.isBlock(body) ? body.statements.filter(ts.isReturnStatement) : [];
+        // 顶层只有 const 与唯一直接返回；控制流、写入及未知语句不靠源码行号解释。
+        if (ts.isBlock(body) && (returns.length !== 1 || !structuralBody(body))) return unresolved;
+        const returned = ts.isBlock(body) ? returns[0].expression : body;
+        const found = returned && locate(returned, key, chain);
+        return found ? { expression: found.expression, via: [node, callable, ...(returns.length ? [returns[0]] : []), ...found.via] } : unresolved;
+      }
+      if (key) {
+        if (!ts.isObjectLiteralExpression(node) || node.properties.some(property => !(ts.isPropertyAssignment(property)
+          || ts.isShorthandPropertyAssignment(property)) || ts.isComputedPropertyName(property.name))) return;
+        const properties = node.properties.filter((property): property is ts.PropertyAssignment | ts.ShorthandPropertyAssignment =>
+          (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property)) && property.name.getText().replace(/^["']|["']$/g, "") === key);
+        const property = properties.length === 1 ? properties[0] : undefined;
+        const child = property && (ts.isPropertyAssignment(property) ? property.initializer : property.name);
+        return child ? { expression: child, via: [node, property!] } : undefined;
+      }
+      return { expression: node, via: [] };
+    };
+    const roots = new Set<ts.Node>();
+    for (const symbol of source.exports(entry.file)) {
+      const declaration = source.target(symbol).valueDeclaration;
+      const callable = declaration && ts.isVariableDeclaration(declaration) && declaration.initializer ? unwrap(declaration.initializer) : declaration;
+      if (!callable || roots.has(callable) || !(ts.isFunctionDeclaration(callable) || ts.isArrowFunction(callable))
+        || !callable.body || !ts.isBlock(callable.body)) continue;
+      roots.add(callable);
+      const returns = callable.body.statements.filter(ts.isReturnStatement);
+      if (returns.length !== 1 || !returns[0].expression) {
+        if (returns.some(statement => statement.expression && objectProperty(statement.expression, "pages"))) issue(callable, "Core 页面需要唯一直接返回");
+        continue;
+      }
+      const node = returns[0], definition = node.expression!;
+      const pages = locate(definition, "pages"), coreIdExpression = locate(definition, "coreId");
+      if (pages && (callable.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.AsyncKeyword)
+        || ts.isFunctionDeclaration(callable) && callable.asteriskToken)) { issue(callable, "Core 页面异步或延迟工厂仍需来源核对"); continue; }
+      if (pages && ts.isArrayLiteralExpression(unwrap(pages.expression)) && (unwrap(pages.expression) as ts.ArrayLiteralExpression).elements.some(ts.isSpreadElement)
+        && !structuralBody(callable.body)) { issue(node, "Core 页面聚合包含未支持的控制流或语句"); continue; }
+      const coreIdValue = coreIdExpression && locate(coreIdExpression.expression);
+      const coreId = source.value(coreIdValue?.expression);
+      if (pages && typeof coreId === "string") {
+          const contributionVersion = source.value(objectProperty(definition, "implementationVersion"));
+          const describePages = (expression: ts.Expression, via: ts.Node[], seen = new Set<ts.Node>()) => {
+            if (seen.has(expression) || seen.size > 80) { issue(expression, "Core 页面聚合存在递归引用"); return; }
+            const chain = new Set(seen).add(expression), selected = locate(expression);
+            if (!selected || !ts.isArrayLiteralExpression(selected.expression)) { issue(selected?.expression ?? expression, "Core 页面列表仍需来源核对"); return; }
+            const locations = [...via, ...selected.via];
+            for (const page of selected.expression.elements) {
+              if (ts.isSpreadElement(page)) { describePages(page.expression, [...locations, page], chain); continue; }
+              const pageObject = unwrap(page), traced = locations.some(ts.isCallExpression)
+                || ts.isObjectLiteralExpression(pageObject) && pageObject.properties.some(ts.isSpreadAssignment);
+              const descriptorSource = describeRepositorySchema(source, page);
+              // sourceFields 枚举原整张 AST 表；页面查询仅保留实际所选字段，避免未引用项进入搜索。
+              delete descriptorSource.sourceFields;
+              const fields = descriptorSource.schema && typeof descriptorSource.schema === "object" && !Array.isArray(descriptorSource.schema)
+                ? descriptorSource.schema : {};
+              const fieldIssues = Array.isArray(descriptorSource.issues) ? descriptorSource.issues.filter((item): item is string => typeof item === "string") : [];
+              const complete = (name: string) => !fieldIssues.some(message => message.startsWith(`/${name}:`) || message.startsWith(`/${name}/`));
+              const id = fields.id, path = fields.path, title = fields.title;
+              const label = CorePageTextSchema.safeParse(title);
+              if (!CorePageDescriptorSchema.shape.id.safeParse(id).success || !CorePageDescriptorSchema.shape.path.safeParse(path).success
+                || typeof id !== "string" || typeof path !== "string" || !label.success || !complete("id") || !complete("path") || !complete("title")) {
+                issue(page, "Core 页面需要未被未知覆盖且通过正式schema的标识、路径和名称");
+                continue;
+              }
+              if (capabilities.some(capability => capability.id === `page:${coreId}:${id}`)) { issue(page, `Core 页面 ${id} 被重复引用`); continue; }
+              const core = corePackages.get(entry.owner);
+              let unresolved = traced ? [...new Set(fieldIssues.filter(message => message !== "schema-expansion:source-reference")
+                .map(message => /^\/([^/:]+)/.exec(message)?.[1] ?? message))] : source.unresolvedProperties(page, ["component"]);
+              const permissionsExpression = objectProperty(page, "permissions");
+              // 这里只展开唯一的直接属性；页面对象的未知覆盖仍交回原源码缺口。
+              const directPermissions = ts.isObjectLiteralExpression(pageObject)
+                && pageObject.properties.every(property => (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property))
+                  && !ts.isComputedPropertyName(property.name))
+                && pageObject.properties.filter(property => property.name?.getText().replace(/^["']|["']$/g, "") === "permissions").length === 1;
+              const permissionsSource = permissionsExpression ? describeRepositorySchema(source, permissionsExpression) : undefined;
+              const permissions = directPermissions && permissionsSource?.status === "indexed"
+                && Array.isArray(permissionsSource.issues) && permissionsSource.issues.length === 0
+                ? CorePageDescriptorSchema.shape.permissions.safeParse(permissionsSource.schema)
+                : traced && complete("permissions") ? CorePageDescriptorSchema.shape.permissions.safeParse(fields.permissions) : undefined;
+              if (permissions?.success) unresolved = unresolved.filter(field => field !== "permissions");
+              else if (!unresolved.includes("permissions")) unresolved.push("permissions");
+              const component = objectProperty(page, "component"), componentSymbol = component && source.checker.getSymbolAtLocation(unwrap(component));
+              const componentDeclaration = componentSymbol && source.target(componentSymbol).valueDeclaration;
+              if (traced && !unresolved.includes("component")) unresolved.push("component");
+              if (core && (core.id !== coreId || core.version !== entry.version)) addIssue("core_version", repositoryPath(root, entry.file), "页面贡献与 Core 清单或包版本不一致");
+              if (contributionVersion !== entry.version) {
+                unresolved.push("implementationVersion");
+                addIssue("core_version", repositoryPath(root, entry.file), "页面实现版本无法解析或与包版本不一致");
+              }
+              const known: Record<string, NonNullable<DevelopmentCapability["details"]>[string]> = {};
+              for (const name of ["parent", "menu", "purpose"] as const) {
+                if (Object.hasOwn(fields, name)) {
+                  const parsed = complete(name) ? CorePageDescriptorSchema.shape[name].safeParse(fields[name]) : undefined;
+                  if (parsed?.success && parsed.data !== undefined) known[name] = parsed.data;
+                  else if (!unresolved.includes(name)) unresolved.push(name);
+                }
+              }
+              if (!Object.hasOwn(fields, "purpose") && complete("purpose") && !fieldIssues.some(message => message.startsWith("/:"))) known.purpose = "business";
+              unresolved = [...new Set(unresolved)];
+              if (unresolved.length) issue(page, `页面 ${id} 尚有来源字段 ${unresolved.join(", ")}`);
+              capabilities.push({ id: `page:${coreId}:${id}`, name: corePageText(label.data, "zh-CN"), kind: "page", owner: coreId, version: entry.version,
+                sources: [{ ...sourceReference(page, root), symbol: id },
+                  ...locations.map(location => sourceReference(location, root)),
+                  ...(traced && Array.isArray(descriptorSource.fieldSources) ? descriptorSource.fieldSources.flatMap(field => field && typeof field === "object"
+                    && !Array.isArray(field) && field.source && typeof field.source === "object" && !Array.isArray(field.source)
+                    ? [field.source as DevelopmentSourceReference] : []) : []),
+                  ...(componentDeclaration && isRepositorySourcePath(root, componentDeclaration.getSourceFile().fileName)
+                    ? [{ ...sourceReference(componentDeclaration, root), symbol: componentSymbol?.name }] : []),
+                  ...(core ? [core.reference] : [])], documentation: sourceDocuments(root, entry.owner),
+                entry: { kind: "page", path: `/cores/${coreId}${path === "/" ? "" : path}` },
+                details: { registration: "source", title: label.data, ...known,
+                  ...(typeof contributionVersion === "string" ? { implementationVersion: contributionVersion } : {}),
+                  ...(permissions?.success ? { permissions: permissions.data } : {}),
+                  ...(permissionsSource ? { permissionsSource } : {}),
+                  ...(traced ? { descriptorSource } : {}),
+                  package: entry.owner, unresolvedMetadata: unresolved } });
+            }
+          };
+          describePages(pages.expression, [node, ...pages.via]);
+      } else if (pages || objectProperty(definition, "pages")) issue(node, "Core 页面列表或归属无法静态解析");
+    }
     const file = repositoryPath(root, entry.file);
     coverage.push({ source: file, count: capabilities.length - before, state: issues.some(issue => issue.path === file) ? "partial" : "indexed" });
   }

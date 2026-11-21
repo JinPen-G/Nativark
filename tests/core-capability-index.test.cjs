@@ -152,7 +152,7 @@ export function createTicketsAdmin() {
   ] };
 }`;
     const partial = buildRepositoryCapabilityIndex(root);
-    for (const id of ["dynamic", "invalid", "covered"]) {
+    for (const id of ["dynamic", "invalid"]) {
       const page = partial.capabilities.find(item => item.id === `page:example-tickets:${id}`);
       assert.ok(page);
       assert.equal(Object.hasOwn(page.details, "permissions"), false);
@@ -163,9 +163,59 @@ export function createTicketsAdmin() {
     const dynamic = partial.capabilities.find(item => item.id === "page:example-tickets:dynamic");
     assert.equal(dynamic.details.permissionsSource.status, "source-reference");
     assert.ok(dynamic.details.permissionsSource.issues.length);
+    assert.equal(partial.capabilities.some(item => item.id === "page:example-tickets:covered"), false);
+    assert.ok(partial.issues.some(issue => issue.code === "page_metadata" && issue.message.includes('id: "covered"')));
   } finally {
     fs.readFileSync = originalRead;
   }
+});
+
+test("Rental页面聚合追实际订单描述，直接数组定位而控制流与动态分支保留缺口", () => {
+  const root = path.resolve(__dirname, "..");
+  const packageFile = path.join(root, "package.json"), adminFile = path.join(root, "packages/rental-core/admin/index.tsx");
+  const pagesFile = path.join(root, "packages/rental-core/admin/orders/pages.ts");
+  const originalRead = fs.readFileSync, metadata = JSON.parse(originalRead(packageFile, "utf8"));
+  const unused = originalRead(pagesFile, "utf8").replace("export const RENTAL_ORDER_PAGES = {", `export const RENTAL_ORDER_PAGES = {
+    unused: { id: "unreferenced", path: "/unreferenced", title: "未引用", permissions: [] },`);
+  let adminFixture;
+  fs.readFileSync = (file, options) => {
+    const resolved = typeof file === "string" ? path.resolve(file) : undefined;
+    const text = resolved === packageFile ? JSON.stringify({ ...metadata, workspaces: ["packages/core-contracts", "packages/rental-core"] })
+      : resolved === pagesFile ? unused : resolved === adminFile ? adminFixture : undefined;
+    if (text === undefined) return originalRead(file, options);
+    const encoding = typeof options === "string" ? options : options?.encoding;
+    return encoding ? Buffer.from(text).toString(encoding) : Buffer.from(text);
+  };
+  try {
+    const index = buildRepositoryCapabilityIndex(root), pages = index.capabilities.filter(item => item.kind === "page" && item.owner === "rental");
+    assert.equal(pages.length, 17);
+    for (const [id, route] of [["orders", "/orders"], ["order-create", "/orders/new"], ["order-detail", "/orders/:id"]]) {
+      const page = pages.find(item => item.id === `page:rental:${id}`);
+      assert.equal(page.entry.path, `/cores/rental${route}`);
+      assert.ok(page.sources.some(location => location.path === "packages/rental-core/admin/index.tsx"));
+      assert.ok(page.sources.some(location => location.path === "packages/rental-core/admin/orders/index.tsx"));
+      assert.ok(page.details.descriptorSource.fieldSources.some(field => field.pointer === "/id" && field.source.path.endsWith("/orders/pages.ts")));
+      for (const field of ["permissions", "component", "implementationVersion"]) assert.ok(page.details.unresolvedMetadata.includes(field));
+    }
+    assert.equal(pages.find(item => item.id === "page:rental:orders").details.menu.order, 10);
+    assert.equal(pages.find(item => item.id === "page:rental:order-detail").details.parent, "orders");
+    assert.equal(pages.some(item => item.id === "page:rental:unreferenced"), false);
+    assert.equal(JSON.stringify(pages).includes("unreferenced"), false);
+    assert.ok(index.issues.some(issue => issue.code === "page_metadata" && issue.message.includes("Object.values(RENTAL_WORK_ORDER_PAGES).map")));
+    assert.ok(pages.find(item => item.id === "page:rental:item-groups").details.unresolvedMetadata.includes("menu"));
+    for (const [control, expected] of [["if (unavailable()) return {};", 0], ["", 3]]) {
+      adminFixture = `import { createRentalOrdersAdminContribution } from "./orders";
+export function createRentalAdminContribution(version, contexts) {
+  const orders = createRentalOrdersAdminContribution(version, contexts.useOrderContext);
+  ${control}
+  return { coreId: orders.coreId, implementationVersion: version, pages: [...orders.pages, ...unavailable()] };
+}`;
+      const result = buildRepositoryCapabilityIndex(root);
+      assert.equal(result.capabilities.filter(item => item.kind === "page" && item.owner === "rental").length, expected);
+      assert.ok(result.issues.some(issue => issue.code === "page_metadata" && issue.message.includes(control ? "控制流" : "unavailable()")));
+      assert.equal(result.capabilities.some(item => item.id === "page:rental:unreferenced"), false);
+    }
+  } finally { fs.readFileSync = originalRead; }
 });
 
 test("继承配置定位真实AI出口，越界、链接和不可读配置保留未解析", () => {

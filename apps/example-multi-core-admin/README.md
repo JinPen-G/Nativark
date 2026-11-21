@@ -29,7 +29,11 @@
 
 ## 验证边界
 
-本片完成公共后台及双 Core 示例的源码类型检查、原工单与订单表单定向用例，以及真实公共组合、路由和 hooks 源码的离线授权、范围与生命周期冒烟。目录及就绪响应、业务请求和 Form 使用明确 fixture，查询缓存使用原 QueryClient。零 Core 与双 Core 均核对同一公共壳、runtime、QueryClient 和唯一 Router。真实双 Core API 装配、持久化、浏览器实页、生产构建、干净标准包安装与正式多 Core 验收由对应宿主阶段继续完成。
+应用的 `tsconfig.json` 同时检查浏览器入口和 Node 侧 Vite 配置。包命令先沿 Rental API 的前置链编译正式出口，配置使用同版本 API 声明及其所选 Client，再检查公共后台与两份页面贡献。[宿主类型配置](tsconfig.json) · [包命令](package.json)
+
+Vite 生产构建从本宿主的 HTML 和组合入口进入真实页面、公共 UI、样式与资源。Rental 和工单分别核对固定标准包的版本、来源与摘要，再供给已核定的虚拟清单。构建期的 Rental API 出口用于旧接口许可，浏览器产物保持两个所选 Core 与公共依赖闭包。[HTML 入口](index.html) · [组合入口](src/main.tsx) · [构建配置](vite.config.ts)
+
+离线验证覆盖原工单与订单表单，以及真实公共组合、路由和 hooks 的授权、范围与生命周期。目录及就绪响应、业务请求和 Form 使用明确 fixture，查询缓存使用原 QueryClient。标准包与 Vite 内存构建记录包版本、来源、摘要、部署锁和依赖映射。真实双 Core API 装配、持久化、浏览器实页、干净标准包安装与正式多 Core 验收分别取得宿主证据。
 
 页头退出沿上述组合与 hooks 证据，另以四组离线反例核对非当前页写标题、卸页等待下一路由、旧确认及旧保存校验的关闭。标题清理包含 A 与 B 同标题时的 owner 区分，旧动作包含退出再返回同一标签页后的回调失效及当前新操作。该验证使用源码 hook facade 与明确 document fixture。
 
