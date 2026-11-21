@@ -472,14 +472,20 @@ export class TenantIntegrationRuntimeService {
     let body: JsonRecord;
     try {
       response = await fetchWithTimeout(`https://dysmsapi.aliyuncs.com/?${query}`, { method: "GET" }, ["dysmsapi.aliyuncs.com"]);
-      body = await this.readJson(response);
+      body = await this.readSmsSendResponse(response);
     } catch (error) {
       if (error instanceof ServiceUnavailableException && !(error instanceof NotificationDeliveryUnknownError)) throw error;
       throw new NotificationDeliveryUnknownError();
     }
-    if (!response.ok || body.Code !== "OK") throw new Error(String(body.Message ?? `HTTP ${response.status}`));
-    const bizId = String(body.BizId ?? "").trim();
-    if (!bizId) throw new NotificationDeliveryUnknownError("阿里云已返回成功，但没有返回可查询的短信回执号");
+    const code = typeof body.Code === "string" ? body.Code.trim() : "";
+    const bizId = typeof body.BizId === "string" ? body.BizId.trim() : "";
+    if (!code || (code !== "OK" && bizId) || response.status >= 500) {
+      throw new NotificationDeliveryUnknownError("阿里云短信应答缺少可信状态或状态与回执矛盾，请核对原操作");
+    }
+    if (code !== "OK") throw new Error(String(body.Message ?? code));
+    if (!response.ok || !bizId) {
+      throw new NotificationDeliveryUnknownError("阿里云短信未返回可确认的成功与原回执号，请核对原操作");
+    }
     return bizId;
   }
 
@@ -540,18 +546,53 @@ export class TenantIntegrationRuntimeService {
         },
         body: payload
       }, [host]);
-      body = await this.readJson(response);
+      body = await this.readSmsSendResponse(response);
     } catch (error) {
       if (error instanceof ServiceUnavailableException && !(error instanceof NotificationDeliveryUnknownError)) throw error;
       throw new NotificationDeliveryUnknownError();
     }
-    const responseBody = (body.Response ?? {}) as JsonRecord;
-    const error = responseBody.Error as JsonRecord | undefined;
-    if (!response.ok || error) throw new Error(String(error?.Message ?? `HTTP ${response.status}`));
-    const sendStatuses = Array.isArray(responseBody.SendStatusSet) ? responseBody.SendStatusSet as JsonRecord[] : [];
-    const serialNo = String(sendStatuses[0]?.SerialNo ?? "").trim();
-    if (!serialNo) throw new NotificationDeliveryUnknownError("腾讯云已返回成功，但没有返回可查询的短信流水号");
+    const responseBody = body.Response;
+    if (!responseBody || typeof responseBody !== "object" || Array.isArray(responseBody)) {
+      throw new NotificationDeliveryUnknownError("腾讯云短信应答缺少可信响应，请核对原操作");
+    }
+    const result = responseBody as JsonRecord;
+    if (response.status >= 500) throw new NotificationDeliveryUnknownError("腾讯云短信服务异常，原发送结果未定，请核对原操作");
+    if (result.Error !== undefined && result.Error !== null) {
+      const error = result.Error as JsonRecord | null;
+      if (!error || typeof error !== "object" || Array.isArray(error) || typeof error.Code !== "string" || !error.Code.trim()) {
+        throw new NotificationDeliveryUnknownError("腾讯云短信应答缺少明确拒绝依据，请核对原操作");
+      }
+      if (result.SendStatusSet !== undefined) throw new NotificationDeliveryUnknownError("腾讯云短信拒绝与发送记录并存，请核对原操作");
+      throw new Error(String(error.Message ?? error.Code));
+    }
+    const statuses = result.SendStatusSet;
+    if (!response.ok || !Array.isArray(statuses) || statuses.length !== 1 || !statuses[0]
+      || typeof statuses[0] !== "object" || Array.isArray(statuses[0])) {
+      throw new NotificationDeliveryUnknownError("腾讯云短信未返回本次单收件人的可信发送结果，请核对原操作");
+    }
+    const status = statuses[0] as JsonRecord;
+    const serialNo = typeof status.SerialNo === "string" ? status.SerialNo.trim() : "";
+    const code = typeof status.Code === "string" ? status.Code.trim() : undefined;
+    if (status.Code !== undefined && !code) {
+      throw new NotificationDeliveryUnknownError("腾讯云短信发送状态不可核定，请核对原操作");
+    }
+    if (code && code.toLowerCase() !== "ok") {
+      if (serialNo) throw new NotificationDeliveryUnknownError("腾讯云短信状态与原回执矛盾，请核对原操作");
+      throw new Error(String(status.Message ?? code));
+    }
+    if (!serialNo) throw new NotificationDeliveryUnknownError("腾讯云未返回可查询的短信流水号，请核对原操作");
     return serialNo;
+  }
+
+  /** 原发送响应必须能核定受理状态；解析失败保留原操作，交原投递记录核对。 */
+  private async readSmsSendResponse(response: Response): Promise<JsonRecord> {
+    let body: unknown;
+    try { body = JSON.parse(await response.text()); }
+    catch { throw new NotificationDeliveryUnknownError("短信发送应答无法解析，请核对原操作"); }
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      throw new NotificationDeliveryUnknownError("短信发送应答结构无法核定，请核对原操作");
+    }
+    return body as JsonRecord;
   }
 
   private async readJson(response: Response): Promise<JsonRecord> {
