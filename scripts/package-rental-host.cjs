@@ -385,10 +385,9 @@ function collectInputs(options) {
 function writeArchive(output, bytes) {
   const file = path.resolve(output); ordinaryDirectories(path.dirname(file));
   if (!file.endsWith('.tgz')) throw Error('输出须为新的 .tgz 文件');
-  let descriptor, identity, completed = false;
+  let descriptor, identity, offset = 0, completed = false;
   try {
     descriptor = fs.openSync(file, 'wx'); identity = fs.fstatSync(descriptor);
-    let offset = 0;
     while (offset < bytes.length) {
       const written = fs.writeSync(descriptor, bytes, offset, bytes.length - offset);
       if (!written) throw Error('归档写入未前进');
@@ -406,6 +405,9 @@ function writeArchive(output, bytes) {
       ordinaryDirectories(path.dirname(file)); const current = fs.lstatSync(file);
       if (current.isSymbolicLink() || current.dev !== identity.dev || current.ino !== identity.ino || current.birthtimeMs !== identity.birthtimeMs)
         throw Error('输出身份变化，停止清理');
+      // A different writer can change bytes without replacing the file.
+      if (current.size !== offset || !readOrdinary(file, offset).equals(bytes.subarray(0, offset)))
+        throw Error('输出内容变化，停止清理');
       fs.unlinkSync(file);
     }
   }
