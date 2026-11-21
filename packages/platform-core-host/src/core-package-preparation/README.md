@@ -24,12 +24,18 @@
 
 请求采用 `operation` 和同一预检 `package` 对象。准备再提供原预览摘要。当前组合、包、文件或请求变化时拒绝旧摘要，原候选仍可按原摘要读取。unknown 保留同一引用，原结果 unavailable 表示缺少可核定证据。
 
-网络与包材料读取在主体锁外完成，文件发布持有原账号、会话、角色及租户锁，返回前再核当前授权和原部署。候选目录按摘要固定，已存在目录只核原内容。新 Core 包由原安装准备写入，完整迁移和记录在同一暂存目录验证后一次发布，失败清理本次尚未发布目录。
+网络与包材料读取在主体锁外完成，文件发布持有原账号、会话、角色及租户锁，返回前再核当前授权和原部署。候选目录按摘要固定，同摘要并发准备复用先发布的完整目录、原回执及准备时间。只有确认目标目录缺失才开始暂存，目录读取失败返回 `preparation_read_failed`。新 Core 包由原安装准备写入，完整迁移和记录在同一暂存目录验证后一次发布。发布失应答时沿同一摘要回读，重新打开存储仍可取得原准备时间及回执。退出时只清理仍存在的本次暂存目录。
+
+摘要目录中的 `deployment/core.deployment.lock.json` 保存完整候选组合，Core 迁移原文位于 `deployment/migrations/core.<Core ID>.<迁移 ID>/migration.sql`。选中 Core 的完整包位于 `package/<Core ID>-<版本>-<包 SHA>/`，所选数据能力的完整包位于 `platform-capabilities/<能力 ID>-<版本>-<包 SHA>/`。重新打开 `createCorePackagePreparationFileStore` 后，用原 SHA 调用 `read` 核对这些文件与原准备时间，再由应用的回执入口复验当前管理权限。
+
+回执入口独立使用当前管理主体与候选存储，可在上游来源、材料或当前部署读取不可用时继续核对原 SHA。摘要目录缺失返回 `preparation_unavailable`，已存在目录的记录或文件损坏返回 `operation_conflict`。当前管理权限撤销时拒绝读取，文件冲突按原候选记录和实际字节处理。
 
 完整公共装配使用 `createPlatformCorePackageAudit` 在原事务写入 `requested` 提交意图。审计失败在文件派发前拒绝，审计之后再次核当前主体和原部署。文件派发后遇数据库提交、主体复验或原部署读取失败，继续返回原候选 SHA 的 `unknown`，原操作冲突保持原拒绝状态。[同事务审计](../core-package-audit.ts)
 
 宿主存储返回的成功记录须经原记录 schema、请求 SHA 和完整候选指纹核对。准备已调用存储而回包不可核定时返回携带原 SHA 的 unknown，后续读取同一摘要。原回读发现记录摘要或计划指纹不符时拒绝，写入失应答返回另一摘要时按原操作冲突拒绝。
 
+存储调用返回 `unavailable` 时，准备应用保留原错误并转换为携带原 SHA 的 `unknown`，页面继续使用原指针核对回执。客户端取消等待或连接中断后，已派发准备的结果沿原摘要读取，当前授权在读取时重新核验。下载超时及发布前缺少来源、材料或存储由发布前准入返回具体失败。
+
 候选记录及 HTTP 结果中的 `deployment` 一直为 `pending`。部署者继续核当前数据与原迁移执行，完成所需构建、迁移、切换和注册，再进入租户授权及成员分配。完整独立运行、真实数据库和宿主验收沿原专项门槛核收。
 
-GitHub 传输复用正式 `@rental-os/core-contracts/github-http`。本模块通过 `@rental-os/platform-core-host/core-package-preparation` 导出，公共 API 使用统一装配供给 Guard、OpenAPI 和宿主文件配置。缺来源、材料或存储均明确 unavailable。源码类型、受控运输/文件 fixture 与真实 GitHub、文件系统、HTTP 和部署验证分别记录。[公共宿主](../../../../apps/platform-api/README.md)
+GitHub 传输复用正式 `@rental-os/core-contracts/github-http`。本模块通过 `@rental-os/platform-core-host/core-package-preparation` 导出，公共 API 使用统一装配供给 Guard、OpenAPI 和宿主文件配置。新候选的存储派发前缺少来源、材料或存储适配时返回 unavailable。源码类型、受控运输/文件 fixture 与真实 GitHub、文件系统、HTTP 和部署验证分别记录。[公共宿主](../../../../apps/platform-api/README.md)

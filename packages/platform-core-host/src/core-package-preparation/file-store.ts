@@ -1,7 +1,7 @@
 /** 固定候选一次发布到独占根，Core 包写入复用原 prepareCoreInstall。
  * 同摘要已有目录逐字节核验，原回读核文件清单，失败仅清理本次尚未发布的暂存目录。 */
 import {
-  existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync,
+  lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync,
   renameSync, rmSync, writeFileSync
 } from "node:fs";
 import { createHash } from "node:crypto";
@@ -18,6 +18,13 @@ import {
 } from "./ports";
 
 const recordFile = "preparation.json";
+function entryExists(path: string): boolean {
+  try { lstatSync(path); return true; }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
 const inside = (root: string, target: string) => {
   const part = relative(root, target);
   return part !== ".." && !part.startsWith(`..${sep}`) && !isAbsolute(part);
@@ -78,20 +85,32 @@ export function createCorePackagePreparationFileStore(input: {
   const root = resolve(input.directory), now = input.now ?? Date.now;
   const legacyApiRoutes = structuredClone(input.legacyApiRoutes ?? {});
   const target = (sha256: string) => join(root, CoreArtifactHashSchema.parse(sha256));
+  function lookup(directory: string, sha256: string) {
+    try {
+      ordinaryDirectory(root);
+      if (!entryExists(directory)) return { status: "absent" as const };
+    } catch {
+      return { status: "unavailable" as const, error: {
+        code: "preparation_read_failed", message: "原候选目录不可核定，请读取同一摘要"
+      } };
+    }
+    try { return { status: "recorded" as const, record: readRecord(directory, sha256) }; }
+    catch { throw new CoreAccessError("operation_conflict", "原固定候选的记录或字节存在缺口，请核对原结果"); }
+  }
+
   return {
     read(sha256) {
-      ordinaryDirectory(root);
-      const directory = target(sha256);
-      if (!existsSync(directory)) return { status: "unavailable", error: {
-        code: "preparation_unavailable", message: "原固定候选尚无可核定的发布结果" } };
-      try { return { status: "recorded", record: readRecord(directory, sha256) }; }
-      catch { throw new CoreAccessError("operation_conflict", "原固定候选的记录或字节存在缺口，请核对原结果"); }
+      const current = lookup(target(sha256), sha256);
+      if (current.status !== "absent") return current;
+      return { status: "unavailable", error: {
+        code: "preparation_unavailable", message: "原固定候选目录缺失，尚无可核定的发布结果" } };
     },
     prepare(bundle: CorePackagePreparationBundle) {
-      ordinaryDirectory(root);
       if (requestFingerprint(bundle.plan) !== bundle.sha256) throw new CoreAccessError("operation_conflict", "候选准备指纹不一致");
       const directory = target(bundle.sha256);
-      if (existsSync(directory)) return { status: "already_prepared", record: readRecord(directory, bundle.sha256) };
+      const existing = lookup(directory, bundle.sha256);
+      if (existing.status === "unavailable") return existing;
+      if (existing.status === "recorded") return { status: "already_prepared", record: existing.record };
       const temporary = mkdtempSync(join(root, ".core-candidate-"));
       let moved = false;
       try {
@@ -118,12 +137,18 @@ export function createCorePackagePreparationFileStore(input: {
         try { renameSync(temporary, directory); moved = true; }
         catch (error) {
           const code = (error as NodeJS.ErrnoException).code;
-          if (!["EEXIST", "ENOTEMPTY", "EPERM"].includes(code ?? "") || !existsSync(directory)) throw error;
-          return { status: "already_prepared", record: readRecord(directory, bundle.sha256) };
+          if (["EEXIST", "ENOTEMPTY", "EPERM"].includes(code ?? "")) {
+            const current = lookup(directory, bundle.sha256);
+            if (current.status === "recorded") return { status: "already_prepared", record: current.record };
+          }
+          return { status: "unknown", sha256: bundle.sha256, error: {
+            code: "preparation_unknown", message: "候选发布尚无确定结果，请读取同一摘要"
+          } };
         }
         return { status: "prepared", record };
       } finally {
-        if (!moved) {
+        // rename 可能已经移走暂存目录，只是调用方没有收到成功结果。
+        if (!moved && entryExists(temporary)) {
           const current = ordinaryDirectory(temporary);
           if (!inside(root, current) || current === root) throw new Error("暂存清理路径与本次候选不同");
           rmSync(current, { recursive: true });

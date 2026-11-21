@@ -156,6 +156,10 @@ export function composePlatformCorePackagePreparation<Tx extends PlatformCoreTra
             code: "preparation_unknown", message: "候选准备尚无确定结果，请按同一摘要核对原回执" } };
         }
         await sameSnapshot(built.snapshot);
+        if (result.status === "unavailable") {
+          // 存储已调用，原目录不可核定时保留本次摘要供回读。
+          return { status: "unknown" as const, sha256: request.expectedSha256, error: result.error };
+        }
         if (result.status === "prepared" || result.status === "already_prepared") {
           const record = verifiedRecord(request.expectedSha256, result.record);
           if (!record) return { status: "unknown" as const, sha256: request.expectedSha256, error: {
