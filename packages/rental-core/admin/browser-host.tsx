@@ -50,6 +50,7 @@ export function createRentalBrowserAdminHost(options: RentalBrowserAdminHostOpti
         auth.tenant?.tenantId, auth.currentWorkspaceId, auth.user?.id,
         auth.user?.isPlatformAdmin, auth.user?.isSaasAdmin, auth.user?.dataScope, auth.user?.locationScope,
         auth.user?.permissions && [...new Set(auth.user.permissions)].sort(), auth.user?.organizationId,
+        auth.user?.tenantMembership,
       ]),
       workOrderPermissions: {
         manage: auth.hasPermission("rental-core:maintenance:manage"),

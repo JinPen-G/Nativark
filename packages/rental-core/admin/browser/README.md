@@ -16,6 +16,14 @@ const session = createRentalBrowserAdminSession({ baseURL: "/api" });
 
 装配时提供原登录品牌默认文案及显式品类治理展示开关。`OrderFactsEntry`、会员 AI 组件和治理 AI/Copilot 组件沿原类型化接点按需提供。订单缺 AI 展示时显示装配状态，普通业务继续使用同一页面。各组件的真实权限、模型和批准仍归原入口。
 
+## 导航与经营范围
+
+`createRentalNavigation` 从同一登记表解析原 Rental 深链接，保留对象参数、查询和锚点。工单通知按 `workOrderId` 定位已登记详情，同时保留原本可解析的历史页签及锚点。消息跳转再次核对当前服务端 Core 目录。租户级会员与客户端渠道使用租户绑定，其他业务页使用当前已验证的经营空间。[导航工厂](../browser-navigation.ts)
+
+`createRentalShell` 复用原空间切换命令。成功回执提交后，原路由仍有效时进入工作台。路由已切换或外层壳已卸载时，迟到回调结束该轮导航与错误反馈。有效性由通知树外的壳保存，正常切空间重建消息投影后仍可完成导航。[薄壳](../browser-shell.tsx)
+
+后台查询范围包含原账号权限、租户会员权限、组织及地点范围。租户会员授权变化后使用新的查询键，页面请求仍在异步前后核对原身份及范围。[浏览器宿主](../browser-host.tsx) · [会员范围](../membership/page-context.tsx)
+
 ## 身份与恢复
 
 沿用 `rental_access_token`、`rental_refresh_token`、`rental_tenant`、`rental_user`、`rental_workspaces` 和 `rental_current_workspace`。登录、会话上下文、改密、空间切换和刷新仅接受原服务端响应，storage 同步后重新验证权限。切空间保留原空刷新令牌语义，原租户会员权限、角色、组织、地点和品类能力继续由原会话实现判定。

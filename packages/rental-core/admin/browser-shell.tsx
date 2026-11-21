@@ -1,6 +1,7 @@
 /** Rental 宿主向同一公共壳供给原空间选择、消息状态及内联工单详情。
- * 宿主可提供当前 Core 的选择器，公共正文与通知 Provider 保持同一生命周期。 */
-import { useNavigate } from "react-router-dom";
+ * 宿主可提供当前 Core 的选择器，迟到导航沿外层路由生命周期核对。 */
+import { useLayoutEffect, useRef } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { PlatformShell, type PlatformShellProps } from "@rental-os/platform-admin";
 import { NativeContextSwitcher } from "@rental-os/platform-admin/shell";
 import { AnimatedIcon, useFeedback, type AnimatedIconName } from "@rental-os/platform-admin/ui";
@@ -25,7 +26,9 @@ export function createRentalShell(options: RentalShellOptions) {
     soundScopeKey: auth => JSON.stringify([auth.tenant?.tenantId, auth.user?.id]),
   });
 
-  function RentalShellContents(props: PlatformShellProps) {
+  function RentalShellContents({ isLocationCurrent, ...props }: PlatformShellProps & {
+    isLocationCurrent: () => boolean;
+  }) {
     const auth = options.session.useAuthStore();
     const { locale } = useLocale();
     const { toast } = useFeedback();
@@ -45,16 +48,30 @@ export function createRentalShell(options: RentalShellOptions) {
           icon: <AnimatedIcon name={categoryIcons[entry.categoryCode] ?? "inventory"} style={{ fontSize: 20 }} /> }))}
         value={auth.currentWorkspaceId ?? ""} label={en ? "Operating workspace" : "经营空间"}
         onChange={async id => {
+          if (!isLocationCurrent()) throw new DOMException("经营空间选择页面已变化", "AbortError");
           await options.session.useAuthStore.getState().switchWorkspace(id);
-          if (options.workspaceHref) navigate(options.workspaceHref, { replace: true });
+          if (options.workspaceHref && isLocationCurrent()) navigate(options.workspaceHref, { replace: true });
         }}
-        onError={() => toast({ type: "error", title: en ? "Workspace switch failed" : "切换经营空间失败" })} /> : props.contextSwitcher}
+        onError={() => {
+          if (isLocationCurrent()) toast({ type: "error", title: en ? "Workspace switch failed" : "切换经营空间失败" });
+        }} /> : props.contextSwitcher}
       notifications={inbox} notificationDetails={id => <notifications.NoticeActions id={id} />} />;
   }
 
   return function RentalShell(props: PlatformShellProps) {
     // 目录更新须同时重渲染 Provider，撤权后停止业务读取及旧消息动作。
     useCoreSession();
-    return <notifications.NotificationProvider><RentalShellContents {...props} /></notifications.NotificationProvider>;
+    const location = useLocation();
+    const locationKey = useRef(location.key);
+    const mounted = useRef(true);
+    locationKey.current = location.key;
+    // 通知树会在经营空间切换后重建，原路由的有效性须保存在其外层。
+    useLayoutEffect(() => {
+      mounted.current = true;
+      return () => { mounted.current = false; };
+    }, []);
+    const isLocationCurrent = () => mounted.current && locationKey.current === location.key;
+    return <notifications.NotificationProvider><RentalShellContents {...props}
+      isLocationCurrent={isLocationCurrent} /></notifications.NotificationProvider>;
   };
 }

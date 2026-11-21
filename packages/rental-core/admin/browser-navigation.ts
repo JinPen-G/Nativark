@@ -49,7 +49,7 @@ export function createRentalNavigation(
       const params = Object.fromEntries(Object.entries(matched.params)
         .filter((entry): entry is [string, string] => typeof entry[1] === "string"));
       const path = resolveCorePageLocation(pages, { coreId: page.coreId, pageId: page.definition.id, params });
-      return { page, href: `${path}${url.search}${url.hash}` };
+      return { page, href: `${path}${url.search}${url.hash}`, search: url.search, hash: url.hash };
     } catch {
       return undefined;
     }
@@ -83,15 +83,15 @@ export function createRentalNavigation(
   }
 
   function resolveNoticeHref(item: Notice, auth: RentalNotificationAuth): string | null {
-    let href = item.href;
+    let target = resolvePage(item.href);
     if (item.workOrderId) {
       try {
-        href = resolveCorePageLocation(pages, rentalWorkOrderLocation(item.workOrderId));
+        const path = resolveCorePageLocation(pages, rentalWorkOrderLocation(item.workOrderId));
+        target = resolvePage(`${path}${target?.search ?? ""}${target?.hash ?? ""}`);
       } catch {
         return null;
       }
     }
-    const target = resolvePage(href);
     if (!target || !canAccessPage(target.page.definition.id, auth)) return null;
     return target.href;
   }
