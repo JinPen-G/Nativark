@@ -6,7 +6,7 @@
 
 构建前置沿 Rental API 的原链编译正式 OpenAPI 出口，先按[API 构建说明](../rental-api/README.md)准备同一所选 Client。API 包仅作为开发依赖，在构建配置中提供 Rental 原接口的有限许可；新 Core 仍使用自己的命名空间。
 
-先在宿主准备锁文件对应的依赖与 Rental 标准包，将 `CORE_DEPLOYMENT_LOCK` 指向与 API 相同的固定部署锁。构建入口核对所选包、清单与公共版本，要求锁内包含一个 Rental Core，随后向应用提供 `virtual:core-manifest`。安装包核验通过 `coreDeploymentHostVersions(lock)` 读取底座和显式选装数据能力的同一版本视图。[构建配置](vite.config.ts) · [标准包核验](../../packages/core-contracts/src/install.ts) · [宿主版本视图](../../packages/core-contracts/src/data-capability.ts)
+先在宿主准备锁文件对应的依赖与 Rental 标准包，将 `CORE_DEPLOYMENT_LOCK` 指向与 API 相同的固定部署锁。锁内须包含一个 Rental Core。构建先核对底座、Core 和显式选装数据能力的兼容版本及数据前置，再检查实际标准包字节、来源与摘要，随后向应用提供 `virtual:core-manifest`。这些检查通过 `coreDeploymentHostVersions(lock)` 使用同一版本视图。[构建配置](vite.config.ts) · [标准包核验](../../packages/core-contracts/src/install.ts) · [宿主版本视图](../../packages/core-contracts/src/data-capability.ts)
 
 ```powershell
 npm run lint -w @rental-os/rental-admin

@@ -6,7 +6,12 @@ import { fileURLToPath } from "node:url";
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
-import { CoreDeploymentLockSchema, coreDeploymentHostVersions } from "@rental-os/core-contracts";
+import {
+  CoreDeploymentLockSchema,
+  checkCoreCombination,
+  checkPlatformDataCapabilities,
+  coreDeploymentHostVersions,
+} from "@rental-os/core-contracts";
 import { requireCorePackagePin } from "@rental-os/core-contracts/install";
 import { rentalHostLegacyApiRoutes } from "@rental-os/rental-api/openapi";
 import { platformAdminVite } from "@rental-os/platform-admin/vite";
@@ -19,9 +24,17 @@ export default defineConfig(({ mode }) => {
   const lock = CoreDeploymentLockSchema.parse(JSON.parse(readFileSync(process.env.CORE_DEPLOYMENT_LOCK, "utf8")));
   if (lock.cores.length !== 1 || lock.cores[0].manifest.id !== "rental")
     throw new Error("Rental 后台只装配所选 Rental Core");
+  const host = coreDeploymentHostVersions(lock);
+  const issues = [
+    ...checkPlatformDataCapabilities(lock),
+    ...checkCoreCombination(lock.cores.map(pin => pin.manifest), host).issues,
+  ];
+  if (issues.length) {
+    throw new Error(issues.map(issue => `${issue.field} ${issue.message}`).join("\n"));
+  }
   const require = createRequire(import.meta.url);
   const root = resolve(dirname(require.resolve("@rental-os/rental-core")), "..");
-  const { manifest } = requireCorePackagePin(root, lock.cores[0], coreDeploymentHostVersions(lock), rentalHostLegacyApiRoutes());
+  const { manifest } = requireCorePackagePin(root, lock.cores[0], host, rentalHostLegacyApiRoutes());
   const platform = platformAdminVite();
   const virtual = "\0selected-rental-manifest";
   return {

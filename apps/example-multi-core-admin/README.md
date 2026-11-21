@@ -7,7 +7,7 @@
 构建前置沿 Rental API 的原链编译同版 OpenAPI 出口，先按[API 构建说明](../rental-api/README.md)准备所选 Client。Rental API 为开发依赖，许可只在构建时用于 Rental 原接口；工单包仍须满足自己的路由命名空间。
 
 1. 按宿主锁文件准备依赖与 Rental、`example-tickets` 两个固定标准包，API 使用相同的包版本、来源与摘要。
-2. 将 `CORE_DEPLOYMENT_LOCK` 指向同一固定部署锁，`cores` 显式包含这两个包。构建逐包校验实际字节，并核对底座及所选数据能力的 `coreDeploymentHostVersions`。[构建入口](vite.config.ts) · [包校验](../../packages/core-contracts/src/install.ts) · [部署合同](../../packages/core-contracts/src/update.ts)
+2. 将 `CORE_DEPLOYMENT_LOCK` 指向同一固定部署锁，`cores` 显式包含这两个包。构建先检查底座、两个 Core 和显式选装数据能力的兼容版本及数据前置，再逐包校验实际字节、来源与摘要。全部检查通过 `coreDeploymentHostVersions` 使用同一版本视图。[构建入口](vite.config.ts) · [包校验](../../packages/core-contracts/src/install.ts) · [部署合同](../../packages/core-contracts/src/update.ts)
 3. 在具备对应环境的工程中执行 `npm run build -w @rental-os/example-multi-core-admin`，本地开发使用 `npm run dev -w @rental-os/example-multi-core-admin`。Web API 基址由 `VITE_API_BASE_URL` 提供，默认 `/api`，开发端口默认 `5179`。
 4. SaaS 管理员授权租户使用两个 Core，租户管理员通过公共成员 Core 分配页分别分配成员。每个 Core 继续校验自己的业务权限和就绪条件。[授权页面](../../packages/platform-admin/src/CoreAccessPage.tsx)
 
