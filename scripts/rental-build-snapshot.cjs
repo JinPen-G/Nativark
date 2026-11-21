@@ -10,7 +10,8 @@ const selections = ['LICENSE', 'package.json', 'package-lock.json', 'tsconfig.ba
   'packages/platform-core-host', 'packages/rental-core', 'packages/shared', 'packages/web-client',
   'packages/platform-admin', 'packages/ui-arc', 'packages/ui-motiq', 'packages/ai-native-data',
   'apps/platform-api', 'apps/rental-api', 'apps/rental-admin', 'apps/tenant-website', 'apps/enterprise-portal',
-  'apps/admin', 'apps/miniprogram', 'apps/staff-miniprogram', 'scripts/miniprogram-shared-types.cjs'];
+  'apps/admin', 'apps/miniprogram', 'apps/staff-miniprogram',
+  'scripts/miniprogram-shared-types.cjs', 'scripts/rental-client-vite.ts'];
 
 function readBuildSnapshot(commit) {
   if (!/^[a-f0-9]{40}$/u.test(commit)) throw Error('构建快照须使用完整固定提交 SHA');

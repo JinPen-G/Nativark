@@ -251,13 +251,23 @@ function verifyConsumers(build) {
   const { directory, files } = build.installation;
   for (const [file, bytes] of files) build.virtual.set(directory + '/' + file, bytes.toString('utf8'));
   build.packages.set('@rental-os/rental-core', { directory, metadata: JSON.parse(files.get('package.json').toString()) });
+  // These projects include their Node-side Vite configs. The OpenAPI export
+  // used to validate the package pin carries declarations from the Rental
+  // host. Resolve them against that same selected Client, never a default one.
+  const viteProjects = ['enterprise-portal', 'rental-admin'].map(app => slash(path.join(root, 'apps', app)));
+  const rentalClient = build.selectedClients.get(slash(path.join(root, 'apps/rental-api')));
+  assert(rentalClient, '构建配置须沿 Rental 宿主所选 Client 解析服务端声明');
+  for (const project of viteProjects) build.selectedClients.set(project, rentalClient);
   try {
     for (const app of ['miniprogram', 'staff-miniprogram', 'tenant-website', 'enterprise-portal', 'rental-admin']) {
       const { program } = build.compile(`apps/${app}/tsconfig.json`);
       for (const source of program.getSourceFiles()) assert(!slash(source.fileName).startsWith(original.directory + '/'),
         '客户端退回作者 Rental 目录：' + source.fileName);
     }
-  } finally { build.packages.set('@rental-os/rental-core', original); }
+  } finally {
+    for (const project of viteProjects) build.selectedClients.delete(project);
+    build.packages.set('@rental-os/rental-core', original);
+  }
   console.log(JSON.stringify({ consumers: 5, rentalSource: 'installed-archive-only', diskOutputs: 0 }));
 }
 
