@@ -13,6 +13,7 @@ import { ROUTES, buildUrl, confirmDialog, navigate, redirect, safeRoute, toast }
  * 注册（现有契约：验证码挑战 → 一次性证明 → 注册）。这是密码账号的兼容路径；
  * 微信手机号主路径就绪后，新用户不需要来这里设密码。
  * 先保存原请求引用，丢应答或重启沿原键恢复，重新获取须用户明确选择。
+ * 验证后的证明与完整注册输入只保留在当前页面；注册失应答重试原提交，不再次验证验证码。
  * 验证码有效期、重发时点由服务端返回；开发环境的 developmentCode 只用于本机联调提示，不进日志。
  */
 interface RegisterData {
@@ -69,6 +70,8 @@ Page({
   challengeGeneration: 0,
   unloaded: false,
   registrationKey: "" as string,
+  registrationRequest: undefined as { scope: string; generation: number; input: Parameters<typeof registerPersonal>[0] } | undefined,
+  registering: false,
   countdown: undefined as number | undefined,
 
   onLoad(options: Record<string, string | undefined>) {
@@ -82,6 +85,8 @@ Page({
   onUnload() {
     this.unloaded = true;
     this.challengeGeneration++;
+    this.registrationRequest = undefined;
+    this.registrationKey = "";
     if (this.countdown) clearInterval(this.countdown);
   },
 
@@ -101,6 +106,8 @@ Page({
       this.challengeGeneration++;
       this.challengeId = "";
       this.challengeExpiresAt = "";
+      this.registrationRequest = undefined;
+      this.registrationKey = "";
       this.startCountdown(0);
       this.setData({ code: "", developmentCode: "", deliveryMode: "", step: "form" });
     }
@@ -178,6 +185,8 @@ Page({
         writeRequiredStorage(scope, key);
         this.challengeId = "";
         this.challengeExpiresAt = "";
+        this.registrationRequest = undefined;
+        this.registrationKey = "";
         this.setData({ code: "", developmentCode: "", deliveryMode: "" });
       }
       const challenge = await createRegistrationChallenge({ method: "sms", identifier, idempotencyKey: key, serviceCode });
@@ -222,67 +231,83 @@ Page({
   },
 
   async onSubmit() {
-    if (this.data.submitting) return;
-    if (!this.challengeId || this.challengeScope !== this.challengeStorageKey() ||
-      !Number.isFinite(Date.parse(this.challengeExpiresAt)) || Date.parse(this.challengeExpiresAt) <= serverNow()) {
+    if (this.registering || this.data.submitting) return;
+    const generation = this.challengeGeneration;
+    const scope = this.challengeStorageKey();
+    const current = () => !this.unloaded && this.challengeGeneration === generation && this.challengeStorageKey() === scope;
+    let original = this.registrationRequest;
+    if (original?.scope !== scope || original.generation !== generation) {
+      original = undefined;
+      this.registrationRequest = undefined;
+      this.registrationKey = "";
+    }
+    if (!original && (!this.challengeId || this.challengeScope !== scope ||
+      !Number.isFinite(Date.parse(this.challengeExpiresAt)) || Date.parse(this.challengeExpiresAt) <= serverNow())) {
       this.setData({ step: "form", formError: "原验证码已失效，请明确选择重新获取。" });
       return;
     }
-    if (!/^\d{6}$/.test(this.data.code.trim())) {
+    if (!original && !/^\d{6}$/.test(this.data.code.trim())) {
       this.setData({ errors: { ...this.data.errors, code: "请输入 6 位验证码" } });
       return;
     }
+    this.registering = true;
     this.setData({ submitting: true, formError: "" });
-    const generation = this.challengeGeneration;
-    const scope = this.challengeStorageKey();
-    let registered: Awaited<ReturnType<typeof registerPersonal>> | undefined;
     try {
-      const verified = await verifyRegistrationChallenge(this.challengeId, this.data.code.trim());
-      if (this.unloaded || this.challengeGeneration !== generation || this.challengeStorageKey() !== scope) {
-        if (!this.unloaded) this.setData({ submitting: false });
+      let registered: Awaited<ReturnType<typeof registerPersonal>>;
+      try {
+        if (!original) {
+          // 在验证等待前固定用户输入；证明取得后先保留原提交，再派发注册。
+          const input = {
+            name: this.data.name.trim(),
+            phone: this.normalizedPhone(),
+            email: this.data.email.trim() || undefined,
+            password: this.data.password,
+            consent: {
+              userAgreementVersion: this.data.agreementVersion || "unversioned",
+              privacyPolicyVersion: this.data.privacyVersion || "unversioned",
+              agreedAt: new Date().toISOString()
+            },
+            serviceCode: preferredServiceCode()
+          };
+          const verified = await verifyRegistrationChallenge(this.challengeId, this.data.code.trim());
+          if (!current()) return;
+          this.registrationKey ||= newKey("register");
+          original = { scope, generation, input: { ...input, verificationToken: verified.verificationToken, idempotencyKey: this.registrationKey } };
+          this.registrationRequest = original;
+        }
+        registered = await registerPersonal(original.input);
+        if (!current()) return;
+      } catch (error) {
+        if (!current()) return;
+        const presented = describeError(error);
+        if (!original && (presented.code === "BAD_REQUEST" || presented.code === "CONFLICT")) {
+          this.setData({ errors: { ...this.data.errors, code: presented.message }, formError: "" });
+        } else {
+          this.setData({ formError: presented.message });
+        }
         return;
       }
-      if (!this.registrationKey) this.registrationKey = newKey("register");
-      registered = await registerPersonal({
-        name: this.data.name.trim(),
-        phone: this.normalizedPhone(),
-        email: this.data.email.trim() || undefined,
-        password: this.data.password,
-        verificationToken: verified.verificationToken,
-        consent: {
-          userAgreementVersion: this.data.agreementVersion || "unversioned",
-          privacyPolicyVersion: this.data.privacyVersion || "unversioned",
-          agreedAt: new Date().toISOString()
-        },
-        idempotencyKey: this.registrationKey,
-        serviceCode: preferredServiceCode()
-      });
-    } catch (error) {
-      const presented = describeError(error);
-      if (presented.code === "BAD_REQUEST" || presented.code === "CONFLICT") {
-        this.setData({ errors: { ...this.data.errors, code: presented.message }, formError: "" });
-      } else {
-        this.setData({ formError: presented.message });
+
+      // 注册已完成后只沿原输入自动登录，失败引导登录，不重新验证或另建注册。
+      try {
+        const session = await loginWithPassword({ loginIdentifier: original.input.phone, password: original.input.password, serviceCode: original.input.serviceCode });
+        if (!current()) return;
+        adoptSession(session, original.input.serviceCode ?? preferredServiceCode(), "register");
+        if (registered.membershipStatus === "pending_activation") {
+          toast("注册成功，会员资料等待商户审核", { duration: 3000 });
+          redirect(ROUTES.me);
+        } else {
+          toast("注册成功", { icon: "success" });
+          redirect(this.redirectTo);
+        }
+      } catch {
+        if (!current()) return;
+        toast("注册已完成，请使用手机号和密码登录", { duration: 3000 });
+        redirect(buildUrl(ROUTES.login, { redirect: this.redirectTo }));
       }
-      this.setData({ submitting: false });
-      return;
-    }
-    // 注册已在服务端完成：后续自动登录失败不能让用户重新提交注册（验证码已消费），改为引导去登录。
-    try {
-      const session = await loginWithPassword({ loginIdentifier: this.normalizedPhone(), password: this.data.password, serviceCode: preferredServiceCode() });
-      adoptSession(session, preferredServiceCode(), "register");
-      if (registered.membershipStatus === "pending_activation") {
-        toast("注册成功，会员资料等待商户审核", { duration: 3000 });
-        redirect(ROUTES.me);
-      } else {
-        toast("注册成功", { icon: "success" });
-        redirect(this.redirectTo);
-      }
-    } catch {
-      toast("注册已完成，请使用手机号和密码登录", { duration: 3000 });
-      redirect(buildUrl(ROUTES.login, { redirect: this.redirectTo }));
     } finally {
-      this.setData({ submitting: false });
+      this.registering = false;
+      if (!this.unloaded) this.setData({ submitting: false });
     }
   },
 

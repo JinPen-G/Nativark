@@ -16,6 +16,7 @@ import {
 
 // 登录与注册是两件事、两个入口：登录页只留「验证码 / 密码」两种登录方式，
 // 注册是登录卡下方「还没有账号？去注册」切到的独立视图（含「已有账号？去登录」返回）。
+// 已验证注册的完整输入仅驻留当前页面；失应答重试原提交，证明和密码不进入存储。
 type View = "login" | "register";
 type LoginMode = "sms" | "password";
 
@@ -81,6 +82,7 @@ export function LoginPage() {
     requestContext.current = { scope, generation: requestContext.current.generation + 1 };
   const timer = useRef<number | null>(null);
   const registrationKey = useRef<string | null>(null);
+  const registrationRequest = useRef<{ scope: string; generation: number; input: Parameters<typeof authApi.register>[0] } | null>(null);
 
   useEffect(() => {
     if (isAuthenticated) returnToTarget();
@@ -91,6 +93,8 @@ export function LoginPage() {
       return () => {
         active.current = false;
         requestContext.current.generation++;
+        registrationRequest.current = null;
+        registrationKey.current = null;
         if (timer.current) window.clearInterval(timer.current);
       };
     },
@@ -136,6 +140,8 @@ export function LoginPage() {
     if (timer.current) window.clearInterval(timer.current);
   }, [tenantCode]);
   useEffect(() => {
+    registrationRequest.current = null;
+    registrationKey.current = null;
     setChallengeId(null);
     challengeExpiry.current = null;
     setDevCode(null);
@@ -200,6 +206,8 @@ export function LoginPage() {
         if (readChallengeKey(scope) !== key) throw new Error(en
           ? "The original request could not be saved. The code request was stopped."
           : "无法保留原请求引用，未派发验证码请求。");
+        registrationRequest.current = null;
+        registrationKey.current = null;
         setChallengeId(null);
         challengeExpiry.current = null;
         setCode("");
@@ -254,48 +262,50 @@ export function LoginPage() {
     setPending(true);
     const generation = requestContext.current.generation;
     const current = () => active.current && requestContext.current.generation === generation;
+    let original = registrationRequest.current;
+    if (original?.scope !== scope || original.generation !== generation) original = null;
     try {
-      if (needsCode && (!challengeId || !challengeExpiry.current || !Number.isFinite(Date.parse(challengeExpiry.current)) || Date.parse(challengeExpiry.current) <= Date.now()))
+      if (needsCode && !(isRegister && original) && (!challengeId || !challengeExpiry.current || !Number.isFinite(Date.parse(challengeExpiry.current)) || Date.parse(challengeExpiry.current) <= Date.now()))
         throw new Error(en ? "Check the original request or get a new code before continuing."
           : "请先核对原请求或重新获取验证码。");
       if (isRegister) {
-        if (!canRegister || !userAgreement || !privacyPolicy)
-          throw new Error(
-            en
-              ? "The store must provide current terms before registration."
-              : "商户需提供当前生效的协议后才能注册。",
-          );
-        if (!phoneValid(phone)) throw new Error(t("requiredPhone"));
-        if (!name.trim()) throw new Error(t("requiredName"));
-        if (password.length < 8) throw new Error(t("loginPasswordRule"));
-        if (!agree) throw new Error(t("loginNeedAgree"));
-        if (!challengeId) throw new Error(t("loginNeedCode"));
-        const verified = await authApi.verifyChallenge(
-          challengeId,
-          code.trim(),
-        );
-        if (!current()) return;
-        registrationKey.current ??= `reg-${crypto.randomUUID()}`;
-        const registration = await authApi.register({
-          tenantCode,
-          name: name.trim(),
-          phone: phone.trim(),
-          password,
-          verificationToken: verified.verificationToken,
-          idempotencyKey: registrationKey.current,
-          consent: {
-            userAgreementVersion: userAgreement.version,
-            privacyPolicyVersion: privacyPolicy.version,
-            agreedAt: new Date().toISOString(),
-          },
-        });
+        if (!original) {
+          if (!canRegister || !userAgreement || !privacyPolicy)
+            throw new Error(
+              en
+                ? "The store must provide current terms before registration."
+                : "商户需提供当前生效的协议后才能注册。",
+            );
+          if (!phoneValid(phone)) throw new Error(t("requiredPhone"));
+          if (!name.trim()) throw new Error(t("requiredName"));
+          if (password.length < 8) throw new Error(t("loginPasswordRule"));
+          if (!agree) throw new Error(t("loginNeedAgree"));
+          if (!challengeId) throw new Error(t("loginNeedCode"));
+          const input = {
+            tenantCode,
+            name: name.trim(),
+            phone: phone.trim(),
+            password,
+            consent: {
+              userAgreementVersion: userAgreement.version,
+              privacyPolicyVersion: privacyPolicy.version,
+              agreedAt: new Date().toISOString(),
+            },
+          };
+          const verified = await authApi.verifyChallenge(challengeId, code.trim());
+          if (!current()) return;
+          registrationKey.current ??= `reg-${crypto.randomUUID()}`;
+          original = { scope, generation, input: { ...input, verificationToken: verified.verificationToken, idempotencyKey: registrationKey.current } };
+          registrationRequest.current = original;
+        }
+        const registration = await authApi.register(original.input);
         if (!current()) return;
         if (!registration.customerId) throw new Error(t("loginFailed"));
         if (methods.includes("password")) {
           await authApi.passwordLogin({
             tenantCode,
-            loginIdentifier: phone.trim(),
-            password,
+            loginIdentifier: original.input.phone,
+            password: original.input.password,
           });
         } else {
           switchView("login");

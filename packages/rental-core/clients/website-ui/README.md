@@ -49,6 +49,8 @@ createRoot(document.getElementById("root")!).render(
 
 只有原状态为待验证、期限有效且投递方式已确认的挑战可进入验证。未知投递、过期、失败与已消费回执显示相应恢复入口。当前商户／手机号／用途代次变化或卸载会隔离迟到结果，快速重复点击沿同一执行占用控制；恢复原请求保留用户已输入验证码。
 
+注册页取得证明后，先在当前页面保留完整原注册输入，再提交注册。提交失应答后的再次提交沿原证明、输入、同意时间和请求键核对，不重复验证已消费的验证码。明确重新获取验证码或改变商户／手机号／用途会清除旧页面提交；证明和密码不写入存储。注册已完成后的自动登录也使用原注册资料。
+
 ## 路由
 
 `/`、`/products`、`/category/:categoryId`、`/product/:productId`、`/booking/:productId`、`/login`、`/account`、`/orders`、`/orders/:orderId`、`/about`、`/guide`、`/help`、`/agreement`、`/privacy`和缺失页 `*`。
