@@ -31,6 +31,8 @@ const authApi = createRentalWebsiteAuthClient({
 
 `createChallenge` 返回原 `ClientRegistrationChallengeResponse`，页面消费原状态、期限、投递方式和服务端冷却。同一请求的恢复保留原键，`provider_pending`、过期或终态回执由页面明确分流。原期限和未知投递不能触发自动换键。
 
+`smsLogin(input, isCurrent?)` 和 `passwordLogin(input, isCurrent?)` 的第二参数是页面的当前请求检查。公共会话协调器在取得原锁及返回后核对该检查和本人代次，再采用服务端会话；页面失效不派发或采用旧请求。它只保护结果归属，身份仍由服务端验证。未传该参数的原消费者保留原调用方式，短信证明不因此获得重放能力。
+
 方法 → 原客户 HTTP → 原客户认证／注册服务 → 当前租户、渠道、空间、资格及供应商裁定。验证码证明的用途、消费与幂等由原服务端校验。[客户 HTTP](../../../src/http-client.controller.ts) · [客户认证](../../../src/mysql-client-auth.ts)
 
 ## 本人资料接入

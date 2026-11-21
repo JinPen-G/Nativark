@@ -43,11 +43,11 @@ export function createRentalWebsiteAuthClient(ports: RentalWebsiteAuthPorts) {
         `/auth/registration/challenges/${encodeURIComponent(challengeId)}/verify`, { code },
       );
     },
-    smsLogin(input: Pick<ClientSmsLoginRequest, "tenantCode" | "loginIdentifier" | "verificationToken">) {
-      return ports.customerLogin(input.tenantCode, ports.clientV1, "/auth/sms-login", input);
+    smsLogin(input: Pick<ClientSmsLoginRequest, "tenantCode" | "loginIdentifier" | "verificationToken">, isCurrent?: () => boolean) {
+      return ports.customerLogin(input.tenantCode, ports.clientV1, "/auth/sms-login", input, isCurrent);
     },
-    passwordLogin(input: Pick<ClientMembershipLoginRequest, "tenantCode" | "loginIdentifier" | "password">) {
-      return ports.customerLogin(input.tenantCode, ports.clientV1, "/auth/login", input);
+    passwordLogin(input: Pick<ClientMembershipLoginRequest, "tenantCode" | "loginIdentifier" | "password">, isCurrent?: () => boolean) {
+      return ports.customerLogin(input.tenantCode, ports.clientV1, "/auth/login", input, isCurrent);
     },
     register(input: RegistrationInput) {
       return ports.postPublic<RegistrationResult>("/auth/register", input);

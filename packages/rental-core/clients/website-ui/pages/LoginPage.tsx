@@ -17,6 +17,7 @@ import {
 // 登录与注册是两件事、两个入口：登录页只留「验证码 / 密码」两种登录方式，
 // 注册是登录卡下方「还没有账号？去注册」切到的独立视图（含「已有账号？去登录」返回）。
 // 已验证注册的完整输入仅驻留当前页面；失应答重试原提交，证明和密码不进入存储。
+// 短信登录没有原会话回放接口；派发后不重新验证原挑战，迟到结果不采用会话。
 type View = "login" | "register";
 type LoginMode = "sms" | "password";
 
@@ -77,12 +78,14 @@ export function LoginPage() {
   const active = useRef(true);
   const operationPending = useRef(false);
   const scope = `rental-os:website-challenge:${JSON.stringify([tenantCode, view, phone.trim()])}`;
-  const requestContext = useRef({ scope, generation: 0 });
-  if (requestContext.current.scope !== scope)
-    requestContext.current = { scope, generation: requestContext.current.generation + 1 };
+  const pageScope = JSON.stringify([scope, view === "login" ? loginMode : view, redirect]);
+  const requestContext = useRef({ scope: pageScope, generation: 0 });
+  if (requestContext.current.scope !== pageScope)
+    requestContext.current = { scope: pageScope, generation: requestContext.current.generation + 1 };
   const timer = useRef<number | null>(null);
   const registrationKey = useRef<string | null>(null);
   const registrationRequest = useRef<{ scope: string; generation: number; input: Parameters<typeof authApi.register>[0] } | null>(null);
+  const submittedSmsChallenge = useRef<string | null>(null);
 
   useEffect(() => {
     if (isAuthenticated) returnToTarget();
@@ -95,6 +98,7 @@ export function LoginPage() {
         requestContext.current.generation++;
         registrationRequest.current = null;
         registrationKey.current = null;
+        submittedSmsChallenge.current = null;
         if (timer.current) window.clearInterval(timer.current);
       };
     },
@@ -142,6 +146,7 @@ export function LoginPage() {
   useEffect(() => {
     registrationRequest.current = null;
     registrationKey.current = null;
+    submittedSmsChallenge.current = null;
     setChallengeId(null);
     challengeExpiry.current = null;
     setDevCode(null);
@@ -208,6 +213,7 @@ export function LoginPage() {
           : "无法保留原请求引用，未派发验证码请求。");
         registrationRequest.current = null;
         registrationKey.current = null;
+        submittedSmsChallenge.current = null;
         setChallengeId(null);
         challengeExpiry.current = null;
         setCode("");
@@ -264,7 +270,11 @@ export function LoginPage() {
     const current = () => active.current && requestContext.current.generation === generation;
     let original = registrationRequest.current;
     if (original?.scope !== scope || original.generation !== generation) original = null;
+    let smsDispatched = false;
     try {
+      if (!isRegister && loginMode === "sms" && submittedSmsChallenge.current !== null && submittedSmsChallenge.current === challengeId)
+        throw new Error(en ? "This code has already been verified. Check your current session, use password sign-in, or explicitly get a new code."
+          : "该验证码已验证过，请检查当前登录状态、改用密码登录，或明确重新获取验证码。");
       if (needsCode && !(isRegister && original) && (!challengeId || !challengeExpiry.current || !Number.isFinite(Date.parse(challengeExpiry.current)) || Date.parse(challengeExpiry.current) <= Date.now()))
         throw new Error(en ? "Check the original request or get a new code before continuing."
           : "请先核对原请求或重新获取验证码。");
@@ -306,7 +316,7 @@ export function LoginPage() {
             tenantCode,
             loginIdentifier: original.input.phone,
             password: original.input.password,
-          });
+          }, current);
         } else {
           switchView("login");
           toast.success(
@@ -321,7 +331,7 @@ export function LoginPage() {
           tenantCode,
           loginIdentifier: phone.trim(),
           password,
-        });
+        }, current);
       } else {
         if (!phoneValid(phone)) throw new Error(t("requiredPhone"));
         if (!challengeId) throw new Error(t("loginNeedCode"));
@@ -329,15 +339,21 @@ export function LoginPage() {
           challengeId,
           code.trim(),
         );
+        // 登录证明只能消费一次，现有服务端不提供按证明回放登录结果。
+        submittedSmsChallenge.current = challengeId;
         if (!current()) return;
+        smsDispatched = true;
         await authApi.smsLogin({
           tenantCode,
           loginIdentifier: phone.trim(),
           verificationToken: verified.verificationToken,
-        });
+        }, current);
       }
     } catch (e: any) {
-      if (current()) setError(e?.message || t("loginFailed"));
+      if (current()) setError(smsDispatched && !(e?.status >= 400 && e?.status < 500)
+        ? en ? "The SMS sign-in result is unconfirmed. Check your current session or use password sign-in; do not verify the same code again."
+          : "本次短信登录结果未确认，请检查当前登录状态或改用密码登录，不要重复验证原验证码。"
+        : e?.message || t("loginFailed"));
     } finally {
       operationPending.current = false;
       if (active.current) setPending(false);
