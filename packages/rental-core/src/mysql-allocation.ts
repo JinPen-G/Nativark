@@ -1025,6 +1025,8 @@ export class RentalAllocationService<TTransaction extends RentalAllocationTransa
             )) {
               if (this.stopping) break;
               const order = await this.scanOrderInScope(row.tenantId, candidate.id, workerScope);
+              // 扫描等待也计入排空；返回后已退出就不能开始下一段配货事务。
+              if (this.stopping) break;
               if (
                 !order ||
                 order.status !== RentalCoreOrderStatus.Reserved ||
@@ -1080,6 +1082,8 @@ export class RentalAllocationService<TTransaction extends RentalAllocationTransa
                   { isolationLevel: "ReadCommitted" },
                 );
               } catch (error) {
+                // 已进入的事务已排空，退出期间保留原结果，不能另开失败写入事务。
+                if (this.stopping) break;
                 await this.prisma.$transaction(async (tx) => {
                   // 当前收尾准入失效后不能为这次自动执行写入失败事实；保留原未知结果供核对。
                   await this.facts.lockOrder(row.tenantId, order.id, tx);

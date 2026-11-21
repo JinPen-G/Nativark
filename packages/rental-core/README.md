@@ -289,6 +289,8 @@ HTTP入口从 `/http-workspace-capabilities`、`/http-staff-payments` 导入；`
 
 配货从 `@rental-os/rental-core/mysql-allocation` 接入，同一数据库、事实仓储和核心实例负责原资源与数量判定。`manage` 使用调用方原事务；办理锁可参加已有事务，释放/解锁仍沿原善后权限。宿主只登记一个配货provider，继承原初始化/销毁钩子，扫描每60秒运行并保留原防重；实际自动变更只在管理员开启时执行。可选失败事件在原聚合写入后参加同一事务；`readRecordedFulfillmentIssue` 只投影原已记录来源，不重新扫描或提供新执行权。[原Nest接线](../../apps/api/src/modules/rental-core/rental-allocation.service.ts) · [原配货验证](../../tests/rental-allocation.test.cjs) · [交接锁验证](../../tests/staff-operation-lock.test.cjs)
 
+停止作业后，原订单扫描返回时再次检查停止标记，阻止开始新的配货事务；已进入的事务等待原结果完成。异常收口同样在新失败事务前检查停止状态，保留已提交的订单、分配修订与原收据。[扫描与排空](src/mysql-allocation.ts) · [原作业恢复验证](../../tests/rental-worker-recovery.test.cjs)
+
 工作台规则从 `@rental-os/rental-core/workbench` 复用，输入由原Controller按当前租户/空间、订单/工单权限和可见订单过滤。退款待办使用原资金依据，通知失败只关联可见父订单，不从消息文本或待办链接扩展读权。[原工作台接点](../../apps/api/src/modules/rental-core/rental-core.controller.ts) · [原工作台验证](../../tests/rental-workbench-todos.test.cjs)
 
 报表从 `@rental-os/rental-core/mysql-reports` 创建，宿主仅提供本表的只读方法，原Auth/ALS供给当前地点及数据范围。每次查询保留租户/空间、草稿排除、订单归属和地点过滤；仅本人范围不能读取混合空间库存快照的整份报表。AI使用固定 `getBoundedOperationReport`，数量或分页证据冲突明确拒绝，不能把部分统计当总数。CSV从 `/report-csv` 复用，币种、筛选和历史口径说明跟随同一结果，导出不重新查询。[原报表Nest接点](../../apps/api/src/modules/rental-core/rental-workspace-report.repository.ts) · [原导出接点](../../apps/api/src/modules/rental-core/rental-workspace-report.csv.ts)
