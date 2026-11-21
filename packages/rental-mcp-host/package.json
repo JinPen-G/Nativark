@@ -131,6 +131,30 @@
     "./original-mcp-subject-management": {
       "types": "./dist/original-mcp-subject-management.d.ts",
       "default": "./dist/original-mcp-subject-management.js"
+    },
+    "./original-mcp-order-status-resources": {
+      "types": "./dist/original-mcp-order-status-resources.d.ts",
+      "default": "./dist/original-mcp-order-status-resources.js"
+    },
+    "./original-mcp-availability-resources": {
+      "types": "./dist/original-mcp-availability-resources.d.ts",
+      "default": "./dist/original-mcp-availability-resources.js"
+    },
+    "./original-mcp-availability-read-authority": {
+      "types": "./dist/original-mcp-availability-read-authority.d.ts",
+      "default": "./dist/original-mcp-availability-read-authority.js"
+    },
+    "./original-mcp-request-authority": {
+      "types": "./dist/original-mcp-request-authority.d.ts",
+      "default": "./dist/original-mcp-request-authority.js"
+    },
+    "./original-mcp-request-participant": {
+      "types": "./dist/original-mcp-request-participant.d.ts",
+      "default": "./dist/original-mcp-request-participant.js"
+    },
+    "./original-mcp-request-save-audit": {
+      "types": "./dist/original-mcp-request-save-audit.d.ts",
+      "default": "./dist/original-mcp-request-save-audit.js"
     }
   },
   "typesVersions": {
@@ -221,6 +245,24 @@
       ],
       "original-mcp-subject-management": [
         "dist/original-mcp-subject-management.d.ts"
+      ],
+      "original-mcp-order-status-resources": [
+        "dist/original-mcp-order-status-resources.d.ts"
+      ],
+      "original-mcp-availability-resources": [
+        "dist/original-mcp-availability-resources.d.ts"
+      ],
+      "original-mcp-availability-read-authority": [
+        "dist/original-mcp-availability-read-authority.d.ts"
+      ],
+      "original-mcp-request-authority": [
+        "dist/original-mcp-request-authority.d.ts"
+      ],
+      "original-mcp-request-participant": [
+        "dist/original-mcp-request-participant.d.ts"
+      ],
+      "original-mcp-request-save-audit": [
+        "dist/original-mcp-request-save-audit.d.ts"
       ]
     }
   },

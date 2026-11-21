@@ -21,6 +21,8 @@
 | Core 与业务读取 | 根出口的 `createOriginalMcpCoreAccess`、`/original-mcp-catalog-read-tools` | 复验成员、绑定、期限、物理数据与部署停新，消费原 Guard 和业务字段来源 |
 | Web 管理 | [grant](src/original-mcp-grant-control-plane.ts)、[admission](src/original-mcp-admission-control-plane.ts)、[review](src/original-mcp-review-control-plane.ts)、[subject](src/original-mcp-subject-control-plane.ts) | 按原 Web 身份办理当前租户/平台的授权、审查和主体管理 |
 | 原目标与收据 | [catalog goal](src/original-mcp-catalog-goal-control-plane.ts)、[目标验证](src/original-mcp-catalog-goal-intent-authority.ts)、[目录资源](src/original-mcp-catalog-resources.ts) | 沿原操作、原修订与当前授权读取和推进目标 |
+| 原请求保存与核对 | `/original-mcp-request-authority` 的 [资源权威](src/original-mcp-request-authority.ts)、`/original-mcp-request-participant` 的 [参加者](src/original-mcp-request-participant.ts)、`/original-mcp-request-save-audit` 的 [关联审计](src/original-mcp-request-save-audit.ts) | 在调用方同一 Native 内保存与审计；提交不明时只核对原键，不创建 Task 或重发操作 |
+| 可用量与订单历史 | `/original-mcp-availability-read-authority` 的 [专属授权](src/original-mcp-availability-read-authority.ts)、`/original-mcp-availability-resources` 的 [库存事实](src/original-mcp-availability-resources.ts)、`/original-mcp-order-status-resources` 的 [订单资源](src/original-mcp-order-status-resources.ts) | 复验原 POST / GET Guard、scope、当前主体和同一事务；历史报价、检查、款项的缺项沿原投影表示 |
 | 空间管理 | `/workspace-management` 的 [权威适配](src/workspace-management.ts) | 从宿主的真实账号仓储、空间投影与配置，在原事务复验管理范围 |
 | 严格事务审计 | `/operation-log` 的 [OperationLogService](src/operation-log.service.ts) | 将原授权、请求、目标和绑定事件与原业务事实一并提交 |
 

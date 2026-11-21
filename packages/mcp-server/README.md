@@ -118,7 +118,7 @@ public-client 登记 / 审查由原当前 SaaS 管理身份办理。通知与准
 
 目录与可用量读取要求部署允许新工作。保存新的原请求还须复验订阅期限。目标意图的新建、接受和采用使用同一回调内已持有的准入锁。部署停新后，原键结果、已有决定回执及拒绝操作保留原当前权限路径，不重发旧请求或新建目标。租户 Core 授权、成员分配、原角色或绑定已失效时仍拒绝该通道。必要历史与业务收尾由其已登记的原权限入口办理。
 
-准入租约只在拥有它的原消费回调内有效，后续复核或回调外不能复用。接口与验证可从 [读取上下文](../rental-mcp-host/src/original-mcp-read-context.ts)、[原请求权威](../../apps/api/src/modules/auth/original-mcp-request-authority.ts)、[目标权威](../rental-mcp-host/src/original-mcp-catalog-goal-intent-authority.ts) 和 [现有可信主体用例](../../tests/mcp-trusted-principal.test.cjs)定位。宿主选装、发布和监听分别配置，参加者本身不注册生产端点或授予业务执行权。
+准入租约只在拥有它的原消费回调内有效，后续复核或回调外不能复用。接口与验证可从 [读取上下文](../rental-mcp-host/src/original-mcp-read-context.ts)、[原请求权威](../rental-mcp-host/src/original-mcp-request-authority.ts)、[目标权威](../rental-mcp-host/src/original-mcp-catalog-goal-intent-authority.ts) 和 [现有可信主体用例](../../tests/mcp-trusted-principal.test.cjs)定位。宿主选装、发布和监听分别配置，参加者本身不注册生产端点或授予业务执行权。
 
 ## 原目标、计量与核对
 
@@ -165,11 +165,11 @@ public-client 登记 / 审查由原当前 SaaS 管理身份办理。通知与准
 | 读取或参加者 | 原入口与领域消费 |
 | --- | --- |
 | 目录 | 同 Native 原目录 GET Guard、Core 配置分页与正式目录 facts，保留 partial / cursor / configurationVersion。[资源](../rental-mcp-host/src/original-mcp-catalog-resources.ts) · [Core 运行时](../rental-core/src/mysql-core-runtime.ts) |
-| 可用性 | 原专属 scope 与 availability POST Guard，复用原履约准入、库存快照及 computeAvailability。[授权](../../apps/api/src/modules/auth/original-mcp-availability-read-authority.ts) · [资源](../../apps/api/src/modules/auth/original-mcp-availability-resources.ts) |
-| 原订单问题 | status / fees / payments / next_steps 按原请求选择消费历史订单、报价与检查，保留缺项和不可执行候选。[订单资源](../../apps/api/src/modules/auth/original-mcp-order-status-resources.ts) · [业务运行时](../rental-core/src/mysql-business-runtime.ts) |
+| 可用性 | 原专属 scope 与 availability POST Guard，复用原履约准入、库存快照及 computeAvailability。[授权](../rental-mcp-host/src/original-mcp-availability-read-authority.ts) · [资源](../rental-mcp-host/src/original-mcp-availability-resources.ts) |
+| 原订单问题 | status / fees / payments / next_steps 按原请求选择消费历史订单、报价与检查，保留缺项和不可执行候选。[订单资源](../rental-mcp-host/src/original-mcp-order-status-resources.ts) · [业务运行时](../rental-core/src/mysql-business-runtime.ts) |
 | 支付 / 退款事实 | 专用财务 Guard 与原 Native 分页，金额 / 状态来自原 PaymentRuntime，缺记录、缺资金事实保持原 unavailable / not_loaded。[固定 Guard](../../apps/api/src/common/api-auth.guard.ts) · [支付兼容入口](../../apps/api/src/modules/integrations/payment.runtime.service.ts) |
-| 原请求 scope / 政策 | canonical scope 只查已有行，订阅与当前资源 policy 在同 Native 复验。[scope](../rental-mcp-host/src/original-mcp-request-scope.ts) · [请求 authority](../../apps/api/src/modules/auth/original-mcp-request-authority.ts) |
-| 原请求保存 / 核对 | 必需同 Native association 审计，saveIn 返回 prepared / commit:not_observed，reconcileIn 按原键只读且 Task 为 not_loaded。[统一参加者](../../apps/api/src/modules/auth/original-mcp-request-participant.ts) · [保存审计](../../apps/api/src/modules/auth/original-mcp-request-save-audit.ts) |
+| 原请求 scope / 政策 | canonical scope 只查已有行，订阅与当前资源 policy 在同 Native 复验。[scope](../rental-mcp-host/src/original-mcp-request-scope.ts) · [请求 authority](../rental-mcp-host/src/original-mcp-request-authority.ts) |
+| 原请求保存 / 核对 | 必需同 Native association 审计，saveIn 返回 prepared / commit:not_observed，reconcileIn 按原键只读且 Task 为 not_loaded。[统一参加者](../rental-mcp-host/src/original-mcp-request-participant.ts) · [保存审计](../rental-mcp-host/src/original-mcp-request-save-audit.ts) |
 
 Native 读取复用原领域与仓储算法，活动 owner、当前授权及 signal 在实际派发前后检查。原 API / Core 目录和可用性明细上限 100，MCP 接点上限 50。库存用 10,001 溢出哨兵拒绝部分计算，内部完整有界事实按原算法求可用量。可用性观察与预占 / 下单分别执行，历史报价读取与当前计价分别取源。[Rental 包路线](../rental-core/README.md)
 
