@@ -502,7 +502,8 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
       const pages = locate(definition, "pages"), coreIdExpression = locate(definition, "coreId");
       if (pages && (callable.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.AsyncKeyword)
         || ts.isFunctionDeclaration(callable) && callable.asteriskToken)) { issue(callable, "Core 页面异步或延迟工厂仍需来源核对"); continue; }
-      if (pages && ts.isArrayLiteralExpression(unwrap(pages.expression)) && (unwrap(pages.expression) as ts.ArrayLiteralExpression).elements.some(ts.isSpreadElement)
+      if (pages && (ts.isArrayLiteralExpression(unwrap(pages.expression)) && (unwrap(pages.expression) as ts.ArrayLiteralExpression).elements.some(ts.isSpreadElement)
+        || ts.isCallExpression(pages.expression) && ts.isPropertyAccessExpression(pages.expression.expression) && pages.expression.expression.name.text === "map")
         && !structuralBody(callable.body)) { issue(node, "Core 页面聚合包含未支持的控制流或语句"); continue; }
       const coreIdValue = coreIdExpression && locate(coreIdExpression.expression);
       const coreId = source.value(coreIdValue?.expression);
@@ -511,13 +512,32 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
           const describePages = (expression: ts.Expression, via: ts.Node[], seen = new Set<ts.Node>()) => {
             if (seen.has(expression) || seen.size > 80) { issue(expression, "Core 页面聚合存在递归引用"); return; }
             const chain = new Set(seen).add(expression), selected = locate(expression);
-            if (!selected || !ts.isArrayLiteralExpression(selected.expression)) { issue(selected?.expression ?? expression, "Core 页面列表仍需来源核对"); return; }
+            if (!selected) { issue(expression, "Core 页面列表仍需来源核对"); return; }
+            const mapped = ts.isCallExpression(selected.expression) && ts.isPropertyAccessExpression(selected.expression.expression)
+              && selected.expression.expression.name.text === "map" ? describeRepositorySchema(source, selected.expression) : undefined;
+            const elements = ts.isArrayLiteralExpression(selected.expression) ? selected.expression.elements
+              : Array.isArray(mapped?.schema) ? mapped.schema.map(() => selected.expression) : undefined;
+            if (!elements) { issue(selected.expression, "Core 页面列表仍需来源核对"); return; }
             const locations = [...via, ...selected.via];
-            for (const page of selected.expression.elements) {
+            for (const [index, page] of elements.entries()) {
               if (ts.isSpreadElement(page)) { describePages(page.expression, [...locations, page], chain); continue; }
-              const pageObject = unwrap(page), traced = locations.some(ts.isCallExpression)
+              const pageObject = unwrap(page), traced = Boolean(mapped) || locations.some(ts.isCallExpression)
                 || ts.isObjectLiteralExpression(pageObject) && pageObject.properties.some(ts.isSpreadAssignment);
-              const descriptorSource = describeRepositorySchema(source, page);
+              let descriptorSource = mapped ?? describeRepositorySchema(source, page);
+              if (mapped && Array.isArray(mapped.schema)) {
+                // 数组映射只保留本页的值、指针与缺口，不把其他表项放进页面查询资料。
+                const prefix = `/${index}`;
+                const fieldSources = Array.isArray(mapped.fieldSources) ? mapped.fieldSources.flatMap(field =>
+                  field && typeof field === "object" && !Array.isArray(field) && typeof field.pointer === "string"
+                    && (field.pointer === prefix || field.pointer.startsWith(prefix + "/"))
+                    ? [{ ...field, pointer: field.pointer.slice(prefix.length) }] : []) : [];
+                const fieldIssues = Array.isArray(mapped.issues) ? mapped.issues.filter((item): item is string => typeof item === "string"
+                  && (item.startsWith(prefix + ":") || item.startsWith(prefix + "/") || item.startsWith("/:")))
+                  .map(item => item.startsWith(prefix) ? item.slice(prefix.length) : item) : [];
+                descriptorSource = { expression: mapped.expression, source: mapped.source, arrayIndex: index,
+                  schema: mapped.schema[index], fieldSources, issues: fieldIssues,
+                  status: fieldIssues.length ? "source-reference" : "indexed" };
+              }
               // sourceFields 枚举原整张 AST 表；页面查询仅保留实际所选字段，避免未引用项进入搜索。
               delete descriptorSource.sourceFields;
               const fields = descriptorSource.schema && typeof descriptorSource.schema === "object" && !Array.isArray(descriptorSource.schema)

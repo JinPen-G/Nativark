@@ -1,6 +1,6 @@
 /**
  * 静态 HTTP/OpenAPI 声明的字段定位。只读取原 AST、符号和本地引用。
- * 字面量及单一返回表达式按原语法读取，不执行模块、生成器或校验器。
+ * 字面量、有限数字加减及单一返回表达式按原语法读取，不执行模块、生成器或校验器。
  * DTO 请求字段只定位原类型和装饰器，不推导校验或响应 schema。Zod 转换和动态表达式保留来源。
  */
 import ts from "typescript";
@@ -75,6 +75,14 @@ class StaticSchemaReader {
       || [ts.SyntaxKind.TrueKeyword, ts.SyntaxKind.FalseKeyword, ts.SyntaxKind.NullKeyword].includes(node.kind)) {
       const value = this.source.value(node);
       return value === UNRESOLVED ? this.unresolved(pointer, "literal") : value;
+    }
+    if (ts.isBinaryExpression(node) && [ts.SyntaxKind.PlusToken, ts.SyntaxKind.MinusToken].includes(node.operatorToken.kind)) {
+      // 菜单顺序只接纳已确定的有限数字，不做字符串拼接、隐式转换或其他运算。
+      const left = read(node.left), right = read(node.right);
+      if (typeof left !== "number" || typeof right !== "number") return this.unresolved(pointer, "dynamic-number");
+      const value = node.operatorToken.kind === ts.SyntaxKind.PlusToken ? left + right : left - right;
+      return Number.isFinite(left) && Number.isFinite(right) && Number.isFinite(value)
+        ? value : this.unresolved(pointer, "non-finite-number");
     }
     if (ts.isIdentifier(node)) {
       const symbol = this.source.checker.getSymbolAtLocation(node);
@@ -226,17 +234,29 @@ class StaticSchemaReader {
     if (ts.isCallExpression(node)) {
       if (ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "map" && node.arguments.length === 1) {
         const list = unwrap(node.expression.expression), callback = unwrap(node.arguments[0]);
-        if (ts.isArrayLiteralExpression(list) && list.elements.every(ts.isStringLiteralLike)
-          && ts.isArrowFunction(callback) && !callback.modifiers?.length && callback.parameters.length === 1
+        if (ts.isArrowFunction(callback) && !callback.modifiers?.length && callback.parameters.length === 1
           && ts.isIdentifier(callback.parameters[0].name) && !callback.parameters[0].initializer
           && !callback.parameters[0].dotDotDotToken && !ts.isBlock(callback.body)) {
           const symbol = this.source.checker.getSymbolAtLocation(callback.parameters[0].name);
-          if (symbol) {
+          let items: ExpressionBinding[] | undefined;
+          if (ts.isArrayLiteralExpression(list) && list.elements.every(ts.isStringLiteralLike))
+            items = list.elements.map(expression => ({ expression, bindings, seen: chain }));
+          else if (ts.isCallExpression(list) && this.objectCall(list, "values") && list.arguments.length === 1 && !ts.isSpreadElement(list.arguments[0])) {
+            // 沿已有对象覆盖/写入守卫核定枚举集合，回调参数仍绑定原成员 AST，不执行工厂。
+            const guard = new StaticSchemaReader(this.source), table = guard.read(list.arguments[0], "", bindings, chain);
+            const writes = table !== UNRESOLVED && table !== null && typeof table === "object" ? guard.objectWrites.get(table) : undefined;
+            if (table !== UNRESOLVED && table !== null && typeof table === "object" && !Array.isArray(table)
+              && !guard.partialObjects.has(table) && !writes?.unknown && !writes?.unsafe) {
+              const selected = Object.keys(table).map(key => this.selectMember(list.arguments[0], [key], bindings, chain));
+              if (selected.every((item): item is ExpressionBinding => item !== undefined && item !== UNRESOLVED)) items = selected;
+            }
+          }
+          if (symbol && items) {
             const value: SchemaValue[] = [];
-            // 逐项绑定原名称表达式，再沿现有静态读取器解释映射体。
-            for (const item of list.elements) {
+            // 逐项绑定原表达式，再沿同一静态读取器解释映射体。
+            for (const item of items) {
               const scope = new Map(bindings);
-              scope.set(symbol, { expression: item, bindings, seen: chain });
+              scope.set(symbol, item);
               const part = this.read(callback.body, `${pointer}/${value.length}`, scope, chain, true);
               if (part === UNRESOLVED) return UNRESOLVED;
               value.push(part);
@@ -268,8 +288,24 @@ class StaticSchemaReader {
           }
           return value;
         }
-        if (value !== UNRESOLVED && value !== null && typeof value === "object" && !this.partialObjects.has(value))
-          return node.expression.name.text === "keys" ? Object.keys(value) : Object.values(value);
+        if (value !== UNRESOLVED && value !== null && typeof value === "object" && !this.partialObjects.has(value)) {
+          const keys = Object.keys(value);
+          if (node.expression.name.text === "keys") return keys;
+          // values 的最终数组沿原属性枚举顺序定位，嵌套未知字段也必须跟随数组索引。
+          const locations = keys.map((key, index) => [`${pointer}/${key.replaceAll("~", "~0").replaceAll("/", "~1")}`, `${pointer}/${index}`])
+            .sort(([left], [right]) => right.length - left.length);
+          const relocate = (location: string, issue = false) => {
+            const found = locations.find(([from]) => location === from || location.startsWith(from + "/") || issue && location.startsWith(from + ":"));
+            return found ? found[1] + location.slice(found[0].length) : location;
+          };
+          const fields = [...this.fields].filter(([location]) => location.startsWith(pointer + "/"));
+          this.clearFields(pointer);
+          for (const [location, source] of fields) this.fields.set(relocate(location), source);
+          const issues = [...this.issues].map(location => [location, relocate(location, true)]);
+          for (const [from, to] of issues) if (from !== to) this.issues.delete(from);
+          for (const [from, to] of issues) if (from !== to) this.issues.add(to);
+          return Object.values(value);
+        }
         return this.unresolved(pointer, node.expression.name.text === "keys" ? "dynamic-keys" : "dynamic-values");
       }
       if (ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "includes" && node.arguments.length === 1) {

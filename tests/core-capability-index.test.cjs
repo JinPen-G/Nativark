@@ -188,7 +188,7 @@ test("Rental页面聚合追实际订单描述，直接数组定位而控制流�
   };
   try {
     const index = buildRepositoryCapabilityIndex(root), pages = index.capabilities.filter(item => item.kind === "page" && item.owner === "rental");
-    assert.equal(pages.length, 17);
+    assert.equal(pages.length, 21);
     for (const [id, route] of [["orders", "/orders"], ["order-create", "/orders/new"], ["order-detail", "/orders/:id"]]) {
       const page = pages.find(item => item.id === `page:rental:${id}`);
       assert.equal(page.entry.path, `/cores/rental${route}`);
@@ -201,17 +201,43 @@ test("Rental页面聚合追实际订单描述，直接数组定位而控制流�
     assert.equal(pages.find(item => item.id === "page:rental:order-detail").details.parent, "orders");
     assert.equal(pages.some(item => item.id === "page:rental:unreferenced"), false);
     assert.equal(JSON.stringify(pages).includes("unreferenced"), false);
-    assert.ok(index.issues.some(issue => issue.code === "page_metadata" && issue.message.includes("Object.values(RENTAL_WORK_ORDER_PAGES).map")));
-    assert.ok(pages.find(item => item.id === "page:rental:item-groups").details.unresolvedMetadata.includes("menu"));
+    for (const [id, group, index, line] of [
+      ["work-orders", "work-orders", 0, 16], ["work-order-detail", "work-orders", 1, 26],
+      ["payment-reconciliation", "payment-reconciliation", 0, 11], ["payment-reconciliation-detail", "payment-reconciliation", 1, 21],
+    ]) {
+      const page = pages.find(item => item.id === `page:rental:${id}`), descriptor = page.details.descriptorSource;
+      assert.equal(descriptor.schema.id, id);
+      assert.equal(descriptor.arrayIndex, index);
+      assert.ok(descriptor.fieldSources.some(field => field.pointer === "/id"
+        && field.source.path === `packages/rental-core/admin/${group}/pages.ts` && field.source.line === line));
+      assert.equal(descriptor.fieldSources.some(field => /^\/\d+(?:\/|$)/u.test(field.pointer)), false);
+      assert.ok(descriptor.issues.some(issue => issue.startsWith("/permissions:") || issue.startsWith("/permissions/")));
+      assert.equal(Object.hasOwn(descriptor, "sourceFields"), false);
+      for (const field of ["permissions", "component", "implementationVersion"]) assert.ok(page.details.unresolvedMetadata.includes(field));
+    }
+    for (const group of ["MEMBERSHIP", "OPERATIONS"]) assert.ok(index.issues.some(issue =>
+      issue.code === "page_metadata" && issue.message.includes(`Object.values(RENTAL_${group}_PAGES).map`)));
+    for (const [id, order] of [["item-groups", 0], ["assets", 20], ["locations", 40]]) {
+      const page = pages.find(item => item.id === `page:rental:${id}`);
+      assert.equal(page.details.menu.order, order);
+      assert.equal(page.details.unresolvedMetadata.includes("menu"), false);
+    }
     for (const [control, expected] of [["if (unavailable()) return {};", 0], ["", 3]]) {
       adminFixture = `import { createRentalOrdersAdminContribution } from "./orders";
 export function createRentalAdminContribution(version, contexts) {
   const orders = createRentalOrdersAdminContribution(version, contexts.useOrderContext);
   ${control}
   return { coreId: orders.coreId, implementationVersion: version, pages: [...orders.pages, ...unavailable()] };
+}
+export function mappedContribution(version) {
+  ${control}
+  return { coreId: "rental", implementationVersion: version, pages:
+    Object.values({ one: { id: "fixture-map", path: "/fixture-map", title: "映射", permissions: [] } })
+      .map(page => ({ ...page, component: () => null })) };
 }`;
       const result = buildRepositoryCapabilityIndex(root);
-      assert.equal(result.capabilities.filter(item => item.kind === "page" && item.owner === "rental").length, expected);
+      assert.equal(result.capabilities.filter(item => item.kind === "page" && item.owner === "rental" && item.id !== "page:rental:fixture-map").length, expected);
+      assert.equal(result.capabilities.some(item => item.id === "page:rental:fixture-map"), !control);
       assert.ok(result.issues.some(issue => issue.code === "page_metadata" && issue.message.includes(control ? "控制流" : "unavailable()")));
       assert.equal(result.capabilities.some(item => item.id === "page:rental:unreferenced"), false);
     }
