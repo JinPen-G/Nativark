@@ -8,7 +8,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import ts from "typescript";
 import { DevelopmentCapabilityIndexSchema, type DevelopmentCapability, type DevelopmentCapabilityIndex,
   type DevelopmentSourceReference } from "./development";
-import { CorePageTextSchema, corePageText } from "./admin";
+import { CorePageDescriptorSchema, CorePageTextSchema, corePageText } from "./admin";
 import { describeRepositorySchema, repositoryApiDocumentation } from "./repository-openapi";
 import { RepositorySource, UNRESOLVED, isRepositorySourcePath, nodeDocumentation, readRepositoryJson, readRepositoryText,
   repositoryFiles, repositoryPath, sourceReference } from "./repository-source";
@@ -417,7 +417,20 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
               addIssue("page_metadata", repositoryPath(root, entry.file), "Core 页面需要可解析的标识、路径和名称");
               continue;
             }
-            const core = corePackages.get(entry.owner), unresolved = source.unresolvedProperties(page, ["component"]);
+            const core = corePackages.get(entry.owner);
+            let unresolved = source.unresolvedProperties(page, ["component"]);
+            const permissionsExpression = objectProperty(page, "permissions"), pageObject = unwrap(page);
+            // 这里只展开唯一的直接属性；页面对象的未知覆盖仍交回原源码缺口。
+            const directPermissions = ts.isObjectLiteralExpression(pageObject)
+              && pageObject.properties.every(property => (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property))
+                && !ts.isComputedPropertyName(property.name))
+              && pageObject.properties.filter(property => property.name?.getText().replace(/^["']|["']$/g, "") === "permissions").length === 1;
+            const permissionsSource = permissionsExpression ? describeRepositorySchema(source, permissionsExpression) : undefined;
+            const permissions = directPermissions && permissionsSource?.status === "indexed"
+              && Array.isArray(permissionsSource.issues) && permissionsSource.issues.length === 0
+              ? CorePageDescriptorSchema.shape.permissions.safeParse(permissionsSource.schema) : undefined;
+            if (permissions?.success) unresolved = unresolved.filter(field => field !== "permissions");
+            else if (!unresolved.includes("permissions")) unresolved.push("permissions");
             const component = objectProperty(page, "component"), componentSymbol = component && source.checker.getSymbolAtLocation(unwrap(component));
             const componentDeclaration = componentSymbol && source.target(componentSymbol).valueDeclaration;
             if (core && (core.id !== coreId || core.version !== entry.version)) addIssue("core_version", repositoryPath(root, entry.file), "页面贡献与 Core 清单或包版本不一致");
@@ -436,6 +449,8 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
               details: { registration: "source", title: label.data,
                 ...(purpose === "configuration" || purpose === "business" ? { purpose } : !purposeExpression ? { purpose: "business" } : {}),
                 ...(typeof contributionVersion === "string" ? { implementationVersion: contributionVersion } : {}),
+                ...(permissions?.success ? { permissions: permissions.data } : {}),
+                ...(permissionsSource ? { permissionsSource } : {}),
                 package: entry.owner, unresolvedMetadata: unresolved } });
           }
         } else if (pages) addIssue("page_metadata", repositoryPath(root, entry.file), "Core 页面列表或归属无法静态解析");

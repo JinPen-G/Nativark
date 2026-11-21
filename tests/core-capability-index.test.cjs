@@ -43,6 +43,70 @@ test("标准底座显式 workspace 能定位公共能力及独立 API 消费者"
   }
 });
 
+test("工单页面静态权限沿正式schema展开，动态和无效权限保留来源", () => {
+  const root = path.resolve(__dirname, "..");
+  const packageFile = path.join(root, "package.json");
+  const adminFile = path.join(root, "packages/example-tickets-core/admin/index.tsx");
+  const originalRead = fs.readFileSync;
+  const metadata = JSON.parse(originalRead(packageFile, "utf8"));
+  let adminFixture;
+  fs.readFileSync = (file, options) => {
+    const resolved = typeof file === "string" ? path.resolve(file) : undefined;
+    const text = resolved === packageFile
+      ? JSON.stringify({ ...metadata, workspaces: ["packages/core-contracts", "packages/example-tickets-core"] })
+      : resolved === adminFile ? adminFixture : undefined;
+    if (text === undefined) return originalRead(file, options);
+    const encoding = typeof options === "string" ? options : options?.encoding;
+    return encoding ? Buffer.from(text).toString(encoding) : Buffer.from(text);
+  };
+  try {
+    const index = buildRepositoryCapabilityIndex(root);
+    const read = { resource: "ticket", action: "read" };
+    for (const [id, expected] of [["tickets", [read]], ["setup", []],
+      ["create", [read, { resource: "ticket", action: "create" }]], ["detail", [read]]]) {
+      const page = index.capabilities.find(item => item.id === `page:example-tickets:${id}`);
+      assert.ok(page);
+      assert.deepEqual(page.details.permissions, expected);
+      assert.equal(page.details.permissionsSource.status, "indexed");
+      assert.deepEqual(page.details.permissionsSource.issues, []);
+      assert.equal(page.details.permissionsSource.source.path, "packages/example-tickets-core/admin/index.tsx");
+      assert.equal(page.details.unresolvedMetadata.includes("permissions"), false);
+      if (expected.length && id !== "create") {
+        assert.ok(page.details.permissionsSource.fieldSources.some(field => field.pointer === "/0/action"));
+      }
+      if (id === "create") assert.ok(page.details.permissionsSource.expression.includes('...permission("create")'));
+    }
+    assert.equal(index.issues.some(issue => issue.code === "page_metadata" && issue.path === "packages/example-tickets-core/admin/index.tsx"), false);
+    adminFixture = `
+import { TICKETS_CORE_ID, TICKETS_CORE_VERSION } from "@rental-os/example-tickets-core/contracts";
+declare const action: string;
+declare const extra: object;
+const permission = (action: string) => [{ resource: "ticket", action }];
+export function createTicketsAdmin() {
+  throw new Error("queried Core function must not execute");
+  return { coreId: TICKETS_CORE_ID, implementationVersion: TICKETS_CORE_VERSION, pages: [
+    { id: "dynamic", path: "/dynamic", title: "动态", permissions: permission(action), component: null },
+    { id: "invalid", path: "/invalid", title: "无效", permissions: [{ resource: "ticket", action: "READ" }], component: null },
+    { id: "covered", path: "/covered", title: "覆盖", permissions: permission("read"), ...extra, component: null }
+  ] };
+}`;
+    const partial = buildRepositoryCapabilityIndex(root);
+    for (const id of ["dynamic", "invalid", "covered"]) {
+      const page = partial.capabilities.find(item => item.id === `page:example-tickets:${id}`);
+      assert.ok(page);
+      assert.equal(Object.hasOwn(page.details, "permissions"), false);
+      assert.ok(page.details.unresolvedMetadata.includes("permissions"));
+      assert.ok(page.details.permissionsSource.expression);
+      assert.ok(partial.issues.some(issue => issue.code === "page_metadata" && issue.message.includes(id)));
+    }
+    const dynamic = partial.capabilities.find(item => item.id === "page:example-tickets:dynamic");
+    assert.equal(dynamic.details.permissionsSource.status, "source-reference");
+    assert.ok(dynamic.details.permissionsSource.issues.length);
+  } finally {
+    fs.readFileSync = originalRead;
+  }
+});
+
 test("继承配置定位真实AI出口，越界、链接和不可读配置保留未解析", () => {
   const root = path.resolve(__dirname, "..");
   const packageFile = path.join(root, "package.json");
