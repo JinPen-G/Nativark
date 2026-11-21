@@ -149,10 +149,26 @@ class StaticSchemaReader {
       const value: SchemaValue[] = [];
       for (const item of node.elements) {
         if (ts.isOmittedExpression(item)) return this.unresolved(pointer, "array-hole");
+        const offset = value.length;
         const part = read(ts.isSpreadElement(item) ? item.expression : item, `${pointer}/${value.length}`);
         if (part === UNRESOLVED) return UNRESOLVED;
         if (ts.isSpreadElement(item)) {
           if (!Array.isArray(part)) return this.unresolved(pointer, "dynamic-array-spread");
+          // 展开的数组不保留外层占位索引，字段及缺口都映射到最终数组位置。
+          const prefix = `${pointer}/${offset}/`;
+          const fields = [...this.fields].filter(([key]) => key.startsWith(prefix));
+          for (const [key] of fields) this.fields.delete(key);
+          for (const [key, location] of fields) {
+            const suffix = key.slice(prefix.length), index = /^(\d+)(?=\/|$)/u.exec(suffix)?.[1];
+            if (index !== undefined) this.fields.set(`${pointer}/${offset + Number(index)}${suffix.slice(index.length)}`, location);
+          }
+          for (const issue of [...this.issues]) if (issue.startsWith(prefix)) {
+            const suffix = issue.slice(prefix.length), index = /^(\d+)(?=\/|:|$)/u.exec(suffix)?.[1];
+            if (index !== undefined) {
+              this.issues.delete(issue);
+              this.issues.add(`${pointer}/${offset + Number(index)}${suffix.slice(index.length)}`);
+            }
+          }
           value.push(...part);
         } else value.push(part);
       }

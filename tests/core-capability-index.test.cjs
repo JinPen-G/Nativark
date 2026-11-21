@@ -49,6 +49,7 @@ test("工单页面静态权限沿正式schema展开，动态和无效权限保�
   const adminFile = path.join(root, "packages/example-tickets-core/admin/index.tsx");
   const originalRead = fs.readFileSync;
   const metadata = JSON.parse(originalRead(packageFile, "utf8"));
+  const permissionLine = originalRead(adminFile, "utf8").split(/\r?\n/).findIndex(line => line.startsWith("const permission =")) + 1;
   let adminFixture;
   fs.readFileSync = (file, options) => {
     const resolved = typeof file === "string" ? path.resolve(file) : undefined;
@@ -74,7 +75,11 @@ test("工单页面静态权限沿正式schema展开，动态和无效权限保�
       if (expected.length && id !== "create") {
         assert.ok(page.details.permissionsSource.fieldSources.some(field => field.pointer === "/0/action"));
       }
-      if (id === "create") assert.ok(page.details.permissionsSource.expression.includes('...permission("create")'));
+      if (id === "create") for (const pointer of ["/0/action", "/1/action"]) {
+        const field = page.details.permissionsSource.fieldSources.find(field => field.pointer === pointer);
+        assert.ok(field);
+        assert.equal(field.source.line, permissionLine);
+      }
     }
     assert.equal(index.issues.some(issue => issue.code === "page_metadata" && issue.path === "packages/example-tickets-core/admin/index.tsx"), false);
     adminFixture = `
@@ -257,6 +262,17 @@ const tombstone = Object.assign({}, base, { properties: unavailable() });
 const afterUnknown = Object.assign({}, base, unavailable(), { properties: { current: { type: "boolean" } } });
 const partial = { ...unavailable(), properties: { current: { type: "integer" } }, "a/b": { "~tag": true } };
 const partialSpread = { ...base, ...partial };
+const unknownSpread = { ...base, ...unavailable() };
+const unsupportedSpread = { ...base, ...["unexpanded"], type: "number" };
+const knownAfterSpread = { ...base, ...unavailable(), type: "number" };
+const unknownProperty = { ...base, type: unavailable() };
+const nestedUnknownProperty = { ...base, ...{ type: unavailable() } };
+const unknownComputed = { ...base, [unavailable()]: "ignored", type: "integer" };
+const getterOverwrite = { ...base, get type() { throw new Error("must-not-run"); } };
+const deeperPartialSpread = { ...base, ...partialSpread };
+const arrayParts = [{ action: "first" }, { action: "second" }];
+const spreadArray = [{ action: "before" }, ...arrayParts, ...[...arrayParts], { action: "after" }];
+const partialArray = [...[{ action: unavailable(), resource: "ticket" }]];
 const mapOf = (name, schema) => ({ [name]: schema });
 const nestedMap = { schemas: mapOf("Built", assigned) };
 const selectedMap = nestedMap.schemas;
@@ -306,6 +322,25 @@ Object.assign(sharedMap, { Result: { type: "number" } });
     const declaration = name => declarations.find(node => node.name.getText() === name);
     const describe = name => describeRepositorySchema(source, declaration(name).name);
     const line = text => fixture.slice(0, fixture.indexOf(text)).split(/\r?\n/).length;
+    for (const [name, keys] of [["unknownSpread", []], ["unsupportedSpread", ["type"]], ["knownAfterSpread", ["type"]],
+      ["unknownProperty", ["properties"]], ["nestedUnknownProperty", ["properties"]],
+      ["unknownComputed", ["type"]], ["getterOverwrite", ["properties"]],
+      ["partialSpread", ["properties", "a/b"]], ["deeperPartialSpread", ["properties", "a/b"]]]) {
+      assert.deepEqual(Object.keys(source.value(declaration(name).name)), keys, name);
+      assert.ok(source.unresolvedProperties(declaration(name).initializer).length, name);
+    }
+    assert.equal(source.value(declaration("knownAfterSpread").name).type, "number");
+    const spreadArray = describe("spreadArray");
+    assert.deepEqual(spreadArray.schema.map(item => item.action), ["before", "first", "second", "first", "second", "after"]);
+    for (let index = 0; index < 6; index++) {
+      const field = spreadArray.fieldSources.find(field => field.pointer === `/${index}/action`);
+      assert.ok(field);
+      assert.equal(field.source.line, line(index === 0 || index === 5 ? "const spreadArray" : "const arrayParts"));
+    }
+    const partialArray = describe("partialArray");
+    assert.equal(partialArray.status, "source-reference");
+    assert.ok(partialArray.issues.some(issue => issue.startsWith("/0/action:")));
+    assert.ok(partialArray.fieldSources.some(field => field.pointer === "/0/resource"));
     const assigned = describe("assigned");
     assert.equal(assigned.status, "indexed");
     assert.deepEqual(Object.keys(assigned.schema.properties), ["current"]);

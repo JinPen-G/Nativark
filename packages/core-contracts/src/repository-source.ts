@@ -65,6 +65,7 @@ export function nodeDocumentation(node: ts.Node): string | undefined {
 export class RepositorySource {
   readonly program: ts.Program;
   readonly checker: ts.TypeChecker;
+  private readonly objectWrites = new WeakMap<object, { keys: Set<string>; unknown: boolean }>();
 
   constructor(readonly root: string, files: string[], paths: Record<string, string[]>) {
     const readPermissions = new Map<string, boolean>();
@@ -161,18 +162,42 @@ export class RepositorySource {
     }
     if (ts.isObjectLiteralExpression(node)) {
       const object: Record<string, StaticValue> = Object.create(null);
+      const writes = { keys: new Set<string>(), unknown: false };
+      this.objectWrites.set(object, writes);
       for (const property of node.properties) {
         if (ts.isSpreadAssignment(property)) {
           const part = value(property.expression);
-          if (part !== UNRESOLVED && part && typeof part === "object" && !Array.isArray(part)) Object.assign(object, part);
-        } else if (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property)) {
+          if (part === null || typeof part === "boolean" || typeof part === "number" || part === "") continue;
+          const source = part !== UNRESOLVED && part && typeof part === "object" && !Array.isArray(part) ? part : undefined;
+          const sourceWrites = source && this.objectWrites.get(source);
+          // 嵌套部分对象仍可能覆盖旧键；已写但无静态值的键也必须覆盖旧值。
+          if (!source || sourceWrites?.unknown) {
+            for (const key of Object.keys(object)) delete object[key];
+            writes.keys.clear();
+            writes.unknown = true;
+          }
+          if (source) for (const key of sourceWrites?.keys ?? Object.keys(source)) {
+            delete object[key];
+            writes.keys.add(key);
+            if (Object.hasOwn(source, key)) object[key] = source[key];
+          }
+        } else {
           const key = ts.isIdentifier(property.name) || ts.isStringLiteralLike(property.name) || ts.isNumericLiteral(property.name)
             ? property.name.text : undefined;
+          if (key === undefined) {
+            for (const key of Object.keys(object)) delete object[key];
+            writes.keys.clear();
+            writes.unknown = true;
+            continue;
+          }
           const shorthand = ts.isShorthandPropertyAssignment(property) ? this.checker.getShorthandAssignmentValueSymbol(property) : undefined;
           const declaration = shorthand && this.target(shorthand).valueDeclaration;
-          const part = value(ts.isPropertyAssignment(property) ? property.initializer
-            : declaration && ts.isVariableDeclaration(declaration) ? declaration.initializer : property.name);
-          if (key !== undefined && part !== UNRESOLVED) object[key] = part;
+          const expression = ts.isPropertyAssignment(property) ? property.initializer
+            : ts.isShorthandPropertyAssignment(property) ? declaration && ts.isVariableDeclaration(declaration) ? declaration.initializer : property.name : undefined;
+          const part = value(expression);
+          writes.keys.add(key);
+          delete object[key];
+          if (part !== UNRESOLVED) object[key] = part;
         }
       }
       return object;
@@ -209,9 +234,14 @@ export class RepositorySource {
     }
     if (!ts.isObjectLiteralExpression(node)) return [];
     return node.properties.flatMap(property => {
-      if (ts.isSpreadAssignment(property)) return this.value(property.expression) === UNRESOLVED
-        || this.unresolvedProperties(property.expression, [], chain).length ? [property.getText()] : [];
+      if (ts.isSpreadAssignment(property)) {
+        const part = this.value(property.expression);
+        const noop = part === null || typeof part === "boolean" || typeof part === "number" || part === "";
+        const object = part !== UNRESOLVED && part && typeof part === "object" && !Array.isArray(part);
+        return !noop && !object || this.unresolvedProperties(property.expression, [], chain).length ? [property.getText()] : [];
+      }
       if (!ts.isPropertyAssignment(property) && !ts.isShorthandPropertyAssignment(property)) return [property.getText()];
+      if (ts.isComputedPropertyName(property.name)) return [property.getText()];
       const name = ts.isIdentifier(property.name) || ts.isStringLiteralLike(property.name) ? property.name.text : property.name.getText();
       if (ignored.includes(name)) return [];
       const expression = ts.isPropertyAssignment(property) ? property.initializer : property.name;
