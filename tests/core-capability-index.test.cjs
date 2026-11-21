@@ -201,6 +201,12 @@ test("Rental页面聚合追实际订单描述，直接数组定位而控制流�
     assert.equal(pages.find(item => item.id === "page:rental:order-detail").details.parent, "orders");
     assert.equal(pages.some(item => item.id === "page:rental:unreferenced"), false);
     assert.equal(JSON.stringify(pages).includes("unreferenced"), false);
+    const version = pages.find(item => item.id === "page:rental:orders").details.implementationVersionSource;
+    assert.equal(version.status, "source-reference");
+    const rootVersion = version.contributions.find(item => item.source.path === "packages/rental-core/admin/index.tsx");
+    assert.equal(rootVersion.source.line, 55);
+    assert.equal(rootVersion.parameter.line, 41);
+    assert.equal(rootVersion.expression, "implementationVersion");
     for (const [id, group, index, line] of [
       ["work-orders", "work-orders", 0, 16], ["work-order-detail", "work-orders", 1, 26],
       ["payment-reconciliation", "payment-reconciliation", 0, 11], ["payment-reconciliation-detail", "payment-reconciliation", 1, 21],
@@ -224,6 +230,11 @@ test("Rental页面聚合追实际订单描述，直接数组定位而控制流�
       assert.ok(descriptor.unresolvedFieldSources.some(field => field.pointer === "/permissions" && field.source.path.endsWith(`/${group}/pages.ts`)));
       assert.equal(descriptor.unresolvedFieldSources.some(field => /^\/\d+(?:\/|$)/u.test(field.pointer)), false);
       assert.equal(Object.hasOwn(descriptor, "sourceFields"), false);
+      if (id === "qualification-types") {
+        const membershipVersion = page.details.implementationVersionSource.contributions.find(item => item.source.path.endsWith("/membership/index.tsx"));
+        assert.equal(membershipVersion.source.line, 33);
+        assert.equal(membershipVersion.parameter.line, 28);
+      }
       for (const field of ["permissions", "component", "implementationVersion"]) assert.ok(page.details.unresolvedMetadata.includes(field));
     }
     for (const [id, order] of [["item-groups", 0], ["assets", 20], ["locations", 40]]) {

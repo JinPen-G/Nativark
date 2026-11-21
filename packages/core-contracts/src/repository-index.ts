@@ -105,8 +105,8 @@ function headerDescription(root: string, file: string): string | undefined {
   return comment?.[1].split("\n").map(line => line.replace(/^\s*\*\s?/u, "").trim()).filter(Boolean).join("\n");
 }
 
-/** 只记录可定位到具体导出的静态导入，namespace 不按整个模块展开使用量。 */
-function importConsumers(source: RepositorySource, paths: Record<string, string[]>) {
+/** 静态导入定位具体导出；直接调用只保存 AST 出处，不执行调用或展开 namespace 使用量。 */
+function importConsumers(source: RepositorySource, paths: Record<string, string[]>, callsByDeclaration: Map<ts.Node, ts.CallExpression[]>) {
   const consumers = new Map<ts.Symbol, Map<ts.Node, DevelopmentSourceReference>>();
   const namespaces = new Map<ts.Symbol, { exports: Map<string, ts.Symbol>; reference: ts.Node }>();
   const members: Array<ts.PropertyAccessExpression | ts.ElementAccessExpression> = [];
@@ -171,6 +171,16 @@ function importConsumers(source: RepositorySource, paths: Record<string, string[
         const imported = importedModule(node.expression.expression), callback = node.arguments[0];
         if (imported && callback && (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback)) && callback.parameters[0])
           bind(callback.parameters[0].name, moduleExports(imported.arguments[0] as ts.StringLiteralLike), imported);
+      }
+      if (ts.isCallExpression(node)) {
+        const symbol = source.checker.getSymbolAtLocation(unwrap(node.expression)), declaration = symbol && source.target(symbol).valueDeclaration;
+        const callable = declaration && ts.isVariableDeclaration(declaration) && declaration.initializer ? unwrap(declaration.initializer) : declaration;
+        if (callable && (ts.isFunctionDeclaration(callable) || ts.isArrowFunction(callable))
+          && isRepositorySourcePath(source.root, callable.getSourceFile().fileName)) {
+          const calls = callsByDeclaration.get(callable) ?? [];
+          calls.push(node);
+          callsByDeclaration.set(callable, calls);
+        }
       }
       if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) members.push(node);
       ts.forEachChild(node, visit);
@@ -359,7 +369,8 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
     };
     visit(file);
   }
-  const consumersBySymbol = importConsumers(source, paths);
+  const callsByDeclaration = new Map<ts.Node, ts.CallExpression[]>();
+  const consumersBySymbol = importConsumers(source, paths, callsByDeclaration);
 
   for (const entry of entries) {
     const before = capabilities.length;
@@ -486,6 +497,41 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
       }
       return { expression: node, via: [] };
     };
+    const versionSources = new Map<ts.Node, { details: NonNullable<DevelopmentCapability["details"]>; sources: DevelopmentSourceReference[] } | undefined>();
+    // 只定位经过的贡献工厂及其直接参数；宿主的实参不是版本值或运行注册证据。
+    const versionSource = (factory: ts.FunctionDeclaration | ts.ArrowFunction) => {
+      if (versionSources.has(factory)) return versionSources.get(factory);
+      versionSources.set(factory, undefined);
+      const returned = factory.body && (ts.isBlock(factory.body)
+        ? factory.body.statements.filter(ts.isReturnStatement) : []);
+      const definition = factory.body && (ts.isBlock(factory.body)
+        ? returned?.length === 1 ? returned[0].expression : undefined : factory.body);
+      const selected = definition && locate(definition, "implementationVersion");
+      if (!selected) return;
+      const property = selected.via.find(node => (ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node))
+        && node.name.getText().replace(/^["']|["']$/g, "") === "implementationVersion");
+      const expression = unwrap(selected.expression);
+      const symbol = property && ts.isShorthandPropertyAssignment(property)
+        ? source.checker.getShorthandAssignmentValueSymbol(property) : source.checker.getSymbolAtLocation(expression);
+      const declaration = symbol && source.target(symbol).valueDeclaration;
+      const parameter = declaration && ts.isParameter(declaration) && declaration.parent === factory ? declaration : undefined;
+      const position = parameter ? factory.parameters.indexOf(parameter) : -1;
+      const sources = [sourceReference(property ?? selected.expression, root), sourceReference(factory, root),
+        ...(parameter ? [sourceReference(parameter, root)] : [])];
+      const calls = position < 0 ? [] : (callsByDeclaration.get(factory) ?? []).map(call => {
+        const argument = !parameter?.dotDotDotToken && !call.arguments.slice(0, position + 1).some(ts.isSpreadElement)
+          ? call.arguments[position] : undefined;
+        const reference = sourceReference(call, root);
+        sources.push(reference, ...(argument ? [sourceReference(argument, root)] : []));
+        return { source: reference, status: "source-reference",
+          ...(argument ? { expression: argument.getText(), argument: sourceReference(argument, root) }
+            : { issues: ["argument-position:unresolved"] }) };
+      });
+      const result = { details: { expression: selected.expression.getText(), source: sources[0], factory: sourceReference(factory, root),
+        ...(parameter ? { parameter: sourceReference(parameter, root), parameterIndex: position } : {}), calls }, sources };
+      versionSources.set(factory, result);
+      return result;
+    };
     const roots = new Set<ts.Node>();
     for (const symbol of source.exports(entry.file)) {
       const declaration = source.target(symbol).valueDeclaration;
@@ -519,6 +565,11 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
               : Array.isArray(mapped?.schema) ? mapped.schema.map(() => selected.expression) : undefined;
             if (!elements) { issue(selected.expression, "Core 页面列表仍需来源核对"); return; }
             const locations = [...via, ...selected.via];
+            const versions = [...new Set([callable, ...locations].filter((node): node is ts.FunctionDeclaration | ts.ArrowFunction =>
+              ts.isFunctionDeclaration(node) || ts.isArrowFunction(node)))].flatMap(factory => {
+              const metadata = versionSource(factory);
+              return metadata ? [metadata] : [];
+            });
             for (const [index, page] of elements.entries()) {
               if (ts.isSpreadElement(page)) { describePages(page.expression, [...locations, page], chain); continue; }
               const pageObject = unwrap(page), traced = Boolean(mapped) || locations.some(ts.isCallExpression)
@@ -591,6 +642,7 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
               capabilities.push({ id: `page:${coreId}:${id}`, name: corePageText(label.data, "zh-CN"), kind: "page", owner: coreId, version: entry.version,
                 sources: [{ ...sourceReference(page, root), symbol: id },
                   ...locations.map(location => sourceReference(location, root)),
+                  ...versions.flatMap(version => version.sources),
                   ...(traced ? [...(Array.isArray(descriptorSource.fieldSources) ? descriptorSource.fieldSources : []),
                     ...(Array.isArray(descriptorSource.unresolvedFieldSources) ? descriptorSource.unresolvedFieldSources : [])].flatMap(field => field && typeof field === "object"
                     && !Array.isArray(field) && field.source && typeof field.source === "object" && !Array.isArray(field.source)
@@ -601,6 +653,8 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
                 entry: { kind: "page", path: `/cores/${coreId}${path === "/" ? "" : path}` },
                 details: { registration: "source", title: label.data, ...known,
                   ...(typeof contributionVersion === "string" ? { implementationVersion: contributionVersion } : {}),
+                  ...(versions.length ? { implementationVersionSource: { status: typeof contributionVersion === "string" ? "indexed" : "source-reference",
+                    contributions: versions.map(version => version.details) } } : {}),
                   ...(permissions?.success ? { permissions: permissions.data } : {}),
                   ...(permissionsSource ? { permissionsSource } : {}),
                   ...(traced ? { descriptorSource } : {}),
