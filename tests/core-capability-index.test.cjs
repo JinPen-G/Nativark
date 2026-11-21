@@ -169,3 +169,127 @@ class GenericDto<T> { value!: T; }
     fs.readFileSync = originalRead;
   }
 });
+
+test("静态对象组合保留最后覆盖与出处，后置写入和未知来源准确失效", () => {
+  const ts = require("typescript");
+  const { RepositorySource } = require("../packages/core-contracts/dist/repository-source.js");
+  const { describeRepositorySchema, repositoryApiDocumentation } = require("../packages/core-contracts/dist/repository-openapi.js");
+  const root = path.resolve(__dirname, "..");
+  const file = path.join(root, "packages/core-contracts/src/repository-openapi.ts");
+  const importedFile = path.join(root, "packages/core-contracts/src/repository-source.ts");
+  const originalRead = fs.readFileSync;
+  const fixture = String.raw`
+import { sharedMap } from "./repository-source";
+const base = { type: "object", properties: { old: { type: "string", maxLength: 12 } } };
+const replacement = { properties: { current: { type: "number" } } };
+const assigned = Object.assign({}, base, replacement);
+const identity = schema => schema;
+const asArray = schema => ({ type: "array", items: identity(schema) });
+const nestedCalls = asArray(base);
+const clone = schema => Object.assign({}, schema, { description: "static" });
+const cloned = clone(base);
+const noops = Object.assign({}, base, null, 0, true, "");
+const tombstone = Object.assign({}, base, { properties: unavailable() });
+const afterUnknown = Object.assign({}, base, unavailable(), { properties: { current: { type: "boolean" } } });
+const partial = { ...unavailable(), properties: { current: { type: "integer" } }, "a/b": { "~tag": true } };
+const partialSpread = { ...base, ...partial };
+const mapOf = (name, schema) => ({ [name]: schema });
+const nestedMap = { schemas: mapOf("Built", assigned) };
+const selectedMap = nestedMap.schemas;
+const builtReference = { $ref: "#/components/schemas/Built" };
+const postMap = { Result: { type: "string", maxLength: 20 } };
+Object.hasOwn(postMap, "Result");
+const alias = postMap;
+const beforeMap = { ...postMap };
+Object.assign(alias, { Result: assigned }, { Added: { type: "boolean" } });
+const STATIC_COMPOSE_SCHEMAS = postMap;
+const STATIC_COMPOSE_OPERATIONS = [{ method: "POST", path: "/api/static-compositions", responseSchema: { $ref: "#/components/schemas/Result" } }];
+const resultReference = { $ref: "#/components/schemas/Result" };
+const loopMap = { Result: { type: "string" } };
+for (const name of unavailable()) loopMap[name] = { type: "number" };
+const escapedMap = { Result: { type: "string" } };
+mutate(escapedMap);
+const getterSource = Object.assign({}, { get properties() { throw new Error("must-not-run"); } }, { type: "object" });
+const getterTarget = Object.assign({ get type() { throw new Error("must-not-run"); } }, { type: "string" });
+const unknownTarget = Object.assign(unavailable(), { type: "string" });
+const frozenTarget = Object.assign(Object.freeze({}), { type: "string" });
+enum StaticNames { Ok = "ok" }
+const frozenEnumTarget = Object.assign(Object.freeze(StaticNames), { type: "string" });
+const shadowed = Object => Object.assign({}, { type: "string" });
+const shadowedObject = shadowed({ assign: unavailable });
+const asyncBuilder = async () => ({ type: "string" });
+const asyncTarget = Object.assign(asyncBuilder(), { type: "number" });
+const prototypeSource = Object.assign({}, { ["__proto__"]: { type: "string" } });
+const parentMap = { Inner: { type: "string" } };
+const memberAlias = parentMap.Inner;
+Object.assign(memberAlias, { type: "number" });
+const destructuredMap = { Inner: { type: "string" } };
+const { Inner: bindingAlias } = destructuredMap;
+bindingAlias.type = "number";
+const importedMap = sharedMap;
+Object.assign(sharedMap, { Result: { type: "number" } });
+`;
+  fs.readFileSync = (source, options) => {
+    if (typeof source !== "string" || ![file, importedFile].includes(path.resolve(source))) return originalRead(source, options);
+    const text = path.resolve(source) === file ? fixture : 'export const sharedMap = { Result: { type: "string" } };';
+    const encoding = typeof options === "string" ? options : options?.encoding;
+    return encoding ? text : Buffer.from(text);
+  };
+  try {
+    const source = new RepositorySource(root, [file], {});
+    const declarations = source.source(file).statements.filter(ts.isVariableStatement)
+      .flatMap(statement => [...statement.declarationList.declarations]);
+    const declaration = name => declarations.find(node => node.name.getText() === name);
+    const describe = name => describeRepositorySchema(source, declaration(name).name);
+    const line = text => fixture.slice(0, fixture.indexOf(text)).split(/\r?\n/).length;
+    const assigned = describe("assigned");
+    assert.equal(assigned.status, "indexed");
+    assert.deepEqual(Object.keys(assigned.schema.properties), ["current"]);
+    assert.equal(assigned.fieldSources.find(field => field.pointer === "/properties/current/type").source.line, line("const replacement"));
+    assert.equal(assigned.fieldSources.some(field => field.pointer.includes("/old")), false);
+    assert.equal(describe("nestedCalls").status, "indexed");
+    assert.equal(describe("nestedCalls").schema.items.properties.old.maxLength, 12);
+    assert.equal(describe("cloned").status, "indexed");
+    assert.equal(describe("cloned").schema.description, "static");
+    assert.equal(describe("noops").status, "indexed");
+    assert.equal(describe("noops").schema.properties.old.maxLength, 12);
+    const tombstone = describe("tombstone");
+    assert.equal(tombstone.status, "source-reference");
+    assert.equal(Object.hasOwn(tombstone.schema, "properties"), false);
+    assert.equal(tombstone.fieldSources.some(field => field.pointer.startsWith("/properties")), false);
+    for (const name of ["afterUnknown", "partialSpread"]) {
+      const result = describe(name);
+      assert.equal(result.status, "source-reference");
+      assert.deepEqual(Object.keys(result.schema.properties), ["current"]);
+      assert.ok(result.fieldSources.some(field => field.pointer === "/properties/current/type"));
+      assert.equal(result.fieldSources.some(field => field.pointer.includes("/old")), false);
+    }
+    assert.ok(describe("partialSpread").fieldSources.some(field => field.pointer === "/a~1b/~0tag"));
+    const built = describeRepositorySchema(source, declaration("builtReference").initializer, [declaration("selectedMap").name]);
+    assert.equal(built.status, "indexed");
+    assert.equal(built.references[0].schema.properties.current.type, "number");
+    const operation = repositoryApiDocumentation(source).get("POST /api/static-compositions");
+    assert.equal(operation.details.openapiSource.schemas.responseSchema.references[0].schema.properties.current.type, "number");
+    assert.equal(describe("beforeMap").schema.Result.type, "string");
+    assert.equal(describe("alias").schema.Result.properties.current.type, "number");
+    for (const name of ["loopMap", "escapedMap"]) {
+      const result = describe(name);
+      assert.equal(result.status, "source-reference");
+      assert.equal(Object.hasOwn(result, "schema"), false);
+      const reference = describeRepositorySchema(source, declaration("resultReference").initializer, [declaration(name).name]);
+      assert.deepEqual(reference.references[0].issues, ["schema-map:source-reference"]);
+      assert.ok(reference.references[0].mapSources.some(location => location.line === line(name === "loopMap" ? "for (const name" : "mutate(escapedMap)")));
+    }
+    for (const name of ["getterSource", "getterTarget", "unknownTarget", "frozenTarget", "frozenEnumTarget", "shadowedObject", "asyncTarget", "prototypeSource"]) {
+      assert.equal(describe(name).status, "source-reference");
+    }
+    assert.equal(describe("memberAlias").schema.type, "number");
+    for (const name of ["parentMap", "destructuredMap", "importedMap"]) {
+      const result = describe(name);
+      assert.equal(result.status, "source-reference");
+      assert.equal(Object.hasOwn(result, "schema"), false);
+    }
+  } finally {
+    fs.readFileSync = originalRead;
+  }
+});
