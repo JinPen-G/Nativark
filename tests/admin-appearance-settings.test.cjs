@@ -41,6 +41,11 @@ function fixture(appearance = initial) {
     };
   }
   const db = {
+    async $queryRaw(query) {
+      assert.equal(query.sql, 'SELECT id FROM Tenant WHERE id=? LOCK IN SHARE MODE');
+      assert.deepEqual(query.values, [user.tenantId]);
+      return [{ id: user.tenantId }];
+    },
     tenantAppearanceProfile: model('appearance'),
     clientChannelProfile: model('channel'),
     businessWorkspace: { findMany: async () => [] },
