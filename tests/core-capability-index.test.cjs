@@ -188,7 +188,7 @@ test("Rental页面聚合追实际订单描述，直接数组定位而控制流�
   };
   try {
     const index = buildRepositoryCapabilityIndex(root), pages = index.capabilities.filter(item => item.kind === "page" && item.owner === "rental");
-    assert.equal(pages.length, 21);
+    assert.equal(pages.length, 31);
     for (const [id, route] of [["orders", "/orders"], ["order-create", "/orders/new"], ["order-detail", "/orders/:id"]]) {
       const page = pages.find(item => item.id === `page:rental:${id}`);
       assert.equal(page.entry.path, `/cores/rental${route}`);
@@ -204,9 +204,15 @@ test("Rental页面聚合追实际订单描述，直接数组定位而控制流�
     for (const [id, group, index, line] of [
       ["work-orders", "work-orders", 0, 16], ["work-order-detail", "work-orders", 1, 26],
       ["payment-reconciliation", "payment-reconciliation", 0, 11], ["payment-reconciliation-detail", "payment-reconciliation", 1, 21],
+      ["qualification-types", "membership", 0, 15], ["membership-reviews", "membership", 1, 32],
+      ["personal-members", "membership", 2, 42], ["personal-member-detail", "membership", 3, 52],
+      ["corporate-members", "membership", 4, 62], ["corporate-member-detail", "membership", 5, 72],
+      ["membership-plans", "membership", 6, 82], ["membership-rewards", "membership", 7, 92],
+      ["workbench", "operations", 0, 11], ["operation-report", "operations", 1, 18],
     ]) {
       const page = pages.find(item => item.id === `page:rental:${id}`), descriptor = page.details.descriptorSource;
       assert.equal(descriptor.schema.id, id);
+      assert.equal(page.entry.path, `/cores/rental${descriptor.schema.path}`);
       assert.equal(descriptor.arrayIndex, index);
       assert.ok(descriptor.fieldSources.some(field => field.pointer === "/id"
         && field.source.path === `packages/rental-core/admin/${group}/pages.ts` && field.source.line === line));
@@ -215,8 +221,6 @@ test("Rental页面聚合追实际订单描述，直接数组定位而控制流�
       assert.equal(Object.hasOwn(descriptor, "sourceFields"), false);
       for (const field of ["permissions", "component", "implementationVersion"]) assert.ok(page.details.unresolvedMetadata.includes(field));
     }
-    for (const group of ["MEMBERSHIP", "OPERATIONS"]) assert.ok(index.issues.some(issue =>
-      issue.code === "page_metadata" && issue.message.includes(`Object.values(RENTAL_${group}_PAGES).map`)));
     for (const [id, order] of [["item-groups", 0], ["assets", 20], ["locations", 40]]) {
       const page = pages.find(item => item.id === `page:rental:${id}`);
       assert.equal(page.details.menu.order, order);
@@ -240,6 +244,41 @@ export function mappedContribution(version) {
       assert.equal(result.capabilities.some(item => item.id === "page:rental:fixture-map"), !control);
       assert.ok(result.issues.some(issue => issue.code === "page_metadata" && issue.message.includes(control ? "控制流" : "unavailable()")));
       assert.equal(result.capabilities.some(item => item.id === "page:rental:unreferenced"), false);
+    }
+    const block = (table, extra = "", modifier = "") => `Object.values(definitions).map(${modifier}definition => {
+      const Content = ${table}[definition.id];
+      const Page = () => { throw Error("must-not-execute-component"); };
+      ${extra}
+      return { ...definition, component: Page };
+    })`;
+    const refused = [
+      ["extraCall", block("components", "unavailable();")], ["control", block("components", "if (unavailable()) return {};")],
+      ["asynchronous", block("components", "", "async ")], ["unknownCover", block("unknownComponents")],
+      ["accessor", block("getterComponents")], ["delayed", block("delayedComponents")], ["dynamicReference", block("runtimeComponents")],
+    ];
+    adminFixture = `function StaticComponent() { throw Error("must-not-execute-imported-component"); }
+const definitions = { entry: { id: "selected", path: "/selected", title: "静态", permissions: [] } };
+const components = { selected: StaticComponent };
+const unknownComponents = { ...unavailable(), selected: StaticComponent };
+const getterComponents = { get selected() { throw Error("must-not-execute-getter"); } };
+const delayedComponents = { selected: StaticComponent };
+function writeLater() { Object.assign(delayedComponents, { selected: StaticComponent }); }
+const runtimeComponents = { selected: unavailable() };
+const accepted = ${block("components")};
+${refused.map(([name, expression]) => `const ${name} = ${expression};`).join("\n")}`;
+    const ts = require("typescript"), { RepositorySource } = require("../packages/core-contracts/dist/repository-source.js");
+    const { describeRepositorySchema } = require("../packages/core-contracts/dist/repository-openapi.js");
+    const source = new RepositorySource(root, [adminFile], {});
+    const declarations = source.source(adminFile).statements.filter(ts.isVariableStatement).flatMap(statement => [...statement.declarationList.declarations]);
+    const describe = name => describeRepositorySchema(source, declarations.find(node => node.name.getText() === name).name);
+    const accepted = describe("accepted");
+    assert.equal(accepted.schema[0].id, "selected");
+    assert.equal(accepted.status, "source-reference");
+    assert.ok(accepted.issues.includes("/0/component:unsupported-expression"));
+    for (const [name] of refused) {
+      const result = describe(name);
+      assert.equal(result.status, "source-reference", name);
+      assert.equal(Object.hasOwn(result, "schema"), false, name);
     }
   } finally { fs.readFileSync = originalRead; }
 });

@@ -1,6 +1,7 @@
 /**
  * 静态 HTTP/OpenAPI 声明的字段定位。只读取原 AST、符号和本地引用。
  * 字面量、有限数字加减及单一返回表达式按原语法读取，不执行模块、生成器或校验器。
+ * 页面组件映射仅绑定受限局部声明，组件体和宿主上下文保持未解析来源。
  * DTO 请求字段只定位原类型和装饰器，不推导校验或响应 schema。Zod 转换和动态表达式保留来源。
  */
 import ts from "typescript";
@@ -236,7 +237,7 @@ class StaticSchemaReader {
         const list = unwrap(node.expression.expression), callback = unwrap(node.arguments[0]);
         if (ts.isArrowFunction(callback) && !callback.modifiers?.length && callback.parameters.length === 1
           && ts.isIdentifier(callback.parameters[0].name) && !callback.parameters[0].initializer
-          && !callback.parameters[0].dotDotDotToken && !ts.isBlock(callback.body)) {
+          && !callback.parameters[0].dotDotDotToken) {
           const symbol = this.source.checker.getSymbolAtLocation(callback.parameters[0].name);
           let items: ExpressionBinding[] | undefined;
           if (ts.isArrayLiteralExpression(list) && list.elements.every(ts.isStringLiteralLike))
@@ -257,7 +258,47 @@ class StaticSchemaReader {
             for (const item of items) {
               const scope = new Map(bindings);
               scope.set(symbol, item);
-              const part = this.read(callback.body, `${pointer}/${value.length}`, scope, chain, true);
+              let body = callback.body;
+              if (ts.isBlock(body)) {
+                // 只接纳组件表选择、局部箭头组件与唯一直接返回；不解释一般语句或执行组件体。
+                const [lookup, local, returned] = body.statements;
+                if (body.statements.length !== 3 || !ts.isVariableStatement(lookup) || !ts.isVariableStatement(local)
+                  || !(lookup.declarationList.flags & ts.NodeFlags.Const) || !(local.declarationList.flags & ts.NodeFlags.Const)
+                  || lookup.declarationList.declarations.length !== 1 || local.declarationList.declarations.length !== 1
+                  || !ts.isReturnStatement(returned) || !returned.expression) return this.unresolved(pointer, "dynamic-map-body");
+                const content = lookup.declarationList.declarations[0], page = local.declarationList.declarations[0];
+                const access = content.initializer && unwrap(content.initializer), component = page.initializer && unwrap(page.initializer);
+                const result = unwrap(returned.expression);
+                if (!ts.isIdentifier(content.name) || !ts.isIdentifier(page.name) || !access || !ts.isElementAccessExpression(access)
+                  || !access.argumentExpression || !component || !ts.isArrowFunction(component) || component.modifiers?.length
+                  || component.parameters.length || !ts.isObjectLiteralExpression(result) || result.properties.length !== 2
+                  || !ts.isSpreadAssignment(result.properties[0]) || !ts.isIdentifier(result.properties[0].expression)
+                  || this.source.checker.getSymbolAtLocation(result.properties[0].expression) !== symbol
+                  || !ts.isPropertyAssignment(result.properties[1]) || result.properties[1].name.getText().replace(/^["']|["']$/g, "") !== "component"
+                  || !ts.isIdentifier(result.properties[1].initializer)) return this.unresolved(pointer, "dynamic-map-body");
+                const contentSymbol = this.source.checker.getSymbolAtLocation(content.name), pageSymbol = this.source.checker.getSymbolAtLocation(page.name);
+                if (!contentSymbol || !pageSymbol || this.source.checker.getSymbolAtLocation(result.properties[1].initializer) !== pageSymbol)
+                  return this.unresolved(pointer, "dynamic-map-body");
+                const guard = new StaticSchemaReader(this.source), table = guard.read(access.expression, "", scope, chain);
+                const writes = table !== UNRESOLVED && table !== null && typeof table === "object" ? guard.objectWrites.get(table) : undefined;
+                for (const composition of guard.compositions) this.compositions.add(composition);
+                const key = guard.read(access.argumentExpression, "", scope, chain);
+                // 组件值本身保持源码引用；键集合、覆盖和写入必须可证明，访问器不会被调用。
+                if (!writes || writes.unknown || writes.unsafe || typeof key !== "string" || !writes.keys.has(key))
+                  return this.unresolved(pointer, "dynamic-map-component-table");
+                const selected = this.selectMember(access.expression, [key], scope, chain);
+                const reference = selected && selected !== UNRESOLVED && unwrap(selected.expression);
+                const targetSymbol = reference && ts.isIdentifier(reference) && this.source.checker.getSymbolAtLocation(reference);
+                const target = targetSymbol && this.source.target(targetSymbol).valueDeclaration;
+                const targetValue = target && ts.isVariableDeclaration(target) && target.initializer ? unwrap(target.initializer) : target;
+                if (!selected || selected === UNRESOLVED || !target || !isRepositorySourcePath(this.source.root, target.getSourceFile().fileName)
+                  || !targetValue || !(ts.isFunctionDeclaration(targetValue) || ts.isArrowFunction(targetValue) || ts.isFunctionExpression(targetValue)))
+                  return this.unresolved(pointer, "dynamic-map-component-reference");
+                scope.set(contentSymbol, selected);
+                scope.set(pageSymbol, { expression: component, bindings: new Map(scope), seen: chain });
+                body = returned.expression;
+              }
+              const part = this.read(body, `${pointer}/${value.length}`, scope, chain, true);
               if (part === UNRESOLVED) return UNRESOLVED;
               value.push(part);
             }
