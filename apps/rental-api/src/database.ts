@@ -3,12 +3,22 @@
 import { Global, Injectable, Module } from "@nestjs/common";
 import { PlatformDatabaseClient } from "@rental-os/platform-api/database";
 import { integrationTestWhere, type IntegrationTestUpdate } from "@rental-os/platform-server/integration-store";
+import { mapPrismaNullInputs } from "@rental-os/platform-server/prisma-runtime";
 import { PrismaClient, Prisma } from "../generated/client";
 
 export type RentalDatabaseTransaction = Prisma.TransactionClient;
 
 @Injectable()
 export class RentalDatabaseClient extends PrismaClient {
+  constructor(options?: Prisma.PrismaClientOptions) {
+    super(options);
+    // 私有适配不加载默认生成 Client；在同一调用及事务内采用本宿主的官方空值品牌。
+    this.$use((parameters, next) => {
+      parameters.args = mapPrismaNullInputs(parameters.args, Prisma);
+      return next(parameters);
+    });
+  }
+
   updateTestConfiguration({ where, data }: IntegrationTestUpdate) {
     return this.tenantIntegrationConfig.updateMany({ where: integrationTestWhere(where, Prisma.JsonNull), data });
   }
@@ -18,6 +28,7 @@ export class RentalDatabaseClient extends PrismaClient {
 }
 
 @Global()
-@Module({ providers: [RentalDatabaseClient, { provide: PlatformDatabaseClient, useExisting: RentalDatabaseClient }],
+@Module({ providers: [{ provide: RentalDatabaseClient, useFactory: () => new RentalDatabaseClient() },
+  { provide: PlatformDatabaseClient, useExisting: RentalDatabaseClient }],
   exports: [RentalDatabaseClient, PlatformDatabaseClient] })
 export class RentalDatabaseModule {}

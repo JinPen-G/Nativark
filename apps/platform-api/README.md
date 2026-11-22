@@ -48,7 +48,7 @@ npm run start -w @rental-os/platform-api
 | [当前底座发行读取](../../packages/platform-core-host/src/core-package-deployment.ts) | 固定启动锁，核对当前模块目录和标准包全部字节，沿原 MySQL 观察供给版本及候选材料 |
 | [数据计划](src/platform-data.ts) | 固定迁移摘要、唯一数据版本、实际物理结构读取；清单和真实已应用账分别核验 |
 | [初始化](src/initialize.ts) | 显式命令创建公共SaaS账号，口令来自进程；重复执行不重置已有账号，失败不补默认账号 |
-| [数据库](src/database.ts) | 由本宿主 schema 生成的单一 Client；导入不连接，实际请求按 Prisma 建立连接 |
+| [数据库](src/database.ts) | 由本宿主 schema 生成的单一 Client；导入不连接，实际请求按 Prisma 建立连接。请求入口将公共运行库的官方 JSON 空值映射为本 Client 的单例，保留普通空对象与数组 |
 | [公共订阅接入与 API](../../packages/platform-server/src/modules/subscription/README.md) | 当前租户查看/申请、SaaS 办理、目录与标准年费、原修订/排期/审计 |
 | [公共组织与安全管理](../../packages/platform-server/src/modules/platform/README.md) | 当前主体和组织范围复验、固定平台安全读取、同事务保存与审计；七操作、五路径由同源政策/schema组合 |
 | [公共字典与编号](../../packages/platform-server/src/modules/platform-tools/README.md) | 本租户工具权限、最高生效配置、同事务取号和审计；五个原操作共用 DTO 与 OpenAPI |

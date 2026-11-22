@@ -7,7 +7,7 @@
 | HTTP 与准入 | [模块](src/platform-server.module.ts)、[公共政策](src/platform-http-policy.ts)、[Guard](src/platform-auth.guard.ts)；未知方法/路径拒绝，行业 HTTP 由受控宿主显式供给 |
 | 权限匹配 | [同源匹配](src/permission-match.ts) 从 `/permission-match` 提供原权限码及通配规则；调用方先取得当前可信权限集合，匹配函数不创建授权 |
 | 可选任务 Runner | [接入说明](src/ai-runtime/README.md)、[原推进算法](src/ai-runtime/ai-task-runner.service.ts)从 `/ai-runtime` 提供；业务、授权、原租约、累计资源和Gateway经宿主端口供给，不加载Rental或开放无Core Agent |
-| Prisma SQL运行值 | [官方运行库适配](src/prisma-runtime.ts)从 `/prisma-runtime` 提供 schema 无关的 SQL、Decimal、空值单例、错误类及隔离级别；生成 Client 及其输入类型由所选宿主和业务适配持有 |
+| Prisma SQL运行值 | [官方运行库适配](src/prisma-runtime.ts)从 `/prisma-runtime` 提供 schema 无关的 SQL、Decimal、空值单例、错误类及隔离级别；生成 Client 及其输入类型由所选宿主和业务适配持有。宿主用 `mapPrismaNullInputs` 将三个官方空值映射为该 Client 的同义单例，普通 JSON 值保持原义 |
 | 公共会话 | [公共认证](src/modules/auth/platform-auth.service.ts)、[共享会话算法](src/modules/auth/auth-session.service.ts)、[HTTP](src/modules/auth/auth-session.controller.ts)及[Web 登录/改密](../platform-admin/src/session-pages.tsx)，复用原签名、失败保护、单次刷新和改密 |
 | 当前组织范围 | [组织子树与地点交集](src/common/organization-location-scope.ts) 从 `/organization-location-scope` 提供；调用方先限定租户，缺失/停用组织返回空集合，配置地点只缩小已映射范围 |
 | 公共数据与原账 | [公共 schema](../../apps/platform-api/prisma/schema.prisma)、[固定数据计划](../../apps/platform-api/src/platform-data.ts)、[原账观察](../core-host/src/mysql-deployment.ts)与[物理读取](../platform-core-host/src/mysql-physical.ts)；公共表、迁移原文及当前结构分别核定，Core 外键由所选宿主供给 |
