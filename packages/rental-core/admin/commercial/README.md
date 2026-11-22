@@ -6,7 +6,7 @@
 
 宿主通过 createRentalCommercialPageContext 供给当前 AdminRuntime、原鉴权图片读取、包含租户与经营空间的 scopeKey 和当前身份读取函数，再将上下文交给 createRentalCommercialAdminContribution。JSON 与图片传输在请求前后复验同一身份，查询传递取消信号。[上下文](page-context.ts) · [旧宿主上下文](../../../../apps/admin/src/features/commercial/legacy-commercial-context.ts) · [原图片传输](../../../../apps/admin/src/api/rentalCore.ts)
 
-统一 Rental 贡献合并这七页。页面权限为 price/manage，旧宿主继续复验 rental-os:price:manage。版本详情参数由已匹配的宿主路由供给，正整数与安全整数检查沿原页面。页头主操作、价格版本入口与返回动作使用正式 CorePage 声明，版本导航解析当前注册表。[旧路由适配](../../../../apps/admin/src/features/commercial/legacy-commercial-page.tsx) · [统一贡献](../index.tsx)
+统一 Rental 贡献合并这七页。页面权限为 price/manage，旧宿主继续复验 rental-os:price:manage。版本详情参数由已匹配的宿主路由供给，正整数与安全整数检查沿原页面。页头主操作、价格版本入口与返回动作使用正式 CorePage 声明。“价格版本”沿原正文辅助操作区使用 tools 插槽，新增调价计划沿原顶部主操作区，返回沿 navigation 插槽，版本导航解析当前注册表。[商业页面](RentalCommercialPage.tsx) · [旧路由适配](../../../../apps/admin/src/features/commercial/legacy-commercial-page.tsx) · [统一贡献](../index.tsx)
 
 | 页面 | 声明路径 | 旧兼容路径 |
 | --- | --- | --- |

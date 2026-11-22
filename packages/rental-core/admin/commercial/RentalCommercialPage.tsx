@@ -879,6 +879,7 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
                     {
                       id: "price-versions",
                       kind: "navigate",
+                      slot: "tools",
                       label: { default: t("价格版本") },
                       permissions: RENTAL_COMMERCIAL_ACCESS,
                       icon: <HistoryOutlined />,
