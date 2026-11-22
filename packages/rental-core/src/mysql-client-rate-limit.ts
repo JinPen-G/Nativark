@@ -1,7 +1,7 @@
 /** 原客户地址/会话及验证码配额，原数据库桶、原子递增和生命周期保持。
  * 服务实例由宿主唯一装配；本层不采信客户端转发头或重复开启清理计时器。 */
 import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
-import { HttpException, HttpStatus, OnApplicationBootstrap, OnApplicationShutdown } from "@nestjs/common";
+import { HttpException, HttpStatus, Logger, OnApplicationBootstrap, OnApplicationShutdown } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
 import { createHash, randomUUID } from "node:crypto";
 import type { RentalClientRateLimitStorage } from "./client-session-ports";
@@ -86,6 +86,7 @@ export class ClientApiRateLimitService implements OnApplicationBootstrap, OnAppl
 
   private cleanupTimer?: ReturnType<typeof setInterval>;
   private cleanup?: Promise<void>;
+  private readonly cleanupLogger = new Logger(ClientApiRateLimitService.name);
   private stopping = false;
 
   onApplicationBootstrap() {
@@ -96,9 +97,12 @@ export class ClientApiRateLimitService implements OnApplicationBootstrap, OnAppl
       // 日桶从当天起点计数，须保留完整日窗口，避免清理后同一天重新取得配额。
       const running = this.prisma.clientApiRateBucket.deleteMany({
         where: { bucketStart: { lt: new Date(Date.now() - IDENTIFIER_DAILY_RULE.windowSeconds * 1000) } }
-      }).then(() => undefined, () => undefined);
+      }).then(() => undefined);
       this.cleanup = running;
-      void running.finally(() => { if (this.cleanup === running) this.cleanup = undefined; });
+      // 观察 finally 的派生 Promise，关闭路径仍等待原删除 Promise 并传播其失败。
+      void running.finally(() => { if (this.cleanup === running) this.cleanup = undefined; }).catch(error => {
+        this.cleanupLogger.error("客户限流清理失败", error instanceof Error ? error.stack : String(error));
+      });
     }, 10 * 60 * 1000);
     this.cleanupTimer.unref?.();
   }

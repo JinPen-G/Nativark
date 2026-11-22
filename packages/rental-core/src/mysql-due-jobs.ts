@@ -66,6 +66,10 @@ export function rentalDueJobIntervalMs(env: NodeJS.ProcessEnv = process.env): nu
 export class RentalDueJobScheduler<TTransaction extends RentalDueJobTransaction = RentalDueJobTransaction> implements OnApplicationBootstrap, OnModuleDestroy {
   private timer?: ReturnType<typeof setInterval>;
   private running = false;
+  private stoppingDueJobs = false;
+  private activeTick?: Promise<void>;
+  private closing?: Promise<void>;
+  private readonly activeJobs = new Set<Promise<boolean>>();
   private notificationDispatchLifetime = new AbortController();
   private readonly logger = new Logger(RentalDueJobScheduler.name);
 
@@ -97,6 +101,7 @@ export class RentalDueJobScheduler<TTransaction extends RentalDueJobTransaction 
   }
 
   onApplicationBootstrap() {
+    if (this.stoppingDueJobs) return;
     if (this.notificationDispatchLifetime.signal.aborted) this.notificationDispatchLifetime = new AbortController();
     if (rentalDueJobsDisabled()) return;
     this.timer = setInterval(() => {
@@ -105,10 +110,25 @@ export class RentalDueJobScheduler<TTransaction extends RentalDueJobTransaction 
     this.timer.unref();
   }
 
-  onModuleDestroy() {
+  onModuleDestroy(): void {
+    this.stopScheduling();
+  }
+
+  private stopScheduling(): void {
+    this.stoppingDueJobs = true;
     this.notificationDispatchLifetime.abort();
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
+  }
+
+  /** 旧宿主在进入 Nest 销毁钩子前调用，枚举和命名锁等待也属于原在途工作。 */
+  stop(): Promise<void> {
+    this.stopScheduling();
+    return this.closing ??= (async () => {
+      const results = await Promise.allSettled([this.activeTick, ...this.activeJobs]);
+      const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+      if (failures.length) throw new AggregateError(failures.map(result => result.reason), "到期作业排空失败");
+    })();
   }
 
   /** 是否已启动定时器；测试用。 */
@@ -120,13 +140,20 @@ export class RentalDueJobScheduler<TTransaction extends RentalDueJobTransaction 
    * 一次节拍：遍历所有经营空间（与自动分配扫描同源：业务设置表一行即一个空间），
    * 逐任务加锁执行。任一任务/空间失败只记日志，不阻断其余。
    */
-  async runTick(): Promise<void> {
-    if (this.running) return;
+  runTick(): Promise<void> {
+    if (this.running || this.stoppingDueJobs) return Promise.resolve();
     this.running = true;
+    const running = this.executeTick();
+    this.activeTick = running;
+    return running;
+  }
+
+  private async executeTick(): Promise<void> {
     try {
       const scopes = await this.prisma.rentalTenantBusinessSettings.findMany({ select: { tenantId: true, workspaceId: true } });
       for (const scope of scopes) {
         for (const job of this.jobs) {
+          if (this.stoppingDueJobs) return;
           try {
             await this.runLocked(job, scope.tenantId, scope.workspaceId);
           } catch (error) {
@@ -139,17 +166,20 @@ export class RentalDueJobScheduler<TTransaction extends RentalDueJobTransaction 
       }
     } finally {
       this.running = false;
+      this.activeTick = undefined;
     }
   }
 
   /** 拿不到锁（其他实例正在跑）时静默跳过；返回是否实际执行。 */
   async runLocked(job: RentalDueJob, tenantId: string, workspaceId: string): Promise<boolean> {
+    if (this.stoppingDueJobs) return Promise.resolve(false);
     const lockName = rentalDueJobLockName(job.name, tenantId, workspaceId);
-    return this.prisma.$transaction(
+    const running = Promise.resolve(this.prisma.$transaction(
       async (tx) => {
         const rows = await tx.$queryRaw<Array<{ acquired: number | bigint | null }>>`SELECT GET_LOCK(${lockName}, 0) AS acquired`;
         if (Number(rows[0]?.acquired ?? 0) !== 1) return false;
         try {
+          if (this.stoppingDueJobs) return false;
           await runWithRequestIdentity(
             { tenantId, workspaceId, userId: RENTAL_DUE_JOB_OPERATOR },
             () => job.run(tenantId, workspaceId),
@@ -161,7 +191,9 @@ export class RentalDueJobScheduler<TTransaction extends RentalDueJobTransaction 
       },
       // 任务本身会开启自己的短事务；这个外层事务只是锁的连接载体，允许跑得更久。
       { maxWait: 5_000, timeout: 10 * 60_000 },
-    );
+    ));
+    this.activeJobs.add(running);
+    return running.finally(() => { this.activeJobs.delete(running); });
   }
 
   private async context(tenantId: string): Promise<BusinessContext> {
