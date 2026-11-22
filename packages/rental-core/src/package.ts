@@ -95,7 +95,8 @@ export function createRentalPackage(input: {
   for (const [file, bytes] of files) {
     if (!file.endsWith(".md")) continue;
     files.set(file, Buffer.from(pinCoreDocumentationLinks(text(bytes),
-      `${sourceDirectory}/${file}`, documentationSource, file === "README.md")));
+      `${sourceDirectory}/${file}`, documentationSource, file === "README.md",
+      input.source.repository === documentationSource.repository ? undefined : { directory: sourceDirectory, source: input.source })));
   }
   const manifest = createRentalManifest({ source: input.source,
     assets: [...files.keys()].filter(file => !["README.md", "LICENSE"].includes(file)), contributions: input.contributions });

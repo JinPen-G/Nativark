@@ -1,16 +1,19 @@
 /** 从公开接入手册的快速入口和Agent模板生成随包指南，字段仍以正式合同为唯一来源。 */
 import type { z } from "zod";
-import { CORE_CONTRACT_VERSION, type CoreManifest, type CoreSourceSchema } from "./manifest";
+import { CORE_CONTRACT_VERSION, CorePackagePathSchema, type CoreManifest, type CoreSourceSchema } from "./manifest";
 
 export const CORE_GUIDE_SOURCE_FILE = "packages/core-contracts/README.md";
 const plain = (text: string) => text.replace(/[<>&]/g, value => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[value]!)
   .replace(/([\\`*_[\]{}|])/g, "\\$1").replace(/[\r\n]+/g, " ");
 
-/** 随包文档的相对链接按原源码文件定位到固定提交；保留外链与代码块，README可保留本页锚点。 */
+/** 相对链接按固定来源定位，独立包内资料可使用自己的源码提交；外链、代码块和本页锚点保留。 */
 export function pinCoreDocumentationLinks(text: string, sourceFile: string, source: z.infer<typeof CoreSourceSchema>,
-  retainLocalFragments = false): string {
+  retainLocalFragments = false,
+  packageSource?: { directory: string; source: z.infer<typeof CoreSourceSchema> }): string {
   const base = new URL(`${source.repository.replace(/\.git$/, "")}/blob/${source.commit}/`);
   const original = new URL(sourceFile, base);
+  const packageBase = packageSource && new URL(`${CorePackagePathSchema.parse(packageSource.directory)}/`, base);
+  const packageDestination = packageSource && new URL(`${packageSource.source.repository.replace(/\.git$/, "")}/blob/${packageSource.source.commit}/`);
   let fence: string | undefined;
   return text.split("\n").map(line => {
     const marker = /^\s{0,3}(`{3,}|~{3,})/.exec(line);
@@ -25,7 +28,10 @@ export function pinCoreDocumentationLinks(text: string, sourceFile: string, sour
       if (/^[a-z][a-z0-9+.-]*:/i.test(target) || retainLocalFragments && target.startsWith("#")) return link;
       const resolved = new URL(target, original);
       if (!resolved.href.startsWith(base.href)) throw new Error("文档链接越出固定源码仓库");
-      return `](<${resolved.href}>)`;
+      // 包内实现和资料随 Core 单独更新；越出包的公共资料仍属于所选底座提交。
+      const pinned = packageBase && packageDestination && resolved.href.startsWith(packageBase.href)
+        ? new URL(resolved.href.slice(packageBase.href.length), packageDestination).href : resolved.href;
+      return `](<${pinned}>)`;
     });
   }).join("\n");
 }

@@ -396,7 +396,7 @@ npm run build -w @rental-os/core-contracts
 node packages/core-contracts/dist/generate-guide.js <Core清单JSON绝对路径> <底座来源JSON绝对路径>
 ```
 
-命令只向标准输出写Markdown，不覆盖包内已有指南。程序内可从正式出口调用 `renderCoreGuide(manifest, guideDocument, platformSource)`；公开手册及源码引用固定到指定提交，服务端、后台、API及已声明可选贡献链接到包内入口。README/LICENSE也可从生成指南直接打开。缺少原文锚点会拒绝生成，指南保留对应版本的支持状态。页面接入见[公共后台包](../platform-admin/README.md)和本文页面声明章节。
+命令只向标准输出写Markdown，不覆盖包内已有指南。程序内可从正式出口调用 `renderCoreGuide(manifest, guideDocument, platformSource)`。标准包资料可通过 `pinCoreDocumentationLinks` 单独指定包的源码来源，包内资料跟随Core提交，公共资料仍固定到底座支持提交；公开手册及源码引用固定到指定提交，服务端、后台、API及已声明可选贡献链接到包内入口。README/LICENSE也可从生成指南直接打开。缺少原文锚点会拒绝生成，指南保留对应版本的支持状态。页面接入见[公共后台包](../platform-admin/README.md)和本文页面声明章节。
 
 打包时复用正式出口 `pinCoreDocumentationLinks(text, sourceFile, source)`，以原源码文件路径解释相对链接并固定到本次提交，保留外链、围栏及行内代码示例。抽出的章节锚点指回公开手册；完整README可传第四参数true保留本页锚点。链接越出固定源码仓库时拒绝，生成过程不访问网络或执行文档命令。[生成源码](src/guide.ts) · [工单打包消费者](../example-tickets-core/src/package.ts)
 

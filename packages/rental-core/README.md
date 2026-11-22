@@ -22,7 +22,7 @@
 | [完整客户网站](clients/website-ui/README.md)、[网站入口](clients/website-ui/index.ts)、[浏览器薄宿主](../../apps/tenant-website/README.md) | `/clients/website-ui` 提供原15路由、页面、语言和样式；宿主供给同一客户会话、公开配置、可靠存储与资产映射，官网和AI业务请求继续沿原协议 |
 | [企业门户前端](clients/enterprise-portal/README.md)、[应用入口](clients/enterprise-portal/index.ts)、[原薄宿主](../../apps/enterprise-portal/README.md) | `/clients/enterprise-portal` 提供完整企业门户，页面使用精确子出口；宿主供给同一客户会话和公共UI，企业/本人/空间及原材料权限沿真实服务核验，不依赖旧后台源码 |
 | [营业时区](clients/time.ts)、[微信打包](../../scripts/miniprogram-shared-types.cjs) | `/clients/time` 是原生CommonJS与声明出口，复用原时区/DST/回退算法；微信构建仅在实际引用时带入同一时间模块，费用仍由服务端裁定 |
-| [标准包工厂](src/package.ts)、[清单工厂](src/manifest.ts) | `/package` 按实际文件形成发行清单。随包 Markdown 的链接在计算归档摘要前固定到源码或单独指定的公开文档提交，根 README 保留本页锚点 |
+| [标准包工厂](src/package.ts)、[清单工厂](src/manifest.ts) | `/package` 按实际文件形成发行清单。随包 Markdown 在归档前固定来源：独立发行的业务资料指向Core提交，公共资料指向所选底座支持提交；根README保留本页锚点 |
 | [客户认证](clients/miniprogram/auth/README.md)、[正式客户入口](clients/miniprogram/index.ts) | `/clients/miniprogram` 提供密码/短信/微信、用途验证码、注册与本人注销；宿主供给原渠道、请求和会话采用，一次性凭证及原错误保持 |
 | [客户AI请求](clients/miniprogram/README.md)、[员工AI请求](clients/staff/README.md) | 两个原生客户端出口提供任务、取消、报价、目标、预约交接及检查/入口动作工厂；宿主供给同一运输、当前会话和原生成校验器，准备、明确提交、取消与原结果沿各自原协议 |
 | [会员请求](admin/membership/client.ts)、[客户请求](admin/membership/customer-client.ts) | `/admin/membership/client` 与 `/admin/membership/customer-client` 提供原57项请求；传入宿主唯一认证请求，保留租户会员、客户主档、账号状态、敏感资料、企业账务及原冲销收据边界 |
