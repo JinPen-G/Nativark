@@ -28,6 +28,8 @@
 
 定价组新增时沿原 initialRates 转换，时间费率和用量费率分别保留对应字段。资金费率保存使用原整体版本追加接口。[定价分组](PricingGroupPage.tsx) · [初始费率转换](pricing-group-initial-rate.ts)
 
+定价分组主列表及原费率继续读取原价格权限释放的业务对象。型号目录按 catalog/view、catalog/manage、order/view 或 order/create 读取，经营术语按 order/view、catalog/view 或 asset/view 读取，两者均由当前已验证宿主核对，请求前后及手动刷新复验权限和页面身份。附属失败或受限独立呈现，旧型号图片树撤下，主记录已有的成员名称与数量保留；标题沿原静态默认，币种、计价单位和历史价格仍来自原业务设置与价格版本。编辑及资金费率保存继续要求原完整型号和必需查询，保存前核对当前查询状态，刷新保留原草稿代次。[定价查询与保存](PricingGroupPage.tsx) · [卡片型号状态](commercialCards.tsx) · [原服务端权限](../../src/http-auth.ts)
+
 调价草稿冻结打开时的版本与费率，提交时只保留操作者改过的价格项。创建草稿后继续核对预览及确认，恢复历史版本使用原原因和追加接口。当前版本列表与详情复用同一查询键及生效时间判据。[商业页面](RentalCommercialPage.tsx) · [版本读取](usePriceVersions.ts)
 
 券模板、发放和作废沿原订单台账请求。券门槛、预算、领用限制和日期绑定保留原载荷。增值服务条款、适用范围与容量时间窗口由同一商业客户端提交。[优惠券](CouponPage.tsx)

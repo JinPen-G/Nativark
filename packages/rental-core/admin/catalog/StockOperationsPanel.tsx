@@ -1,4 +1,5 @@
-/** 库存作业保留原幂等键、表单和真实流水，当前页面拥有提交状态。 */
+/** 库存作业保留原幂等键、表单和真实流水，当前页面拥有提交状态。
+ * 原宿主可供给当前引用资料判定，打开及保存均复验，不用旧下拉资料绕过撤权。 */
 import { useLayoutEffect, useMemo, useRef } from "react";
 import { UnsavedChangesGuard, useCorePageHost } from "@rental-os/platform-admin/core";
 import { useRentalCatalogPageContext } from "./page-context";
@@ -64,12 +65,16 @@ export function StockOperationsPanel({
   terminology,
   canManage,
   unavailable = false,
+  unavailableText,
+  referencesAvailable,
 }: {
   groups: RentalItemGroup[];
   locations: RentalFulfillmentLocation[];
   terminology?: RentalCategoryTerminology;
   canManage: boolean;
   unavailable?: boolean;
+  unavailableText?: string;
+  referencesAvailable?: () => boolean;
 }) {
   const { message } = App.useApp();
   const { t, locale } = useLocale();
@@ -88,6 +93,7 @@ export function StockOperationsPanel({
   const assertManage = () => {
     if (!isCurrentScope()) throw new DOMException("库存作业页面的会话或经营空间已变化", "AbortError");
     if (!allowed()) throw new Error("当前操作不可用");
+    if (referencesAvailable && !referencesAvailable()) throw new Error("关联资料暂不可用");
   };
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -135,6 +141,7 @@ export function StockOperationsPanel({
   function openEditor() {
     if (!canManage || unavailable || apply.isPending || !allowed() || (open && !stockDismissal.visible))
       return;
+    if (referencesAvailable && !referencesAvailable()) return;
     editor.dismiss(() => {
       const firstGroup = quantityGroups[0]?.id;
       const firstLocation = storageLocations[0]?.id;
@@ -176,7 +183,7 @@ export function StockOperationsPanel({
   );
   const editorUnavailable = !canManage || unavailable || !quantityGroups.length || !storageLocations.length;
   const unavailableReason = unavailable
-    ? t("关联资料暂不可用，请先刷新。")
+    ? (unavailableText ?? t("关联资料暂不可用，请先刷新。"))
     : !quantityGroups.length
       ? t("请先建立数量型或耗材型号。")
       : !storageLocations.length

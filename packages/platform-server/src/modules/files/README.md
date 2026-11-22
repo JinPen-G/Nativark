@@ -68,6 +68,8 @@ await files.downloadUrl(tenantId, fileAssetId, owner);
 
 `uploadOriginalFileBuffer` 将服务端已有字节送入同一原会话、派发复验和完成流程。已完成或冻结待核的会话直接进入原完成读取，运输失败沿 `failOriginalFileUpload` 写原失败收据。失败 CAS 只接仍由本次占用的 pending 会话，其他完成者已经取得的冻结结果继续按其原收据处理。知识观察的授权后快照比较共用 `assertOriginalFileUploadSnapshot`，日期版本和有效期按原JSON语义参与比较，具体主体、空间、文档修订和状态范围由知识参加者核定。
 
+知识上传的 PUT 续签由 [Rental 原续签入口](../../../../rental-core/src/file-application-runtime.ts) 沿 Tenant、配置、会话、文件的原锁顺序核对完整快照。配置读取后的授权复验先于会话和文件的末次读取，读取完成后再复验授权，事务提交后核对原有效期，再返回原临时键的引用。
+
 `readOriginalFileUploadReceipt` 保留原会话、文件、配置指纹和有效期。仅仍有效的 `pending_upload` 可以取得原暂存键的 PUT，返回前再核原业务引用、原会话、原文件及当前配置，包括Date版本和会话有效期在授权等待期间的变化。已完成、过期、失败或 `freeze_pending` 返回原回执，续签不会延长有效期或另建目标。租户共享客户资料与空间业务的区别由 Rental 原参加者判断，公共框架没有 Rental 场景枚举。
 
 `FileStorageCleanup` 没有计时器或租户发现。原 Nest 宿主仍持有唯一计时器，Rental 兼容应用发现原租户集合并逐租户委托三个清理方法。[兼容应用](../../../../rental-core/src/file-application-runtime.ts)没有启动钩子或另一套定时器。原完成暂存清理在发送 DELETE 前记录 unknown，失应答及提交结果未知时只 HEAD 原键，保持完成文件与证据不变。专用保留场景由原宿主明确传入，缺少租户的调用在查询前拒绝。

@@ -16,6 +16,8 @@
 
 型号列表以型号、经营资料和品类查询处理加载与错误。定价归属是附属读取，由当前已验证 Core 页面宿主核对 price/manage、order/view 或 order/create，请求前后复验权限与页面身份。表格、卡片及其预览分别呈现读取受限、未能读取或正在读取，只有成功取得分组数组后才显示真实归属或未加入分组。刷新重读必需资料及当前有权的分组，附属失败保留在归属展示中，编辑草稿沿原代次保留，创建与编辑仍要求原必需品类事实。[型号查询与刷新](CatalogPage.tsx) · [卡片归属](catalogCards.tsx) · [页面宿主](../../../platform-admin/src/core/useCoreSession.ts) · [原服务端权限](../../src/http-auth.ts)
 
+资产与库存主列表独立读取本页业务记录、经营资料和品类。附属型号目录沿 catalog/view、catalog/manage、order/view 或 order/create，地点目录沿 station/view，通过同一当前宿主核对后才请求，手动刷新与请求完成也复验权限和身份。主记录已经投影的型号与地点名称继续显示，缺失引用名称、图片或单位资料时明确呈现读取受限、等待或未获取，失败时撤下旧附属缓存。刷新恢复当前有权的附属资料，资产编辑及库存作业仍要求原管理权限、完整必需查询和原表单校验，原打开代次及幂等键保留。[资产与库存查询](AssetWorkspacePage.tsx) · [卡片引用](assetCards.tsx) · [库存保存与流水](StockOperationsPanel.tsx)
+
 图片、资产状态历史和库存流水查询传递取消信号，缓存键绑定当前会话与经营空间。照片组件将对象 URL 绑定生成它的查询身份和原字节，身份或字节切换的首帧撤下旧图，并在替换和卸载时释放。订单等旧消费者通过同一照片薄适配接入当前宿主。[照片组件](ItemGroupPhoto.tsx) · [旧照片入口](../../../../apps/admin/src/features/catalog/ItemGroupPhoto.tsx)
 
 ## 列表与来源

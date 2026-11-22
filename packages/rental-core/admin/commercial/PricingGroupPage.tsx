@@ -37,7 +37,7 @@ import {
   useRentalCommercialWorkspaceAccess,
   type RentalCommercialPageContext,
 } from "./page-context";
-import { RENTAL_COMMERCIAL_ACCESS } from "./pages";
+import { RENTAL_COMMERCIAL_ACCESS, RENTAL_COMMERCIAL_CORE_ID } from "./pages";
 import { useOrderEditor } from "../orders/useOrderEditor";
 import { useLocale } from "@rental-os/platform-admin/locale";
 import { resolveTenantNavigationLabels } from "../catalog/pages";
@@ -48,7 +48,8 @@ import { PRICE_VERSIONS_QUERY_KEY, usePriceVersions } from "./usePriceVersions";
 import styles from "./PricingGroupPage.module.css";
 
 
-/** 定价组与资金费率沿原请求转换，当前范围持有每次打开的表单。 */
+/** 定价组与资金费率沿原请求转换，当前范围持有每次打开的表单。
+ * 型号与经营术语按原权限附属读取，价格和成员事实仍从原受权业务对象取得。 */
 export function PricingGroupPage(context: RentalCommercialPageContext) {
   return (
     <RentalCommercialPageProvider context={context}>
@@ -61,6 +62,8 @@ function PricingGroupWorkspace() {
   const {
     api: rentalCoreApi,
     scope,
+    currentScopeKey,
+    host,
     canManage,
     isCurrentScope,
     assertManage,
@@ -69,6 +72,19 @@ function PricingGroupWorkspace() {
   const { message } = App.useApp();
   const { locale, t } = useLocale();
   const queryClient = useQueryClient();
+  const canReadProfile = () =>
+    Boolean(scope) && currentScopeKey() === scope && (
+      host.canAccess(RENTAL_COMMERCIAL_CORE_ID, [{ resource: "order", action: "view" }]) ||
+      host.canAccess(RENTAL_COMMERCIAL_CORE_ID, [{ resource: "catalog", action: "view" }]) ||
+      host.canAccess(RENTAL_COMMERCIAL_CORE_ID, [{ resource: "asset", action: "view" }])
+    );
+  const canReadModels = () =>
+    Boolean(scope) && currentScopeKey() === scope && (
+      host.canAccess(RENTAL_COMMERCIAL_CORE_ID, [{ resource: "catalog", action: "view" }]) ||
+      host.canAccess(RENTAL_COMMERCIAL_CORE_ID, [{ resource: "catalog", action: "manage" }]) ||
+      host.canAccess(RENTAL_COMMERCIAL_CORE_ID, [{ resource: "order", action: "view" }]) ||
+      host.canAccess(RENTAL_COMMERCIAL_CORE_ID, [{ resource: "order", action: "create" }])
+    );
   const [keyword, setKeyword] = useState("");
   const [editing, setEditing] = useState<RentalPricingGroup>();
   const [open, setOpen] = useState(false);
@@ -88,13 +104,23 @@ function PricingGroupWorkspace() {
   });
   const profile = useQuery({
     queryKey: ["rental-core", "profile", scope],
-    enabled: Boolean(scope),
-    queryFn: ({ signal }) => rentalCoreApi.profile({ signal }),
+    enabled: canReadProfile(),
+    queryFn: async ({ signal }) => {
+      if (!isCurrentScope() || !canReadProfile()) throw new Error("经营资料读取受限");
+      const result = await rentalCoreApi.profile({ signal });
+      if (!isCurrentScope() || !canReadProfile()) throw new Error("经营资料读取受限");
+      return result;
+    },
   });
   const models = useQuery({
     queryKey: ["rental-core", "groups", scope],
-    enabled: Boolean(scope),
-    queryFn: ({ signal }) => rentalCoreApi.itemGroups({ signal }),
+    enabled: canReadModels(),
+    queryFn: async ({ signal }) => {
+      if (!isCurrentScope() || !canReadModels()) throw new Error("型号资料读取受限");
+      const result = await rentalCoreApi.itemGroups({ signal });
+      if (!isCurrentScope() || !canReadModels()) throw new Error("型号资料读取受限");
+      return result;
+    },
   });
   const pricingGroups = useQuery({
     queryKey: ["rental-core", "pricing-groups", scope],
@@ -113,6 +139,26 @@ function PricingGroupWorkspace() {
   });
   const currency = settings.data?.pricing.currency;
   const { versions, currentVersion, currentVersionDetail } = usePriceVersions();
+  const visibleProfile = canReadProfile() && !profile.isError ? profile.data : undefined;
+  const visibleModels = canReadModels() && !models.isError ? models.data : undefined;
+  const modelsUnavailableText = !canReadModels()
+    ? (locale === "en-US" ? "Model access is restricted" : "型号资料读取受限")
+    : models.isError
+      ? (locale === "en-US" ? "Unable to read model details" : "未能读取型号资料")
+      : (locale === "en-US" ? "Reading model details" : "正在读取型号资料");
+  async function refreshPricingGroups(throwOnError = false) {
+    if (!isCurrentScope()) throw new DOMException("商业页面的会话或经营空间已变化", "AbortError");
+    await Promise.all([
+      pricingGroups.refetch({ throwOnError }),
+      settings.refetch({ throwOnError }),
+      rules.refetch({ throwOnError }),
+      versions.refetch({ throwOnError }),
+      ...(currentVersion ? [currentVersionDetail.refetch({ throwOnError })] : []),
+      // 附属错误独立持有，手动刷新仍经过请求前后的当前权限复验。
+      ...(canReadModels() ? [models.refetch()] : []),
+      ...(canReadProfile() ? [profile.refetch()] : []),
+    ]);
+  }
   // 已发布（含未来生效）与最新草稿都参与字段展示，避免先配价格后配资金规则时
   // 出现“发布被拒、页面却没有补录入口”的死锁。
   const rateRuleCandidates = (rules.data ?? []).filter(
@@ -138,6 +184,7 @@ function PricingGroupWorkspace() {
   const save = useMutation({
     mutationFn: (data: SaveRentalPricingGroupRequest) => {
       assertManage();
+      if (!referencesAvailable()) throw new Error(t("当前操作不可用"));
       return rentalCoreApi.savePricingGroup(data);
     },
     onSuccess: async () => {
@@ -158,6 +205,7 @@ function PricingGroupWorkspace() {
   const saveSecurityRates = useMutation({
     mutationFn: (data: UpdateRentalPricingGroupSecurityRatesRequest) => {
       assertManage();
+      if (!referencesAvailable()) throw new Error(t("当前操作不可用"));
       if (!securityEditing) throw new Error(t("当前操作不可用"));
       return rentalCoreApi.updatePricingGroupSecurityRates(securityEditing.id, data);
     },
@@ -186,19 +234,24 @@ function PricingGroupWorkspace() {
     [pricingGroups.data, keyword],
   );
   const routeLabel = t(
-    resolveTenantNavigationLabels(profile.data?.terminology).routes.pricingGroups ?? "定价分组",
+    resolveTenantNavigationLabels(visibleProfile?.terminology).routes.pricingGroups ?? "定价分组",
   );
-  const itemLabel = t(profile.data?.terminology.itemLabel ?? "商品");
-  const itemGroupLabel = t(profile.data?.terminology.itemGroupLabel ?? "产品型号");
+  const itemLabel = t(visibleProfile?.terminology.itemLabel ?? "商品");
+  const itemGroupLabel = t(visibleProfile?.terminology.itemGroupLabel ?? "产品型号");
   const editorUnavailable =
     !canManage ||
     !settings.data ||
     !rules.data ||
-    models.isPending ||
+    !visibleModels ||
     settings.isError ||
     rules.isError ||
     models.isError ||
     pricingGroups.isError;
+  const referencesAvailable = () =>
+    isCurrentScope() && canReadModels() &&
+    ["groups", "pricing-groups", "business-settings", "rule-versions"].every(
+      key => queryClient.getQueryState(["rental-core", key, scope])?.status === "success",
+    );
   const securityUnavailable =
     editorUnavailable ||
     versions.isPending ||
@@ -241,6 +294,7 @@ function PricingGroupWorkspace() {
 
   function edit(record?: RentalPricingGroup) {
     if (editorUnavailable || save.isPending || !isCurrentScope() || (open && !editor.visible)) return;
+    if (!referencesAvailable()) return;
     if (!settings.data || !rules.data) {
       const failed = settings.isError || rules.isError;
       message.error(
@@ -292,6 +346,7 @@ function PricingGroupWorkspace() {
       securityUnavailable ||
       saveSecurityRates.isPending ||
       !isCurrentScope() ||
+      !referencesAvailable() ||
       (securityOpen && !securityEditor.visible)
     )
       return;
@@ -365,7 +420,6 @@ function PricingGroupWorkspace() {
         <QueryState
           loading={
             pricingGroups.isLoading ||
-            models.isLoading ||
             settings.isLoading ||
             rules.isLoading ||
             versions.isLoading ||
@@ -373,32 +427,24 @@ function PricingGroupWorkspace() {
           }
           error={
             pricingGroups.error ||
-            models.error ||
             settings.error ||
             rules.error ||
             versions.error ||
             currentVersionDetail.error
           }
-          onRetry={() =>
-            Promise.all([
-              pricingGroups.refetch({ throwOnError: true }),
-              models.refetch({ throwOnError: true }),
-              settings.refetch({ throwOnError: true }),
-              rules.refetch({ throwOnError: true }),
-              versions.refetch({ throwOnError: true }),
-              ...(currentVersion ? [currentVersionDetail.refetch({ throwOnError: true })] : []),
-            ])
-          }
+          onRetry={() => refreshPricingGroups(true)}
         >
           <Table<RentalPricingGroup>
             emptyScene={keyword.trim() ? "search" : "empty"}
             cardView={pricingGroupCards({
               t,
               rates: currentVersionDetail.data?.rates ?? [],
-              models: models.data ?? [],
+              models: visibleModels,
+              modelsUnavailableText,
               defaultUnit: settings.data?.pricing.defaultUnit,
               money: (value) => formatRentalMoney(value, currency),
-              canEditSecurity: Boolean(securityRateFields.length && currentVersionDetail.data),
+              canEdit: !editorUnavailable,
+              canEditSecurity: !securityUnavailable,
               edit,
               security: editSecurityRates,
             })}
@@ -413,7 +459,7 @@ function PricingGroupWorkspace() {
               ],
             }}
             rowKey="id"
-            onRefresh={() => pricingGroups.refetch()}
+            onRefresh={() => refreshPricingGroups()}
             loading={pricingGroups.isLoading}
             refreshing={pricingGroups.isFetching}
             dataSource={rows}
@@ -582,7 +628,7 @@ function PricingGroupWorkspace() {
                 mode="multiple"
                 showSearch={{ optionFilterProp: "label" }}
                 optionRender={(option) => {
-                  const model = (models.data ?? []).find((item) => item.id === option.value);
+                  const model = visibleModels?.find((item) => item.id === option.value);
                   const specification = model
                     ? [
                         model.attributes.manufacturer,
@@ -600,7 +646,7 @@ function PricingGroupWorkspace() {
                     </Space>
                   );
                 }}
-                options={(models.data ?? [])
+                options={(visibleModels ?? [])
                   .filter((item) => item.status === "enabled")
                   .map((item) => ({ value: item.id, label: `${item.name} · ${item.code}` }))}
               />
@@ -720,7 +766,7 @@ function PricingGroupWorkspace() {
                                 <Typography.Paragraph type="secondary">
                                   {locale === "en-US"
                                     ? "Charge the base amount, include the configured quantity, then bill excess usage by the selected rule. Each started precision step is rounded up."
-                                    : `基础价包含设定用量；超出部分按统一单价或分段累进计费。计量精度按“开始即计”向上进位（${t(profile.data?.terminology.usageMetricLabel ?? "使用量")}）。`}
+                                    : `基础价包含设定用量；超出部分按统一单价或分段累进计费。计量精度按“开始即计”向上进位（${t(visibleProfile?.terminology.usageMetricLabel ?? "使用量")}）。`}
                                 </Typography.Paragraph>
                                 <Space align="start" wrap>
                                   <Form.Item

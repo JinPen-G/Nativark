@@ -488,19 +488,46 @@ async function knowledgeUploadRenewalBoundaries() {
   let authorized = true;
   let duringSigning = () => {};
   let afterConfigurationRead = () => {};
-  const knowledge = new FileStorageRuntimeService(prisma, {
+  let duringAuthorization = async () => {};
+  const lockedQueries = [];
+  // Prisma读取返回独立快照，夹具内的后续变更不能直接改写已经读回的对象。
+  const knowledgeStorage = {
+    ...prisma,
+    fileAsset: {
+      ...prisma.fileAsset,
+      findFirst: async input => structuredClone(await prisma.fileAsset.findFirst(input))
+    },
+    fileUploadSession: {
+      ...prisma.fileUploadSession,
+      findFirst: async input => structuredClone(await prisma.fileUploadSession.findFirst(input))
+    },
+    $transaction: work => prisma.$transaction(tx => work({
+      ...tx,
+      fileAsset: knowledgeStorage.fileAsset,
+      fileUploadSession: knowledgeStorage.fileUploadSession,
+      $queryRaw: async query => {
+        lockedQueries.push(query.sql.replace(/\s+/gu, " ").trim());
+        return tx.$queryRaw(query);
+      }
+    }))
+  };
+  const knowledge = new FileStorageRuntimeService(knowledgeStorage, {
     runtimeConfig: async () => {
       configurationReads += 1;
       afterConfigurationRead(configurationReads);
       return structuredClone(config);
     },
-    assertEnabledInTransaction: integrations.assertEnabledInTransaction
+    assertEnabledInTransaction: async (...args) => {
+      lockedQueries.push("original-config-lock");
+      await integrations.assertEnabledInTransaction(...args);
+    }
   }, undefined, undefined, {
     authorizeUpload: async (currentTenant, input, currentOwner) => {
       assert.equal(currentTenant, tenantId);
       assert.equal(input.idempotencyKey, request.idempotencyKey);
       assert.equal(currentOwner.actorUserId, owner.actorUserId);
       assert.equal(currentOwner.workspaceId, owner.workspaceId);
+      await duringAuthorization();
       if (!authorized) throw new Error("知识上传授权已变化");
     }
   }, access);
@@ -519,6 +546,8 @@ async function knowledgeUploadRenewalBoundaries() {
     authorized = true;
     duringSigning = () => {};
     afterConfigurationRead = () => {};
+    duringAuthorization = async () => {};
+    lockedQueries.length = 0;
     config = {
       id: "knowledge-original-config", capability: "file", provider: "s3_compatible",
       settings: { endpoint: "https://storage.example.invalid", bucket: "files", region: "us-east-1" },
@@ -549,6 +578,12 @@ async function knowledgeUploadRenewalBoundaries() {
     assert.equal(grant.expiresAt, original.session.expiresAt.toISOString());
     assert.equal(signatures, 1);
     assert.ok(grant.uploadUrl);
+    assert.deepEqual(lockedQueries, [
+      "SELECT id FROM Tenant WHERE id=? LOCK IN SHARE MODE",
+      "original-config-lock",
+      "SELECT id FROM file_upload_sessions WHERE tenantId=? AND id=? FOR UPDATE",
+      "SELECT id FROM FileAsset WHERE tenantId=? AND id=? FOR UPDATE"
+    ]);
 
     const changes = [
       state => { state.session.expiresAt = new Date(0); },
@@ -570,6 +605,33 @@ async function knowledgeUploadRenewalBoundaries() {
     };
     await assert.rejects(knowledge.createUploadSession(tenantId, request, owner), /知识上传授权已变化/u);
     assert.equal(signatures, 1);
+
+    const changedDuringAuthorization = fixture();
+    duringAuthorization = async () => {
+      if (configurationReads === 2) {
+        await Promise.resolve();
+        changedDuringAuthorization.session.expiresAt = new Date(0);
+      }
+    };
+    await assert.rejects(knowledge.createUploadSession(tenantId, request, owner), /知识原上传在签发期间已变化/u);
+    assert.equal(signatures, 1);
+    assert.equal(assets.size, 1);
+    assert.equal(sessions.size, 1);
+
+    fixture();
+    // 事务内配置只读一次，末次文件读取让出执行后的撤权仍需拒绝。
+    const originalAssetRead = knowledgeStorage.fileAsset.findFirst;
+    knowledgeStorage.fileAsset.findFirst = async input => {
+      const row = await originalAssetRead(input);
+      if (configurationReads === 2) authorized = false;
+      return row;
+    };
+    try {
+      await assert.rejects(knowledge.createUploadSession(tenantId, request, owner), /知识上传授权已变化/u);
+      assert.equal(signatures, 1);
+    } finally {
+      knowledgeStorage.fileAsset.findFirst = originalAssetRead;
+    }
   } finally {
     assets.clear();
     savedAssets.forEach(([id, row]) => assets.set(id, row));

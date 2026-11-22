@@ -1,4 +1,5 @@
-/** Read-only asset/stock quick looks; quantities, statuses and restrictions stay server-owned. */
+/** 资产和库存卡片复用主记录事实，附属型号资料缺失须保留读取状态。
+ * 数量、状态及处置限制仍由服务端提供，卡片不补造单位、照片或引用名称。 */
 import { Box, CircleCheck, CirclePause, Clock3, MapPin, ScanLine, TriangleAlert, Wrench } from "lucide-react";
 import type {
   RentalAsset,
@@ -29,14 +30,17 @@ const assetStatus = {
   disabled: { tone: "neutral", icon: CirclePause },
 } as const;
 
-function photo(groups: RentalItemGroup[], id: string, name: string) {
-  const group = groups.find((item) => item.id === id);
+function photo(groups: RentalItemGroup[] | undefined, id: string, name: string, unavailableText: string) {
+  const group = groups?.find((item) => item.id === id);
+  if (!group) return <CardSecondary>{unavailableText}</CardSecondary>;
   return <CatalogCardMedia group={group} label={name} />;
 }
 
 export function assetCards({
   t,
   groups,
+  groupsUnavailableText,
+  locationsUnavailableText,
   statusLabel,
   canManage,
   canView,
@@ -49,7 +53,9 @@ export function assetCards({
   serialLabel,
 }: {
   t: Translate;
-  groups: RentalItemGroup[];
+  groups: RentalItemGroup[] | undefined;
+  groupsUnavailableText?: string;
+  locationsUnavailableText?: string;
   statusLabel: (status: string) => string;
   canManage: boolean;
   canView: boolean;
@@ -76,9 +82,14 @@ export function assetCards({
   };
   return {
     kind: "asset",
-    title: (row) => row.itemGroupName,
+    title: (row) => row.itemGroupName || groupsUnavailableText || t("未获取型号资料"),
     subtitle: (row) => row.assetNo,
-    media: (row) => photo(groups, row.itemGroupId, row.itemGroupName),
+    media: (row) => photo(
+      groups,
+      row.itemGroupId,
+      row.itemGroupName,
+      !groups ? (groupsUnavailableText ?? t("未获取型号资料")) : t("未获取型号资料"),
+    ),
     listing: (row) => {
       const status = assetStatus[row.status];
       const StatusIcon = status?.icon ?? Box;
@@ -96,10 +107,10 @@ export function assetCards({
           <p className={listing.row}>
             <span
               className={`${listing.metadata} ${listing.location}`}
-              title={`${locationLabel ?? t("履约地点")} · ${row.locationName}`}
+              title={`${locationLabel ?? t("履约地点")} · ${row.locationName || locationsUnavailableText || t("未获取地点资料")}`}
             >
               <MapPin aria-hidden="true" />
-              <span>{row.locationName}</span>
+              <span>{row.locationName || locationsUnavailableText || t("未获取地点资料")}</span>
             </span>
           </p>
         </>
@@ -118,14 +129,14 @@ export function assetCards({
               <Box aria-hidden="true" />
               <span>{itemGroupLabel ?? t("型号")}</span>
             </dt>
-            <dd>{row.itemGroupName}</dd>
+            <dd>{row.itemGroupName || groupsUnavailableText || t("未获取型号资料")}</dd>
           </div>
           <div>
             <dt>
               <MapPin aria-hidden="true" />
               <span>{locationLabel ?? t("履约地点")}</span>
             </dt>
-            <dd>{row.locationName}</dd>
+            <dd>{row.locationName || locationsUnavailableText || t("未获取地点资料")}</dd>
           </div>
         </dl>
         <dl className={styles.serial}>
@@ -179,12 +190,16 @@ export function assetCards({
 export function stockCards({
   t,
   groups,
+  groupsUnavailableText,
+  locationsUnavailableText,
   dispositions,
   locale,
   locationLabel,
 }: {
   t: Translate;
-  groups: RentalItemGroup[];
+  groups: RentalItemGroup[] | undefined;
+  groupsUnavailableText?: string;
+  locationsUnavailableText?: string;
   dispositions: RentalStockDisposition[];
   locale?: string;
   locationLabel?: string;
@@ -198,11 +213,16 @@ export function stockCards({
     );
   return {
     kind: "stock",
-    title: (row) => row.itemGroupName,
-    subtitle: (row) => `${row.itemGroupCode} · ${row.locationName}`,
-    media: (row) => photo(groups, row.itemGroupId, row.itemGroupName),
+    title: (row) => row.itemGroupName || groupsUnavailableText || t("未获取型号资料"),
+    subtitle: (row) => `${row.itemGroupCode} · ${row.locationName || locationsUnavailableText || t("未获取地点资料")}`,
+    media: (row) => photo(
+      groups,
+      row.itemGroupId,
+      row.itemGroupName,
+      !groups ? (groupsUnavailableText ?? t("未获取型号资料")) : t("未获取型号资料"),
+    ),
     listing: (row) => {
-      const unit = groups.find((group) => group.id === row.itemGroupId)?.unit;
+      const unit = groups?.find((group) => group.id === row.itemGroupId)?.unit;
       const restrictions = restricted(row);
       const exceedsOnHand = row.reservedQuantity + row.maintenanceQuantity > row.onHandQuantity;
       const blocked = restrictions.some((item) => item.status === "blocked");
@@ -230,10 +250,10 @@ export function stockCards({
           <p className={listing.row}>
             <span
               className={`${listing.metadata} ${listing.location}`}
-              title={`${locationLabel ?? t("履约地点")} · ${row.locationName}`}
+              title={`${locationLabel ?? t("履约地点")} · ${row.locationName || locationsUnavailableText || t("未获取地点资料")}`}
             >
               <MapPin aria-hidden="true" />
-              <span>{row.locationName}</span>
+              <span>{row.locationName || locationsUnavailableText || t("未获取地点资料")}</span>
             </span>
             {warning ? (
               <span
@@ -257,11 +277,11 @@ export function stockCards({
     status: (row) => (
       <span className={styles.location} title={locationLabel ?? t("履约地点")}>
         <MapPin aria-hidden="true" />
-        {row.locationName}
+        {row.locationName || locationsUnavailableText || t("未获取地点资料")}
       </span>
     ),
     body: (row) => {
-      const unit = groups.find((group) => group.id === row.itemGroupId)?.unit;
+      const unit = groups?.find((group) => group.id === row.itemGroupId)?.unit;
       return (
         <div className={styles.stock}>
           <div className={styles.availability}>
@@ -271,6 +291,7 @@ export function stockCards({
               {unit && <span>{t(unit)}</span>}
             </span>
           </div>
+          {!groups && <CardSecondary>{groupsUnavailableText ?? t("未获取型号资料")}</CardSecondary>}
           <dl className={styles.quantities}>
             <div>
               <dt>{t("在手")}</dt>

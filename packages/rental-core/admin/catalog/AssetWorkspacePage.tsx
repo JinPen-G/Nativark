@@ -1,4 +1,5 @@
-/** 资产、状态历史和数量库存沿原字段与服务端事实，当前会话拥有编辑状态。 */
+/** 资产、状态历史和数量库存沿原字段与服务端事实，当前会话拥有编辑状态。
+ * 型号及地点附属资料按原权限读取，缺失独立呈现，写入仍要求当前完整引用事实。 */
 import { useLayoutEffect, useRef } from "react";
 import { CorePage, UnsavedChangesGuard, useCorePageHost } from "@rental-os/platform-admin/core";
 import {
@@ -139,11 +140,22 @@ function AssetWorkspace() {
     };
   }, []);
   const isCurrentScope = () => active.current && Boolean(scope) && currentScopeKey() === scope;
+  const canReadGroups = () =>
+    Boolean(scope) && currentScopeKey() === scope && (
+      host.canAccess(RENTAL_CATALOG_CORE_ID, [{ resource: "catalog", action: "view" }]) ||
+      host.canAccess(RENTAL_CATALOG_CORE_ID, [{ resource: "catalog", action: "manage" }]) ||
+      host.canAccess(RENTAL_CATALOG_CORE_ID, [{ resource: "order", action: "view" }]) ||
+      host.canAccess(RENTAL_CATALOG_CORE_ID, [{ resource: "order", action: "create" }])
+    );
+  const canReadLocations = () =>
+    Boolean(scope) && currentScopeKey() === scope &&
+    host.canAccess(RENTAL_CATALOG_CORE_ID, [{ resource: "station", action: "view" }]);
   const allowed = () =>
     isCurrentScope() && host.canAccess(RENTAL_CATALOG_CORE_ID, [{ resource: "asset", action: "manage" }]);
   const assertManage = () => {
     if (!isCurrentScope()) throw new DOMException("商品资产页面的会话或经营空间已变化", "AbortError");
     if (!allowed()) throw new Error("当前操作不可用");
+    if (!referencesAvailable()) throw new Error("关联资料暂不可用");
   };
   const { message } = App.useApp();
   const { t, locale } = useLocale();
@@ -184,13 +196,23 @@ function AssetWorkspace() {
   });
   const groups = useQuery({
     queryKey: ["rental-core", "groups", scope],
-    enabled: Boolean(scope),
-    queryFn: ({ signal }) => rentalCoreApi.itemGroups({ signal }),
+    enabled: canReadGroups(),
+    queryFn: async ({ signal }) => {
+      if (!isCurrentScope() || !canReadGroups()) throw new Error("型号资料读取受限");
+      const result = await rentalCoreApi.itemGroups({ signal });
+      if (!isCurrentScope() || !canReadGroups()) throw new Error("型号资料读取受限");
+      return result;
+    },
   });
   const locations = useQuery({
     queryKey: ["rental-core", "locations", scope],
-    enabled: Boolean(scope),
-    queryFn: ({ signal }) => rentalCoreApi.locations({ signal }),
+    enabled: canReadLocations(),
+    queryFn: async ({ signal }) => {
+      if (!isCurrentScope() || !canReadLocations()) throw new Error("地点资料读取受限");
+      const result = await rentalCoreApi.locations({ signal });
+      if (!isCurrentScope() || !canReadLocations()) throw new Error("地点资料读取受限");
+      return result;
+    },
   });
   // SHARED-WORK-01A：库存页显示不可用原因与预计恢复时间（来自归还处置事实，不由前端拼造）。
   const dispositions = useQuery({
@@ -207,6 +229,35 @@ function AssetWorkspace() {
     enabled: Boolean(scope),
     queryFn: ({ signal }) => rentalCoreApi.categories({ signal }),
   });
+  const visibleGroups = canReadGroups() && !groups.isError ? groups.data : undefined;
+  const visibleLocations = canReadLocations() && !locations.isError ? locations.data : undefined;
+  const groupsUnavailableText = !canReadGroups()
+    ? (locale === "en-US" ? "Model access is restricted" : "型号资料读取受限")
+    : groups.isError
+      ? (locale === "en-US" ? "Unable to read model details" : "未能读取型号资料")
+      : groups.data === undefined
+        ? (locale === "en-US" ? "Reading model details" : "正在读取型号资料")
+        : (locale === "en-US" ? "Model details are unavailable" : "未获取型号资料");
+  const locationsUnavailableText = !canReadLocations()
+    ? (locale === "en-US" ? "Location access is restricted" : "地点资料读取受限")
+    : locations.isError
+      ? (locale === "en-US" ? "Unable to read location details" : "未能读取地点资料")
+      : locations.data === undefined
+        ? (locale === "en-US" ? "Reading location details" : "正在读取地点资料")
+        : (locale === "en-US" ? "Location details are unavailable" : "未获取地点资料");
+  async function refreshWorkspace(throwOnError = false) {
+    if (!isCurrentScope()) throw new DOMException("商品资产页面的会话或经营空间已变化", "AbortError");
+    await Promise.all([
+      profile.refetch({ throwOnError }),
+      categories.refetch({ throwOnError }),
+      ...(activeTab === "assets"
+        ? [assets.refetch({ throwOnError })]
+        : [stocks.refetch({ throwOnError }), dispositions.refetch({ throwOnError })]),
+      // 附属错误由各自查询保留，手动 refetch 仍走当前权限复验。
+      ...(canReadGroups() ? [groups.refetch()] : []),
+      ...(canReadLocations() ? [locations.refetch()] : []),
+    ]);
+  }
   const category = categories.data?.find((item) => item.code === profile.data?.categoryCode);
   const presentation = category?.businessModel.catalogPresentation;
   const serialNoField = category?.businessModel.assetFields.find(
@@ -288,21 +339,24 @@ function AssetWorkspace() {
         }
       : undefined,
   ].filter((item): item is { key: string; label: ReactNode } => Boolean(item));
-  const serializedGroups = (groups.data ?? []).filter(
+  const serializedGroups = (visibleGroups ?? []).filter(
     (group) => group.inventoryMode === RentalInventoryMode.Serialized && group.status === "enabled",
   );
-  const selectedItemGroup = (groups.data ?? []).find((group) => group.id === selectedItemGroupId);
+  const selectedItemGroup = visibleGroups?.find((group) => group.id === selectedItemGroupId);
   const selectedItemGroupCover =
     selectedItemGroup?.images?.find((image) => image.isCover) ?? selectedItemGroup?.images?.[0];
   const editorUnavailable =
     !canManage ||
     !category ||
-    groups.isPending ||
-    locations.isPending ||
-    groups.isError ||
-    locations.isError ||
+    !visibleGroups ||
+    !visibleLocations ||
     profile.isError ||
     categories.isError;
+  const referencesAvailable = () =>
+    isCurrentScope() && canReadGroups() && canReadLocations() && Boolean(category) &&
+    ["groups", "locations", "profile", "categories"].every(
+      key => queryClient.getQueryState(["rental-core", key, scope])?.status === "success",
+    );
   const searchTerms = [
     ...(activeTab === "assets" ? [t(profile.data?.terminology.identifierLabel ?? "资产编号")] : []),
     t(profile.data?.terminology.itemGroupLabel ?? "产品型号"),
@@ -337,6 +391,7 @@ function AssetWorkspace() {
       editorUnavailable ||
       saveAsset.isPending ||
       !allowed() ||
+      !referencesAvailable() ||
       (assetDrawerOpen && !assetDismissal.visible)
     )
       return;
@@ -349,7 +404,7 @@ function AssetWorkspace() {
           itemGroupId: serializedGroups[0]?.id ?? "",
           assetNo: "",
           serialNo: "",
-          locationId: locations.data?.[0]?.id ?? "",
+          locationId: visibleLocations?.[0]?.id ?? "",
           status: RentalAssetStatus.Available,
           attributes: {},
         },
@@ -413,37 +468,25 @@ function AssetWorkspace() {
         <QueryState
           transitionKey={activeTab}
           loading={
-            groups.isLoading ||
-            locations.isLoading ||
             profile.isLoading ||
             categories.isLoading ||
             (activeTab === "assets" ? assets.isLoading : stocks.isLoading || dispositions.isLoading)
           }
           error={
-            groups.error ||
-            locations.error ||
             profile.error ||
             categories.error ||
             (activeTab === "assets" ? assets.error : stocks.error || dispositions.error)
           }
-          onRetry={() =>
-            Promise.all([
-              groups.refetch({ throwOnError: true }),
-              locations.refetch({ throwOnError: true }),
-              profile.refetch({ throwOnError: true }),
-              categories.refetch({ throwOnError: true }),
-              ...(activeTab === "assets"
-                ? [assets.refetch({ throwOnError: true })]
-                : [stocks.refetch({ throwOnError: true }), dispositions.refetch({ throwOnError: true })]),
-            ])
-          }
+          onRetry={() => refreshWorkspace(true)}
         >
           {activeTab === "assets" ? (
             <Table<RentalAsset>
               emptyScene={keyword.trim() ? "search" : "empty"}
               cardView={assetCards({
                 t,
-                groups: groups.data ?? [],
+                groups: visibleGroups,
+                groupsUnavailableText,
+                locationsUnavailableText,
                 statusLabel: (value) => t(statusMap[value]?.label ?? value),
                 canManage,
                 canView,
@@ -465,7 +508,7 @@ function AssetWorkspace() {
                 ],
               }}
               rowKey="id"
-              onRefresh={() => assets.refetch()}
+              onRefresh={() => refreshWorkspace()}
               loading={assets.isLoading}
               refreshing={assets.isFetching}
               dataSource={assetRows}
@@ -476,7 +519,9 @@ function AssetWorkspace() {
                   width: 88,
                   fixed: "left",
                   render: (_, row) => {
-                    const group = (groups.data ?? []).find((item) => item.id === row.itemGroupId);
+                    if (!visibleGroups) return <span className="muted">{groupsUnavailableText}</span>;
+                    const group = visibleGroups.find((item) => item.id === row.itemGroupId);
+                    if (!group) return <span className="muted">{t("未获取型号资料")}</span>;
                     const image = group?.images?.find((item) => item.isCover) ?? group?.images?.[0];
                     return group && image ? (
                       <ItemGroupPhoto groupId={group.id} image={image} />
@@ -506,7 +551,10 @@ function AssetWorkspace() {
                   dataIndex: "itemGroupName",
                   minWidth: ADMIN_TABLE_COLUMN_WIDTH.identity,
                   render: (_, row) => (
-                    <DataTableText primary={row.itemGroupName} secondary={row.itemGroupCode} />
+                    <DataTableText
+                      primary={row.itemGroupName || (!visibleGroups ? groupsUnavailableText : t("未获取型号资料"))}
+                      secondary={row.itemGroupCode}
+                    />
                   ),
                 },
                 ...summaryAssetFields.map((field) => ({
@@ -517,6 +565,8 @@ function AssetWorkspace() {
                 {
                   title: t(profile.data?.terminology.fulfillmentLabel ?? "履约地点"),
                   dataIndex: "locationName",
+                  render: (value: string | undefined) =>
+                    value || (!visibleLocations ? locationsUnavailableText : t("未获取地点资料")),
                 },
                 {
                   title: t("状态"),
@@ -569,7 +619,9 @@ function AssetWorkspace() {
               cardView={stockCards({
                 t,
                 locale,
-                groups: groups.data ?? [],
+                groups: visibleGroups,
+                groupsUnavailableText,
+                locationsUnavailableText,
                 dispositions: dispositions.data ?? [],
                 locationLabel: t(profile.data?.terminology.fulfillmentLabel ?? "履约地点"),
               })}
@@ -584,7 +636,7 @@ function AssetWorkspace() {
                 ],
               }}
               rowKey="id"
-              onRefresh={() => stocks.refetch()}
+              onRefresh={() => refreshWorkspace()}
               loading={stocks.isLoading}
               refreshing={stocks.isFetching}
               dataSource={stockRows}
@@ -594,12 +646,17 @@ function AssetWorkspace() {
                   dataIndex: "itemGroupName",
                   minWidth: ADMIN_TABLE_COLUMN_WIDTH.identity,
                   render: (_, row) => (
-                    <DataTableText primary={row.itemGroupName} secondary={row.itemGroupCode} />
+                    <DataTableText
+                      primary={row.itemGroupName || (!visibleGroups ? groupsUnavailableText : t("未获取型号资料"))}
+                      secondary={row.itemGroupCode}
+                    />
                   ),
                 },
                 {
                   title: t(profile.data?.terminology.fulfillmentLabel ?? "履约地点"),
                   dataIndex: "locationName",
+                  render: (value: string | undefined) =>
+                    value || (!visibleLocations ? locationsUnavailableText : t("未获取地点资料")),
                 },
                 { title: t("在手"), dataIndex: "onHandQuantity", align: "right" },
                 { title: t("已预占"), dataIndex: "reservedQuantity", align: "right" },
@@ -643,11 +700,15 @@ function AssetWorkspace() {
       </ListSection>
       {activeTab === "stock" && (
         <StockOperationsPanel
-          groups={groups.data ?? []}
-          locations={locations.data ?? []}
+          groups={visibleGroups ?? []}
+          locations={visibleLocations ?? []}
           terminology={profile.data?.terminology}
           canManage={canManage}
           unavailable={editorUnavailable}
+          unavailableText={
+            !visibleGroups ? groupsUnavailableText : !visibleLocations ? locationsUnavailableText : undefined
+          }
+          referencesAvailable={referencesAvailable}
         />
       )}
       <Modal
@@ -727,7 +788,7 @@ function AssetWorkspace() {
                           <Select
                             disabled={Boolean(editing) || editorUnavailable || saveAsset.isPending}
                             showSearch={{ optionFilterProp: "label" }}
-                            options={(groups.data ?? [])
+                            options={(visibleGroups ?? [])
                               .filter(
                                 (item) =>
                                   item.inventoryMode === RentalInventoryMode.Serialized &&
@@ -769,7 +830,7 @@ function AssetWorkspace() {
                           rules={[{ required: true }]}
                         >
                           <Select
-                            options={(locations.data ?? [])
+                            options={(visibleLocations ?? [])
                               .filter((item) => item.status === "enabled" || item.id === editing?.locationId)
                               .map((item) => ({
                                 value: item.id,

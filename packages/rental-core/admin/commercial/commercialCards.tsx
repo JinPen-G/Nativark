@@ -1,4 +1,5 @@
-/** Read-only commercial card projections; prices remain the original published/configured facts. */
+/** 商业卡片投影原已发布或已配置事实，附属型号资料缺失保留读取状态。
+ * 价格、成员及规则由原受权对象提供，卡片不自行补齐或重算。 */
 import {
   BadgeCheck,
   Check,
@@ -41,18 +42,22 @@ export function pricingGroupCards({
   t,
   rates,
   models,
+  modelsUnavailableText,
   defaultUnit,
   money,
   canEditSecurity,
+  canEdit = true,
   edit,
   security,
 }: {
   t: Translate;
   rates: CardRate[];
-  models: RentalItemGroup[];
+  models: RentalItemGroup[] | undefined;
+  modelsUnavailableText?: string;
   defaultUnit?: string;
   money: Money;
   canEditSecurity: boolean;
+  canEdit?: boolean;
   edit: (row: RentalPricingGroup) => void;
   security: (row: RentalPricingGroup) => void;
 }): ListCard<RentalPricingGroup> {
@@ -85,7 +90,11 @@ export function pricingGroupCards({
             emptyText={t("当前单位未配置基本价")}
           />
           <div className={styles.models}>
-            <ModelStack members={row.members} models={models} label={t("包含型号")} />
+            {models ? (
+              <ModelStack members={row.members} models={models} label={t("包含型号")} />
+            ) : (
+              <CardSecondary>{modelsUnavailableText ?? t("未能读取型号资料")}</CardSecondary>
+            )}
             <span>
               {t("包含型号")} <b>{row.members.length}</b>
             </span>
@@ -121,7 +130,7 @@ export function pricingGroupCards({
     ),
     actions: (row, afterClose) => (
       <>
-        <Button variant="secondary" size="sm" onClick={() => afterClose(() => edit(row))}>
+        <Button variant="secondary" size="sm" disabled={!canEdit} onClick={() => afterClose(() => edit(row))}>
           {t("编辑分组")}
         </Button>
         <Button

@@ -642,23 +642,27 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
     }
     await this.authorizeKnowledgeUpload(tenantId, input, owner);
     const signed = this.presign(config, 'PUT', this.pendingObjectKey(asset.storageKey), asset.mimeType, session.expiresAt);
-    await this.authorizeKnowledgeUpload(tenantId, input, owner);
-    const [currentSession, currentAsset, currentConfig] = await Promise.all([
-      this.prisma.fileUploadSession.findFirst({ where: { id: session.id, tenantId } }),
-      this.prisma.fileAsset.findFirst({ where: { id: asset.id, tenantId } }),
-      this.integrations.runtimeConfig('file', tenantId, session.provider as never)
-    ]);
-    // 存储和配置读取让出执行后，沿原知识权威复核当前授权。
-    await this.authorizeKnowledgeUpload(tenantId, input, owner);
-    // Date版本及有效期须先按JSON语义保留，续签等待后仍比较完整的原快照。
-    const snapshotFingerprint = (value: unknown) =>
-      requestFingerprint(JSON.parse(JSON.stringify(value) ?? "null"));
-    if (snapshotFingerprint(currentSession) !== snapshotFingerprint(session)
-      || snapshotFingerprint(currentAsset) !== snapshotFingerprint(asset)
-      || !currentConfig || snapshotFingerprint(currentConfig) !== snapshotFingerprint(config)
-      || session.expiresAt.getTime() <= Date.now()) {
-      throw new ConflictException('知识原上传在签发期间已变化');
-    }
+    const snapshot = structuredClone({ session, asset, config });
+    const authorize = () => this.authorizeKnowledgeUpload(tenantId, input, owner);
+    const changed = () => new ConflictException('知识原上传在签发期间已变化');
+    await this.businessTransaction(tenantId, async tx => {
+      await this.integrations.assertEnabledInTransaction(tx, tenantId, 'file', config.provider, { configRevision: config.revision });
+      await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM file_upload_sessions WHERE tenantId=${tenantId} AND id=${session.id} FOR UPDATE`);
+      await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM FileAsset WHERE tenantId=${tenantId} AND id=${asset.id} FOR UPDATE`);
+      const currentConfig = await this.integrations.runtimeConfig('file', tenantId, session.provider as never);
+      const readSnapshot = async () => {
+        const [currentSession, currentAsset] = await Promise.all([
+          tx.fileUploadSession.findFirst({ where: { id: session.id, tenantId } }),
+          tx.fileAsset.findFirst({ where: { id: asset.id, tenantId } })
+        ]);
+        return { session: currentSession, asset: currentAsset, config: currentConfig };
+      };
+      // 配置读取后的授权等待先于末次文件读取，Date变化由这次快照捕获。
+      // 原锁覆盖比较后的授权复验，读取让出执行后仍须核对当前ACL。
+      await assertOriginalFileUploadSnapshot(snapshot, readSnapshot, authorize, changed);
+      await authorize();
+    });
+    if (session.expiresAt.getTime() <= Date.now()) throw changed();
     return { ...this.sessionSummary(session, asset, 'provider'), uploadUrl: signed.url, uploadHeaders: signed.headers };
   }
 
