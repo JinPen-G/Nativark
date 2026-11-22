@@ -5,6 +5,7 @@
  * 不安装依赖、实例化 Client、连接数据库、启动服务或发布 GitHub Release。
  * node scripts/verify-rental-distribution.cjs --commit <完整SHA> [--deps <只读node_modules>]
  * node scripts/verify-rental-distribution.cjs --portable --commit <构建SHA> --platform-commit <底座SHA>
+ *   --source-repository <底座的规范仓库地址>
  *   --core-repo <独立仓根目录> --core-commit <v版本的提交SHA> --out <未占用的rental-版本.tgz>
  * 独立仓标签的根目录须保留 packages/rental-core 子树的原始 Git 字节及 LICENSE。
  */
@@ -26,8 +27,9 @@ function git(directory, args) {
   return execFileSync('git', ['--no-replace-objects', ...args], { cwd: directory, maxBuffer: 16 * 1024 * 1024, windowsHide: true });
 }
 
-function sourceRepository(directory = root) {
-  const origin = git(directory, ['config', '--get', 'remote.origin.url']).toString('utf8').trim();
+function sourceRepository(directory = root, explicitRepository) {
+  // GitHub 更名后的规范来源须显式固定；本地旧 remote 的重定向不应改变版本来源。
+  const origin = explicitRepository ?? git(directory, ['config', '--get', 'remote.origin.url']).toString('utf8').trim();
   const ssh = /^git@github\.com:([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)$/u.exec(origin);
   const url = new URL(ssh ? 'https://github.com/' + ssh[1] : origin);
   if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash)
@@ -179,7 +181,7 @@ function verifyNative(build) {
   return files;
 }
 
-function verifyPackage(build, portable) {
+function verifyPackage(build, portable, buildSource) {
   build.compile('apps/platform-api/tsconfig.json');
   build.compile('packages/ai-native-data/tsconfig.json');
   build.compile('apps/rental-api/tsconfig.json');
@@ -199,7 +201,7 @@ function verifyPackage(build, portable) {
       files.set(file.slice(packageRoot.length + 1), Buffer.from(text));
   }
   if (!files.has('LICENSE')) files.set('LICENSE', build.snapshot.files.get(slash(path.join(root, 'LICENSE'))));
-  const source = portable?.source ?? { repository: sourceRepository(), commit: build.snapshot.commit };
+  const source = portable?.source ?? buildSource ?? { repository: sourceRepository(), commit: build.snapshot.commit };
   const host = portable?.host ?? { platform: '0.1.0', contract: '0.1.1', node: '22.12.0', capabilities: {} };
   const packageFactory = build.load(build.exported('@rental-os/rental-api/package', true));
   const input = { files, source, sourceDirectory: rentalSourceDirectory, platformSource: portable?.platformSource ?? source, host,
@@ -333,7 +335,7 @@ function parseArguments(args) {
     const key = args[index];
     if (options.has(key)) throw Error('重复发行核验选项：' + key);
     if (key === '--portable') options.set(key, true);
-    else if (['--deps', '--commit', ...portableKeys].includes(key) && args[index + 1] && !args[index + 1].startsWith('--'))
+    else if (['--deps', '--commit', '--source-repository', ...portableKeys].includes(key) && args[index + 1] && !args[index + 1].startsWith('--'))
       options.set(key, args[++index]);
     else throw Error('未知或缺少值的发行核验选项：' + key);
   }
@@ -351,8 +353,9 @@ async function main(args) {
   const deps = options.get('--deps') ?? path.join(root, 'node_modules');
   const commit = options.get('--commit') ?? git(root, ['rev-parse', 'HEAD']).toString('ascii').trim();
   const build = createBuild(deps, { commit });
+  const buildSource = { repository: sourceRepository(root, options.get('--source-repository')), commit };
   const portable = options.has('--portable')
-    ? fixedPortableSource(build.snapshot, options, { repository: sourceRepository(), commit }) : undefined;
+    ? fixedPortableSource(build.snapshot, options, buildSource) : undefined;
   verifyContracts(build);
   verifyServer(build);
   if (portable) {
@@ -370,7 +373,7 @@ async function main(args) {
   }
   verifyNative(build);
   await attachPrismaRuntime(build);
-  const packed = verifyPackage(build, portable);
+  const packed = verifyPackage(build, portable, buildSource);
   if (portable) {
     const { writeArchive } = require('./package-rental-host.cjs');
     writeArchive(portable.output, packed.bytes);

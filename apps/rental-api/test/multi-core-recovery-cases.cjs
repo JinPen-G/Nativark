@@ -24,8 +24,47 @@ const patchVersion = (version, increment = 1) => {
  */
 function privateFileTransport({ build, memory, root }) {
   const directory = path.resolve(root, 'output/.tmp/rental-participants-recovery');
+  const slash = file => {
+    const prefix = '\\\\?\\', uncPrefix = prefix + 'UNC\\';
+    if (file.startsWith(uncPrefix)) file = '\\\\' + file.slice(uncPrefix.length);
+    else if (file.startsWith(prefix)) file = file.slice(prefix.length);
+    return path.resolve(file).split(path.sep).join('/');
+  };
   const { Volume, createFsFromVolume } = build.requireDeps('memfs');
-  const volume = createFsFromVolume(new Volume()), restores = [];
+  const nodes = new Volume(), volume = createFsFromVolume(nodes), restores = [];
+  // memfs 3.5 derives birthtime from mutable ctime. Use the same per-Node
+  // creation identity as the build adapter, including reused inode generations.
+  const births = new WeakMap();
+  let nextBirth = 0;
+  const assignBirth = node => {
+    nextBirth = Math.max(Date.now(), nextBirth + 1);
+    births.set(node, nextBirth);
+    return node;
+  };
+  for (const node of Object.values(nodes.inodes)) assignBirth(node);
+  const createNode = nodes.createNode;
+  nodes.createNode = function (...args) {
+    return assignBirth(createNode.apply(this, args));
+  };
+  const stableStats = (stats, node) => {
+    const birth = births.get(node);
+    if (birth === undefined) throw Error('private recovery file creation identity is unavailable');
+    stats.birthtime = new Date(birth);
+    stats.birthtimeMs = typeof stats.birthtimeMs === 'bigint' ? BigInt(birth) : birth;
+    return stats;
+  };
+  for (const name of ['statSync', 'lstatSync']) {
+    const original = volume[name];
+    volume[name] = (...args) => {
+      const stats = original(...args);
+      if (stats === undefined) return stats;
+      return stableStats(stats, nodes.inodes[Number(stats.ino)]);
+    };
+  }
+  const fstat = volume.fstatSync;
+  volume.fstatSync = (descriptor, ...args) =>
+    stableStats(fstat(descriptor, ...args), nodes.getFileByFd(descriptor).node);
+  const descriptors = new Set();
   const key = file => '/' + slash(file), base = slash(directory);
   const owns = file => slash(file) === base || slash(file).startsWith(base + '/');
   const ancestor = file => base.startsWith(slash(file) + '/') && slash(file).startsWith(slash(root) + '/');
@@ -38,8 +77,11 @@ function privateFileTransport({ build, memory, root }) {
   };
   for (const name of ['readFileSync', 'readdirSync', 'statSync', 'lstatSync', 'accessSync', 'existsSync']) {
     const original = memory.fs[name];
-    replace(name, (file, ...args) => owns(file) || ancestor(file)
-      ? volume[name](key(file), ...args) : original(file, ...args));
+    replace(name, (file, ...args) => {
+      if (name === 'readFileSync' && typeof file === 'number')
+        return descriptors.has(file) ? volume.readFileSync(file, ...args) : original(file, ...args);
+      return owns(file) || ancestor(file) ? volume[name](key(file), ...args) : original(file, ...args);
+    });
   }
   const originalRealpath = memory.fs.realpathSync;
   const realpath = (file, ...args) => {
@@ -51,10 +93,29 @@ function privateFileTransport({ build, memory, root }) {
   for (const name of ['mkdirSync', 'writeFileSync', 'rmSync', 'unlinkSync', 'rmdirSync']) {
     const original = memory.fs[name];
     replace(name, (file, ...args) => {
+      if (name === 'writeFileSync' && typeof file === 'number') {
+        if (!descriptors.has(file)) return original(file, ...args);
+        totals.writes++; return volume.writeFileSync(file, ...args);
+      }
       if (!owns(file)) return original(file, ...args);
       totals.writes++; return volume[name](key(file), ...args);
     });
   }
+  const originalOpen = memory.fs.openSync;
+  replace('openSync', (file, ...args) => {
+    if (!owns(file)) return originalOpen(file, ...args);
+    const descriptor = volume.openSync(key(file), ...args);
+    descriptors.add(descriptor);
+    return descriptor;
+  });
+  const originalFstat = memory.fs.fstatSync, originalClose = memory.fs.closeSync;
+  replace('fstatSync', (descriptor, ...args) => descriptors.has(descriptor)
+    ? volume.fstatSync(descriptor, ...args) : originalFstat(descriptor, ...args));
+  replace('closeSync', descriptor => {
+    if (!descriptors.has(descriptor)) return originalClose(descriptor);
+    volume.closeSync(descriptor);
+    descriptors.delete(descriptor);
+  });
   const originalTemp = memory.fs.mkdtempSync;
   replace('mkdtempSync', (prefix, ...args) => owns(prefix)
     ? path.resolve(volume.mkdtempSync(key(prefix), ...args).slice(1)) : originalTemp(prefix, ...args));
@@ -90,6 +151,8 @@ function privateFileTransport({ build, memory, root }) {
     },
     close() {
       try {
+        for (const descriptor of descriptors) volume.closeSync(descriptor);
+        descriptors.clear();
         assert.equal(slash(directory), slash(path.resolve(root, 'output/.tmp/rental-participants-recovery')));
         volume.rmSync(key(directory), { recursive: true });
         assert.equal(volume.existsSync(key(directory)), false);

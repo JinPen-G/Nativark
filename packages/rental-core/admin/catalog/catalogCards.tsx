@@ -1,4 +1,5 @@
-/** Model summaries show catalog facts and every rate-group membership; editing stays in the original guarded flow. */
+/** 型号卡片展示原商品事实及受权定价归属，附属读取缺失须保留明确状态。
+ * 编辑沿原受控流程，卡片不自行查询或授予分组读取权限。 */
 import { Boxes, Check, CircleCheck, CirclePause, Layers3 } from "lucide-react";
 import type { ReactNode } from "react";
 import type { RentalAttributeDefinition, RentalItemGroup, RentalPricingGroup } from "@rental-os/rental-core";
@@ -29,6 +30,7 @@ export function catalogCards({
   fields,
   summaryFields,
   pricingGroups,
+  pricingGroupsUnavailableText,
   canManage,
   edit,
   risk,
@@ -36,13 +38,14 @@ export function catalogCards({
   t: Translate;
   fields: RentalAttributeDefinition[];
   summaryFields: RentalAttributeDefinition[];
-  pricingGroups: RentalPricingGroup[];
+  pricingGroups: RentalPricingGroup[] | undefined;
+  pricingGroupsUnavailableText?: string;
   canManage: boolean;
   edit: (row: RentalItemGroup) => void;
   risk: (row: RentalItemGroup) => ReactNode;
 }): ListCard<RentalItemGroup> {
   const groups = (row: RentalItemGroup) =>
-    pricingGroups.filter((group) => group.memberItemGroupIds.includes(row.id));
+    pricingGroups?.filter((group) => group.memberItemGroupIds.includes(row.id));
   const filled = (row: RentalItemGroup, candidates: RentalAttributeDefinition[]) =>
     candidates.filter((field) => {
       const value = row.attributes[field.code];
@@ -149,7 +152,11 @@ export function catalogCards({
               <Layers3 aria-hidden="true" />
               <div className={styles.groupText}>
                 <span className={styles.label}>{t("所属定价分组")}</span>
-                {memberships.length ? (
+                {memberships === undefined ? (
+                  <span className={styles.unassigned}>
+                    {pricingGroupsUnavailableText ?? t("未能读取定价分组")}
+                  </span>
+                ) : memberships.length ? (
                   <ul className={styles.groupNames}>
                     {memberships.map((group) => (
                       <li key={group.id} title={group.name}>

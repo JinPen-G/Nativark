@@ -390,6 +390,12 @@ npm run lint -w @rental-os/rental-core
 
 独立公开仓库从实际发行提交构建标准包，清单、Tag 和 Release 资产须对应同一来源。公开包声明 `/api/cores/rental/v1` 下已审定的业务操作，部署后的规范路径和原路径进入同一 Controller。包准备、实际部署、注册和租户授权沿现有流程完成。见[规范路径和文档共用入口](src/http-portable.ts)与[宿主接入说明](../../apps/rental-api/README.md)。
 
+公开出包时用 `--source-repository https://github.com/JinPen-G/Nativark` 固定底座和公共资料来源，`--core-repo` 指向独立 Core 仓库。构建与底座 SHA、独立仓的版本 Tag 和新归档路径分别传入；已有安装的来源保持原值，跨仓迁移按明确的来源处置流程办理。
+
+```text
+node scripts/verify-rental-distribution.cjs --portable --commit <构建SHA> --platform-commit <底座SHA> --source-repository https://github.com/JinPen-G/Nativark --core-repo <独立仓根目录> --core-commit <版本Tag的SHA> --out <新目录/rental-版本.tgz>
+```
+
 独立 Linux 镜像使用[宿主打包入口](../../scripts/package-rental-host.cjs)。先完成正式源码构建、完整 Rental 标准包及[原部署准备](../../apps/rental-api/src/prepare-deployment.ts)，再从仓库根执行以下命令；参数均为实际绝对路径，输出父目录须存在且归档不能已存在。底座 `.tgz` 须使用与原 prepared 锁的 `platform.sha256` 一致的固定源码归档，不能用候选 `platform/` 目录代替。
 
 ```text

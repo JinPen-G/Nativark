@@ -1,4 +1,5 @@
-/** 原商品资产字段、列表和图片沿同源实现，当前会话拥有编辑状态。 */
+/** 原商品资产字段、列表和图片沿同源实现，当前会话拥有编辑状态。
+ * 定价归属按当前宿主权限附属读取，受限或失败独立呈现，不能投影为空分组。 */
 import { useLayoutEffect, useRef } from "react";
 import { CorePage, UnsavedChangesGuard, useCorePageHost } from "@rental-os/platform-admin/core";
 import {
@@ -167,6 +168,12 @@ function CatalogWorkspace() {
     };
   }, []);
   const isCurrentScope = () => active.current && Boolean(scope) && currentScopeKey() === scope;
+  const canReadPricingGroups = () =>
+    Boolean(scope) && currentScopeKey() === scope && (
+      host.canAccess(RENTAL_CATALOG_CORE_ID, [{ resource: "price", action: "manage" }]) ||
+      host.canAccess(RENTAL_CATALOG_CORE_ID, [{ resource: "order", action: "view" }]) ||
+      host.canAccess(RENTAL_CATALOG_CORE_ID, [{ resource: "order", action: "create" }])
+    );
   const allowed = () =>
     isCurrentScope() && host.canAccess(RENTAL_CATALOG_CORE_ID, [{ resource: "catalog", action: "manage" }]);
   const assertManage = () => {
@@ -202,8 +209,14 @@ function CatalogWorkspace() {
   });
   const pricingGroups = useQuery({
     queryKey: ["rental-core", "pricing-groups", scope],
-    enabled: Boolean(scope),
-    queryFn: ({ signal }) => rentalCoreApi.pricingGroups({ signal }),
+    enabled: canReadPricingGroups(),
+    queryFn: async ({ signal }) => {
+      // enabled 不约束手动 refetch，迟到结果也必须再核当前权限。
+      if (!isCurrentScope() || !canReadPricingGroups()) throw new Error(t("定价分组读取受限"));
+      const result = await rentalCoreApi.pricingGroups({ signal });
+      if (!isCurrentScope() || !canReadPricingGroups()) throw new Error(t("定价分组读取受限"));
+      return result;
+    },
   });
   const profile = useQuery({
     queryKey: ["rental-core", "profile", scope],
@@ -215,6 +228,23 @@ function CatalogWorkspace() {
     enabled: Boolean(scope),
     queryFn: ({ signal }) => rentalCoreApi.categories({ signal }),
   });
+  const visiblePricingGroups = canReadPricingGroups() && !pricingGroups.isError
+    ? pricingGroups.data : undefined;
+  const pricingGroupsUnavailableText = !canReadPricingGroups()
+    ? (locale === "en-US" ? "Pricing group access is restricted" : "定价分组读取受限")
+    : pricingGroups.isError
+      ? (locale === "en-US" ? "Unable to read pricing groups" : "未能读取定价分组")
+      : (locale === "en-US" ? "Reading pricing groups" : "正在读取定价分组");
+  async function refreshCatalog(throwOnError = false) {
+    if (!isCurrentScope()) throw new DOMException("商品资产页面的会话或经营空间已变化", "AbortError");
+    await Promise.all([
+      groups.refetch({ throwOnError }),
+      profile.refetch({ throwOnError }),
+      categories.refetch({ throwOnError }),
+      // 附属查询独立持有错误，不阻断受权型号列表的恢复。
+      ...(canReadPricingGroups() ? [pricingGroups.refetch()] : []),
+    ]);
+  }
   const category = categories.data?.find((item) => item.code === profile.data?.categoryCode);
   const presentation = category?.businessModel.catalogPresentation;
   const groupFields =
@@ -391,21 +421,14 @@ function CatalogWorkspace() {
         }
       >
         <QueryState
-          loading={groups.isLoading || pricingGroups.isLoading || profile.isLoading || categories.isLoading}
-          error={groups.error || pricingGroups.error || profile.error || categories.error}
-          onRetry={() =>
-            Promise.all([
-              groups.refetch({ throwOnError: true }),
-              pricingGroups.refetch({ throwOnError: true }),
-              profile.refetch({ throwOnError: true }),
-              categories.refetch({ throwOnError: true }),
-            ])
-          }
+          loading={groups.isLoading || profile.isLoading || categories.isLoading}
+          error={groups.error || profile.error || categories.error}
+          onRetry={() => refreshCatalog(true)}
         >
           <Table<RentalItemGroup>
             emptyScene={keyword.trim() ? "search" : "empty"}
             rowKey="id"
-            onRefresh={() => groups.refetch()}
+            onRefresh={() => refreshCatalog()}
             loading={groups.isLoading}
             refreshing={groups.isFetching}
             dataSource={rows}
@@ -423,7 +446,8 @@ function CatalogWorkspace() {
               t,
               fields: groupFields,
               summaryFields,
-              pricingGroups: pricingGroups.data ?? [],
+              pricingGroups: visiblePricingGroups,
+              pricingGroupsUnavailableText,
               canManage,
               edit: openEditor,
               risk: (row) => riskLevelLabels(String(row.attributes.securityRiskLevel ?? ""), locale, t),
@@ -472,7 +496,10 @@ function CatalogWorkspace() {
                 ),
                 minWidth: ADMIN_TABLE_COLUMN_WIDTH.summary,
                 render: (_, row) => {
-                  const memberships = (pricingGroups.data ?? []).filter((pricingGroup) =>
+                  if (!visiblePricingGroups) return (
+                    <Typography.Text type="secondary">{pricingGroupsUnavailableText}</Typography.Text>
+                  );
+                  const memberships = visiblePricingGroups.filter((pricingGroup) =>
                     pricingGroup.memberItemGroupIds.includes(row.id),
                   );
                   return memberships.length ? (

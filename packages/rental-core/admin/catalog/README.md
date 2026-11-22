@@ -14,6 +14,8 @@
 
 三个表单复用现有编辑驱动，保存按钮与回车共用本次打开代次的校验及真实请求 Promise。型号先保存原对象，再逐张上传待选照片，已返回的型号 ID 和已完成照片留在当前代次，照片失败时保留输入与剩余文件。库存作业继续使用每次打开生成的原 idempotencyKey，保存载荷保留作业类型、数量、盘点零值、地点、批次与原因。[型号页面](CatalogPage.tsx) · [资产页面](AssetWorkspacePage.tsx) · [库存作业](StockOperationsPanel.tsx) · [编辑驱动](../orders/useOrderEditor.ts)
 
+型号列表以型号、经营资料和品类查询处理加载与错误。定价归属是附属读取，由当前已验证 Core 页面宿主核对 price/manage、order/view 或 order/create，请求前后复验权限与页面身份。表格、卡片及其预览分别呈现读取受限、未能读取或正在读取，只有成功取得分组数组后才显示真实归属或未加入分组。刷新重读必需资料及当前有权的分组，附属失败保留在归属展示中，编辑草稿沿原代次保留，创建与编辑仍要求原必需品类事实。[型号查询与刷新](CatalogPage.tsx) · [卡片归属](catalogCards.tsx) · [页面宿主](../../../platform-admin/src/core/useCoreSession.ts) · [原服务端权限](../../src/http-auth.ts)
+
 图片、资产状态历史和库存流水查询传递取消信号，缓存键绑定当前会话与经营空间。照片组件将对象 URL 绑定生成它的查询身份和原字节，身份或字节切换的首帧撤下旧图，并在替换和卸载时释放。订单等旧消费者通过同一照片薄适配接入当前宿主。[照片组件](ItemGroupPhoto.tsx) · [旧照片入口](../../../../apps/admin/src/features/catalog/ItemGroupPhoto.tsx)
 
 ## 列表与来源
