@@ -90,7 +90,7 @@
   },
   "peerDependencies": {
     "@prisma/client": "^5.22.0",
-    "@rental-os/rental-core": "0.1.6"
+    "@rental-os/rental-core": "0.1.7"
   },
   "peerDependenciesMeta": {
     "@prisma/client": {

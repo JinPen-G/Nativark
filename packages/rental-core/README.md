@@ -204,6 +204,8 @@ node -e "const { createRentalOpenApi } = require('@rental-os/rental-core/http-op
 
 ## 使用与构建
 
+本版使用底座提供的 `CorePageActions` 正文动作插槽，所需底座最低版本为0.1.9。平台接入合同和Rental数据版本继续由原正式声明维护；升级先按清单核兼容，再更新所选Core与宿主锁，不改租户授权、业务数据或重跑业务初始化。[最低底座与合同要求](src/manifest.ts) · [正文动作接点](../platform-admin/src/core/README.md)
+
 Rental HTTP从 `@rental-os/rental-core/http` 的 `RentalHttpModule` 接入，类型 `RentalHttpServiceGroups` 列出宿主需要供给的真实应用。
 
 完整实例从 [application](src/application.ts) 构造，经 [application-http](src/application-http.ts) 与 [application-platform](src/application-platform.ts) 分别供给原 Rental HTTP 和公共模块。宿主显式选择 AI 模式：未启用时客户检查出箱传 `null` 且不装配 AI 参加者；启用时必须提供原失败出箱、事务事件和通知草稿读取器。构造不会启服务或启动作业。独立组合的实际挂载集合及明确路由缺口见 [Rental API](../../apps/rental-api/README.md)。
