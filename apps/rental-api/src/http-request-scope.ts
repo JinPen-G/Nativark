@@ -1,10 +1,12 @@
 /** 标准 Rental 宿主的 Nest 请求生命周期。原 identity/staff routing middleware 必须先运行，
  * 唯一 Guard 由平台模块分流；本拦截器不再次认证。仅托管显式审定处理器的一次缓冲订阅，
+ * 已知 CoreAccessError 在 HTTP 错误出口保留公共状态及原 code/message。
  * 不启动服务器、不制造匿名身份、不把断线解释成事务回滚或允许重发。 */
 import { AsyncLocalStorage } from "node:async_hooks";
-import { ServiceUnavailableException, StreamableFile, type CallHandler, type ExecutionContext,
+import { HttpException, ServiceUnavailableException, StreamableFile, type CallHandler, type ExecutionContext,
   type NestInterceptor, type NestMiddleware } from "@nestjs/common";
-import { EmptyError, Observable, Subscriber } from "rxjs";
+import { catchError, EmptyError, Observable, Subscriber } from "rxjs";
+import { CoreAccessError } from "@rental-os/core-host";
 import { getRequestIdentity } from "@rental-os/platform-server/request-identity";
 import { matchableRequestPath } from "@rental-os/platform-server/request-path";
 import type { RentalApplicationAccess, RentalApplicationAccessRequest } from "@rental-os/rental-core/application-access";
@@ -48,6 +50,14 @@ type RequestScope = {
 };
 
 const ended = () => new Error("Rental HTTP 请求已结束；在途操作结果仍须按原操作键核对");
+
+function toHttpError(error: unknown): unknown {
+  if (error instanceof CoreAccessError) {
+    return new HttpException({ code: error.code, message: error.message },
+      error.code === "denied" ? 403 : error.code === "core_unavailable" ? 503 : 409);
+  }
+  return error;
+}
 
 /** Register middleware after requestIdentityMiddleware and original staff routing,
  * before Nest's sole Guard. Register interceptor inside response-transforming
@@ -143,7 +153,7 @@ export function createRentalHttpRequestScope(input: {
         });
       } catch (error) {
         scope?.stop(error);
-        next(error);
+        next(toHttpError(error));
       }
     }
   };
@@ -153,11 +163,13 @@ export function createRentalHttpRequestScope(input: {
       if (context.getType() !== "http") return next.handle();
       const request = context.switchToHttp().getRequest<RentalRequest>();
       const scope = scopes.get(request);
-      // Public platform / standard Core use their existing middleware and Guard.
-      // An already selected Rental request cannot change its path to borrow this exit.
-      if (!scope && routesToPlatform(request)) return next.handle();
-      if (!scope) throw new ServiceUnavailableException("Rental HTTP 缺少 Guard 之前的请求 middleware");
       try {
+        // Public platform / standard Core use their existing middleware and Guard.
+        // An already selected Rental request cannot change its path to borrow this exit.
+        if (!scope && routesToPlatform(request)) {
+          return next.handle().pipe(catchError(error => { throw toHttpError(error); }));
+        }
+        if (!scope) throw new ServiceUnavailableException("Rental HTTP 缺少 Guard 之前的请求 middleware");
         assertActive(request, scope);
         if (scope.claimed) throw new Error("Rental HTTP 原处理器只能绑定一次");
         scope.claimed = true;
@@ -240,8 +252,8 @@ export function createRentalHttpRequestScope(input: {
             });
           } catch (error) { native?.discard(); scope.stop(error); destination.error(error); }
           return () => { native?.discard(); scope.stop(); };
-        });
-      } catch (error) { scope.stop(error); throw error; }
+        }).pipe(catchError(error => { throw toHttpError(error); }));
+      } catch (error) { scope?.stop(error); throw toHttpError(error); }
     }
   };
   return Object.freeze({ middleware, interceptor });

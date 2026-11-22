@@ -49,6 +49,8 @@ Core 包目录、预检、版本选择和候选准备的四个原 Controller 挂
 
 [请求作用域](src/http-request-scope.ts) 位于原身份/员工路由 middleware 之后、唯一 Guard 之前。Guard 形成原可信身份后绑定一次实际处理器；拦截器位于原响应信封内部。请求不能重复订阅、切换路径或借另一应用的作用域；断线只结束请求范围，不证明在途工作已经回滚。
 
+HTTP 错误出口将已知 `CoreAccessError` 的 `denied` 映射为 403，`core_unavailable` 映射为 503，正式修订或操作冲突映射为 409，并保留原 `code` 与 `message`。同步异常与异步拒绝共用此映射，数据库及其他异常按原对象传播。[公共 Core HTTP 语义](../../packages/platform-core-host/src/core-scope.controller.ts)
+
 [处理器政策](../../packages/rental-core/src/http-access-policy.ts) 固定绑定原 Controller/handler、方法与路径，客户端不能声明自己的准入种类。
 
 - 身份维护仅限原运营/员工认证和本人订阅入口，保留原 audience、密码、限流、会话与空间切换规则，不要求活跃业务 Core，也不授予业务权。
