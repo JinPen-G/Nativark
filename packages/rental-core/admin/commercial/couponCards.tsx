@@ -19,17 +19,21 @@ const states: Record<RentalCouponTemplate["status"], string> = {
 };
 const targets = { rental: "商品租金与使用量", fulfillment: "履约费", service: "增值服务费" };
 
-export function couponCards({ t, money, groups, edit }: {
+export function couponCards({ t, money, groups, groupsUnavailableText, canEdit = true, edit }: {
   t: (value: string) => string;
   money: (value: number) => string;
-  groups: RentalItemGroup[];
+  groups?: RentalItemGroup[];
+  groupsUnavailableText?: string;
+  canEdit?: boolean;
   edit: (row: RentalCouponTemplate) => void;
 }): ListCard<RentalCouponTemplate> {
   const date = (value: string | undefined) => value && dayjs(value).isValid()
     ? <time dateTime={value}>{dayjs(value).format("YYYY-MM-DD HH:mm")}</time>
     : t("未提供");
   const productNames = (row: RentalCouponTemplate) => row.applicableItemGroupIds.length
-    ? row.applicableItemGroupIds.map(id => groups.find(group => group.id === id)?.name ?? t("已删除商品")).join(" · ")
+    ? groups
+      ? row.applicableItemGroupIds.map(id => groups.find(group => group.id === id)?.name ?? t("已删除商品")).join(" · ")
+      : groupsUnavailableText ?? t("未能读取商品资料")
     : t("全部商品");
 
   return {
@@ -90,6 +94,6 @@ export function couponCards({ t, money, groups, edit }: {
         ]} />
       </CardSection>
     </>,
-    actions: (row, afterClose) => <Button variant="secondary" size="sm" onClick={() => afterClose(() => edit(row))}>{t("编辑")}</Button>,
+    actions: (row, afterClose) => <Button variant="secondary" size="sm" disabled={!canEdit} onClick={() => afterClose(() => edit(row))}>{t("编辑")}</Button>,
   };
 }

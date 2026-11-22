@@ -36,7 +36,7 @@ import {
   useRentalCommercialWorkspaceAccess,
   type RentalCommercialPageContext,
 } from "./page-context";
-import { RENTAL_COMMERCIAL_ACCESS } from "./pages";
+import { RENTAL_COMMERCIAL_ACCESS, RENTAL_COMMERCIAL_CORE_ID } from "./pages";
 import { useOrderEditor } from "../orders/useOrderEditor";
 import { useLocale } from "@rental-os/platform-admin/locale";
 import { CorePage, UnsavedChangesGuard } from "@rental-os/platform-admin/core";
@@ -63,6 +63,8 @@ function CouponWorkspace() {
   const {
     api: rentalCoreApi,
     scope,
+    currentScopeKey,
+    host,
     canManage,
     isCurrentScope,
     assertManage,
@@ -71,6 +73,13 @@ function CouponWorkspace() {
   const { message } = App.useApp();
   const { locale, t } = useLocale();
   const queryClient = useQueryClient();
+  const canReadGroups = () =>
+    Boolean(scope) && currentScopeKey() === scope && (
+      host.canAccess(RENTAL_COMMERCIAL_CORE_ID, [{ resource: "catalog", action: "view" }]) ||
+      host.canAccess(RENTAL_COMMERCIAL_CORE_ID, [{ resource: "catalog", action: "manage" }]) ||
+      host.canAccess(RENTAL_COMMERCIAL_CORE_ID, [{ resource: "order", action: "view" }]) ||
+      host.canAccess(RENTAL_COMMERCIAL_CORE_ID, [{ resource: "order", action: "create" }])
+    );
   const [editing, setEditing] = useState<RentalCouponTemplate>();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [claimOpen, setClaimOpen] = useState(false);
@@ -119,8 +128,13 @@ function CouponWorkspace() {
   });
   const groups = useQuery({
     queryKey: ["rental-core", "groups", scope],
-    enabled: Boolean(scope),
-    queryFn: ({ signal }) => rentalCoreApi.itemGroups({ signal }),
+    enabled: canReadGroups(),
+    queryFn: async ({ signal }) => {
+      if (!isCurrentScope() || !canReadGroups()) throw new Error("商品资料读取受限");
+      const result = await rentalCoreApi.itemGroups({ signal });
+      if (!isCurrentScope() || !canReadGroups()) throw new Error("商品资料读取受限");
+      return result;
+    },
   });
   const settings = useQuery({
     queryKey: ["rental-core", "business-settings", scope],
@@ -129,9 +143,29 @@ function CouponWorkspace() {
   });
   const currency = settings.data?.pricing.currency ?? "CNY";
   const money = (value: number) => formatRentalMoney(Number(value), currency);
+  const visibleGroups = canReadGroups() && !groups.isError ? groups.data : undefined;
+  const groupsUnavailableText = !canReadGroups()
+    ? (locale === "en-US" ? "Product access is restricted" : "商品资料读取受限")
+    : groups.isError
+      ? (locale === "en-US" ? "Unable to read product details" : "未能读取商品资料")
+      : (locale === "en-US" ? "Reading product details" : "正在读取商品资料");
+  const referencesAvailable = () =>
+    isCurrentScope() && canReadGroups() &&
+    ["groups", "coupon-templates"].every(
+      key => queryClient.getQueryState(["rental-core", key, scope])?.status === "success",
+    );
+  async function refreshTemplates(throwOnError = false) {
+    if (!isCurrentScope()) throw new DOMException("商业页面的会话或经营空间已变化", "AbortError");
+    await Promise.all([
+      templates.refetch({ throwOnError }),
+      // 附属错误留在引用状态中，刷新仍复验当前权限，避免阻断已获权的模板。
+      ...(canReadGroups() ? [groups.refetch()] : []),
+    ]);
+  }
   const save = useMutation({
     mutationFn: (values: SaveRentalCouponTemplateRequest) => {
       assertManage();
+      if (!referencesAvailable()) throw new Error(t("当前操作不可用"));
       return rentalCoreApi.saveCouponTemplate(values);
     },
     onSuccess: async () => {
@@ -182,7 +216,7 @@ function CouponWorkspace() {
     },
   });
   const editorUnavailable =
-    !canManage || templates.isPending || groups.isPending || templates.isError || groups.isError;
+    !canManage || !visibleGroups || templates.isPending || templates.isError;
   const templateSubmission = useOrderEditor<SaveRentalCouponTemplateRequest>({
     form,
     identity: drawerOpen
@@ -251,7 +285,7 @@ function CouponWorkspace() {
   }
 
   function openEditor(record?: RentalCouponTemplate) {
-    if (editorUnavailable || save.isPending || !isCurrentScope() || (drawerOpen && !editor.visible)) return;
+    if (editorUnavailable || save.isPending || !referencesAvailable() || (drawerOpen && !editor.visible)) return;
     templateSubmission.dismiss(() => {
       generations.current.template += 1;
       setEditing(record);
@@ -354,18 +388,16 @@ function CouponWorkspace() {
                 }
               >
                 <QueryState
-                  loading={templates.isLoading || groups.isLoading}
-                  error={templates.error || groups.error}
-                  onRetry={() =>
-                    Promise.all([
-                      templates.refetch({ throwOnError: true }),
-                      groups.refetch({ throwOnError: true }),
-                    ])
-                  }
+                  loading={templates.isLoading}
+                  error={templates.error}
+                  onRetry={() => refreshTemplates(true)}
                 >
                   <Table<RentalCouponTemplate>
                     cardView={{
-                      ...couponCards({ t, money, groups: groups.data ?? [], edit: openEditor }),
+                      ...couponCards({
+                        t, money, groups: visibleGroups, groupsUnavailableText,
+                        canEdit: !editorUnavailable, edit: openEditor,
+                      }),
                       defaultView: "cards",
                     }}
                     exportConfig={{
@@ -379,7 +411,7 @@ function CouponWorkspace() {
                       ],
                     }}
                     rowKey="id"
-                    onRefresh={() => templates.refetch()}
+                    onRefresh={() => refreshTemplates()}
                     loading={templates.isLoading}
                     refreshing={templates.isFetching}
                     dataSource={couponFilter.rows}
@@ -432,12 +464,16 @@ function CouponWorkspace() {
                       {
                         title: t("适用商品"),
                         dataIndex: "applicableItemGroupIds",
-                        render: (ids) =>
-                          ids.length
-                            ? locale === "en-US"
-                              ? `${ids.length} ${t("个指定商品")}`
-                              : `${ids.length} 个指定商品`
-                            : t("全部商品"),
+                        render: (ids) => (
+                          <DataTableText
+                            primary={ids.length
+                              ? locale === "en-US"
+                                ? `${ids.length} ${t("个指定商品")}`
+                                : `${ids.length} 个指定商品`
+                              : t("全部商品")}
+                            secondary={ids.length && !visibleGroups ? groupsUnavailableText : undefined}
+                          />
+                        ),
                       },
                       {
                         title: t("有效期"),
@@ -478,7 +514,7 @@ function CouponWorkspace() {
                         title: t("操作"),
                         fixed: "right",
                         render: (_, row) => (
-                          <Button type="link" icon={<EditOutlined />} onClick={() => openEditor(row)}>
+                          <Button type="link" icon={<EditOutlined />} disabled={editorUnavailable} onClick={() => openEditor(row)}>
                             {t("编辑")}
                           </Button>
                         ),
@@ -767,7 +803,7 @@ function CouponWorkspace() {
                       <Select
                         mode="multiple"
                         showSearch={{ optionFilterProp: "label" }}
-                        options={(groups.data ?? []).map((item) => ({
+                        options={(visibleGroups ?? []).map((item) => ({
                           value: item.id,
                           label: `${item.code} · ${item.name}`,
                         }))}
