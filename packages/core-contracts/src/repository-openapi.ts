@@ -2,6 +2,7 @@
  * 静态 HTTP/OpenAPI 声明的字段定位。只读取原 AST、符号和本地引用。
  * 字面量、有限数字加减及单一返回表达式按原语法读取，不执行模块、生成器或校验器。
  * 页面组件映射仅绑定受限局部声明，组件体和宿主上下文保持未解析来源。
+ * 成员写入复用常量归属，所选对象保留确定字段及受影响子字段的准确缺口。
  * DTO 请求字段只定位原类型和装饰器，不推导校验或响应 schema。Zod 转换和动态表达式保留来源。
  */
 import ts from "typescript";
@@ -23,9 +24,9 @@ function unwrap(node: ts.Expression): ts.Expression {
 }
 
 type SchemaValue = null | boolean | number | string | SchemaValue[] | { [key: string]: SchemaValue };
-type ExpressionBinding = { expression: ts.Expression; bindings: Map<ts.Symbol, ExpressionBinding>; seen: Set<ts.Node> };
+type ExpressionBinding = { expression: ts.Expression; bindings: Map<ts.Symbol, ExpressionBinding>; seen: Set<ts.Node>; mutations?: ObjectMutation[] };
 type ObjectWrites = { keys: Set<string>; unknown: boolean; unsafe: boolean; frozen: boolean };
-type ObjectMutation = { node: ts.Node; sources?: ts.Expression[] };
+type ObjectMutation = { node: ts.Node; members?: string[]; sources?: ts.Expression[] };
 const objectMutationIndexes = new WeakMap<RepositorySource, Map<ts.VariableDeclaration, ObjectMutation[]>>();
 
 /** 只解释纯声明语法。未知展开会遮蔽前面的属性，不能保留可能被覆盖的旧字段。 */
@@ -40,8 +41,8 @@ class StaticSchemaReader {
 
   constructor(private readonly source: RepositorySource) {}
 
-  schema(expression: ts.Expression, bindings = new Map<ts.Symbol, ExpressionBinding>(), seen = new Set<ts.Node>()): SchemaValue | typeof UNRESOLVED {
-    const value = this.read(expression, "", bindings, seen);
+  schema(expression: ts.Expression, bindings = new Map<ts.Symbol, ExpressionBinding>(), seen = new Set<ts.Node>(), mutations?: ObjectMutation[]): SchemaValue | typeof UNRESOLVED {
+    const value = this.readBinding({ expression, bindings, seen, mutations });
     if (value !== UNRESOLVED && value !== null && typeof value === "object" && !Array.isArray(value)) {
       if (value.type === "object" && value.additionalProperties === true && !value.properties) this.issues.add("/:unspecified-object-fields");
       if (value["x-schemaStatus"] === "incomplete" || Array.isArray(value["x-schemaGaps"]) && value["x-schemaGaps"].length)
@@ -96,7 +97,7 @@ class StaticSchemaReader {
     if (ts.isIdentifier(node)) {
       const symbol = this.source.checker.getSymbolAtLocation(node);
       const binding = symbol && bindings.get(symbol);
-      if (binding) return this.read(binding.expression, pointer, binding.bindings, binding.seen, selectiveMembers);
+      if (binding) return this.readBinding(binding, pointer, selectiveMembers);
       const target = symbol && this.source.target(symbol).valueDeclaration;
       if (target && ts.isEnumDeclaration(target) && isRepositorySourcePath(this.source.root, target.getSourceFile().fileName)) {
         const value: Record<string, SchemaValue> = Object.create(null);
@@ -234,7 +235,7 @@ class StaticSchemaReader {
       }
       if (typeof key === "string" || typeof key === "number") {
         const selected = this.selectMember(node.expression, [String(key)], bindings, chain);
-        if (selected && selected !== UNRESOLVED) return this.read(selected.expression, pointer, selected.bindings, selected.seen, selectiveMembers);
+        if (selected && selected !== UNRESOLVED) return this.readBinding(selected, pointer, selectiveMembers);
       }
       const value = read(node.expression);
       return value !== UNRESOLVED && value !== null && typeof value === "object" && (typeof key === "string" || typeof key === "number")
@@ -368,6 +369,37 @@ class StaticSchemaReader {
     return this.unresolved(pointer, "unsupported-expression");
   }
 
+  /** 只移除所选对象中受影响的字段，原字段位置和未知写入继续留作缺口。 */
+  private readBinding(binding: ExpressionBinding, pointer = "", selectiveMembers = false): SchemaValue | typeof UNRESOLVED {
+    const value = this.read(binding.expression, pointer, binding.bindings, binding.seen, selectiveMembers);
+    if (!binding.mutations?.length) return value;
+    if (value === UNRESOLVED || value === null || typeof value !== "object" || Array.isArray(value)
+      || binding.mutations.some(mutation => !mutation.members?.length)) {
+      this.clearFields(pointer);
+      return this.unresolved(pointer, "dynamic-object-write");
+    }
+    for (const mutation of binding.mutations) {
+      this.compositions.add(mutation.node);
+      let object = value as Record<string, SchemaValue>;
+      let location = pointer;
+      for (const [index, key] of mutation.members!.entries()) {
+        location += "/" + key.replaceAll("~", "~0").replaceAll("/", "~1");
+        const child = object[key];
+        // 数组成员失效时移除该数组字段，避免缺项数组被当成完整静态值。
+        if (index === mutation.members!.length - 1 || child === null || typeof child !== "object" || Array.isArray(child)) {
+          delete object[key];
+          this.clearFields(location);
+          this.unresolved(location, "dynamic-object-write");
+          this.partialObjects.add(object);
+          break;
+        }
+        object = child;
+      }
+      this.partialObjects.add(value);
+    }
+    return value;
+  }
+
   private objectCall(node: ts.CallExpression, method: string): boolean {
     return ts.isPropertyAccessExpression(node.expression) && ts.isIdentifier(node.expression.expression)
       && node.expression.expression.text === "Object" && node.expression.name.text === method
@@ -399,77 +431,59 @@ class StaticSchemaReader {
     }
   }
 
-  /** 只接纳同模块顺序明确的顶层 assign。循环、未知调用及其他写入保留真实位置并失效。 */
-  private objectMutations(target: ts.VariableDeclaration, usage: ts.Identifier): ObjectMutation[] {
+  /** 顶层 assign 保留原顺序，其他写入按共同归属定位重叠成员。 */
+  private objectMutations(target: ts.VariableDeclaration, usage: ts.Identifier, selectedMembers: readonly string[] = []): ObjectMutation[] {
     let index = objectMutationIndexes.get(this.source);
     if (!index) {
       index = new Map();
-      const owner = (expression: ts.Expression, seen = new Set<ts.Node>()): ts.VariableDeclaration | undefined => {
-        let node = unwrap(expression);
-        if (seen.has(node) || seen.size > 80) return;
-        const chain = new Set(seen).add(node);
-        while (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) node = unwrap(node.expression);
-        const constant = this.constTarget(node);
-        if (constant || !ts.isIdentifier(node)) return constant;
-        const symbol = this.source.checker.getSymbolAtLocation(node);
-        const binding = symbol && this.source.target(symbol).valueDeclaration;
-        if (binding && ts.isBindingElement(binding)) {
-          let declaration: ts.Node = binding.parent;
-          while (declaration.parent && !ts.isVariableDeclaration(declaration)) declaration = declaration.parent;
-          if (ts.isVariableDeclaration(declaration) && declaration.initializer) return owner(declaration.initializer, chain);
+      objectMutationIndexes.set(this.source, index);
+      const add = (node: ts.Node, expression: ts.Expression, sources?: ts.Expression[], referenceOnly = false) => {
+        let reference = this.source.constantOwner(expression);
+        if (referenceOnly && reference) {
+          const value = this.source.value(expression);
+          if (value !== UNRESOLVED && (value === null || typeof value !== "object")) return;
         }
-      };
-      const add = (node: ts.Node, constant: ts.VariableDeclaration, sources?: ts.Expression[]) => {
         const seen = new Set<ts.VariableDeclaration>();
-        while (!seen.has(constant)) {
-          seen.add(constant);
-          const entries = index!.get(constant) ?? [];
-          entries.push({ node, ...(sources ? { sources } : {}) });
-          index!.set(constant, entries);
-          const initializer = constant.initializer && unwrap(constant.initializer);
+        while (reference && !seen.has(reference.declaration)) {
+          seen.add(reference.declaration);
+          const entries = index!.get(reference.declaration) ?? [];
+          entries.push({ node, members: reference.members, ...(sources ? { sources } : {}) });
+          index!.set(reference.declaration, entries);
+          const initializer = reference.declaration.initializer && unwrap(reference.declaration.initializer);
           const parent = initializer && (ts.isPropertyAccessExpression(initializer) || ts.isElementAccessExpression(initializer))
-            && owner(initializer.expression);
-          if (!parent) break;
-          constant = parent;
+            ? this.source.constantOwner(initializer) : undefined;
+          reference = parent && { declaration: parent.declaration, members: parent.members && reference.members
+            ? [...parent.members, ...reference.members] : undefined };
           sources = undefined;
         }
       };
       const visit = (node: ts.Node) => {
-        if (ts.isCallExpression(node)) {
-          const constant = node.arguments[0] && owner(node.arguments[0]);
-          if (constant && this.objectCall(node, "assign")) {
+        if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
+          const reference = node.arguments?.[0] && this.source.constantOwner(node.arguments[0]);
+          if (reference && ts.isCallExpression(node) && this.objectCall(node, "assign")) {
             const direct = unwrap(node.arguments[0]);
             const topLevel = ts.isExpressionStatement(node.parent) && ts.isSourceFile(node.parent.parent);
-            const local = node.getSourceFile() === constant.getSourceFile();
-            add(node, constant, ts.isIdentifier(direct) && topLevel && local && node.getStart() > constant.getStart()
+            const local = node.getSourceFile() === reference.declaration.getSourceFile();
+            add(node, node.arguments[0], ts.isIdentifier(direct) && topLevel && local && node.getStart() > reference.declaration.getStart()
               && !node.arguments.some(ts.isSpreadElement) ? [...node.arguments.slice(1)] : undefined);
-          } else if (!["assign", "keys", "values", "entries", "hasOwn"].some(method => this.objectCall(node, method)) && !this.pureCall(node)) {
-            for (const argument of node.arguments) {
-              const constant = owner(argument);
-              if (constant) add(node, constant);
-            }
+          } else if (!(ts.isCallExpression(node)
+            && (["assign", "keys", "values", "entries", "hasOwn"].some(method => this.objectCall(node, method)) || this.pureCall(node)))) {
+            for (const argument of node.arguments ?? []) add(node, argument, undefined, true);
+            if (ts.isPropertyAccessExpression(node.expression) || ts.isElementAccessExpression(node.expression))
+              add(node, node.expression.expression, undefined, true);
           }
         } else if (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
-          && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) {
-          const constant = owner(node.left);
-          if (constant) add(node, constant);
-        } else if (ts.isDeleteExpression(node) || (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node))
-          && [ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken].includes(node.operator)) {
-          const constant = owner(ts.isDeleteExpression(node) ? node.expression : node.operand);
-          if (constant) add(node, constant);
-        } else if (ts.isVariableDeclaration(node) && node.initializer && ts.isVariableDeclarationList(node.parent)
-          && !(node.parent.flags & ts.NodeFlags.Const)) {
-          const constant = owner(node.initializer);
-          if (constant) add(node, constant);
-        }
+          && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) add(node, node.left);
+        else if (ts.isDeleteExpression(node) || (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node))
+          && [ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken].includes(node.operator)) add(node, ts.isDeleteExpression(node) ? node.expression : node.operand);
+        else if (ts.isVariableDeclaration(node) && node.initializer && ts.isVariableDeclarationList(node.parent)
+          && !(node.parent.flags & ts.NodeFlags.Const)) add(node, node.initializer, undefined, true);
         ts.forEachChild(node, visit);
       };
       for (const file of this.source.program.getSourceFiles()) {
         if (!file.isDeclarationFile && isRepositorySourcePath(this.source.root, file.fileName)) visit(file);
       }
-      objectMutationIndexes.set(this.source, index);
     }
-    const mutations = index.get(target) ?? [];
     const deferred = (node: ts.Node) => {
       for (let current: ts.Node | undefined = node; current && !ts.isSourceFile(current); current = current.parent)
         if (ts.isFunctionLike(current)) return true;
@@ -479,11 +493,16 @@ class StaticSchemaReader {
     while (statement.parent && !ts.isSourceFile(statement.parent)) statement = statement.parent;
     const finalName = ts.isVariableDeclaration(usage.parent) && usage.parent.name === usage;
     const cutoff = finalName || usage.getSourceFile() !== target.getSourceFile() ? Infinity : statement.end;
-    // 与基础常量读取一致：同语句不重放顺序，延迟读写不凭文本位置裁定发生时间。
-    const current = mutations.filter(mutation => deferred(usage) || deferred(mutation.node)
-      || mutation.node.getSourceFile() !== target.getSourceFile() || mutation.node.getStart() < cutoff);
+    // 已确定的其他成员不受影响，同语句、跨模块和延迟写入仍不能重放时序。
+    const current = (index.get(target) ?? []).filter(mutation => {
+      const members = mutation.members;
+      const overlaps = !selectedMembers.length || !members || members.slice(0, Math.min(members.length, selectedMembers.length))
+        .every((key, index) => key === selectedMembers[index]);
+      return overlaps && (deferred(usage) || deferred(mutation.node)
+        || mutation.node.getSourceFile() !== target.getSourceFile() || mutation.node.getStart() < cutoff);
+    });
     for (const mutation of current) this.compositions.add(mutation.node);
-    return current.map(mutation => deferred(usage) || deferred(mutation.node) ? { node: mutation.node } : mutation);
+    return current.map(mutation => deferred(usage) || deferred(mutation.node) ? { node: mutation.node, members: mutation.members } : mutation);
   }
 
   private pureCall(node: ts.CallExpression, seen = new Set<ts.Node>()): boolean {
@@ -576,10 +595,15 @@ class StaticSchemaReader {
       if (binding) return this.selectMember(binding.expression, keys, binding.bindings, binding.seen);
       const target = this.constTarget(node);
       if (target?.initializer) {
-        const mutations = this.objectMutations(target, node);
-        if (mutations.some(mutation => !mutation.sources)) return UNRESOLVED;
-        return mutations.length ? this.assignedMember(target.initializer, mutations.flatMap(mutation => mutation.sources!), keys, bindings, chain)
+        const mutations = this.objectMutations(target, node, keys);
+        if (mutations.some(mutation => !mutation.sources && (!mutation.members || mutation.members.length <= keys.length))) return UNRESOLVED;
+        const assignments = mutations.filter(mutation => mutation.sources);
+        const selected = assignments.length ? this.assignedMember(target.initializer, assignments.flatMap(mutation => mutation.sources!), keys, bindings, chain)
           : this.selectMember(target.initializer, keys, bindings, chain);
+        if (!selected || selected === UNRESOLVED) return selected;
+        const memberWrites = mutations.filter(mutation => !mutation.sources)
+          .map(mutation => ({ node: mutation.node, members: mutation.members!.slice(keys.length) }));
+        return { ...selected, mutations: [...(selected.mutations ?? []), ...memberWrites] };
       }
     }
     if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
@@ -680,7 +704,7 @@ export function describeRepositorySchema(source: RepositorySource, expression: t
     const found = name ? maps.map(map => resolver.member(map, name)).find(value => value !== undefined) : undefined;
     const target = found !== UNRESOLVED ? found : undefined;
     const reader = new StaticSchemaReader(source);
-    const schema = target && reader.schema(target.expression, target.bindings, target.seen);
+    const schema = target && reader.schema(target.expression, target.bindings, target.seen, target.mutations);
     refs.push({ ref, ...(target ? { declaration: sourceReference(target.expression, root),
       ...(schema !== UNRESOLVED && schema !== undefined ? { schema } : {}),
       fieldSources: reader.fieldSources(schema ?? UNRESOLVED), unresolvedFieldSources: reader.unresolvedFieldSources(), issues: [...reader.issues] }

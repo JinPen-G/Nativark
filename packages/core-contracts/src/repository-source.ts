@@ -1,7 +1,8 @@
 /**
  * 开发索引的只读源码读取器。TypeScript 只解析本仓文件和符号，常量解析只接受静态值。
  * 无编译输出、模块执行、环境加载或外部包解析；动态表达式由调用方登记待核对。
- * const 对象的后置写入只定位并失效；可解释的组合仍由 OpenAPI 读取器处理。
+ * const 对象和重叠成员的后置写入只定位并失效，其他成员的确定值保留。
+ * 可解释的组合仍由 OpenAPI 读取器处理。
  */
 import { lstatSync, readFileSync, readdirSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
@@ -10,6 +11,7 @@ import type { DevelopmentSourceReference } from "./development";
 
 export const UNRESOLVED = Symbol("unresolved-static-value");
 type StaticValue = string | number | boolean | null | StaticValue[] | { [key: string]: StaticValue };
+type ConstantOwner = { declaration: ts.VariableDeclaration; members: string[] | undefined };
 
 function unwrapExpression(node: ts.Expression): ts.Expression {
   while (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node)
@@ -73,7 +75,7 @@ export class RepositorySource {
   readonly program: ts.Program;
   readonly checker: ts.TypeChecker;
   private readonly objectWrites = new WeakMap<object, { keys: Set<string>; unknown: boolean }>();
-  private mutationIndex?: Map<ts.VariableDeclaration, ts.Node[]>;
+  private mutationIndex?: Map<ts.VariableDeclaration, { node: ts.Node; members: string[] | undefined }[]>;
 
   constructor(readonly root: string, files: string[], paths: Record<string, string[]>) {
     const readPermissions = new Map<string, boolean>();
@@ -129,35 +131,63 @@ export class RepositorySource {
     return symbol.flags & ts.SymbolFlags.Alias ? this.checker.getAliasedSymbol(symbol) : symbol;
   }
 
-  /** 沿原 OpenAPI 的 const/成员/解构归属定位写入，不重放赋值或未知调用。 */
-  private objectMutations(usage: ts.Identifier): ts.Node[] {
-    const owner = (expression: ts.Expression, seen = new Set<ts.Node>()): ts.VariableDeclaration | undefined => {
-      let node = unwrapExpression(expression);
-      if (seen.has(node) || seen.size > 80) return;
-      const chain = new Set(seen).add(node);
-      while (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) node = unwrapExpression(node.expression);
-      if (!ts.isIdentifier(node)) return;
-      const symbol = this.checker.getSymbolAtLocation(node), declaration = symbol && this.target(symbol).valueDeclaration;
-      if (declaration && ts.isBindingElement(declaration)) {
-        let binding: ts.Node = declaration;
-        while (binding.parent && !ts.isVariableDeclaration(binding)) binding = binding.parent;
-        return ts.isVariableDeclaration(binding) && binding.initializer ? owner(binding.initializer, chain) : undefined;
-      }
-      if (!declaration || !ts.isVariableDeclaration(declaration) || !declaration.initializer
-        || !ts.isVariableDeclarationList(declaration.parent) || !(declaration.parent.flags & ts.NodeFlags.Const)) return;
-      const initial = unwrapExpression(declaration.initializer);
-      return ts.isIdentifier(initial) ? owner(initial, chain) : declaration;
-    };
+  /** 常量与静态成员的共同归属，只定位声明和别名，不执行表达式。 */
+  constantOwner(expression: ts.Expression, seen = new Set<ts.Node>()): ConstantOwner | undefined {
+    let node = unwrapExpression(expression);
+    if (seen.has(node) || seen.size > 80) return;
+    const chain = new Set(seen).add(node);
+    let members: string[] | undefined = [];
+    while (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+      const key = ts.isPropertyAccessExpression(node) ? node.name : unwrapExpression(node.argumentExpression);
+      if (ts.isIdentifier(key) && ts.isPropertyAccessExpression(node) || ts.isStringLiteralLike(key) || ts.isNumericLiteral(key)) {
+        members?.unshift(key.text);
+      } else members = undefined;
+      node = unwrapExpression(node.expression);
+    }
+    if (!ts.isIdentifier(node)) return;
+    const symbol = this.checker.getSymbolAtLocation(node), declaration = symbol && this.target(symbol).valueDeclaration;
+    if (declaration && ts.isBindingElement(declaration)) {
+      let binding: ts.Node = declaration;
+      while (binding.parent && !ts.isVariableDeclaration(binding)) binding = binding.parent;
+      const parent = ts.isVariableDeclaration(binding) && binding.initializer ? this.constantOwner(binding.initializer, chain) : undefined;
+      if (!parent) return;
+      const name = declaration.propertyName ?? declaration.name;
+      const key = ts.isObjectBindingPattern(declaration.parent) && !declaration.dotDotDotToken
+        && (ts.isIdentifier(name) || ts.isStringLiteralLike(name) || ts.isNumericLiteral(name)) ? name.text : undefined;
+      return { declaration: parent.declaration, members: parent.members && members && key !== undefined
+        ? [...parent.members, key, ...members] : undefined };
+    }
+    if (!declaration || !ts.isVariableDeclaration(declaration) || !declaration.initializer
+      || !ts.isVariableDeclarationList(declaration.parent) || !(declaration.parent.flags & ts.NodeFlags.Const)) return;
+    const initial = unwrapExpression(declaration.initializer);
+    if (ts.isIdentifier(initial)) {
+      const parent = this.constantOwner(initial, chain);
+      return parent && { declaration: parent.declaration, members: parent.members && members
+        ? [...parent.members, ...members] : undefined };
+    }
+    return { declaration, members };
+  }
+
+  /** const/成员/解构的写入只定位并失效，不重放赋值或未知调用。 */
+  private objectMutations(usage: ts.Identifier, selectedMembers: readonly string[] = []): ts.Node[] {
     if (!this.mutationIndex) {
-      const index = new Map<ts.VariableDeclaration, ts.Node[]>();
-      const add = (node: ts.Node, expression: ts.Expression) => {
-        let constant = owner(expression);
+      const index = new Map<ts.VariableDeclaration, { node: ts.Node; members: string[] | undefined }[]>();
+      // 先登记索引避免静态参数读取递归重建，后续发现的写入继续收集。
+      this.mutationIndex = index;
+      const add = (node: ts.Node, expression: ts.Expression, referenceOnly = false) => {
+        let reference = this.constantOwner(expression);
+        if (referenceOnly && reference) {
+          const input = this.value(expression);
+          if (input !== UNRESOLVED && (input === null || typeof input !== "object")) return;
+        }
         const seen = new Set<ts.VariableDeclaration>();
-        while (constant && !seen.has(constant)) {
-          seen.add(constant);
-          index.set(constant, [...(index.get(constant) ?? []), node]);
-          const initial = constant.initializer && unwrapExpression(constant.initializer);
-          constant = initial && (ts.isPropertyAccessExpression(initial) || ts.isElementAccessExpression(initial)) ? owner(initial.expression) : undefined;
+        while (reference && !seen.has(reference.declaration)) {
+          seen.add(reference.declaration);
+          index.set(reference.declaration, [...(index.get(reference.declaration) ?? []), { node, members: reference.members }]);
+          const initial = reference.declaration.initializer && unwrapExpression(reference.declaration.initializer);
+          const parent = initial && (ts.isPropertyAccessExpression(initial) || ts.isElementAccessExpression(initial)) ? this.constantOwner(initial) : undefined;
+          reference = parent && { declaration: parent.declaration, members: parent.members && reference.members
+            ? [...parent.members, ...reference.members] : undefined };
         }
       };
       const visit = (node: ts.Node) => {
@@ -165,21 +195,21 @@ export class RepositorySource {
           if (node.arguments[0]) add(node, node.arguments[0]);
         } else if ((ts.isCallExpression(node) || ts.isNewExpression(node))
           && !(ts.isCallExpression(node) && this.readOnlyCall(node))) {
-          for (const argument of node.arguments ?? []) add(node, argument);
-          if (ts.isPropertyAccessExpression(node.expression) || ts.isElementAccessExpression(node.expression)) add(node, node.expression.expression);
+          for (const argument of node.arguments ?? []) add(node, argument, true);
+          if (ts.isPropertyAccessExpression(node.expression) || ts.isElementAccessExpression(node.expression)) add(node, node.expression.expression, true);
         } else if (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
           && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) add(node, node.left);
         else if (ts.isDeleteExpression(node) || (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node))
           && [ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken].includes(node.operator)) add(node, ts.isDeleteExpression(node) ? node.expression : node.operand);
         else if (ts.isVariableDeclaration(node) && node.initializer && ts.isVariableDeclarationList(node.parent)
-          && !(node.parent.flags & ts.NodeFlags.Const)) add(node, node.initializer);
+          && !(node.parent.flags & ts.NodeFlags.Const)) add(node, node.initializer, true);
         ts.forEachChild(node, visit);
       };
       for (const file of this.program.getSourceFiles()) if (!file.isDeclarationFile && isRepositorySourcePath(this.root, file.fileName)) visit(file);
-      this.mutationIndex = index;
     }
-    const constant = owner(usage);
-    if (!constant) return [];
+    const reference = this.constantOwner(usage);
+    if (!reference) return [];
+    const members = reference.members && [...reference.members, ...selectedMembers];
     const deferred = (node: ts.Node) => {
       for (let current: ts.Node | undefined = node; current && !ts.isSourceFile(current); current = current.parent)
         if (ts.isFunctionLike(current)) return true;
@@ -188,10 +218,15 @@ export class RepositorySource {
     let statement: ts.Node = usage;
     while (statement.parent && !ts.isSourceFile(statement.parent)) statement = statement.parent;
     const finalName = ts.isVariableDeclaration(usage.parent) && usage.parent.name === usage;
-    const cutoff = finalName || usage.getSourceFile() !== constant.getSourceFile() ? Infinity : statement.end;
-    // 同语句不重放执行顺序；延迟读写和跨模块写入也没有可证明的文本先后关系。
-    return (this.mutationIndex.get(constant) ?? []).filter(node => deferred(usage) || deferred(node)
-      || node.getSourceFile() !== constant.getSourceFile() || node.getStart() < cutoff);
+    const cutoff = finalName || usage.getSourceFile() !== reference.declaration.getSourceFile() ? Infinity : statement.end;
+    // 完整对象、动态成员及重叠路径继续失效；确定成员不受其他成员调用的影响。
+    return (this.mutationIndex.get(reference.declaration) ?? []).filter(mutation => {
+      const written = mutation.members;
+      if (members?.length && written && !written.slice(0, Math.min(written.length, members.length))
+        .every((key, index) => key === members[index])) return false;
+      const node = mutation.node;
+      return deferred(usage) || deferred(node) || node.getSourceFile() !== reference.declaration.getSourceFile() || node.getStart() < cutoff;
+    }).map(mutation => mutation.node);
   }
 
   private objectCall(node: ts.CallExpression, method: string): boolean {
@@ -233,21 +268,21 @@ export class RepositorySource {
   }
 
   /** 支持静态值和 Object.freeze 的字面量参数，通过语法拆包读取，不调用任何函数。 */
-  value(node: ts.Node | undefined, visited = new Set<ts.Node>()): StaticValue | typeof UNRESOLVED {
+  value(node: ts.Node | undefined, visited = new Set<ts.Node>(), selectedMembers: readonly string[] = []): StaticValue | typeof UNRESOLVED {
     if (!node || visited.has(node)) return UNRESOLVED;
     const chain = new Set(visited).add(node);
-    const value = (child: ts.Node | undefined) => this.value(child, chain);
+    const value = (child: ts.Node | undefined, members: readonly string[] = []) => this.value(child, chain, members);
     if (ts.isStringLiteralLike(node)) return node.text;
     if (ts.isNumericLiteral(node)) return Number(node.text);
     if (node.kind === ts.SyntaxKind.TrueKeyword) return true;
     if (node.kind === ts.SyntaxKind.FalseKeyword) return false;
     if (node.kind === ts.SyntaxKind.NullKeyword) return null;
     if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node)
-      || ts.isTypeAssertionExpression(node) || ts.isNonNullExpression(node)) return value(node.expression);
+      || ts.isTypeAssertionExpression(node) || ts.isNonNullExpression(node)) return value(node.expression, selectedMembers);
     if (ts.isCallExpression(node) && node.arguments.length === 1 && ts.isPropertyAccessExpression(node.expression)
       && node.expression.name.text === "freeze" && ts.isIdentifier(node.expression.expression)
       && node.expression.expression.text === "Object" && !this.checker.getSymbolAtLocation(node.expression.expression)?.declarations?.length)
-      return value(node.arguments[0]);
+      return value(node.arguments[0], selectedMembers);
     if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.MinusToken) {
       const operand = value(node.operand);
       return typeof operand === "number" ? -operand : UNRESOLVED;
@@ -277,7 +312,7 @@ export class RepositorySource {
       this.objectWrites.set(object, writes);
       for (const property of node.properties) {
         if (ts.isSpreadAssignment(property)) {
-          const part = value(property.expression);
+          const part = value(property.expression, selectedMembers);
           if (part === null || typeof part === "boolean" || typeof part === "number" || part === "") continue;
           const source = part !== UNRESOLVED && part && typeof part === "object" && !Array.isArray(part) ? part : undefined;
           const sourceWrites = source && this.objectWrites.get(source);
@@ -305,7 +340,7 @@ export class RepositorySource {
           const declaration = shorthand && this.target(shorthand).valueDeclaration;
           const expression = ts.isPropertyAssignment(property) ? property.initializer
             : ts.isShorthandPropertyAssignment(property) ? declaration && ts.isVariableDeclaration(declaration) ? declaration.initializer : property.name : undefined;
-          const part = value(expression);
+          const part = value(expression, selectedMembers[0] === key ? selectedMembers.slice(1) : []);
           writes.keys.add(key);
           delete object[key];
           if (part !== UNRESOLVED) object[key] = part;
@@ -314,8 +349,8 @@ export class RepositorySource {
       return object;
     }
     if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
-      const object = value(node.expression);
       const key = ts.isPropertyAccessExpression(node) ? node.name.text : value(node.argumentExpression);
+      const object = value(node.expression, typeof key === "string" || typeof key === "number" ? [String(key), ...selectedMembers] : []);
       if (object !== UNRESOLVED && object !== null && typeof object === "object" && (typeof key === "string" || typeof key === "number"))
         return Object.hasOwn(object, key) ? (object as Record<string | number, StaticValue>)[key] : UNRESOLVED;
       const symbol = this.checker.getSymbolAtLocation(ts.isPropertyAccessExpression(node) ? node.name : node);
@@ -328,8 +363,8 @@ export class RepositorySource {
       const declaration = symbol && this.target(symbol).declarations?.[0];
       if (declaration && ts.isVariableDeclaration(declaration) && ts.isVariableDeclarationList(declaration.parent)
         && declaration.parent.flags & ts.NodeFlags.Const) {
-        const initial = value(declaration.initializer);
-        return initial !== UNRESOLVED && initial !== null && typeof initial === "object" && this.objectMutations(node).length ? UNRESOLVED : initial;
+        const initial = value(declaration.initializer, selectedMembers);
+        return initial !== UNRESOLVED && initial !== null && typeof initial === "object" && this.objectMutations(node, selectedMembers).length ? UNRESOLVED : initial;
       }
     }
     return UNRESOLVED;

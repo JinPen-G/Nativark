@@ -121,7 +121,7 @@ Core 页面聚合从正式 `/admin` 出口的唯一直接返回对象，沿实�
 
 字段读取保留原 `expression`、声明和引用。字面量、静态对象/数组、常量及本仓单一返回表达式可给出 `schema`，`fieldSources` 用 JSON Pointer 定位其中已有字段的源码行，引用条目同时提供递归 schema 和各自缺口。`unresolvedFieldSources` 保留读取器已跟踪、且该字段或其子字段仍有缺口的属性指针与源码行；它不补字段值、不改变状态，也不从未引用表项补造出处。仅确定的有限数字加减可静态展开；未知操作数、隐式转换、其他运算或非有限结果保留缺口。`Object.values` 的字段与嵌套缺口按真实属性枚举顺序转换为数组索引，外层 spread 继续按最终位置换算。原必填、可空、默认值、单位及描述随声明读取。`sourceFields` 列出原 AST 的字段表达式和出处，Zod 的 `omit`、校验或转换仍沿原表达式核对。动态调用、展开、计算键、递归表达式及原宽泛对象分别列出原因，状态为 `source-reference`。未知展开可能覆盖的早期属性从已展开结果移除。缺少本地引用时标记 `not-indexed`。`schemas.parameters.schema` 给出从正式参数声明和同源生成器规则读取的路径/查询列表。公共显式列表覆盖推导，Rental 显式路径参数保留自己的限制，生成器只补缺少的路径项。查询 schema 的原枚举、范围和默认值随资料提供；来源见 `sources`。字符串字面量数组经单参数同步箭头函数 `map` 生成的参数列表也可静态读取，并只追踪所选字段的 schema；读取器不执行表达式，其他动态映射继续保留来源缺口。未知列表、schema 或覆盖继续列入 `parameters:source-reference`。[静态字段读取](src/repository-openapi.ts)
 
-可确定的 `Object.assign`、同模块顺序明确的顶层后置组合、本地同步纯函数和成员引用按最后覆盖顺序读取，字段出处跟随最终声明。未知来源可能覆盖的旧字段会失效，后续明确字段仍可定位；循环、未知写入、访问器或无法确定的组合保留实际来源与缺口。基础常量读取不重放 const 对象的后置写入，以 `post-write:<源码路径>:<行号>` 保留实际出处，并移除不能证明为最终值的初始化结果；写入前可证明的快照保留，同语句、跨模块和延迟读写的时序保持未解析。上述有限组合继续由静态字段读取器解释；它按同一时序边界处理同语句写入与延迟读写，保留实际写入出处，不把初始化值标为完整字段结果。扫描不会执行这些调用。
+可确定的 `Object.assign`、同模块顺序明确的顶层后置组合、本地同步纯函数和成员引用按最后覆盖顺序读取，字段出处跟随最终声明。未知来源可能覆盖的旧字段会失效，后续明确字段仍可定位；循环、未知写入、访问器或无法确定的组合保留实际来源与缺口。基础常量读取不重放 const 对象的后置写入，以 `post-write:<源码路径>:<行号>` 保留实际出处，并移除不能证明为最终值的初始化结果；写入前可证明的快照保留，同语句、跨模块和延迟读写的时序保持未解析。调用传出的已确定标量保持原值，可变引用按实际成员路径定位；读取确定成员时只核重叠写入，完整对象、动态成员及未知整对象调用继续失效。页面 schema 成员选择复用同一 const 归属，受影响的子字段保留准确缺口与原指针，其余确定字段仍可定位。上述有限组合继续由静态字段读取器解释；它按同一时序边界处理同语句写入与延迟读写，保留实际写入出处，不把初始化值标为完整字段结果。扫描不会执行这些调用。
 
 `openapiSource.controllerParameters` 将列表连接到实际 Controller 参数。类型、可选标记、`defaultExpression` 和静态 `declaredDefault` 沿原声明提供，`defaultStatus` 及 `defaultIssues` 说明动态默认值。无参 `@Query()` 引用本仓可静态枚举的平面DTO时，字段名逐一对应已有正式参数，保留原类型、可选标记、校验/转换表达式与源码行号；该对应不从DTO另生成schema。继承、泛型、构造/方法、计算或静态字段、动态Query名、默认与pipe继续标明来源缺口。品类候选 `operation` 的可选string、upgrade/restore及默认upgrade沿正式HTTP声明读取。生成器字段与Controller声明可分别核对，实际输入转换及业务限制继续由原入口执行。[公共订阅参数消费](../platform-server/src/modules/subscription/subscription-platform.controller.ts) · [Rental参数生成规则](../rental-core/src/http-openapi-contract.ts)
 
@@ -313,7 +313,7 @@ const route = CorePageDescriptorSchema.parse({
 
 例如“新建工单”是 `kind: "open"`，由本页提供 `open`，`emphasis: "primary"` 表达主操作；无需自行指定CSS。动作可声明附加权限和当前不可用原因。`resolveCorePageLocation`只按已登记目标编码参数，不能导航任意外部URL；注册或路径存在均不授予当前用户访问权。
 
-React 的 `CoreAdminPageAction` 还可声明 `slot`。省略时使用主操作栏，返回用 `"navigation"`，刷新等工具用 `"tools"`；都保留同一权限与页面生命周期。页签和查询视图交给 `CorePage.view`，需要同行工具时使用 `toolsPlacement="view"`。[按钮与页头接入](../platform-admin/README.md#宿主接入)
+React 的 `CoreAdminPageAction` 还可声明 `slot`。省略时使用主操作栏，返回用 `"navigation"`，刷新等工具用 `"tools"`，都保留同一权限与页面生命周期。Base0.1.9 提供 `"content:<名称>"` 正文槽位，动作声明 `slot: "content:quote"`，同一 `CorePage` 的卡片中用 `<CorePageActions slot="content:quote" />` 放置该动作。`CorePageActions` 与 `CoreAdminActionSlot` 从 `@rental-os/platform-admin/core` 正式导入，使用正文槽位的 Core 在 `compatibility.platform.minInclusive` 声明至少 `"0.1.9"`。页签和查询视图交给 `CorePage.view`，需要同行工具时使用 `toolsPlacement="view"`。能力查询使用 `--query CorePageActions` 或 `--query CoreAdminActionSlot` 定位正式出口、源码与资料。[正文动作例子](../platform-admin/src/core/README.md)
 
 **描述、注册、路径解析和[公共React页面适配](../platform-admin/src/core/index.ts)已提供。** 零Core和工单宿主共用同一应用工厂、页面注册表及授权目录；左栏、面包屑行、铃铛、休息和收展由公共壳提供。Rental旧路由仍通过兼容入口使用自身当前身份，完整标准装配继续迁移。字段类型、动态动作和表单Promise留在Core/React代码中；浏览器、真实HTTP/数据库及多Core完整运行仍须实际验收。
 
