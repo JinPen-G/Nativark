@@ -239,11 +239,20 @@ export function resolveRentalCategoryVersionBody(version: { categoryCode: string
   // Lowercasing any stored value would invent aliases for dynamic identities.
   if (!version || readRentalCategoryCode(version.categoryCode) !== categoryCode) throw new ConflictException("业务引用的品类版本不存在或编码不匹配");
   if (version.structureVersion !== 1) throw new ConflictException("当前程序不支持该品类结构版本，请升级兼容程序");
+  let definition = version.definition;
   if (version.status === "legacy_baseline") {
     const runtime = RENTAL_CATEGORY_DEFINITIONS.find((item) => item.code === categoryCode);
-    if (!runtime || !isDeepStrictEqual(version.definition, runtime)) throw new ConflictException("旧库品类快照与运行定义不一致，需先完成显式对账");
+    if (runtime) {
+      const { requiredCapabilities, ...legacyDefinition } = runtime;
+      // 原 Seed/初始化从旧主档投影，不保存空的必需能力声明。
+      // 只兼容其完整相同的旧格式；新必需能力或其他漂移仍须显式对账。
+      if (requiredCapabilities.length === 0 && isDeepStrictEqual(definition, legacyDefinition)) {
+        definition = { ...(definition as Record<string, unknown>), requiredCapabilities: [] };
+      }
+    }
+    if (!runtime || !isDeepStrictEqual(definition, runtime)) throw new ConflictException("旧库品类快照与运行定义不一致，需先完成显式对账");
   } else if (version.status !== "published") throw new ConflictException("业务不可引用未发布的品类版本");
-  return parsePublishedRentalCategory(version.definition, categoryCode);
+  return parsePublishedRentalCategory(definition, categoryCode);
 }
 
 /** Workspace binding is always re-read. Only a published version body can be cached later. */

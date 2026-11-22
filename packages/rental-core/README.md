@@ -136,7 +136,7 @@
 | [规则结构](src/category-adoption-rule-structure.ts)、[规则参数](src/category-adoption-rule-parameters.ts)、[营销引用](src/category-adoption-marketing-references.ts)、[价格引用](src/category-adoption-price-references.ts) | 验证原规则结构/参数与当前、排期的价格及营销引用，复用原DTO和执行规则。 |
 | [商品关系](src/category-adoption-product-graph.ts)、[容量配置](src/category-adoption-service-capacity.ts)、[设置执行](src/category-adoption-settings-execution.ts)、[履约引用](src/category-adoption-fulfillment-references.ts)、[能力引用](src/category-adoption-references.ts) | 商品/资产、服务容量、营业日/配货、履约关系与能力引用分别返回局部检查结果，完整门槛由共同读取器和最终采用复核汇总。 |
 | [品类治理合同](src/category-governance.ts) | `/category-governance` 持有原发布、采用、准备和收据声明，原 shared 出口再导出同一对象 |
-| [品类解析](src/category-runtime.ts)、[只读存储端口](src/category-storage.ts) | `/category-runtime` 提供原发布正文校验、历史引用、推荐版本、当前空间绑定和开通选项。各方法只要求自己使用的事务读取项，绑定与采用权限由原调用者核验 |
+| [品类解析](src/category-runtime.ts)、[只读存储端口](src/category-storage.ts) | `/category-runtime` 提供原发布正文校验、历史引用、推荐版本、当前空间绑定和开通选项。原 Seed 的旧快照只省略空 `requiredCapabilities` 时按原义读取，其他定义或新必需能力漂移仍须显式对账。各方法只要求自己使用的事务读取项，绑定与采用权限由原调用者核验 |
 | [品类身份](src/category-identity.ts)、[扩展一致性](src/rental-extension-registry.ts)、[空间展示名称](src/workspace-names.ts) | `/category-identity` 和 `/extensions` 供原订阅/会员及发布/启动消费。根出口保留原默认展示名称，旧 shared 再导出同一常量 |
 | [专业商品属性规则](src/item-group-validation.ts) | `/item-group-validation` 登记原露营容量与工程额定载荷限制。原商品保存流程在通用字段校验后调用，品类规则随 Rental 模块维护 |
 | [原业务服务入口](../../apps/api/src/modules/rental-core/README.md) | 旧API业务模块转接本包同一持久化服务、Controller、能力与作业，从原导读继续定位合同、调用方和恢复入口。 |
