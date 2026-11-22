@@ -13,7 +13,11 @@ export function createTicketsManifest(source: CoreManifest["source"]): CoreManif
     version: TICKETS_CORE_VERSION,
     source,
     license: "MIT",
-    compatibility: { platform: compatible, contract: compatible },
+    compatibility: {
+      // 标准SQL宿主复用当前事务部署观察，最低底座版本与真实接点一致。
+      platform: { minInclusive: "0.1.10", maxExclusive: "0.2.0" },
+      contract: compatible
+    },
     runtime: { node: { minInclusive: "22.12.0", maxExclusive: "25.0.0" } },
     entries: { server: "dist/index.js", openapi: "openapi.json", admin: "admin/index.tsx" },
     permissions: [

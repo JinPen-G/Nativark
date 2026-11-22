@@ -17,7 +17,7 @@
     "@rental-os/core-contracts": "0.1.0",
     "@rental-os/platform-admin": "0.1.0",
     "@rental-os/platform-contracts": "0.1.0",
-    "@rental-os/rental-core": "0.1.8",
+    "@rental-os/rental-core": "0.1.9",
     "@tanstack/react-query": "5.101.4",
     "@tanstack/react-table": "8.21.3",
     "axios": "1.19.0",
