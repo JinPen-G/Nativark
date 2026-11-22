@@ -16,6 +16,8 @@ npm run dev -w @rental-os/rental-admin
 
 开发端口默认 `5178`，可用进程变量 `PORT` 配置。API 公开基址与代理沿公共环境配置。`ai-offline` 构建模式使用既有离线环境分支。[包命令](package.json) · [环境加载](../../config/environment.cjs)
 
+应用从已核定清单识别公开路由发行。清单的 OpenAPI 入口为 `dist/http-openapi-portable.json` 时，同一会话的 HTTP 拦截器将原业务请求 `/rental/v1/...` 映射为 `/cores/rental/v1/...`，与公开包服务端入口一致。`VITE_API_BASE_URL` 继续提供公共 API 基址，默认 `/api`。JSON、图片和 CSV 共用此映射，认证、公共设置及其他路径沿各自入口。原兼容发行继续使用原业务地址。[应用接线](src/main.tsx) · [公开路由实现](../../packages/rental-core/src/http-portable.ts) · [发行选择](../rental-api/src/package.ts)
+
 ## 源码取出范围
 
 源码宿主的构建组合包含以下入口。公共包和 Rental 标准包按同一部署锁准备，第三方依赖沿应用包及 Core 的直接依赖声明和锁文件安装。

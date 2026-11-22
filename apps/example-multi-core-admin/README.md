@@ -20,6 +20,8 @@
 
 源码取出时包含本应用、`config/environment.cjs` 及其类型声明、公共 `core-contracts`、`platform-contracts`、`platform-admin`、`shared`、`ui-arc`、`ui-motiq` 与两个 Core 的已选依赖闭包。Rental API 及其所选构建依赖同时供给构建期的原路由许可。依赖声明见[应用包](package.json)，构建接点使用公共正式出口。
 
+Rental 清单的 OpenAPI 入口为 `dist/http-openapi-portable.json` 时，应用在同一会话 HTTP 运输中将 `/rental/v1/...` 映射为 `/cores/rental/v1/...`，使 JSON、图片和 CSV 消费公开包的业务入口。公共 API 基址仍由 `VITE_API_BASE_URL` 提供，默认 `/api`。工单、认证、公共设置及其他请求沿各自地址，原兼容 Rental 发行继续使用原业务地址。[应用接线](src/main.tsx) · [公开路由实现](../../packages/rental-core/src/http-portable.ts) · [发行选择](../rental-api/src/package.ts)
+
 ## 页面与动作边界
 
 - 宿主接受新的租户或经营空间投影时，通过原会话切换及 `session.invalidateBusinessScope()` 更新同一代次、请求信号和查询缓存。公共路由按登记参数、当前 Core 授权、成员分配与真实绑定生成页面生命周期。[组合参数](../../packages/platform-admin/src/application-context.ts) · [页面路由](../../packages/platform-admin/src/core/CoreRoutes.tsx)

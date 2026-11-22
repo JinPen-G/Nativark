@@ -19,6 +19,15 @@ import manifests from "virtual:core-manifests";
 import { createMultiCoreShell } from "./MultiCoreShell";
 
 const session = createRentalBrowserAdminSession({ baseURL: import.meta.env.VITE_API_BASE_URL ?? "/api" });
+if (manifests.rental.entries.openapi === "dist/http-openapi-portable.json") {
+  // 同一运输覆盖 JSON、图片与 CSV，刷新后仍使用该固定发行的业务入口。
+  session.http.interceptors.request.use(config => {
+    if (config.url?.startsWith("/rental/v1/")) {
+      config.url = "/cores/rental/v1/" + config.url.slice("/rental/v1/".length);
+    }
+    return config;
+  });
+}
 const rentalHost = createRentalBrowserAdminHost({
   session,
   categoryGovernancePreviewEnabled: import.meta.env.DEV
