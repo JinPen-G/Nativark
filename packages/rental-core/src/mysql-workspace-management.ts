@@ -14,6 +14,7 @@ import { requireRequestTenantId } from "@rental-os/platform-server/request-ident
 import { rentalCategoryStorageCode } from "./category-identity";
 import { assertCategoryAdoptionAllowed } from "./mysql-category-policy";
 import { lockRentalBusinessTenant } from "./mysql-business-fence";
+import { withCreatedRentalWorkspaceConfiguration } from "./mysql-workspace-scope";
 import type { BusinessWorkspace, BusinessWorkspaceStatus, CreateBusinessWorkspaceRequest, SaveWorkspaceMemberRequest,
   UpdateBusinessWorkspaceRequest, WorkspaceMember, SaveSystemUserAccessRequest, RentalCategoryCode } from "./contracts";
 import type { TenantSummary } from "./auth-contracts";
@@ -124,7 +125,8 @@ export class RentalWorkspaceManagementRepository extends PlatformAuthenticationR
           actorId: actorId ?? "system", reason: input.categoryVersionId ? "新建经营空间明确采用品类版本" : "新建经营空间绑定推荐品类版本"
         }
       });
-      await onBeforeCommit?.(tx, workspaceId, tenantId);
+      if (onBeforeCommit) await withCreatedRentalWorkspaceConfiguration(tx, created,
+        () => onBeforeCommit(tx, workspaceId, tenantId));
       return created;
     });
     return this.toWorkspace(created);

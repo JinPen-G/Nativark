@@ -18,7 +18,9 @@ export const PLATFORM_SOURCE_SCRIPTS = [
   "scripts/rental-platform-build.cjs",
   "scripts/rental-host-lock.cjs",
   "scripts/package-rental-host.cjs",
-  "scripts/check-selected-prisma-types.cjs"
+  "scripts/check-selected-prisma-types.cjs",
+  "scripts/prepare-rental-workspace.cjs",
+  "scripts/rental-build-snapshot.cjs"
 ] as const;
 const sourcePaths = [
   ...PLATFORM_SOURCE_WORKSPACES, "packages/ui-arc", "packages/ui-tablecn/LICENSE.md", "packages/ui-tablecn/README.md",
@@ -158,6 +160,7 @@ export function createPlatformSource(
     "db:initialize": "npm run initialize -w @rental-os/platform-api",
     "export:platform": "npm run export:platform -w @rental-os/core-contracts --",
     "core:check": "npm run check -w @rental-os/core-contracts --",
+    "prepare:rental-workspace": "node scripts/prepare-rental-workspace.cjs",
     capabilities: "npm run capabilities -w @rental-os/core-contracts --"
   };
   files.set("package.json", jsonBytes(root));

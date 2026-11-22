@@ -75,6 +75,11 @@ function projectHostLock(lock, workspaces, aiMode, runtimePeers = [], host = 're
     if (root.dependencies[name] && root.dependencies[name] !== entry.version) throw Error('实际运行peer版本冲突：' + name);
     root.dependencies[name] = entry.version;
   }
+  return projectWorkspaceLock(lock, workspaces, root);
+}
+
+/** 源码开发组合复用同一依赖闭包算法；root 明确列出所选工作区及构建工具。 */
+function projectWorkspaceLock(lock, workspaces, root) {
   const entries = { '': root }, reach = new Map(), queue = [['', false, false]];
   // Track production/development and required/optional independently. Old flags
   // describe the entire monorepo; retaining them can silently omit runtime code.
@@ -134,4 +139,4 @@ function projectHostLock(lock, workspaces, aiMode, runtimePeers = [], host = 're
   return { root, lock: projected };
 }
 
-module.exports = { selectWorkspaces, projectHostLock, lockedDependency, hostDirectory };
+module.exports = { selectWorkspaces, projectHostLock, projectWorkspaceLock, lockedDependency, hostDirectory };

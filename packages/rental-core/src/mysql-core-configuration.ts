@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { z } from 'zod';
 import { assertCategoryAdoptionAllowed } from "./mysql-category-policy";
 import { lockActiveCategoryBinding, replaceCategoryUniqueClaims, validateActiveCategoryWrite, type CategoryWriteBinding } from "./mysql-category-write";
+import { readCreatedRentalWorkspaceConfiguration } from "./mysql-workspace-scope";
 import type { Prisma, $Enums, RentalCouponTemplate as CouponTemplateRow } from "@prisma/client";
 import { Decimal, sqltag as sql, join, empty, PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import type { RentalCoreConfigurationTransaction, RentalCoreConfigurationStorage, RentalCoreConfigurationContacts } from "./core-configuration-storage";
@@ -938,7 +939,8 @@ export class RentalCoreConfigRepository<TTransaction extends RentalCoreConfigura
     //
     // 档案在需求里是「租户级升级兼容层」，不是空间的品类来源；空间品类的事实源
     // 是 business_workspaces.categoryCode。因此非默认空间一律不碰它。
-    const requestWorkspaceId = this.contacts.getRequestWorkspaceId();
+    const requestWorkspaceId = readCreatedRentalWorkspaceConfiguration(tx, profile.tenantId)?.id
+      ?? this.contacts.getRequestWorkspaceId();
     const isDefaultWorkspaceWrite = !requestWorkspaceId || requestWorkspaceId === `ws_${profile.tenantId}`;
     if (initialization?.categoryVersionId && !isDefaultWorkspaceWrite) throw new ConflictException("初始化选版只适用于新建默认空间");
     let current: Awaited<ReturnType<typeof lockActiveCategoryBinding>> | undefined;

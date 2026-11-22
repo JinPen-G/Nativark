@@ -13,13 +13,16 @@ const selections = ['LICENSE', 'package.json', 'package-lock.json', 'tsconfig.ba
   'apps/platform-api', 'apps/example-tickets-api', 'apps/example-tickets-admin', 'apps/example-multi-core-api', 'apps/example-multi-core-admin',
   'apps/rental-api', 'apps/rental-admin', 'apps/tenant-website', 'apps/enterprise-portal',
   'apps/admin', 'apps/miniprogram', 'apps/staff-miniprogram',
-  'scripts/miniprogram-shared-types.cjs', 'scripts/rental-client-vite.ts'];
+  'scripts/miniprogram-shared-types.cjs', 'scripts/rental-client-vite.ts', 'scripts/prepare-rental-workspace.cjs'];
 
-function readBuildSnapshot(commit) {
+function readBuildSnapshot(commit, directory = root, paths = selections, targetRoot = root) {
   if (!/^[a-f0-9]{40}$/u.test(commit)) throw Error('构建快照须使用完整固定提交 SHA');
+  if (!paths.length || paths.some(file => file !== '.' && (file.startsWith('/') || /[\\:]/u.test(file)
+    || file.split('/').some(part => !part || part === '.' || part === '..'))))
+    throw Error('构建快照只接受仓库相对文件范围');
   // git archive 也会应用 core.autocrlf；发行摘要与迁移必须比较原提交，不能归一已发布字节。
-  const tar = execFileSync('git', ['-c', 'core.autocrlf=false', 'archive', '--format=tar', commit, '--', ...selections],
-    { cwd: root, maxBuffer: 256 * 1024 * 1024, windowsHide: true });
+  const tar = execFileSync('git', ['--no-replace-objects', '-c', 'core.autocrlf=false', 'archive', '--format=tar', commit, '--', ...paths],
+    { cwd: directory, maxBuffer: 256 * 1024 * 1024, windowsHide: true });
   const files = new Map();
   let extra = {};
   const field = (header, at, length) => header.subarray(at, at + length).toString('utf8').replace(/\0.*$/su, '');
@@ -48,11 +51,17 @@ function readBuildSnapshot(commit) {
     if (name.startsWith('/') || /[\\:]/u.test(name) || name.split('/').some(part => !part || part === '.' || part === '..')
       || /^(?:docs|output)\//u.test(name)
       || /(?:^|\/)(?:node_modules|\.git|\.env(?:\..*)?)(?:\/|$)/u.test(name)) throw Error('Git 快照文件路径不受支持：' + name);
-    files.set(slash(path.join(root, name)), Buffer.from(bytes));
+    files.set(slash(path.join(targetRoot, name)), Buffer.from(bytes));
   }
+  return snapshotFromFiles(commit, files, targetRoot);
+}
+
+/** 固定来源组合后重建目录视图；调用方须先核定每份源码的 Git 身份。 */
+function snapshotFromFiles(commit, files, targetRoot = root) {
   const directories = new Map();
   for (const file of files.keys()) {
-    for (let current = file; current !== slash(root); current = slash(path.dirname(current))) {
+    if (!file.startsWith(slash(targetRoot) + '/')) throw Error('构建源码越出目标工作区：' + file);
+    for (let current = file; current !== slash(targetRoot); current = slash(path.dirname(current))) {
       const parent = slash(path.dirname(current));
       if (!directories.has(parent)) directories.set(parent, new Map());
       directories.get(parent).set(path.basename(current), !files.has(current));
@@ -61,4 +70,4 @@ function readBuildSnapshot(commit) {
   const entries = directory => directories.get(slash(directory));
   return { commit, files, directories, entries };
 }
-module.exports = { readBuildSnapshot };
+module.exports = { readBuildSnapshot, snapshotFromFiles };

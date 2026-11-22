@@ -321,6 +321,8 @@ HTTP入口从 `/http-workspace-capabilities`、`/http-staff-payments` 导入；`
 
 经营空间解析从 `@rental-os/rental-core/mysql-workspace-scope` 复用。有请求空间时重查它属于目标租户，原初始化/恢复只读原default标记，找不到则拒绝；HTTP缺少范围由原Guard先拒绝，解析结果不授予权限。配置写入通过同一 `assertScopedWrite` 核旧对象的租户/空间，避免全局id命中后覆盖他人资料。该空间模型只属于Rental，其他Core使用自己的业务分区。[原空间兼容出口](../../apps/api/src/modules/rental-core/workspace-scope.ts) · [空间范围验证](../../tests/rental-workspace-scope.test.cjs)
 
+新建经营空间时，[原创建仓储](src/mysql-workspace-management.ts)把本次 `businessWorkspace.create` 返回对象与原事务绑定，再调用原初始化回调。[核心初始化](src/mysql-core-runtime.ts)只消费该目标一次，核原发布绑定及已有配置，全部配置与开业事件接点写在同一事务中。原 Guard/ALS 身份保持原引用，回调退出后目标失效，配置事务失败时空间、配置和审计一同回滚，缓存由原门面在提交后预热。[配置仓储](src/mysql-core-configuration.ts) · [初始化回归](../../tests/category-space-initialization.test.cjs)
+
 请求DTO按用途从 `@rental-os/rental-core/configuration-dto`、`/core-dto` 或 `/order-dto` 导入，原API路径再导出同一运行时类。企业与客户预约的告知从 `/enterprise-disclosure-dto` 复用，嵌套转换继续使用同一个类。宿主按原Nest启动先加载 `reflect-metadata`，此子出口使用兼容的 `class-transformer` 和 `class-validator`；构建保留 `experimentalDecorators` 与 `emitDecoratorMetadata`，数组和嵌套对象沿原显式 `Type` 与 `ValidateNested` 校验。完整字段由 [原DTO门禁](../../scripts/validate-dto-coverage.cjs) 扫描实际源码，HTTP/OpenAPI字段继续引用原声明。[原HTTP入口](../../apps/api/src/modules/rental-core/rental-config-request.dto.ts)
 
 资金服务从 `@rental-os/rental-core/mysql-funding` 接入，宿主提供同一数据源、每次请求的原身份/订单可见范围，以及已启用企业业务的原应收参与者。已有事务原样传入；服务自开事务时保持原ReadCommitted，资金解释保持原RepeatableRead有界快照。实款、演练、企业回款分配和预授权各按原依据读取，缺供应商核验不显示真实可用余额。[原Nest接线](../../apps/api/src/modules/rental-core/rental-funding.service.ts) · [资金门禁验证](../../tests/rental-funding-gates.test.cjs) · [事件算法验证](../../tests/rental-funding-events.test.cjs)
@@ -390,10 +392,20 @@ npm run lint -w @rental-os/rental-core
 
 独立公开仓库从实际发行提交构建标准包，清单、Tag 和 Release 资产须对应同一来源。公开包声明 `/api/cores/rental/v1` 下已审定的业务操作，部署后的规范路径和原路径进入同一 Controller。包准备、实际部署、注册和租户授权沿现有流程完成。见[规范路径和文档共用入口](src/http-portable.ts)与[宿主接入说明](../../apps/rental-api/README.md)。
 
-公开出包时用 `--source-repository https://github.com/JinPen-G/Nativark` 固定底座和公共资料来源，`--core-repo` 指向独立 Core 仓库。构建与底座 SHA、独立仓的版本 Tag 和新归档路径分别传入；已有安装的来源保持原值，跨仓迁移按明确的来源处置流程办理。
+Core 使用底座的正式 API 和已声明能力扩展业务，底座与 Core 分别维护版本。底座更新默认兼容支持范围内的 Core；移除旧 API 时明确支持范围、废弃说明和迁移方法。Core 使用新能力时提高相应版本要求，安装前核对兼容范围和 `requires`，现有授权与业务数据仍由原机制维护。
+
+独立 Core 开发先用[源码工作区准备入口](../../scripts/prepare-rental-workspace.cjs)组合固定底座支持源码和 Core 自己的版本标签。它保留原构建工具、各端薄宿主与所选 npm 锁，输出新的开发归档；Core 子树来自独立仓库，底座源码和接口来自明确的支持版本。零 Core 底座继续单独发行。
 
 ```text
-node scripts/verify-rental-distribution.cjs --portable --commit <构建SHA> --platform-commit <底座SHA> --source-repository https://github.com/JinPen-G/Nativark --core-repo <独立仓根目录> --core-commit <版本Tag的SHA> --out <新目录/rental-版本.tgz>
+node scripts/prepare-rental-workspace.cjs --repo <固定底座Git目录> --repository https://github.com/JinPen-G/Nativark --commit <底座支持SHA> --core-repo <独立CoreGit目录> --core-commit <版本Tag的提交SHA> --out <新开发归档.tgz>
+```
+
+在新目录解包，执行 `npm ci`、`npm run check:types`，修改 `packages/rental-core` 后执行 `npm run check:core`。可选 AI 开发组合在准备时显式加 `--ai`；Client 生成、构建、迁移和启动按 [Rental 宿主](../../apps/rental-api/README.md)办理。包内 `development.workspace.json` 记录两个来源和文件摘要，开发组合不依赖维护者私有文档、旧生成物或聊天记忆。
+
+公开出包时用 `--source-repository https://github.com/JinPen-G/Nativark` 固定底座和公共资料来源，`--build-repo` 指向已取得的底座 Git 对象目录，`--core-repo` 指向独立 Core 仓库。发行从独立 Core 标签重新编译，不要求它与底座内的旧 Rental 子树一致。构建与底座 SHA、独立仓的版本 Tag 和新归档路径分别传入；已有安装的来源保持原值，跨仓迁移按明确的来源处置流程办理。
+
+```text
+node scripts/verify-rental-distribution.cjs --portable --build-repo <固定底座Git目录> --commit <构建SHA> --platform-commit <底座SHA> --source-repository https://github.com/JinPen-G/Nativark --core-repo <独立仓根目录> --core-commit <版本Tag的提交SHA> --out <新目录/rental-版本.tgz>
 ```
 
 独立 Linux 镜像使用[宿主打包入口](../../scripts/package-rental-host.cjs)。先完成正式源码构建、完整 Rental 标准包及[原部署准备](../../apps/rental-api/src/prepare-deployment.ts)，再从仓库根执行以下命令；参数均为实际绝对路径，输出父目录须存在且归档不能已存在。底座 `.tgz` 须使用与原 prepared 锁的 `platform.sha256` 一致的固定源码归档，不能用候选 `platform/` 目录代替。

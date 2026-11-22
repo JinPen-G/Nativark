@@ -21,7 +21,7 @@ function createBuild(dependencyDirectory, settings = {}) {
   const selectedClients = new Map();
   let generatedDirectories = new Set();
   const workspaceRoot = slash(root);
-  const snapshot = settings.commit && require('./rental-build-snapshot.cjs').readBuildSnapshot(settings.commit);
+  const snapshot = settings.snapshot ?? (settings.commit && require('./rental-build-snapshot.cjs').readBuildSnapshot(settings.commit));
   const sourceRead = file => snapshot && inside(workspaceRoot, slash(file))
     ? snapshot.files.get(slash(file))?.toString('utf8') : ts.sys.readFile(file);
   const manifests = snapshot ? [...snapshot.files.keys()].filter(file => /\/(?:packages|apps)\/[^/]+\/package\.json$/u.test(file)) : [];

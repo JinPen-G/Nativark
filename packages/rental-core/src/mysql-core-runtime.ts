@@ -132,7 +132,8 @@ import {
   type RentalCapabilityExceptionSnapshot,
   type UpdateRentalServiceOccurrenceRequest
 } from "./contracts";
-import { getRequestWorkspaceId, getRequestIdentity, getRequestStaffLocationIds, runWithRequestIdentity } from "@rental-os/platform-server/request-identity";
+import { getRequestWorkspaceId, getRequestIdentity, getRequestStaffLocationIds } from "@rental-os/platform-server/request-identity";
+import { claimCreatedRentalWorkspaceConfiguration } from "./mysql-workspace-scope";
 import { ACTIVE_ASSIGNMENTS, allocationComplete } from "./allocation-policy";
 import { RentalStateRepository } from "./mysql-state";
 import { DEFAULT_BUSINESS_TIME_ZONE, isValidTimeZone, businessHoursError } from "./business-day";
@@ -892,8 +893,8 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
    * 创建空间的同一事务内调用本方法：任一步失败则空间与配置一起回滚，
    * 不留「空间已建、没有任何品类配置」的空壳。
    *
-   * 同时登记查找表，使同步的 workspaceOf/state 立刻能解析这个新空间——
-   * 否则新空间在本进程内要等到下次重启预热才可用。
+   * 事务内只写原创建目标的配置和开业快照。调用方成功提交后统一预热
+   * 查找表与状态，避免失败事务留下可被同步读取的空间缓存。
    */
   async registerWorkspace(
     workspaceId: string,
@@ -901,27 +902,27 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
     categoryCode: RentalCategoryCode,
     tx?: TTransaction
   ) {
-    if (this.states.has(workspaceId)) return;
-    if (tx && !this.categoryResolver) throw new ServiceUnavailableException("事务初始化缺少持久化品类解析服务");
+    if (!tx) throw new ConflictException("新建空间配置必须使用原创建事务");
+    if (!this.categoryResolver) throw new ServiceUnavailableException("事务初始化缺少持久化品类解析服务");
+    const created = claimCreatedRentalWorkspaceConfiguration(tx, tenantId, workspaceId, categoryCode);
+    if (this.states.has(workspaceId)) throw new ConflictException("已有经营空间不能重新初始化配置");
     const definition = (await this.categoryResolver?.forWorkspace(tenantId, workspaceId, tx))?.definition;
-    if (definition) assertCapabilityHookRuntimeAvailable(this.hooks, definition.requiredCapabilities);
-    if (definition && (definition.conditionalCapabilities?.length || requiresCapabilityHookRuntime(definition.requiredCapabilities))) {
+    if (!definition) throw new ConflictException("新空间缺少原发布品类定义");
+    const current = await this.configStore.loadWorkspaceSnapshot?.(tenantId, workspaceId, tx);
+    if (current && (current.binding.categoryVersionId !== created.categoryVersionId
+      || current.binding.adoptionRevision !== created.categoryAdoptionRevision || current.profile || current.hasPersistedConfig)) {
+      throw new ConflictException("新空间绑定已变化或已有配置，拒绝重新初始化");
+    }
+    assertCapabilityHookRuntimeAvailable(this.hooks, definition.requiredCapabilities);
+    if (definition.conditionalCapabilities?.length || requiresCapabilityHookRuntime(definition.requiredCapabilities)) {
       if (!this.hooks) throw new ServiceUnavailableException("条件品类执行模块未装配，不能初始化空间");
       this.hooks.assertCategoryComposition(definition);
     }
     const seeded = this.seedState(tenantId, categoryCode, this.seedPrefix(tenantId, workspaceId), "CNY", definition);
-    // 写入必须落在这个新空间，而不是会话当前所在的空间。
-    await runWithRequestIdentity({ tenantId, workspaceId }, async () => {
-      await this.persistConfig(seeded, tx);
-    });
+    // 本次 create 的目标与原事务一起传给仓储，原 Guard/ALS 身份保持不变。
+    await this.persistConfig(seeded, tx);
     seeded.configPersisted = true;
-    // 仅在该空间的全部配置已写入后发布，避免配置写失败时留下幽灵映射。
-    // 同一原则：事务内仅持久化，成功提交后由 PlatformService 统一预热发布。
-    if (!tx) {
-      this.categoryByWorkspace.set(workspaceId, categoryCode);
-      this.tenantByWorkspace.set(workspaceId, tenantId);
-      this.states.set(workspaceId, seeded);
-    }
+    // 成功提交后由原调用方统一预热，不在创建事务内发布缓存。
   }
 
   /**

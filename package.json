@@ -1,6 +1,6 @@
 {
   "name": "rental-os",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "license": "MIT",
   "workspaces": [
@@ -8,6 +8,7 @@
     "packages/*"
   ],
   "scripts": {
+    "prepare:rental-workspace": "node scripts/prepare-rental-workspace.cjs",
     "ai:publication:check": "node scripts/ops/check-ai-publication.cjs",
     "docs:check": "node scripts/validate-docs.cjs",
     "test:docs": "node --test tests/docs-check.test.cjs",
