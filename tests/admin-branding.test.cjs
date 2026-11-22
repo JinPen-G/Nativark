@@ -13,7 +13,7 @@ function load(file, overrides = {}) {
 }
 const canonical = read('apps/admin/public/brand/nativark-icon.svg');
 const icons = load('apps/admin/src/app/brandIcon.ts', {
-  '../../public/brand/nativark-icon.svg?raw': canonical,
+  'virtual:nativark-default-brand-icon': canonical,
 });
 const brand = load('apps/admin/src/app/branding.ts');
 const tenant = { brandLogoUrl: '/uploads/tenant.svg', faviconUrl: '/uploads/not-the-logo.png' };
