@@ -162,7 +162,7 @@ function MembershipRewardsWorkspace({ scope }: { scope: string }) {
           {
             id: "grant-reward",
             kind: "open",
-            emphasis: "primary",
+            slot: "tools",
             label: t("补发奖励"),
             icon: <Plus />,
             disabled: !canSeeRewards,

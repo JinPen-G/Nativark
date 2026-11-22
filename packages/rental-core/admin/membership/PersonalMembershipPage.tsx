@@ -582,6 +582,7 @@ function PersonalMembershipWorkspace({ scope }: { scope: string }) {
               {
                 id: "registration-settings",
                 kind: "open",
+                slot: "tools",
                 label: t("注册设置"),
                 disabled: !canManage || settings.isPending || settings.isError,
                 open: () => {
@@ -592,6 +593,7 @@ function PersonalMembershipWorkspace({ scope }: { scope: string }) {
               {
                 id: "workspace-qualification-types",
                 kind: "open",
+                slot: "tools",
                 label: t("当前空间证件类型"),
                 disabled: !canManageTypes,
                 open: () => setDrawer("types"),
