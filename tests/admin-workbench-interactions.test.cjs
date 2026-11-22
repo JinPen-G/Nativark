@@ -236,3 +236,33 @@ test("operations reject previous-scope JSON and CSV results before exposing them
   await assert.rejects(third.api.workbenchTodos(), { name: "AbortError" });
   assert.equal(jsonCalls, 1, "A permission change invalidates the previous context before transport");
 });
+
+test("workbench keeps refresh and payment reconciliation in the original page header", () => {
+  const filename = path.resolve(__dirname, "../packages/rental-core/admin/operations/WorkbenchPage.tsx");
+  const text = fs.readFileSync(filename, "utf8");
+  const tree = ts.createSourceFile(filename, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let header;
+  function visit(node) {
+    if (ts.isJsxOpeningElement(node) && node.tagName.getText(tree) === "CorePage") header = node;
+    ts.forEachChild(node, visit);
+  }
+  visit(tree);
+  assert.ok(header, "The workbench must use the original public page header");
+  const attributes = new Map(header.attributes.properties.filter(ts.isJsxAttribute).map(item => [item.name.text, item.initializer]));
+  assert.equal(attributes.get("toolsPlacement").text, "context", "Refresh must remain in the page header");
+  const tools = attributes.get("tools").expression;
+  assert.equal(tools.tagName.getText(tree), "Button");
+  assert.equal(tools.attributes.properties.find(item => item.name.text === "shape").initializer.text, "circle");
+  const actions = attributes.get("actions").expression;
+  assert.ok(ts.isConditionalExpression(actions));
+  assert.equal(actions.condition.getText(tree), "canReconcilePayments");
+  assert.equal(actions.whenFalse.elements.length, 0, "Unauthorized users have no payment action");
+  const action = actions.whenTrue.elements[0];
+  const properties = new Map(action.properties.map(item => [item.name.text, item.initializer]));
+  assert.equal(properties.get("id").text, "reconcile-payments");
+  assert.equal(properties.get("kind").text, "command");
+  assert.equal(properties.get("pending").getText(tree), "reconcilePayments.isPending");
+  assert.match(properties.get("permissions").getText(tree), /resource: "finance", action: "reconcile"/);
+  assert.match(properties.get("execute").getText(tree), /await reconcilePayments\.mutateAsync\(\)/);
+  assert.doesNotMatch(text, /styles\.(maintenanceTools|todoSection)/, "The original todo layout has no relocated payment toolbar");
+});
