@@ -168,13 +168,16 @@ export function createPlatformSource(
   files.set("README.md", Buffer.from(platformReadme(source)));
   // 组合工程的兼容链接仍可追溯到原提交；私有资料不生成不可访问的公开链接。
   for (const [path, bytes] of files) if (path.endsWith(".md")) {
-    const text = Buffer.from(bytes).toString("utf8").replace(/\[([^\]]+)\]\(([^\s)]+)\)/g, (original, label: string, target: string) => {
+    // Markdown 的尖括号目的地允许空格，私有资料链接也必须在这种写法下移除。
+    const text = Buffer.from(bytes).toString("utf8").replace(/\[([^\]\r\n]+)\]\((<[^<>\r\n]+>|[^\s)]+)([ \t]+(?:"[^"\r\n]*"|'[^'\r\n]*'))?\)/g, (original, label: string, destination: string, title: string | undefined) => {
+      const angle = destination.startsWith("<"), target = angle ? destination.slice(1, -1) : destination;
       if (/^(?:[a-z]+:|#)/i.test(target)) return original;
       const [file, anchor] = target.split("#"), resolved = posix.normalize(posix.join(posix.dirname(path), file));
       if (files.has(resolved) || [...files.keys()].some(path => path.startsWith(resolved + "/"))) return original;
       if (resolved === "docs" || resolved.startsWith("docs/")) return label;
       const kind = posix.extname(resolved) ? "blob" : "tree";
-      return `[${label}](${source.repository}/${kind}/${source.commit}/${resolved}${anchor ? "#" + anchor : ""})`;
+      const url = `${source.repository}/${kind}/${source.commit}/${resolved}${anchor ? "#" + anchor : ""}`;
+      return `[${label}](${angle ? "<" + url + ">" : url}${title ?? ""})`;
     });
     files.set(path, Buffer.from(text));
   }
