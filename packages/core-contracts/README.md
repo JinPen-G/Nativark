@@ -99,6 +99,12 @@ node packages/core-contracts/dist/capabilities.js --id "api:GET:/api/auth/me" --
 node packages/core-contracts/dist/capabilities.js --owner example-tickets --json
 ```
 
+在底座源码归档或 Rental 开发归档的根目录使用 `npm run capabilities` 时，传入 `--repo ../..`。npm 在 `packages/core-contracts` 目录执行该脚本，这个参数定位源码工作区根。
+
+```sh
+npm run capabilities -- --repo ../.. --query SaveButton --json
+```
+
 每项结果包含名称、类型、归属、版本、源码路径和行号、正式导入或 HTTP/页面入口，以及可用的文档链接和原声明元数据。公共导出还给出直接导入计数和前5个源码位置，可以从已有消费者了解用法。统计支持具名和默认导入、namespace 的确定成员，以及字面量 `import()` / `require()` 的解构和成员读取。同一 namespace 绑定重复读取同一导出只计一次。动态模块名、动态成员名及整模块传递保持未展开，`directImportsStatus=not-indexed` 的零计数表示缺少可定位的本仓声明。查询默认返回20项，使用 `--limit`（最多100项）和 `--offset` 分页，`nextOffset` 给出下一页位置。`--owner` 按输出中的准确归属筛选，`--kind` 支持 `module`、`export`、`ui`、`page`、`api`、`extension`。`--repo` 可显式指定本次源码根目录。
 
 索引从查询根包与 workspace 的正式出口、TypeScript 导出与源码说明、Controller 路由、后台 `APP_ROUTES`、Core 清单与页面贡献和 UIArc 来源清单读取。查询根的 `package.json` 有 `exports`、`main` 或 `types` 时，会登记根包及当前源码，归属为 `.`，来源路径为 `package.json` 和 `src/...` 等根相对路径。独立 Core 可省略 `workspaces` 或使用空数组，显式选择根及重复 workspace 只登记一次。workspace 支持 `packages/*` 等一层通配目录，以及底座源码发行中的 `packages/core-contracts` 等显式目录。正式出口按实际条件和构建目录映射到源码，`rootDir` / `outDir` 使用原 TypeScript 配置及其本仓继承配置；配置不可读取时保留未解析出口，不用历史生成物补成源码。兼容转接参与符号解析，直接导入统计读取已发现根包和 workspace 的 `src`。局部别名沿导入文件所属的原 TypeScript 配置解析。Controller 与旧后台路由只从本次所选 workspace 取得，零 Core 底座和所选 Core 的来源分别保留。源码新增或迁移后再次查询即可反映变化。新增 Core 使用自己的正式包出口、清单、页面和 API 贡献登记能力，宿主可通过 `@rental-os/core-contracts/development` 的 `describeCoreDevelopmentCapabilities` 取得同源目录，查询合同由该出口提供。[能力目录实现](src/development.ts)
