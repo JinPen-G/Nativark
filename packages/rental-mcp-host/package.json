@@ -274,7 +274,7 @@
   },
   "dependencies": {
     "@rental-os/ai-native-server": "0.1.0",
-    "@rental-os/rental-core": "0.1.4",
+    "@rental-os/rental-core": "0.1.5",
     "@rental-os/mcp-server": "0.1.0",
     "@rental-os/platform-contracts": "0.1.0",
     "@rental-os/platform-server": "0.1.0",
