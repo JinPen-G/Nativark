@@ -237,19 +237,23 @@ test("operations reject previous-scope JSON and CSV results before exposing them
   assert.equal(jsonCalls, 1, "A permission change invalidates the previous context before transport");
 });
 
-test("workbench keeps refresh and payment reconciliation in the original page header", () => {
+test("operations keep text refresh and secondary reconciliation in the original content locations", () => {
   const filename = path.resolve(__dirname, "../packages/rental-core/admin/operations/WorkbenchPage.tsx");
   const text = fs.readFileSync(filename, "utf8");
   const tree = ts.createSourceFile(filename, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  let header;
+  let header, todoSection;
   function visit(node) {
     if (ts.isJsxOpeningElement(node) && node.tagName.getText(tree) === "CorePage") header = node;
+    if (ts.isJsxElement(node) && node.openingElement.tagName.getText(tree) === "section"
+      && node.openingElement.attributes.properties.some(item => ts.isJsxAttribute(item)
+        && item.name.text === "className" && item.initializer?.expression?.getText(tree) === "styles.todoSection")) todoSection = node;
     ts.forEachChild(node, visit);
   }
   visit(tree);
   assert.ok(header, "The workbench must use the original public page header");
   const attributes = new Map(header.attributes.properties.filter(ts.isJsxAttribute).map(item => [item.name.text, item.initializer]));
-  assert.equal(attributes.has("tools"), false, "The original refresh belongs to the top action bar");
+  assert.equal(attributes.get("toolsPlacement").text, "view");
+  assert.match(attributes.get("tools").expression.getText(tree), /CorePageActions slot="content:view-tools"/);
   assert.equal(attributes.get("actions").expression.getText(tree), "pageActions");
   let declaredActions, paymentGate;
   function findActions(node) {
@@ -260,19 +264,37 @@ test("workbench keeps refresh and payment reconciliation in the original page he
   findActions(tree);
   const refresh = new Map(declaredActions.elements[0].properties.map(item => [item.name.text, item.initializer]));
   assert.equal(refresh.get("id").text, "refresh");
-  assert.equal(refresh.has("slot"), false, "Refresh is the first top action");
-  assert.match(refresh.get("presentation").getText(tree), /shape: "circle", iconOnly: true/);
+  assert.equal(refresh.get("slot").text, "content:view-tools");
+  const presentation = new Map(refresh.get("presentation").properties.map(item => [item.name.text, item.initializer]));
+  assert.equal(presentation.get("control").text, "button");
+  assert.equal(presentation.get("type").text, "text");
+  assert.equal(presentation.get("iconOnly").kind, ts.SyntaxKind.TrueKeyword);
+  assert.equal(presentation.has("shape"), false);
   assert.equal(refresh.get("execute").getText(tree), "refresh");
   assert.ok(paymentGate, "Payment reconciliation is declared only for authorized users");
   const action = paymentGate.thenStatement.expression.arguments[0];
   const properties = new Map(action.properties.map(item => [item.name.text, item.initializer]));
   assert.equal(properties.get("id").text, "reconcile-payments");
   assert.equal(properties.get("kind").text, "command");
-  assert.equal(properties.get("emphasis").text, "primary");
+  assert.equal(properties.get("slot").text, "content:maintenance-tools");
+  assert.equal(properties.get("emphasis").text, "secondary");
   assert.equal(properties.get("pending").getText(tree), "reconcilePayments.isPending");
   assert.match(properties.get("permissions").getText(tree), /resource: "finance", action: "reconcile"/);
   assert.match(properties.get("execute").getText(tree), /await reconcilePayments\.mutateAsync\(\)/);
-  assert.doesNotMatch(text, /styles\.(maintenanceTools|todoSection)/, "The original todo layout has no relocated payment toolbar");
+  assert.ok(todoSection, "Payment reconciliation stays in the original todo section");
+  const todoContent = todoSection.getText(tree);
+  const queueEnd = todoContent.indexOf("</QueryState>");
+  const paymentToolbar = todoContent.indexOf("className={styles.maintenanceTools}");
+  assert.ok(queueEnd > todoContent.indexOf("WorkbenchTodoQueue"));
+  assert.ok(paymentToolbar > queueEnd, "The maintenance toolbar follows the original todo query");
+  assert.match(todoContent.slice(paymentToolbar), /CorePageActions slot="content:maintenance-tools"/);
+  const css = fs.readFileSync(path.resolve(__dirname, "../packages/rental-core/admin/operations/WorkbenchOverview.module.css"), "utf8");
+  assert.match(css, /\.todoSection\s*\{\s*display:\s*grid;\s*min-width:\s*0;\s*gap:\s*var\(--space-2\);\s*\}/);
+  assert.match(css, /\.maintenanceTools\s*\{\s*display:\s*flex;\s*justify-content:\s*flex-end;\s*\}/);
+  const report = fs.readFileSync(path.resolve(__dirname, "../packages/rental-core/admin/operations/WorkspaceOperationReportPage.tsx"), "utf8");
+  assert.match(report, /toolsPlacement="view" tools=\{<Space><CorePageActions slot="content:view-tools" \/><\/Space>\}/);
+  assert.match(report, /id: "export-csv", kind: "command", label: t\("导出 CSV"\), slot: "content:view-tools"/);
+  assert.match(report, /id: "refresh", kind: "command", label: t\("刷新经营报表"\), slot: "content:view-tools"/);
 });
 
 test("declared order actions retain their original quote, result and workflow locations", () => {

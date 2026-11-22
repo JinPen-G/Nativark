@@ -99,6 +99,8 @@ CorePage 的 `title`、`summary` 可显示当前受权对象；`actions` 可声�
 
 真实零Core消费者见[公共Web宿主](../../apps/platform-admin/README.md)。新宿主使用 `/forms` 的草稿同步/离页保护及 `/motion` 的启动入口、`usePrefersReducedMotion` 与原 `motionTokens`，同一偏好驱动保留组件。既有 `/source/` 转接路径在 [包配置](package.json) 中逐项映射实际文件及扩展名，TypeScript与Vite均消费同一出口；它们只承担原后台兼容。新业务页面使用正式 `/core`、`/ui` 等出口，统一能力查询不重复列出这些兼容路径。
 
+原消息中心的 CSS 转接也由包配置明确登记，读取同一[通知样式](src/features/notifications/notifications.css)。新宿主仍从 `/styles` 加载公共样式，不复制旧宿主样式或依赖未登记的子路径。
+
 公共应用按当前身份显示“租户 Core 授权”或“成员 Core 分配”。前者只由 SaaS 管理员读取当前部署目录并为租户开通/停用；后者从服务端 `assignable` 选择本租户已获权 Core，不要求管理者先分配给自己。地址参数只定位真实目录对象，缺失对象不挂载命令。提交中的路由/对象切换被阻止，未知结果保留原核对编号；分配与业务角色各自管理，界面可见性不代替服务端权限。
 
 人员列表与资料页从 `/settings/users` 进入 `/settings/member-cores?target=<成员ID>`，租户列表、资料和状态页从 `/platform/tenants` 进入 `/platform/core-access?target=<租户ID>`。新建先等待可信创建结果，人员使用返回的 `id`，租户使用 `tenant.tenantId`；目标编码后仅预选授权目录，密码仍只留当前页。先保存资料，再由授权页重读当前对象和可管理 Core，单独提交开通或成员分配。[资料页入口](src/features/access/PublicManagementPages.tsx) · [授权目录](src/CoreAccessPage.tsx)

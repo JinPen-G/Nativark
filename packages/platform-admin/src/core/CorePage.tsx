@@ -56,8 +56,8 @@ export type CoreAdminPageAction<Values> = CorePageAction<FormInstance<Values>, V
   intent?: ActionButtonIntent;
   /** 缺省进入主操作栏；返回与辅助动作仍经过同一权限和生命周期驱动。 */
   slot?: CoreAdminActionSlot;
-  /** 特殊正文仍使用原按钮尺寸和形状，只接受呈现字段，执行由公共动作驱动。 */
-  presentation?: Pick<ButtonProps, "block" | "shape" | "size" | "style"> & {
+  /** 特殊正文仍使用原按钮变体、尺寸和形状，执行由公共动作驱动。 */
+  presentation?: Pick<ButtonProps, "type" | "block" | "shape" | "size" | "style"> & {
     control: "button";
     iconOnly?: boolean;
   };
@@ -105,7 +105,7 @@ function PageAction<Values>({ host, action, visible = true }: { host: CorePageHo
   };
   const confirming = useRef<Promise<unknown> | null>(null);
   const executing = useRef<Promise<unknown> | null>(null);
-  const { control, iconOnly, ...presentation } = action.presentation ?? {};
+  const { control, iconOnly, type: buttonType, ...presentation } = action.presentation ?? {};
   const run = async () => {
     const latest = current().action;
     if (latest.kind === "save") {
@@ -119,7 +119,7 @@ function PageAction<Values>({ host, action, visible = true }: { host: CorePageHo
   };
   let button: ReactNode;
   if (action.kind === "navigate" || action.kind === "open") {
-    button = <Button {...presentation} type={action.slot === "navigation" ? "text" : variant === "primary" ? "primary" : "default"} icon={action.icon} danger={action.danger}
+    button = <Button {...presentation} type={buttonType ?? (action.slot === "navigation" ? "text" : variant === "primary" ? "primary" : "default")} icon={action.icon} danger={action.danger}
       loading={action.pending} disabled={disabled} aria-label={iconOnly ? label : undefined} onClick={() => {
       try {
         const value = current(), latest = value.action;
@@ -132,7 +132,7 @@ function PageAction<Values>({ host, action, visible = true }: { host: CorePageHo
       } catch { if (live.current.active && live.current.visible && visibility.current === opening) toast({ type: "error", title: t("当前操作不可用") }); }
     }}>{iconOnly ? null : label}</Button>;
   } else if (control === "button" && !(action.kind === "command" && action.confirmation)) {
-    button = <Button {...presentation} type={variant === "primary" ? "primary" : "default"}
+    button = <Button {...presentation} type={buttonType ?? (variant === "primary" ? "primary" : "default")}
       icon={action.icon} danger={action.danger} loading={action.pending} disabled={disabled}
       htmlType={action.kind === "save" ? "submit" : "button"}
       aria-label={iconOnly ? label : undefined} onClick={event => {

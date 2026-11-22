@@ -20,7 +20,7 @@ import { Select } from "@rental-os/platform-admin/ui";
 import { Button } from "@rental-os/platform-admin/ui";
 import dayjs, { type Dayjs } from "dayjs";
 import { useState } from "react";
-import { CorePage } from "@rental-os/platform-admin/core";
+import { CorePage, CorePageActions } from "@rental-os/platform-admin/core";
 import { useRentalOperationsContext } from "./page-context";
 import { QueryState } from "@rental-os/platform-admin/core";
 import { useLocale } from "@rental-os/platform-admin/locale";
@@ -118,16 +118,17 @@ export function WorkspaceOperationReportPage() {
     <CorePage
         actions={[
           {
-            id: "export-csv", kind: "command", label: t("导出 CSV"),
+            id: "export-csv", kind: "command", label: t("导出 CSV"), slot: "content:view-tools",
             icon: <DownloadOutlined />, presentation: { control: "button" },
             pending: exporting, execute: exportCsv,
           },
           {
-            id: "refresh", kind: "command", label: t("刷新经营报表"),
+            id: "refresh", kind: "command", label: t("刷新经营报表"), slot: "content:view-tools",
             icon: <ReloadOutlined />, presentation: { control: "button", iconOnly: true },
             pending: report.isFetching, execute: () => report.refetch(),
           },
         ]}
+        toolsPlacement="view" tools={<Space><CorePageActions slot="content:view-tools" /></Space>}
         view={
           <ListFilterBar>
             <ListFilterItem label={t("租期范围")} active={Boolean(range?.some(Boolean))} width="dateRange" priority>

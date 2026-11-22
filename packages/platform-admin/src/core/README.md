@@ -66,7 +66,7 @@ import { Card } from "@rental-os/platform-admin/ui";
 </CorePage>;
 ```
 
-`presentation`仅接受大小、形状、宽度、样式和图标按钮意图。导航、打开、保存及命令仍由动作声明驱动。原Button模式保留原加载呈现，保存先校验并复核当前Form，异步命令合并本按钮在途调用，离页或撤权后的校验与回调停止派发。
+`presentation`仅接受原Button的变体、大小、形状、宽度、样式和图标按钮意图。原正文刷新可声明 `presentation: { control: "button", type: "text", iconOnly: true }` 保留原text按钮；省略type继续按主次和导航位置呈现。导航、打开、保存及命令仍由动作声明驱动。原Button模式保留原加载呈现，保存先校验并复核当前Form，异步命令合并本按钮在途调用，离页或撤权后的校验与回调停止派发。
 
 页面的名称只在路由描述中填写，`CorePage`从宿主当前注册项读取。`actions`随实际业务状态变化，离页后自动从原页头卸载；每页操作ID唯一，最多一个`primary`。没有操作时传空数组或省略，不保留业务按钮占位。
 

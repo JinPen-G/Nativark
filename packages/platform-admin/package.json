@@ -200,6 +200,7 @@
     "./source/features/access/TenantAccess.module.css": "./src/features/access/TenantAccess.module.css",
     "./source/features/notifications/AnimatedBell": "./src/features/notifications/AnimatedBell.tsx",
     "./source/features/notifications/HeaderNotifications": "./src/features/notifications/HeaderNotifications.tsx",
+    "./source/features/notifications/notifications.css": "./src/features/notifications/notifications.css",
     "./source/features/notifications/locale": "./src/features/notifications/locale.ts",
     "./source/features/rest/RestContext": "./src/features/rest/RestContext.ts",
     "./source/features/rest/RestEntry": "./src/features/rest/RestEntry.tsx",

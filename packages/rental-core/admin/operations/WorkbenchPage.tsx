@@ -2,7 +2,7 @@
  * local exploration cannot settle money, alter inventory, or execute a todo. */
 import { useRef, useState } from "react";
 import { resolveCorePageLocation, type CorePageLocation } from "@rental-os/core-contracts";
-import { CorePage, useCorePageHost, type CoreAdminPageAction } from "@rental-os/platform-admin/core";
+import { CorePage, CorePageActions, useCorePageHost, type CoreAdminPageAction } from "@rental-os/platform-admin/core";
 import { rentalOrderLocation } from "../orders/pages";
 import { rentalWorkOrderLocation } from "../work-orders/pages";
 import { RENTAL_CATALOG_CORE_ID, RENTAL_CATALOG_PAGES } from "../catalog/pages";
@@ -86,13 +86,14 @@ function WorkbenchContent({ scope }: { scope: string }) {
   const refresh = () => Promise.all([showMetrics ? report.refetch() : Promise.resolve(), todos.refetch()]);
 
   const pageActions: CoreAdminPageAction<Record<string, unknown>>[] = [{
-        id: "refresh", kind: "command", label: t("刷新经营概览"),
+        id: "refresh", kind: "command", label: t("刷新经营概览"), slot: "content:view-tools",
         icon: <AnimatedIcon name="refresh" busy={report.isFetching || todos.isFetching} />,
-        presentation: { control: "button", shape: "circle", iconOnly: true },
+        presentation: { control: "button", type: "text", iconOnly: true },
         pending: report.isFetching || todos.isFetching, execute: refresh,
       }];
   if (canReconcilePayments) pageActions.push({
-        id: "reconcile-payments", kind: "command", label: t("核对支付与退款"), emphasis: "primary",
+        id: "reconcile-payments", kind: "command", label: t("核对支付与退款"),
+        slot: "content:maintenance-tools", emphasis: "secondary",
         permissions: [{ resource: "finance", action: "reconcile" }], pending: reconcilePayments.isPending,
         execute: async () => {
           const result = await reconcilePayments.mutateAsync();
@@ -101,6 +102,7 @@ function WorkbenchContent({ scope }: { scope: string }) {
       });
   return <CorePage description={data ? t("更新于 {time}", { time: new Date(data.generatedAt).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" }) }) : undefined}
       actions={pageActions}
+      toolsPlacement="view" tools={<CorePageActions slot="content:view-tools" />}
       view={showMetrics ? <div className={styles.periodRow}><Segmented aria-label={t("统计期间")} value={period} onChange={value => setPeriod(value as OverviewPeriod)} options={Object.entries(overviewPeriodLabels).map(([value, label]) => ({ value, label: t(label) }))} />
         <span className={styles.periodCaption} role="status">{report.isPlaceholderData ? t("正在更新所选期间") : t("订单按起租时间统计，待办与库存为当前状态")}</span></div> : undefined}>
     <div className={styles.page}>
@@ -108,10 +110,15 @@ function WorkbenchContent({ scope }: { scope: string }) {
         {data && <WorkbenchMetrics data={data} periodLabel={periodLabel} orders={canViewOrders} assets={canViewAssets} busy={report.isFetching}
           onOpen={target => navigate(target === "orders" ? rentalOrderLocation() : target === "assets" ? { coreId: RENTAL_CATALOG_CORE_ID, pageId: RENTAL_CATALOG_PAGES.assets.id } : rentalOperationsLocation("operationReport"))} />}
       </QueryState> : <Alert type="info" title={t("当前账号仅可查看工作台待办")} description={t("订单、库存和金额指标需要报表查看权限及相应的数据查看权限。")} />}
-      <QueryState loading={todos.isLoading} error={todos.error} onRetry={() => todos.refetch({ throwOnError: true })}>
-        <WorkbenchTodoQueue items={todos.data?.items ?? []} busy={todos.isFetching || todos.isError} formatAmount={money} canOpen={item => Boolean(overviewTodoTarget(item, access))}
-          onOpen={openTodo} onRefresh={() => todos.refetch({ throwOnError: true })} />
-      </QueryState>
+      <section className={styles.todoSection}>
+        <QueryState loading={todos.isLoading} error={todos.error} onRetry={() => todos.refetch({ throwOnError: true })}>
+          <WorkbenchTodoQueue items={todos.data?.items ?? []} busy={todos.isFetching || todos.isError} formatAmount={money} canOpen={item => Boolean(overviewTodoTarget(item, access))}
+            onOpen={openTodo} onRefresh={() => todos.refetch({ throwOnError: true })} />
+        </QueryState>
+        {canReconcilePayments && <div className={styles.maintenanceTools}>
+          <CorePageActions slot="content:maintenance-tools" />
+        </div>}
+      </section>
       {showMetrics && data && <>
         <div className={styles.analysisGrid} aria-busy={report.isFetching}>
           {canViewOrders && <InsightPanel title={t("订单状态")} description={`${periodLabel} · ${t("非草稿")}`}
