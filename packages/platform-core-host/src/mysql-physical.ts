@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { join, sqltag as sql } from "@prisma/client/runtime/library";
 import type { CorePhysicalDataObservation } from "@rental-os/core-contracts";
 import type { CoreHostSqlTransaction } from "@rental-os/core-host/mysql";
-import { mysqlCheckShape, mysqlColumnType, mysqlDefaultExpression, type MysqlTableShape } from "./mysql-structure";
+import { mysqlCheckShape, mysqlColumnDefault, mysqlColumnType, mysqlDefaultExpression, type MysqlTableShape } from "./mysql-structure";
 
 export async function readMysqlPhysicalData(database: Pick<CoreHostSqlTransaction, "$queryRaw">,
   expected: readonly MysqlTableShape[], version: string): Promise<CorePhysicalDataObservation | undefined> {
@@ -46,7 +46,7 @@ export async function readMysqlPhysicalData(database: Pick<CoreHostSqlTransactio
       const field = table.columns[index];
       return row.name !== field.name || mysqlColumnType(row.type) !== field.type || row.nullable !== (field.nullable ? "YES" : "NO")
         || row.collation !== field.collation
-        || (row.extra.toUpperCase() === "DEFAULT_GENERATED"
+        || mysqlColumnDefault(field.type, row.extra.toUpperCase() === "DEFAULT_GENERATED"
           ? row.defaultValue === null ? null : mysqlDefaultExpression(row.defaultValue) : row.defaultValue) !== field.defaultValue
         || !["", "DEFAULT_GENERATED"].includes(row.extra.toUpperCase());
     })) return;

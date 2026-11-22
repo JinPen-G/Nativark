@@ -26,6 +26,16 @@ export const mysqlDefaultExpression = (value: string) => lowerOutsideText(value)
 const defaultValue = (value: string | undefined): string | null => value === undefined || /^null$/i.test(value) ? null
   : /^true$/i.test(value) ? "1" : /^false$/i.test(value) ? "0" : /^'/.test(value) ? value.replace(/^'(.*)'$/, "$1") : mysqlDefaultExpression(value);
 
+/** MySQL按DECIMAL列精度补齐默认值小数位；只归一数值字面量，不经过浮点运算或修改文本默认值。 */
+export function mysqlColumnDefault(type: string, value: string | null): string | null {
+  if (!/^decimal\(/i.test(type) || value === null || !/^[+-]?\d+(?:\.\d+)?$/.test(value)) return value;
+  const [whole, fraction = ""] = value.replace(/^\+/, "").split(".");
+  const integer = whole.replace(/^(-?)0+(?=\d)/, "$1");
+  const decimal = fraction.replace(/0+$/, "");
+  const result = decimal ? `${integer}.${decimal}` : integer;
+  return result === "-0" ? "0" : result;
+}
+
 function column(line: string, table: MysqlTableShape): MysqlColumnShape {
   // COMMENT描述不改变列结构；其引号内的分号、逗号由SQL分隔器保留，不能切成另一条迁移。
   const definition = line.replace(/\s+COMMENT\s*(?:=\s*)?'(?:\\.|''|[^'])*'$/i, "");
@@ -36,7 +46,7 @@ function column(line: string, table: MysqlTableShape): MysqlColumnShape {
   if (match[3] && (!collation || !collation.toLowerCase().startsWith(match[3].toLowerCase() + "_")))
     throw new Error(`列字符集与排序规则不一致：${table.name}.${match[1]}`);
   return { name: match[1], type, nullable: match[5].toUpperCase() === "NULL", collation,
-    defaultValue: defaultValue(match[6]) };
+    defaultValue: mysqlColumnDefault(type, defaultValue(match[6])) };
 }
 
 function foreignKey(line: string) {
