@@ -16,6 +16,7 @@ export * from "./http-openapi-enterprise-finance-schemas";
 export * from "./http-openapi-enterprise-order-delegation-schemas";
 export * from "./http-openapi-rental-exchange-inspection-preparation.schemas";
 export { aiLeafToOpenApi30 } from "./http-openapi-json-schema";
+export { createRentalPortableHttp, RENTAL_PORTABLE_OPENAPI_FILE } from "./http-portable";
 export { RENTAL_HTTP_OPERATIONS, RENTAL_HTTP_COMPONENT_SCHEMAS };
 
 export interface RentalHttpDocumentationGap {

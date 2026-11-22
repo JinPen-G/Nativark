@@ -1,6 +1,6 @@
 /** 将受控构建的完整字节集合制成 Rental 标准包；不遍历作者目录、不连接或执行 Core。
  * 宿主负责提供固定来源及构建产物，本入口核出口、相对依赖、数据和随包资料。 */
-import { CorePackagePathSchema, pinCoreDocumentationLinks, renderCoreGuide,
+import { CorePackagePathSchema, CoreSourceSchema, pinCoreDocumentationLinks, renderCoreGuide,
   type CoreHostVersions, type CoreManifest } from "@rental-os/core-contracts";
 import { CORE_ARCHIVE_LIMITS, createCoreArchive } from "@rental-os/core-contracts/archive";
 import { corePackageFiles, inspectCorePackageFiles } from "@rental-os/core-contracts/package";
@@ -17,6 +17,8 @@ export function createRentalPackage(input: {
   files: ReadonlyMap<string, Uint8Array>;
   source: CoreManifest["source"];
   sourceDirectory: string;
+  /** 原文档引用另一固定公共源码时，单独提供其来源。发行身份仍由 source 决定。 */
+  documentationSource?: CoreManifest["source"];
   platformSource: CoreManifest["source"];
   platformGuide: string;
   host: CoreHostVersions;
@@ -25,6 +27,7 @@ export function createRentalPackage(input: {
   legacyApiRoutes?: readonly string[];
 }) {
   const sourceDirectory = CorePackagePathSchema.parse(input.sourceDirectory);
+  const documentationSource = CoreSourceSchema.parse(input.documentationSource ?? input.source);
   const files = new Map<string, Uint8Array>();
   let total = 0;
   for (const [file, bytes] of input.files) {
@@ -92,7 +95,7 @@ export function createRentalPackage(input: {
   for (const [file, bytes] of files) {
     if (!file.endsWith(".md")) continue;
     files.set(file, Buffer.from(pinCoreDocumentationLinks(text(bytes),
-      `${sourceDirectory}/${file}`, input.source, file === "README.md")));
+      `${sourceDirectory}/${file}`, documentationSource, file === "README.md")));
   }
   const manifest = createRentalManifest({ source: input.source,
     assets: [...files.keys()].filter(file => !["README.md", "LICENSE"].includes(file)), contributions: input.contributions });

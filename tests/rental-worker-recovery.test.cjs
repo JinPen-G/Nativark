@@ -57,7 +57,22 @@ function fixture() {
     binding: { bindingId: "original-binding", revision: 1, dataVersion: "0.1.0", containerType: "rental-workspace", containerId: workspaceId },
     orders: new Map(), notifications: new Map(), buckets: new Map(), intents: new Map(), events: new Map(), receipts: new Map(), held: new Set() };
   const record = (tx, kind, value) => f.trace.push({ tx: tx?.id ?? "root", kind, value });
+  const closeReceipts = new Map();
   const tables = tx => ({
+    externalAdapterLog: {
+      findUnique: async ({ where }) => copy(closeReceipts.get(where.id) ?? null),
+      create: async ({ data }) => {
+        assert.equal(closeReceipts.has(data.id), false);
+        closeReceipts.set(data.id, copy(data));
+        return copy(data);
+      },
+      updateMany: async ({ where, data }) => {
+        const row = closeReceipts.get(where.id);
+        if (!row || !matches(row, where)) return { count: 0 };
+        change(row, data);
+        return { count: 1 };
+      }
+    },
     businessWorkspace: { findFirst: async ({ where }) => matches({ id: workspaceId, tenantId }, where) ? { id: workspaceId, tenantId, defaultMarker: "default" } : null },
     rentalCategoryVersion: { findUnique: async () => ({ categoryCode: "camping", structureVersion: 1, status: "legacy_baseline", definition: copy(category) }) },
     tenantRentalProfile: { findUnique: async () => f.configured ? { tenantId, categoryCode: "camping", capabilities: [], terminology: copy(category.terminology),

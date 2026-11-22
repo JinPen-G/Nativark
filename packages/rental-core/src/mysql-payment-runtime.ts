@@ -2019,6 +2019,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
     const original = input.originalIntent ?? await this.prisma.rentalPaymentIntent.findFirst({ where: { id: input.intentId, tenantId: input.tenantId } });
     if (!original) throw new NotFoundException("支付单不存在");
     if (original.id !== input.intentId || original.tenantId !== input.tenantId) throw new ConflictException("原支付收据不属于本次结果");
+    let fundingAttempted = false;
     try {
       await this.prisma.$transaction(async (tx) => {
         await lockRentalBusinessTenant(tx, input.tenantId);
@@ -2086,6 +2087,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
             webhook = concurrent;
           }
         }
+        fundingAttempted = true;
         await this.funding.recordEvent(input.tenantId, intent.workspaceId, intent.orderId, {
           instrument: "rental",
           action: "initiate",
@@ -2105,6 +2107,8 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
         });
       });
     } catch (error) {
+      // 原单据或回调凭据未通过核对时，还没有验明可入账的收据。
+      if (!fundingAttempted) throw error;
       await this.prisma.rentalPaymentIntent.updateMany({ where: { ...this.originalIntentWhere(original), status: { not: "paid" } },
         data: { status: "funding_failed", failureReason: (error instanceof Error ? error.message : "资金入账失败").slice(0, 500) } });
       throw error;

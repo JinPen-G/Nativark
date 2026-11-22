@@ -4,7 +4,8 @@ import { composeCoreOpenApi, CoreDeploymentLockSchema, type CoreDeploymentLock, 
 import { isDeepStrictEqual } from "node:util";
 import { createPlatformOpenApi } from "@rental-os/platform-server";
 import { createPlatformCoreOpenApi, createPlatformCorePackageOpenApi } from "@rental-os/platform-core-host";
-import { createRentalOpenApi, RENTAL_HTTP_DOCUMENTATION_GAPS } from "@rental-os/rental-core/http-openapi";
+import { createRentalOpenApi, createRentalPortableHttp, RENTAL_HTTP_DOCUMENTATION_GAPS,
+  RENTAL_PORTABLE_OPENAPI_FILE } from "@rental-os/rental-core/http-openapi";
 import { createRentalHostHttpPolicy } from "./http-policy";
 
 type Policy = ReturnType<typeof createRentalHostHttpPolicy>;
@@ -54,6 +55,16 @@ export function rentalHostLegacyApiRoutes(): readonly string[] {
   return createRentalHostOpenApiContribution().legacyRoutes;
 }
 
+export function createRentalHostPortableHttp(policy: Policy = createRentalHostHttpPolicy()) {
+  return createRentalPortableHttp(policy, createRentalHostOpenApiContribution(policy).contribution);
+}
+
+export function rentalHostReleaseOpenApi(file: string | undefined): CoreOpenApiSource["contribution"] {
+  return file === RENTAL_PORTABLE_OPENAPI_FILE
+    ? createRentalHostPortableHttp().contribution
+    : createRentalOpenApi();
+}
+
 export function createRentalHostOpenApi(lockValue: CoreDeploymentLock, policy: Policy = createRentalHostHttpPolicy(),
   additional: readonly CoreOpenApiSource[] = []) {
   const lock = CoreDeploymentLockSchema.parse(lockValue);
@@ -63,8 +74,11 @@ export function createRentalHostOpenApi(lockValue: CoreDeploymentLock, policy: P
     || additional.some(item => !extras.some(pin => isDeepStrictEqual(pin.manifest, item.manifest))))
     throw new Error("Rental 文档及额外贡献须逐项来自实际宿主完整清单");
   const { contribution, legacyRoutes, documentationGaps } = createRentalHostOpenApiContribution(policy);
+  const portable = rental.manifest.entries.openapi === RENTAL_PORTABLE_OPENAPI_FILE
+    ? createRentalPortableHttp(policy, contribution).contribution : undefined;
+  const openApi = portable ? { ...contribution, paths: { ...contribution.paths, ...portable.paths } } : contribution;
   const result = composeCoreOpenApi(createPlatformCorePackageOpenApi(createPlatformCoreOpenApi(createPlatformOpenApi())),
-    [{ manifest: rental.manifest, contribution }, ...additional], { rental: legacyRoutes });
+    [{ manifest: rental.manifest, contribution: openApi }, ...additional], { rental: legacyRoutes });
   if (!result.document) throw new Error(result.issues.map(issue => `${issue.field}: ${issue.message}`).join("\n"));
   result.document["x-rentalDocumentationGaps"] = documentationGaps;
   result.document["x-rentalSchemaStatus"] = "incomplete";

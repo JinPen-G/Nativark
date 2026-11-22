@@ -22,7 +22,7 @@
 | [完整客户网站](clients/website-ui/README.md)、[网站入口](clients/website-ui/index.ts)、[浏览器薄宿主](../../apps/tenant-website/README.md) | `/clients/website-ui` 提供原15路由、页面、语言和样式；宿主供给同一客户会话、公开配置、可靠存储与资产映射，官网和AI业务请求继续沿原协议 |
 | [企业门户前端](clients/enterprise-portal/README.md)、[应用入口](clients/enterprise-portal/index.ts)、[原薄宿主](../../apps/enterprise-portal/README.md) | `/clients/enterprise-portal` 提供完整企业门户，页面使用精确子出口；宿主供给同一客户会话和公共UI，企业/本人/空间及原材料权限沿真实服务核验，不依赖旧后台源码 |
 | [营业时区](clients/time.ts)、[微信打包](../../scripts/miniprogram-shared-types.cjs) | `/clients/time` 是原生CommonJS与声明出口，复用原时区/DST/回退算法；微信构建仅在实际引用时带入同一时间模块，费用仍由服务端裁定 |
-| [标准包工厂](src/package.ts)、[清单工厂](src/manifest.ts) | `/package` 按实际文件形成唯一发行清单；所有随包Markdown的源码链接在计算清单及归档摘要前固定到来源提交，根README本页锚点保留 |
+| [标准包工厂](src/package.ts)、[清单工厂](src/manifest.ts) | `/package` 按实际文件形成发行清单。随包 Markdown 的链接在计算归档摘要前固定到源码或单独指定的公开文档提交，根 README 保留本页锚点 |
 | [客户认证](clients/miniprogram/auth/README.md)、[正式客户入口](clients/miniprogram/index.ts) | `/clients/miniprogram` 提供密码/短信/微信、用途验证码、注册与本人注销；宿主供给原渠道、请求和会话采用，一次性凭证及原错误保持 |
 | [客户AI请求](clients/miniprogram/README.md)、[员工AI请求](clients/staff/README.md) | 两个原生客户端出口提供任务、取消、报价、目标、预约交接及检查/入口动作工厂；宿主供给同一运输、当前会话和原生成校验器，准备、明确提交、取消与原结果沿各自原协议 |
 | [会员请求](admin/membership/client.ts)、[客户请求](admin/membership/customer-client.ts) | `/admin/membership/client` 与 `/admin/membership/customer-client` 提供原57项请求；传入宿主唯一认证请求，保留租户会员、客户主档、账号状态、敏感资料、企业账务及原冲销收据边界 |
@@ -185,6 +185,8 @@ node -e "const { createRentalOpenApi } = require('@rental-os/rental-core/http-op
 订单凭证的渲染、历史目录和指定版本复用 [凭证响应 schema](src/http-openapi-rental-order-document-schemas.ts)，支持报价、交付、归还与结算四种原类型。渲染 GET 会复用同内容归档或追加不可变版本；历史读取保留原模板、标题、HTML、摘要和时间，含资金明细时复验当前财务权限。纯内存结果可省略版本 ID，快照正文保持原历史结构，字段说明和示例来自同源投影。
 
 支付单、退款与对账沿 [支付操作](src/http-payment-operations.controller.ts) 和 [对账读取](src/http-payment-reconciliation.controller.ts) 的原投影；员工线下登记与确认沿 [员工入口](src/http-staff-payments.controller.ts) 和 [收据 schema](src/http-openapi-rental-payment-schemas.ts)。登记保留原金额精度、凭证及幂等键，确认返回原登记和对应资金事件，重复确认读取同一收据。未知支付结果由原业务核对，接口资料不代替供应商事实。
+
+退款回调按原事件重投，事件完成与退款结果同事务提交。资金入账失败时保留原第三方退款收据供查单恢复。
 
 订单资金的列表、发起、追加、捕获、退款、释放与失败读取同一 [资金入口](src/http-business.controller.ts)及[同源 schema](src/http-openapi-schemas.ts)。可空支付方式、省略字段和缺省值按原 DTO 解释；普通资金金额与押金金额分别沿原精度工具，不从接口示例推算余额。所有写入保留原 201 状态、业务事务和原操作收据。
 
@@ -384,6 +386,8 @@ npm run lint -w @rental-os/rental-core
 旧 `apps/api` 的原241模型组合沿原生成及运行Client维护；编译依赖包时须显式指定本仓库原默认生成声明，并额外设置 `RENTAL_PRISMA_LEGACY=1`（或CLI传 `--legacy`）。该路径核对生成 schema 与原宿主源码一致，不能把旧241冒充独立247；独立 `rental-api` / `platform-api` 拒绝 legacy。独立构建前应移除该兼容变量。
 
 构建前置按公共合同 → Rental基础合同 → Shared兼容声明 → 公共Core宿主 → Rental完整服务的顺序执行；`npm run build:contracts -w @rental-os/rental-core`只生成Shared实际消费的17个正式合同入口及其内部依赖，避免Shared与完整服务循环构建。该入口保留同一运行时值和正式声明，不创建另一套合同。[合同构建配置](tsconfig.contracts.json) · [内存构建检查](../../scripts/check-rental-package-build.cjs) · [固定版本发行与五端消费核验](../../scripts/verify-rental-distribution.cjs)
+
+独立公开仓库从实际发行提交构建标准包，清单、Tag 和 Release 资产须对应同一来源。公开包声明 `/api/cores/rental/v1` 下已审定的业务操作，部署后的规范路径和原路径进入同一 Controller。包准备、实际部署、注册和租户授权沿现有流程完成。见[规范路径和文档共用入口](src/http-portable.ts)与[宿主接入说明](../../apps/rental-api/README.md)。
 
 独立 Linux 镜像使用[宿主打包入口](../../scripts/package-rental-host.cjs)。先完成正式源码构建、完整 Rental 标准包及[原部署准备](../../apps/rental-api/src/prepare-deployment.ts)，再从仓库根执行以下命令；参数均为实际绝对路径，输出父目录须存在且归档不能已存在。底座 `.tgz` 须使用与原 prepared 锁的 `platform.sha256` 一致的固定源码归档，不能用候选 `platform/` 目录代替。
 

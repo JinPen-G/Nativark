@@ -16,8 +16,7 @@ import { createPublicPlatformDataPlan } from "@rental-os/platform-api/data-plan"
 import { readRentalDataPackage } from "@rental-os/rental-core/data-package";
 import { readAiNativeDataPackage } from "@rental-os/ai-native-data/data-package";
 import { composeAiNativePrismaSchema } from "@rental-os/ai-native-data/prisma-schema";
-import { createRentalOpenApi } from "@rental-os/rental-core/http-openapi";
-import { rentalHostLegacyApiRoutes } from "./openapi";
+import { rentalHostLegacyApiRoutes, rentalHostReleaseOpenApi } from "./openapi";
 
 /** 内存准备与命令共用；真实已部署状态仍由原迁移账和物理读取判定。 */
 export function createRentalDeploymentFiles(input: {
@@ -35,7 +34,8 @@ export function createRentalDeploymentFiles(input: {
   const release = CorePlatformReleaseSchema.parse(input.release);
   const legacyApiRoutes = rentalHostLegacyApiRoutes();
   const rental = readRentalDataPackage(input.coreFiles, input.pin, release.versions, legacyApiRoutes);
-  if (!rental.openapi || !isDeepStrictEqual(rental.openapi, JSON.parse(JSON.stringify(createRentalOpenApi()))))
+  const expectedOpenApi = rentalHostReleaseOpenApi(rental.manifest.entries.openapi);
+  if (!rental.openapi || !isDeepStrictEqual(rental.openapi, JSON.parse(JSON.stringify(expectedOpenApi))))
     throw new Error("Rental 部署准备缺少与当前实际处理器同源的 OpenAPI 贡献");
   const platform = createPublicPlatformDataPlan(rental.dataPlan.publicForeignKeys);
   if (!isDeepStrictEqual(release.data, platform.data)) throw new Error("底座发行数据与当前公共宿主不一致");
