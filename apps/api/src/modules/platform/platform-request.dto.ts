@@ -8,8 +8,7 @@ import {
   type SystemRulesConfig,
   type SaveSystemUserAccessRequest,
   type SaveWorkspaceAccessRequest,
-  type TenantBootstrapRequest,
-  type RentalCategoryOpeningOptionsQuery
+  type TenantBootstrapRequest
 } from "@rental-os/shared";
 import { Type } from "class-transformer";
 import { IsArray, IsBoolean, IsEnum, IsIn, IsInt, IsNotEmpty, IsObject, IsOptional, IsString, Matches, MaxLength, Min, ValidateNested } from "class-validator";
@@ -59,11 +58,6 @@ export class TenantBootstrapDto implements TenantBootstrapRequest {
   @IsOptional() @IsString() @IsNotEmpty() storeName?: string;
   @IsOptional() @IsString() @IsNotEmpty() storeCode?: string;
 }
-export class RentalCategoryOpeningOptionsQueryDto implements RentalCategoryOpeningOptionsQuery {
-  @IsOptional() @IsString() @Matches(/\S/u) @MaxLength(191) tenantId?: string;
-  @IsOptional() @IsString() @MaxLength(100) search?: string;
-}
-
 export class SaveRolePermissionsInputDto {
   @IsOptional() @IsArray() @IsString({ each: true }) permissions?: string[];
   @IsOptional() @IsString() @IsNotEmpty() tenantId?: string;
@@ -80,4 +74,4 @@ export class ResetUserPasswordInputDto {
 
 export { SavePlatformDictionaryBodyInputDto, PlatformDictionaryItemInputDto, SavePlatformNumberRuleBodyInputDto, GeneratePlatformNumberDto } from "@rental-os/platform-server/tools-dto";
 
-export { SaveWorkspaceAccessDto, SaveSystemUserAccessDto } from "@rental-os/rental-core/http-workspace-management-dto";
+export { SaveWorkspaceAccessDto, SaveSystemUserAccessDto, RentalCategoryOpeningOptionsQueryDto } from "@rental-os/rental-core/http-workspace-management-dto";

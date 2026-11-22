@@ -436,6 +436,8 @@ export const RENTAL_HTTP_REVIEWED_ACCESS: readonly RentalHttpAccessDeclaration[]
   ...reviewed(RentalWorkspacesController, [workspace.createWorkspace, workspace.updateWorkspace,
     workspace.saveWorkspaceMember, workspace.createUserWithWorkspaceAccess, workspace.updateUserWithWorkspaceAccess], "transactional-write",
     "original four repository transactions begin Tenant S/Core gate, preserving original category initialization, required capabilities, fixed-admin protection and account/member/role atomicity; no target scope taken from DTO"),
+  ...reviewed(RentalWorkspacesController, [workspace.rentalCategoryOpeningOptions], "buffered-read",
+    "Original SaaS opening options consume the same bounded published/builtin-demo category projection; current authority and deployment are revalidated."),
   ...reviewed(RentalWorkspacesController, [workspace.tenantWorkspaces], "buffered-read",
     "exact target tenant from original path, SaaS live principal -> current target Core grant/tenant binding/deployment; original tenant lookup and scoped workspace list, pre-return recheck without member assignment"),
   ...reviewed(RentalWorkspacesController, [workspace.createTenantWorkspace, workspace.updateTenantWorkspace], "transactional-write",

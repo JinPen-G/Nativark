@@ -5,6 +5,7 @@ import { Blocks, Crown, Settings, UserRound } from "lucide-react";
 import { AdminRuntimeProvider } from "./runtime";
 import { AdminUiProvider } from "./AdminUiProvider";
 import { PlatformShell } from "./PlatformShell";
+import { coreNavigationMessage } from "./coreNavigationMessage";
 import { AdminLoginPage, AdminPasswordPage } from "./session-pages";
 import { LoadingState, PageHeading, QueryState } from "./shell";
 import { Alert, Button, Result } from "./components/ui";
@@ -82,17 +83,13 @@ function SignIn() {
 }
 
 function Home() {
-  const { brandName } = usePlatformApplication();
+  const { brandName, pages } = usePlatformApplication();
   const cores = useCoreSession(), { locale } = useLocale(), en = locale === "en-US";
   const { user } = useAdminSession();
   return <><PageHeading title={en ? "Overview" : "平台概览"} brandName={brandName} />
     <QueryState loading={cores.isPending} error={cores.error} onRetry={cores.refetch}>
       <Alert type="info" showIcon title={en ? `Welcome to ${brandName}` : `欢迎使用 ${brandName}`}
-        description={user?.isSaasAdmin ? en ? "Use platform administration to manage tenant Core access." : "从平台管理入口维护租户的 Core 使用权。"
-          : cores.data?.cores.some(entry => cores.canAccess(entry.core.id, [])) ? en ? "Choose an authorized business Core from the sidebar." : "从左侧选择已获授权的业务 Core。"
-          : cores.data?.cores.length ? en ? "Business Core deployment admission is unavailable. Contact your SaaS administrator." : "业务 Core 部署准入当前不可用，请联系 SaaS 管理员。"
-          : cores.data?.tenantHasRegisteredGrant ? en ? "Ask your tenant administrator to assign a business Core." : "请联系租户管理员分配业务 Core。"
-          : en ? "Contact your SaaS administrator to enable a business Core." : "请联系 SaaS 管理员授权业务 Core。"} />
+        description={coreNavigationMessage(pages, cores, locale, Boolean(user?.isSaasAdmin))} />
     </QueryState></>;
 }
 

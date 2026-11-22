@@ -28,12 +28,7 @@ export interface RentalHttpDocumentationGap {
 }
 
 /** 路由缺口沿原处理器核对，已补齐操作从清单移除。公共种类保留供宿主核对后续缺项。 */
-export const RENTAL_HTTP_DOCUMENTATION_GAPS: readonly RentalHttpDocumentationGap[] = [
-  {
-    method: "GET", path: "/api/platform/tenant-bootstrap/category-options",
-    source: "getRentalCategoryOpeningOptions", kind: "unmounted-legacy-operation"
-  }
-];
+export const RENTAL_HTTP_DOCUMENTATION_GAPS: readonly RentalHttpDocumentationGap[] = [];
 
 /** 独立贡献保留原无 AI 宿主的绑定限制，旧组合沿已装配权威描述原成功投影。 */
 export const RENTAL_HTTP_OPERATION_AVAILABILITY = [

@@ -3,6 +3,7 @@ import type { SaveWorkspaceAccessRequest } from "@rental-os/platform-contracts";
 import { BUSINESS_WORKSPACE_RUN_MODES, RENTAL_CATEGORY_CODE_PATTERN,
   type CreateBusinessWorkspaceRequest, type SaveWorkspaceMemberRequest, type UpdateBusinessWorkspaceRequest,
   type SaveSystemUserAccessRequest } from "./contracts";
+import type { RentalCategoryOpeningOptionsQuery } from "./category-governance";
 import { Type } from "class-transformer";
 import { IsArray, IsBoolean, IsIn, IsNotEmpty, IsObject, IsOptional, IsString, Matches, MaxLength, ValidateNested } from "class-validator";
 const WORKSPACE_STATUSES = ["active", "frozen", "disabled"] as const;
@@ -57,4 +58,9 @@ export class SaveSystemUserAccessDto implements SaveSystemUserAccessRequest {
   @ValidateNested({ each: true })
   @Type(() => SaveWorkspaceAccessDto)
   workspaceAccesses!: SaveWorkspaceAccessRequest[];
+}
+
+export class RentalCategoryOpeningOptionsQueryDto implements RentalCategoryOpeningOptionsQuery {
+  @IsOptional() @IsString() @Matches(/\S/u) @MaxLength(191) tenantId?: string;
+  @IsOptional() @IsString() @MaxLength(100) search?: string;
 }

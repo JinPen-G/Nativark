@@ -179,7 +179,7 @@
 node -e "const { createRentalOpenApi } = require('@rental-os/rental-core/http-openapi'); process.stdout.write(JSON.stringify(createRentalOpenApi(), null, 2))"
 ```
 
-独立贡献包含 576 个已有操作及其 397 个 schema。原宽泛字段由 `RENTAL_HTTP_SCHEMA_GAPS` 列出，涉及的 259 项操作带 `x-schemaStatus=incomplete` 和 `x-schemaGaps`，继续按正式 DTO/响应投影补齐。明确路由缺口从 `RENTAL_HTTP_DOCUMENTATION_GAPS` 读取，当前宿主限制从 `RENTAL_HTTP_OPERATION_AVAILABILITY` 读取。
+独立贡献包含 595 个已有操作及其 413 个 schema。原宽泛字段由 `RENTAL_HTTP_SCHEMA_GAPS` 列出，涉及的 266 项操作带 `x-schemaStatus=incomplete` 和 `x-schemaGaps`，继续按正式 DTO/响应投影补齐。明确路由缺口从 `RENTAL_HTTP_DOCUMENTATION_GAPS` 读取，当前宿主限制从 `RENTAL_HTTP_OPERATION_AVAILABILITY` 读取。
 
 订单列表与详情复用 [订单响应 schema](src/http-openapi-rental-order-schemas.ts)。列表保留原数组或分页结果及九项查询字段，详情按原订单投影说明字段、历史省略与可空金额。配送电话按原脱敏结果公开，办理锁不释放令牌。规则、检查、会员及能力快照的内部版本结构继续从原关联对象读取；未展开的字段仍由缺口清单标明。
 
@@ -200,7 +200,7 @@ node -e "const { createRentalOpenApi } = require('@rental-os/rental-core/http-op
 | `GET/POST /api/platform/customers/{customerId}/avatar` | 已描述单个 5 MiB 位图 multipart 上传、原保存投影及 PNG/JPEG/WebP 原始响应 |
 | `GET /api/rental/v1/orders/{id}/documents/{type}` 及其历史目录/指定版本 | 同内容归档复用、事实变化追加版本；指定版本核原订单范围及含资金历史的当前读取权限 |
 | `POST /api/staff/v1/uploads/{fileAssetId}/inspection-binding` | 已描述原检查目标和附件修订。独立贡献保留无 AI 宿主的 503，旧组合保留已装配权威的原成功投影 |
-| `GET /api/platform/tenant-bootstrap/category-options` | 原合同保留，独立 Rental 宿主未挂载，列入未挂原路径缺口 |
+| `GET /api/platform/tenant-bootstrap/category-options` | 沿[原空间 HTTP](src/http-workspaces.controller.ts)和[同一门面](src/application-workspace-management.ts)挂载，Query DTO复用原两字段验证。仅当前获权 SaaS 身份读取，复验实际部署；[品类解析](src/category-runtime.ts)保留发布/推荐、目标租户开放范围、100项上限及明确 builtin_demo 来源，创建事务再次裁定采用资格 |
 
 ## 使用与构建
 

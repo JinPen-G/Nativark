@@ -181,7 +181,8 @@ function saasManagementScope(method: string, path: string): { kind: "catalog" | 
     if (!tenantId || /[\/\\\u0000-\u001f]/u.test(tenantId)) return;
     return { kind: "tenant", tenantId };
   }
-  if ((method === "GET" || method === "HEAD") && path === "/rental/v1/categories") return { kind: "catalog" };
+  if ((method === "GET" || method === "HEAD") && ["/rental/v1/categories",
+    "/platform/tenant-bootstrap/category-options"].includes(path)) return { kind: "catalog" };
   const base = "/platform/rental-categories", suffix = path.startsWith(base + "/") ? path.slice(base.length + 1) : undefined;
   if (path === base && ["GET", "HEAD", "POST"].includes(method)
     || (method === "GET" || method === "HEAD") && suffix !== undefined && /^(?:capability-catalog|tenant-directory|creation-requests\/[^/]+|[^/]+(?:\/(?:audits|candidates\/[^/]+\/[^/]+|versions\/[^/]+\/preview))?)$/u.test(suffix)

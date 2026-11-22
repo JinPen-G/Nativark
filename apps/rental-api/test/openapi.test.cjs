@@ -24,7 +24,7 @@ const hostContribution = createRentalHostOpenApiContribution();
 const platform = createPublicPlatformDataPlan();
 
 function fixture() {
-  const metadata = { name: "@rental-os/rental-core", version: "0.1.0", license: "MIT", main: "dist/index.js", types: "dist/index.d.ts",
+  const metadata = { name: "@rental-os/rental-core", version: JSON.parse(read("packages/rental-core/package.json")).version, license: "MIT", main: "dist/index.js", types: "dist/index.d.ts",
     exports: { ".": { types: "./dist/index.d.ts", default: "./dist/index.js" } } };
   const files = new Map([
     ["package.json", Buffer.from(JSON.stringify(metadata))], ["dist/index.js", Buffer.from('throw Error("format fixture must not execute");')],
@@ -44,12 +44,12 @@ const lock = { lockVersion: 1, platform: { versions: host, source, sha256: "b".r
 
 test("宿主逐条核原挂载，贡献保留 namespace、原合同缺项和当前可用性", () => {
   const policy = createRentalHostHttpPolicy();
-  assert.equal(policy.routes.length, 576);
-  assert.equal(hostContribution.legacyRoutes.length, 576);
-  assert.equal(hostContribution.documentationGaps.length, 1);
+  assert.equal(policy.routes.length, 595);
+  assert.equal(hostContribution.legacyRoutes.length, 595);
+  assert.equal(hostContribution.documentationGaps.length, 0);
   const document = createRentalHostOpenApi(lock, policy);
   const operations = Object.values(document.paths).flatMap(Object.values).filter(value => value.operationId?.startsWith("rental."));
-  assert.equal(operations.length, 576);
+  assert.equal(operations.length, 595);
   const expectedIncomplete = RENTAL_HTTP_SCHEMA_GAPS.filter(gap => operations.some(operation => operation["x-legacyOperationId"] === gap.operationId));
   assert.deepEqual(operations.filter(value => value["x-schemaStatus"] === "incomplete").map(value => value["x-legacyOperationId"]).sort(),
     expectedIncomplete.map(value => value.operationId).sort());
@@ -62,13 +62,20 @@ test("宿主逐条核原挂载，贡献保留 namespace、原合同缺项和当�
   assert.ok(binding.responses["503"]);
   assert.equal(binding.responses["200"], undefined);
   assert.equal(binding.responses["201"], undefined);
-  assert.equal(document.paths["/api/platform/tenant-bootstrap/category-options"], undefined);
+  const opening = document.paths["/api/platform/tenant-bootstrap/category-options"].get;
+  assert.equal(opening["x-hostHandler"], "RentalWorkspacesController.rentalCategoryOpeningOptions");
+  assert.equal(opening["x-hostAccess"], "buffered-read");
+  assert.equal(opening.operationId, "rental.getRentalCategoryOpeningOptions");
+  assert.deepEqual(opening["x-requiredPermissions"], ["system:tenant:bootstrap", "system:tenant:manage"]);
+  assert.deepEqual(opening.parameters.map(parameter => parameter.name), ["tenantId", "search"]);
+  assert.ok(hostContribution.legacyRoutes.includes("GET /api/platform/tenant-bootstrap/category-options"));
+  assert.equal(document.paths["/api/platform/tenant-bootstrap/category-options"].post, undefined);
 });
 
 test("实际清单缺失 OpenAPI、移除真实处理器或加入未知处理器不能沿用文档许可", () => {
   const missing = structuredClone(lock); delete missing.cores[0].manifest.entries.openapi;
   assert.throws(() => createRentalHostOpenApi(missing), /OpenAPI/);
-  assert.throws(() => createRentalHostOpenApi({ ...lock, cores: [] }), /单 Core/);
+  assert.throws(() => createRentalHostOpenApi({ ...lock, cores: [] }), /实际宿主完整清单/);
   const policy = createRentalHostHttpPolicy();
   assert.throws(() => createRentalHostOpenApiContribution({ ...policy,
     routes: policy.routes.filter(route => route.handlerName !== "order") }), /唯一实际挂载/);

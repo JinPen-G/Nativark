@@ -8,6 +8,7 @@ import { requireRequestTenantId } from "@rental-os/platform-server/request-ident
 import { RENTAL_CATEGORY_DEFINITIONS } from "./contracts";
 import type { CreateBusinessWorkspaceRequest, UpdateBusinessWorkspaceRequest, SaveWorkspaceMemberRequest,
   SaveSystemUserAccessRequest, RentalCategoryCode } from "./contracts";
+import type { RentalCategoryOpeningOptionsQuery } from "./category-governance";
 import type { RentalCoreService } from "./mysql-core-runtime";
 import type { WorkspaceCapabilityService } from "./workspace-capabilities";
 import { RentalWorkspaceManagementRepository } from "./mysql-workspace-management";
@@ -16,7 +17,7 @@ import type { RentalApplication } from "./application";
 export interface RentalWorkspaceManagementDependencies {
   configService: Pick<ConfigService, "get">;
   repository: Pick<RentalWorkspaceManagementRepository, "getTenant" | "listBusinessWorkspacesForTenant" | "createBusinessWorkspaceForTenant" | "updateBusinessWorkspaceForTenant" | "listBusinessWorkspaces" | "createBusinessWorkspace" | "updateBusinessWorkspace" | "listWorkspaceMembers" | "listWorkspaceFulfillmentLocations" | "saveWorkspaceMember" | "saveUserWithWorkspaceAccess" | "hasFixedAllPermissionRole" | "isTenantAdminUser">;
-  rentalCoreService?: Pick<RentalCoreService<Prisma.TransactionClient>, "registerWorkspace" | "getWorkspaceCategoryInTransaction" | "onApplicationBootstrap">;
+  rentalCoreService?: Pick<RentalCoreService<Prisma.TransactionClient>, "registerWorkspace" | "getWorkspaceCategoryInTransaction" | "onApplicationBootstrap" | "getCategoryOpeningOptions">;
   workspaceCapabilityService?: Pick<WorkspaceCapabilityService<Prisma.TransactionClient>, "initializeRequiredCapabilities" | "overview">;
   logger: Pick<Logger, "warn">;
   /** 仅原内存兼容宿主传入原行读取器；不成为新宿主的权限或持久化事实。 */
@@ -40,6 +41,12 @@ export class RentalWorkspaceManagementApplication {
     return this.input.legacyAccounts;
   }
 
+
+  async getRentalCategoryOpeningOptions(query: RentalCategoryOpeningOptionsQuery, currentUser?: SystemUserRow) {
+    this.assertSaasAdmin(currentUser);
+    if (!this.input.rentalCoreService) throw new ConflictException("Rental品类目录未装配");
+    return this.input.rentalCoreService.getCategoryOpeningOptions(query, this.useMysqlDataSource() ? "published" : "builtin_demo");
+  }
 
   async listTenantBusinessWorkspaces(tenantId: string, currentUser?: SystemUserRow) {
     this.assertSaasAdmin(currentUser);
