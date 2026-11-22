@@ -1,4 +1,4 @@
-/** 旧路由绑定同一商业声明，当前身份继续复验原价格管理权限。 */
+/** 旧路由绑定同一商业声明，当前身份和范围沿正式原权限映射复验服务、价格及附属资料访问。 */
 import { useNavigate, useParams } from "react-router-dom";
 import { corePageKey, type CoreRegisteredPage } from "@rental-os/core-contracts";
 import { CorePageHostProvider } from "@rental-os/platform-admin/core";
@@ -10,9 +10,9 @@ import {
 } from "@rental-os/rental-core/admin/commercial";
 import {
   RENTAL_COMMERCIAL_CORE_ID,
-  RENTAL_COMMERCIAL_LEGACY_PERMISSION,
   RENTAL_COMMERCIAL_PAGES,
 } from "@rental-os/rental-core/admin/commercial/pages";
+import { rentalOriginalPermissionCode } from "@rental-os/rental-core/permissions";
 import { resolveAdminBrandName } from "@/app/branding";
 import { useAuthStore } from "@/features/auth/authStore";
 import { rentalCommercialScopeKey, useLegacyRentalCommercialContext } from "./legacy-commercial-context";
@@ -84,12 +84,12 @@ export function LegacyRentalCommercialPage({
             coreId !== RENTAL_COMMERCIAL_CORE_ID
           )
             return false;
-          return permissions.every(
-            (permission) =>
-              permission.resource === "price" &&
-              permission.action === "manage" &&
-              current.hasPermission(RENTAL_COMMERCIAL_LEGACY_PERMISSION),
-          );
+          return permissions.every((permission) => {
+            const original = rentalOriginalPermissionCode(
+              `${coreId}:${permission.resource}:${permission.action}`,
+            );
+            return original !== undefined && current.hasPermission(original);
+          });
         },
       }}
     >

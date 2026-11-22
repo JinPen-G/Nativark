@@ -8,6 +8,8 @@
 
 商品页使用 catalog/view 和 catalog/manage，资产与库存页使用 asset/view 和 asset/manage。原宿主继续使用 rental-core:catalog:view、rental-core:catalog:manage、rental-core:asset:view 和 rental-core:asset:manage，兼容地址为 /rental/item-groups 与 /rental/assets。宿主将两页和已有业务页面合并为同一 Rental 贡献，菜单顺序从原养护分组声明投影。[旧路由适配](../../../../apps/admin/src/features/catalog/legacy-catalog-page.tsx) · [统一 Rental 贡献](../index.tsx)
 
+原管理后台的目录薄适配将主页面以及价格、订单和地点等附属标准权限通过唯一原权限映射交给当前 Auth 检查，目录和资产资源共用同一检查入口。范围变化、跨 Core 和未登记权限继续拒绝，权限码映射本身沿正式目录维护。[原权限映射](../../src/permissions.ts) · [旧宿主权限复验](../../../../apps/admin/src/features/catalog/legacy-catalog-page.tsx)
+
 当前品类的商品、资产、定价与履约导航术语由同一纯模块组合，页面标题消费其结果。[导航术语](navigation-terminology.ts)
 
 ## 编辑与读取

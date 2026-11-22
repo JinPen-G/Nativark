@@ -1,4 +1,4 @@
-/** 宿主供给当前会话、经营空间和原鉴权传输，异步返回继续复验原范围。 */
+/** 宿主供给当前会话、经营空间和原鉴权传输；访问驱动默认价格权限，服务页传入正式服务权限，异步返回复验原范围。 */
 import { createContext, createElement, useContext, useLayoutEffect, useRef, type ReactNode } from "react";
 import type { AdminRequestOptions, AdminRuntime } from "@rental-os/platform-admin/runtime";
 import { useCorePageHost } from "@rental-os/platform-admin/core";
@@ -63,7 +63,7 @@ export function useRentalCommercialPageContext(): RentalCommercialPageContext {
   return context;
 }
 
-export function useRentalCommercialWorkspaceAccess() {
+export function useRentalCommercialWorkspaceAccess(permissions = RENTAL_COMMERCIAL_ACCESS) {
   const context = useRentalCommercialPageContext();
   const host = useCorePageHost();
   const active = useRef(false);
@@ -75,10 +75,10 @@ export function useRentalCommercialWorkspaceAccess() {
   }, []);
   const isCurrentScope = () =>
     active.current && Boolean(context.scopeKey) && context.currentScopeKey() === context.scopeKey;
-  const canManage = host.canAccess(RENTAL_COMMERCIAL_CORE_ID, RENTAL_COMMERCIAL_ACCESS);
+  const canManage = host.canAccess(RENTAL_COMMERCIAL_CORE_ID, permissions);
   const assertManage = () => {
     if (!isCurrentScope()) throw new DOMException("商业页面的会话或经营空间已变化", "AbortError");
-    if (!host.canAccess(RENTAL_COMMERCIAL_CORE_ID, RENTAL_COMMERCIAL_ACCESS))
+    if (!host.canAccess(RENTAL_COMMERCIAL_CORE_ID, permissions))
       throw new Error("当前操作不可用");
   };
   return { ...context, scope: context.scopeKey, host, canManage, isCurrentScope, assertManage };

@@ -1,4 +1,4 @@
-/** 原商品与资产路由绑定同源页面声明和当前权限，业务正文由 Rental Core 提供。 */
+/** 原商品与资产路由绑定同源页面声明，主业务及附属读取沿当前身份的正式原权限映射复验。 */
 import { useNavigate } from "react-router-dom";
 import { corePageKey, type CoreRegisteredPage } from "@rental-os/core-contracts";
 import { CorePageHostProvider } from "@rental-os/platform-admin/core";
@@ -6,8 +6,8 @@ import { CatalogPage, AssetWorkspacePage } from "@rental-os/rental-core/admin/ca
 import {
   RENTAL_CATALOG_CORE_ID,
   RENTAL_CATALOG_PAGES,
-  RENTAL_CATALOG_LEGACY_PERMISSIONS,
 } from "@rental-os/rental-core/admin/catalog/pages";
+import { rentalOriginalPermissionCode } from "@rental-os/rental-core/permissions";
 import { resolveAdminBrandName } from "@/app/branding";
 import { useAuthStore } from "@/features/auth/authStore";
 import { rentalCatalogScopeKey, useLegacyRentalCatalogContext } from "./legacy-catalog-context";
@@ -58,10 +58,10 @@ export function LegacyRentalCatalogPage({
           )
             return false;
           return permissions.every((permission) => {
-            if (permission.resource !== "catalog" && permission.resource !== "asset") return false;
-            const rights = RENTAL_CATALOG_LEGACY_PERMISSIONS[permission.resource];
-            if (permission.action === "view") return current.hasPermission(rights.view);
-            return permission.action === "manage" && current.hasPermission(rights.manage);
+            const original = rentalOriginalPermissionCode(
+              `${coreId}:${permission.resource}:${permission.action}`,
+            );
+            return original !== undefined && current.hasPermission(original);
           });
         },
       }}

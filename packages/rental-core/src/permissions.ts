@@ -130,7 +130,7 @@ export const RENTAL_PAGE_ACCESS = {
   "pricing-version-detail": workspace("rental-os:price:manage", "价格版本详情"),
   discounts: workspace("rental-os:price:manage", "优惠方案"),
   coupons: workspace("rental-os:price:manage", "优惠券"),
-  services: workspace("rental-os:price:manage", "增值服务"),
+  services: workspace("rental-os:service:manage", "增值服务"),
   governance: { ...page("governance", "品类与业务规则页面", "workspace", [
     "rental-os:price:manage", "rental-os:calendar:edit", "rental-os:calendar:publish",
     "rental-os:calendar:view-history", "rental-os:rules:manage", "rental-os:rules:publish", "system:integration:manage"

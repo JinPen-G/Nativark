@@ -106,7 +106,7 @@ const adjustmentStatusLabels: Record<string, string> = {
   failed: "执行失败",
 };
 
-/** 商业分区共享当前宿主，价格版本参数来自已匹配的正式路由。 */
+/** 商业分区共享当前宿主及原价格/服务权限，附属资料失败独立于服务列表；价格版本参数来自正式路由。 */
 export function RentalCommercialPage({
   section,
   ...context
@@ -122,15 +122,47 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
   const {
     api: rentalCoreApi,
     scope,
+    currentScopeKey,
     host,
     canManage,
     isCurrentScope,
     assertManage,
-  } = useRentalCommercialWorkspaceAccess();
+  } = useRentalCommercialWorkspaceAccess(
+    section === "services" ? RENTAL_COMMERCIAL_PAGES.services.permissions : RENTAL_COMMERCIAL_ACCESS,
+  );
   const generations = useRef({ adjustment: 0, discount: 0, service: 0, capacity: 0 });
   const { message } = App.useApp();
   const { locale, t } = useLocale();
   const queryClient = useQueryClient();
+  const canRead = (permissions: readonly { resource: string; action: string }[]) =>
+    Boolean(scope) && currentScopeKey() === scope &&
+    permissions.some(permission => host.canAccess(RENTAL_COMMERCIAL_CORE_ID, [permission]));
+  const canReadProfile = () => canRead([
+    { resource: "order", action: "view" },
+    { resource: "catalog", action: "view" },
+    { resource: "asset", action: "view" },
+  ]);
+  const canReadGroups = () => canRead([
+    { resource: "catalog", action: "view" },
+    { resource: "catalog", action: "manage" },
+    { resource: "order", action: "view" },
+    { resource: "order", action: "create" },
+  ]);
+  const canReadPricingGroups = () => canRead([
+    { resource: "price", action: "manage" },
+    { resource: "order", action: "view" },
+    { resource: "order", action: "create" },
+  ]);
+  const canReadSettings = () => canRead([
+    { resource: "rules", action: "manage" },
+    { resource: "price", action: "manage" },
+    { resource: "order", action: "view" },
+    { resource: "order", action: "create" },
+  ]);
+  const canReadLocations = () => canRead([{ resource: "station", action: "view" }]);
+  const canReadServices = () =>
+    section === "services" && Boolean(scope) && currentScopeKey() === scope &&
+    host.canAccess(RENTAL_COMMERCIAL_CORE_ID, RENTAL_COMMERCIAL_PAGES.services.permissions);
   const [adjustmentPlan, setAdjustmentPlan] = useState<RentalPricingPlanV1 | null>();
   const [adjustmentPreview, setAdjustmentPreview] = useState<RentalPriceAdjustmentPreviewRow[]>([]);
   const [createdAdjustmentId, setCreatedAdjustmentId] = useState<string>();
@@ -205,26 +237,53 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
   });
   const profile = useQuery({
     queryKey: ["rental-core", "profile", scope],
-    queryFn: ({ signal }) => rentalCoreApi.profile({ signal }),
-    enabled: Boolean(scope),
+    queryFn: async ({ signal }) => {
+      if (!isCurrentScope() || !canReadProfile()) throw new Error("经营资料读取受限");
+      const result = await rentalCoreApi.profile({ signal });
+      if (!isCurrentScope() || !canReadProfile()) throw new Error("经营资料读取受限");
+      return result;
+    },
+    enabled: canReadProfile(),
   });
   const settings = useQuery({
     queryKey: ["rental-core", "business-settings", scope],
-    queryFn: ({ signal }) => rentalCoreApi.businessSettings({ signal }),
-    enabled: Boolean(scope),
+    queryFn: async ({ signal }) => {
+      if (!isCurrentScope() || !canReadSettings()) throw new Error("业务设置读取受限");
+      const result = await rentalCoreApi.businessSettings({ signal });
+      if (!isCurrentScope() || !canReadSettings()) throw new Error("业务设置读取受限");
+      return result;
+    },
+    enabled: canReadSettings(),
   });
-  const currency = settings.data?.pricing.currency;
-  const money = (value: number | undefined) => formatRentalMoney(Number(value ?? 0), currency);
-  const currencySymbol = rentalCurrencySymbol(currency);
+  const visibleSettings = canReadSettings() && !settings.isError ? settings.data : undefined;
+  const currency = visibleSettings?.pricing.currency;
+  const money = (value: number | undefined) => {
+    if (section === "services" && !Number.isFinite(value))
+      return locale === "en-US" ? "Amount unavailable" : t("未提供金额");
+    if (section === "services" && !currency)
+      return locale === "en-US" ? "Currency unavailable" : t("未提供币种");
+    return formatRentalMoney(Number(value ?? 0), currency);
+  };
+  const currencySymbol = section === "services" && !currency ? undefined : rentalCurrencySymbol(currency);
   const groups = useQuery({
     queryKey: ["rental-core", "groups", scope],
-    queryFn: ({ signal }) => rentalCoreApi.itemGroups({ signal }),
-    enabled: Boolean(scope),
+    queryFn: async ({ signal }) => {
+      if (!isCurrentScope() || !canReadGroups()) throw new Error("商品资料读取受限");
+      const result = await rentalCoreApi.itemGroups({ signal });
+      if (!isCurrentScope() || !canReadGroups()) throw new Error("商品资料读取受限");
+      return result;
+    },
+    enabled: canReadGroups(),
   });
   const pricingGroups = useQuery({
     queryKey: ["rental-core", "pricing-groups", scope],
-    queryFn: ({ signal }) => rentalCoreApi.pricingGroups({ signal }),
-    enabled: Boolean(scope),
+    queryFn: async ({ signal }) => {
+      if (!isCurrentScope() || !canReadPricingGroups()) throw new Error("定价分组读取受限");
+      const result = await rentalCoreApi.pricingGroups({ signal });
+      if (!isCurrentScope() || !canReadPricingGroups()) throw new Error("定价分组读取受限");
+      return result;
+    },
+    enabled: canReadPricingGroups() && section !== "services",
   });
   // 三个分区各自只取自己要展示的数据：别的分区打开时不发这些请求。
   const pricing = useQuery({
@@ -239,19 +298,75 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
   });
   const locations = useQuery({
     queryKey: ["rental-core", "locations", scope],
-    queryFn: ({ signal }) => rentalCoreApi.locations({ signal }),
-    enabled: Boolean(scope),
+    queryFn: async ({ signal }) => {
+      if (!isCurrentScope() || !canReadLocations()) throw new Error("地点资料读取受限");
+      const result = await rentalCoreApi.locations({ signal });
+      if (!isCurrentScope() || !canReadLocations()) throw new Error("地点资料读取受限");
+      return result;
+    },
+    enabled: canReadLocations(),
   });
   const services = useQuery({
     queryKey: ["rental-core", "value-added-services", scope],
-    queryFn: ({ signal }) => rentalCoreApi.valueAddedServices({ signal }),
-    enabled: Boolean(scope) && section === "services",
+    queryFn: async ({ signal }) => {
+      if (!isCurrentScope() || !canReadServices()) throw new Error("服务资料读取受限");
+      const result = await rentalCoreApi.valueAddedServices({ signal });
+      if (!isCurrentScope() || !canReadServices()) throw new Error("服务资料读取受限");
+      return result;
+    },
+    enabled: canReadServices(),
   });
   const capacities = useQuery({
     queryKey: ["rental-core", "service-capacities", capacityService?.id, scope],
-    queryFn: ({ signal }) => rentalCoreApi.serviceCapacities(capacityService!.id, { signal }),
-    enabled: Boolean(scope && capacityService?.id),
+    queryFn: async ({ signal }) => {
+      if (!isCurrentScope() || !canReadServices()) throw new Error("服务容量读取受限");
+      const result = await rentalCoreApi.serviceCapacities(capacityService!.id, { signal });
+      if (!isCurrentScope() || !canReadServices()) throw new Error("服务容量读取受限");
+      return result;
+    },
+    enabled: canReadServices() && Boolean(capacityService?.id),
   });
+  const visibleProfile = canReadProfile() && !profile.isError ? profile.data : undefined;
+  const visibleGroups = canReadGroups() && !groups.isError ? groups.data : undefined;
+  const visiblePricingGroups = canReadPricingGroups() && !pricingGroups.isError ? pricingGroups.data : undefined;
+  const visibleLocations = canReadLocations() && !locations.isError ? locations.data : undefined;
+  const visibleServices = canReadServices() && !services.isError ? services.data : undefined;
+  const visibleCapacities = canReadServices() && !capacities.isError ? capacities.data : undefined;
+  const serviceReferencesAvailable = () =>
+    isCurrentScope() && canReadServices() && canReadProfile() && canReadSettings() &&
+    canReadGroups() && canReadLocations() && Boolean(
+      queryClient.getQueryData<Awaited<ReturnType<typeof rentalCoreApi.businessSettings>>>(
+        ["rental-core", "business-settings", scope],
+      )?.pricing.currency,
+    ) &&
+    ["profile", "business-settings", "groups", "locations", "value-added-services"].every(
+      key => queryClient.getQueryState(["rental-core", key, scope])?.status === "success",
+    );
+  const capacityReferencesAvailable = () =>
+    isCurrentScope() && canReadServices() && canReadLocations() && Boolean(capacityService) &&
+    queryClient.getQueryState(["rental-core", "locations", scope])?.status === "success" &&
+    queryClient.getQueryState(["rental-core", "service-capacities", capacityService?.id, scope])?.status !== "error";
+  async function refreshServiceReferences() {
+    if (!isCurrentScope()) throw new DOMException("商业页面的会话或经营空间已变化", "AbortError");
+    await Promise.all([
+      ...(canReadGroups() ? [groups.refetch()] : []),
+      ...(canReadLocations() ? [locations.refetch()] : []),
+      ...(canReadProfile() ? [profile.refetch()] : []),
+      ...(canReadSettings() ? [settings.refetch()] : []),
+    ]);
+  }
+  async function refreshServices(throwOnError = false) {
+    if (!isCurrentScope() || !canReadServices()) throw new Error(t("当前操作不可用"));
+    // 附属查询分别持有错误，主服务查询及其重试保持独立。
+    await Promise.all([services.refetch({ throwOnError }), refreshServiceReferences()]);
+  }
+  async function refreshCapacities(throwOnError = false) {
+    if (!isCurrentScope() || !canReadServices()) throw new Error(t("当前操作不可用"));
+    await Promise.all([
+      capacities.refetch({ throwOnError }),
+      ...(canReadLocations() ? [locations.refetch()] : []),
+    ]);
+  }
   // 价格版本与定价分组页共用同一个 hook（同一组查询键、同一个「当前版本」判据）。
   // 版本明细只有价格页需要；版本抽屉在别的分区打开时只需要列表。
   const {
@@ -375,6 +490,7 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
   const saveService = useMutation({
     mutationFn: (values: SaveRentalValueAddedServiceRequest) => {
       assertManage();
+      if (!serviceReferencesAvailable()) throw new Error(t("当前操作不可用"));
       return rentalCoreApi.saveValueAddedService(values);
     },
     onSuccess: async () => {
@@ -393,7 +509,7 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
   const saveCapacity = useMutation({
     mutationFn: (values: SaveRentalServiceCapacityRequest & { window?: [dayjs.Dayjs, dayjs.Dayjs] }) => {
       assertManage();
-      if (!capacityService) throw new Error(t("当前操作不可用"));
+      if (!capacityReferencesAvailable()) throw new Error(t("当前操作不可用"));
       const { window, ...rest } = values;
       return rentalCoreApi.saveServiceCapacity({
         ...rest,
@@ -510,7 +626,7 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
     if (
       serviceUnavailable ||
       saveService.isPending ||
-      !isCurrentScope() ||
+      !serviceReferencesAvailable() ||
       (serviceEditor && !serviceDialog.visible)
     )
       return;
@@ -546,7 +662,7 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
     if (
       capacityUnavailable ||
       saveCapacity.isPending ||
-      !isCurrentScope() ||
+      !capacityReferencesAvailable() ||
       (capacityEditor && !capacityEditorDialog.visible)
     )
       return;
@@ -558,7 +674,7 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
           ? { ...record, window: [dayjs(record.windowStart), dayjs(record.windowEnd)] }
           : {
               serviceId: capacityService!.id,
-              locationId: locations.data?.[0]?.id,
+              locationId: visibleLocations?.[0]?.id,
               totalCapacity: 1,
               status: "enabled",
             },
@@ -577,7 +693,7 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
   const currentPricingRows: Array<{
     group: RentalPricingGroup;
     rate?: RentalPricingPlanV1["rates"][number];
-  }> = (pricingGroups.data ?? []).flatMap(
+  }> = (visiblePricingGroups ?? []).flatMap(
     (group): Array<{ group: RentalPricingGroup; rate?: RentalPricingPlanV1["rates"][number] }> => {
       const rates =
         currentPriceVersionDetail.data?.rates.filter(
@@ -595,7 +711,7 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
     fields: (row) => [row.name, row.code],
     status: (row) => row.status,
   });
-  const serviceFilter = useListFilter(services.data, {
+  const serviceFilter = useListFilter(visibleServices, {
     fields: (row) => [row.name, row.code],
     status: (row) => row.status,
   });
@@ -616,11 +732,8 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
   const serviceUnavailable =
     !canManage ||
     !services.isSuccess ||
-    !settings.isSuccess ||
-    !groups.isSuccess ||
-    !locations.isSuccess ||
-    !profile.isSuccess;
-  const capacityUnavailable = !canManage || !capacityService || !locations.isSuccess || capacities.isError;
+    !visibleSettings || !currency || !visibleGroups || !visibleLocations || !visibleProfile;
+  const capacityUnavailable = !canManage || !capacityService || !visibleLocations || capacities.isError;
 
   const adjustmentSubmission = useOrderEditor<
     CreateRentalPriceAdjustmentRequest & { scheduledAtValue?: dayjs.Dayjs }
@@ -699,7 +812,7 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
 
   function openCapacityService(record: RentalValueAddedService) {
     if (
-      !canManage ||
+      !canReadServices() ||
       !isCurrentScope() ||
       saveCapacity.isPending ||
       (capacityService && !capacityDialog.visible)
@@ -793,7 +906,9 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
                       kind: "open",
                       label: { default: t(section === "discounts" ? "新增优惠方案" : "新增服务") },
                       emphasis: "primary",
-                      permissions: RENTAL_COMMERCIAL_ACCESS,
+                      permissions: section === "services"
+                        ? RENTAL_COMMERCIAL_PAGES.services.permissions
+                        : RENTAL_COMMERCIAL_ACCESS,
                       icon: <PlusOutlined />,
                       disabled:
                         section === "services"
@@ -1023,7 +1138,7 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
                   cardView={discountCards({
                     t,
                     money,
-                    pricingGroups: pricingGroups.data ?? [],
+                    pricingGroups: visiblePricingGroups ?? [],
                     customerLabel: (key) => t(customerScopeLabels[key] ?? key),
                     edit: editDiscount,
                   })}
@@ -1070,7 +1185,7 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
                           ? row.applicablePricingGroupIds
                               .map(
                                 (id) =>
-                                  pricingGroups.data?.find((group) => group.id === id)?.name ??
+                                  visiblePricingGroups?.find((group) => group.id === id)?.name ??
                                   t("已删除分组"),
                               )
                               .join(locale === "en-US" ? ", " : "、")
@@ -1136,35 +1251,34 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
                 />
               }
             >
-              {(groups.isError || locations.isError || profile.isError) && (
+              {(!visibleGroups || !visibleLocations || !visibleProfile || !visibleSettings || !currency) && (
                 <Alert
                   type="warning"
                   showIcon
-                  title={t("服务配置资料读取失败")}
-                  description={t("服务列表仍可查看，重新载入关联资料后再编辑。")}
+                  title={
+                    !canReadGroups() || !canReadLocations() || !canReadProfile() || !canReadSettings()
+                      ? (locale === "en-US" ? "Some service setup details are restricted" : t("部分服务配置资料读取受限"))
+                      : groups.isError || locations.isError || profile.isError || settings.isError
+                        ? (locale === "en-US" ? "Unable to read service setup details" : t("服务配置资料读取失败"))
+                        : (locale === "en-US" ? "Service setup details are incomplete" : t("服务配置资料尚未完整提供"))
+                  }
+                  description={locale === "en-US"
+                    ? "Services remain visible. Editing requires complete products, locations, business details and currency."
+                    : t("服务列表仍可查看；编辑需要完整商品、地点、经营资料和币种。")}
                   action={
                     <ActionButton
                       label={t("重试")}
-                      onAction={() =>
-                        Promise.all([
-                          groups.refetch({ throwOnError: true }),
-                          locations.refetch({ throwOnError: true }),
-                          profile.refetch({ throwOnError: true }),
-                        ])
-                      }
+                      onAction={refreshServiceReferences}
                     />
                   }
                 />
               )}
               <QueryState
-                loading={services.isLoading || settings.isLoading}
-                error={services.error || settings.error}
-                onRetry={() =>
-                  Promise.all([
-                    services.refetch({ throwOnError: true }),
-                    settings.refetch({ throwOnError: true }),
-                  ])
-                }
+                loading={canReadServices() && services.isLoading}
+                error={canReadServices() ? services.error : new Error(
+                  locale === "en-US" ? "Service access is restricted" : t("服务资料读取受限"),
+                )}
+                onRetry={() => refreshServices(true)}
               >
                 <Table<RentalValueAddedService>
                   cardView={serviceCards({
@@ -1188,7 +1302,7 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
                     ],
                   }}
                   rowKey="id"
-                  onRefresh={() => services.refetch()}
+                  onRefresh={() => refreshServices()}
                   loading={services.isLoading}
                   refreshing={services.isFetching}
                   dataSource={serviceFilter.rows}
@@ -1879,7 +1993,7 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
                             allowClear
                             showSearch={{ optionFilterProp: "label" }}
                             placeholder={t("全部定价分组")}
-                            options={(pricingGroups.data ?? []).map((group) => ({
+                            options={(visiblePricingGroups ?? []).map((group) => ({
                               value: group.id,
                               label: `${group.code} · ${group.name}`,
                             }))}
@@ -2203,7 +2317,7 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
                     <Form.Item name="applicableItemGroupIds" label={t("适用商品（空为全部）")}>
                       <Select
                         mode="multiple"
-                        options={(groups.data ?? []).map((group) => ({
+                        options={(visibleGroups ?? []).map((group) => ({
                           value: group.id,
                           label: group.name,
                         }))}
@@ -2212,11 +2326,11 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
                     <Form.Item name="applicableFulfillmentModes" label={t("适用履约方式（空为全部）")}>
                       <Select
                         mode="multiple"
-                        options={(settings.data?.fulfillment.enabledModes ?? []).map((value) => ({
+                        options={(visibleSettings?.fulfillment.enabledModes ?? []).map((value) => ({
                           value,
                           label: t(
                             value === "delivery"
-                              ? (profile.data?.terminology.deliveryLabel ?? fulfillmentModeLabels[value])
+                              ? (visibleProfile?.terminology.deliveryLabel ?? fulfillmentModeLabels[value])
                               : (fulfillmentModeLabels[value] ?? value),
                           ),
                         }))}
@@ -2225,7 +2339,7 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
                     <Form.Item name="applicableLocationIds" label={t("适用地点（空为全部）")}>
                       <Select
                         mode="multiple"
-                        options={(locations.data ?? []).map((row) => ({ value: row.id, label: row.name }))}
+                        options={(visibleLocations ?? []).map((row) => ({ value: row.id, label: row.name }))}
                       />
                     </Form.Item>
                     <Form.Item
@@ -2238,7 +2352,7 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
                             <Form.Item name={["mandatoryRule", "itemGroupIds"]} label={t("命中商品")}>
                               <Select
                                 mode="multiple"
-                                options={(groups.data ?? []).map((row) => ({
+                                options={(visibleGroups ?? []).map((row) => ({
                                   value: row.id,
                                   label: row.name,
                                 }))}
@@ -2247,11 +2361,11 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
                             <Form.Item name={["mandatoryRule", "fulfillmentModes"]} label={t("命中履约方式")}>
                               <Select
                                 mode="multiple"
-                                options={(settings.data?.fulfillment.enabledModes ?? []).map((value) => ({
+                                options={(visibleSettings?.fulfillment.enabledModes ?? []).map((value) => ({
                                   value,
                                   label: t(
                                     value === "delivery"
-                                      ? (profile.data?.terminology.deliveryLabel ??
+                                      ? (visibleProfile?.terminology.deliveryLabel ??
                                           fulfillmentModeLabels[value])
                                       : (fulfillmentModeLabels[value] ?? value),
                                   ),
@@ -2364,19 +2478,28 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
         <QueryState
           loading={capacities.isLoading}
           error={capacities.error}
-          onRetry={() => capacities.refetch({ throwOnError: true })}
+          onRetry={() => refreshCapacities(true)}
         >
           <Table<RentalServiceCapacity>
             rowKey="id"
-            onRefresh={() => capacities.refetch()}
+            onRefresh={() => refreshCapacities()}
             loading={capacities.isLoading}
             refreshing={capacities.isFetching}
-            dataSource={capacities.data ?? []}
+            dataSource={visibleCapacities ?? []}
             columns={[
               {
                 title: t("地点"),
                 dataIndex: "locationId",
-                render: (value) => locations.data?.find((row) => row.id === value)?.name ?? value,
+                render: (value) => (
+                  <DataTableText
+                    primary={visibleLocations?.find((row) => row.id === value)?.name ?? value}
+                    secondary={visibleLocations?.some((row) => row.id === value)
+                      ? undefined
+                      : locale === "en-US"
+                        ? (!canReadLocations() ? "Location access is restricted" : "Location details unavailable")
+                        : t(!canReadLocations() ? "地点资料读取受限" : "未提供地点资料")}
+                  />
+                ),
               },
               {
                 title: t("开始"),
@@ -2455,7 +2578,7 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
             <Input />
           </Form.Item>
           <Form.Item name="locationId" label={t("服务地点")} rules={[{ required: true }]}>
-            <Select options={(locations.data ?? []).map((row) => ({ value: row.id, label: row.name }))} />
+            <Select options={(visibleLocations ?? []).map((row) => ({ value: row.id, label: row.name }))} />
           </Form.Item>
           <Form.Item name="window" label={t("可服务时段")} rules={[{ required: true }]}>
             <DatePicker.RangePicker showTime style={{ width: "100%" }} />

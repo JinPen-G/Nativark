@@ -36,6 +36,10 @@
 
 优惠券模板列表沿原 price/manage 权限读取。关联商品按原 catalog/view、catalog/manage、order/view 或 order/create 权限查询，由当前宿主、页面身份及经营空间在请求前后复验；缺权限时停止附属请求和旧引用展示。模板已有的适用商品数量、全部商品规则、优惠及领用事实保留，指定商品资料受限、失败和等待分别呈现。列表刷新仅读取当前有权资料，保留编辑草稿；创建和编辑仍要求原完整引用，打开和保存时复验当前权限及必需查询成功状态。发放、作废和预算台账继续使用原请求与业务规则。[优惠券查询与保存](CouponPage.tsx) · [卡片引用状态](couponCards.tsx) · [原服务端权限](../../src/http-auth.ts)
 
+增值服务的页面、主按钮、访问驱动和容量操作消费正式 service/manage 权限，其他商业页沿访问驱动默认的价格权限。经营资料、商品、业务设置和地点按原 HTTP 权限分别读取，请求前后及手动刷新复验当前身份；服务页沿自身主查询展示服务和原计费单位，附属受限或失败独立提示，未提供金额或币种明确显示，旧无权缓存退出展示。服务编辑继续要求原完整关联事实和币种，容量保存保留原地点、选定服务与容量查询前置，两类保存紧前均复验当前权限和必需查询状态。原载荷、日期转换、草稿代次和台账流程由现有客户端及表单驱动维护。[服务列表与保存](RentalCommercialPage.tsx) · [访问驱动](page-context.ts) · [页面声明](pages.ts) · [正式权限来源](../../src/permissions.ts)
+
+原管理后台的商业薄适配将标准权限通过唯一原权限映射交给当前 Auth 检查，服务、价格以及商品、地点等附属权限均沿同一来源。范围变化、跨 Core 和未登记权限继续拒绝，主页面、查询及动作复用同一宿主检查。[原路由薄适配](../../../../apps/admin/src/features/commercial/legacy-commercial-page.tsx) · [原权限映射](../../src/permissions.ts)
+
 ## 卡片与来源
 
 定价组、优惠、服务和优惠券卡片保留原只读预览、关闭后操作与样式。头像缓存键绑定当前范围、型号和图片，渲染首帧复验对象 URL 对应的身份及 Blob，替换和卸载时释放 URL。[商业卡片](commercialCards.tsx) · [优惠券卡片](couponCards.tsx) · [头像与卡片呈现](commercialCardParts.tsx)
@@ -45,7 +49,7 @@
 ## 公共整合要求
 
 - Rental 包提供 admin/commercial、admin/commercial/client、admin/commercial/context 和 admin/commercial/pages 的 exports 与 typesVersions，后台类型配置包含 commercial。
-- 统一 Rental 上下文提供 useCommercialContext，统一贡献合并七页，清单登记 price/manage 并沿原价格权限映射。
+- 统一 Rental 上下文提供 useCommercialContext，统一贡献合并七页，价格与服务页分别沿正式 price/manage 和 service/manage 映射。
 - 公共 native-ui 提供 avatarGroupClasses，消费原 Avatar group CSS。公共 motion 提供 motionTokens 和 usePrefersReducedMotion，消费原 UIArc 动效参数与偏好。
 - 公共 ui 提供卡片事实、原图标与列表宽度，shell 提供 SettingsWorkspace；页面使用正式出口，保留来源的编译预览只沿原兼容入口。
 - 宿主合并 rentalCommercialMessages，并将旧菜单、路由和面包屑绑定同一页面声明。

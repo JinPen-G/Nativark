@@ -1,4 +1,4 @@
-/** 七条商业路由保留原价格管理权限，菜单和历史版本面包屑共用正式声明。 */
+/** 商业路由分别消费原价格和服务管理权限，菜单及历史版本面包屑共用正式声明。 */
 import { rentalLegacyPermission, rentalPagePermissions } from "@rental-os/rental-core/permissions";
 import type { CorePageDescriptor } from "@rental-os/core-contracts";
 
