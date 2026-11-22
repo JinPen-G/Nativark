@@ -1483,45 +1483,8 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
         throw new ConflictException("原退款收据不属于本次结果");
       }
       try {
-        const updated = await this.prisma.$transaction(async (tx) => {
-          await lockRentalBusinessTenant(tx, tenantId);
-          // 目标来自原退款记录；与退款创建保持 Order → Refund，不能先更新退款再反向取得订单锁。
-          const orders = await tx.$queryRaw<Array<{ id: string }>>(prismaRuntime.sql`SELECT id FROM rental_orders
-            WHERE id = ${original.orderId} AND tenantId = ${original.tenantId} AND workspaceId = ${original.workspaceId} FOR UPDATE`);
-          if (!orders.length) throw new NotFoundException("原退款订单不存在或不属于原经营空间");
-          await assertRentalBusinessOperationAccessAfterLock(tx, original.tenantId, original.workspaceId, original.orderId);
-          // 使用锁定当前读，避免 RR 中更早的权限读取让 ORM 复读沿用旧快照。
-          const [row] = await tx.$queryRaw<Array<PaymentRefundRow>>(prismaRuntime.sql`SELECT * FROM rental_payment_refunds
-            WHERE id = ${original.id} AND tenantId = ${original.tenantId} FOR UPDATE`);
-          if (!row) throw new NotFoundException("退款单不存在");
-          this.assertOriginalRefund(row, original);
-          if (row.externalRefundId && outcome.externalRefundId && row.externalRefundId !== outcome.externalRefundId) {
-            throw new ConflictException("退款单已绑定其他第三方退款编号，不能接受新的退款结果");
-          }
-          if (row.fundedAt) return row;
-          await tx.rentalPaymentRefund.update({
-            where: { id: row.id },
-            data: {
-              revision: { increment: 1 },
-              status: "succeeded",
-              externalRefundId: outcome.externalRefundId ?? row.externalRefundId,
-              externalStatus: outcome.externalStatus ?? "SUCCESS",
-              responseJson: outcome.responseJson as Prisma.InputJsonValue,
-              succeededAt: row.succeededAt ?? new Date(),
-              failureReason: null
-            }
-          });
-          await this.funding.recordEvent(tenantId, workspaceId, orderId, {
-            instrument: "rental",
-            action: "refund",
-            amount: Number(row.amount),
-            idempotencyKey: `payment-refund:${row.id}`,
-            reason: `真实支付退款：${row.reason}`,
-            provider: row.provider as "alipay" | "wechat_pay" | "stripe",
-            verifiedExternalReceipt: true
-          }, operator ?? "provider", tx);
-          return tx.rentalPaymentRefund.update({ where: { id: row.id }, data: { fundedAt: new Date(), failureReason: null, revision: { increment: 1 } } });
-        });
+        const updated = await this.prisma.$transaction(async tx =>
+          this.fundVerifiedRefund(tx, await this.lockOriginalRefund(tx, original), outcome, operator));
         return { status: updated.status, response: this.toRefundResponse(updated) };
       } catch (error) {
         if (error instanceof ConflictException || error instanceof NotFoundException) throw error;
@@ -1535,15 +1498,7 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
         if (current.fundedAt) return { status: current.status, response: this.toRefundResponse(current) };
         await this.prisma.rentalPaymentRefund.updateMany({
           where: { ...this.originalRefundWhere(original), revision: current.revision, status: current.status, fundedAt: null },
-          data: {
-            revision: { increment: 1 },
-            status: "funding_pending",
-            externalRefundId: outcome.externalRefundId ?? current.externalRefundId,
-            externalStatus: outcome.externalStatus ?? "SUCCESS",
-            responseJson: outcome.responseJson as Prisma.InputJsonValue,
-            succeededAt: current.succeededAt ?? new Date(),
-            failureReason: failureReason.slice(0, 500)
-          }
+          data: this.refundFundingPendingData(current, outcome, failureReason)
         });
         const scoped = await this.prisma.rentalPaymentRefund.findFirst({ where: { id: refundId, tenantId, workspaceId, orderId } });
         if (!scoped) throw new NotFoundException("退款单不存在");
@@ -1555,31 +1510,93 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
       const current = await tx.rentalPaymentRefund.findFirst({ where: { id: refundId, tenantId, workspaceId, orderId } });
       if (!current) throw new NotFoundException("退款单不存在");
       if (expected) this.assertOriginalRefund(current, expected);
-      if (current.externalRefundId && outcome.externalRefundId && current.externalRefundId !== outcome.externalRefundId) {
-        throw new ConflictException("退款单已绑定其他第三方退款编号，不能接受新的退款结果");
-      }
-      // Confirmed provider success must not be downgraded by a late response.
-      if (current.fundedAt || current.status === "succeeded" || current.status === "funding_pending") {
-        return { status: current.status, response: this.toRefundResponse(current) };
-      }
-      const changed = await tx.rentalPaymentRefund.updateMany({
-        where: { ...this.originalRefundWhere(expected ?? current), revision: current.revision },
-        data: {
-          revision: { increment: 1 },
-          status: outcome.status === "accepted" ? "accepted" : "failed",
-          externalRefundId: outcome.externalRefundId,
-          externalStatus: outcome.externalStatus,
-          responseJson: outcome.responseJson as Prisma.InputJsonValue,
-          acceptedAt: outcome.status === "accepted" ? new Date() : undefined,
-          failureReason: outcome.status === "failed" ? "第三方明确拒绝退款" : null
-        }
-      });
-      if (changed.count !== 1) throw new ConflictException('退款事实已变化，请核对原退款收据');
-      const updated = await tx.rentalPaymentRefund.findFirstOrThrow({ where: { id: current.id, tenantId, workspaceId, orderId } });
-      if (outcome.status === 'failed') await this.failureEvents?.refund(tx, { tenantId, workspaceId }, current.id);
-      return { status: updated.status, response: this.toRefundResponse(updated), failureReason: updated.failureReason ?? undefined };
+      return this.recordNonSuccessRefund(tx, current, outcome);
     };
     return this.failureEvents ? this.prisma.$transaction(run) : run(this.prisma);
+  }
+
+  private refundFundingPendingData(current: PaymentRefundRow, outcome: ProviderRefundResult, failureReason: string) {
+    return {
+      revision: { increment: 1 },
+      status: "funding_pending",
+      externalRefundId: outcome.externalRefundId ?? current.externalRefundId,
+      externalStatus: outcome.externalStatus ?? "SUCCESS",
+      responseJson: outcome.responseJson as Prisma.InputJsonValue,
+      succeededAt: current.succeededAt ?? new Date(),
+      failureReason: failureReason.slice(0, 500)
+    };
+  }
+
+  private async lockOriginalRefund(tx: Prisma.TransactionClient, original: PaymentRefundRow) {
+    await lockRentalBusinessTenant(tx, original.tenantId);
+    // 目标来自原退款记录；与退款创建保持 Order → Refund，不能先更新退款再反向取得订单锁。
+    const orders = await tx.$queryRaw<Array<{ id: string }>>(prismaRuntime.sql`SELECT id FROM rental_orders
+      WHERE id = ${original.orderId} AND tenantId = ${original.tenantId} AND workspaceId = ${original.workspaceId} FOR UPDATE`);
+    if (!orders.length) throw new NotFoundException("原退款订单不存在或不属于原经营空间");
+    await assertRentalBusinessOperationAccessAfterLock(tx, original.tenantId, original.workspaceId, original.orderId);
+    // 使用锁定当前读，避免 RR 中更早的权限读取让 ORM 复读沿用旧快照。
+    const [row] = await tx.$queryRaw<Array<PaymentRefundRow>>(prismaRuntime.sql`SELECT * FROM rental_payment_refunds
+      WHERE id = ${original.id} AND tenantId = ${original.tenantId} FOR UPDATE`);
+    if (!row) throw new NotFoundException("退款单不存在");
+    this.assertOriginalRefund(row, original);
+    return row;
+  }
+
+  private async fundVerifiedRefund(tx: Prisma.TransactionClient, row: PaymentRefundRow,
+    outcome: ProviderRefundResult, operator?: string) {
+    if (row.externalRefundId && outcome.externalRefundId && row.externalRefundId !== outcome.externalRefundId) {
+      throw new ConflictException("退款单已绑定其他第三方退款编号，不能接受新的退款结果");
+    }
+    if (row.fundedAt) return row;
+    await tx.rentalPaymentRefund.update({
+      where: { id: row.id },
+      data: {
+        revision: { increment: 1 },
+        status: "succeeded",
+        externalRefundId: outcome.externalRefundId ?? row.externalRefundId,
+        externalStatus: outcome.externalStatus ?? "SUCCESS",
+        responseJson: outcome.responseJson as Prisma.InputJsonValue,
+        succeededAt: row.succeededAt ?? new Date(),
+        failureReason: null
+      }
+    });
+    await this.funding.recordEvent(row.tenantId, row.workspaceId, row.orderId, {
+      instrument: "rental",
+      action: "refund",
+      amount: Number(row.amount),
+      idempotencyKey: `payment-refund:${row.id}`,
+      reason: `真实支付退款：${row.reason}`,
+      provider: row.provider as "alipay" | "wechat_pay" | "stripe",
+      verifiedExternalReceipt: true
+    }, operator ?? "provider", tx);
+    return tx.rentalPaymentRefund.update({ where: { id: row.id }, data: { fundedAt: new Date(), failureReason: null, revision: { increment: 1 } } });
+  }
+
+  private async recordNonSuccessRefund(tx: RentalPaymentRefundClient, current: PaymentRefundRow, outcome: ProviderRefundResult) {
+    const { tenantId, workspaceId, orderId } = current;
+    if (current.externalRefundId && outcome.externalRefundId && current.externalRefundId !== outcome.externalRefundId) {
+      throw new ConflictException("退款单已绑定其他第三方退款编号，不能接受新的退款结果");
+    }
+    // Confirmed provider success must not be downgraded by a late response.
+    if (current.fundedAt || current.status === "succeeded" || current.status === "funding_pending") {
+      return { status: current.status, response: this.toRefundResponse(current) };
+    }
+    const changed = await tx.rentalPaymentRefund.updateMany({
+      where: { ...this.originalRefundWhere(current), revision: current.revision },
+      data: {
+        revision: { increment: 1 },
+        status: outcome.status === "accepted" ? "accepted" : "failed",
+        externalRefundId: outcome.externalRefundId,
+        externalStatus: outcome.externalStatus,
+        responseJson: outcome.responseJson as Prisma.InputJsonValue,
+        acceptedAt: outcome.status === "accepted" ? new Date() : undefined,
+        failureReason: outcome.status === "failed" ? "第三方明确拒绝退款" : null
+      }
+    });
+    if (changed.count !== 1) throw new ConflictException('退款事实已变化，请核对原退款收据');
+    const updated = await tx.rentalPaymentRefund.findFirstOrThrow({ where: { id: current.id, tenantId, workspaceId, orderId } });
+    if (outcome.status === 'failed') await this.failureEvents?.refund(tx, { tenantId, workspaceId }, current.id);
+    return { status: updated.status, response: this.toRefundResponse(updated), failureReason: updated.failureReason ?? undefined };
   }
 
   private async applyRefundWebhookOutcome(input: {
@@ -1592,40 +1609,54 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
     payloadHash: string;
     outcome: ProviderRefundResult;
   }) {
-    const eventProvider = `${input.provider}_refund`;
-    const existing = await this.prisma.paymentWebhookEvent.findUnique({ where: { provider_eventId: { provider: eventProvider, eventId: input.eventId } } });
-    if (existing) {
-      if (existing.tenantId !== input.tenantId || existing.payloadHash !== input.payloadHash || (existing.paymentIntentId && existing.paymentIntentId !== input.refund.paymentIntentId)) {
+    const { refund, outcome } = input;
+    if (refund.tenantId !== input.tenantId || refund.workspaceId !== input.workspaceId || refund.orderId !== input.orderId
+      || refund.provider !== input.provider || refund.method !== input.provider) {
+      throw new ConflictException("原退款收据不属于本次回调");
+    }
+    const provider = input.provider + "_refund";
+    let fundingAttempted = false;
+    const settle = (fundingFailure?: string) => this.prisma.$transaction(async tx => {
+      const current = await this.lockOriginalRefund(tx, refund);
+      const key = { provider, eventId: input.eventId };
+      const event = await tx.paymentWebhookEvent.findUnique({ where: { provider_eventId: key } });
+      if (event && (event.tenantId !== input.tenantId || event.payloadHash !== input.payloadHash
+        || (event.paymentIntentId && event.paymentIntentId !== refund.paymentIntentId))) {
         throw new ConflictException("退款回调事件已绑定到其他租户或退款单");
       }
-      if (existing.status === "processed" || existing.status === "processing") return;
-      const claimed = await this.prisma.paymentWebhookEvent.updateMany({ where: { id: existing.id, status: "failed" }, data: { status: "processing", errorMessage: null } });
-      if (claimed.count !== 1) return;
-    } else {
-      try {
-        await this.prisma.paymentWebhookEvent.create({
-          data: { tenantId: input.tenantId, provider: eventProvider, eventId: input.eventId, paymentIntentId: input.refund.paymentIntentId, payloadHash: input.payloadHash, status: "processing" }
-        });
-      } catch (error) {
-        if (!(error instanceof prismaRuntime.PrismaClientKnownRequestError && error.code === "P2002")) throw error;
-        // 另一并发回调可能已经抢到事件。重新读取并复核事件归属；如果它已经
-        // 失败则由当前请求接管重试，只有 processing/processed 才直接返回。
-        const concurrent = await this.prisma.paymentWebhookEvent.findUnique({ where: { provider_eventId: { provider: eventProvider, eventId: input.eventId } } });
-        if (!concurrent) throw error;
-        if (concurrent.tenantId !== input.tenantId || concurrent.payloadHash !== input.payloadHash || (concurrent.paymentIntentId && concurrent.paymentIntentId !== input.refund.paymentIntentId)) {
-          throw new ConflictException("退款回调事件已绑定到其他租户或退款单");
-        }
-        if (concurrent.status === "processed" || concurrent.status === "processing") return;
-        const claimed = await this.prisma.paymentWebhookEvent.updateMany({ where: { id: concurrent.id, status: "failed" }, data: { status: "processing", errorMessage: null } });
-        if (claimed.count !== 1) return;
+      if (event?.status === "processed") return true;
+      if (current.externalRefundId && outcome.externalRefundId && current.externalRefundId !== outcome.externalRefundId) {
+        throw new ConflictException("退款单已绑定其他第三方退款编号，不能接受新的退款结果");
       }
-    }
+      if (fundingFailure !== undefined) {
+        // 入账写入失败时保留已验的原退款号，供原查单恢复。事件仍可用原键重投。
+        // 先锁后复读，迟到的事务异常不能覆盖已经写入的资金收据。
+        if (!current.fundedAt) await tx.rentalPaymentRefund.update({
+          where: { id: current.id }, data: this.refundFundingPendingData(current, outcome, fundingFailure)
+        });
+        return false;
+      }
+      // 老版本可能留下领取已提交、结果未知的事件。在原退款锁下核对当前结果；
+      // 资金与事件完成标记同事务提交，重投时无需按时间猜测旧执行者是否仍在运行。
+      const completed = { status: "processed", processedAt: new Date(), paymentIntentId: refund.paymentIntentId, errorMessage: null };
+      if (event) await tx.paymentWebhookEvent.update({ where: { id: event.id }, data: completed });
+      else await tx.paymentWebhookEvent.create({ data: { ...key, tenantId: input.tenantId, payloadHash: input.payloadHash, ...completed } });
+      if (outcome.status === "succeeded") {
+        fundingAttempted = !current.fundedAt;
+        await this.fundVerifiedRefund(tx, current, outcome, "provider-webhook");
+      } else if (!event || !((current.status === outcome.status && current.externalStatus === outcome.externalStatus)
+        || (outcome.status === "accepted" && ["failed", "closed"].includes(current.status)))) {
+        // 老事件若已应用，或已由原退款的终态覆盖，只补事件收据。
+        await this.recordNonSuccessRefund(tx, current, outcome);
+      }
+      return true;
+    }, { isolationLevel: "ReadCommitted" });
     try {
-      await this.applyProviderRefundOutcome(input.tenantId, input.workspaceId, input.orderId, input.refund.id, input.outcome, "provider-webhook", input.refund);
-      await this.prisma.paymentWebhookEvent.updateMany({ where: { provider: eventProvider, eventId: input.eventId, status: "processing" }, data: { status: "processed", processedAt: new Date(), paymentIntentId: input.refund.paymentIntentId, errorMessage: null } });
+      await settle();
     } catch (error) {
-      await this.prisma.paymentWebhookEvent.updateMany({ where: { provider: eventProvider, eventId: input.eventId, status: "processing" }, data: { status: "failed", errorMessage: (error instanceof Error ? error.message : String(error)).slice(0, 500) } });
-      throw error;
+      if (!fundingAttempted || error instanceof ConflictException || error instanceof NotFoundException) throw error;
+      const foundCompleted = await settle(error instanceof Error ? error.message : "第三方退款成功，但内部资金入账待恢复");
+      if (!foundCompleted) throw error;
     }
   }
 

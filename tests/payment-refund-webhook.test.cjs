@@ -2,59 +2,141 @@ const assert = require("node:assert/strict");
 const { createCipheriv, createSign, generateKeyPairSync } = require("node:crypto");
 const { PaymentRuntimeService } = require("../apps/api/dist/modules/integrations/payment.runtime.service.js");
 
-const events = new Map();
-let applyCount = 0;
-const prisma = {
-  paymentWebhookEvent: {
-    findUnique: async ({ where }) => events.get(`${where.provider_eventId.provider}:${where.provider_eventId.eventId}`) ?? null,
-    create: async ({ data }) => {
-      const key = `${data.provider}:${data.eventId}`;
-      if (events.has(key)) {
-        const error = new Error("duplicate");
-        error.code = "P2002";
-        throw error;
-      }
-      const row = { id: key, ...data };
-      events.set(key, row);
-      return row;
-    },
-    updateMany: async ({ where, data }) => {
-      const row = [...events.values()].find((item) => item.id === where.id || (item.provider === where.provider && item.eventId === where.eventId));
-      if (!row || (where.status && row.status !== where.status)) return { count: 0 };
-      Object.assign(row, data);
-      return { count: 1 };
+function refundWebhookHarness(status) {
+  const refund = {
+    id: "refund-1", tenantId: "tenant-1", workspaceId: "workspace-1", orderId: "order-1",
+    paymentIntentId: "intent-1", provider: "stripe", method: "stripe", amount: 10, currency: "USD",
+    merchantRefundNo: "RR-1", reason: "测试退款", status: "pending", revision: 1, fundedAt: null,
+    createdAt: new Date(), updatedAt: new Date()
+  };
+  const receipt = { status: "succeeded", externalRefundId: "re_original", externalStatus: "SUCCESS" };
+  const input = {
+    tenantId: refund.tenantId, workspaceId: refund.workspaceId, orderId: refund.orderId, refund,
+    provider: refund.provider, eventId: "refund-event-1", payloadHash: "hash-1", outcome: receipt
+  };
+  let persisted = {
+    refund, funding: [], failures: [],
+    event: status ? { id: "event-row", tenantId: refund.tenantId, paymentIntentId: refund.paymentIntentId,
+      provider: "stripe_refund", eventId: input.eventId, payloadHash: input.payloadHash, status } : null
+  };
+  let tail = Promise.resolve();
+  let loseCommit = false;
+  let failFunding = false;
+  let applyCount = 0;
+  const prisma = {
+    $transaction(consume, options) {
+      assert.equal(options.isolationLevel, "ReadCommitted");
+      // 模拟同一原退款行的互斥与原子提交。每次请求仍创建独立运行实例。
+      const next = tail.then(async () => {
+        const draft = structuredClone(persisted);
+        let lockIndex = 0;
+        const patchRefund = (data) => {
+          for (const [key, value] of Object.entries(data)) {
+            if (value === undefined) continue;
+            draft.refund[key] = key === "revision" ? draft.refund.revision + value.increment : value;
+          }
+          return { ...draft.refund };
+        };
+        const result = await consume({
+          draft,
+          $queryRaw: async ({ sql }) => {
+            assert.match(sql, [/FROM Tenant/, /FROM rental_orders/, /FROM rental_payment_refunds/][lockIndex++]);
+            if (lockIndex === 3) return [{ ...draft.refund }];
+            return [{ id: lockIndex === 1 ? refund.tenantId : refund.orderId }];
+          },
+          paymentWebhookEvent: {
+            findUnique: async ({ where }) => {
+              assert.equal(lockIndex, 3);
+              assert.deepEqual(where.provider_eventId, { provider: "stripe_refund", eventId: input.eventId });
+              return draft.event;
+            },
+            create: async ({ data }) => {
+              assert.equal(draft.event, null);
+              draft.event = { id: "event-row", ...data };
+            },
+            update: async ({ where, data }) => {
+              assert.equal(where.id, draft.event.id);
+              Object.assign(draft.event, data);
+            }
+          },
+          rentalPaymentRefund: {
+            update: async ({ data }) => patchRefund(data),
+            updateMany: async ({ where, data }) => {
+              assert.equal(where.revision, draft.refund.revision);
+              patchRefund(data);
+              return { count: 1 };
+            },
+            findFirstOrThrow: async () => ({ ...draft.refund })
+          }
+        });
+        persisted = draft;
+        if (loseCommit) { loseCommit = false; throw new Error("commit response lost"); }
+        return result;
+      });
+      tail = next.catch(() => {});
+      return next;
     }
-  }
-};
+  };
+  const funding = {
+    recordEvent: async (tenantId, workspaceId, orderId, event, operator, tx) => {
+      assert.deepEqual([tenantId, workspaceId, orderId], [refund.tenantId, refund.workspaceId, refund.orderId]);
+      assert.equal(event.idempotencyKey, "payment-refund:refund-1");
+      assert.equal(event.verifiedExternalReceipt, true);
+      assert.equal(operator, "provider-webhook");
+      applyCount++;
+      tx.draft.funding.push(event.idempotencyKey);
+      if (failFunding) { failFunding = false; throw new Error("funding transaction rolled back"); }
+    }
+  };
+  const failureEvents = { refund: async (tx, scope, id) => tx.draft.failures.push({ scope, id }) };
+  return {
+    input,
+    send: (value = input) => new PaymentRuntimeService(prisma, {}, funding, {}, failureEvents).applyRefundWebhookOutcome(value),
+    persisted: () => persisted,
+    applyCount: () => applyCount,
+    loseCommitResponse: () => { loseCommit = true; },
+    failNextFunding: () => { failFunding = true; }
+  };
+}
 
 async function main() {
-  const service = new PaymentRuntimeService(prisma, {}, {});
-  service.applyProviderRefundOutcome = async () => { applyCount += 1; };
-  const input = {
-    tenantId: "tenant-1",
-    workspaceId: "workspace-1",
-    orderId: "order-1",
-    refund: { id: "refund-1", paymentIntentId: "intent-1" },
-    provider: "wechat_pay",
-    eventId: "refund-event-1",
-    payloadHash: "hash-1",
-    outcome: { status: "succeeded" }
-  };
+  const historical = refundWebhookHarness("processing");
+  await Promise.all([historical.send(), historical.send()]);
+  assert.equal(historical.applyCount(), 1, "重启后可恢复旧处理中事件，同一事件只入账一次");
+  assert.equal(historical.persisted().event.status, "processed");
+  assert.deepEqual(historical.persisted().funding, ["payment-refund:refund-1"]);
+  await assert.rejects(() => historical.send({ ...historical.input, payloadHash: "tampered" }), /绑定到其他租户或退款单/);
 
-  await service.applyRefundWebhookOutcome(input);
-  await service.applyRefundWebhookOutcome(input);
-  assert.equal(applyCount, 1, "同一退款回调事件只能处理一次");
-  assert.equal(events.get("wechat_pay_refund:refund-event-1").status, "processed");
+  const failed = refundWebhookHarness("failed");
+  await failed.send();
+  assert.equal(failed.persisted().event.status, "processed", "原失败事件仍可按原键恢复");
+  assert.equal(failed.applyCount(), 1);
 
-  await assert.rejects(
-    () => service.applyRefundWebhookOutcome({ ...input, payloadHash: "tampered" }),
-    /绑定到其他租户或退款单/
-  );
+  const committed = refundWebhookHarness();
+  committed.loseCommitResponse();
+  await committed.send();
+  await committed.send();
+  assert.equal(committed.persisted().event.status, "processed");
+  assert.ok(committed.persisted().refund.fundedAt);
+  assert.equal(committed.applyCount(), 1, "原提交应答丢失时复读已处理事件，不重新记账");
 
-  events.get("wechat_pay_refund:refund-event-1").status = "failed";
-  events.get("wechat_pay_refund:refund-event-1").payloadHash = "hash-1";
-  await service.applyRefundWebhookOutcome(input);
-  assert.equal(applyCount, 2, "失败事件允许后续通过查单/重试恢复");
+  const pending = refundWebhookHarness();
+  pending.failNextFunding();
+  await assert.rejects(() => pending.send(), /funding transaction rolled back/);
+  assert.equal(pending.persisted().event, null, "资金回滚时不能确认回调完成");
+  assert.deepEqual(pending.persisted().funding, []);
+  assert.equal(pending.persisted().refund.status, "funding_pending");
+  assert.equal(pending.persisted().refund.externalRefundId, "re_original", "保留 Stripe 原退款号供查单");
+  await pending.send();
+  assert.deepEqual(pending.persisted().funding, ["payment-refund:refund-1"]);
+
+  const declined = refundWebhookHarness("processing");
+  const declinedInput = { ...declined.input, outcome: { ...declined.input.outcome, status: "failed", externalStatus: "FAILED" } };
+  await Promise.all([declined.send(declinedInput), declined.send(declinedInput)]);
+  assert.equal(declined.persisted().refund.status, "failed");
+  assert.equal(declined.persisted().event.status, "processed");
+  assert.deepEqual(declined.persisted().failures, [{ scope: { tenantId: "tenant-1", workspaceId: "workspace-1" }, id: "refund-1" }]);
+  assert.deepEqual(declined.persisted().funding, []);
 
   const originalRefund = {
     id: "refund-1", tenantId: "tenant-1", workspaceId: "workspace-1", orderId: "order-1",
