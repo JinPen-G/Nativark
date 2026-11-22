@@ -45,6 +45,11 @@ export function packTicketsPackage(input: {
       const stat = lstatSync(path);
       if (!stat.isFile() || stat.size > CORE_ARCHIVE_LIMITS.fileBytes) throw new Error("工单声明文件不可读或超过包上限");
       bytes = readFileSync(path);
+      if (file === "package.json") {
+        const metadata = JSON.parse(Buffer.from(bytes).toString("utf8")) as { name?: unknown; version?: unknown } | null;
+        if (metadata?.name !== "@rental-os/example-tickets-core" || metadata.version !== manifest.version)
+          throw new Error("工单 npm 包名或版本与本次 Core 发行身份不一致，请从同一版本重新构建");
+      }
       if (file === "README.md") bytes = Buffer.from(pinCoreDocumentationLinks(Buffer.from(bytes).toString("utf8"),
         `${sourceDirectory}/README.md`, input.source, true));
     }

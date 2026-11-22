@@ -93,6 +93,8 @@ npm run pack:core -w @rental-os/example-tickets-core -- <Core仓库HTTPS地址> 
 
 独立发行目录可从Node专用 `@rental-os/example-tickets-core/package` 使用packTicketsPackage，显式提供自己的编译目录、Core/底座来源及固定公开接入README原文。公开手册内容仍通过旧参数名`platformTask`传入，保持已有程序调用兼容。它只读声明文件并返回标准包字节，调用者负责在该来源版本构建后写一个新文件；标准包格式、检查和安装仍复用公共出口，不做第二套解压/安装器。
 
+自 `0.1.2` 起，打包时核对 npm 包名及版本与生成清单的发行身份。遇到版本不一致，先同步 [package.json](package.json) 与 [Core 版本](src/contracts.ts)，再从同一固定来源重建并打包。沿用已登记的旧包作为升级起点，候选继续使用数据版本 `0.1.0` 和原迁移，原绑定与收据按当前权限回读。
+
 生成的CORE_GUIDE直接链接本包API、服务端/后台入口和README/LICENSE。公开接入手册和源码资料固定到各自来源提交，README保留本页锚点和代码示例；两份资料复用同一链接规则，Core作者维护原README即可。[资料生成](../core-contracts/src/guide.ts)
 
 ## HTTP 与 API 文档
