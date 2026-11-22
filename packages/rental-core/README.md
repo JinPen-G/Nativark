@@ -306,7 +306,7 @@ HTTP入口从 `/http-workspace-capabilities`、`/http-staff-payments` 导入；`
 | 宿主启动的原执行者 | 业务与存储接点 | 退出及恢复边界 |
 | --- | --- | --- |
 | `workers.allocation` | [配货](src/mysql-allocation.ts)、[事实/事件](src/allocation-storage.ts)与[当前作业权威](src/application-worker-authority.ts)，同一实例供 HTTP、AI 及自动扫描消费 | 停止扫描并等待原在途工作，原订单、配置开关与失败事件保持原事务边界 |
-| `workers.dueJobs` | [五项到期任务](src/mysql-due-jobs.ts)、[服务端口](src/due-job-ports.ts)及[标准参加者](src/application-participants.ts)，涵盖待确认订单、领取逾期、原通知、调价和支付到期 | 停止新 tick，等待空间枚举、同连接命名锁及已进入业务完整返回，unknown 沿原操作核对 |
+| `workers.dueJobs` | [五项到期任务](src/mysql-due-jobs.ts)、[服务端口](src/due-job-ports.ts)及[标准参加者](src/application-participants.ts)，涵盖待确认订单、领取逾期、原通知、调价和支付到期 | 停止新 tick，等待空间枚举、同连接命名锁及已进入业务完整返回。停机期间完成的准入查询不再启动后续批次或动作，unknown 沿原操作核对 |
 | `integrations.fileCleanup` | [集成生命周期](src/application-integrations.ts)、[文件应用](src/file-application-runtime.ts)与[清理权威](src/application-file-cleanup-authority.ts)，处理原过期上传、完成暂存及待删除对象 | 等待当前清理批次，删除失应答只观察原对象键与修订，AI 知识依赖沿显式选装参加者 |
 | `client.rateLimit` | [唯一限流实例](src/mysql-client-rate-limit.ts)，HTTP、客户认证及清理共用原配额表 | 等待当前清理，完整日窗口和原原子递增保留，退出后由宿主关闭同一数据库 |
 

@@ -5000,7 +5000,8 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
     recipient: string | undefined,
     force: boolean,
     rateReserved = false,
-    observeConfirmed?: (log: RentalNotificationSendLogV1) => void
+    observeConfirmed?: (log: RentalNotificationSendLogV1) => void,
+    dispatchSignal?: AbortSignal
   ): Promise<RentalNotificationSendLogV1> {
     const initial = await this.factStore.findNotificationDelivery(tenantId, id);
     if (!initial) throw new NotFoundException("通知发送记录不存在");
@@ -5036,6 +5037,7 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
     if (!versionedDispatch && this.hasAuthoritativeConfiguration()) {
       throw new ServiceUnavailableException("通知事实仓储缺少当前投递权威接点");
     }
+    dispatchSignal?.throwIfAborted();
     const claimed = versionedDispatch
       ? await this.factStore.claimNotificationDeliveryForDispatch(tenantId, id, now.toISOString(), leaseUntil.toISOString(), force)
       : await this.factStore.claimNotificationDelivery(tenantId, id, now.toISOString(), leaseUntil.toISOString(), force);
@@ -5064,10 +5066,14 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
     }
     // 认领/限频等待之后、运输调用紧前重新核对；拒绝不是供应商失败，不能
     // 落入下面的重试分支。短事务结束后才调用供应商，不把外部请求放在持锁事务内。
+    dispatchSignal?.throwIfAborted();
     if (versionedDispatch) {
       current = await this.factStore.beginNotificationDispatch(tenantId, id, current.observation);
       observeConfirmed?.(current.log);
     }
+    // 停机可能发生在 begin 提交与应答之间。此时保留原 uncertain，
+    // 不开始运输，也不把停机当作供应商失败排回队列。
+    dispatchSignal?.throwIfAborted();
     let sent: Awaited<ReturnType<RentalBusinessNotifications["sendNotificationSms"]>> | undefined;
     let providerAccepted = false;
     try {
@@ -5282,10 +5288,14 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
     return this.deliverNotification(tenantId, context, id, undefined, true, rateReserved);
   }
 
-  async retryDueNotifications(tenantId: string, context: BusinessContext, limit = 20) {
+  async retryDueNotifications(tenantId: string, context: BusinessContext, limit = 20, dispatchSignal?: AbortSignal) {
+    dispatchSignal?.throwIfAborted();
     const due = await this.factStore.listDueNotificationDeliveries(tenantId, new Date().toISOString(), limit);
     const results: RentalNotificationSendLogV1[] = [];
-    for (const row of due) results.push(await this.deliverNotification(tenantId, context, row.log.id, undefined, false, false));
+    for (const row of due) {
+      dispatchSignal?.throwIfAborted();
+      results.push(await this.deliverNotification(tenantId, context, row.log.id, undefined, false, false, undefined, dispatchSignal));
+    }
     return {
       attempted: results.length,
       sent: results.filter((row) => row.status === "sent").length,

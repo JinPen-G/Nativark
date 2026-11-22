@@ -66,6 +66,7 @@ export function rentalDueJobIntervalMs(env: NodeJS.ProcessEnv = process.env): nu
 export class RentalDueJobScheduler<TTransaction extends RentalDueJobTransaction = RentalDueJobTransaction> implements OnApplicationBootstrap, OnModuleDestroy {
   private timer?: ReturnType<typeof setInterval>;
   private running = false;
+  private notificationDispatchLifetime = new AbortController();
   private readonly logger = new Logger(RentalDueJobScheduler.name);
 
   /**
@@ -96,6 +97,7 @@ export class RentalDueJobScheduler<TTransaction extends RentalDueJobTransaction 
   }
 
   onApplicationBootstrap() {
+    if (this.notificationDispatchLifetime.signal.aborted) this.notificationDispatchLifetime = new AbortController();
     if (rentalDueJobsDisabled()) return;
     this.timer = setInterval(() => {
       void this.runTick().catch(() => this.logger.error("到期任务 tick 失败，请检查数据库连接"));
@@ -104,6 +106,7 @@ export class RentalDueJobScheduler<TTransaction extends RentalDueJobTransaction 
   }
 
   onModuleDestroy() {
+    this.notificationDispatchLifetime.abort();
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
   }
@@ -308,7 +311,8 @@ export class RentalDueJobScheduler<TTransaction extends RentalDueJobTransaction 
 
   /** 与 `POST notification-logs/retry-due` 同源。 */
   private async retryDueNotifications(tenantId: string) {
-    await this.business.retryDueNotifications(tenantId, (await this.context(tenantId)), RENTAL_DUE_JOB_BATCH_SIZE);
+    const signal = this.notificationDispatchLifetime.signal;
+    await this.business.retryDueNotifications(tenantId, (await this.context(tenantId)), RENTAL_DUE_JOB_BATCH_SIZE, signal);
     await Promise.all([this.business.persist(tenantId), this.core.persist(tenantId)]);
   }
 

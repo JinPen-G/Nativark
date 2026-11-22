@@ -136,6 +136,7 @@ class StandardRentalDueJobs<TTransaction extends RentalApplicationParticipantTra
       retryDueNotifications: async (...args) => {
         requireJob("retry_due_notifications", args[0]);
         await current();
+        this.assertRunningAfterAdmission();
         // 原实现只消费已保存的 queued/确定失败记录。认领、限频和 begin 各自走 dispatchFence；
         // begin 先提交不可重发的 uncertain，再运输；结果 observation 不重新要求新准入。
         return dependencies.business.retryDueNotifications(...args);
@@ -143,6 +144,7 @@ class StandardRentalDueJobs<TTransaction extends RentalApplicationParticipantTra
       runDuePriceAdjustments: async (...args) => {
         requireJob("run_due_price_adjustments", args[0]);
         await current();
+        this.assertRunningAfterAdmission();
         return dependencies.business.runDuePriceAdjustments(...args);
       },
       emitNotificationEvent: async (...args) => {
@@ -154,6 +156,7 @@ class StandardRentalDueJobs<TTransaction extends RentalApplicationParticipantTra
         }
         const orderId = original.id;
         await current(undefined, orderId);
+        this.assertRunningAfterAdmission();
         return eventContext.run(Object.freeze({ orderId }), () =>
           eventFence.run(() => dependencies.business.emitNotificationEvent(...args)));
       },
@@ -163,6 +166,7 @@ class StandardRentalDueJobs<TTransaction extends RentalApplicationParticipantTra
         const request = requireJob("expire_payment_intents", tenantId);
         if (request.workspaceId !== workspaceId) throw new Error("Rental 支付到期作业不能切换原经营空间");
         await current();
+        this.assertRunningAfterAdmission();
         return dependencies.payments.expireStalePaymentIntents(tenantId, workspaceId, take);
       },
     };
@@ -204,6 +208,11 @@ class StandardRentalDueJobs<TTransaction extends RentalApplicationParticipantTra
     await Promise.allSettled([...this.ticks, ...this.active]);
   }
 
+  private assertRunningAfterAdmission(): void {
+    // 等待准入期间可能已停机，进入下一动作前同步复验。
+    if (this.stopping) throw new Error("Rental 作业准入等待期间已停止，不能开始下一动作");
+  }
+
   override runTick(): Promise<void> {
     if (this.stopping) return Promise.resolve();
     const running = super.runTick();
@@ -223,6 +232,7 @@ class StandardRentalDueJobs<TTransaction extends RentalApplicationParticipantTra
         const consume = async () => {
           if (this.stopping) throw new Error("Rental 作业正在退出，本次执行尚未开始");
           await this.current();
+          this.assertRunningAfterAdmission();
           return registered.run(currentTenant, currentWorkspace);
         };
         // 通知短事务复核完整作业权威；payment 父锁只查 Tenant/Core，
