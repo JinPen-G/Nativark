@@ -3262,7 +3262,11 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
       id: row.id,
       tenantId: row.tenantId,
       orderNo: row.orderNo,
-      assignment: row.assignment ? row.assignment as unknown as RentalOrder["assignment"] : undefined,
+      // 旧所选Client的空值品牌错配会将未配货状态落成普通{}。
+      // 只还原这个确切空状态，非空状态仍由原revision/CAS核定。
+      assignment: row.assignment && !isDeepStrictEqual(row.assignment, {})
+        ? row.assignment as unknown as RentalOrder["assignment"]
+        : undefined,
       categoryCode: lower<RentalCategoryCode>(row.categoryCode),
       categoryVersionId: row.categoryVersionId ?? undefined,
       inspectionTemplateSnapshots: row.inspectionTemplateSnapshots === null ? undefined : row.inspectionTemplateSnapshots as unknown as RentalOrder["inspectionTemplateSnapshots"],
