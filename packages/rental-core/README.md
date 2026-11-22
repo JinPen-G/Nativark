@@ -286,6 +286,8 @@ HTTP入口从 `/http-workspace-capabilities`、`/http-staff-payments` 导入；`
 
 真实短信沿同一事实仓储认领原通知，核当前租户/Core/空间与原修订，再先提交 `delivery_uncertain`，确认后才调用供应商。结果按该次观察的原范围与修订 CAS 落库；提交失应答、结果写失败、重启或租约过期均只核原记录。HTTP 用 `dispatchCommittedNotification` 消费已确认的入队收据，后续撤权或查询失败时返回最后确认的原收据并提示核对，不把入队改成失败。订单附属通知不能遮盖已提交的订单结果，显式通知重试仍遵守原错误合同。原通知作业已由[标准参加者](src/application-participants.ts)登记，并在原认领、限频和派发事务复验当前作业权威。支付作业沿同一参加者先核父级准入，再由原支付事务锁订单并复核完整空间范围。[通知事实](src/mysql-business-facts.ts) · [业务消费](src/mysql-business-runtime.ts) · [HTTP入队结果](src/http-business.controller.ts)
 
+通知移除预检将原 `unknown`、`delivery_uncertain` 和未释放租约归入原结果未定阻碍，未知结果写回已释放租约时仍保留该阻碍。[移除预检](src/mysql-removal.ts)
+
 通知草稿的准备、保存和原结果读取仍由同一业务实例执行，发送是另一个授权动作。宿主通过 `/notification-draft` 的窄接点供给原维护读取器；`/notification-log-cache` 只接收核验过的原行与删除账，产生不可变且无正文的缓存，反序列化副本不会获得核验标记。`/notification-snapshot` 在原恢复写入时剥离草稿正文，普通发送记录保持原值；正文已删除时，原结果返回原删除收据与空正文，不能以缓存内容或空密文推断删除成功。[原维护读取器](../../apps/api/src/modules/ai-native/privacy/retention-notification-draft.ts) · [原缓存适配](../../apps/api/src/modules/rental-core/rental-notification-log-cache.ts)
 
 缓存观察的 `Source` 沿 `rentalNotificationLog.findFirst` 的租户、空间、原行 ID 和原键读取，删除账由原 `aiDataErasure.findUnique` 按稳定收据 ID 查询。这两个窄接点兼容独立组合与原 API 的生成客户端。涉及原通知草稿且缺少维护删除账时明确不可用。[原行合同](src/notification-log-cache.ts) · [删除账接点](src/notification-draft.ts)

@@ -28,6 +28,7 @@ export async function readRentalRemoval(reader: Pick<CoreHostSqlTransaction, "$q
   const knownValues: readonly unknown[] = [true, false, 0, 1, 0n, 1n];
   const present = (value: Existence) => value === true || value === 1 || value === 1n;
   try {
+    // 未知投递结果写回可能已释放租约，仍须保留原结果未定的移除阻碍。
     const rows = await reader.$queryRaw<RentalRemovalRow[]>(sql`
       SELECT
         EXISTS(SELECT 1 FROM rental_orders WHERE status NOT IN ('completed', 'cancelled', 'no_show') ${scope}) AS unfinished,
@@ -35,7 +36,7 @@ export async function readRentalRemoval(reader: Pick<CoreHostSqlTransaction, "$q
           OR EXISTS(SELECT 1 FROM rental_payment_intents WHERE status NOT IN ('paid', 'closed', 'failed') ${scope})
           OR EXISTS(SELECT 1 FROM rental_payment_refunds WHERE status NOT IN ('succeeded', 'failed', 'closed') ${scope})
           OR EXISTS(SELECT 1 FROM payment_webhook_events WHERE status <> 'processed' ${scope})
-          OR EXISTS(SELECT 1 FROM rental_notification_logs WHERE (status = 'unknown' OR leaseUntil IS NOT NULL) ${scope})) AS unresolved,
+          OR EXISTS(SELECT 1 FROM rental_notification_logs WHERE (status IN ('unknown', 'delivery_uncertain') OR leaseUntil IS NOT NULL) ${scope})) AS unresolved,
         (EXISTS(SELECT 1 FROM rental_payment_intents WHERE 1 = 1 ${scope})
           OR EXISTS(SELECT 1 FROM rental_payment_refunds WHERE 1 = 1 ${scope})
           OR EXISTS(SELECT 1 FROM payment_webhook_events WHERE 1 = 1 ${scope})) AS callbacks,
