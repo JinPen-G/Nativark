@@ -290,7 +290,7 @@ async function pendingFileDeleteBoundaries() {
     }, [authority]);
     application.deleteObject = runtime.deleteObject;
     application.objectRequest = runtime.objectRequest;
-    return { application, state };
+    return { application, state, authority };
   }
 
   async function createPublicUpload() {
@@ -461,6 +461,62 @@ async function pendingFileDeleteBoundaries() {
       async () => { observed.session.updatedAt = new Date(observed.session.updatedAt.getTime() + 1); },
       () => Error('原上传观察版本已变化')), /原上传观察版本已变化/u);
     console.log('file upload receipt/observation: original expiry and Date versions are rechecked before return');
+
+    const revokedReceipt = await createPublicUpload();
+    const revokedSnapshot = structuredClone({ asset: revokedReceipt.state.asset,
+      session: sessions.get(revokedReceipt.grant.sessionId) });
+    let receiptConfigurationReads = 0;
+    revokedReceipt.state.onConfig = async () => {
+      if (++receiptConfigurationReads === 2) revokedReceipt.state.coreEnabled = false;
+    };
+    await assert.rejects(revokedReceipt.application.createUploadSession(tenantId, revokedReceipt.request), /Current Core is stopped/u);
+    assert.equal(receiptConfigurationReads, 2);
+    assert.deepEqual({ asset: revokedReceipt.state.asset,
+      session: sessions.get(revokedReceipt.grant.sessionId) }, revokedSnapshot);
+    assert.deepEqual(revokedReceipt.state.requests, []);
+
+    const delegatedReceipt = await createPublicUpload();
+    delegatedReceipt.authority.readReceipt = async (context, readOriginal) => {
+      const receipt = await readOriginal();
+      delegatedReceipt.state.coreEnabled = false;
+      return receipt;
+    };
+    await assert.rejects(delegatedReceipt.application.readUploadReceipt(tenantId, delegatedReceipt.grant.sessionId), /Current Core is stopped/u);
+    assert.deepEqual(delegatedReceipt.state.requests, []);
+    delegatedReceipt.state.coreEnabled = true;
+    sessions.get(delegatedReceipt.grant.sessionId).status = 'freeze_pending';
+    const frozenKey = delegatedReceipt.state.asset.storageKey;
+    delegatedReceipt.state.onConfig = async () => { throw Error('原冻结回执只读取既有结果'); };
+    const frozenReceipt = await delegatedReceipt.application.readUploadReceipt(tenantId, delegatedReceipt.grant.sessionId);
+    assert.equal(frozenReceipt.status, 'freeze_pending');
+    assert.equal(frozenReceipt.sessionId, delegatedReceipt.grant.sessionId);
+    assert.equal(frozenReceipt.fileAssetId, delegatedReceipt.grant.fileAssetId);
+    assert.equal(frozenReceipt.expiresAt, delegatedReceipt.grant.expiresAt);
+    assert.equal(frozenReceipt.uploadUrl, undefined);
+    assert.equal(delegatedReceipt.state.asset.storageKey, frozenKey);
+    assert.deepEqual(delegatedReceipt.state.requests, []);
+
+    const expiringReceipt = await createPublicUpload();
+    let readReceiptFinished = false;
+    expiringReceipt.authority.readReceipt = async (context, readOriginal) => {
+      const receipt = await readOriginal();
+      readReceiptFinished = true;
+      return receipt;
+    };
+    const assertUpload = expiringReceipt.authority.assertUpload;
+    const originalNow = Date.now;
+    expiringReceipt.authority.assertUpload = async (...args) => {
+      await assertUpload(...args);
+      if (readReceiptFinished) Date.now = () => Date.parse(expiringReceipt.grant.expiresAt) + 1;
+    };
+    try {
+      await assert.rejects(expiringReceipt.application.readUploadReceipt(tenantId, expiringReceipt.grant.sessionId), /原上传会话在授权复验期间已变化或过期/u);
+      assert.equal(sessions.get(expiringReceipt.grant.sessionId).expiresAt.toISOString(), expiringReceipt.grant.expiresAt);
+      assert.deepEqual(expiringReceipt.state.requests, []);
+    } finally {
+      Date.now = originalNow;
+    }
+    console.log('public upload receipt: revocation after final reads, delegated receipt, original expiry and frozen observation passed');
   } finally {
     prisma.$transaction = saved.transaction; runtime.deleteObject = saved.deleteObject; runtime.objectRequest = saved.objectRequest;
     fileConfig = saved.fileConfig; beforeConfig = saved.beforeConfig; duringAudit = saved.duringAudit;

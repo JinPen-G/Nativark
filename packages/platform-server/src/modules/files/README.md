@@ -72,6 +72,8 @@ await files.downloadUrl(tenantId, fileAssetId, owner);
 
 `readOriginalFileUploadReceipt` 保留原会话、文件、配置指纹和有效期。仅仍有效的 `pending_upload` 可以取得原暂存键的 PUT，返回前再核原业务引用、原会话、原文件及当前配置，包括Date版本和会话有效期在授权等待期间的变化。已完成、过期、失败或 `freeze_pending` 返回原回执，续签不会延长有效期或另建目标。租户共享客户资料与空间业务的区别由 Rental 原参加者判断，公共框架没有 Rental 场景枚举。
 
+公共文件应用在会话、文件、配置及专用 `readReceipt` 全部读取完成后，对带 PUT 引用的结果调用同一业务权威的 `assertUpload`。这次复验覆盖当前身份、Core、对象及业务范围，随后核对回执的原有效期。纯元数据及冻结结果按原回执路径返回。
+
 `FileStorageCleanup` 没有计时器或租户发现。原 Nest 宿主仍持有唯一计时器，Rental 兼容应用发现原租户集合并逐租户委托三个清理方法。[兼容应用](../../../../rental-core/src/file-application-runtime.ts)没有启动钩子或另一套定时器。原完成暂存清理在发送 DELETE 前记录 unknown，失应答及提交结果未知时只 HEAD 原键，保持完成文件与证据不变。专用保留场景由原宿主明确传入，缺少租户的调用在查询前拒绝。
 
 Rental 的清理事务通过 `createOriginalFileCleanupTransactions` 共用 Session → File 锁、完整日期快照及调用内收据。主体/Tenant/Core 授权和配置锁在文件锁前由原参加者取得。只有收到原占用事务的提交确认后，公共流程才登记本次 DELETE 或 HEAD 收据；提交失应答保留原状态，由后续调用观察原键。派发前的短事务与运输后的结果事务沿同一收据复核，worker 的存储位置指纹继续由所属参加者核定。

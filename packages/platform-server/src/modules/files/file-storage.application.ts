@@ -164,6 +164,7 @@ export class FileStorageApplication<Owner extends FileStorageOwner, Transaction 
   private async receipt(context: FileUploadAuthorityContext<Owner>, authority: FileStorageAuthority<Owner, Transaction>, rows: UploadRows) {
     const { tenantId, owner } = context;
     const { asset, session } = rows;
+    const expiresAt = session.expiresAt.getTime();
     if (session.provider === "local_mock" && !this.participants.allowSimulation)
       throw new ServiceUnavailableException("生产环境禁止重放模拟文件上传，请先配置并验证文件存储平台");
     await authority.assertAsset({ tenantId, asset, owner, operation: "receipt" });
@@ -175,7 +176,14 @@ export class FileStorageApplication<Owner extends FileStorageOwner, Transaction 
       readAsset: () => this.participants.store.fileAsset.findFirst({ where: { id: asset.id, tenantId } }),
       signPendingPut: (config, key, mimeType, expiresAt) => this.presign(config, "PUT", key, mimeType, expiresAt)
     });
-    return authority.readReceipt ? authority.readReceipt({ ...context, asset, session }, original) : original();
+    const receipt = await (authority.readReceipt ? authority.readReceipt({ ...context, asset, session }, original) : original());
+    if (receipt.uploadUrl) {
+      // 回执的文件与配置读取均已结束；PUT引用仍须同一权威的当前新上传许可。
+      await authority.assertUpload(context);
+      if (Date.parse(receipt.expiresAt) !== expiresAt || expiresAt <= Date.now())
+        throw new ConflictException("原上传会话在授权复验期间已变化或过期");
+    }
+    return receipt;
   }
 
   async readUploadReceipt(tenantId: string, sessionId: string, owner?: Owner): Promise<FileUploadSessionSummary> {

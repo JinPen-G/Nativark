@@ -1,4 +1,5 @@
 /** 原上传的创建重放、完成恢复及服务端字节派发。权限、领域证据和事务由所属参加者供给。
+ * PUT引用的末次授权由实际回执调用方在所有读取完成后核定。
  * 始终使用原会话、原键和原冻结目标，失应答解释继续由原提交边界决定。 */
 import { ConflictException, ServiceUnavailableException } from "@nestjs/common";
 import { createHash } from "node:crypto";
