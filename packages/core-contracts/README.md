@@ -21,7 +21,7 @@ npm run export:platform -- --repo . --repository https://github.com/JinPen-G/Nat
 
 ## 五步快速接入
 
-准备 Node.js 22 LTS、npm 锁定依赖和独立 MySQL 开发库，环境配置见[根 README](../../README.md#本地运行)。默认无Core的[API宿主](../../apps/platform-api/README.md)和[后台宿主](../../apps/platform-admin/README.md)是公共框架；[工单Core](../example-tickets-core/README.md)提供业务链的开发样例。完整安装与真实运行验收仍在继续，具体命令的前置按各宿主说明准备。
+准备 Node.js 22 LTS、npm 锁定依赖和独立 MySQL 开发库，环境配置见[根 README](../../README.md#本地运行)。默认无Core的[API宿主](../../apps/platform-api/README.md)和[后台宿主](../../apps/platform-admin/README.md)提供公共框架。先[取得固定工单示例](#取得固定工单示例)，再按下面五步开发，运行前置沿各宿主说明准备。
 
 1. **从最小Core确定业务和标识。** 以工单包为参考，在自己的Core中实现实体、状态、校验和存储。维护[业务合同](../example-tickets-core/src/contracts.ts)、[清单](../example-tickets-core/src/manifest.ts)及[独立迁移](../example-tickets-core/migrations/001-tickets.sql)，更换Core ID、名称、版本和业务字段。Core自行选择租户或自己的容器范围；会员、库存、金额等领域规则由业务决定。清单使用本文的唯一schema，固定声明来源、兼容范围、权限、入口和数据版本。
 2. **提供同源服务与API。** 参考[服务](../example-tickets-core/src/service.ts)、[HTTP合同](../example-tickets-core/src/http.ts)、[服务端贡献](../example-tickets-core/src/server.ts)和[Nest适配](../example-tickets-core/src/nest.ts)。复用公共当前身份、Core授权与成员范围，业务再校验角色、对象及提交条件；OpenAPI从同一请求/响应schema生成。Core可以省略AI贡献，普通业务仍按原权限工作。
@@ -46,7 +46,8 @@ node packages/core-contracts/dist/capabilities.js --query CorePage --json
 ```text
 请在这个仓库开发一个业务Core。
 先读 packages/core-contracts/README.md 的五步快速接入，
-按需要查看 packages/example-tickets-core 和两个工单宿主的真实入口。
+若工单目录尚未取得，先按同手册“取得固定工单示例”准备。
+再按需要查看 packages/example-tickets-core 和两个工单宿主的真实入口。
 Core ID、业务范围、字段、动作与角色按我提供的业务要求定义。
 复用正式平台合同、身份、存储协调、后台外壳、表单、列表和请求工具。
 页面路由与主按钮用正式贡献声明，只修改Core及明确的宿主装配配置。
@@ -62,6 +63,30 @@ AI工具可选，不提供时不要扫描API或数据库自行补工具。
 
 查功能从下方能力索引开始；查字段和注册规则沿正式源码；查宿主、数据或界面分别看对应模块README。后续章节提供包检查、服务端/HTTP/页面贡献、独立更新和GitHub发现的详细参考。
 
+## 取得固定工单示例
+
+零 Core 底座归档中的公共手册引用完整源码的工单示例。在底座根目录执行下面的 Git 命令，取得固定公开版本到相邻目录，原路径及许可证随示例保留。该提交的工单版本为 `0.1.2`。[固定工单原稿](https://github.com/JinPen-G/Nativark/tree/2e6e1714eae13e556a75b63d71070a147e8b1932/packages/example-tickets-core)
+
+```sh
+git clone --no-checkout https://github.com/JinPen-G/Nativark.git ../nativark-reference
+git -C ../nativark-reference sparse-checkout init --cone
+git -C ../nativark-reference sparse-checkout set packages/core-contracts packages/example-tickets-core apps/example-tickets-api apps/example-tickets-admin
+git -C ../nativark-reference checkout --detach 2e6e1714eae13e556a75b63d71070a147e8b1932
+git -C ../nativark-reference rev-parse HEAD
+```
+
+在尚未包含示例目录的独立底座中，将以下三份目录放到根目录下的同名路径。开发自己的 Core 时，从这些入口替换业务标识与实现。
+
+| 取得的目录 | 底座根下的放置路径 | 用途 |
+| --- | --- | --- |
+| `../nativark-reference/packages/example-tickets-core` | `packages/example-tickets-core` | 领域、合同、迁移、后台贡献与标准包 |
+| `../nativark-reference/apps/example-tickets-api` | `apps/example-tickets-api` | 服务端装配、部署锁与授权 |
+| `../nativark-reference/apps/example-tickets-admin` | `apps/example-tickets-admin` | 同包后台装配 |
+
+运行源码示例时，在根 `workspaces` 的原公共目录列表中追加这三个路径，按同版包声明核对公共依赖，并在这个独立宿主准备根锁文件及开发依赖。获得安装授权后，可运行 `npm install --package-lock-only --ignore-scripts` 更新该组合的锁，再用 `npm ci --ignore-scripts` 安装锁定材料。公共 Client、Core 标准包及部署锁按[工单服务端步骤](../../apps/example-tickets-api/README.md#单工单的五步)准备，后台消费同一包。[工单后台步骤](../../apps/example-tickets-admin/README.md#本地使用)
+
+随包指南使用所选底座来源的 Git 原文，取得和构建前置见[指南生成](#生成随包指南与归档)。示例来源、自己 Core 的发行来源和底座来源分别固定，构建及打包按对应 README 办理。
+
 ## 找到平台已有的功能
 
 开发 Agent 可以先按任务查询，再打开结果给出的源码和接入资料。在已准备依赖的源码根目录构建本包后运行以下命令，PowerShell 与 Bash 使用相同参数。
@@ -76,7 +101,7 @@ node packages/core-contracts/dist/capabilities.js --owner example-tickets --json
 
 每项结果包含名称、类型、归属、版本、源码路径和行号、正式导入或 HTTP/页面入口，以及可用的文档链接和原声明元数据。公共导出还给出直接导入计数和前5个源码位置，可以从已有消费者了解用法。统计支持具名和默认导入、namespace 的确定成员，以及字面量 `import()` / `require()` 的解构和成员读取。同一 namespace 绑定重复读取同一导出只计一次。动态模块名、动态成员名及整模块传递保持未展开，`directImportsStatus=not-indexed` 的零计数表示缺少可定位的本仓声明。查询默认返回20项，使用 `--limit`（最多100项）和 `--offset` 分页，`nextOffset` 给出下一页位置。`--owner` 按输出中的准确归属筛选，`--kind` 支持 `module`、`export`、`ui`、`page`、`api`、`extension`。`--repo` 可显式指定本次源码根目录。
 
-索引从 workspace 包出口、TypeScript 导出与源码说明、Controller 路由、后台 `APP_ROUTES`、Core 清单与页面贡献和 UIArc 来源清单读取。workspace 支持 `packages/*` 等一层通配目录，以及底座源码发行中的 `packages/core-contracts` 等显式目录。正式出口按实际条件和构建目录映射到源码，`rootDir` / `outDir` 使用原 TypeScript 配置及其本仓继承配置；配置不可读取时保留未解析出口，不用历史生成物补成源码。兼容转接参与符号解析，直接导入统计读取已发现 workspace 的 `src`。局部别名沿导入文件所属的原 TypeScript 配置解析。Controller 与旧后台路由只从本次所选 workspace 取得，零 Core 底座和所选 Core 的来源分别保留。源码新增或迁移后再次查询即可反映变化。新增 Core 使用自己的正式包出口、清单、页面和 API 贡献登记能力，宿主可通过 `@rental-os/core-contracts/development` 的 `describeCoreDevelopmentCapabilities` 取得同源目录，查询合同由该出口提供。[能力目录实现](src/development.ts)
+索引从查询根包与 workspace 的正式出口、TypeScript 导出与源码说明、Controller 路由、后台 `APP_ROUTES`、Core 清单与页面贡献和 UIArc 来源清单读取。查询根的 `package.json` 有 `exports`、`main` 或 `types` 时，会登记根包及当前源码，归属为 `.`，来源路径为 `package.json` 和 `src/...` 等根相对路径。独立 Core 可省略 `workspaces` 或使用空数组，显式选择根及重复 workspace 只登记一次。workspace 支持 `packages/*` 等一层通配目录，以及底座源码发行中的 `packages/core-contracts` 等显式目录。正式出口按实际条件和构建目录映射到源码，`rootDir` / `outDir` 使用原 TypeScript 配置及其本仓继承配置；配置不可读取时保留未解析出口，不用历史生成物补成源码。兼容转接参与符号解析，直接导入统计读取已发现根包和 workspace 的 `src`。局部别名沿导入文件所属的原 TypeScript 配置解析。Controller 与旧后台路由只从本次所选 workspace 取得，零 Core 底座和所选 Core 的来源分别保留。源码新增或迁移后再次查询即可反映变化。新增 Core 使用自己的正式包出口、清单、页面和 API 贡献登记能力，宿主可通过 `@rental-os/core-contracts/development` 的 `describeCoreDevelopmentCapabilities` 取得同源目录，查询合同由该出口提供。[能力目录实现](src/development.ts)
 
 Core 条目读取正式清单声明中的静态标识、版本、范围和依赖，页面与 HTTP 条目附同一清单出处及包版本。构建时注入的来源、动态权限和未解析字段保留在 `unresolvedMetadata`。`httpContract.schemas` 定位 Controller 使用的合同，`openapiSource.schemas` 定位正式操作表的请求、参数和响应说明。公共操作表按同源 `/api` 路径及 `Platform.*` schema 名连接资料，公共与 Rental 各使用自己的正式 schema 聚合。
 
@@ -108,7 +133,7 @@ node packages/core-contracts/dist/capabilities.js --id "api:POST:/api/cores/exam
 
 结果从 [TicketsController.assign](../example-tickets-core/src/nest.ts) 定位 [TICKETS_HTTP.assign](../example-tickets-core/src/http.ts) 的 params、body 和 response；body 保留 `AssignTicketSchema.omit({ ticketId: true })` 原表达式，并链接 [AssignTicketSchema](../example-tickets-core/src/contracts.ts)。同一合同供 [OpenAPI 生成器](../example-tickets-core/src/openapi.ts) 使用，已登记贡献中的 Request/Response 引用可按 `details.openapi.schemas` 打开。业务调用继续沿 [TicketsService.assign](../example-tickets-core/src/service.ts) → [TicketRepository](../example-tickets-core/src/service.ts) → [MySQL 私有适配](../example-tickets-core/src/mysql.ts)，范围和原操作说明见 [工单模块](../example-tickets-core/README.md)。
 
-输出固定 `audience=development`，`source.snapshot=working-tree` 和当前 Git 修订说明本次读取位置。Git 检出目录同时给出 `source.workingTreeChanged`，表示扫描时是否有未提交修改；当前修订不是这些修改的固定版本。`coverage` 列出实际扫描的来源，并从 Git 跟踪的 workspace 与独立客户端包清单标明未检出的 `notPresent`；已检出但不属于当前扫描范围的独立包标为 `partial`。静态解析缺口通过 `issues` 表达。源码声明、宿主登记和运行验证分别核定，API 的 `registration` 标记源码或明确宿主登记，UIArc 条目标记为保留源码。用途/约束优先读取准确的源码注释和模块 README，缺少说明的条目保留准确入口供后续整改。
+输出固定 `audience=development` 和 `source.snapshot=working-tree`。查询根自身具有 `.git` 且原生 Git 工作树根与查询根一致时，提供当前修订和 `source.workingTreeChanged`。后者表示扫描时是否有未提交修改，当前修订只标识已提交部分。归档或独立子目录省略这两个字段，Git 根不一致则拒绝读取。`coverage` 列出实际扫描的来源，并从 Git 跟踪的 workspace 与独立客户端包清单标明未检出的 `notPresent`；已检出但不属于当前扫描范围的独立包标为 `partial`。静态解析缺口通过 `issues` 表达。源码声明、宿主登记和运行验证分别核定，API 的 `registration` 标记源码或明确宿主登记，UIArc 条目标记为保留源码。用途/约束优先读取准确的源码注释和模块 README，缺少说明的条目保留准确入口供后续整改。
 
 扫描只解析仓库内的声明资料，动态函数和自定义表达式保持待核对。已使用的 `Object.freeze` 通过语法读取参数，扫描过程调用原注册函数的次数为零。普通查询退出0，`--check` 遇到 `issues`、`partial` 或 `notPresent` 退出1，用法/读取失败退出2。`--json` 的标准输出为一份 JSON。源码索引的TypeScript工具是开发依赖，使用包含开发依赖的源码环境运行。
 
@@ -310,6 +335,10 @@ Rental 已提供自己的完整业务 schema、关系贡献和 MySQL 数据计�
 
 ## 分别更新底座或一个 Core
 
+底座与 Core 的关系类似操作系统与应用。Core 基于底座的正式 API 和公开能力扩展，底座与 Core 分别维护、发布和更新版本。
+
+底座默认保持既有公开 API 兼容。废弃或移除旧 API 时，发行说明须写清兼容范围、废弃说明和迁移方法，兼容承诺以声明范围为准。当前装配按 Core 的 `compatibility.platform`、`compatibility.contract`、`runtime.node` 和必需能力版本预检，区间采用 `minInclusive` / `maxExclusive`。[组合预检](src/compatibility.ts) · [版本范围](src/version.ts)
+
 先构建本包，再用实际发行元数据和迁移账快照执行只读预检。
 
 底座源码发行版本取[根包](../../package.json)的 `version`；Core 实现版本取自己的正式清单，Rental 的来源是[发行身份](../rental-core/src/core-identity.ts)。源码或产物变化时使用新发行版本，合同与数据版本按各自变化维护。只更新底座时复用原 Core 包、提交和摘要；只更新一个 Core 时保留原底座与其他 Core 的固定引用，避免把未变更模块按新仓库提交重新打包。
@@ -355,10 +384,16 @@ Node 出口 `@rental-os/core-contracts/platform-data-package` 提供 `readPlatfo
 
 ## 生成随包指南与归档
 
-`CORE_GUIDE.md` 从本README的五步快速入口和Agent模板生成。传入Core清单与含 `repository`/`commit` 的底座来源JSON，底座提交必须已在当前本地Git中存在并包含这份公开手册；来源不含凭据。
+`CORE_GUIDE.md` 从本README的五步快速入口和Agent模板生成。传入Core清单与含 `repository` / `commit` 的底座来源JSON。CLI在自身 `packages/core-contracts/dist` 所在的源码根执行 `git show`，该根须有来源JSON指定的提交及这份公开手册。使用底座归档时，先取得对应公开 Git 检出，并在该检出准备本包的锁定开发依赖和构建产物。[固定原文读取](src/generate-guide.ts)
+
+在该 Git 检出根执行以下命令，将 `<完整SHA>` 替换为底座来源JSON中的同一提交。清单和来源JSON使用绝对路径。
 
 ```sh
-node packages/core-contracts/dist/generate-guide.js <Core清单JSON> <底座来源JSON>
+git rev-parse --show-toplevel
+git cat-file -e "<完整SHA>^{commit}"
+git cat-file -e "<完整SHA>:packages/core-contracts/README.md"
+npm run build -w @rental-os/core-contracts
+node packages/core-contracts/dist/generate-guide.js <Core清单JSON绝对路径> <底座来源JSON绝对路径>
 ```
 
 命令只向标准输出写Markdown，不覆盖包内已有指南。程序内可从正式出口调用 `renderCoreGuide(manifest, guideDocument, platformSource)`；公开手册及源码引用固定到指定提交，服务端、后台、API及已声明可选贡献链接到包内入口。README/LICENSE也可从生成指南直接打开。缺少原文锚点会拒绝生成，指南保留对应版本的支持状态。页面接入见[公共后台包](../platform-admin/README.md)和本文页面声明章节。
@@ -457,10 +492,15 @@ node packages/core-contracts/dist/github-release.js repository owner/repo --rele
 
 [公共出口](src/index.ts) → [清单](src/manifest.ts) / [版本](src/version.ts) / [组合预检](src/compatibility.ts) / [对象引用](src/reference.ts) / [OpenAPI贡献](src/openapi.ts) / [授权与生命周期](src/lifecycle.ts) / [服务端注册](src/server.ts) / [页面声明](src/admin.ts) / [升级预检](src/update.ts) / [指南生成](src/guide.ts)。[包检查命令](src/check.ts) → [目录/文件检查](src/package.ts) → 同一清单与 OpenAPI schema；[升级命令](src/plan-update.ts) → 升级输入schema与纯预检；[指南命令](src/generate-guide.ts)读取固定Git提交的本公开手册。[打包](src/pack.ts)/[安装准备命令](src/prepare-install.ts)及[GitHub命令](src/github-release.ts) → [Topic发现](src/github-discovery.ts)/[固定Release获取](src/github.ts) → [文件准备](src/install.ts) → [归档](src/archive.ts)。发现与发行共用[只读传输](src/github-http.ts)，仅走Node出口；这些入口不加载Core业务代码。
 
+零 Core 底座源码包提供本包的 `build`、`lint`、`check` 和 `capabilities` 命令。准备同一锁文件的开发依赖后，使用以下入口进行类型、能力来源及标准包检查。
+
 ```sh
-npm test -w @rental-os/core-contracts
+npm run lint -w @rental-os/core-contracts
+npm run build -w @rental-os/core-contracts
+node packages/core-contracts/dist/capabilities.js --repo . --query CorePage --json
+node packages/core-contracts/dist/check.js <已解包Core目录> --host <同版宿主版本JSON> --json
 ```
 
-[单一验证入口](test/core-contracts.test.cjs)使用本树源码进行类型检查和编译，运行必要合同用例后清理本树 `output/.tmp/core-contracts`。它验证空/单/双 Core 声明、独立版本、越界/链接路径、迁移摘要、缺文件与 CLI；这些是静态及离线行为证据，不是租户、数据库或浏览器验收。
+需要运行原合同用例时，从固定完整源码取得[原合同测试](https://github.com/JinPen-G/Nativark/blob/2e6e1714eae13e556a75b63d71070a147e8b1932/packages/core-contracts/test/core-contracts.test.cjs)，使用该版本的本包源码、根 `tsconfig.base.json`、锁文件及开发依赖，并在该源码检出根运行 `npm test -w @rental-os/core-contracts`。原入口先类型检查和编译，再运行空/单/双 Core、独立版本、越界/链接路径、迁移摘要、缺文件及 CLI 用例，退出清理本树 `output/.tmp/core-contracts`。类型、静态包检查、离线合同、租户、数据库与浏览器分别验收。
 
 公开使用说明以本手册及各源码模块README为入口。维护者的内部需求、任务、记录与接续在本地单独维护，标准包和指南生成均不依赖它们。

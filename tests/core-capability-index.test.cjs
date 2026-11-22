@@ -1,4 +1,4 @@
-/** 标准底座显式 workspace 列表的索引回归，仅在内存替换根包配置并只读本仓源码。 */
+/** 根包与显式 workspace 的索引回归，在内存替换声明资料并只读本仓源码。 */
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -40,6 +40,83 @@ test("标准底座显式 workspace 能定位公共能力及独立 API 消费者"
     assert.ok(capability.details.directImports.some(item => item.path === "apps/platform-api/src/core-assembly.ts"));
   } finally {
     fs.readFileSync = originalRead;
+  }
+});
+
+test("独立根包与workspace去重，来源和缺失出口保持真实边界", () => {
+  const root = path.resolve(__dirname, "../packages/core-contracts");
+  const packageFile = path.join(root, "package.json");
+  const nestedPackageFile = path.join(root, "test/package.json");
+  const sourceFile = path.join(root, "src/version.ts");
+  const consumerFile = path.join(root, "src/reference.ts");
+  const configFile = path.join(root, "tsconfig.json");
+  const emittedFile = path.join(root, "dist/version.js");
+  const gitMarker = path.join(root, ".git");
+  const originalRead = fs.readFileSync, originalLstat = fs.lstatSync;
+  const fileStat = originalLstat(sourceFile);
+  let workspaces, missingExport = false, unavailableConfig, foreignGit = false;
+  fs.lstatSync = (file, ...args) => {
+    const resolved = typeof file === "string" ? path.resolve(file) : undefined;
+    if (resolved === nestedPackageFile || resolved === emittedFile) return fileStat;
+    if (resolved === gitMarker) return foreignGit ? fileStat : undefined;
+    if (resolved === configFile && unavailableConfig === "linked") return { isSymbolicLink: () => true };
+    return originalLstat(file, ...args);
+  };
+  fs.readFileSync = (file, options) => {
+    if (typeof file !== "string") return originalRead(file, options);
+    const resolved = path.resolve(file);
+    let text;
+    if (resolved === packageFile) text = JSON.stringify({ name: "@fixture/root", version: "1.2.3",
+      exports: { ".": missingExport ? "./dist/version.js" : "./src/version.ts" },
+      dependencies: { zod: "3.25.76" }, ...(workspaces === undefined ? {} : { workspaces }) });
+    else if (resolved === nestedPackageFile) text = JSON.stringify({ name: "@fixture/nested", version: "1.2.3",
+      exports: { ".": "../src/reference.ts" } });
+    else if (resolved === sourceFile) text = "throw new Error('不能执行Core模块');\n"
+      + "export const ROOT_VALUE = 7;\nexport function createRootValue() { throw new Error('不能执行Core函数'); }\n"
+      + "export { z } from 'zod';\n";
+    else if (resolved === consumerFile) text = "import { ROOT_VALUE, createRootValue } from '@fixture/root';\n"
+      + "export const REFERENCE_VALUE = ROOT_VALUE;\ncreateRootValue();\n";
+    else if (resolved === configFile && unavailableConfig === "unreadable") {
+      throw Object.assign(new Error("配置读取被拒绝"), { code: "EACCES" });
+    } else if (resolved === emittedFile) text = "throw new Error('不能执行或索引历史生成物');";
+    else return originalRead(file, options);
+    const encoding = typeof options === "string" ? options : options?.encoding;
+    return encoding ? Buffer.from(text).toString(encoding) : Buffer.from(text);
+  };
+  try {
+    for (workspaces of [undefined, [], [".", "./.", "test", "./test", "test"]]) {
+      const index = buildRepositoryCapabilityIndex(root);
+      const rootModule = index.capabilities.find(item => item.id === "module:.");
+      assert.ok(rootModule);
+      assert.equal(index.capabilities.filter(item => item.id === "module:.").length, 1);
+      assert.equal(rootModule.sources[0].path, "package.json");
+      assert.ok(rootModule.documentation.some(item => item.path === "README.md"));
+      assert.equal(index.source.revision, undefined);
+      assert.equal(index.source.workingTreeChanged, undefined);
+      assert.deepEqual(index.coverage.filter(item => item.source === "package.json"),
+        [{ source: "package.json", count: 1, state: "indexed" }]);
+      const capability = index.capabilities.find(item => item.id === "export:@fixture/root:ROOT_VALUE");
+      assert.ok(capability);
+      assert.equal(capability.sources[0].path, "src/version.ts");
+      assert.ok(capability.details.directImports.some(item => item.path === "src/reference.ts"));
+      const external = index.capabilities.find(item => item.id === "export:@fixture/root:z");
+      assert.equal(external.details.reexport.dependency.source.path, "package.json");
+      assert.equal(index.capabilities.filter(item => item.id === "module:test").length, workspaces?.length ? 1 : 0);
+    }
+    workspaces = undefined;
+    missingExport = true;
+    for (unavailableConfig of [undefined, "linked", "unreadable"]) {
+      const index = buildRepositoryCapabilityIndex(root);
+      assert.ok(index.capabilities.some(item => item.id === "module:."));
+      assert.ok(index.issues.some(issue => issue.code === "export_source" && issue.path === "package.json"));
+      assert.ok(index.coverage.some(item => item.source === "package.json" && item.state === "partial"));
+      assert.equal(index.capabilities.some(item => item.entry?.module === "@fixture/root"), false);
+    }
+    foreignGit = true;
+    assert.throws(() => buildRepositoryCapabilityIndex(root), /Git工作树根与源码查询目录不一致/u);
+  } finally {
+    fs.readFileSync = originalRead;
+    fs.lstatSync = originalLstat;
   }
 });
 

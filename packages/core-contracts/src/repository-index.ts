@@ -1,9 +1,10 @@
 /**
  * 将正式包出口、API/页面声明和组件来源组合成开发索引，提供单一可发现入口。
- * 每次读取当前检出源码，保存固定Git来源和未解析项；运行可用性由真实宿主另行提供。
+ * 独立根包与所选 workspace 共用出口解析，Git 来源只取本次查询根，保留未解析项。
+ * 运行可用性由真实宿主另行提供。
  */
 import { execFileSync } from "node:child_process";
-import { lstatSync, readdirSync } from "node:fs";
+import { lstatSync, readdirSync, realpathSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import ts from "typescript";
 import { DevelopmentCapabilityIndexSchema, type DevelopmentCapability, type DevelopmentCapabilityIndex,
@@ -16,6 +17,11 @@ import { RepositorySource, UNRESOLVED, isRepositorySourcePath, nodeDocumentation
 
 interface PublicEntry { owner: string; version: string; module: string; file: string; visibility: "public" | "host"; ui?: boolean }
 interface PackageInfo { directory: string; name: string; version: string; entries: PublicEntry[]; dependencies: Record<string, string> }
+
+function packageOwnsSource(root: string, directory: string, file: string): boolean {
+  if (directory === ".") return isRepositorySourcePath(root, file);
+  return repositoryPath(root, file).startsWith(directory + "/");
+}
 
 function exportTargets(value: unknown): string[] {
   if (typeof value === "string") return [value];
@@ -76,14 +82,14 @@ function packageSource(root: string, directory: string, target: string): string 
 }
 
 function sourceDocuments(root: string, directory: string): DevelopmentSourceReference[] {
-  let current = directory;
-  while (current !== ".") {
+  let current = directory || ".";
+  do {
     const documents = ["README.md", "AGENTS.md"]
       .filter(file => lstatSync(resolve(root, current, file), { throwIfNoEntry: false })?.isFile())
-      .map(file => ({ path: `${current}/${file}` }));
+      .map(file => ({ path: repositoryPath(root, resolve(root, current, file)) }));
     if (documents.length) return documents;
     current = dirname(current);
-  }
+  } while (current !== ".");
   return [];
 }
 
@@ -209,8 +215,59 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
   const paths: Record<string, string[]> = {};
   const hasGit = Boolean(lstatSync(join(root, ".git"), { throwIfNoEntry: false }));
   const addIssue = (code: string, path: string, message: string) => issues.push({ code, path, message });
+  if (hasGit) {
+    const gitRoot = execFileSync("git", ["rev-parse", "--show-toplevel"],
+      { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    if (realpathSync(gitRoot) !== realpathSync(root)) throw new Error("Git工作树根与源码查询目录不一致");
+  }
+  const registerPackage = (packageDirectory: string, manifest: Record<string, unknown>) => {
+    if (packages.some(info => info.directory === packageDirectory)) return;
+    const metadataFile = repositoryPath(root, resolve(root, packageDirectory, "package.json"));
+    const previousIssues = issues.length;
+    if (typeof manifest.name !== "string" || typeof manifest.version !== "string") {
+      addIssue("package_metadata", metadataFile, "包缺少名称或版本");
+      return;
+    }
+    const dependencyList = manifest.dependencies && typeof manifest.dependencies === "object"
+      ? manifest.dependencies as Record<string, string> : {};
+    const peerDependencies = manifest.peerDependencies && typeof manifest.peerDependencies === "object"
+      ? manifest.peerDependencies as Record<string, string> : {};
+    const optionalDependencies = manifest.optionalDependencies && typeof manifest.optionalDependencies === "object"
+      ? manifest.optionalDependencies as Record<string, string> : {};
+    const info: PackageInfo = { directory: packageDirectory, name: manifest.name, version: manifest.version, entries: [],
+      dependencies: { ...peerDependencies, ...dependencyList, ...optionalDependencies } };
+    const exports = typeof manifest.exports === "string" || Array.isArray(manifest.exports) ? { ".": manifest.exports }
+      : manifest.exports && typeof manifest.exports === "object"
+        ? Object.keys(manifest.exports).some(key => key.startsWith(".")) ? manifest.exports as Record<string, unknown> : { ".": manifest.exports }
+      : manifest.main || manifest.types ? { ".": { types: manifest.types, default: manifest.main } } : {};
+    for (const [subpath, conditions] of Object.entries(exports)) {
+      const targets = exportTargets(conditions);
+      const module = info.name + (subpath === "." ? "" : subpath.slice(1));
+      const file = targets.map(target => packageSource(root, packageDirectory, target)).find(Boolean);
+      if (file) paths[module] = [file];
+      // 样式和兼容源码通配出口不作为单个 TypeScript 模块解析。
+      // 原源码转接由同一正式UI出口覆盖，不将兼容别名登记为另一项能力。
+      if (subpath.startsWith("./source/") || subpath.includes("*") || targets.length && targets.every(target => target.endsWith(".css"))) continue;
+      if (!file) {
+        addIssue("export_source", metadataFile, `未找到 ${subpath} 对应的当前源码入口`);
+        continue;
+      }
+      info.entries.push({ owner: packageDirectory, version: info.version,
+        module, file, visibility: "public",
+        ui: info.name === "@rental-os/platform-admin" && subpath === "./ui" });
+    }
+    packages.push(info);
+    capabilities.push({ id: `module:${packageDirectory}`, name: info.name, kind: "module", owner: packageDirectory,
+      version: info.version, description: typeof manifest.description === "string" && manifest.description ? manifest.description : undefined,
+      sources: [{ path: metadataFile }, ...info.entries.map(item => ({ path: repositoryPath(root, item.file) }))],
+      documentation: sourceDocuments(root, packageDirectory),
+      details: { publicImports: info.entries.map(item => item.module), dependencies: dependencyList } });
+    if (packageDirectory === ".") coverage.push({ source: metadataFile, count: 1,
+      state: issues.length > previousIssues ? "partial" : "indexed" });
+  };
   const workspaces = Array.isArray(rootPackage.workspaces) ? rootPackage.workspaces : [];
   const workspacePattern = /^[^*\\]+(?:\/\*)?$/u;
+  let rootSelected = false;
   for (const workspace of workspaces) {
     if (typeof workspace !== "string" || !workspacePattern.test(workspace)) {
       addIssue("workspace_pattern", "package.json", "当前源码索引支持一层 workspace 通配或显式目录");
@@ -223,52 +280,21 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
       coverage.push({ source: directory, count: 0, state: "not_present" });
       continue;
     }
+    if (selected !== "*" && resolve(root, directory) === root) {
+      rootSelected = true;
+      continue;
+    }
     for (const entry of readdirSync(resolve(root, parent), { withFileTypes: true })) {
       if (!entry.isDirectory() || entry.isSymbolicLink() || selected !== "*" && entry.name !== selected) continue;
       const packageDirectory = repositoryPath(root, resolve(root, parent, entry.name));
       if (packages.some(info => info.directory === packageDirectory)) continue;
-      if (!lstatSync(resolve(root, packageDirectory, "package.json"), { throwIfNoEntry: false })?.isFile()) continue;
-      const manifest = readRepositoryJson(root, `${packageDirectory}/package.json`);
-      if (typeof manifest.name !== "string" || typeof manifest.version !== "string") {
-        addIssue("package_metadata", `${packageDirectory}/package.json`, "包缺少名称或版本");
-        continue;
-      }
-      const dependencyList = manifest.dependencies && typeof manifest.dependencies === "object"
-        ? manifest.dependencies as Record<string, string> : {};
-      const peerDependencies = manifest.peerDependencies && typeof manifest.peerDependencies === "object"
-        ? manifest.peerDependencies as Record<string, string> : {};
-      const optionalDependencies = manifest.optionalDependencies && typeof manifest.optionalDependencies === "object"
-        ? manifest.optionalDependencies as Record<string, string> : {};
-      const info: PackageInfo = { directory: packageDirectory, name: manifest.name, version: manifest.version, entries: [],
-        dependencies: { ...peerDependencies, ...dependencyList, ...optionalDependencies } };
-      const exports = typeof manifest.exports === "string" || Array.isArray(manifest.exports) ? { ".": manifest.exports }
-        : manifest.exports && typeof manifest.exports === "object"
-          ? Object.keys(manifest.exports).some(key => key.startsWith(".")) ? manifest.exports as Record<string, unknown> : { ".": manifest.exports }
-        : manifest.main || manifest.types ? { ".": { types: manifest.types, default: manifest.main } } : {};
-      for (const [subpath, conditions] of Object.entries(exports)) {
-        const targets = exportTargets(conditions);
-        const module = info.name + (subpath === "." ? "" : subpath.slice(1));
-        const file = targets.map(target => packageSource(root, packageDirectory, target)).find(Boolean);
-        if (file) paths[module] = [file];
-        // 样式和兼容源码通配出口不作为单个 TypeScript 模块解析。
-        // 原源码转接由同一正式UI出口覆盖，不将兼容别名登记为另一项能力。
-        if (subpath.startsWith("./source/") || subpath.includes("*") || targets.length && targets.every(target => target.endsWith(".css"))) continue;
-        if (!file) {
-          addIssue("export_source", `${packageDirectory}/package.json`, `未找到 ${subpath} 对应的当前源码入口`);
-          continue;
-        }
-        info.entries.push({ owner: packageDirectory, version: info.version,
-          module, file, visibility: "public",
-          ui: info.name === "@rental-os/platform-admin" && subpath === "./ui" });
-      }
-      packages.push(info);
-      capabilities.push({ id: `module:${packageDirectory}`, name: info.name, kind: "module", owner: packageDirectory,
-        version: info.version, description: typeof manifest.description === "string" && manifest.description ? manifest.description : undefined,
-        sources: [{ path: `${packageDirectory}/package.json` }, ...info.entries.map(item => ({ path: repositoryPath(root, item.file) }))],
-        documentation: sourceDocuments(root, packageDirectory),
-        details: { publicImports: info.entries.map(item => item.module), dependencies: dependencyList } });
+      const metadataFile = repositoryPath(root, resolve(root, packageDirectory, "package.json"));
+      if (!lstatSync(resolve(root, metadataFile), { throwIfNoEntry: false })?.isFile()) continue;
+      registerPackage(packageDirectory, readRepositoryJson(root, metadataFile));
     }
   }
+  // 根包最后登记，嵌套 workspace 仍优先持有自己的源码，同一路径只登记一次。
+  if (rootSelected || rootPackage.exports !== undefined || rootPackage.main || rootPackage.types) registerPackage(".", rootPackage);
   if (hasGit) {
     // 独立客户端不一定属于npm workspace，稀疏检出时也须明确它们的未读范围。
     const packagePatterns = new Set(["clients/*", ...workspaces.filter((workspace): workspace is string =>
@@ -293,7 +319,7 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
   if (adminPackage && lstatSync(uiFile, { throwIfNoEntry: false })?.isFile()) entries.push({ owner: "apps/admin", version: adminPackage.version,
     module: "@/components/ui", file: uiFile, visibility: "host", ui: true });
   const controllers = packages.flatMap(info =>
-    repositoryFiles(root, `${info.directory}/src`, file => file.endsWith(".controller.ts")
+    repositoryFiles(root, repositoryPath(root, resolve(root, info.directory, "src")), file => file.endsWith(".controller.ts")
       || /[/\\](?:nest|http)\.ts$/u.test(file) || file.endsWith("-http.ts")));
   const apiModules = resolve(root, "apps/api/src/modules");
   const moduleDirectories = packages.some(info => info.directory === "apps/api") && isRepositorySourcePath(root, apiModules) && lstatSync(apiModules, { throwIfNoEntry: false })?.isDirectory()
@@ -308,14 +334,14 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
   paths["@/registry/*"] = [resolve(root, "packages/ui-arc/vendor/registry/*")];
   paths["@/lib/motion-tokens"] = [resolve(root, "packages/ui-arc/vendor/lib/motion-tokens.ts")];
   const consumers = packages.flatMap(info =>
-    repositoryFiles(root, `${info.directory}/src`, file => /\.tsx?$/u.test(file) && !file.endsWith(".d.ts")));
+    repositoryFiles(root, repositoryPath(root, resolve(root, info.directory, "src")), file => /\.tsx?$/u.test(file) && !file.endsWith(".d.ts")));
   const source = new RepositorySource(root, [...new Set([...entries.map(entry => entry.file), ...controllers, ...extraSources, ...consumers])], paths);
   for (const diagnostic of source.program.getSyntacticDiagnostics()) {
     if (diagnostic.file) addIssue("source_syntax", repositoryPath(root, diagnostic.file.fileName), ts.flattenDiagnosticMessageText(diagnostic.messageText, " "));
   }
   const corePackages = new Map<string, { id: string; version: string; directory: string; reference: DevelopmentSourceReference }>();
   for (const file of source.program.getSourceFiles()) {
-    const packageInfo = packages.find(info => repositoryPath(root, file.fileName).startsWith(info.directory + "/"));
+    const packageInfo = packages.find(info => packageOwnsSource(root, info.directory, file.fileName));
     if (!packageInfo || file.isDeclarationFile) continue;
     const visit = (node: ts.Node) => {
       if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "parse"
@@ -391,12 +417,12 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
           return targets.map(target => target.replace("*", matched));
         }) : [];
       const asset = candidates.find(file => isRepositorySourcePath(root, file) && lstatSync(file, { throwIfNoEntry: false })?.isFile());
-      const declaringPackage = declaration && packages.find(info => repositoryPath(root, declaration.getSourceFile().fileName).startsWith(info.directory + "/"));
+      const declaringPackage = declaration && packages.find(info => packageOwnsSource(root, info.directory, declaration.getSourceFile().fileName));
       const dependencyName = moduleName?.startsWith("@") ? moduleName.split("/").slice(0, 2).join("/") : moduleName?.split("/")[0];
       const externalDependency = dependencyName && declaringPackage?.dependencies[dependencyName]
         && !packages.some(info => info.name === dependencyName) ? {
           name: dependencyName, versionRange: declaringPackage.dependencies[dependencyName],
-          source: { path: `${declaringPackage.directory}/package.json` }
+          source: { path: repositoryPath(root, resolve(root, declaringPackage.directory, "package.json")) }
         } : undefined;
       if (!resolvedDeclaration && !asset && !externalDependency)
         addIssue("export_symbol", repositoryPath(root, entry.file), `未解析导出 ${symbol.name} 的本仓声明`);
@@ -458,7 +484,7 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
         const symbol = source.checker.getSymbolAtLocation(node), declaration = symbol && source.target(symbol).valueDeclaration;
         if (declaration && ts.isVariableDeclaration(declaration) && declaration.initializer
           && ts.isVariableDeclarationList(declaration.parent) && declaration.parent.flags & ts.NodeFlags.Const
-          && repositoryPath(root, declaration.getSourceFile().fileName).startsWith(entry.owner + "/")) {
+          && packageOwnsSource(root, entry.owner, declaration.getSourceFile().fileName)) {
           if (source.unresolvedProperties(node).some(message => message.startsWith("post-write:")))
             return key ? undefined : { expression: node, via: [declaration] };
           const found = locate(declaration.initializer, key, chain);
@@ -475,7 +501,7 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
         const symbol = source.checker.getSymbolAtLocation(node.expression), declaration = symbol && source.target(symbol).valueDeclaration;
         const callable = declaration && ts.isVariableDeclaration(declaration) && declaration.initializer ? unwrap(declaration.initializer) : declaration;
         if (!callable || !(ts.isFunctionDeclaration(callable) || ts.isArrowFunction(callable)) || !callable.body
-          || !repositoryPath(root, callable.getSourceFile().fileName).startsWith(entry.owner + "/")
+          || !packageOwnsSource(root, entry.owner, callable.getSourceFile().fileName)
           || callable.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.AsyncKeyword)
           || ts.isFunctionDeclaration(callable) && callable.asteriskToken || node.arguments.some(ts.isSpreadElement)) return unresolved;
         const body = callable.body;
@@ -739,7 +765,7 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
               for (const prefix of prefixes) for (const suffix of suffixes) {
                 const path = "/" + ["api", prefix, suffix].filter(Boolean).join("/").replace(/\/+/gu, "/").replace(/:([A-Za-z0-9_]+)/gu, "{$1}");
                 const api = apiDocumentation.get(`${method} ${path}`);
-                const packageInfo = packages.find(info => repositoryPath(root, file).startsWith(info.directory + "/"));
+                const packageInfo = packages.find(info => packageOwnsSource(root, info.directory, file));
                 const core = packageInfo && corePackages.get(packageInfo.directory);
                 const owner = core?.id ?? packageInfo?.directory ?? repositoryPath(root, dirname(file));
                 const id = `api:${method}:${path}`;
