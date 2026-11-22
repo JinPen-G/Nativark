@@ -11,7 +11,7 @@ import type { DevelopmentSourceReference } from "./development";
 
 export const UNRESOLVED = Symbol("unresolved-static-value");
 type StaticValue = string | number | boolean | null | StaticValue[] | { [key: string]: StaticValue };
-type ConstantOwner = { declaration: ts.VariableDeclaration; members: string[] | undefined };
+type ConstantOwner = { declaration: ts.VariableDeclaration; members: (string | undefined)[] | undefined };
 
 function unwrapExpression(node: ts.Expression): ts.Expression {
   while (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node)
@@ -75,7 +75,7 @@ export class RepositorySource {
   readonly program: ts.Program;
   readonly checker: ts.TypeChecker;
   private readonly objectWrites = new WeakMap<object, { keys: Set<string>; unknown: boolean }>();
-  private mutationIndex?: Map<ts.VariableDeclaration, { node: ts.Node; members: string[] | undefined }[]>;
+  private mutationIndex?: Map<ts.VariableDeclaration, { node: ts.Node; members: (string | undefined)[] | undefined }[]>;
 
   constructor(readonly root: string, files: string[], paths: Record<string, string[]>) {
     const readPermissions = new Map<string, boolean>();
@@ -131,17 +131,17 @@ export class RepositorySource {
     return symbol.flags & ts.SymbolFlags.Alias ? this.checker.getAliasedSymbol(symbol) : symbol;
   }
 
-  /** 常量与静态成员的共同归属，只定位声明和别名，不执行表达式。 */
+  /** 常量与成员的共同归属，未知索引保留所在层级，后续确定字段继续定位。 */
   constantOwner(expression: ts.Expression, seen = new Set<ts.Node>()): ConstantOwner | undefined {
     let node = unwrapExpression(expression);
     if (seen.has(node) || seen.size > 80) return;
     const chain = new Set(seen).add(node);
-    let members: string[] | undefined = [];
+    let members: (string | undefined)[] | undefined = [];
     while (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
       const key = ts.isPropertyAccessExpression(node) ? node.name : unwrapExpression(node.argumentExpression);
       if (ts.isIdentifier(key) && ts.isPropertyAccessExpression(node) || ts.isStringLiteralLike(key) || ts.isNumericLiteral(key)) {
         members?.unshift(key.text);
-      } else members = undefined;
+      } else members?.unshift(undefined);
       node = unwrapExpression(node.expression);
     }
     if (!ts.isIdentifier(node)) return;
@@ -168,10 +168,34 @@ export class RepositorySource {
     return { declaration, members };
   }
 
+  /** 已知静态子值用于识别标量引用，动态选择和未知字段保留来源缺口。 */
+  isPrimitiveMember(reference: ConstantOwner): boolean {
+    if (!reference.members?.length) return false;
+    const initial = this.value(reference.declaration.initializer);
+    if (initial === UNRESOLVED) return false;
+    let values: StaticValue[] = [initial];
+    for (const member of reference.members) {
+      const selected: StaticValue[] = [];
+      for (const value of values) {
+        if (value === null || typeof value !== "object") return false;
+        const writes = this.objectWrites.get(value);
+        if (member === undefined && writes?.unknown) return false;
+        const keys = member === undefined ? writes?.keys ?? Object.keys(value) : [member];
+        for (const key of keys) {
+          if (!Object.hasOwn(value, key)) return false;
+          selected.push((value as Record<string, StaticValue>)[key]);
+        }
+      }
+      if (!selected.length) return false;
+      values = selected;
+    }
+    return values.every(value => value === null || typeof value !== "object");
+  }
+
   /** const/成员/解构的写入只定位并失效，不重放赋值或未知调用。 */
   private objectMutations(usage: ts.Identifier, selectedMembers: readonly string[] = []): ts.Node[] {
     if (!this.mutationIndex) {
-      const index = new Map<ts.VariableDeclaration, { node: ts.Node; members: string[] | undefined }[]>();
+      const index = new Map<ts.VariableDeclaration, { node: ts.Node; members: (string | undefined)[] | undefined }[]>();
       // 先登记索引避免静态参数读取递归重建，后续发现的写入继续收集。
       this.mutationIndex = index;
       const add = (node: ts.Node, expression: ts.Expression, referenceOnly = false) => {
@@ -182,6 +206,7 @@ export class RepositorySource {
         }
         const seen = new Set<ts.VariableDeclaration>();
         while (reference && !seen.has(reference.declaration)) {
+          if (referenceOnly && this.isPrimitiveMember(reference)) return;
           seen.add(reference.declaration);
           index.set(reference.declaration, [...(index.get(reference.declaration) ?? []), { node, members: reference.members }]);
           const initial = reference.declaration.initializer && unwrapExpression(reference.declaration.initializer);
@@ -219,11 +244,11 @@ export class RepositorySource {
     while (statement.parent && !ts.isSourceFile(statement.parent)) statement = statement.parent;
     const finalName = ts.isVariableDeclaration(usage.parent) && usage.parent.name === usage;
     const cutoff = finalName || usage.getSourceFile() !== reference.declaration.getSourceFile() ? Infinity : statement.end;
-    // 完整对象、动态成员及重叠路径继续失效；确定成员不受其他成员调用的影响。
+    // 未知成员按所在层级比较重叠路径，确定的不重叠字段继续读取。
     return (this.mutationIndex.get(reference.declaration) ?? []).filter(mutation => {
       const written = mutation.members;
       if (members?.length && written && !written.slice(0, Math.min(written.length, members.length))
-        .every((key, index) => key === members[index])) return false;
+        .every((key, index) => key === undefined || members[index] === undefined || key === members[index])) return false;
       const node = mutation.node;
       return deferred(usage) || deferred(node) || node.getSourceFile() !== reference.declaration.getSourceFile() || node.getStart() < cutoff;
     }).map(mutation => mutation.node);

@@ -26,7 +26,7 @@ function unwrap(node: ts.Expression): ts.Expression {
 type SchemaValue = null | boolean | number | string | SchemaValue[] | { [key: string]: SchemaValue };
 type ExpressionBinding = { expression: ts.Expression; bindings: Map<ts.Symbol, ExpressionBinding>; seen: Set<ts.Node>; mutations?: ObjectMutation[] };
 type ObjectWrites = { keys: Set<string>; unknown: boolean; unsafe: boolean; frozen: boolean };
-type ObjectMutation = { node: ts.Node; members?: string[]; sources?: ts.Expression[] };
+type ObjectMutation = { node: ts.Node; members?: (string | undefined)[]; sources?: ts.Expression[] };
 const objectMutationIndexes = new WeakMap<RepositorySource, Map<ts.VariableDeclaration, ObjectMutation[]>>();
 
 /** 只解释纯声明语法。未知展开会遮蔽前面的属性，不能保留可能被覆盖的旧字段。 */
@@ -374,7 +374,7 @@ class StaticSchemaReader {
     const value = this.read(binding.expression, pointer, binding.bindings, binding.seen, selectiveMembers);
     if (!binding.mutations?.length) return value;
     if (value === UNRESOLVED || value === null || typeof value !== "object" || Array.isArray(value)
-      || binding.mutations.some(mutation => !mutation.members?.length)) {
+      || binding.mutations.some(mutation => !mutation.members?.length || mutation.members.includes(undefined))) {
       this.clearFields(pointer);
       return this.unresolved(pointer, "dynamic-object-write");
     }
@@ -382,7 +382,7 @@ class StaticSchemaReader {
       this.compositions.add(mutation.node);
       let object = value as Record<string, SchemaValue>;
       let location = pointer;
-      for (const [index, key] of mutation.members!.entries()) {
+      for (const [index, key] of (mutation.members as string[]).entries()) {
         location += "/" + key.replaceAll("~", "~0").replaceAll("/", "~1");
         const child = object[key];
         // 数组成员失效时移除该数组字段，避免缺项数组被当成完整静态值。
@@ -445,6 +445,7 @@ class StaticSchemaReader {
         }
         const seen = new Set<ts.VariableDeclaration>();
         while (reference && !seen.has(reference.declaration)) {
+          if (referenceOnly && this.source.isPrimitiveMember(reference)) return;
           seen.add(reference.declaration);
           const entries = index!.get(reference.declaration) ?? [];
           entries.push({ node, members: reference.members, ...(sources ? { sources } : {}) });
@@ -497,7 +498,7 @@ class StaticSchemaReader {
     const current = (index.get(target) ?? []).filter(mutation => {
       const members = mutation.members;
       const overlaps = !selectedMembers.length || !members || members.slice(0, Math.min(members.length, selectedMembers.length))
-        .every((key, index) => key === selectedMembers[index]);
+        .every((key, index) => key === undefined || key === selectedMembers[index]);
       return overlaps && (deferred(usage) || deferred(mutation.node)
         || mutation.node.getSourceFile() !== target.getSourceFile() || mutation.node.getStart() < cutoff);
     });
