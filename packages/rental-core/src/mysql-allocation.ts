@@ -459,7 +459,9 @@ export class RentalAllocationService<TTransaction extends RentalAllocationTransa
           )!.itemGroupId = modelId;
           movedModels.add(modelId);
         }
-        const protectManual = (await this.core.getBusinessSettings(tenantId)).allocation?.protectManual ?? true;
+        // 履约准入已持有空间锁；独立配置刷新会等待本事务自己持有的锁。
+        const settings = await this.core.readVersionedBusinessSettings(tenantId, tx);
+        const protectManual = settings.settings.allocation?.protectManual ?? true;
         const add = (assetId?: string) => {
           const locked = preserveLock;
           order.allocations.push({

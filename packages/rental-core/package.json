@@ -1,6 +1,6 @@
 {
   "name": "@rental-os/rental-core",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "license": "MIT",
   "description": "Rental业务Core的独立领域合同与运行时，原组合通过兼容出口消费",
