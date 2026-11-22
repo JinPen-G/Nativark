@@ -116,7 +116,18 @@ export function WorkspaceOperationReportPage() {
   }
   return (
     <CorePage
-        toolsPlacement="view"
+        actions={[
+          {
+            id: "export-csv", kind: "command", label: t("导出 CSV"),
+            icon: <DownloadOutlined />, presentation: { control: "button" },
+            pending: exporting, execute: exportCsv,
+          },
+          {
+            id: "refresh", kind: "command", label: t("刷新经营报表"),
+            icon: <ReloadOutlined />, presentation: { control: "button", iconOnly: true },
+            pending: report.isFetching, execute: () => report.refetch(),
+          },
+        ]}
         view={
           <ListFilterBar>
             <ListFilterItem label={t("租期范围")} active={Boolean(range?.some(Boolean))} width="dateRange" priority>
@@ -166,14 +177,6 @@ export function WorkspaceOperationReportPage() {
           title: t("口径说明"),
           description: t("订单量为非草稿订单数；租赁收入只含租金；优惠金额为方案优惠与券优惠合计；应收金额为调账后应收，税为价内税——「不含税应收」与「其中税额」是它的拆分，不要相加；异常费用取订单费用行中的逾期、损坏与取消。仅统计当前经营空间，不做跨空间汇总；导出与本页使用同一份数据与筛选。")
         }}
-        tools={
-          <Space>
-            <Button icon={<DownloadOutlined />} loading={exporting} onClick={() => void exportCsv()}>
-              {t("导出 CSV")}
-            </Button>
-            <Button icon={<ReloadOutlined />} loading={report.isFetching} aria-label={t("刷新经营报表")} onClick={() => void report.refetch()} />
-          </Space>
-        }
     >
       <QueryState loading={report.isLoading} error={report.error} onRetry={() => report.refetch({ throwOnError: true })}>
         <TableRefreshProvider onRefresh={() => report.refetch()} busy={report.isFetching}>{data && <ReportBody data={data} />}</TableRefreshProvider>

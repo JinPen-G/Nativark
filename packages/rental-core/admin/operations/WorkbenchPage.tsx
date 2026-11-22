@@ -2,7 +2,7 @@
  * local exploration cannot settle money, alter inventory, or execute a todo. */
 import { useRef, useState } from "react";
 import { resolveCorePageLocation, type CorePageLocation } from "@rental-os/core-contracts";
-import { CorePage, useCorePageHost } from "@rental-os/platform-admin/core";
+import { CorePage, useCorePageHost, type CoreAdminPageAction } from "@rental-os/platform-admin/core";
 import { rentalOrderLocation } from "../orders/pages";
 import { rentalWorkOrderLocation } from "../work-orders/pages";
 import { RENTAL_CATALOG_CORE_ID, RENTAL_CATALOG_PAGES } from "../catalog/pages";
@@ -85,16 +85,22 @@ function WorkbenchContent({ scope }: { scope: string }) {
   };
   const refresh = () => Promise.all([showMetrics ? report.refetch() : Promise.resolve(), todos.refetch()]);
 
-  return <CorePage description={data ? t("更新于 {time}", { time: new Date(data.generatedAt).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" }) }) : undefined}
-      actions={canReconcilePayments ? [{
-        id: "reconcile-payments", kind: "command", label: t("核对支付与退款"),
+  const pageActions: CoreAdminPageAction<Record<string, unknown>>[] = [{
+        id: "refresh", kind: "command", label: t("刷新经营概览"),
+        icon: <AnimatedIcon name="refresh" busy={report.isFetching || todos.isFetching} />,
+        presentation: { control: "button", shape: "circle", iconOnly: true },
+        pending: report.isFetching || todos.isFetching, execute: refresh,
+      }];
+  if (canReconcilePayments) pageActions.push({
+        id: "reconcile-payments", kind: "command", label: t("核对支付与退款"), emphasis: "primary",
         permissions: [{ resource: "finance", action: "reconcile" }], pending: reconcilePayments.isPending,
         execute: async () => {
           const result = await reconcilePayments.mutateAsync();
           if (result.failed > 0 || result.pending > 0) throw new Error("Reconciliation requires attention");
         },
-      }] : []}
-      toolsPlacement="context" tools={<Button shape="circle" aria-label={t("刷新经营概览")} icon={<AnimatedIcon name="refresh" busy={report.isFetching || todos.isFetching} />} loading={report.isFetching || todos.isFetching} onClick={() => void refresh()} />}
+      });
+  return <CorePage description={data ? t("更新于 {time}", { time: new Date(data.generatedAt).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" }) }) : undefined}
+      actions={pageActions}
       view={showMetrics ? <div className={styles.periodRow}><Segmented aria-label={t("统计期间")} value={period} onChange={value => setPeriod(value as OverviewPeriod)} options={Object.entries(overviewPeriodLabels).map(([value, label]) => ({ value, label: t(label) }))} />
         <span className={styles.periodCaption} role="status">{report.isPlaceholderData ? t("正在更新所选期间") : t("订单按起租时间统计，待办与库存为当前状态")}</span></div> : undefined}>
     <div className={styles.page}>

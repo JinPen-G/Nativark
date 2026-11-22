@@ -580,17 +580,8 @@ function PersonalMembershipWorkspace({ scope }: { scope: string }) {
             }
             actions={[
               {
-                id: "create-personal-member",
-                kind: "open",
-                emphasis: "primary",
-                label: t("新增个人会员"),
-                disabled: !canManage,
-                open: openCreate,
-              },
-              {
                 id: "registration-settings",
                 kind: "open",
-                slot: "tools",
                 label: t("注册设置"),
                 disabled: !canManage || settings.isPending || settings.isError,
                 open: () => {
@@ -601,10 +592,17 @@ function PersonalMembershipWorkspace({ scope }: { scope: string }) {
               {
                 id: "workspace-qualification-types",
                 kind: "open",
-                slot: "tools",
                 label: t("当前空间证件类型"),
                 disabled: !canManageTypes,
                 open: () => setDrawer("types"),
+              },
+              {
+                id: "create-personal-member",
+                kind: "open",
+                emphasis: "primary",
+                label: t("新增个人会员"),
+                disabled: !canManage,
+                open: openCreate,
               },
             ]}
             children={null}

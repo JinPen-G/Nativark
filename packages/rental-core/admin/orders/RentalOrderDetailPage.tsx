@@ -18,7 +18,7 @@ import dayjs, { type Dayjs } from "dayjs";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useLocale } from "@rental-os/platform-admin/locale";
-import { CorePage, type CoreAdminPageAction } from "@rental-os/platform-admin/core";
+import { CorePage, CorePageActions, type CoreAdminPageAction } from "@rental-os/platform-admin/core";
 import { useOrderEditor } from "./useOrderEditor";
 import { QueryState } from "@rental-os/platform-admin/ui";
 import { ExchangeInspectionPreparationPanel } from "./ExchangeInspectionPreparationPanel";
@@ -1020,12 +1020,12 @@ function RentalOrderDetailContent() {
   };
 
   const pageActions: CoreAdminPageAction<Record<string, unknown>>[] = [{
-    id: "back", kind: "navigate", slot: "navigation", label: { default: t("返回列表") },
+    id: "back", kind: "navigate", label: { default: t("返回列表") },
     icon: <ArrowLeftOutlined />, to: rentalOrderLocation()
   }];
   if (detail?.status === RentalCoreOrderStatus.Draft && canOperate) {
     pageActions.push({
-      id: "confirm", kind: "command", emphasis: "primary",
+      id: "confirm", kind: "command", slot: "content:confirm", emphasis: "primary",
       label: { default: t("确认订单并核销优惠券") },
       permissions: [{ resource: "order", action: "operate" }],
       pending: action.isPending, execute: () => action.mutateAsync("confirm")
@@ -1036,7 +1036,7 @@ function RentalOrderDetailContent() {
     const permission = canOperate ? "operate" : "pickup";
     if (isCarrierShipping || (detail.ruleSnapshot?.fulfillment?.pickupInspectionRequired ?? true)) {
       pageActions.push({
-        id: "pickup", kind: "open", emphasis: "primary",
+        id: "pickup", kind: "open", slot: "content:handover", emphasis: "primary",
         label: { default: `${label}${t("检查")}` }, icon: <SafetyCertificateOutlined />,
         permissions: [{ resource: "order", action: permission }],
         pending: inspectionPreparing, disabled: inspectionClosing || operationLock.isPending,
@@ -1044,7 +1044,8 @@ function RentalOrderDetailContent() {
       });
     } else {
       pageActions.push({
-        id: "pickup", kind: "command", emphasis: "primary",
+        id: "pickup", kind: "command", slot: "content:handover", emphasis: "primary",
+        presentation: { control: "button" },
         label: { default: `${t("直接完成")}${label}` },
         permissions: [{ resource: "order", action: permission }],
         pending: handover.isPending, execute: () => handover.mutateAsync("pickup")
@@ -1056,7 +1057,7 @@ function RentalOrderDetailContent() {
     const permission = canOperate ? "operate" : "return";
     if (isCarrierShipping || (detail.ruleSnapshot?.fulfillment?.returnInspectionRequired ?? true)) {
       pageActions.push({
-        id: "return", kind: "open", emphasis: "primary",
+        id: "return", kind: "open", slot: "content:handover", emphasis: "primary",
         label: { default: `${label}${t("检查")}` }, icon: <CheckCircleOutlined />,
         permissions: [{ resource: "order", action: permission }],
         pending: inspectionPreparing, disabled: inspectionClosing || operationLock.isPending,
@@ -1064,7 +1065,8 @@ function RentalOrderDetailContent() {
       });
     } else {
       pageActions.push({
-        id: "return", kind: "command", emphasis: "primary",
+        id: "return", kind: "command", slot: "content:handover", emphasis: "primary",
+        presentation: { control: "button" },
         label: { default: `${t("直接完成")}${label}` },
         permissions: [{ resource: "order", action: permission }],
         pending: handover.isPending, execute: () => handover.mutateAsync("return")
@@ -1073,7 +1075,8 @@ function RentalOrderDetailContent() {
   }
   if (detail?.status === RentalCoreOrderStatus.Settling && canSettleFunding) {
     pageActions.push({
-      id: "settle", kind: "command", emphasis: "primary",
+      id: "settle", kind: "command", slot: "content:settle", emphasis: "primary",
+      presentation: { control: "button" },
       label: { default: t("结算并关闭订单") },
       permissions: [{ resource: "order", action: "settle" }],
       pending: settle.isPending, disabled: settleBlockers.length > 0,
@@ -1102,12 +1105,15 @@ function RentalOrderDetailContent() {
   <OrderQuickActionNotice orderId={id} ready={!order.isFetching && !order.isError} />
   <div className={detailStyles.actions} id="rental-order-operations" tabIndex={-1}>
         {canOperate && detail.status === RentalCoreOrderStatus.Draft && detail.reservations.some((row) => row.status === "soft" && row.expiresAt && Date.parse(row.expiresAt) < Date.now()) && <Button danger loading={expirePending.isPending} onClick={() => modal.confirm({ title: t("处理待支付超时？"), content: t("系统会取消该订单，并释放库存预占、服务容量和优惠券占用。"), okText: t("确认处理"), cancelText: t("暂不处理"), okButtonProps: { danger: true }, onOk: () => expirePending.mutateAsync() })}>{t("处理待支付超时")}</Button>}
+        <CorePageActions slot="content:confirm" />
         {canOperate && pickupOverdueReady && <Button danger loading={markPickupOverdue.isPending} onClick={() => modal.confirm({ title: t("进入待确认爽约？"), content: t("订单将标记为领取超时，但不会立即释放资源或收取爽约费用；请先通知客户，达到最终时限后再确认爽约。"), okText: t("确认进入"), cancelText: t("暂不处理"), okButtonProps: { danger: true }, onOk: () => markPickupOverdue.mutateAsync() })}>{t("领取超时")}</Button>}
         {canOperate && detail.status === RentalCoreOrderStatus.PickupOverdue && !detail.noShowNoticeAt && <ActionButton label={t("通知客户")} successLabel={t("客户通知记录已保存")} pending={sendNoShowNotice.isPending} onAction={() => sendNoShowNotice.mutateAsync()} />}
         {canOperate && noShowNoticeReady && <Button danger loading={confirmNoShow.isPending} onClick={() => { noShowForm.resetFields(); setNoShowOpen(true); }}>{t(noShowFinalReady ? "确认爽约" : "提前确认爽约")}</Button>}
         {canOperate && detail.status === RentalCoreOrderStatus.PickupOverdue && <Button loading={resumePickup.isPending} onClick={() => modal.confirm({ title: t("恢复为待领取？"), content: t("客户返回领取时，将订单从待确认爽约恢复为待领取；系统会复核资产与库存仍可交付，不改动金额或资金。"), okText: t("确认恢复"), cancelText: t("暂不处理"), onOk: () => resumePickup.mutateAsync() })}>{t("恢复领取")}</Button>}
         {((canPickup && detail.status === RentalCoreOrderStatus.ReadyForPickup) || (canReturn && detail.status === RentalCoreOrderStatus.Renting)) && <Button loading={operationLock.isPending} disabled={inspectionPreparing || inspectionClosing} onClick={() => operationLock.mutate(operationToken ? "release" : "acquire")}>{t(operationToken ? "结束办理" : "开始 / 接手办理")}</Button>}
+        <CorePageActions slot="content:handover" />
         {canReturn && !isCarrierShipping && detail.status === RentalCoreOrderStatus.Renting && (detail.allocations.filter((allocation) => allocation.status === "picked_up").length > 1 || detail.allocations.some((allocation) => allocation.status === "picked_up" && allocation.quantity > 1)) && <Button disabled={inspectionPreparing || inspectionClosing || operationLock.isPending} onClick={() => setPartialReturnOpen(true)}>{t(detail.ruleSnapshot?.fulfillment?.returnInspectionRequired ? "部分归还检查" : "部分归还")}</Button>}
+        <CorePageActions slot="content:settle" />
         {canExtend && [RentalCoreOrderStatus.ReadyForPickup, RentalCoreOrderStatus.Renting].includes(detail.status) && (!isCarrierShipping || (detail.status === RentalCoreOrderStatus.Renting && carrierSignedRecorded && !carrierHandoffRecorded)) && <Button data-order-action="extend" icon={<RetweetOutlined />} onClick={() => { extensionForm.resetFields(); setExtensionPreview(undefined); extensionForm.setFieldsValue({ newEndAt: dayjs(detail.effectiveEndAt ?? detail.endAt).add(1, "day") }); setExtensionOpen(true); }}>{t("续租 / 延期")}</Button>}
         {canOperate && detail.status === RentalCoreOrderStatus.Renting && exchangeableAllocations.length > 0 && <Button onClick={() => { postPickupExchangeForm.resetFields(); postPickupExchangeForm.setFieldsValue({ priceBasis: "original_order_price", originalDisposition: "return_to_warehouse", customerConfirmed: false }); setPostPickupExchangePreview(undefined); setExchangeTarget(undefined); setPostPickupExchangeOpen(true); }}>{t("办理换货")}</Button>}
         {canOperate && [RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(detail.status) && (detail.lines.filter((line) => (line.cancelledQuantity ?? 0) < line.quantity).length > 1 || detail.lines.some((line) => ["quantity", "consumable"].includes(line.inventoryMode) && line.quantity - (line.cancelledQuantity ?? 0) > 1) || cancelableServiceCount > 0) && <Button onClick={() => { partialCancelForm.resetFields(); setPartialCancelPreview(undefined); setPartialCancelOpen(true); }}>{t("部分取消商品 / 服务")}</Button>}

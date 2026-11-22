@@ -4,7 +4,7 @@
  * 保留页签沿原活动范围关闭旧动作，异步确认/校验完成时再次核对当前声明。
  */
 import { createContext, useContext, useLayoutEffect, useRef, type ReactNode } from "react";
-import type { FormInstance } from "antd";
+import type { ButtonProps, FormInstance } from "antd";
 import {
   corePageKey, corePageText, resolveCorePageLocation,
   type CoreBinding, type CorePageAction, type CorePageDescriptor, type CoreRegisteredPage
@@ -50,10 +50,17 @@ export function CorePageHostProvider({ host, children }: { host: CorePageHost; c
   return <PageBoundary key={JSON.stringify([host.lifetimeKey, host.page.key])} host={host}>{children}</PageBoundary>;
 }
 
+export type CoreAdminActionSlot = "actions" | "navigation" | "tools" | `content:${string}`;
+
 export type CoreAdminPageAction<Values> = CorePageAction<FormInstance<Values>, Values> & {
   intent?: ActionButtonIntent;
   /** 缺省进入主操作栏；返回与辅助动作仍经过同一权限和生命周期驱动。 */
-  slot?: "actions" | "navigation" | "tools";
+  slot?: CoreAdminActionSlot;
+  /** 特殊正文仍使用原按钮尺寸和形状，只接受呈现字段，执行由公共动作驱动。 */
+  presentation?: Pick<ButtonProps, "block" | "shape" | "size" | "style"> & {
+    control: "button";
+    iconOnly?: boolean;
+  };
   /** 原按钮呈现由公共适配承担，pending仍来自真实业务Promise。 */
   icon?: ReactNode;
   danger?: boolean;
@@ -62,6 +69,15 @@ export type CoreAdminPageAction<Values> = CorePageAction<FormInstance<Values>, V
   /** 确认动作沿原ConfirmAction；业务自己声明危险程度。 */
   confirmTone?: "neutral" | "danger";
 };
+
+const ActionSlots = createContext<ReadonlyMap<CoreAdminActionSlot, readonly ReactNode[]> | null>(null);
+
+/** 将已声明动作放入原卡片或流程区，继续使用当前页的权限、生命周期和执行者。 */
+export function CorePageActions({ slot }: { slot: `content:${string}` }) {
+  const slots = useContext(ActionSlots);
+  if (!slots) throw new Error("正文动作须位于CorePage内");
+  return <>{slots.get(slot)}</>;
+}
 
 function PageAction<Values>({ host, action, visible = true }: { host: CorePageHost; action: CoreAdminPageAction<Values>; visible?: boolean }) {
   const { locale, t } = useLocale();
@@ -88,10 +104,23 @@ function PageAction<Values>({ host, action, visible = true }: { host: CorePageHo
     toast({ type: "error", title: t("操作失败") });
   };
   const confirming = useRef<Promise<unknown> | null>(null);
+  const executing = useRef<Promise<unknown> | null>(null);
+  const { control, iconOnly, ...presentation } = action.presentation ?? {};
+  const run = async () => {
+    const latest = current().action;
+    if (latest.kind === "save") {
+      const values = await latest.form.validateFields();
+      const checked = current().action;
+      if (checked.kind !== "save" || checked.form !== latest.form) throw new Error(t("当前操作不可用"));
+      return checked.onSave(values);
+    }
+    if (latest.kind !== "command") throw new Error(t("当前操作不可用"));
+    return latest.execute();
+  };
   let button: ReactNode;
   if (action.kind === "navigate" || action.kind === "open") {
-    button = <Button type={action.slot === "navigation" ? "text" : variant === "primary" ? "primary" : "default"} icon={action.icon} danger={action.danger}
-      loading={action.pending} disabled={disabled} onClick={() => {
+    button = <Button {...presentation} type={action.slot === "navigation" ? "text" : variant === "primary" ? "primary" : "default"} icon={action.icon} danger={action.danger}
+      loading={action.pending} disabled={disabled} aria-label={iconOnly ? label : undefined} onClick={() => {
       try {
         const value = current(), latest = value.action;
         if (latest.kind === "open") latest.open();
@@ -101,7 +130,20 @@ function PageAction<Values>({ host, action, visible = true }: { host: CorePageHo
           value.host.navigate(resolveCorePageLocation(value.host.pages, latest.to));
         }
       } catch { if (live.current.active && live.current.visible && visibility.current === opening) toast({ type: "error", title: t("当前操作不可用") }); }
-    }}>{label}</Button>;
+    }}>{iconOnly ? null : label}</Button>;
+  } else if (control === "button" && !(action.kind === "command" && action.confirmation)) {
+    button = <Button {...presentation} type={variant === "primary" ? "primary" : "default"}
+      icon={action.icon} danger={action.danger} loading={action.pending} disabled={disabled}
+      htmlType={action.kind === "save" ? "submit" : "button"}
+      aria-label={iconOnly ? label : undefined} onClick={event => {
+        if (action.kind === "save") event.preventDefault();
+        if (executing.current) return;
+        const request = Promise.resolve().then(run);
+        executing.current = request;
+        void request.catch(reportFailure).finally(() => {
+          if (executing.current === request) executing.current = null;
+        });
+      }}>{iconOnly ? null : label}</Button>;
   } else if (action.kind === "save") {
     button = <SaveButton label={label} variant={variant} disabled={disabled} intent={action.intent}
       icon={action.icon} danger={action.danger} pending={action.pending} pendingLabel={action.pendingLabel} onActionError={reportFailure}
@@ -130,7 +172,8 @@ function PageAction<Values>({ host, action, visible = true }: { host: CorePageHo
           icon={action.icon} danger={action.danger} pending={action.pending} pendingLabel={action.pendingLabel} onAction={execute} onActionError={reportFailure} />;
   }
   // 深链接只能定位当前页面的已登记动作；包住禁用按钮便于说明原因，不触发业务执行。
-  const target = <span data-core-page={host.page.key} data-core-action={action.id} style={{ display: "inline-flex" }}
+  const target = <span data-core-page={host.page.key} data-core-action={action.id}
+    style={{ display: action.presentation?.block ? "flex" : "inline-flex", width: action.presentation?.block ? "100%" : undefined }}
     tabIndex={action.disabled ? 0 : -1} aria-label={reason && action.disabled ? `${label} · ${reason}` : undefined}>{button}</span>;
   return reason && action.disabled ? <Tooltip title={reason}>{target}</Tooltip> : target;
 }
@@ -156,11 +199,15 @@ export function CorePage<Values = Record<string, unknown>>({ actions = [], title
     ids.add(action.id);
     if (action.emphasis === "primary" && ++primary > 1) throw new Error("当前Core页面只能声明一个主操作");
   }
-  const buttons: Record<"actions" | "navigation" | "tools", ReactNode[]> = { actions: [], navigation: [], tools: [] };
-  for (const action of actions) if (access(host, action.permissions)) buttons[action.slot ?? "actions"].push(
-    <PageAction key={JSON.stringify([action.id, action.kind, action.kind === "command" ? action.confirmation : undefined])} host={host} action={action} visible={active} />);
-  return <><PageHeading title={title ?? corePageText(host.page.definition.title, locale)} brandName={host.brandName}
+  const buttons = new Map<CoreAdminActionSlot, ReactNode[]>();
+  for (const action of actions) if (access(host, action.permissions)) {
+    const slot = action.slot ?? "actions";
+    const group = buttons.get(slot) ?? [];
+    group.push(<PageAction key={JSON.stringify([action.id, action.kind, action.kind === "command" ? action.confirmation : undefined])} host={host} action={action} visible={active} />);
+    buttons.set(slot, group);
+  }
+  return <ActionSlots.Provider value={buttons}><PageHeading title={title ?? corePageText(host.page.definition.title, locale)} brandName={host.brandName}
     summary={summary} description={description} view={view} note={note}
-    extra={buttons.actions.length ? buttons.actions : undefined} navigation={buttons.navigation.length ? buttons.navigation : undefined}
-    tools={buttons.tools.length || tools ? <>{buttons.tools}{tools}</> : undefined} toolsPlacement={toolsPlacement} />{children}</>;
+    extra={buttons.get("actions")} navigation={buttons.get("navigation")}
+    tools={buttons.has("tools") || tools ? <>{buttons.get("tools")}{tools}</> : undefined} toolsPlacement={toolsPlacement} />{children}</ActionSlots.Provider>;
 }

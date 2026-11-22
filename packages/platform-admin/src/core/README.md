@@ -46,7 +46,27 @@ export function TicketsPage() {
 }
 ```
 
-`actions.slot`省略时进入顶部主操作区，返回用`navigation`，刷新等辅助动作用`tools`，共用权限和卸载保护。详情复用 `/ui` 的 `RecordDetailLayout` / `RecordFacts`；页签使用 `CorePage.view`。实际详情见[工单详情](../../../example-tickets-core/admin/index.tsx)。
+`actions.slot`省略时进入顶部操作区。`navigation`和`tools`分别选择正文导航与工具位置，保留原顶部位置的返回、刷新及次操作继续使用默认槽位。详情复用 `/ui` 的 `RecordDetailLayout` / `RecordFacts`，页签使用 `CorePage.view`。实际详情见[工单详情](../../../example-tickets-core/admin/index.tsx)。
+
+原报价卡片、结果卡片和流程区使用命名的正文槽位。动作只声明一次，由 `CorePageActions` 在原布局位置呈现，继续经过同一权限、活动页面和异步驱动。原按钮需要保留大小或圆形时，`presentation`选择公共原Button及其呈现字段。
+
+```tsx
+import { CorePage, CorePageActions } from "@rental-os/platform-admin/core";
+import { Card } from "@rental-os/platform-admin/ui";
+
+<CorePage actions={[{
+  id: "quote", kind: "save", slot: "content:quote", label: "生成报价",
+  emphasis: "primary", form, onSave: editor.submit,
+  presentation: { control: "button", block: true, size: "large" }
+}]}>
+  <Card>
+    {amountSummary}
+    <CorePageActions slot="content:quote" />
+  </Card>
+</CorePage>;
+```
+
+`presentation`仅接受大小、形状、宽度、样式和图标按钮意图。导航、打开、保存及命令仍由动作声明驱动。原Button模式保留原加载呈现，保存先校验并复核当前Form，异步命令合并本按钮在途调用，离页或撤权后的校验与回调停止派发。
 
 页面的名称只在路由描述中填写，`CorePage`从宿主当前注册项读取。`actions`随实际业务状态变化，离页后自动从原页头卸载；每页操作ID唯一，最多一个`primary`。没有操作时传空数组或省略，不保留业务按钮占位。
 

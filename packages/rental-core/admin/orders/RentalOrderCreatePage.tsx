@@ -21,7 +21,7 @@ import { Button, Select, Tabs } from "@rental-os/platform-admin/ui";
 import dayjs, { type Dayjs } from "dayjs";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocale } from "@rental-os/platform-admin/locale";
-import { CorePage, type CoreAdminPageAction } from "@rental-os/platform-admin/core";
+import { CorePage, CorePageActions, type CoreAdminPageAction } from "@rental-os/platform-admin/core";
 import { formSnapshotFingerprint } from "@rental-os/platform-admin/forms";
 import { useOrderEditor } from "./useOrderEditor";
 import { rentalOrderLocation } from "./pages";
@@ -245,9 +245,9 @@ function RentalOrderCreateContent() {
 
   if (created) {
     const actions: CoreAdminPageAction<FormValues>[] = [
-      { id: "back", kind: "navigate", slot: "navigation", label: { default: t("返回订单") }, icon: <ArrowLeftOutlined />, to: rentalOrderLocation() },
-      { id: "detail", kind: "navigate", emphasis: "primary", label: { default: t("查看订单") }, to: rentalOrderLocation(created.id) },
-      { id: "new", kind: "open", label: { default: t("继续新建") }, open: startAnotherOrder }
+      { id: "back", kind: "navigate", label: { default: t("返回订单") }, icon: <ArrowLeftOutlined />, to: rentalOrderLocation() },
+      { id: "detail", kind: "navigate", slot: "content:result", emphasis: "primary", label: { default: t("查看订单") }, to: rentalOrderLocation(created.id) },
+      { id: "new", kind: "open", slot: "content:result", label: { default: t("继续新建") }, open: startAnotherOrder }
     ];
     return <CorePage title={t("新建租赁订单")} actions={actions}>
       <Card className="data-panel">
@@ -256,6 +256,7 @@ function RentalOrderCreateContent() {
           icon={<CheckCircleOutlined />}
           title={t("租赁订单已创建")}
           subTitle={`${created.orderNo} ${t("已进入订单主流程")}`}
+          extra={<CorePageActions slot="content:result" />}
         />
       </Card>
     </CorePage>;
@@ -555,6 +556,7 @@ function RentalOrderCreateContent() {
                     <Typography.Text strong className="order-quote-total">{money(quote.payableAmount)}</Typography.Text>
                   </Row>
                 </>}
+                <CorePageActions slot="content:quote" />
               </Card>
             </Space>
           </div>
@@ -562,18 +564,20 @@ function RentalOrderCreateContent() {
       </Row>
     </Form>;
   const pageActions: CoreAdminPageAction<FormValues>[] = [{
-    id: "back", kind: "navigate", slot: "navigation", label: { default: t("返回订单") }, icon: <ArrowLeftOutlined />, to: rentalOrderLocation()
+    id: "back", kind: "navigate", label: { default: t("返回订单") }, icon: <ArrowLeftOutlined />, to: rentalOrderLocation()
   }];
   if (submissionMode === "ordinary") {
     pageActions.push({
-      id: "quote", kind: "save", emphasis: quote ? "secondary" : "primary",
+      id: "quote", kind: "save", slot: "content:quote", emphasis: quote ? "secondary" : "primary",
       label: { default: t(quote ? "重新计算报价" : "生成报价") },
       permissions: [{ resource: "order", action: "create" }],
       form: quoteForm, onSave: quoteEditor.submit,
+      presentation: { control: "button", block: true, size: "large", style: { marginTop: quote ? "var(--space-4)" : 0 } },
       pending: createQuote.isPending || quoteEditor.busy, disabled: createOrder.isPending
     });
     if (quote) pageActions.push({
-      id: "create", kind: "command", emphasis: "primary", label: { default: t("确认并创建订单") },
+      id: "create", kind: "command", slot: "content:quote", emphasis: "primary", label: { default: t("确认并创建订单") },
+      presentation: { control: "button", block: true, size: "large", style: { marginTop: "var(--space-3)" } },
       permissions: [{ resource: "order", action: "create" }], execute: submitOrder,
       pending: createOrder.isPending, disabled: createQuote.isPending || quoteEditor.busy
     });

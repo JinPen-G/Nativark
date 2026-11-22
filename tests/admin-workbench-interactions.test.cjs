@@ -249,20 +249,133 @@ test("workbench keeps refresh and payment reconciliation in the original page he
   visit(tree);
   assert.ok(header, "The workbench must use the original public page header");
   const attributes = new Map(header.attributes.properties.filter(ts.isJsxAttribute).map(item => [item.name.text, item.initializer]));
-  assert.equal(attributes.get("toolsPlacement").text, "context", "Refresh must remain in the page header");
-  const tools = attributes.get("tools").expression;
-  assert.equal(tools.tagName.getText(tree), "Button");
-  assert.equal(tools.attributes.properties.find(item => item.name.text === "shape").initializer.text, "circle");
-  const actions = attributes.get("actions").expression;
-  assert.ok(ts.isConditionalExpression(actions));
-  assert.equal(actions.condition.getText(tree), "canReconcilePayments");
-  assert.equal(actions.whenFalse.elements.length, 0, "Unauthorized users have no payment action");
-  const action = actions.whenTrue.elements[0];
+  assert.equal(attributes.has("tools"), false, "The original refresh belongs to the top action bar");
+  assert.equal(attributes.get("actions").expression.getText(tree), "pageActions");
+  let declaredActions, paymentGate;
+  function findActions(node) {
+    if (ts.isVariableDeclaration(node) && node.name.getText(tree) === "pageActions") declaredActions = node.initializer;
+    if (ts.isIfStatement(node) && node.expression.getText(tree) === "canReconcilePayments") paymentGate = node;
+    ts.forEachChild(node, findActions);
+  }
+  findActions(tree);
+  const refresh = new Map(declaredActions.elements[0].properties.map(item => [item.name.text, item.initializer]));
+  assert.equal(refresh.get("id").text, "refresh");
+  assert.equal(refresh.has("slot"), false, "Refresh is the first top action");
+  assert.match(refresh.get("presentation").getText(tree), /shape: "circle", iconOnly: true/);
+  assert.equal(refresh.get("execute").getText(tree), "refresh");
+  assert.ok(paymentGate, "Payment reconciliation is declared only for authorized users");
+  const action = paymentGate.thenStatement.expression.arguments[0];
   const properties = new Map(action.properties.map(item => [item.name.text, item.initializer]));
   assert.equal(properties.get("id").text, "reconcile-payments");
   assert.equal(properties.get("kind").text, "command");
+  assert.equal(properties.get("emphasis").text, "primary");
   assert.equal(properties.get("pending").getText(tree), "reconcilePayments.isPending");
   assert.match(properties.get("permissions").getText(tree), /resource: "finance", action: "reconcile"/);
   assert.match(properties.get("execute").getText(tree), /await reconcilePayments\.mutateAsync\(\)/);
   assert.doesNotMatch(text, /styles\.(maintenanceTools|todoSection)/, "The original todo layout has no relocated payment toolbar");
+});
+
+test("declared order actions retain their original quote, result and workflow locations", () => {
+  const read = name => fs.readFileSync(path.resolve(__dirname, "../packages/rental-core/admin/orders", name), "utf8");
+  const create = read("RentalOrderCreatePage.tsx");
+  const detail = read("RentalOrderDetailPage.tsx");
+  assert.match(create, /id: "quote", kind: "save", slot: "content:quote"/);
+  assert.match(create, /id: "create", kind: "command", slot: "content:quote"/);
+  assert.match(create, /block: true, size: "large", style: \{ marginTop: quote \? "var\(--space-4\)" : 0 \}/);
+  assert.match(create, /extra=\{<CorePageActions slot="content:result" \/>\}/);
+  const quoteSlot = create.indexOf('<CorePageActions slot="content:quote" />');
+  assert.ok(quoteSlot > create.indexOf('className="order-quote-total"'));
+  assert.ok(quoteSlot < create.indexOf("</Card>", quoteSlot), "Quote actions stay inside the original amount card");
+  const operations = detail.indexOf('id="rental-order-operations"');
+  const confirmation = detail.indexOf('<CorePageActions slot="content:confirm" />');
+  const handover = detail.indexOf('<CorePageActions slot="content:handover" />');
+  const settlement = detail.indexOf('<CorePageActions slot="content:settle" />');
+  assert.ok(operations < confirmation && confirmation < handover && handover < settlement);
+  assert.ok(settlement < detail.indexOf('data-order-action="extend"'));
+  assert.doesNotMatch(create, /id: "back", kind: "navigate", slot: "navigation"/);
+  assert.doesNotMatch(detail, /id: "back", kind: "navigate", slot: "navigation"/);
+});
+
+test("native declared buttons retain single execution, validation and stale-action rejection", async () => {
+  const vm = require("node:vm");
+  const filename = path.resolve(__dirname, "../packages/platform-admin/src/core/CorePage.tsx");
+  const tree = ts.createSourceFile(filename, fs.readFileSync(filename, "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const actionDriver = tree.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "PageAction");
+  const access = tree.statements.find(node => ts.isVariableStatement(node)
+    && node.declarationList.declarations.some(declaration => declaration.name.getText(tree) === "access"));
+  const compiled = ts.transpileModule(`${access.getText(tree)}\n${actionDriver.getText(tree)}\nglobalThis.render = PageAction;`, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+  }).outputText;
+  function driver(initialAction) {
+    const refs = [], errors = [];
+    let cursor = 0, cleanup, currentAction = initialAction, allowed = true;
+    const host = { page: { key: "rental:test", coreId: "rental", definition: { permissions: [] } }, canAccess: () => allowed };
+    const context = {
+      exports: {}, Button: "button", Tooltip: "tooltip", corePageText: value => value,
+      useLocale: () => ({ locale: "zh-CN", t: value => value }),
+      useFeedback: () => ({ toast: value => errors.push(value) }),
+      useRef: initial => { const index = cursor++; return refs[index] ?? (refs[index] = { current: initial }); },
+      useLayoutEffect: effect => { if (!cleanup) cleanup = effect(); },
+      require: name => { assert.equal(name, "react/jsx-runtime"); return require(name); },
+    };
+    vm.runInNewContext(compiled, context);
+    return {
+      errors, revoke: () => { allowed = false; }, unmount: () => cleanup(),
+      button(action = currentAction, visible = true) {
+        currentAction = action;
+        cursor = 0;
+        return context.render({ host, action, visible }).props.children;
+      },
+    };
+  }
+  const flush = async () => { for (let index = 0; index < 8; index++) await Promise.resolve(); };
+  for (const kind of ["open", "navigate"]) {
+    const iconButton = driver({ id: kind, kind, label: "Open details", icon: "details",
+      presentation: { control: "button", iconOnly: true } }).button();
+    assert.equal(iconButton.props["aria-label"], "Open details");
+    assert.equal(iconButton.props.children, null);
+    assert.equal(iconButton.props.icon, "details");
+  }
+  let resolveCommand, calls = 0;
+  const pending = new Promise(resolve => { resolveCommand = resolve; });
+  const action = { id: "refresh", kind: "command", label: "Refresh", presentation: { control: "button", shape: "circle", iconOnly: true }, execute: () => { calls++; return pending; } };
+  const active = driver(action), button = active.button();
+  assert.equal(button.props.shape, "circle");
+  assert.equal(button.props["aria-label"], "Refresh");
+  assert.equal(button.props.children, null);
+  button.props.onClick(); button.props.onClick();
+  await flush();
+  assert.equal(calls, 1);
+  resolveCommand(); await flush();
+  assert.deepEqual(active.errors, []);
+  active.revoke(); active.button().props.onClick(); await flush();
+  assert.equal(calls, 1);
+  assert.equal(active.errors.length, 1);
+
+  let completedSaves = 0;
+  const completed = driver({ id: "save", kind: "save", label: "Save", presentation: { control: "button" },
+    form: { validateFields: async () => ({ subject: "current" }) },
+    onSave: async values => { assert.equal(values.subject, "current"); completedSaves++; } });
+  const completedButton = completed.button();
+  completedButton.props.onClick({ preventDefault() {} }); completedButton.props.onClick({ preventDefault() {} });
+  await flush();
+  assert.equal(completedSaves, 1, "Normal validated saves still dispatch exactly once");
+  assert.deepEqual(completed.errors, []);
+
+  let resolveValidation, saves = 0;
+  const validation = new Promise(resolve => { resolveValidation = resolve; });
+  const save = { id: "quote", kind: "save", label: "Quote", presentation: { control: "button", block: true, size: "large" }, form: { validateFields: () => validation }, onSave: async () => { saves++; } };
+  const stale = driver(save);
+  const saveButton = stale.button();
+  assert.equal(saveButton.props.htmlType, "submit", "Enter retains the actual form submit target");
+  let prevented = false;
+  saveButton.props.onClick({ preventDefault: () => { prevented = true; } }); await flush();
+  assert.equal(prevented, true, "A click cannot also dispatch the native form submission");
+  stale.button(save, false);
+  resolveValidation({ customerId: "member" }); await flush();
+  assert.equal(saves, 0, "A hidden page cannot dispatch after delayed validation");
+  assert.deepEqual(stale.errors, [], "A hidden page cannot emit an old error toast");
+  const departed = driver(action);
+  const oldButton = departed.button(); departed.unmount(); oldButton.props.onClick(); await flush();
+  assert.equal(calls, 1, "Unmounted callbacks cannot execute");
 });

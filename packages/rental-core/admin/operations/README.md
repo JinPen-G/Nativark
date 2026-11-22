@@ -17,9 +17,9 @@
 
 ## 页面与直属展示
 
-- 运营概览按原期间筛选订单。指标同时核报表和对应订单／资产查看权限，待办独立读取，刷新与支付核对继续位于原页头工具和次操作区，支付核对保留原权限、在途状态和实际 Promise 结果反馈。[工作台](WorkbenchPage.tsx) · [指标明细](WorkbenchMetrics.tsx)
+- 运营概览按原期间筛选订单。指标同时核报表和对应订单／资产查看权限，待办独立读取。原顶部操作区先呈现圆形刷新，再呈现支付核对主按钮，保留原权限、在途状态和实际 Promise 结果反馈。[工作台](WorkbenchPage.tsx) · [指标明细](WorkbenchMetrics.tsx)
 - 待办保留重点／表格视图、分页、悬停预览、固定和键盘操作。已访问表格在视图切换时保持挂载，刷新移除的固定项随结果清除。详情目标由稳定订单／工单标识和对应权限决定。[待办列表](WorkbenchTodoQueue.tsx) · [日期与定位投影](workbenchPresentation.ts)
-- 经营报表保留日期、地点、客户类型和客户标识筛选，以及分析和五组明细视图。查询占位限定同一业务范围，读取失败时清除旧金额展示，导出使用同一组筛选和权限。[经营报表](WorkspaceOperationReportPage.tsx)
+- 经营报表保留日期、地点、客户类型和客户标识筛选，以及分析和五组明细视图。原顶部操作区按导出、刷新顺序呈现，导出使用同一组筛选和权限。查询占位限定同一业务范围，读取失败时清除旧金额展示。[经营报表](WorkspaceOperationReportPage.tsx)
 - 库存与资产沿读取瞬间的快照呈现。金额和客户／地点名称读取原报表事实，图例选择只作用于当前图表。贡献、税额和异常费用继续保留原展示口径。[库存快照](insights/InventoryOverview.tsx) · [贡献分析](insights/ContributionExplorer.tsx) · [报表分析](insights/ReportAnalysis.tsx) · [共享展示](insights/OperationalCharts.tsx) · [图例选择](insights/chartVisibility.ts)
 - Split bar 保留原 CSS、几何、标签布局、图例、键盘和动效实现，减少动态偏好消费底座同源接点。原来源和哈希清单随实现保留。[Split bar](insights/split-bar/SplitBar.tsx) · [来源说明](insights/split-bar/SOURCE.md) · [来源清单](insights/split-bar/source-manifest.json)
 
