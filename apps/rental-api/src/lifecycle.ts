@@ -1,6 +1,6 @@
 /** 所选 Rental 宿主的唯一生命周期：先恢复和预热，再启动原作业；停新、排空、关闭 HTTP 后断库。
  * 不执行迁移或快照回填，不将取消/停机解释为业务回滚。应用实例不再作为独立生命周期 provider 登记。 */
-import type { OnApplicationBootstrap, OnApplicationShutdown, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import { ServiceUnavailableException, type OnApplicationBootstrap, type OnApplicationShutdown, type OnModuleDestroy, type OnModuleInit } from "@nestjs/common";
 import type { RentalApplication } from "@rental-os/rental-core/application";
 
 export class RentalApplicationLifecycle implements OnModuleInit, OnApplicationBootstrap, OnModuleDestroy, OnApplicationShutdown {
@@ -9,9 +9,18 @@ export class RentalApplicationLifecycle implements OnModuleInit, OnApplicationBo
   private draining?: Promise<void>;
   private closing?: Promise<void>;
   private stopping = false;
+  private readonly requests = new Set<Promise<unknown>>();
 
   constructor(private readonly application: RentalApplication, private readonly disconnect: () => Promise<void>,
     private readonly connect?: () => Promise<void>) {}
+
+  /** HTTP 关闭不代表原处理器完成；唯一宿主等待完整请求作用域后才允许断库。 */
+  runRequest<T>(consume: () => Promise<T>): Promise<T> {
+    if (this.stopping) return Promise.reject(new ServiceUnavailableException("Rental 宿主正在停止新请求"));
+    const request = Promise.resolve().then(consume);
+    this.requests.add(request);
+    return request.finally(() => { this.requests.delete(request); });
+  }
 
   onModuleInit(): Promise<void> {
     return this.initialization ??= this.initialize();
@@ -53,7 +62,9 @@ export class RentalApplicationLifecycle implements OnModuleInit, OnApplicationBo
       Promise.resolve().then(() => workers.allocation.onModuleDestroy()),
       Promise.resolve().then(() => workers.dueJobs.onModuleDestroy()),
       Promise.resolve().then(() => integrations.fileCleanup.onApplicationShutdown()),
-      Promise.resolve().then(() => client.rateLimit.onApplicationShutdown())
+      Promise.resolve().then(() => client.rateLimit.onApplicationShutdown()),
+      // 请求的正常失败已交给原 HTTP 出口；排空只等待真实完成，不把业务拒绝当关停失败。
+      Promise.allSettled(this.requests)
     ]);
     const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
     if (failures.length) throw new AggregateError(failures.map(result => result.reason), "Rental 在途工作未能正常排空");

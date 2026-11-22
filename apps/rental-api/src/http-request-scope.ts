@@ -1,6 +1,7 @@
 /** 标准 Rental 宿主的 Nest 请求生命周期。原 identity/staff routing middleware 必须先运行，
  * 唯一 Guard 由平台模块分流；本拦截器不再次认证。仅托管显式审定处理器的一次缓冲订阅，
  * 已知 CoreAccessError 在 HTTP 错误出口保留公共状态及原 code/message。
+ * 断线仅弃置响应，原处理器完成后才释放请求作用域与宿主排空参加者。
  * 不启动服务器、不制造匿名身份、不把断线解释成事务回滚或允许重发。 */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { HttpException, ServiceUnavailableException, StreamableFile, type CallHandler, type ExecutionContext,
@@ -35,6 +36,8 @@ type Resume = <T>(consume: () => T) => T;
 type RequestScope = {
   active: boolean;
   claimed: boolean;
+  processing: boolean;
+  sourcePending: boolean;
   method: string;
   path: string;
   staff: boolean;
@@ -46,6 +49,8 @@ type RequestScope = {
   identity: NonNullable<ReturnType<typeof getRequestIdentity>>;
   resume: Resume;
   stop(error?: unknown): void;
+  completeProcessing(): void;
+  completeSource(): void;
   cancel?: (error: unknown) => void;
 };
 
@@ -70,11 +75,13 @@ export function createRentalHttpRequestScope(input: {
   isClientPublicRoute?(method: string, path: string): boolean;
   policy: RentalHttpAccessPolicy;
   routesToPlatform(request: RentalPlatformRequest): boolean;
+  runRequest<T>(consume: () => Promise<T>): Promise<T>;
   ai?: RentalAiHttpRequestScope;
 }): { middleware: NestMiddleware<RentalRequest, RentalResponse>; interceptor: NestInterceptor } {
   if (typeof input?.access?.run !== "function" || typeof input.access.withRequest !== "function"
-    || typeof input.policy?.requireHandler !== "function" || typeof input.routesToPlatform !== "function") {
-    throw new Error("Rental HTTP 缺少同实例应用准入、已审定处理器或公共分流函数");
+    || typeof input.policy?.requireHandler !== "function" || typeof input.routesToPlatform !== "function"
+    || typeof input.runRequest !== "function") {
+    throw new Error("Rental HTTP 缺少同实例应用准入、已审定处理器、公共分流或宿主排空函数");
   }
   if (Boolean(input.publicAccess) !== Boolean(input.isClientPublicRoute)
     || input.publicAccess && (typeof input.publicAccess.run !== "function" || typeof input.publicAccess.withRequest !== "function")) {
@@ -119,13 +126,14 @@ export function createRentalHttpRequestScope(input: {
         const run = <T>(consume: () => Promise<T>) => identityOnly ? consume()
           : paymentCallback ? callbackAccess!.run(consume) : anonymous ? publicAccess!.run(consume)
             : aiRequest ? ai!.access.run(consume) : access.run(consume);
-        await run(async () => {
+        await input.runRequest(() => run(async () => {
           let release!: () => void;
           const lifetime = new Promise<void>(resolve => { release = resolve; });
           const cancellation = new AbortController();
           const closed = () => scope!.stop(ended());
           scope = {
-            active: true, claimed: false, method: request.method.toUpperCase(), path: matchableRequestPath(request.url),
+            active: true, claimed: false, processing: false, sourcePending: false,
+            method: request.method.toUpperCase(), path: matchableRequestPath(request.url),
             staff: request.staffApiRequest === true, anonymous, identityOnly, paymentCallback, ai: aiRequest,
             signal: cancellation.signal, identity, resume: AsyncLocalStorage.snapshot(),
             stop(error = ended()) {
@@ -136,10 +144,18 @@ export function createRentalHttpRequestScope(input: {
               response.removeListener("close", closed);
               const cancel = scope!.cancel;
               scope!.cancel = undefined;
-              // Releasing run expires the original per-application fence as well.
-              // Already-dispatched database/external work is not forcibly rolled back.
-              release();
+              // Socket cancellation only discards the response. Keep the original
+              // application fence alive until its dispatched handler actually settles.
+              if (!scope!.processing && !scope!.sourcePending) release();
               if (cancel) scope!.resume(() => cancel(error));
+            },
+            completeProcessing() {
+              scope!.processing = false;
+              if (!scope!.active && !scope!.sourcePending) release();
+            },
+            completeSource() {
+              scope!.sourcePending = false;
+              if (!scope!.active && !scope!.processing) release();
             }
           };
           scopes.set(request, scope);
@@ -150,7 +166,7 @@ export function createRentalHttpRequestScope(input: {
             next();
             await lifetime;
           } finally { scope.stop(); }
-        });
+        }));
       } catch (error) {
         scope?.stop(error);
         next(toHttpError(error));
@@ -191,24 +207,24 @@ export function createRentalHttpRequestScope(input: {
         return new Observable(destination => {
           if (subscribed) { destination.error(new Error("Rental HTTP 不允许重复订阅或自动重试原处理器")); return; }
           subscribed = true;
-          let cancelSource: ((error: unknown) => void) | undefined;
+          scope.processing = true;
           scope.cancel = error => {
             native?.discard();
-            cancelSource?.(error);
             destination.error(error);
           };
           const consume = () => new Promise<unknown>((resolve, reject) => {
             assertActive(request, scope);
+            scope.sourcePending = true;
             let received = false, settled = false, value: unknown;
-            const fail = (error: unknown) => {
+            const fail = (error: unknown, terminal = false) => {
+              if (terminal) scope.completeSource();
               if (settled) return;
               settled = true;
-              cancelSource = undefined;
-              source.unsubscribe();
               reject(error);
             };
             const source = new Subscriber<unknown>({
               next(current) {
+                if (settled) return;
                 if (received || current instanceof StreamableFile || current !== null && typeof current === "object"
                   && (Symbol.asyncIterator in current || "pipe" in current && typeof current.pipe === "function")) {
                   fail(new ServiceUnavailableException("Rental HTTP 已审定处理器只能返回单个缓冲结果；流需要专用接点"));
@@ -217,17 +233,18 @@ export function createRentalHttpRequestScope(input: {
                 received = true;
                 value = current;
               },
-              error: fail,
+              error: (error: unknown) => fail(error, true),
               complete() {
+                scope.completeSource();
                 if (settled) return;
                 if (!received) { fail(new EmptyError()); return; }
                 settled = true;
-                cancelSource = undefined;
                 resolve(value);
               }
             });
-            cancelSource = fail;
-            try { next.handle().subscribe(source); } catch (error) { fail(error); }
+            // Do not unsubscribe this original source on HTTP close. Promise-backed
+            // controllers may still be committing even though the response was discarded.
+            try { next.handle().subscribe(source); } catch (error) { fail(error, true); }
           });
           try {
             scope.resume(() => {
@@ -241,6 +258,7 @@ export function createRentalHttpRequestScope(input: {
                   : route.review.kind === "audited-read" ? { auditedRead: true }
                     : route.review.kind === "maintained-read" ? { maintainedRead: true } : undefined, route.recovery);
               void result.then(value => {
+                scope.completeProcessing();
                 // No write authorization check after commit. Reads already passed the
                 // access adapter's pre-return recheck with the original Guard identity.
                 if (!scope.active || destination.closed) { native?.discard(); return; }
@@ -248,9 +266,9 @@ export function createRentalHttpRequestScope(input: {
                 scope.stop();
                 try { native?.flush(); destination.next(value); destination.complete(); }
                 catch (error) { destination.error(error); }
-              }, error => { native?.discard(); scope.cancel = undefined; scope.stop(error); destination.error(error); });
+              }, error => { scope.completeProcessing(); native?.discard(); scope.cancel = undefined; scope.stop(error); destination.error(error); });
             });
-          } catch (error) { native?.discard(); scope.stop(error); destination.error(error); }
+          } catch (error) { scope.completeProcessing(); native?.discard(); scope.stop(error); destination.error(error); }
           return () => { native?.discard(); scope.stop(); };
         }).pipe(catchError(error => { throw toHttpError(error); }));
       } catch (error) { scope?.stop(error); throw toHttpError(error); }

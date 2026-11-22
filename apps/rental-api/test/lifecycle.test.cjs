@@ -202,6 +202,29 @@ async function main() {
       await turn(); assert.equal(f.trace.length, reads);
     });
   });
+  await test('停止新请求后等待原HTTP处理器完成或失败，再关闭唯一数据库', async () => {
+    for (const failed of [false, true]) {
+      const f = fixture(), release = defer();
+      await withTimers(f, async () => {
+        await f.lifecycle.onApplicationBootstrap();
+        const running = f.lifecycle.runRequest(async () => {
+          await release.promise;
+          f.trace.push('http.original.complete');
+          if (failed) throw Error('original HTTP handler failed');
+        });
+        const completion = failed ? assert.rejects(running, /original HTTP handler failed/u) : running;
+        const shutdown = f.lifecycle.onApplicationShutdown();
+        try {
+          await assertPending(shutdown);
+          assert.equal(f.disconnects, 0);
+          await assert.rejects(f.lifecycle.runRequest(async () => assert.fail('new handler must not dispatch')), /正在停止新请求/u);
+        } finally { release.resolve(); }
+        await completion; await shutdown;
+        assert(f.trace.indexOf('http.original.complete') < f.trace.indexOf('disconnect'));
+        assert.equal(f.disconnects, 1);
+      });
+    }
+  });
   assert.equal(fs.existsSync(temporary), false);
   console.log(JSON.stringify({ checks, realApplication: true, timers: 'manual interval handles only', database: 'in-memory transport',
     network: 0, modelCalls: 0, diskOutputs: 0 }));

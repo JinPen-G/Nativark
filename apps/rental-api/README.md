@@ -16,7 +16,7 @@
 | [ai-client-http.ts](src/ai-client-http.ts)、[ai-client-request.ts](src/ai-client-request.ts) | 网站和小程序各十二个原客户操作的有限挂载；仅接受同一 Guard/客户准入绑定的实际请求，保留原方法、收据、响应状态和中止语义。 |
 | [database.ts](src/database.ts) | 公共 40 模型与 Rental 121 模型组成宿主 Client，公共数据库令牌使用同一连接池；生成物仅归本宿主。唯一请求入口将公共及 Core 适配使用的官方 JSON 空值映射为所选 Client 的同义单例，不另开连接或改动调用方事务。 |
 | [http-application-views.ts](src/http-application-views.ts) | 向 HTTP 注入原服务方法，隐藏 Nest 生命周期钩子，避免同一业务实例被多个模块重复启动。 |
-| [lifecycle.ts](src/lifecycle.ts) | 唯一初始化、预热、配货/到期/文件/限流作业与数据库退出负责人；先停止新任务并排空，再断开连接，排空失败不提前断库。 |
+| [lifecycle.ts](src/lifecycle.ts) | 唯一初始化、预热、配货/到期/文件/限流作业与数据库退出负责人；停止新请求和作业，等待原 HTTP 处理器及四作业参加者完成，再断开连接，排空失败不提前断库。 |
 | [deployment-package.ts](src/deployment-package.ts) | 从实际依赖读取固定标准包并核对摘要；源码目录、同名版本或准备结果均不能替代实际部署和物理数据证据。 |
 | [core-package-sources.ts](src/core-package-sources.ts) | 为同一 API 的包管理读取当前固定底座归档、实际运行产物、Rental/可选 AI 完整包和原迁移材料；无同源证据保持不可用。 |
 | [core-removal-source.ts](src/core-removal-source.ts) | 汇合目标 Core 的公共任务、文件、调用/通知收据及已选 AI 原依赖，与 Rental 自有预检共同报告移除阻碍；不执行排空或删除。 |
@@ -47,7 +47,7 @@ Core 包目录、预检、版本选择和候选准备的四个原 Controller 挂
 
 ## 请求、事务与响应
 
-[请求作用域](src/http-request-scope.ts) 位于原身份/员工路由 middleware 之后、唯一 Guard 之前。Guard 形成原可信身份后绑定一次实际处理器；拦截器位于原响应信封内部。请求不能重复订阅、切换路径或借另一应用的作用域；断线只结束请求范围，不证明在途工作已经回滚。
+[请求作用域](src/http-request-scope.ts) 位于原身份/员工路由 middleware 之后、唯一 Guard 之前。Guard 形成原可信身份后绑定一次实际处理器；拦截器位于原响应信封内部。装配供给同一 host.lifecycle.runRequest，停止新请求后，唯一生命周期继续等待已进入的处理器。客户端断线立即弃置响应，原源的完成或失败与响应取消分别处理，原应用作用域在两者均结束后释放。请求不能重复订阅、切换路径或借另一应用的作用域；断线不证明在途工作已经回滚。[实际接线](src/app.module.ts)
 
 HTTP 错误出口将已知 `CoreAccessError` 的 `denied` 映射为 403，`core_unavailable` 映射为 503，正式修订或操作冲突映射为 409，并保留原 `code` 与 `message`。同步异常与异步拒绝共用此映射，数据库及其他异常按原对象传播。[公共 Core HTTP 语义](../../packages/platform-core-host/src/core-scope.controller.ts)
 

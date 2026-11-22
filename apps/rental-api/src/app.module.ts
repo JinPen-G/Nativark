@@ -64,6 +64,7 @@ export function createRentalHostModule<Host extends RentalHostAssembly>(input: {
           return createRentalHttpRequestScope({ access: host.access, publicAccess: host.publicAccess,
             callbackAccess: host.callbackAccess, isClientPublicRoute: host.authorization.isClientPublicRoute,
             policy: currentPolicy, routesToPlatform: host.platform.routesToPlatform,
+            runRequest: consume => host.lifecycle.runRequest(consume),
             ...(input.ai ? { ai: input.ai.requestScope(host, currentPolicy) } : {}) });
         } },
       { provide: RentalApplicationLifecycle, inject: [RENTAL_HOST_ASSEMBLY], useFactory: (host: Host) => host.lifecycle }
