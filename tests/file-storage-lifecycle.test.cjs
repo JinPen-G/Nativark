@@ -516,7 +516,52 @@ async function pendingFileDeleteBoundaries() {
     } finally {
       Date.now = originalNow;
     }
-    console.log('public upload receipt: revocation after final reads, delegated receipt, original expiry and frozen observation passed');
+    for (const delegated of [false, true]) {
+      const advancingReceipt = await createPublicUpload();
+      let originalFinished = false, configurationReads = 0, advanced = false;
+      let advancedRows;
+      advancingReceipt.state.onConfig = async () => {
+        if (++configurationReads === 2) originalFinished = true;
+      };
+      if (delegated) advancingReceipt.authority.readReceipt = async (_context, readOriginal) => {
+        const receipt = await readOriginal();
+        originalFinished = true;
+        return receipt;
+      };
+      const originalAuthority = advancingReceipt.authority.assertUpload;
+      advancingReceipt.authority.assertUpload = async (...args) => {
+        await originalAuthority(...args);
+        if (!originalFinished || advanced) return;
+        await Promise.resolve();
+        const session = sessions.get(advancingReceipt.grant.sessionId), asset = advancingReceipt.state.asset;
+        const checksum = 'b'.repeat(64), destination = `${asset.storageKey}.committed/original-final-wait/${checksum}`;
+        session.status = delegated ? 'completed' : 'freeze_pending';
+        session.storageKey = asset.storageKey = destination;
+        session.updatedAt = new Date(session.updatedAt.getTime() + 1);
+        asset.updatedAt = new Date(asset.updatedAt.getTime() + 1);
+        asset.status = delegated ? 'active' : 'pending_upload';
+        asset.checksum = checksum;
+        asset.metadata = { ...asset.metadata, fileContentVersion: 1, contentHash: checksum,
+          stagingStorageKey: advancingReceipt.state.originalKey };
+        advancedRows = structuredClone({ session, asset });
+        advanced = true;
+      };
+      await assert.rejects(advancingReceipt.application.readUploadReceipt(tenantId, advancingReceipt.grant.sessionId),
+        /原上传会话在授权复验期间已变化或过期/u);
+      assert.equal(advanced, true);
+      // 原仓储夹具回滚当前事务，另一操作已提交的快照独立保留。
+      assets.set(advancedRows.asset.id, advancedRows.asset);
+      sessions.set(advancedRows.session.id, advancedRows.session);
+      advancingReceipt.state.asset = advancedRows.asset;
+      const originalKey = advancingReceipt.state.asset.storageKey;
+      const receipt = await advancingReceipt.application.readUploadReceipt(tenantId, advancingReceipt.grant.sessionId);
+      assert.equal(receipt.status, delegated ? 'completed' : 'freeze_pending');
+      assert.equal(receipt.uploadUrl, undefined);
+      assert.equal(receipt.expiresAt, advancingReceipt.grant.expiresAt);
+      assert.equal(advancingReceipt.state.asset.storageKey, originalKey);
+      assert.deepEqual(advancingReceipt.state.requests, []);
+    }
+    console.log('public upload receipt: revocation after final reads, delegated receipt, original expiry, advancing state and frozen observation passed');
   } finally {
     prisma.$transaction = saved.transaction; runtime.deleteObject = saved.deleteObject; runtime.objectRequest = saved.objectRequest;
     fileConfig = saved.fileConfig; beforeConfig = saved.beforeConfig; duringAudit = saved.duringAudit;
@@ -695,6 +740,137 @@ async function knowledgeUploadRenewalBoundaries() {
     savedSessions.forEach(([id, row]) => sessions.set(id, row));
   }
   console.log("知识文件原键续签在返回前复验日期版本及读取等待后的当前授权");
+}
+
+/** 普通Controller和原Runtime的同键续签，当前Core权威与仓储使用明确的离线夹具。 */
+async function ordinaryUploadRenewalBoundaries() {
+  const { FilesController } = require("@rental-os/rental-core/http-files");
+  const { createRentalBusinessTenantFence } = require("@rental-os/rental-core/mysql-business-fence");
+  const { requestFingerprint } = require("@rental-os/platform-contracts/request-fingerprint");
+  const { fileStorageLocationHash } = require("@rental-os/platform-contracts/file-content-binding");
+  const savedAssets = [...assets], savedSessions = [...sessions];
+  const nativeNow = Date.now;
+  const request = {
+    businessModule: "rental-core", businessType: "rental_order", businessId: orderId,
+    fileName: "contract.pdf", mimeType: "application/pdf", sizeBytes: 1024,
+    uploadScene: "order-contract", idempotencyKey: "ordinary-original-renewal"
+  };
+  const state = { enabled: true, configurationReads: 0, signatures: 0,
+    onConfiguration: async () => {}, onAuthority: async () => {} };
+  const config = {
+    id: "ordinary-original-config", capability: "file", provider: "s3_compatible",
+    settings: { endpoint: "https://storage.example.invalid", bucket: "files", region: "us-east-1" },
+    credentials: { accessKeyId: "offline", secretAccessKey: "offline-only" },
+    revision: { updatedAt: new Date(1) }
+  };
+  const store = {
+    ...prisma,
+    fileAsset: { ...prisma.fileAsset, findFirst: async input => structuredClone(await prisma.fileAsset.findFirst(input)) },
+    fileUploadSession: { ...prisma.fileUploadSession,
+      findFirst: async input => structuredClone(await prisma.fileUploadSession.findFirst(input)) },
+    $transaction: work => prisma.$transaction(tx => work({ ...tx,
+      fileAsset: store.fileAsset, fileUploadSession: store.fileUploadSession }))
+  };
+  const application = new FileStorageRuntimeService(store, {
+    runtimeConfig: async () => {
+      await state.onConfiguration(++state.configurationReads);
+      return structuredClone(config);
+    },
+    assertEnabledInTransaction: integrations.assertEnabledInTransaction
+  }, undefined, undefined, undefined, access);
+  const controller = new FilesController({}, application, store, {});
+  const originalPresign = application.presign.bind(application);
+  application.presign = (...args) => { state.signatures++; return originalPresign(...args); };
+  application.objectRequest = async () => { throw Error("ordinary receipt must not dispatch object storage"); };
+  const fence = createRentalBusinessTenantFence(async (_transaction, currentTenant) => {
+    assert.equal(currentTenant, tenantId);
+    await state.onAuthority();
+    if (!state.enabled) throw Error("Current Core is stopped");
+  });
+  const read = () => fence.run(() => controller.createUploadSession({ user: {
+    id: operatorIdentity.userId, tenantId, displayName: "file operator"
+  } }, request));
+  function fixture(status = "pending_upload") {
+    assets.clear(); sessions.clear();
+    Object.assign(state, { enabled: true, configurationReads: 0, signatures: 0,
+      onConfiguration: async () => {}, onAuthority: async () => {} });
+    const asset = { ...assetRow("ordinary-original-file", status === "completed" ? "active" : "pending_upload"),
+      storageProvider: config.provider, uploadedBy: operatorIdentity.userId,
+      metadata: { uploadMode: "provider", fileUploadVersion: 2, workspaceId,
+        storageLocationHash: fileStorageLocationHash(config),
+        uploadConfigHash: requestFingerprint({ id: config.id, provider: config.provider,
+          settings: config.settings, credentials: config.credentials }) } };
+    const session = { id: "ordinary-original-session", tenantId, fileAssetId: asset.id,
+      idempotencyKey: request.idempotencyKey, provider: config.provider, storageKey: asset.storageKey,
+      status, expiresAt: new Date(nativeNow() + 15 * 60 * 1000), createdAt: new Date(), updatedAt: new Date() };
+    assets.set(asset.id, asset); sessions.set(session.id, session);
+    return { asset, session };
+  }
+  try {
+    const original = fixture(), before = structuredClone(original);
+    const receipt = await read();
+    assert.equal(receipt.sessionId, original.session.id);
+    assert.equal(receipt.fileAssetId, original.asset.id);
+    assert.equal(receipt.expiresAt, original.session.expiresAt.toISOString());
+    assert.equal(new URL(receipt.uploadUrl).pathname.endsWith("contract.pdf.pending-upload"), true);
+    assert.equal(state.signatures, 1);
+    assert.deepEqual(original, before);
+
+    fixture(); state.onConfiguration = async reads => { if (reads === 2) state.enabled = false; };
+    await assert.rejects(read(), /Current Core is stopped/u);
+    assert.equal(state.signatures, 1);
+
+    for (const change of [
+      rows => { rows.session.expiresAt = new Date(0); },
+      rows => { rows.session.updatedAt = new Date(rows.session.updatedAt.getTime() + 1); },
+      rows => { rows.asset.updatedAt = new Date(rows.asset.updatedAt.getTime() + 1); },
+      rows => { rows.session.status = "freeze_pending"; }
+    ]) {
+      const rows = fixture();
+      state.onAuthority = async () => { if (state.configurationReads >= 2) change(rows); };
+      await assert.rejects(read(), /原上传会话在续签期间已变化/u);
+      assert.equal(state.signatures, 1);
+    }
+
+    const expired = fixture();
+    state.onAuthority = async () => { if (state.configurationReads >= 2) Date.now = () => expired.session.expiresAt.getTime(); };
+    await assert.rejects(read(), /原上传会话在续签期间已变化/u);
+    Date.now = nativeNow;
+
+    for (const status of ["completed", "freeze_pending"]) {
+      const rows = fixture(status), snapshot = structuredClone(rows);
+      state.enabled = false;
+      const observed = await read();
+      assert.equal(observed.status, status);
+      assert.equal(observed.uploadUrl, undefined);
+      assert.equal(observed.expiresAt, rows.session.expiresAt.toISOString());
+      assert.equal(state.signatures, 0);
+      assert.deepEqual(rows, snapshot);
+    }
+
+    // 首建事实提交后的撤权只阻止返PUT，恢复仍使用已经保存的原键和原期限。
+    fixture(); assets.clear(); sessions.clear();
+    state.onConfiguration = async reads => { if (reads === 3) state.enabled = false; };
+    await assert.rejects(read(), /Current Core is stopped/u);
+    assert.equal(assets.size, 1);
+    assert.equal(sessions.size, 1);
+    const persisted = structuredClone({ asset: [...assets.values()][0], session: [...sessions.values()][0] });
+    assert.equal(persisted.session.status, "pending_upload");
+    state.enabled = true;
+    state.onConfiguration = async () => {};
+    const recovered = await read();
+    assert.equal(recovered.sessionId, persisted.session.id);
+    assert.equal(recovered.fileAssetId, persisted.asset.id);
+    assert.equal(recovered.expiresAt, persisted.session.expiresAt.toISOString());
+    assert.deepEqual({ asset: [...assets.values()][0], session: [...sessions.values()][0] }, persisted);
+    assert.equal(assets.size, 1);
+    assert.equal(sessions.size, 1);
+  } finally {
+    Date.now = nativeNow;
+    assets.clear(); savedAssets.forEach(([id, row]) => assets.set(id, row));
+    sessions.clear(); savedSessions.forEach(([id, row]) => sessions.set(id, row));
+  }
+  console.log("普通Controller同键回执在读取后复验当前Core、原日期快照和期限");
 }
 
 /** The real public cleanup and presigner, with only transactional storage and
@@ -1655,6 +1831,7 @@ void runWithRequestIdentity(operatorIdentity, async () => {
   await expiredCleanupBoundaries();
   await pendingFileDeleteBoundaries();
   await knowledgeUploadRenewalBoundaries();
+  await ordinaryUploadRenewalBoundaries();
   console.log("file storage lifecycle tests passed");
 }).catch((error) => {
   console.error(error);

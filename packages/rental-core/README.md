@@ -212,7 +212,7 @@ Rental HTTP从 `@rental-os/rental-core/http` 的 `RentalHttpModule` 接入，类
 
 微信客户端工厂可通过 `npm run build:native-clients -w @rental-os/rental-core` 单独构建，类型检查使用 `npm run lint:native-clients -w @rental-os/rental-core`。Native独立入口与两端微信构建复用同一私有声明/Native编译器，读取当前Core、Shared与公共合同源码，不要求先写正式Shared/Core产物。独立入口按真实包出口生成JS、重定位声明与许可，`--check`退出时释放私有产物。[Native配置](tsconfig.native-clients.json) · [客户接入](clients/miniprogram/README.md) · [员工接入](clients/staff/README.md) · [私有准备](../../scripts/miniprogram-shared-types.cjs)
 
-空间切换、开发密码重置和员工订阅上下文由 [独立扩展模块](src/http-extensions.module.ts) 绑定同一认证/订阅实例；它与旧宿主已挂载的三个薄适配路径二选一，公共六项认证继续由公共模块提供。[原 Guard](src/http-auth.ts) 保持角色、客户和空间政策，[application-access](src/application-access.ts) 将当前 Core 授权接入原业务父锁事务；它不代表所有独立写入、媒体流和回调已完成接入。
+空间切换、开发密码重置和员工订阅上下文由 [独立扩展模块](src/http-extensions.module.ts) 绑定同一认证/订阅实例；它与旧宿主已挂载的三个薄适配路径二选一，公共六项认证继续由公共模块提供。[原 Guard](src/http-auth.ts) 保持角色、客户和空间政策，在认证前清除 Node 请求上与 `socket` 相同的 `client` 运输别名；专用客户认证仍写入自己的可信身份。[application-access](src/application-access.ts) 将当前 Core 授权接入原业务父锁事务；它不代表所有独立写入、媒体流和回调已完成接入。
 
 企业历史读取通过受控HTTP政策登记的8个企业入口接入同一恢复权威，依次锁当前Tenant、Core、原Order（适用时）与Workspace，再在同一事务消费原`requireWorkspaceAction`和订单谓词。宿主向`createRentalRecoveryAuthority`提供同实例`corporateHistory.access`与`corporateHistory.orders`；当前成员、授权修订或动作集合变化时丢弃未释放的数据。财务只读取企业承担的原订单，本人订单权限不能替代企业授权。企业入口缺原参加者时明确不可用。[企业历史政策](src/application-recovery-policy.ts) · [当前主体与原对象](src/application-recovery-authority.ts) · [原订单谓词](src/mysql-enterprise-orders.ts)
 

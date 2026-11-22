@@ -12,7 +12,7 @@ import { createOriginalFileUploadFacts } from "./file-upload-session";
 import { readOriginalFileUploadReceipt } from "./file-upload-receipt";
 import { freezeFileUploadContent } from "./file-content-freeze";
 import { FileStorageCleanup, type FileCleanupParticipants, type FileCleanupBoundary } from "./file-cleanup";
-import { createOriginalFileUploadSession, completeOriginalFileUpload, type FileUploadCompletionSnapshot } from "./file-upload-workflow";
+import { assertOriginalFileUploadSnapshot, createOriginalFileUploadSession, completeOriginalFileUpload, type FileUploadCompletionSnapshot } from "./file-upload-workflow";
 import { activateOriginalFileUpload } from "./file-upload-activation";
 import { issueFileDownloadReference, type FileDownloadAudit } from "./file-download";
 import type { FileStorageApplicationTransaction } from "./file-storage.application-store";
@@ -163,7 +163,7 @@ export class FileStorageApplication<Owner extends FileStorageOwner, Transaction 
 
   private async receipt(context: FileUploadAuthorityContext<Owner>, authority: FileStorageAuthority<Owner, Transaction>, rows: UploadRows) {
     const { tenantId, owner } = context;
-    const { asset, session } = rows;
+    const { asset, session } = structuredClone(rows);
     const expiresAt = session.expiresAt.getTime();
     if (session.provider === "local_mock" && !this.participants.allowSimulation)
       throw new ServiceUnavailableException("生产环境禁止重放模拟文件上传，请先配置并验证文件存储平台");
@@ -178,10 +178,26 @@ export class FileStorageApplication<Owner extends FileStorageOwner, Transaction 
     });
     const receipt = await (authority.readReceipt ? authority.readReceipt({ ...context, asset, session }, original) : original());
     if (receipt.uploadUrl) {
-      // 回执的文件与配置读取均已结束；PUT引用仍须同一权威的当前新上传许可。
-      await authority.assertUpload(context);
+      const changed = () => new ConflictException("原上传会话在授权复验期间已变化或过期");
+      // 原事务权威和配置锁覆盖末次授权等待，再读取原快照，避免返回已被完成操作占用的PUT。
+      await this.participants.transaction(async tx => {
+        await authority.assertUpload(context, tx);
+        const config = await this.participants.runtimeConfig(tenantId, session.provider, { requireLiveTest: false });
+        const metadata = asset.metadata as Record<string, unknown> | null;
+        if (!config || metadata?.uploadConfigHash !== requestFingerprint({
+          id: config.id, provider: config.provider, settings: config.settings, credentials: config.credentials
+        })) throw changed();
+        await this.participants.assertEnabled(tx, tenantId, config);
+        await assertOriginalFileUploadSnapshot({ asset, session }, async () => {
+          const [currentAsset, currentSession] = await Promise.all([
+            tx.fileAsset.findFirst({ where: { id: asset.id, tenantId } }),
+            tx.fileUploadSession.findFirst({ where: { id: session.id, tenantId } })
+          ]);
+          return { asset: currentAsset, session: currentSession };
+        }, () => authority.assertUpload(context, tx), changed);
+      });
       if (Date.parse(receipt.expiresAt) !== expiresAt || expiresAt <= Date.now())
-        throw new ConflictException("原上传会话在授权复验期间已变化或过期");
+        throw changed();
     }
     return receipt;
   }

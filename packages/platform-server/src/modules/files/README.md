@@ -70,9 +70,9 @@ await files.downloadUrl(tenantId, fileAssetId, owner);
 
 知识上传的 PUT 续签由 [Rental 原续签入口](../../../../rental-core/src/file-application-runtime.ts) 沿 Tenant、配置、会话、文件的原锁顺序核对完整快照。配置读取后的授权复验先于会话和文件的末次读取，读取完成后再复验授权，事务提交后核对原有效期，再返回原临时键的引用。
 
-`readOriginalFileUploadReceipt` 保留原会话、文件、配置指纹和有效期。仅仍有效的 `pending_upload` 可以取得原暂存键的 PUT，返回前再核原业务引用、原会话、原文件及当前配置，包括Date版本和会话有效期在授权等待期间的变化。已完成、过期、失败或 `freeze_pending` 返回原回执，续签不会延长有效期或另建目标。租户共享客户资料与空间业务的区别由 Rental 原参加者判断，公共框架没有 Rental 场景枚举。
+`readOriginalFileUploadReceipt` 保留原会话、文件、配置指纹和有效期。仅仍有效的 `pending_upload` 可以取得原暂存键的 PUT，返回前再核原业务引用、原会话、原文件及当前配置，包括Date版本和会话有效期在授权等待期间的变化。已完成、过期、失败或 `freeze_pending` 返回原回执，续签不会延长有效期或另建目标。租户共享客户资料与空间业务的区别由 Rental 原参加者判断，公共框架没有 Rental 场景枚举。普通 [Rental HTTP 入口](../../../../rental-core/src/http-files.controller.ts)的原键续签由[兼容应用](../../../../rental-core/src/file-application-runtime.ts)在回执全部读取结束后进入 `ReadCommitted` 短事务，复验当前 Auth、角色、Tenant/Core、成员分配与对象范围，按配置 → 会话 → 文件锁序核完整日期快照，沿同一租约再核当前权限，事务结束后核原有效期再返暂存 PUT。
 
-公共文件应用在会话、文件、配置及专用 `readReceipt` 全部读取完成后，对带 PUT 引用的结果调用同一业务权威的 `assertUpload`。这次复验覆盖当前身份、Core、对象及业务范围，随后核对回执的原有效期。纯元数据及冻结结果按原回执路径返回。
+公共文件应用在普通或专用 `readReceipt` 读取完成后，对带 PUT 引用的结果进入原事务。先复验当前上传权威并锁定原配置，再复验同一权威、读取原会话和文件，比较包括 Date 的完整快照，事务结束后核对原有效期。纯元数据及冻结结果沿原回执读取。
 
 `FileStorageCleanup` 没有计时器或租户发现。原 Nest 宿主仍持有唯一计时器，Rental 兼容应用发现原租户集合并逐租户委托三个清理方法。[兼容应用](../../../../rental-core/src/file-application-runtime.ts)没有启动钩子或另一套定时器。原完成暂存清理在发送 DELETE 前记录 unknown，失应答及提交结果未知时只 HEAD 原键，保持完成文件与证据不变。专用保留场景由原宿主明确传入，缺少租户的调用在查询前拒绝。
 

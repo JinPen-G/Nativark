@@ -1,5 +1,6 @@
 /** Rental 原文件兼容适配，核原合法 module/scene、对象权限、知识、检查和企业凭证。
- * 创建重放、完成/失败、删除及清理收据委托公共流程，原宿主继续供给业务事务与审计参加者。 */
+ * 普通PUT回执在原权限、配置与文件锁内复验。创建、完成/失败、删除及清理委托公共流程。
+ * 原宿主供给同一业务事务、审计及专用参加者。 */
 import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
 import { BadRequestException, ConflictException, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import type { Prisma, PrismaClient } from "@prisma/client";
@@ -24,7 +25,7 @@ import { RentalEvidenceFileStorage } from "./file-application-rental-evidence";
 import { RentalStaffUploadObservation } from "./file-application-staff-observation";
 import { RentalEnterprisePaymentProofFileParticipant } from "./file-application-enterprise-payment-proof";
 import { RentalFileApplicationParticipant, RentalStaffFileStorageApplication, isRentalStaffFileBinding, type RentalFileWorkspaceAuthority } from "./file-application-participant";
-import { lockRentalBusinessTenant } from "./mysql-business-fence";
+import { assertRentalBusinessTenantAccessAfterLock, lockRentalBusinessTenant } from "./mysql-business-fence";
 import { ENTERPRISE_PAYMENT_PROOF_SCENE } from "./enterprise-workflows";
 import { RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE } from "./exchange-inspection-preparation";
 import type { StaffUploadObservationRequest, StaffUploadObservationResponse } from "./staff-upload-observation";
@@ -671,7 +672,7 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
   private async originalUploadSummary(tenantId: string, session: Prisma.FileUploadSessionGetPayload<object>,
     asset: Prisma.FileAssetGetPayload<object>, owner?: FileBusinessOwner<Revision>) {
     session = structuredClone(session); asset = structuredClone(asset);
-    return readOriginalFileUploadReceipt({ tenantId, session, asset, owner }, {
+    const receipt = await readOriginalFileUploadReceipt({ tenantId, session, asset, owner }, {
       isTenantSharedBinding: file => ["customer", "customer_profile", "membership_review"].includes(file.businessType),
       assertBusinessReference: () => this.businessTransaction(tenantId, tx =>
         this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner?.workspaceId, tx)),
@@ -680,6 +681,33 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
       readAsset: () => this.prisma.fileAsset.findFirst({ where: { id: asset.id, tenantId } }),
       signPendingPut: (config, storageKey, mimeType, expiresAt) => this.presign(config, "PUT", storageKey, mimeType, expiresAt)
     });
+    if (!receipt.uploadUrl) return receipt;
+    const changed = () => new ConflictException("原上传会话在续签期间已变化");
+    // helper的末次配置读取已经让出执行，返PUT前沿原同事务权威核当前主体/Core及原文件。
+    await this.prisma.$transaction(async tx => {
+      await lockRentalBusinessTenant(tx, tenantId);
+      const config = await this.integrations.runtimeConfig("file", tenantId, session.provider as never, { requireLiveTest: false });
+      if (!config || (asset.metadata as JsonRecord | null)?.uploadConfigHash !== requestFingerprint({
+        id: config.id, provider: config.provider, settings: config.settings, credentials: config.credentials
+      })) throw changed();
+      await this.integrations.assertEnabledInTransaction(tx, tenantId, "file", config.provider,
+        { configRevision: config.revision, requireLiveTest: false });
+      await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM file_upload_sessions WHERE tenantId=${tenantId} AND id=${session.id} FOR UPDATE`);
+      await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM FileAsset WHERE tenantId=${tenantId} AND id=${asset.id} FOR UPDATE`);
+      const readSnapshot = async () => {
+        const [currentSession, currentAsset] = await Promise.all([
+          tx.fileUploadSession.findFirst({ where: { id: session.id, tenantId } }),
+          tx.fileAsset.findFirst({ where: { id: asset.id, tenantId } })
+        ]);
+        return { session: currentSession, asset: currentAsset };
+      };
+      await assertOriginalFileUploadSnapshot({ session, asset }, readSnapshot,
+        () => this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner?.workspaceId, tx), changed);
+      // 配置和文件锁覆盖读取后的末次会话/角色/Core复验，沿同一租约核对当前权限。
+      await assertRentalBusinessTenantAccessAfterLock(tx, tenantId);
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.ReadCommitted });
+    if (session.expiresAt.getTime() <= Date.now()) throw changed();
+    return receipt;
   }
 
   private matchesUploadRequest(

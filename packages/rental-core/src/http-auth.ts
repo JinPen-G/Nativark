@@ -62,6 +62,7 @@ interface RequestLike {
   staffLocationScope?: { mode: "all" | "selected"; locationIds: string[] };
   user?: SystemUserRow;
   client?: ClientRequestContext;
+  socket?: unknown;
 }
 
 function requiredCapability(path: string): RentalCapability | undefined {
@@ -1120,6 +1121,9 @@ class RentalApiAuthGuard implements CanActivate {
   }
 
   private async authorizeRequest(request: RequestLike) {
+    // Node 的 client 是 socket 的旧别名，不是已认证客户；只移除这一个运输别名。
+    // 下方客户分面仍由原专用认证写入，已有的其他客户上下文不会被营运请求清除。
+    if (request.socket !== undefined && request.client === request.socket) delete request.client;
     // 判定一律用归一化 + 小写化后的路径：Express 的路由匹配对大小写与尾斜杠都不敏感，
     // 而本文件全是字符串前缀与正则判定。两者语义不一致时，变体路径会落到
     // requiredPermissions 末尾的 `return []` 并被当作"无需权限"放行。详见 request-path.ts。
