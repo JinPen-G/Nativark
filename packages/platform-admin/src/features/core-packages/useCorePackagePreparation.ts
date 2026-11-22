@@ -1,4 +1,4 @@
-/** 页面保存唯一核对指针，写入失应答后只读取原结果。
+/** 页面保存唯一核对指针，写入失应答后只读取原结果；本机存储故障仍允许手工核对原回执。
  * 指针按本人和租户隔离，不保存凭据或授予权限，所有请求仍经当前 SaaS 会话围栏。 */
 import { useLayoutEffect, useRef, useState } from "react";
 import type { GitHubCoreReleasePin } from "@rental-os/core-contracts/github";
@@ -79,8 +79,8 @@ export function useCorePackagePreparation(api: CorePackagesApi) {
       && session.tenant?.tenantId === owner.tenantId && session.user?.id === owner.userId
       && session.sessionVerified && canManagePublicResource(session.user, "saas", "system:tenant:manage"));
   }
-  function controller(): AbortController {
-    if (!live()) throw new DOMException("原 Core 包管理页面已失效", "AbortError");
+  function controller(signal?: AbortSignal): AbortController {
+    if (signal?.aborted || !live()) throw new DOMException("原 Core 包管理页面已失效", "AbortError");
     return lifetime.current!;
   }
   function update(patch: Partial<State>): void {
@@ -88,18 +88,25 @@ export function useCorePackagePreparation(api: CorePackagesApi) {
     setState(current.current);
   }
   function run(action: string, input: unknown, work: (signal: AbortSignal) => Promise<void>): Promise<void> {
+    const boundary = controller();
     // 同动作的不同输入必须先等原请求完成，不能共用另一份预览。
     const key = formSnapshotFingerprint([action, input]);
     if (inFlight.current) return inFlight.current.key === key ? inFlight.current.promise
       : Promise.reject(new Error("请等待当前 Core 包操作完成"));
-    const boundary = controller();
+    if (state !== current.current) return Promise.reject(new Error("Core 包操作视图已变化，请使用当前入口"));
     update({ busy: true, error: undefined });
-    const promise = Promise.resolve().then(() => work(boundary.signal)).catch(error => {
-      if (live()) update({ error: error instanceof Error ? error.message : "Core 包操作未完成，请核对原结果" });
+    // effect 重建只恢复新请求，排队中和失应答的旧请求仍受原 signal 约束。
+    const promise = Promise.resolve().then(() => {
+      controller(boundary.signal);
+      return work(boundary.signal);
+    }).catch(error => {
+      if (!boundary.signal.aborted && live()) update({ error: error instanceof Error ? error.message : "Core 包操作未完成，请核对原结果" });
       throw error;
     }).finally(() => {
-      if (inFlight.current?.promise === promise) inFlight.current = null;
-      if (live()) update({ busy: false });
+      if (inFlight.current?.promise === promise) {
+        inFlight.current = null;
+        if (live()) update({ busy: false });
+      }
     });
     inFlight.current = { key, promise };
     return promise;
@@ -129,8 +136,10 @@ export function useCorePackagePreparation(api: CorePackagesApi) {
     controller();
     try {
       const stored = storedPending(journalKey);
-      if (stored && formSnapshotFingerprint(stored) !== formSnapshotFingerprint(pending))
+      if (stored && formSnapshotFingerprint(stored) !== formSnapshotFingerprint(pending)) {
+        update({ pending: stored });
         throw new Error("本机核对指针已变化，不能清除其他操作");
+      }
       window.sessionStorage.removeItem(journalKey);
       if (window.sessionStorage.getItem(journalKey) !== null) throw new Error("本机原操作标记未清除");
       update({ pending: undefined, storageError: undefined });
@@ -140,9 +149,11 @@ export function useCorePackagePreparation(api: CorePackagesApi) {
     }
   }
 
-  const resetPreview = () => {
-    if (current.current.busy || current.current.pending) return;
+  const isCurrent = () => live() && state === current.current;
+  const resetPreview = (): boolean => {
+    if (!isCurrent() || current.current.busy || current.current.pending || current.current.storageError) return false;
     update({ release: undefined, selected: undefined, preview: undefined, prepared: undefined, error: undefined });
+    return true;
   };
   const previewRelease = (expected: GitHubCoreReleasePin) => {
     const pinned = structuredClone(expected);
@@ -151,7 +162,7 @@ export function useCorePackagePreparation(api: CorePackagesApi) {
       update({ release: undefined, selected: undefined, preview: undefined, prepared: undefined });
       const { repository, coreId, version, tag } = pinned;
       const result = await api.previewRelease({ repository, coreId, version, tag }, signal);
-      controller();
+      controller(signal);
       if (result.status === "unavailable") throw new Error(result.error.message);
       if (!/^github-[a-f0-9]{64}$/.test(result.reference)
         || formSnapshotFingerprint(result.release) !== formSnapshotFingerprint(pinned))
@@ -168,7 +179,7 @@ export function useCorePackagePreparation(api: CorePackagesApi) {
     const pending: CorePackagePending = { kind: "release", reference: release.reference };
     remember(pending);
     const result = await api.selectRelease({ release: release.release }, signal);
-    controller();
+    controller(signal);
     if (result.status === "unavailable") {
       // 该返回由发行应用在未尝试发布时给出，HTTP 错误和 unknown 均保留原指针。
       forget(pending);
@@ -185,7 +196,7 @@ export function useCorePackagePreparation(api: CorePackagesApi) {
       requireIdle();
       update({ preview: undefined, prepared: undefined });
       const result = await api.previewPreparation(expected, signal);
-      controller();
+      controller(signal);
       if (result.status === "unavailable") throw new Error(result.error.message);
       if (!sha256.test(result.sha256) || result.plan.format !== "core-preparation-1" || result.plan.deployment !== "pending"
         || formSnapshotFingerprint(result.plan.request) !== formSnapshotFingerprint(expected))
@@ -201,7 +212,7 @@ export function useCorePackagePreparation(api: CorePackagesApi) {
     const pending: CorePackagePending = { kind: "preparation", sha256: preview.sha256 };
     remember(pending);
     const result = await api.prepare({ request: preview.plan.request, expectedSha256: preview.sha256 }, signal);
-    controller();
+    controller(signal);
     if (result.status === "unavailable") {
       // 准备应用的 unavailable 位于发布前，发布后的异常只能按原摘要核对。
       forget(pending);
@@ -212,30 +223,48 @@ export function useCorePackagePreparation(api: CorePackagesApi) {
     update({ prepared: result.record });
     forget(pending);
   });
-  const reconcile = () => run("receipt", state.pending, async signal => {
-    const pending = state.pending;
-    if (!pending || formSnapshotFingerprint(pending) !== formSnapshotFingerprint(current.current.pending))
-      throw new Error("原操作核对指针已变化，请读取当前记录");
-    if (pending.kind === "release") {
-      const result = await api.releaseReceipt({ reference: pending.reference }, signal);
-      controller();
-      if (result.status === "unavailable") throw new Error(result.error.message);
-      // absent 只是当前读取时刻的事实，原失应答请求仍可能尚在发布，不据此重发或解除锁。
-      if (result.status === "absent") throw new Error("尚未读到原发行记录，请保留同一引用并稍后核对");
-      const expected = current.current.release?.reference === pending.reference ? current.current.release.release : undefined;
-      verifyRelease(pending.reference, result.record, expected);
-      update({ selected: result.record });
-    } else {
-      const result = await api.preparationReceipt({ sha256: pending.sha256 }, signal);
-      controller();
-      if (result.status === "unavailable") throw new Error(result.error.message);
-      const expected = current.current.preview?.sha256 === pending.sha256 ? current.current.preview : undefined;
-      verifyPreparation(pending.sha256, result.record, expected);
-      update({ prepared: result.record });
-    }
-    forget(pending);
-  });
-  return { ...state, resetPreview, previewRelease, selectRelease, previewPreparation, prepare, reconcile };
+  const reconcile = (original?: CorePackagePending) => {
+    const pending = structuredClone(original ?? state.pending);
+    return run("receipt", pending, async signal => {
+      if (!pending || (pending.kind === "release" ? !/^github-[a-f0-9]{64}$/.test(pending.reference) : !sha256.test(pending.sha256)))
+        throw new Error("请填写原发行引用或候选 SHA-256");
+      if (current.current.pending && formSnapshotFingerprint(pending) !== formSnapshotFingerprint(current.current.pending))
+        throw new Error("已有其他原操作等待核对，请保留当前指针");
+      // 本机指针丢失时只登记手工提供的原标识，随后仍仅读取原回执。
+      if (!current.current.pending) {
+        try { remember(pending); }
+        catch (error) {
+          controller(signal);
+          if (!current.current.storageError || current.current.pending
+            && formSnapshotFingerprint(current.current.pending) !== formSnapshotFingerprint(pending)) throw error;
+          // 保留存储错误和原存储字节，以内存指针仅读取；新准备仍由 requireIdle 拒绝。
+          update({ pending });
+        }
+        update({ selected: undefined, prepared: undefined });
+      }
+      if (pending.kind === "release") {
+        const result = await api.releaseReceipt({ reference: pending.reference }, signal);
+        controller(signal);
+        if (result.status === "unavailable") throw new Error(result.error.message);
+        // absent 只是当前读取时刻的事实，原失应答请求仍可能尚在发布，不据此重发或解除锁。
+        if (result.status === "absent") throw new Error("尚未读到原发行记录，请保留同一引用并稍后核对");
+        const expected = current.current.release?.reference === pending.reference ? current.current.release.release : undefined;
+        verifyRelease(pending.reference, result.record, expected);
+        update({ selected: result.record, prepared: undefined });
+      } else {
+        const result = await api.preparationReceipt({ sha256: pending.sha256 }, signal);
+        controller(signal);
+        if (result.status === "unavailable") throw new Error(result.error.message);
+        const expected = current.current.preview?.sha256 === pending.sha256 ? current.current.preview : undefined;
+        verifyPreparation(pending.sha256, result.record, expected);
+        // 只保留这个候选实际使用的发行选择，其他原结果不能占据当前恢复视图。
+        const selected = current.current.selected;
+        update({ prepared: result.record, selected: selected?.reference === result.record.plan.request.package.reference ? selected : undefined });
+      }
+      forget(pending);
+    });
+  };
+  return { ...state, isCurrent, resetPreview, previewRelease, selectRelease, previewPreparation, prepare, reconcile };
 }
 
 export type CorePackagePreparationControls = ReturnType<typeof useCorePackagePreparation>;

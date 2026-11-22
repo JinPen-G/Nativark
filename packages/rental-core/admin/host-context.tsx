@@ -279,6 +279,10 @@ export function createRentalAdminHost(options: RentalAdminHostOptions): RentalAd
         capability: createRentalCapabilityPageContext({ ...workspace, refreshSession: options.refreshSession }),
         location: createRentalLocationPageContext({
           ...workspace,
+          canViewProfile: () => ["rental-os:order:view", "rental-core:catalog:view", "rental-core:asset:view"]
+            .some(permission => getWorkspaceSession().hasPermission(permission)),
+          canViewCategories: () => ["rental-os:order:view", "rental-core:catalog:view", "rental-core:asset:view", "system:tenant:manage"]
+            .some(permission => getWorkspaceSession().hasPermission(permission)),
           canViewOrganizations: options.canViewOrganizations,
           canManageOrganizationMapping: options.canManageOrganizationMapping,
         }),

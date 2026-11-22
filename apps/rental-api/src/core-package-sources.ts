@@ -18,6 +18,8 @@ import type { CorePackageDeploymentSource } from "@rental-os/platform-core-host/
 import type { CorePackagePreparationMaterialsSource } from "@rental-os/platform-core-host/core-package-preparation";
 import { requireCorePackagePin } from "@rental-os/core-contracts/install";
 import { readPlatformRuntimeEvidence } from "@rental-os/platform-core-host";
+import { readRentalPackageSnapshot } from "@rental-os/rental-core/data-package";
+import { rentalHostLegacyApiRoutes, rentalHostReleaseOpenApi } from "./openapi";
 
 /** 参加者只由同一受控宿主提供；reader 必须沿原实际依赖位置读取，不能消费请求中的目录或发行。 */
 export interface RentalCorePackageSourcesInput {
@@ -84,15 +86,28 @@ export function createRentalCorePackageSources(input: RentalCorePackageSourcesIn
     const platformFiles = readCoreArchive(artifact.bytes, artifact.release.sha256).files;
     if (!readPlatformRuntime(platformFiles, lock)) return;
 
-    const rental = rentalPackage();
-    if (!isDeepStrictEqual({ manifest: rental.manifest, sha256: rental.sha256 }, pin)
-      || !isAbsolute(rental.root)
-      || relative(resolve(dirname(require.resolve("@rental-os/rental-core")), ".."), resolve(rental.root)) !== "")
-      throw new Error("Rental 实际运行包与当前启动锁不一致");
-    const rentalFiles = readCorePackageFiles(rental.root, CORE_ARCHIVE_LIMITS.fileBytes, CORE_ARCHIVE_LIMITS.totalBytes);
-    // 原 reader 已完整核包；本次再次读取材料后核同一归档，拒绝两次读取之间的文件变化。
-    if (createCoreArchive(rentalFiles).sha256 !== pin.sha256)
-      throw new Error("Rental 包材料在读取期间已变化");
+    const runtimeRoot = resolve(dirname(require.resolve("@rental-os/rental-core")), "..");
+    const requireRentalRoot = (current: { root: string; manifest: CoreManifest; sha256: string }) => {
+      if (!isDeepStrictEqual({ manifest: current.manifest, sha256: current.sha256 }, pin)
+        || !isAbsolute(current.root) || relative(runtimeRoot, resolve(current.root)) !== "")
+        throw new Error("Rental 实际运行包与当前启动锁不一致");
+    };
+    let rentalFiles: ReadonlyMap<string, Uint8Array>;
+    if (typeof readRentalPackageSnapshot === "function") {
+      const current = readRentalPackageSnapshot(runtimeRoot, pin, lock.platform.versions, rentalHostLegacyApiRoutes());
+      requireRentalRoot(current);
+      const expectedOpenApi = rentalHostReleaseOpenApi(current.manifest.entries.openapi);
+      if (!current.openapi || !isDeepStrictEqual(current.openapi, JSON.parse(JSON.stringify(expectedOpenApi))))
+        throw new Error("Rental 固定包缺少与当前实际处理器同源的 OpenAPI 贡献");
+      rentalFiles = current.files;
+    } else {
+      // 原 Core 仍走原部署 reader，并对交给本次准备的第二份字节单独核摘要。
+      const current = rentalPackage();
+      requireRentalRoot(current);
+      rentalFiles = readCorePackageFiles(current.root, CORE_ARCHIVE_LIMITS.fileBytes, CORE_ARCHIVE_LIMITS.totalBytes);
+      if (createCoreArchive(rentalFiles).sha256 !== pin.sha256)
+        throw new Error("Rental 包材料在读取期间已变化");
+    }
     const coreFiles = new Map([[pin.manifest.id, rentalFiles]]);
     for (const current of additional) {
       const expected = extraPins.find(pin => pin.manifest.id === current.manifest.id)!;

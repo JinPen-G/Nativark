@@ -1,4 +1,4 @@
-/** 原地点入口绑定真实会话和组织映射权限，履约网络正文由 Rental Core 单源提供。 */
+/** 原地点入口绑定真实会话、品类读取和组织映射权限，履约网络正文由 Rental Core 单源提供。 */
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { corePageKey, type CoreRegisteredPage } from "@rental-os/core-contracts";
@@ -29,6 +29,9 @@ function locationScopeKey(auth: ReturnType<typeof useAuthStore.getState>): strin
   return rentalOrderSessionIdentity(session, adminRuntime.currentSessionEpoch());
 }
 const currentScopeKey = () => locationScopeKey(useAuthStore.getState());
+const canViewProfile = () => ["rental-os:order:view", "rental-core:catalog:view", "rental-core:asset:view"]
+  .some(permission => useAuthStore.getState().hasPermission(permission));
+const canViewCategories = () => canViewProfile() || useAuthStore.getState().hasPermission("system:tenant:manage");
 const canViewOrganizations = () => useAuthStore.getState().hasPermission("system:user:manage");
 const canManageOrganizationMapping = () => {
   const auth = useAuthStore.getState();
@@ -46,7 +49,7 @@ function LocationWorkspace({ scope }: { scope: string }) {
   const navigate = useNavigate();
   const scopeKey = locationScopeKey(auth) ?? "";
   const context = useMemo(() => createRentalLocationPageContext({ runtime: adminRuntime, scopeKey,
-    currentScopeKey, canViewOrganizations, canManageOrganizationMapping }), [scopeKey]);
+    currentScopeKey, canViewProfile, canViewCategories, canViewOrganizations, canManageOrganizationMapping }), [scopeKey]);
   return <CorePageHostProvider host={{ page, pages, navigate,
     brandName: resolveAdminBrandName(auth.tenant, auth.user), lifetimeKey: JSON.stringify([scope, scopeKey]),
     canAccess: (coreId, permissions) => {

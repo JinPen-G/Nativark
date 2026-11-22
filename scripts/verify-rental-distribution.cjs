@@ -1,8 +1,12 @@
 'use strict';
 /** Rental 独立发行核验：固定 Git 树、真实配置分包 emit 和官方 Prisma 只驻内存。
  * 检查 Native 产物、标准归档/安装准备、可选 AI 数据及五端正式包消费。
- * 不安装依赖、实例化 Client、连接数据库、启动服务或代替磁盘发布和真实宿主验收。
+ * 公开发行另核对独立仓根目录的固定标签与构建字节，准备成功后只写一个新归档。
+ * 不安装依赖、实例化 Client、连接数据库、启动服务或发布 GitHub Release。
  * node scripts/verify-rental-distribution.cjs --commit <完整SHA> [--deps <只读node_modules>]
+ * node scripts/verify-rental-distribution.cjs --portable --commit <构建SHA> --platform-commit <底座SHA>
+ *   --core-repo <独立仓根目录> --core-commit <v版本的提交SHA> --out <未占用的rental-版本.tgz>
+ * 独立仓标签的根目录须保留 packages/rental-core 子树的原始 Git 字节及 LICENSE。
  */
 const fs = require('node:fs');
 const path = require('node:path');
@@ -14,14 +18,62 @@ const { createBuild, verifyContracts } = require('./check-rental-package-build.c
 const { createMemoryBuild } = require('./rental-build-memory.cjs');
 const root = path.resolve(__dirname, '..');
 const slash = file => path.resolve(file).split(path.sep).join('/');
+const rentalSourceDirectory = 'packages/rental-core';
+const platformGuidePath = 'packages/core-contracts/README.md';
+const fullCommit = /^[a-f0-9]{40}$/u;
 
-function sourceRepository() {
-  const origin = execFileSync('git', ['config', '--get', 'remote.origin.url'], { cwd: root, encoding: 'utf8' }).trim();
+function git(directory, args) {
+  return execFileSync('git', ['--no-replace-objects', ...args], { cwd: directory, maxBuffer: 16 * 1024 * 1024, windowsHide: true });
+}
+
+function sourceRepository(directory = root) {
+  const origin = git(directory, ['config', '--get', 'remote.origin.url']).toString('utf8').trim();
   const ssh = /^git@github\.com:([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)$/u.exec(origin);
   const url = new URL(ssh ? 'https://github.com/' + ssh[1] : origin);
   if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash)
     throw Error('发行来源须为无凭据的 HTTPS 仓库地址');
   return url.href.replace(/\.git\/?$/u, '').replace(/\/$/u, '');
+}
+
+function fixedPortableSource(snapshot, options, documentationSource) {
+  const directory = path.resolve(options.get('--core-repo'));
+  if (slash(git(directory, ['rev-parse', '--show-toplevel']).toString('utf8').trim()) !== slash(directory))
+    throw Error('公开 Core 来源须指定独立 Git 仓库根目录');
+  const repository = sourceRepository(directory);
+  if (!/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(repository)
+    || repository.toLowerCase() === documentationSource.repository.toLowerCase())
+    throw Error('公开 Core 来源须为独立的 GitHub 仓库');
+  const commit = options.get('--core-commit');
+  const prefix = slash(path.join(root, rentalSourceDirectory)) + '/';
+  const version = JSON.parse(snapshot.files.get(prefix + 'package.json').toString('utf8')).version;
+  if (typeof version !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(version))
+    throw Error('Rental 构建快照的包版本无效');
+  const tag = `v${version}`;
+  if (git(directory, ['rev-parse', '--verify', `refs/tags/${tag}^{commit}`]).toString('ascii').trim() !== commit)
+    throw Error('公开 Core 标签的提交与指定 SHA 不一致');
+  const tree = new Map();
+  for (const entry of git(directory, ['ls-tree', '-r', '-z', commit]).toString('utf8').split('\0').filter(Boolean)) {
+    const match = /^(100644|100755) blob ([0-9a-f]{40})\t([^\r\n]+)$/u.exec(entry);
+    if (!match) throw Error('公开 Core 标签只接受普通 Git 文件');
+    tree.set(match[3], match[2]);
+  }
+  const expected = new Map();
+  for (const [file, bytes] of snapshot.files) if (file.startsWith(prefix)) expected.set(file.slice(prefix.length), bytes);
+  if (!expected.has('LICENSE')) expected.set('LICENSE', snapshot.files.get(slash(path.join(root, 'LICENSE'))));
+  for (const [file, bytes] of expected) {
+    const digest = createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
+    if (tree.get(file) !== digest) throw Error('公开 Core 标签与构建源码不同：' + file);
+  }
+  for (const file of tree.keys()) {
+    if (/^(?:src|admin|clients|prisma|dist|dist-clients)\//u.test(file) && !expected.has(file))
+      throw Error('公开 Core 标签含未纳入构建快照的文件：' + file);
+  }
+  const output = path.resolve(options.get('--out'));
+  const relative = path.relative(root, output).split(path.sep);
+  if (path.basename(output) !== `rental-${version}.tgz` || relative[0]?.toLowerCase() === 'docs')
+    throw Error('公开 Core 输出须为私有资料目录之外的新 rental-<版本>.tgz 文件');
+  if (fs.existsSync(output)) throw Error('目标归档已存在，不覆盖用户产物');
+  return { source: { repository, commit }, tag, output, documentationSource };
 }
 
 function selectedPrisma(build) {
@@ -127,17 +179,17 @@ function verifyNative(build) {
   return files;
 }
 
-function verifyPackage(build) {
+function verifyPackage(build, portable) {
   build.compile('apps/platform-api/tsconfig.json');
   build.compile('packages/ai-native-data/tsconfig.json');
   build.compile('apps/rental-api/tsconfig.json');
-  const packageRoot = slash(path.join(root, 'packages/rental-core'));
+  const packageRoot = slash(path.join(root, rentalSourceDirectory));
   const files = new Map();
   if (!build.snapshot) throw Error('标准归档须从固定 Git 快照编译，不能给活动 WIP 标旧 HEAD 来源');
   const tracked = [...build.snapshot.files.keys()].filter(file => file.startsWith(packageRoot + '/'))
     .map(file => file.slice(slash(root).length + 1));
   for (const filename of tracked) {
-    const relative = filename.slice('packages/rental-core/'.length);
+    const relative = filename.slice(rentalSourceDirectory.length + 1);
     if (!/^(?:src\/|admin\/|clients\/|prisma\/|package\.json$|README\.md$|LICENSE$)/u.test(relative)) continue;
     const file = path.join(root, filename);
     files.set(relative, build.snapshot.files.get(slash(file)));
@@ -147,21 +199,22 @@ function verifyPackage(build) {
       files.set(file.slice(packageRoot.length + 1), Buffer.from(text));
   }
   if (!files.has('LICENSE')) files.set('LICENSE', build.snapshot.files.get(slash(path.join(root, 'LICENSE'))));
-  const source = { repository: sourceRepository(),
-    commit: build.snapshot.commit };
-  const host = { platform: '0.1.0', contract: '0.1.1', node: '22.12.0', capabilities: {} };
+  const source = portable?.source ?? { repository: sourceRepository(), commit: build.snapshot.commit };
+  const host = portable?.host ?? { platform: '0.1.0', contract: '0.1.1', node: '22.12.0', capabilities: {} };
   const packageFactory = build.load(build.exported('@rental-os/rental-api/package', true));
-  const input = { files, source, sourceDirectory: 'packages/rental-core', platformSource: source, host,
-    platformGuide: build.sourceRead(path.join(root, 'packages/core-contracts/README.md')) };
-  const packed = packageFactory.createRentalHostPackage(input);
+  const input = { files, source, sourceDirectory: rentalSourceDirectory, platformSource: portable?.platformSource ?? source, host,
+    documentationSource: portable?.documentationSource,
+    platformGuide: portable?.platformGuide ?? build.sourceRead(path.join(root, platformGuidePath)) };
+  const edition = portable ? 'portable' : 'legacy-host';
+  const packed = packageFactory.createRentalHostPackage(input, edition);
   const archive = build.load(build.exported('@rental-os/core-contracts/archive', true));
   const decoded = archive.readCoreArchive(packed.bytes, packed.sha256);
   assert.equal(decoded.sha256, packed.sha256);
   assert.equal(decoded.files.size, packed.fileCount);
-  assert.equal(packageFactory.createRentalHostPackage(input).sha256, packed.sha256, '固定快照归档不确定');
+  assert.equal(packageFactory.createRentalHostPackage(input, edition).sha256, packed.sha256, '固定快照归档不确定');
   const memory = createMemoryBuild(build);
   const install = memory.load(build.exported('@rental-os/core-contracts/install', true));
-  const legacyRoutes = build.load(build.exported('@rental-os/rental-api/openapi', true)).rentalHostLegacyApiRoutes();
+  const legacyRoutes = portable ? [] : build.load(build.exported('@rental-os/rental-api/openapi', true)).rentalHostLegacyApiRoutes();
   const destination = path.join(memory.task, 'install');
   memory.fs.mkdirSync(destination, { recursive: true });
   const prepared = install.prepareCoreInstall(packed.bytes, packed.sha256, destination, host, packed.manifest, legacyRoutes);
@@ -182,6 +235,7 @@ function verifyPackage(build) {
   for (const entry of ['miniprogram/index', 'staff/index', 'time'])
     assert(Object.keys(memory.load(path.join(prepared.directory, 'dist-clients/clients/' + entry + '.js'))).length);
   build.installation = { directory: slash(prepared.directory), files: decoded.files };
+  if (portable) return packed;
   const aiRoot = slash(path.join(root, 'packages/ai-native-data'));
   const aiFiles = new Map();
   for (const [file, bytes] of build.snapshot.files) if (file.startsWith(aiRoot + '/')) {
@@ -272,20 +326,60 @@ function verifyConsumers(build) {
   console.log(JSON.stringify({ consumers: 5, rentalSource: 'installed-archive-only', diskOutputs: 0 }));
 }
 
-async function main(args) {
-  let deps = path.join(root, 'node_modules'), commit;
+function parseArguments(args) {
+  const options = new Map();
+  const portableKeys = ['--core-repo', '--core-commit', '--platform-commit', '--out'];
   for (let index = 0; index < args.length; index++) {
-    if (args[index] === '--deps' && args[index + 1]) deps = args[++index];
-    else if (args[index] === '--commit' && args[index + 1]) commit = args[++index];
-    else throw Error('未知发行核验选项：' + args[index]);
+    const key = args[index];
+    if (options.has(key)) throw Error('重复发行核验选项：' + key);
+    if (key === '--portable') options.set(key, true);
+    else if (['--deps', '--commit', ...portableKeys].includes(key) && args[index + 1] && !args[index + 1].startsWith('--'))
+      options.set(key, args[++index]);
+    else throw Error('未知或缺少值的发行核验选项：' + key);
   }
-  commit ??= execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+  if (options.has('--portable') && ['--commit', ...portableKeys].some(key => !options.has(key)))
+    throw Error('公开发行须提供构建及底座提交、独立仓根目录、标签提交和新输出文件');
+  if (!options.has('--portable') && portableKeys.some(key => options.has(key)))
+    throw Error('公开发行选项须与 --portable 一起使用');
+  for (const key of ['--commit', '--core-commit', '--platform-commit'])
+    if (options.has(key) && !fullCommit.test(options.get(key))) throw Error(`${key} 须为完整固定提交 SHA`);
+  return options;
+}
+
+async function main(args) {
+  const options = parseArguments(args);
+  const deps = options.get('--deps') ?? path.join(root, 'node_modules');
+  const commit = options.get('--commit') ?? git(root, ['rev-parse', 'HEAD']).toString('ascii').trim();
   const build = createBuild(deps, { commit });
+  const portable = options.has('--portable')
+    ? fixedPortableSource(build.snapshot, options, { repository: sourceRepository(), commit }) : undefined;
   verifyContracts(build);
   verifyServer(build);
+  if (portable) {
+    const api = build.load(build.exported('@rental-os/core-contracts', true));
+    const { readPlatformSourceFromGit } = build.load(build.exported('@rental-os/core-contracts/platform-source', true));
+    const platformSource = { repository: portable.documentationSource.repository, commit: options.get('--platform-commit') };
+    const platform = await readPlatformSourceFromGit(root, platformSource);
+    const contractFile = 'packages/core-contracts/src/manifest.ts';
+    const contract = platform.files.get(contractFile);
+    if (!contract || !Buffer.from(contract).equals(build.snapshot.files.get(slash(path.join(root, contractFile)))))
+      throw Error('选定底座与 Rental 构建所用 Core 版本契约不同');
+    Object.assign(portable, { platformSource,
+      platformGuide: git(root, ['cat-file', 'blob', `${platformSource.commit}:${platformGuidePath}`]).toString('utf8'),
+      host: { platform: platform.version, contract: api.CORE_CONTRACT_VERSION, node: '24.13.0', capabilities: {} } });
+  }
   verifyNative(build);
   await attachPrismaRuntime(build);
-  verifyPackage(build);
+  const packed = verifyPackage(build, portable);
+  if (portable) {
+    const { writeArchive } = require('./package-rental-host.cjs');
+    writeArchive(portable.output, packed.bytes);
+    console.log(JSON.stringify({ status: 'packaged', mode: 'portable', output: portable.output,
+      source: portable.source, tag: portable.tag, documentationSource: portable.documentationSource,
+      platformSource: portable.platformSource, files: packed.fileCount, bytes: packed.bytes.length,
+      sha256: packed.sha256, install: 'prepared', deployment: 'pending' }));
+    return;
+  }
   verifyConsumers(build);
   console.log(JSON.stringify({ status: 'passed', mode: 'rental-distribution', sourceCommit: commit, stages: build.stages.length,
     emittedFiles: build.outputs.size, diskOutputs: 0 }));

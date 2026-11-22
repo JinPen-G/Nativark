@@ -1,5 +1,6 @@
 /** 原组合后台路由与菜单，投影已登记页面并保留原权限及URL；业务授权由服务端裁定。 */
 import { RENTAL_WORK_ORDER_PAGES, RENTAL_WORK_ORDER_LEGACY_PERMISSIONS } from "@rental-os/rental-core/admin/work-orders/pages";
+import { RENTAL_LOCATION_PAGES, RENTAL_LOCATION_LEGACY_PERMISSIONS } from "@rental-os/rental-core/admin/locations/pages";
 import { RENTAL_ORDER_PAGES, RENTAL_ORDER_LEGACY_PERMISSIONS } from "@rental-os/rental-core/admin/orders/pages";
 import { RENTAL_CAPABILITY_PAGES, RENTAL_CAPABILITY_LEGACY_PERMISSIONS } from "@rental-os/rental-core/admin/capabilities/pages";
 import { RENTAL_CATALOG_PAGES, RENTAL_CATALOG_LEGACY_PERMISSIONS } from "@rental-os/rental-core/admin/catalog/pages";
@@ -60,7 +61,7 @@ export const APP_ROUTES = {
   assets: { path: `/rental${RENTAL_CATALOG_PAGES.assets.path}`, label: RENTAL_CATALOG_PAGES.assets.title.default, permission: RENTAL_CATALOG_LEGACY_PERMISSIONS.asset.view, audience: "tenant", icon: <BoxPlotOutlined />, menu: Boolean(RENTAL_CATALOG_PAGES.assets.menu) },
   workOrders: { path: `/rental${RENTAL_WORK_ORDER_PAGES.workOrders.path}`, label: RENTAL_WORK_ORDER_PAGES.workOrders.title.default, permission: RENTAL_WORK_ORDER_LEGACY_PERMISSIONS.view, audience: "tenant", icon: <ToolOutlined />, menu: Boolean(RENTAL_WORK_ORDER_PAGES.workOrders.menu) },
   workOrderDetail: { path: `/rental${RENTAL_WORK_ORDER_PAGES.workOrderDetail.path}`, label: RENTAL_WORK_ORDER_PAGES.workOrderDetail.title.default, permission: RENTAL_WORK_ORDER_LEGACY_PERMISSIONS.view, audience: "tenant", icon: <ToolOutlined /> },
-  locations: { path: "/rental/locations", label: "履约地点", permission: "rental-os:station:view", audience: "tenant", icon: <ShopOutlined />, menu: true },
+  locations: { path: `/rental${RENTAL_LOCATION_PAGES.locations.path}`, label: RENTAL_LOCATION_PAGES.locations.title.default, permission: RENTAL_LOCATION_LEGACY_PERMISSIONS.view, audience: "tenant", icon: <ShopOutlined />, menu: Boolean(RENTAL_LOCATION_PAGES.locations.menu) },
   pricing: { path: `/rental${RENTAL_COMMERCIAL_PAGES.pricing.path}`, label: RENTAL_COMMERCIAL_PAGES.pricing.title.default, permission: RENTAL_COMMERCIAL_LEGACY_PERMISSION, audience: "tenant", icon: <FundOutlined />, menu: Boolean(RENTAL_COMMERCIAL_PAGES.pricing.menu) },
   pricingVersions: { path: `/rental${RENTAL_COMMERCIAL_PAGES.pricingVersions.path}`, label: RENTAL_COMMERCIAL_PAGES.pricingVersions.title.default, permission: RENTAL_COMMERCIAL_LEGACY_PERMISSION, audience: "tenant", icon: <FundOutlined /> },
   pricingVersionDetail: { path: `/rental${RENTAL_COMMERCIAL_PAGES.pricingVersionDetail.path}`, label: RENTAL_COMMERCIAL_PAGES.pricingVersionDetail.title.default, permission: RENTAL_COMMERCIAL_LEGACY_PERMISSION, audience: "tenant", icon: <FundOutlined /> },

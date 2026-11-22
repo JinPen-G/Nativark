@@ -26,6 +26,8 @@ import {
 } from "./ports";
 
 type Snapshot = Awaited<ReturnType<CorePackageDeploymentSource["read"]>>;
+// 准备事务须在发布前后重核当前完整安装材料及原主体；与普通业务事务分开设定有界期限。
+const PREPARATION_TRANSACTION_TIMEOUT_MS = 30_000;
 const unavailable = (code: string, message: string): CorePackagePreparationUnavailable => ({ status: "unavailable", error: { code, message } });
 function requireManager(user: SystemUserRow): void {
   if (!user.isSaasAdmin || !user.permissions.includes("*") && !user.permissions.includes("system:tenant:manage"))
@@ -112,7 +114,7 @@ export function composePlatformCorePackagePreparation<Tx extends PlatformCoreTra
       };
       try { return await work(transaction, revalidate); }
       finally { await revalidate(); }
-    }, { isolationLevel: "ReadCommitted" });
+    }, { isolationLevel: "ReadCommitted", timeout: PREPARATION_TRANSACTION_TIMEOUT_MS });
   }
   async function sameSnapshot(expected: NonNullable<Snapshot>): Promise<void> {
     let current: Snapshot;

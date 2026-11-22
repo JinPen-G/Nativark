@@ -259,11 +259,10 @@ function CorePackagesContent({ brandName }: { brandName: string }) {
   const [dialog, setDialog] = useState<{ target: CorePackagePreparationTarget; open: boolean }>();
   const blocked = preparation.busy || Boolean(preparation.pending) || Boolean(preparation.storageError);
   const showPreparation = (target: CorePackagePreparationTarget) => {
-    if (blocked) return;
-    preparation.resetPreview();
+    if (!preparation.resetPreview()) return;
     setDialog({ target, open: true });
   };
-  const showReceipt = () => { if (!preparation.busy) setDialog({ target: { kind: "receipt" }, open: true }); };
+  const showReceipt = () => { if (preparation.isCurrent() && !preparation.busy) setDialog({ target: { kind: "receipt" }, open: true }); };
   const catalogue = useQuery({ queryKey: ["core-packages", epoch, "catalogue"], queryFn: ({ signal }) => api.catalogue(signal),
     retry: false, refetchOnWindowFocus: false, meta: { liveRefresh: false } });
   const refresh = async () => {
@@ -272,8 +271,9 @@ function CorePackagesContent({ brandName }: { brandName: string }) {
     return result;
   };
   return <><PageHeading title={en ? "Core packages" : "Core 包管理"} brandName={brandName}
-    extra={<Button disabled={blocked} onClick={() => showPreparation({ kind: "reference", name: en ? "Install local Core package" : "准备本地 Core 包" })}>
-      {en ? "Use downloaded package" : "使用已下载包"}</Button>} />
+    extra={<><Button disabled={blocked} onClick={() => showPreparation({ kind: "reference", name: en ? "Install local Core package" : "准备本地 Core 包" })}>
+      {en ? "Use downloaded package" : "使用已下载包"}</Button>
+      <Button disabled={preparation.busy} onClick={showReceipt}>{en ? "Original result" : "原操作结果"}</Button></>} />
     <Tabs activeKey={view} onChange={setView} items={[
       { key: "catalogue", label: en ? "Registered Cores" : "当前目录" },
       { key: "discover", label: en ? "Discover" : "发现 Core" },
@@ -307,8 +307,11 @@ function CorePackagesContent({ brandName }: { brandName: string }) {
     </ContentTransition>
     {dialog && <CorePackagePreparationDialog key={JSON.stringify(dialog.target)} target={dialog.target} open={dialog.open}
       catalogue={catalogue.error ? undefined : catalogue.data} controls={preparation}
-      onClose={() => setDialog(current => current && { ...current, open: false })}
-      afterClose={() => setDialog(current => current?.open ? current : undefined)} />}
+      onClose={() => {
+        if (preparation.isCurrent() && !preparation.busy)
+          setDialog(current => current?.target === dialog.target ? { ...current, open: false } : current);
+      }}
+      afterClose={() => setDialog(current => current?.target === dialog.target && !current.open ? undefined : current)} />}
   </>;
 }
 

@@ -33,6 +33,8 @@ Core 包目录、预检、版本选择和候选准备的四个原 Controller 挂
 
 当前底座安装状态须同时核对完整源码归档与 `rental-host.context.json` 中的原编译证据。打包器从固定源码、原 npm 锁和所选公共 Client 在内存编译六个公共运行包，逐文件匹配实际 JS、声明和元数据；读取器通过与零 Core 宿主共用的 [运行证据检查](../../packages/platform-core-host/src/core-package-deployment.ts) 再核对当前加载入口、产物集合和同一部署锁。收据与可执行文件属于受控部署材料，不是外部签名。只有源码归档、版本号或准备目录时保持不可用；原迁移账和物理观察仍单独核定。
 
+[包管理材料读取器](src/core-package-sources.ts)每次按当前实际安装路径核定 Rental 固定包。新版 Core 提供本次已通过完整摘要、数据和 OpenAPI 检查的同一份文件给准备流程使用。旧版 Core 仍由原部署入口核验，再单独读取和核对交付材料。
+
 `createRentalHostPackage` 接收实际已构建字节、Core 和底座的固定来源及公开指南。原宿主包生成 `dist/http-openapi.json`，逐条旧路径许可来自实际挂载处理器。独立公开发行调用同一工厂并选择 `portable`，生成 `dist/http-openapi-portable.json`，只声明实际审定并由宿主接线的 `/api/cores/rental/v1` 业务操作。`source` 固定公开版本的真实来源，`documentationSource` 可单独固定原公共源码链接。
 
 宿主选择公开包后，由[启动入口](src/bootstrap.ts)在原身份与业务作用域中间件之前，按实际方法和模板将已登记的规范路径交给同一原 Rental Controller。客户端原路径及渠道、员工、平台和供应商回调继续沿各自原入口。部署准备和启动都核对整包摘要、清单及与所选发行一致的 OpenAPI。候选 SQL 保留原字节和顺序，`prepared` 表示材料已备妥，部署、迁移和运行状态由原流程核定。

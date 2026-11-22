@@ -7,12 +7,51 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { isBuiltin } = require('node:module');
 const root = path.resolve(__dirname, '..');
-const slash = file => path.resolve(file).split(path.sep).join('/');
+const slash = file => {
+  const prefix = '\\\\?\\', uncPrefix = prefix + 'UNC\\';
+  if (file.startsWith(uncPrefix)) file = '\\\\' + file.slice(uncPrefix.length);
+  else if (file.startsWith(prefix)) file = file.slice(prefix.length);
+  return path.resolve(file).split(path.sep).join('/');
+};
 const inside = (directory, file) => file === directory || file.startsWith(directory + '/');
 
 function createMemoryBuild(build) {
   const { Volume, createFsFromVolume } = build.requireDeps('memfs');
   const volume = new Volume(), memory = createFsFromVolume(volume);
+  // memfs 3.5 uses mutable ctime as birthtime. Keep creation identity per Node,
+  // including a new identity when an inode is reused after deletion.
+  const births = new WeakMap();
+  let nextBirth = 0;
+  const assignBirth = node => {
+    nextBirth = Math.max(Date.now(), nextBirth + 1);
+    births.set(node, nextBirth);
+    return node;
+  };
+  for (const node of Object.values(volume.inodes)) assignBirth(node);
+  const createNode = volume.createNode;
+  volume.createNode = function (...args) {
+    return assignBirth(createNode.apply(this, args));
+  };
+  const stableStats = (stats, node) => {
+    const birth = births.get(node);
+    if (birth === undefined) throw Error('内存文件创建身份未核定');
+    stats.birthtime = new Date(birth);
+    stats.birthtimeMs = typeof stats.birthtimeMs === 'bigint' ? BigInt(birth) : birth;
+    return stats;
+  };
+  for (const name of ['statSync', 'lstatSync']) {
+    const original = memory[name];
+    memory[name] = (...args) => {
+      const stats = original(...args);
+      if (stats === undefined) return stats;
+      return stableStats(stats, volume.inodes[Number(stats.ino)]);
+    };
+  }
+  const fstat = memory.fstatSync;
+  memory.fstatSync = (descriptor, ...args) => {
+    const stats = fstat(descriptor, ...args);
+    return stableStats(stats, volume.getFileByFd(descriptor).node);
+  };
   const key = file => '/' + slash(file);
   const task = path.join(root, 'output/.tmp/rental-package-build-dev2');
   const workspaceRoot = slash(root), writable = slash(task);
@@ -38,6 +77,7 @@ function createMemoryBuild(build) {
   const readable = file => exists(file) || !generated(file)
     && !(build.snapshot && inside(workspaceRoot, slash(file)) && !inside(workspaceRoot + '/node_modules', slash(file)));
   for (const name of ['readFileSync', 'statSync', 'lstatSync', 'accessSync']) api[name] = (file, ...args) => {
+    if (name === 'readFileSync' && typeof file === 'number') return memory.readFileSync(file, ...args);
     if (exists(file)) return memory[name](key(file), ...args);
     if (!readable(file)) return memory[name](key(file), ...args);
     return fs[name](mapped(file), ...args);
@@ -59,6 +99,7 @@ function createMemoryBuild(build) {
     return [...found.values()];
   };
   for (const name of ['mkdirSync', 'writeFileSync', 'appendFileSync', 'unlinkSync', 'rmdirSync', 'rmSync']) api[name] = (file, ...args) => {
+    if (name === 'writeFileSync' && typeof file === 'number') return memory.writeFileSync(file, ...args);
     permitted(file);
     return memory[name](key(file), ...args);
   };

@@ -76,6 +76,7 @@
 | [业务请求DTO](src/core-request.dto.ts)、[订单请求DTO](src/order-request.dto.ts)、[企业告知DTO](src/enterprise-disclosure.dto.ts) | `/core-dto`、`/order-dto` 与 `/enterprise-disclosure-dto` 提供原商品/工单、订单/检查/资金请求的同一运行时类；API、客户与企业嵌套告知共用同一元数据，字段校验不替代当前业务授权 |
 | [文件清理权威](src/application-file-cleanup-authority.ts)、[应用接线](src/application-integrations.ts) | `/application-file-cleanup-authority` 只核原过期上传、完成暂存与待删除三类善后。先锁租户/Core、原对象/经营空间，再核配置、知识来源和文件/会话；归属来自原持久对象，停用不授予新上传或业务权 |
 | [数据发行与迁移摘要](src/data.ts)、[MySQL 数据计划](src/mysql-data.ts) | `/data` 核发行合同、迁移对应与原始字节摘要，保留包内目录名并生成正式 `deploymentMigrationNames`。`/mysql-data` 用正式账名供给原 Prisma 收据观察，复用公共物理读取核验 Rental 表，跨域外键由宿主传给公共数据计划 |
+| [固定包读取](src/data-package.ts) | `/data-package` 从受控普通目录一次读取并核定完整包摘要、清单、模型与原迁移。更新准备消费本次核定的文件快照，宿主启动只保留所需的数据与文档材料 |
 | [正式出口](src/index.ts)、[合同](src/contracts.ts) | 原商品/资产、报价订单、履约检查、价格资金、日历与客户会员定义和运行时常量；[shared 兼容出口](../shared/src/core.ts)继续服务原 API、各客户端和 AI |
 | [品类标识](src/rental-category-code.ts) | 原稳定格式及内置常量，格式合法不代表注册、发布或采用权限 |
 | [会员应用](src/mysql-membership.ts)、[私有存储/参加者](src/membership-ports.ts)、[状态审计接点](src/customer-operations-ports.ts) | `/mysql-membership` 持有租户共享会员、注册审核、当前资质、方案版本/授予及报价权益；业务风险、客户锁和企业政策使用同一原实例，金额/订单执行仍由订单域裁定 |

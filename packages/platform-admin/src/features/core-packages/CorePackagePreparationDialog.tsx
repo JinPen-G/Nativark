@@ -1,9 +1,10 @@
-/** 固定发行与本地引用进入同一候选预览，侧栏复用公共 UIArc 生命周期和主题。 */
-import { useId, useState } from "react";
+/** 固定发行与本地引用进入同一候选预览，侧栏复用公共 UIArc 生命周期和主题。
+ * 原回执视图允许本机存储故障下只读核对，准备动作继续遵守可靠指针和当前权限。 */
+import { useId, useLayoutEffect, useState } from "react";
 import type { GitHubCoreReleasePin } from "@rental-os/core-contracts/github";
 import type { CorePackageCatalogue } from "@rental-os/platform-core-host/core-package-ports";
 import type { CorePackagePreparationPlan, CorePackagePreparationRequest } from "@rental-os/platform-core-host/core-package-preparation/protocol";
-import { ActionButton, Alert, Button, DataTableStatus, DataTableText, Input, ListSection, Modal, RecordFacts, Table } from "../../components/ui";
+import { ActionButton, Alert, Button, DataTableStatus, DataTableText, Input, ListSection, Modal, RecordFacts, Table, Tabs } from "../../components/ui";
 import { useLocale } from "../../app/locale";
 import { formSnapshotFingerprint } from "../../app/serverFormSnapshot";
 import type { CorePackagePreparationControls } from "./useCorePackagePreparation";
@@ -60,7 +61,18 @@ export function CorePackagePreparationDialog({ target, open, catalogue, controls
 }) {
   const { locale } = useLocale(), en = locale === "en-US", referenceId = useId();
   const [reference, setReference] = useState(target.kind === "reference" ? target.reference ?? "" : "");
-  const fixed = target.kind === "release" ? target.release : undefined;
+  const [receiptKind, setReceiptKind] = useState<"release" | "preparation">(controls.pending?.kind
+    ?? (controls.selected && !controls.prepared ? "release" : "preparation"));
+  const [receiptValue, setReceiptValue] = useState(controls.pending?.kind === "release" ? controls.pending.reference
+    : controls.pending?.kind === "preparation" ? controls.pending.sha256 : controls.prepared?.sha256 ?? controls.selected?.reference ?? "");
+  useLayoutEffect(() => {
+    if (target.kind !== "receipt" || !controls.pending) return;
+    // 存储恢复后可能发现另一份原指针，输入和结果必须跟随当前核对对象。
+    setReceiptKind(controls.pending.kind);
+    setReceiptValue(controls.pending.kind === "release" ? controls.pending.reference : controls.pending.sha256);
+  }, [target.kind, controls.pending]);
+  const fixed = target.kind === "release" ? target.release
+    : target.kind === "receipt" && receiptKind === "release" && controls.selected?.reference === receiptValue ? controls.selected.release : undefined;
   const release = fixed && controls.release
     && formSnapshotFingerprint(controls.release.release) === formSnapshotFingerprint(fixed) ? controls.release : undefined;
   const selected = fixed && controls.selected
@@ -72,11 +84,13 @@ export function CorePackagePreparationDialog({ target, open, catalogue, controls
   const request: CorePackagePreparationRequest | undefined = packageReference
     ? updateTarget ? { operation: "update", package: { ...updateTarget, reference: packageReference } }
       : { operation: "install", package: { reference: packageReference } } : undefined;
-  const preview = controls.preview && (target.kind === "receipt"
-    || request && formSnapshotFingerprint(controls.preview.plan.request) === formSnapshotFingerprint(request)) ? controls.preview : undefined;
-  const prepared = controls.prepared && (target.kind === "receipt"
+  // 原结果视图只展示已核定回执；本页预览仍属于确认准备前的材料。
+  const preview = controls.preview && target.kind !== "receipt"
+    && request && formSnapshotFingerprint(controls.preview.plan.request) === formSnapshotFingerprint(request) ? controls.preview : undefined;
+  const prepared = controls.prepared && (target.kind === "receipt" && receiptKind === "preparation" && controls.prepared.sha256 === receiptValue
     || request && formSnapshotFingerprint(controls.prepared.plan.request) === formSnapshotFingerprint(request)) ? controls.prepared : undefined;
   const blocked = controls.busy || Boolean(controls.pending) || Boolean(controls.storageError);
+  const receiptBlocked = controls.busy || Boolean(controls.pending);
   const plan = prepared?.plan ?? preview?.plan;
   const hash = prepared?.sha256 ?? preview?.sha256;
   const title = target.kind === "release" ? `${fixed?.coreId} · ${fixed?.version}`
@@ -93,9 +107,9 @@ export function CorePackagePreparationDialog({ target, open, catalogue, controls
         { key: "hash", label: en ? "Package SHA-256" : "包 SHA-256", value: fixed.sha256, wide: true },
         ...(release ? [{ key: "checked", label: en ? "Checked at" : "核对时间", value: release.checkedAt }] : [])
       ]} />
-      {!release && <ActionButton label={en ? "Inspect release" : "核对发行"} intent="review" pending={controls.busy}
+      {target.kind === "release" && !release && <ActionButton label={en ? "Inspect release" : "核对发行"} intent="review" pending={controls.busy}
         disabled={blocked} onAction={() => controls.previewRelease(target.kind === "release" ? target.release : fixed)} />}
-      {release && !selected && <ActionButton label={en ? "Save release selection" : "保存发行选择"}
+      {target.kind === "release" && release && !selected && <ActionButton label={en ? "Save release selection" : "保存发行选择"}
         intent="confirm" pending={controls.busy} disabled={blocked} onAction={controls.selectRelease} />}
       {selected && <RecordFacts items={[
         { key: "selection", label: en ? "Selection" : "发行选择", value: en ? "Recorded, package unchecked" : "已保存，包未校验" },
@@ -105,8 +119,24 @@ export function CorePackagePreparationDialog({ target, open, catalogue, controls
     {target.kind === "reference" && <ListSection title={en ? "Downloaded package" : "已下载包"}>
       <label htmlFor={referenceId}>{en ? "Host package reference" : "宿主包引用"}</label>
       <Input id={referenceId} value={reference} maxLength={128} disabled={blocked}
-        onChange={event => { setReference(event.target.value); controls.resetPreview(); }} />
+        onChange={event => { if (controls.resetPreview()) setReference(event.target.value); }} />
       <p>{en ? "Enter the reference registered by this host for a downloaded standard package." : "填写本宿主为已下载标准包登记的引用。"}</p>
+    </ListSection>}
+    {target.kind === "receipt" && <ListSection title={en ? "Read original result" : "核对原结果"}>
+      <Tabs activeKey={receiptKind} onChange={value => {
+        if (controls.isCurrent() && !receiptBlocked) { setReceiptKind(value as "release" | "preparation"); setReceiptValue(""); }
+      }} items={[
+        { key: "preparation", label: en ? "Candidate SHA-256" : "候选 SHA-256", disabled: receiptBlocked },
+        { key: "release", label: en ? "Release reference" : "发行引用", disabled: receiptBlocked }
+      ]} />
+      <label htmlFor={referenceId}>{receiptKind === "release" ? en ? "Original release reference" : "原发行引用" : en ? "Original candidate SHA-256" : "原候选 SHA-256"}</label>
+      <Input id={referenceId} value={receiptValue} maxLength={71} disabled={receiptBlocked}
+        onChange={event => { if (controls.isCurrent() && !receiptBlocked) setReceiptValue(event.target.value); }} />
+      <ActionButton label={en ? "Read original result" : "核对原结果"} intent="review" pending={controls.busy}
+        disabled={controls.busy || (receiptKind === "release"
+          ? !/^github-[a-f0-9]{64}$/.test(receiptValue) : !/^[a-f0-9]{64}$/.test(receiptValue))}
+        onAction={() => controls.reconcile(receiptKind === "release" ? { kind: "release", reference: receiptValue }
+          : { kind: "preparation", sha256: receiptValue })} />
     </ListSection>}
     {target.kind !== "receipt" && !versions && <Alert type="warning"
       title={catalogue?.versions.status === "unavailable" ? catalogue.versions.error.message

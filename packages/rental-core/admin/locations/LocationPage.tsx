@@ -69,6 +69,8 @@ function LocationWorkspace({
   api: rentalCoreApi,
   scopeKey,
   currentScopeKey,
+  canViewProfile: readProfileAccess,
+  canViewCategories: readCategoryAccess,
   canViewOrganizations: readOrganizationAccess,
   canManageOrganizationMapping: readOrganizationMappingAccess,
 }: RentalLocationPageContext) {
@@ -85,6 +87,8 @@ function LocationWorkspace({
   }, []);
   const isCurrentScope = () => active.current && Boolean(scopeKey) && currentScopeKey() === scopeKey;
   const canManage = host.canAccess(RENTAL_LOCATION_CORE_ID, [{ resource: "station", action: "manage" }]);
+  const canViewProfile = readProfileAccess();
+  const canViewCategories = readCategoryAccess();
   const canManageOrganizationMapping = readOrganizationMappingAccess();
   const canViewOrganizations = readOrganizationAccess();
   const allowed = () =>
@@ -127,17 +131,27 @@ function LocationWorkspace({
     enabled: Boolean(scopeKey),
     queryFn: ({ signal }) => rentalCoreApi.operators({ signal }),
   });
-  const profile = useQuery({
+  const profileQuery = useQuery({
     queryKey: ["rental-core", "profile", scopeKey],
-    enabled: Boolean(scopeKey),
+    enabled: Boolean(scopeKey) && canViewProfile,
     queryFn: ({ signal }) => rentalCoreApi.profile({ signal }),
   });
   const categories = useQuery({
     queryKey: ["rental-core", "categories", scopeKey],
-    enabled: Boolean(scopeKey),
+    enabled: Boolean(scopeKey) && canViewCategories,
     queryFn: ({ signal }) => rentalCoreApi.categories({ signal }),
   });
-  const category = categories.data?.find((item) => item.code === profile.data?.categoryCode);
+  // 元数据不是地点查看的准入条件；撤权或读取失败后不展示缓存中的品类事实。
+  const profile = { data: canViewProfile && !profileQuery.isError ? profileQuery.data : undefined };
+  const category = canViewCategories && !categories.isError
+    ? categories.data?.find((item) => item.code === profile.data?.categoryCode)
+    : undefined;
+  // 原手动刷新也恢复受权附属资料；其默认 refetch 错误状态继续由各查询独立持有。
+  const refreshLocations = (throwOnError = false) => Promise.all([
+    locations.refetch({ throwOnError }),
+    readProfileAccess() ? profileQuery.refetch() : undefined,
+    readCategoryAccess() ? categories.refetch() : undefined,
+  ]);
   const organizationNames = useMemo(
     () => new Map((organizations.data ?? []).map((item) => [item.id, item.name])),
     [organizations.data],
@@ -188,7 +202,7 @@ function LocationWorkspace({
     locations.isError ||
     operators.isPending ||
     operators.isError ||
-    profile.isError ||
+    profileQuery.isError ||
     categories.isError ||
     (canManageOrganizationMapping && (organizations.isPending || organizations.isError));
   const operatorUnavailable = !canManage || operators.isPending || operators.isError;
@@ -458,21 +472,15 @@ function LocationWorkspace({
             }
           >
             <QueryState
-              loading={locations.isLoading || profile.isLoading || categories.isLoading}
-              error={locations.error || profile.error || categories.error}
-              onRetry={() =>
-                Promise.all([
-                  locations.refetch({ throwOnError: true }),
-                  profile.refetch({ throwOnError: true }),
-                  categories.refetch({ throwOnError: true }),
-                ])
-              }
+              loading={locations.isLoading}
+              error={locations.error}
+              onRetry={() => refreshLocations(true)}
             >
               <Table<RentalFulfillmentLocation>
                 emptyScene={keyword.trim() ? "search" : "empty"}
                 cardView={cards}
                 rowKey="id"
-                onRefresh={() => locations.refetch()}
+                onRefresh={() => refreshLocations()}
                 loading={locations.isLoading}
                 refreshing={locations.isFetching}
                 dataSource={rows}

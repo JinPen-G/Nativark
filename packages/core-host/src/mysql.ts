@@ -11,7 +11,7 @@ export interface CoreHostSqlTransaction {
   $queryRaw<T>(query: TemplateStringsArray | Sql, ...values: unknown[]): Promise<T>;
 }
 export interface CoreHostSqlClient<Tx extends CoreHostSqlTransaction> {
-  $transaction<T>(work: (tx: Tx) => Promise<T>, options: { isolationLevel: "ReadCommitted" }): Promise<T>;
+  $transaction<T>(work: (tx: Tx) => Promise<T>, options: { isolationLevel: "ReadCommitted"; timeout?: number }): Promise<T>;
 }
 export interface MysqlCoreManagementAuthority<Tx extends CoreHostSqlTransaction> {
   authorize(tx: Tx, request: CoreManagementRequest): Promise<CoreManagementLease>;
