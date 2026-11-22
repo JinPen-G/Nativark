@@ -142,8 +142,12 @@ async function createRentalDevelopmentWorkspace(options, api) {
       const destination = path.posix.normalize(path.posix.join(path.posix.dirname(file), name));
       if (files.has(destination) || directories.has(destination)) return original;
       if (destination === 'docs' || destination.startsWith('docs/')) return label;
-      return `[${label}](${platform.source.repository}/${path.posix.extname(destination) ? 'blob' : 'tree'}/` +
-        `${platform.source.commit}/${destination}${anchor ? '#' + anchor : ''})`;
+      // 未随开发归档提供的业务资料仍来自独立 Core 提交，公共资料取底座支持提交。
+      const belongsToCore = destination.startsWith(coreDirectory + '/');
+      const source = belongsToCore ? rental.source : platform.source;
+      const sourcePath = belongsToCore ? destination.slice(coreDirectory.length + 1) : destination;
+      return `[${label}](${source.repository}/${path.posix.extname(sourcePath) ? 'blob' : 'tree'}/` +
+        `${source.commit}/${sourcePath}${anchor ? '#' + anchor : ''})`;
     });
     files.set(file, Buffer.from(text));
   }
