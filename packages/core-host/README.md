@@ -55,6 +55,8 @@ const catalogue = createCoreDeployedCatalogue({ lock, registrations: [tickets], 
 
 MySQL实现从`@rental-os/core-host/mysql`导入`createMysqlCoreManagement(client, authority)`。`authority.authorize`先按原固定顺序锁租户/人员/角色并确认本次SaaS或租户管理权；返回的lease绑定同一原主体/目标租户/成员，`revalidate()`用于提交前检查会话/期限。`authority.audit`调用原平台同事务审计，失败抛出。MySQL适配只接驱动窄接口，不引入Rental/AI模型。
 
+可信管理及绑定lease可供给当前事务的 `deployment` 观察。开通、分配与初始化复用该观察，原结果读取不重新取得新业务准入；未提供此字段的非SQL适配继续使用服务构造时的可用性对象。SQL公共宿主的实际供给由[统一应用](../platform-core-host/src/platform-core-application.ts)维护。
+
 执行顺序是原人员/租户授权锁 → 本tenant/Core锁行 → 检查原操作/当前修订 → 授权或成员事实 → 原收据及审计 → 同一lease期限复核 → 提交。所有SQL参数化并带tenant/Core复合条件。不同Core不共用授权记录，旧原操作返回不覆盖后续停用或撤权。当前实现没有热部署/网络下载/业务初始化或跨库事务。
 
 [迁移](../../apps/platform-api/prisma/migrations/20261115010000_core_access/migration.sql)只创建平台授权/成员/原操作/锁四表，不引用Rental。原迁移源码已单份移入公共宿主的Prisma迁移链，原字节保留。它尚未应用到数据库，进入真实宿主时须固定平台数据版本及迁移账；既有组合只做获准的增量迁移，不重放原历史SQL。租户/账号事实继续由原平台维护，本包不复制用户表或建立另一套登录。

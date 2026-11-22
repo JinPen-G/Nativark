@@ -23,6 +23,7 @@ export function composePlatformCoreManagement<Tx extends PlatformCoreTransaction
   users: PlatformCoreUsers<Tx>;
   audit: Pick<PlatformCoreAudit<Tx>, "recordCoreAccessReceipt">;
   deployment: CoreDeploymentAvailability;
+  deploymentForTransaction?: (transaction: Tx) => CoreDeploymentAvailability;
   /** 仅供服务端装配：原身份/Core锁及原收据读取后，在同事务锁定并核对具体来源。
    * 不从HTTP输入选择参加者；原收据重读不进入来源复验。无此参加者保留通用管理行为。 */
   mutationPrecondition?(transaction: Tx, request: CoreManagementRequest): Promise<{ revalidate(): Promise<void> }>;
@@ -38,6 +39,7 @@ export function composePlatformCoreManagement<Tx extends PlatformCoreTransaction
       let mutation: { revalidate(): Promise<void> } | undefined;
       return { actor: lease.principal, tenantId: request.tenantId, canGrant: request.kind === "tenant_grant",
         canAssign: request.kind === "member_assignment", targetMemberId: request.targetMemberId,
+        deployment: input.deploymentForTransaction?.(transaction),
         beforeMutation: precondition ? async () => {
           const current = await precondition(transaction, request);
           if (!current || typeof current.revalidate !== "function")

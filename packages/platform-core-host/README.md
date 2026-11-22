@@ -27,6 +27,8 @@ const access = createPlatformCoreHttpAccess(application);
 
 `database` 和 `users` 是宿主实际公共存储及当前身份，`term.requireNewBusiness` 消费真实统一订阅规则，`audit` 在同一事务保存关联，`catalogue` 是固定受控服务和真实物理 / 迁移观察的目录。字段从端口源码读取。Core 新增只在自己的包与宿主装配登记，不给公共Guard增加行业分支。Nest子模块须通过 imports/export 提供注入依赖；父模块的本地provider不会自动进入子模块。
 
+SQL宿主通过 `deploymentForTransaction(tx)` 将同一固定目录的部署观察绑定到当前事务。授权、成员分配、初始化、业务范围与HTTP准入在持主体锁时复用该事务，不另占根连接；非SQL宿主仍可使用原可用性对象。实际组合见[Rental宿主](../../apps/rental-api/src/assembly.ts)与[单工单宿主](../../apps/example-tickets-api/src/assembly.ts)。
+
 `createEmptyCoreCatalogue()` 表示宿主明确选择零Core，返回空目录并拒绝所有Core准入。它不生成业务表、默认授权或可用数据。当前公共宿主已使用此组合，本人目录无需查询Core授权表即可返回合法空集合。选中Core须改用 `createCoreDeployedCatalogue` 并提供真实数据观察，不能继续用空目录或默认成功适配。[部署目录](../core-host/README.md)
 
 标准管理流为注册 → SaaS授权租户 → 租户管理员分配成员 → 绑定 / 配置 → 普通业务。新Core不自动分配给所有成员，Core开通与业务角色分别核验。单Core停用保留成员记录、绑定、配置及原收据；重新开通按当前条件恢复，不重放初始化或业务。已撤回的成员分配不会随重开自动恢复。

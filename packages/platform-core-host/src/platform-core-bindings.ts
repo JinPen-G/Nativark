@@ -23,6 +23,7 @@ export function composePlatformCoreBindings<Tx extends PlatformCoreTransaction>(
   audit: Pick<PlatformCoreAudit<Tx>, "recordCoreBindingReceipt">;
   term: PlatformCoreTermPolicy<Tx>;
   deployment: CoreDeploymentAvailability;
+  deploymentForTransaction?: (transaction: Tx) => CoreDeploymentAvailability;
   registrations: ReadonlyMap<string, CoreServerRegistration>;
   /** 有容器的Core由自身适配在同一原事务核定容器归属及可初始化范围。 */
   authorizeContainer?(transaction: Tx, user: SystemUserRow,
@@ -32,7 +33,7 @@ export function composePlatformCoreBindings<Tx extends PlatformCoreTransaction>(
 }) {
   const precondition = input.mutationPrecondition;
   const principals = new PlatformPrincipalAuthority<Tx>(input.users);
-  const access = new PlatformCoreAccess<Tx>(input.term, input.deployment);
+  const access = new PlatformCoreAccess<Tx>(input.term, input.deployment, input.deploymentForTransaction);
   const runtime = createMysqlCoreBindings<Tx>(input.database, {
     async lockPrincipal(transaction, request) {
       const lease = await principals.lock(transaction, request.actor, request.scope.tenantId);
@@ -56,6 +57,7 @@ export function composePlatformCoreBindings<Tx extends PlatformCoreTransaction>(
         let mutation: { revalidate(): Promise<void> } | undefined;
         return { actor: lease.principal, scope: request.scope, canInitialize: request.purpose === "initialize",
           canReadOriginal: request.purpose === "original_receipt",
+          deployment: input.deploymentForTransaction?.(transaction),
           beforeInitialization: () => access.requireBusinessAdmission(transaction, request.scope.coreId),
           beforeMutation: precondition ? async () => {
             const current = await precondition(transaction, request);

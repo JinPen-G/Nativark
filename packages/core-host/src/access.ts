@@ -43,6 +43,8 @@ export interface CoreManagementLease {
   canGrant: boolean;
   canAssign: boolean;
   targetMemberId?: string;
+  /** SQL适配在原授权事务内绑定真实部署观察，不另占根连接。 */
+  deployment?: CoreDeploymentAvailability;
   /** 服务端来源参加者只在原收据不存在时进入；不能阻止已记录操作的原结果重读。 */
   beforeMutation?(): Promise<void>;
   /** 对同一原主体/租约复核自然流逝的期限，不能临时换身份继续提交。 */
@@ -79,7 +81,7 @@ export class CoreAccessService {
       await lease.beforeMutation?.();
       const current = await store.grant();
       this.expected(current?.revision, parsed.expectedRevision);
-      if (parsed.state === "enabled") await this.deployment.requireAvailable(parsed.coreId, parsed.tenantId);
+      if (parsed.state === "enabled") await (lease.deployment ?? this.deployment).requireAvailable(parsed.coreId, parsed.tenantId);
       const result = TenantCoreGrantSchema.parse({ tenantId: parsed.tenantId, coreId: parsed.coreId, state: parsed.state,
         revision: parsed.expectedRevision + 1, operationId: parsed.operationId });
       await store.saveGrant(result);
@@ -107,7 +109,7 @@ export class CoreAccessService {
       if (parsed.state === "assigned") {
         const grant = await store.grant();
         if (grant?.state !== "enabled") throw new CoreAccessError("denied", "租户尚未获授权使用该Core");
-        await this.deployment.requireAvailable(parsed.coreId, actor.tenantId);
+        await (lease.deployment ?? this.deployment).requireAvailable(parsed.coreId, actor.tenantId);
       }
       const current = await store.assignment(parsed.userId);
       this.expected(current?.revision, parsed.expectedRevision);

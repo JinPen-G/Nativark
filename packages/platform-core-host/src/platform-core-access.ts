@@ -13,7 +13,9 @@ import type { PlatformCoreTermPolicy, PlatformCoreTransaction } from "./ports";
 
 export class PlatformCoreAccess<Tx extends PlatformCoreTransaction> {
   constructor(private readonly term: PlatformCoreTermPolicy<Tx>,
-    private readonly deployment: CoreDeploymentAvailability) {}
+    private readonly deployment: CoreDeploymentAvailability,
+    /** SQL宿主供给当前事务；原非SQL可用性对象继续使用二参数入口。 */
+    private readonly deploymentForTransaction?: (transaction: Tx) => CoreDeploymentAvailability) {}
 
   async requireMember(transaction: Tx, user: SystemUserRow, coreId: string): Promise<void> {
     const grants = await transaction.$queryRaw<Array<{ state: string; revision: bigint | number; operationId: string }>>`
@@ -29,7 +31,8 @@ export class PlatformCoreAccess<Tx extends PlatformCoreTransaction> {
     const assignment = MemberCoreAssignmentSchema.parse({ ...assignments[0], revision: Number(assignments[0].revision),
       tenantId: user.tenantId, coreId, userId: user.id });
     if (assignment.state !== "assigned") throw new ForbiddenException("成员的Core使用权已撤回");
-    await this.deployment.requireAvailable(coreId, user.tenantId);
+    // 此时已持有授权/成员锁，根观察再申请连接可能与另一持连接待锁的请求互等。
+    await (this.deploymentForTransaction?.(transaction) ?? this.deployment).requireAvailable(coreId, user.tenantId);
   }
 
   /** 原订阅只对新业务裁定期限，读旧结果和原业务收尾沿各Core的正式规则办理。 */

@@ -3,7 +3,7 @@ import type { CoreHostSqlClient } from "@rental-os/core-host/mysql";
 import type { PlatformCoreTransaction, PlatformCoreUsers, PlatformCoreTermPolicy } from "./ports";
 import { CORE_SCOPE_HTTP, CoreScopeResolutionSchema, CoreReadinessSchema, isCoreVersionSupported, matchesCoreScope,
   type CoreScopeObservation, type CoreScopeReference } from "@rental-os/core-contracts";
-import { CoreAccessError, coreBindingScopeKey, type CoreDeployedCatalogue } from "@rental-os/core-host";
+import { CoreAccessError, coreBindingScopeKey, type CoreDeployedCatalogue, type CoreDeploymentAvailability } from "@rental-os/core-host";
 import { PlatformPrincipalAuthority } from "@rental-os/platform-server/principal";
 import { PlatformCoreAccess } from "./platform-core-access";
 
@@ -12,9 +12,10 @@ export function composePlatformCoreScopeReader<Tx extends PlatformCoreTransactio
   users: PlatformCoreUsers<Tx>;
   term: PlatformCoreTermPolicy<Tx>;
   catalogue: CoreDeployedCatalogue;
+  deploymentForTransaction?: (transaction: Tx) => CoreDeploymentAvailability;
 }) {
   const principals = new PlatformPrincipalAuthority<Tx>(input.users);
-  const access = new PlatformCoreAccess<Tx>(input.term, input.catalogue.availability);
+  const access = new PlatformCoreAccess<Tx>(input.term, input.catalogue.availability, input.deploymentForTransaction);
   return async (value: unknown): Promise<CoreScopeObservation> => {
     const parsed = CORE_SCOPE_HTTP.request.parse(value), actor = principals.current();
     const scope: CoreScopeReference = { ...parsed, tenantId: actor.tenantId };

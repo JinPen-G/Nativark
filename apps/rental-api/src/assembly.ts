@@ -126,13 +126,14 @@ export function composeRentalApplication<Binding = never, Additional = unknown>(
   });
   const platformHost = composeRentalPlatformHost<RentalDatabaseTransaction>({ database,
     users: rental.authSource, configuration: rental.foundation.coreConfiguration, term: dependencies.term,
+    deploymentForTransaction,
     deployment: {
       requireRegistered: coreId => catalogue.availability.requireRegistered(coreId),
       requireAvailable: (coreId, tenantId) => catalogue.availability.requireAvailable(coreId, tenantId)
     }
   });
   const bound = additional.map(item => ({ item, value: item.bind({ database, users: rental.authSource,
-    audit: dependencies.audit, term: dependencies.term, deployment: {
+    audit: dependencies.audit, term: dependencies.term, deploymentForTransaction, deployment: {
       requireRegistered: coreId => catalogue.availability.requireRegistered(coreId),
       requireAvailable: (coreId, tenantId) => catalogue.availability.requireAvailable(coreId, tenantId)
     } }) }));
@@ -141,7 +142,7 @@ export function composeRentalApplication<Binding = never, Additional = unknown>(
     registrations: [{ manifest: rentalPackage.manifest, server: platformHost.server },
       ...bound.map(({ item, value }) => ({ manifest: item.manifest, server: value.server }))],
     http: additional.map(item => item.http), observations: observation(database) });
-  const core = composePlatformCoreApplication({ ...dependencies, users: rental.authSource, catalogue,
+  const core = composePlatformCoreApplication({ ...dependencies, users: rental.authSource, catalogue, deploymentForTransaction,
     authorizeContainer: platformHost.authorizeContainer,
     platformRemoval: createRentalCoreRemovalSource({ database,
       readAdmission: coreId => database.$transaction(async transaction =>

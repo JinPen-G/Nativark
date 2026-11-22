@@ -22,7 +22,7 @@ API 启动读取当前进程 `DATABASE_URL`、`AUTH_TOKEN_SECRET`、`CORE_DEPLOY
 | --- | --- |
 | 固定包和部署准备 | [准备命令](src/prepare-deployment.ts)、[包核验](src/deployment-package.ts)；不安装或执行DDL，成功只显示pending |
 | Core权限登记 | [显式命令](src/register-permissions.ts)核相同包/锁后，在同一公共库事务登记六项工单权限；不自动授权或改角色 |
-| 受控组合 | [装配](src/assembly.ts)、[Nest模块](src/app.module.ts)；只选择一个Core，版本与包摘要固定，公共与业务使用一个数据库实例 |
+| 受控组合 | [装配](src/assembly.ts)、[Nest模块](src/app.module.ts)；只选择一个Core，版本与包摘要固定，公共与业务使用一个数据库实例，持主体锁的部署观察复用当前事务 |
 | 当前准入 | [公共Core宿主](../../packages/platform-core-host/README.md)、[工单标准宿主](../../packages/example-tickets-core/src/platform-host.ts)；当前账号 / Core授权 / 成员分配 / 订阅 / 绑定与业务权限 |
 | 实际数据 | [平台数据计划](../platform-api/src/platform-data.ts)、[工单物理检查](../../packages/example-tickets-core/src/mysql.ts)；原Prisma账和实际结构分别核验 |
 | 当前版本与更新材料 | [实际读取源](src/core-package-sources.ts)；核固定底座归档、六公共运行包、完整工单包及原迁移观察 |

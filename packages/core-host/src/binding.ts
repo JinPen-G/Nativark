@@ -32,6 +32,8 @@ export interface CoreBindingLease {
   scope: CoreScopeReference;
   canInitialize: boolean;
   canReadOriginal: boolean;
+  /** 来源为可信执行适配，与绑定/初始化保持同一原事务。 */
+  deployment?: CoreDeploymentAvailability;
   /** 原收据不存在时核定来源；复用现有绑定也须核定，但不会重新初始化。 */
   beforeMutation?(): Promise<void>;
   /** 只在当前范围没有绑定时调用，旧绑定复用及原收据读取不重新取得新初始化准入。 */
@@ -83,7 +85,7 @@ export class CoreBindingService {
         return original.binding;
       }
       await lease.beforeMutation?.();
-      await this.deployment.requireAvailable(scope.coreId, scope.tenantId);
+      await (lease.deployment ?? this.deployment).requireAvailable(scope.coreId, scope.tenantId);
       const existing = await store.binding();
       if ((existing?.revision ?? 0) !== parsed.expectedRevision)
         throw new CoreAccessError("revision_conflict", "Core绑定已变化，请读取原绑定后操作");

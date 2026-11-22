@@ -23,9 +23,11 @@ export function composeTicketsPlatformHost<Tx extends PlatformCoreTransaction>(i
   audit: PlatformCoreBusinessAudit<Tx>;
   term: PlatformCoreTermPolicy<Tx>;
   deployment: CoreDeploymentAvailability;
+  /** 复用当前授权事务观察部署，避免持成员锁时另等根连接。 */
+  deploymentForTransaction?: (transaction: Tx) => CoreDeploymentAvailability;
 }) {
   const principals = new PlatformPrincipalAuthority<Tx>(input.users);
-  const access = new PlatformCoreAccess<Tx>(input.term, input.deployment);
+  const access = new PlatformCoreAccess<Tx>(input.term, input.deployment, input.deploymentForTransaction);
   const execution = createMysqlTicketsExecution<Tx>(input.database, {
     async authorize(transaction, request) {
       const lease = await principals.lock(transaction, request.principal, request.principal.tenantId, request.assigneeId);

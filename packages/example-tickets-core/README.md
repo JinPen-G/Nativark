@@ -41,7 +41,7 @@
 
 业务创建 `new TicketsService(execution)`。`TicketExecution.run`在每次调用时使用原认证、当前租户/Core/成员及业务权限，并将只有本Core方法的仓储交给业务服务。不能用恒真权限或内存演示数据代替真实宿主。
 
-使用平台公共身份的宿主可从 `@rental-os/example-tickets-core/platform-host` 导入 `composeTicketsPlatformHost`，传真实数据库、当前公共账号、Core部署可用性、统一订阅和同事务审计。原Rental组合也消费这个单源适配。它保留当前角色 / Core / 成员 / 对象 / 原收据核验，Core作者不复制原API源码。[实际标准适配](src/platform-host.ts)
+使用平台公共身份的宿主可从 `@rental-os/example-tickets-core/platform-host` 导入 `composeTicketsPlatformHost`，传真实数据库、当前公共账号、Core部署可用性、统一订阅和同事务审计。SQL宿主同时供给 `deploymentForTransaction(tx)`，使范围、业务与受派成员校验复用当前授权事务；单工单和Rental组合共用这个适配。它保留当前角色 / Core / 成员 / 对象 / 原收据核验，Core作者不复制原API源码。[实际标准适配](src/platform-host.ts)
 
 本Core的六项业务权限由同一清单生成。部署者通过[显式权限登记命令](../../apps/example-tickets-api/README.md)写入公共权限目录，原角色接口即可选择这些精确权限；登记不分配角色或Core。Core作者只维护清单，不另外手写Permission Seed或让页面自行注册权限。
 

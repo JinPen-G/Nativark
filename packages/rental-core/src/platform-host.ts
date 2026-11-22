@@ -29,9 +29,11 @@ export function composeRentalPlatformHost<Tx extends PlatformCoreTransaction>(in
   configuration: RentalPlatformConfiguration<Tx>;
   term: PlatformCoreTermPolicy<Tx>;
   deployment: CoreDeploymentAvailability;
+  /** SQL 宿主用调用方原事务观察部署，避免持主体锁时再等待根连接。 */
+  deploymentForTransaction?: (transaction: Tx) => CoreDeploymentAvailability;
 }) {
   const principals = new PlatformPrincipalAuthority<Tx>(input.users);
-  const access = new PlatformCoreAccess<Tx>(input.term, input.deployment);
+  const access = new PlatformCoreAccess<Tx>(input.term, input.deployment, input.deploymentForTransaction);
 
   const requireScope = async (transaction: Tx, user: SystemUserRow, scope: CoreScopeReference) => {
     if (user.isSaasAdmin || scope.tenantId !== user.tenantId || !isRentalCoreScope(scope))
@@ -48,7 +50,8 @@ export function composeRentalPlatformHost<Tx extends PlatformCoreTransaction>(in
   const readReadiness = async (transaction: Tx, binding: CoreScopeReference): Promise<CoreReadiness> => {
     if (!binding.container) {
       // 租户业务无需品类档案，但全部所选数据/能力必须由真实部署观察证明可用。
-      await input.deployment.requireAvailable(RENTAL_CORE_ID, binding.tenantId);
+      const deployment = input.deploymentForTransaction?.(transaction) ?? input.deployment;
+      await deployment.requireAvailable(RENTAL_CORE_ID, binding.tenantId);
       return { status: "ready" };
     }
     const workspaceId = binding.container!.id;

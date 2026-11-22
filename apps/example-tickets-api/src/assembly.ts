@@ -1,6 +1,6 @@
 /** 示例宿主只选择工单Core，公共实现通过正式出口复用；实际版本/来源由显式部署锁提供。 */
 import { CoreDeploymentLockSchema, type CoreDeploymentLock } from "@rental-os/core-contracts";
-import { createCoreDeployedCatalogue } from "@rental-os/core-host";
+import { createCoreDeployedCatalogue, type CoreDeploymentAvailability } from "@rental-os/core-host";
 import { createMysqlCoreDeploymentObservation } from "@rental-os/core-host/mysql-deployment";
 import {
   composePlatformCoreApplication, composePlatformCorePackageAssembly, createPlatformCorePackageAudit
@@ -31,21 +31,28 @@ export function composeTicketsApplication(database: PlatformDatabaseClient, inpu
   if (!isDeepStrictEqual(lock.platform.data, platformPlan.data)) throw new Error("部署锁的公共数据基线与当前宿主不一致");
   const { manifest } = requireTicketsDeploymentPackage(pin, lock.platform.versions);
   let catalogue: ReturnType<typeof createCoreDeployedCatalogue>;
-  const tickets = composeTicketsPlatformHost<PublicDatabaseTransaction>({ ...dependencies, deployment: {
+  const http = createTicketsHttpContribution();
+  const observation = (source: Pick<PublicDatabaseTransaction, "$queryRaw">) =>
+    createMysqlCoreDeploymentObservation({ database: source, platform: platformPlan,
+      cores: [{ coreId: manifest.id, data: manifest.data,
+        migrationNames: manifest.data.migrations.map(migration => corePrismaMigrationName(manifest.id, migration.id)),
+        readPhysical: readTicketsPhysicalData }] });
+  const deploymentForTransaction = (transaction: PublicDatabaseTransaction): CoreDeploymentAvailability =>
+    createCoreDeployedCatalogue({ lock, registrations: [...catalogue.registrations.values()],
+      http: [http], observations: observation(transaction) }).availability;
+  const tickets = composeTicketsPlatformHost<PublicDatabaseTransaction>({ ...dependencies, deploymentForTransaction, deployment: {
     requireRegistered: coreId => catalogue.availability.requireRegistered(coreId),
     requireAvailable: (coreId, tenantId) => catalogue.availability.requireAvailable(coreId, tenantId)
   } });
-  const observations = createMysqlCoreDeploymentObservation({ database, platform: platformPlan,
-    cores: [{ coreId: manifest.id, data: manifest.data,
-      migrationNames: manifest.data.migrations.map(migration => corePrismaMigrationName(manifest.id, migration.id)), readPhysical: readTicketsPhysicalData }] });
+  const observations = observation(database);
   catalogue = createCoreDeployedCatalogue({ lock, registrations: [{ manifest, server: tickets.server }],
-    http: [createTicketsHttpContribution()], observations });
+    http: [http], observations });
   const { platformReference, ...options } = packageOptions;
   const sources = createTicketsCorePackageSources({ lock, storageDirectory: options.storageDirectory,
     platformReference, observe: () => observations.read() });
   return {
     tickets,
-    application: composePlatformCoreApplication<PublicDatabaseTransaction>({ ...dependencies, catalogue }),
+    application: composePlatformCoreApplication<PublicDatabaseTransaction>({ ...dependencies, catalogue, deploymentForTransaction }),
     packages: composePlatformCorePackageAssembly<PublicDatabaseTransaction>({
       ...options, deployment: options.deployment ?? sources.deployment, materials: options.materials ?? sources.materials,
       database: dependencies.database, users: dependencies.users, catalogue,

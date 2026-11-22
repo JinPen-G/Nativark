@@ -1,7 +1,7 @@
 /** 原Guard接入已登记Core HTTP的粗准入；对象/容器、提交点和本人原收据仍由所属Core复核。 */
 import type { CoreHostSqlClient } from "@rental-os/core-host/mysql";
 import type { PlatformCoreTransaction, PlatformCoreUsers, PlatformCoreTermPolicy } from "./ports";
-import type { CoreDeployedCatalogue } from "@rental-os/core-host";
+import type { CoreDeployedCatalogue, CoreDeploymentAvailability } from "@rental-os/core-host";
 import { CoreAccessError } from "@rental-os/core-host";
 import type { CoreHttpPolicy } from "@rental-os/core-contracts";
 import { normalizeRequestPath } from "@rental-os/platform-server/request-path";
@@ -13,9 +13,10 @@ export function composePlatformCoreHttpAccess<Tx extends PlatformCoreTransaction
   users: PlatformCoreUsers<Tx>;
   term: PlatformCoreTermPolicy<Tx>;
   catalogue: CoreDeployedCatalogue;
+  deploymentForTransaction?: (transaction: Tx) => CoreDeploymentAvailability;
 }) {
   const principals = new PlatformPrincipalAuthority<Tx>(input.users);
-  const access = new PlatformCoreAccess<Tx>(input.term, input.catalogue.availability);
+  const access = new PlatformCoreAccess<Tx>(input.term, input.catalogue.availability, input.deploymentForTransaction);
   return async (method: string, url: string): Promise<CoreHttpPolicy> => {
     const actor = principals.current();
     const policy = input.catalogue.http.resolve(method, normalizeRequestPath(url), actor.audience);
