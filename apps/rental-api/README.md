@@ -9,7 +9,7 @@
 | [main.ts](src/main.ts)、[bootstrap.ts](src/bootstrap.ts) | 显式执行才启动；只消费进程配置和指定的固定部署锁，不加载 `.env`。校验 MySQL、认证密钥、AI 选择、端口、代理及 CORS 配置。 |
 | [app.module.ts](src/app.module.ts) | 挂载公共平台、标准 Core、Core 包管理、原 Rental、支付、客户、空间和认证扩展模块；从实际 Controller 元数据核对完整请求政策，再构造同实例服务。 |
 | [assembly.ts](src/assembly.ts) | 核定实际标准包与部署锁，组合原应用、公共分流、业务/公开准入和作业权威；不连接、迁移或派发外部请求。 |
-| [additional-cores.ts](src/additional-cores.ts) | 核对静态选装租户 Core 的完整固定包、正式 server、原 SQL 观察和同源 HTTP，绑定同一数据库、认证、审计和期限策略；不从请求加载模块。 |
+| [additional-cores.ts](src/additional-cores.ts) | 核对静态选装租户 Core 的完整固定包、正式 server、原 SQL 观察和同源 HTTP，绑定同一数据库、认证、审计、期限策略及当前事务的部署观察回调；不从请求加载模块。 |
 | [ai-main.ts](src/ai-main.ts)、[ai-app.module.ts](src/ai-app.module.ts)、[ai-assembly.ts](src/ai-assembly.ts) | 独立的 AI 启用入口；核定锁中的完整选装数据包和原迁移账，组合原 Runtime 与同一 Rental 实例。 |
 | [ai-composition.ts](src/ai-composition.ts)、[ai-inspection-transactions.ts](src/ai-inspection-transactions.ts) | 原 AI 工厂、知识权限、检查事务和生命周期参加者；复用当前 Auth、Guard、Core 和业务实例，构造阶段不执行外部调用。 |
 | [ai-http-policy.ts](src/ai-http-policy.ts)、[ai-openapi.ts](src/ai-openapi.ts) | 对实际 AI 处理器逐条登记读取/审计/原事务边界；发布相同挂载范围和原成功状态，不以 provider 存在开放路由。 |

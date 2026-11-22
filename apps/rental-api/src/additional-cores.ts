@@ -28,6 +28,8 @@ export interface RentalHostCoreContext {
   readonly audit: PlatformCoreBusinessAudit<RentalDatabaseTransaction>;
   readonly term: PlatformCoreTermPolicy<RentalDatabaseTransaction>;
   readonly deployment: CoreDeploymentAvailability;
+  /** 复用当前业务事务观察部署，避免持锁后另取根连接等待同一锁。 */
+  readonly deploymentForTransaction?: (transaction: RentalDatabaseTransaction) => CoreDeploymentAvailability;
 }
 
 export interface RentalHostCoreBinding<Binding = unknown> {
@@ -190,7 +192,8 @@ export function prepareRentalAdditionalCores<Binding = unknown>(
         if (bound) throw new Error("同一额外 Core 候选只能绑定一次，失败不能重建另一服务图");
         bound = true;
         const result = bind(Object.freeze({ database: context.database, users: context.users, audit: context.audit,
-          term: context.term, deployment: context.deployment }));
+          term: context.term, deployment: context.deployment,
+          deploymentForTransaction: context.deploymentForTransaction }));
         if (!result || !Object.hasOwn(result, "binding") || result.binding == null || result.authorizeContainer !== undefined)
           throw new Error("额外租户 Core 须返回实际 binding，不能提供容器授权或替代 Rental 图");
         const registered = registerCoreServers([{ manifest, server: result.server }], host);
