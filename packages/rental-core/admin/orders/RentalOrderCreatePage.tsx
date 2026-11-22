@@ -245,7 +245,7 @@ function RentalOrderCreateContent() {
 
   if (created) {
     const actions: CoreAdminPageAction<FormValues>[] = [
-      { id: "back", kind: "navigate", label: { default: t("返回订单") }, icon: <ArrowLeftOutlined />, to: rentalOrderLocation() },
+      { id: "back", kind: "navigate", slot: "navigation", label: { default: t("返回订单") }, icon: <ArrowLeftOutlined />, to: rentalOrderLocation() },
       { id: "detail", kind: "navigate", slot: "content:result", emphasis: "primary", label: { default: t("查看订单") }, to: rentalOrderLocation(created.id) },
       { id: "new", kind: "open", slot: "content:result", label: { default: t("继续新建") }, open: startAnotherOrder }
     ];
@@ -564,7 +564,7 @@ function RentalOrderCreateContent() {
       </Row>
     </Form>;
   const pageActions: CoreAdminPageAction<FormValues>[] = [{
-    id: "back", kind: "navigate", label: { default: t("返回订单") }, icon: <ArrowLeftOutlined />, to: rentalOrderLocation()
+    id: "back", kind: "navigate", slot: "navigation", label: { default: t("返回订单") }, icon: <ArrowLeftOutlined />, to: rentalOrderLocation()
   }];
   if (submissionMode === "ordinary") {
     pageActions.push({

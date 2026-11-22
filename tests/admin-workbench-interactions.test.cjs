@@ -314,8 +314,8 @@ test("declared order actions retain their original quote, result and workflow lo
   const settlement = detail.indexOf('<CorePageActions slot="content:settle" />');
   assert.ok(operations < confirmation && confirmation < handover && handover < settlement);
   assert.ok(settlement < detail.indexOf('data-order-action="extend"'));
-  assert.doesNotMatch(create, /id: "back", kind: "navigate", slot: "navigation"/);
-  assert.doesNotMatch(detail, /id: "back", kind: "navigate", slot: "navigation"/);
+  assert.equal((create.match(/id: "back", kind: "navigate", slot: "navigation"/g) ?? []).length, 2, "Both create states retain the original text navigation slot");
+  assert.match(detail, /id: "back", kind: "navigate", slot: "navigation"/, "Order details retain the original text navigation slot");
 });
 
 test("native declared buttons retain single execution, validation and stale-action rejection", async () => {
