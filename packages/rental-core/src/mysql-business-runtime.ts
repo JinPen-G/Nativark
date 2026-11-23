@@ -11,7 +11,7 @@ import { isNotificationDraftCacheLog, isVerifiedNotificationDraftCacheLog, readN
 import type { RentalBusinessRuntimeTransaction, RentalBusinessRuntimeStorage, RentalBusinessMemberships, RentalBusinessNotifications, RentalBusinessSecretBox, RentalBusinessCorporateSettlement } from "./business-runtime-ports";
 export type { RentalBusinessRuntimeTransaction, RentalBusinessRuntimeStorage, RentalBusinessMemberships, RentalBusinessNotifications, RentalBusinessSecretBox, RentalBusinessCorporateSettlement } from "./business-runtime-ports";
 import { BadRequestException, ConflictException, ForbiddenException, HttpException, HttpStatus, Logger, NotFoundException, type OnApplicationBootstrap, type OnModuleInit, ServiceUnavailableException } from "@nestjs/common";
-import { PrismaClientKnownRequestError, sqltag as sql, type InputJsonValue } from "@prisma/client/runtime/library";
+import { PrismaClientKnownRequestError, sqltag as sql, type InputJsonValue, type JsonValue } from "@prisma/client/runtime/library";
 import type { RentalBusinessContext as BusinessContext } from "./configuration-basis";
 import { randomUUID } from "node:crypto";
 import { plainToInstance } from 'class-transformer';
@@ -1736,7 +1736,8 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
       code: row.code,
       name: row.name,
       status: row.status,
-      changes: row.changes,
+      // 声明使用独立 JSON 类型，不能把宿主所选 Client 的路径带入 Core 包。
+      changes: row.changes as JsonValue,
       scheduledAt: row.scheduledAt ? row.scheduledAt.toISOString() : undefined,
       baseVersionId: row.baseVersionId ?? undefined,
       resultVersionId: row.resultVersionId ?? undefined,
@@ -1767,7 +1768,7 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
       code: row.code,
       name: row.name,
       status: row.status,
-      changes: row.changes,
+      changes: row.changes as JsonValue,
       scheduledAt: row.scheduledAt ? row.scheduledAt.toISOString() : undefined,
       baseVersionId: row.baseVersionId ?? undefined,
       resultVersionId: row.resultVersionId ?? undefined,
