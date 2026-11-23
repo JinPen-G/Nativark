@@ -1,6 +1,6 @@
 /** Rental 原 HTTP schema 单源。保留历史宽泛字段，字段完整性缺口由接口贡献明确列出。 */
 import { STAFF_UPLOAD_OBSERVATION_SCHEMAS } from "@rental-os/shared";
-import { RentalInventoryMode, RENTAL_LOCATION_TYPES, RENTAL_PRICING_UNIT_CODES, RENTAL_SERVICE_EXECUTION_ACTIONS } from "./contracts";
+import { RENTAL_CURRENCY_CODES, RentalInventoryMode, RENTAL_LOCATION_TYPES, RENTAL_PRICING_UNIT_CODES, RENTAL_SERVICE_EXECUTION_ACTIONS } from "./contracts";
 import type {
   InitiateRentalFundingRequest,
   RefundRentalServiceRequest,
@@ -23,12 +23,60 @@ import { NOTIFICATIONS_OPENAPI_SCHEMAS } from "@rental-os/platform-server/notifi
 import { RENTAL_CATEGORY_CODE_PATTERN, RENTAL_CATEGORY_ICON_CODES } from "@rental-os/shared";
 import { AI_CATEGORY_DRAFT_HTTP_SCHEMAS, AI_EXTENSION_PREVIEW_HTTP_SCHEMAS } from "@rental-os/shared";
 import { aiLeafToOpenApi30 } from "./http-openapi-json-schema";
-import { adminContainerRadiusInput, adminControlRadiusInput, storedAdminRadiusSchema, stringSchema, numberSchema, booleanSchema, objectSchema, ref, arrayOf, objectOf, type SchemaObject } from "./http-openapi-contract";
+import { adminContainerRadiusInput, adminControlRadiusInput, storedAdminRadiusSchema, rentalCategoryCodeSchema, stringSchema, numberSchema, booleanSchema, objectSchema, ref, arrayOf, objectOf, type SchemaObject } from "./http-openapi-contract";
 
 export const RENTAL_HTTP_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ...JOBS_OPENAPI_SCHEMAS,
   ...NOTIFICATIONS_OPENAPI_SCHEMAS,
   ...STAFF_UPLOAD_OBSERVATION_SCHEMAS,
+  TenantSummary: objectOf(
+    {
+      tenantId: stringSchema,
+      tenantCode: stringSchema,
+      tenantName: stringSchema,
+      operatorShortName: { type: "string", maxLength: 64, description: "后台营运商简称，与公司全称和对客品牌分别保存。" },
+      tenantStatus: stringSchema,
+      enabledBusinessLines: arrayOf(stringSchema),
+      categoryCode: stringSchema,
+      categoryName: stringSchema,
+      userCount: numberSchema,
+      organizationCount: numberSchema,
+      orderCount: numberSchema,
+      statusReason: stringSchema,
+      createdAt: { type: "string", format: "date-time" },
+      updatedAt: { type: "string", format: "date-time" }
+    },
+    ["tenantId", "tenantCode", "tenantName", "tenantStatus", "enabledBusinessLines"]
+  ),
+  TenantBootstrapRequest: objectOf(
+    {
+      tenantCode: stringSchema,
+      tenantName: stringSchema,
+      operatorShortName: { type: "string", nullable: true, maxLength: 64, description: "可选后台营运商简称，null/空字符串表示未设置。" },
+      categoryCode: rentalCategoryCodeSchema,
+      categoryVersionId: { type: "string", minLength: 1, maxLength: 191, pattern: "\\S" },
+      currency: { type: "string", enum: [...RENTAL_CURRENCY_CODES], description: "首个经营空间的结算币种；省略沿原初始化使用人民币。" },
+      operator: stringSchema,
+      adminAccount: stringSchema,
+      adminDisplayName: stringSchema,
+      adminPhone: stringSchema,
+      storeName: stringSchema,
+      storeCode: stringSchema
+    },
+    ["tenantCode", "tenantName", "categoryCode", "adminAccount", "adminDisplayName"]
+  ),
+  TenantBootstrapPreview: objectSchema,
+  TenantBootstrapResult: objectOf(
+    {
+      tenant: ref("TenantSummary"),
+      adminUser: ref("SystemUserRow"),
+      preview: ref("TenantBootstrapPreview"),
+      templateExecution: objectSchema,
+      message: stringSchema,
+      temporaryPassword: stringSchema
+    },
+    ["tenant", "adminUser", "preview", "message"]
+  ),
   AiExtensionServiceSnapshotDraft: aiLeafToOpenApi30(AI_EXTENSION_PREVIEW_HTTP_SCHEMAS.AiExtensionServiceSnapshotDraft, "AiExtensionServiceSnapshotDraft"),
   AiCategoryDraftJson: aiLeafToOpenApi30(AI_CATEGORY_DRAFT_HTTP_SCHEMAS.AiCategoryDraftJson, "AiCategoryDraftJson"),
   AiCategoryGovernanceAuditWire: aiLeafToOpenApi30(AI_CATEGORY_DRAFT_HTTP_SCHEMAS.AiCategoryGovernanceAuditWire, "AiCategoryGovernanceAuditWire"),

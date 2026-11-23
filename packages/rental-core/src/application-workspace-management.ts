@@ -1,4 +1,4 @@
-/** 经营空间管理的唯一门面。保留原主体/固定全权保护、品类版本与必选能力的同事务初始化。
+/** 租户初始化与经营空间管理的唯一门面。保留原主体/固定全权保护、品类版本与必选能力的同事务初始化。
  * 宿主提供同一数据库和业务服务；不创建会话、不伪造空间，不用构造成功代替 Core 当前准入。 */
 import { BadRequestException, ConflictException, ForbiddenException, Logger } from "@nestjs/common";
 import type { ConfigService } from "@nestjs/config";
@@ -13,6 +13,9 @@ import type { RentalCoreService } from "./mysql-core-runtime";
 import type { WorkspaceCapabilityService } from "./workspace-capabilities";
 import { RentalWorkspaceManagementRepository } from "./mysql-workspace-management";
 import type { RentalApplication } from "./application";
+import { RentalTenantBootstrapApplication, type RentalTenantBootstrapDependencies } from "./application-tenant-bootstrap";
+import { createRentalTenantBootstrapSeed } from "./tenant-bootstrap-defaults";
+import type { TenantBootstrapRequest, TenantBootstrapResult } from "./tenant-bootstrap-contracts";
 
 export interface RentalWorkspaceManagementDependencies {
   configService: Pick<ConfigService, "get">;
@@ -20,6 +23,8 @@ export interface RentalWorkspaceManagementDependencies {
   rentalCoreService?: Pick<RentalCoreService<Prisma.TransactionClient>, "registerWorkspace" | "getWorkspaceCategoryInTransaction" | "onApplicationBootstrap" | "getCategoryOpeningOptions">;
   workspaceCapabilityService?: Pick<WorkspaceCapabilityService<Prisma.TransactionClient>, "initializeRequiredCapabilities" | "overview">;
   logger: Pick<Logger, "warn">;
+  /** 只有实际独立宿主供给同事务部署观察后，才开放原SaaS租户初始化。 */
+  tenantBootstrap?: RentalTenantBootstrapApplication;
   /** 仅原内存兼容宿主传入原行读取器；不成为新宿主的权限或持久化事实。 */
   legacyAccounts?: {
     roles(): readonly Pick<SystemRoleRow, "id" | "tenantId" | "isActive" | "fixedAllPermissions">[];
@@ -27,15 +32,31 @@ export interface RentalWorkspaceManagementDependencies {
   };
 }
 
-export function createRentalWorkspaceManagementApplication(application: RentalApplication) {
+export function createRentalWorkspaceManagementApplication(application: RentalApplication,
+  options?: Pick<RentalTenantBootstrapDependencies, "deploymentForTransaction">) {
+  const repository = new RentalWorkspaceManagementRepository(application.database);
   return new RentalWorkspaceManagementApplication({ configService: application.configuration,
-    repository: new RentalWorkspaceManagementRepository(application.database),
+    repository,
     rentalCoreService: application.primary.core, workspaceCapabilityService: application.foundation.capabilities,
+    tenantBootstrap: options ? new RentalTenantBootstrapApplication({ database: application.database,
+      repository, users: application.authSource, core: application.primary.core,
+      seed: createRentalTenantBootstrapSeed, deploymentForTransaction: options.deploymentForTransaction }) : undefined,
     logger: new Logger(RentalWorkspaceManagementApplication.name) });
 }
 
 export class RentalWorkspaceManagementApplication {
   constructor(private readonly input: RentalWorkspaceManagementDependencies) {}
+  private requireTenantBootstrap() {
+    if (!this.input.tenantBootstrap) throw new ConflictException("Rental租户初始化及同事务部署观察未装配");
+    return this.input.tenantBootstrap;
+  }
+
+  get tenantBootstrapHttpAccess() { return this.requireTenantBootstrap().httpAccess; }
+  getTenantBootstrapPreview() { return this.requireTenantBootstrap().getTenantBootstrapPreview(); }
+  bootstrapTenant(input: TenantBootstrapRequest, currentUser?: SystemUserRow): Promise<TenantBootstrapResult> {
+    return this.requireTenantBootstrap().bootstrapTenant(input, currentUser);
+  }
+
   private legacyAccounts() {
     if (!this.input.legacyAccounts) throw new BadRequestException("经营空间管理需要 MySQL 数据源，当前为内存演示模式");
     return this.input.legacyAccounts;

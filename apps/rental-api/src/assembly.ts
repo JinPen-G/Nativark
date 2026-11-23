@@ -193,14 +193,16 @@ export function composeRentalApplication<Binding = never, Additional = unknown>(
   const callbackAccess = createRentalPaymentCallbackAccess({ database, deploymentForTransaction });
   const customers = createRentalCustomerManagementApplication(rental);
   const ai = input.aiMode === "enabled" ? input.ai.bind({ rental, guard, customers }) : undefined;
+  const workspaces = createRentalWorkspaceManagementApplication(rental, { deploymentForTransaction });
   return Object.freeze({ rental, catalogue, core, packages, authorization, guard, access, publicAccess, callbackAccess, aiAccess, ai,
     // 隔离映射副本；调用者不能通过修改目录映射替换已注册服务或另一 Core 的绑定。
     get additionalCores(): ReadonlyMap<string, Additional> { return new Map(additionalBindings); },
     http: createRentalHttpApplications(rental, { guard }),
     extensions: { auth: rental.auth, subscriptions: rental.subscriptions },
     customers,
-    workspaces: createRentalWorkspaceManagementApplication(rental),
-    platform: createRentalPlatformApplications(rental, { core, coreHttp, legacyGuard: guard }),
+    workspaces,
+    platform: createRentalPlatformApplications(rental, { core, coreHttp, legacyGuard: guard,
+      tenantBootstrapHttp: workspaces.tenantBootstrapHttpAccess }),
     payments: { runtime: rental.integrations.payments, statements: rental.integrations.statements, core: rental.primary.core },
     jobs: rental.integrations.ledger, notifications: rental.integrations.ledger,
     lifecycle: new RentalApplicationLifecycle(rental, () => database.$disconnect(),

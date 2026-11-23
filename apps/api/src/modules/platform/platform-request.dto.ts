@@ -41,23 +41,8 @@ export class SavePlatformFilterPresetDto implements SavePlatformFilterPresetRequ
   @IsOptional() @IsBoolean() isDefault?: boolean;
   @IsOptional() @IsString() @IsNotEmpty() operator?: string;
 }
-
-export class TenantBootstrapDto implements TenantBootstrapRequest {
-  @IsString() @IsNotEmpty() tenantCode!: string;
-  @IsString() @IsNotEmpty() tenantName!: string;
-  @IsOptional() @IsString() @MaxLength(64) operatorShortName?: string | null;
-  @IsString() @Matches(RENTAL_CATEGORY_CODE_PATTERN) categoryCode!: RentalCategoryCode;
-  @IsOptional() @IsString() @Matches(/\S/u) @MaxLength(191) categoryVersionId?: string;
-  // 结算币种（需求 §948）。只收登记过的两位小数币种；省略按人民币。
-  @IsOptional() @IsIn(RENTAL_CURRENCY_CODES) currency?: RentalCurrency;
-  // 兼容既有 API：省略时由 PlatformService 写入默认操作人；传入则必须是非空字符串。
-  @IsOptional() @IsString() @IsNotEmpty() operator?: string;
-  @IsString() @IsNotEmpty() adminAccount!: string;
-  @IsString() @IsNotEmpty() adminDisplayName!: string;
-  @IsOptional() @IsString() @IsNotEmpty() adminPhone?: string;
-  @IsOptional() @IsString() @IsNotEmpty() storeName?: string;
-  @IsOptional() @IsString() @IsNotEmpty() storeCode?: string;
-}
+/** 原初始化DTO由Rental正式出口单源维护。 */
+export { TenantBootstrapDto } from "@rental-os/rental-core/http-workspace-management-dto";
 export class SaveRolePermissionsInputDto {
   @IsOptional() @IsArray() @IsString({ each: true }) permissions?: string[];
   @IsOptional() @IsString() @IsNotEmpty() tenantId?: string;

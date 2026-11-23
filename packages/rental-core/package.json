@@ -1586,6 +1586,18 @@
       "types": "./dist/application-workspace-management.d.ts",
       "default": "./dist/application-workspace-management.js"
     },
+    "./tenant-bootstrap": {
+      "types": "./dist/application-tenant-bootstrap.d.ts",
+      "default": "./dist/application-tenant-bootstrap.js"
+    },
+    "./tenant-bootstrap-contracts": {
+      "types": "./dist/tenant-bootstrap-contracts.d.ts",
+      "default": "./dist/tenant-bootstrap-contracts.js"
+    },
+    "./tenant-bootstrap-defaults": {
+      "types": "./dist/tenant-bootstrap-defaults.d.ts",
+      "default": "./dist/tenant-bootstrap-defaults.js"
+    },
     "./mysql-workspace-management": {
       "types": "./dist/mysql-workspace-management.d.ts",
       "default": "./dist/mysql-workspace-management.js"
@@ -3015,6 +3027,15 @@
       ],
       "workspace-management": [
         "dist/application-workspace-management.d.ts"
+      ],
+      "tenant-bootstrap": [
+        "dist/application-tenant-bootstrap.d.ts"
+      ],
+      "tenant-bootstrap-contracts": [
+        "dist/tenant-bootstrap-contracts.d.ts"
+      ],
+      "tenant-bootstrap-defaults": [
+        "dist/tenant-bootstrap-defaults.d.ts"
       ],
       "mysql-workspace-management": [
         "dist/mysql-workspace-management.d.ts"

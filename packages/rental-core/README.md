@@ -32,7 +32,8 @@
 | [能力治理前端](admin/capabilities/README.md)、[页面贡献](admin/capabilities/index.tsx)、[请求工厂](admin/capabilities/client.ts) | `/admin/capabilities` 提供原能力目录、配置、升级及审计；宿主供给当前范围和原会话刷新，配置入口保留查看/管理权限与原修订，卡片复用原生 UIArc |
 | [统一HTTP装配](src/http.module.ts)、[服务组合](src/http-assembly.ts)、[原组合宿主](../../apps/api/src/app.module.ts) | `/http` 一次提供19个原Controller与九组应用接线；原宿主已通过正式模块取得同一业务实例，必需服务缺失时拒绝装配，原可选依赖保持 |
 | [客户管理门面](src/application-customer-management.ts)、[客户HTTP](src/http-customers.controller.ts)、[模块](src/http-customers.module.ts) | `/customer-management` 从完整应用选择原客户实例；35条原平台客户路径保留状态权限、敏感审计、合并与企业财务范围。旧 PlatformController 继承同一处理器，不重复挂载新模块 |
-| [空间管理门面](src/application-workspace-management.ts)、[空间仓储](src/mysql-workspace-management.ts)、[空间HTTP](src/http-workspaces.controller.ts)、[模块](src/http-workspaces.module.ts) | `/workspace-management` 与 `/mysql-workspace-management` 保留品类版本、必选能力及空间档案同事务创建，账号/角色/多空间授权仍为原 Serializable 事务。11条路径和原DTO由独立模块供给，旧入口薄适配；公开平台租户管理不依赖此门面 |
+| [空间管理门面](src/application-workspace-management.ts)、[空间仓储](src/mysql-workspace-management.ts)、[空间HTTP](src/http-workspaces.controller.ts)、[模块](src/http-workspaces.module.ts) | `/workspace-management` 与 `/mysql-workspace-management` 保留品类版本、必选能力及空间档案同事务创建，账号/角色/多空间授权仍为原 Serializable 事务。14个操作、11条路径和原DTO由独立模块供给，旧入口薄适配；无Core的公共租户创建仍使用底座独立接口 |
+| [原租户初始化](src/application-tenant-bootstrap.ts)、[合同](src/tenant-bootstrap-contracts.ts)、[首次缺省](src/tenant-bootstrap-defaults.ts) | `/tenant-bootstrap` 在原创建事务内建立租户、管理员和首个Rental空间，保留选定品类版本、币种、首次改密和一次返回的临时密码；同一公共身份与部署停新事实在写前/提交前复验，不代替SaaS的Core租户授权和成员分配 |
 | [支付HTTP模块](src/http-payments.module.ts)、[支付运行](src/mysql-payment-runtime.ts)、[对账文件](src/mysql-payment-reconciliation-file.ts) | `/http-payments` 提供原回调、退款和对账三个Controller；宿主供给同一支付、对账及经营空间解析实例。资金、原操作和回调台账归Rental，签名及供应商请求复用公共运输 |
 | [核心HTTP](src/http-core.controller.ts)、[业务HTTP](src/http-business.controller.ts)、[应用接点](src/http-applications.ts)、[快照与操作键](src/http-context.ts) | `/http-core` 与 `/http-business` 持有原履约、报价、规则和营销HTTP；宿主绑定同一业务/数据库实例，Guard/ALS及原动作继续核权限、事务和原收据 |
 | [空间能力HTTP](src/http-workspace-capabilities.controller.ts)、[员工收款HTTP](src/http-staff-payments.controller.ts)、[服务接点](src/http-service-ports.ts)、[空间能力DTO](src/http-workspace-capability.dto.ts) | 正式HTTP子出口持有原8条路径与校验；宿主Guard先形成可信身份，再通过同一原服务实例处理。原API只再导出，Controller注册不取得额外业务权限 |
@@ -317,6 +318,8 @@ HTTP入口从 `/http-workspace-capabilities`、`/http-staff-payments` 导入；`
 调价作业遇到提交应答丢失时，按原租户、空间、价格组和调价计划回读原状态；已执行的计划须关联同范围的原价格版本，返回同一个版本。缺少可信版本或事务结果未定时返回 `unknown`，保留原事实。仍待执行的计划在原锁和当前权限下，只将明确业务拒绝记为失败；读取已提交结果不重新申请新业务执行权限。[调价运行时](src/mysql-business-runtime.ts) · [原作业恢复验证](../../tests/rental-worker-recovery.test.cjs)
 
 待确认订单到期作业沿[原候选仓储](src/mysql-core-facts.ts)与[Core读取](src/mysql-core-runtime.ts)使用调用内续读参数，返回仍为原候选ID数组。每轮按原两类DRAFT候选并集及createdAt/id取50个，读口最大200；无预占订单沿原快照保留时长过滤，逐单期限与资金继续在原订单锁内裁定。调度器按自身生命周期、租户和经营空间保留位置，读取失败保旧位置，短批次下轮回绕、尾空当轮回读起点，迟到读取不能覆盖新位置。重建调度器从起点读取，原expiry幂等键、同事务资源释放与pending/unknown收据继续复用；位置只安排候选读取。HTTP和旧三参数调用保持原查询与返回。
+
+领取逾期与最终爽约作业沿同一[候选仓储](src/mysql-core-facts.ts)有界读取原状态和快照。每轮50、读口最大200，领取队列按startAt/ID、爽约队列按pickupOverdueAt/ID续读；规则宽限、最终期限和noShowNoticeAt仍由[Core原方法](src/mysql-core-runtime.ts)判定。调度器按自身实例、租户、空间和两队列分别保存位置，两查询及快照过滤成功后才推进，短批次下轮回绕、尾空当轮回读起点，迟到读取不能覆盖新位置。缺配置或原通知结果未定的前排继续保留，后排可在后继批次进入原逐单执行器；原通知键、订单动作键和可信通知事实保持。HTTP与旧三参数读取继续沿原查询和ID数组，内部[due-job端口](src/due-job-ports.ts)从同一Core方法继承可选续读参数。
 
 | 宿主启动的原执行者 | 业务与存储接点 | 退出及恢复边界 |
 | --- | --- | --- |

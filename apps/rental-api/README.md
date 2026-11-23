@@ -27,6 +27,8 @@
 
 原组合宿主的 `PlatformController` 已有客户/空间兼容入口；该宿主不得再次挂载独立客户/空间模块。独立宿主则由本根模块统一挂载。原认证扩展同样不能在同一应用重复登记。
 
+SaaS 原“创建租户”页面继续使用 `GET /api/platform/tenant-bootstrap/preview` 与 `POST /api/platform/tenant-bootstrap`。同一[初始化应用](../../packages/rental-core/src/application-tenant-bootstrap.ts)及[仓储](../../packages/rental-core/src/mysql-workspace-management.ts)在一次事务中创建租户、管理员和首个租赁空间，品类版本与结算币种直接传给原Core初始化；失败整体回滚，缓存只在提交后发布。这两条精确管理路由由公共Guard核当前SaaS主体、原会话与部署停新状态，其他业务请求继续原Core/成员和空间围栏。Core租户授权及成员分配仍分别办理；无Core的公共宿主使用自己的公共租户创建接口。
+
 Core 包目录、预检、版本选择和候选准备的四个原 Controller 挂在同一 API。它们复用当前数据库、管理主体、部署目录和审计，沿唯一公共 Guard 分流；员工路由不能借用管理入口。`CORE_PACKAGE_STORAGE_ROOT` 指定绝对存储目录，`CORE_PLATFORM_PACKAGE_REFERENCE` 指向其中 `archives/index.json` 的当前底座归档记录，前端继续使用本宿主会话与 API。
 
 [本人 Core 目录](../../packages/rental-core/src/core-session.ts)保留公共原租户身份、管理判断及其他 Core 的权限，仅为 Rental 投影当前经营空间的精确权限。原仓储明确确认空间或成员不可用时，只收回 Rental 空间权限；会话撤销、切换、账号/角色异常和存储错误仍拒绝整个请求。返回前再读当前投影，与该 Core 清单和首次权限取交集。

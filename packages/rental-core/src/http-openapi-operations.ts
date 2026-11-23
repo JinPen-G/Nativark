@@ -1401,6 +1401,25 @@ export const RENTAL_HTTP_OPERATIONS: ContractOperation[] = [
   clientOperation("get", "/api/client/v1/orders/{id}/payment-intents/{intentId}", "getClientPaymentIntent", "Get the status of a client payment intent", { responseSchema: "ClientPaymentIntentResponse" }),
   clientOperation("post", "/api/client/v1/orders/{id}/payment-intents/{intentId}/refresh", "refreshClientPaymentIntent", "Query the payment provider and reconcile a client payment intent", { responseSchema: "ClientPaymentIntentResponse" }),
   clientOperation("post", "/api/client/v1/orders/{id}/payment-intents/{intentId}/close", "closeClientPaymentIntent", "Close an unpaid client payment intent", { responseSchema: "ClientPaymentIntentResponse" }),
+  {
+    method: "get",
+    path: "/api/platform/tenant-bootstrap/preview",
+    tag: "Platform",
+    operationId: "getTenantBootstrapPreview",
+    summary: "Preview tenant bootstrap template",
+    permissions: ["system:tenant:bootstrap", "system:tenant:manage"],
+    responseSchema: "TenantBootstrapPreview"
+  },
+  {
+    method: "post",
+    path: "/api/platform/tenant-bootstrap",
+    tag: "Platform",
+    operationId: "bootstrapTenant",
+    summary: "Bootstrap tenant",
+    permissions: ["system:tenant:bootstrap", "system:tenant:manage"],
+    requestSchema: "TenantBootstrapRequest",
+    responseSchema: "TenantBootstrapResult"
+  },
   { method: "get", path: "/api/platform/tenant-bootstrap/category-options", tag: "Platform Rental Core", operationId: "getRentalCategoryOpeningOptions",
     summary: "Read bounded Core-owned options eligible for a new tenant or the specified existing tenant. Published and explicit builtin-demo sources are distinct; metadata does not authorize creation.",
     permissions: ["system:tenant:bootstrap", "system:tenant:manage"],

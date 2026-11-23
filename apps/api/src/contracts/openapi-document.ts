@@ -79,25 +79,6 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   TenantIntegrationCatalogResponse: INTEGRATION_OPENAPI_SCHEMAS["Integration.Catalog"],
   SaveTenantIntegrationRequest: INTEGRATION_OPENAPI_SCHEMAS["Integration.SaveConfig"],
   TenantIntegrationTestResult: INTEGRATION_OPENAPI_SCHEMAS["Integration.TestResult"],
-  TenantSummary: objectOf(
-    {
-      tenantId: stringSchema,
-      tenantCode: stringSchema,
-      tenantName: stringSchema,
-      operatorShortName: { type: "string", maxLength: 64, description: "后台营运商简称，与公司全称和对客品牌分别保存。" },
-      tenantStatus: stringSchema,
-      enabledBusinessLines: arrayOf(stringSchema),
-      categoryCode: stringSchema,
-      categoryName: stringSchema,
-      userCount: numberSchema,
-      organizationCount: numberSchema,
-      orderCount: numberSchema,
-      statusReason: stringSchema,
-      createdAt: { type: "string", format: "date-time" },
-      updatedAt: { type: "string", format: "date-time" }
-    },
-    ["tenantId", "tenantCode", "tenantName", "tenantStatus", "enabledBusinessLines"]
-  ),
   ResetUserPasswordResult: objectOf(
     {
       userId: stringSchema,
@@ -279,22 +260,6 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     },
     ["id", "deleted"]
   ),
-  TenantBootstrapRequest: objectOf(
-    {
-      tenantCode: stringSchema,
-      tenantName: stringSchema,
-      operatorShortName: { type: "string", nullable: true, maxLength: 64, description: "可选后台营运商简称，null/空字符串表示未设置。" },
-      categoryCode: rentalCategoryCodeSchema,
-      categoryVersionId: { type: "string", minLength: 1, maxLength: 191, pattern: "\\S" },
-      operator: stringSchema,
-      adminAccount: stringSchema,
-      adminDisplayName: stringSchema,
-      adminPhone: stringSchema,
-      storeName: stringSchema,
-      storeCode: stringSchema
-    },
-    ["tenantCode", "tenantName", "categoryCode", "adminAccount", "adminDisplayName"]
-  ),
   UpdateTenantRequest: objectOf(
     { tenantName: stringSchema, operatorShortName: { type: "string", nullable: true, maxLength: 64,
       description: "后台营运商简称；省略保持，null/空字符串清空并使用原全称。" } },
@@ -306,18 +271,6 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       reason: stringSchema
     },
     ["status", "reason"]
-  ),
-  TenantBootstrapPreview: objectSchema,
-  TenantBootstrapResult: objectOf(
-    {
-      tenant: ref("TenantSummary"),
-      adminUser: ref("SystemUserRow"),
-      preview: ref("TenantBootstrapPreview"),
-      templateExecution: objectSchema,
-      message: stringSchema,
-      temporaryPassword: stringSchema
-    },
-    ["tenant", "adminUser", "preview", "message"]
   ),
   RolePermissionsRequest: objectOf({
     permissions: arrayOf(stringSchema)
@@ -620,25 +573,6 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     authRequired: true,
     parameters: [queryParam("operator")],
     responseSchema: "DeletePlatformFilterPresetResult"
-  },
-  {
-    method: "get",
-    path: "/api/platform/tenant-bootstrap/preview",
-    tag: "Platform",
-    operationId: "getTenantBootstrapPreview",
-    summary: "Preview tenant bootstrap template",
-    permissions: ["system:tenant:bootstrap", "system:tenant:manage"],
-    responseSchema: "TenantBootstrapPreview"
-  },
-  {
-    method: "post",
-    path: "/api/platform/tenant-bootstrap",
-    tag: "Platform",
-    operationId: "bootstrapTenant",
-    summary: "Bootstrap tenant",
-    permissions: ["system:tenant:bootstrap", "system:tenant:manage"],
-    requestSchema: "TenantBootstrapRequest",
-    responseSchema: "TenantBootstrapResult"
   },
   {
     method: "get",

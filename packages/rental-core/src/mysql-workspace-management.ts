@@ -1,9 +1,9 @@
-/** 原 Rental 空间管理与账号/角色/空间复合写入的唯一仓储。
+/** 原 Rental 租户首次初始化、空间管理与账号/角色/空间复合写入的唯一仓储。
  * 空间档案、已发布品类、必选能力参加者与成员写入保留原事务；身份投影复用公共认证仓储。
  * 事务内方法只供已建立原事务和当前主体的宿主组合，不授予 Core、成员或跨租户访问权。
  */
 import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
-import { BadRequestException, ForbiddenException, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import type { Prisma, PrismaClient, WorkspaceStatus as PrismaWorkspaceStatus, SystemDataScope as PrismaSystemDataScope } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import type { SystemUserRow, SystemDataScope, SaveSystemUserRequest, SaveWorkspaceAccessRequest } from "@rental-os/platform-contracts";
@@ -18,9 +18,11 @@ import { withCreatedRentalWorkspaceConfiguration } from "./mysql-workspace-scope
 import type { BusinessWorkspace, BusinessWorkspaceStatus, CreateBusinessWorkspaceRequest, SaveWorkspaceMemberRequest,
   UpdateBusinessWorkspaceRequest, WorkspaceMember, SaveSystemUserAccessRequest, RentalCategoryCode } from "./contracts";
 import type { TenantSummary } from "./auth-contracts";
+import type { SystemRulesConfig, TenantBootstrapRequest, TenantBootstrapPreview, TenantBootstrapResult } from "./tenant-bootstrap-contracts";
+import type { PlatformDictionaryGroup, PlatformNumberRule } from "@rental-os/platform-contracts";
 
 export type RentalWorkspaceManagementDatabase = Omit<PlatformAuthDataStore, "$transaction"> & Pick<PrismaClient,
-  "businessWorkspace" | "rentalCategoryDefinition" | "rentalCategoryVersion" | "rentalCategoryAdoptionAudit" | "workspaceMember" | "rentalFulfillmentLocation" | "user" | "role" | "tenant" | "organizationUnit" | "userRole" | "$transaction">;
+  "businessWorkspace" | "rentalCategoryDefinition" | "rentalCategoryVersion" | "rentalCategoryAdoptionAudit" | "workspaceMember" | "rentalFulfillmentLocation" | "user" | "role" | "tenant" | "organizationUnit" | "userRole" | "permission" | "rolePermission" | "systemParameterSet" | "operationLog" | "$transaction">;
 
 export class RentalWorkspaceManagementRepository extends PlatformAuthenticationRepository {
   constructor(private readonly database: RentalWorkspaceManagementDatabase) { super(database); }
@@ -29,6 +31,266 @@ export class RentalWorkspaceManagementRepository extends PlatformAuthenticationR
   getTenant(tenantId: string) { return this.getTenantIdentity(tenantId); }
 
 
+
+
+
+  async bootstrapTenant(
+    input: TenantBootstrapRequest,
+    preview: TenantBootstrapPreview,
+    seed: {
+      systemRules: SystemRulesConfig;
+      dictionaries: PlatformDictionaryGroup[];
+      numberRules: PlatformNumberRule[];
+    },
+    /**
+     * 在初始化事务内、提交之前执行。用于把 Rental Core 品类配置并入同一事务，
+     * 满足需求 4.1「初始化失败必须整体回滚」；抛错会连带回滚租户、组织、角色和管理员。
+     */
+    onBeforeCommit?: (tx: Prisma.TransactionClient, tenantId: string) => Promise<void | { categoryName: string }>,
+    /** 当前独立宿主在原事务写入前及提交前复验同一SaaS主体与部署。旧组合仍沿其原Guard。 */
+    authorize?: (tx: Prisma.TransactionClient) => Promise<() => Promise<void>>
+  ): Promise<TenantBootstrapResult> {
+    if (!onBeforeCommit) throw new ConflictException("Rental初始化回调未装配，不能创建租赁租户");
+    const tenantCode = input.tenantCode.trim().toLowerCase();
+    const tenantName = input.tenantName.trim();
+    const adminAccount = input.adminAccount.trim();
+    const adminDisplayName = input.adminDisplayName.trim();
+    if (!tenantCode || !tenantName || !adminAccount || !adminDisplayName || !input.categoryCode) {
+      throw new BadRequestException("租户编码、名称、经营品类和管理员信息不能为空");
+    }
+    const temporaryPassword = generateTemporaryPassword();
+    const storePermissionCodes = new Set([
+      "rental-os:order:view",
+      "rental-os:order:operate",
+      "rental-os:order:settle",
+      // 与 STORE_OPERATOR 预设同一条迁移：原本凭 order:settle 就能裁定的四类费用审核，
+      // 拆权后要显式补上 fee-review，否则门店营运账号开出来就无法处理待审费用。
+      "rental-os:order:fee-review",
+      "rental-os:station:view",
+      "rental-core:catalog:view",
+      "rental-core:asset:view",
+      "rental-core:asset:manage",
+      "rental-os:member:view",
+      "rental-os:corporate:view",
+      "rental-os:order:create",
+      "rental-os:order:pickup",
+      "rental-os:order:return",
+      "rental-os:order:fee-manage"
+    ]);
+    const created = await this.database.$transaction(async (tx) => {
+      const revalidate = await authorize?.(tx);
+      if (await tx.tenant.findUnique({ where: { code: tenantCode } })) {
+        throw new BadRequestException("租户编码已存在");
+      }
+      const categoryCode = this.toPrismaCategoryCode(input.categoryCode);
+      // 与新空间和治理操作保持同一锁顺序；初始化全过程固定推荐引用，避免档案外键共享锁升级死锁及混版缺省。
+      await tx.$queryRaw(prismaRuntime.sql`SELECT code FROM rental_category_definitions WHERE code = ${categoryCode} FOR UPDATE`);
+      const category = await tx.rentalCategoryDefinition.findUnique({ where: { code: categoryCode } });
+      if (!category) throw new BadRequestException("经营品类不存在");
+      const tenant = await tx.tenant.create({
+        data: { code: tenantCode, name: tenantName, operatorShortName: input.operatorShortName, status: ("ACTIVE" as const) }
+      });
+      const operatorOrg = await tx.organizationUnit.create({
+        data: {
+          tenantId: tenant.id,
+          type: ("OPERATOR" as const),
+          code: `OP-${tenantCode.toUpperCase()}`,
+          name: `${tenant.name}营运中心`
+        }
+      });
+      const storeOrg = await tx.organizationUnit.create({
+        data: {
+          tenantId: tenant.id,
+          parentId: operatorOrg.id,
+          type: ("STORE" as const),
+          code: input.storeCode?.trim() || `STORE-${tenantCode.toUpperCase()}`,
+          name: input.storeName?.trim() || `${tenant.name}履约空间`
+        }
+      });
+      const permissions = await tx.permission.findMany();
+      const tenantAdminRole = await tx.role.create({
+        data: {
+          tenantId: tenant.id,
+          code: "TENANT_ADMIN",
+          name: "租户管理员",
+          description: "拥有当前 SaaS 租户内全部权限，但不能访问其他租户。",
+          scope: ("OPERATOR" as const),
+          fixedAllPermissions: true,
+          enabledBusinessScopes: ["RENTAL_CORE"],
+          buttonPermissions: ["*"],
+          dataScope: ("ALL" as const),
+          isActive: true
+        }
+      });
+      const storeRole = await tx.role.create({
+        data: {
+          tenantId: tenant.id,
+          code: "STORE_OPERATOR",
+          name: "门店运营",
+          description: "处理租赁订单、取还检查和基础库存查询。",
+          scope: ("STORE" as const),
+          fixedAllPermissions: false,
+          enabledBusinessScopes: ["RENTAL_CORE"],
+          buttonPermissions: [
+            "rental-os:order:create",
+            "rental-os:order:pickup",
+            "rental-os:order:return",
+            "rental-os:order:fee-manage"
+          ],
+          dataScope: ("STORE" as const),
+          isActive: true
+        }
+      });
+      await tx.rolePermission.createMany({
+        data: permissions
+          .filter((permission) => !permission.code.startsWith("system:tenant:"))
+          .map((permission) => ({ roleId: tenantAdminRole.id, permissionId: permission.id })),
+        skipDuplicates: true
+      });
+      await tx.rolePermission.createMany({
+        data: permissions
+          .filter((permission) => storePermissionCodes.has(permission.code))
+          .map((permission) => ({ roleId: storeRole.id, permissionId: permission.id })),
+        skipDuplicates: true
+      });
+      const user = await tx.user.create({
+        data: {
+          tenantId: tenant.id,
+          organizationId: operatorOrg.id,
+          account: adminAccount,
+          displayName: adminDisplayName,
+          phone: input.adminPhone,
+          roleId: tenantAdminRole.id,
+          passwordHash: hashPassword(temporaryPassword),
+          isSaasAdmin: false,
+          isPlatformAdmin: true,
+          mustChangePassword: true,
+          needsTenantOnboarding: true,
+          isActive: true
+        }
+      });
+      await tx.userRole.create({ data: { userId: user.id, roleId: tenantAdminRole.id } });
+      // SPACE-01（需求 4.1）：默认经营空间、其唯一品类以及管理员的成员关系，
+      // 由 onBeforeCommit 里的 initializeTenant → upsertProfile 在**同一事务**内建立，
+      // 因此这里不再重复创建。
+      //
+      // 刻意不在此处单独写一份：品类档案有两条写入路径（租户初始化与懒加载自愈），
+      // 不变量必须钉在档案的写入点上，否则两条路径会给出不一致的结果。
+      // 该调用在本方法末尾、提交之前发生，任一步失败仍整体回滚。
+      const configs = [
+        ["system-rules", seed.systemRules],
+        ["platform-dictionaries", { groups: seed.dictionaries }],
+        ["platform-number-rules", { rules: seed.numberRules }]
+      ] as const;
+      for (const [module, content] of configs) {
+        await tx.systemParameterSet.create({
+          data: {
+            tenantId: tenant.id,
+            module,
+            versionNo: 1,
+            status: ("EFFECTIVE" as const),
+            content: content as unknown as Prisma.InputJsonValue,
+            operator: input.operator || "SaaS 平台管理员",
+            effectiveAt: new Date()
+          }
+        });
+      }
+      const templateExecution = await this.bootstrapTenantTemplates({
+        tenantId: tenant.id,
+        tenantCode,
+        tenantName: tenant.name,
+        operatorOrgId: operatorOrg.id,
+        storeOrgId: storeOrg.id,
+        adminUserId: user.id,
+        storeCode: storeOrg.code,
+        storeName: storeOrg.name
+      });
+      await tx.operationLog.create({
+        data: {
+          tenantId: tenant.id,
+          userId: undefined,
+          action: "tenant.bootstrap",
+          detail: {
+            categoryCode: input.categoryCode,
+            operatorShortName: tenant.operatorShortName,
+            operator: input.operator || "SaaS 平台管理员",
+            templates: templateExecution.items.map((item) => item.code)
+          }
+        }
+      });
+      const initialized = await onBeforeCommit(tx, tenant.id);
+      await revalidate?.();
+      return { tenant, user, templateExecution, categoryName: initialized && typeof initialized === "object" ? initialized.categoryName : category.name };
+    });
+
+    return {
+      tenant: {
+        tenantId: created.tenant.id,
+        tenantCode: created.tenant.code,
+        tenantName: created.tenant.name,
+        operatorShortName: created.tenant.operatorShortName ?? undefined,
+        tenantStatus: this.toTenantStatus(created.tenant.status),
+        enabledBusinessLines: ["rental_core"],
+        categoryCode: input.categoryCode,
+        categoryName: created.categoryName
+      },
+      adminUser: this.toUserRow(await this.findUserWithRoles(created.user.id)),
+      preview,
+      templateExecution: created.templateExecution,
+      temporaryPassword,
+      message: "租户初始化已完成；临时密码仅本次返回，管理员首次登录必须修改。"
+    };
+  }
+
+
+
+  private async bootstrapTenantTemplates(input: {
+    tenantId: string;
+    tenantCode: string;
+    tenantName: string;
+    operatorOrgId: string;
+    storeOrgId: string;
+    adminUserId: string;
+    storeCode: string;
+    storeName: string;
+  }): Promise<NonNullable<TenantBootstrapResult["templateExecution"]>> {
+    void input;
+
+    return {
+      executionId: `tenant_bootstrap_${randomUUID()}`,
+      items: [
+        {
+          code: "fulfillment-location",
+          name: "默认履约地点",
+          count: 1,
+          reusableForGenericRental: false,
+          remark: "当前模板保留了车辆专用示例；通用租赁应改为服务点/仓库模板。"
+        },
+        {
+          code: "asset-catalog",
+          name: "车辆资产与车型组",
+          count: 2,
+          reusableForGenericRental: false,
+          remark: "汽车租赁专用；通用租赁需替换为资产品类、规格和库存实例。"
+        },
+        {
+          code: "customer",
+          name: "个人会员与企业客户",
+          count: 2,
+          reusableForGenericRental: true,
+          remark: "客户底座可复用，等级和证照字段后续按品类调整。"
+        },
+        {
+          code: "demo-order",
+          name: "演示租赁订单",
+          count: 1,
+          reusableForGenericRental: false,
+          remark: "用于本地验证订单闭环；通用租赁需替换资产快照字段。"
+        }
+      ],
+      message: "已执行默认角色、参数、字典、编号和租赁业务基础模板。"
+    };
+  }
 
   /* ---------- SPACE-01：经营空间主档与成员关系 ---------- */
 

@@ -20,7 +20,8 @@
     "src/enterprise-workflows.ts",
     "src/exchange-inspection-preparation.ts",
     "src/integration-contracts.ts",
-    "src/staff-upload-observation.ts"
+    "src/staff-upload-observation.ts",
+    "src/tenant-bootstrap-contracts.ts"
   ],
   "include": []
 }
