@@ -121,6 +121,8 @@ export interface CorePageActionBase {
   id: string;
   label: CorePageText;
   emphasis?: "primary" | "secondary";
+  /** 仅呈现已登记动作所控制面板的展开状态，不改变动作授权或执行。 */
+  ariaExpanded?: boolean;
   /** 附加于页面访问要求；宿主取当前权限判显示，服务端仍复核实际动作授权。 */
   permissions?: CorePageDescriptor["permissions"];
   /** 当前受权页面的展示条件，不是业务授权证据。 */
