@@ -232,6 +232,8 @@ Rental HTTP从 `@rental-os/rental-core/http` 的 `RentalHttpModule` 接入，类
 
 原文件兼容应用从 `@rental-os/rental-core/file-application-runtime` 导入 `RentalFileStorageApplication`。宿主提供同一文件/业务存储、配置锁、当前 Auth/ACL、审计和原检查解析器。知识权限、修订解析、原键及 unknown 错误工厂可按需供给。新知识上传在写入前核定原错误工厂，原键观察在查询前核定原键和修订解析，缺少所需参加者时明确不可用。原合法任意 module/scene 及历史回执继续沿原权限处理。固定 Staff 场景消费公共文件应用，企业和换货专用依据分别使用所属参加者。原 Nest 类只维护唯一定时器、生命周期与 AI 清理参加者，AI 物理删除仍核原政策和收据。[文件应用](src/file-application-runtime.ts) · [原宿主](../../apps/api/src/modules/integrations/file-storage.runtime.service.ts) · [AI 清理参加者](../../apps/api/src/modules/integrations/file-ai-retention.participant.ts)
 
+跨租户清理按原上传会话与待删除文件在数据库分组发现租户，每页最多1000个，按最后一个租户值继续扫描。分组、排序与页上限由同一Prisma读取交数据库执行。清理移除前页记录后仍能定位下一页，每租户使用调用方原上限并汇合原清理小结。扫描期间新增到游标之前的租户留下一轮处理。每个文件的配置、业务归属、当前数据及清理占用仍由原同事务参加者核定，冻结与删除未知结果继续按原对象读取。[清理准入](src/application-file-cleanup-authority.ts) · [公共清理内核](../platform-server/src/modules/files/README.md)
+
 型号图片首次解绑在原图片事务中把 active 文件排为 `delete_queued`；已有排队、未定、在途或已删事实保持原收据。唯一清理器占用后才派发删除，Core 移除观察保留未完成作业与 unknown 阻碍。[图片事务](src/mysql-core-configuration.ts) · [移除观察](../../apps/rental-api/src/core-removal-source.ts)
 
 员工原键观察的请求与回执 schema 从 `@rental-os/rental-core/staff-upload-observation` 读取，服务端从 `@rental-os/rental-core/file-application-staff-observation` 导入 `parseStaffUploadObservation`。解析复用原 Ajv 封闭校验、8KiB 描述上限及原上传键 UTF-16 长度和 trim 规则，宿主继续向同一 HTTP/文件参加者供给解析函数。[观察合同](src/staff-upload-observation.ts) · [原键解析与观察](src/file-application-staff-observation.ts)

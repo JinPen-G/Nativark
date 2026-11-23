@@ -32,6 +32,7 @@ import type { StaffUploadObservationRequest, StaffUploadObservationResponse } fr
 import type { RentalFileCleanupAuthority } from "./application-file-cleanup-authority";
 
 type JsonRecord = Record<string, unknown>;
+const CLEANUP_TENANT_BATCH_SIZE = 1000;
 
 /** 本编排使用原知识修订的目标字段；完整修订由宿主原 schema 校验并随 owner 保全。 */
 export interface FileKnowledgeRevision {
@@ -312,16 +313,10 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
 
   /**
    * 常驻进程的跨租户清理入口。它不接受请求传入的租户范围，租户集合只从
-   * 上传会话表读取；每个租户仍由 cleanupExpiredUploadSessions 再次带 tenantId
+   * 上传会话表按稳定租户游标分批读取；每个租户仍由原清理参加者再次带 tenantId
    * 查询和抢占，不能因为某个租户的 provider 配置异常而影响其他租户。
    */
   async cleanupExpiredUploadSessionsForAllTenants(limitPerTenant = 50): Promise<FileUploadCleanupSummary> {
-    const tenants = await this.prisma.fileUploadSession.findMany({
-      select: { tenantId: true },
-      distinct: ["tenantId"],
-      orderBy: { tenantId: "asc" },
-      take: 1000
-    });
     const summary: FileUploadCleanupSummary = {
       scanned: 0,
       invalidated: 0,
@@ -329,17 +324,29 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
       cleanupPending: 0,
       sessionIds: []
     };
-    for (const tenant of tenants) {
-      try {
-        const current = await this.cleanupForTenant(tenant.tenantId, true).cleanupExpiredUploadSessions(tenant.tenantId, limitPerTenant);
-        summary.scanned += current.scanned;
-        summary.invalidated += current.invalidated;
-        summary.deletedObjects += current.deletedObjects;
-        summary.cleanupPending += current.cleanupPending;
-        summary.sessionIds.push(...current.sessionIds);
-      } catch {
-        // 单租户配置/网络异常只保留该租户会话待下一轮处理，不能停掉全局清理循环。
+    let afterTenantId: string | undefined;
+    for (;;) {
+      const tenants = await this.prisma.fileUploadSession.groupBy({
+        by: ["tenantId"],
+        where: afterTenantId ? { tenantId: { gt: afterTenantId } } : undefined,
+        orderBy: { tenantId: "asc" },
+        take: CLEANUP_TENANT_BATCH_SIZE
+      });
+      for (const tenant of tenants) {
+        try {
+          const current = await this.cleanupForTenant(tenant.tenantId, true).cleanupExpiredUploadSessions(tenant.tenantId, limitPerTenant);
+          summary.scanned += current.scanned;
+          summary.invalidated += current.invalidated;
+          summary.deletedObjects += current.deletedObjects;
+          summary.cleanupPending += current.cleanupPending;
+          summary.sessionIds.push(...current.sessionIds);
+        } catch {
+          // 单租户配置/网络异常只保留该租户会话待下一轮处理，不能停掉全局清理循环。
+        }
       }
+      if (tenants.length < CLEANUP_TENANT_BATCH_SIZE) break;
+      // 清理可能移除当前页记录，按原租户值继续，不依赖偏移量或游标行仍存在。
+      afterTenantId = tenants[tenants.length - 1].tenantId;
     }
     return summary;
   }
@@ -350,25 +357,32 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
   }
 
   async cleanupPendingFileAssetDeletesForAllTenants(limitPerTenant = 50) {
-    const tenants = await this.prisma.fileAsset.findMany({
-      where: { status: { in: ["delete_queued", "delete_pending", "delete_in_progress"] } },
-      select: { tenantId: true },
-      distinct: ["tenantId"],
-      orderBy: { tenantId: "asc" },
-      take: 1000
-    });
     let scanned = 0;
     let deleted = 0;
     let pending = 0;
-    for (const tenant of tenants) {
-      try {
-        const result = await this.cleanupForTenant(tenant.tenantId, true).cleanupPendingFileAssetDeletes(tenant.tenantId, limitPerTenant);
-        scanned += result.scanned;
-        deleted += result.deleted;
-        pending += result.pending;
-      } catch {
-        // 一个租户的 provider 配置异常不能阻断其他租户的文件清理。
+    let afterTenantId: string | undefined;
+    for (;;) {
+      const tenants = await this.prisma.fileAsset.groupBy({
+        by: ["tenantId"],
+        where: {
+          status: { in: ["delete_queued", "delete_pending", "delete_in_progress"] },
+          tenantId: afterTenantId ? { gt: afterTenantId } : undefined
+        },
+        orderBy: { tenantId: "asc" },
+        take: CLEANUP_TENANT_BATCH_SIZE
+      });
+      for (const tenant of tenants) {
+        try {
+          const result = await this.cleanupForTenant(tenant.tenantId, true).cleanupPendingFileAssetDeletes(tenant.tenantId, limitPerTenant);
+          scanned += result.scanned;
+          deleted += result.deleted;
+          pending += result.pending;
+        } catch {
+          // 一个租户的 provider 配置异常不能阻断其他租户的文件清理。
+        }
       }
+      if (tenants.length < CLEANUP_TENANT_BATCH_SIZE) break;
+      afterTenantId = tenants[tenants.length - 1].tenantId;
     }
     return { scanned, deleted, pending };
   }

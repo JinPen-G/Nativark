@@ -51,6 +51,7 @@ function matches(row, where = {}) {
     if (value && typeof value === "object" && !Array.isArray(value)) {
       if ("in" in value) return value.in.includes(row[key]);
       if ("lte" in value) return row[key] != null && row[key] <= value.lte;
+      if ("gt" in value) return row[key] != null && row[key] > value.gt;
       if ("not" in value) return row[key] !== value.not;
       if ("some" in value) return (row[key] ?? []).some(item => matches(item, value.some));
       return matches(row[key] ?? {}, value);
@@ -58,6 +59,14 @@ function matches(row, where = {}) {
     return row[key] === value;
   });
 }
+
+function groupTenantRows(rows, { by, where, orderBy, take }) {
+  assert.deepEqual(by, ["tenantId"]);
+  assert.deepEqual(orderBy, { tenantId: "asc" });
+  const tenantIds = [...new Set(rows.filter(row => matches(row, where)).map(row => row.tenantId))];
+  return tenantIds.sort().slice(0, take ?? tenantIds.length).map(tenantId => ({ tenantId }));
+}
+
 const orders = [{ id: orderId, tenantId, workspaceId, createdBy: "file-operator", fulfillmentLocationId: "pickup-place",
   returnLocationId: "return-place", workOrders: [] },
   { id: "order-another-space", tenantId, workspaceId: otherWorkspaceId, createdBy: "file-operator", fulfillmentLocationId: "pickup-place", workOrders: [] },
@@ -124,6 +133,7 @@ const prisma = {
     ? { id: workspaceId, tenantId, status: "ACTIVE", categoryCode: "CAMERA" } : null },
   fileAsset: {
     findMany: async ({ where, take }) => [...assets.values()].filter(row => matches(row, where)).slice(0, take ?? assets.size),
+    groupBy: async query => groupTenantRows([...assets.values()], query),
     create: async ({ data }) => {
       const row = { ...assetRow(data.id), ...data, createdAt: new Date(), updatedAt: new Date() };
       assets.set(row.id, row);
@@ -147,6 +157,7 @@ const prisma = {
     }
   },
   fileUploadSession: {
+    groupBy: async query => groupTenantRows([...sessions.values()], query),
     findFirst: async ({ where }) => [...sessions.values()].find((row) => row.tenantId === where.tenantId && (where.id ? row.id === where.id : row.idempotencyKey === where.idempotencyKey)) ?? null,
     findMany: async ({ where, select }) => {
       if (!where && select?.tenantId) {
