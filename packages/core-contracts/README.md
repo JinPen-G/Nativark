@@ -123,6 +123,8 @@ Core 页面聚合从正式 `/admin` 出口的唯一直接返回对象，沿实�
 
 可确定的 `Object.assign`、同模块顺序明确的顶层后置组合、本地同步纯函数和成员引用按最后覆盖顺序读取，字段出处跟随最终声明。未知来源可能覆盖的旧字段会失效，后续明确字段仍可定位。循环、未知写入、访问器或无法确定的组合保留实际来源与缺口。基础常量读取不重放 const 对象的后置写入，以 `post-write:<源码路径>:<行号>` 保留实际出处，并移除不能证明为最终值的初始化结果。写入前可证明的快照保留，同语句、跨模块和延迟读写的时序保持未解析。调用传出的已确定标量保持原值，可变引用按实际成员路径定位。动态索引保留所在层级，后续确定字段用于排除不重叠写入。动态索引后的标量子值须由原常量每个可选分支的已知字段证明，未知字段与对象引用继续保留缺口。完整对象读取仍核全部潜在写入，未知动态值和对象逃逸保留缺口。页面 schema 成员选择复用同一 const 归属，受影响的子字段保留准确缺口与原指针，其余确定字段仍可定位。上述有限组合继续由静态字段读取器解释。它按同一时序边界处理同语句写入与延迟读写，保留实际写入出处，不把初始化值标为完整字段结果。扫描不会执行这些调用。
 
+已解析的函数参数沿原声明定位实际成员使用。异步客户端读取 `declaration.path` 和 `declaration.method` 时，路径与方法的静态值仍可定位，`request`、`response` 子对象的解析调用保留各自字段的来源缺口。直接改写字段、传出对象、动态成员写入或访问器仍按原引用风险处理。[参数成员定位](src/repository-source.ts)
+
 `openapiSource.controllerParameters` 将列表连接到实际 Controller 参数。类型、可选标记、`defaultExpression` 和静态 `declaredDefault` 沿原声明提供，`defaultStatus` 及 `defaultIssues` 说明动态默认值。无参 `@Query()` 引用本仓可静态枚举的平面DTO时，字段名逐一对应已有正式参数，保留原类型、可选标记、校验/转换表达式与源码行号；该对应不从DTO另生成schema。继承、泛型、构造/方法、计算或静态字段、动态Query名、默认与pipe继续标明来源缺口。品类候选 `operation` 的可选string、upgrade/restore及默认upgrade沿正式HTTP声明读取。生成器字段与Controller声明可分别核对，实际输入转换及业务限制继续由原入口执行。[公共订阅参数消费](../platform-server/src/modules/subscription/subscription-platform.controller.ts) · [Rental参数生成规则](../rental-core/src/http-openapi-contract.ts)
 
 `controllerRequestBodies` 定位原 `@Body()` 参数及其 DTO 属性、类型、默认表达式和装饰器，`fieldNamesStatus` 只说明字段名称是否能静态定位。DTO 资料保持 `source-reference`，JSON Schema 的完整性沿 `schemas` 中的 `status` / `issues` 判断。正则字面量的 `.source` 和所选静态约束读取原声明；动态构造、继承、泛型及运行转换保留缺口。未索引引用的 `mapSources` 指向实际 schema 聚合入口，`schema-map:source-reference` 表示聚合尚未展开，`schema-reference:not-indexed` 表示静态集合缺少所选引用。请求体字段资料与返回体、校验和业务运行分别核对。[请求体与引用读取](src/repository-openapi.ts)

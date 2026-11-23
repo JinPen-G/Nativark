@@ -12,6 +12,7 @@ import type { DevelopmentSourceReference } from "./development";
 export const UNRESOLVED = Symbol("unresolved-static-value");
 type StaticValue = string | number | boolean | null | StaticValue[] | { [key: string]: StaticValue };
 type ConstantOwner = { declaration: ts.VariableDeclaration; members: (string | undefined)[] | undefined };
+type ArgumentMemberUse = { members: (string | undefined)[]; referenceOnly: boolean };
 
 function unwrapExpression(node: ts.Expression): ts.Expression {
   while (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node)
@@ -192,14 +193,87 @@ export class RepositorySource {
     return values.every(value => value === null || typeof value !== "object");
   }
 
+  /** 已知函数按参数的实际成员使用登记影响，异步及分支不改变原对象归属。 */
+  callArgumentUses(call: ts.CallExpression, argumentIndex: number): ArgumentMemberUse[] | undefined {
+    if (!ts.isIdentifier(call.expression) || call.arguments.some(ts.isSpreadElement)) return;
+    const argument = call.arguments[argumentIndex], argumentOwner = argument && this.constantOwner(argument);
+    if (!argumentOwner) return;
+    const symbol = this.checker.getSymbolAtLocation(call.expression), target = symbol && this.target(symbol).valueDeclaration;
+    const callable = target && ts.isVariableDeclaration(target) && target.initializer
+      && ts.isVariableDeclarationList(target.parent) && target.parent.flags & ts.NodeFlags.Const
+      ? unwrapExpression(target.initializer) : target;
+    if (!callable || !(ts.isFunctionDeclaration(callable) || ts.isArrowFunction(callable) || ts.isFunctionExpression(callable)) || !callable.body) return;
+    const parameter = callable.parameters[argumentIndex];
+    if (!parameter || !ts.isIdentifier(parameter.name) || parameter.dotDotDotToken) return;
+    const parameterSymbol = this.checker.getSymbolAtLocation(parameter.name);
+    const uses: ArgumentMemberUse[] = [];
+    let unsafe = !parameterSymbol;
+    const visit = (part: ts.Node) => {
+      if (ts.isTypeNode(part)) return;
+      if (ts.isIdentifier(part) && ["arguments", "eval"].includes(part.text)) unsafe = true;
+      if (ts.isIdentifier(part) && this.checker.getSymbolAtLocation(part) === parameterSymbol) {
+        let expression: ts.Expression = part;
+        while (expression.parent) {
+          const parent = expression.parent;
+          if ((ts.isPropertyAccessExpression(parent) || ts.isElementAccessExpression(parent)) && parent.expression === expression
+            || ts.isExpression(parent) && unwrapExpression(parent) === expression) expression = parent;
+          else break;
+        }
+        const parent = expression.parent;
+        const write = ts.isBinaryExpression(parent) && parent.left === expression
+          && parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+          || ts.isDeleteExpression(parent) || (ts.isPrefixUnaryExpression(parent) || ts.isPostfixUnaryExpression(parent))
+            && [ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken].includes(parent.operator);
+        let selected = unwrapExpression(expression);
+        // 方法可以改写其接收对象，参数对象上的直接方法仍按整个对象处理。
+        if (ts.isCallExpression(parent) && parent.expression === expression
+          && (ts.isPropertyAccessExpression(selected) || ts.isElementAccessExpression(selected))) selected = selected.expression;
+        const members: (string | undefined)[] = [];
+        while (ts.isPropertyAccessExpression(selected) || ts.isElementAccessExpression(selected)) {
+          const key = ts.isPropertyAccessExpression(selected) ? selected.name : unwrapExpression(selected.argumentExpression);
+          members.unshift(ts.isIdentifier(key) && ts.isPropertyAccessExpression(selected) || ts.isStringLiteralLike(key) || ts.isNumericLiteral(key) ? key.text : undefined);
+          selected = unwrapExpression(selected.expression);
+        }
+        uses.push({ members, referenceOnly: !write });
+      }
+      ts.forEachChild(part, visit);
+    };
+    visit(callable.body);
+    for (const input of callable.parameters) if (input.initializer) visit(input.initializer);
+    // 可重绑定的函数以及会运行用户 getter 的对象仍保留完整引用风险。
+    const binding = target && (ts.isFunctionDeclaration(target) || ts.isVariableDeclaration(target)) ? target.name : undefined;
+    const bindingSymbol = binding && this.checker.getSymbolAtLocation(binding);
+    const scope = (part: ts.Node) => {
+      if (ts.isBinaryExpression(part) && part.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
+        && part.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+        && this.checker.getSymbolAtLocation(unwrapExpression(part.left)) === bindingSymbol) unsafe = true;
+      ts.forEachChild(part, scope);
+    };
+    if (bindingSymbol) scope(callable.parent);
+    let owner: ConstantOwner | undefined = argumentOwner;
+    const owners = new Set<ts.VariableDeclaration>();
+    const accessor = (part: ts.Node) => {
+      if (ts.isGetAccessorDeclaration(part) || ts.isSetAccessorDeclaration(part)) unsafe = true;
+      ts.forEachChild(part, accessor);
+    };
+    while (owner && !owners.has(owner.declaration)) {
+      owners.add(owner.declaration);
+      const initial: ts.Expression | undefined = owner.declaration.initializer;
+      if (initial) accessor(initial);
+      owner = initial && this.constantOwner(initial);
+    }
+    return unsafe ? undefined : uses;
+  }
+
   /** const/成员/解构的写入只定位并失效，不重放赋值或未知调用。 */
   private objectMutations(usage: ts.Identifier, selectedMembers: readonly string[] = []): ts.Node[] {
     if (!this.mutationIndex) {
       const index = new Map<ts.VariableDeclaration, { node: ts.Node; members: (string | undefined)[] | undefined }[]>();
       // 先登记索引避免静态参数读取递归重建，后续发现的写入继续收集。
       this.mutationIndex = index;
-      const add = (node: ts.Node, expression: ts.Expression, referenceOnly = false) => {
+      const add = (node: ts.Node, expression: ts.Expression, referenceOnly = false, members: (string | undefined)[] = []) => {
         let reference = this.constantOwner(expression);
+        if (reference) reference = { declaration: reference.declaration, members: reference.members && [...reference.members, ...members] };
         if (referenceOnly && reference) {
           const input = this.value(expression);
           if (input !== UNRESOLVED && (input === null || typeof input !== "object")) return;
@@ -220,7 +294,11 @@ export class RepositorySource {
           if (node.arguments[0]) add(node, node.arguments[0]);
         } else if ((ts.isCallExpression(node) || ts.isNewExpression(node))
           && !(ts.isCallExpression(node) && this.readOnlyCall(node))) {
-          for (const argument of node.arguments ?? []) add(node, argument, true);
+          for (const [argumentIndex, argument] of (node.arguments ?? []).entries()) {
+            const uses = ts.isCallExpression(node) ? this.callArgumentUses(node, argumentIndex) : undefined;
+            if (uses) for (const use of uses) add(node, argument, use.referenceOnly, use.members);
+            else add(node, argument, true);
+          }
           if (ts.isPropertyAccessExpression(node.expression) || ts.isElementAccessExpression(node.expression)) add(node, node.expression.expression, true);
         } else if (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
           && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) add(node, node.left);

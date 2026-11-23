@@ -437,8 +437,9 @@ class StaticSchemaReader {
     if (!index) {
       index = new Map();
       objectMutationIndexes.set(this.source, index);
-      const add = (node: ts.Node, expression: ts.Expression, sources?: ts.Expression[], referenceOnly = false) => {
+      const add = (node: ts.Node, expression: ts.Expression, sources?: ts.Expression[], referenceOnly = false, members: (string | undefined)[] = []) => {
         let reference = this.source.constantOwner(expression);
+        if (reference) reference = { declaration: reference.declaration, members: reference.members && [...reference.members, ...members] };
         if (referenceOnly && reference) {
           const value = this.source.value(expression);
           if (value !== UNRESOLVED && (value === null || typeof value !== "object")) return;
@@ -469,7 +470,11 @@ class StaticSchemaReader {
               && !node.arguments.some(ts.isSpreadElement) ? [...node.arguments.slice(1)] : undefined);
           } else if (!(ts.isCallExpression(node)
             && (["assign", "keys", "values", "entries", "hasOwn"].some(method => this.objectCall(node, method)) || this.pureCall(node)))) {
-            for (const argument of node.arguments ?? []) add(node, argument, undefined, true);
+            for (const [argumentIndex, argument] of (node.arguments ?? []).entries()) {
+              const uses = ts.isCallExpression(node) ? this.source.callArgumentUses(node, argumentIndex) : undefined;
+              if (uses) for (const use of uses) add(node, argument, undefined, use.referenceOnly, use.members);
+              else add(node, argument, undefined, true);
+            }
             if (ts.isPropertyAccessExpression(node.expression) || ts.isElementAccessExpression(node.expression))
               add(node, node.expression.expression, undefined, true);
           }
