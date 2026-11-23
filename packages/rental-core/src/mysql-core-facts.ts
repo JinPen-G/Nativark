@@ -261,9 +261,19 @@ export interface RentalExpiredDraftOrderScan {
   after?: { createdAt: Date; id: string };
 }
 
+/** 领取逾期/爽约worker调用内的位置，时间字段由对应原队列决定。 */
+export interface RentalPickupOrderScan {
+  after?: { at: Date; id: string };
+}
+
+export type RentalPickupOrderCandidate = Pick<RentalOrder,
+  "id" | "status" | "startAt" | "pickupOverdueAt" | "noShowNoticeAt" | "ruleSnapshot">;
+
 /** 原服务消费的事实端口；事务由宿主选择，租户/空间、库侧约束和恢复仍按正式业务核验。 */
 export interface RentalCoreFactStore<TTransaction extends RentalCoreFactTransaction = RentalCoreFactTransaction> {
   listOrders(tenantId: string): Promise<RentalOrder[]>;
+  /** 仅有界读取原领取逾期/爽约事实，规则期限与执行继续由Core核定。 */
+  listPickupOrderCandidates(tenantId: string, kind: "overdue" | "no_show", take: number, scan: RentalPickupOrderScan): Promise<RentalPickupOrderCandidate[]>;
   /** 读取订单承运里程碑类型；取消、改配等资源释放动作在同一事务内复核它。 */
   listCarrierShipmentEventTypes(tenantId: string, orderId: string, tx?: TTransaction): Promise<string[]>;
   /**
@@ -752,6 +762,37 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
       orderBy: { createdAt: "desc" }
     });
     return rows.map((row) => this.toDomainOrder(row));
+  }
+
+  /** 按原业务时间/ID续读，不用调度位置替代原范围或通知事实。 */
+  async listPickupOrderCandidates(tenantId: string, kind: "overdue" | "no_show", take: number,
+    scan: RentalPickupOrderScan): Promise<RentalPickupOrderCandidate[]> {
+    const workspaceId = await this.contacts.resolveWorkspaceId(this.store, tenantId);
+    const noShow = kind === "no_show";
+    const candidates: Prisma.RentalOrderWhereInput = noShow
+      ? { status: "PICKUP_OVERDUE", pickupOverdueAt: { not: null }, noShowNoticeAt: { not: null } }
+      : { OR: [
+        { status: { in: ["RESERVED", "READY_FOR_PICKUP"] } },
+        { status: "PICKUP_OVERDUE", noShowNoticeAt: null }
+      ] };
+    const orderBy: Prisma.RentalOrderOrderByWithRelationInput[] = noShow
+      ? [{ pickupOverdueAt: "asc" }, { id: "asc" }]
+      : [{ startAt: "asc" }, { id: "asc" }];
+    const read = (after?: RentalPickupOrderScan["after"]) => {
+      const successor: Prisma.RentalOrderWhereInput = after ? (noShow
+        ? { OR: [{ pickupOverdueAt: { gt: after.at } }, { pickupOverdueAt: after.at, id: { gt: after.id } }] }
+        : { OR: [{ startAt: { gt: after.at } }, { startAt: after.at, id: { gt: after.id } }] }) : {};
+      return this.store.rentalOrder.findMany({
+        where: { tenantId, workspaceId, AND: [this.requestOrderVisibilityWhere(), candidates, successor] },
+        select: { id: true, status: true, startAt: true, pickupOverdueAt: true, noShowNoticeAt: true, ruleSnapshot: true },
+        orderBy, take: Math.min(Math.max(1, take), 200)
+      });
+    };
+    let rows = await read(scan.after);
+    if (!rows.length && scan.after) rows = await read();
+    return rows.map(row => ({ id: row.id, status: lower<RentalCoreOrderStatus>(row.status),
+      startAt: iso(row.startAt), pickupOverdueAt: optionalIso(row.pickupOverdueAt), noShowNoticeAt: optionalIso(row.noShowNoticeAt),
+      ruleSnapshot: row.ruleSnapshot as unknown as RentalRuleConfig }));
   }
 
   /**

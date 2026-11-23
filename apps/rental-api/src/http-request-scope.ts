@@ -1,5 +1,5 @@
 /** 标准 Rental 宿主的 Nest 请求生命周期。原 identity/staff routing middleware 必须先运行，
- * 唯一 Guard 由平台模块分流；本拦截器不再次认证。仅托管显式审定处理器的一次缓冲订阅，
+ * 唯一 Guard 由平台模块分流；本拦截器不再次认证。公共处理器保留原输出，Rental 处理器一次缓冲订阅，
  * 已知 CoreAccessError 在 HTTP 错误出口保留公共状态及原 code/message。
  * 断线仅弃置响应，原处理器完成后才释放请求作用域与宿主排空参加者。
  * 不启动服务器、不制造匿名身份、不把断线解释成事务回滚或允许重发。 */
@@ -34,6 +34,7 @@ interface RentalResponse {
 }
 type Resume = <T>(consume: () => T) => T;
 type RequestScope = {
+  platform: boolean;
   active: boolean;
   claimed: boolean;
   processing: boolean;
@@ -103,14 +104,14 @@ export function createRentalHttpRequestScope(input: {
       || Boolean(policy.isIdentityRoute?.(request)) !== scope.identityOnly
       || Boolean(policy.isPaymentCallbackRoute?.(request)) !== scope.paymentCallback
       || Boolean(ai?.isRoute(request)) !== scope.ai
-      || routesToPlatform(request)) throw ended();
+      || routesToPlatform(request) !== scope.platform) throw ended();
   };
   const middleware: NestMiddleware<RentalRequest, RentalResponse> = {
     async use(request, response, next: (error?: unknown) => void) {
       let scope: RequestScope | undefined;
       try {
         if (scopes.has(request)) throw new Error("Rental HTTP 请求不能重复进入 middleware");
-        if (routesToPlatform(request)) { next(); return; }
+        const platform = routesToPlatform(request);
         const identity = getRequestIdentity();
         if (!identity || identities.has(identity)) throw new Error("Rental HTTP 需要原 middleware 为每个请求建立独立身份上下文");
         identities.add(identity);
@@ -123,7 +124,7 @@ export function createRentalHttpRequestScope(input: {
         if (Number(identityOnly) + Number(anonymous) + Number(paymentCallback) + Number(aiRequest) > 1)
           throw new Error("原身份、公开客户、AI 与支付回调范围不能混用");
         if (paymentCallback && !callbackAccess) throw new ServiceUnavailableException("Rental 缺少已验签支付回调接点");
-        const run = <T>(consume: () => Promise<T>) => identityOnly ? consume()
+        const run = <T>(consume: () => Promise<T>) => platform || identityOnly ? consume()
           : paymentCallback ? callbackAccess!.run(consume) : anonymous ? publicAccess!.run(consume)
             : aiRequest ? ai!.access.run(consume) : access.run(consume);
         await input.runRequest(() => run(async () => {
@@ -132,7 +133,7 @@ export function createRentalHttpRequestScope(input: {
           const cancellation = new AbortController();
           const closed = () => scope!.stop(ended());
           scope = {
-            active: true, claimed: false, processing: false, sourcePending: false,
+            platform, active: true, claimed: false, processing: false, sourcePending: false,
             method: request.method.toUpperCase(), path: matchableRequestPath(request.url),
             staff: request.staffApiRequest === true, anonymous, identityOnly, paymentCallback, ai: aiRequest,
             signal: cancellation.signal, identity, resume: AsyncLocalStorage.snapshot(),
@@ -180,15 +181,50 @@ export function createRentalHttpRequestScope(input: {
       const request = context.switchToHttp().getRequest<RentalRequest>();
       const scope = scopes.get(request);
       try {
-        // Public platform / standard Core use their existing middleware and Guard.
-        // An already selected Rental request cannot change its path to borrow this exit.
-        if (!scope && routesToPlatform(request)) {
-          return next.handle().pipe(catchError(error => { throw toHttpError(error); }));
-        }
         if (!scope) throw new ServiceUnavailableException("Rental HTTP 缺少 Guard 之前的请求 middleware");
         assertActive(request, scope);
         if (scope.claimed) throw new Error("Rental HTTP 原处理器只能绑定一次");
         scope.claimed = true;
+        if (scope.platform) {
+          // 公共 Guard/事务保持原接点，原处理器订阅登记到同一宿主排空。
+          // 响应订阅退出不取消 Promise 背后的原处理器，公共多值及文件输出继续原契约。
+          let subscribed = false;
+          return new Observable(destination => {
+            if (subscribed) {
+              destination.error(new Error("公共 HTTP 不允许重复订阅或自动重试原处理器"));
+              return;
+            }
+            subscribed = true;
+            scope.sourcePending = true;
+            scope.cancel = error => destination.error(error);
+            const fail = (error: unknown) => {
+              scope.cancel = undefined;
+              scope.completeSource();
+              scope.stop(error);
+              destination.error(error);
+            };
+            const source = new Subscriber<unknown>({
+              next(value) {
+                if (scope.active && !destination.closed) destination.next(value);
+              },
+              error: fail,
+              complete() {
+                scope.cancel = undefined;
+                scope.completeSource();
+                scope.stop();
+                destination.complete();
+              }
+            });
+            try {
+              scope.resume(() => {
+                assertActive(request, scope);
+                next.handle().subscribe(source);
+              });
+            }
+            catch (error) { fail(error); }
+            return () => scope.stop();
+          }).pipe(catchError(error => { throw toHttpError(error); }));
+        }
         const route = policy.requireHandler(context.getClass(), context.getHandler(), request);
         if ((route.review.ingress === "platform-identity") !== scope.identityOnly) {
           throw new ServiceUnavailableException("Rental 原身份入口与实际处理器不一致");

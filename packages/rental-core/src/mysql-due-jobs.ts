@@ -13,7 +13,7 @@ import {
   RENTAL_PENDING_PAYMENT_TIMEOUT_REASON,
 } from "./mysql-core-runtime";
 import type { BusinessContext } from "./mysql-business-runtime";
-import type { RentalExpiredDraftOrderScan } from "./mysql-core-facts";
+import type { RentalExpiredDraftOrderScan, RentalPickupOrderScan } from "./mysql-core-facts";
 import type { RentalDueJobTransaction, RentalDueJobStorage, RentalDueJobCore, RentalDueJobBusiness, RentalDueJobActions, RentalDueJobServiceCapacities, RentalDueJobCorporateSettlement, RentalDueJobPayments } from "./due-job-ports";
 
 /**
@@ -72,6 +72,7 @@ export class RentalDueJobScheduler<TTransaction extends RentalDueJobTransaction 
   private closing?: Promise<void>;
   private readonly activeJobs = new Set<Promise<boolean>>();
   private readonly expiredOrderScans = new Map<string, RentalExpiredDraftOrderScan>();
+  private readonly pickupOrderScans = new Map<string, RentalPickupOrderScan>();
   private notificationDispatchLifetime = new AbortController();
   private readonly logger = new Logger(RentalDueJobScheduler.name);
 
@@ -95,7 +96,7 @@ export class RentalDueJobScheduler<TTransaction extends RentalDueJobTransaction 
   ) {
     this.jobs = [
       { name: "expire_pending_orders", run: (tenantId, workspaceId) => this.expirePendingOrders(tenantId, workspaceId) },
-      { name: "reconcile_pickup_overdue", run: (tenantId) => this.reconcilePickupOverdue(tenantId) },
+      { name: "reconcile_pickup_overdue", run: (tenantId, workspaceId) => this.reconcilePickupOverdue(tenantId, workspaceId) },
       { name: "retry_due_notifications", run: (tenantId) => this.retryDueNotifications(tenantId) },
       { name: "run_due_price_adjustments", run: (tenantId) => this.runDuePriceAdjustments(tenantId) },
       { name: "expire_payment_intents", run: (tenantId, workspaceId) => this.expirePaymentIntents(tenantId, workspaceId) },
@@ -279,10 +280,19 @@ export class RentalDueJobScheduler<TTransaction extends RentalDueJobTransaction 
   }
 
   /** 与 `POST orders/reconcile-pickup-overdue` 同源：宽限到期标记逾期并发爽约通知，最终时限到期确认爽约。 */
-  private async reconcilePickupOverdue(tenantId: string) {
+  private async reconcilePickupOverdue(tenantId: string, workspaceId: string) {
     const at = new Date().toISOString();
-    const overdueCandidates = await this.core.listPickupOverdueOrderIds(tenantId, at, RENTAL_DUE_JOB_BATCH_SIZE);
-    const noShowCandidates = await this.core.listNoShowCandidateIds(tenantId, at, RENTAL_DUE_JOB_BATCH_SIZE);
+    const overdueKey = JSON.stringify([tenantId, workspaceId, "overdue"]);
+    const noShowKey = JSON.stringify([tenantId, workspaceId, "no_show"]);
+    const previousOverdue = this.pickupOrderScans.get(overdueKey);
+    const previousNoShow = this.pickupOrderScans.get(noShowKey);
+    const overdueScan: RentalPickupOrderScan = { after: previousOverdue?.after };
+    const noShowScan: RentalPickupOrderScan = { after: previousNoShow?.after };
+    const overdueCandidates = await this.core.listPickupOverdueOrderIds(tenantId, at, RENTAL_DUE_JOB_BATCH_SIZE, overdueScan);
+    const noShowCandidates = await this.core.listNoShowCandidateIds(tenantId, at, RENTAL_DUE_JOB_BATCH_SIZE, noShowScan);
+    // 两队列读取均成功后记录各自位置；迟到批次不能覆盖已推进或回绕的对象。
+    if (this.pickupOrderScans.get(overdueKey) === previousOverdue) this.pickupOrderScans.set(overdueKey, overdueScan);
+    if (this.pickupOrderScans.get(noShowKey) === previousNoShow) this.pickupOrderScans.set(noShowKey, noShowScan);
     if (!overdueCandidates.length && !noShowCandidates.length) return;
     for (const orderId of overdueCandidates) {
       try {

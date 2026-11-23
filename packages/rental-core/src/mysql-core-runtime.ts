@@ -172,6 +172,7 @@ import {
   type RentalInspectionPage,
   type RentalCoreFactStore,
   type RentalExpiredDraftOrderScan,
+  type RentalPickupOrderScan,
   type RentalUniqueAttributeClaim,
   type StockQuarantineChange,
   type StockReturnTransfer
@@ -2271,12 +2272,14 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   }
 
   /** RULE-CLOSE-01：列出已超过领取宽限、仍未领取的订单。 */
-  async listPickupOverdueOrderIds(tenantId: string, at = now(), take = 50) {
+  async listPickupOverdueOrderIds(tenantId: string, at = now(), take = 50, scan?: RentalPickupOrderScan) {
     this.state(tenantId);
     const cutoff = Date.parse(at);
     if (!Number.isFinite(cutoff)) throw new BadRequestException("检查时间无效");
-    const rows = await this.factStore.listOrders(tenantId);
-    return rows
+    const cap = Math.min(Math.max(1, take), 200);
+    const rows = scan ? await this.factStore.listPickupOrderCandidates(tenantId, "overdue", cap, scan)
+      : await this.factStore.listOrders(tenantId);
+    const ids = rows
       .filter((order) => [RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(order.status)
         || (order.status === RentalCoreOrderStatus.PickupOverdue && !order.noShowNoticeAt))
       .filter((order) => order.ruleSnapshot.cancellation.noShow?.enabled === true)
@@ -2285,23 +2288,36 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
         return Date.parse(order.startAt) + grace * 60_000 <= cutoff;
       })
       .sort((a, b) => Date.parse(a.startAt) - Date.parse(b.startAt))
-      .slice(0, Math.min(Math.max(1, take), 200))
+      .slice(0, cap)
       .map((order) => order.id);
+    if (scan) {
+      // 原快照过滤成功后才推进；未到期/未获可信通知的前排不能永久遮挡后排。
+      const last = rows[rows.length - 1];
+      scan.after = rows.length === cap ? { at: new Date(last.startAt), id: last.id } : undefined;
+    }
+    return ids;
   }
 
   /** 已通知且达到最终确认时限的待确认爽约候选。 */
-  async listNoShowCandidateIds(tenantId: string, at = now(), take = 50) {
+  async listNoShowCandidateIds(tenantId: string, at = now(), take = 50, scan?: RentalPickupOrderScan) {
     this.state(tenantId);
     const cutoff = Date.parse(at);
     if (!Number.isFinite(cutoff)) throw new BadRequestException("检查时间无效");
-    const rows = await this.factStore.listOrders(tenantId);
-    return rows
+    const cap = Math.min(Math.max(1, take), 200);
+    const rows = scan ? await this.factStore.listPickupOrderCandidates(tenantId, "no_show", cap, scan)
+      : await this.factStore.listOrders(tenantId);
+    const ids = rows
       .filter((order) => order.status === RentalCoreOrderStatus.PickupOverdue && order.pickupOverdueAt && order.noShowNoticeAt)
       .filter((order) => order.ruleSnapshot.cancellation.noShow?.enabled === true)
       .filter((order) => Math.max(Date.parse(order.pickupOverdueAt!), Date.parse(order.noShowNoticeAt!)) + effectiveNoShowRule(order.ruleSnapshot).finalizationMinutes * 60_000 <= cutoff)
       .sort((a, b) => Date.parse(a.pickupOverdueAt!) - Date.parse(b.pickupOverdueAt!))
-      .slice(0, Math.min(Math.max(1, take), 200))
+      .slice(0, cap)
       .map((order) => order.id);
+    if (scan) {
+      const last = rows[rows.length - 1];
+      scan.after = rows.length === cap ? { at: new Date(last.pickupOverdueAt!), id: last.id } : undefined;
+    }
+    return ids;
   }
 
   async markPickupOverdueOrder(tenantId: string, orderId: string, tx?: TTransaction, operator = "system", at = now()) {

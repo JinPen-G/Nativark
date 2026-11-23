@@ -51,6 +51,8 @@ Core 包目录、预检、版本选择和候选准备的四个原 Controller 挂
 
 [请求作用域](src/http-request-scope.ts) 位于原身份/员工路由 middleware 之后、唯一 Guard 之前。Guard 形成原可信身份后绑定一次实际处理器；拦截器位于原响应信封内部。装配供给同一 host.lifecycle.runRequest，停止新请求后，唯一生命周期继续等待已进入的处理器。客户端断线立即弃置响应，原源的完成或失败与响应取消分别处理，原应用作用域在两者均结束后释放。请求不能重复订阅、切换路径或借另一应用的作用域；断线不证明在途工作已经回滚。[实际接线](src/app.module.ts)
 
+公共平台、Core 管理和包管理请求也登记到同一宿主排空。公共分支沿原 Guard 和事务执行，原多值、文件及响应信封继续使用原输出契约。断线只退出响应订阅，原异步处理器完成或失败后才释放生命周期登记；停止期间的新公共请求在派发前拒绝。[原公共分流](../../packages/rental-core/src/application-platform.ts)
+
 HTTP 错误出口将已知 `CoreAccessError` 的 `denied` 映射为 403，`core_unavailable` 映射为 503，正式修订或操作冲突映射为 409，并保留原 `code` 与 `message`。同步异常与异步拒绝共用此映射，数据库及其他异常按原对象传播。[公共 Core HTTP 语义](../../packages/platform-core-host/src/core-scope.controller.ts)
 
 [处理器政策](../../packages/rental-core/src/http-access-policy.ts) 固定绑定原 Controller/handler、方法与路径，客户端不能声明自己的准入种类。
