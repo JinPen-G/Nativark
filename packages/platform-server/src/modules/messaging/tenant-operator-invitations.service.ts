@@ -2,7 +2,8 @@
  * 邮件提交超时保留原键；已接受凭证仅读最小原结果，账号授权沿原事务办理。 */
 import { BadRequestException, ConflictException, ForbiddenException, HttpException, HttpStatus, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import type { ConfigService } from "@nestjs/config";
-import { PrismaClientKnownRequestError, sqltag } from "@prisma/client/runtime/library";
+import { sqltag } from "@prisma/client/runtime/library";
+import { isPrismaKnownRequestError } from "../../prisma-runtime";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { AcceptTenantOperatorInvitationRequest, AcceptTenantOperatorInvitationResult, CheckTenantOperatorEmailResult,
   InviteTenantOperatorRequest, TenantDispatchStatus, TenantOperatorInvitationPreview, TenantOperatorInvitationRow, TenantOperatorInvitationMailPreview } from "@rental-os/platform-contracts/tenant-messaging";
@@ -17,7 +18,7 @@ import { requireMessagingStorage } from "./tenant-messaging-storage";
 import type { PlatformJsonValue } from "../platform/platform-auth-data-store";
 import type { TenantInvitationAuthority, TenantInvitationDataStore, TenantInvitationSecurity, TenantInvitationTransaction } from "./messaging-store";
 
-const Prisma = { sql: sqltag, PrismaClientKnownRequestError, TransactionIsolationLevel: { Serializable: "Serializable" as const } };
+const Prisma = { sql: sqltag, TransactionIsolationLevel: { Serializable: "Serializable" as const } };
 
 type AccessSnapshot = Pick<InviteTenantOperatorRequest, "organizationId" | "roleIds" | "workspaceAccesses"> & {
   actorName: string; tenantName: string; roleNames: string[]; workspaceNames: string[];
@@ -154,7 +155,7 @@ export class PlatformTenantOperatorInvitationsService<Transaction extends Tenant
           VALUES (${id}, ${actor.tenantId}, ${email}, ${clean.displayName}, ${sha(token)}, ${input.idempotencyKey}, ${requestHash}, ${actor.userId}, ${JSON.stringify(access)}, ${dispatchId}, 'pending', ${expiresAt}, ${now}, ${now})`);
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && ["P2002", "P2034"].includes(error.code)) throw new ConflictException("账号或邀请已变化，请核对原记录");
+      if (isPrismaKnownRequestError(error) && ["P2002", "P2034"].includes(error.code)) throw new ConflictException("账号或邀请已变化，请核对原记录");
       throw error;
     }
     // 在出站前先留下未知状态；进程在投递中退出也不会留下可自动重发的 queued。
@@ -263,7 +264,7 @@ export class PlatformTenantOperatorInvitationsService<Transaction extends Tenant
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
       return this.acceptedResult(tenantCode);
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && ["P2002", "P2034"].includes(error.code)) throw new ConflictException("账号或邀请已变化，请使用邮箱登录核对");
+      if (isPrismaKnownRequestError(error) && ["P2002", "P2034"].includes(error.code)) throw new ConflictException("账号或邀请已变化，请使用邮箱登录核对");
       throw error;
     }
   }

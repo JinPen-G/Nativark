@@ -64,7 +64,7 @@ npm run start -w @rental-os/platform-api
 
 上述公共构建由本宿主的 [package scripts](package.json) 串联原公共依赖。需要类型核对时使用 `npm run lint -w @rental-os/platform-api`，它的 prelint 同样先构建公共依赖。
 
-Client 输出在本宿主 `generated/client`，运行产物从同一宿主目录读取。公共构建消费 `platform-contracts`、`platform-server` 和标准 `core-contracts` / `core-host` / `platform-core-host`。当前 schema 的40个模型均属平台，包含6个 Core 授权/绑定及原收据表、2个统一期限表、5个订阅办理表、2个基础集成表、2个官方日历来源表、2个文件/上传表、2个通知表、1个异步任务表、3个邀请/客服邮件表和1个官网演示申请表。公共数据版本为 `0.1.8`，十三份迁移摘要由数据计划固定；文件、通知与任务的原字段、唯一键、清理收据及外键保留。官网演示申请沿原SQL独立归属公共平台，HTTP装配由相应模块办理。命令是否可执行取决于当前环境许可。
+Client 输出在本宿主 `generated/client`，运行产物从同一宿主目录读取。公共构建消费 `platform-contracts`、`platform-server` 和标准 `core-contracts` / `core-host` / `platform-core-host`。当前 schema 的41个模型均属平台，包含6个 Core 授权/绑定及原收据表、2个统一期限表、5个订阅办理表、2个基础集成表、2个官方日历来源表、2个文件/上传表、2个通知表、1个异步任务表、3个邀请/客服邮件表、1个官网演示申请表和1个公共限流桶表。公共数据版本为 `0.1.9`，十四份迁移摘要由数据计划固定；文件、通知与任务的原字段、唯一键、清理收据及外键保留。官网演示申请、SaaS预约列表和租户筛选预设已由公共模块挂载。匿名预约使用公共持久限流桶，完整Rental组合继续其原表与计数。[预约接入](../../packages/platform-server/src/modules/demo-requests/README.md) · [筛选预设](../../packages/platform-server/src/modules/platform-tools/README.md#筛选预设)。命令是否可执行取决于当前环境许可。
 
 新公共库按 `npm run prisma:migrate:deploy -w @rental-os/platform-api` 应用本链。**不能把本基线套在已有 Rental 组合库**，已有库切换须先按原迁移来源和数据所有权演练兼容迁移。
 
@@ -82,7 +82,7 @@ Client 输出在本宿主 `generated/client`，运行产物从同一宿主目录
 
 ## 独立后端运行包
 
-[离线打包入口](../../scripts/package-platform-host.cjs)消费固定的完整底座源码归档、零 Core 部署锁、本树已构建的六个公共后端包和同一公共 Client 声明。它按原配置在内存重新编译六包、核对实际运行字节，并从原 npm 锁投影所需依赖；复用原迁移生成器输出40模型 schema、13份原 SQL 和完整部署锁。
+[离线打包入口](../../scripts/package-platform-host.cjs)消费固定的完整底座源码归档、零 Core 部署锁、本树已构建的六个公共后端包和同一公共 Client 声明。它按原配置在内存重新编译六包、核对实际运行字节，并从原 npm 锁投影所需依赖；复用原迁移生成器输出所选发行的公共 schema、原 SQL 和完整部署锁。当前源码的数据计划为41模型、14份迁移，旧发行仍按其固定数据计划办理。
 
 ```powershell
 node scripts/package-platform-host.cjs --lock C:\release\core.deployment.lock.json --platform-package C:\release\platform-source.tgz --platform-client C:\checkout\apps\platform-api\generated\client\index.d.ts --output C:\release\platform-host.tgz --deps C:\checkout\node_modules

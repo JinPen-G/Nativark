@@ -921,3 +921,17 @@ model DemoRequest {
   @@index([createdAt, id])
   @@map("platform_demo_requests")
 }
+
+/// 公共匿名入口的持久限流桶。与旧 Rental 桶分别归属，不改写其历史计数或迁移。
+model PlatformApiRateBucket {
+  id          String   @id @default(uuid())
+  scopeKey    String   @db.Char(64)
+  bucketStart DateTime
+  count       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([scopeKey, bucketStart], map: "platform_api_rate_bucket_key")
+  @@index([bucketStart], map: "platform_api_rate_bucket_expiry_idx")
+  @@map("platform_api_rate_buckets")
+}

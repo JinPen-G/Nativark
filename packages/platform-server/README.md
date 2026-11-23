@@ -21,6 +21,9 @@
 | 公共消息应用 | [三步接入](src/modules/messaging/README.md)、[HTTP 与同源政策](src/modules/messaging/tenant-messaging-http.module.ts)、[邀请](src/modules/messaging/tenant-operator-invitations.service.ts)、[寄件](src/modules/messaging/tenant-dispatch.service.ts)、[客服](src/modules/messaging/tenant-support-email.service.ts)从 `/messaging` 提供；公共模块自动装配，Core 的业务范围与寄件来源由真实参加者供给 |
 | 官方日历来源 | [模块导读](src/modules/official-calendars/README.md)、[来源服务](src/modules/official-calendars/official-calendar-source.service.ts)、[冻结读取器](src/modules/official-calendars/official-calendar-source-reader.ts)；公共主档、只追加年度版本与历史快照 |
 | 字典与编号 | [模块及 API](src/modules/platform-tools/README.md)、[服务](src/modules/platform-tools/platform-tools.service.ts)、[生效配置仓储](src/modules/platform-tools/platform-tools.repository.ts)；当前租户维护、原格式及同事务取号，公共缺省为空 |
+| 筛选预设 | [接入与范围](src/modules/platform-tools/README.md#筛选预设)、[服务](src/modules/platform-tools/filter-presets.service.ts)、[仓储](src/modules/platform-tools/filter-presets.repository.ts)；同一公共身份、租户内预设与原审计，不授业务数据读取权 |
+| 官网演示预约 | [接入与 API](src/modules/demo-requests/README.md)从 `/demo-requests` 提供匿名幂等提交与仅SaaS可读的分页列表；公共模块直接挂载，个人资料沿原投影 |
+| 持久限流 | [接入与数据归属](src/modules/public-rate-limit/README.md)从 `/public-rate-limit` 提供原哈希、窗口及同事务计数；默认Demo使用公共表，完整Rental供给原参加者保留旧桶 |
 | 文件存储与冻结 | [模块导读](src/modules/files/README.md)、[字节处理](src/modules/files/file-storage-primitives.ts)、[冻结内核](src/modules/files/file-content-freeze.ts)、[文件仓储](src/modules/files/file-storage.repository.ts)；原限长传输、元数据、上传会话和唯一冻结目标，业务 ACL 由所属 Core 提供 |
 | 媒体字节解析 | [接入与限制](src/modules/media/README.md)、[同源读取](src/modules/media/media-reader.ts) 从 `/media` 提供原图片/PCM检查、实际大小、摘要及取消释放；不依赖业务或AI表，文件授权和原绑定由调用者裁定 |
 | Core 文件应用 | [应用](src/modules/files/file-storage.application.ts)、[权威参加者](src/modules/files/file-storage-authority.ts)、[事务端口](src/modules/files/file-storage.application-store.ts)从 `/files` 提供；受控业务登记后调用同一原键/冻结/激活链 |

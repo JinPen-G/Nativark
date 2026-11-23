@@ -1,4 +1,4 @@
-# 公共字典与编号
+# 公共字典、编号与筛选预设
 
 本模块持有原租户字典维护、编号规则维护和取号实现。公共宿主通过原会话、当前租户及两个原工具权限访问，原 Rental 组合通过薄适配消费同一服务与纯逻辑。数据继续保存在原 `SystemParameterSet`，合同使用平台合同包的原正式类型。[合同](../../../../platform-contracts/src/index.ts) · [公共身份围栏](../platform/platform-principal.authority.ts)
 
@@ -35,3 +35,33 @@
 定向验证复用原离线守卫、类型检查器和主体/事务 fixture，通过短 stdin 执行，临时目录集中到本树 `output/.tmp` 并由退出清理释放。正常与拒绝范围覆盖当前租户、原格式、正规化、并发递增、规则保存、历史生效行/草稿/JSON、审计与撤权回滚、DTO 及 HTTP 声明。[项目验证规则](../../../../../AGENTS.md#修改验证与交付)
 
 fixture 中的事务与锁用于验证参加者调用及提交边界。真实 MySQL 锁竞争、HTTP、浏览器和完整组合运行由专项原验收入口接续。[当前专项入口](../../../../../docs/平台底座/Core接入/平台Core接入-协作接续.md)
+
+## 筛选预设
+
+筛选预设保存当前租户的 UI 筛选偏好。原已登录运营账号可访问，SaaS 账号沿原 Guard 条件拒绝。数据使用公共 schema 中既有的 `FilterPreset`，租户内共享预设，原名称唯一键为 `tenantId/scopeKey/name`。预设内容由消费页面解释，业务读取继续经过对应接口的原权限和范围检查。[原 Guard](../../../../../apps/api/src/common/api-auth.guard.ts) · [公共模型](../../../../../apps/platform-api/prisma/schema.prisma)
+
+| 入口 | 职责 |
+| --- | --- |
+| [Controller](filter-presets.controller.ts) | 原 GET/POST 集合、PUT 默认与 DELETE 单条路径 |
+| [DTO](filter-presets.dto.ts) | 原保存字段及可选 operator 校验，使用正式平台合同 |
+| [服务](filter-presets.service.ts) | 当前 operator 主体、同租户规范化、提交前复验及审计 |
+| [仓储](filter-presets.repository.ts) | 默认优先/更新时间排序、原 ID 与名称唯一键、同 scope 清默认及删除 |
+| [存储端口](filter-presets.store.ts) | 原身份、真实 FilterPreset 操作与同事务 OperationLog，由宿主数据库实现 |
+| [HTTP 声明](filter-presets-http-policy.ts) | 四个原路径、self 准入和实际参数位置 |
+| [OpenAPI 字段](filter-presets-openapi.ts) | 原 DTO、返回投影及删除结果，供宿主组合 |
+
+服务强制使用当前主体的租户，查询和保存中的 `tenantId` 按原普通租户分支覆盖。单条读写都限定原 ID 与该租户。同名保存命中原唯一键并保留 ID，传入 ID 不存在时拒绝。名称去首尾空格后为 1 至 40 字符，description 去空白，filters 沿原 JSON 克隆，isDefault 转为布尔值。保存的 operator 去空白后使用当前显示名或原“营运端”缺省，默认和删除操作沿原 operator 回退规则。原 helper 接受 orders、vehicles、members、corporates、stations、vehicle-transfer 六个 `rental-os.*` scope，合同及原页面中的 contracts 选项与原 helper 存在既有差异，新增实现保留 helper 的判定。历史 scope 字段仍沿原行读取，默认与删除按该行的真实 scope 操作。[正式合同](../../../../platform-contracts/src/index.ts)
+
+每次调用复用公共主体围栏，先锁原 Tenant、账号、会话和角色，在同一 Serializable 事务内执行预设操作和原审计动作，并在返回前复验主体。保存默认和设为默认仅清除同租户同 scope 的默认标记。历史 JSON 为 null、数组或标量时，返回投影沿原仓储表示为空 filters 对象，其他原字段保持。原审计动作及 detail 字段保留，新增可信主体 userId。原仓储的事务外日志与默认/删除前读合入该事务，审计失败、撤权或数据库冲突均整体失败。唯一名称和事务冲突返回可重读核对的 Conflict，服务每次调用执行一次事务。
+
+### 宿主接入
+
+宿主将 `PlatformFilterPresetDatabase` 合入同一公共数据库端口，沿已有 `PLATFORM_AUTH_DATA_STORE` 注入实例，并注册 `PlatformFilterPresetService` 与 `PlatformFilterPresetController`。原组合的 `PlatformService` MySQL 分支将四个同名方法委托给该实例，原演示内存适配继续由原宿主管理。各组合选择一个实际 HTTP Controller，保留原客户端入口。[公共装配](../../platform-server.module.ts) · [原平台服务](../../../../../apps/api/src/modules/platform/platform.service.ts) · [实际客户端](../../../../platform-admin/src/features/platform-tools/client.ts)
+
+公共政策聚合合入 `PLATFORM_FILTER_PRESET_HTTP_OPERATIONS`，OpenAPI 聚合合入 `PLATFORM_FILTER_PRESET_SCHEMAS`，正式 platform-tools 出口暴露服务、Controller、DTO、数据库/事务类型与两份声明。四个操作使用原自助 `self`，权限码为空。服务继续核当前 operator 会话并拒绝 SaaS 身份。公共 Guard 的默认拒绝要求这些方法和路径准确登记。原组合保留 filter-presets 的已登录自助白名单，独立宿主经同一 Guard/ALS 与公共主体围栏进入。[公共政策](../../platform-http-policy.ts) · [公共 Guard](../../platform-auth.guard.ts) · [现有模块出口](index.ts)
+
+GET `/platform/filter-presets` 的 tenantId/scopeKey 在 query。POST 同路径使用保存 DTO。PUT `/platform/filter-presets/:id/default` 的可选 operator 在 body。DELETE `/platform/filter-presets/:id` 的可选 operator 在 query，返回原 id/deleted。根出口、聚合、宿主与旧组合委托由负责装配的作者接入后完成组合验证。
+
+实际后台客户端复用这四条路径，默认和删除对原 ID 编码，operator 分别进入 body 与 query。三个写方法均沿原客户端设置 `retryAuthentication: false`，读取继续支持原会话刷新。工具页的预设管理沿已登录租户身份，页面导航继续沿原工具可见条件。[页面](../../../../platform-admin/src/features/platform-tools/PlatformToolsPage.tsx) · [可见条件](../../../../platform-admin/src/features/platform-tools/platformToolsAccess.ts)
+
+定向验证使用原源码加载器、公共主体/事务的明确内存 fixture 和短 stdin，核原算法、当前租户、真实 DTO/Controller 元数据与失败回滚。必要类型沿所选公共 40 模型的原检查器，同时核真实 PrismaClient/TransactionClient 对存储端口的赋值。真实 MySQL 锁竞争、已部署 HTTP 与原页面交互分别沿实际宿主验收。[源码加载器](../../../../../scripts/controller-sources.cjs) · [所选类型检查器](../../../../../scripts/check-selected-prisma-types.cjs)

@@ -334,6 +334,14 @@
     "./ai-gateway": {
       "types": "./dist/ai-gateway/index.d.ts",
       "default": "./dist/ai-gateway/index.js"
+    },
+    "./demo-requests": {
+      "types": "./dist/modules/demo-requests/index.d.ts",
+      "default": "./dist/modules/demo-requests/index.js"
+    },
+    "./public-rate-limit": {
+      "types": "./dist/modules/public-rate-limit/index.d.ts",
+      "default": "./dist/modules/public-rate-limit/index.js"
     }
   },
   "scripts": {
@@ -601,6 +609,12 @@
       ],
       "ai-gateway": [
         "dist/ai-gateway/index.d.ts"
+      ],
+      "demo-requests": [
+        "./dist/modules/demo-requests/index.d.ts"
+      ],
+      "public-rate-limit": [
+        "./dist/modules/public-rate-limit/index.d.ts"
       ]
     }
   }

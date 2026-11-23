@@ -21,6 +21,15 @@ import { PlatformManagementController } from "./modules/platform/platform-manage
 import { PlatformToolsService } from "./modules/platform-tools/platform-tools.service";
 import { PlatformToolsController } from "./modules/platform-tools/platform-tools.controller";
 import type { PlatformToolsDatabase } from "./modules/platform-tools/platform-tools.store";
+import { PlatformFilterPresetController } from "./modules/platform-tools/filter-presets.controller";
+import { PlatformFilterPresetService } from "./modules/platform-tools/filter-presets.service";
+import type { PlatformFilterPresetDatabase } from "./modules/platform-tools/filter-presets.store";
+import { DemoRequestService } from "./modules/demo-requests/demo-request.service";
+import { PublicDemoRequestController } from "./modules/demo-requests/public-demo-request.controller";
+import { PlatformDemoRequestController } from "./modules/demo-requests/platform-demo-request.controller";
+import { DEMO_REQUEST_RATE_LIMIT, type DemoRequestDatabase, type DemoRequestRateLimit } from "./modules/demo-requests/demo-request.store";
+import { DemoRequestRateLimitService } from "./modules/public-rate-limit/demo-request-rate-limit";
+import type { SqlRateLimitStore } from "./modules/public-rate-limit/rate-limit.store";
 import { SubscriptionService } from "./modules/subscription/subscription.service";
 import { TenantSubscriptionController } from "./modules/subscription/subscription.controller";
 import { PlatformSubscriptionController } from "./modules/subscription/subscription-platform.controller";
@@ -74,6 +83,8 @@ export interface PlatformApplicationBindings {
   files: ObjectStorageProviderService;
   payments: PaymentIntegrationProbe;
   officialCalendarSources: OfficialCalendarSourceService;
+  /** 旧宿主可保留原计数桶和唯一扣额参加者；未提供时使用本版公共持久桶。 */
+  demoRequestRateLimit?: DemoRequestRateLimit;
 }
 
 function hostApplication<Key extends keyof PlatformApplicationBindings>(provide: FactoryProvider["provide"], key: Key): FactoryProvider {
@@ -84,7 +95,8 @@ function hostApplication<Key extends keyof PlatformApplicationBindings>(provide:
 }
 
 export type PlatformDatabase = PlatformAuthDataStore & PlatformAppearanceDataStore & PlatformManagementDatabase & PlatformToolsDatabase & SubscriptionDataStore
-  & TenantIntegrationDataStore & OfficialCalendarDataStore & PlatformOperationLogStorage & PublicMessagingDatabase;
+  & TenantIntegrationDataStore & OfficialCalendarDataStore & PlatformOperationLogStorage & PublicMessagingDatabase
+  & PlatformFilterPresetDatabase & DemoRequestDatabase & SqlRateLimitStore;
 @Module({})
 export class PlatformServerModule {
   static register<Dependencies extends unknown[]>(options: { imports?: ModuleMetadata["imports"]; inject?: FactoryProvider["inject"];
@@ -117,7 +129,10 @@ export class PlatformServerModule {
       hostApplication(INTEGRATION_RUNTIME_PROVIDERS, "integrationRuntimeProviders"), hostApplication(TenantIntegrationService, "integrations"),
       hostApplication(TenantIntegrationRuntimeService, "notifications"), hostApplication(TenantEmailRuntimeService, "email"),
       hostApplication(TenantIntegrationConnectivityService, "connectivity"), hostApplication(ObjectStorageProviderService, "files"),
-      hostApplication(INTEGRATION_PAYMENT_PROBE, "payments"), hostApplication(OfficialCalendarSourceService, "officialCalendarSources")
+      hostApplication(INTEGRATION_PAYMENT_PROBE, "payments"), hostApplication(OfficialCalendarSourceService, "officialCalendarSources"),
+      { provide: DEMO_REQUEST_RATE_LIMIT, inject: [HOST_APPLICATIONS, PLATFORM_AUTH_DATA_STORE],
+        useFactory: (host: PlatformApplicationBindings, database: PlatformDatabase) =>
+          host.demoRequestRateLimit ?? new DemoRequestRateLimitService(database) }
     ] : [
       { provide: INTEGRATION_DATA_STORE, useExisting: PLATFORM_AUTH_DATA_STORE },
       { provide: PlatformOperationLogService, inject: [PLATFORM_AUTH_DATA_STORE], useFactory: (database: PlatformDatabase) => new PlatformOperationLogService(database) },
@@ -125,6 +140,8 @@ export class PlatformServerModule {
       TenantAppearanceProfileService, AccountAppearanceService, PlatformAuthService, PlatformAuthGuard, SubscriptionService,
       SecretBox, TenantIntegrationService, TenantIntegrationRuntimeService, TenantEmailRuntimeService, TenantIntegrationConnectivityService,
       ObjectStorageProviderService, OfficialCalendarSourceService,
+      { provide: DEMO_REQUEST_RATE_LIMIT, inject: [PLATFORM_AUTH_DATA_STORE],
+        useFactory: (database: PlatformDatabase) => new DemoRequestRateLimitService(database) },
       { provide: INTEGRATION_RUNTIME_PROVIDERS, useValue: options.integrationRuntimeProviders ?? PUBLIC_INTEGRATION_RUNTIME_PROVIDERS },
       ...(options.integrationBusiness ? [{ provide: INTEGRATION_BUSINESS_PARTICIPANT, useValue: options.integrationBusiness }] : []),
       ...(options.integrationBusinessProvider ? [{ ...options.integrationBusinessProvider, provide: INTEGRATION_BUSINESS_PARTICIPANT }] : []),
@@ -134,6 +151,7 @@ export class PlatformServerModule {
     return { module: PlatformServerModule, imports: [ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }), ...(options.imports ?? [])],
       controllers: [AuthSessionController, TenantAppearanceProfileController, AccountAppearanceController, PlatformHealthController, PlatformOpenApiController, PlatformManagementController,
         TenantSubscriptionController, PlatformSubscriptionController, TenantIntegrationController, OfficialCalendarSourceController, PlatformToolsController,
+        PlatformFilterPresetController, PublicDemoRequestController, PlatformDemoRequestController,
         TenantOperatorInvitationsController, AcceptTenantOperatorInvitationController, TenantDispatchController, TenantSupportEmailController],
       providers: [
         { provide: PLATFORM_AUTH_DATA_STORE, inject: options.inject ?? [], useFactory: options.useFactory },
@@ -150,7 +168,7 @@ export class PlatformServerModule {
           useFactory: (applications: TenantMessagingHttpApplications) => applications.dispatch },
         { provide: TENANT_SUPPORT_EMAIL_HTTP_APPLICATION, inject: [PUBLIC_MESSAGING_APPLICATIONS],
           useFactory: (applications: TenantMessagingHttpApplications) => applications.support },
-        PlatformManagementService, PlatformToolsService,
+        PlatformManagementService, PlatformToolsService, PlatformFilterPresetService, DemoRequestService,
         { provide: SUBSCRIPTION_APPLICATION, useExisting: SubscriptionService },
         { provide: INTEGRATION_EMAIL_PROBE, useExisting: TenantEmailRuntimeService },
         { provide: TENANT_INTEGRATION_APPLICATION, useExisting: TenantIntegrationService },
@@ -163,7 +181,8 @@ export class PlatformServerModule {
         ...(options.coreHttpProvider ? [{ ...options.coreHttpProvider, provide: REGISTERED_CORE_HTTP_ACCESS }] : []),
         { provide: APP_GUARD, useExisting: PlatformAuthGuard },
         { provide: APP_INTERCEPTOR, useClass: RequestIdInterceptor }
-      ], exports: [PlatformAuthService, PlatformAuthenticationRepository, PlatformManagementService, PlatformToolsService, SubscriptionService, SUBSCRIPTION_APPLICATION,
+      ], exports: [PlatformAuthService, PlatformAuthenticationRepository, PlatformManagementService, PlatformToolsService,
+        PlatformFilterPresetService, DemoRequestService, SubscriptionService, SUBSCRIPTION_APPLICATION,
         TenantIntegrationService, TenantIntegrationRuntimeService, ObjectStorageProviderService, SecretBox, TENANT_INTEGRATION_APPLICATION,
         OfficialCalendarSourceService, OFFICIAL_CALENDAR_APPLICATION, OFFICIAL_CALENDAR_SOURCE_READER,
         TENANT_OPERATOR_INVITATIONS_HTTP_APPLICATION, TENANT_DISPATCH_HTTP_APPLICATION, TENANT_SUPPORT_EMAIL_HTTP_APPLICATION,

@@ -59,6 +59,7 @@ export function createRentalPlatformApplications(application: RentalApplication,
     integrationStore: integrations.integrationStore, integrationBusiness: integrations.integrationBusiness,
     integrationRuntimeProviders: integrations.integrationRuntimeProviders, integrations: integrations.integrations,
     notifications: integrations.notifications, email: integrations.email, connectivity: integrations.connectivity,
-    files: integrations.files, payments: integrations.payments, officialCalendarSources: application.officialCalendarSources
+    files: integrations.files, payments: integrations.payments, officialCalendarSources: application.officialCalendarSources,
+    demoRequestRateLimit: application.client.rateLimit
   };
 }

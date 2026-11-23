@@ -45,6 +45,8 @@ export class PlatformAuthGuard implements CanActivate {
     // 原订阅管理沿SaaS身份的system:tenant:授权，普通租户通配权限仍不能进入。
     if (policy?.access === "saas_subscription" && !user.isSaasAdmin)
       throw new ForbiddenException("仅 SaaS 平台管理员可以管理租户订阅");
+    if (policy?.access === "saas_demo_request" && !user.isSaasAdmin)
+      throw new ForbiddenException("仅 SaaS 平台管理员可以查看演示预约");
     enterRequestIdentity({ tenantId: user.tenantId, userId: user.id, audience: "operator", accessSession: current.accessSession,
       permissions: [...user.permissions], isPlatformAdmin: user.isPlatformAdmin, isSaasAdmin: Boolean(user.isSaasAdmin),
       workspaceId: undefined, dataScope: user.dataScope, organizationId: user.organizationId, locationScope: undefined,

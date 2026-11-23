@@ -9,6 +9,8 @@ import { INTEGRATION_OPENAPI_SCHEMAS } from "./modules/integrations/integration-
 import { OFFICIAL_CALENDAR_SCHEMAS, OFFICIAL_CALENDAR_OPENAPI_QUERY_SCHEMAS } from "./modules/official-calendars/official-calendar-openapi";
 import { PLATFORM_SETTINGS_SCHEMAS, PLATFORM_SETTINGS_OPENAPI_QUERY_SCHEMAS } from "./modules/platform/platform-settings-openapi";
 import { PLATFORM_TOOLS_SCHEMAS } from "./modules/platform-tools/platform-tools-openapi";
+import { PLATFORM_FILTER_PRESET_SCHEMAS, PLATFORM_FILTER_PRESET_QUERY_SCHEMAS } from "./modules/platform-tools/filter-presets-openapi";
+import { DEMO_REQUEST_SCHEMAS, DEMO_REQUEST_QUERY_SCHEMAS } from "./modules/demo-requests/demo-request-openapi";
 import { TENANT_MESSAGING_OPENAPI_SCHEMAS } from "./modules/messaging/tenant-messaging-openapi";
 
 type Schema = { [field: string]: unknown };
@@ -24,7 +26,7 @@ const storedRadius: Schema = { type: "integer", minimum: 0, description: "历史
 const radius = (maximum: number): Schema => ({ type: "integer", minimum: 4, maximum, nullable: true });
 const array = (name: string): Schema => ({ type: "array", items: ref(name) });
 const querySchemas: Readonly<Record<string, Schema>> = { ...SUBSCRIPTION_OPENAPI_QUERY_SCHEMAS, ...OFFICIAL_CALENDAR_OPENAPI_QUERY_SCHEMAS,
-  ...PLATFORM_SETTINGS_OPENAPI_QUERY_SCHEMAS };
+  ...PLATFORM_SETTINGS_OPENAPI_QUERY_SCHEMAS, ...PLATFORM_FILTER_PRESET_QUERY_SCHEMAS, ...DEMO_REQUEST_QUERY_SCHEMAS };
 
 export const PLATFORM_OPENAPI_SCHEMAS = {
   ...SUBSCRIPTION_OPENAPI_SCHEMAS,
@@ -32,6 +34,8 @@ export const PLATFORM_OPENAPI_SCHEMAS = {
   ...OFFICIAL_CALENDAR_SCHEMAS,
   ...PLATFORM_SETTINGS_SCHEMAS,
   ...PLATFORM_TOOLS_SCHEMAS,
+  ...PLATFORM_FILTER_PRESET_SCHEMAS,
+  ...DEMO_REQUEST_SCHEMAS,
   ...TENANT_MESSAGING_OPENAPI_SCHEMAS,
   "Platform.Health": object({ service: string, status: string, time: date }, ["service", "status", "time"]),
   "Platform.OpenApi": { type: "object", additionalProperties: true },
@@ -129,6 +133,7 @@ export function createPlatformOpenApi() {
       ...("permission" in item ? { "x-permissionMatch": "any" } : {}),
       "x-effect": "effect" in item ? item.effect : item.method === "GET" ? "read" : "write",
       description: item.access === "saas_subscription" ? "沿原SaaS订阅管理身份办理。租户父锁、当前修订、价格版本、申请与审计在原事务中核对；续费后仍需当前Core和成员授权。"
+        : item.access === "saas_demo_request" ? "仅当前SaaS管理身份读取平台演示预约。保留原分页、个人资料投影与返回前权限复验，普通租户通配权限不可读取。"
         : item.access === "tenant_summary" ? "仅当前operator本租户的无金额提醒。SaaS身份不能代替租户读取，提醒不授予业务权限。"
         : item.access === "tenant" ? "当前operator的本租户管理范围，SaaS身份不代租户操作。当前角色/账号与提交条件由服务端复验，Core授权另行办理。"
         : item.access === "saas" ? "仅当前SaaS管理身份与对应权限。平台管理不会获得目标租户业务访问权；创建账号口令只在本响应返回，不记日志。"
@@ -140,7 +145,8 @@ export function createPlatformOpenApi() {
       parameters: "parameters" in item ? item.parameters : [
         ...item.path.split("/").filter(part => part.startsWith(":"))
           .map(part => ({ name: part.slice(1), in: "path", required: true, schema: string })),
-        ...("query" in item ? item.query.map(name => ({ name, in: "query", required: false, schema: querySchemas[name] })) : [])
+        ...("query" in item ? item.query.map(name => ({ name, in: "query", required: false,
+          schema: querySchemas[`${item.id}.${name}`] ?? querySchemas[name] })) : [])
       ],
       responses: { [item.method === "POST" ? "201" : "200"]: { description: "成功", content: content(response) },
         "400": { description: "输入不符合原DTO或业务约束" }, "401": { description: "原会话失效或登录受限" },

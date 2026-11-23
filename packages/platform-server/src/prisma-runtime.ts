@@ -3,6 +3,12 @@
  * 隔离级别沿用 Prisma MySQL 的原字符串协议，不持有连接或替换调用方事务。 */
 import { Decimal, PrismaClientKnownRequestError, empty, join, objectEnumValues, raw, sqltag } from "@prisma/client/runtime/library";
 
+/** 独立生成 Client 各自持有官方运行库，构造器身份不可跨包比较。
+ * 官方错误保留同一 toStringTag；普通带 code 的对象仍不是数据库已知错误。 */
+export function isPrismaKnownRequestError(error: unknown): error is PrismaClientKnownRequestError {
+  return error instanceof Error && Object.prototype.toString.call(error) === "[object PrismaClientKnownRequestError]";
+}
+
 export const prismaRuntime = Object.freeze({
   Decimal,
   PrismaClientKnownRequestError,

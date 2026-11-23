@@ -1,9 +1,8 @@
 /** 原客户地址/会话及验证码配额，原数据库桶、原子递增和生命周期保持。
+ * 哈希/窗口/原子计数委托公共模块，业务规则、日预算与唯一清理生命周期保持在此。
  * 服务实例由宿主唯一装配；本层不采信客户端转发头或重复开启清理计时器。 */
-import { prismaRuntime } from "@rental-os/platform-server/prisma-runtime";
+import { clientAddress, consumeRateLimitBucket, WEBSITE_DEMO_REQUEST_RATE_LIMIT_RULE } from "@rental-os/platform-server/public-rate-limit";
 import { HttpException, HttpStatus, Logger, OnApplicationBootstrap, OnApplicationShutdown } from "@nestjs/common";
-import type { Prisma } from "@prisma/client";
-import { createHash, randomUUID } from "node:crypto";
 import type { RentalClientRateLimitStorage } from "./client-session-ports";
 import { lockRentalBusinessTenant } from "./mysql-business-fence";
 
@@ -24,7 +23,7 @@ interface ClientRateLimitRule {
 
 const PUBLIC_RULES: Array<{ matcher: RegExp; method?: string; rule: ClientRateLimitRule }> = [
   // 官网匿名演示预约复用数据库限流；与客户端会话桶隔离。
-  { matcher: /^\/public\/demo-requests$/u, method: "POST", rule: { code: "website_demo_request", windowSeconds: 600, limit: 5 } },
+  { matcher: /^\/public\/demo-requests$/u, method: "POST", rule: WEBSITE_DEMO_REQUEST_RATE_LIMIT_RULE },
   { matcher: /^\/client\/v1\/auth\/login$/u, method: "POST", rule: { code: "login", windowSeconds: 600, limit: 10 } },
   { matcher: /^\/client\/v1\/auth\/registration\/challenges$/u, method: "POST", rule: { code: "registration_challenge", windowSeconds: 300, limit: 5 } },
   { matcher: /^\/client\/v1\/auth\/registration\/challenges\/[^/]+\/verify$/u, method: "POST", rule: { code: "registration_verify", windowSeconds: 300, limit: 15 } },
@@ -45,23 +44,7 @@ export function clientRateLimitRule(path: string, method: string): ClientRateLim
   return match?.rule ?? ANONYMOUS_RULE;
 }
 
-function hashScope(value: string) {
-  return createHash("sha256").update(value).digest("hex");
-}
-
-function normalizedIp(ip?: string) {
-  const value = ip?.trim();
-  return value && value.length <= 128 ? value : "unknown";
-}
-
-/**
- * 限流所用的来源地址只在这里取值：直接用 Express 解析后的 `request.ip`。
- * 它是否采信 `X-Forwarded-For` 由 main.ts 的 `trust proxy`（环境变量 TRUST_PROXY_HOPS）决定，
- * 这里绝不自行读取转发头，避免客户端伪造头部换桶。
- */
-export function clientAddress(request: { ip?: string; socket?: { remoteAddress?: string } }): string {
-  return normalizedIp(request.ip ?? request.socket?.remoteAddress);
-}
+export { clientAddress };
 
 /** 验证码挑战按目标身份与租户的额外配额；来源地址配额仍由 PUBLIC_RULES 单独执行。 */
 export interface ClientChallengeQuotaInput {
@@ -114,28 +97,9 @@ export class ClientApiRateLimitService implements OnApplicationBootstrap, OnAppl
     await this.cleanup;
   }
 
-  private async increment(scopeKey: string, bucketStart: Date, tenantId?: string): Promise<number> {
-    return this.prisma.$transaction(async (tx) => {
-      if (tenantId) await lockRentalBusinessTenant(tx, tenantId);
-      await tx.$executeRaw(prismaRuntime.sql`
-        INSERT INTO client_api_rate_buckets (id, scopeKey, bucketStart, count, createdAt, updatedAt)
-        VALUES (${randomUUID()}, ${scopeKey}, ${bucketStart}, 1, NOW(3), NOW(3))
-        ON DUPLICATE KEY UPDATE count = count + 1, updatedAt = NOW(3)
-      `);
-      const rows = await tx.$queryRaw<Array<{ count: number }>>(prismaRuntime.sql`
-        SELECT \`count\` FROM \`client_api_rate_buckets\`
-        WHERE \`scopeKey\` = ${scopeKey} AND \`bucketStart\` = ${bucketStart}
-        LIMIT 1
-      `);
-      return Number(rows[0]?.count ?? 0);
-    });
-  }
-
   private async consume(rule: ClientRateLimitRule, identity: string, now: number, tenantId?: string): Promise<number> {
-    const windowMs = rule.windowSeconds * 1000;
-    const bucketStart = new Date(Math.floor(now / windowMs) * windowMs);
-    const scopeKey = hashScope(`client-api:${rule.code}:${identity}`);
-    return this.increment(scopeKey, bucketStart, tenantId);
+    return consumeRateLimitBucket(this.prisma, rule, identity, now,
+      tenantId ? tx => lockRentalBusinessTenant(tx, tenantId) : undefined);
   }
 
   /**
