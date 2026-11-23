@@ -61,6 +61,9 @@
       ],
       "@rental-os/rental-core/staff-upload-observation": [
         "./src/staff-upload-observation.ts"
+      ],
+      "@rental-os/rental-core/tenant-bootstrap-contracts": [
+        "./src/tenant-bootstrap-contracts.ts"
       ]
     }
   },
