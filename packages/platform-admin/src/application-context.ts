@@ -37,6 +37,12 @@ export interface PlatformAdminApplicationOptions {
   onboardingPage?: { coreId: string; pageId: string };
   /** 宿主向同一公共外壳供给业务上下文、通知和详情。 */
   Shell?: ComponentType<PlatformShellProps>;
+  /** 同一 Router 内的无 DOM 宿主桥接，覆盖登录和受保护页面，不创建第二个 Router。 */
+  RouterBridge?: ComponentType;
+  /** 原客户端授权内容，固定公共路径及租户 system:params:manage 守卫。 */
+  clientAuthorizationPage?: ComponentType;
+  /** 宿主复用原菜单呈现 hook，仅重排当前公共/Core 登记项及品类称呼。 */
+  useNavigationPresentation?: () => PlatformShellProps["mapNavigation"];
   /** 当前已验证业务投影；变化时调用同一 session.invalidateBusinessScope，使旧请求和页面失效。 */
   getCoreContainer?: (coreId: string, pageId: string) => CoreScopeReference["container"];
   /** 宿主提供原页面图标，沿公共页头呈现，不改变页面准入。 */

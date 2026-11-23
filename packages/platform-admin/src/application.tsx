@@ -1,16 +1,18 @@
 /** 公共 Web 组合工厂，默认空Core。宿主注入登记页面，身份/权限来自原API。 */
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import type { AuthUser } from "@rental-os/platform-contracts";
 import { createBrowserRouter, createRoutesFromElements, Navigate, Outlet, RouterProvider, useLocation, useNavigate, useParams } from "react-router-dom";
 import { coreNavigationEntries, corePageKey } from "@rental-os/core-contracts";
 import { AdminRuntimeProvider } from "./runtime";
 import { isTenantLoginAliasPath, resolveLoginTenantCode } from "./features/auth/login-entry";
 import { BrandIconProvider } from "./app/BrandIconProvider";
 import { AdminUiProvider } from "./AdminUiProvider";
-import { PlatformShell } from "./PlatformShell";
+import { PlatformShell, type PlatformShellProps } from "./PlatformShell";
 import { coreNavigationMessage } from "./coreNavigationMessage";
 import { AdminLoginPage, AdminPasswordPage, PasswordChangeGate } from "./session-pages";
 import { LoadingState, PageHeading, QueryState } from "./shell";
-import { Alert, Button, Result } from "./components/ui";
+import { Alert, AnimatedIcon, Button, Result } from "./components/ui";
+import { SafetyCertificateOutlined } from "./components/ui/icons";
 import { useLocale } from "./app/locale";
 import { createCoreRouteElements, useCoreSession } from "./core";
 import { PlatformApplicationContext, usePlatformApplication, type PlatformAdminApplicationOptions } from "./application-context";
@@ -32,8 +34,62 @@ import { PlatformToolsPage, PLATFORM_TOOLS_ROUTE, canManagePlatformTools } from 
 import { AcceptOperatorInvitationPage, CustomerSupportPage, TenantDispatchPage, createOperatorInvitationApi,
   hasTenantMessagingPermission } from "./features/messaging";
 
+const clientAuthorizationPath = "/settings/client-authorization";
+
+function applicationPublicSections(options: PlatformAdminApplicationOptions, user: AuthUser, showOverview: boolean) {
+  const sections = publicAdminNavigation(user, showOverview, Boolean(options.platformAiPage), options.saasPages);
+  if (options.clientAuthorizationPage && canManagePublicResource(user, "tenant", "system:params:manage")) {
+    let group = sections.find(section => section.key === "account-access");
+    if (!group) {
+      group = { key: "account-access", label: "账号与权限", displayLabel: "账号权限", icon: <AnimatedIcon name="access" />, routes: [] };
+      const following = sections.findIndex(section => section.key === "service-channels" || section.key === "platform-management");
+      sections.splice(following < 0 ? sections.length : following, 0, group);
+    }
+    group.routes.push({ path: clientAuthorizationPath, label: "客户端授权", icon: <SafetyCertificateOutlined /> });
+  }
+  return sections;
+}
+
+/** 同一会话、目录和原生成器供给已过滤菜单，宿主呈现 hook 不改变准入。 */
+function useApplicationNavigationSections(): PlatformShellProps["publicSections"] {
+  const options = usePlatformApplication();
+  const state = useSyncExternalStore(options.session.subscribe, options.session.getSnapshot);
+  const { locale, t } = useLocale();
+  const cores = useCoreSession();
+  const presentation = options.useNavigationPresentation?.();
+  const entries = state.sessionVerified && state.user && cores.data
+    ? coreNavigationEntries(options.pages ?? new Map(), cores.data, locale) : [];
+  const publicSections = state.sessionVerified && state.user
+    ? applicationPublicSections(options, state.user, !state.user.isSaasAdmin && !entries.length) : [];
+  const groups = new Map<string, PlatformShellProps["publicSections"][number]>(publicSections
+    .map(section => [section.key, { ...section, routes: [...section.routes] }]));
+  for (const entry of entries) {
+    const label = entry.group ?? entry.coreName;
+    const shared = publicSections.find(section => t(section.label) === label || section.label === label);
+    const key = shared?.key ?? JSON.stringify([entry.coreId, entry.group]);
+    const group = groups.get(key) ?? { key, label, routes: [] };
+    group.routes.push({ path: entry.path, label: entry.label });
+    groups.set(key, group);
+  }
+  const sections = [...groups.values()];
+  return presentation ? presentation(sections) : sections;
+}
+
+function ApplicationRouterLayout() {
+  const { RouterBridge } = usePlatformApplication();
+  return <>{RouterBridge && <RouterBridge />}<Outlet /></>;
+}
+
+function ClientAuthorization() {
+  const { clientAuthorizationPage: Page } = usePlatformApplication();
+  const { user, sessionVerified } = useAdminSession();
+  return Page && sessionVerified && canManagePublicResource(user, "tenant", "system:params:manage")
+    ? <Page /> : <Result status="403" title="403" />;
+}
+
 function ProtectedLayout() {
-  const { session, brandName, brand, pages, platformAiPage, saasPages, Shell = PlatformShell } = usePlatformApplication();
+  const options = usePlatformApplication();
+  const { session, brandName, brand, pages, Shell = PlatformShell } = options;
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const { locale } = useLocale(), en = locale === "en-US";
   const cores = useCoreSession();
@@ -44,7 +100,7 @@ function ProtectedLayout() {
   if (state.user.mustChangePassword) return <PasswordChangeGate onChange={session.changePassword} />;
   const hasBusinessMenu = Boolean(cores.data && coreNavigationEntries(pages ?? new Map(), cores.data, locale).length);
   return <Shell brandName={brandName} brand={brand} pages={pages} onSignOut={session.signOut}
-    publicSections={publicAdminNavigation(state.user, !state.user.isSaasAdmin && !hasBusinessMenu, Boolean(platformAiPage), saasPages)}>
+    publicSections={applicationPublicSections(options, state.user, !state.user.isSaasAdmin && !hasBusinessMenu)}>
     <Outlet key={session.currentSessionEpoch()} />
   </Shell>;
 }
@@ -121,7 +177,7 @@ export function createPlatformAdminApplication(options: PlatformAdminApplication
   const { session } = options;
   const PlatformAiPage = options.platformAiPage;
   const invitationApi = createOperatorInvitationApi(session.apiBaseURL);
-  const router = createBrowserRouter([
+  const router = createBrowserRouter([{ element: <ApplicationRouterLayout />, children: [
   { path: "/login", element: <SignIn /> },
   { path: "/login/:tenantCode", element: <SignIn /> },
   { path: "/:tenantCode", element: <TenantLoginAlias /> },
@@ -129,6 +185,7 @@ export function createPlatformAdminApplication(options: PlatformAdminApplication
   { element: <ProtectedLayout />, children: [
     { path: "/", element: <Home /> }, { path: "/settings/profile", element: <SelfProfilePage /> },
     { path: "/settings/security", element: <AccountSecurity /> },
+    ...(options.clientAuthorizationPage ? [{ path: clientAuthorizationPath, element: <ClientAuthorization /> }] : []),
     { path: "/settings/appearance", element: <TenantSetting appearance /> },
     { path: "/settings/tenant", element: <TenantSetting /> }, { path: "/settings/tenant-appearance", element: <TenantSetting appearance /> },
     { path: TENANT_INTEGRATIONS_ROUTE.path, element: <TenantIntegrationsPage /> },
@@ -175,7 +232,7 @@ export function createPlatformAdminApplication(options: PlatformAdminApplication
     ...Object.entries(LEGACY_PUBLIC_ADMIN_ROUTE_ALIASES).map(([path, target]) => ({ path, element: <Navigate to={target} replace /> })),
     { path: "*", element: <Result status="404" title="404" /> }
   ] }
-  ]);
+  ] }]);
 
   function PlatformAdminApplication() {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
@@ -195,8 +252,51 @@ export function createPlatformAdminApplication(options: PlatformAdminApplication
       <PublicManagementCoreProvider adapter={options.management}><BrandIconProvider><RouterProvider router={router} /></BrandIconProvider></PublicManagementCoreProvider></PlatformApplicationContext.Provider></AdminRuntimeProvider>
   </AdminUiProvider>;
   }
-  return Object.assign(PlatformAdminApplication, { navigation: createPublicAdminLocationAccess({
+  const navigation = createPublicAdminLocationAccess({
     routes: router.routes, getSession: session.getSnapshot, platformAiAvailable: Boolean(PlatformAiPage), saasPages: options.saasPages,
-  }) });
+  });
+  const canClientAuthorization = () => {
+    const state = session.getSnapshot();
+    return Boolean(options.clientAuthorizationPage && state.sessionVerified
+      && canManagePublicResource(state.user, "tenant", "system:params:manage"));
+  };
+  const publicAccess = {
+    canAccess: (route: { path: string }) => route.path === clientAuthorizationPath
+      ? canClientAuthorization() : navigation.canAccess(route),
+    resolve: (href: string) => href === clientAuthorizationPath && canClientAuthorization()
+      ? clientAuthorizationPath : navigation.resolve(href),
+    originalPath: (pathname: string) => pathname === clientAuthorizationPath && canClientAuthorization()
+      ? clientAuthorizationPath : navigation.originalPath(pathname),
+  };
+  function useMenuAccess() {
+    const sections = useApplicationNavigationSections();
+    const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
+    const cores = useCoreSession();
+    const epoch = session.currentSessionEpoch();
+    const registered = new Map([...(options.pages?.values() ?? [])].map(page => [page.path, page]));
+    const routes = Object.fromEntries(sections.flatMap(section => section.routes).map(route => [
+      registered.get(route.path)?.key ?? route.path,
+      { path: route.path, label: route.label, permission: "", menu: true, coreId: registered.get(route.path)?.coreId },
+    ]));
+    const byPath = new Map(Object.values(routes).map(route => [route.path, route]));
+    function canAccess(route: { path: string }) {
+      if (!byPath.has(route.path) || session.getSnapshot() !== state || session.currentSessionEpoch() !== epoch
+        || !state.sessionVerified || !state.user) return false;
+      const page = registered.get(route.path);
+      return page ? options.pages?.get(page.key) === page && cores.canAccess(page.coreId, page.definition.permissions)
+        : publicAccess.canAccess(route);
+    }
+    return {
+      routes,
+      canAccess,
+      resolve: (href: string) => canAccess({ path: href }) ? href : null,
+      originalPath: (pathname: string) => canAccess({ path: pathname }) ? pathname : null,
+    };
+  }
+  return Object.assign(PlatformAdminApplication, { navigation: {
+    ...publicAccess,
+    useSections: useApplicationNavigationSections,
+    useMenuAccess,
+  } });
 }
 export type { PlatformAdminApplicationOptions, PlatformSaasPage } from "./application-context";

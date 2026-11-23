@@ -69,6 +69,8 @@ Core 的界面词条通过可选 `messages` 传给同一应用工厂，沿原语
 
 需要经营空间选择、业务通知或详情的宿主，可向 `/application` 提供 `Shell` 组件。它接收 `PlatformShellProps` 并包装同一 `PlatformShell`，传递公共菜单、页面、退出和正文。`contextSwitcher` 供给当前已验证业务上下文的控件，`notifications` 与 `notificationDetails` 供给真实通知和详情。原空间切换仍提交服务端响应并推进同一会话的请求与缓存代次。[组合参数](src/application-context.ts) · [公共壳及插槽](src/PlatformShell.tsx)
 
+桌面或其他宿主的无 DOM 桥接可通过 `RouterBridge` 挂在同一 Router 中，覆盖登录与受保护路由。`clientAuthorizationPage` 接原客户端授权内容和固定租户权限守卫。`App.navigation.useSections()` 与 `useMenuAccess()` 返回当前已过滤的公共/Core 菜单，宿主用 `useNavigationPresentation` 沿同一业务术语重排呈现，页面准入继续读取当前权限和 Core 范围。[应用入口](src/application.tsx) · [同源菜单呈现](../rental-core/admin/browser-navigation-presentation.tsx) · [桌面宿主示范](../rental-core/admin/desktop-browser.tsx)
+
 通知文案从 `/notifications` 使用 `useNotificationText`。结果声音从 `/sound` 使用 `captureSoundScope` 和 `emitSoundEvent`，沿用宿主唯一 UI Provider 的已验证身份范围、原偏好和跨标签去重。[通知文案](src/notifications.ts) · [声音出口](src/sound.ts)
 
 通知铃铛由 [HeaderNotifications](src/features/notifications/HeaderNotifications.tsx) 消费宿主的消息、读状态更新、刷新和详情投影。Rental 组合经 [业务通知适配](../rental-core/admin/browser-notifications/README.md) 读取原待办与事件，并按当前身份重新建立范围。休息计时与播放器由 [RestProvider](src/features/rest/RestProvider.tsx) 按当前租户会话挂载。声音由 [交互监听](src/features/sound/GlobalInteractionSounds.tsx) 和 [结果事件服务](src/features/sound/soundService.ts) 使用本机偏好与同一身份范围。验证入口见[原休息播放器行为](../../tests/admin-rest-player.test.cjs)和[原声音行为](../../tests/admin-sound.test.cjs)。
