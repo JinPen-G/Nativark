@@ -14,6 +14,8 @@
 
 宿主将同一数据库实例登记到 `OFFICIAL_CALENDAR_DATA_STORE`，并提供一个 `OfficialCalendarSourceService` 实例。维护 Controller 通过 `OFFICIAL_CALENDAR_APPLICATION` 消费该实例。两个 token 从 `@rental-os/platform-server/official-calendar-store` 导出，Controller 从 `/official-calendar-http` 导出。主装配合入本模块五个操作与 OpenAPI schemas，按原 SaaS 身份及权限复核每次维护请求。
 
+[公共 Guard](../../platform-auth.guard.ts)每次核验原 operator 签名和会话，再从当前账号及有效角色读取 SaaS 身份与权限。已核验的 SaaS 管理员沿原官方日历维护分面访问上述五个登记操作，精确匹配 `system:calendar-source:manage`。普通租户账号即使持有该权限或 `*` 仍受 SaaS 身份门槛约束。未知路径或方法按原登记边界拒绝，账号、租户或会话失效及当前 SaaS 身份撤销后拒绝准入。
+
 政策从 `@rental-os/platform-server/official-calendar-http-policy` 导出 `OFFICIAL_CALENDAR_HTTP_OPERATIONS`。字段和查询声明从 `/official-calendar-openapi` 导出 `OFFICIAL_CALENDAR_SCHEMAS` 与 `OFFICIAL_CALENDAR_OPENAPI_QUERY_SCHEMAS`。来源版本列表接受可选整数 `year`，过滤语义沿原 Controller。
 
 业务读取通过 `@rental-os/platform-server/official-calendar-reader` 的 `OFFICIAL_CALENDAR_SOURCE_READER` 提供 `createOfficialCalendarSourceReader` 的冻结结果。该对象包含 `listVersions`、`getVersion`、`findVersionById`、`getApplicableVersion`、`latestVersionForYear` 和 `availableSourceSummaryForYear`，均调用同一来源实例。业务 Controller 继续使用其本端权限和原版本引用。

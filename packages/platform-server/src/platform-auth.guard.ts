@@ -32,8 +32,10 @@ export class PlatformAuthGuard implements CanActivate {
       throw new ForbiddenException("首次登录或密码重置后必须先修改密码");
     if (!policy && !this.cores?.registered(method, path, "operator"))
       throw new ForbiddenException("该接口未在当前公共宿主或Core中登记");
+    // 原 SaaS 身份含官方日历维护分面，仅匹配已登记的精确日历权限。
     const permitted = user.permissions.includes("*")
-      || platformHttpPermissions(policy).some(permission => user.permissions.includes(permission));
+      || platformHttpPermissions(policy).some(permission => user.permissions.includes(permission)
+        || policy?.access === "saas" && user.isSaasAdmin && permission === "system:calendar-source:manage");
     if (policy?.access === "tenant_summary" && user.isSaasAdmin)
       throw new ForbiddenException("当前接口只读取调用者本租户的订阅摘要");
     if (policy?.access === "authenticated" && !permitted && (user.isSaasAdmin || !user.isPlatformAdmin))
