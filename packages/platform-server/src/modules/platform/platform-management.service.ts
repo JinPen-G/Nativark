@@ -155,12 +155,14 @@ export class PlatformManagementService {
 
   listTenants(compatibility?: LegacyPlatformManagementCompatibility) {
     return this.run("system:tenant:manage", true, undefined,
-      tx => this.tenantRows(tx, undefined, compatibility ?? this.tenantSummaryProjection));
+      tx => this.tenantRows(tx, undefined, compatibility ?? this.tenantSummaryProjection),
+      false, user => user.isSaasAdmin === true);
   }
 
   getTenant(id: string, compatibility?: LegacyPlatformManagementCompatibility) {
     return this.run("system:tenant:manage", true, id,
-      async tx => (await this.tenantRows(tx, id, compatibility ?? this.tenantSummaryProjection))[0]);
+      async tx => (await this.tenantRows(tx, id, compatibility ?? this.tenantSummaryProjection))[0],
+      false, user => user.isSaasAdmin === true);
   }
 
   createTenant(input: CreatePlatformTenantRequest): Promise<CreatePlatformTenantResult> {
