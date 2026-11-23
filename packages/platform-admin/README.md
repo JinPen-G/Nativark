@@ -81,6 +81,8 @@ CorePage 的 `title`、`summary` 可显示当前受权对象；`actions` 可声�
 
 使用 `RecordDetailLayout.header` 自定义页头时，第二个参数提供 `actions`、`navigation`、`tools` 三个插槽；原单参数回调仍收到主动作和返回的组合。类型 `RecordDetailHeaderSlots` 从 `/ui` 导出。[详情布局](src/components/RecordDetailLayout.tsx)
 
+需要沿用原详情分组类时，从 `@rental-os/platform-admin/record-detail.module.css` 默认导入原 CSS 模块。该正式出口直接供给 `RecordDetailLayout` 使用的同一文件，会员详情可复用 `disclosure`、`sectionTitle` 和 `stack`。[详情样式](src/components/RecordDetailLayout.module.css) · [包出口](package.json)
+
 面包屑、休息/通知、当前页面主操作和面板收展共用首行，常规首行52px，4px视觉内距计入其中；可选时间在下方独立20px行，`null` / `false` 不留空行。窄屏由公共壳安排操作换行和收展入口，整个页头按内容增高。Core 只声明自己的 `actions`，公共壳负责按钮样式和位置。已有自定义宿主用 `BusinessShell.headerPanelControl` 提供末尾面板入口，`headerActions` 的旧时钟自动移到独立时间行，其余操作保持。[公共壳](src/components/BusinessShell.tsx) · [面板入口](src/components/workspace/WorkspacePanel.tsx)
 
 需要保留原操作的单次提交语义时，使用 `runtime.request<T>(path, { method: "post", data: command, retryAuthentication: false })`。这会禁止401后刷新并重发该请求；普通请求仍沿原规则最多刷新一次。结果不明时调用该Core的原查询或收据接口，不换操作键重发。[请求合同](src/runtime/index.ts) · [唯一执行者](src/runtime/browser-http.ts)
@@ -88,6 +90,8 @@ CorePage 的 `title`、`summary` 可显示当前受权对象；`actions` 可声�
 `/forms` 同时提供 `readSettingsReference`、`retainSettingsReference`、`clearSettingsReference` 和对应类型，供页面保留非敏感原操作引用。沿用既有导出名和错误标识；键由业务按当前身份与对象限定，损坏或不可写的存储会阻止新操作，不把本地引用作为权限。[操作引用实现](src/operation-reference.ts)
 
 设置分区从 `/forms` 使用 `SettingsWorkspace`、`SettingsGroups`、`revealSettingsValidation` 和 `SettingsSection` 类型。卡片事实、列表宽度、原图标与 `ListPreflightError` 从 `/ui` 使用。聚合出口再导出同一组件、常量和错误类，隐藏表单校验、预览退出及列表写入前的错误识别沿原实现。[设置分区](src/components/settings/SettingsWorkspace.tsx) · [表单出口](src/forms.ts) · [UI 出口](src/components/ui/index.ts)
+
+订单和经营展示从 `/ui` 使用原动作图标、`ADMIN_TABLE_COLUMN_WIDTH`、`ADMIN_INSIGHT_METRICS`、`AnimatedCountText` 与 `PageEnter`。页面加载复用 `/shell` 的 `LoadingState`。这些入口供给同一常量、数值展示、路由入场和像素网格组件，业务页面保留原参数及动作位置。[UI 出口](src/components/ui/index.ts) · [加载出口](src/shell.ts) · [原路由入场](src/components/workspace/PageEnter.tsx)
 
 已呈现动作的定位标识是 `data-core-page`（当前 `page.key`）与 `data-core-action`（声明的 `action.id`）。深链接必须先映射为本页已登记动作，再用两个值一起查找当前入口；只滚动或聚焦，执行继续等待用户操作。禁用按钮有可聚焦容器，原因沿原Tooltip展示，撤权后不会留下动作入口。[页头动作适配](src/core/CorePage.tsx)
 

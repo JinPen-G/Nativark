@@ -4,7 +4,7 @@ import type { RentalWorkspaceOperationReport } from "@rental-os/rental-core";
 import { formatRentalMoney } from "@rental-os/rental-core";
 import { Button, Segmented, Treemap, type TreemapNode } from "@rental-os/platform-admin/ui";
 import { useLocale } from "@rental-os/platform-admin/locale";
-import { ADMIN_INSIGHT_METRICS } from "@rental-os/platform-admin/source/app/designTokens";
+import { ADMIN_INSIGHT_METRICS } from "@rental-os/platform-admin/ui";
 import { InsightPanel, RankedFacts } from "./OperationalCharts";
 import styles from "./OperationalCharts.module.css";
 

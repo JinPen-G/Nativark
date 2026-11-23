@@ -10,6 +10,8 @@
 
 ## 状态与配置入口
 
+完成、继续配置和警告图标从 `@rental-os/platform-admin/ui` 使用原图标组件，状态文本、配置目标及原业务条件继续由本页面供给。[UI 出口](../../../platform-admin/src/components/ui/index.ts)
+
 状态请求保留原 `/rental/v1/tenant-readiness` 接口。原 Rental Controller 委托业务运行时读取空间档案、履约网络、规则、日历、商品、价格和会员等实际配置。页面依据服务端 `ready`、状态、配置项和报价阻塞结果呈现，unavailable 项保留读取重试入口。[HTTP 入口](../../src/http-core.controller.ts) · [业务运行时](../../src/mysql-business-runtime.ts)
 
 九个开业项使用固定映射，同时核对服务端项标识与原 `nextHref`。业务目标通过 `CorePageLocation` 解析当前登记页面，再核对目标访问要求。公共人员与角色配置由宿主提供 `accounts` 接点，调用前复核当前账号入口权限。[导航映射](navigation.ts) · [目标访问与跳转](TenantReadinessPage.tsx) · [公共账号接点](page-context.tsx)

@@ -1,8 +1,16 @@
 export { AnimatedIcon } from "./AnimatedIcon";
 export type { AnimatedIconName } from "./AnimatedIcon";
 export { Button } from "./Button";
-export { ArrowLeftOutlined, CalendarOutlined, CheckCircleOutlined, DeleteOutlined, EditOutlined, HistoryOutlined, InfoCircleOutlined, LeftOutlined, MinusCircleOutlined, NotificationOutlined, PlusOutlined, RightOutlined, SafetyCertificateOutlined, SettingOutlined, TeamOutlined, UploadOutlined } from "./icons";
-export { ADMIN_TABLE_COLUMN_WIDTH } from "../../app/designTokens";
+export {
+  AppstoreOutlined, ArrowLeftOutlined, CalculatorOutlined, CalendarOutlined,
+  CheckCircleFilled, CheckCircleOutlined, DeleteOutlined, DownloadOutlined,
+  EditOutlined, FileSearchOutlined, FileTextOutlined, GiftOutlined, HistoryOutlined,
+  InfoCircleOutlined, LeftOutlined, MinusCircleOutlined, NotificationOutlined,
+  PlusOutlined, PrinterOutlined, ReloadOutlined, RetweetOutlined, RightOutlined,
+  SafetyCertificateOutlined, SettingOutlined, TagsOutlined, TeamOutlined,
+  UploadOutlined, UserOutlined, WarningFilled,
+} from "./icons";
+export { ADMIN_TABLE_COLUMN_WIDTH, ADMIN_INSIGHT_METRICS } from "../../app/designTokens";
 export { Form, FormField, FormSection } from "./Form";
 export { SidebarMenu } from "./SidebarMenu";
 export { UserMenu } from "./UserMenu";
@@ -69,7 +77,7 @@ export { DataTableRowActions, type DataTableRowAction } from "./data-table/DataT
 export { TimePicker, TimeInput } from "./TimePicker";
 export { FileUpload } from "./FileUpload";
 export type { FileUploadItem, FileUploadProps } from "./FileUpload";
-export { AnimatedNumber } from "./AnimatedNumber";
+export { AnimatedNumber, AnimatedCountText } from "./AnimatedNumber";
 export { LiveRefresh, useLiveRefresh } from "./LiveRefresh";
 export { Statistic } from "./Statistic";
 export { useModalDismissal } from "./useModalDismissal";
@@ -80,6 +88,7 @@ export { RecordDisclosure } from "../RecordDisclosure";
 export { RecordFacts, type RecordFact } from "../RecordFacts";
 export { QueryState } from "../QueryState";
 export { ContentTransition, useContentTransition } from "../workspace/ContentTransition";
+export { PageEnter } from "../workspace/PageEnter";
 export { KanbanBoard } from "../kanban-board/KanbanBoard";
 export type { KanbanBoardProps, KanbanCard, KanbanColumn, KanbanPerson } from "../kanban-board/KanbanBoard";
 export type { KanbanBusinessBridge } from "../kanban-board/KanbanBridge";

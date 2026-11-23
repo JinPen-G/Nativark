@@ -4,7 +4,7 @@ import { Space, Tag } from "antd";
 import { corePageKey, resolveCorePageLocation } from "@rental-os/core-contracts";
 import { CorePage, useCorePageHost } from "@rental-os/platform-admin/core";
 import { Alert, Button, useFeedback } from "@rental-os/platform-admin/ui";
-import { CheckCircleFilled, RightOutlined, WarningFilled } from "@rental-os/platform-admin/source/components/ui/icons";
+import { CheckCircleFilled, RightOutlined, WarningFilled } from "@rental-os/platform-admin/ui";
 import { LoadingState } from "@rental-os/platform-admin/shell";
 import { useLocale } from "@rental-os/platform-admin/locale";
 import type { TenantReadinessItem, TenantReadinessStatus } from "@rental-os/rental-core";

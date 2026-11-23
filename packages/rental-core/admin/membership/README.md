@@ -33,6 +33,10 @@
 
 ## 表单与原操作
 
+列表导入与批量操作从 `@rental-os/platform-admin/ui` 使用同一 `ListPreflightError`，当前资料与权限预检继续在原派发前执行，错误类身份与公共列表执行者一致。[列表能力](list-capabilities.ts) · [UI 出口](../../../platform-admin/src/components/ui/index.ts)
+
+企业会员的折叠分组、客户资料的分区标题及奖励内容栈从 `@rental-os/platform-admin/record-detail.module.css` 默认导入原详情样式模块，分别复用 `disclosure`、`sectionTitle`、`stack` 类。[公共详情样式](../../../platform-admin/src/components/RecordDetailLayout.module.css) · [正式包出口](../../../platform-admin/package.json)
+
 会员业务表单复用[既有编辑驱动](../orders/useOrderEditor.ts)，按钮、回车及弹窗确认共用原校验和异步保存 Promise。完整 Form 实例与编辑代次一并保留，关闭经过对应 `dismiss`，异步校验和已派发请求绑定到原编辑对象。
 
 [企业原操作](original-enterprise-operation.ts)保留登记路径白名单、跨页锁、原存储键和精确收据核对。请求派发使用公共单次传输模式。unknown 沿原键与可信收据恢复，表单和当前查询继续各自保留原依据。

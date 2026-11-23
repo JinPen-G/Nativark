@@ -17,6 +17,8 @@
 
 ## 页面与直属展示
 
+工作台、报表和直属图表从 `@rental-os/platform-admin/ui` 复用原图标、`AnimatedIcon`、`AnimatedCountText` 与 `ADMIN_INSIGHT_METRICS`。聚合出口指向同一实现，图表事实、几何参数与减少动态偏好沿原调用。[UI 出口](../../../platform-admin/src/components/ui/index.ts)
+
 - 运营概览按原期间筛选订单。指标同时核报表和对应订单／资产查看权限，待办独立读取。刷新通过已声明的 `content:view-tools` 动作以原 text 图标按钮进入期间查询工具行，支付核对通过 `content:maintenance-tools` 放回原 `todoSection` 底部的 `maintenanceTools` 并使用 secondary。两处复用同一 `CorePageActions` 权限、在途状态和实际 Promise 结果反馈。[工作台](WorkbenchPage.tsx) · [待办布局](WorkbenchOverview.module.css) · [指标明细](WorkbenchMetrics.tsx)
 - 待办保留重点／表格视图、分页、悬停预览、固定和键盘操作。已访问表格在视图切换时保持挂载，刷新移除的固定项随结果清除。详情目标由稳定订单／工单标识和对应权限决定。[待办列表](WorkbenchTodoQueue.tsx) · [日期与定位投影](workbenchPresentation.ts)
 - 经营报表保留日期、地点、客户类型和客户标识筛选，以及分析和五组明细视图。导出、刷新按原顺序通过 `content:view-tools` 动作进入正文筛选工具行，导出使用同一组筛选和权限。查询占位限定同一业务范围，读取失败时清除旧金额展示。[经营报表](WorkspaceOperationReportPage.tsx)

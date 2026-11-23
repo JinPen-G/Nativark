@@ -1,5 +1,5 @@
 import { useRentalOrderContext, rentalOrderSessionIdentity } from "./page-context";
-import { DownloadOutlined, FileTextOutlined, PrinterOutlined } from "@rental-os/platform-admin/source/components/ui/icons";
+import { DownloadOutlined, FileTextOutlined, PrinterOutlined } from "@rental-os/platform-admin/ui";
 import type { RentalCategoryTerminology, RentalFundingBalance, RentalInspectionRecord, RentalInspectionTemplate, RentalOrder, RentalDocumentType } from "@rental-os/rental-core";
 import { Space, Typography } from "antd";
 import { ListSection, Modal, Alert, Button, Select, App } from "@rental-os/platform-admin/ui";

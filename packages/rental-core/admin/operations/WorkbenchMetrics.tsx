@@ -4,7 +4,7 @@ import { AnimatePresence, motion, useIsPresent } from "motion/react";
 import { ChevronDown, X } from "lucide-react";
 import { formatRentalMoney, type RentalWorkspaceOperationReport } from "@rental-os/rental-core";
 import { AnimatedNumber, Button } from "@rental-os/platform-admin/ui";
-import { AnimatedCountText } from "@rental-os/platform-admin/source/components/ui/AnimatedNumber";
+import { AnimatedCountText } from "@rental-os/platform-admin/ui";
 import { ContentTransition } from "@rental-os/platform-admin/ui";
 import { useLocale } from "@rental-os/platform-admin/locale";
 import { motionTokens } from "@rental-os/platform-admin/motion";

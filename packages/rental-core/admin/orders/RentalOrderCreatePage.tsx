@@ -1,5 +1,5 @@
 /** 新建订单沿服务端报价与客户已签原委托执行，复用公共表单、会话及当前页操作。 */
-import { AppstoreOutlined, ArrowLeftOutlined, CalculatorOutlined, CalendarOutlined, CheckCircleOutlined, DeleteOutlined, GiftOutlined, PlusOutlined, TagsOutlined, UserOutlined } from "@rental-os/platform-admin/source/components/ui/icons";
+import { AppstoreOutlined, ArrowLeftOutlined, CalculatorOutlined, CalendarOutlined, CheckCircleOutlined, DeleteOutlined, GiftOutlined, PlusOutlined, TagsOutlined, UserOutlined } from "@rental-os/platform-admin/ui";
 import {
   RENTAL_CATEGORY_DEFINITIONS,
   RENTAL_PRICING_UNIT_LABELS,

@@ -21,6 +21,7 @@
     "./locale": "./src/app/locale.tsx",
     "./theme": "./src/app/theme.tsx",
     "./styles": "./src/styles.css",
+    "./record-detail.module.css": "./src/components/RecordDetailLayout.module.css",
     "./vite": "./config/vite.ts",
     "./source/app/MotionPreferenceProvider": "./src/app/MotionPreferenceProvider.tsx",
     "./source/app/arcTokens": "./src/app/arcTokens.ts",

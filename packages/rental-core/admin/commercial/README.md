@@ -51,7 +51,7 @@
 - Rental 包提供 admin/commercial、admin/commercial/client、admin/commercial/context 和 admin/commercial/pages 的 exports 与 typesVersions，后台类型配置包含 commercial。
 - 统一 Rental 上下文提供 useCommercialContext，统一贡献合并七页，价格与服务页分别沿正式 price/manage 和 service/manage 映射。
 - 公共 native-ui 提供 avatarGroupClasses，消费原 Avatar group CSS。公共 motion 提供 motionTokens 和 usePrefersReducedMotion，消费原 UIArc 动效参数与偏好。
-- 公共 ui 提供卡片事实、原图标与列表宽度，shell 提供 SettingsWorkspace；页面使用正式出口，保留来源的编译预览只沿原兼容入口。
+- 公共 ui 提供卡片事实、原图标与列表宽度，shell 提供 SettingsWorkspace；页面使用正式出口，编译预览与外层适配从公共 motion 读取同一 motionTokens 和 usePrefersReducedMotion，原函数和 CSS 按来源说明维护。
 - 宿主合并 rentalCommercialMessages，并将旧菜单、路由和面包屑绑定同一页面声明。
 
 ## 验证入口

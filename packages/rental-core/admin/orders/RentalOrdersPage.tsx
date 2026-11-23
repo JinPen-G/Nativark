@@ -1,7 +1,7 @@
 /** Rental 订单列表保留原服务端筛选、分页与导出，并通过正式页面声明接入公共外壳。 */
 import { rentalOrderCreateLocation } from "./pages";
 import { useRentalOrderContext, rentalOrderSessionIdentity } from "./page-context";
-import { InfoCircleOutlined, PlusOutlined } from "@rental-os/platform-admin/source/components/ui/icons";
+import { InfoCircleOutlined, PlusOutlined } from "@rental-os/platform-admin/ui";
 import type { RentalCoreOrderStatus, RentalOrder, RentalOrderAssignmentFilter, RentalOrderListQuery } from "@rental-os/rental-core";
 import { RENTAL_ORDER_LIST_DEFAULT_PAGE_SIZE } from "@rental-os/rental-core";
 import { useQuery } from "@tanstack/react-query";
@@ -15,10 +15,10 @@ import { AnimatedNumber, LiveRefresh, useLiveRefresh } from "@rental-os/platform
 import { InsightMetrics } from "@rental-os/platform-admin/insight-metrics";
 import { useLocale } from "@rental-os/platform-admin/locale";
 import { isTransientRefreshError } from "@rental-os/platform-admin/runtime";
-import { ADMIN_TABLE_COLUMN_WIDTH } from "@rental-os/platform-admin/source/app/designTokens";
+import { ADMIN_TABLE_COLUMN_WIDTH } from "@rental-os/platform-admin/ui";
 import { CorePage } from "@rental-os/platform-admin/core";
-import { LoadingState } from "@rental-os/platform-admin/source/components/LoadingState";
-import { PageEnter } from "@rental-os/platform-admin/source/components/workspace/PageEnter";
+import { LoadingState } from "@rental-os/platform-admin/shell";
+import { PageEnter } from "@rental-os/platform-admin/ui";
 import { orderStatusLabels, rentalOrderColumns } from "./rentalOrderColumns";
 import styles from "./RentalOrdersPage.module.css";
 

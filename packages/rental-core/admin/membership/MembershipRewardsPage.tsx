@@ -35,7 +35,7 @@ import { useLocale } from "@rental-os/platform-admin/locale";
 import { QueryState } from "@rental-os/platform-admin/ui";
 import { useModalDismissal } from "@rental-os/platform-admin/ui";
 import { RecordFacts } from "@rental-os/platform-admin/ui";
-import recordStyles from "@rental-os/platform-admin/source/components/RecordDetailLayout.module.css";
+import recordStyles from "@rental-os/platform-admin/record-detail.module.css";
 
 const rewardLabels: Record<string, string> = {
   points: "积分",

@@ -8,7 +8,7 @@ import {
   defineListImport,
   type ListBatchAction,
 } from "@rental-os/platform-admin/ui";
-import { ListPreflightError } from "@rental-os/platform-admin/source/components/ui/data-table/listTransfer";
+import { ListPreflightError } from "@rental-os/platform-admin/ui";
 import type { RentalMembershipApi } from "./client";
 import type { RentalMembershipSession } from "./page-context";
 type Translator = (key: string) => string;

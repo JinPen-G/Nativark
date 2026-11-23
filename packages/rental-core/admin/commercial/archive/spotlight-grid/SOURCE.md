@@ -2,7 +2,7 @@
 
 由用户指定复用 `D:/工作文件/uiarc-pro-archive/preview/src/components/spotlight-grid/` 的成品还原组件。归档来源为 https://uiarc.dev/components/blocks/spotlight-grid，捕获日期 2026-11-09；属于公开编译预览还原，不声称是付费原始 TSX。
 
-- `original.js` 中卡片函数 `er` 逐字提取自 `reference-runtime.js` 的 8152 模块，SHA-256 为 `32a08c67764735399b76b758705a7d230ec8fdab4b9647a87dfa0107d517616a`。打包器依赖名称接回宿主 React / Motion / Lucide，减少动态依赖接现有平台偏好。
+- `original.js` 中卡片函数 `er` 逐字提取自 `reference-runtime.js` 的 8152 模块，SHA-256 为 `32a08c67764735399b76b758705a7d230ec8fdab4b9647a87dfa0107d517616a`。打包器依赖名称接回宿主 React / Motion / Lucide，`motionTokens` 与 `usePrefersReducedMotion` 从 `@rental-os/platform-admin/motion` 读取，编译预览和外层适配使用同一平台动效偏好。
 - 网格函数 `eo` 提取前 SHA-256 为 `28b4a1db2184b65b68d3f2961bffb0efb111ed147c970366b9e990dd718a9ded`。指针光点、弹簧参数、原地变形、Escape 关闭、焦点归还和 `inert` 均未改，只做以下适配：
   - 原示例卡片、预览、详情及其状态改为 `cards`、`renderMini`、`renderDetail` 插槽。
   - 去掉营销标题区，改用 `label` / `closeLabel` 提供无障碍文案。

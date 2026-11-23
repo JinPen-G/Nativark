@@ -5,7 +5,7 @@ import dayjs from "dayjs";
 import { useId, type ReactNode, type ComponentType } from "react";
 import { CalendarCheck2, ChevronDown, ChevronUp, CircleCheck, CircleDashed, CircleHelp, CircleX, ClipboardCheck, ClockAlert, Layers, ListTodo, LockKeyhole, LockOpen, PackageCheck, ReceiptText, Timer, TriangleAlert, UserX, Wallet, type LucideIcon } from "lucide-react";
 import { Button, DataTableColumnHeader, DataTableLeading, DataTableMoney, DataTableStatus, DataTableNote, Tooltip } from "@rental-os/platform-admin/ui";
-import { ADMIN_TABLE_COLUMN_WIDTH as columnWidth } from "@rental-os/platform-admin/source/app/designTokens";
+import { ADMIN_TABLE_COLUMN_WIDTH as columnWidth } from "@rental-os/platform-admin/ui";
 import type { AdminLocale, AdminTranslate } from "@rental-os/platform-admin/locale";
 import { hasPendingFeeReview } from "./orderFeeReview";
 import { orderTimingNotice, plannedReturnAt, timeSpanParts } from "./orderListPresentation";

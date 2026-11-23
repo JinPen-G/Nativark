@@ -15,6 +15,8 @@
 
 ## 公共接点与装配
 
+列表、新建、详情和单据使用 `@rental-os/platform-admin/ui` 的原图标、列表宽度及 `PageEnter`，加载反馈使用 `/shell` 的同一 `LoadingState`。原列表列定义、页面参数和阶段动作继续由本模块提供。[UI 出口](../../../platform-admin/src/components/ui/index.ts) · [加载出口](../../../platform-admin/src/shell.ts)
+
 包配置提供 `admin/orders`、`admin/orders/client`、`admin/orders/logic` 与 `admin/orders/pages` 正式出口，分别指向 `index.tsx`、`client.ts`、`logic.ts` 和 `pages.ts`。后台类型配置同时包含贡献组合、订单和养护页面。旧宿主的列表、新建与详情导航均投影本模块声明，公共配置与最终授权映射由宿主装配维护。
 
 [旧宿主适配](../../../../apps/admin/src/features/rental-core/legacy-order-context.tsx)从同源页面声明投影旧路径和权限，绑定原 `adminRuntime`、实际 AuthStore、原跨领域组件及引用库。订单编辑以打开代次隔离异步校验。原生提交直接等待本代次的 `validateFields`，按钮、回车与浮层确认共用公共表单保存方法。实际请求在途时保留编辑对象，失败保留原输入与未决引用。

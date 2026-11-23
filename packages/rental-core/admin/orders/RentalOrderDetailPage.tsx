@@ -3,7 +3,7 @@ import { useRentalOrderContext, rentalOrderSessionScope, rentalOrderSessionIdent
 import { rentalOrderLocation } from "./pages";
 import { RecordDisclosure } from "@rental-os/platform-admin/ui";
 import { ListSection, SaveButton, Tabs } from "@rental-os/platform-admin/ui";
-import { ArrowLeftOutlined, CheckCircleOutlined, MinusCircleOutlined, PlusOutlined, RetweetOutlined, SafetyCertificateOutlined, UploadOutlined } from "@rental-os/platform-admin/source/components/ui/icons";
+import { ArrowLeftOutlined, CheckCircleOutlined, MinusCircleOutlined, PlusOutlined, RetweetOutlined, SafetyCertificateOutlined, UploadOutlined } from "@rental-os/platform-admin/ui";
 import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type AdjustRentalInspectionExceptionRequest, type ApplyRentalOrderChangeRequest, type CorrectRentalInspectionUsageRequest, type CreateRentalInspectionRequest, type PreviewRentalOrderChangeRequest, type RecordRentalInspectionExceptionCustomerResponseRequest, type RentalAllocation, type RentalDeliveryAddressSnapshot, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalOfflinePaymentMethod, type RentalOrderExtension, type RentalOrderExtensionPreview, type RentalOrderFeeReview, type RentalOrderServiceOccurrence, type RentalReservation, type RentalServiceExecutionAction, type UpdateRentalServiceOccurrenceRequest, type RentalWorkOrder, type RentalStockDisposition, type RentalOrderChangePreview } from "@rental-os/rental-core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, Descriptions, InputNumber, Space, Tag, Typography } from "antd";

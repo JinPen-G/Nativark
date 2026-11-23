@@ -60,7 +60,7 @@ import {
 } from "@rental-os/platform-admin/ui";
 import { BadgeCheck, Landmark, Users } from "lucide-react";
 import { RecordDetailLayout, RecordFacts } from "@rental-os/platform-admin/ui";
-import recordStyles from "@rental-os/platform-admin/source/components/RecordDetailLayout.module.css";
+import recordStyles from "@rental-os/platform-admin/record-detail.module.css";
 import { useEffect, useRef, useState } from "react";
 import {
   bindCorporateCreditDraft,

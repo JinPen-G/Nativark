@@ -1,6 +1,6 @@
 import { useRentalOrderContext, rentalOrderSessionIdentity } from "./page-context";
 import { useOrderEditor } from "./useOrderEditor";
-import { FileSearchOutlined, UploadOutlined } from "@rental-os/platform-admin/source/components/ui/icons";
+import { FileSearchOutlined, UploadOutlined } from "@rental-os/platform-admin/ui";
 import type { CreateRentalCarrierShipmentEventRequest, RentalCarrierShipmentEvent, RentalOrder } from "@rental-os/rental-core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, Descriptions, Space, Tag, Timeline } from "antd";

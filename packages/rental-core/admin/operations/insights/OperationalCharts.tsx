@@ -1,9 +1,9 @@
 /** Presentation of existing report facts. No forecasting, permission decisions or monetary recalculation. */
 import type { ReactNode } from "react";
 import { AnimatedNumber, DonutChart, Empty, Segmented, type DonutChartDatum } from "@rental-os/platform-admin/ui";
-import { AnimatedCountText } from "@rental-os/platform-admin/source/components/ui/AnimatedNumber";
+import { AnimatedCountText } from "@rental-os/platform-admin/ui";
 import { useLocale } from "@rental-os/platform-admin/locale";
-import { ADMIN_INSIGHT_METRICS } from "@rental-os/platform-admin/source/app/designTokens";
+import { ADMIN_INSIGHT_METRICS } from "@rental-os/platform-admin/ui";
 import styles from "./OperationalCharts.module.css";
 
 export function InsightPanel({ title, description, actions, children, className = "" }: {

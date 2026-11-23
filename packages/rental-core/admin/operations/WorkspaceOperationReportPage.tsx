@@ -2,7 +2,7 @@ import { MetricBand, ViewChoice } from "./insights/OperationalCharts";
 import insightStyles from "./insights/OperationalCharts.module.css";
 import { ReportAnalysis } from "./insights/ReportAnalysis";
 import { ContentTransition } from "@rental-os/platform-admin/ui";
-import { DownloadOutlined, ReloadOutlined } from "@rental-os/platform-admin/source/components/ui/icons";
+import { DownloadOutlined, ReloadOutlined } from "@rental-os/platform-admin/ui";
 import type {
   RentalWorkspaceCustomerBreakdownRow,
   RentalWorkspaceLocationBreakdownRow,
