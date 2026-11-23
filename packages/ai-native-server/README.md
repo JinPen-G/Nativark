@@ -51,7 +51,7 @@ const retention = {
 
 宿主选择 [公共数据](../../apps/platform-api/prisma/schema.prisma)、[Rental 数据](../rental-core/prisma/schema.prisma)及 [AI Native 数据贡献](../ai-native-data/README.md)，使用其组合生成的唯一 Prisma Client。生成和数据准备属于宿主，版本、锁和物理观察仍按正式数据部署流程裁定；本包不执行迁移、不声明数据库已就绪。
 
-首次源码构建先由[纯schema准备入口](../../scripts/prepare-selected-prisma-schema.cjs)选择 `--mode rental-ai --output <apps/rental-api下尚不存在的直接子目录绝对路径>`。宿主独立生成该247模型schema的 `generated/client` 后，再从仓库根设置绝对路径并构建；准备schema不依赖业务 `dist`，也不等于已生成Client。
+首次源码构建先由[纯schema准备入口](../../scripts/prepare-selected-prisma-schema.cjs)选择 `--mode rental-ai --output <apps/rental-api下尚不存在的直接子目录绝对路径>`。宿主独立生成该248模型schema的 `generated/client` 后，再从仓库根设置绝对路径并构建；准备schema不依赖业务 `dist`，也不等于已生成Client。
 
 ```powershell
 $env:RENTAL_PRISMA_CLIENT = (Resolve-Path 'apps/rental-api/generated/client/index.d.ts').Path
