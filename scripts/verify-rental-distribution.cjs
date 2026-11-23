@@ -273,7 +273,8 @@ function verifyPackage(build, portable, buildSource) {
     assert.deepEqual(enabled.files.get(`migrations/platform-capability.${migration.id}/migration.sql`), aiDecoded.files.get(migration.file));
   console.log(JSON.stringify({ aiData: { files: aiFiles.size, bytes: aiArchive.bytes.length, sha256: aiArchive.sha256,
     sourceCommit: source.commit, migrations: aiRelease.data.migrations.length, mysqlData: 'compiled-and-loaded' },
-    deploymentSchemas: [161, 247], deployment: 'pending', filesystem: 'memory', database: 'not-connected', diskOutputs: 0 }));
+    deploymentSchemas: [disabled, enabled].map(candidate => (candidate.files.get('schema.prisma').toString().match(/^model /gm) || []).length),
+    deployment: 'pending', filesystem: 'memory', database: 'not-connected', diskOutputs: 0 }));
   const tampered = Uint8Array.from(packed.bytes); tampered[tampered.length - 1] ^= 1;
   assert.throws(() => install.prepareCoreInstall(tampered, packed.sha256, destination, host, packed.manifest, legacyRoutes));
   assert.throws(() => install.prepareCoreInstall(packed.bytes, packed.sha256, destination,

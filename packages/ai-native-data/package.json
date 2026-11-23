@@ -1,6 +1,6 @@
 {
   "name": "@rental-os/ai-native-data",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "license": "MIT",
   "description": "AI Native 可选公共能力的固定数据、schema与部署准备",

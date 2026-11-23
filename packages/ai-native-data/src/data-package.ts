@@ -9,7 +9,7 @@ import { readPlatformDataCapabilityPackage, requirePlatformDataCapabilityFiles }
 import { createAiNativeDataContribution, AI_NATIVE_PRISMA_SCHEMA, type AiNativeDataContribution } from "./data";
 import { AI_NATIVE_DATA_PREREQUISITES } from "./preparation";
 
-export const AI_NATIVE_DATA_PACKAGE_VERSION = "0.1.0";
+export const AI_NATIVE_DATA_PACKAGE_VERSION = "0.1.1";
 const packageName = "@rental-os/ai-native-data";
 
 function packageEntries(files: ReadonlyMap<string, Uint8Array>): void {
@@ -39,7 +39,7 @@ function releaseMetadata(contribution: AiNativeDataContribution) {
     runtime: { node: { minInclusive: "22.0.0", maxExclusive: "25.0.0" } },
     schema: AI_NATIVE_PRISMA_SCHEMA, data: contribution.data,
     // 当前材料只核定这两个数据基线；后续发行须先验证兼容再扩大范围。
-    prerequisites: { platform: { minInclusive: prerequisites.platform.dataVersion, maxExclusive: "0.1.9" },
+    prerequisites: { platform: { minInclusive: prerequisites.platform.dataVersion, maxExclusive: "0.1.10" },
       cores: [{ coreId: "rental", version: { minInclusive: prerequisites.rental.dataVersion, maxExclusive: "0.1.1" },
         migrations: [{ id: prerequisites.rental.migrationId, sha256: prerequisites.rental.migrationSha256 }] }] }
   };
