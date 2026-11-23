@@ -79,7 +79,8 @@ export function createRentalHostModule<Host extends RentalHostAssembly>(input: {
           staff: { ...host.http.staff, inspectionEvidence: evidence } });
       } }], exports: [HTTP_APPLICATIONS] };
   const core = CoreHostModule.register({ imports: [assembly], inject: [RENTAL_HOST_ASSEMBLY],
-    useFactory: (host: Host) => host.core });
+    useFactory: (host: Host) => host.core,
+    permissions: { inject: [RENTAL_HOST_ASSEMBLY], useFactory: (host: Host) => host.permissionStartup } });
   const packages = CorePackageAssemblyModule.register({ imports: [assembly], inject: [RENTAL_HOST_ASSEMBLY],
     useFactory: (host: Host) => host.packages });
   return { module: RentalAppModule, imports: [assembly, httpApplications, core, packages,

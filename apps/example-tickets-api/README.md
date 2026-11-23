@@ -8,7 +8,7 @@
 
 | 步骤 | 操作 | 出口 |
 | --- | --- | --- |
-| 1 | 按[公共 API](../platform-api/README.md#默认零-core-的五步)准备独立配置与公共 schema / Client，再构建本宿主 | 本树唯一公共 40 模型 Client 和公共 / 工单 API 编译产物 |
+| 1 | 按[公共 API](../platform-api/README.md#默认零-core-的五步)准备独立配置与公共 schema / Client，再构建本宿主 | 本树唯一公共 41 模型 Client 和公共 / 工单 API 编译产物 |
 | 2 | 按[公开打包和安装准备](../../packages/core-contracts/README.md#打包与本地安装准备)取得完整固定工单包 | `prepared / already_prepared`、完整包摘要及待部署目录 |
 | 3 | 以[固定底座发行 JSON](../platform-api/README.md#固定发行与部署锁)及同一工单包执行下方准备命令 | 新目录中的 `core.deployment.lock.json`、公共 13 份与工单 1 份原迁移 |
 | 4 | 在目标环境应用组合迁移、初始化公共账号、装配同一标准包并登记精确权限 | 公共 / 工单物理观察可核同，权限目录包含 6 项工单权限 |
@@ -69,6 +69,8 @@ node apps/example-tickets-api/dist/prepare-deployment.js <固定底座发行JSON
 运行依赖中的 `@rental-os/example-tickets-core` 必须是这份已准备包的相同字节。源码检出的 npm workspace 解析到 `packages/example-tickets-core`，部署者在独占宿主中将同一待部署包的[完整声明文件集](../../packages/core-contracts/src/package.ts)供给该实际解析目录，再构建 Web 和启动 API，已有作者稿先保全并核定去向。独立后端运行包已把完整标准包放入这个 workspace。公共 / 工单 API 的编译步骤在包供给前完成，保留所选包的实际 dist 和资料字节。宿主启动前重新核包与锁的ID / 版本 / 来源 / 摘要，实际公共和工单表 / 迁移状态还须通过准入检查。源码目录只有TS或缺清单时拒绝运行，不将作者的源码测试称为包已安装。
 
 同一部署环境完成公共库初始化后，显式登记标准包声明的工单权限。命令读取当前进程的 `DATABASE_URL` 和 `CORE_DEPLOYMENT_LOCK`，不会加载环境文件。它会写公共Permission目录，须在获准的部署环境执行；重复执行保留原ID和角色关联，冲突整笔回滚。
+
+本宿主的标准 Nest 模块也会在 HTTP 监听前，通过同一 `CoreHostPermissionStartup` 和公共库 Serializable 事务登记已核包清单。构造模块期间不查库，登记失败会释放本宿主数据库连接并阻止启动。显式命令可用于部署阶段提前核对，同一次启动的钩子共用原 Promise。新增工单权限只进入可配置目录，角色和成员分配仍经原接口办理。[标准启动接线](src/app.module.ts) · [公共启动对象](../../packages/platform-core-host/src/core-host.module.ts)
 
 ```sh
 npm run register:permissions -w @rental-os/example-tickets-api

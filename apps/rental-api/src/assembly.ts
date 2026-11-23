@@ -1,4 +1,4 @@
-/** 独立 Rental 宿主的同实例组合。无 AI 的 161 模型闭包不导入 AI Runtime；
+/** 独立 Rental 宿主的同实例组合。无 AI 的 162 模型闭包不导入 AI Runtime；
  * enabled 组合由独立入口提供已核完整数据包和实际参加者。构造不连接、预热、迁移或挂载 HTTP。
  * 运行部署仍须实际固定包、原 Prisma 账与物理观察，源码目录不代替已准备发行。 */
 import { ForbiddenException } from "@nestjs/common";
@@ -13,7 +13,7 @@ import { createMysqlCoreDeploymentAdmission } from "@rental-os/core-host/mysql-d
 import { createPublicCoreDependencies } from "@rental-os/platform-api/core-dependencies";
 import { createPublicPlatformDataPlan } from "@rental-os/platform-api/data-plan";
 import { composePlatformCoreApplication, composePlatformCorePackageAssembly, createPlatformCorePackageAudit,
-  createPlatformCorePackageAssemblyHttpAccess, createPlatformCoreHttpAccess } from "@rental-os/platform-core-host";
+  createPlatformCorePackageAssemblyHttpAccess, createPlatformCoreHttpAccess, CoreHostPermissionStartup } from "@rental-os/platform-core-host";
 import { readPublicSubscriptionTerm } from "@rental-os/platform-server/subscription-reader";
 import { readBoundedMedia } from "@rental-os/platform-server/media";
 import { PlatformPrincipalAuthority } from "@rental-os/platform-server/principal";
@@ -29,6 +29,7 @@ import { composeRentalCoreSessionReader } from "@rental-os/rental-core/core-sess
 import { createRentalAuthorization, type RentalAuthorizationGuard } from "@rental-os/rental-core/http-auth";
 import { createRentalCustomerManagementApplication, type RentalCustomerManagementApplication } from "@rental-os/rental-core/customer-management";
 import { createRentalWorkspaceManagementApplication } from "@rental-os/rental-core/workspace-management";
+import { createRentalPermissionRegistrationParticipant } from "@rental-os/rental-core/public-management-compatibility";
 import type { RentalDatabaseClient, RentalDatabaseTransaction } from "./database";
 import { requireRentalDeploymentPackage } from "./deployment-package";
 import { RentalApplicationLifecycle } from "./lifecycle";
@@ -77,6 +78,7 @@ export interface RentalHostAssembly<Binding = unknown, Additional = unknown> {
   readonly jobs: RentalApplication["integrations"]["ledger"];
   readonly notifications: RentalApplication["integrations"]["ledger"];
   readonly lifecycle: RentalApplicationLifecycle;
+  readonly permissionStartup: CoreHostPermissionStartup;
 }
 
 export function composeRentalApplication<Binding = never, Additional = unknown>(input: {
@@ -142,6 +144,9 @@ export function composeRentalApplication<Binding = never, Additional = unknown>(
     registrations: [{ manifest: rentalPackage.manifest, server: platformHost.server },
       ...bound.map(({ item, value }) => ({ manifest: item.manifest, server: value.server }))],
     http: additional.map(item => item.http), observations: observation(database) });
+  const permissionStartup = new CoreHostPermissionStartup({ database,
+    manifests: [...catalogue.registrations.values()].map(registration => registration.manifest),
+    participants: [createRentalPermissionRegistrationParticipant()] });
   const core = composePlatformCoreApplication({ ...dependencies, users: rental.authSource, catalogue, deploymentForTransaction,
     authorizeContainer: platformHost.authorizeContainer,
     platformRemoval: createRentalCoreRemovalSource({ database,
@@ -205,6 +210,8 @@ export function composeRentalApplication<Binding = never, Additional = unknown>(
       tenantBootstrapHttp: workspaces.tenantBootstrapHttpAccess }),
     payments: { runtime: rental.integrations.payments, statements: rental.integrations.statements, core: rental.primary.core },
     jobs: rental.integrations.ledger, notifications: rental.integrations.ledger,
+    permissionStartup,
     lifecycle: new RentalApplicationLifecycle(rental, () => database.$disconnect(),
-      configuration.get<string>("DATABASE_CONNECT_ON_START") === "true" ? () => database.$connect() : undefined) });
+      configuration.get<string>("DATABASE_CONNECT_ON_START") === "true" ? () => database.$connect() : undefined,
+      permissionStartup) });
 }

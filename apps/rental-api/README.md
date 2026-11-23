@@ -23,7 +23,9 @@
 | [http-policy.ts](src/http-policy.ts)、[openapi.ts](src/openapi.ts) | 真实挂载清单同时约束请求包装与旧路径文档许可；逐条核定原方法/处理器，使用 Rental 命名空间并保留原合同缺项。 |
 | [package.ts](src/package.ts)、[prepare-deployment.ts](src/prepare-deployment.ts) | 从已构建字节和固定来源形成标准包及候选部署；同源 OpenAPI、完整摘要和原 SQL 必须一致，不安装或执行迁移。 |
 
-启动配置须显式提供 `DATABASE_URL`、`AUTH_TOKEN_SECRET`、`RENTAL_AI_MODE` 和 `RENTAL_DEPLOYMENT_LOCK`。普通 `main.ts` 只接受 `disabled`；`ai-main.ts` 只接受 `enabled`，并要求所选 247 模型 Client 和固定完整 AI 数据包。部署锁使用绝对路径，文件上限 8 MiB。锁中 Node 和 Core 合同版本须与当前进程实际版本一致，宿主在装配前拒绝不匹配的锁。可配置 `API_PORT`、`TRUST_PROXY_HOPS`、`CORS_ALLOWED_ORIGINS`；公共数据、Rental 和基础设施数据模式均只接受 MySQL。启动入口本身不授予连接业务库或发布权限。
+启动配置须显式提供 `DATABASE_URL`、`AUTH_TOKEN_SECRET`、`RENTAL_AI_MODE` 和 `RENTAL_DEPLOYMENT_LOCK`。普通 `main.ts` 只接受 `disabled`；`ai-main.ts` 只接受 `enabled`，并要求所选 248 模型 Client 和固定完整 AI 数据包。部署锁使用绝对路径，文件上限 8 MiB。锁中 Node 和 Core 合同版本须与当前进程实际版本一致，宿主在装配前拒绝不匹配的锁。可配置 `API_PORT`、`TRUST_PROXY_HOPS`、`CORS_ALLOWED_ORIGINS`；公共数据、Rental 和基础设施数据模式均只接受 MySQL。启动入口本身不授予连接业务库或发布权限。
+
+已核标准包和部署目录在构造时形成唯一 `CoreHostPermissionStartup`，启动时在同一公共库 Serializable 事务登记所选 Core 的权限定义。Rental 原业务码、按钮类型、现存权限 ID 与历史模块沿固定参加者保留，页面 OR 准入继续由目录投影。双 Core 的其他声明走相同标准路径。生命周期先连接、等待权限登记，再执行原业务恢复和预热，最后启动四个作业参加者。登记冲突或初始化失败会阻止 HTTP 监听与作业启动，停止参加者并释放唯一连接。重复 Nest 钩子共享原 Promise，关闭发生在登记期间也须等待该事务完成。角色、租户授权和成员分配经原接口单独办理。[权限启动](../../packages/platform-core-host/src/core-host.module.ts) · [唯一生命周期](src/lifecycle.ts)
 
 原组合宿主的 `PlatformController` 已有客户/空间兼容入口；该宿主不得再次挂载独立客户/空间模块。独立宿主则由本根模块统一挂载。原认证扩展同样不能在同一应用重复登记。
 
@@ -41,7 +43,7 @@ Core 包目录、预检、版本选择和候选准备的四个原 Controller 挂
 
 宿主选择公开包后，由[启动入口](src/bootstrap.ts)在原身份与业务作用域中间件之前，按实际方法和模板将已登记的规范路径交给同一原 Rental Controller。客户端原路径及渠道、员工、平台和供应商回调继续沿各自原入口。部署准备和启动都核对整包摘要、清单及与所选发行一致的 OpenAPI。候选 SQL 保留原字节和顺序，`prepared` 表示材料已备妥，部署、迁移和运行状态由原流程核定。
 
-`createRentalDeploymentFiles` 与命令共用同一准备入口。省略 AI 数据包得到 161 模型；提供已核固定完整 AI 数据发行与包，得到 247 模型及按原顺序追加的 58 份迁移。命令的新迁移目录必须直接位于本宿主根目录，例如 `apps/rental-api/prisma-candidate`，且尚未存在；其中 schema 的 `../generated/client` 与本宿主编译、运行使用同一个 Client。准备只写新目录，失败清理本次候选，不覆盖有效部署。
+`createRentalDeploymentFiles` 与命令共用同一准备入口。省略 AI 数据包得到 162 模型；提供已核固定完整 AI 数据发行与包，得到 248 模型及按原顺序追加的 58 份迁移。命令的新迁移目录必须直接位于本宿主根目录，例如 `apps/rental-api/prisma-candidate`，且尚未存在；其中 schema 的 `../generated/client` 与本宿主编译、运行使用同一个 Client。准备只写新目录，失败清理本次候选，不覆盖有效部署。
 
 受控宿主可向 `composeRentalApplication` 提供 `additionalCores`，其集合必须与锁中的非 Rental 包逐项相同。[双 Core 宿主](../example-multi-core-api/README.md)静态组合原工单服务，通过 `RENTAL_HOST_ASSEMBLY` 取得同一绑定；其八条 HTTP、OpenAPI、迁移观察及包管理材料均来自原固定包。首期额外 Core 只接受 tenant 范围和 raw SQL，不接额外 Prisma Client、容器授权或公共外键扩展。准备函数的 `additionalCores: [{ pin, files }]` 保留原 SQL 字节及迁移账，工单不改变 Rental 的所选模型。CLI 在原 3/5 个位置参数后显式追加 `--additional-core <完整固定包绝对目录>`，最多八项，每项两次完整读取核同一摘要，不自动发现目录；新迁移目录仍位于 Rental 宿主根下。完整包准备不等于物理部署就绪。
 
@@ -101,7 +103,7 @@ npm run lint:rental-api:mcp
 
 ## 组合约束与验证边界
 
-普通宿主使用无 AI 的 161 模型；客户检查出箱用 `null` 表达未选择，`undefined` 或残缺参加者会拒绝。AI 启用入口使用 247 模型，通过原实际工厂组合失败出箱、同事务事件、通知草稿、知识读取和原请求服务。公共数据库视图仍限定原 40 模型；两个 Client 的运行时模型图互不覆盖，正文加密沿各自实际模型关系处理嵌套数据。
+普通宿主使用无 AI 的 162 模型；客户检查出箱用 `null` 表达未选择，`undefined` 或残缺参加者会拒绝。AI 启用入口使用 248 模型，通过原实际工厂组合失败出箱、同事务事件、通知草稿、知识读取和原请求服务。公共数据库视图限定当前 41 模型；两个 Client 的运行时模型图互不覆盖，正文加密沿各自实际模型关系处理嵌套数据。
 
 启用宿主的 HTTP 清单见 [AI 处理器政策](src/ai-http-policy.ts)：运营/员工场景目录、原输入与任务创建、原任务恢复、报价澄清、开业诊断、订单解释、任务中心、场景计划与任务动作策略、租户模型配置及明确列出的手动检查操作。三个执行入口分别消费原专用请求工厂与持久 runner，不同时挂载旧的宽泛模型执行器。每个路由仍通过原 Auth/Guard，后续原场景、owner、对象、能力、任务策略和模型配置分别核定。场景目录只公布确实挂载的请求工厂；原服务端配置未启用、未提供的客户或供应商能力保持不可用。
 
@@ -121,7 +123,7 @@ MCP 的 OAuth、Host router 与原 Web 参加者由独立的 `rental-mcp-host` �
 
 标准 Rental 与双 Core 镜像上下文均排除 `dist-mcp`；提前执行 MCP 构建也不会改变这两种标准组合的包内容。MCP 使用上面的显式选装入口及对应部署依赖。
 
-同一打包入口默认 `--host rental`；双 Core 组合显式使用 `--host example-multi-core --tickets-package <完整固定工单包目录>`，并提供对应双 Core 部署材料。`--ai disabled` 使用 `apps/example-multi-core-api/dist/main.js` 和 161 模型 Client；`--ai enabled` 还须完整 AI 数据包，使用 `apps/example-multi-core-api/dist-ai/ai-main.js` 和 247 模型 Client。打包从所选宿主的真实依赖闭包投影原锁，核两份 Core 完整包及同源公共产物。两个 Core 共用同一个所选 Client，工单仍没有 AI 工具。
+同一打包入口默认 `--host rental`；双 Core 组合显式使用 `--host example-multi-core --tickets-package <完整固定工单包目录>`，并提供对应双 Core 部署材料。`--ai disabled` 使用 `apps/example-multi-core-api/dist/main.js` 和 162 模型 Client；`--ai enabled` 还须完整 AI 数据包，使用 `apps/example-multi-core-api/dist-ai/ai-main.js` 和 248 模型 Client。打包从所选宿主的真实依赖闭包投影原锁，核两份 Core 完整包及同源公共产物。两个 Core 共用同一个所选 Client，工单仍没有 AI 工具。
 
 AI 扩展宿主从正式出口 `@rental-os/rental-api/ai-app-module` 使用 `createRentalAiHostModule`，以 `additionalCores`、`additionalHttp` 和 `additionalOpenApi` 接入静态 Core。该出口同时提供 `RENTAL_HOST_ASSEMBLY`、`RentalAiHostAssembly` 和 `bootstrapRentalComposition`，使 HTTP 绑定及启动读取同一 `dist-ai` 产物中的令牌；普通入口使用独立的 `dist` 闭包。权限、Runtime、模型账和恢复仍由原 Rental AI 组合裁定，额外 Core 的普通授权不产生工具访问权。
 

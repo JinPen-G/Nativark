@@ -43,6 +43,8 @@ function fixture(configuration = {}) {
   const database = Object.fromEntries(emptyTables.map(table => [table, { findMany: query => read(table, query) }]));
   Object.assign(database, {
     tenantIntegrationConfig: {}, externalAdapterLog: {},
+    fileUploadSession: { ...database.fileUploadSession, groupBy: query => read('fileUploadSession', query) },
+    fileAsset: { ...database.fileAsset, groupBy: query => read('fileAsset', query) },
     clientApiRateBucket: { deleteMany: async query => { f.trace.push('rate.cleanup'); await f.onRateCleanup?.(query); return { count: 0 }; } },
     async $transaction(consume, options) {
       f.trace.push('transaction.begin');

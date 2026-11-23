@@ -56,6 +56,10 @@ SQL宿主通过 `deploymentForTransaction(tx)` 将同一固定目录的部署观
 
 所选 Core 可通过第三参数提供固定 `CorePermissionRegistrationParticipant`，每项登记仍须唯一对应已核定清单中的权限声明。Rental 宿主使用 `registerPlatformCorePermissions(tx, manifests, [createRentalPermissionRegistrationParticipant()])`，从原业务声明提供旧码、名称、说明及 ACTION / BUTTON 类型。其他 Core 继续登记规范码。全部清单、参加者、重复码和历史归属在首项写入前核对，已存在的权限 ID 与模块保留。[Rental 参加者](../rental-core/src/public-management-compatibility.ts)
 
+标准 Nest 宿主通过 `CoreHostModule.register({ permissions: { inject, useFactory } })` 提供同一 `CoreHostPermissionStartup`。启动对象只固定已校验清单与参加者，在 `onModuleInit` 的同一公共库 Serializable 事务登记定义，事务预算30秒。显式 `initialize()` 与 Nest 钩子共用一次 Promise。零 Core 使用空启动对象，权限登记读取为零。独立生命周期宿主在连接后、业务初始化前等待该对象，再恢复和启动作业。停止时 `stop()` 阻止尚未开始的登记，已进入的事务仍须等待原结果。登记失败由宿主排空并释放连接。[标准启动](src/core-host.module.ts) · [Rental 生命周期](../../apps/rental-api/src/lifecycle.ts) · [单工单接线](../../apps/example-tickets-api/src/app.module.ts)
+
+Rental 与双 Core 从同一已核部署目录取得全量所选清单，只为 Rental 提供固定原码参加者，其他 Core 按清单登记规范码。旧宿主省略新增启动配置时保留原显式登记方式，升级底座可继续消费其原 Core 和宿主代码。权限定义登记后的角色选择、租户授权及成员分配仍分别经原受控接口办理。
+
 身份围栏复用 [公共原会话](../platform-server/src/modules/platform/platform-principal.authority.ts)，锁原账号 / 角色 / 租户后进入Core锁。旧签名wid只作为原会话一致性证据；公共workspace为空，业务容器仍由Core自身解析。租户和成员撤权、角色变化、令牌到期及提交条件分别复验。原收据只读核对原主体/原键，不用当前状态代替原结果。
 
 公共平台的授权与绑定迁移单份归 [公共宿主迁移链](../../apps/platform-api/README.md)，原SQL字节保留。这里不自动应用迁移；原组合库须按固定数据版本和部署顺序引入相同增量，不能使用新公共基线覆盖已有库。Core自身迁移继续归Core。[授权SQL](../../apps/platform-api/prisma/migrations/20261115010000_core_access/migration.sql) · [绑定SQL](../../apps/platform-api/prisma/migrations/20261115020000_core_bindings/migration.sql)
