@@ -14,7 +14,7 @@ const json = value => Buffer.from(JSON.stringify(value, null, 2) + '\n');
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const coreDirectory = 'packages/rental-core';
 const supportWorkspaces = [
-  'packages/shared', 'packages/web-client', 'packages/ai-native-data', 'apps/rental-api',
+  'packages/shared', 'packages/web-client', 'packages/ai-native-data', 'packages/ai-native-admin', 'apps/rental-api',
   'apps/rental-admin', 'apps/tenant-website', 'apps/enterprise-portal', 'apps/miniprogram', 'apps/staff-miniprogram',
 ];
 const supportScripts = [
