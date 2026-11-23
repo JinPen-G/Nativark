@@ -54,6 +54,8 @@ SQL宿主通过 `deploymentForTransaction(tx)` 将同一固定目录的部署观
 
 部署者在核定标准包并应用所选迁移后，显式调用 `registerPlatformCorePermissions(tx, manifests)`，`tx`须来自同一公共库的Serializable事务。它先核全部清单、重复Core与现存权限归属/类型，再登记 `${coreId}:${resource}:${action}`，供原权限树和角色接口消费；不会创建角色、授予成员、初始化Core或删除历史权限。兼容升级可更新声明名称并保留原权限ID/角色关系。不同模块或原BUTTON占用同码时停止，先核清来源。[工单部署命令](../../apps/example-tickets-api/src/register-permissions.ts)展示实际调用。
 
+所选 Core 可通过第三参数提供固定 `CorePermissionRegistrationParticipant`，每项登记仍须唯一对应已核定清单中的权限声明。Rental 宿主使用 `registerPlatformCorePermissions(tx, manifests, [createRentalPermissionRegistrationParticipant()])`，从原业务声明提供旧码、名称、说明及 ACTION / BUTTON 类型。其他 Core 继续登记规范码。全部清单、参加者、重复码和历史归属在首项写入前核对，已存在的权限 ID 与模块保留。[Rental 参加者](../rental-core/src/public-management-compatibility.ts)
+
 身份围栏复用 [公共原会话](../platform-server/src/modules/platform/platform-principal.authority.ts)，锁原账号 / 角色 / 租户后进入Core锁。旧签名wid只作为原会话一致性证据；公共workspace为空，业务容器仍由Core自身解析。租户和成员撤权、角色变化、令牌到期及提交条件分别复验。原收据只读核对原主体/原键，不用当前状态代替原结果。
 
 公共平台的授权与绑定迁移单份归 [公共宿主迁移链](../../apps/platform-api/README.md)，原SQL字节保留。这里不自动应用迁移；原组合库须按固定数据版本和部署顺序引入相同增量，不能使用新公共基线覆盖已有库。Core自身迁移继续归Core。[授权SQL](../../apps/platform-api/prisma/migrations/20261115010000_core_access/migration.sql) · [绑定SQL](../../apps/platform-api/prisma/migrations/20261115020000_core_bindings/migration.sql)
