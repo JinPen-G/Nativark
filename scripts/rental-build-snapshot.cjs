@@ -9,7 +9,7 @@ const selections = ['LICENSE', 'package.json', 'package-lock.json', 'tsconfig.ba
   'packages/core-contracts', 'packages/platform-contracts', 'packages/platform-server', 'packages/core-host',
   'packages/platform-core-host', 'packages/rental-core', 'packages/example-tickets-core', 'packages/shared', 'packages/web-client',
   'packages/platform-admin', 'packages/ui-arc', 'packages/ui-motiq', 'packages/ai-native-data',
-  'packages/ai-native-server', 'packages/mcp-server', 'packages/rental-mcp-host',
+  'packages/ai-native-server', 'packages/ai-native-admin', 'packages/mcp-server', 'packages/rental-mcp-host',
   'apps/platform-api', 'apps/example-tickets-api', 'apps/example-tickets-admin', 'apps/example-multi-core-api', 'apps/example-multi-core-admin',
   'apps/rental-api', 'apps/rental-admin', 'apps/tenant-website', 'apps/enterprise-portal',
   'apps/admin', 'apps/miniprogram', 'apps/staff-miniprogram',
