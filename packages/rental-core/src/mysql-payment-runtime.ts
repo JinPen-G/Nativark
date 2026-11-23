@@ -53,6 +53,22 @@ interface ProviderRefundResult {
   confirmedTotal?: number;
 }
 
+interface PaymentScanPosition {
+  at: Date;
+  id: string;
+}
+
+interface PaymentReconciliationScan {
+  through?: Date;
+  payment?: PaymentScanPosition;
+  refund?: PaymentScanPosition;
+}
+
+interface PaymentExpiryScan {
+  through?: Date;
+  after?: PaymentScanPosition;
+}
+
 /** 金额取整复用Rental原roundMoney。 */
 const money = roundMoney;
 
@@ -72,6 +88,9 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
   ) { super(); }
 
   private readonly callbackConfigCache = new Map<string, { expiresAt: number; value: Promise<Array<TenantIntegrationRuntimeConfig & { tenantId: string }>> }>();
+  // 位置只安排本实例的有界读取，不证明支付终态；重启或一轮结束后仍核对原记录。
+  private readonly reconciliationScans = new Map<string, PaymentReconciliationScan>();
+  private readonly paymentExpiryScans = new Map<string, PaymentExpiryScan>();
 
   /**
    * 回调候选配置按平台缓存 30 秒。回调是无鉴权公开入口，每次都全表扫描并解密所有租户
@@ -733,18 +752,34 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
   ): Promise<PaymentReconciliationSummary> {
     assertPaymentReconciliationAccess(tenantId, workspaceId, this.authority);
     const take = Math.max(1, Math.min(Number.isFinite(limit) ? Math.floor(limit) : 50, 100));
-    const [intents, refunds] = await Promise.all([
+    const scope = JSON.stringify([tenantId, workspaceId]);
+    const previous = this.reconciliationScans.get(scope);
+    let through = previous?.through ?? new Date();
+    let paymentAfter = previous?.payment, refundAfter = previous?.refund;
+    // 固定本轮上界：accepted 退款的原查询会更新 updatedAt，不能让它反复移到队尾拖住回绕。
+    const read = () => Promise.all([
       this.prisma.rentalPaymentIntent.findMany({
-        where: { tenantId, workspaceId, status: { in: ["pending", "verified_pending_funding", "funding_failed"] } },
-        orderBy: { updatedAt: "asc" },
+        where: { tenantId, workspaceId, status: { in: ["pending", "verified_pending_funding", "funding_failed"] },
+          updatedAt: { lte: through },
+          ...(paymentAfter ? { OR: [{ updatedAt: { gt: paymentAfter.at } },
+            { updatedAt: paymentAfter.at, id: { gt: paymentAfter.id } }] } : {}) },
+        orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
         take
       }),
       this.prisma.rentalPaymentRefund.findMany({
-        where: { tenantId, workspaceId, status: { in: ["pending", "accepted", "funding_pending"] } },
-        orderBy: { updatedAt: "asc" },
+        where: { tenantId, workspaceId, status: { in: ["pending", "accepted", "funding_pending"] },
+          updatedAt: { lte: through },
+          ...(refundAfter ? { OR: [{ updatedAt: { gt: refundAfter.at } },
+            { updatedAt: refundAfter.at, id: { gt: refundAfter.id } }] } : {}) },
+        orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
         take
       })
     ]);
+    let [intents, refunds] = await read();
+    if (!intents.length && !refunds.length && (paymentAfter || refundAfter)) {
+      through = new Date(); paymentAfter = undefined; refundAfter = undefined;
+      [intents, refunds] = await read();
+    }
     const candidates = [
       ...intents.map((row) => ({ kind: "payment_intent" as const, id: row.id, orderId: row.orderId, previousStatus: row.status, updatedAt: row.updatedAt.getTime() })),
       ...refunds.map((row) => ({ kind: "refund" as const, id: row.id, orderId: row.orderId, previousStatus: row.status, intentId: row.paymentIntentId, updatedAt: row.updatedAt.getTime() }))
@@ -780,6 +815,16 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
     }
 
     assertPaymentReconciliationAccess(tenantId, workspaceId, this.authority);
+    if (this.reconciliationScans.get(scope) === previous) {
+      // 只推进实际进入本批的原始键；另一表已读但被合并上限截去的记录仍须留待下批。
+      const lastPayment = candidates.filter(row => row.kind === "payment_intent").at(-1);
+      const lastRefund = candidates.filter(row => row.kind === "refund").at(-1);
+      this.reconciliationScans.set(scope, candidates.length < take ? {} : {
+        through,
+        payment: lastPayment ? { at: new Date(lastPayment.updatedAt), id: lastPayment.id } : paymentAfter,
+        refund: lastRefund ? { at: new Date(lastRefund.updatedAt), id: lastRefund.id } : refundAfter
+      });
+    }
     return {
       scanned: candidates.length,
       processed: results.length,
@@ -953,11 +998,23 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
    */
   async expireStalePaymentIntents(tenantId: string, workspaceId: string, take = 50) {
     const limit = Math.max(1, Math.min(Number.isFinite(take) ? Math.floor(take) : 50, 200));
-    const stale = await this.prisma.rentalPaymentIntent.findMany({
-      where: { tenantId, workspaceId, status: "pending", expiresAt: { lt: new Date() } },
-      orderBy: { expiresAt: "asc" },
+    const scope = JSON.stringify([tenantId, workspaceId]);
+    const previous = this.paymentExpiryScans.get(scope);
+    let through = previous?.through ?? new Date(), after = previous?.after;
+    const read = () => this.prisma.rentalPaymentIntent.findMany({
+      where: { tenantId, workspaceId, status: "pending", expiresAt: { lt: through },
+        ...(after ? { OR: [{ expiresAt: { gt: after.at } },
+          { expiresAt: after.at, id: { gt: after.id } }] } : {}) },
+      orderBy: [{ expiresAt: "asc" }, { id: "asc" }],
       take: limit
     });
+    let stale = await read();
+    if (!stale.length && after) {
+      through = new Date(); after = undefined;
+      stale = await read();
+    }
+    const last = stale.at(-1);
+    const next = last ? { at: new Date(last.expiresAt.getTime()), id: last.id } : undefined;
     const summary = { scanned: stale.length, closed: 0, paid: 0, errors: [] as Array<{ intentId: string; error: string }> };
     for (const intent of stale) {
       try {
@@ -994,6 +1051,10 @@ export class PaymentRuntimeService extends PaymentProviderTransport {
       } catch (error) {
         summary.errors.push({ intentId: intent.id, error: (error instanceof Error ? error.message : String(error)).slice(0, 240) });
       }
+    }
+    // 读失败不动位置；迟到的旧调用不能覆盖已完成调用的位置。unknown 仍留原 pending，下一轮再核。
+    if (this.paymentExpiryScans.get(scope) === previous) {
+      this.paymentExpiryScans.set(scope, stale.length < limit ? {} : { through, after: next });
     }
     return summary;
   }
