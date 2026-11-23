@@ -56,11 +56,11 @@ fixture 中的事务与锁用于验证参加者调用及提交边界。真实 My
 
 ### 宿主接入
 
-宿主将 `PlatformFilterPresetDatabase` 合入同一公共数据库端口，沿已有 `PLATFORM_AUTH_DATA_STORE` 注入实例，并注册 `PlatformFilterPresetService` 与 `PlatformFilterPresetController`。原组合的 `PlatformService` MySQL 分支将四个同名方法委托给该实例，原演示内存适配继续由原宿主管理。各组合选择一个实际 HTTP Controller，保留原客户端入口。[公共装配](../../platform-server.module.ts) · [原平台服务](../../../../../apps/api/src/modules/platform/platform.service.ts) · [实际客户端](../../../../platform-admin/src/features/platform-tools/client.ts)
+宿主将 `PlatformFilterPresetDatabase` 合入同一公共数据库端口，沿已有 `PLATFORM_AUTH_DATA_STORE` 注入实例，并注册 `PlatformFilterPresetService` 与 `PlatformFilterPresetController`。原组合的 `PlatformService` MySQL 分支经 `PlatformRepository` 将四个同名方法委托给该实例，原演示内存适配继续由原宿主管理。原根模块登记唯一公共服务，使用同一 `PrismaService`，各组合选择一个实际 HTTP Controller，保留原客户端入口。[公共装配](../../platform-server.module.ts) · [原根装配](../../../../../apps/api/src/application-services.module.ts) · [原平台服务](../../../../../apps/api/src/modules/platform/platform.service.ts) · [实际客户端](../../../../platform-admin/src/features/platform-tools/client.ts)
 
 公共政策聚合合入 `PLATFORM_FILTER_PRESET_HTTP_OPERATIONS`，OpenAPI 聚合合入 `PLATFORM_FILTER_PRESET_SCHEMAS`，正式 platform-tools 出口暴露服务、Controller、DTO、数据库/事务类型与两份声明。四个操作使用原自助 `self`，权限码为空。服务继续核当前 operator 会话并拒绝 SaaS 身份。公共 Guard 的默认拒绝要求这些方法和路径准确登记。原组合保留 filter-presets 的已登录自助白名单，独立宿主经同一 Guard/ALS 与公共主体围栏进入。[公共政策](../../platform-http-policy.ts) · [公共 Guard](../../platform-auth.guard.ts) · [现有模块出口](index.ts)
 
-GET `/platform/filter-presets` 的 tenantId/scopeKey 在 query。POST 同路径使用保存 DTO。PUT `/platform/filter-presets/:id/default` 的可选 operator 在 body。DELETE `/platform/filter-presets/:id` 的可选 operator 在 query，返回原 id/deleted。根出口、聚合、宿主与旧组合委托由负责装配的作者接入后完成组合验证。
+GET `/platform/filter-presets` 的 tenantId/scopeKey 在 query。POST 同路径使用保存 DTO。PUT `/platform/filter-presets/:id/default` 的可选 operator 在 body。DELETE `/platform/filter-presets/:id` 的可选 operator 在 query，返回原 id/deleted。公共与原组合均消费同一服务；原 MySQL 适配缺少该服务时明确拒绝，不回退到演示内存。
 
 实际后台客户端复用这四条路径，默认和删除对原 ID 编码，operator 分别进入 body 与 query。三个写方法均沿原客户端设置 `retryAuthentication: false`，读取继续支持原会话刷新。工具页的预设管理沿已登录租户身份，页面导航继续沿原工具可见条件。[页面](../../../../platform-admin/src/features/platform-tools/PlatformToolsPage.tsx) · [可见条件](../../../../platform-admin/src/features/platform-tools/platformToolsAccess.ts)
 

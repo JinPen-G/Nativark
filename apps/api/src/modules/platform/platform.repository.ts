@@ -1,14 +1,15 @@
 /** 原组合的公共身份与 Rental 业务仓储接点。
- * 公共身份沿原身份仓储读取，空间、邀请与开业通过原业务接点办理。 */
+ * 公共身份沿原身份仓储读取，筛选预设复用公共服务的当前主体与同事务审计，空间、邀请与开业通过原业务接点办理。 */
 import { assertOriginalMcpWorkspaceIntegrationManagement } from "@rental-os/rental-mcp-host/workspace-management";
 import { RentalWorkspaceManagementRepository } from "@rental-os/rental-core/mysql-workspace-management";
 /** Rental及既有组合平台的仓储；公共登录/账号/会话继承唯一身份仓储。
  * 业务空间、客户与Rental初始化保留本域事务和校验，不成为无Core认证的依赖。 */
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { PlatformIdentityRepository } from "./platform-identity.repository";
 import { RentalWorkspacePrincipalRepository, type WorkspaceSessionIdentity, type RentalMemberSessionIdentity,
   type RentalWorkspaceAccessTransaction } from "@rental-os/rental-core/mysql-workspace-principal";
 import { readPlatformSecurityBaseline } from "@rental-os/platform-server/security";
+import { PlatformFilterPresetService } from "@rental-os/platform-server/tools";
 import { randomUUID } from "node:crypto";
 import { assertCategoryAdoptionAllowed } from "../rental-core/category-governance-policy";
 import { rentalCategoryStorageCode } from "../rental-core/category-identity";
@@ -71,7 +72,10 @@ export class PlatformRepository extends PlatformIdentityRepository {
 
   private readonly workspacePrincipals: RentalWorkspacePrincipalRepository<RentalWorkspaceAccessTransaction>;
 
-  constructor(protected readonly prisma: PrismaService) {
+  constructor(
+    protected readonly prisma: PrismaService,
+    @Optional() private readonly publicFilterPresets?: PlatformFilterPresetService
+  ) {
     super(prisma);
     this.workspacePrincipals = new RentalWorkspacePrincipalRepository<RentalWorkspaceAccessTransaction>(prisma, {
       findUserById: (userId, transaction) => this.findUserById(userId, transaction),
@@ -79,6 +83,13 @@ export class PlatformRepository extends PlatformIdentityRepository {
       projectRoleScope: scope => this.toSharedRoleScope(scope),
       projectDataScope: scope => this.toSharedDataScope(scope)
     });
+  }
+
+  private requirePublicFilterPresets(): PlatformFilterPresetService {
+    if (!this.publicFilterPresets) {
+      throw new ServiceUnavailableException("公共筛选预设服务未装配");
+    }
+    return this.publicFilterPresets;
   }
 
   /** 登录前没有会话；只读平台主体的原生效安全配置，与独立公共认证共用读取算法。 */
@@ -695,121 +706,30 @@ export class PlatformRepository extends PlatformIdentityRepository {
   async listFilterPresets(
     query: PlatformFilterPresetQuery = {}
   ): Promise<PlatformFilterPreset[]> {
-    const tenantId = query.tenantId || (await this.resolveConfigTenantId());
-    const where: Prisma.FilterPresetWhereInput = {
-      tenantId,
-      scopeKey: query.scopeKey
-    };
-    const rows = await this.prisma.filterPreset.findMany({
-      where,
-      orderBy: [{ isDefault: "desc" }, { updatedAt: "desc" }]
-    });
-    return rows.map((row) => this.toFilterPreset(row));
+    return this.requirePublicFilterPresets().listFilterPresets(query);
   }
 
   async saveFilterPreset(
-    input: SavePlatformFilterPresetRequest & {
-      tenantId: string;
-      operator: string;
-    }
+    input: SavePlatformFilterPresetRequest
   ): Promise<PlatformFilterPreset> {
-    const tenantId = input.tenantId || (await this.resolveConfigTenantId());
-    const operator = input.operator || "营运端";
-    const row = await this.prisma.$transaction(async (tx) => {
-      if (input.isDefault) {
-        await tx.filterPreset.updateMany({
-          where: { tenantId, scopeKey: input.scopeKey },
-          data: { isDefault: false }
-        });
-      }
-      const existing = input.id
-        ? await tx.filterPreset.findFirst({ where: { id: input.id, tenantId } })
-        : await tx.filterPreset.findUnique({
-            where: {
-              tenantId_scopeKey_name: {
-                tenantId,
-                scopeKey: input.scopeKey,
-                name: input.name
-              }
-            }
-          });
-      if (input.id && !existing) {
-        throw new NotFoundException("筛选预设不存在");
-      }
-      const data = {
-        tenantId,
-        scopeKey: input.scopeKey,
-        name: input.name,
-        description: input.description,
-        filters: input.filters as Prisma.InputJsonValue,
-        isDefault: Boolean(input.isDefault),
-        isSystem: false,
-        operator
-      };
-      return existing
-        ? tx.filterPreset.update({ where: { id: existing.id }, data })
-        : tx.filterPreset.create({ data });
-    });
-    await this.recordAuditLog({
-      tenantId,
-      action: "filter-preset.save",
-      operator,
-      targetType: "filter-preset",
-      targetId: row.id,
-      detail: `保存筛选预设：${row.name}`
-    });
-    return this.toFilterPreset(row);
+    return this.requirePublicFilterPresets().saveFilterPreset(input);
   }
 
+  /** 旧第三参数保留内部调用形状；当前主体、租户与审计由公共服务统一读取。 */
   async setDefaultFilterPreset(
     id: string,
-    operator = "营运端",
-    tenantId = requireRequestTenantId()
+    operator?: string,
+    _tenantId?: string
   ): Promise<PlatformFilterPreset> {
-    const row = await this.prisma.filterPreset.findFirst({ where: { id, tenantId } });
-    if (!row) {
-      throw new NotFoundException("筛选预设不存在");
-    }
-    const next = await this.prisma.$transaction(async (tx) => {
-      await tx.filterPreset.updateMany({
-        where: { tenantId: row.tenantId, scopeKey: row.scopeKey },
-        data: { isDefault: false }
-      });
-      return tx.filterPreset.update({
-        where: { id },
-        data: { isDefault: true, operator }
-      });
-    });
-    await this.recordAuditLog({
-      tenantId: row.tenantId,
-      action: "filter-preset.default",
-      operator,
-      targetType: "filter-preset",
-      targetId: row.id,
-      detail: `设为默认筛选预设：${row.name}`
-    });
-    return this.toFilterPreset(next);
+    return this.requirePublicFilterPresets().setDefaultFilterPreset(id, operator);
   }
 
   async deleteFilterPreset(
     id: string,
-    operator = "营运端",
-    tenantId = requireRequestTenantId()
+    operator?: string,
+    _tenantId?: string
   ) {
-    const row = await this.prisma.filterPreset.findFirst({ where: { id, tenantId } });
-    if (!row) {
-      throw new NotFoundException("筛选预设不存在");
-    }
-    await this.prisma.filterPreset.delete({ where: { id } });
-    await this.recordAuditLog({
-      tenantId: row.tenantId,
-      action: "filter-preset.delete",
-      operator,
-      targetType: "filter-preset",
-      targetId: row.id,
-      detail: `删除筛选预设：${row.name}`
-    });
-    return { id, deleted: true };
+    return this.requirePublicFilterPresets().deleteFilterPreset(id, operator);
   }
 
   async bootstrapTenant(
@@ -827,36 +747,6 @@ export class PlatformRepository extends PlatformIdentityRepository {
     onBeforeCommit?: (tx: Prisma.TransactionClient, tenantId: string) => Promise<void | { categoryName: string }>
   ): Promise<TenantBootstrapResult> {
     return this.getWorkspaceManagementRepository().bootstrapTenant(input, preview, seed, onBeforeCommit);
-  }
-
-  private toFilterPreset(row: {
-    id: string;
-    tenantId: string;
-    scopeKey: string;
-    name: string;
-    description: string | null;
-    filters: Prisma.JsonValue;
-    isDefault: boolean;
-    isSystem: boolean;
-    operator: string | null;
-    updatedAt: Date;
-  }): PlatformFilterPreset {
-    const filters =
-      row.filters && typeof row.filters === "object" && !Array.isArray(row.filters)
-        ? (row.filters as Record<string, unknown>)
-        : {};
-    return {
-      id: row.id,
-      tenantId: row.tenantId,
-      scopeKey: row.scopeKey as PlatformFilterPreset["scopeKey"],
-      name: row.name,
-      description: row.description ?? undefined,
-      filters,
-      isDefault: row.isDefault,
-      isSystem: row.isSystem,
-      updatedAt: row.updatedAt.toISOString(),
-      updatedBy: row.operator || "营运端"
-    };
   }
 
   private toAuditLogRow(row: {

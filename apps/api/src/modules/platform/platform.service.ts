@@ -767,14 +767,14 @@ export class PlatformService {
     query: PlatformFilterPresetQuery = {},
     user?: SystemUserRow
   ) {
+    if (this.useMysqlDataSource()) {
+      return this.platformRepository.listFilterPresets(query);
+    }
+
     const tenantId = this.resolvePlatformTenantId(query.tenantId, user);
     const scopeKey = query.scopeKey
       ? this.normalizeFilterPresetScope(query.scopeKey)
       : undefined;
-
-    if (this.useMysqlDataSource()) {
-      return this.platformRepository.listFilterPresets({ tenantId, scopeKey });
-    }
 
     return this.clone(
       this.filterPresets
@@ -793,11 +793,11 @@ export class PlatformService {
     input: SavePlatformFilterPresetRequest,
     user?: SystemUserRow
   ) {
-    const preset = this.normalizeFilterPresetInput(input, user);
-
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.saveFilterPreset(preset);
+      return this.platformRepository.saveFilterPreset(input);
     }
+
+    const preset = this.normalizeFilterPresetInput(input, user);
 
     if (preset.isDefault) {
       this.filterPresets = this.filterPresets.map((item) =>
@@ -851,15 +851,11 @@ export class PlatformService {
     operator?: string,
     user?: SystemUserRow
   ) {
-    const tenantId = this.resolvePlatformTenantId(undefined, user);
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.setDefaultFilterPreset(
-        id,
-        operator || user?.displayName || "营运端",
-        tenantId
-      );
+      return this.platformRepository.setDefaultFilterPreset(id, operator);
     }
 
+    const tenantId = this.resolvePlatformTenantId(undefined, user);
     const preset = this.filterPresets.find((item) => item.id === id);
     if (!preset || preset.tenantId !== tenantId) {
       throw new NotFoundException("筛选预设不存在");
@@ -897,15 +893,11 @@ export class PlatformService {
     operator?: string,
     user?: SystemUserRow
   ) {
-    const tenantId = this.resolvePlatformTenantId(undefined, user);
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.deleteFilterPreset(
-        id,
-        operator || user?.displayName || "营运端",
-        tenantId
-      );
+      return this.platformRepository.deleteFilterPreset(id, operator);
     }
 
+    const tenantId = this.resolvePlatformTenantId(undefined, user);
     const index = this.filterPresets.findIndex((item) => item.id === id);
     if (index < 0 || this.filterPresets[index].tenantId !== tenantId) {
       throw new NotFoundException("筛选预设不存在");
