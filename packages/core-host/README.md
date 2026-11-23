@@ -20,6 +20,8 @@
 
 Core有HTTP入口时，组合向 `createCoreDeployedCatalogue`额外传 `http: [coreHttpContribution]`。贡献必须属于当前已登记的Core/版本并通过[公共HTTP政策检查](../core-contracts/README.md#登记core的http政策)，失败不能创建可用目录。目录的 `http.resolve`只返回当前受控政策，输出元数据为隔离副本；目录/可用性/政策方法在组合后固定，后续升级重新建立组合。Core可无HTTP贡献，但未登记路径不能据此开放。Controller实际装配、原Guard和业务提交复验仍由宿主完成。
 
+同一业务事务需要多次核验部署时，用 `createCoreTransactionCatalogues(transaction => createCoreDeployedCatalogue(...))` 复用该事务的固定目录。传入同一个实际事务对象，SQL适配也应保持读取器身份；新事务取得独立目录。该工厂只减少清单和HTTP政策的重复解析，每次可用性核验仍读取真实迁移账与物理状态，原身份、权限、锁序和提交复验保持。根数据库读取继续使用普通目录。[Rental实际组合](../../apps/rental-api/src/assembly.ts) · [工单实际组合](../../apps/example-tickets-api/src/assembly.ts)
+
 ## 读取原迁移账与实际结构
 
 从 `@rental-os/core-host/mysql-deployment`导入 `createMysqlCoreDeploymentObservation({ database, platform, cores, dataCapabilities })`，将返回值直接作为部署目录的 `observations`。每个模块提供自己的正式 `data`合同、与迁移ID逐项对应的原Prisma `migrationNames`，以及读取实际表/列/约束的 `readPhysical`。平台与Core均由原数据所有者提供真实检查；不能用清单版本、文件存在或刚执行过迁移代替检查结果。没有选装平台数据能力时省略 `dataCapabilities`，保持原组合。[只读适配](src/mysql-deployment.ts)

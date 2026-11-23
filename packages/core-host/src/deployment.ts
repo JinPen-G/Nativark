@@ -22,6 +22,23 @@ export interface CoreDeployedCatalogue {
   requireDataCapabilityAvailable(capabilityId: string): Promise<void>;
 }
 
+/** 同一事务复用已核定的固定目录，避免每个业务作用点重新解析整组清单和 HTTP 政策。
+ * 只复用组合对象；每次 requireAvailable 仍读取当前事务的真实迁移账与物理状态。
+ * 工厂由宿主按实际事务对象调用，根读取继续使用普通部署目录。 */
+export function createCoreTransactionCatalogues<Transaction extends object>(
+  create: (transaction: Transaction) => CoreDeployedCatalogue
+): (transaction: Transaction) => CoreDeployedCatalogue {
+  const catalogues = new WeakMap<Transaction, CoreDeployedCatalogue>();
+  return transaction => {
+    let catalogue = catalogues.get(transaction);
+    if (!catalogue) {
+      catalogue = create(transaction);
+      catalogues.set(transaction, catalogue);
+    }
+    return catalogue;
+  };
+}
+
 /** 保存受控组合的方法引用；绑定原服务实例，保留其仓储及运行状态。 */
 function fixedRegistration(registration: CoreServerRegistration): CoreServerRegistration {
   const { server } = registration;

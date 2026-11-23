@@ -6,7 +6,7 @@ import type { ConfigService } from "@nestjs/config";
 import { isDeepStrictEqual } from "node:util";
 import * as shared from "@rental-os/shared";
 import { CoreDeploymentLockSchema, type CoreDeploymentLock, type CorePlatformDataCapabilityRelease, type CoreRemovalAssessment } from "@rental-os/core-contracts";
-import { createCoreDeployedCatalogue, type CoreDeployedCatalogue } from "@rental-os/core-host";
+import { createCoreDeployedCatalogue, createCoreTransactionCatalogues, type CoreDeployedCatalogue } from "@rental-os/core-host";
 import type { CoreHostSqlTransaction } from "@rental-os/core-host/mysql";
 import { createMysqlCoreDeploymentObservation, type CoreMysqlDataPlan } from "@rental-os/core-host/mysql-deployment";
 import { createMysqlCoreDeploymentAdmission } from "@rental-os/core-host/mysql-deployment-admission";
@@ -110,10 +110,10 @@ export function composeRentalApplication<Binding = never, Additional = unknown>(
   });
   let catalogue: CoreDeployedCatalogue;
   // 所有回调只在同步组合完成后才会消费；缺观察时原 catalogue 明确拒绝，不提供准备态放行。
-  const catalogueForTransaction = (transaction: Pick<CoreHostSqlTransaction, "$queryRaw">) => createCoreDeployedCatalogue({
+  const catalogueForTransaction = createCoreTransactionCatalogues((transaction: Pick<CoreHostSqlTransaction, "$queryRaw">) => createCoreDeployedCatalogue({
     lock, registrations: [...catalogue.registrations.values()], http: additional.map(item => item.http),
     observations: observation(transaction)
-  });
+  }));
   const deploymentForTransaction = (transaction: Pick<CoreHostSqlTransaction, "$queryRaw">) => catalogueForTransaction(transaction).availability;
   const admissionForTransaction = createMysqlCoreDeploymentAdmission;
   const rental = createRentalApplication({ database, configuration, aiMode: input.aiMode,

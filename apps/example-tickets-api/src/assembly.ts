@@ -1,6 +1,6 @@
 /** 示例宿主只选择工单Core，公共实现通过正式出口复用；实际版本/来源由显式部署锁提供。 */
 import { CoreDeploymentLockSchema, type CoreDeploymentLock } from "@rental-os/core-contracts";
-import { createCoreDeployedCatalogue, type CoreDeploymentAvailability } from "@rental-os/core-host";
+import { createCoreDeployedCatalogue, createCoreTransactionCatalogues, type CoreDeploymentAvailability } from "@rental-os/core-host";
 import { createMysqlCoreDeploymentObservation } from "@rental-os/core-host/mysql-deployment";
 import {
   composePlatformCoreApplication, composePlatformCorePackageAssembly, createPlatformCorePackageAudit
@@ -37,9 +37,11 @@ export function composeTicketsApplication(database: PlatformDatabaseClient, inpu
       cores: [{ coreId: manifest.id, data: manifest.data,
         migrationNames: manifest.data.migrations.map(migration => corePrismaMigrationName(manifest.id, migration.id)),
         readPhysical: readTicketsPhysicalData }] });
-  const deploymentForTransaction = (transaction: PublicDatabaseTransaction): CoreDeploymentAvailability =>
+  const catalogueForTransaction = createCoreTransactionCatalogues((transaction: PublicDatabaseTransaction) =>
     createCoreDeployedCatalogue({ lock, registrations: [...catalogue.registrations.values()],
-      http: [http], observations: observation(transaction) }).availability;
+      http: [http], observations: observation(transaction) }));
+  const deploymentForTransaction = (transaction: PublicDatabaseTransaction): CoreDeploymentAvailability =>
+    catalogueForTransaction(transaction).availability;
   const tickets = composeTicketsPlatformHost<PublicDatabaseTransaction>({ ...dependencies, deploymentForTransaction, deployment: {
     requireRegistered: coreId => catalogue.availability.requireRegistered(coreId),
     requireAvailable: (coreId, tenantId) => catalogue.availability.requireAvailable(coreId, tenantId)

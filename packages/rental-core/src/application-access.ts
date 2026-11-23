@@ -265,6 +265,17 @@ export function createRentalApplicationAccess(input: RentalApplicationAccessDepe
   const deploymentContinuation = input.deploymentContinuation;
   const requests = new AsyncLocalStorage<ApplicationRequestScope>();
   const policy = input.authorization;
+  const transactionReaders = new WeakMap<RentalBusinessTenantTransaction, Pick<CoreHostSqlTransaction, "$queryRaw">>();
+  const readerForTransaction = (transaction: RentalBusinessTenantTransaction) => {
+    let reader = transactionReaders.get(transaction);
+    if (!reader) {
+      reader = { async $queryRaw<T>(query: TemplateStringsArray | Sql, ...values: unknown[]): Promise<T> {
+        return transaction.$queryRaw<T>("raw" in query ? sql(query, ...values) : query);
+      } };
+      transactionReaders.set(transaction, reader);
+    }
+    return reader;
+  };
 
   const capture = (request: RentalApplicationAccessRequest): RequestEvidence => {
     const identity = getRequestIdentity();
@@ -392,11 +403,8 @@ export function createRentalApplicationAccess(input: RentalApplicationAccessDepe
         throw new CoreAccessError("denied", "Rental 当前 SaaS 管理身份或原动作权限已变化");
       }
     }
-    const reader: Pick<CoreHostSqlTransaction, "$queryRaw"> = {
-      async $queryRaw<T>(query: TemplateStringsArray | Sql, ...values: unknown[]): Promise<T> {
-        return transaction.$queryRaw<T>("raw" in query ? sql(query, ...values) : query);
-      }
-    };
+    // 相同事务保持同一读取器身份，让宿主复用固定目录；权限和数据查询仍实时复验。
+    const reader = readerForTransaction(transaction);
     const deployment = input.deploymentForTransaction(reader);
     if (typeof deployment?.requireAvailable !== "function") throw new CoreAccessError("core_unavailable", "Rental 缺少实际部署观察器");
     if (evidence.management === "catalog") {
