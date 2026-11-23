@@ -2,7 +2,7 @@
  * 开发索引的只读源码读取器。TypeScript 只解析本仓文件和符号，常量解析只接受静态值。
  * 无编译输出、模块执行、环境加载或外部包解析；动态表达式由调用方登记待核对。
  * const 对象和重叠成员的后置写入只定位并失效，其他成员的确定值保留。
- * 可解释的组合仍由 OpenAPI 读取器处理。
+ * Controller 继承与遮蔽供路由和字段索引共用，有限组合由 OpenAPI 读取器处理。
  */
 import { lstatSync, readFileSync, readdirSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
@@ -299,7 +299,8 @@ export class RepositorySource {
             if (uses) for (const use of uses) add(node, argument, use.referenceOnly, use.members);
             else add(node, argument, true);
           }
-          if (ts.isPropertyAccessExpression(node.expression) || ts.isElementAccessExpression(node.expression)) add(node, node.expression.expression, true);
+          if ((ts.isPropertyAccessExpression(node.expression) || ts.isElementAccessExpression(node.expression))
+            && !(ts.isCallExpression(node) && this.arrayCallPreservesReceiver(node))) add(node, node.expression.expression, true);
         } else if (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
           && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) add(node, node.left);
         else if (ts.isDeleteExpression(node) || (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node))
@@ -336,6 +337,28 @@ export class RepositorySource {
     return ts.isPropertyAccessExpression(node.expression) && ts.isIdentifier(node.expression.expression)
       && node.expression.expression.text === "Object" && node.expression.name.text === method
       && !this.checker.getSymbolAtLocation(node.expression.expression)?.declarations?.length;
+  }
+
+  /** 标量数组的只读调用保留接收对象，回调获得原数组时保持引用风险。 */
+  arrayCallPreservesReceiver(node: ts.CallExpression): boolean {
+    if (!ts.isPropertyAccessExpression(node.expression) || !["map", "flatMap", "includes"].includes(node.expression.name.text)
+      || node.arguments.some(ts.isSpreadElement)) return false;
+    const method = node.expression.name.text;
+    if (method === "includes" ? node.arguments.length > 1 : node.arguments.length !== 1) return false;
+    const receiver = this.value(node.expression.expression);
+    if (!Array.isArray(receiver) || !receiver.every(value => value === null || typeof value !== "object")) return false;
+    if (method === "includes") return true;
+    const callback = unwrapExpression(node.arguments[0]);
+    if (!(ts.isArrowFunction(callback) || ts.isFunctionExpression(callback)) || callback.parameters.length > 2
+      || callback.parameters.some(parameter => parameter.dotDotDotToken || parameter.initializer)) return false;
+    let unsafe = false;
+    const visit = (part: ts.Node) => {
+      if (part.kind === ts.SyntaxKind.ThisKeyword || part.kind === ts.SyntaxKind.SuperKeyword
+        || ts.isIdentifier(part) && ["arguments", "eval", "Function"].includes(part.text)) unsafe = true;
+      ts.forEachChild(part, visit);
+    };
+    visit(callback);
+    return !unsafe;
   }
 
   /** 与原读取器相同的单返回纯声明边界；这里只证明没有写入，不求函数返回值。 */
@@ -506,6 +529,42 @@ export class RepositorySource {
       return this.value(expression) === UNRESOLVED || this.unresolvedProperties(expression, [], chain).length ? [name] : [];
     });
   }
+}
+
+/** 从实际父类源码取得实例方法，子类覆盖按同名成员遮蔽，动态父类保留来源缺口。 */
+export function controllerMembers(source: RepositorySource, controller: ts.ClassDeclaration): {
+  members: ts.MethodDeclaration[]; unresolved: ts.Expression[];
+} {
+  const members: ts.MethodDeclaration[] = [];
+  const names = new Set<string>();
+  const visited = new Set<ts.ClassLikeDeclaration>();
+  let current: ts.ClassLikeDeclaration | undefined = controller;
+  while (current && !visited.has(current)) {
+    visited.add(current);
+    for (const member of current.members) {
+      if (ts.getCombinedModifierFlags(member) & ts.ModifierFlags.Static || !member.name
+        || ts.isMethodDeclaration(member) && !member.body) continue;
+      const name = ts.isComputedPropertyName(member.name) ? source.value(member.name.expression)
+        : ts.isStringLiteralLike(member.name) || ts.isNumericLiteral(member.name) ? member.name.text : member.name.getText();
+      if (typeof name !== "string" && typeof name !== "number")
+        return { members: [], unresolved: ts.isComputedPropertyName(member.name) ? [member.name.expression] : [] };
+      if (names.has(String(name))) continue;
+      names.add(String(name));
+      if (ts.isMethodDeclaration(member)) members.push(member);
+    }
+    const extension: ts.Expression | undefined = current.heritageClauses?.find(clause => clause.token === ts.SyntaxKind.ExtendsKeyword)?.types[0]?.expression;
+    if (!extension) return { members, unresolved: [] };
+    const expression = unwrapExpression(extension);
+    const symbol = source.checker.getSymbolAtLocation(expression);
+    const declaration = symbol && source.target(symbol).valueDeclaration;
+    const base = declaration && ts.isVariableDeclaration(declaration) && declaration.initializer
+      && ts.isVariableDeclarationList(declaration.parent) && declaration.parent.flags & ts.NodeFlags.Const
+      ? unwrapExpression(declaration.initializer) : declaration ?? expression;
+    if (!(base && (ts.isClassDeclaration(base) || ts.isClassExpression(base)))) return { members, unresolved: [extension] };
+    if (visited.has(base)) return { members: [], unresolved: [extension] };
+    current = base;
+  }
+  return { members, unresolved: [] };
 }
 
 export function readRepositoryJson(root: string, file: string): Record<string, unknown> {

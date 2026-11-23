@@ -109,6 +109,8 @@ npm run capabilities -- --repo ../.. --query SaveButton --json
 
 索引从查询根包与 workspace 的正式出口、TypeScript 导出与源码说明、Controller 路由、后台 `APP_ROUTES`、Core 清单与页面贡献和 UIArc 来源清单读取。查询根的 `package.json` 有 `exports`、`main` 或 `types` 时，会登记根包及当前源码，归属为 `.`，来源路径为 `package.json` 和 `src/...` 等根相对路径。独立 Core 可省略 `workspaces` 或使用空数组，显式选择根及重复 workspace 只登记一次。workspace 支持 `packages/*` 等一层通配目录，以及底座源码发行中的 `packages/core-contracts` 等显式目录。正式出口按实际条件和构建目录映射到源码，`rootDir` / `outDir` 使用原 TypeScript 配置及其本仓继承配置；配置不可读取时保留未解析出口，不用历史生成物补成源码。兼容转接参与符号解析，直接导入统计读取已发现根包和 workspace 的 `src`。局部别名沿导入文件所属的原 TypeScript 配置解析。Controller 与旧后台路由只从本次所选 workspace 取得，零 Core 底座和所选 Core 的来源分别保留。源码新增或迁移后再次查询即可反映变化。新增 Core 使用自己的正式包出口、清单、页面和 API 贡献登记能力，宿主可通过 `@rental-os/core-contracts/development` 的 `describeCoreDevelopmentCapabilities` 取得同源目录，查询合同由该出口提供。[能力目录实现](src/development.ts)
 
+显式 `source/` 子路径按包的正式出口参与查询，保留原符号、消费点和对应模块说明。`declarationStatus` 标明本仓源码、样式资产、外部依赖或未解析来源，`typeOnly` 沿原声明区分类型与运行值。模块条目的 `sourceAssets` 列出已定位的样式出口及原文件，状态为 `source-asset`，可按完整导入路径查询。通配出口需从模块条目的包声明选择确定入口。查询面向开发资料，当前业务 Agent 的工具目录和执行权限由原发布、租户 Core 授权、成员分配及 Guard 裁定。
+
 Core 条目读取正式清单声明中的静态标识、版本、范围和依赖，页面与 HTTP 条目附同一清单出处及包版本。构建时注入的来源、动态权限和未解析字段保留在 `unresolvedMetadata`。`httpContract.schemas` 定位 Controller 使用的合同，`openapiSource.schemas` 定位正式操作表的请求、参数和响应说明。公共操作表按同源 `/api` 路径及 `Platform.*` schema 名连接资料，公共与 Rental 各使用自己的正式 schema 聚合。
 
 清单的唯一直接 `assets` 属性经完整静态读取（`indexed` 且无 `issues`）和原清单资产 schema 校验后，登记在 `details.manifest.assets`，表达式与出处保留在 `details.assetsSource`。工单清单的字面量数组及字符串映射可按原声明展开；动态资产、无效路径和可能发生的未知覆盖仍保留缺口。构建时注入的 `source` 及其他动态字段分别核对，资产目录不代表实际归档、安装或运行已经验证。[资产合同](src/manifest.ts)
@@ -121,17 +123,35 @@ Core 页面聚合从正式 `/admin` 出口的唯一直接返回对象，沿实�
 
 字段读取保留原 `expression`、声明和引用。字面量、静态对象/数组、常量及本仓单一返回表达式可给出 `schema`，`fieldSources` 用 JSON Pointer 定位其中已有字段的源码行，引用条目同时提供递归 schema 和各自缺口。`unresolvedFieldSources` 保留读取器已跟踪、且该字段或其子字段仍有缺口的属性指针与源码行；它不补字段值、不改变状态，也不从未引用表项补造出处。仅确定的有限数字加减可静态展开；未知操作数、隐式转换、其他运算或非有限结果保留缺口。`Object.values` 的字段与嵌套缺口按真实属性枚举顺序转换为数组索引，外层 spread 继续按最终位置换算。原必填、可空、默认值、单位及描述随声明读取。`sourceFields` 列出原 AST 的字段表达式和出处，Zod 的 `omit`、校验或转换仍沿原表达式核对。动态调用、展开、计算键、递归表达式及原宽泛对象分别列出原因，状态为 `source-reference`。未知展开可能覆盖的早期属性从已展开结果移除。缺少本地引用时标记 `not-indexed`。`schemas.parameters.schema` 给出从正式参数声明和同源生成器规则读取的路径/查询列表。公共显式列表覆盖推导，Rental 显式路径参数保留自己的限制，生成器只补缺少的路径项。查询 schema 的原枚举、范围和默认值随资料提供；来源见 `sources`。字符串字面量数组经单参数同步箭头函数 `map` 生成的参数列表也可静态读取，并只追踪所选字段的 schema；读取器不执行表达式，其他动态映射继续保留来源缺口。未知列表、schema 或覆盖继续列入 `parameters:source-reference`。[静态字段读取](src/repository-openapi.ts)
 
+显式全局 `undefined` 的请求/响应 schema 采用原生成器的缺省分支，括号和类型断言沿同一读取。局部同名绑定和动态表达式保留源码与缺口，缺少响应字段资料时继续标为待核对。[可选字段读取](src/repository-openapi.ts)
+
 可确定的 `Object.assign`、同模块顺序明确的顶层后置组合、本地同步纯函数和成员引用按最后覆盖顺序读取，字段出处跟随最终声明。未知来源可能覆盖的旧字段会失效，后续明确字段仍可定位。循环、未知写入、访问器或无法确定的组合保留实际来源与缺口。基础常量读取不重放 const 对象的后置写入，以 `post-write:<源码路径>:<行号>` 保留实际出处，并移除不能证明为最终值的初始化结果。写入前可证明的快照保留，同语句、跨模块和延迟读写的时序保持未解析。调用传出的已确定标量保持原值，可变引用按实际成员路径定位。动态索引保留所在层级，后续确定字段用于排除不重叠写入。动态索引后的标量子值须由原常量每个可选分支的已知字段证明，未知字段与对象引用继续保留缺口。完整对象读取仍核全部潜在写入，未知动态值和对象逃逸保留缺口。页面 schema 成员选择复用同一 const 归属，受影响的子字段保留准确缺口与原指针，其余确定字段仍可定位。上述有限组合继续由静态字段读取器解释。它按同一时序边界处理同语句写入与延迟读写，保留实际写入出处，不把初始化值标为完整字段结果。扫描不会执行这些调用。
+
+schema 引用支持由局部 `const` 和单一返回表达式组成的同步纯声明工厂。`Object.fromEntries(Object.entries(table).map(([name, schema]) => [键表达式, schema]))` 按原对象键的枚举顺序和最后覆盖定位所选 schema，保留命名空间实参、原 schema 与字段出处。纯度核对包含全部实参和局部初始值。动态键、未知展开、访问器、工厂内写入、异步、控制流和有副作用的声明在结果中给出具体缺口。[schema 聚合读取](src/repository-openapi.ts)
+
+循环写入和转换的所选原输入通过引用条目的 `inputSchemas` 提供，包含原字段、赋值和转换声明的出处。最终引用与转换结果沿原解析状态表示，原 JSON-Schema 的 `const`、可空和数值界限随输入资料保留。聚合定位和原字段展开使用有限遍历预算，超限时保留源码和具体缺口。[原输入资料定位](src/repository-openapi.ts)
+
+正式操作表的同步表达式箭头函数 `map` / `flatMap` 沿原数组成员展开，支持标量、简单元组解构及确定数据对象的 `Object.entries` / `Object.values`。嵌套映射和 `flatMap` 的一层数组展开保留原元素顺序，生成参数绑定原 AST。元组绑定与数组展开按原位置读取，空位导致位置未解析时保留来源状态。外层 `map` 按原语义跳过接收数组的空位。原静态资料优先登记，绑定结果只补缺少的接口资料，并连接当前 Controller 入口。所选合同成员、条件选择和已确定左值的 `??` 沿原字段读取，已知 `null`、显式全局 `undefined` 及经成员归属核实缺少的字段采用原后备表达式。未知成员、动态列表、对象表访问器或覆盖、接收数组后置写入、异步、回调副作用及未支持的绑定继续保留来源缺口。操作名可定位时，schema 聚合与字段完整性仍分别标出实际状态。[操作表字段定位](src/repository-openapi.ts)
+
+静态标量数组的 `map` / `flatMap` 保留原接收对象的路径。回调取得原数组、对象元素、动态回调和实际成员写入仍保留来源缺口。Controller 的实例方法沿实际父类源码读取，同名覆盖、getter 和属性遮蔽按子类声明处理，动态父类保留准确缺口。继承接口同时给出原方法和子 Controller 的出处。同一 HTTP 入口的多份声明合并来源，共用字段缺口登记一次。[路由与继承读取](src/repository-index.ts)
 
 已解析的函数参数沿原声明定位实际成员使用。异步客户端读取 `declaration.path` 和 `declaration.method` 时，路径与方法的静态值仍可定位，`request`、`response` 子对象的解析调用保留各自字段的来源缺口。直接改写字段、传出对象、动态成员写入或访问器仍按原引用风险处理。[参数成员定位](src/repository-source.ts)
 
-`openapiSource.controllerParameters` 将列表连接到实际 Controller 参数。类型、可选标记、`defaultExpression` 和静态 `declaredDefault` 沿原声明提供，`defaultStatus` 及 `defaultIssues` 说明动态默认值。无参 `@Query()` 引用本仓可静态枚举的平面DTO时，字段名逐一对应已有正式参数，保留原类型、可选标记、校验/转换表达式与源码行号；该对应不从DTO另生成schema。继承、泛型、构造/方法、计算或静态字段、动态Query名、默认与pipe继续标明来源缺口。品类候选 `operation` 的可选string、upgrade/restore及默认upgrade沿正式HTTP声明读取。生成器字段与Controller声明可分别核对，实际输入转换及业务限制继续由原入口执行。[公共订阅参数消费](../platform-server/src/modules/subscription/subscription-platform.controller.ts) · [Rental参数生成规则](../rental-core/src/http-openapi-contract.ts)
+`openapiSource.controllerParameters` 将列表连接到实际 Controller 参数。类型、可选标记、`defaultExpression` 和静态 `declaredDefault` 沿原声明提供，`defaultStatus` 及 `defaultIssues` 说明动态默认值。无参 `@Query()` 引用本仓可静态枚举的平面DTO时，字段名逐一对应已有正式参数，保留原类型、可选标记、校验/转换表达式与源码行号；该对应不从DTO另生成schema。DTO 的继承、泛型、构造/方法、计算或静态字段、动态Query名、默认与pipe继续标明来源缺口。品类候选 `operation` 的可选string、upgrade/restore及默认upgrade沿正式HTTP声明读取。生成器字段与Controller声明可分别核对，实际输入转换及业务限制继续由原入口执行。[公共订阅参数消费](../platform-server/src/modules/subscription/subscription-platform.controller.ts) · [Rental参数生成规则](../rental-core/src/http-openapi-contract.ts)
+
+Controller 参数与请求体沿路由索引的同一父类遍历连接原方法。参数条目和请求体条目的 `controller` 指向使用该方法的子 Controller，原参数的类型、默认值和装饰器保留各自出处。尚无 OpenAPI 字段声明时，参数出处保存在 `controllerSource.controllerParameters`，请求体沿 `controllerRequestBodies` 保存，`apiFieldsStatus` 为 `source-reference`，缺少响应资料的原因位于 `controllerSource.issues`。[继承方法来源](src/repository-source.ts) · [字段连接](src/repository-openapi.ts)
 
 `controllerRequestBodies` 定位原 `@Body()` 参数及其 DTO 属性、类型、默认表达式和装饰器，`fieldNamesStatus` 只说明字段名称是否能静态定位。DTO 资料保持 `source-reference`，JSON Schema 的完整性沿 `schemas` 中的 `status` / `issues` 判断。正则字面量的 `.source` 和所选静态约束读取原声明；动态构造、继承、泛型及运行转换保留缺口。未索引引用的 `mapSources` 指向实际 schema 聚合入口，`schema-map:source-reference` 表示聚合尚未展开，`schema-reference:not-indexed` 表示静态集合缺少所选引用。请求体字段资料与返回体、校验和业务运行分别核对。[请求体与引用读取](src/repository-openapi.ts)
 
+`openapiSource.errorResponses` 提供原操作表显式错误响应的状态码、说明、schema 和字段出处。字符串 schema 按状态码连接到 `schemas` 中的原定义与递归引用，内联 schema 沿原表的字段及引用读取。动态错误表、成员覆盖和缺失引用在该资料的 `status` / `issues` 中保留，请求、成功响应和生成器默认分支按各自来源核验。[原错误响应生成](../rental-core/src/http-openapi-contract.ts)
+
+`openapiSource.requestOptions` 从原操作的外层展开读取正文必填、媒体类型和 multipart 编码，保留原值、字段及覆盖来源。字符串按原值读取，动态写入和无法核定所属接口的覆盖保留 `source-reference`。`requestRenderer` 定位公共和 Rental 原生成器的正文条件、缺省必填及媒体类型，最终正文沿对应生成器核对。[公共正文生成](../platform-server/src/platform-openapi.ts) · [Rental 正文生成](../rental-core/src/http-openapi-contract.ts)
+
+`openapiSource.responseOptions` 提供成功码、原始响应媒体类型、响应头、302 跳转、限流和不可用原因的原值、表达式、字段及默认出处。媒体类型和说明字符串按原值读取，嵌套 schema 引用继续沿原定义定位。省略的客户端限流选项使用原 `clientOperation` 的默认表达式，显式 false、未知覆盖和成员写入分别保留准确结果。`responseRenderer` 定位所属平台或 Rental 原渲染函数、默认表达式和按源码顺序排列的响应声明。其 `source-reference` 状态保留原响应组合与宿主转换的核对入口，独立贡献的可用性转换沿同源函数读取。[公共响应生成](../platform-server/src/platform-openapi.ts) · [Rental 独立贡献](../rental-core/src/http-openapi.ts)
+
 `apiFieldsStatus=indexed` 表示已登记字段资料可静态读取。正式接口贡献的 `details.openapi` 保留请求体、参数、响应、递归引用和 JSON Pointer，原 `x-schemaStatus`、`x-schemaGaps` 继续表达字段完整性。Controller/DTO 对照、动态资料与实际运行按各自入口核验。CLI 显示来源、状态和缺口，`--json` 保留完整资料。
 
-CSS 转导出在本仓资产存在时登记 `declarationStatus=source-asset`，`sources` 同时保留资产和转导出位置。外部转导出沿所属包的依赖声明登记 `external-dependency`，`reexport.dependency` 给出包名、版本范围和声明出处。其实现与运行支持由原依赖提供。其余缺少本仓目标的转导出保留正式导入、原模块和本地位置，`declarationStatus=unresolved` 与对应 `issues` 同时出现。
+CSS 转导出在本仓资产存在时登记 `declarationStatus=source-asset`，`sources` 同时保留资产和转导出位置。外部转导出沿所属包的依赖声明登记 `external-dependency`，包括先通过本地命名导入再导出的类型；`reexport.dependency` 给出包名、版本范围和声明出处。其实现与运行支持由原依赖提供。其余缺少本仓目标的转导出保留正式导入、原模块和本地位置，`declarationStatus=unresolved` 与对应 `issues` 同时出现。
 
 例如，查询工单分派接口。
 

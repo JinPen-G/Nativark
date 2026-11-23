@@ -12,7 +12,7 @@ import { DevelopmentCapabilityIndexSchema, type DevelopmentCapability, type Deve
 import { CorePageDescriptorSchema, CorePageTextSchema, corePageText } from "./admin";
 import { CoreManifestSchema } from "./manifest";
 import { describeRepositorySchema, repositoryApiDocumentation } from "./repository-openapi";
-import { RepositorySource, UNRESOLVED, isRepositorySourcePath, nodeDocumentation, readRepositoryJson, readRepositoryText,
+import { RepositorySource, UNRESOLVED, controllerMembers, isRepositorySourcePath, nodeDocumentation, readRepositoryJson, readRepositoryText,
   repositoryFiles, repositoryPath, sourceReference } from "./repository-source";
 
 interface PublicEntry { owner: string; version: string; module: string; file: string; visibility: "public" | "host"; ui?: boolean }
@@ -236,6 +236,7 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
       ? manifest.optionalDependencies as Record<string, string> : {};
     const info: PackageInfo = { directory: packageDirectory, name: manifest.name, version: manifest.version, entries: [],
       dependencies: { ...peerDependencies, ...dependencyList, ...optionalDependencies } };
+    const sourceAssets: { module: string; source: DevelopmentSourceReference; declarationStatus: "source-asset" }[] = [];
     const exports = typeof manifest.exports === "string" || Array.isArray(manifest.exports) ? { ".": manifest.exports }
       : manifest.exports && typeof manifest.exports === "object"
         ? Object.keys(manifest.exports).some(key => key.startsWith(".")) ? manifest.exports as Record<string, unknown> : { ".": manifest.exports }
@@ -245,9 +246,16 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
       const module = info.name + (subpath === "." ? "" : subpath.slice(1));
       const file = targets.map(target => packageSource(root, packageDirectory, target)).find(Boolean);
       if (file) paths[module] = [file];
-      // 样式和兼容源码通配出口不作为单个 TypeScript 模块解析。
-      // 原源码转接由同一正式UI出口覆盖，不将兼容别名登记为另一项能力。
-      if (subpath.startsWith("./source/") || subpath.includes("*") || targets.length && targets.every(target => target.endsWith(".css"))) continue;
+      // 显式源码子路径仍是正式包出口，按原符号给出定位与支持状态。
+      // 样式按文件出处登记，通配出口仍需沿包声明选择确定入口。
+      if (subpath.includes("*")) continue;
+      if (targets.length && targets.every(target => target.endsWith(".css"))) {
+        const asset = targets.map(target => resolve(root, packageDirectory, target))
+          .find(path => isRepositorySourcePath(root, path) && lstatSync(path, { throwIfNoEntry: false })?.isFile());
+        if (asset) sourceAssets.push({ module, source: { path: repositoryPath(root, asset) }, declarationStatus: "source-asset" });
+        else addIssue("export_source", metadataFile, `未找到 ${subpath} 对应的样式源码`);
+        continue;
+      }
       if (!file) {
         addIssue("export_source", metadataFile, `未找到 ${subpath} 对应的当前源码入口`);
         continue;
@@ -259,9 +267,11 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
     packages.push(info);
     capabilities.push({ id: `module:${packageDirectory}`, name: info.name, kind: "module", owner: packageDirectory,
       version: info.version, description: typeof manifest.description === "string" && manifest.description ? manifest.description : undefined,
-      sources: [{ path: metadataFile }, ...info.entries.map(item => ({ path: repositoryPath(root, item.file) }))],
+      sources: [{ path: metadataFile }, ...info.entries.map(item => ({ path: repositoryPath(root, item.file) })),
+        ...sourceAssets.map(item => item.source)],
       documentation: sourceDocuments(root, packageDirectory),
-      details: { publicImports: info.entries.map(item => item.module), dependencies: dependencyList } });
+      details: { publicImports: [...info.entries.map(item => item.module), ...sourceAssets.map(item => item.module)],
+        dependencies: dependencyList, ...(sourceAssets.length ? { sourceAssets } : {}) } });
     if (packageDirectory === ".") coverage.push({ source: metadataFile, count: 1,
       state: issues.length > previousIssues ? "partial" : "indexed" });
   };
@@ -397,6 +407,7 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
   }
   const callsByDeclaration = new Map<ts.Node, ts.CallExpression[]>();
   const consumersBySymbol = importConsumers(source, paths, callsByDeclaration);
+  const sourcePackages = [...packages].sort((left, right) => right.directory.length - left.directory.length);
 
   for (const entry of entries) {
     const before = capabilities.length;
@@ -404,8 +415,12 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
       const target = source.target(symbol);
       const resolvedDeclaration = target.valueDeclaration ?? target.declarations?.[0];
       const reexport = symbol.declarations?.find(ts.isExportSpecifier);
-      const origin = reexport && ts.isExportDeclaration(reexport.parent.parent) ? reexport.parent.parent.moduleSpecifier : undefined;
-      const declaration = resolvedDeclaration ?? reexport;
+      const imported = reexport && source.checker.getExportSpecifierLocalTargetSymbol(reexport)?.declarations?.find(ts.isImportSpecifier);
+      const importStatement = imported?.parent.parent.parent;
+      // 外部类型可先导入再导出；索引记录本包声明和依赖来源，不读取第三方源码。
+      const origin = (reexport && ts.isExportDeclaration(reexport.parent.parent) ? reexport.parent.parent.moduleSpecifier : undefined)
+        ?? (importStatement && ts.isImportDeclaration(importStatement) ? importStatement.moduleSpecifier : undefined);
+      const declaration = resolvedDeclaration ?? imported ?? reexport;
       const moduleName = origin && ts.isStringLiteralLike(origin) ? origin.text : undefined;
       const candidates = moduleName?.endsWith(".css") ? moduleName.startsWith(".")
         ? [resolve(dirname(origin!.getSourceFile().fileName), moduleName)]
@@ -417,7 +432,7 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
           return targets.map(target => target.replace("*", matched));
         }) : [];
       const asset = candidates.find(file => isRepositorySourcePath(root, file) && lstatSync(file, { throwIfNoEntry: false })?.isFile());
-      const declaringPackage = declaration && packages.find(info => packageOwnsSource(root, info.directory, declaration.getSourceFile().fileName));
+      const declaringPackage = declaration && sourcePackages.find(info => packageOwnsSource(root, info.directory, declaration.getSourceFile().fileName));
       const dependencyName = moduleName?.startsWith("@") ? moduleName.split("/").slice(0, 2).join("/") : moduleName?.split("/")[0];
       const externalDependency = dependencyName && declaringPackage?.dependencies[dependencyName]
         && !packages.some(info => info.name === dependencyName) ? {
@@ -449,7 +464,8 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
         details: { directImportCount: resolvedDeclaration ? callers.length : 0, directImports: resolvedDeclaration ? callers.slice(0, 5) : [],
           directImportsStatus: resolvedDeclaration ? "resolved-source" : "not-indexed",
           declarationStatus: resolvedDeclaration ? "resolved-source" : asset ? "source-asset" : externalDependency ? "external-dependency" : "unresolved",
-          ...(moduleName ? { reexport: { module: moduleName, symbol: reexport?.propertyName?.text ?? reexport?.name.text ?? symbol.name,
+          ...(moduleName ? { reexport: { module: moduleName, symbol: imported?.propertyName?.text ?? imported?.name.text
+            ?? reexport?.propertyName?.text ?? reexport?.name.text ?? symbol.name,
             ...(externalDependency && !resolvedDeclaration ? { dependency: externalDependency } : {}) } } : {}) } });
     }
     const file = repositoryPath(root, entry.file);
@@ -581,6 +597,12 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
       const coreId = source.value(coreIdValue?.expression);
       if (pages && typeof coreId === "string") {
           const contributionVersion = source.value(objectProperty(definition, "implementationVersion"));
+          const core = corePackages.get(entry.owner);
+          // 版本属于整项页面贡献，各页保留缺口，共用诊断只登记一次。
+          if (core && (core.id !== coreId || core.version !== entry.version))
+            addIssue("core_version", repositoryPath(root, entry.file), "页面贡献与 Core 清单或包版本不一致");
+          if (contributionVersion !== entry.version)
+            addIssue("core_version", repositoryPath(root, entry.file), "页面实现版本无法解析或与包版本不一致");
           const describePages = (expression: ts.Expression, via: ts.Node[], seen = new Set<ts.Node>()) => {
             if (seen.has(expression) || seen.size > 80) { issue(expression, "Core 页面聚合存在递归引用"); return; }
             const chain = new Set(seen).add(expression), selected = locate(expression);
@@ -630,7 +652,6 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
                 continue;
               }
               if (capabilities.some(capability => capability.id === `page:${coreId}:${id}`)) { issue(page, `Core 页面 ${id} 被重复引用`); continue; }
-              const core = corePackages.get(entry.owner);
               let unresolved = traced ? [...new Set(fieldIssues.filter(message => message !== "schema-expansion:source-reference")
                 .map(message => /^\/([^/:]+)/.exec(message)?.[1] ?? message))] : source.unresolvedProperties(page, ["component"]);
               const permissionsExpression = objectProperty(page, "permissions");
@@ -649,11 +670,7 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
               const component = objectProperty(page, "component"), componentSymbol = component && source.checker.getSymbolAtLocation(unwrap(component));
               const componentDeclaration = componentSymbol && source.target(componentSymbol).valueDeclaration;
               if (traced && !unresolved.includes("component")) unresolved.push("component");
-              if (core && (core.id !== coreId || core.version !== entry.version)) addIssue("core_version", repositoryPath(root, entry.file), "页面贡献与 Core 清单或包版本不一致");
-              if (contributionVersion !== entry.version) {
-                unresolved.push("implementationVersion");
-                addIssue("core_version", repositoryPath(root, entry.file), "页面实现版本无法解析或与包版本不一致");
-              }
+              if (contributionVersion !== entry.version) unresolved.push("implementationVersion");
               const known: Record<string, NonNullable<DevelopmentCapability["details"]>[string]> = {};
               for (const name of ["parent", "menu", "purpose"] as const) {
                 if (Object.hasOwn(fields, name)) {
@@ -735,7 +752,10 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
           const prefix = controller.expression.arguments.length ? source.value(controller.expression.arguments[0]) : "";
           const prefixes = typeof prefix === "string" ? [prefix] : Array.isArray(prefix) && prefix.every(item => typeof item === "string") ? prefix as string[] : [];
           if (!prefixes.length) addIssue("controller_path", repositoryPath(root, file), `无法静态解析 ${node.name?.text ?? "Controller"} 路径`);
-          for (const member of node.members) {
+          const inherited = controllerMembers(source, node);
+          for (const expression of inherited.unresolved)
+            addIssue("controller_members", repositoryPath(root, file), `无法静态解析 ${node.name?.text ?? "Controller"} 继承成员 ${expression.getText()}`);
+          for (const member of inherited.members) {
             for (const decorator of ts.canHaveDecorators(member) ? ts.getDecorators(member) ?? [] : []) {
               if (!ts.isCallExpression(decorator.expression)) continue;
               const method = decorator.expression.expression.getText().toUpperCase();
@@ -772,11 +792,13 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
                 const declaration = { ...sourceReference(member, root), symbol: member.name?.getText() };
                 const existing = apiCapabilities.get(id);
                 const assemblyReference = registeredControllers.get(node.getSourceFile().fileName + ":" + node.getStart());
-                const references = [declaration, ...(assemblyReference ? [assemblyReference] : []), ...(api ? [api.reference] : []),
+                const references = [declaration, ...(member.parent !== node ? [sourceReference(node, root)] : []),
+                  ...(assemblyReference ? [assemblyReference] : []), ...(api ? [api.reference] : []),
                   ...(httpDefinition ? [sourceReference(httpDefinition, root)] : []), ...(core ? [core.reference] : [])];
                 if (unresolved.length) addIssue("api_metadata", repositoryPath(root, file), `接口 ${method} ${path} 尚有动态合同字段 ${unresolved.join(", ")}`);
+                // 同一接口的组合声明共用字段资料，来源在下方合并，诊断登记一次。
                 const apiIssues = api?.details.openapiSource;
-                if (apiIssues && typeof apiIssues === "object" && !Array.isArray(apiIssues) && Array.isArray(apiIssues.issues))
+                if (!existing && apiIssues && typeof apiIssues === "object" && !Array.isArray(apiIssues) && Array.isArray(apiIssues.issues))
                   for (const issue of apiIssues.issues) addIssue("api_schema", api!.reference.path, `接口 ${method} ${path} 的字段资料缺口 ${issue}`);
                 if (existing) {
                   existing.sources.push(...references);

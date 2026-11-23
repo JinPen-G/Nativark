@@ -73,7 +73,7 @@ test("独立根包与workspace去重，来源和缺失出口保持真实边界",
       exports: { ".": "../src/reference.ts" } });
     else if (resolved === sourceFile) text = "throw new Error('不能执行Core模块');\n"
       + "export const ROOT_VALUE = 7;\nexport function createRootValue() { throw new Error('不能执行Core函数'); }\n"
-      + "export { z } from 'zod';\n";
+      + "export { z } from 'zod';\nimport type { ZodTypeAny as ExternalType } from 'zod';\nexport type { ExternalType };\n";
     else if (resolved === consumerFile) text = "import { ROOT_VALUE, createRootValue } from '@fixture/root';\n"
       + "export const REFERENCE_VALUE = ROOT_VALUE;\ncreateRootValue();\n";
     else if (resolved === configFile && unavailableConfig === "unreadable") {
@@ -101,6 +101,11 @@ test("独立根包与workspace去重，来源和缺失出口保持真实边界",
       assert.ok(capability.details.directImports.some(item => item.path === "src/reference.ts"));
       const external = index.capabilities.find(item => item.id === "export:@fixture/root:z");
       assert.equal(external.details.reexport.dependency.source.path, "package.json");
+      const forwarded = index.capabilities.find(item => item.id === "export:@fixture/root:ExternalType");
+      assert.equal(forwarded.entry.typeOnly, true);
+      assert.equal(forwarded.details.declarationStatus, "external-dependency");
+      assert.equal(forwarded.details.reexport.symbol, "ZodTypeAny");
+      assert.equal(forwarded.details.reexport.dependency.source.path, "package.json");
       assert.equal(index.capabilities.filter(item => item.id === "module:test").length, workspaces?.length ? 1 : 0);
     }
     workspaces = undefined;
@@ -281,8 +286,8 @@ test("Rental页面聚合追实际订单描述，直接数组定位而控制流�
     const version = pages.find(item => item.id === "page:rental:orders").details.implementationVersionSource;
     assert.equal(version.status, "source-reference");
     const rootVersion = version.contributions.find(item => item.source.path === "packages/rental-core/admin/index.tsx");
-    assert.equal(rootVersion.source.line, 55);
-    assert.equal(rootVersion.parameter.line, 41);
+    assert.equal(rootVersion.source.line, 56);
+    assert.equal(rootVersion.parameter.line, 42);
     assert.equal(rootVersion.expression, "implementationVersion");
     for (const [id, group, index, line] of [
       ["work-orders", "work-orders", 0, 16], ["work-order-detail", "work-orders", 1, 26],
