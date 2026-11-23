@@ -10,19 +10,21 @@ import { safeObjectPrefix } from "../integrations/object-storage.provider.servic
 import type { StoredFileAsset, StoredFileUploadSession } from "./file-storage.store";
 
 type AssetFilter = {
-  id?: string;
+  id?: string | { gt: string };
   tenantId?: string;
   status?: string | { in: string[] };
   uploadScene?: string | { not: string };
-  updatedAt?: Date;
+  updatedAt?: Date | { gt: Date };
   storageKey?: string;
   storageProvider?: string;
+  AND?: AssetFilter[];
+  OR?: AssetFilter[];
 };
 type SessionFilter = {
-  id?: string;
+  id?: string | { gt: string };
   tenantId?: string;
   status?: string;
-  expiresAt?: Date | { lte: Date };
+  expiresAt?: Date | { lte: Date } | { gt: Date };
   completedAt?: Date | null;
   updatedAt?: Date;
   storageKey?: string;
@@ -35,6 +37,7 @@ type SessionFilter = {
   createdAt?: Date;
   lastCleanupAt?: Date | null | { lte: Date };
   fileAsset?: { is: { uploadScene?: { not: string } } };
+  AND?: SessionFilter[];
   OR?: SessionFilter[];
 };
 type SessionWrite = {
@@ -49,7 +52,8 @@ type SessionWrite = {
 export interface FileCleanupTransaction {
   fileAsset: {
     findFirst(query: { where: { id: string; tenantId: string } }): PromiseLike<StoredFileAsset | null>;
-    findMany(query: { where: AssetFilter & { tenantId: string }; orderBy: { updatedAt: "asc" }; take: number }): PromiseLike<StoredFileAsset[]>;
+    findMany(query: { where: AssetFilter & { tenantId: string };
+      orderBy: { updatedAt: "asc" } | Array<{ updatedAt?: "asc"; id?: "asc" }>; take: number }): PromiseLike<StoredFileAsset[]>;
     updateMany(query: { where: AssetFilter & { tenantId: string }; data: { status: string; updatedAt?: Date } }): PromiseLike<{ count: number }>;
   };
   fileUploadSession: {
@@ -62,6 +66,9 @@ export interface FileCleanupTransaction {
 
 export interface FileCleanupParticipants<Transaction extends FileCleanupTransaction> {
   store: FileCleanupTransaction;
+  /** Stable host-owned lifetime when store wrappers are recreated. This scopes
+   * candidate positions only; every object still needs its original authority. */
+  schedulingScope?: object;
   /** The original algorithm supplies the exact persisted target. Hosts can fence
    * new cleanup work without re-admitting a result already sent to storage. */
   transaction<T>(work: (transaction: Transaction) => Promise<T>, boundary: FileCleanupBoundary): Promise<T>;
@@ -98,6 +105,9 @@ export const COMPLETED_STAGING_PENDING = "completed_staging_pending";
 export const COMPLETED_STAGING_UNKNOWN = "completed_staging_unknown";
 type JsonRecord = Record<string, unknown>;
 type ExpiredUpload = { asset: StoredFileAsset; session: StoredFileUploadSession };
+type CleanupPosition = { at: Date; id: string };
+type CleanupSchedule = { after?: CleanupPosition };
+const cleanupPositions = new WeakMap<object, Map<string, CleanupSchedule>>();
 const expiredUnknown = "expired_upload_unknown:1:";
 const changedUpload = () => new ConflictException("原过期上传清理依据已变化，只能核对原会话");
 const uploadConfigHash = (config: TenantIntegrationRuntimeConfig) => requestFingerprint({
@@ -117,6 +127,31 @@ const nextVersion = (version: Date, at: Date) => new Date(Math.max(version.getTi
 
 export class FileStorageCleanup<Transaction extends FileCleanupTransaction> {
   constructor(private readonly participants: FileCleanupParticipants<Transaction>) {}
+
+  private async cleanupBatch<Row extends { id: string }>(tenantId: string, operation: FileCleanupTarget["operation"],
+    limit: number, read: (after?: CleanupPosition) => PromiseLike<Row[]>, position: (row: Row) => Date): Promise<Row[]> {
+    const scope = this.participants.schedulingScope ?? this.participants.store;
+    let positions = cleanupPositions.get(scope);
+    if (!positions) {
+      positions = new Map();
+      cleanupPositions.set(scope, positions);
+    }
+    const key = JSON.stringify([tenantId, operation, this.participants.excludedUploadScene ?? null]);
+    const previous = positions.get(key);
+    const after = previous?.after;
+    let rows = structuredClone(await read(after));
+    // A removed tail or an exhausted queue wraps on this call, still selecting
+    // at most the original batch. Read failures leave the prior position intact.
+    if (!rows.length && after) rows = structuredClone(await read());
+    // A concurrent older selection must not overwrite another batch's progress.
+    if (positions.get(key) === previous) {
+      if (rows.length === limit) {
+        const last = rows[rows.length - 1];
+        positions.set(key, { after: { at: new Date(position(last).getTime()), id: last.id } });
+      } else if (previous || rows.length) positions.set(key, {});
+    }
+    return rows;
+  }
 
   private result<T>(work: (transaction: FileCleanupTransaction) => Promise<T>, boundary: FileCleanupBoundary) {
     return this.participants.resultTransaction?.(work, boundary) ?? work(this.participants.store);
@@ -178,13 +213,21 @@ export class FileStorageCleanup<Transaction extends FileCleanupTransaction> {
   async cleanupCompletedStagingObjects(tenantId: string, limit: number): Promise<FileUploadCleanupSummary> {
     if (!tenantId) throw new ConflictException("文件清理缺少当前租户");
     const now = new Date(), staleBefore = new Date(now.getTime() - 10 * 60 * 1000);
-    const rows = structuredClone(await this.participants.store.fileUploadSession.findMany({
-      where: { tenantId, status: "completed", expiresAt: { lte: now }, OR: [
-        { cleanupError: COMPLETED_STAGING_PENDING },
-        { cleanupError: COMPLETED_STAGING_UNKNOWN, lastCleanupAt: { lte: staleBefore } }
-      ] },
-      orderBy: [{ expiresAt: "asc" }, { id: "asc" }], take: Math.max(1, Math.min(limit, 100))
-    }));
+    const batchSize = Math.max(1, Math.min(limit, 100));
+    const rows = await this.cleanupBatch(tenantId, "completed_staging", batchSize,
+      after => this.participants.store.fileUploadSession.findMany({
+        where: {
+          tenantId, status: "completed", expiresAt: { lte: now },
+          OR: [
+            { cleanupError: COMPLETED_STAGING_PENDING },
+            { cleanupError: COMPLETED_STAGING_UNKNOWN, lastCleanupAt: { lte: staleBefore } }
+          ],
+          AND: after ? [{ OR: [
+            { expiresAt: { gt: after.at } }, { expiresAt: after.at, id: { gt: after.id } }
+          ] }] : undefined
+        },
+        orderBy: [{ expiresAt: "asc" }, { id: "asc" }], take: batchSize
+      }), row => row.expiresAt);
     const summary: FileUploadCleanupSummary = { scanned: rows.length, invalidated: 0, deletedObjects: 0, cleanupPending: 0, sessionIds: [] };
     for (const row of rows) {
       try {
@@ -241,20 +284,25 @@ export class FileStorageCleanup<Transaction extends FileCleanupTransaction> {
     if (!tenantId) throw new ConflictException("文件清理缺少当前租户");
     const now = new Date();
     const staleCleanupBefore = new Date(now.getTime() - 10 * 60 * 1000);
-    const rows = structuredClone(await this.participants.store.fileUploadSession.findMany({
-      where: {
-        tenantId,
-        expiresAt: { lte: now },
-        fileAsset: { is: { ...this.reservedSceneFilter() } },
-        OR: [
-          { status: "pending_upload" },
-          { status: "failed", cleanupError: { not: null } },
-          { status: "cleanup_in_progress", lastCleanupAt: { lte: staleCleanupBefore } }
-        ]
-      },
-      orderBy: { expiresAt: "asc" },
-      take: Math.max(1, Math.min(limit, 100))
-    }));
+    const batchSize = Math.max(1, Math.min(limit, 100));
+    const rows = await this.cleanupBatch(tenantId, "expired_upload", batchSize,
+      after => this.participants.store.fileUploadSession.findMany({
+        where: {
+          tenantId,
+          expiresAt: { lte: now },
+          fileAsset: { is: { ...this.reservedSceneFilter() } },
+          OR: [
+            { status: "pending_upload" },
+            { status: "failed", cleanupError: { not: null } },
+            { status: "cleanup_in_progress", lastCleanupAt: { lte: staleCleanupBefore } }
+          ],
+          AND: after ? [{ OR: [
+            { expiresAt: { gt: after.at } }, { expiresAt: after.at, id: { gt: after.id } }
+          ] }] : undefined
+        },
+        orderBy: [{ expiresAt: "asc" }, { id: "asc" }],
+        take: batchSize
+      }), row => row.expiresAt);
     let invalidated = 0;
     let deletedObjects = 0;
     let cleanupPending = 0;
@@ -368,11 +416,18 @@ export class FileStorageCleanup<Transaction extends FileCleanupTransaction> {
 
   async cleanupPendingFileAssetDeletes(tenantId: string, limit = 50) {
     if (!tenantId) throw new ConflictException("文件清理缺少当前租户");
-    const rows = structuredClone(await this.participants.store.fileAsset.findMany({
-      where: { tenantId, status: { in: ["delete_queued", "delete_pending", "delete_in_progress"] }, ...this.reservedSceneFilter() },
-      orderBy: { updatedAt: "asc" },
-      take: Math.max(1, Math.min(limit, 100))
-    }));
+    const batchSize = Math.max(1, Math.min(limit, 100));
+    const rows = await this.cleanupBatch(tenantId, "pending_delete", batchSize,
+      after => this.participants.store.fileAsset.findMany({
+        where: {
+          tenantId, status: { in: ["delete_queued", "delete_pending", "delete_in_progress"] }, ...this.reservedSceneFilter(),
+          AND: after ? [{ OR: [
+            { updatedAt: { gt: after.at } }, { updatedAt: after.at, id: { gt: after.id } }
+          ] }] : undefined
+        },
+        orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
+        take: batchSize
+      }), row => row.updatedAt);
     const result = await this.deleteFileAssets(tenantId, rows);
     if (result.deleted || result.pending) {
       await this.participants.recordAudit?.({ tenantId, action: "file.delete.cleanup", targetType: "file",

@@ -804,6 +804,7 @@ export class RentalFileStorageApplication<Revision extends FileKnowledgeRevision
     };
     return new FileStorageCleanup<Prisma.TransactionClient>({
       store,
+      schedulingScope: this,
       ...transactions,
       runtimeConfig: (currentTenant, provider) => this.integrations.runtimeConfig(
         "file", currentTenant, provider as never, { requireLiveTest: false }

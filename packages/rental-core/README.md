@@ -234,6 +234,8 @@ Rental HTTP从 `@rental-os/rental-core/http` 的 `RentalHttpModule` 接入，类
 
 跨租户清理按原上传会话与待删除文件在数据库分组发现租户，每页最多1000个，按最后一个租户值继续扫描。分组、排序与页上限由同一Prisma读取交数据库执行。清理移除前页记录后仍能定位下一页，每租户使用调用方原上限并汇合原清理小结。扫描期间新增到游标之前的租户留下一轮处理。每个文件的配置、业务归属、当前数据及清理占用仍由原同事务参加者核定，冻结与删除未知结果继续按原对象读取。[清理准入](src/application-file-cleanup-authority.ts) · [公共清理内核](../platform-server/src/modules/files/README.md)
 
+三个单租户队列由公共内核按原时间与对象 ID 有界续读。兼容运行时每次新建仓储包装和清理器时，供给同一个 `schedulingScope`，使后续批次能继续处理后排候选。宿主重启只重置调度位置，原文件状态、期限、冻结依据和未知收据继续保留；逐对象授权与占用仍由原参加者裁定。[实际装配](src/file-application-runtime.ts)
+
 型号图片首次解绑在原图片事务中把 active 文件排为 `delete_queued`；已有排队、未定、在途或已删事实保持原收据。唯一清理器占用后才派发删除，Core 移除观察保留未完成作业与 unknown 阻碍。[图片事务](src/mysql-core-configuration.ts) · [移除观察](../../apps/rental-api/src/core-removal-source.ts)
 
 员工原键观察的请求与回执 schema 从 `@rental-os/rental-core/staff-upload-observation` 读取，服务端从 `@rental-os/rental-core/file-application-staff-observation` 导入 `parseStaffUploadObservation`。解析复用原 Ajv 封闭校验、8KiB 描述上限及原上传键 UTF-16 长度和 trim 规则，宿主继续向同一 HTTP/文件参加者供给解析函数。[观察合同](src/staff-upload-observation.ts) · [原键解析与观察](src/file-application-staff-observation.ts)
