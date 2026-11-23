@@ -8,7 +8,7 @@ import type { RentalMembershipSession } from "./page-context";
 export const RENTAL_MEMBERSHIP_CORE_ID = "rental";
 const memberGroup = {
   default: "会员与客户",
-  translations: { "en-US": "Members & customers" },
+  translations: { "en-US": "Customers & members" },
 };
 export const RENTAL_MEMBERSHIP_PAGES = {
   qualificationTypes: {
@@ -16,7 +16,7 @@ export const RENTAL_MEMBERSHIP_PAGES = {
     path: "/qualification-types",
     title: {
       default: "空间证件类型",
-      translations: { "en-US": "Workspace qualification types" },
+      translations: { "en-US": "Document types" },
     },
     purpose: "configuration",
     permissions: rentalPagePermissions("qualification-types"),
@@ -33,7 +33,7 @@ export const RENTAL_MEMBERSHIP_PAGES = {
     path: "/membership/reviews",
     title: {
       default: "会员审核",
-      translations: { "en-US": "Membership reviews" },
+      translations: { "en-US": "Member reviews" },
     },
     permissions: rentalPagePermissions("membership-reviews"),
     menu: { group: memberGroup, order: 10 },
@@ -43,7 +43,7 @@ export const RENTAL_MEMBERSHIP_PAGES = {
     path: "/membership/personal",
     title: {
       default: "个人会员",
-      translations: { "en-US": "Personal members" },
+      translations: { "en-US": "Individual members" },
     },
     permissions: rentalPagePermissions("personal-members"),
     menu: { group: memberGroup, order: 20 },
@@ -53,7 +53,7 @@ export const RENTAL_MEMBERSHIP_PAGES = {
     path: "/membership/personal/:customerId",
     title: {
       default: "个人会员资料",
-      translations: { "en-US": "Personal member profile" },
+      translations: { "en-US": "Member profile" },
     },
     parent: "personal-members",
     permissions: rentalPagePermissions("personal-member-detail"),
@@ -63,7 +63,7 @@ export const RENTAL_MEMBERSHIP_PAGES = {
     path: "/membership/corporate",
     title: {
       default: "企业会员",
-      translations: { "en-US": "Corporate members" },
+      translations: { "en-US": "Company members" },
     },
     permissions: rentalPagePermissions("corporate-members"),
     menu: { group: memberGroup, order: 30 },
@@ -73,7 +73,7 @@ export const RENTAL_MEMBERSHIP_PAGES = {
     path: "/membership/corporate/:customerId",
     title: {
       default: "企业资料",
-      translations: { "en-US": "Corporate profile" },
+      translations: { "en-US": "Company profile" },
     },
     parent: "corporate-members",
     permissions: rentalPagePermissions("corporate-member-detail"),
@@ -93,7 +93,7 @@ export const RENTAL_MEMBERSHIP_PAGES = {
     path: "/membership/rewards",
     title: {
       default: "会员激励",
-      translations: { "en-US": "Member incentives" },
+      translations: { "en-US": "Rewards" },
     },
     permissions: rentalPagePermissions("membership-rewards"),
     menu: { group: memberGroup, order: 50 },

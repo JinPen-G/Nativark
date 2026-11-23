@@ -10,7 +10,7 @@ export const RENTAL_SETUP_PAGES = {
   tenantReadiness: {
     id: "tenant-readiness",
     path: "/readiness",
-    title: { default: "开业配置", translations: { "en-US": "Opening setup" } },
+    title: { default: "开业配置", translations: { "en-US": "Setup checklist" } },
     purpose: "configuration",
     permissions: rentalPagePermissions("tenant-readiness"),
     menu: {

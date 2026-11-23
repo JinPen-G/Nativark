@@ -15,9 +15,9 @@
 | `permissions` | 当前维护、验收、订单读取及库存恢复权限，标准宿主同时核 Core 授权、成员分配和就绪 |
 | `openOrder` | 由本宿主已登记订单页面生成的受控导航 |
 
-页面标识为 `rental:work-orders` 与 `rental:work-order-detail`。标准登记生成 `/cores/rental/work-orders` 和带 `workOrderId` 的详情路径。详情引用列表作为父级，当前受权工单的 `workNo` 提供动态标题。
+页面标识为 `rental:work-orders` 与 `rental:work-order-detail`。标准登记生成 `/cores/rental/work-orders` 和带 `workOrderId` 的详情路径。详情引用列表作为父级，当前受权工单的 `workNo` 提供动态标题。列表及详情动作使用宿主同一语言目录，切换语言时保留原按钮文案。
 
-列表“刷新”沿原 `tools` 插槽与页签同行，工单视图切换仍在该正文工具区。“新建工单”保持顶部主操作。详情“派工”和“取消工单”沿原 `tools` 插槽呈现，“开始处理”“提交验收”“验收”按原状态进入主操作区，返回列表使用正文起点的 `navigation` 插槽。
+列表页签、刷新和视图切换保留原 `viewBar` 与 `Space` 布局；刷新通过 `CorePageActions` 的正文插槽呈现，继续使用公共动作驱动。“新建工单”保持顶部主操作及原图标。详情“派工”和“取消工单”沿原 `tools` 插槽呈现，“开始处理”“提交验收”“验收”按原状态进入主操作区，返回列表使用正文起点的 `navigation` 插槽。
 
 [原营运宿主薄适配](../../../../apps/admin/src/features/rental-core/MaintenanceWorkOrdersPage.tsx)保留 `/rental/work-orders`、详情深链接和 `tab=history`。它读取原 `rental-core:maintenance:view/manage/review`、`rental-os:order:view` 与库存恢复权限，将原会话代次和路由对象交给公共页面边界。页面登记负责定位，实际使用权沿当前会话与服务端核验。
 

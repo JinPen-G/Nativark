@@ -21,7 +21,8 @@ export default defineConfig(({ mode }) => {
   const { manifest } = requireCorePackagePin(root, lock.cores[0], lock.platform.versions);
   const platform = platformAdminVite(), virtual = "\0selected-core-manifest";
   return {
-    envDir: false, envPrefix: [], define: publicEnvironmentDefinitions("admin", env),
+    envDir: false,
+    publicDir: platform.publicDir, envPrefix: [], define: publicEnvironmentDefinitions("admin", env),
     plugins: [...platform.plugins, { name: "selected-core-manifest",
       resolveId: (source: string) => source === "virtual:core-manifest" ? virtual : undefined,
       load: (id: string) => id === virtual ? `export default ${JSON.stringify(manifest)};` : undefined }, tailwindcss(), react()],

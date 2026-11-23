@@ -1,22 +1,26 @@
 /** 公共 Web 组合工厂，默认空Core。宿主注入登记页面，身份/权限来自原API。 */
-import { useEffect, useRef, useSyncExternalStore } from "react";
-import { createBrowserRouter, createRoutesFromElements, Navigate, Outlet, RouterProvider, useParams } from "react-router-dom";
-import { Blocks, Crown, Settings, UserRound } from "lucide-react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { createBrowserRouter, createRoutesFromElements, Navigate, Outlet, RouterProvider, useLocation, useNavigate, useParams } from "react-router-dom";
+import { coreNavigationEntries, corePageKey } from "@rental-os/core-contracts";
 import { AdminRuntimeProvider } from "./runtime";
+import { isTenantLoginAliasPath, resolveLoginTenantCode } from "./features/auth/login-entry";
+import { BrandIconProvider } from "./app/BrandIconProvider";
 import { AdminUiProvider } from "./AdminUiProvider";
 import { PlatformShell } from "./PlatformShell";
 import { coreNavigationMessage } from "./coreNavigationMessage";
-import { AdminLoginPage, AdminPasswordPage } from "./session-pages";
+import { AdminLoginPage, AdminPasswordPage, PasswordChangeGate } from "./session-pages";
 import { LoadingState, PageHeading, QueryState } from "./shell";
 import { Alert, Button, Result } from "./components/ui";
 import { useLocale } from "./app/locale";
 import { createCoreRouteElements, useCoreSession } from "./core";
 import { PlatformApplicationContext, usePlatformApplication, type PlatformAdminApplicationOptions } from "./application-context";
+import { publicAdminNavigation } from "./application-navigation";
 import { AccountAppearancePage, SelfProfilePage, TenantAppearancePage, TenantProfilePage } from "./SettingsPage";
 import { CoreAccessPage } from "./CoreAccessPage";
 import { CorePackagesPage } from "./features/core-packages";
 import { canManagePublicResource } from "./application-access";
 import { useAdminSession } from "./runtime";
+import { PublicManagementCoreProvider } from "./features/access/management-adapter";
 import { PublicManagementPage } from "./features/access/PublicManagementPages";
 import { TenantSubscriptionPage, SubscriptionProPage, SubscriptionRequestDetailPage, PlatformSubscriptionsPage,
   PlatformSubscriptionDetailPage, SubscriptionCatalogPage, SubscriptionExpiryFloatingCard, SubscriptionRoute,
@@ -31,62 +35,54 @@ function ProtectedLayout() {
   const { session, brandName, brand, pages, Shell = PlatformShell } = usePlatformApplication();
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const { locale } = useLocale(), en = locale === "en-US";
+  const cores = useCoreSession();
   if (!state.ready) return <LoadingState />;
   if (state.verificationError) return <><QueryState loading={false} error={state.verificationError} onRetry={session.bootstrap}>{null}</QueryState>
     <Button onClick={() => { void session.signOut().catch(() => undefined); }}>{en ? "Return to sign in" : "返回登录"}</Button></>;
   if (!state.sessionVerified || !state.user) return <Navigate to="/login" replace />;
-  if (state.user.mustChangePassword) return <AdminPasswordPage onChange={session.changePassword} />;
-  const can = (permission: string) => canManagePublicResource(state.user, "tenant", permission);
-  const routes = [
-    { path: "/", label: en ? "Overview" : "平台概览", icon: <Blocks size={18} /> },
-    { path: "/settings/profile", label: en ? "My profile" : "本人资料", icon: <UserRound size={18} /> },
-    { path: "/settings/security", label: en ? "Account security" : "账号安全" },
-    { path: "/settings/appearance", label: en ? "Appearance" : "账户外观", icon: <Settings size={18} /> },
-    ...(can("system:tenant:manage") ? [{ path: "/settings/tenant", label: en ? "Tenant details" : "租户资料" }] : []),
-    ...(can("system:integration:manage") ? [{ path: "/settings/tenant-appearance", label: en ? "Tenant appearance" : "租户外观" }] : []),
-    ...(hasTenantIntegrationPermission(state.user) ? [{ path: TENANT_INTEGRATIONS_ROUTE.path, label: en ? "Third-party services" : "第三方服务" }] : []),
-    ...(hasTenantMessagingPermission(state.user, "system:integration:manage") ? [
-      { path: "/settings/dispatch", label: en ? "Dispatch center" : "寄件中心" },
-      { path: "/settings/support", label: en ? "Customer support" : "客服中心" }
-    ] : []),
-    ...(can("system:user:manage") ? [{ path: "/settings/member-cores", label: en ? "Member Core access" : "成员 Core 分配" }] : []),
-    ...(can("system:user:manage") ? [{ path: "/settings/users", label: en ? "Members" : "人员管理" }] : []),
-    ...(can("system:role:manage") ? [{ path: "/settings/roles", label: en ? "Roles" : "角色权限" }] : []),
-    ...(canReadOrganizations(state.user) ? [{ path: PLATFORM_SETTINGS_ROUTES.organizations.path, label: en ? "Organizations" : "组织管理" }] : []),
-    ...(canReadSecurityBaseline(state.user) ? [{ path: PLATFORM_SETTINGS_ROUTES.security.path, label: en ? "Security baseline" : "安全基线" }] : []),
-    ...(canManagePlatformTools(state.user) ? [{ path: PLATFORM_TOOLS_ROUTE, label: en ? "Platform tools" : "平台工具与治理" }] : []),
-    ...(hasSubscriptionPermission(state.user, "rental-os:subscription:view")
-      ? [{ path: SUBSCRIPTION_ROUTES.subscription.path, label: en ? "Plan and subscription" : "版本与订阅", icon: <Crown size={18} /> }] : []),
-    ...(hasSubscriptionPermission(state.user, "system:tenant:subscription:manage")
-      ? [{ path: SUBSCRIPTION_ROUTES.platformSubscriptions.path, label: en ? "Subscriptions" : "租户订阅", icon: <Crown size={18} /> },
-        { path: SUBSCRIPTION_ROUTES.subscriptionCatalog.path, label: en ? "Feature catalog and pricing" : "功能目录与定价", icon: <Blocks size={18} /> }] : []),
-    ...(canManagePublicResource(state.user, "saas", "system:tenant:manage")
-      ? [{ path: "/platform/tenants", label: en ? "Tenants" : "租户管理" }] : []),
-    ...(canManagePublicResource(state.user, "saas", "system:tenant:manage")
-      ? [{ path: "/platform/core-access", label: en ? "Tenant Core access" : "租户 Core 授权" }] : []),
-    ...(canManagePublicResource(state.user, "saas", "system:tenant:manage")
-      ? [{ path: "/platform/core-packages", label: en ? "Core packages" : "Core 包管理" }] : [])
-  ];
+  if (state.user.mustChangePassword) return <PasswordChangeGate onChange={session.changePassword} />;
+  const hasBusinessMenu = Boolean(cores.data && coreNavigationEntries(pages ?? new Map(), cores.data, locale).length);
   return <Shell brandName={brandName} brand={brand} pages={pages} onSignOut={session.signOut}
-    publicSections={[{ key: "overview", label: "", routes }]}>
-    <Outlet key={session.currentSessionEpoch()} /><SubscriptionExpiryFloatingCard />
+    publicSections={publicAdminNavigation(state.user, !state.user.isSaasAdmin && !hasBusinessMenu)}>
+    <Outlet key={session.currentSessionEpoch()} />
   </Shell>;
 }
 
 function SignIn() {
-  const { session, brandName } = usePlatformApplication();
-  const { tenantCode } = useParams();
+  const { session, brandName, loginDisplay } = usePlatformApplication();
+  const { tenantCode: rawTenantCode } = useParams();
+  const tenantCode = resolveLoginTenantCode(rawTenantCode);
+  const navigate = useNavigate();
+  const [signingIn, setSigningIn] = useState(false);
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const sameTenant = !tenantCode || state.tenant?.tenantCode === tenantCode;
-  return state.sessionVerified && sameTenant ? <Navigate to="/" replace />
-    : <AdminLoginPage key={tenantCode} brandName={brandName} tenantCode={tenantCode} onLogin={session.login} />;
+  return state.sessionVerified && sameTenant && !signingIn ? <Navigate to="/" replace />
+    : <AdminLoginPage {...loginDisplay} key={tenantCode} brandName={brandName} tenantCode={tenantCode} onLogin={async input => {
+      setSigningIn(true);
+      try { return await session.login(input); } catch (error) { setSigningIn(false); throw error; }
+    }} onLoginSuccess={result => navigate("/", { replace: true, state: { needsTenantOnboarding: result.needsTenantOnboarding === true } })} />;
+}
+
+function TenantLoginAlias() {
+  const { pathname } = useLocation();
+  return isTenantLoginAliasPath(pathname) ? <SignIn /> : <Result status="404" title="404" />;
 }
 
 function Home() {
-  const { brandName, pages } = usePlatformApplication();
+  const { brandName, pages, initialPage, onboardingPage } = usePlatformApplication();
+  const location = useLocation();
   const cores = useCoreSession(), { locale } = useLocale(), en = locale === "en-US";
   const { user } = useAdminSession();
-  return <><PageHeading title={en ? "Overview" : "平台概览"} brandName={brandName} />
+  if (user?.isSaasAdmin) {
+    const target = publicAdminNavigation(user, false).flatMap(section => section.routes)[0];
+    if (target) return <Navigate to={target.path} replace />;
+  }
+  const available = cores.data ? coreNavigationEntries(pages ?? new Map(), cores.data, locale) : [];
+  const start = location.state?.needsTenantOnboarding ? onboardingPage ?? initialPage : initialPage;
+  const preferred = start && available.find(page => page.key === corePageKey(start.coreId, start.pageId));
+  const target = preferred ?? available[0];
+  if (target) return <Navigate to={target.path} replace />;
+  return <><PageHeading title={en ? "Workbench" : "工作台"} brandName={brandName} />
     <QueryState loading={cores.isPending} error={cores.error} onRetry={cores.refetch}>
       <Alert type="info" showIcon title={en ? `Welcome to ${brandName}` : `欢迎使用 ${brandName}`}
         description={coreNavigationMessage(pages, cores, locale, Boolean(user?.isSaasAdmin))} />
@@ -98,7 +94,7 @@ function TenantSetting({ appearance = false }: { appearance?: boolean }) {
   const { user } = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const permission = appearance ? "system:integration:manage" : "system:tenant:manage";
   const allowed = canManagePublicResource(user, "tenant", permission);
-  return allowed ? appearance ? <TenantAppearancePage /> : <TenantProfilePage /> : <Result status="403" title="403" />;
+  return allowed ? appearance ? <AccountAppearancePage /> : <TenantProfilePage /> : <Result status="403" title="403" />;
 }
 
 function AccountSecurity() {
@@ -113,15 +109,18 @@ export function createPlatformAdminApplication(options: PlatformAdminApplication
   const router = createBrowserRouter([
   { path: "/login", element: <SignIn /> },
   { path: "/login/:tenantCode", element: <SignIn /> },
+  { path: "/:tenantCode", element: <TenantLoginAlias /> },
   { path: "/invite", element: <AcceptOperatorInvitationPage api={invitationApi} brandName={options.brandName} /> },
   { element: <ProtectedLayout />, children: [
     { path: "/", element: <Home /> }, { path: "/settings/profile", element: <SelfProfilePage /> },
     { path: "/settings/security", element: <AccountSecurity /> },
-    { path: "/settings/appearance", element: <AccountAppearancePage /> },
+    { path: "/settings/appearance", element: <TenantSetting appearance /> },
     { path: "/settings/tenant", element: <TenantSetting /> }, { path: "/settings/tenant-appearance", element: <TenantSetting appearance /> },
     { path: TENANT_INTEGRATIONS_ROUTE.path, element: <TenantIntegrationsPage /> },
     { path: "/settings/dispatch", element: <TenantDispatchPage /> },
     { path: "/settings/support", element: <CustomerSupportPage /> },
+    { path: "/tenant/dispatch", element: <TenantDispatchPage /> },
+    { path: "/tenant/support", element: <CustomerSupportPage /> },
     { path: PLATFORM_SETTINGS_ROUTES.organizations.path, element: <OrganizationsPage /> },
     { path: PLATFORM_SETTINGS_ROUTES.security.path, element: <PlatformSecurityPage /> },
     { path: PLATFORM_TOOLS_ROUTE, element: <PlatformToolsPage /> },
@@ -140,6 +139,8 @@ export function createPlatformAdminApplication(options: PlatformAdminApplication
     { path: "/platform/tenants/:id/status", element: <PublicManagementPage kind="tenants" edit status /> },
     { path: "/settings/users/:id/reset-password", element: <PublicManagementPage kind="users" action /> },
     { path: "/settings/roles/:id/delete", element: <PublicManagementPage kind="roles" action /> },
+    { path: "/tenant/accounts", element: <PublicManagementPage kind="users" /> },
+    { path: "/tenant/roles", element: <PublicManagementPage kind="roles" /> },
     ...(["users", "roles"] as const).flatMap(kind => [
       { path: `/settings/${kind}`, element: <PublicManagementPage kind={kind} /> },
       { path: `/settings/${kind}/new`, element: <PublicManagementPage kind={kind} edit /> },
@@ -154,6 +155,8 @@ export function createPlatformAdminApplication(options: PlatformAdminApplication
 
   return function PlatformAdminApplication() {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
+  const pathname = useSyncExternalStore(router.subscribe, () => router.state.location.pathname);
+  const publicLogin = pathname === "/login" || pathname.startsWith("/login/") || isTenantLoginAliasPath(pathname);
   useEffect(() => { void session.bootstrap(); }, []);
   const identity = JSON.stringify([state.tenant?.tenantId, state.user?.id, state.user?.permissions, state.user?.dataScope,
     state.user?.locationScope, state.user?.organizationId, session.currentSessionEpoch(), state.sessionVerified]);
@@ -161,11 +164,11 @@ export function createPlatformAdminApplication(options: PlatformAdminApplication
   return <AdminUiProvider queryClient={session.queryClient} scope={{ identity, currentIdentity: () => currentIdentity.current }}
     messages={options.messages}
     soundScope={state.sessionVerified && state.user ? { key: JSON.stringify([state.tenant?.tenantId, state.user.id]), epoch: session.currentSessionEpoch() } : null}
-    accountThemeColor={state.sessionVerified ? state.user?.accountThemeColor : undefined}
-    radii={state.sessionVerified ? { container: state.tenant?.adminContainerRadius, button: state.tenant?.adminButtonRadius,
+    accountThemeColor={state.sessionVerified && !publicLogin ? state.user?.accountThemeColor : undefined}
+    radii={state.sessionVerified && !publicLogin ? { container: state.tenant?.adminContainerRadius, button: state.tenant?.adminButtonRadius,
       input: state.tenant?.adminInputRadius, legacy: state.tenant?.adminCornerRadius } : undefined}>
     <AdminRuntimeProvider runtime={session.runtime}><PlatformApplicationContext.Provider value={options}>
-      <RouterProvider router={router} /></PlatformApplicationContext.Provider></AdminRuntimeProvider>
+      <PublicManagementCoreProvider adapter={options.management}><BrandIconProvider><RouterProvider router={router} /></BrandIconProvider></PublicManagementCoreProvider></PlatformApplicationContext.Provider></AdminRuntimeProvider>
   </AdminUiProvider>;
   };
 }

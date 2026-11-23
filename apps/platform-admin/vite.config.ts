@@ -10,7 +10,8 @@ export default defineConfig(({ mode }) => {
   const env = loadViteEnvironment(mode, fileURLToPath(new URL(".", import.meta.url)), loadEnv, { offline: mode === "ai-offline" });
   const platform = platformAdminVite();
   return {
-    envDir: false, envPrefix: [], define: publicEnvironmentDefinitions("admin", env),
+    envDir: false,
+    publicDir: platform.publicDir, envPrefix: [], define: publicEnvironmentDefinitions("admin", env),
     plugins: [...platform.plugins, tailwindcss(), react()],
     css: { postcss: { plugins: platform.postcss } },
     resolve: { alias: platform.alias },

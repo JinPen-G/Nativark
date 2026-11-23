@@ -1,6 +1,6 @@
 # 运营账号与邮箱邀请
 
-`TenantAccessPages` 保留原账号、角色及经营空间授权流程。`OperatorInvitations` 向[公共邀请表单](../../../../../packages/platform-admin/src/features/messaging/README.md)提供真实经营空间及受控角色 / 数据 / 地点配置。逐人角色对应租户基础角色，共用空间配置对应本批成员授权。新增运营账号为页头主动作，邀请入口留在列表工具区。
+`TenantAccessPages` 是旧组合薄入口，[公共账号列表和侧窗](../../../../../packages/platform-admin/src/features/access/PublicOperationsAccountPage.tsx)与[公共角色页](../../../../../packages/platform-admin/src/features/access/PublicRolePermissionPage.tsx)保留原流程，经营空间授权由[同源 Rental 管理适配](../../../../../packages/rental-core/admin/access/README.md)提供。`OperatorInvitations` 向[公共邀请表单](../../../../../packages/platform-admin/src/features/messaging/README.md)提供真实经营空间及受控角色 / 数据 / 地点配置。逐人角色对应租户基础角色，共用空间配置对应本批成员授权。新增运营账号为页头主动作，邀请入口留在列表工具区。
 
 `tenantMessagingApi` → `TenantOperatorInvitationsController` → `TenantOperatorInvitationsService` → 原 `PlatformRepository` 账号/授权事务及 `TenantEmailRuntimeService`。发送前查当前租户邮箱登录账号，包含停用账号，已有账号或有效邀请均停止发送。邀请只保存凭证哈希和待接受授权，接受时复验邀请人当前权限、角色和空间，再同事务创建账号与成员。固定全权基础角色沿原账号管理流程授予。
 

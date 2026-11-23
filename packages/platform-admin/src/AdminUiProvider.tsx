@@ -5,11 +5,11 @@ import { Provider as AntMotionProvider } from "@rc-component/motion";
 import enUS from "antd/locale/en_US";
 import zhCN from "antd/locale/zh_CN";
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
-import { useLayoutEffect, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, type ReactNode } from "react";
 import { LocaleProvider, useLocale, type AdminMessages } from "./app/locale";
 import { AppearanceProvider, createThemeConfig, useAppearance } from "./app/theme";
 import { MotionPreferenceProvider } from "./app/MotionPreferenceProvider";
-import { applyAdminRadiusTokens, type AdminRadiusGroups } from "./app/designTokens";
+import { applyAdminRadiusTokens, resolveAdminPrimaryColor, type AdminRadiusGroups } from "./app/designTokens";
 import { applyArcThemeTokens } from "./app/arcTokens";
 import { FeedbackProvider } from "./components/ui/Feedback";
 import { BusinessUiScopeProvider, type BusinessUiScope } from "./components/ui/BusinessUiScope";
@@ -39,6 +39,10 @@ function ThemedAdmin({ children, queryClient, scope, soundScope, accountThemeCol
     applyAdminRadiusTokens(document.documentElement, radii);
     applyArcThemeTokens(document.documentElement, mode === "dark", accountThemeColor);
   }, [radii, mode, accountThemeColor]);
+  useEffect(() => {
+    const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+    if (meta) meta.content = resolveAdminPrimaryColor(accountThemeColor);
+  }, [accountThemeColor]);
   return <ConfigProvider locale={locale === "en-US" ? enUS : zhCN} variant="outlined"
     getPopupContainer={trigger => {
       if (trigger) return trigger.closest<HTMLElement>("[data-rental-arc-drawer]") ?? document.body;

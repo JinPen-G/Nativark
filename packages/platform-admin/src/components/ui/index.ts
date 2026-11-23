@@ -94,3 +94,5 @@ export type { KanbanBoardProps, KanbanCard, KanbanColumn, KanbanPerson } from ".
 export type { KanbanBusinessBridge } from "../kanban-board/KanbanBridge";
 export { default as kanbanBoardClasses } from "../kanban-board/archive/classes.json";
 export { useListControls } from "./ListSection";
+
+export { ApartmentOutlined, ApiOutlined, BoxPlotOutlined, ControlOutlined, DashboardOutlined, FundOutlined, IdcardOutlined, MobileOutlined, ShopOutlined, ToolOutlined } from "./icons";

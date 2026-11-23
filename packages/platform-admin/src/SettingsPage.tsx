@@ -1,4 +1,5 @@
 /** 公共设置只调用原 API，保留草稿/并发修订和原保存 Promise。业务设置由各 Core 自行贡献。 */
+import { AppearancePage } from "./features/appearance";
 import { useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { AccountAppearanceProfile, PlatformTenantSummary, SavePlatformSelfProfileRequest,
@@ -70,12 +71,7 @@ export function SelfProfilePage() {
       <Form.Item name="phone" label={en ? "Phone" : "电话"}><Input autoComplete="tel" /></Form.Item></>} />;
 }
 
-export function AccountAppearancePage() {
-  const { locale } = useLocale(), en = locale === "en-US";
-  return <SettingsEditor<{ themeColor?: string }> path="/platform/account-appearance" title={en ? "Appearance" : "账户外观"}
-    project={value => ({ themeColor: (value as AccountAppearanceProfile).themeColor ?? "" })}
-    fields={<Form.Item name="themeColor" label={en ? "Account theme color" : "账户主题色"}><ColorPicker /></Form.Item>} />;
-}
+export const AccountAppearancePage = AppearancePage;
 
 export function TenantProfilePage() {
   const { locale } = useLocale(), en = locale === "en-US";

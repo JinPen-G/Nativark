@@ -11,11 +11,11 @@ function load(file, overrides = {}) {
   new Function('require', 'module', 'exports', code)(id => Object.hasOwn(overrides, id) ? overrides[id] : require(id), module, module.exports);
   return module.exports;
 }
-const canonical = read('apps/admin/public/brand/nativark-icon.svg');
-const icons = load('apps/admin/src/app/brandIcon.ts', {
-  'virtual:nativark-default-brand-icon': canonical,
+const canonical = read('packages/platform-admin/public/brand/nativark-icon.svg');
+const icons = load('packages/platform-admin/src/app/brandIcon.ts', {
+  '../../public/brand/nativark-icon.svg?raw': canonical,
 });
-const brand = load('apps/admin/src/app/branding.ts');
+const brand = load('packages/platform-admin/src/app/branding.ts');
 const tenant = { brandLogoUrl: '/uploads/tenant.svg', faviconUrl: '/uploads/not-the-logo.png' };
 const member = { isSaasAdmin: false };
 for (const resolve of [brand.resolveAdminMark, brand.resolveAdminFavicon]) {
@@ -35,13 +35,14 @@ const masks = svg => svg.match(/<defs>[\s\S]*?<\/defs>/)?.[0];
 assert.ok(geometry(canonical).length > 0, 'the default artwork comparison must include actual shapes');
 assert.equal((canonical.match(/<mask\b/g) ?? []).length, 3);
 assert.equal((canonical.match(/<circle\b/g) ?? []).length, 2);
-const bootstrap = read('apps/admin/public/brand/nativark-favicon.svg');
+const bootstrap = read('packages/platform-admin/public/brand/nativark-favicon.svg');
 assert.deepEqual(geometry(bootstrap), geometry(canonical), 'bootstrap must use the provided icon artwork, not a redraw');
 assert.equal(masks(bootstrap), masks(canonical), 'favicon recoloring cannot change the page masks');
 assert.match(bootstrap, /prefers-color-scheme:dark/);
 assert.match(bootstrap, /(?:fill|stroke)="currentColor"/);
-assert.match(read('apps/admin/index.html'), /href="\/brand\/nativark-favicon.svg"/);
-const wordmark = read('apps/admin/public/brand/nativark-logo-mono.svg');
+for (const host of ['admin', 'platform-admin', 'rental-admin', 'example-multi-core-admin', 'example-tickets-admin'])
+  assert.match(read(`apps/${host}/index.html`), /href="\/brand\/nativark-favicon.svg"/);
+const wordmark = read('packages/platform-admin/public/brand/nativark-logo-mono.svg');
 assert.deepEqual(geometry(wordmark), geometry(canonical), 'the login wordmark must embed the same mark');
 assert.equal(masks(wordmark), masks(canonical));
 assert.match(wordmark, />Nativark<\/text>/);
@@ -89,7 +90,7 @@ cleanup(); pngCleanup();
 assert.equal(listeners.size, 0);
 delete global.document;
 
-const provider = read('apps/admin/src/app/BrandIconProvider.tsx');
+const provider = read('packages/platform-admin/src/app/BrandIconProvider.tsx');
 assert.match(provider, /user\?\.id, user\?\.isSaasAdmin, tenant\?\.tenantId, source/);
 assert.match(provider, /if \(!controller.signal.aborted\) setInspection\(\{ scope, svg \}\)/);
 assert.match(provider, /inspection\?\.scope === scope/);

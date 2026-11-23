@@ -5,17 +5,18 @@ import type { FormInstance, FormProps } from "antd";
 import type { CorePageDescriptor } from "@rental-os/core-contracts";
 import { formSnapshotFingerprint, notifyFormSaved } from "../app/serverFormSnapshot";
 import { useLocale } from "../app/locale";
-import { useFeedback } from "../components/ui";
 import { useCorePageHost } from "./CorePage";
 
 /** 将已校验的表单值交给唯一保存方法，共用按钮/回车提交、等待、失败及未保存草稿状态。 */
-export function useCoreForm<Values>({ form, onSave, permissions = [], disabled = false }: {
+export function useCoreForm<Values>({ form, onSave, permissions = [], disabled = false, onError }: {
   form: FormInstance<Values>;
   onSave: (values: Values) => Promise<unknown>;
   permissions?: CorePageDescriptor["permissions"];
   disabled?: boolean;
+  /** 原页面负责业务文案；mutation 已反馈时无需提供，避免回车追加第二条提示。 */
+  onError?: (error: unknown) => void;
 }) {
-  const host = useCorePageHost(), { t } = useLocale(), { toast } = useFeedback();
+  const host = useCorePageHost(), { t } = useLocale();
   const generation = JSON.stringify([host.lifetimeKey, host.page.key]);
   const live = useRef({ host, onSave, permissions, disabled, active: false });
   Object.assign(live.current, { host, onSave, permissions, disabled });
@@ -69,7 +70,7 @@ export function useCoreForm<Values>({ form, onSave, permissions = [], disabled =
       else setDirty(true);
       return result;
     }).catch(failure => {
-      if (isCurrent()) setError(failure);
+      if (isCurrent() && !(failure && typeof failure === "object" && "name" in failure && failure.name === "AbortError")) setError(failure);
       throw failure;
     }).finally(() => {
       if (inFlight.current?.request === request) inFlight.current = null;
@@ -87,8 +88,8 @@ export function useCoreForm<Values>({ form, onSave, permissions = [], disabled =
       const request = submit(values);
       if (existing?.request === request) return; // 初次入口已负责同一请求反馈，回车重入不重复播报。
       void request.catch(failure => {
-        if (isCurrent() && !(failure && typeof failure === "object" && "errorFields" in failure))
-          toast({ type: "error", title: t("操作失败") });
+        if (isCurrent() && !(failure && typeof failure === "object" && ("errorFields" in failure || "name" in failure && failure.name === "AbortError")))
+          onError?.(failure);
       });
     }
   };

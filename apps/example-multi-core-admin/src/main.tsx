@@ -2,14 +2,14 @@
 import "@rental-os/platform-admin/styles";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { Blocks } from "lucide-react";
+import { AdminBrandMark } from "@rental-os/platform-admin/shell";
 import { MotionGlobalConfig } from "motion/react";
 import { registerCoreAdminPages } from "@rental-os/core-contracts";
 import { createPlatformAdminApplication } from "@rental-os/platform-admin/application";
 import { applyMotionPreference, isMotionReduced } from "@rental-os/platform-admin/motion";
 import { createTicketsAdmin } from "@rental-os/example-tickets-core/admin";
 import {
-  createRentalAdminContribution,
+  rentalPublicManagement, createRentalAdminContribution,
   createRentalBrowserAdminHost,
   createRentalNavigation,
 } from "@rental-os/rental-core/admin";
@@ -18,7 +18,10 @@ import { rentalAdminMessages } from "@rental-os/rental-core/admin/messages";
 import manifests from "virtual:core-manifests";
 import { createMultiCoreShell } from "./MultiCoreShell";
 
-const session = createRentalBrowserAdminSession({ baseURL: import.meta.env.VITE_API_BASE_URL ?? "/api" });
+const session = createRentalBrowserAdminSession({ baseURL: import.meta.env.VITE_API_BASE_URL ?? "/api",
+  loginDevelopment: import.meta.env.VITE_SHOW_ACCOUNT_SHORTCUTS === undefined
+    ? import.meta.env.DEV : import.meta.env.VITE_SHOW_ACCOUNT_SHORTCUTS === "true",
+});
 if (manifests.rental.entries.openapi === "dist/http-openapi-portable.json") {
   // 同一运输覆盖 JSON、图片与 CSV，刷新后仍使用该固定发行的业务入口。
   session.http.interceptors.request.use(config => {
@@ -60,9 +63,13 @@ if (registeredHref && registeredHref !== currentHref) {
 }
 const App = createPlatformAdminApplication({
   brandName: "Nativark",
-  brand: <Blocks aria-hidden />,
+  brand: <AdminBrandMark />,
   session,
   pages: registered.pages,
+  initialPage: { coreId: "rental", pageId: "workbench" },
+  onboardingPage: { coreId: "rental", pageId: "tenant-readiness" },
+  loginDisplay: session.loginDisplay,
+  management: rentalPublicManagement,
   messages: rentalAdminMessages,
   getCoreContainer: navigation.getCoreContainer,
   Shell,

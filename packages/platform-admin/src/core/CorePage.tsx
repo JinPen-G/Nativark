@@ -54,6 +54,8 @@ export type CoreAdminActionSlot = "actions" | "navigation" | "tools" | `content:
 
 export type CoreAdminPageAction<Values> = CorePageAction<FormInstance<Values>, Values> & {
   intent?: ActionButtonIntent;
+  /** 仅供原页面尚未报告的业务失败；已有 mutation 提示时不重复播报。 */
+  onActionError?: (error: unknown) => void;
   /** 缺省进入主操作栏；返回与辅助动作仍经过同一权限和生命周期驱动。 */
   slot?: CoreAdminActionSlot;
   /** 特殊正文仍使用原按钮变体、尺寸和形状，执行由公共动作驱动。 */
@@ -100,8 +102,8 @@ function PageAction<Values>({ host, action, visible = true }: { host: CorePageHo
   const disabled = !visible || action.disabled;
   const reason = action.disabledReason ? corePageText(action.disabledReason, locale) : undefined;
   const reportFailure = (error: unknown) => {
-    if (!live.current.active || !live.current.visible || visibility.current !== opening || error && typeof error === "object" && "errorFields" in error) return;
-    toast({ type: "error", title: t("操作失败") });
+    if (!live.current.active || !live.current.visible || visibility.current !== opening || error && typeof error === "object" && ("errorFields" in error || "name" in error && error.name === "AbortError")) return;
+    live.current.action.onActionError?.(error);
   };
   const confirming = useRef<Promise<unknown> | null>(null);
   const executing = useRef<Promise<unknown> | null>(null);
@@ -120,7 +122,7 @@ function PageAction<Values>({ host, action, visible = true }: { host: CorePageHo
   let button: ReactNode;
   if (action.kind === "navigate" || action.kind === "open") {
     button = <Button {...presentation} type={buttonType ?? (action.slot === "navigation" ? "text" : variant === "primary" ? "primary" : "default")} icon={action.icon} danger={action.danger}
-      loading={action.pending} disabled={disabled} aria-label={iconOnly ? label : undefined} onClick={() => {
+      loading={action.pending} disabled={disabled} aria-label={iconOnly ? label : undefined} aria-expanded={action.ariaExpanded} onClick={() => {
       try {
         const value = current(), latest = value.action;
         if (latest.kind === "open") latest.open();
@@ -135,7 +137,7 @@ function PageAction<Values>({ host, action, visible = true }: { host: CorePageHo
     button = <Button {...presentation} type={buttonType ?? (variant === "primary" ? "primary" : "default")}
       icon={action.icon} danger={action.danger} loading={action.pending} disabled={disabled}
       htmlType={action.kind === "save" ? "submit" : "button"}
-      aria-label={iconOnly ? label : undefined} onClick={event => {
+      aria-label={iconOnly ? label : undefined} aria-expanded={action.ariaExpanded} onClick={event => {
         if (action.kind === "save") event.preventDefault();
         if (executing.current) return;
         const request = Promise.resolve().then(run);

@@ -41,11 +41,21 @@ Rental 客户入口分别由[租户网站](../../apps/tenant-website/README.md)�
 
 [静态官网](../../apps/website/README.md)与 [Next.js 官网](../../apps/website-next/README.md)承载公开营销内容和演示预约。预约提交到原[公开演示申请入口](../../apps/api/src/modules/demo-requests/public-demo-request.controller.ts)。租户商城的商品、预约和订单页面在租户网站宿主。第三方组件和保留适配从 [UIArc](../ui-arc/README.md) 及本页的来源说明追溯。
 
+## 登录、外观与原页面呈现
+
+拆分沿用原管理后台的呈现。侧栏的分组、顺序、简称、图标、搜索与收展保持原样；租户业务项由当前 Core 和成员授权过滤，SaaS 增加 Core 管理。页头的面包屑、时钟、通知、休息及页面操作使用原同行结构，正文继续复用原组件。由可信宿主提供的 `PlatformShellProps.layout` 可接回原 Agent/Copilot 的导航与内容插槽，接口授权仍由所属服务端核验。
+
+[登录页](src/features/auth/LoginPage.tsx)保留原双栏演示、租户专属网址、验证码与第三方预览、语言主题切换及原密码表单。可选 `loginDisplay` 只提供公开品牌和显式开发快捷入口，登录继续调用宿主唯一会话；`initialPage` 与 `onboardingPage` 只能在当前获权登记页面里选择。主面板没有额外 Core 状态抽屉。
+
+[外观与音效](src/features/appearance/AppearancePage.tsx)复用原主题、账户色、租户圆角、动效与音效四组设置，保留乐观修订和账户/租户/浏览器各自归属；旧后台通过可选配置面板和会话回调消费同一页。原首次改密由[同源组件](src/features/auth/PasswordChangeGate.tsx)呈现。
+
+四个独立 Web 宿主将公共 Vite 接点的 `publicDir` 用作品牌和登录演示素材目录；默认图标使用原 SVG，租户图标与浏览器标签的失败回退和深浅对比各自处理。原后台保持已登记公共目录。类型和离线断言通过后仍需用同一固定发行在实际浏览器核对布局及交互。
+
 ## 宿主接入
 
 普通宿主从 `/runtime` 创建一次 `createBrowserAdminSession`，将它与品牌、可选页面注册表传给 `/application` 的 `createPlatformAdminApplication` 即可挂载。零Core省略 `pages`；增加Core只改宿主组合与Core自身贡献。实际最小组合见[零Core App](../../apps/platform-admin/src/App.tsx)和[工单入口](../../apps/example-tickets-admin/src/main.tsx)。公共应用创建唯一 Data Router，并将同一注册表用于菜单、直接路由和面包屑。
 
-首页与默认右面板共用[导航状态提示](src/coreNavigationMessage.ts)，只有 `coreNavigationEntries(pages, context, locale)` 生成可访问侧栏入口时才提示选择 Core。当前 Core 已授权而宿主未装配其页面时提示部署管理员处理，已有登记页但没有可导航入口时提示核对页面入口与权限。租户未开通、成员未分配、部署准入不可用和 SaaS 管理提示继续分别呈现，中文与英文使用同一判断。
+无可用菜单时首页使用[导航状态提示](src/coreNavigationMessage.ts)，只有 `coreNavigationEntries(pages, context, locale)` 生成可访问侧栏入口时才提示选择 Core。当前 Core 已授权而宿主未装配其页面时提示部署管理员处理，已有登记页但没有可导航入口时提示核对页面入口与权限。租户未开通、成员未分配、部署准入不可用和 SaaS 管理提示继续分别呈现，中文与英文使用同一判断。
 
 Core 的界面词条通过可选 `messages` 传给同一应用工厂，沿原语言 Context 与公共词条合并。多个 Core 由宿主按受控顺序合并资源。Rental 组合从 `@rental-os/rental-core/admin/messages` 导入 `rentalAdminMessages`；[实际资源](../rental-core/admin/messages.ts)保留原词条及六模块合并顺序，Core 作者可以用相同接点提供自己的词条。[组合参数](src/application-context.ts)
 
@@ -109,19 +119,19 @@ CorePage 的 `title`、`summary` 可显示当前受权对象；`actions` 可声�
 
 公共应用按当前身份显示“租户 Core 授权”或“成员 Core 分配”。前者只由 SaaS 管理员读取当前部署目录并为租户开通/停用；后者从服务端 `assignable` 选择本租户已获权 Core，不要求管理者先分配给自己。地址参数只定位真实目录对象，缺失对象不挂载命令。提交中的路由/对象切换被阻止，未知结果保留原核对编号；分配与业务角色各自管理，界面可见性不代替服务端权限。
 
-人员列表与资料页从 `/settings/users` 进入 `/settings/member-cores?target=<成员ID>`，租户列表、资料和状态页从 `/platform/tenants` 进入 `/platform/core-access?target=<租户ID>`。新建先等待可信创建结果，人员使用返回的 `id`，租户使用 `tenant.tenantId`；目标编码后仅预选授权目录，密码仍只留当前页。先保存资料，再由授权页重读当前对象和可管理 Core，单独提交开通或成员分配。[资料页入口](src/features/access/PublicManagementPages.tsx) · [授权目录](src/CoreAccessPage.tsx)
+人员、角色和 SaaS 租户沿原列表、行内操作及侧窗维护，旧 `/settings/users/:id` 等地址定位同一目录中的编辑器。租户行操作补“Core 授权”，只把当前真实 `tenantId` 带到 `/platform/core-access?target=<租户ID>` 预选目录；开通仍由授权页重读并单独确认。租户成员 Core 分配保留原 `/settings/member-cores` 受权入口。一次性密码仅在原结果弹窗显示。[管理路由](src/features/access/PublicManagementPages.tsx) · [原账号列表与侧窗](src/features/access/PublicOperationsAccountPage.tsx) · [原租户列表与弹层](src/features/access/PublicTenantManagementPage.tsx) · [授权目录](src/CoreAccessPage.tsx)
 
-未保存或结果未确认时保留草稿并禁用资料页的 Core 跳转。目录显示账号停用、租户冻结/停用及原授权记录，新开通需先恢复账号状态；unknown 按原对象、Core、账号和 `operationId` 核对收据。成员入口消费服务端 `canManageMembers`，候选仍取 `assignable` 或已注册目录。租户、人员和角色目录页的保存、口令重置、角色删除及 Core 开通/分配/绑定显式关闭401刷新重发。其他请求默认允许401后刷新并重发一次，网络和业务错误沿原失败处理。无 Core 时公共资料与角色页照常使用。[面板与原结果](src/core/CoreAccessPanel.tsx) · [单次命令客户端](src/core/management-client.ts)
+资料保存的按钮与回车共用一次请求，结果未确认保留草稿，重新打开前先重读目录。目录显示账号停用、租户冻结/停用及原授权记录，新开通需先恢复账号状态；unknown 按原对象、Core、账号和 `operationId` 核对收据。成员入口消费服务端 `canManageMembers`，候选仍取 `assignable` 或已注册目录。租户、人员和角色目录页的保存、口令重置、角色删除及 Core 开通/分配/绑定显式关闭401刷新重发。其他请求默认允许401后刷新并重发一次，网络和业务错误沿原失败处理。无 Core 时公共资料与角色页照常使用。[面板与原结果](src/core/CoreAccessPanel.tsx) · [单次命令客户端](src/core/management-client.ts)
 
-SaaS“租户管理”读取公共租户目录；创建还须有 `system:tenant:bootstrap` 权限。填写租户编码、名称和管理员资料即可创建，无需Core/品类/空间。保存返回的临时密码只在当前页显示，管理员首次登录改密；之后再按上段开通Core。SaaS 租户详情修改名称与后台简称，租户本人的“租户资料”页只修改名称。简称省略保留原值，空字符串、纯空白或 null 清除。状态页单独选择启用/冻结/停用并填写原因，分别调用原接口；恢复租户保留原Core授权及成员分配。
+SaaS“租户管理”读取公共租户目录；创建还须有 `system:tenant:bootstrap` 权限。无 Core 时保留原租户名称、编码及管理员资料表单；所选 Rental 通过 `PublicManagementCoreAdapter` 补回原品类/版本/币种、可选首履约点和经营空间管理，仍由同一原 bootstrap 事务创建。编辑弹窗只修改原租户名称，不清除既有后台简称。状态弹窗保留原目标状态、必填原因及会话撤销说明，恢复租户保留原 Core 授权和成员分配。
 
-[本人资料、账户外观与租户设置](src/SettingsPage.tsx)共用草稿同步和原保存 Promise，其中租户外观携带原 `expectedRevision`。保存显式禁止401后刷新重发；失败保留草稿，重新读取原设置核对后再保存。本人资料的空电话明确清除，人员资料页的空电话转为省略并保留原值。
+[本人资料、账户外观与租户设置](src/SettingsPage.tsx)共用草稿同步和原保存 Promise，其中租户外观携带原 `expectedRevision`。保存显式禁止401后刷新重发；失败保留草稿，重新读取原设置核对后再保存。本人资料的空电话明确清除，人员资料沿原账号表单提交电话字段，处理规则由原管理服务裁定。
 
 “人员管理”和“角色权限”复用公共目录/保存接口；角色权限从实际已登记目录选择，默认新角色为本人数据范围，不采用Rental经营空间默认值。固定管理员角色只读，人员资料保留原角色/组织/管理员字段；一次性创建口令只在当前页显示，不进入缓存或存储。保存与回车共用同一Promise，失败先重读核对，后台刷新保留草稿。权限搜索/对照组件和草稿模型通过 `/access` 正式导出，数据和保存由宿主提供。
 
 公共管理按基础租户成员的完整租户范围识别明确权限或 `*`，当前 Core 的权限不能替代它。新增/编辑成员读取角色选项时，人员管理权和角色管理权任一满足即可；创建、修改及删除角色继续要求角色管理权，提交和返回前由服务端复验。
 
-人员目录可重置其他成员口令，管理员账号另须租户管理员权限；本人走修改密码入口。重置明确确认后调用原接口，撤销旧会话并返回临时密码。普通角色可明确删除，固定/已分配角色由服务端拒绝。失败不自动重发，先读当前目录；再次重置属于新操作，会替换此前口令。已确认结果单独显示，不被后续目录失败遮住；临时密码仅留当前页并可复制。订阅接入见上方公共模块。
+人员目录保留原“编辑授权”行操作、启停开关和重置密码确认框，当前账号不能在此停用；管理员账号仍由服务端复验权限。所选 Rental 在同一大侧窗中保留账号资料、基础角色及全部空间/地点授权，整体走原 `/platform/users/access` 单事务。普通角色的删除仍明确确认，固定/已分配角色由原服务端拒绝；权限矩阵的隐藏授权、草稿与键盘行为保持原实现。写入不自动重发，已确认结果不被后续目录刷新失败替换，临时密码只留当前弹窗。订阅接入见上方公共模块。
 
 “组织管理”沿 `/settings/organizations` 显示原列表、筛选、编辑及状态控件；受权读取与全租户维护分别判定。“安全基线”沿原 `/platform/system` 提供登录限流、密码策略、脱敏和二次确认设置，保存要求当前 SaaS 身份及参数管理权限。原后台组织页签与安全页复用同一组件，六个请求通过宿主唯一客户端发送。个人改密仍使用“账号安全”。[路由、权限、草稿及接入](src/features/platform-settings/README.md)
 

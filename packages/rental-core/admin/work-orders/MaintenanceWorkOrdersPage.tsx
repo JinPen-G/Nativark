@@ -6,7 +6,7 @@ import { WorkOrderBoard } from "./WorkOrderBoard";
 import type { WorkOrderBoardAction } from "./workOrderBoardPolicy";
 import { useParams, useSearchParams } from "react-router-dom";
 import { corePageKey, resolveCorePageLocation } from "@rental-os/core-contracts";
-import { CorePage, useCoreForm, useCorePageHost, type CoreAdminPageAction } from "@rental-os/platform-admin/core";
+import { CorePage, CorePageActions, useCoreForm, useCorePageHost, type CoreAdminPageAction } from "@rental-os/platform-admin/core";
 import type {
   CreateRentalWorkOrderRequest,
   CancelRentalWorkOrderRequest,
@@ -19,12 +19,12 @@ import type {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Descriptions, Space, Tag, Typography, type FormInstance } from "antd";
 import {
-  ActionButton, Alert, AnimatedNumber, App, Button, ContentTransition, DataTableRowActions,
+  ActionButton, Alert, AnimatedNumber, App, ArrowLeftOutlined, Button, ContentTransition, DataTableRowActions,
   DataTableStatus, DataTableText, Empty, Form, Input, ListFilterItem, ListSection, Modal,
-  QueryState, RecordDetailLayout, RecordDetailStack, RecordDisclosure, RecordFacts,
+  PlusOutlined, QueryState, RecordDetailLayout, RecordDetailStack, RecordDisclosure, RecordFacts,
   SearchField, Segmented, Select, Table, Tabs, useModalDismissal, type DataTableRowAction
 } from "@rental-os/platform-admin/ui";
-import { ArrowLeft, ClipboardCheck, Columns3, FileText, History, List, Play, Plus, UserRoundPen, X } from "lucide-react";
+import { ClipboardCheck, Columns3, FileText, History, List, Play, UserRoundPen, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useServerFormSync } from "@rental-os/platform-admin/forms";
 import { useLocale } from "@rental-os/platform-admin/locale";
@@ -309,8 +309,8 @@ export function MaintenanceWorkOrdersPage({
   }
 
   const listActions: CoreAdminPageAction<Record<string, unknown>>[] = [{
-    id: "refresh", kind: "command", label: "刷新", intent: "refresh",
-    slot: "tools",
+    id: "refresh", kind: "command", label: t("刷新"), intent: "refresh",
+    slot: "content:work-order-view",
     pending: workOrders.isFetching || dispositions.isFetching,
     execute: () => Promise.all([
       workOrders.refetch({ throwOnError: true }), dispositions.refetch({ throwOnError: true }),
@@ -318,7 +318,7 @@ export function MaintenanceWorkOrdersPage({
     ])
   }];
   if (canManage && mainView === "work") listActions.push({
-    id: "create", kind: "open", label: "新建工单", emphasis: "primary", icon: <Plus size={16} aria-hidden />,
+    id: "create", kind: "open", label: t("新建工单"), emphasis: "primary", icon: <PlusOutlined />,
     permissions: [{ resource: "maintenance", action: "manage" }],
     disabled: run.isPending || Boolean(dialog) || dispositions.isLoading || dispositions.isError,
     open: () => openDialog("create")
@@ -327,38 +327,41 @@ export function MaintenanceWorkOrdersPage({
   const detailDisabled = run.isPending || Boolean(dialog) || workOrders.isError;
   if (activeWorkOrder) {
     if (canManage && ["pending", "in_progress"].includes(activeWorkOrder.status)) detailActions.push({
-      id: "assign", kind: "open", slot: "tools", label: "派工", disabled: detailDisabled,
+      id: "assign", kind: "open", slot: "tools", label: t("派工"), disabled: detailDisabled,
       permissions: [{ resource: "maintenance", action: "manage" }], open: () => openDialog("assign", activeWorkOrder)
     });
     if (canManage && activeWorkOrder.status === "pending") detailActions.push({
-      id: "start", kind: "command", label: "开始处理", intent: "play", emphasis: "primary",
+      id: "start", kind: "command", label: t("开始处理"), intent: "play", emphasis: "primary",
       disabled: Boolean(dialog) || workOrders.isError, pending: run.isPending,
       permissions: [{ resource: "maintenance", action: "manage" }],
       execute: () => run.mutateAsync({ kind: "start", id: activeWorkOrder.id })
     });
     if (canManage && activeWorkOrder.status === "in_progress") detailActions.push({
-      id: "submit", kind: "open", label: "提交验收", emphasis: "primary", disabled: detailDisabled,
+      id: "submit", kind: "open", label: t("提交验收"), emphasis: "primary", disabled: detailDisabled,
       permissions: [{ resource: "maintenance", action: "manage" }], open: () => openDialog("submit", activeWorkOrder)
     });
     if (canReview && activeWorkOrder.status === "pending_review") detailActions.push({
-      id: "review", kind: "open", label: "验收", emphasis: "primary", disabled: detailDisabled,
+      id: "review", kind: "open", label: t("验收"), emphasis: "primary", disabled: detailDisabled,
       permissions: [{ resource: "maintenance", action: "review" }], open: () => openDialog("review", activeWorkOrder)
     });
     if (canManage && ["pending", "in_progress", "pending_review"].includes(activeWorkOrder.status)) detailActions.push({
-      id: "cancel", kind: "open", slot: "tools", label: "取消工单", danger: true, disabled: detailDisabled,
+      id: "cancel", kind: "open", slot: "tools", label: t("取消工单"), danger: true, disabled: detailDisabled,
       permissions: [{ resource: "maintenance", action: "manage" }], open: () => openDialog("cancel", activeWorkOrder)
     });
   }
-  detailActions.push({ id: "back", kind: "navigate", slot: "navigation", label: "返回列表", icon: <ArrowLeft size={16} aria-hidden />, to: rentalWorkOrderLocation() });
+  detailActions.push({ id: "back", kind: "navigate", slot: "navigation", label: t("返回列表"), icon: <ArrowLeftOutlined aria-hidden />, to: rentalWorkOrderLocation() });
 
   return <>
     {!workOrderId && <>
-    <CorePage description={t("异常隔离须完成养护并通过验收后才能恢复库存。")} actions={listActions}
-      view={<Tabs aria-label={t("工单与归还处置")} activeKey={mainView} onChange={setMainView} items={[{key:"work",label:<>{t("养护工单")} {workOrders.data && <AnimatedNumber value={workOrders.data.length}/>}</>},{key:"dispositions",label:<>{t("归还处置")} {dispositions.data && <AnimatedNumber value={dispositions.data.length}/>}</>}]}/>}
-      toolsPlacement="view" tools={mainView === "work" && <Segmented iconOnly aria-label={t("工单视图")} value={workView} onChange={value=>setWorkView(String(value))} options={[
+    <CorePage description={t("异常隔离须完成养护并通过验收后才能恢复库存。")} actions={listActions}>
+      <div className={styles.viewBar}>
+      <Tabs aria-label={t("工单与归还处置")} activeKey={mainView} onChange={setMainView} items={[{key:"work",label:<>{t("养护工单")} {workOrders.data && <AnimatedNumber value={workOrders.data.length}/>}</>},{key:"dispositions",label:<>{t("归还处置")} {dispositions.data && <AnimatedNumber value={dispositions.data.length}/>}</>}]}/>
+      <Space><CorePageActions slot="content:work-order-view" />{mainView === "work" && <Segmented iconOnly aria-label={t("工单视图")} value={workView} onChange={value=>setWorkView(String(value))} options={[
         { value:"board", label:<span title={t("任务看板")} aria-label={t("任务看板")}><Columns3 size={16} aria-hidden /></span> },
         { value:"list", label:<span title={t("列表")} aria-label={t("列表")}><List size={16} aria-hidden /></span> },
-      ]}/>}>{null}</CorePage>
+      ]}/>}</Space>
+      </div>
+    </CorePage>
       <ContentTransition value={`${mainView}:${workView}`}>
       <div hidden={mainView!=="dispositions"}><QueryState loading={dispositions.isLoading} error={dispositions.error} onRetry={() => dispositions.refetch({ throwOnError: true })}><ListSection>
         <Table<RentalStockDisposition> rowKey="id" onRefresh={() => dispositions.refetch()} loading={dispositions.isLoading} refreshing={dispositions.isFetching} dataSource={dispositions.data ?? []} pagination={{ pageSize: 8 }} scroll={{ x: 1050 }} locale={{ emptyText: <Empty scene="empty" compact description={t("暂无归还处置记录")} /> }} columns={[

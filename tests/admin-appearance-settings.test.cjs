@@ -247,11 +247,11 @@ test('channel radius changes and explicit clearing reach canonical appearance wi
 
 test('appearance form maps old radii only into its draft and saves the original revision with radius fields only', async () => {
   const ts = require('typescript');
-  const file = path.join(__dirname, '../apps/admin/src/features/appearance/AppearancePage.tsx');
+  const file = path.join(__dirname, '../packages/platform-admin/src/features/appearance/AppearancePage.tsx');
   const ast = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
   const declaration = ast.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'AppearancePage');
   const code = ts.transpileModule(declaration.getText(ast), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
-  const tokenCode = ts.transpileModule(fs.readFileSync(path.join(__dirname, '../apps/admin/src/app/designTokens.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const tokenCode = ts.transpileModule(fs.readFileSync(path.join(__dirname, '../packages/platform-admin/src/app/designTokens.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const tokenModule = { exports: {} };
   new Function('require', 'module', 'exports', tokenCode)(require, tokenModule, tokenModule.exports);
   const { resolveAdminCornerRadius, resolveAdminRadiusGroup, resolveAdminRadii } = tokenModule.exports;
@@ -263,7 +263,10 @@ test('appearance form maps old radii only into its draft and saves the original 
     const dependencies = {
       Form: Object.assign(() => null, { useForm: () => [form], useWatch: key => values[key] }),
       useLocale: () => ({ t: text => text }), App: { useApp: () => ({ message: {} }) },
-      useQueryClient: () => ({}), useAuthStore: select => select({ tenant: { tenantId: 'appearance-test' }, setTenantBranding: () => assert.fail('reading cannot update applied branding') }),
+      useQueryClient: () => ({}), useContext: () => undefined, PlatformApplicationContext: {},
+      useAdminSession: () => ({ tenant: { tenantId: 'appearance-test' } }),
+      AppearanceHeading: 'PageHeader', AppearanceSection: 'CopilotSection',
+      useAppearanceApi: () => ({ appearanceApi: { getProfile() {}, saveProfile: payload => { saves.push(payload); return payload; } } }),
       queryOptions: options => options, useQuery: () => ({ data: stored }),
       useServerFormSync: (_form, _source, apply) => apply(),
       useMutation: options => { save = options.mutationFn; return { isPending: false }; },
@@ -289,7 +292,8 @@ test('appearance form maps old radii only into its draft and saves the original 
 test('settings are mounted in the requested pages and sound has an unambiguous module path', () => {
   const ts = require('typescript');
   const read = rel => fs.readFileSync(path.join(__dirname, '..', 'apps/admin/src', rel), 'utf8');
-  const appearance = read('features/appearance/AppearancePage.tsx');
+  const appearance = fs.readFileSync(path.join(__dirname, '..', 'packages/platform-admin/src/features/appearance/AppearancePage.tsx'), 'utf8');
+  assert.match(read('features/appearance/AppearancePage.tsx'), /@rental-os\/platform-admin\/appearance/);
   const appearanceAst = ts.createSourceFile('AppearancePage.tsx', appearance, ts.ScriptTarget.Latest, true);
   const tenantPage = appearanceAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'AppearancePage');
   const accountColorCard = appearanceAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'AccountThemeColorCard');

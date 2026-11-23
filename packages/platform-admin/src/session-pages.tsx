@@ -1,45 +1,13 @@
 /** 公共登录与改密呈现，保留原表单/SaveButton 单次提交；凭据及会话变化由宿主端口执行。 */
 import { useRef, useState } from "react";
-import type { ChangePasswordRequest, LoginRequest } from "@rental-os/platform-contracts";
+import type { ChangePasswordRequest } from "@rental-os/platform-contracts";
 import { Alert, Form, Input, SaveButton } from "./components/ui";
 import { useLocale } from "./app/locale";
 import { UnsavedChangesGuard } from "./components/UnsavedChangesGuard";
-import loginStyles from "@/registry/blocks/login-centered/login-centered.module.css";
-import "./session-pages.css";
 
-export function AdminLoginPage({ brandName, onLogin, tenantCode }: {
-  brandName: string; onLogin: (input: LoginRequest) => Promise<unknown>; tenantCode?: string;
-}) {
-  const [form] = Form.useForm<LoginRequest>();
-  const [error, setError] = useState(false), [busy, setBusy] = useState(false);
-  const pending = useRef<Promise<unknown> | null>(null);
-  const { locale } = useLocale(), english = locale === "en-US";
-  const submit = (input: LoginRequest) => {
-    if (pending.current) return pending.current;
-    setError(false); setBusy(true);
-    const request = Promise.resolve().then(() => onLogin(input)).catch(failure => { setError(true); throw failure; })
-      .finally(() => { pending.current = null; setBusy(false); });
-    pending.current = request;
-    return request;
-  };
-  return <div className="login-stage"><div className="login-frame"><main className="login-workspace">
-    <div className="platform-login-card"><div className={loginStyles.card}>
-      <div className="login-card-form"><div className="login-brand"><strong>{brandName}</strong></div>
-        <div className="login-form-content"><div className="login-panel-heading"><h2>{english ? "Sign in" : "登录"}</h2>
-          <p>{english ? "Use your tenant account to continue." : "使用租户账号进入管理后台。"}</p></div>
-          {error && <Alert type="error" showIcon title={english ? "Sign in failed. Check your account or try again." : "登录失败，请核对账号或稍后重试。"} />}
-          <Form form={form} initialValues={{ tenantCode }} layout="vertical" requiredMark={false} disabled={busy}
-            onFinish={values => { void submit(values).catch(() => undefined); }}>
-            <Form.Item name="tenantCode" label={english ? "Tenant code" : "租户编码"} rules={[{ required: true }]}><Input autoComplete="organization" /></Form.Item>
-            <Form.Item name="account" label={english ? "Account" : "账号"} rules={[{ required: true }]}><Input autoComplete="username" /></Form.Item>
-            <Form.Item name="password" label={english ? "Password" : "密码"} rules={[{ required: true }]}><Input.Password autoComplete="current-password" /></Form.Item>
-            <SaveButton form={form} label={english ? "Sign in" : "登录"} pending={busy} onSave={submit} style={{ width: "100%" }} />
-          </Form>
-        </div>
-      </div>
-    </div></div>
-  </main></div></div>;
-}
+export { AdminLoginPage } from "./features/auth/LoginPage";
+export type { AdminLoginBrand, AdminLoginDisplay, AdminLoginPageProps } from "./features/auth/LoginPage";
+export { resolveLoginTenantCode } from "./features/auth/login-entry";
 
 export function AdminPasswordPage({ onChange, embedded = false }: { onChange: (input: ChangePasswordRequest) => Promise<void>; embedded?: boolean }) {
   const [form] = Form.useForm<ChangePasswordRequest & { confirmation: string }>();
@@ -72,3 +40,8 @@ export function AdminPasswordPage({ onChange, embedded = false }: { onChange: (i
   </div>;
   return embedded ? content : <div className="password-change-stage">{content}</div>;
 }
+
+export { PasswordChangeGate } from "./features/auth/PasswordChangeGate";
+export { AuthCodePreview } from "./features/auth/AuthCodePreview";
+export { GoogleBrandIcon } from "./features/auth/LoginProviderIcons";
+export { LoginShowcase } from "./features/auth/login-showcase/LoginShowcase";

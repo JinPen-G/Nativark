@@ -16,7 +16,7 @@ export function NativeWorkspaceSwitcher({ compact = false }: { compact?: boolean
   const currentId = useAuthStore(s => s.currentWorkspaceId), switchWorkspace = useAuthStore(s => s.switchWorkspace);
   const navigate = useNavigate(), { toast } = useFeedback();
   const fullTitle = user?.isSaasAdmin ? ADMIN_BRAND_NAME : tenant?.tenantName ?? t("租户");
-  const title = user?.isSaasAdmin ? ADMIN_BRAND_NAME : tenant?.operatorShortName || fullTitle;
+  const title = fullTitle;
   const subtitle = workspaces.find(w => w.id === currentId)?.name ?? t(user?.isSaasAdmin ? "平台管理面" : "尚无经营空间");
   return <NativeContextSwitcher compact={compact} title={title} fullTitle={fullTitle} subtitle={compact ? subtitle : t(subtitle)}
     brand={<img src={icon.src} onError={icon.onError} alt="" className={icon.isPlatformMark ? "size-8 object-contain" : "size-8 rounded-lg bg-sidebar object-contain"} />} brandUnframed={icon.isPlatformMark}

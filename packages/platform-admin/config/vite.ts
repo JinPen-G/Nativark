@@ -9,6 +9,7 @@ export { adaptKanbanRuntime, kanbanBoardAdapter } from "./kanbanBoardAdapter";
 export function platformAdminVite() {
   const source = (path: string) => fileURLToPath(new URL(path, import.meta.url));
   return {
+    publicDir: source("../public"),
     plugins: [motionPreferenceAdapter(), actionButtonIconAdapter(), kanbanBoardAdapter()],
     postcss: [motionPreferenceStyles(), nativeSidebarStyles()],
     alias: {

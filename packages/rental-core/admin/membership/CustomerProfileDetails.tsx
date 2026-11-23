@@ -1308,6 +1308,7 @@ export function CustomerProfileDetails({
           current && (
             <RecordDetailLayout
               title={current.profile.name || t("个人会员资料")}
+              brandName={host.brandName}
               onBack={onClose}
               actions={
                 <Button type="primary" disabled={!editable} onClick={onEdit}>

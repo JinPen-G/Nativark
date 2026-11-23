@@ -39,6 +39,7 @@ export default defineConfig(({ mode }) => {
   const virtual = "\0selected-rental-manifest";
   return {
     envDir: false,
+    publicDir: platform.publicDir,
     envPrefix: [],
     define: publicEnvironmentDefinitions("admin", env),
     plugins: [

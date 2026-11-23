@@ -179,10 +179,17 @@ function CapabilityGovernanceContent({ api: rentalCoreApi, scopeKey, currentScop
     }
   });
 
+  const reportLifecycleError = (error: unknown) => {
+    if (!isCurrentScope() || error && typeof error === "object"
+      && ("errorFields" in error || "name" in error && error.name === "AbortError")) return;
+    message.error(error instanceof Error && error.message
+      ? error.message : t("更新失败：请检查依赖、互斥能力与配置项"));
+  };
+
   // 生命周期编辑共用现有 Rental 表单代次，查询刷新保留原打开时的修订和输入。
   const editor = useOrderEditor<LifecycleFormValues>({ form,
     identity: editorState ? JSON.stringify([scopeKey, editorState.generation, editing?.definition.code]) : undefined,
-    onSave: submitLifecycle, disabled: !canManage
+    onSave: submitLifecycle, onError: reportLifecycleError, disabled: !canManage
   });
   const lifecycleForm = useMemo(() => ({ ...form, validateFields: editor.validate }), [form, editor.key]);
 
@@ -483,10 +490,7 @@ function CapabilityGovernanceContent({ api: rentalCoreApi, scopeKey, currentScop
         onClose={() => editor.dismiss(() => setEditorState(undefined))}
         extra={
           <SaveButton label={t("保存")} form={lifecycleForm} pending={save.isPending}
-            disabled={!canManage} onSave={editor.submit} onActionError={error => {
-              if (isCurrentScope() && !(error && typeof error === "object" && "errorFields" in error))
-                message.error(t("操作失败"));
-            }} />
+            disabled={!canManage} onSave={editor.submit} onActionError={reportLifecycleError} />
         }
       >
         {editing && (
@@ -496,7 +500,6 @@ function CapabilityGovernanceContent({ api: rentalCoreApi, scopeKey, currentScop
             disabled={!canManage || save.isPending}
             {...editor.formProps}
           >
-            {editor.error instanceof Error && <Alert type="error" showIcon title={editor.error.message} />}
             <Alert
               type="info"
               showIcon

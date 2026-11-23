@@ -214,12 +214,22 @@ function LocationWorkspace({
     edit: openEditor,
   });
 
+  const reportEditorError = (error: unknown, text: string) => {
+    if (!isCurrentScope() || error && typeof error === "object"
+      && ("errorFields" in error || "name" in error && error.name === "AbortError")) return;
+    message.error(t(text));
+  };
+  const reportLocationError = (error: unknown) =>
+    reportEditorError(error, "保存失败，请检查地点类型、编码、经营主体和履约能力");
+  const reportOperatorError = (error: unknown) => reportEditorError(error, "经营主体保存失败");
+
   const locationEditor = useOrderEditor<SaveRentalFulfillmentLocationRequest>({
     form,
     identity: locationEditorState
       ? JSON.stringify([scopeKey, "location", locationEditorState.generation, editing?.id])
       : undefined,
     onSave: submitLocation,
+    onError: reportLocationError,
     disabled: locationUnavailable,
   });
   const operatorEditor = useOrderEditor<SaveRentalFulfillmentOperatorRequest>({
@@ -228,6 +238,7 @@ function LocationWorkspace({
       ? JSON.stringify([scopeKey, "operator", operatorEditorState.generation, editingOperator?.id])
       : undefined,
     onSave: submitOperator,
+    onError: reportOperatorError,
     disabled: operatorUnavailable,
   });
   const locationForm = useMemo(
@@ -606,10 +617,7 @@ function LocationWorkspace({
               form={locationForm}
               pending={save.isPending}
               onSave={locationEditor.submit}
-              onActionError={(error) => {
-                if (isCurrentScope() && !(error && typeof error === "object" && "errorFields" in error))
-                  message.error(t("保存失败，请检查地点类型、编码、经营主体和履约能力"));
-              }}
+              onActionError={reportLocationError}
             />
           </>
         }
@@ -621,9 +629,6 @@ function LocationWorkspace({
           disabled={locationUnavailable || save.isPending}
           {...locationEditor.formProps}
         >
-          {locationEditor.error instanceof Error && (
-            <Alert type="error" showIcon title={locationEditor.error.message} />
-          )}
           <SettingsWorkspace
             sections={[
               {
@@ -840,10 +845,7 @@ function LocationWorkspace({
               form={boundOperatorForm}
               pending={saveOperator.isPending}
               onSave={operatorEditor.submit}
-              onActionError={(error) => {
-                if (isCurrentScope() && !(error && typeof error === "object" && "errorFields" in error))
-                  message.error(t("经营主体保存失败"));
-              }}
+              onActionError={reportOperatorError}
             />
           </>
         }
@@ -855,9 +857,6 @@ function LocationWorkspace({
           disabled={operatorUnavailable || saveOperator.isPending}
           {...operatorEditor.formProps}
         >
-          {operatorEditor.error instanceof Error && (
-            <Alert type="error" showIcon title={operatorEditor.error.message} />
-          )}
           <div>
             <Row gutter={16}>
               <Col span={24}>

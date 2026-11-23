@@ -13,10 +13,10 @@ export const RENTAL_CAPABILITY_PAGES = {
     id: "capabilities",
     path: "/capabilities",
     purpose: "configuration",
-    title: { default: "经营空间能力", translations: { "en-US": "Workspace capabilities" } },
+    title: { default: "经营空间能力", translations: { "en-US": "Capabilities" } },
     permissions: rentalPagePermissions("capabilities"),
     menu: {
-      group: { default: "经营基础", translations: { "en-US": "Operations foundation" } },
+      group: { default: "经营基础", translations: { "en-US": "Operating setup" } },
       order: 40
     }
   }

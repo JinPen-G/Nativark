@@ -13,6 +13,8 @@
 
 生命周期表单共用[现有 Rental 编辑围栏](../orders/useOrderEditor.ts)，每次打开具有独立代次。按钮和回车等待同一校验及原保存 Promise，失败保留输入并显示原错误，请求在途时保留原编辑对象。配置字段与兼容关系 JSON 转换沿原配置描述，提交使用打开时的修订。
 
+保存按钮与回车共用原具体错误反馈，兼容关系格式和服务端错误保持各自文案。失效页面、已取消请求和字段校验不追加通用失败提示。
+
 ## 共同装配接点
 
 从 `@rental-os/rental-core/admin/capabilities`、`/admin/capabilities/client` 和 `/admin/capabilities/pages` 使用页面、请求和声明。[统一 Rental 贡献](../index.tsx)通过 `useCapabilityContext` 供给本页当前上下文，与订单和养护只登记一份 Core 贡献。标准宿主的 Core 清单须声明 `capability` 资源的 `view` 与 `manage` 权限，页面读取和配置变更分别使用这两项声明。

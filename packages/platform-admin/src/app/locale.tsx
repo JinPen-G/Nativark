@@ -1,3 +1,5 @@
+import { authMessages } from "../features/auth/messages";
+import { appearanceMessages } from "../features/appearance/messages";
 import { useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { LocaleContext } from "./localeContext";
 import { accessMessages } from "../features/access/messages";
@@ -131,7 +133,7 @@ const ENGLISH: Readonly<Record<string, string>> = {
   "编辑资料": "Edit details",
   "请确认本次服务开始时点；过期续费不自动追补过去期间": "Confirm when this service term starts. Renewal after expiry does not automatically cover the elapsed period.",
 
-  ...accessMessages,
+  ...authMessages, ...appearanceMessages, ...accessMessages,
   ...integrationMessages,
   ...platformSettingsMessages,
   ...platformToolsMessages,

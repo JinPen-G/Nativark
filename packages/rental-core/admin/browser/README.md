@@ -16,6 +16,8 @@ const session = createRentalBrowserAdminSession({ baseURL: "/api" });
 
 装配时提供原登录品牌默认文案及显式品类治理展示开关。`OrderFactsEntry`、会员 AI 组件和治理 AI/Copilot 组件沿原类型化接点按需提供。订单缺 AI 展示时显示装配状态，普通业务继续使用同一页面。各组件的真实权限、模型和批准仍归原入口。
 
+公开登录品牌通过返回的 `loginDisplay` 接入公共原登录页，独立的匿名运输调用原公开 bootstrap，不携带缓存中的租户凭据，也不触发会话刷新。开发快捷入口只在宿主显式设置 `loginDevelopment` 时提供，默认关闭；原环境、当前身份及密码重置权限仍由服务端核验。
+
 ## 导航与经营范围
 
 `createRentalNavigation` 从同一登记表解析原 Rental 深链接，保留对象参数、查询和锚点。工单通知按 `workOrderId` 定位已登记详情，同时保留原本可解析的历史页签及锚点。消息跳转再次核对当前服务端 Core 目录。租户级会员与客户端渠道使用租户绑定，其他业务页使用当前已验证的经营空间。[导航工厂](../browser-navigation.ts)

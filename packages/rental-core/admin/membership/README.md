@@ -4,7 +4,7 @@
 
 ## 页面接入
 
-宿主调用 `createRentalMembershipAdminContribution`，传入当前实现版本与页面上下文 hook，将返回值合入同一个 Rental 贡献。公共 `CoreRoutes` 供给页面宿主，菜单、详情父级和页名从[八页描述](pages.ts)读取，主操作与辅助操作通过公共 `CorePage` 声明进入页头。
+宿主调用 `createRentalMembershipAdminContribution`，传入当前实现版本与页面上下文 hook，将返回值合入同一个 Rental 贡献。公共 `CoreRoutes` 供给页面宿主，菜单、详情父级和页名从[八页描述](pages.ts)读取，双语名称沿原词条，主操作与辅助操作通过公共 `CorePage` 声明进入页头。个人与企业资料详情从当前宿主取得品牌名，浏览器标题与原租户后台一致。
 
 个人会员页的“注册设置”和“当前空间证件类型”沿原 `tools` 插槽位于正文辅助区，“新增个人会员”继续使用顶部主操作。会员激励的“补发奖励”沿原 `tools` 插槽与默认按钮样式呈现，表单、弹窗确认与原奖励请求保持同一接点。
 

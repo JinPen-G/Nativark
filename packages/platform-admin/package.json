@@ -241,7 +241,8 @@
     "./source/components/kanban-board/KanbanBridge": "./src/components/kanban-board/KanbanBridge.tsx",
     "./notifications": "./src/notifications.ts",
     "./sound": "./src/sound.ts",
-    "./core-packages": "./src/features/core-packages/index.ts"
+    "./core-packages": "./src/features/core-packages/index.ts",
+    "./appearance": "./src/features/appearance/index.ts"
   },
   "scripts": {
     "lint": "tsc -p tsconfig.json",
@@ -295,5 +296,12 @@
     "typescript": "5.9.3",
     "vite": "8.2.1",
     "@types/node": "22.20.1"
+  },
+  "typesVersions": {
+    "*": {
+      "appearance": [
+        "src/features/appearance/index.ts"
+      ]
+    }
   }
 }

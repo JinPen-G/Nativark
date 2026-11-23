@@ -1,9 +1,8 @@
-/** 当前 Rental 页面取得经营空间选择器，工单与公共页保留公共上下文。
+/** 已获权 Rental 的原经营空间入口在公共和其他 Core 页面持续保留。
  * 同一薄壳与通知 Provider 持续挂载，其他 Core 撤权时保留工单原操作状态。 */
-import { matchRoutes, useLocation } from "react-router-dom";
 import type { CoreRegisteredPage } from "@rental-os/core-contracts";
 import type { PlatformShellProps } from "@rental-os/platform-admin";
-import { NativeContextSwitcher } from "@rental-os/platform-admin/shell";
+import { NativeContextSwitcher, useAdminBrandIcon } from "@rental-os/platform-admin/shell";
 import { useCoreSession, type CoreRouteComponent } from "@rental-os/platform-admin/core";
 import { useLocale } from "@rental-os/platform-admin/locale";
 import { RENTAL_CORE_ID } from "@rental-os/rental-core";
@@ -25,22 +24,16 @@ export function createMultiCoreShell(
   return function MultiCoreShell(props: PlatformShellProps) {
     const auth = session.useAuthStore();
     const cores = useCoreSession();
-    const { pathname } = useLocation();
     const { locale } = useLocale();
+    const brandIcon = useAdminBrandIcon();
     const en = locale === "en-US";
-    const matched = matchRoutes(
-      [...pages.values()].map(entry => ({ path: entry.path, handle: entry })),
-      pathname,
-    )?.at(-1);
-    const page = matched?.route.handle;
-    const rentalContext = page?.coreId === RENTAL_CORE_ID
-      && cores.canAccess(RENTAL_CORE_ID, page.definition.permissions);
+    const rentalContext = !auth.user?.isSaasAdmin && cores.canAccess(RENTAL_CORE_ID, []);
     const contextSwitcher = rentalContext ? undefined : <NativeContextSwitcher
-      title={auth.tenant?.operatorShortName || auth.tenant?.tenantName || props.brandName}
-      fullTitle={auth.tenant?.tenantName || props.brandName}
-      subtitle={auth.user?.isSaasAdmin ? en ? "Platform administration" : "平台管理"
+      title={auth.user?.isSaasAdmin ? props.brandName : auth.tenant?.tenantName || props.brandName}
+      fullTitle={auth.user?.isSaasAdmin ? props.brandName : auth.tenant?.tenantName || props.brandName}
+      subtitle={auth.user?.isSaasAdmin ? en ? "Platform administration" : "平台管理面"
         : en ? "Admin console" : "管理后台"}
-      brand={props.brand} brandUnframed compact={!auth.user?.isSaasAdmin}
+      brand={props.brand} brandUnframed={brandIcon.isPlatformMark} compact
       options={[]} value="" label={en ? "Business Core" : "业务 Core"}
       onChange={() => undefined} />;
     return <RentalShell {...props} contextSwitcher={contextSwitcher} />;

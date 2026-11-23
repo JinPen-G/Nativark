@@ -14,7 +14,7 @@ export const RENTAL_LOCATION_PAGES = {
   locations: {
     id: "locations",
     path: "/locations",
-    title: { default: "履约地点", translations: { "en-US": "Fulfillment locations" } },
+    title: { default: "履约地点", translations: { "en-US": "Locations" } },
     permissions: rentalPagePermissions("locations"),
     menu: {
       group: RENTAL_WORK_ORDER_PAGES.workOrders.menu.group,

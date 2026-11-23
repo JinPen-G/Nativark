@@ -14,6 +14,9 @@ export function NativeNavigation(props: {
   return <SharedNavigation {...props} sections={props.sections.map(section => ({ key: section.key,
     label: MENU_GROUP_LABELS[section.key] ?? section.label,
     icon: <AnimatedIcon name={groupIcons[section.key] ?? "rules"} />,
-    routes: section.routes.map(route => ({ ...route, displayLabel: menuRouteLabel(route.path, route.label) }))
+    routes: section.routes.map(route => ({ ...route, displayLabel: menuRouteLabel(route.path, route.label),
+      icon: section.key === "overview" && !props.flat
+        ? <AnimatedIcon name={route.path === "/workbench" ? "dashboard" : route.path === "/notifications" ? "messages" : "report"} />
+        : route.icon }))
   }))} />;
 }

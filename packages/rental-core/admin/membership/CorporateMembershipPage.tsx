@@ -2042,6 +2042,7 @@ function CorporateMembershipWorkspace({ scope }: { scope: string }) {
       {customerId && (
         <RecordDetailLayout
           title={selected?.corporateName ?? selected?.name ?? t("企业资料")}
+          brandName={host.brandName}
           onBack={() =>
             host.navigate(resolveCorePageLocation(host.pages, rentalCorporateMemberLocation()))
           }

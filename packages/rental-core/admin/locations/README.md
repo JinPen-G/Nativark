@@ -16,6 +16,8 @@
 
 两份表单复用现有编辑驱动，保存按钮与回车共用真实在途 Promise。每次打开固定编辑代次，校验后复验当前对象和权限，保存失败保留输入，侧窗完成退出后再清空字段。地点保存仍按原权限保留组织映射的清除及省略语义，保存后刷新原地点与经营主体查询。[编辑驱动](../orders/useOrderEditor.ts) · [公共表单](../../../platform-admin/src/core/useCoreForm.ts) · [退出生命周期](../../../platform-admin/src/components/ui/useModalDismissal.ts)
 
+地点与经营主体的按钮保存和回车提交共用各自原失败文案；失效页面、取消请求及字段校验不另弹通用失败提示。
+
 ## 列表与卡片
 
 页面和卡片从 `@rental-os/platform-admin/ui` 使用原图标、列表宽度和卡片事实，列表预检使用该出口的同一 `ListPreflightError`。设置分区从 `/forms` 使用原 `SettingsWorkspace`，原表单与退出生命周期沿同一组件供给。[UI 出口](../../../platform-admin/src/components/ui/index.ts) · [表单出口](../../../platform-admin/src/forms.ts)

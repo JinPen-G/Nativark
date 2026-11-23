@@ -6,7 +6,7 @@
 
 1. 使用已验证的会话、实时会话读取器、原查询范围和 `AdminRuntime` 创建页面上下文。配置请求在派发与返回时核对同一账号、租户、经营空间和会话代次，品牌应用回调也核对当前范围。[上下文工厂](page-context.tsx) · [会话身份](../orders/page-context.tsx)
 2. 将上下文钩子传给 `createRentalChannelsAdminContribution`，与其他 Rental 页面合入同一贡献。页面使用 `channel:manage` 声明，兼容宿主沿原 `system:integration:manage` 核对准入。[贡献工厂](index.tsx) · [兼容权限](pages.ts)
-3. 将本模块语言资源合入宿主的同一个 `LocaleProvider`。租户自定义文案与图片继续由当前配置提供。[语言资源](messages.ts)
+3. 将本模块语言资源合入宿主的同一个 `LocaleProvider`。页名与菜单沿原中英文词条，租户自定义文案与图片继续由当前配置提供。[语言资源](messages.ts)
 
 客户端、微信和官网页签按首次访问加载并保留已访问表单。顶部保存随当前页签登记，顶部按钮与回车共用 `useCoreForm` 的校验及真实保存 Promise。保存保留原版本、FAQ 过滤、官网动态列表转换和品牌缓存刷新，读取失败与保存失败沿所属表单呈现。[表单与页签](ClientChannelPage.tsx) · [公共保存接点](../../../platform-admin/src/core/CorePage.tsx)
 

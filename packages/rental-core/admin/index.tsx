@@ -55,3 +55,5 @@ export function createRentalAdminContribution(implementationVersion: string,
   return { coreId: orders.coreId, implementationVersion,
     pages: [...catalog.pages, ...orders.pages, ...workOrders.pages, ...capabilities.pages, ...locations.pages, ...commercial.pages, ...governance.pages, ...membership.pages, ...operations.pages, ...channels.pages, ...setup.pages, ...paymentReconciliation.pages] };
 }
+
+export { rentalPublicManagement, RentalOperationsAccountPage, OriginalRentalOperationsAccountPage, RentalTenantManagementPage, RentalOperatorInvitations } from "./access";

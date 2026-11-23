@@ -10,7 +10,7 @@ export const RENTAL_CHANNELS_PAGES = {
   clientChannel: {
     id: "client-channel",
     path: "/client-channel",
-    title: { default: "客户端渠道", translations: { "en-US": "Client channels" } },
+    title: { default: "客户端渠道", translations: { "en-US": "App & website" } },
     purpose: "configuration",
     permissions: rentalPagePermissions("client-channel"),
     menu: {

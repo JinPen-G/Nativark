@@ -2,17 +2,17 @@
 import { useLayoutEffect, useRef } from "react";
 import type { FormInstance, FormProps } from "antd";
 import { useCoreForm } from "@rental-os/platform-admin/core";
-import { useFeedback } from "@rental-os/platform-admin/ui";
 import { useLocale } from "@rental-os/platform-admin/locale";
 
-export function useOrderEditor<Values>({ form, identity, onSave, disabled = false }: {
+export function useOrderEditor<Values>({ form, identity, onSave, disabled = false, onError }: {
   form: FormInstance<Values>;
   identity?: string;
   onSave: (values: Values) => Promise<unknown>;
   disabled?: boolean;
+  /** 原页面未自行报告的失败；已有 mutation.onError 时省略，避免双重提示。 */
+  onError?: (error: unknown) => void;
 }) {
   const { t } = useLocale();
-  const { toast } = useFeedback();
   const owner = useRef({ identity, sequence: 0, active: true });
   const submission = useRef<{ key: string; request: Promise<unknown> } | undefined>(undefined);
   if (owner.current.identity !== identity) {
@@ -72,8 +72,8 @@ export function useOrderEditor<Values>({ form, identity, onSave, disabled = fals
         const request = submit(values);
         if (pending?.request !== request) return request;
       }).catch(error => {
-        if (isCurrent(key) && !(error && typeof error === "object" && "errorFields" in error))
-          toast({ type: "error", title: t("操作失败") });
+        if (isCurrent(key) && !(error && typeof error === "object" && ("errorFields" in error || "name" in error && error.name === "AbortError")))
+          onError?.(error);
       });
     }
   };

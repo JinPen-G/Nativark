@@ -13,6 +13,7 @@ import { AnimatedIcon } from "../ui/AnimatedIcon";
 export interface ShellNavigationSection {
   key: string;
   label: string;
+  displayLabel?: string;
   icon?: ReactNode;
   routes: Array<{ path: string; label: string; displayLabel?: string; icon?: ReactNode }>;
 }
@@ -59,7 +60,7 @@ export function NativeNavigation({ sections, selectedKey, query, onNavigate, fla
       {visible.filter(s => s.key !== "overview").map(section => {
         const active = section.routes.some(route => selectedKey === route.path);
         const expanded = isExpanded(section);
-        const label = t(section.label);
+        const label = t(section.displayLabel ?? section.label);
         const panelId = `${submenuId}-${section.key}`;
         const panelOpen = expanded && !collapsed;
         return <DropdownMenu key={section.key} modal={false} open={collapsed && popupGroup === section.key}

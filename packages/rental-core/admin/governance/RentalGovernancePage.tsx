@@ -4,7 +4,7 @@ import { CalendarOutlined, NotificationOutlined, SafetyCertificateOutlined, Team
 import type { SaveTenantRentalBusinessSettingsRequest } from "@rental-os/rental-core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { App } from "@rental-os/platform-admin/ui";
-import { Button, Tabs } from "@rental-os/platform-admin/ui";
+import { Tabs } from "@rental-os/platform-admin/ui";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useLocale } from "@rental-os/platform-admin/locale";
 import { QueryState } from "@rental-os/platform-admin/ui";
@@ -90,7 +90,7 @@ const TABS: GovernanceTabDefinition[] = [
  * 规则、日历、会员奖励与通知不会再被一个页头按钮混成一次提交。
  */
 function RentalGovernanceBody() {
-  const { api: rentalCoreApi, session: auth, runtime, scopeKey, queryScope: scope, navigationTarget, components } = useRentalGovernanceContext();
+  const { api: rentalCoreApi, session: auth, getSession, runtime, scopeKey, currentScopeKey, queryScope: scope, navigationTarget, components } = useRentalGovernanceContext();
   const { CategoryAssistFlow } = components;
   const { message } = App.useApp();
   const { t } = useLocale();
@@ -175,8 +175,19 @@ function RentalGovernanceBody() {
     icon: definition.key === "rules" ? <SafetyCertificateOutlined /> : definition.key === "calendar" ? <CalendarOutlined /> : definition.key === "membership" ? <TeamOutlined /> : definition.key === "notifications" ? <NotificationOutlined /> : undefined
   }));
   return (
-    <CorePage tools={tab === "category" && assistAllowed && CategoryAssistFlow ? <Button aria-expanded={assistScope === assistIdentity}
-      onClick={() => setAssistScope(assistIdentity)}>{t("品类版本助手")}</Button> : undefined}>
+    <CorePage actions={tab === "category" && assistAllowed && CategoryAssistFlow ? [{
+      id: "category-assist", kind: "open", label: t("品类版本助手"), emphasis: "secondary",
+      ariaExpanded: assistScope === assistIdentity,
+      open: () => {
+        const current = getSession();
+        // 采用沿原权限检查；它不是普通治理查看权，也不是新增的 Core 权限。
+        if (currentScopeKey() !== scopeKey || !current.sessionVerified || !current.authenticated
+          || !current.tenant?.tenantId || !current.user || current.user.isSaasAdmin
+          || !current.currentWorkspaceId || !current.hasPermission("rental-os:category:adopt"))
+          throw new Error(t("当前操作不可用"));
+        setAssistScope(assistIdentity);
+      }
+    }] : []}>
 
       <div data-copilot-anchor="governance-view"><Tabs
         key={scope}

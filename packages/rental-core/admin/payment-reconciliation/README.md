@@ -6,7 +6,7 @@
 
 1. 使用已验证的 Rental 会话、实时会话读取器、查询范围和 `AdminRuntime` 创建上下文。请求前后核对同一账号、租户、经营空间、会话代次和财务权限，查询取消信号交给原传输。[上下文工厂](page-context.tsx) · [四请求客户端](client.ts)
 2. 将上下文钩子传给 `createRentalPaymentReconciliationAdminContribution`，与其他 Rental 页面合入同一贡献。列表与详情声明共用 `finance:reconcile`，旧宿主沿用 `rental-os:finance:reconcile`。[贡献工厂](index.tsx) · [准入与父级](pages.ts)
-3. 将 `rentalPaymentReconciliationMessages` 并入宿主同一语言目录。批次标题、原处理原因、币种和差异代码继续从服务端返回值展示。[语言资源](messages.ts)
+3. 将 `rentalPaymentReconciliationMessages` 并入宿主同一语言目录；“已确认”“差异”等共用词保持原翻译，不覆盖其他页面的既有口径。批次标题、原处理原因、币种和差异代码继续从服务端返回值展示。[语言资源](messages.ts)
 
 列表与详情分别登记 `/payment-reconciliation` 和 `/payment-reconciliation/:batchId`。旧宿主保留 `/rental/payment-reconciliation` 及原批次深链接，将已匹配的 `batchId` 传入 `CorePageHost.params`。页面跳转经 `CorePageLocation` 定位受权登记目标，详情继承列表菜单和面包屑父级。[位置映射](pages.ts) · [旧宿主上下文](../../../../apps/admin/src/features/settings/legacy-payment-reconciliation-context.tsx) · [旧页面入口](../../../../apps/admin/src/features/settings/PaymentReconciliationPage.tsx)
 

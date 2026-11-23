@@ -3,4 +3,4 @@ export { AdminUiProvider } from "./AdminUiProvider";
 export { AdminRuntimeProvider, useAdminRuntime, useAdminSession, createAdminSessionQueries } from "./runtime";
 export type { AdminRuntime, AdminSessionSnapshot, AdminRequestOptions } from "./runtime";
 export { PlatformShell } from "./PlatformShell";
-export type { PlatformShellProps } from "./PlatformShell";
+export type { PlatformShellProps, PlatformShellLayout } from "./PlatformShell";

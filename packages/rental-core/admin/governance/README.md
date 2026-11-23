@@ -16,6 +16,8 @@
 
 公共 UI、表单和页头来自 platform-admin，SettingsGroups 与 WorkspacePageActions 沿公共 shell 同源出口消费。按钮、回车和确认入口共用已有公共 Core 表单驱动，保存中保护原编辑对象。宿主将 [rentalGovernanceMessages](messages.ts) 合入同一个 LocaleProvider。
 
+“品类版本助手”使用 `CorePage` 的页头辅助动作，保持原默认按钮和展开状态。它仅在品类页签、当前采用权限和实际助手接点均可用时显示，离开当前页面或撤销权限后的旧动作不能打开助手。
+
 ## 调用链
 
 [RentalGovernancePage](RentalGovernancePage.tsx)按同一权限对象生成页签，分别进入 [CategoryTab](CategoryTab.tsx)、[RulesTab](RulesTab.tsx)、[CalendarTab](CalendarTab.tsx)、[MembershipRewardRulesTab](MembershipRewardRulesTab.tsx)和 [NotificationsTab](NotificationsTab.tsx)。[治理客户端](client.ts)委托原 Rental HTTP，金额、版本生效、日历冲突与投递结果继续由原服务端裁定。整体 business-settings 保存由最近的服务端快照合并当前页签补丁，未保存分区保持各自草稿。
