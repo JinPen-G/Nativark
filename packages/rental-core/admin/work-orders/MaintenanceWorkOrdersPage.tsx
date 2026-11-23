@@ -310,6 +310,7 @@ export function MaintenanceWorkOrdersPage({
 
   const listActions: CoreAdminPageAction<Record<string, unknown>>[] = [{
     id: "refresh", kind: "command", label: "刷新", intent: "refresh",
+    slot: "tools",
     pending: workOrders.isFetching || dispositions.isFetching,
     execute: () => Promise.all([
       workOrders.refetch({ throwOnError: true }), dispositions.refetch({ throwOnError: true }),
@@ -326,7 +327,7 @@ export function MaintenanceWorkOrdersPage({
   const detailDisabled = run.isPending || Boolean(dialog) || workOrders.isError;
   if (activeWorkOrder) {
     if (canManage && ["pending", "in_progress"].includes(activeWorkOrder.status)) detailActions.push({
-      id: "assign", kind: "open", label: "派工", disabled: detailDisabled,
+      id: "assign", kind: "open", slot: "tools", label: "派工", disabled: detailDisabled,
       permissions: [{ resource: "maintenance", action: "manage" }], open: () => openDialog("assign", activeWorkOrder)
     });
     if (canManage && activeWorkOrder.status === "pending") detailActions.push({
@@ -344,7 +345,7 @@ export function MaintenanceWorkOrdersPage({
       permissions: [{ resource: "maintenance", action: "review" }], open: () => openDialog("review", activeWorkOrder)
     });
     if (canManage && ["pending", "in_progress", "pending_review"].includes(activeWorkOrder.status)) detailActions.push({
-      id: "cancel", kind: "open", label: "取消工单", danger: true, disabled: detailDisabled,
+      id: "cancel", kind: "open", slot: "tools", label: "取消工单", danger: true, disabled: detailDisabled,
       permissions: [{ resource: "maintenance", action: "manage" }], open: () => openDialog("cancel", activeWorkOrder)
     });
   }
