@@ -15,6 +15,6 @@
     "typescript": "^5.6.3"
   },
   "dependencies": {
-    "@rental-os/rental-core": "0.1.9"
+    "@rental-os/rental-core": "0.1.10"
   }
 }

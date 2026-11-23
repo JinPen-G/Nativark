@@ -12,7 +12,7 @@
   "dependencies": {
     "@rental-os/shared": "0.1.0",
     "@rental-os/web-client": "0.1.0",
-    "@rental-os/rental-core": "0.1.9",
+    "@rental-os/rental-core": "0.1.10",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-router-dom": "7.18.2",

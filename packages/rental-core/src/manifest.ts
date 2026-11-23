@@ -16,8 +16,8 @@ export function createRentalManifest(input: {
     description: "保留品类、经营空间、会员、报价订单、履约资金及各端接口的租赁业务 Core",
     author: "Nativark contributors", version: RENTAL_CORE_VERSION, source: input.source, license: "MIT",
     compatibility: {
-      // 原按钮变体与同事务部署观察要求底座0.1.10；旧底座须在加载前拒绝本版Core。
-      platform: { minInclusive: "0.1.10", maxExclusive: "0.2.0" },
+      // 三队列跨轮调度接点、原按钮变体和同事务部署观察要求底座0.1.11，加载前须核当前发行。
+      platform: { minInclusive: "0.1.11", maxExclusive: "0.2.0" },
       contract: { minInclusive: "0.1.1", maxExclusive: "0.2.0" }
     },
     runtime: { node: { minInclusive: "22.12.0", maxExclusive: "25.0.0" } },
