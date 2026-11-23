@@ -64,6 +64,8 @@ npm run start -w @rental-os/platform-api
 
 上述公共构建由本宿主的 [package scripts](package.json) 串联原公共依赖。需要类型核对时使用 `npm run lint -w @rental-os/platform-api`，它的 prelint 同样先构建公共依赖。
 
+默认零 Core 的数据库仍沿原 `onModuleInit` 可选连接和 `onModuleDestroy` 断开。所选宿主若需统一等待权限登记及在途请求，可在任何生命周期钩子开始前调用 `PlatformDatabaseClient.manageLifecycle`，绑定唯一实际宿主。数据库自己的 init/destroy 随后只委托该宿主，接管者在 HTTP dispose 后的 shutdown 断开同一池；重复绑定同一对象保持原归属，其他对象或晚到的接管拒绝。[公共数据库接点](src/database.ts) · [单工单实际接管](../example-tickets-api/src/lifecycle.ts)
+
 Client 输出在本宿主 `generated/client`，运行产物从同一宿主目录读取。公共构建消费 `platform-contracts`、`platform-server` 和标准 `core-contracts` / `core-host` / `platform-core-host`。当前 schema 的41个模型均属平台，包含6个 Core 授权/绑定及原收据表、2个统一期限表、5个订阅办理表、2个基础集成表、2个官方日历来源表、2个文件/上传表、2个通知表、1个异步任务表、3个邀请/客服邮件表、1个官网演示申请表和1个公共限流桶表。公共数据版本为 `0.1.9`，十四份迁移摘要由数据计划固定；文件、通知与任务的原字段、唯一键、清理收据及外键保留。官网演示申请、SaaS预约列表和租户筛选预设已由公共模块挂载。匿名预约使用公共持久限流桶，完整Rental组合继续其原表与计数。[预约接入](../../packages/platform-server/src/modules/demo-requests/README.md) · [筛选预设](../../packages/platform-server/src/modules/platform-tools/README.md#筛选预设)。命令是否可执行取决于当前环境许可。
 
 新公共库按 `npm run prisma:migrate:deploy -w @rental-os/platform-api` 应用本链。**不能把本基线套在已有 Rental 组合库**，已有库切换须先按原迁移来源和数据所有权演练兼容迁移。

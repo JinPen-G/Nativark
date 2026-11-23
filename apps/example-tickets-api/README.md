@@ -23,6 +23,7 @@ API 启动读取当前进程 `DATABASE_URL`、`AUTH_TOKEN_SECRET`、`CORE_DEPLOY
 | 固定包和部署准备 | [准备命令](src/prepare-deployment.ts)、[包核验](src/deployment-package.ts)；不安装或执行DDL，成功只显示pending |
 | Core权限登记 | [显式命令](src/register-permissions.ts)核相同包/锁后，在同一公共库事务登记六项工单权限；不自动授权或改角色 |
 | 受控组合 | [装配](src/assembly.ts)、[Nest模块](src/app.module.ts)；只选择一个Core，版本与包摘要固定，公共与业务使用一个数据库实例，持主体锁的部署观察复用当前事务 |
+| 唯一生命周期 | [启动/排空](src/lifecycle.ts)、[启动失败关闭](src/main.ts)；权限登记、原Guard和完整处理器结束后，HTTP关闭再断同一池；断线不取消原业务 |
 | 当前准入 | [公共Core宿主](../../packages/platform-core-host/README.md)、[工单标准宿主](../../packages/example-tickets-core/src/platform-host.ts)；当前账号 / Core授权 / 成员分配 / 订阅 / 绑定与业务权限 |
 | 实际数据 | [平台数据计划](../platform-api/src/platform-data.ts)、[工单物理检查](../../packages/example-tickets-core/src/mysql.ts)；原Prisma账和实际结构分别核验 |
 | 当前版本与更新材料 | [实际读取源](src/core-package-sources.ts)；核固定底座归档、六公共运行包、完整工单包及原迁移观察 |
@@ -70,7 +71,9 @@ node apps/example-tickets-api/dist/prepare-deployment.js <固定底座发行JSON
 
 同一部署环境完成公共库初始化后，显式登记标准包声明的工单权限。命令读取当前进程的 `DATABASE_URL` 和 `CORE_DEPLOYMENT_LOCK`，不会加载环境文件。它会写公共Permission目录，须在获准的部署环境执行；重复执行保留原ID和角色关联，冲突整笔回滚。
 
-本宿主的标准 Nest 模块也会在 HTTP 监听前，通过同一 `CoreHostPermissionStartup` 和公共库 Serializable 事务登记已核包清单。构造模块期间不查库，登记失败会释放本宿主数据库连接并阻止启动。显式命令可用于部署阶段提前核对，同一次启动的钩子共用原 Promise。新增工单权限只进入可配置目录，角色和成员分配仍经原接口办理。[标准启动接线](src/app.module.ts) · [公共启动对象](../../packages/platform-core-host/src/core-host.module.ts)
+本宿主的标准 Nest 模块在 HTTP 监听前，通过同一 `CoreHostPermissionStartup` 和公共库 Serializable 事务登记已核包清单。构造模块期间不查库，显式初始化与 Nest 钩子共用原 Promise。唯一[宿主生命周期](src/lifecycle.ts)在初始化前接管公共数据库的连接/关闭钩子；停止时先阻止未开始的登记和新请求，等待同一在途登记、原 Guard 与完整处理器，HTTP dispose 后再断开同一池。并发关闭共用原排空和断库结果，启动入口在 init/listen 失败后关闭同一个应用。客户端断线只弃置响应，原处理器继续到完成或失败；多值、文件和原错误仍交原 HTTP 出口。
+
+显式命令可用于部署阶段提前核对。新增工单权限只进入可配置目录，角色和成员分配仍经原接口办理；生命周期包装调用同一个原 `PlatformAuthGuard`，不复制或放宽授权。[标准启动接线](src/app.module.ts) · [公共启动对象](../../packages/platform-core-host/src/core-host.module.ts) · [数据库归属接点](../platform-api/src/database.ts)
 
 ```sh
 npm run register:permissions -w @rental-os/example-tickets-api

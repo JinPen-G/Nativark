@@ -1,8 +1,10 @@
-/** 公共+工单的显式Nest组合，不修改公共Guard业务分支或公共宿主源码来识别工单页面。 */
-import { Module } from "@nestjs/common";
+/** 公共+工单的显式Nest组合；唯一宿主生命周期等待原Guard/处理器与权限登记。
+ * 公共权限、ALS和工单业务各沿原实例，不复制授权逻辑或提前断开同一数据库。 */
+import { Module, type ExecutionContext } from "@nestjs/common";
+import { APP_INTERCEPTOR } from "@nestjs/core";
 import { ConfigModule, ConfigService } from "@nestjs/config";
 import { CoreDeploymentLockSchema, type CoreDeploymentLock } from "@rental-os/core-contracts";
-import { PlatformServerModule, createPlatformOpenApi } from "@rental-os/platform-server";
+import { PlatformAuthGuard, PlatformServerModule, createPlatformOpenApi } from "@rental-os/platform-server";
 import {
   CORE_HOST_APPLICATION, CORE_PACKAGE_ASSEMBLY, CoreHostModule, CorePackageAssemblyModule, CoreHostPermissionStartup,
   createPlatformCoreHttpAccess, createPlatformCoreOpenApi, createPlatformCorePackageAssemblyHttpAccess,
@@ -12,6 +14,7 @@ import { PlatformDatabaseClient, PlatformDatabaseModule } from "@rental-os/platf
 import { TicketsHttpModule } from "@rental-os/example-tickets-core/nest";
 import { createTicketsOpenApi } from "@rental-os/example-tickets-core";
 import { composeTicketsApplication } from "./assembly";
+import { TicketsApplicationLifecycle } from "./lifecycle";
 
 /** Core和公共API共用原数据库provider，生命周期由宿主唯一模块负责。 */
 export function ticketsApplicationModule(lock: CoreDeploymentLock) {
@@ -30,19 +33,30 @@ export function ticketsApplicationModule(lock: CoreDeploymentLock) {
     useFactory: (assembly: Assembly) => assembly.application,
     permissions: { inject: [assembledToken, PlatformDatabaseClient],
       useFactory: (_assembly: Assembly, database: PlatformDatabaseClient) => new CoreHostPermissionStartup({ database,
-        manifests: selectedLock.cores.map(pin => pin.manifest), onFailure: () => database.$disconnect() }) } });
+        manifests: selectedLock.cores.map(pin => pin.manifest) }) } });
+  @Module({ imports: [PlatformDatabaseModule, coreModule], providers: [{
+    provide: TicketsApplicationLifecycle, inject: [PlatformDatabaseClient, CoreHostPermissionStartup],
+    useFactory: (database: PlatformDatabaseClient, permissions: CoreHostPermissionStartup) =>
+      new TicketsApplicationLifecycle(database, permissions)
+  }], exports: [TicketsApplicationLifecycle] })
+  class TicketsLifecycleModule {}
   const businessModule = TicketsHttpModule.registerFactory({ imports: [TicketsDependenciesModule], inject: [assembledToken],
     useFactory: (assembly: Assembly) => assembly.tickets });
   const packagesModule = CorePackageAssemblyModule.register({ imports: [TicketsDependenciesModule], inject: [assembledToken],
     useFactory: (assembly: Assembly) => assembly.packages });
-  @Module({ imports: [PlatformServerModule.register({ imports: [PlatformDatabaseModule, coreModule, businessModule, packagesModule],
+  @Module({ imports: [TicketsLifecycleModule, PlatformServerModule.register({
+    imports: [PlatformDatabaseModule, coreModule, businessModule, packagesModule, TicketsLifecycleModule],
     inject: [PlatformDatabaseClient], useFactory: (database: PlatformDatabaseClient) => database,
+    guardProvider: { provide: "tickets.request-guard", inject: [PlatformAuthGuard, TicketsApplicationLifecycle],
+      useFactory: (guard: PlatformAuthGuard, lifecycle: TicketsApplicationLifecycle) => ({
+        canActivate: (context: ExecutionContext) => lifecycle.runRequest(() => guard.canActivate(context))
+      }) },
     coreHttpProvider: { provide: "tickets.core-http", inject: [CORE_HOST_APPLICATION, CORE_PACKAGE_ASSEMBLY],
       useFactory: (application: CoreHostHttpApplication, packages: CorePackageAssembly) =>
         createPlatformCorePackageAssemblyHttpAccess(packages, createPlatformCoreHttpAccess(application)) },
     openApiDocument: createPlatformCorePackageOpenApi(createPlatformCoreOpenApi(createPlatformOpenApi(), [
       { manifest: selectedLock.cores[0].manifest, contribution: createTicketsOpenApi() }
-    ])) })] })
+    ])) })], providers: [{ provide: APP_INTERCEPTOR, useExisting: TicketsApplicationLifecycle }] })
   class TicketsApplicationModule {}
   return TicketsApplicationModule;
 }

@@ -17,11 +17,17 @@ async function bootstrap() {
   const port = Number(process.env.API_PORT ?? 3000);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("API_PORT必须为1-65535整数");
   const app = await NestFactory.create(ticketsApplicationModule(lock));
-  app.use(requestIdentityMiddleware);
-  app.setGlobalPrefix("api");
-  app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
-  app.enableShutdownHooks();
-  await app.listen(port);
+  try {
+    app.use(requestIdentityMiddleware);
+    app.setGlobalPrefix("api");
+    app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
+    app.enableShutdownHooks();
+    await app.listen(port);
+  } catch (error) {
+    try { await app.close(); }
+    catch (closingError) { throw new AggregateError([error, closingError], "工单启动失败且资源排空未完成"); }
+    throw error;
+  }
 }
 
 void bootstrap();

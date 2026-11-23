@@ -114,6 +114,8 @@ export class PlatformServerModule {
     integrationBusinessProvider?: FactoryProvider<TenantIntegrationBusinessParticipant>;
     integrationPaymentProbe?: PaymentIntegrationProbe;
     integrationRuntimeProviders?: IntegrationRuntimeProviders;
+    /** 宿主可包装同一个原Guard以等待完整请求；缺省仍直接使用PlatformAuthGuard。 */
+    guardProvider?: FactoryProvider<CanActivate>;
     /** 完整宿主可提供同实例组合；与单项集成选项互斥，避免重复执行者。 */
     applicationsProvider?: FactoryProvider<PlatformApplicationBindings>;
     openApiDocument?: unknown }): DynamicModule {
@@ -184,7 +186,8 @@ export class PlatformServerModule {
         { provide: PLATFORM_OPENAPI_DOCUMENT, useValue: options.openApiDocument ?? createPlatformOpenApi() },
         ...(options.coreHttp ? [{ provide: REGISTERED_CORE_HTTP_ACCESS, useValue: options.coreHttp }] : []),
         ...(options.coreHttpProvider ? [{ ...options.coreHttpProvider, provide: REGISTERED_CORE_HTTP_ACCESS }] : []),
-        { provide: APP_GUARD, useExisting: PlatformAuthGuard },
+        options.guardProvider ? { ...options.guardProvider, provide: APP_GUARD }
+          : { provide: APP_GUARD, useExisting: PlatformAuthGuard },
         { provide: APP_INTERCEPTOR, useClass: RequestIdInterceptor }
       ], exports: [PlatformAuthService, PlatformAuthenticationRepository, PlatformManagementService, PlatformToolsService,
         PlatformFilterPresetService, DemoRequestService, SubscriptionService, SUBSCRIPTION_APPLICATION,
