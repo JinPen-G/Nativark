@@ -20,6 +20,7 @@ export type { RentalAdminHost, RentalAdminHostOptions, RentalAdminHostState } fr
 export { createRentalBrowserAdminHost } from "./browser-host";
 export type { RentalBrowserAdminHostOptions } from "./browser-host";
 export { createRentalNavigation } from "./browser-navigation";
+export { createRentalNavigationPresentation } from "./browser-navigation-presentation";
 export { createRentalShell } from "./browser-shell";
 export type { RentalShellOptions } from "./browser-shell";
 

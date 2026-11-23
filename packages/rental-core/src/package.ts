@@ -5,12 +5,40 @@ import { CorePackagePathSchema, CoreSourceSchema, pinCoreDocumentationLinks, ren
 import { CORE_ARCHIVE_LIMITS, createCoreArchive } from "@rental-os/core-contracts/archive";
 import { corePackageFiles, inspectCorePackageFiles } from "@rental-os/core-contracts/package";
 import { posix } from "node:path";
+import ts from "typescript";
 import { RENTAL_CORE_VERSION } from "./core-identity";
 import { createRentalManifest } from "./manifest";
 import { readRentalDataPackage } from "./data-package";
 
 const generatedNames = new Set(["core.manifest.json", "CORE_GUIDE.md"]);
 const text = (bytes: Uint8Array) => new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+
+/** 只读取真实模块引用；展示代码的字符串和注释不构成包依赖。 */
+function relativeModuleReferences(file: string, source: string): string[] {
+  const references = new Set<string>();
+  const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+  const add = (node: ts.Node | undefined) => {
+    if (node && ts.isStringLiteralLike(node) && node.text.startsWith(".")) {
+      references.add(node.text);
+    }
+  };
+  const visit = (node: ts.Node) => {
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+      add(node.moduleSpecifier);
+    } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
+      add(node.moduleReference.expression);
+    } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)) {
+      add(node.argument.literal);
+    } else if (ts.isCallExpression(node)
+      && (node.expression.kind === ts.SyntaxKind.ImportKeyword
+        || ts.isIdentifier(node.expression) && node.expression.text === "require")) {
+      add(node.arguments[0]);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(tree);
+  return [...references];
+}
 
 /** 源码候选须先构建再传入；仅将缺少 dist 的源码改名打包会明确失败。 */
 export function createRentalPackage(input: {
@@ -74,20 +102,19 @@ export function createRentalPackage(input: {
   for (const [file, bytes] of files) {
     if (!/\.(?:[cm]?js|tsx?|d\.ts)$/.test(file)) continue;
     const source = text(bytes);
-    const references = /\b(?:from\s*|import\s*\(\s*|import\s*|require\s*\(\s*)["'](\.[^"']+)["']/g;
-    for (const match of source.matchAll(references)) {
-      const target = posix.normalize(posix.join(posix.dirname(file), match[1]));
-      if (target === ".." || target.startsWith("../")) throw new Error(`Rental 依赖越出标准包：${file} → ${match[1]}`);
+    for (const reference of relativeModuleReferences(file, source)) {
+      const target = posix.normalize(posix.join(posix.dirname(file), reference));
+      if (target === ".." || target.startsWith("../")) throw new Error(`Rental 依赖越出标准包：${file} → ${reference}`);
       const types = file.endsWith(".d.ts"), runtime = /\.[cm]?js$/.test(file);
       // JS 发布入口不能靠只存在的 TS 作者源码补齐运行依赖。
-      if (runtime && /\.[cm]?tsx?$/.test(target)) throw new Error(`Rental 运行依赖仍指向未构建源码：${file} → ${match[1]}`);
+      if (runtime && /\.[cm]?tsx?$/.test(target)) throw new Error(`Rental 运行依赖仍指向未构建源码：${file} → ${reference}`);
       const extensions = runtime ? [".js", ".cjs", ".mjs", ".json"] : [".ts", ".tsx", ".d.ts", ".js", ".json"];
       const indexes = runtime ? ["index.js", "index.cjs", "index.mjs", "index.json"] : ["index.ts", "index.tsx", "index.d.ts", "index.js"];
       const candidates = types && target.endsWith(".js")
         ? [target.slice(0, -3) + ".d.ts", target]
         : [target, ...extensions.map(extension => target + extension), ...indexes.map(index => `${target}/${index}`)];
       if (!candidates.some(candidate => files.has(candidate)))
-        throw new Error(`Rental 包缺少相对依赖：${file} → ${match[1]}`);
+        throw new Error(`Rental 包缺少相对依赖：${file} → ${reference}`);
     }
   }
   // Source documents keep their original relative links in the checkout.

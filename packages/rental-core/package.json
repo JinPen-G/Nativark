@@ -2441,6 +2441,10 @@
     "./admin/browser-notifications/source/archive/inbox-triage/integration.css": "./admin/browser-notifications/archive/inbox-triage/integration.css",
     "./admin/browser-notifications/source/archive/shared/MeasuredHeight": "./admin/browser-notifications/archive/shared/MeasuredHeight.tsx",
     "./admin/assistant-shell": "./admin/assistant-shell.tsx",
+    "./admin/desktop-browser": {
+      "types": "./admin/desktop-browser.tsx",
+      "default": "./admin/desktop-browser.tsx"
+    },
     "./admin/assistant-browser": {
       "types": "./admin/assistant-browser.tsx",
       "default": "./admin/assistant-browser.tsx"
@@ -4638,6 +4642,9 @@
       "admin/assistant-shell": [
         "admin/assistant-shell.tsx"
       ],
+      "admin/desktop-browser": [
+        "./admin/desktop-browser.tsx"
+      ],
       "admin/assistant-browser": [
         "./admin/assistant-browser.tsx"
       ],
@@ -4693,7 +4700,8 @@
     "motion": "14.6.0",
     "@tanstack/react-table": "8.21.3",
     "@rental-os/shared": "0.1.0",
-    "@rental-os/ai-native-admin": "0.1.0"
+    "@rental-os/ai-native-admin": "0.1.0",
+    "typescript": "5.9.3"
   },
   "peerDependenciesMeta": {
     "@nestjs/common": {
@@ -4772,6 +4780,9 @@
       "optional": true
     },
     "@rental-os/ai-native-admin": {
+      "optional": true
+    },
+    "typescript": {
       "optional": true
     }
   }
