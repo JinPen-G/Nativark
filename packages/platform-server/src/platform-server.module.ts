@@ -15,7 +15,8 @@ import { AccountAppearanceController } from "./modules/client/account-appearance
 import { RequestIdInterceptor } from "./common/request-id.interceptor";
 import { PlatformHealthController } from "./platform-http.controller";
 import { PlatformOpenApiController, PLATFORM_OPENAPI_DOCUMENT, createPlatformOpenApi } from "./platform-openapi";
-import type { PlatformManagementDatabase } from "./modules/platform/platform-management.store";
+import { PLATFORM_TENANT_SUMMARY_PROJECTION, type PlatformManagementDatabase,
+  type PlatformTenantSummaryProjection } from "./modules/platform/platform-management.store";
 import { PlatformManagementService } from "./modules/platform/platform-management.service";
 import { PlatformManagementController } from "./modules/platform/platform-management.controller";
 import { PlatformToolsService } from "./modules/platform-tools/platform-tools.service";
@@ -85,6 +86,8 @@ export interface PlatformApplicationBindings {
   officialCalendarSources: OfficialCalendarSourceService;
   /** 旧宿主可保留原计数桶和唯一扣额参加者；未提供时使用本版公共持久桶。 */
   demoRequestRateLimit?: DemoRequestRateLimit;
+  /** 同一事务内的 Core 数量投影，仅供获权 SaaS 租户列表和详情读取。 */
+  tenantSummaryProjection?: PlatformTenantSummaryProjection;
 }
 
 function hostApplication<Key extends keyof PlatformApplicationBindings>(provide: FactoryProvider["provide"], key: Key): FactoryProvider {
@@ -130,6 +133,8 @@ export class PlatformServerModule {
       hostApplication(TenantIntegrationRuntimeService, "notifications"), hostApplication(TenantEmailRuntimeService, "email"),
       hostApplication(TenantIntegrationConnectivityService, "connectivity"), hostApplication(ObjectStorageProviderService, "files"),
       hostApplication(INTEGRATION_PAYMENT_PROBE, "payments"), hostApplication(OfficialCalendarSourceService, "officialCalendarSources"),
+      { provide: PLATFORM_TENANT_SUMMARY_PROJECTION, inject: [HOST_APPLICATIONS],
+        useFactory: (host: PlatformApplicationBindings) => host.tenantSummaryProjection },
       { provide: DEMO_REQUEST_RATE_LIMIT, inject: [HOST_APPLICATIONS, PLATFORM_AUTH_DATA_STORE],
         useFactory: (host: PlatformApplicationBindings, database: PlatformDatabase) =>
           host.demoRequestRateLimit ?? new DemoRequestRateLimitService(database) }

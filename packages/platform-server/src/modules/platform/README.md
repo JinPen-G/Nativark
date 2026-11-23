@@ -35,9 +35,11 @@
 
 `PlatformManagementService` 的构造依赖为 `PLATFORM_AUTH_DATA_STORE`，类型为 `PlatformManagementDatabase`。宿主使用原 Prisma 实例供给该 token，并将同一服务实例注入原业务适配。内部仓储与主体围栏由该服务创建。[数据库 token](platform-auth-data-store.ts) · [公共模块装配](../../platform-server.module.ts)
 
+所选 Core 可通过 `PlatformApplicationBindings.tenantSummaryProjection` 为 SaaS 租户列表和详情补充原数量列。公共模块将此参加者注入 `PLATFORM_TENANT_SUMMARY_PROJECTION`，读取使用同一管理事务并在返回前复验 SaaS 权限。`workspaceCount` 和 `orderCount` 是可选兼容字段，Core 从实际数据供给，未提供时省略。Rental 使用原经营空间与订单数量，保留公共租户字段及其他 Core 的开通状态。[投影端口](platform-management.store.ts) · [Rental 统计](../../../../../packages/rental-core/src/public-management-compatibility.ts) · [同一宿主组合](../../../../../packages/rental-core/src/application-platform.ts)
+
 | 原方法 | 公共接点 |
 | --- | --- |
-| `listTenants` / `getTenant` | 同名公共方法，SaaS 当前权限及原组合 Rental 摘要投影 |
+| `listTenants` / `getTenant` | 同名公共方法，SaaS 当前权限及所选 Core 的受控业务数量投影 |
 | `updateTenant` / `updateTenantStatus` | `updateTenant` / `tenantStatus`，租户变更和原前后值审计同事务 |
 | `listPermissionTree` / `listRoles` | `permissionTree` / `listRoles`，实际登记及原历史权限解释 |
 | `saveRole` / `saveRolePermissions` / `deleteRole` | 同名公共方法，固定全权、原引用和具体自身撤权提交点 |

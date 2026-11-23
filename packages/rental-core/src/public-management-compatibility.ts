@@ -1,8 +1,8 @@
-/** 原组合管理接口的 Rental 附加读取与历史权限解释。
+/** 公共租户摘要的 Rental 数量投影与原组合历史权限解释。
  * 公共主体、会话和写入由同一管理事务裁定，本适配只投影既有事实和补充拒绝条件。 */
 import { BadRequestException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
-import type { LegacyPlatformManagementCompatibility } from "@rental-os/platform-server/management-store";
+import type { LegacyPlatformManagementCompatibility, PlatformTenantSummaryProjection } from "@rental-os/platform-server/management-store";
 import type { TenantSummary } from "./auth-contracts";
 
 const permissionReplacements: Readonly<Record<string, readonly string[]>> = {
@@ -26,6 +26,23 @@ const legacyButtons = new Set([
   "rental-os:finance:invoice",
   "system:button:export"
 ]);
+
+/** 独立宿主只追加原两项数量，其他 Core 的开通状态由平台目录维护。 */
+export const rentalTenantSummaryProjection: PlatformTenantSummaryProjection = {
+  async projectTenants(transaction, tenants) {
+    const source = transaction as unknown as Pick<Prisma.TransactionClient, "tenant">;
+    const rows = await source.tenant.findMany({
+      where: { id: { in: tenants.map(tenant => tenant.tenantId) } },
+      select: { id: true, _count: { select: { businessWorkspaces: true, rentalOrders: true } } }
+    });
+    const byId = new Map(rows.map(row => [row.id, row]));
+    return tenants.map(tenant => {
+      const row = byId.get(tenant.tenantId);
+      if (!row) throw new NotFoundException("租户不存在");
+      return { ...tenant, workspaceCount: row._count.businessWorkspaces, orderCount: row._count.rentalOrders };
+    });
+  }
+};
 
 export const rentalPublicManagementCompatibility: LegacyPlatformManagementCompatibility = {
   // 原普通管理账号须具有完整租户范围及精确代码，全权管理员沿当前身份标志识别。

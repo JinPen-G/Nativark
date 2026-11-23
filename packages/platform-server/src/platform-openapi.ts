@@ -71,7 +71,10 @@ export const PLATFORM_OPENAPI_SCHEMAS = {
   } satisfies Record<keyof SaveTenantAppearanceRequest, Schema>),
   "Platform.TenantSummary": object({ tenantId: string, tenantCode: string, tenantName: string, operatorShortName: string,
     tenantStatus: { type: "string", enum: ["active", "frozen", "disabled"] }, enabledBusinessLines: strings,
-    userCount: integer, organizationCount: integer, statusReason: string, createdAt: date, updatedAt: date
+    userCount: integer, organizationCount: integer,
+    workspaceCount: { ...integer, minimum: 0, readOnly: true, description: "已装配 Core 供给的原经营空间数量；缺少业务来源时省略。" },
+    orderCount: { ...integer, minimum: 0, readOnly: true, description: "已装配 Core 供给的原订单数量；缺少业务来源时省略。" },
+    statusReason: string, createdAt: date, updatedAt: date
   } satisfies Record<keyof PlatformTenantSummary, Schema>, ["tenantId", "tenantCode", "tenantName", "tenantStatus", "enabledBusinessLines"]),
   "Platform.Tenants": array("TenantSummary"),
   "Platform.CreateTenant": object({ tenantCode: string, tenantName: string, operatorShortName: { ...string, maxLength: 64, nullable: true },

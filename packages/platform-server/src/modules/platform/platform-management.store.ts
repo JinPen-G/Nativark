@@ -39,6 +39,10 @@ export interface LegacyPlatformManagementCompatibility {
   assertUserNotPrivileged(transaction: PlatformManagementTransaction, userId: string, tenantId: string, actor: SystemUserRow): Promise<void>;
 }
 
+/** 所选 Core 在公共 SaaS 读取事务中补充业务数量，不参与账号权限或业务写入。 */
+export type PlatformTenantSummaryProjection = Pick<LegacyPlatformManagementCompatibility, "projectTenants">;
+export const PLATFORM_TENANT_SUMMARY_PROJECTION = Symbol("platform.tenant-summary-projection");
+
 export interface PlatformManagementTransaction extends PlatformAuthTransaction {
   user: PlatformUserStore & {
     findFirst(query: { where: PublicUserWhere; include: PublicUserInclude;

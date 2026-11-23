@@ -5,6 +5,7 @@ import { PlatformAuthGuard, platformHttpPolicy, type PlatformApplicationBindings
 import { matchableRequestPath } from "@rental-os/platform-server/request-path";
 import { createPlatformCoreHttpAccess, type CoreHostHttpApplication } from "@rental-os/platform-core-host";
 import type { RentalApplication } from "./application";
+import { rentalTenantSummaryProjection } from "./public-management-compatibility";
 
 export interface RentalPlatformRequest {
   method: string;
@@ -60,6 +61,7 @@ export function createRentalPlatformApplications(application: RentalApplication,
     integrationRuntimeProviders: integrations.integrationRuntimeProviders, integrations: integrations.integrations,
     notifications: integrations.notifications, email: integrations.email, connectivity: integrations.connectivity,
     files: integrations.files, payments: integrations.payments, officialCalendarSources: application.officialCalendarSources,
-    demoRequestRateLimit: application.client.rateLimit
+    demoRequestRateLimit: application.client.rateLimit,
+    tenantSummaryProjection: rentalTenantSummaryProjection
   };
 }

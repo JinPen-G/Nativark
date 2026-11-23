@@ -129,6 +129,9 @@ export interface PlatformTenantSummary {
   enabledBusinessLines: string[];
   userCount?: number;
   organizationCount?: number;
+  /** 原管理列表的可选业务统计，由已装配的 Core 从实际数据供给。 */
+  workspaceCount?: number;
+  orderCount?: number;
   statusReason?: string;
   createdAt?: string;
   updatedAt?: string;

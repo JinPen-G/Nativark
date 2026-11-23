@@ -1,6 +1,6 @@
 /** 公共管理应用服务：当前原主体→公共事务→仓储→同事务审计。
  * 每次写入和返回前复验当前权限，临时密码只在对应创建/重置响应返回，不记审计。 */
-import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import type { CreatePlatformTenantRequest, CreatePlatformTenantResult, OrganizationSummary, SaveOrganizationRequest,
   SavePlatformSelfProfileRequest, SaveSystemRoleRequest, SaveSystemUserRequest, SystemSecurityBaselineConfig,
   SystemUserRow, UpdateTenantRequest, UpdateTenantStatusRequest } from "@rental-os/platform-contracts";
@@ -9,7 +9,8 @@ import { getRequestIdentity } from "../../common/request-identity";
 import { hasEffectivePermission } from "../../permission-match";
 import { PLATFORM_AUTH_DATA_STORE, type PlatformJsonValue } from "./platform-auth-data-store";
 import { PlatformManagementRepository } from "./platform-management.repository";
-import type { LegacyPlatformManagementCompatibility, PlatformManagementDatabase, PlatformManagementTransaction } from "./platform-management.store";
+import { PLATFORM_TENANT_SUMMARY_PROJECTION, type LegacyPlatformManagementCompatibility, type PlatformManagementDatabase,
+  type PlatformManagementTransaction, type PlatformTenantSummaryProjection } from "./platform-management.store";
 import { PlatformPrincipalAuthority } from "./platform-principal.authority";
 import { managesPlatformTenants, managesTenant, TENANT_ROLE_READ_PERMISSIONS } from "./platform-permissions";
 import { normalizeSecurityBaseline, PLATFORM_SECURITY_TENANT_ID, readPlatformSecurityBaseline, validateSecurityBaseline } from "./platform-security-baseline";
@@ -23,7 +24,8 @@ interface ManagementRunOptions {
 export class PlatformManagementService {
   private readonly repository: PlatformManagementRepository;
   private readonly principals: PlatformPrincipalAuthority;
-  constructor(@Inject(PLATFORM_AUTH_DATA_STORE) private readonly database: PlatformManagementDatabase) {
+  constructor(@Inject(PLATFORM_AUTH_DATA_STORE) private readonly database: PlatformManagementDatabase,
+    @Optional() @Inject(PLATFORM_TENANT_SUMMARY_PROJECTION) private readonly tenantSummaryProjection?: PlatformTenantSummaryProjection) {
     this.repository = new PlatformManagementRepository(database);
     this.principals = new PlatformPrincipalAuthority(this.repository);
   }
@@ -145,18 +147,20 @@ export class PlatformManagementService {
   }
 
   private async tenantRows(tx: PlatformManagementTransaction, tenantId?: string,
-    compatibility?: LegacyPlatformManagementCompatibility) {
+    compatibility?: PlatformTenantSummaryProjection) {
     const tenants = await this.repository.tenants(tx, tenantId);
     if (tenantId && !tenants.length) throw new NotFoundException("租户不存在");
     return compatibility ? compatibility.projectTenants(tx, tenants) : tenants;
   }
 
   listTenants(compatibility?: LegacyPlatformManagementCompatibility) {
-    return this.run("system:tenant:manage", true, undefined, tx => this.tenantRows(tx, undefined, compatibility));
+    return this.run("system:tenant:manage", true, undefined,
+      tx => this.tenantRows(tx, undefined, compatibility ?? this.tenantSummaryProjection));
   }
 
   getTenant(id: string, compatibility?: LegacyPlatformManagementCompatibility) {
-    return this.run("system:tenant:manage", true, id, async tx => (await this.tenantRows(tx, id, compatibility))[0]);
+    return this.run("system:tenant:manage", true, id,
+      async tx => (await this.tenantRows(tx, id, compatibility ?? this.tenantSummaryProjection))[0]);
   }
 
   createTenant(input: CreatePlatformTenantRequest): Promise<CreatePlatformTenantResult> {
