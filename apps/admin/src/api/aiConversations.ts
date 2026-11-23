@@ -1,3 +1,5 @@
+import { createAiModelControlApi } from "@rental-os/ai-native-admin/source/api/aiModelControl";
+import { legacyAiAdminHost } from "@/features/ai-native/legacy-host";
 /** Original conversation transport and explicit Task creation/scene-model starts.
  * Starts use the original hosts; reads never recover a run or dispatch a model. */
 import { AI_CONVERSATION_HTTP_DRAFT, AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_REQUEST_DRAFT_VERSION, AI_SCENE_ORDER_READ_HTTP_DRAFT, AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, aiTaskReadPolicyQuery, type AiSceneRequestReadDraft, type AiConversationListDraft, type AiConversationTurnListDraft,
@@ -50,29 +52,14 @@ async function controlConversationResult(input: AiConversationTurnReferenceDraft
   return result;
 }
 
+const originalModelControl = createAiModelControlApi(legacyAiAdminHost);
 async function workbenchControl(action: 'model-control-prepare', input: { taskId: string }, signal: AbortSignal): Promise<AiWorkbenchModelControlPreparation>;
 async function workbenchControl(action: 'model-control' | 'model-control-read', input: AiWorkbenchModelControlCommand | AiWorkbenchModelControlReference,
   signal: AbortSignal): Promise<AiWorkbenchModelControlObservation>;
 async function workbenchControl(action: 'model-control-prepare' | 'model-control' | 'model-control-read', input: unknown, signal: AbortSignal) {
-  const command = action === 'model-control-prepare' ? parseWorkbenchModelControl('AiWorkbenchDisplayReadDraft', input)
-    : action === 'model-control' ? parseWorkbenchModelControl('AiWorkbenchModelControlCommand', input)
-      : parseWorkbenchModelControl('AiWorkbenchModelControlReference', input);
-  const auth = useAuthStore.getState(), epoch = currentSessionEpoch(), active = AbortSignal.any([signal, currentSessionSignal()]);
-  const owner = JSON.stringify([auth.user, auth.tenant?.tenantId, auth.currentWorkspaceId]);
-  const check = () => { const next = useAuthStore.getState();
-    if (active.aborted || epoch !== currentSessionEpoch() || !next.token || !next.user || next.user.isSaasAdmin
-      || !next.tenant?.tenantId || !next.currentWorkspaceId
-      || JSON.stringify([next.user, next.tenant.tenantId, next.currentWorkspaceId]) !== owner) throw Error('AI_SCOPE_CHANGED');
-  };
-  check();
-  // The canonical interceptor already recognizes this flag. A credential
-  // refresh must return control to the original operation reader, never replay.
-  const config = { signal: active, timeout: action === 'model-control' ? 125000 : 15000, _authRetry: true };
-  const response = await http.post<ApiResult<unknown>>(`/${AI_CONVERSATION_HTTP_DRAFT.basePath}/${action}`, command, config); check();
-  const value = action === 'model-control-prepare' ? parseWorkbenchModelControl('AiWorkbenchModelControlPreparation', response.data.data)
-    : parseWorkbenchModelControl('AiWorkbenchModelControlObservation', response.data.data);
-  if (value.taskId !== command.taskId || 'operationId' in command && (!('operationId' in value) || value.operationId !== command.operationId)) throw Error('AI_SCOPE_CHANGED');
-  return value;
+  if (action === 'model-control-prepare') return originalModelControl.prepare(parseWorkbenchModelControl('AiWorkbenchDisplayReadDraft', input), signal);
+  if (action === 'model-control') return originalModelControl.execute(parseWorkbenchModelControl('AiWorkbenchModelControlCommand', input), signal);
+  return originalModelControl.read(parseWorkbenchModelControl('AiWorkbenchModelControlReference', input), signal);
 }
 
 async function lifecycle(action: 'create' | 'archive' | 'delete' | 'operation' | 'admit' | 'admission' | 'release' | 'closeUnstarted' | 'read', command: unknown, signal: AbortSignal) {

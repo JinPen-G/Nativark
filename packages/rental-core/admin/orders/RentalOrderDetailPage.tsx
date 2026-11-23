@@ -192,6 +192,16 @@ function RentalOrderDetailContent() {
   const [inspectionReturnItems, setInspectionReturnItems] = useState<Array<{ allocationId: string; quantity: number }>>();
   const [inspectionClosing, setInspectionClosing] = useState(false);
   const [inspectionPreparing, setInspectionPreparing] = useState(false);
+  const previewRequests = useRef(new Map<string, Promise<unknown>>());
+  function runPreview(editorKey: string, preview: () => Promise<unknown>) {
+    if (previewRequests.current.has(editorKey)) return;
+    // 原按钮保留原呈现，校验期间也共用本次编辑的试算，避免重复派发。
+    const request = Promise.resolve().then(preview);
+    previewRequests.current.set(editorKey, request);
+    void request.catch(() => undefined).finally(() => {
+      if (previewRequests.current.get(editorKey) === request) previewRequests.current.delete(editorKey);
+    });
+  }
   const inspectionPreparation = useRef<{ key: string; request: Promise<boolean> } | undefined>(undefined);
   const inspectionActive = useRef(true);
   const inspectionIsCurrent = () => inspectionActive.current
@@ -1414,12 +1424,15 @@ function RentalOrderDetailContent() {
      <Modal presentation="side" title={t("续租 / 延期")} open={extensionOpen} onCancel={() => extensionEditor.dismiss(() => { setExtensionOpen(false); invalidateExtensionPreview(); })} destroyOnHidden width={640}
       footer={[
         <Button key="cancel" onClick={() => extensionEditor.dismiss(() => { setExtensionOpen(false); invalidateExtensionPreview(); })}>{t("取消")}</Button>,
-        <ActionButton key={`${extensionEditor.key}:preview`} variant="secondary" label={t("试算费用")}
-          pending={previewExtension.isPending} disabled={extensionEditor.busy || !canExtend}
-          onAction={async () => previewExtension.mutateAsync(await extensionEditor.validate())} />,
-        <SaveButton key={extensionEditor.key} form={extensionForm} disabled={!extensionPreview}
-          pending={extensionEditor.busy || applyExtension.isPending} onSave={extensionEditor.submit}
-          label={extensionPreview?.paymentRequired ? t("提交申请（待补款）") : t("提交并生效")} />
+        <Button key="preview" loading={previewExtension.isPending} disabled={extensionEditor.busy || !canExtend}
+          onClick={() => runPreview(extensionEditor.key, async () => previewExtension.mutateAsync(await extensionEditor.validate()))}>
+          {t("试算费用")}
+        </Button>,
+        <Button key="submit" type="primary" disabled={!extensionPreview || extensionEditor.busy}
+          loading={extensionEditor.busy || applyExtension.isPending}
+          onClick={() => void extensionEditor.confirm().catch(() => undefined)}>
+          {extensionPreview?.paymentRequired ? t("提交申请（待补款）") : t("提交并生效")}
+        </Button>
       ]} cancelButtonProps={{ disabled: extensionEditor.busy }} closable={!extensionEditor.busy}>
       <Form form={extensionForm} disabled={extensionEditor.busy} {...extensionEditor.formProps} layout="vertical">
         <Alert type="info" showIcon title={t("先检查后续占用及缓冲，再计算续租费")} description={order.data?.ruleSnapshot?.extension?.pricingMode === "original_total" ? t("从原起租时间算到新归还时间，沿用原价格版本和原优惠规则，扣除此前已计金额；零差额无需补款，负差额另走退款审核。") : t("原租期费用不变，新增时段按申请续租时的价格单独计算，不追溯重算原订单优惠。")} style={{ marginBottom: 16 }} />
@@ -1465,10 +1478,11 @@ function RentalOrderDetailContent() {
       width={760}
       footer={[
         <Button key="cancel" onClick={() => postPickupExchangeEditor.dismiss(() => { setPostPickupExchangeOpen(false); setPostPickupExchangePreview(undefined); setExchangeTarget(undefined); postPickupExchangeForm.resetFields(); })}>{t("取消")}</Button>,
-        <ActionButton key={`${postPickupExchangeEditor.key}:preview`} variant="secondary" label={t("试算换货差额")}
-          pending={previewPostPickupExchange.isPending} disabled={postPickupExchangeEditor.busy || !canOperate}
-          onAction={async () => previewPostPickupExchange.mutateAsync(await postPickupExchangeEditor.validate(["orderLineId", "allocationId",
-            "replacementItemGroupId", "replacementAssetId", "replacementPricingGroupId", "priceBasis", "originalDisposition", "condition", "cancelServiceOccurrenceIds", "services"]))} />,
+        <Button key="preview" loading={previewPostPickupExchange.isPending} disabled={postPickupExchangeEditor.busy || !canOperate}
+          onClick={() => runPreview(postPickupExchangeEditor.key, async () => previewPostPickupExchange.mutateAsync(await postPickupExchangeEditor.validate(["orderLineId", "allocationId",
+            "replacementItemGroupId", "replacementAssetId", "replacementPricingGroupId", "priceBasis", "originalDisposition", "condition", "cancelServiceOccurrenceIds", "services"])))}>
+          {t("试算换货差额")}
+        </Button>,
         <SaveButton key={postPickupExchangeEditor.key} disabled={!postPickupExchangePreview} label={t("确认换货")} form={postPickupExchangeForm} pending={postPickupExchangeEditor.busy || applyPostPickupExchange.isPending} onSave={postPickupExchangeEditor.submit} />
       ]} cancelButtonProps={{ disabled: postPickupExchangeEditor.busy }} closable={!postPickupExchangeEditor.busy}
     >
@@ -1631,8 +1645,8 @@ function RentalOrderDetailContent() {
       width={680}
       footer={[
         <Button key="cancel" onClick={() => partialCancelEditor.dismiss(() => { setPartialCancelOpen(false); setPartialCancelPreview(undefined); partialCancelForm.resetFields(); })}>{t("取消")}</Button>,
-        <ActionButton key={`${partialCancelEditor.key}:preview`} variant="secondary" label={t("试算差额")}
-          pending={previewPartialCancel.isPending} disabled={partialCancelEditor.busy || !canOperate} onAction={async () => {
+        <Button key="preview" loading={previewPartialCancel.isPending} disabled={partialCancelEditor.busy || !canOperate}
+          onClick={() => runPreview(partialCancelEditor.key, async () => {
           const values = await partialCancelEditor.validate(["items", "serviceOccurrenceIds", "serviceItems"]);
           const items = values.items?.filter((item: { lineId?: string; quantity?: number }) => item?.lineId && item.quantity);
           const serviceOccurrenceIds = values.serviceOccurrenceIds?.filter(Boolean);
@@ -1647,7 +1661,7 @@ function RentalOrderDetailContent() {
             throw new Error(t("整项取消与按数量取消只能选择一种服务方式"));
           }
           return previewPartialCancel.mutateAsync({ type: hasServices ? "service_cancel" : "partial_line_cancel", items, serviceOccurrenceIds, serviceItems });
-        }} />,
+        })}>{t("试算差额")}</Button>,
         <SaveButton key={partialCancelEditor.key} disabled={!partialCancelPreview} label={t("确认并应用")} form={partialCancelForm} pending={partialCancelEditor.busy || applyPartialCancel.isPending} onSave={partialCancelEditor.submit} />
       ]} cancelButtonProps={{ disabled: partialCancelEditor.busy }} closable={!partialCancelEditor.busy}
     >

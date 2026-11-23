@@ -1,0 +1,7 @@
+{
+  "extends": "../platform-admin/tsconfig.json",
+  "include": [
+    "src",
+    "../platform-admin/src/vite-env.d.ts"
+  ]
+}

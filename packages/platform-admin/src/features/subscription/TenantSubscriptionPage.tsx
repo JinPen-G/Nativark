@@ -16,7 +16,7 @@ import { TableRefreshProvider } from "../../components/ui";
  * 数据走 SUB-01 只读聚合视图 TenantSubscriptionView（加载/错误/空态已接）；
  * 租户只提交申请；实际套餐与期限仍由平台办理，沿原权限和申请接口。
  */
-export function TenantSubscriptionPage() {
+export function TenantSubscriptionPage({ description = "所有业务 Core 共用同一订阅。" }: { description?: string } = {}) {
   const { tenant, user, sessionVerified } = useAdminSession();
   const subscriptionApi = useSubscriptionApi();
   const { t } = useLocale();
@@ -29,7 +29,7 @@ export function TenantSubscriptionPage() {
   return (
     <PageHeader
       title="版本与订阅"
-      description={t("所有业务 Core 共用同一订阅。")}
+      description={t(description)}
       note={{ title: "关于版本与订阅", description: "统一到期时间与权益由平台办理；金额与到期限制以平台确认为准，价格未发布显示「价格待公布」。" }}
       view={<QueryState loading={query.isLoading} error={query.error} onRetry={() => query.refetch({ throwOnError: true })}>
         {query.data ? <TableRefreshProvider onRefresh={() => query.refetch()} busy={query.isFetching}><TenantSubscriptionBody data={query.data} canManage={canManage} navigate={navigate} /></TableRefreshProvider>

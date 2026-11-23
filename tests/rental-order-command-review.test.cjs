@@ -3,6 +3,9 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm'), ts = require('typescript');
 const root = path.resolve(__dirname, '..');
+const sourceLoader = require('../scripts/controller-sources.cjs').createControllerSourceLoader(
+  root, path.dirname(path.dirname(require.resolve('typescript/package.json'))));
+const sourceContract = name => sourceLoader.load(sourceLoader.resolveSource(__filename, name, true));
 const feature = file => fs.readFileSync(path.join(root, (file.startsWith('../membership/') || file.startsWith('../catalog/'))
   ? 'packages/rental-core/admin/orders' : file.startsWith('../')
     ? 'apps/admin/src/features/rental-core' : 'packages/rental-core/admin/orders', file), 'utf8');
@@ -697,7 +700,7 @@ function humanReviewConsumer() {
     vm.runInNewContext(ts.transpileModule(feature('../ai-native/' + file), { compilerOptions: { module: ts.ModuleKind.CommonJS,
       target: ts.ScriptTarget.ES2022 } }).outputText, { exports });
   }
-  const shared = require('../packages/shared/src'), context = { exports: {}, ...format, ...safe,
+  const shared = sourceContract('@rental-os/shared'), context = { exports: {}, ...format, ...safe,
     AI_PROPOSAL_DRAFT_VERSION: shared.AI_PROPOSAL_DRAFT_VERSION, AI_TASK_DRAFT_VERSION: shared.AI_TASK_DRAFT_VERSION,
     AI_STEP_STATUSES_DRAFT: shared.AI_STEP_STATUSES_DRAFT, AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION: shared.AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION,
     structuredClone, RENTAL_FULFILLMENT_MODES: shared.RENTAL_FULFILLMENT_MODES,
@@ -710,12 +713,12 @@ function humanReviewConsumer() {
   return { source, context, ...context.exports };
 }
 const boundaryValue = atomicity => ({ kind: 'settings', taskId: 'task', runId: 'run', stepId: 'step', taskRevision: 1,
-  review: { proposal: { payload: { contractVersion: require('../packages/shared/src').AI_PROPOSAL_DRAFT_VERSION,
+  review: { proposal: { payload: { contractVersion: sourceContract('@rental-os/shared').AI_PROPOSAL_DRAFT_VERSION,
     taskId: 'task', proposalId: 'proposal', revision: 1, scope: { kind: 'workspace', tenantId: 'tenant', workspaceId: 'workspace' }, atomicity, failurePolicy: 'stop_and_reconcile',
     actions: atomicity === 'single_action' ? [{}] : [{}, {}], expiresAt: '2099-01-01T00:00:00Z' } },
     change: { diff: { 'notifications.enabledEvents': { before: [], after: ['created'] },
       'notifications.editableChannels': { before: [], after: ['sms'] } }, baseRevision: 1 } } });
-const confirmationSnapshot = () => ({ contractVersion: require('../packages/shared/src').AI_TASK_DRAFT_VERSION, taskId: 'task', steps: [
+const confirmationSnapshot = () => ({ contractVersion: sourceContract('@rental-os/shared').AI_TASK_DRAFT_VERSION, taskId: 'task', steps: [
   { stepId: 'first', runId: 'run', sequence: 1, revision: 2, status: 'succeeded', kind: 'confirmation' },
   { stepId: 'second', runId: 'run', sequence: 2, revision: 3, status: 'unknown', kind: 'confirmation' }] });
 const originalObservation = (stepId, status) => ({ taskId: 'task', runId: 'run', stepId, kind: 'order', status,
@@ -820,7 +823,10 @@ test('order creation API and page contribution retain original paths, signals an
   const pagesModule = { exports: {} };
   vm.runInNewContext(ts.transpileModule(feature('pages.ts'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }
-  }).outputText, { module: pagesModule, exports: pagesModule.exports });
+  }).outputText, { module: pagesModule, exports: pagesModule.exports, require: name => {
+    assert.equal(name, '@rental-os/rental-core/permissions');
+    return sourceContract(name);
+  } });
   const pages = pagesModule.exports.RENTAL_ORDER_PAGES;
   assert.equal(pages.orderCreate.path, '/orders/new'); assert.equal(pages.orderCreate.parent, 'orders');
   assert.deepEqual(JSON.parse(JSON.stringify(pages.orderCreate.permissions)), [{ resource: 'order', action: 'create' }]);
@@ -856,7 +862,7 @@ test('order creation awaits its validated quote and original order while discard
     state.createOrder = { mutateAsync: input => { state.orderCalls.push(input); return state.orderRequest.promise; } };
     state.setQuote = value => { state.quote = value; state.shown.push(value); };
     state.setCreated = value => state.created.push(value);
-    state.setFailure = value => { state.failure = value; if (value) state.errors.push(value); };
+    state.message = { error: value => state.errors.push(value) };
     state.isDeliveryMode = mode => ['delivery', 'onsite_delivery'].includes(mode);
     state.quoteOrder = mutation('RentalOrderCreatePage.tsx', 'quoteOrder', state);
     state.submitOrder = mutation('RentalOrderCreatePage.tsx', 'submitOrder', state);

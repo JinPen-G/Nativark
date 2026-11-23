@@ -7,13 +7,132 @@ const vm = require('node:vm');
 const ts = require('typescript');
 const React = require('react');
 const root = path.resolve(__dirname, '..');
+const sourceLoader = require('../scripts/controller-sources.cjs').createControllerSourceLoader(root,
+  path.dirname(path.dirname(require.resolve('typescript/package.json'))));
+const sharedSource = () => sourceLoader.load(path.join(root, 'packages/shared/src/index.ts'));
+
+test('selected Rental order assistant keeps original controls, request keys and current host authority', async () => {
+  const loader = require('../scripts/controller-sources.cjs').createControllerSourceLoader(root,
+    path.dirname(path.dirname(require.resolve('typescript/package.json'))));
+  const load = file => loader.load(path.join(root, file));
+  const contracts = load('packages/shared/src/ai-admin.ts');
+  const original = load('packages/rental-core/admin/ai/order-facts-host.ts');
+  const fixtures = fs.readFileSync(path.join(root, 'tests/enterprise-consumers.test.cjs'), 'utf8');
+  const fixtureAst = ts.createSourceFile('fixtures.cjs', fixtures, ts.ScriptTarget.Latest, true);
+  const fixture = fixtureAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'reactHost');
+  assert.ok(fixture);
+  const hooks = new Function('assert', fixture.getText(fixtureAst) + ';return reactHost();')(assert);
+  const listeners = new Set(), calls = [];
+  const document = { hidden: false, addEventListener: (_event, listener) => listeners.add(listener),
+    removeEventListener: (_event, listener) => listeners.delete(listener) };
+  let epoch = 1, allowed = true, lost = true, finish, originalReceipt;
+  const session = { sessionVerified: true, authenticated: true, tenant: { tenantId: 'tenant' },
+    user: { id: 'operator', isSaasAdmin: false }, currentWorkspaceId: 'workspace', hasPermission: () => allowed };
+  const signal = new AbortController();
+  const packet = () => ({
+    original: originalReceipt,
+    task: { state: 'observed', taskId: 'task-original', status: 'queued', execution: 'not_inferred_from_metadata' },
+    material: { version: 'lane-a-business-content-1', scenario: 'order_explanation',
+      authority: 'none_reauthorize_before_consumption', payload: {
+        status: 'facts_only', audience: 'operator', orderId: 'order-original', question: 'status',
+        orderVersion: 'original-version', observedAt: '2030-01-01T00:00:00Z',
+        scope: { kind: 'workspace', tenantId: 'tenant', workspaceId: 'workspace' },
+        facts: { order: { value: { id: 'order-original', status: 'active' }, source: {
+          resourceType: 'order', resourceId: 'order-original', version: 'original-version', field: 'status',
+          scope: { kind: 'workspace', tenantId: 'tenant', workspaceId: 'workspace' },
+        } } },
+      } }, model: 'not_called',
+  });
+  const runtime = { getSession: () => session, subscribe: () => () => {}, currentSessionEpoch: () => epoch,
+    currentSessionSignal: () => signal.signal, request: async (url, options) => {
+      calls.push({ url, ...options, data: structuredClone(options.data) });
+      if (url.endsWith('/material')) return packet();
+      if (!originalReceipt) originalReceipt = { draftVersion: contracts.AI_SCENE_REQUEST_DRAFT_VERSION,
+        requestKey: options.data.requestKey, sceneCode: 'order_explanation', inputRef: 'original-input',
+        contentHash: 'original-hash', createdAt: '2030-01-01T00:00:00Z', state: 'stored' };
+      if (lost) { lost = false; throw Error('response lost'); }
+      return { receipt: originalReceipt };
+    } };
+  const currentContext = () => ({ runtime, session, getSession: () => session,
+    requestOriginal: (url, options) => runtime.request(url, { ...options, retryAuthentication: false }) });
+  let context = currentContext();
+  function compile(file, imports) {
+    const exports = {}, source = fs.readFileSync(path.join(root, file), 'utf8');
+    vm.runInNewContext(ts.transpileModule(source, { compilerOptions: {
+      target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX,
+    } }).outputText, { exports, document, AbortController, AbortSignal,
+      crypto: require('node:crypto').webcrypto, require(name) {
+        assert.ok(Object.hasOwn(imports, name), name); return imports[name];
+      } });
+    return exports;
+  }
+  const host = compile('packages/ai-native-admin/src/host.tsx', {
+    react: { ...hooks.runtime, createContext: () => ({ Provider: 'ai-provider' }), useContext: () => null },
+    'react/jsx-runtime': hooks.jsx, '@rental-os/platform-admin/runtime': { AdminRuntimeProvider: 'admin-runtime' },
+  });
+  const page = compile('packages/rental-core/admin/ai/OrderFactsEntry.tsx', {
+    react: hooks.runtime, 'react/jsx-runtime': hooks.jsx,
+    '@rental-os/platform-admin/ui': { ActionButton: 'action', Alert: 'alert' },
+    '../orders/page-context': { useRentalOrderContext: () => context },
+    '@rental-os/ai-native-admin/host': host,
+    '@rental-os/ai-native-admin/workbench': { AiTaskWorkbench: 'workbench' }, './order-facts-host': original,
+  });
+  const nodes = value => value == null || typeof value !== 'object' ? []
+    : Array.isArray(value) ? value.flatMap(nodes) : [value, ...nodes(value.props?.children)];
+  const action = label => nodes(hooks.value).find(node => node.type === 'action' && node.props.label === label);
+  hooks.mount(() => page.OrderFactsEntry({ orderId: 'order-original' }));
+  assert.deepEqual(nodes(hooks.value).filter(node => node.type === 'action').map(node => node.props.label),
+    ['查看订单状态', '核对费用依据', '查看人工办理提示']);
+  assert.equal(calls.length, 0, 'mount does not read, dispatch a model or write business');
+  await assert.rejects(action('查看订单状态').props.onAction(), /response lost/);
+  await hooks.settle(); assert.equal(calls.length, 1);
+  context = currentContext(); hooks.rerender();
+  await action('查看订单状态').props.onAction(); await hooks.settle();
+  assert.equal(calls.length, 3); assert.match(calls[1].url, /\/reconcile$/);
+  assert.equal(calls[1].data.requestKey, calls[0].data.requestKey);
+  assert(calls.every(call => call.retryAuthentication === false));
+  assert(nodes(hooks.value).some(node => node.type === 'workbench'));
+  document.hidden = true; for (const listener of listeners) listener(); await hooks.settle();
+  assert.equal(nodes(hooks.value).some(node => node.type === 'workbench'), false);
+  document.hidden = false; for (const listener of listeners) listener(); await hooks.settle();
+  await action('查看订单状态').props.onAction(); await hooks.settle();
+  assert.equal(calls[3].data.requestKey, calls[0].data.requestKey);
+  const stale = action('查看订单状态').props.onAction;
+  allowed = false; epoch++; hooks.rerender();
+  await assert.rejects(stale()); assert.equal(calls.length, 5); assert.equal(hooks.value, null);
+  hooks.unmount();
+
+  allowed = true; const aiHost = host.createAiAdminHost({ runtime, getSession: () => session });
+  const modelApi = load('packages/ai-native-admin/src/api/aiModelControl.ts').createAiModelControlApi(aiHost);
+  const modelCalls = [];
+  runtime.request = async (url, options) => { modelCalls.push({ url, ...options }); throw Error('model response lost'); };
+  const command = { taskId: 'task-original', operationId: 'operation-original', kind: 'reinterpret',
+    expectedTaskRevision: 1, sourceRunId: 'run-original', sourceResultId: 'result-original', expectedPresentationRevision: 1 };
+  await assert.rejects(modelApi.execute(command, signal.signal), /model response lost/);
+  assert.equal(modelCalls.length, 1); assert.equal(modelCalls[0].timeout, 125000);
+  assert.equal(modelCalls[0].retryAuthentication, false);
+  runtime.request = async (url, options) => { modelCalls.push({ url, ...options });
+    return { version: contracts.AI_WORKBENCH_MODEL_CONTROL_VERSION, taskId: command.taskId,
+      operationId: command.operationId, status: 'not_observed', nextAction: 'read_original_operation' }; };
+  const observed = await modelApi.read({ taskId: command.taskId, operationId: command.operationId }, signal.signal);
+  assert.equal(observed.status, 'not_observed'); assert.equal(modelCalls.length, 2);
+  assert.match(modelCalls[1].url, /\/model-control-read$/); assert.equal(modelCalls[1].timeout, 15000);
+  assert.equal(modelCalls[1].data.operationId, command.operationId);
+  runtime.request = () => new Promise(resolve => { finish = resolve; });
+  const late = modelApi.read({ taskId: command.taskId, operationId: command.operationId }, signal.signal);
+  epoch++; finish(observed); await assert.rejects(late, /AI_SCOPE_CHANGED/);
+  runtime.getSession = () => ({ ...session, tenant: { tenantId: 'foreign' } });
+  assert.equal(aiHost.getSession().sessionVerified, false);
+  await assert.rejects(modelApi.read({ taskId: command.taskId, operationId: command.operationId }, signal.signal), /AI_SCOPE_CHANGED/);
+});
 function loadLifecycleSession(file = 'conversation-lifecycle-session.ts', imports = {}) {
-  const source = fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-native', file), 'utf8');
+  const selected = path.join(root, 'packages/ai-native-admin/src/ai-native', file);
+  const source = fs.readFileSync(fs.existsSync(selected) ? selected : path.join(root, 'apps/admin/src/features/ai-native', file), 'utf8');
   const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const exports = {};
   vm.runInNewContext(output, { exports, AbortController, AbortSignal, structuredClone, TextEncoder, Uint8Array, crypto: require('node:crypto').webcrypto, require(name) {
     if (Object.hasOwn(imports, name)) return imports[name];
-    if (name === '@rental-os/shared') return require('@rental-os/shared');
+    if (name === '@rental-os/shared' || name === '@rental-os/shared/ai-admin') return sharedSource();
     throw Error(name);
   } });
   return exports;
@@ -24,7 +143,7 @@ test('first visible host closes original text/card client reports through existi
   const { recordTaskVisibleObservation } = require('../apps/api/src/modules/ai-native/observability/task-visible-observation.service.ts');
   const { TaskPerformanceReader } = require('../apps/api/src/modules/ai-native/observability/task-performance.reader.ts');
   const { AiTaskRepository } = require('../apps/api/src/modules/ai-native/ai-task.repository.ts');
-  const h = require('./fixtures/ai-native/contract-consumer.cjs'), shared = require('../packages/shared/src/index');
+  const h = require('./fixtures/ai-native/contract-consumer.cjs'), shared = sharedSource();
   const context = structuredClone(h.contexts[0]), taskId = 'visible-task', runId = 'visible-run';
   const { Prisma } = require('../apps/api/node_modules/@prisma/client');
   const scope = { id: 'visible-scope', ...require('../apps/api/src/modules/ai-native/persistence-scope.ts').aiPersistenceScopeColumns(context.scope) };
@@ -83,7 +202,7 @@ test('first visible host closes original text/card client reports through existi
   document.hit = element;
   let cleanup;
   const hooks = { useRef: () => ({ current: element }), useSyncExternalStore: (_subscribe, get) => get(), useEffect: fn => { cleanup = fn(); } };
-  const exports = {}, code = ts.transpileModule(fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-native/VisibleObservationBoundary.tsx'), 'utf8'), {
+  const exports = {}, code = ts.transpileModule(fs.readFileSync(path.join(root, 'packages/ai-native-admin/src/ai-native/VisibleObservationBoundary.tsx'), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
   vm.runInNewContext(code, { exports, document, navigator, window, getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
     IntersectionObserver: class { constructor(fn) { this.callback = fn; } observe() { this.callback([{ isIntersecting: true, intersectionRatio: 1 }]); } disconnect() {} },
@@ -120,15 +239,15 @@ test('first visible host closes original text/card client reports through existi
   mount('card'); paint(); epoch++; paint(); await Promise.resolve(); assert.equal(logs.size, 2);
   const reopened = new LiveVisibleObservationSession('task_center', driver, { taskId }); assert.equal(reopened.visible(source('text'), 'text'), false);
   const hostEffects = [], hostExports = {}, hostSignal = new AbortController();
-  const hostCode = ts.transpileModule(fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-native/VisibleObservationHost.tsx'), 'utf8'), {
+  const hostCode = ts.transpileModule(fs.readFileSync(path.join(root, 'packages/ai-native-admin/src/ai-native/VisibleObservationHost.tsx'), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
   vm.runInNewContext(hostCode, { exports: hostExports, document, navigator, window, IntersectionObserver: class {},
     crypto: require('node:crypto').webcrypto, performance: { now: () => clock }, require(name) {
       if (name === 'react') return { createContext: () => ({ Provider: 'visible-host' }), useContext() {},
         useRef: value => ({ current: value }), useMemo: fn => fn(), useEffect: fn => hostEffects.push(fn) };
       if (name === 'react/jsx-runtime') return require('react/jsx-runtime');
-      if (name === '@/app/queryClient') return { currentSessionEpoch: () => epoch, currentSessionSignal: () => hostSignal.signal };
-      if (name === '@/api/aiTaskCenter') return { aiTaskCenterApi: { reportVisible() { throw Error('No disposed host report is allowed'); } } };
+      if (name === '../host') return { useAiAdminHost: () => ({ runtime: { currentSessionEpoch: () => epoch, currentSessionSignal: () => hostSignal.signal } }) };
+      if (name === '../api/aiTaskCenter') return { createAiTaskCenterApi: () => ({ reportVisible() { throw Error('No disposed host report is allowed'); } }) };
       if (name === './visible-observation-session') return { LiveVisibleObservationSession }; throw Error(name);
     } });
   const mountHost = () => hostExports.VisibleObservationHost({ surface: 'task_center', taskId, current: () => clientCurrent }).props.value;
@@ -150,7 +269,7 @@ test('first visible host closes original text/card client reports through existi
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true } }).outputText;
   vm.runInNewContext(controllerCode, { exports: controllerExports, AbortController, require(name) {
     if (name === '@nestjs/common') return Object.fromEntries(['Body', 'Controller', 'Header', 'HttpCode', 'Inject', 'Post', 'Req'].map(key => [key, () => () => {}]));
-    if (name === '@rental-os/shared') return shared;
+    if (name === '@rental-os/shared' || name === '@rental-os/shared/ai-admin') return shared;
     if (name === 'node:crypto' || name === 'zod') return require(name);
     if (name === './task-contract-validation') return require('../apps/api/src/modules/ai-native/task-contract-validation.ts');
     if (name === './scenes/request-abort') return { withRequestAbort: (_request, fn) => fn(new AbortController().signal) };
@@ -178,7 +297,7 @@ function taskObservationHost(component) {
     useEffect(effect, deps) { const i = cursor++; if (!slots[i] || deps.some((value, index) => !Object.is(value, slots[i][index]))) {
       slots[i] = deps; effects.push(() => { cleaners.get(i)?.(); cleaners.set(i, effect()); }); } }
   };
-  const stub = name => props => React.createElement(name, props), shared = require('../packages/shared/src/index');
+  const stub = name => props => React.createElement(name, props), shared = sharedSource();
   const sessionHost = { currentSessionEpoch: () => epoch, currentSessionSignal: () => session.signal };
   const loadModule = file => {
     const exports = {}, code = ts.transpileModule(fs.readFileSync(path.join(root, file), 'utf8'), {
@@ -186,13 +305,13 @@ function taskObservationHost(component) {
     vm.runInNewContext(code, { exports, document, AbortController, AbortSignal, require(name) {
       if (name === 'react') return hooks;
       if (name === 'react/jsx-runtime') return require('react/jsx-runtime');
-      if (name === '@rental-os/shared') return shared;
+      if (name === '@rental-os/shared' || name === '@rental-os/shared/ai-admin') return shared;
       if (name === '@/app/queryClient') return sessionHost;
       if (name === './http') return { http: { post: async (url, query, options) => {
         calls.push({ url, query: structuredClone(query), signal: options.signal }); return { data: { data: await responder(url, query) } }; } } };
       if (name === './aiRequestTiming') return { AI_EXECUTION_RESPONSE_TIMEOUT_MS: 120000 };
       if (name === '@/api/aiTaskCenter') return { aiTaskCenterApi: api };
-      if (name === '@/components/ui') return { ActionButton: stub('action'), Alert: stub('alert') };
+      if (name === '@/components/ui' || name === '@rental-os/platform-admin/ui') return { ActionButton: stub('action'), Alert: stub('alert') };
       if (name === './management-locale') return { useAiManagementLocale: () => ({ t: text => text }) };
       if (name === './formatters') return { formatTimestamp: value => ({ value }) };
       if (name === './safe-display') return { safeDisplayText: value => value };
@@ -202,7 +321,11 @@ function taskObservationHost(component) {
       throw Error('Unexpected observation dependency: ' + name);
     } }); return exports;
   };
-  const api = loadModule('apps/admin/src/api/aiTaskCenter.ts').aiTaskCenterApi;
+  const api = loadModule('packages/ai-native-admin/src/api/aiTaskCenter.ts').createAiTaskCenterApi({ ...sessionHost,
+    request: async (url, options) => {
+      calls.push({ url, query: structuredClone(options.data), signal: options.signal });
+      return responder(url, options.data);
+    } });
   const source = loadModule(`apps/admin/src/features/ai-native/${component}.tsx`);
   let denied = 0;
   const render = props => { cursor = 0; const tree = source[component]({ ...props, current: () => allowed, onAccessDenied: () => { denied++; } });
@@ -230,7 +353,7 @@ const originalCostSummary = taskId => ({ taskId, observedAt: '2026-11-09T12:00:0
   groups: [{ unit: 'money', currency: 'USD', scale: 6, reservedAtoms: '0', pendingAtoms: '2500000', settledAtoms: '1234567',
     releasedReservationAtoms: '0', settledExcessAtoms: '0' }] });
 function originalOutcomeSample(taskIds, status = 'succeeded') {
-  const shared = require('../packages/shared/src/index'), size = taskIds.length;
+  const shared = sharedSource(), size = taskIds.length;
   const counts = Object.fromEntries(shared.AI_TASK_STATUSES_DRAFT.map(key => [key, key === status ? size : 0]));
   const terminal = shared.AI_TASK_TERMINAL_STATUSES_DRAFT.includes(status) ? size : 0;
   return { version: 'task-outcome-sample-1', observedAt: '2026-11-09T12:00:00Z', sceneCode: 'order_explanation', sceneVersion: '1',
@@ -294,7 +417,7 @@ test('task observations preserve pending rates, absent cost and closed shared su
   for (const key of ['invocationCount', 'recordedCount', 'notRecordedCount', 'accountingComplete', 'groups']) delete limited[key];
   assert.equal(cost.source.validateTaskUsageSummary(limited, 'task-a').state, 'limit_exceeded');
   assert.throws(() => cost.source.validateTaskUsageSummary({ ...summary, accountingComplete: true }, 'task-a'));
-  const shared = require('../packages/shared/src/index'), h = require('./fixtures/ai-native/contract-consumer.cjs');
+  const shared = sharedSource(), h = require('./fixtures/ai-native/contract-consumer.cjs');
   const validators = h.validatorsFor({ AiTaskBudgetUsageSummaryDraft: shared.AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiTaskBudgetUsageSummaryDraft,
     AiTaskOutcomeSampleDraft: shared.AI_TASK_PERFORMANCE_SCHEMAS.AiTaskOutcomeSampleDraft }, {});
   assert.equal(validators.AiTaskBudgetUsageSummaryDraft(summary), true); assert.equal(validators.AiTaskOutcomeSampleDraft(originalOutcomeSample(['task-a'])), true);
@@ -302,14 +425,8 @@ test('task observations preserve pending rates, absent cost and closed shared su
   assert.equal(validators.AiTaskOutcomeSampleDraft({ ...originalOutcomeSample(['task-a']), credential: 'refused' }), false);
   // Exercise the original Guard's registered route permission resolver only;
   // unrelated service constructors are not instantiated or treated as grants.
-  const guard = {}, guardCode = ts.transpileModule(fs.readFileSync(path.join(root, 'apps/api/src/common/api-auth.guard.ts'), 'utf8'), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true } }).outputText;
-  vm.runInNewContext(guardCode, { exports: guard, require(name) {
-    if (name === '@rental-os/shared') return shared;
-    if (name === '@nestjs/common') return { Injectable: () => value => value, Optional: () => () => {} };
-    if (name === './platform-ai-access-policy') return require('../apps/api/src/common/platform-ai-access-policy.ts');
-    return {}; // Explicit inert service dependencies for this pure route resolver.
-  } });
+  const { createRentalAuthorization } = sourceLoader.load(path.join(root, 'packages/rental-core/src/http-auth.ts'));
+  const guard = createRentalAuthorization(shared);
   for (const action of ['outcomes', 'usageSummary']) assert.deepEqual(Array.from(guard.requiredPermissions('POST',
     `/${shared.AI_TASK_CENTER_HTTP_DRAFT.basePath}/${shared.AI_TASK_CENTER_HTTP_DRAFT[action]}`)), Array.from(shared.AI_TASK_CENTER_ENTRY_PERMISSIONS));
   cost.dispose(); host.dispose();
@@ -361,11 +478,11 @@ test('task runtime observation consumes original clocks and bounded records thro
   assert.equal(validation.validateAiTaskObservation('AiTaskPerformanceObservationDraft', originalRuntimeObservation('task-a')).task.taskId, 'task-a');
   assert.throws(() => validation.validateAiTaskObservation('AiTaskPerformanceObservationDraft', { ...originalRuntimeObservation('task-a'), credential: 'refused' }));
   assert.throws(() => host.source.validateTaskRuntimeObservation(originalRuntimeObservation('other-task'), 'task-a'));
-  const shared = require('../packages/shared/src/index'), guard = {};
+  const shared = sharedSource(), guard = {};
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(root, 'apps/api/src/common/api-auth.guard.ts'), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true } }).outputText,
   { exports: guard, require(name) {
-    if (name === '@rental-os/shared') return shared;
+    if (name === '@rental-os/shared' || name === '@rental-os/shared/ai-admin') return shared;
     if (name === '@nestjs/common') return { Injectable: () => value => value, Optional: () => () => {} };
     if (name === './platform-ai-access-policy') return require('../apps/api/src/common/platform-ai-access-policy.ts');
     return {}; // Pure original route resolver; no service construction or execution grant.
@@ -492,11 +609,11 @@ test('original selection material shares the human approval display without drop
   vm.runInNewContext(output, { exports, require(name) {
     if (name === 'react') return React;
     if (name === 'react/jsx-runtime') return require(name);
-    if (name === '@rental-os/shared') return require('@rental-os/shared');
+    if (name === '@rental-os/shared' || name === '@rental-os/shared/ai-admin') return require('@rental-os/shared');
     if (name === '@/api/aiTaskCenter') return { aiTaskCenterApi: {} };
     if (name === './VisibleObservationBoundary') return { VisibleObservationBoundary: ({ children }) => children };
     if (name === './OriginalOrderReceiptLink') return { OriginalOrderReceiptLink: stub };
-    if (name === '@/components/ui') return { ActionButton: stub, Alert: stub, ConfirmAction: stub, Select: stub };
+    if (name === '@/components/ui' || name === '@rental-os/platform-admin/ui') return { ActionButton: stub, Alert: stub, ConfirmAction: stub, Select: stub };
     if (name === './management-locale') return { useAiManagementLocale: () => ({ t: value => value }) };
     if (name === './safe-display') return { safeDisplayText: value => value ?? '' };
     if (name === './formatters') return { formatAmount: value => ({ value: String(value) }), formatTimestamp: value => ({ value }) };
@@ -517,7 +634,7 @@ test('original selection material shares the human approval display without drop
 });
 
 test('B10 workbench is feature-local, opt-in and does not add routes or transport', () => {
-  const source = fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-native/AiTaskWorkbench.tsx'), 'utf8');
+  const source = fs.readFileSync(path.join(root, 'packages/ai-native-admin/src/ai-native/AiTaskWorkbench.tsx'), 'utf8');
   assert.match(source, /export function AiTaskWorkbench/);
   assert.match(source, /TaskList/);
   assert.match(source, /TaskTimeline/);
@@ -530,7 +647,7 @@ test('B10 workbench is feature-local, opt-in and does not add routes or transpor
 });
 
 test('workbench clears detail before every task/context/visibility transition', () => {
-  const source = fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-native/AiTaskWorkbench.tsx'), 'utf8');
+  const source = fs.readFileSync(path.join(root, 'packages/ai-native-admin/src/ai-native/AiTaskWorkbench.tsx'), 'utf8');
   assert.match(source, /setDetail\(null\)/);
   assert.match(source, /epoch\.current \+= 1/);
   assert.match(source, /abort\.abort\(\)/);
@@ -539,14 +656,14 @@ test('workbench clears detail before every task/context/visibility transition', 
 });
 
 test('task list selection is explicit and unavailable rows are disabled', () => {
-  const source = fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-native/TaskList.tsx'), 'utf8');
+  const source = fs.readFileSync(path.join(root, 'packages/ai-native-admin/src/ai-native/TaskList.tsx'), 'utf8');
   assert.match(source, /onSelectTask/);
   assert.match(source, /task\.availability !== "available"/);
   assert.match(source, /selectedTaskId/);
 });
 
 test('actual workbench function renders host callbacks without starting transport', () => {
-  const source = fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-native/AiTaskWorkbench.tsx'), 'utf8')
+  const source = fs.readFileSync(path.join(root, 'packages/ai-native-admin/src/ai-native/AiTaskWorkbench.tsx'), 'utf8')
     .replace(/^import .*?;\r?\n/gm, '');
   const slots = [], effects = [];
   let cursor = 0;
@@ -556,7 +673,7 @@ test('actual workbench function renders host callbacks without starting transpor
     useEffect(effect) { cursor++; effects.push(effect); },
   };
   const stub = name => props => React.createElement(name, props);
-  const wrapped = `const {useState,useRef,useEffect}=hooks; const TaskList=stub('task-list'),TaskTimeline=stub('task-timeline'),MissingFieldsPanel=stub('missing'),ProposalPreview=stub('proposal'),HumanConfirmShell=stub('confirm'),CancelRecoveryStatus=stub('cancel'),KnowledgeSources=stub('sources'),MemoryPreferences=stub('memory'),AiServiceSummary=stub('service'),CapabilityStatus=stub('capability'),ActionButton=stub('action'),Alert=stub('alert');\n${source}`;
+  const wrapped = `const {useState,useRef,useEffect}=hooks; const TaskList=stub('task-list'),TaskTimeline=stub('task-timeline'),MissingFieldsPanel=stub('missing'),ProposalPreview=stub('proposal'),HumanConfirmShell=stub('confirm'),CancelRecoveryStatus=stub('cancel'),KnowledgeSources=stub('sources'),MemoryPreferences=stub('memory'),AiServiceSummary=stub('service'),CapabilityStatus=stub('capability'),ActionButton=stub('action'),Alert=stub('alert'),Accordion=stub('accordion'),VisibleObservationBoundary=stub('visible-observation'),ModelText=stub('model-text'),TaskModelSources=stub('task-model-sources'),TaskWorkbenchDisplay=stub('task-display');\n${source}`;
   const js = ts.transpileModule(wrapped, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText;
   const exports = {};
   vm.runInNewContext(js, { exports, hooks, stub, require(name) { if (name === 'react/jsx-runtime') return require('react/jsx-runtime'); throw new Error(name); }, AbortController });
@@ -575,7 +692,7 @@ test('actual workbench function renders host callbacks without starting transpor
 });
 
 test('actual platform capability consumer rejects legacy/private replies and retracts on disconnect, identity and hide', async () => {
-  const file = path.join(root, 'apps/admin/src/features/ai-native/PlatformCapabilityObservation.tsx');
+  const file = path.join(root, 'packages/ai-native-admin/src/platform-model-settings/PlatformCapabilityObservation.tsx');
   const output = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: {
     module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText;
   const slots = [], pending = [], cleaners = new Map(); let cursor = 0, calls = [], responder, epoch = 1;
@@ -591,36 +708,29 @@ test('actual platform capability consumer rejects legacy/private replies and ret
     } }
   };
   const document = { hidden: false, addEventListener: (key, value) => events.set(key, value), removeEventListener: key => events.delete(key) };
-  const store = { getState: () => ({ user, token, hasPermission: () => permitted }),
+  const store = { getState: () => ({ user, sessionVerified: true, authenticated: Boolean(token), hasPermission: () => permitted }),
     subscribe: listener => { subscribers.add(listener); return () => subscribers.delete(listener); } };
   const stub = name => props => React.createElement(name, props), exports = {};
-  const apiExports = {};
-  vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(root, 'apps/admin/src/api/platformAiSettings.ts'), 'utf8'),
-    { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText,
-    { exports: apiExports, AbortSignal, require(name) {
-      if (name === '@rental-os/shared') return require('@rental-os/shared');
-      if (name === '@/app/queryClient') return { currentSessionSignal: () => sessionAbort.signal };
-      if (name === './http') return { request: () => { throw Error('no platform writes or other operations'); }, http: {
-        get: async (url, options) => {
-          assert.match(url, /^\/platform\/ai\/providers\/profile-[ab]\/capabilities$/u);
-          assert.equal(options.headers['Cache-Control'], 'no-store');
-          const profileId = url.split('/').at(-2); calls.push({ profileId, signal: options.signal });
-          return { data: { data: await responder(profileId, options.signal) } };
-        }
-      } };
-      throw Error(name);
-    } });
+  const runtime = { getSession: store.getState, subscribe: store.subscribe,
+    currentSessionEpoch: () => epoch, currentSessionSignal: () => sessionAbort.signal,
+    request: async (url, options) => {
+      assert.match(url, /^\/platform\/ai\/providers\/profile-[ab]\/capabilities$/u);
+      assert.equal(options.headers['Cache-Control'], 'no-store');
+      assert.equal(options.method ?? 'get', 'get', 'no platform writes or other operations');
+      const profileId = url.split('/').at(-2); calls.push({ profileId, signal: options.signal });
+      return responder(profileId, options.signal);
+    } };
+  const api = sourceLoader.load(path.join(root, 'packages/ai-native-admin/src/platform-model-settings/platformAiSettings.ts'))
+    .createPlatformAiSettingsApi({ runtime, getSession: store.getState });
   const formatTimestamp = loadLifecycleSession('formatters.ts').formatTimestamp;
   vm.runInNewContext(output, { exports, document, AbortController, structuredClone, require(name) {
     if (name === 'react') return hooks;
     if (name === 'react/jsx-runtime') return require('react/jsx-runtime');
-    if (name === '@/api/platformAiSettings') return apiExports;
-    if (name === '@/app/locale') return { useLocale: () => ({ t: value => value }) };
-    if (name === './management-locale') return { useAiManagementLocale: () => ({ t: value => value }) };
-    if (name === '@/app/queryClient') return { currentSessionEpoch: () => epoch, currentSessionSignal: () => sessionAbort.signal };
-    if (name === '@/features/auth/authStore') return { useAuthStore: store };
-    if (name === '@/components/ui') return { ActionButton: stub('action'), Alert: stub('alert') };
-    if (name === './formatters') return { formatTimestamp };
+    if (name === './runtime') return { usePlatformModelSettingsRuntime: () => ({ runtime, getSession: store.getState,
+      currentSessionEpoch: runtime.currentSessionEpoch, platformAiSettingsApi: api }) };
+    if (name === '../ai-native/management-locale') return { useAiManagementLocale: () => ({ t: value => value }) };
+    if (name === '@/components/ui' || name === '@rental-os/platform-admin/ui') return { ActionButton: stub('action'), Alert: stub('alert') };
+    if (name === '../ai-native/formatters') return { formatTimestamp };
     if (name.endsWith('.css')) return { default: {} };
     throw Error(name);
   } });
@@ -659,7 +769,8 @@ test('actual platform capability consumer rejects legacy/private replies and ret
   document.hidden = false; events.get('visibilitychange')?.(); tree = render(); assert.equal(visible(tree), false, 'show never restores or rereads');
   let resolve; responder = () => new Promise(done => { resolve = done; });
   const late = read(tree)(); document.hidden = true; events.get('visibilitychange')?.();
-  assert.equal(calls.at(-1).signal.aborted, true); document.hidden = false; resolve(observation()); await late;
+  assert.equal(calls.at(-1).signal.aborted, true); document.hidden = false; resolve(observation());
+  await assert.rejects(late, /AI_SCOPE_CHANGED/);
   tree = render(); assert.equal(visible(tree), false, 'late hidden response cannot return after show');
   responder = async id => observation(id); await read(tree)(); tree = render();
   sessionAbort.abort(); sessionAbort = new AbortController(); epoch++; user = { ...user, id: 'other-platform-owner' };
@@ -670,7 +781,7 @@ test('actual platform capability consumer rejects legacy/private replies and ret
 
 test('conversation navigation keeps the original locator and rejects changed scope, session or contract', () => {
   const { readConversationNavigation: read } = loadLifecycleSession('conversation-navigation.ts');
-  const shared = require('../packages/shared/src/index');
+  const shared = sharedSource();
   const selection = { draftVersion: shared.AI_CONVERSATION_DRAFT_VERSION, conversationId: 'original-conversation',
     capabilityCode: 'order_explanation', identity: 'owner-space-a', sessionEpoch: 4 };
   assert.equal(JSON.stringify(read(selection, selection.identity, 4)), JSON.stringify(selection));
@@ -704,9 +815,9 @@ test('actual conversation history stays explicit, capability-bound and retracts 
   vm.runInNewContext(output, { exports, document, AbortController, require(name) {
     if (name === 'react') return hooks;
     if (name === 'react/jsx-runtime') return require('react/jsx-runtime');
-    if (name === '@rental-os/shared') return { ...shared, AI_SCENE_CODES: ['order_explanation', 'opening_diagnosis', 'quote_clarification'] };
+    if (name === '@rental-os/shared' || name === '@rental-os/shared/ai-admin') return { ...shared, AI_SCENE_CODES: ['order_explanation', 'opening_diagnosis', 'quote_clarification'] };
     if (name === '@/api/aiConversations') return { aiConversationsApi: api };
-    if (name === '@/components/ui') return { ActionButton: stub('action'), Alert: stub('alert'), Select: stub('select'), Button: stub('button') };
+    if (name === '@/components/ui' || name === '@rental-os/platform-admin/ui') return { ActionButton: stub('action'), Alert: stub('alert'), Select: stub('select'), Button: stub('button') };
     if (name === './ConversationDetail') return { ConversationDetail: stub('conversation-detail') };
     if (name === './ConversationLifecycle') return { ConversationLifecycle: stub('conversation-lifecycle') };
     if (name === './EntrySceneCatalog') return { EntrySceneCatalog: stub('entry-scenes') };
@@ -806,12 +917,12 @@ test('actual operator workspace wires original reads and retracts native control
       if (Object.hasOwn(imports, name)) return imports[name];
       if (name === 'react') return hooks;
       if (name === 'react/jsx-runtime') return require(name);
-      if (name === '@rental-os/shared') return require('@rental-os/shared');
+      if (name === '@rental-os/shared' || name === '@rental-os/shared/ai-admin') return require('@rental-os/shared');
       if (name === './OperatorContext') return { useOperator: () => operator };
       if (name === 'react-router-dom') return { useNavigate: () => () => {} };
       if (name === '@/app/locale') return { useLocale: () => ({ locale: 'zh-CN', t: value => value }) };
       if (name === '../ai-native/management-locale') return { useAiManagementLocale: () => ({ locale: 'zh-CN', t: value => value }) };
-      if (name === '@/components/ui') return { Button: stub('button'), Input: stub('input'), Select: stub('select'), Drawer: stub('drawer') };
+      if (name === '@/components/ui' || name === '@rental-os/platform-admin/ui') return { Button: stub('button'), Input: stub('input'), Select: stub('select'), Drawer: stub('drawer') };
       if (name === '@/components/ui/AnimatedIcon') return { AnimatedIcon: stub('icon') };
       if (name === '@/features/ai-native/VisibleObservationHost') return { useVisibleObservationHost: () => ({ invalidate() { invalidations++; } }) };
       const leaf = leaves.find(value => name.endsWith(`/${value}`));
@@ -881,11 +992,11 @@ test('actual conversation detail loads explicitly and retracts on switch, hide, 
   vm.runInNewContext(output, { exports, document, AbortController, require(name) {
     if (name === 'react') return hooks;
     if (name === 'react/jsx-runtime') return require('react/jsx-runtime');
-    if (name === '@rental-os/shared') return require('../packages/shared/src/ai-conversation-draft');
+    if (name === '@rental-os/shared' || name === '@rental-os/shared/ai-admin') return require('../packages/shared/src/ai-conversation-draft');
     if (name === '@/api/aiConversations') return { aiConversationsApi: { detail: async (query, capability, signal) => {
       calls.push({ query, capability, signal }); return responder(query);
     } } };
-    if (name === '@/components/ui') return { ActionButton: stub('action'), Alert: stub('alert') };
+    if (name === '@/components/ui' || name === '@rental-os/platform-admin/ui') return { ActionButton: stub('action'), Alert: stub('alert') };
     if (name === './management-locale') return { useAiManagementLocale: () => ({ t: text => text }) };
     if (name === './ConversationResult') return { ConversationResult: stub('conversation-result') };
     if (name === './ConversationAdmission') return { ConversationAdmission: stub('conversation-admission') };
@@ -988,14 +1099,14 @@ test('actual original-turn result stays explicit and retracts text on refusal, s
   vm.runInNewContext(output, { exports, document, AbortController, AbortSignal, require(name) {
     if (name === 'react') return hooks;
     if (name === 'react/jsx-runtime') return require('react/jsx-runtime');
-    if (name === '@rental-os/shared') return shared;
+    if (name === '@rental-os/shared' || name === '@rental-os/shared/ai-admin') return shared;
     if (name === '@/features/auth/authStore') return { useAuthStore };
     if (name === '@/app/queryClient') return { currentSessionEpoch: () => epoch, currentSessionSignal: () => session.signal };
     if (name === '@/api/aiTaskCenter') return { aiTaskCenterApi: {} };
     if (name === '@/api/aiConversations') return { aiConversationsApi: { currentResult: async (query, turn, signal) => {
       calls.push({ query, turn, signal }); return responder(query, turn);
     } } };
-    if (name === '@/components/ui') return { ActionButton: stub('action'), Alert: stub('alert') };
+    if (name === '@/components/ui' || name === '@rental-os/platform-admin/ui') return { ActionButton: stub('action'), Alert: stub('alert') };
     if (name === './VisibleObservationBoundary') return { VisibleObservationBoundary: ({ children }) => children };
     if (name === './VisibleObservationHost') return { useVisibleObservationHost: () => null };
     if (name === './TaskWorkbenchDisplay') return { TaskWorkbenchDisplay: stub('workbench-display') };
@@ -1189,7 +1300,7 @@ test('actual lifecycle controls are explicit, retract history and preserve origi
     if (name === 'react') return hooks;
     if (name === 'react/jsx-runtime') return require('react/jsx-runtime');
     if (name === '@/api/aiConversations') return { aiConversationsApi: api };
-    if (name === '@/components/ui') return { ActionButton: stub('action'), Alert: stub('alert'), ConfirmAction: stub('confirm') };
+    if (name === '@/components/ui' || name === '@rental-os/platform-admin/ui') return { ActionButton: stub('action'), Alert: stub('alert'), ConfirmAction: stub('confirm') };
     if (name === './conversation-lifecycle-session') return { ConversationLifecycleSession: class extends original.ConversationLifecycleSession {
       constructor(...args) { super(...args, () => `ui-operation-${++keys}`); }
     } };
@@ -1226,7 +1337,7 @@ test('actual lifecycle controls are explicit, retract history and preserve origi
 test('original order admission retains one key and hash without durable body or resend after uncertainty', async () => {
   const hashing = loadLifecycleSession('budget-settings-session.ts');
   const { ConversationAdmissionSession } = loadLifecycleSession('conversation-admission-session.ts', { './budget-settings-session': hashing });
-  const shared = require('../packages/shared/src/index'), draftVersion = shared.AI_CONVERSATION_DRAFT_VERSION;
+  const shared = sharedSource(), draftVersion = shared.AI_CONVERSATION_DRAFT_VERSION;
   const values = new Map(), storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) };
   let calls = 0, current = true, saved, reply;
   const ports = { admit: async command => { calls++; saved = command; return reply(command); }, admission: async command => reply(command) };
@@ -1363,16 +1474,16 @@ for (const capability of ['order_explanation', 'opening_diagnosis', 'quote_clari
   const storageValues = new Map(), storage = { getItem: key => storageValues.get(key) ?? null, setItem: (key, value) => storageValues.set(key, value), removeItem: key => storageValues.delete(key) };
   const hashing = loadLifecycleSession('budget-settings-session.ts');
   const original = loadLifecycleSession('conversation-admission-session.ts', { './budget-settings-session': hashing });
-  const shared = require('../packages/shared/src/index'), stub = name => props => React.createElement(name, props), exports = {};
+  const shared = sharedSource(), stub = name => props => React.createElement(name, props), exports = {};
   const sessionSignal = new AbortController().signal;
   vm.runInNewContext(output, { exports, document, structuredClone, window: { sessionStorage: storage }, require(name) {
     if (name === 'react') return hooks;
     if (name === 'react/jsx-runtime') return require('react/jsx-runtime');
-    if (name === '@rental-os/shared') return shared;
+    if (name === '@rental-os/shared' || name === '@rental-os/shared/ai-admin') return shared;
     if (name === '@/app/queryClient') return { currentSessionEpoch: () => 1, currentSessionSignal: () => sessionSignal };
     if (name === '@/api/aiConversations') return { aiConversationsApi: { admit: async () => { calls++; throw Error('lost acknowledgement'); },
       admission: async () => { calls++; throw Error('unavailable'); } } };
-    if (name === '@/components/ui') return { ActionButton: stub('action'), Alert: stub('alert'), ConfirmAction: stub('confirm'), Input: stub('input'), Select: stub('select') };
+    if (name === '@/components/ui' || name === '@rental-os/platform-admin/ui') return { ActionButton: stub('action'), Alert: stub('alert'), ConfirmAction: stub('confirm'), Input: stub('input'), Select: stub('select') };
     if (name === './conversation-admission-session') return { ConversationAdmissionSession: class extends original.ConversationAdmissionSession {
       constructor(...args) { super(...args, () => 'ui-admission'); }
     } };
@@ -1439,7 +1550,7 @@ for (const capability of ['order_explanation', 'opening_diagnosis', 'quote_clari
 
 for (const capability of ['order_explanation', 'opening_diagnosis', 'quote_clarification']) test(`original ${capability} task creation journals before sending and recovers only original metadata`, async () => {
   const { ConversationTaskCreationSession: Session } = loadLifecycleSession('conversation-task-creation-session.ts');
-  const shared = require('../packages/shared/src/index');
+  const shared = sharedSource();
   const values = new Map(), storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
   const original = { draftVersion: shared.AI_SCENE_REQUEST_DRAFT_VERSION, inputRef: '11111111-1111-4111-8111-111111111111' };
   const task = { taskId: '22222222-2222-4222-8222-222222222222', runId: '33333333-3333-4333-8333-333333333333' };
@@ -1523,7 +1634,7 @@ for (const capability of ['order_explanation', 'opening_diagnosis', 'quote_clari
   };
   const values = new Map(), storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
   const document = { hidden: false, addEventListener(_name, fn) { this.change = fn; }, removeEventListener() {} };
-  const original = loadLifecycleSession('conversation-task-creation-session.ts'), shared = require('../packages/shared/src/index');
+  const original = loadLifecycleSession('conversation-task-creation-session.ts'), shared = sharedSource();
   const stub = name => props => React.createElement(name, props), exports = {};
   const turn = { admissionKey: 'admission-a', turnId: 'turn-a', originalRequestKey: 'original-a', requestHash: 'a'.repeat(64),
     capabilityCode: capability, capabilityVersion: '1', createdAt: '2026-11-03T00:00:00Z', automaticRetry: false,
@@ -1536,7 +1647,7 @@ for (const capability of ['order_explanation', 'opening_diagnosis', 'quote_clari
       admission: async query => ({ draftVersion: query.draftVersion, conversationId: query.conversationId, admissionKey: query.admissionKey,
         result: { ...turn, admissionKey: query.admissionKey }, absence: 'not_proof_of_no_commit', retryable: false }),
       createTask: async () => { calls++; throw Error('lost task acknowledgement'); }, recovery: async () => { calls++; throw Error('unavailable'); } } };
-    if (name === '@/components/ui') return { ActionButton: stub('action'), Alert: stub('alert'), ConfirmAction: stub('confirm') };
+    if (name === '@/components/ui' || name === '@rental-os/platform-admin/ui') return { ActionButton: stub('action'), Alert: stub('alert'), ConfirmAction: stub('confirm') };
     if (name === './conversation-task-creation-session') return original;
     if (name === './ConversationOrderExecution') return { ConversationOrderExecution: stub('conversation-order-execution') };
     if (name === './ConversationOpeningExecution') return { ConversationOpeningExecution: stub('conversation-opening-execution') };
@@ -1567,7 +1678,7 @@ for (const capability of ['order_explanation', 'opening_diagnosis', 'quote_clari
 });
 
 for (const capability of ['opening_diagnosis', 'quote_clarification']) test(`${capability === 'opening_diagnosis' ? 'opening' : 'quote'} conversation executes its original model host once and reopens only the original receipt`, async () => {
-  const shared = require('../packages/shared/src/index');
+  const shared = sharedSource();
   const turn = { admissionKey: 'opening-admission', turnId: 'opening-turn', originalRequestKey: 'opening-original', requestHash: 'a'.repeat(64),
     capabilityCode: capability, capabilityVersion: '1', createdAt: '2026-11-03T00:00:00Z', automaticRetry: false,
     status: 'original_bound', execution: 'not_inferred_from_association', material: 'retained',
@@ -1632,7 +1743,7 @@ for (const capability of ['opening_diagnosis', 'quote_clarification']) test(`${c
 
 test('original order execution keeps first start explicit and observes uncertainty without replay', async () => {
   const { ConversationOrderExecutionSession: Session } = loadLifecycleSession('conversation-order-execution-session.ts');
-  const shared = require('../packages/shared/src/index');
+  const shared = sharedSource();
   const values = new Map(), storage = { getItem: k => values.get(k) ?? null, setItem: (k, v) => values.set(k, v) };
   const turn = { admissionKey: 'admission-a', turnId: 'turn-a', originalRequestKey: 'original-a', requestHash: 'a'.repeat(64),
     capabilityCode: 'order_explanation', capabilityVersion: '1', createdAt: '2026-11-03T00:00:00Z', automaticRetry: false,
@@ -1698,7 +1809,7 @@ test('actual order execution requires separate reading and confirmation and reje
       slots[i] = deps; effects.push(() => { cleaners.get(i)?.(); cleaners.set(i, effect()); });
     } },
   };
-  const shared = require('../packages/shared/src/index'), sessions = loadLifecycleSession('conversation-order-execution-session.ts');
+  const shared = sharedSource(), sessions = loadLifecycleSession('conversation-order-execution-session.ts');
   const values = new Map(), storage = { getItem: k => values.get(k) ?? null, setItem: (k, v) => values.set(k, v) };
   const document = { hidden: false, addEventListener(_name, fn) { this.change = fn; }, removeEventListener() {} };
   const turn = { admissionKey: 'admission-a', turnId: 'turn-a', originalRequestKey: 'original-a', requestHash: 'a'.repeat(64),
@@ -1718,7 +1829,7 @@ test('actual order execution requires separate reading and confirmation and reje
         execution: 'not_inferred_from_metadata' }, steps: [], hasMore: false, automaticExecution: false, nextAction: 'host_plan_handoff',
         observedResults: 'preserved_even_if_task_cancelled', snapshot: 'bounded_sequential_read' }),
       orderPreparation: async () => preparation, orderStart: async () => { sends++; throw Error('lost start'); } } };
-    if (name === '@/components/ui') return { ActionButton: stub('action'), ConfirmAction: stub('confirm'), Alert: stub('alert') };
+    if (name === '@/components/ui' || name === '@rental-os/platform-admin/ui') return { ActionButton: stub('action'), ConfirmAction: stub('confirm'), Alert: stub('alert') };
     if (name === './conversation-order-execution-session') return sessions;
     if (name === './ConversationOrderResults') return { ConversationOrderResults: stub('conversation-order-results') };
     if (name === './VisibleObservationHost') return { useVisibleObservationHost: () => null };
@@ -1759,7 +1870,7 @@ test('actual original order results read explicitly and retract amounts and text
   vm.runInNewContext(output, { exports, AbortController, document, require(name) {
     if (name === 'react') return hooks; if (name === 'react/jsx-runtime') return require('react/jsx-runtime');
     if (name === '@/api/aiConversations') return { aiConversationsApi: {} };
-    if (name === '@/components/ui') return { ActionButton: stub('action'), Alert: stub('alert') };
+    if (name === '@/components/ui' || name === '@rental-os/platform-admin/ui') return { ActionButton: stub('action'), Alert: stub('alert') };
     if (name === './conversation-order-results-reader') return { readConversationOrderResults: async (_api, _id, _turn, signal) => { calls++; signals.push(signal); return respond(); } };
     if (name === './VisibleObservationBoundary') return { VisibleObservationBoundary: ({ children }) => children };
     if (name === './VisibleObservationHost') return { useVisibleObservationHost: () => null };
@@ -1813,7 +1924,7 @@ test('actual closure controls preserve original receipts and require explicit id
       slots[i] = deps; effects.push(() => { cleaners.get(i)?.(); cleaners.set(i, effect()); });
     } },
   };
-  const shared = require('../packages/shared/src/index'), original = loadLifecycleSession();
+  const shared = sharedSource(), original = loadLifecycleSession();
   const values = new Map(), storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) };
   const document = { hidden: false, addEventListener(_event, fn) { this.change = fn; }, removeEventListener() { this.change = null; } };
   const stub = name => props => React.createElement(name, props), exports = {};
@@ -1823,11 +1934,11 @@ test('actual closure controls preserve original receipts and require explicit id
   vm.runInNewContext(output, { exports, document, window: { sessionStorage: storage }, require(name) {
     if (name === 'react') return hooks;
     if (name === 'react/jsx-runtime') return require('react/jsx-runtime');
-    if (name === '@rental-os/shared') return shared;
+    if (name === '@rental-os/shared' || name === '@rental-os/shared/ai-admin') return shared;
     if (name === '@/api/aiConversations') return { aiConversationsApi: { closeUnstarted: async command => {
       calls++; assert.equal(command.turnId, 'turn-a'); if (lost) throw Error('lost closure response'); return receipt;
     }, operation: async () => { calls++; return receipt; } } };
-    if (name === '@/components/ui') return { ActionButton: stub('action'), Alert: stub('alert'), ConfirmAction: stub('confirm') };
+    if (name === '@/components/ui' || name === '@rental-os/platform-admin/ui') return { ActionButton: stub('action'), Alert: stub('alert'), ConfirmAction: stub('confirm') };
     if (name === './conversation-lifecycle-session') return { ConversationLifecycleSession: class extends original.ConversationLifecycleSession {
       constructor(ports, current, storage, key, _newKey, retain) { super(ports, current, storage, key, () => 'closure-ui', retain); }
     } };

@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { TenantDispatchChannel, TenantDispatchQuery, TenantDispatchRow, TenantDispatchStatus } from "@rental-os/platform-contracts";
 import { Mail, MessageSquare } from "lucide-react";
 import { useLocale } from "../../app/locale";
+import { resolveAdminBrandName } from "../../app/branding";
 import { PageHeading, type PageHeadingProps } from "../../components/PageHeading";
 import { QueryState } from "../../components/QueryState";
 import { Button, DataTableText, SearchField, Select, Segmented, Table, Result } from "../../components/ui";
@@ -15,6 +16,8 @@ import styles from "./Dispatch.module.css";
 
 export interface TenantMessagingPageProps {
   renderHeader?: (props: Omit<PageHeadingProps, "brandName" | "icon">) => ReactNode;
+  description?: string;
+  businessScopeLabel?: string;
 }
 
 export function TenantDispatchPage(props: TenantMessagingPageProps) {
@@ -24,9 +27,9 @@ export function TenantDispatchPage(props: TenantMessagingPageProps) {
   return <DispatchWorkspace key={runtime.currentSessionEpoch()} {...props} />;
 }
 
-function DispatchWorkspace({ renderHeader }: TenantMessagingPageProps) {
+function DispatchWorkspace({ renderHeader, description = "查看当前租户的短信、邮件和成员邀请发送记录。", businessScopeLabel = "业务范围" }: TenantMessagingPageProps) {
   const { t, locale } = useLocale();
-  const { tenant } = useAdminSession();
+  const { tenant, user } = useAdminSession();
   const runtime = useAdminRuntime();
   const api = useTenantMessagingApi();
   const [query, setQuery] = useState<TenantDispatchQuery>({ page: 1, pageSize: 30 });
@@ -34,9 +37,9 @@ function DispatchWorkspace({ renderHeader }: TenantMessagingPageProps) {
   const records = useQuery({ queryKey: ["tenant-dispatch", runtime.currentSessionEpoch(), query],
     queryFn: ({ signal }) => api.dispatches(query, signal) });
   const update = (patch: Partial<TenantDispatchQuery>) => setQuery(value => ({ ...value, ...patch, page: 1 }));
-  const heading = { title: t("寄件中心"), description: t("查看当前租户的短信、邮件和成员邀请发送记录。") };
+  const heading = { title: t("寄件中心"), description: t(description) };
   return <>
-    {renderHeader ? renderHeader(heading) : <PageHeading {...heading} brandName={tenant?.tenantName ?? "Nativark"} />}
+    {renderHeader ? renderHeader(heading) : <PageHeading {...heading} brandName={resolveAdminBrandName(tenant, user)} />}
     <QueryState loading={records.isLoading} error={records.error} onRetry={() => records.refetch({ throwOnError: true })}>
       <Table<TenantDispatchRow> rowKey={row => `${row.source}:${row.id}:${row.channel}`} dataSource={records.data?.rows ?? []}
         toolbar={<>
@@ -52,13 +55,13 @@ function DispatchWorkspace({ renderHeader }: TenantMessagingPageProps) {
           onChange: (page, pageSize) => setQuery(value => ({ ...value, page, pageSize })) }} columns={[
           { title: t("寄件"), render: (_, row) => <div className={styles.identity}><span aria-label={t(row.channel === "email" ? "邮件" : "短信")}>
             {row.channel === "email" ? <Mail size={17} /> : <MessageSquare size={17} />}</span><DataTableText primary={row.subject} secondary={row.recipient} /></div> },
-          { title: t("业务范围"), render: (_, row) => row.workspaceName ?? t("租户通知") },
+          { title: t(businessScopeLabel), render: (_, row) => row.workspaceName ?? t("租户通知") },
           { title: t("状态"), render: (_, row) => <DispatchStatus value={row.status} /> },
           { title: t("发送服务"), dataIndex: "provider" },
           { title: t("创建时间"), render: (_, row) => new Date(row.createdAt).toLocaleString(locale) },
           { title: t("操作"), fixed: "right", render: (_, row) => <Button type="text" size="small" onClick={() => setSelected(row)}>{t("查看详情")}</Button> }
         ]} />
     </QueryState>
-    <DispatchDetail selected={selected} onClose={() => setSelected(undefined)} />
+    <DispatchDetail selected={selected} onClose={() => setSelected(undefined)} businessScopeLabel={businessScopeLabel} />
   </>;
 }

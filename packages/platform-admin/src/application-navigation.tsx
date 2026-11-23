@@ -2,7 +2,7 @@
  * 注册与菜单可见性不授予接口权限，公共页面继续使用各自原服务端守卫。
  */
 import type { AuthUser } from "@rental-os/platform-contracts";
-import { ApiOutlined, AppstoreOutlined, BgColorsOutlined, ControlOutlined, CrownOutlined,
+import { ApiOutlined, AppstoreOutlined, BgColorsOutlined, CalendarOutlined, ControlOutlined, CrownOutlined,
   CustomerServiceOutlined, DashboardOutlined, SafetyCertificateOutlined, SendOutlined,
   SettingOutlined, ShopOutlined, TeamOutlined } from "./components/ui/icons";
 import type { ShellNavigationSection } from "./components/animate-sidebar/NativeNavigation";
@@ -12,7 +12,6 @@ import { hasSubscriptionPermission } from "./features/subscription";
 import { hasTenantIntegrationPermission } from "./features/integrations";
 import { hasTenantMessagingPermission } from "./features/messaging";
 import { canReadSecurityBaseline } from "./features/platform-settings/platformSettingsAccess";
-import { canManagePlatformTools } from "./features/platform-tools";
 
 /** 兼容旧链接，页面实现和请求仍使用同一公共应用实例。 */
 export const PUBLIC_ADMIN_ROUTE_ALIASES = {
@@ -20,6 +19,18 @@ export const PUBLIC_ADMIN_ROUTE_ALIASES = {
   "/tenant/roles": "/settings/roles",
   "/tenant/dispatch": "/settings/dispatch",
   "/tenant/support": "/settings/support",
+} as const;
+
+/** 原深链接只定位同一已登记公共页面，不作为侧栏菜单的反向别名。 */
+export const LEGACY_PUBLIC_ADMIN_ROUTE_ALIASES = {
+  "/platform": "/",
+  "/system-rules": "/platform/system",
+  "/security-baseline": "/platform/operations",
+  "/integrations": "/platform/operations",
+  "/notifications": "/platform/operations",
+  "/platform-governance": "/platform/tools",
+  "/file-assets": "/platform/tools",
+  "/async-jobs": "/platform/tools",
 } as const;
 
 const groupIcons: Record<string, AnimatedIconName> = {
@@ -35,7 +46,7 @@ const routeDisplayLabels: Record<string, string> = {
   "/platform/subscription-catalog": "功能定价",
 };
 
-export function publicAdminNavigation(user: AuthUser, showOverview: boolean): ShellNavigationSection[] {
+export function publicAdminNavigation(user: AuthUser, showOverview: boolean, platformAiAvailable = false): ShellNavigationSection[] {
   const tenant = (permission: string) => canManagePublicResource(user, "tenant", permission);
   const saas = (permission: string) => canManagePublicResource(user, "saas", permission);
   const sections: ShellNavigationSection[] = [
@@ -60,13 +71,20 @@ export function publicAdminNavigation(user: AuthUser, showOverview: boolean): Sh
     ] },
     { key: "platform-management", label: "平台管理", icon: <SettingOutlined />, routes: [
       ...(saas("system:tenant:manage") ? [{ path: "/platform/tenants", label: "SaaS 租户", icon: <ShopOutlined /> }] : []),
+      ...(saas("system:demo-request:view") ? [{ path: "/platform/demo-requests", label: "演示预约", icon: <CalendarOutlined /> }] : []),
       ...(hasSubscriptionPermission(user, "system:tenant:subscription:manage") ? [
         { path: "/platform/subscriptions", label: "租户订阅", icon: <CrownOutlined /> },
         { path: "/platform/subscription-catalog", label: "功能目录与定价", icon: <AppstoreOutlined /> },
       ] : []),
+      ...(saas("system:calendar-source:manage") ? [{ path: "/platform/official-calendars", label: "公共官方日历", icon: <CalendarOutlined /> }] : []),
+      ...(saas("system:user:manage") ? [{ path: "/platform/users", label: "组织与权限", icon: <TeamOutlined /> }] : []),
+      ...(platformAiAvailable && saas("system:ai-provider:view")
+        ? [{ path: "/platform/ai", label: "平台 AI 配置", icon: <ApiOutlined /> }] : []),
       ...(user.isSaasAdmin && canReadSecurityBaseline(user)
         ? [{ path: "/platform/system", label: "平台参数", icon: <SettingOutlined /> }] : []),
-      ...(user.isSaasAdmin && canManagePlatformTools(user)
+      ...(saas("system:params:manage")
+        ? [{ path: "/platform/operations", label: "平台运维", icon: <SafetyCertificateOutlined /> }] : []),
+      ...(saas("system:params:manage")
         ? [{ path: "/platform/tools", label: "平台工具与治理", icon: <ControlOutlined /> }] : []),
       ...(saas("system:tenant:manage") ? [
         { path: "/platform/core-packages", label: "Core 包管理", icon: <AppstoreOutlined /> },

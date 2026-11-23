@@ -11,7 +11,7 @@ import {
 } from "@rental-os/rental-core";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Card, Col, Descriptions, Divider, InputNumber, Row, Space, Tag, Typography } from "antd";
-import { Radio, Result } from "@rental-os/platform-admin/ui";
+import { App, Radio, Result } from "@rental-os/platform-admin/ui";
 import { Checkbox } from "@rental-os/platform-admin/ui";
 import { Form } from "@rental-os/platform-admin/ui";
 import { Alert, DatePicker } from "@rental-os/platform-admin/ui";
@@ -21,7 +21,7 @@ import { Button, Select, Tabs } from "@rental-os/platform-admin/ui";
 import dayjs, { type Dayjs } from "dayjs";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocale } from "@rental-os/platform-admin/locale";
-import { CorePage, CorePageActions, type CoreAdminPageAction } from "@rental-os/platform-admin/core";
+import { CorePage, CorePageActions, UnsavedChangesGuard, type CoreAdminPageAction } from "@rental-os/platform-admin/core";
 import { formSnapshotFingerprint } from "@rental-os/platform-admin/forms";
 import { useOrderEditor } from "./useOrderEditor";
 import { rentalOrderLocation } from "./pages";
@@ -50,12 +50,12 @@ export function RentalOrderCreatePage() {
 
 function RentalOrderCreateContent() {
   const context = useRentalOrderContext();
+  const { message } = App.useApp();
   const { api: rentalCoreApi } = context;
   const queryScope = rentalOrderSessionIdentity(context.session, context.runtime.currentSessionEpoch());
   const { t, locale } = useLocale();
   const [form] = Form.useForm<FormValues>();
   const [quote, setQuote] = useState<RentalQuoteSnapshotV1>();
-  const [failure, setFailure] = useState<string>();
   const currentQuote = useRef<RentalQuoteSnapshotV1 | undefined>(undefined);
   // 输入改变时递增代次，响应只更新其发起时的同一份草稿。
   const quoteGeneration = useRef(0);
@@ -63,7 +63,6 @@ function RentalOrderCreateContent() {
     quoteGeneration.current += 1;
     currentQuote.current = undefined;
     setQuote(undefined);
-    setFailure(undefined);
   };
   const [created, setCreated] = useState<{ id: string; orderNo: string }>();
   const [submissionMode, setSubmissionMode] = useState("ordinary");
@@ -161,11 +160,10 @@ function RentalOrderCreateContent() {
       throw new DOMException("报价输入或页面已变化，请重新生成报价", "AbortError");
     if (!selectedMember || selectedMember.customerId !== values.customerId) {
       const error = new Error(t("请选择租户内的有效个人会员"));
-      setFailure(error.message);
+      message.error(error.message);
       throw error;
     }
     const generation = ++quoteGeneration.current;
-    setFailure(undefined);
     try {
       const result = await createQuote.mutateAsync({
         customerType: "personal",
@@ -199,7 +197,7 @@ function RentalOrderCreateContent() {
       return result;
     } catch (error) {
       if (generation === quoteGeneration.current && quoteEditor.isCurrent())
-        setFailure((error as Error).message || t("报价失败，请检查会员资格、价格、库存与规则"));
+        message.error((error as Error).message || t("报价失败，请检查会员资格、价格、库存与规则"));
       throw error;
     }
   }
@@ -222,14 +220,13 @@ function RentalOrderCreateContent() {
       endAt: original.request.endAt,
       lines: original.request.lines.map(({ itemGroupId, pricingGroupId, quantity, note }) => ({ itemGroupId: itemGroupId!, pricingGroupId, quantity, note })),
     };
-    setFailure(undefined);
     try {
       const result = await createOrder.mutateAsync(input);
       if (quoteEditor.isCurrent() && currentQuote.current === original) setCreated(result);
       return result;
     } catch (error) {
       if (quoteEditor.isCurrent() && currentQuote.current === original)
-        setFailure((error as Error).message || t("创建失败，报价可能过期或资格、库存已变化"));
+        message.error((error as Error).message || t("创建失败，报价可能过期或资格、库存已变化"));
       throw error;
     }
   }
@@ -271,7 +268,6 @@ function RentalOrderCreateContent() {
       onSubmitCapture={quoteEditor.formProps.onSubmitCapture}
       onValuesChange={(changed, values) => { quoteEditor.formProps.onValuesChange?.(changed, values); invalidateQuote(); }}>
       <Row gutter={[16, 16]} align="stretch">
-        {failure && <Col span={24}><Alert showIcon type="error" title={failure} /></Col>}
         <Col xs={24} xl={17}>
           <Space orientation="vertical" size={16} style={{ width: "100%" }}>
             <div className={styles.bookingContext}>
@@ -583,6 +579,8 @@ function RentalOrderCreateContent() {
     });
   }
   return <CorePage title={t("新建租赁订单")} actions={pageActions}>
+    <UnsavedChangesGuard dirty={quoteEditor.dirty || Boolean(quote) || selectedServices.length > 0}
+      busy={createQuote.isPending || createOrder.isPending || quoteEditor.busy} />
     <Tabs activeKey={submissionMode} destroyOnHidden={false}
       onChange={mode => { currentSubmissionMode.current = mode; quoteGeneration.current += 1; setSubmissionMode(mode); }} items={[
       { key: "ordinary", label: locale === "en-US" ? "Ordinary order" : "常规订单", children: ordinaryForm,

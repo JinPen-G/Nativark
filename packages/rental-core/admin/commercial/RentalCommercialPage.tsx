@@ -1259,12 +1259,15 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
                     !canReadGroups() || !canReadLocations() || !canReadProfile() || !canReadSettings()
                       ? (locale === "en-US" ? "Some service setup details are restricted" : t("部分服务配置资料读取受限"))
                       : groups.isError || locations.isError || profile.isError || settings.isError
-                        ? (locale === "en-US" ? "Unable to read service setup details" : t("服务配置资料读取失败"))
+                        ? t("服务配置资料读取失败")
                         : (locale === "en-US" ? "Service setup details are incomplete" : t("服务配置资料尚未完整提供"))
                   }
-                  description={locale === "en-US"
-                    ? "Services remain visible. Editing requires complete products, locations, business details and currency."
-                    : t("服务列表仍可查看；编辑需要完整商品、地点、经营资料和币种。")}
+                  description={canReadGroups() && canReadLocations() && canReadProfile() && canReadSettings()
+                    && (groups.isError || locations.isError || profile.isError || settings.isError)
+                    ? t("服务列表仍可查看，重新载入关联资料后再编辑。")
+                    : locale === "en-US"
+                      ? "Services remain visible. Editing requires complete products, locations, business details and currency."
+                      : t("服务列表仍可查看；编辑需要完整商品、地点、经营资料和币种。")}
                   action={
                     <ActionButton
                       label={t("重试")}
@@ -2490,16 +2493,17 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
               {
                 title: t("地点"),
                 dataIndex: "locationId",
-                render: (value) => (
-                  <DataTableText
-                    primary={visibleLocations?.find((row) => row.id === value)?.name ?? value}
-                    secondary={visibleLocations?.some((row) => row.id === value)
-                      ? undefined
-                      : locale === "en-US"
+                render: (value) => {
+                  const location = visibleLocations?.find((row) => row.id === value);
+                  return location ? location.name ?? value : (
+                    <DataTableText
+                      primary={value}
+                      secondary={locale === "en-US"
                         ? (!canReadLocations() ? "Location access is restricted" : "Location details unavailable")
                         : t(!canReadLocations() ? "地点资料读取受限" : "未提供地点资料")}
-                  />
-                ),
+                    />
+                  );
+                },
               },
               {
                 title: t("开始"),

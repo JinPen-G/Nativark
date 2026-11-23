@@ -1761,7 +1761,13 @@
     "./application-file-cleanup-authority": {
       "types": "./dist/application-file-cleanup-authority.d.ts",
       "default": "./dist/application-file-cleanup-authority.js"
-    }
+    },
+    "./admin/ai/order-facts": "./admin/ai/order-facts.ts",
+    "./admin/agent-desktop": "./admin/agent-desktop/index.tsx",
+    "./admin/agent-desktop/client": "./admin/agent-desktop/client.ts",
+    "./admin/agent-desktop/desktop-host": "./admin/agent-desktop/desktop-host.ts",
+    "./admin/agent-desktop/desktop-policy-session": "./admin/agent-desktop/desktop-policy-session.ts",
+    "./admin/agent-desktop/desktop-session-projection": "./admin/agent-desktop/desktop-session-projection.ts"
   },
   "typesVersions": {
     "*": {
@@ -3469,7 +3475,8 @@
     "axios": "1.19.0",
     "motion": "14.6.0",
     "@tanstack/react-table": "8.21.3",
-    "@rental-os/shared": "0.1.0"
+    "@rental-os/shared": "0.1.0",
+    "@rental-os/ai-native-admin": "0.1.0"
   },
   "peerDependenciesMeta": {
     "@nestjs/common": {
@@ -3545,6 +3552,9 @@
       "optional": true
     },
     "@rental-os/shared": {
+      "optional": true
+    },
+    "@rental-os/ai-native-admin": {
       "optional": true
     }
   }

@@ -17,7 +17,7 @@ function loadTs(relative) {
   return exports;
 }
 
-const display = loadTs('apps/admin/src/features/ai-native/safe-display.ts');
+const display = loadTs('packages/ai-native-admin/src/ai-native/safe-display.ts');
 
 function loadSession() {
   const file = path.join(root, 'apps/admin/src/features/ai-native/settings-save-session.ts');
@@ -60,7 +60,7 @@ test('native action children keep callbacks in instance host bindings', () => {
 });
 
 test('admin and native status views expose pending/error announcements', () => {
-  const workbench = fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-native/AiTaskWorkbench.tsx'), 'utf8');
+  const workbench = fs.readFileSync(path.join(root, 'packages/ai-native-admin/src/ai-native/AiTaskWorkbench.tsx'), 'utf8');
   assert.match(workbench, /aria-busy=\{detailState === "loading"\}/);
   for (const app of ['apps/miniprogram', 'apps/staff-miniprogram']) {
     const input = fs.readFileSync(path.join(root, app, 'src/components/ai-native/ai-supplement-input/index.wxml'), 'utf8');
@@ -70,9 +70,22 @@ test('admin and native status views expose pending/error announcements', () => {
 });
 
 test('resync-required workbench output suppresses stale detail children', () => {
-  const source = fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-native/AiTaskWorkbench.tsx'), 'utf8');
+  const source = fs.readFileSync(path.join(root, 'packages/ai-native-admin/src/ai-native/AiTaskWorkbench.tsx'), 'utf8');
   assert.match(source, /detailSynchronized/);
-  assert.match(source, /detailSynchronized && <TaskTimeline/);
+  const ast = ts.createSourceFile('AiTaskWorkbench.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let gatedTimeline = false;
+  (function visit(node) {
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
+      && ts.isIdentifier(node.left) && node.left.text === 'detailSynchronized') {
+      (function descendants(child) {
+        if ((ts.isJsxSelfClosingElement(child) || ts.isJsxOpeningElement(child))
+          && child.tagName.getText(ast) === 'TaskTimeline') gatedTimeline = true;
+        ts.forEachChild(child, descendants);
+      })(node.right);
+    }
+    ts.forEachChild(node, visit);
+  })(ast);
+  assert.ok(gatedTimeline, 'the original accordion timeline must remain inside the synchronized-detail gate');
   assert.match(source, /事件未同步，请由宿主重新读取快照后再继续/);
 });
 

@@ -7,6 +7,8 @@ const React = require("react");
 const { renderToStaticMarkup } = require("react-dom/server");
 const { createTable, getCoreRowModel } = require("@tanstack/table-core");
 const root = path.resolve(__dirname, "..");
+const sourceLoader = require("../scripts/controller-sources.cjs").createControllerSourceLoader(
+  root, path.dirname(path.dirname(require.resolve("typescript/package.json"))));
 
 function sourceFile(relative) {
   relative = relative.replace(/\\/g, "/");
@@ -49,6 +51,9 @@ function load(relative, overrides = {}, legacy = false, browserWindow) {
       return load(path.relative(root, target));
     }
     if (id === "@rental-os/platform-admin/locale") return load("packages/platform-admin/src/app/locale.tsx");
+    if (id === "@rental-os/rental-core" || id.startsWith("@rental-os/rental-core/")
+      || ["@rental-os/shared", "@rental-os/platform-contracts", "@rental-os/core-contracts"].includes(id))
+      return sourceLoader.load(sourceLoader.resolveSource(filename, id, true));
     return require(id);
   }, mod, mod.exports, browserWindow);
   return mod.exports;
@@ -444,8 +449,7 @@ const { DataTableMoney } = load("apps/admin/src/components/ui/data-table/DataTab
   "./DataTable.module.css": { __esModule: true, default: classes },
 });
 const coreOrderColumns = load("packages/rental-core/admin/orders/rentalOrderColumns.tsx", {
-  "@/components/ui": { Button: "button", Tooltip: ({ title, children }) => React.createElement('span', { 'data-tooltip': title }, children), DataTableColumnHeader: () => null, DataTableLeading, DataTableMoney, DataTableStatus: statusIntegration.DataTableStatus, DataTableNote: statusIntegration.DataTableNote },
-  "@/app/designTokens": load("apps/admin/src/app/designTokens.ts"),
+  "@/components/ui": { ...load("packages/platform-admin/src/app/designTokens.ts"), Button: "button", Tooltip: ({ title, children }) => React.createElement('span', { 'data-tooltip': title }, children), DataTableColumnHeader: () => null, DataTableLeading, DataTableMoney, DataTableStatus: statusIntegration.DataTableStatus, DataTableNote: statusIntegration.DataTableNote },
   "./orderFeeReview": load("apps/admin/src/features/rental-core/orderFeeReview.ts"),
   "./orderListPresentation": { orderTimingNotice, plannedReturnAt, timeSpanParts },
   "./RentalOrdersPage.module.css": { __esModule: true, default: classes },

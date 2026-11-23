@@ -1,5 +1,5 @@
 /** 公共 Web 组合工厂，默认空Core。宿主注入登记页面，身份/权限来自原API。 */
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createBrowserRouter, createRoutesFromElements, Navigate, Outlet, RouterProvider, useLocation, useNavigate, useParams } from "react-router-dom";
 import { coreNavigationEntries, corePageKey } from "@rental-os/core-contracts";
 import { AdminRuntimeProvider } from "./runtime";
@@ -14,7 +14,7 @@ import { Alert, Button, Result } from "./components/ui";
 import { useLocale } from "./app/locale";
 import { createCoreRouteElements, useCoreSession } from "./core";
 import { PlatformApplicationContext, usePlatformApplication, type PlatformAdminApplicationOptions } from "./application-context";
-import { publicAdminNavigation } from "./application-navigation";
+import { LEGACY_PUBLIC_ADMIN_ROUTE_ALIASES, publicAdminNavigation } from "./application-navigation";
 import { AccountAppearancePage, SelfProfilePage, TenantAppearancePage, TenantProfilePage } from "./SettingsPage";
 import { CoreAccessPage } from "./CoreAccessPage";
 import { CorePackagesPage } from "./features/core-packages";
@@ -26,13 +26,14 @@ import { TenantSubscriptionPage, SubscriptionProPage, SubscriptionRequestDetailP
   PlatformSubscriptionDetailPage, SubscriptionCatalogPage, SubscriptionExpiryFloatingCard, SubscriptionRoute,
   SUBSCRIPTION_ROUTES, hasSubscriptionPermission } from "./features/subscription";
 import { TenantIntegrationsPage, TENANT_INTEGRATIONS_ROUTE, hasTenantIntegrationPermission } from "./features/integrations";
-import { OrganizationsPage, PlatformSecurityPage, PLATFORM_SETTINGS_ROUTES, canReadOrganizations, canReadSecurityBaseline } from "./features/platform-settings";
+import { OrganizationsPage, PlatformPage, PlatformSystemPage, PlatformOperationsPage,
+  DemoRequestsPage, OfficialCalendarSourcePage, PLATFORM_SETTINGS_ROUTES } from "./features/platform-settings";
 import { PlatformToolsPage, PLATFORM_TOOLS_ROUTE, canManagePlatformTools } from "./features/platform-tools";
 import { AcceptOperatorInvitationPage, CustomerSupportPage, TenantDispatchPage, createOperatorInvitationApi,
   hasTenantMessagingPermission } from "./features/messaging";
 
 function ProtectedLayout() {
-  const { session, brandName, brand, pages, Shell = PlatformShell } = usePlatformApplication();
+  const { session, brandName, brand, pages, platformAiPage, Shell = PlatformShell } = usePlatformApplication();
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const { locale } = useLocale(), en = locale === "en-US";
   const cores = useCoreSession();
@@ -43,7 +44,7 @@ function ProtectedLayout() {
   if (state.user.mustChangePassword) return <PasswordChangeGate onChange={session.changePassword} />;
   const hasBusinessMenu = Boolean(cores.data && coreNavigationEntries(pages ?? new Map(), cores.data, locale).length);
   return <Shell brandName={brandName} brand={brand} pages={pages} onSignOut={session.signOut}
-    publicSections={publicAdminNavigation(state.user, !state.user.isSaasAdmin && !hasBusinessMenu)}>
+    publicSections={publicAdminNavigation(state.user, !state.user.isSaasAdmin && !hasBusinessMenu, Boolean(platformAiPage))}>
     <Outlet key={session.currentSessionEpoch()} />
   </Shell>;
 }
@@ -69,12 +70,12 @@ function TenantLoginAlias() {
 }
 
 function Home() {
-  const { brandName, pages, initialPage, onboardingPage } = usePlatformApplication();
+  const { brandName, pages, initialPage, onboardingPage, platformAiPage } = usePlatformApplication();
   const location = useLocation();
   const cores = useCoreSession(), { locale } = useLocale(), en = locale === "en-US";
   const { user } = useAdminSession();
   if (user?.isSaasAdmin) {
-    const target = publicAdminNavigation(user, false).flatMap(section => section.routes)[0];
+    const target = publicAdminNavigation(user, false, Boolean(platformAiPage)).flatMap(section => section.routes)[0];
     if (target) return <Navigate to={target.path} replace />;
   }
   const available = cores.data ? coreNavigationEntries(pages ?? new Map(), cores.data, locale) : [];
@@ -103,29 +104,48 @@ function AccountSecurity() {
     <AdminPasswordPage embedded onChange={session.changePassword} /></>;
 }
 
+function SaasPage({ permission, children }: { permission: string; children: ReactNode }) {
+  const { user, sessionVerified } = useAdminSession();
+  return sessionVerified && canManagePublicResource(user, "saas", permission)
+    ? children : <Result status="403" title="403" />;
+}
+
+function ToolsPage() {
+  const { user } = useAdminSession();
+  return user?.isSaasAdmin
+    ? <SaasPage permission="system:params:manage"><PlatformToolsPage /></SaasPage>
+    : <PlatformToolsPage />;
+}
+
 export function createPlatformAdminApplication(options: PlatformAdminApplicationOptions) {
   const { session } = options;
+  const PlatformAiPage = options.platformAiPage;
   const invitationApi = createOperatorInvitationApi(session.apiBaseURL);
   const router = createBrowserRouter([
   { path: "/login", element: <SignIn /> },
   { path: "/login/:tenantCode", element: <SignIn /> },
   { path: "/:tenantCode", element: <TenantLoginAlias /> },
-  { path: "/invite", element: <AcceptOperatorInvitationPage api={invitationApi} brandName={options.brandName} /> },
+  { path: "/invite", element: <AcceptOperatorInvitationPage api={invitationApi} brandName={options.brandName} {...options.publicPageContent?.operatorInvitation} /> },
   { element: <ProtectedLayout />, children: [
     { path: "/", element: <Home /> }, { path: "/settings/profile", element: <SelfProfilePage /> },
     { path: "/settings/security", element: <AccountSecurity /> },
     { path: "/settings/appearance", element: <TenantSetting appearance /> },
     { path: "/settings/tenant", element: <TenantSetting /> }, { path: "/settings/tenant-appearance", element: <TenantSetting appearance /> },
     { path: TENANT_INTEGRATIONS_ROUTE.path, element: <TenantIntegrationsPage /> },
-    { path: "/settings/dispatch", element: <TenantDispatchPage /> },
+    { path: "/settings/dispatch", element: <TenantDispatchPage {...options.publicPageContent?.dispatch} /> },
     { path: "/settings/support", element: <CustomerSupportPage /> },
-    { path: "/tenant/dispatch", element: <TenantDispatchPage /> },
+    { path: "/tenant/dispatch", element: <TenantDispatchPage {...options.publicPageContent?.dispatch} /> },
     { path: "/tenant/support", element: <CustomerSupportPage /> },
     { path: PLATFORM_SETTINGS_ROUTES.organizations.path, element: <OrganizationsPage /> },
-    { path: PLATFORM_SETTINGS_ROUTES.security.path, element: <PlatformSecurityPage /> },
-    { path: PLATFORM_TOOLS_ROUTE, element: <PlatformToolsPage /> },
-    { path: SUBSCRIPTION_ROUTES.subscription.path, element: <SubscriptionRoute permission="rental-os:subscription:view"><TenantSubscriptionPage /></SubscriptionRoute> },
-    { path: SUBSCRIPTION_ROUTES.subscriptionPro.path, element: <SubscriptionRoute permission="rental-os:subscription:view"><SubscriptionProPage /></SubscriptionRoute> },
+    { path: PLATFORM_SETTINGS_ROUTES.security.path, element: <SaasPage permission="system:params:manage"><PlatformSystemPage /></SaasPage> },
+    { path: "/platform/operations", element: <SaasPage permission="system:params:manage"><PlatformOperationsPage /></SaasPage> },
+    { path: "/platform/users", element: <SaasPage permission="system:user:manage"><PlatformPage /></SaasPage> },
+    { path: "/platform/demo-requests", element: <SaasPage permission="system:demo-request:view"><DemoRequestsPage /></SaasPage> },
+    { path: "/platform/official-calendars", element: <SaasPage permission="system:calendar-source:manage"><OfficialCalendarSourcePage /></SaasPage> },
+    ...(PlatformAiPage ? [{ path: "/platform/ai", element: <SaasPage permission="system:ai-provider:view"><PlatformAiPage /></SaasPage> }] : []),
+    { path: PLATFORM_TOOLS_ROUTE, element: <ToolsPage /> },
+    { path: SUBSCRIPTION_ROUTES.subscription.path, element: <SubscriptionRoute permission="rental-os:subscription:view"><TenantSubscriptionPage {...options.publicPageContent?.subscription} /></SubscriptionRoute> },
+    { path: SUBSCRIPTION_ROUTES.subscriptionPro.path, element: <SubscriptionRoute permission="rental-os:subscription:view"><SubscriptionProPage {...options.publicPageContent?.subscriptionPro} /></SubscriptionRoute> },
     { path: SUBSCRIPTION_ROUTES.subscriptionRequestDetail.path, element: <SubscriptionRoute permission="rental-os:subscription:view"><SubscriptionRequestDetailPage /></SubscriptionRoute> },
     { path: SUBSCRIPTION_ROUTES.platformSubscriptions.path, element: <SubscriptionRoute permission="system:tenant:subscription:manage"><PlatformSubscriptionsPage /></SubscriptionRoute> },
     { path: SUBSCRIPTION_ROUTES.platformSubscriptionDetail.path, element: <SubscriptionRoute permission="system:tenant:subscription:manage"><PlatformSubscriptionDetailPage /></SubscriptionRoute> },
@@ -149,6 +169,7 @@ export function createPlatformAdminApplication(options: PlatformAdminApplication
     ...createRoutesFromElements(createCoreRouteElements(options.pages ?? new Map(), {
       brandName: options.brandName, getContainer: options.getCoreContainer
     })),
+    ...Object.entries(LEGACY_PUBLIC_ADMIN_ROUTE_ALIASES).map(([path, target]) => ({ path, element: <Navigate to={target} replace /> })),
     { path: "*", element: <Result status="404" title="404" /> }
   ] }
   ]);

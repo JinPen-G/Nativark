@@ -533,6 +533,7 @@ export * from "./files";
 export * from "./integration-provider";
 export * from "./tenant-integrations";
 export * from "./official-calendar";
+export * from "./demo-request";
 
 export type { InfraAdapterCapability, NotificationTemplateSummary, NotificationSendLogSummary, SendMockNotificationRequest, AdapterLogSummary } from "./notifications";
 export type { AsyncJobSummary, CreateAsyncJobRequest, PrintJobSummary, CreatePrintJobRequest } from "./jobs";

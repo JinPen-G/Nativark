@@ -57,3 +57,4 @@ export function createRentalAdminContribution(implementationVersion: string,
 }
 
 export { rentalPublicManagement, RentalOperationsAccountPage, OriginalRentalOperationsAccountPage, RentalTenantManagementPage, RentalOperatorInvitations } from "./access";
+export { rentalPublicPageContent } from "./public-page-content";

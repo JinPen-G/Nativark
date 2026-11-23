@@ -10,6 +10,8 @@ SMTP配置复用同一表单与保存Promise；启用收信后才要求完整IMA
 
 [公共页头](../../components/PageHeading.tsx)与[紧凑摘要](../../components/InsightMetrics.tsx)共用原呈现和主题。[目录资源](integrations-source/original.css)与[类名](integrations-source/classes.json)保持原字节及动效，[来源](integrations-source/SOURCE.md)记录其出处。
 
+[页头适配](IntegrationPageHeader.tsx)沿[原品牌解析](../../app/branding.ts)读取当前租户与用户品牌，和原后台使用同一回退顺序。目录布局、图标、表单字段、凭据保留提示与提供方连接反馈继续沿原页面。
+
 服务端入口、私有存储、供应商与历史恢复边界见[公共集成导读](../../../../platform-server/src/modules/integrations/README.md)。原安全、隔离、连接修订与默认选择用例继续从该入口发现。公共宿主的导航和路由由主装配消费本模块出口。
 
 [公共应用工厂](../../application.tsx)已消费本模块的页面与权限声明，零Core和工单Web无需分别登记这项公共设置。直接访问同一路径仍先通过已验证会话和页面权限判断；服务端继续复验实际租户、当前权限及每次保存/测试。

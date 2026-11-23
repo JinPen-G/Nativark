@@ -464,16 +464,16 @@ function CouponWorkspace() {
                       {
                         title: t("适用商品"),
                         dataIndex: "applicableItemGroupIds",
-                        render: (ids) => (
-                          <DataTableText
-                            primary={ids.length
-                              ? locale === "en-US"
-                                ? `${ids.length} ${t("个指定商品")}`
-                                : `${ids.length} 个指定商品`
-                              : t("全部商品")}
-                            secondary={ids.length && !visibleGroups ? groupsUnavailableText : undefined}
-                          />
-                        ),
+                        render: (ids) => {
+                          const label = ids.length
+                            ? locale === "en-US"
+                              ? `${ids.length} ${t("个指定商品")}`
+                              : `${ids.length} 个指定商品`
+                            : t("全部商品");
+                          return ids.length && !visibleGroups
+                            ? <DataTableText primary={label} secondary={groupsUnavailableText} />
+                            : label;
+                        },
                       },
                       {
                         title: t("有效期"),

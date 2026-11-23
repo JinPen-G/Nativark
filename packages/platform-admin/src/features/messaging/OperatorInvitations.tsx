@@ -37,6 +37,8 @@ export interface OperatorInvitationsProps {
     requiredMessage: string;
   };
   subtitle?: string;
+  title?: string;
+  revokeTitle?: string;
 }
 
 const failureMessage = (error: unknown) => (error as { response?: { data?: { message?: string } }; message?: string })?.response?.data?.message
@@ -50,7 +52,7 @@ export function OperatorInvitations(props: OperatorInvitationsProps) {
   return <InvitationWorkspace key={`${tenant?.tenantId}:${user?.id}`} {...props} />;
 }
 
-function InvitationWorkspace({ open, onClose, roles, organizations, businessAccess, subtitle }: OperatorInvitationsProps) {
+function InvitationWorkspace({ open, onClose, roles, organizations, businessAccess, subtitle, title = "邀请协作成员", revokeTitle = "撤回这封成员邀请？" }: OperatorInvitationsProps) {
   const { t, locale } = useLocale();
   const { modal } = App.useApp();
   const cache = useQueryClient();
@@ -163,7 +165,7 @@ function InvitationWorkspace({ open, onClose, roles, organizations, businessAcce
   };
 
   const revoke = (item: PendingInvite) => new Promise<void>((resolve, reject) => {
-    modal.confirm({ title: t("撤回这封成员邀请？"), content: t("撤回后原邮件中的加入链接失效。"),
+    modal.confirm({ title: t(revokeTitle), content: t("撤回后原邮件中的加入链接失效。"),
       onOk: async () => {
         if (!isCurrent()) throw new Error(t("当前没有人员管理权限"));
         await api.revokeInvitation(item.key);
@@ -178,7 +180,7 @@ function InvitationWorkspace({ open, onClose, roles, organizations, businessAcce
   const currentPending = [...pending.filter(item => !records.some(row => row.id === item.key)),
     ...records.filter(row => row.status === "pending" || row.status === "accepted").map(row => asPending(row, `history:${row.id}`))];
 
-  return <><Drawer title={t("邀请协作成员")} open={open} onClose={() => { if (!sending) onClose(); }} size={720}>
+  return <><Drawer title={t(title)} open={open} onClose={() => { if (!sending) onClose(); }} size={720}>
     <div className={styles.host}>
       {invitations.error && <div className={styles.loadFailure}>
         <Alert type="warning" title={t("邀请记录暂时无法读取")} description={failureMessage(invitations.error)} />

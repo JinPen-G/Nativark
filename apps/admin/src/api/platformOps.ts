@@ -6,19 +6,8 @@
  */
 import type {
   AdapterLogSummary,
-  AsyncJobSummary,
-  CreateAsyncJobRequest,
-  CreateFileAssetRequest,
-  CreatePrintJobRequest,
-  FileAssetSummary,
   InfraDashboardResult,
   InvokeMockAdapterRequest,
-  NotificationSendLogSummary,
-  NotificationTemplateSummary,
-  PlatformFilterPreset,
-  PlatformFilterPresetQuery,
-  PrintJobSummary,
-  SavePlatformFilterPresetRequest,
   SendMockNotificationRequest
 } from "@rental-os/shared";
 import { request } from "./http";
@@ -32,25 +21,25 @@ export const platformOpsApi = {
   numberRules: toolsApi.numberRules,
   saveNumberRule: toolsApi.saveNumberRule,
   generateNumber: toolsApi.generateNumber,
-  filterPresets: (params: PlatformFilterPresetQuery = {}) => request<PlatformFilterPreset[]>("/platform/filter-presets", { params }),
-  saveFilterPreset: (payload: SavePlatformFilterPresetRequest) => request<PlatformFilterPreset>("/platform/filter-presets", { method: "post", data: payload }),
-  setFilterPresetDefault: (id: string, operator?: string) => request<PlatformFilterPreset>(`/platform/filter-presets/${id}/default`, { method: "put", data: { operator } }),
-  deleteFilterPreset: (id: string, operator?: string) => request<{ id: string; deleted: boolean }>(`/platform/filter-presets/${id}`, { method: "delete", params: { operator } }),
+  filterPresets: toolsApi.filterPresets,
+  saveFilterPreset: toolsApi.saveFilterPreset,
+  setFilterPresetDefault: toolsApi.setFilterPresetDefault,
+  deleteFilterPreset: toolsApi.deleteFilterPreset,
 
   // ---- 文件资产 / 通知 ----
-  fileAssets: () => request<FileAssetSummary[]>("/files"),
-  createFileAsset: (payload: CreateFileAssetRequest) => request<FileAssetSummary>("/files", { method: "post", data: payload }),
-  notificationTemplates: () => request<NotificationTemplateSummary[]>("/notifications/templates"),
-  notificationLogs: () => request<NotificationSendLogSummary[]>("/notifications/logs"),
+  fileAssets: toolsApi.fileAssets,
+  createFileAsset: toolsApi.createFileAsset,
+  notificationTemplates: toolsApi.notificationTemplates,
+  notificationLogs: toolsApi.notificationLogs,
   sendNotification: (payload: SendMockNotificationRequest) => request<unknown>("/notifications/send", { method: "post", data: payload }),
 
   // ---- 异步任务 / 打印任务 ----
-  asyncJobs: () => request<AsyncJobSummary[]>("/jobs"),
-  createAsyncJob: (payload: CreateAsyncJobRequest) => request<AsyncJobSummary>("/jobs", { method: "post", data: payload }),
-  runJob: (id: string) => request<AsyncJobSummary>(`/jobs/${id}/run`, { method: "post" }),
-  runDueJobs: () => request<{ ranCount: number; jobs: AsyncJobSummary[]; message: string }>("/jobs/run-due", { method: "post" }),
-  printJobs: () => request<PrintJobSummary[]>("/jobs/print"),
-  createPrintJob: (payload: CreatePrintJobRequest) => request<PrintJobSummary>("/jobs/print", { method: "post", data: payload }),
+  asyncJobs: toolsApi.asyncJobs,
+  createAsyncJob: toolsApi.createAsyncJob,
+  runJob: toolsApi.runJob,
+  runDueJobs: toolsApi.runDueJobs,
+  printJobs: toolsApi.printJobs,
+  createPrintJob: toolsApi.createPrintJob,
 
   // ---- 基础设施 ----
   integrations: () => request<InfraDashboardResult>("/integrations/dashboard"),

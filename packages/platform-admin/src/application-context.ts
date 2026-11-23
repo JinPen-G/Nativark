@@ -17,6 +17,15 @@ export interface PlatformAdminApplicationOptions {
   messages?: AdminMessages;
   /** 所选 Core 对原账号/租户页提供业务内容；公共权限与会话仍由同一宿主裁定。 */
   management?: PublicManagementCoreAdapter;
+  /** 显式选用的原平台模型配置页；入口仍受同一 SaaS 权限限制。 */
+  platformAiPage?: ComponentType;
+  /** 原公共页面的领域文案由 Core 提供，不改变路由、权限或数据范围。 */
+  publicPageContent?: {
+    subscription?: { description?: string };
+    subscriptionPro?: { standardDescription?: string };
+    dispatch?: { description?: string; businessScopeLabel?: string };
+    operatorInvitation?: { invitationTitle?: string; businessScopeLabel?: string };
+  };
   session: ReturnType<typeof createBrowserAdminSession>;
   pages?: ReadonlyMap<string, CoreRegisteredPage<CoreRouteComponent>>;
   /** 首选的已登记业务入口；未获权时仍从当前可用集合定位，不把偏好作为授权。 */

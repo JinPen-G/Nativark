@@ -17,6 +17,9 @@ const ts = require("typescript");
 
 const ROOT = path.resolve(__dirname, "..");
 const read = (relative) => fs.readFileSync(path.join(ROOT, relative), "utf8");
+const sourceLoader = require("../scripts/controller-sources.cjs").createControllerSourceLoader(
+  ROOT, path.dirname(path.dirname(require.resolve("typescript/package.json"))));
+const sourceContract = name => sourceLoader.load(sourceLoader.resolveSource(__filename, name, true));
 
 /**
  * 管理端是 ESM 包，`.ts` 不能直接 require；而这里要断言的是**运行时行为**，
@@ -35,11 +38,12 @@ function loadPureTsModule(relative, dependencies = {}) {
   });
   const shim = { exports: {} };
   new Function("module", "exports", "require", outputText)(shim, shim.exports,
-    name => Object.hasOwn(dependencies, name) ? dependencies[name] : require(name));
+    name => Object.hasOwn(dependencies, name) ? dependencies[name]
+      : name.startsWith("@rental-os/") ? sourceContract(name) : require(name));
   return shim.exports;
 }
 
-const { RENTAL_CATEGORY_DEFINITIONS } = require("@rental-os/shared");
+const { RENTAL_CATEGORY_DEFINITIONS } = sourceContract("@rental-os/shared");
 const { resolveTenantNavigationLabels, applyTenantNavigationLabels } = loadPureTsModule("packages/rental-core/admin/catalog/navigation-terminology.ts");
 
 const ok = (m) => console.log(`  ✓ ${m}`);
@@ -196,9 +200,10 @@ void (() => {
     "@rental-os/rental-core/admin/commercial/pages": loadPureTsModule("packages/rental-core/admin/commercial/pages.ts"),
     "@rental-os/platform-admin/subscription/subscriptionRoutes": loadPureTsModule("packages/platform-admin/src/features/subscription/subscriptionRoutes.ts"),
     "@/components/ui/icons": new Proxy({}, { get: () => () => null }),
-    "@rental-os/shared": require("@rental-os/shared"),
+    "@rental-os/shared": sourceContract("@rental-os/shared"),
     "./navigation-terminology": { resolveTenantNavigationLabels, applyTenantNavigationLabels },
     "./categoryGovernancePreview": { CATEGORY_GOVERNANCE_PREVIEW_ENABLED: false },
+    "./adminRuntime": { adminRuntime: { getSession: () => ({ sessionVerified: false, user: null }) } },
     "react/jsx-runtime": { jsx: () => null, jsxs: () => null }
   });
   const registeredRoutes = Object.values(APP_ROUTES);

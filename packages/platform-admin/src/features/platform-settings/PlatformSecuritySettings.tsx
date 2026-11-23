@@ -8,6 +8,7 @@ import { usePlatformSettingsApi } from "./client";
 import { canReadSecurityBaseline, canWriteSecurityBaseline, PLATFORM_SETTINGS_ROUTES } from "./platformSettingsAccess";
 import { useAdminRuntime, useAdminSession } from "../../runtime";
 import { useLocale } from "../../app/locale";
+import { resolveAdminBrandName } from "../../app/branding";
 import { useServerFormSync } from "../../app/useServerFormSync";
 import { QueryState } from "../../components/QueryState";
 import { PageHeading } from "../../components/PageHeading";
@@ -128,9 +129,9 @@ export function PlatformSecurityOverview() {
 
 export function PlatformSecurityPage() {
   const { t } = useLocale();
-  const { tenant } = useAdminSession();
+  const { tenant, user } = useAdminSession();
   return <>
-    <PageHeading title={t("平台参数")} brandName={tenant?.tenantName ?? "Nativark"} summary={t("全平台的登录保护、密码策略与敏感信息设置")} />
+    <PageHeading title={t("平台参数")} brandName={resolveAdminBrandName(tenant, user)} summary={t("全平台的登录保护、密码策略与敏感信息设置")} />
     <PlatformSecuritySettings />
   </>;
 }

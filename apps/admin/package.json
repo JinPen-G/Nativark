@@ -52,7 +52,8 @@
     "react-markdown": "10.1.0",
     "react-router-dom": "7.18.2",
     "zustand": "5.0.14",
-    "@rental-os/platform-admin": "0.1.0"
+    "@rental-os/platform-admin": "0.1.0",
+    "@rental-os/ai-native-admin": "0.1.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.3.3",

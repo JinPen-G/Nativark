@@ -26,6 +26,8 @@ import { TenantStatus, type PlatformSessionContextResponse } from "@rental-os/pl
 
 官方日历来源从 `@rental-os/platform-contracts/official-calendar` 导入，根出口提供同一声明。来源主档、年度不可变版本、原来源快照和轻量摘要归平台；日期字段保留原代码及可选字段，Core自行决定业务采用、营业和价格规则。原Rental/shared继续再导出同名类型，公共合同不依赖Rental日期实体。[来源合同](src/official-calendar.ts) · [Rental兼容与业务采用](../rental-core/src/contracts.ts)
 
+官网演示预约从 `@rental-os/platform-contracts/demo-request` 导入，根及原 shared 出口提供同一声明。匿名提交只返回接收回执，列表为 SaaS 管理能力；平台线索不归属业务 Core，不开放按联系方式查询或匿名回显。[预约合同](src/demo-request.ts) · [原兼容出口](../shared/src/demo-request.ts)
+
 原 AI Native 的任务/步骤状态、版本和 Runner 结果从 `@rental-os/platform-contracts/ai-task` 导入，根和原 shared 草案再导出同一声明。它们不包含 Rental 工具、对象或 ORM 类型，不授予任务和业务权限；原字面量及 unknown 恢复语义保持。[任务合同](src/ai-task.ts) · [公共 Runner](../platform-server/src/ai-runtime/README.md)
 
 AI上下文与C03 Gateway从 `@rental-os/platform-contracts/ai-gateway` 导入。调用、结果、事件和Gateway端口以已注册工具请求为泛型，默认不接工具；`createAiGatewayDraftSchemas()`只允许空工具数组，传入Core明确的严格schema后才接受对应工具结构。上下文、配置引用、用量与unknown使用原版本，结构校验不替代当前权限、批准或业务裁定。原shared继续以原订单解释契约特化，并生成完全相同的旧schema。[正式接点](src/ai-gateway.ts) · [工具槽与版本](src/ai-gateway-draft.ts) · [上下文schema](src/ai-context-schemas.ts) · [有限schema读取](src/ai-leaf-schema-validation.ts)

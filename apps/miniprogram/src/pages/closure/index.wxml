@@ -57,7 +57,7 @@
 
       <view wx:if="{{formError}}" class="section section--tight"><view class="notice notice--danger">{{formError}}</view></view>
 
-      <view wx:if="{{hasChallengeRequest}}" class="section section--tight">
+      <view wx:if="{{hasChallengeRequest && !maskedDestination || hasChallengeRequest && deliveryPending || hasChallengeRequest && formError}}" class="section section--tight">
         <text class="link small" bindtap="onRecoverCode">核对原验证码请求</text>
         <text wx:if="{{retryAfter === 0}}" class="link small ml-12" bindtap="onResendCode">重新获取验证码</text>
       </view>
@@ -86,8 +86,8 @@
           </view>
           <view class="row mt-12">
             <text wx:if="{{retryAfter > 0}}" class="muted small">{{retryAfter}}s 后可重新发送</text>
-            <text wx:else class="link small" bindtap="onResendCode">重新获取验证码</text>
-            <text class="link small ml-12" bindtap="onRecoverCode">核对原请求</text>
+            <text wx:else class="link small" bindtap="onResendCode">重新发送验证码</text>
+            <text wx:if="{{deliveryPending}}" class="link small ml-12" bindtap="onRecoverCode">核对原请求</text>
           </view>
         </view>
       </view>

@@ -20,7 +20,7 @@ export function DispatchStatus({ value }: { value: TenantDispatchStatus }) {
   return <Tag color={value === "delivered" ? "success" : ["failed", "delivery_failed"].includes(value) ? "error"
     : value === "delivery_uncertain" ? "warning" : value === "sent" ? "processing" : "default"}>{t(DISPATCH_STATUS_LABELS[value])}</Tag>;
 }
-export function DispatchDetail({ selected, onClose }: { selected?: TenantDispatchRow; onClose: () => void }) {
+export function DispatchDetail({ selected, onClose, businessScopeLabel = "业务范围" }: { selected?: TenantDispatchRow; onClose: () => void; businessScopeLabel?: string }) {
   const { t, locale } = useLocale();
   const { user, sessionVerified } = useAdminSession();
   const runtime = useAdminRuntime();
@@ -35,7 +35,7 @@ export function DispatchDetail({ selected, onClose }: { selected?: TenantDispatc
         <div className={styles.messageHeading}><h2>{data.subject}</h2><DispatchStatus value={data.status} /></div>
         <RecordFacts items={[
           { key: "recipient", label: "收件人", value: data.recipient }, { key: "sender", label: "发件人", value: data.sender ?? "—" },
-          { key: "workspace", label: "业务范围", value: data.workspaceName ?? t("租户通知") }, { key: "provider", label: "发送服务", value: data.provider },
+          { key: "workspace", label: businessScopeLabel, value: data.workspaceName ?? t("租户通知") }, { key: "provider", label: "发送服务", value: data.provider },
           { key: "sentAt", label: "发送时间", value: data.sentAt ? new Date(data.sentAt).toLocaleString(locale) : "—" },
           { key: "attempts", label: "发送次数", value: data.attempts }, { key: "template", label: "模板版本", value: data.templateVersion ?? "—" },
           { key: "business", label: "关联对象", value: data.businessId ?? "—" }

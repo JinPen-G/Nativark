@@ -43,6 +43,10 @@
       "types": "./dist/official-calendar.d.ts",
       "default": "./dist/official-calendar.js"
     },
+    "./demo-request": {
+      "types": "./dist/demo-request.d.ts",
+      "default": "./dist/demo-request.js"
+    },
     "./notifications": {
       "types": "./dist/notifications.d.ts",
       "default": "./dist/notifications.js"
@@ -93,6 +97,9 @@
       ],
       "official-calendar": [
         "dist/official-calendar.d.ts"
+      ],
+      "demo-request": [
+        "dist/demo-request.d.ts"
       ],
       "notifications": [
         "dist/notifications.d.ts"

@@ -5,6 +5,7 @@ import { LocaleContext } from "./localeContext";
 import { accessMessages } from "../features/access/messages";
 import { integrationMessages } from "../features/integrations/messages";
 import { platformSettingsMessages } from "../features/platform-settings/messages";
+import { platformExtraMessages } from "../features/platform-settings/platform-extra-messages";
 import { platformToolsMessages } from "../features/platform-tools/messages";
 import { messagingMessages } from "../features/messaging/messages";
 import { subscriptionMessages } from "../features/subscription/messages";
@@ -136,6 +137,7 @@ const ENGLISH: Readonly<Record<string, string>> = {
   ...authMessages, ...appearanceMessages, ...accessMessages,
   ...integrationMessages,
   ...platformSettingsMessages,
+  ...platformExtraMessages,
   ...platformToolsMessages,
   ...messagingMessages,
   ...subscriptionMessages,

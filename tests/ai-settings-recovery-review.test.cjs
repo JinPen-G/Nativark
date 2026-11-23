@@ -4,10 +4,13 @@ const test = require('node:test'), assert = require('node:assert/strict'), fs = 
 function load(name) {
   const filename = name === 'settings-operation-reference.ts'
     ? path.resolve(__dirname, '../packages/platform-admin/src/operation-reference.ts')
-    : path.resolve(__dirname, '../apps/admin/src/features/ai-native', name);
+    : ['platform-model-settings-session.ts', 'credit-operation-reference.ts', 'budget-settings-session.ts'].includes(name)
+      ? path.resolve(__dirname, '../packages/ai-native-admin/src/platform-model-settings', name)
+      : path.resolve(__dirname, '../apps/admin/src/features/ai-native', name);
   const mod = new Module(filename, module); mod.filename = filename; mod.paths = Module._nodeModulePaths(path.dirname(filename));
   const originalRequire = mod.require.bind(mod);
-  mod.require = request => request === './settings-operation-reference' ? load('settings-operation-reference.ts') : originalRequire(request);
+  mod.require = request => request === './settings-operation-reference' || request === '@rental-os/platform-admin/forms'
+    ? load('settings-operation-reference.ts') : originalRequire(request);
   mod._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, filename);
   return mod.exports;
 }
@@ -45,7 +48,7 @@ function harness(kind, store) {
 // Execute the page's reference adapters without rendering a synthetic host.
 // Only the named, unmodified source functions enter this existing Node harness.
 function creditAdapters() {
-  const filename = path.resolve(__dirname, '../apps/admin/src/features/ai-native/AiCreditSettings.tsx');
+  const filename = path.resolve(__dirname, '../packages/ai-native-admin/src/platform-model-settings/AiCreditSettings.tsx');
   const source = ts.createSourceFile(filename, fs.readFileSync(filename, 'utf8'), ts.ScriptTarget.ES2022, true, ts.ScriptKind.TSX);
   const names = new Set(['referenceStorage', 'savedPending', 'savedAllocation', 'savedDecision']);
   const functions = source.statements.filter(node => ts.isFunctionDeclaration(node) && node.name && names.has(node.name.text));
@@ -110,7 +113,7 @@ test('credit: verified non-secret locators survive unknown and cannot clear anot
     assert.throws(() => clearCreditOperationReference(s, 'credit', original)); assert.equal(s.getItem('credit'), 'other-original-operation');
     s.setItem('credit', original.marker); clearCreditOperationReference(s, 'credit', original); assert.equal(s.getItem('credit'), null);
   }
-  const source = fs.readFileSync(path.resolve(__dirname, '../apps/admin/src/features/ai-native/AiCreditSettings.tsx'), 'utf8');
+  const source = fs.readFileSync(path.resolve(__dirname, '../packages/ai-native-admin/src/platform-model-settings/AiCreditSettings.tsx'), 'utf8');
   for (const call of ['request(command)', 'allocate(command)', 'platformDecide({']) assert.ok(source.includes(`aiCreditApi.${call}`));
   assert.equal((source.match(/retainCreditOperationReference\(referenceStorage\(\),/gu) ?? []).length, 3);
   assert.ok(source.includes('requestJournal.blocked')); assert.ok(source.includes('allocationJournal.blocked')); assert.ok(source.includes('journal.blocked'));

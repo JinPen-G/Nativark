@@ -242,7 +242,9 @@
     "./notifications": "./src/notifications.ts",
     "./sound": "./src/sound.ts",
     "./core-packages": "./src/features/core-packages/index.ts",
-    "./appearance": "./src/features/appearance/index.ts"
+    "./appearance": "./src/features/appearance/index.ts",
+    "./platform-settings/console-client": "./src/features/platform-settings/platform-console-client.ts",
+    "./platform-settings/official-calendar-dates": "./src/features/platform-settings/official-calendar-dates.ts"
   },
   "scripts": {
     "lint": "tsc -p tsconfig.json",

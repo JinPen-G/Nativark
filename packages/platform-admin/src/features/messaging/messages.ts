@@ -1,5 +1,10 @@
 /** 公共邀请、寄件与客服邮件的展示文案。 */
 export const messagingMessages: Readonly<Record<string, string>> = {
+  "接受运营邀请": "Accept operator invitation",
+  "经营空间": "Workspace",
+  "撤回这封运营邀请？": "Revoke this operator invitation?",
+  "邀请运营用户": "Invite operators",
+  "查看当前租户各经营空间的短信、邮件和运营邀请发送记录。": "View SMS, email and operator invitation records across this tenant.",
   "接受成员邀请": "Accept member invitation",
   "邀请链接无效，请向邀请人索取原邮件。": "The invitation link is invalid. Ask the inviter for the original email.",
   "邀请暂时不可读取，请稍后重试。": "The invitation could not be read. Try again later.",

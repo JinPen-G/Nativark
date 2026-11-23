@@ -4,6 +4,8 @@ const path = require("node:path");
 const { test } = require("node:test");
 const ts = require("typescript");
 const Module = require("node:module");
+const sourceLoader = require("../scripts/controller-sources.cjs").createControllerSourceLoader(
+  path.resolve(__dirname, ".."), path.dirname(path.dirname(require.resolve("typescript/package.json"))));
 
 // Load the real, type-only presentation module without API, environment, database or app startup.
 const source = path.resolve(__dirname, "../packages/rental-core/admin/operations/workbenchPresentation.ts");
@@ -140,6 +142,8 @@ function loadOperationsSource(relative, dependencies = {}) {
   }).outputText;
   const actual = { exports: {} };
   new Function("require", "module", "exports", compiled)(name => {
+    if (name === "@rental-os/rental-core/permissions")
+      return sourceLoader.load(sourceLoader.resolveSource(file, name, true));
     assert.ok(Object.hasOwn(dependencies, name), `Unexpected dependency ${name}`);
     return dependencies[name];
   }, actual, actual.exports);
@@ -361,7 +365,7 @@ test("native declared buttons retain single execution, validation and stale-acti
   let resolveCommand, calls = 0;
   const pending = new Promise(resolve => { resolveCommand = resolve; });
   const action = { id: "refresh", kind: "command", label: "Refresh", presentation: { control: "button", shape: "circle", iconOnly: true }, execute: () => { calls++; return pending; } };
-  const active = driver(action), button = active.button();
+  const active = driver({ ...action, onActionError: error => active.errors.push(error) }), button = active.button();
   assert.equal(button.props.shape, "circle");
   assert.equal(button.props["aria-label"], "Refresh");
   assert.equal(button.props.children, null);
@@ -373,6 +377,10 @@ test("native declared buttons retain single execution, validation and stale-acti
   active.revoke(); active.button().props.onClick(); await flush();
   assert.equal(calls, 1);
   assert.equal(active.errors.length, 1);
+  const businessError = new Error("原业务已报告失败");
+  const reported = driver({ ...action, execute: () => Promise.reject(businessError) });
+  reported.button().props.onClick(); await flush();
+  assert.deepEqual(reported.errors, [], "原业务已有反馈时，公共动作不能再追加通用提示");
 
   let completedSaves = 0;
   const completed = driver({ id: "save", kind: "save", label: "Save", presentation: { control: "button" },

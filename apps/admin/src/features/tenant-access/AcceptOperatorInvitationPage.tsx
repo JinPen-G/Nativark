@@ -4,5 +4,6 @@ import { operatorInvitationApi } from "@/api/tenantMessaging";
 import { ADMIN_BRAND_NAME, ADMIN_DEFAULT_MARK } from "@/app/branding";
 
 export function AcceptOperatorInvitationPage() {
-  return <PublicAcceptOperatorInvitationPage api={operatorInvitationApi} brandName={ADMIN_BRAND_NAME} brandMark={ADMIN_DEFAULT_MARK} />;
+  return <PublicAcceptOperatorInvitationPage api={operatorInvitationApi} brandName={ADMIN_BRAND_NAME} brandMark={ADMIN_DEFAULT_MARK}
+    invitationTitle="接受运营邀请" businessScopeLabel="经营空间" />;
 }

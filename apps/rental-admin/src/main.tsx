@@ -7,9 +7,11 @@ import { MotionGlobalConfig } from "motion/react";
 import { registerCoreAdminPages } from "@rental-os/core-contracts";
 import { createPlatformAdminApplication } from "@rental-os/platform-admin/application";
 import { applyMotionPreference, isMotionReduced } from "@rental-os/platform-admin/motion";
-import { rentalPublicManagement, createRentalAdminContribution, createRentalBrowserAdminHost } from "@rental-os/rental-core/admin";
+import { rentalPublicManagement, rentalPublicPageContent, createRentalAdminContribution, createRentalBrowserAdminHost } from "@rental-os/rental-core/admin";
 import { createRentalBrowserAdminSession } from "@rental-os/rental-core/admin/browser";
 import { rentalAdminMessages } from "@rental-os/rental-core/admin/messages";
+import { OrderFactsEntry } from "@rental-os/rental-core/admin/ai/order-facts";
+import { createPlatformModelSettingsPage } from "@rental-os/ai-native-admin/platform-model-settings/application";
 import manifest from "virtual:core-manifest";
 import { createRentalNavigation } from "./navigation";
 import { createRentalShell } from "./RentalShell";
@@ -29,6 +31,7 @@ if (manifest.entries.openapi === "dist/http-openapi-portable.json") {
 }
 const rentalHost = createRentalBrowserAdminHost({
   session,
+  OrderFactsEntry,
   categoryGovernancePreviewEnabled: import.meta.env.DEV
     && import.meta.env.VITE_RENTAL_CATEGORY_GOVERNANCE_PREVIEW === "true",
   loginDefaults: {
@@ -68,6 +71,8 @@ const App = createPlatformAdminApplication({
   onboardingPage: { coreId: "rental", pageId: "tenant-readiness" },
   loginDisplay: session.loginDisplay,
   management: rentalPublicManagement,
+  publicPageContent: rentalPublicPageContent,
+  platformAiPage: createPlatformModelSettingsPage(session.runtime),
   messages: rentalAdminMessages,
   getCoreContainer: navigation.getCoreContainer,
   Shell,

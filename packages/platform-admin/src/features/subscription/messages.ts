@@ -276,5 +276,9 @@ export const subscriptionMessages: AdminMessages = {
   "生效": "Active",
   "已到期": "Expired",
   "币种": "Currency",
-  "拒绝申请": "Reject request"
+  "拒绝申请": "Reject request",
+  "所有经营空间共用同一订阅。": "One subscription covers all workspaces.",
+  "基础租赁经营": "Core rental operations",
+  "所有业务 Core 共用同一订阅。": "One subscription covers all business cores.",
+  "基础业务经营": "Core business operations"
 };

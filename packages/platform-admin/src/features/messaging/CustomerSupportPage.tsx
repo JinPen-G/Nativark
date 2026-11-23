@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileText, Mail } from "lucide-react";
 import { useLocale } from "../../app/locale";
+import { resolveAdminBrandName } from "../../app/branding";
 import { PageHeading } from "../../components/PageHeading";
 import { QueryState } from "../../components/QueryState";
 import { ActionButton, Alert, App, Button, Empty, Pagination, SearchField, Result } from "../../components/ui";
@@ -28,7 +29,7 @@ export function CustomerSupportPage(props: TenantMessagingPageProps) {
 
 function SupportWorkspace({ renderHeader }: TenantMessagingPageProps) {
   const { t, locale } = useLocale(), navigate = useNavigate(), cache = useQueryClient(), { message } = App.useApp();
-  const { tenant } = useAdminSession();
+  const { tenant, user } = useAdminSession();
   const runtime = useAdminRuntime();
   const api = useTenantSupportApi();
   const epoch = runtime.currentSessionEpoch();
@@ -69,7 +70,7 @@ function SupportWorkspace({ renderHeader }: TenantMessagingPageProps) {
       <Button type="text" onClick={() => navigate("/tenant/integrations")}>{t("邮箱配置")}</Button>
     </> };
   return <>
-    {renderHeader ? renderHeader(heading) : <PageHeading {...heading} brandName={tenant?.tenantName ?? "Nativark"} />}
+    {renderHeader ? renderHeader(heading) : <PageHeading {...heading} brandName={resolveAdminBrandName(tenant, user)} />}
     {emails.data && !emails.data.receiverConfigured && <Alert type="info" showIcon title={t("尚未启用客服邮箱接收")}
       description={t("请在第三方服务的邮箱配置中填写 IMAP 服务器与收件文件夹，启用接收并测试连接。已有邮件仍可查看。")} />}
     {storageError ? <Alert type="error" showIcon title={storageError} /> : <QueryState loading={emails.isLoading} error={emails.error}

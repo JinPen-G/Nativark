@@ -3,5 +3,6 @@ import { TenantDispatchPage as PublicTenantDispatchPage } from "@rental-os/platf
 import { PageHeader } from "@/components/PageHeader";
 
 export function TenantDispatchPage() {
-  return <PublicTenantDispatchPage renderHeader={props => <PageHeader {...props} />} />;
+  return <PublicTenantDispatchPage renderHeader={props => <PageHeader {...props} />}
+    description="查看当前租户各经营空间的短信、邮件和运营邀请发送记录。" businessScopeLabel="经营空间" />;
 }

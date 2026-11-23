@@ -12,7 +12,7 @@ export const RENTAL_CATALOG_PAGES = {
   catalog: {
     id: "item-groups",
     path: "/item-groups",
-    title: { default: "商品目录", translations: { "en-US": "Item catalog" } },
+    title: { default: "商品目录", translations: { "en-US": "Catalog" } },
     permissions: rentalPagePermissions("item-groups"),
     menu: {
       group: RENTAL_WORK_ORDER_PAGES.workOrders.menu.group,

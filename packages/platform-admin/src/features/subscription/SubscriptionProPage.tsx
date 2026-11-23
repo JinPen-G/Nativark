@@ -17,7 +17,7 @@ import { PlanComparison } from "./plan-comparison/PlanComparison";
 import { useSubscriptionCategoryLabels } from "./useSubscriptionCategoryLabels";
 
 /** Published catalog projection only; plan selection never grants access or charges a tenant. */
-export function SubscriptionProPage() {
+export function SubscriptionProPage({ standardDescription }: { standardDescription?: string } = {}) {
   const { tenant, user, sessionVerified } = useAdminSession();
   const subscriptionApi = useSubscriptionApi();
   const { t } = useLocale(), navigate = useNavigate();
@@ -38,7 +38,7 @@ export function SubscriptionProPage() {
       {query.error ? <Alert type="error" message={subscriptionError(query.error, t("订阅介绍加载失败"))} action={<Button onClick={() => query.refetch()}>{t("重试")}</Button>} /> : query.data && <div style={{ display: "grid", gap: "var(--rental-layout-section-gap)", minWidth: 0 }}>
         <Alert type="info" showIcon message={t("PRO 暂仅接受咨询或受控试点，正式销售尚未开放。")} />
         {categories.length > 0 && <Space wrap><Select allowClear style={{ width: "var(--rental-control-width-select)" }} placeholder={t("全部适用品类")} value={category} onChange={setCategory} options={categories.map(value => ({ value, label: categoryLabels.label(value) }))} /></Space>}
-        <PlanComparison key={tenantId} features={features} prices={query.data.standardPricing} currentPlan={query.data.overview.plan} actionDisabled={!canManage}
+        <PlanComparison key={tenantId} features={features} prices={query.data.standardPricing} currentPlan={query.data.overview.plan} actionDisabled={!canManage} standardDescription={standardDescription}
           actionLabel={plan => pendingRequest(plan) ? t("查看申请进度") : t(plan === query.data?.overview.plan ? "申请续费" : plan === SubscriptionPlan.Pro ? "升级咨询" : "申请下期基础版")}
           onAction={plan => { const pending = pendingRequest(plan); if (pending) navigate(`${SUBSCRIPTION_ROUTES.subscription.path}/requests/${encodeURIComponent(pending.id)}`); else setRequestType(actionType(plan)); }} />
         <span className="text-meta">{t("实际使用仍须满足有效期、租户授权、品类与空间配置；选择版本不会自动开通或扣费。")}</span>

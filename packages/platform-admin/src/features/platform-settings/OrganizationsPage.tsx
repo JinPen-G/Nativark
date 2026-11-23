@@ -4,11 +4,12 @@ import { Tag } from "antd";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocale } from "../../app/locale";
+import { resolveAdminBrandName } from "../../app/branding";
 import { useServerFormSync } from "../../app/useServerFormSync";
 import { PageHeading } from "../../components/PageHeading";
 import { QueryState } from "../../components/QueryState";
 import { WorkspacePageActions } from "../../components/workspace/WorkspaceHeader";
-import { Alert, App, Button, Drawer, Form, Input, ListFilters, Result, SaveButton, Select, Switch, Table, useListFilter } from "../../components/ui";
+import { App, Button, Drawer, Form, Input, ListFilters, Result, SaveButton, Select, Switch, Table, useListFilter } from "../../components/ui";
 import { EditOutlined, PlusOutlined } from "../../components/ui/icons";
 import { useAdminRuntime, useAdminSession } from "../../runtime";
 import { usePlatformSettingsApi } from "./client";
@@ -103,7 +104,7 @@ export function OrganizationsPage({ embedded = false, onSaved }: { embedded?: bo
   if (!sessionVerified || !canReadOrganizations(user)) return <Result status="403" title="403" />;
   const action = canWrite && <Button type="primary" icon={<PlusOutlined />} disabled={save.isPending || status.isPending} onClick={() => edit()}>{t("新增组织")}</Button>;
   return <>
-    {embedded ? <WorkspacePageActions>{action}</WorkspacePageActions> : <PageHeading title={t("组织管理")} brandName={tenant?.tenantName ?? "Nativark"} extra={action} />}
+    {embedded ? <WorkspacePageActions>{action}</WorkspacePageActions> : <PageHeading title={t("组织管理")} brandName={resolveAdminBrandName(tenant, user)} extra={action} />}
     <QueryState loading={organizations.isLoading} error={organizations.error} onRetry={() => organizations.refetch({ throwOnError: true })}>
       <Table<OrganizationSummary> toolbar={<ListFilters filter={filter} placeholder={t("组织名称或编码")} />} rowKey="id"
         onRefresh={() => organizations.refetch({ throwOnError: true })} loading={organizations.isLoading} refreshing={organizations.isFetching}
@@ -129,7 +130,6 @@ export function OrganizationsPage({ embedded = false, onSaved }: { embedded?: bo
         ]} /></Form.Item>
         <Form.Item name="parentId" label={t("上级组织")}><Select allowClear options={(organizations.data ?? []).filter(row => row.id !== editing?.id).map(row => ({ value: row.id, label: row.name }))} /></Form.Item>
         <Form.Item name="status" label={t("状态")}><Select options={[{ value: "enabled", label: t("启用") }, { value: "disabled", label: t("停用") }]} /></Form.Item>
-        {save.error && <Alert type="error" showIcon title={save.error.message} />}
       </Form>
     </Drawer>
   </>;

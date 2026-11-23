@@ -9,12 +9,14 @@ import { createPlatformAdminApplication } from "@rental-os/platform-admin/applic
 import { applyMotionPreference, isMotionReduced } from "@rental-os/platform-admin/motion";
 import { createTicketsAdmin } from "@rental-os/example-tickets-core/admin";
 import {
-  rentalPublicManagement, createRentalAdminContribution,
+  rentalPublicManagement, rentalPublicPageContent, createRentalAdminContribution,
   createRentalBrowserAdminHost,
   createRentalNavigation,
 } from "@rental-os/rental-core/admin";
 import { createRentalBrowserAdminSession } from "@rental-os/rental-core/admin/browser";
 import { rentalAdminMessages } from "@rental-os/rental-core/admin/messages";
+import { OrderFactsEntry } from "@rental-os/rental-core/admin/ai/order-facts";
+import { createPlatformModelSettingsPage } from "@rental-os/ai-native-admin/platform-model-settings/application";
 import manifests from "virtual:core-manifests";
 import { createMultiCoreShell } from "./MultiCoreShell";
 
@@ -33,6 +35,7 @@ if (manifests.rental.entries.openapi === "dist/http-openapi-portable.json") {
 }
 const rentalHost = createRentalBrowserAdminHost({
   session,
+  OrderFactsEntry,
   categoryGovernancePreviewEnabled: import.meta.env.DEV
     && import.meta.env.VITE_RENTAL_CATEGORY_GOVERNANCE_PREVIEW === "true",
   loginDefaults: {
@@ -70,6 +73,8 @@ const App = createPlatformAdminApplication({
   onboardingPage: { coreId: "rental", pageId: "tenant-readiness" },
   loginDisplay: session.loginDisplay,
   management: rentalPublicManagement,
+  publicPageContent: rentalPublicPageContent,
+  platformAiPage: createPlatformModelSettingsPage(session.runtime),
   messages: rentalAdminMessages,
   getCoreContainer: navigation.getCoreContainer,
   Shell,

@@ -22,6 +22,8 @@ interface Props {
   onAction?: (plan: Plan) => void;
   actionLabel?: (plan: Plan) => string;
   actionDisabled?: boolean;
+  /** 宿主可提供原业务展示词，不参与套餐或权益裁定。 */
+  standardDescription?: string;
 }
 
 function Value({ feature, plan }: { feature: ComparisonFeature; plan: Plan }) {
@@ -58,7 +60,7 @@ function AnimatedNumber({ value }: { value: number }) {
   return <>{reduce ? value : displayValue}</>;
 }
 
-export function PlanComparison({ features, prices, currentPlan, onAction, actionLabel, actionDisabled }: Props) {
+export function PlanComparison({ features, prices, currentPlan, onAction, actionLabel, actionDisabled, standardDescription = "基础业务经营" }: Props) {
   const { t, locale } = useLocale();
   const id = useId();
   const reduce = useReducedMotion();
@@ -94,7 +96,7 @@ export function PlanComparison({ features, prices, currentPlan, onAction, action
             const money = price?.published && price.annualFee && Number.isFinite(price.annualFee.amount) ? price.annualFee : null;
             return (
             <div key={plan} className={`${styles.planCell} ${selected === plan ? styles.planSelected : ""}`} role="columnheader" aria-label={t(PLAN_LABEL[plan])}>
-              <div className={styles.planTop}><h3>{t(PLAN_LABEL[plan])}</h3><span>{t(plan === SubscriptionPlan.Standard ? "基础业务经营" : "专业业务扩展")}</span></div>
+              <div className={styles.planTop}><h3>{t(PLAN_LABEL[plan])}</h3><span>{t(plan === SubscriptionPlan.Standard ? standardDescription : "专业业务扩展")}</span></div>
               <div className={styles.price}><span className={styles.priceValue} aria-live="polite" aria-atomic="true">{money ? <><span className="subscription-price-currency">{money.currency}</span>{new Intl.NumberFormat(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(money.amount)}</> : t("价格待公布")}</span>{money && <span className={styles.pricePeriod}>{t("/ 年")}</span>}</div>
               {(money?.taxInclusive !== undefined || price?.note) && <span className="subscription-price-note">{[money?.taxInclusive !== undefined ? t(money.taxInclusive ? "含税" : "未税") : null, price?.note].filter(Boolean).join(" · ")}</span>}
               <Button type="button" data-rental-arc-button="" data-button-kind={selected === plan ? "primary" : "default"} variant={selected === plan ? "primary" : "secondary"} className={styles.selectButton} aria-pressed={selected === plan} onClick={() => setSelected(current => current === plan ? null : plan)}>{selected === plan ? t(currentPlan === plan ? "当前版本" : "已选择") : t("选择{plan}", { plan: t(PLAN_LABEL[plan]) })}</Button>

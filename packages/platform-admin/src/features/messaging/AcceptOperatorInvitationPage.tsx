@@ -14,9 +14,11 @@ export interface AcceptOperatorInvitationPageProps {
   api: OperatorInvitationApi;
   brandName: string;
   brandMark?: string;
+  invitationTitle?: string;
+  businessScopeLabel?: string;
 }
 
-export function AcceptOperatorInvitationPage({ api, brandName, brandMark }: AcceptOperatorInvitationPageProps) {
+export function AcceptOperatorInvitationPage({ api, brandName, brandMark, invitationTitle = "接受成员邀请", businessScopeLabel }: AcceptOperatorInvitationPageProps) {
   const { t } = useLocale();
   const navigate = useNavigate();
   const token = useRef(new URLSearchParams(window.location.hash.slice(1)).get("token") ?? "");
@@ -30,7 +32,7 @@ export function AcceptOperatorInvitationPage({ api, brandName, brandMark }: Acce
   const accepting = useRef<Promise<void> | null>(null);
   const password = Form.useWatch("password", form) ?? "";
 
-  useEffect(() => { document.title = `${t("接受成员邀请")} · ${brandName}`; }, [t, brandName]);
+  useEffect(() => { document.title = `${t(invitationTitle)} · ${brandName}`; }, [t, brandName, invitationTitle]);
 
   useEffect(() => {
     const abort = new AbortController();
@@ -94,7 +96,7 @@ export function AcceptOperatorInvitationPage({ api, brandName, brandMark }: Acce
       {brandMark && <img src={brandMark} alt="" width={24} height={24} />}{brandName}
     </span></header>
     <div className={loginStyles.stage}><section className={loginStyles.card}><div className={loginStyles.step}>
-      <div className={loginStyles.heading}><h2>{t(accepted ? "你已加入租户" : "接受成员邀请")}</h2>
+      <div className={loginStyles.heading}><h2>{t(accepted ? "你已加入租户" : invitationTitle)}</h2>
         <p>{preview?.status === "pending" ? `${preview.tenantName} · ${preview.email}`
           : accepted ? t("邀请已接受") : t("设置你的账号，开始协同工作。")}</p></div>
       {loading ? <LoadingState /> : accepted ? <>
@@ -103,8 +105,8 @@ export function AcceptOperatorInvitationPage({ api, brandName, brandMark }: Acce
       </> : <>
         {error && <Alert type="error" showIcon title={error} />}
         {preview?.status === "pending" && <>
-          <p>{t("租户基础角色")} · {preview.roleNames.join("、")}
-            {preview.workspaceNames.length > 0 && <><br />{t("业务范围")} · {preview.workspaceNames.join("、")}</>}</p>
+          <p>{t("租户基础角色")}：{preview.roleNames.join("、")}
+            {(businessScopeLabel || preview.workspaceNames.length > 0) && <><br />{t(businessScopeLabel ?? "业务范围")}：{preview.workspaceNames.join("、")}</>}</p>
           {unconfirmed && <>
             <ActionButton label={t("核对原接受结果")} onAction={readAcceptance} />
             <Button onClick={() => navigate(`/login/${encodeURIComponent(preview.tenantCode)}`)}>{t("前往登录核对")}</Button>

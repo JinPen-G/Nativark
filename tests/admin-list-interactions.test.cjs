@@ -365,7 +365,8 @@ test('opening another catalog record clears nested draft fields through the actu
     }) : editor('packages/rental-core/admin/catalog/AssetWorkspacePage.tsx', 'AssetWorkspace', 'openAssetEditor', {
       ...common, assetForm: form, saveAsset: { isPending: false },
       assetDrawerOpen: false, assetDismissal: { visible: true }, assetEditor: editingDriver,
-      serializedGroups: [{ id: 'model-b' }], locations: { data: [{ id: 'location-b' }] }, RentalAssetStatus: { Available: 'available' }
+      referencesAvailable: () => true,
+      serializedGroups: [{ id: 'model-b' }], visibleLocations: [{ id: 'location-b' }], RentalAssetStatus: { Available: 'available' }
     });
     form.setFieldsValue({ id: 'first', attributes: { retainedInFirst: 'unsaved' }, description: 'old draft' });
     const next = { id: 'second', attributes: { suppliedBySecond: 'persisted' } };
@@ -381,6 +382,7 @@ test('opening another catalog record clears nested draft fields through the actu
   form.getInternalHooks('RC_FORM_INTERNAL_HOOKS');
   const openStock = editor('packages/rental-core/admin/catalog/StockOperationsPanel.tsx', 'StockOperationsPanel', 'openEditor', {
     form, canManage: true, unavailable: false, apply: { isPending: false }, allowed: () => true, open: false,
+    referencesAvailable: undefined,
     stockDismissal: { visible: true }, editor: { dismiss: close => close(), markClean() {} },
     quantityGroups: [{ id: 'quantity-model' }], storageLocations: [{ id: 'storage' }],
     setOperationKey() {}, setOperationType() {}, setOpen() {},

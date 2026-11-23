@@ -12,7 +12,7 @@
 | [公共订阅](src/features/subscription/README.md) | 六条原路由、版本对比、申请与办理、目录与年费、无金额到期浮窗，复用同一宿主会话和请求 |
 | [公共第三方服务](src/features/integrations/README.md) | 原目录、配置抽屉和测试反馈；零Core与工单宿主共用同一路由、权限、请求及双语文案 |
 | [公共租户/人员/角色](src/features/access/PublicManagementPages.tsx)、[权限编辑器](src/features/access/PermissionMatrix.tsx) | SaaS租户创建/资料/状态与本租户人员角色管理；共用原目录、保存、草稿与权限组件，旧Rental入口转接 |
-| [公共组织与安全设置](src/features/platform-settings/README.md) | 原组织列表/编辑器、安全基线与概览、请求及双语文案；公共应用和原后台消费同一实现 |
+| [公共平台管理](src/features/platform-settings/README.md) | 原组织、安全、平台参数/运维、演示预约和官方日历，保持原字段、列表、弹层与双语文案；公共应用和原后台消费同一实现 |
 | [公共字典与编号](src/features/platform-tools/README.md) | 原两个页签、列表与表单、首组字典创建和取号结果，原后台与公共应用共用请求及词条 |
 | [公共邀请、寄件与客服](src/features/messaging/README.md)、[成员入口](src/features/access/PublicMemberInvitations.tsx) | `/messaging` 提供原页面和请求工厂；公共应用登记匿名邀请、对应租户登录及受保护邮件目录，基础角色/组织和原操作键保持 |
 | [正式出口](src/index.ts)、[壳组合](src/PlatformShell.tsx) | Provider、完整侧栏、面包屑/页名、通知、休息和面板，导航由获权 Core 页面声明生成 |
@@ -33,7 +33,7 @@
 | [零 Core](../../apps/platform-admin/README.md) | 以公共浏览器会话和空页面注册表组装公共应用，保留公共管理、设置与个人入口 |
 | [Rental](../../apps/rental-admin/README.md)、[双 Core](../../apps/example-multi-core-admin/README.md) | 宿主登记所选页面。两者共用 [Rental 浏览器装配](../rental-core/admin/browser/README.md)，由已验证会话提供经营范围、原深链接和业务通知。双 Core 另登记工单贡献 |
 | [工单](../../apps/example-tickets-admin/README.md) | 公共浏览器会话加 [工单页面贡献](../example-tickets-core/admin/index.tsx)，页面与操作使用所属 Core 的绑定、就绪和访问状态 |
-| [原管理后台](../../apps/admin/src/app/App.tsx)、[原路由](../../apps/admin/src/app/AppRouter.tsx) | 保留原会话、路由和业务组合，逐项转接公共组件和 Rental 页面。AI Native、AI 运营、Copilot 和桌面 Agent 页面仍由原后台装配 |
+| [原管理后台](../../apps/admin/src/app/App.tsx)、[原路由](../../apps/admin/src/app/AppRouter.tsx) | 保留原会话、路由和业务组合，逐项转接公共组件和 Rental 页面。原 AI 工作台与平台模型配置消费 [AI 呈现包](../ai-native-admin/README.md)，Operator/Copilot 的业务接点由 Rental 宿主提供 |
 
 业务页面从 [Rental 后台导读](../rental-core/admin/README.md) 进入。统一登记订单、工单、能力、地点、商品资产、商业、治理、会员、工作台与报表、渠道、开业、支付对账十二组页面。各组导读给出业务数据、操作和权限来源。页面贡献使用公共 UI、宿主请求与查询缓存，服务端按身份、经营范围及业务权限裁定。
 
@@ -44,6 +44,8 @@ Rental 客户入口分别由[租户网站](../../apps/tenant-website/README.md)�
 ## 登录、外观与原页面呈现
 
 拆分沿用原管理后台的呈现。侧栏的分组、顺序、简称、图标、搜索与收展保持原样；租户业务项由当前 Core 和成员授权过滤，SaaS 增加 Core 管理。页头的面包屑、时钟、通知、休息及页面操作使用原同行结构，正文继续复用原组件。由可信宿主提供的 `PlatformShellProps.layout` 可接回原 Agent/Copilot 的导航与内容插槽，接口授权仍由所属服务端核验。
+
+公共平台页面继续使用原路由和权限。宿主显式提供 `platformAiPage` 时，原平台 AI 配置页进入同一 SaaS 菜单及 Router；[组合工厂](../ai-native-admin/src/platform-application.tsx)复用宿主唯一 `AdminRuntime`，页面选择不启用模型或业务工具。Rental 的原公共页面领域文案由 [Core 文案贡献](../rental-core/admin/public-page-content.ts)提供。
 
 [登录页](src/features/auth/LoginPage.tsx)保留原双栏演示、租户专属网址、验证码与第三方预览、语言主题切换及原密码表单。可选 `loginDisplay` 只提供公开品牌和显式开发快捷入口，登录继续调用宿主唯一会话；`initialPage` 与 `onboardingPage` 只能在当前获权登记页面里选择。主面板没有额外 Core 状态抽屉。
 

@@ -505,14 +505,14 @@ export function LoginPage() {
                         !phoneValid(phone) ||
                         (isRegister && !canRegister)
                       }
-                      onClick={() => void sendCode()}
+                      onClick={() => void sendCode(Boolean(challengeId))}
                     >
-                      {countdown > 0 ? countdown + "s" : hasChallengeRequest
+                      {countdown > 0 ? countdown + "s" : hasChallengeRequest && !challengeId && !pending
                         ? en ? "Check original request" : "核对原请求"
                         : t("loginSendCode")}
                     </button>
                   </span>
-                  {hasChallengeRequest && (
+                  {hasChallengeRequest && !challengeId && !pending && (
                     <button
                       type="button"
                       className="login-switch-link"

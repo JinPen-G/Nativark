@@ -9,7 +9,7 @@ interface Props { open: boolean; onClose: () => void; roles: SystemRoleRow[]; wo
 
 export function OperatorInvitations({ workspaces, ...props }: Props) {
   const { t } = useLocale();
-  return <PublicOperatorInvitations {...props} subtitle={t("通过邮件加入租户，接受后启用账号与经营空间权限。")}
+  return <PublicOperatorInvitations {...props} title="邀请运营用户" revokeTitle="撤回这封运营邀请？" subtitle={t("通过邮件加入租户，接受后启用账号与经营空间权限。")}
     businessAccess={{ requiredMessage: t("请选择至少一个经营空间"),
       render: access => <RentalInvitationAccess {...access} workspaces={workspaces} /> }} />;
 }

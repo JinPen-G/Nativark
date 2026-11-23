@@ -9,9 +9,15 @@ const { test } = require("node:test");
 const { stripTypeScriptTypes } = require("node:module");
 const root = path.resolve(__dirname, "..");
 const desktop = "clients/agent-desktop/harness/apps/desktop/src/";
+let originalSources;
 
 function load(relative, bindings = {}, replacements = []) {
   let source = fs.readFileSync(path.join(root, relative), "utf8");
+  if (!replacements.length && /^export \{[^}]+\} from ["']@rental-os\//m.test(source)) {
+    originalSources ??= require("../scripts/controller-sources.cjs").createControllerSourceLoader(root,
+      path.dirname(path.dirname(require.resolve("typescript/package.json"))));
+    return originalSources.load(path.join(root, relative));
+  }
   source = source.replace(/^export \* from ['"]([^'"]+)['"];?$/gm, (_, name) =>
     `Object.assign(module.exports, loadDependency(${JSON.stringify(name)}));`);
   source = source.replace(/^import \{ (\w+(?:,\s*\w+)*) \} from ['"](\.[^'"]+)['"];?$/gm, (_, names, name) =>
@@ -23,7 +29,7 @@ function load(relative, bindings = {}, replacements = []) {
     return `${kind} ${name}`;
   });
   source = relative.endsWith(".tsx")
-    ? require(path.join(root, "clients/agent-desktop/harness/node_modules/typescript")).transpileModule(source, {
+    ? require("typescript").transpileModule(source, {
       compilerOptions: { target: "ES2022", module: "CommonJS", jsx: "React" }
     }).outputText
     : stripTypeScriptTypes(source, { mode: "transform" });
@@ -137,7 +143,7 @@ test("desktop menu is derived from real Web navigation, permissions, audience an
     [/^import \{[\s\S]*?\} from "@ant-design\/icons";/m, ""],
     [/^import \{[^\n]*\} from [^\n]+;$/gm, ""], [/<[A-Za-z]+Outlined \/>/g, "null"]
   ]);
-  const { desktopSessionProjection } = load("apps/admin/src/features/agent-desktop/desktop-session-projection.ts");
+  const { desktopSessionProjection } = load("packages/rental-core/admin/agent-desktop/desktop-session-projection.ts");
   const source = { ready: true, sessionVerified: true, token: "not-projected", user: { id: "a", displayName: "Staff" }, tenant: { tenantId: "t", tenantName: "Tenant", categoryCode: "camera" },
     currentWorkspaceId: "w1", workspaces: sample().workspaces, hasPermission: permission => !permission || permission === "rental-os:order:view",
     hasCapability: capability => !capability, hasTenantMembershipPermission: () => false };
@@ -155,6 +161,162 @@ test("desktop menu is derived from real Web navigation, permissions, audience an
   const terms = desktopSessionProjection({ ...source, hasPermission: () => true }, registry, "/", x => x,
     { itemGroupLabel: "车型", itemLabel: "车辆", assetLabel: "车辆", assetCollectionLabel: "车队", fulfillmentLabel: "门店" });
   assert.equal(terms.sections.flatMap(section => section.items).find(item => item.id === "assets").label, "车辆与车队");
+});
+
+test("restored desktop policy preserves the original save across remount, unavailable receipts and scope changes", async () => {
+  const base = "packages/rental-core/admin/agent-desktop/";
+  const imports = [[/^import \{[\s\S]*?\} from ["']@rental-os\/shared\/agent-desktop["'];/m, ""]];
+  const { DesktopPolicySession } = load(`${base}desktop-policy-session.ts`, { ...shared, AbortController }, imports);
+  const { createDesktopBusinessApi } = load(`${base}client.ts`, { ...shared }, imports);
+  const calls = [], storage = new Map(), keys = [];
+  const journal = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) };
+  const policy = shared.parseRentalDesktopBusinessPolicy({ enabled: true, toolCodes: ["rental.catalog.search"], maxRows: 10,
+    expiresAt: "2027-01-01T00:00:00.000Z", destinations: [{ provider: "local", baseUrl: "https://model.invalid/v1" }], modelRoutes: [] });
+  let current = true, observation = { state: "not_observed" }, wait;
+  const api = createDesktopBusinessApi(async (path, options) => {
+    calls.push({ path, options });
+    assert.equal(options.retryAuthentication, false);
+    assert.equal(options.method, "post");
+    if (path.endsWith("/policy/change")) {
+      keys.push(options.data.operationKey);
+      assert.ok(journal.getItem("original-policy"), "the original key is retained before transport");
+      throw new Error("reply lost after acceptance");
+    }
+    if (path.endsWith("/policy/operation")) return wait ? wait.promise : observation;
+    return { state: "not_configured" };
+  }).desktopBusinessPolicyApi;
+  const create = () => new DesktopPolicySession(api, () => current, () => `key-${keys.length + 1}`, journal, "original-policy");
+  const first = create(); first.activate(); await first.load();
+  await assert.rejects(first.save(policy));
+  assert.equal(first.snapshot().feedback, "unknown");
+  assert.equal(first.snapshot().pending.operationKey, "key-1");
+  first.dispose();
+  const restored = create(); restored.activate();
+  assert.equal(restored.snapshot().pending.operationKey, "key-1");
+  await assert.rejects(restored.save(policy));
+  await restored.reconcile();
+  assert.equal(restored.snapshot().feedback, "unknown");
+  assert.equal(restored.snapshot().pending.operationKey, "key-1");
+  observation = { state: "observed", operationKey: "key-1", result: { state: "configured", revision: 1, policy } };
+  wait = deferred(); const old = restored.reconcile(); current = false; wait.resolve(observation); await assert.rejects(old);
+  assert.ok(journal.getItem("original-policy"), "late scope response cannot discard the original reference");
+  restored.dispose(); current = true; wait = undefined;
+  const returning = create(); returning.activate(); await returning.reconcile();
+  assert.equal(returning.snapshot().feedback, "recorded");
+  assert.equal(returning.snapshot().pending, null);
+  assert.equal(returning.snapshot().policy, null, "historical receipt does not replace current policy");
+  assert.equal(journal.getItem("original-policy"), null);
+  assert.deepEqual(keys, ["key-1"]);
+  assert.ok(calls.filter(call => call.path.endsWith("/policy/operation")).every(call => call.options.data.operationKey === "key-1"));
+  returning.dispose();
+});
+
+test("restored desktop menu follows current registered grants without projecting credentials or hidden routes", () => {
+  const { desktopSessionProjection } = load("packages/rental-core/admin/agent-desktop/desktop-session-projection.ts");
+  const routes = { orders: { path: "/cores/rental/orders", label: "订单管理", menu: true },
+    authorization: { path: "/cores/rental/client-authorization", label: "客户端授权", menu: true },
+    create: { path: "/cores/rental/orders/new", label: "新建订单" } };
+  const granted = new Set([routes.orders.path]);
+  const registry = { routes, sections: () => [{ key: "rental", label: "租赁交易", routes: Object.values(routes) }],
+    allowed: route => granted.has(route.path) };
+  const source = { ready: true, sessionVerified: true, token: "private-token-never-projected", user: { id: "a", displayName: "Staff" },
+    tenant: { tenantId: "t", tenantName: "Tenant" }, currentWorkspaceId: "w1", workspaces: sample().workspaces };
+  const project = () => shared.parseRentalDesktopSession(desktopSessionProjection(source, registry, routes.orders.path, value => value));
+  const initial = project();
+  assert.deepEqual(Array.from(initial.sections[0].items, item => item.id), ["orders"]);
+  assert.equal(initial.defaultPath, routes.orders.path);
+  assert.equal(JSON.stringify(initial).includes(source.token), false);
+  granted.add(routes.authorization.path);
+  assert.deepEqual(Array.from(project().sections[0].items, item => item.id), ["orders", "authorization"]);
+  granted.clear();
+  assert.equal(project().sections.length, 0);
+  assert.equal(project().defaultPath, null);
+  source.sessionVerified = false;
+  assert.equal(project().status, "unavailable");
+  source.sessionVerified = true; source.user.mustChangePassword = true;
+  assert.equal(project().status, "password-change");
+});
+
+test("restored desktop bridge keeps menu commands current and cancels old catalog reads on scope change and unmount", async () => {
+  const base = "packages/rental-core/admin/agent-desktop/";
+  const { desktopSessionProjection } = load(`${base}desktop-session-projection.ts`);
+  const { createDesktopBusinessApi } = load(`${base}client.ts`, { ...shared },
+    [[/^import \{[\s\S]*?\} from ["']@rental-os\/shared\/agent-desktop["'];/m, ""]]);
+  const subscriptions = new Set(), intervals = new Map(), timeouts = new Map(), hooks = [], pendingEffects = [];
+  const reports = [], completed = [], catalogReplies = [], paths = [], reads = [];
+  let cursor = 0, pathname = "/cores/rental/orders", command, catalog, sequence = 0, bootstrap = 0, allowSessionChange = false;
+  let state = { ready: true, sessionVerified: true, token: "private", user: { id: "a", displayName: "Staff" },
+    tenant: { tenantId: "t", tenantName: "Tenant" }, currentWorkspaceId: "w1", workspaces: sample().workspaces,
+    hasPermission: () => true, bootstrap: async () => { bootstrap++; },
+    logout: () => { state = { ...state, token: undefined }; },
+    switchWorkspace: async id => { state = { ...state, currentWorkspaceId: id }; } };
+  const useAuthStore = Object.assign(() => state, { getState: () => state,
+    subscribe: fn => { subscriptions.add(fn); return () => subscriptions.delete(fn); } });
+  const routes = { orders: { path: pathname, label: "订单管理", menu: true },
+    policy: { path: "/cores/rental/client-authorization", label: "客户端授权", menu: true } };
+  let navigation = { routes, sections: () => [{ key: "business", label: "业务", routes: Object.values(routes) }], allowed: () => true };
+  const host = { report: async value => { reports.push(shared.parseRentalDesktopSession(value)); },
+    onCommand: fn => { command = fn; return () => { command = undefined; }; },
+    complete: async value => { completed.push(value); },
+    onCatalog: fn => { catalog = fn; return () => { catalog = undefined; }; },
+    completeCatalog: async value => { catalogReplies.push(value); } };
+  const transport = createDesktopBusinessApi(async (path, options) => {
+    const gate = deferred(); reads.push({ path, options, gate }); return gate.promise;
+  });
+  const context = { session: { useAuthStore }, ...transport, profile: async () => { throw new Error("fixture query never fetches"); },
+    useNavigation: () => navigation };
+  const window = { dispatchEvent: () => allowSessionChange,
+    setInterval: fn => { const id = ++sequence; intervals.set(id, fn); return id; }, clearInterval: id => intervals.delete(id),
+    setTimeout: fn => { const id = ++sequence; timeouts.set(id, fn); return id; }, clearTimeout: id => timeouts.delete(id) };
+  const navigate = async value => { paths.push(value); pathname = value; render(); };
+  const t = value => value;
+  const { DesktopSessionBridge } = load(`${base}DesktopSessionBridge.tsx`, {
+    ...shared, AbortController, Event, window, desktopSessionProjection,
+    useRentalDesktopContext: () => context, rentalDesktopHost: () => host,
+    useLocation: () => ({ pathname }), useNavigate: () => navigate, useLocale: () => ({ t }), useQuery: () => ({ data: undefined }),
+    useRef: initial => { const index = cursor++; return hooks[index] ??= { current: initial }; },
+    useState: initial => { const index = cursor++; hooks[index] ??= { value: initial };
+      return [hooks[index].value, next => { hooks[index].value = typeof next === "function" ? next(hooks[index].value) : next; }]; },
+    useEffect: (effect, dependencies) => { const index = cursor++, previous = hooks[index];
+      if (!previous || dependencies.some((value, i) => value !== previous.dependencies[i])) pendingEffects.push(() => {
+        previous?.cleanup?.(); hooks[index] = { dependencies, cleanup: effect() };
+      }); },
+  }, [[/^import [^\n]+;\n/gm, ""], [/^const \{[^\n]+\} = loadDependency\([^\n]+\);\n/gm, ""]]);
+  function render() { cursor = 0; assert.equal(DesktopSessionBridge(), null); for (const effect of pendingEffects.splice(0)) effect(); }
+  async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); }
+  const binding = { actorId: "a", tenantId: "t", workspaceId: "w1" };
+  const send = (id, value) => command({ id, session: binding, command: { revision: 1, ...value } });
+  try {
+    render(); await settle(); assert.equal(bootstrap, 1); assert.equal(intervals.size, 1);
+    navigation = { ...navigation, allowed: route => route.path === routes.orders.path };
+    render(); await settle();
+    send("hidden", { kind: "navigate", routeId: "policy" }); await settle();
+    assert.equal(completed.at(-1).ok, false); assert.equal(paths.length, 0);
+    send("navigate", { kind: "navigate", routeId: "orders" }); await settle();
+    assert.equal(completed.at(-1).ok, true); assert.equal(paths.length, 1);
+    send("navigate", { kind: "navigate", routeId: "orders" }); await settle(); assert.equal(paths.length, 1);
+    send("switch", { kind: "switch-workspace", workspaceId: "w2" }); await settle();
+    assert.equal(completed.at(-1).ok, false); assert.equal(state.currentWorkspaceId, "w1");
+    catalog({ kind: "catalog_sources", id: "read-1", binding, query: { limit: 1 } }); await settle();
+    assert.equal(reads.length, 1); assert.equal(reads[0].options.retryAuthentication, false);
+    const previous = state; state = { ...state, currentWorkspaceId: "w2" };
+    for (const listener of subscriptions) listener(state, previous);
+    assert.equal(reads[0].options.signal.aborted, true);
+    const result = { version: 1, requestId: "read-1", binding, observedAt: "2026-11-23T00:00:00.000Z",
+      expiresAt: "2026-11-23T00:00:30.000Z", items: [], truncated: false, execution: "references_only" };
+    reads[0].gate.resolve(result); await settle();
+    assert.equal(catalogReplies.at(-1).ok, false);
+    state = previous; render(); await settle();
+    catalog({ kind: "catalog_sources", id: "read-2", binding, query: { limit: 1 } }); await settle();
+    const before = catalogReplies.length;
+    for (const hook of hooks) hook?.cleanup?.();
+    assert.equal(reads[1].options.signal.aborted, true);
+    reads[1].gate.resolve({ ...result, requestId: "read-2" }); await settle();
+    assert.equal(catalogReplies.length, before);
+    assert.equal(subscriptions.size, 0); assert.equal(intervals.size, 0); assert.equal(timeouts.size, 0);
+    assert.equal(command, undefined); assert.equal(catalog, undefined);
+    assert.equal(JSON.stringify(reports).includes("private"), false);
+  } finally { for (const hook of hooks) hook?.cleanup?.(); }
 });
 
 function nativeFixture() {
