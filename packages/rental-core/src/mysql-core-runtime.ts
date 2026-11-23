@@ -171,6 +171,7 @@ import {
   type RentalInspectionPageQuery,
   type RentalInspectionPage,
   type RentalCoreFactStore,
+  type RentalExpiredDraftOrderScan,
   type RentalUniqueAttributeClaim,
   type StockQuarantineChange,
   type StockReturnTransfer
@@ -2204,10 +2205,12 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
    *
    * 候选查询只负责缩小范围；真正的到期判定必须在订单行锁内再次完成，
    * 因为候选查询与实际取消之间可能已经发生确认、人工取消或续租等状态变化。
+    * worker的可选scan只续读候选，HTTP和旧调用继续使用原三参数读取。
    */
-  async listExpiredPendingOrderIds(tenantId: string, expiredBefore = now(), take = 50) {
+  async listExpiredPendingOrderIds(tenantId: string, expiredBefore = now(), take = 50, scan?: RentalExpiredDraftOrderScan) {
     this.state(tenantId);
-    return this.factStore.listExpiredDraftOrderIds(tenantId, expiredBefore, take);
+    return scan ? this.factStore.listExpiredDraftOrderIds(tenantId, expiredBefore, take, scan)
+      : this.factStore.listExpiredDraftOrderIds(tenantId, expiredBefore, take);
   }
 
   /**

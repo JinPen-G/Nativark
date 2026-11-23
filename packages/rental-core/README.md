@@ -314,6 +314,8 @@ HTTP入口从 `/http-workspace-capabilities`、`/http-staff-payments` 导入；`
 
 调价作业遇到提交应答丢失时，按原租户、空间、价格组和调价计划回读原状态；已执行的计划须关联同范围的原价格版本，返回同一个版本。缺少可信版本或事务结果未定时返回 `unknown`，保留原事实。仍待执行的计划在原锁和当前权限下，只将明确业务拒绝记为失败；读取已提交结果不重新申请新业务执行权限。[调价运行时](src/mysql-business-runtime.ts) · [原作业恢复验证](../../tests/rental-worker-recovery.test.cjs)
 
+待确认订单到期作业沿[原候选仓储](src/mysql-core-facts.ts)与[Core读取](src/mysql-core-runtime.ts)使用调用内续读参数，返回仍为原候选ID数组。每轮按原两类DRAFT候选并集及createdAt/id取50个，读口最大200；无预占订单沿原快照保留时长过滤，逐单期限与资金继续在原订单锁内裁定。调度器按自身生命周期、租户和经营空间保留位置，读取失败保旧位置，短批次下轮回绕、尾空当轮回读起点，迟到读取不能覆盖新位置。重建调度器从起点读取，原expiry幂等键、同事务资源释放与pending/unknown收据继续复用；位置只安排候选读取。HTTP和旧三参数调用保持原查询与返回。
+
 | 宿主启动的原执行者 | 业务与存储接点 | 退出及恢复边界 |
 | --- | --- | --- |
 | `workers.allocation` | [配货](src/mysql-allocation.ts)、[事实/事件](src/allocation-storage.ts)与[当前作业权威](src/application-worker-authority.ts)，同一实例供 HTTP、AI 及自动扫描消费 | 停止扫描并等待原在途工作，原订单、配置开关与失败事件保持原事务边界 |
