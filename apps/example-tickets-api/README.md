@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | 1 | 按[公共 API](../platform-api/README.md#默认零-core-的五步)准备独立配置与公共 schema / Client，再构建本宿主 | 本树唯一公共 41 模型 Client 和公共 / 工单 API 编译产物 |
 | 2 | 按[公开打包和安装准备](../../packages/core-contracts/README.md#打包与本地安装准备)取得完整固定工单包 | `prepared / already_prepared`、完整包摘要及待部署目录 |
-| 3 | 以[固定底座发行 JSON](../platform-api/README.md#固定发行与部署锁)及同一工单包执行下方准备命令 | 新目录中的 `core.deployment.lock.json`、公共 13 份与工单 1 份原迁移 |
+| 3 | 以[固定底座发行 JSON](../platform-api/README.md#固定发行与部署锁)及同一工单包执行下方准备命令 | 新目录中的 `core.deployment.lock.json`、所选公共数据计划的迁移（当前 `0.1.9` 为 14 份）与工单 1 份原迁移 |
 | 4 | 在目标环境应用组合迁移、初始化公共账号、装配同一标准包并登记精确权限 | 公共 / 工单物理观察可核同，权限目录包含 6 项工单权限 |
 | 5 | 两端使用同一包和锁，启动 API / Web，再核部署准入、授权及绑定 | SaaS 显式登记所选 Core 的部署准入并开通租户，租户管理员分配自己和成员及角色，首次设置后完成业务链 |
 
@@ -32,7 +32,7 @@ SaaS 的四组 Core 包管理 Controller 也从同一[应用工厂](src/assembly
 
 配置 `CORE_PACKAGE_STORAGE_ROOT` 为宿主独占的绝对目录，按[包管理存储约定](../../packages/platform-core-host/src/core-packages/README.md)准备原归档、发行和候选目录。`CORE_PLATFORM_PACKAGE_REFERENCE` 指向该目录 `archives/index.json` 中与启动锁完全相同的底座源码归档引用；实际 Nest 装配将两项配置传给当前版本及更新材料读取源。
 
-读取源从六个公共包的正式静态入口核 `platform-host.context.json` 同源编译证据，要求 `host=example-tickets` 及 `apps/example-tickets-api/prisma-deployment/core.deployment.lock.json` 等于当前锁。实际公共 schema / 13份原SQL和完整工单包须与固定归档逐字节一致；只允许一个工单Core和空数据能力集合。版本读取复用本宿主的原Prisma账及物理观察，更新材料读取本身不查库。缺配置、固定引用或运行收据保持 unavailable，已有但不一致的材料拒绝读取。受控组合仍可通过 `composeTicketsApplication` 的第三个参数显式注入来源，生产默认不使用替代证据；候选准备沿原待部署状态保存。
+读取源从六个公共包的正式静态入口核 `platform-host.context.json` 同源编译证据，要求 `host=example-tickets` 及 `apps/example-tickets-api/prisma-deployment/core.deployment.lock.json` 等于当前锁。实际公共 schema、所选公共数据计划中的全部原 SQL 和完整工单包须与固定归档逐字节一致；只允许一个工单Core和空数据能力集合。版本读取复用本宿主的原Prisma账及物理观察，更新材料读取本身不查库。缺配置、固定引用或运行收据保持 unavailable，已有但不一致的材料拒绝读取。受控组合仍可通过 `composeTicketsApplication` 的第三个参数显式注入来源，生产默认不使用替代证据；候选准备沿原待部署状态保存。[公共数据计划](../platform-api/src/platform-data.ts)
 
 ## 独立后端运行包
 
