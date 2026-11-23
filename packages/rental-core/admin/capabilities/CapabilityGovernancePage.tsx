@@ -2,8 +2,8 @@
 import { DataTableText, ListFilters, useListFilter, ListSection, SaveButton, Tabs,
   App, Form, Alert, Table, Switch, Input, Select, Button, Drawer, Tooltip } from "@rental-os/platform-admin/ui";
 import { Button as ArcButton } from "@rental-os/platform-admin/native-ui";
-import { CardBadge, CardFacts, CardSecondary, CardSection } from "@rental-os/platform-admin/source/components/ui/data-table/RecordCard";
-import { HistoryOutlined, SettingOutlined } from "@rental-os/platform-admin/source/components/ui/icons";
+import { CardBadge, CardFacts, CardSecondary, CardSection } from "@rental-os/platform-admin/ui";
+import { HistoryOutlined, SettingOutlined } from "@rental-os/platform-admin/ui";
 import { CorePage, QueryState, UnsavedChangesGuard, useCorePageHost } from "@rental-os/platform-admin/core";
 import { useLocale } from "@rental-os/platform-admin/locale";
 import type { RentalCapabilityConfigField, RentalCapabilityConfig, RentalCapabilityLifecycleStatus,

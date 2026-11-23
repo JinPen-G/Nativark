@@ -10,7 +10,7 @@ import {
 import { RENTAL_CATALOG_CORE_ID } from "./pages";
 import { useOrderEditor } from "../orders/useOrderEditor";
 import { DataTableText, ListSection, SaveButton } from "@rental-os/platform-admin/ui";
-import { PlusOutlined } from "@rental-os/platform-admin/source/components/ui/icons";
+import { PlusOutlined } from "@rental-os/platform-admin/ui";
 import {
   RentalAssetStatus,
   RentalInventoryMode,
@@ -46,10 +46,10 @@ import { assetCards, stockCards } from "./assetCards";
 import { StockOperationsPanel } from "./StockOperationsPanel";
 import { AnimatedNumber } from "@rental-os/platform-admin/ui";
 import type { ReactNode } from "react";
-import { SettingsWorkspace } from "@rental-os/platform-admin/source/components/settings/SettingsWorkspace";
+import { SettingsWorkspace } from "@rental-os/platform-admin/forms";
 import styles from "./CatalogEditors.module.css";
 import { catalogAttributeText } from "./catalogAttributeText";
-import { ADMIN_TABLE_COLUMN_WIDTH } from "@rental-os/platform-admin/source/app/designTokens";
+import { ADMIN_TABLE_COLUMN_WIDTH } from "@rental-os/platform-admin/ui";
 import { useModalDismissal } from "@rental-os/platform-admin/ui";
 import dayjs from "dayjs";
 

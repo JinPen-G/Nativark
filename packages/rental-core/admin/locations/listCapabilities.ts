@@ -6,7 +6,7 @@ import type {
   SaveRentalFulfillmentOperatorRequest,
 } from "@rental-os/rental-core";
 import { defineListImport, type ListBatchAction } from "@rental-os/platform-admin/ui";
-import { ListPreflightError } from "@rental-os/platform-admin/source/components/ui/data-table/listTransfer";
+import { ListPreflightError } from "@rental-os/platform-admin/ui";
 import type { RentalLocationApi } from "./client";
 
 type Translator = (key: string) => string;

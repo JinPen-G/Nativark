@@ -20,7 +20,7 @@ import {
   CardFacts,
   CardSecondary,
   CardSection,
-} from "@rental-os/platform-admin/source/components/ui/data-table/RecordCard";
+} from "@rental-os/platform-admin/ui";
 import styles from "./locationCards.module.css";
 
 const capabilitySlots: Array<{ code: RentalFulfillmentLocation["capabilities"][number]; icon: LucideIcon }> =

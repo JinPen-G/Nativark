@@ -14,7 +14,7 @@ import {
   CardFacts,
   CardSecondary,
   CardSection,
-} from "@rental-os/platform-admin/source/components/ui/data-table/RecordCard";
+} from "@rental-os/platform-admin/ui";
 import { CatalogCardMedia } from "./CatalogCardMedia";
 import { catalogAttributeText } from "./catalogAttributeText";
 import styles from "./assetCards.module.css";

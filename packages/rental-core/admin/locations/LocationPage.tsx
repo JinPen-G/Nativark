@@ -27,9 +27,9 @@ import {
 } from "@rental-os/platform-admin/ui";
 import { CorePage, QueryState, UnsavedChangesGuard, useCorePageHost } from "@rental-os/platform-admin/core";
 import { useLocale } from "@rental-os/platform-admin/locale";
-import { PlusOutlined } from "@rental-os/platform-admin/source/components/ui/icons";
-import { SettingsWorkspace } from "@rental-os/platform-admin/source/components/settings/SettingsWorkspace";
-import { ADMIN_TABLE_COLUMN_WIDTH } from "@rental-os/platform-admin/source/app/designTokens";
+import { PlusOutlined } from "@rental-os/platform-admin/ui";
+import { SettingsWorkspace } from "@rental-os/platform-admin/forms";
+import { ADMIN_TABLE_COLUMN_WIDTH } from "@rental-os/platform-admin/ui";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useOrderEditor } from "../orders/useOrderEditor";
 import { locationCapabilities, operatorCapabilities } from "./listCapabilities";

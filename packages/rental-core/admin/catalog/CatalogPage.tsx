@@ -15,7 +15,7 @@ import {
   MinusCircleOutlined,
   PlusOutlined,
   UploadOutlined,
-} from "@rental-os/platform-admin/source/components/ui/icons";
+} from "@rental-os/platform-admin/ui";
 import {
   RentalInventoryMode,
   type RentalAttributeDefinition,
@@ -46,9 +46,9 @@ import { resolveTenantNavigationLabels } from "./pages";
 import { QueryState } from "@rental-os/platform-admin/core";
 import { ItemGroupPhoto } from "./ItemGroupPhoto";
 import { catalogCapabilities } from "./listCapabilities";
-import { SettingsWorkspace } from "@rental-os/platform-admin/source/components/settings/SettingsWorkspace";
+import { SettingsWorkspace } from "@rental-os/platform-admin/forms";
 import { catalogAttributeText } from "./catalogAttributeText";
-import { ADMIN_TABLE_COLUMN_WIDTH } from "@rental-os/platform-admin/source/app/designTokens";
+import { ADMIN_TABLE_COLUMN_WIDTH } from "@rental-os/platform-admin/ui";
 import { useModalDismissal } from "@rental-os/platform-admin/ui";
 import dayjs from "dayjs";
 import { useSearchParams } from "react-router-dom";

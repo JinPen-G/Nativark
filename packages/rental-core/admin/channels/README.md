@@ -10,6 +10,8 @@
 
 客户端、微信和官网页签按首次访问加载并保留已访问表单。顶部保存随当前页签登记，顶部按钮与回车共用 `useCoreForm` 的校验及真实保存 Promise。保存保留原版本、FAQ 过滤、官网动态列表转换和品牌缓存刷新，读取失败与保存失败沿所属表单呈现。[表单与页签](ClientChannelPage.tsx) · [公共保存接点](../../../platform-admin/src/core/CorePage.tsx)
 
+设置分组和隐藏分区校验定位从 `@rental-os/platform-admin/forms` 使用同一 `SettingsGroups`、`revealSettingsValidation`，完成与新增图标从 `/ui` 使用。现有分组、字段和保存回调继续由原页面供给。[表单出口](../../../platform-admin/src/forms.ts) · [UI 出口](../../../platform-admin/src/components/ui/index.ts)
+
 ## 请求与业务来源
 
 客户端请求工厂同时提供登录前的公共 bootstrap 和登录后的配置、凭证及连接测试方法。登录入口直接使用宿主公共传输创建请求工厂，配置页面使用绑定当前会话的上下文。bootstrap 保留原租户编码及 Web 客户端参数。[客户端请求](client.ts) · [旧请求入口](../../../../apps/admin/src/api/clientChannel.ts)

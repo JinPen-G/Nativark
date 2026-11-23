@@ -24,6 +24,8 @@
 
 ## 列表与来源
 
+页面、卡片和列表预检从 `@rental-os/platform-admin/ui` 使用原图标、`ADMIN_TABLE_COLUMN_WIDTH`、卡片事实组件与 `ListPreflightError`。设置分区从 `/forms` 使用同一 `SettingsWorkspace`，字段、动作插槽和样式由原实现供给。[UI 出口](../../../platform-admin/src/components/ui/index.ts) · [表单出口](../../../platform-admin/src/forms.ts)
+
 导出字段、只新增导入、已存在编码检查、批量状态及修订预检沿原逻辑。批量保存前重新读取资料和当前管理权限，原重复冲突由同一错误判断处理。[列表能力](listCapabilities.ts) · [旧列表能力入口](../../../../apps/admin/src/features/listCapabilities.ts)
 
 型号、资产和数量库存卡片保留原浏览、只读预览、关闭后命令与图片切换。按钮消费公共原生 UIArc 出口，样式与固定图片来源保留同一字节版本及许可说明。[型号卡片](catalogCards.tsx) · [资产与库存卡片](assetCards.tsx) · [图片来源](archive/product-listing/SOURCE.md)

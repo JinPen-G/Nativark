@@ -87,6 +87,8 @@ CorePage 的 `title`、`summary` 可显示当前受权对象；`actions` 可声�
 
 `/forms` 同时提供 `readSettingsReference`、`retainSettingsReference`、`clearSettingsReference` 和对应类型，供页面保留非敏感原操作引用。沿用既有导出名和错误标识；键由业务按当前身份与对象限定，损坏或不可写的存储会阻止新操作，不把本地引用作为权限。[操作引用实现](src/operation-reference.ts)
 
+设置分区从 `/forms` 使用 `SettingsWorkspace`、`SettingsGroups`、`revealSettingsValidation` 和 `SettingsSection` 类型。卡片事实、列表宽度、原图标与 `ListPreflightError` 从 `/ui` 使用。聚合出口再导出同一组件、常量和错误类，隐藏表单校验、预览退出及列表写入前的错误识别沿原实现。[设置分区](src/components/settings/SettingsWorkspace.tsx) · [表单出口](src/forms.ts) · [UI 出口](src/components/ui/index.ts)
+
 已呈现动作的定位标识是 `data-core-page`（当前 `page.key`）与 `data-core-action`（声明的 `action.id`）。深链接必须先映射为本页已登记动作，再用两个值一起查找当前入口；只滚动或聚焦，执行继续等待用户操作。禁用按钮有可聚焦容器，原因沿原Tooltip展示，撤权后不会留下动作入口。[页头动作适配](src/core/CorePage.tsx)
 
 无 Core 时传空注册表，壳保留侧栏、面包屑/页名、铃铛、面板及联系管理员的提示。休息入口向已验证租户会话开放，SaaS 账号隐藏该入口。默认通知为空，不开放通用 Agent。通知内容/详情和可选面板通过宿主端口提供。公共包本身不拥有登录凭据、API 代理或可用权限。

@@ -1,8 +1,8 @@
 /** 客户端、微信和官网共用原配置表单，顶部保存与回车委托同一真实请求。 */
 import { ClientBrandPreview } from "./ClientBrandPreview";
-import { SettingsGroups, revealSettingsValidation } from "@rental-os/platform-admin/source/components/settings/SettingsWorkspace";
+import { SettingsGroups, revealSettingsValidation } from "@rental-os/platform-admin/forms";
 import dayjs from "dayjs";
-import { CheckCircleOutlined, PlusOutlined } from "@rental-os/platform-admin/source/components/ui/icons";
+import { CheckCircleOutlined, PlusOutlined } from "@rental-os/platform-admin/ui";
 import type { SaveClientChannelProfileRequest, SaveMiniProgramChannelRequest, SaveWebsiteChannelProfileRequest } from "@rental-os/rental-core";
 import { Card, Col, Divider, Row, Space, Tag, Typography, type FormInstance } from "antd";
 import { App } from "@rental-os/platform-admin/ui";

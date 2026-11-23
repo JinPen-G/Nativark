@@ -6,7 +6,7 @@ import { useRentalCatalogPageContext } from "./page-context";
 import { RENTAL_CATALOG_CORE_ID } from "./pages";
 import { useOrderEditor } from "../orders/useOrderEditor";
 import { DataTableText, ListSection, SaveButton, SearchField } from "@rental-os/platform-admin/ui";
-import { PlusOutlined } from "@rental-os/platform-admin/source/components/ui/icons";
+import { PlusOutlined } from "@rental-os/platform-admin/ui";
 import type {
   RentalCategoryTerminology,
   RentalFulfillmentLocation,
@@ -24,7 +24,7 @@ import { Input } from "@rental-os/platform-admin/ui";
 import { Button, Modal, Select, Tooltip } from "@rental-os/platform-admin/ui";
 import { useState } from "react";
 import { useLocale } from "@rental-os/platform-admin/locale";
-import { ADMIN_TABLE_COLUMN_WIDTH } from "@rental-os/platform-admin/source/app/designTokens";
+import { ADMIN_TABLE_COLUMN_WIDTH } from "@rental-os/platform-admin/ui";
 import { QueryState } from "@rental-os/platform-admin/core";
 import { useModalDismissal } from "@rental-os/platform-admin/ui";
 

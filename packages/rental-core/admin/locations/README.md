@@ -18,6 +18,8 @@
 
 ## 列表与卡片
 
+页面和卡片从 `@rental-os/platform-admin/ui` 使用原图标、列表宽度和卡片事实，列表预检使用该出口的同一 `ListPreflightError`。设置分区从 `/forms` 使用原 `SettingsWorkspace`，原表单与退出生命周期沿同一组件供给。[UI 出口](../../../platform-admin/src/components/ui/index.ts) · [表单出口](../../../platform-admin/src/forms.ts)
+
 导出字段、只新增导入、启用经营主体编码解析、资料修订预检和批量状态载荷沿原逻辑。只有明确的 409 重复冲突可跳过，其他失败继续返回原错误，批量保存前重新检查当前管理权限。[列表能力](listCapabilities.ts) · [原列表兼容入口](../../../../apps/admin/src/features/listCapabilities.ts)
 
 卡片保留原当地时间、营业文本、能力标记和预览退出后编辑的交互，按钮使用公共原生 UIArc 出口。[卡片](locationCards.tsx) · [原卡片兼容入口](../../../../apps/admin/src/features/fulfillment/locationCards.tsx)

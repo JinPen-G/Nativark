@@ -6,7 +6,7 @@ import {
   type SaveRentalItemGroupRequest,
 } from "@rental-os/rental-core";
 import { defineListImport, type ListBatchAction, type ListExport } from "@rental-os/platform-admin/ui";
-import { ListPreflightError } from "@rental-os/platform-admin/source/components/ui/data-table/listTransfer";
+import { ListPreflightError } from "@rental-os/platform-admin/ui";
 import type { RentalCatalogApi } from "./client";
 type Translator = (key: string) => string;
 type Complete = () => Promise<unknown>;

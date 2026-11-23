@@ -19,6 +19,8 @@
 
 卡片按钮从 `@rental-os/platform-admin/native-ui` 使用原 UIArc Button，保留原参数和动效。公共出口由[原生组件接点](../../../platform-admin/src/native-ui.ts)提供；一般业务表单继续使用 `/ui`。
 
+卡片事实、历史与设置图标从 `@rental-os/platform-admin/ui` 使用，正式聚合出口供给同一原组件，能力正文与卡片参数沿原调用。[UI 出口](../../../platform-admin/src/components/ui/index.ts)
+
 [旧宿主薄适配](../../../../apps/admin/src/features/rental-core/CapabilityGovernancePage.tsx)以原 AuthStore 和请求代次供给当前范围，沿原 `bootstrap` 刷新已启用能力。查看允许原查看或治理权限，写入要求治理权限。权限、经营空间或代次变化时，原页面回调停止派发。
 
 [原 API 入口](../../../../apps/admin/src/api/rentalCore.ts)将四个能力方法转接到同一请求工厂，继续供给原方法名和请求载荷。
