@@ -1,0 +1,106 @@
+{
+  "copiedAt": "2026-10-27",
+  "source": "D:\\工作文件\\uiarc-pro-archive\\preview",
+  "files": [
+    {
+      "sha256": "13e2f0aa2988b759b64b0ed5835c0d75e40bec31f639915ebba44624eeeccd89",
+      "path": "agent-run/agent-run-data.ts"
+    },
+    {
+      "sha256": "418318adf1ad0b79abe01d5246e21d19d3eb45c8478943ed4d59690b33708dc6",
+      "path": "agent-run/agent-run-state.ts"
+    },
+    {
+      "sha256": "f100a52b56c69b4bd2e686c2a0c83825e040015afeb1213ddd13ed16ef6bfd60",
+      "path": "agent-run/AgentRun.tsx"
+    },
+    {
+      "sha256": "f1bbd157579fa4b3642e09af9cd14628aa5b3e173df3d153a8464376bb16ab68",
+      "path": "agent-run/integration.css"
+    },
+    {
+      "sha256": "4e45e0ffdd1dca67a8dbcfddaeffe01b3606317f7d903f1cbfbc7e7958f8638b",
+      "path": "agent-run/original.css"
+    },
+    {
+      "sha256": "0bd08c1d983510db6995434e04ebbe9b22b83204ef8ca73d8b2c4d44346c8b62",
+      "path": "agent-run/README.md"
+    },
+    {
+      "sha256": "11638a8294c2cf54d9b11175d42170f167c4a68877b6abd26524ff6b717141a7",
+      "path": "agent-run/reference-update.css"
+    },
+    {
+      "sha256": "f2cfdca22fab53a809f22cd89f502aa252cc56342b6338f0c8ec2a433945289c",
+      "path": "agent-run/tokens.css"
+    },
+    {
+      "sha256": "70e4044ac83493714e443b481dca8045622054bbcc3a5babe5fd5f3cdb736e56",
+      "path": "agent-run/useSimulatedRun.ts"
+    },
+    {
+      "sha256": "f8fc17cd2425ce43de0ca9ef75aacbbf10904c49eeb1356980499859460db6c8",
+      "path": "ai-chat/AiChat.tsx"
+    },
+    {
+      "sha256": "97950c9dcab1bfec54da1185a131cf7284f887b26e59602c04a6067b98db3db0",
+      "path": "ai-chat/chat-demo.ts"
+    },
+    {
+      "sha256": "4df7c155b2a1cf9bd83d92fc350d78d546d0391fcd048b1d28b653747d8b886e",
+      "path": "ai-chat/chat-state.ts"
+    },
+    {
+      "sha256": "838fffc1019709698639c842d7f3dc074fc37844f2455113cf26ba4d50fa2548",
+      "path": "ai-chat/chat.css"
+    },
+    {
+      "sha256": "600e00b1bf4603860a52786baa427800a2ee64da00a680405cffabf3d823c0d9",
+      "path": "ai-chat/ChatMarkdown.tsx"
+    },
+    {
+      "sha256": "8002f227c30e24d10fa034959fc61ef3c2bb23546bc1e143494fc67e044d3cb6",
+      "path": "ai-chat/README.md"
+    },
+    {
+      "sha256": "38746b3dd24c1c514b4154c96ca0e63cb5a75af60dd889e1ffd3467a19ae8c63",
+      "path": "ai-chat/ToolCall.tsx"
+    },
+    {
+      "sha256": "da1cc5991f3ae1b0f0d1b0b9391825f7f4b12b93a540b942e86b0cccdeae5d6a",
+      "path": "docs/agent-run.md"
+    },
+    {
+      "sha256": "627cceac84ac39ffdde7b527cc673323be4b8d8c4789457e0af27b1c9d17dfe5",
+      "path": "docs/ai-chat.md"
+    },
+    {
+      "sha256": "1e7290b35280a048667bbf0ebabac1c7fd52a75300e8b2946ac165715997f2bc",
+      "path": "licenses/Lucide-LICENSE.txt"
+    },
+    {
+      "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93",
+      "path": "licenses/React-LICENSE.txt"
+    },
+    {
+      "sha256": "f6196c64e144f9a6fa9154c3a80bc8b89615a9567934b83a8951879f06ba2aef",
+      "path": "licenses/ReactMarkdown-LICENSE.txt"
+    },
+    {
+      "sha256": "0aa01b23ae8a47a55b81448af8a3333edc51bc27399470a8293346c683eb2954",
+      "path": "shared/BrandMark.tsx"
+    },
+    {
+      "sha256": "869b6a20b62e1abd19009a8160fe60cbfc23b4069a426870e735e8e9231dc226",
+      "path": "shared/MeasuredHeight.tsx"
+    },
+    {
+      "sha256": "930acc1d09673e361c901265385f76479fc355dbe4deb1b0dc13c77719940118",
+      "path": "shared/README.md"
+    },
+    {
+      "sha256": "d3311114f960ac89c02bc644ead7ce04405b8b222b5e1b62d87c3c99190409f9",
+      "path": "shared/reference-marks.json"
+    }
+  ]
+}

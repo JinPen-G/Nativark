@@ -22,11 +22,13 @@ const categoryIcons: Record<string, AnimatedIconName> = {
 
 export interface RentalShellOptions extends RentalBrowserNotificationsOptions {
   workspaceHref: string | null;
+  /** 消息页和铃铛使用同一工厂/Provider；省略时维持原独立壳的创建方式。 */
+  notifications?: ReturnType<typeof createRentalBrowserNotifications>;
 }
 
 export function createRentalShell(options: RentalShellOptions) {
   const profileApi = createRentalOrderApi(options.session.request);
-  const notifications = createRentalBrowserNotifications({
+  const notifications = options.notifications ?? createRentalBrowserNotifications({
     ...options,
     soundScopeKey: auth => JSON.stringify([auth.tenant?.tenantId, auth.user?.id]),
   });

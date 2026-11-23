@@ -215,3 +215,5 @@ const readOriginal = () => setup.reconcile();
 零Core、工单与双Core宿主已经消费同一公共应用、注册表、服务端身份和授权链。类型、内存构建及定向离线行为已经验证；真实浏览器、数据库保存/重启及独立安装按相应宿主记录核收。构建前置和固定包要求见[公共包](../../README.md#来源与验证)及[工单宿主](../../../../apps/example-tickets-admin/README.md)，不依赖维护者私有output或其他树dist。
 
 源码路线为[路由/动作合同](../../../core-contracts/src/admin.ts) → [CorePage](CorePage.tsx) → 原[PageHeading](../components/PageHeading.tsx)/[WorkspaceHeader](../components/workspace/WorkspaceHeader.tsx) → 原[ActionButton/SaveButton](../components/ui/ActionButton.tsx)/[ConfirmAction](../components/ui/ConfirmAction.tsx)。列表/详情/查询沿[UI出口](../components/ui/index.ts)、[QueryState](../components/QueryState.tsx)和[界面标尺](../app/designTokens.ts)，不通过页面JSON建立第二套渲染器。
+
+动作的可选 `onActionError` 与表单的可选 `onError` 只承接原页面尚未报告的失败。业务 mutation 已提示时不再次追加通用消息；失效代次、`AbortError` 和字段校验失败保持原静默或字段提示。`ariaExpanded` 只传递原打开按钮的展开状态，不改变执行和权限。

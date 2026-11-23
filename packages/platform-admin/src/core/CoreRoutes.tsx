@@ -1,7 +1,7 @@
 /** 已登记Core路由消费原会话、真实范围与就绪；沿原Router和页头运行，不重建后台外壳。 */
 import { useSyncExternalStore, type ComponentType, type ReactNode } from "react";
-import { Route, useNavigate, useParams } from "react-router-dom";
-import { corePageText, resolveCorePageLocation, type CoreRegisteredPage, type CoreScopeReference } from "@rental-os/core-contracts";
+import { Navigate, Route, useLocation, useNavigate, useParams } from "react-router-dom";
+import { corePageKey, corePageText, resolveCorePageLocation, type CoreRegisteredPage, type CoreScopeReference } from "@rental-os/core-contracts";
 import { useLocale } from "../app/locale";
 import { useAdminRuntime } from "../runtime";
 import { PageHeading } from "../components/PageHeading";
@@ -13,19 +13,39 @@ import { useCoreScope } from "./useCoreScope";
 
 export interface CoreRouteOptions {
   brandName: string;
+  /** 可信宿主保留旧地址；只重定向到同一注册表，再经过原 Core 授权与范围检查。 */
+  aliases?: readonly CoreRouteAlias[];
   /** 原宿主按当前Core业务上下文提供；租户范围Core可以省略，不补Rental空间默认值。 */
   containers?: Readonly<Record<string, CoreScopeReference["container"]>>;
   /** 动态业务容器来自当前宿主投影，通过同一 Runtime 订阅通知，优先于固定 containers。 */
   getContainer?: (coreId: string, pageId: string) => CoreScopeReference["container"];
+  getPageIcon?: (coreId: string, pageId: string) => ReactNode;
 }
+export interface CoreRouteAlias { path: string; coreId: string; pageId: string }
 export type CoreRouteComponent = ComponentType<{ routeParams?: Readonly<Record<string, string>> }>;
 type Pages = ReadonlyMap<string, CoreRegisteredPage<CoreRouteComponent>>;
 
 /** 在原Routes内部展开登记页面，使用Core键固定全局路由ID，避免Data Router合并时与宿主自动ID冲突。
  * 注册表由受控组合创建，身份/容器变化时重新取当前参数。 */
 export function createCoreRouteElements(pages: Pages, options: CoreRouteOptions) {
-  return [...pages.values()].map(page => <Route key={page.key} id={`core:${page.key}`} path={page.path}
+  const routes = [...pages.values()].map(page => <Route key={page.key} id={`core:${page.key}`} path={page.path}
     element={<RegisteredCoreRoute page={page} pages={pages} options={options} />} />);
+  for (const alias of options.aliases ?? []) {
+    const page = pages.get(corePageKey(alias.coreId, alias.pageId));
+    if (!page) throw new Error("旧地址对应的 Core 页面未登记");
+    routes.push(<Route key={`alias:${alias.path}`} id={`core-alias:${alias.path}`} path={alias.path}
+      element={<CoreAliasRoute page={page} pages={pages} />} />);
+  }
+  return routes;
+}
+
+function CoreAliasRoute({ page, pages }: { page: CoreRegisteredPage<CoreRouteComponent>; pages: Pages }) {
+  const matched = useParams(), location = useLocation();
+  // 原 members/:id 等历史入口指向列表，仅传目标真正声明的参数。
+  const params = Object.fromEntries([...page.path.matchAll(/:([a-z][a-zA-Z0-9]*)/g)]
+    .map(match => [match[1], matched[match[1]]])) as Record<string, string>;
+  const path = resolveCorePageLocation(pages, { coreId: page.coreId, pageId: page.definition.id, params });
+  return <Navigate to={`${path}${location.search}${location.hash}`} state={location.state} replace />;
 }
 
 function RegisteredCoreRoute({ page, pages, options }: { page: CoreRegisteredPage<CoreRouteComponent>; pages: Pages; options: CoreRouteOptions }) {
@@ -77,7 +97,7 @@ function ScopedCoreRoute({ page, pages, options, container, context, canAccess }
   const configuration = page.definition.purpose === "configuration";
   let content: ReactNode;
   if (scope.data && (scope.ready || configuration)) content = <CorePageHostProvider host={{ page, pages, brandName: options.brandName,
-    lifetimeKey, params, binding, canAccess: (coreId, permissions) => canAccess(coreId, permissions)
+    lifetimeKey, params, binding, icon: options.getPageIcon?.(page.coreId, page.definition.id), canAccess: (coreId, permissions) => canAccess(coreId, permissions)
       && (coreId !== page.coreId || scope.isCurrent() && (scope.ready || configuration)), navigate }}><Page routeParams={params} /></CorePageHostProvider>;
   else content = <><PageHeading title={corePageText(page.definition.title, locale)} brandName={options.brandName} />
     {scope.data?.status === "bound" && scope.data.readiness.status === "configuration_required"

@@ -1,4 +1,5 @@
 /** 显式组装原客户端授权页和无 DOM 的桌面桥接；宿主负责登记路由及供给当前菜单。 */
+import type { ReactNode } from "react";
 import { ClientAuthorizationPage } from "./ClientAuthorizationPage";
 import { DesktopSessionBridge } from "./DesktopSessionBridge";
 import { DesktopBusinessPolicySettings } from "./DesktopBusinessPolicySettings";
@@ -7,6 +8,9 @@ import { createRentalDesktopContext, RentalDesktopProvider, type RentalDesktopAd
 export function createRentalDesktopAdmin(options: RentalDesktopAdminOptions) {
   const context = createRentalDesktopContext(options);
   return {
+    Provider: function RentalDesktopAdminProvider({ children }: { children: ReactNode }) {
+      return <RentalDesktopProvider value={context}>{children}</RentalDesktopProvider>;
+    },
     ClientAuthorizationPage: function RentalClientAuthorizationPage() {
       return <RentalDesktopProvider value={context}><ClientAuthorizationPage /></RentalDesktopProvider>;
     },

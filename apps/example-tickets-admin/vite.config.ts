@@ -26,7 +26,7 @@ export default defineConfig(({ mode }) => {
     plugins: [...platform.plugins, { name: "selected-core-manifest",
       resolveId: (source: string) => source === "virtual:core-manifest" ? virtual : undefined,
       load: (id: string) => id === virtual ? `export default ${JSON.stringify(manifest)};` : undefined }, tailwindcss(), react()],
-    css: { postcss: { plugins: platform.postcss } }, resolve: { alias: platform.alias },
+    css: { postcss: { plugins: platform.postcss } }, resolve: { alias: platform.alias, extensions: platform.extensions },
     server: { port: Number(process.env.PORT ?? 5177), proxy: { "/api": { target: apiProxyTarget(env), changeOrigin: true } } }
   };
 });

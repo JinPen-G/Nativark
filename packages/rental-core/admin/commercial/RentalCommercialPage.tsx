@@ -106,6 +106,9 @@ const adjustmentStatusLabels: Record<string, string> = {
   failed: "执行失败",
 };
 
+// 原价格角色可进入增值服务页；服务读取及写入仍需自己的业务权限，不能以 page.* 准入替代。
+const serviceManagementAccess = [{ resource: "service", action: "manage" }];
+
 /** 商业分区共享当前宿主及原价格/服务权限，附属资料失败独立于服务列表；价格版本参数来自正式路由。 */
 export function RentalCommercialPage({
   section,
@@ -128,7 +131,7 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
     isCurrentScope,
     assertManage,
   } = useRentalCommercialWorkspaceAccess(
-    section === "services" ? RENTAL_COMMERCIAL_PAGES.services.permissions : RENTAL_COMMERCIAL_ACCESS,
+    section === "services" ? serviceManagementAccess : RENTAL_COMMERCIAL_ACCESS,
   );
   const generations = useRef({ adjustment: 0, discount: 0, service: 0, capacity: 0 });
   const { message } = App.useApp();
@@ -162,7 +165,7 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
   const canReadLocations = () => canRead([{ resource: "station", action: "view" }]);
   const canReadServices = () =>
     section === "services" && Boolean(scope) && currentScopeKey() === scope &&
-    host.canAccess(RENTAL_COMMERCIAL_CORE_ID, RENTAL_COMMERCIAL_PAGES.services.permissions);
+    host.canAccess(RENTAL_COMMERCIAL_CORE_ID, serviceManagementAccess);
   const [adjustmentPlan, setAdjustmentPlan] = useState<RentalPricingPlanV1 | null>();
   const [adjustmentPreview, setAdjustmentPreview] = useState<RentalPriceAdjustmentPreviewRow[]>([]);
   const [createdAdjustmentId, setCreatedAdjustmentId] = useState<string>();
@@ -907,7 +910,7 @@ function RentalCommercialWorkspace({ section }: { section: RentalCommercialSecti
                       label: { default: t(section === "discounts" ? "新增优惠方案" : "新增服务") },
                       emphasis: "primary",
                       permissions: section === "services"
-                        ? RENTAL_COMMERCIAL_PAGES.services.permissions
+                        ? serviceManagementAccess
                         : RENTAL_COMMERCIAL_ACCESS,
                       icon: <PlusOutlined />,
                       disabled:

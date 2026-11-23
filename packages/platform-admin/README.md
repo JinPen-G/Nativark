@@ -47,6 +47,8 @@ Rental 客户入口分别由[租户网站](../../apps/tenant-website/README.md)�
 
 公共平台页面继续使用原路由和权限。宿主显式提供 `platformAiPage` 时，原平台 AI 配置页进入同一 SaaS 菜单及 Router；[组合工厂](../ai-native-admin/src/platform-application.tsx)复用宿主唯一 `AdminRuntime`，页面选择不启用模型或业务工具。Rental 的原公共页面领域文案由 [Core 文案贡献](../rental-core/admin/public-page-content.ts)提供。
 
+所选 Core 的 SaaS 管理页通过 `saasPages` 提供原路径、标题、权限和组件，经过同一 SaaS 身份守卫；这类管理页不借用租户 Core 分配或经营空间。工厂返回的 `App.navigation` 只定位真实 Router 中已登记且当前公共权限允许的页面，供原助手受控跳转；未登记、撤权或 Core 页面不会借此获得公共权限。[导航实现](src/application-navigation.tsx)
+
 [登录页](src/features/auth/LoginPage.tsx)保留原双栏演示、租户专属网址、验证码与第三方预览、语言主题切换及原密码表单。可选 `loginDisplay` 只提供公开品牌和显式开发快捷入口，登录继续调用宿主唯一会话；`initialPage` 与 `onboardingPage` 只能在当前获权登记页面里选择。主面板没有额外 Core 状态抽屉。
 
 [外观与音效](src/features/appearance/AppearancePage.tsx)复用原主题、账户色、租户圆角、动效与音效四组设置，保留乐观修订和账户/租户/浏览器各自归属；旧后台通过可选配置面板和会话回调消费同一页。原首次改密由[同源组件](src/features/auth/PasswordChangeGate.tsx)呈现。
@@ -62,6 +64,8 @@ Rental 客户入口分别由[租户网站](../../apps/tenant-website/README.md)�
 Core 的界面词条通过可选 `messages` 传给同一应用工厂，沿原语言 Context 与公共词条合并。多个 Core 由宿主按受控顺序合并资源。Rental 组合从 `@rental-os/rental-core/admin/messages` 导入 `rentalAdminMessages`；[实际资源](../rental-core/admin/messages.ts)保留原词条及六模块合并顺序，Core 作者可以用相同接点提供自己的词条。[组合参数](src/application-context.ts)
 
 有业务容器的宿主再提供 `getCoreContainer(coreId, pageId)`，返回当前已验证范围的 `{ type, id }`；租户范围页面可返回 `undefined`。路由每次读取当前值，变化后替换旧页面及主动作，同一个 Router 不捕获首次装配的容器。所需范围和配置就绪仍由所属 Core 的服务端贡献裁定。
+
+已有深链接通过 `coreRouteAliases` 指向同一已登记页面，保留路由参数、查询、锚点与状态，随后仍经过原 Core 准入。`getCorePageIcon` 供给原页面图标。公共 `platformAdminVite` 对旧目录及 Rental assistant 的 Copilot 归档统一隔离 `data-admin-content`，归档 CSS 正文和动效保持原样。[路由接点](src/core/CoreRoutes.tsx) · [样式边界](config/copilotArchiveStyles.ts)
 
 需要经营空间选择、业务通知或详情的宿主，可向 `/application` 提供 `Shell` 组件。它接收 `PlatformShellProps` 并包装同一 `PlatformShell`，传递公共菜单、页面、退出和正文。`contextSwitcher` 供给当前已验证业务上下文的控件，`notifications` 与 `notificationDetails` 供给真实通知和详情。原空间切换仍提交服务端响应并推进同一会话的请求与缓存代次。[组合参数](src/application-context.ts) · [公共壳及插槽](src/PlatformShell.tsx)
 

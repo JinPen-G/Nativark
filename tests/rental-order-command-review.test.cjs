@@ -6,9 +6,18 @@ const root = path.resolve(__dirname, '..');
 const sourceLoader = require('../scripts/controller-sources.cjs').createControllerSourceLoader(
   root, path.dirname(path.dirname(require.resolve('typescript/package.json'))));
 const sourceContract = name => sourceLoader.load(sourceLoader.resolveSource(__filename, name, true));
-const feature = file => fs.readFileSync(path.join(root, (file.startsWith('../membership/') || file.startsWith('../catalog/'))
-  ? 'packages/rental-core/admin/orders' : file.startsWith('../')
-    ? 'apps/admin/src/features/rental-core' : 'packages/rental-core/admin/orders', file), 'utf8');
+const feature = file => {
+  if (file.startsWith('../ai-native/')) {
+    const name = file.slice('../ai-native/'.length);
+    for (const directory of ['packages/rental-core/admin/assistant/ai-native', 'packages/ai-native-admin/src/ai-native']) {
+      const selected = path.join(root, directory, name);
+      if (fs.existsSync(selected)) return fs.readFileSync(selected, 'utf8');
+    }
+  }
+  return fs.readFileSync(path.join(root, (file.startsWith('../membership/') || file.startsWith('../catalog/'))
+    ? 'packages/rental-core/admin/orders' : file.startsWith('../')
+      ? 'apps/admin/src/features/rental-core' : 'packages/rental-core/admin/orders', file), 'utf8');
+};
 function mutation(file, name, context) {
   const source = ts.createSourceFile(file, feature(file), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   let expression;
@@ -707,6 +716,7 @@ function humanReviewConsumer() {
     RENTAL_PRICING_UNIT_CODES: shared.RENTAL_PRICING_UNIT_CODES, useLocale: () => ({ t: value => value }),
     Alert: props => require('react').createElement('aside', null, props.title),
     require: name => { assert.equal(name, 'react/jsx-runtime'); return require(name); } };
+  context.useRentalAssistant = () => ({ aiTaskCenterApi: context.aiTaskCenterApi });
   vm.runInNewContext(ts.transpileModule(declarations.map(node => node.getText(source)).join('\n'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX }
   }).outputText, context);

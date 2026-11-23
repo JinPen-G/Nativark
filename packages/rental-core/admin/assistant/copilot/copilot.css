@@ -1,0 +1,49 @@
+/* The screen shell gives the siblings separate surfaces and its 340px panel width;
+   archive easing and the mobile sheet stay intact. Chat resets never wrap the header. */
+.copilot-host { display:flex; width:100%; min-width:0; height:auto; min-height:0; flex:1 1 0; position:relative; overflow:hidden; isolation:isolate; container-type:inline-size; font:inherit; color:var(--foreground); --asp-ink:var(--foreground); --asp-muted:var(--text-secondary); --asp-faint:var(--text-meta); --asp-ground:var(--rental-shell-panel, var(--surface)); --asp-soft:var(--surface-muted); --asp-line:var(--rental-shell-border, var(--border)); --copilot-panel-gap:var(--rental-workspace-inset, 6px); }
+.copilot-host > .asp-page-column { display:flex; min-height:0; flex-direction:column; overflow:hidden; container:record-screen / inline-size; }
+.copilot-host.is-open:not(.is-sheet) > .asp-dock { width:calc(340px + var(--copilot-panel-gap)); }
+.copilot-host .asp-dock-inner.ai-side-panel { width:340px; height:100%; min-height:0; margin-inline-start:var(--copilot-panel-gap); background:transparent; container-type:normal; font:inherit; }
+.copilot-host .asp-panel { width:100%; font-size:14px; border:1px solid var(--asp-line); border-radius:var(--rental-ui-radius-container); overflow:hidden; }
+.copilot-host .asp-identity > span { min-width:0; flex:1; }
+.copilot-host .asp-identity > button { margin-left:0; flex-shrink:0; }
+.copilot-host .asp-identity > button:first-of-type { margin-left:auto; width:auto; padding-inline:4px; font-size:12px; white-space:nowrap; }
+.copilot-host .asp-context > span { border-radius:var(--rental-ui-radius-button); }
+.copilot-host .asp-composer { border-radius:var(--rental-ui-radius-input); }
+.copilot-host .asp-primary,.copilot-host .asp-send { background:var(--accent) !important; color:var(--accent-foreground) !important; }
+.copilot-host .asp-suggestions button,.copilot-host .asp-change,.copilot-host .asp-user p { border-radius:var(--rental-ui-radius-container); }
+.copilot-host.is-sheet > .asp-dock { position:absolute; inset:auto 0 0; z-index:3; width:100%; height:74%; transform:translateY(101%); transition:transform 460ms cubic-bezier(.22,1,.36,1); border-radius:var(--rental-ui-radius-container) var(--rental-ui-radius-container) 0 0; }
+.copilot-host.is-sheet.is-open > .asp-dock { transform:translateY(0); }
+.copilot-host.is-sheet .asp-dock-inner.ai-side-panel { width:100%; margin-inline-start:0; }
+.copilot-host.is-sheet .asp-panel { border-width:1px 0 0; border-radius:var(--rental-ui-radius-container) var(--rental-ui-radius-container) 0 0; }
+.copilot-host .asp-thread { scrollbar-width:thin; scrollbar-color:var(--border) transparent; }
+.copilot-host .asp-reading { font-size:13px; }
+.copilot-host .copilot-contexts { flex:none; max-height:126px; overflow:auto; margin:8px 12px 0; }
+.copilot-host .copilot-footnote { padding:0 12px 10px; color:var(--text-secondary); font-size:11px; text-align:center; }
+.copilot-host .copilot-sources { font-size:12px; color:var(--text-secondary); margin:8px 0 12px; }
+.copilot-sources summary { cursor:pointer; }
+.copilot-sources > div { padding:8px 0; display:grid; gap:3px; border-bottom:1px solid var(--border); }
+.copilot-sources strong { color:var(--foreground); font-weight:500; }
+.copilot-sources button { width:fit-content; color:var(--accent) !important; }
+.copilot-routes { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+.copilot-routes button { padding:5px 10px; border:1px solid var(--border) !important; border-radius:var(--rental-ui-radius-button); }
+.copilot-review { display:grid; gap:16px; }
+.copilot-review p { margin:0; }
+.copilot-review dl { margin:0; max-height:40dvh; overflow:auto; }
+.copilot-review dl > div { padding:8px 0; border-bottom:1px solid var(--border); }
+.copilot-review dd { margin:4px 0 0; color:var(--text-secondary); overflow-wrap:anywhere; }
+.copilot-review small { color:var(--text-secondary); }
+.copilot-menu-positioner { z-index:1150; outline:none; }
+.copilot-menu { background:var(--surface); color:var(--foreground); border:1px solid var(--border); border-radius:var(--rental-ui-radius-container); box-shadow:var(--shadow-floating); padding:4px; min-width:192px; max-width:calc(100vw - 16px); outline:none; transform-origin:var(--transform-origin); }
+.copilot-menu-label { padding:6px 8px; color:var(--text-secondary); font-size:12px; max-width:248px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.copilot-menu-item { position:relative; display:flex; align-items:center; gap:8px; min-height:32px; padding:6px 8px; border-radius:var(--rental-ui-radius-button); cursor:default; outline:none; font-size:13px; }
+.copilot-menu-item[data-highlighted] { background:var(--surface-muted); }
+.copilot-menu-item .rental-animated-icon { font-size:16px; }
+.copilot-entry-count { min-width:16px; padding:0 4px; font-size:11px; line-height:16px; border-radius:var(--rental-ui-radius-button); background:var(--surface-muted); }
+html[data-reduced-motion="true"] .copilot-host *, html[data-reduced-motion="true"] .copilot-host *::before { animation:none !important; transition:none !important; scroll-behavior:auto !important; }
+.copilot-located { outline:2px solid var(--accent); outline-offset:4px; border-radius:var(--rental-ui-radius-container); scroll-margin:var(--space-6); animation:copilot-locate 2.4s ease-out both; }
+@keyframes copilot-locate { 0%,35% { box-shadow:0 0 0 6px color-mix(in srgb, var(--accent) 13%, transparent); } 100% { box-shadow:0 0 0 0 transparent; } }
+.copilot-location-status { position:absolute; z-index:8; bottom:var(--space-4); left:var(--space-4); padding:var(--space-2) var(--space-3); background:var(--surface); color:var(--foreground); border:1px solid var(--border); box-shadow:var(--shadow-floating); border-radius:var(--rental-ui-radius-container); font-size:var(--rental-typography-meta-size); pointer-events:none; max-width:calc(100% - 32px); }
+.copilot-proposed-field { display:grid; grid-template-columns:minmax(0,1fr) 112px; align-items:center; gap:var(--space-2); margin-block:var(--space-3); }
+.copilot-proposed-field small { display:block; color:var(--text-secondary); font-size:var(--rental-typography-meta-size); margin-top:var(--space-1); }
+.copilot-proposed-field [role="combobox"] { border:1px solid var(--border); background:var(--surface); }

@@ -7,7 +7,7 @@ const ts = require('typescript');
 const vm = require('node:vm');
 
 function loadModel() {
-  const file = path.resolve(__dirname, '..', 'apps/admin/src/features/ai-native/ai-service-settings-model.ts');
+  const file = path.resolve(__dirname, '..', 'packages/ai-native-admin/src/tenant-model-settings/ai-service-settings-model.ts');
   const source = fs.readFileSync(file, 'utf8').replace(/^import[^\n]*\n/gm, '').replace(/export\s+(?=(type|interface|function|const|class)\b)/g, '').replace(/export\s*\{[^}]+\};?/g, '');
   const output = ts.transpileModule(`${source}\nmodule.exports = { fromAiServiceSummary, setAiSettingsMode, validateAiSettingsDraft, toAiSettingsInput };`, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS }, fileName: file }).outputText;
   const module = { exports: {} };
@@ -41,7 +41,7 @@ test('B14-B platform switch removes write-only replacement input but does not cl
 });
 
 test('B14-B BYOK retain/replace/clear have distinct server inputs and validate before save', () => {
-  const base = { mode: 'tenant_managed', enabled: true, protocol: 'openai-compatible', baseUrl: 'https://x.test', model: 'm', apiKeyDraft: '' };
+  const base = { mode: 'tenant_managed', enabled: true, protocol: 'openai_chat_completions', baseUrl: 'https://x.test', model: 'm', apiKeyDraft: '' };
   assert.equal(model.toAiSettingsInput({ ...base, secretOperation: 'retain' }, 'c', 1).secretChange.operation, 'retain');
   assert.equal(model.toAiSettingsInput({ ...base, secretOperation: 'clear' }, 'c', 1).secretChange.operation, 'clear');
   assert.equal(model.toAiSettingsInput({ ...base, secretOperation: 'replace', apiKeyDraft: 'new-secret' }, 'c', 1).secretChange.operation, 'replace');

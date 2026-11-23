@@ -62,7 +62,21 @@
     "./source/platform-model-settings/platform-price-review-session": "./src/platform-model-settings/platform-price-review-session.ts",
     "./source/platform-model-settings/platformAiSettings": "./src/platform-model-settings/platformAiSettings.ts",
     "./source/platform-model-settings/request": "./src/platform-model-settings/request.ts",
-    "./source/platform-model-settings/runtime": "./src/platform-model-settings/runtime.ts"
+    "./source/platform-model-settings/runtime": "./src/platform-model-settings/runtime.ts",
+    "./tenant-model-settings": "./src/tenant-model-settings/index.ts",
+    "./source/tenant-model-settings/aiCapabilityProbe": "./src/tenant-model-settings/aiCapabilityProbe.ts",
+    "./source/tenant-model-settings/AiCallRecords": "./src/tenant-model-settings/AiCallRecords.tsx",
+    "./source/tenant-model-settings/ai-service-settings-model": "./src/tenant-model-settings/ai-service-settings-model.ts",
+    "./source/tenant-model-settings/AiConnectionCheck": "./src/tenant-model-settings/AiConnectionCheck.tsx",
+    "./source/tenant-model-settings/aiModelSettings": "./src/tenant-model-settings/aiModelSettings.ts",
+    "./source/tenant-model-settings/usage-quantity": "./src/tenant-model-settings/usage-quantity.ts",
+    "./source/tenant-model-settings/settings-save-session": "./src/tenant-model-settings/settings-save-session.ts",
+    "./source/tenant-model-settings/runtime": "./src/tenant-model-settings/runtime.ts",
+    "./source/tenant-model-settings/model-settings-session": "./src/tenant-model-settings/model-settings-session.ts",
+    "./source/tenant-model-settings/index": "./src/tenant-model-settings/index.ts",
+    "./source/tenant-model-settings/capability-probe-session": "./src/tenant-model-settings/capability-probe-session.ts",
+    "./source/tenant-model-settings/AiServiceSettingsCard": "./src/tenant-model-settings/AiServiceSettingsCard.tsx",
+    "./source/tenant-model-settings/AiModelSettingsPage": "./src/tenant-model-settings/AiModelSettingsPage.tsx"
   },
   "scripts": {
     "lint": "tsc -p tsconfig.json --noEmit"

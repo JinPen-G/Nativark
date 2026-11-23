@@ -1,6 +1,6 @@
 /** 同一Rental Core只登记一份页面贡献；业务、渠道与开业页面复用各自单源上下文。
  * 此入口不创建认证客户端或授予权限，宿主仍须经过标准注册和服务端授权。 */
-import type { CoreAdminContribution } from "@rental-os/core-contracts";
+import type { CoreAdminContribution, CoreAdminPage } from "@rental-os/core-contracts";
 import type { CoreRouteComponent } from "@rental-os/platform-admin/core";
 import { createRentalOrdersAdminContribution, type RentalOrderPageContext } from "./orders";
 import { createRentalWorkOrdersAdminContribution, type RentalWorkOrderPageContext } from "./work-orders";
@@ -39,7 +39,7 @@ export interface RentalAdminContexts {
 }
 
 export function createRentalAdminContribution(implementationVersion: string,
-  contexts: RentalAdminContexts): CoreAdminContribution<CoreRouteComponent> {
+  contexts: RentalAdminContexts, additionalPages: readonly CoreAdminPage<CoreRouteComponent>[] = []): CoreAdminContribution<CoreRouteComponent> {
   const orders = createRentalOrdersAdminContribution(implementationVersion, contexts.useOrderContext);
   const workOrders = createRentalWorkOrdersAdminContribution(implementationVersion, contexts.useWorkOrderContext);
   const capabilities = createRentalCapabilitiesAdminContribution(implementationVersion, contexts.useCapabilityContext);
@@ -53,7 +53,7 @@ export function createRentalAdminContribution(implementationVersion: string,
   const setup = createRentalSetupAdminContribution(implementationVersion, contexts.useSetupContext);
   const paymentReconciliation = createRentalPaymentReconciliationAdminContribution(implementationVersion, contexts.usePaymentReconciliationContext);
   return { coreId: orders.coreId, implementationVersion,
-    pages: [...catalog.pages, ...orders.pages, ...workOrders.pages, ...capabilities.pages, ...locations.pages, ...commercial.pages, ...governance.pages, ...membership.pages, ...operations.pages, ...channels.pages, ...setup.pages, ...paymentReconciliation.pages] };
+    pages: [...catalog.pages, ...orders.pages, ...workOrders.pages, ...capabilities.pages, ...locations.pages, ...commercial.pages, ...governance.pages, ...membership.pages, ...operations.pages, ...channels.pages, ...setup.pages, ...paymentReconciliation.pages, ...additionalPages] };
 }
 
 export { rentalPublicManagement, RentalOperationsAccountPage, OriginalRentalOperationsAccountPage, RentalTenantManagementPage, RentalOperatorInvitations } from "./access";

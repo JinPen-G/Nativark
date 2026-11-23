@@ -130,7 +130,7 @@ export const RENTAL_PAGE_ACCESS = {
   "pricing-version-detail": workspace("rental-os:price:manage", "价格版本详情"),
   discounts: workspace("rental-os:price:manage", "优惠方案"),
   coupons: workspace("rental-os:price:manage", "优惠券"),
-  services: workspace("rental-os:service:manage", "增值服务"),
+  services: page("services", "增值服务页面", "workspace", ["rental-os:price:manage"]),
   governance: { ...page("governance", "品类与业务规则页面", "workspace", [
     "rental-os:price:manage", "rental-os:calendar:edit", "rental-os:calendar:publish",
     "rental-os:calendar:view-history", "rental-os:rules:manage", "rental-os:rules:publish", "system:integration:manage"
@@ -165,7 +165,14 @@ export const RENTAL_PAGE_ACCESS = {
     "rental-os:order:view", "rental-os:price:manage", "system:user:manage", "system:role:manage"
   ]), permission: { resource: "setup", action: "view" } },
   "payment-reconciliation": workspace("rental-os:finance:reconcile", "支付对账"),
-  "payment-reconciliation-detail": workspace("rental-os:finance:reconcile", "对账批次详情")
+  "payment-reconciliation-detail": workspace("rental-os:finance:reconcile", "对账批次详情"),
+  // Agent 入口跨空间及租户会员范围，须在下方复用原九页的投影，不能将会员权限摊到空间。
+  "ai-operator": page("ai-operator", "Agent工作台", "workspace", []),
+  "ai-settings": page("ai-settings", "AI 服务设置", "workspace", ["system:params:manage"]),
+  "ai-tasks": page("ai-tasks", "AI 任务中心", "workspace", [
+    "rental-os:order:view", "rental-os:order:create", "rental-os:price:manage", "system:params:manage",
+    "system:integration:manage", "rental-os:finance:view", "rental-os:finance:reconcile"
+  ])
 } satisfies Record<string, PageAccess>;
 for (const entry of Object.values(RENTAL_PAGE_ACCESS)) {
   Object.freeze(entry.anyOf); Object.freeze(entry.permission); Object.freeze(entry);
@@ -248,5 +255,11 @@ export function rentalCorePermissionCodes(input: RentalCorePermissionPrincipal):
     const user = scopedUser(input, entry.scope);
     if (entry.anyOf.some(code => hasOriginal(user, code, entry.scope))) result.add(codeOf(entry.permission));
   }
+  // 沿原工作台九页的 OR，尤其保留仅有租户会员权限、没有当前经营空间的合法入口。
+  // 只补页面准入码，不反向赋予原九页的业务动作或 Core 使用权。
+  const assistantEntries = ["workbench", "orders", "locations", "assets", "personal-members", "pricing-groups",
+    "payment-reconciliation", "governance", "operation-report"] as const;
+  if (assistantEntries.some(id => result.has(codeOf(RENTAL_PAGE_ACCESS[id].permission))))
+    result.add(codeOf(RENTAL_PAGE_ACCESS["ai-operator"].permission));
   return [...result].sort();
 }

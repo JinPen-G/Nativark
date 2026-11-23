@@ -1,7 +1,7 @@
 /** 公共应用组合依赖，只由宿主提供；业务Core不创建第二个会话或修改公共路由内部判断。 */
 import { createContext, useContext, type ComponentType, type ReactNode } from "react";
 import type { CoreRegisteredPage, CoreScopeReference } from "@rental-os/core-contracts";
-import type { CoreRouteComponent } from "./core/CoreRoutes";
+import type { CoreRouteAlias, CoreRouteComponent } from "./core/CoreRoutes";
 import type { createBrowserAdminSession } from "./runtime/browser-session";
 import type { PlatformShellProps } from "./PlatformShell";
 import type { AdminLoginDisplay } from "./session-pages";
@@ -19,6 +19,8 @@ export interface PlatformAdminApplicationOptions {
   management?: PublicManagementCoreAdapter;
   /** 显式选用的原平台模型配置页；入口仍受同一 SaaS 权限限制。 */
   platformAiPage?: ComponentType;
+  /** 所选 Core 的 SaaS 管理页；复用公共身份守卫，不要求租户业务分配或经营空间。 */
+  saasPages?: readonly PlatformSaasPage[];
   /** 原公共页面的领域文案由 Core 提供，不改变路由、权限或数据范围。 */
   publicPageContent?: {
     subscription?: { description?: string };
@@ -28,6 +30,7 @@ export interface PlatformAdminApplicationOptions {
   };
   session: ReturnType<typeof createBrowserAdminSession>;
   pages?: ReadonlyMap<string, CoreRegisteredPage<CoreRouteComponent>>;
+  coreRouteAliases?: readonly CoreRouteAlias[];
   /** 首选的已登记业务入口；未获权时仍从当前可用集合定位，不把偏好作为授权。 */
   initialPage?: { coreId: string; pageId: string };
   /** 原登录响应明确需要初始化时优先进入此已获权登记页。 */
@@ -36,6 +39,16 @@ export interface PlatformAdminApplicationOptions {
   Shell?: ComponentType<PlatformShellProps>;
   /** 当前已验证业务投影；变化时调用同一 session.invalidateBusinessScope，使旧请求和页面失效。 */
   getCoreContainer?: (coreId: string, pageId: string) => CoreScopeReference["container"];
+  /** 宿主提供原页面图标，沿公共页头呈现，不改变页面准入。 */
+  getCorePageIcon?: (coreId: string, pageId: string) => ReactNode;
+}
+export interface PlatformSaasPage {
+  path: `/platform/${string}`;
+  label: string;
+  permission: string;
+  component: ComponentType;
+  icon?: ReactNode;
+  section: { key: string; label: string; icon?: ReactNode };
 }
 export const PlatformApplicationContext = createContext<PlatformAdminApplicationOptions | null>(null);
 export function usePlatformApplication() {

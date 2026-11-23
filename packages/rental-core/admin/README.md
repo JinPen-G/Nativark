@@ -73,6 +73,8 @@ export function RentalAdminApplication() {
 
 ## 范围与导航
 
+`rentalCorePageIcon(coreId, pageId)` 提供原 Rental 页头图标，宿主通过 `getCorePageIcon` 交给公共路由。映射沿原 `APP_ROUTES` 路径和 `routeIconName` 的 AnimatedIcon，订单、工单、会员、价格版本及对账详情保留各自原符号。其他 Core 或未知页面 ID 返回 `undefined`，页面授权仍由原路由宿主核验。[页头图标](browser-page-icons.tsx) · [公共图标接点](../../platform-admin/src/core/CoreRoutes.tsx)
+
 租户级会员与渠道允许当前经营空间缺失。经营空间组使用宿主原 `scopeKey`，工厂在原范围键上附加当前会话一致性检查，复用各组请求前后的范围复验。工单沿原请求工厂，补齐同一范围的请求前后检查。未知结果继续通过原操作和原收据核对。
 
 订单和工单导航钩子在已登记的 `CorePageHostProvider` 内执行。目标须存在于当前注册表，当前页面与目标均须满足当前 `canAccess`，路径由 `resolveCorePageLocation` 生成。订单快捷动作保留原类型化 `action` 查询参数，离页或会话变化后拒绝旧导航。Provider 放在应用外层时可以先完成上下文供给，导航会在实际页面渲染时取得对应路由宿主。
@@ -82,6 +84,12 @@ export function RentalAdminApplication() {
 ## 浏览器与多个 Core
 
 浏览器宿主创建一次 `createRentalBrowserAdminSession`，把 Rental 与其他 Core 的页面贡献交给同一注册表。`createRentalNavigation(registered.pages, session)` 提供原深链接、通知目标和 `getCoreContainer`；`createRentalShell` 向公共壳提供原经营空间选择与消息。两个工厂从 `@rental-os/rental-core/admin` 或精确子出口 `/admin/browser-navigation`、`/admin/browser-shell` 导入。[同一会话](browser.ts) · [导航工厂](browser-navigation.ts) · [壳工厂](browser-shell.tsx)
+
+选装原 Agent/Copilot 的 Web 宿主使用 `createRentalAssistantShell({ assistant, session, ...原RentalShellOptions })`，传入已经创建的同一个 assistant 和 Rental 会话。该组合沿 `assistant.Provider → CopilotProvider → OperatorProvider → createRentalShell` 各挂一次，通过正式 `PlatformShellProps.layout` 接回原 Agent/Admin 切换、导航、面包屑、内容类及 Copilot 布局。上次 Admin 地址在当前会话范围保存，切换时重新经过原 `useNavigation` 的 `canAccess` 和 `resolve`；未登记、撤权或没有获权回退页时停止导航。宿主直接使用该组合的 Provider 树，页面正文继续消费同一上下文。[Web 主壳组合](assistant-shell.tsx) · [原 assistant 接点](assistant/README.md) · [正式 layout slot](../../platform-admin/src/PlatformShell.tsx)
+
+完整浏览器组合使用 `createRentalAssistantBrowserHost`，同时接回会员姓名/通知草稿、规则/日历来源、品类助手及原翻译 Hook。先准备同一页面 Map 和公共 `App.navigation` 的延迟回调，再把 `createRentalAssistantAdminContribution(...).pages` 与通知工厂的 `page` 合入一份 Rental 贡献；注册成功后填入该 Map，最后创建公共应用。消息中心和铃铛传入同一通知实例。具体可直接照两个 Web 的入口，Core 作者无需修改公共后台内部。[浏览器组合](assistant-browser.tsx) · [三个 AI 页面](assistant-pages.tsx) · [原页面导航](assistant-navigation.ts) · [单 Rental 入口](../../../apps/rental-admin/src/main.tsx)
+
+SaaS 的原品类治理与能力目录在原开发预览开关启用时，通过该工厂返回的 `saasPages` 挂载；使用当前 SaaS 身份与原品类权限，无经营空间要求。AI 设置页缺少或无权访问任务中心时保留设置正文，仅隐藏不能定位的原任务链接。
 
 公共应用、Rental Provider 和其他 Core 复用这一份会话与 QueryClient。工单使用自己的租户范围，Rental 页面按当前服务端目录和已验证会话取得经营空间；未选经营空间不影响获权工单和公共设置。Core、成员授权或会话变化后，原请求和导航继续复验当前范围。
 

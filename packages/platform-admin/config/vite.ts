@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { motionPreferenceAdapter, motionPreferenceStyles } from "./motionPreferenceAdapter";
 import { actionButtonIconAdapter } from "./actionButtonIconAdapter";
 import { nativeSidebarStyles } from "./nativeSidebarStyles";
+import { copilotArchiveStyles } from "./copilotArchiveStyles";
 import { kanbanBoardAdapter } from "./kanbanBoardAdapter";
 export { adaptKanbanRuntime, kanbanBoardAdapter } from "./kanbanBoardAdapter";
 
@@ -10,8 +11,10 @@ export function platformAdminVite() {
   const source = (path: string) => fileURLToPath(new URL(path, import.meta.url));
   return {
     publicDir: source("../public"),
+    // 原后台优先读取 TS 正文，避免源码旁保留的旧 JS 抢占同名合同。
+    extensions: [".mjs", ".ts", ".tsx", ".js", ".jsx", ".json"],
     plugins: [motionPreferenceAdapter(), actionButtonIconAdapter(), kanbanBoardAdapter()],
-    postcss: [motionPreferenceStyles(), nativeSidebarStyles()],
+    postcss: [motionPreferenceStyles(), nativeSidebarStyles(), copilotArchiveStyles()],
     alias: {
       "@/registry": source("../../ui-arc/vendor/registry"),
       "@/lib/motion-tokens": source("../../ui-arc/vendor/lib/motion-tokens.ts"),

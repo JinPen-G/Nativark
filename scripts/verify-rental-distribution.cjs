@@ -186,7 +186,12 @@ function verifyPackage(build, portable, buildSource) {
   }
   if (!files.has('LICENSE')) files.set('LICENSE', build.snapshot.files.get(slash(path.join(root, 'LICENSE'))));
   const source = portable?.source ?? buildSource ?? { repository: sourceRepository(), commit: build.snapshot.commit };
-  const host = portable?.host ?? { platform: '0.1.0', contract: '0.1.1', node: '22.12.0', capabilities: {} };
+  // 校验所选 Git 底座和实际 Node，不能用固定的虚构宿主版本验证 Core 依赖。
+  const host = portable?.host ?? {
+    platform: JSON.parse(build.sourceRead(path.join(root, 'package.json'))).version,
+    contract: build.load(build.exported('@rental-os/core-contracts', true)).CORE_CONTRACT_VERSION,
+    node: process.versions.node, capabilities: {}
+  };
   const packageFactory = build.load(build.exported('@rental-os/rental-api/package', true));
   const input = { files, source, sourceDirectory: rentalSourceDirectory, platformSource: portable?.platformSource ?? source, host,
     documentationSource: portable?.documentationSource,
@@ -262,8 +267,8 @@ function verifyPackage(build, portable, buildSource) {
   const enabled = deployment.createRentalDeploymentFiles({ ...deploymentInput, ai: { release: aiRelease, files: aiDecoded.files } });
   assert.equal(disabled.deployment, 'pending'); assert.equal(enabled.deployment, 'pending');
   assert.equal(disabled.aiMode, 'disabled'); assert.equal(enabled.aiMode, 'enabled');
-  assert.equal((disabled.files.get('schema.prisma').toString().match(/^model /gm) || []).length, 161);
-  assert.equal((enabled.files.get('schema.prisma').toString().match(/^model /gm) || []).length, 247);
+  assert.equal((disabled.files.get('schema.prisma').toString().match(/^model /gm) || []).length, 162);
+  assert.equal((enabled.files.get('schema.prisma').toString().match(/^model /gm) || []).length, 248);
   for (const migration of aiRelease.data.migrations)
     assert.deepEqual(enabled.files.get(`migrations/platform-capability.${migration.id}/migration.sql`), aiDecoded.files.get(migration.file));
   console.log(JSON.stringify({ aiData: { files: aiFiles.size, bytes: aiArchive.bytes.length, sha256: aiArchive.sha256,

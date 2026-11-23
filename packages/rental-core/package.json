@@ -1767,7 +1767,696 @@
     "./admin/agent-desktop/client": "./admin/agent-desktop/client.ts",
     "./admin/agent-desktop/desktop-host": "./admin/agent-desktop/desktop-host.ts",
     "./admin/agent-desktop/desktop-policy-session": "./admin/agent-desktop/desktop-policy-session.ts",
-    "./admin/agent-desktop/desktop-session-projection": "./admin/agent-desktop/desktop-session-projection.ts"
+    "./admin/agent-desktop/desktop-session-projection": "./admin/agent-desktop/desktop-session-projection.ts",
+    "./admin/task-center": {
+      "types": "./admin/task-center/index.ts",
+      "default": "./admin/task-center/index.ts"
+    },
+    "./admin/task-center/AutomationExplanation": {
+      "types": "./admin/task-center/AutomationExplanation.tsx",
+      "default": "./admin/task-center/AutomationExplanation.tsx"
+    },
+    "./admin/task-center/AutomationPolicySettings": {
+      "types": "./admin/task-center/AutomationPolicySettings.tsx",
+      "default": "./admin/task-center/AutomationPolicySettings.tsx"
+    },
+    "./admin/task-center/AutomationRefundRecords": {
+      "types": "./admin/task-center/AutomationRefundRecords.tsx",
+      "default": "./admin/task-center/AutomationRefundRecords.tsx"
+    },
+    "./admin/task-center/AutomationReviewSection": {
+      "types": "./admin/task-center/AutomationReviewSection.tsx",
+      "default": "./admin/task-center/AutomationReviewSection.tsx"
+    },
+    "./admin/task-center/AutomationReviewWorkbench": {
+      "types": "./admin/task-center/AutomationReviewWorkbench.tsx",
+      "default": "./admin/task-center/AutomationReviewWorkbench.tsx"
+    },
+    "./admin/task-center/BusinessOutboxObservation": {
+      "types": "./admin/task-center/BusinessOutboxObservation.tsx",
+      "default": "./admin/task-center/BusinessOutboxObservation.tsx"
+    },
+    "./admin/task-center/CalendarDraftPreparation": {
+      "types": "./admin/task-center/CalendarDraftPreparation.tsx",
+      "default": "./admin/task-center/CalendarDraftPreparation.tsx"
+    },
+    "./admin/task-center/EntrySceneCatalog": {
+      "types": "./admin/task-center/EntrySceneCatalog.tsx",
+      "default": "./admin/task-center/EntrySceneCatalog.tsx"
+    },
+    "./admin/task-center/MemberNameFlow": {
+      "types": "./admin/task-center/MemberNameFlow.tsx",
+      "default": "./admin/task-center/MemberNameFlow.tsx"
+    },
+    "./admin/task-center/NotificationChangeFlow": {
+      "types": "./admin/task-center/NotificationChangeFlow.tsx",
+      "default": "./admin/task-center/NotificationChangeFlow.tsx"
+    },
+    "./admin/task-center/OpeningIntegrationStatus": {
+      "types": "./admin/task-center/OpeningIntegrationStatus.tsx",
+      "default": "./admin/task-center/OpeningIntegrationStatus.tsx"
+    },
+    "./admin/task-center/ReadinessDiagnosticsCard": {
+      "types": "./admin/task-center/ReadinessDiagnosticsCard.tsx",
+      "default": "./admin/task-center/ReadinessDiagnosticsCard.tsx"
+    },
+    "./admin/task-center/TaskCalendarDraft": {
+      "types": "./admin/task-center/TaskCalendarDraft.tsx",
+      "default": "./admin/task-center/TaskCalendarDraft.tsx"
+    },
+    "./admin/task-center/TaskCenterPage": {
+      "types": "./admin/task-center/TaskCenterPage.tsx",
+      "default": "./admin/task-center/TaskCenterPage.tsx"
+    },
+    "./admin/task-center/TaskFaultObservation": {
+      "types": "./admin/task-center/TaskFaultObservation.tsx",
+      "default": "./admin/task-center/TaskFaultObservation.tsx"
+    },
+    "./admin/task-center/TaskOpeningProposals": {
+      "types": "./admin/task-center/TaskOpeningProposals.tsx",
+      "default": "./admin/task-center/TaskOpeningProposals.tsx"
+    },
+    "./admin/task-center/TaskOutcomeObservation": {
+      "types": "./admin/task-center/TaskOutcomeObservation.tsx",
+      "default": "./admin/task-center/TaskOutcomeObservation.tsx"
+    },
+    "./admin/task-center/TaskReadPolicy": {
+      "types": "./admin/task-center/TaskReadPolicy.tsx",
+      "default": "./admin/task-center/TaskReadPolicy.tsx"
+    },
+    "./admin/task-center/TaskRecovery": {
+      "types": "./admin/task-center/TaskRecovery.tsx",
+      "default": "./admin/task-center/TaskRecovery.tsx"
+    },
+    "./admin/task-center/TaskRuleDraft": {
+      "types": "./admin/task-center/TaskRuleDraft.tsx",
+      "default": "./admin/task-center/TaskRuleDraft.tsx"
+    },
+    "./admin/task-center/TaskRuleDraftView": {
+      "types": "./admin/task-center/TaskRuleDraftView.tsx",
+      "default": "./admin/task-center/TaskRuleDraftView.tsx"
+    },
+    "./admin/task-center/TaskUsageObservation": {
+      "types": "./admin/task-center/TaskUsageObservation.tsx",
+      "default": "./admin/task-center/TaskUsageObservation.tsx"
+    },
+    "./admin/task-center/api/aiAutomationExplanations": {
+      "types": "./admin/task-center/api/aiAutomationExplanations.ts",
+      "default": "./admin/task-center/api/aiAutomationExplanations.ts"
+    },
+    "./admin/task-center/api/aiAutomationOriginalRefunds": {
+      "types": "./admin/task-center/api/aiAutomationOriginalRefunds.ts",
+      "default": "./admin/task-center/api/aiAutomationOriginalRefunds.ts"
+    },
+    "./admin/task-center/api/aiAutomationPolicies": {
+      "types": "./admin/task-center/api/aiAutomationPolicies.ts",
+      "default": "./admin/task-center/api/aiAutomationPolicies.ts"
+    },
+    "./admin/task-center/api/aiAutomationReviews": {
+      "types": "./admin/task-center/api/aiAutomationReviews.ts",
+      "default": "./admin/task-center/api/aiAutomationReviews.ts"
+    },
+    "./admin/task-center/api/aiMemberName": {
+      "types": "./admin/task-center/api/aiMemberName.ts",
+      "default": "./admin/task-center/api/aiMemberName.ts"
+    },
+    "./admin/task-center/api/aiNotificationChanges": {
+      "types": "./admin/task-center/api/aiNotificationChanges.ts",
+      "default": "./admin/task-center/api/aiNotificationChanges.ts"
+    },
+    "./admin/task-center/api/aiOpeningDiagnostics": {
+      "types": "./admin/task-center/api/aiOpeningDiagnostics.ts",
+      "default": "./admin/task-center/api/aiOpeningDiagnostics.ts"
+    },
+    "./admin/task-center/api/aiTaskCalendarDraft": {
+      "types": "./admin/task-center/api/aiTaskCalendarDraft.ts",
+      "default": "./admin/task-center/api/aiTaskCalendarDraft.ts"
+    },
+    "./admin/task-center/api/aiTaskOpeningProposals": {
+      "types": "./admin/task-center/api/aiTaskOpeningProposals.ts",
+      "default": "./admin/task-center/api/aiTaskOpeningProposals.ts"
+    },
+    "./admin/task-center/api/aiTaskReadPolicy": {
+      "types": "./admin/task-center/api/aiTaskReadPolicy.ts",
+      "default": "./admin/task-center/api/aiTaskReadPolicy.ts"
+    },
+    "./admin/task-center/api/aiTaskRecovery": {
+      "types": "./admin/task-center/api/aiTaskRecovery.ts",
+      "default": "./admin/task-center/api/aiTaskRecovery.ts"
+    },
+    "./admin/task-center/api/aiTaskRuleDraft": {
+      "types": "./admin/task-center/api/aiTaskRuleDraft.ts",
+      "default": "./admin/task-center/api/aiTaskRuleDraft.ts"
+    },
+    "./admin/task-center/automation-original-navigation": {
+      "types": "./admin/task-center/automation-original-navigation.ts",
+      "default": "./admin/task-center/automation-original-navigation.ts"
+    },
+    "./admin/task-center/automation-policy-session": {
+      "types": "./admin/task-center/automation-policy-session.ts",
+      "default": "./admin/task-center/automation-policy-session.ts"
+    },
+    "./admin/task-center/automation-review-session": {
+      "types": "./admin/task-center/automation-review-session.ts",
+      "default": "./admin/task-center/automation-review-session.ts"
+    },
+    "./admin/task-center/entry-scene-catalog-api": {
+      "types": "./admin/task-center/entry-scene-catalog-api.ts",
+      "default": "./admin/task-center/entry-scene-catalog-api.ts"
+    },
+    "./admin/task-center/index": {
+      "types": "./admin/task-center/index.ts",
+      "default": "./admin/task-center/index.ts"
+    },
+    "./admin/task-center/member-name-reconfirmation": {
+      "types": "./admin/task-center/member-name-reconfirmation.ts",
+      "default": "./admin/task-center/member-name-reconfirmation.ts"
+    },
+    "./admin/task-center/member-name-session": {
+      "types": "./admin/task-center/member-name-session.ts",
+      "default": "./admin/task-center/member-name-session.ts"
+    },
+    "./admin/task-center/notification-change-session": {
+      "types": "./admin/task-center/notification-change-session.ts",
+      "default": "./admin/task-center/notification-change-session.ts"
+    },
+    "./admin/task-center/notification-reconfirmation": {
+      "types": "./admin/task-center/notification-reconfirmation.ts",
+      "default": "./admin/task-center/notification-reconfirmation.ts"
+    },
+    "./admin/task-center/original-reconfirmation-journal": {
+      "types": "./admin/task-center/original-reconfirmation-journal.ts",
+      "default": "./admin/task-center/original-reconfirmation-journal.ts"
+    },
+    "./admin/task-center/original-reconfirmation-session": {
+      "types": "./admin/task-center/original-reconfirmation-session.ts",
+      "default": "./admin/task-center/original-reconfirmation-session.ts"
+    },
+    "./admin/task-center/readiness-diagnostics": {
+      "types": "./admin/task-center/readiness-diagnostics.ts",
+      "default": "./admin/task-center/readiness-diagnostics.ts"
+    },
+    "./admin/task-center/runtime": {
+      "types": "./admin/task-center/runtime.ts",
+      "default": "./admin/task-center/runtime.ts"
+    },
+    "./admin/task-center/task-calendar-draft-session": {
+      "types": "./admin/task-center/task-calendar-draft-session.ts",
+      "default": "./admin/task-center/task-calendar-draft-session.ts"
+    },
+    "./admin/task-center/task-opening-proposal-session": {
+      "types": "./admin/task-center/task-opening-proposal-session.ts",
+      "default": "./admin/task-center/task-opening-proposal-session.ts"
+    },
+    "./admin/task-center/task-read-policy-session": {
+      "types": "./admin/task-center/task-read-policy-session.ts",
+      "default": "./admin/task-center/task-read-policy-session.ts"
+    },
+    "./admin/task-center/task-recovery-session": {
+      "types": "./admin/task-center/task-recovery-session.ts",
+      "default": "./admin/task-center/task-recovery-session.ts"
+    },
+    "./admin/task-center/task-rule-draft-session": {
+      "types": "./admin/task-center/task-rule-draft-session.ts",
+      "default": "./admin/task-center/task-rule-draft-session.ts"
+    },
+    "./admin/assistant": {
+      "types": "./admin/assistant/index.tsx",
+      "default": "./admin/assistant/index.tsx"
+    },
+    "./admin/assistant/host": {
+      "types": "./admin/assistant/host.tsx",
+      "default": "./admin/assistant/host.tsx"
+    },
+    "./admin/assistant/source/ai-native/CalendarSourceEntry": {
+      "types": "./admin/assistant/ai-native/CalendarSourceEntry.tsx",
+      "default": "./admin/assistant/ai-native/CalendarSourceEntry.tsx"
+    },
+    "./admin/assistant/source/ai-native/ConversationAdmission": {
+      "types": "./admin/assistant/ai-native/ConversationAdmission.tsx",
+      "default": "./admin/assistant/ai-native/ConversationAdmission.tsx"
+    },
+    "./admin/assistant/source/ai-native/ConversationClosure": {
+      "types": "./admin/assistant/ai-native/ConversationClosure.tsx",
+      "default": "./admin/assistant/ai-native/ConversationClosure.tsx"
+    },
+    "./admin/assistant/source/ai-native/ConversationDetail": {
+      "types": "./admin/assistant/ai-native/ConversationDetail.tsx",
+      "default": "./admin/assistant/ai-native/ConversationDetail.tsx"
+    },
+    "./admin/assistant/source/ai-native/ConversationHistory": {
+      "types": "./admin/assistant/ai-native/ConversationHistory.tsx",
+      "default": "./admin/assistant/ai-native/ConversationHistory.tsx"
+    },
+    "./admin/assistant/source/ai-native/ConversationLifecycle": {
+      "types": "./admin/assistant/ai-native/ConversationLifecycle.tsx",
+      "default": "./admin/assistant/ai-native/ConversationLifecycle.tsx"
+    },
+    "./admin/assistant/source/ai-native/ConversationOpeningExecution": {
+      "types": "./admin/assistant/ai-native/ConversationOpeningExecution.tsx",
+      "default": "./admin/assistant/ai-native/ConversationOpeningExecution.tsx"
+    },
+    "./admin/assistant/source/ai-native/ConversationOrderExecution": {
+      "types": "./admin/assistant/ai-native/ConversationOrderExecution.tsx",
+      "default": "./admin/assistant/ai-native/ConversationOrderExecution.tsx"
+    },
+    "./admin/assistant/source/ai-native/ConversationOrderHandoff": {
+      "types": "./admin/assistant/ai-native/ConversationOrderHandoff.tsx",
+      "default": "./admin/assistant/ai-native/ConversationOrderHandoff.tsx"
+    },
+    "./admin/assistant/source/ai-native/ConversationOrderResults": {
+      "types": "./admin/assistant/ai-native/ConversationOrderResults.tsx",
+      "default": "./admin/assistant/ai-native/ConversationOrderResults.tsx"
+    },
+    "./admin/assistant/source/ai-native/ConversationQuoteConfirmation": {
+      "types": "./admin/assistant/ai-native/ConversationQuoteConfirmation.tsx",
+      "default": "./admin/assistant/ai-native/ConversationQuoteConfirmation.tsx"
+    },
+    "./admin/assistant/source/ai-native/ConversationQuoteExecution": {
+      "types": "./admin/assistant/ai-native/ConversationQuoteExecution.tsx",
+      "default": "./admin/assistant/ai-native/ConversationQuoteExecution.tsx"
+    },
+    "./admin/assistant/source/ai-native/ConversationQuoteSelection": {
+      "types": "./admin/assistant/ai-native/ConversationQuoteSelection.tsx",
+      "default": "./admin/assistant/ai-native/ConversationQuoteSelection.tsx"
+    },
+    "./admin/assistant/source/ai-native/ConversationResult": {
+      "types": "./admin/assistant/ai-native/ConversationResult.tsx",
+      "default": "./admin/assistant/ai-native/ConversationResult.tsx"
+    },
+    "./admin/assistant/source/ai-native/ConversationTaskCreation": {
+      "types": "./admin/assistant/ai-native/ConversationTaskCreation.tsx",
+      "default": "./admin/assistant/ai-native/ConversationTaskCreation.tsx"
+    },
+    "./admin/assistant/source/ai-native/NotificationDraftFlow": {
+      "types": "./admin/assistant/ai-native/NotificationDraftFlow.tsx",
+      "default": "./admin/assistant/ai-native/NotificationDraftFlow.tsx"
+    },
+    "./admin/assistant/source/ai-native/OrderHumanHandoff": {
+      "types": "./admin/assistant/ai-native/OrderHumanHandoff.tsx",
+      "default": "./admin/assistant/ai-native/OrderHumanHandoff.tsx"
+    },
+    "./admin/assistant/source/ai-native/OriginalOrderReceiptLink": {
+      "types": "./admin/assistant/ai-native/OriginalOrderReceiptLink.tsx",
+      "default": "./admin/assistant/ai-native/OriginalOrderReceiptLink.tsx"
+    },
+    "./admin/assistant/source/ai-native/QuoteCandidateFields": {
+      "types": "./admin/assistant/ai-native/QuoteCandidateFields.tsx",
+      "default": "./admin/assistant/ai-native/QuoteCandidateFields.tsx"
+    },
+    "./admin/assistant/source/ai-native/QuoteReprepare": {
+      "types": "./admin/assistant/ai-native/QuoteReprepare.tsx",
+      "default": "./admin/assistant/ai-native/QuoteReprepare.tsx"
+    },
+    "./admin/assistant/source/ai-native/RegisteredOrderActions": {
+      "types": "./admin/assistant/ai-native/RegisteredOrderActions.tsx",
+      "default": "./admin/assistant/ai-native/RegisteredOrderActions.tsx"
+    },
+    "./admin/assistant/source/ai-native/RuleSourceEntry": {
+      "types": "./admin/assistant/ai-native/RuleSourceEntry.tsx",
+      "default": "./admin/assistant/ai-native/RuleSourceEntry.tsx"
+    },
+    "./admin/assistant/source/ai-native/TaskClarification": {
+      "types": "./admin/assistant/ai-native/TaskClarification.tsx",
+      "default": "./admin/assistant/ai-native/TaskClarification.tsx"
+    },
+    "./admin/assistant/source/ai-native/TaskHumanApproval": {
+      "types": "./admin/assistant/ai-native/TaskHumanApproval.tsx",
+      "default": "./admin/assistant/ai-native/TaskHumanApproval.tsx"
+    },
+    "./admin/assistant/source/ai-native/TaskQuoteReprepare": {
+      "types": "./admin/assistant/ai-native/TaskQuoteReprepare.tsx",
+      "default": "./admin/assistant/ai-native/TaskQuoteReprepare.tsx"
+    },
+    "./admin/assistant/source/ai-native/budget-settings-session": {
+      "types": "./admin/assistant/ai-native/budget-settings-session.ts",
+      "default": "./admin/assistant/ai-native/budget-settings-session.ts"
+    },
+    "./admin/assistant/source/ai-native/conversation-admission-session": {
+      "types": "./admin/assistant/ai-native/conversation-admission-session.ts",
+      "default": "./admin/assistant/ai-native/conversation-admission-session.ts"
+    },
+    "./admin/assistant/source/ai-native/conversation-history-reader": {
+      "types": "./admin/assistant/ai-native/conversation-history-reader.ts",
+      "default": "./admin/assistant/ai-native/conversation-history-reader.ts"
+    },
+    "./admin/assistant/source/ai-native/conversation-lifecycle-session": {
+      "types": "./admin/assistant/ai-native/conversation-lifecycle-session.ts",
+      "default": "./admin/assistant/ai-native/conversation-lifecycle-session.ts"
+    },
+    "./admin/assistant/source/ai-native/conversation-navigation": {
+      "types": "./admin/assistant/ai-native/conversation-navigation.ts",
+      "default": "./admin/assistant/ai-native/conversation-navigation.ts"
+    },
+    "./admin/assistant/source/ai-native/conversation-opening-execution-session": {
+      "types": "./admin/assistant/ai-native/conversation-opening-execution-session.ts",
+      "default": "./admin/assistant/ai-native/conversation-opening-execution-session.ts"
+    },
+    "./admin/assistant/source/ai-native/conversation-order-execution-session": {
+      "types": "./admin/assistant/ai-native/conversation-order-execution-session.ts",
+      "default": "./admin/assistant/ai-native/conversation-order-execution-session.ts"
+    },
+    "./admin/assistant/source/ai-native/conversation-order-results-reader": {
+      "types": "./admin/assistant/ai-native/conversation-order-results-reader.ts",
+      "default": "./admin/assistant/ai-native/conversation-order-results-reader.ts"
+    },
+    "./admin/assistant/source/ai-native/conversation-quote-confirmation-session": {
+      "types": "./admin/assistant/ai-native/conversation-quote-confirmation-session.ts",
+      "default": "./admin/assistant/ai-native/conversation-quote-confirmation-session.ts"
+    },
+    "./admin/assistant/source/ai-native/conversation-quote-selection-session": {
+      "types": "./admin/assistant/ai-native/conversation-quote-selection-session.ts",
+      "default": "./admin/assistant/ai-native/conversation-quote-selection-session.ts"
+    },
+    "./admin/assistant/source/ai-native/conversation-task-creation-session": {
+      "types": "./admin/assistant/ai-native/conversation-task-creation-session.ts",
+      "default": "./admin/assistant/ai-native/conversation-task-creation-session.ts"
+    },
+    "./admin/assistant/source/ai-native/conversation-workbench-host": {
+      "types": "./admin/assistant/ai-native/conversation-workbench-host.ts",
+      "default": "./admin/assistant/ai-native/conversation-workbench-host.ts"
+    },
+    "./admin/assistant/source/ai-native/notification-draft-session": {
+      "types": "./admin/assistant/ai-native/notification-draft-session.ts",
+      "default": "./admin/assistant/ai-native/notification-draft-session.ts"
+    },
+    "./admin/assistant/source/ai-native/order-human-handoff-session": {
+      "types": "./admin/assistant/ai-native/order-human-handoff-session.ts",
+      "default": "./admin/assistant/ai-native/order-human-handoff-session.ts"
+    },
+    "./admin/assistant/source/ai-native/quote-reprepare-session": {
+      "types": "./admin/assistant/ai-native/quote-reprepare-session.ts",
+      "default": "./admin/assistant/ai-native/quote-reprepare-session.ts"
+    },
+    "./admin/assistant/source/ai-native/rule-source-entry-session": {
+      "types": "./admin/assistant/ai-native/rule-source-entry-session.ts",
+      "default": "./admin/assistant/ai-native/rule-source-entry-session.ts"
+    },
+    "./admin/assistant/source/ai-native/workbench-input-review-session": {
+      "types": "./admin/assistant/ai-native/workbench-input-review-session.ts",
+      "default": "./admin/assistant/ai-native/workbench-input-review-session.ts"
+    },
+    "./admin/assistant/source/ai-operator/AiOperatorNavigation": {
+      "types": "./admin/assistant/ai-operator/AiOperatorNavigation.tsx",
+      "default": "./admin/assistant/ai-operator/AiOperatorNavigation.tsx"
+    },
+    "./admin/assistant/source/ai-operator/AiOperatorPage": {
+      "types": "./admin/assistant/ai-operator/AiOperatorPage.tsx",
+      "default": "./admin/assistant/ai-operator/AiOperatorPage.tsx"
+    },
+    "./admin/assistant/source/ai-operator/NativeOperatorWorkspace": {
+      "types": "./admin/assistant/ai-operator/NativeOperatorWorkspace.tsx",
+      "default": "./admin/assistant/ai-operator/NativeOperatorWorkspace.tsx"
+    },
+    "./admin/assistant/source/ai-operator/OperatorContext": {
+      "types": "./admin/assistant/ai-operator/OperatorContext.tsx",
+      "default": "./admin/assistant/ai-operator/OperatorContext.tsx"
+    },
+    "./admin/assistant/source/ai-operator/ai-operator.css": "./admin/assistant/ai-operator/ai-operator.css",
+    "./admin/assistant/source/ai-operator/archive-adapter.css": "./admin/assistant/ai-operator/archive-adapter.css",
+    "./admin/assistant/source/ai-operator/capabilities": {
+      "types": "./admin/assistant/ai-operator/capabilities.ts",
+      "default": "./admin/assistant/ai-operator/capabilities.ts"
+    },
+    "./admin/assistant/source/ai-operator/native-session": {
+      "types": "./admin/assistant/ai-operator/native-session.ts",
+      "default": "./admin/assistant/ai-operator/native-session.ts"
+    },
+    "./admin/assistant/source/api/aiConversations": {
+      "types": "./admin/assistant/api/aiConversations.ts",
+      "default": "./admin/assistant/api/aiConversations.ts"
+    },
+    "./admin/assistant/source/api/aiEntryActions": {
+      "types": "./admin/assistant/api/aiEntryActions.ts",
+      "default": "./admin/assistant/api/aiEntryActions.ts"
+    },
+    "./admin/assistant/source/api/aiNotificationDrafts": {
+      "types": "./admin/assistant/api/aiNotificationDrafts.ts",
+      "default": "./admin/assistant/api/aiNotificationDrafts.ts"
+    },
+    "./admin/assistant/source/api/aiQuoteSelections": {
+      "types": "./admin/assistant/api/aiQuoteSelections.ts",
+      "default": "./admin/assistant/api/aiQuoteSelections.ts"
+    },
+    "./admin/assistant/source/api/aiTaskOrderHandoff": {
+      "types": "./admin/assistant/api/aiTaskOrderHandoff.ts",
+      "default": "./admin/assistant/api/aiTaskOrderHandoff.ts"
+    },
+    "./admin/assistant/source/api/aiWorkbenchDisplays": {
+      "types": "./admin/assistant/api/aiWorkbenchDisplays.ts",
+      "default": "./admin/assistant/api/aiWorkbenchDisplays.ts"
+    },
+    "./admin/assistant/source/copilot/CopilotLayout": {
+      "types": "./admin/assistant/copilot/CopilotLayout.tsx",
+      "default": "./admin/assistant/copilot/CopilotLayout.tsx"
+    },
+    "./admin/assistant/source/copilot/CopilotNavigation": {
+      "types": "./admin/assistant/copilot/CopilotNavigation.tsx",
+      "default": "./admin/assistant/copilot/CopilotNavigation.tsx"
+    },
+    "./admin/assistant/source/copilot/CopilotProvider": {
+      "types": "./admin/assistant/copilot/CopilotProvider.tsx",
+      "default": "./admin/assistant/copilot/CopilotProvider.tsx"
+    },
+    "./admin/assistant/source/copilot/CopilotSection": {
+      "types": "./admin/assistant/copilot/CopilotSection.tsx",
+      "default": "./admin/assistant/copilot/CopilotSection.tsx"
+    },
+    "./admin/assistant/source/copilot/context": {
+      "types": "./admin/assistant/copilot/context.ts",
+      "default": "./admin/assistant/copilot/context.ts"
+    },
+    "./admin/assistant/source/copilot/copilot-order-session": {
+      "types": "./admin/assistant/copilot/copilot-order-session.ts",
+      "default": "./admin/assistant/copilot/copilot-order-session.ts"
+    },
+    "./admin/assistant/source/copilot/copilot.css": "./admin/assistant/copilot/copilot.css",
+    "./admin/assistant/source/copilot/destinations": {
+      "types": "./admin/assistant/copilot/destinations.ts",
+      "default": "./admin/assistant/copilot/destinations.ts"
+    },
+    "./admin/assistant/source/copilot/useCopilotOrder": {
+      "types": "./admin/assistant/copilot/useCopilotOrder.ts",
+      "default": "./admin/assistant/copilot/useCopilotOrder.ts"
+    },
+    "./admin/assistant/source/host": {
+      "types": "./admin/assistant/host.tsx",
+      "default": "./admin/assistant/host.tsx"
+    },
+    "./admin/assistant/source/index": {
+      "types": "./admin/assistant/index.tsx",
+      "default": "./admin/assistant/index.tsx"
+    },
+    "./admin/assistant/source/transport": {
+      "types": "./admin/assistant/transport.ts",
+      "default": "./admin/assistant/transport.ts"
+    },
+    "./admin/governance/source/useCategoryPreparationSave": {
+      "types": "./admin/governance/useCategoryPreparationSave.ts",
+      "default": "./admin/governance/useCategoryPreparationSave.ts"
+    },
+    "./admin/governance/source/useCategoryAdoption": {
+      "types": "./admin/governance/useCategoryAdoption.ts",
+      "default": "./admin/governance/useCategoryAdoption.ts"
+    },
+    "./admin/governance/source/shared": {
+      "types": "./admin/governance/shared.ts",
+      "default": "./admin/governance/shared.ts"
+    },
+    "./admin/governance/source/securityRuleForm": {
+      "types": "./admin/governance/securityRuleForm.ts",
+      "default": "./admin/governance/securityRuleForm.ts"
+    },
+    "./admin/governance/source/RulesTab": {
+      "types": "./admin/governance/RulesTab.tsx",
+      "default": "./admin/governance/RulesTab.tsx"
+    },
+    "./admin/governance/source/RuleSetupWizard": {
+      "types": "./admin/governance/RuleSetupWizard.tsx",
+      "default": "./admin/governance/RuleSetupWizard.tsx"
+    },
+    "./admin/governance/source/ruleSections": {
+      "types": "./admin/governance/ruleSections.tsx",
+      "default": "./admin/governance/ruleSections.tsx"
+    },
+    "./admin/governance/source/ruleOptionLabels": {
+      "types": "./admin/governance/ruleOptionLabels.ts",
+      "default": "./admin/governance/ruleOptionLabels.ts"
+    },
+    "./admin/governance/source/RentalGovernancePage": {
+      "types": "./admin/governance/RentalGovernancePage.tsx",
+      "default": "./admin/governance/RentalGovernancePage.tsx"
+    },
+    "./admin/governance/source/pages": {
+      "types": "./admin/governance/pages.ts",
+      "default": "./admin/governance/pages.ts"
+    },
+    "./admin/governance/source/page-context": {
+      "types": "./admin/governance/page-context.tsx",
+      "default": "./admin/governance/page-context.tsx"
+    },
+    "./admin/governance/source/notificationTemplateForm": {
+      "types": "./admin/governance/notificationTemplateForm.ts",
+      "default": "./admin/governance/notificationTemplateForm.ts"
+    },
+    "./admin/governance/source/NotificationsTab": {
+      "types": "./admin/governance/NotificationsTab.tsx",
+      "default": "./admin/governance/NotificationsTab.tsx"
+    },
+    "./admin/governance/source/messages": {
+      "types": "./admin/governance/messages.ts",
+      "default": "./admin/governance/messages.ts"
+    },
+    "./admin/governance/source/MembershipRewardRulesTab": {
+      "types": "./admin/governance/MembershipRewardRulesTab.tsx",
+      "default": "./admin/governance/MembershipRewardRulesTab.tsx"
+    },
+    "./admin/governance/source/logic": {
+      "types": "./admin/governance/logic.ts",
+      "default": "./admin/governance/logic.ts"
+    },
+    "./admin/governance/source/index": {
+      "types": "./admin/governance/index.tsx",
+      "default": "./admin/governance/index.tsx"
+    },
+    "./admin/governance/source/client": {
+      "types": "./admin/governance/client.ts",
+      "default": "./admin/governance/client.ts"
+    },
+    "./admin/governance/source/CategoryTemplateIcon": {
+      "types": "./admin/governance/CategoryTemplateIcon.tsx",
+      "default": "./admin/governance/CategoryTemplateIcon.tsx"
+    },
+    "./admin/governance/source/CategoryTab": {
+      "types": "./admin/governance/CategoryTab.tsx",
+      "default": "./admin/governance/CategoryTab.tsx"
+    },
+    "./admin/governance/source/categoryPreparationFields": {
+      "types": "./admin/governance/categoryPreparationFields.ts",
+      "default": "./admin/governance/categoryPreparationFields.ts"
+    },
+    "./admin/governance/source/CategoryPreparationDialog": {
+      "types": "./admin/governance/CategoryPreparationDialog.tsx",
+      "default": "./admin/governance/CategoryPreparationDialog.tsx"
+    },
+    "./admin/governance/source/categoryPreparationCapabilities": {
+      "types": "./admin/governance/categoryPreparationCapabilities.ts",
+      "default": "./admin/governance/categoryPreparationCapabilities.ts"
+    },
+    "./admin/governance/source/CategoryPolicyDialog": {
+      "types": "./admin/governance/CategoryPolicyDialog.tsx",
+      "default": "./admin/governance/CategoryPolicyDialog.tsx"
+    },
+    "./admin/governance/source/CategoryGovernancePageHeader": {
+      "types": "./admin/governance/CategoryGovernancePageHeader.tsx",
+      "default": "./admin/governance/CategoryGovernancePageHeader.tsx"
+    },
+    "./admin/governance/source/CategoryGovernancePage": {
+      "types": "./admin/governance/CategoryGovernancePage.tsx",
+      "default": "./admin/governance/CategoryGovernancePage.tsx"
+    },
+    "./admin/governance/source/categoryGovernance": {
+      "types": "./admin/governance/categoryGovernance.ts",
+      "default": "./admin/governance/categoryGovernance.ts"
+    },
+    "./admin/governance/source/categoryDraftSections": {
+      "types": "./admin/governance/categoryDraftSections.ts",
+      "default": "./admin/governance/categoryDraftSections.ts"
+    },
+    "./admin/governance/source/categoryDraftFields": {
+      "types": "./admin/governance/categoryDraftFields.ts",
+      "default": "./admin/governance/categoryDraftFields.ts"
+    },
+    "./admin/governance/source/CategoryDraftEditor": {
+      "types": "./admin/governance/CategoryDraftEditor.tsx",
+      "default": "./admin/governance/CategoryDraftEditor.tsx"
+    },
+    "./admin/governance/source/CategoryCreationDialog": {
+      "types": "./admin/governance/CategoryCreationDialog.tsx",
+      "default": "./admin/governance/CategoryCreationDialog.tsx"
+    },
+    "./admin/governance/source/CategoryConditionalCapabilitiesEditor": {
+      "types": "./admin/governance/CategoryConditionalCapabilitiesEditor.tsx",
+      "default": "./admin/governance/CategoryConditionalCapabilitiesEditor.tsx"
+    },
+    "./admin/governance/source/CategoryCompatibilityRelationsEditor": {
+      "types": "./admin/governance/CategoryCompatibilityRelationsEditor.tsx",
+      "default": "./admin/governance/CategoryCompatibilityRelationsEditor.tsx"
+    },
+    "./admin/governance/source/categoryAdoptionPending": {
+      "types": "./admin/governance/categoryAdoptionPending.ts",
+      "default": "./admin/governance/categoryAdoptionPending.ts"
+    },
+    "./admin/governance/source/category-preparation-client": {
+      "types": "./admin/governance/category-preparation-client.ts",
+      "default": "./admin/governance/category-preparation-client.ts"
+    },
+    "./admin/governance/source/category-governance-ports": {
+      "types": "./admin/governance/category-governance-ports.ts",
+      "default": "./admin/governance/category-governance-ports.ts"
+    },
+    "./admin/governance/source/CalendarYearGrid": {
+      "types": "./admin/governance/CalendarYearGrid.tsx",
+      "default": "./admin/governance/CalendarYearGrid.tsx"
+    },
+    "./admin/governance/source/CalendarTab": {
+      "types": "./admin/governance/CalendarTab.tsx",
+      "default": "./admin/governance/CalendarTab.tsx"
+    },
+    "./admin/governance/source/CalendarRangeModal": {
+      "types": "./admin/governance/CalendarRangeModal.tsx",
+      "default": "./admin/governance/CalendarRangeModal.tsx"
+    },
+    "./admin/governance/source/CalendarMonthGrid": {
+      "types": "./admin/governance/CalendarMonthGrid.tsx",
+      "default": "./admin/governance/CalendarMonthGrid.tsx"
+    },
+    "./admin/governance/source/calendar-year-model": {
+      "types": "./admin/governance/calendar-year-model.ts",
+      "default": "./admin/governance/calendar-year-model.ts"
+    },
+    "./admin/assistant/source/ai-native/category-governance-display": {
+      "types": "./admin/assistant/ai-native/category-governance-display.ts",
+      "default": "./admin/assistant/ai-native/category-governance-display.ts"
+    },
+    "./admin/assistant/source/ai-native/category-assist-session": {
+      "types": "./admin/assistant/ai-native/category-assist-session.ts",
+      "default": "./admin/assistant/ai-native/category-assist-session.ts"
+    },
+    "./admin/assistant/source/ai-native/CategoryGovernanceCard": {
+      "types": "./admin/assistant/ai-native/CategoryGovernanceCard.tsx",
+      "default": "./admin/assistant/ai-native/CategoryGovernanceCard.tsx"
+    },
+    "./admin/assistant/source/ai-native/CategoryAssistFlow": {
+      "types": "./admin/assistant/ai-native/CategoryAssistFlow.tsx",
+      "default": "./admin/assistant/ai-native/CategoryAssistFlow.tsx"
+    },
+    "./admin/assistant/source/api/aiCategoryDraft": {
+      "types": "./admin/assistant/api/aiCategoryDraft.ts",
+      "default": "./admin/assistant/api/aiCategoryDraft.ts"
+    },
+    "./admin/browser-notifications/source/MessageCenterPage": "./admin/browser-notifications/MessageCenterPage.tsx",
+    "./admin/browser-notifications/source/archive/inbox-triage/InboxTriage": "./admin/browser-notifications/archive/inbox-triage/InboxTriage.tsx",
+    "./admin/browser-notifications/source/archive/inbox-triage/original.css": "./admin/browser-notifications/archive/inbox-triage/original.css",
+    "./admin/browser-notifications/source/archive/inbox-triage/integration.css": "./admin/browser-notifications/archive/inbox-triage/integration.css",
+    "./admin/browser-notifications/source/archive/shared/MeasuredHeight": "./admin/browser-notifications/archive/shared/MeasuredHeight.tsx",
+    "./admin/assistant-shell": "./admin/assistant-shell.tsx",
+    "./admin/assistant-browser": {
+      "types": "./admin/assistant-browser.tsx",
+      "default": "./admin/assistant-browser.tsx"
+    },
+    "./admin/assistant-navigation": {
+      "types": "./admin/assistant-navigation.ts",
+      "default": "./admin/assistant-navigation.ts"
+    },
+    "./admin/assistant-pages": {
+      "types": "./admin/assistant-pages.tsx",
+      "default": "./admin/assistant-pages.tsx"
+    },
+    "./admin/browser-page-icons": {
+      "types": "./admin/browser-page-icons.tsx",
+      "default": "./admin/browser-page-icons.tsx"
+    }
   },
   "typesVersions": {
     "*": {
@@ -3432,6 +4121,534 @@
       ],
       "application-file-cleanup-authority": [
         "dist/application-file-cleanup-authority.d.ts"
+      ],
+      "admin/task-center": [
+        "./admin/task-center/index.ts"
+      ],
+      "admin/task-center/AutomationExplanation": [
+        "./admin/task-center/AutomationExplanation.tsx"
+      ],
+      "admin/task-center/AutomationPolicySettings": [
+        "./admin/task-center/AutomationPolicySettings.tsx"
+      ],
+      "admin/task-center/AutomationRefundRecords": [
+        "./admin/task-center/AutomationRefundRecords.tsx"
+      ],
+      "admin/task-center/AutomationReviewSection": [
+        "./admin/task-center/AutomationReviewSection.tsx"
+      ],
+      "admin/task-center/AutomationReviewWorkbench": [
+        "./admin/task-center/AutomationReviewWorkbench.tsx"
+      ],
+      "admin/task-center/BusinessOutboxObservation": [
+        "./admin/task-center/BusinessOutboxObservation.tsx"
+      ],
+      "admin/task-center/CalendarDraftPreparation": [
+        "./admin/task-center/CalendarDraftPreparation.tsx"
+      ],
+      "admin/task-center/EntrySceneCatalog": [
+        "./admin/task-center/EntrySceneCatalog.tsx"
+      ],
+      "admin/task-center/MemberNameFlow": [
+        "./admin/task-center/MemberNameFlow.tsx"
+      ],
+      "admin/task-center/NotificationChangeFlow": [
+        "./admin/task-center/NotificationChangeFlow.tsx"
+      ],
+      "admin/task-center/OpeningIntegrationStatus": [
+        "./admin/task-center/OpeningIntegrationStatus.tsx"
+      ],
+      "admin/task-center/ReadinessDiagnosticsCard": [
+        "./admin/task-center/ReadinessDiagnosticsCard.tsx"
+      ],
+      "admin/task-center/TaskCalendarDraft": [
+        "./admin/task-center/TaskCalendarDraft.tsx"
+      ],
+      "admin/task-center/TaskCenterPage": [
+        "./admin/task-center/TaskCenterPage.tsx"
+      ],
+      "admin/task-center/TaskFaultObservation": [
+        "./admin/task-center/TaskFaultObservation.tsx"
+      ],
+      "admin/task-center/TaskOpeningProposals": [
+        "./admin/task-center/TaskOpeningProposals.tsx"
+      ],
+      "admin/task-center/TaskOutcomeObservation": [
+        "./admin/task-center/TaskOutcomeObservation.tsx"
+      ],
+      "admin/task-center/TaskReadPolicy": [
+        "./admin/task-center/TaskReadPolicy.tsx"
+      ],
+      "admin/task-center/TaskRecovery": [
+        "./admin/task-center/TaskRecovery.tsx"
+      ],
+      "admin/task-center/TaskRuleDraft": [
+        "./admin/task-center/TaskRuleDraft.tsx"
+      ],
+      "admin/task-center/TaskRuleDraftView": [
+        "./admin/task-center/TaskRuleDraftView.tsx"
+      ],
+      "admin/task-center/TaskUsageObservation": [
+        "./admin/task-center/TaskUsageObservation.tsx"
+      ],
+      "admin/task-center/api/aiAutomationExplanations": [
+        "./admin/task-center/api/aiAutomationExplanations.ts"
+      ],
+      "admin/task-center/api/aiAutomationOriginalRefunds": [
+        "./admin/task-center/api/aiAutomationOriginalRefunds.ts"
+      ],
+      "admin/task-center/api/aiAutomationPolicies": [
+        "./admin/task-center/api/aiAutomationPolicies.ts"
+      ],
+      "admin/task-center/api/aiAutomationReviews": [
+        "./admin/task-center/api/aiAutomationReviews.ts"
+      ],
+      "admin/task-center/api/aiMemberName": [
+        "./admin/task-center/api/aiMemberName.ts"
+      ],
+      "admin/task-center/api/aiNotificationChanges": [
+        "./admin/task-center/api/aiNotificationChanges.ts"
+      ],
+      "admin/task-center/api/aiOpeningDiagnostics": [
+        "./admin/task-center/api/aiOpeningDiagnostics.ts"
+      ],
+      "admin/task-center/api/aiTaskCalendarDraft": [
+        "./admin/task-center/api/aiTaskCalendarDraft.ts"
+      ],
+      "admin/task-center/api/aiTaskOpeningProposals": [
+        "./admin/task-center/api/aiTaskOpeningProposals.ts"
+      ],
+      "admin/task-center/api/aiTaskReadPolicy": [
+        "./admin/task-center/api/aiTaskReadPolicy.ts"
+      ],
+      "admin/task-center/api/aiTaskRecovery": [
+        "./admin/task-center/api/aiTaskRecovery.ts"
+      ],
+      "admin/task-center/api/aiTaskRuleDraft": [
+        "./admin/task-center/api/aiTaskRuleDraft.ts"
+      ],
+      "admin/task-center/automation-original-navigation": [
+        "./admin/task-center/automation-original-navigation.ts"
+      ],
+      "admin/task-center/automation-policy-session": [
+        "./admin/task-center/automation-policy-session.ts"
+      ],
+      "admin/task-center/automation-review-session": [
+        "./admin/task-center/automation-review-session.ts"
+      ],
+      "admin/task-center/entry-scene-catalog-api": [
+        "./admin/task-center/entry-scene-catalog-api.ts"
+      ],
+      "admin/task-center/index": [
+        "./admin/task-center/index.ts"
+      ],
+      "admin/task-center/member-name-reconfirmation": [
+        "./admin/task-center/member-name-reconfirmation.ts"
+      ],
+      "admin/task-center/member-name-session": [
+        "./admin/task-center/member-name-session.ts"
+      ],
+      "admin/task-center/notification-change-session": [
+        "./admin/task-center/notification-change-session.ts"
+      ],
+      "admin/task-center/notification-reconfirmation": [
+        "./admin/task-center/notification-reconfirmation.ts"
+      ],
+      "admin/task-center/original-reconfirmation-journal": [
+        "./admin/task-center/original-reconfirmation-journal.ts"
+      ],
+      "admin/task-center/original-reconfirmation-session": [
+        "./admin/task-center/original-reconfirmation-session.ts"
+      ],
+      "admin/task-center/readiness-diagnostics": [
+        "./admin/task-center/readiness-diagnostics.ts"
+      ],
+      "admin/task-center/runtime": [
+        "./admin/task-center/runtime.ts"
+      ],
+      "admin/task-center/task-calendar-draft-session": [
+        "./admin/task-center/task-calendar-draft-session.ts"
+      ],
+      "admin/task-center/task-opening-proposal-session": [
+        "./admin/task-center/task-opening-proposal-session.ts"
+      ],
+      "admin/task-center/task-read-policy-session": [
+        "./admin/task-center/task-read-policy-session.ts"
+      ],
+      "admin/task-center/task-recovery-session": [
+        "./admin/task-center/task-recovery-session.ts"
+      ],
+      "admin/task-center/task-rule-draft-session": [
+        "./admin/task-center/task-rule-draft-session.ts"
+      ],
+      "admin/assistant": [
+        "./admin/assistant/index.tsx"
+      ],
+      "admin/assistant/host": [
+        "./admin/assistant/host.tsx"
+      ],
+      "admin/assistant/source/ai-native/CalendarSourceEntry": [
+        "./admin/assistant/ai-native/CalendarSourceEntry.tsx"
+      ],
+      "admin/assistant/source/ai-native/ConversationAdmission": [
+        "./admin/assistant/ai-native/ConversationAdmission.tsx"
+      ],
+      "admin/assistant/source/ai-native/ConversationClosure": [
+        "./admin/assistant/ai-native/ConversationClosure.tsx"
+      ],
+      "admin/assistant/source/ai-native/ConversationDetail": [
+        "./admin/assistant/ai-native/ConversationDetail.tsx"
+      ],
+      "admin/assistant/source/ai-native/ConversationHistory": [
+        "./admin/assistant/ai-native/ConversationHistory.tsx"
+      ],
+      "admin/assistant/source/ai-native/ConversationLifecycle": [
+        "./admin/assistant/ai-native/ConversationLifecycle.tsx"
+      ],
+      "admin/assistant/source/ai-native/ConversationOpeningExecution": [
+        "./admin/assistant/ai-native/ConversationOpeningExecution.tsx"
+      ],
+      "admin/assistant/source/ai-native/ConversationOrderExecution": [
+        "./admin/assistant/ai-native/ConversationOrderExecution.tsx"
+      ],
+      "admin/assistant/source/ai-native/ConversationOrderHandoff": [
+        "./admin/assistant/ai-native/ConversationOrderHandoff.tsx"
+      ],
+      "admin/assistant/source/ai-native/ConversationOrderResults": [
+        "./admin/assistant/ai-native/ConversationOrderResults.tsx"
+      ],
+      "admin/assistant/source/ai-native/ConversationQuoteConfirmation": [
+        "./admin/assistant/ai-native/ConversationQuoteConfirmation.tsx"
+      ],
+      "admin/assistant/source/ai-native/ConversationQuoteExecution": [
+        "./admin/assistant/ai-native/ConversationQuoteExecution.tsx"
+      ],
+      "admin/assistant/source/ai-native/ConversationQuoteSelection": [
+        "./admin/assistant/ai-native/ConversationQuoteSelection.tsx"
+      ],
+      "admin/assistant/source/ai-native/ConversationResult": [
+        "./admin/assistant/ai-native/ConversationResult.tsx"
+      ],
+      "admin/assistant/source/ai-native/ConversationTaskCreation": [
+        "./admin/assistant/ai-native/ConversationTaskCreation.tsx"
+      ],
+      "admin/assistant/source/ai-native/NotificationDraftFlow": [
+        "./admin/assistant/ai-native/NotificationDraftFlow.tsx"
+      ],
+      "admin/assistant/source/ai-native/OrderHumanHandoff": [
+        "./admin/assistant/ai-native/OrderHumanHandoff.tsx"
+      ],
+      "admin/assistant/source/ai-native/OriginalOrderReceiptLink": [
+        "./admin/assistant/ai-native/OriginalOrderReceiptLink.tsx"
+      ],
+      "admin/assistant/source/ai-native/QuoteCandidateFields": [
+        "./admin/assistant/ai-native/QuoteCandidateFields.tsx"
+      ],
+      "admin/assistant/source/ai-native/QuoteReprepare": [
+        "./admin/assistant/ai-native/QuoteReprepare.tsx"
+      ],
+      "admin/assistant/source/ai-native/RegisteredOrderActions": [
+        "./admin/assistant/ai-native/RegisteredOrderActions.tsx"
+      ],
+      "admin/assistant/source/ai-native/RuleSourceEntry": [
+        "./admin/assistant/ai-native/RuleSourceEntry.tsx"
+      ],
+      "admin/assistant/source/ai-native/TaskClarification": [
+        "./admin/assistant/ai-native/TaskClarification.tsx"
+      ],
+      "admin/assistant/source/ai-native/TaskHumanApproval": [
+        "./admin/assistant/ai-native/TaskHumanApproval.tsx"
+      ],
+      "admin/assistant/source/ai-native/TaskQuoteReprepare": [
+        "./admin/assistant/ai-native/TaskQuoteReprepare.tsx"
+      ],
+      "admin/assistant/source/ai-native/budget-settings-session": [
+        "./admin/assistant/ai-native/budget-settings-session.ts"
+      ],
+      "admin/assistant/source/ai-native/conversation-admission-session": [
+        "./admin/assistant/ai-native/conversation-admission-session.ts"
+      ],
+      "admin/assistant/source/ai-native/conversation-history-reader": [
+        "./admin/assistant/ai-native/conversation-history-reader.ts"
+      ],
+      "admin/assistant/source/ai-native/conversation-lifecycle-session": [
+        "./admin/assistant/ai-native/conversation-lifecycle-session.ts"
+      ],
+      "admin/assistant/source/ai-native/conversation-navigation": [
+        "./admin/assistant/ai-native/conversation-navigation.ts"
+      ],
+      "admin/assistant/source/ai-native/conversation-opening-execution-session": [
+        "./admin/assistant/ai-native/conversation-opening-execution-session.ts"
+      ],
+      "admin/assistant/source/ai-native/conversation-order-execution-session": [
+        "./admin/assistant/ai-native/conversation-order-execution-session.ts"
+      ],
+      "admin/assistant/source/ai-native/conversation-order-results-reader": [
+        "./admin/assistant/ai-native/conversation-order-results-reader.ts"
+      ],
+      "admin/assistant/source/ai-native/conversation-quote-confirmation-session": [
+        "./admin/assistant/ai-native/conversation-quote-confirmation-session.ts"
+      ],
+      "admin/assistant/source/ai-native/conversation-quote-selection-session": [
+        "./admin/assistant/ai-native/conversation-quote-selection-session.ts"
+      ],
+      "admin/assistant/source/ai-native/conversation-task-creation-session": [
+        "./admin/assistant/ai-native/conversation-task-creation-session.ts"
+      ],
+      "admin/assistant/source/ai-native/conversation-workbench-host": [
+        "./admin/assistant/ai-native/conversation-workbench-host.ts"
+      ],
+      "admin/assistant/source/ai-native/notification-draft-session": [
+        "./admin/assistant/ai-native/notification-draft-session.ts"
+      ],
+      "admin/assistant/source/ai-native/order-human-handoff-session": [
+        "./admin/assistant/ai-native/order-human-handoff-session.ts"
+      ],
+      "admin/assistant/source/ai-native/quote-reprepare-session": [
+        "./admin/assistant/ai-native/quote-reprepare-session.ts"
+      ],
+      "admin/assistant/source/ai-native/rule-source-entry-session": [
+        "./admin/assistant/ai-native/rule-source-entry-session.ts"
+      ],
+      "admin/assistant/source/ai-native/workbench-input-review-session": [
+        "./admin/assistant/ai-native/workbench-input-review-session.ts"
+      ],
+      "admin/assistant/source/ai-operator/AiOperatorNavigation": [
+        "./admin/assistant/ai-operator/AiOperatorNavigation.tsx"
+      ],
+      "admin/assistant/source/ai-operator/AiOperatorPage": [
+        "./admin/assistant/ai-operator/AiOperatorPage.tsx"
+      ],
+      "admin/assistant/source/ai-operator/NativeOperatorWorkspace": [
+        "./admin/assistant/ai-operator/NativeOperatorWorkspace.tsx"
+      ],
+      "admin/assistant/source/ai-operator/OperatorContext": [
+        "./admin/assistant/ai-operator/OperatorContext.tsx"
+      ],
+      "admin/assistant/source/ai-operator/capabilities": [
+        "./admin/assistant/ai-operator/capabilities.ts"
+      ],
+      "admin/assistant/source/ai-operator/native-session": [
+        "./admin/assistant/ai-operator/native-session.ts"
+      ],
+      "admin/assistant/source/api/aiConversations": [
+        "./admin/assistant/api/aiConversations.ts"
+      ],
+      "admin/assistant/source/api/aiEntryActions": [
+        "./admin/assistant/api/aiEntryActions.ts"
+      ],
+      "admin/assistant/source/api/aiNotificationDrafts": [
+        "./admin/assistant/api/aiNotificationDrafts.ts"
+      ],
+      "admin/assistant/source/api/aiQuoteSelections": [
+        "./admin/assistant/api/aiQuoteSelections.ts"
+      ],
+      "admin/assistant/source/api/aiTaskOrderHandoff": [
+        "./admin/assistant/api/aiTaskOrderHandoff.ts"
+      ],
+      "admin/assistant/source/api/aiWorkbenchDisplays": [
+        "./admin/assistant/api/aiWorkbenchDisplays.ts"
+      ],
+      "admin/assistant/source/copilot/CopilotLayout": [
+        "./admin/assistant/copilot/CopilotLayout.tsx"
+      ],
+      "admin/assistant/source/copilot/CopilotNavigation": [
+        "./admin/assistant/copilot/CopilotNavigation.tsx"
+      ],
+      "admin/assistant/source/copilot/CopilotProvider": [
+        "./admin/assistant/copilot/CopilotProvider.tsx"
+      ],
+      "admin/assistant/source/copilot/CopilotSection": [
+        "./admin/assistant/copilot/CopilotSection.tsx"
+      ],
+      "admin/assistant/source/copilot/context": [
+        "./admin/assistant/copilot/context.ts"
+      ],
+      "admin/assistant/source/copilot/copilot-order-session": [
+        "./admin/assistant/copilot/copilot-order-session.ts"
+      ],
+      "admin/assistant/source/copilot/destinations": [
+        "./admin/assistant/copilot/destinations.ts"
+      ],
+      "admin/assistant/source/copilot/useCopilotOrder": [
+        "./admin/assistant/copilot/useCopilotOrder.ts"
+      ],
+      "admin/assistant/source/host": [
+        "./admin/assistant/host.tsx"
+      ],
+      "admin/assistant/source/index": [
+        "./admin/assistant/index.tsx"
+      ],
+      "admin/assistant/source/transport": [
+        "./admin/assistant/transport.ts"
+      ],
+      "admin/governance/source/useCategoryPreparationSave": [
+        "./admin/governance/useCategoryPreparationSave.ts"
+      ],
+      "admin/governance/source/useCategoryAdoption": [
+        "./admin/governance/useCategoryAdoption.ts"
+      ],
+      "admin/governance/source/shared": [
+        "./admin/governance/shared.ts"
+      ],
+      "admin/governance/source/securityRuleForm": [
+        "./admin/governance/securityRuleForm.ts"
+      ],
+      "admin/governance/source/RulesTab": [
+        "./admin/governance/RulesTab.tsx"
+      ],
+      "admin/governance/source/RuleSetupWizard": [
+        "./admin/governance/RuleSetupWizard.tsx"
+      ],
+      "admin/governance/source/ruleSections": [
+        "./admin/governance/ruleSections.tsx"
+      ],
+      "admin/governance/source/ruleOptionLabels": [
+        "./admin/governance/ruleOptionLabels.ts"
+      ],
+      "admin/governance/source/RentalGovernancePage": [
+        "./admin/governance/RentalGovernancePage.tsx"
+      ],
+      "admin/governance/source/pages": [
+        "./admin/governance/pages.ts"
+      ],
+      "admin/governance/source/page-context": [
+        "./admin/governance/page-context.tsx"
+      ],
+      "admin/governance/source/notificationTemplateForm": [
+        "./admin/governance/notificationTemplateForm.ts"
+      ],
+      "admin/governance/source/NotificationsTab": [
+        "./admin/governance/NotificationsTab.tsx"
+      ],
+      "admin/governance/source/messages": [
+        "./admin/governance/messages.ts"
+      ],
+      "admin/governance/source/MembershipRewardRulesTab": [
+        "./admin/governance/MembershipRewardRulesTab.tsx"
+      ],
+      "admin/governance/source/logic": [
+        "./admin/governance/logic.ts"
+      ],
+      "admin/governance/source/index": [
+        "./admin/governance/index.tsx"
+      ],
+      "admin/governance/source/client": [
+        "./admin/governance/client.ts"
+      ],
+      "admin/governance/source/CategoryTemplateIcon": [
+        "./admin/governance/CategoryTemplateIcon.tsx"
+      ],
+      "admin/governance/source/CategoryTab": [
+        "./admin/governance/CategoryTab.tsx"
+      ],
+      "admin/governance/source/categoryPreparationFields": [
+        "./admin/governance/categoryPreparationFields.ts"
+      ],
+      "admin/governance/source/CategoryPreparationDialog": [
+        "./admin/governance/CategoryPreparationDialog.tsx"
+      ],
+      "admin/governance/source/categoryPreparationCapabilities": [
+        "./admin/governance/categoryPreparationCapabilities.ts"
+      ],
+      "admin/governance/source/CategoryPolicyDialog": [
+        "./admin/governance/CategoryPolicyDialog.tsx"
+      ],
+      "admin/governance/source/CategoryGovernancePageHeader": [
+        "./admin/governance/CategoryGovernancePageHeader.tsx"
+      ],
+      "admin/governance/source/CategoryGovernancePage": [
+        "./admin/governance/CategoryGovernancePage.tsx"
+      ],
+      "admin/governance/source/categoryGovernance": [
+        "./admin/governance/categoryGovernance.ts"
+      ],
+      "admin/governance/source/categoryDraftSections": [
+        "./admin/governance/categoryDraftSections.ts"
+      ],
+      "admin/governance/source/categoryDraftFields": [
+        "./admin/governance/categoryDraftFields.ts"
+      ],
+      "admin/governance/source/CategoryDraftEditor": [
+        "./admin/governance/CategoryDraftEditor.tsx"
+      ],
+      "admin/governance/source/CategoryCreationDialog": [
+        "./admin/governance/CategoryCreationDialog.tsx"
+      ],
+      "admin/governance/source/CategoryConditionalCapabilitiesEditor": [
+        "./admin/governance/CategoryConditionalCapabilitiesEditor.tsx"
+      ],
+      "admin/governance/source/CategoryCompatibilityRelationsEditor": [
+        "./admin/governance/CategoryCompatibilityRelationsEditor.tsx"
+      ],
+      "admin/governance/source/categoryAdoptionPending": [
+        "./admin/governance/categoryAdoptionPending.ts"
+      ],
+      "admin/governance/source/category-preparation-client": [
+        "./admin/governance/category-preparation-client.ts"
+      ],
+      "admin/governance/source/category-governance-ports": [
+        "./admin/governance/category-governance-ports.ts"
+      ],
+      "admin/governance/source/CalendarYearGrid": [
+        "./admin/governance/CalendarYearGrid.tsx"
+      ],
+      "admin/governance/source/CalendarTab": [
+        "./admin/governance/CalendarTab.tsx"
+      ],
+      "admin/governance/source/CalendarRangeModal": [
+        "./admin/governance/CalendarRangeModal.tsx"
+      ],
+      "admin/governance/source/CalendarMonthGrid": [
+        "./admin/governance/CalendarMonthGrid.tsx"
+      ],
+      "admin/governance/source/calendar-year-model": [
+        "./admin/governance/calendar-year-model.ts"
+      ],
+      "admin/assistant/source/ai-native/category-governance-display": [
+        "./admin/assistant/ai-native/category-governance-display.ts"
+      ],
+      "admin/assistant/source/ai-native/category-assist-session": [
+        "./admin/assistant/ai-native/category-assist-session.ts"
+      ],
+      "admin/assistant/source/ai-native/CategoryGovernanceCard": [
+        "./admin/assistant/ai-native/CategoryGovernanceCard.tsx"
+      ],
+      "admin/assistant/source/ai-native/CategoryAssistFlow": [
+        "./admin/assistant/ai-native/CategoryAssistFlow.tsx"
+      ],
+      "admin/assistant/source/api/aiCategoryDraft": [
+        "./admin/assistant/api/aiCategoryDraft.ts"
+      ],
+      "admin/browser-notifications/source/MessageCenterPage": [
+        "admin/browser-notifications/MessageCenterPage.tsx"
+      ],
+      "admin/browser-notifications/source/archive/inbox-triage/InboxTriage": [
+        "admin/browser-notifications/archive/inbox-triage/InboxTriage.tsx"
+      ],
+      "admin/browser-notifications/source/archive/inbox-triage/original.css": [
+        "admin/browser-notifications/archive/inbox-triage/original.css"
+      ],
+      "admin/browser-notifications/source/archive/inbox-triage/integration.css": [
+        "admin/browser-notifications/archive/inbox-triage/integration.css"
+      ],
+      "admin/browser-notifications/source/archive/shared/MeasuredHeight": [
+        "admin/browser-notifications/archive/shared/MeasuredHeight.tsx"
+      ],
+      "admin/assistant-shell": [
+        "admin/assistant-shell.tsx"
+      ],
+      "admin/assistant-browser": [
+        "./admin/assistant-browser.tsx"
+      ],
+      "admin/assistant-navigation": [
+        "./admin/assistant-navigation.ts"
+      ],
+      "admin/assistant-pages": [
+        "./admin/assistant-pages.tsx"
+      ],
+      "admin/browser-page-icons": [
+        "./admin/browser-page-icons.tsx"
       ]
     }
   },

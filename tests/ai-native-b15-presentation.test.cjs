@@ -20,7 +20,7 @@ function loadTs(relative) {
 const display = loadTs('packages/ai-native-admin/src/ai-native/safe-display.ts');
 
 function loadSession() {
-  const file = path.join(root, 'apps/admin/src/features/ai-native/settings-save-session.ts');
+  const file = path.join(root, 'packages/ai-native-admin/src/tenant-model-settings/settings-save-session.ts');
   const output = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;

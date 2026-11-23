@@ -18,6 +18,7 @@ export interface CorePageHost {
   page: CoreRegisteredPage<unknown>;
   pages: ReadonlyMap<string, CoreRegisteredPage<unknown>>;
   brandName: string;
+  icon?: ReactNode;
   /** 原会话/租户/Core范围或路由对象变化时更换，释放旧页动作和表单。不是授权凭据。 */
   lifetimeKey: string;
   /** 仅由已匹配的登记路由和真实范围读取提供，定位信息不是业务授权。 */
@@ -208,7 +209,7 @@ export function CorePage<Values = Record<string, unknown>>({ actions = [], title
     group.push(<PageAction key={JSON.stringify([action.id, action.kind, action.kind === "command" ? action.confirmation : undefined])} host={host} action={action} visible={active} />);
     buttons.set(slot, group);
   }
-  return <ActionSlots.Provider value={buttons}><PageHeading title={title ?? corePageText(host.page.definition.title, locale)} brandName={host.brandName}
+  return <ActionSlots.Provider value={buttons}><PageHeading title={title ?? corePageText(host.page.definition.title, locale)} brandName={host.brandName} icon={host.icon}
     summary={summary} description={description} view={view} note={note}
     extra={buttons.get("actions")} navigation={buttons.get("navigation")}
     tools={buttons.has("tools") || tools ? <>{buttons.get("tools")}{tools}</> : undefined} toolsPlacement={toolsPlacement} />{children}</ActionSlots.Provider>;

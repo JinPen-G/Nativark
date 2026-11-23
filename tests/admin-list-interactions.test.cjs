@@ -722,3 +722,77 @@ test('lazy settings panels stay hidden after visiting and release their content 
   assert.ok(!renderToStaticMarkup(render({ items: items.filter(item => item.key !== 'website') })).includes('name="website"'), 'A removed or revoked view cannot retain its protected subtree.');
   assert.ok(!renderToStaticMarkup(render({ destroyOnHidden: true })).includes('name="website"'), 'Explicit destruction still takes priority.');
 });
+
+test('restored message center preserves shared inbox state, original folders, undo, filters and keyboard actions', async () => {
+  const vm = require('node:vm'), root = path.resolve(__dirname, '..');
+  const fixtureAst = ts.createSourceFile('fixture.cjs', fs.readFileSync(path.join(root, 'tests/enterprise-consumers.test.cjs'), 'utf8'), ts.ScriptTarget.Latest, true);
+  const fixture = fixtureAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'reactHost');
+  assert.ok(fixture);
+  const hooks = () => new Function('assert', fixture.getText(fixtureAst) + ';return reactHost();')(assert);
+  const pageHooks = hooks(), listHooks = hooks(), updates = [], restores = [];
+  const stub = name => props => React.createElement(name, props);
+  const icons = Object.fromEntries(['Bell', 'ClipboardCheck', 'ClipboardList', 'Sparkles', 'Wrench', 'Archive', 'Clock3', 'RotateCcw', 'Undo2'].map(name => [name, stub(name)]));
+  const compile = (relative, imports, globals = {}) => {
+    const exports = {}, code = ts.transpileModule(fs.readFileSync(path.join(root, relative), 'utf8'), { compilerOptions: {
+      module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX,
+    } }).outputText;
+    vm.runInNewContext(code, { exports, ...globals, require(name) { assert.ok(Object.hasOwn(imports, name), name); return imports[name]; } });
+    return exports;
+  };
+  const notificationLocale = { useNotificationText: () => value => value };
+  const originalEntry = { read: false, folder: 'Inbox', events: ['original'], updatedAt: 1 };
+  const inbox = { personal: { one: originalEntry }, storageAvailable: true, loading: false, error: false,
+    messages: [
+      { id: 'one', title: 'Original order', description: 'Original detail', createdAt: '2026-11-01', category: 'business', orderNo: 'ORDER-1', folder: 'Inbox', read: false, pending: true },
+      { id: 'two', title: 'Read message', description: 'Second detail', createdAt: '2026-11-01', category: 'system', folder: 'Inbox', read: true, pending: false },
+    ],
+    update(id, patch) { updates.push({ id, patch });
+      inbox.messages = inbox.messages.map(row => row.id === id ? { ...row, ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)) } : row); },
+    restore(id, entry) { restores.push({ id, entry }); inbox.messages = inbox.messages.map(row => row.id === id ? { ...row, folder: entry?.folder ?? 'Inbox', read: entry?.read ?? false } : row); },
+  };
+  const NoticeActions = stub('original-business-actions'), document = { title: '' };
+  const InboxTriage = compile('packages/rental-core/admin/browser-notifications/archive/inbox-triage/InboxTriage.tsx', {
+    react: { ...listHooks.runtime, useId: () => 'original-inbox' }, 'react/jsx-runtime': require('react/jsx-runtime'), 'lucide-react': icons,
+    '@rental-os/platform-admin/source/lib/usePrefersReducedMotion': { usePrefersReducedMotion: () => true },
+    '@rental-os/platform-admin/notifications': notificationLocale, '../shared/MeasuredHeight': { MeasuredHeight: stub('measured-height') },
+    './original.css': {}, './integration.css': {},
+  }, { setTimeout, clearTimeout, requestAnimationFrame: callback => { callback(); return 1; } }).InboxTriage;
+  let providerReads = 0;
+  const { createRentalMessageCenterPage } = compile('packages/rental-core/admin/browser-notifications/MessageCenterPage.tsx', {
+    react: pageHooks.runtime, 'react/jsx-runtime': require('react/jsx-runtime'), 'lucide-react': icons,
+    '@rental-os/platform-admin/locale': { useLocale: () => ({ locale: 'en-US' }) },
+    '@rental-os/platform-admin/shell': { resolveAdminBrandName: () => 'Original brand' },
+    '@rental-os/platform-admin/ui': { EmptyScene: stub('empty') }, './archive/inbox-triage/InboxTriage': { InboxTriage },
+    '@rental-os/platform-admin/notifications': notificationLocale,
+    '@rental-os/platform-admin/source/features/notifications/HeaderNotifications': { formatNoticeTime: (at, locale) => at + ':' + locale },
+    '@rental-os/platform-admin/source/features/notifications/notifications.css': {},
+  }, { document });
+  const Page = createRentalMessageCenterPage({ session: { useAuthStore: () => ({ tenant: {}, user: {} }) } }, () => { providerReads++; return inbox; }, NoticeActions);
+  pageHooks.mount(Page); assert.equal(document.title, 'Message center · Original brand'); assert.equal(providerReads, 1);
+  let props = pageHooks.value.props.children.props;
+  assert.equal(props.messages[0].sender, 'ORDER-1'); assert.equal(props.messages[0].restoreData, originalEntry);
+  assert.equal(props.renderDetails(props.messages[0]).type, NoticeActions); assert.equal(props.renderDetails(props.messages[0]).props.surface, 'inbox');
+  listHooks.mount(() => InboxTriage(props));
+  const nodes = predicate => { const found = []; const walk = tree => React.Children.forEach(tree, node => {
+    if (!React.isValidElement(node)) return; if (predicate(node)) found.push(node); walk(node.props.children);
+  }); walk(listHooks.value); return found; };
+  const text = tree => React.Children.toArray(tree).map(node => React.isValidElement(node) ? text(node.props.children) : String(node ?? '')).join('');
+  const button = label => { const found = nodes(node => node.type === 'button' && text(node.props.children).startsWith(label)); assert.ok(found.length, label); return found[0]; };
+  const refresh = () => { pageHooks.rerender(); props = pageHooks.value.props.children.props; listHooks.rerender(); };
+  assert.deepEqual(nodes(node => node.props.role === 'tab').map(node => text(node.props.children).replace(/\d+$/, '')), ['Inbox', 'Snoozed', 'Archive']);
+  let first = nodes(node => node.props['aria-keyshortcuts'])[0]; first.props.onClick(); refresh();
+  assert.equal(inbox.messages[0].read, true); assert.equal(nodes(node => node.props['aria-keyshortcuts'])[0].props['aria-expanded'], true);
+  let prevented = 0;
+  nodes(node => node.props['aria-keyshortcuts'])[0].props.onKeyDown({ key: 'e', preventDefault() { prevented++; } }); refresh();
+  assert.equal(prevented, 1); assert.equal(inbox.messages[0].folder, 'Archive');
+  button('Undo').props.onClick(); refresh(); assert.equal(restores.length, 1); assert.equal(restores[0].entry, originalEntry);
+  assert.equal(inbox.messages[0].folder, 'Inbox'); assert.equal(inbox.messages[0].read, false);
+  button('Pending').props.onClick(); await listHooks.settle(); assert.equal(nodes(node => node.props['aria-keyshortcuts']).length, 1);
+  button('Unread only').props.onClick(); await listHooks.settle(); assert.equal(nodes(node => node.props['aria-keyshortcuts']).length, 1);
+  first = nodes(node => node.props['aria-keyshortcuts'])[0]; first.props.onKeyDown({ key: 's', preventDefault() {} }); refresh();
+  assert.equal(inbox.messages[0].folder, 'Snoozed');
+  button('Snoozed').props.onClick(); await listHooks.settle();
+  nodes(node => node.props['aria-keyshortcuts'])[0].props.onKeyDown({ key: 'u', preventDefault() {} }); refresh();
+  assert.equal(inbox.messages[0].folder, 'Inbox'); assert.equal(updates.length, 4);
+  pageHooks.unmount(); listHooks.unmount();
+});

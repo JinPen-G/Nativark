@@ -6,6 +6,8 @@ function load(name) {
     ? path.resolve(__dirname, '../packages/platform-admin/src/operation-reference.ts')
     : ['platform-model-settings-session.ts', 'credit-operation-reference.ts', 'budget-settings-session.ts'].includes(name)
       ? path.resolve(__dirname, '../packages/ai-native-admin/src/platform-model-settings', name)
+      : name === 'model-settings-session.ts'
+        ? path.resolve(__dirname, '../packages/ai-native-admin/src/tenant-model-settings', name)
       : path.resolve(__dirname, '../apps/admin/src/features/ai-native', name);
   const mod = new Module(filename, module); mod.filename = filename; mod.paths = Module._nodeModulePaths(path.dirname(filename));
   const originalRequire = mod.require.bind(mod);

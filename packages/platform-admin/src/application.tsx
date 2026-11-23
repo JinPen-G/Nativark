@@ -14,7 +14,7 @@ import { Alert, Button, Result } from "./components/ui";
 import { useLocale } from "./app/locale";
 import { createCoreRouteElements, useCoreSession } from "./core";
 import { PlatformApplicationContext, usePlatformApplication, type PlatformAdminApplicationOptions } from "./application-context";
-import { LEGACY_PUBLIC_ADMIN_ROUTE_ALIASES, publicAdminNavigation } from "./application-navigation";
+import { createPublicAdminLocationAccess, LEGACY_PUBLIC_ADMIN_ROUTE_ALIASES, publicAdminNavigation } from "./application-navigation";
 import { AccountAppearancePage, SelfProfilePage, TenantAppearancePage, TenantProfilePage } from "./SettingsPage";
 import { CoreAccessPage } from "./CoreAccessPage";
 import { CorePackagesPage } from "./features/core-packages";
@@ -33,7 +33,7 @@ import { AcceptOperatorInvitationPage, CustomerSupportPage, TenantDispatchPage, 
   hasTenantMessagingPermission } from "./features/messaging";
 
 function ProtectedLayout() {
-  const { session, brandName, brand, pages, platformAiPage, Shell = PlatformShell } = usePlatformApplication();
+  const { session, brandName, brand, pages, platformAiPage, saasPages, Shell = PlatformShell } = usePlatformApplication();
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const { locale } = useLocale(), en = locale === "en-US";
   const cores = useCoreSession();
@@ -44,7 +44,7 @@ function ProtectedLayout() {
   if (state.user.mustChangePassword) return <PasswordChangeGate onChange={session.changePassword} />;
   const hasBusinessMenu = Boolean(cores.data && coreNavigationEntries(pages ?? new Map(), cores.data, locale).length);
   return <Shell brandName={brandName} brand={brand} pages={pages} onSignOut={session.signOut}
-    publicSections={publicAdminNavigation(state.user, !state.user.isSaasAdmin && !hasBusinessMenu, Boolean(platformAiPage))}>
+    publicSections={publicAdminNavigation(state.user, !state.user.isSaasAdmin && !hasBusinessMenu, Boolean(platformAiPage), saasPages)}>
     <Outlet key={session.currentSessionEpoch()} />
   </Shell>;
 }
@@ -70,12 +70,12 @@ function TenantLoginAlias() {
 }
 
 function Home() {
-  const { brandName, pages, initialPage, onboardingPage, platformAiPage } = usePlatformApplication();
+  const { brandName, pages, initialPage, onboardingPage, platformAiPage, saasPages } = usePlatformApplication();
   const location = useLocation();
   const cores = useCoreSession(), { locale } = useLocale(), en = locale === "en-US";
   const { user } = useAdminSession();
   if (user?.isSaasAdmin) {
-    const target = publicAdminNavigation(user, false, Boolean(platformAiPage)).flatMap(section => section.routes)[0];
+    const target = publicAdminNavigation(user, false, Boolean(platformAiPage), saasPages).flatMap(section => section.routes)[0];
     if (target) return <Navigate to={target.path} replace />;
   }
   const available = cores.data ? coreNavigationEntries(pages ?? new Map(), cores.data, locale) : [];
@@ -143,6 +143,8 @@ export function createPlatformAdminApplication(options: PlatformAdminApplication
     { path: "/platform/demo-requests", element: <SaasPage permission="system:demo-request:view"><DemoRequestsPage /></SaasPage> },
     { path: "/platform/official-calendars", element: <SaasPage permission="system:calendar-source:manage"><OfficialCalendarSourcePage /></SaasPage> },
     ...(PlatformAiPage ? [{ path: "/platform/ai", element: <SaasPage permission="system:ai-provider:view"><PlatformAiPage /></SaasPage> }] : []),
+    ...(options.saasPages ?? []).map(({ path, permission, component: Page }) => ({ path,
+      element: <SaasPage permission={permission}><Page /></SaasPage> })),
     { path: PLATFORM_TOOLS_ROUTE, element: <ToolsPage /> },
     { path: SUBSCRIPTION_ROUTES.subscription.path, element: <SubscriptionRoute permission="rental-os:subscription:view"><TenantSubscriptionPage {...options.publicPageContent?.subscription} /></SubscriptionRoute> },
     { path: SUBSCRIPTION_ROUTES.subscriptionPro.path, element: <SubscriptionRoute permission="rental-os:subscription:view"><SubscriptionProPage {...options.publicPageContent?.subscriptionPro} /></SubscriptionRoute> },
@@ -167,14 +169,15 @@ export function createPlatformAdminApplication(options: PlatformAdminApplication
       { path: `/settings/${kind}/:id`, element: <PublicManagementPage kind={kind} edit /> }
     ]),
     ...createRoutesFromElements(createCoreRouteElements(options.pages ?? new Map(), {
-      brandName: options.brandName, getContainer: options.getCoreContainer
+      brandName: options.brandName, getContainer: options.getCoreContainer, aliases: options.coreRouteAliases,
+      getPageIcon: options.getCorePageIcon,
     })),
     ...Object.entries(LEGACY_PUBLIC_ADMIN_ROUTE_ALIASES).map(([path, target]) => ({ path, element: <Navigate to={target} replace /> })),
     { path: "*", element: <Result status="404" title="404" /> }
   ] }
   ]);
 
-  return function PlatformAdminApplication() {
+  function PlatformAdminApplication() {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const pathname = useSyncExternalStore(router.subscribe, () => router.state.location.pathname);
   const publicLogin = pathname === "/login" || pathname.startsWith("/login/") || isTenantLoginAliasPath(pathname);
@@ -191,6 +194,9 @@ export function createPlatformAdminApplication(options: PlatformAdminApplication
     <AdminRuntimeProvider runtime={session.runtime}><PlatformApplicationContext.Provider value={options}>
       <PublicManagementCoreProvider adapter={options.management}><BrandIconProvider><RouterProvider router={router} /></BrandIconProvider></PublicManagementCoreProvider></PlatformApplicationContext.Provider></AdminRuntimeProvider>
   </AdminUiProvider>;
-  };
+  }
+  return Object.assign(PlatformAdminApplication, { navigation: createPublicAdminLocationAccess({
+    routes: router.routes, getSession: session.getSnapshot, platformAiAvailable: Boolean(PlatformAiPage), saasPages: options.saasPages,
+  }) });
 }
-export type { PlatformAdminApplicationOptions } from "./application-context";
+export type { PlatformAdminApplicationOptions, PlatformSaasPage } from "./application-context";

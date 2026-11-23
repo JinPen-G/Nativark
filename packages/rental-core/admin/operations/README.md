@@ -13,6 +13,8 @@
 
 请求工厂提供原工作台待办、经营报表、CSV 导出及支付／退款核对方法，复用订单客户端的空间档案和地点读取。筛选沿原合同，经营空间由服务端会话解析，CSV 由原始文本传输返回。[请求工厂](client.ts) · [订单请求](../orders/client.ts)
 
+档案、地点、报表和待办查询的缓存键绑定当前业务范围，JSON 查询将取消信号交给原请求工厂。CSV 下载和支付核对提示只投影到仍获权的当前页面，导出失败保留原错误提示并向调用方返回失败 Promise。查询取消和页面退出后的业务结果继续通过原服务端操作及收据核对。[报表读取与导出](WorkspaceOperationReportPage.tsx) · [工作台反馈](WorkbenchPage.tsx)
+
 报表通过原 Controller、报告应用和仓储读取金额、客户／地点分类以及库存快照。CSV 沿原报告响应与字段投影生成，支付／退款结果由原资金域提供。[HTTP 入口](../../src/http-core.controller.ts) · [报告仓储](../../src/mysql-reports.ts) · [CSV 生成](../../src/report-csv.ts) · [待办投影](../../src/workbench.ts) · [支付运行时](../../src/mysql-payment-runtime.ts)
 
 ## 页面与直属展示

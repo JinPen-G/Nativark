@@ -14,9 +14,11 @@
 ## 源码职责
 
 - [main](src/main.tsx)创建唯一 `createRentalBrowserAdminSession`，将两份真实页面贡献放入同一注册表，再交给 `createPlatformAdminApplication`。公共应用与 Rental 正文使用同一 runtime、会话代次和 QueryClient。
-- [MultiCoreShell](src/MultiCoreShell.tsx)持续挂载正式 Rental 薄壳和通知 Provider。当前获权 Rental 页面显示经营空间选择，工单与公共页显示公共上下文。Core 撤权后的当前目录更新关闭相应菜单、动作和通知读取，工单原操作状态沿同一正文保留。
+- [MultiCoreShell](src/MultiCoreShell.tsx)持续挂载同一 Rental 助手壳和通知 Provider。有获权 Rental 时保留原经营空间入口，工单与公共页面仍使用各自范围。Core 撤权后的当前目录更新关闭相应菜单、动作和通知读取，工单原操作状态沿同一正文保留。
 - [Rental 导航](../../packages/rental-core/admin/browser-navigation.ts)维护原深链接、通知对象定位及已验证的 `rental-workspace` 投影。工单按租户范围进入正式路由，缺经营空间的成员仍可使用获权工单和适用公共设置。
 - [Rental 贡献](../../packages/rental-core/admin/index.tsx)与[工单贡献](../../packages/example-tickets-core/admin/index.tsx)提供真实正文及类型化动作，原写入、权限、历史与 unknown 核对规则沿各自实现运行。
+
+Rental 的消息页和三个 AI 页面合入同一 Core 贡献；两个 Core 共用公共 Router，原深链接通过 `coreRouteAliases` 继续定位。原 Agent/Copilot 仅消费当前登记及权限，公共页面由 `App.navigation` 定位；原 SaaS 品类预览通过 `saasPages` 使用公共身份守卫。[原助手组合](../../packages/rental-core/admin/assistant-browser.tsx) · [原导航](../../packages/rental-core/admin/assistant-navigation.ts)
 
 源码取出时包含本应用、`config/environment.cjs` 及其类型声明、公共 `core-contracts`、`platform-contracts`、`platform-admin`、`shared`、`ui-arc`、`ui-motiq` 与两个 Core 的已选依赖闭包。Rental API 及其所选构建依赖同时供给构建期的原路由许可。依赖声明见[应用包](package.json)，构建接点使用公共正式出口。
 

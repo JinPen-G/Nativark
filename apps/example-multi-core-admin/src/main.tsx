@@ -1,19 +1,25 @@
 /** 两个已核定 Core 的真实页面共用一份公共应用、原会话与 QueryClient。 */
 import "@rental-os/platform-admin/styles";
+import type { CoreRouteComponent } from "@rental-os/platform-admin/core";
+import type { RentalAssistantNavigation } from "@rental-os/rental-core/admin/assistant";
+import { createRentalAssistantBrowserHost } from "@rental-os/rental-core/admin/assistant-browser";
+import { createRentalAssistantAdminContribution } from "@rental-os/rental-core/admin/assistant-pages";
+import { createRentalAssistantShell } from "@rental-os/rental-core/admin/assistant-shell";
+import { rentalCorePageIcon } from "@rental-os/rental-core/admin/browser-page-icons";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { AdminBrandMark } from "@rental-os/platform-admin/shell";
 import { MotionGlobalConfig } from "motion/react";
-import { registerCoreAdminPages } from "@rental-os/core-contracts";
+import { registerCoreAdminPages, type CoreRegisteredPage } from "@rental-os/core-contracts";
 import { createPlatformAdminApplication } from "@rental-os/platform-admin/application";
 import { applyMotionPreference, isMotionReduced } from "@rental-os/platform-admin/motion";
 import { createTicketsAdmin } from "@rental-os/example-tickets-core/admin";
 import {
   rentalPublicManagement, rentalPublicPageContent, createRentalAdminContribution,
-  createRentalBrowserAdminHost,
   createRentalNavigation,
 } from "@rental-os/rental-core/admin";
 import { createRentalBrowserAdminSession } from "@rental-os/rental-core/admin/browser";
+import { createRentalBrowserNotifications } from "@rental-os/rental-core/admin/browser-notifications";
 import { rentalAdminMessages } from "@rental-os/rental-core/admin/messages";
 import { OrderFactsEntry } from "@rental-os/rental-core/admin/ai/order-facts";
 import { createPlatformModelSettingsPage } from "@rental-os/ai-native-admin/platform-model-settings/application";
@@ -33,7 +39,19 @@ if (manifests.rental.entries.openapi === "dist/http-openapi-portable.json") {
     return config;
   });
 }
-const rentalHost = createRentalBrowserAdminHost({
+const pages = new Map<string, CoreRegisteredPage<CoreRouteComponent>>();
+const publicNavigation: Pick<RentalAssistantNavigation, "canAccess" | "resolve" | "originalPath"> = {
+  canAccess: route => App.navigation.canAccess(route),
+  resolve: href => App.navigation.resolve(href),
+  originalPath: pathname => App.navigation.originalPath(pathname),
+};
+const notifications = createRentalBrowserNotifications({ session,
+  resolveHref: (item, auth) => navigation.resolveNoticeHref(item, auth),
+  hasPageAccess: (pageId, auth) => navigation.canAccessPage(pageId, auth),
+  soundScopeKey: auth => JSON.stringify([auth.tenant?.tenantId, auth.user?.id]),
+});
+const rentalHost = createRentalAssistantBrowserHost({
+  pages, publicNavigation,
   session,
   OrderFactsEntry,
   categoryGovernancePreviewEnabled: import.meta.env.DEV
@@ -50,15 +68,19 @@ const rentalHost = createRentalBrowserAdminHost({
   },
 });
 const registered = registerCoreAdminPages([
-  { manifest: manifests.rental, contribution: createRentalAdminContribution(manifests.rental.version, rentalHost.contexts) },
+  { manifest: manifests.rental, contribution: createRentalAdminContribution(manifests.rental.version, rentalHost.contexts, [notifications.page, ...createRentalAssistantAdminContribution(manifests.rental.version, { assistant: rentalHost.assistant }).pages]) },
   { manifest: manifests.tickets, contribution: createTicketsAdmin() },
 ]);
 if (!registered.ok) {
   session.dispose();
   throw new Error(registered.issues.map(issue => `${issue.field} ${issue.message}`).join("\n"));
 }
-const navigation = createRentalNavigation(registered.pages, session);
-const Shell = createMultiCoreShell(session, registered.pages, navigation);
+for (const [key, page] of registered.pages) pages.set(key, page);
+const navigation = createRentalNavigation(pages, session);
+const Shell = createMultiCoreShell(session, createRentalAssistantShell({ session, notifications, assistant: rentalHost.assistant,
+  resolveHref: navigation.resolveNoticeHref, hasPageAccess: navigation.canAccessPage,
+  workspaceHref: navigation.resolvePageHref("/workbench"),
+}));
 const currentHref = `${window.location.pathname}${window.location.search}${window.location.hash}`;
 const registeredHref = navigation.resolvePageHref(currentHref);
 if (registeredHref && registeredHref !== currentHref) {
@@ -68,7 +90,10 @@ const App = createPlatformAdminApplication({
   brandName: "Nativark",
   brand: <AdminBrandMark />,
   session,
-  pages: registered.pages,
+  pages,
+  saasPages: rentalHost.saasPages,
+  getCorePageIcon: rentalCorePageIcon,
+  coreRouteAliases: navigation.aliases,
   initialPage: { coreId: "rental", pageId: "workbench" },
   onboardingPage: { coreId: "rental", pageId: "tenant-readiness" },
   loginDisplay: session.loginDisplay,

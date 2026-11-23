@@ -19,8 +19,8 @@ import { Input } from "@rental-os/platform-admin/ui";
 import { Select } from "@rental-os/platform-admin/ui";
 import { Button } from "@rental-os/platform-admin/ui";
 import dayjs, { type Dayjs } from "dayjs";
-import { useState } from "react";
-import { CorePage, CorePageActions } from "@rental-os/platform-admin/core";
+import { useLayoutEffect, useRef, useState } from "react";
+import { CorePage, CorePageActions, useCorePageHost } from "@rental-os/platform-admin/core";
 import { useRentalOperationsContext } from "./page-context";
 import { QueryState } from "@rental-os/platform-admin/core";
 import { useLocale } from "@rental-os/platform-admin/locale";
@@ -67,6 +67,13 @@ export function WorkspaceOperationReportPage() {
   const { message } = App.useApp();
   const { t } = useLocale();
   const { api, queryScope: scope } = useRentalOperationsContext();
+  const host = useCorePageHost();
+  const active = useRef(false);
+  useLayoutEffect(() => {
+    active.current = true;
+    return () => { active.current = false; };
+  }, []);
+  const isCurrent = () => active.current && host.canAccess(host.page.coreId, host.page.definition.permissions);
   const [range, setRange] = useState<[Dayjs | null, Dayjs | null] | null>(null);
   const [locationId, setLocationId] = useState<string>();
   const [customerId, setCustomerId] = useState<string>();
@@ -80,12 +87,12 @@ export function WorkspaceOperationReportPage() {
     customerId: customerId?.trim() || undefined,
     customerType
   };
-  const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: api.profile });
-  const locations = useQuery({ queryKey: ["rental-core", "locations"], queryFn: api.locations });
+  const profile = useQuery({ queryKey: ["rental-core", "profile", scope], queryFn: ({ signal }) => api.profile({ signal }) });
+  const locations = useQuery({ queryKey: ["rental-core", "locations", scope], queryFn: ({ signal }) => api.locations({ signal }) });
   const report = useQuery({
     // 查询键必须包含全部筛选项，否则换了地点却命中上一次的缓存。
     queryKey: ["rental-core", "operation-report", scope, filter],
-    queryFn: () => api.operationReport(filter), placeholderData: (previous, previousQuery) => previousQuery?.queryKey[2] === scope ? previous : undefined
+    queryFn: ({ signal }) => api.operationReport(filter, { signal }), placeholderData: (previous, previousQuery) => previousQuery?.queryKey[2] === scope ? previous : undefined
   });
 
   // 读取失败时清除旧金额展示，筛选占位只复用同一业务范围。
@@ -98,9 +105,11 @@ export function WorkspaceOperationReportPage() {
    * 令牌刷新，会出现「页面能看、点导出却 401」。这里取回文本再本地存盘。
    */
   async function exportCsv() {
+    if (!isCurrent()) throw new DOMException("报表页面或权限已变化", "AbortError");
     setExporting(true);
     try {
       const csv = await api.exportOperationReport(filter);
+      if (!isCurrent()) throw new DOMException("报表页面或权限已变化", "AbortError");
       const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -109,9 +118,10 @@ export function WorkspaceOperationReportPage() {
       URL.revokeObjectURL(url);
       message.success(t("报表已导出（口径、筛选与权限与页面一致）"));
     } catch (error) {
-      message.error((error as Error).message || t("导出失败"));
+      if (isCurrent()) message.error((error as Error).message || t("导出失败"));
+      throw error;
     } finally {
-      setExporting(false);
+      if (isCurrent()) setExporting(false);
     }
   }
   return (

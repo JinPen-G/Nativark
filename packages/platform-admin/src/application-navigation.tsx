@@ -2,6 +2,8 @@
  * 注册与菜单可见性不授予接口权限，公共页面继续使用各自原服务端守卫。
  */
 import type { AuthUser } from "@rental-os/platform-contracts";
+import { matchRoutes, type RouteObject } from "react-router-dom";
+import type { PlatformSaasPage } from "./application-context";
 import { ApiOutlined, AppstoreOutlined, BgColorsOutlined, CalendarOutlined, ControlOutlined, CrownOutlined,
   CustomerServiceOutlined, DashboardOutlined, SafetyCertificateOutlined, SendOutlined,
   SettingOutlined, ShopOutlined, TeamOutlined } from "./components/ui/icons";
@@ -24,10 +26,12 @@ export const PUBLIC_ADMIN_ROUTE_ALIASES = {
 /** 原深链接只定位同一已登记公共页面，不作为侧栏菜单的反向别名。 */
 export const LEGACY_PUBLIC_ADMIN_ROUTE_ALIASES = {
   "/platform": "/",
+  "/users": "/tenant/accounts",
+  "/organizations": "/tenant/roles",
+  "/permissions": "/tenant/roles",
   "/system-rules": "/platform/system",
   "/security-baseline": "/platform/operations",
   "/integrations": "/platform/operations",
-  "/notifications": "/platform/operations",
   "/platform-governance": "/platform/tools",
   "/file-assets": "/platform/tools",
   "/async-jobs": "/platform/tools",
@@ -46,7 +50,8 @@ const routeDisplayLabels: Record<string, string> = {
   "/platform/subscription-catalog": "功能定价",
 };
 
-export function publicAdminNavigation(user: AuthUser, showOverview: boolean, platformAiAvailable = false): ShellNavigationSection[] {
+export function publicAdminNavigation(user: AuthUser, showOverview: boolean, platformAiAvailable = false,
+  saasPages: readonly PlatformSaasPage[] = []): ShellNavigationSection[] {
   const tenant = (permission: string) => canManagePublicResource(user, "tenant", permission);
   const saas = (permission: string) => canManagePublicResource(user, "saas", permission);
   const sections: ShellNavigationSection[] = [
@@ -92,10 +97,17 @@ export function publicAdminNavigation(user: AuthUser, showOverview: boolean, pla
       ] : []),
     ] },
   ];
+  const extensionSections = new Map<string, ShellNavigationSection>();
+  for (const page of saasPages) if (saas(page.permission)) {
+    const section = extensionSections.get(page.section.key) ?? { ...page.section, routes: [] };
+    section.routes.push({ path: page.path, label: page.label, icon: page.icon });
+    extensionSections.set(section.key, section);
+  }
+  sections.unshift(...extensionSections.values());
   return sections.filter(section => section.routes.length).map(section => ({
     ...section,
     displayLabel: groupDisplayLabels[section.key],
-    icon: <AnimatedIcon name={groupIcons[section.key] ?? "rules"} />,
+    icon: groupIcons[section.key] ? <AnimatedIcon name={groupIcons[section.key]} /> : section.icon,
     routes: section.routes.map(route => ({ ...route,
       displayLabel: routeDisplayLabels[route.path] ?? route.label,
       icon: section.key === "overview" ? <AnimatedIcon name="dashboard" /> : route.icon,
@@ -107,4 +119,31 @@ export function publicAdminMenuPath(pathname: string): string {
   const alias = Object.entries(PUBLIC_ADMIN_ROUTE_ALIASES).find(([, target]) =>
     pathname === target || pathname.startsWith(`${target}/`));
   return alias ? alias[0] + pathname.slice(alias[1].length) : pathname;
+}
+
+/** 基于同一 Router 的真实登记和当前菜单权限供给助手导航，不接收调用者权限声明。 */
+export function createPublicAdminLocationAccess(options: {
+  routes: RouteObject[];
+  getSession(): { sessionVerified: boolean; user?: AuthUser | null };
+  platformAiAvailable: boolean;
+  saasPages?: readonly PlatformSaasPage[];
+}) {
+  function locate(href: string) {
+    if (!href.startsWith("/") || href.startsWith("//") || href.includes("\\") || /[\u0000-\u001f\u007f]/.test(href)) return;
+    const state = options.getSession();
+    if (!state.sessionVerified || !state.user) return;
+    let url: URL;
+    try { url = new URL(href, "https://platform.invalid"); decodeURIComponent(url.pathname); } catch { return; }
+    const matched = matchRoutes(options.routes, url.pathname)?.at(-1)?.route;
+    if (!matched?.path || matched.path === "*" || matched.id?.startsWith("core:" ) || matched.id?.startsWith("core-alias:")) return;
+    const original = publicAdminMenuPath(url.pathname);
+    const permitted = publicAdminNavigation(state.user, false, options.platformAiAvailable, options.saasPages)
+      .flatMap(section => section.routes).some(route => original === route.path || original.startsWith(`${route.path}/`));
+    return permitted ? { href: `${url.pathname}${url.search}${url.hash}`, original } : undefined;
+  }
+  return {
+    canAccess: (route: { path: string }) => Boolean(locate(route.path)),
+    resolve: (href: string) => locate(href)?.href ?? null,
+    originalPath: (pathname: string) => locate(pathname)?.original ?? null,
+  };
 }

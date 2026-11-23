@@ -1,6 +1,6 @@
 /** Tenant operations overview. Uses the existing report/todo APIs and their scope;
  * local exploration cannot settle money, alter inventory, or execute a todo. */
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { resolveCorePageLocation, type CorePageLocation } from "@rental-os/core-contracts";
 import { CorePage, CorePageActions, useCorePageHost, type CoreAdminPageAction } from "@rental-os/platform-admin/core";
 import { rentalOrderLocation } from "../orders/pages";
@@ -42,6 +42,12 @@ function WorkbenchContent({ scope }: { scope: string }) {
   const [locationId, setLocationId] = useState<string>();
   const resolvedPeriod = useRef(period);
   const host = useCorePageHost();
+  const active = useRef(false);
+  useLayoutEffect(() => {
+    active.current = true;
+    return () => { active.current = false; };
+  }, []);
+  const canReportReconciliation = () => active.current && host.canAccess(host.page.coreId, [{ resource: "finance", action: "reconcile" }]);
   const navigate = (to: CorePageLocation) => host.navigate(resolveCorePageLocation(host.pages, to));
   const { message } = App.useApp();
   const { t, locale } = useLocale();
@@ -52,16 +58,17 @@ function WorkbenchContent({ scope }: { scope: string }) {
   const canReconcilePayments = hasPermission("rental-os:finance:reconcile");
   const showMetrics = hasPermission("rental-os:report:view") && (canViewOrders || canViewAssets);
   const filter: RentalWorkspaceReportFilter = { from: overviewPeriodStart(period) };
-  const report = useQuery({ queryKey: ["rental-core", "operation-report", scope, filter], queryFn: () => api.operationReport(filter), enabled: showMetrics,
+  const report = useQuery({ queryKey: ["rental-core", "operation-report", scope, filter], queryFn: ({ signal }) => api.operationReport(filter, { signal }), enabled: showMetrics,
     placeholderData: (previous, previousQuery) => previousQuery?.queryKey[2] === scope ? previous : undefined });
-  const todos = useQuery({ queryKey: ["rental-core", "workbench-todos", scope], queryFn: api.workbenchTodos });
+  const todos = useQuery({ queryKey: ["rental-core", "workbench-todos", scope], queryFn: ({ signal }) => api.workbenchTodos({ signal }) });
   const reconcilePayments = useMutation({
     mutationFn: () => api.reconcilePayments(),
     onSuccess: result => {
+      if (!canReportReconciliation()) return;
       if (result.failed > 0 || result.pending > 0) message.warning(t("已核对 {processed} 笔，{pending} 笔仍待核对，{failed} 笔需要人工处理", { processed: result.processed, pending: result.pending, failed: result.failed }));
       else message.success(t("支付对账完成，共处理 {processed} 笔", { processed: result.processed }));
     },
-    onError: (error: Error) => message.error(error.message || t("支付对账失败")),
+    onError: (error: Error) => { if (canReportReconciliation()) message.error(error.message || t("支付对账失败")); },
   });
   // Never display stale report money as a successful read after an error.
   const data = report.isError ? undefined : report.data;

@@ -1,38 +1,6 @@
-import { Button, Segmented } from "@/components/ui";
-import { AnimatedIcon } from "@/components/ui/AnimatedIcon";
-import { SidebarGroup, SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/animate-sidebar/runtime/sidebar";
-import { useOperator } from "./OperatorContext";
-import { Highlight, HighlightItem } from "@animate-ui/react/primitives/effects/highlight";
-import { useLocale } from "@/app/locale";
-
-export function OperatorModeSwitch({ ai, onChange }: { ai: boolean; onChange: (ai: boolean) => void }) {
-  const { t, locale } = useLocale();
-  return <div className="operator-mode-switch">
-    <div className="operator-mode-expanded"><Segmented block aria-label={t("工作模式")} value={ai ? "ai" : "admin"} options={[{ label: locale === "en-US" ? "Agent" : t("Agent工作台"), value: "ai" }, { label: locale === "en-US" ? "Admin" : t("管理控制台"), value: "admin" }]} onChange={value => onChange(value === "ai")} /></div>
-    <div className="operator-mode-collapsed"><Button type="text" aria-label={t(ai ? "切换到管理控制台" : "切换到Agent工作台")} title={t(ai ? "管理控制台" : "Agent工作台")} icon={<AnimatedIcon name={ai ? "dashboard" : "ai"} />} onClick={() => onChange(!ai)} /></div>
-  </div>;
-}
-export function AiOperatorNavigation({ query }: { query: string }) {
-  const operator = useOperator();
-  const matches = (text: string) => !query.trim() || text.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
-  const selected = operator.view === "chat" ? operator.available.some(item => item.id === operator.active.capabilityId && matches(item.name)) ? operator.active.capabilityId : null : operator.view;
-  return <Highlight mode="parent" controlledItems value={selected} enabled={selected !== null} hover={false} click={false} containerClassName="rental-sidebar-navigation operator-navigation" className="rental-sidebar-route-highlight">
-    <SidebarGroup><SidebarMenu>
-      <SidebarMenuItem><SidebarMenuButton tooltip="新对话" onClick={() => operator.createConversation()} data-sound="press"><AnimatedIcon name="ai" /><span>新对话</span></SidebarMenuButton></SidebarMenuItem>
-      {([['plugins', '插件', 'plugins'], ['automations', '自动化任务', 'schedule']] as const).filter(([, title]) => matches(title)).map(([view, title, icon]) => <SidebarMenuItem key={view}>
-        <HighlightItem value={view} asChild><div className="rental-sidebar-route-target"><SidebarMenuButton tooltip={title} isActive={operator.view === view} aria-current={operator.view === view ? "page" : undefined} onClick={() => operator.setView(view)} data-sound="press"><AnimatedIcon name={icon} /><span>{title}</span></SidebarMenuButton></div></HighlightItem>
-      </SidebarMenuItem>)}
-    </SidebarMenu></SidebarGroup>
-    <SidebarGroup><SidebarGroupLabel>经营能力</SidebarGroupLabel><SidebarMenu>
-      {operator.available.filter(item => matches(item.name)).map(item => <SidebarMenuItem key={item.id}>
-        <HighlightItem value={item.id} asChild><div className="rental-sidebar-route-target"><SidebarMenuButton tooltip={item.name} isActive={operator.view === "chat" && operator.active.capabilityId === item.id} aria-current={operator.view === "chat" && operator.active.capabilityId === item.id ? "page" : undefined} onClick={() => operator.chooseCapability(item.id)} data-sound="press"><AnimatedIcon name={item.icon} /><span>{item.name}</span></SidebarMenuButton></div></HighlightItem>
-      </SidebarMenuItem>)}
-    </SidebarMenu></SidebarGroup>
-    {operator.capability.nativeScene && <SidebarGroup className="operator-history"><SidebarGroupLabel>当前能力的对话</SidebarGroupLabel><SidebarMenu>
-      <SidebarMenuItem><SidebarMenuButton onClick={() => void operator.history('active')}>查看最近对话</SidebarMenuButton></SidebarMenuItem>
-      <SidebarMenuItem><SidebarMenuButton onClick={() => void operator.history('archived')}>查看已归档对话</SidebarMenuButton></SidebarMenuItem>
-      {operator.capabilityThreads.filter(thread => (thread.messages.length || thread.native || thread.hasOriginal) && matches(thread.title)).map(thread => <SidebarMenuItem key={thread.id}><SidebarMenuButton tooltip={thread.title} onClick={() => operator.selectConversation(thread.id)} data-sound="press"><AnimatedIcon name="messages" /><span>{thread.group === '已归档' ? '已归档 · ' : ''}{thread.title}</span></SidebarMenuButton></SidebarMenuItem>)}
-      {operator.historyPage?.next && <SidebarMenuItem><SidebarMenuButton onClick={() => void operator.history(operator.historyPage!.status, operator.historyPage!.next!)}>加载更多{operator.historyPage.status === 'archived' ? '已归档对话' : '最近对话'}</SidebarMenuButton></SidebarMenuItem>}
-    </SidebarMenu></SidebarGroup>}
-  </Highlight>;
-}
+/** 原后台兼容入口；正文与恢复状态由选装 Rental 助手单源提供。 */
+export * from "@rental-os/rental-core/admin/assistant/source/ai-operator/AiOperatorNavigation";
+import { OperatorModeSwitch as OriginalOperatorModeSwitch, AiOperatorNavigation as OriginalAiOperatorNavigation } from "@rental-os/rental-core/admin/assistant/source/ai-operator/AiOperatorNavigation";
+import { bindLegacyRentalAssistant } from "./legacy-host";
+export const OperatorModeSwitch = bindLegacyRentalAssistant(OriginalOperatorModeSwitch);
+export const AiOperatorNavigation = bindLegacyRentalAssistant(OriginalAiOperatorNavigation);

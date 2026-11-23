@@ -14,14 +14,15 @@ import { applyTenantNavigationLabels } from "./catalog/navigation-terminology";
 
 type Section = PlatformShellProps["publicSections"][number];
 const layout = [
-  { key: "overview", label: "概览", icon: <DashboardOutlined />, items: ["workbench", "operation-report", "/notifications"] },
+  { key: "platform-rental-core", label: "租赁内核", icon: <AppstoreOutlined />, items: ["/platform/rental-categories", "/platform/rental-category-capabilities"] },
+  { key: "overview", label: "概览", icon: <DashboardOutlined />, items: ["workbench", "operation-report", "notifications"] },
   { key: "transactions", label: "租赁交易", icon: <ApartmentOutlined />, items: ["orders"] },
   { key: "inventory", label: "商品与资产", icon: <AppstoreOutlined />, items: ["item-groups", "assets", "work-orders", "locations"] },
   { key: "commercial", label: "定价与营销", icon: <FundOutlined />, items: ["pricing-groups", "pricing", "discounts", "coupons", "services"] },
   { key: "customers", label: "会员与客户", icon: <TeamOutlined />, items: ["membership-reviews", "personal-members", "corporate-members", "membership-plans", "membership-rewards"] },
   { key: "operations-foundation", label: "经营基础", icon: <SettingOutlined />, items: ["tenant-readiness", "governance", "qualification-types", "capabilities", "/settings/subscription"] },
   { key: "account-access", label: "账号与权限", icon: <TeamOutlined />, items: ["/tenant/accounts", "/tenant/roles", "/settings/client-authorization"] },
-  { key: "service-channels", label: "服务与渠道", icon: <ApiOutlined />, items: ["/tenant/integrations", "/tenant/dispatch", "/tenant/support", "/settings/ai", "/ai/tasks", "client-channel", "/settings/appearance"] },
+  { key: "service-channels", label: "服务与渠道", icon: <ApiOutlined />, items: ["/tenant/integrations", "/tenant/dispatch", "/tenant/support", "ai-settings", "ai-tasks", "client-channel", "/settings/appearance"] },
   { key: "finance-reconciliation", label: "财务与对账", icon: <FileSearchOutlined />, items: ["payment-reconciliation"] },
   { key: "platform-management", label: "平台管理", icon: <SettingOutlined />, items: [] },
 ] as const;
@@ -29,6 +30,9 @@ const layout = [
 const originalRoutes = {
   workbench: { label: "运营概览", icon: <AnimatedIcon name="dashboard" /> },
   "operation-report": { label: "经营报表", icon: <AnimatedIcon name="report" /> },
+  notifications: { label: "消息中心", icon: <FileTextOutlined /> },
+  "ai-settings": { label: "AI 服务设置", icon: <SettingOutlined /> },
+  "ai-tasks": { label: "AI 任务中心", icon: <FileTextOutlined /> },
   orders: { label: "订单管理", icon: <FileTextOutlined /> },
   "item-groups": { label: "商品目录", icon: <AppstoreOutlined /> },
   assets: { label: "资产与库存", icon: <BoxPlotOutlined /> },
@@ -53,6 +57,7 @@ const originalRoutes = {
 } as const;
 
 const groupIcons: Record<string, AnimatedIconName> = {
+  "platform-rental-core": "rules",
   overview: "dashboard", transactions: "orders", inventory: "inventory", commercial: "pricing",
   customers: "customers", "operations-foundation": "rules", "account-access": "access",
   "service-channels": "plugins", "finance-reconciliation": "finance", "platform-management": "rules",

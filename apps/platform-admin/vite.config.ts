@@ -14,7 +14,7 @@ export default defineConfig(({ mode }) => {
     publicDir: platform.publicDir, envPrefix: [], define: publicEnvironmentDefinitions("admin", env),
     plugins: [...platform.plugins, tailwindcss(), react()],
     css: { postcss: { plugins: platform.postcss } },
-    resolve: { alias: platform.alias },
+    resolve: { alias: platform.alias, extensions: platform.extensions },
     server: { port: Number(process.env.PORT ?? 5176), proxy: { "/api": { target: apiProxyTarget(env), changeOrigin: true } } }
   };
 });

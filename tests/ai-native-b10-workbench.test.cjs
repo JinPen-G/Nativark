@@ -127,12 +127,14 @@ test('selected Rental order assistant keeps original controls, request keys and 
 });
 function loadLifecycleSession(file = 'conversation-lifecycle-session.ts', imports = {}) {
   const selected = path.join(root, 'packages/ai-native-admin/src/ai-native', file);
-  const source = fs.readFileSync(fs.existsSync(selected) ? selected : path.join(root, 'apps/admin/src/features/ai-native', file), 'utf8');
+  const assistant = path.join(root, 'packages/rental-core/admin/assistant/ai-native', file);
+  const source = fs.readFileSync(fs.existsSync(selected) ? selected : fs.existsSync(assistant) ? assistant : path.join(root, 'apps/admin/src/features/ai-native', file), 'utf8');
   const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const exports = {};
   vm.runInNewContext(output, { exports, AbortController, AbortSignal, structuredClone, TextEncoder, Uint8Array, crypto: require('node:crypto').webcrypto, require(name) {
     if (Object.hasOwn(imports, name)) return imports[name];
     if (name === '@rental-os/shared' || name === '@rental-os/shared/ai-admin') return sharedSource();
+    if (name.startsWith('@rental-os/ai-native-admin/source/')) return sourceLoader.load(sourceLoader.resolveSource(selected, name, true));
     throw Error(name);
   } });
   return exports;
@@ -311,11 +313,12 @@ function taskObservationHost(component) {
         calls.push({ url, query: structuredClone(query), signal: options.signal }); return { data: { data: await responder(url, query) } }; } } };
       if (name === './aiRequestTiming') return { AI_EXECUTION_RESPONSE_TIMEOUT_MS: 120000 };
       if (name === '@/api/aiTaskCenter') return { aiTaskCenterApi: api };
+      if (name === './runtime') return { useRentalTaskCenter: () => ({ ...sessionHost, aiTaskCenterApi: api }) };
       if (name === '@/components/ui' || name === '@rental-os/platform-admin/ui') return { ActionButton: stub('action'), Alert: stub('alert') };
-      if (name === './management-locale') return { useAiManagementLocale: () => ({ t: text => text }) };
-      if (name === './formatters') return { formatTimestamp: value => ({ value }) };
-      if (name === './safe-display') return { safeDisplayText: value => value };
-      if (name === './usage-quantity') return loadModule('apps/admin/src/features/ai-native/usage-quantity.ts');
+      if (name === '@rental-os/ai-native-admin/source/ai-native/management-locale') return { useAiManagementLocale: () => ({ t: text => text }) };
+      if (name === '@rental-os/ai-native-admin/source/ai-native/formatters') return { formatTimestamp: value => ({ value }) };
+      if (name === '@rental-os/ai-native-admin/source/ai-native/safe-display') return { safeDisplayText: value => value };
+      if (name === '@rental-os/ai-native-admin/source/tenant-model-settings/usage-quantity') return loadModule('packages/ai-native-admin/src/tenant-model-settings/usage-quantity.ts');
       if (name === './TaskOutcomeObservation') return { TaskOutcomeObservation: stub('task-outcomes') };
       if (name === './TaskFaultObservation') return { TaskFaultObservation: stub('task-faults') };
       throw Error('Unexpected observation dependency: ' + name);
@@ -326,7 +329,7 @@ function taskObservationHost(component) {
       calls.push({ url, query: structuredClone(options.data), signal: options.signal });
       return responder(url, options.data);
     } });
-  const source = loadModule(`apps/admin/src/features/ai-native/${component}.tsx`);
+  const source = loadModule(`packages/rental-core/admin/task-center/${component}.tsx`);
   let denied = 0;
   const render = props => { cursor = 0; const tree = source[component]({ ...props, current: () => allowed, onAccessDenied: () => { denied++; } });
     effects.splice(0).forEach(effect => effect()); return tree; };
@@ -474,19 +477,12 @@ test('task runtime observation consumes original clocks and bounded records thro
   assert.match(text, /已记录耗时.*5 ms/); assert.match(text, /待核对耗时.*7 ms/);
   assert.match(text, /预算拒绝记录.*1/); assert.match(text, /取消请求不证明已回滚或退额/);
   assert.match(text, /首字、首卡尚未记录/); assert.match(text, /真实 SLO 未评估/);
-  const validation = require('../apps/api/src/modules/ai-native/task-contract-validation.ts');
+  const validation = sourceLoader.load(path.join(root, 'packages/ai-native-server/src/runtime/task-contract-validation.ts'));
   assert.equal(validation.validateAiTaskObservation('AiTaskPerformanceObservationDraft', originalRuntimeObservation('task-a')).task.taskId, 'task-a');
   assert.throws(() => validation.validateAiTaskObservation('AiTaskPerformanceObservationDraft', { ...originalRuntimeObservation('task-a'), credential: 'refused' }));
   assert.throws(() => host.source.validateTaskRuntimeObservation(originalRuntimeObservation('other-task'), 'task-a'));
-  const shared = sharedSource(), guard = {};
-  vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(root, 'apps/api/src/common/api-auth.guard.ts'), 'utf8'), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true } }).outputText,
-  { exports: guard, require(name) {
-    if (name === '@rental-os/shared' || name === '@rental-os/shared/ai-admin') return shared;
-    if (name === '@nestjs/common') return { Injectable: () => value => value, Optional: () => () => {} };
-    if (name === './platform-ai-access-policy') return require('../apps/api/src/common/platform-ai-access-policy.ts');
-    return {}; // Pure original route resolver; no service construction or execution grant.
-  } });
+  const shared = sharedSource();
+  const guard = sourceLoader.load(path.join(root, 'packages/rental-core/src/http-auth.ts')).createRentalAuthorization(shared);
   assert.deepEqual(Array.from(guard.requiredPermissions('POST', `/${shared.AI_TASK_CENTER_HTTP_DRAFT.basePath}/${shared.AI_TASK_CENTER_HTTP_DRAFT.performance}`)),
     Array.from(shared.AI_TASK_CENTER_ENTRY_PERMISSIONS));
   host.dispose();
@@ -603,13 +599,15 @@ test('conversation Core quote confirms original human parameters once and recove
 });
 
 test('original selection material shares the human approval display without dropping customer fulfillment or services', () => {
-  const output = ts.transpileModule(fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-native/TaskHumanApproval.tsx'), 'utf8'),
+  const output = ts.transpileModule(fs.readFileSync(path.join(root, 'packages/rental-core/admin/assistant/ai-native/TaskHumanApproval.tsx'), 'utf8'),
     { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText;
   const exports = {}, stub = props => React.createElement('section', props);
   vm.runInNewContext(output, { exports, require(name) {
+    if (name.startsWith('@rental-os/ai-native-admin/source/ai-native/')) name = './' + name.split('/').at(-1);
+    if (name === '../host') return { useRentalAssistant: () => ({ aiTaskCenterApi: {} }) };
     if (name === 'react') return React;
     if (name === 'react/jsx-runtime') return require(name);
-    if (name === '@rental-os/shared' || name === '@rental-os/shared/ai-admin') return require('@rental-os/shared');
+    if (name === '@rental-os/shared' || name === '@rental-os/shared/ai-admin') return sharedSource();
     if (name === '@/api/aiTaskCenter') return { aiTaskCenterApi: {} };
     if (name === './VisibleObservationBoundary') return { VisibleObservationBoundary: ({ children }) => children };
     if (name === './OriginalOrderReceiptLink') return { OriginalOrderReceiptLink: stub };
@@ -793,7 +791,7 @@ test('conversation navigation keeps the original locator and rejects changed sco
 });
 
 test('actual conversation history stays explicit, capability-bound and retracts late hidden reads', async () => {
-  const file = path.join(root, 'apps/admin/src/features/ai-native/ConversationHistory.tsx');
+  const file = path.join(root, 'packages/rental-core/admin/assistant/ai-native/ConversationHistory.tsx');
   const source = fs.readFileSync(file, 'utf8');
   const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS,
     jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText;
@@ -809,10 +807,12 @@ test('actual conversation history stays explicit, capability-bound and retracts 
   };
   const document = { hidden: false, addEventListener(_name, handler) { this.change = handler; }, removeEventListener() { this.change = null; } };
   const stub = name => props => React.createElement(name, props);
-  const shared = require('../packages/shared/src/ai-conversation-draft');
+  const shared = sharedSource();
   const api = { list: async (query, signal) => { calls.push({ query, signal }); return responder(query, signal); } };
   const exports = {};
-  vm.runInNewContext(output, { exports, document, AbortController, require(name) {
+  vm.runInNewContext(output, { exports, document, AbortController, require: function fixtureImport(name) {
+    if (name === '../host') return { useRentalAssistant: () => ({ ...fixtureImport('@/api/aiConversations') }) };
+    name = name.replace('@rental-os/ai-native-admin/source/ai-native/', './').replace('../../task-center/', './');
     if (name === 'react') return hooks;
     if (name === 'react/jsx-runtime') return require('react/jsx-runtime');
     if (name === '@rental-os/shared' || name === '@rental-os/shared/ai-admin') return { ...shared, AI_SCENE_CODES: ['order_explanation', 'opening_diagnosis', 'quote_clarification'] };
@@ -874,14 +874,15 @@ test('actual conversation history stays explicit, capability-bound and retracts 
   tree = render(); current = false;
   const count = calls.length; await assert.rejects(action(tree, '读取本人对话').props.onAction(), /AI_SCOPE_CHANGED/); assert.equal(calls.length, count);
   cleaners.forEach(cleanup => cleanup?.());
-  const host = fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-native/TaskCenterPage.tsx'), 'utf8');
-  assert.match(host, /import \{ ConversationHistory \} from '\.\/ConversationHistory'/u);
+  const selectedHost = path.join(root, 'packages/rental-core/admin/task-center/TaskCenterPage.tsx');
+  const host = fs.readFileSync(fs.existsSync(selectedHost) ? selectedHost : path.join(root, 'apps/admin/src/features/ai-native/TaskCenterPage.tsx'), 'utf8');
+  assert.match(host, /import \{ ConversationHistory \} from ['"](?:\.\/|\.\.\/assistant\/ai-native\/)ConversationHistory['"]/u);
   assert.match(host, /enabled=\{historyOpen\.includes\('conversations'\) && visible\}/u);
   assert.match(host, /<Accordion value=\{historyOpen\} onValueChange=\{value => \{ setHistoryOpen\(value\);/u);
 });
 
 test('actual operator workspace wires original reads and retracts native controls on close, selection, scope and hide', () => {
-  const source = fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-operator/AiOperatorPage.tsx'), 'utf8');
+  const source = fs.readFileSync(path.join(root, 'packages/rental-core/admin/assistant/ai-operator/AiOperatorPage.tsx'), 'utf8');
   assert.match(source, /<WorkArea visible=\{workOpen\}/u);
   assert.match(source, /<WorkArea visible=\{mobileOpen\}/u);
   const slots = [], pending = [], layouts = [], cleaners = new Map(); let cursor = 0, epoch = 1, permitted = true, reads = 0, invalidations = 0;
@@ -914,10 +915,19 @@ test('actual operator workspace wires original reads and retracts native control
     const output = ts.transpileModule(text, { compilerOptions: { module: ts.ModuleKind.CommonJS,
       jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText;
     vm.runInNewContext(output, { exports, document, require(name) {
+      if (name.startsWith('@rental-os/ai-native-admin/source/ai-native/')) {
+        const leaf = name.split('/').at(-1);
+        name = leaf === 'management-locale' ? '../ai-native/management-locale' : '@/features/ai-native/' + leaf;
+      }
+      if (name.startsWith('@rental-os/platform-admin/source/')) name = '@/' + name.slice('@rental-os/platform-admin/source/'.length);
+      if (name === '@rental-os/platform-admin/locale') name = '@/app/locale';
+      if (name === '@rental-os/platform-admin/shell') name = '@/app/branding';
+      if (name === '../ai-native/conversation-navigation') name = '@/features/ai-native/conversation-navigation';
+      if (name === '../host') return { useRentalAssistant: () => ({}), useNavigate: () => () => {} };
       if (Object.hasOwn(imports, name)) return imports[name];
       if (name === 'react') return hooks;
       if (name === 'react/jsx-runtime') return require(name);
-      if (name === '@rental-os/shared' || name === '@rental-os/shared/ai-admin') return require('@rental-os/shared');
+      if (name === '@rental-os/shared' || name === '@rental-os/shared/ai-admin') return sharedSource();
       if (name === './OperatorContext') return { useOperator: () => operator };
       if (name === 'react-router-dom') return { useNavigate: () => () => {} };
       if (name === '@/app/locale') return { useLocale: () => ({ locale: 'zh-CN', t: value => value }) };
@@ -934,7 +944,7 @@ test('actual operator workspace wires original reads and retracts native control
         '@/components/workspace/WorkspaceHeader', '@/app/branding'].includes(name)) return {};
       throw Error(`unexpected import: ${name}`);
     } }); return exports; };
-  const native = load(fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-operator/NativeOperatorWorkspace.tsx'), 'utf8'));
+  const native = load(fs.readFileSync(path.join(root, 'packages/rental-core/admin/assistant/ai-operator/NativeOperatorWorkspace.tsx'), 'utf8'));
   const page = load(`${source}\nexport { WorkArea };`, { './NativeOperatorWorkspace': native });
   const nodes = observationNodes, readButton = tree => nodes(tree).find(node => node.props['aria-label'] === '读取原结果');
   const desktop = page.WorkArea({ visible: true }), header = nodes(desktop).find(node => node.type === 'header');
@@ -976,7 +986,7 @@ test('actual operator workspace wires original reads and retracts native control
 });
 
 test('actual conversation detail loads explicitly and retracts on switch, hide, refusal and unmount', async () => {
-  const output = ts.transpileModule(fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-native/ConversationDetail.tsx'), 'utf8'),
+  const output = ts.transpileModule(fs.readFileSync(path.join(root, 'packages/rental-core/admin/assistant/ai-native/ConversationDetail.tsx'), 'utf8'),
     { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText;
   const slots = [], effects = [], cleaners = new Map(); let cursor = 0, current = true, responder, calls = [];
   const hooks = {
@@ -989,10 +999,12 @@ test('actual conversation detail loads explicitly and retracts on switch, hide, 
   const document = { hidden: false, addEventListener(_name, handler) { this.change = handler; }, removeEventListener() { this.change = null; } };
   const stub = name => props => React.createElement(name, props), exports = {};
   const orderExecution = stub('conversation-order-execution'), openingExecution = stub('conversation-opening-execution');
-  vm.runInNewContext(output, { exports, document, AbortController, require(name) {
+  vm.runInNewContext(output, { exports, document, AbortController, require: function fixtureImport(name) {
+    if (name === '../host') return { useRentalAssistant: () => ({ ...fixtureImport('@/api/aiConversations') }) };
+    name = name.replace('@rental-os/ai-native-admin/source/ai-native/', './').replace('../../task-center/', './');
     if (name === 'react') return hooks;
     if (name === 'react/jsx-runtime') return require('react/jsx-runtime');
-    if (name === '@rental-os/shared' || name === '@rental-os/shared/ai-admin') return require('../packages/shared/src/ai-conversation-draft');
+    if (name === '@rental-os/shared' || name === '@rental-os/shared/ai-admin') return sharedSource();
     if (name === '@/api/aiConversations') return { aiConversationsApi: { detail: async (query, capability, signal) => {
       calls.push({ query, capability, signal }); return responder(query);
     } } };
@@ -1073,7 +1085,7 @@ test('actual conversation detail loads explicitly and retracts on switch, hide, 
 });
 
 test('actual original-turn result stays explicit and retracts text on refusal, switch, hide and unmount', async () => {
-  const output = ts.transpileModule(fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-native/ConversationResult.tsx'), 'utf8'),
+  const output = ts.transpileModule(fs.readFileSync(path.join(root, 'packages/rental-core/admin/assistant/ai-native/ConversationResult.tsx'), 'utf8'),
     { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText;
   const slots = [], effects = [], cleaners = new Map(); let cursor = 0, current = true, responder, calls = [], epoch = 1, permitted = true;
   const hooks = {
@@ -1094,9 +1106,14 @@ test('actual original-turn result stays explicit and retracts text on refusal, s
     user: { id: 'owner-a', isSaasAdmin: false }, hasPermission: () => permitted };
   const useAuthStore = () => auth; useAuthStore.getState = () => auth;
   useAuthStore.subscribe = listener => { subscribers.add(listener); return () => subscribers.delete(listener); };
-  const shared = require('@rental-os/shared');
+  const shared = sharedSource();
   const stub = name => props => React.createElement(name, props), exports = {};
   vm.runInNewContext(output, { exports, document, AbortController, AbortSignal, require(name) {
+    if (name.startsWith('@rental-os/ai-native-admin/source/ai-native/')) name = './' + name.split('/').at(-1);
+    if (name === '../host') return { useRentalAssistant: () => ({ useAuthStore, currentSessionEpoch: () => epoch,
+      currentSessionSignal: () => session.signal, aiTaskCenterApi: {}, createAiWorkbenchDisplayPort: () => {},
+      aiConversationsApi: { currentResult: async (query, turn, signal) => { calls.push({ query, turn, signal }); return responder(query, turn); } },
+    }) };
     if (name === 'react') return hooks;
     if (name === 'react/jsx-runtime') return require('react/jsx-runtime');
     if (name === '@rental-os/shared' || name === '@rental-os/shared/ai-admin') return shared;
@@ -1198,13 +1215,13 @@ test('actual original-turn result stays explicit and retracts text on refusal, s
   assert.equal(calls.at(-1).signal.aborted, true); resolve(packet('conversation-b')); await assert.rejects(unmounted, /AI_SCOPE_CHANGED/);
   const before = calls.length; await assert.rejects(action(tree).props.onAction(), /AI_SCOPE_CHANGED/); assert.equal(calls.length, before);
   current = false; await assert.rejects(action(tree).props.onAction(), /AI_SCOPE_CHANGED/); assert.equal(calls.length, before);
-  const source = fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-native/ConversationDetail.tsx'), 'utf8');
+  const source = fs.readFileSync(path.join(root, 'packages/rental-core/admin/assistant/ai-native/ConversationDetail.tsx'), 'utf8');
   assert.match(source, /ConversationResult key=\{`\$\{identity\}:\$\{conversationId\}:\$\{capabilityCode\}:\$\{turn.turnId\}:\$\{resultEpochs\[turn.turnId\] \?\? 0\}`\}/u);
 });
 
 test('conversation lifecycle journals before sending and reconciles without replaying unknown writes', async () => {
   const { ConversationLifecycleSession } = loadLifecycleSession();
-  const { AI_CONVERSATION_DRAFT_VERSION: draftVersion } = require('../packages/shared/src/ai-conversation-draft');
+  const { AI_CONVERSATION_DRAFT_VERSION: draftVersion } = sharedSource();
   const values = new Map(), storage = { getItem: key => values.get(key) ?? null,
     setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) };
   let sends = 0, keys = 0, current = true, reply;
@@ -1273,7 +1290,7 @@ test('conversation lifecycle journals before sending and reconciles without repl
 });
 
 test('actual lifecycle controls are explicit, retract history and preserve original journal across panel closure', async () => {
-  const source = fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-native/ConversationLifecycle.tsx'), 'utf8');
+  const source = fs.readFileSync(path.join(root, 'packages/rental-core/admin/assistant/ai-native/ConversationLifecycle.tsx'), 'utf8');
   const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS,
     jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText;
   const slots = [], effects = [], cleaners = new Map(); let cursor = 0, current = true, clears = 0, keys = 0, sends = 0;
@@ -1290,13 +1307,15 @@ test('actual lifecycle controls are explicit, retract history and preserve origi
   const document = { hidden: false, addEventListener(_event, fn) { this.change = fn; }, removeEventListener() { this.change = null; } };
   const stub = name => props => React.createElement(name, props), exports = {};
   const original = loadLifecycleSession();
-  const shared = require('../packages/shared/src/ai-conversation-draft');
+  const shared = sharedSource();
   const api = Object.fromEntries(['create', 'archive', 'delete', 'operation'].map(action => [action, async command => {
     sends++; return { draftVersion: shared.AI_CONVERSATION_DRAFT_VERSION, operationKey: command.operationKey, retryable: false,
       status: 'observed', operation: action, conversationId: command.conversationId ?? 'new-conversation',
       revision: (command.expectedRevision ?? 0) + 1, taskCancellation: 'not_requested', businessRecords: 'not_modified' };
   }]));
-  vm.runInNewContext(output, { exports, document, window: { sessionStorage: storage }, require(name) {
+  vm.runInNewContext(output, { exports, document, window: { sessionStorage: storage }, require: function fixtureImport(name) {
+    if (name === '../host') return { useRentalAssistant: () => ({ ...fixtureImport('@/api/aiConversations') }) };
+    name = name.replace('@rental-os/ai-native-admin/source/ai-native/', './').replace('../../task-center/', './');
     if (name === 'react') return hooks;
     if (name === 'react/jsx-runtime') return require('react/jsx-runtime');
     if (name === '@/api/aiConversations') return { aiConversationsApi: api };
@@ -1331,7 +1350,7 @@ test('actual lifecycle controls are explicit, retract history and preserve origi
   assert.equal(find(tree, '删除所选对话').props.disabled, true);
   cleaners.forEach(fn => fn?.()); current = false;
   await assert.rejects(find(tree, '新建当前能力对话').props.onAction(), /AI_SCOPE_CHANGED/);
-  assert.match(fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-native/ConversationHistory.tsx'), 'utf8'), /ConversationLifecycle identity=\{identity\}/u);
+  assert.match(fs.readFileSync(path.join(root, 'packages/rental-core/admin/assistant/ai-native/ConversationHistory.tsx'), 'utf8'), /ConversationLifecycle identity=\{identity\}/u);
 });
 
 test('original order admission retains one key and hash without durable body or resend after uncertainty', async () => {
@@ -1456,7 +1475,7 @@ test('original order admission retains one key and hash without durable body or 
 });
 
 for (const capability of ['order_explanation', 'opening_diagnosis', 'quote_clarification']) test(`actual ${capability} admission distinguishes unsent preparation and clears draft on hide without automatic requests`, async () => {
-  const output = ts.transpileModule(fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-native/ConversationAdmission.tsx'), 'utf8'),
+  const output = ts.transpileModule(fs.readFileSync(path.join(root, 'packages/rental-core/admin/assistant/ai-native/ConversationAdmission.tsx'), 'utf8'),
     { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText;
   const slots = [], effects = [], cleaners = new Map(); let cursor = 0, changed = 0, calls = 0, current = true, headVisible = true;
   const hooks = {
@@ -1476,7 +1495,9 @@ for (const capability of ['order_explanation', 'opening_diagnosis', 'quote_clari
   const original = loadLifecycleSession('conversation-admission-session.ts', { './budget-settings-session': hashing });
   const shared = sharedSource(), stub = name => props => React.createElement(name, props), exports = {};
   const sessionSignal = new AbortController().signal;
-  vm.runInNewContext(output, { exports, document, structuredClone, window: { sessionStorage: storage }, require(name) {
+  vm.runInNewContext(output, { exports, document, structuredClone, window: { sessionStorage: storage }, require: function fixtureImport(name) {
+    if (name === '../host') return { useRentalAssistant: () => ({ ...fixtureImport('@/api/aiConversations'), ...fixtureImport('@/app/queryClient') }) };
+    name = name.replace('@rental-os/ai-native-admin/source/ai-native/', './').replace('../../task-center/', './');
     if (name === 'react') return hooks;
     if (name === 'react/jsx-runtime') return require('react/jsx-runtime');
     if (name === '@rental-os/shared' || name === '@rental-os/shared/ai-admin') return shared;
@@ -1545,7 +1566,7 @@ for (const capability of ['order_explanation', 'opening_diagnosis', 'quote_clari
   storageValues.delete('ai-conversation-closure:owner-scope:conversation-c');
   await assert.rejects(find(tree, '核对并完成中断的轮换').props.onAction(), /unavailable/); assert.equal(calls, 3);
   cleaners.forEach(fn => fn?.()); current = false;
-  assert.match(fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-native/ConversationDetail.tsx'), 'utf8'), /ConversationAdmission conversationId=\{conversationId\}/u);
+  assert.match(fs.readFileSync(path.join(root, 'packages/rental-core/admin/assistant/ai-native/ConversationDetail.tsx'), 'utf8'), /ConversationAdmission conversationId=\{conversationId\}/u);
 });
 
 for (const capability of ['order_explanation', 'opening_diagnosis', 'quote_clarification']) test(`original ${capability} task creation journals before sending and recovers only original metadata`, async () => {
@@ -1621,7 +1642,7 @@ for (const capability of ['order_explanation', 'opening_diagnosis', 'quote_clari
 });
 
 for (const capability of ['order_explanation', 'opening_diagnosis', 'quote_clarification']) test(`actual ${capability} task creation controls stay explicit and retract on hide and turn switch`, async () => {
-  const output = ts.transpileModule(fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-native/ConversationTaskCreation.tsx'), 'utf8'),
+  const output = ts.transpileModule(fs.readFileSync(path.join(root, 'packages/rental-core/admin/assistant/ai-native/ConversationTaskCreation.tsx'), 'utf8'),
     { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText;
   const slots = [], effects = [], cleaners = new Map(); let cursor = 0, calls = 0, current = true;
   const hooks = {
@@ -1640,7 +1661,9 @@ for (const capability of ['order_explanation', 'opening_diagnosis', 'quote_clari
     capabilityCode: capability, capabilityVersion: '1', createdAt: '2026-11-03T00:00:00Z', automaticRetry: false,
     status: 'original_bound', original: { draftVersion: shared.AI_SCENE_REQUEST_DRAFT_VERSION, inputRef: '11111111-1111-4111-8111-111111111111' },
     execution: 'not_inferred_from_association', material: 'retained', task: null };
-  vm.runInNewContext(output, { exports, document, window: { sessionStorage: storage }, require(name) {
+  vm.runInNewContext(output, { exports, document, window: { sessionStorage: storage }, require: function fixtureImport(name) {
+    if (name === '../host') return { useRentalAssistant: () => ({ ...fixtureImport('@/api/aiConversations') }) };
+    name = name.replace('@rental-os/ai-native-admin/source/ai-native/', './').replace('../../task-center/', './');
     if (name === 'react') return hooks;
     if (name === 'react/jsx-runtime') return require('react/jsx-runtime');
     if (name === '@/api/aiConversations') return { aiConversationsApi: {
@@ -1798,7 +1821,7 @@ test('original order execution keeps first start explicit and observes uncertain
 });
 
 test('actual order execution requires separate reading and confirmation and rejects hidden or stale turns', async () => {
-  const source = fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-native/ConversationOrderExecution.tsx'), 'utf8');
+  const source = fs.readFileSync(path.join(root, 'packages/rental-core/admin/assistant/ai-native/ConversationOrderExecution.tsx'), 'utf8');
   const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText;
   const slots = [], effects = [], cleaners = new Map(); let cursor = 0, reads = 0, sends = 0, current = true;
   const hooks = {
@@ -1821,7 +1844,9 @@ test('actual order execution requires separate reading and confirmation and reje
     preparation: { publishedInputs: 0, requiredInputs: 3, missing: ['model_request', 'order_read', 'model_answer'], planPublished: false, execution: 'not_attested' },
     observation: 'revalidated_not_atomic', automaticRetry: false };
   const stub = name => props => React.createElement(name, props), exports = {};
-  vm.runInNewContext(output, { exports, document, window: { sessionStorage: storage }, require(name) {
+  vm.runInNewContext(output, { exports, document, window: { sessionStorage: storage }, require: function fixtureImport(name) {
+    if (name === '../host') return { useRentalAssistant: () => ({ ...fixtureImport('@/api/aiConversations') }) };
+    name = name.replace('@rental-os/ai-native-admin/source/ai-native/', './').replace('../../task-center/', './');
     if (name === 'react') return hooks; if (name === 'react/jsx-runtime') return require('react/jsx-runtime');
     if (name === '@/api/aiConversations') return { aiConversationsApi: {
       admission: async query => { reads++; return { ...query, result: { ...turn, admissionKey: query.admissionKey }, absence: 'not_proof_of_no_commit', retryable: false }; },
@@ -1855,7 +1880,7 @@ test('actual order execution requires separate reading and confirmation and reje
 });
 
 test('actual original order results read explicitly and retract amounts and text on failure or hide', async () => {
-  const output = ts.transpileModule(fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-native/ConversationOrderResults.tsx'), 'utf8'),
+  const output = ts.transpileModule(fs.readFileSync(path.join(root, 'packages/rental-core/admin/assistant/ai-native/ConversationOrderResults.tsx'), 'utf8'),
     { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText;
   const slots = [], effects = [], cleaners = new Map(); let cursor = 0, calls = 0, current = true, respond;
   const hooks = {
@@ -1867,7 +1892,9 @@ test('actual original order results read explicitly and retract amounts and text
   };
   const document = { hidden: false, addEventListener(_name, fn) { this.change = fn; }, removeEventListener() {} };
   const stub = name => props => React.createElement(name, props), exports = {}, signals = [];
-  vm.runInNewContext(output, { exports, AbortController, document, require(name) {
+  vm.runInNewContext(output, { exports, AbortController, document, require: function fixtureImport(name) {
+    if (name === '../host') return { useRentalAssistant: () => ({ ...fixtureImport('@/api/aiConversations') }) };
+    name = name.replace('@rental-os/ai-native-admin/source/ai-native/', './').replace('../../task-center/', './');
     if (name === 'react') return hooks; if (name === 'react/jsx-runtime') return require('react/jsx-runtime');
     if (name === '@/api/aiConversations') return { aiConversationsApi: {} };
     if (name === '@/components/ui' || name === '@rental-os/platform-admin/ui') return { ActionButton: stub('action'), Alert: stub('alert') };
@@ -1909,11 +1936,11 @@ test('actual original order results read explicitly and retract amounts and text
   const old = read(tree).props.onAction; render('conversation-b'); tree = render('conversation-b');
   await assert.rejects(old(), /AI_SCOPE_CHANGED/);
   cleaners.forEach(fn => fn?.()); current = false; await assert.rejects(read(tree).props.onAction(), /AI_SCOPE_CHANGED/);
-  assert.doesNotMatch(fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-native/ConversationOrderResults.tsx'), 'utf8'), /dangerouslySetInnerHTML|localStorage|sessionStorage|setInterval/);
+  assert.doesNotMatch(fs.readFileSync(path.join(root, 'packages/rental-core/admin/assistant/ai-native/ConversationOrderResults.tsx'), 'utf8'), /dangerouslySetInnerHTML|localStorage|sessionStorage|setInterval/);
 });
 
 test('actual closure controls preserve original receipts and require explicit idle-head revalidation', async () => {
-  const output = ts.transpileModule(fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-native/ConversationClosure.tsx'), 'utf8'),
+  const output = ts.transpileModule(fs.readFileSync(path.join(root, 'packages/rental-core/admin/assistant/ai-native/ConversationClosure.tsx'), 'utf8'),
     { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText;
   const slots = [], effects = [], cleaners = new Map(); let cursor = 0, current = true, calls = 0, rotations = 0, lost = true;
   const hooks = {
@@ -1932,6 +1959,10 @@ test('actual closure controls preserve original receipts and require explicit id
     conversationId: 'conversation-a', revision: 3, operation: 'close_unstarted', creation: 'permanently_closed', task: 'not_created',
     taskCancellation: 'not_requested', businessRecords: 'not_modified' };
   vm.runInNewContext(output, { exports, document, window: { sessionStorage: storage }, require(name) {
+    if (name.startsWith('@rental-os/ai-native-admin/source/ai-native/')) name = './' + name.split('/').at(-1);
+    if (name === '../host') return { useRentalAssistant: () => ({ aiConversationsApi: { closeUnstarted: async command => {
+      calls++; assert.equal(command.turnId, 'turn-a'); if (lost) throw Error('lost closure response'); return receipt;
+    }, operation: async () => { calls++; return receipt; } } }) };
     if (name === 'react') return hooks;
     if (name === 'react/jsx-runtime') return require('react/jsx-runtime');
     if (name === '@rental-os/shared' || name === '@rental-os/shared/ai-admin') return shared;

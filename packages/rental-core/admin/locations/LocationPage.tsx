@@ -78,7 +78,9 @@ function LocationWorkspace({
   const { t } = useLocale();
   const queryClient = useQueryClient();
   const host = useCorePageHost();
-  const active = useRef(false);
+  // 首次渲染已持有当前受权范围，命中新鲜缓存也要立即生成原导入/批量入口。
+  // ref 变化不会触发渲染；退出后仍以同一标记拒绝迟到的列表操作。
+  const active = useRef(true);
   useLayoutEffect(() => {
     active.current = true;
     return () => {

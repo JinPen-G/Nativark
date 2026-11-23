@@ -53,7 +53,7 @@ export default defineConfig(({ mode }) => {
       react(),
     ],
     css: { postcss: { plugins: platform.postcss } },
-    resolve: { alias: platform.alias },
+    resolve: { alias: platform.alias, extensions: platform.extensions },
     server: {
       port: Number(process.env.PORT ?? 5178),
       proxy: { "/api": { target: apiProxyTarget(env), changeOrigin: true } },
