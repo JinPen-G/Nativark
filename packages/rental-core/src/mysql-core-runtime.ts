@@ -1394,6 +1394,10 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   }
 
   async saveOperator(tenantId: string, input: SaveRentalFulfillmentOperatorRequest) {
+    input = structuredClone(input);
+    // 页面R0列表不再发布配置缓存；保存仍须原完整当前配置，避免另一实例
+    // 新建的主体可读却被本进程旧缓存误判不存在。固定输入后才等待该读取。
+    await this.refreshCommittedWorkspace(tenantId);
     const state = this.state(tenantId);
     const { result, existing } = this.buildOperator(tenantId, input, state);
     const preserveStatus = Boolean(existing && input.status === undefined);
