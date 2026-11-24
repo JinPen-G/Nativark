@@ -1,6 +1,6 @@
 # 本地归档组件接入记录
 
-日期：2026-10-27。来源：`D:\工作文件\uiarc-pro-archive\preview`。
+日期：2026-10-27。来源：`uiarc-pro-archive/preview`。
 
 ## 来源边界
 
