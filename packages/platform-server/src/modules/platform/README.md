@@ -23,6 +23,8 @@
 
 角色编码沿原大写口径保存，省略状态和业务范围沿原缺省处理；编辑人员时省略电话或组织保留存量值。权限单独保存只更新权限关系及按钮投影，保留角色资料；固定全权角色沿原返回语义处理。
 
+角色权限按已登记的 `Permission.kind` 分类，按钮码无需含 `:button:`。列表将 `BUTTON` 仅列入 `buttonPermissions`，普通权限列入 `permissions`；两种保存入口从同一登记类型生成按钮投影，显式按钮字段不能提交操作或菜单权限。原历史权限码仍由宿主的固定兼容映射解释，当前成员的 Core 分配另行校验。[类型及保存](platform-management.repository.ts) · [登记存储](platform-management.store.ts)
+
 原组合宿主提供固定的 [Rental 兼容适配](../../../../../packages/rental-core/src/public-management-compatibility.ts)，在同一公共事务补充租户品类、能力、空间和订单汇总，解释原四个历史权限码及按钮，并核对角色空间引用和目标账号的活跃空间管理员身份。公共默认宿主直接读取公共表和已登记权限。
 
 原组合的合法自身状态、密码和角色撤权在具体写入前复验。当前主体、会话、租户和角色行锁保持到提交，预期失权后的响应使用原事务结果。该接点由服务端固定适配选择；公共默认本人保护及其余管理操作的返回前复验沿现有服务执行。[提交点](platform-management.service.ts) · [角色和人员写入](platform-management.repository.ts)

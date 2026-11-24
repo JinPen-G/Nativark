@@ -187,17 +187,11 @@ export class PlatformManagementRepository extends PlatformIdentityRepository {
     return compatibility ? compatibility.normalizePermissionCodes(codes) : [...new Set(codes)];
   }
 
-  private isButtonPermission(code: string, compatibility?: LegacyPlatformManagementCompatibility) {
-    return code.includes(":button:") || Boolean(compatibility?.isButtonPermission(code));
-  }
-
-  private async registeredPermissions(tx: PlatformManagementTransaction, codes: string[], buttons: string[],
-    compatibility?: LegacyPlatformManagementCompatibility) {
+  private async registeredPermissions(tx: PlatformManagementTransaction, codes: string[], buttons: string[]) {
     if (codes.some(code => !code || code === "*")) throw new BadRequestException("普通角色不能配置通配权限");
     const permissions = await tx.permission.findMany({ where: { code: { in: codes } } });
     const registered = new Map(permissions.map(permission => [permission.code, permission]));
-    if (codes.some(code => !registered.has(code)) || buttons.some(code =>
-      registered.get(code)?.kind !== "BUTTON" && !this.isButtonPermission(code, compatibility))) {
+    if (codes.some(code => !registered.has(code)) || buttons.some(code => registered.get(code)?.kind !== "BUTTON")) {
       throw new BadRequestException("角色只能配置已登记的对应类型权限");
     }
     return permissions;
@@ -230,16 +224,18 @@ export class PlatformManagementRepository extends PlatformIdentityRepository {
       orderBy: [{ fixedAllPermissions: "desc" }, { code: "asc" }]
     });
     return rows.map(row => {
-      const codes = this.permissionCodes(row.permissions.map(item => item.permission.code), compatibility);
-      const registeredButtons = row.permissions.filter(item => item.permission.kind === "BUTTON")
-        .map(item => item.permission.code);
+      // Core 的按钮码不必含 :button:；使用已登记类型，避免同一按钮同时进入操作权限和按钮权限。
+      const codes = this.permissionCodes(row.permissions.filter(item => item.permission.kind !== "BUTTON")
+        .map(item => item.permission.code), compatibility);
+      const registeredButtons = this.permissionCodes(row.permissions.filter(item => item.permission.kind === "BUTTON")
+        .map(item => item.permission.code), compatibility);
       const savedButtons = this.permissionCodes((row.buttonPermissions as string[] | null) ?? [], compatibility);
       return {
         id: row.id, tenantId, code: row.code, name: row.name,
         description: row.description ?? undefined, scope: this.toSharedRoleScope(row.scope),
         fixedAllPermissions: row.fixedAllPermissions, enabledBusinessScopes: row.enabledBusinessScopes as string[],
         dataScope: this.toSharedDataScope(row.dataScope), isActive: row.isActive,
-        permissions: row.fixedAllPermissions ? ["*"] : codes.filter(code => !this.isButtonPermission(code, compatibility)),
+        permissions: row.fixedAllPermissions ? ["*"] : codes,
         buttonPermissions: row.fixedAllPermissions ? ["*"] : [...new Set([...registeredButtons, ...savedButtons])]
       };
     });
@@ -257,10 +253,10 @@ export class PlatformManagementRepository extends PlatformIdentityRepository {
     const duplicates = await tx.role.findMany({ where: { tenantId, code }, include: { permissions: { include: { permission: true } } } });
     if (duplicates.some(role => role.id !== existing?.id)) throw new BadRequestException("角色编码已存在");
     const requestedPermissions = this.permissionCodes(input.permissions ?? [], compatibility);
-    const buttons = [...new Set([...(input.buttonPermissions ?? []),
-      ...requestedPermissions.filter(permission => this.isButtonPermission(permission, compatibility))])];
-    const codes = [...new Set([...requestedPermissions, ...buttons])];
-    const permissions = await this.registeredPermissions(tx, codes, buttons, compatibility);
+    const requestedButtons = this.permissionCodes(input.buttonPermissions ?? [], compatibility);
+    const codes = [...new Set([...requestedPermissions, ...requestedButtons])];
+    const permissions = await this.registeredPermissions(tx, codes, requestedButtons);
+    const buttons = permissions.filter(permission => permission.kind === "BUTTON").map(permission => permission.code);
     const id = existing?.id ?? input.id ?? randomUUID();
     const data = {
       code, name, description: input.description?.trim(), scope: input.scope.toUpperCase() as StoredPlatformRoleScope,
@@ -285,8 +281,8 @@ export class PlatformManagementRepository extends PlatformIdentityRepository {
     if (!existing) throw new NotFoundException("角色不存在");
     if (existing.fixedAllPermissions) return existing;
     const nextPermissions = this.permissionCodes(codes, compatibility);
-    const buttons = nextPermissions.filter(permission => this.isButtonPermission(permission, compatibility));
-    const permissions = await this.registeredPermissions(tx, nextPermissions, buttons, compatibility);
+    const permissions = await this.registeredPermissions(tx, nextPermissions, []);
+    const buttons = permissions.filter(permission => permission.kind === "BUTTON").map(permission => permission.code);
     if (existing.isActive && [...existing.permissions, ...(existing.buttonPermissions ?? [])].some(permission => !nextPermissions.includes(permission))) {
       await beforeSelfRevocation?.();
     }
