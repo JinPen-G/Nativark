@@ -41,7 +41,7 @@ Core 包目录、预检、版本选择和候选准备的四个原 Controller 挂
 
 `createRentalHostPackage` 接收实际已构建字节、Core 和底座的固定来源及公开指南。同一工厂生成 `dist/http-openapi.json` 和 `dist/http-openapi-portable.json`，独立更新保留既有文档路径。原宿主版选择前者，逐条旧路径许可来自实际挂载处理器；独立公开发行选择 `portable` 后以后一份为清单入口，只声明实际审定并由宿主接线的 `/api/cores/rental/v1` 业务操作。两份文档均来自同版本处理器，清单只选一个正式入口。`source` 固定公开版本的真实来源，`documentationSource` 可单独固定原公共源码链接。
 
-宿主选择公开包后，由[启动入口](src/bootstrap.ts)在原身份与业务作用域中间件之前，按实际方法和模板将已登记的规范路径交给同一原 Rental Controller。客户端原路径及渠道、员工、平台和供应商回调继续沿各自原入口。部署准备和启动都核对整包摘要、清单及与所选发行一致的 OpenAPI。候选 SQL 保留原字节和顺序，`prepared` 表示材料已备妥，部署、迁移和运行状态由原流程核定。
+宿主无论选择哪一种合法 OpenAPI 文档入口，都由[启动入口](src/bootstrap.ts)在原身份与业务作用域中间件之前，按实际方法和模板将已登记的规范路径交给同一原 Rental Controller；文档文件名不决定业务路径是否挂载。宿主 OpenAPI 同时描述实际规范路径和原路径，客户端原路径及渠道、员工、平台和供应商回调继续沿各自原入口。部署准备和启动仍核对整包摘要、清单及与所选发行一致的文档，身份、权限和业务事务共用原实现。候选 SQL 保留原字节和顺序，`prepared` 表示材料已备妥，部署、迁移和运行状态由原流程核定。
 
 `createRentalDeploymentFiles` 与命令共用同一准备入口。省略 AI 数据包得到 162 模型；提供已核固定完整 AI 数据发行与包，得到 248 模型及按原顺序追加的 58 份迁移。命令的新迁移目录必须直接位于本宿主根目录，例如 `apps/rental-api/prisma-candidate`，且尚未存在；其中 schema 的 `../generated/client` 与本宿主编译、运行使用同一个 Client。准备只写新目录，失败清理本次候选，不覆盖有效部署。
 

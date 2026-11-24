@@ -74,9 +74,9 @@ export function createRentalHostOpenApi(lockValue: CoreDeploymentLock, policy: P
     || additional.some(item => !extras.some(pin => isDeepStrictEqual(pin.manifest, item.manifest))))
     throw new Error("Rental 文档及额外贡献须逐项来自实际宿主完整清单");
   const { contribution, legacyRoutes, documentationGaps } = createRentalHostOpenApiContribution(policy);
-  const portable = rental.manifest.entries.openapi === RENTAL_PORTABLE_OPENAPI_FILE
-    ? createRentalPortableHttp(policy, contribution).contribution : undefined;
-  const openApi = portable ? { ...contribution, paths: { ...contribution.paths, ...portable.paths } } : contribution;
+  // 宿主始终把已审定的规范路径交给同一原处理器；两种文档入口均发布实际挂载范围。
+  const portable = createRentalPortableHttp(policy, contribution).contribution;
+  const openApi = { ...contribution, paths: { ...contribution.paths, ...portable.paths } };
   const result = composeCoreOpenApi(createPlatformCorePackageOpenApi(createPlatformCoreOpenApi(createPlatformOpenApi())),
     [{ manifest: rental.manifest, contribution: openApi }, ...additional], { rental: legacyRoutes });
   if (!result.document) throw new Error(result.issues.map(issue => `${issue.field}: ${issue.message}`).join("\n"));

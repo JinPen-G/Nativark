@@ -9,7 +9,6 @@ import { isAbsolute } from "node:path";
 import { CORE_CONTRACT_VERSION, CoreDeploymentLockSchema, type CoreDeploymentLock } from "@rental-os/core-contracts";
 import { requestIdentityMiddleware } from "@rental-os/platform-server";
 import { createRentalStaffApiRouting } from "@rental-os/rental-core/staff-routing";
-import { RENTAL_PORTABLE_OPENAPI_FILE } from "@rental-os/rental-core/http-openapi";
 import { AI_STAFF_INSPECTION_HTTP_DRAFT, AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT } from "@rental-os/shared";
 import type { createRentalHttpRequestScope } from "./http-request-scope";
 import { attachRentalBootstrapIngress, type RentalBootstrapIngress } from "./bootstrap-ingress";
@@ -71,8 +70,8 @@ export async function bootstrapRentalComposition(aiMode: "enabled" | "disabled",
   if (lock.platform.versions.node !== process.versions.node || lock.platform.versions.contract !== CORE_CONTRACT_VERSION)
     throw new Error(`Rental 部署锁须与当前 Node ${process.versions.node} 和 Core 合同 ${CORE_CONTRACT_VERSION} 一致`);
   const { RENTAL_HTTP_REQUEST_SCOPE } = await import("./app.module.js");
-  const portable = lock.cores.find(pin => pin.manifest.id === "rental")?.manifest.entries.openapi === RENTAL_PORTABLE_OPENAPI_FILE
-    ? createRentalHostPortableHttp() : undefined;
+  // 两种合法文档入口共用同一实际处理器，文档文件名不决定规范业务路径是否挂载。
+  const portable = createRentalHostPortableHttp();
   // 注册全量原路由前核定各接点，失败发生在 Client 构造/连接/监听之前。
   const module = await register(lock);
   const app = await NestFactory.create<NestExpressApplication>(module, { rawBody: true });
@@ -82,7 +81,7 @@ export async function bootstrapRentalComposition(aiMode: "enabled" | "disabled",
     const ingress = await extension?.createIngress(app);
     if (ingress) attachRentalBootstrapIngress(app, ingress);
     if (settings.trustProxyHops > 0) app.set("trust proxy", settings.trustProxyHops);
-    if (portable) app.use((request: { method: string; url: string }, _response: unknown, next: () => void) => {
+    app.use((request: { method: string; url: string }, _response: unknown, next: () => void) => {
       const original = portable.originalUrl(request.method, request.url);
       if (original) request.url = original;
       next();
