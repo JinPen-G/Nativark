@@ -36,12 +36,16 @@ export function createAdminHttpClient<T extends PlatformLoginResponse>({ baseURL
     return refreshPromise;
   }
 
-  type TrackedRequest = InternalAxiosRequestConfig & { _authRetry?: boolean; _authRefreshToken?: string; _sessionEpoch?: number };
+  type TrackedRequest = InternalAxiosRequestConfig & {
+    _authRetry?: boolean; _sessionEpoch?: number; _sessionAccessToken?: string; _sessionRefreshToken?: string;
+  };
   http.interceptors.request.use(config => {
     const token = session.accessToken(), tenant = session.tenant();
     if (token) config.headers.Authorization = `Bearer ${token}`;
     if (!config.signal) config.signal = session.currentSessionSignal();
-    (config as TrackedRequest)._sessionEpoch = session.currentSessionEpoch();
+    const tracked = config as TrackedRequest;
+    tracked._sessionEpoch = session.currentSessionEpoch();
+    tracked._sessionAccessToken = token; tracked._sessionRefreshToken = session.refreshToken();
     if (tenant?.tenantId) config.headers["x-tenant-id"] = tenant.tenantId;
     if (tenant?.tenantCode) config.headers["x-tenant-code"] = tenant.tenantCode;
     return config;
@@ -49,28 +53,38 @@ export function createAdminHttpClient<T extends PlatformLoginResponse>({ baseURL
   http.interceptors.response.use(response => response, async error => {
     const original = error?.config as TrackedRequest | undefined, callerSignal = original?.signal;
     const stale = () => callerSignal?.aborted || original?._sessionEpoch !== undefined && original._sessionEpoch !== session.currentSessionEpoch();
+    const credentialsChanged = () => original?._sessionAccessToken !== session.accessToken()
+      || original?._sessionRefreshToken !== session.refreshToken();
     if (stale()) return Promise.reject(error);
     const authEndpoint = original?.url?.includes("/auth/login") || original?.url?.includes("/auth/refresh");
     if (error?.response?.status === 401 && original && !original._authRetry && !authEndpoint) {
-      const refreshToken = session.refreshToken();
+      const retry = (accessToken: string) => {
+        const signal = callerSignal ? AbortSignal.any([callerSignal as AbortSignal, session.currentSessionSignal()]) : session.currentSessionSignal();
+        if (signal.aborted) return Promise.reject(error);
+        original.signal = signal; original.headers.Authorization = `Bearer ${accessToken}`;
+        return http.request(original);
+      };
+      original._authRetry = true;
+      // 同一主体已刷新时，迟到的旧401只用当前凭据重读一次，不再次轮换或退出新会话。
+      if (credentialsChanged()) {
+        const accessToken = session.accessToken();
+        return accessToken ? retry(accessToken) : Promise.reject(error);
+      }
+      const refreshToken = original._sessionRefreshToken;
       if (refreshToken) {
-        original._authRetry = true; original._authRefreshToken = refreshToken;
         try {
           const refreshed = await refreshSession(refreshToken);
           if (stale()) return Promise.reject(error);
           const accessToken = refreshed?.accessToken ?? session.accessToken();
           if (!accessToken) throw error;
-          const signal = callerSignal ? AbortSignal.any([callerSignal as AbortSignal, session.currentSessionSignal()]) : session.currentSessionSignal();
-          if (signal.aborted) return Promise.reject(error);
-          original.signal = signal; original.headers.Authorization = `Bearer ${accessToken}`;
-          return http.request(original);
+          return retry(accessToken);
         } catch {
           // 刷新失败由下方唯一清理点处理，跨标签已轮换者可沿新凭据继续。
         }
       }
     }
     if (stale()) return Promise.reject(error);
-    if (error?.response?.status === 401 && (!original?._authRefreshToken || original._authRefreshToken === session.refreshToken())) session.expire();
+    if (error?.response?.status === 401 && original && !credentialsChanged()) session.expire();
     return Promise.reject(error);
   });
 
