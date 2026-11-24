@@ -52,7 +52,7 @@
 | [原角色目录参加者](src/public-management-compatibility.ts)、[公共登记事务](../platform-core-host/src/platform-core-permissions.ts) | `/public-management-compatibility` 导出 `createRentalPermissionRegistrationParticipant()`，受控宿主将其传入同一 Serializable 登记事务；只选所用清单对应的原业务码，包含经营空间品类版本采用，保留名称、说明、按钮类型、历史模块及权限 ID，角色编辑继续保存原码。采用仍须原预览开关、业务权限与空间范围 |
 | [存量授权准备](src/legacy-access-preparation.ts) | `/legacy-access-preparation` 在同库只读快照中对照原身份、空间权限与现有 Rental 授权/绑定，给出缺失候选和差异；实际变更仍需原管理事务 |
 | [存量单项接管](src/legacy-access-adoption.ts) | `/legacy-access-adoption` 将确认的单项候选交回原管理服务，在同一事务复验来源、当前身份和修订，沿原操作键保存授权/分配/绑定及审计 |
-| [经营空间会话权威](src/mysql-workspace-principal.ts)、[原仓储入口](../../apps/api/src/modules/platform/platform.repository.ts) | `@rental-os/rental-core/mysql-workspace-principal` 提供可进入空间、默认空间、成员权限及会话复验，构造时传入同一数据库与原账号/角色投影回调。原 Auth、Guard 和 MCP 沿六个仓储入口消费同一实例，角色及权限锁沿原事务顺序 |
+| [经营空间会话权威](src/mysql-workspace-principal.ts)、[原仓储入口](../../apps/api/src/modules/platform/platform.repository.ts) | `@rental-os/rental-core/mysql-workspace-principal` 提供可进入空间、默认空间、成员权限及会话复验，构造时传入同一数据库与原账号/角色投影回调。原 Auth、Guard 和 MCP 沿六个仓储入口消费同一实例，角色及权限锁沿原事务顺序。服务端明确登记的缓冲读取持共享身份锁，业务写入及原会话管理保留独占锁；每个原事务仍核当前权限与会话，返回前复验 |
 | [主应用工厂](src/mysql-primary-application.ts)、[原宿主接线](../../apps/api/src/modules/rental-core/rental-primary-application.providers.ts) | `/mysql-primary-application` 构造同一对核心与报价/营销实例，显式提供真实配置快照、数据库和参加者；旧服务令牌、HTTP及AI消费这两个实例 |
 | [独立API宿主](../../apps/rental-api/README.md)、[唯一根模块](../../apps/rental-api/src/app.module.ts)、[请求政策](src/http-access-policy.ts) | 组合公共平台与同一Rental应用、身份和数据库；按真实处理器区分身份维护、公开、业务与管理准入，未接齐的必要处理器在连接和监听前拒绝。原事务、提交收据和返回前字段复验分别保留 |
 | [核心聚合](src/mysql-core-runtime.ts)、[宿主接点](src/core-runtime-ports.ts) | `/mysql-core-runtime` 持有原配置、库存、订单、交接及结算裁定；主应用工厂供给原依赖，Controller/AI/企业及各端继续消费原签名 |

@@ -78,7 +78,7 @@ try {
   process.exitCode = check && (result.issues.length || result.coverage.partial.length || result.coverage.notPresent.length) ? 1 : 0;
 } catch (error) {
   const message = error instanceof Error ? error.message : "能力索引读取失败";
-  if (json) process.stdout.write(JSON.stringify({ audience: "development", error: message }) + "\n");
+  if (args.includes("--json")) process.stdout.write(JSON.stringify({ audience: "development", error: message }) + "\n");
   else console.error(message);
   process.exitCode = 2;
 }

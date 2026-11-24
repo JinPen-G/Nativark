@@ -64,8 +64,8 @@ export class RentalMysqlAuthenticationRepository extends PlatformAuthenticationR
     return this.workspacePrincipals.readWorkspaceSessionUser(transaction, expected);
   }
   lockMemberSessionUser(transaction: RentalWorkspaceAccessTransaction, expected: RentalMemberSessionIdentity,
-    parentLock: "exclusive" | "shared" = "exclusive") {
-    return this.workspacePrincipals.lockMemberSessionUser(transaction, expected, parentLock);
+    parentLock: "exclusive" | "shared" = "exclusive", identityLock: "exclusive" | "shared" = "exclusive") {
+    return this.workspacePrincipals.lockMemberSessionUser(transaction, expected, parentLock, identityLock);
   }
   readMemberSessionUser(transaction: RentalWorkspaceAccessTransaction, expected: RentalMemberSessionIdentity) {
     return this.workspacePrincipals.readMemberSessionUser(transaction, expected);

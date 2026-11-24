@@ -37,6 +37,8 @@ export interface RentalMemberAuthorityRequest {
   readonly path: string;
   readonly projection: "tenant" | "workspace";
   readonly allowInvalidWorkspace: boolean;
+  /** 只由请求边界的原缓冲读取声明供给，不接受客户端或路由方法推断。 */
+  readonly bufferedRead?: true;
 }
 export interface RentalMemberAuthorityLease { revalidate(): Promise<void> }
 
@@ -53,7 +55,8 @@ export function createRentalMemberAuthority(input: {
         throw new CoreAccessError("denied", "Rental 普通请求缺少原同事务成员身份与空间依据");
       const original = memberProjectionKey(request.user);
       const lease = await input.auth.lockRequestMemberAccess(transaction,
-        { projection: request.projection, allowInvalidWorkspace: request.allowInvalidWorkspace });
+        { projection: request.projection, allowInvalidWorkspace: request.allowInvalidWorkspace,
+          ...(request.bufferedRead === true ? { bufferedRead: true } : {}) });
       const revalidate = async () => {
         const { user, configuredLocationScope } = await lease.revalidate();
         if (getRequestIdentity() !== identity || memberProjectionKey(user) !== original

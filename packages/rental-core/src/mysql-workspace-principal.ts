@@ -190,30 +190,33 @@ export class RentalWorkspacePrincipalRepository<Transaction extends RentalWorksp
     return (await this.lockMemberSessionUser(tx, { ...expected, projection: "workspace", allowInvalidWorkspace: false })).user;
   }
 
-  /** 普通业务共用原主体锁及角色投影。Tenant S 沿原业务父锁，可在已持 Tenant X 时复用，
-   * 不升级 S→X；原空间会话事务仍默认 Tenant X。其余身份锁保持原排序及强度。 */
+  /** 普通业务共用原主体锁及角色投影。Tenant S 沿原业务父锁，可在已持 Tenant X 时复用。
+   * 只有已登记缓冲读取可选择身份 S，让并发读页共用当前事实，并阻止撤权/刷新取得 X。
+   * 写入及原空间会话事务默认身份 X；锁顺序、原会话/角色投影和返回复验保持。 */
   async lockMemberSessionUser(tx: Transaction, expected: RentalMemberSessionIdentity,
-    parentLock: "exclusive" | "shared" = "exclusive"): Promise<RentalMemberSessionPrincipal> {
+    parentLock: "exclusive" | "shared" = "exclusive", identityLock: "exclusive" | "shared" = "exclusive"): Promise<RentalMemberSessionPrincipal> {
+    if (identityLock !== "exclusive" && identityLock !== "shared") throw new ForbiddenException("成员身份锁模式无效");
+    const identityLockSql = identityLock === "shared" ? prismaRuntime.sql`LOCK IN SHARE MODE` : prismaRuntime.sql`FOR UPDATE`;
     const tenant = await tx.$queryRaw<Array<{ id: string }>>(parentLock === "shared"
       ? prismaRuntime.sql`SELECT id FROM Tenant WHERE id = ${expected.tenantId} LOCK IN SHARE MODE`
       : prismaRuntime.sql`SELECT id FROM Tenant WHERE id = ${expected.tenantId} FOR UPDATE`);
-    const users = await tx.$queryRaw<Array<{ id: string; roleId: string | null }>>(prismaRuntime.sql`SELECT id, roleId FROM \`User\` WHERE id = ${expected.userId} AND tenantId = ${expected.tenantId} FOR UPDATE`);
+    const users = await tx.$queryRaw<Array<{ id: string; roleId: string | null }>>(prismaRuntime.sql`SELECT id, roleId FROM \`User\` WHERE id = ${expected.userId} AND tenantId = ${expected.tenantId} ${identityLockSql}`);
     if (tenant.length !== 1 || users.length !== 1) throw new UnauthorizedException("账号或租户已失效");
-    const sessions = await tx.$queryRaw<Array<{ id: string }>>(prismaRuntime.sql`SELECT id FROM auth_sessions WHERE id = ${expected.sessionId} AND userId = ${expected.userId} FOR UPDATE`);
+    const sessions = await tx.$queryRaw<Array<{ id: string }>>(prismaRuntime.sql`SELECT id FROM auth_sessions WHERE id = ${expected.sessionId} AND userId = ${expected.userId} ${identityLockSql}`);
     if (sessions.length !== 1) throw new UnauthorizedException("原会话已失效");
-    const members = expected.workspaceId === null ? [] : await tx.$queryRaw<Array<{ roleId: string | null }>>(prismaRuntime.sql`SELECT roleId FROM workspace_members WHERE tenantId = ${expected.tenantId} AND workspaceId = ${expected.workspaceId} AND userId = ${expected.userId} FOR UPDATE`);
+    const members = expected.workspaceId === null ? [] : await tx.$queryRaw<Array<{ roleId: string | null }>>(prismaRuntime.sql`SELECT roleId FROM workspace_members WHERE tenantId = ${expected.tenantId} AND workspaceId = ${expected.workspaceId} AND userId = ${expected.userId} ${identityLockSql}`);
     if (members.length > 1) throw new ForbiddenException("当前经营空间成员关系不唯一");
-    const assignments = await tx.$queryRaw<Array<{ roleId: string }>>(prismaRuntime.sql`SELECT roleId FROM \`UserRole\` WHERE userId = ${expected.userId} ORDER BY roleId FOR UPDATE`);
+    const assignments = await tx.$queryRaw<Array<{ roleId: string }>>(prismaRuntime.sql`SELECT roleId FROM \`UserRole\` WHERE userId = ${expected.userId} ORDER BY roleId ${identityLockSql}`);
     const roleIds = [...new Set([users[0].roleId, members[0]?.roleId, ...assignments.map(row => row.roleId)].filter((id): id is string => Boolean(id)))].sort();
     const permissionIds = new Set<string>();
     for (const roleId of roleIds) {
-      const roles = await tx.$queryRaw<Array<{ id: string }>>(prismaRuntime.sql`SELECT id FROM \`Role\` WHERE id = ${roleId} AND tenantId = ${expected.tenantId} FOR UPDATE`);
+      const roles = await tx.$queryRaw<Array<{ id: string }>>(prismaRuntime.sql`SELECT id FROM \`Role\` WHERE id = ${roleId} AND tenantId = ${expected.tenantId} ${identityLockSql}`);
       if (roles.length !== 1) throw new ForbiddenException("账号角色不属于当前租户或已失效");
-      const permissions = await tx.$queryRaw<Array<{ permissionId: string }>>(prismaRuntime.sql`SELECT permissionId FROM \`RolePermission\` WHERE roleId = ${roleId} ORDER BY permissionId FOR UPDATE`);
+      const permissions = await tx.$queryRaw<Array<{ permissionId: string }>>(prismaRuntime.sql`SELECT permissionId FROM \`RolePermission\` WHERE roleId = ${roleId} ORDER BY permissionId ${identityLockSql}`);
       for (const row of permissions) permissionIds.add(row.permissionId);
     }
     for (const permissionId of [...permissionIds].sort()) {
-      await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM \`Permission\` WHERE id = ${permissionId} FOR UPDATE`);
+      await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM \`Permission\` WHERE id = ${permissionId} ${identityLockSql}`);
     }
     // 即使没有成员行，也先复验原会话及租户角色，不能用空间不可用掩盖撤销/切换。
     const scoped = await this.readMemberSessionUser(tx, expected);

@@ -108,6 +108,7 @@ type RequestEvidence = {
   actor: string;
   tenantScope: boolean;
   newBusiness: boolean;
+  bufferedRead: boolean;
   deploymentContinuation: boolean;
   management?: "catalog" | "tenant";
   leases: WeakMap<object, PlatformPrincipalLease>;
@@ -326,7 +327,7 @@ export function createRentalApplicationAccess(input: RentalApplicationAccessDepe
     return { active: true, request, method, path, objectPath: normalizeRequestPath(request.url), tenantId: management?.tenantId ?? identity.tenantId, userId: identity.userId,
       audience, workspaceId, sessionId, expiresAt, identity: identityFingerprint(),
       sourceIdentity: identity, actor: actorFingerprint(request, audience), tenantScope,
-      newBusiness: policy.isNewBusinessRoute(method, path), deploymentContinuation: deploymentContinuation?.(method, path) === true,
+      newBusiness: policy.isNewBusinessRoute(method, path), bufferedRead: false, deploymentContinuation: deploymentContinuation?.(method, path) === true,
       management: management?.kind, leases: new WeakMap(), memberLeases: new WeakMap(), recoveryLeases: new WeakMap() };
   };
 
@@ -362,7 +363,8 @@ export function createRentalApplicationAccess(input: RentalApplicationAccessDepe
         await input.memberAuthority.lock(transaction, { tenantId, workspaceId: evidence.workspaceId,
           audience: evidence.audience, user: evidence.request.user, method: evidence.method, path: evidence.path,
           projection: policy.isTenantMembershipRoute(evidence.path) ? "tenant" : "workspace",
-          allowInvalidWorkspace: evidence.tenantScope }));
+          allowInvalidWorkspace: evidence.tenantScope,
+          ...(evidence.bufferedRead ? { bufferedRead: true } : {}) }));
       return;
     }
     if (tenantId !== evidence.tenantId || "$transaction" in transaction || !managementTransaction(transaction))
@@ -545,6 +547,8 @@ export function createRentalApplicationAccess(input: RentalApplicationAccessDepe
         || !readMethod && isRead && (maintained || evidence.method !== "POST")) {
         throw new CoreAccessError("denied", "Rental 读取须明确登记缓冲或独立事务审计；POST 仅允许已审定读取，不允许派生维护");
       }
+      // 仅原处理器的已核缓冲声明选择共享身份锁；请求字段和 GET 方法本身不赋予此模式。
+      evidence.bufferedRead = buffered;
       scope.evidence = evidence;
       const internal = createRentalInternalAuthorityScope(() => assertEvidence(evidence), () => evidence.request.client, evidence.request);
       return internal.run(async () => { try {

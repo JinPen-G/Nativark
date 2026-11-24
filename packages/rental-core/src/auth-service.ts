@@ -437,9 +437,10 @@ export class RentalAuthService extends AuthSessionService<LoginResponse, AuthAcc
   }
 
   /** 普通 Core 提交在调用方原事务复用当前会话/角色投影，Tenant 使用原业务共享父锁。
-   * 这两个选项只来自原 Guard 的路由选择；不赋予权限，不读取请求中的投影或空间字段。 */
+   * 原缓冲读取持共享身份锁，写入及其他读取保持独占锁；均阻止会话/角色在本事务内变化。
+   * 选项只来自原 Guard 和处理器声明；不赋予权限，不读取请求中的投影或空间字段。 */
   async lockRequestMemberAccess(tx: RentalWorkspaceAccessTransaction,
-    options: { projection: "tenant" | "workspace"; allowInvalidWorkspace: boolean }): Promise<RentalMemberAccessLease> {
+    options: { projection: "tenant" | "workspace"; allowInvalidWorkspace: boolean; bufferedRead?: true }): Promise<RentalMemberAccessLease> {
     const identity = getRequestIdentity(), session = identity?.accessSession;
     if (!identity?.tenantId || !identity.userId || !["operator", "staff"].includes(identity.audience ?? "")
       || !session?.sessionId || !Number.isSafeInteger(session.expiresAt)
@@ -453,7 +454,8 @@ export class RentalAuthService extends AuthSessionService<LoginResponse, AuthAcc
       if (expiresAt <= Math.floor(Date.now() / 1000)) throw new UnauthorizedException("原访问令牌已到期，请先核对原操作结果");
     };
     assertNotExpired();
-    const principal = await this.platformService.lockMemberSessionUser(tx, expected, "shared");
+    const principal = await this.platformService.lockMemberSessionUser(tx, expected, "shared",
+      options.bufferedRead === true ? "shared" : "exclusive");
     assertNotExpired();
     return { principal, revalidate: async () => {
       assertNotExpired();
