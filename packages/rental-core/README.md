@@ -210,7 +210,7 @@ node -e "const { createRentalOpenApi } = require('@rental-os/rental-core/http-op
 
 标准包工厂 `/package` 使用已有 TypeScript 解析器核对源码和声明中的真实模块引用，覆盖 import、export、动态 import、require、类型导入与 import-equals。展示代码的字符串和注释按原文随包保留。调用此构建出口时须提供所声明的 TypeScript peer，包内引用仍须有实际目标，运行 JavaScript 的依赖须提供可执行产物。[标准包工厂](src/package.ts)
 
-本版使用底座提供的 `CorePageActions` 正文动作、原按钮变体、当前事务部署观察及文件清理跨轮调度接点，所需底座最低版本为0.1.11。清理调用通过原运行时实例提供稳定的 `schedulingScope`，仓储包装重建后仍继续原有界队列；其他运行时实例保持独立。平台接入合同和Rental数据版本继续由原正式声明维护；升级先按清单核兼容，再更新所选Core与宿主锁，不改租户授权、业务数据或重跑业务初始化。[最低底座与合同要求](src/manifest.ts) · [正文动作接点](../platform-admin/src/core/README.md) · [清理接点](../platform-server/src/modules/files/README.md)
+本版使用底座提供的 `CorePageActions` 正文动作、原按钮变体、页面和桌面插槽、受控租户统计、当前事务部署观察及文件清理跨轮调度接点，所需底座最低版本为0.1.12。清理调用通过原运行时实例提供稳定的 `schedulingScope`，仓储包装重建后仍继续原有界队列；其他运行时实例保持独立。平台接入合同和Rental数据版本继续由原正式声明维护；升级先按清单核兼容，再更新所选Core与宿主锁，不改租户授权、业务数据或重跑业务初始化。[最低底座与合同要求](src/manifest.ts) · [正文动作接点](../platform-admin/src/core/README.md) · [清理接点](../platform-server/src/modules/files/README.md)
 
 Rental HTTP从 `@rental-os/rental-core/http` 的 `RentalHttpModule` 接入，类型 `RentalHttpServiceGroups` 列出宿主需要供给的真实应用。
 
@@ -408,7 +408,7 @@ npm run build -w @rental-os/rental-core
 npm run lint -w @rental-os/rental-core
 ```
 
-正式[编译入口](../../scripts/build-selected-prisma.cjs)支持 `--project <原tsconfig>`、`--mode rental`、`--client <index.d.ts>` 和 `--noEmit`。npm 前置链通过绝对路径变量 `RENTAL_PRISMA_CLIENT` 继承同一个选择；仅把 `--client` 追加到末端 npm 命令不会传给前置构建。编译器只增加 `@prisma/client` 的精确类型映射，保留原 `rootDir`、输出目录及正式出口；声明、相邻 `schema.prisma`、模型集合或已配置路径不一致时立即失败。编译不读取 `.env`、不生成或运行Client、不启动引擎或连接数据库。发行 `.d.ts` 保留 `@prisma/client`，消费者也须将其解析到自己同一所选Client。
+正式[编译入口](../../scripts/build-selected-prisma.cjs)支持 `--project <原tsconfig>`、`--mode rental`、`--client <index.d.ts>` 和 `--noEmit`。npm 前置链通过绝对路径变量 `RENTAL_PRISMA_CLIENT` 继承同一个选择；仅把 `--client` 追加到末端 npm 命令不会传给前置构建。编译器只增加 `@prisma/client` 的精确类型映射，保留原 `rootDir`、输出目录及正式出口；声明、相邻 `schema.prisma`、模型集合或已配置路径不一致时立即失败。编译不读取 `.env`、不生成或运行Client、不启动引擎或连接数据库。发行 `.d.ts` 通过正式 `@prisma/client` 及其运行库出口引用生成类型和 JSON 类型，Controller 直接引用同一应用端口的返回类型；消费者将生成类型解析到自己同一所选Client。
 
 旧 `apps/api` 的原241模型组合沿原生成及运行Client维护；编译依赖包时须显式指定本仓库原默认生成声明，并额外设置 `RENTAL_PRISMA_LEGACY=1`（或CLI传 `--legacy`）。该路径核对生成 schema 与原宿主源码一致，不能把旧241冒充独立247；独立 `rental-api` / `platform-api` 拒绝 legacy。独立构建前应移除该兼容变量。
 

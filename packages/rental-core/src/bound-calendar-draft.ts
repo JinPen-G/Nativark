@@ -5,7 +5,7 @@
  * revalidation callback; ALS/command fields alone never grant a calendar write. */
 import { ConflictException, ForbiddenException } from '@nestjs/common';
 import type { RentalCalendarOverrideAuditEntry } from '@prisma/client';
-import { sqltag as sql, type InputJsonValue } from '@prisma/client/runtime/library';
+import { sqltag as sql, type InputJsonValue, type JsonObject } from '@prisma/client/runtime/library';
 import { z } from 'zod';
 import { isRentalCategoryCode, type RentalCalendarDay, type RentalCalendarYear } from './contracts';
 import { getRequestIdentity } from '@rental-os/platform-server/request-identity';
@@ -116,7 +116,7 @@ export class BoundCalendarDraftService {
     const receiptMetadata = { ...metadata };
     if (!Object.hasOwn(saved, 'overrideConfirmed')) delete (receiptMetadata as { overrideConfirmed?: boolean }).overrideConfirmed;
     if (requestFingerprint(saved) !== requestFingerprint(receiptMetadata)) throw new ConflictException('同一原操作键不能改版本、输入或主体');
-    const after = { ...row.after }; delete after[marker];
+    const after: JsonObject = { ...row.after }; delete after[marker];
     const proof = requestFingerprint({ metadata: receiptMetadata, before: row.before, after, reason: row.reason, operator: row.operator, at: row.at.toISOString() });
     if (proofHash !== proof || !object(row.before)
       || Object.keys(command.before).some(key => requestFingerprint((row.before as Record<string, unknown>)[key]) !== requestFingerprint(command.before[key as keyof typeof command.before])))
@@ -124,7 +124,7 @@ export class BoundCalendarDraftService {
     return { state: 'committed' as const, receiptId: row.id, operationKey: command.operationKey, commandHash: metadata.commandHash,
       targetId: metadata.targetId, year: row.year, version: row.version, date: row.date,
       baseRevision: metadata.baseRevision, resultRevision: metadata.resultRevision,
-      before: structuredClone(row.before), after, committedAt: row.at.toISOString(),
+      before: structuredClone<JsonObject>(row.before), after, committedAt: row.at.toISOString(),
       ...(command.reviewHash !== undefined ? { reviewHash: command.reviewHash } : {}),
       businessDraft: 'saved_not_published' as const, publication: 'not_attempted' as const };
   }

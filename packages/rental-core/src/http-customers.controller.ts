@@ -208,7 +208,7 @@ export class RentalCustomersController {
 
   /** CUSTOMER-01D：提交人工合并。不搬订单、不合并空间权益，只写映射并标记被合并方。 */
   @Post("customers/merge")
-  mergeCustomers(@Body() body: MergeCustomersDto, @Req() req: RequestWithUser) {
+  mergeCustomers(@Body() body: MergeCustomersDto, @Req() req: RequestWithUser): ReturnType<RentalCustomersHttpApplication["mergeCustomers"]> {
     return this.customers.mergeCustomers(body, req.user);
   }
 
