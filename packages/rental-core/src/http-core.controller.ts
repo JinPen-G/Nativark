@@ -567,13 +567,13 @@ export class RentalCoreController {
   @Get("coupon-templates") couponTemplates(@Req() req: AuthenticatedRequest) { return this.service.readCouponTemplates(req.user.tenantId); }
   @Post("coupon-templates") saveCouponTemplate(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalCouponTemplateDto) { return this.committed(req.user.tenantId, this.service.saveCouponTemplate(req.user.tenantId, body)); }
   @Put("coupon-templates/:id") updateCouponTemplate(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalCouponTemplateDto) { return this.committed(req.user.tenantId, this.service.saveCouponTemplate(req.user.tenantId, { ...body, id })); }
-  @Get("locations") async locations(@Req() req: AuthenticatedRequest) { await this.service.refreshCommittedWorkspace(req.user.tenantId); return this.service.listLocations(req.user.tenantId); }
-  @Get("fulfillment-operators") async operators(@Req() req: AuthenticatedRequest) { await this.service.refreshCommittedWorkspace(req.user.tenantId); return this.service.listOperators(req.user.tenantId); }
+  @Get("locations") locations(@Req() req: AuthenticatedRequest) { return this.service.readLocations(req.user.tenantId); }
+  @Get("fulfillment-operators") operators(@Req() req: AuthenticatedRequest) { return this.service.readOperators(req.user.tenantId); }
   @Post("fulfillment-operators") saveOperator(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalFulfillmentOperatorDto) { return this.committed(req.user.tenantId, this.service.saveOperator(req.user.tenantId, body)); }
   @Put("fulfillment-operators/:id") updateOperator(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalFulfillmentOperatorDto) { return this.committed(req.user.tenantId, this.service.saveOperator(req.user.tenantId, { ...body, id })); }
   @Post("locations") saveLocation(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalFulfillmentLocationDto) { return this.committed(req.user.tenantId, this.service.saveLocation(req.user.tenantId, body)); }
   @Put("locations/:id") updateLocation(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalFulfillmentLocationDto) { return this.committed(req.user.tenantId, this.service.saveLocation(req.user.tenantId, { ...body, id })); }
-  @Get("item-groups") async groups(@Req() req: AuthenticatedRequest) { await this.service.refreshCommittedWorkspace(req.user.tenantId); return this.service.listItemGroups(req.user.tenantId); }
+  @Get("item-groups") groups(@Req() req: AuthenticatedRequest) { return this.service.readItemGroups(req.user.tenantId); }
   @Post("item-groups") saveGroup(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalItemGroupDto) { return this.committed(req.user.tenantId, this.service.saveItemGroup(req.user.tenantId, body)); }
   @Put("item-groups/:id") updateGroup(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalItemGroupDto) { return this.committed(req.user.tenantId, this.service.saveItemGroup(req.user.tenantId, { ...body, id })); }
   @Post("item-groups/:id/images")

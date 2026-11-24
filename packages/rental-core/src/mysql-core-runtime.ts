@@ -152,7 +152,7 @@ import { RentalFundingService } from "./mysql-funding";
 
 import { parseRentalItemGroupPageQuery, type RentalConfigStore, type RentalDefaultWorkspaceInitialization,
   type RentalItemGroupPageQuery, type RentalItemGroupPage, RENTAL_OPENING_TERMINOLOGY_FIELDS,
-  type RentalOpeningConfigurationFacts } from "./mysql-core-configuration";
+  type RentalOpeningConfigurationFacts, type RentalWorkspaceConfigurationKind, type RentalWorkspaceConfigurationRead } from "./mysql-core-configuration";
 import { lockActiveCategoryBinding, type CategoryWriteBinding } from "./mysql-category-write";
 import { assertCurrentOfflinePaymentMethod, assertRentalOfflinePaymentMethodEnabled, parseRentalOfflinePaymentMethod } from "./mysql-offline-payment-method";
 import type { RentalFulfillmentRequirement } from "./mysql-fulfillment-admission";
@@ -726,8 +726,25 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
 
   listCategories() { return categories; }
   async getWorkspaceCategory(tenantId: string): Promise<RentalCategoryDefinition> {
+    const page = await this.readPageConfiguration(tenantId, "category");
+    if (page) return page.definition;
     const current = await this.refreshCommittedWorkspace(tenantId);
     return current?.definition ?? this.effectiveCategory(tenantId, this.state(tenantId).profile.categoryCode);
+  }
+  /** 页面R0读取不进入配置发布队列；每条请求保留自己的原事务、当前品类锁
+   * 和身份，不借另一请求的Promise或部分配置更新共享缓存。 */
+  private async readPageConfiguration<K extends RentalWorkspaceConfigurationKind>(tenantId: string, kind: K):
+    Promise<Extract<RentalWorkspaceConfigurationRead, { kind: K }> | undefined> {
+    if (!this.configStore.readWorkspaceConfiguration) return undefined;
+    const workspaceId = this.workspaceOf(tenantId), identity = getRequestIdentity(), identityBinding = requestFingerprint(identity);
+    if (identity?.tenantId && identity.tenantId !== tenantId || hasRentalBusinessTenantFence() && !identity?.userId)
+      throw new ForbiddenException("页面配置缺少本请求的当前租户身份");
+    const current = await this.configStore.readWorkspaceConfiguration(tenantId, workspaceId, kind);
+    if (current.kind !== kind || current.tenantId !== tenantId || current.workspaceId !== workspaceId
+      || current.definition.code === undefined) throw new ConflictException("页面配置的类型、空间或品类来源变化");
+    if (this.workspaceOf(tenantId) !== workspaceId || requestFingerprint(getRequestIdentity()) !== identityBinding)
+      throw new ForbiddenException("页面配置读取期间当前身份或经营空间变化");
+    return structuredClone(current) as Extract<RentalWorkspaceConfigurationRead, { kind: K }>;
   }
   /** Refresh only current configuration from a scoped committed snapshot. It
    * never republishes snapshots or creates sample facts; old contexts hold their
@@ -948,6 +965,16 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
     if (tx) await this.configStore.captureOpeningConfiguration?.(state.profile.tenantId, tx);
   }
   async getProfile(tenantId: string) {
+    const page = await this.readPageConfiguration(tenantId, "profile");
+    if (page) {
+      const profile = page.profile;
+      if (!profile) throw new ConflictException("经营空间档案尚未持久化，不能以模板值冒充当前配置");
+      if (profile.tenantId !== tenantId || profile.categoryCode !== page.definition.code)
+        throw new ConflictException("经营空间档案与当前租户或品类不一致，不能用模板覆盖");
+      return { ...profile, categoryVersionId: page.binding.categoryVersionId, categoryAdoptionRevision: page.binding.adoptionRevision,
+        terminology: { ...page.definition.terminology, ...profile.terminology,
+          navigationLabels: { ...page.definition.terminology.navigationLabels, ...profile.terminology.navigationLabels } } };
+    }
     const current = await this.refreshCommittedWorkspace(tenantId);
     if (current && !current.effectiveProfile) throw new ConflictException("经营空间档案尚未持久化，不能以模板值冒充当前配置");
     const profile = current?.effectiveProfile ?? this.state(tenantId).profile;
@@ -1345,12 +1372,26 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
     return this.visibleLocations(this.state(tenantId).locations);
   }
 
+  async readLocations(tenantId: string) {
+    const page = await this.readPageConfiguration(tenantId, "locations");
+    if (page) return this.visibleLocations(page.locations);
+    await this.refreshCommittedWorkspace(tenantId);
+    return this.listLocations(tenantId);
+  }
+
   private visibleLocations(locations: RentalFulfillmentLocation[]) {
     const locationIds = getRequestStaffLocationIds();
     return locationIds === undefined ? locations : locations.filter((row) => locationIds.includes(row.id));
   }
 
   listOperators(tenantId: string) { return this.state(tenantId).operators; }
+
+  async readOperators(tenantId: string) {
+    const page = await this.readPageConfiguration(tenantId, "operators");
+    if (page) return page.operators;
+    await this.refreshCommittedWorkspace(tenantId);
+    return this.listOperators(tenantId);
+  }
 
   async saveOperator(tenantId: string, input: SaveRentalFulfillmentOperatorRequest) {
     const state = this.state(tenantId);
@@ -1454,6 +1495,12 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
     return result;
   }
   listItemGroups(tenantId: string) { return this.state(tenantId).itemGroups.map((group) => this.publicItemGroup(group)); }
+  async readItemGroups(tenantId: string) {
+    const page = await this.readPageConfiguration(tenantId, "item-groups");
+    if (page) return page.itemGroups.map(group => this.publicItemGroup(group));
+    await this.refreshCommittedWorkspace(tenantId);
+    return this.listItemGroups(tenantId);
+  }
   /** Minimal persisted read port for bounded consumers. Existing cached/manual
    * list and all pricing/write semantics remain unchanged. No fallback scan. */
   async listItemGroupsPage(tenantId: string, value: RentalItemGroupPageQuery): Promise<RentalItemGroupPage> {

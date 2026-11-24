@@ -268,6 +268,8 @@ HTTP入口从 `/http-workspace-capabilities`、`/http-staff-payments` 导入；`
 
 品类HTTP从 `/http-category` 接入，将同一治理、准备和采用实例交给 `RentalCategoryHttpModule.register({ governance, preparations, adoptions })`；已有Nest服务模块可用 `registerFactory` 的 imports、inject 和 useFactory 供给同一对象。原API沿三个 `useExisting` 令牌接线，AI及旧HTTP引用同一Controller类。宿主仍提供全局身份/权限Guard，环境开关只控制预览暴露。[HTTP模块](src/http-category.module.ts) · [三项应用接点](src/http-category-applications.ts) · [原宿主接线](../../apps/api/src/modules/rental-core/category-http.providers.ts)
 
+档案、当前品类、地点、经营主体和完整商品列表通过 `readWorkspaceConfiguration` 各自读取所需配置，保留原字段、创建时间排序及套装同空间校验。每次读取仍在自己的原事务持有租户、Core 和当前品类采用锁，并在返回前复核身份、空间与地点范围；地点继续按当前授权投影。页面读取不排队刷新全部配置，也不发布部分缓存或跨请求共享就绪结果。启动、编辑和完整业务上下文继续使用原全量配置刷新，报价、规则、历史快照和写入不变。[页面读取](src/mysql-core-runtime.ts) · [配置仓储](src/mysql-core-configuration.ts) · [原HTTP入口](src/http-core.controller.ts)
+
 治理请求从 `/http-category-governance.dto`，准备/采用请求从 `/http-category-adoption.dto` 导入；两组共用原15个校验类和字段。`platform/rental-categories` 与 `rental/v1/category-adoption` 的25个方法保持原路径，字段继续消费原OpenAPI，返回结果仍由业务服务裁定。预览默认关闭，生产环境始终关闭。[治理HTTP](src/http-category-governance.controller.ts) · [采用HTTP](src/http-category-adoption-preparation.controller.ts) · [预览门禁](src/http-category-preview.guard.ts) · [原API字段](../../apps/api/src/contracts/openapi-document.ts)
 
 绑定草稿从 `@rental-os/rental-core/bound-rule-draft` 或 `/bound-calendar-draft` 创建，供给同一数据源和原业务服务。调用方先走原规则/日历Guard，再将当前复验函数传给 `review`、`save` 和 `read`。`review` 只返回完整候选及核对摘要，`save` 在原父锁→空间锁内校验摘要与目标版本，业务草稿和原收据同事务；`read` 按原键回读。规则历史恢复产生新草稿，已有草稿使用原CAS，保存不发布、不创建AI任务或批准。[原规则消费者](../../apps/api/src/modules/ai-native/scenes/opening-rule-draft.composition.ts) · [原日历消费者](../../apps/api/src/modules/ai-native/scenes/opening-calendar-draft.composition.ts)
