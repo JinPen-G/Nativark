@@ -21,6 +21,9 @@ export interface RentalPlatformUsers<Tx extends PlatformCoreTransaction> extends
 export interface RentalPlatformConfiguration<Tx extends PlatformCoreTransaction> {
   loadWorkspaceSnapshot(tenantId: string, workspaceId: string, transaction: Tx):
     Promise<{ tenantId: string; workspaceId: string; profile?: TenantRentalProfile; businessSettings?: TenantRentalBusinessSettings }>;
+  /** 同原Native和采用锁仅取完整档案/设置；未提供的旧宿主保留全量读取。 */
+  readReadinessConfiguration?(tenantId: string, workspaceId: string, transaction: Tx):
+    Promise<{ tenantId: string; workspaceId: string; profile?: TenantRentalProfile; businessSettings?: TenantRentalBusinessSettings }>;
 }
 
 export function composeRentalPlatformHost<Tx extends PlatformCoreTransaction>(input: {
@@ -56,7 +59,9 @@ export function composeRentalPlatformHost<Tx extends PlatformCoreTransaction>(in
     }
     const workspaceId = binding.container!.id;
     // 原仓储持空间采用锁并解析已保存配置，不从模板或恢复缓存补造当前档案。
-    const snapshot = await input.configuration.loadWorkspaceSnapshot(binding.tenantId, workspaceId, transaction);
+    const snapshot = input.configuration.readReadinessConfiguration
+      ? await input.configuration.readReadinessConfiguration(binding.tenantId, workspaceId, transaction)
+      : await input.configuration.loadWorkspaceSnapshot(binding.tenantId, workspaceId, transaction);
     if (snapshot.tenantId !== binding.tenantId || snapshot.workspaceId !== workspaceId)
       throw new CoreAccessError("denied", "Rental配置不属于当前业务绑定");
     const missing = [

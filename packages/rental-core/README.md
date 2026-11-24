@@ -270,6 +270,8 @@ HTTP入口从 `/http-workspace-capabilities`、`/http-staff-payments` 导入；`
 
 档案、当前品类、地点、经营主体和完整商品列表通过 `readWorkspaceConfiguration` 各自读取所需配置，保留原字段、创建时间排序及套装同空间校验。每次读取仍在自己的原事务持有租户、Core 和当前品类采用锁，并在返回前复核身份、空间与地点范围；地点继续按当前授权投影。页面读取不排队刷新全部配置，也不发布部分缓存或跨请求共享就绪结果。启动、编辑和完整业务上下文继续使用原全量配置刷新，报价、规则、历史快照和写入不变。[页面读取](src/mysql-core-runtime.ts) · [配置仓储](src/mysql-core-configuration.ts) · [原HTTP入口](src/http-core.controller.ts)
 
+Core绑定和空间就绪检查可通过 `readReadinessConfiguration` 在同一原事务、当前采用锁下仅读取完整档案与业务设置，沿原解析与缺项判定返回结果；商品、价格等集合不参与这一存在性检查。旧宿主未提供该可选读口时保留原全量读取，已提供读口的错误仍直接拒绝，不改用缓存或默认值。作业与完整业务快照继续消费原读取器。[宿主就绪](src/platform-host.ts)
+
 治理请求从 `/http-category-governance.dto`，准备/采用请求从 `/http-category-adoption.dto` 导入；两组共用原15个校验类和字段。`platform/rental-categories` 与 `rental/v1/category-adoption` 的25个方法保持原路径，字段继续消费原OpenAPI，返回结果仍由业务服务裁定。预览默认关闭，生产环境始终关闭。[治理HTTP](src/http-category-governance.controller.ts) · [采用HTTP](src/http-category-adoption-preparation.controller.ts) · [预览门禁](src/http-category-preview.guard.ts) · [原API字段](../../apps/api/src/contracts/openapi-document.ts)
 
 绑定草稿从 `@rental-os/rental-core/bound-rule-draft` 或 `/bound-calendar-draft` 创建，供给同一数据源和原业务服务。调用方先走原规则/日历Guard，再将当前复验函数传给 `review`、`save` 和 `read`。`review` 只返回完整候选及核对摘要，`save` 在原父锁→空间锁内校验摘要与目标版本，业务草稿和原收据同事务；`read` 按原键回读。规则历史恢复产生新草稿，已有草稿使用原CAS，保存不发布、不创建AI任务或批准。[原规则消费者](../../apps/api/src/modules/ai-native/scenes/opening-rule-draft.composition.ts) · [原日历消费者](../../apps/api/src/modules/ai-native/scenes/opening-calendar-draft.composition.ts)
