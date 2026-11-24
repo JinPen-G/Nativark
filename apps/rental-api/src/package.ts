@@ -13,8 +13,10 @@ export function createRentalHostPackage(input: Omit<Parameters<typeof createRent
   }
   const portable = edition === "portable";
   const file = portable ? RENTAL_PORTABLE_OPENAPI_FILE : legacyFile;
-  const openApi = rentalHostReleaseOpenApi(file);
-  files.set(file, Buffer.from(JSON.stringify(openApi) + "\n"));
+  // 两种文档从同一处理器生成，独立更新保留旧文档路径；清单仍只选择一个正式入口。
+  for (const document of [legacyFile, RENTAL_PORTABLE_OPENAPI_FILE] as const) {
+    files.set(document, Buffer.from(JSON.stringify(rentalHostReleaseOpenApi(document)) + "\n"));
+  }
   return createRentalPackage({ ...input, files, contributions: { openapi: file },
     legacyApiRoutes: portable ? [] : rentalHostLegacyApiRoutes() });
 }
