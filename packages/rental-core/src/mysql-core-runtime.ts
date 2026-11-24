@@ -2296,6 +2296,7 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
     * worker的可选scan只续读候选，HTTP和旧调用继续使用原三参数读取。
    */
   async listExpiredPendingOrderIds(tenantId: string, expiredBefore = now(), take = 50, scan?: RentalExpiredDraftOrderScan) {
+    await this.prepareColdWorkspace(tenantId);
     this.state(tenantId);
     return scan ? this.factStore.listExpiredDraftOrderIds(tenantId, expiredBefore, take, scan)
       : this.factStore.listExpiredDraftOrderIds(tenantId, expiredBefore, take);
@@ -2360,6 +2361,7 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
 
   /** RULE-CLOSE-01：列出已超过领取宽限、仍未领取的订单。 */
   async listPickupOverdueOrderIds(tenantId: string, at = now(), take = 50, scan?: RentalPickupOrderScan) {
+    await this.prepareColdWorkspace(tenantId);
     this.state(tenantId);
     const cutoff = Date.parse(at);
     if (!Number.isFinite(cutoff)) throw new BadRequestException("检查时间无效");
@@ -2387,6 +2389,7 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
 
   /** 已通知且达到最终确认时限的待确认爽约候选。 */
   async listNoShowCandidateIds(tenantId: string, at = now(), take = 50, scan?: RentalPickupOrderScan) {
+    await this.prepareColdWorkspace(tenantId);
     this.state(tenantId);
     const cutoff = Date.parse(at);
     if (!Number.isFinite(cutoff)) throw new BadRequestException("检查时间无效");
