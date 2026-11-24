@@ -10,12 +10,16 @@ import {
   useCorePageHost, useCoreRequest, useCoreForm, useCoreBinding, useLocale, type CoreAdminPageAction
 } from "@rental-os/platform-admin/core";
 import { formatSubscriptionDate } from "@rental-os/platform-admin/subscription/subscriptionLabels";
-import { TICKETS_CORE_ID, TICKETS_CORE_VERSION, TicketSchema, type Ticket } from "@rental-os/example-tickets-core/contracts";
+import { TICKETS_CORE_ID, TICKETS_CORE_VERSION, TicketSchema, type Ticket, type TicketAssignmentFilter } from "@rental-os/example-tickets-core/contracts";
 import { TICKETS_HTTP } from "@rental-os/example-tickets-core/http";
 
 const page = (pageId: string, ticketId?: string) => ({ coreId: TICKETS_CORE_ID, pageId, ...(ticketId ? { params: { ticketId } } : {}) });
 const permission = (action: string) => [{ resource: "ticket", action }];
 const stateNames = { open: "待处理", in_progress: "处理中", closed: "已关闭" };
+const assignmentNames = {
+  assigned: { zh: "已分派", en: "Assigned" },
+  unassigned: { zh: "未分派", en: "Unassigned" },
+};
 const pathFor = (path: string, id?: string) => "/" + path.replace(":ticketId", encodeURIComponent(id ?? ""));
 /** 只有本Core明确在提交前拒绝的错误才释放当前编辑；网络/500/无原收据继续保持未知。 */
 function rejectedBeforeCommit(error: unknown): boolean {
@@ -36,13 +40,14 @@ function useTicketNavigation() {
 }
 
 export function TicketsPage() {
-  const { request, queryKey } = useCoreRequest(), navigate = useTicketNavigation(), { t } = useLocale();
+  const { request, queryKey } = useCoreRequest(), navigate = useTicketNavigation(), { t, locale } = useLocale();
   const [offset, setOffset] = useState(0), [limit, setLimit] = useState(20), [state, setState] = useState<string>();
+  const [assignment, setAssignment] = useState<TicketAssignmentFilter>();
   const [subject, setSubject] = useState("");
   const searchSubject = subject.trim() || undefined;
-  const listKey = [...queryKey, "list", offset, limit, state, searchSubject];
+  const listKey = [...queryKey, "list", offset, limit, state, searchSubject, assignment];
   const query = useQuery({ queryKey: listKey, queryFn: async ({ signal }) =>
-    TICKETS_HTTP.page.response.parse(await request(pathFor(TICKETS_HTTP.page.path), { params: { offset, limit, state, subject: searchSubject }, signal })), meta: { liveRefresh: false } });
+    TICKETS_HTTP.page.response.parse(await request(pathFor(TICKETS_HTTP.page.path), { params: { offset, limit, state, subject: searchSubject, assignment }, signal })), meta: { liveRefresh: false } });
   const counts = useQuery({ queryKey: [...queryKey, "status-counts"], queryFn: async ({ signal }) =>
     TICKETS_HTTP.counts.response.parse(await request(pathFor(TICKETS_HTTP.counts.path), { signal })), meta: { liveRefresh: false } });
   const summary = <QueryState loading={counts.isPending} error={counts.error} onRetry={() => counts.refetch()}>
@@ -56,7 +61,11 @@ export function TicketsPage() {
         onChange={event => { setSubject(event.target.value); setOffset(0); }} />
         <Select allowClear aria-label={t("工单状态")} placeholder={t("全部状态")} value={state}
         options={Object.entries(stateNames).map(([value, label]) => ({ value, label: t(label) }))}
-        onChange={value => { setState(value); setOffset(0); }} /></>} columns={[
+        onChange={value => { setState(value); setOffset(0); }} />
+        <Select<TicketAssignmentFilter> allowClear aria-label={locale === "en-US" ? "Ticket assignment" : "工单分派"}
+          placeholder={locale === "en-US" ? "All assignments" : "全部分派"} value={assignment}
+          options={Object.entries(assignmentNames).map(([value, label]) => ({ value, label: locale === "en-US" ? label.en : label.zh }))}
+          onChange={value => { setAssignment(value); setOffset(0); }} /></>} columns={[
           { title: t("标题"), key: "subject", render: (_, row) => <DataTableText primary={row.subject} secondary={row.description || undefined} /> },
           { title: t("状态"), dataIndex: "state", render: (value: Ticket["state"]) => t(stateNames[value]) },
           { title: t("受派成员"), dataIndex: "assigneeId", render: value => value ?? t("尚未分派") },

@@ -10,6 +10,8 @@ export const TicketIdSchema = z.string().min(1).max(36).regex(/^[a-zA-Z0-9_-]+$(
 const id = TicketIdSchema;
 const revision = z.number().int().safe().positive();
 export const TicketStateSchema = z.enum(["open", "in_progress", "closed"]);
+export const TicketAssignmentFilterSchema = z.enum(["assigned", "unassigned"]);
+export type TicketAssignmentFilter = z.infer<typeof TicketAssignmentFilterSchema>;
 export const TicketSchema = z.object({
   id, tenantId: id, subject: z.string().trim().min(1).max(160), description: z.string().max(4000),
   createdBy: id, assigneeId: id.nullable(), state: TicketStateSchema, revision,
@@ -26,9 +28,10 @@ export const ListTicketsSchema = z.object({
   limit: z.number().int().min(1).max(100).default(20)
 }).strict();
 export type ListTickets = z.infer<typeof ListTicketsSchema>;
-/** 分页入口独立提供标题包含搜索和安全整数偏移；旧数组入口保持原合同。 */
+/** 分页按标题、状态和原受派成员是否为空筛选，正文与总数共用当前可读范围。 */
 export const TicketPageQuerySchema = ListTicketsSchema.extend({
   subject: z.string().trim().max(160).optional().describe("按标题字面包含搜索，区分大小写；首尾空白去除，空值不筛选"),
+  assignment: TicketAssignmentFilterSchema.optional().describe("assigned为已有受派成员，unassigned为尚未分派；不改变当前成员可读范围"),
   offset: z.number().int().safe().nonnegative().default(0)
 });
 export type TicketPageQuery = z.infer<typeof TicketPageQuerySchema>;

@@ -104,7 +104,7 @@ npm run pack:core -w @rental-os/example-tickets-core -- <Core仓库HTTPS地址> 
 | 方法与路径 | 业务权限 | 输入与返回 |
 | --- | --- | --- |
 | `GET /api/cores/example-tickets/tickets` | `example-tickets:ticket:read` | 可选state/offset/limit；当前可见工单数组 |
-| `GET /api/cores/example-tickets/ticket-pages` | 同上 | 可选subject/state/offset/limit；subject为标题字面包含搜索，同一次读取的rows/total只计当前可见且匹配的范围 |
+| `GET /api/cores/example-tickets/ticket-pages` | 同上 | 可选subject/state/assignment/offset/limit；subject为标题字面包含搜索，assignment为assigned或unassigned，同一次读取的rows/total只计当前可见且匹配的范围 |
 | `GET /api/cores/example-tickets/ticket-status-counts` | 同上 | 无查询输入；当前可见全部工单的total/open/in_progress/closed计数 |
 | `GET /api/cores/example-tickets/tickets/{ticketId}` | 同上 | 已登记工单ID；当前可见详情 |
 | `GET /api/cores/example-tickets/operations/{operationId}` | 同上 | 本人的原操作键；recorded原收据或unavailable |
@@ -119,6 +119,8 @@ npm run pack:core -w @rental-os/example-tickets-core -- <Core仓库HTTPS地址> 
 
 分页实现使用单条MySQL8 CTE，正文和COUNT共用可见集合及语句快照；成员读取和总数均限定创建者/受派者，read.all只扩大到本租户。LEFT JOIN保留空末页的真实总数，total单独解析，不混入严格工单对象。读取不创建Core锁行、工单、收据或审计。[分页合同](src/contracts.ts) · [仓储](src/mysql.ts)
 
+分派筛选使用原工单的 `assigneeId`：`assignment=assigned` 只读取已有受派成员的工单，`assignment=unassigned` 只读取尚未分派的工单。省略此项读取全部当前可见范围，清除或切换筛选回到首页。分派条件与标题、状态一起作用于同一分页正文和总数，顶部状态汇总仍读取当前可见全部工单。查询不接收租户或成员范围，不改变原 `read / read.all` 权限与创建者/受派者可见条件。
+
 0.1.1增加状态数量汇总，数据版本仍为0.1.0。汇总复用原租户及创建者/受派者条件，在同一SQL语句内计数全部可读工单。空范围返回零，计数必须为非负安全整数，读取失败明确报错。旧仓储适配仍可使用原接口，缺少汇总端口时明确报错。路径使用独立的`ticket-status-counts`，遵守静态路径不能与`tickets/:ticketId`重叠的注册规则。列表页通过原`CorePage.summary`显示总数及三个状态计数，标题和状态筛选仍只作用于列表；原列表刷新同时重读汇总，汇总失败提供自己的只读重试。汇总和分页各自是一份读取观察。[汇总合同](src/http.ts) · [列表呈现](admin/index.tsx)
 
 <a id="后台三页面"></a>
@@ -129,7 +131,7 @@ npm run pack:core -w @rental-os/example-tickets-core -- <Core仓库HTTPS地址> 
 
 测试宿主接通后，按“受控注册 → SaaS开通租户 → 租户管理者给成员分配Core → 工单设置 → 创建/分派/处理/关闭”使用。`/cores/example-tickets/setup`是已登记配置页，不要求工单业务先就绪；管理者需已获Core成员分配才能办理首次绑定。工单没有额外初始化配置，设置动作调用平台原绑定服务，已有绑定复用。结果未知只核对原设置收据，刷新或重入保留原键；设置成功后再进入实际工单列表。[平台绑定用法](../platform-admin/src/core/README.md#core首次设置)
 
-列表支持标题搜索、状态筛选和显式分页；输入或清除标题后回首页并读取同条件的服务端总数。新建用声明式保存主操作，详情按当前状态声明处理/关闭，分派使用原Form/SaveButton。没有新CSS或外壳，页面标题从路由声明读取；普通成员仍经服务端数据范围。首次示范的分派填写已授权成员ID，后续原成员目录适配接通后可改为实名选择，当前不创建假人员列表。
+列表支持标题搜索、状态与分派筛选和显式分页；输入或清除筛选后回首页并读取同条件的服务端总数。筛选控件共用原 `CoreList.controls` 和选择器，表格、页头及详情保持同一呈现。新建用声明式保存主操作，详情按当前状态声明处理/关闭，分派使用原Form/SaveButton。没有新CSS或外壳，页面标题从路由声明读取；普通成员仍经服务端数据范围。首次示范的分派填写已授权成员ID，后续原成员目录适配接通后可改为实名选择，当前不创建假人员列表。
 
 网络/未知结果保留原输入、键和常显提示，只提供GET原收据核对；已知本Core提交前拒绝允许核正输入/状态再发起新操作。输入未保存、写入中或未知结果沿原UnsavedChangesGuard保护。查询缓存包含Core/会话/页面代次，原HTTP负责凭据与信封，通用Core请求适配负责离页中止及迟到响应拒绝。
 

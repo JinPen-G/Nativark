@@ -46,8 +46,10 @@ class MysqlTicketRepository implements TicketRepository {
     // 一个CTE固定正文和总数的同一范围/语句快照；末页为空仍返回真实total，供页面重读有效页。
     // LOCATE按原列排序规则匹配字面文本，百分号/下划线不作为通配符，值仍由原SQL模板参数化。
     const subject = query.subject ? sql`AND LOCATE(${query.subject}, subject) > 0` : empty;
+    const assignment = query.assignment === "assigned" ? sql`AND assignee_id IS NOT NULL`
+      : query.assignment === "unassigned" ? sql`AND assignee_id IS NULL` : empty;
     const rows = await this.tx.$queryRaw<Array<(TicketRow | { id: null }) & { total: bigint | number }>>(sql`
-      WITH visible_tickets AS (SELECT ${columns} FROM example_tickets ${this.visibleWhere(query, viewerId)} ${subject})
+      WITH visible_tickets AS (SELECT ${columns} FROM example_tickets ${this.visibleWhere(query, viewerId)} ${subject} ${assignment})
       SELECT page.*, totals.total FROM (SELECT COUNT(*) AS total FROM visible_tickets) totals
       LEFT JOIN (SELECT * FROM visible_tickets ORDER BY createdAt DESC, id DESC LIMIT ${query.limit} OFFSET ${query.offset}) page ON TRUE
       ORDER BY page.createdAt DESC, page.id DESC`);

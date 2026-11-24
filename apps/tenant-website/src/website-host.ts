@@ -2,7 +2,11 @@
 import * as customerSession from "@rental-os/web-client";
 import { createRentalWebsitePublicClient } from "@rental-os/rental-core/clients/website";
 import { configureRentalWebsiteHost, type RentalWebsiteHost } from "@rental-os/rental-core/clients/website-ui/host";
-import photoSources from "../public/media/photo-sources.json";
+import photoSourcesJson from "../public/media/photo-sources.json?raw";
+
+// Keep the original public sidecar as the sole source. Vite serves public JSON
+// as an asset, so read its text explicitly before supplying the host mapping.
+const photoSources = JSON.parse(photoSourcesJson);
 
 const apiBase = import.meta.env?.VITE_API_BASE ?? "";
 export const websiteHost: RentalWebsiteHost = {
