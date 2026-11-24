@@ -27,11 +27,15 @@ function hostDirectory(host = 'rental') {
   throw Error('未登记的静态宿主组合：' + host);
 }
 
-function selectWorkspaces(lock, readMetadata, aiMode, host = 'rental') {
+function selectWorkspaces(lock, readMetadata, aiMode, host = 'rental', options = {}) {
   if (lock.lockfileVersion !== 3 || !lock.packages?.['']) throw Error('独立宿主要求原 npm v3 锁文件');
   if (['platform', 'example-tickets'].includes(host) && aiMode !== 'disabled') throw Error('公共及工单独立宿主不能选装 AI');
   const selected = new Map(), queue = [hostDirectory(host)];
   if (aiMode === 'enabled') queue.push('packages/ai-native-server');
+  if (options.mcp) {
+    if (aiMode !== 'enabled' || !['rental', 'example-multi-core'].includes(host)) throw Error('MCP只接受显式Rental AI组合');
+    queue.push('packages/mcp-server', 'packages/rental-mcp-host');
+  }
   while (queue.length) {
     const directory = queue.shift();
     if (selected.has(directory)) continue;
@@ -54,7 +58,7 @@ function selectWorkspaces(lock, readMetadata, aiMode, host = 'rental') {
   return selected;
 }
 
-function projectHostLock(lock, workspaces, aiMode, runtimePeers = [], host = 'rental') {
+function projectHostLock(lock, workspaces, aiMode, runtimePeers = [], host = 'rental', options = {}) {
   if (['platform', 'example-tickets'].includes(host) && aiMode !== 'disabled') throw Error('公共及工单独立宿主不能选装 AI');
   const generator = lock.packages['node_modules/prisma'], client = lock.packages['node_modules/@prisma/client'];
   if (generator?.version !== '5.22.0' || client?.version !== generator.version)
@@ -68,6 +72,14 @@ function projectHostLock(lock, workspaces, aiMode, runtimePeers = [], host = 're
     dependencies: { [selectedHost.name]: selectedHost.version,
       ...(aiMode === 'enabled' ? { '@rental-os/ai-native-server': workspaces.get('packages/ai-native-server').version } : {}) },
     devDependencies: { prisma: generator.version } };
+  if (options.mcp) {
+    if (aiMode !== 'enabled' || !['rental', 'example-multi-core'].includes(host)) throw Error('MCP只接受显式Rental AI组合');
+    for (const directory of ['packages/mcp-server', 'packages/rental-mcp-host']) {
+      const metadata = workspaces.get(directory);
+      if (!metadata) throw Error('MCP运行锁缺少所选正式工作区：' + directory);
+      root.dependencies[metadata.name] = metadata.version;
+    }
+  }
   for (const { owner, name } of runtimePeers) {
     const metadata = workspaces.get(owner), location = lockedDependency(lock, owner, name), entry = lock.packages[location];
     if (!metadata?.peerDependenciesMeta?.[name]?.optional || name.startsWith('@rental-os/') || !entry?.version

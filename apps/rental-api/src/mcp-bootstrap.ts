@@ -8,6 +8,7 @@ import { createRentalAiHostModule, RENTAL_HOST_ASSEMBLY, type RentalAiModuleOpti
 import type { RentalAiHostAssembly } from "./ai-assembly";
 import { bootstrapRentalComposition } from "./bootstrap";
 import { createRentalMcpHttpContribution } from "./mcp-composition";
+import { createRentalOriginalMcpHost, type RentalOriginalMcpHostSources } from "./mcp-host";
 
 // 扩展模块与启动入口取得同一 dist-mcp 中的令牌和类，避免跨构建目录混用实例。
 export { RENTAL_HOST_ASSEMBLY, createRentalAiHostModule } from "./ai-app.module";
@@ -45,4 +46,14 @@ export function bootstrapRentalAiMcp<Additional = unknown>(selection: RentalAiMc
       return ingress;
     },
   });
+}
+
+/** 已审定原owner交给同一具体工厂；Node源码入口须在顶层显式调用本函数。 */
+export function bootstrapRentalOriginalAiMcp<Additional = unknown>(sources: RentalOriginalMcpHostSources,
+  cores?: Omit<RentalAiModuleOptions<Additional>, "lock">) {
+  if (typeof sources?.metadata?.read !== "function" || typeof sources.catalog?.publication?.allows !== "function"
+    || typeof sources.catalog?.release?.project !== "function" || typeof sources.catalog?.traffic?.current !== "function")
+    throw new TypeError("MCP启动缺少已审定的AS/发布/字段/流量来源");
+  return bootstrapRentalAiMcp<Additional>({ cores,
+    createOriginalHost: (host, dependencies) => createRentalOriginalMcpHost(host, dependencies, sources) });
 }

@@ -13,7 +13,8 @@ import { createMysqlCoreDeploymentAdmission } from "@rental-os/core-host/mysql-d
 import { createPublicCoreDependencies } from "@rental-os/platform-api/core-dependencies";
 import { createPublicPlatformDataPlan } from "@rental-os/platform-api/data-plan";
 import { composePlatformCoreApplication, composePlatformCorePackageAssembly, createPlatformCorePackageAudit,
-  createPlatformCorePackageAssemblyHttpAccess, createPlatformCoreHttpAccess, CoreHostPermissionStartup } from "@rental-os/platform-core-host";
+  createPlatformCorePackageAssemblyHttpAccess, createPlatformCoreHttpAccess, CoreHostPermissionStartup,
+  type PlatformCoreTermPolicy } from "@rental-os/platform-core-host";
 import { readPublicSubscriptionTerm } from "@rental-os/platform-server/subscription-reader";
 import { readBoundedMedia } from "@rental-os/platform-server/media";
 import { PlatformPrincipalAuthority } from "@rental-os/platform-server/principal";
@@ -58,6 +59,11 @@ export interface RentalHostAiSetup<Binding> {
 export interface RentalHostAssembly<Binding = unknown, Additional = unknown> {
   readonly rental: RentalApplication;
   readonly catalogue: CoreDeployedCatalogue;
+  /** 受控MCP读复用原Native事务的目录与期限；不把根连接的观察代替调用方事务。 */
+  readonly coreReadSources: {
+    term: PlatformCoreTermPolicy<RentalDatabaseTransaction>;
+    catalogueForTransaction(reader: Pick<CoreHostSqlTransaction, "$queryRaw">): CoreDeployedCatalogue;
+  };
   readonly core: ReturnType<typeof composePlatformCoreApplication>;
   readonly packages: ReturnType<typeof composePlatformCorePackageAssembly>;
   readonly authorization: ReturnType<typeof createRentalAuthorization>;
@@ -200,6 +206,7 @@ export function composeRentalApplication<Binding = never, Additional = unknown>(
   const ai = input.aiMode === "enabled" ? input.ai.bind({ rental, guard, customers }) : undefined;
   const workspaces = createRentalWorkspaceManagementApplication(rental, { deploymentForTransaction });
   return Object.freeze({ rental, catalogue, core, packages, authorization, guard, access, publicAccess, callbackAccess, aiAccess, ai,
+    coreReadSources: Object.freeze({ term: dependencies.term, catalogueForTransaction }),
     // 隔离映射副本；调用者不能通过修改目录映射替换已注册服务或另一 Core 的绑定。
     get additionalCores(): ReadonlyMap<string, Additional> { return new Map(additionalBindings); },
     http: createRentalHttpApplications(rental, { guard }),

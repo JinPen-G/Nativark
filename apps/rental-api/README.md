@@ -92,6 +92,10 @@ AI 启用入口额外提供[知识文件来源](src/ai-file-cleanup-source.ts)�
 
 静态启动源码从 `@rental-os/rental-api/mcp-bootstrap` 调用 `bootstrapRentalAiMcp(selection)`。`selection.cores` 使用原额外 Core 装配选项，`selection.createOriginalHost(host, dependencies)` 接收同一 `RENTAL_HOST_ASSEMBLY`、数据库和配置。该函数调用 `@rental-os/rental-mcp-host` 的原 `createOriginalMcpHost`，绑定真实 Auth、Guard、空间管理、审计与原政策，返回同一总路由。参数与实际实现见 [启动入口](src/mcp-bootstrap.ts)和[原参加者包](../../packages/rental-mcp-host/README.md)。
 
+已具备原 owner 时，可使用 `bootstrapRentalOriginalAiMcp(sources, cores?)`，由[具体工厂](src/mcp-host.ts)绑定同一个 `host.rental.auth`、公开 `authSource`、Guard、数据库和严格事务审计。它从正式 ESM 子出口组成原 OAuth / Web / Host 工厂，目录读取通过同一 Native 的 Core 和 AI 数据观察，再沿原 grant、目标 / calls 计量及字段释放。MCP 读不调用模型，原模型请求继续使用该 AI 组合的唯一 Gateway 和原预算。
+
+`RentalOriginalMcpHostSources` 必须由原 AS / MCP 政策作者提供 `config`、当前 `metadata` 及目录 `catalog`（获准 wire schema、动态发布、字段释放、原流量政策），适用 MFA / review 等继续按实际来源提供。配置中的 `enabled`、issuer 和内部 API schema 不证明 AS ready、工具发布或字段批准；缺真实来源时拒绝，现行 MCP 尚未核收的字段和客户端门槛保持。[原服务与政策边界](../../packages/mcp-server/README.md) · [事务目录来源](src/assembly.ts)
+
 所选 Client 与 AI 数据准备完成后，在仓库根构建这组明确选装的产物。
 
 ```powershell
@@ -100,6 +104,10 @@ npm run lint:rental-api:mcp
 ```
 
 这一组源码、启动令牌和入口统一来自 `dist-mcp`。需要扩展 HTTP 时，从同一 `/mcp-bootstrap` 出口取得 `RENTAL_HOST_ASSEMBLY`、`createRentalAiHostModule`、`RentalDatabaseClient` 及对应类型，随后以同一 `close()` 链处理主动关闭和进程信号。运行前继续提供原 Rental 启动配置、固定部署锁及服务端明确的 MCP 配置。[构建配置](tsconfig.mcp.json) · [排空实现](src/bootstrap-ingress.ts)
+
+独立 Node 启动需要宿主自己的第一方源码叶入口。该入口在顶层调用上述一个 bootstrap，并供给已审定的 owner；单独导出函数或只运行 `mcp-bootstrap.js` 不会启动服务。沿实际宿主构建该入口，随后在[原运行包命令](../../scripts/package-rental-host.cjs)的 `--ai enabled` 参数上追加 `--mcp-entry <本树所选宿主dist-mcp中的绝对入口.js>`。入口限当前 `--host` 的目录，所选包和部署锁仍用同一原材料；双 Core 入口通过原 `cores` 选项提供完整工单绑定与 HTTP。
+
+显式 MCP 出包会选择原 `mcp-server` / `rental-mcp-host` 及锁中实际依赖，保留对应 `dist-mcp`，核入口确有顶层调用并将该文件作为 Docker 的 Node 启动目标。预检按正式 `import` 条件解析 ESM，在加载目标前停止，不运行应用；普通/AI 默认出包继续各自原入口。MCP 镜像中的 AI 服务包只保留运行材料，省略声明时同步移除该副本的类型出口，固定 Core / AI 数据包和公共六包保持完整，原归档资源上限保持。源码与开发声明仍从同版源码发行取得。包构建不替代真实 AS / 客户端、TLS、迁移、监听和业务验收，缺入口、原 owner 或运行材料不能作为已启用交付。
 
 ## 组合约束与验证边界
 

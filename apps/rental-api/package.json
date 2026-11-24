@@ -44,6 +44,10 @@
     "./mcp-composition": {
       "types": "./dist-mcp/mcp-composition.d.ts",
       "default": "./dist-mcp/mcp-composition.js"
+    },
+    "./mcp-host": {
+      "types": "./dist-mcp/mcp-host.d.ts",
+      "default": "./dist-mcp/mcp-host.js"
     }
   },
   "typesVersions": {
@@ -77,6 +81,9 @@
       ],
       "mcp-composition": [
         "dist-mcp/mcp-composition.d.ts"
+      ],
+      "mcp-host": [
+        "dist-mcp/mcp-host.d.ts"
       ]
     }
   },
