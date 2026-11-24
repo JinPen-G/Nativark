@@ -753,6 +753,12 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
     return this.loadCommittedWorkspace(tenantId, this.workspaceOf(tenantId));
   }
 
+  /** 独立R0读取不发布共享状态。首次传统读取/编辑只在没有调用方事务时
+   * 补原完整配置；已有状态和原Native路径不另开事务，也不发布部分缓存。 */
+  private async prepareColdWorkspace(tenantId: string, transaction?: TTransaction) {
+    if (!transaction && !this.states.has(this.workspaceOf(tenantId))) await this.refreshCommittedWorkspace(tenantId);
+  }
+
   private async loadCommittedWorkspace(tenantId: string, workspaceId: string, tx?: TTransaction) {
     if (!this.configStore?.loadWorkspaceSnapshot) {
       if (this.categoryResolver) throw new ServiceUnavailableException("品类已版本化但缺少空间配置权威读取器");
@@ -1103,6 +1109,8 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   }
 
   async saveBusinessSettings(tenantId: string, input: SaveTenantRentalBusinessSettingsRequest, operator: string) {
+    input = structuredClone(input);
+    await this.prepareColdWorkspace(tenantId);
     const { settings, binding } = await this.buildBusinessSettings(tenantId, input, operator);
     const settingsRevision = await this.configStore.upsertBusinessSettings(settings, operator, undefined, binding);
     this.publishBusinessSettings(tenantId, { settings, settingsRevision });
@@ -1265,6 +1273,7 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   listCouponTemplates(tenantId: string) { return this.state(tenantId).couponTemplates; }
 
   async readCouponTemplates(tenantId: string) {
+    await this.prepareColdWorkspace(tenantId);
     const state = this.state(tenantId);
     if (this.configStore.listCouponTemplates) {
       const beforeRead = JSON.stringify(state.couponTemplates);
@@ -1280,6 +1289,7 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   }
 
   async saveCouponTemplate(tenantId: string, input: SaveRentalCouponTemplateRequest) {
+    input = structuredClone(input);
     await this.readCouponTemplates(tenantId);
     const state = this.state(tenantId);
     const { binding } = await this.categoryWriteContext(tenantId, state.profile.categoryCode);
@@ -1428,6 +1438,7 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
 
   async saveLocation(tenantId: string, input: SaveRentalFulfillmentLocationRequest) {
     input = structuredClone(input);
+    await this.prepareColdWorkspace(tenantId);
     const state = this.state(tenantId);
     const { definition, binding } = await this.categoryWriteContext(tenantId, state.profile.categoryCode);
     if (!definition.businessModel.locationTypes.includes(input.type)) throw new BadRequestException("当前经营品类不支持该履约地点类型");
@@ -1559,6 +1570,8 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   listPricingGroups(tenantId: string) { return this.state(tenantId).pricingGroups; }
 
   async savePricingGroup(tenantId: string, input: SaveRentalPricingGroupRequest, tx?: TTransaction, deferCache = false) {
+    input = structuredClone(input);
+    await this.prepareColdWorkspace(tenantId, tx);
     const transactionContext = tx ? await this.readBusinessContext(tenantId, tx) : undefined;
     const state = transactionContext ? { ...this.state(tenantId), profile: transactionContext.profile,
       itemGroups: transactionContext.groups, pricingGroups: transactionContext.pricingGroups ?? [] } : this.state(tenantId);
@@ -1613,6 +1626,8 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   }
 
   async saveItemGroup(tenantId: string, input: SaveRentalItemGroupRequest) {
+    input = structuredClone(input);
+    await this.prepareColdWorkspace(tenantId);
     const state = this.state(tenantId);
     const writeContext = await this.categoryWriteContext(tenantId, state.profile.categoryCode);
     const definition = writeContext.definition;
@@ -1781,6 +1796,7 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   }
 
   async readItemGroupImage(tenantId: string, itemGroupId: string, imageId: string) {
+    await this.prepareColdWorkspace(tenantId);
     const group = this.group(this.state(tenantId), itemGroupId);
     const image = this.storedItemGroupImages(group).find((item) => item.id === imageId);
     if (!image) throw new NotFoundException("产品型号图片不存在");
@@ -1860,22 +1876,26 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   }
 
   async restoreStockDisposition(tenantId: string, dispositionId: string, operator: string) {
+    await this.prepareColdWorkspace(tenantId);
     this.state(tenantId);
     return this.factStore.restoreStockDisposition(tenantId, dispositionId, operator);
   }
 
   async writeOffStockDisposition(tenantId: string, dispositionId: string, reason: string, operator: string) {
+    await this.prepareColdWorkspace(tenantId);
     this.state(tenantId);
     return this.factStore.writeOffStockDisposition(tenantId, dispositionId, reason, operator);
   }
 
   async listStockDispositions(tenantId: string, orderId?: string) {
+    await this.prepareColdWorkspace(tenantId);
     this.state(tenantId);
     if (orderId) await this.requireOrder(tenantId, orderId);
     return this.factStore.listStockDispositions(tenantId, orderId);
   }
 
   async listWorkOrders(tenantId: string, status?: RentalWorkOrderStatus) {
+    await this.prepareColdWorkspace(tenantId);
     this.state(tenantId);
     if (status && !["pending", "in_progress", "pending_review", "completed", "rejected", "cancelled"].includes(status)) {
       throw new BadRequestException("养护工单状态无效");
@@ -1884,11 +1904,13 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   }
 
   async listWorkOrderAssignees(tenantId: string, locationId?: string): Promise<RentalWorkOrderAssignee[]> {
+    await this.prepareColdWorkspace(tenantId);
     this.state(tenantId);
     return this.factStore.listWorkOrderAssignees(tenantId, locationId);
   }
 
   async listWorkOrderHistory(tenantId: string, workOrderId: string): Promise<RentalWorkOrderHistoryEntry[]> {
+    await this.prepareColdWorkspace(tenantId);
     this.state(tenantId);
     const row = (await this.factStore.listWorkOrders(tenantId)).find((item) => item.id === workOrderId);
     if (!row) throw new NotFoundException("养护工单不存在或不属于当前经营空间");
@@ -1903,6 +1925,8 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   }
 
   async createWorkOrder(tenantId: string, input: CreateRentalWorkOrderRequest, operator: string) {
+    input = structuredClone(input);
+    await this.prepareColdWorkspace(tenantId);
     this.state(tenantId);
     const dispositions = await this.factStore.listStockDispositions(tenantId);
     const disposition = dispositions.find((row) => row.id === input.dispositionId);
@@ -1937,6 +1961,8 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   }
 
   async assignWorkOrder(tenantId: string, workOrderId: string, input: AssignRentalWorkOrderRequest) {
+    input = structuredClone(input);
+    await this.prepareColdWorkspace(tenantId);
     this.state(tenantId);
     const current = await this.factStore.listWorkOrders(tenantId);
     const row = current.find((item) => item.id === workOrderId);
@@ -1947,21 +1973,28 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   }
 
   async startWorkOrder(tenantId: string, workOrderId: string, operator: string) {
+    await this.prepareColdWorkspace(tenantId);
     this.state(tenantId);
     return this.factStore.transitionWorkOrder(tenantId, workOrderId, "start", operator);
   }
 
   async submitWorkOrder(tenantId: string, workOrderId: string, input: SubmitRentalWorkOrderRequest, operator: string) {
+    input = structuredClone(input);
+    await this.prepareColdWorkspace(tenantId);
     this.state(tenantId);
     return this.factStore.transitionWorkOrder(tenantId, workOrderId, "submit", operator, input);
   }
 
   async reviewWorkOrder(tenantId: string, workOrderId: string, input: ReviewRentalWorkOrderRequest, operator: string) {
+    input = structuredClone(input);
+    await this.prepareColdWorkspace(tenantId);
     this.state(tenantId);
     return this.factStore.transitionWorkOrder(tenantId, workOrderId, "review", operator, input);
   }
 
   async cancelWorkOrder(tenantId: string, workOrderId: string, input: CancelRentalWorkOrderRequest, operator: string) {
+    input = structuredClone(input);
+    await this.prepareColdWorkspace(tenantId);
     this.state(tenantId);
     return this.factStore.transitionWorkOrder(tenantId, workOrderId, "cancel", operator, input);
   }
@@ -2226,6 +2259,7 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   }
 
   async listOrders(tenantId: string) {
+    await this.prepareColdWorkspace(tenantId);
     this.state(tenantId);
     return (await this.factStore.listOrders(tenantId)).map((order) => this.publicOrder(order));
   }
@@ -2235,6 +2269,8 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
    * 只按条件筛，供兼容旧的纯数组响应；分页大小夹在 1..MAX 之间。
    */
   async queryOrders(tenantId: string, query: RentalOrderListQuery): Promise<RentalOrderPage> {
+    query = structuredClone(query);
+    await this.prepareColdWorkspace(tenantId);
     this.state(tenantId);
     const paged = query.page !== undefined || query.pageSize !== undefined;
     const page = Math.max(1, Math.floor(query.page ?? 1));
@@ -2562,6 +2598,7 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   }
 
   async getOrder(tenantId: string, orderId: string) {
+    await this.prepareColdWorkspace(tenantId);
     this.state(tenantId);
     return this.publicOrder(await this.requireOrder(tenantId, orderId));
   }
@@ -3591,6 +3628,9 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
 
   async listInspectionTemplates(tenantId: string, stage?: "pickup" | "return", order?: RentalOrder, tx?: TTransaction,
     returnAllocationIds?: readonly string[]) {
+    order = order && structuredClone(order);
+    returnAllocationIds = returnAllocationIds && [...returnAllocationIds];
+    await this.prepareColdWorkspace(tenantId, tx);
     const state = this.state(tenantId);
     if (order && order.tenantId !== tenantId) throw new ForbiddenException("订单不属于当前租户");
     if (order) {
@@ -3634,6 +3674,7 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   }
 
   async listInspections(tenantId: string, orderId: string) {
+    await this.prepareColdWorkspace(tenantId);
     this.state(tenantId);
     await this.requireOrder(tenantId, orderId);
     return this.factStore.listInspections(tenantId, orderId);
@@ -4012,12 +4053,14 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
 
   /** 订单的续租记录，按序号升序。订单详情与幂等重放都读它。 */
   async listOrderExtensions(tenantId: string, orderId: string, tx?: TTransaction) {
+    await this.prepareColdWorkspace(tenantId, tx);
     this.state(tenantId);
     return this.factStore.listExtensions(tenantId, orderId, tx);
   }
 
   /** 订单变更历史只读；原订单与原报价快照不从这里重写。 */
   async listOrderChanges(tenantId: string, orderId: string, tx?: TTransaction) {
+    await this.prepareColdWorkspace(tenantId, tx);
     this.state(tenantId);
     return this.factStore.listOrderChanges(tenantId, orderId, tx);
   }
