@@ -168,7 +168,8 @@ export interface OrganizationSummary {
 export interface SaveOrganizationRequest {
   id?: string;
   tenantId: string;
-  parentId?: string;
+  /** 省略保留原上级，null 明确移回根级；新建省略时为根级。 */
+  parentId?: string | null;
   type: RoleScope;
   code: string;
   name: string;

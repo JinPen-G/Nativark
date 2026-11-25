@@ -23,7 +23,8 @@ export const PLATFORM_SETTINGS_SCHEMAS = {
   "PlatformSettings.Organization": { type: "object", required: ["id", "tenantId", "type", "code", "name", "status"], properties: organizationProperties },
   "PlatformSettings.Organizations": { type: "array", items: { $ref: "#/components/schemas/PlatformSettings.Organization" } },
   "PlatformSettings.SaveOrganization": { type: "object", required: ["tenantId", "type", "code", "name", "status"], properties: {
-    ...organizationProperties, id: requiredText, tenantId: requiredText, parentId: requiredText,
+    ...organizationProperties, id: requiredText, tenantId: requiredText,
+    parentId: { ...requiredText, nullable: true, description: "省略保留原上级；null移回根级，新建省略时为根级。上级不能为自身或下级组织。" },
     code: requiredText, name: requiredText, operator: requiredText
   } },
   "PlatformSettings.OrganizationStatus": { type: "object", required: ["status"], properties: {

@@ -99,19 +99,26 @@ export class PlatformManagementRepository extends PlatformIdentityRepository {
   }
 
   async saveOrganization(tx: PlatformManagementTransaction, input: SaveOrganizationRequest) {
-    const code = input.code.trim(), name = input.name.trim(), parentId = input.parentId?.trim() || undefined;
+    const code = input.code.trim(), name = input.name.trim();
+    const parentId = typeof input.parentId === "string" ? input.parentId.trim() : input.parentId;
     const status = input.status ?? "enabled";
     if (!code || !name) throw new BadRequestException("组织编码和组织名称不能为空");
+    if (parentId === "") throw new BadRequestException("上级组织不能为空文本，移回根级请明确传入null");
     if (!await tx.tenant.findUnique({ where: { id: input.tenantId } })) throw new BadRequestException("租户不存在");
     if (await tx.organizationUnit.findFirst({ where: { id: { not: input.id }, tenantId: input.tenantId, code } }))
       throw new BadRequestException("该租户下组织编码已存在");
-    if (parentId) {
-      if (parentId === input.id) throw new BadRequestException("上级组织不能选择自身");
-      if (!await tx.organizationUnit.findFirst({ where: { id: parentId, tenantId: input.tenantId } }))
-        throw new BadRequestException("上级组织不属于当前租户");
-    }
     const existing = input.id ? await tx.organizationUnit.findFirst({ where: { id: input.id, tenantId: input.tenantId } }) : undefined;
     if (input.id && !existing) throw new NotFoundException("组织不存在");
+    // 公共服务已持有原租户父锁；沿同一事务检查整个祖先链，停用节点也不能绕过成环校验。
+    const visited = new Set<string>();
+    let ancestorId = parentId === undefined ? existing?.parentId : parentId;
+    while (ancestorId) {
+      if (ancestorId === input.id || visited.has(ancestorId)) throw new BadRequestException("上级组织不能形成循环层级");
+      visited.add(ancestorId);
+      const ancestor = await tx.organizationUnit.findFirst({ where: { id: ancestorId, tenantId: input.tenantId } });
+      if (!ancestor) throw new BadRequestException("上级组织不属于当前租户或层级已失效");
+      ancestorId = ancestor.parentId;
+    }
     const id = input.id ?? `org_${randomUUID()}`;
     const data = { parentId, type: input.type.toUpperCase() as StoredPlatformRoleScope, code, name, status };
     const row = existing ? await tx.organizationUnit.update({ where: { id }, data })

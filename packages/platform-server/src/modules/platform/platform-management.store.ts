@@ -23,7 +23,7 @@ type RoleWrite = { code: string; name: string; description?: string | null; scop
   enabledBusinessScopes: string[]; buttonPermissions: string[]; dataScope: StoredPlatformDataScope; isActive: boolean };
 type StoredOrganization = { id: string; tenantId: string; parentId: string | null; type: StoredPlatformRoleScope;
   code: string; name: string; status: string };
-type OrganizationWrite = { parentId?: string; type: StoredPlatformRoleScope; code: string; name: string; status?: string };
+type OrganizationWrite = { parentId?: string | null; type: StoredPlatformRoleScope; code: string; name: string; status?: string };
 type ParameterContent = { [key: string]: PlatformJsonValue | undefined };
 
 /** 原组合宿主供给固定代码适配，HTTP 输入不参与选择。

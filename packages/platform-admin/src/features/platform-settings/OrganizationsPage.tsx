@@ -62,7 +62,8 @@ export function OrganizationsPage({ embedded = false, onSaved }: { embedded?: bo
       if (runtime.currentSessionEpoch() !== epoch || !current.sessionVerified || !canWriteOrganizations(current.user) || current.user?.tenantId !== values.tenantId)
         throw new Error(t("当前没有组织维护权限"));
       if (!isCurrent() || editing && !source) throw new Error(t("服务端配置已变更，请重新打开本页核对后再保存"));
-      return api.saveOrganization({ ...values, id: editing?.id, operator: current.user?.displayName ?? t("租户管理员") });
+      return api.saveOrganization({ ...values, parentId: values.parentId ?? null,
+        id: editing?.id, operator: current.user?.displayName ?? t("租户管理员") });
     },
     onSuccess: async () => {
       if (runtime.currentSessionEpoch() !== epoch) return;

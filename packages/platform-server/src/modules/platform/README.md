@@ -31,6 +31,8 @@
 
 组织读取沿原 `system:user:manage` 及数据投影。组织范围账号只读取当前组织连续启用的子树，缺失或停用组织返回空集合。组织维护要求当前租户、账号管理权限、全租户数据范围及完整地点范围。SaaS 组织接口按原准入拒绝，查询参数仅参与原租户投影。
 
+组织保存沿原租户父锁和同一事务核对上级的完整祖先链，自身、子孙回挂及既有循环均拒绝，停用组织也参与层级校验。`parentId` 省略保留原上级，明确传 `null` 移回根级；新建省略时为根级。编辑页清空原选择器后提交 `null`，其他字段和页面布局沿原实现。层级写入与审计一起提交，审计失败不保留新层级。[保存入口](platform-management.repository.ts) · [输入合同](../../../../platform-contracts/src/index.ts) · [原编辑器](../../../../platform-admin/src/features/platform-settings/OrganizationsPage.tsx)
+
 全平台安全保存要求当前 SaaS 身份及 `system:params:manage`，通过平台租户锁串行化，在写入点匹配原行 ID、版本和生效状态。更新保留原生效版本及 JSON 中其他字段，历史 JSON null 使用原缺省语义。五个数值沿原有限且非负的规则，小数继续兼容。唯一键和事务冲突明确返回，由调用方重读核对。
 
 二次确认管理工具保留原演示确认码 `000000` 和返回消息。实际业务批准与执行继续消费各自的正式授权及收据。[原管理工具](platform-management.service.ts) · [原响应字段](platform-settings-openapi.ts)

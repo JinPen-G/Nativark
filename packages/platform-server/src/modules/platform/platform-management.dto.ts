@@ -7,7 +7,7 @@ import { IsArray, IsBoolean, IsEnum, IsIn, IsNotEmpty, IsObject, IsOptional, IsS
 export class SaveOrganizationDto implements SaveOrganizationRequest {
   @IsOptional() @IsString() @IsNotEmpty() id?: string;
   @IsString() @IsNotEmpty() tenantId!: string;
-  @IsOptional() @IsString() @IsNotEmpty() parentId?: string;
+  @IsOptional() @IsString() @IsNotEmpty() parentId?: string | null;
   @IsEnum(RoleScope) type!: RoleScope;
   @IsString() @IsNotEmpty() code!: string;
   @IsString() @IsNotEmpty() name!: string;
