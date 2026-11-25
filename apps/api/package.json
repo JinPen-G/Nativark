@@ -36,7 +36,7 @@
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "zod": "^3.23.8",
-    "@rental-os/rental-core": "0.1.12",
+    "@rental-os/rental-core": "0.1.13",
     "@rental-os/platform-contracts": "0.1.0",
     "@rental-os/ai-native-server": "0.1.0",
     "@rental-os/rental-mcp-host": "0.1.0"

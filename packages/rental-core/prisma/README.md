@@ -1,6 +1,6 @@
 # Rental 数据接入
 
-Rental 自己维护121个模型和5个枚举。公共账号、角色、授权、配置与台账由底座维护；AI 模型属于可选 AI 模块。未安装 Rental 时，公共 schema 和迁移无需包含这些业务表。[业务模型](schema.prisma)
+Rental 自己维护121个模型、5个枚举和6张由 raw SQL 仓储使用的换货工作流表。公共账号、角色、授权、配置与台账由底座维护，AI 模型属于可选 AI 模块。业务模型与换货迁移共同构成 Rental 的物理数据范围。[业务模型](schema.prisma) · [换货工作流迁移](migrations/20261125010000_rental_exchange_workflow/migration.sql)
 
 ## 组合新宿主
 
@@ -30,6 +30,23 @@ const platformData = createPublicPlatformDataPlan(rental.dataPlan.publicForeignK
 ## 迁移与历史
 
 新空库先应用公共链，再应用本包[Rental 初始迁移](migrations/20261119030000_rental_initial/migration.sql)。该迁移创建业务表，追加原 AuthSession／OperationLog 关系，保留原批准、配置快照和检查修订的7个 CHECK，以及原操作键的二进制排序规则。初始迁移不填充示范业务、不更新历史对象，也不执行模型或资金操作。
+
+随后应用[换货工作流前进迁移](migrations/20261125010000_rental_exchange_workflow/migration.sql)，物理数据版本推进至 `0.1.1`。原七份换货 SQL 的最终结构承接为六表，包含企业审批与费用确认、检查准备、媒体及完成 claim、媒体使用、客户同意和原执行收据。原操作键、字段默认、状态、唯一约束、外键及排序规则由同一迁移提供，MySQL 原默认外键更新动作显式写为 `RESTRICT`。SQL 文件头保留七份来源目录名。
+
+| 表 | 持久事实 |
+| --- | --- |
+| `enterprise_exchange_approvals` | 换货费用审批、员工费用确认和修订 |
+| `rental_exchange_inspection_preparations` | 原检查准备及请求、载荷摘要 |
+| `rental_exchange_inspection_media` | 原媒体绑定、完成占用和完成证据 |
+| `rental_exchange_inspection_media_uses` | 媒体与原检查准备的使用关联 |
+| `rental_exchange_inspection_consents` | 原客户同意及操作键 |
+| `rental_approved_exchange_executions` | 批准、准备、同意和 Core 变更的原执行收据 |
+
+六表进入同一物理数据计划。部署观察同时核原迁移账和实际表、列、约束，任一表缺失均拒绝 Rental 准入。原独立 `0.1.0` 数据库通过追加本迁移升级，已应用的初始迁移保留原摘要。
+
+绑定的可读范围继续为 `>=0.1.0 <0.2.0`。在完整的新物理版本和两份迁移收据核定后，原 `dataVersion=0.1.0` 绑定仍沿原经营空间读取就绪状态，保留其授权、配置与绑定修订。部署准入另外要求观察版本等于本版 `0.1.1` 且完整迁移链匹配，未迁移库由该检查拒绝。
+
+旧 Rental `0.1.12` 实现的数据观察会拒绝新增的所属迁移。程序回退须使用经过实际兼容验证的版本，或由部署负责人按备份恢复方案处理数据库与程序组合，原可读范围声明不能作为升级后回退成功的依据。已有混合库的原七份迁移及数据继续沿原链核对，切换独立迁移链须另行核定。
 
 Rental 数据版本、可读范围、迁移 ID、包内路径和原文摘要由同一[发行声明](../src/data.ts)提供。包内目录名定位 SQL；部署目录及原账名称使用公共 `corePrismaMigrationName`，与 `deploymentMigrationNames` 保持一致。已应用 SQL 不因换行、编码或打包变化改写。
 

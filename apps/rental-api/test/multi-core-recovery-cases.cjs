@@ -518,6 +518,55 @@ module.exports = async function multiCoreRecoveryCases({ build, memory, load, ro
       } finally { Object.assign(row, original); }
     });
 
+    await group('Rental exchange SQL tables and migration receipt are required for admission', async () => {
+      const exchangeTables = ['enterprise_exchange_approvals', 'rental_exchange_inspection_preparations',
+        'rental_exchange_inspection_media', 'rental_exchange_inspection_media_uses',
+        'rental_exchange_inspection_consents', 'rental_approved_exchange_executions'];
+      const physical = f.state.physical, receipts = f.state.receipts;
+      const before = { transactions: f.state.transactions, audits: f.state.audits.length, writes: f.state.forbiddenWrites };
+      checked(rental.dataPlan.data.version, '0.1.1');
+      checked(rental.dataPlan.data.readable.minInclusive, '0.1.0');
+      for (const table of exchangeTables)
+        assert(physical.tables.some(row => row.tableName === table), 'exchange table must be in the deployment: ' + table);
+      for (const [table, columns] of [
+        ['enterprise_exchange_approvals', ['employeeConfirmationOperationKey', 'employeeConfirmedAt', 'employeeConfirmationFingerprint']],
+        ['rental_exchange_inspection_media', ['completionClaimId', 'completionClaimedAt']]
+      ]) for (const column of columns)
+        assert(physical.columns.some(row => row.tableName === table && row.name === column), 'original field must survive: ' + table + '.' + column);
+      const migration = rental.dataPlan.data.migrations.find(item => item.id === 'rental.20261125010000-exchange-workflow');
+      assert(migration, 'raw SQL tables need their own forward migration');
+      const migrationName = deployment.corePrismaMigrationName('rental', migration.id);
+      assert(receipts.some(row => row.migrationName === migrationName && row.checksum === migration.sha256));
+      await currentCatalogue.availability.requireAvailable('rental');
+      const binding = contracts.CoreBindingSchema.parse({ coreId: 'rental', tenantId: f.identity.tenantId,
+        container: { type: 'rental-workspace', id: 'existing-exchange-workspace' },
+        bindingId: 'existing-exchange-binding', revision: 3, dataVersion: '0.1.0' });
+      const originalBinding = structuredClone(binding);
+      const readiness = { status: 'configuration_required', missing: [{ code: 'original-configuration', message: 'Original workspace fixture' }] };
+      let bindingReads = 0;
+      const server = load('@rental-os/rental-core/server').createRentalServer({
+        async resolveAuthorizedBinding() { throw Error('readiness must use the original binding'); },
+        async readReadiness(value) { checked(value, originalBinding); bindingReads++; return readiness; }
+      });
+      checked(await server.readReadiness(binding), readiness, 'a migrated deployment still reads the original 0.1.0 binding');
+      checked(bindingReads, 1); checked(binding, originalBinding);
+      try {
+        for (const table of exchangeTables) {
+          f.state.physical = Object.fromEntries(Object.entries(physical).map(([kind, values]) =>
+            [kind, values.filter(row => row.tableName !== table)]));
+          checked(await rental.dataPlan.readPhysical(f.database), undefined, 'missing table refuses physical evidence: ' + table);
+          checked((await observer.read('rental')).cores, [], 'missing table omits Rental observation: ' + table);
+          await assert.rejects(currentCatalogue.availability.requireAvailable('rental'), error => error.code === 'core_unavailable'); assertions++;
+        }
+        f.state.physical = physical;
+        f.state.receipts = receipts.filter(row => row.migrationName !== migrationName);
+        assert(await rental.dataPlan.readPhysical(f.database), 'physical tables alone do not replace the original migration receipt');
+        await assert.rejects(currentCatalogue.availability.requireAvailable('rental'), error => error.code === 'core_unavailable'); assertions++;
+      } finally { f.state.physical = physical; f.state.receipts = receipts; }
+      await currentCatalogue.availability.requireAvailable('rental');
+      checked({ transactions: f.state.transactions, audits: f.state.audits.length, writes: f.state.forbiddenWrites }, before);
+    });
+
     await group('future owned migrations and optional physical failures preserve module isolation', async () => {
       const receipts = f.state.receipts, physical = f.state.physical;
       const before = { transactions: f.state.transactions, audits: f.state.audits.length, writes: f.state.forbiddenWrites };

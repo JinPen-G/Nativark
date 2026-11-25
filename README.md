@@ -5,7 +5,7 @@
 *An open-source, multi-tenant SaaS foundation built for AI-native business applications.*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Platform Base](https://img.shields.io/badge/Base-0.1.16-0F766E.svg)](package.json)
+[![Platform Base](https://img.shields.io/badge/Base-0.1.17-0F766E.svg)](package.json)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.12-339933.svg)](package.json)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178C6.svg)](tsconfig.base.json)
 [![NestJS](https://img.shields.io/badge/NestJS-10-E0234E.svg)](apps/platform-api/README.md)
