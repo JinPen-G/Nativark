@@ -6,9 +6,9 @@
 
 Nativark 为开发者和开发 AI 提供构建业务应用所需的公共基础，包括身份认证、多租户、权限、订阅、管理后台和受控 AI 能力。业务通过独立的 **Core** 接入，拥有自己的领域模型、数据、页面和业务规则。
 
-开源主体是 Nativark 底座。**Rental Core 将作为首个开源业务 Core 示范**，展示如何在公共底座上构建完整业务、接入客户端并向 Agent 提供受控工具。后续可按同一接入边界扩展 CRM、TMS 等业务 Core。
+开源主体是 Nativark 底座。**[Rental Core](https://github.com/JinPen-G/nativark-rental-core) 是首个独立开源业务 Core 示范**，展示如何在公共底座上构建完整业务、接入客户端并向 Agent 提供受控工具。后续可按同一接入边界扩展 CRM、TMS 等业务 Core。
 
-公共底座、Rental Core 和宿主装配分别维护。默认公共 API 与后台提供初始化、认证、租户 / 人员角色 / 组织管理、安全与外观设置、订阅、字典与编号、成员邀请和邮件目录；业务 Core 由宿主显式选择。Rental 示范提供独立 API、各端页面与客户端，可另外选择 AI Native 组合。原 Rental OS 开发入口继续消费这些包的同一实现。源码目录、npm 包名及配置变量目前沿用原工程标识，完整运行与兼容验收仍在推进。[独立公共 API](apps/platform-api/README.md) · [公共后台](apps/platform-admin/README.md) · [Rental 宿主](apps/rental-api/README.md)
+公共底座、Rental Core 和宿主装配分别维护。默认公共 API 与后台提供初始化、认证、租户 / 人员角色 / 组织管理、安全与外观设置、订阅、字典与编号、成员邀请和邮件目录；业务 Core 由宿主显式选择。Rental 示范提供独立 API、各端页面与客户端，可另外选择 AI Native 组合。原 Rental OS 开发入口继续消费这些包的同一实现。源码目录、npm 包名及配置变量沿用原工程标识。[独立公共 API](apps/platform-api/README.md) · [公共后台](apps/platform-admin/README.md) · [Rental 宿主](apps/rental-api/README.md)
 
 - [底座建设范围](#底座建设范围)
 - [理解架构](#理解架构)
@@ -96,7 +96,7 @@ SaaS 管理区的 Core 包管理页提供注册目录、GitHub Topic 发现和�
 
 Rental Core 是首个业务示范，提供商品、资产、库存、报价、订单、交付、归还、检查和结算等租赁业务。摄影设备、露营装备、车辆载具和工程设备通过品类定义、计费策略及能力扩展共用租赁业务链。
 
-这个示范将展示 Core 如何使用公共身份、租户、后台和 AI 接入机制，同时保有业务模型、事务、金额、幂等与历史快照。客户网站、员工与客户小程序、企业客户门户提供该业务的多端消费样例。
+这个示范使用公共身份、租户、后台和 AI 接入机制，同时保有业务模型、事务、金额、幂等与历史快照。客户网站、员工与客户小程序、企业客户门户提供该业务的多端消费样例。源码与标准包在[独立 Rental Core 仓库](https://github.com/JinPen-G/nativark-rental-core)发布，固定发行从 [GitHub Releases](https://github.com/JinPen-G/nativark-rental-core/releases)获取，沿[公开 Core 发现与包准备](packages/core-contracts/README.md#发现公开-core-仓库)接入。
 
 开发者可从实际 Controller、领域服务和客户端调用链开始阅读。[业务包与接入说明](packages/rental-core/README.md)
 
@@ -107,8 +107,8 @@ Rental Core 是首个业务示范，提供商品、资产、库存、报价、�
 | 位置 | 当前内容 | 阅读入口 |
 | --- | --- | --- |
 | `apps/api` | 身份、公共平台、AI Native、基础服务与现有 Core 的 API 组合；业务及支付 HTTP 通过 Rental 正式模块挂载 | [启动](apps/api/src/main.ts)、[装配](apps/api/src/app.module.ts)、[同一服务组](apps/api/src/application-services.module.ts) |
-| `apps/platform-api` | 默认无 Core 的独立公共 API，初始化 / 认证 / 公共管理 / 组织与安全 / 订阅已提供，完整运行继续交付 | [宿主导读](apps/platform-api/README.md) |
-| `apps/example-tickets-api` | 公共底座与单工单Core受控组合，标准包和迁移准备，真实运行验收继续交付 | [示范导读](apps/example-tickets-api/README.md) |
+| `apps/platform-api` | 默认无 Core 的独立公共 API，提供初始化 / 认证 / 公共管理 / 组织与安全 / 订阅及数据准备 | [宿主导读](apps/platform-api/README.md) |
+| `apps/example-tickets-api` | 公共底座与单工单Core受控组合，消费固定标准包、公共身份和同一迁移准备链 | [示范导读](apps/example-tickets-api/README.md) |
 | `apps/rental-api` | 公共底座与 Rental 的独立组合；共用同一身份、数据库与业务实例，提供常规及可选 AI 的构建、启动和数据准备入口 | [Rental组合导读](apps/rental-api/README.md) |
 | `packages/platform-contracts` | 无行业依赖的公共身份、人员与设置合同；原 shared 兼容再导出 | [正式出口](packages/platform-contracts/README.md) |
 | `packages/platform-server` | 认证、公共管理与订阅、字典/编号、集成、文件原语及公共 HTTP 的唯一实现，存储由宿主提供 | [源码路线](packages/platform-server/README.md) |
@@ -116,7 +116,7 @@ Rental Core 是首个业务示范，提供商品、资产、库存、报价、�
 | `packages/platform-admin` | 公共后台外壳、UIArc、组织/安全/订阅/集成/工具设置与 Core 页面适配，原后台窄转接同一实现 | [公共前端导读](packages/platform-admin/README.md) |
 | `packages/ai-native-server` | 已支持 AI Runtime、任务与恢复、Gateway 和原权限事务的单源实现，由选用 AI 的宿主装配 | [AI 服务端导读](packages/ai-native-server/README.md) |
 | `packages/ai-native-data` | 可选 AI 数据、原迁移字节及物理观察贡献，与所属宿主的所选 Client 和部署锁一致 | [AI 数据导读](packages/ai-native-data/README.md) |
-| `apps/platform-admin` | 默认无Core的公共Web宿主，登录/改密、公共管理、组织/安全/订阅与集成设置，真实运行继续验收 | [公共后台导读](apps/platform-admin/README.md) |
+| `apps/platform-admin` | 默认无Core的公共Web宿主，提供登录/改密、公共管理、组织/安全/订阅与集成设置及完整后台外壳 | [公共后台导读](apps/platform-admin/README.md) |
 | `apps/example-tickets-admin` | 复用同一公共应用的工单Web宿主，四页声明接线与标准包构建核验 | [工单后台导读](apps/example-tickets-admin/README.md) |
 | `apps/example-multi-core-admin` | Rental与工单共用一份公共应用、会话和查询缓存，各自按当前授权显示页面与业务范围 | [双Core后台导读](apps/example-multi-core-admin/README.md) |
 | `apps/admin` | SaaS 管理、租户公共后台与现有业务页面 | [入口](apps/admin/src/main.tsx)、[本端规则](apps/admin/AGENTS.md) |

@@ -9,6 +9,7 @@ import { NativeAccountMenuView } from "./components/animate-sidebar/NativeAccoun
 import { NativeContextSwitcher } from "./components/animate-sidebar/NativeContextSwitcher";
 import { WorkspaceBreadcrumbCurrent } from "./components/workspace/WorkspaceHeader";
 import { WorkspacePanel, WorkspacePanelToggle } from "./components/workspace/WorkspacePanel";
+import { Empty } from "./components/ui/Empty";
 import { RightOutlined } from "./components/ui/icons";
 import { HeaderNotifications, type ShellNotifications } from "./features/notifications/HeaderNotifications";
 import { RestProvider } from "./features/rest/RestProvider";
@@ -27,7 +28,8 @@ import { publicAdminMenuPath } from "./application-navigation";
 
 const shellMessages = {
   "功能导航": "Navigation", "业务 Core": "Business Core", "平台管理面": "Platform administration", "管理后台": "Admin console",
-  "面包屑": "Breadcrumb", "收起面板": "Collapse panel", "展开面板": "Expand panel"
+  "面包屑": "Breadcrumb", "收起面板": "Collapse panel", "展开面板": "Expand panel",
+  "当前没有可用的业务工作区": "No business workspace is currently available"
 };
 
 const noMessages: ShellNotifications = { messages: [], loading: false, error: false, refresh: () => undefined, update: () => undefined };
@@ -69,6 +71,8 @@ function ShellContents({ children, brandName, brand, publicSections, pages = noP
   const brandIcon = useAdminBrandIcon();
   const [panelOpen, setPanelOpen] = useState(false);
   const closePanel = useCallback(() => setPanelOpen(false), []);
+  // 收展属于公共外壳；缺业务插槽只显示空态，不因此开放 Agent 或业务操作。
+  const workspacePanel = panel ?? <Empty description={t("当前没有可用的业务工作区")} />;
   const sections = useMemo(() => {
     const entries = cores.data ? coreNavigationEntries(pages, cores.data, locale) : [];
     const groups = new Map<string, ShellNavigationSection>(publicSections.map(section => [section.key,
@@ -131,10 +135,10 @@ function ShellContents({ children, brandName, brand, publicSections, pages = noP
       separator={<RightOutlined size={13} className="workspace-breadcrumb-separator" />} items={items} />}
     headerUtilities={<><RestEntry /><HeaderNotifications inbox={notifications} renderDetails={notificationDetails} /></>}
     headerTime={<WorkspaceClock />}
-    headerPanelControl={layout?.headerPanelControl ?? (panel && <WorkspacePanelToggle open={panelOpen} onChange={setPanelOpen} controls="platform-workspace-panel"
-      label={t(panelOpen ? "收起面板" : "展开面板")} />)}
-    wrapContent={layout?.wrapContent ?? (column => panel ? <WorkspacePanel id="platform-workspace-panel" label={t("业务 Core")} open={panelOpen}
-      onClose={closePanel} panel={panel}>{column}</WorkspacePanel> : <div className="workspace-main-panel">{column}</div>)}
+    headerPanelControl={layout?.headerPanelControl ?? <WorkspacePanelToggle open={panelOpen} onChange={setPanelOpen} controls="platform-workspace-panel"
+      label={t(panelOpen ? "收起面板" : "展开面板")} />}
+    wrapContent={layout?.wrapContent ?? (column => <WorkspacePanel id="platform-workspace-panel" label={t("业务 Core")} open={panelOpen}
+      onClose={closePanel} panel={workspacePanel}>{column}</WorkspacePanel>)}
     overlay={<SubscriptionExpiryFloatingCard />}>
     {children}
   </BusinessShell>;

@@ -2,7 +2,7 @@
 
 这个包让底座和业务 Core 使用同一份清单、版本规则和对象引用。正式入口为 `@rental-os/core-contracts`；目录检查使用 Node 专用出口 `@rental-os/core-contracts/package`。包不导入 Rental、Nest、Prisma 或模型 SDK。
 
-**目前已实现清单/页面/服务端合同、静态包检查、OpenAPI 贡献组合、独立升级预检及本地/固定 GitHub Release 包准备。** [公共宿主适配](../platform-core-host/README.md)已提供真实身份、授权/绑定和HTTP主接点，默认无Core宿主消费空目录；选中Core的完整运行/持久化、页面和安装验证仍在拆分中。开发新Core从下面的五步开始，本手册与代码一起公开发布。
+这个包提供清单/页面/服务端合同、包检查、OpenAPI 贡献组合、独立升级预检及本地/固定 GitHub Release 包准备。[公共宿主适配](../platform-core-host/README.md)负责真实身份、租户授权、成员分配、绑定和HTTP接入；默认无Core宿主消费空目录，所选Core由固定包与部署锁装配。开发新Core从下面的五步开始，本手册与代码一起公开发布。
 
 ## 单独取出底座源码
 
@@ -337,7 +337,7 @@ const route = CorePageDescriptorSchema.parse({
 
 React 的 `CoreAdminPageAction` 还可声明 `slot`。省略时使用主操作栏，返回用 `"navigation"`，刷新等工具用 `"tools"`，都保留同一权限与页面生命周期。Base0.1.9 提供 `"content:<名称>"` 正文槽位，动作声明 `slot: "content:quote"`，同一 `CorePage` 的卡片中用 `<CorePageActions slot="content:quote" />` 放置该动作。`CorePageActions` 与 `CoreAdminActionSlot` 从 `@rental-os/platform-admin/core` 正式导入，使用正文槽位的 Core 在 `compatibility.platform.minInclusive` 声明至少 `"0.1.9"`。页签和查询视图交给 `CorePage.view`，需要同行工具时使用 `toolsPlacement="view"`。能力查询使用 `--query CorePageActions` 或 `--query CoreAdminActionSlot` 定位正式出口、源码与资料。[正文动作例子](../platform-admin/src/core/README.md)
 
-**描述、注册、路径解析和[公共React页面适配](../platform-admin/src/core/index.ts)已提供。** 零Core和工单宿主共用同一应用工厂、页面注册表及授权目录；左栏、面包屑行、铃铛、休息和收展由公共壳提供。Rental旧路由仍通过兼容入口使用自身当前身份，完整标准装配继续迁移。字段类型、动态动作和表单Promise留在Core/React代码中；浏览器、真实HTTP/数据库及多Core完整运行仍须实际验收。
+描述、注册、路径解析和[公共React页面适配](../platform-admin/src/core/index.ts)由同一合同提供。零Core、工单及Rental宿主共用公共应用工厂、页面注册表及授权目录；左栏、面包屑行、铃铛、休息和收展由公共壳提供。没有业务工作区时，收展按钮仍可打开准确空态。Rental旧深链接通过受控兼容入口使用自身当前身份。字段类型、动态动作和表单Promise留在Core/React代码中，API和数据库继续核验当前主体与业务范围。
 
 Rental 的商品、订单、养护、会员及经营页面通过 `createRentalAdminContribution(version, contexts)` 合入同一 Core。工作台和报表由 `useOperationsContext` 提供当前会话、业务范围、客户预览与已认证的 JSON / CSV 请求，页面复用同一外壳和原按钮；无需修改底座内部。[统一贡献](../rental-core/admin/index.tsx) · [工作台三步接入与原权限](../rental-core/admin/operations/README.md#接入与旧宿主)
 
@@ -471,7 +471,7 @@ node packages/core-contracts/dist/github-release.js prepare <固定Release JSON>
 
 Node专用出口 `@rental-os/core-contracts/github` 提供 `inspectGitHubCoreRelease`、`prepareGitHubCoreRelease` 及两份输入 schema。两条命令成功退出0，失败退出1；成功stdout只有JSON，失败stderr不包含响应正文、签名下载URL或凭据。下载有时间/大小上限，仅跟随GitHub受支持的HTTPS资产地址，失败没有落地半包。固定内容的检查不证明发布者或代码已经审核。
 
-仓库可添加 `nativark-core` Topic供发现入口检索；**Topic本身不发布版本、不安装也不授权**。GitHub行为依据[按Tag读取Release](https://docs.github.com/en/rest/releases/releases#get-a-release-by-tag-name)、[资产与摘要](https://docs.github.com/en/rest/releases/assets#get-a-release-asset)、[读取引用](https://docs.github.com/en/rest/git/refs#get-a-reference)和[附注Tag](https://docs.github.com/en/rest/git/tags#get-a-tag)。本阶段使用离线HTTP响应验证，真实标准包发行下载尚未验收。
+仓库可添加 `nativark-core` Topic供发现入口检索；**Topic本身不发布版本、不安装也不授权**。GitHub行为依据[按Tag读取Release](https://docs.github.com/en/rest/releases/releases#get-a-release-by-tag-name)、[资产与摘要](https://docs.github.com/en/rest/releases/assets#get-a-release-asset)、[读取引用](https://docs.github.com/en/rest/git/refs#get-a-reference)和[附注Tag](https://docs.github.com/en/rest/git/tags#get-a-tag)。[公开 Rental Core](https://github.com/JinPen-G/nativark-rental-core)提供同一标准的固定发行，可用 `inspect JinPen-G/nativark-rental-core rental 0.1.12` 读取。包准备成功后，继续按所选[宿主说明](../../apps/rental-api/README.md)构建、准备数据并启动，再授权租户及成员；候选目录本身不代表业务已安装可用。
 
 ## 发现公开 Core 仓库
 

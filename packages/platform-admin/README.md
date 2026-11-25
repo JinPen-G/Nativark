@@ -45,6 +45,8 @@ Rental 客户入口分别由[租户网站](../../apps/tenant-website/README.md)�
 
 拆分沿用原管理后台的呈现。侧栏的分组、顺序、简称、图标、搜索与收展保持原样；租户业务项由当前 Core 和成员授权过滤，SaaS 增加 Core 管理。页头的面包屑、时钟、通知、休息及页面操作使用原同行结构，正文继续复用原组件。由可信宿主提供的 `PlatformShellProps.layout` 可接回原 Agent/Copilot 的导航与内容插槽，接口授权仍由所属服务端核验。
 
+面板收展始终由公共外壳提供。宿主未提供业务工作区时，打开面板只显示准确空态；无 Core 也可使用收展按钮，不因此开放 Agent 任务。已提供的 Core 工作区和原 Agent/Copilot 插槽继续使用同一外壳。
+
 公共平台页面继续使用原路由和权限。宿主显式提供 `platformAiPage` 时，原平台 AI 配置页进入同一 SaaS 菜单及 Router；[组合工厂](../ai-native-admin/src/platform-application.tsx)复用宿主唯一 `AdminRuntime`，页面选择不启用模型或业务工具。Rental 的原公共页面领域文案由 [Core 文案贡献](../rental-core/admin/public-page-content.ts)提供。
 
 所选 Core 的 SaaS 管理页通过 `saasPages` 提供原路径、标题、权限和组件，经过同一 SaaS 身份守卫；这类管理页不借用租户 Core 分配或经营空间。工厂返回的 `App.navigation` 只定位真实 Router 中已登记且当前公共权限允许的页面，供原助手受控跳转；未登记、撤权或 Core 页面不会借此获得公共权限。[导航实现](src/application-navigation.tsx)
