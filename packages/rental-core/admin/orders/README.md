@@ -37,6 +37,8 @@
 
 [表单绑定](useOrderEditor.ts)保留原 `validateFields` 的字段与选项两种重载。同一编辑代次复用绑定对象，查询刷新期间的校验继续使用原对象。会员、字段或增值服务改变时清除已显示报价，旧代次的响应保持隔离。创建请求在途时保留输入，报价与创建失败沿原消息提示反馈，页面保留原表单布局。
 
+报价总额的原颜色、字号、字重和行高由[页面样式](RentalOrderCreatePage.module.css)随页面加载，引用同一公共 Token；独立 Rental、多 Core 与旧后台都不依赖旧宿主额外注入这段业务样式。
+
 [客户委托面板](EnterpriseMerchantOrderDelegationPanel.tsx)与[原来源 hook](enterprise-merchant-order-delegation.ts)读取客户已签原 D，分别处理来源核对、明确执行和 Core 原结果读取。原企业管理及订单操作权限、浏览器引用协调、来源字段核验和历史存储键继续生效，单次传输使用上下文 `requestOriginal`。执行结果为 `unknown` 时保留同一 D，后续从原结果入口核对。
 
 ## 验证入口
