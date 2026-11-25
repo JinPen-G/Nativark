@@ -10,7 +10,7 @@
 
 ```sh
 npm run build -w @rental-os/core-contracts
-npm run export:platform -- --repo . --repository https://github.com/JinPen-G/Zelo --commit <完整SHA> --out zelo-platform.tgz
+npm run export:platform -- --repo . --repository https://github.com/JinPen-G/Nativark --commit <完整SHA> --out zelo-platform.tgz
 ```
 
 解包后包含公共 API、公共后台、平台包、UIArc 源码和许可、公共数据库链及必要配置。独立后端运行包所需的具名打包脚本也随源码提供，按[公共 API 的运行包步骤](../../apps/platform-api/README.md#独立后端运行包)使用。根 workspace、默认构建/启动命令和 npm v3 锁文件按同一闭包生成。包内 README 给出安装、初始化和启动步骤，`platform.source.json` 保存固定来源及文件摘要。现有输出文件会被拒绝，不读取工作区未提交代码。[发行实现](src/platform-source.ts) · [命令入口](src/export-platform.ts)
@@ -366,6 +366,21 @@ Rental 已提供自己的完整业务 schema、关系贡献和 MySQL 数据计�
 ## 分别更新底座或一个 Core
 
 底座与 Core 的关系类似操作系统与应用。Core 基于底座的正式 API 和公开能力扩展，底座与 Core 分别维护、发布和更新版本。
+
+<a id="stable-release-source"></a>
+### 更名后的稳定发行来源
+
+官方底座的发行身份继续使用 `source.repository = "https://github.com/JinPen-G/Nativark"`，后续新版本也保持该值。源码 clone、浏览和品牌显示使用 `JinPen-G/Zelo`；两者用途不同。`source.commit` 始终是本次实际发行的完整 Git 提交，版本和摘要必须对应新包。首次安装和已有 Nativark 来源安装使用相同的官方发行身份，避免下一次更新因品牌更名更换信任来源。
+
+维护者先在 Zelo 仓库固定已提交源码和新的发行版本，按本文开头 `export:platform --repository https://github.com/JinPen-G/Nativark --commit <完整SHA>` 导出，再按宿主原打包步骤生成同源运行包并发布新版本。生成的 `platform.source.json`、发行资料及候选锁须保持该稳定来源，不覆盖旧版本资产、Tag 或历史收据。示例只说明发行规则，不表示已有未发布版本可下载安装。
+
+已有安装按以下步骤前进：
+
+1. 读取原活动锁的 `platform.source.repository`。值为上述 Nativark 来源时，选择同来源的新官方底座包，核实际发行提交与 SHA-256；Core 包、用户配置、授权和历史数据沿原引用保留。
+2. 从新包实际资料形成 `{ "kind": "platform", "release": <新底座发行资料> }`，并从目标环境原数据观察接点取得当前迁移账。用下方 `plan-update.js <当前锁JSON> <升级请求JSON> <数据观察JSON> --json` 预检；只有得到合法候选后，才沿原四步部署交接构建、迁移和切换。
+3. 返回 `source_conflict` 时停止采用该候选。不要手改活动锁、伪造包来源或把新旧 URL 加入任意等价表；先选择与原安装相同稳定来源的发行。若已有自建安装曾使用 Zelo 或其他来源，需要由该来源维护者提供同来源的新发行；跨来源迁移目前没有自动协议，必须另行核定可信来源、原锁、数据和审计方案。
+
+`source_conflict` 比较及历史 Nativark 包/锁保持原样，GitHub 仓库重定向也不会自动获得来源迁移权。独立 Core 继续使用各自原发行仓库标识，不因底座改名重写 Core 清单。[实际来源检查](src/update.ts) · [固定源码导出](src/export-platform.ts) · [原部署交接](../platform-core-host/src/core-package-preparation/README.md)
 
 底座默认保持既有公开 API 兼容。废弃或移除旧 API 时，发行说明须写清兼容范围、废弃说明和迁移方法，兼容承诺以声明范围为准。当前装配按 Core 的 `compatibility.platform`、`compatibility.contract`、`runtime.node` 和必需能力版本预检，区间采用 `minInclusive` / `maxExclusive`。[组合预检](src/compatibility.ts) · [版本范围](src/version.ts)
 

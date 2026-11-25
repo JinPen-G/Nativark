@@ -124,7 +124,7 @@ node packages/core-contracts/dist/capabilities.js --query ticket --kind page --j
 node packages/core-contracts/dist/check.js <unpacked-core-dir> --host <host-version-json> --json
 
 # 3. Export a clean zero-Core base source tarball (no business Cores; includes standalone lockfile & pack scripts)
-npm run export:platform -- --repo . --repository https://github.com/JinPen-G/Zelo --commit <full-sha> --out zelo-platform.tgz
+npm run export:platform -- --repo . --repository https://github.com/JinPen-G/Nativark --commit <full-sha> --out zelo-platform.tgz
 ```
 
 > **Online Core Discovery & Distribution**: Make your standalone Core repository public on GitHub, add the topic **`nativark-core`**, and attach your standard `.tgz` artifact to a GitHub Release. Any Zelo base can then discover it online in **Core Packages (`/platform/core-packages`)**, verify compatibility and SHA-256 digests, and stage installation. See [Core Package Host Integration](packages/platform-core-host/README.md#core-包管理接入) · [Admin Package Console](packages/platform-admin/src/features/core-packages/README.md).
@@ -324,7 +324,7 @@ Zelo/
 | `apps/api`, `apps/admin`, `packages/shared` | Legacy composite entrypoints and compatibility barrel consuming the split packages | [API Module](apps/api/src/app.module.ts) · [Admin Rules](apps/admin/AGENTS.md) · [Shared Index](packages/shared/src/index.ts) |
 | `apps/website`, `apps/website-next` | Static marketing site and Next.js marketing site | [Static Site](apps/website/README.md) · [Next.js Site](apps/website-next/README.md) |
 
-> **Compatibility Naming Note**: The brand is finalized as **Zelo**. The main GitHub repository is now `JinPen-G/Zelo`. The independent Rental Core repository, `nativark-core` discovery topic, and existing release identifiers remain unchanged to keep installation and upgrade chains compatible. For compatibility with existing installations, workspace package scopes (`@rental-os/*`) and certain env prefixes (`RENTAL_*`) are preserved for smooth migration and client compatibility without affecting zero-Core base export or standalone execution.
+> **Compatibility Naming Note**: The brand and main repository are now **Zelo** (`JinPen-G/Zelo`). Future official base releases retain `https://github.com/JinPen-G/Nativark` as their stable `source.repository`; use the Zelo URL to clone and browse the source. The independent Rental Core repository, `nativark-core` discovery topic, historical packages, deployment locks, and source receipts retain their original values. Do not rewrite old packages or edit a lock to replace its source. The updater continues to reject different sources; see [Stable Release Source After Renaming](packages/core-contracts/README.md#stable-release-source) for export and existing-installation update steps. Workspace package scopes (`@rental-os/*`) and certain environment prefixes (`RENTAL_*`) remain for migration and client compatibility without affecting zero-Core export or standalone execution.
 
 ---
 

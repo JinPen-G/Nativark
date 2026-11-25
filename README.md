@@ -23,7 +23,7 @@
 
 **Zelo** 是一个可独立运行的开源多租户 SaaS 底座。它把几乎所有企业级 SaaS 都要重复建设的底层能力——身份认证、多租户与组织权限、SaaS 订阅、公共管理后台、加密外部集成、受控 AI Native / MCP 引擎，以及标准化的 **Core 插件化接入与独立升级机制**——沉淀为纯净的公共平台。
 
-业务系统通过独立的 **Core（业务包）** 接入底座，各自维护领域模型、数据迁移、页面贡献与可选 AI 工具。**底座默认零 Core 即可独立启动、打包与源码导出**；仓库随附轻量教学包 **Example Tickets Core** 与首个官方生产级业务包 **[Rental Core](#内置业务-core-示例)**（同步独立开源于 [JinPen-G/nativark-rental-core](https://github.com/JinPen-G/nativark-rental-core)），用于开箱演示并作为构建 CRM、TMS、工单或任意垂直业务 Core 的参考实现。
+业务系统通过独立的 **Core（业务包）** 接入底座，各自维护领域模型、数据迁移、页面贡献与可选 AI 工具。**底座默认零 Core 即可独立启动、打包与源码导出**；仓库随附轻量教学包 **Example Tickets Core** 与首个官方业务包 **[Rental Core](#内置业务-core-示例)**（同步独立开源于 [JinPen-G/nativark-rental-core](https://github.com/JinPen-G/nativark-rental-core)），用于开箱演示并作为构建 CRM、TMS、工单或任意垂直业务 Core 的参考实现。
 
 > **快速导航**：[为什么选择 Zelo](#为什么选择-zelo) · [底座核心能力](#底座核心能力) · [架构与 Core 模型](#架构与-core-扩展模型) · [五步接入业务 Core](#五步接入自己的业务-core) · [内置 Core 示例](#内置业务-core-示例) · [本地运行](#本地运行) · [项目组成](#项目组成) · [开发导读](#开发导读) · [验证改动](#验证改动) · [参与贡献](#参与贡献)
 
@@ -124,7 +124,7 @@ node packages/core-contracts/dist/capabilities.js --query 工单 --kind page --j
 node packages/core-contracts/dist/check.js <已解包Core目录> --host <宿主版本JSON> --json
 
 # 3. 一键导出纯净零 Core 底座源码包（不含任何业务 Core，附独立锁文件与打包脚本）
-npm run export:platform -- --repo . --repository https://github.com/JinPen-G/Zelo --commit <完整SHA> --out zelo-platform.tgz
+npm run export:platform -- --repo . --repository https://github.com/JinPen-G/Nativark --commit <完整SHA> --out zelo-platform.tgz
 ```
 
 > **公开 Core 在线发现与分发**：将你的独立业务 Core 仓库在 GitHub 设为公开并添加 Topic **`nativark-core`**，在 Release 中附上标准 `.tgz` 资产后，任何 Zelo 底座均可在 SaaS 后台 **Core 包管理（`/platform/core-packages`）** 中在线发现、核对兼容与 SHA-256 摘要并准备安装。[包管理接入说明](packages/platform-core-host/README.md#core-包管理接入) · [后台操作说明](packages/platform-admin/src/features/core-packages/README.md)
@@ -140,7 +140,7 @@ npm run export:platform -- --repo . --repository https://github.com/JinPen-G/Zel
 - **演示能力**：工单创建 → 分派 → 开始处理 → 关闭，完整展示 3 张独立业务表迁移、幂等与原操作收据、服务端分页搜索、四页后台声明及停用重开边界。
 - **入口**：[Core 源码](packages/example-tickets-core/README.md) · [单工单 API 宿主](apps/example-tickets-api/README.md) · [单工单 Web 宿主](apps/example-tickets-admin/README.md)
 
-### 2. Rental Core（官方生产级业务包）
+### 2. Rental Core（官方业务包）
 - **定位**：Zelo 首个完整行业业务 Core，作为复杂业务接入底座的全景参考实现——**它是装在底座上的一个业务包，而非底座本体**。
 - **演示能力**：覆盖摄影设备、露营装备、车辆载具与工程设备四品类租赁全链路（商品/资产/库存/计价策略/报价/订单/交付/归还/检查/结算/企业授信），支持无 AI 与选装 AI Native 两种组合，并附带租户官网、企业客户门户、客户与员工微信小程序四端消费示例。
 - **独立仓库与发行**：同步开源于 **[JinPen-G/nativark-rental-core](https://github.com/JinPen-G/nativark-rental-core)**，标准发行包可从 [GitHub Releases](https://github.com/JinPen-G/nativark-rental-core/releases) 获取，直接通过底座的 GitHub Topic 发现接入。
@@ -324,7 +324,7 @@ Zelo/
 | `apps/api`、`apps/admin`、`packages/shared` | 原组合工程兼容入口与共享总出口（底层消费拆分后的单源包） | [API 装配](apps/api/src/app.module.ts) · [Admin 规则](apps/admin/AGENTS.md) · [shared 出口](packages/shared/src/index.ts) |
 | `apps/website`、`apps/website-next` | 静态宣传网站与 Next.js 宣传网站 | [静态官网](apps/website/README.md) · [Next.js 官网](apps/website-next/README.md) |
 
-> **关于兼容命名**：品牌及主仓库已更名为 Zelo（`JinPen-G/Zelo`）。`nativark-core` 发现标签、已有发布包的来源收据和格式标识继续沿用，以保证已有安装与更新链路兼容；不得修改历史发行包来重写来源。Zelo 由生产级业务系统演进而来，为保障既有数据库迁移、构建脚本与多端客户端平滑兼容，workspace 包名（`@rental-os/*`）及部分环境键（`RENTAL_*`）仍保留原前缀，不影响零 Core 底座的独立导出与运行。
+> **关于兼容命名**：品牌及主仓库已更名为 Zelo（`JinPen-G/Zelo`）。官方底座的新发行继续用 `https://github.com/JinPen-G/Nativark` 作为稳定的 `source.repository`，clone 与浏览源码使用 Zelo 地址；来源标识与品牌名分别维护。`nativark-core` 发现标签、历史包、部署锁和来源收据保持原值；不得修改旧包或手改锁把来源替换为新名称。更新器仍拒绝不同来源，具体导出和旧安装更新步骤见[更名后的稳定发行来源](packages/core-contracts/README.md#stable-release-source)。为保障既有迁移、构建及客户端兼容，workspace 包名（`@rental-os/*`）及部分环境键（`RENTAL_*`）仍保留原前缀，不影响零 Core 底座的独立导出与运行。
 
 ---
 
