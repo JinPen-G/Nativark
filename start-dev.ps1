@@ -59,14 +59,80 @@ function Test-ProjectProcess($process, $processes) {
 }
 
 function Assert-PortOwnership([int]$port) {
-  $listeners = Get-Listeners $port
-  if ($listeners.Count -eq 0) { return }
-  $processes = @(Get-CimInstance Win32_Process)
-  foreach ($ownerId in @($listeners.OwningProcess | Select-Object -Unique)) {
-    $process = $processes | Where-Object { $_.ProcessId -eq $ownerId } | Select-Object -First 1
-    if (-not (Test-ProjectProcess $process $processes)) {
-      throw "端口 $port 被 PID $ownerId 占用，无法确认是当前工作树；未停止或改动该进程。请先核对归属。"
+  for ($attempt = 0; $attempt -lt 3; $attempt++) {
+    $listeners = Get-Listeners $port
+    if ($listeners.Count -eq 0) { return }
+    $ownerIds = @($listeners.OwningProcess | Sort-Object -Unique)
+    $processes = @(Get-CimInstance Win32_Process)
+    $retry = $false
+    foreach ($ownerId in $ownerIds) {
+      $process = $processes | Where-Object { $_.ProcessId -eq $ownerId } | Select-Object -First 1
+      if (-not (Test-ProjectProcess $process $processes)) {
+        # 监听与进程不是同一原子快照；已退出的热重载子进程不能被误报成未知占用者。
+        if (@((Get-Listeners $port).OwningProcess) -contains $ownerId) {
+          $currentProcesses = @(Get-CimInstance Win32_Process)
+          $currentProcess = $currentProcesses | Where-Object { $_.ProcessId -eq $ownerId } | Select-Object -First 1
+          if (-not (Test-ProjectProcess $currentProcess $currentProcesses) -and
+              @((Get-Listeners $port).OwningProcess) -contains $ownerId) {
+            throw "端口 $port 被 PID $ownerId 占用，无法确认是当前工作树；未停止或改动该进程。请先核对归属。"
+          }
+        }
+        $retry = $true
+        break
+      }
     }
+    if ($retry) { continue }
+    $confirmedOwnerIds = @((Get-Listeners $port).OwningProcess | Sort-Object -Unique)
+    if (($ownerIds -join ',') -eq ($confirmedOwnerIds -join ',')) { return }
+  }
+  throw "端口 $port 的监听进程持续变化，无法稳定确认归属；未停止或重复启动进程，请待现有重载完成后重试。"
+}
+
+function Get-NodeInvocation($process) {
+  # 只解析实际 node 进程的脚本参数，不把诊断 PowerShell/cmd 正文里的路径当作服务。
+  if ($null -eq $process -or $process.Name -ne 'node.exe') { return $null }
+  $arguments = @([regex]::Matches([string]$process.CommandLine, '"[^"]*"|\S+') | ForEach-Object { $_.Value.Trim('"') })
+  if ($arguments.Count -lt 2 -or -not [IO.Path]::IsPathRooted($arguments[1])) { return $null }
+  try { $entry = [IO.Path]::GetFullPath($arguments[1].Replace('/', '\')) } catch { return $null }
+  return [pscustomobject]@{ Entry = $entry; Arguments = @($arguments | Select-Object -Skip 2) }
+}
+
+function Get-ProjectApiProcesses($processes = @(Get-CimInstance Win32_Process)) {
+  $apiMain = Join-Path $root 'apps\api\dist\main'
+  $nestEntry = Join-Path $root 'node_modules\@nestjs\cli\bin\nest.js'
+  foreach ($process in $processes) {
+    $invocation = Get-NodeInvocation $process
+    if ($null -eq $invocation) { continue }
+    $arguments = $invocation.Arguments
+    if (($invocation.Entry -eq $helper -and $arguments.Count -eq 2 -and $arguments[0] -eq 'run' -and $arguments[1] -in @('dev', 'dev:api')) -or
+        $invocation.Entry -in @($apiMain, "$apiMain.js")) {
+      $process
+      continue
+    }
+    if ($invocation.Entry -ne $nestEntry -or $arguments -notcontains 'start' -or $arguments -notcontains '--watch') { continue }
+    # 同树 Nest CLI 也可能运行纯底座；须沿仍有效的父链确认原组合 API 的 npm workspace。
+    $seen = @{}
+    $child = $process
+    while ($null -ne $child -and -not $seen.ContainsKey([int]$child.ProcessId)) {
+      $seen[[int]$child.ProcessId] = $true
+      $parent = $processes | Where-Object { $_.ProcessId -eq $child.ParentProcessId } | Select-Object -First 1
+      if ($null -eq $parent -or $parent.CreationDate -gt $child.CreationDate) { break }
+      $parentInvocation = Get-NodeInvocation $parent
+      if ($null -ne $parentInvocation -and [IO.Path]::GetFileName($parentInvocation.Entry) -eq 'npm-cli.js') {
+        $parentArguments = $parentInvocation.Arguments -join ' '
+        if ($parentArguments -match '^run dev (?:(?:-w|--workspace) +|--workspace=)@rental-os/api$') {
+          $process
+          break
+        }
+      }
+      $child = $parent
+    }
+  }
+}
+
+function Assert-ApiNotRunning([int]$port) {
+  if ((Get-Listeners $port).Count -gt 0 -or @(Get-ProjectApiProcesses).Count -gt 0) {
+    throw '应用迁移前请先正常关闭本树 API（包括仍在编译或重载的启动进程）；本脚本不对运行中的 API 执行迁移。'
   }
 }
 
@@ -76,6 +142,21 @@ function Test-ApiHealth([int]$port) {
     $payload = if ($null -ne $response.data) { $response.data } else { $response }
     return $payload.status -eq "ok" -and $payload.service -eq "rental-os-api"
   } catch { return $false }
+}
+
+function Wait-ForExistingApi([int]$port) {
+  Assert-PortOwnership $port
+  if ((Get-Listeners $port).Count -eq 0 -and @(Get-ProjectApiProcesses).Count -eq 0) { return $false }
+  if (Test-ApiHealth $port) { return $true }
+  # Nest watch 重载期间可能完全没有监听端口；原 launcher/watch 已存在就只能等候，不能另起。
+  Write-Host '[nativark] 已运行的 API 正在启动或重载，等待原服务恢复。' -ForegroundColor DarkGray
+  $reloadDeadline = [DateTime]::UtcNow.AddSeconds(90)
+  while ([DateTime]::UtcNow -lt $reloadDeadline) {
+    Start-Sleep -Seconds 2
+    Assert-PortOwnership $port
+    if (Test-ApiHealth $port) { return $true }
+  }
+  throw "本树 API 进程等待后仍不健康（端口 $port）；请检查现有日志。未停止或重复启动进程。"
 }
 
 function Test-AdminHealth([int]$port) {
@@ -98,6 +179,9 @@ function Test-AdminHealth([int]$port) {
 
 function Assert-ClientNotInUse {
   $processes = @(Get-CimInstance Win32_Process)
+  if (@(Get-ProjectApiProcesses $processes).Count -gt 0) {
+    throw '本树 API 启动或 watch 进程尚在运行；不覆盖在用的 Prisma Client，请先正常关闭该任务再生成。'
+  }
   $apiEntry = (Join-Path $root 'apps\api\').ToLowerInvariant()
   $clientEntry = (Join-Path $root 'node_modules\.prisma\client').ToLowerInvariant()
   foreach ($process in $processes) {
@@ -181,23 +265,11 @@ try {
   if ($apiPort -eq $adminPort) { throw 'API 与管理端不能使用相同端口。' }
   Assert-PortOwnership $apiPort
   Assert-PortOwnership $adminPort
-  $apiListening = (Get-Listeners $apiPort).Count -gt 0
+  if ($ApplyMigrations) { Assert-ApiNotRunning $apiPort }
   $adminListening = (Get-Listeners $adminPort).Count -gt 0
-  $apiHealthy = $apiListening -and (Test-ApiHealth $apiPort)
+  $apiHealthy = Wait-ForExistingApi $apiPort
   $adminHealthy = $adminListening -and (Test-AdminHealth $adminPort)
-  if ($apiListening -and -not $apiHealthy) {
-    # Nest watch 重载会短暂关闭 HTTP；已核定本树归属时等待原服务，不另起第二个进程。
-    Write-Host '[nativark] 已运行的 API 正在启动或重载，等待原服务恢复。' -ForegroundColor DarkGray
-    $reloadDeadline = [DateTime]::UtcNow.AddSeconds(90)
-    while (-not $apiHealthy -and [DateTime]::UtcNow -lt $reloadDeadline) {
-      Start-Sleep -Seconds 2
-      Assert-PortOwnership $apiPort
-      $apiHealthy = Test-ApiHealth $apiPort
-    }
-    if (-not $apiHealthy) { throw "本树端口 $apiPort 的 API 等待后仍不健康；请检查现有日志。未停止或重复启动进程。" }
-  }
   if ($adminListening -and -not $adminHealthy) { throw "管理端 HTML 可访问也不代表已启动：$script:adminFailure。若刚恢复链接，请正常重启本树 Vite；脚本不会误停已有进程。" }
-  if ($ApplyMigrations -and $apiListening) { throw '应用迁移前请先正常关闭本树 API；本脚本不对运行中的 API 执行迁移。' }
 
   foreach ($name in @('RENTAL_PRISMA_CLIENT', 'RENTAL_PRISMA_LEGACY', 'PRISMA_GENERATE_SKIP_AUTOINSTALL', 'NATIVARK_NPM_CLI')) {
     $previousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
@@ -231,9 +303,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Docker 本地依赖启动失败。' }
   }
   if (-not $SkipDatabaseChecks -and -not $apiHealthy) { Wait-ForLocalDatabase ([int]$settings.mysqlPort) }
-  if ($ApplyMigrations) { Invoke-Npm 'db:migrate:deploy' }
+  if ($ApplyMigrations) { Assert-ApiNotRunning $apiPort; Invoke-Npm 'db:migrate:deploy' }
 
   $launcher = $null
+  if (-not $apiHealthy) { $apiHealthy = Wait-ForExistingApi $apiPort }
   if (-not $apiHealthy -and -not $adminHealthy) { $launcher = Start-DevProcess 'dev' }
   elseif (-not $apiHealthy) { $launcher = Start-DevProcess 'dev:api' }
   elseif (-not $adminHealthy) { $launcher = Start-DevProcess 'dev:admin' }
