@@ -1,0 +1,102 @@
+import type { AiExecutionContext, AiPlatformScope } from "./ai-context";
+/** AIN-C03 draft only; public contract, not a model/authorization/connection implementation. */
+export const AI_GATEWAY_DRAFT_VERSION = "ain-c03-draft-2" as const;
+export type AiGatewayFeatureDraft = "text" | "tools" | "structured_output" | "image" | "audio" | "streaming" | "embedding" | "reasoning";
+export type AiGatewayServiceModeDraft = "platform_managed" | "tenant_managed";
+/** Probe evidence only, never authorization. Unverified is not unsupported or supported. */
+export type AiGatewayCapabilityAssessmentDraft = {
+  feature: AiGatewayFeatureDraft;
+} & (
+  | { status: "supported" | "unsupported"; evidence: "mock" | "live"; methodVersion: string; checkedAt: string; configRevision: number }
+  | { status: "unverified"; reason: "not_tested" | "probe_unavailable" | "configuration_changed" }
+);
+export interface AiGatewayCapabilitiesDraft {
+  draftVersion: typeof AI_GATEWAY_DRAFT_VERSION;
+  protocol: string; provider: string; model: string; configRevision: number;
+  features: AiGatewayFeatureDraft[]; contextTokens: number; maxOutputTokens: number;
+  usageAvailability: "reported" | "estimated_only" | "unavailable";
+  evidence: "mock" | "live";
+}
+/** These are server-established references, not bearer capabilities or model-selected settings. */
+interface AiGatewayConfigReferenceBaseDraft {
+  configId: string; configRevision: number; credentialRef: string;
+  protocol: string; provider: string; model: string;
+}
+export type AiGatewayConfigReferenceDraft = AiGatewayConfigReferenceBaseDraft & (
+  | { tenantId: string; serviceMode: "platform_managed"; configurationScope: AiPlatformScope }
+  | { tenantId: string; serviceMode: "tenant_managed"; configurationScope: { kind: "tenant"; tenantId: string } }
+  /** Explicit SaaS/platform work, not an absent tenantId silently interpreted as platform. */
+  | { consumerScope: AiPlatformScope; serviceMode: "platform_managed"; configurationScope: AiPlatformScope }
+);
+export const AI_GATEWAY_TOOL_RESULT_REFERENCE_VERSION = "ain-tool-result-reference-1" as const;
+/** Server-frozen selectors into the original plan, not a tool grant or result.
+ * Native IDs, arguments and result text are resolved only after the original
+ * model/read steps complete and current business authorization is rechecked. */
+export interface AiGatewayToolResultReferenceDraft {
+  referenceVersion: typeof AI_GATEWAY_TOOL_RESULT_REFERENCE_VERSION;
+  taskId: string;
+  runId: string;
+  modelRegistrationRef: string;
+  toolRegistrationRef: string;
+  callIndex: number;
+}
+export type AiGatewayContentDraft =
+  | { kind: "text"; text: string }
+  | { kind: "image"; attachmentId: string; attachmentRevision: number }
+  | { kind: "audio"; attachmentId: string; attachmentRevision: number }
+  | { kind: "tool_result_reference"; reference: AiGatewayToolResultReferenceDraft };
+export type AiGatewayUsageDraft =
+  | { kind: "reported"; inputTokens: number; outputTokens: number }
+  | { kind: "estimated"; inputTokens: number; outputTokens: number; methodVersion: string }
+  | { kind: "unknown"; reason: "not_returned" | "result_unknown"; nextAction: "reconcile" };
+/** Agent-facing intent: the Gateway resolves provider/config/model only after authorization. */
+export interface AiGatewayIntentDraft {
+  draftVersion: typeof AI_GATEWAY_DRAFT_VERSION;
+  requestId: string;
+  sceneCode: string;
+  messages: AiGatewayCallDraft["messages"];
+  requiredFeatures: AiGatewayFeatureDraft[];
+  optionalFeatures: AiGatewayFeatureDraft[];
+  maxOutputTokens: number;
+}
+/** Internal resolved envelope between Gateway/Router and Adapter, not the Agent input. */
+export interface AiGatewayCallDraft<TToolRequest = never> {
+  draftVersion: typeof AI_GATEWAY_DRAFT_VERSION;
+  requestId: string; runId: string; stepId: string;
+  /** Trusted server envelope only. Model-facing messages/tools never supply context/config. */
+  context: AiExecutionContext;
+  config: AiGatewayConfigReferenceDraft;
+  /** The Agent needs a scene and capabilities, never a supplier/model. Model pin is server-only. */
+  sceneCode: string;
+  expectation: { model?: string; configRevision: number; requiredFeatures: AiGatewayFeatureDraft[]; optionalFeatures: AiGatewayFeatureDraft[] };
+  messages: Array<{ role: "system" | "user" | "assistant"; content: AiGatewayContentDraft[] }>;
+  /** 仅承载宿主按已注册严格契约核验的工具请求；登记和结构合法不授予业务权限。 */
+  authorizedToolRequests: TToolRequest[];
+  maxOutputTokens: number;
+  mode: "mock" | "live";
+}
+export type AiGatewayFailureCodeDraft = "authentication_failed" | "timeout" | "cancelled" | "rate_limited" | "capability_unsupported" | "adapter_unavailable" | "configuration_changed" | "invalid_response";
+interface AiGatewayResultBaseDraft {
+  draftVersion: typeof AI_GATEWAY_DRAFT_VERSION; requestId: string;
+  actual: AiGatewayConfigReferenceDraft; evidence: "mock" | "live";
+  usage: AiGatewayUsageDraft;
+}
+export type AiGatewayResultDraft<TToolRequest = never> = AiGatewayResultBaseDraft & (
+  | { status: "completed"; text: string; toolRequests: TToolRequest[] }
+  | { status: "failed"; error: { code: AiGatewayFailureCodeDraft; message: string; nextAction: "manual" | "reauthorize" | "retry_later" } }
+  | { status: "unknown"; error: { code: "AI_RESULT_UNKNOWN"; message: string; retryable: false; nextAction: "reconcile" }; usage: Extract<AiGatewayUsageDraft, { kind: "unknown" }> }
+);
+/** All callers use one Gateway port; no supplier SDK or endpoint appears in this input. */
+export interface AiGatewayPortDraft<TToolRequest = never> {
+  invoke(context: AiExecutionContext, intent: AiGatewayIntentDraft): Promise<AiGatewayResultDraft<TToolRequest>>;
+  stream(context: AiExecutionContext, intent: AiGatewayIntentDraft): AsyncIterable<AiGatewayStreamEventDraft<TToolRequest>>;
+}
+
+/** Provider stream events only, not business success or C04 task UI events. */
+export type AiGatewayStreamEventDraft<TToolRequest = never> = {
+  draftVersion: typeof AI_GATEWAY_DRAFT_VERSION; requestId: string; sequence: number;
+} & (
+  | { kind: "started"; actual: AiGatewayConfigReferenceDraft; evidence: "mock" | "live" }
+  | { kind: "text_delta"; delta: string }
+  | { kind: "terminal"; result: AiGatewayResultDraft<TToolRequest> }
+);

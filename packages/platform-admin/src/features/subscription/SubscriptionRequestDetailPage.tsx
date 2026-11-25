@@ -1,0 +1,58 @@
+import { useAdminSession } from "../../runtime";
+import { hasSubscriptionPermission } from "./subscription-access";
+import { Space } from "antd";
+import { App, ConfirmAction, Empty, ListSection } from "../../components/ui";
+import { Alert } from "../../components/ui";
+import { Button } from "../../components/ui";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate, useParams } from "react-router-dom";
+import { PageHeader } from "./SubscriptionPageHeader";
+import { QueryState } from "../../components/QueryState";
+import { useLocale } from "../../app/locale";
+import { SUBSCRIPTION_ROUTES } from "./subscriptionRoutes";
+import { useSubscriptionApi } from "./client";
+import { SubscriptionRequestDetails } from "./SubscriptionRequestDetails";
+import { canCancelRequest, subscriptionError } from "./subscriptionOperations";
+
+export function SubscriptionRequestDetailPage() {
+  const { tenant, user, sessionVerified } = useAdminSession();
+  const subscriptionApi = useSubscriptionApi();
+  const { t } = useLocale();
+  const navigate = useNavigate();
+  const { id = "" } = useParams();
+  const canManage = hasSubscriptionPermission(user, "rental-os:subscription:manage");
+  const userId = user?.id;
+  const tenantId = tenant?.tenantId;
+  const { message } = App.useApp();
+  const queryClient = useQueryClient();
+  const query = useQuery({ queryKey: ["subscription", "tenant-view", tenantId, userId], queryFn: subscriptionApi.tenantView, enabled: sessionVerified && Boolean(tenantId && userId) });
+  const request = query.data?.requests.find((row) => row.id === id);
+  const cancelMutation = useMutation({
+    mutationFn: () => {
+      if (!canCancelRequest(request, canManage)) throw new Error(t("仅待处理申请可撤销"));
+      return subscriptionApi.cancelRequest(id);
+    },
+    onSuccess: async () => {
+      message.success(t("申请已撤销"));
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["subscription", "tenant-view"] }),
+        queryClient.invalidateQueries({ queryKey: ["subscription", "reminder"] })
+      ]);
+    },
+    onError: (error) => message.error(subscriptionError(error, t("撤销失败，请联系平台")))
+  });
+
+  return <PageHeader title="申请详情"
+    navigation={<Button type="text" onClick={() => navigate(SUBSCRIPTION_ROUTES.subscription.path)}>{t("返回版本与订阅")}</Button>}
+    view={<QueryState loading={query.isLoading}>
+      {query.error ? <Alert type="error" showIcon message={subscriptionError(query.error, t("申请详情加载失败"))} action={<Button onClick={() => query.refetch()}>{t("重试")}</Button>} />
+        : !request ? <Empty scene="map" description={t("未找到当前租户的申请")} />
+        : <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+          <Alert type="info" showIcon message={t("申请不等于开通；实际以平台核实到账并保存版本与期限为准，办理结果会显示真实生效时间。")} />
+          <ListSection title={t("申请与处理过程")}><SubscriptionRequestDetails request={request} timeZone={query.data?.overview.timeZone} /></ListSection>
+          {canCancelRequest(request, canManage) && <div><p className="text-meta">{t("已有线下资金请另联系平台处理，本操作不代表退款。")}</p>
+            <ConfirmAction label={t("撤销申请")} prompt={t("确认撤销此待处理申请？")} tone="danger" onConfirm={() => cancelMutation.mutateAsync()} />
+          </div>}
+        </Space>}
+    </QueryState>} />;
+}

@@ -1,0 +1,30 @@
+/** 公共文件SDK的唯一入口。宿主提供实际业务权威、事务和配置，导入本出口不登记HTTP或启动扫描。 */
+export { FileStoragePrimitives, MAX_FILE_BYTES } from "./file-storage-primitives";
+export { s3ObjectReadRequest } from "./s3-object-read-request";
+export { FileStorageRepository, fileAssetSummary } from "./file-storage.repository";
+export type { FileUploadFacts } from "./file-storage.repository";
+export type { FileStorageOwner, FileStorageTransaction, StoredFileAsset, StoredFileUploadSession } from "./file-storage.store";
+export { freezeFileUploadContent } from "./file-content-freeze";
+export type { FileContentFreezeAsset, FileContentFreezeSession, FileContentFreezeTransaction, FileContentFreezeParticipants } from "./file-content-freeze";
+export { readOriginalFileUploadReceipt } from "./file-upload-receipt";
+export type { FileUploadReceiptParticipants } from "./file-upload-receipt";
+export { createOriginalFileUploadFacts } from "./file-upload-session";
+export type { FileUploadSessionParticipants, OriginalFileUploadFacts } from "./file-upload-session";
+export { createOriginalFileUploadSession, completeOriginalFileUpload, uploadOriginalFileBuffer,
+  assertOriginalFileUploadSnapshot } from "./file-upload-workflow";
+export type { FileUploadCreationParticipants, FileFrozenUploadContent, FileUploadCompletionSnapshot,
+  FileUploadCompletionParticipants, FileBufferUploadParticipants } from "./file-upload-workflow";
+export { activateOriginalFileUpload, failOriginalFileUpload } from "./file-upload-activation";
+export type { FileUploadActivationFacts, FileUploadActivationParticipants, FileUploadFailureTransaction } from "./file-upload-activation";
+export { FileStorageCleanup, COMPLETED_STAGING_PENDING, COMPLETED_STAGING_UNKNOWN } from "./file-cleanup";
+export type { FileCleanupTransaction, FileCleanupParticipants } from "./file-cleanup";
+export { createOriginalFileCleanupTransactions } from "./file-cleanup-transactions";
+export type { FileCleanupLockedTransaction, FileCleanupObjectRequest, FileCleanupTransactionParticipants } from "./file-cleanup-transactions";
+export { issueFileDownloadReference } from "./file-download";
+export type { FileDownloadAsset, FileDownloadAccess, FileDownloadAudit, FileDownloadParticipants } from "./file-download";
+export { FileStorageApplication } from "./file-storage.application";
+export type { FileStorageApplicationParticipants } from "./file-storage.application";
+export type { FileStorageApplicationTransaction, FileActivationTransaction } from "./file-storage.application-store";
+export type { FileStorageAuthority, FileStorageBinding, FileUploadAuthorityContext, FileAssetAuthorityContext, FileCompletionAuthorityContext } from "./file-storage-authority";
+export { FileLedgerApplication, createSimulationFileAsset } from "./file-ledger";
+export type { FileLedgerAuthority, FileLedgerStorage, FileLedgerParticipants, FileLedgerMetadataStore } from "./file-ledger";

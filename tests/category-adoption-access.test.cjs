@@ -109,6 +109,8 @@ test("token expiry during business validation cannot be extended through the req
 
 test("preparation rollback includes staged data and receipt when final authorization expires; later current access can read the original receipt", async () => {
   const f = fixture(), state = { patches: [], receipts: [], failExpiry: true };
+  const originalResult = { id: "original", revision: 1, sourceRevision: 0, targetVersionId: "v2", batchId: "batch-one",
+    preparedOnly: true, adoptionImplemented: false };
   const db = { $transaction: async run => {
     const before = structuredClone(state);
     try { return await run(f.tx); }
@@ -118,7 +120,8 @@ test("preparation rollback includes staged data and receipt when final authoriza
   // Exercise the production transaction owner with real auth mapping. The
   // injected write simulates a preparation/receipt write, not MySQL rollback.
   const save = () => runWithRequestIdentity(f.access.identity, () => service.transaction(f.user, async () => {
-    state.patches.push("staged"); state.receipts.push({ result: { id: "original", revision: 1 } });
+    state.patches.push("staged"); state.receipts.push({ actorId: "operator", preparationId: "original",
+      inputFingerprint: "a".repeat(64), result: structuredClone(originalResult) });
     if (state.failExpiry) f.access.state.session.expiresAt = new Date(0);
     return "saved";
   }));
@@ -131,7 +134,7 @@ test("preparation rollback includes staged data and receipt when final authoriza
     return state.receipts[0];
   } };
   const read = () => runWithRequestIdentity(f.access.identity, () => service.readBatch(f.user, "v2", "batch-one"));
-  assert.deepEqual(await read(), { outcome: "saved", result: { id: "original", revision: 1 } });
+  assert.deepEqual(await read(), { outcome: "saved", result: originalResult });
   f.access.state.member.isActive = false;
   await assert.rejects(read(), /撤销/);
   assert.equal(state.receipts.length, 1);

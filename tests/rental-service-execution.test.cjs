@@ -94,6 +94,12 @@ function receiptFixture() {
   service.state = () => ({});
   service.persist = async () => { if (failPersistence) { failPersistence = false; throw Error("post-commit projection failed"); } };
   const rows = {
+    // 原动作事务先取Tenant共享父锁，收据夹具也须核验这条真实查询。
+    $queryRaw: async query => {
+      assert.equal(query.sql, "SELECT id FROM Tenant WHERE id=? LOCK IN SHARE MODE");
+      assert.deepEqual(query.values, ["tenant_1"]);
+      return [{ id: "tenant_1" }];
+    },
     businessWorkspace: { findFirst: async ({ where }) => where.tenantId === "tenant_1" && where.id === "ws_1" ? { id: "ws_1" } : null },
     rentalOrderIdempotencyRecord: {
       findFirst: async ({ where }) => {
@@ -368,6 +374,46 @@ void (async () => {
   }
 
   await runWithRequestIdentity({ tenantId: "tenant_1", workspaceId: "ws_1", userId: "operator" }, async () => {
+    const { ValidationPipe } = require("@nestjs/common");
+    const { UpdateRentalServiceOccurrenceDto } = require("../apps/api/src/modules/rental-core/rental-order-request.dto");
+    const pipe = new ValidationPipe({ transform: true, whitelist: true });
+    const transform = body => pipe.transform(body, { type: "body", metatype: UpdateRentalServiceOccurrenceDto });
+    for (const customerConfirmed of [null, false, true, undefined]) {
+      const fixture = receiptFixture(), { controller, occurrenceId, req, calls } = fixture;
+      const body = await transform({ action: "complete", executedQuantity: 1, actualAt: at(), result: "completed 1", customerConfirmed });
+      assert.equal(body.customerConfirmed, customerConfirmed, "原 DTO 不把 null 或缺省值转换为布尔值");
+      const key = `confirmation-${String(customerConfirmed)}`;
+      if (customerConfirmed === undefined) {
+        for (const input of [body, await transform({ action: "complete", executedQuantity: 1, actualAt: body.actualAt, result: body.result })]) {
+          await assert.rejects(controller.updateServiceOccurrence(req(key), "order_service_1", occurrenceId, input),
+            error => error.status === 400 && error.getResponse().serviceExecutionNotCommitted === true);
+        }
+        assert.equal(fixture.transactions(), 0); assert.equal(calls.saved, 0); assert.equal(fixture.records().length, 0);
+        ok("显式 undefined 与省略客户确认均在原执行器前拒绝，不写履约或收据");
+        continue;
+      }
+      const original = await controller.updateServiceOccurrence(req(key), "order_service_1", occurrenceId, body);
+      const replayed = await controller.updateServiceOccurrence(req(key), "order_service_1", occurrenceId, body);
+      assert.deepEqual(replayed.occurrence, original.occurrence);
+      assert.equal(Boolean(replayed.occurrence.executionSegments[0].customerConfirmedAt), Boolean(customerConfirmed));
+      const recordedHash = fixture.records()[0].requestHash;
+      const conflicts = customerConfirmed === null ? [false, true] : [!customerConfirmed];
+      for (const changed of conflicts) {
+        await assert.rejects(controller.updateServiceOccurrence(req(key), "order_service_1", occurrenceId,
+          await transform({ ...body, customerConfirmed: changed })), error => error.status === 409);
+      }
+      await assert.rejects(controller.updateServiceOccurrence(req(key), "order_service_1", occurrenceId,
+        await transform({ ...body, customerConfirmed: undefined })),
+      error => error.status === 400 && error.getResponse().serviceExecutionNotCommitted === true);
+      assert.equal(fixture.transactions(), 1, "原键重放与冲突不能重新执行业务事务");
+      assert.equal(calls.saved, 1); assert.equal(fixture.records().length, 1);
+      assert.equal(fixture.records()[0].requestHash, recordedHash);
+      assert.equal(fixture.order().serviceSnapshots[0].executedQuantity, 1);
+      ok(`客户确认 ${String(customerConfirmed)} 按原语义重放，换值不改原指纹且不重执行`);
+    }
+  });
+
+  await runWithRequestIdentity({ tenantId: "tenant_1", workspaceId: "ws_1", userId: "operator" }, async () => {
     const fixture = receiptFixture(), { controller, occurrenceId, req, calls } = fixture;
     const complete = quantity => ({ action: "complete", executedQuantity: quantity, actualAt: at(), result: `completed ${quantity}`, customerConfirmed: true });
     const first = complete(1);
@@ -430,11 +476,20 @@ void (async () => {
 
   {
     const fs = require("node:fs"), path = require("node:path"), ts = require("typescript");
-    const helpers = {}, journal = {};
-    new Function("exports", ts.transpileModule(fs.readFileSync(path.join(__dirname, "../apps/admin/src/features/ai-native/settings-operation-reference.ts"), "utf8"),
-      { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(helpers);
+    const helpers = {}, publicHelpers = {}, journal = {}, coreJournal = {};
+    // The original forms export now lives in platform-admin; keep the real journal
+    // and compatibility re-export without loading unrelated React form components.
+    new Function("exports", ts.transpileModule(fs.readFileSync(path.join(__dirname, "../packages/platform-admin/src/operation-reference.ts"), "utf8"),
+      { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(publicHelpers);
+    new Function("exports", "require", ts.transpileModule(fs.readFileSync(path.join(__dirname, "../apps/admin/src/features/ai-native/settings-operation-reference.ts"), "utf8"),
+      { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(helpers, name => {
+        assert.equal(name, "@rental-os/platform-admin/forms"); return publicHelpers;
+      });
+    new Function("exports", ts.transpileModule(fs.readFileSync(path.join(__dirname, "../packages/rental-core/admin/orders/service-execution-reference.ts"), "utf8"),
+      { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(coreJournal);
     new Function("exports", "require", ts.transpileModule(fs.readFileSync(path.join(__dirname, "../apps/admin/src/features/rental-core/service-execution-reference.ts"), "utf8"),
       { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(journal, name => {
+        if (name === "@rental-os/rental-core/admin/orders/logic") return coreJournal;
         assert.match(name, /settings-operation-reference$/); return helpers;
       });
     const rows = new Map(), storage = { getItem: key => rows.get(key) ?? null, setItem: (key, value) => rows.set(key, value), removeItem: key => rows.delete(key) };
@@ -450,9 +505,12 @@ void (async () => {
     assert.equal(journal.readServiceExecutionReference(storage, reference.scope, reference.orderId).blocked, true);
     rows.set(storedKey, JSON.stringify(reference));
     journal.clearServiceExecutionReference(storage, reference); assert.equal(rows.size, 0);
-    const returnJournal = {};
+    const returnJournal = {}, coreReturnJournal = {};
+    new Function("exports", ts.transpileModule(fs.readFileSync(path.join(__dirname, "../packages/rental-core/admin/orders/return-operation-reference.ts"), "utf8"),
+      { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(coreReturnJournal);
     new Function("exports", "require", ts.transpileModule(fs.readFileSync(path.join(__dirname, "../apps/admin/src/features/rental-core/return-operation-reference.ts"), "utf8"),
       { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(returnJournal, name => {
+        if (name === "@rental-os/rental-core/admin/orders/logic") return coreReturnJournal;
         assert.match(name, /settings-operation-reference$/); return helpers;
       });
     const payload = { items: [{ allocationId: "actual-allocation", quantity: 1 }] };
@@ -471,7 +529,7 @@ void (async () => {
     }
     await assert.rejects(returnJournal.retainReturnOperation(undefined, reference.scope, "order", "partial", payload));
     assert.equal(rows.size, 0);
-    const source = fs.readFileSync(path.join(__dirname, "../apps/admin/src/features/rental-core/RentalOrderDetailPage.tsx"), "utf8");
+    const source = fs.readFileSync(path.join(__dirname, "../packages/rental-core/admin/orders/RentalOrderDetailPage.tsx"), "utf8");
     assert.match(source, /retainServiceExecutionReference\(serviceReferenceStorage\(\), command.reference\)/);
     assert.match(source, /command.reference.orderId, command.reference.occurrenceId, command.data, command.reference.key/);
     assert.match(source, /currentSessionEpoch\(\) === epoch/);

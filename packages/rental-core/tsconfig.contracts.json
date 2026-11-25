@@ -1,0 +1,27 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmitOnError": true
+  },
+  "files": [
+    "src/index.ts",
+    "src/auth-contracts.ts",
+    "src/category-governance.ts",
+    "src/channel-contracts.ts",
+    "src/client-contracts.ts",
+    "src/contracts.ts",
+    "src/document-contracts.ts",
+    "src/enterprise.ts",
+    "src/enterprise-exchange.ts",
+    "src/enterprise-expense.ts",
+    "src/enterprise-order-delegation.ts",
+    "src/enterprise-policy.ts",
+    "src/enterprise-transfer-decision.ts",
+    "src/enterprise-workflows.ts",
+    "src/exchange-inspection-preparation.ts",
+    "src/integration-contracts.ts",
+    "src/staff-upload-observation.ts",
+    "src/tenant-bootstrap-contracts.ts"
+  ],
+  "include": []
+}

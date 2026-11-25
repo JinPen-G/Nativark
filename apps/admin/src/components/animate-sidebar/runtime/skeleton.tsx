@@ -1,13 +1,2 @@
-import { cn } from "cn"
-
-function Skeleton({ className, ...props }: React.ComponentProps<"div">) {
-  return (
-    <div
-      data-slot="skeleton"
-      className={cn("bg-muted rounded-md animate-pulse", className)}
-      {...props}
-    />
-  )
-}
-
-export { Skeleton }
+/** 原入口兼容转接；公共实现由 platform-admin 单源维护。 */
+export * from "@rental-os/platform-admin/source/components/animate-sidebar/runtime/skeleton";

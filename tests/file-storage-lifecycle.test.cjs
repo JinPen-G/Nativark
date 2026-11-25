@@ -47,9 +47,11 @@ function matches(row, where = {}) {
     if (value instanceof Date) return row[key] instanceof Date && row[key].getTime() === value.getTime();
     if (key === "AND") return value.every(clause => matches(row, clause));
     if (key === "OR") return value.some(clause => matches(row, clause));
+    if (key === "fileAsset" && value?.is) return Boolean(assets.get(row.fileAssetId)) && matches(assets.get(row.fileAssetId), value.is);
     if (value && typeof value === "object" && !Array.isArray(value)) {
       if ("in" in value) return value.in.includes(row[key]);
       if ("lte" in value) return row[key] != null && row[key] <= value.lte;
+      if ("gt" in value) return row[key] != null && row[key] > value.gt;
       if ("not" in value) return row[key] !== value.not;
       if ("some" in value) return (row[key] ?? []).some(item => matches(item, value.some));
       return matches(row[key] ?? {}, value);
@@ -57,6 +59,14 @@ function matches(row, where = {}) {
     return row[key] === value;
   });
 }
+
+function groupTenantRows(rows, { by, where, orderBy, take }) {
+  assert.deepEqual(by, ["tenantId"]);
+  assert.deepEqual(orderBy, { tenantId: "asc" });
+  const tenantIds = [...new Set(rows.filter(row => matches(row, where)).map(row => row.tenantId))];
+  return tenantIds.sort().slice(0, take ?? tenantIds.length).map(tenantId => ({ tenantId }));
+}
+
 const orders = [{ id: orderId, tenantId, workspaceId, createdBy: "file-operator", fulfillmentLocationId: "pickup-place",
   returnLocationId: "return-place", workOrders: [] },
   { id: "order-another-space", tenantId, workspaceId: otherWorkspaceId, createdBy: "file-operator", fulfillmentLocationId: "pickup-place", workOrders: [] },
@@ -83,8 +93,9 @@ function assetRow(id, status = "pending_upload", assetTenantId = tenantId, asset
     mimeType: "application/pdf",
     sizeBytes: 1024,
     storageProvider: "local_mock",
-    storageKey: `tenant-files/${tenantId}/${id}/contract.pdf`,
+    storageKey: `tenant-files/${assetTenantId}/${id}/contract.pdf`,
     publicUrl: null,
+    checksum: null,
     uploadScene: "order-contract",
     status,
     uploadedBy: null,
@@ -95,6 +106,18 @@ function assetRow(id, status = "pending_upload", assetTenantId = tenantId, asset
 }
 
 const prisma = {
+  $queryRaw: async query => {
+    if (query.sql.includes("FROM Tenant")) return [tenantId, secondTenantId].includes(query.values[0]) ? [{ id: query.values[0] }] : [];
+    const sql = query.sql.replace(/\s+/gu, " ").trim();
+    if (/^SELECT id FROM (file_upload_sessions|FileAsset) WHERE tenantId=\? AND id=\? (FOR UPDATE|LOCK IN SHARE MODE)$/u.test(sql)) {
+      assert.equal(query.values.length, 2);
+      const rows = sql.includes("FROM file_upload_sessions") ? sessions : assets;
+      const row = rows.get(query.values[1]);
+      return row?.tenantId === query.values[0] ? [{ id: row.id }] : [];
+    }
+    throw new Error("unexpected file storage SQL");
+  },
+  operationLog: { create: async () => { if (duringAudit) await duringAudit(); } },
   rentalOrder: lookup(orders), rentalAsset: lookup(inventory), rentalWorkOrder: lookup(workOrders),
   rentalQuote: lookup([{ id: 'quote-file', tenantId, workspaceId, categoryCode: 'CAMERA', createdAt: new Date(), expiresAt: new Date(),
     request: { customerId: 'customer-file-test', fulfillmentLocationId: 'pickup-place', returnLocationId: 'return-place', services: [] },
@@ -107,9 +130,10 @@ const prisma = {
   asyncJob: lookup([{ id: 'job-file', tenantId, businessType: 'rental_order', businessId: 'order-another-space' }]),
   customerProfile: lookup(customerProfiles), rentalItemGroup: lookup([catalogGroup]),
   businessWorkspace: { findFirst: async ({ where }) => publicationEnabled && where.tenantId === tenantId && where.id === workspaceId
-    ? { id: workspaceId, tenantId, status: "ACTIVE" } : null },
+    ? { id: workspaceId, tenantId, status: "ACTIVE", categoryCode: "CAMERA" } : null },
   fileAsset: {
     findMany: async ({ where, take }) => [...assets.values()].filter(row => matches(row, where)).slice(0, take ?? assets.size),
+    groupBy: async query => groupTenantRows([...assets.values()], query),
     create: async ({ data }) => {
       const row = { ...assetRow(data.id), ...data, createdAt: new Date(), updatedAt: new Date() };
       assets.set(row.id, row);
@@ -118,7 +142,7 @@ const prisma = {
     findUniqueOrThrow: async ({ where }) => assets.get(where.id),
     findFirst: async ({ where }) => {
       const row = assets.get(where.id);
-      return row && row.tenantId === where.tenantId && (!where.status || row.status === where.status) && (!where.businessType || row.businessType === where.businessType) && (!where.businessId || row.businessId === where.businessId) && (!where.uploadScene || row.uploadScene === where.uploadScene) ? row : null;
+      return row && matches(row, where) ? row : null;
     },
     update: async ({ where, data }) => {
       const row = assets.get(where.id);
@@ -127,14 +151,13 @@ const prisma = {
     },
     updateMany: async ({ where, data }) => {
       const row = assets.get(where.id);
-      if (!row || row.tenantId !== where.tenantId || (where.status && row.status !== where.status)
-        || where.storageKey && row.storageKey !== where.storageKey
-        || where.updatedAt && row.updatedAt.getTime() !== where.updatedAt.getTime()) return { count: 0 };
-      Object.assign(row, data, { updatedAt: new Date() });
+      if (!row || !matches(row, where)) return { count: 0 };
+      Object.assign(row, data, { updatedAt: data.updatedAt ?? new Date() });
       return { count: 1 };
     }
   },
   fileUploadSession: {
+    groupBy: async query => groupTenantRows([...sessions.values()], query),
     findFirst: async ({ where }) => [...sessions.values()].find((row) => row.tenantId === where.tenantId && (where.id ? row.id === where.id : row.idempotencyKey === where.idempotencyKey)) ?? null,
     findMany: async ({ where, select }) => {
       if (!where && select?.tenantId) {
@@ -143,7 +166,7 @@ const prisma = {
       return [...sessions.values()].filter(row => matches(row, where)).slice(0, 100);
     },
     create: async ({ data }) => {
-      const row = { ...data, createdAt: new Date(), updatedAt: new Date(), cleanupAttempts: 0, cleanupError: null, lastCleanupAt: null };
+      const row = { ...data, completedAt: null, failureReason: null, createdAt: new Date(), updatedAt: new Date(), cleanupAttempts: 0, cleanupError: null, lastCleanupAt: null };
       sessions.set(row.id, row);
       return row;
     },
@@ -156,7 +179,7 @@ const prisma = {
       const row = sessions.get(where.id);
       const allowed = row && matches(row, where);
       if (!allowed) return { count: 0 };
-      Object.assign(row, data, { updatedAt: new Date(), cleanupAttempts: (row.cleanupAttempts ?? 0) + (data.cleanupAttempts?.increment ?? 0) });
+      Object.assign(row, data, { updatedAt: data.updatedAt ?? new Date(), cleanupAttempts: (row.cleanupAttempts ?? 0) + (data.cleanupAttempts?.increment ?? 0) });
       return { count: 1 };
     }
   },
@@ -168,7 +191,7 @@ const prisma = {
     }
     if (Array.isArray(work)) return Promise.all(work);
     const assetBefore = structuredClone([...assets]), sessionBefore = structuredClone([...sessions]);
-    try { return await work({ fileAsset: prisma.fileAsset, fileUploadSession: prisma.fileUploadSession }); }
+    try { return await work({ ...prisma }); }
     catch (error) {
       assets.clear(); assetBefore.forEach(([id, row]) => assets.set(id, row));
       sessions.clear(); sessionBefore.forEach(([id, row]) => sessions.set(id, row)); throw error;
@@ -183,6 +206,904 @@ const integrations = {
 const access = new FileBusinessAccessService(prisma, new RentalCoreFactRepository(prisma),
   new RentalBusinessFactRepository(prisma), new CustomerOperationsService(prisma, {}, {}));
 const runtime = new FileStorageRuntimeService(prisma, integrations, { record: async () => { if (duringAudit) await duringAudit(); } }, undefined, undefined, access);
+
+/** 原Rental删除入口、公共占用/结果事务和原键HEAD，运输仅使用明确内存应答。 */
+async function pendingFileDeleteBoundaries() {
+  const { fileStorageLocationHash } = require('@rental-os/platform-contracts/file-content-binding');
+  const saved = { transaction: prisma.$transaction, deleteObject: runtime.deleteObject,
+    objectRequest: runtime.objectRequest, fileConfig, beforeConfig, duringAudit, workspace: orders[0].workspaceId };
+  function fixture(status = 'active') {
+    assets.clear(); sessions.clear(); beforeConfig = undefined; duringAudit = undefined;
+    orders[0].workspaceId = saved.workspace;
+    fileConfig = { id: 'original-delete-config', capability: 'file', provider: 's3_compatible',
+      settings: { endpoint: 'https://storage.example.invalid', bucket: 'files', region: 'us-east-1' },
+      credentials: { accessKeyId: 'offline', secretAccessKey: 'offline-only' }, revision: { updatedAt: new Date(1) } };
+    const asset = { ...assetRow('delete-original', status), storageProvider: fileConfig.provider,
+      metadata: { workspaceId, storageLocationHash: fileStorageLocationHash(fileConfig) } };
+    assets.set(asset.id, asset);
+    const owner = { businessType: asset.businessType, businessId: asset.businessId, uploadScene: asset.uploadScene, workspaceId };
+    const state = { asset, owner, requests: [], exists: true, transactions: 0, loseDelete: false,
+      loseCommitAt: 0, failResultAt: 0, revokeAt: 0 };
+    prisma.$transaction = async (work, options) => {
+      const number = ++state.transactions;
+      if (number === state.revokeAt) orders[0].workspaceId = otherWorkspaceId;
+      const result = await saved.transaction(async tx => {
+        const value = await work(tx);
+        if (number === state.failResultAt) throw Error('original result transaction rolled back');
+        return value;
+      }, options);
+      if (number === state.loseCommitAt) throw Error('original transaction acknowledgement lost');
+      return result;
+    };
+    runtime.deleteObject = async (config, key) => {
+      assert.equal(config.id, fileConfig.id);
+      assert.equal(key, asset.storageKey);
+      assert.equal(assets.get(asset.id).status, 'delete_in_progress', 'DELETE follows persisted original claim');
+      state.requests.push('DELETE'); state.exists = false;
+      if (state.loseDelete) throw Error('original DELETE acknowledgement lost');
+      return true;
+    };
+    runtime.objectRequest = async (url, init) => {
+      assert.equal(init.method, 'HEAD');
+      assert(decodeURIComponent(new URL(url).pathname).endsWith(`/${asset.storageKey}`));
+      state.requests.push('HEAD');
+      return new Response(null, { status: state.exists ? 200 : 404 });
+    };
+    state.remove = () => runtime.deleteFileAsset(tenantId, asset.id, owner);
+    state.cleanup = () => runtime.cleanupPendingFileAssetDeletes(tenantId);
+    return state;
+  }
+
+  /** 公共应用消费登记的非Rental文件权威，Core、配置和运输使用明确夹具。 */
+  function createPublicFixture(status) {
+    const { FileStorageApplication } = require('@rental-os/platform-server/files');
+    const state = fixture(status);
+    Object.assign(state.asset, { businessModule: 'fixture-core', businessType: 'fixture_object',
+      businessId: 'original-object', uploadScene: 'attachment' });
+    state.coreEnabled = true;
+    state.configurationEnabled = true;
+    state.coreChecks = 0;
+    state.configurationChecks = 0;
+    state.boundaries = [];
+    const authority = {
+      binding: { businessModule: 'fixture-core', businessType: 'fixture_object', uploadScene: 'attachment' },
+      authorityKey: () => String(state.coreEnabled),
+      assertUpload: async () => { if (!state.coreEnabled) throw Error('Current Core is stopped'); },
+      assertAsset: async context => {
+        assert.equal(context.tenantId, tenantId);
+        assert.equal(context.asset.businessId, 'original-object');
+        if (!state.coreEnabled) throw Error('Current Core is stopped');
+      },
+      isTenantSharedBinding: () => false
+    };
+    const application = new FileStorageApplication({
+      store: prisma,
+      transaction: async (work, boundary) => {
+        state.coreChecks++;
+        if (boundary) {
+          assert.equal(boundary.asset.tenantId, tenantId);
+          state.boundaries.push({ operation: boundary.operation, phase: boundary.phase });
+        }
+        if (!state.coreEnabled) throw Error('Current Core is stopped');
+        const result = await prisma.$transaction(work, { isolationLevel: 'ReadCommitted' });
+        await state.afterTransaction?.();
+        return result;
+      },
+      runtimeConfig: async () => { await state.onConfig?.(); return structuredClone(fileConfig); },
+      assertEnabled: async (tx, currentTenant, config) => {
+        assert.equal(typeof tx.fileAsset.findFirst, 'function');
+        assert.equal(currentTenant, tenantId);
+        assert.equal(config.id, fileConfig.id);
+        state.configurationChecks++;
+        if (!state.configurationEnabled) throw Error('Original configuration is disabled');
+      },
+      allowSimulation: false, isUniqueConflict: () => false, excludedUploadScene: undefined
+    }, [authority]);
+    application.deleteObject = runtime.deleteObject;
+    application.objectRequest = runtime.objectRequest;
+    return { application, state, authority };
+  }
+
+  async function createPublicUpload() {
+    const fixture = createPublicFixture('pending_upload');
+    const { application, state } = fixture;
+    assets.clear(); sessions.clear();
+    const objects = new Map(), bytes = Buffer.alloc(1024, 42);
+    application.presign = (config, method, key) => ({
+      url: 'https://storage.example.invalid/' + encodeURIComponent(key), headers: {}
+    });
+    application.readObjectContent = async (config, key) => {
+      assert.equal(config.id, fileConfig.id);
+      if (key === state.originalKey + '.pending-upload') return Buffer.from(bytes);
+      if (!objects.has(key)) throw Error('Original committed object is absent');
+      return Buffer.from(objects.get(key));
+    };
+    application.objectRequest = async (url, init) => {
+      assert.equal(init.method, 'PUT');
+      const key = decodeURIComponent(new URL(url).pathname.slice(1));
+      state.requests.push('PUT'); objects.set(key, Buffer.from(init.body));
+      if (state.losePutReply) throw Error('Original PUT acknowledgement lost');
+      return new Response('', { status: 200 });
+    };
+    const request = {
+      businessModule: 'fixture-core', businessType: 'fixture_object', businessId: 'original-object',
+      uploadScene: 'attachment', fileName: 'contract.pdf', mimeType: 'application/pdf',
+      sizeBytes: bytes.length, idempotencyKey: 'public-original-upload'
+    };
+    const grant = await application.createUploadSession(tenantId, request);
+    state.asset = assets.get(grant.fileAssetId);
+    state.originalKey = state.asset.storageKey;
+    return { ...fixture, grant, request };
+  }
+  try {
+    const lost = fixture(); lost.loseDelete = true;
+    await assert.rejects(lost.remove, /原文件删除结果尚未证实/u);
+    assert.equal(assets.get(lost.asset.id).status, 'delete_in_progress');
+    assert.equal((await lost.cleanup()).deleted, 1);
+    assert.deepEqual(lost.requests, ['DELETE', 'HEAD']);
+    assert.equal(assets.get(lost.asset.id).status, 'deleted');
+
+    const queued = fixture('delete_queued');
+    assert.equal((await queued.cleanup()).deleted, 1);
+    assert.deepEqual(queued.requests, ['DELETE'], 'acknowledged unlink queue still dispatches its first DELETE');
+
+    const legacy = fixture('delete_pending');
+    await assert.rejects(legacy.remove, /原文件删除结果尚未证实/u);
+    assert.equal(assets.get(legacy.asset.id).status, 'delete_pending');
+    legacy.exists = false;
+    assert.equal((await legacy.cleanup()).deleted, 1);
+    assert.deepEqual(legacy.requests, ['HEAD', 'HEAD'], 'legacy pending cannot establish a new DELETE receipt');
+
+    const enqueueLost = fixture(); enqueueLost.loseCommitAt = 1;
+    await assert.rejects(enqueueLost.remove, /acknowledgement lost/u);
+    assert.equal(assets.get(enqueueLost.asset.id).status, 'delete_queued');
+    assert.equal(enqueueLost.requests.length, 0);
+    enqueueLost.loseCommitAt = 0;
+    assert.equal((await enqueueLost.cleanup()).deleted, 1);
+    assert.deepEqual(enqueueLost.requests, ['DELETE']);
+
+    const claimLost = fixture(); claimLost.loseCommitAt = 2;
+    await assert.rejects(claimLost.remove, /原文件删除结果尚未证实/u);
+    assert.equal(assets.get(claimLost.asset.id).status, 'delete_in_progress');
+    claimLost.loseCommitAt = 0;
+    assert.equal((await claimLost.cleanup()).pending, 1);
+    await assert.rejects(claimLost.remove, /原文件删除结果尚未证实/u);
+    assert.deepEqual(claimLost.requests, ['HEAD', 'HEAD'], 'unacknowledged claim and repeated caller never resend DELETE');
+
+    for (const failure of ['loseCommitAt', 'failResultAt']) {
+      const resultLost = fixture(); resultLost[failure] = 4;
+      await assert.rejects(resultLost.remove, /原文件删除结果尚未证实/u);
+      assert.equal(assets.get(resultLost.asset.id).status, failure === 'loseCommitAt' ? 'deleted' : 'delete_in_progress');
+      resultLost[failure] = 0;
+      assert.equal((await resultLost.remove()).status, 'deleted');
+      assert.deepEqual(resultLost.requests, failure === 'loseCommitAt' ? ['DELETE'] : ['DELETE', 'HEAD']);
+    }
+
+    const revoked = fixture(); revoked.revokeAt = 3;
+    await assert.rejects(revoked.remove, /原文件删除结果尚未证实/u);
+    assert.equal(revoked.requests.length, 0, 'original business reference is rechecked immediately before DELETE');
+    assert.equal(assets.get(revoked.asset.id).status, 'delete_queued');
+
+    const isolated = fixture();
+    const other = { ...assetRow('delete-other', 'delete_queued'), storageProvider: fileConfig.provider,
+      metadata: { storageLocationHash: fileStorageLocationHash(fileConfig) } };
+    assets.set(other.id, other);
+    assert.equal((await isolated.remove()).status, 'deleted');
+    assert.equal(assets.get(other.id).status, 'delete_queued', 'single-file request never scans another queued target');
+    assert.deepEqual(isolated.requests, ['DELETE']);
+
+    const local = fixture(); local.asset.storageProvider = 'local_mock';
+    assert.equal((await local.remove()).status, 'deleted');
+    assert.equal(local.requests.length, 0);
+    console.log('file deletion: single DELETE, original HEAD, legacy pending, commit loss, current binding and target isolation passed');
+
+    const publicNormal = createPublicFixture('delete_queued');
+    assert.equal((await publicNormal.application.cleanup.cleanupPendingFileAssetDeletes(tenantId)).deleted, 1);
+    assert.deepEqual(publicNormal.state.requests, ['DELETE']);
+    assert.equal(publicNormal.state.configurationChecks, 1);
+    assert.deepEqual(publicNormal.state.boundaries, [
+      { operation: 'pending_delete', phase: 'claim' }, { operation: 'pending_delete', phase: 'prepare' }
+    ]);
+
+    const publicStopped = createPublicFixture('delete_queued');
+    publicStopped.state.onConfig = async () => { publicStopped.state.coreEnabled = false; };
+    assert.equal((await publicStopped.application.cleanup.cleanupPendingFileAssetDeletes(tenantId)).pending, 1);
+    assert.deepEqual(publicStopped.state.requests, []);
+    assert.equal(assets.get(publicStopped.state.asset.id).status, 'delete_queued');
+
+    const publicDisabledConfig = createPublicFixture('delete_queued');
+    publicDisabledConfig.state.onConfig = async () => { publicDisabledConfig.state.configurationEnabled = false; };
+    await publicDisabledConfig.application.cleanup.cleanupPendingFileAssetDeletes(tenantId);
+    assert.deepEqual(publicDisabledConfig.state.requests, []);
+    assert.equal(publicDisabledConfig.state.configurationChecks, 1);
+
+    const publicChangedLocation = createPublicFixture('delete_queued');
+    publicChangedLocation.state.onConfig = async () => { fileConfig.settings.bucket = 'changed-location'; };
+    await publicChangedLocation.application.cleanup.cleanupPendingFileAssetDeletes(tenantId);
+    assert.deepEqual(publicChangedLocation.state.requests, []);
+
+    const publicChangedVersion = createPublicFixture('delete_queued');
+    publicChangedVersion.state.onConfig = async () => {
+      const row = assets.get(publicChangedVersion.state.asset.id);
+      row.updatedAt = new Date(row.updatedAt.getTime() + 1);
+    };
+    await publicChangedVersion.application.cleanup.cleanupPendingFileAssetDeletes(tenantId);
+    assert.deepEqual(publicChangedVersion.state.requests, []);
+
+    const publicUpload = await createPublicUpload();
+    assert.equal((await publicUpload.application.completeUpload(tenantId, publicUpload.grant.sessionId, {})).status, 'active');
+    assert.deepEqual(publicUpload.state.requests, ['PUT']);
+
+    const publicUploadStopped = await createPublicUpload();
+    publicUploadStopped.state.afterTransaction = async () => {
+      if (sessions.get(publicUploadStopped.grant.sessionId).status === 'freeze_pending')
+        publicUploadStopped.state.coreEnabled = false;
+    };
+    await assert.rejects(publicUploadStopped.application.completeUpload(tenantId, publicUploadStopped.grant.sessionId, {}), /Current Core is stopped/u);
+    assert.deepEqual(publicUploadStopped.state.requests, []);
+    assert.equal(sessions.get(publicUploadStopped.grant.sessionId).status, 'freeze_pending');
+
+    const publicUploadLost = await createPublicUpload();
+    publicUploadLost.state.losePutReply = true;
+    await assert.rejects(publicUploadLost.application.completeUpload(tenantId, publicUploadLost.grant.sessionId, {}), /acknowledgement lost/u);
+    const publicOriginalFrozenKey = assets.get(publicUploadLost.grant.fileAssetId).storageKey;
+    publicUploadLost.state.losePutReply = false;
+    assert.equal((await publicUploadLost.application.completeUpload(tenantId, publicUploadLost.grant.sessionId, {})).status, 'active');
+    assert.deepEqual(publicUploadLost.state.requests, ['PUT']);
+    assert.equal(assets.get(publicUploadLost.grant.fileAssetId).storageKey, publicOriginalFrozenKey);
+    console.log('public file application: dispatch-time Core/config/location/version, one-shot PUT and original recovery passed');
+
+    const publicReceipt = await createPublicUpload();
+    const replay = await publicReceipt.application.createUploadSession(tenantId, publicReceipt.request);
+    assert.equal(replay.expiresAt, publicReceipt.grant.expiresAt);
+    assert.equal(replay.uploadUrl, publicReceipt.grant.uploadUrl);
+    publicReceipt.state.onConfig = async () => {
+      const session = sessions.get(publicReceipt.grant.sessionId);
+      session.expiresAt = new Date(0);
+      session.updatedAt = new Date(session.updatedAt.getTime() + 1);
+    };
+    await assert.rejects(publicReceipt.application.createUploadSession(tenantId, publicReceipt.request), /原上传会话在续签期间已变化/u);
+    assert.deepEqual(publicReceipt.state.requests, []);
+
+    const { assertOriginalFileUploadSnapshot } = require('../packages/platform-server/dist/modules/files');
+    const observed = { session: structuredClone(sessions.get(publicReceipt.grant.sessionId)) };
+    await assert.rejects(assertOriginalFileUploadSnapshot(structuredClone(observed),
+      async () => structuredClone(observed),
+      async () => { observed.session.updatedAt = new Date(observed.session.updatedAt.getTime() + 1); },
+      () => Error('原上传观察版本已变化')), /原上传观察版本已变化/u);
+    console.log('file upload receipt/observation: original expiry and Date versions are rechecked before return');
+
+    const revokedReceipt = await createPublicUpload();
+    const revokedSnapshot = structuredClone({ asset: revokedReceipt.state.asset,
+      session: sessions.get(revokedReceipt.grant.sessionId) });
+    let receiptConfigurationReads = 0;
+    revokedReceipt.state.onConfig = async () => {
+      if (++receiptConfigurationReads === 2) revokedReceipt.state.coreEnabled = false;
+    };
+    await assert.rejects(revokedReceipt.application.createUploadSession(tenantId, revokedReceipt.request), /Current Core is stopped/u);
+    assert.equal(receiptConfigurationReads, 2);
+    assert.deepEqual({ asset: revokedReceipt.state.asset,
+      session: sessions.get(revokedReceipt.grant.sessionId) }, revokedSnapshot);
+    assert.deepEqual(revokedReceipt.state.requests, []);
+
+    const delegatedReceipt = await createPublicUpload();
+    delegatedReceipt.authority.readReceipt = async (context, readOriginal) => {
+      const receipt = await readOriginal();
+      delegatedReceipt.state.coreEnabled = false;
+      return receipt;
+    };
+    await assert.rejects(delegatedReceipt.application.readUploadReceipt(tenantId, delegatedReceipt.grant.sessionId), /Current Core is stopped/u);
+    assert.deepEqual(delegatedReceipt.state.requests, []);
+    delegatedReceipt.state.coreEnabled = true;
+    sessions.get(delegatedReceipt.grant.sessionId).status = 'freeze_pending';
+    const frozenKey = delegatedReceipt.state.asset.storageKey;
+    delegatedReceipt.state.onConfig = async () => { throw Error('原冻结回执只读取既有结果'); };
+    const frozenReceipt = await delegatedReceipt.application.readUploadReceipt(tenantId, delegatedReceipt.grant.sessionId);
+    assert.equal(frozenReceipt.status, 'freeze_pending');
+    assert.equal(frozenReceipt.sessionId, delegatedReceipt.grant.sessionId);
+    assert.equal(frozenReceipt.fileAssetId, delegatedReceipt.grant.fileAssetId);
+    assert.equal(frozenReceipt.expiresAt, delegatedReceipt.grant.expiresAt);
+    assert.equal(frozenReceipt.uploadUrl, undefined);
+    assert.equal(delegatedReceipt.state.asset.storageKey, frozenKey);
+    assert.deepEqual(delegatedReceipt.state.requests, []);
+
+    const expiringReceipt = await createPublicUpload();
+    let readReceiptFinished = false;
+    expiringReceipt.authority.readReceipt = async (context, readOriginal) => {
+      const receipt = await readOriginal();
+      readReceiptFinished = true;
+      return receipt;
+    };
+    const assertUpload = expiringReceipt.authority.assertUpload;
+    const originalNow = Date.now;
+    expiringReceipt.authority.assertUpload = async (...args) => {
+      await assertUpload(...args);
+      if (readReceiptFinished) Date.now = () => Date.parse(expiringReceipt.grant.expiresAt) + 1;
+    };
+    try {
+      await assert.rejects(expiringReceipt.application.readUploadReceipt(tenantId, expiringReceipt.grant.sessionId), /原上传会话在授权复验期间已变化或过期/u);
+      assert.equal(sessions.get(expiringReceipt.grant.sessionId).expiresAt.toISOString(), expiringReceipt.grant.expiresAt);
+      assert.deepEqual(expiringReceipt.state.requests, []);
+    } finally {
+      Date.now = originalNow;
+    }
+    for (const delegated of [false, true]) {
+      const advancingReceipt = await createPublicUpload();
+      let originalFinished = false, configurationReads = 0, advanced = false;
+      let advancedRows;
+      advancingReceipt.state.onConfig = async () => {
+        if (++configurationReads === 2) originalFinished = true;
+      };
+      if (delegated) advancingReceipt.authority.readReceipt = async (_context, readOriginal) => {
+        const receipt = await readOriginal();
+        originalFinished = true;
+        return receipt;
+      };
+      const originalAuthority = advancingReceipt.authority.assertUpload;
+      advancingReceipt.authority.assertUpload = async (...args) => {
+        await originalAuthority(...args);
+        if (!originalFinished || advanced) return;
+        await Promise.resolve();
+        const session = sessions.get(advancingReceipt.grant.sessionId), asset = advancingReceipt.state.asset;
+        const checksum = 'b'.repeat(64), destination = `${asset.storageKey}.committed/original-final-wait/${checksum}`;
+        session.status = delegated ? 'completed' : 'freeze_pending';
+        session.storageKey = asset.storageKey = destination;
+        session.updatedAt = new Date(session.updatedAt.getTime() + 1);
+        asset.updatedAt = new Date(asset.updatedAt.getTime() + 1);
+        asset.status = delegated ? 'active' : 'pending_upload';
+        asset.checksum = checksum;
+        asset.metadata = { ...asset.metadata, fileContentVersion: 1, contentHash: checksum,
+          stagingStorageKey: advancingReceipt.state.originalKey };
+        advancedRows = structuredClone({ session, asset });
+        advanced = true;
+      };
+      await assert.rejects(advancingReceipt.application.readUploadReceipt(tenantId, advancingReceipt.grant.sessionId),
+        /原上传会话在授权复验期间已变化或过期/u);
+      assert.equal(advanced, true);
+      // 原仓储夹具回滚当前事务，另一操作已提交的快照独立保留。
+      assets.set(advancedRows.asset.id, advancedRows.asset);
+      sessions.set(advancedRows.session.id, advancedRows.session);
+      advancingReceipt.state.asset = advancedRows.asset;
+      const originalKey = advancingReceipt.state.asset.storageKey;
+      const receipt = await advancingReceipt.application.readUploadReceipt(tenantId, advancingReceipt.grant.sessionId);
+      assert.equal(receipt.status, delegated ? 'completed' : 'freeze_pending');
+      assert.equal(receipt.uploadUrl, undefined);
+      assert.equal(receipt.expiresAt, advancingReceipt.grant.expiresAt);
+      assert.equal(advancingReceipt.state.asset.storageKey, originalKey);
+      assert.deepEqual(advancingReceipt.state.requests, []);
+    }
+    console.log('public upload receipt: revocation after final reads, delegated receipt, original expiry, advancing state and frozen observation passed');
+  } finally {
+    prisma.$transaction = saved.transaction; runtime.deleteObject = saved.deleteObject; runtime.objectRequest = saved.objectRequest;
+    fileConfig = saved.fileConfig; beforeConfig = saved.beforeConfig; duringAudit = saved.duringAudit;
+    orders[0].workspaceId = saved.workspace; assets.clear(); sessions.clear();
+  }
+}
+
+/** 原宿主创建入口续签知识上传，使用真实签名器及明确的知识授权和存储夹具。 */
+async function knowledgeUploadRenewalBoundaries() {
+  const { requestFingerprint } = require("@rental-os/platform-contracts/request-fingerprint");
+  const savedAssets = [...assets];
+  const savedSessions = [...sessions];
+  const owner = {
+    businessType: "ai_knowledge_document", businessId: "knowledge-renewal", uploadScene: "ai-knowledge",
+    actorUserId: "knowledge-user", workspaceId
+  };
+  const request = {
+    businessModule: "ai-native", businessType: owner.businessType, businessId: owner.businessId,
+    uploadScene: owner.uploadScene, fileName: "knowledge.pdf", mimeType: "application/pdf",
+    sizeBytes: 1024, idempotencyKey: "knowledge-original-renewal"
+  };
+  let config;
+  let signatures = 0;
+  let configurationReads = 0;
+  let authorized = true;
+  let duringSigning = () => {};
+  let afterConfigurationRead = () => {};
+  let duringAuthorization = async () => {};
+  const lockedQueries = [];
+  // Prisma读取返回独立快照，夹具内的后续变更不能直接改写已经读回的对象。
+  const knowledgeStorage = {
+    ...prisma,
+    fileAsset: {
+      ...prisma.fileAsset,
+      findFirst: async input => structuredClone(await prisma.fileAsset.findFirst(input))
+    },
+    fileUploadSession: {
+      ...prisma.fileUploadSession,
+      findFirst: async input => structuredClone(await prisma.fileUploadSession.findFirst(input))
+    },
+    $transaction: work => prisma.$transaction(tx => work({
+      ...tx,
+      fileAsset: knowledgeStorage.fileAsset,
+      fileUploadSession: knowledgeStorage.fileUploadSession,
+      $queryRaw: async query => {
+        lockedQueries.push(query.sql.replace(/\s+/gu, " ").trim());
+        return tx.$queryRaw(query);
+      }
+    }))
+  };
+  const knowledge = new FileStorageRuntimeService(knowledgeStorage, {
+    runtimeConfig: async () => {
+      configurationReads += 1;
+      afterConfigurationRead(configurationReads);
+      return structuredClone(config);
+    },
+    assertEnabledInTransaction: async (...args) => {
+      lockedQueries.push("original-config-lock");
+      await integrations.assertEnabledInTransaction(...args);
+    }
+  }, undefined, undefined, {
+    authorizeUpload: async (currentTenant, input, currentOwner) => {
+      assert.equal(currentTenant, tenantId);
+      assert.equal(input.idempotencyKey, request.idempotencyKey);
+      assert.equal(currentOwner.actorUserId, owner.actorUserId);
+      assert.equal(currentOwner.workspaceId, owner.workspaceId);
+      await duringAuthorization();
+      if (!authorized) throw new Error("知识上传授权已变化");
+    }
+  }, access);
+  const originalPresign = knowledge.presign.bind(knowledge);
+  knowledge.presign = (...args) => {
+    const signed = originalPresign(...args);
+    signatures += 1;
+    duringSigning();
+    return signed;
+  };
+  function fixture() {
+    assets.clear();
+    sessions.clear();
+    signatures = 0;
+    configurationReads = 0;
+    authorized = true;
+    duringSigning = () => {};
+    afterConfigurationRead = () => {};
+    duringAuthorization = async () => {};
+    lockedQueries.length = 0;
+    config = {
+      id: "knowledge-original-config", capability: "file", provider: "s3_compatible",
+      settings: { endpoint: "https://storage.example.invalid", bucket: "files", region: "us-east-1" },
+      credentials: { accessKeyId: "offline", secretAccessKey: "offline-only" },
+      revision: { updatedAt: new Date(1) }
+    };
+    const asset = {
+      ...assetRow("knowledge-original-file"), businessModule: request.businessModule,
+      businessType: request.businessType, businessId: request.businessId, uploadScene: request.uploadScene,
+      fileName: request.fileName, storageProvider: config.provider, uploadedBy: owner.actorUserId,
+      metadata: { workspaceId, knowledgeUploadVersion: 1, fileUploadVersion: 2,
+        uploadConfigHash: requestFingerprint({ id: config.id, provider: config.provider,
+          settings: config.settings, credentials: config.credentials }) }
+    };
+    const session = {
+      id: "knowledge-original-session", tenantId, fileAssetId: asset.id, idempotencyKey: request.idempotencyKey,
+      provider: config.provider, storageKey: asset.storageKey, status: "pending_upload",
+      expiresAt: new Date(Date.now() + 15 * 60 * 1000), createdAt: new Date(), updatedAt: new Date()
+    };
+    assets.set(asset.id, asset); sessions.set(session.id, session);
+    return { asset, session };
+  }
+  try {
+    const original = fixture();
+    const grant = await knowledge.createUploadSession(tenantId, request, owner);
+    assert.equal(grant.sessionId, original.session.id);
+    assert.equal(grant.fileAssetId, original.asset.id);
+    assert.equal(grant.expiresAt, original.session.expiresAt.toISOString());
+    assert.equal(signatures, 1);
+    assert.ok(grant.uploadUrl);
+    assert.deepEqual(lockedQueries, [
+      "SELECT id FROM Tenant WHERE id=? LOCK IN SHARE MODE",
+      "original-config-lock",
+      "SELECT id FROM file_upload_sessions WHERE tenantId=? AND id=? FOR UPDATE",
+      "SELECT id FROM FileAsset WHERE tenantId=? AND id=? FOR UPDATE"
+    ]);
+
+    const changes = [
+      state => { state.session.expiresAt = new Date(0); },
+      state => { state.session.updatedAt = new Date(state.session.updatedAt.getTime() + 1); },
+      state => { state.asset.updatedAt = new Date(state.asset.updatedAt.getTime() + 1); },
+      () => { config.revision.updatedAt = new Date(2); }
+    ];
+    for (const change of changes) {
+      const state = fixture();
+      duringSigning = () => change(state);
+      await assert.rejects(knowledge.createUploadSession(tenantId, request, owner), /知识原上传在签发期间已变化/u);
+      assert.equal(signatures, 1);
+      assert.equal(assets.size, 1);
+      assert.equal(sessions.size, 1);
+    }
+    fixture();
+    afterConfigurationRead = calls => {
+      if (calls === 2) authorized = false;
+    };
+    await assert.rejects(knowledge.createUploadSession(tenantId, request, owner), /知识上传授权已变化/u);
+    assert.equal(signatures, 1);
+
+    const changedDuringAuthorization = fixture();
+    duringAuthorization = async () => {
+      if (configurationReads === 2) {
+        await Promise.resolve();
+        changedDuringAuthorization.session.expiresAt = new Date(0);
+      }
+    };
+    await assert.rejects(knowledge.createUploadSession(tenantId, request, owner), /知识原上传在签发期间已变化/u);
+    assert.equal(signatures, 1);
+    assert.equal(assets.size, 1);
+    assert.equal(sessions.size, 1);
+
+    fixture();
+    // 事务内配置只读一次，末次文件读取让出执行后的撤权仍需拒绝。
+    const originalAssetRead = knowledgeStorage.fileAsset.findFirst;
+    knowledgeStorage.fileAsset.findFirst = async input => {
+      const row = await originalAssetRead(input);
+      if (configurationReads === 2) authorized = false;
+      return row;
+    };
+    try {
+      await assert.rejects(knowledge.createUploadSession(tenantId, request, owner), /知识上传授权已变化/u);
+      assert.equal(signatures, 1);
+    } finally {
+      knowledgeStorage.fileAsset.findFirst = originalAssetRead;
+    }
+  } finally {
+    assets.clear();
+    savedAssets.forEach(([id, row]) => assets.set(id, row));
+    sessions.clear();
+    savedSessions.forEach(([id, row]) => sessions.set(id, row));
+  }
+  console.log("知识文件原键续签在返回前复验日期版本及读取等待后的当前授权");
+}
+
+/** 普通Controller和原Runtime的同键续签，当前Core权威与仓储使用明确的离线夹具。 */
+async function ordinaryUploadRenewalBoundaries() {
+  const { FilesController } = require("@rental-os/rental-core/http-files");
+  const { createRentalBusinessTenantFence } = require("@rental-os/rental-core/mysql-business-fence");
+  const { requestFingerprint } = require("@rental-os/platform-contracts/request-fingerprint");
+  const { fileStorageLocationHash } = require("@rental-os/platform-contracts/file-content-binding");
+  const savedAssets = [...assets], savedSessions = [...sessions];
+  const nativeNow = Date.now;
+  const request = {
+    businessModule: "rental-core", businessType: "rental_order", businessId: orderId,
+    fileName: "contract.pdf", mimeType: "application/pdf", sizeBytes: 1024,
+    uploadScene: "order-contract", idempotencyKey: "ordinary-original-renewal"
+  };
+  const state = { enabled: true, configurationReads: 0, signatures: 0,
+    onConfiguration: async () => {}, onAuthority: async () => {} };
+  const config = {
+    id: "ordinary-original-config", capability: "file", provider: "s3_compatible",
+    settings: { endpoint: "https://storage.example.invalid", bucket: "files", region: "us-east-1" },
+    credentials: { accessKeyId: "offline", secretAccessKey: "offline-only" },
+    revision: { updatedAt: new Date(1) }
+  };
+  const store = {
+    ...prisma,
+    fileAsset: { ...prisma.fileAsset, findFirst: async input => structuredClone(await prisma.fileAsset.findFirst(input)) },
+    fileUploadSession: { ...prisma.fileUploadSession,
+      findFirst: async input => structuredClone(await prisma.fileUploadSession.findFirst(input)) },
+    $transaction: work => prisma.$transaction(tx => work({ ...tx,
+      fileAsset: store.fileAsset, fileUploadSession: store.fileUploadSession }))
+  };
+  const application = new FileStorageRuntimeService(store, {
+    runtimeConfig: async () => {
+      await state.onConfiguration(++state.configurationReads);
+      return structuredClone(config);
+    },
+    assertEnabledInTransaction: integrations.assertEnabledInTransaction
+  }, undefined, undefined, undefined, access);
+  const controller = new FilesController({}, application, store, {});
+  const originalPresign = application.presign.bind(application);
+  application.presign = (...args) => { state.signatures++; return originalPresign(...args); };
+  application.objectRequest = async () => { throw Error("ordinary receipt must not dispatch object storage"); };
+  const fence = createRentalBusinessTenantFence(async (_transaction, currentTenant) => {
+    assert.equal(currentTenant, tenantId);
+    await state.onAuthority();
+    if (!state.enabled) throw Error("Current Core is stopped");
+  });
+  const read = () => fence.run(() => controller.createUploadSession({ user: {
+    id: operatorIdentity.userId, tenantId, displayName: "file operator"
+  } }, request));
+  function fixture(status = "pending_upload") {
+    assets.clear(); sessions.clear();
+    Object.assign(state, { enabled: true, configurationReads: 0, signatures: 0,
+      onConfiguration: async () => {}, onAuthority: async () => {} });
+    const asset = { ...assetRow("ordinary-original-file", status === "completed" ? "active" : "pending_upload"),
+      storageProvider: config.provider, uploadedBy: operatorIdentity.userId,
+      metadata: { uploadMode: "provider", fileUploadVersion: 2, workspaceId,
+        storageLocationHash: fileStorageLocationHash(config),
+        uploadConfigHash: requestFingerprint({ id: config.id, provider: config.provider,
+          settings: config.settings, credentials: config.credentials }) } };
+    const session = { id: "ordinary-original-session", tenantId, fileAssetId: asset.id,
+      idempotencyKey: request.idempotencyKey, provider: config.provider, storageKey: asset.storageKey,
+      status, expiresAt: new Date(nativeNow() + 15 * 60 * 1000), createdAt: new Date(), updatedAt: new Date() };
+    assets.set(asset.id, asset); sessions.set(session.id, session);
+    return { asset, session };
+  }
+  try {
+    const original = fixture(), before = structuredClone(original);
+    const receipt = await read();
+    assert.equal(receipt.sessionId, original.session.id);
+    assert.equal(receipt.fileAssetId, original.asset.id);
+    assert.equal(receipt.expiresAt, original.session.expiresAt.toISOString());
+    assert.equal(new URL(receipt.uploadUrl).pathname.endsWith("contract.pdf.pending-upload"), true);
+    assert.equal(state.signatures, 1);
+    assert.deepEqual(original, before);
+
+    fixture(); state.onConfiguration = async reads => { if (reads === 2) state.enabled = false; };
+    await assert.rejects(read(), /Current Core is stopped/u);
+    assert.equal(state.signatures, 1);
+
+    for (const change of [
+      rows => { rows.session.expiresAt = new Date(0); },
+      rows => { rows.session.updatedAt = new Date(rows.session.updatedAt.getTime() + 1); },
+      rows => { rows.asset.updatedAt = new Date(rows.asset.updatedAt.getTime() + 1); },
+      rows => { rows.session.status = "freeze_pending"; }
+    ]) {
+      const rows = fixture();
+      state.onAuthority = async () => { if (state.configurationReads >= 2) change(rows); };
+      await assert.rejects(read(), /原上传会话在续签期间已变化/u);
+      assert.equal(state.signatures, 1);
+    }
+
+    const expired = fixture();
+    state.onAuthority = async () => { if (state.configurationReads >= 2) Date.now = () => expired.session.expiresAt.getTime(); };
+    await assert.rejects(read(), /原上传会话在续签期间已变化/u);
+    Date.now = nativeNow;
+
+    for (const status of ["completed", "freeze_pending"]) {
+      const rows = fixture(status), snapshot = structuredClone(rows);
+      state.enabled = false;
+      const observed = await read();
+      assert.equal(observed.status, status);
+      assert.equal(observed.uploadUrl, undefined);
+      assert.equal(observed.expiresAt, rows.session.expiresAt.toISOString());
+      assert.equal(state.signatures, 0);
+      assert.deepEqual(rows, snapshot);
+    }
+
+    // 首建事实提交后的撤权只阻止返PUT，恢复仍使用已经保存的原键和原期限。
+    fixture(); assets.clear(); sessions.clear();
+    state.onConfiguration = async reads => { if (reads === 3) state.enabled = false; };
+    await assert.rejects(read(), /Current Core is stopped/u);
+    assert.equal(assets.size, 1);
+    assert.equal(sessions.size, 1);
+    const persisted = structuredClone({ asset: [...assets.values()][0], session: [...sessions.values()][0] });
+    assert.equal(persisted.session.status, "pending_upload");
+    state.enabled = true;
+    state.onConfiguration = async () => {};
+    const recovered = await read();
+    assert.equal(recovered.sessionId, persisted.session.id);
+    assert.equal(recovered.fileAssetId, persisted.asset.id);
+    assert.equal(recovered.expiresAt, persisted.session.expiresAt.toISOString());
+    assert.deepEqual({ asset: [...assets.values()][0], session: [...sessions.values()][0] }, persisted);
+    assert.equal(assets.size, 1);
+    assert.equal(sessions.size, 1);
+  } finally {
+    Date.now = nativeNow;
+    assets.clear(); savedAssets.forEach(([id, row]) => assets.set(id, row));
+    sessions.clear(); savedSessions.forEach(([id, row]) => sessions.set(id, row));
+  }
+  console.log("普通Controller同键回执在读取后复验当前Core、原日期快照和期限");
+}
+
+/** The real public cleanup and presigner, with only transactional storage and
+ * object transport replaced. Moving the clock never edits a persisted claim. */
+async function expiredCleanupBoundaries() {
+  const { FileStorageCleanup, FileStoragePrimitives } = require('@rental-os/platform-server/files');
+  const { requestFingerprint } = require('@rental-os/platform-contracts/request-fingerprint');
+  const { fileStorageLocationHash } = require('@rental-os/platform-contracts/file-content-binding');
+  const NativeDate = Date;
+  let time = NativeDate.now();
+  globalThis.Date = class extends NativeDate {
+    constructor(...args) { super(...(args.length ? args : [time])); return new NativeDate(this.getTime()); }
+    static now() { return time; }
+    static [Symbol.hasInstance](value) { return value instanceof NativeDate; }
+  };
+  const advance = () => { time += 11 * 60 * 1000; };
+  function fixture() {
+    const config = { id: 'cleanup-original-config', capability: 'file', provider: 's3_compatible',
+      settings: { endpoint: 'https://storage.example.invalid', bucket: 'files', region: 'us-east-1' },
+      credentials: { accessKeyId: 'offline', secretAccessKey: 'offline-only' },
+      revision: { updatedAt: new Date(time - 10000) } };
+    const asset = { ...assetRow('expired-original'), storageProvider: config.provider,
+      storageKey: `tenant-files/${tenantId}/expired-original/blob`, metadata: { fileUploadVersion: 2,
+        storageLocationHash: fileStorageLocationHash(config), uploadConfigHash: requestFingerprint({
+          id: config.id, provider: config.provider, settings: config.settings, credentials: config.credentials }) } };
+    const session = { id: 'expired-original-session', tenantId, fileAssetId: asset.id,
+      provider: config.provider, storageKey: asset.storageKey, status: 'pending_upload', idempotencyKey: 'expired-original-key',
+      expiresAt: new Date(time - 1000), completedAt: null, failureReason: null, cleanupAttempts: 0,
+      cleanupError: null, lastCleanupAt: null, createdAt: new Date(time - 16000), updatedAt: new Date(time - 10000) };
+    const state = { asset, session, config, depth: 0, transactions: 0, requests: [], audits: [], exists: true, trace: [] };
+    const matchSession = where => {
+      const { fileAsset, ...scalar } = where;
+      return matches(state.session, scalar) && (!fileAsset || matches(state.asset, fileAsset.is));
+    };
+    const store = {
+      fileAsset: {
+        findFirst: async ({ where }) => matches(state.asset, where) ? structuredClone(state.asset) : null,
+        findMany: async ({ where }) => matches(state.asset, where) ? [structuredClone(state.asset)] : [],
+        updateMany: async ({ where, data }) => {
+          assert.equal(state.depth, 1, 'asset CAS belongs to original host transaction');
+          state.trace.push('asset');
+          if (!matches(state.asset, where)) return { count: 0 };
+          if (state.failAssetWrite) throw Error('private asset storage failure');
+          Object.assign(state.asset, structuredClone(data)); return { count: 1 };
+        }
+      },
+      fileUploadSession: {
+        findMany: async ({ where }) => matchSession(where) ? [structuredClone(state.session)] : [],
+        update: async () => { throw Error('unconditional session receipt forbidden'); },
+        updateMany: async ({ where, data }) => {
+          assert.equal(state.depth, 1, 'session CAS belongs to original host transaction');
+          state.trace.push('session');
+          if (!matchSession(where)) return { count: 0 };
+          Object.assign(state.session, structuredClone(data), { cleanupAttempts:
+            state.session.cleanupAttempts + (data.cleanupAttempts?.increment ?? 0) });
+          return { count: 1 };
+        }
+      }
+    };
+    let queue = Promise.resolve();
+    const transaction = async work => {
+      const previous = queue; let release;
+      queue = new Promise(resolve => { release = resolve; });
+      await previous;
+      const number = ++state.transactions;
+      try { await state.beforeTransaction?.(number); }
+      catch (error) { release(); throw error; }
+      const before = structuredClone({ asset: state.asset, session: state.session });
+      let result;
+      state.depth++;
+      try { result = await work(store); }
+      catch (error) { state.asset = before.asset; state.session = before.session; throw error; }
+      finally { state.depth--; release(); }
+      // This failure is AFTER persistence, outside the rollback catch.
+      await state.afterCommit?.(number);
+      return result;
+    };
+    const bytes = new FileStoragePrimitives();
+    bytes.objectRequest = async (url, init) => {
+      assert.equal(state.depth, 0, 'object IO remains outside the transaction');
+      const key = decodeURIComponent(new URL(url).pathname).replace(/^\//u, '');
+      state.requests.push({ method: init.method, key });
+      assert.equal(key, `${asset.storageKey}.pending-upload`, 'only the original pending key');
+      if (init.method === 'DELETE') {
+        assert.equal(state.session.status, 'cleanup_in_progress');
+        assert(state.session.cleanupError, 'uncertainty must be durable before DELETE');
+        if (state.deleteFalse) return new Response(null, { status: 503 });
+        state.exists = false;
+        await state.afterDelete?.();
+        if (state.deleteLost) throw Error('private-provider-error-with-credentials');
+        return new Response(null, { status: 204 });
+      }
+      assert.equal(init.method, 'HEAD');
+      if (state.headLost) throw Error('private HEAD failure');
+      return new Response(null, { status: state.exists ? 200 : 404 });
+    };
+    const cleanup = new FileStorageCleanup({ store, transaction, excludedUploadScene: 'reserved-scene',
+      runtimeConfig: async (t, p) => { assert.equal(t, tenantId); assert.equal(p, config.provider);
+        await state.beforeConfig?.(); return structuredClone(state.config); },
+      deleteObject: bytes.deleteObject.bind(bytes), presign: bytes.presign.bind(bytes), objectRequest: bytes.objectRequest,
+      recordAudit: async input => { state.audits.push(structuredClone(input)); } });
+    return { state, run: () => cleanup.cleanupExpiredUploadSessions(tenantId) };
+  }
+  try {
+    {
+      const f = fixture(), result = await f.run();
+      assert.deepEqual(result, { scanned: 1, invalidated: 1, deletedObjects: 1, cleanupPending: 0, sessionIds: ['expired-original-session'] });
+      assert.equal(f.state.session.status, 'failed'); assert.equal(f.state.asset.status, 'failed');
+      assert.equal(f.state.session.cleanupError, null);
+      assert.deepEqual(f.state.trace, ['session', 'asset', 'session', 'asset', 'session', 'asset']);
+      await f.run(); assert.deepEqual(f.state.requests.map(row => row.method), ['DELETE']);
+      const concurrent = fixture();
+      await Promise.all([concurrent.run(), concurrent.run()]);
+      assert.deepEqual(concurrent.state.requests.map(row => row.method), ['DELETE']);
+      assert.equal(concurrent.state.session.cleanupError, null);
+      console.log('expired cleanup: original one-shot DELETE and concurrent single claim passed');
+    }
+    {
+      for (const acknowledgement of [1, 2]) {
+        const f = fixture();
+        f.state.afterCommit = number => { if (number === acknowledgement) throw Error('COMMIT acknowledgement lost'); };
+        assert.equal((await f.run()).cleanupPending, 1);
+        assert.equal(f.state.requests.length, 0);
+        assert.equal(f.state.session.status, 'cleanup_in_progress');
+        f.state.afterCommit = undefined; advance();
+        await f.run(); assert.deepEqual(f.state.requests.map(row => row.method), ['HEAD']);
+        assert(f.state.session.cleanupError, 'HEAD 200 cannot certify deletion or authorize dispatch');
+        f.state.exists = false; await f.run();
+        assert.deepEqual(f.state.requests.map(row => row.method), ['HEAD', 'HEAD']);
+        assert.equal(f.state.session.cleanupError, null);
+      }
+      console.log('expired cleanup: claim/dispatch-CAS lost COMMIT stays HEAD-only after TTL');
+    }
+    {
+      for (const fault of ['deleteLost', 'deleteFalse', 'receiptLost']) {
+        const f = fixture();
+        if (fault === 'receiptLost') f.state.afterCommit = number => { if (number === 3) throw Error('receipt COMMIT lost'); };
+        else f.state[fault] = true;
+        assert.equal((await f.run()).cleanupPending, 1);
+        assert(!JSON.stringify([f.state.session, f.state.audits]).includes('private-provider'));
+        f.state.afterCommit = undefined; advance();
+        await f.run();
+        assert.equal(f.state.requests.filter(row => row.method === 'DELETE').length, 1);
+        if (fault === 'receiptLost') assert.equal(f.state.requests.length, 1, 'already recorded receipt is read without transport');
+        else assert.equal(f.state.requests[1].method, 'HEAD');
+        if (fault === 'deleteFalse') {
+          assert(f.state.session.cleanupError); f.state.exists = false; await f.run();
+        }
+        assert.equal(f.state.session.cleanupError, null);
+      }
+      for (const status of ['failed', 'cleanup_in_progress']) {
+        const f = fixture();
+        Object.assign(f.state.session, { status, cleanupError: 'arbitrary old provider failure',
+          cleanupAttempts: 3, lastCleanupAt: new Date(time - 11 * 60 * 1000) });
+        f.state.asset.status = status === 'failed' ? 'failed' : 'pending_upload';
+        f.state.headLost = true; await f.run(); f.state.headLost = false; advance();
+        await f.run(); f.state.exists = false; await f.run();
+        assert(f.state.requests.every(row => row.method === 'HEAD'));
+        assert.equal(f.state.session.cleanupError, null);
+      }
+      console.log('expired cleanup: DELETE/Boolean unknown, lost result receipt and legacy errors never resend');
+    }
+    {
+      for (const change of [s => { s.config.settings.bucket = 'another-bucket'; },
+        s => { s.config.id = 'another-config'; }, s => { s.config.credentials.secretAccessKey = 'rotated'; },
+        s => { s.config.provider = 'aliyun_oss'; },
+        s => { s.asset.storageProvider = 'aliyun_oss'; }, s => { s.asset.storageKey += '-changed'; },
+        s => { s.asset.metadata = { uploadMode: 'provider' }; }, s => { s.session.completedAt = new Date(); }]) {
+        const f = fixture(); change(f.state);
+        const before = structuredClone({ asset: f.state.asset, session: f.state.session });
+        assert.equal((await f.run()).cleanupPending, 1); assert.equal(f.state.requests.length, 0);
+        assert.deepEqual({ asset: f.state.asset, session: f.state.session }, before);
+      }
+      const missing = fixture(); missing.state.config = undefined;
+      assert.equal((await missing.run()).cleanupPending, 1); assert.equal(missing.state.transactions, 0);
+      for (const phase of ['claim', 'receipt']) {
+        for (const field of ['asset', 'session']) {
+          const f = fixture(); let expected;
+          const change = () => {
+            if (field === 'asset') { f.state.asset.businessId = 'another-owner'; f.state.asset.updatedAt = new Date(time + 5); }
+            else { f.state.session.idempotencyKey = 'another-operation'; f.state.session.updatedAt = new Date(time + 5); }
+            expected = structuredClone({ asset: f.state.asset, session: f.state.session });
+          };
+          if (phase === 'claim') f.state.beforeTransaction = number => { if (number === 1) change(); };
+          else f.state.afterDelete = change;
+          assert.equal((await f.run()).cleanupPending, 1);
+          assert.deepEqual({ asset: f.state.asset, session: f.state.session }, expected, 'CAS rollback never overwrites another writer');
+          assert.equal(f.state.requests.length, phase === 'claim' ? 0 : 1);
+          f.state.beforeTransaction = undefined; f.state.afterDelete = undefined;
+          if (phase === 'receipt') { advance(); await f.run(); assert.equal(f.state.requests.length, 1, 'changed saved digest cannot select another target'); }
+        }
+      }
+      const changedConfig = fixture(); changedConfig.state.deleteLost = true; await changedConfig.run();
+      changedConfig.state.config.revision.updatedAt = new Date(time + 1); advance();
+      assert.equal((await changedConfig.run()).cleanupPending, 1); assert.equal(changedConfig.state.requests.length, 1);
+      const duringConfig = fixture(); let configReads = 0;
+      duringConfig.state.beforeConfig = () => { if (++configReads === 2) duringConfig.state.config.settings.bucket = 'changed-at-dispatch'; };
+      assert.equal((await duringConfig.run()).cleanupPending, 1); assert.equal(duringConfig.state.requests.length, 0);
+      console.log('expired cleanup: exact configuration, provider, asset/session revisions and receipt CAS passed');
+    }
+    {
+      const f = fixture(), before = structuredClone({ asset: f.state.asset, session: f.state.session });
+      f.state.failAssetWrite = true; assert.equal((await f.run()).cleanupPending, 1);
+      assert.deepEqual({ asset: f.state.asset, session: f.state.session }, before);
+      assert.equal(f.state.requests.length, 0, 'session claim and asset failure roll back together');
+      const denied = fixture(); denied.state.beforeTransaction = () => { throw Error('host authority revoked'); };
+      assert.equal((await denied.run()).cleanupPending, 1); assert.equal(denied.state.requests.length, 0);
+      assert.equal(denied.state.session.cleanupAttempts, 0, 'host transaction participant is not bypassed');
+      const local = fixture(); local.state.asset.storageProvider = local.state.session.provider = 'local_mock';
+      assert.equal((await local.run()).deletedObjects, 1); assert.equal(local.state.requests.length, 0);
+      for (const reserved of ['reserved-scene', 'freeze_pending', 'completed']) {
+        const excluded = fixture();
+        if (reserved === 'reserved-scene') excluded.state.asset.uploadScene = reserved;
+        else excluded.state.session.status = reserved;
+        const snapshot = structuredClone({ asset: excluded.state.asset, session: excluded.state.session });
+        await excluded.run(); assert.equal(excluded.state.transactions, 0); assert.equal(excluded.state.requests.length, 0);
+        assert.deepEqual({ asset: excluded.state.asset, session: excluded.state.session }, snapshot);
+      }
+      console.log('expired cleanup: atomic rollback, local_mock and reserved/frozen/completed isolation passed');
+    }
+  } finally { globalThis.Date = NativeDate; }
+}
 
 void runWithRequestIdentity(operatorIdentity, async () => {
   const input = {
@@ -352,6 +1273,7 @@ void runWithRequestIdentity(operatorIdentity, async () => {
     status: "pending_upload",
     idempotencyKey: "upload-expired",
     expiresAt: new Date(Date.now() - 1000),
+    completedAt: null, failureReason: null, lastCleanupAt: null, createdAt: new Date(), updatedAt: new Date(),
     cleanupError: null,
     cleanupAttempts: 0
   });
@@ -373,6 +1295,7 @@ void runWithRequestIdentity(operatorIdentity, async () => {
     status: "pending_upload",
     idempotencyKey: "upload-expired-second-tenant",
     expiresAt: new Date(Date.now() - 1000),
+    completedAt: null, failureReason: null, lastCleanupAt: null, createdAt: new Date(), updatedAt: new Date(),
     cleanupError: null,
     cleanupAttempts: 0
   });
@@ -519,7 +1442,7 @@ void runWithRequestIdentity(operatorIdentity, async () => {
   await assert.rejects(() => runtime.downloadUrl(tenantId, invoiceFile.id), notReadable);
   assert.equal((await inScope({ permissions: [...operatorIdentity.permissions, 'rental-os:finance:view'] }, () => runtime.downloadUrl(tenantId, invoiceFile.id))).fileAssetId, invoiceFile.id);
   duringAudit = () => { throw Error('audit persistence refused'); };
-  await assert.rejects(() => runtime.downloadUrl(tenantId, qualificationSession.fileAssetId), /audit persistence refused/);
+  await assert.rejects(() => runtime.downloadUrl(tenantId, qualificationSession.fileAssetId), /敏感资料审计失败，未返回完整信息/);
   duringAudit = undefined;
   console.log('file business ACL passed: original object, current scope, sensitive credentials, generic ledgers, staff stage, public publication, audited reads and pre-return rechecks');
 
@@ -533,7 +1456,8 @@ void runWithRequestIdentity(operatorIdentity, async () => {
       ? { id: where.id, tenantId, customerType: 'personal' } : null },
     customerMembership: { findUnique: async () => ({ id: 'membership-file', status: 'active' }) },
     customerMembershipQualificationType: { findFirst: async ({ where }) => matches(qualificationType, where) ? qualificationType : null },
-    $queryRaw: async sql => { const id = sql.values[1]; const row = assets.get(id);
+    $queryRaw: async sql => { if (sql.sql.includes("FROM Tenant")) return prisma.$queryRaw(sql);
+      const id = sql.values[1]; const row = assets.get(id);
       return row && row.tenantId === sql.values[0] ? [structuredClone(row)] : []; },
     customerMembershipReview: {
       create: async ({ data }) => { const row = { id: `file-review-${membershipState.reviews.length}`, ...data, createdAt: new Date(), updatedAt: new Date() }; membershipState.reviews.push(row); return row; },
@@ -686,6 +1610,60 @@ void runWithRequestIdentity(operatorIdentity, async () => {
     objectBytes.set(wrongKey, Buffer.from('short'));
     await assert.rejects(() => runtime.completeUpload(tenantId, wrongBytes.sessionId, {}, owner), /类型或大小/);
     assert.equal(sessions.get(wrongBytes.sessionId).status, 'pending_upload');
+
+    const expiryChanged = await create('immutable-expiry-changed');
+    const expiryKey = decodeURIComponent(new URL(expiryChanged.uploadUrl).pathname).replace(/^\//, '');
+    const expiryStorageKey = assets.get(expiryChanged.fileAssetId).storageKey;
+    const expiryVersion = sessions.get(expiryChanged.sessionId).updatedAt.getTime();
+    const putsBeforeExpiry = requests.filter(row => row.method === 'PUT').length;
+    objectBytes.set(expiryKey, Buffer.from('HHHH'));
+    afterRead = key => {
+      if (key === expiryKey) sessions.get(expiryChanged.sessionId).expiresAt = new Date(0);
+    };
+    try {
+      await assert.rejects(() => runtime.completeUpload(tenantId, expiryChanged.sessionId, {}, owner), /原上传会话在内容读取期间已变化/u);
+    } finally {
+      afterRead = undefined;
+    }
+    assert.equal(requests.filter(row => row.method === 'PUT').length, putsBeforeExpiry);
+    assert.equal(sessions.get(expiryChanged.sessionId).status, 'pending_upload');
+    assert.equal(sessions.get(expiryChanged.sessionId).updatedAt.getTime(), expiryVersion);
+    assert.equal(assets.get(expiryChanged.fileAssetId).storageKey, expiryStorageKey);
+    console.log('文件冻结在原占用和 PUT 前拒绝 Date 快照变化');
+
+    const { freezeFileUploadContent } = require('@rental-os/platform-server/files');
+    const controlledSource = await create('immutable-controlled-source-length');
+    const controlledAsset = structuredClone(assets.get(controlledSource.fileAssetId));
+    const controlledSession = structuredClone(sessions.get(controlledSource.sessionId));
+    const controlledAttempts = { transactions: 0, reads: 0, puts: 0 };
+    for (const bytes of [Buffer.alloc(0), Buffer.from('AAA'), Buffer.from('AAAAA')]) {
+      const contentHash = require('node:crypto').createHash('sha256').update(bytes).digest('hex');
+      await assert.rejects(() => freezeFileUploadContent({
+        tenantId, asset: controlledAsset, session: controlledSession, config: fileConfig
+      }, {
+        transaction: async () => {
+          controlledAttempts.transactions += 1;
+          throw Error('invalid controlled bytes must precede the freeze transaction');
+        },
+        beforeClaim: async () => { throw Error('invalid controlled bytes must precede authorization'); },
+        assertConfiguration: async () => { throw Error('invalid controlled bytes must precede configuration locks'); },
+        readPendingContent: async () => ({ bytes, contentHash }),
+        readContent: async () => {
+          controlledAttempts.reads += 1;
+          throw Error('invalid controlled bytes must not read an object');
+        },
+        writeContent: async () => {
+          controlledAttempts.puts += 1;
+          throw Error('invalid controlled bytes must not dispatch PUT');
+        }
+      }), /原上传字节与声明大小不一致/);
+    }
+    assert.deepEqual(controlledAttempts, { transactions: 0, reads: 0, puts: 0 });
+    assert.deepEqual(assets.get(controlledSource.fileAssetId), controlledAsset);
+    assert.deepEqual(sessions.get(controlledSource.sessionId), controlledSession);
+    sessions.delete(controlledSource.sessionId);
+    assets.delete(controlledSource.fileAssetId);
+
     const revoked = await create('immutable-revoked'), revokeKey = decodeURIComponent(new URL(revoked.uploadUrl).pathname).replace(/^\//, '');
     objectBytes.set(revokeKey, Buffer.from('GGGG'));
     const originalOrder = orders[0].workspaceId;
@@ -746,9 +1724,18 @@ void runWithRequestIdentity(operatorIdentity, async () => {
     await runtime.completeUpload(tenantId, claimUnknown.sessionId, {}, owner);
     const claimSession = sessions.get(claimUnknown.sessionId); claimSession.expiresAt = new Date(Date.now() - 1000);
     let loseClaim = true;
-    prisma.$transaction = async work => { const result = await originalTransaction(work);
-      if (loseClaim && result?.count === 1) { loseClaim = false; throw Error('cleanup COMMIT acknowledgement lost'); } return result; };
+    prisma.$transaction = async work => {
+      const result = await originalTransaction(work);
+      const claimResult = result?.result ?? result;
+      if (loseClaim && claimResult?.session?.id === claimUnknown.sessionId
+        && claimResult.session.cleanupError === 'completed_staging_unknown') {
+        loseClaim = false;
+        throw Error('cleanup COMMIT acknowledgement lost');
+      }
+      return result;
+    };
     await runtime.cleanupCompletedStagingObjects(tenantId, 100); prisma.$transaction = originalTransaction;
+    assert.equal(loseClaim, false, '原清理占用提交后必须实际注入失应答');
     assert.equal(claimSession.cleanupError, 'completed_staging_unknown');
     claimSession.lastCleanupAt = new Date(Date.now() - 11 * 60 * 1000);
     await runtime.cleanupCompletedStagingObjects(tenantId, 100);
@@ -797,18 +1784,43 @@ void runWithRequestIdentity(operatorIdentity, async () => {
   const originalFetch=globalThis.fetch, originalEgress=require('../apps/api/src/common/outbound-url').assertOutboundUrl;
   const egress=require('../apps/api/src/common/outbound-url'); egress.assertOutboundUrl=async url=>new URL(url);
   const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7x8AAAAASUVORK5CYII=','base64');
-  assert.equal(png.length,68); let byteRequests=0;
-  globalThis.fetch=async () => { byteRequests++; return new Response(png,{ headers:{'content-length':'68','content-type':'image/png'} }); };
+  assert.equal(png.length,68); let byteRequests=0, frozenWrites=0, frozenReads=0;
+  globalThis.fetch=async (url, init) => {
+    const objectPath=decodeURIComponent(new URL(url).pathname);
+    const stagingPath=decodeURIComponent(new URL(plan.uploadUrl).pathname);
+    if (init?.method === 'GET' && objectPath === stagingPath) byteRequests++;
+    if (init?.method === 'PUT' && objectPath.startsWith(stagingPath+'.committed/')) frozenWrites++;
+    if (init?.method === 'GET' && objectPath.startsWith(stagingPath+'.committed/')) frozenReads++;
+    return new Response(png,{ headers:{'content-length':'68','content-type':'image/png'} });
+  };
   try {
     await assert.rejects(dedicated.inspectExchangeInspectionUpload(tenantId,plan.assetId,{...owner,workspaceId:otherWorkspaceId},plan.configRowHash,plan.storageLocationHash),/归属/u);
     const proof=await dedicated.inspectExchangeInspectionUpload(tenantId,plan.assetId,owner,plan.configRowHash,plan.storageLocationHash);
     assert.equal(proof.contentHash,require('node:crypto').createHash('sha256').update(png).digest('hex')); assert.equal(proof.width,1); assert.equal(byteRequests,1);
+    assert.equal(frozenWrites,1); assert.equal(frozenReads,1);
+    const frozenSession=sessions.get(plan.sessionId), frozenAsset=assets.get(plan.assetId);
+    assert.equal(frozenSession.status,'freeze_pending');
+    assert.equal(frozenAsset.status,'pending_upload');
+    assert.equal(frozenSession.storageKey,frozenAsset.storageKey);
+    assert.ok(frozenAsset.storageKey.startsWith(plan.storageKey+'.committed/'));
+    assert.ok(frozenAsset.storageKey.endsWith('/'+proof.contentHash));
+    assert.equal(frozenAsset.checksum,proof.contentHash);
+    assert.equal(frozenAsset.metadata.contentHash,proof.contentHash);
+    assert.deepEqual(frozenAsset.metadata.exchangeInspectionFrozenEvidence,{
+      sourceId:owner.exchangeInspectionSourceId,contentHash:proof.contentHash,sizeBytes:proof.sizeBytes,
+      mimeType:proof.mimeType,width:proof.width,height:proof.height
+    });
     await assert.rejects(dedicated.completeUpload(tenantId,plan.sessionId,{},owner),/专用/u);
     await assert.rejects(dedicated.deleteFileAsset(tenantId,plan.assetId,owner),/专用/u);
-    sessions.get(plan.sessionId).expiresAt=new Date(0);
+    const sessionBeforeExpiry=structuredClone(frozenSession), assetBeforeExpiry=structuredClone(frozenAsset);
+    frozenSession.expiresAt=new Date(0);
+    const expiredSessionBeforeCleanup=structuredClone(frozenSession);
     const retained=await dedicated.cleanupExpiredUploadSessions(tenantId); assert.ok(!retained.sessionIds.includes(plan.sessionId));
-    assert.equal(sessions.get(plan.sessionId).status,'pending_upload'); assert.equal(assets.get(plan.assetId).status,'pending_upload');
-    sessions.get(plan.sessionId).expiresAt=plan.expiresAt;
+    assert.equal(frozenSession.status,'freeze_pending'); assert.equal(frozenAsset.status,'pending_upload');
+    assert.deepEqual(frozenSession,expiredSessionBeforeCleanup);
+    assert.deepEqual(frozenAsset,assetBeforeExpiry);
+    frozenSession.expiresAt=plan.expiresAt;
+    assert.deepEqual(frozenSession,sessionBeforeExpiry);
     const completion=await dedicated.completeExchangeInspectionUpload(dedicatedDb,tenantId,plan.assetId,owner,proof);
     assert.equal(completion.contentHash,proof.contentHash); assert.equal(assets.get(plan.assetId).status,'active');
     await assert.rejects(dedicated.downloadUrl(tenantId,plan.assetId),/专用/u);
@@ -827,6 +1839,10 @@ void runWithRequestIdentity(operatorIdentity, async () => {
     assert.ok(requestFingerprint(proof));
   } finally { globalThis.fetch=originalFetch; egress.assertOutboundUrl=originalEgress; }
   console.log("dedicated exchange image bytes, generic isolation and unknown TTL retention passed");
+  await expiredCleanupBoundaries();
+  await pendingFileDeleteBoundaries();
+  await knowledgeUploadRenewalBoundaries();
+  await ordinaryUploadRenewalBoundaries();
   console.log("file storage lifecycle tests passed");
 }).catch((error) => {
   console.error(error);

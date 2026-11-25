@@ -1,0 +1,31 @@
+CREATE TABLE `ai_gateway_invocations` (
+  `id` VARCHAR(36) NOT NULL,
+  `scopeId` VARCHAR(36) NOT NULL,
+  `taskId` VARCHAR(36) NOT NULL,
+  `runId` VARCHAR(36) NOT NULL,
+  `stepId` VARCHAR(36) NOT NULL,
+  `actionId` VARCHAR(191) NOT NULL,
+  `stepFingerprint` CHAR(64) NOT NULL,
+  `actorId` VARCHAR(191) NOT NULL,
+  `callId` VARCHAR(128) NOT NULL,
+  `sceneCode` VARCHAR(128) NOT NULL,
+  `mode` VARCHAR(8) NOT NULL,
+  `intentHash` CHAR(64) NOT NULL,
+  `registrationHash` CHAR(64) NOT NULL,
+  `configuration` JSON NOT NULL,
+  `configurationHash` CHAR(64) NOT NULL,
+  `priceVersion` VARCHAR(64) NOT NULL,
+  `maxOutputTokens` INT UNSIGNED NOT NULL,
+  `leaseOwnerId` VARCHAR(191) NOT NULL,
+  `fencingToken` DECIMAL(20,0) NOT NULL,
+  `expiresAt` DATETIME(3) NOT NULL,
+  `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`),
+  UNIQUE INDEX `ai_gateway_invocations_scope_call_key` (`scopeId`, `callId`),
+  UNIQUE INDEX `ai_gateway_invocations_scope_step_key` (`scopeId`, `stepId`),
+  INDEX `ai_gateway_invocations_task_run_idx` (`scopeId`, `taskId`, `runId`),
+  CONSTRAINT `ai_gateway_invocations_step_fk` FOREIGN KEY (`scopeId`, `taskId`, `actionId`, `stepFingerprint`)
+    REFERENCES `ai_steps` (`scopeId`, `taskId`, `actionId`, `requestFingerprint`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `ai_gateway_invocations_run_fk` FOREIGN KEY (`scopeId`, `taskId`, `runId`)
+    REFERENCES `ai_runs` (`scopeId`, `taskId`, `id`) ON DELETE RESTRICT ON UPDATE RESTRICT
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

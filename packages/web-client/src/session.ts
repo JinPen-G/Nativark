@@ -62,14 +62,23 @@ function validSession(value: ClientSession) {
     && typeof value.customer?.customerId === "string" && Boolean(value.customer.customerId)
     && typeof value.customer.displayName === "string" && Array.isArray(value.workspaces);
 }
-export function customerLogin(tenantCode: string, apiBase: string, path: "/auth/login", body: ClientMembershipLoginRequest): Promise<ClientSession>;
-export function customerLogin(tenantCode: string, apiBase: string, path: "/auth/sms-login", body: ClientSmsLoginRequest): Promise<ClientSession>;
-export function customerLogin(tenantCode: string, apiBase: string, path: "/auth/login" | "/auth/sms-login", body: ClientMembershipLoginRequest | ClientSmsLoginRequest) {
+export function customerLogin(tenantCode: string, apiBase: string, path: "/auth/login", body: ClientMembershipLoginRequest, isCurrent?: () => boolean): Promise<ClientSession>;
+export function customerLogin(tenantCode: string, apiBase: string, path: "/auth/sms-login", body: ClientSmsLoginRequest, isCurrent?: () => boolean): Promise<ClientSession>;
+export function customerLogin(tenantCode: string, apiBase: string, path: "/auth/login" | "/auth/sms-login", body: ClientMembershipLoginRequest | ClientSmsLoginRequest, isCurrent?: () => boolean) {
   const base = normalizedApiBase(apiBase);
   if (body.tenantCode !== tenantCode) return Promise.reject(new ClientTransportError(401, "登录商户与当前入口不一致"));
+  const generation = customerSessionGeneration(tenantCode);
+  const assertCurrent = () => {
+    if (generation === "unavailable" || customerSessionGeneration(tenantCode) !== generation || isCurrent && !isCurrent()) {
+      throw new ClientTransportError(401, "登录页面或客户会话已变化", "STALE_CONTEXT");
+    }
+  };
   return sessionLock(tenantCode, async () => {
+    // 排队或网络等待期间可能换账号/页面，旧登录结果不能覆盖当前会话。
+    assertCurrent();
     const next = await customerPublicPost<ClientSession>(base, path, body);
     if (!validSession(next)) throw new ClientTransportError(401, "客户登录响应无效");
+    assertCurrent();
     writeSession(tenantCode, next);
     return next;
   });

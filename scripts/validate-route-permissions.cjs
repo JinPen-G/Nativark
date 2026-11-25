@@ -12,6 +12,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const { controllerSources } = require("./controller-sources.cjs");
 
 require("ts-node").register({
   transpileOnly: true,
@@ -27,24 +28,13 @@ const {
   PUBLIC_ROUTE_PREFIXES,
   isClientRoute,
   UNMATCHED_ROUTE_PERMISSION
-} = require("../apps/api/src/common/api-auth.guard");
+} = require("@rental-os/rental-core/http-auth").createRentalAuthorization(require("@rental-os/shared"));
 
 const isPublic = (routePath) =>
   PUBLIC_ROUTES.has(routePath) ||
   PUBLIC_ROUTE_PREFIXES.some((prefix) => routePath === prefix || routePath.startsWith(`${prefix}/`));
 
 const repoRoot = path.resolve(__dirname, "..");
-const controllerRoot = path.join(repoRoot, "apps", "api", "src", "modules");
-
-function readControllerFiles(dir) {
-  const files = [];
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) files.push(...readControllerFiles(fullPath));
-    else if (entry.isFile() && entry.name.endsWith(".controller.ts")) files.push(fullPath);
-  }
-  return files;
-}
 
 /** 控制器前缀 + 方法路由 → 守卫看到的路径（已剥掉全局 /api 前缀）。 */
 function guardPath(prefix, route) {
@@ -57,8 +47,7 @@ function guardPath(prefix, route) {
 
 function controllerRoutes() {
   const routes = [];
-  for (const file of readControllerFiles(controllerRoot)) {
-    const source = fs.readFileSync(file, "utf8");
+  for (const [file, source] of controllerSources(repoRoot)) {
     const controllerMatch = source.match(/@Controller\((?:"([^"]*)")?\)/);
     if (!controllerMatch) continue;
     const prefix = controllerMatch[1] ?? "";
@@ -141,7 +130,7 @@ if (unmatched.length || zeroPermission.length || undeclared.size) {
     }
     console.error("Permission 表里没有这一行时，角色预设与管理端勾选都会被静默丢弃，该路由对非平台管理员一律 403。");
   }
-  console.error("请在 apps/api/src/common/api-auth.guard.ts 的 requiredPermissions 中补齐，或将确属公共的路由加入 PUBLIC_ROUTES。");
+  console.error("请在 packages/rental-core/src/http-auth.ts 的 requiredPermissions 中补齐，或将确属公共的路由加入 PUBLIC_ROUTES。");
   process.exit(1);
 }
 

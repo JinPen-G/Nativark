@@ -1,6 +1,2 @@
-import { AppstoreOutlined, CameraOutlined, CarOutlined, FireOutlined, InboxOutlined, SkinOutlined, ToolOutlined } from "@/components/ui/icons";
-const icons = { rental: AppstoreOutlined, camera: CameraOutlined, camping: FireOutlined, construction: ToolOutlined, vehicle: CarOutlined, clothing: SkinOutlined, tool: ToolOutlined, package: InboxOutlined };
-export function CategoryTemplateIcon({ code }: { code?: string }) {
-  const Icon = icons[code as keyof typeof icons] ?? AppstoreOutlined;
-  return <Icon aria-hidden />;
-}
+/** 原后台兼容入口；品类正文与字段规则由 Rental 单源提供。 */
+export * from "@rental-os/rental-core/admin/governance/source/CategoryTemplateIcon";

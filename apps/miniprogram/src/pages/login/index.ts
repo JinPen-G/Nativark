@@ -6,14 +6,14 @@ import { newKey } from "../../core/keys";
 import { cachedMerchant, loadMerchant, preferredServiceCode, resolveServiceCode, type MerchantInfo } from "../../core/merchant";
 import { resolvePublicImageUrl } from "../../core/public-asset";
 import { type FieldErrors } from "../../core/page";
-import { isSignedIn } from "../../core/session";
+import { isSignedIn, principalVersion } from "../../core/session";
 import { themeBehavior } from "../../core/theme-behavior";
 import { ROUTES, buildUrl, callPhone, navigate, redirect, safeRoute, toast } from "../../core/ui";
 
 /**
  * P11 登录/授权（需求 §5.1）。
- * 主入口：微信手机号授权登录（拟新增契约，服务端未提供时如实提示并展开备用入口）；
- * 备用：手机号 + 密码（现有契约）；短信验证码登录属 MP-02B，未提供时不显示假入口。
+ * 按商户公开渠道提供微信手机号、短信或密码登录，服务端裁定身份与证明用途。
+ * 短信证明只有一次消费；失应答不重复验证，页面/本人/服务变化后不采用旧会话。
  * 协议默认不勾选，必须主动同意；返回目标只能是白名单页面且不带私有参数。
  */
 interface LoginData {
@@ -81,12 +81,36 @@ Page({
   smsChallengeId: "" as string,
   smsChallengeKey: "" as string,
   smsCountdown: undefined as number | undefined,
+  loginActive: true,
+  loginGeneration: 0,
+  loginPending: false,
+
+  captureLoginAttempt() {
+    const generation = this.loginGeneration;
+    const principal = principalVersion();
+    const serviceCode = preferredServiceCode();
+    return { serviceCode, current: () => this.loginActive && this.loginGeneration === generation
+      && principalVersion() === principal && preferredServiceCode() === serviceCode };
+  },
 
   onUnload() {
+    this.loginActive = false;
+    this.loginGeneration++;
     if (this.smsCountdown) clearInterval(this.smsCountdown);
   },
 
+  onHide() {
+    this.loginActive = false;
+    this.loginGeneration++;
+  },
+
+  onShow() {
+    this.loginActive = true;
+    this.setData({ submitting: this.loginPending });
+  },
+
   onLoad(options: Record<string, string | undefined>) {
+    this.loginActive = true;
     this.redirectTo = safeRoute(options.redirect, ROUTES.home);
     if (isSignedIn()) {
       redirect(this.redirectTo);
@@ -94,7 +118,7 @@ Page({
     }
     const cached = cachedMerchant();
     if (cached) this.applyMerchant(cached);
-    loadMerchant(false).then((info) => this.applyMerchant(info)).catch(() => undefined);
+    loadMerchant(false).then((info) => { if (this.loginActive) this.applyMerchant(info); }).catch(() => undefined);
     this.prefetchLoginCode();
   },
 
@@ -162,7 +186,7 @@ Page({
 
   /** 微信手机号授权：组件回调只给一次性 code，手机号由服务端解析。 */
   async onPhoneNumber(event: WechatMiniprogram.ButtonGetPhoneNumber) {
-    if (this.data.submitting) return;
+    if (this.loginPending || this.data.submitting) return;
     const phoneCode = (event.detail as { code?: string; errMsg?: string }).code;
     if (!phoneCode) {
       const message = String((event.detail as { errMsg?: string }).errMsg ?? "");
@@ -175,14 +199,18 @@ Page({
     }
     if (!this.requireConsent()) return;
     const consent = this.consent()!;
+    const attempt = this.captureLoginAttempt();
+    this.loginPending = true;
     this.setData({ submitting: true, formError: "" });
     try {
       const loginCode = this.loginCode || (await this.freshLoginCode());
+      if (!attempt.current()) return;
       this.loginCode = "";
       if (!loginCode) throw new Error("未能获取微信登录凭证，请重试");
-      const session = await loginWithWechatPhone({ loginCode, phoneCode, consent, serviceCode: preferredServiceCode() });
-      this.finish(session);
+      const session = await loginWithWechatPhone({ loginCode, phoneCode, consent, serviceCode: attempt.serviceCode });
+      if (attempt.current()) this.finish(session);
     } catch (error) {
+      if (!attempt.current()) return;
       this.prefetchLoginCode();
       if (isApiError(error, "UNAVAILABLE")) {
         this.setData({ wechatAvailable: false, showPassword: true, wechatNotice: describeError(error).message });
@@ -190,7 +218,8 @@ Page({
         this.setData({ formError: describeError(error).message });
       }
     } finally {
-      this.setData({ submitting: false });
+      this.loginPending = false;
+      if (this.loginActive) this.setData({ submitting: false });
     }
   },
 
@@ -201,6 +230,7 @@ Page({
   /* ---------- MP-02B 短信验证码登录 ---------- */
   onSwitchAuthMode(event: WechatMiniprogram.TouchEvent) {
     const mode = String(event.currentTarget.dataset.mode ?? "password") === "sms" ? "sms" : "password";
+    if (mode !== this.data.authMode) this.loginGeneration++;
     this.setData({ authMode: mode, formError: "", errors: {} });
   },
 
@@ -220,32 +250,37 @@ Page({
   },
 
   async onSendSmsCode() {
-    if (this.data.submitting || this.data.smsRetryAfter > 0) return;
+    if (this.loginPending || this.data.submitting || this.data.smsRetryAfter > 0) return;
     const identifier = this.data.loginIdentifier.trim().replace(/[\s-]/g, "");
     if (!/^\+?[0-9]{6,20}$/.test(identifier)) {
       this.setData({ errors: { loginIdentifier: "请输入正确的手机号" } });
       return;
     }
+    const attempt = this.captureLoginAttempt();
+    this.loginPending = true;
     this.setData({ submitting: true, formError: "" });
     try {
       // 同一手机号重试复用同一幂等键；换号码才换键。login 用途要求该手机号已注册，未注册时服务端返回明确错误。
       const fingerprint = `login-sms:${identifier}`;
       if (!this.smsChallengeKey.startsWith(`${fingerprint}|`)) this.smsChallengeKey = `${fingerprint}|${newKey("challenge")}`;
-      const challenge = await createChallenge({ purpose: "login", method: "sms", identifier, idempotencyKey: this.smsChallengeKey.split("|")[1], serviceCode: preferredServiceCode() });
+      const challenge = await createChallenge({ purpose: "login", method: "sms", identifier, idempotencyKey: this.smsChallengeKey.split("|")[1], serviceCode: attempt.serviceCode });
+      if (!attempt.current()) return;
       this.smsChallengeId = challenge.challengeId;
       this.setData({ smsMasked: challenge.maskedDestination, smsDevelopmentCode: challenge.developmentCode ?? "", smsCode: "" });
       this.startSmsCountdown(challenge.retryAfterSeconds ?? 60);
     } catch (error) {
+      if (!attempt.current()) return;
       const presented = describeError(error);
       if (presented.code === "RATE_LIMITED") this.startSmsCountdown((error as { retryAfterSeconds?: number }).retryAfterSeconds ?? 60);
       this.setData({ formError: presented.message });
     } finally {
-      this.setData({ submitting: false });
+      this.loginPending = false;
+      if (this.loginActive) this.setData({ submitting: false });
     }
   },
 
   async onSmsLogin() {
-    if (this.data.submitting) return;
+    if (this.loginPending || this.data.submitting) return;
     const identifier = this.data.loginIdentifier.trim().replace(/[\s-]/g, "");
     const errors: FieldErrors = {};
     if (!/^\+?[0-9]{6,20}$/.test(identifier)) errors.loginIdentifier = "请输入正确的手机号";
@@ -256,18 +291,26 @@ Page({
       return;
     }
     if (!this.requireConsent()) return;
+    const challengeId = this.smsChallengeId;
+    const code = this.data.smsCode.trim();
+    const attempt = this.captureLoginAttempt();
+    this.loginPending = true;
     this.setData({ submitting: true, formError: "" });
     let stage: "verify" | "login" = "verify";
     try {
-      const verified = await verifyRegistrationChallenge(this.smsChallengeId, this.data.smsCode.trim());
+      const verified = await verifyRegistrationChallenge(challengeId, code);
       stage = "login";
-      // 验证码已换成一次性证明：无论登录成败都不能再用，同时换掉挑战幂等键，重新获取时才不会撞上“已验证”的旧挑战。
-      this.smsChallengeId = "";
-      this.smsChallengeKey = "";
+      // 只清除这次已验证的挑战，迟到结果不能覆盖用户后来选择的手机号。
+      if (this.smsChallengeId === challengeId) {
+        this.smsChallengeId = "";
+        this.smsChallengeKey = "";
+      }
+      if (!attempt.current()) return;
       // preferredServiceCode 只会返回商户当前已发布的服务，不会因过期服务导致拒登；验证令牌一次性，故不重试。
-      const session = await loginWithSms({ loginIdentifier: identifier, verificationToken: verified.verificationToken, serviceCode: preferredServiceCode() });
-      this.finish(session);
+      const session = await loginWithSms({ loginIdentifier: identifier, verificationToken: verified.verificationToken, serviceCode: attempt.serviceCode });
+      if (attempt.current()) this.finish(session);
     } catch (error) {
+      if (!attempt.current()) return;
       const presented = describeError(error);
       if (stage === "verify") {
         // 验证码错误可重输；挑战已过期/已用尽（409/404）则必须重新获取（并换幂等键）。
@@ -277,16 +320,26 @@ Page({
         }
         this.setData({ errors: { ...this.data.errors, smsCode: presented.code === "CONFLICT" || presented.code === "NOT_FOUND" ? `${presented.message}，请重新获取验证码` : presented.message } });
       } else {
-        // 证明已被消耗；登录被拒（如会员受限）后须重新获取验证码。
-        this.setData({ smsCode: "", formError: `${presented.message} 如需重试请重新获取验证码。` });
+        // 网络或服务端失应答不证明会话未创建，原证明不能盲目重发。
+        const status = (error as { status?: number }).status;
+        this.setData({ smsCode: "", formError: status && status >= 400 && status < 500
+          ? `${presented.message} 请重新获取验证码或改用密码登录。`
+          : "本次短信登录结果未确认，请检查当前登录状态或改用密码登录；再次短信登录需重新获取验证码。" });
       }
     } finally {
-      this.setData({ submitting: false });
+      this.loginPending = false;
+      if (this.loginActive) this.setData({ submitting: false });
     }
   },
 
   onIdentifierInput(event: WechatMiniprogram.Input) {
-    this.setData({ loginIdentifier: String(event.detail.value ?? ""), "errors.loginIdentifier": "" });
+    const identifier = String(event.detail.value ?? "");
+    if (identifier.trim().replace(/[\s-]/g, "") !== this.data.loginIdentifier.trim().replace(/[\s-]/g, "")) {
+      this.loginGeneration++;
+      this.smsChallengeId = "";
+      this.smsChallengeKey = "";
+    }
+    this.setData({ loginIdentifier: identifier, "errors.loginIdentifier": "" });
   },
 
   onPasswordInput(event: WechatMiniprogram.Input) {
@@ -294,7 +347,7 @@ Page({
   },
 
   async onPasswordLogin() {
-    if (this.data.submitting) return;
+    if (this.loginPending || this.data.submitting) return;
     const errors: FieldErrors = {};
     const identifier = this.data.loginIdentifier.trim().replace(/[\s-]/g, "");
     if (!/^\+?[0-9]{6,20}$/.test(identifier)) errors.loginIdentifier = "请输入正确的手机号";
@@ -304,26 +357,31 @@ Page({
       return;
     }
     if (!this.requireConsent()) return;
+    const password = this.data.password;
+    const attempt = this.captureLoginAttempt();
+    this.loginPending = true;
     this.setData({ submitting: true, formError: "" });
     try {
-      const session = await this.passwordLogin(identifier);
-      this.finish(session);
+      const session = await this.passwordLogin(identifier, password, attempt);
+      if (attempt.current()) this.finish(session);
     } catch (error) {
+      if (!attempt.current()) return;
       const presented = describeError(error);
       this.setData({ formError: presented.code === "UNAUTHENTICATED" ? "手机号或密码不正确" : presented.message });
     } finally {
-      this.setData({ submitting: false });
+      this.loginPending = false;
+      if (this.loginActive) this.setData({ submitting: false });
     }
   },
 
   /** 带初始服务登录；该服务已不可用（403/404）时退回不指定服务再试一次，由服务端选默认服务。 */
-  async passwordLogin(identifier: string) {
-    const serviceCode = preferredServiceCode();
+  async passwordLogin(identifier: string, password: string, attempt: { serviceCode: string | undefined; current: () => boolean }) {
+    const serviceCode = attempt.serviceCode;
     try {
-      return await loginWithPassword({ loginIdentifier: identifier, password: this.data.password, serviceCode });
+      return await loginWithPassword({ loginIdentifier: identifier, password, serviceCode });
     } catch (error) {
-      if (serviceCode && (isApiError(error, "FORBIDDEN") || isApiError(error, "NOT_FOUND"))) {
-        return loginWithPassword({ loginIdentifier: identifier, password: this.data.password });
+      if (attempt.current() && serviceCode && (isApiError(error, "FORBIDDEN") || isApiError(error, "NOT_FOUND"))) {
+        return loginWithPassword({ loginIdentifier: identifier, password });
       }
       throw error;
     }

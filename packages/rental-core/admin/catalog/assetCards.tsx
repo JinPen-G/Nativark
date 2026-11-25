@@ -1,0 +1,352 @@
+/** 资产和库存卡片复用主记录事实，附属型号资料缺失须保留读取状态。
+ * 数量、状态及处置限制仍由服务端提供，卡片不补造单位、照片或引用名称。 */
+import { Box, CircleCheck, CirclePause, Clock3, MapPin, ScanLine, TriangleAlert, Wrench } from "lucide-react";
+import type {
+  RentalAsset,
+  RentalAttributeDefinition,
+  RentalItemGroup,
+  RentalStockBalance,
+  RentalStockDisposition,
+} from "@rental-os/rental-core";
+import { DataTableStatus, type ListCard } from "@rental-os/platform-admin/ui";
+import { Button } from "@rental-os/platform-admin/native-ui";
+import {
+  CardFacts,
+  CardSecondary,
+  CardSection,
+} from "@rental-os/platform-admin/ui";
+import { CatalogCardMedia } from "./CatalogCardMedia";
+import { catalogAttributeText } from "./catalogAttributeText";
+import styles from "./assetCards.module.css";
+import listing from "./catalogListing.module.css";
+
+type Translate = (key: string) => string;
+const assetStatus = {
+  available: { tone: "success", icon: CircleCheck },
+  reserved: { tone: "info", icon: Clock3 },
+  rented: { tone: "info", icon: Clock3 },
+  inspection: { tone: "warning", icon: ScanLine },
+  maintenance: { tone: "warning", icon: Wrench },
+  disabled: { tone: "neutral", icon: CirclePause },
+} as const;
+
+function photo(groups: RentalItemGroup[] | undefined, id: string, name: string, unavailableText: string) {
+  const group = groups?.find((item) => item.id === id);
+  if (!group) return <CardSecondary>{unavailableText}</CardSecondary>;
+  return <CatalogCardMedia group={group} label={name} />;
+}
+
+export function assetCards({
+  t,
+  groups,
+  groupsUnavailableText,
+  locationsUnavailableText,
+  statusLabel,
+  canManage,
+  canView,
+  edit,
+  history,
+  fields = [],
+  summaryFields = [],
+  itemGroupLabel,
+  locationLabel,
+  serialLabel,
+}: {
+  t: Translate;
+  groups: RentalItemGroup[] | undefined;
+  groupsUnavailableText?: string;
+  locationsUnavailableText?: string;
+  statusLabel: (status: string) => string;
+  canManage: boolean;
+  canView: boolean;
+  edit: (row: RentalAsset) => void;
+  history: (row: RentalAsset) => void;
+  fields?: RentalAttributeDefinition[];
+  summaryFields?: RentalAttributeDefinition[];
+  itemGroupLabel?: string;
+  locationLabel?: string;
+  serialLabel?: string;
+}): ListCard<RentalAsset> {
+  const filled = (row: RentalAsset, candidates: RentalAttributeDefinition[]) =>
+    candidates.filter((field) => {
+      const value = row.attributes[field.code];
+      return value !== undefined && value !== null && String(value).trim() !== "";
+    });
+  const extraFields = (row: RentalAsset) => {
+    const shown = new Set(
+      filled(row, summaryFields)
+        .slice(0, 2)
+        .map((field) => field.code),
+    );
+    return filled(row, fields).filter((field) => !shown.has(field.code));
+  };
+  return {
+    kind: "asset",
+    title: (row) => row.itemGroupName || groupsUnavailableText || t("未获取型号资料"),
+    subtitle: (row) => row.assetNo,
+    media: (row) => photo(
+      groups,
+      row.itemGroupId,
+      row.itemGroupName,
+      !groups ? (groupsUnavailableText ?? t("未获取型号资料")) : t("未获取型号资料"),
+    ),
+    listing: (row) => {
+      const status = assetStatus[row.status];
+      const StatusIcon = status?.icon ?? Box;
+      return (
+        <>
+          <p className={listing.row}>
+            <span className={listing.identity} title={row.assetNo}>
+              {row.assetNo}
+            </span>
+            <span className={listing.state} data-warning={status?.tone === "warning" || undefined}>
+              <StatusIcon aria-hidden="true" />
+              {statusLabel(row.status)}
+            </span>
+          </p>
+          <p className={listing.row}>
+            <span
+              className={`${listing.metadata} ${listing.location}`}
+              title={`${locationLabel ?? t("履约地点")} · ${row.locationName || locationsUnavailableText || t("未获取地点资料")}`}
+            >
+              <MapPin aria-hidden="true" />
+              <span>{row.locationName || locationsUnavailableText || t("未获取地点资料")}</span>
+            </span>
+          </p>
+        </>
+      );
+    },
+    status: (row) => (
+      <DataTableStatus variant="soft" {...assetStatus[row.status]}>
+        {statusLabel(row.status)}
+      </DataTableStatus>
+    ),
+    body: (row) => (
+      <div className={styles.asset}>
+        <dl className={styles.identity}>
+          <div>
+            <dt>
+              <Box aria-hidden="true" />
+              <span>{itemGroupLabel ?? t("型号")}</span>
+            </dt>
+            <dd>{row.itemGroupName || groupsUnavailableText || t("未获取型号资料")}</dd>
+          </div>
+          <div>
+            <dt>
+              <MapPin aria-hidden="true" />
+              <span>{locationLabel ?? t("履约地点")}</span>
+            </dt>
+            <dd>{row.locationName || locationsUnavailableText || t("未获取地点资料")}</dd>
+          </div>
+        </dl>
+        <dl className={styles.serial}>
+          <div>
+            <dt>{serialLabel ?? t("序列号")}</dt>
+            <dd data-empty={row.serialNo ? undefined : ""}>{row.serialNo || t("未登记序列号")}</dd>
+          </div>
+        </dl>
+        {filled(row, summaryFields).length > 0 && (
+          <dl className={styles.attributes}>
+            {filled(row, summaryFields)
+              .slice(0, 2)
+              .map((field) => (
+                <div key={field.code}>
+                  <dt>{t(field.label)}</dt>
+                  <dd>{catalogAttributeText(row.attributes[field.code], t)}</dd>
+                </div>
+              ))}
+          </dl>
+        )}
+      </div>
+    ),
+    details: (row) =>
+      extraFields(row).length > 0 ? (
+        <CardSection title={t("基本资料")}>
+          <CardFacts
+            items={extraFields(row).map((field) => ({
+              label: t(field.label),
+              value: catalogAttributeText(row.attributes[field.code], t),
+            }))}
+          />
+        </CardSection>
+      ) : null,
+    actions: (row, afterClose) => (
+      <>
+        {canManage && (
+          <Button variant="secondary" size="sm" onClick={() => afterClose(() => edit(row))}>
+            {t("编辑")}
+          </Button>
+        )}
+        {canView && (
+          <Button variant="secondary" size="sm" onClick={() => afterClose(() => history(row))}>
+            {t("状态历史")}
+          </Button>
+        )}
+      </>
+    ),
+  };
+}
+
+export function stockCards({
+  t,
+  groups,
+  groupsUnavailableText,
+  locationsUnavailableText,
+  dispositions,
+  locale,
+  locationLabel,
+}: {
+  t: Translate;
+  groups: RentalItemGroup[] | undefined;
+  groupsUnavailableText?: string;
+  locationsUnavailableText?: string;
+  dispositions: RentalStockDisposition[];
+  locale?: string;
+  locationLabel?: string;
+}): ListCard<RentalStockBalance> {
+  const restricted = (row: RentalStockBalance) =>
+    dispositions.filter(
+      (item) =>
+        item.itemGroupId === row.itemGroupId &&
+        item.locationId === row.locationId &&
+        (item.status === "buffered" || item.status === "blocked"),
+    );
+  return {
+    kind: "stock",
+    title: (row) => row.itemGroupName || groupsUnavailableText || t("未获取型号资料"),
+    subtitle: (row) => `${row.itemGroupCode} · ${row.locationName || locationsUnavailableText || t("未获取地点资料")}`,
+    media: (row) => photo(
+      groups,
+      row.itemGroupId,
+      row.itemGroupName,
+      !groups ? (groupsUnavailableText ?? t("未获取型号资料")) : t("未获取型号资料"),
+    ),
+    listing: (row) => {
+      const unit = groups?.find((group) => group.id === row.itemGroupId)?.unit;
+      const restrictions = restricted(row);
+      const exceedsOnHand = row.reservedQuantity + row.maintenanceQuantity > row.onHandQuantity;
+      const blocked = restrictions.some((item) => item.status === "blocked");
+      const warning = exceedsOnHand
+        ? t("库存异常")
+        : blocked
+          ? t("异常隔离")
+          : restrictions.length
+            ? t("周转缓冲")
+            : row.maintenanceQuantity > 0
+              ? `${t("维护/清洁")} ${row.maintenanceQuantity}`
+              : undefined;
+      return (
+        <>
+          <p className={`${listing.row} ${listing.quantityRow}`}>
+            <span className={listing.identity}>
+              {t("可用")} {row.availableQuantity}
+              {unit && ` ${t(unit)}`}
+            </span>
+            <span className={listing.state}>
+              <Box aria-hidden="true" />
+              {t("在手")} {row.onHandQuantity}
+            </span>
+          </p>
+          <p className={listing.row}>
+            <span
+              className={`${listing.metadata} ${listing.location}`}
+              title={`${locationLabel ?? t("履约地点")} · ${row.locationName || locationsUnavailableText || t("未获取地点资料")}`}
+            >
+              <MapPin aria-hidden="true" />
+              <span>{row.locationName || locationsUnavailableText || t("未获取地点资料")}</span>
+            </span>
+            {warning ? (
+              <span
+                className={listing.state}
+                data-warning={!blocked || undefined}
+                data-error={blocked || undefined}
+                title={restrictions.map((item) => item.blockReason || t("养护处理中")).join("；") || warning}
+              >
+                <TriangleAlert aria-hidden="true" />
+                {warning}
+              </span>
+            ) : row.reservedQuantity > 0 ? (
+              <span className={listing.state}>
+                {t("已预占")} {row.reservedQuantity}
+              </span>
+            ) : null}
+          </p>
+        </>
+      );
+    },
+    status: (row) => (
+      <span className={styles.location} title={locationLabel ?? t("履约地点")}>
+        <MapPin aria-hidden="true" />
+        {row.locationName || locationsUnavailableText || t("未获取地点资料")}
+      </span>
+    ),
+    body: (row) => {
+      const unit = groups?.find((group) => group.id === row.itemGroupId)?.unit;
+      return (
+        <div className={styles.stock}>
+          <div className={styles.availability}>
+            <span className={styles.availableLabel}>{t("可用")}</span>
+            <span className={styles.availableValue}>
+              {row.availableQuantity}
+              {unit && <span>{t(unit)}</span>}
+            </span>
+          </div>
+          {!groups && <CardSecondary>{groupsUnavailableText ?? t("未获取型号资料")}</CardSecondary>}
+          <dl className={styles.quantities}>
+            <div>
+              <dt>{t("在手")}</dt>
+              <dd>{row.onHandQuantity}</dd>
+            </div>
+            <div>
+              <dt>{t("已预占")}</dt>
+              <dd>{row.reservedQuantity}</dd>
+            </div>
+            <div>
+              <dt>{t("维护/清洁")}</dt>
+              <dd>{row.maintenanceQuantity}</dd>
+            </div>
+          </dl>
+          {row.reservedQuantity + row.maintenanceQuantity > row.onHandQuantity && (
+            <div className={styles.restriction}>
+              <TriangleAlert aria-hidden="true" />
+              <span>
+                {t("已预占")} + {t("维护/清洁")} &gt; {t("在手")}
+              </span>
+            </div>
+          )}
+          {restricted(row)
+            .slice(0, 2)
+            .map((item) => (
+              <div
+                className={`${styles.restriction} ${styles.dispositionSummary}`}
+                key={item.id}
+                data-blocked={item.status === "blocked" || undefined}
+              >
+                <TriangleAlert aria-hidden="true" />
+                <span>
+                  {t(item.status === "blocked" ? "异常隔离" : "周转缓冲")} ·{" "}
+                  {item.blockReason || t("养护处理中")}
+                </span>
+              </div>
+            ))}
+        </div>
+      );
+    },
+    details: (row) =>
+      restricted(row).length > 0 ? (
+        <CardSection title={t("不可用原因 / 预计恢复")}>
+          {restricted(row).map((item) => (
+            <div key={item.id}>
+              <DataTableStatus variant="soft" tone={item.status === "blocked" ? "error" : "warning"}>
+                {t(item.status === "blocked" ? "异常隔离" : "周转缓冲")}
+              </DataTableStatus>
+              <CardSecondary>{item.blockReason || t("养护处理中")}</CardSecondary>
+              {item.status === "buffered" && item.bufferUntil && (
+                <CardSecondary>{new Date(item.bufferUntil).toLocaleString(locale)}</CardSecondary>
+              )}
+            </div>
+          ))}
+        </CardSection>
+      ) : null,
+  };
+}

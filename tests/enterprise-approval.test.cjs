@@ -7,8 +7,8 @@ const { Prisma } = require('@prisma/client');
 const commandsModule = { enterpriseJson: value => typeof value === 'string' ? JSON.parse(value) : value };
 class HttpError extends Error {}
 const exportsForService = {};
-const source = ts.transpileModule(fs.readFileSync('apps/api/src/modules/enterprise/enterprise-approval.service.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true } }).outputText;
-vm.runInNewContext(source, { exports: exportsForService, require: name => name === '@nestjs/common' ? { Injectable: () => value => value, ConflictException: HttpError, ForbiddenException: HttpError, NotFoundException: HttpError } : name === '@prisma/client' ? { Prisma } : name === './enterprise-command.service' ? commandsModule : name === '../../common/request-identity' ? { requireRequestWorkspaceId: () => 'w1' } : name.startsWith('node:') ? require(name) : (() => { throw new Error(name); })(), Date, JSON, structuredClone });
+const source = ts.transpileModule(fs.readFileSync('packages/rental-core/src/mysql-enterprise-approval.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true } }).outputText;
+vm.runInNewContext(source, { exports: exportsForService, require: name => name === '@nestjs/common' ? { Injectable: () => value => value, ConflictException: HttpError, ForbiddenException: HttpError, NotFoundException: HttpError } : name === '@prisma/client' ? { Prisma } : name === './mysql-enterprise-command' ? commandsModule : name === '@rental-os/platform-server/request-identity' ? { requireRequestWorkspaceId: () => 'w1' } : name.startsWith('node:') || name.startsWith('@rental-os/') ? require(name) : name === './enterprise-order-delegation-source' ? require('@rental-os/rental-core/enterprise-order-delegation-source') : (() => { throw new Error(name); })(), Date, JSON, structuredClone });
 const { EnterpriseApprovalService } = exportsForService;
 const context = { tenantId: 't1', customerId: 'p1', workspaceId: 'w1' };
 function fixture() {
@@ -16,7 +16,14 @@ function fixture() {
     request: { customerId: 'p1', bookingIdentity: { bookingIdentity: 'enterprise_employee', corporateCustomerId: 'c1', enterpriseContractAndPayer: true }, lines: [{ itemGroupId: 'g1', quantity: 1 }], deliveryAddress: { street: 'private' } }, chargeLines: [], membershipSnapshot: { personalCustomerId: 'p1', corporateCustomerId: 'c1', corporateMembershipId: 'm1', enterpriseContractAndPayer: true, enterpriseBasis: { approvalMode: 'per_order' } } };
   const state = { customerClosed: false, row: { id: 'a1', corporateCustomerId: 'c1', applicantCustomerId: 'p1', workspaceId: 'w1', quoteId: 'q1', state: 'approved', revision: 2, expiresAt: new Date('2099-01-01T00:00:00Z'), purpose: 'Work', orderId: null, amount: new Prisma.Decimal(100), currency: 'CNY', quote, request: { quoteId: 'q1', customerId: 'p1' }, requestFingerprint: 'fingerprint', basis: quote.membershipSnapshot.enterpriseBasis, executionKey: null, approvedBy: 'reviewer', reviewerMembershipId: 'reviewer-member', reviewerMembershipUpdatedAt: new Date() }, receipts: new Map(), dispatched: 0, orderWrites: 0, revoke: false, loseResponse: false, failCore: false };
   const db = {
-    $queryRaw: async strings => { const sql = Array.isArray(strings) ? strings.join('?') : strings.sql; if (sql.includes('enterprise_booking_approvals')) return [state.row]; throw new Error(sql); },
+    $queryRaw: async (strings, ...input) => { const sql = Array.isArray(strings) ? strings.join('?') : strings.sql;
+      if (sql.includes('enterprise_booking_approvals')) return [state.row];
+      if (sql.includes('enterprise_portal_operations')) {
+        const values = Array.isArray(strings) ? input : strings.values;
+        assert.deepEqual(Array.from(values), ['t1', require('@rental-os/rental-core/enterprise-order-delegation-source').enterpriseDelegationTarget('q1')]);
+        return []; // This original booking fixture has no merchant delegation record.
+      }
+      throw new Error(sql); },
     $executeRaw: async (strings, ...values) => { const sql = strings.join('?'); if (sql.includes("SET state='executing'")) { state.row = { ...state.row, state: 'executing', executionKey: values[0], revision: state.row.revision + 1 }; return 1; }
       if (sql.includes("state='consumed'")) { state.row = { ...state.row, state: 'consumed', orderId: values[0], revision: state.row.revision + 1 }; return 1; }
       if (sql.includes('enterprise_portal_operations')) { state.receipts.set(values[2], JSON.parse(values[0])); return 1; }

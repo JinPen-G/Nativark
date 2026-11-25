@@ -1,3 +1,5 @@
+/** 原组合后台的薄宿主入口。连接公共运行时、主题、语言、反馈及同一查询缓存，
+ * 挂载原登记路由，身份切换继续使用原会话与缓存代次。 */
 import { App as AntdApp, ConfigProvider } from "antd";
 import { Provider as AntMotionProvider } from "@rc-component/motion";
 import enUS from "antd/locale/en_US";
@@ -20,6 +22,8 @@ import { FeedbackProvider } from "@/components/ui/Feedback";
 import { MotionPreferenceProvider } from "./MotionPreferenceProvider";
 import { usePrefersReducedMotion } from "@/lib/usePrefersReducedMotion";
 import { isAdminLoginPath } from "@/features/auth/login-entry";
+import { AdminRuntimeProvider } from "@rental-os/platform-admin/runtime";
+import { adminRuntime } from "./adminRuntime";
 
 // Keep existing descendant routes; data router supplies supported SPA blockers.
 const router = createBrowserRouter([{ path: "*", element: <AppRouter />, errorElement: <RouteErrorPage /> }]);
@@ -70,7 +74,7 @@ function ThemedApp() {
           <AntdApp>
             <FeedbackProvider>
               <GlobalInteractionSounds />
-              <AdminBusinessUiScope><BrandIconProvider><RouterProvider router={router} /></BrandIconProvider></AdminBusinessUiScope>
+              <AdminRuntimeProvider runtime={adminRuntime}><AdminBusinessUiScope><BrandIconProvider><RouterProvider router={router} /></BrandIconProvider></AdminBusinessUiScope></AdminRuntimeProvider>
             </FeedbackProvider>
           </AntdApp>
         </QueryClientProvider>

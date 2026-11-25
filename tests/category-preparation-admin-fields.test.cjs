@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const ts = require("typescript");
 const { RENTAL_CATEGORY_DEFINITIONS } = require("@rental-os/shared");
-const source = fs.readFileSync("apps/admin/src/features/settings/governance/categoryPreparationFields.ts", "utf8");
+const source = fs.readFileSync("packages/rental-core/admin/governance/categoryPreparationFields.ts", "utf8");
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const exportsObject = {};
 new Function("exports", "require", compiled)(exportsObject, require);
@@ -57,7 +57,7 @@ next.patches[0].values.name = "changed copy";
 assert.deepEqual(queued, queuedBefore, "发送中的批次不能继续引用可变的页面输入");
 assert.throws(() => nextPreparationBatch([{ ...queued[0], values: { name: "🙂".repeat(80000) } }]), /单条预备资料过大/);
 console.log("category-preparation-admin-fields: 作用域同 ID 区分、候选读回、退役/媒体隔离、序列号专列、false/0、失效准备及差异补丁通过");
-const capabilitySource = fs.readFileSync("apps/admin/src/features/settings/governance/categoryPreparationCapabilities.ts", "utf8");
+const capabilitySource = fs.readFileSync("packages/rental-core/admin/governance/categoryPreparationCapabilities.ts", "utf8");
 const capabilityCompiled = ts.transpileModule(capabilitySource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const capExports = {};
 new Function("exports", "require", capabilityCompiled)(capExports, require);
@@ -125,11 +125,11 @@ console.log("category-preparation-new-capabilities: 注册执行器、显式选�
 
 function preparationSaveHarness(api) {
   const cleanups = [];
-  const hookSource = fs.readFileSync("apps/admin/src/features/settings/governance/useCategoryPreparationSave.ts", "utf8");
+  const hookSource = fs.readFileSync("packages/rental-core/admin/governance/useCategoryPreparationSave.ts", "utf8");
   const js = ts.transpileModule(hookSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const result = {};
   const react = { useRef: value => ({ current: value }), useState: value => [value, () => undefined], useEffect: setup => cleanups.push(setup()) };
-  new Function("exports", "require", js)(result, name => name === "react" ? react : name === "@/api/categoryPreparation" ? { categoryPreparationApi: api } : require(name));
+  new Function("exports", "require", js)(result, name => name === "react" ? react : name === "./page-context" ? { useRentalGovernanceContext: () => ({ categoryPreparationApi: api }) } : require(name));
   let current = true;
   return { hook: result.useCategoryPreparationSave(() => current), changeScope: () => { current = false; }, unmount: () => cleanups.forEach(fn => fn?.()) };
 }
@@ -176,10 +176,11 @@ void (async () => {
   await assert.rejects(changed.hook.start("v2", request(), async () => undefined), /会话或经营空间/);
   console.log("category-preparation-save: frozen original key/body, unknown outcomes, scoped retries and saved-but-unread recovery passed (hook boundary substitute)");
 
-  const httpSource = fs.readFileSync("apps/admin/src/api/http.ts", "utf8");
+  const httpSource = fs.readFileSync("packages/platform-admin/src/runtime/browser-http.ts", "utf8");
   const httpAst = ts.createSourceFile("http.ts", httpSource, ts.ScriptTarget.Latest, true);
-  const requestFunction = httpAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "request");
-  const requestJs = ts.transpileModule(requestFunction.getText(httpAst), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const factory = httpAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "createAdminHttpClient");
+  const requestFunction = factory.body.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "request");
+  const requestJs = ts.transpileModule("export " + requestFunction.getText(httpAst), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   function transportHarness() {
     const session = new AbortController(), calls = [], result = {};
     const http = { request: config => new Promise((resolve, reject) => {
@@ -187,7 +188,7 @@ void (async () => {
       if (config.signal?.aborted) reject(new Error("cancelled"));
       else config.signal?.addEventListener("abort", () => reject(new Error("cancelled")), { once: true });
     }) };
-    new Function("exports", "http", "currentSessionSignal", requestJs)(result, http, () => session.signal);
+    new Function("exports", "http", "session", requestJs)(result, http, { currentSessionSignal: () => session.signal, currentSessionEpoch: () => 0 });
     return { request: result.request, session, calls };
   }
   const sessionCancellation = transportHarness(), query = new AbortController();

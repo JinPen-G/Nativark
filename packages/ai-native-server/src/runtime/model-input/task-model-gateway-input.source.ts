@@ -1,0 +1,323 @@
+import type { PrismaClient } from '@prisma/client';
+import { z } from 'zod';
+import { AI_TOOL_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
+import { AiTaskRepositoryError, aiTaskAccessFromContext } from '../ai-task.repository';
+import { gatewayTextIntentBindingSchema, prepareGatewayIntent, type GatewayTextIntentBinding } from '../gateway-intent';
+import { gatewayRoutingBinding, type GatewayRoutingResolution } from '../gateway-routing.service';
+import { PublicAiGatewayService, type PublicGatewayRuntime } from '../public-ai-gateway.service';
+import type { AiTaskExecutionAuthorization, AiTaskRegisteredExecutor } from '../runner/prisma-task-measured-effects';
+import type { AiTaskGatewayInputSource } from '../runner/prisma-task-gateway-invocation.preparation';
+import type { AiTaskRunnerLease, AiTaskRunnerStepRef } from '@rental-os/platform-server/ai-runtime';
+import type { PrismaTaskPlanInputSource } from '../runner/prisma-task-plan-input.source';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
+import { readModelNonDispatchEvidence } from './prisma-model-nondispatch.evidence';
+import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, taskModelConfiguration, taskModelIdentity, taskModelIntent,
+  parseTaskModelInput, taskModelMaterialSchema, taskImageMaterialSchema, taskAudioMaterialSchema, taskModelMediaSchema, taskModelFingerprint, taskModelPolicy, taskModelCapabilities, type TaskModelInput, type TaskModelKind } from './task-model-input';
+
+const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
+const revision = z.number().int().min(1).max(4294967294);
+const leaseSchema = z.object({ taskId: id.max(36), runId: id.max(36), holderId: id, revision,
+  fencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u), expiresAt: z.string().datetime({ offset: true }) }).strict();
+const publishSchema = z.object({ taskId: id.max(36), registrationRef: id, expectedTaskRevision: revision,
+  lease: leaseSchema, material: taskModelMaterialSchema }).strict();
+type ExecutionInput = Parameters<NonNullable<Awaited<ReturnType<AiTaskRegisteredExecutor['resolve']>>>['execute']>[0];
+const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
+/** Optional stricter current-source check owned by the composing text host.
+ * It cannot replace the original input, identity, model or financial gates. */
+export type TaskModelMaterialRevalidation = (key: { taskId: string; runId: string },
+  material: z.infer<typeof taskModelMaterialSchema>) => Promise<void>;
+
+export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
+  private readonly scene: GatewayTextIntentBinding & { nativeToolResults?: boolean };
+  private readonly runtime: PublicGatewayRuntime;
+  private readonly priceVersion: string;
+  constructor(private readonly db: Pick<PrismaClient, 'aiTask' | 'aiStep' | 'aiGatewayInvocation'
+    | 'aiInvocationAdmission' | 'aiGatewayAccountingReceipt' | 'aiBudgetReservation'> & Partial<Pick<PrismaClient, 'aiTaskActionInput'>>,
+    private readonly inputs: PrismaTaskPlanInputSource, private readonly execution: AiTaskExecutionAuthorization,
+    runtime: PublicGatewayRuntime, scene: GatewayTextIntentBinding & { nativeToolResults?: boolean }, priceVersion: string,
+  private readonly clock: () => Date = () => new Date(), private readonly kind?: TaskModelKind,
+    private readonly revalidateMaterial?: TaskModelMaterialRevalidation) {
+    this.scene = gatewayTextIntentBindingSchema.extend({ nativeToolResults: z.boolean().optional() }).parse(structuredClone(scene));
+    taskModelPolicy(this.policy);
+    this.priceVersion = id.max(64).parse(priceVersion);
+    if (typeof inputs?.publishModelInput !== 'function' || typeof inputs?.readModelForExecution !== 'function'
+      || typeof execution?.authorize !== 'function' || typeof runtime?.ports?.routing?.resolve !== 'function'
+      || typeof runtime?.ports?.routing?.assertCurrent !== 'function' || typeof runtime?.verifyEvidence !== 'function'
+      || (kind && (scene.routeScene !== 'vision' || typeof runtime.ports.media?.resolve !== 'function'
+        || typeof runtime.ports.media?.assertCurrent !== 'function'))) throw unavailable();
+    this.runtime = { ...runtime, ports: { ...runtime.ports, routing: {
+      resolve: runtime.ports.routing.resolve.bind(runtime.ports.routing),
+      assertCurrent: runtime.ports.routing.assertCurrent.bind(runtime.ports.routing)
+    } }, verifyEvidence: runtime.verifyEvidence.bind(runtime) };
+  }
+  private get tool() { return this.kind === 'image' ? TASK_IMAGE_MODEL_TOOL : this.kind === 'audio' ? TASK_AUDIO_MODEL_TOOL : TASK_TEXT_MODEL_TOOL; }
+  private get policy() {
+    const { routeScene: _, ...policy } = this.scene;
+    return taskModelPolicy({ ...policy, ...(this.kind ? { kind: this.kind } : {}) });
+  }
+  private async media(context: AiExecutionContext, intent: TaskModelInput['intent'], signal = new AbortController().signal) {
+    const prepared = await prepareGatewayIntent(intent, { sceneCode: this.scene.sceneCode, maxOutputTokens: this.scene.maxOutputTokens },
+      'invoke', this.narrow(context), this.runtime.ports.media, signal);
+    return { hash: prepared.intentHash, references: prepared.request.messages.flatMap(message => typeof message.content === 'string' ? []
+      : message.content.filter(part => part.kind !== 'text').map(part => part.kind === 'image'
+        ? { kind: 'image' as const, attachmentId: part.attachmentId, attachmentRevision: part.attachmentRevision,
+          mediaType: part.mediaType, contentHash: part.contentHash, sizeBytes: Buffer.from(part.data, 'base64').length }
+        : { kind: 'audio' as const, attachmentId: part.attachmentId, attachmentRevision: part.attachmentRevision,
+          mediaType: part.mediaType, contentHash: part.contentHash, sizeBytes: Buffer.from(part.data, 'base64').length })) };
+  }
+  private async verifyMedia(context: AiExecutionContext, input: TaskModelInput, signal?: AbortSignal) {
+    if (!this.kind) return;
+    const current = await this.media(context, input.intent, signal);
+    if (current.hash !== taskModelFingerprint(input, this.policy) || requestFingerprint(current.references) !== requestFingerprint(input.media)) throw denied();
+  }
+
+  private narrow(context: AiExecutionContext) {
+    if (context.scope.kind === 'platform') {
+      if (context.audience !== 'operator' || context.actor.kind !== 'saas_admin'
+        || this.kind || this.scene.orderExplainTool || this.scene.nativeToolResults) throw denied();
+      // An explicit platform authority supplied by the composition owns this
+      // Task. No absent workspace field is interpreted as a platform grant.
+      return { actorId: context.actor.userId };
+    }
+    if (context.scope.kind !== 'workspace'
+      || (context.audience === 'client' ? context.actor.kind !== 'customer'
+        : context.audience === 'automation' ? context.actor.kind !== 'automation' : context.actor.kind !== 'user')
+      || !['operator', 'staff', 'client', 'automation'].includes(context.audience)) throw denied();
+    const actorId = context.actor.kind === 'customer' ? context.actor.customerId
+      : context.actor.kind === 'automation' ? context.actor.subjectId
+        : 'userId' in context.actor ? context.actor.userId : undefined;
+    if (!actorId) throw denied();
+    return { tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId, actorId };
+  }
+  private async route(context: AiExecutionContext) {
+    const route = structuredClone(await this.runtime.ports.routing.resolve(this.narrow(context), taskModelCapabilities(this.policy)));
+    await this.verifyRoute(context, route);
+    return route;
+  }
+  private async verifyRoute(context: AiExecutionContext, route: GatewayRoutingResolution) {
+    if (taskModelIdentity(route.context) !== taskModelIdentity(context) || route.scene !== this.scene.routeScene
+      || requestFingerprint(route.requiredCapabilities) !== requestFingerprint(taskModelCapabilities(this.policy))
+      || await this.runtime.verifyEvidence(structuredClone(route), this.runtime.evidence) !== true) throw denied();
+    taskModelConfiguration(route);
+  }
+  private frozen(context: AiExecutionContext, input: TaskModelInput, route: GatewayRoutingResolution) {
+    if (input.identityHash !== taskModelIdentity(context) || input.routingHash !== gatewayRoutingBinding(route)
+      || input.priceVersion !== this.priceVersion || requestFingerprint(input.configuration) !== requestFingerprint(taskModelConfiguration(route))) throw denied();
+  }
+  private async currentMaterial(key: { taskId: string; runId: string }, input: TaskModelInput) {
+    if (!this.revalidateMaterial) return;
+    if (this.kind) throw denied();
+    await this.revalidateMaterial(structuredClone(key), taskModelMaterialSchema.parse({
+      messages: structuredClone(input.intent.messages), maxOutputTokens: input.intent.maxOutputTokens,
+      ...(input.displayWitness ? { displayWitness: structuredClone(input.displayWitness) } : {}) }));
+  }
+
+  async publish(value: unknown) {
+    const parsed = (this.kind === 'image' ? publishSchema.extend({ material: taskImageMaterialSchema,
+      expectedMedia: taskModelMediaSchema.optional() }) : this.kind === 'audio' ? publishSchema.extend({ material: taskAudioMaterialSchema,
+      expectedMedia: taskModelMediaSchema.optional() }) : publishSchema).safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const command = parsed.data;
+    const context = structuredClone(await this.execution.authorize(command.taskId));
+    const route = await this.route(context);
+    const input: TaskModelInput = { mode: 'invoke',
+      intent: taskModelIntent(command.taskId, command.lease.runId, command.registrationRef, this.scene.sceneCode, command.material, this.kind,
+        this.scene.orderExplainTool === true, this.scene.structuredOutput === true),
+      configuration: taskModelConfiguration(route), priceVersion: this.priceVersion,
+      ...(this.scene.structuredSchemaHash ? { structuredSchemaHash: this.scene.structuredSchemaHash } : {}),
+      ...(command.material.displayWitness ? { displayWitness: command.material.displayWitness } : {}),
+      routingHash: gatewayRoutingBinding(route), identityHash: taskModelIdentity(context) };
+    if (input.displayWitness && (this.kind || this.scene.orderExplainTool || this.scene.structuredOutput
+      || input.displayWitness.binding.taskId !== command.taskId
+      || context.scope.kind !== 'workspace' || context.audience !== 'operator' || context.actor.kind !== 'user'
+      || requestFingerprint(input.displayWitness.context.scope) !== requestFingerprint(context.scope))) throw denied();
+    if (this.kind) input.media = (await this.media(context, input.intent)).references;
+    if ('expectedMedia' in command && command.expectedMedia
+      && requestFingerprint(command.expectedMedia) !== requestFingerprint(input.media)) throw denied();
+    taskModelFingerprint(input, this.policy);
+    await this.runtime.ports.routing.assertCurrent(this.narrow(context), route);
+    await this.currentMaterial({ taskId: command.taskId, runId: command.lease.runId }, input);
+    const result = await this.inputs.publishModelInput({ taskId: command.taskId, registrationRef: command.registrationRef,
+      expectedTaskRevision: command.expectedTaskRevision, lease: command.lease, input });
+    this.frozen(await this.execution.authorize(command.taskId), input, await this.route(context));
+    await this.verifyMedia(context, input);
+    await this.currentMaterial({ taskId: command.taskId, runId: command.lease.runId }, input);
+    return result;
+  }
+  /** Revalidate an original frozen publication without regenerating messages,
+   * changing its price/config binding, registering or dispatching a call. */
+  async revalidatePublished(value: unknown) {
+    const parsed = z.object({ taskId: id.max(36), runId: id.max(36), registrationRef: id }).strict().safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const command = parsed.data, context = await this.execution.authorize(command.taskId);
+    const receipt = await this.inputs.readModelInputReceipt(command);
+    if (receipt.state !== 'published') throw unavailable();
+    const input = parseTaskModelInput(receipt.payload, this.policy);
+    if (taskModelFingerprint(input, this.policy) !== receipt.fingerprint
+      || taskModelIdentity(receipt.context) !== taskModelIdentity(context)) throw denied();
+    this.frozen(context, input, await this.route(context));
+    await this.verifyMedia(context, input);
+    await this.currentMaterial({ taskId: command.taskId, runId: command.runId }, input);
+    const latest = await this.inputs.readModelInputReceipt(command);
+    if (latest.state !== 'published' || latest.id !== receipt.id || latest.fingerprint !== receipt.fingerprint
+      || requestFingerprint(latest.payload) !== requestFingerprint(receipt.payload)
+      || taskModelIdentity(await this.execution.authorize(command.taskId)) !== taskModelIdentity(context)) throw denied();
+    return { inputRef: receipt.id, fingerprint: receipt.fingerprint, execution: 'not_attested' as const };
+  }
+
+  /** Read the exact frozen input an invocation registered, for input counting
+   * only: verifies the persisted material against the invocation's registered
+   * hashes without publishing, leasing, registering a new call or dispatching.
+   * The counting consumer receives the same intent/configuration the text
+   * dispatch will send, so a receipt can never attest different content. */
+  async readFrozenCountingInput(value: unknown) {
+    const parsed = z.object({ callId: id.max(128).optional(), invocationId: id.max(36).optional(), scopeId: id.max(36), actorId: id })
+      .strict().refine(item => (item.callId !== undefined) !== (item.invocationId !== undefined))
+      .safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    if (this.kind || typeof this.db.aiTaskActionInput?.findFirst !== 'function') throw unavailable();
+    const invocation = parsed.data.invocationId !== undefined
+      ? await this.db.aiGatewayInvocation.findUnique({ where: { id: parsed.data.invocationId } })
+      : await this.db.aiGatewayInvocation.findUnique({
+        where: { scopeId_callId: { scopeId: parsed.data.scopeId, callId: parsed.data.callId! } } });
+    if (!invocation || invocation.scopeId !== parsed.data.scopeId
+      || parsed.data.callId !== undefined && invocation.callId !== parsed.data.callId
+      || parsed.data.invocationId !== undefined && invocation.id !== parsed.data.invocationId
+      || invocation.sceneCode !== this.scene.sceneCode || invocation.mode !== 'invoke') throw denied();
+    const context = structuredClone(await this.execution.authorize(invocation.taskId));
+    const actorId = this.narrow(context).actorId;
+    if (actorId !== parsed.data.actorId || invocation.actorId !== actorId) throw denied();
+    const access = aiTaskAccessFromContext(context, invocation.taskId, this.clock());
+    const task = await this.db.aiTask.findFirst({ where: access.where });
+    if (!task || task.scopeId !== invocation.scopeId) throw denied();
+    const step = await this.db.aiStep.findFirst({ where: { scopeId: task.scopeId, taskId: invocation.taskId,
+      runId: invocation.runId, id: invocation.stepId } });
+    if (!step || step.toolCode !== this.tool || step.toolVersion !== AI_TOOL_DRAFT_VERSION
+      || !step.inputRef || step.requestFingerprint !== invocation.stepFingerprint) throw denied();
+    const saved = await this.db.aiTaskActionInput!.findFirst({ where: { id: step.inputRef, scopeId: task.scopeId,
+      taskId: invocation.taskId, runId: invocation.runId, toolCode: this.tool,
+      toolVersion: AI_TOOL_DRAFT_VERSION, fingerprint: step.requestFingerprint } });
+    if (!saved || saved.id !== step.inputRef || saved.fingerprint !== step.requestFingerprint
+      || !(saved.expiresAt instanceof Date) || saved.expiresAt <= this.clock()) throw unavailable();
+    const frozen = parseTaskModelInput(saved.payload, this.policy);
+    if (taskModelFingerprint(frozen, this.policy) !== invocation.intentHash
+      || frozen.identityHash !== taskModelIdentity(context)
+      || frozen.priceVersion !== invocation.priceVersion
+      || requestFingerprint(frozen.configuration) !== invocation.configurationHash
+      || frozen.intent.requestId !== invocation.callId
+      || frozen.intent.maxOutputTokens !== invocation.maxOutputTokens
+      || frozen.intent.sceneCode !== invocation.sceneCode) throw denied();
+    const latest = await this.db.aiGatewayInvocation.findUnique({ where: {
+      scopeId_callId: { scopeId: task.scopeId, callId: invocation.callId } } });
+    if (!latest || latest.id !== invocation.id || latest.registrationHash !== invocation.registrationHash
+      || latest.intentHash !== invocation.intentHash
+      || taskModelIdentity(await this.execution.authorize(invocation.taskId)) !== taskModelIdentity(context)) throw denied();
+    return { scopeId: task.scopeId, actorId, context,
+      invocation: { id: invocation.id, taskId: invocation.taskId, runId: invocation.runId, stepId: invocation.stepId,
+        actionId: invocation.actionId, callId: invocation.callId, registrationHash: invocation.registrationHash,
+        intentHash: invocation.intentHash, configurationHash: invocation.configurationHash,
+        priceVersion: invocation.priceVersion, maxOutputTokens: invocation.maxOutputTokens,
+        sceneCode: invocation.sceneCode, expiresAt: new Date(invocation.expiresAt) },
+      intent: structuredClone(frozen.intent), configuration: structuredClone(frozen.configuration) };
+  }
+
+  async resolve(presented: AiTaskRunnerStepRef, held: AiTaskRunnerLease) {
+    const ref = structuredClone(presented), lease = leaseSchema.parse(structuredClone(held));
+    if (ref.plan.toolCode !== this.tool || ref.plan.toolVersion !== AI_TOOL_DRAFT_VERSION
+      || ref.plan.operation !== 'external_unknown' || ref.registered.runId !== lease.runId) throw denied();
+    const context = await this.execution.authorize(lease.taskId);
+    const access = aiTaskAccessFromContext(context, lease.taskId, this.clock());
+    const task = await this.db.aiTask.findFirst({ where: access.where });
+    if (!task) throw denied();
+    const row = await this.db.aiStep.findFirst({ where: { scopeId: task.scopeId, taskId: lease.taskId, runId: lease.runId,
+      id: ref.registered.stepId, revision: ref.registered.stepRevision, status: 'RUNNING' } });
+    if (!row?.inputRef) throw unavailable();
+    const stored = await this.inputs.readModelForExecution({ taskId: lease.taskId, runId: lease.runId, stepId: row.id,
+      actionId: row.actionId, inputRef: row.inputRef, fingerprint: row.requestFingerprint, lease });
+    if (stored.registrationRef !== ref.plan.registrationRef || taskModelIdentity(stored.context) !== taskModelIdentity(context)) throw denied();
+    this.frozen(stored.context, stored.input, await this.route(stored.context));
+    await this.verifyMedia(stored.context, stored.input);
+    return { stepId: row.id, mode: stored.input.mode, lease: { runId: lease.runId, holderId: lease.holderId,
+      fencingToken: lease.fencingToken }, intent: stored.input.intent, configuration: stored.input.configuration,
+      priceVersion: stored.input.priceVersion, expiresAt: new Date(Math.min(Date.parse(lease.expiresAt), Date.parse(stored.expiresAt))) };
+  }
+
+  registeredExecutors(): AiTaskRegisteredExecutor {
+    return { resolve: async (code, version) => code === this.tool && version === AI_TOOL_DRAFT_VERSION
+      ? { operation: 'external_unknown', execute: this.execute.bind(this) } : null };
+  }
+
+  private async execute(binding: ExecutionInput, signal: AbortSignal) {
+    binding = structuredClone(binding);
+    if (signal.aborted || binding.clarifications?.length) throw unavailable();
+    const stored = await this.inputs.readModelForExecution(binding), input = stored.input;
+    const context = stored.context, narrow = this.narrow(context);
+    const task = await this.db.aiTask.findFirst({ where: aiTaskAccessFromContext(context, binding.taskId, this.clock()).where });
+    if (!task) throw denied();
+    const invocation = await this.db.aiGatewayInvocation.findUnique({ where: {
+      scopeId_callId: { scopeId: task.scopeId, callId: input.intent.requestId }
+    } });
+    if (!invocation || invocation.taskId !== binding.taskId || invocation.runId !== binding.runId || invocation.stepId !== binding.stepId
+      || invocation.actionId !== binding.actionId || invocation.stepFingerprint !== binding.fingerprint
+      || invocation.intentHash !== taskModelFingerprint(input, this.policy) || invocation.mode !== input.mode
+      || invocation.leaseOwnerId !== binding.lease.holderId || invocation.fencingToken.toFixed(0) !== binding.lease.fencingToken
+      || invocation.expiresAt <= this.clock() || invocation.priceVersion !== input.priceVersion
+      || invocation.configurationHash !== requestFingerprint(input.configuration)) throw denied();
+    const ports = this.runtime.ports;
+    await this.verifyMedia(context, input, signal);
+    const originalMedia = ports.media;
+    const frozenMedia = this.kind && originalMedia ? {
+      resolve: async (...args: Parameters<typeof originalMedia.resolve>) => {
+        const result = await originalMedia.resolve(...args);
+        const expected = input.media?.find(item => item.attachmentId === args[1].attachmentId && item.attachmentRevision === args[1].attachmentRevision);
+        if (!result || !expected || result.contentHash !== expected.contentHash || result.mediaType !== expected.mediaType
+          || result.bytes.byteLength !== expected.sizeBytes) throw denied();
+        return result;
+      },
+      assertCurrent: async (...args: Parameters<NonNullable<typeof originalMedia.assertCurrent>>) => {
+        if (!originalMedia.assertCurrent) throw unavailable();
+        await originalMedia.assertCurrent(...args);
+      }
+    } : originalMedia;
+    const assertCurrent = async (route: GatewayRoutingResolution) => {
+      await ports.routing.assertCurrent(narrow, route);
+      await this.verifyRoute(context, route);
+      this.frozen(await this.execution.authorize(binding.taskId), input, route);
+      await this.currentMaterial({ taskId: binding.taskId, runId: binding.runId }, input);
+    };
+    const gateway = new PublicAiGatewayService({ ...this.runtime, ports: { ...ports, media: frozenMedia, routing: {
+      resolve: async (caller, required) => {
+        const route = structuredClone(await ports.routing.resolve(caller, required));
+        await assertCurrent(route);
+        return route;
+      },
+      assertCurrent: async (_caller, route) => assertCurrent(route)
+    } } }, [this.scene]);
+    const result = await gateway.invoke(context, input.intent, signal);
+    if (result.requestId !== input.intent.requestId || requestFingerprint(result.actual) !== requestFingerprint(input.configuration)) throw denied();
+    const payload = JSON.parse(JSON.stringify(result));
+    if (result.status === 'completed' && result.usage.kind === 'reported') return { kind: 'succeeded' as const, payload };
+    if (result.status === 'failed') {
+      const owner = context.scope.kind === 'platform'
+        ? { scopeId: task.scopeId, scopeKind: 'PLATFORM' as const, actorId: narrow.actorId }
+        : context.scope.kind === 'workspace'
+          ? { scopeId: task.scopeId, tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId, actorId: narrow.actorId }
+          : null;
+      if (!owner) throw denied();
+      const unsent = await readModelNonDispatchEvidence(this.db, owner, invocation);
+      if (taskModelIdentity(await this.execution.authorize(binding.taskId)) !== input.identityHash) throw denied();
+      // Step outcomes use the shared tool-error contract, not an internal
+      // repository error code (which the transition authority must reject).
+      if (unsent) return { kind: 'failed' as const, payload, errorCode: 'AI_PROVIDER_UNAVAILABLE' };
+      // A process-local failed result is not durable proof of no dispatch or
+      // no debit. Preserve the original call for reconciliation, not retries.
+      return { kind: 'unknown' as const, payload: JSON.parse(JSON.stringify({ draftVersion: result.draftVersion,
+        requestId: result.requestId, actual: result.actual, evidence: result.evidence, status: 'unknown',
+        usage: { kind: 'unknown', reason: 'result_unknown', nextAction: 'reconcile' },
+        error: { code: 'AI_RESULT_UNKNOWN', message: 'Original dispatch or accounting outcome requires reconciliation.',
+          retryable: false, nextAction: 'reconcile' } })) };
+    }
+    return { kind: 'unknown' as const, payload };
+  }
+}

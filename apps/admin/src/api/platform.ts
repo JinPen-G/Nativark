@@ -8,23 +8,16 @@
 import type {
   BusinessWorkspace,
   WorkspaceMember,
-  LoginRequest,
-  LoginResponse,
-  ChangePasswordRequest,
   CreateBusinessWorkspaceRequest,
   RefreshSessionRequest,
   ResetUserPasswordResult,
   ResetLocalDemoPasswordRequest,
   ResetLocalDemoPasswordResult,
-  SessionContextResponse,
-  OrganizationSummary,
   PermissionModule,
   PlatformAuditLogRow,
-  SaveOrganizationRequest,
   SaveSystemRoleRequest,
   SaveSystemUserAccessRequest,
   SaveSystemUserRequest,
-  SystemSecurityBaselineConfig,
   SystemRoleRow,
   SystemRulesConfig,
   SystemUserRow,
@@ -37,33 +30,35 @@ import type {
   UpdateTenantRequest,
   UpdateTenantStatusRequest
 } from "@rental-os/shared";
-import { request } from "./http";
+import { request, rentalBrowserSession } from "./http";
+import { createPlatformSettingsApi } from "@rental-os/platform-admin/platform-settings/client";
+const platformSettingsApi = createPlatformSettingsApi(request);
 
 export const api = {
   // ---- 会话 ----
-  login: (payload: LoginRequest) => request<LoginResponse>("/auth/login", { method: "post", data: payload }),
+  login: rentalBrowserSession.api.login,
   resetLocalDemoPassword: (payload: ResetLocalDemoPasswordRequest) => request<ResetLocalDemoPasswordResult>("/auth/development/reset-demo-password", { method: "post", data: payload }),
   logout: (payload: RefreshSessionRequest) => request<{ loggedOut: boolean }>("/auth/logout", { method: "post", data: payload }),
-  changePassword: (payload: ChangePasswordRequest) => request<LoginResponse>("/auth/change-password", { method: "post", data: payload }),
+  changePassword: rentalBrowserSession.api.changePassword,
   // SPACE-05：切换当前经营空间。服务端重新校验成员资格与空间状态。
-  switchWorkspace: (payload: { workspaceId: string }) => request<LoginResponse>("/auth/switch-workspace", { method: "post", data: payload }),
-  sessionContext: () => request<SessionContextResponse>("/auth/session-context"),
+  switchWorkspace: rentalBrowserSession.api.switchWorkspace,
+  sessionContext: rentalBrowserSession.api.sessionContext,
 
   // ---- 系统规则与安全基线 ----
   systemRules: () => request<SystemRulesConfig>("/platform/system-rules"),
   saveSystemRuleSection: (sectionKey: string, config: SystemRulesConfig, operator: string) => request<SystemRulesConfig>(`/platform/system-rules/${sectionKey}`, { method: "put", data: { config, operator } }),
   testAiConnection: (operator: string) => request<unknown>("/platform/system-rules/ai-test", { method: "post", data: { operator } }),
-  securityBaseline: () => request<SystemSecurityBaselineConfig>("/platform/security-baseline"),
-  saveSecurityBaseline: (config: SystemSecurityBaselineConfig, operator?: string) => request<SystemSecurityBaselineConfig>("/platform/security-baseline", { method: "put", data: { config, operator } }),
-  checkSecondConfirmation: (action: string, confirmationCode?: string) => request<{ action: string; required: boolean; accepted: boolean; message: string }>("/platform/security-baseline/second-confirmation/check", { method: "post", data: { action, confirmationCode } }),
+  securityBaseline: () => platformSettingsApi.securityBaseline(),
+  saveSecurityBaseline: platformSettingsApi.saveSecurityBaseline,
+  checkSecondConfirmation: platformSettingsApi.checkSecondConfirmation,
 
   // ---- 当前租户：经营空间、组织、账号、角色 ----
   workspaces: () => request<BusinessWorkspace[]>("/platform/workspaces"),
   workspaceMembers: (workspaceId: string) => request<WorkspaceMember[]>(`/platform/workspaces/${workspaceId}/members`),
   workspaceFulfillmentLocations: (workspaceId: string) => request<Array<{ id: string; name: string; code: string; status: string }>>(`/platform/workspaces/${workspaceId}/fulfillment-locations`),
-  organizations: () => request<OrganizationSummary[]>("/platform/organizations"),
-  saveOrganization: (payload: SaveOrganizationRequest) => request<OrganizationSummary>(payload.id ? `/platform/organizations/${payload.id}` : "/platform/organizations", { method: payload.id ? "put" : "post", data: payload }),
-  setOrganizationStatus: (id: string, status: OrganizationSummary["status"], operator: string) => request<OrganizationSummary>(`/platform/organizations/${id}/status`, { method: "put", data: { status, operator } }),
+  organizations: () => platformSettingsApi.organizations(),
+  saveOrganization: platformSettingsApi.saveOrganization,
+  setOrganizationStatus: platformSettingsApi.setOrganizationStatus,
   users: () => request<SystemUserRow[]>("/platform/users"),
   saveUser: (payload: SaveSystemUserRequest) => request<SystemUserRow>(payload.id ? `/platform/users/${payload.id}` : "/platform/users", { method: payload.id ? "put" : "post", data: payload }),
   saveUserWithWorkspaceAccess: (payload: SaveSystemUserAccessRequest) => request<SystemUserRow>(payload.id ? `/platform/users/${payload.id}/access` : "/platform/users/access", { method: payload.id ? "put" : "post", data: payload }),

@@ -1,21 +1,2 @@
-import { createContext, useContext, type RefObject } from "react";
-import type { RestMinutes, RestSession } from "./restSession";
-
-export interface RestContextValue {
-  available: boolean;
-  session: RestSession | null;
-  remaining: number;
-  expanded: boolean;
-  entryRef: RefObject<HTMLButtonElement | null>;
-  start: (minutes: RestMinutes) => void;
-  close: () => void;
-  minimize: () => void;
-  expand: () => void;
-}
-
-export const RestContext = createContext<RestContextValue | null>(null);
-export function useRest() {
-  const value = useContext(RestContext);
-  if (!value) throw new Error("Rest controls require RestProvider");
-  return value;
-}
+/** 原入口兼容转接；公共实现由 platform-admin 单源维护。 */
+export * from "@rental-os/platform-admin/source/features/rest/RestContext";

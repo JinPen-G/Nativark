@@ -9,6 +9,10 @@ export interface McpHostComponent {
   close(): Promise<void>;
 }
 
+export interface McpRoutedHost extends McpHostComponent {
+  readonly routeUrls: readonly string[];
+}
+
 export interface McpHostRouterConfig {
   readonly service: Pick<RentalMcpServiceConfig, "resource" | "authorization" | "tokens">;
   readonly routes: readonly { readonly url: string; readonly component: string }[];
@@ -41,7 +45,7 @@ function canonicalHttpsUrl(value: string): URL {
  * untouched. close is single-shot and waits for original work, including work that
  * ignores cancellation; component close failures remain failures and are never retried. */
 export function createMcpHostRouter(config: McpHostRouterConfig,
-  components: McpHostComponents): McpHostComponent {
+  components: McpHostComponents): McpRoutedHost {
   if (!components || typeof components !== "object" || Array.isArray(components)) {
     throw new TypeError("MCP host components must include a service with fetch and close methods");
   }
@@ -90,6 +94,7 @@ export function createMcpHostRouter(config: McpHostRouterConfig,
   const pending = new Set<Promise<Response>>();
   let closed = false, closing: Promise<void> | undefined;
   return Object.freeze({
+    routeUrls: Object.freeze([...routes.keys()]),
     fetch(request: Request): Promise<Response> {
       if (closed) return Promise.resolve(errorResponse(503, "mcp_host_closed"));
       let component: Readonly<McpHostComponent>, forwarded: Request;

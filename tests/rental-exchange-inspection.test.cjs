@@ -173,6 +173,12 @@ function inspectionBasisHarness(options = {}) {
       assert.doesNotMatch(sql, /\b(?:INSERT|UPDATE|DELETE|fields|results|rateSnapshot|calendarSnapshot|assetNo)\b/iu);
       if (/FROM rental_orders o WHERE/u.test(sql)) return [options.missing ? { templatesType: null, templateCount: null, templates: null }
         : options.templateOverflow ? { templatesType: 'ARRAY', templateCount: 51, templates: null } : projection(options.empty ? [] : [original])];
+      if (/FROM rental_orders o JOIN rental_quotes q/u.test(sql)) {
+        assert.match(sql, /q\.tenantId = o\.tenantId AND q\.workspaceId = o\.workspaceId/u);
+        assert.match(sql, /q\.categoryCode = o\.categoryCode AND q\.categoryVersionId <=> o\.categoryVersionId/u);
+        assert.deepEqual(query.values.slice(-4), ['order', 'tenant', 'workspace', at]);
+        return [];
+      }
       if (/FROM rental_allocations a/u.test(sql)) return rows.map(row => ({ id: row.id, updatedAt: at,
         metadataType: 'OBJECT', exchangeType: row.id === 'new-resource' ? (options.malformedLink ? 'BOOLEAN' : 'STRING') : null,
         exchangeId: row.id === 'new-resource' ? 'exchange-one' : null }));

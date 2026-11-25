@@ -75,11 +75,11 @@ void (async () => {
   );
   console.log("  PASS 业务配置 upsert 拒绝跨租户/空间价格计划");
 
-  const coreSource = fs.readFileSync(path.join(ROOT, "apps/api/src/modules/rental-core/rental-core-config.repository.ts"), "utf8");
+  const coreSource = fs.readFileSync(path.join(ROOT, "packages/rental-core/src/mysql-core-configuration.ts"), "utf8");
   for (const method of ["upsertOperator", "upsertLocation", "upsertItemGroup", "upsertPricingGroup", "upsertCouponTemplate", "upsertInspectionTemplate"]) {
     assert.match(methodBody(coreSource, method), /assertScopedWrite\(/u, `${method} 必须执行作用域断言`);
   }
-  const businessSource = fs.readFileSync(path.join(ROOT, "apps/api/src/modules/rental-core/rental-business-config.repository.ts"), "utf8");
+  const businessSource = fs.readFileSync(path.join(ROOT, "packages/rental-core/src/mysql-business-configuration.ts"), "utf8");
   for (const method of ["upsertPricingPlan", "upsertDiscountPlan", "upsertService", "upsertRuleVersion", "writeRuleVersionWithAudit", "upsertNotificationTemplate"]) {
     assert.match(methodBody(businessSource, method), /assertScopedWrite\(/u, `${method} 必须执行作用域断言`);
   }

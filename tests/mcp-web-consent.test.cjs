@@ -2,10 +2,12 @@
 /** Actual Web consent source -> grant -> code -> token, with real original Auth.
  * SQL, reviewed notice/applicable MFA policy and audit are explicit substitutes;
  * no browser UI/human event/MFA execution, actual DB/DI or production publication. */
-const assert = require('node:assert/strict'), { test } = require('node:test');
+const assert = require('node:assert/strict'), { test, after } = require('node:test');
 const fs = require('node:fs'), path = require('node:path'), { createHash } = require('node:crypto');
-const { createRequire, registerHooks } = require('node:module'), { pathToFileURL } = require('node:url');
-const { fixture: originalFixture, source, runtimeShared: principalShared } = require('./fixtures/mcp/original-identity.cjs');
+const { registerHooks } = require('node:module'), { pathToFileURL } = require('node:url');
+const { fixture: originalFixture, source, runtimeShared: principalShared, installed, ts, dependencyDirectory,
+  output: originalOutput, cleanup: cleanupOriginal } = require('./fixtures/mcp/original-identity.cjs');
+after(cleanupOriginal);
 const { createOriginalMcpCatalogReadAuthority } = source('apps/api/src/modules/auth/original-mcp-catalog-read-authority.ts');
 const { createOriginalMcpAvailabilityReadAuthority } = source('apps/api/src/modules/auth/original-mcp-availability-read-authority.ts');
 const { createOriginalMcpCatalogReadContext } = source('apps/api/src/modules/auth/original-mcp-read-context.ts');
@@ -14,17 +16,18 @@ const { createOriginalMcpCatalogReadTools } = source('apps/api/src/modules/auth/
 const { AsyncLocalStorage } = require('node:async_hooks');
 const { createOriginalMcpHost } = source('apps/api/src/modules/auth/original-mcp-host.ts');
 const root = path.resolve(__dirname, '..'), signal = () => new AbortController().signal;
-const installed = createRequire(path.join(root, 'clients/agent-desktop/harness/packages/mcp/mcp-client/package.json'));
-const ts = require(path.join(root, 'clients/agent-desktop/harness/node_modules/typescript/lib/typescript.js'));
+installed.resolve('@modelcontextprotocol/server');
 let artifact, registerOriginalReadTools;
 async function compiled() {
   if (artifact) return artifact;
-  const output = fs.mkdtempSync(path.join(root, 'output/mcp-web-consent-verification-')), packageRoot = path.join(root, 'packages/mcp-server'), staged = path.join(output, 'node_modules/@rental-os/mcp-server');
+  const output = path.join(originalOutput, 'web-consent'), packageRoot = path.join(root, 'packages/mcp-server'), staged = path.join(output, 'node_modules/@rental-os/mcp-server');
+  fs.mkdirSync(output, { recursive: true });
   fs.mkdirSync(staged, { recursive: true }); fs.copyFileSync(path.join(packageRoot, 'package.json'), path.join(staged, 'package.json'));
   const options = { strict: true, skipLibCheck: true, declaration: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext,
-    types: ['node'], typeRoots: [path.join(root, 'clients/agent-desktop/harness/node_modules/@types')], rootDir: path.join(packageRoot, 'src'), outDir: path.join(staged, 'dist'),
+    types: ['node'], typeRoots: [path.join(dependencyDirectory, '@types')], rootDir: path.join(packageRoot, 'src'), outDir: path.join(staged, 'dist'),
     paths: { '@modelcontextprotocol/server': [path.join(path.dirname(installed.resolve('@modelcontextprotocol/server')), 'index.d.mts')],
-      '@rental-os/shared': [path.join(principalShared, 'dist/index.d.ts')] } };
+      '@rental-os/shared': [path.join(principalShared, 'dist/index.d.ts')],
+      zod: [path.join(path.dirname(installed.resolve('zod/package.json')), 'index.d.cts')] } };
   const check = program => { const diagnostics = ts.getPreEmitDiagnostics(program); assert.equal(diagnostics.length, 0, diagnostics.map(d => ts.flattenDiagnosticMessageText(d.messageText, '\n')).join('\n')); assert.equal(program.emit().emitSkipped, false); };
   check(ts.createProgram(['original-traffic-meter.ts', 'catalog-goal-control-plane.ts', 'prisma-mcp-catalog-goal-adoptions.ts', 'prisma-mcp-read-goal-settlement.ts', 'prisma-mcp-catalog-goal-intents.ts', 'prisma-mcp-catalog-goals.ts', 'prisma-mcp-read-accounting.ts', 'persistent-read-accounting.ts', 'capability-mapping.ts', 'host-router.ts', 'service.ts', 'consent-control-plane.ts', 'review-control-plane.ts', 'grant-control-plane.ts', 'admission-control-plane.ts', 'reviewed-governance-control-plane.ts', 'subject-control-plane.ts', 'prisma-oauth-web-consent.ts', 'prisma-oauth-consent-review.ts'].map(file => path.join(packageRoot, 'src', file)), options));
   // Strictly compile only the new API context and original request-identity types.

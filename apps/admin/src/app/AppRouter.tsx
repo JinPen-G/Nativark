@@ -1,3 +1,5 @@
+/** 原管理后台路由装配。按当前会话和登记的 Core、业务范围及页面权限选择页面，
+ * 复用公共外壳与原懒加载贡献，详情入口继承对应业务路由的准入。 */
 import { lazy, Suspense, type ReactNode } from "react";
 import { Button, Result } from "@/components/ui";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
@@ -12,6 +14,7 @@ import { WorkspaceRouteReady } from "@/components/workspace/WorkspaceNavigation"
 import { DesktopSessionBridge } from "@/features/agent-desktop/DesktopSessionBridge";
 import { rentalDesktopHost } from "@/features/agent-desktop/desktop-host";
 import { isTenantLoginAliasPath } from "@/features/auth/login-entry";
+import { resolveAdminBrandName } from "./branding";
 
 const LoginPage = lazy(() => import("@/features/auth/LoginPage").then((module) => ({ default: module.LoginPage })));
 const MessageCenterPage = lazy(() => import("@/features/notifications/MessageCenterPage"));
@@ -43,6 +46,7 @@ const PlatformToolsPage = lazy(() => import("@/features/platform/PlatformToolsPa
 const OfficialCalendarSourcePage = lazy(() => import("@/features/platform/OfficialCalendarSourcePage").then((module) => ({ default: module.OfficialCalendarSourcePage })));
 const DemoRequestsPage = lazy(() => import("@/features/platform/DemoRequestsPage").then((module) => ({ default: module.DemoRequestsPage })));
 const TenantManagementPage = lazy(() => import("@/features/platform/TenantManagementPage").then((module) => ({ default: module.TenantManagementPage })));
+const CorePackagesPage = lazy(() => import("@rental-os/platform-admin/core-packages").then((module) => ({ default: module.CorePackagesPage })));
 const TenantReadinessPage = lazy(() => import("@/features/settings/TenantReadinessPage").then((module) => ({ default: module.TenantReadinessPage })));
 const RentalSettingsPage = lazy(() => import("@/features/settings/RentalGovernancePage").then((module) => ({ default: module.RentalGovernancePage })));
 const CapabilityGovernancePage = lazy(() => import("@/features/rental-core/CapabilityGovernancePage").then((module) => ({ default: module.CapabilityGovernancePage })));
@@ -68,6 +72,11 @@ const SubscriptionCatalogPage = lazy(() => import("@/features/subscription/Subsc
 
 function PageLoader() {
   return <div className="route-loader"><LoadingState /></div>;
+}
+
+function PlatformCorePackagesRoute() {
+  const tenant = useAuthStore(state => state.tenant), user = useAuthStore(state => state.user);
+  return <CorePackagesPage brandName={resolveAdminBrandName(tenant, user)} />;
 }
 
 function RouteAccess({ route, children }: { route: AppRouteDefinition; children: ReactNode }) {
@@ -171,6 +180,7 @@ function ProtectedRoutes() {
             <Route path="/platform" element={<DefaultRoute />} />
             <Route path={APP_ROUTES.platformDemoRequests.path} element={guard(APP_ROUTES.platformDemoRequests, <DemoRequestsPage />)} />
             <Route path={APP_ROUTES.platformTenants.path} element={guard(APP_ROUTES.platformTenants, <TenantManagementPage />)} />
+            <Route path={APP_ROUTES.platformCorePackages.path} element={guard(APP_ROUTES.platformCorePackages, <PlatformCorePackagesRoute />)} />
             {CATEGORY_GOVERNANCE_PREVIEW_ENABLED && <Route path={APP_ROUTES.platformCategories.path} element={guard(APP_ROUTES.platformCategories, <CategoryGovernancePage />)} />}
             {CATEGORY_GOVERNANCE_PREVIEW_ENABLED && <Route path={APP_ROUTES.platformCategoryCapabilities.path} element={guard(APP_ROUTES.platformCategoryCapabilities, <CategoryCapabilityCatalogPage />)} />}
             <Route path={APP_ROUTES.platformSubscriptions.path} element={guard(APP_ROUTES.platformSubscriptions, <PlatformSubscriptionsPage />)} />

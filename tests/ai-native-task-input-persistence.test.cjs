@@ -235,12 +235,41 @@ for (const failure of ['before_wait_commit', 'lost_wait_reply']) test(`waiting t
     assert.equal((await h.run()).status, 'paused');
   } else {
     assert.equal(h.state.aiTaskInputRequest.length, 1); assert.equal(h.state.aiTask[0].status, 'WAITING_INPUT');
+    const measurement = h.state.aiTaskRunOverhead.find(row => row.segment === 'pre:clarify');
+    const charge = h.state.aiTaskExecutionCharge.find(row => row.chargeId === measurement?.id);
+    assert.ok(measurement?.completedAt instanceof Date);
+    assert.equal(charge?.status, 'RECORDED');
+    assert.equal(charge?.evidenceRef, `overhead:${measurement.id}`);
     assert.equal((await h.run()).status, 'paused');
     await assert.rejects(h.submit(), e => e.code === 'AI_REVISION_CONFLICT');
     h.control.now = new Date(h.control.now.getTime() + 100001);
   }
   await h.submit(); assert.equal((await h.run()).status, 'succeeded');
   assert.deepEqual(h.executions, ['input-clarify', 'input-continue']);
+});
+
+test('waiting transaction recovery preserves original time debt when its commit evidence cannot be read', async () => {
+  const h = await setup();
+  let missingEvidenceReads = 0;
+  h.storeControl.beforeWrite = name => {
+    if (name === 'aiTaskInputRequest') h.storeControl.loseReply = true;
+  };
+  h.storeControl.beforeRead = (name, args, state) => {
+    if (name === 'aiTaskEvent' && args.where?.type === 'task.transition' && state.aiTask[0].status === 'WAITING_INPUT') {
+      missingEvidenceReads++;
+      throw Error('synthetic original transition read unavailable');
+    }
+  };
+  await assert.rejects(h.run(), { code: 'AI_RESULT_UNKNOWN' });
+  assert.equal(missingEvidenceReads, 1);
+  assert.equal(h.state.aiTaskInputRequest.length, 1);
+  const measurement = h.state.aiTaskRunOverhead.find(row => row.segment === 'pre:clarify');
+  const charge = h.state.aiTaskExecutionCharge.find(row => row.chargeId === measurement?.id);
+  assert.equal(measurement?.completedAt, null);
+  assert.equal(charge?.status, 'RESERVED');
+  assert.equal(charge?.actualAmount, null);
+  assert.equal(h.state.aiTaskInputReceipt.length, 0);
+  assert.deepEqual(h.executions, ['input-clarify']);
 });
 
 test('waiting view reads original contract only for its current owner and pending state', async () => {
@@ -353,12 +382,16 @@ test('tampering a consumed receipt cannot feed later tools or replay a response'
   assert.deepEqual(h.executions, ['input-clarify']);
 });
 
-test('seeded persisted unknown recovery keeps original receipt and never executes a tool or consumes input', async () => {
-  const h = await setup(); await h.run();
-  h.state.aiTask[0].status = 'WAITING_EXTERNAL';
-  h.state.aiStep[0].status = 'UNKNOWN'; h.state.aiStep[0].effect = 'POSSIBLE'; h.state.aiStep[0].errorCode = 'AI_RESULT_UNKNOWN';
-  h.state.aiTaskResultArtifact[0].outcome = 'UNKNOWN'; h.state.aiTaskResultArtifact[0].completeMeasurement = false;
-  for (const charge of h.state.aiTaskExecutionCharge) charge.status = 'UNKNOWN';
+test('persisted unknown recovery keeps original receipt and never executes a tool or consumes input', async () => {
+  const h = await setup();
+  // Persist an interrupted read through the real runner. Rewriting a successful
+  // result would leave its completed measurements inconsistent with the budget.
+  h.control.execute = async () => { throw Error('synthetic lost read response'); };
+  assert.equal((await h.run()).status, 'unknown');
+  assert.equal(h.state.aiTask[0].status, 'WAITING_EXTERNAL');
+  assert.equal(h.state.aiTaskResultArtifact.length, 1);
+  assert.equal(h.state.aiTaskResultArtifact[0].completeMeasurement, false);
+  h.control.execute = async () => assert.fail('recovery cannot execute the original tool again');
   const artifact = h.clone(h.state.aiTaskResultArtifact);
   assert.equal((await h.make(h.inputs()).runner.run({ ...h.claim(), recovery: true })).status, 'unknown');
   assert.deepEqual(h.executions, ['input-clarify']); assert.deepEqual(h.state.aiTaskResultArtifact, artifact);

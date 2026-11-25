@@ -1,13 +1,2 @@
-import { Module, type DynamicModule } from "@nestjs/common";
-import { ModelGatewayService } from "./model-gateway.service";
-import type { GatewayPorts, ModelAdapter } from "./model-gateway.ports";
-
-/** Explicit server wiring only. AppModule/routes are intentionally not changed by this slice. */
-@Module({})
-export class ModelGatewayModule {
-  static register(ports: GatewayPorts, adapters: readonly ModelAdapter[]): DynamicModule {
-    return { module: ModelGatewayModule,
-      providers: [{ provide: ModelGatewayService, useFactory: () => new ModelGatewayService(ports, adapters) }],
-      exports: [ModelGatewayService] };
-  }
-}
+/** 原组合兼容出口；AI Runtime 与运行时标记由正式包单源提供。 */
+export * from "@rental-os/ai-native-server/runtime/model-gateway.module";

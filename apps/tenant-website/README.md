@@ -1,87 +1,52 @@
-# 租户消费者官网
+# 租户消费者官网宿主
 
-React 19、TypeScript 与 Vite 8 实现的租赁前台。一套网站按租户配置呈现品牌、已发布品类、商品和取还门店。平台营销站入口见 [apps/website](../website/README.md)。
+React、TypeScript 与 Vite 的 Rental 客户网站。完整页面与业务消费链在 [Rental 网站前端](../../packages/rental-core/clients/website-ui/README.md)，本应用供给浏览器寿命、公开构建参数、同一客户会话／运输、可靠原引用存储及资产。
 
-## 本地验收
+## 入口
 
-当前分支为 `codex/tenant-website-redesign`。在本目录双击 [start-preview.cmd](start-preview.cmd)，或执行以下命令。
+- [main.tsx](src/main.tsx)挂载原 StrictMode 与根组件。
+- [App.tsx](src/App.tsx)向 RentalWebsite 提供同一 [website-host.ts](src/website-host.ts)。
+- [styles.css](src/styles.css)导入正式网站样式，声明原 Manrope 字体。
+- [vite.config.ts](vite.config.ts)沿原环境白名单、代理和端口配置构建。
+
+原 src 页面、组件、数据和 AI 业务适配路径均转发到正式 source 出口，直接消费者继续使用同一实现。路由、主题、语言、样式及真实／演示隔离见 [前端导读](../../packages/rental-core/clients/website-ui/README.md)，设计依据保留在 [DESIGN.md](DESIGN.md)。
+
+## 宿主输入
+
+VITE_API_BASE 同时供给原公开工厂、认证及业务消费者，VITE_BASE_DOMAIN 和 VITE_DEFAULT_TENANT 供给原租户解析。客户运输与会话复用 [web-client](../../packages/web-client/src/session.ts)。原 localStorage、sessionStorage 和 LockManager 供给恢复及引用持久化，原拒绝、迟到响应与 unknown 恢复边界保持。
+
+租户识别仍依次使用演示参数、显式 tenantCode、平台直接子域名、自定义域名绑定和正式默认租户。真实模式读取 public/bootstrap 和各服务 public/catalog，核对当前租户、渠道及经营空间／品类／结构版本，失败时保持原缺事实与恢复入口。
+
+## 标准包发布
+
+发布须显式提供本工作树内的 Rental 标准包目录 `RENTAL_CORE_PACKAGE` 和与 API 相同的 `CORE_DEPLOYMENT_LOCK`。构建前准备公共 Shared、`core-contracts/install`、`core-contracts/package` 和 `rental-api/openapi` 的正式运行出口，前置沿[原 Rental API 构建链](../rental-api/README.md)。
+
+两端 `npm run build` 的 `prebuild` 复用完整 Rental API 正式构建链。先准备公共 API 自身的 40 模型 Client，再按所选组合准备 Rental Client 并设置绝对 `RENTAL_PRISMA_CLIENT`；公共 API 的 tsc 继续使用自身生成物。具体生成与选择步骤见[公共 API](../platform-api/README.md)和[Rental 构建说明](../rental-api/README.md)。
+
+在仓库根使用原宿主命令。
+
+```powershell
+$env:RENTAL_CORE_PACKAGE = "<待部署目录>"
+$env:CORE_DEPLOYMENT_LOCK = "<组合锁.json>"
+npm run build -w @rental-os/tenant-website
+```
+
+[构建接点](../../scripts/rental-client-vite.ts)复用原安装校验，核对来源、版本、摘要和正式客户端出口。实际读入的包文件须在锁定清单内，相对依赖继续核对成员与普通路径，产物生成时再次校验包摘要。正式入口须提供宿主实际消费的运行值，纯类型或缺失的重导出目标会拒绝。缺包、错锁、未声明出口或文件会终止发布。
+
+包内网站和共用字段贡献按本宿主的 target、JSX 与 class-field 设置通过原 Vite/Oxc 编译。合同相对依赖复用同一包的编译 JS，Shared 保留完整 Rental Root 的合同与纯函数出口，公共 web-client 持有原客户会话。开发及原 `ai-offline` 源码路径沿现有入口，显式选择包时进入同一安装包校验链。
+
+## 本地演示
+
+`ai-offline` 模式关闭环境文件加载和业务代理，演示预约只保存在浏览器。
 
 ```powershell
 npm run dev -- --mode ai-offline --port 4194
 ```
 
-- [多品类演示](http://127.0.0.1:4194/?tenant=multiple)
-- [单品类演示](http://127.0.0.1:4194/?tenant=single)
-- [双品类演示](http://127.0.0.1:4194/?tenant=double)
+演示参数为 `?tenant=single`、`?tenant=double`、`?tenant=multiple`。已有依赖可启动，结束使用 Ctrl+C。真实域名、API 和发布接入沿专项授权。
 
-`ai-offline` 模式关闭环境文件加载和业务 API 代理。演示预约只保存到当前浏览器。已有依赖可直接启动，结束预览使用启动窗口中的 `Ctrl+C`。
+## 资产与验证
 
-## 全站设计
+原 [media](public/media)、[brand](public/brand)、[fonts](public/fonts)及图片 sidecar／字体许可继续由本宿主维护。图片署名从 [photo-sources.json](public/media/photo-sources.json)传入，assetUrl 保留原同源路径，迁入的前端包通过该配置读取。
 
-演示品牌采用一程租赁。浅色主题使用白底黑字，深色主题使用黑底白字，正文、说明、标签和导航都保持明确对比。自托管 Manrope 搭配系统中文字体，单色几何标志、海边场景和商品摄影组成品牌展示。设计规则及当前验证结果分别见 [DESIGN.md](DESIGN.md) 和[当前阶段记录](../../docs/预约网站/预约网站-开发记录.md#tenant-redesign-monochrome-20261113)。
-
-首页提供品类、门店和完整时间查询。桌面以标题与照片并排开场，下方独立排列查询，手机优先显示查询。平板查询采用两列，手机日期字段占完整一行。单品类商户展示二级分类，双品类和多品类商户展示已发布的一级分类。精选商品来自目录，具体可租状态在选定条件及正式报价中确认。
-
-目录支持搜索、分类、排序和查询修改。详情提供商品信息、规格、租期、数量及取还方式。查询条件连续传入预约。演示预约保存商品快照、门店、时间、联系人和估算金额，随后可从我的订单查看。重复保存复用同一记录，存储失败提供错误反馈。
-
-账户覆盖地址、优惠券和通知。说明页面覆盖门店、租赁指南、帮助搜索、用户协议、隐私政策及缺失页。中英文、深浅色、键盘焦点、减少动态效果和窄屏布局贯穿全站。
-
-## 源码入口
-
-| 入口 | 职责 |
-| --- | --- |
-| [App.tsx](src/App.tsx) | 路由及按需加载 |
-| [SiteContext.tsx](src/SiteContext.tsx) | 租户、目录、主题、语言及加载恢复 |
-| [SiteLayout.tsx](src/components/SiteLayout.tsx) | 导航、页脚、手机菜单与路由焦点 |
-| [styles.css](src/styles.css) | 全站唯一样式入口及响应式规则 |
-| [RentalFinder.tsx](src/components/RentalFinder.tsx) | 首页租赁查询 |
-| [CatalogConditions.tsx](src/components/CatalogConditions.tsx) | 目录条件编辑、确认与取消 |
-| [siteRepository.ts](src/data/siteRepository.ts) | 页面目录边界与本地演示记录 |
-| [remoteSite.ts](src/data/remoteSite.ts) | 公开 bootstrap 与目录映射 |
-| [authClient.ts](src/data/authClient.ts) | 现有客户认证和业务接口消费者 |
-| [RemoteBooking.tsx](src/components/RemoteBooking.tsx) | 真实报价与预约入口 |
-| [OrderPages.tsx](src/pages/OrderPages.tsx) | 本人订单、付款意图及原业务恢复消费者 |
-
-`@rental-os/shared` 和 `@rental-os/web-client` 从正式出口导入。Vite 本地源码别名优先解析 TypeScript，避免同目录旧 CommonJS 文件进入浏览器。
-
-## 租户与数据
-
-租户识别依次使用以下入口。
-
-1. `?tenant=single|double|multiple` 读取静态演示目录。
-2. `?tenantCode=xxx` 显式指定业务租户。
-3. `VITE_BASE_DOMAIN` 下的直接子域名解析租户编码，保留平台用途子域名。
-4. 自定义域名通过公开 `site-resolve` 查询已绑定租户。
-5. `VITE_DEFAULT_TENANT` 提供独立部署的默认租户。
-
-本地缺省打开多品类演示。自定义域名归属查询失败且没有正式默认租户时，页面提供加载失败与重试入口。
-
-真实模式先读取 `public/bootstrap` 的品牌、协议和已发布服务，再读取各服务 `public/catalog`。响应必须匹配当前租户和渠道，目录另核对经营空间、品类及结构版本。单个目录失败会显示重新加载提示。真实目录加载期间，演示商品保持隔离。
-
-客户会话继续使用共用协调器。报价、库存、押金、订单、支付结果、企业审批和 AI 原材料由既有服务与消费者提供。前端沿原租户、本人、经营空间与操作键边界呈现事实。
-
-生产接入沿原域名绑定、DNS、HTTPS、API 和渠道发布配置，实施及联调须遵循对应专项授权。
-
-## 验证入口
-
-在仓库根目录执行类型和离线组件检查。
-
-```powershell
-node apps/tenant-website/node_modules/typescript/bin/tsc -p apps/tenant-website/tsconfig.json --noEmit --incremental false
-node apps/tenant-website/scripts/check-storefront-render.mjs
-```
-
-离线组件检查覆盖18种路由场景、3种演示租户、2种语言、2种主题，共216次渲染，另含9项 favicon 和19项定向行为检查。脚本将临时产物集中到本树任务目录，并在退出时清理。
-
-本次生产前端构建采用 `ai-offline` 模式和独立临时输出，结果与内置浏览器记录见[当前阶段记录](../../docs/预约网站/预约网站-开发记录.md#tenant-redesign-monochrome-20261113)。应用的常规构建入口为 `npm run build`，它按正式配置加载环境文件。离线复验需显式使用 `ai-offline`，输出与缓存应归入本树任务目录并在退出时清理。真实业务、支付、微信宿主及发布沿正式验收门槛核对。
-
-## 图片与字体
-
-图片位于 [public/media](public/media)。生成图的完整提示词、派生图来源及外部照片许可随图片 sidecar 保存。外部照片署名集中在 [photo-sources.json](public/media/photo-sources.json)，关于页提供来源与许可入口。Manrope 许可随字体保存在 [public/fonts](public/fonts)。
-
-## 正式资料
-
-- [需求](../../docs/预约网站/预约网站-需求.md)
-- [开发任务](../../docs/预约网站/预约网站-开发任务.md)
-- [开发记录](../../docs/预约网站/预约网站-开发记录.md)
-- [协作接续](../../docs/预约网站/预约网站-协作接续.md)
+现有 [离线组件入口](scripts/check-storefront-render.mjs)与[原断言](scripts/storefront-render-cases.tsx)覆盖演示路由及条件、存储、目录身份和 favicon。常规 `npm run build` 按原配置加载环境文件，离线构建须显式指定 `ai-offline`，把输出和缓存归入本树任务临时目录并在退出时清理。真实订单、支付、浏览器和发布分别核收。

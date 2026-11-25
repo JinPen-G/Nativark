@@ -5,7 +5,7 @@
 const test = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm'), ts = require('typescript');
 const { createHash } = require('node:crypto'), { Prisma } = require('@prisma/client');
-const root = path.resolve(__dirname, '..'), output = path.join(root, 'output/enterprise-offline/workflows');
+const root = path.resolve(__dirname, '..'), output = path.join(root, 'output/.tmp/enterprise-workflows');
 assert.equal(process.env.DATABASE_URL, 'mysql://offline:offline@127.0.0.1:1/rental_os_offline');
 assert.equal(path.resolve(process.env.AI_OFFLINE_WRITE_ROOT), output);
 assert.ok(require.cache[require.resolve('./fixtures/ai-native/prisma-offline-preload.cjs')]);
@@ -20,6 +20,7 @@ function load(relative) {
     if (name === '@nestjs/common') return common;
     if (name === '@prisma/client') return { Prisma };
     if (name === '@rental-os/shared') return shared;
+    if (name.startsWith('@rental-os/') || name === '@prisma/client/runtime/library') return require(name);
     if (name === 'zod') return require('zod');
     if (name.startsWith('.')) {
       // Injection-only modules are not bootstrapped. Only the five services under
@@ -54,7 +55,7 @@ function fixture(paymentRequired = true) {
   const basis = { merchantRevision: 1, companyRevision: 1, employeeRevision: 1, membershipUpdatedAt: relationUpdated.toISOString(), noticeVersion: 'v1', acknowledgedAt: updated, guaranteePayer: 'enterprise', approvalMode: 'per_order' };
   let state = { exchangeApprovals: [], approvals: [], receipts: [], extensions: [], idempotency: [], order: { id: 'o1', tenantId: 't1', workspaceId: 'w1', quoteId: 'q1', customerId: 'p1', status: shared.RentalCoreOrderStatus.Renting,
     startAt: '2090-01-01T00:00:00Z', endAt: '2090-01-02T00:00:00Z', updatedAt: updated, ruleSnapshot: { extension: { enabled: true } }, rentalAmount: 100, payableAmount: 100, finalPayableAmount: 100,
-    chargeLines: [], reservations: [], lines: [], allocations: [], membershipSnapshot: { bookingIdentity: 'enterprise_employee', personalCustomerId: 'p1', corporateCustomerId: 'c1', corporateMembershipId: 'm1', enterpriseContractAndPayer: true, enterpriseBasis: basis } } };
+    currency: 'CNY', chargeLines: [], reservations: [], lines: [], allocations: [], membershipSnapshot: { bookingIdentity: 'enterprise_employee', personalCustomerId: 'p1', corporateCustomerId: 'c1', corporateMembershipId: 'm1', enterpriseContractAndPayer: true, enterpriseBasis: basis } } };
   const flags = { active: true, reviewer: true, member: true, failReceipt: false, failCoreSave: false, failCloseReceipt: false, loseAck: false, paid: false, pricingChanged: false, available: true };
   const events = [], barriers = {}, policies = ['merchant', 'company', 'member:m1'].map(scopeKey => ({ scopeKey, revision: 1, policy: copy(policy), membershipUpdatedAt: relationUpdated }));
   const preview = { orderId: 'o1', originalEndAt: state.order.endAt, newEndAt: '2090-01-03T00:00:00.000Z', billableUnits: 1, rentalAmount: 100, serviceAmount: 0, depositDelta: paymentRequired ? 10 : 0, preAuthDelta: 0, payableAmount: 100,
@@ -145,6 +146,11 @@ function fixture(paymentRequired = true) {
   } };
   const core = Object.create(RentalCoreService.prototype);
   Object.assign(core, { state: () => ({ profile: { terminology: { pickupLabel: 'pickup' } } }), resolveWorkspaceId: () => 'w1',
+    funding: { assertReadyForExtension: async (tenantId, workspaceId, orderId, _extension, tx, options) => {
+      assert.equal(tenantId, 't1'); assert.equal(workspaceId, 'w1'); assert.equal(orderId, 'o1'); assert.ok(tx.id);
+      events.push({ event: 'funding.check', tx: tx.id });
+      if (!options.skipRentalPayment && !flags.paid) throw new Error('original funding unpaid');
+    } },
     async lockedOrder(tenant, id, tx) { assert.equal(id, 'o1'); await acquire(tx, 'order:o1'); return copy(local(tx).order); },
     assertOrderQualification: async () => { if (!flags.member) throw new Error('qualification unavailable'); },
     assertOrderExtensionAvailable: async () => { if (!flags.available) throw new Error('inventory unavailable'); },
@@ -164,6 +170,7 @@ function fixture(paymentRequired = true) {
     occupyExtensionServices: async (_ctx, _o, _e, tx) => events.push({ event: 'services.reserve', tx: tx.id }),
     listExtensions: async () => copy(state.extensions),
   });
+  core.corporateSettlement = client.corporateSettlement;
   const access = { requireAction: async context => { if (!flags.reviewer || context.customerId !== 'reviewer') throw new common.ForbiddenException('review permission'); return { membershipId: 'reviewer-m', permissionRevision: '1' }; } };
   const service = new EnterpriseExtensionApprovalService(prisma, commands, policiesApi, access, core, client, new RentalIdempotencyRepository(prisma));
   const request = () => within('p1', () => service.request(ctx('p1'), change('request-key', 0, { orderId: 'o1', expectedOrderUpdatedAt: updated, extension: { newEndAt: preview.newEndAt } })));
@@ -223,7 +230,7 @@ test('ordinary Core extension cannot borrow booking approval; payment revalidate
   assert.equal(f.state().order.effectiveEndAt, undefined);
   f.flags.reviewer = true; f.flags.pricingChanged = true;
   await assert.rejects(within('p1', () => f.prisma.$transaction(tx => f.core.payOrderExtension('t1', 'o1', f.state().extensions[0].id, tx))));
-  f.flags.pricingChanged = false;
+  f.flags.pricingChanged = false; f.flags.paid = true;
   const result = await within('p1', () => f.prisma.$transaction(tx => f.core.payOrderExtension('t1', 'o1', f.state().extensions[0].id, tx)));
   assert.equal(result.extension.status, 'effective'); assert.equal(f.state().order.effectiveEndAt, f.preview.newEndAt);
 });
@@ -235,26 +242,27 @@ test('original result is whitelisted and exact; missing/mismatched extension nev
   await assert.rejects(within('p1', () => f.service.result(ctx('p1'), r.id)));
 });
 test('transaction-scoped pricing executes the real original algorithm with persisted sources, not cached seed data or a second calculator', async () => {
-  const { RentalBusinessService } = load('apps/api/src/modules/rental-core/rental-business.service.ts');
+  const { RentalBusinessService } = require('@rental-os/rental-core/mysql-business-runtime');
   const category = { ...copy(shared.RENTAL_CATEGORY_DEFINITIONS.find(c => c.code === 'camping')), businessModel: { ...copy(shared.RENTAL_CATEGORY_DEFINITIONS.find(c => c.code === 'camping').businessModel), pricingUnits: ['day_24h'] } };
   const from = new Date(Date.now() + 86400000).toISOString(), newEndAt = new Date(Date.parse(from) + 86400000).toISOString();
   const rate = { id: 'rate', itemGroupId: 'g1', itemGroupCode: 'G1', itemGroupName: 'Original item', unit: 'day_24h', baseAmount: 100, weekendMultiplier: 1, holidayMultiplier: 1, depositAmount: 0, minimumUnits: 1 };
   const rules = { payment: { depositMode: 'fixed', preauthorizationRequired: false }, extension: { enabled: true, pricingMode: 'incremental' }, qualification: { required: false }, damage: {}, cancellation: {}, overdue: {}, fulfillment: {} };
-  const settings = { pricing: { currency: 'CNY', holidayPricingEnabled: false }, calendar: { timeZone: 'Asia/Shanghai', weekendDays: [0, 6] } };
-  const quote = { id: 'q1', tenantId: 't1', categoryCode: 'camping', categoryVersionId: 'cat1', request: { startAt: from, endAt: newEndAt, lines: [{ itemGroupId: 'g1', quantity: 1 }] }, rateSnapshot: [rate], ruleSnapshot: rules, ruleVersion: 'r1', calendarSnapshot: [] };
-  const coreConfig = { profile: { tenantId: 't1', categoryCode: 'camping', terminology: {} }, workspaceCategoryCode: 'camping', businessSettings: settings,
+  const settings = { tenantId: 't1', categoryCode: 'camping', pricing: { currency: 'CNY', holidayPricingEnabled: false }, calendar: { timeZone: 'Asia/Shanghai', weekendDays: [0, 6] } };
+  const quote = { id: 'q1', tenantId: 't1', currency: 'CNY', categoryCode: 'camping', categoryVersionId: 'cat1', request: { startAt: from, endAt: newEndAt, lines: [{ itemGroupId: 'g1', quantity: 1 }] }, rateSnapshot: [rate], ruleSnapshot: rules, ruleVersion: 'r1', calendarSnapshot: [] };
+  const coreConfig = { tenantId: 't1', workspaceId: 'w1', profile: { tenantId: 't1', categoryCode: 'camping', terminology: {} }, workspaceCategoryCode: 'camping', businessSettings: settings,
     itemGroups: [{ id: 'g1', code: 'G1', name: 'Original item', status: 'enabled', inventoryMode: 'quantity' }], pricingGroups: [], couponTemplates: [], locations: [], operators: [] };
-  const config = { pricingPlans: [{ id: 'plan1', status: 'enabled', effectiveFrom: '2020-01-01T00:00:00Z', rates: [rate], version: 'v1' }], discountPlans: [], services: [], calendars: [],
+  const config = { tenantId: 't1', workspaceId: 'w1', categoryCode: 'camping', pricingPlans: [{ id: 'plan1', status: 'enabled', effectiveFrom: '2020-01-01T00:00:00Z', rates: [rate], version: 'v1' }], discountPlans: [], services: [], calendars: [],
     ruleVersions: [{ id: 'rule1', version: 'r1', status: 'published', effectiveFrom: '2020-01-01T00:00:00Z', config: rules }], hasPersistedConfig: true };
   let reads = 0;
   const tx = { $queryRaw: async () => [{ id: 'w1' }], businessWorkspace: { findFirst: async () => ({ status: 'ACTIVE', categoryVersionId: 'cat1', categoryAdoptionRevision: 1 }) },
+    rentalOrder: { findFirst: async ({ where }) => { assert.deepEqual(plain(where), { id: 'o1', tenantId: 't1', workspaceId: 'w1' }); return { id: 'o1', quoteId: 'q1', categoryCode: 'CAMPING' }; } },
     rentalPriceVersion: { findFirst: async () => { reads++; return { id: 'price1', sequence: 1, effectiveFrom: new Date('2020-01-01'), rates: [rate] }; } } };
   const onlyTx = current => { assert.equal(current, tx, 'all authoritative reads participate in the caller transaction'); };
   const service = new RentalBusinessService({ loadWorkspace: async (_t, _w, current) => { onlyTx(current); return config; } },
     { findQuote: async (_t, _q, current) => { onlyTx(current); return quote; } }, { loadWorkspace: async (_t, _w, current) => { onlyTx(current); return coreConfig; } });
   service.prisma = {}; service.categoryResolver = { forWorkspace: async (_t, _w, current) => { onlyTx(current); return { definition: category, categoryVersionId: 'cat1', adoptionRevision: 1 }; },
     forVersion: async (_c, _v, current) => { onlyTx(current); return category; } };
-  const order = { id: 'o1', tenantId: 't1', quoteId: 'q1', startAt: new Date(Date.parse(from) - 86400000).toISOString(), endAt: from, lines: [{ itemGroupId: 'g1', quantity: 1 }], depositAmount: 0, preAuthAmount: 0, fulfillmentMode: 'store_pickup_return', customerType: 'personal' };
+  const order = { id: 'o1', tenantId: 't1', quoteId: 'q1', categoryCode: 'camping', currency: 'CNY', startAt: new Date(Date.parse(from) - 86400000).toISOString(), endAt: from, lines: [{ itemGroupId: 'g1', quantity: 1 }], depositAmount: 0, preAuthAmount: 0, fulfillmentMode: 'store_pickup_return', customerType: 'personal' };
   const before = service.states.size;
   const price = () => within('p1', () => service.quoteEnterpriseExtension('t1', order, [], { newEndAt }, 'immediate', tx));
   const result = await price(); assert.equal(result.rentalAmount, 100); assert.equal(result.payableAmount, 100); assert.equal(result.priceVersionId, 'price1'); assert.equal(result.ruleVersion, 'r1');
@@ -273,11 +281,10 @@ test('approved monthly extension refuses added guarantees; personal and explicit
     assert.equal(result.extension.status, 'pending_payment'); assert.equal(f.state().approvals.length, 0); assert.equal(f.state().order.effectiveEndAt, undefined);
   }
 });
-test('original client activation checks the funding port before Core and never treats enterprise approval as payment', async () => {
+test('original client activation uses the Core funding participant before effect and never treats enterprise approval as payment', async () => {
   const f = fixture(), requested = await f.request(); await f.approve(requested.id); await f.submit(requested.id);
   f.client.assertClientOrder = async () => copy(f.state().order);
   f.client.orderView = order => ({ id: order.id, effectiveEndAt: order.effectiveEndAt });
-  f.client.fundingService = { assertExtensionPaid: async (_tenant, _workspace, _order, _extension, tx) => { f.events.push({ event: 'funding.check', tx: tx.id }); if (!f.flags.paid) throw new Error('original funding unpaid'); } };
   await assert.rejects(within('p1', () => f.client.payExtension(ctx('p1'), 'o1', f.state().extensions[0].id)), /funding unpaid/);
   assert.equal(f.state().order.effectiveEndAt, undefined); assert.equal(f.state().extensions[0].status, 'pending_payment');
   f.flags.paid = true;
@@ -438,11 +445,13 @@ test('shared original exchange preview preserves original pricing and candidate 
   const { RentalExchangePreviewService } = load('apps/api/src/modules/rental-core/rental-exchange-preview.service.ts');
   const order = { id: 'o1', tenantId: 't1', updatedAt: 'r1', status: shared.RentalCoreOrderStatus.Renting, fulfillmentLocationId: 'l1', customerType: 'corporate', finalPayableAmount: 100,
     lines: [{ id: 'line1', itemGroupId: 'old', itemGroupName: 'Original', quantity: 1, inventoryMode: 'serialized' }], allocations: [{ id: 'a1', orderLineId: 'line1', status: 'picked_up', quantity: 1 }] };
-  const groups = [{ id: 'new', name: 'Replacement', status: 'enabled', inventoryMode: 'serialized' }], calls = [], basis = { effectiveFrom: 'now', source: 'original' };
+  const groups = [{ id: 'new', name: 'Replacement', status: 'enabled', inventoryMode: 'serialized' }], calls = [], basis = { effectiveFrom: 'now', source: 'original', inspectionTemplateSnapshots: [], ruleSnapshot: { fulfillment: {} } };
   const core = { lockOrderForUpdate: async (_tenant, _id, tx) => { assert.ok(tx); calls.push('lock'); return order; }, getProfile: () => ({}), getWorkspaceCategory: async () => ({}),
-    getBusinessSettings: () => ({}), listItemGroups: () => groups, listPricingGroups: () => [], listCouponTemplates: () => [], listLocations: () => [], listOperators: () => [], listOrderExtensions: async () => [] };
-  const business = { quotePostPickupExchange: async (_tenant, _ctx, input) => { calls.push('price'); assert.equal(input.orderLineId, 'line1'); return { originalAmount: 100, replacementAmount: 140,
-    priced: { depositDelta: 10, preAuthDelta: 0, currency: 'CNY', priceVersion: 'original-v1', pricingSnapshot: { recalculatedPayableAmount: 140 } } }; }, captureExchangeExecutionBasis: async () => basis };
+    getBusinessSettings: () => ({}), listItemGroups: () => groups, listPricingGroups: () => [], listCouponTemplates: () => [], listLocations: () => [], listOperators: () => [], listOrderExtensions: async () => [], listOrderChanges: async () => [],
+    readBusinessContext: async tenantId => { assert.equal(tenantId, 't1'); return { profile: {}, category: {}, settings: {}, groups, pricingGroups: [], couponTemplates: [], locations: [], operators: [] }; } };
+  const business = { refreshWorkspaceContext: async (_tenant, context) => context,
+    quotePostPickupExchange: async (_tenant, _ctx, input) => { calls.push('price'); assert.equal(input.orderLineId, 'line1'); return { originalAmount: 100, replacementAmount: 140,
+    priced: { depositDelta: 10, preAuthDelta: 0, currency: 'CNY', priceVersion: 'original-v1', linePricing: { previousSegments: [] }, pricingSnapshot: { recalculatedPayableAmount: 140 } } }; }, captureExchangeExecutionBasis: async () => basis };
   let available = true;
   const allocation = { exchangeAssetCandidates: async () => [{ assetId: 'asset-new', assetNo: 'A1', available }] }, prisma = { $transaction: fn => fn({ tx: true }) };
   const service = new RentalExchangePreviewService(core, business, allocation, prisma), intent = { orderLineId: 'line1', allocationId: 'a1', replacementItemGroupId: 'new', replacementAssetId: 'asset-new' };
@@ -477,7 +486,16 @@ function exchangeFixture() {
       inspectionSnapshot: { customerConfirmed: false }, executionBasis: { effectiveFrom: '2026-11-03T00:00:00Z', categoryCode: 'vehicle', categoryVersionId: 'v1',
         ruleSnapshot: { version: 'r1' }, rateSnapshot: [{ baseAmount: 140 }], calendarSnapshot: [], inspectionTemplateSnapshots: [], pricingSnapshot: copy(pricing) } } };
   const prices = { preview: async () => { if (!f.flags.available) throw new Error('exchange stock unavailable'); f.events.push({ event: 'exchange.price' }); return { order: copy(f.state().order), preview: copy(preview) }; } };
-  const service = new EnterpriseExchangeApprovalService(f.prisma, f.service.commands, f.policiesApi, f.access, f.core, prices, { catalog: async () => ({ items: [{ id: 'new' }] }) });
+  const service = new EnterpriseExchangeApprovalService(f.prisma, f.service.commands, f.policiesApi, f.access, f.core, prices, {
+    catalog: async () => ({ items: [{ id: 'new' }] }),
+    getOrder: async (context, orderId) => {
+      const order = f.state().order;
+      assert.equal(context.tenantId, order.tenantId); assert.equal(context.workspaceId, order.workspaceId);
+      assert.equal(context.customerId, order.customerId); assert.equal(orderId, order.id);
+      if (!f.flags.active) throw new common.ForbiddenException('customer closed');
+      return { id: order.id };
+    }
+  });
   const input = change('exchange-request', 0, { orderId: 'o1', expectedOrderUpdatedAt: f.state().order.updatedAt, exchange: intent });
   const request = () => within('p1', () => service.request(ctx('p1'), input));
   const decide = (id, decision = 'approve', revision = 1, actor = 'reviewer') => within(actor, () => service.decide(ctx(actor), id, change(`exchange-${decision}`, revision, { decision })));
@@ -801,7 +819,7 @@ test('inspection preparation DTO and registered schemas never accept execution, 
 function exchangeImageFixture() {
   const f = inspectionPreparationFixture(), { RentalExchangeInspectionMediaService } = load('apps/api/src/modules/rental-core/rental-exchange-inspection-media.service.ts');
   f.originalTemplate.fields.push({ code: 'photo', label: 'Original condition', type: 'photo', required: true });
-  let state = { rows: [], assets: [] }, tail = Promise.resolve(); f.filePlans = 0; f.byteReads = 0; f.failFinish = false; f.failInsert = false;
+  let state = { rows: [], assets: [] }, tail = Promise.resolve(); f.filePlans = 0; f.byteReads = 0; f.frozenReads = 0; f.failFinish = false; f.failInsert = false;
   f.failClaim = false; f.loseClaimAck = false; f.loseCompletionAck = false; f.inspectHook = async () => undefined; f.afterClaim = async () => undefined;
   const fileAsset = assets => ({ findFirst: async ({ where }) => copy(assets.find(asset => asset.id === where.id && asset.tenantId === where.tenantId) ?? null) });
   const prisma = { async $transaction(fn) {
@@ -829,18 +847,32 @@ function exchangeImageFixture() {
     } finally { release(); }
   } };
   const files = { async planExchangeInspectionUpload(_tenant, input, owner) { f.filePlans++; const assetId = `image-${f.filePlans}`, sessionId = `session-${f.filePlans}`;
-    return { input, owner, assetId, sessionId, storageKey: `private/${assetId}`, provider: 's3_compatible', expiresAt: new Date(Date.now()+900000), configRowHash: 'config', storageLocationHash: 'location', uploadUrl: 'https://storage.example.invalid/original-put', uploadHeaders: {} }; },
+    return { input, owner, assetId, sessionId, storageKey: `private/t1/${assetId}/blob`, provider: 's3_compatible', expiresAt: new Date(Date.now()+900000), configRowHash: 'config', storageLocationHash: 'location', uploadUrl: 'https://storage.example.invalid/original-put', uploadHeaders: {} }; },
     async persistExchangeInspectionUpload(tx, tenantId, plan) { tx.assets.push({ id: plan.assetId, tenantId, businessModule: 'rental-core', businessType: 'rental_order', businessId: plan.input.businessId, fileName: plan.input.fileName,
-      mimeType: plan.input.mimeType, sizeBytes: plan.input.sizeBytes, storageProvider: plan.provider, storageKey: `private/${plan.assetId}`, uploadScene: shared.RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE, uploadedBy: plan.owner.actorUserId,
+      mimeType: plan.input.mimeType, sizeBytes: plan.input.sizeBytes, storageProvider: plan.provider, storageKey: plan.storageKey, uploadScene: shared.RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE, uploadedBy: plan.owner.actorUserId,
       metadata: { workspaceId: 'w1', exchangeInspectionSourceId: plan.owner.exchangeInspectionSourceId, storageLocationHash: 'location' }, status: 'pending_upload',
-      uploadSession: { id: plan.sessionId, tenantId, fileAssetId: plan.assetId, provider: plan.provider, storageKey: `private/${plan.assetId}`, status: 'pending_upload', expiresAt: plan.expiresAt, idempotencyKey: plan.input.idempotencyKey } }); },
+      uploadSession: { id: plan.sessionId, tenantId, fileAssetId: plan.assetId, provider: plan.provider, storageKey: plan.storageKey, status: 'pending_upload', expiresAt: plan.expiresAt, idempotencyKey: plan.input.idempotencyKey } }); },
     async inspectExchangeInspectionUpload() {
       f.byteReads++; assert.ok(state.rows[0].completionClaimId, 'claim must commit before any object read');
-      await f.inspectHook(); return { contentHash: 'a'.repeat(64), sizeBytes: 68, mimeType: 'image/png', width: 1, height: 1 };
+      await f.inspectHook();
+      // The original file provider commits its freeze before the Core completion transaction.
+      const asset = state.assets[0], staging = asset.storageKey;
+      const evidence = { sourceId: asset.metadata.exchangeInspectionSourceId, contentHash: 'a'.repeat(64), sizeBytes: 68, mimeType: 'image/png', width: 1, height: 1 };
+      asset.storageKey = staging + '.committed/00000000-0000-4000-8000-000000000000/' + evidence.contentHash;
+      asset.checksum = evidence.contentHash;
+      Object.assign(asset.metadata, { fileUploadVersion: 2, fileContentVersion: 1, contentHash: evidence.contentHash, stagingStorageKey: staging, exchangeInspectionFrozenEvidence: evidence });
+      asset.uploadSession.storageKey = asset.storageKey; asset.uploadSession.status = 'freeze_pending';
+      return { ...evidence, assetHash: requestFingerprint(plain(asset)), sessionHash: requestFingerprint(plain(asset.uploadSession)), configRowHash: 'config', storageLocationHash: 'location' };
+    },
+    async reconcileExchangeInspectionUpload() {
+      const asset = state.assets[0];
+      if (asset.uploadSession.status === 'pending_upload') return undefined;
+      f.frozenReads++;
+      return { ...asset.metadata.exchangeInspectionFrozenEvidence, assetHash: requestFingerprint(plain(asset)), sessionHash: requestFingerprint(plain(asset.uploadSession)), configRowHash: 'config', storageLocationHash: 'location' };
     },
     async completeExchangeInspectionUpload(tx, _tenant, fileId, _owner, proof) { const asset = tx.assets.find(row => row.id === fileId), completedAt = new Date().toISOString();
       asset.status = 'active'; asset.checksum = proof.contentHash; asset.metadata.exchangeInspectionContentHash = proof.contentHash; asset.uploadSession.status = 'completed'; asset.uploadSession.completedAt = new Date(completedAt);
-      return { ...proof, completedAt }; } };
+      return { contentHash: proof.contentHash, sizeBytes: proof.sizeBytes, mimeType: proof.mimeType, width: proof.width, height: proof.height, completedAt }; } };
   f.restartMedia = () => { f.media = new RentalExchangeInspectionMediaService(prisma, f.service, files); };
   f.restartMedia(); f.state = () => state;
   f.mediaRequirements = () => f.within(() => f.media.requirements('operator-token-double', f.user, 'o1', { expectedOrderUpdatedAt: f.order.updatedAt, exchange: { orderLineId:'line', allocationId:'allocation', replacementItemGroupId:'new', replacementAssetId:'asset', priceBasis:'original_order_price', originalDisposition:'return_to_warehouse' } }));
@@ -851,7 +883,7 @@ function exchangeImageFixture() {
   f.finishImage = key => f.within(() => f.media.complete('operator-token-double', f.user, 'o1', key)); return f;
 }
 test('dedicated exchange image binds original photo requirement and permanently observes K without another ticket or preparation acceptance', async () => {
-  const f = exchangeImageFixture(), input = await f.mediaInput(); await assert.rejects(f.requirements(), /影像/u);
+  const f = exchangeImageFixture(), input = await f.mediaInput(); await assert.rejects(f.prepare(await f.input()), /影像/u);
   const first = await f.createImage(input); assert.ok(first.uploadUrl); assert.equal(first.source.preparationUse, 'not_connected');
   const plans = f.filePlans, replay = await f.createImage(input); assert.equal(replay.state,'observed'); assert.equal(replay.uploadUrl, undefined); assert.equal(f.filePlans,plans);
   await assert.rejects(f.createImage({ ...input, fileName:'different.png' }), /不同/u);
@@ -869,9 +901,9 @@ test('dedicated exchange image rejects foreign declarations and atomically appen
   }
   const failed = exchangeImageFixture(), failedInput = await failed.mediaInput(); await failed.createImage(failedInput); failed.failFinish=true;
   await assert.rejects(failed.finishImage(failedInput.operationKey), /核对/u);
-  assert.equal(failed.state().assets[0].status,'pending_upload'); assert.equal(failed.state().assets[0].uploadSession.status,'pending_upload'); assert.equal(failed.state().rows[0].completion,null);
+  assert.equal(failed.state().assets[0].status,'pending_upload'); assert.equal(failed.state().assets[0].uploadSession.status,'freeze_pending'); assert.equal(failed.state().rows[0].completion,null);
   assert.ok(failed.state().rows[0].completionClaimId); failed.failFinish=false;
-  assert.equal((await failed.finishImage(failedInput.operationKey)).source.state,'completion_unknown'); assert.equal(failed.byteReads,1);
+  assert.equal((await failed.finishImage(failedInput.operationKey)).source.state,'completed'); assert.equal(failed.byteReads,1); assert.equal(failed.frozenReads,1, 'the original frozen target is observed, without another staging read');
   const f = exchangeImageFixture(), input = await f.mediaInput(); await f.createImage(input);
   const finished=await f.finishImage(input.operationKey); assert.equal(finished.source.state,'completed'); assert.equal(finished.source.completion.contentHash,'a'.repeat(64));
   const reads=f.byteReads; f.order.updatedAt='changed'; assert.equal((await f.finishImage(input.operationKey)).source.id,finished.source.id); assert.equal(f.byteReads,reads);
@@ -914,9 +946,14 @@ test('exchange image completion failures, expiry and corrupt claims never grant 
     if (stage === 'claim-replaced') f.inspectHook = async () => { f.state().rows[0].completionClaimId = '00000000-0000-4000-8000-000000000000'; };
     if (stage === 'claim-time-changed') f.inspectHook = async () => { f.state().rows[0].completionClaimedAt = new Date(f.state().rows[0].completionClaimedAt.getTime()+1); };
     await assert.rejects(f.finishImage(body.operationKey)); assert.ok(f.state().rows[0].completionClaimId);
-    assert.equal(f.state().assets[0].status,'pending_upload'); assert.equal(f.state().assets[0].uploadSession.status,'pending_upload'); assert.equal(f.state().rows[0].completion,null);
+    const frozen = Boolean(f.state().assets[0].metadata.exchangeInspectionFrozenEvidence);
+    assert.equal(f.state().assets[0].status,'pending_upload'); assert.equal(f.state().assets[0].uploadSession.status,frozen ? 'freeze_pending' : 'pending_upload'); assert.equal(f.state().rows[0].completion,null);
     f.authority = true; f.inspectHook = async () => undefined; f.afterClaim = async () => undefined; f.restartMedia();
-    assert.equal((await f.finishImage(body.operationKey)).source.state,'completion_unknown'); assert.equal(f.byteReads,stage === 'authority-before-read' ? 0 : 1);
+    if (stage === 'revision') {
+      await assert.rejects(f.finishImage(body.operationKey), /修订/u);
+      assert.equal((await f.readImage(body.operationKey)).source.state,'completion_unknown');
+    } else assert.equal((await f.finishImage(body.operationKey)).source.state,frozen ? 'completed' : 'completion_unknown');
+    assert.equal(f.byteReads,stage === 'authority-before-read' ? 0 : 1);
   }
   const expired = exchangeImageFixture(), body = await expired.mediaInput(); await expired.createImage(body);
   const row = expired.state().rows[0], binding = JSON.parse(row.binding); binding.source.expiresAt = new Date(0).toISOString(); row.binding = JSON.stringify(binding); row.bindingHash = requestFingerprint(binding);

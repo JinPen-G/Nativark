@@ -1,6 +1,6 @@
 # 客服中心 · 邮件客诉
 
-首期接收并展示专用客服邮箱或文件夹的邮件。`CustomerSupportPage` 复用 [UIARC Inbox triage](https://uiarc.dev/components/screens/inbox-triage) 的列表和 [Support conversation](https://uiarc.dev/components/screens/support-conversation) 的邮件正文布局，先查官网，再核对用户本地 `uiarc-pro-archive/preview/src/screens` 源码。只复制两组件原 CSS、class 映射和来源记录到 `source`；未复制完整演示宿主或伪造回复、派工、处理成功。原动效由共享 ContentTransition / UIArc 控件承担。
+首期接收并展示专用客服邮箱或文件夹的邮件。`CustomerSupportPage` 消费[公共消息页面](../../../../../packages/platform-admin/src/features/messaging/README.md)，原宿主提供当前品牌和路由图标。列表与正文分别沿 UIARC Inbox triage、Support conversation 的原布局，共享 ContentTransition / UIArc 控件承担动效。[公共来源目录](../../../../../packages/platform-admin/src/features/messaging/support-source/inbox/provenance.json)保留原 CSS、class 映射和来源记录。
 
 `tenantSupportApi` → `TenantSupportEmailController` → `TenantSupportEmailService` → `imap-reader` / `inbound-mail-codec`。SMTP 与 IMAP 配置同属第三方服务邮箱目录，凭据使用原 SecretBox。受权人员显式同步，IMAP 只用 TLS、EXAMINE、BODY.PEEK；不修改已读标记、删除原邮件或执行其中指令。
 

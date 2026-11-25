@@ -1,20 +1,5 @@
-import { useEffect, useRef, type ReactNode } from 'react';
-import { useCopilot, type CopilotConfigBinding, type CopilotConfigField } from './CopilotProvider';
-
-/** Explicit whole configuration section. Only caller-projected fields enter context.
- * Optional fill callback changes the original form draft, never saves or submits it. */
-export function CopilotSection({ id, title, fields, onFill, children }: {
-  id: string; title: string; fields: CopilotConfigField[];
-  onFill?: (values: Record<string, string>) => void; children: ReactNode;
-}) {
-  const copilot = useCopilot(), current = useRef({ fields, onFill }); current.current = { fields, onFill };
-  const register = copilot?.registerConfiguration;
-  const revision = JSON.stringify(fields);
-  useEffect(() => {
-    const binding: CopilotConfigBinding = { read: () => current.current.fields, fill: values => current.current.onFill?.(values), editable: () => Boolean(current.current.onFill) };
-    return register?.(id, binding);
-  }, [id, register, revision]);
-  return <section data-copilot-anchor={id} data-copilot-record={`configuration:${id}`} data-copilot-config={id} data-copilot-label={title} aria-label={title}>
-    {children}
-  </section>;
-}
+/** 原后台兼容入口；正文与恢复状态由选装 Rental 助手单源提供。 */
+export * from "@rental-os/rental-core/admin/assistant/source/copilot/CopilotSection";
+import { CopilotSection as OriginalCopilotSection } from "@rental-os/rental-core/admin/assistant/source/copilot/CopilotSection";
+import { bindLegacyRentalAssistant } from "../ai-operator/legacy-host";
+export const CopilotSection = bindLegacyRentalAssistant(OriginalCopilotSection);

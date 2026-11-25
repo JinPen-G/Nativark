@@ -2,9 +2,8 @@ import { fileURLToPath, URL } from "node:url";
 import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
-import { motionPreferenceAdapter, motionPreferenceStyles } from "../admin/config/motionPreferenceAdapter";
-import { nativeSidebarStyles } from "../admin/config/nativeSidebarStyles";
-import { actionButtonIconAdapter } from "../admin/config/actionButtonIconAdapter";
+import { platformAdminVite } from "@rental-os/platform-admin/vite";
+import { rentalClientVite } from "../../scripts/rental-client-vite";
 import { loadViteEnvironment, publicEnvironmentDefinitions } from "../../config/environment.cjs";
 const at = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 function customerBoundary(): Plugin {
@@ -14,32 +13,38 @@ function customerBoundary(): Plugin {
       next();
     });
   }, load(id) {
-    if (/\/admin\/src\/(?:features\/(?:auth|copilot)|api\/|app\/(?:AppRouter|navigation)\.)/.test(id.replaceAll("\\", "/"))) {
+    const source = id.replaceAll("\\", "/").split("?")[0];
+    // 公共 Locale 共用这份纯词条；它不包含营运会话、请求或权限实现。
+    if (source.endsWith("/platform-admin/src/features/auth/messages.ts")) return;
+    if (/\/(?:admin|platform-admin)\/src\/(?:features\/(?:auth|copilot)|api\/|app\/(?:AppRouter|navigation)\.)/.test(source)) {
       throw new Error(`Enterprise UI imported an operator runtime: ${id}`);
     }
   } };
 }
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ command, mode }) => {
+  const rental = rentalClientVite(at("../../"),
+    command === "build" && !["development", "offline", "ai-offline"].includes(mode));
   const env = loadViteEnvironment(mode, at("."), loadEnv, { offline: mode === "offline" });
   const port = Number(env.ENTERPRISE_PORTAL_PORT ?? 4191);
+  const platform = platformAdminVite();
   return {
   envDir: false,
   envPrefix: [],
   define: publicEnvironmentDefinitions("enterprisePortal", env),
   cacheDir: at("../../output/enterprise-offline/vite-cache"),
   base: "/enterprise-assets/",
-  plugins: [customerBoundary(), motionPreferenceAdapter(), actionButtonIconAdapter(), tailwindcss(), react()],
-  css: { postcss: { plugins: [motionPreferenceStyles(), nativeSidebarStyles()] } },
-  resolve: { extensions: [".mjs", ".ts", ".tsx", ".js", ".jsx", ".json"], alias: [
-    { find: /^@\/components\/ui$/, replacement: at("../admin/src/components/ui/customer-entry.ts") },
-    { find: "@/registry", replacement: at("../../packages/ui-arc/vendor/registry") },
-    ...["motion-tokens", "media", "use-copy-feedback", "use-today"].map(name => ({ find: `@/lib/${name}`, replacement: at(`../../packages/ui-arc/vendor/lib/${name}.ts`) })),
-    { find: "@rental-os/shared", replacement: at("../../packages/shared/src/index.ts") },
-    { find: "@rental-os/web-client", replacement: at("../../packages/web-client/src/index.ts") },
-    { find: "@enterprise", replacement: at("./src") },
-    { find: "@", replacement: at("../admin/src") }
+  plugins: [customerBoundary(), ...rental.plugins, ...platform.plugins, tailwindcss(), react()],
+  css: { postcss: { plugins: [...platform.postcss, ...rental.postcss] } },
+  resolve: { dedupe: rental.dedupe, extensions: [".mjs", ".ts", ".tsx", ".js", ".jsx", ".json"], alias: [
+    ...Object.entries(platform.alias).map(([find, replacement]) => ({ find, replacement })),
+    ...Object.entries(rental.alias).filter(([find]) => find.startsWith("@rental-os/rental-core/"))
+      .map(([find, replacement]) => ({ find, replacement })),
+    { find: "@rental-os/shared", replacement: rental.alias["@rental-os/shared"] ?? at("../../packages/shared/src/index.ts") },
+    { find: "@rental-os/web-client", replacement: rental.alias["@rental-os/web-client"] ?? at("../../packages/web-client/src/index.ts") },
+    { find: "@enterprise", replacement: at("./src") }
   ] },
-  build: { outDir: mode === "offline" ? at("../../output/enterprise-offline/build") : "dist", emptyOutDir: false },
+  build: { outDir: mode === "offline" ? at("../../output/enterprise-offline/build") : "dist", emptyOutDir: false,
+    commonjsOptions: rental.commonjsOptions },
   server: { host: "127.0.0.1", port, strictPort: true },
   preview: { host: "127.0.0.1", port, strictPort: true }
   };

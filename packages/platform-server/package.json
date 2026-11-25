@@ -1,0 +1,621 @@
+{
+  "name": "@rental-os/platform-server",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "独立的SaaS公共身份、会话和设置服务",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./prisma-runtime": {
+      "types": "./dist/prisma-runtime.d.ts",
+      "default": "./dist/prisma-runtime.js"
+    },
+    "./password": {
+      "types": "./dist/common/password.d.ts",
+      "default": "./dist/common/password.js"
+    },
+    "./request-id": {
+      "types": "./dist/common/request-id.interceptor.d.ts",
+      "default": "./dist/common/request-id.interceptor.js"
+    },
+    "./request-identity": {
+      "types": "./dist/common/request-identity.d.ts",
+      "default": "./dist/common/request-identity.js"
+    },
+    "./request-path": {
+      "types": "./dist/common/request-path.d.ts",
+      "default": "./dist/common/request-path.js"
+    },
+    "./auth-session": {
+      "types": "./dist/modules/auth/auth-session.service.d.ts",
+      "default": "./dist/modules/auth/auth-session.service.js"
+    },
+    "./auth-http": {
+      "types": "./dist/modules/auth/auth-session.controller.d.ts",
+      "default": "./dist/modules/auth/auth-session.controller.js"
+    },
+    "./auth-dto": {
+      "types": "./dist/modules/auth/auth-session.dto.d.ts",
+      "default": "./dist/modules/auth/auth-session.dto.js"
+    },
+    "./auth": {
+      "types": "./dist/modules/auth/platform-auth.service.d.ts",
+      "default": "./dist/modules/auth/platform-auth.service.js"
+    },
+    "./identity": {
+      "types": "./dist/modules/platform/platform-identity.repository.d.ts",
+      "default": "./dist/modules/platform/platform-identity.repository.js"
+    },
+    "./principal": {
+      "types": "./dist/modules/platform/platform-principal.authority.d.ts",
+      "default": "./dist/modules/platform/platform-principal.authority.js"
+    },
+    "./management-dto": {
+      "types": "./dist/modules/platform/platform-management.dto.d.ts",
+      "default": "./dist/modules/platform/platform-management.dto.js"
+    },
+    "./authentication": {
+      "types": "./dist/modules/platform/platform-authentication.source.d.ts",
+      "default": "./dist/modules/platform/platform-authentication.source.js"
+    },
+    "./security": {
+      "types": "./dist/modules/platform/platform-security-baseline.d.ts",
+      "default": "./dist/modules/platform/platform-security-baseline.js"
+    },
+    "./auth-store": {
+      "types": "./dist/modules/platform/platform-auth-data-store.d.ts",
+      "default": "./dist/modules/platform/platform-auth-data-store.js"
+    },
+    "./appearance-store": {
+      "types": "./dist/modules/platform/platform-appearance-data-store.d.ts",
+      "default": "./dist/modules/platform/platform-appearance-data-store.js"
+    },
+    "./tenant-appearance": {
+      "types": "./dist/modules/client/tenant-appearance-profile.service.d.ts",
+      "default": "./dist/modules/client/tenant-appearance-profile.service.js"
+    },
+    "./tenant-appearance-http": {
+      "types": "./dist/modules/client/tenant-appearance-profile.controller.d.ts",
+      "default": "./dist/modules/client/tenant-appearance-profile.controller.js"
+    },
+    "./tenant-appearance-dto": {
+      "types": "./dist/modules/client/tenant-appearance-profile.dto.d.ts",
+      "default": "./dist/modules/client/tenant-appearance-profile.dto.js"
+    },
+    "./account-appearance": {
+      "types": "./dist/modules/client/account-appearance.service.d.ts",
+      "default": "./dist/modules/client/account-appearance.service.js"
+    },
+    "./account-appearance-http": {
+      "types": "./dist/modules/client/account-appearance.controller.d.ts",
+      "default": "./dist/modules/client/account-appearance.controller.js"
+    },
+    "./account-appearance-dto": {
+      "types": "./dist/modules/client/account-appearance.dto.d.ts",
+      "default": "./dist/modules/client/account-appearance.dto.js"
+    },
+    "./subscription-state": {
+      "types": "./dist/modules/subscription/subscription-state.d.ts",
+      "default": "./dist/modules/subscription/subscription-state.js"
+    },
+    "./subscription-term": {
+      "types": "./dist/modules/subscription/subscription-term.d.ts",
+      "default": "./dist/modules/subscription/subscription-term.js"
+    },
+    "./subscription-reader": {
+      "types": "./dist/modules/subscription/subscription-reader.d.ts",
+      "default": "./dist/modules/subscription/subscription-reader.js"
+    },
+    "./notification-delivery": {
+      "types": "./dist/common/notification-delivery.d.ts",
+      "default": "./dist/common/notification-delivery.js"
+    },
+    "./organization-location-scope": {
+      "types": "./dist/common/organization-location-scope.d.ts",
+      "default": "./dist/common/organization-location-scope.js"
+    },
+    "./operation-log": {
+      "types": "./dist/common/operation-log.service.d.ts",
+      "default": "./dist/common/operation-log.service.js"
+    },
+    "./permission-match": {
+      "types": "./dist/permission-match.d.ts",
+      "default": "./dist/permission-match.js"
+    },
+    "./subscription": {
+      "types": "./dist/modules/subscription/subscription.service.d.ts",
+      "default": "./dist/modules/subscription/subscription.service.js"
+    },
+    "./subscription-store": {
+      "types": "./dist/modules/subscription/subscription-store.d.ts",
+      "default": "./dist/modules/subscription/subscription-store.js"
+    },
+    "./subscription-dto": {
+      "types": "./dist/modules/subscription/subscription-request.dto.d.ts",
+      "default": "./dist/modules/subscription/subscription-request.dto.js"
+    },
+    "./subscription-http": {
+      "types": "./dist/modules/subscription/subscription.controller.d.ts",
+      "default": "./dist/modules/subscription/subscription.controller.js"
+    },
+    "./subscription-platform-http": {
+      "types": "./dist/modules/subscription/subscription-platform.controller.d.ts",
+      "default": "./dist/modules/subscription/subscription-platform.controller.js"
+    },
+    "./subscription-http-policy": {
+      "types": "./dist/modules/subscription/subscription-http-policy.d.ts",
+      "default": "./dist/modules/subscription/subscription-http-policy.js"
+    },
+    "./subscription-openapi": {
+      "types": "./dist/modules/subscription/subscription-openapi.d.ts",
+      "default": "./dist/modules/subscription/subscription-openapi.js"
+    },
+    "./secret-box": {
+      "types": "./dist/common/secret-box.d.ts",
+      "default": "./dist/common/secret-box.js"
+    },
+    "./outbound-url": {
+      "types": "./dist/common/outbound-url.d.ts",
+      "default": "./dist/common/outbound-url.js"
+    },
+    "./tenant-integration": {
+      "types": "./dist/modules/integrations/tenant-integration.service.d.ts",
+      "default": "./dist/modules/integrations/tenant-integration.service.js"
+    },
+    "./integration-store": {
+      "types": "./dist/modules/integrations/integration-store.d.ts",
+      "default": "./dist/modules/integrations/integration-store.js"
+    },
+    "./integration-dto": {
+      "types": "./dist/modules/integrations/tenant-integration-request.dto.d.ts",
+      "default": "./dist/modules/integrations/tenant-integration-request.dto.js"
+    },
+    "./integration-http": {
+      "types": "./dist/modules/integrations/tenant-integration.controller.d.ts",
+      "default": "./dist/modules/integrations/tenant-integration.controller.js"
+    },
+    "./integration-connectivity": {
+      "types": "./dist/modules/integrations/tenant-integration.connectivity.service.d.ts",
+      "default": "./dist/modules/integrations/tenant-integration.connectivity.service.js"
+    },
+    "./integration-probe": {
+      "types": "./dist/modules/integrations/integration-probe.d.ts",
+      "default": "./dist/modules/integrations/integration-probe.js"
+    },
+    "./integration-sms": {
+      "types": "./dist/modules/integrations/tenant-integration.runtime.service.d.ts",
+      "default": "./dist/modules/integrations/tenant-integration.runtime.service.js"
+    },
+    "./object-storage": {
+      "types": "./dist/modules/integrations/object-storage.provider.service.d.ts",
+      "default": "./dist/modules/integrations/object-storage.provider.service.js"
+    },
+    "./aliyun-oss-v4": {
+      "types": "./dist/modules/integrations/aliyun-oss-v4.d.ts",
+      "default": "./dist/modules/integrations/aliyun-oss-v4.js"
+    },
+    "./integration-http-policy": {
+      "types": "./dist/modules/integrations/integration-http-policy.d.ts",
+      "default": "./dist/modules/integrations/integration-http-policy.js"
+    },
+    "./integration-openapi": {
+      "types": "./dist/modules/integrations/integration-openapi.d.ts",
+      "default": "./dist/modules/integrations/integration-openapi.js"
+    },
+    "./official-calendar-source": {
+      "types": "./dist/modules/official-calendars/official-calendar-source.service.d.ts",
+      "default": "./dist/modules/official-calendars/official-calendar-source.service.js"
+    },
+    "./official-calendar-store": {
+      "types": "./dist/modules/official-calendars/official-calendar-store.d.ts",
+      "default": "./dist/modules/official-calendars/official-calendar-store.js"
+    },
+    "./official-calendar-dto": {
+      "types": "./dist/modules/official-calendars/official-calendar-request.dto.d.ts",
+      "default": "./dist/modules/official-calendars/official-calendar-request.dto.js"
+    },
+    "./official-calendar-http": {
+      "types": "./dist/modules/official-calendars/official-calendar-source.controller.d.ts",
+      "default": "./dist/modules/official-calendars/official-calendar-source.controller.js"
+    },
+    "./official-calendar-reader": {
+      "types": "./dist/modules/official-calendars/official-calendar-source-reader.d.ts",
+      "default": "./dist/modules/official-calendars/official-calendar-source-reader.js"
+    },
+    "./official-calendar-http-policy": {
+      "types": "./dist/modules/official-calendars/official-calendar-http-policy.d.ts",
+      "default": "./dist/modules/official-calendars/official-calendar-http-policy.js"
+    },
+    "./official-calendar-openapi": {
+      "types": "./dist/modules/official-calendars/official-calendar-openapi.d.ts",
+      "default": "./dist/modules/official-calendars/official-calendar-openapi.js"
+    },
+    "./management": {
+      "types": "./dist/modules/platform/platform-management.service.d.ts",
+      "default": "./dist/modules/platform/platform-management.service.js"
+    },
+    "./management-store": {
+      "types": "./dist/modules/platform/platform-management.store.d.ts",
+      "default": "./dist/modules/platform/platform-management.store.js"
+    },
+    "./management-http": {
+      "types": "./dist/modules/platform/platform-management.controller.d.ts",
+      "default": "./dist/modules/platform/platform-management.controller.js"
+    },
+    "./settings-http-policy": {
+      "types": "./dist/modules/platform/platform-settings-http-policy.d.ts",
+      "default": "./dist/modules/platform/platform-settings-http-policy.js"
+    },
+    "./settings-openapi": {
+      "types": "./dist/modules/platform/platform-settings-openapi.d.ts",
+      "default": "./dist/modules/platform/platform-settings-openapi.js"
+    },
+    "./tools": {
+      "types": "./dist/modules/platform-tools/index.d.ts",
+      "default": "./dist/modules/platform-tools/index.js"
+    },
+    "./tools-dto": {
+      "types": "./dist/modules/platform-tools/platform-tools.dto.d.ts",
+      "default": "./dist/modules/platform-tools/platform-tools.dto.js"
+    },
+    "./files": {
+      "types": "./dist/modules/files/index.d.ts",
+      "default": "./dist/modules/files/index.js"
+    },
+    "./file-integration-dependencies": {
+      "types": "./dist/modules/files/file-integration-dependencies.d.ts",
+      "default": "./dist/modules/files/file-integration-dependencies.js"
+    },
+    "./file-dto": {
+      "types": "./dist/modules/files/file-upload.dto.d.ts",
+      "default": "./dist/modules/files/file-upload.dto.js"
+    },
+    "./integration-wechat": {
+      "types": "./dist/modules/integrations/wechat-mini-program.adapter.d.ts",
+      "default": "./dist/modules/integrations/wechat-mini-program.adapter.js"
+    },
+    "./notifications": {
+      "types": "./dist/modules/notifications/index.d.ts",
+      "default": "./dist/modules/notifications/index.js"
+    },
+    "./jobs": {
+      "types": "./dist/modules/jobs/index.d.ts",
+      "default": "./dist/modules/jobs/index.js"
+    },
+    "./integration-email": {
+      "types": "./dist/modules/integrations/tenant-email.runtime.service.d.ts",
+      "default": "./dist/modules/integrations/tenant-email.runtime.service.js"
+    },
+    "./integration-smtp": {
+      "types": "./dist/modules/integrations/smtp-transport.d.ts",
+      "default": "./dist/modules/integrations/smtp-transport.js"
+    },
+    "./integration-imap": {
+      "types": "./dist/modules/integrations/imap-reader.d.ts",
+      "default": "./dist/modules/integrations/imap-reader.js"
+    },
+    "./integration-inbound-mail": {
+      "types": "./dist/modules/integrations/inbound-mail-codec.d.ts",
+      "default": "./dist/modules/integrations/inbound-mail-codec.js"
+    },
+    "./messaging": {
+      "types": "./dist/modules/messaging/index.d.ts",
+      "default": "./dist/modules/messaging/index.js"
+    },
+    "./member-invitation-authority": {
+      "types": "./dist/modules/platform/platform-member-invitation.authority.d.ts",
+      "default": "./dist/modules/platform/platform-member-invitation.authority.js"
+    },
+    "./integration-payment": {
+      "types": "./dist/modules/integrations/payment-provider-transport.d.ts",
+      "default": "./dist/modules/integrations/payment-provider-transport.js"
+    },
+    "./payment-webhook-rate-limit": {
+      "types": "./dist/modules/integrations/payment-webhook-rate-limit.d.ts",
+      "default": "./dist/modules/integrations/payment-webhook-rate-limit.js"
+    },
+    "./stripe-signature": {
+      "types": "./dist/modules/integrations/stripe-signature.d.ts",
+      "default": "./dist/modules/integrations/stripe-signature.js"
+    },
+    "./media": {
+      "types": "./dist/modules/media/index.d.ts",
+      "default": "./dist/modules/media/index.js"
+    },
+    "./ai-runtime": {
+      "types": "./dist/ai-runtime/index.d.ts",
+      "default": "./dist/ai-runtime/index.js"
+    },
+    "./ai-gateway": {
+      "types": "./dist/ai-gateway/index.d.ts",
+      "default": "./dist/ai-gateway/index.js"
+    },
+    "./demo-requests": {
+      "types": "./dist/modules/demo-requests/index.d.ts",
+      "default": "./dist/modules/demo-requests/index.js"
+    },
+    "./public-rate-limit": {
+      "types": "./dist/modules/public-rate-limit/index.d.ts",
+      "default": "./dist/modules/public-rate-limit/index.js"
+    }
+  },
+  "scripts": {
+    "prebuild": "npm run build -w @rental-os/platform-contracts",
+    "build": "tsc -p tsconfig.json",
+    "prelint": "npm run build -w @rental-os/platform-contracts",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@rental-os/platform-contracts": "0.1.0",
+    "@nestjs/common": "^10.4.15",
+    "@nestjs/config": "^3.3.0",
+    "@nestjs/core": "^10.4.15",
+    "class-validator": "^0.14.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "@prisma/client": "^5.22.0",
+    "class-transformer": "^0.5.1",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0"
+  },
+  "typesVersions": {
+    "*": {
+      "prisma-runtime": [
+        "dist/prisma-runtime.d.ts"
+      ],
+      "password": [
+        "dist/common/password.d.ts"
+      ],
+      "request-id": [
+        "dist/common/request-id.interceptor.d.ts"
+      ],
+      "request-identity": [
+        "dist/common/request-identity.d.ts"
+      ],
+      "request-path": [
+        "dist/common/request-path.d.ts"
+      ],
+      "auth-session": [
+        "dist/modules/auth/auth-session.service.d.ts"
+      ],
+      "auth-http": [
+        "dist/modules/auth/auth-session.controller.d.ts"
+      ],
+      "auth-dto": [
+        "dist/modules/auth/auth-session.dto.d.ts"
+      ],
+      "auth": [
+        "dist/modules/auth/platform-auth.service.d.ts"
+      ],
+      "identity": [
+        "dist/modules/platform/platform-identity.repository.d.ts"
+      ],
+      "principal": [
+        "dist/modules/platform/platform-principal.authority.d.ts"
+      ],
+      "management-dto": [
+        "dist/modules/platform/platform-management.dto.d.ts"
+      ],
+      "authentication": [
+        "dist/modules/platform/platform-authentication.source.d.ts"
+      ],
+      "security": [
+        "dist/modules/platform/platform-security-baseline.d.ts"
+      ],
+      "auth-store": [
+        "dist/modules/platform/platform-auth-data-store.d.ts"
+      ],
+      "appearance-store": [
+        "dist/modules/platform/platform-appearance-data-store.d.ts"
+      ],
+      "tenant-appearance": [
+        "dist/modules/client/tenant-appearance-profile.service.d.ts"
+      ],
+      "tenant-appearance-http": [
+        "dist/modules/client/tenant-appearance-profile.controller.d.ts"
+      ],
+      "tenant-appearance-dto": [
+        "dist/modules/client/tenant-appearance-profile.dto.d.ts"
+      ],
+      "account-appearance": [
+        "dist/modules/client/account-appearance.service.d.ts"
+      ],
+      "account-appearance-http": [
+        "dist/modules/client/account-appearance.controller.d.ts"
+      ],
+      "account-appearance-dto": [
+        "dist/modules/client/account-appearance.dto.d.ts"
+      ],
+      "subscription-state": [
+        "dist/modules/subscription/subscription-state.d.ts"
+      ],
+      "subscription-term": [
+        "dist/modules/subscription/subscription-term.d.ts"
+      ],
+      "subscription-reader": [
+        "dist/modules/subscription/subscription-reader.d.ts"
+      ],
+      "notification-delivery": [
+        "dist/common/notification-delivery.d.ts"
+      ],
+      "organization-location-scope": [
+        "dist/common/organization-location-scope.d.ts"
+      ],
+      "operation-log": [
+        "dist/common/operation-log.service.d.ts"
+      ],
+      "permission-match": [
+        "dist/permission-match.d.ts"
+      ],
+      "subscription": [
+        "dist/modules/subscription/subscription.service.d.ts"
+      ],
+      "subscription-store": [
+        "dist/modules/subscription/subscription-store.d.ts"
+      ],
+      "subscription-dto": [
+        "dist/modules/subscription/subscription-request.dto.d.ts"
+      ],
+      "subscription-http": [
+        "dist/modules/subscription/subscription.controller.d.ts"
+      ],
+      "subscription-platform-http": [
+        "dist/modules/subscription/subscription-platform.controller.d.ts"
+      ],
+      "subscription-http-policy": [
+        "dist/modules/subscription/subscription-http-policy.d.ts"
+      ],
+      "subscription-openapi": [
+        "dist/modules/subscription/subscription-openapi.d.ts"
+      ],
+      "secret-box": [
+        "dist/common/secret-box.d.ts"
+      ],
+      "outbound-url": [
+        "dist/common/outbound-url.d.ts"
+      ],
+      "tenant-integration": [
+        "dist/modules/integrations/tenant-integration.service.d.ts"
+      ],
+      "integration-store": [
+        "dist/modules/integrations/integration-store.d.ts"
+      ],
+      "integration-dto": [
+        "dist/modules/integrations/tenant-integration-request.dto.d.ts"
+      ],
+      "integration-http": [
+        "dist/modules/integrations/tenant-integration.controller.d.ts"
+      ],
+      "integration-connectivity": [
+        "dist/modules/integrations/tenant-integration.connectivity.service.d.ts"
+      ],
+      "integration-probe": [
+        "dist/modules/integrations/integration-probe.d.ts"
+      ],
+      "integration-sms": [
+        "dist/modules/integrations/tenant-integration.runtime.service.d.ts"
+      ],
+      "object-storage": [
+        "dist/modules/integrations/object-storage.provider.service.d.ts"
+      ],
+      "aliyun-oss-v4": [
+        "dist/modules/integrations/aliyun-oss-v4.d.ts"
+      ],
+      "integration-http-policy": [
+        "dist/modules/integrations/integration-http-policy.d.ts"
+      ],
+      "integration-openapi": [
+        "dist/modules/integrations/integration-openapi.d.ts"
+      ],
+      "official-calendar-source": [
+        "dist/modules/official-calendars/official-calendar-source.service.d.ts"
+      ],
+      "official-calendar-store": [
+        "dist/modules/official-calendars/official-calendar-store.d.ts"
+      ],
+      "official-calendar-dto": [
+        "dist/modules/official-calendars/official-calendar-request.dto.d.ts"
+      ],
+      "official-calendar-http": [
+        "dist/modules/official-calendars/official-calendar-source.controller.d.ts"
+      ],
+      "official-calendar-reader": [
+        "dist/modules/official-calendars/official-calendar-source-reader.d.ts"
+      ],
+      "official-calendar-http-policy": [
+        "dist/modules/official-calendars/official-calendar-http-policy.d.ts"
+      ],
+      "official-calendar-openapi": [
+        "dist/modules/official-calendars/official-calendar-openapi.d.ts"
+      ],
+      "management": [
+        "dist/modules/platform/platform-management.service.d.ts"
+      ],
+      "management-store": [
+        "dist/modules/platform/platform-management.store.d.ts"
+      ],
+      "management-http": [
+        "dist/modules/platform/platform-management.controller.d.ts"
+      ],
+      "settings-http-policy": [
+        "dist/modules/platform/platform-settings-http-policy.d.ts"
+      ],
+      "settings-openapi": [
+        "dist/modules/platform/platform-settings-openapi.d.ts"
+      ],
+      "tools": [
+        "dist/modules/platform-tools/index.d.ts"
+      ],
+      "tools-dto": [
+        "dist/modules/platform-tools/platform-tools.dto.d.ts"
+      ],
+      "files": [
+        "dist/modules/files/index.d.ts"
+      ],
+      "file-integration-dependencies": [
+        "dist/modules/files/file-integration-dependencies.d.ts"
+      ],
+      "file-dto": [
+        "dist/modules/files/file-upload.dto.d.ts"
+      ],
+      "integration-wechat": [
+        "dist/modules/integrations/wechat-mini-program.adapter.d.ts"
+      ],
+      "notifications": [
+        "dist/modules/notifications/index.d.ts"
+      ],
+      "jobs": [
+        "dist/modules/jobs/index.d.ts"
+      ],
+      "integration-email": [
+        "dist/modules/integrations/tenant-email.runtime.service.d.ts"
+      ],
+      "integration-smtp": [
+        "dist/modules/integrations/smtp-transport.d.ts"
+      ],
+      "integration-imap": [
+        "dist/modules/integrations/imap-reader.d.ts"
+      ],
+      "integration-inbound-mail": [
+        "dist/modules/integrations/inbound-mail-codec.d.ts"
+      ],
+      "messaging": [
+        "dist/modules/messaging/index.d.ts"
+      ],
+      "member-invitation-authority": [
+        "dist/modules/platform/platform-member-invitation.authority.d.ts"
+      ],
+      "integration-payment": [
+        "./dist/modules/integrations/payment-provider-transport.d.ts"
+      ],
+      "payment-webhook-rate-limit": [
+        "./dist/modules/integrations/payment-webhook-rate-limit.d.ts"
+      ],
+      "stripe-signature": [
+        "./dist/modules/integrations/stripe-signature.d.ts"
+      ],
+      "media": [
+        "./dist/modules/media/index.d.ts"
+      ],
+      "ai-runtime": [
+        "dist/ai-runtime/index.d.ts"
+      ],
+      "ai-gateway": [
+        "dist/ai-gateway/index.d.ts"
+      ],
+      "demo-requests": [
+        "./dist/modules/demo-requests/index.d.ts"
+      ],
+      "public-rate-limit": [
+        "./dist/modules/public-rate-limit/index.d.ts"
+      ]
+    }
+  }
+}

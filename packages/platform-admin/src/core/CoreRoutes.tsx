@@ -1,0 +1,110 @@
+/** 已登记Core路由消费原会话、真实范围与就绪；沿原Router和页头运行，不重建后台外壳。 */
+import { useSyncExternalStore, type ComponentType, type ReactNode } from "react";
+import { Navigate, Route, useLocation, useNavigate, useParams } from "react-router-dom";
+import { corePageKey, corePageText, resolveCorePageLocation, type CoreRegisteredPage, type CoreScopeReference } from "@rental-os/core-contracts";
+import { useLocale } from "../app/locale";
+import { useAdminRuntime } from "../runtime";
+import { PageHeading } from "../components/PageHeading";
+import { QueryState } from "../components/QueryState";
+import { Alert, Result } from "../components/ui";
+import { CorePageHostProvider } from "./CorePage";
+import { useCoreSession } from "./useCoreSession";
+import { useCoreScope } from "./useCoreScope";
+
+export interface CoreRouteOptions {
+  brandName: string;
+  /** 可信宿主保留旧地址；只重定向到同一注册表，再经过原 Core 授权与范围检查。 */
+  aliases?: readonly CoreRouteAlias[];
+  /** 原宿主按当前Core业务上下文提供；租户范围Core可以省略，不补Rental空间默认值。 */
+  containers?: Readonly<Record<string, CoreScopeReference["container"]>>;
+  /** 动态业务容器来自当前宿主投影，通过同一 Runtime 订阅通知，优先于固定 containers。 */
+  getContainer?: (coreId: string, pageId: string) => CoreScopeReference["container"];
+  getPageIcon?: (coreId: string, pageId: string) => ReactNode;
+}
+export interface CoreRouteAlias { path: string; coreId: string; pageId: string }
+export type CoreRouteComponent = ComponentType<{ routeParams?: Readonly<Record<string, string>> }>;
+type Pages = ReadonlyMap<string, CoreRegisteredPage<CoreRouteComponent>>;
+
+/** 在原Routes内部展开登记页面，使用Core键固定全局路由ID，避免Data Router合并时与宿主自动ID冲突。
+ * 注册表由受控组合创建，身份/容器变化时重新取当前参数。 */
+export function createCoreRouteElements(pages: Pages, options: CoreRouteOptions) {
+  const routes = [...pages.values()].map(page => <Route key={page.key} id={`core:${page.key}`} path={page.path}
+    element={<RegisteredCoreRoute page={page} pages={pages} options={options} />} />);
+  for (const alias of options.aliases ?? []) {
+    const page = pages.get(corePageKey(alias.coreId, alias.pageId));
+    if (!page) throw new Error("旧地址对应的 Core 页面未登记");
+    routes.push(<Route key={`alias:${alias.path}`} id={`core-alias:${alias.path}`} path={alias.path}
+      element={<CoreAliasRoute page={page} pages={pages} />} />);
+  }
+  return routes;
+}
+
+function CoreAliasRoute({ page, pages }: { page: CoreRegisteredPage<CoreRouteComponent>; pages: Pages }) {
+  const matched = useParams(), location = useLocation();
+  // 原 members/:id 等历史入口指向列表，仅传目标真正声明的参数。
+  const params = Object.fromEntries([...page.path.matchAll(/:([a-z][a-zA-Z0-9]*)/g)]
+    .map(match => [match[1], matched[match[1]]])) as Record<string, string>;
+  const path = resolveCorePageLocation(pages, { coreId: page.coreId, pageId: page.definition.id, params });
+  return <Navigate to={`${path}${location.search}${location.hash}`} state={location.state} replace />;
+}
+
+function RegisteredCoreRoute({ page, pages, options }: { page: CoreRegisteredPage<CoreRouteComponent>; pages: Pages; options: CoreRouteOptions }) {
+  const { currentSessionEpoch, subscribe } = useAdminRuntime();
+  // Getter 可以返回新对象；订阅其稳定值，避免新引用循环，也不捕获创建 Router 时的旧容器。
+  const readContainer = () => JSON.stringify(options.getContainer
+    ? options.getContainer(page.coreId, page.definition.id) : options.containers?.[page.coreId]);
+  const containerSnapshot = useSyncExternalStore(subscribe, readContainer, readContainer);
+  const container: CoreScopeReference["container"] = containerSnapshot ? JSON.parse(containerSnapshot) : undefined;
+  const session = useCoreSession(), { locale } = useLocale();
+  const permitted = session.canAccess(page.coreId, page.definition.permissions);
+  const admission = session.data?.cores.find(entry => entry.core.id === page.coreId)?.admission;
+  let unavailableTitle = locale === "en-US" ? "This Core page is unavailable" : "当前Core页面不可用";
+  let unavailableDescription = locale === "en-US" ? "Ask your tenant administrator to check Core assignment and page access." : "请联系租户管理员核对Core分配及页面权限。";
+  if (admission?.state === "stopped") {
+    unavailableTitle = locale === "en-US" ? "New business is paused for this Core" : "该Core已暂停新业务";
+    unavailableDescription = locale === "en-US" ? "Your SaaS administrator manages deployment admission. Existing Core assignments and bindings are retained." : "部署准入由SaaS管理员管理，原Core分配与绑定保留。";
+  } else if (admission?.state === "unknown") {
+    unavailableTitle = locale === "en-US" ? "Core deployment admission is unavailable" : "无法确认Core部署准入";
+    unavailableDescription = admission.reason;
+  }
+  return <QueryState loading={session.isPending} error={session.error} onRetry={session.refetch}>
+    {permitted && session.data
+      ? <ScopedCoreRoute key={JSON.stringify([currentSessionEpoch(), page.key, containerSnapshot, admission])}
+        page={page} pages={pages} options={options} container={container} context={session.data} canAccess={session.canAccess} />
+      : <><PageHeading title={corePageText(page.definition.title, locale)} brandName={options.brandName} />
+        <Result status={admission?.state === "stopped" || admission?.state === "unknown" ? "warning" : "403"}
+          title={unavailableTitle} subTitle={unavailableDescription} /></>}
+  </QueryState>;
+}
+
+function ScopedCoreRoute({ page, pages, options, container, context, canAccess }: {
+  page: CoreRegisteredPage<CoreRouteComponent>; pages: Pages; options: CoreRouteOptions;
+  container: CoreScopeReference["container"];
+  context: NonNullable<ReturnType<typeof useCoreSession>["data"]>; canAccess: ReturnType<typeof useCoreSession>["canAccess"];
+}) {
+  const { currentSessionEpoch } = useAdminRuntime();
+  const scope = useCoreScope(page.coreId, container);
+  const navigate = useNavigate(), matched = useParams(), { locale } = useLocale();
+  const params = Object.fromEntries([...page.path.matchAll(/:([a-z][a-zA-Z0-9]*)/g)]
+    .map(match => [match[1], matched[match[1]]])) as Record<string, string>;
+  // 只把原Router当前已匹配的登记参数交给Core；缺参数在渲染业务前明确拒绝。
+  resolveCorePageLocation(pages, { coreId: page.coreId, pageId: page.definition.id, params });
+  const granted = context.cores.find(entry => entry.core.id === page.coreId)!;
+  const binding = scope.data?.status === "bound" ? scope.data.binding : undefined;
+  const lifetimeKey = JSON.stringify([currentSessionEpoch(), context.tenantId, context.subjectId, page.coreId,
+    granted.grant.revision, granted.assignment.revision, granted.admission, granted.permissions, params, binding?.bindingId, binding?.revision]);
+  const Page = page.definition.component;
+  const configuration = page.definition.purpose === "configuration";
+  let content: ReactNode;
+  if (scope.data && (scope.ready || configuration)) content = <CorePageHostProvider host={{ page, pages, brandName: options.brandName,
+    lifetimeKey, params, binding, icon: options.getPageIcon?.(page.coreId, page.definition.id), canAccess: (coreId, permissions) => canAccess(coreId, permissions)
+      && (coreId !== page.coreId || scope.isCurrent() && (scope.ready || configuration)), navigate }}><Page routeParams={params} /></CorePageHostProvider>;
+  else content = <><PageHeading title={corePageText(page.definition.title, locale)} brandName={options.brandName} />
+    {scope.data?.status === "bound" && scope.data.readiness.status === "configuration_required"
+      ? <Alert type="warning" title={locale === "en-US" ? "Core configuration is incomplete" : "Core配置尚未完成"}
+        description={<ul>{scope.data.readiness.missing.map(item => <li key={item.code}>{item.message}</li>)}</ul>} />
+      : <Result status="warning" title={locale === "en-US" ? "This Core is not ready" : "Core尚未就绪"}
+        subTitle={scope.data?.status === "bound" && scope.data.readiness.status === "unavailable" ? scope.data.readiness.message
+          : locale === "en-US" ? "Ask your tenant administrator to complete Core setup." : "请联系租户管理员完成Core配置。"} />}</>;
+  return <QueryState loading={scope.isPending} error={scope.error} onRetry={scope.refetch}>{content}</QueryState>;
+}

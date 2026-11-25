@@ -1,17 +1,9 @@
-/** Independent enterprise application; original UIArc adapters retain their source.
- * No operator application, credentials or business APIs are mounted here. */
-import "antd/dist/reset.css";
-import "@/registry/foundation.css";
-import "@/styles.css";
-import "@/components/ui/arc-bridge.css";
-import "@/components/ui/input-radius.css";
-import "@/components/ui/input-colors.css";
-import "@/components/ui/control-metrics.css";
-import "@/components/ui/status-colors.css";
+/** 企业门户浏览器入口，加载公共呈现与门户样式后采用原邀请和动效设置。 */
+import "@rental-os/platform-admin/styles";
 import "./styles.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { applyMotionPreference, isMotionReduced } from "@/app/motionPreferences";
+import { applyMotionPreference, isMotionReduced } from "@rental-os/platform-admin/motion";
 import { MotionGlobalConfig } from "motion/react";
 import { App } from "./App";
 import { captureEnterpriseInvite } from "@rental-os/web-client";

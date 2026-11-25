@@ -1,0 +1,2309 @@
+import { composeOpeningCalendarDraftSave } from './opening-calendar-draft.composition';
+import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
+import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
+import { captureRentalInternalAuthority } from '@rental-os/rental-core/application-internal-authority';
+import { AiTaskRepositoryError } from '../ai-task.repository';
+import type { AiTaskCredentialSource } from '../task-current-action.authority';
+import { PrismaQuoteSelectionRepository, type HumanQuoteSelectionDependencies } from '../task-request/prisma-quote-selection.repository';
+import { composeAiOriginalScenes, type AiOriginalSceneDependencies } from './original-scenes.composition';
+import { composeHumanQuoteOrder, composeSelectedQuoteTaskApplication, type SelectedQuoteTaskConfiguration, type HumanQuoteOrderDependencies } from './human-quote-order.composition';
+import { composeAiOriginalSceneModel, composeOriginalSceneClarificationSource, createOriginalScenePendingInputSource,
+  type AiOriginalSceneModelDependencies, type AiOriginalSceneRunDependencies,
+  type OriginalSceneInputWaitMode } from './original-scene-model.composition';
+import { prepareOriginalInputContinuation, type OriginalInputContinuationConfiguration } from '../task-input-admission.composition';
+import { prepareOriginalQuoteApprovalAdmission, prepareTaskCenterQuoteApprovalAdmission,
+  type OriginalQuoteApprovalAdmissionConfiguration, type TaskCenterQuoteApprovalIntent } from '../task-approval-admission.composition';
+import { prepareOriginalSettingsApprovalAdmission, prepareTaskCenterSettingsApprovalAdmission,
+  type OriginalSettingsApprovalAdmissionConfiguration } from '../approval-execution/settings-approval-admission.composition';
+import { prepareOriginalSettingsStartAdmission,
+  type OriginalSettingsStartAdmissionConfiguration } from '../approval-execution/settings-start-admission.composition';
+import type { TaskInputAdmissionIntent } from '../task-input-admission.application';
+import { waitForTaskApplicationDependency, type AiTaskApplicationHost } from '../runner/prisma-task-application';
+import { composeFormalApprovedOrderReprepareServices, type FormalApprovedOrderReprepareConfiguration } from '../approval-execution/formal-approved-order-reprepare.composition';
+import { composeSelectedQuoteStockReview } from './selected-quote-stock-review';
+import { composeQuoteRequestReissue, type QuoteRequestReissueConfiguration } from './quote-reissue.composition';
+import { composeClarifiedQuoteSelectionPreparation } from './clarified-quote-selection-preparation';
+import { composePersistedTaskCenter } from '../task-center.composition';
+import { composeAiTaskCenterScene, readSettingsTaskCenterScene } from '../task-center-scene.composition';
+import { composePersistedTaskAuthorization } from '../task-authorization.composition';
+import { composeOriginalOrderAnswerReader } from '../model-input/original-order-answer.reader';
+import { AiOriginalSceneRecoveryService } from './original-scene-recovery.service';
+import { composeTaskSettingsHost, type AiSettingsTask } from '../runner/settings-task-host.composition';
+import { composeApprovedSettingsApplication } from '../approval-execution/approved-settings-application.composition';
+import { aiTaskRunPlanSchema } from '../runner/prisma-task-run-evidence.repository';
+import { settingsChangeReferenceSchema } from '@rental-os/rental-core/approved-settings-validation';
+import { prepareSettingsChangeSchema } from '@rental-os/rental-core/approved-settings-validation';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
+import { projectOrderExplanationMaterial, projectOrderExplanationMaterialV2,
+  assertOrderPublicationV2Available } from '../tools/order-explanation-renderer';
+import { ApprovedSettingsRouteAuthority } from '@rental-os/rental-core/approved-settings-route-authority';
+import { AiTaskCreationRepository } from '../ai-task-creation.repository';
+import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
+import { AiScopeRepository } from '../ai-scope.repository';
+import { PrismaSubscriptionBudgetReader } from '../budget/prisma-subscription-budget-reader';
+import { aiPersistedPlanToolsSchema } from '../runner/prisma-task-plan-input.source';
+import { aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
+import { composeAiSettingsBusinessConsumer } from './settings-business-consumer.composition';
+import { ApprovedSettingsTaskAuthority, type ApprovedSettingsApplicationDependencies } from '../approval-execution/approved-settings-task.authority';
+import { composeSettingsReconfirmation, settingsReconfirmationOriginalSchema } from './settings-reconfirmation.composition';
+import { originalRequestReferenceSchema, freezeOriginalInput } from '../task-request/original-request.validation';
+import { originalIdentityHash, AiCurrentOriginalRequestAuthority } from '../task-request/original-request.authority';
+import { PrismaOriginalRequestRepository } from '../task-request/prisma-original-request.repository';
+import { AiBusinessReadRouteAuthority } from '../business-read-route.authority';
+import { composePersistedTaskCallGateway, composePersistedTaskGateway, composePersistedTaskAccountingRecovery,
+  type PersistedTaskCallGatewayDependencies, type PersistedTaskGatewayDependencies } from '../task-model-gateway.composition';
+import { BudgetError } from '../budget/budget.ports';
+import { presentTaskBudgetUsageRecord } from '../budget/task-budget-usage.reader';
+import { AiTaskRunnerError, callAiTaskRunnerDependency, inheritAiTaskHeldPreparation } from '@rental-os/platform-server/ai-runtime';
+import type { AiTaskInputSource } from '../task-input/task-input.ports';
+import { parseQuoteSelection, parseClarifiedQuoteSelection, validateQuoteSelectionHttpRequest } from '../task-request/quote-selection.validation';
+import { composeTaskActionPolicyManagement } from '../task-action-policy-management.composition';
+import { taskActionPolicyOperations, type AiTaskActionPolicyMutation } from '../prisma-task-action-policy.repository';
+import { PrismaTaskTakeoverRepository } from '../runner/prisma-task-takeover.repository';
+import { AiTaskTransitionRepository } from '../ai-task-transition.repository';
+import { PrismaTaskPlanPolicyRepository } from '../runner/prisma-task-plan-policy.repository';
+import { PrismaTaskRecoverySnapshotRepository } from '../runner/prisma-task-recovery-snapshot.repository';
+import { AI_TASK_RECOVERY_READ_VERSION, AI_APPROVED_SETTINGS_TOOL_CODE, AI_TOOL_DRAFT_VERSION,
+  isAiTaskInputSubmissionDraft, type AiSceneModelRecoverySnapshotReadResponse, type AiOriginalTaskAccountingResponseDraft,
+  type AiOriginalTaskAccountingOperationResponseDraft } from '@rental-os/shared';
+import { PrismaTaskInputRepository, readTaskModelRunOrigin, taskInputReceiptReferenceSchema } from '../task-input/prisma-task-input.repository';
+import { AiOriginalSceneResultService } from './original-scene-result.service';
+import { WorkbenchModelControlRepository } from '../workbench-model-control.repository';
+import { composeOriginalSceneKnowledge, type AiOriginalSceneKnowledgeOptions } from './original-scene-knowledge';
+import { gatewayTextIntentBindingSchema } from '../gateway-intent';
+import { composePersistedReadonlyBusinessTaskHost } from '../runner/persisted-catalog-runner.composition';
+import { composeProfileWorkflow } from './profile-workflow.composition';
+import { composeOpeningProposalWorkflow } from './opening-proposal-workflow.composition';
+import { composeOpeningRuleDraftSave } from './opening-rule-draft.composition';
+import type { ApprovedProfileApplicationDependencies } from '../approval-execution/approved-profile-task.authority';
+import { snapshotTaskCenterRecoveryFence, type TaskCenterRecoveryFence } from '../task-center-recovery-target.reader';
+import { bindOriginalSettingsRead } from './settings-original-read.authority';
+import { withOriginalSceneTaskTransactions } from './original-scene-transactions';
+import { createTenantModelConfigurationTransactions } from '../tenant-model-config-transactions';
+
+export type AiSceneHttpRequest = { headers: { authorization?: unknown } };
+export type AiSceneRequestOptions = { enabled: boolean; audience: 'operator' | 'staff' };
+export type AiOriginalTaskActionPolicyOptions = AiSceneRequestOptions & {
+  /** Explicit server configuration. No client permission lists or automatic
+   * action-policy creation. The current owner must also pass config Guard. */
+  templates: readonly (Pick<AiTaskActionPolicyMutation, 'operation' | 'requiredPermissions'> & { sceneCode?: string })[];
+  ttlMs: number;
+};
+export type AiScenePlanPolicyConfiguration = AiSceneRequestOptions & {
+  scenes: readonly { scene: { code: string; version: string };
+    tools: NonNullable<ConstructorParameters<typeof PrismaTaskPlanPolicyRepository>[1]['tools']> }[];
+};
+export type RequestBoundOriginalSceneDependencies = Omit<AiOriginalSceneDependencies, 'credentials'>;
+export type RequestBoundOriginalSceneModelDependencies = Omit<AiOriginalSceneModelDependencies, 'credentials'>;
+export type AiSettingsTaskRequestOptions = AiSceneRequestOptions & { host: AiTaskApplicationHost; task: AiSettingsTask };
+/** Original business change preparation, before any Task exists. */
+export function composeRequestBoundSettingsChanges(
+  dependencies: Omit<ApprovedSettingsApplicationDependencies, 'credentials'>, options: AiSceneRequestOptions) {
+  if (options.audience !== 'operator') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+  const call = bindRequests(dependencies, options, composeApprovedSettingsApplication);
+  const reconfirmation = composeRequestBoundSettingsReconfirmation(dependencies, options);
+  const read = prepareSettingsChangeSchema.pick({ changeKey: true });
+  return Object.freeze({
+    readCurrent: (request: AiSceneHttpRequest) => call(request, {}, app => app.readCurrent(), { write: false }),
+    prepare: (request: AiSceneHttpRequest, value: unknown) => {
+      const parsed = prepareSettingsChangeSchema.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return call(request, freezeOriginalInput(parsed.data), async (app, command) => {
+        const change = await app.prepareChange(command);
+        return freezeOriginalInput({ change, task: 'not_created' as const, approval: 'not_granted' as const,
+          activeSettings: 'not_modified' as const });
+      }, { write: true });
+    },
+    readReceipt: (request: AiSceneHttpRequest, value: unknown) => {
+      const parsed = read.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return call(request, freezeOriginalInput(parsed.data), (app, command) => app.readChangeReceipt(command), { write: false });
+    },
+    readUpdatedDifference: reconfirmation.readUpdatedDifference,
+    prepareReconfirmedChange: reconfirmation.prepareReconfirmedChange,
+    readReconfirmedChange: reconfirmation.readReconfirmedChange
+  });
+}
+export type AiSceneModelRequestOptions = AiSceneRequestOptions & {
+  host: AiTaskApplicationHost;
+  runServices: (dependencies: AiOriginalSceneModelDependencies) => AiOriginalSceneRunDependencies;
+  /** Server-only business assembly. Never copied from a request body. */
+  quoteTask?: { dependencies: RequestBoundQuoteOrderDependencies; configuration: SelectedQuoteTaskConfiguration };
+  /** Server-only settings task assembly. It is never derived from a model or request body. */
+  settingsTask?: { dependencies: Omit<ApprovedSettingsApplicationDependencies, 'credentials'>;
+    configuration: { host: AiTaskApplicationHost; task: AiSettingsTask } };
+};
+export type RequestBoundQuoteSelectionDependencies = RequestBoundOriginalSceneDependencies & Omit<HumanQuoteSelectionDependencies, 'credentials' | 'originals'>;
+export type RequestBoundQuoteOrderDependencies = RequestBoundOriginalSceneDependencies & Omit<HumanQuoteOrderDependencies, 'credentials' | 'originals'>;
+const optionsSchema = z.object({ enabled: z.literal(true), audience: z.enum(['operator', 'staff']) }).strict();
+const bearerSchema = z.string().min(1).max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u);
+
+/** Resolve the existing snapshot only from an authorized original reference.
+ * This is not a run claim or business receipt. Keep its persisted cursor intact. */
+async function readOriginalTaskSnapshot(scenes: Pick<ReturnType<typeof composeAiOriginalScenes>, 'requests' | 'readTaskReceipt'>,
+  events: ReturnType<typeof composePersistedTaskCenter>['events'], value: unknown) {
+  const parsed = originalRequestReferenceSchema.safeParse(structuredClone(value));
+  if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+  const reference = freezeOriginalInput(parsed.data);
+  const original = await scenes.requests.readHistorical(reference);
+  const task = await scenes.readTaskReceipt(reference.inputRef);
+  if (task.state !== 'observed' || original.receipt.state === 'revoked') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  const snapshot = structuredClone(await events.readSnapshot({ taskId: task.taskId }));
+  const after = await scenes.requests.readHistorical(reference);
+  const latest = await scenes.readTaskReceipt(reference.inputRef);
+  if (after.receipt.state === 'revoked' || originalIdentityHash(original.context) !== originalIdentityHash(after.context)
+    || original.receipt.contentHash !== after.receipt.contentHash || latest.state !== 'observed'
+    || latest.taskId !== task.taskId || latest.runId !== task.runId || latest.revision !== task.revision
+    || snapshot.taskId !== task.taskId || snapshot.revision !== task.revision) {
+    throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+  }
+  return freezeOriginalInput(snapshot);
+}
+
+function bindRequests<D extends object, A>(dependencies: D, options: AiSceneRequestOptions,
+  compose: (input: D & { credentials: AiTaskCredentialSource }, command: unknown) => A | Promise<A>,
+  defaultLifetime?: { write: boolean },
+  transactionAuthority?: <R>(input: D & { credentials: AiTaskCredentialSource }, command: unknown, consume: () => Promise<R>,
+    purpose: 'new_work' | 'original_recovery') => Promise<R>) {
+  const parsed = optionsSchema.safeParse(options);
+  if (!parsed.success || 'credentials' in dependencies || 'originals' in dependencies) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  const server = { ...dependencies }, { audience } = parsed.data;
+  return async <R>(request: AiSceneHttpRequest, value: unknown, consume: (app: A, command: unknown) => Promise<R>,
+    lifetime: { write: boolean; signal?: AbortSignal; preflightOnly?: true; originalRecovery?: true } | undefined = defaultLifetime): Promise<R> => {
+    const header = bearerSchema.safeParse(request?.headers?.authorization);
+    if (!header.success) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    const command = structuredClone(value), credential = Object.freeze({ authorization: header.data, audience, requestId: randomUUID() });
+    let active = true;
+    const close = () => { active = false; };
+    // A request that already arrived aborted still delivers its explicit
+    // submission to the application: the application's own abort checks own the
+    // not-started outcomes (a durable answer receipt with a suppressed
+    // continuation, a plain not_started, or an idempotent original-request
+    // write that replays its persisted receipt). Keep its dependency bound:
+    // a disconnected host still cannot wait forever or retain credentials
+    // indefinitely. Only the wait ignores the already-aborted signal; the
+    // application receives that original signal and must suppress execution.
+    // A timeout is still unknown for writes, never proof of rollback.
+    const deadOnArrival = Boolean(lifetime?.signal?.aborted);
+    const waitSignal = deadOnArrival ? undefined : lifetime?.signal;
+    if (!deadOnArrival) lifetime?.signal?.addEventListener('abort', close, { once: true });
+    try {
+      const selected = captureRentalInternalAuthority();
+      const invoke = async () => {
+        const input = { ...server, credentials: {
+          current: async () => {
+            if (!active) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+            return { ...credential };
+          }
+        } };
+        const execute = async () => {
+          const assemble = () => Promise.resolve(compose(input, command));
+          // Original execution preflight is read-only. Bound identity/material
+          // resolution without imposing this five-second limit on a valid run.
+          // Abort revokes request-local credentials before any late consume.
+          const app = !deadOnArrival && lifetime?.preflightOnly
+            ? await waitForTaskApplicationDependency(assemble, false, waitSignal) : await assemble();
+          if (!active) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+          return consume(app, command);
+        };
+        return transactionAuthority && lifetime?.write ? transactionAuthority(input, command, execute,
+          lifetime.originalRecovery ? 'original_recovery' : 'new_work') : execute();
+      };
+      // 已选宿主持有原 HTTP Guard 的真实 store；不要清空它再拿投影填回。
+      // 下层每个实际业务动作仍执行自己的隔离 Guard，并仅由 runVerified 返回
+      // 同一原 store。旧宿主没有这个请求权威，继续使用原空 ALS 隔离。
+      const operation = () => selected ? invoke() : runWithRequestIdentity({}, invoke);
+      // Short observations/mutations, including accounting, bound the whole
+      // request. Execution bounds only preflight here and retains the runner's
+      // own limits after that. An abandoned wait
+      // revokes these credentials, never proves an original write rolled back.
+      // An already-aborted execution cannot enter a long-running runner:
+      // bound the whole not-started/receipt path, including its consumer.
+      return lifetime && (deadOnArrival || !lifetime.preflightOnly)
+        ? await waitForTaskApplicationDependency(operation, lifetime.write, waitSignal) : await operation();
+    } finally {
+      active = false;
+      if (!deadOnArrival) lifetime?.signal?.removeEventListener('abort', close);
+    }
+  };
+}
+
+function originalSceneTransactionAuthority<R>(input: AiOriginalSceneDependencies, command: unknown, consume: () => Promise<R>,
+  purpose: 'new_work' | 'original_recovery') {
+  const reference = command && typeof command === 'object' && 'original' in command ? command.original : command;
+  return withOriginalSceneTaskTransactions(input, reference, consume, purpose === 'original_recovery' ? 'original_recovery' : 'task');
+}
+
+/** Request-scoped ordinary-name workflow. This exports a server assembly only;
+ * it does not register an HTTP route, model tool, policy, permission or provider. */
+export function composeRequestBoundProfileWorkflow(
+  dependencies: Omit<ApprovedProfileApplicationDependencies, 'credentials'>,
+  options: AiSceneRequestOptions & { host: AiTaskApplicationHost; taskPolicyConfiguration?: { executionEnabled: boolean; ttlMs: number } }) {
+  if (options.audience !== 'operator') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+  const host = Object.freeze(structuredClone(options.host));
+  const taskPolicyConfiguration = Object.freeze(structuredClone(options.taskPolicyConfiguration ?? { executionEnabled: false, ttlMs: 120000 }));
+  const call = bindRequests(dependencies, { enabled: options.enabled, audience: options.audience },
+    input => composeProfileWorkflow(input, host, taskPolicyConfiguration));
+  return Object.freeze({
+    configureTaskActions: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.configureTaskActions(command), { write: true, signal }),
+    readTaskActionAdmission: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.readTaskActionAdmission(command), { write: false, signal }),
+    prepareChange: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.prepareChange(command), { write: true, signal }),
+    readUpdatedDifference: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.readUpdatedDifference(command), { write: false, signal }),
+    readTaskObservation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.readTaskObservation(command), { write: false, signal }),
+    readTaskEvents: (request: AiSceneHttpRequest, value: unknown) => call(request, value,
+      (app, command) => app.readTaskEvents(command), { write: false }),
+    prepareReconfirmedChange: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.prepareReconfirmedChange(command), { write: true, signal }),
+    readReconfirmedChange: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.readReconfirmedChange(command), { write: false, signal }),
+    readCurrent: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.readCurrent(command), { write: false, signal }),
+    readChange: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.readChange(command), { write: false, signal }),
+    createTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.createTask(command), { write: true, signal }),
+    readCreation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.readCreation(command), { write: false, signal }),
+    start: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.start(command, signal), { write: true, signal, preflightOnly: true }),
+    startUnstarted: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.startUnstarted(command, signal), { write: true, signal, preflightOnly: true }),
+    read: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.read(command), { write: false }),
+    humanHandoff: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.humanHandoff(command), { write: false }),
+    requestCancellation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.requestCancellation(command), { write: true, signal }),
+    settleUnstartedCancellation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.settleUnstartedCancellation(command), { write: true, signal }),
+    readCancellation: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readCancellation(command), { write: false }),
+    readCancellationSettlement: (request: AiSceneHttpRequest, value: unknown) => call(request, value,
+      (app, command) => app.readCancellationSettlement(command), { write: false }),
+    recoverOriginal: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.recoverOriginal(command, signal), { write: true, signal, preflightOnly: true }),
+    decide: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.decide(command), { write: true, signal }),
+    continueConfirmation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.continueConfirmation(command, signal), { write: true, signal, preflightOnly: true })
+  });
+}
+
+/** Human-only request binding for an existing opening rule proposal. No public
+ * route/provider registration or model-facing save action is created here. */
+export function composeRequestBoundOpeningRuleDraftSave(
+  dependencies: Omit<Parameters<typeof composeOpeningRuleDraftSave>[0], 'credentials'>,
+  options: AiSceneRequestOptions & { host: AiTaskApplicationHost }) {
+  if (options.audience !== 'operator') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+  const host = Object.freeze(structuredClone(options.host));
+  const call = bindRequests(dependencies, { enabled: options.enabled, audience: options.audience }, input => composeOpeningRuleDraftSave(input, host));
+  return Object.freeze({
+    reviewDraft: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.reviewDraft(command), { write: false, signal }),
+    saveDraft: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.saveDraft(command), { write: true, signal }),
+    readDraftOperation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.readDraftOperation(command), { write: false, signal })
+  });
+}
+
+/** Human-only request binding for an existing opening calendar proposal. No public
+ * route/provider registration or model-facing save action is created here. */
+export function composeRequestBoundOpeningCalendarDraftSave(
+  dependencies: Omit<Parameters<typeof composeOpeningCalendarDraftSave>[0], 'credentials'>,
+  options: AiSceneRequestOptions & { host: AiTaskApplicationHost }) {
+  if (options.audience !== 'operator') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+  const host = Object.freeze(structuredClone(options.host));
+  const call = bindRequests(dependencies, { enabled: options.enabled, audience: options.audience }, input => composeOpeningCalendarDraftSave(input, host));
+  return Object.freeze({
+    reviewDraft: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.reviewDraft(command), { write: false, signal }),
+    saveDraft: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.saveDraft(command), { write: true, signal }),
+    readDraftOperation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.readDraftOperation(command), { write: false, signal })
+  });
+}
+
+/** Canonical notification re-confirmation behind the existing human HTTP host.
+ * Original creation and current business read authority locate Task/Run;
+ * preparation grants no approval/execution and never reallocates old resources. */
+export function composeRequestBoundSettingsReconfirmation(
+  dependencies: Omit<ApprovedSettingsApplicationDependencies, 'credentials'>, options: AiSceneRequestOptions) {
+  if (options.audience !== 'operator') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+  const creation = composeRequestBoundSettingsTaskCreation(dependencies, options);
+  const call = bindRequests(dependencies, options, async (input, command) => {
+    const reference = settingsReconfirmationOriginalSchema.parse((command as { original?: unknown })?.original);
+    const credential = await input.credentials.current(), request = { headers: { authorization: credential.authorization } };
+    const bound = await bindOriginalSettingsRead(input, reference, value => creation.read(request, value));
+    const source = { ...input, originalReadAuthority: bound.authority };
+    const app = composeApprovedSettingsApplication(source), authority = new ApprovedSettingsTaskAuthority(source);
+    return composeSettingsReconfirmation(source, async value => {
+      const reference = settingsReconfirmationOriginalSchema.parse(structuredClone(value));
+      if (requestFingerprint(reference) !== requestFingerprint(settingsReconfirmationOriginalSchema.parse((command as { original?: unknown }).original)))
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      const original = await creation.read(request, reference);
+      if (!('task' in original.receipt) || original.receipt.state !== 'observed' || !original.receipt.task)
+        throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const task = { taskId: original.receipt.task.taskId, runId: original.receipt.task.runId };
+      const change = await app.readChangeReceipt({ changeKey: reference.changeKey });
+      if (change.state !== 'prepared_not_approved' || change.change.changeId !== original.original.changeId
+        || change.change.changeHash !== original.original.changeHash) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      const before = await authority.resolve(task.taskId, 'read');
+      const verify = async () => {
+        await bound.verify();
+        const latest = await creation.read(request, reference), after = await authority.resolve(task.taskId, 'read');
+        if (!('task' in latest.receipt) || latest.receipt.state !== 'observed' || !latest.receipt.task
+          || latest.receipt.task.taskId !== task.taskId || latest.receipt.task.runId !== task.runId
+          || requestFingerprint(latest.original) !== requestFingerprint(original.original)
+          || after.bindingHash !== before.bindingHash) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      };
+      await verify();
+      return { reference, task, change: change.change, before, verify };
+    });
+  });
+  return Object.freeze({
+    readUpdatedDifference: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.readUpdatedDifference(command), { write: false, signal }),
+    prepareReconfirmedChange: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.prepareReconfirmedChange(command), { write: true, signal }),
+    readReconfirmedChange: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.readReconfirmedChange(command), { write: false, signal })
+  });
+}
+
+/** Core-prepared immutable change -> existing metadata creation repository.
+ * Neither creation nor receipt observation publishes a plan or grants actions. */
+export function composeRequestBoundSettingsTaskCreation(
+  dependencies: Omit<ApprovedSettingsApplicationDependencies, 'credentials'>, options: AiSceneRequestOptions) {
+  const scene = freezeOriginalInput(z.object({ code: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
+    version: z.string().min(1).max(64).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict().parse(structuredClone(dependencies.scene)));
+  const schema = z.object({ creationKey: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
+    changeKey: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict();
+  const call = bindRequests({ ...dependencies, scene }, options, input => input);
+  const use = (request: AiSceneHttpRequest, value: unknown, creating: boolean, signal?: AbortSignal) => {
+    const parsed = schema.safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    return call(request, parsed.data, async (input, value) => {
+      const command = schema.parse(value), clock = input.clock ?? (() => new Date());
+      const scopes = new AiScopeRepository(input.db, new AiTaskCurrentIdentityAuthority(input.auth, input.credentials, clock), clock);
+      const route = new ApprovedSettingsRouteAuthority(input.guard, input.credentials);
+      const app = composeApprovedSettingsApplication(input);
+      const entitlements = new PrismaSubscriptionBudgetReader(input.db, input.subscriptions, clock);
+      let expectedPolicy: string | undefined;
+      const read = () => route.withAuthorization(creating ? 'write' : 'read', async (actor, revalidate) => {
+        const before = await scopes.resolveCurrent();
+        if (before.scope.kind !== 'WORKSPACE' || before.context.actor.kind !== 'user'
+          || before.context.actor.userId !== actor.actorId || before.scope.tenantId !== actor.tenantId
+          || before.scope.workspaceId !== actor.workspaceId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        const original = structuredClone(await app.readChangeReceipt({ changeKey: command.changeKey }));
+        if (original.state !== 'prepared_not_approved') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        const row = structuredClone(await input.db.rentalApprovedSettingsChange.findFirst({ where: { id: original.change.changeId, ...actor } }));
+        if (!row || row.changeKey !== command.changeKey || row.changeHash !== original.change.changeHash)
+          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        if (creating) {
+          if (!(row.expiresAt instanceof Date) || !Number.isFinite(row.expiresAt.getTime()) || row.expiresAt <= clock())
+            throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+          const current = structuredClone(await input.core.readVersionedBusinessSettings(actor.tenantId));
+          const workspace = structuredClone(await input.db.businessWorkspace.findFirst({ where: { id: actor.workspaceId, tenantId: actor.tenantId } }));
+          if (current.settingsRevision !== row.baseRevision || requestFingerprint(current.settings) !== row.baseSettingsHash
+            || !workspace || workspace.status !== 'ACTIVE' || workspace.categoryVersionId !== row.categoryVersionId
+            || workspace.categoryAdoptionRevision !== row.categoryAdoptionRevision) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+          const policy = structuredClone(await input.db.aiTaskPlanPolicy.findFirst({ where: { scopeId: before.scope.id, sceneCode: scene.code, sceneVersion: scene.version } }));
+          const tools = aiPersistedPlanToolsSchema.safeParse(structuredClone(policy?.allowedTools));
+          const limits = aiTaskRunnerLimitsSchema.safeParse(structuredClone(policy?.limits));
+          if (!policy || policy.scopeId !== before.scope.id || policy.sceneCode !== scene.code || policy.sceneVersion !== scene.version
+            || !Number.isInteger(policy.revision) || policy.revision < 1 || policy.revision > 4294967294
+            || policy.enabled !== true || !(policy.expiresAt instanceof Date) || !Number.isFinite(policy.expiresAt.getTime())
+            || policy.expiresAt <= clock() || !tools.success || !limits.success
+            || !tools.data.some(tool => tool.code === AI_APPROVED_SETTINGS_TOOL_CODE)) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+          const entitlement = await entitlements.read(actor.tenantId, 'ai.native.use');
+          if (entitlement.entitlements.length !== 1 || entitlement.entitlements[0].code !== 'ai.native.use'
+            || entitlement.entitlements[0].available !== true) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+          const hash = requestFingerprint({ scene, scopeId: before.scope.id, policyRevision: policy.revision,
+            tools: tools.data, limits: limits.data, expiresAt: policy.expiresAt.toISOString(), entitlement });
+          if (expectedPolicy !== undefined && expectedPolicy !== hash) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+          expectedPolicy = hash;
+        }
+        await revalidate();
+        const after = await scopes.resolveCurrent();
+        if (before.scope.id !== after.scope.id || originalIdentityHash(before.context) !== originalIdentityHash(after.context))
+          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        return { context: after.context, change: original.change };
+      });
+      const original = await read();
+      const resolveOriginal = async (sceneCode: string, inputRef: string) => {
+        if (sceneCode !== scene.code || inputRef !== original.change.changeId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        const current = await read();
+        if (original.change.changeId !== current.change.changeId || original.change.changeHash !== current.change.changeHash
+          || originalIdentityHash(original.context) !== originalIdentityHash(current.context)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        return { context: current.context, sceneCode: scene.code, sceneVersion: scene.version,
+          // The immutable change row is revision one. Its business baseRevision
+          // is already hash-bound and must not become a fabricated input revision.
+          inputRef: current.change.changeId, inputRevision: 1, inputHash: current.change.changeHash };
+      };
+      const repository = creating ? new AiTaskCreationRepository(input.db, { resolve: async (sceneCode, inputRef) =>
+        ({ ...await resolveOriginal(sceneCode, inputRef), creationAllowed: true as const }) }, clock)
+        : AiTaskCreationRepository.receiptReader(input.db, { resolve: resolveOriginal }, clock);
+      const target = { creationKey: command.creationKey, sceneCode: scene.code, inputRef: original.change.changeId };
+      let receipt;
+      try { receipt = creating && repository instanceof AiTaskCreationRepository
+        ? await repository.create(target) : await repository.readCreation(target); }
+      catch (error) {
+        if (creating && error instanceof AiTaskRepositoryError && error.code === 'AI_STORAGE_UNAVAILABLE') {
+          // The repository cannot prove a failed transaction reply was uncommitted.
+          throw Object.assign(new Error('AI_RESULT_UNKNOWN'), { code: 'AI_RESULT_UNKNOWN', retryable: false });
+        }
+        throw error;
+      }
+      return freezeOriginalInput({ original: { changeId: original.change.changeId, changeHash: original.change.changeHash },
+        receipt, execution: 'not_attested' as const, approval: 'not_granted' as const });
+    }, { write: creating, signal });
+  };
+  return Object.freeze({
+    create: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => use(request, value, true, signal),
+    read: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => use(request, value, false, signal)
+  });
+}
+
+/** Current original creation receipt -> explicit owner policy management/start.
+ * An explicitly configured initial issuer runs only on start. Creation and
+ * reads do not seed policies; the original host owns leases/business work. */
+export function composeRequestBoundSettingsTaskControls(
+  dependencies: Omit<ApprovedSettingsApplicationDependencies, 'credentials'>,
+  options: AiOriginalTaskActionPolicyOptions & { host: AiTaskApplicationHost },
+  startAdmission?: OriginalSettingsStartAdmissionConfiguration) {
+  if (options.audience !== 'operator') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+  const templates = freezeOriginalInput(z.array(z.object({
+    operation: z.string().refine(value => taskActionPolicyOperations.includes(value)),
+    requiredPermissions: z.array(z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u)).min(1).max(64)
+      .refine(values => new Set(values).size === values.length)
+  }).strict()).min(1).max(taskActionPolicyOperations.length).parse(structuredClone(options.templates)));
+  if (new Set(templates.map(row => row.operation)).size !== templates.length) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+  const ttlMs = z.number().int().min(1).max(120000).parse(options.ttlMs);
+  const host = Object.freeze(structuredClone(options.host)), scene = freezeOriginalInput(structuredClone(dependencies.scene));
+  const creation = composeRequestBoundSettingsTaskCreation({ ...dependencies, scene }, { enabled: options.enabled, audience: options.audience });
+  const reference = z.object({ creationKey: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
+    changeKey: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict();
+  const readSchema = reference.extend({ operation: z.string() }).strict();
+  const writeSchema = readSchema.extend({ expectedRevision: z.number().int().min(1).max(4294967294).nullable() }).strict();
+  const clearSchema = readSchema.extend({ expectedRevision: z.number().int().min(1).max(4294967293) }).strict();
+  const operationSchema = z.discriminatedUnion('mutation', [
+    readSchema.extend({ mutation: z.literal('configure'), expectedRevision: z.number().int().min(1).max(4294967293).nullable() }).strict(),
+    readSchema.extend({ mutation: z.literal('clear'), expectedRevision: z.number().int().min(1).max(4294967293) }).strict()
+  ]);
+  const cancellationSchema = reference.extend({ expectedRevision: z.number().int().min(1).max(4294967293) }).strict();
+  const call = bindRequests({ ...dependencies, scene }, { enabled: options.enabled, audience: options.audience }, input => ({
+    input, policies: composeTaskActionPolicyManagement(input), settings: composeApprovedSettingsApplication(input),
+    clock: input.clock ?? (() => new Date())
+  }));
+  type Root = { input: ApprovedSettingsApplicationDependencies; policies: ReturnType<typeof composeTaskActionPolicyManagement>;
+    settings: ReturnType<typeof composeApprovedSettingsApplication>; clock: () => Date };
+  const target = async (root: Root, request: AiSceneHttpRequest, input: z.infer<typeof reference>, signal?: AbortSignal) => {
+    const before = await creation.read(request, input, signal);
+    if (!('task' in before.receipt) || before.receipt.state !== 'observed' || !before.receipt.task)
+      throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    const task = before.receipt.task;
+    const change = await root.settings.readChangeReceipt({ changeKey: input.changeKey });
+    if (change.state !== 'prepared_not_approved' || change.change.changeId !== before.original.changeId
+      || change.change.changeHash !== before.original.changeHash) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    const verify = async () => {
+      const after = await creation.read(request, input, signal);
+      if (!('task' in after.receipt) || after.receipt.state !== 'observed' || !after.receipt.task
+        || after.receipt.task.taskId !== task.taskId || after.receipt.task.runId !== task.runId
+        || requestFingerprint(after.original) !== requestFingerprint(before.original))
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    };
+    return { task, change: change.change, verify };
+  };
+  const policy = (request: AiSceneHttpRequest, value: unknown, mode: 'read' | 'configure' | 'clear', signal?: AbortSignal) => {
+    const schema = mode === 'read' ? readSchema : mode === 'configure' ? writeSchema : clearSchema;
+    const parsed = schema.safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    return call(request, parsed.data, async (root, value) => {
+      const input = schema.parse(value), template = templates.find(row => row.operation === input.operation);
+      if (!template) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const found = await target(root, request, reference.parse({ creationKey: input.creationKey, changeKey: input.changeKey }), signal);
+      const operation = template.operation as AiTaskActionPolicyMutation['operation'];
+      let receipt;
+      if (mode === 'read') receipt = await root.policies.read(found.task.taskId, operation);
+      else if (mode === 'clear') receipt = await root.policies.clear(found.task.taskId, operation, clearSchema.parse(value).expectedRevision, true);
+      else {
+        const now = root.clock().getTime(), expiresAt = Math.min(Date.parse(found.change.expiresAt), now + ttlMs);
+        if (!Number.isFinite(expiresAt) || expiresAt <= now) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        receipt = await root.policies.put({ taskId: found.task.taskId, operation, requiredPermissions: template.requiredPermissions,
+          expiresAt: new Date(expiresAt) }, writeSchema.parse(value).expectedRevision, true);
+      }
+      try { await found.verify(); }
+      catch (error) {
+        if (mode !== 'read') throw Object.assign(new Error('AI_RESULT_UNKNOWN'), { code: 'AI_RESULT_UNKNOWN', retryable: false });
+        throw error;
+      }
+      return freezeOriginalInput({ receipt, semantics: 'policy_not_approval_or_dispatch' as const });
+    }, { write: mode !== 'read', signal });
+  };
+  const readPolicyOperation = (request: AiSceneHttpRequest, value: unknown) => {
+    const parsed = operationSchema.safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    return call(request, parsed.data, async (root, value) => {
+      const input = operationSchema.parse(value);
+      if (!templates.some(row => row.operation === input.operation)) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const found = await target(root, request, { creationKey: input.creationKey, changeKey: input.changeKey });
+      const receipt = structuredClone(await root.policies.readMutation(found.task.taskId,
+        input.operation as AiTaskActionPolicyMutation['operation'], input.expectedRevision, input.mutation));
+      await found.verify();
+      return freezeOriginalInput({ mutation: input.mutation, expectedRevision: input.expectedRevision, receipt,
+        semantics: 'original_policy_mutation_not_current_permission' as const });
+    }, { write: false });
+  };
+  const cancellation = (request: AiSceneHttpRequest, value: unknown,
+    mode: 'request' | 'settle_unstarted' | 'read_request' | 'read_settlement', signal?: AbortSignal) => {
+    const parsed = cancellationSchema.safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    return call(request, parsed.data, async (root, value) => {
+      const command = cancellationSchema.parse(value), found = await target(root, request,
+        reference.parse({ creationKey: command.creationKey, changeKey: command.changeKey }), signal);
+      const authorization = composePersistedTaskAuthorization(root.input);
+      const transitions = new AiTaskTransitionRepository(root.input.db, authorization.authority, root.clock);
+      const input = { taskId: found.task.taskId, expectedRevision: command.expectedRevision };
+      const receipt = mode === 'read_request' ? await transitions.readCancellationReceipt(input)
+        : mode === 'read_settlement' ? await transitions.readCancellationSettlementReceipt(input)
+          : mode === 'request' ? await transitions.transition({ ...input, to: 'cancel_requested', reason: 'cancel_requested' })
+            : await transitions.settleUnstartedCancellation({ ...input, to: 'cancelled', reason: 'cancel_settled' }, found.task.runId);
+      try { await found.verify(); }
+      catch (error) {
+        if (mode === 'request' || mode === 'settle_unstarted')
+          throw Object.assign(new Error('AI_RESULT_UNKNOWN'), { code: 'AI_RESULT_UNKNOWN', retryable: false });
+        throw error;
+      }
+      return freezeOriginalInput({ receipt, cancellation: 'not_business_rollback' as const,
+        automaticRetry: false as const, financialRelease: 'not_performed' as const });
+    }, { write: mode === 'request' || mode === 'settle_unstarted', signal });
+  };
+  return Object.freeze({
+    requestCancellation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => cancellation(request, value, 'request', signal),
+    settleUnstartedCancellation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => cancellation(request, value, 'settle_unstarted', signal),
+    readCancellation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => cancellation(request, value, 'read_request', signal),
+    readCancellationSettlement: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => cancellation(request, value, 'read_settlement', signal),
+    readPolicy: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => policy(request, value, 'read', signal),
+    readPolicyOperation,
+    configurePolicy: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => policy(request, value, 'configure', signal),
+    clearPolicy: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => policy(request, value, 'clear', signal),
+    start(request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) {
+      const parsed = reference.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return call(request, parsed.data, async (root, value) => {
+        // The original creation/change receipt authorizes this explicit initial
+        // admission. Keep its possible CAS writes outside the read-only wait.
+        if (startAdmission) await prepareOriginalSettingsStartAdmission(root.input, reference.parse(value),
+          { ...startAdmission, maximumAdmissionMs: Math.min(ttlMs, startAdmission.maximumAdmissionMs ?? ttlMs) }, signal);
+        const { found, hostRoot } = await waitForTaskApplicationDependency(async () => {
+          const input = reference.parse(value), found = await target(root, request, input, signal);
+          const authorization = composePersistedTaskAuthorization(root.input);
+          const access = await authorization.tasks.resolveAccess(found.task.taskId, 'read_metadata');
+          const metadata = await root.input.db.aiTask.findFirst({ where: access.where });
+          if (!metadata || metadata.sceneCode !== scene.code || metadata.sceneVersion !== scene.version
+            || metadata.inputRef !== found.change.changeId || metadata.inputHash !== found.change.changeHash)
+            throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+          const policy = structuredClone(await root.input.db.aiTaskPlanPolicy.findFirst({ where: {
+            scopeId: metadata.scopeId, sceneCode: scene.code, sceneVersion: scene.version } }));
+          const tools = aiPersistedPlanToolsSchema.safeParse(policy?.allowedTools);
+          const limits = aiTaskRunnerLimitsSchema.safeParse(policy?.limits);
+          if (!policy?.enabled || policy.scopeId !== metadata.scopeId || policy.sceneCode !== scene.code
+            || policy.sceneVersion !== scene.version || !policy.expiresAt
+            || !Number.isFinite(new Date(policy.expiresAt).getTime()) || new Date(policy.expiresAt).getTime() <= root.clock().getTime()
+            || !tools.success || !limits.success
+            || !tools.data.some(tool => tool.code === AI_APPROVED_SETTINGS_TOOL_CODE)) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+          const hostRoot = composeTaskSettingsHost({ ...root.input, host, task: { taskId: found.task.taskId, runId: found.task.runId,
+            registrationRef: `settings-change:${found.change.changeHash}`, change: { changeId: found.change.changeId, changeHash: found.change.changeHash },
+            limits: limits.data } });
+          return { found, hostRoot };
+        }, false, signal);
+        const result = await hostRoot.application.startUnstarted(signal);
+        try { await waitForTaskApplicationDependency(found.verify, false, signal); }
+        catch { throw Object.assign(new Error('AI_RESULT_UNKNOWN'), { code: 'AI_RESULT_UNKNOWN', retryable: false }); }
+        return freezeOriginalInput(result);
+      }, { write: true, signal, preflightOnly: true });
+    }
+  });
+}
+
+/** Independent real notification-settings runner/approval consumer. No model
+ * execution dependency or caller-selected task/holder/plan enters this root. */
+export function composeRequestBoundSettingsTask(dependencies: Omit<ApprovedSettingsApplicationDependencies, 'credentials'>,
+  options: AiSettingsTaskRequestOptions) {
+  const host = Object.freeze(structuredClone(options.host)), task = freezeOriginalInput(structuredClone(options.task));
+  const scene = freezeOriginalInput(structuredClone(dependencies.scene));
+  const call = bindRequests({ ...dependencies, scene }, { enabled: options.enabled, audience: options.audience }, (input, value) => {
+    if (!value || typeof value !== 'object' || !('taskId' in value) || value.taskId !== task.taskId
+      || 'runId' in value && value.runId !== task.runId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    const settingsHost = composeTaskSettingsHost({ ...input, host, task });
+    return { settingsHost };
+  }, { write: false });
+  return Object.freeze({
+    startSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      call(request, value, (root, command) => root.settingsHost.application.start(command, signal), { write: true, signal, preflightOnly: true }),
+    readSettingsConfirmation: (request: AiSceneHttpRequest, value: unknown) =>
+      call(request, value, (root, command) => root.settingsHost.application.readConfirmation(command)),
+    decideSettingsProposal: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      call(request, value, (root, command) => root.settingsHost.settings.application.decide(command), { write: true, signal }),
+    readSettingsDecision: (request: AiSceneHttpRequest, value: unknown) =>
+      call(request, value, (root, command) => root.settingsHost.settings.application.readDecisionReceipt(command)),
+    continueSettingsConfirmation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      call(request, value, (root, command) => root.settingsHost.application.continueOriginalConfirmation(command, signal), { write: true, signal, preflightOnly: true }),
+    reconcileSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      call(request, value, (root, command) => root.settingsHost.application.reconcileOriginal(command, signal), { write: true, signal, preflightOnly: true }),
+    cancelSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      call(request, value, (root, command) => root.settingsHost.application.requestCancelOriginal(command, signal), { write: true, signal })
+  });
+}
+
+/** Recover the server binding from the original published input/plan, not from
+ * caller limits, a latest-run lookup or today's settings. This never creates a
+ * task/plan; an unpublished task still needs the original explicit producer. */
+export function composeRequestBoundPersistedSettingsTask(
+  dependencies: Omit<ApprovedSettingsApplicationDependencies, 'credentials'>,
+  options: AiSceneRequestOptions & { host: AiTaskApplicationHost },
+  approvalAdmission?: OriginalSettingsApprovalAdmissionConfiguration) {
+  const host = Object.freeze(structuredClone(options.host)), scene = freezeOriginalInput(structuredClone(dependencies.scene));
+  const selector = z.object({ taskId: z.string().min(1).max(36).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
+    runId: z.string().min(1).max(36).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u).optional() }).passthrough();
+  const server = { ...dependencies, scene }, requestOptions = { enabled: options.enabled, audience: options.audience };
+  const assemble = async (input: typeof server & { credentials: AiTaskCredentialSource }, value: unknown) => {
+    const command = selector.safeParse(value);
+    if (!command.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const authorization = composePersistedTaskAuthorization(input);
+    const read = async () => {
+      const access = await authorization.tasks.resolveAccess(command.data.taskId, 'read_metadata');
+      const task = await input.db.aiTask.findFirst({ where: access.where });
+      if (!task || task.sceneCode !== scene.code || task.sceneVersion !== scene.version
+        || access.scope.kind !== 'WORKSPACE' || !access.scope.tenantId || !access.scope.workspaceId)
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      const key = { scopeId: task.scopeId, taskId: task.id };
+      const runs = await input.db.aiRun.findMany({ where: { ...key, actorKind: access.actorKind, actorId: access.actorId }, take: 2 });
+      const run = runs[0];
+      if (runs.length !== 1 || !run || run.sequence !== 1 || run.taskId !== task.id || run.scopeId !== task.scopeId
+        || run.inputReceiptId != null || run.resourceOriginRunId != null
+        || run.actorKind !== access.actorKind || run.actorId !== access.actorId
+        || command.data.runId !== undefined && run.id !== command.data.runId)
+        throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const planRow = await input.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: { ...key, runId: run.id } } });
+      const plan = aiTaskRunPlanSchema.safeParse(structuredClone(planRow?.payload));
+      if (!planRow || planRow.scopeId !== key.scopeId || planRow.taskId !== key.taskId || planRow.runId !== run.id
+        || !plan.success || plan.data.taskId !== task.id || plan.data.runId !== run.id
+        || requestFingerprint(plan.data) !== planRow.planHash || plan.data.steps.length !== 1
+        || plan.data.steps[0].toolCode !== AI_APPROVED_SETTINGS_TOOL_CODE
+        || plan.data.steps[0].toolVersion !== AI_TOOL_DRAFT_VERSION || plan.data.steps[0].operation !== 'idempotent')
+        throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const registered = plan.data.steps[0].registrationRef;
+      const saved = await input.db.aiTaskActionInput.findFirst({ where: { ...key, runId: run.id, registrationRef: registered } });
+      const change = settingsChangeReferenceSchema.safeParse(structuredClone(saved?.payload));
+      if (!saved || saved.scopeId !== key.scopeId || saved.taskId !== key.taskId || saved.runId !== run.id
+        || !z.string().min(1).max(36).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u).safeParse(saved.id).success
+        || !Number.isInteger(saved.policyRevision) || saved.policyRevision < 1 || saved.policyRevision > 4294967294
+        || !(saved.expiresAt instanceof Date) || !Number.isFinite(saved.expiresAt.getTime())
+        || saved.registrationRef !== registered || saved.toolCode !== AI_APPROVED_SETTINGS_TOOL_CODE
+        || saved.toolVersion !== AI_TOOL_DRAFT_VERSION || !change.success || requestFingerprint(change.data) !== saved.fingerprint)
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      const row = await input.db.rentalApprovedSettingsChange.findFirst({ where: { id: change.data.changeId,
+        tenantId: access.scope.tenantId, workspaceId: access.scope.workspaceId, actorId: access.actorId } });
+      if (!row || row.changeHash !== change.data.changeHash) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      // The existing Core historical reader checks the original material hash,
+      // owner, tenant/workspace and current route permission, even after expiry.
+      const receipt = await composeApprovedSettingsApplication(input).readChangeReceipt({ changeKey: row.changeKey });
+      if (receipt.state !== 'prepared_not_approved' || receipt.change.changeId !== change.data.changeId
+        || receipt.change.changeHash !== change.data.changeHash) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      if ((await authorization.tasks.resolveAccess(task.id, 'read_metadata')).bindingKey !== access.bindingKey)
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      return { binding: requestFingerprint({ identity: access.bindingKey, scopeId: key.scopeId, taskId: task.id, runId: run.id,
+        scene, planHash: planRow.planHash, inputId: saved.id, inputHash: saved.fingerprint, change: change.data }),
+        task: { taskId: task.id, runId: run.id, registrationRef: registered, change: change.data, limits: plan.data.limits } };
+    };
+    const before = await read(), settingsHost = composeTaskSettingsHost({ ...input, host, task: before.task });
+    return { settingsHost, input, verify: async () => {
+      if ((await read()).binding !== before.binding) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+    } };
+  };
+  const call = bindRequests(server, requestOptions, assemble, { write: false });
+  const admissionCall = bindRequests(server, requestOptions, input => input);
+  const use = <R>(request: AiSceneHttpRequest, value: unknown,
+    consume: (root: ReturnType<typeof composeTaskSettingsHost>, command: unknown) => Promise<R>,
+    lifetime: { write: boolean; signal?: AbortSignal; preflightOnly?: true }) =>
+    call(request, value, async (root, command) => {
+      const result = await consume(root.settingsHost, command);
+      try { await waitForTaskApplicationDependency(root.verify, false, lifetime.signal); }
+      catch (error) {
+        if (lifetime.write) throw Object.assign(new Error('AI_RESULT_UNKNOWN'), { code: 'AI_RESULT_UNKNOWN', retryable: false });
+        throw error;
+      }
+      return result;
+    }, lifetime);
+  const admitted = <R>(request: AiSceneHttpRequest, value: unknown, intent: 'explicit_decide' | 'explicit_continue',
+    consume: (root: ReturnType<typeof composeTaskSettingsHost>, command: unknown, signal?: AbortSignal) => Promise<R>, signal?: AbortSignal) => {
+    if (!approvalAdmission) return use(request, value, (root, command) => consume(root, command, signal),
+      intent === 'explicit_decide' ? { write: true, signal } : { write: true, signal, preflightOnly: true });
+    return admissionCall(request, value, (input, command) => callAiTaskRunnerDependency(async child => {
+      await prepareOriginalSettingsApprovalAdmission(input, command, intent, approvalAdmission, child);
+      const root = await waitForTaskApplicationDependency(() => assemble(input, command), false, child);
+      const result = await consume(root.settingsHost, command, child);
+      try { await waitForTaskApplicationDependency(root.verify, false, child); }
+      catch { throw new AiTaskRunnerError('AI_RESULT_UNKNOWN'); }
+      return result;
+    }, intent === 'explicit_decide' ? 20000 : 120000, 'original_settings_admitted_action', signal),
+    { write: true, signal, preflightOnly: true });
+  };
+  return Object.freeze({
+    // Internal task-center preflight; no additional HTTP action is registered.
+    prepareTaskCenterApproval: (request: AiSceneHttpRequest, value: unknown, intent: 'explicit_decide' | 'explicit_continue', signal?: AbortSignal) =>
+      admissionCall(request, value, (input, command) => callAiTaskRunnerDependency(async child => {
+        if (!approvalAdmission) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        await prepareTaskCenterSettingsApprovalAdmission(input, command, intent, approvalAdmission, child);
+      }, 15000, 'task_center_settings_admission', signal), { write: true, signal, preflightOnly: true }),
+    readTaskScene: (request: AiSceneHttpRequest, value: unknown) => call(request, value, async (root, command) => {
+      const settings = composeAiSettingsBusinessConsumer({ ...root.input, settingsHost: root.settingsHost });
+      const persisted = composePersistedTaskCenter(root.input);
+      const result = await readSettingsTaskCenterScene(settings, persisted.events, command);
+      await root.verify();
+      return result;
+    }),
+    startSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      use(request, value, (root, command) => root.application.start(command, signal), { write: true, signal, preflightOnly: true }),
+    readSettingsConfirmation: (request: AiSceneHttpRequest, value: unknown) =>
+      use(request, value, (root, command) => root.application.readConfirmation(command), { write: false }),
+    decideSettingsProposal: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      admitted(request, value, 'explicit_decide', (root, command) => root.settings.application.decide(command), signal),
+    readSettingsDecision: (request: AiSceneHttpRequest, value: unknown) =>
+      use(request, value, (root, command) => root.settings.application.readDecisionReceipt(command), { write: false }),
+    continueSettingsConfirmation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      admitted(request, value, 'explicit_continue', (root, command, child) => root.application.continueOriginalConfirmation(command, child), signal),
+    reconcileSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      use(request, value, (root, command) => root.application.reconcileOriginal(command, signal), { write: true, signal, preflightOnly: true }),
+    cancelSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      use(request, value, (root, command) => root.application.requestCancelOriginal(command, signal), { write: true, signal })
+  });
+}
+
+/** Human-owned plan configuration, not task ownership or dispatch authority.
+ * The scene/tool registry is fixed by the server and never taken from a body. */
+export function composeRequestBoundScenePlanPolicies(dependencies: RequestBoundOriginalSceneDependencies,
+  options: AiScenePlanPolicyConfiguration) {
+  if (options.audience !== 'operator') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+  const scenes = freezeOriginalInput(structuredClone(options.scenes));
+  if (!Array.isArray(scenes) || !scenes.length || scenes.length > 32
+    || scenes.some(row => !row?.scene || !Array.isArray(row.tools) || !row.tools.length || row.tools.length > 16)
+    || new Set(scenes.map(row => row.scene.code)).size !== scenes.length) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+  const readSchema = z.object({ sceneCode: z.string().min(1).max(64).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict();
+  const changeSchema = readSchema.extend({ change: z.unknown() }).strict();
+  const call = bindRequests(dependencies, { enabled: options.enabled, audience: 'operator' }, input => ({
+    repository(code: string) {
+      const selected = scenes.find(row => row.scene.code === code);
+      if (!selected) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      return new PrismaTaskPlanPolicyRepository(input.db, { auth: input.auth, credentials: input.credentials,
+        guard: input.guard, scene: selected.scene, tool: selected.tools[0], tools: selected.tools, audit: true,
+        transactionParticipant: createTenantModelConfigurationTransactions(input) }, input.clock);
+    }
+  }));
+  return Object.freeze({
+    read(request: AiSceneHttpRequest, value: unknown) {
+      const parsed = readSchema.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return call(request, parsed.data, async (root, command) => {
+        const input = readSchema.parse(command);
+        return { sceneCode: input.sceneCode, ...await root.repository(input.sceneCode).read(),
+          execution: 'not_attested' as const, taskActionPolicy: 'not_granted' as const };
+      }, { write: false });
+    },
+    change(request: AiSceneHttpRequest, value: unknown) {
+      const parsed = changeSchema.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return call(request, parsed.data, async (root, command) => {
+        const input = changeSchema.parse(command);
+        return { sceneCode: input.sceneCode, ...await root.repository(input.sceneCode).put(input.change),
+          execution: 'not_attested' as const, taskActionPolicy: 'not_granted' as const };
+      }, { write: true });
+    },
+  });
+}
+
+/** Original operator scenes can now configure their own execution policies
+ * through the existing config authority/CAS repository. This does not grant
+ * staff/client/automation policies, business approval or dispatch ownership. */
+export function composeRequestBoundOriginalTaskActionPolicies(
+  dependencies: RequestBoundOriginalSceneDependencies, options: AiOriginalTaskActionPolicyOptions) {
+  if (options.audience !== 'operator') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+  const operation = z.string().refine(value => taskActionPolicyOperations.includes(value));
+  const permission = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
+  const templates = freezeOriginalInput(z.array(z.object({ operation,
+    sceneCode: z.enum(['order_explanation', 'quote_clarification', 'opening_diagnosis']).optional(),
+    requiredPermissions: z.array(permission).min(1).max(64).refine(value => new Set(value).size === value.length)
+  }).strict()).min(1).max(taskActionPolicyOperations.length * 4).parse(structuredClone(options.templates)));
+  if (new Set(templates.map(template => `${template.sceneCode ?? '*'}:${template.operation}`)).size !== templates.length)
+    throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+  const ttlMs = z.number().int().min(1).max(120000).parse(options.ttlMs);
+  const readSchema = z.object({ original: originalRequestReferenceSchema, operation }).strict();
+  const configureSchema = readSchema.extend({ expectedRevision: z.number().int().min(1).max(4294967294).nullable() }).strict();
+  const clearSchema = readSchema.extend({ expectedRevision: z.number().int().min(1).max(4294967293) }).strict();
+  const call = bindRequests(dependencies, { enabled: options.enabled, audience: 'operator' }, input => ({
+    scenes: composeAiOriginalScenes(input), policies: composeTaskActionPolicyManagement(input), clock: input.clock ?? (() => new Date())
+  }), { write: false }, originalSceneTransactionAuthority);
+  type Root = { scenes: ReturnType<typeof composeAiOriginalScenes>;
+    policies: ReturnType<typeof composeTaskActionPolicyManagement>; clock: () => Date };
+  const target = async (root: Root, original: z.infer<typeof originalRequestReferenceSchema>, selected: string) => {
+    const before = await root.scenes.requests.readHistorical(original);
+    const template = templates.find(value => value.operation === selected && value.sceneCode === before.receipt.sceneCode)
+      ?? templates.find(value => value.operation === selected && value.sceneCode === undefined);
+    if (!template) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    const task = await root.scenes.readTaskReceipt(original.inputRef);
+    if (before.receipt.state === 'revoked' || task.state !== 'observed') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    const verify = async () => {
+      const current = await root.scenes.requests.readHistorical(original), latest = await root.scenes.readTaskReceipt(original.inputRef);
+      if (current.receipt.state === 'revoked' || current.receipt.contentHash !== before.receipt.contentHash
+        || originalIdentityHash(current.context) !== originalIdentityHash(before.context)
+        || latest.state !== 'observed' || latest.taskId !== task.taskId || latest.runId !== task.runId || latest.revision !== task.revision)
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    };
+    await verify();
+    return { taskId: task.taskId, template, expiresAt: before.receipt.expiresAt, verify };
+  };
+  // These additional server consumers expose only original read-policy
+  // templates and exact recorded CAS operations. They do not add a runner
+  // operation, broaden the public configure contract or seed during creation.
+  const observationOperations = ['read_metadata', 'read_events', 'read_step_terminal'];
+  const recordedSchema = configureSchema.extend({ expiresAt: z.string().max(40).datetime({ offset: true }) }).strict();
+  const observation = (selected: string) => { if (!observationOperations.includes(selected)) throw new AiTaskRepositoryError('AI_INVALID_INPUT'); };
+  return Object.freeze({
+    describeReading(request: AiSceneHttpRequest, value: unknown) {
+      const command = readSchema.parse(structuredClone(value)); observation(command.operation);
+      return call(request, command, async (root, body) => {
+        const selected = readSchema.parse(body), found = await target(root, selected.original, selected.operation);
+        const current = await root.policies.read(found.taskId, found.template.operation as AiTaskActionPolicyMutation['operation']);
+        await found.verify();
+        return { original: selected.original, taskId: found.taskId, operation: selected.operation, ttlMs,
+          // An existing stricter policy is preserved, never replaced with a
+          // weaker template just to make a new task readable.
+          requiredPermissions: current.state === 'observed' ? current.policy.requiredPermissions : found.template.requiredPermissions,
+          current: current.state === 'observed' ? current.policy : null };
+      });
+    },
+    configureReadingRecorded(request: AiSceneHttpRequest, value: unknown) {
+      const command = recordedSchema.parse(structuredClone(value)); observation(command.operation);
+      return call(request, command, async (root, body) => {
+        const selected = recordedSchema.parse(body), found = await target(root, selected.original, selected.operation);
+        const expiry = Date.parse(selected.expiresAt), now = root.clock().getTime();
+        if (!Number.isFinite(now) || expiry <= now || expiry > now + ttlMs) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        const existing = await root.policies.read(found.taskId, found.template.operation as AiTaskActionPolicyMutation['operation']);
+        if ((existing.state === 'observed' ? existing.policy.revision : null) !== selected.expectedRevision) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+        const requiredPermissions = existing.state === 'observed' ? existing.policy.requiredPermissions : found.template.requiredPermissions;
+        const policy = await root.policies.put({ taskId: found.taskId, operation: found.template.operation as AiTaskActionPolicyMutation['operation'],
+          requiredPermissions, expiresAt: new Date(expiry) }, selected.expectedRevision, true);
+        await found.verify(); return { original: selected.original, policy };
+      }, { write: true });
+    },
+    readReadingRecorded(request: AiSceneHttpRequest, value: unknown) {
+      const command = configureSchema.parse(structuredClone(value)); observation(command.operation);
+      return call(request, command, async (root, body) => {
+        const selected = configureSchema.parse(body), found = await target(root, selected.original, selected.operation);
+        const receipt = await root.policies.readMutation(found.taskId, found.template.operation as AiTaskActionPolicyMutation['operation'], selected.expectedRevision);
+        await found.verify(); return { original: selected.original, receipt };
+      });
+    },
+    clear(request: AiSceneHttpRequest, value: unknown) {
+      const parsed = clearSchema.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return call(request, parsed.data, async (root, command) => {
+        const input = clearSchema.parse(command), found = await target(root, input.original, input.operation);
+        const policy = await root.policies.clear(found.taskId,
+          found.template.operation as AiTaskActionPolicyMutation['operation'], input.expectedRevision);
+        await found.verify();
+        return { original: input.original, state: 'revoked' as const, policy, retryable: false as const,
+          semantics: 'new_task_actions_denied_not_remote_rollback' as const };
+      }, { write: true });
+    },
+    configure(request: AiSceneHttpRequest, value: unknown) {
+      const parsed = configureSchema.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return call(request, parsed.data, async (root, command) => {
+        const input = configureSchema.parse(command), found = await target(root, input.original, input.operation);
+        // Current manager + current original-resource access can authorize
+        // another short observation window after the creation input expires.
+        // That must not refresh input, execution, takeover or approval rights.
+        const observation = ['read_metadata', 'read_events', 'read_step_terminal'].includes(found.template.operation);
+        const now = root.clock().getTime(), expiry = observation ? now + ttlMs : Math.min(Date.parse(found.expiresAt), now + ttlMs);
+        if (!Number.isFinite(expiry) || expiry <= now) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        const policy = await root.policies.put({ taskId: found.taskId,
+          operation: found.template.operation as AiTaskActionPolicyMutation['operation'],
+          requiredPermissions: found.template.requiredPermissions, expiresAt: new Date(expiry) }, input.expectedRevision);
+        await found.verify();
+        return { original: input.original, state: 'configured' as const, policy, retryable: false as const,
+          semantics: 'action_policy_not_dispatch_or_business_approval' as const };
+      }, { write: true });
+    },
+    read(request: AiSceneHttpRequest, value: unknown) {
+      const parsed = readSchema.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return call(request, parsed.data, async (root, command) => {
+        const input = readSchema.parse(command), found = await target(root, input.original, input.operation);
+        const policy = await root.policies.read(found.taskId, found.template.operation as AiTaskActionPolicyMutation['operation']);
+        await found.verify();
+        return { original: input.original, state: policy.state, policy: policy.state === 'observed' ? policy.policy : null,
+          retryable: false as const, semantics: 'action_policy_not_dispatch_or_business_approval' as const };
+      });
+    },
+  });
+}
+
+/** Bind the existing final-order-answer read to this request's credentials.
+ * No execution configuration, Gateway, publication or runner is constructed. */
+export function composeRequestBoundOriginalOrderAnswerReader(dependencies: RequestBoundOriginalSceneDependencies,
+  options: AiSceneRequestOptions) {
+  const call = bindRequests(dependencies, options, input => {
+    const authorization = composePersistedTaskAuthorization(input), scenes = composeAiOriginalScenes(input);
+    return composeOriginalOrderAnswerReader({ ...input, tasks: authorization.tasks, originals: scenes.requests,
+      history: scenes.createHistoryReader(authorization.tasks) });
+  }, { write: false });
+  return { read: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+    call(request, value, (reader, command) => reader.read(command, signal), { write: false, signal }) };
+}
+
+/** Read an original takeover receipt without constructing a model, Gateway,
+ * budget admission or runner. Current original-resource and action permissions
+ * remain mandatory; a later clarification does not replace the referenced run. */
+export function composeRequestBoundOriginalTaskRecoveryReaders(
+  dependencies: RequestBoundOriginalSceneDependencies, options: AiSceneRequestOptions,
+  results?: { policy: ConstructorParameters<typeof AiOriginalSceneResultService>[3]; knowledge?: AiOriginalSceneKnowledgeOptions }) {
+  const resultPolicy = results ? freezeOriginalInput(gatewayTextIntentBindingSchema.parse(structuredClone(results.policy))) : undefined;
+  const knowledgeOptions = results?.knowledge;
+  const snapshotSchema = z.object({ original: originalRequestReferenceSchema,
+    runId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict();
+  const cancellationSchema = z.object({ original: originalRequestReferenceSchema,
+    expectedRevision: z.number().int().min(1).max(4294967294) }).strict();
+  const answerSchema = z.object({ original: originalRequestReferenceSchema, submission: z.unknown() }).strict();
+  const schema = z.object({ original: originalRequestReferenceSchema,
+    runId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
+    expectedTaskRevision: z.number().int().min(1).max(4294967294),
+    expectedRunRevision: z.number().int().min(1).max(4294967294),
+    expectedFencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u) }).strict();
+  const call = bindRequests(dependencies, options, input => {
+    const authorization = composePersistedTaskAuthorization(input);
+    const scenes = composeAiOriginalScenes(input);
+    // The current formal root must not construct a model/Gateway merely to
+    // reconnect. Keep the existing repositories and source-bound consumer.
+    const persistedCenter = composePersistedTaskCenter({ ...input, usageDb: input.db, performanceDb: input.db });
+    // Construct knowledge services only for actual result/source reads. These
+    // still revalidate current ACL/consent; absence never means trusted content.
+    const observationPolicy = (sceneCode = resultPolicy?.sceneCode) => {
+      if (!resultPolicy) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      // Observation does not use the order scene's policy for every saved
+      // result. Choose only a known, server-registered original scene; this
+      // grants no tools, model route, fresh plan or execution entitlement.
+      if (!['order_explanation', 'opening_diagnosis', 'quote_clarification'].includes(sceneCode ?? '')
+        || !input.creationRules.some(rule => rule.sceneCode === sceneCode)) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      return sceneCode === resultPolicy.sceneCode ? resultPolicy
+        : { ...resultPolicy, sceneCode: sceneCode!, orderExplainTool: false };
+    };
+    const resultReader = (sceneCode = resultPolicy?.sceneCode) => {
+      const selected = observationPolicy(sceneCode);
+      const knowledge = knowledgeOptions ? composeOriginalSceneKnowledge(knowledgeOptions, input, input.clock ?? (() => new Date())) : undefined;
+      const control = options.audience === 'operator' && typeof input.db.operationLog?.findFirst === 'function'
+        ? new WorkbenchModelControlRepository(input.db, authorization.authority, input.clock) : undefined;
+      return new AiOriginalSceneResultService(input.db, authorization.tasks, scenes, selected, input.clock, knowledge,
+        control ? control.readOrigin.bind(control) : undefined);
+    };
+    const originalResultReader = async (value: unknown) => {
+      const parsed = z.object({ original: originalRequestReferenceSchema }).passthrough().safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const original = await scenes.requests.readHistorical(parsed.data.original);
+      return resultReader(original.request.sceneCode);
+    };
+    const pending = async (value: unknown) => {
+      const reference = originalRequestReferenceSchema.parse(structuredClone(value));
+      const original = await scenes.requests.readHistorical(reference);
+      const policy = observationPolicy(original.request.sceneCode);
+      const scene = input.creationRules.find(rule => rule.sceneCode === original.request.sceneCode
+        && rule.sceneVersion === original.receipt.sceneVersion);
+      if (!scene) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const task = await scenes.readTaskReceipt(reference.inputRef);
+      if (task.state !== 'observed') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      if (task.status === 'waiting_input' && original.request.sceneCode === 'quote_clarification') {
+        const knowledge = knowledgeOptions ? composeOriginalSceneKnowledge(knowledgeOptions, input, input.clock ?? (() => new Date())) : undefined;
+        // The original pending reader has already checked the persisted wait,
+        // history and current resource in this read-only factory. It renews no
+        // policy and accepts no submission key or execution mode from the client.
+        const pending = await createOriginalScenePendingInputSource({ db: input.db, scenes,
+          scene: { code: scene.sceneCode, version: scene.sceneVersion }, gatewayScene: policy,
+          clock: input.clock, knowledge }, authorization.tasks, reference);
+        return pending.pending;
+      }
+      const { source } = composeOriginalSceneClarificationSource({ db: input.db, tasks: authorization.tasks, scenes,
+        scene: { code: scene.sceneCode, version: scene.sceneVersion }, gatewayScene: policy,
+        results: { read: command => resultReader(scene.sceneCode).read(command),
+          readQuoteGoalCandidates: command => resultReader(scene.sceneCode).readQuoteGoalCandidates(command) } });
+      return PrismaTaskInputRepository.pendingReader(input.db, authorization.tasks, source, input.clock).readPending(task.taskId);
+    };
+    const center = composeAiTaskCenterScene({ list: persistedCenter.list, events: persistedCenter.events,
+      usage: persistedCenter.usage, performance: persistedCenter.performance, scenes, ...(resultPolicy ? { input: { read: pending } } : {}), modelResults: {
+        read: async value => (await originalResultReader(value)).read(value),
+        reopenSource: async value => (await originalResultReader(value)).reopenSource(value)
+      } });
+    return { scenes, center, resultReader, originalResultReader, tasks: authorization.tasks, db: input.db,
+      answers: () => PrismaTaskInputRepository.receiptReader(input.db, authorization.tasks, input.clock),
+      inputCancellation: () => PrismaTaskInputRepository.releasedCancellationWitness(input.db, authorization.tasks, input.clock),
+      snapshots: new PrismaTaskRecoverySnapshotRepository(input.db, authorization.tasks),
+      transitions: new AiTaskTransitionRepository(input.db, authorization.authority, input.clock),
+      takeovers: new PrismaTaskTakeoverRepository(input.db, authorization.authority, input.clock) };
+    // This root only observes old work or submits the three explicit cancel
+    // mutations below. Their original repository transactions use the persisted
+    // original/task binding; settlement still requires its original witness.
+    // A stalled read closes its credentials and never leaves a lasting grant.
+  }, { write: false }, originalSceneTransactionAuthority);
+  const cancellation = (request: AiSceneHttpRequest, value: unknown, settled: boolean) => {
+    const parsed = cancellationSchema.safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    return call(request, parsed.data, async (root, command) => {
+      const input = cancellationSchema.parse(command), before = await root.scenes.requests.readHistorical(input.original);
+      const task = await root.scenes.readTaskReceipt(input.original.inputRef);
+      if (before.receipt.state === 'revoked' || task.state !== 'observed') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const reference = { taskId: task.taskId, expectedRevision: input.expectedRevision };
+      const receipt = settled ? await root.transitions.readCancellationSettlementReceipt(reference)
+        : await root.transitions.readCancellationReceipt(reference);
+      const after = await root.scenes.requests.readHistorical(input.original);
+      const latest = await root.scenes.readTaskReceipt(input.original.inputRef);
+      if (after.receipt.state === 'revoked' || after.receipt.contentHash !== before.receipt.contentHash
+        || originalIdentityHash(after.context) !== originalIdentityHash(before.context)
+        || latest.state !== 'observed' || latest.taskId !== task.taskId || latest.runId !== task.runId)
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      return freezeOriginalInput({ original: input.original, receipt,
+        execution: 'read_only_no_lease_or_dispatch' as const });
+    });
+  };
+  const readAnswer = (request: AiSceneHttpRequest, value: unknown, resolve: boolean) => {
+      const receiptQuery = z.union([answerSchema.extend({ submission: z.custom<import('@rental-os/shared').AiTaskInputSubmissionDraft>(isAiTaskInputSubmissionDraft) }), z.object({ original: originalRequestReferenceSchema,
+        reference: taskInputReceiptReferenceSchema }).strict()]);
+      const parsed = receiptQuery.safeParse(structuredClone(value));
+      if (!parsed.success || 'submission' in parsed.data && !isAiTaskInputSubmissionDraft(parsed.data.submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return call(request, parsed.data, async (root, command) => {
+        const input = receiptQuery.parse(command);
+        if ('submission' in input && !isAiTaskInputSubmissionDraft(input.submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        const reference = 'submission' in input ? input.submission : input.reference;
+        const before = await root.scenes.requests.readHistorical(input.original);
+        const task = await root.scenes.readTaskReceipt(input.original.inputRef);
+        if (before.receipt.state === 'revoked' || task.state !== 'observed') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        if (reference.taskId !== task.taskId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        if (resolve && !('reference' in input)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        const resolved = resolve && 'reference' in input ? await root.answers().resolveSubmissionReference(input.reference) : null;
+        const receipt = resolved ? resolved.observation : 'submission' in input ? await root.answers().readSubmission(input.submission)
+          : await root.answers().readSubmissionReference(input.reference);
+        if (receipt.state === 'observed') {
+          const access = await root.tasks.resolveAccess(task.taskId, 'read_metadata');
+          await root.db.$transaction(async tx => {
+            const row = await tx.aiTask.findFirst({ where: access.where });
+            if (!row || row.inputRef !== input.original.inputRef || row.inputHash !== before.receipt.contentHash)
+              throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+            await readTaskModelRunOrigin(tx, access, { scopeId: row.scopeId, taskId: task.taskId, runId: receipt.runId,
+              originRunId: task.runId, registrationRef: `scene-model:${input.original.inputRef}` });
+          });
+          if ((await root.tasks.resolveAccess(task.taskId, 'read_metadata')).bindingKey !== access.bindingKey)
+            throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        }
+        const after = await root.scenes.requests.readHistorical(input.original);
+        const latest = await root.scenes.readTaskReceipt(input.original.inputRef);
+        if (after.receipt.state === 'revoked' || after.receipt.contentHash !== before.receipt.contentHash
+          || originalIdentityHash(after.context) !== originalIdentityHash(before.context)
+          || latest.state !== 'observed' || latest.taskId !== task.taskId || latest.runId !== task.runId)
+          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        return freezeOriginalInput({ receipt, submission: resolved?.submission ?? null });
+      });
+  };
+  return Object.freeze({
+    readTaskPage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (root, command) => root.center.readPage(command)),
+    readTaskEvents: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (root, command) => root.center.readEvents(command)),
+    readTaskReconnect: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (root, command) => root.center.readReconnect(command)),
+    readTaskUsage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (root, command) => root.center.readUsage(command)),
+    readTaskPerformance: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      call(request, value, (root, command) => root.center.readPerformance(command), { write: false, signal }),
+    readTaskScene: (request: AiSceneHttpRequest, value: unknown) =>
+      call(request, value, (root, command) => root.center.readScene(command)),
+    readInput: (request: AiSceneHttpRequest, value: unknown) =>
+      call(request, value, async (root, command) => (await root.center.readInput({ original: command })).input),
+    readAnswer: async (request: AiSceneHttpRequest, value: unknown) => (await readAnswer(request, value, false)).receipt,
+    /** Original answer/quote receipts do not require an enabled model host.
+     * The saved answer and Run lineage locate this exact Core operation; an
+     * absent receipt never authorizes another quote or a replacement key. */
+    async readClarifiedQuoteReceipt(request: AiSceneHttpRequest, value: unknown) {
+      const currentRequest = freezeOriginalInput({ headers: { authorization: request?.headers?.authorization } });
+      const supplied = freezeOriginalInput(structuredClone(value));
+      const { receipt } = await readAnswer(currentRequest, supplied, false);
+      return call(currentRequest, supplied, async (root, command) => {
+        const parsed = z.object({ original: originalRequestReferenceSchema }).passthrough().safeParse(structuredClone(command));
+        if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        const original = parsed.data.original, before = await root.scenes.requests.readHistorical(original);
+        const task = await root.scenes.readTaskReceipt(original.inputRef);
+        if (before.request.sceneCode !== 'quote_clarification') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        if (before.receipt.state === 'revoked' || task.state !== 'observed') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        if (receipt.state !== 'observed') return freezeOriginalInput({ receipt, quotation: 'unavailable' as const });
+        if (receipt.taskId !== task.taskId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        const result = await root.scenes.tools.quote.recoverOriginal(`scene-answer:${original.inputRef}:${receipt.receiptId}`,
+          originalIdentityHash(before.context));
+        const latestAnswer = await readAnswer(currentRequest, supplied, false);
+        const after = await root.scenes.requests.readHistorical(original), latestTask = await root.scenes.readTaskReceipt(original.inputRef);
+        if (requestFingerprint(latestAnswer.receipt) !== requestFingerprint(receipt) || after.receipt.state === 'revoked'
+          || after.receipt.contentHash !== before.receipt.contentHash || after.receipt.revision !== before.receipt.revision
+          || originalIdentityHash(after.context) !== originalIdentityHash(before.context) || latestTask.state !== 'observed'
+          || latestTask.taskId !== task.taskId || latestTask.runId !== task.runId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        return freezeOriginalInput({ original: before.receipt, receipt, result,
+          observation: 'original_clarified_quote_operation_only' as const, orderApproval: 'not_granted' as const,
+          inventoryReservation: 'not_attempted' as const });
+      });
+    },
+    /** Server-internal material for explicit continuation; not an HTTP reader. */
+    resolveAnswerContinuation: async (request: AiSceneHttpRequest, value: unknown) => {
+      const result = await readAnswer(request, value, true);
+      if (!result.submission) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      return result.submission;
+    },
+    readModelResult(request: AiSceneHttpRequest, value: unknown) {
+      return call(request, value, async (root, command) => {
+        const parsed = z.object({ original: originalRequestReferenceSchema, resultId: z.string().min(1).max(191) }).strict()
+          .safeParse(structuredClone(command));
+        if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        const original = await root.scenes.requests.readHistorical(parsed.data.original);
+        return root.resultReader(original.request.sceneCode).read(parsed.data);
+      });
+    },
+    readQuoteGoalCandidates(request: AiSceneHttpRequest, value: unknown) {
+      return call(request, value, async (root, command) => {
+        const parsed = z.object({ original: originalRequestReferenceSchema,
+          resultId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict().safeParse(structuredClone(command));
+        if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        const reader = root.resultReader('quote_clarification');
+        const { routeScene: _routeScene, ...policy } = gatewayTextIntentBindingSchema.parse({
+          ...resultPolicy, sceneCode: 'quote_clarification', orderExplainTool: false });
+        return root.scenes.createQuoteGoalProjectionReader(root.tasks, reader, policy).read(parsed.data);
+      });
+    },
+    reopenModelSource(request: AiSceneHttpRequest, value: unknown) {
+      return call(request, value, async (root, command) => {
+        const parsed = z.object({ original: originalRequestReferenceSchema, resultId: z.string().min(1).max(191),
+          sourceIndex: z.number().int().min(0).max(4), sourceKind: z.enum(['order', 'knowledge']).optional() }).strict().safeParse(structuredClone(command));
+        if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        const original = await root.scenes.requests.readHistorical(parsed.data.original);
+        return root.resultReader(original.request.sceneCode).reopenSource(parsed.data);
+      });
+    },
+    reopenOpeningModelSource(request: AiSceneHttpRequest, value: unknown) {
+      return call(request, value, async (root, command) => (await root.originalResultReader(command)).reopenOpeningSection(command));
+    },
+    readRecoverySnapshot(request: AiSceneHttpRequest, value: unknown) {
+      const parsed = snapshotSchema.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return call(request, parsed.data, async (root, command) => {
+        const input = snapshotSchema.parse(command), before = await root.scenes.requests.readHistorical(input.original);
+        const task = await root.scenes.readTaskReceipt(input.original.inputRef);
+        if (before.receipt.state === 'revoked' || task.state !== 'observed') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        const snapshot = await root.snapshots.read({ taskId: task.taskId, runId: input.runId });
+        const after = await root.scenes.requests.readHistorical(input.original);
+        const latest = await root.scenes.readTaskReceipt(input.original.inputRef);
+        if (after.receipt.state === 'revoked' || after.receipt.contentHash !== before.receipt.contentHash
+          || originalIdentityHash(after.context) !== originalIdentityHash(before.context)
+          || latest.state !== 'observed' || latest.taskId !== task.taskId || latest.runId !== task.runId
+          || snapshot.task.taskId !== task.taskId || snapshot.run.runId !== input.runId)
+          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        const response: AiSceneModelRecoverySnapshotReadResponse = { contractVersion: AI_TASK_RECOVERY_READ_VERSION,
+          original: input.original, snapshot,
+          execution: 'read_only_no_lease_or_dispatch' as const,
+          resources: 'task_cumulative_not_new_allowance' as const };
+        if (Buffer.byteLength(JSON.stringify(response), 'utf8') > 524288) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        return freezeOriginalInput(response);
+      });
+    },
+    /** Stopping original work must not construct a fresh financial/model
+     * admission. Only record the current authorized cancellation intent;
+     * settlement still requires the existing runner/input witness. */
+    requestCancellationIntent(request: AiSceneHttpRequest, value: unknown) {
+      const parsed = cancellationSchema.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return call(request, parsed.data, async (root, command) => {
+        const input = cancellationSchema.parse(command), before = await root.scenes.requests.readHistorical(input.original);
+        const task = await root.scenes.readTaskReceipt(input.original.inputRef);
+        if (before.receipt.state === 'revoked' || task.state !== 'observed') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        const receipt = await root.transitions.transition({ taskId: task.taskId, expectedRevision: input.expectedRevision,
+          to: 'cancel_requested', reason: 'cancel_requested' });
+        const after = await root.scenes.requests.readHistorical(input.original);
+        const latest = await root.scenes.readTaskReceipt(input.original.inputRef);
+        if (after.receipt.state === 'revoked' || after.receipt.contentHash !== before.receipt.contentHash
+          || originalIdentityHash(after.context) !== originalIdentityHash(before.context)
+          || latest.state !== 'observed' || latest.taskId !== task.taskId || latest.runId !== task.runId)
+          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        return freezeOriginalInput({ receipt, cancellation: 'requested_not_rollback' as const,
+          settlement: null, settlementState: 'not_attempted' as const });
+      }, { write: true });
+    },
+    /** This does not cancel started work or release any financial reservation. */
+    settleUnstartedCancellation(request: AiSceneHttpRequest, value: unknown) {
+      const parsed = cancellationSchema.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return call(request, parsed.data, async (root, command) => {
+        const input = cancellationSchema.parse(command), before = await root.scenes.requests.readHistorical(input.original);
+        const task = await root.scenes.readTaskReceipt(input.original.inputRef);
+        if (before.receipt.state === 'revoked' || task.state !== 'observed') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        const receipt = await root.transitions.settleUnstartedCancellation({ taskId: task.taskId,
+          expectedRevision: input.expectedRevision, to: 'cancelled', reason: 'cancel_settled' }, task.runId);
+        const after = await root.scenes.requests.readHistorical(input.original);
+        const latest = await root.scenes.readTaskReceipt(input.original.inputRef);
+        if (after.receipt.state === 'revoked' || after.receipt.contentHash !== before.receipt.contentHash
+          || originalIdentityHash(after.context) !== originalIdentityHash(before.context)
+          || latest.state !== 'observed' || latest.taskId !== task.taskId || latest.runId !== task.runId)
+          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        return freezeOriginalInput({ original: input.original, receipt,
+          cancellation: 'unstarted_task_cancelled_not_business_rollback' as const, automaticRetry: false as const });
+      }, { write: true });
+    },
+    readCancellationReceipt: (request: AiSceneHttpRequest, value: unknown) => cancellation(request, value, false),
+    /** Close only the original released, fully measured clarification wait.
+     * Its persisted witness is checked under the aggregate task CAS lock. */
+    settleReleasedInputCancellation(request: AiSceneHttpRequest, value: unknown) {
+      const parsed = cancellationSchema.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return call(request, parsed.data, async (root, command) => {
+        const input = cancellationSchema.parse(command), before = await root.scenes.requests.readHistorical(input.original);
+        const task = await root.scenes.readTaskReceipt(input.original.inputRef);
+        if (before.receipt.state === 'revoked' || task.state !== 'observed') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        const receipt = await root.transitions.settleInputCancellation({ taskId: task.taskId,
+          expectedRevision: input.expectedRevision, to: 'cancelled', reason: 'cancel_settled' }, root.inputCancellation());
+        const after = await root.scenes.requests.readHistorical(input.original);
+        const latest = await root.scenes.readTaskReceipt(input.original.inputRef);
+        if (after.receipt.state === 'revoked' || after.receipt.contentHash !== before.receipt.contentHash
+          || originalIdentityHash(after.context) !== originalIdentityHash(before.context)
+          || latest.state !== 'observed' || latest.taskId !== task.taskId || latest.runId !== task.runId)
+          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        return freezeOriginalInput({ original: input.original, receipt,
+          cancellation: 'released_input_wait_cancelled_not_business_rollback' as const,
+          resourceRelease: 'not_attempted' as const, automaticRetry: false as const });
+      }, { write: true });
+    },
+    readCancellationSettlementReceipt: (request: AiSceneHttpRequest, value: unknown) => cancellation(request, value, true),
+    readTakeoverReceipt(request: AiSceneHttpRequest, value: unknown) {
+      const parsed = schema.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return call(request, parsed.data, async (root, command) => {
+        const input = schema.parse(command);
+        const before = await root.scenes.requests.readHistorical(input.original);
+        const task = await root.scenes.readTaskReceipt(input.original.inputRef);
+        if (before.receipt.state === 'revoked' || task.state !== 'observed') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        const { original: _reference, ...generation } = input;
+        const receipt = await root.takeovers.readReceipt({ ...generation, taskId: task.taskId });
+        const after = await root.scenes.requests.readHistorical(input.original);
+        const latest = await root.scenes.readTaskReceipt(input.original.inputRef);
+        if (after.receipt.state === 'revoked' || after.receipt.contentHash !== before.receipt.contentHash
+          || originalIdentityHash(after.context) !== originalIdentityHash(before.context)
+          || latest.state !== 'observed' || latest.taskId !== task.taskId || latest.runId !== task.runId)
+          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        return freezeOriginalInput({ original: input.original, receipt,
+          execution: 'read_only_no_lease_or_dispatch' as const });
+      });
+    },
+  });
+}
+
+/** Original-operation consumer; transport accepts only original ref + callId,
+ * never a model-selected tool, actor, reservation or execution grant. Resolve
+ * pricing from the owned persisted call, never the current model selection.
+ * Accounting may close an old balance but cannot start/resume a run or dispatch.
+ * Unknown dispatch/usage remains with the same ledger's evidence checks. */
+export function composeRequestBoundOriginalTaskAccounting(
+  dependencies: RequestBoundOriginalSceneDependencies, options: AiSceneRequestOptions) {
+  const schema = z.object({ original: originalRequestReferenceSchema,
+    callId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u) }).strict();
+  const operationSchema = schema.extend({ operation: z.enum(['releaseUnsent', 'reconcile']) }).strict();
+  const call = bindRequests(dependencies, options, input => input);
+  function use(request: AiSceneHttpRequest, value: unknown, operation: 'read' | 'releaseUnsent' | 'reconcile',
+    signal?: AbortSignal): Promise<AiOriginalTaskAccountingResponseDraft>;
+  function use(request: AiSceneHttpRequest, value: unknown, operation: 'readOperation',
+    signal?: AbortSignal): Promise<AiOriginalTaskAccountingOperationResponseDraft>;
+  function use(request: AiSceneHttpRequest, value: unknown, operation: 'read' | 'releaseUnsent' | 'reconcile' | 'readOperation',
+    signal?: AbortSignal): Promise<AiOriginalTaskAccountingResponseDraft | AiOriginalTaskAccountingOperationResponseDraft> {
+    const selectedSchema = operation === 'readOperation' ? operationSchema : schema;
+    const parsed = selectedSchema.safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    return call(request, parsed.data, async (input, raw) => {
+      const command = selectedSchema.parse(raw), scenes = composeAiOriginalScenes(input);
+      const original = await scenes.requests.readHistorical(command.original);
+      const task = await scenes.readTaskReceipt(command.original.inputRef);
+      if (original.receipt.state === 'revoked' || task.state !== 'observed') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const authorization = composePersistedTaskAuthorization(input);
+      const current = await authorization.authority.resolve(task.taskId, 'read_step_terminal');
+      const scope = await authorization.scopes.resolveCurrent();
+      if (scope.scope.kind !== 'WORKSPACE' || current.actor.kind !== 'user'
+        || originalIdentityHash(current) !== originalIdentityHash(original.context)
+        || originalIdentityHash(scope.context) !== originalIdentityHash(current)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      const invocation = structuredClone(await input.db.aiGatewayInvocation.findUnique({ where: {
+        scopeId_callId: { scopeId: scope.scope.id, callId: command.callId } },
+        select: { id: true, scopeId: true, taskId: true, actorId: true, callId: true, priceVersion: true } }));
+      if (!invocation || invocation.scopeId !== scope.scope.id || invocation.taskId !== task.taskId
+        || invocation.actorId !== current.actor.userId || invocation.callId !== command.callId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      const reservation = structuredClone(await input.db.aiBudgetReservation.findUnique({ where: {
+        scopeId_scopeKind_callId: { scopeId: scope.scope.id, scopeKind: 'WORKSPACE', callId: command.callId } },
+        select: { id: true, scopeId: true, scopeKind: true, tenantId: true, workspaceId: true, actorId: true,
+          callId: true, priceVersion: true, unitKind: true } }));
+      // No replacement reserve when an acknowledgement or link is missing.
+      if (!reservation) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+      if (reservation.scopeId !== scope.scope.id || reservation.scopeKind !== 'WORKSPACE'
+        || reservation.tenantId !== scope.scope.tenantId || reservation.workspaceId !== scope.scope.workspaceId
+        || reservation.actorId !== current.actor.userId || reservation.callId !== invocation.callId
+        || reservation.priceVersion !== invocation.priceVersion || !['calls', 'tokens', 'money'].includes(reservation.unitKind))
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      const verify = async () => {
+        const latest = await scenes.requests.readHistorical(command.original);
+        const latestTask = await scenes.readTaskReceipt(command.original.inputRef);
+        const authority = await authorization.authority.resolve(task.taskId, 'read_step_terminal');
+        if (latest.receipt.state === 'revoked' || latest.receipt.contentHash !== original.receipt.contentHash
+          || originalIdentityHash(latest.context) !== originalIdentityHash(original.context)
+          || originalIdentityHash(authority) !== originalIdentityHash(current)
+          || latestTask.state !== 'observed' || latestTask.taskId !== task.taskId || latestTask.runId !== task.runId)
+          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      };
+      let returnedMutation = false;
+      try {
+        await verify();
+        if (signal?.aborted) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+        const recovery = composePersistedTaskAccountingRecovery({ db: input.db, auth: input.auth,
+          credentials: input.credentials, subscriptions: input.subscriptions, guard: input.guard,
+          taskId: task.taskId, clock: input.clock, pricing: {
+            kind: reservation.unitKind === 'calls' ? 'calls' : 'recorded', priceVersion: invocation.priceVersion } });
+        if (operation === 'readOperation') {
+          const query = operationSchema.parse(command);
+          const receipt = structuredClone(await recovery.readOperation({ reservationId: reservation.id, operation: query.operation }));
+          await verify();
+          if (receipt.operation !== query.operation || !['observed', 'not_observed'].includes(receipt.status)
+            || (receipt.status === 'observed') !== (receipt.record !== null)
+            || receipt.record && (receipt.record.id !== reservation.id || receipt.record.callId !== invocation.callId))
+            throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+          return freezeOriginalInput({ original: command.original, callId: invocation.callId, taskId: task.taskId,
+            reservationId: reservation.id, operation: query.operation, status: receipt.status,
+            execution: 'read_only_no_dispatch_or_release' as const, automaticRetry: false as const,
+            semantics: 'original_accounting_operation_not_current_balance' as const });
+        }
+        const record = operation === 'read' ? await recovery.readCall({ callId: invocation.callId })
+          : await recovery[operation]({ reservationId: reservation.id });
+        returnedMutation = operation !== 'read';
+        await verify();
+        if (record.id !== reservation.id || record.callId !== invocation.callId) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+        return freezeOriginalInput({ draftVersion: command.original.draftVersion, original: command.original,
+          taskId: task.taskId, record: presentTaskBudgetUsageRecord(invocation, record), execution: 'not_invoked' as const,
+          accounting: operation === 'read' ? 'observed' as const : 'original_operation_only' as const,
+          automaticRetry: false as const, businessExecution: 'not_inferred_from_usage' as const, admission: 'not_granted' as const });
+      } catch (error) {
+        if (returnedMutation || error instanceof BudgetError && error.code === 'PENDING_RECONCILIATION')
+          throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+        if (error instanceof BudgetError) throw new AiTaskRepositoryError(error.code === 'FORBIDDEN'
+          ? 'AI_ACCESS_DENIED' : error.code === 'INVALID' ? 'AI_INVALID_INPUT' : 'AI_RESOURCE_UNAVAILABLE');
+        throw error;
+      }
+    }, { write: operation === 'releaseUnsent' || operation === 'reconcile', signal });
+  }
+  return Object.freeze({ read: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => use(request, value, 'read', signal),
+    releaseUnsent: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => use(request, value, 'releaseUnsent', signal),
+    reconcile: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => use(request, value, 'reconcile', signal),
+    readOperation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => use(request, value, 'readOperation', signal) });
+}
+
+export type RequestBoundPersistedOriginalSceneModelDependencies =
+  Omit<RequestBoundOriginalSceneModelDependencies, 'runtime' | 'priceVersion' | 'kind' | 'inputCounting'> & {
+    /** Server-owned configuration. No request may choose a provider or task. */
+    gateway: Pick<PersistedTaskCallGatewayDependencies,
+      'secrets' | 'platformProfileId' | 'routeScene' | 'callPriceVersion' | 'adapters' | 'nativeProtocol' | 'audit' | 'capacity'>
+      | Pick<PersistedTaskGatewayDependencies,
+        'secrets' | 'platformProfileId' | 'routeScene' | 'pricing' | 'adapters' | 'nativeProtocol' | 'audit' | 'inputCounting' | 'capacity'>;
+  };
+
+/** Formal original-reference model actions. Resolve the current original task
+ * before constructing its real persisted Gateway/financial evidence producer.
+ * The existing scene input, continuation, plan, runner and result consumers
+ * remain the only execution chain. Construction does not call or claim work.
+ * Business-only task-center readers remain in the existing scene entrypoint.
+ */
+export function composeRequestBoundPersistedOriginalSceneModel(
+  dependencies: RequestBoundPersistedOriginalSceneModelDependencies,
+  options: AiSceneRequestOptions & { host: AiTaskApplicationHost;
+    clock?: AiOriginalSceneRunDependencies['clock']; monotonic?: AiOriginalSceneRunDependencies['monotonic'];
+    /** Actual standard-host publication and database, never a request option. */
+    inputContinuation?: OriginalInputContinuationConfiguration;
+    /** Server configuration only. Absence preserves the original single model. */
+    orderReadChain?: { enabled: true; inputSource?: AiTaskInputSource; answerRoundTrip?: true } }) {
+  if (!dependencies.gateway || dependencies.gateway.routeScene !== dependencies.gatewayScene.routeScene
+    || 'runtime' in dependencies || 'priceVersion' in dependencies || 'kind' in dependencies || 'inputCounting' in dependencies
+    || 'runServices' in options) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  const { host, clock, monotonic, orderReadChain, inputContinuation, ...requestOptions } = options;
+  if (inputContinuation && (!Object.is(inputContinuation.db, dependencies.db)
+    || typeof inputContinuation.currentRuntimeEnabled !== 'function' || dependencies.scene.code !== 'quote_clarification'))
+    throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  if (orderReadChain && (orderReadChain.enabled !== true || dependencies.scene.code !== 'order_explanation'
+    || orderReadChain.answerRoundTrip !== undefined && orderReadChain.answerRoundTrip !== true
+    || dependencies.gatewayScene.orderExplainTool !== true || dependencies.gatewayScene.structuredOutput
+    || orderReadChain.inputSource !== undefined && (typeof orderReadChain.inputSource?.resolve !== 'function'
+      || typeof orderReadChain.inputSource?.validateAnswers !== 'function'))) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  const orderSource = orderReadChain?.inputSource ? Object.freeze({
+    resolve: orderReadChain.inputSource.resolve.bind(orderReadChain.inputSource),
+    validateAnswers: orderReadChain.inputSource.validateAnswers.bind(orderReadChain.inputSource)
+  }) : undefined;
+  const answerRoundTrip = orderReadChain?.answerRoundTrip === true;
+  const serverHost = freezeOriginalInput(structuredClone(host));
+  const { gateway, ...sceneDependencies } = dependencies;
+  const recoveryReaders = composeRequestBoundOriginalTaskRecoveryReaders(sceneDependencies, requestOptions,
+    { policy: dependencies.gatewayScene, knowledge: dependencies.knowledge });
+  const accounting = composeRequestBoundOriginalTaskAccounting(sceneDependencies, requestOptions);
+  if ('pricing' in gateway && 'callPriceVersion' in gateway) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  const serverGateway = Object.freeze({ ...gateway,
+    ...(gateway.adapters === undefined ? {} : { adapters: Object.freeze([...gateway.adapters]) }),
+    ...('pricing' in gateway ? { pricing: freezeOriginalInput(structuredClone(gateway.pricing)),
+      ...(gateway.inputCounting ? { inputCounting: freezeOriginalInput(structuredClone(gateway.inputCounting)) } : {}) } : {}) });
+  const assemble = async (input: typeof sceneDependencies & { credentials: AiTaskCredentialSource }, command: unknown,
+    inputWaitMode?: OriginalSceneInputWaitMode) => {
+    const raw = command && typeof command === 'object' && 'original' in command ? command.original : command;
+    const parsed = originalRequestReferenceSchema.safeParse(raw);
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const reference = freezeOriginalInput(parsed.data), scenes = composeAiOriginalScenes(input);
+    const original = await scenes.requests.readHistorical(reference);
+    // Construction only observes the current original resource. The real start
+    // and input source retain their own execution checks; requiring a fresh
+    // creation window here would also block historical input/result readers.
+    const task = await scenes.readTaskReceipt(reference.inputRef);
+    if (task.state !== 'observed' || original.receipt.state === 'revoked'
+      || original.request.sceneCode !== input.scene.code || original.receipt.sceneVersion !== input.scene.version) {
+      throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    }
+    const gatewayDependencies = { ...serverGateway, db: input.db, auth: input.auth,
+      credentials: input.credentials, subscriptions: input.subscriptions, guard: input.guard,
+      taskId: task.taskId, clock: input.clock };
+    const persisted = 'pricing' in serverGateway
+      ? composePersistedTaskGateway({ ...gatewayDependencies, pricing: serverGateway.pricing! })
+      : composePersistedTaskCallGateway({ ...gatewayDependencies, callPriceVersion: serverGateway.callPriceVersion });
+    const model = composeAiOriginalSceneModel({ ...input, runtime: persisted.runtime, priceVersion: persisted.priceVersion,
+      ...(inputWaitMode ? { inputWaitMode } : {}),
+      ...(persisted.inputCounting ? { inputCounting: persisted.inputCounting } : {}) });
+    const orderApplication = orderReadChain ? model.createModelOrderApplication(serverHost, {
+      inputSource: orderSource, financialEvidence: persisted.financialEvidence, clock, monotonic },
+      answerRoundTrip ? { answerRoundTrip: true } : undefined) : undefined;
+    // Clarification and quote actions retain separate protocols. Control and
+    // receipts belong to this original chain, never the single-model fallback.
+    // Unsupported actions reject, never silently run the old single-model host.
+    const unsupported = async (): Promise<never> => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); };
+    const application = orderApplication ? { ...orderApplication,
+      readInput: unsupported, refreshInput: unsupported, submitAnswer: unsupported, resume: unsupported,
+      continueAnswer: unsupported, readQuotePreparation: unsupported, confirmClarifiedQuote: unsupported,
+      readClarifiedQuoteReceipt: unsupported,
+      reconcile: orderApplication.recover, readExecution: orderApplication.readScene }
+      : model.createApplication(serverHost, { inputSource: 'original_scene',
+        financialEvidence: persisted.financialEvidence, clock, monotonic });
+    const after = await scenes.requests.readHistorical(reference), latest = await scenes.readTaskReceipt(reference.inputRef);
+    if (after.receipt.state === 'revoked' || originalIdentityHash(original.context) !== originalIdentityHash(after.context)
+      || original.receipt.contentHash !== after.receipt.contentHash || latest.state !== 'observed'
+      || latest.taskId !== task.taskId || latest.runId !== task.runId || latest.revision !== task.revision) {
+      throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    }
+    return Object.freeze({ ...application,
+      readModelResult: orderApplication ? orderApplication.readModelResult : model.readModelResult,
+      reopenModelSource: orderApplication ? orderApplication.reopenOrderSource : model.reopenModelSource,
+      readOrderResult: orderApplication?.readOrderResult ?? unsupported,
+      readTaskScene: orderApplication?.readScene ?? unsupported,
+      readNextSteps: orderApplication?.readNextSteps ?? unsupported,
+      readTakeoverReceipt: orderApplication?.readTakeoverReceipt ?? unsupported,
+      readCancellationReceipt: orderApplication?.readCancellationReceipt ?? unsupported,
+      settleUnstartedCancellation: orderApplication?.settleUnstartedCancellation ?? unsupported,
+      readCancellationSettlementReceipt: orderApplication?.readCancellationSettlementReceipt ?? unsupported,
+      readPreparation: orderApplication?.readPreparation ?? unsupported,
+      resumePrepared: orderApplication?.resumePrepared ?? unsupported,
+      readTaskSnapshot: (value: unknown) => readOriginalTaskSnapshot(scenes, composePersistedTaskCenter(input).events, value) });
+  };
+  const call = bindRequests(sceneDependencies, requestOptions, assemble, { write: false }, originalSceneTransactionAuthority);
+  const originalInputCall = bindRequests(sceneDependencies, requestOptions, input => input, undefined, originalSceneTransactionAuthority);
+  const callWaiting = <R>(request: AiSceneHttpRequest, value: unknown, intent: TaskInputAdmissionIntent,
+    consume: (app: Awaited<ReturnType<typeof assemble>>, command: unknown) => Promise<R>, signal?: AbortSignal): Promise<R> => {
+    if (!inputContinuation) return call(request, value, consume, { write: true, signal, preflightOnly: true });
+    // Issuance belongs to the explicit write interval, never the binder's pure
+    // construction timeout. The same request credentials survive into the host.
+    return originalInputCall(request, value, async (input, command) => {
+      const mode = await prepareOriginalInputContinuation(input, command, intent, inputContinuation, signal);
+      const app = await waitForTaskApplicationDependency(() => assemble(input, command, mode), false, signal);
+      return consume(app, command);
+    }, { write: true, signal, preflightOnly: true });
+  };
+  return Object.freeze({
+    readOriginalAccounting: accounting.read,
+    releaseOriginalUnsentAccounting: accounting.releaseUnsent,
+    reconcileOriginalAccounting: accounting.reconcile,
+    readTaskPage: recoveryReaders.readTaskPage,
+    readTaskEvents: recoveryReaders.readTaskEvents,
+    readTaskReconnect: recoveryReaders.readTaskReconnect,
+    readTaskUsage: recoveryReaders.readTaskUsage,
+    readTaskPerformance: recoveryReaders.readTaskPerformance,
+    readRecoverySnapshot: recoveryReaders.readRecoverySnapshot,
+    requestCancellationIntent: recoveryReaders.requestCancellationIntent,
+    settleReleasedInputCancellation: recoveryReaders.settleReleasedInputCancellation,
+    readTakeoverReceipt: recoveryReaders.readTakeoverReceipt,
+    settleUnstartedCancellation: recoveryReaders.settleUnstartedCancellation,
+    readCancellationReceipt: recoveryReaders.readCancellationReceipt,
+    readCancellationSettlementReceipt: recoveryReaders.readCancellationSettlementReceipt,
+    readOrderReadChainTakeoverReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTakeoverReceipt(command)),
+    readOrderReadChainCancellationReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readCancellationReceipt(command)),
+    settleOrderReadChainUnstartedCancellation: (request: AiSceneHttpRequest, value: unknown) => call(request, value,
+      (app, command) => app.settleUnstartedCancellation(command), { write: true }),
+    readOrderReadChainCancellationSettlementReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readCancellationSettlementReceipt(command)),
+    ...(orderReadChain ? {
+      readOrderResult: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readOrderResult(command)),
+      readTaskScene: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskScene(command)),
+      readNextSteps: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readNextSteps(command)),
+      readPreparation: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readPreparation(command)),
+      resumePrepared: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+        (app, command) => app.resumePrepared(command, signal), { write: true, signal, preflightOnly: true }),
+      readTaskSnapshot: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskSnapshot(command))
+    } : {}),
+    start: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      call(request, value, async (app, command) => await app.start(command, signal),
+        { write: true, signal, preflightOnly: true }),
+    readInput: recoveryReaders.readInput,
+    refreshInput: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.refreshInput(command), { write: true }),
+    resume: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      callWaiting(request, value, 'explicit_wait_resume', (app, command) => app.resume(command, signal), signal),
+    readAnswer: recoveryReaders.readAnswer,
+    submitAnswer: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      callWaiting(request, value, 'explicit_wait_submit', (app, command) => app.submitAnswer(command), signal),
+    readModelResult: recoveryReaders.readModelResult,
+    readQuoteGoalCandidates: recoveryReaders.readQuoteGoalCandidates,
+    reopenModelSource: recoveryReaders.reopenModelSource,
+    reopenOpeningModelSource: recoveryReaders.reopenOpeningModelSource,
+    readOrderReadChainAnswer: (request: AiSceneHttpRequest, value: unknown) => call(request, value, async (app, command) => await app.readAnswer(command)),
+    readOrderReadChainModelResult: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readModelResult(command)),
+    reopenOrderReadChainSource: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.reopenModelSource(command)),
+    readQuotePreparation: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readQuotePreparation(command)),
+    confirmClarifiedQuote: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.confirmClarifiedQuote(command), { write: true }),
+    readClarifiedQuoteReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readClarifiedQuoteReceipt(command)),
+    continueAnswer: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      callWaiting(request, value, 'explicit_answer_continue', (app, command) => app.continueAnswer(command, signal), signal),
+    reconcile: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      call(request, value, async (app, command) => await app.reconcile(command, signal), { write: true, signal, preflightOnly: true, originalRecovery: true }),
+    recover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal, exact?: Readonly<TaskCenterRecoveryFence>) => {
+      const fence = exact === undefined ? undefined : snapshotTaskCenterRecoveryFence(exact);
+      return call(request, value, async (app, command) => await app.recover(command, signal, fence),
+        { write: true, signal, preflightOnly: true, originalRecovery: true });
+    },
+    readExecution: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readExecution(command)),
+    takeover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal, exact?: Readonly<TaskCenterRecoveryFence>) => {
+      const fence = exact === undefined ? undefined : snapshotTaskCenterRecoveryFence(exact);
+      return call(request, value, async (app, command) => await app.takeover(command, signal, fence),
+        { write: true, signal, preflightOnly: true });
+    },
+    requestCancel: (request: AiSceneHttpRequest, value: unknown) => call(request, value,
+      async (app, command) => await app.requestCancel(command), { write: true })
+  });
+}
+
+/** One dedicated original order chain for both explicit modules and Nest's
+ * standard application provider. Never bind the legacy single-model driver. */
+export function composeRequestBoundPersistedOriginalOrderRead(dependencies: RequestBoundPersistedOriginalSceneModelDependencies,
+  options: Parameters<typeof composeRequestBoundPersistedOriginalSceneModel>[1] & {
+    orderReadChain: NonNullable<Parameters<typeof composeRequestBoundPersistedOriginalSceneModel>[1]['orderReadChain']>
+  }) {
+  if (!options?.orderReadChain) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  const app = composeRequestBoundPersistedOriginalSceneModel(dependencies, options);
+  return Object.freeze({ ...app, readAnswer: app.readOrderReadChainAnswer,
+    readModelResult: app.readOrderReadChainModelResult, reopenModelSource: app.reopenOrderReadChainSource,
+    readTakeoverReceipt: app.readOrderReadChainTakeoverReceipt,
+    readCancellationReceipt: app.readOrderReadChainCancellationReceipt,
+    settleUnstartedCancellation: app.settleOrderReadChainUnstartedCancellation,
+    readCancellationSettlementReceipt: app.readOrderReadChainCancellationSettlementReceipt });
+}
+
+export function composeRequestBoundOriginalSceneModel(dependencies: RequestBoundOriginalSceneModelDependencies,
+  options: AiSceneModelRequestOptions) {
+  const { host, runServices, quoteTask, settingsTask, ...requestOptions } = options;
+  if (typeof runServices !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  if (quoteTask && ('credentials' in quoteTask.dependencies || 'originals' in quoteTask.dependencies
+    || quoteTask.dependencies.db !== dependencies.db || quoteTask.dependencies.auth !== dependencies.auth
+    || quoteTask.dependencies.guard !== dependencies.guard || quoteTask.dependencies.core !== dependencies.core)) {
+    throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  }
+  if (settingsTask && ('credentials' in settingsTask.dependencies
+    || settingsTask.dependencies.db !== dependencies.db || settingsTask.dependencies.auth !== dependencies.auth
+    || settingsTask.dependencies.guard !== dependencies.guard || settingsTask.dependencies.core !== dependencies.core)) {
+    throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  }
+  const business = quoteTask ? { dependencies: { ...quoteTask.dependencies }, configuration: {
+    ...quoteTask.configuration, host: structuredClone(quoteTask.configuration.host),
+    limits: structuredClone(quoteTask.configuration.limits) } } : undefined;
+  const settingsBusiness = settingsTask ? { dependencies: { ...settingsTask.dependencies,
+    scene: structuredClone(settingsTask.dependencies.scene) }, configuration: {
+    host: structuredClone(settingsTask.configuration.host), task: structuredClone(settingsTask.configuration.task) } } : undefined;
+  const settingsRequests = settingsBusiness ? composeRequestBoundSettingsTask(settingsBusiness.dependencies,
+    { ...requestOptions, ...settingsBusiness.configuration }) : undefined;
+  const requireSettingsRequests = () => {
+    if (!settingsRequests) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    return settingsRequests;
+  };
+  const serverHost = Object.freeze(structuredClone(host));
+  const recoveryReaders = composeRequestBoundOriginalTaskRecoveryReaders(dependencies, requestOptions,
+    { policy: dependencies.gatewayScene, knowledge: dependencies.knowledge });
+  const call = bindRequests(dependencies, requestOptions, input => {
+    const model = composeAiOriginalSceneModel(input);
+    // A business-only read must not construct model execution dependencies.
+    // Resolve them only for an actual model action or pending-input read.
+    let application: ReturnType<typeof model.createApplication> | undefined;
+    const modelApplication = () => application ??= model.createApplication(serverHost, runServices(input));
+    const persisted = composePersistedTaskCenter({ ...input, usageDb: input.db });
+    const quote = business ? composeQuoteTaskCenterReaders({ ...business.dependencies,
+      credentials: input.credentials, originals: model.scenes.requests }, business.configuration) : {};
+    const settingsHost = settingsBusiness ? composeTaskSettingsHost({ ...settingsBusiness.dependencies,
+      credentials: input.credentials, host: settingsBusiness.configuration.host, task: settingsBusiness.configuration.task }) : undefined;
+    const settings = settingsHost && settingsBusiness ? composeAiSettingsBusinessConsumer({ ...settingsBusiness.dependencies,
+      credentials: input.credentials, settingsHost }) : undefined;
+    const center = composeAiTaskCenterScene({ list: persisted.list, events: persisted.events, usage: persisted.usage,
+      ...quote, ...(settings ? { settings } : {}),
+      scenes: model.scenes, modelResults: { read: model.readModelResult, reopenSource: model.reopenModelSource },
+      input: { read: value => modelApplication().readInput(value) } });
+    return { model, get application() { return modelApplication(); }, center,
+      readTaskSnapshot: (value: unknown) => readOriginalTaskSnapshot(model.scenes, persisted.events, value) };
+  }, { write: false }, originalSceneTransactionAuthority);
+  return Object.freeze({
+    readTakeoverReceipt: recoveryReaders.readTakeoverReceipt,
+    readRecoverySnapshot: recoveryReaders.readRecoverySnapshot,
+    requestCancellationIntent: recoveryReaders.requestCancellationIntent,
+    settleUnstartedCancellation: recoveryReaders.settleUnstartedCancellation,
+    settleReleasedInputCancellation: recoveryReaders.settleReleasedInputCancellation,
+    readCancellationReceipt: recoveryReaders.readCancellationReceipt,
+    readCancellationSettlementReceipt: recoveryReaders.readCancellationSettlementReceipt,
+    startSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      requireSettingsRequests().startSettingsTask(request, value, signal),
+    readTaskPerformance: recoveryReaders.readTaskPerformance,
+    readSettingsConfirmation: (request: AiSceneHttpRequest, value: unknown) =>
+      requireSettingsRequests().readSettingsConfirmation(request, value),
+    decideSettingsProposal: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      requireSettingsRequests().decideSettingsProposal(request, value, signal),
+    readSettingsDecision: (request: AiSceneHttpRequest, value: unknown) =>
+      requireSettingsRequests().readSettingsDecision(request, value),
+    continueSettingsConfirmation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      requireSettingsRequests().continueSettingsConfirmation(request, value, signal),
+    reconcileSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      requireSettingsRequests().reconcileSettingsTask(request, value, signal),
+    cancelSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      requireSettingsRequests().cancelSettingsTask(request, value, signal),
+    readTaskPage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.center.readPage(command)),
+    readTaskSnapshot: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskSnapshot(command)),
+    readTaskEvents: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.center.readEvents(command)),
+    readTaskReconnect: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.center.readReconnect(command)),
+    readTaskUsage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.center.readUsage(command)),
+    readTaskScene: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.center.readScene(command)),
+    reopenOrderCitation: (request: AiSceneHttpRequest, value: unknown) =>
+      call(request, value, (app, command) => app.model.scenes.reopenOrderCitation(command)),
+    prepareOrderManualHandoff: (request: AiSceneHttpRequest, value: unknown) =>
+      call(request, value, (app, command) => app.model.scenes.prepareOrderManualHandoff(command)),
+    readQuoteCatalog: (request: AiSceneHttpRequest, value: unknown) =>
+      call(request, value, (app, command) => app.model.scenes.readQuoteCatalog(command)),
+    compareOriginalQuotes: (request: AiSceneHttpRequest, value: unknown) =>
+      call(request, value, (app, command) => app.model.scenes.compareOriginalQuotes(command)),
+    prepareOpeningSections: (request: AiSceneHttpRequest, value: unknown) =>
+      call(request, value, (app, command) => app.model.scenes.prepareOpeningSections(command)),
+    readOpeningSection: (request: AiSceneHttpRequest, value: unknown) =>
+      call(request, value, (app, command) => app.model.scenes.readOpeningSection(command)),
+    readRecovery: (request: AiSceneHttpRequest, value: unknown) =>
+      call(request, value, (app, command) => app.model.scenes.readRecovery(command)),
+    reviewQuote: (request: AiSceneHttpRequest, value: unknown) =>
+      call(request, value, (app, command) => app.model.scenes.reviewQuote(command)),
+    readQuoteReceipt: (request: AiSceneHttpRequest, value: unknown) =>
+      call(request, value, (app, command) => app.model.scenes.readQuoteReceipt(command)),
+    start: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      call(request, value, (app, command) => app.application.start(command, signal), { write: true, signal, preflightOnly: true }),
+    readInput: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.application.readInput(command)),
+    refreshInput: (request: AiSceneHttpRequest, value: unknown) => call(request, value,
+      (app, command) => app.application.refreshInput(command), { write: true }),
+    resume: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      call(request, value, (app, command) => app.application.resume(command, signal), { write: true, signal, preflightOnly: true }),
+    readAnswer: recoveryReaders.readAnswer,
+    submitAnswer: (request: AiSceneHttpRequest, value: unknown) =>
+      call(request, value, (app, command) => app.application.submitAnswer(command), { write: true }),
+    readQuotePreparation: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.application.readQuotePreparation(command)),
+    confirmClarifiedQuote: (request: AiSceneHttpRequest, value: unknown) => call(request, value,
+      (app, command) => app.application.confirmClarifiedQuote(command), { write: true }),
+    readClarifiedQuoteReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.application.readClarifiedQuoteReceipt(command)),
+    continueAnswer: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      call(request, value, (app, command) => app.application.continueAnswer(command, signal), { write: true, signal, preflightOnly: true }),
+    reconcile: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      call(request, value, (app, command) => app.application.reconcile(command, signal), { write: true, signal, preflightOnly: true, originalRecovery: true }),
+    recover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal, exact?: Readonly<TaskCenterRecoveryFence>) => {
+      const fence = exact === undefined ? undefined : snapshotTaskCenterRecoveryFence(exact);
+      return call(request, value, (app, command) => app.application.recover(command, signal, fence),
+        { write: true, signal, preflightOnly: true, originalRecovery: true });
+    },
+    readExecution: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.application.readExecution(command)),
+    takeover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal, exact?: Readonly<TaskCenterRecoveryFence>) => {
+      const fence = exact === undefined ? undefined : snapshotTaskCenterRecoveryFence(exact);
+      return call(request, value, (app, command) => app.application.takeover(command, signal, fence), { write: true, signal, preflightOnly: true });
+    },
+    requestCancel: (request: AiSceneHttpRequest, value: unknown) => call(request, value,
+      (app, command) => app.application.requestCancel(command), { write: true }),
+    readModelResult: recoveryReaders.readModelResult,
+    readQuoteGoalCandidates: recoveryReaders.readQuoteGoalCandidates,
+    reopenModelSource: recoveryReaders.reopenModelSource,
+    reopenOpeningModelSource: recoveryReaders.reopenOpeningModelSource
+  });
+}
+
+/** Share the real human-selection/approval/result readers between model and
+ * business task centers. No start, continue, lease or write methods escape. */
+function composeQuoteTaskCenterReaders(input: HumanQuoteOrderDependencies, configuration: SelectedQuoteTaskConfiguration) {
+  const human = composeHumanQuoteOrder(input), tasks = composeSelectedQuoteTaskApplication(input, configuration);
+  return Object.freeze({ selections: human, approvals: human, orders: { readResult: tasks.readResult } });
+}
+
+export function composeRequestBoundOriginalScenes(dependencies: RequestBoundOriginalSceneDependencies, options: AiSceneRequestOptions) {
+  const call = bindRequests(dependencies, options, composeAiOriginalScenes);
+  return Object.freeze({
+    queryOrders: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      call(request, value, (app, command) => app.queryOrders(command), { write: false, signal }),
+    // These are short preparation/observation operations, not the runner. A
+    // closed wait revokes only this request's credentials; a write may already
+    // be durable and must be observed by the same original key, never retried.
+    create: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.create(command), { write: true, signal }),
+    read: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.read(command), { write: false, signal }),
+    reissue: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.reissue(command), { write: true, signal }),
+    reconcile: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.reconcile(command), { write: false, signal }),
+    reconcileReissue: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.reconcile(command, true), { write: false, signal }),
+    createTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.createTask(command), { write: true, signal }),
+    prepareTaskMaterial: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, async (app, command) => {
+      const packet = await app.prepareTaskMaterial(command, 'read_only');
+      if (packet.original.sceneCode !== 'order_explanation') return packet;
+      if (requestFingerprint(packet.material) !== packet.materialHash) throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+      const material = projectOrderExplanationMaterial(packet.material);
+      // This is a NEW read-only public preparation, not an original Gateway
+      // result. Its hash describes what this endpoint emits; the internal
+      // model input and its frozen hash stay untouched in the original app.
+      return freezeOriginalInput({ ...packet, material, materialHash: requestFingerprint(material) });
+    }, { write: false, signal }),
+    /** Explicit new publication: validate/derive from the unchanged internal
+     * preparation seal, never relabel a stored model result or its input hash. */
+    prepareOrderTaskMaterialV2: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, async (app, command) => {
+      assertOrderPublicationV2Available();
+      const packet = await app.prepareTaskMaterial(command, 'order_history_read');
+      if (packet.original.sceneCode !== 'order_explanation') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      if (requestFingerprint(packet.material) !== packet.materialHash) throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+      const material = projectOrderExplanationMaterialV2(packet.material);
+      return freezeOriginalInput({ ...packet, material, materialHash: requestFingerprint(material) });
+    }, { write: false, signal }),
+    reopenOrderCitationV2: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => {
+      assertOrderPublicationV2Available(); return app.reopenOrderCitationV2(command);
+    }, { write: false, signal }),
+    reopenOrderCitation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.reopenOrderCitation(command), { write: false, signal }),
+    prepareOrderManualHandoff: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.prepareOrderManualHandoff(command), { write: false, signal }),
+    previewOrderExtension: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      call(request, value, (app, command) => app.previewOrderExtension(command), { write: false, signal }),
+    readQuoteCatalog: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.readQuoteCatalog(command), { write: false, signal }),
+    compareOriginalQuotes: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.compareOriginalQuotes(command), { write: false, signal }),
+    prepareOpeningSections: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.prepareOpeningSections(command), { write: false, signal }),
+    readOpeningSection: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.readOpeningSection(command), { write: false, signal }),
+    reviewQuote: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.reviewQuote(command), { write: false, signal }),
+    confirmQuote: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.confirmQuote(command), { write: true, signal }),
+    readQuoteReceipt: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.readQuoteReceipt(command), { write: false, signal }),
+    readRecovery: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.readRecovery(command), { write: false, signal })
+  });
+}
+
+/** Explicit server-selected R1 consumer for an original opening request.
+ * It is alternative to the read/model host, never an additional driver for the
+ * same run. Body fields cannot choose Task/Run/lease/policy or authorize publish. */
+export function composeRequestBoundOpeningProposals(dependencies: RequestBoundOriginalSceneDependencies,
+  options: AiSceneRequestOptions, configuration: { host: AiTaskApplicationHost; monotonic?: () => number }) {
+  if (options.audience !== 'operator') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+  const host = z.object({ holderId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
+    leaseMs: z.number().int().min(1).max(120000) }).strict().parse(structuredClone(configuration.host));
+  const call = bindRequests(dependencies, options, input => composeOpeningProposalWorkflow(input, host, configuration.monotonic));
+  return Object.freeze({
+    requestCancellation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (root, command) => root.requestCancellation(command), { write: true, signal }),
+    settleUnstartedCancellation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (root, command) => root.settleUnstartedCancellation(command), { write: true, signal }),
+    readCancellation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (root, command) => root.readCancellation(command), { write: false, signal }),
+    readCancellationSettlement: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (root, command) => root.readCancellationSettlement(command), { write: false, signal }),
+    recoverOriginal: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (root, command) => root.recoverOriginal(command, signal), { write: true, signal, preflightOnly: true }),
+    previewSections: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (root, command) => root.previewSections(command), { write: false, signal }),
+    startSections: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (root, command) => root.startSections(command, signal), { write: true, signal, preflightOnly: true }),
+    readSections: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (root, command) => root.readSections(command), { write: false, signal }),
+    preview: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (root, command) => root.preview(command), { write: false, signal }),
+    start: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (root, command) => root.start(command, signal), { write: true, signal, preflightOnly: true }),
+    readReceipt: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (root, command) => root.readReceipt(command), { write: false, signal })
+  });
+}
+
+/** Alternative server-selected original opening READ host, not a second
+ * driver alongside the model host for the same run. No caller task/lease/tool
+ * or config input is accepted; the original saved plan prevents replacement. */
+export function composeRequestBoundOriginalOpeningReadTask(
+  dependencies: RequestBoundOriginalSceneDependencies, options: AiSceneRequestOptions,
+  configuration: { host: AiTaskApplicationHost; limits: z.infer<typeof aiTaskRunnerLimitsSchema>;
+    monotonic?: () => number }) {
+  const limits = aiTaskRunnerLimitsSchema.parse(structuredClone(configuration.limits));
+  const monotonic = configuration.monotonic;
+  const db = dependencies.db;
+  const host = z.object({ holderId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
+    leaseMs: z.number().int().min(1).max(120000) }).strict().parse(structuredClone(configuration.host));
+  const call = bindRequests(dependencies, options, input => input);
+  // These are the existing original-key cancellation transactions/readers.
+  // Do not construct an execution host merely to stop queued or running work.
+  const recoveryReaders = composeRequestBoundOriginalTaskRecoveryReaders(dependencies, options);
+  const cancellation = (request: AiSceneHttpRequest, value: unknown,
+    method: 'requestCancellationIntent' | 'settleUnstartedCancellation' | 'readCancellationReceipt' | 'readCancellationSettlementReceipt') => {
+    const schema = z.object({ original: originalRequestReferenceSchema,
+      expectedRevision: z.number().int().min(1).max(4294967294) }).strict();
+    const parsed = schema.safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    return call(request, parsed.data, async input => {
+      const scenes = composeAiOriginalScenes(input), original = await scenes.requests.readHistorical(parsed.data.original);
+      if (original.request.sceneCode !== 'opening_diagnosis' || original.receipt.state === 'revoked') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      const receipt = await recoveryReaders[method](request, parsed.data);
+      const after = await scenes.requests.readHistorical(parsed.data.original);
+      if (after.receipt.state === 'revoked' || after.receipt.contentHash !== original.receipt.contentHash
+        || originalIdentityHash(after.context) !== originalIdentityHash(original.context)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      return receipt;
+    });
+  };
+  const consume = <T>(request: AiSceneHttpRequest, value: unknown, historical: boolean,
+    work: (root: ReturnType<typeof composePersistedReadonlyBusinessTaskHost>,
+      original: Awaited<ReturnType<ReturnType<typeof composeAiOriginalScenes>['requests']['readHistorical']>>,
+      command: { taskId: string; runId: string }, resultId?: string) => Promise<T>, result = false) => {
+    const schema = result ? originalRequestReferenceSchema.extend({ resultId: z.string().uuid() }).strict() : originalRequestReferenceSchema;
+    const parsed = schema.safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    return call(request, parsed.data, async (input, value) => {
+      const command = schema.parse(value), reference = freezeOriginalInput({ draftVersion: command.draftVersion, inputRef: command.inputRef });
+      const scenes = composeAiOriginalScenes(input);
+      const readOriginal = async () => {
+        if (!historical) await scenes.requests.read(reference);
+        return scenes.requests.readHistorical(reference);
+      };
+      const original = await readOriginal();
+      if (original.request.sceneCode !== 'opening_diagnosis') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const task = await scenes.requests.readTaskReceipt(reference.inputRef);
+      if (task.state !== 'observed') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const expected = originalIdentityHash(original.context);
+      const verifyOriginal = async () => {
+        const current = await readOriginal();
+        const currentTask = await scenes.requests.readTaskReceipt(reference.inputRef);
+        if (originalIdentityHash(current.context) !== expected || current.receipt.contentHash !== original.receipt.contentHash
+          || currentTask.state !== 'observed' || currentTask.taskId !== task.taskId || currentTask.runId !== task.runId) {
+          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        }
+      };
+      const root = composePersistedReadonlyBusinessTaskHost({ db: input.db,
+        authorization: { auth: input.auth, credentials: input.credentials, subscriptions: input.subscriptions },
+        guard: input.guard, core: input.core, diagnosticCore: input.core, business: input.business,
+        wall: input.clock, monotonic, host, revalidateOriginal: verifyOriginal,
+        scene: { code: original.receipt.sceneCode, version: original.receipt.sceneVersion },
+        task: { taskId: task.taskId, runId: task.runId, limits,
+          steps: [{ registrationRef: `opening-read:${reference.inputRef}`, toolCode: 'tenant.opening.diagnose',
+            input: { limit: 50, sections: [...original.request.input.sections] } }] } });
+      // Recheck the original request while the real runner holds its lease,
+      // not merely once before waiting for Task acquisition.
+      const application = root.createApplication(host, inheritAiTaskHeldPreparation(async held => {
+        await verifyOriginal();
+        await root.prepare(held);
+        await verifyOriginal();
+      }, root.prepare));
+      const selected = Object.freeze({ ...root, application });
+      await verifyOriginal();
+      const observed = await work(selected, original, { taskId: task.taskId, runId: task.runId },
+        'resultId' in command && typeof command.resultId === 'string' ? command.resultId : undefined);
+      await verifyOriginal();
+      return observed;
+    });
+  };
+  return Object.freeze({
+    requestCancellationIntent: (request: AiSceneHttpRequest, value: unknown) => cancellation(request, value, 'requestCancellationIntent'),
+    settleUnstartedCancellation: (request: AiSceneHttpRequest, value: unknown) => cancellation(request, value, 'settleUnstartedCancellation'),
+    readCancellationReceipt: (request: AiSceneHttpRequest, value: unknown) => cancellation(request, value, 'readCancellationReceipt'),
+    readCancellationSettlementReceipt: (request: AiSceneHttpRequest, value: unknown) => cancellation(request, value, 'readCancellationSettlementReceipt'),
+    /** Existing takeover draft: the request supplies only an observed original
+     * generation, never worker names, lease duration or an execution token. */
+    takeover(request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) {
+      const parsed = z.object({ original: originalRequestReferenceSchema,
+        expectedTaskRevision: z.number().int().min(1).max(4294967294),
+        expectedRunRevision: z.number().int().min(1).max(4294967294),
+        expectedFencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u) }).strict().safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const observed = freezeOriginalInput(parsed.data);
+      return consume(request, observed.original, false, async (root, original, selected) => {
+        if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
+        const snapshot = await root.application.inspect(selected);
+        if (!snapshot.plan || snapshot.task.revision !== observed.expectedTaskRevision
+          || snapshot.run.revision !== observed.expectedRunRevision || snapshot.run.fencingToken !== observed.expectedFencingToken) {
+          throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+        }
+        const access = await root.authorization.tasks.resolveAccess(selected.taskId, 'takeover_run');
+        const task = structuredClone(await db.aiTask.findFirst({ where: access.where,
+          select: { id: true, scopeId: true, inputRef: true } }));
+        if (!task || task.id !== selected.taskId || task.inputRef !== original.receipt.inputRef) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        const foundRun = await db.aiRun.findFirst({ where: { scopeId: task.scopeId, taskId: task.id,
+          id: selected.runId, actorKind: access.actorKind, actorId: access.actorId },
+          select: { id: true, scopeId: true, taskId: true, revision: true, fencingToken: true, leaseOwnerId: true } });
+        if (foundRun && !foundRun.fencingToken.equals(snapshot.run.fencingToken)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+        const run = foundRun && Object.freeze({ id: foundRun.id, scopeId: foundRun.scopeId, taskId: foundRun.taskId,
+          revision: foundRun.revision, fencingToken: foundRun.fencingToken.toFixed(0), leaseOwnerId: foundRun.leaseOwnerId });
+        if (!run || run.id !== selected.runId || run.taskId !== task.id || run.scopeId !== task.scopeId
+          || !run.leaseOwnerId || run.leaseOwnerId === host.holderId || run.revision !== snapshot.run.revision
+          || run.fencingToken !== snapshot.run.fencingToken) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+        const outcome = await root.takeoverAndRecover({ taskId: task.id, runId: selected.runId,
+          previousHolderId: run.leaseOwnerId, holderId: host.holderId,
+          expectedTaskRevision: snapshot.task.revision, expectedRunRevision: snapshot.run.revision,
+          expectedFencingToken: snapshot.run.fencingToken, leaseMs: host.leaseMs }, signal);
+        return freezeOriginalInput({ kind: 'run_outcome' as const, outcome,
+          takeover: 'same_owner_recovery_only' as const, automaticRetry: false as const,
+          businessExecution: 'not_attested' as const });
+      });
+    },
+    readTakeoverReceipt: recoveryReaders.readTakeoverReceipt,
+    start: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      consume(request, value, false, async (root, original, task) => ({ original: original.receipt,
+        execution: await root.application.start(task, signal), model: 'not_called' as const,
+        configurationWrite: 'not_attempted' as const })),
+    /** Reacquire only the original run through claim_recovery_run. A released
+     * lease after a crash is not recovered by starting a new run/plan. */
+    recover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      consume(request, value, false, async (root, original, selected) => {
+        if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
+        const snapshot = await root.application.inspect(selected);
+        if (!snapshot.plan) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        const outcome = await root.runner.run({ ...selected, holderId: host.holderId, leaseMs: host.leaseMs,
+          expectedTaskRevision: snapshot.task.revision, expectedRunRevision: snapshot.run.revision,
+          expectedFencingToken: snapshot.run.fencingToken, recovery: true }, signal);
+        return freezeOriginalInput({ original: original.receipt, kind: 'run_outcome' as const, outcome,
+          recovery: 'original_run_evidence_only' as const, automaticRetry: false as const, model: 'not_called' as const });
+      }),
+    reconcile: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      consume(request, value, false, async (root, original, task) => ({ original: original.receipt,
+        execution: await root.application.reconcile(task, signal), model: 'not_called' as const,
+        configurationWrite: 'not_attempted' as const })),
+    inspect: (request: AiSceneHttpRequest, value: unknown) =>
+      consume(request, value, true, async (root, original, task) => ({ original: original.receipt,
+        snapshot: await root.application.inspect(task), execution: 'not_invoked' as const })),
+    reopenSource: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      consume(request, value, true, async (root, original, task, resultId) => ({ original: original.receipt,
+        source: await root.reopenBusinessSource({ taskId: task.taskId, resultId }, signal) }), true)
+  });
+}
+
+export function composeRequestBoundQuoteSelections(dependencies: RequestBoundQuoteSelectionDependencies, options: AiSceneRequestOptions) {
+  const call = bindRequests(dependencies, options, input => new PrismaQuoteSelectionRepository({ ...input,
+    originals: composeAiOriginalScenes(input).requests }));
+  return Object.freeze({
+    select: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.select(command), { write: true }),
+    prepareMerchantDelegation: (request: AiSceneHttpRequest, value: unknown) => call(request, value,
+      (app, command) => app.prepareMerchantDelegation(command), { write: false }),
+    read: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.read(command), { write: false }),
+    reconcile: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.reconcile(command), { write: false }),
+    readOperationLocator: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readOperationLocator(command), { write: false })
+  });
+}
+
+/** Read-only human preparation from the already configured original model
+ * receipt and Core snapshot. Request-local credentials reach the existing
+ * Guards; the result is a selection command, not a saved selection or approval. */
+export function composeRequestBoundClarifiedQuoteSelectionPreparation(
+  model: Pick<ReturnType<typeof composeRequestBoundPersistedOriginalSceneModel>, 'readClarifiedQuoteReceipt'>,
+  business: RequestBoundQuoteOrderDependencies, options: AiSceneRequestOptions) {
+  if (business.scene.code !== 'quote_clarification') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  const call = bindRequests(business, options, input => composeClarifiedQuoteSelectionPreparation(model, input));
+  return Object.freeze({
+    prepareSelection(request: AiSceneHttpRequest, value: unknown) {
+      const currentRequest = freezeOriginalInput({ headers: { authorization: request?.headers?.authorization } });
+      return call(currentRequest, value, (app, command) => app.prepareSelection(currentRequest, command), { write: false });
+    }
+  });
+}
+
+/** Server consumer of the original preparation/select/read commands, not a new HTTP protocol. Human
+ * selection must point at the exact clarified Core operation and its durable
+ * successor, never an arbitrary authorized quote or a completed model plan. */
+export function composeRequestBoundClarifiedQuoteSelection(
+  dependencies: RequestBoundPersistedOriginalSceneModelDependencies,
+  options: Parameters<typeof composeRequestBoundPersistedOriginalSceneModel>[1],
+  business: RequestBoundQuoteOrderDependencies) {
+  if (dependencies.scene.code !== 'quote_clarification' || business.scene.code !== dependencies.scene.code
+    || business.scene.version !== dependencies.scene.version || options.orderReadChain
+    || business.db !== dependencies.db || business.auth !== dependencies.auth || business.guard !== dependencies.guard
+    || business.core !== dependencies.core || business.subscriptions !== dependencies.subscriptions) {
+    throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  }
+  const model = composeRequestBoundPersistedOriginalSceneModel(dependencies, options);
+  const requestOptions = { enabled: options.enabled, audience: options.audience };
+  const selections = composeRequestBoundQuoteSelections(business, requestOptions);
+  const preparation = composeRequestBoundClarifiedQuoteSelectionPreparation(model, business, requestOptions);
+  return composeClarifiedQuoteSelectionRequests(model, selections, preparation);
+}
+
+/** Reuse the already configured request hosts. No additional Gateway or order
+ * driver is assembled for handoff; both original commands retain their guards. */
+export function composeClarifiedQuoteSelectionRequests(
+  model: Pick<ReturnType<typeof composeRequestBoundPersistedOriginalSceneModel>, 'readClarifiedQuoteReceipt'>,
+  selections: ReturnType<typeof composeRequestBoundQuoteSelections>,
+  preparation?: ReturnType<typeof composeRequestBoundClarifiedQuoteSelectionPreparation>) {
+  const resolveOriginalSelection = async (request: AiSceneHttpRequest, value: unknown, clarification: unknown, historical = false) => {
+    const command = parseQuoteSelection(structuredClone(value));
+    const source = parseClarifiedQuoteSelection({ selection: command, clarification }).clarification;
+    if (command.originalInputRef !== source.original.inputRef) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    // Snapshot credentials once; mutable caller request/command objects must
+    // not switch actors or payloads between awaited source checks and reads.
+    const currentRequest = freezeOriginalInput({ headers: { authorization: request?.headers?.authorization } });
+    const observed = await model.readClarifiedQuoteReceipt(currentRequest, source);
+    if (!('result' in observed) || observed.receipt.state !== 'observed'
+      || !(observed.result.status === 'quoted' || historical && observed.result.status === 'expired')
+      || !observed.result.quote) {
+      throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    }
+    if (observed.receipt.taskId !== command.taskId || observed.receipt.runId !== command.runId
+      || observed.original.inputRef !== command.originalInputRef || observed.result.quote.id !== command.order.quoteId) {
+      throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    }
+    return { currentRequest, command };
+  };
+  return Object.freeze({
+    async readOriginalOperation(request: AiSceneHttpRequest, value: unknown) {
+      if (typeof selections.readOperationLocator !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const command = validateQuoteSelectionHttpRequest('AiClarifiedQuoteSelectionOriginalOperationReadDraft', value) as import('@rental-os/shared').AiClarifiedQuoteSelectionOriginalOperationReadDraft;
+      const currentRequest = freezeOriginalInput({ headers: { authorization: request?.headers?.authorization } });
+      const read = () => model.readClarifiedQuoteReceipt(currentRequest, command.clarification);
+      const before = await read();
+      if (!('result' in before) || before.receipt.state !== 'observed' || !before.result.quote
+        || !['quoted', 'expired'].includes(before.result.status) || before.original.inputRef !== command.selection.originalInputRef
+        || before.receipt.taskId !== command.selection.taskId || before.receipt.runId !== command.selection.runId
+        || before.result.quote.id !== command.selection.quoteId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      const result = await selections.readOperationLocator(currentRequest, command.selection);
+      const after = await read();
+      if (!('result' in after) || after.receipt.state !== 'observed'
+        || requestFingerprint({ original: before.original, receipt: before.receipt, quote: before.result.quote, scope: before.result.scope })
+          !== requestFingerprint({ original: after.original, receipt: after.receipt, quote: after.result.quote, scope: after.result.scope }))
+        throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      return result;
+    },
+    async prepareSelection(request: AiSceneHttpRequest, value: unknown) {
+      if (!preparation) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      return preparation.prepareSelection(request, value);
+    },
+    async select(request: AiSceneHttpRequest, value: unknown, clarification: unknown) {
+      const { currentRequest, command } = await resolveOriginalSelection(request, value, clarification);
+      // Existing repository rechecks current quote, owner, human payload,
+      // revision, successor ancestry and absence of a frozen order/model plan.
+      // This does not start that successor or attest an order/approval.
+      return selections.select(currentRequest, command);
+    },
+    /** Lost selection replies are observed by the exact original key/payload.
+     * This never selects again, grants approval or retries an unknown order. */
+    async readOperation(request: AiSceneHttpRequest, value: unknown, clarification: unknown) {
+      const { currentRequest, command } = await resolveOriginalSelection(request, value, clarification, true);
+      return selections.reconcile(currentRequest, command);
+    }
+  });
+}
+
+export function composeRequestBoundSelectedQuoteTask(dependencies: RequestBoundQuoteOrderDependencies,
+  options: AiSceneRequestOptions, configuration: SelectedQuoteTaskConfiguration,
+  approvalAdmission?: OriginalQuoteApprovalAdmissionConfiguration) {
+  const server = { ...configuration, host: structuredClone(configuration.host), limits: structuredClone(configuration.limits) };
+  const retainedCall = bindRequests(dependencies, options, input => {
+    const clock = input.clock ?? (() => new Date());
+    const routes = new AiBusinessReadRouteAuthority(input.guard, input.credentials, clock);
+    // Retained original metadata is not a fresh quote preparation. Identity,
+    // original hash and Task/Run ancestry remain checked by the original stores;
+    // the persisted human selection independently rechecks its exact quote/body
+    // through AiApprovedOrderRouteAuthority before retained reads or cancellation.
+    const authority = new AiCurrentOriginalRequestAuthority(input.db, { ...input,
+      authorizeResources: body => {
+        if (body.sceneCode !== 'quote_clarification') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        return routes.withRead('quote_context', {}, async context => context);
+      } }, clock);
+    const originals = new PrismaOriginalRequestRepository(input.db, authority, clock);
+    const tasks = composeSelectedQuoteTaskApplication({ ...input, originals }, server);
+    const business = composeQuoteTaskCenterReaders({ ...input, originals }, server);
+    const persisted = composePersistedTaskCenter({ ...input, usageDb: input.db });
+    const recovery = new AiOriginalSceneRecoveryService(input.db, originals, composePersistedTaskAuthorization(input).tasks);
+    const center = composeAiTaskCenterScene({ list: persisted.list, events: persisted.events, usage: persisted.usage, ...business,
+      scenes: { requests: originals, readTaskReceipt: originals.readTaskReceipt.bind(originals), readRecovery: recovery.read.bind(recovery) } });
+    // Exact original recovery never publishes or continues new business work.
+    // Its current read/takeover/recovery policies are separate from creation;
+    // observing an old receipt cannot grant another lease or order execution.
+    return Object.freeze({ requestCancel: tasks.requestCancel,
+      settleUnstartedCancellation: tasks.settleUnstartedCancellation,
+      readCancellation: tasks.readCancellation, readCancellationSettlement: tasks.readCancellationSettlement,
+      recover: tasks.recover, takeover: tasks.takeover, readTakeoverReceipt: tasks.readTakeoverReceipt,
+      readRecoverySnapshot: tasks.readRecoverySnapshot,
+      readResult: tasks.readResult, readScene: center.readScene,
+      readTaskSnapshot: (value: unknown) => readOriginalTaskSnapshot({ requests: originals,
+        readTaskReceipt: originals.readTaskReceipt.bind(originals) }, persisted.events, value) });
+  });
+  const call = bindRequests(dependencies, options, input => {
+    // Normal selection execution reuses the original scene authority, including
+    // its current rates/address readers. Reprepare has separate requirements and
+    // must not replace this source with a reduced candidate-only authority.
+    const originals = composeAiOriginalScenes(input).requests;
+    const tasks = composeSelectedQuoteTaskApplication({ ...input, originals }, server);
+    const business = composeQuoteTaskCenterReaders({ ...input, originals }, server), persisted = composePersistedTaskCenter({ ...input, usageDb: input.db });
+    const recovery = new AiOriginalSceneRecoveryService(input.db, originals, composePersistedTaskAuthorization(input).tasks);
+    const center = composeAiTaskCenterScene({ list: persisted.list, events: persisted.events, usage: persisted.usage, ...business, scenes: { requests: originals,
+        readTaskReceipt: originals.readTaskReceipt.bind(originals), readRecovery: recovery.read.bind(recovery) } });
+    return Object.freeze({ ...tasks,
+      continueConfirmation: async (value: unknown, signal?: AbortSignal) => {
+        if (approvalAdmission) await prepareOriginalQuoteApprovalAdmission({ ...input, originals }, value,
+          'explicit_continue', approvalAdmission, signal);
+        return tasks.continueConfirmation(value, signal);
+      }, readScene: center.readScene,
+      readTaskSnapshot: (value: unknown) => readOriginalTaskSnapshot({ requests: originals,
+        readTaskReceipt: originals.readTaskReceipt.bind(originals) }, persisted.events, value),
+      readTaskPage: center.readPage, readTaskEvents: center.readEvents, readTaskReconnect: center.readReconnect, readTaskUsage: center.readUsage });
+  });
+  return Object.freeze({
+    readTaskPage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskPage(command), { write: false }),
+    readTaskUsage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskUsage(command), { write: false }),
+    readTaskSnapshot: (request: AiSceneHttpRequest, value: unknown) => retainedCall(request, value, (app, command) => app.readTaskSnapshot(command), { write: false }),
+    // Server-only TaskCenter ports reuse its existing closed Task/Run/fence
+    // commands. Public route and contract registration stay with that owner.
+    readRecoverySnapshot: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => retainedCall(request, value,
+      (app, command) => app.readRecoverySnapshot(command, signal), { write: false, signal }),
+    readTakeoverReceipt: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => retainedCall(request, value,
+      (app, command) => app.readTakeoverReceipt(command, signal), { write: false, signal }),
+    recover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => retainedCall(request, value,
+      (app, command) => app.recover(command, signal), { write: true, signal, preflightOnly: true }),
+    takeover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => retainedCall(request, value,
+      (app, command) => app.takeover(command, signal), { write: true, signal, preflightOnly: true }),
+    readTaskEvents: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskEvents(command), { write: false }),
+    readTaskReconnect: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskReconnect(command), { write: false }),
+    readScene: (request: AiSceneHttpRequest, value: unknown) => retainedCall(request, value, (app, command) => app.readScene(command), { write: false }),
+    start: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.start(command, signal), { write: true, signal, preflightOnly: true }),
+    readConfirmation: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readConfirmation(command), { write: false }),
+    continueConfirmation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.continueConfirmation(command, signal), { write: true, signal, preflightOnly: true }),
+    reconcile: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.reconcile(command, signal), { write: true, signal, preflightOnly: true }),
+    readResult: (request: AiSceneHttpRequest, value: unknown) => retainedCall(request, value, (app, command) => app.readResult(command), { write: false }),
+    requestCancel: (request: AiSceneHttpRequest, value: unknown) => retainedCall(request, value, (app, command) => app.requestCancel(command), { write: true }),
+    // Internal consumers only; no new Controller/OpenAPI action is registered.
+    settleUnstartedCancellation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => retainedCall(request, value,
+      (app, command) => app.settleUnstartedCancellation(command), { write: true, signal }),
+    readCancellation: (request: AiSceneHttpRequest, value: unknown) => retainedCall(request, value,
+      (app, command) => app.readCancellation(command), { write: false }),
+    readCancellationSettlement: (request: AiSceneHttpRequest, value: unknown) => retainedCall(request, value,
+      (app, command) => app.readCancellationSettlement(command), { write: false })
+  });
+}
+
+export function composeRequestBoundHumanQuoteOrder(dependencies: RequestBoundQuoteOrderDependencies, options: AiSceneRequestOptions,
+  reprepare?: FormalApprovedOrderReprepareConfiguration, reissue?: QuoteRequestReissueConfiguration,
+  approvalAdmission?: OriginalQuoteApprovalAdmissionConfiguration) {
+  if (reprepare && 'reprepareServices' in dependencies) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  const configuration = reprepare ? { holderId: reprepare.holderId, creationRules: structuredClone(reprepare.creationRules),
+    memberships: reprepare.memberships } : undefined;
+  const call = bindRequests(dependencies, options, input => {
+    // A selected quote and its human approval are original business evidence,
+    // not a request for another catalog/opening/quote diagnostic. Keep current
+    // original-request access; the selection, approval and Core authorities
+    // separately own exact quote/body/expiry checks and all execution rights.
+    const clock = input.clock ?? (() => new Date());
+    const routes = new AiBusinessReadRouteAuthority(input.guard, input.credentials, clock);
+    const authority = new AiCurrentOriginalRequestAuthority(input.db, { ...input,
+      authorizeResources: async body => {
+        if (body.sceneCode !== 'quote_clarification') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        return routes.withRead('quote_context', {}, async context => context);
+      }
+    }, clock);
+    const originals = new PrismaOriginalRequestRepository(input.db, authority, clock);
+    // Only the server's formal replacement factory may prepare new material.
+    // Historical access above grants neither a replacement nor approval.
+    const factory = configuration ? (current: Parameters<typeof composeFormalApprovedOrderReprepareServices>[0]) =>
+      composeFormalApprovedOrderReprepareServices(current, configuration) : undefined;
+    const human = composeHumanQuoteOrder({ ...input, originals, ...(factory ? { reprepareServices: factory } : {}) });
+    // Existing history readers do not acquire new Core preparation dependencies.
+    const linked = () => composeQuoteRequestReissue({ ...input, originals, source: human.readRequestReissueSource }, reissue);
+    return Object.freeze({ ...human,
+      prepareTaskCenterApproval: async (value: unknown, intent: TaskCenterQuoteApprovalIntent, signal?: AbortSignal) => {
+        if (!approvalAdmission) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        await prepareTaskCenterQuoteApprovalAdmission({ ...input, originals }, value, intent, approvalAdmission, signal);
+      },
+      decideSelectedProposal: async (value: unknown, signal?: AbortSignal) => {
+        if (approvalAdmission) await prepareOriginalQuoteApprovalAdmission({ ...input, originals }, value,
+          'explicit_decide', approvalAdmission, signal);
+        return human.decideSelectedProposal(value);
+      },
+      reprepareSelectedProposal: async (value: unknown, signal?: AbortSignal) => {
+        if (approvalAdmission) await prepareOriginalQuoteApprovalAdmission({ ...input, originals }, value,
+          'explicit_reprepare', approvalAdmission, signal);
+        return human.reprepareSelectedProposal(value);
+      },
+      readReissuePreparation: (value: unknown) => linked().readReissuePreparation(value),
+      reissueSelectedRequest: (value: unknown, signal?: AbortSignal) => linked().reissueSelectedRequest(value, signal),
+      readReissueOperation: (value: unknown) => linked().readReissueOperation(value),
+      readReissuedSelectionPreparation: (value: unknown) => linked().readReissuedSelectionPreparation(value),
+      selectReissuedQuote: (value: unknown, signal?: AbortSignal) => linked().selectReissuedQuote(value, signal),
+      readReissuedSelectionOperation: (value: unknown) => linked().readReissuedSelectionOperation(value),
+      readSelectedAvailability: composeSelectedQuoteStockReview({ ...input, originals }) });
+  });
+  return Object.freeze({
+    // Internal task-center bridge only. No Controller/OpenAPI route is added.
+    prepareTaskCenterApproval: (request: AiSceneHttpRequest, value: unknown, intent: TaskCenterQuoteApprovalIntent, signal?: AbortSignal) =>
+      call(request, value, (app, command) => callAiTaskRunnerDependency(
+        () => app.prepareTaskCenterApproval(command, intent, signal), 15000, 'task_center_approval_admission', signal),
+      { write: true, signal, preflightOnly: true }),
+    readSelectedAvailability: (request: AiSceneHttpRequest, value: unknown) => call(request, value,
+      (app, command) => app.readSelectedAvailability(command), { write: false }),
+    readSelectedProposal: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedProposal(command), { write: false }),
+    decideSelectedProposal: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.decideSelectedProposal(command), { write: true }),
+    readSelectedDecisionReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedDecisionReceipt(command), { write: false }),
+    readSelectedOrderResult: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedOrderResult(command), { write: false }),
+    readSelectedReprepareEligibility: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedReprepareEligibility(command), { write: false }),
+    readSelectedRepreparePreparation: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedRepreparePreparation(command), { write: false }),
+    reprepareSelectedProposal: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.reprepareSelectedProposal(command), { write: true }),
+    readSelectedReprepareReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedReprepareReceipt(command), { write: false }),
+    readReissuePreparation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.readReissuePreparation(command), { write: false, signal }),
+    reissueSelectedRequest: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.reissueSelectedRequest(command, signal), { write: true, signal }),
+    readReissueOperation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.readReissueOperation(command), { write: false, signal }),
+    readReissuedSelectionPreparation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.readReissuedSelectionPreparation(command), { write: false, signal }),
+    selectReissuedQuote: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.selectReissuedQuote(command, signal), { write: true, signal }),
+    readReissuedSelectionOperation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.readReissuedSelectionOperation(command), { write: false, signal })
+  });
+}
+
+/** Settings business requests do not need a model runtime or a quote/order
+ * host. Every action consumes the existing settings application/runner only. */
+export function composeRequestBoundSettingsBusinessTask(
+  dependencies: Omit<ApprovedSettingsApplicationDependencies, 'credentials'>,
+  options: AiSceneRequestOptions,
+  configuration: { host: AiTaskApplicationHost; task: AiSettingsTask }) {
+  const selected = freezeOriginalInput(structuredClone(configuration));
+  const call = bindRequests(dependencies, options, input => {
+    const settings = composeApprovedSettingsApplication(input);
+    let host: ReturnType<typeof composeTaskSettingsHost> | undefined;
+    const requireHost = () => host ??= composeTaskSettingsHost({ ...input, host: selected.host, task: selected.task });
+    const requireTask = (value: unknown) => {
+      if (!value || typeof value !== 'object' || !('taskId' in value) || value.taskId !== selected.task.taskId
+        || 'runId' in value && value.runId !== selected.task.runId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      return requireHost();
+    };
+    return { settings, requireTask, get consumer() {
+      return composeAiSettingsBusinessConsumer({ ...input, settingsHost: requireHost() });
+    } };
+  }, { write: false });
+  return Object.freeze({
+    readCurrent: (request: AiSceneHttpRequest) => call(request, {}, app => app.settings.readCurrent()),
+    prepareChange: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.settings.prepareChange(command), { write: true, signal }),
+    readChangeReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.settings.readChangeReceipt(command)),
+    readBusiness: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => {
+      app.requireTask(command && typeof command === 'object' && 'preparation' in command ? command.preparation : undefined);
+      return app.consumer.read(command);
+    }),
+    startSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.requireTask(command).application.start(command, signal), { write: true, signal, preflightOnly: true }),
+    readSettingsConfirmation: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.requireTask(command).application.readConfirmation(command)),
+    decideSettingsProposal: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.requireTask(command).settings.application.decide(command), { write: true, signal }),
+    readSettingsDecision: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.requireTask(command).settings.application.readDecisionReceipt(command)),
+    continueSettingsConfirmation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.requireTask(command).application.continueOriginalConfirmation(command, signal), { write: true, signal, preflightOnly: true }),
+    reconcileSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.requireTask(command).application.reconcileOriginal(command, signal), { write: true, signal, preflightOnly: true }),
+    cancelSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.requireTask(command).application.requestCancelOriginal(command, signal), { write: true, signal })
+  });
+}

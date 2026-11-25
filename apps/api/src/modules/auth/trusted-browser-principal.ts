@@ -1,10 +1,2 @@
-/** Original authenticated Web session binding, internal to OAuth consent owners.
- * No bearer, refresh token, role tree, MFA/CSRF assertion or completed decision.
- * The caller must retain/recheck the same session fence through its transaction. */
-import type { TrustedWorkspacePrincipal } from './trusted-workspace-principal';
-
-export interface TrustedBrowserPrincipal extends TrustedWorkspacePrincipal {
-  readonly sessionId: string;
-  /** Original access-token/session minimum expiry, not a new grant lifetime. */
-  readonly expiresAt: number;
-}
+/** 原认证票据的兼容出口，与 Rental 标准宿主共用单一合同。 */
+export * from "@rental-os/rental-core/trusted-browser-principal";

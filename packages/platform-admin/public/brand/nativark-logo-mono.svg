@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="148" height="32" viewBox="0 0 148 32" role="img" aria-label="Nativark">
+  <svg xmlns="http://www.w3.org/2000/svg" x="0" y="0" width="32" height="32" viewBox="48 40 416 416">
+  <defs>
+    <mask id="page-0" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512">
+      <rect width="512" height="512" fill="white"/>
+      <g fill="black" stroke="black" stroke-width="18">
+        <rect x="205" y="61" width="146" height="244" rx="30" transform="rotate(1.5 278 183)"/>
+        <rect x="330" y="143" width="108" height="216" rx="26" transform="rotate(4 384 251)"/>
+        <rect x="124" y="153" width="222" height="246" rx="38" transform="rotate(-3 235 276)"/>
+      </g>
+    </mask>
+    <mask id="page-1" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512">
+      <rect width="512" height="512" fill="white"/>
+      <g fill="black" stroke="black" stroke-width="18">
+        <rect x="330" y="143" width="108" height="216" rx="26" transform="rotate(4 384 251)"/>
+        <rect x="124" y="153" width="222" height="246" rx="38" transform="rotate(-3 235 276)"/>
+      </g>
+    </mask>
+    <mask id="page-2" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512">
+      <rect width="512" height="512" fill="white"/>
+      <g fill="black" stroke="black" stroke-width="18">
+        <rect x="124" y="153" width="222" height="246" rx="38" transform="rotate(-3 235 276)"/>
+      </g>
+    </mask>
+  </defs>
+  <g fill="none" stroke="currentColor" stroke-width="18" stroke-linejoin="round">
+    <g mask="url(#page-0)"><rect x="72" y="112" width="154" height="228" rx="34" transform="rotate(-7 149 226)"/></g>
+    <g mask="url(#page-1)"><rect x="205" y="61" width="146" height="244" rx="30" transform="rotate(1.5 278 183)"/></g>
+    <g mask="url(#page-2)"><rect x="330" y="143" width="108" height="216" rx="26" transform="rotate(4 384 251)"/></g>
+    <rect x="124" y="153" width="222" height="246" rx="38" transform="rotate(-3 235 276)"/>
+  </g>
+  <g transform="rotate(-3 235 276)" fill="currentColor">
+    <circle cx="177" cy="219" r="15"/>
+    <circle cx="222" cy="210" r="15"/>
+    <rect x="180" y="274" width="112" height="20" rx="10" transform="rotate(-10 236 284)"/>
+    <rect x="183" y="319" width="108" height="20" rx="10" transform="rotate(-10 237 329)"/>
+  </g>
+</svg>
+  <text x="42" y="24" fill="currentColor" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="25" font-weight="600" letter-spacing="-0.65">Nativark</text>
+</svg>

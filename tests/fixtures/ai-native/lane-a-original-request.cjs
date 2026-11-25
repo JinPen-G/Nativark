@@ -17,6 +17,9 @@ exports.setup = async (extraTables = {}, withMembership = false, categoryCode = 
   const policies = sceneCodes.map(sceneCode => ({ scopeId: scope.id, sceneCode, sceneVersion: '1', revision: 1, enabled: true,
     allowedTools: [], limits: {}, expiresAt: new Date('2027-01-01T00:00:00Z') }));
   const store = createTaskInputStore({ aiScope: [scope], aiTaskOriginalRequest: [], aiTaskActionInput: [], aiTask: [], aiRun: [], aiStep: [], aiTaskRunPlan: [], aiTaskExecutionCharge: [],
+    // Original draft recovery reads both ledgers; explicit empty tables retain
+    // real fixture persistence and do not substitute authorization or success.
+    operationLog: [], rentalCalendarOverrideAuditEntry: [],
     aiTaskPlanPolicy: policies, aiTaskActionPolicy: [], aiBudgetPolicy: [], aiTenantModelConfiguration: [], tenant: [tenant], subscriptionFeatureCatalog: clone(b.h.state.subscriptionFeatureCatalog), tenantFeatureGrant: [], ...extraTables },
   { aiTaskOriginalRequest: [['id'], ['scopeId', 'audience', 'ownerKind', 'ownerId', 'requestKey']], aiTask: [['id'], ['scopeId', 'audience', 'ownerKind', 'ownerId', 'creationKey']] });
   const decorate = client => {

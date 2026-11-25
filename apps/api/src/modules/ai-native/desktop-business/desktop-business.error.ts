@@ -1,9 +1,2 @@
-/** Public local-business failures; unknown is an observation, not permission to repeat a write. */
-import type { RentalDesktopBusinessFailureCode } from '@rental-os/shared';
-
-export class DesktopBusinessError extends Error {
-  constructor(readonly code: RentalDesktopBusinessFailureCode) {
-    super(code);
-    this.name = 'DesktopBusinessError';
-  }
-}
+/** 原组合兼容出口；AI Runtime 与运行时标记由正式包单源提供。 */
+export * from "@rental-os/ai-native-server/runtime/desktop-business/desktop-business.error";

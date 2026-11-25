@@ -34,7 +34,15 @@ function makeHarness(providerError, existingMethod = null) {
       }
     },
     externalAdapterLog: { create: async () => undefined },
-    $transaction: async () => ({ intent, orderNo: "ORDER-1", amount: 12.34, replayed: false })
+    $transaction: async (work) => work({
+      $queryRaw: async (query) => query.sql.includes("FROM Tenant") ? [{ id: "tenant-1" }]
+        : [{ id: "order-1", orderNo: "ORDER-1", amount: 12.34, currency: "CNY" }],
+      rentalPaymentIntent: {
+        findUnique: async () => null,
+        findFirst: async () => null,
+        create: async () => intent
+      }
+    })
   };
   const integrations = {
     assertEnabledInTransaction: async () => undefined,
@@ -46,7 +54,9 @@ function makeHarness(providerError, existingMethod = null) {
       credentials: {}
     })
   };
-  const service = new PaymentRuntimeService(prisma, integrations, {});
+  const service = new PaymentRuntimeService(prisma, integrations, {
+    listEvents: async () => ({ rental: { balance: 12.34, pendingExtensionAmount: 0 } })
+  });
   service.createAlipayIntent = async () => { throw providerError; };
   return { service, updates, intent };
 }

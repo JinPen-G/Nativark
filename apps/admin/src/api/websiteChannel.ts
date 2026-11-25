@@ -1,27 +1,5 @@
-/** web 官网渠道配置 API（WEBSITE-CHANNEL-01）：租户级官网特有设定项（标语、Hero、辅助色、页脚、联系地址、
- * 底部 CTA、SEO、Powered by 与官网启用开关）。对应 `/platform/website-channel`；通用品牌/协议仍走 `/platform/client-channel`。 */
-import type {
-  ApiResult,
-  SaveWebsiteChannelProfileRequest,
-  WebsiteChannelProfileSummary
-} from "@rental-os/shared";
-import { http } from "./http";
+/** 原官网配置与图片上传委托 Rental 单源工厂，传输沿原宿主提供。 */
+import { createRentalWebsiteChannelApi } from "@rental-os/rental-core/admin/channels/website-client";
+import { request } from "./http";
 
-export const websiteChannelApi = {
-  async getProfile() {
-    const response = await http.get<ApiResult<WebsiteChannelProfileSummary>>("/platform/website-channel");
-    return response.data.data;
-  },
-  async saveProfile(payload: SaveWebsiteChannelProfileRequest) {
-    const response = await http.put<ApiResult<WebsiteChannelProfileSummary>>("/platform/website-channel", payload);
-    return response.data.data;
-  },
-  /** 上传品牌图片（scene: logo|favicon|hero|category），返回可写入配置的公开 URL。 */
-  async uploadAsset(scene: "logo" | "favicon" | "hero" | "category", file: File) {
-    const form = new FormData();
-    form.append("scene", scene);
-    form.append("file", file);
-    const response = await http.post<ApiResult<{ assetId: string; url: string; mimeType: string }>>("/platform/website-channel/assets", form);
-    return response.data.data;
-  }
-};
+export const websiteChannelApi = createRentalWebsiteChannelApi(request);

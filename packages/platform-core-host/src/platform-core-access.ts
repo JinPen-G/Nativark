@@ -1,0 +1,63 @@
+/**
+ * 原主体事务内读取Core授权、成员分配及绑定，复用原订阅对新业务的期限规则。
+ * Core的动作权限与对象范围由调用方继续检查，数据查询始终带当前租户/Core。
+ */
+import { createHash } from "node:crypto";
+import { ForbiddenException } from "@nestjs/common";
+import { CoreBindingSchema, MemberCoreAssignmentSchema, TenantCoreGrantSchema,
+  type CoreBinding, type CoreScopeReference } from "@rental-os/core-contracts";
+import { coreBindingScopeKey, type CoreDeploymentAvailability } from "@rental-os/core-host";
+import { createMysqlCoreDeploymentAdmission } from "@rental-os/core-host/mysql-deployment-admission";
+import type { SystemUserRow } from "@rental-os/platform-contracts";
+import type { PlatformCoreTermPolicy, PlatformCoreTransaction } from "./ports";
+
+export class PlatformCoreAccess<Tx extends PlatformCoreTransaction> {
+  constructor(private readonly term: PlatformCoreTermPolicy<Tx>,
+    private readonly deployment: CoreDeploymentAvailability,
+    /** SQL宿主供给当前事务；原非SQL可用性对象继续使用二参数入口。 */
+    private readonly deploymentForTransaction?: (transaction: Tx) => CoreDeploymentAvailability) {}
+
+  async requireMember(transaction: Tx, user: SystemUserRow, coreId: string): Promise<void> {
+    const grants = await transaction.$queryRaw<Array<{ state: string; revision: bigint | number; operationId: string }>>`
+      SELECT state, revision, operation_id AS operationId FROM platform_tenant_core_grants
+      WHERE tenant_id = ${user.tenantId} AND core_id = ${coreId} FOR UPDATE`;
+    if (!grants[0]) throw new ForbiddenException("租户尚未获得该Core使用权");
+    const grant = TenantCoreGrantSchema.parse({ ...grants[0], revision: Number(grants[0].revision), tenantId: user.tenantId, coreId });
+    if (grant.state !== "enabled") throw new ForbiddenException("该Core的租户授权已停用");
+    const assignments = await transaction.$queryRaw<Array<{ state: string; revision: bigint | number; operationId: string }>>`
+      SELECT state, revision, operation_id AS operationId FROM platform_member_core_assignments
+      WHERE tenant_id = ${user.tenantId} AND core_id = ${coreId} AND user_id = ${user.id} FOR UPDATE`;
+    if (!assignments[0]) throw new ForbiddenException("成员尚未分配该Core");
+    const assignment = MemberCoreAssignmentSchema.parse({ ...assignments[0], revision: Number(assignments[0].revision),
+      tenantId: user.tenantId, coreId, userId: user.id });
+    if (assignment.state !== "assigned") throw new ForbiddenException("成员的Core使用权已撤回");
+    // 此时已持有授权/成员锁，根观察再申请连接可能与另一持连接待锁的请求互等。
+    await (this.deploymentForTransaction?.(transaction) ?? this.deployment).requireAvailable(coreId, user.tenantId);
+  }
+
+  /** 原订阅只对新业务裁定期限，读旧结果和原业务收尾沿各Core的正式规则办理。 */
+  async requireNewBusiness(transaction: Tx, tenantId: string): Promise<void> {
+    await this.term.requireNewBusiness(transaction, tenantId);
+  }
+
+  /** 部署关闭普通业务入口；原收据和明确登记的收尾由各 Core 另行核验，不经过本门禁。 */
+  async requireBusinessAdmission(transaction: Tx, coreId: string): Promise<void> {
+    await createMysqlCoreDeploymentAdmission(transaction).requireAccepting(coreId);
+  }
+
+  async binding(transaction: Tx, scope: CoreScopeReference): Promise<CoreBinding | undefined> {
+    const hash = createHash("sha256").update(coreBindingScopeKey(scope)).digest("hex");
+    const rows = await transaction.$queryRaw<Array<{ bindingId: string; revision: bigint | number; dataVersion: string;
+      containerType: string | null; containerId: string | null }>>`
+      SELECT binding_id AS bindingId, revision, data_version AS dataVersion, container_type AS containerType, container_id AS containerId
+      FROM platform_core_bindings WHERE tenant_id = ${scope.tenantId} AND core_id = ${scope.coreId} AND scope_hash = ${hash}`;
+    if (!rows[0]) return undefined;
+    const row = rows[0];
+    const binding = CoreBindingSchema.parse({ tenantId: scope.tenantId, coreId: scope.coreId, bindingId: row.bindingId,
+      revision: Number(row.revision), dataVersion: row.dataVersion,
+      ...(row.containerType !== null || row.containerId !== null ? { container: { type: row.containerType, id: row.containerId } } : {}) });
+    if (coreBindingScopeKey(binding) !== coreBindingScopeKey(scope))
+      throw new ForbiddenException("原Core绑定与当前范围不一致");
+    return binding;
+  }
+}

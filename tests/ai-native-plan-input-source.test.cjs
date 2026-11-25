@@ -1666,6 +1666,9 @@ async function boundCalendarDraftSaveSetup(suffix, existingOverride = false) {
   const definition = h.clone(h.b.core.listCategories().find(row => row.code === 'camera'));
   h.state.rentalCategoryVersion.push({ id: 'bound-calendar-category', categoryCode: 'camera', structureVersion: 1, status: 'published', definition });
   Object.assign(h.state.businessWorkspace[0], { categoryVersionId: 'bound-calendar-category', categoryAdoptionRevision: 1 });
+  // This adopted sample reads its current persisted category binding through
+  // the real resolver; its version label alone is not commit authority.
+  h.b.core.categoryResolver = new (require('../apps/api/src/modules/rental-core/rental-category-resolver.service').RentalCategoryResolver)(h.db);
   const original = h.clone(h.state.rentalBusinessCalendar[0]);
   const published = { ...h.clone(original), id: 'bound-calendar-published', version: '0.1', status: 'published', revision: 2 };
   published.days[0].name = 'Original published day'; h.state.rentalBusinessCalendar.push(published);
@@ -1952,6 +1955,9 @@ async function originalRuleDraftSaveSetup(suffix, draftSource = false, candidate
         categoryVersionId: 'bound-rule-category', categoryAdoptionRevision: 1 }] } });
   const definition = h.clone(h.b.core.listCategories().find(row => row.code === 'camera'));
   h.state.rentalCategoryVersion.push({ id: 'bound-rule-category', categoryCode: 'camera', structureVersion: 1, status: 'published', definition });
+  // This adopted sample reads its current persisted category binding through
+  // the real resolver; its version label alone is not commit authority.
+  h.b.core.categoryResolver = new (require('../apps/api/src/modules/rental-core/rental-category-resolver.service').RentalCategoryResolver)(h.db);
   h.b.business.configStore = new (require('../apps/api/src/modules/rental-core/rental-business-config.repository').RentalBusinessConfigRepository)(h.db);
   const { runWithRequestIdentity } = require('../apps/api/src/common/request-identity');
   const source = h.clone(h.state.rentalRuleVersion[0]);

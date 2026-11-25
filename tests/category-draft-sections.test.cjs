@@ -2,7 +2,7 @@
 // Local draft workflow boundary; these checks do not prove browser or Core acceptance.
 const assert = require("node:assert/strict"), fs = require("node:fs"), ts = require("typescript"), { test } = require("node:test");
 const shared = require("@rental-os/shared");
-const source = fs.readFileSync("apps/admin/src/features/platform/categoryDraftSections.ts", "utf8"), exportsObject = {};
+const source = fs.readFileSync("packages/rental-core/admin/governance/categoryDraftSections.ts", "utf8"), exportsObject = {};
 const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 new Function("exports", "require", javascript)(exportsObject, name => name === "@rental-os/shared" ? shared : require(name));
 const { initialCategorySectionDrafts, reconcileCategorySectionDrafts, resetCategoryDraftSection, categoryDefinitionWithLocalSections,

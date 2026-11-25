@@ -132,7 +132,7 @@ test("conditional declaration or unavailable registered inspection contract cann
 });
 
 test("the admin offers a registered conditional candidate but requires an explicit selection before preparing it", () => {
-  const source = fs.readFileSync("apps/admin/src/features/settings/governance/categoryPreparationCapabilities.ts", "utf8");
+  const source = fs.readFileSync("packages/rental-core/admin/governance/categoryPreparationCapabilities.ts", "utf8");
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const exports = {};
   new Function("exports", "require", compiled)(exports, require);

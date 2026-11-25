@@ -1,0 +1,13 @@
+-- 公共入口单独拥有持久限流桶；原 Rental 的 client_api_rate_buckets 及原迁移不变。
+CREATE TABLE `platform_api_rate_buckets` (
+    `id` VARCHAR(191) NOT NULL,
+    `scopeKey` CHAR(64) NOT NULL,
+    `bucketStart` DATETIME(3) NOT NULL,
+    `count` INTEGER NOT NULL DEFAULT 0,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `platform_api_rate_bucket_expiry_idx`(`bucketStart`),
+    UNIQUE INDEX `platform_api_rate_bucket_key`(`scopeKey`, `bucketStart`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

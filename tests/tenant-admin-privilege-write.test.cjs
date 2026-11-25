@@ -6,7 +6,10 @@ require("ts-node").register({
 });
 
 const { PlatformService } = require("../apps/api/src/modules/platform/platform.service");
-const { PlatformRepository } = require("../apps/api/src/modules/platform/platform.repository");
+const { OriginalPublicManagementAdapter } = require("../apps/api/src/modules/platform/public-management.adapter");
+const { fixture: publicManagementFixture } = require("./fixtures/platform-management.cjs");
+const { RentalWorkspaceManagementApplication } = require("@rental-os/rental-core/workspace-management");
+const { RentalWorkspaceManagementRepository } = require("@rental-os/rental-core/mysql-workspace-management");
 const { Prisma } = require("@prisma/client");
 
 const tenantId = "tenant-a";
@@ -20,14 +23,16 @@ function serviceFixture() {
     { id: "operator-role", tenantId, fixedAllPermissions: false, isActive: true }
   ];
   const users = [{ id: "target-admin", tenantId, isPlatformAdmin: false, roleIds: [privilegedRoleId] }];
+  const application = new RentalWorkspaceManagementApplication({
+    configService: { get: () => "memory" }, repository: {}, logger: { warn() {} },
+    legacyAccounts: { roles: () => roles, users: () => users }
+  });
   return {
     useMysqlDataSource: () => false,
     roleRows: roles,
     users,
     assertPrivilege: (input, actor = ordinaryActor) =>
-      PlatformService.prototype.assertTenantAdminPrivilegeWrite.call(
-        { useMysqlDataSource: () => false, roleRows: roles, users }, input, tenantId, actor
-      )
+      application.assertTenantAdminPrivilegeWrite(input, tenantId, actor)
   };
 }
 
@@ -80,7 +85,7 @@ async function main() {
     toUserRow: () => ({ isPlatformAdmin: false })
   };
   await rejectsForbidden(
-    PlatformRepository.prototype.saveUserInTransaction.call(repo, tx, {
+    RentalWorkspaceManagementRepository.prototype.saveUserInTransaction.call(repo, tx, {
       account: "new-user", displayName: "New User", roleIds: [privilegedRoleId], isPlatformAdmin: false, isActive: true
     }, tenantId, "staff-a"),
     "transaction rechecks full-permission role assignment even if service guard is bypassed"
@@ -93,7 +98,7 @@ async function main() {
     user: { findFirst: async () => ({ id: "staff-a", tenantId, isActive: true, isSaasAdmin: false, roleAssignments: [], role: null }) }
   };
   await rejectsForbidden(
-    PlatformRepository.prototype.assertFixedAllWorkspaceAccessesAllowed.call(repo, workspaceTx, tenantId,
+    RentalWorkspaceManagementRepository.prototype.assertFixedAllWorkspaceAccessesAllowed.call(repo, workspaceTx, tenantId,
       [{ workspaceId: "ws-a", roleId: privilegedRoleId, isActive: true }], "staff-a"),
     "transaction rechecks fixed role assignment through workspace access"
   );
@@ -104,7 +109,11 @@ async function main() {
     prisma: {
       $transaction: async (work, options) => {
         isolationLevels.push(options?.isolationLevel);
-        return work({});
+        return work({ $queryRaw: async (query) => {
+          assert.match(query.sql, /SELECT id FROM Tenant.*LOCK IN SHARE MODE/);
+          assert.deepEqual(query.values, [tenantId]);
+          return [{ id: tenantId }];
+        } });
       }
     },
     saveUserInTransaction: async () => ({ userId: "target" }),
@@ -113,9 +122,18 @@ async function main() {
     findUserWithRoles: async () => ({ id: "target" }),
     toUserRow: (user) => user
   };
-  await PlatformRepository.prototype.saveUser.call(transactionRepo, {}, tenantId, "admin-a");
-  await PlatformRepository.prototype.saveUserWithWorkspaceAccess.call(
-    transactionRepo,
+  const publicFixture = publicManagementFixture();
+  const management = new OriginalPublicManagementAdapter(publicFixture.service);
+  await publicFixture.as("admin", () => management.saveUser({
+    id: "target", tenantId, account: "target", displayName: "Target",
+    roleIds: ["role-a"], isPlatformAdmin: false, isActive: true
+  }));
+  isolationLevels.push(...publicFixture.options.map((option) => option.isolationLevel));
+  const publicTenantLock = publicFixture.locks.find((query) => query.sql.includes("FROM Tenant"));
+  assert.match(publicTenantLock.sql, /SELECT id, status FROM Tenant.*FOR UPDATE/);
+  assert.deepEqual(publicTenantLock.values, [tenantId]);
+  await RentalWorkspaceManagementRepository.prototype.saveUserWithWorkspaceAccess.call(
+    { ...transactionRepo, database: transactionRepo.prisma },
     { workspaceAccesses: [] },
     tenantId,
     "admin-a"

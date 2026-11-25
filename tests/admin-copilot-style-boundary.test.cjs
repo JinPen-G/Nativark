@@ -21,13 +21,14 @@ function load(file, name) {
 }
 
 (async () => {
-  const file = 'apps/admin/src/features/copilot/archive/ai-side-panel/side-panel.css';
-  const source = read(file);
-  const manifest = JSON.parse(read('apps/admin/src/features/copilot/archive/source-manifest.json'));
+  const file = 'packages/rental-core/admin/assistant/copilot/archive/ai-side-panel/side-panel.css';
+  // The archive manifest records LF source bytes; Windows checkouts may use CRLF.
+  const source = read(file).replaceAll('\r\n', '\n');
+  const manifest = JSON.parse(read('packages/rental-core/admin/assistant/copilot/archive/source-manifest.json'));
   assert.equal(crypto.createHash('sha256').update(source).digest('hex'),
     manifest.find(entry => entry.path === 'ai-side-panel/side-panel.css').sha256);
-  const { copilotArchiveStyles } = load('apps/admin/config/copilotArchiveStyles.ts', 'copilotArchiveStyles');
-  const { motionPreferenceStyles } = load('apps/admin/config/motionPreferenceAdapter.ts', 'motionPreferenceStyles');
+  const { copilotArchiveStyles } = load('packages/platform-admin/config/copilotArchiveStyles.ts', 'copilotArchiveStyles');
+  const { motionPreferenceStyles } = load('packages/platform-admin/config/motionPreferenceAdapter.ts', 'motionPreferenceStyles');
   const result = await postcss([motionPreferenceStyles(), copilotArchiveStyles()])
     .process(source, { from: path.join(root, file) });
   const boundary = ':not(:where([data-admin-content], [data-admin-content] *))';
@@ -54,10 +55,25 @@ function load(file, name) {
   };
   assert.deepEqual(declarations(result.root), declarations(postcss.parse(source)),
     'all original declarations, geometry, motion and important flags are retained');
+  const legacyFile = 'apps/admin/src/features/copilot/archive/ai-side-panel/side-panel.css';
+  const legacySource = read(legacyFile).replaceAll('\r\n', '\n');
+  assert.equal(legacySource, source, 'the selected Core keeps the exact original archive content');
+  const legacy = await postcss([motionPreferenceStyles(), copilotArchiveStyles()])
+    .process(legacySource, { from: path.join(root, legacyFile) });
+  assert.equal(legacy.css, result.css, 'old and selected hosts preserve the same guarded selectors');
+  const duplicate = await postcss([motionPreferenceStyles(), copilotArchiveStyles(), copilotArchiveStyles()])
+    .process(source, { from: path.join(root, file) });
+  assert.equal(duplicate.css, result.css, 'the legacy explicit plugin does not apply the boundary twice');
   const unrelated = await postcss([copilotArchiveStyles()])
     .process(source, { from: path.join(root, 'unrelated/side-panel.css') });
   assert.equal(unrelated.css, source, 'the adapter only changes the imported Copilot archive');
-  assert.match(read('apps/admin/vite.config.ts'), /plugins: \[motionPreferenceStyles\(\), nativeSidebarStyles\(\), copilotArchiveStyles\(\)\]/);
-  assert.match(read('apps/admin/src/components/AppShell.tsx'), /<CopilotLayout[^>]*><div[^>]*data-admin-content/);
+  assert.match(read('packages/platform-admin/config/vite.ts'), /postcss: \[motionPreferenceStyles\(\), nativeSidebarStyles\(\), copilotArchiveStyles\(\)\]/);
+  assert.match(read('apps/admin/config/copilotArchiveStyles.ts'), /export \{ copilotArchiveStyles \} from "\.\.\/\.\.\/\.\.\/packages\/platform-admin\/config\/copilotArchiveStyles"/);
+  for (const host of ['apps/admin', 'apps/rental-admin', 'apps/example-multi-core-admin']) {
+    assert.match(read(`${host}/vite.config.ts`), /postcss: \{ plugins: (?:platform\.postcss|\[\.\.\.platform\.postcss, copilotArchiveStyles\(\)\])/);
+  }
+  assert.match(read('packages/platform-admin/src/components/BusinessShell.tsx'), /className=\{`app-content[^\n]+data-admin-content/);
+  assert.match(read('apps/admin/src/components/AppShell.tsx'), /wrapContent=\{column => <CopilotLayout[^>]*>\{column\}<\/CopilotLayout>\}/);
+  assert.match(read('packages/rental-core/admin/assistant-shell.tsx'), /wrapContent: column => <CopilotLayout[^>]*>\{column\}<\/CopilotLayout>/);
   console.log(`admin-copilot-style-boundary: ${guarded} selectors isolated; source hash and declarations unchanged (offline CSS contract only)`);
 })().catch(error => { console.error(error); process.exitCode = 1; });

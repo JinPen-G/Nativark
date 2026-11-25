@@ -1,14 +1,2 @@
-import { RentalCategoryCode, type BuiltinRentalCategoryCode } from "./core";
-
-/**
- * 经营空间的默认展示名称。
- *
- * 这是界面与新租户初始化使用的展示文案，不是品类编码；历史订单、权限码和
- * 数据库内部标识仍然使用 RentalCategoryCode。空间名称允许租户后续自行修改。
- */
-export const RENTAL_CATEGORY_WORKSPACE_NAMES: Readonly<Partial<Record<RentalCategoryCode, string>>> = Object.freeze({
-  [RentalCategoryCode.Camera]: "摄影设备租赁",
-  [RentalCategoryCode.Camping]: "露营装备租赁",
-  [RentalCategoryCode.Vehicle]: "车辆载具租赁",
-  [RentalCategoryCode.Construction]: "工程设备租赁"
-} satisfies Record<BuiltinRentalCategoryCode, string>);
+/** Rental 空间默认展示名称的兼容出口，原后台与初始化共用 Core 单源。 */
+export { RENTAL_CATEGORY_WORKSPACE_NAMES } from "@rental-os/rental-core";

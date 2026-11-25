@@ -61,7 +61,7 @@ test('original location/operator writers take the same workspace lock before cha
     return rows;
   }, rentalCategoryVersion: { findUnique: async () => ({ categoryCode: 'CAMERA', status: 'published', structureVersion: 1, definition }) },
     rentalFulfillmentOperator: { findUnique: async () => ({ tenantId: 't', workspaceId: 'w' }),
-      findFirst: async () => ({ id: 'op' }), upsert: async ({ update }) => { assert.ok(fixture.trace.at(-1).includes('business_workspaces'));
+      findFirst: async () => structuredClone(source.operators[0]), upsert: async ({ update }) => { assert.ok(fixture.trace.at(-1).includes('business_workspaces'));
         Object.assign(source.operators[0], update); } },
     rentalFulfillmentLocation: { findUnique: async () => ({ tenantId: 't', workspaceId: 'w' }),
       upsert: async ({ update }) => { assert.ok(fixture.trace.at(-1).includes('business_workspaces')); Object.assign(source.locations[0], update); } } };
@@ -81,7 +81,7 @@ test('ordinary edits on a stale Core instance preserve the persisted disabled op
     return query.sql.includes('business_workspaces') ? [{ status: 'ACTIVE', categoryCode: 'CAMERA', categoryVersionId: 'v1', categoryAdoptionRevision: 0 }] : rows;
   }, rentalCategoryVersion: { findUnique: async () => ({ categoryCode: 'CAMERA', status: 'published', structureVersion: 1, definition }) },
     rentalFulfillmentOperator: { findUnique: async () => ({ ...structuredClone(source.operators[0]), workspaceId: 'w' }),
-      findFirst: async () => ({ id: 'op' }), upsert: async ({ update }) => Object.assign(source.operators[0], update) },
+      findFirst: async () => structuredClone(source.operators[0]), upsert: async ({ update }) => Object.assign(source.operators[0], update) },
     rentalFulfillmentLocation: { findUnique: async () => ({ ...structuredClone(source.locations[0]), workspaceId: 'w' }),
       upsert: async ({ update }) => Object.assign(source.locations[0], update) } };
   const repo = new RentalCoreConfigRepository({ ...tx, $transaction: async work => work(tx) });
@@ -170,12 +170,18 @@ test('new order creation binds current creation facts in the transaction and rej
 test('actual quote creation precheck reads current facts on each instance and rejects absent authority', async () => {
   const tenant = 'tenant_002', coreService = new RentalCoreService(stores.createAbsorbingConfigStore(), stores.createAbsorbingFactStore());
   await coreService.onApplicationBootstrap();
-  const profile = coreService.getProfile(tenant), ctx = { profile, category: coreService.listCategories().find(row => row.code === profile.categoryCode),
-    settings: coreService.getBusinessSettings(tenant), groups: coreService.listItemGroups(tenant), pricingGroups: coreService.listPricingGroups(tenant),
+  const profile = await coreService.getProfile(tenant), ctx = { profile, category: coreService.listCategories().find(row => row.code === profile.categoryCode),
+    settings: await coreService.getBusinessSettings(tenant), groups: coreService.listItemGroups(tenant), pricingGroups: coreService.listPricingGroups(tenant),
     locations: coreService.listLocations(tenant), operators: coreService.listOperators(tenant), couponTemplates: [] };
   const source = structuredClone(ctx), services = [0, 1].map(() => new RentalBusinessService(stores.createAbsorbingBusinessConfigStore(),
     stores.createAbsorbingBusinessFactStore(), stores.createAbsorbingConfigStore()));
   bindFulfillmentAdmission(services, tenant, 'ws_tenant_002', source);
+  for (const service of services) service.coreConfigStore.listItemGroupsPage = async (tenantId, workspaceId, query) => {
+    assert.equal(tenantId, tenant); assert.equal(workspaceId, 'ws_tenant_002'); assert.equal(query.limit, 1);
+    const row = ctx.groups.find(group => group.id === query.itemGroupId);
+    return { rows: row ? [structuredClone(row)] : [], nextCursor: null, truncated: false,
+      source: 'persisted_workspace_configuration', configurationVersion: 'explicit-offline-inventory-fixture' };
+  };
   for (const service of services) await service.onApplicationBootstrap();
   const input = { customerType: 'personal', customerName: 'Fixture', fulfillmentMode: 'store_pickup_return', fulfillmentLocationId: ctx.locations[0].id,
     startAt: new Date(Date.now() + 3 * 86400000).toISOString(), endAt: new Date(Date.now() + 4 * 86400000).toISOString(),
@@ -189,12 +195,25 @@ test('actual quote creation precheck reads current facts on each instance and re
 
 test('quote persistence rechecks current admission at original create commit, while original receipts remain readable after disable', async () => scope(async () => {
   const source = facts(), fixture = fulfillmentAdmissionFixture('t', 'w', source); let row, creates = 0;
-  const tx = { ...fixture.tx, rentalQuote: { findFirst: async () => row ?? null, findUnique: async () => row ?? null,
+  const inventoryGroup = { id: 'g', tenantId: 't', workspaceId: 'w', categoryCode: 'CAMERA', code: 'G', name: 'Group',
+    inventoryMode: 'QUANTITY', unit: 'piece', status: 'enabled', createdAt: new Date('2026-10-31'), updatedAt: new Date('2026-10-31') };
+  const tx = { ...fixture.tx, $queryRaw: async query => {
+    if (query.sql.includes('rental_bundle_components')) {
+      assert.deepEqual(query.values, ['g']); assert.match(query.sql, /LOCK IN SHARE MODE/u); return [];
+    }
+    if (query.sql.includes('rental_item_groups')) {
+      assert.deepEqual(query.values, ['t', 'w', 'g', 2]); assert.match(query.sql, /LOCK IN SHARE MODE/u);
+      return [structuredClone(inventoryGroup)];
+    }
+    return fixture.tx.$queryRaw(query);
+  }, rentalQuote: { findFirst: async () => row ?? null, findUnique: async () => row ?? null,
     create: async ({ data }) => { creates++; const { Prisma } = require('@prisma/client');
       row = Object.fromEntries(Object.entries(data).map(([key, value]) => [key, value === Prisma.DbNull ? null : value]));
     }, update: async ({ data }) => Object.assign(row, data) } };
   const db = { ...tx, $transaction: async work => work(tx) }, repo = new RentalBusinessFactRepository(db);
-  const q = { id: 'q', tenantId: 't', quoteNo: 'RQ', categoryCode: 'camera', request: { fulfillmentLocationId: 'loc', fulfillmentMode: 'store_pickup_return' },
+  const q = { id: 'q', tenantId: 't', quoteNo: 'RQ', categoryCode: 'camera', request: { fulfillmentLocationId: 'loc', fulfillmentMode: 'store_pickup_return', lines: [{ itemGroupId: 'g', quantity: 1 }] },
+    inventoryBasis: { version: 'rental-quote-inventory-1', tenantId: 't', workspaceId: 'w',
+      groups: [{ id: 'g', tenantId: 't', categoryCode: 'camera', code: 'G', name: 'Group', inventoryMode: 'quantity', unit: 'piece', status: 'enabled', bundleComponents: [] }] },
     rentalAmount: 100, discountAmount: 0, couponAmount: 0, serviceAmount: 0, fulfillmentAmount: 0, depositAmount: 0, preAuthAmount: 0,
     receivableAmount: 100, payableAmount: 100, appliedDiscountPlanIds: [], rateSnapshot: [], calendarSnapshot: [], calendarWarnings: [], ruleSnapshot: {},
     pricingPlanVersion: '1', ruleVersion: '1', createdAt: '2026-10-31', expiresAt: '2099-01-01' };

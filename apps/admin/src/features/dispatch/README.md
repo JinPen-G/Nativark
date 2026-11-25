@@ -1,6 +1,6 @@
 # 租户寄件中心
 
-`TenantDispatchPage` 使用已有 UIArc Table / ListFilterBar / Segmented 适配器组成寄件目录，`DispatchDetail` 使用 UIArc Drawer / Tabs 及隔离邮件预览。记录来自原 `NotificationSendLog`、空间 `RentalNotificationLog` 和认证短信 `ExternalAdapterLog`，不建立镜像流水。
+`TenantDispatchPage` 与 `DispatchDetail` 沿[公共消息页面](../../../../../packages/platform-admin/src/features/messaging/README.md)组成寄件目录、详情及隔离邮件预览。原宿主提供当前品牌和路由图标。记录来自原 `NotificationSendLog`、空间 `RentalNotificationLog` 和认证短信 `ExternalAdapterLog`。
 
 视觉来源：[UIArc sortable data table](https://uiarc.dev/components/sortable-data-table)、[Drawer](https://uiarc.dev/components/drawer)、[Tabs](https://uiarc.dev/components/tabs)，原源码与许可保存在 [本地组件库](../../../../../packages/ui-arc/README.md)。列表按渠道、状态及标题/脱敏收件人筛选，查看操作留在记录行，顶栏不增加无用途主动作。
 

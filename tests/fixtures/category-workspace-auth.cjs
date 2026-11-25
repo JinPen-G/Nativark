@@ -11,7 +11,7 @@ function categoryWorkspaceAuth(tx, { tenantId, userId, workspaceId }) {
     fixedAllPermissions: false, dataScope: "ALL", buttonPermissions: [],
     permissions: [{ permission: { id: "adopt-permission", code: "rental-os:category:adopt" } }] };
   const state = {
-    tenantStatus: "ACTIVE", locks: [], beforeLock: undefined,
+    tenantStatus: "ACTIVE", locks: [], sharedTenantLocks: [], beforeLock: undefined,
     user: { id: userId, tenantId, account: "fixture", displayName: "Fixture", isActive: true, isSaasAdmin: false,
       isPlatformAdmin: false, mustChangePassword: false, roleId: role.id, role, roleAssignments: [], organization: null },
     member: { roleId: role.id, role, isActive: true, dataScope: null, locationScope: { mode: "all", locationIds: [] } },
@@ -24,6 +24,12 @@ function categoryWorkspaceAuth(tx, { tenantId, userId, workspaceId }) {
     const tables = ["Tenant", "User", "auth_sessions", "workspace_members", "UserRole", "Role", "RolePermission", "Permission"];
     const table = tables.find(table => sql.includes(`FROM \`${table}\``) || sql.includes(`FROM ${table} `));
     if (!table) return originalQuery(query);
+    if (table === "Tenant" && /LOCK IN SHARE MODE$/u.test(sql)) {
+      assert.equal(sql, "SELECT id FROM Tenant WHERE id=? LOCK IN SHARE MODE");
+      assert.deepEqual(query.values, [tenantId]);
+      state.sharedTenantLocks.push(table);
+      return [{ id: tenantId }];
+    }
     assert.match(sql, /FOR UPDATE$/);
     state.locks.push(table);
     if (state.beforeLock) await state.beforeLock(table);

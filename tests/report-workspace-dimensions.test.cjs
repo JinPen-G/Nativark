@@ -455,8 +455,14 @@ void withCleanup(async () => {
   ok("CSV 安全：公式前缀被中和，引号与逗号按规则转义");
 
   // ============ 11. 页面与接口契约 ============
-  const page = fs.readFileSync(
+  // 页面正文迁入 Core，原路由只供给真实业务 Context。
+  const pageHost = fs.readFileSync(
     path.join(ROOT, "apps/admin/src/features/reports/WorkspaceOperationReportPage.tsx"), "utf8"
+  );
+  assert.match(pageHost, /@rental-os\/rental-core\/admin\/operations/u, "原报表路由必须复用正式业务页面");
+  assert.match(pageHost, /<RentalWorkspaceOperationReportPage\s*\//u, "原宿主须渲染同一业务页面");
+  const page = fs.readFileSync(
+    path.join(ROOT, "packages/rental-core/admin/operations/WorkspaceOperationReportPage.tsx"), "utf8"
   );
   assert.match(page, /exportOperationReport\(filter\)/u, "导出必须复用页面同一组筛选");
   assert.match(page, /这一节是读取瞬间的快照，不是区间利用率/u, "页面必须显著标注快照口径");

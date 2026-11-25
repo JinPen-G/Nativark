@@ -1,0 +1,23 @@
+/* Keep the supplied geometry/motion; bind its palette and radii to the admin. */
+.rental-selection-toolbar .selection-local {
+  --accent: var(--rental-color-primary);
+  --border: var(--rental-color-border-secondary);
+  --border-subtle: var(--rental-color-border-secondary);
+  --danger: var(--rental-status-danger-ink, var(--rental-color-error));
+  --foreground: var(--rental-color-text);
+  --radius-panel: var(--rental-ui-radius-container);
+  --shadow-raised: var(--shadow-floating);
+  --surface: var(--rental-color-bg-container);
+  --surface-muted: var(--rental-color-fill-tertiary);
+  --surface-raised: var(--rental-color-bg-container);
+  --text-muted: var(--rental-color-text-secondary);
+  --text-secondary: var(--rental-color-text-secondary);
+  --text-xs: var(--rental-typography-meta-size);
+  font-family: inherit;
+}
+.rental-selection-toolbar .selection-toolbar_actions__DVZ9S button,
+.rental-selection-toolbar .selection-toolbar_clear__kCdJs { border-radius: var(--rental-ui-radius-button); }
+.rental-selection-toolbar .selection-local button:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+.rental-selection-toolbar .selection-local button:disabled:hover { background: transparent; }
+.rental-selection-toolbar .selection-local button:focus-visible { outline-color: var(--rental-color-primary); }
+.rental-selection-toolbar [data-shown="true"] { pointer-events: auto; }

@@ -5,7 +5,7 @@
 *An open-source, multi-tenant SaaS foundation built for AI-native business applications.*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Platform Base](https://img.shields.io/badge/Base-0.1.16-0F766E.svg)](package.json)
+[![Platform Base](https://img.shields.io/badge/Base-0.1.17-0F766E.svg)](package.json)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.12-339933.svg)](package.json)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178C6.svg)](tsconfig.base.json)
 [![NestJS](https://img.shields.io/badge/NestJS-10-E0234E.svg)](apps/platform-api/README.md)
@@ -231,6 +231,8 @@ npm run dev
 | **健康检查 / OpenAPI** | `http://localhost:3000/api/health` · `/api/openapi.json` | 服务状态与接口文档 |
 
 > 使用独立公共宿主或独立 Rental 宿主时，请清除 `RENTAL_PRISMA_LEGACY` 并指向各自宿主的 `generated/client/index.d.ts`（详参 [Client 选择规则](scripts/build-selected-prisma.cjs)）。
+
+原底座与 Rental 组合的 API / Web 镜像沿[正式 Dockerfile](scripts/ops/deployment/Dockerfile)构建，包含拆分后的工作区依赖。构建使用隔离生成的同一 Prisma Client，运行层只接收正式编译产物；[现有 CI](.github/workflows/nativark-release.yml)在无网络容器中核对 API 模块加载与 Web 文件。
 
 ---
 

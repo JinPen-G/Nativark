@@ -1,0 +1,17 @@
+import type { CreateFileUploadSessionRequest } from '@rental-os/shared';
+import type { FileBusinessOwner } from '../rental-adapters/file-storage.runtime.service';
+
+export const KNOWLEDGE_FILE_ACCESS = Symbol('KNOWLEDGE_FILE_ACCESS');
+export interface KnowledgeFileAccess {
+  authorizeUpload(tenantId: string, input: CreateFileUploadSessionRequest, owner?: FileBusinessOwner): Promise<void>;
+  /** Current metadata read, never a grant for a new upload or object read. */
+  authorizeUploadObservation?(tenantId: string, owner: FileBusinessOwner): Promise<void>;
+  assertBound(tenantId: string, fileAssetId: string, owner: FileBusinessOwner, target?: { documentVersion: string; expectedRevision: number }): Promise<void>;
+  /** Original pending-upload bytes only; current upload authority is mandatory.
+   * The original completion transaction persists the digest before activation. */
+  readUploadContentHash?(tenantId: string, fileAssetId: string, owner: FileBusinessOwner): Promise<string>;
+  /** Same original upload authority, exposing bounded bytes only internally to
+   * the storage completion path so it can freeze an independent object. */
+  readUploadContent?(tenantId: string, fileAssetId: string, owner: FileBusinessOwner): Promise<{ bytes: Uint8Array; contentHash: string }>;
+  read(tenantId: string, fileAssetId: string, owner: FileBusinessOwner, maxBytes: number, signal?: AbortSignal): Promise<{ mediaType: string; bytes: Uint8Array }>;
+}

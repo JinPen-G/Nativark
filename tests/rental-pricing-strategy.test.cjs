@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 
 require("ts-node").register({
   transpileOnly: true,
+  preferTsExts: true,
   compilerOptions: { module: "commonjs", moduleResolution: "node" }
 });
 

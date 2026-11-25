@@ -12,6 +12,7 @@ export const STORAGE_KEYS = {
   bootstrap: `${PREFIX}bootstrap`,
   lastService: `${PREFIX}last-service`,
   actionKeys: `${PREFIX}action-keys`,
+  closureChallenge: `${PREFIX}closure-challenge`,
   enterpriseOperations: `${PREFIX}enterprise-operations`,
   paymentIntents: `${PREFIX}payment-intents`,
   favorites: `${PREFIX}favorites`,

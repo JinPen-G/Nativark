@@ -1,11 +1,2 @@
-import { IsIn, IsString, MaxLength } from "class-validator";
-import type { ReviewPaymentStatementLineRequest } from "@rental-os/shared";
-
-export class ReviewPaymentStatementLineDto implements ReviewPaymentStatementLineRequest {
-  @IsIn(["acknowledge", "query_provider"])
-  decision!: "acknowledge" | "query_provider";
-
-  @IsString()
-  @MaxLength(500)
-  reason!: string;
-}
+/** 原支付HTTP兼容入口，消费Rental同源控制器和请求校验。 */
+export { ReviewPaymentStatementLineDto } from "@rental-os/rental-core/http-payments";

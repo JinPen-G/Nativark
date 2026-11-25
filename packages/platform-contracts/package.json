@@ -1,0 +1,124 @@
+{
+  "name": "@rental-os/platform-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "不依赖业务Core的公共身份、人员和设置契约",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./subscription": {
+      "types": "./dist/subscription.d.ts",
+      "default": "./dist/subscription.js"
+    },
+    "./rich-text": {
+      "types": "./dist/rich-text.d.ts",
+      "default": "./dist/rich-text.js"
+    },
+    "./request-fingerprint": {
+      "types": "./dist/request-fingerprint.d.ts",
+      "default": "./dist/request-fingerprint.js"
+    },
+    "./file-content-binding": {
+      "types": "./dist/file-content-binding.d.ts",
+      "default": "./dist/file-content-binding.js"
+    },
+    "./files": {
+      "types": "./dist/files.d.ts",
+      "default": "./dist/files.js"
+    },
+    "./integration-provider": {
+      "types": "./dist/integration-provider.d.ts",
+      "default": "./dist/integration-provider.js"
+    },
+    "./tenant-integrations": {
+      "types": "./dist/tenant-integrations.d.ts",
+      "default": "./dist/tenant-integrations.js"
+    },
+    "./official-calendar": {
+      "types": "./dist/official-calendar.d.ts",
+      "default": "./dist/official-calendar.js"
+    },
+    "./demo-request": {
+      "types": "./dist/demo-request.d.ts",
+      "default": "./dist/demo-request.js"
+    },
+    "./notifications": {
+      "types": "./dist/notifications.d.ts",
+      "default": "./dist/notifications.js"
+    },
+    "./jobs": {
+      "types": "./dist/jobs.d.ts",
+      "default": "./dist/jobs.js"
+    },
+    "./tenant-messaging": {
+      "types": "./dist/tenant-messaging.d.ts",
+      "default": "./dist/tenant-messaging.js"
+    },
+    "./ai-task": {
+      "types": "./dist/ai-task.d.ts",
+      "default": "./dist/ai-task.js"
+    },
+    "./ai-gateway": {
+      "types": "./dist/ai-gateway.d.ts",
+      "default": "./dist/ai-gateway.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "typesVersions": {
+    "*": {
+      "subscription": [
+        "dist/subscription.d.ts"
+      ],
+      "rich-text": [
+        "dist/rich-text.d.ts"
+      ],
+      "request-fingerprint": [
+        "dist/request-fingerprint.d.ts"
+      ],
+      "file-content-binding": [
+        "dist/file-content-binding.d.ts"
+      ],
+      "files": [
+        "dist/files.d.ts"
+      ],
+      "integration-provider": [
+        "dist/integration-provider.d.ts"
+      ],
+      "tenant-integrations": [
+        "dist/tenant-integrations.d.ts"
+      ],
+      "official-calendar": [
+        "dist/official-calendar.d.ts"
+      ],
+      "demo-request": [
+        "dist/demo-request.d.ts"
+      ],
+      "notifications": [
+        "dist/notifications.d.ts"
+      ],
+      "jobs": [
+        "dist/jobs.d.ts"
+      ],
+      "tenant-messaging": [
+        "dist/tenant-messaging.d.ts"
+      ],
+      "ai-task": [
+        "dist/ai-task.d.ts"
+      ],
+      "ai-gateway": [
+        "dist/ai-gateway.d.ts"
+      ]
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0"
+  }
+}

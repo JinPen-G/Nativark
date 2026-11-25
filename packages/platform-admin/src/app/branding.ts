@@ -1,0 +1,74 @@
+import type { AuthUser, TenantIdentity } from "@rental-os/platform-contracts";
+
+export const ADMIN_BRAND_NAME = "Nativark";
+// Platform defaults share the approved Preview outline. Runtime mark and browser
+// favicon choose contrast independently; tenant-uploaded artwork keeps priority.
+export const ADMIN_DEFAULT_LOGO = "/brand/nativark-logo-mono.svg";
+export const ADMIN_DEFAULT_MARK = "/brand/nativark-icon.svg";
+export const ADMIN_DEFAULT_FAVICON = "/brand/nativark-favicon.svg";
+export const ADMIN_LOGIN_DEFAULTS = {
+  title: "你的租赁业务，\n有了 Rental Agent。",
+  description: "资源调配、任务分派、跨店协作，\n交给 Rental Agent 统筹安排。\n\n日常管理，也有 Copilot 随时协助。",
+  highlights: [
+    { title: "Rental Agent", description: "统筹资源与任务" },
+    { title: "Copilot", description: "辅助日常管理" },
+    { title: "多品类经营", description: "不同业务，轻松切换" }
+  ],
+  footerText: "Nativark"
+} as const;
+
+function isTenantUser(user?: Pick<AuthUser, "isSaasAdmin">) {
+  return Boolean(user && !user.isSaasAdmin);
+}
+
+export function resolveAdminBrandName(
+  tenant?: Pick<TenantIdentity, "tenantName" | "brandName">,
+  user?: Pick<AuthUser, "isSaasAdmin">,
+) {
+  if (!isTenantUser(user)) return ADMIN_BRAND_NAME;
+  return (
+    tenant?.brandName?.trim() || tenant?.tenantName?.trim() || ADMIN_BRAND_NAME
+  );
+}
+
+export function resolveAdminLogo(
+  tenant?: Pick<TenantIdentity, "brandLogoUrl">,
+  user?: Pick<AuthUser, "isSaasAdmin">,
+) {
+  return isTenantUser(user)
+    ? tenant?.brandLogoUrl?.trim() || ADMIN_DEFAULT_LOGO
+    : ADMIN_DEFAULT_LOGO;
+}
+
+export function resolveAdminFavicon(
+  tenant?: Pick<TenantIdentity, "brandLogoUrl">,
+  user?: Pick<AuthUser, "isSaasAdmin">,
+) {
+  return resolveAdminMark(tenant, user);
+}
+
+export function resolveAdminMark(
+  tenant?: Pick<TenantIdentity, "brandLogoUrl">,
+  user?: Pick<AuthUser, "isSaasAdmin">,
+) {
+  return isTenantUser(user)
+    ? tenant?.brandLogoUrl?.trim() || ADMIN_DEFAULT_MARK
+    : ADMIN_DEFAULT_MARK;
+}
+
+/** 登录前无法读取会话时也可安全替换 favicon；失败时保留 HTML 中的平台默认图标。 */
+export function applyAdminFavicon(url?: string, onError?: () => void) {
+  if (typeof document === "undefined") return;
+  const href = url?.trim() || ADMIN_DEFAULT_FAVICON;
+  let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+  if (!link) {
+    link = document.createElement("link");
+    link.rel = "icon";
+    document.head.appendChild(link);
+  }
+  link.href = href;
+  link.type = /^data:image\/svg\+xml[;,]|\.svg(?:[?#]|$)/iu.test(href) ? "image/svg+xml" : "";
+  const failed = () => { if (link?.getAttribute("href") === href) onError?.(); };
+  link.addEventListener("error", failed);
+  return () => link?.removeEventListener("error", failed);
+}

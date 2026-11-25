@@ -13,6 +13,7 @@ const { PaymentRuntimeService } = require(path.join(__dirname, "../apps/api/src/
 const { TenantIntegrationRuntimeService } = require(path.join(__dirname, "../apps/api/src/modules/integrations/tenant-integration.runtime.service"));
 const { TenantIntegrationConnectivityService } = require(path.join(__dirname, "../apps/api/src/modules/integrations/tenant-integration.connectivity.service"));
 const { TenantIntegrationService } = require(path.join(__dirname, "../apps/api/src/modules/integrations/tenant-integration.service"));
+const { Prisma } = require("@prisma/client");
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048, privateKeyEncoding: { type: "pkcs8", format: "pem" }, publicKeyEncoding: { type: "spki", format: "pem" } });
 const calls = [];
@@ -178,7 +179,8 @@ async function runRevisionChecks() {
     if (key === 'OR') return value.some(matches);
     if (value instanceof Date) return row[key] instanceof Date && row[key].getTime() === value.getTime();
     if (value && typeof value === 'object') {
-      if ('equals' in value) return JSON.stringify(row[key]) === JSON.stringify(value.equals);
+      if ('equals' in value) return value.equals === Prisma.JsonNull
+        ? row[key] === null : JSON.stringify(row[key]) === JSON.stringify(value.equals);
       if ('lt' in value) return row[key] && row[key] < value.lt;
     }
     return row[key] === value;
@@ -220,7 +222,22 @@ async function runRevisionChecks() {
   assert.equal(staleResult.ok, false);
   assert.match(staleResult.message, /未采用旧测试结果/);
   assert.equal(row.lastTestStatus, 'not_tested');
-  console.log('integration test revision checks passed: read/claim/probe/result binding, credential change and duplicate result rejection');
+  row.settings = null;
+  row.secretFields = null;
+  row.credentialsEncrypted = null;
+  row.lastTestAt = null;
+  const nullConfig = await read(), nullStartedAt = new Date();
+  const nullClaim = { tenantId: row.tenantId, configId: row.id, revision: nullConfig.revision,
+    startedAt: nullStartedAt, cooldownMs: 30000 };
+  assert.equal(await service.claimLiveTest(nullClaim), true, 'stored JSON null retains its original claim comparison');
+  assert.equal(await service.recordTestResult({ ...nullClaim, status: 'failed', mode: 'live', checkedAt: nullStartedAt }), true);
+  row.lastTestAt = null;
+  row.settings = {};
+  assert.equal(await service.claimLiveTest(nullClaim), false, 'an empty settings object is different from stored JSON null');
+  row.settings = null;
+  row.secretFields = [];
+  assert.equal(await service.claimLiveTest(nullClaim), false, 'an empty secret field array is different from stored JSON null');
+  console.log('integration test revision checks passed: read/claim/probe/result binding, credential change, JSON null and duplicate result rejection');
 }
 
 void (async () => {

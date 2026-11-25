@@ -6,13 +6,56 @@ const ts = require("typescript");
 const React = require("react");
 const { renderToStaticMarkup } = require("react-dom/server");
 const { createTable, getCoreRowModel } = require("@tanstack/table-core");
+const root = path.resolve(__dirname, "..");
+const sourceLoader = require("../scripts/controller-sources.cjs").createControllerSourceLoader(
+  root, path.dirname(path.dirname(require.resolve("typescript/package.json"))));
 
-function load(relative, overrides = {}) {
-  const filename = path.resolve(__dirname, "..", relative);
+function sourceFile(relative) {
+  relative = relative.replace(/\\/g, "/");
+  if (relative === "apps/admin/src/app/locale.tsx") return path.resolve(root, relative);
+  const candidates = [
+    relative.replace(/^apps\/admin\/src\/features\/membership\//, "packages/rental-core/admin/membership/"),
+    relative.replace(/^apps\/admin\/src\/features\/rental-core\//, "packages/rental-core/admin/orders/"),
+    relative.replace(/^apps\/admin\/src\//, "packages/platform-admin/src/"),
+  ].filter(candidate => candidate !== relative);
+  candidates.push(relative);
+  for (const candidate of candidates) for (const suffix of ["", ".ts", ".tsx", "/index.ts"]) {
+    const filename = path.resolve(root, candidate + suffix);
+    if (fs.existsSync(filename) && fs.statSync(filename).isFile()) return filename;
+  }
+  return path.resolve(root, relative);
+}
+function dependencyFile(id, filename) {
+  if (id === "@/app/locale") return sourceFile("packages/platform-admin/src/app/locale.tsx");
+  if (id.startsWith("@/")) return sourceFile("apps/admin/src/" + id.slice(2));
+  if (id.startsWith("@rental-os/platform-admin/source/")) return sourceFile("packages/platform-admin/src/" + id.slice("@rental-os/platform-admin/source/".length));
+  if (id.startsWith(".")) return sourceFile(path.relative(root, path.resolve(path.dirname(filename), id)));
+}
+function load(relative, overrides = {}, legacy = false, browserWindow) {
+  const original = path.resolve(root, relative), filename = legacy ? original : sourceFile(relative);
+  if (filename.endsWith(".css")) return { __esModule: true, default: {} };
   const source = fs.readFileSync(filename, "utf8");
-  const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
+  const code = ts.transpileModule(source, { fileName: filename, compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText + `\n//# sourceURL=${filename}`;
   const mod = { exports: {} };
-  new Function("require", "module", "exports", code)(id => Object.hasOwn(overrides, id) ? overrides[id] : require(id), mod, mod.exports);
+  const aliases = { "@rental-os/platform-admin/ui": "@/components/ui", "@rental-os/platform-admin/locale": "@/app/locale" };
+  new Function("require", "module", "exports", "window", code)(id => {
+    if (Object.hasOwn(overrides, id)) return overrides[id];
+    if (Object.hasOwn(overrides, aliases[id])) return overrides[aliases[id]];
+    if (id.startsWith("@/registry/")) return load("packages/ui-arc/vendor/" + id.slice(2));
+    if (id.startsWith("@/lib/")) return load("packages/ui-arc/vendor/" + id.slice(2));
+    const target = dependencyFile(id, filename);
+    if (target) {
+      const equivalent = Object.keys(overrides).find(name => dependencyFile(name, original) === target);
+      if (equivalent) return overrides[equivalent];
+      if (target.endsWith(".css")) return { __esModule: true, default: {} };
+      return load(path.relative(root, target));
+    }
+    if (id === "@rental-os/platform-admin/locale") return load("packages/platform-admin/src/app/locale.tsx");
+    if (id === "@rental-os/rental-core" || id.startsWith("@rental-os/rental-core/")
+      || ["@rental-os/shared", "@rental-os/platform-contracts", "@rental-os/core-contracts"].includes(id))
+      return sourceLoader.load(sourceLoader.resolveSource(filename, id, true));
+    return require(id);
+  }, mod, mod.exports, browserWindow);
   return mod.exports;
 }
 
@@ -58,7 +101,9 @@ assert.equal(orderTimingNotice({ ...base, endAt: base.startAt }, clock), undefin
 assert.deepEqual(timeSpanParts(1505), [{ value: 1, unit: "天" }, { value: 1, unit: "小时" }, { value: 5, unit: "分钟" }]);
 assert.deepEqual(timeSpanParts(-1), []);
 
-const { rentalOrderListSort } = load("apps/api/src/modules/rental-core/rental-order-list-sort.ts");
+const { rentalOrderListSort } = load("apps/api/src/modules/rental-core/rental-order-list-sort.ts", {
+  "@rental-os/rental-core/mysql-order-list-sort": load("packages/rental-core/src/mysql-order-list-sort.ts"),
+});
 assert.equal(rentalOrderListSort({}).sql, "o.`createdAt` DESC, o.`id` DESC");
 assert.equal(rentalOrderListSort({ sort: "startAt.asc,payableAmount.desc" }).sql, "o.`startAt` ASC, o.`payableAmount` DESC, o.`id` DESC");
 const dueSort = rentalOrderListSort({ sort: "endAt.asc" });
@@ -145,7 +190,7 @@ for (const total of [0, 1, 22, 51]) {
 }
 assert.equal(elements(Pagination({ total: 22, pageSize: 20, showSizeChanger: false }), 'arc-size-select').length, 0);
 assert.equal(elements(Pagination({ total: 22, pageSize: 20, showSizeChanger: true, disabled: true }), 'arc-size-select')[0].props.disabled, true);
-const orderPageSource = fs.readFileSync(path.resolve(__dirname, '../apps/admin/src/features/rental-core/RentalOrdersPage.tsx'), 'utf8');
+const orderPageSource = fs.readFileSync(sourceFile("apps/admin/src/features/rental-core/RentalOrdersPage.tsx"), 'utf8');
 const orderPageAst = ts.createSourceFile('orders.tsx', orderPageSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 let pagerNode;
 function findPager(node) {
@@ -165,14 +210,16 @@ assert.deepEqual(orderPageWrites.splice(0), [['pageSize', 50], ['page', 1]], 'ch
 footerHandler(2, 20);
 assert.deepEqual(orderPageWrites, [['page', 2]], 'normal page navigation stays unchanged');
 assert.match(orderPageSource, /const query: RentalOrderListQuery = \{\s*page,\s*pageSize,/);
-assert.match(orderPageSource, /queryKey: \["rental-core", "orders", query\], queryFn: \(\) => rentalCoreApi\.orderPage\(query\)/);
-assert.match(fs.readFileSync(path.resolve(__dirname, '../apps/admin/src/components/ui/Pagination.tsx'), 'utf8'), /arc-select-field arc-pagination-size/);
-const pageSizeRule = require('postcss').parse(fs.readFileSync(path.resolve(__dirname, '../apps/admin/src/components/ui/arc-bridge.css'), 'utf8'))
+assert.match(orderPageSource, /const listScope = JSON\.stringify\(\[live\.scope, queryScope\]\)/);
+assert.match(orderPageSource, /queryKey: \["rental-core", "orders", listScope, query\], queryFn: \(\{ signal \}\) => rentalCoreApi\.orderPage\(query, \{ signal \}\)/);
+assert.match(orderPageSource, /previousQuery\?\.queryKey\[2\] === listScope \? previous : undefined/);
+assert.match(fs.readFileSync(sourceFile("apps/admin/src/components/ui/Pagination.tsx"), 'utf8'), /arc-select-field arc-pagination-size/);
+const pageSizeRule = require('postcss').parse(fs.readFileSync(sourceFile("apps/admin/src/components/ui/arc-bridge.css"), 'utf8'))
   .nodes.find(node => node.type === 'rule' && node.selector === '.arc-pagination-size');
 assert.deepEqual(Object.fromEntries(pageSizeRule.nodes.map(node => [node.prop, node.value])), {
   width: 'max-content', 'min-width': '0', flex: 'none', 'white-space': 'nowrap'
 }, 'only size selector width/wrapping changes; typography, radius and animation stay upstream');
-const bridgeRules = require('postcss').parse(fs.readFileSync(path.resolve(__dirname, '../apps/admin/src/components/ui/arc-bridge.css'), 'utf8')).nodes;
+const bridgeRules = require('postcss').parse(fs.readFileSync(sourceFile("apps/admin/src/components/ui/arc-bridge.css"), 'utf8')).nodes;
 const noCheckRule = bridgeRules.find(rule => rule.selector === '[data-rental-page-size-menu] [role="option"] > [class*="indicator"]');
 assert.deepEqual(Object.fromEntries(noCheckRule.nodes.map(node => [node.prop, node.value])), { display: 'none' });
 const optionRule = bridgeRules.find(rule => rule.selector === '[data-rental-page-size-menu] [role="option"]');
@@ -252,7 +299,7 @@ assert.deepEqual(table.getState().rowSelection, {});
 
 // Original motion parameters and the extracted numeric hook must not silently drift.
 const originalMotion = fs.readFileSync(path.resolve(__dirname, "../packages/ui-motiq/vendor/streaming-data-rows.tsx"), "utf8");
-const originalPrimitives = fs.readFileSync(path.resolve(__dirname, "../packages/ui-motiq/vendor/motion.ts"), "utf8");
+const originalPrimitives = fs.readFileSync(path.resolve(__dirname, "../packages/ui-motiq/vendor/motion.ts"), "utf8").replace(/\r\n/g, "\n");
 const crypto = require("node:crypto");
 for (const [file, hash] of Object.entries({
   "streaming-data-rows.tsx": "a9f93db655f00d19857ec40dcd8c6e3a251e8ca285c5f184ca0f521534eb7ee0",
@@ -262,7 +309,7 @@ for (const [file, hash] of Object.entries({
   const content = fs.readFileSync(path.resolve(__dirname, "../packages/ui-motiq/vendor", file), "utf8").replace(/\r\n/g, "\n").trimEnd() + "\n";
   assert.equal(crypto.createHash("sha256").update(content).digest("hex"), hash, "reserved original source must not drift");
 }
-const hookSource = fs.readFileSync(path.resolve(__dirname, "../packages/ui-motiq/runtime/use-animated-number.ts"), "utf8");
+const hookSource = fs.readFileSync(path.resolve(__dirname, "../packages/ui-motiq/runtime/use-animated-number.ts"), "utf8").replace(/\r\n/g, "\n");
 const hookStart = originalPrimitives.indexOf("export function useAnimatedNumber(");
 const hookEnd = originalPrimitives.indexOf("\n/* -------------------------------------------------------------------------- */", hookStart);
 assert.ok(hookSource.endsWith(originalPrimitives.slice(hookStart, hookEnd).trimEnd() + "\n"));
@@ -291,8 +338,8 @@ assert.equal((refreshing.match(/class="skeletonRow"/g) ?? []).length, table.getR
 assert.match(refreshing, /<tbody inert=""/);
 assert.match(refreshing, new RegExp(`data-row-id="${table.getRowModel().rows[0].id}"`), "refresh must preserve old rows and table height");
 assert.doesNotMatch(refreshing, /data-refreshing|progressbar|正在读取订单/);
-const tableStyles = fs.readFileSync(path.resolve(__dirname, "../apps/admin/src/components/ui/data-table/DataTable.module.css"), "utf8");
-// Regression: the approved 999 button preset must never turn the table frame/popovers into ovals.
+const tableStyles = fs.readFileSync(sourceFile("apps/admin/src/components/ui/data-table/DataTable.module.css"), "utf8");
+// Legacy large button values stay within current bounds and keep frame/popover radii independent.
 const { applyAdminRadiusTokens } = load("apps/admin/src/app/designTokens.ts");
 function radiusVariables(groups) {
   const values = new Map();
@@ -305,10 +352,11 @@ const metricValues = new Map();
 load("apps/admin/src/app/designTokens.ts").applyAdminTypographyTokens({ style: { setProperty: (name, value) => metricValues.set(name, value) } });
 assert.equal(metricValues.get('--rental-table-compact-header-height'), '36px');
 assert.equal(metricValues.get('--rental-table-status-height'), '24px');
-assert.equal(metricValues.get('--rental-layout-page-top-gap'), 'var(--space-1)', 'shared shell top gap is injected at startup from the foundation scale');
+assert.equal(metricValues.get('--rental-layout-page-top-gap'), '0px', 'the shared content starts immediately below the context row');
+assert.equal(metricValues.get('--rental-layout-context-optical-inset'), 'var(--space-1)', 'optical alignment stays inside the shared context row');
 assert.equal(metricValues.get('--rental-table-status-radius-max'), '6px');
-assert.equal(fullButtonRadii.get("--rental-ui-radius-button"), "999px");
-assert.equal(fullButtonRadii.get("--rental-ui-radius-container"), "24px");
+assert.equal(fullButtonRadii.get("--rental-ui-radius-button"), "16px");
+assert.equal(fullButtonRadii.get("--rental-ui-radius-container"), "20px");
 assert.equal(fullButtonRadii.get("--rental-ui-radius-input"), "12px");
 for (const [group, selectors] of Object.entries({
   container: ["scroll", "rowMenu", "refreshOverlay", "menu", "columnViewMenu", "columnCommand", "sortOverlay"],
@@ -339,7 +387,7 @@ assert.doesNotMatch(pageLoading, /<table|<aside|data-loading-skeleton|<button|<i
 assert.match(renderToStaticMarkup(React.createElement(LoadingState, { label: "Loading…" })), /class="rental-loading-label">Loading…<\/span>/);
 assert.equal(loadingShapes.PageSkeleton, undefined);
 assert.equal(loadingShapes.ShellSkeleton, undefined);
-const orderPageSource = fs.readFileSync(path.resolve(__dirname, "../apps/admin/src/features/rental-core/RentalOrdersPage.tsx"), "utf8");
+const orderPageSource = fs.readFileSync(sourceFile("apps/admin/src/features/rental-core/RentalOrdersPage.tsx"), "utf8");
 assert.doesNotMatch(orderPageSource, /正在读取订单|筛选结果更新中，当前显示上次结果。/);
 // Inspect the actual View element tree, keeping real TanStack visibility callbacks.
 const viewIntegration = load("apps/admin/src/components/ui/data-table/DataTable.tsx", {
@@ -382,23 +430,58 @@ const quickActions = load("apps/admin/src/features/rental-core/orderQuickActions
 const allOrderPermissions = { operate: true, pickup: true, return: true, extend: true, cancel: true, settle: true };
 const noOrderPermissions = Object.fromEntries(Object.keys(allOrderPermissions).map(key => [key, false]));
 const rowActionIntegration = load("apps/admin/src/components/ui/data-table/DataTableRowActions.tsx", {
-  "../Button": { Button: "button" }, "../Dropdown": { Dropdown: ({ children }) => children },
+  "../Button": { Button: ({ type, size, danger, children, ...props }) => React.createElement("button", props, children) },
+  "../Dropdown": { Dropdown: ({ children }) => children },
   "./DataTable.module.css": { __esModule: true, default: classes },
 });
-const orderRowActions = load("apps/admin/src/features/rental-core/RentalOrderRowActions.tsx", {
+const coreOrderRowActions = load("packages/rental-core/admin/orders/RentalOrderRowActions.tsx", {
   "@/components/ui": rowActionIntegration, "./orderQuickActions": quickActions,
 });
+const legacyOrderRowActions = load("apps/admin/src/features/rental-core/RentalOrderRowActions.tsx", {
+  "@rental-os/rental-core/admin/orders": coreOrderRowActions, "@rental-os/rental-core/admin/orders/logic": quickActions,
+}, true);
+const orderRowActions = { RentalOrderRowActions(props) {
+  const wrapped = legacyOrderRowActions.RentalOrderRowActions(props);
+  assert.equal(wrapped.type, coreOrderRowActions.RentalOrderRowActions);
+  return wrapped.type(wrapped.props);
+} };
 const { DataTableMoney } = load("apps/admin/src/components/ui/data-table/DataTableMoney.tsx", {
   "./DataTable.module.css": { __esModule: true, default: classes },
 });
-const orderColumns = load("apps/admin/src/features/rental-core/rentalOrderColumns.tsx", {
-  "@/components/ui": { Button: "button", Tooltip: ({ title, children }) => React.createElement('span', { 'data-tooltip': title }, children), DataTableColumnHeader: () => null, DataTableLeading, DataTableMoney, DataTableStatus: statusIntegration.DataTableStatus, DataTableNote: statusIntegration.DataTableNote },
-  "@/app/designTokens": load("apps/admin/src/app/designTokens.ts"),
+const coreOrderColumns = load("packages/rental-core/admin/orders/rentalOrderColumns.tsx", {
+  "@/components/ui": { ...load("packages/platform-admin/src/app/designTokens.ts"), Button: "button", Tooltip: ({ title, children }) => React.createElement('span', { 'data-tooltip': title }, children), DataTableColumnHeader: () => null, DataTableLeading, DataTableMoney, DataTableStatus: statusIntegration.DataTableStatus, DataTableNote: statusIntegration.DataTableNote },
   "./orderFeeReview": load("apps/admin/src/features/rental-core/orderFeeReview.ts"),
   "./orderListPresentation": { orderTimingNotice, plannedReturnAt, timeSpanParts },
   "./RentalOrdersPage.module.css": { __esModule: true, default: classes },
-  "./RentalOrderRowActions": orderRowActions,
+  "./RentalOrderRowActions": coreOrderRowActions,
+  "./orderStatusSemantics": load("packages/rental-core/admin/orders/orderStatusSemantics.ts"),
 });
+const customerPreviewProps = [];
+const previewSession = { user: { id: "operator", tenantId: "tenant" }, tenant: { tenantId: "tenant" },
+  currentWorkspaceId: "workspace", hasPermission: () => false, hasTenantMembershipPermission: () => false };
+const { CustomerPreview: OriginalCustomerPreview } = load("packages/rental-core/admin/membership/CustomerPreview.tsx", {
+  "@rental-os/platform-admin/native-ui": {
+    HoverCard: ({ children }) => children, HoverCardProfile: () => null,
+    Button: ({ variant, size, children, ...props }) => React.createElement("button", props, children),
+    avatarClasses: classes,
+  },
+  "./page-context": {
+    useRentalMembershipSession: selector => selector(previewSession),
+    useRentalMembershipContext: () => ({ customerApi: { detail: () => { throw new Error("Closed previews cannot read customer facts"); } } }),
+  },
+  "@/app/locale": { useLocale: () => ({ t: text => text }) },
+  "./CustomerPreview.module.css": { __esModule: true, default: classes },
+  "./CustomerAvatar": { CustomerAvatar: ({ fallback }) => fallback },
+});
+
+const CustomerPreview = props => {
+  customerPreviewProps.push(props);
+  return React.createElement(OriginalCustomerPreview, props);
+};
+const orderColumns = load("apps/admin/src/features/rental-core/rentalOrderColumns.tsx", {
+  "@rental-os/rental-core/admin/orders": coreOrderColumns, "@rental-os/rental-core/admin/orders/logic": quickActions,
+  "@/features/membership/CustomerPreview": { CustomerPreview },
+}, true);
 const data = { ...base, id: "order", orderNo: "R1", customerName: "Customer", reservations: [], lines: [], payableAmount: 12.3, currency: "CNY" };
 for (const [status, primary] of [["draft", "confirm"], ["reserved", "allocation"], ["ready_for_pickup", "pickup"], ["renting", "return"], ["settling", "settle"]]) {
   const order = { ...data, status };
@@ -431,9 +514,9 @@ assert.doesNotMatch(readOnlyActionHtml, /分配 \/ 锁定|办理领取|取消并
 assert.match(readOnlyActionHtml, /aria-label="查看详情 · R1"/);
 assert.match(readOnlyActionHtml, /lucide-file-text/);
 assert.match(readOnlyActionHtml, />查看详情<\/button>/, "details must keep a visible label, not an icon alone");
-assert.match(readOnlyActionHtml, /<button(?=[^>]*class="rowMenuTrigger")(?=[^>]*disabled="")[^>]*>/);
+assert.doesNotMatch(readOnlyActionHtml, /class="rowMenuTrigger"/, "read-only orders keep the details action without an empty menu");
 const cancelledActionHtml = renderToStaticMarkup(React.createElement(orderRowActions.RentalOrderRowActions, { order: { ...data, status: "cancelled" }, permissions: allOrderPermissions, navigate() {}, t: text => text }));
-assert.match(cancelledActionHtml, /<button(?=[^>]*class="rowMenuTrigger")(?=[^>]*disabled="")[^>]*>/, "cancelled orders have no duplicate details menu");
+assert.doesNotMatch(cancelledActionHtml, /class="rowMenuTrigger"/, "cancelled orders keep one details action without an empty menu");
 assert.equal((cancelledActionHtml.match(/>查看详情<\/button>/g) || []).length, 1);
 assert.equal(actionProps.menuIcons, true, 'orders explicitly opt into semantic menu icons');
 const menuForInspection = rowActionIntegration.DataTableRowActions({ ...actionProps, menuIcons: false }).props.children[1];
@@ -452,17 +535,28 @@ for (let index = 0; index < iconEntries.length; index++) {
   assert.equal(children[1], expected.label);
   assert.equal(iconEntries[index].props.onSelect, expected.onSelect, 'adding an icon must preserve the real navigation callback');
 }
-assert.match(fs.readFileSync(path.resolve(__dirname, '../apps/admin/src/features/rental-core/RentalOrderRowActions.tsx'), 'utf8'), /<DataTableRowActions menuIcons/);
-const noticeSource = fs.readFileSync(path.resolve(__dirname, "../apps/admin/src/features/rental-core/OrderQuickActionNotice.tsx"), "utf8");
+assert.match(fs.readFileSync(sourceFile("apps/admin/src/features/rental-core/RentalOrderRowActions.tsx"), 'utf8'), /<DataTableRowActions menuIcons/);
+const noticeSource = fs.readFileSync(sourceFile("apps/admin/src/features/rental-core/OrderQuickActionNotice.tsx"), "utf8");
 assert.doesNotMatch(noticeSource, /\.click\(|mutate|rentalCoreApi|fetch\(/, "locating an operation must not execute it");
-assert.match(noticeSource, /button\?\.disabled \? container/);
-assert.match(noticeSource, /prefers-reduced-motion/);
-const pageCss = fs.readFileSync(path.resolve(__dirname, "../apps/admin/src/features/rental-core/RentalOrdersPage.module.css"), "utf8");
+assert.match(noticeSource, /button\?\.disabled \? declaredTarget \?\? container/);
+assert.match(noticeSource, /isMotionReduced\(\)/);
+const pageCss = fs.readFileSync(sourceFile("apps/admin/src/features/rental-core/RentalOrdersPage.module.css"), "utf8");
 const { translateAdminText } = load("apps/admin/src/app/locale.tsx", { "./localeContext": load("apps/admin/src/app/localeContext.ts") });
 const zhCopy = (text, values) => translateAdminText(text, "zh-CN", values);
 const enCopy = (text, values) => translateAdminText(text, "en-US", values);
+assert.match(fs.readFileSync(path.resolve(root, "packages/platform-admin/src/shell.ts"), "utf8"),
+  /export \{ PageHeading \} from "\.\/components\/PageHeading"/);
+const { PageHeading } = load("packages/platform-admin/src/components/PageHeading.tsx", {
+  "antd": { Space: ({ children }) => React.createElement("div", null, children) },
+  "./ui/Button": { Button: ({ children, ...props }) => React.createElement("button", props, children) },
+  "./ui/InfoPopover": { InfoPopover: ({ children }) => children },
+  "./ui/icons": { InfoCircleOutlined: () => null },
+  "../app/locale": { useLocale: () => ({ t: enCopy, locale: "en-US" }) },
+  "./workspace/WorkspaceHeader": { useWorkspaceHeader: () => null },
+});
 // A page needs a name, not a mandatory explanatory sentence or duplicate list title.
 const { PageHeader } = load("apps/admin/src/components/PageHeader.tsx", {
+  "@rental-os/platform-admin/shell": { PageHeading },
   "@ant-design/icons": { InfoCircleOutlined: () => null },
   "antd": { Space: ({ children }) => React.createElement("div", null, children), Popover: ({ children }) => children },
   "@/components/ui": { Button: ({ children, ...props }) => React.createElement("button", props, children) },
@@ -479,10 +573,11 @@ const scopedHeader = renderToStaticMarkup(React.createElement(PageHeader, { titl
 assert.match(scopedHeader, /Member records and status changes apply across all workspaces/);
 assert.match(scopedHeader, /class="page-context" role="note"/);
 assert.doesNotMatch(scopedHeader, /page-subtitle/, "business scope stays visible without a second title row");
-const commercialSource = fs.readFileSync(path.resolve(__dirname, "../apps/admin/src/features/commercial/RentalCommercialPage.tsx"), "utf8");
+const commercialSource = fs.readFileSync(path.resolve(__dirname, "../packages/rental-core/admin/commercial/RentalCommercialPage.tsx"), "utf8");
 assert.doesNotMatch(commercialSource, /className="context-note"|t\("增值服务及保障"\)|t\("自动优惠方案"\)/);
 assert.match(commercialSource, /已有价格须通过调价计划变更/);
 assert.equal(enCopy("新增服务"), "Add service");
+// 手工单元格夹具读取原内容回调，完整 Table 渲染仍由 TanStack 提供稳定列上下文。
 const definitions = orderColumns.rentalOrderColumns({ t: zhCopy, now: clock, labels: {}, navigate() {}, permissions: allOrderPermissions });
 // The approved layout changes presentation only: the same server fields,
 // selection, original source motion and real actions remain connected.
@@ -491,25 +586,25 @@ const defaultVisibility = { createdAt: false, quoteNo: false, security: false, a
 const layoutTable = createTable({ ...options, data: [data], columns: definitions,
   state: { ...options.state, columnVisibility: defaultVisibility, columnPinning: { left: [], right: ['actions'] } } });
 assert.deepEqual(layoutTable.getVisibleLeafColumns().map(column => column.id), ['orderNo', 'customerName', 'items', 'startAt', 'endAt', 'payableAmount', 'status', 'actions']);
-assert.equal(layoutTable.getTotalSize(), 1375, 'reallocate the action-column space without widening the default business columns');
-assert.equal(layoutTable.getColumn('actions').getSize(), 168);
+assert.equal(layoutTable.getTotalSize(), 1415, 'retained width baselines stay compatible while the rendered table uses content-responsive sizing');
+assert.equal(layoutTable.getColumn('actions').getSize(), 208);
 assert.equal(layoutTable.getColumn('createdAt').getCanSort(), true);
 assert.equal(layoutTable.getColumn('createdAt').getCanHide(), true);
 layoutTable.setOptions(previous => ({ ...previous, state: { ...previous.state, columnVisibility: { ...defaultVisibility, createdAt: true } } }));
 assert.ok(layoutTable.getVisibleLeafColumns().some(column => column.id === 'createdAt'));
 const originalCreatedAt = '2026-10-15T10:23:00Z';
-const orderIdHtml = renderToStaticMarkup(definitions.find(column => column.id === 'orderNo').cell({ row: { original: { ...data, createdAt: originalCreatedAt } } }));
+const orderIdHtml = renderToStaticMarkup(definitions.find(column => column.id === 'orderNo').meta.orderCell({ row: { original: { ...data, createdAt: originalCreatedAt } } }));
 assert.doesNotMatch(orderIdHtml, /创建|10-15/);
-const createdAtHtml = renderToStaticMarkup(definitions.find(column => column.id === 'createdAt').cell({ row: { original: { ...data, createdAt: originalCreatedAt } } }));
+const createdAtHtml = renderToStaticMarkup(definitions.find(column => column.id === 'createdAt').meta.orderCell({ row: { original: { ...data, createdAt: originalCreatedAt } } }));
 assert.match(createdAtHtml, /dateTime="2026-10-15T10:23:00Z"/);
 for (const createdAt of [undefined, null, '', 'bad-time']) {
-  assert.match(renderToStaticMarkup(definitions.find(column => column.id === 'createdAt').cell({ row: { original: { ...data, createdAt } } })), /—/);
+  assert.match(renderToStaticMarkup(definitions.find(column => column.id === 'createdAt').meta.orderCell({ row: { original: { ...data, createdAt } } })), /—/);
 }
 assert.equal(metricValues.get('--rental-control-height-filter'), '36px');
 assert.match(orderPageSource, /<DataTableToolbar[\s\S]*?controls=\{<>/, "orders use the same single-row filter bar as other lists");
 assert.ok(orderPageSource.indexOf('<Segmented aria-label={t("分配进度")}') < orderPageSource.indexOf('<SearchField label={t("搜索订单")}'), "category tabs precede the keyword field");
 assert.doesNotMatch(pageCss, /\.(queryControls|tableOptions|viewRow)\s*\{/, "page-local filter rails no longer duplicate the shared toolbar");
-const filterBarSource = fs.readFileSync(path.resolve(__dirname, "../apps/admin/src/components/ui/ListFilterBar.tsx"), "utf8");
+const filterBarSource = fs.readFileSync(sourceFile("apps/admin/src/components/ui/ListFilterBar.tsx"), "utf8");
 const ViewTabs = () => null, Criterion = () => null;
 const { splitListControls } = load("apps/admin/src/components/ui/ListFilterBar.tsx", {
   "lucide-react": {}, "@/registry/components/popover/popover": {}, "@/app/designTokens": {}, "@/app/locale": {},
@@ -537,20 +632,21 @@ assert.equal(planListFilters({ ...filterGeometry, available: 700 }).count, 0);
 assert.equal(planListFilters({ ...filterGeometry, available: 600, category: 0, categoryMin: 0, fieldWidths: [192, 192], preferFirst: false, resets: [] }).count, 1, "criteria collapse from the end one at a time");
 assert.equal(planListFilters({ ...filterGeometry, available: 450, category: 240, categoryMin: 160, searchMin: 96, fieldWidths: [], resets: [] }).more, false, "category plus keyword must not create an empty More panel");
 assert.match(orderPageSource, /className=\{styles.feeToggle\}/);
-assert.match(fs.readFileSync(path.resolve(__dirname, '../apps/admin/src/features/rental-core/RentalOrderDetailPage.tsx'), 'utf8'), /key: "createdAt", label: t\("创建时间"\)/);
+assert.match(fs.readFileSync(sourceFile("apps/admin/src/features/rental-core/RentalOrderDetailPage.tsx"), 'utf8'), /key: "createdAt", label: t\("创建时间"\)/);
 for (const id of ["status", "payableAmount", "actions"]) {
   const primaryCell = definitions.find(column => column.id === id);
-  const markup = renderToStaticMarkup(primaryCell.cell({ row: { original: data } }));
-  assert.match(markup, /^<span class="leading">|^<div class="cellStack"><span class="leading">/, `${id} keeps its internal leading slot independently of whole-cell alignment`);
+  const markup = renderToStaticMarkup(primaryCell.meta.orderCell({ row: { original: data } }));
+  assert.match(markup, /^<span class="leading"[^>]*>|^<div class="(?:cellStack|statusStack)"><span class="leading"[^>]*>/, `${id} keeps its internal leading slot independently of whole-cell alignment`);
 }
-const tableCss = fs.readFileSync(path.resolve(__dirname, "../apps/admin/src/components/ui/data-table/DataTable.module.css"), "utf8");
-// Alignment is explicit column metadata, not a global middle rule or a stretched
-// motion wrapper. Real rendered td attributes must track the record's content.
+const tableCss = fs.readFileSync(sourceFile("apps/admin/src/components/ui/data-table/DataTable.module.css"), "utf8");
+// Column metadata selects whole-cell alignment above the shared middle default.
+// Real rendered td attributes track the record's content through the motion wrapper.
 assert.match(tableCss, /\.table tbody td\[data-cell-align="middle"\] \{ vertical-align: middle; \}/);
-assert.match(tableCss, /\.table th, \.table td \{[^}]*vertical-align: top/);
+assert.match(tableCss, /\.table tbody td\[data-cell-align="top"\] \{ vertical-align: top; \}/);
+assert.match(tableCss, /\.table th, \.table td \{[^}]*vertical-align: middle/);
 assert.match(tableCss, /\.toolbar \{[^}]*--rental-control-height-toolbar: var\(--rental-control-height-filter\)/, "shared toolbar, not an order-only copy, owns filter height");
 assert.match(tableCss, /\.toolbar \{[^}]*align-items: flex-start/, "filters stay aligned with the table tools");
-assert.match(tableCss, /\.toolbarFilters \{[^}]*flex: 1 1 0;[^}]*min-width: 0/, "filters use the room left by the tools instead of reserving a second row");
+assert.match(tableCss, /\.toolbarFilters \{[^}]*flex: 1 1 0;[^}]*min-width: min\(100%, var\(--rental-list-control-width-search-min\)\)/, "filters share the available row and retain the shared search minimum");
 assert.match(tableCss, /\.filterBar \{[^}]*height: var\(--rental-control-height-filter\)/, "the query bar remains a single shared-height row");
 assert.match(tableCss, /\.listSection \{[^}]*padding: 0;[^}]*border: 0;[^}]*background: transparent;[^}]*box-shadow: none/, "list grouping has no duplicate card shell");
 assert.doesNotMatch(pageCss, /\.refreshControl\s*\{/);
@@ -599,9 +695,9 @@ assert.match(tableCss, /\.rowMenu\[data-state="closed"\] \{[^}]*rowMenuOut 100ms
 assert.match(tableCss, /\.rowMenu\[data-side="bottom"\] \{ --row-menu-y: -\.5rem/);
 assert.match(tableCss, /@keyframes rowMenuIn[^\n]*scale\(\.95\)/);
 assert.match(tableCss, /\.statusPill\[data-tinted\] \{[^}]*12%[^}]*border-color:[^}]*38%/);
-assert.match(tableCss, /\.statusPill\[data-variant="soft"\] \{[^}]*height: var\(--rental-table-status-height\);[^}]*border: 0;[^}]*border-radius: min\(var\(--rental-ui-radius-container\), var\(--rental-table-status-radius-max\)\);[^}]*color: var\(--table-status-color\);[^}]*8%/);
+assert.match(tableCss, /\.statusPill\[data-variant="soft"\] \{[^}]*height: var\(--rental-table-status-height\);[^}]*border: 0;[^}]*border-radius: min\(var\(--rental-ui-radius-container\), var\(--rental-table-status-radius-max\)\);[^}]*color: var\(--table-status-color\);[^}]*background: var\(--table-status-surface, var\(--rental-status-neutral-surface\)\)/);
 assert.match(tableCss, /\.root\[data-compact-header\] \{ --table-header-height: var\(--rental-table-compact-header-height\); \}/);
-assert.match(tableCss, /\.root\[data-compact-header\] \.table thead th \{[^}]*padding-block: 0;[^}]*background: var\(--surface-muted\)/);
+assert.match(tableCss, /\.root\[data-compact-header\] \.table thead th \{[^}]*padding-block: 0;[^}]*background: var\(--surface\);[^}]*color: var\(--text-secondary\)/);
 assert.match(tableCss, /\.rowMenuIcon \{[^}]*flex-shrink: 0;[^}]*color: var\(--text-muted\)/);
 assert.match(orderPageSource, /<DataTable compactHeader/);
 const compactMarkup = renderToStaticMarkup(React.createElement(DataTable, { table, caption: '订单', empty: '无记录', compactHeader: true }));
@@ -622,10 +718,10 @@ itemTable = createTable({
   onExpandedChange: updater => itemTable.setOptions(previous => ({ ...previous, state: { ...previous.state,
     expanded: typeof updater === "function" ? updater(previous.state.expanded) : updater } })),
 });
-const itemElement = () => itemsColumn.cell({ row: itemTable.getRowModel().rows[0] });
+const itemElement = () => itemsColumn.meta.orderCell({ row: itemTable.getRowModel().rows[0] });
 const itemsHtml = renderToStaticMarkup(itemElement());
 assert.equal((itemsHtml.match(/class="itemLine"/g) ?? []).length, 3, "only the remaining items belong to the expandable list");
-assert.match(itemsHtml, /^<div class="cellStack"><span class="leading"><span class="itemName">全画幅相机机身<\/span>/);
+assert.match(itemsHtml, /^<div class="cellStack"><span class="leading"[^>]*><span class="itemName">全画幅相机机身<\/span>/);
 assert.match(itemsHtml, /class="itemMeta"><span class="itemQuantity">数量 × 2<\/span><button[^>]*aria-expanded="false"/);
 assert.match(itemsHtml, />另 3 项<svg/);
 assert.match(itemsHtml, /class="itemList" hidden=""/);
@@ -650,51 +746,64 @@ itemElement().props.onToggle();
 itemTable.resetExpanded(true);
 assert.equal(itemTable.getRowModel().rows[0].getIsExpanded(), false, "identity scope reset clears the item expansion map");
 const itemRow = order => ({ original: order, getIsExpanded: () => false, toggleExpanded() {} });
-const noItemsHtml = renderToStaticMarkup(itemsColumn.cell({ row: itemRow(data) }));
+const noItemsHtml = renderToStaticMarkup(itemsColumn.meta.orderCell({ row: itemRow(data) }));
 assert.match(noItemsHtml, /—/);
 assert.doesNotMatch(noItemsHtml, /数量 ×/);
 // Identity summaries use only order snapshots, without repeated ordinary labels
 // or fake product images; they must not acquire catalogue/customer access.
 const customerColumn = definitions.find(column => column.id === "customerName");
-const customerHtml = order => renderToStaticMarkup(customerColumn.cell({ row: { original: order } }));
+const customerHtml = order => renderToStaticMarkup(customerColumn.meta.orderCell({ row: { original: order } }));
 const personal = { ...data, customerId: "member-1", customerType: "personal", customerName: "李宁", membershipSnapshot: { personalCustomerId: "member-1", personalCustomerName: "李宁" } };
 const personalHtml = customerHtml(personal);
-assert.match(personalHtml, /class="customerMark" data-tone="[1-4]" aria-hidden="true">李宁/);
-assert.match(personalHtml, /class="customerName">李宁/);
+assert.match(personalHtml, /class="avatar sm avatar" aria-hidden="true">李<\/span>/);
+assert.match(personalHtml, /class="listName" data-customer-preview-name="">李宁/);
+assert.equal(customerPreviewProps.at(-1).customerId, "member-1");
+assert.equal(customerPreviewProps.at(-1).presentation, "list");
+assert.equal(customerPreviewProps.at(-1).snapshot, true);
 assert.doesNotMatch(personalHtml, /lucide-user-round|个人会员|旧客户记录|<img/);
-assert.equal(customerHtml(personal), personalHtml, "identity color must not be random on each render");
+assert.equal(customerHtml(personal), personalHtml, "the original preview identity stays stable across renders");
 assert.match(customerHtml({ ...personal, membershipSnapshot: { ...personal.membershipSnapshot, personalCustomerName: "Emma Collins" } }), /aria-hidden="true">EC/);
-assert.match(customerHtml({ ...data, customerName: "😀张三" }), /aria-hidden="true">张三/);
-const enterpriseHtml = customerHtml({ ...personal, customerName: "当前主档名不应覆盖快照", membershipSnapshot: { ...personal.membershipSnapshot, corporateCustomerName: "山海影业", enterpriseContractAndPayer: true } });
+assert.match(customerHtml({ ...data, customerName: "😀张三" }), /data-customer-preview-name="">😀张三|class="customerName">😀张三/);
+const enterpriseHtml = customerHtml({ ...personal, customerName: "当前主档名不应覆盖快照", membershipSnapshot: { ...personal.membershipSnapshot, corporateCustomerId: "company-1", corporateCustomerName: "山海影业", enterpriseContractAndPayer: true } });
 assert.match(enterpriseHtml, /lucide-building-2/);
 assert.match(enterpriseHtml, /山海影业/);
 assert.match(enterpriseHtml, /企业签约付款/);
+assert.equal(customerPreviewProps.at(-2).type, "personal");
+assert.equal(customerPreviewProps.at(-2).customerId, "member-1");
+assert.equal(customerPreviewProps.at(-1).type, "corporate");
+assert.equal(customerPreviewProps.at(-1).customerId, "company-1");
+assert.equal(customerPreviewProps.at(-1).snapshot, true);
 assert.doesNotMatch(enterpriseHtml, /当前主档名不应覆盖快照|data-corporate="true"/, "enterprise employees retain their personal identity alongside the company relation");
 assert.match(customerHtml({ ...personal, membershipSnapshot: { ...personal.membershipSnapshot, corporateCustomerName: "山海影业", enterpriseContractAndPayer: false } }), /企业权益/);
-const legacyCorporate = customerHtml({ ...data, customerType: "corporate", customerName: "山海影业" });
-assert.match(legacyCorporate, /data-corporate="true"/);
+const legacyCorporate = customerHtml({ ...data, customerId: "company-legacy", customerType: "corporate", customerName: "山海影业" });
+assert.equal(customerPreviewProps.at(-1).type, "corporate");
+assert.equal(customerPreviewProps.at(-1).customerId, "company-legacy");
 assert.match(legacyCorporate, /lucide-building-2/);
 assert.match(legacyCorporate, /旧客户记录/);
 assert.doesNotMatch(legacyCorporate, /企业签约付款|企业权益/, "legacy company records cannot invent membership or payer facts");
+const legacyWithoutId = customerHtml({ ...data, customerType: "corporate", customerName: "山海影业" });
+assert.match(legacyWithoutId, /class="customerName">山海影业/);
+assert.match(legacyWithoutId, /旧客户记录/);
+assert.doesNotMatch(legacyWithoutId, /data-copilot-reference|aria-label="预览客户资料/, "historical names without a master ID stay readable");
 assert.match(customerHtml({ ...data, customerName: " " }), /class="customerName">—/);
 assert.match(customerHtml({ ...data, customerName: "<客户>" }), /&lt;客户&gt;/);
 for (const categoryCode of ["camera", "camping", "vehicle", "construction", "__proto__"]) {
-  const html = renderToStaticMarkup(itemsColumn.cell({ row: itemRow({ ...data, categoryCode, lines: [{ id: "line", itemGroupName: "历史商品名称", quantity: 1 }] }) }));
+  const html = renderToStaticMarkup(itemsColumn.meta.orderCell({ row: itemRow({ ...data, categoryCode, lines: [{ id: "line", itemGroupName: "历史商品名称", quantity: 1 }] }) }));
   assert.match(html, /历史商品名称/);
   assert.match(html, /数量 × 1/);
   assert.doesNotMatch(html, /itemMark|品类图标|<svg|aria-expanded/, "single-item summaries have no repeated category tile or needless disclosure");
   assert.doesNotMatch(html, /<img|(?:src|href)="https?:/, "fallback marks are not invented product photos or external images");
 }
-const columnsSource = fs.readFileSync(path.resolve(__dirname, "../apps/admin/src/features/rental-core/rentalOrderColumns.tsx"), "utf8");
+const columnsSource = fs.readFileSync(sourceFile("apps/admin/src/features/rental-core/rentalOrderColumns.tsx"), "utf8");
 assert.doesNotMatch(columnsSource, /useQuery|rentalCoreApi|customerApi|fetch\(|Math\.random\(/);
 for (const id of ["orderNo", "startAt", "endAt"]) {
-  const html = renderToStaticMarkup(definitions.find(column => column.id === id).cell({ row: { original: data } }));
-  assert.match(html, /^<div class="cellStack"><span class="leading">/, `${id} aligns with the existing primary status/amount/actions slot`);
+  const html = renderToStaticMarkup(definitions.find(column => column.id === id).meta.orderCell({ row: { original: data } }));
+  assert.match(html, /^<div class="cellStack"><span class="leading"[^>]*>/, `${id} aligns with the existing primary status/amount/actions slot`);
 }
-const pickupHtml = renderToStaticMarkup(definitions.find(column => column.id === "startAt").cell({ row: { original: data } }));
+const pickupHtml = renderToStaticMarkup(definitions.find(column => column.id === "startAt").meta.orderCell({ row: { original: data } }));
 assert.match(pickupHtml, /<time dateTime="2026-10-16T01:00:00Z" class="plannedDate"><span>2026-10-16<\/span><span class="plannedClock">\d{2}:00<\/span>/);
 assert.match(pickupHtml, /class="timingNotice" data-tone="warning".*lucide-clock-alert.*到时未取/s);
-const longPickupHtml = renderToStaticMarkup(orderColumns.rentalOrderColumns({ t: text => text, now: Date.parse(base.startAt) + (3 * 1440 + 8 * 60 + 54) * 60000, labels: {}, navigate() {}, permissions: allOrderPermissions }).find(column => column.id === "startAt").cell({ row: { original: data } }));
+const longPickupHtml = renderToStaticMarkup(orderColumns.rentalOrderColumns({ t: text => text, now: Date.parse(base.startAt) + (3 * 1440 + 8 * 60 + 54) * 60000, labels: {}, navigate() {}, permissions: allOrderPermissions }).find(column => column.id === "startAt").meta.orderCell({ row: { original: data } }));
 assert.match(longPickupHtml, /class="duration" title="3 天 8 小时 54 分钟" aria-label="3 天 8 小时 54 分钟">3天8时<\/span>/);
 // Native, compact copy uses the actual shared dictionary. Unknown business
 // names stay unchanged; counts are complete messages, not Chinese fragments.
@@ -709,11 +818,11 @@ for (const key of ["constructor", "__proto__", "toString"]) assert.equal(enCopy(
 assert.equal(zhCopy("另 {count} 项", { count: 3 }), "另 3 项");
 assert.equal(enCopy("另 {count} 项", { count: "$&{other}" }), "+$&{other} more", "values are substituted once, never executed or recursively translated");
 const englishDefinitions = orderColumns.rentalOrderColumns({ t: enCopy, locale: "en-US", now: Date.parse(base.startAt) + (3 * 1440 + 8 * 60 + 54) * 60000, labels: {}, navigate() {}, permissions: allOrderPermissions });
-const englishPickup = renderToStaticMarkup(englishDefinitions.find(column => column.id === "startAt").cell({ row: { original: data } }));
+const englishPickup = renderToStaticMarkup(englishDefinitions.find(column => column.id === "startAt").meta.orderCell({ row: { original: data } }));
 assert.match(englishPickup, /title="3 days 8 hours 54 minutes" aria-label="3 days 8 hours 54 minutes">3d 8h<\/span>/);
 const englishSingular = orderColumns.rentalOrderColumns({ t: enCopy, locale: "en-US", now: Date.parse(base.startAt) + 1501 * 60000, labels: {}, navigate() {}, permissions: allOrderPermissions });
-assert.match(renderToStaticMarkup(englishSingular.find(column => column.id === "startAt").cell({ row: { original: data } })), /title="1 day 1 hour 1 minute"/);
-assert.match(renderToStaticMarkup(englishDefinitions.find(column => column.id === "items").cell({ row: itemRow(multiItemOrder) })), />\+3 more<svg/);
+assert.match(renderToStaticMarkup(englishSingular.find(column => column.id === "startAt").meta.orderCell({ row: { original: data } })), /title="1 day 1 hour 1 minute"/);
+assert.match(renderToStaticMarkup(englishDefinitions.find(column => column.id === "items").meta.orderCell({ row: itemRow(multiItemOrder) })), />\+3 more<svg/);
 const englishAction = orderRowActions.RentalOrderRowActions({ order: { ...data, status: "ready_for_pickup" }, permissions: allOrderPermissions, pickupLabel: "取机", t: enCopy, navigate() {} });
 assert.equal(englishAction.props.primary.label, "Check out");
 assert.match(pageCss, /\.duration \{[^}]*white-space: nowrap/);
@@ -726,8 +835,10 @@ assert.equal(metricValues.get("--rental-table-identity-size"), "32px");
 assert.equal(metricValues.get("--rental-table-identity-icon-size"), "16px");
 assert.equal(metricValues.get("--rental-table-identity-radius-max"), "8px");
 for (let tone = 1; tone <= 4; tone++) assert.match(metricValues.get(`--rental-table-identity-${tone}`), new RegExp(`var\\(--series-${tone}\\).*var\\(--foreground\\)`));
-assert.match(pageCss, /\.customerMark\[data-corporate\] \{ border-radius: min\(var\(--rental-ui-radius-container\), var\(--rental-table-identity-radius-max\)\)/);
-assert.match(pageCss, /\.customerMark \{[^}]*border-radius: var\(--rental-ui-radius-pill\)/);
+const customerPreviewCss = fs.readFileSync(path.join(root, "packages/rental-core/admin/membership/CustomerPreview.module.css"), "utf8");
+assert.match(customerPreviewCss, /\.trigger \{[^}]*border-radius: var\(--radius-pill\)/);
+assert.match(customerPreviewCss, /\.trigger\.listTrigger \{[^}]*border: 0;[^}]*background: transparent/);
+assert.match(customerPreviewCss, /\.trigger\.listTrigger \.avatar \{[^}]*width: var\(--rental-table-list-avatar-size\);[^}]*height: var\(--rental-table-list-avatar-size\)/);
 assert.match(pageCss, /\.orderLink \{[^}]*font-weight: var\(--rental-typography-body-weight\)/);
 const laterDefinitions = orderColumns.rentalOrderColumns({ t: text => `EN ${text}`, now: clock + 60000, labels: {}, navigate() {}, permissions: allOrderPermissions });
 for (const definition of definitions.filter(column => column.meta?.motion)) {
@@ -741,17 +852,17 @@ assert.notEqual(orderColumns.orderStatusIcon("completed"), orderColumns.orderSta
 assert.notEqual(orderColumns.orderStatusIcon("reserved"), orderColumns.orderStatusIcon("renting"));
 assert.notEqual(orderColumns.orderStatusIcon("pickup_overdue"), orderColumns.orderStatusIcon("return_inspection"));
 for (const [status, iconClass] of [["completed", "circle-check"], ["cancelled", "circle-x"], ["reserved", "calendar-check"], ["renting", "timer"], ["return_inspection", "clipboard-check"], ["settling", "wallet"], ["no_show", "user"]]) {
-  const markup = renderToStaticMarkup(definitions.find(column => column.id === "status").cell({ row: { original: { ...data, status } } }));
+  const markup = renderToStaticMarkup(definitions.find(column => column.id === "status").meta.orderCell({ row: { original: { ...data, status } } }));
   assert.match(markup, new RegExp("lucide-" + iconClass));
   assert.match(markup, /data-variant="soft"/);
   assert.match(markup, /data-tinted="true"/, "all order status badges retain semantic backgrounds, including neutral cancelled");
 }
-const allocationMarkup = renderToStaticMarkup(definitions.find(column => column.id === "status").cell({ row: { original: data } }));
+const allocationMarkup = renderToStaticMarkup(definitions.find(column => column.id === "status").meta.orderCell({ row: { original: data } }));
 assert.match(allocationMarkup, /lucide-layers/);
 assert.match(allocationMarkup, /待分配/);
 assert.match(allocationMarkup, /class="statusNote" data-slot="table-note" data-tone="neutral"/);
 assert.equal((allocationMarkup.match(/data-slot="badge"/g) ?? []).length, 1, 'only the primary order lifecycle is a badge');
-const statusCellMarkup = order => renderToStaticMarkup(definitions.find(column => column.id === 'status').cell({ row: { original: order } }));
+const statusCellMarkup = order => renderToStaticMarkup(definitions.find(column => column.id === 'status').meta.orderCell({ row: { original: order } }));
 const pendingFeeMarkup = statusCellMarkup({ ...data, status: 'no_show', feeReviews: [{ status: 'pending' }] });
 assert.match(pendingFeeMarkup, /data-slot="table-note" data-tone="warning".*待裁定费用/);
 assert.equal((pendingFeeMarkup.match(/data-slot="badge"/g) ?? []).length, 1);
@@ -764,20 +875,21 @@ const lockedMarkup = statusCellMarkup({ ...data, status: 'ready_for_pickup', res
 assert.match(lockedMarkup, /class="secondary">已锁定/);
 assert.doesNotMatch(lockedMarkup, /lucide-lock-keyhole/, 'ordinary successful locking is quiet text, not another icon competing with the main state');
 const renewedOrder = { ...data, status: 'renting', effectiveEndAt: '2026-10-19T05:20:00Z', allocations: [{ status: 'picked_up', quantity: 1 }] };
-const renewedHtml = renderToStaticMarkup(definitions.find(column => column.id === 'endAt').cell({ row: { original: renewedOrder } }));
+const renewedHtml = renderToStaticMarkup(definitions.find(column => column.id === 'endAt').meta.orderCell({ row: { original: renewedOrder } }));
 assert.match(renewedHtml, /dateTime="2026-10-19T05:20:00Z"/);
 assert.match(renewedHtml, /data-tooltip="已续租，原 2026-10-17/);
 assert.match(renewedHtml, /tabindex="0" aria-label="已续租，原 [^"]+">已续租/);
 assert.doesNotMatch(renewedHtml, /class="secondary">已续租，原 /, 'the old timestamp remains accessible on demand, not a repeated third line');
 const overdueRenewal = orderColumns.rentalOrderColumns({ t: text => text, now: Date.parse(renewedOrder.effectiveEndAt) + 60000, labels: {}, navigate() {}, permissions: allOrderPermissions }).find(column => column.id === 'endAt');
-const overdueRenewalHtml = renderToStaticMarkup(overdueRenewal.cell({ row: { original: renewedOrder } }));
+const overdueRenewalHtml = renderToStaticMarkup(overdueRenewal.meta.orderCell({ row: { original: renewedOrder } }));
 assert.match(overdueRenewalHtml, /class="timingNotice" data-tone="danger".*逾期未还/s);
 assert.match(overdueRenewalHtml, /tabindex="0"[^>]*>已续租/);
 for (const status of ['approved', 'rejected']) assert.doesNotMatch(statusCellMarkup({ ...data, feeReviews: [{ status }] }), /待裁定费用/);
 const noteStyle = tableCss.match(/\.statusNote \{([^}]+)\}/)[1];
-assert.doesNotMatch(noteStyle, /background|border|padding|font-weight/, 'annotations must not recreate the primary badge appearance');
-assert.match(noteStyle, /color: var\(--text-muted\)/);
-assert.match(tableCss, /\.statusNote\[data-tone="warning"\] \{ color: var\(--warning\); \}/);
+assert.doesNotMatch(noteStyle, /background|border|padding/, 'annotations retain a plain secondary-text appearance');
+assert.match(noteStyle, /color: var\(--text-secondary\)/);
+assert.match(noteStyle, /font-weight: 400/);
+assert.match(tableCss, /\.statusNote\[data-tone="warning"\] svg \{ color: var\(--rental-status-warning-ink\); \}/);
 assert.equal(orderColumns.orderStatusIcon("unknown"), orderColumns.orderStatusIcon("__proto__"));
 const amountMotion = definitions.find(column => column.id === "payableAmount").meta.motion;
 assert.equal(amountMotion.value({ ...data, payableAmount: undefined }), null);
@@ -786,11 +898,11 @@ assert.notEqual(amountMotion.context(data), amountMotion.context({ ...data, curr
 // The visible morph path must use the same currency/amount hierarchy as a static
 // cell; styling only children would affect the screen-reader copy, not the UI.
 const amountColumn = definitions.find(column => column.id === "payableAmount");
-const amountCell = order => amountColumn.cell({ row: { original: order } });
+const amountCell = order => amountColumn.meta.orderCell({ row: { original: order } });
 const moneyOrder = { ...data, payableAmount: 1288.77 };
 const staticMoney = renderToStaticMarkup(amountCell(moneyOrder));
 assert.match(staticMoney, /class="moneyCurrency">¥<\/span><span class="moneyValue">1,288\.77<\/span>/);
-assert.match(staticMoney, /^<span class="leading">/);
+assert.match(staticMoney, /^<span class="leading"[^>]*>/);
 for (const currency of ["CNY", "HKD", "MOP", "TWD", "SGD", "USD", "EUR", "XYZ"]) {
   for (const payableAmount of [0, 12.3, -12.3, 9999999.99]) {
     const order = { ...data, currency, payableAmount };
@@ -810,8 +922,8 @@ for (const payableAmount of [undefined, null, NaN, Infinity, "12.30"]) {
 assert.match(renderToStaticMarkup(React.createElement(DataTableMoney, { formatted: "<coin> 12.30" })), /&lt;coin&gt;/);
 const moneyTable = createTable({ data: [moneyOrder], columns: [amountColumn], getCoreRowModel: getCoreRowModel(), state: options.state });
 const animatedMoney = renderToStaticMarkup(React.createElement(DataTable, { table: moneyTable, caption: "金额", empty: "无记录", animated: true }));
-assert.match(animatedMoney, /class="leading" aria-hidden="true"><span class="money" data-slot="table-money"><span class="moneyCurrency">¥<\/span><span class="moneyValue">1,288\.77<\/span>/);
-assert.match(animatedMoney, /class="srOnly"><span class="leading"><span class="money"/, "exact amount remains available separately to assistive technology");
+assert.match(animatedMoney, /class="leading"[^>]*aria-hidden="true"[^>]*><span class="money" data-slot="table-money"><span class="moneyCurrency">¥<\/span><span class="moneyValue">1,288\.77<\/span>/);
+assert.match(animatedMoney, /class="srOnly"><span class="leading"[^>]*><span class="money"/, "exact amount remains available separately to assistive technology");
 for (const [paused, reduced] of [[false, false], [true, false], [false, true]]) {
   const midMotion = load("apps/admin/src/components/ui/data-table/DataTableMotion.tsx", {
     "motion/react": { ...require("motion/react"), useReducedMotion: () => reduced },
@@ -830,10 +942,10 @@ for (const [paused, reduced] of [[false, false], [true, false], [false, true]]) 
 }
 assert.match(tableCss, /\.moneyValue \{[^}]*color: var\(--foreground\);[^}]*font-size: var\(--rental-typography-table-money-size\);[^}]*font-weight: var\(--rental-typography-table-money-weight\)/);
 assert.match(tableCss, /\.moneyCurrency \{[^}]*color: var\(--text-secondary\);[^}]*font-size: var\(--rental-typography-meta-size\);[^}]*font-weight: var\(--rental-typography-meta-weight\)/);
-assert.equal(metricValues.get("--rental-typography-table-money-size"), "16px");
-assert.equal(metricValues.get("--rental-typography-table-money-weight"), "600");
+assert.equal(metricValues.get("--rental-typography-table-money-size"), "13px");
+assert.equal(metricValues.get("--rental-typography-table-money-weight"), "500");
 assert.doesNotMatch(pageCss, /\.money \{/);
-// Shared legacy-column bridge: real TanStack models, no API/network/browser.
+// The shared legacy-column bridge uses real TanStack models and controlled route/identity inputs.
 let businessView, businessTools, businessPager;
 const listSections = load("apps/admin/src/components/ui/ListSection.tsx", {
   "./data-table/DataTable.module.css": { __esModule: true, default: classes },
@@ -843,6 +955,9 @@ const business = load("apps/admin/src/components/ui/Table.tsx", {
   "@/app/locale": { useLocale: () => ({ t: text => text }) },
   "@/app/designTokens": loadingTokens,
   "./data-table/TableRefreshContext": { useTableRefresh: () => ({}) },
+  "./BusinessUiScope": { useBusinessUiScope: () => ({ identity: "tenant:workspace:operator", currentIdentity: () => "tenant:workspace:operator" }) },
+  "./data-table/ListCapabilities": { ListCards: () => null, ListSelectionBar: () => null,
+    ListTransferTools: () => null, ListViewSwitch: () => null },
   "./ListSection": listSections,
   "./data-table/DataTable": {
     DataTable: props => { businessView = props; return React.createElement(DataTable, props); },
@@ -852,7 +967,7 @@ const business = load("apps/admin/src/components/ui/Table.tsx", {
     props.heading && React.createElement(listSections.ListSectionTitle, props.heading), props.heading?.extra); } },
   "./Pagination": { Pagination: props => { businessPager = props; return React.createElement("div", { "data-shared-pagination": true }); } },
   "./data-table/DataTable.module.css": { __esModule: true, default: classes },
-});
+}, false, { location: { pathname: "/rental/orders" } });
 assert.equal(business.readTableValue({ a: [{ b: 0 }] }, ["a", 0, "b"]), 0);
 assert.equal(business.readTableValue({ a: null }, ["a", "b"]), undefined);
 assert.equal(business.readTableValue(undefined, ["missing"]), undefined);
@@ -926,7 +1041,8 @@ assert.equal(rowClick, "b");
 assert.equal(businessView.footer, undefined, "explicitly unpaged detail tables stay unpaged");
 assert.equal(businessView.table.getColumn("expand").getCanHide(), false);
 assert.match(renderToStaticMarkup(React.createElement(business.Table, { rowKey: "id", dataSource: [], columns: businessColumns, loading: true, pagination: false })), /skeletonRow/);
-assert.match(renderToStaticMarkup(React.createElement(business.Table, { dataSource: businessRows, columns: businessColumns, rowSelection: {} })), /data-compatibility/, "unbridged selection contracts retain the original renderer");
+assert.doesNotMatch(renderToStaticMarkup(React.createElement(business.Table, { dataSource: businessRows, columns: businessColumns, rowSelection: {} })), /data-compatibility/, "supported checkbox selection uses the shared renderer");
+assert.match(renderToStaticMarkup(React.createElement(business.Table, { dataSource: businessRows, columns: businessColumns, rowSelection: { type: "radio" } })), /data-compatibility/, "unbridged radio selection retains the original renderer");
 
 async function repositoryCheck() {
   const queries = [];

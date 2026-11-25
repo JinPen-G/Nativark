@@ -1,7 +1,2 @@
-/** Explicit recipient refusal of an original unresolved transfer decision; no authority inputs. */
-import { IsBoolean, IsIn } from "class-validator";
-import type { CloseEnterpriseTransferDecisionRequest } from "@rental-os/shared";
-import { EnterpriseChangeRequestDto } from "./enterprise-request.dto";
-export class CloseEnterpriseTransferDecisionDto extends EnterpriseChangeRequestDto implements CloseEnterpriseTransferDecisionRequest {
-  @IsBoolean() @IsIn([true]) confirm!: true;
-}
+/** 原API兼容同一Rental请求校验，声明与运行时只保留一份。 */
+export * from "@rental-os/rental-core/http-enterprise-transfer-decision.dto";

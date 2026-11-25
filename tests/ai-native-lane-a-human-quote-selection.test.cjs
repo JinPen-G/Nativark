@@ -195,6 +195,13 @@ async function exerciseMultilineApprovedConsumer(enterprise = false, expireBefor
         ? withDeliveryFixture && field.fieldId === 'fulfillment_selection' ? before.fulfillmentMode
           : field.options.find(option => field.fieldId === 'item_selection' && option.value === before.items[field.target?.rowIndex ?? 0].itemGroupId)?.value ?? field.options[0].value
         : field.kind === 'integer' ? 1 : field.fieldId === 'starts_at' ? candidate.start : field.fieldId === 'ends_at' ? candidate.end : 'Parameters only; no quote or order approval.' })) };
+    // This consumer selects the original structured parameters. Optional prose
+    // is a separate model-clarification intent and cannot prepare that quote.
+    if (standardPreparationFixture === 'conversation_consumer') {
+      const prose = pending.contract.fields.find(field => field.fieldId === 'clarification_text');
+      if (prose) assert.equal(prose.required, false);
+      submission.answers = submission.answers.filter(answer => answer.fieldId !== 'clarification_text');
+    }
     // Begin same name explicit answer.
     if (['same_name', 'same_name_revoked'].includes(standardPreparationFixture)) {
       const field = pending.contract.fields.find(row => row.fieldId === 'customer_selection');
@@ -525,17 +532,18 @@ async function exerciseMultilineApprovedConsumer(enterprise = false, expireBefor
   let selected, conversationConsumer;
   if (standardPreparationFixture === 'conversation_consumer') {
     const { AiClarifiedQuoteSelectionController } = require('../apps/api/src/modules/ai-native/task-request/human-quote-selection.controller');
-    const controller = new AiClarifiedQuoteSelectionController(selectionConsumer), Module = require('node:module');
-    const queryFile = require.resolve('../apps/admin/src/app/queryClient'), httpFile = require.resolve('../apps/admin/src/api/http');
-    const oldQuery = Module._cache[queryFile], oldHttp = Module._cache[httpFile], stored = new Map(), calls = [];
+    const controller = new AiClarifiedQuoteSelectionController(selectionConsumer), stored = new Map(), calls = [];
+    const frontend = require('../scripts/controller-sources.cjs').createControllerSourceLoader(path.resolve(__dirname, '..'),
+      path.dirname(path.dirname(require.resolve('typescript/package.json'))));
+    const frontendSource = file => frontend.load(path.resolve(__dirname, '..', file));
     const turn = { admissionKey: 'selection-admission', turnId: 'selection-turn', originalRequestKey: h.created.receipt.requestKey,
       requestHash: 'a'.repeat(64), capabilityCode: 'quote_clarification', capabilityVersion: h.created.receipt.sceneVersion,
       createdAt: h.created.receipt.createdAt, automaticRetry: false, status: 'original_bound', execution: 'not_inferred_from_association',
       material: 'retained', original: h.reference, task: { taskId: h.created.task.taskId, runId: h.created.task.runId } };
     let current = true, changedMaterial = false, loseSelection = true, loseStart = true, taskController, taskCenterController;
     const source = { answer: { reference: selectionClarification.reference, receiptId: receipt.receipt.receiptId }, quoteId: quote.id, runId: receipt.receipt.runId };
-    Module._cache[queryFile] = { id: queryFile, filename: queryFile, loaded: true, exports: { currentSessionSignal: () => new AbortController().signal, currentSessionEpoch: () => 1 } };
-    Module._cache[httpFile] = { id: httpFile, filename: httpFile, loaded: true, exports: { http: { post: async (url, input, options) => {
+    const frontendSession = { currentSessionSignal: () => new AbortController().signal, currentSessionEpoch: () => 1,
+      useAuthStore: { getState: () => h.b.h.identity }, http: { post: async (url, input, options) => {
       const action = url.split('/').at(-1); calls.push({ action, input: structuredClone(input), url }); assert.equal(options.signal.aborted, false);
       if (action === 'admission') return { data: { data: { ...input, result: turn, absence: 'not_proof_of_no_commit', retryable: false } } };
       if (action === 'select' || action === 'start') {
@@ -557,11 +565,15 @@ async function exerciseMultilineApprovedConsumer(enterprise = false, expireBefor
         if (action === 'start' && loseStart) { loseStart = false; throw Error('Lost original host reply'); }
       }
       return { data: { data: JSON.parse(JSON.stringify(value)) } };
-    } } } };
-    const { aiQuoteSelectionsApi } = require('../apps/admin/src/api/aiQuoteSelections');
-    const { aiConversationsApi } = require('../apps/admin/src/api/aiConversations');
-    const { ConversationQuoteSelectionSession } = require('../apps/admin/src/features/ai-native/conversation-quote-selection-session');
-    const { aiTaskCenterApi } = require('../apps/admin/src/api/aiTaskCenter');
+    } } };
+    frontendSession.runtime = { currentSessionSignal: frontendSession.currentSessionSignal,
+      currentSessionEpoch: frontendSession.currentSessionEpoch, getSession: () => h.b.h.identity, subscribe: () => () => {},
+      request: async (url, options) => (await frontendSession.http.post(url, options.data, options)).data.data };
+    const transport = { session: frontendSession, aiHost: { runtime: frontendSession.runtime, getSession: () => h.b.h.identity } };
+    const aiQuoteSelectionsApi = frontendSource('packages/rental-core/admin/assistant/api/aiQuoteSelections.ts').createAiQuoteSelectionsApi(transport);
+    const aiConversationsApi = frontendSource('packages/rental-core/admin/assistant/api/aiConversations.ts').createAiConversationsApi(transport);
+    const { ConversationQuoteSelectionSession } = frontendSource('packages/rental-core/admin/assistant/ai-native/conversation-quote-selection-session.ts');
+    const aiTaskCenterApi = frontendSource('packages/ai-native-admin/src/api/aiTaskCenter.ts').createAiTaskCenterApi(frontendSession.runtime);
     const ports = { ...aiQuoteSelectionsApi, admission: aiConversationsApi.admission };
     const create = () => new ConversationQuoteSelectionSession('selection-conversation', turn, ports, () => current, () => source,
       { getItem: key => stored.get(key) ?? null, setItem: (key, value) => stored.set(key, value) }, 'original-selection');
@@ -571,7 +583,6 @@ async function exerciseMultilineApprovedConsumer(enterprise = false, expireBefor
     await assert.rejects(session.select(), /Lost frontend selection reply/); assert.equal(h.state.aiTaskQuoteSelection.length, 1);
     assert.equal(h.state.aiApproval.length, 0); assert.equal(h.state.rentalOrder.length, 0); session.dispose();
     const beforeReload = calls.length; session = create(); assert.equal(calls.length, beforeReload); await session.reconcile();
-    if (process.env.AI_OFFLINE_WRITE_ROOT) require('node:fs').writeFileSync(path.join(process.env.AI_OFFLINE_WRITE_ROOT, 'original-selection-material.json'), JSON.stringify(preparedSelection.material));
     selected = { receipt: session.snapshot().receipt, replayed: false }; await assert.rejects(session.select(), /AI_RESULT_UNKNOWN/);
     assert.equal(calls.filter(row => row.action === 'select').length, 1);
     conversationConsumer = { get session() { return session; }, calls, api: aiTaskCenterApi, setupCenter(controller) { taskCenterController = controller; }, async start(controller) {
@@ -582,8 +593,7 @@ async function exerciseMultilineApprovedConsumer(enterprise = false, expireBefor
       assert.equal(session.snapshot().result.order.quoteId, quote.id); current = false; session.retract();
       assert.equal(session.snapshot().result, null); const before = calls.length; await assert.rejects(session.readResult(), /AI_SCOPE_CHANGED/);
       assert.equal(calls.length, before); session.dispose(); }, restore() {
-      if (oldQuery) Module._cache[queryFile] = oldQuery; else delete Module._cache[queryFile];
-      if (oldHttp) Module._cache[httpFile] = oldHttp; else delete Module._cache[httpFile];
+      // Factory-bound transports do not replace another consumer's module cache.
     } };
   } else if (standardPreparationFixture === 'http_reference') {
     const { AiClarifiedQuoteSelectionController } = require('../apps/api/src/modules/ai-native/task-request/human-quote-selection.controller');

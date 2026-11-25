@@ -147,6 +147,8 @@ model Tenant {
   id                                String                                   @id @default(uuid())
   code                              String                                   @unique
   name                              String
+  /// SaaS管理员设置的后台营运商简称；不替代完整公司名称或客户端品牌，旧租户为空。
+  operatorShortName                 String?                                  @db.VarChar(64)
   status                            TenantStatus                             @default(ACTIVE)
   statusReason                      String?
   statusChangedAt                   DateTime?

@@ -1,0 +1,5 @@
+.metrics { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-2); margin: 0; padding: 0; color: var(--rental-content-secondary); font-size: var(--rental-list-summary-size); line-height: var(--rental-list-summary-line-height); }
+.metrics > div { display: inline-flex; align-items: baseline; gap: var(--space-1); }
+.metrics > div + div::before { content: "·"; margin-inline-end: var(--space-1); color: var(--text-muted); }
+.metrics dt { margin: 0; font-weight: var(--rental-list-summary-weight); }
+.metrics dd { margin: 0; color: var(--rental-content-primary); font-size: var(--rental-list-summary-value-size); line-height: var(--rental-list-summary-value-line-height); font-weight: var(--rental-list-summary-value-weight); font-variant-numeric: tabular-nums; }

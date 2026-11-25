@@ -7,6 +7,8 @@ const { RentalCoreController } = require('../apps/api/src/modules/rental-core/re
 const { returnPricingSlices } = require('../apps/api/src/modules/rental-core/rental-return-pricing');
 const { runWithRequestIdentity } = require('../apps/api/src/common/request-identity');
 const { RentalServiceCapacityService } = require('../apps/api/src/modules/rental-core/rental-service-capacity.service');
+const { RentalExchangePreviewService } = require('../apps/api/src/modules/rental-core/rental-exchange-preview.service');
+const { readRentalInventoryBasis } = require('@rental-os/rental-core/quote-inventory-basis');
 const { MembershipService } = require('../apps/api/src/modules/platform/membership.service');
 const { fulfillmentAdmissionFixture } = require('./helpers/fulfillment-admission-fixture.cjs');
 const { exchangeServiceConfirmationHash } = require('../apps/api/src/modules/rental-core/rental-service-catalog');
@@ -21,7 +23,10 @@ function fixture({ unit = 'day_24h', days = 10, old = 10, next = 20, minimum = 1
   const rates = [rate('a', old), rate('b', next), rate('c', 30)];
   const context = { profile: { categoryCode: 'camera' }, category: { code: 'camera' },
     settings: { calendar: { timeZone: 'UTC' }, pricing: { holidayPricingEnabled: false, currency: 'CNY' } },
-    groups: ['a', 'b', 'c'].map(id => ({ id, code: id.toUpperCase(), name: id.toUpperCase(), status: 'enabled', inventoryMode: 'quantity', attributes: {} })),
+    groups: ['a', 'b', 'c'].map(id => ({ id, tenantId: 't', categoryCode: 'camera', code: id.toUpperCase(), name: id.toUpperCase(),
+      unit: '件', status: 'enabled', inventoryMode: 'quantity', attributes: {}, bundleComponents: [] })),
+    locations: [{ id: 'loc', code: 'LOC', name: 'Location', status: 'enabled', operatorId: 'op', type: 'store', capabilities: ['pickup', 'return'] }],
+    operators: [{ id: 'op', code: 'OP', name: 'Operator', status: 'enabled', type: 'self_operated' }],
     pricingGroups: [] };
   const pricingContext = { timeZone: 'UTC', calendars: [], legacyDayTypeMultipliers: false, dayRates: rates.filter(row => row.unit === 'day_24h') };
   const rule = { pricing: {}, payment: { depositMode: 'none' }, overdue: { graceMinutes: 0, feeMode: 'hourly', feeMultiplier: 1 },
@@ -185,13 +190,17 @@ test('exchange executes current membership, original equipment and delivery gate
     attributes: { insuranceExpiry: '2020-01-01', inspectionExpiry: '2099-01-01' } };
   f.core.loadInventorySnapshot = async () => ({ assets: [clone(asset)], reservations: [], stockBalances: [] });
   const apply = () => f.apply(at(5), 'replacement_current_price', 'b', {}, { replacementAssetId: asset.id }, tx);
-  const source = { locations: [{ id: 'loc', code: 'LOC', name: 'Current', status: 'enabled', operatorId: 'op', type: 'store', capabilities: ['pickup', 'return'] }],
+  const source = { workspaceStatus: 'active', locations: [{ id: 'loc', code: 'LOC', name: 'Current', status: 'enabled', operatorId: 'op', type: 'store', capabilities: ['pickup', 'return'] }],
     operators: [{ id: 'op', code: 'OP', name: 'Operator', status: 'enabled', type: 'self_operated' }] };
   const admission = fulfillmentAdmissionFixture('t', 'w', source);
   const now = new Date(), relation = { id: 'relationship', tenantId: 't', corporateCustomerId: 'corp', personalCustomerId: 'customer',
     status: 'active', effectiveFrom: now, effectiveTo: null };
   let qualified = false;
   const tx = { ...admission.tx,
+    businessWorkspace: { findFirst: async ({ where }) => {
+      assert.equal(where.tenantId, 't'); assert.equal(where.id, 'w');
+      return { id: 'w', tenantId: 't', categoryCode: 'vehicle' };
+    } },
     $queryRaw: query => query.sql.includes('customer_membership_qualification_types') ? Promise.resolve([]) : admission.tx.$queryRaw(query),
     customerProfile: { findFirst: async ({ where }) => ({ id: where.id, tenantId: 't', customerType: where.id === 'corp' ? 'corporate' : 'personal', name: where.id }) },
     customerMembership: { findUnique: async () => ({ status: 'active' }) },
@@ -321,6 +330,17 @@ test('original exchange controller publishes pickup binding and validated apply 
   const capture = f.business.captureExchangeExecutionBasis.bind(f.business);
   f.business.captureExchangeExecutionBasis = (tenant, context, mode, _at, priced) => capture(tenant, context, mode, at(5), priced);
   f.controller.prisma = { $transaction: async work => work({ original: true }) };
+  f.core.readBusinessContext = async tenant => { assert.equal(tenant, 't'); return clone(f.context); };
+  f.business.refreshWorkspaceContext = async (tenant, current) => {
+    assert.equal(tenant, 't'); assert.deepEqual(current, f.context); return current;
+  };
+  f.core.lockOrderForUpdate = async (tenant, orderId, tx) => {
+    assert.equal(tenant, 't'); assert.equal(orderId, 'o'); assert.equal(tx.original, true); return f.order;
+  };
+  f.core.listOrderExtensions = async () => f.extensions; f.core.listOrderChanges = async () => f.changes;
+  f.controller.exchangePreview = new RentalExchangePreviewService(f.core, f.business, {
+    exchangeAssetCandidates: async () => { throw Error('quantity exchange must not read asset candidates'); }
+  }, f.controller.prisma);
   const req = { user: { tenantId: 't', id: 'operator', displayName: 'Operator', permissions: ['rental-os:order:operate'] },
     headers: { 'idempotency-key': 'exchange-pickup-original' } };
   const request = { type: 'post_pickup_exchange', orderLineId: 'line', allocationId: 'allocation', replacementItemGroupId: 'b',
@@ -1565,7 +1585,7 @@ test('partial exchange returns preserve adopted net benefits, repeated handovers
     }
     if (scenario.endsWith('extension')) {
       f.quote.ruleSnapshot.extension = { enabled: true, pricingMode: 'incremental' };
-      f.business.state = () => ({ pricingPlans: [{ id: 'current-plan', code: 'CURRENT', status: 'enabled', version: '2',
+      f.business.state = () => ({ services: [], pricingPlans: [{ id: 'current-plan', code: 'CURRENT', status: 'enabled', version: '2',
         effectiveFrom: '2020-01-01T00:00:00Z', rates: f.rates }], quotes: [], calendars: [], ruleVersions: [] });
       f.business.currentRule = () => ({ config: clone(f.quote.ruleSnapshot), version: 'rule-2' });
       const priced = await f.business.quoteOrderExtension('t', f.context, { order: f.order, previousExtensions: [], previousChanges: f.changes,
@@ -1748,7 +1768,7 @@ test('return uses each independent extension original period and current-price r
   f.quote.ruleSnapshot.earlyReturn = { mode: 'auto', minAdvanceHours: 0, refundPercent: 100 };
   f.quote.ruleSnapshot.extension = { enabled: true, pricingMode: 'incremental' };
   f.rates[0].baseAmount = 40;
-  f.business.state = () => ({ pricingPlans: [{ id: 'current-plan', code: 'CURRENT', name: 'Current', status: 'enabled', version: '2',
+  f.business.state = () => ({ services: [], pricingPlans: [{ id: 'current-plan', code: 'CURRENT', name: 'Current', status: 'enabled', version: '2',
     effectiveFrom: '2020-01-01T00:00:00Z', rates: f.rates }], quotes: [], calendars: [], ruleVersions: [] });
   f.business.currentRule = () => ({ config: clone(f.quote.ruleSnapshot), version: 'rule-2' });
   const priced = await f.business.quoteOrderExtension('t', f.context, { order: f.order, previousExtensions: [], lines: f.order.lines,
@@ -1801,7 +1821,7 @@ test('original-total extension before partial returns consumes the frozen whole-
   f.quote.ruleSnapshot.extension = { enabled: true, pricingMode: 'original_total' };
   f.quote.pricingContext.calendars = [{ tenantId: 't', year: 2026, version: 'original-week-rule', status: 'superseded', days: Array.from({ length: 14 }, (_, index) => ({
     date: at(index).slice(0, 10), dayType: 'workday', source: 'week_rule', pricingMultiplier: 1, closed: false })) }];
-  f.business.state = () => ({ calendars: [], discountPlans: [] });
+  f.business.state = () => ({ services: [], calendars: [], discountPlans: [] });
   const priced = await f.business.quoteOrderExtension('t', f.context, { order: f.order, previousExtensions: [], lines: f.order.lines,
     newEndAt: at(12), appliedAt: at(1), settlementMode: 'immediate', fulfillmentMode: 'store_pickup_return', locationIds: ['loc'], customerType: 'personal' });
   assert.equal(priced.rentalAmount, 60); assert.equal(priced.pricingSnapshot.recalculatedRentalAmount, 360);
@@ -1848,7 +1868,7 @@ test('original-total partial returns keep producer request order when stable lin
   f.order.payableAmount = f.order.finalPayableAmount = 400; f.order.chargeLines = clone(f.quote.chargeLines);
   f.order.allocations.push({ id: 'allocation-c', orderId: 'o', orderLineId: 'line-c', itemGroupId: 'c', quantity: 1, status: 'picked_up' });
   f.order.reservations.push({ id: 'reservation-c', orderId: 'o', orderLineId: 'line-c', itemGroupId: 'c', locationId: 'loc', status: 'fulfilled', quantity: 1, releasedQuantity: 0 });
-  f.business.state = () => ({ calendars: [], discountPlans: [] });
+  f.business.state = () => ({ services: [], calendars: [], discountPlans: [] });
   const priced = await f.business.quoteOrderExtension('t', f.context, { order: f.order, previousExtensions: [], lines: f.order.lines,
     newEndAt: at(12), appliedAt: at(1), settlementMode: 'immediate', fulfillmentMode: 'store_pickup_return', locationIds: ['loc'], customerType: 'personal' });
   assert.deepEqual(priced.pricingSnapshot.fullChargeLines.filter(row => row.type === 'rental').map(row => row.amount), [360, 120]);
@@ -1869,7 +1889,7 @@ test('original-total partial return retains the produced marketing coupon member
   f.quote.ruleSnapshot.extension = { enabled: true, pricingMode: 'original_total' };
   f.quote.pricingContext.calendars = [{ tenantId: 't', year: 2026, version: 'original-week-rule', status: 'superseded', days: Array.from({ length: 14 }, (_, index) => ({
     date: at(index).slice(0, 10), dayType: 'workday', source: 'week_rule', pricingMultiplier: 1, closed: false })) }];
-  f.business.state = () => ({ calendars: [], discountPlans: [] });
+  f.business.state = () => ({ services: [], calendars: [], discountPlans: [] });
   const priced = await f.business.quoteOrderExtension('t', f.context, { order: f.order, previousExtensions: [], lines: f.order.lines,
     newEndAt: at(12), appliedAt: at(1), settlementMode: 'immediate', fulfillmentMode: 'store_pickup_return', locationIds: ['loc'], customerType: 'personal' });
   assert.equal(priced.pricingSnapshot.recalculatedPayableAmount, 262.44);
@@ -1903,7 +1923,7 @@ test('original-total partial return does not treat a pending tier reduction as b
   f.quote.ruleSnapshot.extension = { enabled: true, pricingMode: 'original_total' };
   f.quote.pricingContext.calendars = [{ tenantId: 't', year: 2026, version: 'original-week-rule', status: 'superseded', days: Array.from({ length: 4 }, (_, index) => ({
     date: at(index).slice(0, 10), dayType: 'workday', source: 'week_rule', pricingMultiplier: 1, closed: false })) }];
-  f.business.state = () => ({ calendars: [], discountPlans: [] });
+  f.business.state = () => ({ services: [], calendars: [], discountPlans: [] });
   const priced = await f.business.quoteOrderExtension('t', f.context, { order: f.order, previousExtensions: [], lines: f.order.lines,
     newEndAt: at(3), appliedAt: at(0.5), settlementMode: 'immediate', fulfillmentMode: 'store_pickup_return', locationIds: ['loc'], customerType: 'personal' });
   assert.equal(priced.pricingSnapshot.differenceAmount, -15);
@@ -1929,7 +1949,7 @@ test('independent extension before partial returns preserves each original batch
   f.quote.ruleSnapshot.extension = { enabled: true, pricingMode: 'incremental' };
   adoptedMarketingLayers(f);
   f.rates[0].baseAmount = 40;
-  f.business.state = () => ({ pricingPlans: [{ id: 'current-plan', code: 'CURRENT', status: 'enabled', version: '2',
+  f.business.state = () => ({ services: [], pricingPlans: [{ id: 'current-plan', code: 'CURRENT', status: 'enabled', version: '2',
     effectiveFrom: '2020-01-01T00:00:00Z', rates: f.rates }], quotes: [], calendars: [], ruleVersions: [] });
   f.business.currentRule = () => ({ config: clone(f.quote.ruleSnapshot), version: 'rule-2' });
   const priced = await f.business.quoteOrderExtension('t', f.context, { order: f.order, previousExtensions: [], lines: f.order.lines,
@@ -2006,7 +2026,7 @@ test('converted-hour independent extension partial returns retain each frozen pu
   f.order.chargeLines = clone(f.quote.chargeLines);
   f.rates[0].baseAmount = 40;
   f.rates.push({ ...clone(f.rates[0]), unit: 'day_24h', baseAmount: 150 });
-  f.business.state = () => ({ pricingPlans: [{ id: 'current-plan', code: 'CURRENT', status: 'enabled', version: '2',
+  f.business.state = () => ({ services: [], pricingPlans: [{ id: 'current-plan', code: 'CURRENT', status: 'enabled', version: '2',
     effectiveFrom: '2020-01-01T00:00:00Z', rates: f.rates }], quotes: [], calendars: [], ruleVersions: [] });
   f.business.currentRule = () => ({ config: clone(f.quote.ruleSnapshot), version: 'rule-2' });
   const priced = await f.business.quoteOrderExtension('t', f.context, { order: f.order, previousExtensions: [], lines: f.order.lines,
@@ -2053,7 +2073,7 @@ test('independent extension early return keeps distinct line rates and original 
   f.order.allocations.push({ id: 'allocation-c', orderId: 'o', orderLineId: 'line-c', itemGroupId: 'c', quantity: 1, status: 'picked_up' });
   f.order.payableAmount = f.order.finalPayableAmount = 380; f.order.chargeLines = clone(f.quote.chargeLines);
   f.rates[0].baseAmount = 40; f.rates[2].baseAmount = 60;
-  f.business.state = () => ({ pricingPlans: [{ id: 'current-plan', code: 'CURRENT', status: 'enabled', version: '2',
+  f.business.state = () => ({ services: [], pricingPlans: [{ id: 'current-plan', code: 'CURRENT', status: 'enabled', version: '2',
     effectiveFrom: '2020-01-01T00:00:00Z', rates: f.rates }], quotes: [], calendars: [], ruleVersions: [] });
   f.business.currentRule = () => ({ config: clone(f.quote.ruleSnapshot), version: 'rule-2' });
   const priced = await f.business.quoteOrderExtension('t', f.context, { order: f.order, previousExtensions: [], lines: f.order.lines,
@@ -2087,7 +2107,7 @@ test('new incremental extension persists its exact billed context through reques
   const f = fixture();
   f.quote.ruleSnapshot.extension = { enabled: true, pricingMode: 'incremental', forceImmediateWhenOverdue: true };
   f.rates[0].baseAmount = 40;
-  const state = { pricingPlans: [{ id: 'current-plan', code: 'CURRENT', name: 'Current', status: 'enabled', version: '2',
+  const state = { services: [], pricingPlans: [{ id: 'current-plan', code: 'CURRENT', name: 'Current', status: 'enabled', version: '2',
     effectiveFrom: '2020-01-01T00:00:00Z', rates: f.rates }], quotes: [], calendars: [], ruleVersions: [] };
   f.business.state = () => state;
   f.business.currentRule = () => ({ config: clone(f.quote.ruleSnapshot), version: 'rule-2' });
@@ -2483,6 +2503,13 @@ test('shared-target quote charges retain each model amount through preparation, 
   f.quote.chargeLines = [100, 200].map(amount => ({ code: 'rental:RENAMED', name: 'Original model rental', type: 'rental', amount }));
   f.quote.rentalAmount = 300; f.quote.rentalLineAmounts = { p: 300 }; f.quote.payableAmount = 300;
   f.quote.inspectionTemplateSnapshots = []; f.quote.ruleSnapshot.payment.unpaidHoldMinutes = 30;
+  const inventoryTransaction = { original: true };
+  f.quote.inventoryBasis = await readRentalInventoryBasis({ listItemGroupsPage: async (tenant, workspace, query, tx) => {
+    assert.equal(tenant, 't'); assert.equal(workspace, 'w'); assert.equal(tx, inventoryTransaction);
+    assert.equal(query.limit, 1);
+    return { source: 'persisted_workspace_configuration', truncated: false, limit: 1,
+      rows: clone(f.context.groups.filter(row => row.id === query.itemGroupId)) };
+  } }, 't', 'w', f.quote.request.lines, inventoryTransaction);
   const loc = { id: 'loc', name: 'Location', capabilities: ['pickup', 'return'], operatorId: 'op' };
   f.core.state = () => ({ profile: { categoryCode: 'camera' }, itemGroups: f.context.groups, pricingGroups: [group], locations: [loc], operators: [] });
   f.core.availability = async () => ({ available: true });

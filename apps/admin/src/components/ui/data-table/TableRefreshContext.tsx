@@ -1,10 +1,2 @@
-import { createContext, useContext, type ReactNode } from "react";
-
-type Reader = { onRefresh?: () => unknown; busy?: boolean };
-const TableRefreshContext = createContext<Reader>({});
-
-/** Snapshot tables in tabs/drawers refresh their owning reader, not arbitrary caches. */
-export function TableRefreshProvider({ children, ...reader }: Reader & { children: ReactNode }) {
-  return <TableRefreshContext.Provider value={reader}>{children}</TableRefreshContext.Provider>;
-}
-export function useTableRefresh() { return useContext(TableRefreshContext); }
+/** 原入口兼容转接；公共实现由 platform-admin 单源维护。 */
+export * from "@rental-os/platform-admin/source/components/ui/data-table/TableRefreshContext";

@@ -8,12 +8,12 @@ function load(file, deps = {}) {
   const source = fs.readFileSync(path.resolve(file), 'utf8');
   const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true } }).outputText;
   const exports = {};
-  const sandbox = { exports, require: name => { if (name in deps) return deps[name]; if (name.startsWith('node:')) return require(name); if (name === '@nestjs/common') return { Injectable: () => x => x, ForbiddenException: class extends Error {}, BadRequestException: class extends Error {}, ConflictException: class extends Error {}, NotFoundException: class extends Error {} }; throw new Error(`Unexpected dependency ${name}`); }, Date, Map, Set, JSON, console };
+  const sandbox = { exports, require: name => { if (name in deps) return deps[name]; if (name === './mysql-business-fence') return require('@rental-os/rental-core/mysql-business-fence'); if (name === "@rental-os/rental-core" && "@rental-os/shared" in deps) return deps["@rental-os/shared"]; if (name.startsWith('node:')) return require(name); if (name === '@nestjs/common') return { Injectable: () => x => x, ForbiddenException: class extends Error {}, BadRequestException: class extends Error {}, ConflictException: class extends Error {}, NotFoundException: class extends Error {} }; throw new Error(`Unexpected dependency ${name}`); }, Date, Map, Set, JSON, console };
   vm.runInNewContext(output, sandbox, { filename: file });
   return exports;
 }
-const shared = require('../packages/shared/dist');
-const { EnterpriseAccessService } = load('apps/api/src/modules/client/enterprise-access.service.ts', { '@rental-os/shared': shared });
+const shared = require('@rental-os/shared');
+const { EnterpriseAccessService } = load('apps/api/src/modules/client/enterprise-access.service.ts', { '@rental-os/rental-core/mysql-enterprise-access': require('@rental-os/rental-core/mysql-enterprise-access') });
 const context = { tenantId: 't1', tenantCode: 'demo', customerId: 'p1', customerType: 'personal', sessionId: 'session', displayName: 'Admin', membershipStatus: 'active' };
 function rows(action = ['portal:enter', 'members:read']) {
   return action.map(action => ({ corporateCustomerId: 'c1', corporateName: 'Company', membershipId: 'r1', role: 'admin', action, tenantRevision: 1, corporateRevision: 1, tenantEnabled: true, corporateEnabled: true }));
@@ -41,7 +41,7 @@ test('member projection excludes private fields and rechecks revoked permissions
   await assert.rejects(fixture(() => ++reads === 1 ? rows() : []).members(context, 'demo', 'c1'));
 });
 test('entry-only grants survive separate action editing and invalid member-only grants refuse', () => {
-  const { portalAccessGrants, isPortalRevisionConflict } = load('apps/admin/src/features/membership/enterprise-portal-config.ts', { '@rental-os/shared': shared });
+  const { portalAccessGrants, isPortalRevisionConflict } = load('packages/rental-core/admin/membership/enterprise-portal-config.ts', { '@rental-os/shared': shared });
   const result = portalAccessGrants({ enabled: true, entryMembershipIds: ['entry', 'reader'], memberMembershipIds: ['reader'], reason: 'Keep independent actions' });
   assert.deepEqual(JSON.parse(JSON.stringify(result)), [{ membershipId: 'entry', actions: ['portal:enter'] }, { membershipId: 'reader', actions: ['portal:enter', 'members:read'] }]);
   assert.throws(() => portalAccessGrants({ entryMembershipIds: [], memberMembershipIds: ['reader'] }));
@@ -58,10 +58,10 @@ test('entry-only grants survive separate action editing and invalid member-only 
 test('revision conflict has an explicit pre-write rejection; committed original keys only replay receipts', async () => {
   class HttpError extends Error { constructor(body) { super(body.message ?? body); this.body = body; } }
   const common = { Injectable: () => x => x, ForbiddenException: HttpError, BadRequestException: HttpError, ConflictException: HttpError, NotFoundException: HttpError };
-  const { EnterprisePortalService } = load('apps/api/src/modules/platform/enterprise-portal.service.ts', {
+  const { EnterprisePortalService } = load('packages/rental-core/src/mysql-enterprise-portal.ts', {
     '@nestjs/common': common, '@prisma/client': { Prisma: {} },
-    '@rental-os/shared': { ENTERPRISE_PORTAL_ACTIONS: ['portal:enter', 'members:read'] },
-    '../../common/request-identity': { requireRequestTenantId: () => 't1', requireRequestUserId: () => 'u1' },
+    './enterprise': { ENTERPRISE_PORTAL_ACTIONS: ['portal:enter', 'members:read'] },
+    '@rental-os/platform-server/request-identity': { requireRequestTenantId: () => 't1', requireRequestUserId: () => 'u1' },
   });
   let revision = 2, writes = 0; const receipts = new Map();
   const tx = {
@@ -94,11 +94,13 @@ test('revision conflict has an explicit pre-write rejection; committed original 
 });
 test('all seven portal operations retain matching Controller methods and OpenAPI references', () => {
   const api = fs.readFileSync('apps/api/src/contracts/openapi-document.ts', 'utf8');
-  const client = fs.readFileSync('apps/api/src/modules/client/client-api.controller.ts', 'utf8');
-  const membership = fs.readFileSync('apps/api/src/modules/platform/membership.controller.ts', 'utf8');
-  const workflow = load('apps/api/src/modules/enterprise/enterprise-workflow-schemas.ts');
-  const extension = load('apps/api/src/modules/enterprise/enterprise-extension-schemas.ts');
-  const { ENTERPRISE_COMPONENT_SCHEMAS: schemas } = load('apps/api/src/contracts/enterprise-schemas.ts', { '@rental-os/shared': shared, '../modules/enterprise/enterprise-workflow-schemas': workflow, '../modules/enterprise/enterprise-extension-schemas': extension });
+  const client = fs.readFileSync('packages/rental-core/src/http-client.controller.ts', 'utf8');
+  const membership = fs.readFileSync('packages/rental-core/src/http-membership.controller.ts', 'utf8');
+  assert.ok(fs.readFileSync('apps/api/src/modules/platform/membership.controller.ts', 'utf8').includes('@rental-os/rental-core/http-membership'));
+  // 复用原合同检查器的源码加载方式，跨领域引用在实际OpenAPI组合中核对。
+  require('ts-node').register({ transpileOnly: true, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
+  const { ENTERPRISE_COMPONENT_SCHEMAS: enterpriseSchemas } = require('../apps/api/src/contracts/enterprise-schemas');
+  const { OPENAPI_COMPONENT_SCHEMAS: schemas } = require('../apps/api/src/contracts/openapi-document');
   for (const [method, prefix, route, file] of [
     ['get', '/api/client/v1/', 'enterprise/entry', client],
     ['get', '/api/client/v1/', 'enterprise/corporates/:corporateCustomerId/members', client],
@@ -115,13 +117,13 @@ test('all seven portal operations retain matching Controller methods and OpenAPI
   }
   const check = value => {
     if (!value || typeof value !== 'object') return;
-    if (value.$ref) assert.ok(schemas[value.$ref.slice('#/components/schemas/'.length)]);
+    if (value.$ref) assert.ok(schemas[value.$ref.slice('#/components/schemas/'.length)], value.$ref);
     Object.values(value).forEach(check);
   };
-  Object.values(schemas).forEach(check);
+  Object.values(enterpriseSchemas).forEach(check);
 });
 test('SQL source guards current session, active memberships and grant relationship revision', () => {
-  const code = fs.readFileSync('apps/api/src/modules/client/enterprise-access.service.ts', 'utf8');
+  const code = fs.readFileSync('packages/rental-core/src/mysql-enterprise-access.ts', 'utf8');
   for (const guard of ["s.revokedAt IS NULL", "s.expiresAt>NOW(3)", "personalMember.status='active'", "corporateMember.status='active'", "account.status='active'", "g.membershipUpdatedAt=m.updatedAt", "m.effectiveTo>NOW(3)"]) assert.ok(code.includes(guard), guard);
   const migration = fs.readFileSync('apps/api/prisma/migrations/20261101000100_enterprise_portal_access/migration.sql', 'utf8');
   assert.ok(migration.includes('DEFAULT false'));

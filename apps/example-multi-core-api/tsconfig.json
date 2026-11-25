@@ -1,0 +1,21 @@
+{
+  "extends": "../rental-api/tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "baseUrl": ".",
+    "paths": {
+      "@prisma/client": [
+        "../rental-api/generated/client/index.d.ts"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "dist",
+    "dist-ai",
+    "src/ai-*.ts"
+  ]
+}

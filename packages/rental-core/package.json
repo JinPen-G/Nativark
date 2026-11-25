@@ -1,0 +1,4805 @@
+{
+  "name": "@rental-os/rental-core",
+  "version": "0.1.13",
+  "private": true,
+  "license": "MIT",
+  "description": "Rental业务Core的独立领域合同与运行时，原组合通过兼容出口消费",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./prisma-null-values": {
+      "types": "./dist/prisma-null-values.d.ts",
+      "default": "./dist/prisma-null-values.js"
+    },
+    "./business-day": {
+      "types": "./dist/business-day.d.ts",
+      "default": "./dist/business-day.js"
+    },
+    "./pricing": {
+      "types": "./dist/pricing.d.ts",
+      "default": "./dist/pricing.js"
+    },
+    "./equipment": {
+      "types": "./dist/equipment.d.ts",
+      "default": "./dist/equipment.js"
+    },
+    "./item-group-validation": {
+      "types": "./dist/item-group-validation.d.ts",
+      "default": "./dist/item-group-validation.js"
+    },
+    "./mysql-state": {
+      "types": "./dist/mysql-state.d.ts",
+      "default": "./dist/mysql-state.js"
+    },
+    "./prisma-schema": {
+      "types": "./dist/prisma-schema.d.ts",
+      "default": "./dist/prisma-schema.js"
+    },
+    "./inspection-object-reader": {
+      "types": "./dist/inspection-object-reader.d.ts",
+      "default": "./dist/inspection-object-reader.js"
+    },
+    "./mysql-idempotency": {
+      "types": "./dist/mysql-idempotency.d.ts",
+      "default": "./dist/mysql-idempotency.js"
+    },
+    "./mysql-idempotent-actions": {
+      "types": "./dist/mysql-idempotent-actions.d.ts",
+      "default": "./dist/mysql-idempotent-actions.js"
+    },
+    "./mysql-business-fence": {
+      "types": "./dist/mysql-business-fence.d.ts",
+      "default": "./dist/mysql-business-fence.js"
+    },
+    "./configuration-basis": {
+      "types": "./dist/configuration-basis.d.ts",
+      "default": "./dist/configuration-basis.js"
+    },
+    "./rule-version-chain": {
+      "types": "./dist/rule-version-chain.d.ts",
+      "default": "./dist/rule-version-chain.js"
+    },
+    "./mysql-business-configuration": {
+      "types": "./dist/mysql-business-configuration.d.ts",
+      "default": "./dist/mysql-business-configuration.js"
+    },
+    "./category-governance": {
+      "types": "./dist/category-governance.d.ts",
+      "default": "./dist/category-governance.js"
+    },
+    "./capability-conditions": {
+      "types": "./dist/capability-conditions.d.ts",
+      "default": "./dist/capability-conditions.js"
+    },
+    "./capability-runtime": {
+      "types": "./dist/capability-runtime.d.ts",
+      "default": "./dist/capability-runtime.js"
+    },
+    "./workspace-capabilities": {
+      "types": "./dist/workspace-capabilities.d.ts",
+      "default": "./dist/workspace-capabilities.js"
+    },
+    "./workspace-capability-repository": {
+      "types": "./dist/workspace-capability-repository.d.ts",
+      "default": "./dist/workspace-capability-repository.js"
+    },
+    "./capability-audit": {
+      "types": "./dist/capability-audit.d.ts",
+      "default": "./dist/capability-audit.js"
+    },
+    "./category-runtime": {
+      "types": "./dist/category-runtime.d.ts",
+      "default": "./dist/category-runtime.js"
+    },
+    "./category-identity": {
+      "types": "./dist/category-identity.d.ts",
+      "default": "./dist/category-identity.js"
+    },
+    "./extensions": {
+      "types": "./dist/rental-extension-registry.d.ts",
+      "default": "./dist/rental-extension-registry.js"
+    },
+    "./capabilities": {
+      "types": "./dist/capabilities/index.d.ts",
+      "default": "./dist/capabilities/index.js"
+    },
+    "./capabilities/camera-compatibility": {
+      "types": "./dist/capabilities/camera-compatibility.d.ts",
+      "default": "./dist/capabilities/camera-compatibility.js"
+    },
+    "./capabilities/camera-kit-handover": {
+      "types": "./dist/capabilities/camera-kit-handover.d.ts",
+      "default": "./dist/capabilities/camera-kit-handover.js"
+    },
+    "./capabilities/camping-cleaning-turnaround": {
+      "types": "./dist/capabilities/camping-cleaning-turnaround.d.ts",
+      "default": "./dist/capabilities/camping-cleaning-turnaround.js"
+    },
+    "./capabilities/camping-kit-integrity": {
+      "types": "./dist/capabilities/camping-kit-integrity.d.ts",
+      "default": "./dist/capabilities/camping-kit-integrity.js"
+    },
+    "./capabilities/kit-handover": {
+      "types": "./dist/capabilities/kit-handover.d.ts",
+      "default": "./dist/capabilities/kit-handover.js"
+    },
+    "./category-attributes": {
+      "types": "./dist/category-attributes.d.ts",
+      "default": "./dist/category-attributes.js"
+    },
+    "./mysql-category-write": {
+      "types": "./dist/mysql-category-write.d.ts",
+      "default": "./dist/mysql-category-write.js"
+    },
+    "./mysql-category-policy": {
+      "types": "./dist/mysql-category-policy.d.ts",
+      "default": "./dist/mysql-category-policy.js"
+    },
+    "./mysql-fulfillment-admission": {
+      "types": "./dist/mysql-fulfillment-admission.d.ts",
+      "default": "./dist/mysql-fulfillment-admission.js"
+    },
+    "./mysql-core-configuration": {
+      "types": "./dist/mysql-core-configuration.d.ts",
+      "default": "./dist/mysql-core-configuration.js"
+    },
+    "./mysql-business-facts": {
+      "types": "./dist/mysql-business-facts.d.ts",
+      "default": "./dist/mysql-business-facts.js"
+    },
+    "./mysql-quote-capabilities": {
+      "types": "./dist/mysql-quote-capabilities.d.ts",
+      "default": "./dist/mysql-quote-capabilities.js"
+    },
+    "./quote-inventory-basis": {
+      "types": "./dist/quote-inventory-basis.d.ts",
+      "default": "./dist/quote-inventory-basis.js"
+    },
+    "./usage-reading": {
+      "types": "./dist/usage-reading.d.ts",
+      "default": "./dist/usage-reading.js"
+    },
+    "./occupancy": {
+      "types": "./dist/occupancy.d.ts",
+      "default": "./dist/occupancy.js"
+    },
+    "./carrier-shipment": {
+      "types": "./dist/carrier-shipment.d.ts",
+      "default": "./dist/carrier-shipment.js"
+    },
+    "./mysql-order-list-sort": {
+      "types": "./dist/mysql-order-list-sort.d.ts",
+      "default": "./dist/mysql-order-list-sort.js"
+    },
+    "./mysql-order-number": {
+      "types": "./dist/mysql-order-number.d.ts",
+      "default": "./dist/mysql-order-number.js"
+    },
+    "./rule-defaults": {
+      "types": "./dist/rule-defaults.d.ts",
+      "default": "./dist/rule-defaults.js"
+    },
+    "./work-order-assignee-scope": {
+      "types": "./dist/work-order-assignee-scope.d.ts",
+      "default": "./dist/work-order-assignee-scope.js"
+    },
+    "./money": {
+      "types": "./dist/money.d.ts",
+      "default": "./dist/money.js"
+    },
+    "./mysql-order-inspection-basis": {
+      "types": "./dist/mysql-order-inspection-basis.d.ts",
+      "default": "./dist/mysql-order-inspection-basis.js"
+    },
+    "./mysql-order-allocation-pickup": {
+      "types": "./dist/mysql-order-allocation-pickup.d.ts",
+      "default": "./dist/mysql-order-allocation-pickup.js"
+    },
+    "./mysql-core-facts": {
+      "types": "./dist/mysql-core-facts.d.ts",
+      "default": "./dist/mysql-core-facts.js"
+    },
+    "./fact-request-context": {
+      "types": "./dist/fact-request-context.d.ts",
+      "default": "./dist/fact-request-context.js"
+    },
+    "./inspection-result-validation": {
+      "types": "./dist/inspection-result-validation.d.ts",
+      "default": "./dist/inspection-result-validation.js"
+    },
+    "./early-return": {
+      "types": "./dist/early-return.d.ts",
+      "default": "./dist/early-return.js"
+    },
+    "./quote-line-source": {
+      "types": "./dist/quote-line-source.d.ts",
+      "default": "./dist/quote-line-source.js"
+    },
+    "./damage-waiver": {
+      "types": "./dist/damage-waiver.d.ts",
+      "default": "./dist/damage-waiver.js"
+    },
+    "./inspection-customer-response": {
+      "types": "./dist/inspection-customer-response.d.ts",
+      "default": "./dist/inspection-customer-response.js"
+    },
+    "./inspection-template-snapshot": {
+      "types": "./dist/inspection-template-snapshot.d.ts",
+      "default": "./dist/inspection-template-snapshot.js"
+    },
+    "./exchange-inspection": {
+      "types": "./dist/exchange-inspection.d.ts",
+      "default": "./dist/exchange-inspection.js"
+    },
+    "./inspection-observation": {
+      "types": "./dist/inspection-observation.d.ts",
+      "default": "./dist/inspection-observation.js"
+    },
+    "./inspection-evidence": {
+      "types": "./dist/inspection-evidence.d.ts",
+      "default": "./dist/inspection-evidence.js"
+    },
+    "./allocation-policy": {
+      "types": "./dist/allocation-policy.d.ts",
+      "default": "./dist/allocation-policy.js"
+    },
+    "./exchange-pricing-source": {
+      "types": "./dist/exchange-pricing-source.d.ts",
+      "default": "./dist/exchange-pricing-source.js"
+    },
+    "./exchange-membership": {
+      "types": "./dist/exchange-membership.d.ts",
+      "default": "./dist/exchange-membership.js"
+    },
+    "./exchange-coupon": {
+      "types": "./dist/exchange-coupon.d.ts",
+      "default": "./dist/exchange-coupon.js"
+    },
+    "./exchange-discount": {
+      "types": "./dist/exchange-discount.d.ts",
+      "default": "./dist/exchange-discount.js"
+    },
+    "./extension-lifecycle": {
+      "types": "./dist/extension-lifecycle.d.ts",
+      "default": "./dist/extension-lifecycle.js"
+    },
+    "./repricing-context": {
+      "types": "./dist/repricing-context.d.ts",
+      "default": "./dist/repricing-context.js"
+    },
+    "./delivery-address-privacy": {
+      "types": "./dist/delivery-address-privacy.d.ts",
+      "default": "./dist/delivery-address-privacy.js"
+    },
+    "./mysql-offline-payment-method": {
+      "types": "./dist/mysql-offline-payment-method.d.ts",
+      "default": "./dist/mysql-offline-payment-method.js"
+    },
+    "./service-occurrence": {
+      "types": "./dist/service-occurrence.d.ts",
+      "default": "./dist/service-occurrence.js"
+    },
+    "./service-cancellation": {
+      "types": "./dist/service-cancellation.d.ts",
+      "default": "./dist/service-cancellation.js"
+    },
+    "./category-samples": {
+      "types": "./dist/category-samples.d.ts",
+      "default": "./dist/category-samples.js"
+    },
+    "./qualification": {
+      "types": "./dist/qualification.d.ts",
+      "default": "./dist/qualification.js"
+    },
+    "./service-catalog": {
+      "types": "./dist/service-catalog.d.ts",
+      "default": "./dist/service-catalog.js"
+    },
+    "./asset-validity": {
+      "types": "./dist/asset-validity.d.ts",
+      "default": "./dist/asset-validity.js"
+    },
+    "./approved-extension-ports": {
+      "types": "./dist/approved-extension-ports.d.ts",
+      "default": "./dist/approved-extension-ports.js"
+    },
+    "./quote-access": {
+      "types": "./dist/quote-access.d.ts",
+      "default": "./dist/quote-access.js"
+    },
+    "./calendar-range": {
+      "types": "./dist/calendar-range.d.ts",
+      "default": "./dist/calendar-range.js"
+    },
+    "./price-adjustments": {
+      "types": "./dist/price-adjustments.d.ts",
+      "default": "./dist/price-adjustments.js"
+    },
+    "./category-pricing-rule-compatibility": {
+      "types": "./dist/category-pricing-rule-compatibility.d.ts",
+      "default": "./dist/category-pricing-rule-compatibility.js"
+    },
+    "./discount-selection": {
+      "types": "./dist/discount-selection.d.ts",
+      "default": "./dist/discount-selection.js"
+    },
+    "./security-deposit": {
+      "types": "./dist/security-deposit.d.ts",
+      "default": "./dist/security-deposit.js"
+    },
+    "./mysql-funding": {
+      "types": "./dist/mysql-funding.d.ts",
+      "default": "./dist/mysql-funding.js"
+    },
+    "./funding-events": {
+      "types": "./dist/funding-events.d.ts",
+      "default": "./dist/funding-events.js"
+    },
+    "./mysql-service-capacity": {
+      "types": "./dist/mysql-service-capacity.d.ts",
+      "default": "./dist/mysql-service-capacity.js"
+    },
+    "./mysql-order-receivables": {
+      "types": "./dist/mysql-order-receivables.d.ts",
+      "default": "./dist/mysql-order-receivables.js"
+    },
+    "./corporate-settlement-basis": {
+      "types": "./dist/corporate-settlement-basis.d.ts",
+      "default": "./dist/corporate-settlement-basis.js"
+    },
+    "./mysql-corporate-ledger": {
+      "types": "./dist/mysql-corporate-ledger.d.ts",
+      "default": "./dist/mysql-corporate-ledger.js"
+    },
+    "./corporate-payment-receipts": {
+      "types": "./dist/corporate-payment-receipts.d.ts",
+      "default": "./dist/corporate-payment-receipts.js"
+    },
+    "./approved-settings-ports": {
+      "types": "./dist/approved-settings-ports.d.ts",
+      "default": "./dist/approved-settings-ports.js"
+    },
+    "./approved-settings-validation": {
+      "types": "./dist/approved-settings-validation.d.ts",
+      "default": "./dist/approved-settings-validation.js"
+    },
+    "./approved-exchange-ports": {
+      "types": "./dist/approved-exchange-ports.d.ts",
+      "default": "./dist/approved-exchange-ports.js"
+    },
+    "./exchange-inspection-consent-basis": {
+      "types": "./dist/exchange-inspection-consent-basis.d.ts",
+      "default": "./dist/exchange-inspection-consent-basis.js"
+    },
+    "./mysql-approved-exchange": {
+      "types": "./dist/mysql-approved-exchange.d.ts",
+      "default": "./dist/mysql-approved-exchange.js"
+    },
+    "./exchange-inspection-preparation": {
+      "types": "./dist/exchange-inspection-preparation.d.ts",
+      "default": "./dist/exchange-inspection-preparation.js"
+    },
+    "./mysql-primary-application": {
+      "types": "./dist/mysql-primary-application.d.ts",
+      "default": "./dist/mysql-primary-application.js"
+    },
+    "./mysql-core-runtime": {
+      "types": "./dist/mysql-core-runtime.d.ts",
+      "default": "./dist/mysql-core-runtime.js"
+    },
+    "./mysql-business-runtime": {
+      "types": "./dist/mysql-business-runtime.d.ts",
+      "default": "./dist/mysql-business-runtime.js"
+    },
+    "./configuration-dto": {
+      "types": "./dist/config-request.dto.d.ts",
+      "default": "./dist/config-request.dto.js"
+    },
+    "./approved-order-ports": {
+      "types": "./dist/approved-order-transaction.ports.d.ts",
+      "default": "./dist/approved-order-transaction.ports.js"
+    },
+    "./mysql-order-confirmation": {
+      "types": "./dist/mysql-order-confirmation.d.ts",
+      "default": "./dist/mysql-order-confirmation.js"
+    },
+    "./merchant-delegation": {
+      "types": "./dist/merchant-delegation.d.ts",
+      "default": "./dist/merchant-delegation.js"
+    },
+    "./server-quote-access": {
+      "types": "./dist/server-quote-access.d.ts",
+      "default": "./dist/server-quote-access.js"
+    },
+    "./mysql-allocation": {
+      "types": "./dist/mysql-allocation.d.ts",
+      "default": "./dist/mysql-allocation.js"
+    },
+    "./mysql-workspace-scope": {
+      "types": "./dist/mysql-workspace-scope.d.ts",
+      "default": "./dist/mysql-workspace-scope.js"
+    },
+    "./core-dto": {
+      "types": "./dist/core-request.dto.d.ts",
+      "default": "./dist/core-request.dto.js"
+    },
+    "./order-dto": {
+      "types": "./dist/order-request.dto.d.ts",
+      "default": "./dist/order-request.dto.js"
+    },
+    "./enterprise-disclosure-dto": {
+      "types": "./dist/enterprise-disclosure.dto.d.ts",
+      "default": "./dist/enterprise-disclosure.dto.js"
+    },
+    "./workbench": {
+      "types": "./dist/workbench.d.ts",
+      "default": "./dist/workbench.js"
+    },
+    "./report-csv": {
+      "types": "./dist/report-csv.d.ts",
+      "default": "./dist/report-csv.js"
+    },
+    "./mysql-reports": {
+      "types": "./dist/mysql-reports.d.ts",
+      "default": "./dist/mysql-reports.js"
+    },
+    "./mysql-due-jobs": {
+      "types": "./dist/mysql-due-jobs.d.ts",
+      "default": "./dist/mysql-due-jobs.js"
+    },
+    "./exchange-choices": {
+      "types": "./dist/exchange-choices.d.ts",
+      "default": "./dist/exchange-choices.js"
+    },
+    "./document-contracts": {
+      "types": "./dist/document-contracts.d.ts",
+      "default": "./dist/document-contracts.js"
+    },
+    "./document-renderer": {
+      "types": "./dist/document-renderer.d.ts",
+      "default": "./dist/document-renderer.js"
+    },
+    "./mysql-exchange-preview": {
+      "types": "./dist/mysql-exchange-preview.d.ts",
+      "default": "./dist/mysql-exchange-preview.js"
+    },
+    "./mysql-documents": {
+      "types": "./dist/mysql-documents.d.ts",
+      "default": "./dist/mysql-documents.js"
+    },
+    "./mysql-exchange-inspection-preparation": {
+      "types": "./dist/mysql-exchange-inspection-preparation.d.ts",
+      "default": "./dist/mysql-exchange-inspection-preparation.js"
+    },
+    "./mysql-exchange-inspection-media": {
+      "types": "./dist/mysql-exchange-inspection-media.d.ts",
+      "default": "./dist/mysql-exchange-inspection-media.js"
+    },
+    "./exchange-inspection-dto": {
+      "types": "./dist/exchange-inspection-preparation.dto.d.ts",
+      "default": "./dist/exchange-inspection-preparation.dto.js"
+    },
+    "./exchange-inspection-preparation-read": {
+      "types": "./dist/exchange-inspection-preparation.read.d.ts",
+      "default": "./dist/exchange-inspection-preparation.read.js"
+    },
+    "./exchange-inspection-media-read": {
+      "types": "./dist/exchange-inspection-media.read.d.ts",
+      "default": "./dist/exchange-inspection-media.read.js"
+    },
+    "./mysql-exchange-inspection-consent": {
+      "types": "./dist/mysql-exchange-inspection-consent.d.ts",
+      "default": "./dist/mysql-exchange-inspection-consent.js"
+    },
+    "./mysql-approved-exchange-execution": {
+      "types": "./dist/mysql-approved-exchange-execution.d.ts",
+      "default": "./dist/mysql-approved-exchange-execution.js"
+    },
+    "./bound-rule-draft": {
+      "types": "./dist/bound-rule-draft.d.ts",
+      "default": "./dist/bound-rule-draft.js"
+    },
+    "./bound-calendar-draft": {
+      "types": "./dist/bound-calendar-draft.d.ts",
+      "default": "./dist/bound-calendar-draft.js"
+    },
+    "./mysql-approved-settings": {
+      "types": "./dist/mysql-approved-settings.d.ts",
+      "default": "./dist/mysql-approved-settings.js"
+    },
+    "./approved-settings-route-authority": {
+      "types": "./dist/approved-settings-route-authority.d.ts",
+      "default": "./dist/approved-settings-route-authority.js"
+    },
+    "./mysql-category-governance": {
+      "types": "./dist/mysql-category-governance.d.ts",
+      "default": "./dist/mysql-category-governance.js"
+    },
+    "./category-definition-diff": {
+      "types": "./dist/category-definition-diff.d.ts",
+      "default": "./dist/category-definition-diff.js"
+    },
+    "./category-creation-templates": {
+      "types": "./dist/category-creation-templates.d.ts",
+      "default": "./dist/category-creation-templates.js"
+    },
+    "./mysql-category-adoption": {
+      "types": "./dist/mysql-category-adoption.d.ts",
+      "default": "./dist/mysql-category-adoption.js"
+    },
+    "./category-adoption-access": {
+      "types": "./dist/category-adoption-access.d.ts",
+      "default": "./dist/category-adoption-access.js"
+    },
+    "./category-adoption-transaction-phase": {
+      "types": "./dist/category-adoption-transaction-phase.d.ts",
+      "default": "./dist/category-adoption-transaction-phase.js"
+    },
+    "./category-adoption-entity-writer": {
+      "types": "./dist/category-adoption-entity-writer.d.ts",
+      "default": "./dist/category-adoption-entity-writer.js"
+    },
+    "./category-adoption-records": {
+      "types": "./dist/category-adoption-records.d.ts",
+      "default": "./dist/category-adoption-records.js"
+    },
+    "./category-adoption-capability-writer": {
+      "types": "./dist/category-adoption-capability-writer.d.ts",
+      "default": "./dist/category-adoption-capability-writer.js"
+    },
+    "./category-adoption-references": {
+      "types": "./dist/category-adoption-references.d.ts",
+      "default": "./dist/category-adoption-references.js"
+    },
+    "./category-adoption-commercial": {
+      "types": "./dist/category-adoption-commercial.d.ts",
+      "default": "./dist/category-adoption-commercial.js"
+    },
+    "./category-adoption-final-compatibility": {
+      "types": "./dist/category-adoption-final-compatibility.d.ts",
+      "default": "./dist/category-adoption-final-compatibility.js"
+    },
+    "./category-adoption-compatibility-reader": {
+      "types": "./dist/category-adoption-compatibility-reader.d.ts",
+      "default": "./dist/category-adoption-compatibility-reader.js"
+    },
+    "./category-adoption-business-compatibility": {
+      "types": "./dist/category-adoption-business-compatibility.d.ts",
+      "default": "./dist/category-adoption-business-compatibility.js"
+    },
+    "./category-adoption-rule-parameters": {
+      "types": "./dist/category-adoption-rule-parameters.d.ts",
+      "default": "./dist/category-adoption-rule-parameters.js"
+    },
+    "./category-adoption-rule-structure": {
+      "types": "./dist/category-adoption-rule-structure.d.ts",
+      "default": "./dist/category-adoption-rule-structure.js"
+    },
+    "./category-adoption-marketing-references": {
+      "types": "./dist/category-adoption-marketing-references.d.ts",
+      "default": "./dist/category-adoption-marketing-references.js"
+    },
+    "./category-adoption-price-references": {
+      "types": "./dist/category-adoption-price-references.d.ts",
+      "default": "./dist/category-adoption-price-references.js"
+    },
+    "./category-adoption-service-capacity": {
+      "types": "./dist/category-adoption-service-capacity.d.ts",
+      "default": "./dist/category-adoption-service-capacity.js"
+    },
+    "./category-adoption-product-graph": {
+      "types": "./dist/category-adoption-product-graph.d.ts",
+      "default": "./dist/category-adoption-product-graph.js"
+    },
+    "./category-adoption-price-structure": {
+      "types": "./dist/category-adoption-price-structure.d.ts",
+      "default": "./dist/category-adoption-price-structure.js"
+    },
+    "./category-adoption-settings-execution": {
+      "types": "./dist/category-adoption-settings-execution.d.ts",
+      "default": "./dist/category-adoption-settings-execution.js"
+    },
+    "./category-adoption-fulfillment-references": {
+      "types": "./dist/category-adoption-fulfillment-references.d.ts",
+      "default": "./dist/category-adoption-fulfillment-references.js"
+    },
+    "./category-preparation-batches": {
+      "types": "./dist/category-preparation-batches.d.ts",
+      "default": "./dist/category-preparation-batches.js"
+    },
+    "./mysql-category-preparation": {
+      "types": "./dist/mysql-category-preparation.d.ts",
+      "default": "./dist/mysql-category-preparation.js"
+    },
+    "./category-adoption-ports": {
+      "types": "./dist/category-adoption-ports.d.ts",
+      "default": "./dist/category-adoption-ports.js"
+    },
+    "./mysql-staff-payments": {
+      "types": "./dist/mysql-staff-payments.d.ts",
+      "default": "./dist/mysql-staff-payments.js"
+    },
+    "./http-staff-payment.dto": {
+      "types": "./dist/http-staff-payment.dto.d.ts",
+      "default": "./dist/http-staff-payment.dto.js"
+    },
+    "./return-pricing": {
+      "types": "./dist/return-pricing.d.ts",
+      "default": "./dist/return-pricing.js"
+    },
+    "./corporate-maturity-receipt": {
+      "types": "./dist/corporate-maturity-receipt.d.ts",
+      "default": "./dist/corporate-maturity-receipt.js"
+    },
+    "./mysql-snapshot-backfill": {
+      "types": "./dist/mysql-snapshot-backfill.d.ts",
+      "default": "./dist/mysql-snapshot-backfill.js"
+    },
+    "./client-context": {
+      "types": "./dist/client-context.d.ts",
+      "default": "./dist/client-context.js"
+    },
+    "./client-order-ownership": {
+      "types": "./dist/client-order-ownership.d.ts",
+      "default": "./dist/client-order-ownership.js"
+    },
+    "./enterprise": {
+      "types": "./dist/enterprise.d.ts",
+      "default": "./dist/enterprise.js"
+    },
+    "./enterprise-workflows": {
+      "types": "./dist/enterprise-workflows.d.ts",
+      "default": "./dist/enterprise-workflows.js"
+    },
+    "./enterprise-policy": {
+      "types": "./dist/enterprise-policy.d.ts",
+      "default": "./dist/enterprise-policy.js"
+    },
+    "./enterprise-transfer-decision": {
+      "types": "./dist/enterprise-transfer-decision.d.ts",
+      "default": "./dist/enterprise-transfer-decision.js"
+    },
+    "./enterprise-order-delegation": {
+      "types": "./dist/enterprise-order-delegation.d.ts",
+      "default": "./dist/enterprise-order-delegation.js"
+    },
+    "./client-order-requests": {
+      "types": "./dist/client-order-requests.d.ts",
+      "default": "./dist/client-order-requests.js"
+    },
+    "./mysql-enterprise-policy": {
+      "types": "./dist/mysql-enterprise-policy.d.ts",
+      "default": "./dist/mysql-enterprise-policy.js"
+    },
+    "./mysql-enterprise-members": {
+      "types": "./dist/mysql-enterprise-members.d.ts",
+      "default": "./dist/mysql-enterprise-members.js"
+    },
+    "./enterprise-administrator-continuity": {
+      "types": "./dist/enterprise-administrator-continuity.d.ts",
+      "default": "./dist/enterprise-administrator-continuity.js"
+    },
+    "./enterprise-order-delegation-source": {
+      "types": "./dist/enterprise-order-delegation-source.d.ts",
+      "default": "./dist/enterprise-order-delegation-source.js"
+    },
+    "./enterprise-receipt": {
+      "types": "./dist/enterprise-receipt.d.ts",
+      "default": "./dist/enterprise-receipt.js"
+    },
+    "./enterprise-read-storage": {
+      "types": "./dist/enterprise-read-storage.d.ts",
+      "default": "./dist/enterprise-read-storage.js"
+    },
+    "./mysql-enterprise-access": {
+      "types": "./dist/mysql-enterprise-access.d.ts",
+      "default": "./dist/mysql-enterprise-access.js"
+    },
+    "./mysql-enterprise-orders": {
+      "types": "./dist/mysql-enterprise-orders.d.ts",
+      "default": "./dist/mysql-enterprise-orders.js"
+    },
+    "./mysql-enterprise-reader-audit": {
+      "types": "./dist/mysql-enterprise-reader-audit.d.ts",
+      "default": "./dist/mysql-enterprise-reader-audit.js"
+    },
+    "./mysql-enterprise-command": {
+      "types": "./dist/mysql-enterprise-command.d.ts",
+      "default": "./dist/mysql-enterprise-command.js"
+    },
+    "./mysql-enterprise-finance": {
+      "types": "./dist/mysql-enterprise-finance.d.ts",
+      "default": "./dist/mysql-enterprise-finance.js"
+    },
+    "./mysql-customer-master": {
+      "types": "./dist/mysql-customer-master.d.ts",
+      "default": "./dist/mysql-customer-master.js"
+    },
+    "./customer-master-storage": {
+      "types": "./dist/customer-master-storage.d.ts",
+      "default": "./dist/customer-master-storage.js"
+    },
+    "./mysql-enterprise-application": {
+      "types": "./dist/mysql-enterprise-application.d.ts",
+      "default": "./dist/mysql-enterprise-application.js"
+    },
+    "./mysql-enterprise-management-request": {
+      "types": "./dist/mysql-enterprise-management-request.d.ts",
+      "default": "./dist/mysql-enterprise-management-request.js"
+    },
+    "./mysql-enterprise-task-center": {
+      "types": "./dist/mysql-enterprise-task-center.d.ts",
+      "default": "./dist/mysql-enterprise-task-center.js"
+    },
+    "./mysql-enterprise-rental-handoff": {
+      "types": "./dist/mysql-enterprise-rental-handoff.d.ts",
+      "default": "./dist/mysql-enterprise-rental-handoff.js"
+    },
+    "./mysql-enterprise-membership-audit": {
+      "types": "./dist/mysql-enterprise-membership-audit.d.ts",
+      "default": "./dist/mysql-enterprise-membership-audit.js"
+    },
+    "./enterprise-payment-proof-source": {
+      "types": "./dist/enterprise-payment-proof-source.d.ts",
+      "default": "./dist/enterprise-payment-proof-source.js"
+    },
+    "./enterprise-transfer-receipt-projection": {
+      "types": "./dist/enterprise-transfer-receipt-projection.d.ts",
+      "default": "./dist/enterprise-transfer-receipt-projection.js"
+    },
+    "./client-contracts": {
+      "types": "./dist/client-contracts.d.ts",
+      "default": "./dist/client-contracts.js"
+    },
+    "./enterprise-expense": {
+      "types": "./dist/enterprise-expense.d.ts",
+      "default": "./dist/enterprise-expense.js"
+    },
+    "./enterprise-exchange": {
+      "types": "./dist/enterprise-exchange.d.ts",
+      "default": "./dist/enterprise-exchange.js"
+    },
+    "./enterprise-workflow-ports": {
+      "types": "./dist/enterprise-workflow-ports.d.ts",
+      "default": "./dist/enterprise-workflow-ports.js"
+    },
+    "./notification-draft": {
+      "types": "./dist/notification-draft.d.ts",
+      "default": "./dist/notification-draft.js"
+    },
+    "./notification-log-cache": {
+      "types": "./dist/notification-log-cache.d.ts",
+      "default": "./dist/notification-log-cache.js"
+    },
+    "./notification-snapshot": {
+      "types": "./dist/notification-snapshot.d.ts",
+      "default": "./dist/notification-snapshot.js"
+    },
+    "./mysql-enterprise-approval": {
+      "types": "./dist/mysql-enterprise-approval.d.ts",
+      "default": "./dist/mysql-enterprise-approval.js"
+    },
+    "./mysql-enterprise-extension-approval": {
+      "types": "./dist/mysql-enterprise-extension-approval.d.ts",
+      "default": "./dist/mysql-enterprise-extension-approval.js"
+    },
+    "./mysql-enterprise-exchange-approval": {
+      "types": "./dist/mysql-enterprise-exchange-approval.d.ts",
+      "default": "./dist/mysql-enterprise-exchange-approval.js"
+    },
+    "./mysql-enterprise-merchant-delegation": {
+      "types": "./dist/mysql-enterprise-merchant-delegation.d.ts",
+      "default": "./dist/mysql-enterprise-merchant-delegation.js"
+    },
+    "./mysql-enterprise-merchant-order-submission": {
+      "types": "./dist/mysql-enterprise-merchant-order-submission.d.ts",
+      "default": "./dist/mysql-enterprise-merchant-order-submission.js"
+    },
+    "./enterprise-approval-ports": {
+      "types": "./dist/enterprise-approval-ports.d.ts",
+      "default": "./dist/enterprise-approval-ports.js"
+    },
+    "./http-service-ports": {
+      "types": "./dist/http-service-ports.d.ts",
+      "default": "./dist/http-service-ports.js"
+    },
+    "./http-workspace-capabilities": {
+      "types": "./dist/http-workspace-capabilities.controller.d.ts",
+      "default": "./dist/http-workspace-capabilities.controller.js"
+    },
+    "./http-staff-payments": {
+      "types": "./dist/http-staff-payments.controller.d.ts",
+      "default": "./dist/http-staff-payments.controller.js"
+    },
+    "./http-workspace-capability.dto": {
+      "types": "./dist/http-workspace-capability.dto.d.ts",
+      "default": "./dist/http-workspace-capability.dto.js"
+    },
+    "./http-core": {
+      "types": "./dist/http-core.controller.d.ts",
+      "default": "./dist/http-core.controller.js"
+    },
+    "./http-business": {
+      "types": "./dist/http-business.controller.d.ts",
+      "default": "./dist/http-business.controller.js"
+    },
+    "./http-applications": {
+      "types": "./dist/http-applications.d.ts",
+      "default": "./dist/http-applications.js"
+    },
+    "./http-context": {
+      "types": "./dist/http-context.d.ts",
+      "default": "./dist/http-context.js"
+    },
+    "./http-enterprise-applications": {
+      "types": "./dist/http-enterprise-applications.d.ts",
+      "default": "./dist/http-enterprise-applications.js"
+    },
+    "./http-enterprise-request.dto": {
+      "types": "./dist/http-enterprise-request.dto.d.ts",
+      "default": "./dist/http-enterprise-request.dto.js"
+    },
+    "./http-enterprise-order-query.dto": {
+      "types": "./dist/http-enterprise-order-query.dto.d.ts",
+      "default": "./dist/http-enterprise-order-query.dto.js"
+    },
+    "./http-enterprise-order-delegation.dto": {
+      "types": "./dist/http-enterprise-order-delegation.dto.d.ts",
+      "default": "./dist/http-enterprise-order-delegation.dto.js"
+    },
+    "./http-enterprise-exchange-request.dto": {
+      "types": "./dist/http-enterprise-exchange-request.dto.d.ts",
+      "default": "./dist/http-enterprise-exchange-request.dto.js"
+    },
+    "./http-enterprise-extension-request.dto": {
+      "types": "./dist/http-enterprise-extension-request.dto.d.ts",
+      "default": "./dist/http-enterprise-extension-request.dto.js"
+    },
+    "./http-enterprise-transfer-decision.dto": {
+      "types": "./dist/http-enterprise-transfer-decision.dto.d.ts",
+      "default": "./dist/http-enterprise-transfer-decision.dto.js"
+    },
+    "./http-client-request.dto": {
+      "types": "./dist/http-client-request.dto.d.ts",
+      "default": "./dist/http-client-request.dto.js"
+    },
+    "./http-enterprise-read": {
+      "types": "./dist/http-enterprise-read.controller.d.ts",
+      "default": "./dist/http-enterprise-read.controller.js"
+    },
+    "./http-enterprise-merchant": {
+      "types": "./dist/http-enterprise-merchant.controller.d.ts",
+      "default": "./dist/http-enterprise-merchant.controller.js"
+    },
+    "./http-enterprise-handoff-merchant": {
+      "types": "./dist/http-enterprise-handoff-merchant.controller.d.ts",
+      "default": "./dist/http-enterprise-handoff-merchant.controller.js"
+    },
+    "./http-enterprise-workflows": {
+      "types": "./dist/http-enterprise-workflows.controller.d.ts",
+      "default": "./dist/http-enterprise-workflows.controller.js"
+    },
+    "./file-access": {
+      "types": "./dist/file-access.d.ts",
+      "default": "./dist/file-access.js"
+    },
+    "./mysql-client-delivery-address": {
+      "types": "./dist/mysql-client-delivery-address.d.ts",
+      "default": "./dist/mysql-client-delivery-address.js"
+    },
+    "./mysql-client-account-closure": {
+      "types": "./dist/mysql-client-account-closure.d.ts",
+      "default": "./dist/mysql-client-account-closure.js"
+    },
+    "./client-delivery-service-area": {
+      "types": "./dist/client-delivery-service-area.d.ts",
+      "default": "./dist/client-delivery-service-area.js"
+    },
+    "./client-lifecycle-ports": {
+      "types": "./dist/client-lifecycle-ports.d.ts",
+      "default": "./dist/client-lifecycle-ports.js"
+    },
+    "./mysql-client-application": {
+      "types": "./dist/mysql-client-application.d.ts",
+      "default": "./dist/mysql-client-application.js"
+    },
+    "./client-application-ports": {
+      "types": "./dist/client-application-ports.d.ts",
+      "default": "./dist/client-application-ports.js"
+    },
+    "./category-client-projection": {
+      "types": "./dist/category-client-projection.d.ts",
+      "default": "./dist/category-client-projection.js"
+    },
+    "./file-application-participant": {
+      "types": "./dist/file-application-participant.d.ts",
+      "default": "./dist/file-application-participant.js"
+    },
+    "./business-location-scope": {
+      "types": "./dist/business-location-scope.d.ts",
+      "default": "./dist/business-location-scope.js"
+    },
+    "./file-application-exchange-inspection": {
+      "types": "./dist/file-application-exchange-inspection.d.ts",
+      "default": "./dist/file-application-exchange-inspection.js"
+    },
+    "./http-staff-auth": {
+      "types": "./dist/http-staff-auth.controller.d.ts",
+      "default": "./dist/http-staff-auth.controller.js"
+    },
+    "./http-staff-uploads": {
+      "types": "./dist/http-staff-uploads.controller.d.ts",
+      "default": "./dist/http-staff-uploads.controller.js"
+    },
+    "./staff-upload-observation": {
+      "types": "./dist/staff-upload-observation.d.ts",
+      "default": "./dist/staff-upload-observation.js"
+    },
+    "./client-session-ports": {
+      "types": "./dist/client-session-ports.d.ts",
+      "default": "./dist/client-session-ports.js"
+    },
+    "./mysql-client-auth": {
+      "types": "./dist/mysql-client-auth.d.ts",
+      "default": "./dist/mysql-client-auth.js"
+    },
+    "./mysql-customer-registration": {
+      "types": "./dist/mysql-customer-registration.d.ts",
+      "default": "./dist/mysql-customer-registration.js"
+    },
+    "./mysql-customer-registration-transaction": {
+      "types": "./dist/mysql-customer-registration-transaction.d.ts",
+      "default": "./dist/mysql-customer-registration-transaction.js"
+    },
+    "./mysql-client-rate-limit": {
+      "types": "./dist/mysql-client-rate-limit.d.ts",
+      "default": "./dist/mysql-client-rate-limit.js"
+    },
+    "./mysql-client-website-assets": {
+      "types": "./dist/mysql-client-website-assets.d.ts",
+      "default": "./dist/mysql-client-website-assets.js"
+    },
+    "./http-client-applications": {
+      "types": "./dist/http-client-applications.d.ts",
+      "default": "./dist/http-client-applications.js"
+    },
+    "./http-client": {
+      "types": "./dist/http-client.controller.d.ts",
+      "default": "./dist/http-client.controller.js"
+    },
+    "./file-application-rental-evidence": {
+      "types": "./dist/file-application-rental-evidence.d.ts",
+      "default": "./dist/file-application-rental-evidence.js"
+    },
+    "./file-application-staff-observation": {
+      "types": "./dist/file-application-staff-observation.d.ts",
+      "default": "./dist/file-application-staff-observation.js"
+    },
+    "./mysql-client-wechat-auth": {
+      "types": "./dist/mysql-client-wechat-auth.d.ts",
+      "default": "./dist/mysql-client-wechat-auth.js"
+    },
+    "./client-wechat-ports": {
+      "types": "./dist/client-wechat-ports.d.ts",
+      "default": "./dist/client-wechat-ports.js"
+    },
+    "./file-application-enterprise-payment-proof": {
+      "types": "./dist/file-application-enterprise-payment-proof.d.ts",
+      "default": "./dist/file-application-enterprise-payment-proof.js"
+    },
+    "./admin": {
+      "types": "./admin/index.tsx",
+      "default": "./admin/index.tsx"
+    },
+    "./admin/messages": {
+      "types": "./admin/messages.ts",
+      "default": "./admin/messages.ts"
+    },
+    "./admin/capabilities": {
+      "types": "./admin/capabilities/index.tsx",
+      "default": "./admin/capabilities/index.tsx"
+    },
+    "./admin/capabilities/client": {
+      "types": "./admin/capabilities/client.ts",
+      "default": "./admin/capabilities/client.ts"
+    },
+    "./admin/capabilities/pages": {
+      "types": "./admin/capabilities/pages.ts",
+      "default": "./admin/capabilities/pages.ts"
+    },
+    "./admin/orders": {
+      "types": "./admin/orders/index.tsx",
+      "default": "./admin/orders/index.tsx"
+    },
+    "./admin/orders/client": {
+      "types": "./admin/orders/client.ts",
+      "default": "./admin/orders/client.ts"
+    },
+    "./admin/orders/logic": {
+      "types": "./admin/orders/logic.ts",
+      "default": "./admin/orders/logic.ts"
+    },
+    "./admin/orders/pages": {
+      "types": "./admin/orders/pages.ts",
+      "default": "./admin/orders/pages.ts"
+    },
+    "./admin/work-orders": {
+      "types": "./admin/work-orders/index.tsx",
+      "default": "./admin/work-orders/index.tsx"
+    },
+    "./admin/work-orders/client": {
+      "types": "./admin/work-orders/client.ts",
+      "default": "./admin/work-orders/client.ts"
+    },
+    "./admin/work-orders/policy": {
+      "types": "./admin/work-orders/workOrderBoardPolicy.ts",
+      "default": "./admin/work-orders/workOrderBoardPolicy.ts"
+    },
+    "./admin/work-orders/pages": {
+      "types": "./admin/work-orders/pages.ts",
+      "default": "./admin/work-orders/pages.ts"
+    },
+    "./channel-contracts": {
+      "types": "./dist/channel-contracts.d.ts",
+      "default": "./dist/channel-contracts.js"
+    },
+    "./client-channel-ports": {
+      "types": "./dist/client-channel-ports.d.ts",
+      "default": "./dist/client-channel-ports.js"
+    },
+    "./mysql-client-channel-profile": {
+      "types": "./dist/mysql-client-channel-profile.d.ts",
+      "default": "./dist/mysql-client-channel-profile.js"
+    },
+    "./mysql-website-channel-profile": {
+      "types": "./dist/mysql-website-channel-profile.d.ts",
+      "default": "./dist/mysql-website-channel-profile.js"
+    },
+    "./mysql-mini-program-channel": {
+      "types": "./dist/mysql-mini-program-channel.d.ts",
+      "default": "./dist/mysql-mini-program-channel.js"
+    },
+    "./http-channel-dto": {
+      "types": "./dist/http-channel.dto.d.ts",
+      "default": "./dist/http-channel.dto.js"
+    },
+    "./http-channels": {
+      "types": "./dist/http-channels.controller.d.ts",
+      "default": "./dist/http-channels.controller.js"
+    },
+    "./http-channel-applications": {
+      "types": "./dist/http-channel-applications.d.ts",
+      "default": "./dist/http-channel-applications.js"
+    },
+    "./file-application-runtime": {
+      "types": "./dist/file-application-runtime.d.ts",
+      "default": "./dist/file-application-runtime.js"
+    },
+    "./mysql-membership": {
+      "types": "./dist/mysql-membership.d.ts",
+      "default": "./dist/mysql-membership.js"
+    },
+    "./membership-ports": {
+      "types": "./dist/membership-ports.d.ts",
+      "default": "./dist/membership-ports.js"
+    },
+    "./customer-operations-ports": {
+      "types": "./dist/customer-operations-ports.d.ts",
+      "default": "./dist/customer-operations-ports.js"
+    },
+    "./mysql-customer-operations": {
+      "types": "./dist/mysql-customer-operations.d.ts",
+      "default": "./dist/mysql-customer-operations.js"
+    },
+    "./mysql-enterprise-portal": {
+      "types": "./dist/mysql-enterprise-portal.d.ts",
+      "default": "./dist/mysql-enterprise-portal.js"
+    },
+    "./http-membership": {
+      "types": "./dist/http-membership.controller.d.ts",
+      "default": "./dist/http-membership.controller.js"
+    },
+    "./http-membership-request.dto": {
+      "types": "./dist/http-membership-request.dto.d.ts",
+      "default": "./dist/http-membership-request.dto.js"
+    },
+    "./http-enterprise-portal-request.dto": {
+      "types": "./dist/http-enterprise-portal-request.dto.d.ts",
+      "default": "./dist/http-enterprise-portal-request.dto.js"
+    },
+    "./http-membership-applications": {
+      "types": "./dist/http-membership-applications.d.ts",
+      "default": "./dist/http-membership-applications.js"
+    },
+    "./http-files": {
+      "types": "./dist/http-files.controller.d.ts",
+      "default": "./dist/http-files.controller.js"
+    },
+    "./http-file-applications": {
+      "types": "./dist/http-file-applications.d.ts",
+      "default": "./dist/http-file-applications.js"
+    },
+    "./http-file.dto": {
+      "types": "./dist/http-file.dto.d.ts",
+      "default": "./dist/http-file.dto.js"
+    },
+    "./customer-governance-ports": {
+      "types": "./dist/customer-governance-ports.d.ts",
+      "default": "./dist/customer-governance-ports.js"
+    },
+    "./mysql-customer-governance": {
+      "types": "./dist/mysql-customer-governance.d.ts",
+      "default": "./dist/mysql-customer-governance.js"
+    },
+    "./mysql-customer-merge": {
+      "types": "./dist/mysql-customer-merge.d.ts",
+      "default": "./dist/mysql-customer-merge.js"
+    },
+    "./mysql-customer-insights": {
+      "types": "./dist/mysql-customer-insights.d.ts",
+      "default": "./dist/mysql-customer-insights.js"
+    },
+    "./mysql-customer-avatar": {
+      "types": "./dist/mysql-customer-avatar.d.ts",
+      "default": "./dist/mysql-customer-avatar.js"
+    },
+    "./http-customer-avatar": {
+      "types": "./dist/http-customer-avatar.controller.d.ts",
+      "default": "./dist/http-customer-avatar.controller.js"
+    },
+    "./http-customer-avatar-applications": {
+      "types": "./dist/http-customer-avatar-applications.d.ts",
+      "default": "./dist/http-customer-avatar-applications.js"
+    },
+    "./mysql-customer-corporate": {
+      "types": "./dist/mysql-customer-corporate.d.ts",
+      "default": "./dist/mysql-customer-corporate.js"
+    },
+    "./mysql-customer-corporate-settlement": {
+      "types": "./dist/mysql-customer-corporate-settlement.d.ts",
+      "default": "./dist/mysql-customer-corporate-settlement.js"
+    },
+    "./corporate-application-storage": {
+      "types": "./dist/corporate-application-storage.d.ts",
+      "default": "./dist/corporate-application-storage.js"
+    },
+    "./admin/locations": {
+      "types": "./admin/locations/index.tsx",
+      "default": "./admin/locations/index.tsx"
+    },
+    "./admin/locations/client": {
+      "types": "./admin/locations/client.ts",
+      "default": "./admin/locations/client.ts"
+    },
+    "./admin/locations/pages": {
+      "types": "./admin/locations/pages.ts",
+      "default": "./admin/locations/pages.ts"
+    },
+    "./admin/locations/list-capabilities": {
+      "types": "./admin/locations/listCapabilities.ts",
+      "default": "./admin/locations/listCapabilities.ts"
+    },
+    "./admin/catalog": {
+      "types": "./admin/catalog/index.tsx",
+      "default": "./admin/catalog/index.tsx"
+    },
+    "./admin/catalog/client": {
+      "types": "./admin/catalog/client.ts",
+      "default": "./admin/catalog/client.ts"
+    },
+    "./admin/catalog/context": {
+      "types": "./admin/catalog/page-context.ts",
+      "default": "./admin/catalog/page-context.ts"
+    },
+    "./admin/catalog/pages": {
+      "types": "./admin/catalog/pages.ts",
+      "default": "./admin/catalog/pages.ts"
+    },
+    "./admin/catalog/images": {
+      "types": "./admin/catalog/ItemGroupPhoto.tsx",
+      "default": "./admin/catalog/ItemGroupPhoto.tsx"
+    },
+    "./admin/catalog/list-capabilities": {
+      "types": "./admin/catalog/listCapabilities.ts",
+      "default": "./admin/catalog/listCapabilities.ts"
+    },
+    "./admin/catalog/terminology": {
+      "types": "./admin/catalog/navigation-terminology.ts",
+      "default": "./admin/catalog/navigation-terminology.ts"
+    },
+    "./http-category-governance": {
+      "types": "./dist/http-category-governance.controller.d.ts",
+      "default": "./dist/http-category-governance.controller.js"
+    },
+    "./http-category-adoption-preparation": {
+      "types": "./dist/http-category-adoption-preparation.controller.d.ts",
+      "default": "./dist/http-category-adoption-preparation.controller.js"
+    },
+    "./http-category-governance.dto": {
+      "types": "./dist/http-category-governance.dto.d.ts",
+      "default": "./dist/http-category-governance.dto.js"
+    },
+    "./http-category-adoption.dto": {
+      "types": "./dist/http-category-adoption.dto.d.ts",
+      "default": "./dist/http-category-adoption.dto.js"
+    },
+    "./http-category-preview": {
+      "types": "./dist/http-category-preview.guard.d.ts",
+      "default": "./dist/http-category-preview.guard.js"
+    },
+    "./http-category-applications": {
+      "types": "./dist/http-category-applications.d.ts",
+      "default": "./dist/http-category-applications.js"
+    },
+    "./http-category": {
+      "types": "./dist/http-category.module.d.ts",
+      "default": "./dist/http-category.module.js"
+    },
+    "./http": {
+      "types": "./dist/http.module.d.ts",
+      "default": "./dist/http.module.js"
+    },
+    "./admin/commercial": {
+      "types": "./admin/commercial/index.tsx",
+      "default": "./admin/commercial/index.tsx"
+    },
+    "./admin/commercial/client": {
+      "types": "./admin/commercial/client.ts",
+      "default": "./admin/commercial/client.ts"
+    },
+    "./admin/commercial/context": {
+      "types": "./admin/commercial/page-context.ts",
+      "default": "./admin/commercial/page-context.ts"
+    },
+    "./admin/commercial/pages": {
+      "types": "./admin/commercial/pages.ts",
+      "default": "./admin/commercial/pages.ts"
+    },
+    "./admin/governance": {
+      "types": "./admin/governance/index.tsx",
+      "default": "./admin/governance/index.tsx"
+    },
+    "./admin/governance/client": {
+      "types": "./admin/governance/client.ts",
+      "default": "./admin/governance/client.ts"
+    },
+    "./admin/governance/context": {
+      "types": "./admin/governance/page-context.tsx",
+      "default": "./admin/governance/page-context.tsx"
+    },
+    "./admin/governance/pages": {
+      "types": "./admin/governance/pages.ts",
+      "default": "./admin/governance/pages.ts"
+    },
+    "./admin/governance/logic": {
+      "types": "./admin/governance/logic.ts",
+      "default": "./admin/governance/logic.ts"
+    },
+    "./admin/governance/messages": {
+      "types": "./admin/governance/messages.ts",
+      "default": "./admin/governance/messages.ts"
+    },
+    "./admin/membership/client": {
+      "types": "./admin/membership/client.ts",
+      "default": "./admin/membership/client.ts"
+    },
+    "./admin/membership/customer-client": {
+      "types": "./admin/membership/customer-client.ts",
+      "default": "./admin/membership/customer-client.ts"
+    },
+    "./mysql-payment-runtime": {
+      "types": "./dist/mysql-payment-runtime.d.ts",
+      "default": "./dist/mysql-payment-runtime.js"
+    },
+    "./mysql-payment-reconciliation-file": {
+      "types": "./dist/mysql-payment-reconciliation-file.d.ts",
+      "default": "./dist/mysql-payment-reconciliation-file.js"
+    },
+    "./http-payments": {
+      "types": "./dist/http-payments.d.ts",
+      "default": "./dist/http-payments.js"
+    },
+    "./payment-money": {
+      "types": "./dist/payment-money.d.ts",
+      "default": "./dist/payment-money.js"
+    },
+    "./stripe-payment": {
+      "types": "./dist/stripe-payment.d.ts",
+      "default": "./dist/stripe-payment.js"
+    },
+    "./admin/membership": "./admin/membership/index.tsx",
+    "./admin/membership/context": "./admin/membership/page-context.tsx",
+    "./admin/membership/pages": "./admin/membership/pages.ts",
+    "./admin/membership/components": "./admin/membership/components.ts",
+    "./admin/membership/logic": "./admin/membership/logic.ts",
+    "./admin/membership/messages": "./admin/membership/messages.ts",
+    "./admin/membership/insights": "./admin/membership/MembershipInsights.tsx",
+    "./admin/membership/list-capabilities": "./admin/membership/list-capabilities.ts",
+    "./data": {
+      "types": "./dist/data.d.ts",
+      "default": "./dist/data.js"
+    },
+    "./mysql-data": {
+      "types": "./dist/mysql-data.d.ts",
+      "default": "./dist/mysql-data.js"
+    },
+    "./admin/operations": "./admin/operations/index.tsx",
+    "./admin/operations/client": "./admin/operations/client.ts",
+    "./admin/operations/context": "./admin/operations/page-context.tsx",
+    "./admin/operations/pages": "./admin/operations/pages.ts",
+    "./admin/operations/components": "./admin/operations/components.ts",
+    "./admin/operations/logic": "./admin/operations/logic.ts",
+    "./admin/operations/messages": "./admin/operations/messages.ts",
+    "./core-identity": {
+      "types": "./dist/core-identity.d.ts",
+      "default": "./dist/core-identity.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "default": "./dist/server.js"
+    },
+    "./platform-host": {
+      "types": "./dist/platform-host.d.ts",
+      "default": "./dist/platform-host.js"
+    },
+    "./admin/channels": "./admin/channels/index.tsx",
+    "./admin/channels/client": "./admin/channels/client.ts",
+    "./admin/channels/website-client": "./admin/channels/website-client.ts",
+    "./admin/channels/context": "./admin/channels/page-context.tsx",
+    "./admin/channels/pages": "./admin/channels/pages.ts",
+    "./admin/channels/messages": "./admin/channels/messages.ts",
+    "./admin/setup": "./admin/setup/index.tsx",
+    "./admin/setup/client": "./admin/setup/client.ts",
+    "./admin/setup/context": "./admin/setup/page-context.tsx",
+    "./admin/setup/pages": "./admin/setup/pages.ts",
+    "./admin/setup/navigation": "./admin/setup/navigation.ts",
+    "./admin/setup/messages": "./admin/setup/messages.ts",
+    "./admin/payment-reconciliation": "./admin/payment-reconciliation/index.tsx",
+    "./admin/payment-reconciliation/client": "./admin/payment-reconciliation/client.ts",
+    "./admin/payment-reconciliation/context": "./admin/payment-reconciliation/page-context.tsx",
+    "./admin/payment-reconciliation/pages": "./admin/payment-reconciliation/pages.ts",
+    "./admin/payment-reconciliation/messages": "./admin/payment-reconciliation/messages.ts",
+    "./clients/enterprise": "./clients/enterprise/index.ts",
+    "./integration-contracts": {
+      "types": "./dist/integration-contracts.d.ts",
+      "default": "./dist/integration-contracts.js"
+    },
+    "./integration-runtime": {
+      "types": "./dist/integration-runtime.d.ts",
+      "default": "./dist/integration-runtime.js"
+    },
+    "./mysql-integrations": {
+      "types": "./dist/mysql-integrations.d.ts",
+      "default": "./dist/mysql-integrations.js"
+    },
+    "./http-integrations": {
+      "types": "./dist/http-integrations.d.ts",
+      "default": "./dist/http-integrations.js"
+    },
+    "./integration-business-participant": {
+      "types": "./dist/integration-business-participant.d.ts",
+      "default": "./dist/integration-business-participant.js"
+    },
+    "./auth-contracts": {
+      "types": "./dist/auth-contracts.d.ts",
+      "default": "./dist/auth-contracts.js"
+    },
+    "./admin/browser": "./admin/browser.ts",
+    "./clients/staff": {
+      "types": "./dist-clients/clients/staff/index.d.ts",
+      "require": "./dist-clients/clients/staff/index.js",
+      "default": "./dist-clients/clients/staff/index.js"
+    },
+    "./clients/miniprogram": {
+      "types": "./dist-clients/clients/miniprogram/index.d.ts",
+      "require": "./dist-clients/clients/miniprogram/index.js",
+      "default": "./dist-clients/clients/miniprogram/index.js"
+    },
+    "./clients/website": "./clients/website/index.ts",
+    "./permissions": {
+      "types": "./dist/permissions.d.ts",
+      "default": "./dist/permissions.js"
+    },
+    "./legacy-access-preparation": {
+      "types": "./dist/legacy-access-preparation.d.ts",
+      "default": "./dist/legacy-access-preparation.js"
+    },
+    "./legacy-access-adoption": {
+      "types": "./dist/legacy-access-adoption.d.ts",
+      "default": "./dist/legacy-access-adoption.js"
+    },
+    "./manifest": {
+      "types": "./dist/manifest.d.ts",
+      "default": "./dist/manifest.js"
+    },
+    "./admin/browser-notifications": "./admin/browser-notifications/index.tsx",
+    "./admin/browser-notifications/model": "./admin/browser-notifications/model.ts",
+    "./contracts": {
+      "types": "./dist/contracts.d.ts",
+      "default": "./dist/contracts.js"
+    },
+    "./application-repositories": {
+      "types": "./dist/application-repositories.d.ts",
+      "default": "./dist/application-repositories.js"
+    },
+    "./mysql-workspace-principal": {
+      "types": "./dist/mysql-workspace-principal.d.ts",
+      "default": "./dist/mysql-workspace-principal.js"
+    },
+    "./application-domain": {
+      "types": "./dist/application-domain.d.ts",
+      "default": "./dist/application-domain.js"
+    },
+    "./application-participants": {
+      "types": "./dist/application-participants.d.ts",
+      "default": "./dist/application-participants.js"
+    },
+    "./application-customers": {
+      "types": "./dist/application-customers.d.ts",
+      "default": "./dist/application-customers.js"
+    },
+    "./application-ai-sources": {
+      "types": "./dist/application-ai-sources.d.ts",
+      "default": "./dist/application-ai-sources.js"
+    },
+    "./package": {
+      "types": "./dist/package.d.ts",
+      "default": "./dist/package.js"
+    },
+    "./data-package": {
+      "types": "./dist/data-package.d.ts",
+      "default": "./dist/data-package.js"
+    },
+    "./initialize-categories": {
+      "types": "./dist/initialize-categories.d.ts",
+      "default": "./dist/initialize-categories.js"
+    },
+    "./application-client": {
+      "types": "./dist/application-client.d.ts",
+      "default": "./dist/application-client.js"
+    },
+    "./application-enterprise": {
+      "types": "./dist/application-enterprise.d.ts",
+      "default": "./dist/application-enterprise.js"
+    },
+    "./auth-service": {
+      "types": "./dist/auth-service.d.ts",
+      "default": "./dist/auth-service.js"
+    },
+    "./auth-source": {
+      "types": "./dist/auth-source.d.ts",
+      "default": "./dist/auth-source.js"
+    },
+    "./trusted-workspace-principal": {
+      "types": "./dist/trusted-workspace-principal.d.ts",
+      "default": "./dist/trusted-workspace-principal.js"
+    },
+    "./trusted-browser-principal": {
+      "types": "./dist/trusted-browser-principal.d.ts",
+      "default": "./dist/trusted-browser-principal.js"
+    },
+    "./trusted-platform-browser-principal": {
+      "types": "./dist/trusted-platform-browser-principal.d.ts",
+      "default": "./dist/trusted-platform-browser-principal.js"
+    },
+    "./application-integrations": {
+      "types": "./dist/application-integrations.d.ts",
+      "default": "./dist/application-integrations.js"
+    },
+    "./mysql-auth-source": {
+      "types": "./dist/mysql-auth-source.d.ts",
+      "default": "./dist/mysql-auth-source.js"
+    },
+    "./http-auth": {
+      "types": "./dist/http-auth.d.ts",
+      "default": "./dist/http-auth.js"
+    },
+    "./auth-guard-contracts": {
+      "types": "./dist/auth-guard-contracts.d.ts",
+      "default": "./dist/auth-guard-contracts.js"
+    },
+    "./staff-api-policy": {
+      "types": "./dist/staff-api-policy.d.ts",
+      "default": "./dist/staff-api-policy.js"
+    },
+    "./platform-ai-access-policy": {
+      "types": "./dist/platform-ai-access-policy.d.ts",
+      "default": "./dist/platform-ai-access-policy.js"
+    },
+    "./application": {
+      "types": "./dist/application.d.ts",
+      "default": "./dist/application.js"
+    },
+    "./application-category": {
+      "types": "./dist/application-category.d.ts",
+      "default": "./dist/application-category.js"
+    },
+    "./application-worker-authority": {
+      "types": "./dist/application-worker-authority.d.ts",
+      "default": "./dist/application-worker-authority.js"
+    },
+    "./core-session": {
+      "types": "./dist/core-session.d.ts",
+      "default": "./dist/core-session.js"
+    },
+    "./application-http": {
+      "types": "./dist/application-http.d.ts",
+      "default": "./dist/application-http.js"
+    },
+    "./application-platform": {
+      "types": "./dist/application-platform.d.ts",
+      "default": "./dist/application-platform.js"
+    },
+    "./staff-routing": {
+      "types": "./dist/staff-routing.d.ts",
+      "default": "./dist/staff-routing.js"
+    },
+    "./application-access": {
+      "types": "./dist/application-access.d.ts",
+      "default": "./dist/application-access.js"
+    },
+    "./http-auth-extensions": {
+      "types": "./dist/http-auth-extensions.controller.d.ts",
+      "default": "./dist/http-auth-extensions.controller.js"
+    },
+    "./http-staff-subscription": {
+      "types": "./dist/http-staff-subscription.controller.d.ts",
+      "default": "./dist/http-staff-subscription.controller.js"
+    },
+    "./http-extensions": {
+      "types": "./dist/http-extensions.module.d.ts",
+      "default": "./dist/http-extensions.module.js"
+    },
+    "./customer-management": {
+      "types": "./dist/application-customer-management.d.ts",
+      "default": "./dist/application-customer-management.js"
+    },
+    "./http-customers": {
+      "types": "./dist/http-customers.controller.d.ts",
+      "default": "./dist/http-customers.controller.js"
+    },
+    "./http-customers-module": {
+      "types": "./dist/http-customers.module.d.ts",
+      "default": "./dist/http-customers.module.js"
+    },
+    "./http-customer-operations-dto": {
+      "types": "./dist/http-customer-operations.dto.d.ts",
+      "default": "./dist/http-customer-operations.dto.js"
+    },
+    "./http-customer-corporate-dto": {
+      "types": "./dist/http-customer-corporate.dto.d.ts",
+      "default": "./dist/http-customer-corporate.dto.js"
+    },
+    "./http-customer-merge-dto": {
+      "types": "./dist/http-customer-merge.dto.d.ts",
+      "default": "./dist/http-customer-merge.dto.js"
+    },
+    "./http-customer-registration-dto": {
+      "types": "./dist/http-customer-registration.dto.d.ts",
+      "default": "./dist/http-customer-registration.dto.js"
+    },
+    "./workspace-management": {
+      "types": "./dist/application-workspace-management.d.ts",
+      "default": "./dist/application-workspace-management.js"
+    },
+    "./tenant-bootstrap": {
+      "types": "./dist/application-tenant-bootstrap.d.ts",
+      "default": "./dist/application-tenant-bootstrap.js"
+    },
+    "./tenant-bootstrap-contracts": {
+      "types": "./dist/tenant-bootstrap-contracts.d.ts",
+      "default": "./dist/tenant-bootstrap-contracts.js"
+    },
+    "./tenant-bootstrap-defaults": {
+      "types": "./dist/tenant-bootstrap-defaults.d.ts",
+      "default": "./dist/tenant-bootstrap-defaults.js"
+    },
+    "./mysql-workspace-management": {
+      "types": "./dist/mysql-workspace-management.d.ts",
+      "default": "./dist/mysql-workspace-management.js"
+    },
+    "./http-workspace-management-dto": {
+      "types": "./dist/http-workspace-management.dto.d.ts",
+      "default": "./dist/http-workspace-management.dto.js"
+    },
+    "./http-workspaces": {
+      "types": "./dist/http-workspaces.controller.d.ts",
+      "default": "./dist/http-workspaces.controller.js"
+    },
+    "./http-workspaces-module": {
+      "types": "./dist/http-workspaces.module.d.ts",
+      "default": "./dist/http-workspaces.module.js"
+    },
+    "./clients/enterprise-portal": "./clients/enterprise-portal/index.ts",
+    "./clients/enterprise-portal/styles": "./clients/enterprise-portal/styles.css",
+    "./clients/time": {
+      "types": "./dist-clients/clients/time.d.ts",
+      "require": "./dist-clients/clients/time.js",
+      "default": "./dist-clients/clients/time.js"
+    },
+    "./clients/enterprise-portal/pages/AdministratorEditor": "./clients/enterprise-portal/AdministratorEditor.tsx",
+    "./clients/enterprise-portal/pages/ApplicationReviewMessages": "./clients/enterprise-portal/ApplicationReviewMessages.tsx",
+    "./clients/enterprise-portal/pages/ApprovalDecision": "./clients/enterprise-portal/ApprovalDecision.tsx",
+    "./clients/enterprise-portal/pages/ApprovalNotices": "./clients/enterprise-portal/ApprovalNotices.tsx",
+    "./clients/enterprise-portal/pages/ApprovalReview": "./clients/enterprise-portal/ApprovalReview.tsx",
+    "./clients/enterprise-portal/pages/ApprovalsPage": "./clients/enterprise-portal/ApprovalsPage.tsx",
+    "./clients/enterprise-portal/pages/AuthorityUpload": "./clients/enterprise-portal/AuthorityUpload.tsx",
+    "./clients/enterprise-portal/pages/CorporateStatusMessages": "./clients/enterprise-portal/CorporateStatusMessages.tsx",
+    "./clients/enterprise-portal/pages/EmployeePolicyMessages": "./clients/enterprise-portal/EmployeePolicyMessages.tsx",
+    "./clients/enterprise-portal/pages/EnterpriseShell": "./clients/enterprise-portal/EnterpriseShell.tsx",
+    "./clients/enterprise-portal/pages/ExchangeApprovalsPage": "./clients/enterprise-portal/ExchangeApprovalsPage.tsx",
+    "./clients/enterprise-portal/pages/ExtensionApprovalsPage": "./clients/enterprise-portal/ExtensionApprovalsPage.tsx",
+    "./clients/enterprise-portal/pages/FinancePage": "./clients/enterprise-portal/FinancePage.tsx",
+    "./clients/enterprise-portal/pages/JoinReviewMessages": "./clients/enterprise-portal/JoinReviewMessages.tsx",
+    "./clients/enterprise-portal/pages/ManagementRequestFeedback": "./clients/enterprise-portal/ManagementRequestFeedback.tsx",
+    "./clients/enterprise-portal/pages/ManagementRequestsPage": "./clients/enterprise-portal/ManagementRequestsPage.tsx",
+    "./clients/enterprise-portal/pages/ManagementReviewMessages": "./clients/enterprise-portal/ManagementReviewMessages.tsx",
+    "./clients/enterprise-portal/pages/MemberLifecycle": "./clients/enterprise-portal/MemberLifecycle.tsx",
+    "./clients/enterprise-portal/pages/MemberOperationRecovery": "./clients/enterprise-portal/MemberOperationRecovery.tsx",
+    "./clients/enterprise-portal/pages/MembershipAudit": "./clients/enterprise-portal/MembershipAudit.tsx",
+    "./clients/enterprise-portal/pages/MerchantContact": "./clients/enterprise-portal/MerchantContact.tsx",
+    "./clients/enterprise-portal/pages/OrdersPage": "./clients/enterprise-portal/OrdersPage.tsx",
+    "./clients/enterprise-portal/pages/OwnMessages": "./clients/enterprise-portal/OwnMessages.tsx",
+    "./clients/enterprise-portal/pages/OwnRentalFulfillment": "./clients/enterprise-portal/OwnRentalFulfillment.tsx",
+    "./clients/enterprise-portal/pages/OwnRentalHandoffOrders": "./clients/enterprise-portal/OwnRentalHandoffOrders.tsx",
+    "./clients/enterprise-portal/pages/OwnRentalHandoffs": "./clients/enterprise-portal/OwnRentalHandoffs.tsx",
+    "./clients/enterprise-portal/pages/OwnStatusMessages": "./clients/enterprise-portal/OwnStatusMessages.tsx",
+    "./clients/enterprise-portal/pages/PolicyPage": "./clients/enterprise-portal/PolicyPage.tsx",
+    "./clients/enterprise-portal/pages/RelationshipMessages": "./clients/enterprise-portal/RelationshipMessages.tsx",
+    "./clients/enterprise-portal/pages/RentalHandoffMaterial": "./clients/enterprise-portal/RentalHandoffMaterial.tsx",
+    "./clients/enterprise-portal/pages/RetainedMergeMessages": "./clients/enterprise-portal/RetainedMergeMessages.tsx",
+    "./clients/enterprise-portal/pages/TasksPage": "./clients/enterprise-portal/TasksPage.tsx",
+    "./clients/enterprise-portal/pages/TransferDecisionRecovery": "./clients/enterprise-portal/TransferDecisionRecovery.tsx",
+    "./clients/enterprise-portal/pages/TransferMessages": "./clients/enterprise-portal/TransferMessages.tsx",
+    "./clients/enterprise-portal/pages/WorkflowPages": "./clients/enterprise-portal/WorkflowPages.tsx",
+    "./clients/enterprise-portal/pages/WorkflowReview": "./clients/enterprise-portal/WorkflowReview.tsx",
+    "./clients/website-ui": "./clients/website-ui/index.ts",
+    "./clients/website-ui/host": "./clients/website-ui/host.ts",
+    "./clients/website-ui/styles": "./clients/website-ui/styles.css",
+    "./clients/website-ui/source/App": "./clients/website-ui/App.tsx",
+    "./clients/website-ui/source/AuthContext": "./clients/website-ui/AuthContext.tsx",
+    "./clients/website-ui/source/SiteContext": "./clients/website-ui/SiteContext.tsx",
+    "./clients/website-ui/source/components/CatalogConditions": "./clients/website-ui/components/CatalogConditions.tsx",
+    "./clients/website-ui/source/components/EnterpriseBookingApproval": "./clients/website-ui/components/EnterpriseBookingApproval.tsx",
+    "./clients/website-ui/source/components/EnterpriseExchangeProgress": "./clients/website-ui/components/EnterpriseExchangeProgress.tsx",
+    "./clients/website-ui/source/components/EnterpriseExchangeRequest": "./clients/website-ui/components/EnterpriseExchangeRequest.tsx",
+    "./clients/website-ui/source/components/EnterpriseExtensionApproval": "./clients/website-ui/components/EnterpriseExtensionApproval.tsx",
+    "./clients/website-ui/source/components/ErrorBoundary": "./clients/website-ui/components/ErrorBoundary.tsx",
+    "./clients/website-ui/source/components/Img": "./clients/website-ui/components/Img.tsx",
+    "./clients/website-ui/source/components/MemberLayout": "./clients/website-ui/components/MemberLayout.tsx",
+    "./clients/website-ui/source/components/PageHeader": "./clients/website-ui/components/PageHeader.tsx",
+    "./clients/website-ui/source/components/PageState": "./clients/website-ui/components/PageState.tsx",
+    "./clients/website-ui/source/components/ProductCard": "./clients/website-ui/components/ProductCard.tsx",
+    "./clients/website-ui/source/components/RemoteBooking": "./clients/website-ui/components/RemoteBooking.tsx",
+    "./clients/website-ui/source/components/RentalFinder": "./clients/website-ui/components/RentalFinder.tsx",
+    "./clients/website-ui/source/components/SiteIcon": "./clients/website-ui/components/SiteIcon.tsx",
+    "./clients/website-ui/source/components/SiteLayout": "./clients/website-ui/components/SiteLayout.tsx",
+    "./clients/website-ui/source/components/StoreDirectory": "./clients/website-ui/components/StoreDirectory.tsx",
+    "./clients/website-ui/source/components/Toast": "./clients/website-ui/components/Toast.tsx",
+    "./clients/website-ui/source/components/enterprise-exchange-confirmation": "./clients/website-ui/components/enterprise-exchange-confirmation.ts",
+    "./clients/website-ui/source/components/enterprise-exchange-request": "./clients/website-ui/components/enterprise-exchange-request.ts",
+    "./clients/website-ui/source/components/useEnterpriseOrderSubmission": "./clients/website-ui/components/useEnterpriseOrderSubmission.ts",
+    "./clients/website-ui/source/data/apiClient": "./clients/website-ui/data/apiClient.ts",
+    "./clients/website-ui/source/data/authClient": "./clients/website-ui/data/authClient.ts",
+    "./clients/website-ui/source/data/catalog": "./clients/website-ui/data/catalog.ts",
+    "./clients/website-ui/source/data/clientRecoveryStorage": "./clients/website-ui/data/clientRecoveryStorage.ts",
+    "./clients/website-ui/source/data/datetime": "./clients/website-ui/data/datetime.ts",
+    "./clients/website-ui/source/data/money": "./clients/website-ui/data/money.ts",
+    "./clients/website-ui/source/data/remoteSite": "./clients/website-ui/data/remoteSite.ts",
+    "./clients/website-ui/source/data/rentalQuery": "./clients/website-ui/data/rentalQuery.ts",
+    "./clients/website-ui/source/data/resolveTenant": "./clients/website-ui/data/resolveTenant.ts",
+    "./clients/website-ui/source/data/siteRepository": "./clients/website-ui/data/siteRepository.ts",
+    "./clients/website-ui/source/features/ai-native/BookingDraftReview": "./clients/website-ui/features/ai-native/BookingDraftReview.tsx",
+    "./clients/website-ui/source/features/ai-native/BookingHandoffBridge": "./clients/website-ui/features/ai-native/BookingHandoffBridge.tsx",
+    "./clients/website-ui/source/features/ai-native/BookingHandoffHost": "./clients/website-ui/features/ai-native/BookingHandoffHost.tsx",
+    "./clients/website-ui/source/features/ai-native/BookingHandoffPanel": "./clients/website-ui/features/ai-native/BookingHandoffPanel.tsx",
+    "./clients/website-ui/source/features/ai-native/ClientBookingTransfer": "./clients/website-ui/features/ai-native/ClientBookingTransfer.tsx",
+    "./clients/website-ui/source/features/ai-native/ClientGoalPicker": "./clients/website-ui/features/ai-native/ClientGoalPicker.tsx",
+    "./clients/website-ui/source/features/ai-native/ClientOriginalQuoteFacts": "./clients/website-ui/features/ai-native/ClientOriginalQuoteFacts.tsx",
+    "./clients/website-ui/source/features/ai-native/ClientPublicBrowse": "./clients/website-ui/features/ai-native/ClientPublicBrowse.tsx",
+    "./clients/website-ui/source/features/ai-native/ClientQuotePreparation": "./clients/website-ui/features/ai-native/ClientQuotePreparation.tsx",
+    "./clients/website-ui/source/features/ai-native/ClientRegisteredEntryActions": "./clients/website-ui/features/ai-native/ClientRegisteredEntryActions.tsx",
+    "./clients/website-ui/source/features/ai-native/ClientSceneCatalog": "./clients/website-ui/features/ai-native/ClientSceneCatalog.tsx",
+    "./clients/website-ui/source/features/ai-native/ClientTaskCancellation": "./clients/website-ui/features/ai-native/ClientTaskCancellation.tsx",
+    "./clients/website-ui/source/features/ai-native/ClientTaskWorkbench": "./clients/website-ui/features/ai-native/ClientTaskWorkbench.tsx",
+    "./clients/website-ui/source/features/ai-native/booking-draft-review": "./clients/website-ui/features/ai-native/booking-draft-review.ts",
+    "./clients/website-ui/source/features/ai-native/booking-handoff": "./clients/website-ui/features/ai-native/booking-handoff.ts",
+    "./clients/website-ui/source/features/ai-native/booking-host.factory": "./clients/website-ui/features/ai-native/booking-host.factory.ts",
+    "./clients/website-ui/source/features/ai-native/client-booking-transfer-api": "./clients/website-ui/features/ai-native/client-booking-transfer-api.ts",
+    "./clients/website-ui/source/features/ai-native/client-booking-transfer-session": "./clients/website-ui/features/ai-native/client-booking-transfer-session.ts",
+    "./clients/website-ui/source/features/ai-native/client-entry-actions-api": "./clients/website-ui/features/ai-native/client-entry-actions-api.ts",
+    "./clients/website-ui/source/features/ai-native/client-goal-api": "./clients/website-ui/features/ai-native/client-goal-api.ts",
+    "./clients/website-ui/source/features/ai-native/client-goal-session": "./clients/website-ui/features/ai-native/client-goal-session.ts",
+    "./clients/website-ui/source/features/ai-native/client-public-api": "./clients/website-ui/features/ai-native/client-public-api.ts",
+    "./clients/website-ui/source/features/ai-native/client-quote-session": "./clients/website-ui/features/ai-native/client-quote-session.ts",
+    "./clients/website-ui/source/features/ai-native/client-quote-time": "./clients/website-ui/features/ai-native/client-quote-time.ts",
+    "./clients/website-ui/source/features/ai-native/client-scene-catalog-api": "./clients/website-ui/features/ai-native/client-scene-catalog-api.ts",
+    "./clients/website-ui/source/features/ai-native/client-task-api": "./clients/website-ui/features/ai-native/client-task-api.ts",
+    "./clients/website-ui/source/features/ai-native/client-task-cancellation-api": "./clients/website-ui/features/ai-native/client-task-cancellation-api.ts",
+    "./clients/website-ui/source/features/ai-native/client-task-cancellation-session": "./clients/website-ui/features/ai-native/client-task-cancellation-session.ts",
+    "./clients/website-ui/source/features/ai-native/client-task-session": "./clients/website-ui/features/ai-native/client-task-session.ts",
+    "./clients/website-ui/source/features/ai-native/customer-order-facts": "./clients/website-ui/features/ai-native/customer-order-facts.ts",
+    "./clients/website-ui/source/hooks/useActiveRail": "./clients/website-ui/hooks/useActiveRail.ts",
+    "./clients/website-ui/source/i18n": "./clients/website-ui/i18n.ts",
+    "./clients/website-ui/source/pages/AccountPage": "./clients/website-ui/pages/AccountPage.tsx",
+    "./clients/website-ui/source/pages/BookingPage": "./clients/website-ui/pages/BookingPage.tsx",
+    "./clients/website-ui/source/pages/DocumentPage": "./clients/website-ui/pages/DocumentPage.tsx",
+    "./clients/website-ui/source/pages/HomePage": "./clients/website-ui/pages/HomePage.tsx",
+    "./clients/website-ui/source/pages/InfoPages": "./clients/website-ui/pages/InfoPages.tsx",
+    "./clients/website-ui/source/pages/LoginPage": "./clients/website-ui/pages/LoginPage.tsx",
+    "./clients/website-ui/source/pages/OrderPages": "./clients/website-ui/pages/OrderPages.tsx",
+    "./clients/website-ui/source/pages/ProductDetailPage": "./clients/website-ui/pages/ProductDetailPage.tsx",
+    "./clients/website-ui/source/pages/ProductsPage": "./clients/website-ui/pages/ProductsPage.tsx",
+    "./clients/website-ui/source/theme": "./clients/website-ui/theme.ts",
+    "./clients/website-ui/source/types": "./clients/website-ui/types.ts",
+    "./admin/browser-navigation": "./admin/browser-navigation.ts",
+    "./admin/browser-shell": "./admin/browser-shell.tsx",
+    "./http-access-policy": {
+      "types": "./dist/http-access-policy.d.ts",
+      "default": "./dist/http-access-policy.js"
+    },
+    "./application-public-access": {
+      "types": "./dist/application-public-access.d.ts",
+      "default": "./dist/application-public-access.js"
+    },
+    "./public-management-compatibility": {
+      "types": "./dist/public-management-compatibility.d.ts",
+      "default": "./dist/public-management-compatibility.js"
+    },
+    "./application-internal-authority": {
+      "types": "./dist/application-internal-authority.d.ts",
+      "default": "./dist/application-internal-authority.js"
+    },
+    "./http-openapi": {
+      "types": "./dist/http-openapi.d.ts",
+      "default": "./dist/http-openapi.js"
+    },
+    "./application-file-cleanup-authority": {
+      "types": "./dist/application-file-cleanup-authority.d.ts",
+      "default": "./dist/application-file-cleanup-authority.js"
+    },
+    "./admin/ai/order-facts": "./admin/ai/order-facts.ts",
+    "./admin/agent-desktop": "./admin/agent-desktop/index.tsx",
+    "./admin/agent-desktop/client": "./admin/agent-desktop/client.ts",
+    "./admin/agent-desktop/desktop-host": "./admin/agent-desktop/desktop-host.ts",
+    "./admin/agent-desktop/desktop-policy-session": "./admin/agent-desktop/desktop-policy-session.ts",
+    "./admin/agent-desktop/desktop-session-projection": "./admin/agent-desktop/desktop-session-projection.ts",
+    "./admin/task-center": {
+      "types": "./admin/task-center/index.ts",
+      "default": "./admin/task-center/index.ts"
+    },
+    "./admin/task-center/AutomationExplanation": {
+      "types": "./admin/task-center/AutomationExplanation.tsx",
+      "default": "./admin/task-center/AutomationExplanation.tsx"
+    },
+    "./admin/task-center/AutomationPolicySettings": {
+      "types": "./admin/task-center/AutomationPolicySettings.tsx",
+      "default": "./admin/task-center/AutomationPolicySettings.tsx"
+    },
+    "./admin/task-center/AutomationRefundRecords": {
+      "types": "./admin/task-center/AutomationRefundRecords.tsx",
+      "default": "./admin/task-center/AutomationRefundRecords.tsx"
+    },
+    "./admin/task-center/AutomationReviewSection": {
+      "types": "./admin/task-center/AutomationReviewSection.tsx",
+      "default": "./admin/task-center/AutomationReviewSection.tsx"
+    },
+    "./admin/task-center/AutomationReviewWorkbench": {
+      "types": "./admin/task-center/AutomationReviewWorkbench.tsx",
+      "default": "./admin/task-center/AutomationReviewWorkbench.tsx"
+    },
+    "./admin/task-center/BusinessOutboxObservation": {
+      "types": "./admin/task-center/BusinessOutboxObservation.tsx",
+      "default": "./admin/task-center/BusinessOutboxObservation.tsx"
+    },
+    "./admin/task-center/CalendarDraftPreparation": {
+      "types": "./admin/task-center/CalendarDraftPreparation.tsx",
+      "default": "./admin/task-center/CalendarDraftPreparation.tsx"
+    },
+    "./admin/task-center/EntrySceneCatalog": {
+      "types": "./admin/task-center/EntrySceneCatalog.tsx",
+      "default": "./admin/task-center/EntrySceneCatalog.tsx"
+    },
+    "./admin/task-center/MemberNameFlow": {
+      "types": "./admin/task-center/MemberNameFlow.tsx",
+      "default": "./admin/task-center/MemberNameFlow.tsx"
+    },
+    "./admin/task-center/NotificationChangeFlow": {
+      "types": "./admin/task-center/NotificationChangeFlow.tsx",
+      "default": "./admin/task-center/NotificationChangeFlow.tsx"
+    },
+    "./admin/task-center/OpeningIntegrationStatus": {
+      "types": "./admin/task-center/OpeningIntegrationStatus.tsx",
+      "default": "./admin/task-center/OpeningIntegrationStatus.tsx"
+    },
+    "./admin/task-center/ReadinessDiagnosticsCard": {
+      "types": "./admin/task-center/ReadinessDiagnosticsCard.tsx",
+      "default": "./admin/task-center/ReadinessDiagnosticsCard.tsx"
+    },
+    "./admin/task-center/TaskCalendarDraft": {
+      "types": "./admin/task-center/TaskCalendarDraft.tsx",
+      "default": "./admin/task-center/TaskCalendarDraft.tsx"
+    },
+    "./admin/task-center/TaskCenterPage": {
+      "types": "./admin/task-center/TaskCenterPage.tsx",
+      "default": "./admin/task-center/TaskCenterPage.tsx"
+    },
+    "./admin/task-center/TaskFaultObservation": {
+      "types": "./admin/task-center/TaskFaultObservation.tsx",
+      "default": "./admin/task-center/TaskFaultObservation.tsx"
+    },
+    "./admin/task-center/TaskOpeningProposals": {
+      "types": "./admin/task-center/TaskOpeningProposals.tsx",
+      "default": "./admin/task-center/TaskOpeningProposals.tsx"
+    },
+    "./admin/task-center/TaskOutcomeObservation": {
+      "types": "./admin/task-center/TaskOutcomeObservation.tsx",
+      "default": "./admin/task-center/TaskOutcomeObservation.tsx"
+    },
+    "./admin/task-center/TaskReadPolicy": {
+      "types": "./admin/task-center/TaskReadPolicy.tsx",
+      "default": "./admin/task-center/TaskReadPolicy.tsx"
+    },
+    "./admin/task-center/TaskRecovery": {
+      "types": "./admin/task-center/TaskRecovery.tsx",
+      "default": "./admin/task-center/TaskRecovery.tsx"
+    },
+    "./admin/task-center/TaskRuleDraft": {
+      "types": "./admin/task-center/TaskRuleDraft.tsx",
+      "default": "./admin/task-center/TaskRuleDraft.tsx"
+    },
+    "./admin/task-center/TaskRuleDraftView": {
+      "types": "./admin/task-center/TaskRuleDraftView.tsx",
+      "default": "./admin/task-center/TaskRuleDraftView.tsx"
+    },
+    "./admin/task-center/TaskUsageObservation": {
+      "types": "./admin/task-center/TaskUsageObservation.tsx",
+      "default": "./admin/task-center/TaskUsageObservation.tsx"
+    },
+    "./admin/task-center/api/aiAutomationExplanations": {
+      "types": "./admin/task-center/api/aiAutomationExplanations.ts",
+      "default": "./admin/task-center/api/aiAutomationExplanations.ts"
+    },
+    "./admin/task-center/api/aiAutomationOriginalRefunds": {
+      "types": "./admin/task-center/api/aiAutomationOriginalRefunds.ts",
+      "default": "./admin/task-center/api/aiAutomationOriginalRefunds.ts"
+    },
+    "./admin/task-center/api/aiAutomationPolicies": {
+      "types": "./admin/task-center/api/aiAutomationPolicies.ts",
+      "default": "./admin/task-center/api/aiAutomationPolicies.ts"
+    },
+    "./admin/task-center/api/aiAutomationReviews": {
+      "types": "./admin/task-center/api/aiAutomationReviews.ts",
+      "default": "./admin/task-center/api/aiAutomationReviews.ts"
+    },
+    "./admin/task-center/api/aiMemberName": {
+      "types": "./admin/task-center/api/aiMemberName.ts",
+      "default": "./admin/task-center/api/aiMemberName.ts"
+    },
+    "./admin/task-center/api/aiNotificationChanges": {
+      "types": "./admin/task-center/api/aiNotificationChanges.ts",
+      "default": "./admin/task-center/api/aiNotificationChanges.ts"
+    },
+    "./admin/task-center/api/aiOpeningDiagnostics": {
+      "types": "./admin/task-center/api/aiOpeningDiagnostics.ts",
+      "default": "./admin/task-center/api/aiOpeningDiagnostics.ts"
+    },
+    "./admin/task-center/api/aiTaskCalendarDraft": {
+      "types": "./admin/task-center/api/aiTaskCalendarDraft.ts",
+      "default": "./admin/task-center/api/aiTaskCalendarDraft.ts"
+    },
+    "./admin/task-center/api/aiTaskOpeningProposals": {
+      "types": "./admin/task-center/api/aiTaskOpeningProposals.ts",
+      "default": "./admin/task-center/api/aiTaskOpeningProposals.ts"
+    },
+    "./admin/task-center/api/aiTaskReadPolicy": {
+      "types": "./admin/task-center/api/aiTaskReadPolicy.ts",
+      "default": "./admin/task-center/api/aiTaskReadPolicy.ts"
+    },
+    "./admin/task-center/api/aiTaskRecovery": {
+      "types": "./admin/task-center/api/aiTaskRecovery.ts",
+      "default": "./admin/task-center/api/aiTaskRecovery.ts"
+    },
+    "./admin/task-center/api/aiTaskRuleDraft": {
+      "types": "./admin/task-center/api/aiTaskRuleDraft.ts",
+      "default": "./admin/task-center/api/aiTaskRuleDraft.ts"
+    },
+    "./admin/task-center/automation-original-navigation": {
+      "types": "./admin/task-center/automation-original-navigation.ts",
+      "default": "./admin/task-center/automation-original-navigation.ts"
+    },
+    "./admin/task-center/automation-policy-session": {
+      "types": "./admin/task-center/automation-policy-session.ts",
+      "default": "./admin/task-center/automation-policy-session.ts"
+    },
+    "./admin/task-center/automation-review-session": {
+      "types": "./admin/task-center/automation-review-session.ts",
+      "default": "./admin/task-center/automation-review-session.ts"
+    },
+    "./admin/task-center/entry-scene-catalog-api": {
+      "types": "./admin/task-center/entry-scene-catalog-api.ts",
+      "default": "./admin/task-center/entry-scene-catalog-api.ts"
+    },
+    "./admin/task-center/index": {
+      "types": "./admin/task-center/index.ts",
+      "default": "./admin/task-center/index.ts"
+    },
+    "./admin/task-center/member-name-reconfirmation": {
+      "types": "./admin/task-center/member-name-reconfirmation.ts",
+      "default": "./admin/task-center/member-name-reconfirmation.ts"
+    },
+    "./admin/task-center/member-name-session": {
+      "types": "./admin/task-center/member-name-session.ts",
+      "default": "./admin/task-center/member-name-session.ts"
+    },
+    "./admin/task-center/notification-change-session": {
+      "types": "./admin/task-center/notification-change-session.ts",
+      "default": "./admin/task-center/notification-change-session.ts"
+    },
+    "./admin/task-center/notification-reconfirmation": {
+      "types": "./admin/task-center/notification-reconfirmation.ts",
+      "default": "./admin/task-center/notification-reconfirmation.ts"
+    },
+    "./admin/task-center/original-reconfirmation-journal": {
+      "types": "./admin/task-center/original-reconfirmation-journal.ts",
+      "default": "./admin/task-center/original-reconfirmation-journal.ts"
+    },
+    "./admin/task-center/original-reconfirmation-session": {
+      "types": "./admin/task-center/original-reconfirmation-session.ts",
+      "default": "./admin/task-center/original-reconfirmation-session.ts"
+    },
+    "./admin/task-center/readiness-diagnostics": {
+      "types": "./admin/task-center/readiness-diagnostics.ts",
+      "default": "./admin/task-center/readiness-diagnostics.ts"
+    },
+    "./admin/task-center/runtime": {
+      "types": "./admin/task-center/runtime.ts",
+      "default": "./admin/task-center/runtime.ts"
+    },
+    "./admin/task-center/task-calendar-draft-session": {
+      "types": "./admin/task-center/task-calendar-draft-session.ts",
+      "default": "./admin/task-center/task-calendar-draft-session.ts"
+    },
+    "./admin/task-center/task-opening-proposal-session": {
+      "types": "./admin/task-center/task-opening-proposal-session.ts",
+      "default": "./admin/task-center/task-opening-proposal-session.ts"
+    },
+    "./admin/task-center/task-read-policy-session": {
+      "types": "./admin/task-center/task-read-policy-session.ts",
+      "default": "./admin/task-center/task-read-policy-session.ts"
+    },
+    "./admin/task-center/task-recovery-session": {
+      "types": "./admin/task-center/task-recovery-session.ts",
+      "default": "./admin/task-center/task-recovery-session.ts"
+    },
+    "./admin/task-center/task-rule-draft-session": {
+      "types": "./admin/task-center/task-rule-draft-session.ts",
+      "default": "./admin/task-center/task-rule-draft-session.ts"
+    },
+    "./admin/assistant": {
+      "types": "./admin/assistant/index.tsx",
+      "default": "./admin/assistant/index.tsx"
+    },
+    "./admin/assistant/host": {
+      "types": "./admin/assistant/host.tsx",
+      "default": "./admin/assistant/host.tsx"
+    },
+    "./admin/assistant/source/ai-native/CalendarSourceEntry": {
+      "types": "./admin/assistant/ai-native/CalendarSourceEntry.tsx",
+      "default": "./admin/assistant/ai-native/CalendarSourceEntry.tsx"
+    },
+    "./admin/assistant/source/ai-native/ConversationAdmission": {
+      "types": "./admin/assistant/ai-native/ConversationAdmission.tsx",
+      "default": "./admin/assistant/ai-native/ConversationAdmission.tsx"
+    },
+    "./admin/assistant/source/ai-native/ConversationClosure": {
+      "types": "./admin/assistant/ai-native/ConversationClosure.tsx",
+      "default": "./admin/assistant/ai-native/ConversationClosure.tsx"
+    },
+    "./admin/assistant/source/ai-native/ConversationDetail": {
+      "types": "./admin/assistant/ai-native/ConversationDetail.tsx",
+      "default": "./admin/assistant/ai-native/ConversationDetail.tsx"
+    },
+    "./admin/assistant/source/ai-native/ConversationHistory": {
+      "types": "./admin/assistant/ai-native/ConversationHistory.tsx",
+      "default": "./admin/assistant/ai-native/ConversationHistory.tsx"
+    },
+    "./admin/assistant/source/ai-native/ConversationLifecycle": {
+      "types": "./admin/assistant/ai-native/ConversationLifecycle.tsx",
+      "default": "./admin/assistant/ai-native/ConversationLifecycle.tsx"
+    },
+    "./admin/assistant/source/ai-native/ConversationOpeningExecution": {
+      "types": "./admin/assistant/ai-native/ConversationOpeningExecution.tsx",
+      "default": "./admin/assistant/ai-native/ConversationOpeningExecution.tsx"
+    },
+    "./admin/assistant/source/ai-native/ConversationOrderExecution": {
+      "types": "./admin/assistant/ai-native/ConversationOrderExecution.tsx",
+      "default": "./admin/assistant/ai-native/ConversationOrderExecution.tsx"
+    },
+    "./admin/assistant/source/ai-native/ConversationOrderHandoff": {
+      "types": "./admin/assistant/ai-native/ConversationOrderHandoff.tsx",
+      "default": "./admin/assistant/ai-native/ConversationOrderHandoff.tsx"
+    },
+    "./admin/assistant/source/ai-native/ConversationOrderResults": {
+      "types": "./admin/assistant/ai-native/ConversationOrderResults.tsx",
+      "default": "./admin/assistant/ai-native/ConversationOrderResults.tsx"
+    },
+    "./admin/assistant/source/ai-native/ConversationQuoteConfirmation": {
+      "types": "./admin/assistant/ai-native/ConversationQuoteConfirmation.tsx",
+      "default": "./admin/assistant/ai-native/ConversationQuoteConfirmation.tsx"
+    },
+    "./admin/assistant/source/ai-native/ConversationQuoteExecution": {
+      "types": "./admin/assistant/ai-native/ConversationQuoteExecution.tsx",
+      "default": "./admin/assistant/ai-native/ConversationQuoteExecution.tsx"
+    },
+    "./admin/assistant/source/ai-native/ConversationQuoteSelection": {
+      "types": "./admin/assistant/ai-native/ConversationQuoteSelection.tsx",
+      "default": "./admin/assistant/ai-native/ConversationQuoteSelection.tsx"
+    },
+    "./admin/assistant/source/ai-native/ConversationResult": {
+      "types": "./admin/assistant/ai-native/ConversationResult.tsx",
+      "default": "./admin/assistant/ai-native/ConversationResult.tsx"
+    },
+    "./admin/assistant/source/ai-native/ConversationTaskCreation": {
+      "types": "./admin/assistant/ai-native/ConversationTaskCreation.tsx",
+      "default": "./admin/assistant/ai-native/ConversationTaskCreation.tsx"
+    },
+    "./admin/assistant/source/ai-native/NotificationDraftFlow": {
+      "types": "./admin/assistant/ai-native/NotificationDraftFlow.tsx",
+      "default": "./admin/assistant/ai-native/NotificationDraftFlow.tsx"
+    },
+    "./admin/assistant/source/ai-native/OrderHumanHandoff": {
+      "types": "./admin/assistant/ai-native/OrderHumanHandoff.tsx",
+      "default": "./admin/assistant/ai-native/OrderHumanHandoff.tsx"
+    },
+    "./admin/assistant/source/ai-native/OriginalOrderReceiptLink": {
+      "types": "./admin/assistant/ai-native/OriginalOrderReceiptLink.tsx",
+      "default": "./admin/assistant/ai-native/OriginalOrderReceiptLink.tsx"
+    },
+    "./admin/assistant/source/ai-native/QuoteCandidateFields": {
+      "types": "./admin/assistant/ai-native/QuoteCandidateFields.tsx",
+      "default": "./admin/assistant/ai-native/QuoteCandidateFields.tsx"
+    },
+    "./admin/assistant/source/ai-native/QuoteReprepare": {
+      "types": "./admin/assistant/ai-native/QuoteReprepare.tsx",
+      "default": "./admin/assistant/ai-native/QuoteReprepare.tsx"
+    },
+    "./admin/assistant/source/ai-native/RegisteredOrderActions": {
+      "types": "./admin/assistant/ai-native/RegisteredOrderActions.tsx",
+      "default": "./admin/assistant/ai-native/RegisteredOrderActions.tsx"
+    },
+    "./admin/assistant/source/ai-native/RuleSourceEntry": {
+      "types": "./admin/assistant/ai-native/RuleSourceEntry.tsx",
+      "default": "./admin/assistant/ai-native/RuleSourceEntry.tsx"
+    },
+    "./admin/assistant/source/ai-native/TaskClarification": {
+      "types": "./admin/assistant/ai-native/TaskClarification.tsx",
+      "default": "./admin/assistant/ai-native/TaskClarification.tsx"
+    },
+    "./admin/assistant/source/ai-native/TaskHumanApproval": {
+      "types": "./admin/assistant/ai-native/TaskHumanApproval.tsx",
+      "default": "./admin/assistant/ai-native/TaskHumanApproval.tsx"
+    },
+    "./admin/assistant/source/ai-native/TaskQuoteReprepare": {
+      "types": "./admin/assistant/ai-native/TaskQuoteReprepare.tsx",
+      "default": "./admin/assistant/ai-native/TaskQuoteReprepare.tsx"
+    },
+    "./admin/assistant/source/ai-native/budget-settings-session": {
+      "types": "./admin/assistant/ai-native/budget-settings-session.ts",
+      "default": "./admin/assistant/ai-native/budget-settings-session.ts"
+    },
+    "./admin/assistant/source/ai-native/conversation-admission-session": {
+      "types": "./admin/assistant/ai-native/conversation-admission-session.ts",
+      "default": "./admin/assistant/ai-native/conversation-admission-session.ts"
+    },
+    "./admin/assistant/source/ai-native/conversation-history-reader": {
+      "types": "./admin/assistant/ai-native/conversation-history-reader.ts",
+      "default": "./admin/assistant/ai-native/conversation-history-reader.ts"
+    },
+    "./admin/assistant/source/ai-native/conversation-lifecycle-session": {
+      "types": "./admin/assistant/ai-native/conversation-lifecycle-session.ts",
+      "default": "./admin/assistant/ai-native/conversation-lifecycle-session.ts"
+    },
+    "./admin/assistant/source/ai-native/conversation-navigation": {
+      "types": "./admin/assistant/ai-native/conversation-navigation.ts",
+      "default": "./admin/assistant/ai-native/conversation-navigation.ts"
+    },
+    "./admin/assistant/source/ai-native/conversation-opening-execution-session": {
+      "types": "./admin/assistant/ai-native/conversation-opening-execution-session.ts",
+      "default": "./admin/assistant/ai-native/conversation-opening-execution-session.ts"
+    },
+    "./admin/assistant/source/ai-native/conversation-order-execution-session": {
+      "types": "./admin/assistant/ai-native/conversation-order-execution-session.ts",
+      "default": "./admin/assistant/ai-native/conversation-order-execution-session.ts"
+    },
+    "./admin/assistant/source/ai-native/conversation-order-results-reader": {
+      "types": "./admin/assistant/ai-native/conversation-order-results-reader.ts",
+      "default": "./admin/assistant/ai-native/conversation-order-results-reader.ts"
+    },
+    "./admin/assistant/source/ai-native/conversation-quote-confirmation-session": {
+      "types": "./admin/assistant/ai-native/conversation-quote-confirmation-session.ts",
+      "default": "./admin/assistant/ai-native/conversation-quote-confirmation-session.ts"
+    },
+    "./admin/assistant/source/ai-native/conversation-quote-selection-session": {
+      "types": "./admin/assistant/ai-native/conversation-quote-selection-session.ts",
+      "default": "./admin/assistant/ai-native/conversation-quote-selection-session.ts"
+    },
+    "./admin/assistant/source/ai-native/conversation-task-creation-session": {
+      "types": "./admin/assistant/ai-native/conversation-task-creation-session.ts",
+      "default": "./admin/assistant/ai-native/conversation-task-creation-session.ts"
+    },
+    "./admin/assistant/source/ai-native/conversation-workbench-host": {
+      "types": "./admin/assistant/ai-native/conversation-workbench-host.ts",
+      "default": "./admin/assistant/ai-native/conversation-workbench-host.ts"
+    },
+    "./admin/assistant/source/ai-native/notification-draft-session": {
+      "types": "./admin/assistant/ai-native/notification-draft-session.ts",
+      "default": "./admin/assistant/ai-native/notification-draft-session.ts"
+    },
+    "./admin/assistant/source/ai-native/order-human-handoff-session": {
+      "types": "./admin/assistant/ai-native/order-human-handoff-session.ts",
+      "default": "./admin/assistant/ai-native/order-human-handoff-session.ts"
+    },
+    "./admin/assistant/source/ai-native/quote-reprepare-session": {
+      "types": "./admin/assistant/ai-native/quote-reprepare-session.ts",
+      "default": "./admin/assistant/ai-native/quote-reprepare-session.ts"
+    },
+    "./admin/assistant/source/ai-native/rule-source-entry-session": {
+      "types": "./admin/assistant/ai-native/rule-source-entry-session.ts",
+      "default": "./admin/assistant/ai-native/rule-source-entry-session.ts"
+    },
+    "./admin/assistant/source/ai-native/workbench-input-review-session": {
+      "types": "./admin/assistant/ai-native/workbench-input-review-session.ts",
+      "default": "./admin/assistant/ai-native/workbench-input-review-session.ts"
+    },
+    "./admin/assistant/source/ai-operator/AiOperatorNavigation": {
+      "types": "./admin/assistant/ai-operator/AiOperatorNavigation.tsx",
+      "default": "./admin/assistant/ai-operator/AiOperatorNavigation.tsx"
+    },
+    "./admin/assistant/source/ai-operator/AiOperatorPage": {
+      "types": "./admin/assistant/ai-operator/AiOperatorPage.tsx",
+      "default": "./admin/assistant/ai-operator/AiOperatorPage.tsx"
+    },
+    "./admin/assistant/source/ai-operator/NativeOperatorWorkspace": {
+      "types": "./admin/assistant/ai-operator/NativeOperatorWorkspace.tsx",
+      "default": "./admin/assistant/ai-operator/NativeOperatorWorkspace.tsx"
+    },
+    "./admin/assistant/source/ai-operator/OperatorContext": {
+      "types": "./admin/assistant/ai-operator/OperatorContext.tsx",
+      "default": "./admin/assistant/ai-operator/OperatorContext.tsx"
+    },
+    "./admin/assistant/source/ai-operator/ai-operator.css": "./admin/assistant/ai-operator/ai-operator.css",
+    "./admin/assistant/source/ai-operator/archive-adapter.css": "./admin/assistant/ai-operator/archive-adapter.css",
+    "./admin/assistant/source/ai-operator/capabilities": {
+      "types": "./admin/assistant/ai-operator/capabilities.ts",
+      "default": "./admin/assistant/ai-operator/capabilities.ts"
+    },
+    "./admin/assistant/source/ai-operator/native-session": {
+      "types": "./admin/assistant/ai-operator/native-session.ts",
+      "default": "./admin/assistant/ai-operator/native-session.ts"
+    },
+    "./admin/assistant/source/api/aiConversations": {
+      "types": "./admin/assistant/api/aiConversations.ts",
+      "default": "./admin/assistant/api/aiConversations.ts"
+    },
+    "./admin/assistant/source/api/aiEntryActions": {
+      "types": "./admin/assistant/api/aiEntryActions.ts",
+      "default": "./admin/assistant/api/aiEntryActions.ts"
+    },
+    "./admin/assistant/source/api/aiNotificationDrafts": {
+      "types": "./admin/assistant/api/aiNotificationDrafts.ts",
+      "default": "./admin/assistant/api/aiNotificationDrafts.ts"
+    },
+    "./admin/assistant/source/api/aiQuoteSelections": {
+      "types": "./admin/assistant/api/aiQuoteSelections.ts",
+      "default": "./admin/assistant/api/aiQuoteSelections.ts"
+    },
+    "./admin/assistant/source/api/aiTaskOrderHandoff": {
+      "types": "./admin/assistant/api/aiTaskOrderHandoff.ts",
+      "default": "./admin/assistant/api/aiTaskOrderHandoff.ts"
+    },
+    "./admin/assistant/source/api/aiWorkbenchDisplays": {
+      "types": "./admin/assistant/api/aiWorkbenchDisplays.ts",
+      "default": "./admin/assistant/api/aiWorkbenchDisplays.ts"
+    },
+    "./admin/assistant/source/copilot/CopilotLayout": {
+      "types": "./admin/assistant/copilot/CopilotLayout.tsx",
+      "default": "./admin/assistant/copilot/CopilotLayout.tsx"
+    },
+    "./admin/assistant/source/copilot/CopilotNavigation": {
+      "types": "./admin/assistant/copilot/CopilotNavigation.tsx",
+      "default": "./admin/assistant/copilot/CopilotNavigation.tsx"
+    },
+    "./admin/assistant/source/copilot/CopilotProvider": {
+      "types": "./admin/assistant/copilot/CopilotProvider.tsx",
+      "default": "./admin/assistant/copilot/CopilotProvider.tsx"
+    },
+    "./admin/assistant/source/copilot/CopilotSection": {
+      "types": "./admin/assistant/copilot/CopilotSection.tsx",
+      "default": "./admin/assistant/copilot/CopilotSection.tsx"
+    },
+    "./admin/assistant/source/copilot/context": {
+      "types": "./admin/assistant/copilot/context.ts",
+      "default": "./admin/assistant/copilot/context.ts"
+    },
+    "./admin/assistant/source/copilot/copilot-order-session": {
+      "types": "./admin/assistant/copilot/copilot-order-session.ts",
+      "default": "./admin/assistant/copilot/copilot-order-session.ts"
+    },
+    "./admin/assistant/source/copilot/copilot.css": "./admin/assistant/copilot/copilot.css",
+    "./admin/assistant/source/copilot/destinations": {
+      "types": "./admin/assistant/copilot/destinations.ts",
+      "default": "./admin/assistant/copilot/destinations.ts"
+    },
+    "./admin/assistant/source/copilot/useCopilotOrder": {
+      "types": "./admin/assistant/copilot/useCopilotOrder.ts",
+      "default": "./admin/assistant/copilot/useCopilotOrder.ts"
+    },
+    "./admin/assistant/source/host": {
+      "types": "./admin/assistant/host.tsx",
+      "default": "./admin/assistant/host.tsx"
+    },
+    "./admin/assistant/source/index": {
+      "types": "./admin/assistant/index.tsx",
+      "default": "./admin/assistant/index.tsx"
+    },
+    "./admin/assistant/source/transport": {
+      "types": "./admin/assistant/transport.ts",
+      "default": "./admin/assistant/transport.ts"
+    },
+    "./admin/governance/source/useCategoryPreparationSave": {
+      "types": "./admin/governance/useCategoryPreparationSave.ts",
+      "default": "./admin/governance/useCategoryPreparationSave.ts"
+    },
+    "./admin/governance/source/useCategoryAdoption": {
+      "types": "./admin/governance/useCategoryAdoption.ts",
+      "default": "./admin/governance/useCategoryAdoption.ts"
+    },
+    "./admin/governance/source/shared": {
+      "types": "./admin/governance/shared.ts",
+      "default": "./admin/governance/shared.ts"
+    },
+    "./admin/governance/source/securityRuleForm": {
+      "types": "./admin/governance/securityRuleForm.ts",
+      "default": "./admin/governance/securityRuleForm.ts"
+    },
+    "./admin/governance/source/RulesTab": {
+      "types": "./admin/governance/RulesTab.tsx",
+      "default": "./admin/governance/RulesTab.tsx"
+    },
+    "./admin/governance/source/RuleSetupWizard": {
+      "types": "./admin/governance/RuleSetupWizard.tsx",
+      "default": "./admin/governance/RuleSetupWizard.tsx"
+    },
+    "./admin/governance/source/ruleSections": {
+      "types": "./admin/governance/ruleSections.tsx",
+      "default": "./admin/governance/ruleSections.tsx"
+    },
+    "./admin/governance/source/ruleOptionLabels": {
+      "types": "./admin/governance/ruleOptionLabels.ts",
+      "default": "./admin/governance/ruleOptionLabels.ts"
+    },
+    "./admin/governance/source/RentalGovernancePage": {
+      "types": "./admin/governance/RentalGovernancePage.tsx",
+      "default": "./admin/governance/RentalGovernancePage.tsx"
+    },
+    "./admin/governance/source/pages": {
+      "types": "./admin/governance/pages.ts",
+      "default": "./admin/governance/pages.ts"
+    },
+    "./admin/governance/source/page-context": {
+      "types": "./admin/governance/page-context.tsx",
+      "default": "./admin/governance/page-context.tsx"
+    },
+    "./admin/governance/source/notificationTemplateForm": {
+      "types": "./admin/governance/notificationTemplateForm.ts",
+      "default": "./admin/governance/notificationTemplateForm.ts"
+    },
+    "./admin/governance/source/NotificationsTab": {
+      "types": "./admin/governance/NotificationsTab.tsx",
+      "default": "./admin/governance/NotificationsTab.tsx"
+    },
+    "./admin/governance/source/messages": {
+      "types": "./admin/governance/messages.ts",
+      "default": "./admin/governance/messages.ts"
+    },
+    "./admin/governance/source/MembershipRewardRulesTab": {
+      "types": "./admin/governance/MembershipRewardRulesTab.tsx",
+      "default": "./admin/governance/MembershipRewardRulesTab.tsx"
+    },
+    "./admin/governance/source/logic": {
+      "types": "./admin/governance/logic.ts",
+      "default": "./admin/governance/logic.ts"
+    },
+    "./admin/governance/source/index": {
+      "types": "./admin/governance/index.tsx",
+      "default": "./admin/governance/index.tsx"
+    },
+    "./admin/governance/source/client": {
+      "types": "./admin/governance/client.ts",
+      "default": "./admin/governance/client.ts"
+    },
+    "./admin/governance/source/CategoryTemplateIcon": {
+      "types": "./admin/governance/CategoryTemplateIcon.tsx",
+      "default": "./admin/governance/CategoryTemplateIcon.tsx"
+    },
+    "./admin/governance/source/CategoryTab": {
+      "types": "./admin/governance/CategoryTab.tsx",
+      "default": "./admin/governance/CategoryTab.tsx"
+    },
+    "./admin/governance/source/categoryPreparationFields": {
+      "types": "./admin/governance/categoryPreparationFields.ts",
+      "default": "./admin/governance/categoryPreparationFields.ts"
+    },
+    "./admin/governance/source/CategoryPreparationDialog": {
+      "types": "./admin/governance/CategoryPreparationDialog.tsx",
+      "default": "./admin/governance/CategoryPreparationDialog.tsx"
+    },
+    "./admin/governance/source/categoryPreparationCapabilities": {
+      "types": "./admin/governance/categoryPreparationCapabilities.ts",
+      "default": "./admin/governance/categoryPreparationCapabilities.ts"
+    },
+    "./admin/governance/source/CategoryPolicyDialog": {
+      "types": "./admin/governance/CategoryPolicyDialog.tsx",
+      "default": "./admin/governance/CategoryPolicyDialog.tsx"
+    },
+    "./admin/governance/source/CategoryGovernancePageHeader": {
+      "types": "./admin/governance/CategoryGovernancePageHeader.tsx",
+      "default": "./admin/governance/CategoryGovernancePageHeader.tsx"
+    },
+    "./admin/governance/source/CategoryGovernancePage": {
+      "types": "./admin/governance/CategoryGovernancePage.tsx",
+      "default": "./admin/governance/CategoryGovernancePage.tsx"
+    },
+    "./admin/governance/source/categoryGovernance": {
+      "types": "./admin/governance/categoryGovernance.ts",
+      "default": "./admin/governance/categoryGovernance.ts"
+    },
+    "./admin/governance/source/categoryDraftSections": {
+      "types": "./admin/governance/categoryDraftSections.ts",
+      "default": "./admin/governance/categoryDraftSections.ts"
+    },
+    "./admin/governance/source/categoryDraftFields": {
+      "types": "./admin/governance/categoryDraftFields.ts",
+      "default": "./admin/governance/categoryDraftFields.ts"
+    },
+    "./admin/governance/source/CategoryDraftEditor": {
+      "types": "./admin/governance/CategoryDraftEditor.tsx",
+      "default": "./admin/governance/CategoryDraftEditor.tsx"
+    },
+    "./admin/governance/source/CategoryCreationDialog": {
+      "types": "./admin/governance/CategoryCreationDialog.tsx",
+      "default": "./admin/governance/CategoryCreationDialog.tsx"
+    },
+    "./admin/governance/source/CategoryConditionalCapabilitiesEditor": {
+      "types": "./admin/governance/CategoryConditionalCapabilitiesEditor.tsx",
+      "default": "./admin/governance/CategoryConditionalCapabilitiesEditor.tsx"
+    },
+    "./admin/governance/source/CategoryCompatibilityRelationsEditor": {
+      "types": "./admin/governance/CategoryCompatibilityRelationsEditor.tsx",
+      "default": "./admin/governance/CategoryCompatibilityRelationsEditor.tsx"
+    },
+    "./admin/governance/source/categoryAdoptionPending": {
+      "types": "./admin/governance/categoryAdoptionPending.ts",
+      "default": "./admin/governance/categoryAdoptionPending.ts"
+    },
+    "./admin/governance/source/category-preparation-client": {
+      "types": "./admin/governance/category-preparation-client.ts",
+      "default": "./admin/governance/category-preparation-client.ts"
+    },
+    "./admin/governance/source/category-governance-ports": {
+      "types": "./admin/governance/category-governance-ports.ts",
+      "default": "./admin/governance/category-governance-ports.ts"
+    },
+    "./admin/governance/source/CalendarYearGrid": {
+      "types": "./admin/governance/CalendarYearGrid.tsx",
+      "default": "./admin/governance/CalendarYearGrid.tsx"
+    },
+    "./admin/governance/source/CalendarTab": {
+      "types": "./admin/governance/CalendarTab.tsx",
+      "default": "./admin/governance/CalendarTab.tsx"
+    },
+    "./admin/governance/source/CalendarRangeModal": {
+      "types": "./admin/governance/CalendarRangeModal.tsx",
+      "default": "./admin/governance/CalendarRangeModal.tsx"
+    },
+    "./admin/governance/source/CalendarMonthGrid": {
+      "types": "./admin/governance/CalendarMonthGrid.tsx",
+      "default": "./admin/governance/CalendarMonthGrid.tsx"
+    },
+    "./admin/governance/source/calendar-year-model": {
+      "types": "./admin/governance/calendar-year-model.ts",
+      "default": "./admin/governance/calendar-year-model.ts"
+    },
+    "./admin/assistant/source/ai-native/category-governance-display": {
+      "types": "./admin/assistant/ai-native/category-governance-display.ts",
+      "default": "./admin/assistant/ai-native/category-governance-display.ts"
+    },
+    "./admin/assistant/source/ai-native/category-assist-session": {
+      "types": "./admin/assistant/ai-native/category-assist-session.ts",
+      "default": "./admin/assistant/ai-native/category-assist-session.ts"
+    },
+    "./admin/assistant/source/ai-native/CategoryGovernanceCard": {
+      "types": "./admin/assistant/ai-native/CategoryGovernanceCard.tsx",
+      "default": "./admin/assistant/ai-native/CategoryGovernanceCard.tsx"
+    },
+    "./admin/assistant/source/ai-native/CategoryAssistFlow": {
+      "types": "./admin/assistant/ai-native/CategoryAssistFlow.tsx",
+      "default": "./admin/assistant/ai-native/CategoryAssistFlow.tsx"
+    },
+    "./admin/assistant/source/api/aiCategoryDraft": {
+      "types": "./admin/assistant/api/aiCategoryDraft.ts",
+      "default": "./admin/assistant/api/aiCategoryDraft.ts"
+    },
+    "./admin/browser-notifications/source/MessageCenterPage": "./admin/browser-notifications/MessageCenterPage.tsx",
+    "./admin/browser-notifications/source/archive/inbox-triage/InboxTriage": "./admin/browser-notifications/archive/inbox-triage/InboxTriage.tsx",
+    "./admin/browser-notifications/source/archive/inbox-triage/original.css": "./admin/browser-notifications/archive/inbox-triage/original.css",
+    "./admin/browser-notifications/source/archive/inbox-triage/integration.css": "./admin/browser-notifications/archive/inbox-triage/integration.css",
+    "./admin/browser-notifications/source/archive/shared/MeasuredHeight": "./admin/browser-notifications/archive/shared/MeasuredHeight.tsx",
+    "./admin/assistant-shell": "./admin/assistant-shell.tsx",
+    "./admin/desktop-browser": {
+      "types": "./admin/desktop-browser.tsx",
+      "default": "./admin/desktop-browser.tsx"
+    },
+    "./admin/assistant-browser": {
+      "types": "./admin/assistant-browser.tsx",
+      "default": "./admin/assistant-browser.tsx"
+    },
+    "./admin/assistant-navigation": {
+      "types": "./admin/assistant-navigation.ts",
+      "default": "./admin/assistant-navigation.ts"
+    },
+    "./admin/assistant-pages": {
+      "types": "./admin/assistant-pages.tsx",
+      "default": "./admin/assistant-pages.tsx"
+    },
+    "./admin/browser-page-icons": {
+      "types": "./admin/browser-page-icons.tsx",
+      "default": "./admin/browser-page-icons.tsx"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "prisma-null-values": [
+        "dist/prisma-null-values.d.ts"
+      ],
+      "business-day": [
+        "dist/business-day.d.ts"
+      ],
+      "pricing": [
+        "dist/pricing.d.ts"
+      ],
+      "equipment": [
+        "dist/equipment.d.ts"
+      ],
+      "item-group-validation": [
+        "dist/item-group-validation.d.ts"
+      ],
+      "mysql-state": [
+        "dist/mysql-state.d.ts"
+      ],
+      "prisma-schema": [
+        "dist/prisma-schema.d.ts"
+      ],
+      "inspection-object-reader": [
+        "dist/inspection-object-reader.d.ts"
+      ],
+      "mysql-idempotency": [
+        "dist/mysql-idempotency.d.ts"
+      ],
+      "mysql-idempotent-actions": [
+        "dist/mysql-idempotent-actions.d.ts"
+      ],
+      "mysql-business-fence": [
+        "dist/mysql-business-fence.d.ts"
+      ],
+      "configuration-basis": [
+        "dist/configuration-basis.d.ts"
+      ],
+      "rule-version-chain": [
+        "dist/rule-version-chain.d.ts"
+      ],
+      "mysql-business-configuration": [
+        "dist/mysql-business-configuration.d.ts"
+      ],
+      "category-governance": [
+        "dist/category-governance.d.ts"
+      ],
+      "capability-conditions": [
+        "dist/capability-conditions.d.ts"
+      ],
+      "capability-runtime": [
+        "dist/capability-runtime.d.ts"
+      ],
+      "workspace-capabilities": [
+        "dist/workspace-capabilities.d.ts"
+      ],
+      "workspace-capability-repository": [
+        "dist/workspace-capability-repository.d.ts"
+      ],
+      "capability-audit": [
+        "dist/capability-audit.d.ts"
+      ],
+      "category-runtime": [
+        "dist/category-runtime.d.ts"
+      ],
+      "category-identity": [
+        "dist/category-identity.d.ts"
+      ],
+      "extensions": [
+        "dist/rental-extension-registry.d.ts"
+      ],
+      "capabilities": [
+        "dist/capabilities/index.d.ts"
+      ],
+      "capabilities/camera-compatibility": [
+        "dist/capabilities/camera-compatibility.d.ts"
+      ],
+      "capabilities/camera-kit-handover": [
+        "dist/capabilities/camera-kit-handover.d.ts"
+      ],
+      "capabilities/camping-cleaning-turnaround": [
+        "dist/capabilities/camping-cleaning-turnaround.d.ts"
+      ],
+      "capabilities/camping-kit-integrity": [
+        "dist/capabilities/camping-kit-integrity.d.ts"
+      ],
+      "capabilities/kit-handover": [
+        "dist/capabilities/kit-handover.d.ts"
+      ],
+      "category-attributes": [
+        "dist/category-attributes.d.ts"
+      ],
+      "mysql-category-write": [
+        "dist/mysql-category-write.d.ts"
+      ],
+      "mysql-category-policy": [
+        "dist/mysql-category-policy.d.ts"
+      ],
+      "mysql-fulfillment-admission": [
+        "dist/mysql-fulfillment-admission.d.ts"
+      ],
+      "mysql-core-configuration": [
+        "dist/mysql-core-configuration.d.ts"
+      ],
+      "mysql-business-facts": [
+        "dist/mysql-business-facts.d.ts"
+      ],
+      "mysql-quote-capabilities": [
+        "dist/mysql-quote-capabilities.d.ts"
+      ],
+      "quote-inventory-basis": [
+        "dist/quote-inventory-basis.d.ts"
+      ],
+      "usage-reading": [
+        "dist/usage-reading.d.ts"
+      ],
+      "occupancy": [
+        "dist/occupancy.d.ts"
+      ],
+      "carrier-shipment": [
+        "dist/carrier-shipment.d.ts"
+      ],
+      "mysql-order-list-sort": [
+        "dist/mysql-order-list-sort.d.ts"
+      ],
+      "mysql-order-number": [
+        "dist/mysql-order-number.d.ts"
+      ],
+      "rule-defaults": [
+        "dist/rule-defaults.d.ts"
+      ],
+      "work-order-assignee-scope": [
+        "dist/work-order-assignee-scope.d.ts"
+      ],
+      "money": [
+        "dist/money.d.ts"
+      ],
+      "mysql-order-inspection-basis": [
+        "dist/mysql-order-inspection-basis.d.ts"
+      ],
+      "mysql-order-allocation-pickup": [
+        "dist/mysql-order-allocation-pickup.d.ts"
+      ],
+      "mysql-core-facts": [
+        "dist/mysql-core-facts.d.ts"
+      ],
+      "fact-request-context": [
+        "dist/fact-request-context.d.ts"
+      ],
+      "inspection-result-validation": [
+        "dist/inspection-result-validation.d.ts"
+      ],
+      "early-return": [
+        "dist/early-return.d.ts"
+      ],
+      "quote-line-source": [
+        "dist/quote-line-source.d.ts"
+      ],
+      "damage-waiver": [
+        "dist/damage-waiver.d.ts"
+      ],
+      "inspection-customer-response": [
+        "dist/inspection-customer-response.d.ts"
+      ],
+      "inspection-template-snapshot": [
+        "dist/inspection-template-snapshot.d.ts"
+      ],
+      "exchange-inspection": [
+        "dist/exchange-inspection.d.ts"
+      ],
+      "inspection-observation": [
+        "dist/inspection-observation.d.ts"
+      ],
+      "inspection-evidence": [
+        "dist/inspection-evidence.d.ts"
+      ],
+      "allocation-policy": [
+        "dist/allocation-policy.d.ts"
+      ],
+      "exchange-pricing-source": [
+        "dist/exchange-pricing-source.d.ts"
+      ],
+      "exchange-membership": [
+        "dist/exchange-membership.d.ts"
+      ],
+      "exchange-coupon": [
+        "dist/exchange-coupon.d.ts"
+      ],
+      "exchange-discount": [
+        "dist/exchange-discount.d.ts"
+      ],
+      "extension-lifecycle": [
+        "dist/extension-lifecycle.d.ts"
+      ],
+      "repricing-context": [
+        "dist/repricing-context.d.ts"
+      ],
+      "delivery-address-privacy": [
+        "dist/delivery-address-privacy.d.ts"
+      ],
+      "mysql-offline-payment-method": [
+        "dist/mysql-offline-payment-method.d.ts"
+      ],
+      "service-occurrence": [
+        "dist/service-occurrence.d.ts"
+      ],
+      "service-cancellation": [
+        "dist/service-cancellation.d.ts"
+      ],
+      "category-samples": [
+        "dist/category-samples.d.ts"
+      ],
+      "qualification": [
+        "dist/qualification.d.ts"
+      ],
+      "service-catalog": [
+        "dist/service-catalog.d.ts"
+      ],
+      "asset-validity": [
+        "dist/asset-validity.d.ts"
+      ],
+      "approved-extension-ports": [
+        "dist/approved-extension-ports.d.ts"
+      ],
+      "quote-access": [
+        "dist/quote-access.d.ts"
+      ],
+      "calendar-range": [
+        "dist/calendar-range.d.ts"
+      ],
+      "price-adjustments": [
+        "dist/price-adjustments.d.ts"
+      ],
+      "category-pricing-rule-compatibility": [
+        "dist/category-pricing-rule-compatibility.d.ts"
+      ],
+      "discount-selection": [
+        "dist/discount-selection.d.ts"
+      ],
+      "security-deposit": [
+        "dist/security-deposit.d.ts"
+      ],
+      "mysql-funding": [
+        "dist/mysql-funding.d.ts"
+      ],
+      "funding-events": [
+        "dist/funding-events.d.ts"
+      ],
+      "mysql-service-capacity": [
+        "dist/mysql-service-capacity.d.ts"
+      ],
+      "mysql-order-receivables": [
+        "dist/mysql-order-receivables.d.ts"
+      ],
+      "corporate-settlement-basis": [
+        "dist/corporate-settlement-basis.d.ts"
+      ],
+      "mysql-corporate-ledger": [
+        "dist/mysql-corporate-ledger.d.ts"
+      ],
+      "corporate-payment-receipts": [
+        "dist/corporate-payment-receipts.d.ts"
+      ],
+      "approved-settings-ports": [
+        "dist/approved-settings-ports.d.ts"
+      ],
+      "approved-settings-validation": [
+        "dist/approved-settings-validation.d.ts"
+      ],
+      "approved-exchange-ports": [
+        "dist/approved-exchange-ports.d.ts"
+      ],
+      "exchange-inspection-consent-basis": [
+        "dist/exchange-inspection-consent-basis.d.ts"
+      ],
+      "mysql-approved-exchange": [
+        "dist/mysql-approved-exchange.d.ts"
+      ],
+      "exchange-inspection-preparation": [
+        "dist/exchange-inspection-preparation.d.ts"
+      ],
+      "mysql-primary-application": [
+        "dist/mysql-primary-application.d.ts"
+      ],
+      "mysql-core-runtime": [
+        "dist/mysql-core-runtime.d.ts"
+      ],
+      "mysql-business-runtime": [
+        "dist/mysql-business-runtime.d.ts"
+      ],
+      "configuration-dto": [
+        "dist/config-request.dto.d.ts"
+      ],
+      "approved-order-ports": [
+        "dist/approved-order-transaction.ports.d.ts"
+      ],
+      "mysql-order-confirmation": [
+        "dist/mysql-order-confirmation.d.ts"
+      ],
+      "merchant-delegation": [
+        "dist/merchant-delegation.d.ts"
+      ],
+      "server-quote-access": [
+        "dist/server-quote-access.d.ts"
+      ],
+      "mysql-allocation": [
+        "dist/mysql-allocation.d.ts"
+      ],
+      "mysql-workspace-scope": [
+        "dist/mysql-workspace-scope.d.ts"
+      ],
+      "core-dto": [
+        "dist/core-request.dto.d.ts"
+      ],
+      "order-dto": [
+        "dist/order-request.dto.d.ts"
+      ],
+      "enterprise-disclosure-dto": [
+        "dist/enterprise-disclosure.dto.d.ts"
+      ],
+      "workbench": [
+        "dist/workbench.d.ts"
+      ],
+      "report-csv": [
+        "dist/report-csv.d.ts"
+      ],
+      "mysql-reports": [
+        "dist/mysql-reports.d.ts"
+      ],
+      "mysql-due-jobs": [
+        "dist/mysql-due-jobs.d.ts"
+      ],
+      "exchange-choices": [
+        "dist/exchange-choices.d.ts"
+      ],
+      "document-contracts": [
+        "dist/document-contracts.d.ts"
+      ],
+      "document-renderer": [
+        "dist/document-renderer.d.ts"
+      ],
+      "mysql-exchange-preview": [
+        "dist/mysql-exchange-preview.d.ts"
+      ],
+      "mysql-documents": [
+        "dist/mysql-documents.d.ts"
+      ],
+      "mysql-exchange-inspection-preparation": [
+        "dist/mysql-exchange-inspection-preparation.d.ts"
+      ],
+      "mysql-exchange-inspection-media": [
+        "dist/mysql-exchange-inspection-media.d.ts"
+      ],
+      "exchange-inspection-dto": [
+        "dist/exchange-inspection-preparation.dto.d.ts"
+      ],
+      "exchange-inspection-preparation-read": [
+        "dist/exchange-inspection-preparation.read.d.ts"
+      ],
+      "exchange-inspection-media-read": [
+        "dist/exchange-inspection-media.read.d.ts"
+      ],
+      "mysql-exchange-inspection-consent": [
+        "dist/mysql-exchange-inspection-consent.d.ts"
+      ],
+      "mysql-approved-exchange-execution": [
+        "dist/mysql-approved-exchange-execution.d.ts"
+      ],
+      "bound-rule-draft": [
+        "dist/bound-rule-draft.d.ts"
+      ],
+      "bound-calendar-draft": [
+        "dist/bound-calendar-draft.d.ts"
+      ],
+      "mysql-approved-settings": [
+        "dist/mysql-approved-settings.d.ts"
+      ],
+      "approved-settings-route-authority": [
+        "dist/approved-settings-route-authority.d.ts"
+      ],
+      "mysql-category-governance": [
+        "dist/mysql-category-governance.d.ts"
+      ],
+      "category-definition-diff": [
+        "dist/category-definition-diff.d.ts"
+      ],
+      "category-creation-templates": [
+        "dist/category-creation-templates.d.ts"
+      ],
+      "mysql-category-adoption": [
+        "dist/mysql-category-adoption.d.ts"
+      ],
+      "category-adoption-access": [
+        "dist/category-adoption-access.d.ts"
+      ],
+      "category-adoption-transaction-phase": [
+        "dist/category-adoption-transaction-phase.d.ts"
+      ],
+      "category-adoption-entity-writer": [
+        "dist/category-adoption-entity-writer.d.ts"
+      ],
+      "category-adoption-records": [
+        "dist/category-adoption-records.d.ts"
+      ],
+      "category-adoption-capability-writer": [
+        "dist/category-adoption-capability-writer.d.ts"
+      ],
+      "category-adoption-references": [
+        "dist/category-adoption-references.d.ts"
+      ],
+      "category-adoption-commercial": [
+        "dist/category-adoption-commercial.d.ts"
+      ],
+      "category-adoption-final-compatibility": [
+        "dist/category-adoption-final-compatibility.d.ts"
+      ],
+      "category-adoption-compatibility-reader": [
+        "dist/category-adoption-compatibility-reader.d.ts"
+      ],
+      "category-adoption-business-compatibility": [
+        "dist/category-adoption-business-compatibility.d.ts"
+      ],
+      "category-adoption-rule-parameters": [
+        "dist/category-adoption-rule-parameters.d.ts"
+      ],
+      "category-adoption-rule-structure": [
+        "dist/category-adoption-rule-structure.d.ts"
+      ],
+      "category-adoption-marketing-references": [
+        "dist/category-adoption-marketing-references.d.ts"
+      ],
+      "category-adoption-price-references": [
+        "dist/category-adoption-price-references.d.ts"
+      ],
+      "category-adoption-service-capacity": [
+        "dist/category-adoption-service-capacity.d.ts"
+      ],
+      "category-adoption-product-graph": [
+        "dist/category-adoption-product-graph.d.ts"
+      ],
+      "category-adoption-price-structure": [
+        "dist/category-adoption-price-structure.d.ts"
+      ],
+      "category-adoption-settings-execution": [
+        "dist/category-adoption-settings-execution.d.ts"
+      ],
+      "category-adoption-fulfillment-references": [
+        "dist/category-adoption-fulfillment-references.d.ts"
+      ],
+      "category-preparation-batches": [
+        "dist/category-preparation-batches.d.ts"
+      ],
+      "mysql-category-preparation": [
+        "dist/mysql-category-preparation.d.ts"
+      ],
+      "category-adoption-ports": [
+        "dist/category-adoption-ports.d.ts"
+      ],
+      "mysql-staff-payments": [
+        "dist/mysql-staff-payments.d.ts"
+      ],
+      "http-staff-payment.dto": [
+        "dist/http-staff-payment.dto.d.ts"
+      ],
+      "return-pricing": [
+        "dist/return-pricing.d.ts"
+      ],
+      "corporate-maturity-receipt": [
+        "dist/corporate-maturity-receipt.d.ts"
+      ],
+      "mysql-snapshot-backfill": [
+        "dist/mysql-snapshot-backfill.d.ts"
+      ],
+      "client-context": [
+        "dist/client-context.d.ts"
+      ],
+      "client-order-ownership": [
+        "dist/client-order-ownership.d.ts"
+      ],
+      "enterprise": [
+        "dist/enterprise.d.ts"
+      ],
+      "enterprise-workflows": [
+        "dist/enterprise-workflows.d.ts"
+      ],
+      "enterprise-policy": [
+        "dist/enterprise-policy.d.ts"
+      ],
+      "enterprise-transfer-decision": [
+        "dist/enterprise-transfer-decision.d.ts"
+      ],
+      "enterprise-order-delegation": [
+        "dist/enterprise-order-delegation.d.ts"
+      ],
+      "client-order-requests": [
+        "dist/client-order-requests.d.ts"
+      ],
+      "mysql-enterprise-policy": [
+        "dist/mysql-enterprise-policy.d.ts"
+      ],
+      "mysql-enterprise-members": [
+        "dist/mysql-enterprise-members.d.ts"
+      ],
+      "enterprise-administrator-continuity": [
+        "dist/enterprise-administrator-continuity.d.ts"
+      ],
+      "enterprise-order-delegation-source": [
+        "dist/enterprise-order-delegation-source.d.ts"
+      ],
+      "enterprise-receipt": [
+        "dist/enterprise-receipt.d.ts"
+      ],
+      "enterprise-read-storage": [
+        "dist/enterprise-read-storage.d.ts"
+      ],
+      "mysql-enterprise-access": [
+        "dist/mysql-enterprise-access.d.ts"
+      ],
+      "mysql-enterprise-orders": [
+        "dist/mysql-enterprise-orders.d.ts"
+      ],
+      "mysql-enterprise-reader-audit": [
+        "dist/mysql-enterprise-reader-audit.d.ts"
+      ],
+      "mysql-enterprise-command": [
+        "dist/mysql-enterprise-command.d.ts"
+      ],
+      "mysql-enterprise-finance": [
+        "dist/mysql-enterprise-finance.d.ts"
+      ],
+      "mysql-customer-master": [
+        "dist/mysql-customer-master.d.ts"
+      ],
+      "customer-master-storage": [
+        "dist/customer-master-storage.d.ts"
+      ],
+      "mysql-enterprise-application": [
+        "dist/mysql-enterprise-application.d.ts"
+      ],
+      "mysql-enterprise-management-request": [
+        "dist/mysql-enterprise-management-request.d.ts"
+      ],
+      "mysql-enterprise-task-center": [
+        "dist/mysql-enterprise-task-center.d.ts"
+      ],
+      "mysql-enterprise-rental-handoff": [
+        "dist/mysql-enterprise-rental-handoff.d.ts"
+      ],
+      "mysql-enterprise-membership-audit": [
+        "dist/mysql-enterprise-membership-audit.d.ts"
+      ],
+      "enterprise-payment-proof-source": [
+        "dist/enterprise-payment-proof-source.d.ts"
+      ],
+      "enterprise-transfer-receipt-projection": [
+        "dist/enterprise-transfer-receipt-projection.d.ts"
+      ],
+      "client-contracts": [
+        "dist/client-contracts.d.ts"
+      ],
+      "enterprise-expense": [
+        "dist/enterprise-expense.d.ts"
+      ],
+      "enterprise-exchange": [
+        "dist/enterprise-exchange.d.ts"
+      ],
+      "enterprise-workflow-ports": [
+        "dist/enterprise-workflow-ports.d.ts"
+      ],
+      "notification-draft": [
+        "dist/notification-draft.d.ts"
+      ],
+      "notification-log-cache": [
+        "dist/notification-log-cache.d.ts"
+      ],
+      "notification-snapshot": [
+        "dist/notification-snapshot.d.ts"
+      ],
+      "mysql-enterprise-approval": [
+        "dist/mysql-enterprise-approval.d.ts"
+      ],
+      "mysql-enterprise-extension-approval": [
+        "dist/mysql-enterprise-extension-approval.d.ts"
+      ],
+      "mysql-enterprise-exchange-approval": [
+        "dist/mysql-enterprise-exchange-approval.d.ts"
+      ],
+      "mysql-enterprise-merchant-delegation": [
+        "dist/mysql-enterprise-merchant-delegation.d.ts"
+      ],
+      "mysql-enterprise-merchant-order-submission": [
+        "dist/mysql-enterprise-merchant-order-submission.d.ts"
+      ],
+      "enterprise-approval-ports": [
+        "dist/enterprise-approval-ports.d.ts"
+      ],
+      "http-service-ports": [
+        "dist/http-service-ports.d.ts"
+      ],
+      "http-workspace-capabilities": [
+        "dist/http-workspace-capabilities.controller.d.ts"
+      ],
+      "http-staff-payments": [
+        "dist/http-staff-payments.controller.d.ts"
+      ],
+      "http-workspace-capability.dto": [
+        "dist/http-workspace-capability.dto.d.ts"
+      ],
+      "http-core": [
+        "dist/http-core.controller.d.ts"
+      ],
+      "http-business": [
+        "dist/http-business.controller.d.ts"
+      ],
+      "http-applications": [
+        "dist/http-applications.d.ts"
+      ],
+      "http-context": [
+        "dist/http-context.d.ts"
+      ],
+      "http-enterprise-applications": [
+        "dist/http-enterprise-applications.d.ts"
+      ],
+      "http-enterprise-request.dto": [
+        "dist/http-enterprise-request.dto.d.ts"
+      ],
+      "http-enterprise-order-query.dto": [
+        "dist/http-enterprise-order-query.dto.d.ts"
+      ],
+      "http-enterprise-order-delegation.dto": [
+        "dist/http-enterprise-order-delegation.dto.d.ts"
+      ],
+      "http-enterprise-exchange-request.dto": [
+        "dist/http-enterprise-exchange-request.dto.d.ts"
+      ],
+      "http-enterprise-extension-request.dto": [
+        "dist/http-enterprise-extension-request.dto.d.ts"
+      ],
+      "http-enterprise-transfer-decision.dto": [
+        "dist/http-enterprise-transfer-decision.dto.d.ts"
+      ],
+      "http-client-request.dto": [
+        "dist/http-client-request.dto.d.ts"
+      ],
+      "http-enterprise-read": [
+        "dist/http-enterprise-read.controller.d.ts"
+      ],
+      "http-enterprise-merchant": [
+        "dist/http-enterprise-merchant.controller.d.ts"
+      ],
+      "http-enterprise-handoff-merchant": [
+        "dist/http-enterprise-handoff-merchant.controller.d.ts"
+      ],
+      "http-enterprise-workflows": [
+        "dist/http-enterprise-workflows.controller.d.ts"
+      ],
+      "file-access": [
+        "dist/file-access.d.ts"
+      ],
+      "mysql-client-delivery-address": [
+        "dist/mysql-client-delivery-address.d.ts"
+      ],
+      "mysql-client-account-closure": [
+        "dist/mysql-client-account-closure.d.ts"
+      ],
+      "client-delivery-service-area": [
+        "dist/client-delivery-service-area.d.ts"
+      ],
+      "client-lifecycle-ports": [
+        "dist/client-lifecycle-ports.d.ts"
+      ],
+      "mysql-client-application": [
+        "dist/mysql-client-application.d.ts"
+      ],
+      "client-application-ports": [
+        "dist/client-application-ports.d.ts"
+      ],
+      "category-client-projection": [
+        "dist/category-client-projection.d.ts"
+      ],
+      "file-application-participant": [
+        "dist/file-application-participant.d.ts"
+      ],
+      "business-location-scope": [
+        "dist/business-location-scope.d.ts"
+      ],
+      "file-application-exchange-inspection": [
+        "dist/file-application-exchange-inspection.d.ts"
+      ],
+      "http-staff-auth": [
+        "dist/http-staff-auth.controller.d.ts"
+      ],
+      "http-staff-uploads": [
+        "dist/http-staff-uploads.controller.d.ts"
+      ],
+      "staff-upload-observation": [
+        "dist/staff-upload-observation.d.ts"
+      ],
+      "client-session-ports": [
+        "dist/client-session-ports.d.ts"
+      ],
+      "mysql-client-auth": [
+        "dist/mysql-client-auth.d.ts"
+      ],
+      "mysql-customer-registration": [
+        "dist/mysql-customer-registration.d.ts"
+      ],
+      "mysql-customer-registration-transaction": [
+        "dist/mysql-customer-registration-transaction.d.ts"
+      ],
+      "mysql-client-rate-limit": [
+        "dist/mysql-client-rate-limit.d.ts"
+      ],
+      "mysql-client-website-assets": [
+        "dist/mysql-client-website-assets.d.ts"
+      ],
+      "http-client-applications": [
+        "dist/http-client-applications.d.ts"
+      ],
+      "http-client": [
+        "dist/http-client.controller.d.ts"
+      ],
+      "file-application-rental-evidence": [
+        "dist/file-application-rental-evidence.d.ts"
+      ],
+      "file-application-staff-observation": [
+        "dist/file-application-staff-observation.d.ts"
+      ],
+      "mysql-client-wechat-auth": [
+        "dist/mysql-client-wechat-auth.d.ts"
+      ],
+      "client-wechat-ports": [
+        "dist/client-wechat-ports.d.ts"
+      ],
+      "file-application-enterprise-payment-proof": [
+        "dist/file-application-enterprise-payment-proof.d.ts"
+      ],
+      "admin": [
+        "admin/index.tsx"
+      ],
+      "admin/messages": [
+        "admin/messages.ts"
+      ],
+      "admin/orders": [
+        "admin/orders/index.tsx"
+      ],
+      "admin/orders/client": [
+        "admin/orders/client.ts"
+      ],
+      "admin/orders/logic": [
+        "admin/orders/logic.ts"
+      ],
+      "admin/orders/pages": [
+        "admin/orders/pages.ts"
+      ],
+      "admin/work-orders": [
+        "admin/work-orders/index.tsx"
+      ],
+      "admin/work-orders/client": [
+        "admin/work-orders/client.ts"
+      ],
+      "admin/work-orders/policy": [
+        "admin/work-orders/workOrderBoardPolicy.ts"
+      ],
+      "admin/work-orders/pages": [
+        "admin/work-orders/pages.ts"
+      ],
+      "channel-contracts": [
+        "dist/channel-contracts.d.ts"
+      ],
+      "client-channel-ports": [
+        "dist/client-channel-ports.d.ts"
+      ],
+      "mysql-client-channel-profile": [
+        "dist/mysql-client-channel-profile.d.ts"
+      ],
+      "mysql-website-channel-profile": [
+        "dist/mysql-website-channel-profile.d.ts"
+      ],
+      "mysql-mini-program-channel": [
+        "dist/mysql-mini-program-channel.d.ts"
+      ],
+      "http-channel-dto": [
+        "dist/http-channel.dto.d.ts"
+      ],
+      "http-channels": [
+        "dist/http-channels.controller.d.ts"
+      ],
+      "http-channel-applications": [
+        "dist/http-channel-applications.d.ts"
+      ],
+      "file-application-runtime": [
+        "dist/file-application-runtime.d.ts"
+      ],
+      "mysql-membership": [
+        "dist/mysql-membership.d.ts"
+      ],
+      "membership-ports": [
+        "dist/membership-ports.d.ts"
+      ],
+      "customer-operations-ports": [
+        "dist/customer-operations-ports.d.ts"
+      ],
+      "mysql-customer-operations": [
+        "dist/mysql-customer-operations.d.ts"
+      ],
+      "mysql-enterprise-portal": [
+        "dist/mysql-enterprise-portal.d.ts"
+      ],
+      "http-membership": [
+        "dist/http-membership.controller.d.ts"
+      ],
+      "http-membership-request.dto": [
+        "dist/http-membership-request.dto.d.ts"
+      ],
+      "http-enterprise-portal-request.dto": [
+        "dist/http-enterprise-portal-request.dto.d.ts"
+      ],
+      "http-membership-applications": [
+        "dist/http-membership-applications.d.ts"
+      ],
+      "http-files": [
+        "dist/http-files.controller.d.ts"
+      ],
+      "http-file-applications": [
+        "dist/http-file-applications.d.ts"
+      ],
+      "http-file.dto": [
+        "dist/http-file.dto.d.ts"
+      ],
+      "customer-governance-ports": [
+        "dist/customer-governance-ports.d.ts"
+      ],
+      "mysql-customer-governance": [
+        "dist/mysql-customer-governance.d.ts"
+      ],
+      "mysql-customer-merge": [
+        "dist/mysql-customer-merge.d.ts"
+      ],
+      "mysql-customer-insights": [
+        "dist/mysql-customer-insights.d.ts"
+      ],
+      "mysql-customer-avatar": [
+        "dist/mysql-customer-avatar.d.ts"
+      ],
+      "http-customer-avatar": [
+        "dist/http-customer-avatar.controller.d.ts"
+      ],
+      "http-customer-avatar-applications": [
+        "dist/http-customer-avatar-applications.d.ts"
+      ],
+      "admin/capabilities": [
+        "admin/capabilities/index.tsx"
+      ],
+      "admin/capabilities/client": [
+        "admin/capabilities/client.ts"
+      ],
+      "admin/capabilities/pages": [
+        "admin/capabilities/pages.ts"
+      ],
+      "mysql-customer-corporate": [
+        "dist/mysql-customer-corporate.d.ts"
+      ],
+      "mysql-customer-corporate-settlement": [
+        "dist/mysql-customer-corporate-settlement.d.ts"
+      ],
+      "corporate-application-storage": [
+        "dist/corporate-application-storage.d.ts"
+      ],
+      "admin/locations": [
+        "admin/locations/index.tsx"
+      ],
+      "admin/locations/client": [
+        "admin/locations/client.ts"
+      ],
+      "admin/locations/pages": [
+        "admin/locations/pages.ts"
+      ],
+      "admin/locations/list-capabilities": [
+        "admin/locations/listCapabilities.ts"
+      ],
+      "admin/catalog": [
+        "admin/catalog/index.tsx"
+      ],
+      "admin/catalog/client": [
+        "admin/catalog/client.ts"
+      ],
+      "admin/catalog/context": [
+        "admin/catalog/page-context.ts"
+      ],
+      "admin/catalog/pages": [
+        "admin/catalog/pages.ts"
+      ],
+      "admin/catalog/images": [
+        "admin/catalog/ItemGroupPhoto.tsx"
+      ],
+      "admin/catalog/list-capabilities": [
+        "admin/catalog/listCapabilities.ts"
+      ],
+      "admin/catalog/terminology": [
+        "admin/catalog/navigation-terminology.ts"
+      ],
+      "http-category-governance": [
+        "dist/http-category-governance.controller.d.ts"
+      ],
+      "http-category-adoption-preparation": [
+        "dist/http-category-adoption-preparation.controller.d.ts"
+      ],
+      "http-category-governance.dto": [
+        "dist/http-category-governance.dto.d.ts"
+      ],
+      "http-category-adoption.dto": [
+        "dist/http-category-adoption.dto.d.ts"
+      ],
+      "http-category-preview": [
+        "dist/http-category-preview.guard.d.ts"
+      ],
+      "http-category-applications": [
+        "dist/http-category-applications.d.ts"
+      ],
+      "http-category": [
+        "dist/http-category.module.d.ts"
+      ],
+      "http": [
+        "dist/http.module.d.ts"
+      ],
+      "admin/commercial": [
+        "admin/commercial/index.tsx"
+      ],
+      "admin/commercial/client": [
+        "admin/commercial/client.ts"
+      ],
+      "admin/commercial/context": [
+        "admin/commercial/page-context.ts"
+      ],
+      "admin/commercial/pages": [
+        "admin/commercial/pages.ts"
+      ],
+      "admin/governance": [
+        "./admin/governance/index.tsx"
+      ],
+      "admin/governance/client": [
+        "./admin/governance/client.ts"
+      ],
+      "admin/governance/context": [
+        "./admin/governance/page-context.tsx"
+      ],
+      "admin/governance/pages": [
+        "./admin/governance/pages.ts"
+      ],
+      "admin/governance/logic": [
+        "./admin/governance/logic.ts"
+      ],
+      "admin/governance/messages": [
+        "./admin/governance/messages.ts"
+      ],
+      "admin/membership/client": [
+        "./admin/membership/client.ts"
+      ],
+      "admin/membership/customer-client": [
+        "./admin/membership/customer-client.ts"
+      ],
+      "mysql-payment-runtime": [
+        "./dist/mysql-payment-runtime.d.ts"
+      ],
+      "mysql-payment-reconciliation-file": [
+        "./dist/mysql-payment-reconciliation-file.d.ts"
+      ],
+      "http-payments": [
+        "./dist/http-payments.d.ts"
+      ],
+      "payment-money": [
+        "./dist/payment-money.d.ts"
+      ],
+      "stripe-payment": [
+        "./dist/stripe-payment.d.ts"
+      ],
+      "admin/membership": [
+        "./admin/membership/index.tsx"
+      ],
+      "admin/membership/context": [
+        "./admin/membership/page-context.tsx"
+      ],
+      "admin/membership/pages": [
+        "./admin/membership/pages.ts"
+      ],
+      "admin/membership/components": [
+        "./admin/membership/components.ts"
+      ],
+      "admin/membership/logic": [
+        "./admin/membership/logic.ts"
+      ],
+      "admin/membership/messages": [
+        "./admin/membership/messages.ts"
+      ],
+      "admin/membership/insights": [
+        "./admin/membership/MembershipInsights.tsx"
+      ],
+      "admin/membership/list-capabilities": [
+        "./admin/membership/list-capabilities.ts"
+      ],
+      "data": [
+        "./dist/data.d.ts"
+      ],
+      "mysql-data": [
+        "./dist/mysql-data.d.ts"
+      ],
+      "admin/operations": [
+        "./admin/operations/index.tsx"
+      ],
+      "admin/operations/client": [
+        "./admin/operations/client.ts"
+      ],
+      "admin/operations/context": [
+        "./admin/operations/page-context.tsx"
+      ],
+      "admin/operations/pages": [
+        "./admin/operations/pages.ts"
+      ],
+      "admin/operations/components": [
+        "./admin/operations/components.ts"
+      ],
+      "admin/operations/logic": [
+        "./admin/operations/logic.ts"
+      ],
+      "admin/operations/messages": [
+        "./admin/operations/messages.ts"
+      ],
+      "core-identity": [
+        "dist/core-identity.d.ts"
+      ],
+      "server": [
+        "dist/server.d.ts"
+      ],
+      "platform-host": [
+        "dist/platform-host.d.ts"
+      ],
+      "admin/channels": [
+        "./admin/channels/index.tsx"
+      ],
+      "admin/channels/client": [
+        "./admin/channels/client.ts"
+      ],
+      "admin/channels/website-client": [
+        "./admin/channels/website-client.ts"
+      ],
+      "admin/channels/context": [
+        "./admin/channels/page-context.tsx"
+      ],
+      "admin/channels/pages": [
+        "./admin/channels/pages.ts"
+      ],
+      "admin/channels/messages": [
+        "./admin/channels/messages.ts"
+      ],
+      "admin/setup": [
+        "./admin/setup/index.tsx"
+      ],
+      "admin/setup/client": [
+        "./admin/setup/client.ts"
+      ],
+      "admin/setup/context": [
+        "./admin/setup/page-context.tsx"
+      ],
+      "admin/setup/pages": [
+        "./admin/setup/pages.ts"
+      ],
+      "admin/setup/navigation": [
+        "./admin/setup/navigation.ts"
+      ],
+      "admin/setup/messages": [
+        "./admin/setup/messages.ts"
+      ],
+      "admin/payment-reconciliation": [
+        "./admin/payment-reconciliation/index.tsx"
+      ],
+      "admin/payment-reconciliation/client": [
+        "./admin/payment-reconciliation/client.ts"
+      ],
+      "admin/payment-reconciliation/context": [
+        "./admin/payment-reconciliation/page-context.tsx"
+      ],
+      "admin/payment-reconciliation/pages": [
+        "./admin/payment-reconciliation/pages.ts"
+      ],
+      "admin/payment-reconciliation/messages": [
+        "./admin/payment-reconciliation/messages.ts"
+      ],
+      "clients/enterprise": [
+        "./clients/enterprise/index.ts"
+      ],
+      "integration-contracts": [
+        "./dist/integration-contracts.d.ts"
+      ],
+      "integration-runtime": [
+        "./dist/integration-runtime.d.ts"
+      ],
+      "mysql-integrations": [
+        "./dist/mysql-integrations.d.ts"
+      ],
+      "http-integrations": [
+        "./dist/http-integrations.d.ts"
+      ],
+      "integration-business-participant": [
+        "./dist/integration-business-participant.d.ts"
+      ],
+      "auth-contracts": [
+        "./dist/auth-contracts.d.ts"
+      ],
+      "admin/browser": [
+        "admin/browser.ts"
+      ],
+      "clients/staff": [
+        "dist-clients/clients/staff/index.d.ts"
+      ],
+      "clients/miniprogram": [
+        "dist-clients/clients/miniprogram/index.d.ts"
+      ],
+      "clients/website": [
+        "clients/website/index.ts"
+      ],
+      "permissions": [
+        "./dist/permissions.d.ts"
+      ],
+      "legacy-access-preparation": [
+        "./dist/legacy-access-preparation.d.ts"
+      ],
+      "legacy-access-adoption": [
+        "./dist/legacy-access-adoption.d.ts"
+      ],
+      "manifest": [
+        "./dist/manifest.d.ts"
+      ],
+      "admin/browser-notifications": [
+        "admin/browser-notifications/index.tsx"
+      ],
+      "admin/browser-notifications/model": [
+        "admin/browser-notifications/model.ts"
+      ],
+      "contracts": [
+        "dist/contracts.d.ts"
+      ],
+      "application-repositories": [
+        "./dist/application-repositories.d.ts"
+      ],
+      "mysql-workspace-principal": [
+        "./dist/mysql-workspace-principal.d.ts"
+      ],
+      "application-domain": [
+        "./dist/application-domain.d.ts"
+      ],
+      "application-participants": [
+        "./dist/application-participants.d.ts"
+      ],
+      "application-customers": [
+        "./dist/application-customers.d.ts"
+      ],
+      "application-ai-sources": [
+        "./dist/application-ai-sources.d.ts"
+      ],
+      "package": [
+        "./dist/package.d.ts"
+      ],
+      "data-package": [
+        "./dist/data-package.d.ts"
+      ],
+      "initialize-categories": [
+        "./dist/initialize-categories.d.ts"
+      ],
+      "application-client": [
+        "./dist/application-client.d.ts"
+      ],
+      "application-enterprise": [
+        "./dist/application-enterprise.d.ts"
+      ],
+      "auth-service": [
+        "./dist/auth-service.d.ts"
+      ],
+      "auth-source": [
+        "./dist/auth-source.d.ts"
+      ],
+      "trusted-workspace-principal": [
+        "./dist/trusted-workspace-principal.d.ts"
+      ],
+      "trusted-browser-principal": [
+        "./dist/trusted-browser-principal.d.ts"
+      ],
+      "trusted-platform-browser-principal": [
+        "./dist/trusted-platform-browser-principal.d.ts"
+      ],
+      "application-integrations": [
+        "./dist/application-integrations.d.ts"
+      ],
+      "mysql-auth-source": [
+        "./dist/mysql-auth-source.d.ts"
+      ],
+      "http-auth": [
+        "./dist/http-auth.d.ts"
+      ],
+      "auth-guard-contracts": [
+        "./dist/auth-guard-contracts.d.ts"
+      ],
+      "staff-api-policy": [
+        "./dist/staff-api-policy.d.ts"
+      ],
+      "platform-ai-access-policy": [
+        "./dist/platform-ai-access-policy.d.ts"
+      ],
+      "application": [
+        "./dist/application.d.ts"
+      ],
+      "application-category": [
+        "./dist/application-category.d.ts"
+      ],
+      "application-worker-authority": [
+        "./dist/application-worker-authority.d.ts"
+      ],
+      "core-session": [
+        "dist/core-session.d.ts"
+      ],
+      "application-http": [
+        "dist/application-http.d.ts"
+      ],
+      "application-platform": [
+        "dist/application-platform.d.ts"
+      ],
+      "staff-routing": [
+        "dist/staff-routing.d.ts"
+      ],
+      "application-access": [
+        "dist/application-access.d.ts"
+      ],
+      "http-auth-extensions": [
+        "dist/http-auth-extensions.controller.d.ts"
+      ],
+      "http-staff-subscription": [
+        "dist/http-staff-subscription.controller.d.ts"
+      ],
+      "http-extensions": [
+        "dist/http-extensions.module.d.ts"
+      ],
+      "customer-management": [
+        "dist/application-customer-management.d.ts"
+      ],
+      "http-customers": [
+        "dist/http-customers.controller.d.ts"
+      ],
+      "http-customers-module": [
+        "dist/http-customers.module.d.ts"
+      ],
+      "http-customer-operations-dto": [
+        "dist/http-customer-operations.dto.d.ts"
+      ],
+      "http-customer-corporate-dto": [
+        "dist/http-customer-corporate.dto.d.ts"
+      ],
+      "http-customer-merge-dto": [
+        "dist/http-customer-merge.dto.d.ts"
+      ],
+      "http-customer-registration-dto": [
+        "dist/http-customer-registration.dto.d.ts"
+      ],
+      "workspace-management": [
+        "dist/application-workspace-management.d.ts"
+      ],
+      "tenant-bootstrap": [
+        "dist/application-tenant-bootstrap.d.ts"
+      ],
+      "tenant-bootstrap-contracts": [
+        "dist/tenant-bootstrap-contracts.d.ts"
+      ],
+      "tenant-bootstrap-defaults": [
+        "dist/tenant-bootstrap-defaults.d.ts"
+      ],
+      "mysql-workspace-management": [
+        "dist/mysql-workspace-management.d.ts"
+      ],
+      "http-workspace-management-dto": [
+        "dist/http-workspace-management.dto.d.ts"
+      ],
+      "http-workspaces": [
+        "dist/http-workspaces.controller.d.ts"
+      ],
+      "http-workspaces-module": [
+        "dist/http-workspaces.module.d.ts"
+      ],
+      "clients/enterprise-portal": [
+        "clients/enterprise-portal/index.ts"
+      ],
+      "clients/enterprise-portal/styles": [
+        "clients/enterprise-portal/styles.css"
+      ],
+      "clients/time": [
+        "dist-clients/clients/time.d.ts"
+      ],
+      "clients/enterprise-portal/pages/AdministratorEditor": [
+        "clients/enterprise-portal/AdministratorEditor.tsx"
+      ],
+      "clients/enterprise-portal/pages/ApplicationReviewMessages": [
+        "clients/enterprise-portal/ApplicationReviewMessages.tsx"
+      ],
+      "clients/enterprise-portal/pages/ApprovalDecision": [
+        "clients/enterprise-portal/ApprovalDecision.tsx"
+      ],
+      "clients/enterprise-portal/pages/ApprovalNotices": [
+        "clients/enterprise-portal/ApprovalNotices.tsx"
+      ],
+      "clients/enterprise-portal/pages/ApprovalReview": [
+        "clients/enterprise-portal/ApprovalReview.tsx"
+      ],
+      "clients/enterprise-portal/pages/ApprovalsPage": [
+        "clients/enterprise-portal/ApprovalsPage.tsx"
+      ],
+      "clients/enterprise-portal/pages/AuthorityUpload": [
+        "clients/enterprise-portal/AuthorityUpload.tsx"
+      ],
+      "clients/enterprise-portal/pages/CorporateStatusMessages": [
+        "clients/enterprise-portal/CorporateStatusMessages.tsx"
+      ],
+      "clients/enterprise-portal/pages/EmployeePolicyMessages": [
+        "clients/enterprise-portal/EmployeePolicyMessages.tsx"
+      ],
+      "clients/enterprise-portal/pages/EnterpriseShell": [
+        "clients/enterprise-portal/EnterpriseShell.tsx"
+      ],
+      "clients/enterprise-portal/pages/ExchangeApprovalsPage": [
+        "clients/enterprise-portal/ExchangeApprovalsPage.tsx"
+      ],
+      "clients/enterprise-portal/pages/ExtensionApprovalsPage": [
+        "clients/enterprise-portal/ExtensionApprovalsPage.tsx"
+      ],
+      "clients/enterprise-portal/pages/FinancePage": [
+        "clients/enterprise-portal/FinancePage.tsx"
+      ],
+      "clients/enterprise-portal/pages/JoinReviewMessages": [
+        "clients/enterprise-portal/JoinReviewMessages.tsx"
+      ],
+      "clients/enterprise-portal/pages/ManagementRequestFeedback": [
+        "clients/enterprise-portal/ManagementRequestFeedback.tsx"
+      ],
+      "clients/enterprise-portal/pages/ManagementRequestsPage": [
+        "clients/enterprise-portal/ManagementRequestsPage.tsx"
+      ],
+      "clients/enterprise-portal/pages/ManagementReviewMessages": [
+        "clients/enterprise-portal/ManagementReviewMessages.tsx"
+      ],
+      "clients/enterprise-portal/pages/MemberLifecycle": [
+        "clients/enterprise-portal/MemberLifecycle.tsx"
+      ],
+      "clients/enterprise-portal/pages/MemberOperationRecovery": [
+        "clients/enterprise-portal/MemberOperationRecovery.tsx"
+      ],
+      "clients/enterprise-portal/pages/MembershipAudit": [
+        "clients/enterprise-portal/MembershipAudit.tsx"
+      ],
+      "clients/enterprise-portal/pages/MerchantContact": [
+        "clients/enterprise-portal/MerchantContact.tsx"
+      ],
+      "clients/enterprise-portal/pages/OrdersPage": [
+        "clients/enterprise-portal/OrdersPage.tsx"
+      ],
+      "clients/enterprise-portal/pages/OwnMessages": [
+        "clients/enterprise-portal/OwnMessages.tsx"
+      ],
+      "clients/enterprise-portal/pages/OwnRentalFulfillment": [
+        "clients/enterprise-portal/OwnRentalFulfillment.tsx"
+      ],
+      "clients/enterprise-portal/pages/OwnRentalHandoffOrders": [
+        "clients/enterprise-portal/OwnRentalHandoffOrders.tsx"
+      ],
+      "clients/enterprise-portal/pages/OwnRentalHandoffs": [
+        "clients/enterprise-portal/OwnRentalHandoffs.tsx"
+      ],
+      "clients/enterprise-portal/pages/OwnStatusMessages": [
+        "clients/enterprise-portal/OwnStatusMessages.tsx"
+      ],
+      "clients/enterprise-portal/pages/PolicyPage": [
+        "clients/enterprise-portal/PolicyPage.tsx"
+      ],
+      "clients/enterprise-portal/pages/RelationshipMessages": [
+        "clients/enterprise-portal/RelationshipMessages.tsx"
+      ],
+      "clients/enterprise-portal/pages/RentalHandoffMaterial": [
+        "clients/enterprise-portal/RentalHandoffMaterial.tsx"
+      ],
+      "clients/enterprise-portal/pages/RetainedMergeMessages": [
+        "clients/enterprise-portal/RetainedMergeMessages.tsx"
+      ],
+      "clients/enterprise-portal/pages/TasksPage": [
+        "clients/enterprise-portal/TasksPage.tsx"
+      ],
+      "clients/enterprise-portal/pages/TransferDecisionRecovery": [
+        "clients/enterprise-portal/TransferDecisionRecovery.tsx"
+      ],
+      "clients/enterprise-portal/pages/TransferMessages": [
+        "clients/enterprise-portal/TransferMessages.tsx"
+      ],
+      "clients/enterprise-portal/pages/WorkflowPages": [
+        "clients/enterprise-portal/WorkflowPages.tsx"
+      ],
+      "clients/enterprise-portal/pages/WorkflowReview": [
+        "clients/enterprise-portal/WorkflowReview.tsx"
+      ],
+      "clients/website-ui": [
+        "./clients/website-ui/index.ts"
+      ],
+      "clients/website-ui/host": [
+        "./clients/website-ui/host.ts"
+      ],
+      "clients/website-ui/styles": [
+        "./clients/website-ui/styles.css"
+      ],
+      "clients/website-ui/source/App": [
+        "./clients/website-ui/App.tsx"
+      ],
+      "clients/website-ui/source/AuthContext": [
+        "./clients/website-ui/AuthContext.tsx"
+      ],
+      "clients/website-ui/source/SiteContext": [
+        "./clients/website-ui/SiteContext.tsx"
+      ],
+      "clients/website-ui/source/components/CatalogConditions": [
+        "./clients/website-ui/components/CatalogConditions.tsx"
+      ],
+      "clients/website-ui/source/components/EnterpriseBookingApproval": [
+        "./clients/website-ui/components/EnterpriseBookingApproval.tsx"
+      ],
+      "clients/website-ui/source/components/EnterpriseExchangeProgress": [
+        "./clients/website-ui/components/EnterpriseExchangeProgress.tsx"
+      ],
+      "clients/website-ui/source/components/EnterpriseExchangeRequest": [
+        "./clients/website-ui/components/EnterpriseExchangeRequest.tsx"
+      ],
+      "clients/website-ui/source/components/EnterpriseExtensionApproval": [
+        "./clients/website-ui/components/EnterpriseExtensionApproval.tsx"
+      ],
+      "clients/website-ui/source/components/ErrorBoundary": [
+        "./clients/website-ui/components/ErrorBoundary.tsx"
+      ],
+      "clients/website-ui/source/components/Img": [
+        "./clients/website-ui/components/Img.tsx"
+      ],
+      "clients/website-ui/source/components/MemberLayout": [
+        "./clients/website-ui/components/MemberLayout.tsx"
+      ],
+      "clients/website-ui/source/components/PageHeader": [
+        "./clients/website-ui/components/PageHeader.tsx"
+      ],
+      "clients/website-ui/source/components/PageState": [
+        "./clients/website-ui/components/PageState.tsx"
+      ],
+      "clients/website-ui/source/components/ProductCard": [
+        "./clients/website-ui/components/ProductCard.tsx"
+      ],
+      "clients/website-ui/source/components/RemoteBooking": [
+        "./clients/website-ui/components/RemoteBooking.tsx"
+      ],
+      "clients/website-ui/source/components/RentalFinder": [
+        "./clients/website-ui/components/RentalFinder.tsx"
+      ],
+      "clients/website-ui/source/components/SiteIcon": [
+        "./clients/website-ui/components/SiteIcon.tsx"
+      ],
+      "clients/website-ui/source/components/SiteLayout": [
+        "./clients/website-ui/components/SiteLayout.tsx"
+      ],
+      "clients/website-ui/source/components/StoreDirectory": [
+        "./clients/website-ui/components/StoreDirectory.tsx"
+      ],
+      "clients/website-ui/source/components/Toast": [
+        "./clients/website-ui/components/Toast.tsx"
+      ],
+      "clients/website-ui/source/components/enterprise-exchange-confirmation": [
+        "./clients/website-ui/components/enterprise-exchange-confirmation.ts"
+      ],
+      "clients/website-ui/source/components/enterprise-exchange-request": [
+        "./clients/website-ui/components/enterprise-exchange-request.ts"
+      ],
+      "clients/website-ui/source/components/useEnterpriseOrderSubmission": [
+        "./clients/website-ui/components/useEnterpriseOrderSubmission.ts"
+      ],
+      "clients/website-ui/source/data/apiClient": [
+        "./clients/website-ui/data/apiClient.ts"
+      ],
+      "clients/website-ui/source/data/authClient": [
+        "./clients/website-ui/data/authClient.ts"
+      ],
+      "clients/website-ui/source/data/catalog": [
+        "./clients/website-ui/data/catalog.ts"
+      ],
+      "clients/website-ui/source/data/clientRecoveryStorage": [
+        "./clients/website-ui/data/clientRecoveryStorage.ts"
+      ],
+      "clients/website-ui/source/data/datetime": [
+        "./clients/website-ui/data/datetime.ts"
+      ],
+      "clients/website-ui/source/data/money": [
+        "./clients/website-ui/data/money.ts"
+      ],
+      "clients/website-ui/source/data/remoteSite": [
+        "./clients/website-ui/data/remoteSite.ts"
+      ],
+      "clients/website-ui/source/data/rentalQuery": [
+        "./clients/website-ui/data/rentalQuery.ts"
+      ],
+      "clients/website-ui/source/data/resolveTenant": [
+        "./clients/website-ui/data/resolveTenant.ts"
+      ],
+      "clients/website-ui/source/data/siteRepository": [
+        "./clients/website-ui/data/siteRepository.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/BookingDraftReview": [
+        "./clients/website-ui/features/ai-native/BookingDraftReview.tsx"
+      ],
+      "clients/website-ui/source/features/ai-native/BookingHandoffBridge": [
+        "./clients/website-ui/features/ai-native/BookingHandoffBridge.tsx"
+      ],
+      "clients/website-ui/source/features/ai-native/BookingHandoffHost": [
+        "./clients/website-ui/features/ai-native/BookingHandoffHost.tsx"
+      ],
+      "clients/website-ui/source/features/ai-native/BookingHandoffPanel": [
+        "./clients/website-ui/features/ai-native/BookingHandoffPanel.tsx"
+      ],
+      "clients/website-ui/source/features/ai-native/ClientBookingTransfer": [
+        "./clients/website-ui/features/ai-native/ClientBookingTransfer.tsx"
+      ],
+      "clients/website-ui/source/features/ai-native/ClientGoalPicker": [
+        "./clients/website-ui/features/ai-native/ClientGoalPicker.tsx"
+      ],
+      "clients/website-ui/source/features/ai-native/ClientOriginalQuoteFacts": [
+        "./clients/website-ui/features/ai-native/ClientOriginalQuoteFacts.tsx"
+      ],
+      "clients/website-ui/source/features/ai-native/ClientPublicBrowse": [
+        "./clients/website-ui/features/ai-native/ClientPublicBrowse.tsx"
+      ],
+      "clients/website-ui/source/features/ai-native/ClientQuotePreparation": [
+        "./clients/website-ui/features/ai-native/ClientQuotePreparation.tsx"
+      ],
+      "clients/website-ui/source/features/ai-native/ClientRegisteredEntryActions": [
+        "./clients/website-ui/features/ai-native/ClientRegisteredEntryActions.tsx"
+      ],
+      "clients/website-ui/source/features/ai-native/ClientSceneCatalog": [
+        "./clients/website-ui/features/ai-native/ClientSceneCatalog.tsx"
+      ],
+      "clients/website-ui/source/features/ai-native/ClientTaskCancellation": [
+        "./clients/website-ui/features/ai-native/ClientTaskCancellation.tsx"
+      ],
+      "clients/website-ui/source/features/ai-native/ClientTaskWorkbench": [
+        "./clients/website-ui/features/ai-native/ClientTaskWorkbench.tsx"
+      ],
+      "clients/website-ui/source/features/ai-native/booking-draft-review": [
+        "./clients/website-ui/features/ai-native/booking-draft-review.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/booking-handoff": [
+        "./clients/website-ui/features/ai-native/booking-handoff.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/booking-host.factory": [
+        "./clients/website-ui/features/ai-native/booking-host.factory.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/client-booking-transfer-api": [
+        "./clients/website-ui/features/ai-native/client-booking-transfer-api.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/client-booking-transfer-session": [
+        "./clients/website-ui/features/ai-native/client-booking-transfer-session.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/client-entry-actions-api": [
+        "./clients/website-ui/features/ai-native/client-entry-actions-api.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/client-goal-api": [
+        "./clients/website-ui/features/ai-native/client-goal-api.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/client-goal-session": [
+        "./clients/website-ui/features/ai-native/client-goal-session.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/client-public-api": [
+        "./clients/website-ui/features/ai-native/client-public-api.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/client-quote-session": [
+        "./clients/website-ui/features/ai-native/client-quote-session.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/client-quote-time": [
+        "./clients/website-ui/features/ai-native/client-quote-time.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/client-scene-catalog-api": [
+        "./clients/website-ui/features/ai-native/client-scene-catalog-api.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/client-task-api": [
+        "./clients/website-ui/features/ai-native/client-task-api.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/client-task-cancellation-api": [
+        "./clients/website-ui/features/ai-native/client-task-cancellation-api.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/client-task-cancellation-session": [
+        "./clients/website-ui/features/ai-native/client-task-cancellation-session.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/client-task-session": [
+        "./clients/website-ui/features/ai-native/client-task-session.ts"
+      ],
+      "clients/website-ui/source/features/ai-native/customer-order-facts": [
+        "./clients/website-ui/features/ai-native/customer-order-facts.ts"
+      ],
+      "clients/website-ui/source/hooks/useActiveRail": [
+        "./clients/website-ui/hooks/useActiveRail.ts"
+      ],
+      "clients/website-ui/source/i18n": [
+        "./clients/website-ui/i18n.ts"
+      ],
+      "clients/website-ui/source/pages/AccountPage": [
+        "./clients/website-ui/pages/AccountPage.tsx"
+      ],
+      "clients/website-ui/source/pages/BookingPage": [
+        "./clients/website-ui/pages/BookingPage.tsx"
+      ],
+      "clients/website-ui/source/pages/DocumentPage": [
+        "./clients/website-ui/pages/DocumentPage.tsx"
+      ],
+      "clients/website-ui/source/pages/HomePage": [
+        "./clients/website-ui/pages/HomePage.tsx"
+      ],
+      "clients/website-ui/source/pages/InfoPages": [
+        "./clients/website-ui/pages/InfoPages.tsx"
+      ],
+      "clients/website-ui/source/pages/LoginPage": [
+        "./clients/website-ui/pages/LoginPage.tsx"
+      ],
+      "clients/website-ui/source/pages/OrderPages": [
+        "./clients/website-ui/pages/OrderPages.tsx"
+      ],
+      "clients/website-ui/source/pages/ProductDetailPage": [
+        "./clients/website-ui/pages/ProductDetailPage.tsx"
+      ],
+      "clients/website-ui/source/pages/ProductsPage": [
+        "./clients/website-ui/pages/ProductsPage.tsx"
+      ],
+      "clients/website-ui/source/theme": [
+        "./clients/website-ui/theme.ts"
+      ],
+      "clients/website-ui/source/types": [
+        "./clients/website-ui/types.ts"
+      ],
+      "admin/browser-navigation": [
+        "admin/browser-navigation.ts"
+      ],
+      "admin/browser-shell": [
+        "admin/browser-shell.tsx"
+      ],
+      "http-access-policy": [
+        "dist/http-access-policy.d.ts"
+      ],
+      "application-public-access": [
+        "dist/application-public-access.d.ts"
+      ],
+      "public-management-compatibility": [
+        "dist/public-management-compatibility.d.ts"
+      ],
+      "application-internal-authority": [
+        "dist/application-internal-authority.d.ts"
+      ],
+      "http-openapi": [
+        "dist/http-openapi.d.ts"
+      ],
+      "application-file-cleanup-authority": [
+        "dist/application-file-cleanup-authority.d.ts"
+      ],
+      "admin/task-center": [
+        "./admin/task-center/index.ts"
+      ],
+      "admin/task-center/AutomationExplanation": [
+        "./admin/task-center/AutomationExplanation.tsx"
+      ],
+      "admin/task-center/AutomationPolicySettings": [
+        "./admin/task-center/AutomationPolicySettings.tsx"
+      ],
+      "admin/task-center/AutomationRefundRecords": [
+        "./admin/task-center/AutomationRefundRecords.tsx"
+      ],
+      "admin/task-center/AutomationReviewSection": [
+        "./admin/task-center/AutomationReviewSection.tsx"
+      ],
+      "admin/task-center/AutomationReviewWorkbench": [
+        "./admin/task-center/AutomationReviewWorkbench.tsx"
+      ],
+      "admin/task-center/BusinessOutboxObservation": [
+        "./admin/task-center/BusinessOutboxObservation.tsx"
+      ],
+      "admin/task-center/CalendarDraftPreparation": [
+        "./admin/task-center/CalendarDraftPreparation.tsx"
+      ],
+      "admin/task-center/EntrySceneCatalog": [
+        "./admin/task-center/EntrySceneCatalog.tsx"
+      ],
+      "admin/task-center/MemberNameFlow": [
+        "./admin/task-center/MemberNameFlow.tsx"
+      ],
+      "admin/task-center/NotificationChangeFlow": [
+        "./admin/task-center/NotificationChangeFlow.tsx"
+      ],
+      "admin/task-center/OpeningIntegrationStatus": [
+        "./admin/task-center/OpeningIntegrationStatus.tsx"
+      ],
+      "admin/task-center/ReadinessDiagnosticsCard": [
+        "./admin/task-center/ReadinessDiagnosticsCard.tsx"
+      ],
+      "admin/task-center/TaskCalendarDraft": [
+        "./admin/task-center/TaskCalendarDraft.tsx"
+      ],
+      "admin/task-center/TaskCenterPage": [
+        "./admin/task-center/TaskCenterPage.tsx"
+      ],
+      "admin/task-center/TaskFaultObservation": [
+        "./admin/task-center/TaskFaultObservation.tsx"
+      ],
+      "admin/task-center/TaskOpeningProposals": [
+        "./admin/task-center/TaskOpeningProposals.tsx"
+      ],
+      "admin/task-center/TaskOutcomeObservation": [
+        "./admin/task-center/TaskOutcomeObservation.tsx"
+      ],
+      "admin/task-center/TaskReadPolicy": [
+        "./admin/task-center/TaskReadPolicy.tsx"
+      ],
+      "admin/task-center/TaskRecovery": [
+        "./admin/task-center/TaskRecovery.tsx"
+      ],
+      "admin/task-center/TaskRuleDraft": [
+        "./admin/task-center/TaskRuleDraft.tsx"
+      ],
+      "admin/task-center/TaskRuleDraftView": [
+        "./admin/task-center/TaskRuleDraftView.tsx"
+      ],
+      "admin/task-center/TaskUsageObservation": [
+        "./admin/task-center/TaskUsageObservation.tsx"
+      ],
+      "admin/task-center/api/aiAutomationExplanations": [
+        "./admin/task-center/api/aiAutomationExplanations.ts"
+      ],
+      "admin/task-center/api/aiAutomationOriginalRefunds": [
+        "./admin/task-center/api/aiAutomationOriginalRefunds.ts"
+      ],
+      "admin/task-center/api/aiAutomationPolicies": [
+        "./admin/task-center/api/aiAutomationPolicies.ts"
+      ],
+      "admin/task-center/api/aiAutomationReviews": [
+        "./admin/task-center/api/aiAutomationReviews.ts"
+      ],
+      "admin/task-center/api/aiMemberName": [
+        "./admin/task-center/api/aiMemberName.ts"
+      ],
+      "admin/task-center/api/aiNotificationChanges": [
+        "./admin/task-center/api/aiNotificationChanges.ts"
+      ],
+      "admin/task-center/api/aiOpeningDiagnostics": [
+        "./admin/task-center/api/aiOpeningDiagnostics.ts"
+      ],
+      "admin/task-center/api/aiTaskCalendarDraft": [
+        "./admin/task-center/api/aiTaskCalendarDraft.ts"
+      ],
+      "admin/task-center/api/aiTaskOpeningProposals": [
+        "./admin/task-center/api/aiTaskOpeningProposals.ts"
+      ],
+      "admin/task-center/api/aiTaskReadPolicy": [
+        "./admin/task-center/api/aiTaskReadPolicy.ts"
+      ],
+      "admin/task-center/api/aiTaskRecovery": [
+        "./admin/task-center/api/aiTaskRecovery.ts"
+      ],
+      "admin/task-center/api/aiTaskRuleDraft": [
+        "./admin/task-center/api/aiTaskRuleDraft.ts"
+      ],
+      "admin/task-center/automation-original-navigation": [
+        "./admin/task-center/automation-original-navigation.ts"
+      ],
+      "admin/task-center/automation-policy-session": [
+        "./admin/task-center/automation-policy-session.ts"
+      ],
+      "admin/task-center/automation-review-session": [
+        "./admin/task-center/automation-review-session.ts"
+      ],
+      "admin/task-center/entry-scene-catalog-api": [
+        "./admin/task-center/entry-scene-catalog-api.ts"
+      ],
+      "admin/task-center/index": [
+        "./admin/task-center/index.ts"
+      ],
+      "admin/task-center/member-name-reconfirmation": [
+        "./admin/task-center/member-name-reconfirmation.ts"
+      ],
+      "admin/task-center/member-name-session": [
+        "./admin/task-center/member-name-session.ts"
+      ],
+      "admin/task-center/notification-change-session": [
+        "./admin/task-center/notification-change-session.ts"
+      ],
+      "admin/task-center/notification-reconfirmation": [
+        "./admin/task-center/notification-reconfirmation.ts"
+      ],
+      "admin/task-center/original-reconfirmation-journal": [
+        "./admin/task-center/original-reconfirmation-journal.ts"
+      ],
+      "admin/task-center/original-reconfirmation-session": [
+        "./admin/task-center/original-reconfirmation-session.ts"
+      ],
+      "admin/task-center/readiness-diagnostics": [
+        "./admin/task-center/readiness-diagnostics.ts"
+      ],
+      "admin/task-center/runtime": [
+        "./admin/task-center/runtime.ts"
+      ],
+      "admin/task-center/task-calendar-draft-session": [
+        "./admin/task-center/task-calendar-draft-session.ts"
+      ],
+      "admin/task-center/task-opening-proposal-session": [
+        "./admin/task-center/task-opening-proposal-session.ts"
+      ],
+      "admin/task-center/task-read-policy-session": [
+        "./admin/task-center/task-read-policy-session.ts"
+      ],
+      "admin/task-center/task-recovery-session": [
+        "./admin/task-center/task-recovery-session.ts"
+      ],
+      "admin/task-center/task-rule-draft-session": [
+        "./admin/task-center/task-rule-draft-session.ts"
+      ],
+      "admin/assistant": [
+        "./admin/assistant/index.tsx"
+      ],
+      "admin/assistant/host": [
+        "./admin/assistant/host.tsx"
+      ],
+      "admin/assistant/source/ai-native/CalendarSourceEntry": [
+        "./admin/assistant/ai-native/CalendarSourceEntry.tsx"
+      ],
+      "admin/assistant/source/ai-native/ConversationAdmission": [
+        "./admin/assistant/ai-native/ConversationAdmission.tsx"
+      ],
+      "admin/assistant/source/ai-native/ConversationClosure": [
+        "./admin/assistant/ai-native/ConversationClosure.tsx"
+      ],
+      "admin/assistant/source/ai-native/ConversationDetail": [
+        "./admin/assistant/ai-native/ConversationDetail.tsx"
+      ],
+      "admin/assistant/source/ai-native/ConversationHistory": [
+        "./admin/assistant/ai-native/ConversationHistory.tsx"
+      ],
+      "admin/assistant/source/ai-native/ConversationLifecycle": [
+        "./admin/assistant/ai-native/ConversationLifecycle.tsx"
+      ],
+      "admin/assistant/source/ai-native/ConversationOpeningExecution": [
+        "./admin/assistant/ai-native/ConversationOpeningExecution.tsx"
+      ],
+      "admin/assistant/source/ai-native/ConversationOrderExecution": [
+        "./admin/assistant/ai-native/ConversationOrderExecution.tsx"
+      ],
+      "admin/assistant/source/ai-native/ConversationOrderHandoff": [
+        "./admin/assistant/ai-native/ConversationOrderHandoff.tsx"
+      ],
+      "admin/assistant/source/ai-native/ConversationOrderResults": [
+        "./admin/assistant/ai-native/ConversationOrderResults.tsx"
+      ],
+      "admin/assistant/source/ai-native/ConversationQuoteConfirmation": [
+        "./admin/assistant/ai-native/ConversationQuoteConfirmation.tsx"
+      ],
+      "admin/assistant/source/ai-native/ConversationQuoteExecution": [
+        "./admin/assistant/ai-native/ConversationQuoteExecution.tsx"
+      ],
+      "admin/assistant/source/ai-native/ConversationQuoteSelection": [
+        "./admin/assistant/ai-native/ConversationQuoteSelection.tsx"
+      ],
+      "admin/assistant/source/ai-native/ConversationResult": [
+        "./admin/assistant/ai-native/ConversationResult.tsx"
+      ],
+      "admin/assistant/source/ai-native/ConversationTaskCreation": [
+        "./admin/assistant/ai-native/ConversationTaskCreation.tsx"
+      ],
+      "admin/assistant/source/ai-native/NotificationDraftFlow": [
+        "./admin/assistant/ai-native/NotificationDraftFlow.tsx"
+      ],
+      "admin/assistant/source/ai-native/OrderHumanHandoff": [
+        "./admin/assistant/ai-native/OrderHumanHandoff.tsx"
+      ],
+      "admin/assistant/source/ai-native/OriginalOrderReceiptLink": [
+        "./admin/assistant/ai-native/OriginalOrderReceiptLink.tsx"
+      ],
+      "admin/assistant/source/ai-native/QuoteCandidateFields": [
+        "./admin/assistant/ai-native/QuoteCandidateFields.tsx"
+      ],
+      "admin/assistant/source/ai-native/QuoteReprepare": [
+        "./admin/assistant/ai-native/QuoteReprepare.tsx"
+      ],
+      "admin/assistant/source/ai-native/RegisteredOrderActions": [
+        "./admin/assistant/ai-native/RegisteredOrderActions.tsx"
+      ],
+      "admin/assistant/source/ai-native/RuleSourceEntry": [
+        "./admin/assistant/ai-native/RuleSourceEntry.tsx"
+      ],
+      "admin/assistant/source/ai-native/TaskClarification": [
+        "./admin/assistant/ai-native/TaskClarification.tsx"
+      ],
+      "admin/assistant/source/ai-native/TaskHumanApproval": [
+        "./admin/assistant/ai-native/TaskHumanApproval.tsx"
+      ],
+      "admin/assistant/source/ai-native/TaskQuoteReprepare": [
+        "./admin/assistant/ai-native/TaskQuoteReprepare.tsx"
+      ],
+      "admin/assistant/source/ai-native/budget-settings-session": [
+        "./admin/assistant/ai-native/budget-settings-session.ts"
+      ],
+      "admin/assistant/source/ai-native/conversation-admission-session": [
+        "./admin/assistant/ai-native/conversation-admission-session.ts"
+      ],
+      "admin/assistant/source/ai-native/conversation-history-reader": [
+        "./admin/assistant/ai-native/conversation-history-reader.ts"
+      ],
+      "admin/assistant/source/ai-native/conversation-lifecycle-session": [
+        "./admin/assistant/ai-native/conversation-lifecycle-session.ts"
+      ],
+      "admin/assistant/source/ai-native/conversation-navigation": [
+        "./admin/assistant/ai-native/conversation-navigation.ts"
+      ],
+      "admin/assistant/source/ai-native/conversation-opening-execution-session": [
+        "./admin/assistant/ai-native/conversation-opening-execution-session.ts"
+      ],
+      "admin/assistant/source/ai-native/conversation-order-execution-session": [
+        "./admin/assistant/ai-native/conversation-order-execution-session.ts"
+      ],
+      "admin/assistant/source/ai-native/conversation-order-results-reader": [
+        "./admin/assistant/ai-native/conversation-order-results-reader.ts"
+      ],
+      "admin/assistant/source/ai-native/conversation-quote-confirmation-session": [
+        "./admin/assistant/ai-native/conversation-quote-confirmation-session.ts"
+      ],
+      "admin/assistant/source/ai-native/conversation-quote-selection-session": [
+        "./admin/assistant/ai-native/conversation-quote-selection-session.ts"
+      ],
+      "admin/assistant/source/ai-native/conversation-task-creation-session": [
+        "./admin/assistant/ai-native/conversation-task-creation-session.ts"
+      ],
+      "admin/assistant/source/ai-native/conversation-workbench-host": [
+        "./admin/assistant/ai-native/conversation-workbench-host.ts"
+      ],
+      "admin/assistant/source/ai-native/notification-draft-session": [
+        "./admin/assistant/ai-native/notification-draft-session.ts"
+      ],
+      "admin/assistant/source/ai-native/order-human-handoff-session": [
+        "./admin/assistant/ai-native/order-human-handoff-session.ts"
+      ],
+      "admin/assistant/source/ai-native/quote-reprepare-session": [
+        "./admin/assistant/ai-native/quote-reprepare-session.ts"
+      ],
+      "admin/assistant/source/ai-native/rule-source-entry-session": [
+        "./admin/assistant/ai-native/rule-source-entry-session.ts"
+      ],
+      "admin/assistant/source/ai-native/workbench-input-review-session": [
+        "./admin/assistant/ai-native/workbench-input-review-session.ts"
+      ],
+      "admin/assistant/source/ai-operator/AiOperatorNavigation": [
+        "./admin/assistant/ai-operator/AiOperatorNavigation.tsx"
+      ],
+      "admin/assistant/source/ai-operator/AiOperatorPage": [
+        "./admin/assistant/ai-operator/AiOperatorPage.tsx"
+      ],
+      "admin/assistant/source/ai-operator/NativeOperatorWorkspace": [
+        "./admin/assistant/ai-operator/NativeOperatorWorkspace.tsx"
+      ],
+      "admin/assistant/source/ai-operator/OperatorContext": [
+        "./admin/assistant/ai-operator/OperatorContext.tsx"
+      ],
+      "admin/assistant/source/ai-operator/capabilities": [
+        "./admin/assistant/ai-operator/capabilities.ts"
+      ],
+      "admin/assistant/source/ai-operator/native-session": [
+        "./admin/assistant/ai-operator/native-session.ts"
+      ],
+      "admin/assistant/source/api/aiConversations": [
+        "./admin/assistant/api/aiConversations.ts"
+      ],
+      "admin/assistant/source/api/aiEntryActions": [
+        "./admin/assistant/api/aiEntryActions.ts"
+      ],
+      "admin/assistant/source/api/aiNotificationDrafts": [
+        "./admin/assistant/api/aiNotificationDrafts.ts"
+      ],
+      "admin/assistant/source/api/aiQuoteSelections": [
+        "./admin/assistant/api/aiQuoteSelections.ts"
+      ],
+      "admin/assistant/source/api/aiTaskOrderHandoff": [
+        "./admin/assistant/api/aiTaskOrderHandoff.ts"
+      ],
+      "admin/assistant/source/api/aiWorkbenchDisplays": [
+        "./admin/assistant/api/aiWorkbenchDisplays.ts"
+      ],
+      "admin/assistant/source/copilot/CopilotLayout": [
+        "./admin/assistant/copilot/CopilotLayout.tsx"
+      ],
+      "admin/assistant/source/copilot/CopilotNavigation": [
+        "./admin/assistant/copilot/CopilotNavigation.tsx"
+      ],
+      "admin/assistant/source/copilot/CopilotProvider": [
+        "./admin/assistant/copilot/CopilotProvider.tsx"
+      ],
+      "admin/assistant/source/copilot/CopilotSection": [
+        "./admin/assistant/copilot/CopilotSection.tsx"
+      ],
+      "admin/assistant/source/copilot/context": [
+        "./admin/assistant/copilot/context.ts"
+      ],
+      "admin/assistant/source/copilot/copilot-order-session": [
+        "./admin/assistant/copilot/copilot-order-session.ts"
+      ],
+      "admin/assistant/source/copilot/destinations": [
+        "./admin/assistant/copilot/destinations.ts"
+      ],
+      "admin/assistant/source/copilot/useCopilotOrder": [
+        "./admin/assistant/copilot/useCopilotOrder.ts"
+      ],
+      "admin/assistant/source/host": [
+        "./admin/assistant/host.tsx"
+      ],
+      "admin/assistant/source/index": [
+        "./admin/assistant/index.tsx"
+      ],
+      "admin/assistant/source/transport": [
+        "./admin/assistant/transport.ts"
+      ],
+      "admin/governance/source/useCategoryPreparationSave": [
+        "./admin/governance/useCategoryPreparationSave.ts"
+      ],
+      "admin/governance/source/useCategoryAdoption": [
+        "./admin/governance/useCategoryAdoption.ts"
+      ],
+      "admin/governance/source/shared": [
+        "./admin/governance/shared.ts"
+      ],
+      "admin/governance/source/securityRuleForm": [
+        "./admin/governance/securityRuleForm.ts"
+      ],
+      "admin/governance/source/RulesTab": [
+        "./admin/governance/RulesTab.tsx"
+      ],
+      "admin/governance/source/RuleSetupWizard": [
+        "./admin/governance/RuleSetupWizard.tsx"
+      ],
+      "admin/governance/source/ruleSections": [
+        "./admin/governance/ruleSections.tsx"
+      ],
+      "admin/governance/source/ruleOptionLabels": [
+        "./admin/governance/ruleOptionLabels.ts"
+      ],
+      "admin/governance/source/RentalGovernancePage": [
+        "./admin/governance/RentalGovernancePage.tsx"
+      ],
+      "admin/governance/source/pages": [
+        "./admin/governance/pages.ts"
+      ],
+      "admin/governance/source/page-context": [
+        "./admin/governance/page-context.tsx"
+      ],
+      "admin/governance/source/notificationTemplateForm": [
+        "./admin/governance/notificationTemplateForm.ts"
+      ],
+      "admin/governance/source/NotificationsTab": [
+        "./admin/governance/NotificationsTab.tsx"
+      ],
+      "admin/governance/source/messages": [
+        "./admin/governance/messages.ts"
+      ],
+      "admin/governance/source/MembershipRewardRulesTab": [
+        "./admin/governance/MembershipRewardRulesTab.tsx"
+      ],
+      "admin/governance/source/logic": [
+        "./admin/governance/logic.ts"
+      ],
+      "admin/governance/source/index": [
+        "./admin/governance/index.tsx"
+      ],
+      "admin/governance/source/client": [
+        "./admin/governance/client.ts"
+      ],
+      "admin/governance/source/CategoryTemplateIcon": [
+        "./admin/governance/CategoryTemplateIcon.tsx"
+      ],
+      "admin/governance/source/CategoryTab": [
+        "./admin/governance/CategoryTab.tsx"
+      ],
+      "admin/governance/source/categoryPreparationFields": [
+        "./admin/governance/categoryPreparationFields.ts"
+      ],
+      "admin/governance/source/CategoryPreparationDialog": [
+        "./admin/governance/CategoryPreparationDialog.tsx"
+      ],
+      "admin/governance/source/categoryPreparationCapabilities": [
+        "./admin/governance/categoryPreparationCapabilities.ts"
+      ],
+      "admin/governance/source/CategoryPolicyDialog": [
+        "./admin/governance/CategoryPolicyDialog.tsx"
+      ],
+      "admin/governance/source/CategoryGovernancePageHeader": [
+        "./admin/governance/CategoryGovernancePageHeader.tsx"
+      ],
+      "admin/governance/source/CategoryGovernancePage": [
+        "./admin/governance/CategoryGovernancePage.tsx"
+      ],
+      "admin/governance/source/categoryGovernance": [
+        "./admin/governance/categoryGovernance.ts"
+      ],
+      "admin/governance/source/categoryDraftSections": [
+        "./admin/governance/categoryDraftSections.ts"
+      ],
+      "admin/governance/source/categoryDraftFields": [
+        "./admin/governance/categoryDraftFields.ts"
+      ],
+      "admin/governance/source/CategoryDraftEditor": [
+        "./admin/governance/CategoryDraftEditor.tsx"
+      ],
+      "admin/governance/source/CategoryCreationDialog": [
+        "./admin/governance/CategoryCreationDialog.tsx"
+      ],
+      "admin/governance/source/CategoryConditionalCapabilitiesEditor": [
+        "./admin/governance/CategoryConditionalCapabilitiesEditor.tsx"
+      ],
+      "admin/governance/source/CategoryCompatibilityRelationsEditor": [
+        "./admin/governance/CategoryCompatibilityRelationsEditor.tsx"
+      ],
+      "admin/governance/source/categoryAdoptionPending": [
+        "./admin/governance/categoryAdoptionPending.ts"
+      ],
+      "admin/governance/source/category-preparation-client": [
+        "./admin/governance/category-preparation-client.ts"
+      ],
+      "admin/governance/source/category-governance-ports": [
+        "./admin/governance/category-governance-ports.ts"
+      ],
+      "admin/governance/source/CalendarYearGrid": [
+        "./admin/governance/CalendarYearGrid.tsx"
+      ],
+      "admin/governance/source/CalendarTab": [
+        "./admin/governance/CalendarTab.tsx"
+      ],
+      "admin/governance/source/CalendarRangeModal": [
+        "./admin/governance/CalendarRangeModal.tsx"
+      ],
+      "admin/governance/source/CalendarMonthGrid": [
+        "./admin/governance/CalendarMonthGrid.tsx"
+      ],
+      "admin/governance/source/calendar-year-model": [
+        "./admin/governance/calendar-year-model.ts"
+      ],
+      "admin/assistant/source/ai-native/category-governance-display": [
+        "./admin/assistant/ai-native/category-governance-display.ts"
+      ],
+      "admin/assistant/source/ai-native/category-assist-session": [
+        "./admin/assistant/ai-native/category-assist-session.ts"
+      ],
+      "admin/assistant/source/ai-native/CategoryGovernanceCard": [
+        "./admin/assistant/ai-native/CategoryGovernanceCard.tsx"
+      ],
+      "admin/assistant/source/ai-native/CategoryAssistFlow": [
+        "./admin/assistant/ai-native/CategoryAssistFlow.tsx"
+      ],
+      "admin/assistant/source/api/aiCategoryDraft": [
+        "./admin/assistant/api/aiCategoryDraft.ts"
+      ],
+      "admin/browser-notifications/source/MessageCenterPage": [
+        "admin/browser-notifications/MessageCenterPage.tsx"
+      ],
+      "admin/browser-notifications/source/archive/inbox-triage/InboxTriage": [
+        "admin/browser-notifications/archive/inbox-triage/InboxTriage.tsx"
+      ],
+      "admin/browser-notifications/source/archive/inbox-triage/original.css": [
+        "admin/browser-notifications/archive/inbox-triage/original.css"
+      ],
+      "admin/browser-notifications/source/archive/inbox-triage/integration.css": [
+        "admin/browser-notifications/archive/inbox-triage/integration.css"
+      ],
+      "admin/browser-notifications/source/archive/shared/MeasuredHeight": [
+        "admin/browser-notifications/archive/shared/MeasuredHeight.tsx"
+      ],
+      "admin/assistant-shell": [
+        "admin/assistant-shell.tsx"
+      ],
+      "admin/desktop-browser": [
+        "./admin/desktop-browser.tsx"
+      ],
+      "admin/assistant-browser": [
+        "./admin/assistant-browser.tsx"
+      ],
+      "admin/assistant-navigation": [
+        "./admin/assistant-navigation.ts"
+      ],
+      "admin/assistant-pages": [
+        "./admin/assistant-pages.tsx"
+      ],
+      "admin/browser-page-icons": [
+        "./admin/browser-page-icons.tsx"
+      ]
+    }
+  },
+  "scripts": {
+    "prebuild": "npm run build -w @rental-os/shared && npm run build -w @rental-os/platform-core-host",
+    "build": "node ../../scripts/build-selected-prisma.cjs --project tsconfig.json --mode rental",
+    "prelint": "npm run build -w @rental-os/shared && npm run build -w @rental-os/platform-core-host",
+    "lint": "node ../../scripts/build-selected-prisma.cjs --project tsconfig.json --mode rental --noEmit",
+    "build:native-clients": "node ../../scripts/miniprogram-shared-types.cjs --build-native-clients",
+    "lint:native-clients": "node ../../scripts/miniprogram-shared-types.cjs --build-native-clients --check",
+    "prebuild:contracts": "npm run build -w @rental-os/platform-contracts",
+    "build:contracts": "tsc -p tsconfig.contracts.json",
+    "postbuild": "npm run build:native-clients"
+  },
+  "dependencies": {
+    "@rental-os/platform-contracts": "0.1.0",
+    "zod": "3.25.76"
+  },
+  "peerDependencies": {
+    "@nestjs/common": "^10.4.15",
+    "@prisma/client": "^5.22.0",
+    "@rental-os/platform-server": "0.1.0",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.1",
+    "@nestjs/core": "^10.4.15",
+    "@nestjs/platform-express": "^10.4.15",
+    "@rental-os/core-contracts": "0.1.0",
+    "@rental-os/platform-admin": "0.1.0",
+    "@tanstack/react-query": "5.101.4",
+    "antd": "6.6.0",
+    "lucide-react": "^1.49.0",
+    "react": "19.2.8",
+    "react-router-dom": "7.18.2",
+    "@rental-os/core-host": "0.1.0",
+    "@rental-os/platform-core-host": "0.1.0",
+    "@rental-os/web-client": "0.1.0",
+    "ajv": "^8.12.0",
+    "zustand": "5.0.14",
+    "@rc-component/motion": "1.3.3",
+    "dayjs": "1.11.21",
+    "axios": "1.19.0",
+    "motion": "14.6.0",
+    "@tanstack/react-table": "8.21.3",
+    "@rental-os/shared": "0.1.0",
+    "@rental-os/ai-native-admin": "0.1.0",
+    "typescript": "5.9.3",
+    "@animate-ui/react": "2.3.0",
+    "react-markdown": "10.1.0",
+    "ajv-formats": "2.1.1",
+    "@nestjs/config": "^3.3.0"
+  },
+  "peerDependenciesMeta": {
+    "@nestjs/common": {
+      "optional": true
+    },
+    "@prisma/client": {
+      "optional": true
+    },
+    "@rental-os/platform-server": {
+      "optional": true
+    },
+    "class-transformer": {
+      "optional": true
+    },
+    "class-validator": {
+      "optional": true
+    },
+    "@nestjs/core": {
+      "optional": true
+    },
+    "@nestjs/platform-express": {
+      "optional": true
+    },
+    "@rental-os/core-contracts": {
+      "optional": true
+    },
+    "@rental-os/platform-admin": {
+      "optional": true
+    },
+    "@tanstack/react-query": {
+      "optional": true
+    },
+    "antd": {
+      "optional": true
+    },
+    "lucide-react": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "react-router-dom": {
+      "optional": true
+    },
+    "@rental-os/core-host": {
+      "optional": true
+    },
+    "@rental-os/platform-core-host": {
+      "optional": true
+    },
+    "@rental-os/web-client": {
+      "optional": true
+    },
+    "ajv": {
+      "optional": true
+    },
+    "zustand": {
+      "optional": true
+    },
+    "@rc-component/motion": {
+      "optional": true
+    },
+    "dayjs": {
+      "optional": true
+    },
+    "axios": {
+      "optional": true
+    },
+    "motion": {
+      "optional": true
+    },
+    "@tanstack/react-table": {
+      "optional": true
+    },
+    "@rental-os/shared": {
+      "optional": true
+    },
+    "@rental-os/ai-native-admin": {
+      "optional": true
+    },
+    "typescript": {
+      "optional": true
+    },
+    "@animate-ui/react": {
+      "optional": true
+    },
+    "react-markdown": {
+      "optional": true
+    },
+    "ajv-formats": {
+      "optional": true
+    },
+    "@nestjs/config": {
+      "optional": true
+    }
+  }
+}

@@ -1,17 +1,88 @@
 "use strict";
 /** Real official SDKs and new package sources; all HTTP stays in-process with synthetic identity evidence. */
 const assert = require("node:assert/strict");
-const { test } = require("node:test");
+const { test, after } = require("node:test");
 const fs = require("node:fs");
 const path = require("node:path");
-const { createRequire, registerHooks } = require("node:module");
-const { pathToFileURL } = require("node:url");
+const { createRequire, registerHooks, isBuiltin } = require("node:module");
+const { pathToFileURL, fileURLToPath } = require("node:url");
 const root = path.resolve(__dirname, "..");
-const toolchainRoot = path.resolve(process.env.MCP_TEST_TOOLCHAIN_ROOT || path.join(root, "clients/agent-desktop/harness"));
-const ts = require(path.join(toolchainRoot, "node_modules/typescript/lib/typescript.js"));
-// Test-only resolution of this tree's existing, fixed SDK installation. Product
-// sources use package exports, never this Harness path or copied node_modules.
-const installed = createRequire(path.join(toolchainRoot, "packages/mcp/mcp-client/package.json"));
+const toolchainRoot = path.resolve(process.env.MCP_TEST_TOOLCHAIN_ROOT || root);
+const dependencyDirectory = path.join(toolchainRoot, "node_modules");
+const dependencyRequire = createRequire(path.join(dependencyDirectory, "typescript/package.json"));
+// Resolve each third-party package from the chosen installation. A missing
+// prerequisite cannot fall through to an ancestor or a private Harness checkout.
+function resolveDependency(specifier) {
+  if (isBuiltin(specifier)) return specifier;
+  const packageName = specifier.split("/").slice(0, specifier.startsWith("@") ? 2 : 1).join("/");
+  const packageDirectory = path.join(dependencyDirectory, packageName);
+  if (!fs.existsSync(path.join(packageDirectory, "package.json"))) {
+    const error = new Error(`MCP test prerequisite ${packageName} is missing from ${dependencyDirectory}. Set MCP_TEST_TOOLCHAIN_ROOT to an existing installation containing this package.`);
+    error.code = "MCP_TEST_PREREQUISITE";
+    throw error;
+  }
+  const resolved = dependencyRequire.resolve(specifier);
+  const relative = path.relative(fs.realpathSync(packageDirectory), fs.realpathSync(resolved));
+  assert.ok(relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative),
+    `MCP test dependency ${specifier} resolved outside its selected package`);
+  return resolved;
+}
+function installed(specifier) { return dependencyRequire(resolveDependency(specifier)); }
+installed.resolve = resolveDependency;
+const ts = installed("typescript");
+installed.resolve("@types/node/package.json");
+installed.resolve("@modelcontextprotocol/server");
+const temporaryRoot = path.join(root, "output/.tmp");
+const owner = path.basename(process.argv[1] || "mcp-tests").replace(/[^A-Za-z0-9._-]/gu, "_");
+const outputParent = path.resolve(process.env.MCP_TEST_OUTPUT_ROOT || path.join(temporaryRoot, `mcp-test-toolchain-${process.pid}`));
+const outputDirectory = path.join(outputParent, `foundation-${owner}-${process.pid}`);
+let ownsOutput = false;
+function within(directory, file) {
+  const relative = path.relative(directory, file);
+  return relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+function checkOutputPath() {
+  assert.ok(within(temporaryRoot, outputParent), "MCP test output must stay in this worktree's output/.tmp");
+  for (let current = outputDirectory; current !== root; current = path.dirname(current)) {
+    assert.ok(within(root, current), "MCP test output escaped its worktree");
+    if (fs.existsSync(current)) assert.equal(fs.lstatSync(current).isSymbolicLink(), false, "MCP test must not follow output links");
+  }
+}
+function prepareOutput() {
+  if (!ownsOutput) {
+    checkOutputPath();
+    fs.mkdirSync(outputParent, { recursive: true });
+    fs.mkdirSync(outputDirectory);
+    ownsOutput = true;
+  }
+  return outputDirectory;
+}
+function cleanupOutput() {
+  if (!ownsOutput) return;
+  checkOutputPath();
+  assert.equal(fs.realpathSync(outputDirectory), outputDirectory, "MCP test output was redirected");
+  const checkChildren = directory => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      assert.equal(entry.isSymbolicLink(), false, "MCP test cleanup must not enter a link");
+      if (entry.isDirectory()) checkChildren(path.join(directory, entry.name));
+    }
+  };
+  checkChildren(outputDirectory);
+  fs.rmSync(outputDirectory, { recursive: true });
+  assert.equal(fs.existsSync(outputDirectory), false, "MCP test output was not removed");
+  ownsOutput = false;
+  if (!process.env.MCP_TEST_OUTPUT_ROOT) {
+    try { fs.rmdirSync(outputParent); }
+    catch (error) { if (error.code !== "ENOTEMPTY" && error.code !== "ENOENT") throw error; }
+  }
+}
+// Register before compilation so failed and cancelled runs release their own output.
+after(cleanupOutput);
+process.once("exit", cleanupOutput);
+for (const [name, status] of [["SIGINT", 130], ["SIGTERM", 143]]) process.once(name, () => {
+  try { cleanupOutput(); } finally { process.exit(status); }
+});
+const sourceResolver = require("../scripts/controller-sources.cjs").createControllerSourceLoader(root, dependencyDirectory);
 const sourceCache = new Map();
 function source(relative) {
   const file = path.join(root, relative);
@@ -21,17 +92,22 @@ function source(relative) {
     fileName: file,
   }).outputText;
   const module = { exports: {} };
-  const localRequire = specifier => specifier === "@rental-os/shared" ? source("packages/shared/src/index.ts")
-    : specifier.startsWith(".")
-      ? source(path.relative(root, path.resolve(path.dirname(file), specifier.endsWith(".js") ? specifier.replace(/\.js$/, ".ts") : `${specifier}.ts`)))
-      : file.startsWith(path.join(root, "packages/shared/src")) ? require(specifier) : installed(specifier);
+  const localRequire = specifier => {
+    const dependency = sourceResolver.resolveSource(file, specifier, true);
+    return dependency ? source(path.relative(root, dependency)) : installed(specifier);
+  };
   new Function("require", "module", "exports", javascript)(localRequire, module, module.exports);
   sourceCache.set(file, module.exports);
   return module.exports;
 }
 const { createProtectedMcpEndpoint, createIntrospectionVerifier, ResourceAuthorizationError } = source("packages/mcp-server/src/index.ts");
-const { inspectRentalMcpConnection, ConnectionInspectionError } = source("clients/harness-plugin/src/connection.ts");
-const { Client, StreamableHTTPClientTransport } = installed("@modelcontextprotocol/client");
+// Harness discovery has its own source prerequisite, independent of the official SDK.
+function harnessConnection() {
+  const connectionSource = "clients/harness-plugin/src/connection.ts";
+  assert.ok(fs.existsSync(path.join(root, connectionSource)),
+    `MCP test prerequisite Harness connection source is missing: ${connectionSource}`);
+  return source(connectionSource);
+}
 const resource = "https://mcp.example.invalid/mcp";
 const issuer = "https://auth.example.invalid/";
 const metadata = "https://mcp.example.invalid/.well-known/oauth-protected-resource/mcp";
@@ -57,6 +133,7 @@ function inProcess(endpoint, calls = []) {
 }
 
 async function verifyBusinessCapabilityMapping(t, mapping) {
+  const { Client, StreamableHTTPClientTransport } = installed("@modelcontextprotocol/client");
   const expected = [
     ["rental.catalog.search", "rental_catalog_search", "read"],
     ["rental.availability.check", "rental_availability_check", "read"],
@@ -255,6 +332,7 @@ test("public client authorization precheck accepts SDK S256 and refuses unregist
 
 async function verifyPersistentOAuthTokens(t, module, endpointModule, authorizationModule = source("packages/mcp-server/src/persistent-oauth-authorization.ts"),
   createService = source("packages/mcp-server/src/service.ts").createRentalMcpService) {
+  const { Client, StreamableHTTPClientTransport } = installed("@modelcontextprotocol/client");
   const { startAuthorization, exchangeAuthorization, refreshAuthorization } = installed("@modelcontextprotocol/client");
   const clientId = "persistent-client-fixture", scopes = ["rental.catalog.read"];
   const redirectUri = "http://127.0.0.1:49153/rental/callback";
@@ -1016,22 +1094,23 @@ test("OAuth token transport serves SDK exchange and refresh once without inventi
 });
 
 function compileSharedExport(output) {
-  const packageRoot = path.join(root, "packages/shared");
-  const staged = path.join(output, "node_modules/@rental-os/shared");
-  fs.mkdirSync(staged, { recursive: true });
-  fs.copyFileSync(path.join(packageRoot, "package.json"), path.join(staged, "package.json"));
-  const parsed = ts.readConfigFile(path.join(packageRoot, "tsconfig.json"), ts.sys.readFile);
-  assert.equal(parsed.error, undefined);
-  const configured = ts.parseJsonConfigFileContent(parsed.config, ts.sys, packageRoot);
-  const program = ts.createProgram(configured.fileNames, { ...configured.options,
-    module: ts.ModuleKind.Node16, moduleResolution: ts.ModuleResolutionKind.Node16, composite: false,
-    rootDir: path.join(packageRoot, "src"), outDir: path.join(staged, "dist"),
-    paths: { zod: [path.join(path.dirname(require.resolve("zod/package.json")), "index.d.cts")] },
-  });
-  const diagnostics = ts.getPreEmitDiagnostics(program);
-  assert.equal(diagnostics.length, 0, diagnostics.map(d => ts.flattenDiagnosticMessageText(d.messageText, "\n")).join("\n"));
-  assert.equal(program.emit().emitSkipped, false);
-  return staged;
+  // The existing contract build preserves Shared/Core runtime identities and
+  // emits only this tree's contracts into this run's private package directory.
+  const { createBuild, verifyContracts } = require("../scripts/check-rental-package-build.cjs");
+  const build = createBuild(dependencyDirectory);
+  verifyContracts(build);
+  for (const name of ["@rental-os/platform-contracts", "@rental-os/rental-core", "@rental-os/shared"]) {
+    const pkg = build.packages.get(name), target = path.join(output, "node_modules", name);
+    fs.mkdirSync(target, { recursive: true });
+    fs.copyFileSync(path.join(pkg.directory, "package.json"), path.join(target, "package.json"));
+    for (const [file, text] of build.outputs) {
+      if (!within(pkg.directory, file)) continue;
+      const destination = path.join(target, path.relative(pkg.directory, file));
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.writeFileSync(destination, text);
+    }
+  }
+  return path.join(output, "node_modules/@rental-os/shared");
 }
 
 function conversationResult(status = "unknown", sceneCode = "order_explanation") {
@@ -1063,6 +1142,7 @@ function conversationResult(status = "unknown", sceneCode = "order_explanation")
 }
 
 async function verifyConversationRead(t, createRead) {
+  const { Client, StreamableHTTPClientTransport } = installed("@modelcontextprotocol/client");
   const command = { draftVersion: "ain-conversation-draft-2", conversationId: "conversation-a", admissionKey: "admission-a", resultId: "result-a" };
   let current = conversationResult(), readCalls = 0, published = true;
   let afterRead;
@@ -1096,6 +1176,7 @@ async function verifyConversationRead(t, createRead) {
   assert.equal(readCalls, beforeInputAccessor, "a direct getter input never enters the original adapter");
   assert.equal(read.inputSchema.properties.admissionKey.maxLength, 128);
   assert.equal(read.inputSchema.properties.resultId.pattern, "^[A-Za-z0-9][A-Za-z0-9._:-]*$");
+  installed.resolve("@deepseek-ai/dsh-tools");
   assert.throws(() => installed("@deepseek-ai/dsh-tools").assertSupportedJsonSchema(read.inputSchema), error => error.code === "UNSUPPORTED_SCHEMA",
     "the original Host rejects the actual shared constraints instead of dropping them");
   assert.throws(() => createRead({ name: "override_schema", description: "No override.", outputSchema, originalSchemas: {
@@ -1228,6 +1309,7 @@ function taskRecovery(state = "observed") {
 }
 
 async function verifyTaskRecoveryRead(t, createRead) {
+  const { Client, StreamableHTTPClientTransport } = installed("@modelcontextprotocol/client");
   const command = { draftVersion: "ain-scene-request-draft-1", inputRef: "00000000-0000-4000-8000-000000000001" };
   const outputSchema = { type: "object", properties: { recovery: {} }, required: ["recovery"], additionalProperties: false };
   let current = taskRecovery(), calls = 0, releases = 0, published = true, afterRead, hold;
@@ -1242,6 +1324,7 @@ async function verifyTaskRecoveryRead(t, createRead) {
   binding.read = async () => { throw new Error("Original reader replacement must not run"); };
   assert.throws(() => createRead({ name: "bad_projection", description: "No loose projection.", outputSchema: { type: "object" }, read: async () => current }), /closed object/);
   assert.equal(read.inputSchema.properties.inputRef.format, "uuid");
+  installed.resolve("@deepseek-ai/dsh-tools");
   assert.throws(() => installed("@deepseek-ai/dsh-tools").assertSupportedJsonSchema(read.inputSchema), error => error.code === "UNSUPPORTED_SCHEMA");
   const mutable = { ...command }, initial = read.read(mutable, signal());
   queueMicrotask(() => { mutable.inputRef = "00000000-0000-4000-8000-000000000004"; });
@@ -1325,6 +1408,7 @@ function selectedProposalReview(status = "pending_confirmation") {
 }
 
 async function verifySelectedProposalRead(t, createRead) {
+  const { Client, StreamableHTTPClientTransport } = installed("@modelcontextprotocol/client");
   const selection = quoteSelectionReceipt(), review = selectedProposalReview();
   const command = { selection: { draftVersion: selection.draftVersion, originalInputRef: selection.originalInputRef,
     selectionId: selection.selectionId, taskId: selection.taskId, runId: selection.runId, inputHash: selection.inputHash },
@@ -1338,6 +1422,7 @@ async function verifySelectedProposalRead(t, createRead) {
   const read = createRead(binding);
   binding.read = async () => { throw new Error("Replacement review must not run"); };
   assert.equal(calls, 0);
+  installed.resolve("@deepseek-ai/dsh-tools");
   assert.throws(() => installed("@deepseek-ai/dsh-tools").assertSupportedJsonSchema(read.inputSchema), error => error.code === "UNSUPPORTED_SCHEMA");
   const endpoint = fixture(t, undefined, { readTools: { tools: [read], publication: { allows: async () => published },
     authority: { withRead: async (_auth, _name, _input, consume) => consume() }, accounting: { withCall: async (_auth, _name, _input, consume) => consume() },
@@ -1400,6 +1485,7 @@ function quoteSelectionReceipt(state = "selected_not_approved") {
 }
 
 async function verifyQuoteSelectionRead(t, createRead) {
+  const { Client, StreamableHTTPClientTransport } = installed("@modelcontextprotocol/client");
   const { draftVersion, originalInputRef, selectionId } = quoteSelectionReceipt();
   const command = { draftVersion, originalInputRef, selectionId };
   const outputSchema = { type: "object", properties: { selection: {} }, required: ["selection"], additionalProperties: false };
@@ -1414,6 +1500,7 @@ async function verifyQuoteSelectionRead(t, createRead) {
   binding.read = async () => { throw new Error("Replacement reader must not execute"); };
   assert.equal(calls, 0);
   assert.equal(read.inputSchema.properties.selectionId.format, "uuid");
+  installed.resolve("@deepseek-ai/dsh-tools");
   assert.throws(() => installed("@deepseek-ai/dsh-tools").assertSupportedJsonSchema(read.inputSchema), error => error.code === "UNSUPPORTED_SCHEMA");
   const mutable = { ...command }, pending = read.read(mutable, signal());
   mutable.selectionId = "00000000-0000-4000-8000-000000000005";
@@ -1484,6 +1571,7 @@ function selectedOrderResult(status = "committed") {
 }
 
 async function verifySelectedOrderResultRead(t, createRead) {
+  const { Client, StreamableHTTPClientTransport } = installed("@modelcontextprotocol/client");
   const command = { selection: { draftVersion: "ain-quote-selection-draft-1", originalInputRef: "00000000-0000-4000-8000-000000000001",
     selectionId: "00000000-0000-4000-8000-000000000002", taskId: "00000000-0000-4000-8000-000000000003",
     runId: "00000000-0000-4000-8000-000000000004", inputHash: "a".repeat(64) } };
@@ -1499,6 +1587,7 @@ async function verifySelectedOrderResultRead(t, createRead) {
   binding.read = async () => { throw new Error("Replaced reader must not execute"); };
   assert.equal(calls, 0);
   assert.equal(read.inputSchema.properties.selection.properties.originalInputRef.format, "uuid");
+  installed.resolve("@deepseek-ai/dsh-tools");
   assert.throws(() => installed("@deepseek-ai/dsh-tools").assertSupportedJsonSchema(read.inputSchema), error => error.code === "UNSUPPORTED_SCHEMA");
   const mutable = structuredClone(command), pendingSnapshot = read.read(mutable, signal());
   mutable.selection.inputHash = "f".repeat(64);
@@ -1564,6 +1653,7 @@ function conversationOperation(status = "observed", operation = "create") {
 }
 
 async function verifyOperationRead(t, createRead) {
+  const { Client, StreamableHTTPClientTransport } = installed("@modelcontextprotocol/client");
   const command = { draftVersion: "ain-conversation-draft-2", operationKey: "operation-a" };
   const outputSchema = { type: "object", properties: { observation: {} }, required: ["observation"], additionalProperties: false };
   let current = conversationOperation(), calls = 0, releases = 0, published = true, hold, afterRead;
@@ -1576,6 +1666,7 @@ async function verifyOperationRead(t, createRead) {
   const read = createRead(binding);
   binding.read = async () => { throw new Error("Original reader replacement must not run"); };
   assert.equal(read.inputSchema.properties.operationKey.maxLength, 128);
+  installed.resolve("@deepseek-ai/dsh-tools");
   assert.throws(() => installed("@deepseek-ai/dsh-tools").assertSupportedJsonSchema(read.inputSchema), error => error.code === "UNSUPPORTED_SCHEMA");
   const input = { ...command }, pendingInput = read.read(input, signal());
   queueMicrotask(() => { input.operationKey = "changed-after-validation"; });
@@ -1648,6 +1739,7 @@ function conversationPage(count = 1, status = "active") {
 }
 
 async function verifyConversationList(t, createRead) {
+  const { Client, StreamableHTTPClientTransport } = installed("@modelcontextprotocol/client");
   let current = conversationPage(), calls = 0, releases = 0, published = true, hold;
   const outputSchema = { type: "object", properties: { page: {} }, required: ["page"], additionalProperties: false };
   const binding = { name: "synthetic_conversation_page", description: "Read one authorized metadata page, not all conversations.", outputSchema,
@@ -1656,6 +1748,7 @@ async function verifyConversationList(t, createRead) {
   binding.read = async () => { throw new Error("Original reader replacement must not run"); };
   const command = { draftVersion: "ain-conversation-draft-2", status: "active", limit: 1 };
   assert.equal(read.inputSchema.properties.limit.maximum, 20);
+  installed.resolve("@deepseek-ai/dsh-tools");
   assert.throws(() => installed("@deepseek-ai/dsh-tools").assertSupportedJsonSchema(read.inputSchema), error => error.code === "UNSUPPORTED_SCHEMA");
   const endpoint = fixture(t, async () => verified(), { readTools: { tools: [read], publication: { allows: async () => published },
     authority: { withRead: async (_auth, _name, _input, consume) => consume() }, accounting: { withCall: async (_auth, _name, _input, consume) => consume() },
@@ -1713,6 +1806,7 @@ test("original conversation list reads one bounded page without totals", async t
 });
 
 async function verifyOriginalSelectedOrderComposition(t, createRead, createSelectionRead, createProposalRead) {
+  const { Client, StreamableHTTPClientTransport } = installed("@modelcontextprotocol/client");
   // Original request-bound APIs and Core/approval readers run here. Identity,
   // database and external release are fixtures, not a production MCP adapter.
   const { selectedOrderHarness } = require("./fixtures/ai-native/lane-a-selected-order.cjs");
@@ -1861,28 +1955,35 @@ async function verifyOriginalSelectedOrderComposition(t, createRead, createSelec
 }
 
 async function verifyOriginalConversationComposition(t, createRead, createRecoveryRead, createOperationRead, createListRead, createOrderRead, createSelectionRead, createProposalRead, stagedShared) {
+  const { Client, StreamableHTTPClientTransport } = installed("@modelcontextprotocol/client");
   // Only the existing fixture's shared resolver is replaced; production APIs
   // still import the public package, backed here by this run's private artifact.
   const resolver = path.join(path.dirname(stagedShared), "fixture-shared.cjs");
   fs.writeFileSync(resolver, 'module.exports = require("@rental-os/shared");\n');
   const sharedFile = path.join(stagedShared, "dist/index.js");
+  const sourceUrl = pathToFileURL(root + path.sep).href;
   const hooks = registerHooks({ resolve(specifier, context, next) {
     if (specifier === "@rental-os/shared") return { url: pathToFileURL(sharedFile).href, shortCircuit: true };
     if (context.parentURL?.includes("/tests/fixtures/ai-native/") && specifier === "./local-shared.cjs") {
       return { url: pathToFileURL(resolver).href, shortCircuit: true };
     }
+    if (context.parentURL?.startsWith(sourceUrl) && !specifier.startsWith(".") && !path.isAbsolute(specifier) && !URL.canParse(specifier) && !isBuiltin(specifier)) {
+      const dependency = sourceResolver.resolveSource(fileURLToPath(context.parentURL), specifier, true);
+      return { url: pathToFileURL(dependency || installed.resolve(specifier)).href, shortCircuit: true };
+    }
     return next(specifier, context);
   } });
   const extensions = new Map(Object.getOwnPropertyNames(require.extensions).map(name => [name, Object.getOwnPropertyDescriptor(require.extensions, name)]));
-  const runtime = require("ts-node").register({ transpileOnly: true, compiler: path.join(root, "clients/agent-desktop/harness/node_modules/typescript/lib/typescript.js"),
-    compilerOptions: { module: "Node16", moduleResolution: "Node16", target: "ES2022", experimentalDecorators: true, emitDecoratorMetadata: true, esModuleInterop: true } });
+  let runtime;
   const restore = () => {
-    runtime.enabled(false); hooks.deregister();
+    runtime?.enabled(false); hooks.deregister();
     for (const name of Object.getOwnPropertyNames(require.extensions)) if (!extensions.has(name)) delete require.extensions[name];
     for (const [name, descriptor] of extensions) Object.defineProperty(require.extensions, name, descriptor);
   };
   t.after(restore);
   try {
+    runtime = installed("ts-node").register({ transpileOnly: true, compiler: installed.resolve("typescript"),
+      compilerOptions: { module: "Node16", moduleResolution: "Node16", target: "ES2022", experimentalDecorators: true, emitDecoratorMetadata: true, esModuleInterop: true } });
     const { setup } = require("./fixtures/ai-native/lane-a-original-request.cjs");
     const { composeAiConversationRequests } = require("../apps/api/src/modules/ai-native/conversation.application.ts");
     const { composeRequestBoundOriginalTaskRecoveryReaders, composeRequestBoundOriginalScenes } = require("../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application.ts");
@@ -2050,8 +2151,9 @@ async function verifyOriginalConversationComposition(t, createRead, createRecove
 }
 
 test("compiled MCP package exports load and serve both eras without source transpilation", async t => {
+  const { Client, StreamableHTTPClientTransport } = installed("@modelcontextprotocol/client");
   const packageRoot = path.join(root, "packages/mcp-server");
-  const output = fs.mkdtempSync(path.join(root, "output/mcp-package-consumer-"));
+  const output = prepareOutput();
   const stagedShared = compileSharedExport(output);
   const staged = path.join(output, "node_modules/@rental-os/mcp-server");
   fs.mkdirSync(staged, { recursive: true });
@@ -2060,10 +2162,11 @@ test("compiled MCP package exports load and serve both eras without source trans
   assert.equal(parsed.error, undefined);
   const configured = ts.parseJsonConfigFileContent(parsed.config, ts.sys, packageRoot);
   const serverTypes = path.join(path.dirname(installed.resolve("@modelcontextprotocol/server")), "index.d.mts");
-  const typeRoots = [path.join(root, "clients/agent-desktop/harness/node_modules/@types")];
+  const typeRoots = [path.join(dependencyDirectory, "@types")];
   const program = ts.createProgram(configured.fileNames, {
     ...configured.options, outDir: path.join(staged, "dist"), typeRoots,
-    paths: { "@modelcontextprotocol/server": [serverTypes], "@rental-os/shared": [path.join(stagedShared, "dist/index.d.ts")] },
+    paths: { "@modelcontextprotocol/server": [serverTypes], "@rental-os/shared": [path.join(stagedShared, "dist/index.d.ts")],
+      zod: [path.join(path.dirname(installed.resolve("zod/package.json")), "index.d.cts")] },
   });
   const diagnostics = ts.getPreEmitDiagnostics(program);
   assert.equal(diagnostics.length, 0, diagnostics.map(d => ts.flattenDiagnosticMessageText(d.messageText, "\n")).join("\n"));
@@ -2129,7 +2232,8 @@ test("compiled MCP package exports load and serve both eras without source trans
     strict: true, skipLibCheck: true, declaration: true, target: ts.ScriptTarget.ES2022,
     module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext,
     types: ["node"], typeRoots, rootDir: output, outDir: path.join(output, "consumer-build"),
-    paths: { "@modelcontextprotocol/server": [serverTypes], "@rental-os/shared": [path.join(stagedShared, "dist/index.d.ts")] },
+    paths: { "@modelcontextprotocol/server": [serverTypes], "@rental-os/shared": [path.join(stagedShared, "dist/index.d.ts")],
+      zod: [path.join(path.dirname(installed.resolve("zod/package.json")), "index.d.cts")] },
   });
   const consumerDiagnostics = ts.getPreEmitDiagnostics(consumerProgram);
   assert.equal(consumerDiagnostics.length, 0, consumerDiagnostics.map(d => ts.flattenDiagnosticMessageText(d.messageText, "\n")).join("\n"));
@@ -2141,8 +2245,8 @@ test("compiled MCP package exports load and serve both eras without source trans
     if (context.parentURL?.startsWith(stagedUrl) && specifier === "@modelcontextprotocol/server") {
       return { url: pathToFileURL(installed.resolve(specifier)).href, shortCircuit: true };
     }
-    if (context.parentURL?.startsWith(pathToFileURL(stagedShared + path.sep).href) && specifier === "zod") {
-      return { url: pathToFileURL(require.resolve("zod")).href, shortCircuit: true };
+    if (context.parentURL?.startsWith(pathToFileURL(output + path.sep).href) && specifier === "zod") {
+      return { url: pathToFileURL(installed.resolve("zod")).href, shortCircuit: true };
     }
     return next(specifier, context);
   } });
@@ -2223,6 +2327,7 @@ test("MCP foundation refuses disabled, unconfigured, foreign-origin and malforme
 });
 
 test("standard challenge and RFC 9728 metadata are consumed without granting access or leaking credentials", async t => {
+  const { inspectRentalMcpConnection } = harnessConnection();
   let visits = 0;
   const endpoint = fixture(t, async () => { visits++; return verified(); });
   const challenge = await endpoint.fetch(post("{}"));
@@ -2240,6 +2345,7 @@ test("standard challenge and RFC 9728 metadata are consumed without granting acc
 });
 
 async function verifyProtocolPins(t, create) {
+  const { Client, StreamableHTTPClientTransport } = installed("@modelcontextprotocol/client");
   let reads = 0;
   const endpoint = create({ ...config, readTools: {
     tools: [{ name: "synthetic_version_read", description: "Protocol fixture only, not a production capability.",
@@ -2296,6 +2402,7 @@ test("MCP protocol pins reject undeclared request revisions without reading busi
 });
 
 test("real official MCP client negotiates both supported eras with zero business tools", async t => {
+  const { Client, StreamableHTTPClientTransport } = installed("@modelcontextprotocol/client");
   for (const [versionNegotiation, expectedVersion] of [[{ mode: { pin: "2026-07-28" } }, "2026-07-28"], [{ mode: "legacy" }, "2025-11-25"]]) {
     let visits = 0;
     const endpoint = fixture(t, async token => {
@@ -2353,6 +2460,7 @@ test("late identity verification cannot dispatch after cancellation or close", a
 });
 
 test("client discovery rejects substituted issuer, resource, metadata target and oversized UTF-8 before authorizing", async t => {
+  const { inspectRentalMcpConnection, ConnectionInspectionError } = harnessConnection();
   const endpoint = fixture(t);
   for (const altered of [
     { resource: "https://other.example.invalid/mcp" },
@@ -2376,6 +2484,7 @@ test("client discovery rejects substituted issuer, resource, metadata target and
 });
 
 test("client cancellation does not fetch metadata or publish a late authorization state", async () => {
+  const { inspectRentalMcpConnection } = harnessConnection();
   const controller = new AbortController();
   let release;
   let calls = 0;
@@ -2389,6 +2498,7 @@ test("client cancellation does not fetch metadata or publish a late authorizatio
 });
 
 test("client metadata stream is cancelled when inspection loses its caller", async () => {
+  const { inspectRentalMcpConnection } = harnessConnection();
   const controller = new AbortController();
   let started;
   let cancelled;
@@ -2476,6 +2586,7 @@ test("fixed RFC7662 introspection verifies current resource tokens without cache
 });
 
 async function verifySafeInputErrors(t, create) {
+  const { Client, StreamableHTTPClientTransport } = installed("@modelcontextprotocol/client");
   const visits = { authority: 0, accounting: 0, read: 0 };
   const inputSchema = { type: "object", properties: { entries: { type: "object",
     additionalProperties: { type: "integer", minimum: 1, maximum: 50 } } }, required: ["entries"], additionalProperties: false };
@@ -2523,6 +2634,7 @@ test("MCP read input errors do not echo rejected field paths or values", async t
 });
 
 test("read registration keeps original authority, accounting and released values on the actual MCP path", async t => {
+  const { Client, StreamableHTTPClientTransport } = installed("@modelcontextprotocol/client");
   let published = true;
   let identityValid = true;
   let large = false;
@@ -2639,6 +2751,7 @@ test("read registration keeps original authority, accounting and released values
 });
 
 test("read definitions stay fixed across publication while current policy still withdraws", async t => {
+  const { Client, StreamableHTTPClientTransport } = installed("@modelcontextprotocol/client");
   for (const versionNegotiation of [{ mode: { pin: "2026-07-28" } }, { mode: "legacy" }]) {
     const entered = Promise.withResolvers(), resume = Promise.withResolvers();
     let held = false, published = true, reads = 0, replacements = 0;
@@ -2681,6 +2794,7 @@ test("read definitions stay fixed across publication while current policy still 
 });
 
 test("released JSON snapshots reject values that stringify would silently change", async t => {
+  const { Client, StreamableHTTPClientTransport } = installed("@modelcontextprotocol/client");
   let output = { value: null };
   let getterCalls = 0;
   let toJsonCalls = 0;
@@ -2727,6 +2841,7 @@ test("released JSON snapshots reject values that stringify would silently change
 });
 
 test("trusted subjects stay internal and cannot change across publication or released reads", async t => {
+  const { Client, StreamableHTTPClientTransport } = installed("@modelcontextprotocol/client");
   for (const versionNegotiation of [{ mode: { pin: "2026-07-28" } }, { mode: "legacy" }]) {
     let subject = "synthetic-actor";
     let changeAt;
@@ -2789,6 +2904,7 @@ test("trusted subjects stay internal and cannot change across publication or rel
 });
 
 async function verifyGuidanceSnapshots(t, create) {
+  const { Client, StreamableHTTPClientTransport } = installed("@modelcontextprotocol/client");
   for (const versionNegotiation of [{ mode: { pin: "2026-07-28" } }, { mode: "legacy" }]) {
     let entered, resume;
     const begun = new Promise(resolve => { entered = resolve; });
@@ -2899,6 +3015,7 @@ test("guidance methods and ordinary snapshots remain fixed without freezing curr
 });
 
 async function verifyResources(t, create) {
+  const { Client, StreamableHTTPClientTransport } = installed("@modelcontextprotocol/client");
   for (const versionNegotiation of [{ mode: { pin: "2026-07-28" } }, { mode: "legacy" }]) {
     let published = true, version = "resource-v1", subject = "synthetic-actor", text = "Original receipt reference, not approval or execution.";
     let descriptors, released, missing = false, hold, deny, mutate, reads = 0, lists = 0, getters = 0;
@@ -2996,6 +3113,7 @@ test("optional resources require current exact publication and original read own
 });
 
 test("optional prompts publish current versioned guidance without business inputs or effects", async t => {
+  const { Client, StreamableHTTPClientTransport } = installed("@modelcontextprotocol/client");
   for (const versionNegotiation of [{ mode: { pin: "2026-07-28" } }, { mode: "legacy" }]) {
     let published = true;
     let version = "reviewed-prompt-v1";
@@ -3152,6 +3270,7 @@ test("optional prompts publish current versioned guidance without business input
 });
 
 test("versioned instructions use the approved provider without granting tools or prompts", async t => {
+  const { Client, StreamableHTTPClientTransport } = installed("@modelcontextprotocol/client");
   let text = "Choose the format the user needs. Missing facts are not zero. {{literal}}";
   let version = "reviewed-v1";
   let allowed = true;

@@ -8,13 +8,14 @@
  *   4. 校验并写入 dist/config/public.js：
  *      - 默认（本机联调）模式：允许回环 http 地址，并在产物里写 allowLocalApi=true，打印“不可上传”提示；
  *      - `--release` 发布模式：API 地址必须是 HTTPS，任何 http 地址（含回环）一律拒绝，联调开关恒为 false；
- *   5. 校验产物：不含 @rental-os/shared 的运行时依赖（只允许 import type）、不含密钥形态字符串。
+ *   5. 打包正式 Rental 员工客户端的相对 CommonJS 闭包与许可；拒绝剩余裸包依赖和密钥形态字符串。
  *
  * 与客户小程序的区别：员工端一套包服务所有租户，构建不绑定租户编码。
  *
  * 用法：
  *   node scripts/build.cjs              # 本机联调构建
- *   node scripts/build.cjs --release    # 发布构建（拒绝 http）
+ *   node scripts/build.cjs --release --rental-package <待部署目录> --rental-lock <组合锁.json>
+ *                                     # 固定标准包发布构建（拒绝 http）
  *   node scripts/build.cjs --check      # 只做类型检查
  *   node scripts/build.cjs --out-dir <本树 output/.tmp/任务/员工端> # 隔离构建
  */
@@ -22,7 +23,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
-const { prepareMiniprogramSharedTypes, releaseMiniprogramSharedTypes, clearMiniprogramBuildOutput } = require('../../../scripts/miniprogram-shared-types.cjs');
+const { prepareMiniprogramSharedTypes, releaseMiniprogramSharedTypes, clearMiniprogramBuildOutput, emitMiniprogramRentalClientRuntime, validateMiniprogramRuntime } = require('../../../scripts/miniprogram-shared-types.cjs');
 
 const root = path.resolve(__dirname, "..");
 const src = path.join(root, "src");
@@ -54,7 +55,7 @@ function resolveTsc() {
 let privateTypeConfig;
 function runTsc(args) {
   if (args[0] === '-p' && args[1] === 'tsconfig.json') {
-    privateTypeConfig ??= prepareMiniprogramSharedTypes(root);
+    privateTypeConfig ??= prepareMiniprogramSharedTypes(root, process.argv.slice(2));
     args = ['-p', privateTypeConfig, ...args.slice(2)];
   }
   const result = spawnSync(process.execPath, [resolveTsc(), ...args], { cwd: root, stdio: "inherit" });
@@ -81,6 +82,7 @@ function publicConfig(defaults) {
 }
 
 async function main() {
+  privateTypeConfig = prepareMiniprogramSharedTypes(root, process.argv.slice(2));
   if (checkOnly) {
     runTsc(["-p", "tsconfig.json", "--noEmit"]);
     process.stdout.write("[staff-miniprogram build] 类型检查通过\n");
@@ -96,6 +98,7 @@ async function main() {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.copyFileSync(file, target);
   }
+  emitMiniprogramRentalClientRuntime(root, dist, privateTypeConfig);
   const actionRuntime = await require('../../../scripts/miniprogram-ai-runtime.cjs').buildEntryActionRuntime(root);
   const actionRuntimeFile = path.join(dist, 'components', 'ai-native', 'entry-action-runtime.js');
   fs.mkdirSync(path.dirname(actionRuntimeFile), { recursive: true });
@@ -115,11 +118,15 @@ async function main() {
   fs.writeFileSync(configFile, replaced);
   fs.writeFileSync(path.join(dist, "config", "public.json"), `${literal}\n`);
 
+  validateMiniprogramRuntime(root, dist);
   const compiled = walk(dist).filter((file) => /\.(js|json|wxml|wxss)$/.test(file));
   for (const file of compiled) {
     const text = fs.readFileSync(file, "utf8");
     if (file.endsWith(".js") && /require\(["']@rental-os\/shared["']\)/.test(text)) {
       fail(`${path.relative(root, file)} 在运行时依赖 @rental-os/shared；小程序只能使用 import type`);
+    }
+    if (file.endsWith(".js") && /require\(["']@rental-os\/rental-core(?:\/[^"']+)?["']\)/.test(text)) {
+      fail(`${path.relative(root, file)} 未打包正式Rental员工客户端闭包`);
     }
     if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(text)) fail(`${path.relative(root, file)} 含私钥`);
     if (/(appSecret|session_key|apiV3Key|mchKey|merchantSecret)\s*[:=]\s*["'][^"']+["']/i.test(text)) fail(`${path.relative(root, file)} 含密钥形态字符串`);
@@ -150,7 +157,7 @@ async function main() {
   catch (error) { process.stderr.write(`[staff-miniprogram build] ${error.message}\n`); process.exitCode = 1; }
   finally {
     try { releaseMiniprogramSharedTypes(privateTypeConfig); }
-    catch (error) { process.stderr.write(`[staff-miniprogram cleanup] ${error.message}\n`); process.exitCode = 1; }
+    catch (error) { process.stderr.write(`[staff-miniprogram cleanup] ${error.message}\n`); buildCompleted = false; process.exitCode = 1; }
     if (outputPrepared && !buildCompleted) {
       try {
         clearMiniprogramBuildOutput(root, process.argv.slice(2));

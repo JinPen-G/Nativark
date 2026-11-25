@@ -1,6 +1,2 @@
-import { IsOptional, IsString, Matches, MaxLength } from 'class-validator';
-import type { AiTaskOrderHandoffQuery } from '@rental-os/shared';
-export class AiTaskOrderHandoffQueryDto implements AiTaskOrderHandoffQuery {
-  @IsString() @MaxLength(36) @Matches(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) taskId!: string;
-  @IsOptional() @IsString() @MaxLength(36) @Matches(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) runId?: string;
-}
+/** 原组合兼容出口；AI Runtime 与运行时标记由正式包单源提供。 */
+export * from "@rental-os/ai-native-server/runtime/task-order-handoff.dto";
