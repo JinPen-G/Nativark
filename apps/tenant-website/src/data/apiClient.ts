@@ -54,6 +54,23 @@ export type CatalogPricingGroup = ClientCatalogPricingGroup;
 
 export type PublicCatalogResponse = ClientCatalogResponse;
 
+/** Both public browsing and signed-in booking must understand the current
+ * category projection. Missing metadata remains compatible with the original
+ * catalog contract; an advertised unknown structure cannot start a new flow.
+ * This gate does not reinterpret historical orders or original quote receipts. */
+export function assertSupportedCatalogVersion(catalog: ClientCatalogResponse): ClientCatalogResponse {
+  if (!catalog || typeof catalog !== 'object' || Array.isArray(catalog)
+    || typeof catalog.categoryCode !== 'string' || !catalog.categoryCode) {
+    throw new Error('商品目录无法读取，请重新加载');
+  }
+  const metadata = catalog.categoryMetadata;
+  if (metadata !== undefined && (!metadata || typeof metadata !== 'object'
+    || Array.isArray(metadata) || metadata.structureVersion !== 1)) {
+    throw new Error('当前网站不支持此品类展示版本，请刷新页面；仍无法使用时请联系商户');
+  }
+  return catalog;
+}
+
 /** 公开可用性检索：给定门店 + 时段 + 候选型号，返回各行可租状态（供官网按时段/门店真实过滤商品）。 */
 export interface PublicAvailabilityRequest {
   locationId?: string;
@@ -73,7 +90,7 @@ export const clientApi = {
     return getJson<BootstrapResponse>('/public/bootstrap', { tenantCode, client: 'web' });
   },
   publicCatalog(tenantCode: string, service: string): Promise<PublicCatalogResponse> {
-    return getJson<PublicCatalogResponse>('/public/catalog', { tenantCode, service });
+    return getJson<PublicCatalogResponse>('/public/catalog', { tenantCode, service }).then(assertSupportedCatalogVersion);
   },
   /** 公开可用性检索（免登录）：按门店 + 时段过滤某服务下的候选型号。后端 public/availability（Phase 2）。 */
   publicAvailability(tenantCode: string, service: string, payload: PublicAvailabilityRequest): Promise<PublicAvailabilityResponse> {

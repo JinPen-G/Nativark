@@ -1,9 +1,9 @@
 // 客户端会话与认证：调用 /api/client/v1/auth/* 与需要登录的接口。
 // 令牌按租户隔离存储（每个租户官网是独立品牌，会话不跨租户），并在 401 时用 refresh token 自动续期一次。
 
-import { API_BASE } from './apiClient';
+import { API_BASE, assertSupportedCatalogVersion } from './apiClient';
 import type { AiBookingHandoff, AiBookingSubmissionAcceptance, AiBookingSubmissionDecision, AiBookingSubmissionReceipt,
-  AiBookingAcceptanceReadRequest, AiBookingAcceptanceReadResponse }
+  AiBookingAcceptanceReadRequest, AiBookingAcceptanceReadResponse, ClientCatalogResponse }
   from '@rental-os/shared';
 import type { AiClientHostCapabilities, EnterpriseOwnRentalPolicy, EnterpriseBookingApprovalView, EnterpriseApprovalOriginalResult, EnterpriseOrderOriginalResult } from '@rental-os/shared';
 import type { IssueEnterpriseOrderDelegation, RevokeEnterpriseOrderDelegation, EnterpriseOrderDelegationOriginal } from '@rental-os/shared';
@@ -226,7 +226,7 @@ export const sessionApi = {
     return switchCustomerWorkspace(owner.tenantCode, CLIENT_V1, workspaceCode);
   },
   /** 登录态目录：含履约地点、履约模式与型号（用于下单时取 locationId / fulfillmentMode）。 */
-  catalog() { return authedJson<Record<string, any>>('/catalog'); },
+  catalog() { return authedJson<ClientCatalogResponse>('/catalog').then(assertSupportedCatalogVersion); },
   availability(payload: unknown) { return authedJson<Record<string, unknown>>('/availability', { method: 'POST', body: JSON.stringify(payload) }); },
   enterpriseRentalPolicies() { return authedJson<EnterpriseOwnRentalPolicy[]>('/enterprise/my-rental-policies'); },
   enterpriseApprovals() { return authedJson<EnterpriseBookingApprovalView[]>('/enterprise/my-approvals'); },
