@@ -15,6 +15,8 @@ import { holdAiTaskDeploymentAdmission, withAiTaskTransactionAuthority, type AiT
 import { TASK_TEXT_MODEL_TOOL } from '../model-input/task-model-input';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiClientPolicyAuthority, type AiClientTaskDependencies } from './client-task.authority';
+import type { ClientBookingOriginalBinding } from './client-booking-transfer-host';
+import { clientBookingTransferCustomerHash, clientBookingTransferReceiptSchema } from './client-booking-transfer.contract';
 import { originalClientMaterialScope, PrismaClientSceneMaterialRepository, type AiClientMaterialDb,
   type AiClientMaterialScope, type AiClientSceneMaterial } from './prisma-client-scene-material.repository';
 import { PrismaClientTaskInputRepository, type AiClientTaskInput } from './prisma-client-task-input.repository';
@@ -245,13 +247,29 @@ export function clientSelectedBookingSubmission(db: AiClientMaterialDb, binding:
 /** Exact server-produced Booking material only. An external save is accepted
  * solely inside the owning Draft transaction, never an arbitrary caller tx. */
 export async function withClientSelectedBookingMaterial<T>(db: AiClientMaterialDb, material: AiClientSceneMaterial,
-  verify: (tx: Prisma.TransactionClient) => Promise<void>, consume: () => Promise<T>, transaction?: Prisma.TransactionClient): Promise<T> {
+  verify: (tx: Prisma.TransactionClient) => Promise<void>, consume: () => Promise<T>, transaction?: Prisma.TransactionClient,
+  original?: ClientBookingOriginalBinding): Promise<T> {
   if (!hasRentalBusinessTenantFence()) return consume();
   const owner = selected(db), booking = bookingTransactions.getStore();
   if (bookingMaterials.getStore() || quoteMaterials.getStore() || typeof verify !== 'function'
-    || !sameScope(material, owner.materialScope) || material.bindingHash !== owner.input.bindingHash
-    || material.publicationHash !== owner.input.publicationHash
     || transaction && (!booking?.active || booking.owner !== owner || booking.transaction !== transaction)) throw denied();
+  if (original) {
+    const receipt = clientBookingTransferReceiptSchema.parse(original.receipt), source = receipt.issue.source;
+    const target = receipt.consumption?.target, identity = owner.input.identity;
+    if (identity.customerType !== 'personal') throw denied();
+    // Only the already-consumed target may keep the original source ciphertext
+    // and idempotency key, and only inside its current owning Draft transaction.
+    if (!transaction || !target || !sameScope(target, owner.materialScope)
+      || target.bindingHash !== owner.input.bindingHash || target.publicationHash !== owner.input.publicationHash
+      || target.customerHash !== clientBookingTransferCustomerHash({ ...identity, customerType: 'personal' })
+      || source.customerHash !== target.customerHash || source.tenantId !== target.tenantId
+      || source.workspaceId !== target.workspaceId || source.channel === target.channel
+      || !sameScope(original.scope, source) || original.bindingHash !== source.bindingHash
+      || original.publicationHash !== source.publicationHash || original.policyHash !== source.policyHash
+      || !sameScope(material, source) || material.bindingHash !== source.bindingHash
+      || material.publicationHash !== source.publicationHash) throw denied();
+  } else if (!sameScope(material, owner.materialScope) || material.bindingHash !== owner.input.bindingHash
+    || material.publicationHash !== owner.input.publicationHash) throw denied();
   const scope: BookingMaterialScope = { active: true, owner, materialHash: hash(material), verify, transaction };
   return bookingMaterials.run(scope, async () => {
     try { return await consume(); }

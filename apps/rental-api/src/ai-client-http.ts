@@ -110,6 +110,26 @@ abstract class RentalClientMaterialHttp {
     return this.original.readBookingAcceptance(request, body);
   }
 
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.issueBookingTransfer) @HttpCode(200) @Header("Cache-Control", "no-store")
+  issueBookingTransfer(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.issueBookingTransfer(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingTransferIssue) @HttpCode(200) @Header("Cache-Control", "no-store")
+  readBookingTransferIssue(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.readBookingTransferIssue(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.consumeBookingTransfer) @HttpCode(200) @Header("Cache-Control", "no-store")
+  consumeBookingTransfer(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.consumeBookingTransfer(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingTransferReceipt) @HttpCode(200) @Header("Cache-Control", "no-store")
+  readBookingTransferReceipt(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.readBookingTransferReceipt(request, body);
+  }
+
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.acceptBookingSubmission) @HttpCode(200) @Header("Cache-Control", "no-store")
   acceptBookingSubmission(@Req() request: ClientEntryRequest, @Body() body: unknown) {
     return this.original.acceptBookingSubmission(request, body);

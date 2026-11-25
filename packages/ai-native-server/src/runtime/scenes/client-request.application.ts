@@ -495,8 +495,15 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
   // after the Draft CAS or material INSERT in the SAME transaction.
   const verifyBookingBasis = async (bound: Bound, row: AiClientSceneMaterial, tx: Prisma.TransactionClient,
     stored: boolean, invalidating = false) => {
-    if (!bound.identity || !taskDependencies || bound.originalBooking)
+    if (!bound.identity || !taskDependencies)
       throw new AiClientEntryError('AI_ACCESS_DENIED', 'booking_transaction_scope');
+    if (bound.originalBooking) {
+      if (!stored) throw new AiClientEntryError('AI_ACCESS_DENIED', 'booking_transfer_new_material');
+      const original = await transferHost(bound).loadTransactionMaterial(bound.originalBooking, tx, invalidating);
+      if (materialRecordHash(original.row) !== materialRecordHash(row))
+        throw new AiClientEntryError('AI_REVISION_CONFLICT', 'booking_transfer_material_changed');
+      return { policyFingerprint: original.policyFingerprint, expiresAt: original.policyExpiresAt };
+    }
     const scope = scopeOf(bound);
     if (Object.entries(scope).some(([key, value]) => row[key as keyof AiClientSceneMaterial] !== value)
       || row.bindingHash !== bound.bindingHash || row.publicationHash !== jsonHash(bound.published.value)
@@ -745,7 +752,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       if (jsonHash(await submissionPort().prepareOrderSubmission(identity, body)) !== jsonHash(material.accepted))
         throw new AiClientEntryError('AI_REVISION_CONFLICT', 'booking_accepted_request_changed');
     });
-  }, () => repository.save(row, transaction), transaction);
+  }, () => repository.save(row, transaction), transaction, bound.originalBooking);
   const readSubmission = async (request: AiClientApplicationRequest, bound: Bound, acceptance: Awaited<ReturnType<typeof loadAcceptance>>) => {
     const { row, material, policyFingerprint } = freezeOriginalInput(structuredClone(acceptance));
     const result = await originalBookingCall(request, bound, { quoteId: material.quoteId }, false,
@@ -1553,7 +1560,13 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
           originalSource = source;
           await assertBookingUse(bound, currentDraft, tx);
           let policyExpiresAt: Date | undefined;
-          if (!bound.originalBooking) {
+          if (bound.originalBooking) {
+            const { issue, consumption } = bound.originalBooking.receipt;
+            if (!consumption) throw new AiClientEntryError('AI_ACCESS_DENIED', 'booking_transfer_consumption_missing');
+            // The original handoff can outlive the target grant. Carry its
+            // shorter accepted deadline through the final awaited reads.
+            policyExpiresAt = new Date(Math.min(Date.parse(issue.expiresAt), Date.parse(consumption.expiresAt)));
+          } else {
             const policy = new AiClientPolicyAuthority(taskDependencies!, taskDependencies!, randomUUID(), clock);
             const locked = await policy.policy({ ...scope, identity: bound.identity! }, 'create', tx, true);
             const grant = await entryGrant(bound, row);

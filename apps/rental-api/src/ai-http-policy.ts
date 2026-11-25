@@ -65,6 +65,10 @@ const declarations: readonly RentalHttpAccessDeclaration[] = [
   ...reviewed(AiConversationController, [conversations.modelControl], "transactional-write",
   "explicit same-task pure model control, original source/operation/parent Run and cumulative resource binding; owning registration and runner transactions hold Auth/Tenant/Core before Task CAS, original Gateway single accounting and unknown operation receipt remain"),
   ...[RentalWebsiteClientEntryController, RentalWechatClientEntryController].flatMap(controller => [
+    ...reviewed(controller, [controller.prototype.issueBookingTransfer, controller.prototype.consumeBookingTransfer], "transactional-write",
+    "original short-lived Booking transfer, current ClientAuth/Tenant/Core before the shared Draft lock, both channel policies locked in fixed order; exact source and reauthenticated target retain one acceptance/attempt/Core key, issue/consume receipts never grant execution"),
+    ...reviewed(controller, [controller.prototype.readBookingTransferIssue, controller.prototype.readBookingTransferReceipt], "audited-read",
+    "exact original transfer receipts in a nonlocking read snapshot with current client and independent read policy; expiry or stop permits observation only, no renewed reference or target continuation"),
     ...reviewed(controller, [controller.prototype.prepareOriginalQuoteBooking, controller.prototype.issueAction,
       controller.prototype.createBookingDraft, controller.prototype.chooseBookingDraft, controller.prototype.handoffBookingDraft,
       controller.prototype.readBookingDraft, controller.prototype.readBookingHandoff,
@@ -219,6 +223,7 @@ export function rentalAiDeploymentContinuationSelector(policy: ReturnType<typeof
         controller.prototype.readGoalQuotePreparation, controller.prototype.readQuotePreparationOperation,
         controller.prototype.readPreparedQuoteOriginal, controller.prototype.readOriginalQuoteBookingOperation,
         controller.prototype.readBookingOperation, controller.prototype.readBookingAcceptance, controller.prototype.readBookingSubmission,
+        controller.prototype.readBookingTransferIssue, controller.prototype.readBookingTransferReceipt,
         controller.prototype.readTaskInput, controller.prototype.readTaskInputReceipt,
         controller.prototype.readTaskModelResult, controller.prototype.recoverTaskModel,
         controller.prototype.reconcileTaskModel]] as [Function, readonly Function[]])
@@ -278,6 +283,7 @@ export function rentalAiOriginalReceiptSelector(policy: ReturnType<typeof create
         controller.prototype.readGoalQuotePreparation, controller.prototype.readQuotePreparationOperation,
         controller.prototype.readPreparedQuoteOriginal, controller.prototype.readOriginalQuoteBookingOperation,
         controller.prototype.readBookingOperation, controller.prototype.readBookingAcceptance, controller.prototype.readBookingSubmission,
+        controller.prototype.readBookingTransferIssue, controller.prototype.readBookingTransferReceipt,
         controller.prototype.readTaskModelResult, controller.prototype.readTaskCancellationReceipt,
         controller.prototype.readTaskCancellationSettlementReceipt]] as [Function, readonly Function[]])
   ]);

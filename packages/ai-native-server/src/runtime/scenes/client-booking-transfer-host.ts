@@ -2,7 +2,7 @@
  * material stays under its original channel/principal; only a persisted target
  * binding may select that source. New use rechecks both publications, policies
  * and original Core facts. Historical receipts do not restore continuation. */
-import type { PrismaClient } from '@prisma/client';
+import type { Prisma, PrismaClient } from '@prisma/client';
 import { aiBookingMaterialSchema, type AiBookingMaterial } from '@rental-os/shared';
 import type { ClientRequestContext } from '@rental-os/rental-core/client-context';
 import type { composeAiClientScenes } from '../client-scene.composition';
@@ -16,6 +16,7 @@ import { CLIENT_BOOKING_TRANSFER_LIFETIME_MS, clientBookingTransferCustomerHash,
   clientBookingTransferScopeSchema, type ClientBookingTransferPrincipal, type ClientBookingTransferBinding,
   type ClientBookingTransferOriginal, type ClientBookingTransferReceipt, type ClientBookingTransferTransaction } from './client-booking-transfer.contract';
 import type { ClientBookingRow } from './prisma-client-booking.repository';
+import { withClientSelectedBookingTransaction } from './client-selected-transactions';
 
 type Channel = 'web' | 'wechat_miniprogram';
 type Bound = { identity: ClientRequestContext; bindingHash: string;
@@ -56,6 +57,19 @@ export function composeClientBookingTransferHost(d: {
       policyHash: create ? canonicalHash({ policyHash: grant.policyHash ?? canonicalHash(grant.policy),
         release: { enabled: true, releaseRevision: publication.releaseRevision } }) : null,
       releaseRevision: publication.releaseRevision };
+  };
+  const lockPolicies = async (transaction: Prisma.TransactionClient, create: boolean) => {
+    // Both channels use one lock order; target consent is bound at issue and
+    // may not be replaced by a new policy while consuming the same reference.
+    for (const channel of ['web', 'wechat_miniprogram'] as const) {
+      const authority = new AiClientPolicyAuthority(d.tasks, d.tasks, 'booking-transfer-transaction', d.clock);
+      const operation = create ? 'create' : 'read';
+      const locked = await authority.policy(subject(channel), operation, transaction, true);
+      const grant = await authority.authorize(subject(channel), operation);
+      if (canonicalHash(locked) !== canonicalHash(grant.policy)) throw denied();
+      await policy(channel, create);
+    }
+    await bound.assertCurrent();
   };
   const principal = async (create: boolean): Promise<ClientBookingTransferPrincipal> => {
     const grant = await policy(d.channel, create), at = now();
@@ -132,7 +146,9 @@ export function composeClientBookingTransferHost(d: {
         Date.parse(target.expiresAt), Date.parse(original.handoffExpiresAt))).toISOString() };
   };
   const repository = new ClientBookingTransferRepository(d.db, {
-    source: (_ref, purpose) => principal(purpose === 'issue'), target: (_ref, purpose) => principal(purpose === 'consume'), original: prove
+    source: (_ref, purpose) => principal(purpose === 'issue'), target: (_ref, purpose) => principal(purpose === 'consume'), original: prove,
+    withWriteTransaction: (transaction, consume) => withClientSelectedBookingTransaction(d.db, transaction,
+      () => lockPolicies(transaction, true), consume)
   }, d.clock);
   const binding = async (locator: { handoffRef?: string; draftId?: string; acceptanceRef?: string }, historical: boolean) => {
     const viewer = await principal(false), receipt = await repository.resolveTarget(viewer, locator);
@@ -166,13 +182,17 @@ export function composeClientBookingTransferHost(d: {
     if (!historical && (sourceGrant.expiresAt <= now() || targetExpiresAt! <= now()
       || Date.parse(receipt.consumption.expiresAt) <= now().getTime())) throw stale();
   };
-  return Object.freeze({ repository, principal, binding, validate,
-    async loadMaterial(original: ClientBookingOriginalBinding, historical: boolean, transaction?: ClientBookingTransferTransaction) {
-      await validate(original, historical, transaction);
-      const first = await material(original.receipt.issue.source, original.receipt.issue.original, historical, transaction);
-      await validate(original, historical, transaction);
-      return { ...first, policyFingerprint: original.policyHash,
-        policyExpiresAt: new Date(original.receipt.consumption!.expiresAt) };
+  const loadMaterial = async (original: ClientBookingOriginalBinding, historical: boolean, transaction?: ClientBookingTransferTransaction) => {
+    await validate(original, historical, transaction);
+    const first = await material(original.receipt.issue.source, original.receipt.issue.original, historical, transaction);
+    await validate(original, historical, transaction);
+    return { ...first, policyFingerprint: original.policyHash,
+      policyExpiresAt: new Date(original.receipt.consumption!.expiresAt) };
+  };
+  return Object.freeze({ repository, principal, binding, validate, loadMaterial,
+    async loadTransactionMaterial(original: ClientBookingOriginalBinding, transaction: Prisma.TransactionClient, historical = false) {
+      await lockPolicies(transaction, !historical);
+      return loadMaterial(original, historical, transaction);
     },
     async assertSourceUse(scope: AiClientMaterialScope, row: ClientBookingRow, transaction?: ClientBookingTransferTransaction) {
       const current = await repository.currentForDraft(clientBookingTransferScopeSchema.parse(scope), row.id, transaction);

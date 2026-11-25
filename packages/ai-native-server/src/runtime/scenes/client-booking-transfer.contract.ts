@@ -133,6 +133,8 @@ export type ClientBookingTransferOriginalProof = z.infer<typeof clientBookingTra
 export type ClientBookingTransferTransaction = Pick<Prisma.TransactionClient, '$queryRaw' | 'operationLog'>;
 export type ClientBookingTransferDatabase = Pick<PrismaClient, '$transaction' | '$queryRaw' | 'operationLog'>;
 export interface ClientBookingTransferAuthority {
+  /** Selected host owns ClientAuth/Tenant/Core before any original Draft lock. */
+  withWriteTransaction?<T>(transaction: Prisma.TransactionClient, consume: () => Promise<T>): Promise<T>;
   /** Same source caller's actual current Auth; read is independent of new
    * execution/TTL and must still enforce current receipt access. */
   source(handoffRef: string, purpose: 'read' | 'issue', transaction: ClientBookingTransferTransaction): Promise<ClientBookingTransferPrincipal>;

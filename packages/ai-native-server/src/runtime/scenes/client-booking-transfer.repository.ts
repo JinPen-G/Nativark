@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
+import { hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
 import { AI_BOOKING_DRAFT_STATES } from '@rental-os/shared';
 import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiClientEntryError, entryHash, entryId } from './client-entry-action';
@@ -76,6 +77,7 @@ const consumeRequestHash = (target: ClientBookingTransferPrincipal, value: unkno
 const equal = (left: unknown, right: unknown) =>
   hash(JSON.parse(JSON.stringify(left ?? null))) === hash(JSON.parse(JSON.stringify(right ?? null)));
 const options = { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 };
+const readOptions = { ...options, isolationLevel: prismaRuntime.TransactionIsolationLevel.RepeatableRead };
 
 export class ClientBookingTransferRepository {
   constructor(private readonly db: ClientBookingTransferDatabase, private readonly authority: ClientBookingTransferAuthority,
@@ -84,6 +86,12 @@ export class ClientBookingTransferRepository {
       || typeof db.operationLog?.findUnique !== 'function' || typeof db.operationLog.create !== 'function'
       || typeof authority?.source !== 'function' || typeof authority.target !== 'function' || typeof authority.original !== 'function'
       || typeof clock !== 'function') throw unavailable();
+  }
+
+  private write<T>(consume: (transaction: Prisma.TransactionClient) => Promise<T>) {
+    if (hasRentalBusinessTenantFence() && !this.authority.withWriteTransaction) throw unavailable();
+    return this.db.$transaction(tx => this.authority.withWriteTransaction
+      ? this.authority.withWriteTransaction(tx, () => consume(tx)) : consume(tx), options);
   }
 
   private now() {
@@ -140,11 +148,11 @@ export class ClientBookingTransferRepository {
     if (!equal(scopeOf(value), scope)) throw denied();
     return value;
   }
-  private draft(reader: Reader, scope: ClientBookingTransferScope, draftId: string) {
+  private draft(reader: Reader, scope: ClientBookingTransferScope, draftId: string, locked = true) {
     return this.one(reader, prismaRuntime.sql`SELECT id, tenantId, workspaceId, channel, principalKind, principalHash,
       materialRef, inputHash, bindingHash, policyHash, state, revision, selectionRevision, selectedAt, createdAt, expiresAt
       FROM ai_client_booking_drafts WHERE tenantId = ${scope.tenantId} AND workspaceId = ${scope.workspaceId}
-      AND channel = ${scope.channel} AND principalHash = ${scope.principalHash} AND id = ${draftId} LIMIT 1 FOR UPDATE`, draftMetadata, scope);
+      AND channel = ${scope.channel} AND principalHash = ${scope.principalHash} AND id = ${draftId} LIMIT 1 ${locked ? prismaRuntime.sql`FOR UPDATE` : prismaRuntime.empty}`, draftMetadata, scope);
   }
   private handoff(reader: Reader, scope: ClientBookingTransferScope, handoffRef: string) {
     return this.one(reader, prismaRuntime.sql`SELECT id, tenantId, workspaceId, channel, principalKind, principalHash,
@@ -298,7 +306,7 @@ export class ClientBookingTransferRepository {
           || issue.targetChannel !== command.targetChannel || issue.requestHash !== issueRequestHash(viewer, command)
           || !equal(principalIdentity(viewer), bindingIdentity(issue.source))) throw conflict();
         await this.verifyPointer(tx, 'issue', scope, command.operationKey, issue, issue);
-        const draft = await this.draft(tx, scope, issue.original.draftId);
+        const draft = await this.draft(tx, scope, issue.original.draftId, false);
         if (!draft) throw unavailable();
         this.assertLockedReceipt(draft, issue);
         const consumption = await this.consumption(tx, issue);
@@ -306,7 +314,7 @@ export class ClientBookingTransferRepository {
         if (!equal(liveBasis(viewer), liveBasis(after)) || !equal(await this.issued(tx, scope, draft.id), issue)
           || !equal(await this.consumption(tx, issue), consumption)) throw denied();
         return { issue, consumption, currentUse: 'not_authorized_by_receipt' as const };
-      }, options);
+      }, readOptions);
     } catch (error) { this.error(error, false); }
   }
 
@@ -318,7 +326,7 @@ export class ClientBookingTransferRepository {
     if (previous) return { ...previous, replayed: true };
     let attempted = false;
     try {
-      await this.db.$transaction(async tx => {
+      await this.write(async tx => {
         const principal = this.principal(await this.authority.source(command.handoffRef, 'issue', tx), true), source = this.binding(principal);
         if (source.channel === command.targetChannel) throw denied();
         const scope = scopeOf(source), handoff = await this.handoff(tx, scope, command.handoffRef);
@@ -365,7 +373,7 @@ export class ClientBookingTransferRepository {
           || !equal(closingHandoff, handoff) || !equal(closingMaterial, material)) throw denied();
         if (Date.parse(issue.expiresAt) <= this.now().getTime() || Date.parse(issue.expiresAt) > Math.min(
           Date.parse(closing.expiresAt), Date.parse(finalPrincipal.expiresAt), Date.parse(closingProof.authorizedUntil))) throw stale();
-      }, options);
+      });
       const receipt = await this.readSourceReceipt(command);
       if (!receipt) throw unavailable();
       return { ...receipt, replayed: !attempted };
@@ -384,7 +392,7 @@ export class ClientBookingTransferRepository {
           if (!equal(liveBasis(viewer), liveBasis(after))) throw denied();
           return null;
         }
-        const draft = await this.draft(tx, scopeOf(issue.source), issue.original.draftId);
+        const draft = await this.draft(tx, scopeOf(issue.source), issue.original.draftId, false);
         if (!draft) throw unavailable();
         this.assertLockedReceipt(draft, issue);
         const consumption = await this.consumption(tx, issue);
@@ -397,7 +405,7 @@ export class ClientBookingTransferRepository {
         if (!equal(liveBasis(viewer), liveBasis(after)) || !equal(await this.byReference(tx, after, command.transferRef), issue)
           || !equal(await this.consumption(tx, issue), consumption)) throw denied();
         return { issue, consumption, currentUse: 'not_authorized_by_receipt' as const };
-      }, options);
+      }, readOptions);
     } catch (error) { this.error(error, false); }
   }
 
@@ -407,7 +415,7 @@ export class ClientBookingTransferRepository {
     if (previous?.consumption) return { ...previous, replayed: true };
     let attempted = false;
     try {
-      await this.db.$transaction(async tx => {
+      await this.write(async tx => {
         const principal = this.principal(await this.authority.target(command.transferRef, 'consume', tx), true), issue = await this.byReference(tx, principal, command.transferRef);
         if (!issue) throw denied();
         const scope = scopeOf(issue.source), draft = await this.draft(tx, scope, issue.original.draftId);
@@ -461,7 +469,7 @@ export class ClientBookingTransferRepository {
           || !equal(closingHandoff, handoff) || !equal(closingMaterial, material)) throw denied();
         if (Date.parse(consumption.expiresAt) <= this.now().getTime() || Date.parse(consumption.expiresAt) > Math.min(
           Date.parse(closing.expiresAt), Date.parse(finalPrincipal.expiresAt), Date.parse(closingProof.authorizedUntil))) throw stale();
-      }, options);
+      });
       const receipt = await this.readReceipt(command);
       if (!receipt?.consumption) throw unavailable();
       return { ...receipt, replayed: !attempted };
@@ -486,7 +494,7 @@ export class ClientBookingTransferRepository {
       if (!equal(liveBasis(current), liveBasis(viewer))) throw denied();
       const issue = await this.byReference(reader, current, locator.transferRef);
       if (!issue || issue.original.draftId !== locator.draftId) throw unavailable();
-      const draft = await this.draft(reader, scopeOf(issue.source), locator.draftId);
+      const draft = await this.draft(reader, scopeOf(issue.source), locator.draftId, !!transaction);
       if (!draft) throw unavailable();
       this.assertLockedReceipt(draft, issue);
       const consumption = await this.consumption(reader, issue);
@@ -507,7 +515,7 @@ export class ClientBookingTransferRepository {
           actions.index, clientBookingTransferTargetLocatorSchema), locator)) throw denied();
       return { issue, consumption, currentUse: 'not_authorized_by_receipt' };
     };
-    try { return transaction ? await read(transaction) : await this.db.$transaction(read, options); }
+    try { return transaction ? await read(transaction) : await this.db.$transaction(read, readOptions); }
     catch (error) { this.error(error, false); }
   }
 
@@ -558,7 +566,7 @@ export class ClientBookingTransferRepository {
       channel: sourceValue.channel, principalKind: sourceValue.principalKind, principalHash: sourceValue.principalHash }),
       draftId = z.string().uuid().parse(draftIdValue);
     const read = async (reader: Reader): Promise<ClientBookingTransferSourceInterlock> => {
-      const draft = await this.draft(reader, source, draftId);
+      const draft = await this.draft(reader, source, draftId, !!transaction);
       if (!draft) throw denied();
       const issue = await this.issued(reader, source, draftId);
       if (!issue) return { state: 'not_issued', currentUse: 'not_authorized_by_receipt' };
@@ -567,7 +575,7 @@ export class ClientBookingTransferRepository {
       return consumption ? { state: 'consumed', issue, consumption, currentUse: 'not_authorized_by_receipt' }
         : { state: 'pending', issue, currentUse: 'not_authorized_by_receipt' };
     };
-    try { return transaction ? await read(transaction) : await this.db.$transaction(read, options); }
+    try { return transaction ? await read(transaction) : await this.db.$transaction(read, readOptions); }
     catch (error) { this.error(error, false); }
   }
 }

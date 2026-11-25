@@ -45,6 +45,8 @@ Core 停用后的已有回答及模型结果核对，由宿主 [只读处理器�
 
 客户 Booking 使用[原草稿仓储](src/runtime/scenes/prisma-client-booking.repository.ts)保存创建、明确选择、转接及提交状态。同一原 Serializable 事务在 Draft 或材料写入前核 ClientAuth/Tenant/Core，在写入后复核原材料、政策、发布及期限。页面受理和提交尝试通过[限定事务参加者](src/runtime/scenes/client-selected-transactions.ts)保存，外部材料写入仅接受当前 Draft 所属事务。原 Guard 复验后恢复同一请求身份调用 ClientApi/Core；只有首次尝试提交得到回执才派发订单，重复或失回复只核原收据，submitted 仅表示页面请求已受理。原订单事务在首个 Tenant 锁前取得同一客户会话租约，再核独立政策、渠道发布和原 Draft/受理/attempt；订单、报价消费与幂等收据写入后再次复核材料及期限，失败整笔回滚。原收据使用独立读取政策，过期和停新后的读取保留本人及渠道隔离。
 
+[Booking 跨渠道转接](src/runtime/scenes/client-booking-transfer-host.ts)由原签发/消费仓储保存短期引用，目标端重新通过 ClientAuth 后只绑定同一客户、空间和原 Draft。双方政策按固定渠道顺序锁定，ClientAuth/Tenant/Core 先于 Draft 锁，原材料正文保留源渠道绑定。目标端消费后沿原受理、唯一 attempt 和 Core 幂等键提交，较短的转接期限在订单事务末次等待后仍须有效；历史签发/消费收据不延长期限或重新派发。
+
 Rental 的通知缓存和草稿仓储通过 `@rental-os/rental-core/notification-draft` 消费以下组合：
 
 ```ts
