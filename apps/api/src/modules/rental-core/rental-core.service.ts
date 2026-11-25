@@ -1838,38 +1838,25 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   }
 
   async applyStockOperation(tenantId: string, input: RentalStockOperationRequest, operator: string): Promise<RentalStockOperationResult> {
-    const state = await this.factContext(tenantId);
-    const group = this.group(state, input.itemGroupId);
-    if (![RentalInventoryMode.Quantity, RentalInventoryMode.Consumable].includes(group.inventoryMode)) throw new BadRequestException("库存日常作业目前只适用于数量型或一次性耗材库存");
-    if (input.type === "consume" && group.inventoryMode !== RentalInventoryMode.Consumable) {
-      throw new BadRequestException("消耗作业只适用于一次性耗材库存");
-    }
-    if (!input.reason?.trim()) throw new BadRequestException("库存作业必须填写原因或来源说明");
-    if (input.batchNo !== undefined && (!input.batchNo.trim() || input.batchNo.trim().length > 100)) throw new BadRequestException("批次号不能为空且不能超过100个字符");
-    if (input.sourceDocumentNo !== undefined && (!input.sourceDocumentNo.trim() || input.sourceDocumentNo.trim().length > 100)) throw new BadRequestException("来源单据号不能为空且不能超过100个字符");
-
-    if (input.type === "transfer") {
-      if (!input.fromLocationId || !input.toLocationId || input.fromLocationId === input.toLocationId) throw new BadRequestException("调拨必须选择两个不同的履约地点");
-      this.activeLocation(state, input.fromLocationId, "storage");
-      this.activeLocation(state, input.toLocationId, "storage");
-    } else {
-      if (!input.locationId) throw new BadRequestException("库存作业必须选择履约地点");
-      this.activeLocation(state, input.locationId, "storage");
-    }
-
+    input = structuredClone(input);
+    // The original writer reads receipts before validating current admission.
+    // A disabled location must not turn a committed operation into a fresh write.
     const result = await this.factStore.applyStockOperation({
       ...input,
-      batchNo: input.batchNo?.trim() || undefined,
-      sourceDocumentNo: input.sourceDocumentNo?.trim() || undefined,
       tenantId,
       operator: operator || input.operator || "系统"
     });
     const locationIds = new Set(result.entries.map((entry) => entry.locationId));
-    const balances = (await this.listStockBalances(tenantId)).filter((row) => row.itemGroupId === input.itemGroupId && locationIds.has(row.locationId));
+    const [stocks, reservations] = await Promise.all([this.factStore.listStockBalances(tenantId), this.factStore.activeReservations(tenantId)]);
+    const balances = stocks.filter((row) => row.itemGroupId === input.itemGroupId && locationIds.has(row.locationId)).map(row => {
+      const reservedQuantity = this.reservedQuantity(reservations, row.itemGroupId, row.locationId);
+      return { ...row, reservedQuantity, availableQuantity: Math.max(0, row.onHandQuantity - row.maintenanceQuantity - reservedQuantity) };
+    });
     return { ...result, balances };
   }
 
   async saveStockBalance(tenantId: string, input: SaveRentalStockBalanceRequest) {
+    input = structuredClone(input);
     const state = await this.factContext(tenantId);
     const group = this.group(state, input.itemGroupId);
     if (![RentalInventoryMode.Quantity, RentalInventoryMode.Consumable].includes(group.inventoryMode)) throw new BadRequestException("只有数量型或一次性耗材库存可以维护库存余额");
@@ -1891,7 +1878,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       itemGroupId: group.id,
       locationId: location.id,
       onHandQuantity: input.onHandQuantity,
-      maintenanceQuantity: input.maintenanceQuantity
+      maintenanceQuantity: input.maintenanceQuantity,
+      initialOnly: true
     });
     return (await this.listStockBalances(tenantId)).find((row) => row.id === saved.id)!;
   }

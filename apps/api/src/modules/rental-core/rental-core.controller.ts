@@ -916,7 +916,9 @@ export class RentalCoreController {
     }
   }
   @Post("stock-operations") stockOperation(@Req() req: AuthenticatedRequest, @Body() body: ApplyRentalStockOperationDto) {
-    return this.committed(req.user.tenantId, this.service.applyStockOperation(req.user.tenantId, body, req.user.displayName));
+    // Balances and ledger commit in the original fact transaction. Receipt reads
+    // must not initialize or persist unrelated Core/Business configuration caches.
+    return this.service.applyStockOperation(req.user.tenantId, body, req.user.displayName);
   }
   @Get("stock-dispositions") dispositions(@Req() req: AuthenticatedRequest, @Query("orderId") orderId?: string) { return this.service.listStockDispositions(req.user.tenantId, orderId); }
   @Post("stock-dispositions/:dispositionId/restore") restoreDisposition(@Req() req: AuthenticatedRequest, @Param("dispositionId") dispositionId: string) { return this.committed(req.user.tenantId, this.service.restoreStockDisposition(req.user.tenantId, dispositionId, req.user.displayName)); }
