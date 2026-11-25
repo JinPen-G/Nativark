@@ -92,6 +92,8 @@ npm run build -w @rental-os/staff-miniprogram -- --release --rental-package <待
 
 标准包模式的 AI 合同从正式 `./contracts`、`./client-contracts` 和 `./enterprise-order-delegation` JS 出口及其已编译相对依赖打包，读取文件须在锁定清单内。原 Shared 白名单、公开出口、资源上限和无宿主全局变量的运行检查继续生效。发布收尾重新校验安装包摘要，失败时清理本次输出与私有声明。
 
+Shared 的公共 AI 合同沿 `@rental-os/platform-contracts/ai-gateway` 与 `ai-task` 两个正式出口读取同一源码及其相对依赖；[原打包器](../../scripts/miniprogram-ai-runtime.cjs)限定这两个入口，不引入公共服务或整个合同总入口，页面与校验规则保持原实现。
+
 发布构建强制 HTTPS API 域名并开启 `urlCheck`。可用 `STAFF_MINIPROGRAM_API_ORIGIN` / `STAFF_MINIPROGRAM_APP_ID` 在构建时覆盖（无租户编码，租户在登录页输入）。
 
 ## 配置与安全
