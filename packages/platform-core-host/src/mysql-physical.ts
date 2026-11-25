@@ -1,5 +1,6 @@
 /** 当前平台物理数据观察；只读取information_schema，不执行迁移或把迁移清单当就绪。
- * 列/键/检查/外键必须与固定数据版本一致，可追加非唯一索引，不接受额外写入约束。 */
+ * 列/键/检查/外键必须与固定数据版本一致，可追加非唯一索引，不接受额外写入约束。
+ * 外键元数据按库/表/约束关联，避免持有业务锁时反复扫描整个库的约束。 */
 import { createHash } from "node:crypto";
 import { join, sqltag as sql } from "@prisma/client/runtime/library";
 import type { CorePhysicalDataObservation } from "@rental-os/core-contracts";
@@ -33,7 +34,8 @@ export async function readMysqlPhysicalData(database: Pick<CoreHostSqlTransactio
       SELECT k.TABLE_NAME AS tableName,k.CONSTRAINT_NAME AS name,k.ORDINAL_POSITION AS position,k.COLUMN_NAME AS columnName,
         k.REFERENCED_TABLE_NAME AS targetTable,k.REFERENCED_COLUMN_NAME AS targetColumn,(k.REFERENCED_TABLE_SCHEMA=DATABASE()) AS sameSchema,
         r.DELETE_RULE AS deleteRule,r.UPDATE_RULE AS updateRule FROM information_schema.KEY_COLUMN_USAGE k
-      JOIN information_schema.REFERENTIAL_CONSTRAINTS r ON r.CONSTRAINT_SCHEMA=k.CONSTRAINT_SCHEMA AND r.CONSTRAINT_NAME=k.CONSTRAINT_NAME
+      JOIN information_schema.REFERENTIAL_CONSTRAINTS r ON r.CONSTRAINT_SCHEMA=k.CONSTRAINT_SCHEMA
+        AND r.TABLE_NAME=k.TABLE_NAME AND r.CONSTRAINT_NAME=k.CONSTRAINT_NAME
       WHERE k.CONSTRAINT_SCHEMA=DATABASE() AND k.TABLE_NAME IN (${join(tableNames)}) AND k.REFERENCED_TABLE_NAME IS NOT NULL
       ORDER BY k.TABLE_NAME,k.CONSTRAINT_NAME,k.ORDINAL_POSITION`)
   ]);
