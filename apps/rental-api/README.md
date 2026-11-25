@@ -13,7 +13,7 @@
 | [ai-main.ts](src/ai-main.ts)、[ai-app.module.ts](src/ai-app.module.ts)、[ai-assembly.ts](src/ai-assembly.ts) | 独立的 AI 启用入口；核定锁中的完整选装数据包和原迁移账，组合原 Runtime 与同一 Rental 实例。 |
 | [ai-composition.ts](src/ai-composition.ts)、[ai-inspection-transactions.ts](src/ai-inspection-transactions.ts) | 原 AI 工厂、知识权限、检查事务和生命周期参加者；复用当前 Auth、Guard、Core 和业务实例，构造阶段不执行外部调用。 |
 | [ai-http-policy.ts](src/ai-http-policy.ts)、[ai-openapi.ts](src/ai-openapi.ts) | 对实际 AI 处理器逐条登记读取/审计/原事务边界；发布相同挂载范围和原成功状态，不以 provider 存在开放路由。 |
-| [ai-client-http.ts](src/ai-client-http.ts)、[ai-client-request.ts](src/ai-client-request.ts) | 网站和小程序各二十八个原客户操作的明确挂载，覆盖目标准备与候选、订单导航、资料、Task、模型及取消收尾；仅接受同一 Guard/客户准入绑定的实际请求，保留原方法、收据、响应状态和中止语义。 |
+| [ai-client-http.ts](src/ai-client-http.ts)、[ai-client-request.ts](src/ai-client-request.ts) | 网站和小程序各三十四个原客户操作的明确挂载，覆盖目标与候选、报价参数准备/明确确认/原收据、订单导航、资料、Task、模型及取消收尾；仅接受同一 Guard/客户准入绑定的实际请求，保留原方法、收据、响应状态和中止语义。 |
 | [database.ts](src/database.ts) | 当前公共 41 模型与 Rental 121 模型组成宿主 Client，公共数据库令牌使用同一连接池；生成物仅归本宿主。唯一请求入口将公共及 Core 适配使用的官方 JSON 空值映射为所选 Client 的同义单例，不另开连接或改动调用方事务。 |
 | [http-application-views.ts](src/http-application-views.ts) | 向 HTTP 注入原服务方法，隐藏 Nest 生命周期钩子，避免同一业务实例被多个模块重复启动。 |
 | [lifecycle.ts](src/lifecycle.ts) | 唯一初始化、预热、配货/到期/文件/限流作业与数据库退出负责人；停止新请求和作业，等待原 HTTP 处理器及四作业参加者完成，再断开连接，排空失败不提前断库。 |

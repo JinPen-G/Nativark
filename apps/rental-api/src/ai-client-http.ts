@@ -1,4 +1,4 @@
-/** Selected client goal/order material, navigation, Task and original model HTTP. Each channel delegates to
+/** Selected client goal/quote/order material, navigation, Task and original model HTTP. Each channel delegates to
  * the original controller and application, preserving schemas, refusal audit,
  * abort handling and unknown receipts. Other client actions are not inherited. */
 import { Body, Controller, Header, HttpCode, Inject, Post, Req } from "@nestjs/common";
@@ -28,6 +28,36 @@ abstract class RentalClientMaterialHttp {
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readGoalCandidates) @HttpCode(200) @Header("Cache-Control", "no-store")
   readGoalCandidates(@Req() request: ClientEntryRequest & { body?: unknown }) {
     return this.original.readGoalCandidates(request);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.prepareGoalQuote) @HttpCode(200) @Header("Cache-Control", "no-store")
+  prepareGoalQuote(@Req() request: ClientEntryRequest & { body?: unknown }) {
+    return this.original.prepareGoalQuote(request);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readGoalQuotePreparation) @HttpCode(200) @Header("Cache-Control", "no-store")
+  readGoalQuotePreparation(@Req() request: ClientEntryRequest & { body?: unknown }) {
+    return this.original.readGoalQuotePreparation(request);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.prepareQuoteParameters) @HttpCode(200) @Header("Cache-Control", "no-store")
+  prepareQuoteParameters(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.prepareQuoteParameters(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readQuotePreparationOperation) @HttpCode(200) @Header("Cache-Control", "no-store")
+  readQuotePreparationOperation(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.readQuotePreparationOperation(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.confirmQuoteParameters) @HttpCode(200) @Header("Cache-Control", "no-store")
+  confirmQuoteParameters(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.confirmQuoteParameters(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readPreparedQuoteOriginal) @HttpCode(200) @Header("Cache-Control", "no-store")
+  readPreparedQuoteOriginal(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.readPreparedQuoteOriginal(request, body);
   }
 
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readHostCapabilities) @HttpCode(200) @Header("Cache-Control", "no-store")

@@ -23,7 +23,7 @@ Core 停用后的已有回答及模型结果核对，由宿主 [只读处理器�
 | [runtime/task-transaction-authority](src/runtime/task-transaction-authority.ts) | 所选宿主的任务新写在原事务内核 Tenant / Core / 原来源；嵌套调用必须沿同一事务和任务。旧已派发结果继续按原 lease、dispatch token、收据和 CAS 收口。 |
 | [runtime/task-start-admission.composition](src/runtime/task-start-admission.composition.ts)、[原场景事务](src/runtime/scenes/original-scene-transactions.ts) | 报价澄清、开业诊断和订单解释沿原请求工厂启动；保留 Guard 形成的身份，在原 Scope/Task/Plan 写入前进入同一 Auth/Core/业务来源参加者。 |
 | [runtime/task-input/prisma-task-input.repository](src/runtime/task-input/prisma-task-input.repository.ts) | 保存原回答与收据。单模型续答同事务登记无租约的后继 Run，显式续程执行前复验当前权威并领取租约。嵌套原收据观察使用只读 RR 快照；写入与取消见证仍由原 Serializable 事务及 CAS 裁定。 |
-| [runtime/client-scene.composition](src/runtime/client-scene.composition.ts)、[客户资料与任务事务](src/runtime/scenes/client-selected-transactions.ts) | 所选客户入口保留原 ClientAuth 对象与请求 ALS；同一事务先核会话/Tenant/Core，再核本人订单、发布资料与 Task。参加者仅支持明确登记的场景，不创建营运权限或第二个任务。 |
+| [runtime/client-scene.composition](src/runtime/client-scene.composition.ts)、[客户资料与任务事务](src/runtime/scenes/client-selected-transactions.ts) | 所选客户入口保留原 ClientAuth 对象与请求 ALS；同一事务先核会话/Tenant/Core，再核本人订单、目标/报价参数、发布资料与 Task。报价准备和确认尝试各绑定原材料及政策，提交前复核原 Core 规范化结果。参加者仅支持明确登记的场景，不创建营运权限或第二个任务。 |
 | [原场景策略](src/runtime/scenes/request-bound-scenes.application.ts)、[计划策略仓储](src/runtime/runner/prisma-task-plan-policy.repository.ts) | 配置策略在原 Auth/Tenant/Core 与业务来源核验后提交 CAS/审计；读取只观察原策略，不占用任务或派发模型。 |
 | [runtime/task-provider-dispatch](src/runtime/task-provider-dispatch.ts) | 在 Vault 等待之后、唯一模型运输之前复核当前任务权威；短事务结束后才执行原外部调用。 |
 | [runtime/privacy/prisma-ai-body-storage](src/runtime/privacy/prisma-ai-body-storage.ts) | AI 专属正文视图保留原事务和原密文规则；只按真实所选 Client 的模型关系编解码，不能借默认 Client 的其他 schema。 |
@@ -40,6 +40,8 @@ Core 停用后的已有回答及模型结果核对，由宿主 [只读处理器�
 人工回答保存与执行续程分开处理。Core 撤权后可按原收据权限核对已保存回答，恢复当前授权后才可显式续程；重复续程不追加模型调用。每次派发复用唯一 Gateway 预占和结算，任务累计用量不重置。只读观察不取得对原提交事务的隐式共享锁，也不授权写入或重发。[原事务用例](test/original-scene-transactions.test.cjs) · [原执行与续程用例](test/original-scene-execution.test.cjs)
 
 客户的原任务模型启动、恢复、输入读取/保存、同 Task 续程与输入收据，复用 [客户请求应用](src/runtime/scenes/client-request.application.ts)、[标准客户场景](src/runtime/scenes/standard-client-entry.application.ts)和[原执行组合](src/runtime/scenes/client-task-execution.composition.ts)。事务参加者保留原 ClientAuth/请求身份、本人对象、当前发布与政策；Vault 读取后仍复验当前权限，失效时不发送模型请求。续程沿原任务与累计资源、同一 Gateway 预占/结算；unknown 只按原调用/holder/收据核对。宿主仅挂载明确选定方法，这些工厂方法不自动发布全部旧客户报价或 booking 操作。[客户同事务用例](test/client-selected-transactions.test.cjs)
+
+客户明确选择目标候选后，经[原报价准备](src/runtime/scenes/client-quote-preparation.composition.ts)保存参数，再独立确认同一材料哈希。[原报价适配](src/runtime/client-quote-original.composition.ts)在每次 Guard 复验后回到所选宿主的原请求身份，使用原 ClientApi/Core 报价与原操作收据。确认尝试只有首次保存成功且收到回执后才允许派发一次；丢失应答或重复确认沿原引用核对。参数准备、报价保存与 Booking/订单提交分别办理，停新后的精确读取不授予新的准备或确认。
 
 Rental 的通知缓存和草稿仓储通过 `@rental-os/rental-core/notification-draft` 消费以下组合：
 

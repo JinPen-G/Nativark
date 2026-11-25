@@ -10,6 +10,7 @@ import { createAiGuardedClientSession } from '../client-scene.composition';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { AiClientPolicyAuthority, clientTaskSceneSchema, type AiClientTaskDependencies } from './client-task.authority';
 import { AiClientMaterialError, PrismaClientSceneMaterialRepository, type AiClientSceneMaterial } from './prisma-client-scene-material.repository';
+import { withClientSelectedQuoteMaterial } from './client-selected-transactions';
 
 const id = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const digest = z.string().regex(/^[a-f0-9]{64}$/u);
@@ -146,6 +147,32 @@ export function composeClientOriginalQuotePreparation(input: {
       || attempt.inputHash !== requestFingerprint(basis.command) || attempt.materialHash !== requestFingerprint(basis.material)
       || attempt.expiresAt.getTime() !== row.expiresAt.getTime()) throw stale();
   };
+  const save = (bound: Awaited<ReturnType<typeof current>>, row: AiClientSceneMaterial,
+    permission: Awaited<ReturnType<typeof grant>>, source?: AiClientSceneMaterial) => {
+    const material = decode(source ?? row), operation = source ? 'execute' as const : 'create' as const;
+    return withClientSelectedQuoteMaterial(input.tasks.db, row, bound.identity, async tx => {
+      if (Object.entries(bound.scope).some(([key, value]) => row[key as keyof AiClientSceneMaterial] !== value)
+        || row.bindingHash !== bound.bindingHash) throw denied();
+      if (source) {
+        const latest = await repository.findOperation(bound.scope, source.operationKey, tx, true);
+        if (!latest || requestFingerprint(canonical(latest)) !== requestFingerprint(canonical(source))) throw stale();
+        assertAttempt(row, source, material);
+      } else decode(row);
+      const policy = await authority.policy({ ...bound.scope, identity: bound.identity }, operation, tx, true);
+      if (requestFingerprint(canonical(policy)) !== requestFingerprint(canonical(permission.policy))) throw stale();
+      // Tenant/Core and the original client session are already locked by the
+      // selected participant. Keep the historical prequote scope and re-read the
+      // original Core normalization, never price or eligibility in AI code.
+      const parameters = await quotes.prepare({ input: material.input });
+      if (parameters.tenantId !== bound.scope.tenantId || parameters.workspaceId !== bound.scope.workspaceId
+        || parameters.customerId !== bound.identity.customerId || parameters.inputHash !== material.inputHash
+        || parameters.configurationHash !== material.configurationHash) throw stale();
+      await check(bound); await input.assertCurrent?.();
+      const closing = await grant(bound, operation);
+      if (closing.policyHash !== permission.policyHash || row.expiresAt <= clock()
+        || permission.policy.expiresAt <= clock()) throw stale();
+    }, () => repository.save(row));
+  };
   const observedConfirmation = async (value: unknown) => {
     const read = await observeOriginal(value);
     if (read.state !== 'observed' || !read.quote) throw new AiClientQuoteResultUnknownError();
@@ -207,7 +234,7 @@ export function composeClientOriginalQuotePreparation(input: {
         publication: { tenantCode, serviceCode, channel }, operationKey: parsed.data.operationKey,
         inputHash: requestFingerprint(command), materialHash: requestFingerprint(material), command, material,
         revision: 1, createdAt: now, expiresAt: new Date(Math.min(now.getTime() + 300000, permission.policy.expiresAt.getTime())) };
-      const saved = await repository.save(row);
+      const saved = await save(bound, row, permission);
       if (saved.row.bindingHash !== bound.bindingHash || saved.row.inputHash !== row.inputHash) throw stale();
       decode(saved.row); await check(bound);
       return { ...packet(saved.row), replayed: saved.replayed, freshness: 'recheck_at_confirmation' as const };
@@ -236,9 +263,9 @@ export function composeClientOriginalQuotePreparation(input: {
       const basis = attemptBasis(row, material);
       let saved: Awaited<ReturnType<typeof repository.save>>;
       try {
-        saved = await repository.save({ ...row, id: randomUUID(), operationKey,
+        saved = await save(bound, { ...row, id: randomUUID(), operationKey,
           inputHash: requestFingerprint(basis.command), materialHash: requestFingerprint(basis.material),
-          command: basis.command, material: basis.material, createdAt: clock() });
+          command: basis.command, material: basis.material, createdAt: clock() }, permission, row);
       } catch (error) {
         if (error instanceof AiClientMaterialError && error.code === 'AI_CLIENT_RESULT_UNKNOWN') throw new AiClientQuoteResultUnknownError();
         throw error;

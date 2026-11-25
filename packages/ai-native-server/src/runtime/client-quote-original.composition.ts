@@ -3,6 +3,7 @@ import { BadRequestException, ForbiddenException, HttpException, ServiceUnavaila
 import { z } from 'zod';
 import type { ApiAuthGuard } from './rental-adapters/api-auth.guard';
 import { getRequestIdentity, runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
+import { captureRentalClientInternalAuthority } from '@rental-os/rental-core/application-internal-authority';
 import type { ClientRequestContext } from '@rental-os/rental-core/client-context';
 import type { ClientApiService } from '@rental-os/rental-core/mysql-client-application';
 import { ClientCreateQuoteRequestDto } from '@rental-os/rental-core/http-client-request.dto';
@@ -32,24 +33,32 @@ export function composeGuardedClientOriginalQuotes(input: {
   if ([input?.guard?.canActivate, input?.credentials?.current, input?.client?.createQuoteForOriginalOperation,
     input?.client?.readQuoteForOriginalOperation].some(method => typeof method !== 'function')) throw new ServiceUnavailableException();
   const validation = new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true });
-  const authorize = async (method: 'GET' | 'POST', path: 'auth/me' | 'quotes', body: unknown) => {
+  const authorize = async <T>(method: 'GET' | 'POST', path: 'auth/me' | 'quotes', body: unknown,
+    consume: (context: ClientRequestContext) => Promise<T>): Promise<T> => {
+    const selected = captureRentalClientInternalAuthority();
     const credential = structuredClone(await input.credentials.current());
     if (typeof credential.authorization !== 'string' || credential.authorization.length > 8192
       || !/^Bearer [A-Za-z0-9._~+/-]+=*$/u.test(credential.authorization)) throw new ForbiddenException();
-    const request = { method, url: `/api/client/v1/${path}`, originalUrl: `/api/client/v1/${path}`,
-      headers: { authorization: credential.authorization }, ip: credential.ip, query: {}, body: structuredClone(body),
-      client: undefined as ClientRequestContext | undefined };
-    if (await input.guard.canActivate(new ExecutionContextHost([request])) !== true || !request.client) throw new ForbiddenException();
-    const context = structuredClone(request.client), identity = getRequestIdentity();
-    if (context.membershipStatus !== 'active' || !identity || identity.tenantId !== context.tenantId
-      || identity.workspaceId !== context.workspaceId || identity.userId !== context.customerId
-      || identity.isSaasAdmin !== false || identity.staffApi === true) throw new ForbiddenException();
-    return context;
+    return runWithRequestIdentity({}, async () => {
+      const request = { method, url: `/api/client/v1/${path}`, originalUrl: `/api/client/v1/${path}`,
+        headers: { authorization: credential.authorization }, ip: credential.ip, query: {}, body: structuredClone(body),
+        client: undefined as ClientRequestContext | undefined };
+      if (await input.guard.canActivate(new ExecutionContextHost([request])) !== true || !request.client) throw new ForbiddenException();
+      const context = structuredClone(request.client), identity = getRequestIdentity();
+      if (context.membershipStatus !== 'active' || !identity || identity.tenantId !== context.tenantId
+        || identity.workspaceId !== context.workspaceId || identity.userId !== context.customerId
+        || identity.isSaasAdmin !== false || identity.staffApi === true) throw new ForbiddenException();
+      // The original Guard still authenticates each operation. The selected
+      // host's one-use bridge restores its owning ALS and actual session object.
+      return selected ? selected.runVerified(request.client, consume) : consume(context);
+    });
   };
   const current = <T>(method: 'GET' | 'POST', path: 'auth/me' | 'quotes', body: unknown,
-    work: (context: ClientRequestContext, recheck: () => Promise<void>) => Promise<T>) => runWithRequestIdentity({}, async () => {
-    const before = await authorize(method, path, body);
-    const recheck = async () => { if (requestFingerprint(await authorize(method, path, body)) !== requestFingerprint(before)) throw new ForbiddenException(); };
+    work: (context: ClientRequestContext, recheck: () => Promise<void>) => Promise<T>) => authorize(method, path, body, async before => {
+    const beforeHash = requestFingerprint(before);
+    const recheck = () => authorize(method, path, body, async after => {
+      if (requestFingerprint(after) !== beforeHash) throw new ForbiddenException();
+    });
     try { const result = await work(before, recheck); await recheck(); return result; }
     catch (error) { await recheck(); throw error; }
   });

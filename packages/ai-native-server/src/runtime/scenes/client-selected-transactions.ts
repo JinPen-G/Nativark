@@ -42,6 +42,9 @@ interface ClientSelectedBinding {
 type Scope = { active: boolean; input: ClientSelectedBinding; identity: NonNullable<ReturnType<typeof getRequestIdentity>>;
   identityHash: string; clientHash: string; materialScope: AiClientMaterialScope };
 const scopes = new AsyncLocalStorage<Scope>();
+type QuoteMaterialScope = { active: boolean; owner: Scope; materialHash: string;
+  verify(tx: Prisma.TransactionClient): Promise<void> };
+const quoteMaterials = new AsyncLocalStorage<QuoteMaterialScope>();
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const hash = (value: unknown) => requestFingerprint(JSON.parse(JSON.stringify(value)));
@@ -91,6 +94,24 @@ function selected(db: AiClientMaterialDb) {
   return scope;
 }
 
+async function beginPrincipal(scope: Scope, tx: Prisma.TransactionClient,
+  purpose: 'new_work' | 'original_recovery' = 'new_work') {
+  const { input } = scope;
+  current(scope);
+  if ('$transaction' in tx || typeof input.transactions?.clientAuth?.lockCurrentSession !== 'function'
+    || typeof input.revalidatePublication !== 'function') throw unavailable();
+  const lease = await input.transactions.clientAuth.lockCurrentSession(tx, input.identity);
+  const revalidate = async () => {
+    current(scope);
+    if (hash(await lease.revalidate()) !== scope.clientHash) throw denied();
+    await assertRentalBusinessTenantAccessAfterLock(tx, input.identity.tenantId);
+    current(scope);
+  };
+  await revalidate();
+  await holdAiTaskDeploymentAdmission(tx, purpose === 'original_recovery' ? 'task_control' : 'new_work');
+  return { revalidate };
+}
+
 async function begin(scope: Scope, tx: Prisma.TransactionClient, material: AiClientSceneMaterial, stored: boolean,
   purpose: 'new_work' | 'original_recovery' = 'new_work') {
   const { input, materialScope } = scope, ports = input.transactions;
@@ -118,16 +139,8 @@ async function begin(scope: Scope, tx: Prisma.TransactionClient, material: AiCli
   } else throw unavailable();
   // No AI/current-data read precedes this original session's Tenant X lock.
   // Serializable reads are locking current reads, never a prior RR snapshot.
-  const lease = await ports.clientAuth.lockCurrentSession(tx, input.identity);
-  const principal = async () => {
-    current(scope);
-    if (hash(await lease.revalidate()) !== scope.clientHash) throw denied();
-    await assertRentalBusinessTenantAccessAfterLock(tx, material.tenantId);
-    current(scope);
-  };
-  await principal();
   // 原恢复只核同一持久 Run/Step/Plan，不取得新步骤或派发能力；实际新工作才要求 accepting。
-  await holdAiTaskDeploymentAdmission(tx, purpose === 'original_recovery' ? 'task_control' : 'new_work');
+  const principal = await beginPrincipal(scope, tx, purpose);
   if (orderId) await ports.orders.lockOrder(material.tenantId, orderId, tx);
   const resource = async () => {
     if (orderId) {
@@ -152,7 +165,27 @@ async function begin(scope: Scope, tx: Prisma.TransactionClient, material: AiCli
     if (!latest || hash(latest) !== materialKey) throw denied();
   };
   await verifyMaterial();
-  return { revalidate: async () => { await principal(); await resource(); await verifyMaterial(); } };
+  return { revalidate: async () => { await principal.revalidate(); await resource(); await verifyMaterial(); } };
+}
+
+/** Bind one original prequote/confirmation-attempt save. Its historical scope
+ * differs from Task materials; only the original quote composition validates
+ * that scope, source, parameters and independent policy inside this callback. */
+export async function withClientSelectedQuoteMaterial<T>(db: AiClientMaterialDb, material: AiClientSceneMaterial,
+  identity: ClientRequestContext, verify: (tx: Prisma.TransactionClient) => Promise<void>, consume: () => Promise<T>): Promise<T> {
+  if (!hasRentalBusinessTenantFence()) return consume();
+  const owner = selected(db), command = material.command;
+  if (quoteMaterials.getStore() || hash(identity) !== owner.clientHash || typeof verify !== 'function'
+    || !command || typeof command !== 'object' || !('kind' in command)
+    || !['quote_preparation', 'quote_confirmation_attempt'].includes(String(command.kind))
+    || material.tenantId !== identity.tenantId || material.workspaceId !== identity.workspaceId
+    || material.channel !== owner.input.channel || material.principalKind !== identity.customerType
+    || material.bindingHash !== requestFingerprint(identity)) throw denied();
+  const scope: QuoteMaterialScope = { active: true, owner, materialHash: hash(material), verify };
+  return quoteMaterials.run(scope, async () => {
+    try { return await consume(); }
+    finally { scope.active = false; }
+  });
 }
 
 /** First line of the ORIGINAL material-save callback. External transactions
@@ -161,7 +194,23 @@ export async function withClientSelectedMaterialTransaction<T>(db: AiClientMater
   material: AiClientSceneMaterial, consume: () => Promise<T>, external = false): Promise<T> {
   if (!hasRentalBusinessTenantFence()) return consume();
   if (external) throw unavailable();
-  const scope = selected(db), lease = await begin(scope, tx, material, false);
+  const scope = selected(db), quote = quoteMaterials.getStore();
+  if (quote) {
+    if (!quote.active || quote.owner !== scope || quote.materialHash !== hash(material)) throw denied();
+    const principal = await beginPrincipal(scope, tx);
+    const verify = async () => {
+      current(scope);
+      if (!quote.active || quoteMaterials.getStore() !== quote || quote.materialHash !== hash(material)) throw denied();
+      await scope.input.revalidatePublication!(tx);
+      await quote.verify(tx);
+      current(scope);
+    };
+    await verify();
+    const result = await consume();
+    await principal.revalidate(); await verify();
+    return result;
+  }
+  const lease = await begin(scope, tx, material, false);
   const result = await consume();
   await lease.revalidate();
   return result;

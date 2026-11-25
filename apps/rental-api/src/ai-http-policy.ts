@@ -65,6 +65,12 @@ const declarations: readonly RentalHttpAccessDeclaration[] = [
   ...reviewed(AiConversationController, [conversations.modelControl], "transactional-write",
   "explicit same-task pure model control, original source/operation/parent Run and cumulative resource binding; owning registration and runner transactions hold Auth/Tenant/Core before Task CAS, original Gateway single accounting and unknown operation receipt remain"),
   ...[RentalWebsiteClientEntryController, RentalWechatClientEntryController].flatMap(controller => [
+    ...reviewed(controller, [controller.prototype.prepareGoalQuote, controller.prototype.prepareQuoteParameters,
+      controller.prototype.confirmQuoteParameters], "transactional-write",
+    "original explicit selection and immutable prequote/confirmation-attempt; owning ClientAuth/Tenant/Core precede original source/policy/material locks, current Core normalization and publication rechecked before commit; original attempt permits one quote dispatch, unknown only reads its receipt, no order or payment"),
+    ...reviewed(controller, [controller.prototype.readGoalQuotePreparation, controller.prototype.readQuotePreparationOperation,
+      controller.prototype.readPreparedQuoteOriginal], "audited-read",
+    "same original client and historical preparation scope, frozen selection/hash and original quote reference; current independent read policy and source checks retain refusal audit, no current normalization, preparation, confirmation or quote dispatch"),
     ...reviewed(controller, [controller.prototype.prepareGoal], "transactional-write",
     "original explicit customer goal and frozen public sources; original ClientAuth/Tenant/Core, exact channel publication and source revalidation participate in the original material transaction, no Task/model/quote creation and unknown retains original operation"),
     ...reviewed(controller, [controller.prototype.readGoalPreparation, controller.prototype.readGoalCandidates], "audited-read",
@@ -202,6 +208,8 @@ export function rentalAiDeploymentContinuationSelector(policy: ReturnType<typeof
         controller.prototype.readTaskCancellationSettlementReceipt,
         controller.prototype.settleTaskUnstartedCancellation, controller.prototype.reconcileTaskInputCancellation,
         controller.prototype.readOrderMaterialReceipt, controller.prototype.readGoalPreparation, controller.prototype.readTaskCreation,
+        controller.prototype.readGoalQuotePreparation, controller.prototype.readQuotePreparationOperation,
+        controller.prototype.readPreparedQuoteOriginal,
         controller.prototype.readTaskInput, controller.prototype.readTaskInputReceipt,
         controller.prototype.readTaskModelResult, controller.prototype.recoverTaskModel,
         controller.prototype.reconcileTaskModel]] as [Function, readonly Function[]])
@@ -258,6 +266,8 @@ export function rentalAiOriginalReceiptSelector(policy: ReturnType<typeof create
     [AiTaskCenterController, [center.stopReceipt, center.decisionReceipt, center.inputReceipt, center.result]],
     ...[RentalWebsiteClientEntryController, RentalWechatClientEntryController].map(controller => [controller,
       [controller.prototype.readGoalPreparation, controller.prototype.readTaskCreation, controller.prototype.readTaskInputReceipt,
+        controller.prototype.readGoalQuotePreparation, controller.prototype.readQuotePreparationOperation,
+        controller.prototype.readPreparedQuoteOriginal,
         controller.prototype.readTaskModelResult, controller.prototype.readTaskCancellationReceipt,
         controller.prototype.readTaskCancellationSettlementReceipt]] as [Function, readonly Function[]])
   ]);
