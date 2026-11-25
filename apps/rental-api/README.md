@@ -39,7 +39,7 @@ Core 包目录、预检、版本选择和候选准备的四个原 Controller 挂
 
 [包管理材料读取器](src/core-package-sources.ts)每次按当前实际安装路径核定 Rental 固定包。新版 Core 提供本次已通过完整摘要、数据和 OpenAPI 检查的同一份文件给准备流程使用。旧版 Core 仍由原部署入口核验，再单独读取和核对交付材料。
 
-当前推荐使用已发布的 Base `0.1.17`（源码 `3fee227517a2b20e18a426e853f18cdf37cb63ff`）和 Rental `0.1.13`（独立源码 `affeadb25453b0f977b3760bc9ebd53bfd8ebaad`）。截至 2026-11-25，独立 Rental 默认 `main` 仍提供 `0.1.12` 发现清单，新清单在 PR #2 待集成，安装时应核对所选 Release 内的清单和资产摘要。[发行与发现说明](../../packages/rental-core/README.md#使用与构建)
+当前组合使用 Base `0.1.17`（源码 `3fee227517a2b20e18a426e853f18cdf37cb63ff`）和 Rental `0.1.14`（独立源码 `2cada4c9bb7e7c4baa1affe66b72f5750e8431e6`）。底座从独立仓库默认分支发现清单，安装时核对对应 Release 的固定来源和资产摘要。`0.1.14` 仅补回独立后台的订单报价原样式，没有新增数据迁移；旧组合宿主归档仍保留其原版本，更新须重新准备所选包与部署锁。[发行与发现说明](../../packages/rental-core/README.md#使用与构建)
 
 独立更新先按目标固定包生成并核对部署锁，沿原停新、排空与迁移流程完成更新，再由宿主核定完整迁移账、物理结构及当前权限。Rental `0.1.13` 的 `dataVersion` 为 `0.1.1`，仍允许读取旧 `0.1.0` 绑定，保留原绑定 ID、修订、授权和业务收据。新增六表迁移完成后，程序回退候选须支持该完整迁移链。旧程序 `0.1.12` 未声明新增迁移，不能直接降级并宣称兼容。[Rental 数据合同](../../packages/rental-core/src/data.ts) · [迁移与回退边界](../../packages/rental-core/prisma/README.md)
 
