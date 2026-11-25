@@ -218,6 +218,8 @@ Rental HTTP从 `@rental-os/rental-core/http` 的 `RentalHttpModule` 接入，类
 
 网站、门户和部分前端出口继续使用 `@rental-os/shared@0.1.0` 的原运行协议。该包是可选 peer，消费这些出口的宿主仍须安装它；只使用其他出口时可按实际依赖选择。租赁值逐项转到已有 Core 正式出口，AI schema 和协调器当前仍由原 Shared 单源提供。
 
+本包自有源码采用 MIT，Lucide 保留随附的 ISC 与 Feather MIT 归属。`@animate-ui/react@2.3.0` 的许可为 MIT + Commons Clause，允许作为应用、网站或产品的一部分使用，覆盖商业用途，限制原始组件的单独或成套销售及再分发。依赖的许可与版本一起核对。[项目许可](../../LICENSE) · [Animate UI 版本](https://www.npmjs.com/package/@animate-ui/react/v/2.3.0)
+
 微信客户端工厂可通过 `npm run build:native-clients -w @rental-os/rental-core` 单独构建，类型检查使用 `npm run lint:native-clients -w @rental-os/rental-core`。Native独立入口与两端微信构建复用同一私有声明/Native编译器，读取当前Core、Shared与公共合同源码，不要求先写正式Shared/Core产物。独立入口按真实包出口生成JS、重定位声明与许可，`--check`退出时释放私有产物。[Native配置](tsconfig.native-clients.json) · [客户接入](clients/miniprogram/README.md) · [员工接入](clients/staff/README.md) · [私有准备](../../scripts/miniprogram-shared-types.cjs)
 
 空间切换、开发密码重置和员工订阅上下文由 [独立扩展模块](src/http-extensions.module.ts) 绑定同一认证/订阅实例；它与旧宿主已挂载的三个薄适配路径二选一，公共六项认证继续由公共模块提供。[原 Guard](src/http-auth.ts) 保持角色、客户和空间政策，在认证前清除 Node 请求上与 `socket` 相同的 `client` 运输别名；专用客户认证仍写入自己的可信身份。[application-access](src/application-access.ts) 将当前 Core 授权接入原业务父锁事务；它不代表所有独立写入、媒体流和回调已完成接入。
@@ -412,7 +414,7 @@ npm run lint -w @rental-os/rental-core
 
 旧 `apps/api` 的原241模型组合沿原生成及运行Client维护；编译依赖包时须显式指定本仓库原默认生成声明，并额外设置 `RENTAL_PRISMA_LEGACY=1`（或CLI传 `--legacy`）。该路径核对生成 schema 与原宿主源码一致，不能把旧241冒充独立247；独立 `rental-api` / `platform-api` 拒绝 legacy。独立构建前应移除该兼容变量。
 
-构建前置按公共合同 → Rental基础合同 → Shared兼容声明 → 公共Core宿主 → Rental完整服务的顺序执行；`npm run build:contracts -w @rental-os/rental-core`只生成Shared实际消费的17个正式合同入口及其内部依赖，避免Shared与完整服务循环构建。该入口保留同一运行时值和正式声明，不创建另一套合同。[合同构建配置](tsconfig.contracts.json) · [内存构建检查](../../scripts/check-rental-package-build.cjs) · [固定版本发行与五端消费核验](../../scripts/verify-rental-distribution.cjs)
+构建前置按公共合同 → Rental基础合同 → Shared兼容声明 → 公共Core宿主 → Rental完整服务的顺序执行；`npm run build:contracts -w @rental-os/rental-core`只生成Shared实际消费的18个正式合同入口及其内部依赖，避免Shared与完整服务循环构建。该入口保留同一运行时值和正式声明，不创建另一套合同。[合同构建配置](tsconfig.contracts.json) · [内存构建检查](../../scripts/check-rental-package-build.cjs) · [固定版本发行与五端消费核验](../../scripts/verify-rental-distribution.cjs)
 
 独立公开仓库从实际发行提交构建标准包，清单、Tag 和 Release 资产须对应同一来源。公开包声明 `/api/cores/rental/v1` 下已审定的业务操作，部署后的规范路径和原路径进入同一 Controller。包准备、实际部署、注册和租户授权沿现有流程完成。见[规范路径和文档共用入口](src/http-portable.ts)与[宿主接入说明](../../apps/rental-api/README.md)。
 
@@ -420,8 +422,10 @@ Core 使用底座的正式 API 和已声明能力扩展业务，底座与 Core �
 
 独立 Core 开发先用[源码工作区准备入口](../../scripts/prepare-rental-workspace.cjs)组合固定底座支持源码和 Core 自己的版本标签。它保留原构建工具、各端薄宿主与所选 npm 锁，输出新的开发归档；Core 子树来自独立仓库，底座源码和接口来自明确的支持版本。零 Core 底座继续单独发行。
 
+包含客户和员工小程序的源码开发使用支持提交 `357147d90249c5dd40b67e24824247d80107d33d` 与 Rental `v0.1.12` 的源码提交 `50ba3335592893a3b7a4d440ba85b764b2ca8e24`。准备入口的 `supportScripts` 从 `--commit` 指定的 Git 提交读取 `scripts/miniprogram-ai-runtime.cjs`，两端构建由此取得 `platform-contracts/ai-gateway` 和 `ai-task` 的正式打包接点。取得该固定支持源码后，按原锁文件与各端构建前置准备工作区。[固定支持源码](https://github.com/JinPen-G/Nativark/tree/357147d90249c5dd40b67e24824247d80107d33d)
+
 ```text
-node scripts/prepare-rental-workspace.cjs --repo <固定底座Git目录> --repository https://github.com/JinPen-G/Nativark --commit <底座支持SHA> --core-repo <独立CoreGit目录> --core-commit <版本Tag的提交SHA> --out <新开发归档.tgz>
+node scripts/prepare-rental-workspace.cjs --repo <固定底座Git目录> --repository https://github.com/JinPen-G/Nativark --commit 357147d90249c5dd40b67e24824247d80107d33d --core-repo <独立CoreGit目录> --core-commit 50ba3335592893a3b7a4d440ba85b764b2ca8e24 --out <新开发归档.tgz>
 ```
 
 在新目录解包，执行 `npm ci`、`npm run check:types`，修改 `packages/rental-core` 后执行 `npm run check:core`。可选 AI 开发组合在准备时显式加 `--ai`；Client 生成、构建、迁移和启动按 [Rental 宿主](../../apps/rental-api/README.md)办理。包内 `development.workspace.json` 记录两个来源和文件摘要，开发组合不依赖维护者私有文档、旧生成物或聊天记忆。

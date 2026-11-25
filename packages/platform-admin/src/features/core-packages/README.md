@@ -2,6 +2,22 @@
 
 [CorePackagesPage](CorePackagesPage.tsx)提供当前注册目录、GitHub Topic 发现和底座/Core独立版本三个视图。[客户端](client.ts)复用唯一 AdminRuntime，查询键带原会话代次，离开视图释放查询，权限变化后拒绝旧响应。普通租户在挂载查询前拒绝。
 
+## 公开 Rental Core 的五步
+
+已公开验证的组合使用 Nativark 测试底座 `0.1.16` 和 Rental Core `0.1.12`。Rental 要求底座 `>=0.1.12 <0.2.0`、接入合同 `>=0.1.1 <0.2.0`、Node `>=22.12.0 <25.0.0`。[底座发行](https://github.com/JinPen-G/Nativark/releases/tag/v0.1.16) · [Rental 发行](https://github.com/JinPen-G/nativark-rental-core/releases/tag/v0.1.12)
+
+标准资产为 `rental-0.1.12.tgz`，SHA-256 为 `7179a27231aed503ab294639093d3bb7f101a51cf63c5c3e984d43329c835574`，发行源码为 `50ba3335592893a3b7a4d440ba85b764b2ca8e24`。
+
+| 步骤 | 操作与核对结果 |
+| --- | --- |
+| 1. 发现 | SaaS 管理员进入 `/platform/core-packages` 的“发现 Core”，搜索 `rental`，选择 `JinPen-G/nativark-rental-core`。 |
+| 2. 下载与校验 | 在 `v0.1.12` 详情点“选择版本”，核对上面的来源和摘要，保存固定发行引用，再按预览确认“准备候选”。成功回执显示“候选已准备，待部署”。 |
+| 3. 部署注册 | 部署人员按[Rental 宿主步骤](../../../../../apps/rental-api/README.md)使用固定包与部署锁，完成构建、迁移和启动，在“当前目录”核对注册来源及版本。首次准入按[正式管理步骤](../../../../platform-core-host/README.md#部署准入与存量切换)读取当前状态并登记 `accepting`。 |
+| 4. 租户授权 | SaaS 管理员进入 `/platform/core-access` 的“租户 Core 授权”，选目标租户与 `rental`，核对当前修订并保存授权。租户列表的“Core 授权”动作也进入此页。 |
+| 5. 成员分配 | 租户管理员进入 `/settings/member-cores` 的“成员 Core 分配”，给指定成员分配 `rental`，再按原角色和经营空间入口配置业务权限及绑定。当前目录、租户授权、成员分配与业务范围分别回读。 |
+
+授权和分配使用同一[管理面板](../../core/CoreAccessPanel.tsx)。应答不明时选择“核对原结果”，沿原发行引用、候选摘要或管理操作读取原收据。
+
 页面必须接收宿主提供的 `brandName: string`，沿用当前 AdminRuntime 和 QueryClient。原后台从现有租户/用户品牌解析传入，公共宿主从 `options.brandName` 传入。
 
 页面从正式 `@rental-os/platform-core-host/core-package-ports` 消费同源路径和投影类型，搜索校验复用 `@rental-os/core-contracts/github-discovery`。宿主须提供这些正式子出口并将页面接入原 SaaS 路由/菜单，HTTP 接入见[服务端模块](../../../../platform-core-host/src/core-packages/README.md)。
