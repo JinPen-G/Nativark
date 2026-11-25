@@ -23,6 +23,7 @@ import { requestFingerprint } from '@rental-os/platform-contracts/request-finger
 import { aiTaskHasUnresolvedEffects } from './task-unresolved-effects';
 import { validateAiSceneModelObservation } from './scenes/scene-observation-contracts';
 import { originalRequestReferenceSchema, freezeOriginalInput } from './task-request/original-request.validation';
+import { beginConversationTransaction } from './conversation-transactions';
 
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const conflict = () => new AiTaskRepositoryError('AI_REVISION_CONFLICT');
@@ -38,7 +39,7 @@ export class AiConversationRepository {
   private readonly clock: () => Date;
   private readonly capabilities: readonly string[];
   private readonly db: PrismaClient;
-  constructor(input: AiOriginalSceneDependencies, private readonly originals: PrismaOriginalRequestRepository) {
+  constructor(private readonly input: AiOriginalSceneDependencies, private readonly originals: PrismaOriginalRequestRepository) {
     this.clock = input.clock ?? (() => new Date()); this.db = input.db;
     this.scopes = new AiScopeRepository(input.db, new AiTaskCurrentIdentityAuthority(input.auth, input.credentials, this.clock), this.clock);
     this.capabilities = input.creationRules.filter(rule => rule.audiences.includes('operator')).map(rule => rule.sceneCode);
@@ -56,6 +57,17 @@ export class AiConversationRepository {
       workspaceId: context.scope.workspaceId, binding: originalIdentityHash(context) };
   }
   private owner(session: Session) { return { scopeId: session.scopeId, ownerId: session.ownerId }; }
+  private transaction<T>(session: Session, consume: (tx: Prisma.TransactionClient) => Promise<T>,
+    purpose: 'new_work' | 'task_control' = 'task_control') {
+    return this.db.$transaction(async tx => {
+      const lease = await beginConversationTransaction(this.input, tx, session, purpose);
+      try {
+        const result = await consume(tx);
+        await lease?.revalidate();
+        return result;
+      } finally { lease?.close(); }
+    }, transaction);
+  }
   private async check(session: Session) {
     const current = await this.current();
     if (requestFingerprint(session) !== requestFingerprint(current)) throw denied();
@@ -92,7 +104,7 @@ export class AiConversationRepository {
     const inputHash = requestFingerprint({ operation: 'create', command });
     let attempted = false;
     try {
-      const result = await this.db.$transaction(async tx => {
+      const result = await this.transaction(session, async tx => {
         const key = { ...this.owner(session), operationKey: command.operationKey };
         const existing = await tx.aiConversationOperation.findFirst({ where: key });
         if (existing) { if (existing.inputHash !== inputHash) throw conflict(); await this.check(session); return this.operation(existing); }
@@ -103,7 +115,7 @@ export class AiConversationRepository {
         const receipt = await tx.aiConversationOperation.create({ data: { ...key, conversationId: id, operation: 'create', inputHash, revision: 1, createdAt: at } });
         await this.check(session);
         return this.operation(receipt);
-      }, transaction);
+      }, 'new_work');
       await this.check(session);
       return result;
     } catch (error) {
@@ -117,7 +129,7 @@ export class AiConversationRepository {
     const inputHash = requestFingerprint({ operation, command });
     let attempted = false;
     try {
-      const result = await this.db.$transaction(async tx => {
+      const result = await this.transaction(session, async tx => {
         const key = { ...this.owner(session), operationKey: command.operationKey };
         const existing = await tx.aiConversationOperation.findFirst({ where: key });
         if (existing) { if (existing.inputHash !== inputHash) throw conflict(); await this.check(session); return this.operation(existing); }
@@ -131,7 +143,7 @@ export class AiConversationRepository {
         const receipt = await tx.aiConversationOperation.create({ data: { ...key, conversationId: row.id, operation, inputHash,
           revision: row.revision + 1, createdAt: at } });
         await this.check(session); return this.operation(receipt);
-      }, transaction);
+      });
       await this.check(session); return result;
     } catch (error) { if (attempted) throw new AiOriginalRequestResultUnknownError(); throw error; }
   }
@@ -145,7 +157,7 @@ export class AiConversationRepository {
     if (existing) { if (existing.inputHash !== inputHash) throw conflict(); await this.check(session); return this.operation(existing); }
     let attempted = false;
     try {
-      const result = await this.db.$transaction(async tx => {
+      const result = await this.transaction(session, async tx => {
         // A competing same-key release can commit after the first receipt read.
         // Return that original fact before inspecting the now-changed head.
         const replay = await tx.aiConversationOperation.findFirst({ where: key });
@@ -168,7 +180,7 @@ export class AiConversationRepository {
         const receipt = await tx.aiConversationOperation.create({ data: { ...key, conversationId: row.id, operation: 'release_turn',
           inputHash, revision: row.revision + 1, createdAt: this.now() } });
         await this.check(session); return this.operation(receipt);
-      }, transaction);
+      });
       await this.check(session); return result;
     } catch (error) { if (attempted) throw new AiOriginalRequestResultUnknownError(); throw error; }
   }
@@ -184,7 +196,7 @@ export class AiConversationRepository {
     };
     let attempted = false;
     try {
-      const result = await this.db.$transaction(async tx => {
+      const result = await this.transaction(session, async tx => {
         // Task creation/upsert and retention take the scope first. Keep that
         // order before conversation/original locks to avoid a lock inversion.
         const scopes = await tx.$queryRaw<Array<{ id: string }>>(prismaRuntime.sql`SELECT id FROM ai_scopes WHERE id = ${session.scopeId}
@@ -210,7 +222,7 @@ export class AiConversationRepository {
         const receipt = await tx.aiConversationOperation.create({ data: { ...key, conversationId: row.id, operation: 'close_unstarted',
           inputHash, revision: row.revision + 1, createdAt: closed.closedAt } });
         await this.check(session); return original(receipt);
-      }, transaction);
+      });
       await this.check(session); return result;
     } catch (error) { if (attempted) throw new AiOriginalRequestResultUnknownError(); throw error; }
   }

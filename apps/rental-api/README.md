@@ -127,6 +127,8 @@ MCP 的 OAuth、Host router 与原 Web 参加者由独立的 `rental-mcp-host` �
 
 原模型启动和人工输入续程保留同一请求身份，准入事务在原 Scope/Task/Plan 锁前取得当前 Auth/Tenant/Core 与原任务来源围栏。原 Gateway 财务单账、任务累计资源、计划、租约、回答收据和恢复修订继续裁决执行；请求断开、TTL、取消或 unknown 不产生重发权。报价澄清不会批准订单，开业诊断不会发布经营设置，订单解释使用原只读业务投影。
 
+Agent/Copilot 的[原会话接口](../../packages/ai-native-server/src/runtime/conversation.application.ts)已纳入同一宿主的处理器、请求令牌和 OpenAPI 发布。新建、归档、删除及轮次关闭在[原会话事务](../../packages/ai-native-server/src/runtime/conversation-transactions.ts)中复核当前 Auth/Tenant/Core、成员范围与部署状态；准入沿原输入保存事务。展示按原 Task/Run/结果来源读取，明确重新排版或重新解释在同一 Task 内登记后继 Run，复用原累计资源和 Gateway 单账。未建任务的轮次按原创建围栏关闭，已完成轮次仍须核清未决副作用；丢失提交应答只按原操作收据核对。
+
 网站与小程序客户入口分别挂载资料准备/原资料收据、Task 创建/原创建收据、模型启动、人工输入提交/续程、模型恢复/核对，以及原输入、输入收据和回答读取。它们沿原客户工厂复核本人订单、发布状态、材料与当前会话，复用原 Gateway 单账和同一 Task 累计资源。客户作用域固定实际 request 对象及原身份，禁止克隆借用、嵌套和请求结束后的异步逃逸；已提交操作不追加撤权查询改写成功回执。场景选择、报价、预订、移交和取消等未挂操作不由此开放。
 
 场景计划的读取与变更，以及原任务动作策略的读取、配置和清除，分别挂载原两个 Controller 的五个操作。计划写入在原 Serializable 事务的 Scope/策略锁前取得 Auth/Tenant/Core；任务动作写入继续先核原订单与空间，再执行原策略 CAS 和审计，提交前同事务复验。策略配置不启动任务、不授予模型额度；提交失回复仍按原操作收据核对。定向行为入口为 [策略事务回归](../../packages/ai-native-server/test/scene-policy-transactions.test.cjs)。

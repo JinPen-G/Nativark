@@ -14,6 +14,7 @@ import { AiOriginalOpeningModelExecutionController, AI_ORIGINAL_OPENING_MODEL_RE
 import { AiOriginalOrderReadController, AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS } from "@rental-os/ai-native-server/runtime/scenes/original-order-read.controller";
 import { AiTaskCenterController, AI_NATIVE_TASK_CENTER_REQUESTS } from "@rental-os/ai-native-server/runtime/task-center.application";
 import { AiModelSettingsController, AI_NATIVE_MODEL_SETTINGS_REQUESTS } from "@rental-os/ai-native-server/runtime/model-settings.application";
+import { AiConversationController, AI_CONVERSATION_REQUESTS } from "@rental-os/ai-native-server/runtime/conversation.application";
 import { AI_STAFF_INSPECTION_REQUESTS } from "@rental-os/ai-native-server/runtime/inspection-assist/staff-inspection-assist.controller";
 import * as shared from "@rental-os/shared";
 import { RENTAL_HOST_CONTROLLERS } from "./http-policy";
@@ -28,14 +29,14 @@ export const RENTAL_AI_CONTROLLERS = Object.freeze([
   OperatorEntrySceneCatalogController, StaffEntrySceneCatalogController, StaffInspectionAssistController,
   AiOriginalScenesController, AiOriginalSceneRecoveryController, AiTaskCenterController, AiModelSettingsController,
   AiOriginalQuoteModelExecutionController, AiOriginalOpeningModelExecutionController, AiOriginalOrderReadController,
-  AiScenePlanPolicyController, AiOriginalTaskActionPolicyController,
+  AiScenePlanPolicyController, AiOriginalTaskActionPolicyController, AiConversationController,
   RentalWebsiteClientEntryController, RentalWechatClientEntryController
 ]);
 export const RENTAL_AI_MOUNTED_REQUESTS: readonly symbol[] = Object.freeze([
   AI_STAFF_INSPECTION_REQUESTS, AI_ORIGINAL_SCENE_REQUESTS, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS,
   AI_NATIVE_TASK_CENTER_REQUESTS, AI_NATIVE_MODEL_SETTINGS_REQUESTS,
   AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS, AI_ORIGINAL_OPENING_MODEL_REQUESTS, AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS,
-  AI_SCENE_PLAN_POLICIES, AI_ORIGINAL_TASK_ACTION_POLICIES
+  AI_SCENE_PLAN_POLICIES, AI_ORIGINAL_TASK_ACTION_POLICIES, AI_CONVERSATION_REQUESTS
 ]);
 function reviewed(controller: RentalHttpAccessDeclaration["controller"], handlers: readonly Function[],
   kind: "buffered-read" | "audited-read" | "transactional-write", evidence: string): RentalHttpAccessDeclaration[] {
@@ -46,7 +47,20 @@ const center = AiTaskCenterController.prototype, settings = AiModelSettingsContr
 const quote = AiOriginalQuoteModelExecutionController.prototype, opening = AiOriginalOpeningModelExecutionController.prototype;
 const orders = AiOriginalOrderReadController.prototype;
 const plans = AiScenePlanPolicyController.prototype, actions = AiOriginalTaskActionPolicyController.prototype;
+const conversations = AiConversationController.prototype;
 const declarations: readonly RentalHttpAccessDeclaration[] = [
+  ...reviewed(AiConversationController, [conversations.read, conversations.list, conversations.turns,
+    conversations.operation, conversations.admission], "buffered-read",
+  "original current owner, registered scene and bounded metadata/turn/operation readers; original input and task provenance retained, no admission or model dispatch; selected access rechecks before response"),
+  ...reviewed(AiConversationController, [conversations.create, conversations.archive, conversations.delete,
+    conversations.release, conversations.closeUnstarted, conversations.admit], "transactional-write",
+  "original conversation CAS and operation receipts hold Auth/Tenant/Core in the owning transaction; admission shares original input save and resource fences, closure retains original creation fence and unresolved-effect checks; no implicit Task/model/business execution or unknown replay"),
+  ...reviewed(AiConversationController, [conversations.modelResult, conversations.taskResult, conversations.display,
+    conversations.displayRevalidate, conversations.displaySource, conversations.prepareModelControl,
+    conversations.readModelControl], "audited-read",
+  "original Task/Run/result lineage, field bindings, publication and source ACL readers; optional knowledge body uses the existing same-identity sensitive audit, selected response recheck, no new model control or invocation"),
+  ...reviewed(AiConversationController, [conversations.modelControl], "transactional-write",
+  "explicit same-task pure model control, original source/operation/parent Run and cumulative resource binding; owning registration and runner transactions hold Auth/Tenant/Core before Task CAS, original Gateway single accounting and unknown operation receipt remain"),
   ...[RentalWebsiteClientEntryController, RentalWechatClientEntryController].flatMap(controller => [
     ...reviewed(controller, [controller.prototype.prepareOrderMaterial, controller.prototype.createTask], "transactional-write",
     "original channel-specific ClientAuth and same customer/tenant/workspace request; original material/task creation transactions hold selected Auth/Tenant/Core before original Order/Workspace/task locks and revalidate before commit; original operation receipts and unknown retained"),
@@ -138,6 +152,10 @@ export function createRentalAiHttpPolicy(authorization = createRentalAuthorizati
  * recover/reconcile 仍由原 lease/receipt 仓储裁定，不能据此创建或重新派发。 */
 export function rentalAiDeploymentContinuationSelector(policy: ReturnType<typeof createRentalAiHttpPolicy>) {
   const selected = new Map<Function, readonly Function[]>([
+    [AiConversationController, [conversations.read, conversations.list, conversations.turns, conversations.operation,
+      conversations.admission, conversations.archive, conversations.delete, conversations.release, conversations.closeUnstarted,
+      conversations.modelResult, conversations.taskResult, conversations.display, conversations.displayRevalidate,
+      conversations.displaySource, conversations.readModelControl]],
     [AiOriginalScenesController, [scene.read, scene.reconcile, scene.reconcileReissue, scene.material,
       scene.materialV2, scene.sourceV2, scene.recovery, scene.quoteReview, scene.quoteReceipt, scene.compareOriginalQuotes]],
     [AiOriginalSceneRecoveryController, [recovery.readTaskPage, recovery.readTaskEvents, recovery.readTaskUsage,
@@ -206,6 +224,8 @@ export function rentalAiRouteSelector(policy: ReturnType<typeof createRentalAiHt
  * 从真实controller/handler闭集取路由，并要求只读审定；请求标志不能扩展此集合。 */
 export function rentalAiOriginalReceiptSelector(policy: ReturnType<typeof createRentalAiHttpPolicy>) {
   const selected = new Map<Function, readonly Function[]>([
+    [AiConversationController, [conversations.operation, conversations.modelResult, conversations.taskResult,
+      conversations.readModelControl]],
     [AiOriginalScenesController, [scene.reconcile, scene.reconcileReissue, scene.recovery]],
     [AiOriginalSceneRecoveryController, [recovery.readRecoverySnapshot, recovery.readTakeoverReceipt,
       recovery.readCancellationReceipt, recovery.readCancellationSettlementReceipt, recovery.readAnswer, recovery.readModelResult]],

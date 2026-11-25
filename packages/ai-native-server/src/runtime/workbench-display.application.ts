@@ -8,6 +8,7 @@ import { AI_CONVERSATION_DRAFT_VERSION, AI_TASK_CENTER_ENTRY_PERMISSIONS,
   type AiWorkbenchDisplaySourceReadDraft, type AiWorkbenchDisplayMaterialDraft,
   type AiTaskReviewQueryDraft, type AiSceneRequestReadDraft } from '@rental-os/shared';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
+import { captureRentalInternalAuthority } from '@rental-os/rental-core/application-internal-authority';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { composePersistedTaskAuthorization } from './task-authorization.composition';
 import { composeAiOriginalScenes, type AiOriginalSceneDependencies } from './scenes/original-scenes.composition';
@@ -49,7 +50,8 @@ export function composeAiWorkbenchDisplayRequests(dependencies: Omit<AiOriginalS
     const requestId = randomUUID(); let active = !signal?.aborted;
     const close = () => { active = false; }; signal?.addEventListener('abort', close, { once: true });
     try {
-      return await waitForTaskApplicationDependency(() => runWithRequestIdentity({}, async () => {
+      const selected = captureRentalInternalAuthority();
+      const consume = async () => {
         const input = { ...dependencies, credentials: { current: async () => {
           if (!active) throw denied(); return { authorization: header, audience: 'operator' as const, requestId };
         } } }, clock = input.clock ?? (() => new Date());
@@ -184,7 +186,8 @@ export function composeAiWorkbenchDisplayRequests(dependencies: Omit<AiOriginalS
         if (!active || !same(before.reference, after.reference) || before.identity !== after.identity || before.scopeId !== after.scopeId
           || before.task.revision !== after.task.revision || before.runId !== after.runId || before.currentRunId !== after.currentRunId) throw denied();
         return result;
-      }), false, signal);
+      };
+      return await waitForTaskApplicationDependency(() => selected ? consume() : runWithRequestIdentity({}, consume), false, signal);
     } finally { close(); signal?.removeEventListener('abort', close); }
   } };
 }

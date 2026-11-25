@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { AI_TASK_DRAFT_VERSION, AI_CONVERSATION_DRAFT_VERSION, AI_WORKBENCH_MODEL_CONTROL_VERSION, type AiWorkbenchModelControlPreparation,
   type AiWorkbenchModelControlCommand, type AiWorkbenchModelControlReference, type AiSceneRequestReadDraft } from '@rental-os/shared';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
+import { captureRentalInternalAuthority } from '@rental-os/rental-core/application-internal-authority';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { conversationCommand } from './conversation-contract';
 import { composePersistedTaskAuthorization } from './task-authorization.composition';
@@ -23,6 +24,7 @@ import { WorkbenchModelControlSource } from './workbench-model-control.source';
 import { WorkbenchModelControlService, type WorkbenchModelControlDependencies } from './workbench-model-control.service';
 import { composeOriginalSceneKnowledge, type AiOriginalSceneKnowledgeOptions } from './scenes/original-scene-knowledge';
 import { WORKBENCH_MODEL_CONTROL_ACTION } from './workbench-model-control.contract';
+import { withTaskCenterTransactions } from './task-center-transactions';
 
 export const AI_WORKBENCH_MODEL_CONTROL_REQUESTS = Symbol('AI_WORKBENCH_MODEL_CONTROL_REQUESTS');
 type Action = 'model-control-prepare' | 'model-control' | 'model-control-read';
@@ -55,7 +57,8 @@ export function composeWorkbenchModelControlRequests(dependencies: Omit<AiOrigin
     const requestId = randomUUID(); let active = !signal?.aborted;
     const close = () => { active = false; }; signal?.addEventListener('abort', close, { once: true });
     try {
-      return await runWithRequestIdentity({}, async () => {
+      const selected = captureRentalInternalAuthority();
+      const consume = async () => {
         const input = { ...dependencies, credentials: { current: async () => {
           if (!active) throw denied(); return { authorization: header, audience: 'operator' as const, requestId };
         } } }, clock = input.clock ?? (() => new Date());
@@ -147,7 +150,8 @@ export function composeWorkbenchModelControlRequests(dependencies: Omit<AiOrigin
         },
           build: control => options.build(input, control) });
         if (action === 'model-control-read') return service.read(command as AiWorkbenchModelControlReference);
-        if (action === 'model-control') return service.execute(command as AiWorkbenchModelControlCommand, signal);
+        if (action === 'model-control') return withTaskCenterTransactions(input.transactions, input.db, input.credentials,
+          command.taskId, () => service.execute(command as AiWorkbenchModelControlCommand, signal));
         if (!options.available(current.task.sceneCode) || current.task.status !== 'SUCCEEDED') throw unavailable();
         const key = { scopeId: current.task.scopeId, taskId: command.taskId };
         const runs = await input.db.aiRun.findMany({ where: key, orderBy: { sequence: 'desc' }, take: 2 });
@@ -180,7 +184,8 @@ export function composeWorkbenchModelControlRequests(dependencies: Omit<AiOrigin
         const { operationId: _operation, kind: _kind, ...original } = selected;
         return { version: AI_WORKBENCH_MODEL_CONTROL_VERSION, ...original,
           kinds: ['reinterpret', 'reformat'], semantics: 'current_original_source_not_model_permission' } satisfies AiWorkbenchModelControlPreparation;
-      });
+      };
+      return await (selected ? consume() : runWithRequestIdentity({}, consume));
     } finally { close(); signal?.removeEventListener('abort', close); }
   };
   return { consume: (request: Request, action: Action, value: unknown, signal?: AbortSignal) => call(request, action, value, signal),

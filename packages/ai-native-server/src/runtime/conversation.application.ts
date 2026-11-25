@@ -6,6 +6,7 @@ import { Body, Controller, Header, HttpCode, Inject, Post, Req } from '@nestjs/c
 import type { IncomingMessage } from 'node:http';
 import { AI_CONVERSATION_HTTP_DRAFT } from '@rental-os/shared';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
+import { captureRentalInternalAuthority } from '@rental-os/rental-core/application-internal-authority';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { composeAiOriginalScenes, type AiOriginalSceneDependencies } from './scenes/original-scenes.composition';
 import { AiConversationRepository } from './conversation.repository';
@@ -43,7 +44,8 @@ export function composeAiConversationRequests(dependencies: Omit<AiOriginalScene
         // five-second wrapper cannot truncate it into an untracked retry.
         return conversationResponse(action, await modelControls.consume(request, action, command, signal), command);
       }
-      return await waitForTaskApplicationDependency(() => runWithRequestIdentity({}, async () => {
+      const selected = captureRentalInternalAuthority();
+      const consume = async () => {
         if (action === 'display' || action === 'display-revalidate' || action === 'display-source') {
           if (!active) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
           if (!display) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
@@ -74,7 +76,10 @@ export function composeAiConversationRequests(dependencies: Omit<AiOriginalScene
           } })
           : await app[action](supplied);
         return conversationResponse(action, result, command);
-      }), contract.write, signal);
+      };
+      // Selected requests already carry the original HTTP Guard's owning store.
+      // Resource guards retain their one-use return bridge; legacy hosts keep isolation.
+      return await waitForTaskApplicationDependency(() => selected ? consume() : runWithRequestIdentity({}, consume), contract.write, signal);
     } finally { close(); signal?.removeEventListener('abort', close); }
   } };
 }

@@ -5,6 +5,7 @@ import type { PrismaClient, Prisma, AiTask, AiRun, AiStep, AiTaskActionInput } f
 import { AI_SCENE_REQUEST_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, type AiConversationTurnObservationDraft,
   type AiSceneRequestReceiptDraft } from '@rental-os/shared';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
+import { withAiTaskTransaction } from './task-transaction-authority';
 import { originalIdentityHash } from './task-request/original-request.authority';
 import { AiTaskRepositoryError, aiTaskAccessFromContext, type AiTaskRepositoryAuthority } from './ai-task.repository';
 import { aiTaskRunPlanSchema } from './runner/prisma-task-run-evidence.repository';
@@ -298,7 +299,8 @@ export class WorkbenchModelControlRepository {
     const initial = await this.current(command.taskId), key = this.operationId(initial, command);
     if (source.scopeId !== initial.task.scopeId || source.identityHash !== initial.identityHash) throw denied();
     try {
-      return await this.db.$transaction(async tx => {
+      return await this.db.$transaction(tx => withAiTaskTransaction(tx as Prisma.TransactionClient,
+        { kind: 'task', taskId: command.taskId }, async () => {
         const existing = await this.receipt(tx, initial, { taskId: command.taskId, operationId: command.operationId });
         if (existing) { if (existing.commandHash !== requestFingerprint(command)) throw changed(); return { receipt: existing, created: false }; }
         const current = await this.current(command.taskId), task = current.task;
@@ -382,7 +384,7 @@ export class WorkbenchModelControlRepository {
         // this same transaction so late withdrawal rolls back the new Run.
         this.assertRegistrationCurrent?.(task.sceneCode);
         return { receipt, created: true };
-      }, { isolationLevel: 'Serializable' });
+      }), { isolationLevel: 'Serializable' });
     } catch (error) {
       // A transaction reply can be lost after the Run and receipt committed.
       // Recovery observes that same key; it never earns another start token.
