@@ -10,6 +10,8 @@
 
 [批准订单授权桥](src/runtime/approval-execution/approved-order-route.authority.ts) 在进入隔离 Guard 前捕获原请求权威；完整 Guard 和身份一致性通过后，准备、读取与执行回调恢复同一原 ALS store。原 Task/批准/Core 事务和幂等仍由真实参加者裁定，失应答保持 unknown，不按新键重发。
 
+Task 准入与人工批准/重新准备复用[同一服务政策读取](src/runtime/task-service-admission.ts)。现代 BYOK 的平台金额为零或未配置时，仍核服务开关、场景政策、凭据配置和计划期限；平台付费与旧政策继续按原金额及层级门槛核定。人工批准在其原事务中读取这些政策，并将配置和计划修订绑定到确认依据，独立人工权限、提交前复核和批准消费由原服务执行。
+
 Core 停用后的已有回答及模型结果核对，由宿主 [只读处理器闭集](../../apps/rental-api/src/ai-http-policy.ts) 明确开放。原读取器仍执行当前主体、Task/Run 来源、原键和对象权限检查；缺结果保持未知。读取不创建任务、不领取新调用、不恢复模型执行，也不恢复已撤销的成员权限。
 
 ## 入口与调用方

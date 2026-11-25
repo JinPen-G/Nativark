@@ -1,11 +1,10 @@
 import { hasEffectivePermission } from '@rental-os/platform-server/permission-match';
 import type { Prisma } from '@prisma/client';
-import { AI_TASK_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, type AiUsageSettingsDraft } from '@rental-os/shared';
+import { AI_TASK_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import type { AiApprovalPrincipal } from '../ai-approval-repository';
 import { AiTaskRepositoryError } from '../ai-task.repository';
-import { aiPersistenceScopeColumns } from '../persistence-scope';
-import { validateBudgetSettings } from '../budget/budget-settings';
+import { readTaskServiceAdmission } from '../task-service-admission';
 import { PrismaSubscriptionBudgetReader } from '../budget/prisma-subscription-budget-reader';
 import { SubscriptionBudgetEntitlementAdapter } from '../budget/budget-dependency-adapters';
 import type { ControlledApprovedOrderDependencies } from './controlled-approved-order.composition';
@@ -52,25 +51,9 @@ export class ApprovedOrderHumanAuthority {
         || policy.requiredPermissions.some(p => typeof p !== 'string' || !p || p.length > 191)
         || new Set(policy.requiredPermissions).size !== policy.requiredPermissions.length) throw unavailable();
       if (policy.requiredPermissions.some(p => typeof p !== 'string' || !hasEffectivePermission(context.access.permissions, p))) throw deniedOrder();
-      const columns = [aiPersistenceScopeColumns({ kind: 'platform' }),
-        aiPersistenceScopeColumns({ kind: 'tenant', tenantId: context.scope.tenantId }), aiPersistenceScopeColumns(context.scope)];
-      const gates = [];
-      for (const expected of columns) {
-        const scope = await db.aiScope.findFirst({ where: expected });
-        if (!scope || Object.entries(expected).some(([k, v]) => scope[k as keyof typeof scope] !== v)
-          || (scope.kind === 'WORKSPACE' && scope.id !== scopeId)) throw deniedOrder();
-        const budgetKey = { scopeId: scope.id, scopeKind: scope.kind, sceneCode: task.sceneCode };
-        const row = await db.aiBudgetPolicy.findUnique({ where: { scopeId_scopeKind_sceneCode: budgetKey } });
-        if (!row || Object.entries(budgetKey).some(([k, v]) => row[k as keyof typeof row] !== v)
-          || !validRevision(row.configRevision) || row.enabled !== true) throw unavailable();
-        const settings = structuredClone(row.settingsJson) as unknown as AiUsageSettingsDraft;
-        validateBudgetSettings(settings);
-        const settingScope = scope.kind === 'PLATFORM' ? { kind: 'platform' } : { kind: 'tenant', tenantId: context.scope.tenantId };
-        if (requestFingerprint(settings.scope) !== requestFingerprint(settingScope) || settings.sceneCode !== task.sceneCode
-          || !settings.allowedScenes.includes(task.sceneCode) || !settings.allowedModels.length || settings.budget.state !== 'limited'
-          || settings.maxConcurrent < 1 || settings.maxCallsPerRun < 1 || !Object.values(settings.gates).every(g => g.enabled === true)) throw unavailable();
-        gates.push({ key: budgetKey, revision: row.configRevision, settings });
-      }
+      // Reuse the Task's current service/scene policy through this owning tx.
+      // BYOK monetary absence grants no exception to explicit disable or plan gates.
+      const gates = await readTaskServiceAdmission(db, context, scopeId, task.sceneCode, task.sceneVersion, this.clock);
       const entitlement = await this.entitlements.check(context, 'ai.native.use');
       if (!entitlement.available) throw unavailable();
       const latest = await this.policy.authorizeRead(taskId, tx);
