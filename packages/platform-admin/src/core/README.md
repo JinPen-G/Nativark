@@ -20,7 +20,7 @@ import manifest from "virtual:core-manifest";
 const registered = registerCoreAdminPages([{ manifest, contribution: createTicketsAdmin() }]);
 if (!registered.ok) throw new Error(registered.issues.map(issue => issue.message).join("\n"));
 const session = createBrowserAdminSession({ baseURL: "/api", storageKey: "my-app:admin" });
-const App = createPlatformAdminApplication({ brandName: "Nativark", brand: "Nativark", session, pages: registered.pages });
+const App = createPlatformAdminApplication({ brandName: "Zelo", brand: "Zelo", session, pages: registered.pages });
 ```
 
 入口加载 `@rental-os/platform-admin/styles`，渲染 `<App />` 并沿示范释放 `session.dispose()`；动效与Vite适配也沿同一示范。零Core省略 `pages` 即保留公共后台。已有业务容器或通知的宿主通过正式 `getCoreContainer` / `Shell` 选项供给当前已验证范围和展示，见[宿主接入](../../README.md#宿主接入)。

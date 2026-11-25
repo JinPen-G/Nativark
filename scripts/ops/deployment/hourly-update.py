@@ -16,10 +16,10 @@ import urllib.error
 import urllib.request
 
 
-REPOSITORY = "JinPen-G/Nativark"
+REPOSITORY = "JinPen-G/Zelo"
 GIT_URL = f"https://github.com/{REPOSITORY}.git"
 CI_URL = f"https://api.github.com/repos/{REPOSITORY}/actions/workflows/nativark-release.yml/runs"
-ROOT = Path("/home/ritiadm/nativark")
+ROOT = Path("/home/ritiadm/zelo")
 STATE = ROOT / ".hourly-update"
 OVERRIDE = ROOT / "compose.override.yml"
 ACTIVE = STATE / "active.json"
@@ -86,7 +86,7 @@ def ci_approved(runs, commit):
 def ci_run(commit):
     url = f"{CI_URL}?branch=main&event=push&head_sha={commit}&per_page=20"
     request = urllib.request.Request(url, headers={
-        "User-Agent": "Nativark-hourly-update", "Accept": "application/vnd.github+json",
+        "User-Agent": "Zelo-hourly-update", "Accept": "application/vnd.github+json",
     })
     try:
         with urllib.request.urlopen(request, timeout=15) as response:
@@ -315,7 +315,7 @@ def self_test():
     assert ci_approved([success], "b" * 40) is None
     assert ci_approved([success, dict(success, id=10, status="in_progress")], commit) is None
     assert ci_approved([dict(success, event="pull_request"), dict(success, conclusion="failure")], commit) is None
-    assert ci_approved([dict(success, head_repository={"full_name": "Other/Nativark"})], commit) is None
+    assert ci_approved([dict(success, head_repository={"full_name": "Other/Zelo"})], commit) is None
     print("CI 固定版本门禁检查通过")
 
     repo = Path(__file__).resolve().parents[3]

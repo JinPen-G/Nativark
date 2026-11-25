@@ -14,7 +14,7 @@ import { StrictMode, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { createRoot } from "react-dom/client";
 import type { PlatformShellProps } from "@rental-os/platform-admin";
-import { AdminBrandMark, RestProvider } from "@rental-os/platform-admin/shell";
+import { ADMIN_BRAND_NAME, AdminBrandMark, RestProvider } from "@rental-os/platform-admin/shell";
 import { SubscriptionExpiryFloatingCard } from "@rental-os/platform-admin/subscription";
 import { MotionGlobalConfig } from "motion/react";
 import { registerCoreAdminPages, type CoreRegisteredPage } from "@rental-os/core-contracts";
@@ -72,7 +72,7 @@ const rentalHost = createRentalAssistantBrowserHost({
       { title: "Copilot", description: "辅助日常管理" },
       { title: "多品类经营", description: "不同业务，轻松切换" },
     ],
-    footerText: "Nativark",
+    footerText: ADMIN_BRAND_NAME,
   },
 });
 const registered = registerCoreAdminPages([
@@ -133,7 +133,7 @@ if (registeredHref && registeredHref !== currentHref) {
   window.history.replaceState(window.history.state, "", registeredHref);
 }
 const App = createPlatformAdminApplication({
-  brandName: "Nativark",
+  brandName: ADMIN_BRAND_NAME,
   brand: <AdminBrandMark />,
   session,
   pages,

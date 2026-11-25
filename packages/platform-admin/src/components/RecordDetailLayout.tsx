@@ -2,6 +2,7 @@
 import type { ReactNode } from "react";
 import { ArrowLeftOutlined } from "./ui/icons";
 import { useLocale } from "../app/locale";
+import { ADMIN_BRAND_NAME } from "../app/branding";
 import { PageHeading } from "./PageHeading";
 import { Button } from "./ui/Button";
 import styles from "./RecordDetailLayout.module.css";
@@ -18,7 +19,7 @@ export interface RecordDetailLayoutProps {
 
 export interface RecordDetailHeaderSlots { actions?: ReactNode; navigation: ReactNode; tools?: ReactNode }
 
-export function RecordDetailLayout({ title, status, facts, actions, secondaryActions, onBack, children, header, brandName = "Nativark" }: RecordDetailLayoutProps) {
+export function RecordDetailLayout({ title, status, facts, actions, secondaryActions, onBack, children, header, brandName = ADMIN_BRAND_NAME }: RecordDetailLayoutProps) {
   const { t } = useLocale();
   const navigation = <Button type="text" icon={<ArrowLeftOutlined aria-hidden />} onClick={onBack}>{t("返回列表")}</Button>;
   // 单参数旧扩展仍取得原组合；新扩展可分别使用主动作、返回和工具。

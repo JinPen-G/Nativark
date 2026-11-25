@@ -1112,8 +1112,7 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
 /* Keep the small header wordmark bounded before theme tokens are injected. */
 .login-brand img { display: block; width: auto; max-width: 100%; height: var(--rental-login-brand-height, 24px); max-height: var(--rental-login-brand-height, 24px); object-fit: contain; object-position: left center; }
 .login-brand--compact { display: flex; flex: none; margin-bottom: 0; padding-right: 90px; min-height: 36px; }
-.login-brand--compact.login-brand--platform img { filter: brightness(0); }
-:root[data-theme="dark"] .login-brand--compact.login-brand--platform img { filter: brightness(0) invert(1); }
+.login-brand--compact.login-brand--platform img { filter: none; }
 .login-form-content { width: min(100%, 400px); align-self: center; margin-block: 0; padding-block: clamp(12px, calc(50dvh - 360px), 220px) 12px; }
 .login-panel-heading h2 { margin: 0 0 10px !important; font-size: var(--rental-login-title-size, 40px) !important; font-weight: var(--rental-login-title-weight, 400) !important; line-height: var(--rental-login-title-line-height, 44px) !important; letter-spacing: -.03em; overflow-wrap: anywhere; }
 .login-card-form .arc-password-field button svg { width: var(--rental-icon-control-size, 16px); height: var(--rental-icon-control-size, 16px); }

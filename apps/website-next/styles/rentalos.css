@@ -126,7 +126,6 @@
   width: auto;
   max-width: none;
   flex: none;
-  filter: brightness(0) invert(1);
 }
 .demo-dialog [hidden] { display: none !important; }
 .demo-dialog .demo-submit,
@@ -169,7 +168,7 @@
 [data-rentalos-preview] .rentalos-preview-control:focus-visible { outline: 2px solid #cfd3d6; outline-offset: -2px; }
 [data-rentalos-preview] .rentalos-preview-control:hover { background-color: rgb(255 255 255 / 8%); }
 [data-rentalos-preview] .rentalos-preview-control:disabled { opacity: .45; cursor: not-allowed; }
-[data-rentalos-preview] .rentalos-preview-logo { height: calc(var(--u) * 24); width: auto; filter: brightness(0) invert(1); }
+[data-rentalos-preview] .rentalos-preview-logo { height: calc(var(--u) * 24); width: auto; }
 [data-rentalos-preview] .rentalos-preview-muted { color: #adb2b8; font-size: calc(var(--u) * 12); }
 [data-rentalos-preview] .rentalos-preview-rows { display: flex; flex-direction: column; }
 [data-rentalos-preview] .rentalos-preview-row { display: flex; align-items: center; gap: calc(var(--u) * 12); padding: calc(var(--u) * 16) 0; border-bottom: .5px solid rgb(255 255 255 / 12%); }

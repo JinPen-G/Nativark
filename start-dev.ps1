@@ -149,7 +149,7 @@ function Wait-ForExistingApi([int]$port) {
   if ((Get-Listeners $port).Count -eq 0 -and @(Get-ProjectApiProcesses).Count -eq 0) { return $false }
   if (Test-ApiHealth $port) { return $true }
   # Nest watch 重载期间可能完全没有监听端口；原 launcher/watch 已存在就只能等候，不能另起。
-  Write-Host '[nativark] 已运行的 API 正在启动或重载，等待原服务恢复。' -ForegroundColor DarkGray
+  Write-Host '[Zelo] 已运行的 API 正在启动或重载，等待原服务恢复。' -ForegroundColor DarkGray
   $reloadDeadline = [DateTime]::UtcNow.AddSeconds(90)
   while ([DateTime]::UtcNow -lt $reloadDeadline) {
     Start-Sleep -Seconds 2
@@ -225,14 +225,14 @@ function Start-DevProcess([string]$scriptName) {
   $stdout = Join-Path $logRoot "$label-$stamp-$PID.stdout.log"
   $stderr = Join-Path $logRoot "$label-$stamp-$PID.stderr.log"
   $process = Start-Process -FilePath $script:nodeExe -ArgumentList @("`"$helper`"", 'run', $scriptName) -WorkingDirectory $root -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
-  Write-Host "[nativark] 启动 PID $($process.Id)，日志：$stdout" -ForegroundColor DarkGray
+  Write-Host "[Zelo] 启动 PID $($process.Id)，日志：$stdout" -ForegroundColor DarkGray
   return $process
 }
 
 function Wait-ForService([string]$name, [scriptblock]$probe, $launcher, [int]$timeoutSeconds = 1200) {
   $deadline = [DateTime]::UtcNow.AddSeconds($timeoutSeconds)
   while ([DateTime]::UtcNow -lt $deadline) {
-    if (& $probe) { Write-Host "[nativark] $name 已就绪。" -ForegroundColor Green; return }
+    if (& $probe) { Write-Host "[Zelo] $name 已就绪。" -ForegroundColor Green; return }
     $launcher.Refresh()
     if ($launcher.HasExited) { throw "$name 启动进程已退出（$($launcher.ExitCode)）；请检查 $logRoot 内本次 stdout/stderr 日志。" }
     Start-Sleep -Seconds 2
@@ -256,9 +256,9 @@ try {
   try { $ownsLock = $startupLock.WaitOne(0) } catch [Threading.AbandonedMutexException] { $ownsLock = $true }
   if (-not $ownsLock) { throw '当前工作树另一个启动脚本正在运行，请等待该次启动完成。' }
 
-  Write-Host "[nativark] 原完整组合工作树：$root" -ForegroundColor Cyan
+  Write-Host "[Zelo] 原完整组合工作树：$root" -ForegroundColor Cyan
   $dependencies = Invoke-Preflight 'repair-links'
-  if ($dependencies.repaired -gt 0) { Write-Host "[nativark] 已恢复 $($dependencies.repaired) 个锁定的本树 workspace 链接。" -ForegroundColor Cyan }
+  if ($dependencies.repaired -gt 0) { Write-Host "[Zelo] 已恢复 $($dependencies.repaired) 个锁定的本树 workspace 链接。" -ForegroundColor Cyan }
   $settings = Invoke-Preflight 'settings'
   $apiPort = [int]$settings.apiPort
   $adminPort = [int]$settings.adminPort
@@ -291,7 +291,7 @@ try {
     Invoke-Npm 'db:generate'
     $client = Invoke-Preflight 'client'
     if (-not $client.ready) { throw '生成的 Client 仍未对应当前原组合 schema，停止启动。' }
-  } else { Write-Host '[nativark] 复用与原组合 schema 一致的 Client，不覆盖在用产物。' -ForegroundColor DarkGray }
+  } else { Write-Host '[Zelo] 复用与原组合 schema 一致的 Client，不覆盖在用产物。' -ForegroundColor DarkGray }
   if (-not $SkipDatabaseChecks) { Invoke-Npm 'db:validate' }
 
   if (-not $SkipDocker -and -not $apiHealthy) {
@@ -315,12 +315,12 @@ try {
   Assert-PortOwnership $apiPort
   Assert-PortOwnership $adminPort
   if (-not (Test-ApiHealth $adminPort)) { throw '前端与 API 已响应，但前端 /api/health 代理不健康；请检查本树代理配置。' }
-  Write-Host "[nativark] 管理端已就绪：http://127.0.0.1:$adminPort/login" -ForegroundColor Green
-  Write-Host "[nativark] API 健康入口：http://127.0.0.1:$apiPort/api/health" -ForegroundColor DarkGray
-  if ($ApplyMigrations) { Write-Host '[nativark] 已按 -ApplyMigrations 执行迁移；未执行 Seed。' -ForegroundColor DarkGray }
-  else { Write-Host '[nativark] 未执行数据库迁移或 Seed；迁移仅由 -ApplyMigrations 显式开启。' -ForegroundColor DarkGray }
+  Write-Host "[Zelo] 管理端已就绪：http://127.0.0.1:$adminPort/login" -ForegroundColor Green
+  Write-Host "[Zelo] API 健康入口：http://127.0.0.1:$apiPort/api/health" -ForegroundColor DarkGray
+  if ($ApplyMigrations) { Write-Host '[Zelo] 已按 -ApplyMigrations 执行迁移；未执行 Seed。' -ForegroundColor DarkGray }
+  else { Write-Host '[Zelo] 未执行数据库迁移或 Seed；迁移仅由 -ApplyMigrations 显式开启。' -ForegroundColor DarkGray }
 } catch {
-  Write-Host "[nativark] 启动失败：$($_.Exception.Message)" -ForegroundColor Red
+  Write-Host "[Zelo] 启动失败：$($_.Exception.Message)" -ForegroundColor Red
   $exitCode = 1
 } finally {
   foreach ($name in $previousEnvironment.Keys) { [Environment]::SetEnvironmentVariable($name, $previousEnvironment[$name], 'Process') }

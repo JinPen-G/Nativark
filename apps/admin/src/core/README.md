@@ -6,4 +6,4 @@
 
 兼容宿主的 [Vite 配置](../../vite.config.ts) 为 Shared 源码转发的六个公共合同子出口声明 `optimizeDeps.include`，开发时按安装包正式出口预构建 CJS。生产构建沿 Vite 8 的原生 Rolldown 互操作，`build.commonjsOptions` 在该版本已无效。
 
-默认品牌模块由同一配置在编译时读取 [静态 SVG 原稿](../../public/brand/nativark-icon.svg)，通过 `virtual:nativark-default-brand-icon` 供 [品牌函数](../app/brandIcon.ts) 消费。开发监听跟踪原稿变化，静态 URL 与模块共用该文件；原深浅色、遮罩、安全过滤和重着色逻辑继续由品牌函数维护。
+默认品牌实现通过 [品牌兼容出口](../app/brandIcon.ts)复用公共后台，Zelo 黑白定稿及来源在 [公共静态目录](../../../../packages/platform-admin/public/brand/zelo-source.json)。旧 `virtual:nativark-default-brand-icon` 标识为兼容保留，读取同一公共黑色原稿并跟踪变化；当前公共品牌函数直接选择原黑白 SVG。租户图片安全过滤和独立 favicon 回退继续由公共实现维护。

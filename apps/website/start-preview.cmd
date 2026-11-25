@@ -10,7 +10,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo Rental OS 2.0 preview: http://127.0.0.1:%SITE_PORT%/
+echo Zelo 2.0 preview: http://127.0.0.1:%SITE_PORT%/
 echo Keep this window open while previewing. Press Ctrl+C to stop.
 start "" "http://127.0.0.1:%SITE_PORT%/"
 py -3 -m http.server %SITE_PORT% --bind 127.0.0.1 --directory "%CD%"

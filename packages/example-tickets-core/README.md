@@ -97,7 +97,7 @@ npm run pack:core -w @rental-os/example-tickets-core -- <Core仓库HTTPS地址> 
 
 自 `0.1.2` 起，打包时核对 npm 包名及版本与生成清单的发行身份。遇到版本不一致，先同步 [package.json](package.json) 与 [Core 版本](src/contracts.ts)，再从同一固定来源重建并打包。沿用已登记的旧包作为升级起点，候选继续使用数据版本 `0.1.0` 和原迁移，原绑定与收据按当前权限回读。
 
-当前正式版本为 `0.1.4`，包含工单分派筛选，标准包及同一双Core宿主的必要冒烟已通过。公开发行使用 Tag `example-tickets/v0.1.4` 和资产 `example-tickets-0.1.4.tgz`，固定源提交 `74a16a2c3fecfad654241de25cea5d3f27da1332`；下载后按 Release 摘要和同版清单核对。[0.1.4 发行](https://github.com/JinPen-G/Nativark/releases/tag/example-tickets/v0.1.4)。推荐从该固定版本准备更新候选，`dataVersion` 仍为 `0.1.0`，沿用原迁移。独立升级只更新所选 Tickets 包及宿主对应的部署锁，保留原绑定、工单和操作收据。程序回退候选同样须核对包身份、宿主合同、数据版本和完整迁移账，并按目标版本核验页面及 API 能力。[版本与数据合同](src/contracts.ts) · [独立宿主](../../apps/example-tickets-api/README.md)
+当前正式版本为 `0.1.4`，包含工单分派筛选，标准包及同一双Core宿主的必要冒烟已通过。公开发行使用 Tag `example-tickets/v0.1.4` 和资产 `example-tickets-0.1.4.tgz`，固定源提交 `74a16a2c3fecfad654241de25cea5d3f27da1332`；下载后按 Release 摘要和同版清单核对。[0.1.4 发行](https://github.com/JinPen-G/Zelo/releases/tag/example-tickets/v0.1.4)。推荐从该固定版本准备更新候选，`dataVersion` 仍为 `0.1.0`，沿用原迁移。独立升级只更新所选 Tickets 包及宿主对应的部署锁，保留原绑定、工单和操作收据。程序回退候选同样须核对包身份、宿主合同、数据版本和完整迁移账，并按目标版本核验页面及 API 能力。[版本与数据合同](src/contracts.ts) · [独立宿主](../../apps/example-tickets-api/README.md)
 
 生成的CORE_GUIDE直接链接本包API、服务端/后台入口和README/LICENSE。公开接入手册和源码资料固定到各自来源提交，README保留本页锚点和代码示例；两份资料复用同一链接规则，Core作者维护原README即可。[资料生成](../core-contracts/src/guide.ts)
 

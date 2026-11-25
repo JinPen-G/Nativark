@@ -95,7 +95,8 @@ export function BrandLogo({ className }) {
     <img
       className={className}
       src={assetPath("/icons/rentalos-logo.svg")}
-      alt="Rental OS"
+      alt="Zelo"
+      width={72}
       height={24}
     />
   );

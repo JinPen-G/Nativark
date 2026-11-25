@@ -286,7 +286,7 @@ export function SiteLayout({ children }: { children: ReactNode }) {
           <div>
             <Link to={href("/agreement")}>{en ? "Terms" : "用户协议"}</Link>
             <Link to={href("/privacy")}>{en ? "Privacy" : "隐私政策"}</Link>
-            {tenant.showPoweredBy && <span>Powered by Rental OS</span>}
+            {tenant.showPoweredBy && <span>Powered by Zelo</span>}
           </div>
         </div>
       </footer>

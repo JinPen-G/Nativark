@@ -22,7 +22,7 @@ export async function initializePublicPlatform(database: PlatformManagementDatab
       return { initialized: false as const, tenantId: existing.id };
     }
     const tenantId = "tenant_platform";
-    await tx.tenant.create({ data: { id: tenantId, code: "platform", name: "Nativark SaaS平台", status: "ACTIVE" } });
+    await tx.tenant.create({ data: { id: tenantId, code: "platform", name: "Zelo SaaS平台", status: "ACTIVE" } });
     await tx.organizationUnit.create({ data: { id: "org_saas_platform", tenantId, type: "OPERATOR", code: "SAAS", name: "SaaS平台管理" } });
     const roleId = "role_saas_admin", allowed = ["system:tenant:manage", "system:tenant:bootstrap", "system:params:manage"];
     await tx.role.create({ data: { id: roleId, tenantId, code: "SAAS_ADMIN", name: "SaaS平台管理员",

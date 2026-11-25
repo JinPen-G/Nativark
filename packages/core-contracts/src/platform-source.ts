@@ -114,7 +114,7 @@ function projectLock(lock: Lock, root: Package, packages: ReadonlyMap<string, Pa
 }
 
 function platformReadme(source: PlatformSourceIdentity): string {
-  return `# Nativark 公共底座\n\n` +
+  return `# Zelo 公共底座\n\n` +
     `这是不包含业务 Core 的底座源码，来源固定于 [${source.commit}](${source.repository}/tree/${source.commit})。\n\n` +
     `公共 API 和后台提供登录、租户/人员/角色、基础设置及 Core 授权入口。侧栏、面包屑、通知、休息和面板属于公共后台。\n\n` +
     `## 本地运行\n\n使用 Node 22.12 或更新的 LTS 补丁与 npm，准备自己的独立 MySQL。初始化和API启动直接读取当前进程的 DATABASE_URL、AUTH_TOKEN_SECRET 和 SEED_PLATFORM_PASSWORD，配置模板见 .env.example。PowerShell使用 $env:变量名 = '自己的值'，Bash使用 export 变量名='自己的值'；配置、Client与迁移顺序见[公共API五步](apps/platform-api/README.md#默认零-core-的五步)。\n\n` +

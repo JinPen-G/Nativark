@@ -424,7 +424,7 @@ npm run lint -w @rental-os/rental-core
 
 独立公开仓库从实际发行提交构建标准包，清单、Tag 和 Release 资产须对应同一来源。公开包声明 `/api/cores/rental/v1` 下已审定的业务操作，部署后的规范路径和原路径进入同一 Controller。包准备、实际部署、注册和租户授权沿现有流程完成。见[规范路径和文档共用入口](src/http-portable.ts)与[宿主接入说明](../../apps/rental-api/README.md)。
 
-当前组合使用 Base `0.1.17`，源码 `3fee227517a2b20e18a426e853f18cdf37cb63ff`，以及 Rental `0.1.14`，独立源码 `2cada4c9bb7e7c4baa1affe66b72f5750e8431e6`。安装和独立更新按所选固定包摘要及部署锁办理。`0.1.14` 将订单报价总额的原 Token 样式随 Core 页面加载，不修改业务逻辑、数据版本或迁移；原 `0.1.13` 的六表升级与回退限制仍适用。[Base 0.1.17](https://github.com/JinPen-G/Nativark/releases/tag/v0.1.17) · [Rental 0.1.14](https://github.com/JinPen-G/nativark-rental-core/releases/tag/v0.1.14)
+当前组合使用 Base `0.1.17`，源码 `3fee227517a2b20e18a426e853f18cdf37cb63ff`，以及 Rental `0.1.14`，独立源码 `2cada4c9bb7e7c4baa1affe66b72f5750e8431e6`。安装和独立更新按所选固定包摘要及部署锁办理。`0.1.14` 将订单报价总额的原 Token 样式随 Core 页面加载，不修改业务逻辑、数据版本或迁移；原 `0.1.13` 的六表升级与回退限制仍适用。[Base 0.1.17](https://github.com/JinPen-G/Zelo/releases/tag/v0.1.17) · [Rental 0.1.14](https://github.com/JinPen-G/nativark-rental-core/releases/tag/v0.1.14)
 
 底座按独立仓库默认分支的清单发现版本，并按对应 Release 锁定来源和资产摘要。新版本的源码合并、发行包发布和默认清单更新分别核对；不能只凭版本标签认定可安装。已发布的 Base17/Rental13 组合宿主仍固定原版本，更新到 `0.1.14` 须重新准备所选 Core 与部署锁，不把旧宿主归档改名为新版。
 
@@ -432,18 +432,18 @@ Core 使用底座的正式 API 和已声明能力扩展业务，底座与 Core �
 
 独立 Core 开发先用[源码工作区准备入口](../../scripts/prepare-rental-workspace.cjs)组合固定底座支持源码和 Core 自己的版本标签。它保留原构建工具、各端薄宿主与所选 npm 锁，输出新的开发归档；Core 子树来自独立仓库，底座源码和接口来自明确的支持版本。零 Core 底座继续单独发行。
 
-包含企业门户、客户和员工小程序的源码开发使用支持提交 `68303f7abedc8c70540662f70e268eacb132e2a1` 与 Rental `v0.1.14` 的源码提交 `2cada4c9bb7e7c4baa1affe66b72f5750e8431e6`。准备入口的 `supportScripts` 从 `--commit` 指定的 Git 提交读取 `scripts/miniprogram-ai-runtime.cjs`，两端构建由此取得 `platform-contracts/ai-gateway` 和 `ai-task` 的正式打包接点。该支持提交还包含企业门户公共词条构建边界及独立后台报价样式修复，公开 UI 规范使用正式 SDK 入口；已发布 Base `0.1.17` 的固定来源和资产不变。取得该固定支持源码后，按原锁文件与各端构建前置准备工作区。[固定支持源码](https://github.com/JinPen-G/Nativark/tree/68303f7abedc8c70540662f70e268eacb132e2a1)
+包含企业门户、客户和员工小程序的源码开发使用支持提交 `68303f7abedc8c70540662f70e268eacb132e2a1` 与 Rental `v0.1.14` 的源码提交 `2cada4c9bb7e7c4baa1affe66b72f5750e8431e6`。准备入口的 `supportScripts` 从 `--commit` 指定的 Git 提交读取 `scripts/miniprogram-ai-runtime.cjs`，两端构建由此取得 `platform-contracts/ai-gateway` 和 `ai-task` 的正式打包接点。该支持提交还包含企业门户公共词条构建边界及独立后台报价样式修复，公开 UI 规范使用正式 SDK 入口；已发布 Base `0.1.17` 的固定来源和资产不变。取得该固定支持源码后，按原锁文件与各端构建前置准备工作区。[固定支持源码](https://github.com/JinPen-G/Zelo/tree/68303f7abedc8c70540662f70e268eacb132e2a1)
 
 ```text
-node scripts/prepare-rental-workspace.cjs --repo <固定底座Git目录> --repository https://github.com/JinPen-G/Nativark --commit 68303f7abedc8c70540662f70e268eacb132e2a1 --core-repo <独立CoreGit目录> --core-commit 2cada4c9bb7e7c4baa1affe66b72f5750e8431e6 --out <新开发归档.tgz>
+node scripts/prepare-rental-workspace.cjs --repo <固定底座Git目录> --repository https://github.com/JinPen-G/Zelo --commit 68303f7abedc8c70540662f70e268eacb132e2a1 --core-repo <独立CoreGit目录> --core-commit 2cada4c9bb7e7c4baa1affe66b72f5750e8431e6 --out <新开发归档.tgz>
 ```
 
 在新目录解包，执行 `npm ci`、`npm run check:types`，修改 `packages/rental-core` 后执行 `npm run check:core`。可选 AI 开发组合在准备时显式加 `--ai`；Client 生成、构建、迁移和启动按 [Rental 宿主](../../apps/rental-api/README.md)办理。包内 `development.workspace.json` 记录两个来源和文件摘要，开发组合不依赖维护者私有文档、旧生成物或聊天记忆。
 
-公开出包时用 `--source-repository https://github.com/JinPen-G/Nativark` 固定底座和公共资料来源，`--build-repo` 指向已取得的底座 Git 对象目录，`--core-repo` 指向独立 Core 仓库。发行从独立 Core 标签重新编译，不要求它与底座内的旧 Rental 子树一致。构建与底座 SHA、独立仓的版本 Tag 和新归档路径分别传入；已有安装的来源保持原值，跨仓迁移按明确的来源处置流程办理。
+公开出包时用 `--source-repository https://github.com/JinPen-G/Zelo` 固定底座和公共资料来源，`--build-repo` 指向已取得的底座 Git 对象目录，`--core-repo` 指向独立 Core 仓库。发行从独立 Core 标签重新编译，不要求它与底座内的旧 Rental 子树一致。构建与底座 SHA、独立仓的版本 Tag 和新归档路径分别传入；已有安装的来源保持原值，跨仓迁移按明确的来源处置流程办理。
 
 ```text
-node scripts/verify-rental-distribution.cjs --portable --build-repo <固定底座Git目录> --commit <构建SHA> --platform-commit <底座SHA> --source-repository https://github.com/JinPen-G/Nativark --core-repo <独立仓根目录> --core-commit <版本Tag的提交SHA> --out <新目录/rental-版本.tgz>
+node scripts/verify-rental-distribution.cjs --portable --build-repo <固定底座Git目录> --commit <构建SHA> --platform-commit <底座SHA> --source-repository https://github.com/JinPen-G/Zelo --core-repo <独立仓根目录> --core-commit <版本Tag的提交SHA> --out <新目录/rental-版本.tgz>
 ```
 
 独立 Linux 镜像使用[宿主打包入口](../../scripts/package-rental-host.cjs)。先完成正式源码构建、完整 Rental 标准包及[原部署准备](../../apps/rental-api/src/prepare-deployment.ts)，再从仓库根执行以下命令；参数均为实际绝对路径，输出父目录须存在且归档不能已存在。底座 `.tgz` 须使用与原 prepared 锁的 `platform.sha256` 一致的固定源码归档，不能用候选 `platform/` 目录代替。

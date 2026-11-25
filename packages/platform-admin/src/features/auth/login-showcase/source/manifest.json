@@ -5,8 +5,9 @@
       "source": "apps/website-next/components/demos/BusinessPreview.jsx",
       "sourceSha256": "74b775976b840e721253fbb0430fcfba793e21e02820dd11fba2239484f3d623",
       "copiedSha256": "d8adb2a1483753653f6d79c040f1c397d555c6700ad44e0f072a4086c506f9d4",
-      "adaptedSha256": "1a5000f4c388916ce5fc4917a07e2550852bd4d44c9e8e20a075a760f451f683",
-      "adaptedHashEncoding": "UTF-8, CRLF normalised to LF"
+      "adaptedSha256": "5f1cfb1b196ab92d9d1f28e98051c50f6149dc8cd5b9fee26e98130e432bec55",
+      "adaptedHashEncoding": "UTF-8, CRLF normalised to LF",
+      "adaptedNote": "公共登录演示使用Zelo原黑白组合标；原技术类名、交互与轮播保持。"
     },
     {
       "source": "apps/website-next/components/demos/ReturnReminderDemo.jsx",

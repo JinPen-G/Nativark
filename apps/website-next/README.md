@@ -1,6 +1,8 @@
-# Rental OS 官网 · Next.js 源码工程
+# Zelo 官网 · Next.js 源码工程
 
-沿用原站的技术路线：Next.js App Router、React、next-intl、Framer Motion，以及 WebGL / Three.js 动效。保留当前 Rental OS 官网的文案、布局、业务演示、预约入口和社交链接；这是从现有发布版迁移整理的可编辑源码，不是原作者未公开的开发工程。
+平台官网采用 Next.js App Router、React、next-intl、Framer Motion 和 WebGL / Three.js 动效。页面、中英文文案与元数据使用 Zelo 正式品牌，现有布局、业务演示、预约入口及社交链接由对应组件维护。
+
+完整横标与图形标逐字节取自[Zelo 黑白定稿](../../assets/01_Logo/zelo-logo-bw/README.md)。横标画布为 704×236，导航和内部演示按原比例显示白色版本。favicon 使用 512×512 黑白图形标，按系统深浅色选择。应用内沿用 `public/harness/icons/rentalos-logo.svg` 与 `rentalos-icon-black.svg`、`rentalos-icon-white.svg` 的兼容路径。
 
 ## 启动和构建
 
@@ -56,7 +58,7 @@ tools/                   静态预览、源码检查及一次性迁移工具
 - 中文 `/harness/`，英文 `/en/harness/`。根路径进入浏览器语言对应版本；中文以外默认英语，手动选择写入 `NEXT_LOCALE` Cookie。
 - AI 管理、传统管理、预约、履约、门店协同、插件、自动任务和能力卡片保留前端演示。确认操作只产生示例回执，不连接真实 AI 或业务系统。
 - 预约/合作入口共用 React 表单，保留咨询意向预填、人工输入保护、请求标识重试、超时与后端回执判断。线上配置公开构建变量 `NEXT_PUBLIC_DEMO_API_BASE_URL`（HTTPS，含 `/api`）；未配置时不伪造成功。仅本机 HTTP 预览可回落到 `http://127.0.0.1:3000/api`。
-- 顶栏和页脚 GitHub、页脚 X 使用用户指定链接。页脚署名 `Powered by PenG-AI · All rights reserved.`；政策文字保留但不跳转。移动菜单尚保留迁移前已有的原模板外部文档/插件/论文入口，这些不是 Rental OS 自有资源。
+- 顶栏和页脚 GitHub、页脚 X 使用用户指定链接。页脚署名 `Powered by PenG-AI · All rights reserved.`。移动菜单的外部文档、插件和论文沿各自来源维护，政策文字沿现有入口呈现。
 - 原站字体、图标和着色器的来源不因迁移而变化；源码迁移不等于第三方素材已获得新的许可。
 
 ## 与旧目录的关系

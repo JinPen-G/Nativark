@@ -11,13 +11,20 @@ function load(file, overrides = {}) {
   new Function('require', 'module', 'exports', code)(id => Object.hasOwn(overrides, id) ? overrides[id] : require(id), module, module.exports);
   return module.exports;
 }
-const canonical = read('packages/platform-admin/public/brand/nativark-icon.svg');
+const canonical = read('packages/platform-admin/public/brand/zelo-icon-black.svg');
+const whiteIcon = read('packages/platform-admin/public/brand/zelo-icon-white.svg');
 const icons = load('packages/platform-admin/src/app/brandIcon.ts', {
-  '../../public/brand/nativark-icon.svg?raw': canonical,
+  '../../public/brand/zelo-icon-black.svg?raw': canonical,
+  '../../public/brand/zelo-icon-white.svg?raw': whiteIcon,
 });
 const brand = load('packages/platform-admin/src/app/branding.ts');
 const tenant = { brandLogoUrl: '/uploads/tenant.svg', faviconUrl: '/uploads/not-the-logo.png' };
 const member = { isSaasAdmin: false };
+assert.equal(brand.ADMIN_BRAND_NAME, 'Zelo');
+assert.equal(brand.resolveAdminBrandName({ brandName: '租户品牌', tenantName: '租户全称' }, member), '租户品牌');
+assert.equal(brand.resolveAdminBrandName({ tenantName: '租户全称' }, member), '租户全称');
+assert.equal(brand.resolveAdminBrandName({ brandName: '租户品牌' }, { isSaasAdmin: true }), 'Zelo');
+assert.equal(brand.resolveAdminLogo(tenant, member), tenant.brandLogoUrl);
 for (const resolve of [brand.resolveAdminMark, brand.resolveAdminFavicon]) {
   assert.equal(resolve(tenant, member), tenant.brandLogoUrl);
   assert.equal(resolve({ faviconUrl: tenant.faviconUrl }, member), brand.ADMIN_DEFAULT_MARK);
@@ -25,32 +32,36 @@ for (const resolve of [brand.resolveAdminMark, brand.resolveAdminFavicon]) {
   assert.equal(resolve(tenant, undefined), brand.ADMIN_DEFAULT_MARK);
 }
 const decode = value => decodeURIComponent(value.split(',').slice(1).join(','));
-// The approved mark uses masked rectangles and dots, so path-only comparison
-// would accept two empty arrays and miss a changed overlap or missing page.
+// Keep the full approved geometry, including groups and transforms; paint is
+// chosen from the original black/white files rather than rewritten at runtime.
 const geometry = svg => [...svg.matchAll(/<(path|rect|circle|ellipse|line|polyline|polygon|g|mask)\b([^>]*)>/g)].map(match => [
   match[1],
   [...match[2].matchAll(/\b(id|d|x|y|cx|cy|width|height|rx|ry|r|points|transform|mask|maskUnits|maskContentUnits|stroke-width|stroke-linejoin)="([^"]*)"/g)].map(attribute => [attribute[1], attribute[2]]),
 ]);
-const masks = svg => svg.match(/<defs>[\s\S]*?<\/defs>/)?.[0];
 assert.ok(geometry(canonical).length > 0, 'the default artwork comparison must include actual shapes');
-assert.equal((canonical.match(/<mask\b/g) ?? []).length, 3);
-assert.equal((canonical.match(/<circle\b/g) ?? []).length, 2);
-const bootstrap = read('packages/platform-admin/public/brand/nativark-favicon.svg');
+const provenance = JSON.parse(read('packages/platform-admin/public/brand/zelo-source.json'));
+assert.equal(provenance.files.length, 9);
+for (const { file, sha256 } of provenance.files) {
+  const svg = read(`packages/platform-admin/public/brand/${file}`);
+  assert.equal(require('node:crypto').createHash('sha256').update(svg.replace(/\r\n/g, '\n')).digest('hex'), sha256, `approved SVG content: ${file}`);
+  assert.equal(read(`apps/admin/public/brand/${file}`), svg, `legacy host asset: ${file}`);
+  assert.doesNotMatch(svg, /<(?:text|image|script|foreignObject)\b|\b(?:href|src)=/i, 'approved vectors are self-contained');
+}
+const bootstrap = read('packages/platform-admin/public/brand/zelo-favicon.svg');
 assert.deepEqual(geometry(bootstrap), geometry(canonical), 'bootstrap must use the provided icon artwork, not a redraw');
-assert.equal(masks(bootstrap), masks(canonical), 'favicon recoloring cannot change the page masks');
-assert.match(bootstrap, /prefers-color-scheme:dark/);
-assert.match(bootstrap, /(?:fill|stroke)="currentColor"/);
+assert.match(bootstrap, /prefers-color-scheme:\s*dark/);
+assert.match(bootstrap, /\.zelo-mark\s*\{\s*fill:\s*#FFFFFF/i);
 for (const host of ['admin', 'platform-admin', 'rental-admin', 'example-multi-core-admin', 'example-tickets-admin'])
-  assert.match(read(`apps/${host}/index.html`), /href="\/brand\/nativark-favicon.svg"/);
-const wordmark = read('packages/platform-admin/public/brand/nativark-logo-mono.svg');
-assert.deepEqual(geometry(wordmark), geometry(canonical), 'the login wordmark must embed the same mark');
-assert.equal(masks(wordmark), masks(canonical));
-assert.match(wordmark, />Nativark<\/text>/);
+  assert.match(read(`apps/${host}/index.html`), /href="\/brand\/zelo-favicon.svg"/);
+const logo = read('packages/platform-admin/public/brand/zelo-logo-black.svg');
+assert.match(logo, /viewBox="0 0 704 236"/);
+const paths = svg => [...svg.matchAll(/\bd="([^"]+)"/g)].map(match => match[1]);
+assert.deepEqual(paths(logo).slice(0, paths(canonical).length), paths(canonical), 'the login logo keeps the approved icon paths');
 for (const dark of [false, true]) {
   const svg = decode(icons.defaultAdminBrandIcon(dark));
   assert.deepEqual(geometry(svg), geometry(canonical));
-  assert.equal(masks(svg), masks(canonical), 'root contrast cannot invert or flatten the black/white masks');
-  assert.match(svg, new RegExp(`color="${dark ? '#ffffff' : '#000000'}"`));
+  assert.equal(svg, dark ? whiteIcon : canonical, 'runtime must preserve the original vector bytes');
+  assert.equal(brand.defaultAdminBrandLogo(dark), `/brand/zelo-logo-${dark ? 'white' : 'black'}.svg`);
 }
 for (const url of ['/uploads/logo.svg?signature=x', 'https://brand.invalid/logo.png', 'data:image/svg+xml,%3Csvg%3E', 'data:image/png;base64,AA==']) assert.equal(icons.safeBrandIconUrl(url), url);
 for (const url of ['javascript:alert(1)', 'data:text/html,<svg>', 'file:///C:/logo.svg', 'vbscript:a', 'https://a\n.invalid/logo.png', '']) assert.equal(icons.safeBrandIconUrl(url), undefined);

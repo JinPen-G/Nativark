@@ -2,7 +2,7 @@ import { SiteDocument } from "../../../components/Document";
 import { siteIcons } from "../../../lib/site";
 export const metadata = {
   icons: siteIcons,
-  title: "Rental OS · AI Native Rental Operations",
+  title: "Zelo · AI Native Rental Operations",
   description:
     "Connect bookings, inventory, fulfillment and settlement in one rental operations platform.",
 };

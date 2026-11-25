@@ -1,12 +1,12 @@
-# Rental OS 官网 2.0 — 文案与双语阶段
+# Zelo 平台官网
 
 这是重新编写的 HTML / CSS / JavaScript 首页，不是把下载站的编译 bundle 再包一层，也不是恢复作者原始 Framer 工程。
 
-首页文字已调整为 Rental OS 的业务定位与能力介绍，并提供简体中文和英文。品牌素材保留 Rental OS 文件名，并放在模板对应的目录：页头及页脚小 Logo 共用 `assets/icons/rentalos-logo.svg`，页底大字使用 `assets/images/rentalos-wordmark.svg`，均复制自 `Rental-OS_Brand-Assets/01_Logo/新版/` 中用户提供的纯黑 SVG；浏览器标签页和首屏“Rental OS 平台”轮播选项共用 `assets/images/rentalos-icon-color.svg`，使用用户提供的渐变色图标。品牌原文件未改动。页头在深色首屏通过 CSS 反色显示为白色，滚动后及移动端浅色菜单显示黑色。原模板其余图片、Lottie 和整体排版、动效仍保留；旧官网在上一级 `index.html`，没有覆盖。
+首页、中英文说明、导航与元数据使用 Zelo 正式品牌。品牌 SVG 逐字节取自仓库的[黑白定稿](../../assets/01_Logo/zelo-logo-bw/README.md)。页头与页脚使用完整横标，画布为 704×236，页底使用 444×220 字标。页头在深色首屏显示白色，滚动后和手机浅色菜单显示黑色。首屏轮播使用白色图形标，浏览器图标由定稿 favicon 根据系统深浅色自动选择。
 
-共享品牌原稿目录现统一为仓库根目录 `assets/01_Logo/`，上文旧目录仅保留最初复制来源的说明；官网内部的素材路径继续以本应用目录为准。
+应用内沿用 `assets/icons/rentalos-logo.svg`、`assets/images/rentalos-wordmark.svg` 和 `assets/images/rentalos-icon-color.svg` 的兼容路径，favicon 位于 `assets/icons/zelo-favicon.svg`。标志按原比例显示，素材原稿由仓库资产目录维护。
 
-模板中的客户评价、业绩数字与 GDPR/德国托管声明没有作为 Rental OS 的真实案例使用。故事区改为明确标注的租赁业务场景示例，数字区改为平台能力文案。其余图片和动画素材内的原模板英文尚未替换。
+故事区提供明确标注的租赁业务场景示例，数字区展示平台能力文案。第三方图片、动画及相关许可沿现有来源维护。
 
 ## 预览
 

@@ -9,7 +9,7 @@ export function createTicketsManifest(source: CoreManifest["source"]): CoreManif
     id: TICKETS_CORE_ID,
     name: "轻量工单示范",
     description: "独立租户范围的创建、分派、处理和关闭工单，演示Core接入边界",
-    author: "Nativark contributors",
+    author: "Zelo contributors",
     version: TICKETS_CORE_VERSION,
     source,
     license: "MIT",

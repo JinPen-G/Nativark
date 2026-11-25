@@ -41,7 +41,7 @@
   --login-demo-selected-fill: color-mix(in srgb, var(--foreground) 12%, transparent);
   --login-demo-violet: #71429b;
   --login-demo-keyword: #a02b57;
-  --login-demo-logo-filter: brightness(0);
+  --login-demo-logo-filter: none;
   --login-demo-hover-filter: brightness(.96);
   color: var(--foreground);
 }
@@ -61,7 +61,7 @@
   --login-demo-layer: #353638;
   --login-demo-violet: #c4a7e7;
   --login-demo-keyword: #faa2c1;
-  --login-demo-logo-filter: brightness(0) invert(1);
+  --login-demo-logo-filter: none;
   --login-demo-hover-filter: brightness(1.15);
 }
 /* The local backdrop follows the login theme beneath the translucent sidebar. */

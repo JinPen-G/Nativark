@@ -1,0 +1,76 @@
+{
+  "brand": "Zelo",
+  "source": {
+    "directory": "assets/01_Logo/zelo-logo-bw",
+    "selection": "39号极简写实蜗牛黑白纯矢量定稿",
+    "authorization": "负责人确认定稿，后台切片由PM分配"
+  },
+  "usage": {
+    "logo": {
+      "light": "zelo-logo-black.svg",
+      "dark": "zelo-logo-white.svg",
+      "viewBox": "0 0 704 236",
+      "height": 24
+    },
+    "mark": {
+      "light": "zelo-icon-black.svg",
+      "dark": "zelo-icon-white.svg",
+      "viewBox": "0 0 512 512",
+      "size": 24
+    },
+    "favicon": "zelo-favicon.svg"
+  },
+  "adaptations": [
+    "9枚SVG均按原字节复制，不重画、不改路径或颜色。",
+    "公共后台选择原黑白稿；浏览器favicon由定稿自身媒体查询适配。",
+    "apps/admin仅保留同字节静态兼容副本，品牌实现复用公共包。"
+  ],
+  "files": [
+    {
+      "file": "zelo-badge-black.svg",
+      "sha256": "ace45ae3315157c82639b7e2c4f52e224b841fe87b013adb0dbadd6c3569af60",
+      "sourceByteSha256": "06a6aa9fd5d17aa755b3be89be2cc00810d52fc4e2555a4613f724df06b317c2"
+    },
+    {
+      "file": "zelo-badge-white.svg",
+      "sha256": "e15c1bf03ff3b17e50febbefc2be125d831260075c41927de653d4f3012eaf25",
+      "sourceByteSha256": "60f5bbd8e45d2e6024eb0601a1c69e65b1bf77424ce3a75cab9e17d887da5ee5"
+    },
+    {
+      "file": "zelo-favicon.svg",
+      "sha256": "dc56b5239955b703dbb43c55a0fe99064320c664b60dbd15fbfae430456905b3",
+      "sourceByteSha256": "eb67874908e22d2527e831100f5bc6981c4877fe5355576cfca43667408f2ac6"
+    },
+    {
+      "file": "zelo-icon-black.svg",
+      "sha256": "c378ea1414a6a7144deb0d0e917278549cb69efccd023bb93a4b5f1db23f5ad2",
+      "sourceByteSha256": "2bb79a095974da0244292c274ad5f933749bfeeddcb432599cbc3308ac1967de"
+    },
+    {
+      "file": "zelo-icon-white.svg",
+      "sha256": "1ca4826294b7c9d73c6bf95106d43eeb0836658ee04026e8e59927768583ab62",
+      "sourceByteSha256": "a53a34b5cc15a2a695d6190e05f58fc2aa9eaf4285e7b4231e2e4b5b01155670"
+    },
+    {
+      "file": "zelo-logo-black.svg",
+      "sha256": "6b9be1b605f02e630f021399202a2706d93f37a661786fd9f58f4e7c84a8d1f8",
+      "sourceByteSha256": "0dc3754457ad5b6b4ea737ced6aca8d1a3ccae6b77a7b819a68d8546dc1b0bec"
+    },
+    {
+      "file": "zelo-logo-white.svg",
+      "sha256": "fe02acbc0795d06ecbf36fe7e15941e3b71f429673d5d59cdb4e6385c9d1dd3c",
+      "sourceByteSha256": "b03a29128e84c918f0d112f75ef7d45b5751ca05bff48d9f5dc962681ecf014b"
+    },
+    {
+      "file": "zelo-wordmark-black.svg",
+      "sha256": "a183657c4ae4d4be6fee65d0e5a3ff97ee63451de626360c8a57d56482c36a73",
+      "sourceByteSha256": "fb60bc11b1b1c83c503d185c5ff08b158faa315270c9aa79d16342114e190700"
+    },
+    {
+      "file": "zelo-wordmark-white.svg",
+      "sha256": "507c20c06a5d50d1bd625f7c1b5fb48b6d260ee521f750fa2f06aeed080498e5",
+      "sourceByteSha256": "705afc6ca178295a4c803b6c0d72789f3876872fce254fcf2f55d97eb2cd5ea0"
+    }
+  ],
+  "hashEncoding": "UTF-8, CRLF normalised to LF for Git checkout portability"
+}

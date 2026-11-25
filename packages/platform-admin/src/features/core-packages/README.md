@@ -4,7 +4,7 @@
 
 ## 公开 Rental Core 的五步
 
-已公开验证的组合使用 Nativark 测试底座 `0.1.16` 和 Rental Core `0.1.12`。Rental 要求底座 `>=0.1.12 <0.2.0`、接入合同 `>=0.1.1 <0.2.0`、Node `>=22.12.0 <25.0.0`。[底座发行](https://github.com/JinPen-G/Nativark/releases/tag/v0.1.16) · [Rental 发行](https://github.com/JinPen-G/nativark-rental-core/releases/tag/v0.1.12)
+已公开验证的组合使用 Zelo 测试底座 `0.1.16` 和 Rental Core `0.1.12`。Rental 要求底座 `>=0.1.12 <0.2.0`、接入合同 `>=0.1.1 <0.2.0`、Node `>=22.12.0 <25.0.0`。[底座发行](https://github.com/JinPen-G/Zelo/releases/tag/v0.1.16) · [Rental 发行](https://github.com/JinPen-G/nativark-rental-core/releases/tag/v0.1.12)
 
 标准资产为 `rental-0.1.12.tgz`，SHA-256 为 `7179a27231aed503ab294639093d3bb7f101a51cf63c5c3e984d43329c835574`，发行源码为 `50ba3335592893a3b7a4d440ba85b764b2ca8e24`。
 

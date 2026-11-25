@@ -1,4 +1,9 @@
-# Nativark
+# Zelo
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/01_Logo/zelo-logo-bw/zelo-logo-white.svg">
+  <img src="assets/01_Logo/zelo-logo-bw/zelo-logo-black.svg" alt="Zelo" width="240">
+</picture>
 
 **面向 AI Native 应用的开源多租户 SaaS 底座。**
 
@@ -14,15 +19,15 @@
 
 ---
 
-**Nativark** 是一个可独立运行的开源多租户 SaaS 底座。它把几乎所有企业级 SaaS 都要重复建设的底层能力——身份认证、多租户与组织权限、SaaS 订阅、公共管理后台、加密外部集成、受控 AI Native / MCP 引擎，以及标准化的 **Core 插件化接入与独立升级机制**——沉淀为纯净的公共平台。
+**Zelo** 是一个可独立运行的开源多租户 SaaS 底座。它把几乎所有企业级 SaaS 都要重复建设的底层能力——身份认证、多租户与组织权限、SaaS 订阅、公共管理后台、加密外部集成、受控 AI Native / MCP 引擎，以及标准化的 **Core 插件化接入与独立升级机制**——沉淀为纯净的公共平台。
 
 业务系统通过独立的 **Core（业务包）** 接入底座，各自维护领域模型、数据迁移、页面贡献与可选 AI 工具。**底座默认零 Core 即可独立启动、打包与源码导出**；仓库随附轻量教学包 **Example Tickets Core** 与首个官方生产级业务包 **[Rental Core](#内置业务-core-示例)**（同步独立开源于 [JinPen-G/nativark-rental-core](https://github.com/JinPen-G/nativark-rental-core)），用于开箱演示并作为构建 CRM、TMS、工单或任意垂直业务 Core 的参考实现。
 
-> **快速导航**：[为什么选择 Nativark](#为什么选择-nativark) · [底座核心能力](#底座核心能力) · [架构与 Core 模型](#架构与-core-扩展模型) · [五步接入业务 Core](#五步接入自己的业务-core) · [内置 Core 示例](#内置业务-core-示例) · [本地运行](#本地运行) · [项目组成](#项目组成) · [开发导读](#开发导读) · [验证改动](#验证改动) · [参与贡献](#参与贡献)
+> **快速导航**：[为什么选择 Zelo](#为什么选择-zelo) · [底座核心能力](#底座核心能力) · [架构与 Core 模型](#架构与-core-扩展模型) · [五步接入业务 Core](#五步接入自己的业务-core) · [内置 Core 示例](#内置业务-core-示例) · [本地运行](#本地运行) · [项目组成](#项目组成) · [开发导读](#开发导读) · [验证改动](#验证改动) · [参与贡献](#参与贡献)
 
 ---
 
-## 为什么选择 Nativark
+## 为什么选择 Zelo
 
 - **零 Core 独立运行与一键导出**：提供独立的 `platform-api` 与 `platform-admin`，开箱即用 41 个公共模型与 14 份基础迁移；运行 `npm run export:platform` 即可导出一份完全不含行业业务的纯净底座源码包。
 - **标准化 Core 契约与独立升级**：所有业务 Core 通过 `@rental-os/core-contracts` 声明清单、权限、页面、OpenAPI 与 SQL 迁移；SaaS 后台内置 **Core 包管理（`/platform/core-packages`）**，支持按 GitHub Topic（`nativark-core`）在线发现、校验 Release 摘要、生成固定部署锁，实现**底座与每个 Core 各自独立升级与安全回退**。
@@ -34,7 +39,7 @@
 
 ## 底座核心能力
 
-Nativark 将“跨行业复用的公共 SaaS 底座”与“按需装配的行业业务 Core”彻底拆分：
+Zelo 将“跨行业复用的公共 SaaS 底座”与“按需装配的行业业务 Core”彻底拆分：
 
 ### 1. 零 Core 底座开箱即用能力
 
@@ -49,7 +54,7 @@ Nativark 将“跨行业复用的公共 SaaS 底座”与“按需装配的行�
 
 ### 2. 底座与业务 Core 的职责边界
 
-| 维度 | Nativark 公共底座负责 | 业务 Core 负责 |
+| 维度 | Zelo 公共底座负责 | 业务 Core 负责 |
 | --- | --- | --- |
 | **身份与多租户** | 账号、会话、租户、组织、公共角色及可信请求上下文 | 定义业务角色、业务容器（如空间/项目/门店）与细粒度数据范围 |
 | **授权与订阅** | 部署准入、租户 Core 授权、成员 Core 分配、统一订阅期限与撤销 | 声明业务功能权限码、动作前置条件与权益边界 |
@@ -65,7 +70,7 @@ Nativark 将“跨行业复用的公共 SaaS 底座”与“按需装配的行�
 ```mermaid
 flowchart TD
     UI[公共管理后台 & 多端业务客户端] --> Identity
-    subgraph Base[Nativark 公共 SaaS 底座]
+    subgraph Base[Zelo 公共 SaaS 底座]
         Identity[身份认证 / 多租户 / 组织权限] --> CoreHost[Core 宿主与包管理 · core-host / platform-core-host]
         Console[公共后台外壳 / 订阅 / 工具 / 集成] --> CoreHost
         AI[可选 AI Native Runtime / Model Gateway / MCP] --> CoreHost
@@ -117,10 +122,10 @@ node packages/core-contracts/dist/capabilities.js --query 工单 --kind page --j
 node packages/core-contracts/dist/check.js <已解包Core目录> --host <宿主版本JSON> --json
 
 # 3. 一键导出纯净零 Core 底座源码包（不含任何业务 Core，附独立锁文件与打包脚本）
-npm run export:platform -- --repo . --repository https://github.com/JinPen-G/Nativark --commit <完整SHA> --out nativark-platform.tgz
+npm run export:platform -- --repo . --repository https://github.com/JinPen-G/Zelo --commit <完整SHA> --out zelo-platform.tgz
 ```
 
-> **公开 Core 在线发现与分发**：将你的独立业务 Core 仓库在 GitHub 设为公开并添加 Topic **`nativark-core`**，在 Release 中附上标准 `.tgz` 资产后，任何 Nativark 底座均可在 SaaS 后台 **Core 包管理（`/platform/core-packages`）** 中在线发现、核对兼容与 SHA-256 摘要并准备安装。[包管理接入说明](packages/platform-core-host/README.md#core-包管理接入) · [后台操作说明](packages/platform-admin/src/features/core-packages/README.md)
+> **公开 Core 在线发现与分发**：将你的独立业务 Core 仓库在 GitHub 设为公开并添加 Topic **`nativark-core`**，在 Release 中附上标准 `.tgz` 资产后，任何 Zelo 底座均可在 SaaS 后台 **Core 包管理（`/platform/core-packages`）** 中在线发现、核对兼容与 SHA-256 摘要并准备安装。[包管理接入说明](packages/platform-core-host/README.md#core-包管理接入) · [后台操作说明](packages/platform-admin/src/features/core-packages/README.md)
 
 ---
 
@@ -134,7 +139,7 @@ npm run export:platform -- --repo . --repository https://github.com/JinPen-G/Nat
 - **入口**：[Core 源码](packages/example-tickets-core/README.md) · [单工单 API 宿主](apps/example-tickets-api/README.md) · [单工单 Web 宿主](apps/example-tickets-admin/README.md)
 
 ### 2. Rental Core（官方生产级业务包）
-- **定位**：Nativark 首个完整行业业务 Core，作为复杂业务接入底座的全景参考实现——**它是装在底座上的一个业务包，而非底座本体**。
+- **定位**：Zelo 首个完整行业业务 Core，作为复杂业务接入底座的全景参考实现——**它是装在底座上的一个业务包，而非底座本体**。
 - **演示能力**：覆盖摄影设备、露营装备、车辆载具与工程设备四品类租赁全链路（商品/资产/库存/计价策略/报价/订单/交付/归还/检查/结算/企业授信），支持无 AI 与选装 AI Native 两种组合，并附带租户官网、企业客户门户、客户与员工微信小程序四端消费示例。
 - **独立仓库与发行**：同步开源于 **[JinPen-G/nativark-rental-core](https://github.com/JinPen-G/nativark-rental-core)**，标准发行包可从 [GitHub Releases](https://github.com/JinPen-G/nativark-rental-core/releases) 获取，直接通过底座的 GitHub Topic 发现接入。
 - **仓内入口**：[Rental Core 包导读](packages/rental-core/README.md) · [Rental 独立 API 宿主](apps/rental-api/README.md) · [Rental 独立 Web 宿主](apps/rental-admin/README.md)
@@ -163,8 +168,8 @@ npm run export:platform -- --repo . --repository https://github.com/JinPen-G/Nat
 克隆仓库并安装锁定依赖：
 
 ```bash
-git clone https://github.com/JinPen-G/Nativark.git
-cd Nativark
+git clone https://github.com/JinPen-G/Zelo.git
+cd Zelo
 npm ci
 ```
 
@@ -183,7 +188,7 @@ npm ci
 
 ### 3. 方式 A：启动纯净零 Core 公共底座（推荐）
 
-只体验或基于 Nativark 公共底座二次开发，无需构建或初始化任何行业 Core：
+只体验或基于 Zelo 公共底座二次开发，无需构建或初始化任何行业 Core：
 
 ```bash
 # 1. 启动本地 MySQL（若已有独立 MySQL 可跳过）
@@ -245,7 +250,7 @@ Windows 日常启动也可双击根目录 `start-dev.cmd`，或运行 `./start-d
 主工程使用 **npm workspaces**，技术栈为 **TypeScript 5.6、NestJS 10、React 19、Vite 8、Tailwind CSS 4、UIArc、Prisma 5.22、MySQL 8.4**（依赖版本以 [package.json](package.json) 与 [package-lock.json](package-lock.json) 为准）。
 
 ```text
-Nativark/
+Zelo/
 ├── apps/
 │   ├── platform-api/                 # [纯底座] 零 Core 独立公共 API 宿主（41 模型 / 14 迁移）
 │   ├── platform-admin/               # [纯底座] 零 Core 独立公共 Web 后台宿主
@@ -317,7 +322,7 @@ Nativark/
 | `apps/api`、`apps/admin`、`packages/shared` | 原组合工程兼容入口与共享总出口（底层消费拆分后的单源包） | [API 装配](apps/api/src/app.module.ts) · [Admin 规则](apps/admin/AGENTS.md) · [shared 出口](packages/shared/src/index.ts) |
 | `apps/website`、`apps/website-next` | 静态宣传网站与 Next.js 宣传网站 | [静态官网](apps/website/README.md) · [Next.js 官网](apps/website-next/README.md) |
 
-> **关于兼容命名**：Nativark 由生产级业务系统演进而来，为保障既有数据库迁移、构建脚本与多端客户端平滑兼容，workspace 包名（`@rental-os/*`）及部分环境键（`RENTAL_*`）仍保留原前缀，不影响零 Core 底座的独立导出与运行。
+> **关于兼容命名**：品牌及主仓库已更名为 Zelo（`JinPen-G/Zelo`）。`nativark-core` 发现标签、已有发布包的来源收据和格式标识继续沿用，以保证已有安装与更新链路兼容；不得修改历史发行包来重写来源。Zelo 由生产级业务系统演进而来，为保障既有数据库迁移、构建脚本与多端客户端平滑兼容，workspace 包名（`@rental-os/*`）及部分环境键（`RENTAL_*`）仍保留原前缀，不影响零 Core 底座的独立导出与运行。
 
 ---
 
@@ -366,7 +371,7 @@ Nativark/
 
 ## 参与贡献
 
-欢迎通过 Issue 与 Pull Request 参与 Nativark 公共底座建设、文档完善，或提交基于 Nativark 构建的开源业务 Core：
+欢迎通过 Issue 与 Pull Request 参与 Zelo 公共底座建设、文档完善，或提交基于 Zelo 构建的开源业务 Core：
 
 1. Fork 本仓库并从最新主干创建语义清晰的功能或修复分支。
 2. 保持底座无行业依赖：`platform-*`、`core-contracts`、`core-host` 不得反向依赖具体业务 Core；公共协议变更须经正式包出口同步更新 OpenAPI、生产者与消费者。
@@ -385,7 +390,7 @@ Nativark/
 
 ## 许可证与第三方致谢
 
-Nativark 公开发布的自有源码及配套说明文档采用 **[MIT License](LICENSE)** 开源，允许自由使用、修改、分发和商业使用；分发时须保留版权与许可证声明。
+Zelo 公开发布的自有源码及配套说明文档采用 **[MIT License](LICENSE)** 开源，允许自由使用、修改、分发和商业使用；分发时须保留版权与许可证声明。
 
 项目中引用的第三方开源组件与素材遵循各自原始许可证，并在源码与发行包中保留对应版权和来源文件：
 

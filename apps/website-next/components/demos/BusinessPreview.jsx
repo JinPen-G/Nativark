@@ -92,14 +92,14 @@ export function BusinessPreview() {
     );
   const scenes = {
     overview: {
-      title: text('认识 Rental OS', 'Meet Rental OS'),
+      title: text('认识 Zelo', 'Meet Zelo'),
       question: text(
         '我能怎样通过对话经营租赁业务？',
         'How can I run my rental business through conversation?',
       ),
       intro: text(
-        'Rental OS 是 AI Native 的租赁业务平台。说出你的经营目标，AI 将理解业务上下文，协调不同任务，并通过 Rental Core 连接预约、库存、履约与结算。',
-        'Rental OS is an AI Native rental platform. Describe your goal: AI understands the business context, coordinates work, and connects bookings, inventory, fulfillment and settlement through Rental Core.',
+        'Zelo 是 AI Native 的租赁业务平台。说出你的经营目标，AI 将理解业务上下文，协调不同任务，并通过 Rental Core 连接预约、库存、履约与结算。',
+        'Zelo is an AI Native rental platform. Describe your goal: AI understands the business context, coordinates work, and connects bookings, inventory, fulfillment and settlement through Rental Core.',
       ),
       lead: text(
         '不同业务，可以交给不同的对话：',
@@ -1586,8 +1586,8 @@ export function BusinessPreview() {
       className: css.viewport,
       role: 'region',
       'aria-label': text(
-        'Rental OS AI Native 业务平台交互演示',
-        'Rental OS AI Native business platform demo',
+        'Zelo AI Native 业务平台交互演示',
+        'Zelo AI Native business platform demo',
       ),
       'data-rentalos-preview': true,
     },
@@ -1623,9 +1623,9 @@ export function BusinessPreview() {
           },
           h('img', {
             src: assetPath('/icons/rentalos-logo.svg'),
-            alt: 'Rental OS',
+            alt: 'Zelo',
             className: 'rentalos-preview-logo',
-            width: 107,
+            width: 72,
             height: 24,
           }),
         ),

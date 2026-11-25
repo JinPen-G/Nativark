@@ -6,7 +6,7 @@ export class GitHubCoreReadError extends Error {
 
 export type GitHubFetcher = typeof fetch;
 export const GITHUB_API = "https://api.github.com";
-const headers = { "User-Agent": "Nativark-Core", "X-GitHub-Api-Version": "2026-03-10" };
+const headers = { "User-Agent": "Zelo-Core", "X-GitHub-Api-Version": "2026-03-10" };
 const downloadHosts = new Set(["api.github.com", "github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"]);
 
 /** 连接已坏时取消失败不覆盖原网络/HTTP诊断。 */

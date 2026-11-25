@@ -10,7 +10,7 @@
 
 ```sh
 npm run build -w @rental-os/core-contracts
-npm run export:platform -- --repo . --repository https://github.com/JinPen-G/Nativark --commit <完整SHA> --out nativark-platform.tgz
+npm run export:platform -- --repo . --repository https://github.com/JinPen-G/Zelo --commit <完整SHA> --out zelo-platform.tgz
 ```
 
 解包后包含公共 API、公共后台、平台包、UIArc 源码和许可、公共数据库链及必要配置。独立后端运行包所需的具名打包脚本也随源码提供，按[公共 API 的运行包步骤](../../apps/platform-api/README.md#独立后端运行包)使用。根 workspace、默认构建/启动命令和 npm v3 锁文件按同一闭包生成。包内 README 给出安装、初始化和启动步骤，`platform.source.json` 保存固定来源及文件摘要。现有输出文件会被拒绝，不读取工作区未提交代码。[发行实现](src/platform-source.ts) · [命令入口](src/export-platform.ts)
@@ -67,23 +67,23 @@ AI工具可选，不提供时不要扫描API或数据库自行补工具。
 
 ## 取得固定工单示例
 
-零 Core 底座归档中的公共手册引用完整源码的工单示例。在底座根目录执行下面的 Git 命令，取得固定公开版本到相邻目录，原路径及许可证随示例保留。该提交的工单版本为 `0.1.2`。[固定工单原稿](https://github.com/JinPen-G/Nativark/tree/2e6e1714eae13e556a75b63d71070a147e8b1932/packages/example-tickets-core)
+零 Core 底座归档中的公共手册引用完整源码的工单示例。在底座根目录执行下面的 Git 命令，取得固定公开版本到相邻目录，原路径及许可证随示例保留。该提交的工单版本为 `0.1.2`。[固定工单原稿](https://github.com/JinPen-G/Zelo/tree/2e6e1714eae13e556a75b63d71070a147e8b1932/packages/example-tickets-core)
 
 ```sh
-git clone --no-checkout https://github.com/JinPen-G/Nativark.git ../nativark-reference
-git -C ../nativark-reference sparse-checkout init --cone
-git -C ../nativark-reference sparse-checkout set packages/core-contracts packages/example-tickets-core apps/example-tickets-api apps/example-tickets-admin
-git -C ../nativark-reference checkout --detach 2e6e1714eae13e556a75b63d71070a147e8b1932
-git -C ../nativark-reference rev-parse HEAD
+git clone --no-checkout https://github.com/JinPen-G/Zelo.git ../zelo-reference
+git -C ../zelo-reference sparse-checkout init --cone
+git -C ../zelo-reference sparse-checkout set packages/core-contracts packages/example-tickets-core apps/example-tickets-api apps/example-tickets-admin
+git -C ../zelo-reference checkout --detach 2e6e1714eae13e556a75b63d71070a147e8b1932
+git -C ../zelo-reference rev-parse HEAD
 ```
 
 在尚未包含示例目录的独立底座中，将以下三份目录放到根目录下的同名路径。开发自己的 Core 时，从这些入口替换业务标识与实现。
 
 | 取得的目录 | 底座根下的放置路径 | 用途 |
 | --- | --- | --- |
-| `../nativark-reference/packages/example-tickets-core` | `packages/example-tickets-core` | 领域、合同、迁移、后台贡献与标准包 |
-| `../nativark-reference/apps/example-tickets-api` | `apps/example-tickets-api` | 服务端装配、部署锁与授权 |
-| `../nativark-reference/apps/example-tickets-admin` | `apps/example-tickets-admin` | 同包后台装配 |
+| `../zelo-reference/packages/example-tickets-core` | `packages/example-tickets-core` | 领域、合同、迁移、后台贡献与标准包 |
+| `../zelo-reference/apps/example-tickets-api` | `apps/example-tickets-api` | 服务端装配、部署锁与授权 |
+| `../zelo-reference/apps/example-tickets-admin` | `apps/example-tickets-admin` | 同包后台装配 |
 
 运行源码示例时，在根 `workspaces` 的原公共目录列表中追加这三个路径，按同版包声明核对公共依赖，并在这个独立宿主准备根锁文件及开发依赖。获得安装授权后，可运行 `npm install --package-lock-only --ignore-scripts` 更新该组合的锁，再用 `npm ci --ignore-scripts` 安装锁定材料。公共 Client、Core 标准包及部署锁按[工单服务端步骤](../../apps/example-tickets-api/README.md#单工单的五步)准备，后台消费同一包。[工单后台步骤](../../apps/example-tickets-admin/README.md#本地使用)
 
@@ -531,6 +531,6 @@ node packages/core-contracts/dist/capabilities.js --repo . --query CorePage --js
 node packages/core-contracts/dist/check.js <已解包Core目录> --host <同版宿主版本JSON> --json
 ```
 
-需要运行原合同用例时，从固定完整源码取得[原合同测试](https://github.com/JinPen-G/Nativark/blob/2e6e1714eae13e556a75b63d71070a147e8b1932/packages/core-contracts/test/core-contracts.test.cjs)，使用该版本的本包源码、根 `tsconfig.base.json`、锁文件及开发依赖，并在该源码检出根运行 `npm test -w @rental-os/core-contracts`。原入口先类型检查和编译，再运行空/单/双 Core、独立版本、越界/链接路径、迁移摘要、缺文件及 CLI 用例，退出清理本树 `output/.tmp/core-contracts`。类型、静态包检查、离线合同、租户、数据库与浏览器分别验收。
+需要运行原合同用例时，从固定完整源码取得[原合同测试](https://github.com/JinPen-G/Zelo/blob/2e6e1714eae13e556a75b63d71070a147e8b1932/packages/core-contracts/test/core-contracts.test.cjs)，使用该版本的本包源码、根 `tsconfig.base.json`、锁文件及开发依赖，并在该源码检出根运行 `npm test -w @rental-os/core-contracts`。原入口先类型检查和编译，再运行空/单/双 Core、独立版本、越界/链接路径、迁移摘要、缺文件及 CLI 用例，退出清理本树 `output/.tmp/core-contracts`。类型、静态包检查、离线合同、租户、数据库与浏览器分别验收。
 
 公开使用说明以本手册及各源码模块README为入口。维护者的内部需求、任务、记录与接续在本地单独维护，标准包和指南生成均不依赖它们。

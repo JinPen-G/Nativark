@@ -19,7 +19,7 @@ export { SettingsWorkspace, SettingsGroups } from "./components/settings/Setting
 export { WorkspacePageActions } from "./components/workspace/WorkspaceHeader";
 export { useServerFormSync } from "./app/useServerFormSync";
 export { AdminBrandMark, BrandIconProvider, useAdminBrandIcon } from "./app/BrandIconProvider";
-export { ADMIN_BRAND_NAME, ADMIN_DEFAULT_LOGO, ADMIN_DEFAULT_MARK, ADMIN_DEFAULT_FAVICON, ADMIN_LOGIN_DEFAULTS, resolveAdminBrandName, resolveAdminLogo, resolveAdminMark, resolveAdminFavicon, applyAdminFavicon } from "./app/branding";
+export { ADMIN_BRAND_NAME, ADMIN_DEFAULT_LOGO, ADMIN_DEFAULT_MARK, ADMIN_DEFAULT_FAVICON, ADMIN_LOGIN_DEFAULTS, defaultAdminBrandLogo, resolveAdminBrandName, resolveAdminLogo, resolveAdminMark, resolveAdminFavicon, applyAdminFavicon } from "./app/branding";
 export { AppearanceSwitcher } from "./components/AppearanceSwitcher";
 export { LanguageSwitcher } from "./components/LanguageSwitcher";
 export { defaultAdminBrandIcon, safeBrandIconUrl, isSvgBrandIcon, adaptMonochromeBrandSvg, readBrandSvg } from "./app/brandIcon";

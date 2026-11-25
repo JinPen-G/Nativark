@@ -1,4 +1,4 @@
-name: Nativark release
+name: Zelo 发布
 
 on:
   push:

@@ -101,6 +101,6 @@ server.on("error", (error) => {
 });
 server.listen(port, "127.0.0.1", () =>
   console.log(
-    "Rental OS static export: http://127.0.0.1:" + port + basePath + "/harness/",
+    "Zelo static export: http://127.0.0.1:" + port + basePath + "/harness/",
   ),
 );

@@ -22,7 +22,7 @@ assert.match(login, /name: t\("微信"\)/);
 const providerPreview = login.slice(login.indexOf('className="login-provider-preview"'), login.indexOf('className="login-switch-tenant"'));
 assert.doesNotMatch(providerPreview, /GitHub|GithubOutlined/);
 assert.doesNotMatch(login, /<Input[^\n]+size="large"/);
-assert.match(login, /https:\/\/github.com\/JinPen-G\/Nativark/);
+assert.match(login, /https:\/\/github.com\/JinPen-G\/Zelo/);
 assert.match(login, /useFeedback/);
 assert.doesNotMatch(login, /message\.(info|success|error)\(/);
 const manifest = JSON.parse(read('packages/ui-arc/manifest.json'));

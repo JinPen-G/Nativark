@@ -4,7 +4,7 @@ export default function Home() {
   return (
     <>
       <LanguageBootstrap home />
-      <a href={sitePath("/harness/")}>Rental OS</a>
+      <a href={sitePath("/harness/")}>Zelo</a>
     </>
   );
 }

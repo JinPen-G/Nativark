@@ -159,7 +159,7 @@ export function createPlatformOpenApi() {
         "500": { description: "实际持久化失败；不能视为已保存或可重发" } } };
     (paths[`/api${item.path.replace(/:([a-z]+)/g, "{$1}")}`] ??= {})[item.method.toLowerCase()] = operation;
   }
-  return { openapi: "3.0.3", info: { title: "Nativark Platform API", version: "0.1.0", description: "公共宿主接口；业务Core另贡献同版本文档，文档可见不授予Agent业务权限。" },
+  return { openapi: "3.0.3", info: { title: "Zelo Platform API", version: "0.1.0", description: "公共宿主接口；业务Core另贡献同版本文档，文档可见不授予Agent业务权限。" },
     paths, components: { securitySchemes: { bearerAuth: { type: "http", scheme: "bearer" } }, schemas: PLATFORM_OPENAPI_SCHEMAS } };
 }
 

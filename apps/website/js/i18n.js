@@ -1,5 +1,5 @@
 /**
- * Rental OS 2.0 copy and language preferences.
+ * Zelo 2.0 copy and language preferences.
  * Text-only bindings preserve the existing media, carousel nodes and animation state.
  * To edit copy, update index.html's Chinese fallback and the matching entry below.
  */
@@ -30,8 +30,8 @@
       en: "What would you like to explore? (optional)",
     },
     "demo.privacy": {
-      zh: "提交即表示你同意 Rental OS 使用以上信息联系你，沟通本次演示；不会自动注册账号或订阅营销消息。",
-      en: "By submitting, you agree that Rental OS may use these details to contact you about this demo. This does not create an account or subscribe you to marketing.",
+      zh: "提交即表示你同意 Zelo 使用以上信息联系你，沟通本次演示；不会自动注册账号或订阅营销消息。",
+      en: "By submitting, you agree that Zelo may use these details to contact you about this demo. This does not create an account or subscribe you to marketing.",
     },
     "demo.submit": { zh: "提交预约", en: "Request a demo" },
     "demo.submitting": { zh: "正在提交…", en: "Sending…" },
@@ -120,8 +120,8 @@
       en: "Company",
     },
     "nav.about": {
-      zh: "关于 Rental OS",
-      en: "About Rental OS",
+      zh: "关于 Zelo",
+      en: "About Zelo",
     },
     "nav.careers": {
       zh: "加入我们",
@@ -196,8 +196,8 @@
       en: "Explore fulfillment",
     },
     "hero.platformTab": {
-      zh: "Rental OS 平台",
-      en: "Rental OS",
+      zh: "Zelo 平台",
+      en: "Zelo",
     },
     "product.more": {
       zh: "多门店与经营协同",
@@ -480,8 +480,8 @@
       en: "Make rental simpler.",
     },
     "cta.heading2": {
-      zh: "从 Rental OS 开始。",
-      en: "Start with Rental OS.",
+      zh: "从 Zelo 开始。",
+      en: "Start with Zelo.",
     },
     "cta.body1": {
       zh: "带上你的业务场景，",
@@ -496,8 +496,8 @@
       en: "Make rental simpler. Make the world more efficient.",
     },
     "footer.newsletter": {
-      zh: "了解 Rental OS 的产品更新。",
-      en: "Stay up to date with Rental OS.",
+      zh: "了解 Zelo 的产品更新。",
+      en: "Stay up to date with Zelo.",
     },
     "footer.email": {
       zh: "邮箱地址",
@@ -520,12 +520,12 @@
       en: "Fulfillment guide",
     },
     "footer.about": {
-      zh: "关于 Rental OS",
-      en: "About Rental OS",
+      zh: "关于 Zelo",
+      en: "About Zelo",
     },
     "footer.copyright": {
-      zh: "© 2026 Rental OS. 保留所有权利。",
-      en: "© 2026 Rental OS. All rights reserved.",
+      zh: "© 2026 Zelo. 保留所有权利。",
+      en: "© 2026 Zelo. All rights reserved.",
     },
     "footer.imprint": {
       zh: "网站声明",
@@ -576,8 +576,8 @@
       en: "Customize",
     },
     "aria.home": {
-      zh: "Rental OS 首页",
-      en: "Rental OS home",
+      zh: "Zelo 首页",
+      en: "Zelo home",
     },
     "aria.mainNav": {
       zh: "主导航",
@@ -608,8 +608,8 @@
       en: "Featured slides",
     },
     "aria.clients": {
-      zh: "Rental OS 平台与行业场景",
-      en: "Rental OS platform and industry scenarios",
+      zh: "Zelo 平台与行业场景",
+      en: "Zelo platform and industry scenarios",
     },
     "marquee.booking": { zh: "预约与库存", en: "Booking & inventory" },
     "marquee.orders": { zh: "订单与履约", en: "Orders & fulfillment" },
@@ -686,12 +686,12 @@
       en: "Close preference settings",
     },
     title: {
-      zh: "Rental OS｜面向多品类租赁业务的经营平台",
-      en: "Rental OS | One platform for rental operations",
+      zh: "Zelo｜面向多品类租赁业务的经营平台",
+      en: "Zelo | One platform for rental operations",
     },
     description: {
-      zh: "Rental OS 是面向多品类租赁业务的一体化经营平台，连接预约、订单、库存、门店、履约与结算。",
-      en: "Rental OS connects booking, orders, inventory, locations, fulfillment and settlement on one platform for multi-category rental businesses.",
+      zh: "Zelo 是面向多品类租赁业务的一体化经营平台，连接预约、订单、库存、门店、履约与结算。",
+      en: "Zelo connects booking, orders, inventory, locations, fulfillment and settlement on one platform for multi-category rental businesses.",
     },
     "menu.close": {
       zh: "关闭菜单",

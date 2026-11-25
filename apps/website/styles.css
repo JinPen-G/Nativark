@@ -235,14 +235,14 @@ summary:focus-visible,
   align-items: center;
 }
 .brand img {
-  width: 124px;
-  height: auto;
+  width: auto;
+  height: 28px;
   filter: invert(1);
   transition: filter 0.25s;
 }
 .footer-brand img {
-  width: 116px;
-  height: auto;
+  width: auto;
+  height: 28px;
 }
 .main-nav {
   display: flex;
@@ -1565,9 +1565,9 @@ summary:focus-visible,
   overflow: hidden;
 }
 .footer-wordmark {
-  width: 100%;
+  width: min(100%, 640px);
   height: auto;
-  opacity: 0.72;
+  margin-inline: auto;
 }
 .product-explore {
   display: none;

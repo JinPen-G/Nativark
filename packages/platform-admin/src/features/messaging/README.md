@@ -20,7 +20,7 @@ import {
 
 const invitationApi = createOperatorInvitationApi("/api");
 
-<AcceptOperatorInvitationPage api={invitationApi} brandName="Nativark" />;
+<AcceptOperatorInvitationPage api={invitationApi} brandName="Zelo" />;
 <OperatorInvitations open={open} onClose={close} roles={roles} organizations={organizations} />;
 ```
 

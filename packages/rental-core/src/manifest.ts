@@ -14,7 +14,7 @@ export function createRentalManifest(input: {
   return CoreManifestSchema.parse({
     manifestVersion: 1, id: RENTAL_CORE_ID, name: "Rental Core",
     description: "保留品类、经营空间、会员、报价订单、履约资金及各端接口的租赁业务 Core",
-    author: "Nativark contributors", version: RENTAL_CORE_VERSION, source: input.source, license: "MIT",
+    author: "Zelo contributors", version: RENTAL_CORE_VERSION, source: input.source, license: "MIT",
     compatibility: {
       // 原页面和桌面插槽、受控租户统计使用底座0.1.12接口，加载前须核当前发行。
       platform: { minInclusive: "0.1.12", maxExclusive: "0.2.0" },

@@ -4,7 +4,7 @@
 
 `source/manifest.json` 保存原文件路径与 SHA-256。`source/components` 保留五组演示的组件、交互、示例数据与动画类名；适配涉及 admin 语言入口、本地素材路径、Agent 演示默认预约场景和自动焦点约束。轨迹示例原系统 span 映射缺失时沿用基础类，避免拼入 `undefined`。`showcase-source.css` 从官网现行样式定向提取，全部限定在 `.login-showcase-demo` 内；四组原动画的duration/delay按同一比例压入6.4秒，保留阶段与相对节奏，适应负责人指定的7秒轮播。没有加载官网全局 foundation、Next.js、Provider 或整站壳子。
 
-登录页默认平台品牌复用 `ADMIN_BRAND_NAME` 与 `ADMIN_DEFAULT_LOGO`，让左侧演示的名称、Logo和无障碍标签与右侧登录一致。BusinessPreview仅替换平台展示文字与Logo来源，保留技术class/id、Rental Core称呼、原交互/动画、主题和裁切；没有修改官网源组件。manifest的`sourceSha256`与`copiedSha256`保留原来源及品牌替换前副本，`adaptedSha256`记录当前登录适配组件，以UTF-8、CRLF转LF计算；旧Logo资源作为原稿保留。租户自定义登录名称与图片继续由原LoginPage管理，不传入示例或改写认证。
+登录页默认平台品牌复用 `ADMIN_BRAND_NAME` 与 `defaultAdminBrandLogo`，让左侧演示的名称、Logo和无障碍标签与右侧登录一致。BusinessPreview仅替换平台展示文字与Logo来源，保留技术class/id、Rental Core称呼、原交互/动画、主题和裁切；没有修改官网源组件。manifest的`sourceSha256`与`copiedSha256`保留原来源及品牌替换前副本，`adaptedSha256`记录当前登录适配组件，以UTF-8、CRLF转LF计算；旧Logo资源作为原稿保留。租户自定义登录名称与图片继续由原LoginPage管理，不传入示例或改写认证。
 
 [LoginShowcase.tsx](LoginShowcase.tsx) 负责轮播、暂停、可见性、尺寸缩放和减少动态偏好；[locale.ts](locale.ts) 复用后台中英文。轮播规则以2026-11-06核对的[UIArc登录页](https://uiarc.dev/sign-in?redirect_url=%2Fdocs%2Fmotion)为参考：每组7秒，由CSS进度完成后推进；鼠标移入整个展示面板或焦点进入时暂停切换，移出并失去内部焦点后从剩余进度续播；手动暂停是独立状态。暂停切换不冻结示例组件内部演示。前后切换使用0.48秒、16px方向位移、轻微缩放和6px模糊，播放/暂停图标沿原0.26秒无回弹弹簧；减少动态时只淡入淡出且不自动推进。现有页面后台、窄屏不可见守卫保留。没有复制原站业务、账户或Pro组件源码。
 
@@ -17,3 +17,5 @@ Agent默认预约场景每次挂载或重播从空输入开始：逐字输入 �
 验证入口为后台 TypeScript 检查、离线 Vite 构建及登录页实际浏览器检查；静态和构建通过不代表视觉验收或认证、第三方授权接通。后续同步官网演示时对照 manifest 和这几处适配，不覆盖原官网或 vendor。
 
 公共登录页与原后台使用此处同一 renderer。公开租户品牌、开发快捷入口与登录执行由宿主供给；演示组件只更换公共语言、品牌及动效偏好的相对导入，DOM、素材、五组交互和轮播时序沿原源码。`source/manifest.json` 保留迁移前来源证据，路径迁移后以固定 main 基线与此处相对导入差异核对。
+
+默认品牌现使用负责人确认的 Zelo 定稿，演示里的组合标与表单顶栏共用 `defaultAdminBrandLogo`，随站内主题选择原黑白稿，不再通过 CSS 反色。原演示类名和交互保持；原稿摘要见[公共品牌来源](../../../../public/brand/zelo-source.json)。

@@ -3,11 +3,13 @@
 import * as React from 'react';
 import { getBusinessStyles } from '../shared/styleNames.js';
 import { useLocale } from '../../../locale';
-import { ADMIN_BRAND_NAME, ADMIN_DEFAULT_LOGO } from '../../../../../../app/branding';
+import { ADMIN_BRAND_NAME, defaultAdminBrandLogo } from '../../../../../../app/branding';
+import { useAppearance } from '../../../../../../app/theme';
 import { usePrefersReducedMotion } from '../../../../../../lib/usePrefersReducedMotion';
 export function BusinessPreview({ paused = false, initialScene = 'booking' } = {}) {
   const h = React.createElement;
   const reduced = usePrefersReducedMotion();
+  const { mode: appearanceMode } = useAppearance();
   const css = getBusinessStyles();
   const en = useLocale() === 'en';
   const text = (zh, english) => (en ? english : zh);
@@ -1664,11 +1666,11 @@ export function BusinessPreview({ paused = false, initialScene = 'booking' } = {
             className: css.brand,
           },
           h('img', {
-            src: ADMIN_DEFAULT_LOGO,
+            src: defaultAdminBrandLogo(appearanceMode === 'dark'),
             alt: ADMIN_BRAND_NAME,
             className: 'rentalos-preview-logo',
-            width: 107,
-            height: 24,
+            width: 704,
+            height: 236,
           }),
         ),
         h(

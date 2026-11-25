@@ -14,7 +14,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import type { AdminLoginBranding, LoginRequest, PlatformLoginResponse } from "@rental-os/platform-contracts";
-import { ADMIN_BRAND_NAME, ADMIN_DEFAULT_LOGO, applyAdminFavicon } from "../../app/branding";
+import { ADMIN_BRAND_NAME, ADMIN_DEFAULT_LOGO, applyAdminFavicon, defaultAdminBrandLogo } from "../../app/branding";
 import { useLocale } from "../../app/locale";
 import { createThemeConfig, useAppearance } from "../../app/theme";
 import { applyArcThemeTokens, getArcPalette } from "../../app/arcTokens";
@@ -90,6 +90,7 @@ export function AdminLoginPage({ brandName, tenantCode: urlTenantCode, onLogin, 
   const tenantLockedButUnresolved = isTenantLocked && Boolean(loadTenantBrand) && publicBootstrap.isFetched && !tenantBrand;
   const loginBrandName = tenantBrand?.merchant.name?.trim() || brandName;
   const loginBrandLogo = tenantBrand?.merchant.logoUrl?.trim() || brandLogo;
+  const displayedLoginBrandLogo = loginBrandLogo === ADMIN_DEFAULT_LOGO ? defaultAdminBrandLogo(mode === "dark") : loginBrandLogo;
   const loginBranding = tenantBrand?.adminLogin;
   const showBrandTitle = loginBranding?.showTitle !== false;
   const showBrandDescription = loginBranding?.showDescription !== false;
@@ -195,7 +196,7 @@ export function AdminLoginPage({ brandName, tenantCode: urlTenantCode, onLogin, 
               highlights={loginBranding?.highlights} showHighlights={loginBranding?.showHighlights !== false} />
             <div className="login-card-form">
               {/* One brand mark remains visible above the form at every width. */}
-              <div className={`login-brand login-brand--compact${loginBrandLogo === ADMIN_DEFAULT_LOGO ? " login-brand--platform" : " login-brand--tenant"}`}><img src={loginBrandLogo} alt={loginBrandName} /></div>
+              <div className={`login-brand login-brand--compact${loginBrandLogo === ADMIN_DEFAULT_LOGO ? " login-brand--platform" : " login-brand--tenant"}`}><img src={displayedLoginBrandLogo} alt={loginBrandName} /></div>
               <div className="login-form-content">
               <div className="login-panel-heading">
                 <Typography.Title level={2}>{locale === "en-US" ? `Sign in to ${loginBrandName}` : `登录 ${loginBrandName}`}</Typography.Title>
@@ -285,7 +286,7 @@ export function AdminLoginPage({ brandName, tenantCode: urlTenantCode, onLogin, 
                 {locale === "en-US" ? "Made by " : "由 "}
                 <a href="https://github.com/JinPen-G" target="_blank" rel="noopener noreferrer">JinPen-G</a>
                 {locale === "en-US" ? ". Source code on " : " 制作。源码发布在 "}
-                <a href="https://github.com/JinPen-G/Nativark" target="_blank" rel="noopener noreferrer">GitHub</a>
+                <a href="https://github.com/JinPen-G/Zelo" target="_blank" rel="noopener noreferrer">GitHub</a>
                 {locale === "en-US" ? "." : "。"}
               </footer>
             </div>

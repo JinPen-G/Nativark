@@ -1,11 +1,14 @@
 import type { AuthUser, TenantIdentity } from "@rental-os/platform-contracts";
 
-export const ADMIN_BRAND_NAME = "Nativark";
-// Platform defaults share the approved Preview outline. Runtime mark and browser
-// favicon choose contrast independently; tenant-uploaded artwork keeps priority.
-export const ADMIN_DEFAULT_LOGO = "/brand/nativark-logo-mono.svg";
-export const ADMIN_DEFAULT_MARK = "/brand/nativark-icon.svg";
-export const ADMIN_DEFAULT_FAVICON = "/brand/nativark-favicon.svg";
+export const ADMIN_BRAND_NAME = "Zelo";
+// Use the approved vector originals; site and browser contrast stay independent.
+// Tenant-uploaded artwork keeps priority and is never replaced by platform styling.
+export const ADMIN_DEFAULT_LOGO = "/brand/zelo-logo-black.svg";
+export const ADMIN_DEFAULT_MARK = "/brand/zelo-icon-black.svg";
+export const ADMIN_DEFAULT_FAVICON = "/brand/zelo-favicon.svg";
+export function defaultAdminBrandLogo(dark: boolean) {
+  return dark ? "/brand/zelo-logo-white.svg" : ADMIN_DEFAULT_LOGO;
+}
 export const ADMIN_LOGIN_DEFAULTS = {
   title: "你的租赁业务，\n有了 Rental Agent。",
   description: "资源调配、任务分派、跨店协作，\n交给 Rental Agent 统筹安排。\n\n日常管理，也有 Copilot 随时协助。",
@@ -14,7 +17,7 @@ export const ADMIN_LOGIN_DEFAULTS = {
     { title: "Copilot", description: "辅助日常管理" },
     { title: "多品类经营", description: "不同业务，轻松切换" }
   ],
-  footerText: "Nativark"
+  footerText: ADMIN_BRAND_NAME
 } as const;
 
 function isTenantUser(user?: Pick<AuthUser, "isSaasAdmin">) {

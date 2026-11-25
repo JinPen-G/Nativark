@@ -11,7 +11,7 @@ export default defineConfig(({ mode }) => {
   const offline = mode === "ai-offline";
   const env = loadViteEnvironment(mode, fileURLToPath(new URL(".", import.meta.url)), loadEnv, { offline });
   const platform = platformAdminVite();
-  const brandSource = fileURLToPath(new URL("./public/brand/nativark-icon.svg", import.meta.url));
+  const brandSource = fileURLToPath(new URL("../../packages/platform-admin/public/brand/zelo-icon-black.svg", import.meta.url));
   const brandModule = "\0nativark-default-brand-icon";
 
   return {
