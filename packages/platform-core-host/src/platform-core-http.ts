@@ -5,6 +5,7 @@ import { CORE_SCOPE_HTTP, CORE_SESSION_HTTP, coreManagementHttpPolicy,
   createCoreManagementOpenApi, createCoreScopeOpenApi, createCoreSessionOpenApi, composeCoreOpenApi,
   type CoreOpenApiSource, type PlatformOpenApiDocument } from "@rental-os/core-contracts";
 import { getRequestIdentity } from "@rental-os/platform-server/request-identity";
+import { hasEffectivePermission } from "@rental-os/platform-server/permission-match";
 import type { RegisteredCoreHttpAccess } from "@rental-os/platform-server";
 import type { CoreHostHttpApplication } from "./core-host.module";
 
@@ -23,8 +24,8 @@ export function createPlatformCoreHttpAccess(application: CoreHostHttpApplicatio
       const policy = coreManagementHttpPolicy(method(verb), path);
       if (policy) {
         const permissions = identity.permissions ?? [];
-        const canManage = policy.audience === "saas" ? identity.isSaasAdmin && (permissions.includes("*") || permissions.includes(policy.permission))
-          : !identity.isSaasAdmin && (identity.isPlatformAdmin || identity.dataScope === "all" && permissions.includes(policy.permission));
+        const canManage = policy.audience === "saas" ? identity.isSaasAdmin && hasEffectivePermission(permissions, policy.permission)
+          : !identity.isSaasAdmin && (identity.isPlatformAdmin || identity.dataScope === "all" && hasEffectivePermission(permissions, policy.permission));
         if (!canManage) throw new ForbiddenException("当前主体缺少对应Core管理权限");
         return;
       }
