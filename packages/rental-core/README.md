@@ -428,10 +428,10 @@ Core 使用底座的正式 API 和已声明能力扩展业务，底座与 Core �
 
 独立 Core 开发先用[源码工作区准备入口](../../scripts/prepare-rental-workspace.cjs)组合固定底座支持源码和 Core 自己的版本标签。它保留原构建工具、各端薄宿主与所选 npm 锁，输出新的开发归档；Core 子树来自独立仓库，底座源码和接口来自明确的支持版本。零 Core 底座继续单独发行。
 
-包含客户和员工小程序的源码开发使用 Base `0.1.17` 的支持提交 `3fee227517a2b20e18a426e853f18cdf37cb63ff` 与 Rental `v0.1.13` 的源码提交 `affeadb25453b0f977b3760bc9ebd53bfd8ebaad`。准备入口的 `supportScripts` 从 `--commit` 指定的 Git 提交读取 `scripts/miniprogram-ai-runtime.cjs`，两端构建由此取得 `platform-contracts/ai-gateway` 和 `ai-task` 的正式打包接点。取得该固定支持源码后，按原锁文件与各端构建前置准备工作区。[固定支持源码](https://github.com/JinPen-G/Nativark/tree/3fee227517a2b20e18a426e853f18cdf37cb63ff)
+包含企业门户、客户和员工小程序的源码开发使用支持提交 `d22724d823a3f82f7618e4bdd204e31385b86c84` 与 Rental `v0.1.13` 的源码提交 `affeadb25453b0f977b3760bc9ebd53bfd8ebaad`。准备入口的 `supportScripts` 从 `--commit` 指定的 Git 提交读取 `scripts/miniprogram-ai-runtime.cjs`，两端构建由此取得 `platform-contracts/ai-gateway` 和 `ai-task` 的正式打包接点。该支持提交还包含企业门户公共语言词条的精确构建边界修复；已发布 Base `0.1.17` 与 Rental `0.1.13` 的固定来源和资产不变。取得该固定支持源码后，按原锁文件与各端构建前置准备工作区。[固定支持源码](https://github.com/JinPen-G/Nativark/tree/d22724d823a3f82f7618e4bdd204e31385b86c84)
 
 ```text
-node scripts/prepare-rental-workspace.cjs --repo <固定底座Git目录> --repository https://github.com/JinPen-G/Nativark --commit 3fee227517a2b20e18a426e853f18cdf37cb63ff --core-repo <独立CoreGit目录> --core-commit affeadb25453b0f977b3760bc9ebd53bfd8ebaad --out <新开发归档.tgz>
+node scripts/prepare-rental-workspace.cjs --repo <固定底座Git目录> --repository https://github.com/JinPen-G/Nativark --commit d22724d823a3f82f7618e4bdd204e31385b86c84 --core-repo <独立CoreGit目录> --core-commit affeadb25453b0f977b3760bc9ebd53bfd8ebaad --out <新开发归档.tgz>
 ```
 
 在新目录解包，执行 `npm ci`、`npm run check:types`，修改 `packages/rental-core` 后执行 `npm run check:core`。可选 AI 开发组合在准备时显式加 `--ai`；Client 生成、构建、迁移和启动按 [Rental 宿主](../../apps/rental-api/README.md)办理。包内 `development.workspace.json` 记录两个来源和文件摘要，开发组合不依赖维护者私有文档、旧生成物或聊天记忆。
