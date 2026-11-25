@@ -4701,7 +4701,11 @@
     "@tanstack/react-table": "8.21.3",
     "@rental-os/shared": "0.1.0",
     "@rental-os/ai-native-admin": "0.1.0",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "@animate-ui/react": "2.3.0",
+    "react-markdown": "10.1.0",
+    "ajv-formats": "2.1.1",
+    "@nestjs/config": "^3.3.0"
   },
   "peerDependenciesMeta": {
     "@nestjs/common": {
@@ -4783,6 +4787,18 @@
       "optional": true
     },
     "typescript": {
+      "optional": true
+    },
+    "@animate-ui/react": {
+      "optional": true
+    },
+    "react-markdown": {
+      "optional": true
+    },
+    "ajv-formats": {
+      "optional": true
+    },
+    "@nestjs/config": {
       "optional": true
     }
   }
