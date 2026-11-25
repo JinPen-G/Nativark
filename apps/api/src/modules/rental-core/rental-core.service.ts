@@ -1730,23 +1730,24 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   }
 
   async restoreStockDisposition(tenantId: string, dispositionId: string, operator: string) {
-    this.state(tenantId);
+    // 已持久化的处置/工单沿原仓储范围和事务读取，不初始化当前品类配置。
+    this.workspaceOf(tenantId);
     return this.factStore.restoreStockDisposition(tenantId, dispositionId, operator);
   }
 
   async writeOffStockDisposition(tenantId: string, dispositionId: string, reason: string, operator: string) {
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     return this.factStore.writeOffStockDisposition(tenantId, dispositionId, reason, operator);
   }
 
   async listStockDispositions(tenantId: string, orderId?: string) {
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     if (orderId) await this.requireOrder(tenantId, orderId);
     return this.factStore.listStockDispositions(tenantId, orderId);
   }
 
   async listWorkOrders(tenantId: string, status?: RentalWorkOrderStatus) {
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     if (status && !["pending", "in_progress", "pending_review", "completed", "rejected", "cancelled"].includes(status)) {
       throw new BadRequestException("养护工单状态无效");
     }
@@ -1754,12 +1755,12 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   }
 
   async listWorkOrderAssignees(tenantId: string, locationId?: string): Promise<RentalWorkOrderAssignee[]> {
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     return this.factStore.listWorkOrderAssignees(tenantId, locationId);
   }
 
   async listWorkOrderHistory(tenantId: string, workOrderId: string): Promise<RentalWorkOrderHistoryEntry[]> {
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     const row = (await this.factStore.listWorkOrders(tenantId)).find((item) => item.id === workOrderId);
     if (!row) throw new NotFoundException("养护工单不存在或不属于当前经营空间");
     return this.factStore.listWorkOrderHistory(tenantId, workOrderId);
@@ -1773,7 +1774,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   }
 
   async createWorkOrder(tenantId: string, input: CreateRentalWorkOrderRequest, operator: string) {
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     const dispositions = await this.factStore.listStockDispositions(tenantId);
     const disposition = dispositions.find((row) => row.id === input.dispositionId);
     if (!disposition) throw new NotFoundException("库存处置不存在或不属于当前经营空间");
@@ -1807,7 +1808,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   }
 
   async assignWorkOrder(tenantId: string, workOrderId: string, input: AssignRentalWorkOrderRequest) {
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     const current = await this.factStore.listWorkOrders(tenantId);
     const row = current.find((item) => item.id === workOrderId);
     if (!row) throw new NotFoundException("养护工单不存在或不属于当前经营空间");
@@ -1817,22 +1818,22 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   }
 
   async startWorkOrder(tenantId: string, workOrderId: string, operator: string) {
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     return this.factStore.transitionWorkOrder(tenantId, workOrderId, "start", operator);
   }
 
   async submitWorkOrder(tenantId: string, workOrderId: string, input: SubmitRentalWorkOrderRequest, operator: string) {
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     return this.factStore.transitionWorkOrder(tenantId, workOrderId, "submit", operator, input);
   }
 
   async reviewWorkOrder(tenantId: string, workOrderId: string, input: ReviewRentalWorkOrderRequest, operator: string) {
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     return this.factStore.transitionWorkOrder(tenantId, workOrderId, "review", operator, input);
   }
 
   async cancelWorkOrder(tenantId: string, workOrderId: string, input: CancelRentalWorkOrderRequest, operator: string) {
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     return this.factStore.transitionWorkOrder(tenantId, workOrderId, "cancel", operator, input);
   }
 
@@ -2088,7 +2089,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   }
 
   async listOrders(tenantId: string) {
-    this.state(tenantId);
+    // 历史订单的原快照由事实仓储返回；当前品类缓存不是历史读取的前置。
+    this.workspaceOf(tenantId);
     return (await this.factStore.listOrders(tenantId)).map((order) => this.publicOrder(order));
   }
 
@@ -2097,7 +2099,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    * 只按条件筛，供兼容旧的纯数组响应；分页大小夹在 1..MAX 之间。
    */
   async queryOrders(tenantId: string, query: RentalOrderListQuery): Promise<RentalOrderPage> {
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     const paged = query.page !== undefined || query.pageSize !== undefined;
     const page = Math.max(1, Math.floor(query.page ?? 1));
     const pageSize = Math.min(RENTAL_ORDER_LIST_MAX_PAGE_SIZE, Math.max(1, Math.floor(query.pageSize ?? RENTAL_ORDER_LIST_DEFAULT_PAGE_SIZE)));
@@ -2121,7 +2123,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    * 因为候选查询与实际取消之间可能已经发生确认、人工取消或续租等状态变化。
    */
   async listExpiredPendingOrderIds(tenantId: string, expiredBefore = now(), take = 50) {
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     return this.factStore.listExpiredDraftOrderIds(tenantId, expiredBefore, take);
   }
 
@@ -2184,7 +2186,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
 
   /** RULE-CLOSE-01：列出已超过领取宽限、仍未领取的订单。 */
   async listPickupOverdueOrderIds(tenantId: string, at = now(), take = 50) {
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     const cutoff = Date.parse(at);
     if (!Number.isFinite(cutoff)) throw new BadRequestException("检查时间无效");
     const rows = await this.factStore.listOrders(tenantId);
@@ -2203,7 +2205,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
 
   /** 已通知且达到最终确认时限的待确认爽约候选。 */
   async listNoShowCandidateIds(tenantId: string, at = now(), take = 50) {
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     const cutoff = Date.parse(at);
     if (!Number.isFinite(cutoff)) throw new BadRequestException("检查时间无效");
     const rows = await this.factStore.listOrders(tenantId);
@@ -2407,7 +2409,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   }
 
   async getOrder(tenantId: string, orderId: string) {
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     return this.publicOrder(await this.requireOrder(tenantId, orderId));
   }
 
@@ -2612,7 +2614,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    * 的 `lockedOrder`，全部锁同一行订单，因此彼此串行。
    */
   async lockOrderForUpdate(tenantId: string, orderId: string, tx: RentalFactTx) {
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     return this.publicOrder(await this.lockedOrder(tenantId, orderId, tx));
   }
 
