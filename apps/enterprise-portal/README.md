@@ -4,6 +4,8 @@
 
 视觉和交互沿[UI 适配规则](../admin/AGENTS.md)和[公共后台实现](../../packages/platform-admin/README.md)，复用原 React/UIArc、主题、语言与原生侧栏。订单、财务、全员审计和导出缺正式授权或来源时保持不可用。
 
+构建边界允许公共 Locale 复用平台的纯[语言词条](../../packages/platform-admin/src/features/auth/messages.ts)，其余营运认证、Copilot、API 与应用路由实现仍禁止进入企业端；共享词条不提供营运身份或请求能力。
+
 管理端与企业端共用 [BusinessShell](../admin/src/components/BusinessShell.tsx)、[导航](../admin/src/components/animate-sidebar/NativeNavigation.tsx)、[上下文选择器](../admin/src/components/animate-sidebar/NativeContextSwitcher.tsx)及[账号菜单](../admin/src/components/animate-sidebar/NativeAccountMenuView.tsx)。框架布局、侧栏、顶部栏、间距、深浅主题及动效只维护这些共用组件和管理端原样式/token。企业 [Shell](src/EnterpriseShell.tsx)仅提供客户身份、当前企业、受权菜单与原客户动作。修改共用源码后，两端开发入口均使用更新后的实现，发行时重新构建两端产物。
 
 ## 标准包发布

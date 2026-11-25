@@ -13,7 +13,10 @@ function customerBoundary(): Plugin {
       next();
     });
   }, load(id) {
-    if (/\/(?:admin|platform-admin)\/src\/(?:features\/(?:auth|copilot)|api\/|app\/(?:AppRouter|navigation)\.)/.test(id.replaceAll("\\", "/"))) {
+    const source = id.replaceAll("\\", "/").split("?")[0];
+    // 公共 Locale 共用这份纯词条；它不包含营运会话、请求或权限实现。
+    if (source.endsWith("/platform-admin/src/features/auth/messages.ts")) return;
+    if (/\/(?:admin|platform-admin)\/src\/(?:features\/(?:auth|copilot)|api\/|app\/(?:AppRouter|navigation)\.)/.test(source)) {
       throw new Error(`Enterprise UI imported an operator runtime: ${id}`);
     }
   } };
