@@ -16,6 +16,7 @@ import type { BusinessContext } from "./rental-business.service";
 import { capabilityRequirementRoots, resolveCapabilityRequirements } from "./category-capability-conditions";
 import { validateQuotedCapabilityRequirements } from "./category-capability-facts";
 import { readRentalCategoryCode, rentalDefaultWorkspaceName } from "./category-identity";
+import { normalizeBusinessOptionsForCategory, normalizeBusinessSettingsForCategory } from "./rental-business-settings";
 import { assertInspectionAllocationScope, exchangeBasis, exchangeInspectionTemplates, exchangePickupInspectionRequirements, projectExchangeInspectionTemplates } from "./rental-exchange-inspection";
 import type { RentalOrderInspectionBasisFacts } from "@rental-os/shared";
 import { projectAllocationPickupBasis, type RentalOrderAllocationPickupBasis } from "./rental-order-allocation-pickup.read";
@@ -299,61 +300,6 @@ function defaultBusinessSettings(
     },
     updatedAt: now(),
     updatedBy: "system"
-  };
-}
-
-/**
- * 把旧空间保存的经营设置收敛到当前品类定义。
- *
- * 品类定义会随着基础模型修正而缩小允许范围；如果读取时原样返回旧 JSON，管理端
- * 仍会显示已经不适用的计价/履约选项，而且报价上下文也可能继续使用它们。这里仅
- * 过滤运行设置，不改历史订单、报价或价格版本快照；运营下次保存时自然持久化新值。
- */
-function normalizeBusinessOptionsForCategory(
-  settings: RentalOpeningConfigurationFacts['settings'], definition: RentalCategoryDefinition
-) {
-  const supportedUnits = new Set(definition.businessModel.pricingUnits);
-  const configuredUnits = new Set((settings.pricing.enabledUnits ?? []).filter((unit) => supportedUnits.has(unit)));
-  const enabledUnits = definition.businessModel.pricingUnits.filter((unit) => configuredUnits.has(unit));
-  const safeUnits = enabledUnits.length ? enabledUnits : [definition.businessModel.defaultPricingUnit];
-  const defaultUnit = safeUnits.includes(settings.pricing.defaultUnit)
-    ? settings.pricing.defaultUnit
-    : definition.businessModel.defaultPricingUnit;
-
-  const supportedModes = new Set(definition.businessModel.fulfillmentModes);
-  const configuredModes = new Set((settings.fulfillment.enabledModes ?? []).filter((mode) => supportedModes.has(mode)));
-  const enabledModes = definition.businessModel.fulfillmentModes.filter((mode) => configuredModes.has(mode));
-  const safeModes = enabledModes.length ? enabledModes : [definition.businessModel.fulfillmentModes[0]];
-  return { enabledUnits: safeUnits, defaultUnit, enabledModes: safeModes };
-}
-
-function normalizeBusinessSettingsForCategory(settings: TenantRentalBusinessSettings, definition: RentalCategoryDefinition): TenantRentalBusinessSettings {
-  const { enabledUnits: safeUnits, defaultUnit, enabledModes: safeModes } = normalizeBusinessOptionsForCategory(settings, definition);
-  return {
-    ...settings,
-    pricing: {
-      ...settings.pricing,
-      enabledUnits: safeUnits,
-      defaultUnit,
-      holidayPricingEnabled: definition.businessModel.supportsHolidayPricing && settings.pricing.holidayPricingEnabled
-    },
-    fulfillment: {
-      ...settings.fulfillment,
-      enabledModes: safeModes,
-      // 兼容尚未带服务区域的旧 JSON 设置；只有管理员显式配置 allowlist 才限制报价。
-      deliveryServiceArea: settings.fulfillment.deliveryServiceArea?.mode === "allowlist"
-        ? {
-            mode: "allowlist",
-            areas: Array.isArray(settings.fulfillment.deliveryServiceArea.areas)
-              ? settings.fulfillment.deliveryServiceArea.areas
-              : []
-          }
-        : { mode: "all", areas: [] }
-    },
-    calendar: {
-      ...settings.calendar,
-      holidayPricingEnabled: definition.businessModel.supportsHolidayPricing && settings.calendar.holidayPricingEnabled
-    }
   };
 }
 

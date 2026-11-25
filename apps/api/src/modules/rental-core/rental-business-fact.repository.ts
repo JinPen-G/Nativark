@@ -22,6 +22,9 @@ import { resolveScopeWorkspaceId } from "./workspace-scope";
 import { requestFingerprint } from './rental-idempotency.repository';
 import { readRentalFulfillmentAdmission } from './rental-fulfillment-admission';
 import { RentalCoreConfigRepository } from './rental-core-config.repository';
+import { RentalBusinessConfigRepository } from './rental-business-config.repository';
+import { assertQuoteConfigurationBasis, type RentalQuoteConfigurationBasis } from './rental-quote-configuration';
+import { lockRentalBusinessTenant } from './rental-business-fence';
 import { assertRentalInventoryBasis } from './rental-quote-inventory-basis';
 import { requestRentalOrderVisibilityWhere } from './rental-core-fact.repository';
 
@@ -93,10 +96,11 @@ export interface RentalBusinessFactStore {
   releaseCouponForOrder(tenantId: string, orderId: string, releasedAt: string, tx: RentalBusinessFactTx): Promise<void>;
   expireClaimedCoupons(tenantId: string, expiredAt: string): Promise<number>;
   voidClaimedCoupon(tenantId: string, couponId: string, reason: string, voidedAt: string, tx: RentalBusinessFactTx): Promise<boolean>;
-  upsertQuote(quote: RentalQuoteSnapshotV1, expectedBinding?: { categoryVersionId: string; adoptionRevision: number }): Promise<void>;
+  upsertQuote(quote: RentalQuoteSnapshotV1, expectedBinding?: { categoryVersionId: string; adoptionRevision: number },
+    configurationBasis?: RentalQuoteConfigurationBasis): Promise<void>;
   saveQuoteForOriginalOperation?(quote: RentalQuoteSnapshotV1, original: RentalQuoteOriginalOperation,
     expectedBinding?: { categoryVersionId: string; adoptionRevision: number },
-    beforePersist?: (native: RentalBusinessFactTx) => Promise<void>): Promise<RentalQuoteSnapshotV1>;
+    beforePersist?: (native: RentalBusinessFactTx) => Promise<void>, configurationBasis?: RentalQuoteConfigurationBasis): Promise<RentalQuoteSnapshotV1>;
   findQuoteForOriginalOperation?(tenantId: string, original: RentalQuoteOriginalOperation): Promise<RentalQuoteSnapshotV1 | undefined>;
   findQuoteForOriginalReference?(tenantId: string, key: string): Promise<RentalQuoteSnapshotV1 | undefined>;
   /**
@@ -543,20 +547,24 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
     return result.count === 1;
   }
 
-  async upsertQuote(quote: RentalQuoteSnapshotV1, expectedBinding?: { categoryVersionId: string; adoptionRevision: number }): Promise<void> {
-    await this.persistQuote(structuredClone(quote), expectedBinding && { ...expectedBinding });
+  async upsertQuote(quote: RentalQuoteSnapshotV1, expectedBinding?: { categoryVersionId: string; adoptionRevision: number },
+    configurationBasis?: RentalQuoteConfigurationBasis): Promise<void> {
+    await this.persistQuote(structuredClone(quote), expectedBinding && { ...expectedBinding }, undefined, undefined,
+      configurationBasis && structuredClone(configurationBasis));
   }
 
   async saveQuoteForOriginalOperation(quote: RentalQuoteSnapshotV1, value: RentalQuoteOriginalOperation,
     expectedBinding?: { categoryVersionId: string; adoptionRevision: number },
-    beforePersist?: (native: RentalBusinessFactTx) => Promise<void>): Promise<RentalQuoteSnapshotV1> {
+    beforePersist?: (native: RentalBusinessFactTx) => Promise<void>, configurationBasis?: RentalQuoteConfigurationBasis): Promise<RentalQuoteSnapshotV1> {
     const snapshot = structuredClone(quote), original = quoteOriginalOperation(value);
     if (requestFingerprint(snapshot.request) !== original.inputHash) throw new ConflictException('报价原操作输入冲突');
-    return this.persistQuote(snapshot, expectedBinding && { ...expectedBinding }, original, beforePersist);
+    return this.persistQuote(snapshot, expectedBinding && { ...expectedBinding }, original, beforePersist,
+      configurationBasis && structuredClone(configurationBasis));
   }
 
   private async persistQuote(quote: RentalQuoteSnapshotV1, expectedBinding?: { categoryVersionId: string; adoptionRevision: number },
-    original?: RentalQuoteOriginalOperation, beforePersist?: (native: RentalBusinessFactTx) => Promise<void>): Promise<RentalQuoteSnapshotV1> {
+    original?: RentalQuoteOriginalOperation, beforePersist?: (native: RentalBusinessFactTx) => Promise<void>,
+    configurationBasis?: RentalQuoteConfigurationBasis): Promise<RentalQuoteSnapshotV1> {
     const data = {
       tenantId: quote.tenantId,
       quoteNo: quote.quoteNo,
@@ -697,6 +705,8 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
         await validateQuotedCapabilityRequirements(client, workspaceId, quote);
         await assertRentalInventoryBasis(new RentalCoreConfigRepository(this.prisma), quote.tenantId, workspaceId,
           quote.request.lines, quote.inventoryBasis, client);
+        await assertQuoteConfigurationBasis(client, quote.tenantId, workspaceId, quote, configurationBasis,
+          new RentalCoreConfigRepository(this.prisma), new RentalBusinessConfigRepository(this.prisma));
         // A server-owned originating host may have stricter current policy or
         // material deadlines. Close it after every Core preparation/lock wait,
         // in this original transaction, only for a genuinely new quote.
@@ -709,6 +719,8 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       return quote;
     };
     return this.prisma.$transaction(async (tx) => {
+      // 配置写入先取租户父锁，再取空间；复用相同次序，不能持空间锁反取父锁。
+      await lockRentalBusinessTenant(tx, quote.tenantId);
       // Serialize original-operation creation without applying today's enabled
       // flags to an already saved receipt; only the create branch admits work.
       await tx.$queryRaw(Prisma.sql`SELECT id FROM business_workspaces

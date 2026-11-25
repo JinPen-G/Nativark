@@ -136,7 +136,7 @@ export type RentalQuoteRateTarget = Pick<RentalPricingRate, 'itemGroupId' | 'pri
  */
 export interface RentalBusinessConfigStore {
   loadAll(): Promise<TenantBusinessConfigSnapshot[]>;
-  loadWorkspaceSnapshot?(tenantId: string, workspaceId: string, expected: CategoryWriteBinding): Promise<TenantBusinessConfigSnapshot>;
+  loadWorkspaceSnapshot?(tenantId: string, workspaceId: string, expected: CategoryWriteBinding, tx?: RentalConfigTx): Promise<TenantBusinessConfigSnapshot>;
   readQuoteRateTargets?(tenantId: string, workspaceId: string, at: Date): Promise<RentalQuoteRateTarget[]>;
   /** Opening metadata only; never loads rule config, calendar days or prices. */
   readReadinessBusinessFacts?(tenantId: string, workspaceId: string, at: Date, calendarYears: readonly number[], tx?: RentalConfigTx): Promise<RentalReadinessBusinessFacts>;
@@ -246,8 +246,8 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
 
   /** Current business configuration only. The expected Core binding prevents a
    * second read from joining a different adoption; empty sets remain empty. */
-  async loadWorkspaceSnapshot(tenantId: string, workspaceId: string, expected: CategoryWriteBinding): Promise<TenantBusinessConfigSnapshot> {
-    return this.prisma.$transaction(async tx => {
+  async loadWorkspaceSnapshot(tenantId: string, workspaceId: string, expected: CategoryWriteBinding, existingTx?: RentalConfigTx): Promise<TenantBusinessConfigSnapshot> {
+    const read = async (tx: RentalConfigTx): Promise<TenantBusinessConfigSnapshot> => {
       const { definition } = await lockActiveCategoryBinding(tx, tenantId, workspaceId, expected);
       const where = { tenantId, workspaceId };
       const [pricing, discounts, services, calendars, rules, templates] = await Promise.all([
@@ -260,7 +260,8 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
         services: services.map(row => this.toService(row)), calendars: calendars.map(row => this.toCalendar(row)),
         ruleVersions: rules.map(row => this.toRuleVersion(row)), notificationTemplates: templates.map(row => this.toNotificationTemplate(row)),
         hasPersistedConfig: true };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    };
+    return existingTx ? read(existingTx) : this.prisma.$transaction(read, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
   async readQuoteRateTargets(tenantId: string, workspaceId: string, at: Date): Promise<RentalQuoteRateTarget[]> {
