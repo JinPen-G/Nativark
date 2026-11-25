@@ -108,18 +108,7 @@ export function CapabilitiesSection() {
                     }
                     {
                       <p className="ds-text-body text-ds-description">
-                        {tCapability.rich(''.concat(e, '.description'), {
-                          cordis: (e) => (
-                            <a
-                              href="https://github.com/cordiverse/cordis"
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-ds-primary underline decoration-dashed underline-offset-4 hover:text-ds-brand"
-                            >
-                              {e}
-                            </a>
-                          ),
-                        })}
+                        {tCapability(''.concat(e, '.description'))}
                       </p>
                     }
                   </div>

@@ -94,57 +94,57 @@ export function BusinessPreview() {
     overview: {
       title: text('认识 Zelo', 'Meet Zelo'),
       question: text(
-        '我能怎样通过对话经营租赁业务？',
-        'How can I run my rental business through conversation?',
+        'Zelo 公共底座与业务 Core 如何协同运行？',
+        'How do the Zelo base and business Cores work together?',
       ),
       intro: text(
-        'Zelo 是 AI Native 的租赁业务平台。说出你的经营目标，AI 将理解业务上下文，协调不同任务，并通过 Rental Core 连接预约、库存、履约与结算。',
-        'Zelo is an AI Native rental platform. Describe your goal: AI understands the business context, coordinates work, and connects bookings, inventory, fulfillment and settlement through Rental Core.',
+        'Zelo 是面向 AI Native 应用的开源多租户 SaaS 底座。以下使用 Rental Core 示例数据，演示受控对话与管理后台在预约、库存、履约与结算中的协作方式。',
+        'Zelo is an open-source, multi-tenant SaaS foundation for AI-native apps. This preview uses sample Rental Core data to illustrate how governed conversation and the admin console coordinate bookings, inventory, fulfillment, and settlement.',
       ),
       lead: text(
-        '不同业务，可以交给不同的对话：',
-        'Keep different work in focused conversations:',
+        '底座提供统一身份与权限，选装 AI 后提供受控编排，业务 Core 承载各自领域流程：',
+        'The base provides auth and RBAC, with governed orchestration when AI is enabled. Each Core owns its domain workflows:',
       ),
       items: [
         [
           text('经营与协同', 'Operations'),
           text(
-            '查看经营动态、梳理待办，协调门店与团队。',
-            'Review activity, prioritize work and coordinate locations.',
+            '在统一租户与组织权限下查看经营动态、梳理待办，协同门店与团队。',
+            'Review activity, prioritize tasks, and coordinate teams within unified tenant RBAC.',
           ),
         ],
         [
           text('预约与库存', 'Bookings & inventory'),
           text(
-            '理解客户需求，查询可租资源，准备预约方案。',
-            'Understand requests, check availability and prepare booking plans.',
+            '解析客户需求，核验可租资源与计价依据，生成待确认预约方案。',
+            'Parse requests, verify availability and pricing rules, and prepare booking drafts.',
           ),
         ],
         [
           text('订单与履约', 'Orders & fulfillment'),
           text(
-            '串联交付、租用、归还与验收，跟进处理进度。',
-            'Coordinate handover, rental, return and inspection.',
+            '串联交付、租用、归还与验收流程，查看各环节的业务记录。',
+            'Coordinate handover, rental, return, and inspection, with records for each stage.',
           ),
         ],
         [
           text('财务与结算', 'Finance & settlement'),
           text(
-            '核对应收与押金，整理结算事项和业务依据。',
-            'Review receivables, deposits and supporting records.',
+            '基于正式账单与收据核对应收与押金，资金动作遵循当前权限与审批规则。',
+            'Reconcile receivables and deposits from authoritative records under current permissions and approval rules.',
           ),
         ],
         [
-          text('插件与自动化', 'Plugins & automation'),
+          text('Core 扩展与自动化', 'Core extensions & automation'),
           text(
-            '扩展业务能力，让重复工作按计划推进。',
-            'Extend capabilities and schedule recurring work.',
+            '按标准契约开发并接入 CRM、工单等业务 Core，选装 AI 后按配置推进周期任务。',
+            'Develop and connect CRM, ticketing, or other business Cores through standard contracts, with configured recurring tasks when AI is enabled.',
           ),
         ],
       ],
       more: text(
-        '对话驱动业务，也可随时切换业务后台。重要操作仍需权限与确认。',
-        'Conversation drives the work. Switch to the business console anytime; sensitive actions still require permission and confirmation.',
+        '底座零 Core 即可独立启动，AI 为可选能力层；对话与管理后台可随时切换，关键操作始终受权限与确认约束。',
+        'The base runs standalone with zero Cores and opt-in AI. Switch between chat and console anytime—sensitive actions always require permission and confirmation.',
       ),
     },
     booking: {
@@ -314,7 +314,7 @@ export function BusinessPreview() {
     },
   };
   const titles = {
-    plugins: text('插件', 'Plugins'),
+    plugins: text('Core 能力', 'Capabilities'),
     automation: text('自动化任务', 'Automation'),
     new: text('新对话', 'New conversation'),
   };
@@ -423,8 +423,8 @@ export function BusinessPreview() {
             'plugin',
             'Rental Core',
             text(
-              '按业务需要扩展租赁品类能力。',
-              'Extend category capabilities for your rental business.',
+              '官方业务包示例，涵盖多品类租赁流程。',
+              'Official business Core example covering multi-category rental workflows.',
             ),
           ],
         ]
@@ -468,8 +468,8 @@ export function BusinessPreview() {
         null,
         view === 'plugins'
           ? text(
-              '把业务能力连接到对话。AI 按你的目标调用能力，仍遵循原有权限与确认流程。',
-              'Connect business capabilities to conversation. AI coordinates them toward your goal, within existing permissions and confirmation flows.',
+              '通过标准契约将业务 Core 与平台能力接入工作区。AI 按租户权限调用能力，关键写操作遵循原有审批流程。',
+              'Attach business Cores and platform capabilities by contract. AI invokes them within tenant permissions and existing approval flows.',
             )
           : text(
               '把重复工作交给计划。AI 按时整理信息、准备处理建议，需要确认的业务动作留给你决定。',
@@ -661,7 +661,7 @@ export function BusinessPreview() {
           h(
             'p',
             null,
-            text('租赁业务 / ', 'Rental operations / '),
+            'Rental Core / ',
             businessTitle,
           ),
         ),
@@ -1446,8 +1446,8 @@ export function BusinessPreview() {
           className: css.placeholder,
         },
         text(
-          '说出经营目标，连接业务、协调任务、推进执行。',
-          'Describe your goal. Connect business, coordinate tasks, move work forward.',
+          '输入业务目标，按租户权限调用 Core 能力、协调任务与推进执行。',
+          'Describe a business goal to invoke Core capabilities, coordinate tasks, and move work forward.',
         ),
       ),
       h(
@@ -1485,13 +1485,13 @@ export function BusinessPreview() {
             h(
               'span',
               null,
-              'DeepSeek-V41-Flash ',
+              'Model Gateway ',
               h(
                 'span',
                 {
                   className: css.modelEffort,
                 },
-                'High',
+                'Auto',
               ),
             ),
             icon('down'),
@@ -1542,16 +1542,16 @@ export function BusinessPreview() {
                     'p',
                     null,
                     text(
-                      '今天，你想推进什么业务？',
-                      'What would you like to move forward today?',
+                      '今天，希望 Zelo 协助推进哪项业务？',
+                      'What would you like to move forward in Zelo today?',
                     ),
                   ),
                   h(
                     'p',
                     null,
                     text(
-                      '选择一个场景，查看 AI 如何理解目标、连接业务并准备下一步。',
-                      'Choose a scenario to see how AI understands a goal, connects records and prepares the next step.',
+                      '选择下方 Rental Core 演示场景，查看底座如何校验权限、调用业务能力并生成待确认方案。',
+                      'Choose a Rental Core scenario below to see how the base checks permissions, invokes Core tools, and prepares a reviewable plan.',
                     ),
                   ),
                   ...['booking', 'fulfillment', 'operations', 'finance'].map(
@@ -1586,8 +1586,8 @@ export function BusinessPreview() {
       className: css.viewport,
       role: 'region',
       'aria-label': text(
-        'Zelo AI Native 业务平台交互演示',
-        'Zelo AI Native business platform demo',
+        'Zelo 开源多租户 SaaS 底座交互演示',
+        'Zelo open-source multi-tenant SaaS foundation demo',
       ),
       'data-rentalos-preview': true,
     },
@@ -1634,11 +1634,11 @@ export function BusinessPreview() {
           {
             className: 'rentalos-preview-mode-tabs',
             role: 'tablist',
-            'aria-label': text('经营管理方式', 'Management mode'),
+            'aria-label': text('交互模式切换', 'Workspace mode'),
           },
           ...[
-            ['ai', text('AI 管理', 'AI mode')],
-            ['business', text('传统管理', 'Console')],
+            ['ai', text('AI 工作区', 'AI workspace')],
+            ['business', text('管理后台', 'Admin console')],
           ].map(([key, label]) =>
             button('', label, () => switchMode(key), {
               key,
@@ -1686,14 +1686,14 @@ export function BusinessPreview() {
                   'newChat',
                   css.newSession,
                 ),
-                nav('plugins', text('插件', 'Plugins'), 'plugin'),
+                nav('plugins', text('Core 能力', 'Capabilities'), 'plugin'),
                 nav('automation', text('自动化任务', 'Automation'), 'clock'),
                 h(
                   'div',
                   {
                     className: css.workspaceHeader,
                   },
-                  h('span', null, text('经营空间', 'Workspace')),
+                  h('span', null, text('租户空间', 'Workspace')),
                   h(
                     'div',
                     {
@@ -1708,7 +1708,7 @@ export function BusinessPreview() {
                     className: css.folderRow + ' ' + css.activeFolder,
                   },
                   icon('folderOpen'),
-                  h('span', null, text('租赁业务', 'Rental operations')),
+                  h('span', null, text('Rental Core 示例', 'Rental Core demo')),
                 ),
                 h(
                   'div',
@@ -1741,7 +1741,7 @@ export function BusinessPreview() {
                   {
                     className: css.workspaceHeader,
                   },
-                  h('span', null, text('业务菜单', 'Business menu')),
+                  h('span', null, text('Rental Core 菜单', 'Rental Core menu')),
                 ),
                 ...businessMenu.map(([key, name, label]) =>
                   button(
@@ -1781,7 +1781,7 @@ export function BusinessPreview() {
             },
             icon('user'),
           ),
-          h('span', null, text('经营者', 'Business owner')),
+          h('span', null, text('租户管理员', 'Tenant admin')),
         ),
       ),
       h(
