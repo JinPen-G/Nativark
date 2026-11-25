@@ -62,7 +62,7 @@ import { composeClientOriginalQuotePreparation } from './client-quote-preparatio
 import { BudgetError } from '../budget/budget.ports';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { withClientSelectedTaskCreation, withClientSelectedTransactions, withClientSelectedOriginalTask, withClientSelectedBookingMaterial,
-  type ClientSelectedTransactionDependencies } from './client-selected-transactions';
+  clientSelectedBookingSubmission, type ClientSelectedTransactionDependencies } from './client-selected-transactions';
 import { clientGoalCommandSchema, prepareClientGoalMaterial, validateClientGoalMaterial, revalidateClientGoalMaterial,
   type ClientGoalSources } from './client-goal-material';
 import { projectClientGoal, prepareClientGoalQuoteRequest, type ClientGoalHumanClarification } from './client-goal-projection';
@@ -1526,6 +1526,48 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         }, (locked, transaction) => assertBookingUse(bound, locked, transaction),
         tx => verifyBookingDraftTransaction(bound, expected, tx));
         if (attempt.replayed) return readSubmission(request, bound, acceptance);
+        let originalSource: AiClientSceneMaterial | undefined;
+        const submission = clientSelectedBookingSubmission(dependencies.db, {
+          tenantId: material.accepted.tenantId, workspaceId: material.accepted.workspaceId,
+          idempotencyKey: material.operationKey, requestFingerprint: material.accepted.requestHash,
+          request: material.accepted.request
+        }, async (tx, committing) => {
+          // Core 已写入后报价会被本事务消费；末次检查原持久来源及当前授权，
+          // 不把本次消费误判为“必须重新报价”，也不另造一次建单请求。
+          if (!committing) await verifyBookingDraftTransaction(bound, expected, tx);
+          const scope = bookingScope(bound);
+          const currentDraft = await bookingRepository.find(scope, expected.id, tx, true);
+          const currentAcceptance = await repository.findOperation(scope, row.operationKey, tx, true);
+          const currentAttempt = await repository.findOperation(scope, attemptKey, tx, true);
+          const source = await repository.findSource(scope, expected.materialRef, tx);
+          const handoff = await bookingRepository.handoff(scope, material.handoffRef, tx);
+          if (!currentDraft || jsonHash(currentDraft) !== jsonHash(attempt.row)
+            || !currentAcceptance || materialRecordHash(currentAcceptance) !== materialRecordHash(row)
+            || !currentAttempt || materialRecordHash(currentAttempt) !== materialRecordHash(attempt.attempt.row)
+            || !source || source.inputHash !== expected.inputHash || source.bindingHash !== expected.bindingHash
+            || !handoff || handoff.draftId !== expected.id || handoff.inputHash !== expected.inputHash
+            || handoff.selectionRevision !== expected.selectionRevision)
+            throw new AiClientEntryError('AI_REVISION_CONFLICT', 'booking_submission_source_changed');
+          if (committing && (!originalSource || materialRecordHash(source) !== materialRecordHash(originalSource)))
+            throw new AiClientEntryError('AI_REVISION_CONFLICT', 'booking_submission_material_changed');
+          originalSource = source;
+          await assertBookingUse(bound, currentDraft, tx);
+          let policyExpiresAt: Date | undefined;
+          if (!bound.originalBooking) {
+            const policy = new AiClientPolicyAuthority(taskDependencies!, taskDependencies!, randomUUID(), clock);
+            const locked = await policy.policy({ ...scope, identity: bound.identity! }, 'create', tx, true);
+            const grant = await entryGrant(bound, row);
+            policyExpiresAt = grant.expiresAt;
+            if (jsonHash(locked) !== jsonHash(grant.policy) || grant.policyFingerprint !== expected.policyHash
+              || grant.expiresAt <= clock()) throw new AiClientEntryError('AI_ACCESS_DENIED', 'booking_current_grant_changed');
+          }
+          if (await repository.findOperation(scope, 'entry-invalid:' + source.id, tx))
+            throw new AiClientEntryError('AI_PROPOSAL_STALE', 'action_invalidated', 'reprepare');
+          await bound.assertCurrent();
+          if (policyExpiresAt && policyExpiresAt <= clock()
+            || [currentDraft, currentAcceptance, currentAttempt, source, handoff].some(value => value.expiresAt <= clock()))
+            throw new AiClientEntryError('AI_PROPOSAL_STALE', 'booking_acceptance_expired');
+        });
         let called = false;
         try {
           await originalBookingCall(request, bound, body, true, async identity => {
@@ -1545,7 +1587,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
               }
               if (row.expiresAt <= clock()) throw new AiClientEntryError('AI_PROPOSAL_STALE', 'booking_acceptance_expired');
               called = true;
-            });
+            }, submission);
           });
         } catch (error) {
           if (!called) throw error;

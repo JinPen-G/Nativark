@@ -5,6 +5,7 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import { AI_TASK_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 import type { ClientAuthService } from '@rental-os/rental-core/mysql-client-auth';
 import type { ClientRequestContext } from '@rental-os/rental-core/client-context';
+import type { RentalOrderCreationBinding, RentalOrderCreationParticipant } from '@rental-os/rental-core/mysql-order-confirmation';
 import type { RentalCoreFactRepository } from '@rental-os/rental-core/mysql-core-facts';
 import { clientOwnsRentalOrder } from '@rental-os/rental-core/client-order-ownership';
 import { assertRentalBusinessTenantAccessAfterLock, hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
@@ -209,6 +210,36 @@ export async function withClientSelectedBookingTransaction<T>(db: AiClientMateri
       return result;
     } finally { scope.active = false; }
   });
+}
+
+/** 原预约页面唯一 attempt 的 Core 事务参加者。保持同一请求身份，
+ * 在 Core 首锁前取得客户租约，事务末尾重验原材料和期限；旧宿主沿原入口。 */
+export function clientSelectedBookingSubmission(db: AiClientMaterialDb, binding: RentalOrderCreationBinding,
+  verify: (tx: Prisma.TransactionClient, committing: boolean) => Promise<void>): RentalOrderCreationParticipant<Prisma.TransactionClient> | undefined {
+  if (!hasRentalBusinessTenantFence()) return undefined;
+  const owner = selected(db), expected = structuredClone(binding);
+  if (expected.tenantId !== owner.input.identity.tenantId || expected.workspaceId !== owner.input.identity.workspaceId
+    || expected.request.customerType !== 'personal' || expected.request.customerId !== owner.input.identity.customerId) throw denied();
+  let started = false;
+  return { async begin(tx, original) {
+    current(owner);
+    if (started || hash(original) !== hash(expected)) throw denied();
+    started = true;
+    const principal = await beginPrincipal(owner, tx);
+    await owner.input.revalidatePublication!(tx);
+    await verify(tx, false);
+    current(owner);
+    let finished = false;
+    return { async revalidate() {
+      if (finished) throw denied();
+      try {
+        await principal.revalidate();
+        await owner.input.revalidatePublication!(tx);
+        await verify(tx, true);
+        current(owner);
+      } finally { finished = true; }
+    } };
+  } };
 }
 
 /** Exact server-produced Booking material only. An external save is accepted

@@ -18,9 +18,11 @@ import { lockRentalBusinessTenant } from "./mysql-business-fence";
 import { assertCoreMerchantDelegationProof, assertMerchantDelegatedOrderAuthority, bindCoreMerchantDelegationProof,
   type MerchantDelegatedOrderAuthority } from "./merchant-delegation";
 import type { RentalOrderConfirmationTransaction, RentalOrderConfirmationStorage, RentalOrderSubjectResolver,
-  RentalOrderCustomerOperations, RentalOrderConfirmationMemberships, RentalOrderConfirmationEnterprisePolicies } from "./order-confirmation-ports";
+  RentalOrderCustomerOperations, RentalOrderConfirmationMemberships, RentalOrderConfirmationEnterprisePolicies,
+  RentalOrderCreationParticipant } from "./order-confirmation-ports";
 export type { RentalOrderConfirmationTransaction, RentalOrderConfirmationStorage, RentalOrderSubjectResolver,
-  RentalOrderCustomerOperations, RentalOrderConfirmationMemberships, RentalOrderConfirmationEnterprisePolicies } from "./order-confirmation-ports";
+  RentalOrderCustomerOperations, RentalOrderConfirmationMemberships, RentalOrderConfirmationEnterprisePolicies,
+  RentalOrderCreationBinding, RentalOrderCreationParticipant } from "./order-confirmation-ports";
 
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -120,8 +122,11 @@ export class RentalOrderConfirmationService<TTransaction extends RentalOrderConf
    * 返回值带 `replayed` 标记：调用方据此跳过下单通知等**外部副作用**。
    * 通知不在事务内，事务回滚撤不回已发出的短信，正确边界是「只在首次真正建单时发」。
    */
-  createOrder(tenantId: string, input: CreateRentalOrderRequest, userName: string, context: BusinessContext, idempotencyKey?: string) {
-    return this.create(tenantId, input, userName, context, idempotencyKey);
+  createOrder(tenantId: string, input: CreateRentalOrderRequest, userName: string, context: BusinessContext, idempotencyKey?: string,
+    submission?: RentalOrderCreationParticipant<TTransaction>) {
+    if (submission && typeof submission.begin !== "function") throw new BadRequestException("原建单事务权威未就绪");
+    const participant = submission ? { begin: submission.begin.bind(submission) } : undefined;
+    return this.create(tenantId, input, userName, context, idempotencyKey, undefined, undefined, participant);
   }
 
   normalizeOrderInput(input: CreateRentalOrderRequest): CreateRentalOrderRequest {
@@ -218,7 +223,8 @@ export class RentalOrderConfirmationService<TTransaction extends RentalOrderConf
     context: BusinessContext,
     idempotencyKey?: string,
     approval?: ApprovedOrderTransaction<TTransaction>,
-    merchantAuthority?: MerchantDelegatedOrderAuthority
+    merchantAuthority?: MerchantDelegatedOrderAuthority,
+    submission?: RentalOrderCreationParticipant<TTransaction>
   ) {
     // 未显式传键时退回 quoteId：报价一次性使用，天然是这次下单的唯一标识。
     input = this.normalizeOrderInput(input);
@@ -359,6 +365,11 @@ export class RentalOrderConfirmationService<TTransaction extends RentalOrderConf
 
     try {
       await this.prisma.$transaction(async (tx) => {
+        // 原客户会话需要 Tenant X。先进入来源参加者，不能在 Core 已持 Tenant S 后升级父锁。
+        const submissionLease = submission ? await submission.begin(tx, {
+          tenantId, workspaceId, idempotencyKey: key, requestFingerprint: fingerprint, request: structuredClone(input)
+        }) : undefined;
+        if (submission && typeof submissionLease?.revalidate !== "function") throw new ConflictException("原建单事务权威未就绪");
         if (quote.membershipSnapshot?.bookingIdentity === "enterprise_employee") {
           if (!this.enterprisePolicies) throw new ConflictException("企业政策事务服务未就绪");
           await this.enterprisePolicies.assertOrderCreation(tenantId, workspaceId, quote, tx, approvalBinding);
@@ -537,12 +548,14 @@ export class RentalOrderConfirmationService<TTransaction extends RentalOrderConf
           await approval.authorize(structuredClone(approvalBinding));
           await approval.commit(tx, structuredClone(approvalBinding), order.id);
         }
+        // 锁保护当前授权，提交前再核自然到期和原受理材料；失败回滚同一订单与原幂等收据。
+        await submissionLease?.revalidate();
       // Approved creation also revalidates immutable inputs and current rights
       // through its original participant before and after the business writes.
       // Keep that transaction finite without changing manual creation defaults;
       // a timeout still requires original-key reconciliation, never replay.
       }, { isolationLevel: "ReadCommitted",
-        ...(approval ? { maxWait: 2500, timeout: 30000 } : {}) });
+        ...(approval || submission ? { maxWait: 2500, timeout: 30000 } : {}) });
     } catch (error) {
       // 并发同键：先到者已提交，本次回滚后返回它的结果，而不是报错或重复建单。
       if (error instanceof IdempotentReplay) {

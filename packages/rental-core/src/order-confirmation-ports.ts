@@ -11,6 +11,21 @@ export type RentalOrderConfirmationStorage<TTransaction extends RentalOrderConfi
     options?: { isolationLevel: "ReadCommitted"; maxWait?: number; timeout?: number }): Promise<TResult>;
 };
 
+/** 服务器原建单来源的同事务权威。begin 在首个 Tenant 锁前进入，
+ * revalidate 在订单、报价和幂等收据全部写入后执行；不签发批准或另开事务。 */
+export interface RentalOrderCreationBinding {
+  tenantId: string;
+  workspaceId: string;
+  idempotencyKey: string;
+  requestFingerprint: string;
+  request: import("./contracts").CreateRentalOrderRequest;
+}
+export interface RentalOrderCreationParticipant<TTransaction> {
+  begin(transaction: TTransaction, binding: Readonly<RentalOrderCreationBinding>): Promise<{
+    revalidate(): Promise<void>;
+  }>;
+}
+
 export interface RentalOrderSubjectResolver<TTransaction> {
   lockOrderSubjectCustomers(tenantId: string, customerIds: readonly string[], transaction: TTransaction): Promise<void>;
   resolveOrderSubjects(tenantId: string, orderCustomerId: string, at: string,

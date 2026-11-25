@@ -97,6 +97,7 @@ import {
 import { parseRentalOfflinePaymentMethod } from "./mysql-offline-payment-method";
 import { type BusinessContext } from "./mysql-business-runtime";
 import { type ApprovedOrderTransaction as CoreApprovedOrderTransaction } from "./approved-order-transaction.ports";
+import type { RentalOrderCreationParticipant } from "./order-confirmation-ports";
 import { type ApprovedExtensionBinding } from "./approved-extension-ports";
 import { type ClientRequestContext } from "./client-context";
 import { validateInspectionCustomerResponse } from "./inspection-customer-response";
@@ -1505,7 +1506,8 @@ export class ClientApiService {
   }
 
   async createOrder(context: ClientRequestContext, input: ClientCreateOrderRequest, requestContext?: ClientOrderRequestContext,
-    beforeDispatch?: (prepared: Awaited<ReturnType<ClientApiService['prepareOrderSubmission']>>) => Promise<void>) {
+    beforeDispatch?: (prepared: Awaited<ReturnType<ClientApiService['prepareOrderSubmission']>>) => Promise<void>,
+    submission?: RentalOrderCreationParticipant<Prisma.TransactionClient>) {
     context = structuredClone(context);
     const { business, orderInput } = await this.prepareClientOrder(context, structuredClone(input));
     // Request-bound hosts may lose their independent use grant while the
@@ -1515,7 +1517,7 @@ export class ClientApiService {
       customerId: context.customerId, request: structuredClone(orderInput),
       requestHash: this.orders.fingerprintOrderRequest(orderInput), execution: 'not_submitted', inventory: 'not_reserved' });
     // 收货地址在报价阶段已由核心解析并固化进报价/订单快照；下单直接消费报价即可，无需再查客户端旁表。
-    const created = await this.orders.createOrder(context.tenantId, orderInput, `client:${context.customerId}`, business, idempotencyKeyOf(requestContext));
+    const created = await this.orders.createOrder(context.tenantId, orderInput, `client:${context.customerId}`, business, idempotencyKeyOf(requestContext), submission);
     const order = await this.assertClientOrder(context, created.order.id);
     await Promise.all([this.core.persist(context.tenantId), this.business.persist(context.tenantId)]);
     return { order: this.orderView(order, await this.addresses?.snapshotForOrder(context, order)), replayed: created.replayed };
