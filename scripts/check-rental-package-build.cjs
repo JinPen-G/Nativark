@@ -22,8 +22,52 @@ function createBuild(dependencyDirectory, settings = {}) {
   let generatedDirectories = new Set();
   const workspaceRoot = slash(root);
   const snapshot = settings.snapshot ?? (settings.commit && require('./rental-build-snapshot.cjs').readBuildSnapshot(settings.commit));
-  const sourceRead = file => snapshot && inside(workspaceRoot, slash(file))
-    ? snapshot.files.get(slash(file))?.toString('utf8') : ts.sys.readFile(file);
+  const lockFile = workspaceRoot + '/package-lock.json';
+  const lock = JSON.parse(snapshot ? snapshot.files.get(lockFile)?.toString('utf8') : ts.sys.readFile(lockFile));
+  const dependencyPackages = new Map(), dependencyDirectories = new Set([deps]);
+  for (const [name, metadata] of Object.entries(lock.packages || {})) {
+    if (!name.startsWith('node_modules/') || metadata.link || !metadata.version) continue;
+    const directory = deps + name.slice('node_modules'.length);
+    dependencyPackages.set(directory, metadata);
+    for (let current = directory; inside(deps, current); current = slash(path.dirname(current))) {
+      dependencyDirectories.add(current);
+      if (current === deps) break;
+    }
+  }
+  const samePath = (left, right) => process.platform === 'win32'
+    ? left.toLowerCase() === right.toLowerCase() : left === right;
+  const physicalPath = file => {
+    try { return samePath(slash(fs.realpathSync(file)), file); } catch { return false; }
+  };
+  const checkedDependencies = new Map();
+  // Only installed, lock-declared third-party packages may bypass the Git
+  // snapshot. Workspace links, generated Clients and links to other trees may not.
+  const dependencyPath = file => {
+    if (!inside(deps, file) || /(?:^|\/)\.prisma(?:\/|$)/u.test(file) || !physicalPath(file)) return false;
+    if (dependencyDirectories.has(file)) return true;
+    const relative = 'node_modules/' + file.slice(deps.length + 1);
+    const match = /^(.*(?:^|\/)node_modules\/(?:@[^/]+\/)?[^/]+)(?:\/|$)/u.exec(relative);
+    const directory = match && deps + match[1].slice('node_modules'.length);
+    const metadata = dependencyPackages.get(directory);
+    if (!metadata) return false;
+    if (!checkedDependencies.has(directory)) {
+      let valid = false;
+      try {
+        const manifest = directory + '/package.json';
+        valid = physicalPath(manifest) && JSON.parse(fs.readFileSync(manifest, 'utf8')).version === metadata.version;
+      } catch { /* A missing or changed installed dependency is not a source fallback. */ }
+      checkedDependencies.set(directory, valid);
+    }
+    return checkedDependencies.get(directory);
+  };
+  const dependencyFile = file => /\.(?:json|[cm]?[jt]sx?)$/u.test(file) && dependencyPath(file);
+  const fromSnapshot = file => snapshot && inside(workspaceRoot, file) && !inside(deps, file);
+  const sourceRead = file => {
+    file = slash(file);
+    if (inside(deps, file)) return dependencyFile(file) ? ts.sys.readFile(file) : undefined;
+    return fromSnapshot(file) ? snapshot.files.get(file)?.toString('utf8')
+      : inside(workspaceRoot, file) ? ts.sys.readFile(file) : undefined;
+  };
   const manifests = snapshot ? [...snapshot.files.keys()].filter(file => /\/(?:packages|apps)\/[^/]+\/package\.json$/u.test(file)) : [];
   if (!snapshot) for (const top of ['packages', 'apps']) {
     for (const entry of fs.readdirSync(path.join(root, top), { withFileTypes: true })) {
@@ -39,7 +83,7 @@ function createBuild(dependencyDirectory, settings = {}) {
     if (metadata.name) packages.set(metadata.name, { directory: slash(path.dirname(filename)), metadata });
   }
   // Never fall through to installed workspace links or an author's stale output.
-  const generated = file => inside(workspaceRoot, file)
+  const generated = file => inside(workspaceRoot, file) && !dependencyPath(file)
     && /\/(?:dist(?:-[^/]+)?|generated)\/|\.tsbuildinfo$/u.test(file);
   const mapped = file => {
     file = slash(file);
@@ -53,7 +97,8 @@ function createBuild(dependencyDirectory, settings = {}) {
     file = mapped(file);
     if (/(?:^|\/)\.prisma\/client(?:\/|$)/u.test(file)) return false;
     return outputs.has(file) || virtual.has(file) || (!generated(file)
-      && (snapshot && inside(workspaceRoot, file) ? snapshot.files.has(file) : ts.sys.fileExists(file)));
+      && (inside(deps, file) ? dependencyFile(file) : fromSnapshot(file)
+        ? snapshot.files.has(file) : inside(workspaceRoot, file) && ts.sys.fileExists(file)));
   };
   const readFile = file => {
     file = mapped(file);
@@ -64,18 +109,22 @@ function createBuild(dependencyDirectory, settings = {}) {
     file = mapped(file);
     if (file.endsWith('/node_modules/@rental-os')) return true;
     return generatedDirectories.has(file)
-      || (!generated(file + '/_') && (snapshot && inside(workspaceRoot, file)
-        ? snapshot.directories.has(file) : ts.sys.directoryExists(file)));
+      || (inside(deps, file) ? dependencyPath(file) && ts.sys.directoryExists(file)
+        : !generated(file + '/_') && (fromSnapshot(file)
+          ? snapshot.directories.has(file) : inside(workspaceRoot, file) && ts.sys.directoryExists(file)));
   };
-  const getDirectories = file => snapshot && inside(workspaceRoot, mapped(file))
-    ? [...(snapshot.entries(mapped(file)) || [])].filter(([, directory]) => directory).map(([name]) => name)
-    : ts.sys.getDirectories(mapped(file));
-  const readDirectory = (directory, extensions, excludes, includes, depth) => snapshot && inside(workspaceRoot, slash(directory))
+  const getDirectories = file => {
+    file = mapped(file);
+    return fromSnapshot(file)
+      ? [...(snapshot.entries(file) || [])].filter(([, directory]) => directory).map(([name]) => name)
+      : directoryExists(file) ? ts.sys.getDirectories(file).filter(name => directoryExists(path.resolve(file, name))) : [];
+  };
+  const readDirectory = (directory, extensions, excludes, includes, depth) => fromSnapshot(slash(directory))
     ? ts.matchFiles(directory, extensions, excludes, includes, ts.sys.useCaseSensitiveFileNames, root, depth,
       file => { const entries = [...(snapshot.entries(file) || [])]; return {
         files: entries.filter(([, dir]) => !dir).map(([name]) => name),
         directories: entries.filter(([, dir]) => dir).map(([name]) => name) }; }, file => slash(file))
-    : ts.sys.readDirectory(directory, extensions, excludes, includes, depth);
+    : directoryExists(directory) ? ts.sys.readDirectory(directory, extensions, excludes, includes, depth).filter(fileExists) : [];
   function exported(name, runtime = false) {
     const parts = name.split('/'), packageName = parts.slice(0, 2).join('/');
     const pkg = packages.get(packageName);
