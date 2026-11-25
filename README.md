@@ -17,6 +17,8 @@
 [![React](https://img.shields.io/badge/React-19-61DAFB.svg)](apps/platform-admin/README.md)
 [![Prisma](https://img.shields.io/badge/Prisma-5.22-2D3748.svg)](apps/platform-api/README.md)
 
+**简体中文** | [English](README.en.md)
+
 ---
 
 **Zelo** 是一个可独立运行的开源多租户 SaaS 底座。它把几乎所有企业级 SaaS 都要重复建设的底层能力——身份认证、多租户与组织权限、SaaS 订阅、公共管理后台、加密外部集成、受控 AI Native / MCP 引擎，以及标准化的 **Core 插件化接入与独立升级机制**——沉淀为纯净的公共平台。
@@ -31,7 +33,7 @@
 
 - **零 Core 独立运行与一键导出**：提供独立的 `platform-api` 与 `platform-admin`，开箱即用 41 个公共模型与 14 份基础迁移；运行 `npm run export:platform` 即可导出一份完全不含行业业务的纯净底座源码包。
 - **标准化 Core 契约与独立升级**：所有业务 Core 通过 `@rental-os/core-contracts` 声明清单、权限、页面、OpenAPI 与 SQL 迁移；SaaS 后台内置 **Core 包管理（`/platform/core-packages`）**，支持按 GitHub Topic（`nativark-core`）在线发现、校验 Release 摘要、生成固定部署锁，实现**底座与每个 Core 各自独立升级与安全回退**。
-- **完整的生产级多租户与公共后台**：内置 SaaS / 租户两级身份、组织与角色权限、成员邮箱邀请、安全基线、字典与编号、订阅期限、AES-GCM 凭据加密、邮件/短信/文件/支付基础服务，以及基于 React 19 + UIArc 的现代化公共管理外壳。
+- **多租户与公共后台**：内置 SaaS / 租户两级身份、组织与角色权限、成员邮箱邀请、安全基线、字典与编号、订阅期限、AES-GCM 凭据加密、邮件/短信/文件/支付基础服务，以及基于 React 19 + UIArc 的现代化公共管理外壳。
 - **按需选装、严格受控的 AI Native 与 MCP**：AI 是可选能力层（不装 AI 亦可完整运行普通业务）。启用后复用统一任务编排与恢复、Model Gateway、预算单账、知识库 ACL、人工审批与原操作收据核对，并支持标准 OAuth 保护的 MCP Server 与 Harness 客户端消费。
 - **为开发者与 AI 编程助手设计**：提供[五步快速接入手册](packages/core-contracts/README.md#五步快速接入)、可直接复制的 [Agent 任务模板](packages/core-contracts/README.md#交给开发agent的任务模板)、标准包静态校验器（`check.js`）以及统一能力索引 CLI（`capabilities.js`），一条命令即可查清底座已有的组件、页面、API 与公共导出。
 

@@ -12,7 +12,6 @@ import { ReturnReminderDemo } from "./source/components/demos/ReturnReminderDemo
 import { DeliverablesDemo } from "./source/components/demos/DeliverablesDemo.jsx";
 import { ScheduledOperationsDemo } from "./source/components/demos/ScheduledOperationsDemo.jsx";
 import { ExecutionTraceDemo } from "./source/components/demos/ExecutionTraceDemo.jsx";
-import { useTranslations } from "./locale";
 import { motionTokens } from "@/lib/motion-tokens";
 import "./showcase-source.css";
 import "./login-showcase.css";
@@ -25,6 +24,46 @@ const slides = [
   { key: "workflow", component: ScheduledOperationsDemo, width: 600, height: 480 },
   { key: "trace", component: ExecutionTraceDemo, width: 600, height: 400 },
 ] as const;
+
+type SlideKey = (typeof slides)[number]["key"];
+
+const SLIDE_CAPTIONS: Record<SlideKey, { title: [string, string]; description: [string, string] }> = {
+  agent: {
+    title: ["目标驱动的业务协同", "Goal-Driven Business Orchestration"],
+    description: [
+      "从需求解析、方案报价到预约确认，完整呈现受控业务流程。",
+      "Follow a governed workflow from request intake and pricing to confirmed booking.",
+    ],
+  },
+  plugins: {
+    title: ["按需装配业务能力", "Modular Capability Assembly"],
+    description: [
+      "在既定权限范围内启用平台开放能力，通过统一配置管理提醒与通知规则。",
+      "Enable platform capabilities within your assigned scope to configure reminders and notification policies.",
+    ],
+  },
+  deliverables: {
+    title: ["结构化业务成果交付", "Structured Operational Deliverables"],
+    description: [
+      "自动整理预约报价、交接清单与经营报表，支持在线审阅与持续修订。",
+      "Generate quotes, handover checklists, and operational reports for direct review and refinement.",
+    ],
+  },
+  workflow: {
+    title: ["规范化的周期任务编排", "Governed Scheduled Operations"],
+    description: [
+      "按计划自动执行经营简报、归还跟进与周期复盘，关键节点经人工确认后生效。",
+      "Run operational briefs, return follow-ups, and periodic reviews on schedule, with human confirmation at key checkpoints.",
+    ],
+  },
+  trace: {
+    title: ["全链路执行审计与追溯", "End-to-End Execution Auditability"],
+    description: [
+      "从需求解析、库存核验到预约提交，完整留存业务依据、操作轨迹与执行回执。",
+      "Inspect the business evidence, action history, and execution receipts behind every step from intake to submission.",
+    ],
+  },
+};
 // Reference: UIArc sign-in showcase, observed 2026-11-06. CSS completion owns
 // the 7-second advance so pause/resume preserves elapsed progress.
 const ROTATION_MS = 7000;
@@ -45,7 +84,6 @@ export function LoginShowcase({ title, description, footer, showTitle = true, sh
   const { locale } = useLocale();
   const en = locale === "en-US";
   const text = (zh: string, english: string) => en ? english : zh;
-  const labels = useTranslations("Harness.Capabilities");
   const reduced = usePrefersReducedMotion();
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
@@ -84,8 +122,9 @@ export function LoginShowcase({ title, description, footer, showTitle = true, sh
     setDirection(step);
     setIndex(current => (current + step + slides.length) % slides.length);
   };
-  const slideTitle = slide.key === "agent" ? text("说出目标，Agent 推进工作", "Describe your goal. Agent moves work forward.") : labels(`${slide.key}.title`);
-  const slideDescription = slide.key === "agent" ? text("从需求、报价到确认预约，看看一项工作如何完成。", "See a request become a quote and a booking ready for confirmation.") : labels(`${slide.key}.description`);
+  const slideCaption = SLIDE_CAPTIONS[slide.key];
+  const slideTitle = text(slideCaption.title[0], slideCaption.title[1]);
+  const slideDescription = text(slideCaption.description[0], slideCaption.description[1]);
 
   return <aside ref={root} className="login-showcase" aria-label={text(`${ADMIN_BRAND_NAME} 工作演示`, `${ADMIN_BRAND_NAME} in action`)}
     data-running={demoRunning} data-reduced-motion={reduced}
@@ -128,7 +167,7 @@ export function LoginShowcase({ title, description, footer, showTitle = true, sh
       {showHighlights && highlights?.some(item => item.title?.trim() || item.description?.trim()) && <dl className="login-showcase-highlights">
         {highlights.filter(item => item.title?.trim() || item.description?.trim()).map((item, position) => <div key={position}><dt>{item.title}</dt><dd>{item.description}</dd></div>)}
       </dl>}
-      <p className="login-showcase-note">{text("交互演示 · 示例数据", "Interactive demo · sample data")}{showFooter && footer?.trim() ? ` · ${footer.trim()}` : ""}</p>
+      <p className="login-showcase-note">{text("功能演示 · 示例数据（非真实业务记录）", "Product demonstration · Sample data (non-production)")}{showFooter && footer?.trim() ? ` · ${footer.trim()}` : ""}</p>
     </div>
   </aside>;
 }
