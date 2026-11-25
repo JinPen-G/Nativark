@@ -69,7 +69,7 @@ build/lint 使用[显式所选Client编译器](../../scripts/build-selected-pris
 
 旧组合 `apps/api` 的241模型具有原AI模型，可在明确设置 `RENTAL_PRISMA_LEGACY=1` 并指定本仓库原默认生成声明时构建兼容包；另核其schema与原源码一致。独立宿主拒绝该兼容模式。[所选编译回归](../../tests/selected-prisma-build.test.cjs)仅在测试进程内生成官方声明验证161/247/241边界，不是生产生成入口，也不替代真实磁盘构建或部署验收。
 
-独立镜像沿[Rental构建说明](../rental-core/README.md#使用与构建)的[宿主打包入口](../../scripts/package-rental-host.cjs)，显式选择 `--ai enabled` 并追加 `--ai-data-package <完整固定AI数据包绝对目录>`；同时提供原含AI的prepared目录、完整Rental包、公共40与所选247声明。打包消费已经构建的本包 `dist` 与宿主 `dist-ai/ai-main.js`，核完整AI数据包摘要及原58份迁移；缺包、错模式、缺实际运行出口或不同schema均拒绝。Linux镜像内按原锁生成两个专属Client，当前打包不安装、不执行Docker、不迁移，结果始终区分 `imageBuild=not-run` 与 `deployment=pending`。
+独立镜像沿[Rental构建说明](../rental-core/README.md#使用与构建)的[宿主打包入口](../../scripts/package-rental-host.cjs)，显式选择 `--ai enabled` 并追加 `--ai-data-package <完整固定AI数据包绝对目录>`；同时提供原含AI的prepared目录、完整Rental包、公共41与所选248声明。打包消费已经构建的本包 `dist` 与宿主 `dist-ai/ai-main.js`，核完整AI数据包摘要及原58份迁移；缺包、错模式、缺实际运行出口或不同schema均拒绝。Linux镜像内按原锁生成两个专属Client，当前打包不安装、不执行Docker、不迁移，结果始终区分 `imageBuild=not-run` 与 `deployment=pending`。
 
 旧 [出箱入口](../../apps/api/src/modules/ai-native/business-events/prisma-business-failure-outbox.ts)、[归还异常入口](../../apps/api/src/modules/ai-native/business-events/return-exception-source.ts)、[Task 仓储错误](../../apps/api/src/modules/ai-native/ai-task.repository.ts)和[保留策略](../../apps/api/src/modules/ai-native/privacy/retention-policy.ts)再导出同一对象，保留错误 `instanceof` 和出箱 Symbol 身份。
 

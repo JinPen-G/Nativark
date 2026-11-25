@@ -23,6 +23,9 @@ const routes = new Set([
   AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedBasePath,
   AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedWechatBasePath
 ].flatMap(base => [
+  AI_CLIENT_ENTRY_HTTP_DRAFT.prepareGoal,
+  AI_CLIENT_ENTRY_HTTP_DRAFT.readGoalPreparation,
+  AI_CLIENT_ENTRY_HTTP_DRAFT.readGoalCandidates,
   AI_CLIENT_ENTRY_HTTP_DRAFT.readHostCapabilities,
   AI_CLIENT_ENTRY_HTTP_DRAFT.readOrderTaskHostCapabilities,
   AI_CLIENT_ENTRY_HTTP_DRAFT.readOrderAction,

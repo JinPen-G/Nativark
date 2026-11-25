@@ -65,6 +65,10 @@ const declarations: readonly RentalHttpAccessDeclaration[] = [
   ...reviewed(AiConversationController, [conversations.modelControl], "transactional-write",
   "explicit same-task pure model control, original source/operation/parent Run and cumulative resource binding; owning registration and runner transactions hold Auth/Tenant/Core before Task CAS, original Gateway single accounting and unknown operation receipt remain"),
   ...[RentalWebsiteClientEntryController, RentalWechatClientEntryController].flatMap(controller => [
+    ...reviewed(controller, [controller.prototype.prepareGoal], "transactional-write",
+    "original explicit customer goal and frozen public sources; original ClientAuth/Tenant/Core, exact channel publication and source revalidation participate in the original material transaction, no Task/model/quote creation and unknown retains original operation"),
+    ...reviewed(controller, [controller.prototype.readGoalPreparation, controller.prototype.readGoalCandidates], "audited-read",
+    "original goal receipt or current source-bound candidate projection from the same customer Task/result and explicit clarifications; original selected request identity and nested current client validation retained, no candidate adoption or quote execution"),
     ...reviewed(controller, [controller.prototype.readHostCapabilities, controller.prototype.readOrderTaskHostCapabilities,
       controller.prototype.readOrderAction, controller.prototype.revalidateOrderAction, controller.prototype.readTaskSnapshot,
       controller.prototype.readTaskEvents, controller.prototype.readOrderExplanation, controller.prototype.readSource,
@@ -197,7 +201,7 @@ export function rentalAiDeploymentContinuationSelector(policy: ReturnType<typeof
         controller.prototype.requestTaskCancellation, controller.prototype.readTaskCancellationReceipt,
         controller.prototype.readTaskCancellationSettlementReceipt,
         controller.prototype.settleTaskUnstartedCancellation, controller.prototype.reconcileTaskInputCancellation,
-        controller.prototype.readOrderMaterialReceipt, controller.prototype.readTaskCreation,
+        controller.prototype.readOrderMaterialReceipt, controller.prototype.readGoalPreparation, controller.prototype.readTaskCreation,
         controller.prototype.readTaskInput, controller.prototype.readTaskInputReceipt,
         controller.prototype.readTaskModelResult, controller.prototype.recoverTaskModel,
         controller.prototype.reconcileTaskModel]] as [Function, readonly Function[]])
@@ -253,7 +257,7 @@ export function rentalAiOriginalReceiptSelector(policy: ReturnType<typeof create
     [AiOriginalOpeningModelExecutionController, [opening.readExecution]],
     [AiTaskCenterController, [center.stopReceipt, center.decisionReceipt, center.inputReceipt, center.result]],
     ...[RentalWebsiteClientEntryController, RentalWechatClientEntryController].map(controller => [controller,
-      [controller.prototype.readTaskCreation, controller.prototype.readTaskInputReceipt,
+      [controller.prototype.readGoalPreparation, controller.prototype.readTaskCreation, controller.prototype.readTaskInputReceipt,
         controller.prototype.readTaskModelResult, controller.prototype.readTaskCancellationReceipt,
         controller.prototype.readTaskCancellationSettlementReceipt]] as [Function, readonly Function[]])
   ]);

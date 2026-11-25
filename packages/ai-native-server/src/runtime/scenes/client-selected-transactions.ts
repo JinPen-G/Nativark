@@ -17,6 +17,7 @@ import { AiClientPolicyAuthority, type AiClientTaskDependencies } from './client
 import { originalClientMaterialScope, PrismaClientSceneMaterialRepository, type AiClientMaterialDb,
   type AiClientMaterialScope, type AiClientSceneMaterial } from './prisma-client-scene-material.repository';
 import { PrismaClientTaskInputRepository, type AiClientTaskInput } from './prisma-client-task-input.repository';
+import { revalidateClientGoalMaterial, validateClientGoalMaterial, type ClientGoalSources } from './client-goal-material';
 
 export interface ClientSelectedTransactionDependencies {
   clientAuth: Pick<ClientAuthService, 'lockCurrentSession'>;
@@ -34,6 +35,8 @@ interface ClientSelectedBinding {
   assertCurrent(): Promise<void>;
   /** The standard host compares the exact original publication using this tx. */
   revalidatePublication?(tx: Prisma.TransactionClient): Promise<void>;
+  /** Original guarded catalogue/help and current own booking identities. */
+  goalSources?(): Promise<ClientGoalSources>;
   clock(): Date;
 }
 type Scope = { active: boolean; input: ClientSelectedBinding; identity: NonNullable<ReturnType<typeof getRequestIdentity>>;
@@ -63,7 +66,13 @@ export async function withClientSelectedTransactions<T>(input: ClientSelectedBin
   const parent = scopes.getStore();
   if (parent) {
     current(parent);
-    if (parent.input.db !== input.db || parent.input.identity !== input.identity
+    // Nested original readers repeat ClientAuth and return an equivalent client
+    // projection. The owning ALS object remains exact; a copied or changed
+    // request store is still rejected by current(parent).
+    if (parent.input.db !== input.db || parent.clientHash !== hash(input.identity)
+      || parent.input.transactions !== input.transactions || parent.input.tasks !== input.tasks
+      || parent.input.channel !== input.channel || parent.input.appId !== input.appId
+      || parent.input.publicationHash !== input.publicationHash
       || parent.input.bindingHash !== input.bindingHash) throw denied();
     return consume();
   }
@@ -91,13 +100,22 @@ async function begin(scope: Scope, tx: Prisma.TransactionClient, material: AiCli
     || typeof input.revalidatePublication !== 'function') throw unavailable();
   if (!sameScope(material, materialScope) || material.bindingHash !== input.bindingHash
     || material.publicationHash !== input.publicationHash) throw denied();
-  // This first slice is the original own-order material. Other material kinds
-  // need their own original resource participant before a selected host mounts them.
   const command = material.command;
-  if (!command || typeof command !== 'object' || !('kind' in command) || command.kind !== 'order'
-    || !('orderId' in command) || typeof command.orderId !== 'string'
-    || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(command.orderId)) throw unavailable();
-  const orderId = command.orderId;
+  if (!command || typeof command !== 'object' || !('kind' in command)) throw unavailable();
+  let orderId: string | undefined;
+  if (command.kind === 'order') {
+    if (!('orderId' in command) || typeof command.orderId !== 'string'
+      || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(command.orderId)) throw unavailable();
+    orderId = command.orderId;
+  } else if (command.kind === 'client_goal') {
+    const goal = validateClientGoalMaterial(material);
+    if (goal.binding.tenantId !== materialScope.tenantId || goal.binding.workspaceId !== materialScope.workspaceId
+      || goal.binding.principalHash !== materialScope.principalHash || goal.binding.channel !== input.channel
+      || goal.binding.appId !== (input.appId ?? null) || goal.context.tenantCode !== input.identity.tenantCode
+      || goal.context.serviceCode !== input.identity.workspaceCode || goal.context.categoryCode !== input.identity.categoryCode)
+      throw denied();
+    if (purpose === 'new_work' && typeof input.goalSources !== 'function') throw unavailable();
+  } else throw unavailable();
   // No AI/current-data read precedes this original session's Tenant X lock.
   // Serializable reads are locking current reads, never a prior RR snapshot.
   const lease = await ports.clientAuth.lockCurrentSession(tx, input.identity);
@@ -110,12 +128,19 @@ async function begin(scope: Scope, tx: Prisma.TransactionClient, material: AiCli
   await principal();
   // 原恢复只核同一持久 Run/Step/Plan，不取得新步骤或派发能力；实际新工作才要求 accepting。
   await holdAiTaskDeploymentAdmission(tx, purpose === 'original_recovery' ? 'task_control' : 'new_work');
-  await ports.orders.lockOrder(material.tenantId, orderId, tx);
+  if (orderId) await ports.orders.lockOrder(material.tenantId, orderId, tx);
   const resource = async () => {
-    const order = await ports.orders.findOrder(material.tenantId, orderId, tx);
-    // The original repository resolves the current workspace from this same
-    // Guard store; its public Order does not expose a second workspace field.
-    if (!order || order.id !== orderId || !clientOwnsRentalOrder(input.identity, order)) throw denied();
+    if (orderId) {
+      const order = await ports.orders.findOrder(material.tenantId, orderId, tx);
+      // The original repository resolves the current workspace from this same
+      // Guard store; its public Order does not expose a second workspace field.
+      if (!order || order.id !== orderId || !clientOwnsRentalOrder(input.identity, order)) throw denied();
+    } else if (purpose === 'new_work') {
+      // Tenant X fences catalogue/configuration and membership writers. Read
+      // through the original client ports while held, and again before commit.
+      // Recovery retains the frozen goal even after public choices have changed.
+      revalidateClientGoalMaterial(material, await input.goalSources!());
+    }
     await input.revalidatePublication!(tx);
     current(scope);
   };

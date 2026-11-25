@@ -1,4 +1,4 @@
-/** Selected client order navigation, material, Task and original order-model HTTP. Each channel delegates to
+/** Selected client goal/order material, navigation, Task and original model HTTP. Each channel delegates to
  * the original controller and application, preserving schemas, refusal audit,
  * abort handling and unknown receipts. Other client actions are not inherited. */
 import { Body, Controller, Header, HttpCode, Inject, Post, Req } from "@nestjs/common";
@@ -13,6 +13,21 @@ abstract class RentalClientMaterialHttp {
 
   protected constructor(application: AiClientEntryApplication) {
     this.original = new AiClientEntryController(application);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.prepareGoal) @HttpCode(200) @Header("Cache-Control", "no-store")
+  prepareGoal(@Req() request: ClientEntryRequest & { body?: unknown }) {
+    return this.original.prepareGoal(request);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readGoalPreparation) @HttpCode(200) @Header("Cache-Control", "no-store")
+  readGoalPreparation(@Req() request: ClientEntryRequest & { body?: unknown }) {
+    return this.original.readGoalPreparation(request);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readGoalCandidates) @HttpCode(200) @Header("Cache-Control", "no-store")
+  readGoalCandidates(@Req() request: ClientEntryRequest & { body?: unknown }) {
+    return this.original.readGoalCandidates(request);
   }
 
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readHostCapabilities) @HttpCode(200) @Header("Cache-Control", "no-store")

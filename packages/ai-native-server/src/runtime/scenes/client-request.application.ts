@@ -221,7 +221,8 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         const result = identity ? await withClientSelectedTransactions({ db: dependencies.db, transactions: dependencies.transactions,
           tasks: taskDependencies ?? undefined, identity, channel: server.channel, appId: server.appId,
           bindingHash, publicationHash: requestFingerprint(before.value), assertCurrent,
-          revalidatePublication: dependencies.revalidateClientPublication, clock }, () => consume(bound)) : await consume(bound);
+          revalidatePublication: dependencies.revalidateClientPublication, goalSources: () => goalSources(bound), clock },
+          () => consume(bound)) : await consume(bound);
         await assertCurrent();
         return result;
       };
