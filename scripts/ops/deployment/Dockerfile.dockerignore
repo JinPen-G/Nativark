@@ -5,6 +5,10 @@
 **/node_modules
 **/dist
 **/dist-agent-desktop
+**/dist-clients
+**/dist-ai
+**/dist-mcp
+**/*.tsbuildinfo
 output
 clients
 worktree

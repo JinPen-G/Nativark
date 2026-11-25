@@ -29,7 +29,7 @@ jobs:
               "nativark-$service:$GITHUB_SHA")" = "$GITHUB_SHA"
           done
           docker run --rm --network none --entrypoint sh "nativark-api:$GITHUB_SHA" -ec \
-            'test -s dist/main.js && test -s prisma/schema.prisma && node -e "require(\"@prisma/client\")"'
+            'test -s dist/main.js && test -s prisma/schema.prisma && test ! -d /app/docs && test ! -d /app/output && node -e "require(\"@prisma/client\"); require(\"./dist/app.module.js\")"'
           docker run --rm --network none --entrypoint sh "nativark-web:$GITHUB_SHA" -ec \
             'test -s /usr/share/nginx/html/index.html && nginx -V >/dev/null 2>&1'
           python3 scripts/ops/deployment/hourly-update.py --self-test

@@ -135,6 +135,8 @@ Rental Core 是首个业务示范，提供商品、资产、库存、报价、�
 
 根构建按 shared → MCP server → API → admin 执行。网站、小程序和 Harness 插件使用各自构建入口。[静态网站](apps/website/README.md) · [Next.js 网站](apps/website-next/README.md) · [Harness 插件](clients/harness-plugin/README.md)
 
+原底座与 Rental 组合的 API / Web 镜像沿[正式 Dockerfile](scripts/ops/deployment/Dockerfile)构建，包含拆分后的工作区依赖。构建使用隔离生成的同一 Prisma Client，运行层只接收正式编译产物；[现有 CI](.github/workflows/nativark-release.yml)在无网络容器中核对 API 模块加载与 Web 文件。
+
 ## 本地运行
 
 只使用公共底座时，按[公共 API 初始化与构建](apps/platform-api/README.md)及[公共后台](apps/platform-admin/README.md)准备自己的数据库和配置；业务 Core 的源码、表和作业不作为公共登录的前置。接入新 Core 从[五步手册](packages/core-contracts/README.md#五步快速接入)开始。
