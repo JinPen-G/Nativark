@@ -1321,9 +1321,12 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     return tx ? write(tx) : this.prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
-  /** 套装组成是独立表，整组替换以免留下已被移除的组件行。 */
+  /** 普通资料连同组成一起保存；媒体入口只更新媒体，group.updatedAt 是其读取依据。 */
   async upsertItemGroup(group: RentalItemGroup, tx?: RentalConfigTx, uniqueAttributes?: RentalUniqueAttributeClaim[], expectedBinding?: CategoryWriteBinding, allowMediaWrite = false, deferOpeningCapture = false): Promise<void> {
     if (deferOpeningCapture && !tx) throw new ConflictException("复合型号保存必须保留原事务");
+    if (allowMediaWrite) {
+      return this.updateItemGroupMedia(structuredClone(group), tx, expectedBinding && { ...expectedBinding }, deferOpeningCapture);
+    }
     const data = {
       tenantId: group.tenantId,
       categoryCode: rentalCategoryStorageCode(group.categoryCode),
@@ -1381,6 +1384,46 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       }
       throw error;
     }
+  }
+
+  /** Uploads can wait for an external provider while adoption or another editor
+   * advances the row. Read under the original locks, reject stale media, and
+   * never replace business attributes, unique claims or bundle components. */
+  private async updateItemGroupMedia(group: RentalItemGroup, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding, deferOpeningCapture = false): Promise<void> {
+    const media = group.attributes.__itemGroupMedia;
+    const observedAt = new Date(group.updatedAt);
+    if (!media || typeof media !== "object" || Array.isArray(media) || !Array.isArray((media as { images?: unknown }).images)
+      || !Number.isFinite(observedAt.getTime())) throw new BadRequestException("产品型号图片或读取依据无效");
+    const write = async (client: RentalConfigTx) => {
+      const workspaceId = await resolveScopeWorkspaceId(client, group.tenantId);
+      await lockActiveCategoryBinding(client, group.tenantId, workspaceId, expectedBinding, group.categoryCode);
+      // Use a locking read as an outer transaction may already have an older
+      // REPEATABLE READ snapshot. Both the value and the CAS come from this row.
+      const rows = await client.$queryRaw<Array<{ attributes: Prisma.JsonValue; updatedAt: Date; categoryCode: string }>>(Prisma.sql`
+        SELECT attributes, updatedAt, categoryCode FROM rental_item_groups
+        WHERE id = ${group.id} AND tenantId = ${group.tenantId} AND workspaceId = ${workspaceId} FOR UPDATE
+      `);
+      const current = rows[0];
+      if (rows.length !== 1 || !current || readRentalCategoryCode(current.categoryCode) !== group.categoryCode
+        || !(current.updatedAt instanceof Date) || current.updatedAt.getTime() !== observedAt.getTime()) {
+        throw new ConflictException("产品型号资料已变化，请重新读取后再操作图片");
+      }
+      if (!current.attributes || typeof current.attributes !== "object" || Array.isArray(current.attributes)) {
+        throw new ConflictException("产品型号资料不可用，不能以图片保存覆盖");
+      }
+      const saved = await client.rentalItemGroup.updateMany({
+        where: { id: group.id, tenantId: group.tenantId, workspaceId, updatedAt: current.updatedAt },
+        data: {
+          attributes: { ...current.attributes, __itemGroupMedia: media } as Prisma.InputJsonValue,
+          // Keep two media writes in the same millisecond distinguishable.
+          updatedAt: new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1))
+        }
+      });
+      if (saved.count !== 1) throw new ConflictException("产品型号资料已变化，请重新读取后再操作图片");
+      if (!deferOpeningCapture) await this.captureOpening(client, group.tenantId, workspaceId, 'business_settings');
+    };
+    if (tx) return write(tx);
+    await this.prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
   /** Group/member writes share adoption's workspace lock. Recheck current units

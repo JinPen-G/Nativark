@@ -1556,8 +1556,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   }
 
   async addItemGroupImage(tenantId: string, itemGroupId: string, file: UploadedItemGroupImage) {
-    const state = this.state(tenantId);
-    const group = this.group(state, itemGroupId);
+    const { group, binding, cacheSource } = await this.itemGroupMediaContext(tenantId, itemGroupId);
     const mimeExtensions: Record<string, string> = {
       "image/jpeg": "jpg",
       "image/png": "png",
@@ -1581,7 +1580,6 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     };
     const workspaceId = getRequestWorkspaceId() ?? undefined;
     const useConfiguredProvider = this.fileStorage ? await this.fileStorage.hasEnabledProvider(tenantId) : false;
-    let absolutePath: string | undefined;
     if (useConfiguredProvider) {
       const owner: FileBusinessOwner = { businessType: "item_group", businessId: group.id, uploadScene: "item-group-image", workspaceId };
       const asset = await this.fileStorage!.uploadBuffer(tenantId, {
@@ -1600,30 +1598,19 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       if (process.env.NODE_ENV === "production") {
         throw new ServiceUnavailableException("生产环境必须先配置文件存储平台，不能使用本地图片存储");
       }
-      absolutePath = this.itemGroupImagePath(group, nextImage);
+      const absolutePath = this.itemGroupImagePath(group, nextImage);
       await mkdir(dirname(absolutePath), { recursive: true });
       await writeFile(absolutePath, file.buffer);
     }
     const next: StoredItemGroupImage[] = [...current, nextImage];
-    try {
-      await this.persistItemGroupImages(group, next);
-    } catch (error) {
-      if (absolutePath) await rm(absolutePath, { force: true });
-      if (nextImage.fileAssetId && this.fileStorage) {
-        await this.fileStorage.deleteFileAsset(tenantId, nextImage.fileAssetId, {
-          businessType: "item_group",
-          businessId: group.id,
-          uploadScene: "item-group-image",
-          workspaceId
-        }).catch(() => undefined);
-      }
-      throw error;
-    }
-    return this.publicItemGroup(group);
+    // A lost commit response does not prove rollback. Preserve the uploaded
+    // object for reconciliation instead of deleting a possibly committed image.
+    const saved = await this.persistItemGroupImages(group, next, binding, cacheSource);
+    return this.publicItemGroup(saved);
   }
 
   async removeItemGroupImage(tenantId: string, itemGroupId: string, imageId: string) {
-    const group = this.group(this.state(tenantId), itemGroupId);
+    const { group, binding, cacheSource } = await this.itemGroupMediaContext(tenantId, itemGroupId);
     const current = this.storedItemGroupImages(group);
     const target = current.find((image) => image.id === imageId);
     if (!target) throw new NotFoundException("产品型号图片不存在");
@@ -1631,7 +1618,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       throw new ServiceUnavailableException("生产环境不能操作本地图片，请先迁移到真实文件存储");
     }
     const remaining = current.filter((image) => image.id !== imageId).map((image, index) => ({ ...image, isCover: index === 0 }));
-    await this.persistItemGroupImages(group, remaining);
+    const saved = await this.persistItemGroupImages(group, remaining, binding, cacheSource);
     if (target.fileAssetId && this.fileStorage) {
       await this.fileStorage.deleteFileAsset(tenantId, target.fileAssetId, {
         businessType: "item_group",
@@ -1642,11 +1629,11 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     } else {
       await rm(this.itemGroupImagePath(group, target), { force: true });
     }
-    return this.publicItemGroup(group);
+    return this.publicItemGroup(saved);
   }
 
   async readItemGroupImage(tenantId: string, itemGroupId: string, imageId: string) {
-    const group = this.group(this.state(tenantId), itemGroupId);
+    const { group } = await this.itemGroupMediaContext(tenantId, itemGroupId);
     const image = this.storedItemGroupImages(group).find((item) => item.id === imageId);
     if (!image) throw new NotFoundException("产品型号图片不存在");
     if (process.env.NODE_ENV === "production" && (!this.fileStorage || !image.fileAssetId)) {
@@ -6466,11 +6453,28 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     };
   }
 
-  private async persistItemGroupImages(group: RentalItemGroup, images: StoredItemGroupImage[]) {
-    group.attributes = { ...group.attributes, [ITEM_GROUP_MEDIA_KEY]: { images } };
-    group.images = this.publicItemGroupImages(group, images);
-    group.updatedAt = now();
-    await this.configStore.upsertItemGroup(group, undefined, undefined, undefined, true);
+  private async itemGroupMediaContext(tenantId: string, itemGroupId: string) {
+    const current = await this.refreshCommittedWorkspace(tenantId);
+    const source = this.group(current ?? this.state(tenantId), itemGroupId);
+    return { group: structuredClone(source), binding: current?.binding, cacheSource: current ? undefined : source };
+  }
+
+  private async persistItemGroupImages(group: RentalItemGroup, images: StoredItemGroupImage[], binding?: CategoryWriteBinding, cacheSource?: RentalItemGroup) {
+    const candidate = structuredClone(group);
+    candidate.attributes = { ...candidate.attributes, [ITEM_GROUP_MEDIA_KEY]: { images: structuredClone(images) } };
+    candidate.images = this.publicItemGroupImages(candidate);
+    // Preserve the observed timestamp until the repository has checked it. No
+    // shared object changes before commit, including a save that loses its reply.
+    await this.configStore.upsertItemGroup(candidate, undefined, undefined, binding, true);
+    const current = await this.refreshCommittedWorkspace(group.tenantId);
+    if (current) return this.group(current, group.id);
+    // Explicit memory/absorbing stores have no authoritative reload. Publish
+    // only if their original object is still current; never restore an old row.
+    candidate.updatedAt = now();
+    const state = this.states.get(this.workspaceOf(group.tenantId));
+    const index = cacheSource && state ? state.itemGroups.indexOf(cacheSource) : -1;
+    if (state && index >= 0) state.itemGroups.splice(index, 1, candidate);
+    return candidate;
   }
 
   private itemGroupUploadRoot() {
