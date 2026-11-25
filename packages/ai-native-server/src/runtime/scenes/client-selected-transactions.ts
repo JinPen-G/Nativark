@@ -45,6 +45,10 @@ const scopes = new AsyncLocalStorage<Scope>();
 type QuoteMaterialScope = { active: boolean; owner: Scope; materialHash: string;
   verify(tx: Prisma.TransactionClient): Promise<void> };
 const quoteMaterials = new AsyncLocalStorage<QuoteMaterialScope>();
+type BookingTransactionScope = { active: boolean; owner: Scope; transaction: Prisma.TransactionClient };
+const bookingTransactions = new AsyncLocalStorage<BookingTransactionScope>();
+type BookingMaterialScope = QuoteMaterialScope & { transaction?: Prisma.TransactionClient };
+const bookingMaterials = new AsyncLocalStorage<BookingMaterialScope>();
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const hash = (value: unknown) => requestFingerprint(JSON.parse(JSON.stringify(value)));
@@ -188,11 +192,64 @@ export async function withClientSelectedQuoteMaterial<T>(db: AiClientMaterialDb,
   });
 }
 
+/** One original Booking transaction, before its Draft/source locks. The
+ * application binds its exact material, policy and handoff; only this active
+ * transaction can also save that page's acceptance or submission attempt. */
+export async function withClientSelectedBookingTransaction<T>(db: AiClientMaterialDb, tx: Prisma.TransactionClient,
+  verify: (() => Promise<void>) | undefined, consume: () => Promise<T>): Promise<T> {
+  if (!hasRentalBusinessTenantFence()) return consume();
+  if (!verify || bookingTransactions.getStore()) throw unavailable();
+  const owner = selected(db), principal = await beginPrincipal(owner, tx);
+  const scope: BookingTransactionScope = { active: true, owner, transaction: tx };
+  return bookingTransactions.run(scope, async () => {
+    try {
+      await owner.input.revalidatePublication!(tx); await verify();
+      const result = await consume();
+      await principal.revalidate(); await owner.input.revalidatePublication!(tx); await verify();
+      return result;
+    } finally { scope.active = false; }
+  });
+}
+
+/** Exact server-produced Booking material only. An external save is accepted
+ * solely inside the owning Draft transaction, never an arbitrary caller tx. */
+export async function withClientSelectedBookingMaterial<T>(db: AiClientMaterialDb, material: AiClientSceneMaterial,
+  verify: (tx: Prisma.TransactionClient) => Promise<void>, consume: () => Promise<T>, transaction?: Prisma.TransactionClient): Promise<T> {
+  if (!hasRentalBusinessTenantFence()) return consume();
+  const owner = selected(db), booking = bookingTransactions.getStore();
+  if (bookingMaterials.getStore() || quoteMaterials.getStore() || typeof verify !== 'function'
+    || !sameScope(material, owner.materialScope) || material.bindingHash !== owner.input.bindingHash
+    || material.publicationHash !== owner.input.publicationHash
+    || transaction && (!booking?.active || booking.owner !== owner || booking.transaction !== transaction)) throw denied();
+  const scope: BookingMaterialScope = { active: true, owner, materialHash: hash(material), verify, transaction };
+  return bookingMaterials.run(scope, async () => {
+    try { return await consume(); }
+    finally { scope.active = false; }
+  });
+}
+
 /** First line of the ORIGINAL material-save callback. External transactions
  * are not admitted here after another caller may already hold business locks. */
 export async function withClientSelectedMaterialTransaction<T>(db: AiClientMaterialDb, tx: Prisma.TransactionClient,
   material: AiClientSceneMaterial, consume: () => Promise<T>, external = false): Promise<T> {
   if (!hasRentalBusinessTenantFence()) return consume();
+  const booking = bookingMaterials.getStore();
+  if (booking) {
+    const owner = selected(db), parent = bookingTransactions.getStore();
+    if (!booking.active || booking.owner !== owner || booking.materialHash !== hash(material)
+      || external !== (booking.transaction !== undefined) || external && (booking.transaction !== tx
+        || !parent?.active || parent.owner !== owner || parent.transaction !== tx)) throw denied();
+    const principal = external ? null : await beginPrincipal(owner, tx);
+    const verify = async () => {
+      current(owner);
+      if (!booking.active || bookingMaterials.getStore() !== booking || booking.materialHash !== hash(material)) throw denied();
+      await owner.input.revalidatePublication!(tx); await booking.verify(tx); current(owner);
+    };
+    await verify();
+    const result = await consume();
+    await principal?.revalidate(); await verify();
+    return result;
+  }
   if (external) throw unavailable();
   const scope = selected(db), quote = quoteMaterials.getStore();
   if (quote) {

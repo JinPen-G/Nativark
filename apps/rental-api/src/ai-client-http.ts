@@ -1,4 +1,4 @@
-/** Selected client goal/quote/order material, navigation, Task and original model HTTP. Each channel delegates to
+/** Selected client goal/quote/Booking/order material, navigation, Task and original model HTTP. Each channel delegates to
  * the original controller and application, preserving schemas, refusal audit,
  * abort handling and unknown receipts. Other client actions are not inherited. */
 import { Body, Controller, Header, HttpCode, Inject, Post, Req } from "@nestjs/common";
@@ -58,6 +58,71 @@ abstract class RentalClientMaterialHttp {
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readPreparedQuoteOriginal) @HttpCode(200) @Header("Cache-Control", "no-store")
   readPreparedQuoteOriginal(@Req() request: ClientEntryRequest, @Body() body: unknown) {
     return this.original.readPreparedQuoteOriginal(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.prepareOriginalQuoteBooking) @HttpCode(200) @Header("Cache-Control", "no-store")
+  prepareOriginalQuoteBooking(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.prepareOriginalQuoteBooking(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readOriginalQuoteBookingOperation) @HttpCode(200) @Header("Cache-Control", "no-store")
+  readOriginalQuoteBookingOperation(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.readOriginalQuoteBookingOperation(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.issueAction) @HttpCode(200) @Header("Cache-Control", "no-store")
+  issueAction(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.issueAction(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.createBookingDraft) @HttpCode(200) @Header("Cache-Control", "no-store")
+  createBookingDraft(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.createBookingDraft(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.chooseBookingDraft) @HttpCode(200) @Header("Cache-Control", "no-store")
+  chooseBookingDraft(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.chooseBookingDraft(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingDraft) @HttpCode(200) @Header("Cache-Control", "no-store")
+  readBookingDraft(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.readBookingDraft(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.handoffBookingDraft) @HttpCode(200) @Header("Cache-Control", "no-store")
+  handoffBookingDraft(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.handoffBookingDraft(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingHandoff) @HttpCode(200) @Header("Cache-Control", "no-store")
+  readBookingHandoff(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.readBookingHandoff(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingOperation) @HttpCode(200) @Header("Cache-Control", "no-store")
+  readBookingOperation(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.readBookingOperation(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingAcceptance) @HttpCode(200) @Header("Cache-Control", "no-store")
+  readBookingAcceptance(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.readBookingAcceptance(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.acceptBookingSubmission) @HttpCode(200) @Header("Cache-Control", "no-store")
+  acceptBookingSubmission(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.acceptBookingSubmission(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.submitAcceptedBooking) @HttpCode(200) @Header("Cache-Control", "no-store")
+  submitAcceptedBooking(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.submitAcceptedBooking(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingSubmission) @HttpCode(200) @Header("Cache-Control", "no-store")
+  readBookingSubmission(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.readBookingSubmission(request, body);
   }
 
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readHostCapabilities) @HttpCode(200) @Header("Cache-Control", "no-store")

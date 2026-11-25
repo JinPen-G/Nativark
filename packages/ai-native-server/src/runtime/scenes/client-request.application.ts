@@ -15,6 +15,7 @@ import { ExecutionContextHost } from '@nestjs/core/helpers/execution-context-hos
 import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
 import { getRequestIdentity, runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
 import { hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
+import { captureRentalClientInternalAuthority } from '@rental-os/rental-core/application-internal-authority';
 import { composeAiClientScenes, createAiGuardedClientSession } from '../client-scene.composition';
 import type { ClientRequestContext } from '@rental-os/rental-core/client-context';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
@@ -53,14 +54,14 @@ type PersistedClientModelServerDependencies = Omit<Parameters<typeof composeClie
 import { AiClientTaskUnknownError, clientTaskCommandSchema, PrismaClientTaskInputRepository } from './prisma-client-task-input.repository';
 import { prepareClientOrderExplanation, readClientOrderExplanation } from './client-order-explanation';
 import { bookingSelectionSchema, readClientBookingMaterial } from './client-booking-material';
-import { PrismaClientBookingRepository } from './prisma-client-booking.repository';
+import { PrismaClientBookingRepository, type ClientBookingRow } from './prisma-client-booking.repository';
 import { composeClientBooking } from './client-booking.composition';
 import type { AiBookingMaterial } from '@rental-os/shared';
 import type { ClientApiService } from '@rental-os/rental-core/mysql-client-application';
 import { composeClientOriginalQuotePreparation } from './client-quote-preparation.composition';
 import { BudgetError } from '../budget/budget.ports';
 import type { Prisma, PrismaClient } from '@prisma/client';
-import { withClientSelectedTaskCreation, withClientSelectedTransactions, withClientSelectedOriginalTask,
+import { withClientSelectedTaskCreation, withClientSelectedTransactions, withClientSelectedOriginalTask, withClientSelectedBookingMaterial,
   type ClientSelectedTransactionDependencies } from './client-selected-transactions';
 import { clientGoalCommandSchema, prepareClientGoalMaterial, validateClientGoalMaterial, revalidateClientGoalMaterial,
   type ClientGoalSources } from './client-goal-material';
@@ -376,7 +377,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     }, randomUUID(), clock);
     const grant = await authority.authorize(row.id, operation);
     return { policyFingerprint: requestFingerprint({ policyHash: grant.policyHash ?? requestFingerprint(grant.policy),
-      release: server.entry }), expiresAt: grant.policy.expiresAt };
+      release: server.entry }), expiresAt: grant.policy.expiresAt, policy: grant.policy };
   };
   const verifyEntryMaterial = async (bound: Bound, row: AiClientSceneMaterial, operation: 'create' | 'read' = 'create') => {
     const key = `entry-invalid:${row.id}`, scope = scopeOf(bound);
@@ -395,9 +396,11 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       if (operation !== 'read' && (code === 'AI_PROPOSAL_STALE' || code === 'AI_ACCESS_DENIED' || code === 'AI_RESOURCE_UNAVAILABLE' || [401, 403, 404].includes(status)
         || (error instanceof Error && ['AI_CLIENT_MATERIAL_STALE', 'AI_CLIENT_CONTEXT_UNAVAILABLE'].includes(error.message)))) {
         const command = { kind: 'entry_invalid', materialRef: row.id }, material = { reason: 'current_basis_invalid' }, createdAt = clock();
-        await repository.save({ ...row, id: randomUUID(), operationKey: key, command, material,
+        const invalidation = { ...row, id: randomUUID(), operationKey: key, command, material,
           inputHash: requestFingerprint(command), materialHash: requestFingerprint(material), createdAt,
-          expiresAt: new Date(createdAt.getTime() + lifetimeMs) });
+          expiresAt: new Date(createdAt.getTime() + lifetimeMs) };
+        await withClientSelectedBookingMaterial(dependencies.db, invalidation,
+          async tx => { await verifyBookingBasis(bound, row, tx, true, true); }, () => repository.save(invalidation));
       }
       throw error;
     }
@@ -487,6 +490,68 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'booking_reads_not_assembled');
     }
   };
+  // These callbacks run only after selected ClientAuth/Tenant/Core locks. The
+  // original policy/material keys remain authoritative and are checked again
+  // after the Draft CAS or material INSERT in the SAME transaction.
+  const verifyBookingBasis = async (bound: Bound, row: AiClientSceneMaterial, tx: Prisma.TransactionClient,
+    stored: boolean, invalidating = false) => {
+    if (!bound.identity || !taskDependencies || bound.originalBooking)
+      throw new AiClientEntryError('AI_ACCESS_DENIED', 'booking_transaction_scope');
+    const scope = scopeOf(bound);
+    if (Object.entries(scope).some(([key, value]) => row[key as keyof AiClientSceneMaterial] !== value)
+      || row.bindingHash !== bound.bindingHash || row.publicationHash !== jsonHash(bound.published.value)
+      || row.publicationHash !== jsonHash(row.publication)) throw new AiClientEntryError('AI_ACCESS_DENIED', 'booking_transaction_source');
+    if (stored) {
+      const original = await repository.findOperation(scope, row.operationKey, tx, true);
+      if (!original || materialRecordHash(original) !== materialRecordHash(row))
+        throw new AiClientEntryError('AI_REVISION_CONFLICT', 'booking_material_changed');
+    }
+    const command = commandSchema.parse(row.command);
+    if (command.kind !== 'booking_quote' || row.inputHash !== requestFingerprint(command)
+      || row.materialHash !== materialHash(command, row.material)) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'booking_material_invalid');
+    const policy = new AiClientPolicyAuthority(taskDependencies, taskDependencies, randomUUID(), clock);
+    const locked = await policy.policy({ ...scope, identity: bound.identity }, invalidating ? 'read' : 'create', tx, true);
+    const grant = await entryGrant(bound, row, invalidating ? 'read' : 'create');
+    if (jsonHash(locked) !== jsonHash(grant.policy)) throw new AiClientEntryError('AI_ACCESS_DENIED', 'booking_policy_changed');
+    if (!invalidating) {
+      let current = await readMaterial(bound, command);
+      // Retain the original pre-unit-display material shape on legacy drafts.
+      const saved = row.material as AiBookingMaterial;
+      if (saved.quote && !('lines' in saved.quote) && current && typeof current === 'object' && 'quote' in current
+        && current.quote && typeof current.quote === 'object' && 'lines' in current.quote) {
+        const { lines: _display, ...quote } = current.quote;
+        current = { ...current, quote };
+      }
+      if (materialHash(command, current) !== row.materialHash || row.expiresAt <= clock())
+        throw new AiClientEntryError('AI_PROPOSAL_STALE', 'booking_material_changed', 'reprepare');
+      if (await repository.findOperation(scope, `entry-invalid:${row.id}`, tx))
+        throw new AiClientEntryError('AI_PROPOSAL_STALE', 'action_invalidated', 'reprepare');
+    }
+    await bound.assertCurrent();
+    if (jsonHash(await policy.policy({ ...scope, identity: bound.identity }, invalidating ? 'read' : 'create', tx, true)) !== jsonHash(locked))
+      throw new AiClientEntryError('AI_ACCESS_DENIED', 'booking_policy_changed');
+    return grant;
+  };
+  const verifyBookingDraftTransaction = async (bound: Bound, source: ClientBookingRow | AiClientSceneMaterial,
+    tx: Prisma.TransactionClient, invalidating = false, expectedPolicy?: string) => {
+    if (!('materialRef' in source)) {
+      const grant = await verifyBookingBasis(bound, source, tx, true, invalidating);
+      if (expectedPolicy && grant.policyFingerprint !== expectedPolicy)
+        throw new AiClientEntryError('AI_ACCESS_DENIED', 'booking_policy_changed');
+      return;
+    }
+    const row = await bookingRepository.find(bookingScope(bound), source.id, tx, true);
+    if (!row || row.materialRef !== source.materialRef || row.inputHash !== source.inputHash
+      || row.bindingHash !== source.bindingHash || row.policyHash !== source.policyHash)
+      throw new AiClientEntryError('AI_REVISION_CONFLICT', 'booking_draft_changed');
+    const material = await repository.findSource(bookingScope(bound), row.materialRef, tx);
+    if (!material || material.inputHash !== row.inputHash || material.bindingHash !== row.bindingHash)
+      throw new AiClientEntryError('AI_ACCESS_DENIED', 'booking_draft_material_changed');
+    const grant = await verifyBookingBasis(bound, material, tx, true, invalidating);
+    if (!invalidating && (grant.policyFingerprint !== row.policyHash || row.expiresAt <= clock()))
+      throw new AiClientEntryError('AI_PROPOSAL_STALE', 'booking_draft_policy_changed', 'reprepare');
+    await assertBookingUse(bound, row, tx);
+  };
   const loadBookingMaterial = async (bound: Bound, materialRef: string) => {
     requireBooking();
     if (bound.originalBooking) {
@@ -522,6 +587,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
   const booking = (bound: Bound) => composeClientBooking({ repository: bookingRepository, scope: bookingScope(bound),
     bindingHash: bookingBindingHash(bound), surface: requireEntry(), clock, assertCurrent: bound.assertCurrent,
     assertUse: row => assertBookingUse(bound, row),
+    authorizeTransaction: (tx, source, invalidating, expectedPolicy) => verifyBookingDraftTransaction(bound, source, tx, invalidating, expectedPolicy),
     loadMaterial: ref => loadBookingMaterial(bound, ref), loadHistoricalMaterial: ref => loadHistoricalBookingMaterial(bound, ref),
     withReceiptRead: async read => {
       if (!taskDependencies || !bound.identity) throw new AiClientEntryError('AI_ACCESS_DENIED', 'client_required');
@@ -644,7 +710,9 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     });
   };
   const originalBookingCall = async <T>(request: AiClientApplicationRequest, bound: Bound, body: { quoteId: string; contactPhone?: string },
-    write: boolean, consume: (identity: ClientRequestContext) => Promise<T>) => runWithRequestIdentity({}, async () => {
+    write: boolean, consume: (identity: ClientRequestContext) => Promise<T>) => {
+    const selected = captureRentalClientInternalAuthority();
+    return runWithRequestIdentity({}, async () => {
     const guarded: { method: string; url: string; originalUrl: string; headers: { authorization: unknown };
       body: unknown; query: unknown; ip?: string; client?: ClientRequestContext } = { method: write ? 'POST' : 'GET',
       url: write ? '/api/client/v1/orders' : '/api/client/v1/auth/me', originalUrl: write ? '/api/client/v1/orders' : '/api/client/v1/auth/me',
@@ -654,8 +722,30 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     const current = getRequestIdentity();
     if (!current || current.tenantId !== guarded.client.tenantId || current.workspaceId !== guarded.client.workspaceId
       || current.userId !== guarded.client.customerId || current.isSaasAdmin) throw new AiClientEntryError('AI_ACCESS_DENIED', 'booking_identity_scope_missing');
-    return consume(structuredClone(guarded.client));
-  });
+    return selected ? selected.runVerified(guarded.client, consume) : consume(structuredClone(guarded.client));
+    });
+  };
+  const saveBookingPageMaterial = (request: AiClientApplicationRequest, bound: Bound, row: AiClientSceneMaterial,
+    draft: ClientBookingRow, transaction: Prisma.TransactionClient, acceptanceRef?: string) => withClientSelectedBookingMaterial(dependencies.db, row, async tx => {
+    const material = row.material as Acceptance, command = parseEntry(submissionDraft, row.command);
+    const operationKey = `booking-order:${jsonHash({ scope: bookingScope(bound), handoffRef: command.handoffRef })}`;
+    if (material.version !== 'client-booking-acceptance-1' || material.operationKey !== operationKey
+      || row.operationKey !== (acceptanceRef ? `booking-attempt:${acceptanceRef}` : operationKey)
+      || material.handoffRef !== command.handoffRef || material.bookingDraftId !== draft.id
+      || material.inputFingerprint !== draft.inputHash || material.selectionRevision !== draft.selectionRevision
+      || row.inputHash !== jsonHash(command) || row.materialHash !== jsonHash(material) || row.expiresAt <= clock())
+      throw new AiClientEntryError('AI_ACCESS_DENIED', 'booking_page_material_changed');
+    await verifyBookingDraftTransaction(bound, draft, tx);
+    const handoff = await bookingRepository.handoff(bookingScope(bound), command.handoffRef, tx);
+    if (!handoff || handoff.draftId !== draft.id || handoff.inputHash !== draft.inputHash
+      || handoff.selectionRevision !== draft.selectionRevision || handoff.expiresAt <= clock())
+      throw new AiClientEntryError('AI_PROPOSAL_STALE', 'booking_handoff_changed');
+    const body = { quoteId: material.quoteId, ...(command.contactPhone !== undefined ? { contactPhone: command.contactPhone } : {}) };
+    await originalBookingCall(request, bound, body, true, async identity => {
+      if (jsonHash(await submissionPort().prepareOrderSubmission(identity, body)) !== jsonHash(material.accepted))
+        throw new AiClientEntryError('AI_REVISION_CONFLICT', 'booking_accepted_request_changed');
+    });
+  }, () => repository.save(row, transaction), transaction);
   const readSubmission = async (request: AiClientApplicationRequest, bound: Bound, acceptance: Awaited<ReturnType<typeof loadAcceptance>>) => {
     const { row, material, policyFingerprint } = freezeOriginalInput(structuredClone(acceptance));
     const result = await originalBookingCall(request, bound, { quoteId: material.quoteId }, false,
@@ -1369,20 +1459,22 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         const material: Acceptance = { version: 'client-booking-acceptance-1', handoffRef: command.handoffRef,
           bookingDraftId: handoff.bookingDraftId, selectionRevision: draft.selectionRevision,
           inputFingerprint: draft.inputFingerprint, quoteId: handoff.fields.quoteId, operationKey, accepted };
+        const expected = await bookingRepository.find(scope, handoff.bookingDraftId);
+        if (!expected) throw new AiClientEntryError('AI_ACCESS_DENIED', 'booking_draft_unavailable');
         const row = await bookingRepository.withDraftLock(scope, handoff.bookingDraftId, async (locked, transaction) => {
           await assertBookingUse(bound, locked, transaction);
           if (locked.state !== 'handed_to_booking_page' || locked.revision !== draft.revision || locked.inputHash !== draft.inputFingerprint)
             throw new AiClientEntryError('AI_REVISION_CONFLICT', 'booking_acceptance_draft_changed');
           const storedMaterial = bound.originalBooking
             ? await transferHost(bound).loadMaterial(bound.originalBooking, false, transaction) : null;
-          const saved = await repository.save({ id: randomUUID(), ...scope, bindingHash: bookingBindingHash(bound),
+          const saved = await saveBookingPageMaterial(request, bound, { id: randomUUID(), ...scope, bindingHash: bookingBindingHash(bound),
             publicationHash: bound.originalBooking?.publicationHash ?? jsonHash(bound.published.value),
             publication: storedMaterial?.row.publication ?? bound.published.value, operationKey,
             command, inputHash: jsonHash(command), material, materialHash: jsonHash(material), revision: 1,
-            createdAt: clock(), expiresAt: new Date(handoff.expiresAt) }, transaction);
+            createdAt: clock(), expiresAt: new Date(handoff.expiresAt) }, locked, transaction);
           if (bound.originalBooking) await transferHost(bound).repository.bindAcceptance(bound.originalBooking.receipt, saved.row.id, transaction);
           return saved;
-        });
+        }, tx => verifyBookingDraftTransaction(bound, expected, tx));
         await bound.assertCurrent();
         const saved = await loadAcceptance(bound, row.row.id);
         return acceptedView(saved.row, saved.material);
@@ -1430,8 +1522,9 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
             return { row: prior, replayed: true };
           }
           if (replayOnly) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'booking_submission_attempt_missing');
-          return repository.save({ ...row, id: randomUUID(), operationKey: attemptKey }, tx);
-        }, (locked, transaction) => assertBookingUse(bound, locked, transaction));
+          return saveBookingPageMaterial(request, bound, { ...row, id: randomUUID(), operationKey: attemptKey }, expected, tx, row.id);
+        }, (locked, transaction) => assertBookingUse(bound, locked, transaction),
+        tx => verifyBookingDraftTransaction(bound, expected, tx));
         if (attempt.replayed) return readSubmission(request, bound, acceptance);
         let called = false;
         try {
@@ -1815,7 +1908,10 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
             await bound.assertCurrent();
           }
           submitted = true;
-          const saved = await repository.save(draftRow);
+          const saved = input.command.kind === 'booking_quote'
+            ? await withClientSelectedBookingMaterial(dependencies.db, draftRow,
+              async tx => { await verifyBookingBasis(bound, draftRow, tx, false); }, () => repository.save(draftRow))
+            : await repository.save(draftRow);
           if (input.command.kind === 'booking_quote') await entryGrant(bound, saved.row);
           return { ...packet(saved.row, await verify(bound, saved.row)), replayed: saved.replayed };
         }, signal);

@@ -5,6 +5,9 @@ import { z } from 'zod';
 import { AI_BOOKING_DRAFT_STATES } from '@rental-os/shared';
 import { AiClientMaterialError, type AiClientMaterialDb, type AiClientMaterialScope, type AiClientSceneMaterial } from './prisma-client-scene-material.repository';
 import { AiClientEntryError, entryHash, entryId } from './client-entry-action';
+import { withClientSelectedBookingTransaction } from './client-selected-transactions';
+
+type BookingAuthority = (transaction: Prisma.TransactionClient) => Promise<void>;
 
 const scopeFields = { tenantId: entryId, workspaceId: entryId, channel: z.enum(['web', 'wechat_miniprogram']),
   principalKind: z.enum(['personal', 'corporate']), principalHash: entryHash };
@@ -72,10 +75,11 @@ export class PrismaClientBookingRepository {
         ${operation.resultRevision}, ${operation.handoffRef}, ${operation.createdAt})`);
     return operation;
   }
-  async create(material: AiClientSceneMaterial, policyHash: string, expiresAt: Date, operationKey: string, inputHash: string) {
+  async create(material: AiClientSceneMaterial, policyHash: string, expiresAt: Date, operationKey: string, inputHash: string, authorize?: BookingAuthority) {
     let attempted = false;
     try {
-      return await this.db.$transaction(async tx => {
+      return await this.db.$transaction(async tx => withClientSelectedBookingTransaction(this.db, tx,
+        authorize ? () => authorize(tx) : undefined, async () => {
         const prior = await this.operation(material, operationKey, tx);
         if (prior) {
           if (prior.inputHash !== inputHash || prior.kind !== 'create') throw conflict();
@@ -102,17 +106,18 @@ export class PrismaClientBookingRepository {
             ${row.materialRef}, ${row.inputHash}, ${row.bindingHash}, ${row.policyHash}, ${row.state}, ${row.revision},
             ${row.selectionRevision}, ${row.selectedAt}, ${row.createdAt}, ${row.updatedAt}, ${row.expiresAt}, ${row.invalidReason})`);
         return { row, operation: await this.record(tx, row, operationKey, inputHash, 'create', null), replayed: false };
-      }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+      }), { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     } catch (error) {
       if (attempted) throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'booking_commit_unacknowledged', 'read_booking_operation');
       if (error instanceof AiClientEntryError) throw error;
       throw unavailable();
     }
   }
-  async transition(expected: ClientBookingRow, kind: 'select' | 'handoff' | 'abandon', operationKey: string, inputHash: string) {
+  async transition(expected: ClientBookingRow, kind: 'select' | 'handoff' | 'abandon', operationKey: string, inputHash: string, authorize?: BookingAuthority) {
     let attempted = false;
     try {
-      return await this.db.$transaction(async tx => {
+      return await this.db.$transaction(async tx => withClientSelectedBookingTransaction(this.db, tx,
+        authorize ? () => authorize(tx) : undefined, async () => {
         const row = await this.find(expected, expected.id, tx, true);
         if (!row) throw conflict();
         const prior = await this.operation(row, operationKey, tx);
@@ -144,7 +149,7 @@ export class PrismaClientBookingRepository {
               ${row.id}, ${row.inputHash}, ${selectionRevision}, ${now}, ${expiresAt})`);
         }
         return { row: updated, operation: await this.record(tx, updated, operationKey, inputHash, kind, handoffRef), replayed: false };
-      }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+      }), { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     } catch (error) {
       if (attempted) throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'booking_commit_unacknowledged', 'read_booking_operation');
       if (error instanceof AiClientEntryError) throw error;
@@ -155,10 +160,11 @@ export class PrismaClientBookingRepository {
    * together. A lost commit reply never permits Core dispatch or a new key. */
   async acceptSubmission(expected: ClientBookingRow, handoffRef: string,
     persistAttempt: (tx: Prisma.TransactionClient, replayOnly: boolean) => Promise<{ row: AiClientSceneMaterial; replayed: boolean }>,
-    authorize?: (row: ClientBookingRow, tx: Prisma.TransactionClient) => Promise<void>) {
+    authorize?: (row: ClientBookingRow, tx: Prisma.TransactionClient) => Promise<void>, current?: BookingAuthority) {
     let attempted = false;
     try {
-      return await this.db.$transaction(async tx => {
+      return await this.db.$transaction(async tx => withClientSelectedBookingTransaction(this.db, tx,
+        current ? () => current(tx) : undefined, async () => {
         const row = await this.find(expected, expected.id, tx, true);
         if (!row || row.inputHash !== expected.inputHash || row.bindingHash !== expected.bindingHash
           || row.policyHash !== expected.policyHash || row.selectionRevision !== 1 || !row.selectedAt) throw conflict();
@@ -185,7 +191,7 @@ export class PrismaClientBookingRepository {
         if (count !== 1) throw conflict();
         return { row: draftSchema.parse({ ...row, state: 'submitted', revision: row.revision + 1, updatedAt: now }),
           attempt, replayed: false };
-      }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+      }), { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     } catch (error) {
       if (attempted || error instanceof AiClientMaterialError && error.code === 'AI_CLIENT_RESULT_UNKNOWN')
         throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'booking_submission_acceptance_unacknowledged', 'read_original_submission');
@@ -196,27 +202,31 @@ export class PrismaClientBookingRepository {
   /** Share the original Draft lock with acceptance/transfer metadata writes.
    * The caller still owns current Auth, material and idempotency validation. */
   async withDraftLock<T>(scope: AiClientMaterialScope, draftId: string,
-    consume: (row: ClientBookingRow, transaction: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+    consume: (row: ClientBookingRow, transaction: Prisma.TransactionClient) => Promise<T>, authorize?: BookingAuthority): Promise<T> {
     let returned = false;
     try {
-      return await this.db.$transaction(async tx => {
+      return await this.db.$transaction(async tx => withClientSelectedBookingTransaction(this.db, tx,
+        authorize ? () => authorize(tx) : undefined, async () => {
         const row = await this.find(scope, draftId, tx, true);
         if (!row) throw unavailable();
         const result = await consume(row, tx);
         returned = true;
         return result;
-      }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+      }), { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     } catch (error) {
       if (returned) throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'booking_acceptance_commit_unacknowledged', 'read_booking_operation');
       if (error instanceof AiClientEntryError || error instanceof AiClientMaterialError) throw error;
       throw unavailable();
     }
   }
-  async invalidate(row: ClientBookingRow, state: 'stale' | 'expired', reason: string) {
+  async invalidate(row: ClientBookingRow, state: 'stale' | 'expired', reason: string, authorize?: BookingAuthority) {
     if (!active.includes(row.state)) return;
-    await this.db.$executeRaw(prismaRuntime.sql`UPDATE ai_client_booking_drafts SET state = ${state}, revision = ${row.revision + 1},
+    const invalidate = (tx: Prisma.TransactionClient) => tx.$executeRaw(prismaRuntime.sql`UPDATE ai_client_booking_drafts SET state = ${state}, revision = ${row.revision + 1},
       invalidReason = ${reason}, updatedAt = ${this.clock()} WHERE tenantId = ${row.tenantId} AND workspaceId = ${row.workspaceId}
       AND channel = ${row.channel} AND principalHash = ${row.principalHash} AND id = ${row.id} AND revision = ${row.revision}
       AND state = ${row.state}`);
+    await this.db.$transaction(tx => withClientSelectedBookingTransaction(this.db, tx,
+      authorize ? () => authorize(tx) : undefined, () => invalidate(tx)),
+    { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
   }
 }

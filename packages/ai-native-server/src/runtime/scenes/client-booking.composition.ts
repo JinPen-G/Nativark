@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { Prisma } from '@prisma/client';
 import { AI_BOOKING_DRAFT_CONTRACT_VERSION, AI_BOOKING_OPERATION_OBSERVATION_VERSION,
   type AiBookingDraft, type AiBookingHandoff, type AiBookingMaterial, type AiBookingOperationObservationDraft } from '@rental-os/shared';
 import type { AiCustomerEntrySurface, AiEntryActionDraft } from '@rental-os/shared';
@@ -23,9 +24,14 @@ export function composeClientBooking(input: {
   assertCurrent(): Promise<void>; clock(): Date;
   /** Current source/target continuation interlock, never receipt authority. */
   assertUse?(row: ClientBookingRow): Promise<void>;
+  /** Same current source and independent policy inside the original Draft tx. */
+  authorizeTransaction?(tx: Prisma.TransactionClient, source: AiClientSceneMaterial | ClientBookingRow,
+    invalidating?: boolean, expectedPolicy?: string): Promise<void>;
   withReceiptRead<T>(read: () => Promise<T>): Promise<T>;
 }) {
   const repo = input.repository;
+  const authority = (source: AiClientSceneMaterial | ClientBookingRow, invalidating = false) => input.authorizeTransaction
+    ? (tx: Prisma.TransactionClient) => input.authorizeTransaction!(tx, source, invalidating) : undefined;
   const load = async (id: string) => {
     const row = await repo.find(input.scope, id);
     if (!row || row.bindingHash !== input.bindingHash) throw new AiClientEntryError('AI_ACCESS_DENIED', 'draft_unavailable');
@@ -35,7 +41,7 @@ export function composeClientBooking(input: {
     if (input.assertUse) await input.assertUse(row);
     if (!active.includes(row.state)) throw new AiClientEntryError('AI_PROPOSAL_STALE', `draft_${row.state}`, 'reprepare');
     if (row.expiresAt <= input.clock()) {
-      await repo.invalidate(row, 'expired', 'lifetime_elapsed');
+      await repo.invalidate(row, 'expired', 'lifetime_elapsed', authority(row, true));
       throw new AiClientEntryError('AI_PROPOSAL_STALE', 'draft_expired', 'reprepare');
     }
     try {
@@ -53,7 +59,7 @@ export function composeClientBooking(input: {
       const status = error instanceof Error && 'getStatus' in error && typeof error.getStatus === 'function' ? error.getStatus() : null;
       if (code === 'AI_PROPOSAL_STALE' || code === 'AI_ACCESS_DENIED' || code === 'AI_RESOURCE_UNAVAILABLE' || [401, 403, 404].includes(status)
         || (error instanceof Error && ['AI_CLIENT_MATERIAL_STALE', 'AI_CLIENT_CONTEXT_UNAVAILABLE'].includes(error.message))) {
-        await repo.invalidate(row, 'stale', 'current_basis_invalid');
+        await repo.invalidate(row, 'stale', 'current_basis_invalid', authority(row, true));
       }
       throw error;
     }
@@ -132,7 +138,10 @@ export function composeClientBooking(input: {
         material.material.selection.quoteId, 'CREATE_BOOKING_DRAFT');
       assertEntryAction(action, expected, input.clock());
       const result = await repo.create(material.row, material.policyFingerprint, new Date(expected.expiresAt), operationKey,
-        requestFingerprint({ kind: 'create', action }));
+        requestFingerprint({ kind: 'create', action }), input.authorizeTransaction ? async tx => {
+          await input.authorizeTransaction!(tx, material.row, false, material.policyFingerprint);
+          if (Date.parse(expected.expiresAt) <= input.clock().getTime()) throw new AiClientEntryError('AI_PROPOSAL_STALE', 'action_expired');
+        } : undefined);
       try { return { draft: view(await verified(result.row)), operation: result.operation.operationKey, replayed: result.replayed }; }
       catch { throw unknown(); }
     },
@@ -167,7 +176,7 @@ export function composeClientBooking(input: {
       }
       await verified(row);
       if (row.revision !== command.expectedRevision) throw new AiClientEntryError('AI_REVISION_CONFLICT', 'selection_revision_changed');
-      const result = await repo.transition(row, command.decision === 'continue_booking' ? 'select' : 'abandon', command.operationKey, operationHash);
+      const result = await repo.transition(row, command.decision === 'continue_booking' ? 'select' : 'abandon', command.operationKey, operationHash, authority(row));
       try {
         await input.assertCurrent();
         if (result.row.state === 'abandoned') return { bookingDraftId: row.id, state: result.row.state, revision: result.row.revision, replayed: result.replayed };
@@ -187,7 +196,7 @@ export function composeClientBooking(input: {
       const valueAtRead = await verified(await load(action.associations.bookingDraftId)), expected = openAction(valueAtRead);
       if (!expected) throw new AiClientEntryError('AI_PROPOSAL_STALE', 'selection_required');
       assertEntryAction(action, expected, input.clock());
-      const result = await repo.transition(valueAtRead.row, 'handoff', operationKey, requestFingerprint({ kind: 'handoff', action }));
+      const result = await repo.transition(valueAtRead.row, 'handoff', operationKey, requestFingerprint({ kind: 'handoff', action }), authority(valueAtRead.row));
       try {
         if (!result.operation.handoffRef) throw unknown();
         return { handoff: await readHandoff(result.operation.handoffRef), replayed: result.replayed };

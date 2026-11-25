@@ -43,6 +43,8 @@ Core 停用后的已有回答及模型结果核对，由宿主 [只读处理器�
 
 客户明确选择目标候选后，经[原报价准备](src/runtime/scenes/client-quote-preparation.composition.ts)保存参数，再独立确认同一材料哈希。[原报价适配](src/runtime/client-quote-original.composition.ts)在每次 Guard 复验后回到所选宿主的原请求身份，使用原 ClientApi/Core 报价与原操作收据。确认尝试只有首次保存成功且收到回执后才允许派发一次；丢失应答或重复确认沿原引用核对。参数准备、报价保存与 Booking/订单提交分别办理，停新后的精确读取不授予新的准备或确认。
 
+客户 Booking 使用[原草稿仓储](src/runtime/scenes/prisma-client-booking.repository.ts)保存创建、明确选择、转接及提交状态。同一原 Serializable 事务在 Draft 或材料写入前核 ClientAuth/Tenant/Core，在写入后复核原材料、政策、发布及期限。页面受理和提交尝试通过[限定事务参加者](src/runtime/scenes/client-selected-transactions.ts)保存，外部材料写入仅接受当前 Draft 所属事务。原 Guard 复验后恢复同一请求身份调用 ClientApi/Core；只有首次尝试提交得到回执才派发订单，重复或失回复只核原收据，submitted 仅表示页面请求已受理。原收据使用独立读取政策，过期和停新后的读取保留本人及渠道隔离。
+
 Rental 的通知缓存和草稿仓储通过 `@rental-os/rental-core/notification-draft` 消费以下组合：
 
 ```ts

@@ -65,6 +65,14 @@ const declarations: readonly RentalHttpAccessDeclaration[] = [
   ...reviewed(AiConversationController, [conversations.modelControl], "transactional-write",
   "explicit same-task pure model control, original source/operation/parent Run and cumulative resource binding; owning registration and runner transactions hold Auth/Tenant/Core before Task CAS, original Gateway single accounting and unknown operation receipt remain"),
   ...[RentalWebsiteClientEntryController, RentalWechatClientEntryController].flatMap(controller => [
+    ...reviewed(controller, [controller.prototype.prepareOriginalQuoteBooking, controller.prototype.issueAction,
+      controller.prototype.createBookingDraft, controller.prototype.chooseBookingDraft, controller.prototype.handoffBookingDraft,
+      controller.prototype.readBookingDraft, controller.prototype.readBookingHandoff,
+      controller.prototype.acceptBookingSubmission, controller.prototype.submitAcceptedBooking], "transactional-write",
+    "original quote and explicit Booking selection; same ClientAuth/Tenant/Core locks precede material/Draft/policy CAS, page acceptance and first attempt share the Draft transaction; current reads may persist a bounded invalidation, unknown never re-dispatches Core and submitted is not business success"),
+    ...reviewed(controller, [controller.prototype.readOriginalQuoteBookingOperation, controller.prototype.readBookingOperation,
+      controller.prototype.readBookingAcceptance, controller.prototype.readBookingSubmission], "audited-read",
+    "exact original quote/material/Draft/acceptance/submission receipts under independent read policy and current original client; same selected ALS and immutable reference preserved after expiry or new-work stop, no preparation, new attempt or order dispatch"),
     ...reviewed(controller, [controller.prototype.prepareGoalQuote, controller.prototype.prepareQuoteParameters,
       controller.prototype.confirmQuoteParameters], "transactional-write",
     "original explicit selection and immutable prequote/confirmation-attempt; owning ClientAuth/Tenant/Core precede original source/policy/material locks, current Core normalization and publication rechecked before commit; original attempt permits one quote dispatch, unknown only reads its receipt, no order or payment"),
@@ -209,7 +217,8 @@ export function rentalAiDeploymentContinuationSelector(policy: ReturnType<typeof
         controller.prototype.settleTaskUnstartedCancellation, controller.prototype.reconcileTaskInputCancellation,
         controller.prototype.readOrderMaterialReceipt, controller.prototype.readGoalPreparation, controller.prototype.readTaskCreation,
         controller.prototype.readGoalQuotePreparation, controller.prototype.readQuotePreparationOperation,
-        controller.prototype.readPreparedQuoteOriginal,
+        controller.prototype.readPreparedQuoteOriginal, controller.prototype.readOriginalQuoteBookingOperation,
+        controller.prototype.readBookingOperation, controller.prototype.readBookingAcceptance, controller.prototype.readBookingSubmission,
         controller.prototype.readTaskInput, controller.prototype.readTaskInputReceipt,
         controller.prototype.readTaskModelResult, controller.prototype.recoverTaskModel,
         controller.prototype.reconcileTaskModel]] as [Function, readonly Function[]])
@@ -267,7 +276,8 @@ export function rentalAiOriginalReceiptSelector(policy: ReturnType<typeof create
     ...[RentalWebsiteClientEntryController, RentalWechatClientEntryController].map(controller => [controller,
       [controller.prototype.readGoalPreparation, controller.prototype.readTaskCreation, controller.prototype.readTaskInputReceipt,
         controller.prototype.readGoalQuotePreparation, controller.prototype.readQuotePreparationOperation,
-        controller.prototype.readPreparedQuoteOriginal,
+        controller.prototype.readPreparedQuoteOriginal, controller.prototype.readOriginalQuoteBookingOperation,
+        controller.prototype.readBookingOperation, controller.prototype.readBookingAcceptance, controller.prototype.readBookingSubmission,
         controller.prototype.readTaskModelResult, controller.prototype.readTaskCancellationReceipt,
         controller.prototype.readTaskCancellationSettlementReceipt]] as [Function, readonly Function[]])
   ]);
