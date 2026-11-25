@@ -12,6 +12,8 @@ import { SubscriptionService as LegacySubscriptionService } from "./modules/subs
 import { SubscriptionService as PackageSubscriptionService } from "@rental-os/platform-server/subscription";
 import { ClientDeliveryAddressService as LegacyClientDeliveryAddressService } from "./modules/client/client-delivery-address.service";
 import { ClientDeliveryAddressService as PackageClientDeliveryAddressService } from "@rental-os/rental-core/mysql-client-delivery-address";
+import { ClientAuthService as LegacyClientAuthService } from "./modules/client/client-auth.service";
+import { ClientAuthService as PackageClientAuthService } from "@rental-os/rental-core/mysql-client-auth";
 import { RentalCoreService as LegacyRentalCoreService } from "./modules/rental-core/rental-core.service";
 import { RentalCoreService as PackageRentalCoreService } from "@rental-os/ai-native-server/runtime/rental-adapters/rental-core.service";
 import { WorkspaceCapabilityService as LegacyWorkspaceCapabilityService } from "./modules/rental-core/workspace-capability.service";
@@ -62,6 +64,7 @@ export const AI_NATIVE_LEGACY_SERVICE_ALIASES: Provider[] = [
   { provide: PackageOperationLogService, useExisting: LegacyOperationLogService },
   { provide: PackageSubscriptionService, useExisting: LegacySubscriptionService },
   { provide: PackageClientDeliveryAddressService, useExisting: LegacyClientDeliveryAddressService },
+  { provide: PackageClientAuthService, useExisting: LegacyClientAuthService },
   { provide: PackageRentalCoreService, useExisting: LegacyRentalCoreService },
   { provide: PackageWorkspaceCapabilityService, useExisting: LegacyWorkspaceCapabilityService },
   { provide: PackageRentalOrderConfirmationService, useExisting: LegacyRentalOrderConfirmationService },
