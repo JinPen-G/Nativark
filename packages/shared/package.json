@@ -46,7 +46,7 @@
   "dependencies": {
     "@rental-os/platform-contracts": "0.1.0",
     "zod": "3.25.76",
-    "@rental-os/rental-core": "0.1.13"
+    "@rental-os/rental-core": "0.1.14"
   },
   "devDependencies": {},
   "typesVersions": {
