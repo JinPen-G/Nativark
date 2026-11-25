@@ -160,13 +160,17 @@ export class RentalStateRepository<TTransaction extends RentalSnapshotTransactio
             return original as string | number;
           });
           const keyExpression = field === "calendars" ? raw("CONCAT(CAST(`year` AS CHAR), ':', `version`)") : raw(`\`${key}\``);
+          // CONCAT 的字符集推导可能没有可比较的排序规则。日历完整键按字节核对，
+          // 与下方 Set 的精确比较一致；保留原键投影，不改表或放宽版本匹配。
+          const matchExpression = field === "calendars" ? sql`CAST(${keyExpression} AS BINARY)` : keyExpression;
           // Bound each query without interpreting a partial set as complete.
           for (let offset = 0; offset < keys.length; offset += 200) {
             const batch = keys.slice(offset, offset + 200);
+            const matchKeys = field === "calendars" ? batch.map(value => sql`CAST(${value} AS BINARY)`) : batch;
             const present = await tx.$queryRaw<Array<{ originalKey: string | number }>>(sql`
               SELECT ${keyExpression} AS originalKey FROM ${raw(`\`${table}\``)}
               WHERE tenantId = ${row.tenantId} AND workspaceId = ${row.workspaceId}
-                AND ${keyExpression} IN (${join(batch)})`);
+                AND ${matchExpression} IN (${join(matchKeys)})`);
             const existing = new Set(present.map(value => String(value.originalKey)));
             if (batch.some(value => !existing.has(String(value)))) {
               throw new ServiceUnavailableException(`历史Rental快照 ${field} 尚有未核定的原键或主档映射，请沿原恢复流程核对；原资料保留`);

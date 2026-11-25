@@ -35,29 +35,45 @@ export default defineConfig(({ mode }) => {
       tailwindcss(),
       react(),
     ],
-    // Shared 源码转发这些正式 CJS 出口，开发扫描须同时覆盖链接包的子路径。
+    // 拆分包的正式运行时出口为 CJS；统一预打包，避免源码 export * 丢失具名导出。
     optimizeDeps: {
       include: [
+        "@rental-os/core-contracts",
+        "@rental-os/core-contracts/github-discovery",
+        "@rental-os/platform-contracts",
         "@rental-os/platform-contracts/ai-gateway",
         "@rental-os/platform-contracts/ai-task",
         "@rental-os/platform-contracts/rich-text",
         "@rental-os/platform-contracts/subscription",
         "@rental-os/platform-contracts/tenant-integrations",
         "@rental-os/platform-contracts/tenant-messaging",
+        "@rental-os/platform-core-host/core-package-ports",
+        "@rental-os/platform-core-host/core-package-preparation/protocol",
+        "@rental-os/platform-core-host/core-package-selection/protocol",
+        "@rental-os/rental-core",
+        "@rental-os/rental-core/category-governance",
+        "@rental-os/rental-core/client-contracts",
+        "@rental-os/rental-core/enterprise",
+        "@rental-os/rental-core/enterprise-exchange",
+        "@rental-os/rental-core/enterprise-expense",
+        "@rental-os/rental-core/enterprise-order-delegation",
+        "@rental-os/rental-core/enterprise-policy",
+        "@rental-os/rental-core/enterprise-transfer-decision",
+        "@rental-os/rental-core/enterprise-workflows",
+        "@rental-os/rental-core/exchange-inspection-preparation",
+        "@rental-os/rental-core/permissions",
+        "@rental-os/rental-core/staff-upload-observation",
+        "@rental-os/shared/ai-admin",
+        "@rental-os/shared/agent-desktop",
+        "@rental-os/shared",
       ],
     },
     css: { postcss: { plugins: [...platform.postcss, copilotArchiveStyles()] } },
     resolve: {
-      // Prefer source contracts over stray CommonJS build artifacts in shared/src.
       extensions: [".mjs", ".ts", ".tsx", ".js", ".jsx", ".json"],
       alias: [
         ...Object.entries(platform.alias).map(([find, replacement]) => ({ find, replacement })),
-        { find: "@", replacement: fileURLToPath(new URL("./src", import.meta.url)) },
-        {
-          // 总出口读取源码；子入口继续按包 exports 解析，不能拼到 index.ts 后面。
-          find: /^@rental-os\/shared$/,
-          replacement: fileURLToPath(new URL("../../packages/shared/src/index.ts", import.meta.url))
-        }
+        { find: "@", replacement: fileURLToPath(new URL("./src", import.meta.url)) }
       ]
     },
     server: {

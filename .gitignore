@@ -10,6 +10,7 @@ dist/
 apps/platform-api/generated/
 apps/admin/dist-ai-offline/
 packages/shared/dist-agent-desktop/
+packages/rental-core/dist-clients/
 build/
 .vite/
 *.tsbuildinfo

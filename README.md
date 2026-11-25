@@ -223,6 +223,10 @@ $env:RENTAL_PRISMA_LEGACY = '1'
 npm run dev
 ```
 
+Windows 日常启动也可双击根目录 `start-dev.cmd`，或运行 `./start-dev.ps1`。脚本检查锁定依赖、同树 workspace 链接与 Prisma Client，隐藏启动 API / 管理端，并验证 API、前端代理及关键页面模块；日志位于 `output/runtime/rental-os-dev`。默认不安装依赖、不执行迁移或 Seed，也不终止占用端口的现有进程。
+
+已有本地数据库时使用 `./start-dev.ps1 -SkipDocker`；`-SkipDatabaseChecks` 仅跳过 schema 与数据库端口预检，仍要求有效 Client 并核对服务健康。只有准备执行当前开发库的已有迁移时才使用 `-ApplyMigrations`，此参数不能与 `-SkipDatabaseChecks` 同用，且须先关闭本树 API。该入口只接受本机回环地址的数据库。
+
 | 入口 | 默认地址 | 说明 |
 | --- | --- | --- |
 | **零 Core 公共后台**（方式 A） | `http://127.0.0.1:5176` | 纯底座管理后台 |
