@@ -23,6 +23,7 @@ import type { RentalBusinessContext as BusinessContext } from "./configuration-b
 import { capabilityRequirementRoots, resolveCapabilityRequirements } from "./capability-conditions";
 import { validateQuotedCapabilityRequirements } from "./mysql-quote-capabilities";
 import { readRentalCategoryCode, rentalDefaultWorkspaceName } from "./category-identity";
+import { normalizeBusinessOptionsForCategory, normalizeBusinessSettingsForCategory } from "./business-settings";
 import { assertInspectionAllocationScope, exchangeBasis, exchangeInspectionTemplates, exchangePickupInspectionRequirements, projectExchangeInspectionTemplates } from "./exchange-inspection";
 import type { RentalOrderInspectionBasisFacts } from "./contracts";
 import { projectAllocationPickupBasis, type RentalOrderAllocationPickupBasis } from "./mysql-order-allocation-pickup";
@@ -310,61 +311,6 @@ function defaultBusinessSettings(
   };
 }
 
-/**
- * 把旧空间保存的经营设置收敛到当前品类定义。
- *
- * 品类定义会随着基础模型修正而缩小允许范围；如果读取时原样返回旧 JSON，管理端
- * 仍会显示已经不适用的计价/履约选项，而且报价上下文也可能继续使用它们。这里仅
- * 过滤运行设置，不改历史订单、报价或价格版本快照；运营下次保存时自然持久化新值。
- */
-function normalizeBusinessOptionsForCategory(
-  settings: RentalOpeningConfigurationFacts['settings'], definition: RentalCategoryDefinition
-) {
-  const supportedUnits = new Set(definition.businessModel.pricingUnits);
-  const configuredUnits = new Set((settings.pricing.enabledUnits ?? []).filter((unit) => supportedUnits.has(unit)));
-  const enabledUnits = definition.businessModel.pricingUnits.filter((unit) => configuredUnits.has(unit));
-  const safeUnits = enabledUnits.length ? enabledUnits : [definition.businessModel.defaultPricingUnit];
-  const defaultUnit = safeUnits.includes(settings.pricing.defaultUnit)
-    ? settings.pricing.defaultUnit
-    : definition.businessModel.defaultPricingUnit;
-
-  const supportedModes = new Set(definition.businessModel.fulfillmentModes);
-  const configuredModes = new Set((settings.fulfillment.enabledModes ?? []).filter((mode) => supportedModes.has(mode)));
-  const enabledModes = definition.businessModel.fulfillmentModes.filter((mode) => configuredModes.has(mode));
-  const safeModes = enabledModes.length ? enabledModes : [definition.businessModel.fulfillmentModes[0]];
-  return { enabledUnits: safeUnits, defaultUnit, enabledModes: safeModes };
-}
-
-function normalizeBusinessSettingsForCategory(settings: TenantRentalBusinessSettings, definition: RentalCategoryDefinition): TenantRentalBusinessSettings {
-  const { enabledUnits: safeUnits, defaultUnit, enabledModes: safeModes } = normalizeBusinessOptionsForCategory(settings, definition);
-  return {
-    ...settings,
-    pricing: {
-      ...settings.pricing,
-      enabledUnits: safeUnits,
-      defaultUnit,
-      holidayPricingEnabled: definition.businessModel.supportsHolidayPricing && settings.pricing.holidayPricingEnabled
-    },
-    fulfillment: {
-      ...settings.fulfillment,
-      enabledModes: safeModes,
-      // 兼容尚未带服务区域的旧 JSON 设置；只有管理员显式配置 allowlist 才限制报价。
-      deliveryServiceArea: settings.fulfillment.deliveryServiceArea?.mode === "allowlist"
-        ? {
-            mode: "allowlist",
-            areas: Array.isArray(settings.fulfillment.deliveryServiceArea.areas)
-              ? settings.fulfillment.deliveryServiceArea.areas
-              : []
-          }
-        : { mode: "all", areas: [] }
-    },
-    calendar: {
-      ...settings.calendar,
-      holidayPricingEnabled: definition.businessModel.supportsHolidayPricing && settings.calendar.holidayPricingEnabled
-    }
-  };
-}
-
 export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction = RentalCoreRuntimeTransaction> implements OnModuleInit, OnApplicationBootstrap {
   /**
    * SPACE-03：状态以**经营空间**为键，而不是租户。
@@ -425,8 +371,8 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   /**
    * 在一个 Core 动作上执行某触发点的全部已启用能力 Hook。
    *
-   * 统一从这里取空间与品类：两者都由服务自身按会话解析（`workspaceOf` / `state`），
-   * 不接受调用方传入——否则调用方可以声明另一个空间或品类来改变判定口径。
+   * 空间沿原会话解析；订单动作使用Core已读取的原订单/变更依据中的品类编码和版本，
+   * 建档动作读取当前权威品类定义。不能用当前缓存替换历史依据，也不接受客户端自授范围。
    *
    * 只有不依赖Hook且没有已启用Hook依据的基础路径可缺执行器并返回undefined。
    * 能力阻止时 `evaluate` 会抛 `CapabilityBlockedException`，本方法不吞异常：
@@ -450,14 +396,24 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
       ? payload.order as Record<string, unknown> : payload;
     const historical = subjectRef.type === "order" && orderPayload
       ? orderPayload as Pick<RentalOrder, "categoryCode" | "categoryVersionId" | "capabilityPolicy" | "capabilityRequirementsSnapshot" | "capabilitySnapshot" | "lines" | "fulfillmentMode"> : undefined;
+    if (subjectRef.type === "order" && !historical) throw new ConflictException("能力检查缺少原订单依据");
     if (!this.hooks && historical?.capabilityRequirementsSnapshot) throw new ServiceUnavailableException("条件能力执行模块不可用");
     if (historical?.capabilityRequirementsSnapshot && (!historical.categoryVersionId || !this.categoryResolver)) {
       throw new ConflictException("条件履约依据缺少可核对的品类版本");
     }
     if (historical?.categoryVersionId && !this.categoryResolver) throw new ServiceUnavailableException("历史品类版本解析服务不可用");
-    const definition = historical?.categoryVersionId && this.categoryResolver
-      ? await this.categoryResolver.forVersion(this.state(tenantId).profile.categoryCode, historical.categoryVersionId, tx)
-      : historical ? undefined : await this.getWorkspaceCategory(tenantId);
+    let definition: RentalCategoryDefinition | undefined;
+    let categoryCode: RentalCategoryCode;
+    if (historical) {
+      // 历史编码与版本必须成对消费；实例冷启动或空间换版不能改变原能力适用范围。
+      categoryCode = readRentalCategoryCode(historical.categoryCode);
+      if (historical.categoryVersionId && this.categoryResolver) {
+        definition = await this.categoryResolver.forVersion(categoryCode, historical.categoryVersionId, tx);
+      }
+    } else {
+      definition = await this.getWorkspaceCategory(tenantId);
+      categoryCode = definition.code;
+    }
     if (!this.hooks) {
       if (historical && definition?.conditionalCapabilities?.length) throw new ServiceUnavailableException("条件能力执行模块不可用");
       assertCapabilityHookRuntimeAvailable(this.hooks, definition?.requiredCapabilities ?? [],
@@ -478,7 +434,7 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
       point,
       tenantId,
       workspaceId: this.workspaceOf(tenantId),
-      categoryCode: this.state(tenantId).profile.categoryCode,
+      categoryCode,
       // 旧单明确保留已有兼容政策，不能把升级后新增必选能力套回存量。
       requiredCapabilities: requirements?.required ?? definition?.requiredCapabilities ?? (historical?.capabilityPolicy === "legacy_empty" ? [] : undefined),
       // 建档可以准备未就绪的商品；商品/履约条件在正式报价及订单动作中核对。
@@ -1171,10 +1127,9 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   private async buildBusinessSettings(
     tenantId: string, input: SaveTenantRentalBusinessSettingsRequest, operator: string, tx?: TTransaction
   ) {
-    const state = this.state(tenantId);
-    const { definition, binding } = tx
-      ? await lockActiveCategoryBinding(tx, tenantId, this.workspaceOf(tenantId), undefined, state.profile.categoryCode)
-      : await this.categoryWriteContext(tenantId, state.profile.categoryCode);
+    input = structuredClone(input);
+    const { definition, binding, snapshot } = await this.categoryWriteContext(tenantId, undefined, false, tx);
+    const state = snapshot ?? this.state(tenantId);
     const pricingUnits = new Set(definition.businessModel.pricingUnits);
     const fulfillmentModes = new Set(definition.businessModel.fulfillmentModes);
     const enabledPaymentMethods = input.payment.enabledMethods?.length ? input.payment.enabledMethods : DEFAULT_RENTAL_PAYMENT_METHODS;
@@ -1210,7 +1165,7 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
     }
     const configuredDeliveryArea =
       input.fulfillment.deliveryServiceArea ??
-      state.businessSettings.fulfillment.deliveryServiceArea ??
+      state.businessSettings?.fulfillment.deliveryServiceArea ??
       { mode: "all" as const, areas: [] };
     if (configuredDeliveryArea.mode !== "all" && configuredDeliveryArea.mode !== "allowlist") {
       throw new BadRequestException("配送服务区域模式无效");
@@ -1273,7 +1228,10 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   listCouponTemplates(tenantId: string) { return this.state(tenantId).couponTemplates; }
 
   async readCouponTemplates(tenantId: string) {
-    await this.prepareColdWorkspace(tenantId);
+    if (this.configStore.loadWorkspaceSnapshot || this.categoryResolver) {
+      const current = await this.refreshCommittedWorkspace(tenantId);
+      if (current) return structuredClone(current.couponTemplates);
+    }
     const state = this.state(tenantId);
     if (this.configStore.listCouponTemplates) {
       const beforeRead = JSON.stringify(state.couponTemplates);
@@ -1341,6 +1299,14 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
     };
     await this.configStore.upsertCouponTemplate(result, undefined, binding);
 
+    // A claim or a later edit can commit before this save resumes. Publish the
+    // authoritative result, never the counters/configuration captured earlier.
+    if (this.configStore.loadWorkspaceSnapshot) {
+      await this.refreshCommittedWorkspace(tenantId);
+      const saved = this.state(tenantId).couponTemplates.find(row => row.id === result.id);
+      if (!saved) throw new ConflictException("已保存优惠券的当前结果不可用，请刷新核对原模板");
+      return structuredClone(saved);
+    }
     if (existing) state.couponTemplates.splice(state.couponTemplates.indexOf(existing), 1, result); else state.couponTemplates.unshift(result);
     return result;
   }
@@ -1438,9 +1404,8 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
 
   async saveLocation(tenantId: string, input: SaveRentalFulfillmentLocationRequest) {
     input = structuredClone(input);
-    await this.prepareColdWorkspace(tenantId);
+    const { definition, binding } = await this.categoryWriteContext(tenantId);
     const state = this.state(tenantId);
-    const { definition, binding } = await this.categoryWriteContext(tenantId, state.profile.categoryCode);
     if (!definition.businessModel.locationTypes.includes(input.type)) throw new BadRequestException("当前经营品类不支持该履约地点类型");
     if (!input.code?.trim() || !input.name?.trim()) throw new BadRequestException("地点编码和名称不能为空");
     if (input.status !== undefined && input.status !== 'enabled' && input.status !== 'disabled') throw new BadRequestException("履约地点状态无效");
@@ -1571,14 +1536,13 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
 
   async savePricingGroup(tenantId: string, input: SaveRentalPricingGroupRequest, tx?: TTransaction, deferCache = false) {
     input = structuredClone(input);
-    await this.prepareColdWorkspace(tenantId, tx);
     const transactionContext = tx ? await this.readBusinessContext(tenantId, tx) : undefined;
-    const state = transactionContext ? { ...this.state(tenantId), profile: transactionContext.profile,
-      itemGroups: transactionContext.groups, pricingGroups: transactionContext.pricingGroups ?? [] } : this.state(tenantId);
     const writeContext = transactionContext ? { definition: transactionContext.category,
       binding: transactionContext.categoryVersionId !== undefined && transactionContext.categoryAdoptionRevision !== undefined
         ? { categoryVersionId: transactionContext.categoryVersionId, adoptionRevision: transactionContext.categoryAdoptionRevision }
-        : undefined } : await this.categoryWriteContext(tenantId, state.profile.categoryCode);
+        : undefined } : await this.categoryWriteContext(tenantId);
+    const state = transactionContext ? { profile: transactionContext.profile,
+      itemGroups: transactionContext.groups, pricingGroups: transactionContext.pricingGroups ?? [] } : this.state(tenantId);
     if (!input.code?.trim() || !input.name?.trim()) throw new BadRequestException("定价分组编码和名称不能为空");
     if (input.defaultPricingUnit && !(transactionContext?.settings ?? await this.getBusinessSettings(tenantId)).pricing.enabledUnits.includes(input.defaultPricingUnit)) {
       throw new BadRequestException("定价分组默认计价单位必须是当前品类已启用的计价单位");
@@ -1627,9 +1591,8 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
 
   async saveItemGroup(tenantId: string, input: SaveRentalItemGroupRequest) {
     input = structuredClone(input);
-    await this.prepareColdWorkspace(tenantId);
+    const writeContext = await this.categoryWriteContext(tenantId);
     const state = this.state(tenantId);
-    const writeContext = await this.categoryWriteContext(tenantId, state.profile.categoryCode);
     const definition = writeContext.definition;
     const existing = input.id ? state.itemGroups.find((row) => row.id === input.id) : undefined;
     if (input.id && !existing) throw new NotFoundException("标的分组不存在");
@@ -1796,7 +1759,7 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   }
 
   async readItemGroupImage(tenantId: string, itemGroupId: string, imageId: string) {
-    await this.prepareColdWorkspace(tenantId);
+    await this.refreshCommittedWorkspace(tenantId);
     const group = this.group(this.state(tenantId), itemGroupId);
     const image = this.storedItemGroupImages(group).find((item) => item.id === imageId);
     if (!image) throw new NotFoundException("产品型号图片不存在");
@@ -1830,6 +1793,8 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   }
 
   async saveAsset(tenantId: string, input: SaveRentalAssetRequest) {
+    // Keep the checked request fixed across configuration, inventory and hook waits.
+    input = structuredClone(input);
     const state = await this.factContext(tenantId);
     const group = this.group(state, input.itemGroupId);
     if (group.inventoryMode !== RentalInventoryMode.Serialized) throw new BadRequestException("只有序列化库存可以登记独立资产");
@@ -1876,27 +1841,24 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   }
 
   async restoreStockDisposition(tenantId: string, dispositionId: string, operator: string) {
-    await this.prepareColdWorkspace(tenantId);
-    this.state(tenantId);
+    // 已持久化的处置/工单沿原仓储范围和事务读取，不初始化当前品类配置。
+    this.workspaceOf(tenantId);
     return this.factStore.restoreStockDisposition(tenantId, dispositionId, operator);
   }
 
   async writeOffStockDisposition(tenantId: string, dispositionId: string, reason: string, operator: string) {
-    await this.prepareColdWorkspace(tenantId);
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     return this.factStore.writeOffStockDisposition(tenantId, dispositionId, reason, operator);
   }
 
   async listStockDispositions(tenantId: string, orderId?: string) {
-    await this.prepareColdWorkspace(tenantId);
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     if (orderId) await this.requireOrder(tenantId, orderId);
     return this.factStore.listStockDispositions(tenantId, orderId);
   }
 
   async listWorkOrders(tenantId: string, status?: RentalWorkOrderStatus) {
-    await this.prepareColdWorkspace(tenantId);
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     if (status && !["pending", "in_progress", "pending_review", "completed", "rejected", "cancelled"].includes(status)) {
       throw new BadRequestException("养护工单状态无效");
     }
@@ -1904,14 +1866,12 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   }
 
   async listWorkOrderAssignees(tenantId: string, locationId?: string): Promise<RentalWorkOrderAssignee[]> {
-    await this.prepareColdWorkspace(tenantId);
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     return this.factStore.listWorkOrderAssignees(tenantId, locationId);
   }
 
   async listWorkOrderHistory(tenantId: string, workOrderId: string): Promise<RentalWorkOrderHistoryEntry[]> {
-    await this.prepareColdWorkspace(tenantId);
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     const row = (await this.factStore.listWorkOrders(tenantId)).find((item) => item.id === workOrderId);
     if (!row) throw new NotFoundException("养护工单不存在或不属于当前经营空间");
     return this.factStore.listWorkOrderHistory(tenantId, workOrderId);
@@ -1926,8 +1886,7 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
 
   async createWorkOrder(tenantId: string, input: CreateRentalWorkOrderRequest, operator: string) {
     input = structuredClone(input);
-    await this.prepareColdWorkspace(tenantId);
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     const dispositions = await this.factStore.listStockDispositions(tenantId);
     const disposition = dispositions.find((row) => row.id === input.dispositionId);
     if (!disposition) throw new NotFoundException("库存处置不存在或不属于当前经营空间");
@@ -1962,8 +1921,7 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
 
   async assignWorkOrder(tenantId: string, workOrderId: string, input: AssignRentalWorkOrderRequest) {
     input = structuredClone(input);
-    await this.prepareColdWorkspace(tenantId);
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     const current = await this.factStore.listWorkOrders(tenantId);
     const row = current.find((item) => item.id === workOrderId);
     if (!row) throw new NotFoundException("养护工单不存在或不属于当前经营空间");
@@ -1973,29 +1931,25 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   }
 
   async startWorkOrder(tenantId: string, workOrderId: string, operator: string) {
-    await this.prepareColdWorkspace(tenantId);
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     return this.factStore.transitionWorkOrder(tenantId, workOrderId, "start", operator);
   }
 
   async submitWorkOrder(tenantId: string, workOrderId: string, input: SubmitRentalWorkOrderRequest, operator: string) {
     input = structuredClone(input);
-    await this.prepareColdWorkspace(tenantId);
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     return this.factStore.transitionWorkOrder(tenantId, workOrderId, "submit", operator, input);
   }
 
   async reviewWorkOrder(tenantId: string, workOrderId: string, input: ReviewRentalWorkOrderRequest, operator: string) {
     input = structuredClone(input);
-    await this.prepareColdWorkspace(tenantId);
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     return this.factStore.transitionWorkOrder(tenantId, workOrderId, "review", operator, input);
   }
 
   async cancelWorkOrder(tenantId: string, workOrderId: string, input: CancelRentalWorkOrderRequest, operator: string) {
     input = structuredClone(input);
-    await this.prepareColdWorkspace(tenantId);
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     return this.factStore.transitionWorkOrder(tenantId, workOrderId, "cancel", operator, input);
   }
 
@@ -2017,35 +1971,18 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   }
 
   async applyStockOperation(tenantId: string, input: RentalStockOperationRequest, operator: string): Promise<RentalStockOperationResult> {
-    const state = await this.factContext(tenantId);
-    const group = this.group(state, input.itemGroupId);
-    if (![RentalInventoryMode.Quantity, RentalInventoryMode.Consumable].includes(group.inventoryMode)) throw new BadRequestException("库存日常作业目前只适用于数量型或一次性耗材库存");
-    if (input.type === "consume" && group.inventoryMode !== RentalInventoryMode.Consumable) {
-      throw new BadRequestException("消耗作业只适用于一次性耗材库存");
-    }
-    if (!input.reason?.trim()) throw new BadRequestException("库存作业必须填写原因或来源说明");
-    if (input.batchNo !== undefined && (!input.batchNo.trim() || input.batchNo.trim().length > 100)) throw new BadRequestException("批次号不能为空且不能超过100个字符");
-    if (input.sourceDocumentNo !== undefined && (!input.sourceDocumentNo.trim() || input.sourceDocumentNo.trim().length > 100)) throw new BadRequestException("来源单据号不能为空且不能超过100个字符");
-
-    if (input.type === "transfer") {
-      if (!input.fromLocationId || !input.toLocationId || input.fromLocationId === input.toLocationId) throw new BadRequestException("调拨必须选择两个不同的履约地点");
-      this.activeLocation(state, input.fromLocationId, "storage");
-      this.activeLocation(state, input.toLocationId, "storage");
-    } else {
-      if (!input.locationId) throw new BadRequestException("库存作业必须选择履约地点");
-      this.activeLocation(state, input.locationId, "storage");
-    }
-
+    input = structuredClone(input);
+    // 原仓储先读同键收据，再复验新业务准入，并在同一事务返回余额。
+    // 当前型号或地点停用不能把已提交结果变成新的库存作业。
     return this.factStore.applyStockOperation({
       ...input,
-      batchNo: input.batchNo?.trim() || undefined,
-      sourceDocumentNo: input.sourceDocumentNo?.trim() || undefined,
       tenantId,
       operator: operator || input.operator || "系统"
     });
   }
 
   async saveStockBalance(tenantId: string, input: SaveRentalStockBalanceRequest) {
+    input = structuredClone(input);
     const state = await this.factContext(tenantId);
     const group = this.group(state, input.itemGroupId);
     if (![RentalInventoryMode.Quantity, RentalInventoryMode.Consumable].includes(group.inventoryMode)) throw new BadRequestException("只有数量型或一次性耗材库存可以维护库存余额");
@@ -2067,7 +2004,8 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
       itemGroupId: group.id,
       locationId: location.id,
       onHandQuantity: input.onHandQuantity,
-      maintenanceQuantity: input.maintenanceQuantity
+      maintenanceQuantity: input.maintenanceQuantity,
+      initialOnly: true
     });
   }
 
@@ -2259,8 +2197,8 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   }
 
   async listOrders(tenantId: string) {
-    await this.prepareColdWorkspace(tenantId);
-    this.state(tenantId);
+    // 历史订单的原快照由事实仓储返回；当前品类缓存不是历史读取的前置。
+    this.workspaceOf(tenantId);
     return (await this.factStore.listOrders(tenantId)).map((order) => this.publicOrder(order));
   }
 
@@ -2270,8 +2208,7 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
    */
   async queryOrders(tenantId: string, query: RentalOrderListQuery): Promise<RentalOrderPage> {
     query = structuredClone(query);
-    await this.prepareColdWorkspace(tenantId);
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     const paged = query.page !== undefined || query.pageSize !== undefined;
     const page = Math.max(1, Math.floor(query.page ?? 1));
     const pageSize = Math.min(RENTAL_ORDER_LIST_MAX_PAGE_SIZE, Math.max(1, Math.floor(query.pageSize ?? RENTAL_ORDER_LIST_DEFAULT_PAGE_SIZE)));
@@ -2296,8 +2233,7 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
     * worker的可选scan只续读候选，HTTP和旧调用继续使用原三参数读取。
    */
   async listExpiredPendingOrderIds(tenantId: string, expiredBefore = now(), take = 50, scan?: RentalExpiredDraftOrderScan) {
-    await this.prepareColdWorkspace(tenantId);
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     return scan ? this.factStore.listExpiredDraftOrderIds(tenantId, expiredBefore, take, scan)
       : this.factStore.listExpiredDraftOrderIds(tenantId, expiredBefore, take);
   }
@@ -2361,8 +2297,7 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
 
   /** RULE-CLOSE-01：列出已超过领取宽限、仍未领取的订单。 */
   async listPickupOverdueOrderIds(tenantId: string, at = now(), take = 50, scan?: RentalPickupOrderScan) {
-    await this.prepareColdWorkspace(tenantId);
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     const cutoff = Date.parse(at);
     if (!Number.isFinite(cutoff)) throw new BadRequestException("检查时间无效");
     const cap = Math.min(Math.max(1, take), 200);
@@ -2389,8 +2324,7 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
 
   /** 已通知且达到最终确认时限的待确认爽约候选。 */
   async listNoShowCandidateIds(tenantId: string, at = now(), take = 50, scan?: RentalPickupOrderScan) {
-    await this.prepareColdWorkspace(tenantId);
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     const cutoff = Date.parse(at);
     if (!Number.isFinite(cutoff)) throw new BadRequestException("检查时间无效");
     const cap = Math.min(Math.max(1, take), 200);
@@ -2601,8 +2535,7 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
   }
 
   async getOrder(tenantId: string, orderId: string) {
-    await this.prepareColdWorkspace(tenantId);
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     return this.publicOrder(await this.requireOrder(tenantId, orderId));
   }
 
@@ -2807,7 +2740,7 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
    * 的 `lockedOrder`，全部锁同一行订单，因此彼此串行。
    */
   async lockOrderForUpdate(tenantId: string, orderId: string, tx: TTransaction) {
-    this.state(tenantId);
+    this.workspaceOf(tenantId);
     return this.publicOrder(await this.lockedOrder(tenantId, orderId, tx));
   }
 
@@ -6159,17 +6092,24 @@ export class RentalCoreService<TTransaction extends RentalCoreRuntimeTransaction
     if (resolved.definition.code !== code) throw new ConflictException("经营空间品类与商品资料不一致");
     return resolved.definition;
   }
-  private async categoryWriteContext(tenantId: string, code: RentalCategoryCode, allowProfileInitialization = false) {
-    const current = await this.refreshCommittedWorkspace(tenantId);
+  /** A workspace created by another instance has no local cache yet. Resolve
+   * its authoritative definition before consulting state; an outer transaction
+   * keeps its configuration private until its owner commits. */
+  private async categoryWriteContext(tenantId: string, code?: RentalCategoryCode, allowProfileInitialization = false, tx?: TTransaction) {
+    const current = tx
+      ? await this.loadCommittedWorkspace(tenantId, this.workspaceOf(tenantId), tx)
+      : await this.refreshCommittedWorkspace(tenantId);
     if (current) {
-      if (current.definition.code !== code) throw new ConflictException("经营空间品类与商品资料不一致");
+      if (code && current.definition.code !== code) throw new ConflictException("经营空间品类与商品资料不一致");
       if (!current.effectiveProfile && !allowProfileInitialization) throw new ConflictException("经营空间档案尚未持久化，请先明确保存档案");
-      return { definition: current.definition, binding: current.binding };
+      return { definition: current.definition, binding: current.binding, snapshot: current };
     }
-    if (!this.categoryResolver) return { definition: this.category(code), binding: undefined };
+    const fallbackCode = code ?? this.state(tenantId).profile.categoryCode;
+    if (tx) return { ...await lockActiveCategoryBinding(tx, tenantId, this.workspaceOf(tenantId), undefined, fallbackCode), snapshot: undefined };
+    if (!this.categoryResolver) return { definition: this.category(fallbackCode), binding: undefined, snapshot: undefined };
     const resolved = await this.categoryResolver.forWorkspace(tenantId, this.workspaceOf(tenantId));
-    if (resolved.definition.code !== code) throw new ConflictException("经营空间品类与商品资料不一致");
-    return { definition: resolved.definition, binding: { categoryVersionId: resolved.categoryVersionId, adoptionRevision: resolved.adoptionRevision } };
+    if (resolved.definition.code !== fallbackCode) throw new ConflictException("经营空间品类与商品资料不一致");
+    return { definition: resolved.definition, binding: { categoryVersionId: resolved.categoryVersionId, adoptionRevision: resolved.adoptionRevision }, snapshot: undefined };
   }
   private group<T extends Pick<RentalItemGroup, 'id'>>(state: { itemGroups: T[] }, groupId: string) { const found = state.itemGroups.find((row) => row.id === groupId); if (!found) throw new NotFoundException("标的分组不存在"); return found; }
   private location(state: TenantRentalState, locationId: string) { const found = state.locations.find((row) => row.id === locationId); if (!found) throw new NotFoundException("履约网点不存在"); return found; }

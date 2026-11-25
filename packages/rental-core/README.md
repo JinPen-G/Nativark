@@ -6,6 +6,8 @@ Core 停用后，受控宿主可通过 `originalReceiptRead` 登记已有操作�
 
 ## 阅读路线
 
+新报价的[配置组合依据](src/quote-configuration.ts)由报价服务捕获，在原事实事务内复核经营设置、商品与履约配置、价格计划、优惠、服务、日历、规则及不可变价格版本。[仓储组合](src/application-repositories.ts)通过 `mysql-business-facts` 正式出口的 `createRentalQuoteConfigurationReader` 复用同一配置仓储和调用方事务；自行装配事实仓储的宿主也须提供此读口。缺依据或读口时新报价不可保存，已有报价和原操作收据沿原历史事实读取，不重新采用当前配置。
+
 | 入口 | 职责与直接消费者 |
 | --- | --- |
 | [完整应用](src/application.ts)、[仓储组合](src/application-repositories.ts)、[领域基础](src/application-domain.ts)、[独立宿主](../../apps/rental-api/src/assembly.ts) | 完整应用以同一数据库组合仓储、资金、事实和业务服务，事件沿调用方事务传播。独立宿主取得该服务图，分别管理构造、启动与退出。 |

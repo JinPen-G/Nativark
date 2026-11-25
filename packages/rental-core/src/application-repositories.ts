@@ -11,7 +11,7 @@ import { RentalBusinessConfigRepository, type RentalBusinessConfigurationStorage
   type RentalBusinessConfigurationTransaction } from "./mysql-business-configuration";
 import { RentalCoreFactRepository, requestRentalOrderVisibilityWhere } from "./mysql-core-facts";
 import type { RentalCoreFactStorage, RentalCoreFactTransaction, RentalCoreFactContacts } from "./core-fact-storage";
-import { RentalBusinessFactRepository } from "./mysql-business-facts";
+import { RentalBusinessFactRepository, createRentalQuoteConfigurationReader } from "./mysql-business-facts";
 import type { RentalBusinessFactStorage, RentalBusinessFactTransaction, RentalBusinessFactContacts } from "./business-fact-storage";
 import { RentalStateRepository, type RentalSnapshotStore, type RentalSnapshotConfig,
   type RentalSnapshotTransaction } from "./mysql-state";
@@ -69,6 +69,7 @@ export function createRentalApplicationRepositories<Tx extends RentalRepositoryT
     resolveWorkspaceId: resolveScopeWorkspaceId, orderVisibilityWhere,
     // 报价和核心使用同一配置仓储；不能另外构造带不同事件或配置来源的实例。
     quoteConfiguration: coreConfiguration,
+    quoteConfigurationBasis: createRentalQuoteConfigurationReader<Tx>(coreConfiguration, businessConfiguration),
     ...(notification ? { events: { notification } } : {})
   });
   const state = new RentalStateRepository<Tx>(database, configuration, {

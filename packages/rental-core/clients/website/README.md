@@ -29,7 +29,9 @@
 
 ## 错误与兼容边界
 
-HTTP 错误继续抛 `ApiError(status, 请求失败文案)`，网络与 JSON 解析错误原样向调用方传播。响应沿原 `body?.data ?? body` 同时消费包装与裸值，工厂返回服务端原数据，商户／空间／文档及结构版本核对沿上述页面和映射层执行。
+HTTP 错误继续抛 `ApiError(status, 请求失败文案)`，网络与 JSON 解析错误原样向调用方传播。响应沿原 `body?.data ?? body` 同时消费包装与裸值，商户／空间／文档核对沿上述页面和映射层执行。
+
+公开 `publicCatalog()` 与登录态 `catalog()` 共用[目录结构门禁](catalog.ts)，返回正式 `ClientCatalogResponse`。空目录、缺失品类码和已声明但不支持的展示结构会拒绝；省略 `categoryMetadata` 继续兼容旧合同。`assertSupportedCatalogVersion` 同时由正式网站客户端出口提供，只用于当前目录，不改变历史订单和原报价收据读取。
 
 原官网消费的 `/public/availability` 当前在 Controller 和 [OpenAPI](../../../../apps/api/src/contracts/openapi-document.ts)尚未登记，现有 `/availability` 使用本人会话。原公开请求路径、省略门店和宽松可用性行保留为兼容边界，行字段从 [Core 可用性合同](../../src/contracts.ts)派生。正式公开路由、DTO、公开字段和完整响应须按真实 HTTP 核定。请求失败或缺行时，原页面继续提示下单时核验可用性。
 

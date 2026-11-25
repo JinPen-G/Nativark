@@ -14,6 +14,7 @@ import {
   RentalCoreOrderStatus,
   RENTAL_FULFILLMENT_MODES,
   RENTAL_CURRENCY_CODES,
+  RENTAL_STOCK_OPERATION_TYPES,
   type RentalCurrency,
   RentalInventoryMode,
   RentalReservationStatus,
@@ -48,7 +49,8 @@ import {
 } from "./contracts";
 import { readOrderInspectionBasisInput } from "./mysql-order-inspection-basis";
 import { readAllocationPickupInput } from "./mysql-order-allocation-pickup";
-import { replaceCategoryUniqueClaims, validateActiveCategoryWrite, type CategoryWriteBinding } from "./mysql-category-write";
+import { lockActiveCategoryBinding, replaceCategoryUniqueClaims, validateActiveCategoryWrite, type CategoryWriteBinding } from "./mysql-category-write";
+import { readRentalFulfillmentAdmission } from "./mysql-fulfillment-admission";
 import { bufferedRentalPeriod, peakReservedQuantity } from "./occupancy";
 import { rentalOrderDueAt } from "./carrier-shipment";
 import { rentalOrderListSort } from "./mysql-order-list-sort";
@@ -197,6 +199,8 @@ export interface StockCountInput {
   locationId: string;
   onHandQuantity: number;
   maintenanceQuantity?: number;
+  /** Public balance registration may only create or confirm an unchanged row. */
+  initialOnly?: boolean;
 }
 
 export interface StockOperationInput extends RentalStockOperationRequest {
@@ -1746,6 +1750,10 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
     statusChange?: AssetStatusHistoryMetadata,
     expectedBinding?: CategoryWriteBinding
   ): Promise<void> {
+    asset = structuredClone(asset);
+    uniqueAttributes = structuredClone(uniqueAttributes);
+    statusChange = statusChange && { ...statusChange };
+    expectedBinding = expectedBinding && { ...expectedBinding };
     const data = {
       tenantId: asset.tenantId,
       itemGroupId: asset.itemGroupId,
@@ -1758,8 +1766,21 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
     try {
       await this.store.$transaction(async (tx) => {
         const workspaceId = await this.contacts.resolveWorkspaceId(tx, asset.tenantId);
+        const { definition } = await lockActiveCategoryBinding(tx, asset.tenantId, workspaceId, expectedBinding);
+        // The editor may have waited for a hook or this lock after checking its
+        // model/location. Recheck their actual facts before claims or asset writes.
+        const groups = await tx.$queryRaw<Array<{ id: string; inventoryMode: string; categoryCode: string }>>(sql`
+          SELECT id, inventoryMode, categoryCode FROM rental_item_groups
+          WHERE id = ${asset.itemGroupId} AND tenantId = ${asset.tenantId} AND workspaceId = ${workspaceId} FOR UPDATE
+        `);
+        if (groups.length !== 1 || typeof groups[0]?.inventoryMode !== "string" || groups[0].inventoryMode.toLowerCase() !== RentalInventoryMode.Serialized
+          || readRentalCategoryCode(groups[0].categoryCode) !== definition.code) {
+          throw new ConflictException("资产型号已变化，须为当前经营空间和品类下的序列化型号");
+        }
+        await readRentalFulfillmentAdmission(tx, asset.tenantId, workspaceId, [{ locationId: asset.locationId, capability: "storage" }]);
         const activeWrite = await validateActiveCategoryWrite(tx, asset.tenantId, workspaceId, {
-          id: asset.id, scope: "asset", attributes: asset.attributes, serialNo: asset.serialNo
+          id: asset.id, scope: "asset", attributes: asset.attributes, serialNo: asset.serialNo,
+          inventoryMode: RentalInventoryMode.Serialized, categoryCode: definition.code
         }, expectedBinding);
         await replaceCategoryUniqueClaims(tx, asset.tenantId, workspaceId, "asset", asset.id, activeWrite.claims);
         const existing = await tx.rentalAsset.findUnique({
@@ -1863,19 +1884,24 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
   }
 
   async applyStockCount(input: StockCountInput): Promise<RentalStockBalance> {
+    input = structuredClone(input);
     return this.store.$transaction(async (tx) => {
       await lockRentalBusinessTenant(tx, input.tenantId);
       const workspaceId = await this.contacts.resolveWorkspaceId(tx, input.tenantId);
+      const inventoryMode = await this.lockStockWriteAdmission(tx, input.tenantId, workspaceId, input.itemGroupId, [input.locationId]);
       await this.lockInventoryTargets(
         input.tenantId,
         input.locationId,
-        [{ itemGroupId: input.itemGroupId, inventoryMode: RentalInventoryMode.Quantity }],
+        [{ itemGroupId: input.itemGroupId, inventoryMode }],
         tx
       );
       const existing = await tx.rentalStockBalance.findFirst({
         where: { tenantId: input.tenantId, workspaceId, itemGroupId: input.itemGroupId, locationId: input.locationId },
-        select: { id: true, maintenanceQuantity: true }
+        select: { id: true, onHandQuantity: true, maintenanceQuantity: true }
       });
+      if (input.initialOnly && existing && existing.onHandQuantity !== input.onHandQuantity) {
+        throw new ConflictException("已有库存不能直接覆盖余额，请使用库存作业并填写来源");
+      }
       const maintenanceQuantity = existing?.maintenanceQuantity ?? 0;
       if (input.maintenanceQuantity !== undefined && input.maintenanceQuantity !== maintenanceQuantity) {
         throw new ConflictException("维修隔离量不能通过盘点直接修改，请在归还处置中完成恢复或核销");
@@ -1945,6 +1971,10 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
    * 直接抹掉。相同幂等键只回放第一次结果，业务参数变化则明确冲突。
    */
   async applyStockOperation(input: StockOperationInput): Promise<AppliedStockOperation> {
+    input = structuredClone(input);
+    if (typeof input.idempotencyKey !== "string" || !input.idempotencyKey.trim() || input.idempotencyKey.length > 191) {
+      throw new BadRequestException("库存作业缺少有效的原操作标识");
+    }
     const batchNo = input.batchNo?.trim() || undefined;
     const sourceDocumentNo = input.sourceDocumentNo?.trim() || undefined;
     const requestFingerprint = createHash("sha256").update(JSON.stringify({
@@ -1963,14 +1993,28 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
     return this.store.$transaction(async (tx) => {
       await lockRentalBusinessTenant(tx, input.tenantId);
       const workspaceId = await this.contacts.resolveWorkspaceId(tx, input.tenantId);
+      // Serialize original-key reads before new-business admission. A previous
+      // result remains readable after the model, location or category changes.
+      const spaces = await tx.$queryRaw<Array<{ id: string }>>(sql`
+        SELECT id FROM business_workspaces WHERE tenantId = ${input.tenantId} AND id = ${workspaceId} FOR UPDATE
+      `);
+      if (spaces.length !== 1 || spaces[0].id !== workspaceId) throw new ConflictException("库存作业所属经营空间不可用");
       const existing = await tx.rentalStockLedgerEntry.findMany({
         where: { tenantId: input.tenantId, workspaceId, idempotencyKey: input.idempotencyKey },
-        include: { itemGroup: { select: { code: true, name: true } }, location: { select: { name: true } } },
+        include: { itemGroup: { select: { tenantId: true, workspaceId: true, code: true, name: true } },
+          location: { select: { tenantId: true, workspaceId: true, name: true } } },
         orderBy: { createdAt: "asc" }
       });
       if (existing.length) {
         if (existing.some((row) => row.requestFingerprint !== requestFingerprint)) {
           throw new ConflictException("同一幂等键已用于另一笔库存作业，请更换幂等键");
+        }
+        const kinds = input.type === "transfer" ? ["out", "in"] : [input.type === "consume" ? "out" : "single"];
+        if (existing.length !== kinds.length || new Set(existing.map(row => row.entryKind)).size !== kinds.length
+          || existing.some(row => !kinds.includes(row.entryKind) || row.operationId !== existing[0].operationId
+            || row.operationType !== input.type || row.itemGroup.tenantId !== input.tenantId || row.itemGroup.workspaceId !== workspaceId
+            || row.location.tenantId !== input.tenantId || row.location.workspaceId !== workspaceId)) {
+          throw new ConflictException("库存原流水不完整或引用范围变化，请核对原操作，不能重新执行");
         }
         return {
           operationId: existing[0].operationId,
@@ -1981,6 +2025,10 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
         };
       }
 
+      if (!RENTAL_STOCK_OPERATION_TYPES.includes(input.type)) throw new BadRequestException("库存作业类型无效");
+      if (!input.reason?.trim()) throw new BadRequestException("库存作业必须填写原因或来源说明");
+      if (input.batchNo !== undefined && (!input.batchNo.trim() || input.batchNo.trim().length > 100)) throw new BadRequestException("批次号不能为空且不能超过100个字符");
+      if (input.sourceDocumentNo !== undefined && (!input.sourceDocumentNo.trim() || input.sourceDocumentNo.trim().length > 100)) throw new BadRequestException("来源单据号不能为空且不能超过100个字符");
       const isTransfer = input.type === "transfer";
       const targetLocationIds = isTransfer
         ? [input.fromLocationId, input.toLocationId]
@@ -1992,6 +2040,7 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
       if (!isTransfer && locationIds.length !== 1) {
         throw new BadRequestException("该库存作业必须选择履约地点");
       }
+      await this.lockStockWriteAdmission(tx, input.tenantId, workspaceId, input.itemGroupId, locationIds, input.type === "consume");
 
       for (const locationId of locationIds) {
         await tx.rentalStockBalance.upsert({
@@ -2079,6 +2128,26 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
       const balances = await this.stockBalanceResults(input.tenantId, input.itemGroupId, locationIds, tx);
       return { operationId, operationType: input.type, idempotent: false, entries, balances };
     }, { isolationLevel: "ReadCommitted" });
+  }
+
+  /** Current stock registration/operations only. Historical order consumption,
+   * physical returns and original receipts retain their own frozen basis. */
+  private async lockStockWriteAdmission(
+    tx: TTransaction, tenantId: string, workspaceId: string, itemGroupId: string, locationIds: string[], consumableOnly = false
+  ): Promise<RentalInventoryMode> {
+    const { definition } = await lockActiveCategoryBinding(tx, tenantId, workspaceId);
+    const groups = await tx.$queryRaw<Array<{ inventoryMode: string; categoryCode: string }>>(sql`
+      SELECT inventoryMode, categoryCode FROM rental_item_groups
+      WHERE id = ${itemGroupId} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId} FOR UPDATE
+    `);
+    const mode = typeof groups[0]?.inventoryMode === "string" ? groups[0].inventoryMode.toLowerCase() as RentalInventoryMode : undefined;
+    if (groups.length !== 1 || !mode || ![RentalInventoryMode.Quantity, RentalInventoryMode.Consumable].includes(mode)
+      || readRentalCategoryCode(groups[0].categoryCode) !== definition.code || !definition.supportedInventoryModes.includes(mode)) {
+      throw new ConflictException("库存型号已变化，须为当前空间及品类支持的数量型或耗材型号");
+    }
+    if (consumableOnly && mode !== RentalInventoryMode.Consumable) throw new BadRequestException("消耗作业只适用于一次性耗材库存");
+    await readRentalFulfillmentAdmission(tx, tenantId, workspaceId, locationIds.map(locationId => ({ locationId, capability: "storage" })));
+    return mode;
   }
 
   /**
@@ -2212,6 +2281,7 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
   }
 
   async upsertStockBalance(balance: RentalStockBalance): Promise<void> {
+    balance = structuredClone(balance);
     const data = {
       tenantId: balance.tenantId,
       itemGroupId: balance.itemGroupId,
@@ -2219,19 +2289,23 @@ export class RentalCoreFactRepository<TTransaction extends RentalCoreFactTransac
       onHandQuantity: balance.onHandQuantity,
       maintenanceQuantity: balance.maintenanceQuantity
     };
-    const workspaceId = await this.contacts.resolveWorkspaceId(this.store, balance.tenantId);
-    const existing = await this.store.rentalStockBalance.findUnique({
-      where: { id: balance.id },
-      select: { tenantId: true, workspaceId: true }
-    });
-    if (existing && (existing.tenantId !== balance.tenantId || existing.workspaceId !== workspaceId)) {
-      throw new ConflictException("库存台账已属于其他租户或经营空间，拒绝覆盖");
-    }
-    if (existing) {
-      await this.store.rentalStockBalance.update({ where: { id: balance.id }, data });
-    } else {
-      await this.store.rentalStockBalance.create({ data: { workspaceId, id: balance.id, ...data } });
-    }
+    await this.store.$transaction(async (tx) => {
+      const workspaceId = await this.contacts.resolveWorkspaceId(tx, balance.tenantId);
+      await this.lockStockWriteAdmission(tx, balance.tenantId, workspaceId, balance.itemGroupId, [balance.locationId]);
+      const existing = await tx.rentalStockBalance.findUnique({
+        where: { id: balance.id }, select: { tenantId: true, workspaceId: true, itemGroupId: true, locationId: true }
+      });
+      if (existing && (existing.tenantId !== balance.tenantId || existing.workspaceId !== workspaceId
+        || existing.itemGroupId !== balance.itemGroupId || existing.locationId !== balance.locationId)) {
+        throw new ConflictException("库存台账已有其他归属，拒绝用样本覆盖");
+      }
+      // Sample initialization only fills a missing balance; a concurrent real
+      // operation or another instance may already have created the actual row.
+      if (existing || await tx.rentalStockBalance.findFirst({
+        where: { tenantId: balance.tenantId, workspaceId, itemGroupId: balance.itemGroupId, locationId: balance.locationId }, select: { id: true }
+      })) return;
+      await tx.rentalStockBalance.create({ data: { workspaceId, id: balance.id, ...data } });
+    }, { isolationLevel: "ReadCommitted" });
   }
 
   async listStockDispositions(tenantId: string, orderId?: string, tx?: TTransaction): Promise<RentalStockDisposition[]> {

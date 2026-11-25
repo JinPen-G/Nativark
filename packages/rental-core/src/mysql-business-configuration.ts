@@ -140,7 +140,7 @@ export type RentalQuoteRateTarget = Pick<RentalPricingRate, 'itemGroupId' | 'pri
  */
 export interface RentalBusinessConfigStore<TTransaction = RentalBusinessConfigurationTransaction> {
   loadAll(): Promise<TenantBusinessConfigSnapshot[]>;
-  loadWorkspaceSnapshot?(tenantId: string, workspaceId: string, expected: CategoryWriteBinding): Promise<TenantBusinessConfigSnapshot>;
+  loadWorkspaceSnapshot?(tenantId: string, workspaceId: string, expected: CategoryWriteBinding, tx?: TTransaction): Promise<TenantBusinessConfigSnapshot>;
   readQuoteRateTargets?(tenantId: string, workspaceId: string, at: Date): Promise<RentalQuoteRateTarget[]>;
   /** Opening metadata only; never loads rule config, calendar days or prices. */
   readReadinessBusinessFacts?(tenantId: string, workspaceId: string, at: Date, calendarYears: readonly number[], tx?: TTransaction): Promise<RentalReadinessBusinessFacts>;
@@ -251,8 +251,8 @@ export class RentalBusinessConfigRepository<TTransaction extends RentalBusinessC
 
   /** Current business configuration only. The expected Core binding prevents a
    * second read from joining a different adoption; empty sets remain empty. */
-  async loadWorkspaceSnapshot(tenantId: string, workspaceId: string, expected: CategoryWriteBinding): Promise<TenantBusinessConfigSnapshot> {
-    return this.store.$transaction(async tx => {
+  async loadWorkspaceSnapshot(tenantId: string, workspaceId: string, expected: CategoryWriteBinding, existingTx?: TTransaction): Promise<TenantBusinessConfigSnapshot> {
+    const read = async (tx: TTransaction): Promise<TenantBusinessConfigSnapshot> => {
       const { definition } = await this.contacts.lockCategoryBinding(tx, tenantId, workspaceId, expected);
       const where = { tenantId, workspaceId };
       const [pricing, discounts, services, calendars, rules, templates] = await Promise.all([
@@ -265,7 +265,8 @@ export class RentalBusinessConfigRepository<TTransaction extends RentalBusinessC
         services: services.map(row => this.toService(row)), calendars: calendars.map(row => this.toCalendar(row)),
         ruleVersions: rules.map(row => this.toRuleVersion(row)), notificationTemplates: templates.map(row => this.toNotificationTemplate(row)),
         hasPersistedConfig: true };
-    }, { isolationLevel: "ReadCommitted" });
+    };
+    return existingTx ? read(existingTx) : this.store.$transaction(read, { isolationLevel: "ReadCommitted" });
   }
 
   async readQuoteRateTargets(tenantId: string, workspaceId: string, at: Date): Promise<RentalQuoteRateTarget[]> {

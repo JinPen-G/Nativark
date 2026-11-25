@@ -1591,6 +1591,8 @@ export class RentalCoreConfigRepository<TTransaction extends RentalCoreConfigura
   }
 
   async upsertCouponTemplate(template: RentalCouponTemplate, tx?: TTransaction, expectedBinding?: CategoryWriteBinding): Promise<void> {
+    template = structuredClone(template);
+    expectedBinding = expectedBinding ? { ...expectedBinding } : undefined;
     const data = {
       tenantId: template.tenantId,
       code: template.code,
@@ -1640,6 +1642,19 @@ export class RentalCoreConfigRepository<TTransaction extends RentalCoreConfigura
         if (expectedBinding && template.version !== `${Number(existing.version.split(".")[0]) + 1}.0`) {
           throw new ConflictException("优惠券模板已被其他人员修改，请刷新后重新保存");
         }
+      }
+      // Configuration edits and initial creation must recheck their references
+      // under adoption's space lock. Existing claim/budget transactions retain
+      // the original template basis instead of revalidating historical coupons.
+      if ((!tx || expectedBinding || !existing) && template.applicableItemGroupIds.length) {
+        const ids = [...new Set(template.applicableItemGroupIds)];
+        // The caller may already have an older REPEATABLE READ snapshot.
+        const groups = await client.$queryRaw<Array<{ id: string }>>(sql`
+          SELECT id FROM rental_item_groups
+          WHERE tenantId = ${template.tenantId} AND workspaceId = ${workspaceId} AND id IN (${join(ids)})
+          ORDER BY id FOR UPDATE
+        `);
+        if (groups.length !== ids.length) throw new ConflictException("优惠券适用商品已变化或不属于当前经营空间，请重新核对");
       }
       await client.rentalCouponTemplate.upsert({
         where: { id: template.id },

@@ -1,6 +1,7 @@
 /** Rental报价、券、奖励及通知的私有MySQL视图；当前范围和原事件由宿主提供，公共Core合同不携带生成模型。 */
 import type { Prisma } from "@prisma/client";
 import type { RentalQuoteInventoryReader } from "./quote-inventory-basis";
+import type { RentalQuoteConfigurationReader } from "./quote-configuration";
 import type { RentalQuoteCapabilityTransaction } from "./mysql-quote-capabilities";
 
 export interface RentalBusinessFactTransaction extends RentalQuoteCapabilityTransaction {
@@ -30,6 +31,8 @@ export interface RentalBusinessFactContacts<TTransaction extends RentalBusinessF
   /** 每次从原服务端身份生成，前后读取不缓存旧权限。 */
   orderVisibilityWhere(): Prisma.RentalOrderWhereInput;
   quoteConfiguration: RentalQuoteInventoryReader<TTransaction>;
+  /** 缺少该组合读口时只拒绝新报价，已存报价和原收据继续沿历史依据。 */
+  quoteConfigurationBasis?: RentalQuoteConfigurationReader<TTransaction>;
   events?: {
     /** 原事实与事件在同一事务提交；外部短信执行仍由原通知服务负责。 */
     notification(transaction: TTransaction, scope: { tenantId: string; workspaceId: string }, id: string): PromiseLike<unknown>;

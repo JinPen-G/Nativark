@@ -1,6 +1,7 @@
 /** Rental 官网登录态业务请求由宿主原 JSON 运输执行。
  * 当前客户身份、刷新和迟到响应由宿主维护，金额、授权与原结果沿服务端裁定。 */
-import type { ClientOrderView } from "../../src/client-contracts";
+import type { ClientCatalogResponse, ClientOrderView } from "../../src/client-contracts";
+import { assertSupportedCatalogVersion } from "./catalog";
 import type {
   EnterpriseOwnRentalPolicy,
   EnterpriseBookingApprovalView,
@@ -37,7 +38,7 @@ export function createRentalWebsiteSessionClient(authedJson: RentalWebsiteSessio
   return {
     /** 登录态目录：含履约地点、履约模式与型号（用于下单时取 locationId / fulfillmentMode）。 */
     catalog() {
-      return authedJson<Record<string, any>>('/catalog');
+      return authedJson<ClientCatalogResponse>('/catalog').then(assertSupportedCatalogVersion);
     },
     availability(payload: unknown) {
       return authedJson<Record<string, unknown>>('/availability', { method: 'POST', body: JSON.stringify(payload) });

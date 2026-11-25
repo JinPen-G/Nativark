@@ -27,6 +27,7 @@ import { snapshotInspectionTemplate } from "./inspection-template-snapshot";
 import { capabilityRequirementRoots, captureCapabilityRequirements, resolveCapabilityRequirements } from "./capability-conditions";
 import { readRentalCategoryCode } from "./category-identity";
 import { readRentalInventoryBasis, assertInventoryBasisContext } from "./quote-inventory-basis";
+import { captureQuoteConfigurationBasis } from "./quote-configuration";
 import { assertCapabilityHookRuntimeAvailable, CapabilityBlockedException, CapabilityHookRuntime, requiresCapabilityHookRuntime } from "./capability-runtime";
 import { CapabilityHookRepository } from "./capability-audit";
 import { WorkspaceCapabilityService } from "./workspace-capabilities";
@@ -5836,7 +5837,8 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
       if (!isDeepStrictEqual(context.category, resolved.definition)) {
         throw new ConflictException("品类版本在报价准备期间已变化，请刷新后重新报价");
       }
-      context = { ...context, category: resolved.definition };
+      context = { ...context, category: resolved.definition,
+        categoryVersionId: resolved.categoryVersionId, categoryAdoptionRevision: resolved.adoptionRevision };
       categoryVersionId = resolved.categoryVersionId;
       categoryAdoptionRevision = resolved.adoptionRevision;
     }
@@ -5900,7 +5902,11 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
     );
     // PRICE-03：费率取自**不可变价格版本**（按租期开始时点命中的最新版本），
     // 而不是计划行的当前值——计划行只是编辑工作区，版本链才是生效事实。
-    const spaceVersion = await this.resolveSpaceRates(tenantId, context, input.startAt);
+    const spaceVersion = structuredClone(await this.resolveSpaceRates(tenantId, context, input.startAt));
+    // 保留实际算价输入的指纹。保存时在原事务重读同一组合，不能把后继
+    // 价格与旧规则/履约费拼接成可消费报价；本证据不回写历史正文。
+    const configurationBasis = 'versionId' in spaceVersion
+      ? captureQuoteConfigurationBasis(tenantId, this.workspaceOf(tenantId), context, state, spaceVersion) : undefined;
     const planRates: RentalPricingRate[] = spaceVersion.rates;
     const calendars = this.calendarsForDateRange(tenantId, context, input.startAt, input.endAt);
     // 停业只拦领取与归还时点，不拦租期跨过（需求 4.5.4）。
@@ -6605,8 +6611,8 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
     let persisted = quote;
     if (original) {
       if (!this.factStore.saveQuoteForOriginalOperation) throw new ServiceUnavailableException('报价原操作持久化不可用');
-      persisted = await this.factStore.saveQuoteForOriginalOperation(quote, original, expectedBinding, beforePersist);
-    } else await this.factStore.upsertQuote(quote, expectedBinding);
+      persisted = await this.factStore.saveQuoteForOriginalOperation(quote, original, expectedBinding, beforePersist, configurationBasis);
+    } else await this.factStore.upsertQuote(quote, expectedBinding, configurationBasis);
     return persisted;
   }
 

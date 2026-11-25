@@ -12,7 +12,9 @@ import type {
   ClientWebsiteHostResolution,
 } from "../../src/client-contracts";
 import type { RentalAvailabilityLine } from "../../src/contracts";
+import { assertSupportedCatalogVersion } from "./catalog";
 
+export { assertSupportedCatalogVersion } from "./catalog";
 export { createRentalWebsiteSessionClient, type RentalWebsiteSessionRequest } from "./session";
 export { createRentalWebsiteAuthClient, createRentalWebsiteAccountClient } from "./auth";
 export type { OwnProfileReadView, RentalWebsiteAuthPorts, RentalWebsiteAccountPorts,
@@ -60,7 +62,7 @@ export function createRentalWebsitePublicClient(apiBase: string) {
       return requestJson<BootstrapResponse>("/public/bootstrap", { tenantCode, client: "web" });
     },
     publicCatalog(tenantCode: string, service: string): Promise<PublicCatalogResponse> {
-      return requestJson<PublicCatalogResponse>("/public/catalog", { tenantCode, service });
+      return requestJson<PublicCatalogResponse>("/public/catalog", { tenantCode, service }).then(assertSupportedCatalogVersion);
     },
     publicAvailability(tenantCode: string, service: string, payload: PublicAvailabilityRequest): Promise<PublicAvailabilityResponse> {
       return requestJson<PublicAvailabilityResponse>("/public/availability", { tenantCode, service }, {

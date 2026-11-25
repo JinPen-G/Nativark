@@ -24,6 +24,8 @@ import { requestFingerprint } from '@rental-os/platform-contracts/request-finger
 import { readRentalFulfillmentAdmission } from './mysql-fulfillment-admission';
 import { lockRentalBusinessTenant } from './mysql-business-fence';
 import { assertRentalInventoryBasis } from './quote-inventory-basis';
+import { assertQuoteConfigurationBasis, type RentalQuoteConfigurationBasis } from './quote-configuration';
+export { createRentalQuoteConfigurationReader } from './quote-configuration';
 import type { RentalBusinessFactTransaction, RentalBusinessFactStorage, RentalBusinessFactContacts } from "./business-fact-storage";
 export type { RentalBusinessFactTransaction, RentalBusinessFactStorage, RentalBusinessFactContacts } from "./business-fact-storage";
 
@@ -123,10 +125,11 @@ export interface RentalBusinessFactStore<TTransaction extends RentalBusinessFact
   releaseCouponForOrder(tenantId: string, orderId: string, releasedAt: string, tx: TTransaction): Promise<void>;
   expireClaimedCoupons(tenantId: string, expiredAt: string): Promise<number>;
   voidClaimedCoupon(tenantId: string, couponId: string, reason: string, voidedAt: string, tx: TTransaction): Promise<boolean>;
-  upsertQuote(quote: RentalQuoteSnapshotV1, expectedBinding?: { categoryVersionId: string; adoptionRevision: number }): Promise<void>;
+  upsertQuote(quote: RentalQuoteSnapshotV1, expectedBinding?: { categoryVersionId: string; adoptionRevision: number },
+    configurationBasis?: RentalQuoteConfigurationBasis): Promise<void>;
   saveQuoteForOriginalOperation?(quote: RentalQuoteSnapshotV1, original: RentalQuoteOriginalOperation,
     expectedBinding?: { categoryVersionId: string; adoptionRevision: number },
-    beforePersist?: (native: TTransaction) => Promise<void>): Promise<RentalQuoteSnapshotV1>;
+    beforePersist?: (native: TTransaction) => Promise<void>, configurationBasis?: RentalQuoteConfigurationBasis): Promise<RentalQuoteSnapshotV1>;
   findQuoteForOriginalOperation?(tenantId: string, original: RentalQuoteOriginalOperation): Promise<RentalQuoteSnapshotV1 | undefined>;
   findQuoteForOriginalReference?(tenantId: string, key: string): Promise<RentalQuoteSnapshotV1 | undefined>;
   /**
@@ -627,20 +630,24 @@ export class RentalBusinessFactRepository<TTransaction extends RentalBusinessFac
     return result.count === 1;
   }
 
-  async upsertQuote(quote: RentalQuoteSnapshotV1, expectedBinding?: { categoryVersionId: string; adoptionRevision: number }): Promise<void> {
-    await this.persistQuote(structuredClone(quote), expectedBinding && { ...expectedBinding });
+  async upsertQuote(quote: RentalQuoteSnapshotV1, expectedBinding?: { categoryVersionId: string; adoptionRevision: number },
+    configurationBasis?: RentalQuoteConfigurationBasis): Promise<void> {
+    await this.persistQuote(structuredClone(quote), expectedBinding && { ...expectedBinding }, undefined, undefined,
+      configurationBasis && structuredClone(configurationBasis));
   }
 
   async saveQuoteForOriginalOperation(quote: RentalQuoteSnapshotV1, value: RentalQuoteOriginalOperation,
     expectedBinding?: { categoryVersionId: string; adoptionRevision: number },
-    beforePersist?: (native: TTransaction) => Promise<void>): Promise<RentalQuoteSnapshotV1> {
+    beforePersist?: (native: TTransaction) => Promise<void>, configurationBasis?: RentalQuoteConfigurationBasis): Promise<RentalQuoteSnapshotV1> {
     const snapshot = structuredClone(quote), original = quoteOriginalOperation(value);
     if (requestFingerprint(snapshot.request) !== original.inputHash) throw new ConflictException('报价原操作输入冲突');
-    return this.persistQuote(snapshot, expectedBinding && { ...expectedBinding }, original, beforePersist);
+    return this.persistQuote(snapshot, expectedBinding && { ...expectedBinding }, original, beforePersist,
+      configurationBasis && structuredClone(configurationBasis));
   }
 
   private async persistQuote(quote: RentalQuoteSnapshotV1, expectedBinding?: { categoryVersionId: string; adoptionRevision: number },
-    original?: RentalQuoteOriginalOperation, beforePersist?: (native: TTransaction) => Promise<void>): Promise<RentalQuoteSnapshotV1> {
+    original?: RentalQuoteOriginalOperation, beforePersist?: (native: TTransaction) => Promise<void>,
+    configurationBasis?: RentalQuoteConfigurationBasis): Promise<RentalQuoteSnapshotV1> {
     const data = {
       tenantId: quote.tenantId,
       quoteNo: quote.quoteNo,
@@ -781,6 +788,8 @@ export class RentalBusinessFactRepository<TTransaction extends RentalBusinessFac
         await validateQuotedCapabilityRequirements(client, workspaceId, quote);
         await assertRentalInventoryBasis(this.contacts.quoteConfiguration, quote.tenantId, workspaceId,
           quote.request.lines, quote.inventoryBasis, client);
+        await assertQuoteConfigurationBasis(client, quote.tenantId, workspaceId, quote, configurationBasis,
+          this.contacts.quoteConfigurationBasis);
         // 原宿主在Core准备和锁等待后，仅对新报价关闭自己的当前权限及材料期限。
         if (original) await beforePersist?.(client);
         await client.rentalQuote.create({

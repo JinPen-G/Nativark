@@ -409,6 +409,10 @@ export class RentalCoreController {
     await Promise.all([this.service.persist(tenantId), this.business.persist(tenantId)]);
     return redactDeliveryAddressPhone(resolved);
   }
+  /** 事实已由原仓储保存，返回时只脱敏；无关配置快照失败不能遮蔽已提交结果。 */
+  private async factResponse<T>(result: T | Promise<T>): Promise<T> {
+    return redactDeliveryAddressPhone(await result);
+  }
   private async releaseCancelledOrderResources(tenantId: string, orderId: string, tx: Prisma.TransactionClient, reason: string) {
     await this.business.releaseCouponInTransaction(tenantId, orderId, tx);
     await this.serviceCapacities.releaseForOrder(tenantId, orderId, reason, new Date().toISOString(), tx);
@@ -924,11 +928,13 @@ export class RentalCoreController {
     }
   }
   @Post("stock-operations") stockOperation(@Req() req: AuthenticatedRequest, @Body() body: ApplyRentalStockOperationDto) {
-    return this.committed(req.user.tenantId, this.service.applyStockOperation(req.user.tenantId, body, req.user.displayName));
+    // Balances and ledger commit in the original fact transaction. Receipt reads
+    // must not initialize or persist unrelated Core/Business configuration caches.
+    return this.service.applyStockOperation(req.user.tenantId, body, req.user.displayName);
   }
   @Get("stock-dispositions") dispositions(@Req() req: AuthenticatedRequest, @Query("orderId") orderId?: string) { return this.service.listStockDispositions(req.user.tenantId, orderId); }
-  @Post("stock-dispositions/:dispositionId/restore") restoreDisposition(@Req() req: AuthenticatedRequest, @Param("dispositionId") dispositionId: string) { return this.committed(req.user.tenantId, this.service.restoreStockDisposition(req.user.tenantId, dispositionId, req.user.displayName)); }
-  @Post("stock-dispositions/:dispositionId/write-off") writeOffDisposition(@Req() req: AuthenticatedRequest, @Param("dispositionId") dispositionId: string, @Body() body: WriteOffRentalStockDispositionDto) { return this.committed(req.user.tenantId, this.service.writeOffStockDisposition(req.user.tenantId, dispositionId, body.reason, req.user.displayName)); }
+  @Post("stock-dispositions/:dispositionId/restore") restoreDisposition(@Req() req: AuthenticatedRequest, @Param("dispositionId") dispositionId: string) { return this.factResponse(this.service.restoreStockDisposition(req.user.tenantId, dispositionId, req.user.displayName)); }
+  @Post("stock-dispositions/:dispositionId/write-off") writeOffDisposition(@Req() req: AuthenticatedRequest, @Param("dispositionId") dispositionId: string, @Body() body: WriteOffRentalStockDispositionDto) { return this.factResponse(this.service.writeOffStockDisposition(req.user.tenantId, dispositionId, body.reason, req.user.displayName)); }
   @Put("stock-balances") saveStock(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalStockBalanceDto) { return this.committed(req.user.tenantId, this.service.saveStockBalance(req.user.tenantId, body)); }
   @Get("work-orders") workOrders(@Req() req: AuthenticatedRequest, @Query("status") status?: string) {
     return this.service.listWorkOrders(req.user.tenantId, status as RentalWorkOrderStatus | undefined);
@@ -940,22 +946,22 @@ export class RentalCoreController {
     return this.service.listWorkOrderHistory(req.user.tenantId, id);
   }
   @Post("work-orders") createWorkOrder(@Req() req: AuthenticatedRequest, @Body() body: CreateRentalWorkOrderDto) {
-    return this.committed(req.user.tenantId, this.service.createWorkOrder(req.user.tenantId, body, req.user.displayName));
+    return this.factResponse(this.service.createWorkOrder(req.user.tenantId, body, req.user.displayName));
   }
   @Put("work-orders/:id/assign") assignWorkOrder(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: AssignRentalWorkOrderDto) {
-    return this.committed(req.user.tenantId, this.service.assignWorkOrder(req.user.tenantId, id, body));
+    return this.factResponse(this.service.assignWorkOrder(req.user.tenantId, id, body));
   }
   @Post("work-orders/:id/start") startWorkOrder(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
-    return this.committed(req.user.tenantId, this.service.startWorkOrder(req.user.tenantId, id, req.user.displayName));
+    return this.factResponse(this.service.startWorkOrder(req.user.tenantId, id, req.user.displayName));
   }
   @Post("work-orders/:id/submit") submitWorkOrder(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SubmitRentalWorkOrderDto) {
-    return this.committed(req.user.tenantId, this.service.submitWorkOrder(req.user.tenantId, id, body, req.user.displayName));
+    return this.factResponse(this.service.submitWorkOrder(req.user.tenantId, id, body, req.user.displayName));
   }
   @Post("work-orders/:id/review") reviewWorkOrder(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: ReviewRentalWorkOrderDto) {
-    return this.committed(req.user.tenantId, this.service.reviewWorkOrder(req.user.tenantId, id, body, req.user.displayName));
+    return this.factResponse(this.service.reviewWorkOrder(req.user.tenantId, id, body, req.user.displayName));
   }
   @Post("work-orders/:id/cancel") cancelWorkOrder(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: CancelRentalWorkOrderDto) {
-    return this.committed(req.user.tenantId, this.service.cancelWorkOrder(req.user.tenantId, id, body, req.user.displayName));
+    return this.factResponse(this.service.cancelWorkOrder(req.user.tenantId, id, body, req.user.displayName));
   }
   @Post("availability") availability(@Req() req: AuthenticatedRequest, @Body() body: RentalAvailabilityDto) { return this.service.availability(req.user.tenantId, body); }
   /**
