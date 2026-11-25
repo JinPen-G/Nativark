@@ -88,7 +88,7 @@ const prepared = createAiNativeDataPreparation({ baseSchema, contribution: ai })
 准备本包时按下面三个步骤装配。
 
 1. 在已有 npm workspace 依赖环境运行 `npm run build -w @rental-os/ai-native-data`，从同一构建包取得完整字节集合，以 `createAiNativeDataRelease({ files, source })` 生成固定发行资料。`source` 是实际发行提交，原 SQL 来源由 provenance 保存。构建前置以 [包脚本](package.json) 为准。
-2. 将发行资料加入所选部署锁的 `dataCapabilities`，使用 `checkPlatformDataCapabilities(lock)` 核数据前置。Core 安装检查使用 `coreDeploymentHostVersions(lock)` 的同一版本视图。本版材料支持公共数据 `0.1.8`、`0.1.9` 与 Rental 数据 `0.1.0` 的已声明范围和 initial 摘要。公共 `0.1.9` 仅追加独立限流表，原公共40模型与AI材料保持，组合为248模型。固定提取基线仍为40模型/`0.1.8`，来源和58份SQL摘要按原记录核定。公共数据 `0.1.10` 及之后须另行验证兼容。
+2. 将发行资料加入所选部署锁的 `dataCapabilities`，使用 `checkPlatformDataCapabilities(lock)` 核数据前置。Core 安装检查使用 `coreDeploymentHostVersions(lock)` 的同一版本视图。本版材料支持公共数据 `0.1.8`、`0.1.9` 与 Rental 数据 `0.1.0`、`0.1.1` 的已声明范围和 initial 摘要。公共 `0.1.9` 仅追加独立限流表，原公共40模型与AI材料保持，组合为248模型。Rental `0.1.1` 只追加[六张换货工作流表](../rental-core/prisma/migrations/20261125010000_rental_exchange_workflow/migration.sql)，不改原 schema、initial 或 AI 依赖的表、列和键；六表不与 AI 的58份迁移重名，仍按公共 → Rental完整迁移链 → AI 的顺序准备。固定提取基线仍为公共40模型/`0.1.8`、Rental121模型/`0.1.0`，来源和58份SQL摘要不变。公共数据 `0.1.10`、Rental 数据 `0.1.2` 及之后须另行验证兼容。
 3. 以 `createCoreMigrationDeployment({ lock, platform, cores, dataCapabilities })` 准备完整迁移集合。`dataCapabilities` 是能力 ID 到完整已核包字节的 Map，必须覆盖锁中的全部所选能力。另用上面的 schema 组合器形成同一宿主的完整 schema，再沿宿主准备入口保存新的待部署目录。
 
 部署组合核对公共 → Core → 平台能力的实际目录排序，缺包、摘要变化或混入未选择能力都会拒绝。`createAiNativeDataPreparation` 仅返回 AI 材料，完整部署与最终 schema 由宿主组合；结果仍为 `prepared / pending`。

@@ -38,9 +38,10 @@ function releaseMetadata(contribution: AiNativeDataContribution) {
       contract: { minInclusive: "0.1.1", maxExclusive: "0.2.0" } },
     runtime: { node: { minInclusive: "22.0.0", maxExclusive: "25.0.0" } },
     schema: AI_NATIVE_PRISMA_SCHEMA, data: contribution.data,
-    // 当前材料只核定这两个数据基线；后续发行须先验证兼容再扩大范围。
+    // Rental 0.1.1 仅追加六张换货 raw SQL 表；原 schema、initial 及 AI 外键目标保持。
+    // 只接受已核定的 0.1.0/0.1.1，未来数据版本须重新验证，不以 readable 范围代替。
     prerequisites: { platform: { minInclusive: prerequisites.platform.dataVersion, maxExclusive: "0.1.10" },
-      cores: [{ coreId: "rental", version: { minInclusive: prerequisites.rental.dataVersion, maxExclusive: "0.1.1" },
+      cores: [{ coreId: "rental", version: { minInclusive: prerequisites.rental.dataVersion, maxExclusive: "0.1.2" },
         migrations: [{ id: prerequisites.rental.migrationId, sha256: prerequisites.rental.migrationSha256 }] }] }
   };
 }
