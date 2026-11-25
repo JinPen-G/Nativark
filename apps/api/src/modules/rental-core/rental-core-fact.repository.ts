@@ -47,7 +47,8 @@ import { BUSINESS_FAILURE_OUTBOX, type BusinessFailureOutboxParticipant } from '
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 import { readOrderInspectionBasisInput } from "./rental-order-inspection-basis.read";
 import { readAllocationPickupInput } from "./rental-order-allocation-pickup.read";
-import { replaceCategoryUniqueClaims, validateActiveCategoryWrite, type CategoryWriteBinding } from "./category-active-write";
+import { lockActiveCategoryBinding, replaceCategoryUniqueClaims, validateActiveCategoryWrite, type CategoryWriteBinding } from "./category-active-write";
+import { readRentalFulfillmentAdmission } from "./rental-fulfillment-admission";
 import { bufferedRentalPeriod, peakReservedQuantity } from "./rental-occupancy";
 import { rentalOrderDueAt } from "./rental-carrier-shipment";
 import { rentalOrderListSort } from "./rental-order-list-sort";
@@ -1678,6 +1679,10 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     statusChange?: AssetStatusHistoryMetadata,
     expectedBinding?: CategoryWriteBinding
   ): Promise<void> {
+    asset = structuredClone(asset);
+    uniqueAttributes = structuredClone(uniqueAttributes);
+    statusChange = statusChange && { ...statusChange };
+    expectedBinding = expectedBinding && { ...expectedBinding };
     const data = {
       tenantId: asset.tenantId,
       itemGroupId: asset.itemGroupId,
@@ -1690,8 +1695,21 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     try {
       await this.prisma.$transaction(async (tx) => {
         const workspaceId = await resolveScopeWorkspaceId(tx, asset.tenantId);
+        const { definition } = await lockActiveCategoryBinding(tx, asset.tenantId, workspaceId, expectedBinding);
+        // The editor may have waited for a hook or this lock after checking its
+        // model/location. Recheck their actual facts before claims or asset writes.
+        const groups = await tx.$queryRaw<Array<{ id: string; inventoryMode: string; categoryCode: string }>>(Prisma.sql`
+          SELECT id, inventoryMode, categoryCode FROM rental_item_groups
+          WHERE id = ${asset.itemGroupId} AND tenantId = ${asset.tenantId} AND workspaceId = ${workspaceId} FOR UPDATE
+        `);
+        if (groups.length !== 1 || typeof groups[0]?.inventoryMode !== "string" || groups[0].inventoryMode.toLowerCase() !== RentalInventoryMode.Serialized
+          || readRentalCategoryCode(groups[0].categoryCode) !== definition.code) {
+          throw new ConflictException("资产型号已变化，须为当前经营空间和品类下的序列化型号");
+        }
+        await readRentalFulfillmentAdmission(tx, asset.tenantId, workspaceId, [{ locationId: asset.locationId, capability: "storage" }]);
         const activeWrite = await validateActiveCategoryWrite(tx, asset.tenantId, workspaceId, {
-          id: asset.id, scope: "asset", attributes: asset.attributes, serialNo: asset.serialNo
+          id: asset.id, scope: "asset", attributes: asset.attributes, serialNo: asset.serialNo,
+          inventoryMode: RentalInventoryMode.Serialized, categoryCode: definition.code
         }, expectedBinding);
         await replaceCategoryUniqueClaims(tx, asset.tenantId, workspaceId, "asset", asset.id, activeWrite.claims);
         const existing = await tx.rentalAsset.findUnique({

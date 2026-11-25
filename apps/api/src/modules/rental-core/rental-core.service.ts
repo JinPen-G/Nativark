@@ -1666,6 +1666,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   }
 
   async saveAsset(tenantId: string, input: SaveRentalAssetRequest) {
+    // Keep the checked request fixed across configuration, inventory and hook waits.
+    input = structuredClone(input);
     const state = await this.factContext(tenantId);
     const group = this.group(state, input.itemGroupId);
     if (group.inventoryMode !== RentalInventoryMode.Serialized) throw new BadRequestException("只有序列化库存可以登记独立资产");
