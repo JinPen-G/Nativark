@@ -1175,6 +1175,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   }
 
   async saveCouponTemplate(tenantId: string, input: SaveRentalCouponTemplateRequest) {
+    input = structuredClone(input);
     await this.readCouponTemplates(tenantId);
     const state = this.state(tenantId);
     const { binding } = await this.categoryWriteContext(tenantId, state.profile.categoryCode);
@@ -1226,6 +1227,14 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     };
     await this.configStore.upsertCouponTemplate(result, undefined, binding);
 
+    // A claim or a later edit can commit before this save resumes. Publish the
+    // authoritative result, never the counters/configuration captured earlier.
+    if (this.configStore.loadWorkspaceSnapshot) {
+      await this.refreshCommittedWorkspace(tenantId);
+      const saved = this.state(tenantId).couponTemplates.find(row => row.id === result.id);
+      if (!saved) throw new ConflictException("已保存优惠券的当前结果不可用，请刷新核对原模板");
+      return structuredClone(saved);
+    }
     if (existing) state.couponTemplates.splice(state.couponTemplates.indexOf(existing), 1, result); else state.couponTemplates.unshift(result);
     return result;
   }
