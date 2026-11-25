@@ -2,6 +2,7 @@
  * 登录/刷新/撤权仅访问平台表，业务空间和品类由Core适配补充。
  * 保留原角色映射与刷新事务；本仓储不创建业务绑定或授予Core使用权。 */
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { isDeepStrictEqual } from "node:util";
 import {
   RoleScope,
   TenantStatus,
@@ -10,6 +11,8 @@ import {
   type PlatformTenantSummary,
 } from "@rental-os/platform-contracts";
 import { hashPassword, verifyPassword } from "../../common/password";
+import { getRequestIdentity, type RequestIdentity } from "../../common/request-identity";
+import { PlatformPrincipalAuthority } from "./platform-principal.authority";
 import type { PlatformAuthDataStore, PlatformAuthTransaction, StoredPlatformUser,
   StoredPlatformTenant, StoredPlatformRoleScope, StoredPlatformDataScope, StoredTenantStatus } from "./platform-auth-data-store";
 
@@ -76,6 +79,23 @@ export class PlatformIdentityRepository {
       throw new ForbiddenException(`租户管理操作需要完整租户范围及权限：${permission}`);
     }
     return user;
+  }
+
+  /** 敏感读取在审计及资料读取结束后，用原会话/主体围栏复验；外部等待不占持数据库锁。 */
+  async revalidateTenantManagementRead(identity: Readonly<Partial<RequestIdentity>>, permission: string): Promise<void> {
+    const assertSameIdentity = () => {
+      if (!isDeepStrictEqual(identity, getRequestIdentity())) throw new ForbiddenException("读取期间身份或范围已变化");
+    };
+    assertSameIdentity();
+    const authority = new PlatformPrincipalAuthority(this), principal = authority.current();
+    await this.prisma.$transaction(async transaction => {
+      const lease = await authority.lock(transaction, principal, principal.tenantId);
+      if (lease.user.isSaasAdmin) throw new ForbiddenException("需要当前租户管理身份");
+      await this.assertTenantManagementPermission(principal.tenantId, principal.subjectId, permission, transaction);
+      await lease.revalidate();
+      assertSameIdentity();
+    });
+    assertSameIdentity();
   }
 
   /** 改密回执的版本须在会话创建事务的用户行锁内核对，防止重置后继续签发。 */

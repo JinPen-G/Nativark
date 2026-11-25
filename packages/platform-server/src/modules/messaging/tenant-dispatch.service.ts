@@ -7,7 +7,7 @@ import type { TenantDispatchChannel, TenantDispatchDetail, TenantDispatchPage, T
 import { getRequestIdentity, requireRequestTenantId } from "../../common/request-identity";
 import type { PlatformOperationLogService } from "../../common/operation-log.service";
 
-import type { StoredTenantDispatchRow, TenantDispatchBusinessParticipant, TenantDispatchDataStore, TenantManagementAuthority } from "./messaging-store";
+import type { StoredTenantDispatchRow, TenantDispatchBusinessParticipant, TenantDispatchDataStore, TenantSensitiveReadAuthority } from "./messaging-store";
 
 const Prisma = { sql: sqltag, empty };
 const status = (value: string): TenantDispatchStatus => value === "mock_success" ? "simulated" : value === "mock_failed" ? "simulation_failed"
@@ -17,7 +17,7 @@ const obj = (value: unknown): Record<string, unknown> => value && typeof value =
 const text = (value: unknown) => typeof value === "string" ? value : "";
 
 export class PlatformTenantDispatchService {
-  constructor(private readonly prisma: TenantDispatchDataStore, private readonly accounts: TenantManagementAuthority,
+  constructor(private readonly prisma: TenantDispatchDataStore, private readonly accounts: TenantSensitiveReadAuthority,
     private readonly audit: Pick<PlatformOperationLogService, "record">, private readonly business?: TenantDispatchBusinessParticipant) {}
   private async authorize() {
     const identity = getRequestIdentity();
@@ -69,6 +69,12 @@ export class PlatformTenantDispatchService {
     return { rows: rows.map(row => this.row(row)), total: Number(counts[0]?.total ?? 0), page, pageSize };
   }
   async detail(source: TenantDispatchSource, id: string, channel: TenantDispatchChannel): Promise<TenantDispatchDetail> {
+    const identity = structuredClone(getRequestIdentity() ?? {});
+    const result = await this.readDetail(source, id, channel);
+    await this.accounts.revalidateTenantManagementRead(identity, "system:integration:manage");
+    return result;
+  }
+  private async readDetail(source: TenantDispatchSource, id: string, channel: TenantDispatchChannel): Promise<TenantDispatchDetail> {
     const actor = await this.authorize();
     if (!["platform", "rental", "verification"].includes(source) || !["sms", "email"].includes(channel) || !/^[A-Za-z0-9._:-]{1,191}$/u.test(id))
       throw new BadRequestException("寄件定位无效");

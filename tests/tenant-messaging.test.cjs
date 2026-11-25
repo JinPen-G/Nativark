@@ -384,12 +384,18 @@ test('verification SMS dispatch preserves unknown delivery and only reports fail
     assert.equal(sends, 1);
     assert.doesNotMatch(JSON.stringify(stored), /654321|13800138000/u);
     if (outcome === 'legacy') { stored.status = 'failed'; stored.responseJson = undefined; }
-    const dispatch = new TenantDispatchService(db, { assertTenantManagementPermission: async () => {} }, { record: async () => {} });
+    let rechecks = 0;
+    const dispatch = new TenantDispatchService(db, { assertTenantManagementPermission: async () => {},
+      revalidateTenantManagementRead: async (snapshot, permission) => {
+        assert.deepEqual(snapshot, manager); assert.equal(permission, 'system:integration:manage'); rechecks++;
+      }
+    }, { record: async () => {} });
     await identity.runWithRequestIdentity(manager, async () => {
       const result = await dispatch.detail('verification', 'sms-log', 'sms');
       assert.equal(result.status, outcome === 'legacy' ? 'delivery_uncertain' : outcome);
       assert.equal(Boolean(result.sentAt), outcome === 'sent');
     });
+    assert.equal(rechecks, 1);
   }
 });
 

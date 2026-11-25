@@ -12,7 +12,7 @@ import { imapConnection, readImapMailbox } from "../integrations/imap-reader";
 import { smtpConnection } from "../integrations/smtp-transport";
 import { requireMessagingStorage } from "./tenant-messaging-storage";
 
-import type { TenantManagementAuthority, TenantSupportEmailDataStore, TenantSupportEmailTransaction } from "./messaging-store";
+import type { TenantSensitiveReadAuthority, TenantSupportEmailDataStore, TenantSupportEmailTransaction } from "./messaging-store";
 
 const Prisma = { sql: sqltag, empty };
 
@@ -23,7 +23,7 @@ const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const attachmentRows = (value: StoredEmail["attachments"]) => typeof value === "string" ? JSON.parse(value) as TenantSupportEmailDetail["attachments"] : value;
 
 export class PlatformTenantSupportEmailService<Transaction extends TenantSupportEmailTransaction = TenantSupportEmailTransaction> {
-  constructor(private readonly prisma: TenantSupportEmailDataStore<Transaction>, private readonly accounts: TenantManagementAuthority<Transaction>,
+  constructor(private readonly prisma: TenantSupportEmailDataStore<Transaction>, private readonly accounts: TenantSensitiveReadAuthority<Transaction>,
     private readonly emailRuntime: Pick<TenantEmailRuntimeService, "configuration">, private readonly audit: Pick<PlatformOperationLogService, "record">) {}
   private async authorize() {
     const identity = getRequestIdentity();
@@ -53,11 +53,13 @@ export class PlatformTenantSupportEmailService<Transaction extends TenantSupport
       receiverConfigured: receiving, lastSyncedAt: sync[0]?.lastSyncedAt?.toISOString() };
   }
   async detail(id: string): Promise<TenantSupportEmailDetail> {
+    const identity = structuredClone(getRequestIdentity() ?? {});
     const actor = await this.authorize();
     if (!/^[A-Za-z0-9._:-]{1,191}$/u.test(id)) throw new BadRequestException("邮件定位无效");
     const row = (await this.prisma.$queryRaw<StoredEmail[]>(Prisma.sql`SELECT id, tenantId, senderEmail, senderName, recipient, subject, bodyText, attachments, messageId, receivedAt FROM tenant_support_emails WHERE tenantId = ${actor.tenantId} AND id = ${id} LIMIT 1`))[0];
     if (!row) throw new NotFoundException("客诉邮件不存在");
     await this.audit.record({ ...actor, action: "support.email.read", targetType: "support-email", targetId: id, requireSuccess: true });
+    await this.accounts.revalidateTenantManagementRead(identity, "system:integration:manage");
     return { ...this.project(row), recipient: row.recipient, bodyText: row.bodyText, messageId: row.messageId ?? undefined, attachments: attachmentRows(row.attachments) };
   }
   async sync(): Promise<SyncTenantSupportEmailsResult> {

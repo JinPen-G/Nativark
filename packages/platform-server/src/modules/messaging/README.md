@@ -5,7 +5,7 @@
 ## 三步接入
 
 1. 从 `@rental-os/platform-server/messaging` 导入所需应用及存储端口，消息请求和响应复用 `@rental-os/platform-contracts/tenant-messaging`。按 [messaging-store.ts](messaging-store.ts) 提供实际使用的公共表委托与参数化 SQL。事务回调传递原宿主事务对象。
-2. 邀请应用使用 `TenantInvitationAuthority` 核验当前租户管理权限、角色及业务范围，并在接受邀请的原事务内创建账号和授权。客服应用使用原管理权威、`TenantEmailRuntimeService` 和成功必需的操作审计。寄件应用通过 `TenantDispatchBusinessParticipant` 接入业务查询和详情，业务查询与公共来源进入同一 SQL UNION，共用过滤、全局排序、分页和总数。
+2. 邀请应用使用 `TenantInvitationAuthority` 核验当前租户管理权限、角色及业务范围，并在接受邀请的原事务内创建账号和授权。客服和寄件应用使用 `TenantSensitiveReadAuthority`，由原账户仓储提供初次授权和返回前会话复验；客服另接 `TenantEmailRuntimeService`，两类详情均要求审计成功。寄件应用通过 `TenantDispatchBusinessParticipant` 接入原 Rental 业务查询和详情，业务查询与公共来源进入同一 SQL UNION，共用过滤、全局排序、分页和总数。
 3. 使用 [TenantMessagingHttpModule](tenant-messaging-http.module.ts) 的 `register({ imports, inject, useFactory })` 提供这三个已有应用实例。Factory 返回 [TenantMessagingHttpApplications](tenant-messaging-http.application.ts) 的 `invitations`、`dispatch`、`support`，四个 Controller 共用它们。保留原邀请操作键、投递台账和邮箱 UID 游标，邀请提交后通过 `readByKey` 核对原结果，客服同步显式调用 `sync`。
 
 邀请存储的租户读取使用一个精确 `code/name/status` select，真实 Prisma delegate 可直接满足端口。已接受邀请仍只投影原租户编码和提示，租户当前状态不改变原接受结果。
@@ -29,6 +29,10 @@
 | [客服邮件](tenant-support-email.service.ts) | 公共邮件和邮箱台账、原配置及管理权限、IMAP 和审计 | 连接 fingerprint、120 秒租约、UIDVALIDITY/UID 去重，配置复核后同事务保存邮件及游标，仅释放本次租约 |
 
 原凭证读取已接受邀请时，先核对原 `acceptedUserId` 和有效 `acceptedAt`，仅返回租户编码、提示及 `status: "accepted"`。该原结果在邀请有效期结束后仍可读取。待接受邀请保留当前授权复验，账号与权限在原事务提交；并发锁定后已接受则读取原结果。
+
+客服邮件与全部寄件详情在资料和成功必需的审计都完成后，调用原账户仓储的 [revalidateTenantManagementRead](../platform/platform-identity.repository.ts)。它使用 [原主体围栏](../platform/platform-principal.authority.ts) 在短事务内核原签名会话、租户、账号、角色及当前管理权限，撤销、到期、切换会话或范围变化时不释放已读正文。资料/外部审计的等待不占持该事务锁；此复验不新增业务读取权限。
+
+独立 Core 当前可复用 `platform` 公共发送台账。业务寄件来源目前仅支持原 Rental 参加者，`verification` 只投影原验证码日志；尚未提供任意 Core 的独立业务台账来源注册。新 Core 不应冒用 `rental` 来源或通过客户端提交新来源绕过登记，公共发送台账能力也不等于有权读取其他租户或业务资料。
 
 异常邮件提示、`support.email.import.quarantined` 审计和 UID 游标在同一事务提交。审计失败回滚邮件及游标，已存 UID 跳过重复提示和审计。同步结果分别计数 `imported` 和 `quarantined`。验证码寄件只有原成功日志映射为 `sent`，失败状态与结构化失败证据一致时映射为 `failed`，其余沿 `delivery_uncertain` 核对原操作。
 

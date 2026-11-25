@@ -2,6 +2,7 @@
 import type { InviteTenantOperatorRequest, TenantDispatchChannel, TenantDispatchSource } from "@rental-os/platform-contracts/tenant-messaging";
 import type { PlatformJsonValue } from "../platform/platform-auth-data-store";
 import type { SubscriptionSqlQuery } from "../subscription/subscription-store";
+import type { RequestIdentity } from "../../common/request-identity";
 
 export interface TenantMessagingSqlTransaction {
   $queryRaw<T = unknown>(query: TemplateStringsArray | SubscriptionSqlQuery, ...values: unknown[]): Promise<T>;
@@ -10,6 +11,11 @@ export interface TenantMessagingSqlTransaction {
 
 export interface TenantManagementAuthority<Transaction = never> {
   assertTenantManagementPermission(tenantId: string, userId: string, permission: string, transaction?: Transaction): Promise<unknown>;
+}
+
+/** 详情释放前复用真实会话和主体权威，不能以初次授权或原ALS快照代替当前状态。 */
+export interface TenantSensitiveReadAuthority<Transaction = never> extends TenantManagementAuthority<Transaction> {
+  revalidateTenantManagementRead(identity: Readonly<Partial<RequestIdentity>>, permission: string): Promise<void>;
 }
 
 export type TenantInvitationAccess = Pick<InviteTenantOperatorRequest, "organizationId" | "roleIds" | "workspaceAccesses">;
