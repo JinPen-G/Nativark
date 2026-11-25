@@ -95,6 +95,8 @@ COPY --from=build /app/packages/example-tickets-core/dist packages/example-ticke
 COPY --from=build /app/packages/ai-native-server/dist packages/ai-native-server/dist
 COPY --from=build /app/packages/rental-mcp-host/dist packages/rental-mcp-host/dist
 COPY --from=build /app/LICENSE LICENSE
+# 迁移源码目录供非 root 运行用户读取，兼容此前严格 umask 产生的构建缓存。
+RUN find apps/api/prisma packages/rental-core/prisma -type d -exec chmod 0755 {} +
 USER node
 WORKDIR /app/apps/api
 CMD ["node", "dist/main.js"]
