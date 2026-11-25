@@ -202,12 +202,13 @@ export async function withClientSelectedTaskCreation<T>(db: AiClientMaterialDb,
  * and immutable source are checked in every original runner/Gateway/input tx;
  * original recovery admits only its existing Task's bounded observation time,
  * never a new Step/Invocation or provider dispatch. */
-export async function withClientSelectedOriginalTask<T>(db: PrismaClient,
-  command: { creationKey: string; materialRef: string }, operation: 'execute' | 'submit_input' | 'recover',
+export async function withClientSelectedOriginalTask<T>(db: AiClientTaskDependencies['db']
+  & Partial<Pick<PrismaClient, 'aiStep' | 'aiTaskRunPlan'>>,
+  command: { creationKey: string; materialRef: string }, operation: 'execute' | 'submit_input' | 'recover' | 'cancel',
   consume: () => Promise<T>): Promise<T> {
   if (!hasRentalBusinessTenantFence()) return consume();
   const scope = selected(db), tasks = scope.input.tasks;
-  if (!tasks || tasks.db !== db || !['execute', 'submit_input', 'recover'].includes(operation)) throw unavailable();
+  if (!tasks || tasks.db !== db || !['execute', 'submit_input', 'recover', 'cancel'].includes(operation)) throw unavailable();
   const inputs = new PrismaClientTaskInputRepository(tasks.db);
   const original = await inputs.findCreation(scope.materialScope, command.creationKey);
   if (!original || original.materialRef !== command.materialRef || original.sceneCode !== tasks.sceneCode
@@ -238,7 +239,9 @@ export async function withClientSelectedOriginalTask<T>(db: PrismaClient,
   // Recovery can meter its current observation, but cannot add an action or
   // successor. Preserve the original identities across every such transaction;
   // original repositories still own all status/revision/receipt transitions.
-  const recoveryOrigin = async (reader: Pick<PrismaClient, 'aiRun' | 'aiStep' | 'aiTaskRunPlan'>) => {
+  const recoveryOrigin = async (reader: Pick<PrismaClient, 'aiRun'>
+    & Partial<Pick<PrismaClient, 'aiStep' | 'aiTaskRunPlan'>>) => {
+    if (!reader.aiStep || !reader.aiTaskRunPlan) throw unavailable();
     const where = { scopeId: task.scopeId, taskId: task.id };
     const runs = await reader.aiRun.findMany({ where, orderBy: { sequence: 'asc' }, take: 1001,
       select: { id: true, taskId: true, scopeId: true, sequence: true, actorKind: true, actorId: true,
@@ -259,13 +262,19 @@ export async function withClientSelectedOriginalTask<T>(db: PrismaClient,
     return hash({ runs, steps, plans });
   };
   const originalRecovery = operation === 'recover' ? await recoveryOrigin(db) : undefined;
+  // Cancellation uses only the original Task control mutation. It never opens
+  // Step/Invocation writes or requires a new model execution/financial grant.
+  const acceptsReference = (reference: AiTaskTransactionReference) => operation === 'cancel'
+    ? reference.kind === 'task_control'
+    : reference.kind !== 'creation' && reference.kind !== 'task_control'
+      && (operation === 'execute' || reference.kind === 'task');
   return withAiTaskTransactionAuthority({ binding: hash({ scope: scope.materialScope, command, operation }), begin: async (tx, reference) => {
-    if (reference.kind === 'creation' || reference.kind === 'task_control'
-      || operation !== 'execute' && reference.kind !== 'task') throw denied();
+    if (!acceptsReference(reference)) throw denied();
     const material = await new PrismaClientSceneMaterialRepository(db).findSource(scope.materialScope, original.materialRef);
     if (!material || material.inputHash !== original.materialInputHash || material.materialHash !== original.materialHash
       || material.revision !== original.materialRevision || material.bindingHash !== original.bindingHash) throw denied();
-    const lease = await begin(scope, tx, material, true, operation === 'recover' ? 'original_recovery' : 'new_work');
+    const lease = await begin(scope, tx, material, true,
+      operation === 'recover' || operation === 'cancel' ? 'original_recovery' : 'new_work');
     const verifyTarget = async () => {
       current(scope);
       const latestInput = await inputs.findCreation(scope.materialScope, command.creationKey, tx, true);
@@ -289,9 +298,8 @@ export async function withClientSelectedOriginalTask<T>(db: PrismaClient,
     };
     const verifyReference = async (key: AiTaskTransactionReference) => {
       current(scope);
-      if (key.kind === 'creation' || key.kind === 'task_control'
-        || operation !== 'execute' && key.kind !== 'task') throw denied();
-      if (key.kind === 'task') { if (key.taskId !== task.id) throw denied(); }
+      if (!acceptsReference(key) || key.kind === 'creation') throw denied();
+      if (key.kind === 'task' || key.kind === 'task_control') { if (key.taskId !== task.id) throw denied(); }
       else if (key.kind === 'step') await verifyStep(key.stepId);
       else {
         const invocation = await tx.aiGatewayInvocation.findFirst({ where: { callId: key.callId, scopeId: task.scopeId,

@@ -1,4 +1,4 @@
-/** Selected client material, task creation and original order-model HTTP. Each channel delegates to
+/** Selected client order navigation, material, Task and original order-model HTTP. Each channel delegates to
  * the original controller and application, preserving schemas, refusal audit,
  * abort handling and unknown receipts. Other client actions are not inherited. */
 import { Body, Controller, Header, HttpCode, Inject, Post, Req } from "@nestjs/common";
@@ -13,6 +13,71 @@ abstract class RentalClientMaterialHttp {
 
   protected constructor(application: AiClientEntryApplication) {
     this.original = new AiClientEntryController(application);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readHostCapabilities) @HttpCode(200) @Header("Cache-Control", "no-store")
+  readHostCapabilities(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.readHostCapabilities(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readOrderTaskHostCapabilities) @HttpCode(200) @Header("Cache-Control", "no-store")
+  readOrderTaskHostCapabilities(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.readOrderTaskHostCapabilities(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readOrderAction) @HttpCode(200) @Header("Cache-Control", "no-store")
+  readOrderAction(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.readOrderAction(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.revalidateOrderAction) @HttpCode(200) @Header("Cache-Control", "no-store")
+  revalidateOrderAction(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.revalidateOrderAction(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskSnapshot) @HttpCode(200) @Header("Cache-Control", "no-store")
+  readTaskSnapshot(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.readTaskSnapshot(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskEvents) @HttpCode(200) @Header("Cache-Control", "no-store")
+  readTaskEvents(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.readTaskEvents(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readOrderExplanation) @HttpCode(200) @Header("Cache-Control", "no-store")
+  readOrderExplanation(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.readOrderExplanation(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readSource) @HttpCode(200) @Header("Cache-Control", "no-store")
+  readSource(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.readSource(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.requestTaskCancellation) @HttpCode(200) @Header("Cache-Control", "no-store")
+  requestTaskCancellation(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.requestTaskCancellation(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskCancellationReceipt) @HttpCode(200) @Header("Cache-Control", "no-store")
+  readTaskCancellationReceipt(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.readTaskCancellationReceipt(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskCancellationSettlementReceipt) @HttpCode(200) @Header("Cache-Control", "no-store")
+  readTaskCancellationSettlementReceipt(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.readTaskCancellationSettlementReceipt(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.settleTaskUnstartedCancellation) @HttpCode(200) @Header("Cache-Control", "no-store")
+  settleTaskUnstartedCancellation(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.settleTaskUnstartedCancellation(request, body);
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.reconcileTaskInputCancellation) @HttpCode(200) @Header("Cache-Control", "no-store")
+  reconcileTaskInputCancellation(@Req() request: ClientEntryRequest, @Body() body: unknown) {
+    return this.original.reconcileTaskInputCancellation(request, body);
   }
 
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.prepareOrderMaterial) @HttpCode(200) @Header("Cache-Control", "no-store")

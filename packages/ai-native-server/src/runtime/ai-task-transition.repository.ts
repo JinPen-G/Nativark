@@ -525,7 +525,12 @@ const originalWork = async () => {
             remainingActiveMs: checkpoint.continuation.remainingActiveMs, remainingOutputBytes: checkpoint.continuation.remainingOutputBytes } } : {}) };
 
 };
-return input.to === 'running' || input.to === 'cancel_requested' ? withAiTaskTransaction(tx, { kind: input.to === 'cancel_requested' ? 'task_control' : 'task', taskId: input.taskId }, originalWork) : originalWork();
+if (input.to === 'running') return withAiTaskTransaction(tx, { kind: 'task', taskId: input.taskId }, originalWork);
+// A server-bound cancellation witness still mutates the original Task/Run.
+// Take the same current Auth/Core participant before the original task lock.
+if (input.to === 'cancel_requested' || inputWitness)
+  return withAiTaskTransaction(tx, { kind: 'task_control', taskId: input.taskId }, originalWork);
+return originalWork();
 }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: confirmation ? 10000 : 5000 });
     } catch (error) {
       // Any completed mutation callback may have committed before the reply

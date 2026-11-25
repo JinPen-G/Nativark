@@ -15,6 +15,7 @@ import { requestFingerprint } from '@rental-os/platform-contracts/request-finger
 import { assertAiReadContextBinding } from './tools/read-context-binding';
 import { validateAiOrderReadResponse } from './scenes/scene-observation-contracts';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
+import { captureRentalInternalAuthority } from '@rental-os/rental-core/application-internal-authority';
 import { waitForTaskApplicationDependency } from './runner/prisma-task-application';
 import { respondAiScene } from './scenes/original-scenes.controller';
 import { withRequestAbort } from './scenes/request-abort';
@@ -33,7 +34,9 @@ export function composeRequestBoundTaskOrderHandoff(d: Omit<AiOriginalSceneDepen
     const close = () => { active = false; }; signal?.addEventListener('abort', close, { once: true });
     const clock = d.clock ?? (() => new Date()), requestId = randomUUID();
     const credentials = { current: async () => { if (!active) throw denied(); return { authorization, requestId, audience: 'operator' as const }; } };
-    try { return await waitForTaskApplicationDependency(() => runWithRequestIdentity({}, async () => {
+    try {
+      const selected = captureRentalInternalAuthority();
+      const consume = async () => {
       const input = { ...d, credentials }, auth = composePersistedTaskAuthorization(input), scenes = composeAiOriginalScenes(input);
       const context = await auth.authority.resolve(query.taskId, 'read_metadata');
       const access = await auth.tasks.resolveAccess(query.taskId, 'read_metadata');
@@ -85,7 +88,11 @@ export function composeRequestBoundTaskOrderHandoff(d: Omit<AiOriginalSceneDepen
           candidates: handoff.next.candidates.map(item => ({ code: item.code, version: item.version, kind: item.kind,
             executable: item.executable, permission: item.permission, requirements: item.requirements })), manual: handoff.next.manual },
         execution: handoff.execution, approval: handoff.approval, consistency: 'revalidated_reads_not_atomic_snapshot' }));
-    }), false, signal); } finally { active = false; signal?.removeEventListener('abort', close); }
+      };
+      // Selected HTTP already owns the original Guard identity. Its resource
+      // guards keep their one-use return bridge; legacy calls remain isolated.
+      return await waitForTaskApplicationDependency(() => selected ? consume() : runWithRequestIdentity({}, consume), false, signal);
+    } finally { active = false; signal?.removeEventListener('abort', close); }
   } });
 }
 @Controller(AI_TASK_ORDER_HANDOFF_HTTP.basePath)

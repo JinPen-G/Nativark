@@ -13,7 +13,7 @@
 | [ai-main.ts](src/ai-main.ts)、[ai-app.module.ts](src/ai-app.module.ts)、[ai-assembly.ts](src/ai-assembly.ts) | 独立的 AI 启用入口；核定锁中的完整选装数据包和原迁移账，组合原 Runtime 与同一 Rental 实例。 |
 | [ai-composition.ts](src/ai-composition.ts)、[ai-inspection-transactions.ts](src/ai-inspection-transactions.ts) | 原 AI 工厂、知识权限、检查事务和生命周期参加者；复用当前 Auth、Guard、Core 和业务实例，构造阶段不执行外部调用。 |
 | [ai-http-policy.ts](src/ai-http-policy.ts)、[ai-openapi.ts](src/ai-openapi.ts) | 对实际 AI 处理器逐条登记读取/审计/原事务边界；发布相同挂载范围和原成功状态，不以 provider 存在开放路由。 |
-| [ai-client-http.ts](src/ai-client-http.ts)、[ai-client-request.ts](src/ai-client-request.ts) | 网站和小程序各十二个原客户操作的有限挂载；仅接受同一 Guard/客户准入绑定的实际请求，保留原方法、收据、响应状态和中止语义。 |
+| [ai-client-http.ts](src/ai-client-http.ts)、[ai-client-request.ts](src/ai-client-request.ts) | 网站和小程序各二十五个原客户操作的明确挂载，覆盖订单导航、资料、Task、模型及取消收尾；仅接受同一 Guard/客户准入绑定的实际请求，保留原方法、收据、响应状态和中止语义。 |
 | [database.ts](src/database.ts) | 当前公共 41 模型与 Rental 121 模型组成宿主 Client，公共数据库令牌使用同一连接池；生成物仅归本宿主。唯一请求入口将公共及 Core 适配使用的官方 JSON 空值映射为所选 Client 的同义单例，不另开连接或改动调用方事务。 |
 | [http-application-views.ts](src/http-application-views.ts) | 向 HTTP 注入原服务方法，隐藏 Nest 生命周期钩子，避免同一业务实例被多个模块重复启动。 |
 | [lifecycle.ts](src/lifecycle.ts) | 唯一初始化、预热、配货/到期/文件/限流作业与数据库退出负责人；停止新请求和作业，等待原 HTTP 处理器及四作业参加者完成，再断开连接，排空失败不提前断库。 |
@@ -129,7 +129,9 @@ MCP 的 OAuth、Host router 与原 Web 参加者由独立的 `rental-mcp-host` �
 
 Agent/Copilot 的[原会话接口](../../packages/ai-native-server/src/runtime/conversation.application.ts)已纳入同一宿主的处理器、请求令牌和 OpenAPI 发布。新建、归档、删除及轮次关闭在[原会话事务](../../packages/ai-native-server/src/runtime/conversation-transactions.ts)中复核当前 Auth/Tenant/Core、成员范围与部署状态；准入沿原输入保存事务。展示按原 Task/Run/结果来源读取，明确重新排版或重新解释在同一 Task 内登记后继 Run，复用原累计资源和 Gateway 单账。未建任务的轮次按原创建围栏关闭，已完成轮次仍须核清未决副作用；丢失提交应答只按原操作收据核对。
 
-网站与小程序客户入口分别挂载资料准备/原资料收据、Task 创建/原创建收据、模型启动、人工输入提交/续程、模型恢复/核对，以及原输入、输入收据和回答读取。它们沿原客户工厂复核本人订单、发布状态、材料与当前会话，复用原 Gateway 单账和同一 Task 累计资源。客户作用域固定实际 request 对象及原身份，禁止克隆借用、嵌套和请求结束后的异步逃逸；已提交操作不追加撤权查询改写成功回执。场景选择、报价、预订、移交和取消等未挂操作不由此开放。
+网站与小程序客户入口分别挂载能力观察、原订单导航/复验、订单解释/来源、资料准备/原资料收据、Task 创建/原创建收据、快照/事件、模型启动、人工输入提交/续程、模型恢复/核对，以及原输入、输入收据和回答读取。它们沿原客户工厂复核本人订单、发布状态、材料与当前会话，复用原 Gateway 单账和同一 Task 累计资源。客户作用域固定实际 request 对象及原身份，禁止克隆借用、嵌套和请求结束后的异步逃逸；已提交操作不追加撤权查询改写成功回执。
+
+客户取消沿[原同 Task 事务参加者](../../packages/ai-native-server/src/runtime/scenes/client-selected-transactions.ts)核定当前 ClientAuth/Tenant/Core、本人订单、原资料及独立取消政策。请求取消只保存原意图，未启动任务和已释放输入等待分别使用原持久见证完成收尾，保留原 CAS、事件和收据。部署停新、模型额度耗尽后可办理这些既有任务控制；Core 停用只开放已登记的原取消收据读取。缺少见证及未知结果继续按原键核对。[人工订单转接](../../packages/ai-native-server/src/runtime/task-order-handoff.application.ts)从同一 Task/Run 和原订单权限生成业务页入口，保留当前 Guard 身份及只读语义。
 
 场景计划的读取与变更，以及原任务动作策略的读取、配置和清除，分别挂载原两个 Controller 的五个操作。计划写入在原 Serializable 事务的 Scope/策略锁前取得 Auth/Tenant/Core；任务动作写入继续先核原订单与空间，再执行原策略 CAS 和审计，提交前同事务复验。策略配置不启动任务、不授予模型额度；提交失回复仍按原操作收据核对。定向行为入口为 [策略事务回归](../../packages/ai-native-server/test/scene-policy-transactions.test.cjs)。
 

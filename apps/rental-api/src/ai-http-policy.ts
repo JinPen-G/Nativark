@@ -15,6 +15,7 @@ import { AiOriginalOrderReadController, AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS } f
 import { AiTaskCenterController, AI_NATIVE_TASK_CENTER_REQUESTS } from "@rental-os/ai-native-server/runtime/task-center.application";
 import { AiModelSettingsController, AI_NATIVE_MODEL_SETTINGS_REQUESTS } from "@rental-os/ai-native-server/runtime/model-settings.application";
 import { AiConversationController, AI_CONVERSATION_REQUESTS } from "@rental-os/ai-native-server/runtime/conversation.application";
+import { AiTaskOrderHandoffController, AI_TASK_ORDER_HANDOFF_REQUESTS } from "@rental-os/ai-native-server/runtime/task-order-handoff.application";
 import { AI_STAFF_INSPECTION_REQUESTS } from "@rental-os/ai-native-server/runtime/inspection-assist/staff-inspection-assist.controller";
 import * as shared from "@rental-os/shared";
 import { RENTAL_HOST_CONTROLLERS } from "./http-policy";
@@ -29,14 +30,14 @@ export const RENTAL_AI_CONTROLLERS = Object.freeze([
   OperatorEntrySceneCatalogController, StaffEntrySceneCatalogController, StaffInspectionAssistController,
   AiOriginalScenesController, AiOriginalSceneRecoveryController, AiTaskCenterController, AiModelSettingsController,
   AiOriginalQuoteModelExecutionController, AiOriginalOpeningModelExecutionController, AiOriginalOrderReadController,
-  AiScenePlanPolicyController, AiOriginalTaskActionPolicyController, AiConversationController,
+  AiScenePlanPolicyController, AiOriginalTaskActionPolicyController, AiConversationController, AiTaskOrderHandoffController,
   RentalWebsiteClientEntryController, RentalWechatClientEntryController
 ]);
 export const RENTAL_AI_MOUNTED_REQUESTS: readonly symbol[] = Object.freeze([
   AI_STAFF_INSPECTION_REQUESTS, AI_ORIGINAL_SCENE_REQUESTS, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS,
   AI_NATIVE_TASK_CENTER_REQUESTS, AI_NATIVE_MODEL_SETTINGS_REQUESTS,
   AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS, AI_ORIGINAL_OPENING_MODEL_REQUESTS, AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS,
-  AI_SCENE_PLAN_POLICIES, AI_ORIGINAL_TASK_ACTION_POLICIES, AI_CONVERSATION_REQUESTS
+  AI_SCENE_PLAN_POLICIES, AI_ORIGINAL_TASK_ACTION_POLICIES, AI_CONVERSATION_REQUESTS, AI_TASK_ORDER_HANDOFF_REQUESTS
 ]);
 function reviewed(controller: RentalHttpAccessDeclaration["controller"], handlers: readonly Function[],
   kind: "buffered-read" | "audited-read" | "transactional-write", evidence: string): RentalHttpAccessDeclaration[] {
@@ -49,6 +50,8 @@ const orders = AiOriginalOrderReadController.prototype;
 const plans = AiScenePlanPolicyController.prototype, actions = AiOriginalTaskActionPolicyController.prototype;
 const conversations = AiConversationController.prototype;
 const declarations: readonly RentalHttpAccessDeclaration[] = [
+  ...reviewed(AiTaskOrderHandoffController, [AiTaskOrderHandoffController.prototype.read], "buffered-read",
+  "original Task/Run/input provenance and current guarded order/next-step read; same selected request identity and final scope/source checks, manual handoff grants no approval or execution"),
   ...reviewed(AiConversationController, [conversations.read, conversations.list, conversations.turns,
     conversations.operation, conversations.admission], "buffered-read",
   "original current owner, registered scene and bounded metadata/turn/operation readers; original input and task provenance retained, no admission or model dispatch; selected access rechecks before response"),
@@ -62,6 +65,14 @@ const declarations: readonly RentalHttpAccessDeclaration[] = [
   ...reviewed(AiConversationController, [conversations.modelControl], "transactional-write",
   "explicit same-task pure model control, original source/operation/parent Run and cumulative resource binding; owning registration and runner transactions hold Auth/Tenant/Core before Task CAS, original Gateway single accounting and unknown operation receipt remain"),
   ...[RentalWebsiteClientEntryController, RentalWechatClientEntryController].flatMap(controller => [
+    ...reviewed(controller, [controller.prototype.readHostCapabilities, controller.prototype.readOrderTaskHostCapabilities,
+      controller.prototype.readOrderAction, controller.prototype.revalidateOrderAction, controller.prototype.readTaskSnapshot,
+      controller.prototype.readTaskEvents, controller.prototype.readOrderExplanation, controller.prototype.readSource,
+      controller.prototype.readTaskCancellationReceipt, controller.prototype.readTaskCancellationSettlementReceipt], "audited-read",
+    "original ClientAuth, channel/publication, owned order/material/Task and current read policy; exact navigation/source and original cancellation receipts, selected refusal audit and response recheck, no creation or model dispatch"),
+    ...reviewed(controller, [controller.prototype.requestTaskCancellation, controller.prototype.settleTaskUnstartedCancellation,
+      controller.prototype.reconcileTaskInputCancellation], "transactional-write",
+    "original same-customer Task cancellation request; Auth/Tenant/Core, owned order, original material and independent cancel policy revalidated in the existing Task control transaction; original CAS/receipt retained, no provider cancellation or rollback inferred"),
     ...reviewed(controller, [controller.prototype.prepareOrderMaterial, controller.prototype.createTask], "transactional-write",
     "original channel-specific ClientAuth and same customer/tenant/workspace request; original material/task creation transactions hold selected Auth/Tenant/Core before original Order/Workspace/task locks and revalidate before commit; original operation receipts and unknown retained"),
     ...reviewed(controller, [controller.prototype.readOrderMaterialReceipt, controller.prototype.readTaskCreation], "audited-read",
@@ -152,6 +163,7 @@ export function createRentalAiHttpPolicy(authorization = createRentalAuthorizati
  * recover/reconcile 仍由原 lease/receipt 仓储裁定，不能据此创建或重新派发。 */
 export function rentalAiDeploymentContinuationSelector(policy: ReturnType<typeof createRentalAiHttpPolicy>) {
   const selected = new Map<Function, readonly Function[]>([
+    [AiTaskOrderHandoffController, [AiTaskOrderHandoffController.prototype.read]],
     [AiConversationController, [conversations.read, conversations.list, conversations.turns, conversations.operation,
       conversations.admission, conversations.archive, conversations.delete, conversations.release, conversations.closeUnstarted,
       conversations.modelResult, conversations.taskResult, conversations.display, conversations.displayRevalidate,
@@ -179,7 +191,13 @@ export function rentalAiDeploymentContinuationSelector(policy: ReturnType<typeof
     [AiOriginalTaskActionPolicyController, [actions.read, actions.clear]],
     [AiModelSettingsController, [settings.operation]],
     ...[RentalWebsiteClientEntryController, RentalWechatClientEntryController].map(controller => [controller,
-      [controller.prototype.readOrderMaterialReceipt, controller.prototype.readTaskCreation,
+      [controller.prototype.readHostCapabilities, controller.prototype.readOrderTaskHostCapabilities,
+        controller.prototype.readOrderAction, controller.prototype.revalidateOrderAction, controller.prototype.readTaskSnapshot,
+        controller.prototype.readTaskEvents, controller.prototype.readOrderExplanation, controller.prototype.readSource,
+        controller.prototype.requestTaskCancellation, controller.prototype.readTaskCancellationReceipt,
+        controller.prototype.readTaskCancellationSettlementReceipt,
+        controller.prototype.settleTaskUnstartedCancellation, controller.prototype.reconcileTaskInputCancellation,
+        controller.prototype.readOrderMaterialReceipt, controller.prototype.readTaskCreation,
         controller.prototype.readTaskInput, controller.prototype.readTaskInputReceipt,
         controller.prototype.readTaskModelResult, controller.prototype.recoverTaskModel,
         controller.prototype.reconcileTaskModel]] as [Function, readonly Function[]])
@@ -236,7 +254,8 @@ export function rentalAiOriginalReceiptSelector(policy: ReturnType<typeof create
     [AiTaskCenterController, [center.stopReceipt, center.decisionReceipt, center.inputReceipt, center.result]],
     ...[RentalWebsiteClientEntryController, RentalWechatClientEntryController].map(controller => [controller,
       [controller.prototype.readTaskCreation, controller.prototype.readTaskInputReceipt,
-        controller.prototype.readTaskModelResult]] as [Function, readonly Function[]])
+        controller.prototype.readTaskModelResult, controller.prototype.readTaskCancellationReceipt,
+        controller.prototype.readTaskCancellationSettlementReceipt]] as [Function, readonly Function[]])
   ]);
   const routes = policy.routes.filter(route => selected.get(route.controller)?.includes(route.handler));
   if (routes.some(route => route.method !== "POST" || !["buffered-read", "audited-read"].includes(route.review.kind)))

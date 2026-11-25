@@ -1187,9 +1187,12 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     reconcileOriginalTaskInputCancellation(request: AiClientApplicationRequest, value: unknown,
       source = configuredTaskInputSource, signal?: AbortSignal) {
       if (source && source.db !== dependencies.db) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-      return withOriginalTaskReceipt(request, value, (authorized, db) => {
+      if (!taskDependencies) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const original = parseEntry(clientTaskCommandSchema, structuredClone(value));
+      return withOriginalTaskReceipt(request, original, (authorized, db) => {
         if (!db) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_input_dependencies_missing');
-        return authorized.cancellation.settleReleasedInputWait(db);
+        return withClientSelectedOriginalTask(taskDependencies.db, original, 'cancel',
+          () => authorized.cancellation.settleReleasedInputWait(db));
       }, signal, source?.db);
     },
     /** Exact original events, not current status or execution permission. */
@@ -1202,8 +1205,11 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       return withOriginalTaskReceipt(request, original, authorized => authorized.cancellation.readReceipt({ expectedRevision }, true), signal);
     },
     settleOriginalTaskUnstartedCancellation(request: AiClientApplicationRequest, value: unknown, signal?: AbortSignal) {
+      if (!taskDependencies) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       const { expectedRevision, ...original } = parseEntry(aiClientTaskCancelRequestSchema, structuredClone(value));
-      return withOriginalTaskReceipt(request, original, authorized => authorized.cancellation.settleUnstarted({ expectedRevision }), signal);
+      return withOriginalTaskReceipt(request, original, authorized =>
+        withClientSelectedOriginalTask(taskDependencies.db, original, 'cancel',
+          () => authorized.cancellation.settleUnstarted({ expectedRevision })), signal);
     },
     /** Original cancellation request only; no provider, financial release or rollback. */
     async requestOriginalTaskCancellation(request: AiClientApplicationRequest, value: unknown) {
@@ -1221,7 +1227,8 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
           return { row, identity: structuredClone(bound.identity) };
         };
         const authorized = composePersistedClientTaskAuthorization(taskDependencies, original, loadMaterial, clock);
-        const result = await authorized.cancellation.request({ expectedRevision });
+        const result = await withClientSelectedOriginalTask(taskDependencies.db, original, 'cancel',
+          () => authorized.cancellation.request({ expectedRevision }));
         await bound.assertCurrent();
         return result;
       });
