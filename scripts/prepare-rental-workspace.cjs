@@ -118,6 +118,13 @@ async function createRentalDevelopmentWorkspace(options, api) {
   const originalLock = JSON.parse((readBuildSnapshot(options.commit, options.repo, ['package-lock.json']))
     .files.get(slash(path.join(root, 'package-lock.json'))).toString('utf8'));
   const projected = projectWorkspaceLock(originalLock, workspaces, developmentRoot);
+  // 开发工作区继承固定底座的完整工具链，包括已锁定的可选开发 peer。
+  // 运行包仍另做生产闭包投影，不能借该投影裁掉开发源码需要的依赖记录。
+  const platformLock = JSON.parse(Buffer.from(platform.files.get('package-lock.json')).toString('utf8'));
+  for (const [file, entry] of Object.entries(platformLock.packages)) {
+    if (file.startsWith('node_modules/') && !entry.link && !projected.lock.packages[file])
+      projected.lock.packages[file] = { ...entry };
+  }
   files.set('package.json', json(projected.root));
   files.set('package-lock.json', json(projected.lock));
   files.set('README.md', Buffer.from(`# Rental Core 开发工作区\n\n` +

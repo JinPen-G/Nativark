@@ -17,6 +17,8 @@ npm run export:platform -- --repo . --repository https://github.com/JinPen-G/Nat
 
 `@rental-os/core-contracts/platform-source` 也提供文件集与归档接口，可用于源码发行。它只准备源码；运行环境和业务 Core 由使用者按接入说明配置。
 
+使用独立 Rental Core 源码开发时，按[开发工作区准备](../rental-core/README.md#使用与构建)组合两个固定 Git 来源。开发归档保留底座锁定的完整开发工具依赖及 Core 所需依赖，宿主运行包另按生产依赖生成；无需手工补锁或复制维护者的依赖目录。
+
 <a id="core-quick-start"></a>
 
 ## 五步快速接入
