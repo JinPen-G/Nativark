@@ -50,13 +50,15 @@ export default defineConfig(({ mode }) => {
     resolve: {
       // Prefer source contracts over stray CommonJS build artifacts in shared/src.
       extensions: [".mjs", ".ts", ".tsx", ".js", ".jsx", ".json"],
-      alias: {
-        ...platform.alias,
-        "@": fileURLToPath(new URL("./src", import.meta.url)),
-        "@rental-os/shared": fileURLToPath(
-          new URL("../../packages/shared/src/index.ts", import.meta.url)
-        )
-      }
+      alias: [
+        ...Object.entries(platform.alias).map(([find, replacement]) => ({ find, replacement })),
+        { find: "@", replacement: fileURLToPath(new URL("./src", import.meta.url)) },
+        {
+          // 总出口读取源码；子入口继续按包 exports 解析，不能拼到 index.ts 后面。
+          find: /^@rental-os\/shared$/,
+          replacement: fileURLToPath(new URL("../../packages/shared/src/index.ts", import.meta.url))
+        }
+      ]
     },
     server: {
       port: Number(process.env.PORT ?? env.REACT_ADMIN_PORT ?? 5175),
