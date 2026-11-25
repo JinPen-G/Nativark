@@ -12,7 +12,7 @@ import {
 } from "@rental-os/platform-core-host";
 import { PlatformDatabaseClient, PlatformDatabaseModule } from "@rental-os/platform-api/database";
 import { TicketsHttpModule } from "@rental-os/example-tickets-core/nest";
-import { createTicketsOpenApi } from "@rental-os/example-tickets-core";
+import { createTicketsOpenApi, TICKETS_FILTER_PRESET_CONTRIBUTION } from "@rental-os/example-tickets-core";
 import { composeTicketsApplication } from "./assembly";
 import { TicketsApplicationLifecycle } from "./lifecycle";
 
@@ -47,6 +47,7 @@ export function ticketsApplicationModule(lock: CoreDeploymentLock) {
   @Module({ imports: [TicketsLifecycleModule, PlatformServerModule.register({
     imports: [PlatformDatabaseModule, coreModule, businessModule, packagesModule, TicketsLifecycleModule],
     inject: [PlatformDatabaseClient], useFactory: (database: PlatformDatabaseClient) => database,
+    filterPresetContributions: [TICKETS_FILTER_PRESET_CONTRIBUTION],
     guardProvider: { provide: "tickets.request-guard", inject: [PlatformAuthGuard, TicketsApplicationLifecycle],
       useFactory: (guard: PlatformAuthGuard, lifecycle: TicketsApplicationLifecycle) => ({
         canActivate: (context: ExecutionContext) => lifecycle.runRequest(() => guard.canActivate(context))
@@ -54,7 +55,8 @@ export function ticketsApplicationModule(lock: CoreDeploymentLock) {
     coreHttpProvider: { provide: "tickets.core-http", inject: [CORE_HOST_APPLICATION, CORE_PACKAGE_ASSEMBLY],
       useFactory: (application: CoreHostHttpApplication, packages: CorePackageAssembly) =>
         createPlatformCorePackageAssemblyHttpAccess(packages, createPlatformCoreHttpAccess(application)) },
-    openApiDocument: createPlatformCorePackageOpenApi(createPlatformCoreOpenApi(createPlatformOpenApi(), [
+    openApiDocument: createPlatformCorePackageOpenApi(createPlatformCoreOpenApi(createPlatformOpenApi({
+      filterPresetContributions: [TICKETS_FILTER_PRESET_CONTRIBUTION] }), [
       { manifest: selectedLock.cores[0].manifest, contribution: createTicketsOpenApi() }
     ])) })], providers: [{ provide: APP_INTERCEPTOR, useExisting: TicketsApplicationLifecycle }] })
   class TicketsApplicationModule {}

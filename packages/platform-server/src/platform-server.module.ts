@@ -24,6 +24,8 @@ import { PlatformToolsController } from "./modules/platform-tools/platform-tools
 import type { PlatformToolsDatabase } from "./modules/platform-tools/platform-tools.store";
 import { PlatformFilterPresetController } from "./modules/platform-tools/filter-presets.controller";
 import { PlatformFilterPresetService } from "./modules/platform-tools/filter-presets.service";
+import type { PlatformFilterPresetContribution } from "@rental-os/platform-contracts";
+import { PLATFORM_FILTER_PRESET_CONTRIBUTIONS, collectPlatformFilterPresetScopes } from "./modules/platform-tools/filter-preset-scopes";
 import type { PlatformFilterPresetDatabase } from "./modules/platform-tools/filter-presets.store";
 import { DemoRequestService } from "./modules/demo-requests/demo-request.service";
 import { PublicDemoRequestController } from "./modules/demo-requests/public-demo-request.controller";
@@ -105,6 +107,8 @@ export class PlatformServerModule {
   static register<Dependencies extends unknown[]>(options: { imports?: ModuleMetadata["imports"]; inject?: FactoryProvider["inject"];
     useFactory: (...args: Dependencies) => PlatformDatabase | Promise<PlatformDatabase>;
     coreHttp?: RegisteredCoreHttpAccess;
+    /** 受控宿主源码提供的 Core 页面偏好范围；不从请求或任意客户端 scope 建登记。 */
+    filterPresetContributions?: readonly PlatformFilterPresetContribution[];
     /** 可选标准Core模块导出的准入provider；不在公共包反向导入具体Core宿主。 */
     coreHttpProvider?: FactoryProvider<RegisteredCoreHttpAccess>;
     /** 宿主的真实行业目录参加者，空Core组合只接受公共无品类范围。 */
@@ -119,6 +123,7 @@ export class PlatformServerModule {
     /** 完整宿主可提供同实例组合；与单项集成选项互斥，避免重复执行者。 */
     applicationsProvider?: FactoryProvider<PlatformApplicationBindings>;
     openApiDocument?: unknown }): DynamicModule {
+    collectPlatformFilterPresetScopes(options.filterPresetContributions);
     if (options.coreHttp && options.coreHttpProvider) throw new Error("Core HTTP只能登记一个实际准入提供者");
     if (options.integrationBusiness && options.integrationBusinessProvider) throw new Error("集成业务依赖只能登记一个实际参加者");
     if (options.applicationsProvider && (options.integrationBusiness || options.integrationBusinessProvider
@@ -162,6 +167,7 @@ export class PlatformServerModule {
         TenantOperatorInvitationsController, AcceptTenantOperatorInvitationController, TenantDispatchController, TenantSupportEmailController],
       providers: [
         { provide: PLATFORM_AUTH_DATA_STORE, inject: options.inject ?? [], useFactory: options.useFactory },
+        { provide: PLATFORM_FILTER_PRESET_CONTRIBUTIONS, useValue: options.filterPresetContributions ?? [] },
         { provide: PLATFORM_APPEARANCE_DATA_STORE, useExisting: PLATFORM_AUTH_DATA_STORE },
         { provide: PLATFORM_SUBSCRIPTION_DATA_STORE, useExisting: PLATFORM_AUTH_DATA_STORE },
         { provide: OFFICIAL_CALENDAR_DATA_STORE, useExisting: PLATFORM_AUTH_DATA_STORE },
@@ -183,7 +189,7 @@ export class PlatformServerModule {
         { provide: OFFICIAL_CALENDAR_APPLICATION, useExisting: OfficialCalendarSourceService },
         { provide: OFFICIAL_CALENDAR_SOURCE_READER, inject: [OfficialCalendarSourceService], useFactory: createOfficialCalendarSourceReader },
         { provide: AUTH_HTTP_APPLICATION, useExisting: PlatformAuthService },
-        { provide: PLATFORM_OPENAPI_DOCUMENT, useValue: options.openApiDocument ?? createPlatformOpenApi() },
+        { provide: PLATFORM_OPENAPI_DOCUMENT, useValue: options.openApiDocument ?? createPlatformOpenApi({ filterPresetContributions: options.filterPresetContributions }) },
         ...(options.coreHttp ? [{ provide: REGISTERED_CORE_HTTP_ACCESS, useValue: options.coreHttp }] : []),
         ...(options.coreHttpProvider ? [{ ...options.coreHttpProvider, provide: REGISTERED_CORE_HTTP_ACCESS }] : []),
         options.guardProvider ? { ...options.guardProvider, provide: APP_GUARD }

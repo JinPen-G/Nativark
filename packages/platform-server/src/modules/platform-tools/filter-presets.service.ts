@@ -1,25 +1,26 @@
 /** 当前租户的原筛选预设自助服务。沿 operator 会话锁定及复验主体，预设和审计同事务提交。
  * scope 仅标记原 UI 偏好，不授予业务读取权。请求中的 tenantId 和 operator 不提供授权。 */
-import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Optional } from "@nestjs/common";
 import type { DeletePlatformFilterPresetResult, PlatformFilterPresetQuery, PlatformFilterPresetScope,
-  SavePlatformFilterPresetRequest, SystemUserRow } from "@rental-os/platform-contracts";
+  SavePlatformFilterPresetRequest, SystemUserRow, PlatformFilterPresetContribution } from "@rental-os/platform-contracts";
 import { PLATFORM_AUTH_DATA_STORE } from "../platform/platform-auth-data-store";
 import { PlatformIdentityRepository } from "../platform/platform-identity.repository";
 import { PlatformPrincipalAuthority } from "../platform/platform-principal.authority";
 import { PlatformFilterPresetRepository } from "./filter-presets.repository";
 import type { PlatformFilterPresetDatabase, PlatformFilterPresetTransaction } from "./filter-presets.store";
-
-/** 原服务实际接受的六个 scope。合同中的其他声明仍需对应业务接点明确开放。 */
-export const PLATFORM_FILTER_PRESET_SCOPES = ["rental-os.orders", "rental-os.vehicles", "rental-os.members",
-  "rental-os.corporates", "rental-os.stations", "rental-os.vehicle-transfer"] as const;
+import { collectPlatformFilterPresetScopes, PLATFORM_FILTER_PRESET_CONTRIBUTIONS } from "./filter-preset-scopes";
+export { PLATFORM_FILTER_PRESET_SCOPES } from "./filter-preset-scopes";
 
 @Injectable()
 export class PlatformFilterPresetService {
   private readonly repository = new PlatformFilterPresetRepository();
   private readonly principals: PlatformPrincipalAuthority<PlatformFilterPresetTransaction>;
+  private readonly scopes: readonly PlatformFilterPresetScope[];
 
-  constructor(@Inject(PLATFORM_AUTH_DATA_STORE) private readonly database: PlatformFilterPresetDatabase) {
+  constructor(@Inject(PLATFORM_AUTH_DATA_STORE) private readonly database: PlatformFilterPresetDatabase,
+    @Optional() @Inject(PLATFORM_FILTER_PRESET_CONTRIBUTIONS) contributions: readonly PlatformFilterPresetContribution[] = []) {
     this.principals = new PlatformPrincipalAuthority(new PlatformIdentityRepository(database));
+    this.scopes = collectPlatformFilterPresetScopes(contributions);
   }
 
   private run<T>(work: (tx: PlatformFilterPresetTransaction, user: SystemUserRow) => Promise<T>): Promise<T> {
@@ -38,7 +39,7 @@ export class PlatformFilterPresetService {
   }
 
   private normalizeFilterPresetScope(scopeKey: string): PlatformFilterPresetScope {
-    if (!PLATFORM_FILTER_PRESET_SCOPES.includes(scopeKey as typeof PLATFORM_FILTER_PRESET_SCOPES[number]))
+    if (!this.scopes.includes(scopeKey as PlatformFilterPresetScope))
       throw new BadRequestException("筛选预设范围不支持");
     return scopeKey as PlatformFilterPresetScope;
   }
@@ -64,6 +65,10 @@ export class PlatformFilterPresetService {
   listFilterPresets(query: PlatformFilterPresetQuery = {}) {
     return this.run((tx, user) => this.repository.listFilterPresets(tx, user.tenantId,
       query.scopeKey ? this.normalizeFilterPresetScope(query.scopeKey) : undefined));
+  }
+
+  listFilterPresetScopes(): Promise<readonly PlatformFilterPresetScope[]> {
+    return this.run(async () => this.scopes);
   }
 
   saveFilterPreset(input: SavePlatformFilterPresetRequest) {

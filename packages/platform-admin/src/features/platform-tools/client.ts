@@ -4,7 +4,7 @@ import type { GeneratePlatformNumberResult, PlatformDictionaryGroup, PlatformNum
   SavePlatformDictionaryGroupRequest, SavePlatformNumberRuleRequest,
   AsyncJobSummary, CreateAsyncJobRequest, CreateFileAssetRequest, CreatePrintJobRequest,
   FileAssetSummary, NotificationSendLogSummary, NotificationTemplateSummary,
-  PlatformFilterPreset, PlatformFilterPresetQuery, PrintJobSummary, SavePlatformFilterPresetRequest
+  PlatformFilterPreset, PlatformFilterPresetQuery, PlatformFilterPresetScope, PrintJobSummary, SavePlatformFilterPresetRequest
 } from "@rental-os/platform-contracts";
 import { useMemo } from "react";
 import { useAdminRuntime, type AdminRuntime } from "../../runtime";
@@ -24,6 +24,8 @@ export function createPlatformToolsApi(request: AdminRuntime["request"]) {
     ),
     filterPresets: (params: PlatformFilterPresetQuery = {}, signal?: AbortSignal) =>
       request<PlatformFilterPreset[]>("/platform/filter-presets", { params, signal }),
+    filterPresetScopes: (signal?: AbortSignal) =>
+      request<PlatformFilterPresetScope[]>("/platform/filter-presets/scopes", { signal }),
     saveFilterPreset: (payload: SavePlatformFilterPresetRequest) => request<PlatformFilterPreset>(
       "/platform/filter-presets", { method: "post", data: payload, retryAuthentication: false }),
     setFilterPresetDefault: (id: string, operator?: string) => request<PlatformFilterPreset>(

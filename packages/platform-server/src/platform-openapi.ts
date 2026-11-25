@@ -1,7 +1,7 @@
 /** 公共宿主同版本接口资料；只组合已登记公共HTTP，不加载行业文档或开放业务工具。 */
 import { Controller, Get, Inject } from "@nestjs/common";
 import type { AuthUser, TenantIdentity, TenantAppearanceProfile, SaveTenantAppearanceRequest, PlatformTenantSummary,
-  CreatePlatformTenantRequest, SaveSystemUserRequest, SaveSystemRoleRequest, SystemRoleRow, SystemUserRow } from "@rental-os/platform-contracts";
+  CreatePlatformTenantRequest, SaveSystemUserRequest, SaveSystemRoleRequest, SystemRoleRow, SystemUserRow, PlatformFilterPresetContribution } from "@rental-os/platform-contracts";
 import { PLATFORM_HTTP_OPERATIONS, platformHttpPermissions } from "./platform-http-policy";
 import { RAW_HTTP_RESPONSE } from "./common/request-id.interceptor";
 import { SUBSCRIPTION_OPENAPI_SCHEMAS, SUBSCRIPTION_OPENAPI_QUERY_SCHEMAS } from "./modules/subscription/subscription-openapi";
@@ -9,7 +9,7 @@ import { INTEGRATION_OPENAPI_SCHEMAS } from "./modules/integrations/integration-
 import { OFFICIAL_CALENDAR_SCHEMAS, OFFICIAL_CALENDAR_OPENAPI_QUERY_SCHEMAS } from "./modules/official-calendars/official-calendar-openapi";
 import { PLATFORM_SETTINGS_SCHEMAS, PLATFORM_SETTINGS_OPENAPI_QUERY_SCHEMAS } from "./modules/platform/platform-settings-openapi";
 import { PLATFORM_TOOLS_SCHEMAS } from "./modules/platform-tools/platform-tools-openapi";
-import { PLATFORM_FILTER_PRESET_SCHEMAS, PLATFORM_FILTER_PRESET_QUERY_SCHEMAS } from "./modules/platform-tools/filter-presets-openapi";
+import { PLATFORM_FILTER_PRESET_SCHEMAS, PLATFORM_FILTER_PRESET_QUERY_SCHEMAS, createPlatformFilterPresetSchemas } from "./modules/platform-tools/filter-presets-openapi";
 import { DEMO_REQUEST_SCHEMAS, DEMO_REQUEST_QUERY_SCHEMAS } from "./modules/demo-requests/demo-request-openapi";
 import { TENANT_MESSAGING_OPENAPI_SCHEMAS } from "./modules/messaging/tenant-messaging-openapi";
 
@@ -123,7 +123,10 @@ export const PLATFORM_OPENAPI_SCHEMAS = {
     items: object({ code: string, name: string, description: string }, ["code", "name"]) } }, ["code", "name", "children"]) }
 } satisfies Record<string, Schema>;
 
-export function createPlatformOpenApi() {
+export function createPlatformOpenApi(options: { filterPresetContributions?: readonly PlatformFilterPresetContribution[] } = {}) {
+  const filterSchemas = createPlatformFilterPresetSchemas(options.filterPresetContributions);
+  const selectedQuerySchemas: Readonly<Record<string, Schema>> = { ...querySchemas,
+    "filterPresets.scopeKey": filterSchemas["PlatformTools.FilterPresetScopes"].items };
   const paths: Record<string, Record<string, unknown>> = {};
   for (const item of PLATFORM_HTTP_OPERATIONS) {
     const content = (schema: Schema) => ({ "application/json": { schema } });
@@ -149,7 +152,7 @@ export function createPlatformOpenApi() {
         ...item.path.split("/").filter(part => part.startsWith(":"))
           .map(part => ({ name: part.slice(1), in: "path", required: true, schema: string })),
         ...("query" in item ? item.query.map(name => ({ name, in: "query", required: false,
-          schema: querySchemas[`${item.id}.${name}`] ?? querySchemas[name] })) : [])
+          schema: selectedQuerySchemas[`${item.id}.${name}`] ?? selectedQuerySchemas[name] })) : [])
       ],
       responses: { [item.method === "POST" ? "201" : "200"]: { description: "成功", content: content(response) },
         "400": { description: "输入不符合原DTO或业务约束" }, "401": { description: "原会话失效或登录受限" },
@@ -160,7 +163,7 @@ export function createPlatformOpenApi() {
     (paths[`/api${item.path.replace(/:([a-z]+)/g, "{$1}")}`] ??= {})[item.method.toLowerCase()] = operation;
   }
   return { openapi: "3.0.3", info: { title: "Zelo Platform API", version: "0.1.0", description: "公共宿主接口；业务Core另贡献同版本文档，文档可见不授予Agent业务权限。" },
-    paths, components: { securitySchemes: { bearerAuth: { type: "http", scheme: "bearer" } }, schemas: PLATFORM_OPENAPI_SCHEMAS } };
+    paths, components: { securitySchemes: { bearerAuth: { type: "http", scheme: "bearer" } }, schemas: { ...PLATFORM_OPENAPI_SCHEMAS, ...filterSchemas } } };
 }
 
 export const PLATFORM_OPENAPI_DOCUMENT = Symbol("platform.openapi.document");

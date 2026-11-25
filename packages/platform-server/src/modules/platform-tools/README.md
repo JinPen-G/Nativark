@@ -50,7 +50,7 @@ fixture 中的事务与锁用于验证参加者调用及提交边界。真实 My
 | [HTTP 声明](filter-presets-http-policy.ts) | 四个原路径、self 准入和实际参数位置 |
 | [OpenAPI 字段](filter-presets-openapi.ts) | 原 DTO、返回投影及删除结果，供宿主组合 |
 
-服务强制使用当前主体的租户，查询和保存中的 `tenantId` 按原普通租户分支覆盖。单条读写都限定原 ID 与该租户。同名保存命中原唯一键并保留 ID，传入 ID 不存在时拒绝。名称去首尾空格后为 1 至 40 字符，description 去空白，filters 沿原 JSON 克隆，isDefault 转为布尔值。保存的 operator 去空白后使用当前显示名或原“营运端”缺省，默认和删除操作沿原 operator 回退规则。原 helper 接受 orders、vehicles、members、corporates、stations、vehicle-transfer 六个 `rental-os.*` scope，合同及原页面中的 contracts 选项与原 helper 存在既有差异，新增实现保留 helper 的判定。历史 scope 字段仍沿原行读取，默认与删除按该行的真实 scope 操作。[正式合同](../../../../platform-contracts/src/index.ts)
+服务强制使用当前主体的租户，查询和保存中的 `tenantId` 按原普通租户分支覆盖。单条读写都限定原 ID 与该租户。同名保存命中原唯一键并保留 ID，传入 ID 不存在时拒绝。名称去首尾空格后为 1 至 40 字符，description 去空白，filters 沿原 JSON 克隆，isDefault 转为布尔值。保存的 operator 去空白后使用当前显示名或原“营运端”缺省，默认和删除操作沿原 operator 回退规则。原 orders、vehicles、members、corporates、stations、vehicle-transfer 六个 `rental-os.*` scope 保持；新 scope 必须由受控宿主源码登记。未登记的 contracts 等历史值仍可随原行读取，默认与删除按原 scope 操作，不据此新增写入范围。[正式合同](../../../../platform-contracts/src/index.ts)
 
 每次调用复用公共主体围栏，先锁原 Tenant、账号、会话和角色，在同一 Serializable 事务内执行预设操作和原审计动作，并在返回前复验主体。保存默认和设为默认仅清除同租户同 scope 的默认标记。历史 JSON 为 null、数组或标量时，返回投影沿原仓储表示为空 filters 对象，其他原字段保持。原审计动作及 detail 字段保留，新增可信主体 userId。原仓储的事务外日志与默认/删除前读合入该事务，审计失败、撤权或数据库冲突均整体失败。唯一名称和事务冲突返回可重读核对的 Conflict，服务每次调用执行一次事务。
 
@@ -58,7 +58,14 @@ fixture 中的事务与锁用于验证参加者调用及提交边界。真实 My
 
 宿主将 `PlatformFilterPresetDatabase` 合入同一公共数据库端口，沿已有 `PLATFORM_AUTH_DATA_STORE` 注入实例，并注册 `PlatformFilterPresetService` 与 `PlatformFilterPresetController`。原组合的 `PlatformService` MySQL 分支经 `PlatformRepository` 将四个同名方法委托给该实例，原演示内存适配继续由原宿主管理。原根模块登记唯一公共服务，使用同一 `PrismaService`，各组合选择一个实际 HTTP Controller，保留原客户端入口。[公共装配](../../platform-server.module.ts) · [原根装配](../../../../../apps/api/src/application-services.module.ts) · [原平台服务](../../../../../apps/api/src/modules/platform/platform.service.ts) · [实际客户端](../../../../platform-admin/src/features/platform-tools/client.ts)
 
-公共政策聚合合入 `PLATFORM_FILTER_PRESET_HTTP_OPERATIONS`，OpenAPI 聚合合入 `PLATFORM_FILTER_PRESET_SCHEMAS`，正式 platform-tools 出口暴露服务、Controller、DTO、数据库/事务类型与两份声明。四个操作使用原自助 `self`，权限码为空。服务继续核当前 operator 会话并拒绝 SaaS 身份。公共 Guard 的默认拒绝要求这些方法和路径准确登记。原组合保留 filter-presets 的已登录自助白名单，独立宿主经同一 Guard/ALS 与公共主体围栏进入。[公共政策](../../platform-http-policy.ts) · [公共 Guard](../../platform-auth.guard.ts) · [现有模块出口](index.ts)
+公共政策聚合合入 `PLATFORM_FILTER_PRESET_HTTP_OPERATIONS`，正式 tools 出口暴露服务、Controller、DTO、存储类型、受控登记和 OpenAPI 工厂。四个原操作和新增范围目录都使用原自助 `self`，服务继续核当前 operator 会话并拒绝 SaaS 身份。公共 Guard 的默认拒绝要求方法和路径准确登记。原组合保留 filter-presets 的已登录自助白名单，独立宿主经同一 Guard/ALS 与公共主体围栏进入。[公共政策](../../platform-http-policy.ts) · [公共 Guard](../../platform-auth.guard.ts) · [现有模块出口](index.ts)
+
+新 Core 用两个步骤复用预设，无需修改底座内部：
+
+1. Core 导出固定声明，例如 `{ coreId: "example-tickets", scopes: ["example-tickets.tickets"] }`。宿主可信组合文件直接导入，通过 `PlatformServerModule.register({ ..., filterPresetContributions: [contribution] })` 传入。每个 Core 只登记一次，scope 必须位于自己的 `coreId.` 命名空间，重复、越界和历史命名空间冒用均在装配时拒绝。未传贡献时只保留原六范围。
+2. Core 页面以同一个常量调用公共 `saveFilterPreset` / `filterPresets`。自行组合接口文档时，传同一贡献给 `createPlatformOpenApi({ filterPresetContributions: [contribution] })`；缺省公共文档由模块自动同源生成。公共工具页通过 GET `/platform/filter-presets/scopes` 读取真实登记列表，用原选择器展示；范围读取失败沿原 QueryState 显示并允许显式重读，不回退任意客户端白名单。
+
+[工单声明](../../../../example-tickets-core/src/server.ts)与[实际工单宿主](../../../../../apps/example-tickets-api/src/app.module.ts)提供完整装配例子。登记只提供租户内共享 UI 偏好，不注册业务路由、不授予 Core/成员权限，也不能读取业务数据；业务页面的实际查询仍走各自原授权。停用或移除贡献不会删除历史预设；无 scope 的列表、按原 ID 设默认和删除继续保留历史处理语义。
 
 GET `/platform/filter-presets` 的 tenantId/scopeKey 在 query。POST 同路径使用保存 DTO。PUT `/platform/filter-presets/:id/default` 的可选 operator 在 body。DELETE `/platform/filter-presets/:id` 的可选 operator 在 query，返回原 id/deleted。公共与原组合均消费同一服务；原 MySQL 适配缺少该服务时明确拒绝，不回退到演示内存。
 

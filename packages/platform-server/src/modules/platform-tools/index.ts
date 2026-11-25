@@ -11,4 +11,6 @@ export { PlatformFilterPresetRepository } from "./filter-presets.repository";
 export { SavePlatformFilterPresetDto, SetPlatformFilterPresetDefaultDto } from "./filter-presets.dto";
 export { PLATFORM_FILTER_PRESET_HTTP_OPERATIONS } from "./filter-presets-http-policy";
 export { PLATFORM_FILTER_PRESET_SCHEMAS } from "./filter-presets-openapi";
+export { createPlatformFilterPresetSchemas } from "./filter-presets-openapi";
+export { collectPlatformFilterPresetScopes, PLATFORM_FILTER_PRESET_SCOPES, PLATFORM_FILTER_PRESET_CONTRIBUTIONS } from "./filter-preset-scopes";
 export type { PlatformFilterPresetDatabase, PlatformFilterPresetTransaction } from "./filter-presets.store";

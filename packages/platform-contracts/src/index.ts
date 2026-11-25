@@ -383,7 +383,15 @@ export type PlatformFilterPresetScope =
   | "rental-os.corporates"
   | "rental-os.stations"
   | "rental-os.vehicle-transfer"
-  | "rental-os.contracts";
+  | "rental-os.contracts"
+  /** 新 scope 仍须由宿主服务端登记；字符串形状不授予业务读取权限。 */
+  | `${string}.${string}`;
+
+/** 可信 Core 组合声明的页面偏好范围；不从 HTTP 请求、浏览器或清单路径动态加载。 */
+export interface PlatformFilterPresetContribution {
+  readonly coreId: string;
+  readonly scopes: readonly PlatformFilterPresetScope[];
+}
 
 export interface PlatformFilterPreset {
   id: string;

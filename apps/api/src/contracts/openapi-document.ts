@@ -8,7 +8,7 @@ import { OFFICIAL_CALENDAR_HTTP_OPERATIONS } from '@rental-os/platform-server/of
 import { OFFICIAL_CALENDAR_SCHEMAS, OFFICIAL_CALENDAR_OPENAPI_QUERY_SCHEMAS } from '@rental-os/platform-server/official-calendar-openapi';
 import { PLATFORM_SETTINGS_HTTP_OPERATIONS } from '@rental-os/platform-server/settings-http-policy';
 import { PLATFORM_SETTINGS_SCHEMAS, PLATFORM_SETTINGS_OPENAPI_QUERY_SCHEMAS } from '@rental-os/platform-server/settings-openapi';
-import { PLATFORM_TOOLS_HTTP_OPERATIONS, PLATFORM_TOOLS_SCHEMAS } from '@rental-os/platform-server/tools';
+import { PLATFORM_TOOLS_HTTP_OPERATIONS, PLATFORM_TOOLS_SCHEMAS, PLATFORM_FILTER_PRESET_SCHEMAS } from '@rental-os/platform-server/tools';
 import { JOBS_OPENAPI_SCHEMAS } from '@rental-os/platform-server/jobs';
 import { NOTIFICATIONS_OPENAPI_SCHEMAS } from '@rental-os/platform-server/notifications';
 import { SUBSCRIPTION_OPENAPI_SCHEMAS, SUBSCRIPTION_OPENAPI_QUERY_SCHEMAS } from '@rental-os/platform-server/subscription-openapi';
@@ -35,6 +35,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ...OFFICIAL_CALENDAR_SCHEMAS,
   ...PLATFORM_SETTINGS_SCHEMAS,
   ...PLATFORM_TOOLS_SCHEMAS,
+  ...PLATFORM_FILTER_PRESET_SCHEMAS,
   ...JOBS_OPENAPI_SCHEMAS,
   ...NOTIFICATIONS_OPENAPI_SCHEMAS,
   ...TENANT_MESSAGING_SCHEMAS,
@@ -529,6 +530,16 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
       queryParam("limit", { type: "integer", format: "int32" })
     ],
     responseSchema: "PlatformAuditResult"
+  },
+  {
+    method: "get",
+    path: "/api/platform/filter-presets/scopes",
+    tag: "Platform",
+    operationId: "filterPresetScopes",
+    summary: "读取当前宿主登记的筛选预设范围",
+    permissions: [],
+    authRequired: true,
+    responseSchema: "PlatformTools.FilterPresetScopes",
   },
   {
     method: "get",

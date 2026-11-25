@@ -8,6 +8,7 @@ import type {
 } from "@rental-os/shared";
 import { PlatformService } from "./platform.service";
 import { CustomerOperationsService } from "./customer-operations.service";
+import { PlatformFilterPresetService } from "@rental-os/platform-server/tools";
 import {
   ChangeCustomerAccountStatusDto,
   ChangeCustomerMembershipStatusDto,
@@ -58,7 +59,8 @@ export class PlatformController extends RentalCustomersController {
   private readonly workspaceController: RentalWorkspacesController;
   constructor(
     private readonly platformService: PlatformService,
-    private readonly customerOperations: CustomerOperationsService
+    private readonly customerOperations: CustomerOperationsService,
+    private readonly filterPresetsService: PlatformFilterPresetService
   ) { super(platformService); this.workspaceController = new RentalWorkspacesController(platformService); }
 
   @Get("tenants")
@@ -248,6 +250,9 @@ export class PlatformController extends RentalCustomersController {
   filterPresets(@Query() query: PlatformFilterPresetQuery, @Req() req?: RequestWithUser) {
     return this.platformService.listFilterPresets(query, req?.user);
   }
+
+  @Get("filter-presets/scopes")
+  filterPresetScopes() { return this.filterPresetsService.listFilterPresetScopes(); }
 
   @Post("filter-presets")
   saveFilterPreset(

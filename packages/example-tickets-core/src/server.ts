@@ -2,6 +2,11 @@
 import { isCoreVersionSupported, type CoreBinding, type CoreScopeRequest, type CoreServerContribution } from "@rental-os/core-contracts";
 import { TICKETS_CORE_ID, TICKETS_CORE_VERSION, TICKETS_DATA_READABLE } from "./contracts";
 
+/** 同一受控声明供宿主登记、接口文档和工单页面使用；不是业务权限。 */
+export const TICKETS_FILTER_PRESET_SCOPE = "example-tickets.tickets" as const;
+export const TICKETS_FILTER_PRESET_CONTRIBUTION = Object.freeze({ coreId: TICKETS_CORE_ID,
+  scopes: Object.freeze([TICKETS_FILTER_PRESET_SCOPE]) });
+
 export interface TicketsScopeAuthority {
   resolveAuthorizedBinding(request: CoreScopeRequest): Promise<CoreBinding | undefined>;
   /** 原业务数据所有者读取移除依赖；未提供时保持宿主的缺检查器拒绝。 */
