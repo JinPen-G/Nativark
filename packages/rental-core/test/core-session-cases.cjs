@@ -53,6 +53,31 @@ module.exports = function registerCases({ test, fixture, sourceModule, loadPacka
     noWrite(f);
   });
 
+  test('租户渠道按原身份投影，无空间仍可进入，但 Core 授权、成员分配与空间业务不放宽', async () => {
+    const integration = [{ permission: { id: 'integration', code: 'system:integration:manage' } }];
+    for (const scenario of ['tenant', 'none', 'workspace', 'workspace-denied', 'grant', 'assignment', 'revoked']) {
+      const f = sessionFixture(), inWorkspace = scenario.startsWith('workspace');
+      f.state.roles.find(row => row.id === 'admin-role').permissions = scenario === 'none' ? [] : integration;
+      f.state.roles.find(row => row.id === 'reader').permissions = scenario === 'workspace' ? integration : [];
+      f.state.sessions.find(row => row.userId === 'user').currentWorkspaceId = inWorkspace ? 'space' : null;
+      if (scenario === 'grant') f.state.grants.find(row => row.coreId === 'rental').state = 'disabled';
+      if (scenario === 'assignment') f.state.assignments.find(row => row.coreId === 'rental').state = 'revoked';
+      if (scenario === 'revoked') f.controls.beforeQuery = (state, _tx, sql) => {
+        if (sql.includes('FROM platform_member_core_assignments')) state.roles.find(row => row.id === 'admin-role').permissions = [];
+      };
+      const read = composeRentalCoreSessionReader(f.input);
+      const context = await f.withActor('user', read, { accessSession: {
+        sessionId: 'user-session', expiresAt: 4070908800, ...(inWorkspace ? { workspaceId: 'space' } : {})
+      } });
+      const codes = permissions(context, 'rental') ?? [];
+      assert.equal(codes.includes('rental:channel:manage'), ['tenant', 'workspace'].includes(scenario), scenario);
+      assert(!codes.includes('rental:order:view'), '渠道授权不能开启订单');
+      assert(!codes.includes('rental:governance:view') || scenario === 'workspace', '无空间不取得空间治理');
+      assert(!codes.includes('rental:page.ai-operator:view') || scenario === 'workspace', '无空间不借渠道权取得 Agent 入口');
+      noWrite(f);
+    }
+  });
+
   test('仅 Rental 成员/空间失效时工单仍可见；停用空间角色不回退租户通配', async () => {
     for (const revoke of [s => { s.members = s.members.filter(row => row.userId !== 'user'); },
       s => { s.members.find(row => row.userId === 'user').isActive = false; },

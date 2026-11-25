@@ -74,7 +74,8 @@ const hash = value => createHash('sha256').update(value).digest('hex');
 const source = { repository: 'https://github.com/example/offline-fixture', commit: 'a'.repeat(40) };
 const manifest = createRentalManifest({ source, assets: ['dist/server.js', 'admin/index.tsx'] });
 const lock = { lockVersion: 1, platform: { source, sha256: 'b'.repeat(64),
-  versions: { platform: '0.1.0', contract: '0.1.1', node: '22.16.0', capabilities: {} },
+  versions: { platform: JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version,
+    contract: '0.1.1', node: '22.16.0', capabilities: {} },
   data: { version: '0.1.0', readable: { minInclusive: '0.1.0', maxExclusive: '0.2.0' }, migrations: [] } },
   cores: [{ manifest, sha256: 'c'.repeat(64) }] };
 

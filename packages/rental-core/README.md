@@ -52,7 +52,7 @@ Core 停用后，受控宿主可通过 `originalReceiptRead` 登记已有操作�
 | [企业请求DTO](src/http-enterprise-request.dto.ts)、[订单查询DTO](src/http-enterprise-order-query.dto.ts)、[客户请求DTO](src/http-client-request.dto.ts) | 原企业申请/成员、客户注册/报价/履约及文件完成校验单源；续租、换货、委托与交接DTO各从同名HTTP子出口使用，输入校验不授予执行权 |
 | [本人地址与交付快照](src/mysql-client-delivery-address.ts)、[本人注销](src/mysql-client-account-closure.ts)、[配送区域](src/client-delivery-service-area.ts)、[宿主参加者](src/client-lifecycle-ports.ts) | 客户地址按租户与本人校验，报价/订单快照保持原值；注销沿原短信证明、会员/账号状态及会话撤销顺序。原客户Controller、报价及AI场景消费同一实现 |
 | [浏览器会话与页面装配](admin/browser/README.md)、[认证合同](src/auth-contracts.ts) | 一个宿主创建一份真实会话、刷新运输和查询缓存，向十二组页面供给当前服务端身份；旧后台消费同一实现，登录、空间切换及本机存储命名空间保持 |
-| [清单与页面权限](src/permissions.ts)、[清单工厂](src/manifest.ts) | `/permissions` 同源声明原权限及页面 OR 准入，`/manifest` 生成固定来源的发行清单；标准码只投影当前原租户/空间权限，声明不授予Core，原HTTP码保持 |
+| [清单与页面权限](src/permissions.ts)、[清单工厂](src/manifest.ts) | `/permissions` 同源声明原权限及页面 OR 准入，`/manifest` 生成固定来源的发行清单。客户端渠道沿原 Auth 选择有效空间身份；无有效空间身份时只核租户原集成管理权限，其他空间页面不回退。标准码不授予 Core，租户授权、成员分配与原 HTTP 权限仍须分别通过 |
 | [原角色目录参加者](src/public-management-compatibility.ts)、[公共登记事务](../platform-core-host/src/platform-core-permissions.ts) | `/public-management-compatibility` 导出 `createRentalPermissionRegistrationParticipant()`，受控宿主将其传入同一 Serializable 登记事务；只选所用清单对应的原业务码，包含经营空间品类版本采用，保留名称、说明、按钮类型、历史模块及权限 ID，角色编辑继续保存原码。采用仍须原预览开关、业务权限与空间范围 |
 | [存量授权准备](src/legacy-access-preparation.ts) | `/legacy-access-preparation` 在同库只读快照中对照原身份、空间权限与现有 Rental 授权/绑定，给出缺失候选和差异；实际变更仍需原管理事务 |
 | [存量单项接管](src/legacy-access-adoption.ts) | `/legacy-access-adoption` 将确认的单项候选交回原管理服务，在同一事务复验来源、当前身份和修订，沿原操作键保存授权/分配/绑定及审计 |

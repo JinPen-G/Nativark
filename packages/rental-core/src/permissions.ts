@@ -90,7 +90,7 @@ const legacyModules: PermissionModule[] = [
 /** 原租户种子获得独立对象，不能修改固定发行清单所用的登记。 */
 export function createRentalLegacyPermissionModules(): PermissionModule[] { return structuredClone(legacyModules); }
 
-export type RentalPermissionScope = "workspace" | "tenant-membership";
+export type RentalPermissionScope = "workspace" | "tenant-membership" | "tenant-channel";
 type PermissionReference = CorePageDescriptor["permissions"][number];
 interface PageAccess {
   scope: RentalPermissionScope;
@@ -106,10 +106,11 @@ function legacyReference(code: string): PermissionReference {
   return { resource: parts.slice(0, -1).join("."), action: parts.at(-1)! };
 }
 const codeOf = ({ resource, action }: PermissionReference) => `${RENTAL_CORE_ID}:${resource}:${action}`;
-const workspace = (code: string, name: string): PageAccess => ({
+const workspace = (code: string, name: string): PageAccess & { scope: "workspace" } => ({
   scope: "workspace", anyOf: [code], permission: legacyReference(code), name
 });
-const page = (id: string, name: string, scope: RentalPermissionScope, anyOf: readonly string[]): PageAccess => ({
+const page = <Scope extends RentalPermissionScope>(id: string, name: string, scope: Scope,
+  anyOf: readonly string[]): PageAccess & { scope: Scope } => ({
   scope, anyOf, permission: { resource: `page.${id}`, action: "view" }, name
 });
 
@@ -160,7 +161,7 @@ export const RENTAL_PAGE_ACCESS = {
     "rental-os:report:view", "rental-os:order:view", "rental-core:maintenance:view"
   ]),
   "operation-report": workspace("rental-os:report:view", "经营报表"),
-  "client-channel": { ...page("client-channel", "客户端渠道页面", "workspace", ["system:integration:manage"]),
+  "client-channel": { ...page("client-channel", "客户端渠道页面", "tenant-channel", ["system:integration:manage"]),
     permission: { resource: "channel", action: "manage" } },
   "tenant-readiness": { ...page("tenant-readiness", "开业配置页面", "workspace", [
     "rental-os:order:view", "rental-os:price:manage", "system:user:manage", "system:role:manage"
@@ -187,7 +188,9 @@ export function rentalPagePermissions(id: RentalPageId): PermissionReference[] {
 export function rentalPageLegacyPermissions(id: RentalPageId): readonly string[] {
   return [...RENTAL_PAGE_ACCESS[id].anyOf];
 }
-export function rentalLegacyPagePolicy(id: RentalPageId): { scope: RentalPermissionScope; permissions: readonly string[] } {
+export function rentalLegacyPagePolicy<Id extends RentalPageId>(id: Id): {
+  scope: typeof RENTAL_PAGE_ACCESS[Id]["scope"]; permissions: readonly string[];
+} {
   return { scope: RENTAL_PAGE_ACCESS[id].scope, permissions: rentalPageLegacyPermissions(id) };
 }
 
@@ -223,13 +226,16 @@ function scopedUser(input: RentalCorePermissionPrincipal, scope: RentalPermissio
     const user = input.tenantUser;
     return user.isPlatformAdmin || user.dataScope === "all" ? user : undefined;
   }
+  // 原 /platform/* 渠道使用 allowInvalidWorkspace：无有效空间身份时核租户原权限；
+  // 有空间身份仍沿原 Auth 选择它，不借租户通配扩大空间角色，其他页面不走此分支。
+  if (scope === "tenant-channel" && input.workspaceUser === undefined) return input.tenantUser;
   const user = input.workspaceUser;
   if (!input.workspaceId || !active(user) || user.id !== input.tenantUser.id || user.tenantId !== input.tenantUser.tenantId)
     return undefined;
   return user;
 }
 const hasOriginal = (user: SystemUserRow | undefined, code: string, scope: RentalPermissionScope): boolean => Boolean(user
-  && (scope === "tenant-membership" && user.isPlatformAdmin || user.permissions.includes("*") || user.permissions.includes(code)));
+  && (scope !== "workspace" && user.isPlatformAdmin || user.permissions.includes("*") || user.permissions.includes(code)));
 
 /** 一一映射原动作；Core 页面准入不能反向换成旧权限码，不能接受任意 rental:* 自授。 */
 export function rentalOriginalPermissionCode(code: string): string | undefined {
@@ -242,7 +248,7 @@ export function rentalLegacyPermission(resource: string, action: string): string
 }
 
 /** 只供当前已验证主体的目录投影，Core grant/assignment/binding 仍由实际宿主在原事务核验。
- * 租户通配只参与原租户会员规则；空间动作始终读取 workspaceUser，缺失不回退 tenantUser。
+ * 原租户会员及渠道分别沿自己的身份规则；空间动作始终读取 workspaceUser，缺失不回退 tenantUser。
  * staff/client 沿原专用 Guard，这个 operator 页面目录不把它们冒充后台成员。
  */
 export function rentalCorePermissionCodes(input: RentalCorePermissionPrincipal): string[] {
