@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const ts = require("typescript");
 const { test } = require("node:test");
 function load(file, dependencies = {}) {
-  const source = fs.readFileSync(`apps/admin/src/features/settings/governance/${file}.ts`, "utf8");
+  const source = fs.readFileSync(`packages/rental-core/admin/governance/${file}.ts`, "utf8");
   const result = {}, javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   new Function("exports", "require", "window", javascript)(result, name => dependencies[name] ?? require(name), dependencies.window);
   return result;
@@ -22,7 +22,7 @@ function harness(api, current = () => true, onAdopted = async () => undefined, s
   const states = [], cleanups = [];
   const react = { useRef: value => ({ current: value }), useState: value => [value, next => states.push(next)], useEffect: setup => cleanups.push(setup()) };
   const hooks = load("useCategoryAdoption", { react, window: { sessionStorage: store }, "./categoryAdoptionPending": helpers,
-    "./useCategoryPreparationSave": { preparationErrorMessage: error => error.message }, "@/api/categoryPreparation": { categoryPreparationApi: api } });
+    "./useCategoryPreparationSave": { preparationErrorMessage: error => error.message }, "./page-context": { useRentalGovernanceContext: () => ({ categoryPreparationApi: api }) } });
   return { hook: hooks.useCategoryAdoption("actor-space", current, onAdopted), states, store, unmount: () => cleanups.forEach(cleanup => cleanup?.()) };
 }
 test("recovery metadata retains the original basis, is scoped and excludes reasons or cached success", () => {

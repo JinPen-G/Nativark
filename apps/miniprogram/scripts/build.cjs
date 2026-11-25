@@ -10,11 +10,12 @@
  *      - 默认（本机联调）模式：允许回环 http 地址，并在产物里写 allowLocalApi=true，打印“不可上传”提示；
  *      - `--release` 发布模式：API 地址必须是 HTTPS，任何 http 地址（含回环）一律拒绝，联调开关恒为 false；
  *      - 非回环的 http 地址在任何模式下都拒绝；带路径的地址拒绝；AppID 若填写必须是 wx + 16 位十六进制；
- *   5. 按白名单打包公共富文本及客户AI合同运行时，校验产物不含共享包运行时require或密钥。
+ *   5. 打包正式Rental客户闭包、许可及原公共富文本/客户AI运行时，拒绝剩余裸包require和密钥。
  *
  * 用法：
  *   node scripts/build.cjs              # 本机联调构建
- *   node scripts/build.cjs --release    # 发布构建（拒绝 http）
+ *   node scripts/build.cjs --release --rental-package <待部署目录> --rental-lock <组合锁.json>
+ *                                     # 固定标准包发布构建（拒绝 http）
  *   node scripts/build.cjs --check      # 只做类型检查
  *   node scripts/build.cjs --out-dir <本树 output/.tmp/任务/客户端> # 隔离构建
  * 兼容旧开关：MINIPROGRAM_ALLOW_LOCAL_API=1 在发布模式下**不再**放行回环地址。
@@ -23,7 +24,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
-const { prepareMiniprogramSharedTypes, releaseMiniprogramSharedTypes, clearMiniprogramBuildOutput, emitMiniprogramSharedReceiptRuntime } = require('../../../scripts/miniprogram-shared-types.cjs');
+const { prepareMiniprogramSharedTypes, releaseMiniprogramSharedTypes, clearMiniprogramBuildOutput, emitMiniprogramSharedReceiptRuntime, emitMiniprogramRichTextRuntime, emitMiniprogramRentalClientRuntime, validateMiniprogramRuntime } = require('../../../scripts/miniprogram-shared-types.cjs');
 
 const root = path.resolve(__dirname, "..");
 const src = path.join(root, "src");
@@ -56,7 +57,7 @@ function resolveTsc() {
 let privateTypeConfig;
 function runTsc(args) {
   if (args[0] === '-p' && args[1] === 'tsconfig.json') {
-    privateTypeConfig ??= prepareMiniprogramSharedTypes(root);
+    privateTypeConfig ??= prepareMiniprogramSharedTypes(root, process.argv.slice(2));
     args = ['-p', privateTypeConfig, ...args.slice(2)];
   }
   const result = spawnSync(process.execPath, [resolveTsc(), ...args], { cwd: root, stdio: "inherit" });
@@ -89,6 +90,7 @@ function publicConfig(defaults) {
 }
 
 async function main() {
+  privateTypeConfig = prepareMiniprogramSharedTypes(root, process.argv.slice(2));
   if (checkOnly) {
     runTsc(["-p", "tsconfig.json", "--noEmit"]);
     process.stdout.write("[miniprogram build] 类型检查通过\n");
@@ -136,17 +138,13 @@ async function main() {
     }
     validateUses(sourceFile);
     if (parserUses === 0) fail("legal shared parser import is unused");
-    const parserSource = path.resolve(root, "../../packages/shared/src/client-rich-text.ts");
-    runTsc([parserSource, "--target", "ES2019", "--module", "commonjs", "--strict", "--skipLibCheck", "--outDir", path.join(dist, "vendor", "shared-rich-text")]);
     fs.writeFileSync(legalFile, legalSource.replace(sharedRequire, 'require("../../vendor/shared-rich-text/client-rich-text")'));
   }
   // The source-level legal import points at this vendor path too. Compile from
   // the same canonical implementation even when no legacy shared import remains.
-  if (!fs.existsSync(path.join(dist, "vendor", "shared-rich-text", "client-rich-text.js"))) {
-    const parserSource = path.resolve(root, "../../packages/shared/src/client-rich-text.ts");
-    runTsc([parserSource, "--target", "ES2019", "--module", "commonjs", "--strict", "--skipLibCheck", "--outDir", path.join(dist, "vendor", "shared-rich-text")]);
-  }
-  emitMiniprogramSharedReceiptRuntime(root, dist);
+  emitMiniprogramRichTextRuntime(root, dist, privateTypeConfig);
+  emitMiniprogramSharedReceiptRuntime(root, dist, privateTypeConfig);
+  emitMiniprogramRentalClientRuntime(root, dist, privateTypeConfig);
 
   // Only the canonical named customer validators and their necessary existing
   // validation code enter this single native bundle. No package runtime import,
@@ -177,11 +175,15 @@ async function main() {
   fs.writeFileSync(path.join(dist, "config", "public.json"), `${literal}\n`);
 
   // 产物校验
+  validateMiniprogramRuntime(root, dist);
   const compiled = walk(dist).filter((file) => /\.(js|json|wxml|wxss)$/.test(file));
   for (const file of compiled) {
     const text = fs.readFileSync(file, "utf8");
     if (file.endsWith(".js") && /require\(["']@rental-os\/shared(?:\/[^"']+)?["']\)/.test(text)) {
       fail(`${path.relative(root, file)} 在运行时依赖 @rental-os/shared；小程序只能使用 import type`);
+    }
+    if (file.endsWith(".js") && /require\(["']@rental-os\/rental-core(?:\/[^"']+)?["']\)/.test(text)) {
+      fail(`${path.relative(root, file)} 未打包正式Rental客户端闭包`);
     }
     if (file.endsWith(".js") && /require\(["']zod(?:\/[^"']+)?["']\)/.test(text)) {
       fail(`${path.relative(root, file)} 直接依赖 zod；客户合同须使用受控 vendor/shared-ai-client 运行时`);
@@ -215,7 +217,7 @@ async function main() {
   catch (error) { process.stderr.write(`[miniprogram build] ${error.message}\n`); process.exitCode = 1; }
   finally {
     try { releaseMiniprogramSharedTypes(privateTypeConfig); }
-    catch (error) { process.stderr.write(`[miniprogram cleanup] ${error.message}\n`); process.exitCode = 1; }
+    catch (error) { process.stderr.write(`[miniprogram cleanup] ${error.message}\n`); buildCompleted = false; process.exitCode = 1; }
     if (outputPrepared && !buildCompleted) {
       try { clearMiniprogramBuildOutput(root, process.argv.slice(2)); }
       catch (error) { process.stderr.write(`[miniprogram cleanup] ${error.message}\n`); process.exitCode = 1; }

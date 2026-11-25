@@ -10,7 +10,13 @@ const definition = structuredClone(RENTAL_CATEGORY_DEFINITIONS.find((row) => row
 const client = {
   $transaction: async (write) => { calls.push("transaction"); return write(client); },
   businessWorkspace: { findFirst: async () => ({ id: "ws" }) },
-  $queryRaw: async () => { calls.push("lock"); return [{ categoryCode: "CAMERA", categoryVersionId: "v", categoryAdoptionRevision: 1, status }]; },
+  $queryRaw: async query => {
+    if (query.sql === "SELECT id FROM Tenant WHERE id=? LOCK IN SHARE MODE") {
+      assert.deepEqual(query.values, ["t"]);
+      return [{ id: "t" }];
+    }
+    calls.push("lock"); return [{ categoryCode: "CAMERA", categoryVersionId: "v", categoryAdoptionRevision: 1, status }];
+  },
   rentalCategoryVersion: { findUnique: async () => { calls.push("version"); return { categoryCode: "CAMERA", status: "published", structureVersion: 1, definition }; } },
   rentalBusinessCalendar: {
     upsert: async () => { calls.push("calendar"); },

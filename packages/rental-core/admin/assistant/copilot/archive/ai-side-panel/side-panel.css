@@ -1,0 +1,113 @@
+.ai-side-panel { --asp-ink: var(--foreground, #202020); --asp-muted: var(--text-secondary, #666); --asp-faint: var(--text-muted, #737373); --asp-ground: var(--surface, #fff); --asp-soft: var(--surface-muted, #f7f7f7); --asp-line: var(--border, #e9e9e9); display: flex; width: 100%; min-width: 0; height: var(--side-panel-height, 720px); min-height: 460px; background: var(--asp-ground); color: var(--asp-ink); position: relative; overflow: hidden; isolation: isolate; font: 14px/1.6 var(--font-inter, Inter, 'Segoe UI', sans-serif); container-type: inline-size; }
+.ai-side-panel *, .ai-side-panel *::before, .ai-side-panel *::after { box-sizing: border-box; }
+.ai-side-panel button, .ai-side-panel textarea { color: inherit; font: inherit; }
+.ai-side-panel button { cursor: pointer; background: none; border: 0; }
+.ai-side-panel button:disabled { cursor: default; opacity: .35; }
+.ai-side-panel button:focus-visible, .ai-side-panel textarea:focus-visible { outline: 2px solid var(--asp-ink); outline-offset: 3px; }
+.ai-side-panel svg { flex-shrink: 0; vertical-align: middle; }
+.asp-sr { position: absolute; width: 1px; height: 1px; clip-path: inset(50%); overflow: hidden; white-space: nowrap; }
+.preview-section.is-fullscreen .ai-side-panel { height: calc(100dvh - 150px); min-height: 460px; }
+.asp-page-column { flex: 1; min-width: 0; position: relative; }
+.asp-page-scroll { height: 100%; overflow: auto; overscroll-behavior: contain; }
+.asp-document { max-width: var(--side-panel-page, 680px); margin-inline: auto; padding: 72px 36px 64px; }
+.asp-document > header { margin-bottom: 24px; }
+.asp-document h1 { font-size: 22px; font-weight: 500; letter-spacing: -.03em; line-height: 1.2; margin: 0 0 4px; }
+.asp-document > header > p { font-size: 12px; line-height: 1.5; color: var(--asp-faint); margin: 0; }
+.asp-block { position: relative; min-width: 0; isolation: isolate; }
+.asp-block.is-paragraph p { color: var(--asp-muted); margin: 0 0 24px; line-height: 1.6; overflow-wrap: anywhere; white-space: pre-wrap; }
+.asp-block.is-heading h2, .asp-block.is-heading h3 { margin: 26px 0 10px; font-size: 14px; font-weight: 500; line-height: 1.5; letter-spacing: -.01em; }
+.asp-table-scroll { max-width: 100%; overflow-x: auto; margin-block: -12px 24px; }
+.asp-table-scroll table { width: 100%; border-collapse: collapse; font-size: 14px; line-height: 1.6; text-align: left; }
+.asp-table-scroll th { font-size: 12px; font-weight: 400; color: var(--asp-faint); white-space: nowrap; }
+.asp-table-scroll th, .asp-table-scroll td { padding: 6px 10px 6px 0; border-bottom: 1px solid var(--asp-line); }
+.asp-table-scroll tr:last-child td { border-bottom: 0; }
+.asp-table-scroll td:not(:first-child) { color: var(--asp-muted); }
+.asp-table-scroll th:nth-child(n+3), .asp-table-scroll td:nth-child(n+3) { text-align: right; font-variant-numeric: tabular-nums; }
+.asp-table-scroll th:last-child, .asp-table-scroll td:last-child { padding-right: 0; }
+.asp-block.is-highlighted::before { content: ''; position: absolute; inset: -7px -9px; border-radius: 5px; z-index: -1; background: color-mix(in srgb, var(--asp-ink) 7%, transparent); transform-origin: left; animation: asp-highlight 1200ms cubic-bezier(.2,.8,.2,1) both; }
+.asp-block.is-highlighted { animation: asp-content 280ms ease-out; }
+.asp-reopen { position: absolute; right: 16px; top: 12px; display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px; border-radius: 7px; font-size: 13px !important; background: var(--asp-ground) !important; transition: opacity 160ms; }
+.ai-side-panel.is-open .asp-reopen { opacity: 0; pointer-events: none; }
+.asp-reopen:hover { background: var(--asp-soft) !important; }
+.asp-dock { width: 0; flex: none; overflow: hidden; transition: width 460ms cubic-bezier(.22,1,.36,1); }
+.ai-side-panel.is-open .asp-dock { width: 360px; }
+.asp-dock-inner { height: 100%; width: 360px; }
+.asp-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--asp-ground); border-left: 1px solid var(--asp-line); }
+.asp-panel-header { flex: none; padding: 14px 16px 12px; border-bottom: 1px solid var(--asp-line); }
+.asp-identity { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.asp-identity strong { font-size: 14px; font-weight: 500; }
+.asp-identity > span { color: var(--asp-faint); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.asp-identity > button { width: 28px; height: 28px; margin-left: auto; display: flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--asp-muted); }
+.asp-identity > button:hover { background: var(--asp-soft); }
+.asp-context { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.asp-context > span { border: 1px solid var(--asp-line); border-radius: 999px; display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; padding: 2px 8px; font-size: 12px; color: var(--asp-muted); line-height: 1.5; }
+.asp-selection-chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.asp-selection-chip > button { padding: 1px; display: flex; flex-shrink: 0; }
+.asp-selection-chip { animation: asp-context-in 220ms cubic-bezier(.22,1,.36,1); }
+.asp-selection-prompt { position: absolute; z-index: 6; display: inline-flex; align-items: center; gap: 7px; padding: 7px 10px; border-radius: 8px; background: var(--asp-ground) !important; border: 1px solid var(--asp-line) !important; box-shadow: var(--shadow-floating, 0 8px 24px rgb(0 0 0 / .12)); font-size: 12px !important; white-space: nowrap; }
+.asp-thread { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; overflow-anchor: none; }
+.asp-thread-content { min-height: 100%; display: flex; flex-direction: column; padding: 20px 16px 16px; }
+.asp-thread-content.is-empty { justify-content: flex-end; }
+.asp-empty h2 { font-size: 14px; line-height: 1.4; font-weight: 500; margin: 0 0 6px; letter-spacing: -.01em; }
+.asp-empty p { font-size: 12px; line-height: 1.6; color: var(--asp-faint); margin: 0 0 14px; }
+.asp-suggestions { display: flex; flex-wrap: wrap; gap: 7px; padding-top: 12px; }
+.asp-suggestions button { padding: 4px 12px; border: 1px solid var(--asp-line) !important; border-radius: 999px; font-size: 13px !important; line-height: 1.4; text-align: left; }
+.asp-suggestions button:hover { background: var(--asp-soft); }
+.asp-turn { margin-bottom: 22px; min-width: 0; }
+.asp-user { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; margin-bottom: 18px; }
+.asp-user p { display: inline-block; max-width: 90%; padding: 8px 12px; margin: 0; background: var(--asp-soft); border-radius: 14px; font-size: 13px; overflow-wrap: anywhere; }
+.asp-user > span { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: var(--asp-muted); }
+.asp-answer { min-width: 0; }
+.asp-reading { color: var(--asp-faint); animation: asp-reading 1.5s ease-in-out infinite; }
+.asp-markdown { font-size: 14px; line-height: 1.65; overflow-wrap: anywhere; }
+.asp-markdown p { margin: 0 0 14px; }
+.asp-markdown ul, .asp-markdown ol { padding-left: 20px; margin: 10px 0 16px; }
+.asp-markdown li { margin-block: 5px; }
+.asp-markdown strong { font-weight: 550; }
+.asp-markdown blockquote { margin: 12px 0; color: var(--asp-muted); padding-left: 12px; border-left: 1px solid var(--asp-line); }
+.asp-markdown code { background: var(--asp-soft); font-size: 12px; padding: 1px 3px; border-radius: 3px; }
+.asp-markdown.is-streaming { animation: asp-content 150ms ease-out; }
+.asp-change { border: 1px solid var(--asp-line); border-radius: 12px; overflow: hidden; margin-top: 14px; }
+.asp-change > header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 10px 12px; background: var(--asp-soft); border-bottom: 1px solid var(--asp-line); }
+.asp-change > header strong { font-size: 12px; font-weight: 500; }
+.asp-change > header span { color: var(--asp-muted); font-size: 10px; }
+.asp-change-body { padding: 12px; font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
+.asp-change-body p { margin: 0; white-space: pre-wrap; }
+.asp-change-body del + ins, .asp-change-body ins + del { margin-inline-start: .2em; }
+.asp-change-body .asp-table-scroll { margin: 0; }
+.asp-change-body table { font-size: 12px; }
+.asp-change-body th { font-size: 10px; }
+.ai-side-panel ins { text-decoration: none; background: color-mix(in srgb, var(--success, #278347) 13%, transparent); color: var(--success, #237642); border-radius: 2px; }
+.ai-side-panel del { background: color-mix(in srgb, var(--danger, #c42f45) 9%, transparent); color: var(--danger, #af3042); border-radius: 2px; text-decoration-thickness: 1px; }
+.asp-change > footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 43px; padding: 6px 10px; border-top: 1px solid var(--asp-line); }
+.asp-change > footer > div { display: flex; align-items: center; gap: 5px; }
+.asp-change > footer button { font-size: 12px; padding: 5px 9px; border-radius: 6px; }
+.asp-change > footer button:hover { background: var(--asp-soft); }
+.asp-primary { background: var(--asp-ink) !important; color: var(--asp-ground) !important; }
+.asp-state { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--asp-muted); margin: 0; }
+.asp-state.is-applied { color: var(--success, #237642); }
+.asp-error { display: flex; gap: 7px; align-items: flex-start; color: var(--danger, #af3042); font-size: 12px; }
+.asp-error p { margin: 4px 0 8px; }
+.asp-error button { display: inline-flex; align-items: center; gap: 5px; text-decoration: underline; padding: 0; }
+.asp-action-error { color: var(--danger, #af3042); padding: 8px 12px; font-size: 11px; margin: 0; }
+.asp-undo-tray { display: flex; gap: 6px; flex-wrap: wrap; padding: 5px 16px 2px; }
+.asp-undo-tray button { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--asp-line); border-radius: 999px; padding: 4px 7px; max-width: 100%; font-size: 11px !important; }
+.asp-undo-tray button > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--asp-muted); }
+.asp-undo-tray button:hover { background: var(--asp-soft); }
+.asp-composer { flex: none; display: flex; align-items: flex-end; gap: 8px; margin: 12px 12px 12px; border: 1px solid var(--asp-line); border-radius: 18px; padding: 4px 6px 4px 14px; }
+.asp-composer:focus-within { border-color: var(--border-strong, #aaa); }
+.asp-composer textarea { resize: none; width: 100%; min-width: 0; max-height: 150px; min-height: 29px; padding: 4px 3px; font-size: 13px; line-height: 21px; background: transparent; border: 0; outline: none; }
+.asp-composer textarea:focus-visible { outline: none !important; }
+.asp-composer textarea::placeholder { color: var(--asp-faint); }
+.asp-send { display: flex; align-items: center; justify-content: center; width: 29px; height: 29px; flex: none; border-radius: 50%; background: var(--asp-ink) !important; color: var(--asp-ground) !important; }
+.asp-scrim { position: absolute; inset: 0; z-index: 2; background: rgb(0 0 0 / .18); animation: asp-content 200ms; }
+.ai-side-panel.is-sheet .asp-dock { position: absolute; inset: auto 0 0; z-index: 3; width: 100%; height: 74%; transform: translateY(101%); transition: transform 460ms cubic-bezier(.22,1,.36,1); border-radius: 16px 16px 0 0; }
+.ai-side-panel.is-sheet.is-open .asp-dock { width: 100%; transform: translateY(0); }
+.ai-side-panel.is-sheet .asp-dock-inner { width: 100%; }
+.ai-side-panel.is-sheet .asp-panel { border-left: 0; border-top: 1px solid var(--asp-line); }
+@container (max-width: 639px) { .asp-document { padding: 60px 24px 40px; } .asp-document h1 { font-size: 22px; } .asp-table-scroll { font-size: 12px; } .asp-identity > span { font-size: 11px; } }
+@keyframes asp-content { from { opacity: .35; } to { opacity: 1; } }
+@keyframes asp-reading { 50% { opacity: .45; } }
+@keyframes asp-context-in { from { opacity: .4; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@keyframes asp-highlight { 0% { opacity: .1; transform: scaleX(0); } 35% { opacity: 1; transform: scaleX(1); } 100% { opacity: 0; transform: scaleX(1); } }
+@media (prefers-reduced-motion: reduce) { .ai-side-panel *, .ai-side-panel *::before, .ai-side-panel *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } .asp-block.is-highlighted::before { opacity: .65; } }

@@ -1,7 +1,2 @@
-import { Table, type BusinessTableProps } from "./Table";
-
-/** Legacy import kept source-compatible; lists share the order renderer. */
-export function AnimatedTable<T extends object>(props: BusinessTableProps<T>) {
-  return <Table {...props} />;
-}
-AnimatedTable.listToolbarHost = true;
+/** 原入口兼容转接；公共实现由 platform-admin 单源维护。 */
+export * from "@rental-os/platform-admin/source/components/ui/AnimatedTable";

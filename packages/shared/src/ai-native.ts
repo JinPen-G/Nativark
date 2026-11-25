@@ -3,9 +3,9 @@
  * 身份由服务端建立；类型/schema 合法不代表资源可访问。AIN-04 必须在每步及结果重放前重验授权。
  * 未冻结：不注册 HTTP 路由、handler、模型或 Worker；具体业务投影在后续切片定义。
  */
-import type { AuthUser, SystemDataScope } from "./platform";
-
-export const AI_CONTRACT_DRAFT_VERSION = "ain-c01-c02-draft-1" as const;
+export { AI_CONTRACT_DRAFT_VERSION } from "@rental-os/platform-contracts/ai-gateway";
+export type { AiAudience, AiPlatformScope, AiTenantScope, AiWorkspaceScope, AiExecutionScope, AiLocationScope, AiOperatorAccess, AiContextBase, AiExecutionContext } from "@rental-os/platform-contracts/ai-gateway";
+import { AI_CONTRACT_DRAFT_VERSION, type AiAudience, type AiExecutionScope } from "@rental-os/platform-contracts/ai-gateway";
 export const AI_TOOL_DRAFT_VERSION = "draft-1" as const;
 export const AI_TOOL_CODES = Object.freeze([
   "rental.order.explain", "rental.catalog.search", "rental.availability.check",
@@ -15,45 +15,8 @@ export const AI_TOOL_CODES = Object.freeze([
   "operations.risks.list", "platform.category.propose"
 ] as const);
 export type AiToolCode = typeof AI_TOOL_CODES[number];
-export type AiAudience = "operator" | "staff" | "client" | "automation";
 export type AiRisk = "R0" | "R1" | "R2" | "R3";
 export type AiToolMaturity = "unavailable" | "preview_only" | "executable";
-
-export interface AiPlatformScope { kind: "platform" }
-export interface AiTenantScope { kind: "tenant"; tenantId: string }
-export interface AiWorkspaceScope { kind: "workspace"; tenantId: string; workspaceId: string }
-export type AiExecutionScope = AiPlatformScope | AiTenantScope | AiWorkspaceScope;
-
-/** 复用既有岗位数据/地点口径；selected 空列表表示无可访问地点，绝不折算为 all。 */
-export type AiLocationScope = NonNullable<AuthUser["locationScope"]> & (
-  { mode: "all"; locationIds: [] } | { mode: "selected"; locationIds: string[] }
-);
-export interface AiOperatorAccess {
-  permissions: NonNullable<AuthUser["permissions"]>;
-  dataScope: SystemDataScope;
-  locationScope: AiLocationScope;
-  organizationId?: string;
-}
-
-interface AiContextBase {
-  contractVersion: typeof AI_CONTRACT_DRAFT_VERSION;
-  requestId: string;
-  /** 最近一次由服务端解析授权的时点，不是长期授权凭据。 */
-  authorizedAt: string;
-}
-
-/**
- * 仅供可信服务器内部传递，不作为任意客户端/模型请求体。
- * SaaS 身份与后台共用 operator audience，但只能声明 platform 范围；不能默认进入租户。
- * automation 是未来独立主体的契约，不表示已有自动主体或执行器。
- * 匿名任务迁移、企业用人授权与完整 C01 授权修订留待后续冻结。
- */
-export type AiExecutionContext = AiContextBase & (
-  | { audience: "operator"; actor: { kind: "saas_admin"; userId: string }; scope: AiPlatformScope; permissions: string[] }
-  | { audience: "operator" | "staff"; actor: { kind: "user"; userId: string }; scope: AiTenantScope | AiWorkspaceScope; access: AiOperatorAccess }
-  | { audience: "client"; actor: { kind: "customer"; customerId: string }; scope: AiTenantScope | AiWorkspaceScope }
-  | { audience: "automation"; actor: { kind: "automation"; subjectId: string; policyId: string; policyRevision: number; expiresAt: string }; scope: AiTenantScope | AiWorkspaceScope; access: AiOperatorAccess }
-);
 
 /** 模型侧最小输入示例；orderId 仍须按当前会话与资源归属核验。不是通用执行代理。 */
 export interface AiOrderExplainInput {

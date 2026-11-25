@@ -2,27 +2,119 @@
 /** Concrete SQL adapter and original OAuth services, with an explicit in-process
  * SQL transaction substitute. No database, listener, env file or shared rebuild. */
 const assert = require("node:assert/strict");
-const { test } = require("node:test");
+const { test, after } = require("node:test");
 const fs = require("node:fs"), path = require("node:path");
-const { createRequire } = require("node:module");
+const { createRequire, registerHooks, isBuiltin } = require("node:module");
 const { pathToFileURL } = require("node:url");
 const { createHash } = require("node:crypto");
 const root = path.resolve(__dirname, "..");
-const ts = require(path.join(root, "clients/agent-desktop/harness/node_modules/typescript/lib/typescript.js"));
-const installed = createRequire(path.join(root, "clients/agent-desktop/harness/packages/mcp/mcp-client/package.json"));
+const toolchainRoot = path.resolve(process.env.MCP_TEST_TOOLCHAIN_ROOT || root);
+const dependencyDirectory = path.join(toolchainRoot, "node_modules");
+const dependencyRequire = createRequire(path.join(dependencyDirectory, "typescript/package.json"));
+// Resolve each third-party package from the chosen installation. A missing
+// prerequisite cannot fall through to an ancestor or a private Harness checkout.
+function resolveDependency(specifier) {
+  if (isBuiltin(specifier)) return specifier;
+  const packageName = specifier.split("/").slice(0, specifier.startsWith("@") ? 2 : 1).join("/");
+  const packageDirectory = path.join(dependencyDirectory, packageName);
+  if (!fs.existsSync(path.join(packageDirectory, "package.json"))) {
+    const error = new Error(`MCP test prerequisite ${packageName} is missing from ${dependencyDirectory}. Set MCP_TEST_TOOLCHAIN_ROOT to an existing installation containing this package.`);
+    error.code = "MCP_TEST_PREREQUISITE";
+    throw error;
+  }
+  const resolved = dependencyRequire.resolve(specifier);
+  const relative = path.relative(fs.realpathSync(packageDirectory), fs.realpathSync(resolved));
+  assert.ok(relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative),
+    `MCP test dependency ${specifier} resolved outside its selected package`);
+  return resolved;
+}
+function installed(specifier) { return dependencyRequire(resolveDependency(specifier)); }
+installed.resolve = resolveDependency;
+const ts = installed("typescript");
+installed.resolve("@types/node/package.json");
+installed.resolve("@modelcontextprotocol/server");
+const temporaryRoot = path.join(root, "output/.tmp");
+const owner = path.basename(process.argv[1] || "mcp-tests").replace(/[^A-Za-z0-9._-]/gu, "_");
+const outputParent = path.resolve(process.env.MCP_TEST_OUTPUT_ROOT || path.join(temporaryRoot, `mcp-test-toolchain-${process.pid}`));
+const outputDirectory = path.join(outputParent, `mysql-store-${owner}-${process.pid}`);
+let ownsOutput = false;
+function within(directory, file) {
+  const relative = path.relative(directory, file);
+  return relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+function checkOutputPath() {
+  assert.ok(within(temporaryRoot, outputParent), "MCP test output must stay in this worktree's output/.tmp");
+  for (let current = outputDirectory; current !== root; current = path.dirname(current)) {
+    assert.ok(within(root, current), "MCP test output escaped its worktree");
+    if (fs.existsSync(current)) assert.equal(fs.lstatSync(current).isSymbolicLink(), false, "MCP test must not follow output links");
+  }
+}
+function prepareOutput() {
+  if (!ownsOutput) {
+    checkOutputPath();
+    fs.mkdirSync(outputParent, { recursive: true });
+    fs.mkdirSync(outputDirectory);
+    ownsOutput = true;
+  }
+  return outputDirectory;
+}
+function cleanupOutput() {
+  if (!ownsOutput) return;
+  checkOutputPath();
+  assert.equal(fs.realpathSync(outputDirectory), outputDirectory, "MCP test output was redirected");
+  const checkChildren = directory => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      assert.equal(entry.isSymbolicLink(), false, "MCP test cleanup must not enter a link");
+      if (entry.isDirectory()) checkChildren(path.join(directory, entry.name));
+    }
+  };
+  checkChildren(outputDirectory);
+  fs.rmSync(outputDirectory, { recursive: true });
+  assert.equal(fs.existsSync(outputDirectory), false, "MCP test output was not removed");
+  ownsOutput = false;
+  if (!process.env.MCP_TEST_OUTPUT_ROOT) {
+    try { fs.rmdirSync(outputParent); }
+    catch (error) { if (error.code !== "ENOTEMPTY" && error.code !== "ENOENT") throw error; }
+  }
+}
+// Register before compilation so failed and cancelled runs release their own output.
+after(cleanupOutput);
+process.once("exit", cleanupOutput);
+for (const [name, status] of [["SIGINT", 130], ["SIGTERM", 143]]) process.once(name, () => {
+  try { cleanupOutput(); } finally { process.exit(status); }
+});
+
 const signal = () => new AbortController().signal;
 let artifact;
 async function compiled() {
   if (artifact) return artifact;
-  const output = fs.mkdtempSync(path.join(root, "output/mcp-mysql-store-verification-"));
+  const output = prepareOutput();
+  // The existing contract build preserves Shared/Core runtime identities and
+  // emits only this tree's contracts into this run's private package directory.
+  const { createBuild, verifyContracts } = require("../scripts/check-rental-package-build.cjs");
+  const build = createBuild(dependencyDirectory);
+  verifyContracts(build);
+  for (const name of ["@rental-os/platform-contracts", "@rental-os/rental-core", "@rental-os/shared"]) {
+    const pkg = build.packages.get(name), target = path.join(output, "node_modules", name);
+    fs.mkdirSync(target, { recursive: true });
+    fs.copyFileSync(path.join(pkg.directory, "package.json"), path.join(target, "package.json"));
+    for (const [file, text] of build.outputs) {
+      if (!within(pkg.directory, file)) continue;
+      const destination = path.join(target, path.relative(pkg.directory, file));
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.writeFileSync(destination, text);
+    }
+  }
   const staged = path.join(output, "node_modules/@rental-os/mcp-server"), source = path.join(root, "packages/mcp-server");
   fs.mkdirSync(staged, { recursive: true });
   fs.copyFileSync(path.join(source, "package.json"), path.join(staged, "package.json"));
-  const typeRoots = [path.join(root, "clients/agent-desktop/harness/node_modules/@types")];
+  const typeRoots = [path.join(dependencyDirectory, "@types")];
   const options = { strict: true, skipLibCheck: true, declaration: true, target: ts.ScriptTarget.ES2022,
     module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext,
     types: ["node"], typeRoots, rootDir: path.join(source, "src"), outDir: path.join(staged, "dist"),
-    paths: { "@modelcontextprotocol/server": [path.join(path.dirname(installed.resolve("@modelcontextprotocol/server")), "index.d.mts")] } };
+    paths: { "@modelcontextprotocol/server": [path.join(path.dirname(installed.resolve("@modelcontextprotocol/server")), "index.d.mts")],
+      "@rental-os/shared": [path.join(output, "node_modules/@rental-os/shared/dist/index.d.ts")],
+      zod: [path.join(path.dirname(installed.resolve("zod/package.json")), "index.d.cts")] } };
   const check = program => {
     const diagnostics = ts.getPreEmitDiagnostics(program);
     assert.equal(diagnostics.length, 0, diagnostics.map(d => ts.flattenDiagnosticMessageText(d.messageText, "\n")).join("\n"));
@@ -62,7 +154,15 @@ async function compiled() {
     ' const marker: "native" = store.native(tx).originalMarker; void marker; return tx.readFamily("original-family"); }, signal);',
   ].join("\n"));
   check(ts.createProgram([consumer], { ...options, rootDir: output, outDir: path.join(output, "consumer-build") }));
-  artifact = await import(pathToFileURL(path.join(output, "consumer-build/consumer.mjs")).href);
+  const outputUrl = pathToFileURL(output + path.sep).href;
+  const hooks = registerHooks({ resolve(specifier, context, next) {
+    if (context.parentURL?.startsWith(outputUrl) && (specifier === "@modelcontextprotocol/server" || specifier === "zod")) {
+      return { url: pathToFileURL(installed.resolve(specifier)).href, shortCircuit: true };
+    }
+    return next(specifier, context);
+  } });
+  try { artifact = await import(pathToFileURL(path.join(output, "consumer-build/consumer.mjs")).href); }
+  finally { hooks.deregister(); }
   fs.writeFileSync(path.join(output, "scope.json"), JSON.stringify({ strict: "OAuth/read-budget/input-bound accounting actual dependency closure", publicConsumer: "NodeNext manifest exports and emitted ESM", database: "explicit SQL substitute; no real DB", output }, null, 2));
   return artifact;
 }

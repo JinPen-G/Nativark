@@ -1,4 +1,2 @@
-/** Slot's import bridge for ordinary CSS module class names; no Tailwind utilities are exposed here. */
-export function cn(...classNames: (string | undefined)[]) {
-  return classNames.filter(Boolean).join(" ");
-}
+/** 原入口兼容转接；公共实现由 platform-admin 单源维护。 */
+export * from "@rental-os/platform-admin/source/components/workspace/classNames";

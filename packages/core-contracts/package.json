@@ -1,0 +1,118 @@
+{
+  "name": "@rental-os/core-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "平台与业务 Core 共用的清单、版本和对象引用契约",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "typesVersions": {
+    "*": {
+      "package": [
+        "dist/package.d.ts"
+      ],
+      "archive": [
+        "dist/archive.d.ts"
+      ],
+      "install": [
+        "dist/install.d.ts"
+      ],
+      "deployment": [
+        "dist/deployment.d.ts"
+      ],
+      "prisma": [
+        "dist/prisma.d.ts"
+      ],
+      "github": [
+        "dist/github.d.ts"
+      ],
+      "development": [
+        "dist/development.d.ts"
+      ],
+      "github-repository": [
+        "dist/github-repository.d.ts"
+      ],
+      "github-discovery": [
+        "dist/github-discovery.d.ts"
+      ],
+      "platform-source": [
+        "dist/platform-source.d.ts"
+      ],
+      "platform-data-package": [
+        "dist/platform-data-package.d.ts"
+      ],
+      "github-http": [
+        "dist/github-http.d.ts"
+      ]
+    }
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package": {
+      "types": "./dist/package.d.ts",
+      "default": "./dist/package.js"
+    },
+    "./archive": {
+      "types": "./dist/archive.d.ts",
+      "default": "./dist/archive.js"
+    },
+    "./install": {
+      "types": "./dist/install.d.ts",
+      "default": "./dist/install.js"
+    },
+    "./deployment": {
+      "types": "./dist/deployment.d.ts",
+      "default": "./dist/deployment.js"
+    },
+    "./prisma": {
+      "types": "./dist/prisma.d.ts",
+      "default": "./dist/prisma.js"
+    },
+    "./github": {
+      "types": "./dist/github.d.ts",
+      "default": "./dist/github.js"
+    },
+    "./development": {
+      "types": "./dist/development.d.ts",
+      "default": "./dist/development.js"
+    },
+    "./github-repository": {
+      "types": "./dist/github-repository.d.ts",
+      "default": "./dist/github-repository.js"
+    },
+    "./github-discovery": {
+      "types": "./dist/github-discovery.d.ts",
+      "default": "./dist/github-discovery.js"
+    },
+    "./platform-source": {
+      "types": "./dist/platform-source.d.ts",
+      "default": "./dist/platform-source.js"
+    },
+    "./platform-data-package": {
+      "types": "./dist/platform-data-package.d.ts",
+      "default": "./dist/platform-data-package.js"
+    },
+    "./github-http": {
+      "types": "./dist/github-http.d.ts",
+      "default": "./dist/github-http.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test test/core-contracts.test.cjs",
+    "check": "node dist/check.js",
+    "capabilities": "node dist/capabilities.js",
+    "export:platform": "node dist/export-platform.js"
+  },
+  "dependencies": {
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "typescript": "5.9.3"
+  }
+}

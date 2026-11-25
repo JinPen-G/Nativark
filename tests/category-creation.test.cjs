@@ -8,8 +8,9 @@ const { CategoryGovernanceService } = require("../apps/api/dist/modules/rental-c
 const { CapabilityHookRuntime } = require("../apps/api/dist/modules/rental-core/capability-hook.runtime.js");
 const { CapabilityHookRegistrar } = require("../apps/api/dist/modules/rental-core/capability-hook.registrar.js");
 const { requestFingerprint } = require("../apps/api/dist/modules/rental-core/rental-idempotency.repository.js");
+const { AuthService } = require("../apps/api/dist/modules/auth/auth.service.js");
 
-const actor = { id: "platform-owner", isSaasAdmin: true, permissions: [permissions.view, permissions.edit] };
+const actor = { id: "platform-owner", tenantId: "platform-tenant", isSaasAdmin: true, permissions: [permissions.view, permissions.edit] };
 function input(templateId = "serialized", code = "stage_tools") {
   const source = categoryCreationTemplates().find(template => template.id === templateId).definition;
   return { code, name: "舞台用品", templateId, versionLabel: "1.0", inventoryModes: [...source.supportedInventoryModes],
@@ -56,6 +57,10 @@ function serviceFixture() {
   let savedAudit;
   const calls = [];
   const tx = {
+    async $queryRaw(query) {
+      assert.match(query.sql, /SELECT id FROM Tenant.*LOCK IN SHARE MODE/u);
+      return [{ id: query.values[0] }];
+    },
     rentalCategoryGovernanceAudit: {
       findUnique: async ({ where }) => savedAudit?.id === where.id ? savedAudit : null,
       create: async ({ data }) => { calls.push("audit"); savedAudit = structuredClone(data); return data; }
@@ -71,10 +76,34 @@ function serviceFixture() {
         createdAt: new Date("2026-11-09T00:00:00Z"), updatedAt: new Date("2026-11-09T00:00:00Z") }; }
     }
   };
-  const db = { ...tx, $transaction: async work => { calls.push("transaction"); return work(tx); } };
-  const service = new CategoryGovernanceService(db, hooks());
+  // SQL, account and session rows are substitutes; signing and Web session
+  // verification use the original Auth methods consumed by governance writes.
+  const users = new Map(), sessions = new Map();
+  const db = { ...tx, $transaction: async (work, options) => {
+    assert.deepEqual(options, { isolationLevel: "Serializable", maxWait: 10000, timeout: 30000 });
+    calls.push("transaction"); return work(tx);
+  } };
+  const principals = { findUserById: async (id, transaction) => {
+    assert.equal(transaction, tx); return users.get(id);
+  } };
+  const auth = Object.create(AuthService.prototype);
+  auth.configService = { get: key => key === "AUTH_TOKEN_SECRET" ? "category-creation-offline-fixture-secret" : undefined };
+  auth.platformService = {
+    getAuthSession: async (id, transaction) => { assert.equal(transaction, tx); return sessions.get(id); },
+    assertTrustedSaasManagement: async (binding, transaction) => {
+      assert.equal(transaction, tx); const current = users.get(binding.userId);
+      return current?.isSaasAdmin && current.tenantId === binding.tenantId ? binding : undefined;
+    }
+  };
+  const authorization = user => {
+    users.set(user.id, user); const now = Math.floor(Date.now() / 1000), sessionId = `session-${user.id}`;
+    sessions.set(sessionId, { id: sessionId, userId: user.id, currentWorkspaceId: null, audience: "operator",
+      expiresAt: new Date((now + 1800) * 1000), revokedAt: null });
+    return "Bearer " + auth.signAccessToken({ sub: user.id, tid: user.tenantId, sid: sessionId, aud: "operator", iat: now, exp: now + 900 });
+  };
+  const service = new CategoryGovernanceService(db, hooks(), auth, principals);
   service.dynamicCreationEnabled = () => true;
-  return { service, db, tx, calls, audit: () => savedAudit };
+  return { service, db, tx, calls, authorization, audit: () => savedAudit };
 }
 
 test("preview writes nothing; creation uses the supplied transaction and replays the original receipt after closure", async () => {
@@ -82,15 +111,17 @@ test("preview writes nothing; creation uses the supplied transaction and replays
   const preview = await fixture.service.previewCreation(request, actor);
   assert.equal(preview.valid, true); assert.equal(preview.previewOnly, true); assert.deepEqual(fixture.calls, []);
   const create = { ...request, expectedDefinitionHash: preview.definitionHash, idempotencyKey: "create-event-kits-1", reason: "独立经营" };
-  const created = await fixture.service.createCategory(create, actor);
+  const created = await fixture.service.createCategory(create, actor, fixture.authorization(actor));
   assert.deepEqual(fixture.calls, ["transaction", "identity", "draft", "audit"]);
   assert.equal(created.status, "draft"); assert.equal(created.categoryCode, request.code);
   fixture.service.dynamicCreationEnabled = () => false;
-  assert.deepEqual(await fixture.service.createCategory(create, actor), created);
-  assert.deepEqual(await fixture.service.readCreationReceipt(create.idempotencyKey, actor), { outcome: "created", version: created });
-  await assert.rejects(fixture.service.createCategory({ ...create, reason: "改变输入" }, actor), /不同新品类输入/);
-  assert.deepEqual(await fixture.service.readCreationReceipt(create.idempotencyKey, { ...actor, id: "another-platform-user" }), { outcome: "unknown" });
-  assert.deepEqual(fixture.calls, ["transaction", "identity", "draft", "audit"], "receipt reads and retries do not run another create");
+  assert.deepEqual(await fixture.service.createCategory(create, actor, fixture.authorization(actor)), created);
+  assert.deepEqual(await fixture.service.readCreationReceipt(create.idempotencyKey, actor, fixture.authorization(actor)), { outcome: "created", version: created });
+  await assert.rejects(fixture.service.createCategory({ ...create, reason: "改变输入" }, actor, fixture.authorization(actor)), /不同新品类输入/);
+  const other = { ...actor, id: "another-platform-user" };
+  assert.deepEqual(await fixture.service.readCreationReceipt(create.idempotencyKey, other, fixture.authorization(other)), { outcome: "unknown" });
+  assert.deepEqual(fixture.calls, ["transaction", "identity", "draft", "audit", "transaction", "transaction", "transaction", "transaction"],
+    "receipt reads and retries retain identity transactions without another create");
 });
 
 test("closed creation, altered previews, duplicate identities and missing execution block before active writes", async () => {
@@ -102,7 +133,7 @@ test("closed creation, altered previews, duplicate identities and missing execut
     if (failure === "fingerprint") create.name = "预览后变化";
     if (failure === "identity") fixture.tx.rentalCategoryDefinition.findUnique = async () => ({ code: request.code });
     if (failure === "implementation") fixture.service.hooks.reset();
-    await assert.rejects(fixture.service.createCategory(create, actor));
+    await assert.rejects(fixture.service.createCategory(create, actor, fixture.authorization(actor)));
     assert.equal(fixture.calls.includes("identity"), false);
     assert.equal(fixture.calls.includes("audit"), false);
   }
@@ -119,11 +150,11 @@ test("copying another published category preserves its immutable origin and supp
   const fixture = serviceFixture(), request = input("kit", "studio_kits");
   request.templateId = undefined; request.sourceVersionId = "original-published-source";
   const definition = categoryCreationTemplates().find(row => row.id === "kit").definition;
-  const source = { id: request.sourceVersionId, categoryCode: definition.code, status: "published", definition: structuredClone(definition) };
+  const source = { id: request.sourceVersionId, categoryCode: definition.code, status: "published", structureVersion: 1, definition: structuredClone(definition) };
   fixture.tx.rentalCategoryVersion.findUnique = async ({ where }) => where.id === source.id ? source : null;
   const preview = await fixture.service.previewCreation(request, actor);
   assert.equal(preview.valid, true);
-  const created = await fixture.service.createCategory({ ...request, expectedDefinitionHash: preview.definitionHash, idempotencyKey: "original-copy-key", reason: "复制定义" }, actor);
+  const created = await fixture.service.createCategory({ ...request, expectedDefinitionHash: preview.definitionHash, idempotencyKey: "original-copy-key", reason: "复制定义" }, actor, fixture.authorization(actor));
   assert.equal(created.sourceVersionId, source.id); assert.equal(created.sourceKind, "category_copy");
   fixture.tx.rentalCategoryVersion.findFirst = async () => created;
   fixture.db.businessWorkspace = { count: async () => 0 };
@@ -149,7 +180,7 @@ test("creation DTO and HTTP schemas retain all fields and reject extra input", a
   assert.equal(accepts({ ...create, execute: "arbitrary" }), false);
   assert.equal(previews({ ...request, sourceVersionId: "both-sources" }), false);
   assert.equal(previews({ ...request, templateId: undefined }), false);
-  const fixture = serviceFixture(), created = await fixture.service.createCategory(create, actor);
+  const fixture = serviceFixture(), created = await fixture.service.createCategory(create, actor, fixture.authorization(actor));
   const receipts = ajv.compile(CATEGORY_CREATION_RECEIPT_SCHEMA);
   assert.equal(receipts({ outcome: "created", version: created }), true, JSON.stringify(receipts.errors));
   assert.equal(receipts({ outcome: "unknown" }), true);

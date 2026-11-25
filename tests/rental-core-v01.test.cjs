@@ -29,7 +29,7 @@ const campingTenant = "tenant_002";
 const startAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 const endAt = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
 
-// 配置写方法已随「配置落库」转为异步，.cjs 无顶层 await，故整体包一层异步 IIFE。
+// 配置读写已随「配置落库」转为异步，.cjs 无顶层 await，故整体包一层异步 IIFE。
 void (async () => {
 
 // SPACE-03：服务层状态按经营空间取，因此必须先跑一次启动预热，
@@ -50,8 +50,8 @@ assert.deepEqual(realService.listOperators(realTenant), [], "普通空间不得�
 assert.deepEqual(realService.listLocations(realTenant), [], "普通空间不得生成演示地址和电话");
 assert.deepEqual(realService.listItemGroups(realTenant), [], "普通空间不得生成演示商品");
 
-const cameraProfile = service.getProfile(cameraTenant);
-const campingProfile = service.getProfile(campingTenant);
+const cameraProfile = await service.getProfile(cameraTenant);
+const campingProfile = await service.getProfile(campingTenant);
 assert.equal(cameraProfile.categoryCode, "camera");
 assert.equal(campingProfile.categoryCode, "camping");
 const categories = service.listCategories();
@@ -115,7 +115,7 @@ assert.deepEqual(vehicleModels.map((group) => group.name), ["荣威 D7 标准版
 assert.deepEqual(vehicleSampleService.listPricingGroups(cameraTenant).map((group) => group.name), ["标准轿车组", "城市 SUV 组"], "商业车组名称只保存在定价分组");
 assert.ok(vehicleModels.every((group) => group.inventoryMode === RentalInventoryMode.Serialized && group.unit === "辆"));
 
-const cameraSettings = service.getBusinessSettings(cameraTenant);
+const cameraSettings = await service.getBusinessSettings(cameraTenant);
 assert.equal(cameraSettings.categoryCode, "camera");
 assert.ok(cameraSettings.pricing.enabledUnits.includes("day_24h"));
 const savedCameraSettings = await service.saveBusinessSettings(cameraTenant, {
@@ -180,15 +180,6 @@ const normalizedCameraAsset = await service.saveAsset(cameraTenant, {
 assert.equal(normalizedCameraAsset.serialNo, "TOP-LEVEL-SN", "top-level alias must be the canonical value");
 assert.equal(normalizedCameraAsset.attributes.serialNo, undefined, "aliased fields must not persist a second JSON copy");
 
-const cameraContext = {
-  profile: service.getProfile(cameraTenant),
-  category: service.listCategories().find((item) => item.code === service.getProfile(cameraTenant).categoryCode),
-  settings: service.getBusinessSettings(cameraTenant),
-  groups: service.listItemGroups(cameraTenant),
-  couponTemplates: service.listCouponTemplates(cameraTenant),
-  locations: service.listLocations(cameraTenant),
-  operators: service.listOperators(cameraTenant)
-};
 // ── 订单生命周期与可用量断言已移交 tests/mysql-e2e.test.cjs ──
 // RC-01 阶段 3 把订单、预占、分配、资产、库存和检查记录迁到数据库后，服务不再就地
 // 修改调用方持有的 order 对象，而是从库加载副本再写回。原先"调 confirmOrder 后

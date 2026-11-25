@@ -20,11 +20,11 @@ const stores = require("./helpers/absorbing-config-store.cjs");
   );
   await core.onApplicationBootstrap();
   await business.onApplicationBootstrap();
-  const profile = core.getProfile(tenantId);
+  const profile = await core.getProfile(tenantId);
   const context = {
     profile,
     category: core.listCategories().find((item) => item.code === profile.categoryCode),
-    settings: core.getBusinessSettings(tenantId),
+    settings: await core.getBusinessSettings(tenantId),
     groups: core.listItemGroups(tenantId),
     pricingGroups: core.listPricingGroups(tenantId),
     locations: core.listLocations(tenantId),
@@ -32,6 +32,19 @@ const stores = require("./helpers/absorbing-config-store.cjs");
     operators: core.listOperators(tenantId)
   };
   require('./helpers/fulfillment-admission-fixture.cjs').bindFulfillmentAdmission([core, business], tenantId, 'ws_tenant_002', context);
+  // 原报价要求有界的当前库存对象来源；本用例明确提供配置fixture，不模拟持久化。
+  business.coreConfigStore.listItemGroupsPage = async (tenant, workspace, query) => {
+    assert.equal(tenant, tenantId);
+    assert.equal(workspace, 'ws_tenant_002');
+    assert.equal(query.limit, 1);
+    return {
+      rows: structuredClone(context.groups.filter(row => row.id === query.itemGroupId)),
+      nextCursor: null,
+      truncated: false,
+      configurationVersion: 'fixture-current-configuration',
+      source: 'persisted_workspace_configuration'
+    };
+  };
   const groups = context.groups.filter((item) => item.status === "enabled" && item.inventoryMode === RentalInventoryMode.Quantity);
   const location = context.locations.find((item) => item.status === "enabled");
   assert.ok(groups.length >= 2 && location, "需要两个数量库存商品和一个启用地点");
@@ -72,7 +85,15 @@ const stores = require("./helpers/absorbing-config-store.cjs");
       unitPrice: originalRate.baseAmount
     }]
   };
+  const exchangeTransaction = Object.freeze({});
+  business.configStore.readServicesForExchange = async (tenant, workspace, transaction) => {
+    assert.equal(tenant, tenantId);
+    assert.equal(workspace, 'ws_tenant_002');
+    assert.equal(transaction, exchangeTransaction);
+    return []; // 本fixture明确没有已配置增值服务，不表示真实数据库事务通过。
+  };
   const priced = await business.quotePostPickupExchange(tenantId, context, {
+    tx: exchangeTransaction,
     order,
     previousExtensions: [],
     orderLineId: "exchange-line-1",

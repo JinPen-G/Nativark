@@ -1,0 +1,583 @@
+'use strict';
+/** 独立 Rental 宿主的离线打包入口。消费已构建字节、固定完整包及原 prepared 部署材料，
+ * 从锁定底座源码在内存复算公共六包，匹配后沿原上下文收据记录同源产物。
+ * 输出确定性 Linux Docker 上下文；镜像构建才安装原锁依赖并生成目标平台 Client。
+ * 本命令不读 .env、不安装、不生成 Client、不启动进程/服务、不连接库或办理迁移。 */
+const fs = require('node:fs'), path = require('node:path');
+const { createHash } = require('node:crypto');
+const { createRequire, isBuiltin } = require('node:module');
+const { isDeepStrictEqual } = require('node:util');
+const { selectedCompilerOptions, samePrismaSchema, prismaSchemaTokens } = require('./build-selected-prisma.cjs');
+const { compileRentalPlatformSource, requireMatchingPublicRuntime, publicDirectories } = require('./rental-platform-build.cjs');
+const { selectWorkspaces, projectHostLock, lockedDependency, hostDirectory } = require('./rental-host-lock.cjs');
+const root = path.resolve(__dirname, '..');
+const targetNodeVersion = '24.13.0';
+const json = value => Buffer.from(JSON.stringify(value, null, 2) + '\n');
+const hash = bytes => createHash('sha256').update(bytes).digest('hex');
+const text = (files, file) => {
+  const bytes = files.get(file);
+  if (!bytes?.byteLength) throw Error('打包缺少实际文件：' + file);
+  return Buffer.from(bytes).toString('utf8');
+};
+const within = (directory, file) => { const rel = path.relative(directory, file); return rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel); };
+const rentalHostDirectory = host => {
+  if (!['rental', 'example-multi-core'].includes(host)) throw Error('未登记的 Rental 宿主组合：' + host);
+  return hostDirectory(host);
+};
+
+function parseArguments(args) {
+  const values = {};
+  for (let index = 0; index < args.length; index += 2) {
+    const option = args[index], value = args[index + 1];
+    if (!['--ai', '--host', '--deployment', '--platform-package', '--rental-package', '--tickets-package', '--ai-data-package', '--client', '--platform-client', '--output', '--deps', '--mcp-entry'].includes(option)
+      || Object.hasOwn(values, option) || !value || value.startsWith('--')) throw Error('未知、重复或缺值的打包选项：' + option);
+    values[option] = value;
+  }
+  if (!['enabled', 'disabled'].includes(values['--ai'])) throw Error('须显式选择 --ai enabled|disabled');
+  const host = values['--host'] ?? 'rental'; rentalHostDirectory(host);
+  if (values['--mcp-entry']) {
+    if (values['--ai'] !== 'enabled' || !path.isAbsolute(values['--mcp-entry'])) throw Error('--mcp-entry只接受显式AI组合的绝对编译入口');
+    requireMcpEntry(path.relative(root, values['--mcp-entry']).split(path.sep).join('/'), host);
+  }
+  if ((host === 'example-multi-core') !== Boolean(values['--tickets-package']))
+    throw Error('只有双 Core 示范须显式提供 --tickets-package');
+  for (const key of ['--deployment', '--platform-package', '--rental-package', '--client', '--platform-client', '--output'])
+    if (!values[key] || !path.isAbsolute(values[key])) throw Error(key + ' 须为显式绝对路径');
+  if ((values['--ai'] === 'enabled') !== Boolean(values['--ai-data-package'])) throw Error('只有 AI enabled 必须提供 --ai-data-package');
+  for (const key of ['--ai-data-package', '--tickets-package', '--deps']) if (values[key] && !path.isAbsolute(values[key])) throw Error(key + ' 须为绝对路径');
+  if (!values['--output'].endsWith('.tgz')) throw Error('--output 须为尚不存在的 .tgz 文件');
+  if (!values['--platform-package'].endsWith('.tgz')) throw Error('--platform-package 须为锁定的完整底座源码 .tgz');
+  return { aiMode: values['--ai'], host, ...(values['--mcp-entry'] ? { mcpEntry: values['--mcp-entry'] } : {}),
+    ticketsPackage: values['--tickets-package'], deployment: values['--deployment'], rentalPackage: values['--rental-package'],
+    platformPackage: values['--platform-package'],
+    aiDataPackage: values['--ai-data-package'], client: values['--client'], platformClient: values['--platform-client'],
+    output: values['--output'], deps: values['--deps'] || path.join(root, 'node_modules') };
+}
+
+function ordinaryDirectories(directory) {
+  for (let current = path.resolve(directory); ; current = path.dirname(current)) {
+    const stat = fs.lstatSync(current);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw Error('打包路径不能经过链接或非普通目录');
+    if (path.dirname(current) === current) break;
+  }
+}
+function readOrdinary(file, maxBytes = 32 * 1024 * 1024) {
+  ordinaryDirectories(path.dirname(file));
+  const stat = fs.lstatSync(file);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > maxBytes) throw Error('打包输入须为有界普通文件');
+  const bytes = fs.readFileSync(file);
+  if (bytes.length > maxBytes) throw Error('输入在读取期间超过大小上限');
+  return bytes;
+}
+function readTree(directory, allowed) {
+  ordinaryDirectories(directory);
+  const files = new Map(); let bytes = 0;
+  const visit = (current, prefix = '') => {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const relative = prefix + entry.name, file = path.join(current, entry.name);
+      if (entry.isSymbolicLink()) throw Error('打包目录中存在链接：' + relative);
+      if (entry.isDirectory()) visit(file, relative + '/');
+      else {
+        if (!allowed(relative)) throw Error('打包目录中存在未声明材料：' + relative);
+        const content = readOrdinary(file); bytes += content.length;
+        if (files.size >= 20000 || bytes > 128 * 1024 * 1024) throw Error('打包目录超过资源上限');
+        files.set(relative, content);
+      }
+    }
+  };
+  visit(directory); return files;
+}
+
+function publicApi() {
+  // These are this checkout's already-built formal modules, never executable
+  // code loaded from the caller's candidate package directory.
+  return {
+    ...require('@rental-os/core-contracts'),
+    ...require('@rental-os/core-contracts/archive'),
+    ...require('@rental-os/core-contracts/package'),
+    ...require('@rental-os/core-contracts/platform-data-package'),
+    ...require('@rental-os/core-contracts/platform-source'),
+    ...require('@rental-os/platform-core-host/core-package-preflight'),
+    ...require('@rental-os/platform-api/data-plan'),
+    ...require(path.join(root, 'apps/rental-api/dist/prepare-deployment.js')),
+  };
+}
+
+function requireMcpEntry(entry, host) {
+  const prefix = rentalHostDirectory(host) + '/dist-mcp/';
+  if (typeof entry !== 'string' || !entry.startsWith(prefix) || !/^[a-z0-9][a-z0-9-]*\.js$/u.test(entry.slice(prefix.length)))
+    throw Error('MCP入口须为当前所选宿主dist-mcp中的第一方编译叶文件');
+  return entry;
+}
+
+/** 只接受源入口真正调用原bootstrap；单独导出函数不会在Node启动时执行。 */
+function requireMcpStartup(files, entry, ts) {
+  const tree = ts.createSourceFile(entry, text(files, entry), ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const names = new Set(), spaces = new Set();
+  const bootstraps = new Set(['bootstrapRentalAiMcp', 'bootstrapRentalOriginalAiMcp']);
+  const isBootstrap = value => value === '@rental-os/rental-api/mcp-bootstrap' || /^\.\/mcp-bootstrap(?:\.js)?$/u.test(value);
+  for (const statement of tree.statements) {
+    if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier) && isBootstrap(statement.moduleSpecifier.text)) {
+      const bindings = statement.importClause?.namedBindings;
+      if (bindings && ts.isNamespaceImport(bindings)) spaces.add(bindings.name.text);
+      else if (bindings && ts.isNamedImports(bindings)) for (const item of bindings.elements)
+        if (bootstraps.has((item.propertyName ?? item.name).text)) names.add(item.name.text);
+    }
+    if (ts.isVariableStatement(statement)) for (const declaration of statement.declarationList.declarations) {
+      const value = declaration.initializer;
+      if (!value || !ts.isCallExpression(value) || !ts.isIdentifier(value.expression) || value.expression.text !== 'require'
+        || value.arguments.length !== 1 || !ts.isStringLiteralLike(value.arguments[0]) || !isBootstrap(value.arguments[0].text)) continue;
+      if (ts.isIdentifier(declaration.name)) spaces.add(declaration.name.text);
+      else if (ts.isObjectBindingPattern(declaration.name)) for (const item of declaration.name.elements)
+        if (ts.isIdentifier(item.name) && bootstraps.has((item.propertyName ?? item.name).text)) names.add(item.name.text);
+    }
+  }
+  const unwrap = expression => ts.isParenthesizedExpression(expression) ? unwrap(expression.expression)
+    : ts.isBinaryExpression(expression) && expression.operatorToken.kind === ts.SyntaxKind.CommaToken ? unwrap(expression.right) : expression;
+  let called = false;
+  function inspect(node) {
+    if (ts.isFunctionLike(node) || ts.isClassLike(node)) return;
+    if (ts.isCallExpression(node)) {
+      const value = unwrap(node.expression);
+      if (ts.isIdentifier(value) && names.has(value.text) || ts.isPropertyAccessExpression(value)
+        && ts.isIdentifier(value.expression) && spaces.has(value.expression.text) && bootstraps.has(value.name.text)) called = true;
+    }
+    ts.forEachChild(node, inspect);
+  }
+  inspect(tree);
+  if (!called) throw Error('MCP编译入口没有在顶层实际调用同一MCP bootstrap');
+}
+
+function workspaceExport(metadata, specifier, mode = 'require') {
+  const name = metadata.name, key = specifier === name ? '.' : '.' + specifier.slice(name.length);
+  let entry = metadata.exports?.[key], replacement;
+  if (entry === undefined) {
+    const patterns = Object.keys(metadata.exports || {}).filter(value => value.split('*').length === 2)
+      .sort((a, b) => b.indexOf('*') - a.indexOf('*') || b.length - a.length);
+    for (const pattern of patterns) {
+      const [prefix, suffix] = pattern.split('*');
+      if (key.startsWith(prefix) && key.endsWith(suffix) && key.length > prefix.length + suffix.length) {
+        entry = metadata.exports[pattern]; replacement = key.slice(prefix.length, suffix.length ? -suffix.length : undefined); break;
+      }
+    }
+  }
+  const pick = value => typeof value === 'string' ? value : value && pick(value.node ?? value[mode] ?? value.default);
+  let target = pick(entry);
+  if (!metadata.exports && key === '.') target = metadata.main;
+  if (replacement !== undefined) target = target?.replace('*', replacement);
+  if (!target || /[\\%:*]/u.test(target) || target.split('/').some(part => part === '..' || part === 'node_modules'))
+    throw Error('运行依赖缺少正式 CommonJS 出口：' + specifier);
+  return target.replace(/^\.\//u, '');
+}
+
+/** MCP镜像只执行AI服务包；去掉类型条件后才省略声明，避免留下悬空正式出口。
+ * 固定Core/AI数据包与公共六包仍完整保留，归档资源上限不扩大。 */
+function runtimeOnlyMetadata(metadata) {
+  const result = { ...metadata };
+  delete result.types; delete result.typings; delete result.typesVersions;
+  const conditions = value => typeof value === 'string' || value === null ? value : Array.isArray(value)
+    ? value.map(conditions) : Object.fromEntries(Object.entries(value).filter(([name]) => name !== 'types')
+      .map(([name, entry]) => [name, conditions(entry)]));
+  if (result.exports) result.exports = conditions(result.exports);
+  return result;
+}
+
+/** 只沿真实启动模块的静态 require/import 检查闭包；不 require 应用、运行 Client 或猜动态入口。
+ * 最终 Node exports/外部包的实际解析留给生成的镜像预检，在镜像内安装完成后执行。 */
+function checkRuntimeClosure(files, workspaces, lock, entry, ts, options = {}) {
+  const packages = new Map([...workspaces].map(([directory, metadata]) => [metadata.name, { directory, metadata }]));
+  const queue = [entry], seen = new Set(), resolutions = [], clients = new Set(), runtimePeers = new Map();
+  const locate = target => [target, target + '.js', target + '.json', target + '/index.js'].find(file => files.has(file));
+  while (queue.length) {
+    const file = queue.shift(); if (seen.has(file)) continue;
+    const source = text(files, file); seen.add(file);
+    if (file.endsWith('.json')) { JSON.parse(source); continue; }
+    const owner = [...workspaces.keys()].find(directory => file.startsWith(directory + '/'));
+    if (!owner) throw Error('运行代码越出所选工作区：' + file);
+    const metadata = workspaces.get(owner), tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+    if (tree.parseDiagnostics.length) throw Error('运行产物语法无效：' + file);
+    const imports = new Map();
+    const add = (specifier, mode) => {
+      if (!imports.has(specifier)) imports.set(specifier, new Set());
+      imports.get(specifier).add(options.moduleImports && mode === 'import' ? 'import' : 'require');
+    };
+    function inspect(node) {
+      if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier))
+        add(node.moduleSpecifier.text, 'import');
+      if (ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword
+        || ts.isIdentifier(node.expression) && node.expression.text === 'require'
+        || ts.isPropertyAccessExpression(node.expression) && ts.isIdentifier(node.expression.expression)
+          && node.expression.expression.text === 'require' && node.expression.name.text === 'resolve')) {
+        if (node.arguments.length !== 1 || !ts.isStringLiteralLike(node.arguments[0]))
+          throw Error('运行产物含未核定的动态模块路径：' + file);
+        add(node.arguments[0].text, node.expression.kind === ts.SyntaxKind.ImportKeyword ? 'import' : 'require');
+      }
+      ts.forEachChild(node, inspect);
+    }
+    inspect(tree);
+    for (const [specifier, modes] of imports) for (const mode of modes) {
+      if (isBuiltin(specifier)) continue;
+      if (specifier === '@prisma/client' || specifier.includes('.prisma/client')) throw Error('运行代码仍引用默认 Client：' + file);
+      resolutions.push({ from: file, specifier, ...(mode === 'import' ? { mode } : {}) });
+      if (specifier.startsWith('.')) {
+        const target = path.posix.normalize(path.posix.join(path.posix.dirname(file), specifier));
+        if (['apps/platform-api/generated/client', 'apps/rental-api/generated/client'].includes(target)) {
+          clients.add(target); continue;
+        }
+        if (!target.startsWith(owner + '/')) throw Error('运行代码跨工作区深层导入：' + file);
+        const resolved = mode === 'import' ? files.has(target) && target : locate(target);
+        if (!resolved) throw Error('运行产物缺少内部依赖：' + file + ' -> ' + specifier);
+        queue.push(resolved); continue;
+      }
+      const name = specifier.startsWith('@') ? specifier.split('/').slice(0, 2).join('/') : specifier.split('/')[0];
+      const declared = { ...metadata.dependencies, ...metadata.optionalDependencies, ...metadata.peerDependencies };
+      if (name !== metadata.name && !Object.hasOwn(declared, name)) throw Error('运行代码使用未声明的依赖：' + file + ' -> ' + name);
+      if (name.startsWith('@rental-os/')) {
+        const pkg = packages.get(name);
+        if (!pkg) throw Error('运行代码引用未选工作区：' + name);
+        const target = pkg.directory + '/' + workspaceExport(pkg.metadata, specifier, mode);
+        if (!files.has(target)) throw Error('正式运行出口未实际构建：' + specifier + ' -> ' + target);
+        queue.push(target);
+      } else {
+        const dependency = lockedDependency(lock, owner, name), locked = lock.packages[dependency];
+        if (!locked) throw Error('运行依赖不在原锁闭包：' + name);
+        if (!metadata.dependencies?.[name] && metadata.peerDependenciesMeta?.[name]?.optional)
+          runtimePeers.set(owner + ':' + name, { owner, name });
+      }
+    }
+  }
+  if (options.expectedClients === undefined) {
+    if (!clients.has('apps/rental-api/generated/client')) throw Error('宿主没有引用所选专属 Client');
+  } else {
+    const expected = options.expectedClients;
+    if (!Array.isArray(expected) || !expected.length || new Set(expected).size !== expected.length
+      || expected.some(directory => !['apps/platform-api/generated/client', 'apps/rental-api/generated/client'].includes(directory))
+      || clients.size !== expected.length || expected.some(directory => !clients.has(directory)))
+      throw Error('实际运行 Client 集合与所选宿主不一致');
+  }
+  return { files: seen.size, resolutions, clients: [...clients].sort(), runtimePeers: [...runtimePeers.values()] };
+}
+
+function dockerfile(mode, entry) {
+  return `# 从本打包上下文构建；不复制作者 node_modules、Windows 引擎或环境文件。\n` +
+    `FROM node:${targetNodeVersion}-bookworm-slim AS base\n` +
+    `RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates openssl && rm -rf /var/lib/apt/lists/*\n` +
+    `WORKDIR /app\nFROM base AS clients\nCOPY . .\n` +
+    `RUN npm ci --include=dev --ignore-scripts --no-audit --no-fund\n` +
+    `RUN DATABASE_URL=mysql://offline:offline@127.0.0.1:1/rental_os_offline node node_modules/prisma/build/index.js generate --schema apps/platform-api/prisma/schema.prisma && \\\n` +
+    `    DATABASE_URL=mysql://offline:offline@127.0.0.1:1/rental_os_offline node node_modules/prisma/build/index.js generate --schema apps/rental-api/prisma-deployment/schema.prisma\n` +
+    `FROM base AS runtime\nENV NODE_ENV=production RENTAL_AI_MODE=${mode} RENTAL_DEPLOYMENT_LOCK=/app/apps/rental-api/prisma-deployment/core.deployment.lock.json\n` +
+    `COPY . .\nRUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund\n` +
+    `COPY --from=clients /app/apps/platform-api/generated/client ./apps/platform-api/generated/client\n` +
+    `COPY --from=clients /app/apps/rental-api/generated/client ./apps/rental-api/generated/client\n` +
+    `RUN node verify-runtime.cjs\nUSER node\nEXPOSE 3000\nCMD ["node", "${entry}"]\n`;
+}
+
+function createRuntimeVerifier(receiptFile = 'rental-host.context.json', moduleImports = false) {
+  if (!/^[a-z][a-z0-9-]*\.context\.json$/u.test(receiptFile)) throw Error('运行收据须为宿主根内的固定 JSON 文件名');
+  return `'use strict';
+// 镜像构建中的字节与解析预检；不导入应用、不实例化Client、不连接或迁移数据库。
+const fs = require('node:fs'), path = require('node:path');
+const { createHash } = require('node:crypto'), { createRequire${moduleImports ? ', registerHooks' : ''} } = require('node:module');
+const root = __dirname, receipt = JSON.parse(fs.readFileSync(path.join(root, '${receiptFile}'), 'utf8'));
+const digest = bytes => createHash('sha256').update(bytes).digest('hex');
+const schemaTokens = ${prismaSchemaTokens.toString()};
+for (const item of receipt.files) if (digest(fs.readFileSync(path.join(root, item.file))) !== item.sha256)
+  throw Error('镜像输入摘要变化：' + item.file);
+for (const item of receipt.clients) {
+  const schemaFile = item.directory === 'apps/platform-api/generated/client' ? 'apps/platform-api/prisma/schema.prisma'
+    : item.directory === 'apps/rental-api/generated/client' ? 'apps/rental-api/prisma-deployment/schema.prisma' : undefined;
+  if (!schemaFile) throw Error('镜像 Client 目录未登记');
+  const source = fs.readFileSync(path.join(root, schemaFile), 'utf8');
+  if (digest(Buffer.from(source)) !== item.schemaSha256
+    || schemaTokens(fs.readFileSync(path.join(root, item.directory, 'schema.prisma'), 'utf8')) !== schemaTokens(source))
+    throw Error('镜像生成 Client 与核定 schema 不一致');
+  const metadata = JSON.parse(fs.readFileSync(path.join(root, item.directory, 'package.json'), 'utf8'));
+  if (metadata.version !== receipt.prismaVersion) throw Error('镜像 Client 版本不一致');
+}
+if (fs.existsSync(path.join(root, 'node_modules/.prisma/client'))) throw Error('镜像不接受默认 Client');
+${moduleImports ? `// Node原解析钩子只核import条件；在load前抛出已解析URL，不执行目标模块。
+function resolveImported(from, specifier) {
+  const captured = {}, probe = 'nativark-runtime-import-probe';
+  const hook = registerHooks({ resolve(name, context, next) {
+    if (name !== probe) return next(name, context);
+    captured.url = next(specifier, { ...context, conditions: ['node', 'import'] }).url;
+    throw captured;
+  } });
+  try { createRequire(from)(probe); throw Error('MCP解析未在模块加载前停止'); }
+  catch (error) {
+    if (error !== captured || !captured.url?.startsWith('file:')
+      || !fs.existsSync(require('node:url').fileURLToPath(captured.url))) throw error;
+  } finally { hook.deregister(); }
+}
+for (const item of receipt.runtime.resolutions) {
+  const from = path.join(root, item.from);
+  if (item.mode === 'import') resolveImported(from, item.specifier);
+  else createRequire(from).resolve(item.specifier);
+}` : `for (const item of receipt.runtime.resolutions) createRequire(path.join(root, item.from)).resolve(item.specifier);`}
+console.log(JSON.stringify({ status: 'image-preflight-passed', aiMode: receipt.aiMode, applicationStarted: false, deployment: 'pending' }));
+`;
+}
+
+/** 仅整理公共包与宿主 README 副本的资料链接；不改完整 Core/AI 包或扩大运行文件集合。
+ * 两宿主原 rootDir=src，普通/AI outDir=dist/dist-ai；只有实际入包输出才能替代源码链接。 */
+function runtimePackageReadme(source, file, files, aiMode, platformFiles, platformSource, pinLinks) {
+  const missing = new Set(), directory = path.posix.dirname(file);
+  let fence, compiled = 0, pinned = 0;
+  // 沿公开指南的链接语法保留围栏、行内代码、外链和本页锚点。
+  const readme = source.split('\n').map(line => {
+    const marker = /^\s{0,3}(`{3,}|~{3,})/u.exec(line);
+    if (fence) {
+      if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && !line.slice(marker[0].length).trim()) fence = undefined;
+      return line;
+    }
+    if (marker) { fence = marker[1]; return line; }
+    return line.replace(/(`+).*?\1|\[([^\]\n]+)\]\((?:<([^>\n]+)>|([^\s)]+))\)/gu, (link, code, label, angled, plain) => {
+      if (code) return link;
+      const target = angled ?? plain;
+      if (/^(?:[a-z][a-z0-9+.-]*:|#|\/\/)/iu.test(target)) return link;
+      const [name, fragment] = target.split('#'), resolved = path.posix.normalize(path.posix.join(directory, name));
+      if (files.has(resolved) || [...files.keys()].some(file => file.startsWith(resolved + '/'))) return link;
+      const hostSource = /^(apps\/(?:rental-api|example-multi-core-api))\/src\/(.+)\.ts$/u.exec(resolved);
+      if (hostSource && !resolved.endsWith('.d.ts') && !fragment) {
+        const outputs = aiMode === 'enabled' ? ['dist-ai', 'dist'] : ['dist'];
+        const module = outputs.flatMap(output => ['.js', '.d.ts'].map(extension =>
+          hostSource[1] + '/' + output + '/' + hostSource[2] + extension)).find(file => files.has(file));
+        if (module) { compiled++; return `[${label}](${path.posix.relative(directory, module)})`; }
+      }
+      // 固定归档内的源码与公共包嵌套 README 才可外指；生成根 README/platform.source.json 不在此集合。
+      const nestedReadme = resolved.endsWith('/README.md') && publicDirectories.some(directory =>
+        resolved.startsWith(directory + '/') && resolved !== directory + '/README.md');
+      if (!hostSource && (/\.(?:[cm]?js|tsx?)$/u.test(resolved) || nestedReadme) && platformFiles.has(resolved)) {
+        pinned++; return pinLinks(link, file, platformSource, true);
+      }
+      missing.add(target); return label;
+    });
+  }).join('\n');
+  if (!compiled && !pinned && !missing.size) return readme;
+  return readme.trimEnd() + '\n\n## 运行包内的资料定位\n\n' +
+    '本 README 的包内链接定位实际入包文件；替换后的宿主源码链接定位编译模块（JS 或声明），不代表原 TypeScript 源码。源码包另取原发行；底座源码外链仅使用已核固定归档内的文件及该发行来源，不为宿主源码猜提交。\n' +
+    (missing.size ? '\n以下原相对路径未入包且没有已核对应输出或固定源码链接，保留为接手缺口；须从原发行另取并核对来源：\n\n' +
+      [...missing].map(target => '- `' + target.replace(/`/gu, '\\`') + '`').join('\n') + '\n' : '');
+}
+
+function createRentalHostContext(input) {
+  const api = publicApi(), { aiMode, sourceFiles, platformFiles, rentalFiles, ticketsFiles, aiFiles, deploymentFiles, ts, selections } = input;
+  const host = input.host ?? 'rental', directory = rentalHostDirectory(host), multi = host === 'example-multi-core';
+  if (!['enabled', 'disabled'].includes(aiMode)) throw Error('须明确选择宿主 AI 模式');
+  const mcpEntry = input.mcpEntry === undefined ? undefined : requireMcpEntry(input.mcpEntry, host);
+  if (mcpEntry && aiMode !== 'enabled') throw Error('MCP入口须选择同一AI数据与Runtime');
+  const lock = api.CoreDeploymentLockSchema.parse(JSON.parse(text(deploymentFiles, 'core.deployment.lock.json')));
+  if (lock.platform.versions.node !== targetNodeVersion || lock.platform.versions.contract !== api.CORE_CONTRACT_VERSION)
+    throw Error(`Rental 宿主锁须与实际合同和目标 Node ${targetNodeVersion} 一致`);
+  const rentalPin = lock.cores.find(pin => pin.manifest.id === 'rental');
+  const ticketsPin = lock.cores.find(pin => pin.manifest.id === 'example-tickets');
+  if (!rentalPin || lock.cores.length !== (multi ? 2 : 1) || multi !== Boolean(ticketsFiles)
+    || multi && !ticketsPin
+    || (lock.dataCapabilities?.length || 0) !== (aiMode === 'enabled' ? 1 : 0)
+    || aiMode === 'enabled' && lock.dataCapabilities[0].id !== 'ai-native'
+    || (aiMode === 'enabled') !== Boolean(aiFiles)) throw Error('部署锁、固定包与显式 AI 选择不一致');
+  const publicSchema = text(sourceFiles, 'apps/platform-api/prisma/schema.prisma');
+  if (publicSchema !== text(platformFiles, 'apps/platform-api/prisma/schema.prisma'))
+    throw Error('实际公共 schema 与固定底座源码不同');
+  const platform = api.createPublicPlatformDataPlan();
+  const expected = api.createRentalDeploymentFiles({ release: lock.platform, pin: rentalPin, coreFiles: rentalFiles,
+    publicSchema, publicMigrations: platform.migrationNames.map((name, index) => ({ name,
+      sql: sourceFiles.get('apps/platform-api/' + platform.data.migrations[index].file) })),
+    ...(aiFiles ? { ai: { release: lock.dataCapabilities[0], files: aiFiles } } : {}),
+    ...(multi ? { additionalCores: [{ pin: ticketsPin, files: ticketsFiles }] } : {}) });
+  if (!isDeepStrictEqual(expected.lock, lock) || expected.files.size !== deploymentFiles.size)
+    throw Error('部署材料与原准备结果不一致');
+  for (const [file, bytes] of expected.files) if (!deploymentFiles.has(file) || !Buffer.from(bytes).equals(deploymentFiles.get(file)))
+    throw Error('部署材料缺失或摘要不一致：' + file);
+  const clients = [];
+  for (const [host, mode, schema] of [['platform', 'platform', publicSchema], ['rental', aiMode === 'enabled' ? 'rental-ai' : 'rental', text(deploymentFiles, 'schema.prisma')]]) {
+    const directory = `apps/${host}-api/generated/client`, selected = selections[host];
+    if (!selected || path.resolve(selected.client) !== path.join(root, directory, 'index.d.ts'))
+      throw Error('须选用本宿主实际 generated/client 声明：' + host);
+    const read = file => path.resolve(file) === path.resolve(selected.client) ? selected.declarations
+      : path.resolve(file) === path.join(root, directory, 'schema.prisma') ? selected.schema : undefined;
+    const checked = selectedCompilerOptions(ts, path.join(root, `apps/${host}-api/tsconfig.json`), {}, { client: selected.client, mode }, read);
+    if (!samePrismaSchema(selected.schema, schema)) throw Error('构建所选 Client 与部署 schema 不一致：' + host);
+    clients.push({ directory, mode, models: checked.models, schemaSha256: hash(Buffer.from(schema)) });
+  }
+  const originalLock = JSON.parse(text(sourceFiles, 'package-lock.json'));
+  const platformLock = JSON.parse(text(platformFiles, 'package-lock.json'));
+  // 源码发行与宿主锁的 dev/optional 可因闭包投影变化，实际版本、来源、摘要和依赖边仍须一致。
+  const dependencyIdentity = value => {
+    const { dev, optional, devOptional, peer, ...identity } = value || {};
+    return identity;
+  };
+  for (const [file, entry] of Object.entries(platformLock.packages)) if (file.includes('node_modules/') && !entry.link
+    && !isDeepStrictEqual(dependencyIdentity(entry), dependencyIdentity(originalLock.packages[file])))
+    throw Error('宿主与固定底座的原依赖锁不一致：' + file);
+  const fixedPackages = new Map([['packages/rental-core', rentalFiles],
+    ...(ticketsFiles ? [['packages/example-tickets-core', ticketsFiles]] : []),
+    ...(aiFiles ? [['packages/ai-native-data', aiFiles]] : [])]);
+  const workspaces = selectWorkspaces(originalLock, directory => JSON.parse(text(
+    fixedPackages.get(directory) ?? (publicDirectories.includes(directory) ? platformFiles : sourceFiles),
+    fixedPackages.has(directory) ? 'package.json' : directory + '/package.json')), aiMode, host, { mcp: Boolean(mcpEntry) });
+  for (const directory of fixedPackages.keys()) if (!workspaces.has(directory))
+    throw Error('固定 Core 包不在实际宿主依赖闭包：' + directory);
+  const files = new Map();
+  for (const [directory] of workspaces) {
+    const fixed = fixedPackages.get(directory);
+    if (fixed) for (const [file, bytes] of fixed) files.set(directory + '/' + file, bytes);
+    else for (const [file, bytes] of sourceFiles) if (file.startsWith(directory + '/')) {
+      const relative = file.slice(directory.length + 1);
+      if (relative.startsWith('dist-mcp/') && !mcpEntry) continue;
+      if (mcpEntry && directory === 'packages/ai-native-server' && relative.endsWith('.d.ts')) continue;
+      if (['apps/rental-api', 'apps/example-multi-core-api'].includes(directory)
+        && aiMode === 'disabled' && relative.startsWith('dist-ai/')) continue;
+      if (['package.json', 'README.md', 'LICENSE'].includes(relative) || /^dist(?:-[a-z0-9-]+)?\/.*\.(?:js|cjs|json|d\.ts)$/u.test(relative)
+        || directory === 'apps/platform-api' && relative.startsWith('prisma/')) files.set(file, bytes);
+    }
+    if (publicDirectories.includes(directory))
+      files.set(directory + '/package.json', Buffer.from(text(platformFiles, directory + '/package.json')));
+    // 公共导读与已核底座发行同源，仅替换原本入包的 README，不新增文件。
+    if (publicDirectories.includes(directory) && files.has(directory + '/README.md'))
+      files.set(directory + '/README.md', Buffer.from(text(platformFiles, directory + '/README.md')));
+    if (!files.has(directory + '/LICENSE')) files.set(directory + '/LICENSE', Buffer.from(text(sourceFiles, 'LICENSE')));
+    if (mcpEntry && directory === 'packages/ai-native-server')
+      files.set(directory + '/package.json', json(runtimeOnlyMetadata(workspaces.get(directory))));
+  }
+  for (const [file, bytes] of deploymentFiles) files.set('apps/rental-api/prisma-deployment/' + file, bytes);
+  files.set('LICENSE', Buffer.from(text(sourceFiles, 'LICENSE')));
+  const entry = mcpEntry ?? directory + (aiMode === 'enabled' ? '/dist-ai/ai-main.js' : '/dist/main.js');
+  if (mcpEntry) requireMcpStartup(files, entry, ts);
+  const runtime = checkRuntimeClosure(files, workspaces, originalLock, entry, ts, { moduleImports: Boolean(mcpEntry) });
+  const projected = projectHostLock(originalLock, workspaces, aiMode, runtime.runtimePeers, host, { mcp: Boolean(mcpEntry) });
+  for (const item of runtime.resolutions) if (!item.specifier.startsWith('.') && !item.specifier.startsWith('@rental-os/')) {
+    const name = item.specifier.startsWith('@') ? item.specifier.split('/').slice(0, 2).join('/') : item.specifier.split('/')[0];
+    const owner = [...workspaces.keys()].find(directory => item.from.startsWith(directory + '/'));
+    const locked = projected.lock.packages[lockedDependency(projected.lock, owner, name)];
+    if (!locked || locked.dev) throw Error('运行依赖不在生产锁闭包：' + name);
+  }
+  // 先拒绝部署材料、所选 Client、锁闭包及入口依赖错误，再做六包源码编译。
+  // 两次读取之间不接受缓存收据；产物仍逐字节复算，成功输出才替换成固定源码的规范元数据。
+  const platformBuild = compileRentalPlatformSource({ platformFiles, release: lock.platform,
+    selection: selections.platform, dependencyDirectory: input.dependencyDirectory, ts, api });
+  requireMatchingPublicRuntime(sourceFiles, platformFiles, platformBuild);
+  for (const [file, bytes] of platformBuild.generated) files.set(file, bytes);
+  files.set('package.json', json(projected.root)); files.set('package-lock.json', json(projected.lock));
+  files.set('Dockerfile', Buffer.from(dockerfile(aiMode, entry)));
+  files.set('.dockerignore', Buffer.from('**/node_modules\n**/generated\n**/.git\n**/.env\n**/.env.*\ndocs\noutput\n'));
+  files.set('verify-runtime.cjs', Buffer.from(createRuntimeVerifier('rental-host.context.json', Boolean(mcpEntry))));
+  files.set('README.md', Buffer.from('# 独立 Rental 宿主镜像上下文\n\n' +
+    '本目录消费固定 Rental 包、所选 AI 数据包及原 prepared 锁/迁移。rental-host.context.json 记录实际字节摘要；不将作者工作区或包版本名当作已部署来源。\n\n' +
+    '在目标 Linux 平台执行 `docker build --target runtime -t rental-host .`。构建按原 npm 锁安装依赖，并在镜像内用 Prisma 5.22.0 分别生成公共和所选宿主 Client；不会复制 Windows 引擎或默认 Client。外部镜像、apt/npm/引擎下载与实际构建须在部署环境核验。\n\n' +
+    `镜像启动入口固定为 ${entry}，AI=${aiMode}。运行前由部署负责人配置 DATABASE_URL、AUTH_TOKEN_SECRET 及必要的原集成配置，沿原迁移账/物理观察办理数据库准备。候选材料位于 apps/rental-api/prisma-deployment；不得用它替代迁移收据。\n\n` +
+    (mcpEntry ? 'MCP由该第一方源码入口显式调用bootstrapRentalAiMcp或bootstrapRentalOriginalAiMcp；原Auth/Core/Native、AS就绪、工具发布及字段释放须由真实owner供给。缺依赖拒绝启动或读取，包不自动制造批准。Node预检按实际import条件解析ESM，不执行目标模块。\n\n' : '') +
+    '版本与候选材料读取另须配置 CORE_PACKAGE_STORAGE_ROOT 为受管绝对目录，在其 archives/index.json 登记同一固定底座完整源码 .tgz 及发行资料；CORE_PLATFORM_PACKAGE_REFERENCE 选取其中与当前启动锁 platform 完全一致的引用。缺配置或原材料保持不可用，已有归档或发行不匹配时拒绝读取。[宿主配置](apps/rental-api/README.md)\n\n' +
+    '兼容程序恢复须使用上次已验证的完整运行包及原锁，同时保留并选取该锁对应的完整底座归档和原登记，先核当前数据与原迁移链仍符合该锁。索引成功读取后固定于本进程，变更登记或配置选择须重新启动装配后采用；实际归档每次读取仍核原路径和字节。运行包和原锁不代替数据兼容、当前授权与原操作收据的实际验证。\n\n' +
+    '打包和镜像预检均不启动应用、连接数据库、执行迁移或供应商动作。当前 imageBuild=not-run、deployment=pending；真实安装、镜像、数据库及业务验收分别办理。\n'));
+  for (const directory of [...publicDirectories, 'apps/rental-api', 'apps/example-multi-core-api']) {
+    const file = directory + '/README.md';
+    if (files.has(file)) files.set(file, Buffer.from(runtimePackageReadme(text(files, file), file, files, aiMode,
+      platformFiles, lock.platform.source, api.pinCoreDocumentationLinks)));
+  }
+  const receipt = { format: 'rental-host-context-1', host, aiMode, imageBuild: 'not-run', deployment: 'pending',
+    ...(mcpEntry ? { mcpEntry } : {}),
+    target: 'linux-bookworm', prismaVersion: '5.22.0', entry, clients,
+    deploymentLockSha256: hash(deploymentFiles.get('core.deployment.lock.json')), coreSha256: rentalPin.sha256,
+    ...(multi ? { additionalCorePackages: [{ id: ticketsPin.manifest.id, sha256: ticketsPin.sha256 }] } : {}),
+    ...(aiFiles ? { aiDataSha256: lock.dataCapabilities[0].sha256 } : {}),
+    originalNpmLockSha256: hash(sourceFiles.get('package-lock.json')), platformBuild: platformBuild.evidence, runtime,
+    files: [...files].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([file, bytes]) => ({ file, sha256: hash(bytes) })) };
+  files.set('rental-host.context.json', json(receipt));
+  return { files, receipt, ...api.createCoreArchive(files) };
+}
+
+function collectInputs(options) {
+  const api = publicApi(), sourceFiles = new Map([['package-lock.json', readOrdinary(path.join(root, 'package-lock.json'))],
+    ['LICENSE', readOrdinary(path.join(root, 'LICENSE'))]]);
+  const deploymentFiles = readTree(options.deployment, file => file === 'schema.prisma' || file === 'core.deployment.lock.json'
+    || file === 'migrations/migration_lock.toml' || /^migrations\/[^/]+\/migration\.sql$/u.test(file));
+  const lock = api.CoreDeploymentLockSchema.parse(JSON.parse(text(deploymentFiles, 'core.deployment.lock.json')));
+  const platformFiles = api.readCoreArchive(readOrdinary(options.platformPackage, api.CORE_ARCHIVE_LIMITS.totalBytes), lock.platform.sha256).files;
+  ordinaryDirectories(options.rentalPackage);
+  const rentalFiles = api.readCorePackageFiles(options.rentalPackage, api.CORE_ARCHIVE_LIMITS.fileBytes, api.CORE_ARCHIVE_LIMITS.totalBytes);
+  const ticketsFiles = options.ticketsPackage && api.readCorePackageFiles(options.ticketsPackage, api.CORE_ARCHIVE_LIMITS.fileBytes, api.CORE_ARCHIVE_LIMITS.totalBytes);
+  const aiFiles = options.aiDataPackage && api.readPlatformDataCapabilityPackage(options.aiDataPackage, lock.dataCapabilities?.[0]).files;
+  const workspaces = selectWorkspaces(JSON.parse(text(sourceFiles, 'package-lock.json')), directory => {
+    const bytes = directory === 'packages/rental-core' ? rentalFiles.get('package.json')
+      : directory === 'packages/example-tickets-core' && ticketsFiles ? ticketsFiles.get('package.json')
+      : directory === 'packages/ai-native-data' && aiFiles ? aiFiles.get('package.json') : readOrdinary(path.join(root, directory, 'package.json'));
+    if (!bytes) throw Error('固定包缺少正式 package.json');
+    sourceFiles.set(directory + '/package.json', bytes); return JSON.parse(bytes.toString('utf8'));
+  }, options.aiMode, options.host, { mcp: Boolean(options.mcpEntry) });
+  for (const directory of workspaces.keys()) {
+    if (directory === 'packages/rental-core' || directory === 'packages/example-tickets-core' && ticketsFiles
+      || directory === 'packages/ai-native-data' && aiFiles) continue;
+    const absolute = path.join(root, directory); ordinaryDirectories(absolute);
+    for (const entry of fs.readdirSync(absolute, { withFileTypes: true })) {
+      if (entry.name === 'dist-mcp' && !options.mcpEntry) continue;
+      if (/^dist(?:-[a-z0-9-]+)?$/u.test(entry.name)) {
+        if (entry.isSymbolicLink() || !entry.isDirectory()) throw Error('编译产物须为普通目录');
+        for (const [file, bytes] of readTree(path.join(absolute, entry.name), file => /\.(?:js|cjs|json|d\.ts)$/u.test(file)))
+          sourceFiles.set(directory + '/' + entry.name + '/' + file, bytes);
+      } else if (['LICENSE', 'README.md'].includes(entry.name)) sourceFiles.set(directory + '/' + entry.name, readOrdinary(path.join(absolute, entry.name)));
+    }
+  }
+  for (const file of ['prisma/schema.prisma', ...api.createPublicPlatformDataPlan().data.migrations.map(item => item.file)])
+    sourceFiles.set('apps/platform-api/' + file, readOrdinary(path.join(root, 'apps/platform-api', file)));
+  const selections = {};
+  for (const [host, client] of [['rental', options.client], ['platform', options.platformClient]]) selections[host] = {
+    client: path.resolve(client), declarations: readOrdinary(client).toString('utf8'), schema: readOrdinary(path.join(path.dirname(client), 'schema.prisma')).toString('utf8') };
+  const requireDeps = createRequire(path.join(options.deps, 'typescript/package.json'));
+  const ts = requireDeps('typescript');
+  if (ts.version !== JSON.parse(text(sourceFiles, 'package-lock.json')).packages['node_modules/typescript']?.version)
+    throw Error('静态解析器与本树原锁不一致');
+  return { aiMode: options.aiMode, host: options.host,
+    ...(options.mcpEntry ? { mcpEntry: path.relative(root, options.mcpEntry).split(path.sep).join('/') } : {}),
+    sourceFiles, platformFiles, rentalFiles, ticketsFiles, aiFiles, deploymentFiles, selections, ts,
+    dependencyDirectory: options.deps };
+}
+
+function writeArchive(output, bytes) {
+  const file = path.resolve(output); ordinaryDirectories(path.dirname(file));
+  if (!file.endsWith('.tgz')) throw Error('输出须为新的 .tgz 文件');
+  let descriptor, identity, offset = 0, completed = false;
+  try {
+    descriptor = fs.openSync(file, 'wx'); identity = fs.fstatSync(descriptor);
+    while (offset < bytes.length) {
+      const written = fs.writeSync(descriptor, bytes, offset, bytes.length - offset);
+      if (!written) throw Error('归档写入未前进');
+      offset += written;
+    }
+    fs.closeSync(descriptor); descriptor = undefined;
+    ordinaryDirectories(path.dirname(file));
+    const current = fs.lstatSync(file);
+    if (current.isSymbolicLink() || current.dev !== identity.dev || current.ino !== identity.ino
+      || current.birthtimeMs !== identity.birthtimeMs || hash(readOrdinary(file, 128 * 1024 * 1024)) !== hash(bytes)) throw Error('输出身份或内容变化');
+    completed = true;
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+    if (identity && !completed) {
+      ordinaryDirectories(path.dirname(file)); const current = fs.lstatSync(file);
+      if (current.isSymbolicLink() || current.dev !== identity.dev || current.ino !== identity.ino || current.birthtimeMs !== identity.birthtimeMs)
+        throw Error('输出身份变化，停止清理');
+      // A different writer can change bytes without replacing the file.
+      if (current.size !== offset || !readOrdinary(file, offset).equals(bytes.subarray(0, offset)))
+        throw Error('输出内容变化，停止清理');
+      fs.unlinkSync(file);
+    }
+  }
+}
+
+function main(args) {
+  const options = parseArguments(args);
+  ordinaryDirectories(path.dirname(options.output));
+  if (fs.existsSync(options.output)) throw Error('目标归档已存在，不覆盖用户产物');
+  if (within(path.join(root, 'docs'), options.output)) throw Error('发行产物不能写入私有资料目录');
+  const result = createRentalHostContext(collectInputs(options)); writeArchive(options.output, result.bytes);
+  return { status: 'packaged', aiMode: options.aiMode, ...(result.receipt.mcpEntry ? { mcpEntry: result.receipt.mcpEntry } : {}),
+    output: options.output, sha256: result.sha256,
+    files: result.files.size, bytes: result.bytes.length, imageBuild: 'not-run', deployment: 'pending' };
+}
+if (require.main === module) {
+  try { process.stdout.write(JSON.stringify(main(process.argv.slice(2))) + '\n'); }
+  catch (error) { process.stderr.write((error instanceof Error ? error.message : '独立宿主打包失败') + '\n'); process.exitCode = 1; }
+}
+module.exports = { parseArguments, createRentalHostContext, collectInputs, checkRuntimeClosure,
+  readOrdinary, readTree, createRuntimeVerifier, writeArchive, main };

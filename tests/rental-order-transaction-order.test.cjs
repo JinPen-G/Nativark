@@ -65,7 +65,7 @@ function extensionController() {
   instance.serviceCapacities = { reserveForOrder: async () => {}, confirmForOrder: async () => {} };
   const order = {
     id: orderId, status: "renting", ruleSnapshot: { extension: { enabled: true } },
-    lines: [], fulfillmentMode: "store_pickup_return", fulfillmentLocationId: "loc_1", customerType: "personal"
+    lines: [], allocations: [], fulfillmentMode: "store_pickup_return", fulfillmentLocationId: "loc_1", customerType: "personal"
   };
   instance.service = {
     resolveWorkspaceId: () => "ws_1",
@@ -145,8 +145,9 @@ void (async () => {
 {
   const forbidden = ["finalPayableAmount", "payableAmount", "adjustmentAmount", "status", "completedAt", "skipReview", "forceComplete"];
   const dtoSource = require("node:fs").readFileSync(
-    require("node:path").join(__dirname, "../apps/api/src/modules/rental-core/rental-order-request.dto.ts"), "utf8"
+    require("node:path").join(__dirname, "../packages/rental-core/src/order-request.dto.ts"), "utf8"
   );
+  assert.match(dtoSource, /export class CreateRentalInspectionDto/u, "必须读取实际归还检查 DTO，不能检查兼容再导出文件");
   const inspectionDto = dtoSource.slice(dtoSource.indexOf("class CreateRentalInspectionDto"), dtoSource.indexOf("class CreateRentalInspectionDto") + 1400);
   for (const field of forbidden) {
     assert.equal(inspectionDto.includes(`${field}`), false, `归还检查入参不得包含 ${field}`);

@@ -6,8 +6,8 @@ const ROOT = path.resolve(__dirname, "..");
 const read = (relative) => fs.readFileSync(path.join(ROOT, relative), "utf8");
 
 const controller = read("apps/api/src/modules/rental-core/rental-core.controller.ts");
-const dto = read("apps/api/src/modules/rental-core/rental-order-request.dto.ts");
-const service = read("apps/api/src/modules/rental-core/rental-core.service.ts");
+const dto = read("packages/rental-core/src/order-request.dto.ts");
+const service = read("packages/rental-core/src/mysql-core-runtime.ts");
 const page = read("apps/admin/src/features/rental-core/RentalOrderDetailPage.tsx");
 
 const requestStart = controller.indexOf('request: {', controller.indexOf('action: "order.inspection"'));

@@ -1,7 +1,7 @@
 import type { ClientMembershipSessionResponse } from "@rental-os/shared";
 import { PUBLIC_CONFIG, configProblem } from "../config/public";
 import { noteServerDate } from "./clock";
-import { accessToken, clearSession, contextVersion, currentServiceCode, isSignedIn, refreshToken, saveSession } from "./session";
+import { accessToken, clearSession, contextVersion, currentServiceCode, isSignedIn, principalVersion, refreshToken, saveSession } from "./session";
 
 /**
  * 客户端 API 的唯一请求出口。
@@ -9,8 +9,7 @@ import { accessToken, clearSession, contextVersion, currentServiceCode, isSigned
  * - 统一解包 `{ data, requestId }` 信封；错误统一成 ApiError（业务码 + 用户文案 + requestId）。
  * - 401：同一时刻只做一次刷新（单飞），刷新成功后重放原请求一次；刷新被拒绝就清空身份。
  *   401 来自网关，处理器没有执行过，所以重放不会造成重复下单/扣款。
- * - 工作空间范围的请求记录发出时的上下文版本；切换服务后回来的迟到响应整体丢弃，
- *   杜绝“摄影的价格显示在露营商品上”。
+ * - 携带身份的请求绑定本人/租户代次，工作空间请求额外绑定服务代次。切换后的旧响应整体丢弃。
  * - 每个响应头 Date 都用于校准倒计时时钟。
  */
 export type ApiErrorCode =
@@ -68,7 +67,7 @@ export interface RequestOptions {
   query?: Record<string, string | number | boolean | undefined>;
   /** required：必须已登录；optional：有令牌就带；none：公开接口。默认 required。 */
   auth?: "required" | "optional" | "none";
-  /** workspace：切换服务后丢弃迟到响应（默认）；tenant：本人租户级数据，不受切换影响；public：公开数据。 */
+  /** workspace：切换服务后丢弃迟到响应（默认）；tenant：同本人/租户切服务仍可读取；public：公开数据。 */
   scope?: "workspace" | "tenant" | "public";
   idempotencyKey?: string;
   timeoutMs?: number;
@@ -197,7 +196,14 @@ function send(path: string, options: RequestOptions, token: string): Promise<Raw
   });
 }
 
-let refreshing: Promise<"ok" | "rejected" | "failed"> | undefined;
+type RefreshResult = "ok" | "rejected" | "failed";
+
+let refreshing: {
+  principal: number;
+  tenantCode: string;
+  token: string;
+  result: Promise<RefreshResult>;
+} | undefined;
 
 async function performRefresh(): Promise<"ok" | "rejected" | "failed"> {
   const token = refreshToken();
@@ -206,11 +212,18 @@ async function performRefresh(): Promise<"ok" | "rejected" | "failed"> {
     return "rejected";
   }
   const startVersion = contextVersion();
+  const startPrincipal = principalVersion();
+  const startTenantCode = PUBLIC_CONFIG.tenantCode;
   let raw: RawResponse;
   try {
     raw = await send("/auth/refresh", { method: "POST", data: { refreshToken: token } }, "");
   } catch {
     return "failed";
+  }
+  // 旧刷新无权覆盖或清除后来保存的身份和令牌，同本人切服务后继续使用当前会话。
+  if (principalVersion() !== startPrincipal || contextVersion() !== startVersion
+    || PUBLIC_CONFIG.tenantCode !== startTenantCode || refreshToken() !== token) {
+    return isSignedIn() ? "ok" : "rejected";
   }
   if (raw.statusCode >= 200 && raw.statusCode < 300) {
     const body = unwrap(raw.data) as ClientMembershipSessionResponse | undefined;
@@ -218,8 +231,6 @@ async function performRefresh(): Promise<"ok" | "rejected" | "failed"> {
       clearSession("refresh-invalid-response");
       return "rejected";
     }
-    // 刷新期间发生了登录/切换服务：当前会话已被替换，旧会话刷出的令牌不能覆盖它。
-    if (contextVersion() !== startVersion) return isSignedIn() ? "ok" : "rejected";
     saveSession(body, currentServiceCode(), "refresh");
     return "ok";
   }
@@ -232,19 +243,24 @@ async function performRefresh(): Promise<"ok" | "rejected" | "failed"> {
 
 /** 单飞刷新：并发的 401 共享同一次刷新，避免旧 refresh token 被多次消费导致互相踢下线。 */
 export function refreshSessionOnce(): Promise<"ok" | "rejected" | "failed"> {
-  if (!refreshing) {
-    refreshing = performRefresh().then(
+  const principal = principalVersion();
+  const tenantCode = PUBLIC_CONFIG.tenantCode;
+  const token = refreshToken();
+  if (!refreshing || refreshing.principal !== principal || refreshing.tenantCode !== tenantCode || refreshing.token !== token) {
+    const flight = { principal, tenantCode, token, result: performRefresh() };
+    flight.result = flight.result.then(
       (result) => {
-        refreshing = undefined;
+        if (refreshing === flight) refreshing = undefined;
         return result;
       },
       () => {
-        refreshing = undefined;
+        if (refreshing === flight) refreshing = undefined;
         return "failed" as const;
       }
     );
+    refreshing = flight;
   }
-  return refreshing;
+  return refreshing.result;
 }
 
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
@@ -255,7 +271,12 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   if (auth === "required" && !isSignedIn()) throw new ApiError("AUTH_REQUIRED", "请先登录", { status: 401 });
 
   const startVersion = contextVersion();
+  const startPrincipal = principalVersion();
+  const startTenantCode = PUBLIC_CONFIG.tenantCode;
   const assertContext = () => {
+    if (auth !== "none" && (principalVersion() !== startPrincipal || PUBLIC_CONFIG.tenantCode !== startTenantCode)) {
+      throw new ApiError("STALE_CONTEXT", "登录身份已变化，该结果已作废");
+    }
     if (scope === "workspace" && contextVersion() !== startVersion) {
       throw new ApiError("STALE_CONTEXT", "服务已切换，该结果已作废");
     }
@@ -277,7 +298,11 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     if (options.replayAfterRefresh === false) throw new ApiError("AUTH_EXPIRED", "登录已刷新，请重新发起本次操作", { status: 401 });
     assertContext();
     raw = await send(path, options, replayToken);
+    assertContext();
     if (raw.statusCode === 401) {
+      if (accessToken() !== replayToken) {
+        throw new ApiError("STALE_CONTEXT", "登录会话已变化，该结果已作废");
+      }
       clearSession("replay-rejected");
       throw new ApiError("AUTH_EXPIRED", "登录已失效，请重新登录", { status: 401 });
     }

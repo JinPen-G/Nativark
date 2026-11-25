@@ -181,7 +181,7 @@ async function run() {
   );
 
   const categoryPage = fs.readFileSync(
-    path.join(root, "apps/admin/src/features/settings/governance/CategoryTab.tsx"),
+    path.join(root, "packages/rental-core/admin/governance/CategoryTab.tsx"),
     "utf8"
   );
   const coreSettings = fs.readFileSync(

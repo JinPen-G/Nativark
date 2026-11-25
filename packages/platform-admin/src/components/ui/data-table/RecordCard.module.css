@@ -1,0 +1,95 @@
+.item { position: relative; min-width: 0; display: flex; --radius-panel: var(--rental-ui-radius-container); --font-body: var(--rental-typography-font-family); }
+.card { width: 100%; height: 100%; display: flex; flex-direction: column; border-radius: var(--rental-ui-radius-container); }
+.card > div:has(> h3) { display: flex; flex-direction: column; flex: 1; }
+.card h3 { font-size: var(--rental-record-card-title-size); line-height: var(--rental-record-card-title-line-height); font-weight: 500; }
+.item[data-selectable] .card h3 { max-width: calc(100% - var(--space-8)); }
+.item[data-featured] > .card { border-color: color-mix(in oklab, var(--warning) 40%, var(--border)); background: color-mix(in oklab, var(--warning) 3%, var(--surface)); }
+.item[data-selected] > article { outline: 2px solid var(--accent); outline-offset: 2px; }
+.item { --record-media-offset: 0px; }
+.item[data-has-media] { --record-media-offset: var(--rental-record-card-media-height); }
+.selection { position: absolute; top: calc(var(--record-media-offset) + var(--space-5) + var(--text-lg) * .65 - var(--control-height-md) / 2); right: var(--space-2); z-index: 3; display: flex; align-items: center; }
+.mobileHit { position: absolute; inset: 0; z-index: 1; border: 0; background: transparent; border-radius: inherit; cursor: pointer; }
+.mobileHit:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -3px; }
+.summary { display: flex; flex: 1; flex-direction: column; gap: var(--space-3); padding-block-start: var(--space-3); min-width: 0; color: var(--rental-content-primary); font-size: var(--rental-list-primary-size); line-height: var(--rental-list-primary-line-height); }
+.context { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.metric { display: grid; gap: var(--space-1); }
+.metricValue { display: flex; align-items: baseline; gap: var(--space-1); font-size: var(--rental-record-card-metric-size); font-weight: 500; line-height: 1.3; font-variant-numeric: tabular-nums; color: var(--rental-content-primary); flex-wrap: wrap; overflow-wrap: anywhere; }
+.highlights { display: grid; gap: var(--space-2); margin: 0; padding-block: var(--space-3); border-block: 1px solid var(--border-subtle); }
+.highlights > div { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); min-width: 0; }
+.highlights dt { display: flex; align-items: center; gap: var(--space-2); color: var(--text-secondary); font-size: var(--rental-typography-meta-size); min-width: 0; }
+.highlights dt svg { flex: none; align-self: center; width: var(--rental-icon-control-size); height: var(--rental-icon-control-size); stroke-width: var(--rental-icon-control-stroke); }
+.highlights dd { margin: 0; text-align: end; font-size: var(--rental-typography-body-size); font-weight: 500; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.footnote { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); color: var(--text-secondary); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); }
+.metricSuffix, .secondary { color: var(--text-secondary); font-size: var(--rental-typography-meta-size); font-weight: var(--rental-typography-meta-weight); line-height: var(--rental-typography-meta-line-height); }
+.facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3) var(--space-4); margin: 0; }
+.facts > div { min-width: 0; }
+.facts dt { font-size: var(--rental-list-secondary-size); color: var(--rental-content-secondary); margin-block-end: var(--space-1); }
+.facts dd { margin: 0; color: var(--rental-content-primary); font-size: var(--rental-list-primary-size); line-height: var(--rental-list-primary-line-height); overflow-wrap: anywhere; }
+.card .facts dd { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.list { display: grid; gap: var(--space-3); list-style: none; margin: 0; padding: 0; }
+.list li { display: flex; align-items: start; gap: var(--space-2); min-width: 0; }
+.list li > svg { flex: none; width: var(--rental-icon-control-size); height: var(--rental-icon-control-size); margin-block-start: var(--space-1); color: var(--text-secondary); stroke-width: var(--rental-icon-control-stroke); }
+.list li > div { min-width: 0; overflow-wrap: anywhere; }
+.section { display: grid; gap: var(--space-3); }
+.section h4 { margin: 0; color: var(--foreground); font-size: var(--rental-typography-panel-title-size); font-weight: var(--rental-typography-panel-title-weight); }
+.preview { display: grid; gap: var(--space-5); color: var(--foreground); }
+.previewActions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); border-top: 1px solid var(--border); padding-block-start: var(--space-4); }
+.previewActions:empty, .context:empty, .footnote:empty { display: none; }
+.badge { display: inline-flex; gap: var(--space-1); align-items: center; max-width: 100%; padding: var(--space-1) var(--space-2); background: var(--surface); border: 1px solid var(--border); border-radius: var(--rental-ui-radius-control); color: var(--foreground); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); font-weight: 500; }
+.badge[data-emphasis] { background: color-mix(in oklab, var(--warning) 10%, var(--surface)); border-color: color-mix(in oklab, var(--warning) 35%, var(--surface)); }
+.badge[data-tone="positive"] { color: var(--rental-status-success-ink); border-color: transparent; background: var(--rental-status-success-surface); }
+.badge[data-tone="accent"] { color: var(--rental-content-primary); border-color: transparent; background: var(--surface-muted); }
+.badge svg { width: var(--rental-icon-control-size); height: var(--rental-icon-control-size); stroke-width: var(--rental-icon-control-stroke); }
+.sheetMedia { margin-block: var(--space-2) var(--space-4); overflow: hidden; border-radius: var(--rental-ui-radius-container); }
+:global(body):has([data-record-card-preview-owner]) :global([data-list-selection-bar]) { visibility: hidden; pointer-events: none; }
+/* The native morph retains the outer shell. Only its inner content scrolls,
+   keeping the Windows scrollbar and media inside the rounded clip. Returning
+   geometry remains entirely owned by UIArc. */
+:global([role="dialog"][data-framer-portal-id]):not([data-returning]):has(.preview) { display: flex; flex-direction: column; overflow: hidden; }
+:global([role="dialog"][data-framer-portal-id]):not([data-returning]):has(.preview) > div:first-child:not(:last-child) { flex: none; }
+:global([role="dialog"][data-framer-portal-id]):not([data-returning]):has(.preview) > div:last-child { min-height: 0; overflow: hidden auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+:global([role="dialog"][data-framer-portal-id]):has(.preview:not([data-has-media])) h2 { max-width: calc(100% - var(--space-8)); }
+@media (max-width: 639px) { .facts { gap: var(--space-3); } .preview { padding-block-start: var(--space-5); } }
+/* Member plans render as a physical member card: no outer frame, no hover outline, the card itself carries depth. */
+.item[data-kind="membership"] > .card, .item[data-kind="membership"] > .card[data-hover], .item[data-kind="membership"][data-featured] > .card { border-color: transparent; background: transparent; box-shadow: none; overflow: visible; }
+.item[data-kind="membership"] > .card > div:first-child { overflow: visible; background: transparent; }
+.item[data-kind="membership"] > .card > div:first-child > div { transform: none !important; }
+.item[data-kind="membership"] > .card > div:has(> h3) { position: absolute; inset: 0; padding: 0; pointer-events: none; }
+.item[data-kind="membership"] .card h3 { display: none; }
+.item[data-kind="membership"] > .card > div:has(> h3) > div:last-child { position: absolute; right: calc((100% - min(100% - 24px, 290px)) / 2 + 18px); bottom: 24px; margin: 0; z-index: 4; pointer-events: auto; }
+.memberDetails { --surface: #242427; --foreground: #eeeeef; --border: #ffffff30; --text-secondary: #d0d0d3; --surface-muted: #35353a; }
+.item[data-kind="membership"] .mobileHit { display: none; }
+.sheetMedia:has([data-member-holo]) { overflow: visible; }
+.card [data-member-holo] [role="button"]:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 4px; }
+
+/* Product listing screen geometry, adapted only for explicitly opted-in records.
+   The native Card still owns preview/focus/motion; other card kinds retain their surface. */
+.item[data-presentation="product-listing"] { align-self: start; container-type: inline-size; --rental-record-card-media-height: 100%; --listing-card-padding: 8px; }
+.item[data-presentation="product-listing"] > .card { height: auto; padding: var(--listing-card-padding); border: 0; border-radius: 14px; background: transparent; box-shadow: none; }
+.item[data-presentation="product-listing"] > .card[data-hover], .item[data-presentation="product-listing"][data-current] > .card { background: color-mix(in oklab, var(--foreground) 4.5%, transparent); }
+.item[data-presentation="product-listing"][data-selected] > .card { background: color-mix(in oklab, var(--foreground) 7%, transparent); outline: none; }
+.item[data-presentation="product-listing"] > .card > div:first-child:not(:has(> h3)) { aspect-ratio: 1; border-radius: 10px; }
+.item[data-presentation="product-listing"] > .card > div:first-child:not(:has(> h3)) > div { height: 100%; min-height: 0; }
+.item[data-presentation="product-listing"] > .card > div:has(> h3) { display: grid; gap: 3px; padding: 10px 2px 2px; }
+.item[data-presentation="product-listing"] .card h3 { width: 100%; margin: 0; font-size: 13px; line-height: 1.4; font-weight: 500; white-space: nowrap; text-wrap: nowrap; }
+.item[data-presentation="product-listing"] .card h3, .item[data-presentation="product-listing"] .card h3 > button { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item[data-presentation="product-listing"] .card h3 > button { display: block; max-width: 100%; }
+.item[data-presentation="product-listing"] > .card > div:has(> h3) > div:has([data-record-card-meta]) { display: none; }
+.listingSummary { display: grid; min-width: 0; gap: 3px; color: var(--foreground); font-size: 13px; line-height: 1.4; }
+.item[data-presentation="product-listing"] .selection { top: calc(var(--listing-card-padding) + 4px); left: calc(var(--listing-card-padding) + 4px); right: auto; height: 28px; opacity: 0; pointer-events: none; }
+.item[data-presentation="product-listing"]:is(:hover, :focus-within, [data-selected]) .selection { opacity: 1; pointer-events: auto; }
+.item[data-presentation="product-listing"] .selection button[role="checkbox"] { width: 28px; height: 28px; }
+.item[data-presentation="product-listing"] .selection button[role="checkbox"] > span { width: 16px; height: 16px; }
+.item[data-presentation="product-listing"] .selection button[role="checkbox"] svg { inset: -2px; }
+.item[data-presentation="product-listing"] .card:has(h3 > button:focus-visible), .item[data-presentation="product-listing"] .mobileHit:focus-visible { outline: 2px solid var(--foreground); outline-offset: -2px; }
+.item[data-presentation="product-listing"][data-selectable] .card h3 { max-width: 100%; }
+:global([role="dialog"]):has(.preview) .listingSummary { display: none; }
+@container admin-content (max-width: 640px) {
+  .item[data-presentation="product-listing"] { --listing-card-padding: 6px; }
+  .item[data-presentation="product-listing"] > .card { border-radius: 12px; }
+}
+@container record-screen (min-width: 641px) {
+  .item[data-presentation="product-listing"] { --listing-card-padding: 8px; }
+  .item[data-presentation="product-listing"] > .card { border-radius: 14px; }
+}
+@media (hover: none) { .item[data-presentation="product-listing"] .selection { opacity: 1; pointer-events: auto; } }

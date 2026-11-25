@@ -164,7 +164,7 @@ for (const unit of ['calls', 'tokens', 'money']) test(`customer persisted ${unit
     channel: 'web', customerType: 'personal', sceneCode, sceneVersion, enabled: true, allowCreate: true, allowRead: true,
     allowExecute: true, revision: 1, expiresAt: new Date('2027-01-01') };
   const quantity = unit === 'money' ? { unit, amount: '1.000000', currency: 'USD', scale: 6 } : { unit, value: 1000 };
-  const store = createTaskInputStore({ aiScope: scopes, aiTask: [], aiRun: [], aiStep: [], aiTaskEvent: [], aiTaskRunPlan: [],
+  const store = createTaskInputStore({ aiScope: scopes, aiTask: [], aiRun: [], aiStep: [], aiTaskEvent: [], aiTaskRunPlan: [], aiTaskExecutionCharge: [],
     aiBudgetReservation: [], aiBudgetAllocation: [], aiBudgetLedgerEntry: [], aiGatewayInvocation: [],
     aiGatewayAccountingReceipt: [], aiInvocationAdmission: [], operationLog: [], aiGatewayPriceRecord: [], aiGatewayInputBoundRecord: [],
     aiClientTaskPolicy: [policy], aiClientTaskInput: [], aiPlatformModelConnection: [],
@@ -232,9 +232,17 @@ for (const unit of ['calls', 'tokens', 'money']) test(`customer persisted ${unit
   const budgetAuthority = new PrismaClientTaskBudgetAuthorizationSource({ ...dependencies, command });
   const binding = await new PrismaGatewayInvocationBindings(db, budgetAuthority.scopes, clock)
     .resolveForReserve(accountingCall.context, accountingCall.request);
-  await budgetAuthority.authorize('reserve', await budgetAuthority.resolveContext(), { association: binding.association });
-  if (unit !== 'calls') {
-    await assert.rejects(gateway.runtime.ports.budget.reserve(accountingCall), { code: 'BUDGET_UNAVAILABLE' });
+  const context = await budgetAuthority.resolveContext();
+  const grant = await budgetAuthority.authorize('reserve', context, { association: binding.association });
+  let reservationId;
+  if (unit === 'calls') {
+    reservationId = (await gateway.runtime.ports.budget.reserve(accountingCall)).id;
+    await gateway.runtime.ports.budget.dispatch(accountingCall, reservationId);
+  } else {
+    const { PrismaGatewayRecordedPricing } = require('../apps/api/src/modules/ai-native/budget/prisma-gateway-recorded-pricing');
+    const pricing = new PrismaGatewayRecordedPricing(db, budgetAuthority.scopes, clock);
+    const reserveCommand = { association: binding.association, callId: invocation.callId, sceneCode, expiresAt };
+    await assert.rejects(pricing.quote(reserveCommand, { ...grant, context, entitled: true }), { code: 'UNAVAILABLE' });
     assert.equal(state.aiBudgetReservation.length, 0);
     const records = new PrismaGatewayPricingRecords(db);
     const evidence = { kind: 'gateway-price-1', priceVersion: 'price', configuration,
@@ -251,15 +259,37 @@ for (const unit of ['calls', 'tokens', 'money']) test(`customer persisted ${unit
       validFrom: now.toISOString(), expiresAt: expiresAt.toISOString(), provenance: { reference: 'synthetic-bound', revision: '1', documentHash: 'e'.repeat(64) } };
     state.aiGatewayInputBoundRecord.push({ id: records.boundId('scope-a', invocation.id), scopeId: 'scope-a', invocationId: invocation.id,
       priceRecordId: priceId, payload: bound, payloadHash: requestFingerprint(bound) });
+    // Restore the rows of an already dispatched request from before BYOK calls
+    // metering. Current admission cannot create another legacy reservation.
+    const originalQuote = await pricing.quote(reserveCommand, { ...grant, context, entitled: true });
+    const reserved = originalQuote.quantity;
+    assert.equal(reserved.unit, unit);
+    reservationId = 'historical-client-reservation';
+    await db.aiBudgetReservation.create({ data: { id: reservationId, ...accountingCall.context,
+      scopeId: invocation.scopeId, scopeKind: 'WORKSPACE', billingMode: 'legacy_unknown',
+      callId: invocation.callId, requestId: invocation.callId, idempotencyKey: invocation.callId,
+      runId: invocation.runId, stepId: invocation.stepId, actionId: invocation.actionId, sceneCode, priceVersion: invocation.priceVersion,
+      configRevision: configuration.configRevision, configurationHash: invocation.configurationHash,
+      requestHash: requestFingerprint({ reserveCommand, quote: originalQuote }), unitKind: unit,
+      reservedTokens: unit === 'tokens' ? BigInt(reserved.value) : null,
+      reservedMoney: unit === 'money' ? reserved.amount : null, moneyCurrency: unit === 'money' ? reserved.currency : null,
+      status: 'reserved', dispatchState: 'dispatched', expiresAt: originalQuote.expiresAt } });
+    for (const key of originalQuote.policies) {
+      const row = state.aiBudgetPolicy.find(policy => policy.scopeId === key.scopeId && policy.scopeKind === key.scopeKind && policy.sceneCode === key.sceneCode);
+      assert.ok(row);
+      await db.aiBudgetAllocation.create({ data: { reservationId, policyId: row.id, policyRevision: row.configRevision } });
+    }
+    await db.aiGatewayAccountingReceipt.create({ data: { reservationId, invocationId: invocation.id,
+      taskId: invocation.taskId, scopeId: invocation.scopeId, scopeKind: 'WORKSPACE',
+      tenantId: identity.tenantId, workspaceId: identity.workspaceId, admissionId: accountingCall.binding.id,
+      dispatchToken: accountingCall.binding.dispatchId, requestHash: accountingCall.binding.requestHash, state: 'dispatched' } });
   }
-  const reserved = await gateway.runtime.ports.budget.reserve(accountingCall);
   assert.equal(state.aiBudgetReservation.length, 1);
   assert.equal(state.aiBudgetAllocation.length, 3);
-  await gateway.runtime.ports.budget.dispatch(accountingCall, reserved.id);
-  await gateway.runtime.ports.budget.abandon(accountingCall, reserved.id, 'provider_reply_pending');
-  await assert.rejects(gateway.accountingRecovery.reconcile({ reservationId: reserved.id }), { code: 'PENDING_RECONCILIATION' });
+  await gateway.runtime.ports.budget.abandon(accountingCall, reservationId, 'provider_reply_pending');
+  await assert.rejects(gateway.accountingRecovery.reconcile({ reservationId }), { code: 'PENDING_RECONCILIATION' });
   // Late original usage is persisted, but an unknown account must use reconcile.
-  await assert.rejects(gateway.runtime.ports.budget.settle(accountingCall, reserved.id, 'late-original-usage',
+  await assert.rejects(gateway.runtime.ports.budget.settle(accountingCall, reservationId, 'late-original-usage',
     { inputTokens: 2, outputTokens: 3 }), { code: 'ACCOUNTING_PENDING' });
   const originalInvocation = clone(state.aiGatewayInvocation[0]), originalPrices = clone(state.aiGatewayPriceRecord);
   state.aiProviderProfile[0].enabled = false; state.aiProviderProfile[0].configRevision = 2;
@@ -267,20 +297,20 @@ for (const unit of ['calls', 'tokens', 'money']) test(`customer persisted ${unit
   for (const row of state.aiBudgetPolicy) { row.enabled = false; row.priceVersion = 'next-price'; row.configRevision++; }
   now = new Date('2026-10-06T12:02:00Z');
   const recovery = composeClientTaskAccountingRecovery({ ...dependencies, pricing: { ...selection, priceVersion: 'next-price' } }, command);
-  const result = await recovery.reconcile({ reservationId: reserved.id });
+  const result = await recovery.reconcile({ reservationId });
   const expected = unit === 'money' ? { unit, amount: '0.000013', currency: 'USD', scale: 6 } : { unit, value: unit === 'tokens' ? 5 : 1 };
   assert.equal(result.status, 'settled');
   assert.deepEqual(result.actual, expected);
   assert.equal(result.association.priceVersion, 'price');
   assert.equal(result.association.config.configRevision, 1);
   const ledgerCount = state.aiBudgetLedgerEntry.length;
-  await recovery.reconcile({ reservationId: reserved.id });
+  await recovery.reconcile({ reservationId });
   assert.equal(state.aiBudgetLedgerEntry.length, ledgerCount);
   assert.equal(state.aiBudgetLedgerEntry.filter(row => row.kind === 'reconcile').length, 1);
   assert.equal(state.aiBudgetReservation.length, 1);
   assert.deepEqual(state.aiGatewayInvocation[0], originalInvocation);
   assert.deepEqual(state.aiGatewayPriceRecord, originalPrices);
-  await assert.rejects(recovery.releaseUnsent({ reservationId: reserved.id }), { code: 'PENDING_RECONCILIATION' });
+  await assert.rejects(recovery.releaseUnsent({ reservationId }), { code: 'PENDING_RECONCILIATION' });
   await assert.rejects(gateway.runtime.ports.budget.reserve(accountingCall));
   for (const key of ['customerId', 'workspaceId']) {
     const original = identity[key]; identity[key] = 'another-principal-or-scope';
@@ -288,7 +318,7 @@ for (const unit of ['calls', 'tokens', 'money']) test(`customer persisted ${unit
     identity[key] = original;
   }
   state.aiClientTaskPolicy[0].allowRead = false;
-  await assert.rejects(recovery.read({ reservationId: reserved.id }), e => ['AI_ACCESS_DENIED', 'FORBIDDEN'].includes(e.code));
+  await assert.rejects(recovery.read({ reservationId }), e => ['AI_ACCESS_DENIED', 'FORBIDDEN'].includes(e.code));
 });
 
 function harness() {

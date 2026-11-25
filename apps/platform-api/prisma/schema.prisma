@@ -1,0 +1,937 @@
+// 公共底座的独立模型。新公共库使用本链，旧Rental组合库继续原迁移，不用此schema覆盖其历史。
+// 保留原账号/角色/会话表名及标识；租赁空间和订单仅保留可空关联ID，不建立业务表外键。
+generator client {
+  provider = "prisma-client-js"
+  output = "../generated/client"
+}
+
+datasource db {
+  provider = "mysql"
+  url = env("DATABASE_URL")
+}
+
+enum TenantStatus {
+  ACTIVE   @map("active")
+  FROZEN   @map("frozen")
+  DISABLED @map("disabled")
+}
+
+enum OrganizationType {
+  OPERATOR @map("operator")
+  CAR_SHOP @map("car_shop")
+  STORE    @map("store")
+  STATION  @map("station")
+}
+
+enum RoleScope {
+  OPERATOR @map("operator")
+  CAR_SHOP @map("car_shop")
+  STORE    @map("store")
+  STATION  @map("station")
+}
+
+enum SystemDataScope {
+  ALL          @map("all")
+  ORGANIZATION @map("organization")
+  STORE        @map("store")
+  OWN          @map("own")
+}
+
+enum PermissionKind {
+  MENU   @map("menu")
+  ACTION @map("action")
+  BUTTON @map("button")
+}
+
+enum ConfigStatus {
+  DRAFT     @map("draft")
+  EFFECTIVE @map("effective")
+  ARCHIVED  @map("archived")
+}
+
+model Tenant {
+  id                                String                                   @id @default(uuid())
+  code                              String                                   @unique
+  name                              String
+  /// SaaS管理员设置的后台营运商简称；不替代完整公司名称或客户端品牌，旧租户为空。
+  operatorShortName                 String?                                  @db.VarChar(64)
+  status                            TenantStatus                             @default(ACTIVE)
+  statusReason                      String?
+  statusChangedAt                   DateTime?
+  statusChangedBy                   String?
+  organizations                     OrganizationUnit[]
+  users                             User[]
+  roles                             Role[]
+  filterPresets                     FilterPreset[]
+  systemParameterSets               SystemParameterSet[]
+  subscription                      TenantSubscription?
+  subscriptionSegments              TenantSubscriptionSegment[]
+  featureGrants                     TenantFeatureGrant[]
+  subscriptionRequests              SubscriptionRequest[]
+  subscriptionEvents                SubscriptionEvent[]
+  adapterLogs                       ExternalAdapterLog[]
+  notificationTemplates             NotificationTemplate[]
+  notificationLogs                  NotificationSendLog[]
+  operatorInvitations               TenantOperatorInvitation[]
+  supportMailboxes                   TenantSupportMailbox[]
+  supportEmails                     TenantSupportEmail[]
+  asyncJobs                         AsyncJob[]
+  integrationConfigs                TenantIntegrationConfig[]
+  files                             FileAsset[]
+  fileUploadSessions                FileUploadSession[]
+  logs                              OperationLog[]
+  createdAt                         DateTime                                 @default(now())
+  updatedAt                         DateTime                                 @updatedAt
+
+}
+
+model OrganizationUnit {
+  id        String             @id @default(uuid())
+  tenantId  String
+  tenant    Tenant             @relation(fields: [tenantId], references: [id])
+  parentId  String?
+  parent    OrganizationUnit?  @relation("OrgTree", fields: [parentId], references: [id])
+  children  OrganizationUnit[] @relation("OrgTree")
+  type      OrganizationType
+  code      String
+  name      String
+  status    String             @default("enabled")
+  users     User[]
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  @@unique([tenantId, code])
+  @@unique([tenantId, id], map: "organization_units_tenant_id_key")
+  @@index([tenantId, type, status])
+
+}
+
+model User {
+  id                 String            @id @default(uuid())
+  tenantId           String
+  tenant             Tenant            @relation(fields: [tenantId], references: [id])
+  organizationId     String?
+  organization       OrganizationUnit? @relation(fields: [organizationId], references: [id])
+  roleId             String?
+  role               Role?             @relation(fields: [roleId], references: [id])
+  account            String
+  displayName        String
+  phone              String?
+  passwordHash       String
+  isSaasAdmin        Boolean           @default(false)
+  isPlatformAdmin    Boolean           @default(false)
+  isActive           Boolean           @default(true)
+  mustChangePassword Boolean           @default(true)
+  needsTenantOnboarding Boolean        @default(false)
+  tokenVersion       Int               @default(1)
+  passwordChangedAt  DateTime?
+  lastLoginAt        DateTime?
+  roleAssignments    UserRole[]
+  authSessions       AuthSession[]
+  logs               OperationLog[]
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  appearancePreference UserAppearancePreference?
+
+  @@unique([tenantId, account])
+  /// 保留原租户/账号复合身份键；Core成员或业务关联仍须指向同租户账号。
+  @@unique([tenantId, id], map: "users_tenant_id_key")
+  @@index([tenantId, organizationId])
+
+}
+
+model UserAppearancePreference {
+  id         String   @id @default(uuid())
+  userId     String   @unique(map: "user_appearance_preferences_user_key")
+  /// 该账户的管理后台主题色（#RRGGBB）；未设置时回退平台默认色。与租户品牌色无关。
+  themeColor String?  @db.VarChar(16)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_appearance_preferences")
+
+}
+
+model AuthSession {
+  id                 String             @id @default(uuid())
+  userId             String
+  user               User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokenHash   String             @unique
+  /// 原会话的兼容关联ID；公共新会话为空。此公共schema不创建Rental空间或业务外键。
+  /// 已保留关联也不授予业务权限，Core仍从原成员/范围验证当前使用权。
+  currentWorkspaceId String?
+  /// AUTH-AUDIENCE-01：运营后台与员工小程序会话不可互换。
+  audience           String             @default("operator") @db.VarChar(16)
+  expiresAt          DateTime
+  revokedAt          DateTime?
+  lastUsedAt         DateTime?
+  createdAt          DateTime           @default(now())
+
+  @@index([userId, expiresAt, revokedAt])
+  @@index([currentWorkspaceId], map: "auth_sessions_workspace_idx")
+  @@map("auth_sessions")
+
+}
+
+model AuthLoginFailure {
+  id           String   @id @default(uuid())
+  loginKeyHash String   @unique(map: "auth_login_failures_login_key_hash_key") @db.Char(64)
+  failureCount Int      @default(0)
+  firstFailedAt DateTime @db.DateTime(3)
+  lockedUntil  DateTime? @db.DateTime(3)
+  expiresAt    DateTime @db.DateTime(3)
+  revision     Int      @default(1)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([expiresAt], map: "auth_login_failures_expires_idx")
+  @@map("auth_login_failures")
+
+}
+
+model Role {
+  id                    String            @id @default(uuid())
+  tenantId              String
+  tenant                Tenant            @relation(fields: [tenantId], references: [id])
+  code                  String
+  name                  String
+  description           String?
+  scope                 RoleScope
+  fixedAllPermissions   Boolean           @default(false)
+  enabledBusinessScopes Json
+  buttonPermissions     Json?
+  dataScope             SystemDataScope   @default(STORE)
+  isActive              Boolean           @default(true)
+  users                 User[]
+  userAssignments       UserRole[]
+  permissions           RolePermission[]
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  @@unique([tenantId, code])
+  @@unique([tenantId, name])
+  /// 保留同租户角色身份键，Core范围分配不能引用另一租户角色。
+  @@unique([tenantId, id], map: "roles_tenant_id_key")
+
+}
+
+model Permission {
+  id          String           @id @default(uuid())
+  code        String           @unique
+  name        String
+  description String?
+  module      String
+  kind        PermissionKind   @default(ACTION)
+  roles       RolePermission[]
+  createdAt   DateTime         @default(now())
+
+}
+
+model UserRole {
+  userId    String
+  roleId    String
+  user      User     @relation(fields: [userId], references: [id])
+  role      Role     @relation(fields: [roleId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@id([userId, roleId])
+  @@index([roleId])
+
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id])
+  permission   Permission @relation(fields: [permissionId], references: [id])
+
+  @@id([roleId, permissionId])
+
+}
+
+model TenantAppearanceProfile {
+  id                   String   @id @default(uuid())
+  tenantId             String   @unique(map: "tenant_appearance_profiles_tenant_key")
+  revision             Int      @default(1)
+  brandName            String?  @db.VarChar(120)
+  brandLogoUrl         String?  @db.VarChar(512)
+  faviconUrl           String?  @db.VarChar(512)
+  /// 客户端与管理后台主色（#RRGGBB）。
+  themeColor           String?  @db.VarChar(16)
+  /// 旧的统一圆角（回退基准，8-40px 或 999px）。
+  adminCornerRadius    Int?     @db.UnsignedSmallInt
+  adminContainerRadius Int?     @db.UnsignedSmallInt
+  adminButtonRadius    Int?     @db.UnsignedSmallInt
+  adminInputRadius     Int?     @db.UnsignedSmallInt
+  adminLoginJson       Json?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@map("tenant_appearance_profiles")
+
+}
+
+/// 公共文件事实沿原表名/字段保存；业务ACL、知识及检查绑定由所选Core或专用模块提供。
+model FileAsset {
+  id              String             @id @default(uuid())
+  tenantId        String
+  tenant          Tenant             @relation(fields: [tenantId], references: [id])
+  businessModule  String
+  businessType    String
+  businessId      String?
+  fileName        String
+  fileExt         String?
+  mimeType        String
+  sizeBytes       Int                @default(0)
+  storageProvider String             @default("local_mock")
+  storageKey      String
+  publicUrl       String?
+  checksum        String?
+  uploadScene     String
+  status          String             @default("active")
+  uploadedBy      String?
+  metadata        Json?
+  uploadSession   FileUploadSession?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([tenantId, businessType, businessId])
+  @@index([tenantId, uploadScene, createdAt])
+}
+
+/// 原会话/冻结/清理收据，状态和原对象键不能由过期推断成功、回滚或可重发。
+model FileUploadSession {
+  id              String    @id @default(uuid())
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fileAssetId     String    @unique
+  fileAsset       FileAsset @relation(fields: [fileAssetId], references: [id], onDelete: Cascade)
+  provider        String    @db.VarChar(40)
+  storageKey      String    @db.VarChar(500)
+  status          String    @default("pending_upload") @db.VarChar(24)
+  idempotencyKey  String?
+  expiresAt       DateTime
+  completedAt     DateTime?
+  failureReason   String?   @db.VarChar(500)
+  /// 原清理占用和失败观察，不能据此重新发送未知操作。
+  cleanupAttempts Int       @default(0)
+  lastCleanupAt   DateTime?
+  cleanupError    String?   @db.VarChar(500)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([tenantId, idempotencyKey], map: "file_upload_sessions_scope_idem_key")
+  @@index([tenantId, status, expiresAt], map: "file_upload_sessions_scope_status_idx")
+  @@map("file_upload_sessions")
+}
+
+model OperationLog {
+  id            String             @id @default(uuid())
+  tenantId      String
+  tenant        Tenant             @relation(fields: [tenantId], references: [id])
+  userId        String?
+  user          User?              @relation(fields: [userId], references: [id])
+  /// 原租赁审计关联兼容值；公共库不建立租赁订单表，Core读取仍核其当前权限。
+  rentalOrderId String?
+  /// 原业务范围兼容引用；公共审计为空。保留历史值，关联Core不随公共源码移除而删事实。
+  workspaceId   String?
+  action        String
+  detail        Json
+  createdAt     DateTime           @default(now())
+
+  @@index([tenantId, action, createdAt])
+  @@index([tenantId, rentalOrderId, createdAt])
+  @@index([tenantId, workspaceId, createdAt], map: "OperationLog_tenant_workspace_created_idx")
+
+}
+
+model SystemParameterSet {
+  id          String       @id @default(uuid())
+  tenantId    String
+  tenant      Tenant       @relation(fields: [tenantId], references: [id])
+  module      String
+  versionNo   Int          @default(1)
+  status      ConfigStatus @default(EFFECTIVE)
+  content     Json
+  operator    String?
+  effectiveAt DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@unique([tenantId, module, versionNo])
+  @@index([tenantId, module, status])
+
+}
+
+model FilterPreset {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  scopeKey    String
+  name        String
+  description String?
+  filters     Json
+  isDefault   Boolean  @default(false)
+  isSystem    Boolean  @default(false)
+  operator    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, scopeKey, name])
+  @@index([tenantId, scopeKey, isDefault])
+  @@index([tenantId, scopeKey, updatedAt])
+
+}
+
+// 平台Core授权/绑定事实单属平台，业务表由所选Core迁移；检查约束在同版本SQL迁移中。
+model PlatformCoreAccessLock {
+  tenantId String @map("tenant_id") @db.VarChar(200)
+  coreId   String @map("core_id") @db.VarChar(64)
+  @@id([tenantId, coreId])
+  @@map("platform_core_access_locks")
+}
+
+model PlatformTenantCoreGrant {
+  tenantId    String @map("tenant_id") @db.VarChar(200)
+  coreId      String @map("core_id") @db.VarChar(64)
+  state       String @db.VarChar(16)
+  revision    BigInt @db.UnsignedBigInt
+  operationId String @map("operation_id") @db.VarChar(200)
+  @@id([tenantId, coreId])
+  @@map("platform_tenant_core_grants")
+}
+
+model PlatformMemberCoreAssignment {
+  tenantId    String @map("tenant_id") @db.VarChar(200)
+  coreId      String @map("core_id") @db.VarChar(64)
+  userId      String @map("user_id") @db.VarChar(200)
+  state       String @db.VarChar(16)
+  revision    BigInt @db.UnsignedBigInt
+  operationId String @map("operation_id") @db.VarChar(200)
+  @@id([tenantId, coreId, userId])
+  @@index([tenantId, userId], map: "platform_member_core_lookup")
+  @@map("platform_member_core_assignments")
+}
+
+model PlatformCoreManagementOperation {
+  tenantId      String @map("tenant_id") @db.VarChar(200)
+  coreId        String @map("core_id") @db.VarChar(64)
+  operationId   String @map("operation_id") @db.VarChar(200)
+  kind          String @db.VarChar(32)
+  actorTenantId String @map("actor_tenant_id") @db.VarChar(200)
+  actorId       String @map("actor_id") @db.VarChar(200)
+  fingerprint   String @db.Char(64)
+  result        Json
+  @@id([tenantId, coreId, operationId])
+  @@map("platform_core_management_operations")
+}
+
+model PlatformCoreBinding {
+  tenantId      String @map("tenant_id") @db.VarChar(200)
+  coreId        String @map("core_id") @db.VarChar(64)
+  scopeHash     String @map("scope_hash") @db.Char(64)
+  containerType String? @map("container_type") @db.VarChar(200)
+  containerId   String? @map("container_id") @db.VarChar(200)
+  bindingId     String @map("binding_id") @db.VarChar(200)
+  revision      BigInt @db.UnsignedBigInt
+  dataVersion   String @map("data_version") @db.VarChar(80)
+  @@id([tenantId, coreId, scopeHash])
+  @@unique([tenantId, coreId, bindingId], map: "platform_core_binding_identity")
+  @@map("platform_core_bindings")
+}
+
+model PlatformCoreBindingOperation {
+  tenantId      String @map("tenant_id") @db.VarChar(200)
+  coreId        String @map("core_id") @db.VarChar(64)
+  scopeHash     String @map("scope_hash") @db.Char(64)
+  operationId   String @map("operation_id") @db.VarChar(200)
+  actorTenantId String @map("actor_tenant_id") @db.VarChar(200)
+  actorId       String @map("actor_id") @db.VarChar(200)
+  fingerprint   String @db.Char(64)
+  operation     Json
+  binding       Json
+  @@id([tenantId, coreId, scopeHash, operationId])
+  @@map("platform_core_binding_operations")
+}
+
+enum SubscriptionPlan {
+  STANDARD @map("standard")
+  PRO      @map("pro")
+}
+
+enum SubscriptionSource {
+  SALE                @map("sale")
+  PILOT               @map("pilot")
+  HISTORICAL_REGISTER @map("historical_register")
+  TEMP_EXTENSION      @map("temp_extension")
+}
+
+enum SubscriptionSegmentStatus {
+  CURRENT    @map("current")
+  SCHEDULED  @map("scheduled")
+  HISTORICAL @map("historical")
+}
+
+model TenantSubscription {
+  id                 String             @id @default(uuid())
+  tenantId           String             @unique
+  tenant             Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  revision           Int                @default(1)
+  plan               SubscriptionPlan
+  source             SubscriptionSource
+  startAt            DateTime?
+  endAt              DateTime?
+  /// 服务时区（IANA）；不随经营空间切换（§4.1.3）。
+  serviceTimeZone    String?            @db.VarChar(64)
+  billingAnniversary DateTime?
+  /// 本期确认金额；null=待确认，不落 0（§5.2/§14.2）。
+  currentAmount      Decimal?           @db.Decimal(12, 2)
+  currentCurrency    String?            @db.VarChar(8)
+  currentTaxInclusive Boolean?
+  sourceReason       String?            @db.VarChar(512)
+  handledAt          DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@map("tenant_subscriptions")
+}
+
+model TenantSubscriptionSegment {
+  id        String                    @id @default(uuid())
+  tenantId  String
+  tenant    Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  status    SubscriptionSegmentStatus
+  plan      SubscriptionPlan
+  source    SubscriptionSource
+  startAt   DateTime?
+  endAt     DateTime?
+  amount    Decimal?                  @db.Decimal(12, 2)
+  currency  String?                   @db.VarChar(8)
+  taxInclusive Boolean?
+  billingAnniversary DateTime?
+  reason    String?                   @db.VarChar(512)
+  createdAt DateTime                  @default(now())
+
+  @@index([tenantId, status])
+  @@map("tenant_subscription_segments")
+}
+
+
+enum FeatureReleaseStatus {
+  PLANNED  @map("planned")
+  PILOT    @map("pilot")
+  RELEASED @map("released")
+  PAUSED   @map("paused")
+  RETIRED  @map("retired")
+}
+
+enum FeatureOwnership {
+  STANDARD @map("standard")
+  PRO      @map("pro")
+}
+
+enum SubscriptionRequestType {
+  UPGRADE_PRO     @map("upgrade_pro")
+  RENEW_STANDARD  @map("renew_standard")
+  RENEW_PRO       @map("renew_pro")
+  UPGRADE_CONSULT @map("upgrade_consult")
+  NEXT_STANDARD   @map("next_standard")
+  NO_RENEW        @map("no_renew")
+}
+
+enum SubscriptionRequestStatus {
+  PENDING   @map("pending")
+  PROCESSED @map("processed")
+  REJECTED  @map("rejected")
+  CANCELLED @map("cancelled")
+}
+
+enum SubscriptionEventType {
+  PROVISION       @map("provision")
+  UPGRADE         @map("upgrade")
+  RENEW           @map("renew")
+  DOWNGRADE       @map("downgrade")
+  TEMP_EXTENSION  @map("temp_extension")
+  TERM_CORRECTION @map("term_correction")
+  PUBLIC_GRANT    @map("public_grant")
+  PUBLIC_REVOKE   @map("public_revoke")
+  TENANT_GRANT    @map("tenant_grant")
+  TENANT_REVOKE   @map("tenant_revoke")
+  CATALOG_UPDATE  @map("catalog_update")
+  PRICE_UPDATE    @map("price_update")
+}
+
+model SubscriptionFeatureCatalog {
+  code             String               @id
+  name             String
+  module           String
+  /// 适用品类编码数组（JSON）。
+  categories       Json
+  defaultOwnership FeatureOwnership
+  currentOwnership FeatureOwnership
+  releaseStatus    FeatureReleaseStatus @default(PLANNED)
+  valueText        String?              @db.Text
+  prerequisiteText String?              @db.Text
+  /// 外部/按量费用说明；另计不自动扣费（§3.3/§14.2 S-D09）。
+  externalFeeNote  String?              @db.Text
+  contentVersion   String?              @db.VarChar(64)
+  effectiveAt      DateTime?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  @@map("subscription_feature_catalog")
+}
+
+model TenantFeatureGrant {
+  id            String    @id @default(uuid())
+  tenantId      String
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  featureCode   String
+  effectiveAt   DateTime  @default(now())
+  operator      String?   @db.VarChar(191)
+  reason        String?   @db.VarChar(512)
+  revokedAt     DateTime?
+  revokedReason String?   @db.VarChar(512)
+  createdAt     DateTime  @default(now())
+
+  @@unique([tenantId, featureCode])
+  @@index([tenantId])
+  @@map("tenant_feature_grants")
+}
+
+model SubscriptionRequest {
+  id              String                    @id @default(uuid())
+  tenantId        String
+  tenant          Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  type            SubscriptionRequestType
+  targetPlan      SubscriptionPlan?
+  status          SubscriptionRequestStatus @default(PENDING)
+  contactName     String?                   @db.VarChar(120)
+  contactPhone    String?                   @db.VarChar(32)
+  /// 意向模块/品类（JSON）。
+  moduleIntent    Json?
+  note            String?                   @db.Text
+  /// 处理过程时间线（JSON 数组 {at,status,note}）。
+  timeline        Json?
+  publicReason    String?                   @db.VarChar(512)
+  dedupeKey       String
+  /// 实际办理金额；null=未办理/待确认，不落 0（§14.2）。
+  handledAmount   Decimal?                  @db.Decimal(12, 2)
+  handledCurrency String?                   @db.VarChar(8)
+  handledTaxInclusive Boolean?
+  linkedEventId   String?                   @db.VarChar(191)
+  periodText      String?                   @db.VarChar(191)
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+
+  @@unique([tenantId, dedupeKey])
+  @@index([tenantId, status])
+  @@map("subscription_requests")
+}
+
+model SubscriptionEvent {
+  id           String                @id @default(uuid())
+  tenantId     String?
+  tenant       Tenant?               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  type         SubscriptionEventType
+  beforeJson   Json?
+  afterJson    Json?
+  amount       Decimal?              @db.Decimal(12, 2)
+  currency     String?               @db.VarChar(8)
+  handlingNote String?               @db.Text
+  reason       String?               @db.VarChar(512)
+  operator     String?               @db.VarChar(191)
+  effectiveAt  DateTime?
+  createdAt    DateTime              @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([type, createdAt])
+  @@map("subscription_events")
+}
+
+model SubscriptionStandardPrice {
+  id           String           @id @default(uuid())
+  plan         SubscriptionPlan @unique
+  annualFee    Decimal?         @db.Decimal(12, 2)
+  currency     String?          @db.VarChar(8)
+  taxInclusive Boolean?
+  published    Boolean          @default(false)
+  priceVersion String?          @db.VarChar(64)
+  note         String?          @db.Text
+  updatedAt    DateTime         @updatedAt
+
+  @@map("subscription_standard_prices")
+}
+
+model TenantIntegrationConfig {
+  id                   String    @id @default(uuid())
+  tenantId             String
+  tenant               Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  capability           String    @db.VarChar(20)
+  provider             String    @db.VarChar(40)
+  enabled              Boolean   @default(false)
+  isDefault            Boolean   @default(false)
+  settings             Json
+  credentialsEncrypted String?   @db.Text
+  secretFields         Json
+  lastTestStatus       String    @default("not_tested") @db.VarChar(20)
+  lastTestMode         String    @default("none") @db.VarChar(20)
+  lastTestAt           DateTime?
+  lastTestError        String?   @db.VarChar(500)
+  updatedBy            String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@unique([tenantId, capability, provider], map: "tenant_integration_configs_scope_provider_key")
+  @@index([tenantId, capability, enabled], map: "tenant_integration_configs_scope_capability_idx")
+  @@map("tenant_integration_configs")
+}
+
+// 通知内容由所属宿主提供；公共台账保留原字段、租户范围和历史标识。
+model NotificationTemplate {
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  code      String
+  name      String
+  category  String
+  trigger   String
+  channels  Json
+  content   String
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, code])
+  @@index([tenantId, category, enabled])
+}
+
+model NotificationSendLog {
+  id           String    @id @default(uuid())
+  tenantId     String
+  tenant       Tenant    @relation(fields: [tenantId], references: [id])
+  templateCode String?
+  businessType String
+  businessId   String?
+  targetType   String
+  targetName   String?
+  targetMasked String?
+  channels     Json
+  provider     String    @default("mock")
+  status       String
+  requestJson  Json
+  responseJson Json?
+  sentAt       DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([tenantId, businessType, businessId])
+  @@index([tenantId, templateCode, createdAt])
+  @@index([tenantId, status, createdAt])
+}
+
+model ExternalAdapterLog {
+  id           String   @id @default(uuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  provider     String
+  capability   String
+  operation    String
+  businessType String?
+  businessId   String?
+  status       String
+  requestJson  Json
+  responseJson Json?
+  errorMessage String?
+  createdAt    DateTime @default(now())
+
+  @@index([tenantId, provider, capability, createdAt])
+  @@index([tenantId, businessType, businessId])
+  @@index([tenantId, status, createdAt])
+}
+
+model OfficialCalendarSource {
+  id        String   @id @default(uuid())
+  /// 目前只有中国大陆；预留以便后续接其他地区的公共假日数据。
+  region    String   @default("CN")
+  /// 来源机构或文件名，例如「国务院办公厅年度放假通知」。
+  name      String
+  /// 官方公告地址，必须 HTTPS——来源不可验证的数据不该进入公共来源库。
+  url       String
+  notes     String?  @db.Text
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  versions OfficialCalendarSourceVersion[]
+
+  @@unique([region, name], map: "official_calendar_sources_region_name_key")
+  @@map("official_calendar_sources")
+}
+
+/// 公共官方日历的**来源版本**（需求 4.5.2：「官方日历再次调整时必须形成新的来源版本；
+/// 已发布的经营空间日历、有效报价和订单不得被静默覆盖」）。
+///
+/// 只追加：同一来源同一年度的每次调整都新增一行，旧版本保留，供空间日历追溯自己
+/// 当初引用的是哪一版官方数据。
+model OfficialCalendarSourceVersion {
+  id                 String                 @id @default(uuid())
+  sourceId           String
+  /// Restrict 而非 Cascade：来源版本声明为「只追加、旧版本保留」，若允许级联删除，
+  /// 直接删来源就会连带清空全部不可变历史版本，与不可变承诺相悖。来源只能停用，
+  /// 仍有版本时不得删除（当前也没有删除来源的 API，这是数据库层的兜底）。
+  source             OfficialCalendarSource @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  year               Int
+  /// 来源版本号，由平台按 1.0/1.1… 递增。展示用；排序与并发分配一律用 sequence。
+  version            String
+  /// 版本序号（1 起）。字符串版本号在 1.10 之后会被字典序排到 1.9 之前，
+  /// 因此列表排序与「下一个版本号」分配都用这个整数，并靠唯一键把并发登记挡成冲突。
+  sequence           Int
+  /// 登记当时的来源信息**快照**。
+  ///
+  /// 不能在读取历史版本时去 join 来源主档：主档允许改名称、URL、地区，一改就会让
+  /// 昨天登记的旧版本显示成新名称、新 URL，租户引用旧版本时也拿到改后的信息——
+  /// 与「来源版本不可变、可历史追溯」冲突。主档继续维护，但不得改写历史版本的含义。
+  sourceNameSnapshot String
+  sourceUrlSnapshot  String
+  regionSnapshot     String
+  /// 官方公告的发布日期，与导入时间不同：追溯要能区分「官方什么时候发的」与「我们什么时候入的库」。
+  publishedAt        DateTime
+  importedAt         DateTime               @default(now())
+  importedBy         String?
+  /// ImportRentalCalendarDayInput[]：该版本的整年官方日期（法定节假日与调休工作日）。
+  days               Json
+  createdAt          DateTime               @default(now())
+
+  @@unique([sourceId, year, version], map: "official_calendar_source_versions_source_year_version_key")
+  /// 并发登记的关口：两个平台管理员同时算出同一个 sequence 时，其中一个必然撞唯一键，
+  /// 由服务层转成明确的 409/重试，而不是靠"先查后写"这种在并发下必然出错的时序。
+  @@unique([sourceId, year, sequence], map: "official_calendar_source_versions_source_year_sequence_key")
+  @@index([year], map: "official_calendar_source_versions_year_idx")
+  @@map("official_calendar_source_versions")
+}
+
+model AsyncJob {
+  id           String    @id @default(uuid())
+  tenantId     String
+  tenant       Tenant    @relation(fields: [tenantId], references: [id])
+  jobType      String
+  businessType String?
+  businessId   String?
+  status       String
+  attempt      Int       @default(0)
+  maxAttempts  Int       @default(3)
+  scheduledAt  DateTime?
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  operator     String?
+  payload      Json
+  result       Json?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([tenantId, jobType, status])
+  @@index([tenantId, scheduledAt])
+  @@index([tenantId, businessType, businessId])
+}
+
+/// 公共运营邀请保留原一次性凭证、授权快照和投递引用；业务授权由所选Core参加者裁定。
+model TenantOperatorInvitation {
+  id              String   @id @db.VarChar(191)
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+  email           String   @db.VarChar(191)
+  displayName     String   @db.VarChar(100)
+  tokenHash       String   @unique @db.Char(64)
+  idempotencyKey  String   @db.VarChar(128)
+  requestHash     String   @db.Char(64)
+  invitedBy       String   @db.VarChar(191)
+  accessSnapshot  Json
+  dispatchId      String   @db.VarChar(191)
+  status          String   @default("pending") @db.VarChar(20)
+  expiresAt       DateTime @db.DateTime(3)
+  acceptedAt      DateTime? @db.DateTime(3)
+  acceptedUserId  String?  @db.VarChar(191)
+  createdAt       DateTime @default(now()) @db.DateTime(3)
+  updatedAt       DateTime @updatedAt @db.DateTime(3)
+
+  @@unique([tenantId, idempotencyKey], map: "tenant_operator_invitations_idempotency_key")
+  @@index([tenantId, email, status], map: "tenant_operator_invitations_email_idx")
+  @@index([tenantId, createdAt], map: "tenant_operator_invitations_created_idx")
+  @@map("tenant_operator_invitations")
+}
+
+/// 公共客服邮箱按原服务器/文件夹指纹维护租约与UID游标。
+model TenantSupportMailbox {
+  id                 String @id @db.VarChar(191)
+  tenantId           String
+  tenant             Tenant @relation(fields: [tenantId], references: [id])
+  configId           String @db.VarChar(191)
+  mailboxFingerprint String @db.Char(64)
+  uidValidity        String? @db.VarChar(64)
+  lastUid            BigInt @default(0) @db.UnsignedBigInt
+  lastSyncedAt       DateTime? @db.DateTime(3)
+  leaseToken         String? @db.VarChar(64)
+  leaseUntil         DateTime? @db.DateTime(3)
+  createdAt          DateTime @default(now()) @db.DateTime(3)
+  updatedAt          DateTime @updatedAt @db.DateTime(3)
+
+  @@unique([tenantId, configId, mailboxFingerprint], map: "tenant_support_mailbox_source_key")
+  @@map("tenant_support_mailboxes")
+}
+
+/// 客服邮件只保存原安全文本与附件元数据，UID和租户隔离沿原唯一键。
+model TenantSupportEmail {
+  id                 String @id @db.VarChar(191)
+  tenantId           String
+  tenant             Tenant @relation(fields: [tenantId], references: [id])
+  configId           String @db.VarChar(191)
+  mailboxFingerprint String @db.Char(64)
+  uidValidity        String @db.VarChar(64)
+  uid                BigInt @db.UnsignedBigInt
+  senderEmail        String @db.VarChar(320)
+  senderName         String @db.VarChar(191)
+  recipient          String @db.VarChar(1000)
+  subject            String @db.VarChar(500)
+  bodyText           String @db.MediumText
+  attachments        Json
+  messageId          String? @db.VarChar(191)
+  receivedAt         DateTime @db.DateTime(3)
+  createdAt          DateTime @default(now()) @db.DateTime(3)
+
+  @@unique([tenantId, configId, mailboxFingerprint, uidValidity, uid], map: "tenant_support_email_uid_key")
+  @@index([tenantId, receivedAt], map: "tenant_support_email_received_idx")
+  @@map("tenant_support_emails")
+}
+
+// 平台官网演示申请不依赖业务Core，也不属于租户客户主档。
+model DemoRequest {
+  id           String   @id @db.VarChar(36)
+  requestKey   String   @unique @db.VarChar(36)
+  payloadHash  String   @db.VarChar(64)
+  name         String   @db.VarChar(80)
+  contactType  String   @db.VarChar(16)
+  contactValue String   @db.VarChar(160)
+  company      String   @default("") @db.VarChar(120)
+  message      String   @db.Text
+  language     String   @db.VarChar(8)
+  createdAt    DateTime @default(now()) @db.DateTime(3)
+
+  @@index([createdAt, id])
+  @@map("platform_demo_requests")
+}
+
+/// 公共匿名入口的持久限流桶。与旧 Rental 桶分别归属，不改写其历史计数或迁移。
+model PlatformApiRateBucket {
+  id          String   @id @default(uuid())
+  scopeKey    String   @db.Char(64)
+  bucketStart DateTime
+  count       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([scopeKey, bucketStart], map: "platform_api_rate_bucket_key")
+  @@index([bucketStart], map: "platform_api_rate_bucket_expiry_idx")
+  @@map("platform_api_rate_buckets")
+}

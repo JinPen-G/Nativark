@@ -7,6 +7,7 @@ node_modules/
 
 # Build output
 dist/
+apps/platform-api/generated/
 apps/admin/dist-ai-offline/
 packages/shared/dist-agent-desktop/
 build/

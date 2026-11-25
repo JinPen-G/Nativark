@@ -11,7 +11,16 @@ const input = { serviceId: "s", locationId: "l", windowStart: "2099-01-01", wind
 const client = {
   businessWorkspace: { findFirst: async () => ({ id: "ws" }) },
   $transaction: async (write, options) => { assert.equal(options.isolationLevel, "ReadCommitted"); return write(client); },
-  $queryRaw: async (sql) => { calls.push(sql.sql.includes("rental_service_capacities") ? "row-lock" : "space-lock"); return [{ categoryCode: "CAMERA", categoryVersionId: "v2", categoryAdoptionRevision: 1, status: bindingStatus }]; },
+  $queryRaw: async (sql) => {
+    if (/FROM Tenant /u.test(sql.sql)) {
+      assert.equal(sql.sql, "SELECT id FROM Tenant WHERE id=? LOCK IN SHARE MODE");
+      assert.deepEqual(sql.values, ["t"]);
+      calls.push("tenant-lock");
+      return [{ id: "t" }];
+    }
+    calls.push(sql.sql.includes("rental_service_capacities") ? "row-lock" : "space-lock");
+    return [{ categoryCode: "CAMERA", categoryVersionId: "v2", categoryAdoptionRevision: 1, status: bindingStatus }];
+  },
   rentalCategoryVersion: { findUnique: async () => { calls.push("definition"); return { categoryCode: "CAMERA", structureVersion: 1, status: "published", definition }; } },
   rentalValueAddedService: { findFirst: async () => { calls.push("service"); return { requiresCapacity: true }; } },
   rentalFulfillmentLocation: { findFirst: async () => { calls.push("location"); return { type: locationType }; } },
@@ -25,9 +34,9 @@ const service = new RentalServiceCapacityService(client);
 const save = (overrides = {}) => runWithRequestIdentity({ tenantId: "t", workspaceId: "ws" }, () => service.saveCapacity("t", { ...input, ...overrides }));
 (async () => {
   await save();
-  assert.deepEqual(calls.splice(0), ["space-lock", "definition", "service", "location", "overlap", "write"]);
+  assert.deepEqual(calls.splice(0), ["tenant-lock", "space-lock", "definition", "service", "location", "overlap", "write"]);
   await save({ id: "c" });
-  assert.deepEqual(calls.splice(0), ["space-lock", "definition", "row-lock", "service", "location", "existing", "overlap", "write"]);
+  assert.deepEqual(calls.splice(0), ["tenant-lock", "space-lock", "definition", "row-lock", "service", "location", "existing", "overlap", "write"]);
   locationType = "project_site";
   await assert.rejects(save(), /不支持/);
   assert.ok(!calls.splice(0).includes("write"));
@@ -37,6 +46,6 @@ const save = (overrides = {}) => runWithRequestIdentity({ tenantId: "t", workspa
   assert.ok(calls.splice(0).includes("write"), "历史窗口不强套新地点定义");
   bindingStatus = "PAUSED";
   await assert.rejects(save(), /不可用/);
-  assert.deepEqual(calls.splice(0), ["space-lock"]);
+  assert.deepEqual(calls.splice(0), ["tenant-lock", "space-lock"]);
   console.log("category-service-capacity-write: RC/空间锁/容量行锁、最新地点范围、停用与历史保留通过（执行替身）");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

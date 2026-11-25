@@ -1,0 +1,1071 @@
+import { pricingGroupCards } from "./commercialCards";
+import {
+  ADMIN_TABLE_COLUMN_WIDTH,
+  App,
+  Button,
+  DataTableMoney,
+  DataTableRowActions,
+  DataTableText,
+  DeleteOutlined,
+  Form,
+  FormSection,
+  Input,
+  ListSection,
+  Modal,
+  PlusOutlined,
+  SaveButton,
+  SearchField,
+  Select,
+  Table,
+  useModalDismissal,
+} from "@rental-os/platform-admin/ui";
+import {
+  RENTAL_PRICING_UNIT_LABELS,
+  formatRentalMoney,
+  rentalCurrencySymbol,
+  type RentalPricingGroup,
+  type SaveRentalPricingGroupRequest,
+  type UpdateRentalPricingGroupSecurityRatesRequest,
+} from "@rental-os/rental-core";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Col, InputNumber, Row, Space, Tag, Typography } from "antd";
+
+import { Pencil, ShieldCheck } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import {
+  RentalCommercialPageProvider,
+  useRentalCommercialWorkspaceAccess,
+  type RentalCommercialPageContext,
+} from "./page-context";
+import { RENTAL_COMMERCIAL_ACCESS, RENTAL_COMMERCIAL_CORE_ID } from "./pages";
+import { useOrderEditor } from "../orders/useOrderEditor";
+import { useLocale } from "@rental-os/platform-admin/locale";
+import { resolveTenantNavigationLabels } from "../catalog/pages";
+import { CorePage, UnsavedChangesGuard } from "@rental-os/platform-admin/core";
+import { QueryState } from "@rental-os/platform-admin/core";
+import { toPricingGroupRequest, type PricingGroupFormValues } from "./pricing-group-initial-rate";
+import { PRICE_VERSIONS_QUERY_KEY, usePriceVersions } from "./usePriceVersions";
+import styles from "./PricingGroupPage.module.css";
+
+
+/** 定价组与资金费率沿原请求转换，当前范围持有每次打开的表单。
+ * 型号与经营术语按原权限附属读取，价格和成员事实仍从原受权业务对象取得。 */
+export function PricingGroupPage(context: RentalCommercialPageContext) {
+  return (
+    <RentalCommercialPageProvider context={context}>
+      <PricingGroupWorkspace key={context.scopeKey} />
+    </RentalCommercialPageProvider>
+  );
+}
+
+function PricingGroupWorkspace() {
+  const {
+    api: rentalCoreApi,
+    scope,
+    currentScopeKey,
+    host,
+    canManage,
+    isCurrentScope,
+    assertManage,
+  } = useRentalCommercialWorkspaceAccess();
+  const generations = useRef({ group: 0, security: 0 });
+  const { message } = App.useApp();
+  const { locale, t } = useLocale();
+  const queryClient = useQueryClient();
+  const canReadProfile = () =>
+    Boolean(scope) && currentScopeKey() === scope && (
+      host.canAccess(RENTAL_COMMERCIAL_CORE_ID, [{ resource: "order", action: "view" }]) ||
+      host.canAccess(RENTAL_COMMERCIAL_CORE_ID, [{ resource: "catalog", action: "view" }]) ||
+      host.canAccess(RENTAL_COMMERCIAL_CORE_ID, [{ resource: "asset", action: "view" }])
+    );
+  const canReadModels = () =>
+    Boolean(scope) && currentScopeKey() === scope && (
+      host.canAccess(RENTAL_COMMERCIAL_CORE_ID, [{ resource: "catalog", action: "view" }]) ||
+      host.canAccess(RENTAL_COMMERCIAL_CORE_ID, [{ resource: "catalog", action: "manage" }]) ||
+      host.canAccess(RENTAL_COMMERCIAL_CORE_ID, [{ resource: "order", action: "view" }]) ||
+      host.canAccess(RENTAL_COMMERCIAL_CORE_ID, [{ resource: "order", action: "create" }])
+    );
+  const [keyword, setKeyword] = useState("");
+  const [editing, setEditing] = useState<RentalPricingGroup>();
+  const [open, setOpen] = useState(false);
+  const [securityEditing, setSecurityEditing] = useState<RentalPricingGroup>();
+  const [securityOpen, setSecurityOpen] = useState(false);
+  const [form] = Form.useForm<PricingGroupFormValues>();
+  const [securityForm] = Form.useForm<UpdateRentalPricingGroupSecurityRatesRequest>();
+  const editor = useModalDismissal(open, () => {
+    setOpen(false);
+    setEditing(undefined);
+    form.resetFields();
+  });
+  const securityEditor = useModalDismissal(securityOpen, () => {
+    setSecurityOpen(false);
+    setSecurityEditing(undefined);
+    securityForm.resetFields();
+  });
+  const profile = useQuery({
+    queryKey: ["rental-core", "profile", scope],
+    enabled: canReadProfile(),
+    queryFn: async ({ signal }) => {
+      if (!isCurrentScope() || !canReadProfile()) throw new Error("经营资料读取受限");
+      const result = await rentalCoreApi.profile({ signal });
+      if (!isCurrentScope() || !canReadProfile()) throw new Error("经营资料读取受限");
+      return result;
+    },
+  });
+  const models = useQuery({
+    queryKey: ["rental-core", "groups", scope],
+    enabled: canReadModels(),
+    queryFn: async ({ signal }) => {
+      if (!isCurrentScope() || !canReadModels()) throw new Error("型号资料读取受限");
+      const result = await rentalCoreApi.itemGroups({ signal });
+      if (!isCurrentScope() || !canReadModels()) throw new Error("型号资料读取受限");
+      return result;
+    },
+  });
+  const pricingGroups = useQuery({
+    queryKey: ["rental-core", "pricing-groups", scope],
+    enabled: Boolean(scope),
+    queryFn: ({ signal }) => rentalCoreApi.pricingGroups({ signal }),
+  });
+  const settings = useQuery({
+    queryKey: ["rental-core", "business-settings", scope],
+    enabled: Boolean(scope),
+    queryFn: ({ signal }) => rentalCoreApi.businessSettings({ signal }),
+  });
+  const rules = useQuery({
+    queryKey: ["rental-core", "rule-versions", scope],
+    enabled: Boolean(scope),
+    queryFn: ({ signal }) => rentalCoreApi.ruleVersions({ signal }),
+  });
+  const currency = settings.data?.pricing.currency;
+  const { versions, currentVersion, currentVersionDetail } = usePriceVersions();
+  const visibleProfile = canReadProfile() && !profile.isError ? profile.data : undefined;
+  const visibleModels = canReadModels() && !models.isError ? models.data : undefined;
+  const modelsUnavailableText = !canReadModels()
+    ? (locale === "en-US" ? "Model access is restricted" : "型号资料读取受限")
+    : models.isError
+      ? (locale === "en-US" ? "Unable to read model details" : "未能读取型号资料")
+      : (locale === "en-US" ? "Reading model details" : "正在读取型号资料");
+  async function refreshPricingGroups(throwOnError = false) {
+    if (!isCurrentScope()) throw new DOMException("商业页面的会话或经营空间已变化", "AbortError");
+    await Promise.all([
+      pricingGroups.refetch({ throwOnError }),
+      settings.refetch({ throwOnError }),
+      rules.refetch({ throwOnError }),
+      versions.refetch({ throwOnError }),
+      ...(currentVersion ? [currentVersionDetail.refetch({ throwOnError })] : []),
+      // 附属错误独立持有，手动刷新仍经过请求前后的当前权限复验。
+      ...(canReadModels() ? [models.refetch()] : []),
+      ...(canReadProfile() ? [profile.refetch()] : []),
+    ]);
+  }
+  // 已发布（含未来生效）与最新草稿都参与字段展示，避免先配价格后配资金规则时
+  // 出现“发布被拒、页面却没有补录入口”的死锁。
+  const rateRuleCandidates = (rules.data ?? []).filter(
+    (row) => row.status === "published" || row.status === "pending" || row.status === "draft",
+  );
+  const depositModes = rateRuleCandidates.map((row) => {
+    const legacyMode = row.config.payment.depositMode;
+    return row.config.deposit?.mode ?? (legacyMode === "preauthorization" ? "none" : (legacyMode ?? "none"));
+  });
+  const preauthorizationModes = rateRuleCandidates.map(
+    (row) =>
+      row.config.preauthorization?.mode ??
+      (row.config.payment.depositMode === "preauthorization" ? "fixed" : "none"),
+  );
+  const securityRateFields = [
+    ...(depositModes.includes("fixed") ? [{ name: "depositAmount", label: "每件固定押金" }] : []),
+    ...(depositModes.includes("price_multiple") ? [{ name: "depositMultiple", label: "押金租金倍数" }] : []),
+    ...(preauthorizationModes.includes("fixed") ? [{ name: "preAuthAmount", label: "每件预授权额度" }] : []),
+    ...(preauthorizationModes.some((mode) => mode === "price_multiple" || mode === "risk_surcharge")
+      ? [{ name: "preAuthMultiple", label: "预授权租金倍数" }]
+      : []),
+  ];
+  const save = useMutation({
+    mutationFn: (data: SaveRentalPricingGroupRequest) => {
+      assertManage();
+      if (!referencesAvailable()) throw new Error(t("当前操作不可用"));
+      return rentalCoreApi.savePricingGroup(data);
+    },
+    onSuccess: async () => {
+      if (!isCurrentScope()) return;
+      await queryClient.invalidateQueries({ queryKey: ["rental-core", "pricing-groups"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["rental-core", "pricing-plans"] }),
+        queryClient.invalidateQueries({ queryKey: PRICE_VERSIONS_QUERY_KEY }),
+      ]);
+      if (!isCurrentScope()) return;
+      editor.dismiss();
+      message.success(t("定价分组已保存"));
+    },
+    onError: () => {
+      if (isCurrentScope()) message.error(t("保存失败，请检查编码、成员型号和库存方式"));
+    },
+  });
+  const saveSecurityRates = useMutation({
+    mutationFn: (data: UpdateRentalPricingGroupSecurityRatesRequest) => {
+      assertManage();
+      if (!referencesAvailable()) throw new Error(t("当前操作不可用"));
+      if (!securityEditing) throw new Error(t("当前操作不可用"));
+      return rentalCoreApi.updatePricingGroupSecurityRates(securityEditing.id, data);
+    },
+    onSuccess: async (result) => {
+      if (!isCurrentScope()) return;
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: PRICE_VERSIONS_QUERY_KEY }),
+        queryClient.invalidateQueries({ queryKey: ["rental-core", "price-version"] }),
+      ]);
+      if (!isCurrentScope()) return;
+      securityEditor.dismiss();
+      message.success(t("资金费率已保存，新价格版本已生效") + ` · ${result.version}`);
+    },
+    onError: (error) => {
+      if (isCurrentScope())
+        message.error(error instanceof Error ? error.message : t("资金费率保存失败，请检查规则与待生效调价"));
+    },
+  });
+  const rows = useMemo(
+    () =>
+      (pricingGroups.data ?? []).filter((row) =>
+        `${row.code}${row.name}${row.members.map((item) => item.name).join("")}`
+          .toLowerCase()
+          .includes(keyword.toLowerCase()),
+      ),
+    [pricingGroups.data, keyword],
+  );
+  const routeLabel = t(
+    resolveTenantNavigationLabels(visibleProfile?.terminology).routes.pricingGroups ?? "定价分组",
+  );
+  const itemLabel = t(visibleProfile?.terminology.itemLabel ?? "商品");
+  const itemGroupLabel = t(visibleProfile?.terminology.itemGroupLabel ?? "产品型号");
+  const editorUnavailable =
+    !canManage ||
+    !settings.data ||
+    !rules.data ||
+    !visibleModels ||
+    settings.isError ||
+    rules.isError ||
+    models.isError ||
+    pricingGroups.isError;
+  const referencesAvailable = () =>
+    isCurrentScope() && canReadModels() &&
+    ["groups", "pricing-groups", "business-settings", "rule-versions"].every(
+      key => queryClient.getQueryState(["rental-core", key, scope])?.status === "success",
+    );
+  const securityUnavailable =
+    editorUnavailable ||
+    versions.isPending ||
+    versions.isError ||
+    currentVersionDetail.isPending ||
+    currentVersionDetail.isError ||
+    !currentVersionDetail.data ||
+    !securityRateFields.length;
+
+  const groupSubmission = useOrderEditor<PricingGroupFormValues>({
+    form,
+    identity: open ? JSON.stringify([scope, "pricing-group", generations.current.group]) : undefined,
+    disabled: editorUnavailable,
+    onSave: (values) => {
+      assertManage();
+      return save.mutateAsync(toPricingGroupRequest(values, editing?.id));
+    },
+  });
+  const securitySubmission = useOrderEditor<UpdateRentalPricingGroupSecurityRatesRequest>({
+    form: securityForm,
+    identity: securityOpen
+      ? JSON.stringify([scope, "pricing-security", generations.current.security])
+      : undefined,
+    disabled: securityUnavailable,
+    onSave: (values) => {
+      assertManage();
+      return saveSecurityRates.mutateAsync(values);
+    },
+  });
+  const groupForm = useMemo(
+    () => ({ ...form, validateFields: groupSubmission.validate }),
+    [form, groupSubmission.key],
+  );
+  const boundSecurityForm = useMemo(
+    () => ({ ...securityForm, validateFields: securitySubmission.validate }),
+    [securityForm, securitySubmission.key],
+  );
+  const dismissGroup = () => groupSubmission.dismiss(editor.dismiss);
+  const dismissSecurity = () => securitySubmission.dismiss(securityEditor.dismiss);
+
+  function edit(record?: RentalPricingGroup) {
+    if (editorUnavailable || save.isPending || !isCurrentScope() || (open && !editor.visible)) return;
+    if (!referencesAvailable()) return;
+    if (!settings.data || !rules.data) {
+      const failed = settings.isError || rules.isError;
+      message.error(
+        t(
+          failed
+            ? "基础经营设置或业务规则读取失败，请刷新后重试"
+            : "基础经营设置或业务规则仍在加载，请稍后重试",
+        ),
+      );
+      return;
+    }
+    groupSubmission.dismiss(() => {
+      generations.current.group += 1;
+      setEditing(record);
+      form.resetFields();
+      form.setFieldsValue(
+        record
+          ? {
+              id: record.id,
+              code: record.code,
+              name: record.name,
+              description: record.description,
+              defaultPricingUnit: record.defaultPricingUnit,
+              memberItemGroupIds: record.memberItemGroupIds,
+              status: record.status,
+            }
+          : {
+              code: "",
+              name: "",
+              memberItemGroupIds: [],
+              initialRates: [
+                {
+                  unit: settings.data?.pricing.defaultUnit ?? "calendar_day",
+                  baseAmount: 0,
+                  usagePrecision: 0,
+                  usageMode: "flat",
+                },
+              ],
+              status: "enabled",
+            },
+      );
+      groupSubmission.markClean();
+      setOpen(true);
+    });
+  }
+
+  function editSecurityRates(record: RentalPricingGroup) {
+    if (
+      securityUnavailable ||
+      saveSecurityRates.isPending ||
+      !isCurrentScope() ||
+      !referencesAvailable() ||
+      (securityOpen && !securityEditor.visible)
+    )
+      return;
+    const currentRates = (currentVersionDetail.data?.rates ?? [])
+      .filter((rate) => (rate.pricingGroupId ?? rate.itemGroupId) === record.id)
+      .map(({ unit, depositAmount, depositMultiple, preAuthAmount, preAuthMultiple }) => ({
+        unit,
+        depositAmount,
+        depositMultiple,
+        preAuthAmount,
+        preAuthMultiple,
+      }));
+    if (!currentRates.length) {
+      message.error(t("当前价格版本没有该定价组的费率，请先建立或发布基本价"));
+      return;
+    }
+    if (!securityRateFields.length) {
+      message.info(t("当前已发布或草稿规则没有按计价单位收取押金/预授权，无需配置此处费率"));
+      return;
+    }
+    securitySubmission.dismiss(() => {
+      generations.current.security += 1;
+      setSecurityEditing(record);
+      securityForm.resetFields();
+      securityForm.setFieldsValue({ rates: currentRates });
+      securitySubmission.markClean();
+      setSecurityOpen(true);
+    });
+  }
+
+  return (
+    <>
+      <UnsavedChangesGuard
+        dirty={(open && groupSubmission.dirty) || (securityOpen && securitySubmission.dirty)}
+        busy={save.isPending || saveSecurityRates.isPending}
+      />
+      <CorePage
+        children={null}
+        title={routeLabel}
+        note={{
+          title: locale === "en-US" ? "Rate groups and models" : `定价分组不是${itemGroupLabel}`,
+          description:
+            locale === "en-US"
+              ? "A rate group can include several models, and a model can belong to several groups. Stock is tracked once. The quote determines which model fulfills the booking."
+              : `一个定价分组可以包含多个${itemGroupLabel}；同一${itemGroupLabel}也可以加入多个定价分组。资产与库存始终只维护一份，报价后由系统选择实际承接型号。`,
+        }}
+        actions={[
+          {
+            id: "create-pricing-group",
+            kind: "open",
+            label: { default: t("新增定价分组") },
+            emphasis: "primary",
+            permissions: RENTAL_COMMERCIAL_ACCESS,
+            icon: <PlusOutlined />,
+            disabled: editorUnavailable || save.isPending,
+            open: () => edit(),
+          },
+        ]}
+      />
+      <ListSection
+        controls={
+          <SearchField
+            label={t("搜索定价分组")}
+            value={keyword}
+            onValueChange={setKeyword}
+            placeholder={t("搜索分组或成员型号")}
+            style={{ width: "var(--rental-control-width-search)" }}
+          />
+        }
+      >
+        <QueryState
+          loading={
+            pricingGroups.isLoading ||
+            settings.isLoading ||
+            rules.isLoading ||
+            versions.isLoading ||
+            currentVersionDetail.isLoading
+          }
+          error={
+            pricingGroups.error ||
+            settings.error ||
+            rules.error ||
+            versions.error ||
+            currentVersionDetail.error
+          }
+          onRetry={() => refreshPricingGroups(true)}
+        >
+          <Table<RentalPricingGroup>
+            emptyScene={keyword.trim() ? "search" : "empty"}
+            cardView={pricingGroupCards({
+              t,
+              rates: currentVersionDetail.data?.rates ?? [],
+              models: visibleModels,
+              modelsUnavailableText,
+              defaultUnit: settings.data?.pricing.defaultUnit,
+              money: (value) => formatRentalMoney(value, currency),
+              canEdit: !editorUnavailable,
+              canEditSecurity: !securityUnavailable,
+              edit,
+              security: editSecurityRates,
+            })}
+            exportConfig={{
+              filename: t("定价分组"),
+              fields: [
+                { label: t("编码"), value: (row) => row.code },
+                { label: t("名称"), value: (row) => row.name },
+                { label: t("版本"), value: (row) => row.version },
+                { label: t("状态"), value: (row) => t(row.status === "enabled" ? "已启用" : "已停用") },
+                { label: t("包含的型号"), value: (row) => row.members.map((item) => item.name).join(" / ") },
+              ],
+            }}
+            rowKey="id"
+            onRefresh={() => refreshPricingGroups()}
+            loading={pricingGroups.isLoading}
+            refreshing={pricingGroups.isFetching}
+            dataSource={rows}
+            columns={[
+              {
+                title: t("定价分组"),
+                dataIndex: "name",
+                minWidth: ADMIN_TABLE_COLUMN_WIDTH.summary,
+                render: (_, row) => (
+                  <DataTableText primary={row.name} secondary={`${row.code} · v${row.version}`} />
+                ),
+              },
+              {
+                title: locale === "en-US" ? itemGroupLabel : `${t("包含的")}${itemGroupLabel}`,
+                render: (_, row) => (
+                  <Space orientation="vertical" size={4}>
+                    {row.members.length ? (
+                      row.members.map((member) => (
+                        <DataTableText key={member.id} primary={member.name} secondary={member.code} />
+                      ))
+                    ) : (
+                      <span className="muted">{t("未配置")}</span>
+                    )}
+                  </Space>
+                ),
+              },
+              {
+                title: t("默认计价"),
+                render: (_, row) =>
+                  row.defaultPricingUnit
+                    ? t(RENTAL_PRICING_UNIT_LABELS[row.defaultPricingUnit] ?? row.defaultPricingUnit)
+                    : t("跟随价格配置"),
+              },
+              {
+                title: t("当前基本价"),
+                minWidth: ADMIN_TABLE_COLUMN_WIDTH.dateTime,
+                render: (_, row) => {
+                  const rates = (currentVersionDetail.data?.rates ?? []).filter(
+                    (rate) => (rate.pricingGroupId ?? rate.itemGroupId) === row.id,
+                  );
+                  return rates.length ? (
+                    <Space orientation="vertical" size={4}>
+                      {rates.map((rate) => (
+                        <span style={{ whiteSpace: "nowrap" }} key={`${rate.itemGroupId}:${rate.unit}`}>
+                          <DataTableMoney formatted={formatRentalMoney(rate.baseAmount, currency)} />
+                          <span className="muted">
+                            {" "}
+                            / {t(RENTAL_PRICING_UNIT_LABELS[rate.unit] ?? rate.unit)}
+                          </span>
+                        </span>
+                      ))}
+                    </Space>
+                  ) : (
+                    <Tag color="warning">{t("历史分组未配置")}</Tag>
+                  );
+                },
+              },
+              {
+                title: t("状态"),
+                dataIndex: "status",
+                render: (value) => (
+                  <Tag color={value === "enabled" ? "success" : "default"}>
+                    {t(value === "enabled" ? "启用" : "停用")}
+                  </Tag>
+                ),
+              },
+              {
+                title: t("操作"),
+                render: (_, row) => (
+                  <DataTableRowActions
+                    primary={{
+                      id: "edit",
+                      label: t("编辑"),
+                      icon: Pencil,
+                      disabled: editorUnavailable || save.isPending,
+                      onSelect: () => edit(row),
+                    }}
+                    details={() => edit(row)}
+                    detailLabel={t("编辑")}
+                    menuLabel={`${row.name} · ${t("更多操作")}`}
+                    actions={[
+                      {
+                        id: "security",
+                        label: t("押金/预授权"),
+                        icon: ShieldCheck,
+                        disabled: securityUnavailable || saveSecurityRates.isPending,
+                        onSelect: () => editSecurityRates(row),
+                      },
+                    ]}
+                  />
+                ),
+              },
+            ]}
+          />
+        </QueryState>
+      </ListSection>
+      <Modal
+        presentation="side"
+        title={t(editing ? "编辑定价分组" : "新增定价分组")}
+        width={640}
+        open={editor.visible}
+        destroyOnHidden
+        onCancel={dismissGroup}
+        afterClose={editor.afterClose}
+        closable={!save.isPending}
+        keyboard={!save.isPending}
+        mask={{ closable: !save.isPending }}
+        footer={
+          <>
+            <Button disabled={save.isPending} onClick={dismissGroup}>
+              {t("取消")}
+            </Button>
+            <SaveButton
+              label={t("保存")}
+              form={groupForm}
+              disabled={editorUnavailable}
+              pending={save.isPending}
+              onSave={groupSubmission.submit}
+            />
+          </>
+        }
+      >
+        <Form<PricingGroupFormValues>
+          name="pricing-group"
+          form={form}
+          layout="vertical"
+          disabled={editorUnavailable || save.isPending}
+          {...groupSubmission.formProps}
+          onFinish={groupSubmission.submit}
+        >
+          <FormSection title={t("基本资料")}>
+            <Form.Item name="name" label={t("分组名称")} rules={[{ required: true }]}>
+              <Input
+                placeholder={
+                  locale === "en-US" ? `e.g. Standard ${itemLabel} group` : `如：标准${itemLabel}分组`
+                }
+              />
+            </Form.Item>
+            <Row gutter={16}>
+              <Col xs={24} sm={12}>
+                <Form.Item name="code" label={t("分组编码")} rules={[{ required: true }]}>
+                  <Input
+                    disabled={Boolean(editing) || editorUnavailable || save.isPending}
+                    placeholder="STANDARD_GROUP"
+                  />
+                </Form.Item>
+              </Col>
+              <Col xs={24} sm={12}>
+                <Form.Item name="status" label={t("状态")} rules={[{ required: true }]}>
+                  <Select
+                    options={[
+                      { value: "enabled", label: t("启用") },
+                      { value: "disabled", label: t("停用") },
+                    ]}
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
+            <Form.Item
+              name="memberItemGroupIds"
+              label={locale === "en-US" ? t("包含的型号") : `${t("包含的")}${itemGroupLabel}`}
+              rules={[{ required: true, type: "array", min: 1 }]}
+              extra={t("同一型号可以加入多个定价分组；库存不会因此复制。")}
+            >
+              <Select
+                mode="multiple"
+                showSearch={{ optionFilterProp: "label" }}
+                optionRender={(option) => {
+                  const model = visibleModels?.find((item) => item.id === option.value);
+                  const specification = model
+                    ? [
+                        model.attributes.manufacturer,
+                        model.attributes.brand,
+                        model.attributes.model,
+                        model.attributes.trim,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")
+                    : "";
+                  return (
+                    <Space orientation="vertical" size={0}>
+                      <span>{option.label}</span>
+                      {specification && <span className="muted">{specification}</span>}
+                    </Space>
+                  );
+                }}
+                options={(visibleModels ?? [])
+                  .filter((item) => item.status === "enabled")
+                  .map((item) => ({ value: item.id, label: `${item.name} · ${item.code}` }))}
+              />
+            </Form.Item>
+            {editing && (
+              <Form.Item name="defaultPricingUnit" label={t("默认计价单位")}>
+                <Select
+                  allowClear
+                  options={(settings.data?.pricing.enabledUnits ?? []).map((value) => ({
+                    value,
+                    label: t(RENTAL_PRICING_UNIT_LABELS[value] ?? value),
+                  }))}
+                />
+              </Form.Item>
+            )}
+          </FormSection>
+          {!editing && (
+            <FormSection title={t("基本价")}>
+              <Typography.Paragraph type="secondary">{t("第一行是默认计价单位。")}</Typography.Paragraph>
+              <Form.List
+                name="initialRates"
+                rules={[
+                  {
+                    validator: async (_, value) => {
+                      if (!value?.length) throw new Error(t("至少填写一条基本价"));
+                      if (new Set(value.map((row: { unit?: string }) => row.unit)).size !== value.length)
+                        throw new Error(t("同一个计价单位不能重复"));
+                    },
+                  },
+                ]}
+              >
+                {(fields, { add, remove }, { errors }) => (
+                  <div className={styles.rates}>
+                    {fields.map((field, index) => (
+                      <div key={field.key} className={styles.rate}>
+                        <div className={styles.rateFields}>
+                          <Form.Item
+                            name={[field.name, "unit"]}
+                            label={index === 0 ? t("计价单位（默认）") : t("计价单位")}
+                            rules={[{ required: true, message: t("请选择计价单位") }]}
+                          >
+                            <Select
+                              style={{ width: "100%" }}
+                              options={(settings.data?.pricing.enabledUnits ?? []).map((value) => ({
+                                value,
+                                label: t(RENTAL_PRICING_UNIT_LABELS[value] ?? value),
+                              }))}
+                            />
+                          </Form.Item>
+                          <Form.Item
+                            name={[field.name, "baseAmount"]}
+                            label={t("价格")}
+                            rules={[{ required: true, message: t("请填写价格") }]}
+                          >
+                            <InputNumber
+                              min={0}
+                              precision={2}
+                              prefix={rentalCurrencySymbol(currency)}
+                              style={{ width: "100%" }}
+                            />
+                          </Form.Item>
+                          <Button
+                            danger
+                            type="text"
+                            aria-label={t("删除基本价")}
+                            icon={<DeleteOutlined />}
+                            disabled={fields.length === 1}
+                            onClick={() => remove(field.name)}
+                            style={{ marginTop: 30 }}
+                          />
+                        </div>
+                        {securityRateFields.length > 0 && (
+                          <FormSection title={t("押金与预授权")}>
+                            <Typography.Paragraph type="secondary">
+                              {t(
+                                "按当前已生效的业务规则填写本计价单位需要的资金金额；押金是实收，预授权是冻结额度，两者分别计算。",
+                              )}
+                            </Typography.Paragraph>
+                            <Space align="start" wrap>
+                              {securityRateFields.map((fieldConfig) => (
+                                <Form.Item
+                                  key={fieldConfig.name}
+                                  name={[field.name, fieldConfig.name]}
+                                  label={t(fieldConfig.label)}
+                                  rules={[
+                                    { required: true, message: t("当前已生效规则要求填写此金额") },
+                                    { type: "number", min: 0.01, message: t("金额或倍数必须大于 0") },
+                                  ]}
+                                  extra={
+                                    fieldConfig.name.toLowerCase().includes("multiple")
+                                      ? t("按本行实际租金乘以该倍数")
+                                      : t("启用对应规则时必须大于 0")
+                                  }
+                                >
+                                  <InputNumber
+                                    min={0.01}
+                                    precision={2}
+                                    style={{ width: "var(--rental-control-width-number)" }}
+                                  />
+                                </Form.Item>
+                              ))}
+                            </Space>
+                          </FormSection>
+                        )}
+                        <Form.Item
+                          noStyle
+                          shouldUpdate={(previous, current) =>
+                            previous.initialRates?.[field.name]?.unit !==
+                              current.initialRates?.[field.name]?.unit ||
+                            previous.initialRates?.[field.name]?.usageMode !==
+                              current.initialRates?.[field.name]?.usageMode
+                          }
+                        >
+                          {({ getFieldValue }) =>
+                            getFieldValue(["initialRates", field.name, "unit"]) === "usage" && (
+                              <FormSection title={t("用量计费规则")}>
+                                <Typography.Paragraph type="secondary">
+                                  {locale === "en-US"
+                                    ? "Charge the base amount, include the configured quantity, then bill excess usage by the selected rule. Each started precision step is rounded up."
+                                    : `基础价包含设定用量；超出部分按统一单价或分段累进计费。计量精度按“开始即计”向上进位（${t(visibleProfile?.terminology.usageMetricLabel ?? "使用量")}）。`}
+                                </Typography.Paragraph>
+                                <Space align="start" wrap>
+                                  <Form.Item
+                                    name={[field.name, "includedUsage"]}
+                                    label={t("基础价包含用量")}
+                                    extra={t("留空按 0 处理")}
+                                  >
+                                    <InputNumber
+                                      min={0}
+                                      precision={2}
+                                      style={{ width: "var(--rental-control-width-number)" }}
+                                    />
+                                  </Form.Item>
+                                  <Form.Item name={[field.name, "usagePrecision"]} label={t("用量计量精度")}>
+                                    <Select
+                                      style={{ width: "var(--rental-control-width-select)" }}
+                                      options={[
+                                        {
+                                          value: 0,
+                                          label: locale === "en-US" ? "Whole unit" : "整数（每 1 单位进位）",
+                                        },
+                                        {
+                                          value: 1,
+                                          label:
+                                            locale === "en-US"
+                                              ? "0.1 (round up per 0.1 unit)"
+                                              : "0.1（每 0.1 单位进位）",
+                                        },
+                                        {
+                                          value: 2,
+                                          label:
+                                            locale === "en-US"
+                                              ? "0.01 (round up per 0.01 unit)"
+                                              : "0.01（每 0.01 单位进位）",
+                                        },
+                                      ]}
+                                    />
+                                  </Form.Item>
+                                  <Form.Item
+                                    name={[field.name, "usageMode"]}
+                                    label={t("超额计费方式")}
+                                    rules={[{ required: true, message: t("请选择超额计费方式") }]}
+                                  >
+                                    <Select
+                                      style={{ width: "var(--rental-control-width-select)" }}
+                                      onChange={(mode: "flat" | "progressive") => {
+                                        if (
+                                          mode === "progressive" &&
+                                          !form.getFieldValue(["initialRates", field.name, "tiers"])?.length
+                                        ) {
+                                          form.setFieldValue(
+                                            ["initialRates", field.name, "tiers"],
+                                            [{ minUnits: 1, unitAmount: 0 }],
+                                          );
+                                        }
+                                      }}
+                                      options={[
+                                        { value: "flat", label: t("统一超额单价") },
+                                        { value: "progressive", label: t("超额分段累进") },
+                                      ]}
+                                    />
+                                  </Form.Item>
+                                </Space>
+                                {getFieldValue(["initialRates", field.name, "usageMode"]) ===
+                                "progressive" ? (
+                                  <Form.List
+                                    name={[field.name, "tiers"]}
+                                    rules={[
+                                      {
+                                        validator: async (
+                                          _,
+                                          tiers: Array<{ minUnits?: number }> | undefined,
+                                        ) => {
+                                          if (!tiers?.length || tiers[0].minUnits !== 1)
+                                            throw new Error(t("分段累进第一档必须从第 1 个超额单位开始"));
+                                          if (
+                                            new Set(tiers.map((tier) => tier.minUnits)).size !== tiers.length
+                                          )
+                                            throw new Error(t("阶梯起始单位不能重复"));
+                                        },
+                                      },
+                                    ]}
+                                  >
+                                    {(
+                                      tierFields,
+                                      { add: addTier, remove: removeTier },
+                                      { errors: tierErrors },
+                                    ) => (
+                                      <Space orientation="vertical" size={6} style={{ width: "100%" }}>
+                                        {tierFields.map((tierField, tierIndex) => (
+                                          <Space key={tierField.key} align="start" wrap>
+                                            <Form.Item
+                                              name={[tierField.name, "minUnits"]}
+                                              label={
+                                                tierIndex === 0
+                                                  ? t("起始超额单位（第一档固定为 1）")
+                                                  : t("起始超额单位")
+                                              }
+                                              rules={[
+                                                { required: true },
+                                                { type: "number", min: 1, message: t("起始单位必须大于 0") },
+                                              ]}
+                                            >
+                                              <InputNumber
+                                                min={1}
+                                                precision={0}
+                                                disabled={tierIndex === 0}
+                                                style={{ width: "var(--rental-control-width-number)" }}
+                                              />
+                                            </Form.Item>
+                                            <Form.Item
+                                              name={[tierField.name, "unitAmount"]}
+                                              label={t("每单位价格")}
+                                              rules={[{ required: true, message: t("请填写每单位价格") }]}
+                                            >
+                                              <InputNumber
+                                                min={0}
+                                                precision={2}
+                                                prefix={rentalCurrencySymbol(currency)}
+                                                style={{ width: "var(--rental-control-width-number)" }}
+                                              />
+                                            </Form.Item>
+                                            <Button
+                                              danger
+                                              type="text"
+                                              aria-label={t("删除阶梯")}
+                                              icon={<DeleteOutlined />}
+                                              disabled={tierFields.length === 1 || tierIndex === 0}
+                                              onClick={() => removeTier(tierField.name)}
+                                              style={{ marginTop: 30 }}
+                                            />
+                                          </Space>
+                                        ))}
+                                        <Form.ErrorList errors={tierErrors} />
+                                        <Button
+                                          icon={<PlusOutlined />}
+                                          onClick={() => {
+                                            const tiers = getFieldValue([
+                                              "initialRates",
+                                              field.name,
+                                              "tiers",
+                                            ]) as Array<{ minUnits?: number }> | undefined;
+                                            const lastMinUnits = tiers?.[tiers.length - 1]?.minUnits ?? 1;
+                                            addTier({
+                                              minUnits: Math.max(2, lastMinUnits + 1),
+                                              unitAmount: 0,
+                                            });
+                                          }}
+                                        >
+                                          {t("增加价格档")}
+                                        </Button>
+                                      </Space>
+                                    )}
+                                  </Form.List>
+                                ) : (
+                                  <Form.Item
+                                    name={[field.name, "excessUsageAmount"]}
+                                    label={t("超额单价（每单位）")}
+                                    rules={[{ required: true, message: t("请填写超额单价") }]}
+                                  >
+                                    <InputNumber
+                                      min={0}
+                                      precision={2}
+                                      prefix={rentalCurrencySymbol(currency)}
+                                      style={{ width: "var(--rental-control-width-number)" }}
+                                    />
+                                  </Form.Item>
+                                )}
+                                <Form.Item
+                                  name={[field.name, "maxAmount"]}
+                                  label={t("单件本次租期封顶（可选）")}
+                                  extra={t("留空表示不封顶；填 0 表示免租")}
+                                >
+                                  <InputNumber
+                                    min={0}
+                                    precision={2}
+                                    prefix={rentalCurrencySymbol(currency)}
+                                    style={{ width: "var(--rental-control-width-number)" }}
+                                  />
+                                </Form.Item>
+                              </FormSection>
+                            )
+                          }
+                        </Form.Item>
+                      </div>
+                    ))}
+                    <Form.ErrorList errors={errors} />
+                    <Button
+                      icon={<PlusOutlined />}
+                      disabled={fields.length >= (settings.data?.pricing.enabledUnits.length ?? 0)}
+                      onClick={() => {
+                        const existingRates = form.getFieldValue(
+                          "initialRates",
+                        ) as PricingGroupFormValues["initialRates"];
+                        const nextUnit = settings.data?.pricing.enabledUnits.find(
+                          (unit) => !existingRates?.some((rate) => rate.unit === unit),
+                        );
+                        if (nextUnit)
+                          add({ unit: nextUnit, baseAmount: 0, usagePrecision: 0, usageMode: "flat" });
+                      }}
+                    >
+                      {t("增加计价单位")}
+                    </Button>
+                  </div>
+                )}
+              </Form.List>
+            </FormSection>
+          )}
+          <Form.Item name="description" label={t("说明")}>
+            <Input.TextArea rows={3} />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Modal
+        presentation="side"
+        title={`${t("押金/预授权费率")} · ${securityEditing?.name ?? ""}`}
+        width={640}
+        open={securityEditor.visible}
+        destroyOnHidden
+        onCancel={dismissSecurity}
+        afterClose={securityEditor.afterClose}
+        closable={!saveSecurityRates.isPending}
+        keyboard={!saveSecurityRates.isPending}
+        mask={{ closable: !saveSecurityRates.isPending }}
+        footer={
+          <>
+            <Button disabled={saveSecurityRates.isPending} onClick={dismissSecurity}>
+              {t("取消")}
+            </Button>
+            <SaveButton
+              label={t("保存费率")}
+              form={boundSecurityForm}
+              disabled={securityUnavailable}
+              pending={saveSecurityRates.isPending}
+              onSave={securitySubmission.submit}
+            />
+          </>
+        }
+      >
+        <Typography.Paragraph type="secondary">
+          {t(
+            "只调整本定价组的押金与预授权金额，不改基本租金。保存后会为整个经营空间追加新价格版本，历史版本和既有订单快照保持不变。",
+          )}
+        </Typography.Paragraph>
+        <Form<UpdateRentalPricingGroupSecurityRatesRequest>
+          name="pricing-security-rates"
+          form={securityForm}
+          layout="vertical"
+          disabled={securityUnavailable || saveSecurityRates.isPending}
+          {...securitySubmission.formProps}
+          onFinish={securitySubmission.submit}
+        >
+          <Form.List name="rates">
+            {(fields) => (
+              <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+                {fields.map((field) => {
+                  const unit = securityForm.getFieldValue(["rates", field.name, "unit"]) as
+                    | keyof typeof RENTAL_PRICING_UNIT_LABELS
+                    | undefined;
+                  return (
+                    <FormSection
+                      key={field.key}
+                      title={t(unit ? RENTAL_PRICING_UNIT_LABELS[unit] : "计价单位")}
+                    >
+                      <Form.Item name={[field.name, "unit"]} hidden>
+                        <Input />
+                      </Form.Item>
+                      <Space align="start" wrap>
+                        {securityRateFields.map((fieldConfig) => (
+                          <Form.Item
+                            key={fieldConfig.name}
+                            name={[field.name, fieldConfig.name]}
+                            label={t(fieldConfig.label)}
+                            rules={[
+                              { required: true, message: t("当前业务规则要求填写此金额") },
+                              { type: "number", min: 0.01, message: t("金额或倍数必须大于 0") },
+                            ]}
+                            extra={
+                              fieldConfig.name.toLowerCase().includes("multiple")
+                                ? t("按本行实际租金乘以该倍数")
+                                : t("启用对应规则时必须大于 0")
+                            }
+                          >
+                            <InputNumber
+                              min={0.01}
+                              precision={2}
+                              style={{ width: "var(--rental-control-width-number)" }}
+                            />
+                          </Form.Item>
+                        ))}
+                      </Space>
+                    </FormSection>
+                  );
+                })}
+              </Space>
+            )}
+          </Form.List>
+        </Form>
+      </Modal>
+    </>
+  );
+}

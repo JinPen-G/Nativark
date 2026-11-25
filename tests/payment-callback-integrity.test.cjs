@@ -12,6 +12,9 @@ function makeHarness({ intentStatus = "pending", externalTransactionId = null, e
     orderId: "order-1",
     provider: "alipay",
     method: "alipay",
+    instrument: "rental",
+    merchantOrderNo: "RO-1",
+    currency: "CNY",
     amount: 12.34,
     status: intentStatus,
     externalTransactionId,
@@ -40,6 +43,8 @@ function makeHarness({ intentStatus = "pending", externalTransactionId = null, e
     }
   };
   const tx = {
+    $queryRaw: async (query) => query.sql.includes("FROM rental_payment_intents") ? [{ ...intent }]
+      : [{ id: query.sql.includes("FROM Tenant") ? "tenant-1" : "order-1" }],
     paymentWebhookEvent,
     rentalPaymentIntent: {
       findFirst: async () => intent,
@@ -53,7 +58,15 @@ function makeHarness({ intentStatus = "pending", externalTransactionId = null, e
   const prisma = {
     $transaction: async (callback) => callback(tx),
     rentalPaymentIntent: {
-      updateMany: async () => ({ count: 0 })
+      findFirst: async () => ({ ...intent }),
+      updateMany: async ({ where, data }) => {
+        if (where.id !== intent.id || where.tenantId !== intent.tenantId || where.status.not === intent.status) {
+          return { count: 0 };
+        }
+        updates.push(data);
+        Object.assign(intent, data);
+        return { count: 1 };
+      }
     }
   };
   const service = new PaymentRuntimeService(prisma, {}, {
@@ -81,10 +94,20 @@ async function main() {
     await assert.rejects(() => invalid.service.settleVerifiedPayment({ ...baseInput, amount }), /金额与支付单不一致/u);
     assert.equal(invalid.fundingCalls, 0);
     assert.equal(invalid.events.size, 0);
+    assert.equal(invalid.intent.status, "pending", "未验明金额不能将原支付单标为入账失败");
+    assert.deepEqual(invalid.updates, []);
   }
   const invalidIntent = makeHarness();
   invalidIntent.intent.amount = undefined;
   await assert.rejects(() => invalidIntent.service.settleVerifiedPayment(baseInput), /金额与支付单不一致/u);
+  assert.equal(invalidIntent.intent.status, "pending");
+  const wrongTenant = makeHarness({ existingEvent: {
+    tenantId: "another-tenant", paymentIntentId: baseInput.intentId, payloadHash: baseInput.payloadHash, status: "failed"
+  } });
+  await assert.rejects(() => wrongTenant.service.settleVerifiedPayment(baseInput), /已绑定到其他支付单/u);
+  assert.equal(wrongTenant.intent.status, "pending");
+  assert.equal(wrongTenant.fundingCalls, 0);
+  assert.deepEqual(wrongTenant.updates, []);
   const mismatch = makeHarness({ intentStatus: "paid", externalTransactionId: "trade-existing" });
   await assert.rejects(
     () => mismatch.service.settleVerifiedPayment({ ...baseInput, externalTransactionId: "trade-other" }),
@@ -120,6 +143,23 @@ async function main() {
   assert.equal(first.intent.externalTransactionId, "trade-1");
   assert.equal(first.events.get("alipay:event-1").status, "processed");
   assert.equal(first.fundingCalls, 1);
+
+  const fundingFailed = makeHarness();
+  fundingFailed.service.funding.recordEvent = async () => { throw new Error("funding unavailable"); };
+  await assert.rejects(() => fundingFailed.service.settleVerifiedPayment(baseInput), /funding unavailable/);
+  assert.equal(fundingFailed.intent.status, "funding_failed", "资金写入开始后仍保留原恢复状态");
+
+  const committed = makeHarness();
+  const transaction = committed.service.prisma.$transaction;
+  committed.service.prisma.$transaction = async (consume) => {
+    await transaction(consume);
+    throw new Error("commit response lost");
+  };
+  await assert.rejects(() => committed.service.settleVerifiedPayment(baseInput), /commit response lost/);
+  assert.equal(committed.intent.status, "paid", "提交应答丢失不能覆盖已支付事实");
+  assert.equal(committed.events.get("alipay:event-1").status, "processed");
+  assert.equal(committed.fundingCalls, 1);
+  assert.equal(committed.updates.some(update => update.status === "funding_failed"), false);
 
   console.log("payment callback integrity tests passed");
 }

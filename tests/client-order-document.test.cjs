@@ -54,7 +54,7 @@ service.documents = {
   );
 
   const controllerSource = fs.readFileSync(
-    path.join(repo, "apps/api/src/modules/client/client-api.controller.ts"),
+    path.join(repo, "packages/rental-core/src/http-client.controller.ts"),
     "utf8"
   );
   const contractSource = fs.readFileSync(

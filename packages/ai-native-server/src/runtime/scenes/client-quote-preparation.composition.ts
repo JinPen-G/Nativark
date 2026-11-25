@@ -1,0 +1,282 @@
+import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
+import { aiClientPersonalQuoteSelectionSchema, aiClientQuoteReadRequestSchema, aiClientQuoteParameterReviewSchema,
+  clientGoalSelectedInput, RENTAL_PRICING_UNIT_CODES, type ClientCreateQuoteRequest } from '@rental-os/shared';
+import type { ClientApiService } from '@rental-os/rental-core/mysql-client-application';
+import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
+import { AiClientQuoteResultUnknownError, composeGuardedClientOriginalQuotes } from '../client-quote-original.composition';
+import { createAiGuardedClientSession } from '../client-scene.composition';
+import { AiTaskRepositoryError } from '../ai-task.repository';
+import { AiClientPolicyAuthority, clientTaskSceneSchema, type AiClientTaskDependencies } from './client-task.authority';
+import { AiClientMaterialError, PrismaClientSceneMaterialRepository, type AiClientSceneMaterial } from './prisma-client-scene-material.repository';
+
+const id = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
+const digest = z.string().regex(/^[a-f0-9]{64}$/u);
+const reference = z.object({ materialRef: z.string().uuid(), expectedMaterialHash: digest }).strict();
+const savedCommand = z.object({ kind: z.literal('quote_preparation'), inputHash: digest, goalHash: digest.optional() }).strict();
+const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
+const stale = () => new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+const canonical = (value: unknown) => JSON.parse(JSON.stringify(value)) as unknown;
+
+/** Explicit server composition, not a model tool or public route. prepare
+ * persists the current authorized parameters; confirm is a distinct human
+ * request referencing the exact stored material hash. A scene/HTTP host must
+ * expose confirm only to that authenticated human, never to model dispatch.
+ * Existing client material storage and independent policy/entitlement gates
+ * are reused. An acknowledged first confirmation attempt permits one original
+ * quote dispatch; subsequent requests only observe that original receipt.
+ * No task, approval, financial ledger or session database is added. */
+export function composeClientOriginalQuotePreparation(input: {
+  enabled?: boolean; guard: Pick<ApiAuthGuard, 'canActivate'>;
+  credentials: { current(): Promise<{ authorization: string; ip?: string }> };
+  client: Pick<ClientApiService, 'prepareQuoteForOriginalOperation' | 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation'>;
+  tasks: AiClientTaskDependencies; channel: 'web' | 'wechat_miniprogram'; tenantCode: string; serviceCode: string;
+  clock?: () => Date;
+  /** Request-local publication/lifecycle check, never a wire or model grant. */
+  assertCurrent?(): Promise<void>;
+}) {
+  const enabled = input.enabled === true, clock = input.clock ?? (() => new Date());
+  const scene = clientTaskSceneSchema.parse({ sceneCode: input.tasks.sceneCode, sceneVersion: input.tasks.sceneVersion });
+  const channel = z.enum(['web', 'wechat_miniprogram']).parse(input.channel);
+  const tenantCode = id.parse(input.tenantCode), serviceCode = id.parse(input.serviceCode);
+  const repository = new PrismaClientSceneMaterialRepository(input.tasks.db);
+  const session = createAiGuardedClientSession(input.guard, input.credentials);
+  const quotes = composeGuardedClientOriginalQuotes(input);
+  const authority = new AiClientPolicyAuthority(input.tasks, scene, randomUUID(), clock);
+  const current = async () => {
+    if (!enabled) throw unavailable();
+    const identity = await session.current(), scope = await repository.resolveScope(tenantCode, serviceCode);
+    if (identity.tenantCode !== tenantCode || identity.workspaceCode !== serviceCode
+      || identity.tenantId !== scope.tenantId || identity.workspaceId !== scope.workspaceId) throw denied();
+    return { identity, scope: { ...scope, channel, principalKind: identity.customerType,
+      principalHash: requestFingerprint({ ...scope, channel, customerId: identity.customerId,
+        customerType: identity.customerType, sessionId: identity.sessionId }) }, bindingHash: requestFingerprint(identity) };
+  };
+  const grant = async (bound: Awaited<ReturnType<typeof current>>, operation: 'create' | 'read' | 'execute') =>
+    authority.authorize({ ...bound.scope, identity: bound.identity }, operation);
+  const check = async (bound: Awaited<ReturnType<typeof current>>) => {
+    if (requestFingerprint(await current()) !== requestFingerprint(bound)) throw denied();
+  };
+  const decode = (row: AiClientSceneMaterial) => {
+    const command = savedCommand.safeParse(row.command);
+    const material = z.object({ version: z.literal('client-prequote-1'), input: z.unknown(), normalized: z.unknown(),
+      inputHash: digest, configurationHash: digest }).strict().safeParse(row.material);
+    const publication = { tenantCode, serviceCode, channel };
+    if (!command.success || !material.success || row.publicationHash !== requestFingerprint(publication)
+      || requestFingerprint(row.publication) !== requestFingerprint(publication) || row.inputHash !== requestFingerprint(command.data)
+      || row.materialHash !== requestFingerprint(material.data) || command.data.inputHash !== requestFingerprint(material.data.input)
+      || material.data.inputHash !== requestFingerprint(material.data.normalized)) throw unavailable();
+    return material.data;
+  };
+  const load = async (value: unknown, operation: 'read' | 'execute') => {
+    const parsed = reference.safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const bound = await current(), row = await repository.findSource(bound.scope, parsed.data.materialRef);
+    if (!row || row.materialHash !== parsed.data.expectedMaterialHash || row.bindingHash !== bound.bindingHash) throw stale();
+    const material = decode(row), permission = await grant(bound, operation);
+    if (operation === 'execute' && row.expiresAt <= clock()) throw stale();
+    await check(bound);
+    return { bound, row, material, permission };
+  };
+  const parameterReview = (material: ReturnType<typeof decode>) => {
+    // The original Core resolver preserves line order, quantity and explicit
+    // units. Only an omitted unit can carry its registered server-default basis.
+    // Do not read current configuration or mutate the persisted human input.
+    const line = z.object({ itemGroupId: z.string().optional(), pricingGroupId: z.string().optional(),
+      quantity: z.number().finite().positive(), pricingUnit: z.string().optional() }).passthrough();
+    const lines = z.object({ lines: z.array(line).min(1).max(100) }).passthrough();
+    const original = lines.safeParse(material.input), normalized = lines.safeParse(material.normalized);
+    if (!original.success || !normalized.success || original.data.lines.length !== normalized.data.lines.length) throw unavailable();
+    // An old preparation could precede Core's unit normalization. Its exact
+    // receipt remains readable; today's default cannot sign that old material.
+    const unit = z.enum(RENTAL_PRICING_UNIT_CODES);
+    if (normalized.data.lines.some(value => value.pricingUnit === undefined)) {
+      if (normalized.data.lines.some(value => value.pricingUnit !== undefined && !unit.safeParse(value.pricingUnit).success)) throw unavailable();
+      return undefined;
+    }
+    return aiClientQuoteParameterReviewSchema.parse({ configurationHash: material.configurationHash,
+      lines: normalized.data.lines.map((value, lineIndex) => {
+        const selected = original.data.lines[lineIndex];
+        if (selected.quantity !== value.quantity || selected.itemGroupId && selected.itemGroupId !== value.itemGroupId
+          || selected.pricingGroupId !== value.pricingGroupId
+          || selected.pricingUnit !== undefined && selected.pricingUnit !== value.pricingUnit) throw unavailable();
+        return { lineIndex, itemGroupId: value.itemGroupId,
+          ...(value.pricingGroupId === undefined ? {} : { pricingGroupId: value.pricingGroupId }),
+          quantity: value.quantity, pricingUnit: value.pricingUnit,
+          source: selected.pricingUnit === undefined ? 'server_default' : 'user_explicit',
+          basis: selected.pricingUnit !== undefined ? 'user_input'
+            : selected.pricingGroupId === undefined ? 'business_settings_default' : 'pricing_group_default' };
+      }) });
+  };
+  const packet = (row: AiClientSceneMaterial) => {
+    const material = decode(row), review = parameterReview(material);
+    return { materialRef: row.id, materialHash: row.materialHash,
+      inputHash: material.inputHash, revision: row.revision, expiresAt: row.expiresAt.toISOString(),
+      ...(review ? { parameterReview: review } : {}),
+      preparation: 'normalized_parameters' as const, eligibility: 'not_attested' as const,
+      quotePersistence: 'not_attempted' as const, inventoryReservation: 'not_attempted' as const,
+      humanAction: 'explicit_confirmation_required' as const };
+  };
+  const observeOriginal = async (value: unknown) => {
+    const { bound, row, permission } = await load(value, 'read');
+    const result = await quotes.readOriginal({ reference: `${row.id}:${row.materialHash}` });
+    // Core/Guard reads may wait after the initial read grant. Close the SAME
+    // persisted source and independent read policy before delivering history;
+    // neither current execution gates nor an expired material can replace it.
+    const latest = await repository.findSource(bound.scope, row.id);
+    if (!latest || requestFingerprint(canonical(latest)) !== requestFingerprint(canonical(row))) throw stale();
+    const closing = await grant(bound, 'read');
+    if (permission.policy.expiresAt <= clock() || closing.policy.expiresAt <= clock()
+      || requestFingerprint(canonical(closing.policy)) !== requestFingerprint(canonical(permission.policy))) throw denied();
+    await check(bound);
+    return { ...result, source: { materialRef: row.id, materialHash: row.materialHash } };
+  };
+  const attemptBasis = (row: AiClientSceneMaterial, material: ReturnType<typeof decode>) => ({
+    command: { kind: 'quote_confirmation_attempt', materialRef: row.id, materialHash: row.materialHash },
+    material: { version: 'client-prequote-confirmation-1', sourceInputHash: material.inputHash }
+  });
+  const assertAttempt = (attempt: AiClientSceneMaterial, row: AiClientSceneMaterial, material: ReturnType<typeof decode>) => {
+    const basis = attemptBasis(row, material);
+    if (attempt.bindingHash !== row.bindingHash || attempt.publicationHash !== row.publicationHash
+      || requestFingerprint(canonical(attempt.publication)) !== requestFingerprint(canonical(row.publication))
+      || requestFingerprint(attempt.command) !== requestFingerprint(basis.command)
+      || requestFingerprint(attempt.material) !== requestFingerprint(basis.material)
+      || attempt.inputHash !== requestFingerprint(basis.command) || attempt.materialHash !== requestFingerprint(basis.material)
+      || attempt.expiresAt.getTime() !== row.expiresAt.getTime()) throw stale();
+  };
+  const observedConfirmation = async (value: unknown) => {
+    const read = await observeOriginal(value);
+    if (read.state !== 'observed' || !read.quote) throw new AiClientQuoteResultUnknownError();
+    return { quote: read.quote, quotePersistence: 'saved' as const, inventoryReservation: 'not_attempted' as const,
+      orderExecution: 'not_attempted' as const, retryable: false as const, source: read.source,
+      confirmation: 'parameters_only_not_order_approval' as const };
+  };
+  return Object.freeze({
+    /** Observe an uncertain material INSERT without attempting another write.
+     * Absence is unknown, not evidence that preparation did not commit. */
+    async readPreparationOperation(value: unknown, goalHash?: string) {
+      const parsed = aiClientQuoteReadRequestSchema.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const bound = await current();
+      const permission = await grant(bound, 'read');
+      const row = await repository.findOperation(bound.scope, parsed.data.operationKey);
+      if (!row) {
+        await check(bound);
+        await grant(bound, 'read');
+        return { state: 'unknown' as const, operationKey: parsed.data.operationKey,
+          retryable: false as const, execution: 'read_only' as const };
+      }
+      const command = savedCommand.parse(row.command), material = decode(row);
+      const selectionHash = 'selectionHash' in parsed.data ? parsed.data.selectionHash : requestFingerprint(canonical(parsed.data.input));
+      if (command.inputHash !== selectionHash || row.bindingHash !== bound.bindingHash || goalHash !== command.goalHash) throw stale();
+      const latest = await repository.findOperation(bound.scope, parsed.data.operationKey);
+      if (!latest || requestFingerprint(canonical(latest)) !== requestFingerprint(canonical(row))) throw stale();
+      const closing = await grant(bound, 'read');
+      if (permission.policy.expiresAt <= clock() || closing.policy.expiresAt <= clock()
+        || closing.policyHash !== permission.policyHash) throw denied();
+      await check(bound);
+      return { state: 'observed' as const, ...packet(row), retryable: false as const,
+        ...('selectionHash' in parsed.data ? { originalSelection: goalHash
+          ? clientGoalSelectedInput(material.input as ClientCreateQuoteRequest) : aiClientPersonalQuoteSelectionSchema.parse(material.input) } : {}),
+        execution: 'read_only' as const, freshness: 'recheck_at_confirmation' as const };
+    },
+    async prepare(value: unknown, goalHash?: string) {
+      const parsed = z.object({ operationKey: id, input: z.unknown() }).strict().safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const bound = await current(), permission = await grant(bound, 'create');
+      const raw = canonical(parsed.data.input), command = { kind: 'quote_preparation' as const, inputHash: requestFingerprint(raw), ...(goalHash ? { goalHash: digest.parse(goalHash) } : {}) };
+      const existing = await repository.findOperation(bound.scope, parsed.data.operationKey);
+      if (existing) {
+        if (existing.inputHash !== requestFingerprint(command) || existing.bindingHash !== bound.bindingHash) throw stale();
+        decode(existing); await check(bound);
+        return { ...packet(existing), replayed: true, freshness: 'recheck_at_confirmation' as const };
+      }
+      const normalized = await quotes.prepare({ input: raw });
+      if (normalized.tenantId !== bound.scope.tenantId || normalized.workspaceId !== bound.scope.workspaceId
+        || normalized.customerId !== bound.identity.customerId) throw denied();
+      const material = canonical({ version: 'client-prequote-1', input: raw, normalized: normalized.request,
+        inputHash: normalized.inputHash, configurationHash: normalized.configurationHash });
+      if (!parameterReview(material as ReturnType<typeof decode>)) throw unavailable();
+      const latest = await grant(bound, 'create');
+      if (latest.policyHash !== permission.policyHash) throw stale();
+      await check(bound);
+      const now = clock(), row: AiClientSceneMaterial = { id: randomUUID(), ...bound.scope,
+        bindingHash: bound.bindingHash, publicationHash: requestFingerprint({ tenantCode, serviceCode, channel }),
+        publication: { tenantCode, serviceCode, channel }, operationKey: parsed.data.operationKey,
+        inputHash: requestFingerprint(command), materialHash: requestFingerprint(material), command, material,
+        revision: 1, createdAt: now, expiresAt: new Date(Math.min(now.getTime() + 300000, permission.policy.expiresAt.getTime())) };
+      const saved = await repository.save(row);
+      if (saved.row.bindingHash !== bound.bindingHash || saved.row.inputHash !== row.inputHash) throw stale();
+      decode(saved.row); await check(bound);
+      return { ...packet(saved.row), replayed: saved.replayed, freshness: 'recheck_at_confirmation' as const };
+    },
+    async confirm(value: unknown) {
+      const { bound, row, material, permission } = await load(value, 'execute');
+      const operationKey = `quote-confirmation:${row.id}`;
+      const prior = await repository.findOperation(bound.scope, operationKey);
+      if (prior) {
+        assertAttempt(prior, row, material);
+        return observedConfirmation(value);
+      }
+      // Pre-existing original quotes remain readable without manufacturing a
+      // new attempt or reentering the writer after an upgrade/restart.
+      if ((await observeOriginal(value)).state === 'observed') return observedConfirmation(value);
+      if (!parameterReview(material)) throw unavailable();
+      const currentParameters = await quotes.prepare({ input: material.input });
+      if (currentParameters.inputHash !== material.inputHash || currentParameters.configurationHash !== material.configurationHash) throw stale();
+      await check(bound);
+      if ((await grant(bound, 'execute')).policyHash !== permission.policyHash) throw stale();
+      const latest = await repository.findSource(bound.scope, row.id);
+      // Parameter normalization, current authority and storage reads may wait.
+      // A material that expired during those waits cannot initiate the R1 quote
+      // write, even if its content and current policy are otherwise unchanged.
+      if (!latest || requestFingerprint(latest) !== requestFingerprint(row) || latest.expiresAt <= clock()) throw stale();
+      const basis = attemptBasis(row, material);
+      let saved: Awaited<ReturnType<typeof repository.save>>;
+      try {
+        saved = await repository.save({ ...row, id: randomUUID(), operationKey,
+          inputHash: requestFingerprint(basis.command), materialHash: requestFingerprint(basis.material),
+          command: basis.command, material: basis.material, createdAt: clock() });
+      } catch (error) {
+        if (error instanceof AiClientMaterialError && error.code === 'AI_CLIENT_RESULT_UNKNOWN') throw new AiClientQuoteResultUnknownError();
+        throw error;
+      }
+      assertAttempt(saved.row, row, material);
+      // Only the acknowledged first INSERT may enter the original R1 writer.
+      // A replay, lost acknowledgement, timeout or missing Core receipt grants
+      // observation only; never infer rollback or dispatch another quote.
+      if (saved.replayed) return observedConfirmation(value);
+      const closingSource = await repository.findSource(bound.scope, row.id);
+      if (!closingSource || requestFingerprint(canonical(closingSource)) !== requestFingerprint(canonical(row))) throw stale();
+      await check(bound);
+      if ((await grant(bound, 'execute')).policyHash !== permission.policyHash || row.expiresAt <= clock()) throw stale();
+      const result = await quotes.create({ reference: `${row.id}:${row.materialHash}`, input: material.input,
+        prepared: { inputHash: material.inputHash, configurationHash: material.configurationHash } }, async native => {
+        // The same original quote transaction calls after all internal Core
+        // waits. Pin this material, attempt and policy, then close current Auth,
+        // publication and execution admission; an old attempt never re-dispatches.
+        const source = await repository.findOperation(bound.scope, row.operationKey, native, true);
+        const attempt = await repository.findOperation(bound.scope, operationKey, native, true);
+        const subject = { ...bound.scope, identity: bound.identity };
+        const lockedPolicy = await authority.policy(subject, 'execute', native, true);
+        if (!source || !attempt || requestFingerprint(canonical(source)) !== requestFingerprint(canonical(row))) throw stale();
+        assertAttempt(attempt, row, material);
+        await check(bound); await input.assertCurrent?.();
+        const final = await grant(bound, 'execute');
+        await check(bound); await input.assertCurrent?.();
+        // No awaited Guard or publication read follows this deadline check
+        // before the originating Core transaction initiates its INSERT.
+        if (final.policyHash !== permission.policyHash
+          || requestFingerprint(canonical(final.policy)) !== requestFingerprint(canonical(lockedPolicy))
+          || row.expiresAt <= clock() || final.policy.expiresAt <= clock()) throw stale();
+      });
+      await check(bound);
+      if ((await grant(bound, 'execute')).policyHash !== permission.policyHash) throw denied();
+      return { ...result, source: { materialRef: row.id, materialHash: row.materialHash },
+        confirmation: 'parameters_only_not_order_approval' as const };
+    },
+    readOriginal: observeOriginal,
+  });
+}

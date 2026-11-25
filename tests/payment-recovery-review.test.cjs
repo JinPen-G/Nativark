@@ -9,7 +9,7 @@ const originalIntent = () => ({ id: 'i', tenantId: 't', workspaceId: 'w', orderI
   merchantOrderNo: 'RO-original', currency: 'USD', amount: 10, status: 'pending', expiresAt: new Date(0),
   responseJson: { sessionId: 'cs_original' }, createdAt: new Date(), updatedAt: new Date() });
 const config = { provider: 'stripe', capability: 'payment', settings: {}, credentials: {} };
-const integrations = { runtimeConfig: async () => config };
+const integrations = { runtimeConfig: async () => config, assertEnabledInTransaction: async () => undefined };
 
 function paymentFixture() {
   const intent = originalIntent(), writes = [];
@@ -21,8 +21,14 @@ function paymentFixture() {
       if (where.status !== intent.status) return { count: 0 };
       writes.push(data); Object.assign(intent, data); return { count: 1 };
     }
-  }, $transaction: async () => ({ intent, orderNo: 'ORDER', amount: 10, replayed: false }) };
-  const service = new PaymentRuntimeService(prisma, integrations, {});
+  }, $transaction: async work => work({
+    $queryRaw: async query => query.sql.includes('FROM Tenant') ? [{ id: 't' }]
+      : [{ id: 'o', orderNo: 'ORDER', amount: 10, currency: 'USD' }],
+    rentalPaymentIntent: { findUnique: async () => null, findFirst: async () => null, create: async () => intent }
+  }) };
+  const service = new PaymentRuntimeService(prisma, integrations, {
+    listEvents: async () => ({ rental: { balance: 10, pendingExtensionAmount: 0 } })
+  });
   service.log = async () => undefined;
   return { service, intent, writes };
 }
@@ -79,7 +85,7 @@ test('refund query errors never become definitive submission failure or release 
     const refund = { id: 'r', tenantId: 't', workspaceId: 'w', orderId: 'o', paymentIntentId: 'i', revision: 1,
       amount: 10, provider: 'stripe', method: 'stripe', currency: 'USD', status: 'accepted',
       merchantRefundNo: 'RR-original', createdAt: new Date(0), updatedAt: new Date(), fundedAt: null };
-    const prisma = { rentalPaymentRefund: {
+    const prisma = { $transaction: async work => work({ $queryRaw: async () => [{ id: 't' }] }), rentalPaymentRefund: {
       findFirst: async () => refund,
       updateMany: async ({ where, data }) => {
         assert.deepEqual(where.status.in, ['pending', 'accepted']);
@@ -104,7 +110,8 @@ test('expired pending and verified funding-failed original payments block anothe
       findUnique: async () => null,
       findFirst: async ({ where }) => { assert.ok(where.status.in.includes(status)); assert.equal(where.expiresAt, undefined); return intent; },
       create: async () => { assert.fail('must not create another local payment'); }
-    }, $queryRaw: async () => [{ id: 'o', orderNo: 'ORDER', currency: 'USD', finalPayableAmount: 10 }] };
+    }, $queryRaw: async query => query.sql.includes('FROM Tenant') ? [{ id: 't' }]
+      : [{ id: 'o', orderNo: 'ORDER', currency: 'USD', finalPayableAmount: 10 }] };
     prisma.$transaction = async work => work(prisma);
     const service = new PaymentRuntimeService(prisma, { runtimeConfig: async () => config,
       assertEnabledInTransaction: async () => { trace.push('current-config'); } }, {

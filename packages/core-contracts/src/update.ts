@@ -1,0 +1,246 @@
+/**
+ * 固定底座/Core版本和包摘要，按真实数据观察生成单对象升级候选。
+ * 只作纯预检，不下载、覆盖配置、执行迁移或改变运行/授权状态。
+ */
+import { z } from "zod";
+import {
+  CoreArtifactHashSchema, CoreDataContractSchema, CoreIdSchema, CoreManifestSchema,
+  CoreMigrationSchema, CoreSourceSchema, type CoreDataContract
+} from "./manifest";
+import { checkCoreCombination, CoreHostVersionsSchema } from "./compatibility";
+import { CoreReleaseVersionSchema, compareCoreReleaseVersions, isCoreVersionSupported } from "./version";
+import { CorePlatformDataCapabilityReleaseSchema, checkPlatformDataCapabilities, coreDeploymentHostVersions } from "./data-capability";
+
+export const CorePackagePinSchema = z.object({
+  manifest: CoreManifestSchema,
+  sha256: CoreArtifactHashSchema
+}).strict();
+export const CorePlatformReleaseSchema = z.object({
+  versions: CoreHostVersionsSchema,
+  source: CoreSourceSchema,
+  sha256: CoreArtifactHashSchema,
+  data: CoreDataContractSchema
+}).strict();
+
+/** 锁文件只保存可复现发行元数据，不接收用户配置、凭据或租户授权。 */
+export const CoreDeploymentLockSchema = z.object({
+  lockVersion: z.literal(1),
+  platform: CorePlatformReleaseSchema,
+  cores: z.array(CorePackagePinSchema),
+  /** 省略时保持原无选装能力的锁；选择不会自动注册 Core、工具或作业。 */
+  dataCapabilities: z.array(CorePlatformDataCapabilityReleaseSchema).max(100).optional()
+}).strict().superRefine((lock, context) => {
+  const seen = new Set<string>();
+  lock.cores.forEach((pin, index) => {
+    if (seen.has(pin.manifest.id)) context.addIssue({ code: "custom", path: ["cores", index], message: "组合存在重复 Core" });
+    seen.add(pin.manifest.id);
+  });
+  const capabilities = new Set<string>();
+  (lock.dataCapabilities ?? []).forEach((release, index) => {
+    if (capabilities.has(release.id)) context.addIssue({ code: "custom", path: ["dataCapabilities", index], message: "组合存在重复数据能力" });
+    capabilities.add(release.id);
+  });
+});
+export type CoreDeploymentLock = z.infer<typeof CoreDeploymentLockSchema>;
+
+export const CoreUpdateRequestSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("platform"), release: CorePlatformReleaseSchema }).strict(),
+  z.object({ kind: z.literal("core"), coreId: CoreIdSchema, release: CorePackagePinSchema }).strict(),
+  z.object({ kind: z.literal("platform-capability"), capabilityId: CoreIdSchema, release: CorePlatformDataCapabilityReleaseSchema }).strict()
+]);
+export type CoreUpdateRequest = z.infer<typeof CoreUpdateRequestSchema>;
+
+/** 迁移账的执行状态由原所有者提供，部分DDL已提交时须先核真实物理状态并恢复。 */
+export const CoreMigrationExecutionSchema = z.discriminatedUnion("state", [
+  z.object({ state: z.literal("ready") }).strict(),
+  z.object({
+    state: z.enum(["running", "failed", "unknown"]),
+    migration: CoreMigrationSchema.pick({ id: true, sha256: true }),
+    completedStatements: z.number().int().nonnegative().optional(),
+    expectedStatements: z.number().int().positive().optional(),
+    physicalState: z.object({ observedAt: z.string().datetime(), sha256: CoreArtifactHashSchema }).strict().optional(),
+    recovery: CoreMigrationSchema.pick({ file: true, sha256: true }).optional()
+  }).strict()
+]).superRefine((execution, context) => {
+  if (execution.state !== "ready" && execution.completedStatements !== undefined && execution.expectedStatements !== undefined
+    && execution.completedStatements > execution.expectedStatements)
+    context.addIssue({ code: "custom", path: ["completedStatements"], message: "已完成语句数不能超过原迁移总数" });
+});
+export type CoreMigrationExecution = z.infer<typeof CoreMigrationExecutionSchema>;
+
+/** 数据所有者读取真实物理状态后给出的版本证据；迁移/包清单本身不能生成该观察。 */
+export const CorePhysicalDataObservationSchema = z.object({
+  version: CoreReleaseVersionSchema,
+  observedAt: z.string().datetime(),
+  sha256: CoreArtifactHashSchema
+}).strict();
+export type CorePhysicalDataObservation = z.infer<typeof CorePhysicalDataObservationSchema>;
+
+const observation = z.object({
+  version: CoreReleaseVersionSchema,
+  appliedMigrations: z.array(CoreMigrationSchema.pick({ id: true, sha256: true })),
+  /** 旧调用方沿原完整物理基线保证；新增宿主读取迁移执行收据后明确提供当前状态。 */
+  execution: CoreMigrationExecutionSchema.optional()
+}).strict();
+export const CoreDataObservationSchema = z.object({
+  platform: observation,
+  cores: z.array(observation.extend({ coreId: CoreIdSchema }).strict()),
+  dataCapabilities: z.array(observation.extend({ capabilityId: CoreIdSchema, execution: CoreMigrationExecutionSchema }).strict()).optional()
+}).strict().superRefine((data, context) => {
+  const seen = new Set<string>();
+  data.cores.forEach((core, index) => {
+    if (seen.has(core.coreId)) context.addIssue({ code: "custom", path: ["cores", index], message: "Core 数据观察重复" });
+    seen.add(core.coreId);
+  });
+  const capabilities = new Set<string>();
+  (data.dataCapabilities ?? []).forEach((capability, index) => {
+    if (capabilities.has(capability.capabilityId)) context.addIssue({ code: "custom", path: ["dataCapabilities", index], message: "数据能力观察重复" });
+    capabilities.add(capability.capabilityId);
+  });
+});
+export type CoreDataObservation = z.infer<typeof CoreDataObservationSchema>;
+
+export interface CoreUpdateIssue { owner: string; code: string; field: string; message: string }
+export type CoreUpdateResult =
+  | { ok: false; scope: "update-preflight"; issues: CoreUpdateIssue[] }
+  | {
+    ok: true;
+    scope: "update-preflight";
+    status: "unchanged" | "candidate" | "migration_required";
+    candidate: CoreDeploymentLock;
+    migrations: Array<{ owner: string; fromVersion: string; toVersion: string; entries: CoreDataContract["migrations"] }>;
+  };
+
+// JSON对象字段顺序不改变发布内容；比较元数据时只归一键顺序，不重排迁移/能力等数组。
+function sameData(left: unknown, right: unknown): boolean {
+  const normalize = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(normalize);
+    if (value !== null && typeof value === "object")
+      return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, item]) => [key, normalize(item)]));
+    return value;
+  };
+  return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right));
+}
+
+/**
+ * 输入先经各自schema解析。只替换明确选择的一项，其他Core及全部用户配置留在原位。
+ * 数据观察由迁移账原所有者供给；预检结果不得替代切换前对真实状态/历史执行者的复核。
+ */
+export function planCoreUpdate(
+  current: CoreDeploymentLock, request: CoreUpdateRequest, observed: CoreDataObservation
+): CoreUpdateResult {
+  const candidate = structuredClone(current);
+  const issues: CoreUpdateIssue[] = [];
+  const migrations: Extract<CoreUpdateResult, { ok: true }>["migrations"] = [];
+  const selected = request.kind === "platform" ? "platform" : request.kind === "core"
+    ? `core:${request.coreId}` : `platform-capability:${request.capabilityId}`;
+  const add = (owner: string, code: string, field: string, message: string) =>
+    issues.push({ owner, code, field, message });
+  const checkRelease = (owner: string, previous: { version: string; source: z.infer<typeof CoreSourceSchema>; sha256: string },
+    next: typeof previous) => {
+    if (previous.source.repository !== next.source.repository)
+      add(owner, "source_conflict", "source.repository", "升级不能将已登记模块静默替换为另一来源");
+    if (previous.version === next.version && (previous.sha256 !== next.sha256 || previous.source.commit !== next.source.commit))
+      add(owner, "release_changed", "sha256", "同版本的提交或包摘要已变化，请使用新发行版本");
+    if (compareCoreReleaseVersions(next.version, previous.version) < 0)
+      add(owner, "release_rollback", "version", "本入口仅准备前进升级；程序回退须使用已验证的数据/历史兼容方案");
+  };
+
+  if (request.kind === "platform") {
+    checkRelease("platform", { ...current.platform, version: current.platform.versions.platform },
+      { ...request.release, version: request.release.versions.platform });
+    if (current.platform.versions.platform === request.release.versions.platform
+      && !sameData(current.platform, request.release))
+      add("platform", "release_metadata_changed", "release", "同一底座发行的锁定资料不能被改写");
+    candidate.platform = structuredClone(request.release);
+  } else if (request.kind === "core") {
+    const index = candidate.cores.findIndex(pin => pin.manifest.id === request.coreId);
+    if (index < 0) add(selected, "core_not_installed", "coreId", "只能更新组合中已有的 Core，新 Core 须先走安装准备");
+    if (request.release.manifest.id !== request.coreId)
+      add(selected, "core_identity", "release.manifest.id", "候选包与所选 Core 标识不同");
+    if (index >= 0) {
+      checkRelease(selected, { ...current.cores[index].manifest, sha256: current.cores[index].sha256 },
+        { ...request.release.manifest, sha256: request.release.sha256 });
+      if (current.cores[index].manifest.version === request.release.manifest.version
+        && !sameData(current.cores[index], request.release))
+        add(selected, "release_metadata_changed", "release", "同一 Core 发行的锁定资料不能被改写");
+      // 普通更新复用原绑定；范围模型改变须先有独立的绑定/数据迁移方案。
+      if (!sameData(current.cores[index].manifest.scope, request.release.manifest.scope))
+        add(selected, "scope_changed", "release.manifest.scope", "Core业务范围已变化，须先核定原绑定与数据迁移，不能按普通更新切换");
+      candidate.cores[index] = structuredClone(request.release);
+    }
+  } else {
+    const index = (candidate.dataCapabilities ?? []).findIndex(release => release.id === request.capabilityId);
+    if (index < 0) add(selected, "capability_not_installed", "capabilityId", "只能更新已选择的数据能力，新增能力须先明确准备部署");
+    if (request.release.id !== request.capabilityId)
+      add(selected, "capability_identity", "release.id", "候选与所选数据能力标识不同");
+    if (index >= 0) {
+      const previous = current.dataCapabilities![index];
+      checkRelease(selected, previous, request.release);
+      if (previous.version === request.release.version && !sameData(previous, request.release))
+        add(selected, "release_metadata_changed", "release", "同一能力发行的锁定资料不能被改写");
+      candidate.dataCapabilities![index] = structuredClone(request.release);
+    }
+  }
+  if (issues.length) return { ok: false, scope: "update-preflight", issues };
+  issues.push(...checkPlatformDataCapabilities(candidate));
+  for (const issue of checkCoreCombination(candidate.cores.map(pin => pin.manifest), coreDeploymentHostVersions(candidate)).issues)
+    add(`core:${issue.coreId}`, issue.code, issue.field, issue.message);
+
+  const checkData = (owner: string, previous: CoreDataContract, next: CoreDataContract,
+    actual: z.infer<typeof observation> | undefined) => {
+    if (!actual) { add(owner, "data_unavailable", "data", "缺少所属模块当前数据版本和迁移账，不能用清单代替"); return; }
+    if (actual.execution && actual.execution.state !== "ready") {
+      const execution = actual.execution;
+      const statements = execution.completedStatements !== undefined && execution.expectedStatements !== undefined
+        ? `，已完成${execution.completedStatements}/${execution.expectedStatements}条语句` : "";
+      add(owner, "migration_incomplete", "execution", `原迁移${execution.migration.id}处于${execution.state}${statements}，先按原收据、物理状态和恢复条件核对`);
+      return;
+    }
+    if (compareCoreReleaseVersions(next.version, previous.version) < 0)
+      add(owner, "data_rollback", "data.version", "升级候选不能降低所属模块的数据版本");
+    // 已发布迁移只追加；即便尚未应用，也不能改同名历史文件来适配新版本。
+    previous.migrations.forEach((migration, index) => {
+      const target = next.migrations[index];
+      if (!target || target.id !== migration.id || target.file !== migration.file || target.sha256 !== migration.sha256)
+        add(owner, "migration_changed", `data.migrations.${index}`, "已发布迁移被删除、重排或修改");
+    });
+    let historyMatches = true;
+    actual.appliedMigrations.forEach((migration, index) => {
+      const target = next.migrations[index];
+      if (!target || target.id !== migration.id || target.sha256 !== migration.sha256) {
+        historyMatches = false;
+        add(owner, "migration_history", `appliedMigrations.${index}`, "实际迁移账与候选不可变链不一致");
+      }
+    });
+    if (!historyMatches) return;
+    const pending = next.migrations.slice(actual.appliedMigrations.length);
+    if (pending.length) {
+      if (owner !== selected) add(owner, "other_module_not_ready", "data.migrations", "未选择更新的模块仍有待应用迁移，请先核对当前部署");
+      else if (actual.version !== previous.version || actual.appliedMigrations.length !== previous.migrations.length)
+        add(owner, "migration_baseline", "data", "实际数据必须与当前发行的完整迁移基线一致，先核对未完迁移");
+      else if (compareCoreReleaseVersions(next.version, actual.version) <= 0)
+        add(owner, "data_version_unchanged", "data.version", "新增迁移须使用前进的数据版本");
+      else migrations.push({ owner, fromVersion: actual.version, toVersion: next.version, entries: pending });
+    } else {
+      if (actual.version !== next.version)
+        add(owner, "data_observation_conflict", "data.version", "实际迁移链已完整，但数据版本与该链的目标版本不同");
+      if (previous.version !== next.version && previous.migrations.length === next.migrations.length)
+        add(owner, "data_version_without_migration", "data.version", "数据版本变更必须有对应前进迁移");
+      if (!isCoreVersionSupported(actual.version, next.readable))
+        add(owner, "data_version", "data.readable", "当前数据版本不在候选实现可读范围，且没有待应用的前进迁移");
+    }
+  };
+  checkData("platform", current.platform.data, candidate.platform.data, observed.platform);
+  const dataByCore = new Map(observed.cores.map(core => [core.coreId, core]));
+  for (const [index, pin] of candidate.cores.entries())
+    checkData(`core:${pin.manifest.id}`, current.cores[index].manifest.data, pin.manifest.data, dataByCore.get(pin.manifest.id));
+  const dataByCapability = new Map((observed.dataCapabilities ?? []).map(capability => [capability.capabilityId, capability]));
+  for (const [index, release] of (candidate.dataCapabilities ?? []).entries())
+    checkData(`platform-capability:${release.id}`, current.dataCapabilities![index].data, release.data, dataByCapability.get(release.id));
+  if (issues.length) return { ok: false, scope: "update-preflight", issues };
+  const unchanged = sameData(candidate, current);
+  return { ok: true, scope: "update-preflight", status: migrations.length ? "migration_required" : unchanged ? "unchanged" : "candidate",
+    candidate, migrations };
+}

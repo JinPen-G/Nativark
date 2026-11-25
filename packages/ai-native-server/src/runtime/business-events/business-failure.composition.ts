@@ -1,0 +1,66 @@
+import { Module, type DynamicModule } from '@nestjs/common';
+import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
+import type { AuthService } from '../rental-adapters/auth.service';
+import type { PrismaService } from '../rental-adapters/prisma.service';
+import { PaymentRuntimeService } from '../rental-adapters/payment.runtime.service';
+import type { TenantIntegrationService } from '@rental-os/platform-server/tenant-integration';
+import { RentalBusinessFactRepository } from '../rental-adapters/rental-business-fact.repository';
+import type { RentalCoreService } from '../rental-adapters/rental-core.service';
+import type { RentalFundingService } from '../rental-adapters/rental-funding.service';
+import type { AiTaskCredentialSource } from '../task-current-action.authority';
+import { BusinessFailureCandidateService } from './business-failure-candidate.service';
+import { BusinessFailureReadAuthority } from './business-failure-read.authority';
+import { AutomationFailureTasksModule, composeAutomationFailureTasks, type AutomationDependencies } from '../automation/automation.composition';
+import { HumanAutomationPolicyManagementService } from '../automation/human-automation-policy-management.service';
+import { HumanAutomationReviewService } from '../automation/human-automation-review.service';
+import { BUSINESS_FAILURE_OUTBOX, PrismaBusinessFailureOutbox, type BusinessFailureResourcePorts } from './prisma-business-failure-outbox';
+import { HumanAutomationRequestModule, type HumanAutomationHttpOptions } from '../automation/human-automation-request.module';
+
+export type BusinessFailureDependencies = {
+  db: PrismaService; integrations: TenantIntegrationService; funding: RentalFundingService;
+  core: Pick<RentalCoreService, 'getOrder'>; auth: Pick<AuthService, 'resolveAccessContext'>;
+  guard: Pick<ApiAuthGuard, 'canActivate'>; credentials: AiTaskCredentialSource;
+  /** Original Core sources plus forward-schema storage. Absence preserves the
+   * original three event kinds; new resource kinds remain unavailable. */
+  resources?: BusinessFailureResourcePorts;
+  clock?: () => Date;
+};
+
+export function composeBusinessFailureEvents(input: BusinessFailureDependencies) {
+  const outbox = new PrismaBusinessFailureOutbox(input.clock, input.resources);
+  const authority = new BusinessFailureReadAuthority(input.db, input.auth, input.credentials, input.guard, input.core, input.clock, input.resources);
+  return { outbox, notifications: new RentalBusinessFactRepository(input.db, outbox),
+    payments: new PaymentRuntimeService(input.db, input.integrations, input.funding, outbox),
+    candidates: new BusinessFailureCandidateService(input.db, authority, input.clock),
+    reviews: new HumanAutomationReviewService(input.db, authority, input.clock),
+    policyManagement: new HumanAutomationPolicyManagementService(input.db, input, input.clock) };
+}
+
+export function composeBusinessFailureAutomation(input: BusinessFailureDependencies & Pick<AutomationDependencies, 'policyId' | 'subscriptions'>) {
+  const humanReads = new BusinessFailureReadAuthority(input.db, input.auth, input.credentials, input.guard, input.core, input.clock, input.resources);
+  return { ...composeBusinessFailureEvents(input), automation: composeAutomationFailureTasks(input, humanReads) };
+}
+
+@Module({})
+export class BusinessFailureEventsModule {
+  static registerRequestHttp(options: HumanAutomationHttpOptions = {}): DynamicModule {
+    return { module: BusinessFailureEventsModule, imports: [HumanAutomationRequestModule.register(options)] };
+  }
+
+  static registerAutomation(input: BusinessFailureDependencies & Pick<AutomationDependencies, 'policyId' | 'subscriptions'>): DynamicModule {
+    const base = this.register(input);
+    const humanReads = new BusinessFailureReadAuthority(input.db, input.auth, input.credentials, input.guard, input.core, input.clock, input.resources);
+    return { ...base, imports: [AutomationFailureTasksModule.register(input, humanReads)], exports: [...(base.exports ?? []), AutomationFailureTasksModule] };
+  }
+  static register(input: BusinessFailureDependencies): DynamicModule {
+    const services = composeBusinessFailureEvents(input);
+    return { module: BusinessFailureEventsModule, providers: [
+      { provide: BUSINESS_FAILURE_OUTBOX, useValue: services.outbox },
+      { provide: RentalBusinessFactRepository, useValue: services.notifications },
+      { provide: PaymentRuntimeService, useValue: services.payments },
+      { provide: BusinessFailureCandidateService, useValue: services.candidates },
+      { provide: HumanAutomationReviewService, useValue: services.reviews },
+      { provide: HumanAutomationPolicyManagementService, useValue: services.policyManagement }
+    ], exports: [BUSINESS_FAILURE_OUTBOX, RentalBusinessFactRepository, PaymentRuntimeService, BusinessFailureCandidateService, HumanAutomationReviewService, HumanAutomationPolicyManagementService] };
+  }
+}

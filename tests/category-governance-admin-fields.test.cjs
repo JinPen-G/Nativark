@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const ts = require("typescript");
-const source = fs.readFileSync(path.join(__dirname, "../apps/admin/src/features/platform/categoryDraftFields.ts"), "utf8");
+const source = fs.readFileSync(path.join(__dirname, "../packages/rental-core/admin/governance/categoryDraftFields.ts"), "utf8");
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const actual = { exports: {} };
 new Function("module", "exports", compiled)(actual, actual.exports);

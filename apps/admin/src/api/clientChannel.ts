@@ -1,39 +1,19 @@
-/** 客户端渠道配置 API（CLIENT-CHANNEL-01）：租户级品牌/客服/协议/帮助/发布服务（小程序与 APP 共用），
- * 以及微信小程序渠道凭证（AppID/AppSecret 与连通性测试）。分别对应 `/platform/client-channel` 与 `/platform/mini-program-channel`。 */
-import type {
-  ApiResult,
-  ClientChannelBootstrapResponse,
-  ClientChannelProfileSummary,
-  MiniProgramChannelSummary,
-  MiniProgramChannelTestResult,
-  SaveClientChannelProfileRequest,
-  SaveMiniProgramChannelRequest
-} from "@rental-os/shared";
-import { http } from "./http";
+/** 原渠道请求委托 Rental 单源工厂，登录前 bootstrap 继续使用原公共传输。 */
+import { createRentalClientChannelApi } from "@rental-os/rental-core/admin/channels/client";
+import type { ApiResult } from "@rental-os/platform-contracts";
+import type { AdminRequestOptions } from "@rental-os/platform-admin/runtime";
+import axios from "axios";
+import { request } from "./http";
+
+// 登录前读取网址租户的公开品牌，不能携带缓存中的另一租户凭据或触发会话刷新。
+const publicHttp = axios.create({
+  baseURL: import.meta.env.VITE_API_BASE_URL ?? "/api", timeout: 12_000, withCredentials: false,
+  headers: { Authorization: null, "x-tenant-id": null, "x-tenant-code": null, "x-workspace-id": null },
+});
+const publicChannelApi = createRentalClientChannelApi(async <Output,>(path: string, options?: AdminRequestOptions) =>
+  (await publicHttp.request<ApiResult<Output>>({ url: path, method: "get", ...options })).data.data);
 
 export const clientChannelApi = {
-  async getPublicBootstrap(tenantCode: string) {
-    const response = await http.get<ApiResult<ClientChannelBootstrapResponse>>("/client/v1/public/bootstrap", { params: { tenantCode, client: "web" } });
-    return response.data.data;
-  },
-  async getProfile() {
-    const response = await http.get<ApiResult<ClientChannelProfileSummary>>("/platform/client-channel");
-    return response.data.data;
-  },
-  async saveProfile(payload: SaveClientChannelProfileRequest) {
-    const response = await http.put<ApiResult<ClientChannelProfileSummary>>("/platform/client-channel", payload);
-    return response.data.data;
-  },
-  async getWechat() {
-    const response = await http.get<ApiResult<MiniProgramChannelSummary>>("/platform/mini-program-channel");
-    return response.data.data;
-  },
-  async saveWechat(payload: SaveMiniProgramChannelRequest) {
-    const response = await http.put<ApiResult<MiniProgramChannelSummary>>("/platform/mini-program-channel", payload);
-    return response.data.data;
-  },
-  async testWechat() {
-    const response = await http.post<ApiResult<MiniProgramChannelTestResult>>("/platform/mini-program-channel/test");
-    return response.data.data;
-  }
+  ...createRentalClientChannelApi(request),
+  getPublicBootstrap: publicChannelApi.getPublicBootstrap,
 };

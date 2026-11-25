@@ -1,7 +1,7 @@
 import { describeError } from "../../core/errors";
 import { terms } from "../../core/context";
 import { navMetrics } from "../../core/nav";
-import { rememberScan, resolveScan } from "../../core/scan";
+import { assertCurrentResult, rememberScan, resolveScan } from "../../core/scan";
 import { isSignedIn } from "../../core/session";
 import { themeBehavior } from "../../core/theme-behavior";
 import { ROUTES, back, buildUrl, redirect, relaunch, toast } from "../../core/ui";
@@ -41,7 +41,9 @@ Page({
     wx.showLoading({ title: "识别中…", mask: true });
     try {
       const result = await resolveScan(value);
+      assertCurrentResult(result);
       if (result.kind !== "unknown") rememberScan({ code: result.code, kind: result.kind, id: result.id, title: result.title, subtitle: result.subtitle, action: "查看", imageSource: result.imageSource });
+      assertCurrentResult(result);
       redirect(buildUrl(ROUTES.scanResult, { code: value }));
     } catch (error) {
       toast(describeError(error).message, { duration: 3000 });

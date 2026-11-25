@@ -1,6 +1,2 @@
-import type { AiTaskRecoverySnapshot } from '@rental-os/shared';
-export type { AiTaskRecoverySnapshot } from '@rental-os/shared';
-
-export interface AiTaskRecoverySnapshotSource {
-  read(value: unknown): Promise<AiTaskRecoverySnapshot>;
-}
+/** 原组合兼容出口；AI Runtime 与运行时标记由正式包单源提供。 */
+export * from "@rental-os/ai-native-server/runtime/runner/task-recovery-snapshot.ports";

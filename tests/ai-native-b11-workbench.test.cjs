@@ -1,4 +1,7 @@
 'use strict';
+/** Employee inspection consumer regression. The first case checks original receipts,
+ * component lifetime and the same formal Native transport. Candidate handling
+ * and adoption use the separate projections returned by the original Core. */
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { load, mount, deferred } = require('./fixtures/ai-native/b09-host.cjs');
@@ -7,7 +10,7 @@ test('staff original receipt stays separate from failed draft linkage and late s
   const { StaffInspectionHostBinding } = load('apps/staff-miniprogram/src/components/ai-native/inspection-host.ts');
   const target = { orderId: 'order-1', allocationId: 'allocation-1', templateId: 'template-1', stage: 'pickup' };
   const detail = { draftId: 'draft-1', revision: 2, status: 'submission_unknown', target,
-    templateVersion: 'v1', bindingFingerprint: 'binding', state: { version: 1, fields: {}, candidates: [], evidence: [], missingFields: [], reviewRequired: false } };
+    templateVersion: 'v1', bindingFingerprint: 'binding', candidateReviews: [], state: { version: 1, fields: {}, candidates: [], evidence: [], missingFields: [], reviewRequired: false } };
   let view, reads = 0, denyDraft = false, denyReceipt = false, denyRecognition = false;
   const host = { context: { tenantId: 'tenant-1', workspaceId: 'space-1', ownerId: 'staff-1', audience: 'staff' },
     target, draftId: 'draft-1', serverEnabled: true, current: () => true, actionId: 'action-1', operationId: kind => kind + '-1',
@@ -50,13 +53,19 @@ test('staff original receipt stays separate from failed draft linkage and late s
   const reference = { ...target, draftId: 'draft-1', inputId: 'input-original', expectedRevision: 3, taskId: 'task-original', resultId: 'result-original' };
   const candidate = { candidateId: 'candidate-original', fieldCode: 'reading', status: 'candidate', confidence: 0.8,
     value: { kind: 'number', value: 9 }, sources: [{ attachmentId: 'file-1', attachmentRevision: 1, kind: 'image', region: { x: 0, y: 0, width: 1, height: 1 } }] };
+  const resultFacts = { resultHash: 'a'.repeat(64), inputFingerprint: 'b'.repeat(64), runId: 'run-original', stepId: 'step-original',
+    observedAt: '2026-11-04T00:00:00Z', trust: 'untrusted_candidate', automaticRetry: false, persistence: 'not_saved',
+    execution: 'not_attempted', basis: { version: 'inspection-recognition-basis-1', status: 'not_recorded' },
+    reviewIssues: [], basisIssues: [] };
   let recognitionReads = 0, saves = 0, status = 'available', savedDraftId = 'draft-1';
   const recognitionLookups = [];
   const saved = deferred(), saving = deferred();
   const recognitionHost = { ...host, drafts: { ...host.drafts, edit: async () => { throw Error('invalid input must not reach edit'); } }, evidence: { fingerprint: async () => 'current' },
     templates: { read: async () => ({ bindingFingerprint: 'binding', template: { id: 'template-1', version: 'v1', stage: 'pickup', fields: [{ code: 'reading', type: 'number', label: '读数' }] } }) },
-    recognition: { reference, read: async () => { recognitionReads++; if (denyRecognition) throw Error('current result denied'); return { ...reference, status,
-      candidates: status === 'available' ? [structuredClone(candidate)] : [], trust: 'untrusted_candidate', automaticRetry: false, persistence: 'not_saved', execution: 'not_attempted' }; },
+    recognition: { reference, read: async () => { recognitionReads++; if (denyRecognition) throw Error('current result denied'); return { ...reference, ...resultFacts, status,
+      candidates: status === 'available' ? [structuredClone(candidate)] : [],
+      recognitionEvidence: status === 'available' ? 'persisted_image_step' : 'not_confirmed',
+      nextAction: status === 'available' ? 'human_review' : 'reconcile_or_manual_review' }; },
       save: async operationId => { saves++; saving.resolve(operationId); return saved.promise; },
       reconcileSave: async operationId => { recognitionLookups.push(operationId); assert.equal(operationId, 'candidates-1');
         return { status: 'found', result: { draftId: savedDraftId, revision: 4, status: 'draft_saved' } }; } } };
@@ -72,6 +81,10 @@ test('staff original receipt stays separate from failed draft linkage and late s
   status = 'available'; await recognitionBinding.readRecognition();
   const save = recognitionBinding.saveRecognition(); await saving.promise; await recognitionBinding.saveRecognition(); assert.equal(saves, 1);
   detail.revision = 4; detail.state.candidates = [structuredClone(candidate)];
+  detail.state.reviewRequired = true;
+  detail.candidateReviews = [{ candidateId: candidate.candidateId, basis: structuredClone(resultFacts.basis),
+    sourcesMatchDraftEvidence: true, adoption: 'unavailable', reviewIssues: ['field_unavailable'],
+    basisIssues: [{ fieldCode: 'reading', code: 'field_unavailable', reason: 'original_basis_not_recorded' }] }];
   saved.reject(new Error('commit response lost')); await save;
   assert.equal(view.phase, 'unknown'); assert.equal(view.canSaveRecognition, false);
   recognitionBinding.hide(); denyDraft = true; await recognitionBinding.show();
@@ -85,7 +98,13 @@ test('staff original receipt stays separate from failed draft linkage and late s
   assert.equal(view.canReadRecognition, false); // The old frozen result is not a new revision's recognition request.
   await recognitionBinding.edit('reading', 'Infinity'); assert.ok(view.items[0].error); assert.equal(detail.state.fields.reading.value, 42);
   recognitionBinding.hide(); detail.revision++; detail.state.evidence = [{ attachmentId: 'file-2', attachmentRevision: 1 }];
-  await recognitionBinding.show(); assert.equal(view.items[0].humanValue, 42); assert.equal(view.items[0].candidateActionable, false);
+  detail.candidateReviews = [{ ...detail.candidateReviews[0], sourcesMatchDraftEvidence: false,
+    reviewIssues: ['source_unclear'],
+    basisIssues: [{ fieldCode: 'reading', code: 'source_unclear', reason: 'draft_evidence_changed' }] }];
+  // Core retains historical candidates for human rejection. Adoption has its own current-source gate.
+  await recognitionBinding.show(); assert.equal(view.items[0].humanValue, 42);
+  assert.equal(view.items[0].candidateCanAccept, false); assert.equal(view.items[0].candidateActionable, true);
+
   const beforeOldRead = recognitionReads; await recognitionBinding.readRecognition();
   assert.equal(recognitionReads, beforeOldRead); assert.equal(view.recognitionItems.length, 0); assert.equal(view.canSaveRecognition, false);
   await recognitionBinding.decideCandidate('reading', candidate.candidateId, 'accepted', detail.revision);
@@ -95,8 +114,31 @@ test('staff original receipt stays separate from failed draft linkage and late s
   const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm'), ts = require('typescript');
   const transportExports = {}, requests = []; let sessionVersion = 1, wirePatch = value => value, validateWire;
   const session = { tenant: { tenantId: 'tenant-1' }, currentWorkspaceId: 'space-1', user: { id: 'staff-1' } };
+  const nativeRoot = path.resolve('packages/rental-core/clients'), nativeModules = new Map();
+  function loadNativeClient(file) {
+    let absolute = path.resolve(file);
+    if (!path.extname(absolute)) absolute += '.ts';
+    assert.ok(absolute.startsWith(nativeRoot + path.sep), 'Native runtime stays within the client source closure');
+    if (nativeModules.has(absolute)) return nativeModules.get(absolute);
+    const exported = {};
+    nativeModules.set(absolute, exported);
+    vm.runInNewContext(ts.transpileModule(fs.readFileSync(absolute, 'utf8'),
+      { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019 } }).outputText,
+      { exports: exported, require: name => {
+        assert.ok(name.startsWith('.'), 'Native runtime imports only its relative closure');
+        return loadNativeClient(path.resolve(path.dirname(absolute), name));
+      } });
+    return exported;
+  }
+
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.resolve('apps/staff-miniprogram/src/components/ai-native/inspection-transport.ts'), 'utf8'),
     { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, { exports: transportExports, require: module => {
+      if (module === '@rental-os/rental-core/clients/staff') {
+        const entry = JSON.parse(fs.readFileSync(path.resolve('packages/rental-core/package.json'), 'utf8')).exports['./clients/staff'];
+        assert.equal(entry.types, './dist-clients/clients/staff/index.d.ts');
+        assert.equal(entry.default, './dist-clients/clients/staff/index.js');
+        return loadNativeClient(path.join(nativeRoot, 'staff/index.ts'));
+      }
       if (module === './inspection-wire') {
         const exported = {};
         vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.resolve('apps/staff-miniprogram/src/components/ai-native/inspection-wire.ts'), 'utf8'),
@@ -106,7 +148,10 @@ test('staff original receipt stays separate from failed draft linkage and late s
             vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.resolve('apps/staff-miniprogram/src/components/ai-native/inspection-wire-schemas.ts'), 'utf8'),
               { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, { exports: registry, require: () => { throw Error('native registry must have no runtime package dependency'); } });
             const shared = require('@rental-os/shared'), contracts = { ...shared.AI_INSPECTION_MANUAL_HTTP_CONTRACTS, ...shared.AI_INSPECTION_LIFECYCLE_HTTP_CONTRACTS };
-            const schemas = { ...shared.AI_INSPECTION_DRAFT_SCHEMAS, ...shared.AI_INSPECTION_MANUAL_HTTP_SCHEMAS, ...shared.AI_INSPECTION_LIFECYCLE_HTTP_SCHEMAS };
+            const schemas = { ...shared.AI_INSPECTION_DRAFT_SCHEMAS, ...shared.AI_INSPECTION_MANUAL_HTTP_SCHEMAS,
+              ...shared.AI_INSPECTION_LIFECYCLE_HTTP_SCHEMAS, ...shared.AI_TASK_RECOVERY_HTTP_SCHEMAS,
+              ...shared.AI_TASK_INPUT_DRAFT_SCHEMAS, ...shared.AI_TASK_OBSERVATION_DRAFT_SCHEMAS, ...shared.AI_SCOPE_DRAFT_SCHEMAS,
+              ...shared.STAFF_UPLOAD_OBSERVATION_SCHEMAS };
             assert.deepEqual(JSON.parse(JSON.stringify(registry.contracts)), contracts);
             for (const [key, value] of Object.entries(registry.schemas)) assert.deepEqual(JSON.parse(JSON.stringify(value)), schemas[key], key);
             return registry; } });
@@ -126,10 +171,8 @@ test('staff original receipt stays separate from failed draft linkage and late s
             fields: [{ code: 'reading', label: 'Reading', type: 'number', required: true }] } });
         if (url.endsWith('draft-read')) return wirePatch({ ...structuredClone(detail), revision: 3, assetId: 'asset-1',
           inspectionId: null, bindingFingerprint: 'a'.repeat(64), recognitionEvidence: 'caller_supplied_not_model_execution_proof' });
-        if (url.endsWith('result-read')) return wirePatch({ ...reference, candidates: [candidate], status: 'available',
-          resultHash: 'a'.repeat(64), inputFingerprint: 'b'.repeat(64), runId: 'run-original', stepId: 'step-original',
-          observedAt: '2026-11-04T00:00:00Z', trust: 'untrusted_candidate', automaticRetry: false, persistence: 'not_saved',
-          execution: 'not_attempted', recognitionEvidence: 'persisted_image_step', nextAction: 'human_review' });
+        if (url.endsWith('result-read')) return wirePatch({ ...reference, ...resultFacts, candidates: [candidate], status: 'available',
+          recognitionEvidence: 'persisted_image_step', nextAction: 'human_review' });
         if (url.endsWith('result-save')) return wirePatch({ status: 'saved', result: { draftId: 'draft-1', revision: 4, status: 'draft_saved', inspectionId: null }, execution: 'not_attempted' });
         if (url.endsWith('result-save-receipt') || url.endsWith('draft-operation')) return wirePatch({ status: 'found', result: { draftId: 'draft-1', revision: 4, status: 'draft_saved', inspectionId: null } });
         if (url.endsWith('draft-edit') || url.endsWith('evidence-replace')) return wirePatch({ draftId: 'draft-1', revision: 4, status: 'draft_saved', inspectionId: null });

@@ -36,6 +36,15 @@ const rows = new Map();
 let creates = 0;
 const keyOf = (where) => [where.tenantId, where.workspaceId, where.orderId, where.documentType, where.contentHash].join("|");
 const prisma = {
+  async $queryRaw(query) {
+    assert.match(query.sql, /SELECT id FROM Tenant.*LOCK IN SHARE MODE/u);
+    return [{ id: query.values[0] }];
+  },
+  async $transaction(run, options) {
+    assert.equal(options.isolationLevel, "ReadCommitted");
+    const { $transaction, ...transaction } = this;
+    return run(transaction);
+  },
   rentalOrderDocumentSnapshot: {
     async findUnique({ where }) { return rows.get(keyOf(where.tenantId_workspaceId_orderId_documentType_contentHash)); },
     async findMany({ where }) {

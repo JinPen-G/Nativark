@@ -49,7 +49,7 @@ assert.equal(rentalOrderDueAt({ fulfillmentMode: "carrier_shipping", startAt: at
 
 const controller = fs.readFileSync(path.join(root, "apps/api/src/modules/rental-core/rental-core.controller.ts"), "utf8");
 const coreService = fs.readFileSync(path.join(root, "apps/api/src/modules/rental-core/rental-core.service.ts"), "utf8");
-const orderPage = fs.readFileSync(path.join(root, "apps/admin/src/features/rental-core/RentalOrderDetailPage.tsx"), "utf8");
+const orderPage = fs.readFileSync(path.join(root, "packages/rental-core/admin/orders/RentalOrderDetailPage.tsx"), "utf8");
 const authGuard = fs.readFileSync(path.join(root, "apps/api/src/common/api-auth.guard.ts"), "utf8");
 assert.match(controller, /assertCarrierProofFiles\(req, id, body\.evidenceFileAssetIds, \["carrier-shipment-evidence"\]\)/u);
 assert.match(controller, /if \(!canRecordCarrierShipmentEventDirectly\(body\.type\)\)/u);

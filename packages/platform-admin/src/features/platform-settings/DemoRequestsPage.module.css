@@ -1,0 +1,6 @@
+.excerpt { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; white-space: pre-line; }
+.detail { display: flex; flex-direction: column; min-width: 0; gap: var(--rental-layout-section-gap); }
+.detail > :global(.arc-form-section) { margin-block: 0; }
+.contact { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); min-width: 0; }
+.contact > span { min-width: 0; overflow-wrap: anywhere; }
+.message { margin: 0; color: var(--foreground); font-size: var(--rental-typography-body-size); line-height: var(--rental-typography-body-line-height); white-space: pre-wrap; overflow-wrap: anywhere; }

@@ -1,0 +1,22 @@
+{
+  "extends": "../../platform-admin/tsconfig.json",
+  "include": [
+    "index.tsx",
+    "host-context.tsx",
+    "browser.ts",
+    "browser-notifications",
+    "orders",
+    "work-orders",
+    "capabilities",
+    "locations",
+    "catalog",
+    "commercial",
+    "governance",
+    "membership",
+    "operations",
+    "channels",
+    "setup",
+    "payment-reconciliation",
+    "../../platform-admin/src/**/*.d.ts"
+  ]
+}

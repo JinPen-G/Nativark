@@ -1,9 +1,19 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, Optional } from "@nestjs/common";
+/** 原组合宿主的平台与 Rental 管理适配，公共能力消费正式平台出口。
+ * Rental 空间/客户与 MCP 管理委托所属实现，保留原身份、事务和历史兼容。 */
+import { assertOriginalMcpManagedSubject, assertOriginalMcpManagedWorkspace } from "@rental-os/rental-mcp-host/workspace-management";
+import { normalizeRentalTenantBootstrapInput } from "@rental-os/rental-core/tenant-bootstrap";
+import { createRentalBootstrapSystemRules, createRentalBootstrapDictionaries, createRentalBootstrapNumberRules, createRentalTenantBootstrapPreview } from "@rental-os/rental-core/tenant-bootstrap-defaults";
+import { RentalWorkspaceManagementApplication } from "@rental-os/rental-core/workspace-management";
+import { RentalCustomerManagementApplication } from "@rental-os/rental-core/customer-management";
+/** 原组合平台的业务适配及内存演示。持久化租户/人员/角色、组织/安全与字典/编号委托同一公共应用；Rental范围与初始化由原业务链裁定。 */
+import { createRentalLegacyPermissionModules } from "@rental-os/rental-core/permissions";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { getRequestDataScope, getRequestLocationIds, getRequestWorkspaceId, requireRequestTenantId, requireRequestWorkspaceId } from "../../common/request-identity";
 import {
+  normalizeOperatorShortName,
   RENTAL_CATEGORY_DEFINITIONS,
   isRentalCategoryCode,
   CreateBusinessWorkspaceRequest,
@@ -30,7 +40,6 @@ import {
   PlatformAuditLogQuery,
   PlatformAuditLogRow,
   PlatformDictionaryGroup,
-  PlatformDictionaryItem,
   PlatformFilterPreset,
   PlatformFilterPresetQuery,
   PlatformFilterPresetScope,
@@ -67,7 +76,8 @@ import {
   resolveTenantIdForQuery
 } from "../../common/data-permission";
 import { enabledOrganizationSubtreeIds } from "../../common/organization-location-scope";
-import { PlatformRepository, type WorkspaceSessionIdentity } from "./platform.repository";
+import { PlatformRepository, type WorkspaceSessionIdentity, type RentalMemberSessionIdentity,
+  type RentalWorkspaceAccessTransaction } from "./platform.repository";
 import { MembershipService } from "./membership.service";
 import { SharedCustomerRepository } from "./shared-customer.repository";
 import { CustomerOperationsService } from "./customer-operations.service";
@@ -76,12 +86,18 @@ import { CustomerCorporateService } from "./customer-corporate.service";
 import { CustomerCorporateSettlementService } from "./customer-corporate-settlement.service";
 import { WorkspaceCapabilityService } from "../rental-core/workspace-capability.service";
 import { RentalCoreService } from "../rental-core/rental-core.service";
+import { defaultSecurityBaseline, normalizeSecurityBaseline } from "./platform-security-baseline";
+import { PlatformManagementService } from "@rental-os/platform-server/management";
+import { OriginalPublicManagementAdapter } from "./public-management.adapter";
+import { PlatformToolsService, advanceNumberRule, createDictionaryGroup, createNumberRule, formatPlatformNumber } from "@rental-os/platform-server/tools";
 import { assertNoLegacyAiCredentials, closedLegacyAiSettings } from "./legacy-system-ai";
 
 interface StoredUser extends Omit<SaveSystemUserRequest, "tenantId"> {
   id: string;
   tenantId: string;
   password: string;
+  /** 历史 demo 记录省略时从1开始，仅用于认证内部撤销围栏。 */
+  tokenVersion?: number;
   mustChangePassword?: boolean;
   needsTenantOnboarding?: boolean;
 }
@@ -100,6 +116,53 @@ const MEMORY_MODE_WORKSPACE_ID = "ws_memory_default";
 
 @Injectable()
 export class PlatformService {
+  private workspaceApplication?: RentalWorkspaceManagementApplication;
+  private getWorkspaceApplication() {
+    return this.workspaceApplication ??= new RentalWorkspaceManagementApplication({
+      configService: this.configService,
+      repository: {
+        // SaaS 指定租户读取沿公共管理授权和 Rental 投影，空间行为由原 Core 仓储裁定。
+        getTenant: (tenantId) => this.getPublicManagementAdapter().getTenant(tenantId),
+        listBusinessWorkspacesForTenant: (tenantId) => this.platformRepository.listBusinessWorkspacesForTenant(tenantId),
+        createBusinessWorkspaceForTenant: (tenantId, input, onBeforeCommit, actorId) =>
+          this.platformRepository.createBusinessWorkspaceForTenant(tenantId, input, onBeforeCommit, actorId),
+        updateBusinessWorkspaceForTenant: (tenantId, workspaceId, input) =>
+          this.platformRepository.updateBusinessWorkspaceForTenant(tenantId, workspaceId, input),
+        listBusinessWorkspaces: (currentUser) => this.platformRepository.listBusinessWorkspaces(currentUser),
+        createBusinessWorkspace: (input, currentUser, onBeforeCommit) =>
+          this.platformRepository.createBusinessWorkspace(input, currentUser, onBeforeCommit),
+        updateBusinessWorkspace: (workspaceId, input, currentUser) =>
+          this.platformRepository.updateBusinessWorkspace(workspaceId, input, currentUser),
+        listWorkspaceMembers: (workspaceId, currentUser) => this.platformRepository.listWorkspaceMembers(workspaceId, currentUser),
+        listWorkspaceFulfillmentLocations: (workspaceId, currentUser) =>
+          this.platformRepository.listWorkspaceFulfillmentLocations(workspaceId, currentUser),
+        saveWorkspaceMember: (workspaceId, input, currentUser) =>
+          this.platformRepository.saveWorkspaceMember(workspaceId, input, currentUser),
+        saveUserWithWorkspaceAccess: (input, tenantId, actorId) =>
+          this.platformRepository.saveUserWithWorkspaceAccess(input, tenantId, actorId),
+        hasFixedAllPermissionRole: (roleIds, tenantId) => this.platformRepository.hasFixedAllPermissionRole(roleIds, tenantId),
+        isTenantAdminUser: (userId, tenantId) => this.platformRepository.isTenantAdminUser(userId, tenantId)
+      },
+      rentalCoreService: this.rentalCoreService, workspaceCapabilityService: this.workspaceCapabilityService,
+      logger: this.logger, legacyAccounts: { roles: () => this.roleRows, users: () => this.users }
+    });
+  }
+
+  private customerApplication?: RentalCustomerManagementApplication;
+
+  /** 同一原客户服务由新门面消费；懒绑定保留既有位置构造与内存模式拒绝语义。 */
+  private getCustomerApplication() {
+    return this.customerApplication ??= new RentalCustomerManagementApplication({
+      configService: this.configService,
+      principals: { findWorkspaceScopedUser: (userId, workspaceId, tenantUser, transaction) =>
+        transaction ? this.platformRepository.findWorkspaceScopedUser(userId, workspaceId, tenantUser, transaction)
+          : this.findWorkspaceScopedUser(userId, workspaceId, tenantUser) },
+      sharedCustomers: this.sharedCustomers, customerOperations: this.customerOperations,
+      customerMerge: this.customerMerge, customerCorporate: this.customerCorporate,
+      customerCorporateSettlement: this.customerCorporateSettlement, memberships: this.memberships
+    });
+  }
+
   constructor(
     private readonly configService: ConfigService,
     private readonly platformRepository: PlatformRepository,
@@ -124,8 +187,26 @@ export class PlatformService {
     @Optional() private readonly customerMerge?: CustomerMergeService,
     // CORP-SETTLE-01A：企业授信账务流水。继续追加在最后，保持既有位置参数测试兼容。
     @Optional() private readonly customerCorporateSettlement?: CustomerCorporateSettlementService,
-    @Optional() private readonly memberships?: MembershipService
+    @Optional() private readonly memberships?: MembershipService,
+    // 追加依赖保留原位置构造；持久化宿主必须供给该公共管理实例。
+    @Optional() private readonly publicManagement?: PlatformManagementService,
+    @Optional() private readonly publicTools?: PlatformToolsService
   ) {}
+
+  private requirePublicManagement() {
+    if (!this.publicManagement) throw new ServiceUnavailableException("公共租户、人员、角色与安全管理服务未装配");
+    return this.publicManagement;
+  }
+
+  private publicManagementAdapter?: OriginalPublicManagementAdapter;
+  private getPublicManagementAdapter() {
+    return this.publicManagementAdapter ??= new OriginalPublicManagementAdapter(this.requirePublicManagement());
+  }
+
+  private requirePublicTools() {
+    if (!this.publicTools) throw new ServiceUnavailableException("公共字典与编号服务未装配");
+    return this.publicTools;
+  }
 
   private readonly logger = new Logger(PlatformService.name);
 
@@ -205,85 +286,7 @@ export class PlatformService {
   ];
 
   private readonly permissionTree: PermissionModule[] = [
-    {
-      code: "rental-core",
-      name: "Rental Core",
-      children: [
-        { code: "rental-core:catalog:view", name: "通用商品目录查看" },
-        { code: "rental-core:catalog:manage", name: "通用商品目录管理" },
-        { code: "rental-core:asset:view", name: "通用资产库存查看" },
-        { code: "rental-core:asset:manage", name: "通用资产库存管理" },
-        { code: "rental-core:maintenance:view", name: "养护工单查看", description: "查看归还处置和养护工单" },
-        { code: "rental-core:maintenance:manage", name: "养护工单处理", description: "创建、派工、开始和提交养护工单" },
-        { code: "rental-core:maintenance:review", name: "养护工单验收", description: "审核养护结果并恢复库存可用状态" },
-        { code: "rental-core:capability:view", name: "经营空间能力查看" },
-        { code: "rental-core:capability:manage", name: "经营空间能力治理" },
-        // CAM-01A：确认能力给出的风险提示（如需转接环的器材组合）才能带风险下单。
-        // 与 :manage 分开：治理能力启停是配置动作，带风险下单是一次经营决策，
-        // 两者的授权对象通常不同（店长可确认风险，但不一定负责能力启停）。
-        { code: "rental-core:capability:override", name: "能力风险例外确认" }
-      ]
-    },
-    {
-      code: "rental-os",
-      name: "租赁业务",
-      children: [
-        { code: "rental-os:rules:manage", name: "业务规则配置" },
-        // RULE-01A：发布与编辑分权（需求 4.6.14）。发布改变对外生效条款，
-        // 与「改草稿」是两个责任；共用一个码会让任何能编辑的人直接对客户生效。
-        { code: "rental-os:rules:publish", name: "业务规则发布", description: "发布或安排规则版本生效、作废已发布或待生效版本" },
-        { code: "rental-os:order:view", name: "订单查看", description: "查看租赁订单列表和详情" },
-        { code: "rental-os:order:operate", name: "订单操作", description: "新建租赁订单、领取检查和归还检查" },
-        { code: "rental-os:order:reassign", name: "资源解锁与改配", description: "解锁、释放及更换订单锁定资源，必须填写原因" },
-        { code: "rental-os:order:settle", name: "订单结算", description: "确认费用、补缴、退款或月结入账" },
-        { code: "rental-os:order:offline-payment", name: "线下收款登记", description: "登记待确认的线下收款；不含确认到账、退款或资金结算" },
-        // ORDER-CLOSE-02：裁定「该收/该退多少」与实际动钱拆成两个权限。此前四类审核
-        // 都认 order:settle，而资金事件也认它，一个权限同时授予定金额和收退款。
-        { code: "rental-os:order:fee-review", name: "费用裁定", description: "裁定逾期人工核价、提前归还退款、续租负差额与检查异常的金额；不含实际收退款" },
-        { code: "rental-os:order:create", name: "按钮-新建订单", description: "显示并执行新建租赁订单入口" },
-        { code: "rental-os:order:pickup", name: "按钮-领取交付", description: "执行领取交付和确认开始履约" },
-        { code: "rental-os:order:return", name: "按钮-归还验收", description: "执行归还验收和提交结算" },
-        { code: "rental-os:order:extend", name: "按钮-延长租期", description: "执行延长租期和逾期补办续租" },
-        { code: "rental-os:order:cancel", name: "按钮-取消/爽约", description: "执行取消订单和标记爽约" },
-        { code: "rental-os:order:close", name: "按钮-关闭/拒绝履约", description: "执行关闭订单和拒绝履约" },
-        { code: "rental-os:order:fee-manage", name: "按钮-费用处理", description: "登记订单费用、收款、退款和减免" },
-        { code: "rental-os:dispatch:manage", name: "调度管理" },
-        { code: "rental-os:price:manage", name: "价格规则" },
-        { code: "rental-os:calendar:edit", name: "营业日历编辑（草稿）", description: "新建和修改营业日历草稿，不含发布" },
-        { code: "rental-os:calendar:publish", name: "营业日历发布", description: "发布年度营业日历版本" },
-        { code: "rental-os:calendar:view-history", name: "营业日历历史只读", description: "查看历史版本、发布差异、覆盖审计与报价命中的日历依据，不得修改" },
-        { code: "rental-os:marketing:manage", name: "行销方案管理" },
-        { code: "rental-os:station:view", name: "履约地点查看" },
-        { code: "rental-os:station:manage", name: "履约地点管理" },
-        { code: "rental-os:member:view", name: "会员查看" },
-        { code: "rental-os:member:manage", name: "会员管理" },
-        // 证件类型是当前经营空间的业务配置，不是租户级会员资料维护：
-        // 空间配置人员不必顺带拿到改会员主档的权限，反之亦然。
-        { code: "rental-os:qualification-type:manage", name: "空间证件类型管理", description: "维护当前经营空间的资质证件类型" },
-        { code: "rental-os:member:review", name: "会员注册审核", description: "处理个人会员注册审核，不含证件审核" },
-        { code: "rental-os:member:qualification-review", name: "会员证件审核", description: "处理身份证件和品类资质审核" },
-        { code: "rental-os:member:account-manage", name: "会员账号与密码管理", description: "开通账号、设置临时密码和管理账号状态" },
-        { code: "rental-os:member:plan:manage", name: "会员方案编辑", description: "编辑个人和企业会员方案草稿、授予方案" },
-        { code: "rental-os:member:plan:publish", name: "会员方案发布", description: "发布会员方案版本" },
-        { code: "rental-os:member:risk-action", name: "会员风险管理", description: "登记与复核风险记录，并执行会员风险限制" },
-        // CUSTOMER-01B：敏感资料解密查看单独授权。必须出现在权限目录里——
-        // 角色管理页的可选项完全来自这棵树，漏了它就没人能被授予该权限。
-        { code: "rental-os:customer:reveal-sensitive", name: "客户敏感资料解密", description: "查看客户证件号等明文，并可查阅敏感访问审计" },
-        { code: "rental-os:customer:merge", name: "客户合并", description: "人工合并重复客户主档，不可逆" },
-        { code: "rental-os:customer:close", name: "客户注销", description: "注销客户账号或空间会员关系，不可逆" },
-        { code: "rental-os:corporate:view", name: "企业客户查看" },
-        { code: "rental-os:corporate:manage", name: "企业客户管理" },
-        { code: "rental-os:corporate:employee-manage", name: "企业员工管理", description: "维护企业管理员和员工关系" },
-        { code: "rental-os:corporate:monthly-settle", name: "按钮-企业月结回款", description: "登记企业账单回款" },
-        { code: "rental-os:finance:view", name: "财务查看", description: "查看资金流水、发票收据、调账和对账" },
-        { code: "rental-os:finance:manage", name: "财务管理", description: "维护财务单据和处理资金状态" },
-        { code: "rental-os:finance:adjust", name: "按钮-手工调账", description: "提交、审核和入账手工调账" },
-        { code: "rental-os:finance:invoice", name: "按钮-发票/收据", description: "开具、发送和作废发票收据" },
-        { code: "rental-os:finance:reconcile", name: "财务对账", description: "查看和处理资金、月结、调账异常" },
-        { code: "rental-os:service:manage", name: "增值服务管理" },
-        { code: "rental-os:report:view", name: "报表查看" }
-      ]
-    },
+    ...createRentalLegacyPermissionModules(),
     {
       code: "system",
       name: "系统设置",
@@ -488,189 +491,7 @@ export class PlatformService {
     currentWorkspaceId?: string | null;
   }>();
 
-  private systemRulesConfig: SystemRulesConfig = {
-    member: {
-      accountType: "MOBILE",
-      auditRequired: true,
-      welcomeGift: {
-        enabled: true,
-        trigger: "AUDIT_PASS",
-        amount: 100,
-        validity: 365
-      },
-      referralGift: {
-        enabled: true,
-        trigger: "INVITEE_AUDIT_PASS",
-        amount: 50,
-        validity: 365
-      }
-    },
-    fleet: {
-      maintenance: {
-        thresholdMileage: 5000,
-        thresholdMonths: 6,
-        advanceKm: 500,
-        advanceDays: 15
-      },
-      cleaning: {
-        thresholdCount: 5,
-        thresholdDays: 7,
-        advanceCount: 1,
-        advanceDays: 1
-      }
-    },
-    calendar: {
-      weekly: [
-        { id: 1, name: "周一", isHoliday: false, isFullDay: true, startTime: "" },
-        { id: 2, name: "周二", isHoliday: false, isFullDay: true, startTime: "" },
-        { id: 3, name: "周三", isHoliday: false, isFullDay: true, startTime: "" },
-        { id: 4, name: "周四", isHoliday: false, isFullDay: true, startTime: "" },
-        { id: 5, name: "周五", isHoliday: false, isFullDay: true, startTime: "" },
-        { id: 6, name: "周六", isHoliday: true, isFullDay: true, startTime: "" },
-        { id: 0, name: "周日", isHoliday: true, isFullDay: true, startTime: "" }
-      ],
-      specialDates: [
-        { range: ["2026-05-01", "2026-05-05"], type: "HOLIDAY", name: "劳动节" },
-        { range: ["2026-05-09", "2026-05-09"], type: "WORKDAY", name: "五一补班" }
-      ]
-    },
-    push: {
-      list: [
-        {
-          id: "push_order_confirmed",
-          category: "订单",
-          title: "订单已确认",
-          content: "尊敬的{用户}，您的订单{订单号}已经确认，请按约定时间办理领取。",
-          trigger: "订单支付成功",
-          channels: ["APP", "SMS"],
-          enabled: true
-        },
-        {
-          id: "push_member_approved",
-          category: "系统",
-          title: "审核通过通知",
-          content: "您的账号已通过审核，现在可以开始用车了。",
-          trigger: "会员审核通过",
-          channels: ["APP", "SMS"],
-          enabled: true
-        },
-        {
-          id: "push_birthday",
-          category: "营销",
-          title: "生日祝福",
-          content: "祝您生日快乐！一张租车券已放入您的账户。",
-          trigger: "用户生日当天",
-          channels: ["APP", "SMS", "EMAIL"],
-          enabled: true
-        }
-      ]
-    },
-    aiModel: {
-      enabled: true,
-      provider: "OPENAI_COMPATIBLE",
-      baseUrl: "https://api.example.com/v1",
-      modelName: "gpt-xxx",
-      apiKeyMasked: "sk-****8F3A",
-      promptSourceText: "租户专属版",
-      promptConfigVersion: "prompt-config-20260519.01",
-      promptVersion: "rental-os-dispatch-agent-v1",
-      promptHash: "sha256:8c21...f09a",
-      lastTestStatus: "成功",
-      lastTestTime: "2026-05-05 10:30",
-      guardrails: [
-        {
-          title: "提示词配置文件",
-          desc: "按租户命中专属提示词；未命中时使用全租户默认提示词。"
-        },
-        {
-          title: "硬约束不可突破",
-          desc: "同车行、车组、状态、时间窗、硬锁和人工保护仍由系统校验。"
-        },
-        {
-          title: "数据最小化",
-          desc: "不提交手机号、证件号、支付资料、API Key 或无关敏感备注。"
-        }
-      ],
-      logs: [
-        {
-          time: "2026-05-19 14:32",
-          analysisId: "AI-DISPATCH-20260519-0008",
-          operator: "王店长",
-          model: "gpt-xxx",
-          promptSourceText: "租户专属版",
-          promptVersion: "rental-os-dispatch-agent-v1",
-          promptHash: "sha256:8c21...f09a",
-          filteredCount: 5,
-          status: "成功",
-          promptText:
-            "你是 Rental OS 平台租赁业务 AI 调度分析 Agent。\n你的职责是帮助调度员分析车辆排程风险，并在系统合法候选车辆范围内生成推荐。",
-          requestPayload: JSON.stringify(
-            {
-              analysisContext: {
-                tenantId: "tenant-demo-tpe",
-                windowDays: 7,
-                storeScope: ["台北总店", "桃园机场店"]
-              },
-              orders: [{ orderNo: "ORD-202605-0108", phone: "[excluded]" }],
-              candidatesByOrder: {
-                "ORD-202605-0108": ["VH-TPE-2841", "VH-TPE-6630"]
-              },
-              privacyFilter: ["手机号", "证件号", "支付资料", "API Key", "未脱敏敏感备注"]
-            },
-            null,
-            2
-          ),
-          responsePayload: JSON.stringify(
-            {
-              analysisId: "AI-DISPATCH-20260519-0008",
-              parseStatus: "JSON_SCHEMA_PASSED",
-              validationStatus: "PARTIAL_PASSED"
-            },
-            null,
-            2
-          )
-        },
-        {
-          time: "2026-05-18 09:15",
-          analysisId: "AI-DISPATCH-20260518-0014",
-          operator: "陈调度",
-          model: "gpt-xxx",
-          promptSourceText: "默认版",
-          promptVersion: "rental-os-dispatch-agent-v1",
-          promptHash: "sha256:7f18...a921",
-          filteredCount: 5,
-          status: "成功",
-          promptText:
-            "你是 Rental OS 平台租赁业务 AI 调度分析 Agent。\n必须遵守系统硬约束，不得直接修改订单、车辆或排程。",
-          requestPayload: JSON.stringify(
-            {
-              analysisContext: {
-                tenantId: "tenant-demo-tpe",
-                windowDays: 3,
-                storeScope: ["台北总店"]
-              },
-              orders: [{ orderNo: "ORD-202605-0062", phone: "[excluded]" }],
-              privacyFilter: ["手机号", "证件号", "支付资料", "API Key", "未脱敏敏感备注"]
-            },
-            null,
-            2
-          ),
-          responsePayload: JSON.stringify(
-            {
-              analysisId: "AI-DISPATCH-20260518-0014",
-              parseStatus: "JSON_SCHEMA_PASSED",
-              validationStatus: "PASSED"
-            },
-            null,
-            2
-          )
-        }
-      ]
-    },
-    security: this.defaultSecurityBaseline(),
-    updatedAt: "2026-05-05T10:30:00+08:00",
-    updatedBy: "系统初始化"
-  };
+  private systemRulesConfig: SystemRulesConfig = createRentalBootstrapSystemRules();
 
   private readonly auditLogs: PlatformAuditLogRow[] = [
     {
@@ -697,58 +518,9 @@ export class PlatformService {
 
   private filterPresets: PlatformFilterPreset[] = [];
 
-  private dictionaryGroups: PlatformDictionaryGroup[] = [
-    {
-      code: "order_main_status",
-      name: "订单主状态",
-      module: "租赁业务",
-      description: "租赁业务订单列表、详情和审计中心统一展示主状态。",
-      items: [
-        { code: "reserved", label: "已预订", value: "reserved", sortNo: 10, enabled: true },
-        { code: "renting", label: "租赁中", value: "renting", sortNo: 20, enabled: true },
-        { code: "settlement_pending", label: "待结算", value: "settlement_pending", sortNo: 30, enabled: true },
-        { code: "completed", label: "已完成", value: "completed", sortNo: 40, enabled: true }
-      ],
-      updatedAt: "2026-05-05T10:00:00+08:00",
-      updatedBy: "系统初始化"
-    },
-    {
-      code: "vehicle_operation_status",
-      name: "车辆营运状态",
-      module: "车辆资产",
-      description: "车辆档案库、调度候选和车辆状态动作统一使用。",
-      items: [
-        { code: "idle", label: "空闲", value: "idle", sortNo: 10, enabled: true },
-        { code: "reserved", label: "已预约", value: "reserved", sortNo: 20, enabled: true },
-        { code: "renting", label: "租赁中", value: "renting", sortNo: 30, enabled: true },
-        { code: "controlled", label: "受控", value: "controlled", sortNo: 40, enabled: true },
-        { code: "maintenance", label: "维保中", value: "maintenance", sortNo: 50, enabled: true }
-      ],
-      updatedAt: "2026-05-05T10:00:00+08:00",
-      updatedBy: "系统初始化"
-    },
-    {
-      code: "customer_level",
-      name: "客户等级",
-      module: "客户运营",
-      description: "客户等级方案和会员资料共用展示项。",
-      items: [
-        { code: "silver", label: "白银会员", value: "MEMBER_SILVER", sortNo: 10, enabled: true },
-        { code: "gold", label: "黄金会员", value: "MEMBER_GOLD", sortNo: 20, enabled: true },
-        { code: "black", label: "黑金会员", value: "MEMBER_BLACK", sortNo: 30, enabled: true }
-      ],
-      updatedAt: "2026-05-05T10:00:00+08:00",
-      updatedBy: "系统初始化"
-    }
-  ];
+  private dictionaryGroups: PlatformDictionaryGroup[] = createRentalBootstrapDictionaries();
 
-  private numberRules: PlatformNumberRule[] = [
-    this.buildNumberRule("STORE_ORDER", "租赁订单号", "订单中心", "SO", "yyyyMMdd", 6),
-    this.buildNumberRule("CONTRACT", "合同编号", "合同单据", "CT", "yyyyMM", 5),
-    this.buildNumberRule("ACCIDENT_REPORT", "事故报案号", "事故出险", "AC", "yyyyMMdd", 4),
-    this.buildNumberRule("CUSTOMER", "客户编号", "客户运营", "CU", "yyyyMM", 5),
-    this.buildNumberRule("VEHICLE_LICENSE", "车辆证照编号", "车辆资产", "VL", "yyyyMM", 4)
-  ];
+  private numberRules: PlatformNumberRule[] = createRentalBootstrapNumberRules();
 
   getSystemRules(tenantId?: string) {
     if (this.useMysqlDataSource()) {
@@ -762,24 +534,29 @@ export class PlatformService {
 
   async getSecurityBaseline() {
     // 登录等认证前流程没有租户身份：安全基线显式从平台主体读取，不回退演示租户
+    if (this.useMysqlDataSource()) return this.platformRepository.getSecurityBaseline();
     const config = await this.getSystemRules(PLATFORM_SUBJECT_TENANT_ID);
-    return this.normalizeSecurityBaseline(config.security);
+    return normalizeSecurityBaseline(config.security);
+  }
+
+  /** 管理HTTP须复验当前会话；登录前读取继续使用上面的无会话接点。 */
+  readSecurityBaseline() {
+    return this.useMysqlDataSource() ? this.requirePublicManagement().readSecurityBaseline() : this.getSecurityBaseline();
   }
 
   async saveSecurityBaseline(
     input: SystemSecurityBaselineConfig,
     currentUser?: SystemUserRow
   ) {
+    if (this.useMysqlDataSource()) return this.requirePublicManagement().saveSecurityBaseline(input);
     this.assertSaasAdmin(currentUser);
     if (!currentUser!.permissions.includes("system:params:manage") && !currentUser!.permissions.includes("*")) {
       throw new ForbiddenException("修改全平台安全基线需要系统参数管理权限");
     }
     const operator = currentUser!.displayName;
-    const security = this.normalizeSecurityBaseline(input);
+    const security = normalizeSecurityBaseline(input);
     // 安全基线是平台级配置：读取、写入和审计都固定使用平台主体，不回退演示租户
-    const config = this.useMysqlDataSource()
-      ? this.copySystemRulesConfig(await this.platformRepository.getSystemRules(PLATFORM_SUBJECT_TENANT_ID) ?? this.systemRulesConfig)
-      : this.copySystemRulesConfig();
+    const config = this.copySystemRulesConfig();
     const next: SystemRulesConfig = {
       ...config,
       security,
@@ -788,32 +565,21 @@ export class PlatformService {
     };
     this.validateSystemRulesConfig(next);
 
-    if (this.useMysqlDataSource()) {
-      await this.platformRepository.saveSystemRules(next, operator, PLATFORM_SUBJECT_TENANT_ID);
-      await this.platformRepository.recordAuditLog({
-        tenantId: PLATFORM_SUBJECT_TENANT_ID,
-        action: "security-baseline.update",
-        operator,
-        targetType: "security-baseline",
-        targetId: "system-security",
-        detail: "更新登录限流、密码策略、脱敏和二次确认配置。"
-      });
-    } else {
-      this.systemRulesConfig = next;
-      this.recordMemoryAudit({
-        tenantId: PLATFORM_SUBJECT_TENANT_ID,
-        action: "security-baseline.update",
-        operator,
-        targetType: "security-baseline",
-        targetId: "system-security",
-        detail: "更新登录限流、密码策略、脱敏和二次确认配置。"
-      });
-    }
+    this.systemRulesConfig = next;
+    this.recordMemoryAudit({
+      tenantId: PLATFORM_SUBJECT_TENANT_ID,
+      action: "security-baseline.update",
+      operator,
+      targetType: "security-baseline",
+      targetId: "system-security",
+      detail: "更新登录限流、密码策略、脱敏和二次确认配置。"
+    });
 
     return security;
   }
 
   async checkSecondConfirmation(action: string, confirmationCode?: string) {
+    if (this.useMysqlDataSource()) return this.requirePublicManagement().checkSecondConfirmation(action, confirmationCode);
     const baseline = await this.getSecurityBaseline();
     const required =
       baseline.secondConfirmation.enabled &&
@@ -1001,14 +767,14 @@ export class PlatformService {
     query: PlatformFilterPresetQuery = {},
     user?: SystemUserRow
   ) {
+    if (this.useMysqlDataSource()) {
+      return this.platformRepository.listFilterPresets(query);
+    }
+
     const tenantId = this.resolvePlatformTenantId(query.tenantId, user);
     const scopeKey = query.scopeKey
       ? this.normalizeFilterPresetScope(query.scopeKey)
       : undefined;
-
-    if (this.useMysqlDataSource()) {
-      return this.platformRepository.listFilterPresets({ tenantId, scopeKey });
-    }
 
     return this.clone(
       this.filterPresets
@@ -1027,11 +793,11 @@ export class PlatformService {
     input: SavePlatformFilterPresetRequest,
     user?: SystemUserRow
   ) {
-    const preset = this.normalizeFilterPresetInput(input, user);
-
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.saveFilterPreset(preset);
+      return this.platformRepository.saveFilterPreset(input);
     }
+
+    const preset = this.normalizeFilterPresetInput(input, user);
 
     if (preset.isDefault) {
       this.filterPresets = this.filterPresets.map((item) =>
@@ -1085,15 +851,11 @@ export class PlatformService {
     operator?: string,
     user?: SystemUserRow
   ) {
-    const tenantId = this.resolvePlatformTenantId(undefined, user);
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.setDefaultFilterPreset(
-        id,
-        operator || user?.displayName || "营运端",
-        tenantId
-      );
+      return this.platformRepository.setDefaultFilterPreset(id, operator);
     }
 
+    const tenantId = this.resolvePlatformTenantId(undefined, user);
     const preset = this.filterPresets.find((item) => item.id === id);
     if (!preset || preset.tenantId !== tenantId) {
       throw new NotFoundException("筛选预设不存在");
@@ -1131,15 +893,11 @@ export class PlatformService {
     operator?: string,
     user?: SystemUserRow
   ) {
-    const tenantId = this.resolvePlatformTenantId(undefined, user);
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.deleteFilterPreset(
-        id,
-        operator || user?.displayName || "营运端",
-        tenantId
-      );
+      return this.platformRepository.deleteFilterPreset(id, operator);
     }
 
+    const tenantId = this.resolvePlatformTenantId(undefined, user);
     const index = this.filterPresets.findIndex((item) => item.id === id);
     if (index < 0 || this.filterPresets[index].tenantId !== tenantId) {
       throw new NotFoundException("筛选预设不存在");
@@ -1158,27 +916,17 @@ export class PlatformService {
 
   async listDictionaries() {
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.getPlatformDictionaries(this.dictionaryGroups);
+      return this.requirePublicTools().listDictionaries(this.dictionaryGroups);
     }
     return this.clone(this.dictionaryGroups);
   }
 
   async saveDictionaryGroup(input: SavePlatformDictionaryGroupRequest) {
-    this.validateDictionaryGroup(input);
-
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.savePlatformDictionaryGroup(input);
+      return this.requirePublicTools().saveDictionaryGroup(input);
     }
 
-    const group: PlatformDictionaryGroup = {
-      code: input.code.trim(),
-      name: input.name.trim(),
-      module: input.module.trim(),
-      description: input.description?.trim(),
-      items: this.normalizeDictionaryItems(input.items),
-      updatedAt: new Date().toISOString(),
-      updatedBy: input.operator || "营运端"
-    };
+    const group = createDictionaryGroup(input);
     const index = this.dictionaryGroups.findIndex((item) => item.code === group.code);
     if (index >= 0) {
       this.dictionaryGroups[index] = group;
@@ -1198,7 +946,7 @@ export class PlatformService {
 
   async listNumberRules() {
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.getPlatformNumberRules(this.numberRules);
+      return this.requirePublicTools().listNumberRules(this.numberRules);
     }
     return this.clone(
       this.numberRules.map((rule) => ({
@@ -1209,28 +957,12 @@ export class PlatformService {
   }
 
   async saveNumberRule(input: SavePlatformNumberRuleRequest) {
-    this.validateNumberRule(input);
-
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.savePlatformNumberRule(input);
+      return this.requirePublicTools().saveNumberRule(input);
     }
 
-    const existing = this.numberRules.find((rule) => rule.code === input.code);
-    const rule: PlatformNumberRule = {
-      code: input.code.trim().toUpperCase(),
-      name: input.name.trim(),
-      module: input.module.trim(),
-      prefix: input.prefix.trim().toUpperCase(),
-      datePattern: input.datePattern,
-      sequenceLength: input.sequenceLength,
-      currentSequence: input.currentSequence ?? existing?.currentSequence ?? 0,
-      resetCycle: input.resetCycle,
-      enabled: input.enabled,
-      sample: "",
-      updatedAt: new Date().toISOString(),
-      updatedBy: input.operator || "营运端"
-    };
-    rule.sample = this.formatNumber(rule, rule.currentSequence + 1);
+    const existing = this.numberRules.find((rule) => rule.code === input.code.trim().toUpperCase());
+    const rule = createNumberRule(input, existing);
 
     const index = this.numberRules.findIndex((item) => item.code === rule.code);
     if (index >= 0) {
@@ -1251,85 +983,39 @@ export class PlatformService {
 
   async generateNumber(input: GeneratePlatformNumberRequest) {
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.generatePlatformNumber(input);
+      return this.requirePublicTools().generateNumber(input);
     }
 
-    const rule = this.numberRules.find((item) => item.code === input.code);
-    if (!rule) {
+    const index = this.numberRules.findIndex((item) => item.code === input.code);
+    if (index < 0) {
       throw new NotFoundException("编号规则不存在");
     }
-    if (!rule.enabled) {
-      throw new BadRequestException("编号规则已停用");
-    }
-
-    rule.currentSequence += 1;
-    rule.sample = this.formatNumber(rule, rule.currentSequence + 1);
-    rule.updatedAt = new Date().toISOString();
-    rule.updatedBy = input.operator || "营运端";
+    const { rule, result } = advanceNumberRule(this.numberRules[index], input.operator);
+    this.numberRules[index] = rule;
     this.recordMemoryAudit({
       tenantId: "tenant_001",
       action: "number.generate",
       operator: rule.updatedBy,
       targetType: "number-rule",
       targetId: rule.code,
-      detail: `生成编号：${this.formatNumber(rule, rule.currentSequence)}`
+      detail: `生成编号：${result.generatedNo}`
     });
 
-    return {
-      code: rule.code,
-      generatedNo: this.formatNumber(rule, rule.currentSequence),
-      nextSequence: rule.currentSequence + 1
-    };
+    return result;
   }
 
   getTenantBootstrapPreview(): TenantBootstrapPreview {
-    return {
-      roles: [
-        {
-          code: "TENANT_ADMIN",
-          name: "租户管理员",
-          permissions: ["*"]
-        },
-        {
-          code: "STORE_OPERATOR",
-          name: "门店营运",
-          permissions: [
-            "rental-os:order:view",
-            "rental-os:order:operate",
-            "rental-core:asset:view"
-          ]
-        }
-      ],
-      dictionaries: this.dictionaryGroups.map((item) => item.code),
-      numberRules: this.numberRules.map((item) => item.code),
-      systemRules: ["system-rules"]
-    };
+    return createRentalTenantBootstrapPreview({ dictionaries: this.dictionaryGroups, numberRules: this.numberRules });
   }
 
   async bootstrapTenant(input: TenantBootstrapRequest, currentUser?: SystemUserRow): Promise<TenantBootstrapResult> {
     this.assertSaasAdmin(currentUser);
+    input = normalizeRentalTenantBootstrapInput(input, { persistent: this.useMysqlDataSource(), coreAvailable: Boolean(this.rentalCoreService) });
     const tenantCode = input.tenantCode.trim().toLowerCase();
     const tenantName = input.tenantName.trim();
     const adminAccount = input.adminAccount.trim();
     const adminDisplayName = input.adminDisplayName.trim();
 
-    if (!tenantCode || !tenantName || !adminAccount || !adminDisplayName || !input.categoryCode) {
-      throw new BadRequestException("租户编码、名称、经营品类和管理员信息不能为空");
-    }
-    if (!isRentalCategoryCode(input.categoryCode)) {
-      throw new BadRequestException("经营品类不存在");
-    }
-    if (!this.useMysqlDataSource() && !RENTAL_CATEGORY_DEFINITIONS.some((category) => category.code === input.categoryCode)) {
-      throw new ConflictException("动态品类需要持久化品类目录与发布版本");
-    }
-    if (input.categoryVersionId !== undefined && (typeof input.categoryVersionId !== "string" || !input.categoryVersionId.trim() || input.categoryVersionId.length > 191)) {
-      throw new BadRequestException("请选择合法的品类发布版本");
-    }
-    if (input.categoryVersionId && !this.useMysqlDataSource()) throw new ConflictException("明确选版需要持久化品类目录与发布版本");
-    if (this.useMysqlDataSource() && !this.rentalCoreService) throw new ConflictException("Rental初始化服务未装配，不能创建租赁租户");
-    if (!/^[a-z][a-z0-9_-]{1,31}$/.test(tenantCode)) {
-      throw new BadRequestException("租户编码必须以小写字母开头，只能包含小写字母、数字、下划线和短横线");
-    }
 
     if (this.useMysqlDataSource()) {
       const result = await this.platformRepository.bootstrapTenant(
@@ -1368,6 +1054,7 @@ export class PlatformService {
       tenantId,
       tenantCode,
       tenantName,
+      operatorShortName: input.operatorShortName ?? undefined,
       tenantStatus: TenantStatus.Active,
       enabledBusinessLines: ["rental_core"],
       categoryCode: input.categoryCode,
@@ -1435,7 +1122,7 @@ export class PlatformService {
       operator: currentUser?.displayName || input.operator || "SaaS 平台管理员",
       targetType: "tenant",
       targetId: tenantId,
-      detail: `初始化租户：${tenantName}`
+      detail: `初始化租户：${tenantName}${input.operatorShortName ? `；营运商简称：${input.operatorShortName}` : ""}`
     });
 
     await this.rentalCoreService?.initializeTenant(tenantId, input.categoryCode, undefined, input.currency);
@@ -1457,10 +1144,10 @@ export class PlatformService {
   }
 
   listTenants(currentUser?: SystemUserRow) {
-    this.assertSaasAdmin(currentUser);
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.listTenants();
+      return this.getPublicManagementAdapter().listTenants();
     }
+    this.assertSaasAdmin(currentUser);
     return this.tenants
       .filter((tenant) => tenant.tenantCode !== "platform")
       .map((tenant) => ({
@@ -1472,8 +1159,8 @@ export class PlatformService {
   }
 
   getTenant(id: string, currentUser?: SystemUserRow) {
+    if (this.useMysqlDataSource()) return this.getPublicManagementAdapter().getTenant(id);
     this.assertSaasAdmin(currentUser);
-    if (this.useMysqlDataSource()) return this.platformRepository.getTenant(id);
     const tenant = this.tenants.find((item) => item.tenantId === id);
     if (!tenant) throw new NotFoundException("租户不存在");
     if (tenant.tenantCode === "platform") throw new BadRequestException("SaaS 平台主体不属于业务租户列表");
@@ -1481,20 +1168,35 @@ export class PlatformService {
   }
 
   updateTenant(id: string, input: UpdateTenantRequest, currentUser?: SystemUserRow) {
+    if (this.useMysqlDataSource()) return this.getPublicManagementAdapter().updateTenant(id, input);
     this.assertSaasAdmin(currentUser);
-    if (this.useMysqlDataSource()) return this.platformRepository.updateTenant(id, input, currentUser!);
+    input = { ...input, operatorShortName: this.operatorShortName(input.operatorShortName) };
     const tenant = this.tenants.find((item) => item.tenantId === id);
     if (!tenant) throw new NotFoundException("租户不存在");
     if (tenant.tenantCode === "platform") throw new BadRequestException("SaaS 平台主体不能通过租户接口修改");
     const tenantName = input.tenantName.trim();
     if (!tenantName) throw new BadRequestException("租户名称不能为空");
+    const before = { tenantName: tenant.tenantName, operatorShortName: tenant.operatorShortName };
     tenant.tenantName = tenantName;
+    if (input.operatorShortName !== undefined) tenant.operatorShortName = input.operatorShortName ?? undefined;
+    this.recordMemoryAudit({
+      tenantId: id, action: "tenant.update", operator: currentUser!.displayName, targetType: "tenant", targetId: id,
+      detail: JSON.stringify({ before, after: { tenantName, operatorShortName: tenant.operatorShortName } })
+    });
     return tenant;
   }
 
+  private operatorShortName(value: unknown) {
+    try { return normalizeOperatorShortName(value); }
+    catch (error) {
+      if (!(error instanceof Error)) throw error;
+      throw new BadRequestException(error.message);
+    }
+  }
+
   updateTenantStatus(id: string, input: UpdateTenantStatusRequest, currentUser?: SystemUserRow) {
+    if (this.useMysqlDataSource()) return this.getPublicManagementAdapter().updateTenantStatus(id, input);
     this.assertSaasAdmin(currentUser);
-    if (this.useMysqlDataSource()) return this.platformRepository.updateTenantStatus(id, input, currentUser!);
     const tenant = this.tenants.find((item) => item.tenantId === id);
     if (!tenant) throw new NotFoundException("租户不存在");
     if (tenant.tenantCode === "platform") throw new BadRequestException("SaaS 平台主体不能冻结或停用");
@@ -1511,10 +1213,7 @@ export class PlatformService {
   }
 
   async listTenantBusinessWorkspaces(tenantId: string, currentUser?: SystemUserRow) {
-    this.assertSaasAdmin(currentUser);
-    this.requireWorkspaceDataSource();
-    await this.platformRepository.getTenant(tenantId);
-    return this.platformRepository.listBusinessWorkspacesForTenant(tenantId);
+    return this.getWorkspaceApplication().listTenantBusinessWorkspaces(tenantId, currentUser);
   }
 
   async createTenantBusinessWorkspace(
@@ -1522,39 +1221,7 @@ export class PlatformService {
     input: CreateBusinessWorkspaceRequest,
     currentUser?: SystemUserRow
   ) {
-    this.assertSaasAdmin(currentUser);
-    this.requireWorkspaceDataSource();
-    if (!this.rentalCoreService) throw new ConflictException("Rental初始化服务未装配，不能创建租赁空间");
-    await this.platformRepository.getTenant(tenantId);
-    const result = await this.platformRepository.createBusinessWorkspaceForTenant(
-      tenantId,
-      input,
-      async (tx, workspaceId) => {
-        await this.rentalCoreService!.registerWorkspace(workspaceId, tenantId, input.categoryCode, tx);
-        // 与 createBusinessWorkspace 同一口径：必选能力与空间档案原子创建。
-        await this.initializeWorkspaceCapabilities(
-          tenantId,
-          workspaceId,
-          input.categoryCode,
-          tx,
-          undefined,
-          input.runMode ?? "development"
-        );
-        const tenantAdmins = await tx.user.findMany({
-          where: { tenantId, isPlatformAdmin: true, isActive: true },
-          select: { id: true }
-        });
-        if (tenantAdmins.length) {
-          await tx.workspaceMember.createMany({
-            data: tenantAdmins.map((admin) => ({ tenantId, workspaceId, userId: admin.id, isActive: true })),
-            skipDuplicates: true
-          });
-        }
-      },
-      currentUser?.id
-    );
-    await this.rentalCoreService?.onApplicationBootstrap();
-    return result;
+    return this.getWorkspaceApplication().createTenantBusinessWorkspace(tenantId, input, currentUser);
   }
 
   async updateTenantBusinessWorkspace(
@@ -1563,11 +1230,7 @@ export class PlatformService {
     input: UpdateBusinessWorkspaceRequest,
     currentUser?: SystemUserRow
   ) {
-    this.assertSaasAdmin(currentUser);
-    this.requireWorkspaceDataSource();
-    await this.platformRepository.getTenant(tenantId);
-    await this.assertProductionModeAllowed(tenantId, workspaceId, input);
-    return this.platformRepository.updateBusinessWorkspaceForTenant(tenantId, workspaceId, input);
+    return this.getWorkspaceApplication().updateTenantBusinessWorkspace(tenantId, workspaceId, input, currentUser);
   }
 
   findTenantByCode(code: string) {
@@ -1591,383 +1254,94 @@ export class PlatformService {
   }
 
   listBusinessWorkspaces(currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    return this.platformRepository.listBusinessWorkspaces(currentUser);
+    return this.getWorkspaceApplication().listBusinessWorkspaces(currentUser);
   }
 
-  /**
-   * 共享客户主档仓储只在连库时注入（不连库的单元测试用位置参数构造本服务）。
-   * 缺失时明确拒绝，而不是让 `undefined.xxx` 抛成 500。
-   */
-  private requireSharedCustomers(): SharedCustomerRepository {
-    if (!this.sharedCustomers) {
-      throw new BadRequestException("共享客户主档需要 MySQL 数据源，当前为内存演示模式");
-    }
-    return this.sharedCustomers;
-  }
+  listSharedCustomers(currentUser?: SystemUserRow) { return this.getCustomerApplication().listSharedCustomers(currentUser); }
 
-  /* ---------- SPACE-04：租户共享客户主档 ---------- */
+  getCustomerDetail(customerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().getCustomerDetail(customerId, currentUser); }
 
-  listSharedCustomers(currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().listCustomers(tenantId, getRequestWorkspaceId(), currentUser);
-  }
+  async getCustomerProfileOverview(customerId: string, query: CustomerProfileOrderQuery = {}, currentUser?: SystemUserRow) { return this.getCustomerApplication().getCustomerProfileOverview(customerId, query, currentUser); }
 
-  /**
-   * CUSTOMER-01B 的入口一律在这里解析 `tenantId` 与 `workspaceId` 后转交
-   * `CustomerOperationsService`，与本文件其他经营入口同一口径：
-   * 空间只从会话取，客户端传什么都不作数。
-   */
-  private requireCustomerOperations() {
-    if (!this.customerOperations) {
-      throw new ConflictException("客户运营服务未就绪");
-    }
-    return this.customerOperations;
-  }
+  saveCustomerProfileAddress(customerId: string, input: SaveCustomerProfileAddressRequest, currentUser?: SystemUserRow) { return this.getCustomerApplication().saveCustomerProfileAddress(customerId, input, currentUser); }
 
-  getCustomerDetail(customerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().getCustomerDetail(
-      tenantId,
-      getRequestWorkspaceId(),
-      customerId,
-      currentUser
-    );
-  }
+  removeCustomerProfileAddress(customerId: string, addressId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().removeCustomerProfileAddress(customerId, addressId, currentUser); }
 
-  async getCustomerProfileOverview(customerId: string, query: CustomerProfileOrderQuery = {}, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    const workspaceId = requireRequestWorkspaceId();
-    if (!currentUser || currentUser.isSaasAdmin) throw new ForbiddenException("会员经营资料需要当前空间账号授权");
-    const scoped = await this.findWorkspaceScopedUser(currentUser.id, workspaceId);
-    if (!scoped?.isActive || scoped.tenantId !== tenantId) throw new ForbiddenException("当前经营空间访问权已失效");
-    return this.requireCustomerOperations().getProfileOverview(tenantId, workspaceId, customerId, scoped, query);
-  }
+  listSharedCustomersMasked(currentUser?: SystemUserRow) { return this.getCustomerApplication().listSharedCustomersMasked(currentUser); }
 
-  saveCustomerProfileAddress(customerId: string, input: SaveCustomerProfileAddressRequest, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().saveCustomerAddress(tenantId, customerId, input);
-  }
-
-  removeCustomerProfileAddress(customerId: string, addressId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().removeCustomerAddress(tenantId, customerId, addressId);
-  }
-
-  listSharedCustomersMasked(currentUser?: SystemUserRow) {
-    return this.listSharedCustomers(currentUser);
-  }
-
-  ensureCustomerAccount(customerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().ensureAccount(tenantId, customerId, currentUser?.displayName);
-  }
+  ensureCustomerAccount(customerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().ensureCustomerAccount(customerId, currentUser); }
 
   changeCustomerAccountStatus(
     customerId: string,
     input: ChangeCustomerAccountStatusRequest,
     currentUser?: SystemUserRow
-  ) {
-    this.requireWorkspaceDataSource();
-    this.assertCustomerActionPermission(
-      currentUser,
-      input.status === "closed" ? "rental-os:customer:close" : "rental-os:member:account-manage",
-      input.status === "closed" ? "注销客户账号" : "变更客户账号状态"
-    );
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    // 账号级动作**不**解析 workspaceId：它影响全部空间，绑定某个空间会造成误解。
-    return this.requireCustomerOperations().changeAccountStatus(
-      tenantId,
-      customerId,
-      input,
-      currentUser?.displayName
-    );
-  }
+  ) { return this.getCustomerApplication().changeCustomerAccountStatus(customerId, input, currentUser); }
 
   changeCustomerMembershipStatus(
     customerId: string,
     input: ChangeCustomerMembershipStatusRequest,
     currentUser?: SystemUserRow
-  ) {
-    this.requireWorkspaceDataSource();
-    this.assertCustomerActionPermission(
-      currentUser,
-      input.status === "closed"
-        ? "rental-os:customer:close"
-        : input.status === "risk_restricted"
-          ? "rental-os:member:risk-action"
-          : "rental-os:member:manage",
-      input.status === "closed"
-        ? "注销租户会员关系"
-        : input.status === "risk_restricted"
-          ? "限制客户风险状态"
-          : "变更租户会员状态"
-    );
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().changeMembershipStatus(
-      tenantId,
-      customerId,
-      input,
-      currentUser?.displayName
-    );
-  }
+  ) { return this.getCustomerApplication().changeCustomerMembershipStatus(customerId, input, currentUser); }
 
-  listCustomerStatusHistory(customerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().listStatusHistory(
-      tenantId,
-      customerId,
-      getRequestWorkspaceId(),
-      getRequestLocationIds() === undefined
-    );
-  }
+  listCustomerStatusHistory(customerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().listCustomerStatusHistory(customerId, currentUser); }
 
-  listCustomerIdentityVerifications(customerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().listIdentityVerifications(tenantId, customerId, currentUser);
-  }
+  listCustomerIdentityVerifications(customerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().listCustomerIdentityVerifications(customerId, currentUser); }
 
-  saveCustomerIdentityVerification(customerId: string, input: SaveCustomerIdentityVerificationRequest, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().saveIdentityVerification(tenantId, customerId, input, currentUser);
-  }
+  saveCustomerIdentityVerification(customerId: string, input: SaveCustomerIdentityVerificationRequest, currentUser?: SystemUserRow) { return this.getCustomerApplication().saveCustomerIdentityVerification(customerId, input, currentUser); }
 
-  listCustomerRiskRecords(customerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().listRiskRecords(
-      tenantId,
-      getRequestWorkspaceId(),
-      customerId,
-      currentUser
-    );
-  }
+  listCustomerRiskRecords(customerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().listCustomerRiskRecords(customerId, currentUser); }
 
-  createCustomerRiskRecord(customerId: string, input: CreateCustomerRiskRecordRequest, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    this.assertCustomerActionPermission(currentUser, "rental-os:member:risk-action", "登记会员风险");
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().createRiskRecord(
-      tenantId,
-      getRequestWorkspaceId(),
-      customerId,
-      input,
-      currentUser?.displayName,
-      currentUser
-    );
-  }
+  createCustomerRiskRecord(customerId: string, input: CreateCustomerRiskRecordRequest, currentUser?: SystemUserRow) { return this.getCustomerApplication().createCustomerRiskRecord(customerId, input, currentUser); }
 
   reviewCustomerRiskRecord(
     customerId: string,
     riskRecordId: string,
     input: ReviewCustomerRiskRecordRequest,
     currentUser?: SystemUserRow
-  ) {
-    this.requireWorkspaceDataSource();
-    this.assertCustomerActionPermission(currentUser, "rental-os:member:risk-action", "复核会员风险");
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().reviewRiskRecord(
-      tenantId,
-      getRequestWorkspaceId(),
-      customerId,
-      riskRecordId,
-      input,
-      currentUser?.displayName,
-      currentUser
-    );
-  }
+  ) { return this.getCustomerApplication().reviewCustomerRiskRecord(customerId, riskRecordId, input, currentUser); }
 
-  listCustomerSensitiveAccess(customerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().listSensitiveAccess(tenantId, customerId, currentUser);
-  }
+  listCustomerSensitiveAccess(customerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().listCustomerSensitiveAccess(customerId, currentUser); }
 
+  findCustomerDuplicates(customerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().findCustomerDuplicates(customerId, currentUser); }
 
-  private requireCustomerMerge() {
-    if (!this.customerMerge) throw new ConflictException("客户合并服务未就绪");
-    return this.customerMerge;
-  }
+  previewCustomerMerge(customerId: string, targetCustomerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().previewCustomerMerge(customerId, targetCustomerId, currentUser); }
 
-  findCustomerDuplicates(customerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerMerge().findDuplicates(tenantId, customerId);
-  }
+  mergeCustomers(input: MergeCustomersRequest, currentUser?: SystemUserRow) { return this.getCustomerApplication().mergeCustomers(input, currentUser); }
 
-  previewCustomerMerge(customerId: string, targetCustomerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    if (!targetCustomerId?.trim()) throw new BadRequestException("必须指定保留主档 targetCustomerId");
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerMerge().previewMerge(tenantId, customerId, targetCustomerId.trim());
-  }
+  getCustomerClosability(customerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().getCustomerClosability(customerId, currentUser); }
 
-  mergeCustomers(input: MergeCustomersRequest, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    // 合并是租户级动作，不绑定空间：被合并方的空间会员关系原样保留，不做跨空间搬迁。
-    return this.requireCustomerMerge().mergeCustomers(tenantId, input, currentUser?.displayName);
-  }
+  getCustomerMembershipClosability(customerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().getCustomerMembershipClosability(customerId, currentUser); }
 
-  getCustomerClosability(customerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    // 不传 workspaceId：本接口回答「整个租户客户账号能否注销」。
-    // 空间会员注销的检查在改状态时按空间范围各自进行。
-    return this.requireCustomerMerge().assertClosable(tenantId, customerId);
-  }
+  getCustomerTransactability(customerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().getCustomerTransactability(customerId, currentUser); }
 
-  getCustomerMembershipClosability(customerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerMerge().assertClosable(tenantId, customerId);
-  }
-
-  getCustomerTransactability(customerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().assertTransactable(
-      tenantId,
-      requireRequestWorkspaceId(),
-      customerId
-    );
-  }
-
-  /**
-   * CUSTOMER-01C：企业资料入口。
-   *
-   * 与客户主档一样按 `tenantId` 解析——企业资料属于租户级客户身份，不按空间隔离
-   * （同一家企业在两个空间是同一家企业，开票与合同不该各存一份）。
-   */
-  private requireCustomerCorporate() {
-    if (!this.customerCorporate) {
-      throw new ConflictException("企业客户服务未就绪");
-    }
-    return this.customerCorporate;
-  }
-
-  private requireCustomerCorporateSettlement() {
-    if (!this.customerCorporateSettlement) {
-      throw new ConflictException("企业授信账务服务未就绪");
-    }
-    return this.customerCorporateSettlement;
-  }
-
-  listCustomerInvoiceProfiles(customerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerCorporate().listInvoiceProfiles(tenantId, customerId);
-  }
+  listCustomerInvoiceProfiles(customerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().listCustomerInvoiceProfiles(customerId, currentUser); }
 
   saveCustomerInvoiceProfile(
     customerId: string,
     input: SaveCustomerInvoiceProfileRequest,
     currentUser?: SystemUserRow
-  ) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerCorporate().saveInvoiceProfile(tenantId, customerId, input);
-  }
+  ) { return this.getCustomerApplication().saveCustomerInvoiceProfile(customerId, input, currentUser); }
 
-  listCustomerContracts(customerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerCorporate().listContracts(tenantId, customerId);
-  }
+  listCustomerContracts(customerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().listCustomerContracts(customerId, currentUser); }
 
   saveCustomerContract(
     customerId: string,
     input: SaveCustomerContractRequest,
     currentUser?: SystemUserRow
-  ) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerCorporate().saveContract(tenantId, customerId, input);
-  }
+  ) { return this.getCustomerApplication().saveCustomerContract(customerId, input, currentUser); }
 
-  getCustomerCredit(customerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerCorporate().getCredit(tenantId, customerId);
-  }
+  getCustomerCredit(customerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().getCustomerCredit(customerId, currentUser); }
 
   saveCustomerCredit(
     customerId: string,
     input: SaveCustomerCreditRequest,
     currentUser?: SystemUserRow
-  ) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerCorporate().saveCredit(
-      tenantId,
-      customerId,
-      input,
-      currentUser?.displayName
-    );
-  }
+  ) { return this.getCustomerApplication().saveCustomerCredit(customerId, input, currentUser); }
 
-  async registerSharedCustomer(input: SaveSharedCustomerRequest, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    if (!this.memberships) throw new ConflictException("会员服务未就绪");
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    const customerId = input.customerType === "corporate"
-      ? (await this.memberships.saveCorporateMember(tenantId, {
-          name: input.name,
-          phone: input.phone,
-          email: input.email,
-          corporateName: input.corporateName?.trim() || input.name,
-          unifiedSocialCreditCode: input.unifiedSocialCreditCode,
-          registeredAddress: input.registeredAddress,
-          legalRepName: input.legalRepName,
-          legalRepPhone: input.legalRepPhone,
-          industry: input.industry,
-          scale: input.scale,
-          corporateTaxNo: input.corporateTaxNo
-        })).customerId
-      : (await this.memberships.registerPersonal(tenantId, {
-          name: input.name,
-          phone: input.phone,
-          email: input.email,
-          identityNo: input.identityNo,
-          gender: input.gender,
-          birthday: input.birthday,
-          sourceChannel: input.sourceChannel,
-          region: input.region,
-          channel: "admin"
-        }, currentUser?.displayName)).customerId;
-    return this.requireSharedCustomers().findById(tenantId, customerId);
-  }
+  async registerSharedCustomer(input: SaveSharedCustomerRequest, currentUser?: SystemUserRow) { return this.getCustomerApplication().registerSharedCustomer(input, currentUser); }
 
   async createBusinessWorkspace(input: CreateBusinessWorkspaceRequest, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    if (!this.rentalCoreService) throw new ConflictException("Rental初始化服务未装配，不能创建租赁空间");
-    // 需求 4.1：空间档案与其品类配置同事务创建，任一步失败整体回滚。
-    const result = await this.platformRepository.createBusinessWorkspace(input, currentUser, async (tx, workspaceId, tenantId) => {
-      await this.rentalCoreService!.registerWorkspace(workspaceId, tenantId, input.categoryCode, tx);
-      // Review P1-3：品类必选能力必须与空间档案原子创建。放在同一 tx 里，
-      // 任一步失败则空间与能力实例一起回滚，不会留下「空间已建、能力没开」的半成品
-      // ——那种空间在正式经营模式下连报价都做不了。
-      await this.initializeWorkspaceCapabilities(
-        tenantId,
-        workspaceId,
-        input.categoryCode,
-        tx,
-        currentUser,
-        input.runMode ?? "development"
-      );
-    });
-    // 仓储事务已经提交，才允许将新空间发布到本进程缓存。
-    await this.rentalCoreService?.onApplicationBootstrap();
-    return result;
+    return this.getWorkspaceApplication().createBusinessWorkspace(input, currentUser);
   }
 
   /**
@@ -1984,50 +1358,11 @@ export class PlatformService {
     currentUser?: SystemUserRow,
     runMode: "production" | "demo" | "development" = "development"
   ) {
-    if (!this.workspaceCapabilityService) {
-      if (runMode === "production") {
-        throw new ConflictException("能力服务不可用，不能创建正式经营空间");
-      }
-      return;
-    }
-    const category = this.rentalCoreService
-      ? await this.rentalCoreService.getWorkspaceCategoryInTransaction(tenantId, workspaceId, categoryCode, tx)
-      : RENTAL_CATEGORY_DEFINITIONS.find((row) => row.code === categoryCode);
-    const declared = category?.defaultCapabilities ?? [];
-    const required = category?.requiredCapabilities ?? [];
-    const result = await this.workspaceCapabilityService.initializeRequiredCapabilities(
-      tenantId,
-      workspaceId,
-      categoryCode,
-      declared,
-      tx,
-      { operator: currentUser?.displayName, requiredCodes: required }
-    );
-    if (result.skipped.length) {
-      // 跳过的必选能力不是错误（未实现、或必填配置无默认值），但必须留痕：
-      // 空间会保持非生产就绪，运营需要知道还差什么。
-      this.logger.warn(
-        `空间 ${workspaceId} 初始化必选能力时跳过：` +
-          result.skipped.map((row) => `${row.code}（${row.why}）`).join("；")
-      );
-    }
-    if (runMode === "production") {
-      const enabled = new Set(result.enabled);
-      const missing = required.filter((code) => !enabled.has(code));
-      if (missing.length) {
-        throw new ConflictException(
-          `正式经营空间初始化失败：缺少可自动启用的必选能力 ${missing.join("、")}。` +
-            "请改为演示/开发模式创建，或先补齐能力实现与默认配置。"
-        );
-      }
-    }
+    return this.getWorkspaceApplication().initializeWorkspaceCapabilities(tenantId, workspaceId, categoryCode, tx, currentUser, runMode);
   }
 
   async updateBusinessWorkspace(id: string, input: UpdateBusinessWorkspaceRequest, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    await this.assertProductionModeAllowed(tenantId, id, input);
-    return this.platformRepository.updateBusinessWorkspace(id, input, currentUser);
+    return this.getWorkspaceApplication().updateBusinessWorkspace(id, input, currentUser);
   }
 
   private async assertProductionModeAllowed(
@@ -2048,23 +1383,20 @@ export class PlatformService {
   }
 
   listWorkspaceMembers(workspaceId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    return this.platformRepository.listWorkspaceMembers(workspaceId, currentUser);
+    return this.getWorkspaceApplication().listWorkspaceMembers(workspaceId, currentUser);
   }
 
   listWorkspaceFulfillmentLocations(workspaceId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    return this.platformRepository.listWorkspaceFulfillmentLocations(workspaceId, currentUser);
+    return this.getWorkspaceApplication().listWorkspaceFulfillmentLocations(workspaceId, currentUser);
   }
 
   saveWorkspaceMember(workspaceId: string, input: SaveWorkspaceMemberRequest, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    return this.platformRepository.saveWorkspaceMember(workspaceId, input, currentUser);
+    return this.getWorkspaceApplication().saveWorkspaceMember(workspaceId, input, currentUser);
   }
 
   listOrganizations(tenantId?: string, currentUser?: SystemUserRow) {
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.listOrganizations(tenantId, currentUser);
+      return this.requirePublicManagement().listOrganizations(tenantId);
     }
     if (isOrganizationScopedUser(currentUser)) {
       const scopedTenantId = resolveTenantIdForQuery(tenantId, currentUser);
@@ -2095,7 +1427,7 @@ export class PlatformService {
     const tenantId = this.resolveTargetTenantId(input.tenantId, currentUser);
     input = { ...input, tenantId };
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.saveOrganization(input);
+      return this.requirePublicManagement().saveOrganization(input);
     }
 
     const code = input.code.trim();
@@ -2171,14 +1503,9 @@ export class PlatformService {
     operator = "租户管理员",
     currentUser?: SystemUserRow
   ) {
+    if (this.useMysqlDataSource()) return this.requirePublicManagement().setOrganizationStatus(id, status, operator);
     const existing = this.organizations.find((item) => item.id === id);
-    const mysqlTarget = this.useMysqlDataSource()
-      ? await this.platformRepository.getOrganizationTenantId(id)
-      : existing?.tenantId;
-    this.resolveTargetTenantId(mysqlTarget, currentUser);
-    if (this.useMysqlDataSource()) {
-      return this.platformRepository.setOrganizationStatus(id, status, operator);
-    }
+    this.resolveTargetTenantId(existing?.tenantId, currentUser);
 
     const row = this.organizations.find((item) => item.id === id);
     if (!row) {
@@ -2200,34 +1527,32 @@ export class PlatformService {
 
   listPermissionTree() {
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.listPermissionTree();
+      return this.getPublicManagementAdapter().listPermissionTree();
     }
     return this.permissionTree;
   }
 
   listRoles(tenantId?: string, currentUser?: SystemUserRow) {
-    const targetTenantId = this.resolveTargetTenantId(tenantId, currentUser);
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.listRoles(targetTenantId);
+      return this.getPublicManagementAdapter().listRoles(tenantId);
     }
+    const targetTenantId = this.resolveTargetTenantId(tenantId, currentUser);
     return this.roleRows
       .filter((role) => !role.tenantId || role.tenantId === targetTenantId)
       .map((role) => ({ ...role, tenantId: targetTenantId }));
   }
 
-  findTenantByIdForAuth(id: string) {
-    if (this.useMysqlDataSource()) return this.platformRepository.getTenant(id);
+  findTenantByIdForAuth(id: string): TenantSummary | Promise<TenantSummary> {
+    if (this.useMysqlDataSource()) return this.platformRepository.getTenantIdentity(id);
     const tenant = this.tenants.find((item) => item.tenantId === id);
     if (!tenant) throw new NotFoundException("租户不存在");
     return tenant;
   }
 
   saveRole(input: SaveSystemRoleRequest, currentUser?: SystemUserRow) {
+    if (this.useMysqlDataSource()) return this.getPublicManagementAdapter().saveRole(input);
     this.assertCustomerActionPermission(currentUser, "system:role:manage", "维护角色");
     const tenantId = this.resolveTargetTenantId(input.tenantId, currentUser);
-    if (this.useMysqlDataSource()) {
-      return this.platformRepository.saveRole(input, tenantId, currentUser?.id);
-    }
     const existing = input.id
       ? this.roleRows.find((role) => role.id === input.id)
       : undefined;
@@ -2298,19 +1623,15 @@ export class PlatformService {
   }
 
   async saveRolePermissions(id: string, permissions: string[], tenantId: string | undefined, currentUser?: SystemUserRow) {
+    if (this.useMysqlDataSource()) return this.getPublicManagementAdapter().saveRolePermissions(id, permissions, tenantId);
     this.assertCustomerActionPermission(currentUser, "system:role:manage", "维护角色权限");
     const targetTenantId = this.resolveTargetTenantId(
-      tenantId ?? (this.useMysqlDataSource()
-        ? await this.platformRepository.getRoleTenantId(id)
-        : this.roleRows.find((role) => role.id === id)?.tenantId),
+      tenantId ?? this.roleRows.find((role) => role.id === id)?.tenantId,
       currentUser
     );
-    if (this.useMysqlDataSource()) {
-      return this.platformRepository.saveRolePermissions(id, permissions, targetTenantId, currentUser?.id);
-    }
     const role = this.roleRows.find((item) => item.id === id);
 
-    if (!role) {
+    if (!role || role.tenantId && role.tenantId !== targetTenantId) {
       throw new NotFoundException(`Role ${id} was not found`);
     }
     if (role.fixedAllPermissions) {
@@ -2329,22 +1650,21 @@ export class PlatformService {
   }
 
   async deleteRole(id: string, tenantId: string | undefined, currentUser?: SystemUserRow) {
+    if (this.useMysqlDataSource()) return this.getPublicManagementAdapter().deleteRole(id, tenantId);
     this.assertCustomerActionPermission(currentUser, "system:role:manage", "删除角色");
     const targetTenantId = this.resolveTargetTenantId(
-      tenantId ?? (this.useMysqlDataSource()
-        ? await this.platformRepository.getRoleTenantId(id)
-        : this.roleRows.find((role) => role.id === id)?.tenantId),
+      tenantId ?? this.roleRows.find((role) => role.id === id)?.tenantId,
       currentUser
     );
-    if (this.useMysqlDataSource()) {
-      return this.platformRepository.deleteRole(id, targetTenantId, currentUser?.id);
-    }
     const index = this.roleRows.findIndex((role) => role.id === id);
     if (index < 0) {
       throw new NotFoundException(`Role ${id} was not found`);
     }
 
     const role = this.roleRows[index];
+    if (role.tenantId && role.tenantId !== targetTenantId) {
+      throw new NotFoundException(`Role ${id} was not found`);
+    }
     if (role.fixedAllPermissions) {
       throw new BadRequestException("预设角色不能删除");
     }
@@ -2360,15 +1680,11 @@ export class PlatformService {
   }
 
   async setUserStatus(id: string, isActive: boolean, tenantId: string | undefined, currentUser?: SystemUserRow) {
+    if (this.useMysqlDataSource()) return this.getPublicManagementAdapter().setUserStatus(id, isActive, tenantId);
     const targetTenantId = this.resolveTargetTenantId(
-      tenantId ?? (this.useMysqlDataSource()
-        ? await this.platformRepository.getUserTenantId(id)
-        : this.users.find((user) => user.id === id)?.tenantId),
+      tenantId ?? this.users.find((user) => user.id === id)?.tenantId,
       currentUser
     );
-    if (this.useMysqlDataSource()) {
-      return this.platformRepository.setUserStatus(id, isActive, targetTenantId, currentUser?.id);
-    }
     const user = this.users.find((item) => item.id === id);
     if (!user || user.tenantId !== targetTenantId) {
       throw new NotFoundException(`User ${id} was not found`);
@@ -2381,15 +1697,11 @@ export class PlatformService {
   }
 
   async resetUserPassword(id: string, tenantId: string | undefined, currentUser?: SystemUserRow) {
+    if (this.useMysqlDataSource()) return this.getPublicManagementAdapter().resetUserPassword(id, tenantId);
     const targetTenantId = this.resolveTargetTenantId(
-      tenantId ?? (this.useMysqlDataSource()
-        ? await this.platformRepository.getUserTenantId(id)
-        : this.users.find((user) => user.id === id)?.tenantId),
+      tenantId ?? this.users.find((user) => user.id === id)?.tenantId,
       currentUser
     );
-    if (this.useMysqlDataSource()) {
-      return this.platformRepository.resetUserPassword(id, targetTenantId, currentUser?.id);
-    }
     const user = this.users.find((item) => item.id === id);
     if (!user || user.tenantId !== targetTenantId) {
       throw new NotFoundException(`User ${id} was not found`);
@@ -2411,10 +1723,8 @@ export class PlatformService {
   }
 
   async resetTenantAdminPassword(tenantId: string, currentUser?: SystemUserRow) {
+    if (this.useMysqlDataSource()) return this.getPublicManagementAdapter().resetTenantAdminPassword(tenantId);
     this.assertSaasAdmin(currentUser);
-    if (this.useMysqlDataSource()) {
-      return this.platformRepository.resetTenantAdminPassword(tenantId, currentUser?.id);
-    }
 
     const tenant = this.tenants.find((item) => item.tenantId === tenantId && item.tenantCode !== "platform");
     if (!tenant) {
@@ -2429,7 +1739,7 @@ export class PlatformService {
 
   listUsers(tenantId?: string, currentUser?: SystemUserRow) {
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.listUsers(tenantId, currentUser);
+      return this.getPublicManagementAdapter().listUsers(tenantId);
     }
     if (isOrganizationScopedUser(currentUser)) {
       const scopedTenantId = resolveTenantIdForQuery(tenantId, currentUser);
@@ -2463,12 +1773,10 @@ export class PlatformService {
   }
 
   async saveUser(input: SaveSystemUserRequest, currentUser?: SystemUserRow) {
+    if (this.useMysqlDataSource()) return this.getPublicManagementAdapter().saveUser(input);
     const targetTenantId = this.resolveTargetTenantId(input.tenantId, currentUser);
     input = { ...input, tenantId: targetTenantId, isSaasAdmin: false };
     await this.assertTenantAdminPrivilegeWrite(input, targetTenantId, currentUser);
-    if (this.useMysqlDataSource()) {
-      return this.platformRepository.saveUser(input, targetTenantId, currentUser?.id);
-    }
     const tenant = this.tenants.find((item) => item.tenantId === input.tenantId);
     const account = input.account.trim();
     const displayName = input.displayName.trim();
@@ -2567,72 +1875,27 @@ export class PlatformService {
     input: SaveSystemUserAccessRequest,
     currentUser?: SystemUserRow
   ) {
-    const targetTenantId = this.resolveTargetTenantId(input.tenantId, currentUser);
-    await this.assertTenantAdminPrivilegeWrite(input, targetTenantId, currentUser);
-    this.requireWorkspaceDataSource();
-    return this.platformRepository.saveUserWithWorkspaceAccess(
-      { ...input, tenantId: targetTenantId, isSaasAdmin: false },
-      targetTenantId,
-      currentUser?.id
-    );
+    return this.getWorkspaceApplication().saveUserWithWorkspaceAccess(input, currentUser);
   }
 
-  getCustomerCreditAccount(customerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerCorporateSettlement().financialAccount(tenantId, customerId);
-  }
+  getCustomerCreditAccount(customerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().getCustomerCreditAccount(customerId, currentUser); }
 
-  listCustomerCreditLedger(customerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerCorporateSettlement().listLedger(tenantId, customerId);
-  }
+  listCustomerCreditLedger(customerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().listCustomerCreditLedger(customerId, currentUser); }
 
-  recordCustomerCreditMaturity(customerId: string, input: RecordCustomerCorporateCreditMaturityRequest, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    if (!currentUser?.id || currentUser.isSaasAdmin || !(currentUser.isPlatformAdmin
-      || currentUser.permissions.includes("rental-os:corporate:manage") || currentUser.permissions.includes("*"))) {
-      throw new ForbiddenException("核定债权到期日需要当前企业管理权限");
-    }
-    if (getRequestDataScope() !== "all" || getRequestLocationIds() !== undefined) throw new ForbiddenException("核定债权须当前完整空间财务范围");
-    return this.requireCustomerCorporateSettlement().recordMaturity(currentUser.tenantId, customerId, input,
-      currentUser.id, requireRequestWorkspaceId());
-  }
+  recordCustomerCreditMaturity(customerId: string, input: RecordCustomerCorporateCreditMaturityRequest, currentUser?: SystemUserRow) { return this.getCustomerApplication().recordCustomerCreditMaturity(customerId, input, currentUser); }
 
-  readCustomerCreditMaturity(customerId: string, ledgerId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    if (getRequestDataScope() !== "all" || getRequestLocationIds() !== undefined) throw new ForbiddenException("读取债权到期依据须当前完整空间财务范围");
-    return this.requireCustomerCorporateSettlement().readMaturity(tenantId, customerId, ledgerId, requireRequestWorkspaceId());
-  }
+  readCustomerCreditMaturity(customerId: string, ledgerId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().readCustomerCreditMaturity(customerId, ledgerId, currentUser); }
 
-  readCustomerCreditPaymentReversal(customerId: string, paymentId: string, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    return this.requireCustomerCorporateSettlement().readPaymentReversal(currentUser?.tenantId ?? requireRequestTenantId(), customerId, paymentId);
-  }
+  readCustomerCreditPaymentReversal(customerId: string, paymentId: string, currentUser?: SystemUserRow) { return this.getCustomerApplication().readCustomerCreditPaymentReversal(customerId, paymentId, currentUser); }
 
   reverseCustomerCreditPayment(customerId: string, paymentId: string, input: ReverseCustomerCorporateCreditPaymentRequest,
-    currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerCorporateSettlement().reversePayment(tenantId, customerId, paymentId, input);
-  }
+    currentUser?: SystemUserRow) { return this.getCustomerApplication().reverseCustomerCreditPayment(customerId, paymentId, input, currentUser); }
 
   recordCustomerCreditPayment(
     customerId: string,
     input: RecordCustomerCorporateCreditPaymentRequest,
     currentUser?: SystemUserRow
-  ) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerCorporateSettlement().recordPayment(
-      tenantId,
-      customerId,
-      input,
-      currentUser?.displayName
-    );
-  }
+  ) { return this.getCustomerApplication().recordCustomerCreditPayment(customerId, input, currentUser); }
 
   async findUserForLogin(tenantCode: string, account: string, password: string) {
     if (this.useMysqlDataSource()) {
@@ -2670,8 +1933,12 @@ export class PlatformService {
     return user && tenant?.tenantStatus === TenantStatus.Active ? this.toUserRow(user) : undefined;
   }
 
-  createAuthSession(input: { id: string; userId: string; refreshTokenHash: string; expiresAt: Date; currentWorkspaceId?: string | null; audience?: "operator" | "staff" }) {
-    if (this.useMysqlDataSource()) return this.platformRepository.createAuthSession(input);
+  createAuthSession(input: { id: string; userId: string; refreshTokenHash: string; expiresAt: Date; currentWorkspaceId?: string | null; audience?: "operator" | "staff" }, expectedVersion?: number) {
+    if (this.useMysqlDataSource()) return this.platformRepository.createAuthSession(input, expectedVersion);
+    if (expectedVersion !== undefined) {
+      const user = this.users.find(item => item.id === input.userId);
+      if (!user || (user.tokenVersion ?? 1) !== expectedVersion) throw new ConflictException("密码已变化，请重新登录");
+    }
     const session = { ...input, audience: input.audience ?? "operator" as const };
     this.authSessions.set(input.id, session);
     return session;
@@ -2742,6 +2009,17 @@ export class PlatformService {
     return this.platformRepository.readWorkspaceSessionUser(tx, expected);
   }
 
+  lockMemberSessionUser(tx: RentalWorkspaceAccessTransaction, expected: RentalMemberSessionIdentity,
+    parentLock: "exclusive" | "shared" = "exclusive") {
+    if (!this.useMysqlDataSource()) throw new ForbiddenException("业务事务授权需要持久化身份来源，演示身份不能替代");
+    return this.platformRepository.lockMemberSessionUser(tx, expected, parentLock);
+  }
+
+  readMemberSessionUser(tx: RentalWorkspaceAccessTransaction, expected: RentalMemberSessionIdentity) {
+    if (!this.useMysqlDataSource()) throw new ForbiddenException("业务事务授权需要持久化身份来源");
+    return this.platformRepository.readMemberSessionUser(tx, expected);
+  }
+
   /** External current grants must use original persistent identity, never the
    * memory mode's synthetic workspace or a mutable Web session selection. */
   async resolveTrustedWorkspacePrincipal(binding: { userId: string; tenantId: string; workspaceId: string }, transaction: Prisma.TransactionClient) {
@@ -2750,24 +2028,14 @@ export class PlatformService {
   }
 
   async assertTrustedWorkspaceIntegrationManagement(binding: { userId: string; tenantId: string; workspaceId: string }, transaction: Prisma.TransactionClient) {
-    if (!this.useMysqlDataSource()) throw new ForbiddenException('可信空间集成管理需要原持久身份系统');
-    return this.platformRepository.assertTrustedWorkspaceIntegrationManagement(binding, transaction);
+    return assertOriginalMcpManagedWorkspace({ useMysqlDataSource: () => this.useMysqlDataSource(), repository: this.platformRepository }, binding, transaction);
   }
 
   /** Original tenant metadata governance, not target workspace/business access.
    * Reuses full-tenant integration rights and the original persistent account;
    * SaaS identity never becomes a tenant actor or a tenant subject target. */
   async assertTrustedWorkspaceSubjectManagement(binding: { userId: string; tenantId: string; workspaceId: string }, targetUserId: string, transaction: Prisma.TransactionClient) {
-    if (!this.useMysqlDataSource() || !transaction?.user || typeof targetUserId !== 'string'
-      || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/.test(targetUserId)) throw new ForbiddenException('可信主体管理需要原持久身份系统');
-    const actor = await this.assertTrustedWorkspaceIntegrationManagement(binding, transaction);
-    const user = await this.platformRepository.findUserById(targetUserId, transaction);
-    if (!user || typeof user !== 'object') throw new ForbiddenException('缺少当前租户主体');
-    const descriptors = Object.getOwnPropertyDescriptors(user);
-    const value = (name: string) => { const field = descriptors[name]; if (!field?.enumerable || !Object.hasOwn(field, 'value')) throw new ForbiddenException('缺少当前租户主体'); return field.value; };
-    if (value('id') !== targetUserId || value('tenantId') !== binding.tenantId || value('isActive') !== true
-      || value('isSaasAdmin') !== false || actor.id !== binding.userId || actor.tenantId !== binding.tenantId) throw new ForbiddenException('缺少当前租户主体');
-    return Object.freeze({ actorId: actor.id, tenantId: binding.tenantId, userId: targetUserId, workspaceId: binding.workspaceId });
+    return assertOriginalMcpManagedSubject({ useMysqlDataSource: () => this.useMysqlDataSource(), repository: this.platformRepository }, binding, targetUserId, transaction);
   }
 
   /** Internal PLATFORM management only. Re-read the original persistent account
@@ -2849,6 +2117,8 @@ export class PlatformService {
 
   revokeUserSessions(userId: string) {
     if (this.useMysqlDataSource()) return this.platformRepository.revokeUserSessions(userId);
+    const user = this.users.find(item => item.id === userId);
+    if (user) user.tokenVersion = (user.tokenVersion ?? 1) + 1;
     for (const session of this.authSessions.values()) {
       if (session.userId === userId) session.revokedAt = new Date();
     }
@@ -2860,10 +2130,13 @@ export class PlatformService {
     }
     const user = this.users.find((item) => item.id === userId);
     if (!user || user.password !== currentPassword) throw new BadRequestException("当前密码不正确");
+    // 本次同步改密和撤销固定一个版本，await之后不能借后续重置的版本继续签发。
+    const expectedVersion = (user.tokenVersion ?? 1) + 1;
     user.password = nextPassword;
     user.mustChangePassword = false;
     user.needsTenantOnboarding = false;
     await this.revokeUserSessions(userId);
+    return expectedVersion;
   }
 
   /** 仅由本机开发环境入口调用；详情与环境限制由 AuthService 负责。 */
@@ -3020,84 +2293,8 @@ export class PlatformService {
     };
   }
 
-  private validateDictionaryGroup(input: SavePlatformDictionaryGroupRequest) {
-    if (!input.code.trim() || !input.name.trim() || !input.module.trim()) {
-      throw new BadRequestException("字典编码、名称和归属模块不能为空");
-    }
-    if (input.items.length === 0) {
-      throw new BadRequestException("数据字典至少保留一个字典项");
-    }
-    this.normalizeDictionaryItems(input.items);
-  }
-
-  private normalizeDictionaryItems(items: PlatformDictionaryItem[]) {
-    const codes = new Set<string>();
-    return items
-      .map((item) => ({
-        code: item.code.trim(),
-        label: item.label.trim(),
-        value: item.value.trim(),
-        sortNo: Number(item.sortNo),
-        enabled: Boolean(item.enabled),
-        remark: item.remark?.trim()
-      }))
-      .sort((left, right) => left.sortNo - right.sortNo)
-      .map((item) => {
-        if (!item.code || !item.label || !item.value) {
-          throw new BadRequestException("字典项编码、显示名称和值不能为空");
-        }
-        if (!Number.isFinite(item.sortNo)) {
-          throw new BadRequestException("字典项排序必须是数字");
-        }
-        if (codes.has(item.code)) {
-          throw new BadRequestException("字典项编码不能重复");
-        }
-        codes.add(item.code);
-        return item;
-      });
-  }
-
-  private validateNumberRule(input: SavePlatformNumberRuleRequest) {
-    if (!input.code.trim() || !input.name.trim() || !input.module.trim()) {
-      throw new BadRequestException("编号规则编码、名称和归属模块不能为空");
-    }
-    if (!input.prefix.trim()) {
-      throw new BadRequestException("编号前缀不能为空");
-    }
-    if (!Number.isInteger(input.sequenceLength) || input.sequenceLength < 3 || input.sequenceLength > 12) {
-      throw new BadRequestException("流水号长度必须是 3 到 12 位整数");
-    }
-    if (input.currentSequence !== undefined && input.currentSequence < 0) {
-      throw new BadRequestException("当前流水不能为负数");
-    }
-  }
-
   private formatNumber(rule: PlatformNumberRule, sequence: number) {
-    const parts = [rule.prefix];
-    const datePart = this.formatDatePart(rule.datePattern);
-    if (datePart) {
-      parts.push(datePart);
-    }
-    parts.push(String(sequence).padStart(rule.sequenceLength, "0"));
-    return parts.join("-");
-  }
-
-  private formatDatePart(pattern: PlatformNumberRule["datePattern"]) {
-    if (pattern === "none") {
-      return "";
-    }
-    const now = new Date();
-    const yyyy = String(now.getFullYear());
-    const yy = yyyy.slice(-2);
-    const mm = String(now.getMonth() + 1).padStart(2, "0");
-    const dd = String(now.getDate()).padStart(2, "0");
-    if (pattern === "yyyyMMdd") {
-      return `${yyyy}${mm}${dd}`;
-    }
-    if (pattern === "yyyyMM") {
-      return `${yyyy}${mm}`;
-    }
-    return `${yy}${mm}${dd}`;
+    return formatPlatformNumber(rule, sequence);
   }
 
   private recordMemoryAudit(input: Omit<PlatformAuditLogRow, "id" | "createdAt">) {
@@ -3150,39 +2347,7 @@ export class PlatformService {
     tenantId: string,
     currentUser?: SystemUserRow
   ) {
-    const actorIsTenantAdmin = Boolean(
-      currentUser?.id && currentUser.tenantId === tenantId && currentUser.isPlatformAdmin && !currentUser.isSaasAdmin
-    );
-    let targetIsTenantAdmin = false;
-    const workspaceRoleIds = "workspaceAccesses" in input && Array.isArray(input.workspaceAccesses)
-      ? input.workspaceAccesses.map((access) => access.roleId).filter((roleId): roleId is string => Boolean(roleId))
-      : [];
-    const requestedRoleIds = [...new Set([...(input.roleIds ?? []), ...workspaceRoleIds])];
-    let assignsFixedAllPermissions = false;
-    if (requestedRoleIds.length) {
-      if (this.useMysqlDataSource()) {
-        assignsFixedAllPermissions = await this.platformRepository.hasFixedAllPermissionRole(requestedRoleIds, tenantId);
-      } else {
-        assignsFixedAllPermissions = requestedRoleIds.some((roleId) =>
-          this.roleRows.some((role) => role.id === roleId && role.tenantId === tenantId && role.isActive && role.fixedAllPermissions)
-        );
-      }
-    }
-    if (input.id) {
-      if (this.useMysqlDataSource()) {
-        targetIsTenantAdmin = await this.platformRepository.isTenantAdminUser(input.id, tenantId);
-      } else {
-        const target = this.users.find((user) => user.id === input.id && user.tenantId === tenantId);
-        targetIsTenantAdmin = Boolean(target && (
-          target.isPlatformAdmin || target.roleIds.some((roleId) =>
-            this.roleRows.some((role) => role.id === roleId && role.tenantId === tenantId && role.isActive && role.fixedAllPermissions)
-          )
-        ));
-      }
-    }
-    if (!actorIsTenantAdmin && (input.isPlatformAdmin === true || targetIsTenantAdmin || assignsFixedAllPermissions)) {
-      throw new ForbiddenException("只有当前租户管理员可以新增、修改或撤销租户管理员权限");
-    }
+    return this.getWorkspaceApplication().assertTenantAdminPrivilegeWrite(input, tenantId, currentUser);
   }
 
   private cloneSystemRulesConfig(
@@ -3197,7 +2362,7 @@ export class PlatformService {
 
   private copySystemRulesConfig(config: SystemRulesConfig = this.systemRulesConfig): SystemRulesConfig {
     const cloned = JSON.parse(JSON.stringify(config)) as SystemRulesConfig;
-    cloned.security = this.normalizeSecurityBaseline(cloned.security);
+    cloned.security = normalizeSecurityBaseline(cloned.security);
     return cloned;
   }
 
@@ -3248,70 +2413,8 @@ export class PlatformService {
     return scope ?? "own";
   }
 
-  private defaultSecurityBaseline(): SystemSecurityBaselineConfig {
-    return {
-      loginRateLimit: {
-        enabled: true,
-        maxFailures: 5,
-        windowMinutes: 10,
-        lockMinutes: 15
-      },
-      passwordPolicy: {
-        minLength: 8,
-        requireLetter: true,
-        requireNumber: true,
-        disallowDefaultPassword: true,
-        expireDays: 90
-      },
-      masking: {
-        phone: true,
-        identityNo: true,
-        driverLicenseNo: true,
-        email: false,
-        apiKey: true
-      },
-      secondConfirmation: {
-        enabled: true,
-        actions: [
-          "system.user.reset-password",
-          "system.role.delete",
-          "rental-os.order.close",
-          "rental-os.fee.waive",
-          "rental-os.vehicle.disable"
-        ]
-      }
-    };
-  }
-
-  private normalizeSecurityBaseline(
-    input?: Partial<SystemSecurityBaselineConfig>
-  ): SystemSecurityBaselineConfig {
-    const defaults = this.defaultSecurityBaseline();
-    return {
-      loginRateLimit: {
-        ...defaults.loginRateLimit,
-        ...(input?.loginRateLimit ?? {})
-      },
-      passwordPolicy: {
-        ...defaults.passwordPolicy,
-        ...(input?.passwordPolicy ?? {})
-      },
-      masking: {
-        ...defaults.masking,
-        ...(input?.masking ?? {})
-      },
-      secondConfirmation: {
-        ...defaults.secondConfirmation,
-        ...(input?.secondConfirmation ?? {}),
-        actions:
-          input?.secondConfirmation?.actions ??
-          defaults.secondConfirmation.actions
-      }
-    };
-  }
-
   private validateSystemRulesConfig(config: SystemRulesConfig) {
-    const security = this.normalizeSecurityBaseline(config.security);
+    const security = normalizeSecurityBaseline(config.security);
     const numbers = [
       config.member.welcomeGift.amount,
       config.member.welcomeGift.validity,

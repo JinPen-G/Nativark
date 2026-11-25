@@ -323,14 +323,14 @@ function requestContext(method, url, accessToken) {
   assert.match(repositorySource, /authSession\.updateMany/);
   assert.doesNotMatch(repositorySource, /mock-token/);
 
-  const integrationsServiceSource = fs.readFileSync(
-    path.join(__dirname, "../apps/api/src/modules/integrations/integrations.service.ts"),
-    "utf8"
-  );
-  const integrationsRepositorySource = fs.readFileSync(
-    path.join(__dirname, "../apps/api/src/modules/integrations/integrations.repository.ts"),
-    "utf8"
-  );
+  const integrationsServiceSource = [
+    "../apps/api/src/modules/integrations/integrations.service.ts",
+    "../packages/rental-core/src/integration-runtime.ts"
+  ].map((file) => fs.readFileSync(path.join(__dirname, file), "utf8")).join("\n");
+  const integrationsRepositorySource = [
+    "../apps/api/src/modules/integrations/integrations.repository.ts",
+    "../packages/rental-core/src/mysql-integrations.ts"
+  ].map((file) => fs.readFileSync(path.join(__dirname, file), "utf8")).join("\n");
   const requestIdentitySource = fs.readFileSync(
     path.join(__dirname, "../apps/api/src/common/request-identity.ts"),
     "utf8"

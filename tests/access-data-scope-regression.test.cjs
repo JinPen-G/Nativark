@@ -11,6 +11,8 @@ const { buildOrganizationWhere, buildSystemUserWhere, isOrganizationScopedUser }
 const { enabledOrganizationSubtreeIds, organizationLocationScope } = require("../apps/api/src/common/organization-location-scope");
 const { MembershipService } = require("../apps/api/src/modules/platform/membership.service");
 const { PlatformRepository } = require("../apps/api/src/modules/platform/platform.repository");
+const { OriginalPublicManagementAdapter } = require("../apps/api/src/modules/platform/public-management.adapter");
+const { fixture: publicManagementFixture } = require("./fixtures/platform-management.cjs");
 const { PlatformService } = require("../apps/api/src/modules/platform/platform.service");
 const { RentalWorkspaceReportRepository } = require("../apps/api/src/modules/rental-core/rental-workspace-report.repository");
 const { CustomerOperationsRepository } = require("../apps/api/src/modules/platform/customer-operations.repository");
@@ -151,25 +153,26 @@ void (async () => {
     { id: "org-hidden", tenantId: "tenant-a", parentId: "org-disabled", type: "STORE", code: "HIDDEN", name: "停用链下级", status: "enabled" },
     { id: "org-sibling", tenantId: "tenant-a", parentId: null, type: "OPERATOR", code: "SIBLING", name: "平级组织", status: "enabled" }
   ];
-  const platformRepository = new PlatformRepository({
-    organizationUnit: {
-      async findMany(args) {
-        repositoryQueries.organization.push(args);
-        return repositoryOrganizationRows;
-      }
-    },
-    user: {
-      async findMany(args) {
-        repositoryQueries.users.push(args);
-        return [];
-      }
-    }
-  });
+  const publicFixture = publicManagementFixture();
+  publicFixture.operators[scopedOrganizationUser.id] = { ...publicFixture.operators.actor, ...scopedOrganizationUser };
+  publicFixture.tx.organizationUnit.findMany = async (args) => {
+    repositoryQueries.organization.push(args);
+    return repositoryOrganizationRows;
+  };
+  publicFixture.tx.user.findMany = async (args) => {
+    repositoryQueries.users.push(args);
+    return [];
+  };
+  const platformRepository = new PlatformRepository(publicFixture.database);
+  const management = new OriginalPublicManagementAdapter(publicFixture.service);
   assert.deepEqual((await platformRepository.listOrganizations("tenant-b", scopedOrganizationUser)).map((row) => row.id), ["org-root", "org-child"]);
-  await platformRepository.listUsers("tenant-b", scopedOrganizationUser);
+  await assert.rejects(publicFixture.as(scopedOrganizationUser.id, () => management.listUsers("tenant-b")),
+    (error) => error.status === 403, "读取人员仍需当前原管理权限");
+  publicFixture.operators[scopedOrganizationUser.id].permissions = ["system:user:manage"];
+  await publicFixture.as(scopedOrganizationUser.id, () => management.listUsers("tenant-b"));
   assert.deepEqual(repositoryQueries.organization[0].where, { tenantId: "tenant-a" });
   assert.deepEqual(repositoryQueries.users[0].where, {
-    tenantId: "tenant-a", organizationId: { in: ["org-child", "org-root"] }
+    tenantId: "tenant-a", isSaasAdmin: false, organizationId: { in: ["org-child", "org-root"] }
   });
   console.log("  PASS Prisma 查询条件将组织及运营账号限制在租户内的启用组织子树");
 
@@ -400,6 +403,11 @@ void (async () => {
   const restoreScopeRepository = new RentalCoreFactRepository({
     businessWorkspace: { async findFirst({ where }) { return { id: where.id ?? "workspace-a" }; } },
     async $transaction(run) { return run(this); },
+    async $queryRaw(query) {
+      assert.match(query.sql, /SELECT id FROM Tenant WHERE id=.*LOCK IN SHARE MODE/u);
+      assert.deepEqual(query.values, ["tenant-a"]);
+      return [{ id: "tenant-a" }];
+    },
     rentalStockDisposition: {
       async findFirst({ where }) { restoreDispositionWhere = where; return null; }
     }

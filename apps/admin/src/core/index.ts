@@ -1,0 +1,3 @@
+/** 原入口兼容转接；公共实现由 platform-admin 单源维护。 */
+export * from "@rental-os/platform-admin/source/core/index";
+export { coreManagementApi } from "./management-client";

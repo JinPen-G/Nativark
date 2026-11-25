@@ -16,7 +16,7 @@ function walk(dir) {
       const source = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
       const relative = path.relative(root, file).replaceAll(path.sep, '/');
       for (const node of source.statements) {
-        if (ts.isExportDeclaration(node) && relative === 'apps/admin/src/components/ui/index.ts' && node.exportClause && ts.isNamedExports(node.exportClause)) {
+        if (ts.isExportDeclaration(node) && relative === 'packages/platform-admin/src/components/ui/index.ts' && node.exportClause && ts.isNamedExports(node.exportClause)) {
           uiExports.push(...node.exportClause.elements.map(item => item.name.text));
         }
         if (!ts.isImportDeclaration(node) || !ts.isStringLiteral(node.moduleSpecifier)) continue;
@@ -25,7 +25,7 @@ function walk(dir) {
           const key = module.slice('@/'.length).replace(/\.(tsx?|css)$/, '');
           imports.set(key, [...(imports.get(key) ?? []), relative]);
         }
-        if (module === 'antd' && !relative.startsWith('apps/admin/src/components/ui/')) {
+        if (module === 'antd' && !relative.startsWith('apps/admin/src/components/ui/') && !relative.startsWith('packages/platform-admin/src/components/ui/')) {
           const bindings = node.importClause?.namedBindings;
           if (bindings && ts.isNamedImports(bindings)) for (const item of bindings.elements) {
             if (item.isTypeOnly || node.importClause.isTypeOnly) continue;
@@ -38,6 +38,7 @@ function walk(dir) {
   }
 }
 walk(path.join(root, 'apps/admin/src'));
+walk(path.join(root, 'packages/platform-admin/src'));
 const badHashes = [];
 const entries = manifest.entries.map(entry => {
   const consumers = new Set();
@@ -57,7 +58,7 @@ if (process.argv.includes('--json')) console.log(JSON.stringify(report, null, 2)
 else {
   const lines = ['# 后台组件源码与接入清单', '', '> 由 `node scripts/audit-admin-components.cjs` 只读扫描生成。引用不等于运行验收，也不等于所有兼容分支均已替换。', '',
     `本地 ${entries.length} 个公开源码条目 / ${report.sourceFiles} 个唯一文件；Pro ${report.proCount} 个仅有目录元数据；源码校验异常 ${badHashes.length} 个。`, '',
-    '## 使用入口', '', '`@/components/ui` 是业务页统一入口；原始源码在 `packages/ui-arc/vendor`，下载记录及哈希在 `manifest.json`。', '',
+    '## 使用入口', '', '`@rental-os/platform-admin/ui` 是公共页面入口；原后台 `@/components/ui` 保留兼容转接。原始源码在 `packages/ui-arc/vendor`，下载记录及哈希在 `manifest.json`。', '',
     '新增页面先查本清单和适配器 API；备用组件按需单独接入并安装其依赖，不要打包整个目录。不要修改 vendor，尺寸与动效保留原设计；颜色、圆角、语言和声音由平台适配层负责。', '',
     '已导出的平台 API：' + uiExports.map(name => '`' + name + '`').join('、') + '。', '',
     '## 全量公开源码清单', '', '| 名称 | 接入状态 | 当前引用位置 |', '| --- | --- | --- |'];

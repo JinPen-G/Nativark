@@ -50,8 +50,7 @@ void (async () => {
   assert.equal(facts.rows[0].blockReason, "damage");
   ok("同批重试保持幂等，异常归还进入阻断状态");
 
-  const repo = Object.create(RentalCoreFactRepository.prototype);
-  repo.prisma = {};
+  const repo = new RentalCoreFactRepository({});
   const original = {
     id: "disp_1", tenantId: "tenant_1", workspaceId: "ws_1", orderId: "order_1", inspectionId: "inspection_1",
     returnBatchKey: "batch_1", itemGroupId: "group_q", locationId: "loc_b", assetId: null,
@@ -63,6 +62,11 @@ void (async () => {
   let maintenanceDelta;
   const tx = {
     $queryRaw: async query => {
+      if (/FROM Tenant/.test(query.sql)) {
+        assert.match(query.sql, /LOCK IN SHARE MODE/);
+        assert.deepEqual(query.values, ["tenant_1"]);
+        return [{ id: "tenant_1" }];
+      }
       if (/rental_allocations/.test(query.sql)) return [];
       if (/rental_orders/.test(query.sql)) return [{ id: 'order_1', workspaceId: 'ws_1' }];
       if (/rental_stock_dispositions/.test(query.sql)) return [original];
@@ -89,7 +93,7 @@ void (async () => {
   assert.equal(maintenanceDelta[5], "maintenance_release");
   ok("缓冲结束后受控恢复通过带来源的维修库存流水释放实收地点隔离量");
 
-  const writeOffRepo = Object.create(RentalCoreFactRepository.prototype);
+  const writeOffRepo = new RentalCoreFactRepository({});
   const writeOffDisposition = {
     ...original,
     status: "blocked",

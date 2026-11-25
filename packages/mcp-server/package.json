@@ -203,9 +203,20 @@
     "./conversation-list-read": {
       "types": "./dist/conversation-list-read.d.ts",
       "import": "./dist/conversation-list-read.js"
+    },
+    "./http-host": {
+      "types": "./dist/http-host.d.ts",
+      "import": "./dist/http-host.js"
     }
   },
-  "files": ["dist", "mysql-oauth-schema.sql", "mysql-read-budget-schema.sql", "mysql-catalog-goal-schema.sql", "mysql-catalog-goal-intent-schema.sql", "mysql-catalog-goal-adoption-schema.sql"],
+  "files": [
+    "dist",
+    "mysql-oauth-schema.sql",
+    "mysql-read-budget-schema.sql",
+    "mysql-catalog-goal-schema.sql",
+    "mysql-catalog-goal-intent-schema.sql",
+    "mysql-catalog-goal-adoption-schema.sql"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
@@ -217,10 +228,167 @@
     "@rental-os/shared": "0.1.0"
   },
   "peerDependenciesMeta": {
-    "@rental-os/shared": { "optional": true }
+    "@rental-os/shared": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/node": "22.20.1",
     "typescript": "6.0.3"
+  },
+  "types": "./dist/index.d.ts",
+  "typesVersions": {
+    "*": {
+      "host-router": [
+        "dist/host-router.d.ts"
+      ],
+      "service": [
+        "dist/service.d.ts"
+      ],
+      "persistent-oauth-authorization": [
+        "dist/persistent-oauth-authorization.d.ts"
+      ],
+      "persistent-oauth-tokens": [
+        "dist/persistent-oauth-tokens.d.ts"
+      ],
+      "prisma-oauth-store": [
+        "dist/prisma-oauth-store.d.ts"
+      ],
+      "prisma-public-client-registry": [
+        "dist/prisma-public-client-registry.d.ts"
+      ],
+      "protocol-traffic": [
+        "dist/protocol-traffic.d.ts"
+      ],
+      "original-traffic-meter": [
+        "dist/original-traffic-meter.d.ts"
+      ],
+      "persistent-read-accounting": [
+        "dist/persistent-read-accounting.d.ts"
+      ],
+      "prisma-mcp-read-budget": [
+        "dist/prisma-mcp-read-budget.d.ts"
+      ],
+      "prisma-mcp-read-accounting": [
+        "dist/prisma-mcp-read-accounting.d.ts"
+      ],
+      "prisma-mcp-catalog-goals": [
+        "dist/prisma-mcp-catalog-goals.d.ts"
+      ],
+      "prisma-mcp-read-bindings": [
+        "dist/prisma-mcp-read-bindings.d.ts"
+      ],
+      "prisma-mcp-catalog-goal-adoptions": [
+        "dist/prisma-mcp-catalog-goal-adoptions.d.ts"
+      ],
+      "prisma-mcp-catalog-goal-intents": [
+        "dist/prisma-mcp-catalog-goal-intents.d.ts"
+      ],
+      "prisma-mcp-read-goal-settlement": [
+        "dist/prisma-mcp-read-goal-settlement.d.ts"
+      ],
+      "prisma-mcp-read-receipt": [
+        "dist/prisma-mcp-read-receipt.d.ts"
+      ],
+      "prisma-oauth-grant-admission": [
+        "dist/prisma-oauth-grant-admission.d.ts"
+      ],
+      "prisma-oauth-grant-use": [
+        "dist/prisma-oauth-grant-use.d.ts"
+      ],
+      "prisma-oauth-grant-management": [
+        "dist/prisma-oauth-grant-management.d.ts"
+      ],
+      "prisma-oauth-grant-authority": [
+        "dist/prisma-oauth-grant-authority.d.ts"
+      ],
+      "prisma-oauth-admission-store": [
+        "dist/prisma-oauth-admission-store.d.ts"
+      ],
+      "prisma-oauth-consent-authority": [
+        "dist/prisma-oauth-consent-authority.d.ts"
+      ],
+      "prisma-oauth-web-consent": [
+        "dist/prisma-oauth-web-consent.d.ts"
+      ],
+      "prisma-oauth-consent-review": [
+        "dist/prisma-oauth-consent-review.d.ts"
+      ],
+      "consent-control-plane": [
+        "dist/consent-control-plane.d.ts"
+      ],
+      "catalog-goal-control-plane": [
+        "dist/catalog-goal-control-plane.d.ts"
+      ],
+      "subject-control-plane": [
+        "dist/subject-control-plane.d.ts"
+      ],
+      "reviewed-governance-control-plane": [
+        "dist/reviewed-governance-control-plane.d.ts"
+      ],
+      "admission-control-plane": [
+        "dist/admission-control-plane.d.ts"
+      ],
+      "grant-control-plane": [
+        "dist/grant-control-plane.d.ts"
+      ],
+      "review-control-plane": [
+        "dist/review-control-plane.d.ts"
+      ],
+      "prisma-oauth-notice-review": [
+        "dist/prisma-oauth-notice-review.d.ts"
+      ],
+      "prisma-oauth-consent-policy-store": [
+        "dist/prisma-oauth-consent-policy-store.d.ts"
+      ],
+      "prisma-oauth-subject-store": [
+        "dist/prisma-oauth-subject-store.d.ts"
+      ],
+      "prisma-public-client-review": [
+        "dist/prisma-public-client-review.d.ts"
+      ],
+      "authorization-code-binding": [
+        "dist/authorization-code-binding.d.ts"
+      ],
+      "authorization-server-metadata": [
+        "dist/authorization-server-metadata.d.ts"
+      ],
+      "oauth-token-endpoint": [
+        "dist/oauth-token-endpoint.d.ts"
+      ],
+      "public-client-authorization-endpoint": [
+        "dist/public-client-authorization-endpoint.d.ts"
+      ],
+      "public-client-authorization": [
+        "dist/public-client-authorization.d.ts"
+      ],
+      "capability-mapping": [
+        "dist/capability-mapping.d.ts"
+      ],
+      "conversation-result-read": [
+        "dist/conversation-result-read.d.ts"
+      ],
+      "selected-proposal-read": [
+        "dist/selected-proposal-read.d.ts"
+      ],
+      "quote-selection-read": [
+        "dist/quote-selection-read.d.ts"
+      ],
+      "selected-order-result-read": [
+        "dist/selected-order-result-read.d.ts"
+      ],
+      "original-task-recovery-read": [
+        "dist/original-task-recovery-read.d.ts"
+      ],
+      "conversation-operation-read": [
+        "dist/conversation-operation-read.d.ts"
+      ],
+      "conversation-list-read": [
+        "dist/conversation-list-read.d.ts"
+      ],
+      "http-host": [
+        "dist/http-host.d.ts"
+      ]
+    }
   }
 }

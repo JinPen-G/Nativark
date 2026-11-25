@@ -22,7 +22,7 @@ require("ts-node").register({
 const ROOT = path.resolve(__dirname, "..");
 const navSource = fs.readFileSync(path.join(ROOT, "apps/admin/src/app/navigation.tsx"), "utf8");
 const pageSource = fs.readFileSync(path.join(ROOT, "apps/admin/src/features/tenant-access/TenantAccessPages.tsx"), "utf8");
-const memberRepoSource = fs.readFileSync(path.join(ROOT, "apps/api/src/modules/platform/platform.repository.ts"), "utf8");
+const memberRepoSource = fs.readFileSync(path.join(ROOT, "packages/rental-core/src/mysql-workspace-principal.ts"), "utf8");
 const authServiceSource = fs.readFileSync(path.join(ROOT, "apps/api/src/modules/auth/auth.service.ts"), "utf8");
 
 let passed = 0;

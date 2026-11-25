@@ -299,8 +299,15 @@ void withCleanup(async () => {
   ]) {
     assert.equal(serialized.includes(legacy), false, `出参不得包含车辆/门市专用字段 ${legacy}`);
   }
-  const repoSource = fs.readFileSync(
+  // 旧 Nest 入口与包内实现分别核对，薄转接不再承载报表查询正文。
+  const repositoryHost = fs.readFileSync(
     path.join(ROOT, "apps/api/src/modules/rental-core/rental-workspace-report.repository.ts"),
+    "utf8"
+  );
+  assert.match(repositoryHost, /@rental-os\/rental-core\/mysql-reports/u, "原仓储入口必须复用正式业务包");
+  assert.match(repositoryHost, /extends RentalWorkspaceReportImplementation/u, "原仓储入口须保持同一实现的委托");
+  const repoSource = fs.readFileSync(
+    path.join(ROOT, "packages/rental-core/src/mysql-reports.ts"),
     "utf8"
   );
   for (const legacy of ["storeRental", "rental_orders", "vehicle", "plateNo", "billingMode"]) {
@@ -329,8 +336,14 @@ void withCleanup(async () => {
 
   // ============ 7. 页面：标题用品类术语，指标标签固定 ============
   // 指标标签跟着品类变会让同一个数字在两个空间被读成两种含义。
-  const page = fs.readFileSync(
+  const pageHost = fs.readFileSync(
     path.join(ROOT, "apps/admin/src/features/reports/WorkspaceOperationReportPage.tsx"),
+    "utf8"
+  );
+  assert.match(pageHost, /@rental-os\/rental-core\/admin\/operations/u, "原报表路由必须复用正式业务页面");
+  assert.match(pageHost, /<RentalWorkspaceOperationReportPage\s*\//u, "原宿主须渲染同一业务页面");
+  const page = fs.readFileSync(
+    path.join(ROOT, "packages/rental-core/admin/operations/WorkspaceOperationReportPage.tsx"),
     "utf8"
   );
   assert.match(page, /terminology\.itemLabel/u, "页面描述可以使用当前品类术语");

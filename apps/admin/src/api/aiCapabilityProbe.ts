@@ -1,24 +1,6 @@
-/** Original controlled probe transport. No supplier connection, provider ID,
- * caller scope, policy permissions, automatic retry or task replacement. */
-import { AI_TEXT_CAPABILITY_HTTP_DRAFT as routes, type AiTextCapabilityHttpResponsesDraft,
-  type AiTextCapabilityPrepareRequestDraft, type AiTextCapabilityCancelRequestDraft,
-  type AiTextCapabilityConfigureActionDraft, type AiTextCapabilityActionRequestDraft,
-  type AiTextCapabilityAccountingOperationRequestDraft, type ApiResult } from '@rental-os/shared';
-import { currentSessionSignal } from '@/app/queryClient';
-import { aiTaskCenterApi } from './aiTaskCenter';
-import { http } from './http';
-import { AI_EXECUTION_RESPONSE_TIMEOUT_MS } from './aiRequestTiming';
+/** 原组合后台仅绑定原会话；设置正文与恢复逻辑由所选 AI 包单源提供。 */
+import { createAiCapabilityProbeApi } from "@rental-os/ai-native-admin/source/tenant-model-settings/aiCapabilityProbe";
+import { legacyAiAdminHost } from "@/features/ai-native/legacy-host";
+export type { CapabilityProbeAction } from "@rental-os/ai-native-admin/source/tenant-model-settings/aiCapabilityProbe";
 
-export type CapabilityProbeAction = 'prepare' | 'publish' | 'readOriginal' | 'createTask' | 'readTask' | 'start' | 'inspect'
-  | 'cancel' | 'reconcile' | 'readCapabilityReceipt' | 'readHistory' | 'preflight' | 'readTaskAction' | 'configureTaskAction' | 'readTaskActionReceipt'
-  | 'readAccounting' | 'releaseUnsent' | 'reconcileAccounting' | 'readAccountingOperation';
-export const aiCapabilityProbeApi = Object.freeze({
-  readCancellationReceipt: aiTaskCenterApi.stopReceipt,
-  async call<K extends CapabilityProbeAction>(action: K, value: AiTextCapabilityPrepareRequestDraft | AiTextCapabilityCancelRequestDraft
-    | AiTextCapabilityConfigureActionDraft | AiTextCapabilityActionRequestDraft | AiTextCapabilityAccountingOperationRequestDraft, signal: AbortSignal): Promise<AiTextCapabilityHttpResponsesDraft[K]> {
-    const response = await http.post<ApiResult<AiTextCapabilityHttpResponsesDraft[K]>>(`/${routes.basePath}/${routes[action]}`, value,
-      { signal: AbortSignal.any([signal, currentSessionSignal()]), headers: { 'Cache-Control': 'no-store' },
-        ...(action === 'start' ? { timeout: AI_EXECUTION_RESPONSE_TIMEOUT_MS } : {}) });
-    return response.data.data;
-  }
-});
+export const aiCapabilityProbeApi = createAiCapabilityProbeApi(legacyAiAdminHost);

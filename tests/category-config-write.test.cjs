@@ -8,7 +8,14 @@ const calls = [];
 const client = {
   $transaction: async (write, options) => { assert.equal(options?.isolationLevel, "ReadCommitted", "自建配置事务必须避免锁前旧快照"); calls.push("transaction"); return write(client); },
   businessWorkspace: { findFirst: async () => ({ id: "ws" }) },
-  $queryRaw: async () => { calls.push("lock"); return [{ categoryCode: "CAMERA", categoryVersionId: "v2", categoryAdoptionRevision: 2, status: "ACTIVE" }]; },
+  $queryRaw: async query => {
+    if (query.sql === "SELECT id FROM Tenant WHERE id=? LOCK IN SHARE MODE") {
+      assert.deepEqual(query.values, ["t"]); calls.push("tenant-lock"); return [{ id: "t" }];
+    }
+    assert.match(query.sql, /business_workspaces/u); assert.match(query.sql, /FOR UPDATE$/u);
+    assert.deepEqual(query.values, ["t", "ws"]);
+    calls.push("lock"); return [{ categoryCode: "CAMERA", categoryVersionId: "v2", categoryAdoptionRevision: 2, status: "ACTIVE" }];
+  },
   rentalCategoryVersion: { findUnique: async () => { calls.push("version"); return { categoryCode: "CAMERA", structureVersion: 1, status: "published", definition }; } }
 };
 for (const name of ["rentalTenantBusinessSettings", "rentalFulfillmentLocation", "rentalFulfillmentOperator", "rentalInspectionTemplate"]) client[name] = {
@@ -44,7 +51,13 @@ async function approvedNotificationsSmoke() {
     return {
       records: data,
       businessWorkspace: { findFirst: async () => structuredClone(workspace) },
-      $queryRaw: async query => { assert.match(query.sql, /FOR UPDATE/); assert.equal(transactional, true); return [structuredClone(workspace)]; },
+      $queryRaw: async query => {
+        assert.equal(transactional, true);
+        if (query.sql === "SELECT id FROM Tenant WHERE id=? LOCK IN SHARE MODE") {
+          assert.deepEqual(query.values, ["t"]); return [{ id: "t" }];
+        }
+        assert.match(query.sql, /FOR UPDATE/); return [structuredClone(workspace)];
+      },
       rentalCategoryVersion: { findUnique: async () => ({ categoryCode: "CAMERA", structureVersion: 1, status: "published", definition: category }) },
       rentalApprovedSettingsChange: ledger("changes"), rentalApprovedSettingsOperation: ledger("operations"),
       rentalTenantBusinessSettings: {
@@ -66,8 +79,10 @@ async function approvedNotificationsSmoke() {
     };
   };
   const db = new Proxy({}, { get: (_target, key) => key === "$transaction" ? async (work, options) => {
-    assert.equal(options.isolationLevel, "ReadCommitted");
+    const historicalRead = options.isolationLevel === "RepeatableRead";
+    if (!historicalRead) assert.equal(options.isolationLevel, "ReadCommitted");
     const draft = structuredClone(rows), result = await work(local(draft, true));
+    if (historicalRead) assert.deepEqual(draft, rows, "历史变更回读只观察原收据，不修改活动设置或批准");
     const committedOperation = draft.operations.length > rows.operations.length;
     const committedPreparation = draft.changes.length > rows.changes.length;
     rows = draft;
@@ -80,7 +95,7 @@ async function approvedNotificationsSmoke() {
     readVersionedBusinessSettings: repository.readVersionedBusinessSettings.bind(repository), upsertBusinessSettings: repository.upsertBusinessSettings.bind(repository) };
   const core = new RentalCoreService(store, createAbsorbingFactStore());
   await core.onApplicationBootstrap();
-  await scope(() => core.saveBusinessSettings("t", core.getBusinessSettings("t"), "admin"));
+  await scope(async () => core.saveBusinessSettings("t", await core.getBusinessSettings("t"), "admin"));
   assert.equal(rows.settings.settingsRevision, 1);
   const initial = structuredClone(rows.settings.settings);
   const guard = new ApiAuthGuard({ resolveAccessContext: async (token, options) => {
@@ -123,7 +138,7 @@ async function approvedNotificationsSmoke() {
   workspace.categoryAdoptionRevision = 2; ackLost = true;
   await assert.rejects(() => app.commitApprovedChange(command), error => error.code === "SETTINGS_RESULT_UNKNOWN");
   assert.equal(rows.settings.settingsRevision, 2); assert.equal(rows.operations.length, 1); assert.equal(rows.consumptions.length, 1);
-  assert.deepEqual(scope(() => core.getBusinessSettings("t").notifications), initial.notifications, "unknown 不提前发布缓存");
+  assert.deepEqual(await scope(async () => (await core.getBusinessSettings("t")).notifications), initial.notifications, "unknown 不提前发布缓存");
   failReplay = true;
   await assert.rejects(() => app.readOperation({ operationKey: command.operationKey }), error => error.code === "SETTINGS_RESULT_UNKNOWN" && error.nextAction === "read_operation");
   await assert.rejects(() => app.commitApprovedChange(command), error => error.code === "SETTINGS_RESULT_UNKNOWN");
@@ -131,7 +146,7 @@ async function approvedNotificationsSmoke() {
   failReplay = false;
   const result = await app.readOperation({ operationKey: command.operationKey });
   assert.equal(result.state, "committed"); assert.equal(result.cacheRefreshed, true);
-  assert.deepEqual(scope(() => core.getBusinessSettings("t").notifications), next);
+  assert.deepEqual(await scope(async () => (await core.getBusinessSettings("t")).notifications), next);
   const { notifications: oldNotifications, updatedAt: oldAt, updatedBy: oldBy, ...protectedBefore } = initial;
   const { notifications: newNotifications, updatedAt: newAt, updatedBy: newBy, ...protectedAfter } = rows.settings.settings;
   assert.deepEqual(protectedAfter, protectedBefore, "不能顺带改变支付、计价、会员等字段");
@@ -140,7 +155,7 @@ async function approvedNotificationsSmoke() {
   await assert.rejects(() => app.commitApprovedChange({ ...command, approval: { ...command.approval, approvalId: "another" } }), /同一操作键/);
   const second = await app.prepareChange({ ...preparation, changeKey: "notification-b", baseRevision: 2,
     notifications: { enabledEvents: ["order.confirmed"], editableChannels: ["sms"] }, expiresAt: "2026-10-11T00:00:00.000Z" });
-  await scope(() => core.saveBusinessSettings("t", core.getBusinessSettings("t"), "admin"));
+  await scope(async () => core.saveBusinessSettings("t", await core.getBusinessSettings("t"), "admin"));
   assert.equal(rows.settings.settingsRevision, 3);
   await assert.rejects(() => app.commitApprovedChange({ ...command, operationKey: "settings-operation-b", changeId: second.changeId, changeHash: second.changeHash }), /版本|品类绑定/);
   user.permissions = ["rental-os:order:view"];
@@ -171,6 +186,7 @@ async function approvedNotificationsSmoke() {
   assert.equal(unknownPreparation.error.nextAction, 'read_change_receipt');
   ackLostPreparation = false;
   const recovered = await api.readChangeReceipt(request, { changeKey: proposedChange.changeKey });
+  assert.equal(recovered.ok, true, JSON.stringify(recovered.error));
   assert.equal(recovered.value.state, 'prepared_not_approved');
   assert.equal(recovered.value.change.baseRevision, 3);
   const changeCount = rows.changes.length;
@@ -202,9 +218,9 @@ async function approvedNotificationsSmoke() {
 
 (async () => {
   await scope(() => repo.upsertBusinessSettings(settings, "admin", undefined, binding));
-  assert.deepEqual(calls.splice(0), ["transaction", "lock", "version", "rentalTenantBusinessSettings"]);
+  assert.deepEqual(calls.splice(0), ["transaction", "tenant-lock", "lock", "version", "rentalTenantBusinessSettings"]);
   await assert.rejects(scope(() => repo.upsertBusinessSettings(settings, "admin", undefined, stale)), /版本已变化/);
-  assert.deepEqual(calls.splice(0), ["transaction", "lock"], "冲突不写入也不发布缓存");
+  assert.deepEqual(calls.splice(0), ["transaction", "tenant-lock", "lock"], "冲突不写入也不发布缓存");
   for (const invalid of [
     { ...settings, pricing: { enabledUnits: ["shift"], defaultUnit: "shift" } },
     { ...settings, fulfillment: { enabledModes: ["onsite_delivery"] } },
@@ -215,14 +231,14 @@ async function approvedNotificationsSmoke() {
   calls.length = 0;
   const location = { id: "l", tenantId: "t", type: "store", code: "L", name: "store", capabilities: ["pickup"], status: "enabled" };
   await scope(() => repo.upsertLocation(location, client, binding));
-  assert.deepEqual(calls.splice(0), ["lock", "version", "rentalFulfillmentLocation"], "外层事务直接复用，不嵌套开事务");
+  assert.deepEqual(calls.splice(0), ["tenant-lock", "lock", "version", "rentalFulfillmentLocation"], "外层事务直接复用，不嵌套开事务");
   await assert.rejects(scope(() => repo.upsertLocation({ ...location, type: "project_site" })), /不支持/);
   await assert.rejects(scope(() => repo.upsertLocation(location, undefined, stale)), /版本已变化/);
   calls.length = 0;
   await scope(() => repo.upsertOperator({ id: "op", tenantId: "t", code: "OP", name: "operator", type: "self_operated", status: "enabled", createdAt: new Date().toISOString() }));
-  assert.deepEqual(calls.splice(0), ["transaction", "lock", "version", "rentalFulfillmentOperator"]);
+  assert.deepEqual(calls.splice(0), ["transaction", "tenant-lock", "lock", "version", "rentalFulfillmentOperator"]);
   await scope(() => repo.upsertInspectionTemplate({ id: "inspection", tenantId: "t", categoryCode: "camera", code: "I", name: "inspection", stage: "pickup", version: "1", fields: [], enabled: true }));
-  assert.deepEqual(calls.splice(0), ["transaction", "lock", "version", "rentalInspectionTemplate"]);
+  assert.deepEqual(calls.splice(0), ["transaction", "tenant-lock", "lock", "version", "rentalInspectionTemplate"]);
   console.log("category-config-write: 设置/地点绑定复核、当前定义校验、主体/检查模板同锁与外层事务复用通过（仓储替身）");
   await approvedNotificationsSmoke();
 })().catch((error) => { console.error(error); process.exitCode = 1; });

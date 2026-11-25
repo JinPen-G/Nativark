@@ -3,6 +3,10 @@
  * C01 创建时上下文只用于追溯；恢复/每步执行仍必须重新授权并在数据库提交点做 CAS/fencing。
  */
 import { AI_TOOL_CODES, type AiExecutionContext, type AiFactReference, type AiToolError } from "./ai-native";
+import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, AI_STEP_STATUSES_DRAFT,
+  AI_TASK_TERMINAL_STATUSES_DRAFT, type AiTaskStatusDraft, type AiStepStatusDraft } from "@rental-os/platform-contracts/ai-task";
+export { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, AI_STEP_STATUSES_DRAFT, AI_TASK_TERMINAL_STATUSES_DRAFT };
+export type { AiTaskStatusDraft, AiStepStatusDraft };
 
 export const AI_TEXT_MODEL_STEP_CODE = "ai.model.text" as const;
 export const AI_IMAGE_MODEL_STEP_CODE = "ai.model.image" as const;
@@ -10,18 +14,6 @@ export const AI_AUDIO_MODEL_STEP_CODE = "ai.model.audio" as const;
 export const AI_TEXT_CAPABILITY_PROBE_STEP_CODE = "ai.capability.text.probe" as const;
 export const AI_TASK_STEP_CODES = Object.freeze([...AI_TOOL_CODES, AI_TEXT_MODEL_STEP_CODE, AI_IMAGE_MODEL_STEP_CODE, AI_AUDIO_MODEL_STEP_CODE, AI_TEXT_CAPABILITY_PROBE_STEP_CODE] as const);
 export type AiTaskStepCode = typeof AI_TASK_STEP_CODES[number];
-
-export const AI_TASK_DRAFT_VERSION = "ain-c04-draft-1" as const;
-export const AI_TASK_STATUSES_DRAFT = Object.freeze([
-  "queued", "running", "waiting_input", "waiting_confirmation", "waiting_external", "cancel_requested",
-  "succeeded", "partially_succeeded", "failed", "cancelled"
-] as const);
-export type AiTaskStatusDraft = typeof AI_TASK_STATUSES_DRAFT[number];
-export const AI_STEP_STATUSES_DRAFT = Object.freeze(["pending", "running", "succeeded", "failed", "unknown", "cancelled"] as const);
-export type AiStepStatusDraft = typeof AI_STEP_STATUSES_DRAFT[number];
-export const AI_TASK_TERMINAL_STATUSES_DRAFT: readonly AiTaskStatusDraft[] = Object.freeze([
-  "succeeded", "partially_succeeded", "failed", "cancelled"
-]);
 
 /** 业务写结果未知时保留原 actionId/fingerprint，不能换key重放。 */
 export type AiStepOutcomeDraft =
@@ -92,7 +84,7 @@ export type AiTaskTransitionDecisionDraft =
   | { allowed: true; nextRevision: number }
   | { allowed: false; reason: "invalid_state" | "revision_conflict" | "transition_denied" | "unresolved_steps" | "outcome_conflict" };
 
-interface AiTaskEventBaseDraft {
+export interface AiTaskEventBaseDraft {
   contractVersion: typeof AI_TASK_DRAFT_VERSION;
   taskId: string;
   /** 服务端落库后分配，严格递增但可有空洞；不是 taskRevision，也不是授权token。 */

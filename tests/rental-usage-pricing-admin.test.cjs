@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 
 const ts = require("typescript");
-const helperPath = require.resolve("../apps/admin/src/features/commercial/pricing-group-initial-rate.ts");
+const helperPath = require.resolve("../packages/rental-core/admin/commercial/pricing-group-initial-rate.ts");
 const helperSource = fs.readFileSync(helperPath, "utf8");
 const helperJs = ts.transpileModule(helperSource, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }
@@ -10,8 +10,8 @@ const helperJs = ts.transpileModule(helperSource, {
 const helperModule = { exports: {} };
 new Function("module", "exports", helperJs)(helperModule, helperModule.exports);
 const { toPricingGroupRequest } = helperModule.exports;
-const page = fs.readFileSync("apps/admin/src/features/commercial/PricingGroupPage.tsx", "utf8");
-const locale = fs.readFileSync("apps/admin/src/app/locale.tsx", "utf8");
+const page = fs.readFileSync("packages/rental-core/admin/commercial/PricingGroupPage.tsx", "utf8");
+const locale = fs.readFileSync("packages/rental-core/admin/commercial/messages.ts", "utf8");
 
 const timeRequest = toPricingGroupRequest({
   code: "DAY",

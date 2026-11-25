@@ -1,23 +1,2 @@
-import { Body, Controller, Get, Post } from "@nestjs/common";
-import type { SendMockNotificationRequest } from "@rental-os/shared";
-import { IntegrationsService } from "../integrations/integrations.service";
-
-@Controller("notifications")
-export class NotificationsController {
-  constructor(private readonly integrationsService: IntegrationsService) {}
-
-  @Get("templates")
-  templates() {
-    return this.integrationsService.listNotificationTemplates();
-  }
-
-  @Get("logs")
-  logs() {
-    return this.integrationsService.listNotificationLogs();
-  }
-
-  @Post("send")
-  send(@Body() body: SendMockNotificationRequest) {
-    return this.integrationsService.sendNotification(body);
-  }
-}
+/** 原通知 Controller 兼容出口，宿主通过公共应用令牌供给同一 IntegrationsService。 */
+export { NotificationsController } from "@rental-os/platform-server/notifications";

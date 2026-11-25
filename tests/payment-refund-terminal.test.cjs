@@ -168,7 +168,7 @@ async function testRefundTxLocksProviderConfig() {
   const calls = [];
   const intent = { id: "intent-1", tenantId: "tenant-1", workspaceId: "workspace-1", orderId: "order-1", method: "alipay", provider: "alipay", status: "paid", externalTransactionId: "t1", amount: 100, currency: "CNY", merchantOrderNo: "RO-1" };
   const tx = {
-    $queryRaw: async () => [],
+    $queryRaw: async (query) => query.sql.includes("FROM Tenant") ? [{ id: "tenant-1" }] : [],
     rentalPaymentIntent: { findFirst: async () => intent },
     rentalPaymentRefund: { findFirst: async () => null, findMany: async () => [], create: async ({ data }) => ({ id: "refund-new", createdAt: new Date(), updatedAt: new Date(), ...data }) }
   };
@@ -193,7 +193,8 @@ async function testExpiredPendingBlocksNewCreate() {
   const expired = { id: "intent-old", status: "pending", method: "alipay", merchantOrderNo: "RO-OLD", expiresAt: new Date(Date.now() - 60_000) };
   let created;
   const tx = {
-    $queryRaw: async () => [{ id: "order-1", orderNo: "ORD-1", finalPayableAmount: 100, currency: "CNY" }],
+    $queryRaw: async (query) => query.sql.includes("FROM Tenant") ? [{ id: "tenant-1" }]
+      : [{ id: "order-1", orderNo: "ORD-1", finalPayableAmount: 100, currency: "CNY" }],
     rentalPaymentIntent: {
       findUnique: async () => null,
       findFirst: async () => expired,
@@ -251,6 +252,7 @@ async function testExpireStaleJob() {
   const closed = [];
   const prisma = {
     ...noopLog,
+    $transaction: async (work) => work({ $queryRaw: async () => [{ id: "t" }] }),
     rentalPaymentIntent: {
       findMany: async ({ where, take }) => { assert.equal(where.status, "pending"); assert.ok(where.expiresAt.lt instanceof Date); assert.equal(take, 50); return intents; },
       updateMany: async ({ where, data }) => { updates.push({ where, data }); return { count: 1 }; }
@@ -279,7 +281,8 @@ async function testExpireStaleJob() {
 async function testCloseAllowsResetLiveTest() {
   const options = [];
   const intent = { id: "i", tenantId: "t", workspaceId: "w", orderId: "o", status: "pending", method: "alipay", merchantOrderNo: "RO", expiresAt: new Date(), amount: 1, currency: "CNY", provider: "alipay" };
-  const prisma = { ...noopLog, rentalPaymentIntent: { findFirst: async () => intent, updateMany: async ({ data }) => { Object.assign(intent, data); return { count: 1 }; } } };
+  const prisma = { ...noopLog, $transaction: async (work) => work({ $queryRaw: async () => [{ id: "t" }] }),
+    rentalPaymentIntent: { findFirst: async () => intent, updateMany: async ({ data }) => { Object.assign(intent, data); return { count: 1 }; } } };
   const service = new PaymentRuntimeService(prisma, { runtimeConfig: async (_c, _t, _m, opts) => { options.push(opts); return { provider: "alipay", capability: "payment", settings: {}, credentials: {} }; } }, {});
   service.closeAlipayIntent = async () => undefined;
   const response = await service.closePaymentIntent("t", "w", "o", "i");

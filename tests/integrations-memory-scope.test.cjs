@@ -44,6 +44,39 @@ async function inTenant(tenantId, fn) {
   const bLogs = await inTenant(tenantB, () => service.listNotificationLogs());
   assert.equal(bLogs.some((item) => item.id === aNotification.id), false, "通知日志不能跨租户可见");
 
+  const templateRows = [{ id: "tpl_order_confirmed", tenantId: tenantA, code: "order_confirmed" }];
+  const templateRepository = new IntegrationsRepository({
+    notificationTemplate: {
+      upsert: async ({ where, update, create }) => {
+        const { tenantId, code } = where.tenantId_code;
+        const existing = templateRows.find((row) => row.tenantId === tenantId && row.code === code);
+        if (existing) {
+          Object.assign(existing, update, { updatedAt: new Date() });
+          return existing;
+        }
+        assert.equal(templateRows.some((row) => row.id === create.id), false, "默认模板主键不能跨租户冲突");
+        const row = { ...create, updatedAt: new Date() };
+        templateRows.push(row);
+        return row;
+      },
+      findMany: async ({ where }) => templateRows.filter((row) => row.tenantId === where.tenantId)
+    }
+  });
+  const [aTemplates, bTemplates] = await Promise.all([
+    templateRepository.listNotificationTemplates(tenantA),
+    templateRepository.listNotificationTemplates(tenantB)
+  ]);
+  assert.equal(aTemplates.length, 3);
+  assert.equal(bTemplates.length, 3);
+  assert.equal(aTemplates.find((row) => row.code === "order_confirmed").id, "tpl_order_confirmed", "更新通过原租户与编码定位历史模板");
+  assert.equal(new Set([...aTemplates, ...bTemplates].map((row) => row.id)).size, 6);
+  assert.deepEqual(
+    (await templateRepository.listNotificationTemplates(tenantB)).map((row) => row.id),
+    bTemplates.map((row) => row.id),
+    "重复初始化使用同一组默认模板"
+  );
+  assert.equal(templateRows.length, 6);
+
   const aDevice = await inTenant(tenantA, () => service.saveTBoxDevice({
     cid: "CID-SCOPE-A",
     model: "SCOPE-1"
@@ -77,7 +110,7 @@ async function inTenant(tenantId, fn) {
   assert.deepEqual(repositoryLookup, { id: "tbox_other_tenant", tenantId: tenantB });
 
   const repositorySource = fs.readFileSync(
-    path.join(repo, "apps/api/src/modules/integrations/integrations.repository.ts"),
+    path.join(repo, "packages/rental-core/src/mysql-integrations.ts"),
     "utf8"
   );
   assert.match(

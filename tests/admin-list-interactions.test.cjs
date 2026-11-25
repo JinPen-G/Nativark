@@ -5,10 +5,66 @@ const path = require('node:path');
 const ts = require('typescript');
 const React = require('react');
 
-function load(file, dependencies) {
-  const code = ts.transpileModule(fs.readFileSync(path.resolve(__dirname, '..', file), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
+function sourceFile(relative) {
+  relative = relative.replaceAll("\\", "/");
+  const root = path.resolve(__dirname, '..');
+  if (relative === 'apps/admin/src/app/locale.tsx' || relative === 'apps/admin/src/components/ui/LiveRefresh.tsx') return path.resolve(root, relative);
+  const candidates = [
+    relative.replace(/^apps\/admin\/src\/registry\//u, "packages/ui-arc/vendor/registry/"),
+    relative.replace(/^apps\/admin\/src\/features\/membership\//u, 'packages/rental-core/admin/membership/'),
+    relative.replace(/^apps\/admin\/src\/features\/catalog\//u, 'packages/rental-core/admin/catalog/'),
+    relative.replace(/^apps\/admin\/src\/features\/fulfillment\//u, 'packages/rental-core/admin/locations/'),
+    relative.replace(/^apps\/admin\/src\//u, 'packages/platform-admin/src/'),
+  ].filter(candidate => candidate !== relative);
+  candidates.push(relative);
+  for (const candidate of candidates) {
+    for (const suffix of ['', '.ts', '.tsx', '/index.ts']) {
+      const filename = path.resolve(root, candidate + suffix);
+      if (fs.existsSync(filename) && fs.statSync(filename).isFile()) return filename;
+    }
+  }
+  return path.resolve(root, relative);
+}
+
+function dependencyFile(name, filename) {
+  if (name === "@/app/locale") return sourceFile("packages/platform-admin/src/app/locale.tsx");
+  const root = path.resolve(__dirname, '..');
+  if (name.startsWith('@/') && filename.replaceAll('\\', '/').includes('/packages/ui-arc/vendor/')) return sourceFile('packages/ui-arc/vendor/' + name.slice(2));
+  if (name.startsWith('@/')) return sourceFile('apps/admin/src/' + name.slice(2));
+  if (name.startsWith('.')) return sourceFile(path.relative(root, path.resolve(path.dirname(filename), name)));
+  const packageName = /^@rental-os\/([^/]+)(.*)$/u.exec(name);
+  if (!packageName) return undefined;
+  const packageRoot = path.join(root, 'packages', packageName[1]);
+  const metadata = path.join(packageRoot, 'package.json');
+  if (!fs.existsSync(metadata)) return undefined;
+  const entry = JSON.parse(fs.readFileSync(metadata, 'utf8')).exports?.[packageName[2] ? '.' + packageName[2] : '.'];
+  const target = typeof entry === 'string' ? entry : entry?.require ?? entry?.default ?? entry?.import ?? entry?.types;
+  if (typeof target !== 'string') return undefined;
+  const source = target.replace(/^\.\/dist\//u, 'src/').replace(/\.d\.ts$|\.js$/u, '.ts');
+  return sourceFile(path.relative(root, path.join(packageRoot, source)));
+}
+
+function load(file, dependencies = {}) {
+  const root = path.resolve(__dirname, '..');
+  const original = path.resolve(root, file);
+  const filename = sourceFile(file);
+  if (filename.endsWith('.css')) return { __esModule: true, default: {} };
+  const source = fs.readFileSync(filename, 'utf8');
+  const code = ts.transpileModule(source, { fileName: filename, compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
   const exported = { exports: {} };
-  new Function('require', 'module', 'exports', code)(name => Object.hasOwn(dependencies, name) ? dependencies[name] : require(name), exported, exported.exports);
+  const aliases = { '@rental-os/platform-admin/ui': '@/components/ui', '@rental-os/platform-admin/locale': '@/app/locale' };
+  // 复用订单列表用例的同源解析，迁移后的导入继续消费原 fixture。
+  new Function('require', 'module', 'exports', code)(name => {
+    if (Object.hasOwn(dependencies, name)) return dependencies[name];
+    if (Object.hasOwn(dependencies, aliases[name])) return dependencies[aliases[name]];
+    const target = dependencyFile(name, filename);
+    if (target) {
+      const equivalent = Object.keys(dependencies).find(key => dependencyFile(key, original) === target);
+      if (equivalent) return dependencies[equivalent];
+      return load(path.relative(root, target), dependencies);
+    }
+    return require(name);
+  }, exported, exported.exports);
   return exported.exports;
 }
 
@@ -33,8 +89,9 @@ test('refreshed header consumers share the retained provider and inactive parent
 
 test('page tools remain beside their content while only the primary action enters the shell', () => {
   const { renderToStaticMarkup } = require('react-dom/server');
-  const { PageHeader } = load('apps/admin/src/components/PageHeader.tsx', {
+  const dependencies = {
     '@/components/ui/icons': { InfoCircleOutlined: () => null },
+    './ui/Button': { Button: 'button' }, './ui/InfoPopover': { InfoPopover: 'span' },
     antd: { Space: 'div' }, '@/components/ui': { Button: 'button', InfoPopover: 'span' },
     'react-router-dom': { useLocation: () => ({ pathname: '/settings/example' }) },
     '@/app/navigation': { findRouteByPath: () => undefined },
@@ -44,7 +101,9 @@ test('page tools remain beside their content while only the primary action enter
     './ui/AnimatedIcon': { AnimatedIcon: () => null },
     '@/app/navigation-icons': { routeIconName: () => 'settings' },
     './workspace/WorkspaceHeader': { useWorkspaceHeader: () => ({}), WorkspacePageTitle: 'header-title', WorkspacePageActions: 'header-actions' },
-  });
+  };
+  const { PageHeading } = load('packages/platform-admin/src/components/PageHeading.tsx', dependencies);
+  const { PageHeader } = load('apps/admin/src/components/PageHeader.tsx', { ...dependencies, '@rental-os/platform-admin/shell': { PageHeading } });
   const props = { title: '设置', extra: React.createElement('button', null, '保存'), navigation: React.createElement('button', null, '返回'), tools: React.createElement('button', null, '刷新') };
   const form = React.createElement('form', { id: 'current-draft' }, React.createElement('input', { name: 'draft', defaultValue: 'retain me' }));
   const markup = renderToStaticMarkup(React.createElement(PageHeader, { ...props, view: form }));
@@ -139,7 +198,7 @@ test('portaled saves retain native submit association and validate before a sing
     '@/registry/components/action-button/action-button': { ActionButton: 'arc-action' },
     '@/app/locale': { useLocale: () => ({ t: text => text }) },
     '@/app/serverFormSnapshot': snapshot,
-    './ActionButtonIcon': { ActionButtonIconContext: React.createContext('none') },
+    './ActionButtonIcon': { ActionButtonIconContext: React.createContext('none'), ActionButtonCustomIconContext: React.createContext(undefined) },
     './actionButtonIntent': load('apps/admin/src/components/ui/actionButtonIntent.ts', {}),
     '../workspace/WorkspaceHeader': { useWorkspaceActionForm: () => formOwner },
   });
@@ -148,7 +207,13 @@ test('portaled saves retain native submit association and validate before a sing
   const props = { label: '保存配置', form, onClickCapture: () => events.push('capture'), onSave: values => {
     saved.push(values); return new Promise(resolve => { finish = resolve; });
   } };
-  const render = () => { cursor = 0; const action = SaveButton(props); return action.type(action.props).props.children; };
+  const render = () => {
+    cursor = 0;
+    const button = SaveButton(props);
+    let action = button.type(button.props);
+    while (action.type !== 'arc-action') action = action.props.children;
+    return action;
+  };
   let action = render();
   assert.equal(action.props.form, 'original-form');
   assert.equal(action.props.type, 'submit');
@@ -204,16 +269,20 @@ test('modal feedback remains available between retained providers and refreshed 
 test('record screens discard local task snapshots at identity or related grant changes', () => {
   let identity = 'tenant-a:workspace-a:operator', grants = new Set(['rental-os:member:view', 'rental-os:member:review']);
   const boundary = (file, name, child) => {
-    const source = ts.createSourceFile(file, fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), ts.ScriptTarget.Latest, true);
+    const source = ts.createSourceFile(file, fs.readFileSync(sourceFile(file), 'utf8'), ts.ScriptTarget.Latest, true);
     const declaration = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name);
     assert.ok(declaration, name);
     const code = ts.transpileModule(declaration.getText(source), {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
     }).outputText;
     const exports = {};
-    new Function('exports', 'require', 'useListQueryIdentity', 'useAuthStore', child, code)(exports, require,
-      () => identity, select => select({ user: { tenantMembership: { grants: [...grants] } }, hasTenantMembershipPermission: permission => grants.has(permission) }), child);
-    return exports[name];
+    const session = select => select({ user: { tenantMembership: { grants: [...grants] } }, hasTenantMembershipPermission: permission => grants.has(permission) });
+    new Function('exports', 'require', 'useListQueryIdentity', 'useAuthStore', 'useMembershipQueryIdentity', 'useRentalMembershipSession', 'RentalCatalogPageProvider', child, code)(exports, require,
+      () => identity, session, () => identity, session, 'catalog-provider', child);
+    return declaration.parameters[0]?.name.getText(source) === 'context' ? () => {
+      const page = exports[name]({ scopeKey: identity });
+      return page.type === 'catalog-provider' ? page.props.children : page;
+    } : exports[name];
   };
   const Review = boundary('apps/admin/src/features/membership/MembershipReviewPage.tsx', 'MembershipReviewPage', 'MembershipReviewWorkspace');
   const Rewards = boundary('apps/admin/src/features/membership/MembershipRewardsPage.tsx', 'MembershipRewardsPage', 'MembershipRewardsWorkspace');
@@ -282,13 +351,22 @@ test('opening another catalog record clears nested draft fields through the actu
     const form = new FormStore(() => {}).getForm();
     form.getInternalHooks('RC_FORM_INTERNAL_HOOKS');
     let selected;
-    const common = { setEditing: value => { selected = value; }, editorUnavailable: false };
-    const open = kind === 'model' ? editor('apps/admin/src/features/catalog/CatalogPage.tsx', 'CatalogWorkspace', 'openEditor', {
-      ...common, form, busy: false, setPendingFiles() {}, setDrawerOpen() {}, presentation: undefined,
+    const editingDriver = { dismiss: close => close(), markClean() {} };
+    const common = {
+      setEditorState: value => { selected = value.record; },
+      editorGeneration: { current: 0 },
+      editorUnavailable: false,
+      allowed: () => true,
+    };
+    const open = kind === 'model' ? editor('packages/rental-core/admin/catalog/CatalogPage.tsx', 'CatalogWorkspace', 'openEditor', {
+      ...common, form, busy: false, setPendingFiles() {},
+      drawerOpen: false, catalogDismissal: { visible: true }, editor: editingDriver, presentation: undefined,
       category: { supportedInventoryModes: ['serialized'] }, RentalInventoryMode: { Serialized: 'serialized' }
-    }) : editor('apps/admin/src/features/catalog/AssetWorkspacePage.tsx', 'AssetWorkspace', 'openAssetEditor', {
-      ...common, assetForm: form, saveAsset: { isPending: false }, setAssetDrawerOpen() {},
-      serializedGroups: [{ id: 'model-b' }], locations: { data: [{ id: 'location-b' }] }, RentalAssetStatus: { Available: 'available' }
+    }) : editor('packages/rental-core/admin/catalog/AssetWorkspacePage.tsx', 'AssetWorkspace', 'openAssetEditor', {
+      ...common, assetForm: form, saveAsset: { isPending: false },
+      assetDrawerOpen: false, assetDismissal: { visible: true }, assetEditor: editingDriver,
+      referencesAvailable: () => true,
+      serializedGroups: [{ id: 'model-b' }], visibleLocations: [{ id: 'location-b' }], RentalAssetStatus: { Available: 'available' }
     });
     form.setFieldsValue({ id: 'first', attributes: { retainedInFirst: 'unsaved' }, description: 'old draft' });
     const next = { id: 'second', attributes: { suppliedBySecond: 'persisted' } };
@@ -302,8 +380,10 @@ test('opening another catalog record clears nested draft fields through the actu
   }
   const form = new FormStore(() => {}).getForm();
   form.getInternalHooks('RC_FORM_INTERNAL_HOOKS');
-  const openStock = editor('apps/admin/src/features/catalog/StockOperationsPanel.tsx', 'StockOperationsPanel', 'openEditor', {
-    form, canManage: true, unavailable: false, apply: { isPending: false },
+  const openStock = editor('packages/rental-core/admin/catalog/StockOperationsPanel.tsx', 'StockOperationsPanel', 'openEditor', {
+    form, canManage: true, unavailable: false, apply: { isPending: false }, allowed: () => true, open: false,
+    referencesAvailable: undefined,
+    stockDismissal: { visible: true }, editor: { dismiss: close => close(), markClean() {} },
     quantityGroups: [{ id: 'quantity-model' }], storageLocations: [{ id: 'storage' }],
     setOperationKey() {}, setOperationType() {}, setOpen() {},
   });
@@ -319,8 +399,10 @@ test('opening another catalog record clears nested draft fields through the actu
   adjustmentForm.getInternalHooks('RC_FORM_INTERNAL_HOOKS');
   const rate = { itemGroupId: 'group-a', unit: 'calendar_day', baseAmount: 100 };
   let openedSource;
-  const openAdjustment = editor('apps/admin/src/features/commercial/RentalCommercialPage.tsx', 'RentalCommercialWorkspace', 'openAdjustment', {
+  const openAdjustment = editor('packages/rental-core/admin/commercial/RentalCommercialPage.tsx', 'RentalCommercialWorkspace', 'openAdjustment', {
     adjustmentForm, enabledPlans: [{}], adjustmentBusy: false, priceMatrixReady: true,
+    adjustmentPlan: undefined, isCurrentScope: () => true, adjustmentDialog: { visible: true },
+    generations: { current: { adjustment: 0 } }, adjustmentSubmission: { dismiss: close => close(), markClean() {} },
     currentPriceVersionDetail: { data: { version: 'v1', rates: [rate] } },
     setAdjustmentPreview() {}, setCreatedAdjustmentId() {}, setAdjustmentPlan() {},
     setAdjustmentSource: value => { openedSource = value; }, dayjs: require('dayjs'), t: text => text,
@@ -332,8 +414,86 @@ test('opening another catalog record clears nested draft fields through the actu
   assert.equal(openedSource.rates[0].baseAmount, 100, 'Refreshing the price cache cannot relabel or reprice an open draft.');
 });
 
+test('catalog photos suppress the prior object URL before effects run for a new query identity', context => {
+  const createObjectURL = URL.createObjectURL;
+  const revokeObjectURL = URL.revokeObjectURL;
+  const activeUrls = new Set();
+  context.mock.method(URL, 'createObjectURL', data => {
+    const url = createObjectURL(data);
+    activeUrls.add(url);
+    return url;
+  });
+  context.mock.method(URL, 'revokeObjectURL', url => {
+    assert.ok(activeUrls.delete(url), 'Every generated object URL is released exactly once.');
+    revokeObjectURL(url);
+  });
+  for (const presentation of [undefined, 'card']) {
+    let scope = 'scope-a', data = new Blob(['original']), cursor = 0;
+    let effect, cleanup, dependencies;
+    let props = { groupId: 'group-a', image: { id: 'image-a', fileName: 'original.png' }, presentation };
+    const state = [];
+    const { ItemGroupPhoto } = load('packages/rental-core/admin/catalog/ItemGroupPhoto.tsx', {
+      react: {
+        ...React,
+        useState: initial => {
+          const slot = cursor++;
+          if (!(slot in state)) state[slot] = initial;
+          return [state[slot], value => { state[slot] = typeof value === 'function' ? value(state[slot]) : value; }];
+        },
+        useEffect: (next, values) => {
+          if (!dependencies || values.some((value, index) => value !== dependencies[index])) {
+            dependencies = values;
+            effect = next;
+          }
+        },
+      },
+      '@tanstack/react-query': { useQuery: () => ({ data, isError: false }) },
+      antd: { Image: 'photo' },
+      './page-context': { useRentalCatalogPageContext: () => ({ api: {}, scopeKey: scope }) },
+      '@rental-os/platform-admin/locale': { useLocale: () => ({ t: text => text }) },
+      './ItemGroupPhoto.module.css': { default: {} },
+    });
+    const renderedUrl = () => {
+      cursor = 0;
+      const photo = ItemGroupPhoto(props);
+      return presentation === 'card' ? photo.props.children.props.src : photo.props.src;
+    };
+    const flush = () => {
+      if (!effect) return;
+      if (cleanup) cleanup();
+      cleanup = effect();
+      effect = undefined;
+    };
+    try {
+      assert.equal(renderedUrl(), undefined);
+      flush();
+      assert.equal(typeof renderedUrl(), 'string');
+      scope = 'scope-b';
+      data = undefined;
+      assert.equal(renderedUrl(), undefined, 'The new scope cannot render the previous object URL before effect cleanup.');
+      flush();
+      data = new Blob(['current']);
+      renderedUrl();
+      flush();
+      assert.equal(typeof renderedUrl(), 'string');
+      data = new Blob(['updated']);
+      assert.equal(renderedUrl(), undefined, 'The object URL must belong to the current query bytes.');
+      flush();
+      assert.equal(typeof renderedUrl(), 'string');
+      props = { ...props, image: { ...props.image, id: 'image-b' } };
+      assert.equal(renderedUrl(), undefined, 'Another image cannot reuse the previous URL.');
+      flush();
+      props = { ...props, groupId: 'group-b' };
+      assert.equal(renderedUrl(), undefined, 'Another item group cannot reuse the previous URL.');
+    } finally {
+      if (cleanup) cleanup();
+    }
+    assert.equal(activeUrls.size, 0, 'Replacing and unmounting a photo releases all generated object URLs.');
+  }
+});
+
 test('price adjustment submission keeps untouched prices out of a refreshed draft and cannot create it twice', async () => {
-  const file = 'apps/admin/src/features/commercial/RentalCommercialPage.tsx';
+  const file = 'packages/rental-core/admin/commercial/RentalCommercialPage.tsx';
   const source = ts.createSourceFile(file, fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), ts.ScriptTarget.Latest, true);
   const owner = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'RentalCommercialWorkspace');
   const submit = owner.body.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'submitAdjustment');
@@ -362,9 +522,10 @@ test('price adjustment submission keeps untouched prices out of a refreshed draf
 test('live refresh is opt-in, pauses while editing, stops on denial and resets across identities', () => {
   let identity = { tenant: { tenantId: 't' }, currentWorkspaceId: 'w', user: { id: 'u' } };
   let state;
-  const { useLiveRefresh } = load('apps/admin/src/components/ui/LiveRefresh.tsx', {
-    react: { useState: initial => { state ??= initial; return [state, next => { state = typeof next === 'function' ? next(state) : next; }]; }, useEffect: effect => effect() },
+  const { useLiveRefresh, useListQueryIdentity } = load('apps/admin/src/components/ui/LiveRefresh.tsx', {
+    react: { ...React, useState: initial => { state ??= initial; return [state, next => { state = typeof next === 'function' ? next(state) : next; }]; }, useEffect: effect => effect() },
     '@/features/auth/authStore': { useAuthStore: selector => selector(identity) },
+    './BusinessUiScope': { useBusinessUiScope: () => ({ identity: useListQueryIdentity() }) },
     '@/app/locale': {}, './Switch': {}
   });
   let live = useLiveRefresh('orders');
@@ -387,6 +548,7 @@ test('list identity ignores permission ordering but retains access and organizat
     id: 'operator', permissions, dataScope: 'self_org', organizationId: 'org-a', locationScope: { mode: 'selected', locationIds: ['one'] }
   } };
   const { useListQueryIdentity } = load('apps/admin/src/components/ui/LiveRefresh.tsx', {
+    '@rental-os/platform-admin/source/components/ui/LiveRefresh': {},
     react: {}, '@/features/auth/authStore': { useAuthStore: selector => selector(identity) }, '@/app/locale': {}, './Switch': {}
   });
   const original = useListQueryIdentity();
@@ -444,7 +606,10 @@ test('subscription detail retains its editor through temporary refresh failures 
   const { PlatformSubscriptionDetailPage } = load('apps/admin/src/features/subscription/PlatformSubscriptionDetailPage.tsx', {
     antd: { Space: 'space', Tag: 'tag' },
     '@/components/ui': new Proxy({}, { get: (_, key) => String(key) }),
-    '@/components/RecordDetailLayout': { RecordFacts: 'facts' },
+    '../../components/RecordFacts': { RecordFacts: 'facts' },
+    './SubscriptionPageHeader': { PageHeader: 'page' },
+    './client': { useSubscriptionApi: () => ({}) },
+    './subscriptionRoutes': { SUBSCRIPTION_ROUTES: { platformSubscriptions: { path: '/platform/subscriptions' } } },
     '@/components/ui/useModalDismissal': {},
     './TenantSubscription.module.css': { default: {} },
     '@tanstack/react-query': { useQuery: () => query },
@@ -556,4 +721,78 @@ test('lazy settings panels stay hidden after visiting and release their content 
   assert.match(renderToStaticMarkup(render()), /data-state="inactive"[^>]*hidden=""[^>]*><input name="website"/u);
   assert.ok(!renderToStaticMarkup(render({ items: items.filter(item => item.key !== 'website') })).includes('name="website"'), 'A removed or revoked view cannot retain its protected subtree.');
   assert.ok(!renderToStaticMarkup(render({ destroyOnHidden: true })).includes('name="website"'), 'Explicit destruction still takes priority.');
+});
+
+test('restored message center preserves shared inbox state, original folders, undo, filters and keyboard actions', async () => {
+  const vm = require('node:vm'), root = path.resolve(__dirname, '..');
+  const fixtureAst = ts.createSourceFile('fixture.cjs', fs.readFileSync(path.join(root, 'tests/enterprise-consumers.test.cjs'), 'utf8'), ts.ScriptTarget.Latest, true);
+  const fixture = fixtureAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'reactHost');
+  assert.ok(fixture);
+  const hooks = () => new Function('assert', fixture.getText(fixtureAst) + ';return reactHost();')(assert);
+  const pageHooks = hooks(), listHooks = hooks(), updates = [], restores = [];
+  const stub = name => props => React.createElement(name, props);
+  const icons = Object.fromEntries(['Bell', 'ClipboardCheck', 'ClipboardList', 'Sparkles', 'Wrench', 'Archive', 'Clock3', 'RotateCcw', 'Undo2'].map(name => [name, stub(name)]));
+  const compile = (relative, imports, globals = {}) => {
+    const exports = {}, code = ts.transpileModule(fs.readFileSync(path.join(root, relative), 'utf8'), { compilerOptions: {
+      module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX,
+    } }).outputText;
+    vm.runInNewContext(code, { exports, ...globals, require(name) { assert.ok(Object.hasOwn(imports, name), name); return imports[name]; } });
+    return exports;
+  };
+  const notificationLocale = { useNotificationText: () => value => value };
+  const originalEntry = { read: false, folder: 'Inbox', events: ['original'], updatedAt: 1 };
+  const inbox = { personal: { one: originalEntry }, storageAvailable: true, loading: false, error: false,
+    messages: [
+      { id: 'one', title: 'Original order', description: 'Original detail', createdAt: '2026-11-01', category: 'business', orderNo: 'ORDER-1', folder: 'Inbox', read: false, pending: true },
+      { id: 'two', title: 'Read message', description: 'Second detail', createdAt: '2026-11-01', category: 'system', folder: 'Inbox', read: true, pending: false },
+    ],
+    update(id, patch) { updates.push({ id, patch });
+      inbox.messages = inbox.messages.map(row => row.id === id ? { ...row, ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)) } : row); },
+    restore(id, entry) { restores.push({ id, entry }); inbox.messages = inbox.messages.map(row => row.id === id ? { ...row, folder: entry?.folder ?? 'Inbox', read: entry?.read ?? false } : row); },
+  };
+  const NoticeActions = stub('original-business-actions'), document = { title: '' };
+  const InboxTriage = compile('packages/rental-core/admin/browser-notifications/archive/inbox-triage/InboxTriage.tsx', {
+    react: { ...listHooks.runtime, useId: () => 'original-inbox' }, 'react/jsx-runtime': require('react/jsx-runtime'), 'lucide-react': icons,
+    '@rental-os/platform-admin/source/lib/usePrefersReducedMotion': { usePrefersReducedMotion: () => true },
+    '@rental-os/platform-admin/notifications': notificationLocale, '../shared/MeasuredHeight': { MeasuredHeight: stub('measured-height') },
+    './original.css': {}, './integration.css': {},
+  }, { setTimeout, clearTimeout, requestAnimationFrame: callback => { callback(); return 1; } }).InboxTriage;
+  let providerReads = 0;
+  const { createRentalMessageCenterPage } = compile('packages/rental-core/admin/browser-notifications/MessageCenterPage.tsx', {
+    react: pageHooks.runtime, 'react/jsx-runtime': require('react/jsx-runtime'), 'lucide-react': icons,
+    '@rental-os/platform-admin/locale': { useLocale: () => ({ locale: 'en-US' }) },
+    '@rental-os/platform-admin/shell': { resolveAdminBrandName: () => 'Original brand' },
+    '@rental-os/platform-admin/ui': { EmptyScene: stub('empty') }, './archive/inbox-triage/InboxTriage': { InboxTriage },
+    '@rental-os/platform-admin/notifications': notificationLocale,
+    '@rental-os/platform-admin/source/features/notifications/HeaderNotifications': { formatNoticeTime: (at, locale) => at + ':' + locale },
+    '@rental-os/platform-admin/source/features/notifications/notifications.css': {},
+  }, { document });
+  const Page = createRentalMessageCenterPage({ session: { useAuthStore: () => ({ tenant: {}, user: {} }) } }, () => { providerReads++; return inbox; }, NoticeActions);
+  pageHooks.mount(Page); assert.equal(document.title, 'Message center · Original brand'); assert.equal(providerReads, 1);
+  let props = pageHooks.value.props.children.props;
+  assert.equal(props.messages[0].sender, 'ORDER-1'); assert.equal(props.messages[0].restoreData, originalEntry);
+  assert.equal(props.renderDetails(props.messages[0]).type, NoticeActions); assert.equal(props.renderDetails(props.messages[0]).props.surface, 'inbox');
+  listHooks.mount(() => InboxTriage(props));
+  const nodes = predicate => { const found = []; const walk = tree => React.Children.forEach(tree, node => {
+    if (!React.isValidElement(node)) return; if (predicate(node)) found.push(node); walk(node.props.children);
+  }); walk(listHooks.value); return found; };
+  const text = tree => React.Children.toArray(tree).map(node => React.isValidElement(node) ? text(node.props.children) : String(node ?? '')).join('');
+  const button = label => { const found = nodes(node => node.type === 'button' && text(node.props.children).startsWith(label)); assert.ok(found.length, label); return found[0]; };
+  const refresh = () => { pageHooks.rerender(); props = pageHooks.value.props.children.props; listHooks.rerender(); };
+  assert.deepEqual(nodes(node => node.props.role === 'tab').map(node => text(node.props.children).replace(/\d+$/, '')), ['Inbox', 'Snoozed', 'Archive']);
+  let first = nodes(node => node.props['aria-keyshortcuts'])[0]; first.props.onClick(); refresh();
+  assert.equal(inbox.messages[0].read, true); assert.equal(nodes(node => node.props['aria-keyshortcuts'])[0].props['aria-expanded'], true);
+  let prevented = 0;
+  nodes(node => node.props['aria-keyshortcuts'])[0].props.onKeyDown({ key: 'e', preventDefault() { prevented++; } }); refresh();
+  assert.equal(prevented, 1); assert.equal(inbox.messages[0].folder, 'Archive');
+  button('Undo').props.onClick(); refresh(); assert.equal(restores.length, 1); assert.equal(restores[0].entry, originalEntry);
+  assert.equal(inbox.messages[0].folder, 'Inbox'); assert.equal(inbox.messages[0].read, false);
+  button('Pending').props.onClick(); await listHooks.settle(); assert.equal(nodes(node => node.props['aria-keyshortcuts']).length, 1);
+  button('Unread only').props.onClick(); await listHooks.settle(); assert.equal(nodes(node => node.props['aria-keyshortcuts']).length, 1);
+  first = nodes(node => node.props['aria-keyshortcuts'])[0]; first.props.onKeyDown({ key: 's', preventDefault() {} }); refresh();
+  assert.equal(inbox.messages[0].folder, 'Snoozed');
+  button('Snoozed').props.onClick(); await listHooks.settle();
+  nodes(node => node.props['aria-keyshortcuts'])[0].props.onKeyDown({ key: 'u', preventDefault() {} }); refresh();
+  assert.equal(inbox.messages[0].folder, 'Inbox'); assert.equal(updates.length, 4);
+  pageHooks.unmount(); listHooks.unmount();
 });

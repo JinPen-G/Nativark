@@ -1,28 +1,9 @@
-import type { ReactNode } from "react";
-import { ArrowLeftOutlined } from "@/components/ui/icons";
-import { useLocale } from "@/app/locale";
+/** 原营运宿主只供给品牌/路由页头；记录详情布局来自公共单源。 */
+import { RecordDetailLayout as PublicRecordDetailLayout, type RecordDetailLayoutProps } from "@rental-os/platform-admin/ui";
 import { PageHeader } from "./PageHeader";
-import { Button } from "./ui";
-import styles from "./RecordDetailLayout.module.css";
-
-export type RecordFact = { key: string; label: string; value: ReactNode; wide?: boolean };
-
-/** Read-only detail geometry. Permissions, queries and commands stay with each domain. */
-export function RecordFacts({ items }: { items: RecordFact[] }) {
-  const { t } = useLocale();
-  return <div className={styles.factsContainer}><dl className={styles.facts}>{items.map(item => <div key={item.key} className={item.wide ? styles.wide : undefined}><dt>{t(item.label)}</dt><dd data-copilot-field={item.key} data-copilot-label={t(item.label)}>{item.value ?? "—"}</dd></div>)}</dl></div>;
-}
-
-export function RecordDetailLayout({ title, status, facts, actions, secondaryActions, onBack, children }: {
-  title: string; status?: ReactNode; facts?: RecordFact[]; actions?: ReactNode; secondaryActions?: ReactNode; onBack: () => void; children: ReactNode;
-}) {
-  const { t } = useLocale();
-  return <div className={styles.record} data-copilot-detail="" data-copilot-record="detail" data-copilot-label={title}>
-    <PageHeader title={title} extra={actions} navigation={<Button type="text" icon={<ArrowLeftOutlined aria-hidden />} onClick={onBack}>{t("返回列表")}</Button>} tools={secondaryActions} />
-    {(status || facts?.length) && <section className={styles.summary} aria-label={t("资料概览")}>
-      {status && <div className={styles.status}>{status}</div>}
-      {facts?.length ? <RecordFacts items={facts} /> : null}
-    </section>}
-    <div className={styles.content}>{children}</div>
-  </div>;
+export { RecordFacts, type RecordFact } from "@rental-os/platform-admin/shell";
+export function RecordDetailLayout(props: RecordDetailLayoutProps) {
+  return <PublicRecordDetailLayout {...props} header={props.header === undefined
+    ? (_combined, slots) => <PageHeader title={props.title} extra={slots.actions} navigation={slots.navigation} tools={slots.tools} />
+    : props.header} />;
 }

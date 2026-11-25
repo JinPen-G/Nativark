@@ -1,5 +1,7 @@
 'use strict';
 const React = require('react');
+// This renderer supplies the original Chinese locale; browser locale switching is separate.
+exports.useLocale = () => ({ locale: 'zh-CN', t: value => value });
 const clean = ({ children, label, loading, pending, pendingLabel, successLabel, onAction, ...props }) => props;
 exports.Button = props => React.createElement('button', { ...clean(props), type: props.htmlType ?? 'button' }, props.children ?? props.label);
 exports.ActionButton = props => React.createElement('button', { ...clean(props), type: 'button', disabled: props.disabled || props.pending }, props.pending ? props.pendingLabel ?? '处理中' : props.label);

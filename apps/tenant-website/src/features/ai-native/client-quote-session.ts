@@ -1,3 +1,2 @@
-export { createClientQuoteSession, createClientQuoteBookingSession, clientQuoteStorageKey, clientQuoteOwner,
-  clientQuoteRecoveryLocator } from '@rental-os/shared';
-export type { ClientQuoteApi, ClientQuoteBookingApi, ClientQuoteContext, ClientQuoteView, ClientQuoteBookingView } from '@rental-os/shared';
+import "../../website-host";
+export * from "@rental-os/rental-core/clients/website-ui/source/features/ai-native/client-quote-session";

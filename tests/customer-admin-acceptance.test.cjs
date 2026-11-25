@@ -291,11 +291,11 @@ void (async () => {
   const read = (relative) => fs.readFileSync(path.join(ROOT, relative), "utf8");
   const nav = read("apps/admin/src/app/navigation.tsx");
   const router = read("apps/admin/src/app/AppRouter.tsx");
-  const reviewPage = read("apps/admin/src/features/membership/MembershipReviewPage.tsx");
-  const personalPage = read("apps/admin/src/features/membership/PersonalMembershipPage.tsx");
-  const corporatePage = read("apps/admin/src/features/membership/CorporateMembershipPage.tsx");
-  const planPage = read("apps/admin/src/features/membership/MembershipPlanPage.tsx");
-  const api = read("apps/admin/src/api/customer.ts");
+  const reviewPage = read("packages/rental-core/admin/membership/MembershipReviewPage.tsx");
+  const personalPage = read("packages/rental-core/admin/membership/PersonalMembershipPage.tsx");
+  const corporatePage = read("packages/rental-core/admin/membership/CorporateMembershipPage.tsx");
+  const planPage = read("packages/rental-core/admin/membership/MembershipPlanPage.tsx");
+  const api = read("packages/rental-core/admin/membership/customer-client.ts");
 
   // 路由条目可带 `scope: "tenant-membership"` 等前置字段，只钉 key 与 path 的对应，不钉字面顺序。
   const routeEntry = (key, routePath) => new RegExp(`\\b${key}: \\{[^\\n]*path: "${routePath.replace(/\//g, "\\/")}"`, "u");

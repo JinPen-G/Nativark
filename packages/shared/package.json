@@ -24,15 +24,39 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.js"
+    },
+    "./platform": {
+      "types": "./dist/platform-identity.d.ts",
+      "import": "./dist/platform-identity.js",
+      "require": "./dist/platform-identity.js"
+    },
+    "./ai-admin": {
+      "types": "./dist/ai-admin.d.ts",
+      "import": "./dist/ai-admin.js",
+      "require": "./dist/ai-admin.js"
     }
   },
   "scripts": {
+    "prebuild": "npm run build:contracts -w @rental-os/rental-core",
+    "prelint": "npm run build:contracts -w @rental-os/rental-core",
     "build": "tsc -p tsconfig.json && npm run build:agent-desktop",
     "build:agent-desktop": "tsc -p tsconfig.agent-desktop.json",
     "lint": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "zod": "3.25.76"
+    "@rental-os/platform-contracts": "0.1.0",
+    "zod": "3.25.76",
+    "@rental-os/rental-core": "0.1.14"
   },
-  "devDependencies": {}
+  "devDependencies": {},
+  "typesVersions": {
+    "*": {
+      "platform": [
+        "dist/platform-identity.d.ts"
+      ],
+      "ai-admin": [
+        "dist/ai-admin.d.ts"
+      ]
+    }
+  }
 }

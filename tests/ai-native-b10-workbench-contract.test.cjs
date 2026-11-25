@@ -8,7 +8,7 @@ const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 
 test('workbench imports the existing feature components and exposes host-only boundaries', () => {
-  const source = read('apps/admin/src/features/ai-native/AiTaskWorkbench.tsx');
+  const source = read('packages/ai-native-admin/src/ai-native/AiTaskWorkbench.tsx');
   for (const name of ['TaskList', 'TaskTimeline', 'MissingFieldsPanel', 'ProposalPreview', 'HumanConfirmShell', 'CancelRecoveryStatus', 'KnowledgeSources', 'MemoryPreferences', 'AiServiceSummary', 'CapabilityStatus']) {
     assert.match(source, new RegExp(`import \\{[^}]*${name}`));
     assert.match(source, new RegExp(`<${name}\\b`));
@@ -18,7 +18,7 @@ test('workbench imports the existing feature components and exposes host-only bo
 });
 
 test('detail reads are epoch-gated and visibility-gated', () => {
-  const source = read('apps/admin/src/features/ai-native/AiTaskWorkbench.tsx');
+  const source = read('packages/ai-native-admin/src/ai-native/AiTaskWorkbench.tsx');
   assert.match(source, /setDetail\(null\)/);
   assert.match(source, /setDetailError\(null\)/);
   assert.match(source, /const currentEpoch = epoch\.current/);
@@ -28,7 +28,7 @@ test('detail reads are epoch-gated and visibility-gated', () => {
 });
 
 test('status and confirmation output stays host-gated', () => {
-  const source = read('apps/admin/src/features/ai-native/AiTaskWorkbench.tsx');
+  const source = read('packages/ai-native-admin/src/ai-native/AiTaskWorkbench.tsx');
   assert.match(source, /available=\{Boolean\(onConfirm\)\}/);
   assert.match(source, /canCancel=\{Boolean\(onCancel\)\}/);
   assert.match(source, /canRecover=\{Boolean\(onRecover\)\}/);
@@ -36,7 +36,7 @@ test('status and confirmation output stays host-gated', () => {
 });
 
 test('workbench uses the existing event consumer and exposes resync instead of inventing cursor fallback', () => {
-  const source = read('apps/admin/src/features/ai-native/AiTaskWorkbench.tsx');
+  const source = read('packages/ai-native-admin/src/ai-native/AiTaskWorkbench.tsx');
   assert.match(source, /consumePolledEvents/);
   assert.match(source, /resyncRequired/);
   assert.match(source, /重新读取快照/);

@@ -20,6 +20,14 @@ const { OPENAPI_DOCUMENT } = require("../apps/api/src/contracts/openapi-document
 
 const status = (value) => (error) => error?.getStatus?.() === value;
 
+/** 写入夹具保留真实事务中的 Tenant 父锁查询与租户参数。 */
+const tenantParentLock = async (query) => {
+  assert.match(query.sql, /FROM Tenant/);
+  assert.match(query.sql, /LOCK IN SHARE MODE/);
+  assert.equal(query.values[0], "t1");
+  return [{ id: "t1", code: "demo" }];
+};
+
 /** 构造一个只实现本用例所需方法的 prisma 替身。 */
 function buildPrisma({ tenant, profile, appearance = null, wechatChannel, workspaces = [], websiteProfile = null }) {
   return {
@@ -213,7 +221,12 @@ test("profile save: 就绪判定要求品牌/客服/两份协议正文/至少一
     clientChannelProfile: { findUnique: async () => stored, update: tx.clientChannelProfile.update, create: tx.clientChannelProfile.create },
     businessWorkspace: { findMany: async ({ where }) => (where?.id?.in ? where.id.in.filter((id) => id === "w-cam").map((id) => ({ id, status: "ACTIVE" })) : [{ id: "w-cam", code: "camera", name: "摄影", categoryCode: "camera", status: "ACTIVE" }]) },
     clientChannelWorkspace: tx.clientChannelWorkspace,
-    $transaction: async (fn) => fn(tx)
+    $transaction: async (fn) => fn({
+      ...tx,
+      $queryRaw: tenantParentLock,
+      businessWorkspace: prisma.businessWorkspace,
+      clientChannelProfile: { ...tx.clientChannelProfile, findUnique: prisma.clientChannelProfile.findUnique }
+    })
   };
   const svc = Object.assign(Object.create(ClientChannelProfileService.prototype), { prisma, operationLog: { record: async () => {} } });
   const user = { tenantId: "t1", isSaasAdmin: false };
@@ -332,7 +345,8 @@ test("website profile save: 辅助色归一化、就绪判定要求启用+Hero �
       update: async ({ data }) => { calls.written = data; return { id: "web1", tenantId: "t1", revision: 3, ...data, updatedAt: new Date() }; },
       create: async ({ data }) => { calls.written = data; return { id: "web1", ...data, revision: 1, updatedAt: new Date() }; }
     },
-    businessWorkspace: { findMany: async () => [{ code: "camera", name: "摄影器材", isDefault: true }, { code: "camping", name: "露营装备", isDefault: false }] }
+    businessWorkspace: { findMany: async () => [{ code: "camera", name: "摄影器材", isDefault: true }, { code: "camping", name: "露营装备", isDefault: false }] },
+    $transaction: async (fn) => fn({ $queryRaw: tenantParentLock, websiteChannelProfile: prisma.websiteChannelProfile, businessWorkspace: prisma.businessWorkspace })
   };
   const svc = Object.assign(Object.create(WebsiteChannelProfileService.prototype), { prisma, operationLog: { record: async () => {} } });
   const user = { tenantId: "t1", isSaasAdmin: false };
@@ -400,7 +414,8 @@ test("website 自定义域名：归一化、按 Host 反查租户、全局唯一
       update: async ({ data }) => { calls.written = data; return { id: "web1", tenantId: "t1", revision: 3, ...data, updatedAt: new Date() }; },
       create: async ({ data }) => { calls.written = data; return { id: "web1", ...data, revision: 1, updatedAt: new Date() }; }
     },
-    businessWorkspace: { findMany: async () => [{ code: "camera", name: "摄影器材", isDefault: true }] }
+    businessWorkspace: { findMany: async () => [{ code: "camera", name: "摄影器材", isDefault: true }] },
+    $transaction: async (fn) => fn({ $queryRaw: tenantParentLock, websiteChannelProfile: prisma.websiteChannelProfile, businessWorkspace: prisma.businessWorkspace })
   };
   const svc = Object.assign(Object.create(WebsiteChannelProfileService.prototype), { prisma, operationLog: { record: async () => {} } });
   const user = { tenantId: "t1", isSaasAdmin: false };
@@ -414,6 +429,7 @@ test("website 自定义域名：归一化、按 Host 反查租户、全局唯一
 
   // 唯一冲突：Prisma P2002 → 409。
   const conflictPrisma = { websiteChannelProfile: { findUnique: async () => null, create: async () => { const e = new Error("Unique constraint"); e.code = "P2002"; throw e; } }, businessWorkspace: { findMany: async () => [] } };
+  conflictPrisma.$transaction = async (fn) => fn({ $queryRaw: tenantParentLock, websiteChannelProfile: conflictPrisma.websiteChannelProfile, businessWorkspace: conflictPrisma.businessWorkspace });
   const conflictSvc = Object.assign(Object.create(WebsiteChannelProfileService.prototype), { prisma: conflictPrisma, operationLog: { record: async () => {} } });
   await assert.rejects(conflictSvc.save({ enabled: true, showPoweredBy: true, customDomain: "taken.com" }, user), status(409));
 
@@ -445,7 +461,8 @@ test("website assets: 上传校验图片类型/大小/魔数并回传公开 URL�
     websiteAsset: {
       create: async ({ data }) => { created.push(data); return { id: "asset-1" }; },
       findFirst: async ({ where }) => (where.id === "asset-1" && where.tenantId === "t1" ? { data: png, mimeType: "image/png" } : null)
-    }
+    },
+    $transaction: async (fn) => fn({ $queryRaw: tenantParentLock, websiteAsset: prisma.websiteAsset })
   };
   const svc = Object.assign(Object.create(WebsiteAssetService.prototype), { prisma });
   const user = { tenantId: "t1", isSaasAdmin: false };

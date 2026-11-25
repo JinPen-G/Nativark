@@ -76,17 +76,17 @@ void (async () => {
   }
 
   const genericUiFiles = [
-    "apps/admin/src/features/catalog/CatalogPage.tsx",
-    "apps/admin/src/features/catalog/AssetWorkspacePage.tsx",
-    "apps/admin/src/features/commercial/PricingGroupPage.tsx",
-    "apps/admin/src/features/fulfillment/LocationPage.tsx"
+    "packages/rental-core/admin/catalog/CatalogPage.tsx",
+    "packages/rental-core/admin/catalog/AssetWorkspacePage.tsx",
+    "packages/rental-core/admin/commercial/PricingGroupPage.tsx",
+    "packages/rental-core/admin/locations/LocationPage.tsx"
   ].map((file) => readFileSync(join(__dirname, "..", file), "utf8")).join("\n");
   for (const vehicleOnlyText of ["舒适轿车组", "车牌/VIN", "具体单车", "车行、摄影合作商"]) {
     assert.ok(!genericUiFiles.includes(vehicleOnlyText), `通用页面不得写死车辆文案：${vehicleOnlyText}`);
   }
 
   const categorySettingsUi = readFileSync(
-    join(__dirname, "..", "apps/admin/src/features/settings/governance/CategoryTab.tsx"),
+    join(__dirname, "..", "packages/rental-core/admin/governance/CategoryTab.tsx"),
     "utf8"
   );
   assert.ok(
@@ -98,7 +98,7 @@ void (async () => {
     "经营设置的履约方式必须来自当前品类定义"
   );
   const ruleSectionsUi = readFileSync(
-    join(__dirname, "..", "apps/admin/src/features/settings/governance/ruleSections.tsx"),
+    join(__dirname, "..", "packages/rental-core/admin/governance/ruleSections.tsx"),
     "utf8"
   );
   const qualificationSectionStart = ruleSectionsUi.indexOf('key: "damage-qualification"');
@@ -122,8 +122,8 @@ void (async () => {
   );
 
   const genericPermissionSources = [
-    "apps/admin/src/features/catalog/CatalogPage.tsx",
-    "apps/admin/src/features/catalog/AssetWorkspacePage.tsx",
+    "packages/rental-core/admin/catalog/CatalogPage.tsx",
+    "packages/rental-core/admin/catalog/AssetWorkspacePage.tsx",
     "apps/api/src/common/api-auth.guard.ts",
     "apps/api/src/contracts/openapi-document.ts"
   ].map((file) => readFileSync(join(__dirname, "..", file), "utf8")).join("\n");
@@ -150,16 +150,16 @@ void (async () => {
   ]) {
     assert.ok(permissionMigration.includes(targetPermission), `存量角色迁移必须补授 ${targetPermission}`);
   }
-  const platformRepository = readFileSync(
-    join(__dirname, "..", "apps/api/src/modules/platform/platform.repository.ts"),
-    "utf8"
-  );
+  const publicManagement = [
+    "packages/platform-server/src/modules/platform/platform-management.repository.ts",
+    "packages/rental-core/src/public-management-compatibility.ts"
+  ].map((file) => readFileSync(join(__dirname, "..", file), "utf8")).join("\n");
   assert.ok(
-    platformRepository.includes("DEPRECATED_RENTAL_PERMISSION_CODES.has(permission.code)"),
+    publicManagement.includes("if (Object.hasOwn(permissionReplacements, permission.code)) return undefined"),
     "数据库权限树必须隐藏旧车辆权限"
   );
   assert.ok(
-    platformRepository.includes("normalizePermissionCodes"),
+    publicManagement.includes("compatibility.normalizePermissionCodes(codes)"),
     "角色保存与读回必须把旧车辆权限转换为 Rental Core 新权限"
   );
 

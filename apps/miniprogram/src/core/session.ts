@@ -1,4 +1,5 @@
 import type { ClientMembershipSessionResponse } from "@rental-os/shared";
+import { PUBLIC_CONFIG } from "../config/public";
 import { Emitter } from "./events";
 import { STORAGE_KEYS, clearPrivateStorage, readStorage, writeStorage } from "./storage";
 
@@ -10,6 +11,7 @@ import { STORAGE_KEYS, clearPrivateStorage, readStorage, writeStorage } from "./
  * - “当前服务”（经营空间）是服务端会话的一部分：切换服务必须经服务端换发令牌，
  *   本地只记录结果，并把 contextVersion +1，让切换前发出的读取在返回时被丢弃。
  * - 会员身份是租户级的：切服务不会重新入会，membershipStatus 对所有服务相同。
+ * - 本人/租户代次隔离换登录和退出后的响应，包内租户编码仅记录缓存归属，授权仍由服务端裁定。
  */
 export interface SessionCustomer {
   customerId: string;
@@ -27,6 +29,7 @@ export interface SessionService {
 }
 
 export interface SessionState {
+  tenantCode: string;
   accessToken: string;
   refreshToken: string;
   expiresAt: number;
@@ -49,13 +52,19 @@ export const sessionEvents = new Emitter<SessionEvent>();
 let state: SessionState | undefined;
 let restored = false;
 let contextVersionCounter = 1;
+let principalVersionCounter = 1;
 
 function restore(): void {
   if (restored) return;
   restored = true;
   const stored = readStorage<SessionState>(STORAGE_KEYS.session);
   if (stored && stored.accessToken && stored.refreshToken && stored.customer && stored.serviceCode) {
-    state = stored;
+    if (stored.tenantCode && stored.tenantCode !== PUBLIC_CONFIG.tenantCode) {
+      clearPrivateStorage();
+      return;
+    }
+    // 旧包缓存未记录租户编码，沿本端原有的一租户一包约定补齐归属。
+    state = { ...stored, tenantCode: stored.tenantCode ?? PUBLIC_CONFIG.tenantCode };
   }
 }
 
@@ -99,6 +108,11 @@ export function contextVersion(): number {
   return contextVersionCounter;
 }
 
+/** 本人/租户会话代次。同一身份切服务或刷新令牌不改变它。 */
+export function principalVersion(): number {
+  return principalVersionCounter;
+}
+
 export function bumpContext(_reason: string): number {
   contextVersionCounter += 1;
   return contextVersionCounter;
@@ -121,6 +135,8 @@ function toServices(response: ClientMembershipSessionResponse): SessionService[]
 export function saveSession(response: ClientMembershipSessionResponse, serviceCode: string, reason: string): SessionState {
   restore();
   const previous = state;
+  const customerChanged = !previous || previous.customer.customerId !== response.customer.customerId
+    || previous.tenantCode !== PUBLIC_CONFIG.tenantCode;
   const services = toServices(response);
   const bound = response.workspace?.workspaceCode;
   const resolvedService = (bound && services.some((row) => row.code === bound) ? bound : undefined)
@@ -128,6 +144,7 @@ export function saveSession(response: ClientMembershipSessionResponse, serviceCo
     ?? services[0]?.code
     ?? serviceCode;
   state = {
+    tenantCode: PUBLIC_CONFIG.tenantCode,
     accessToken: response.accessToken,
     refreshToken: response.refreshToken,
     expiresAt: Date.now() + Math.max(60, response.expiresIn) * 1000,
@@ -139,14 +156,14 @@ export function saveSession(response: ClientMembershipSessionResponse, serviceCo
     },
     services,
     serviceCode: resolvedService,
-    wechatBound: response.wechatBound ?? (previous && previous.customer.customerId === response.customer.customerId ? previous.wechatBound : false),
+    wechatBound: response.wechatBound ?? (!customerChanged && previous ? previous.wechatBound : false),
     savedAt: Date.now()
   };
   persist();
   writeStorage(STORAGE_KEYS.lastService, resolvedService);
-  const customerChanged = !previous || previous.customer.customerId !== state.customer.customerId;
   const serviceChanged = !previous || previous.serviceCode !== state.serviceCode;
   if (customerChanged) {
+    principalVersionCounter += 1;
     bumpContext(reason);
     sessionEvents.emit({ type: "signed-in", reason });
   } else if (serviceChanged) {
@@ -164,6 +181,7 @@ export function clearSession(reason: string): void {
   const had = Boolean(state);
   state = undefined;
   clearPrivateStorage();
+  principalVersionCounter += 1;
   bumpContext(reason);
   if (had) sessionEvents.emit({ type: "signed-out", reason });
 }
@@ -190,4 +208,5 @@ export function resetSessionForTest(): void {
   state = undefined;
   restored = false;
   contextVersionCounter = 1;
+  principalVersionCounter = 1;
 }

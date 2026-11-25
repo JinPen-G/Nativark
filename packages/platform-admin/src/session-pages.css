@@ -1,0 +1,3 @@
+.platform-login-card { display:grid; min-height:calc(100dvh - 24px); place-items:center; padding:var(--space-4); }
+.platform-login-card .login-card-form { padding:var(--space-6); }
+.platform-login-card .login-form-content { padding-block:var(--space-4) 0; }

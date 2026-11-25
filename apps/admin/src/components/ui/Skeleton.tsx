@@ -1,6 +1,2 @@
-import { Skeleton as ArcSkeleton, type SkeletonProps } from "@/registry/components/skeleton/skeleton";
-import { useLocale } from "@/app/locale";
-export function Skeleton(props: SkeletonProps) {
-  const { t } = useLocale();
-  return <ArcSkeleton {...props} label={props.label ?? t("加载中")} />;
-}
+/** 原入口兼容转接；公共实现由 platform-admin 单源维护。 */
+export * from "@rental-os/platform-admin/source/components/ui/Skeleton";

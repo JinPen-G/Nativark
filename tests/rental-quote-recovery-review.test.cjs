@@ -94,18 +94,37 @@ test('manual order creation uses durable quote before any prepare/write and reje
 });
 
 test('actual quote repository round-trips source/address/rental allocation and refuses provenance changes', async () => {
+  const { Prisma } = require('@prisma/client');
   let row;
+  const item = { id: 'group', tenantId: 't', workspaceId: 'w', categoryCode: 'CAMERA', code: 'GROUP', name: 'Fixture group',
+    inventoryMode: 'QUANTITY', unit: '件', status: 'enabled', createdAt: new Date('2026-10-30'), updatedAt: new Date('2026-10-30') };
   const db = { businessWorkspace: { findFirst: async ({ where }) => { assert.equal(where.tenantId, 't'); return { id: 'w' }; } },
     rentalQuote: { findFirst: async () => row ?? null, findUnique: async () => row ?? null,
-      create: async ({ data }) => { row = { ...data }; }, update: async () => { throw Error('must reject before update'); } } };
+      create: async ({ data }) => { row = Object.fromEntries(Object.entries(data).map(([key, value]) => [key, value === Prisma.DbNull ? null : value])); },
+      update: async () => { throw Error('must reject before update'); } } };
   const admission = require('./helpers/fulfillment-admission-fixture.cjs').fulfillmentAdmissionFixture('t', 'w', {
     locations: ['pickup', 'return'].map(id => ({ id, name: id, operatorId: 'op', status: 'enabled', capabilities: ['pickup', 'return'] })),
     operators: [{ id: 'op', status: 'enabled', type: 'self_operated' }]
   });
-  db.$queryRaw = admission.tx.$queryRaw;
+  // New quotes require the same bounded inventory facts as the configuration writer; no current facts backfill saved quotes.
+  db.$queryRaw = async query => {
+    if (query.sql.includes('SELECT * FROM rental_item_groups')) {
+      assert.deepEqual(query.values, ['t', 'w', 'group', 2]);
+      assert.match(query.sql, /LOCK IN SHARE MODE/);
+      return [{ ...item }];
+    }
+    if (query.sql.includes('FROM rental_bundle_components')) {
+      assert.deepEqual(query.values, ['group']);
+      return [];
+    }
+    return admission.tx.$queryRaw(query);
+  };
   db.$transaction = async work => work(db);
   const repo = new RentalBusinessFactRepository(db);
-  const q = { ...quote(), inspectionTemplateSnapshots: [], appliedDiscountPlanIds: [], rateSnapshot: [], calendarSnapshot: [], calendarWarnings: [], ruleSnapshot: {} };
+  const q = { ...quote(), request: { ...quote().request, lines: [{ itemGroupId: 'group', quantity: 1 }] },
+    inventoryBasis: { version: 'rental-quote-inventory-1', tenantId: 't', workspaceId: 'w', groups: [{ id: item.id, tenantId: item.tenantId,
+      categoryCode: 'camera', code: item.code, name: item.name, inventoryMode: 'quantity', unit: item.unit, status: item.status, bundleComponents: [] }] },
+    inspectionTemplateSnapshots: [], appliedDiscountPlanIds: [], rateSnapshot: [], calendarSnapshot: [], calendarWarnings: [], ruleSnapshot: {} };
   await runWithRequestIdentity(scope, async () => {
     // Decimal values must retain the real class; only JSON is serialized by the DB.
     await repo.upsertQuote(q);

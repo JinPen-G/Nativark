@@ -22,6 +22,11 @@ function setup() {
     && (!where.credentialType || (typeof where.credentialType === "string" ? row.credentialType === where.credentialType : where.credentialType.in.includes(row.credentialType))))
     .sort((a, b) => b.reviewedAt - a.reviewedAt || b.createdAt - a.createdAt || b.id.localeCompare(a.id))[0] ?? null;
   const tx = {
+    async $queryRaw(query) {
+      assert.match(query.sql, /FROM Tenant WHERE id=\? LOCK IN SHARE MODE/u);
+      assert.deepEqual(query.values, ["tenant-1"]);
+      return [{ id: "tenant-1" }];
+    },
     customerIdentityVerification: {
       async create({ data }) {
         const row = { id: `verification-${verifications.length + 1}`, ...data, createdAt: new Date() };
@@ -77,7 +82,7 @@ function setup() {
       return transaction.customerProfile.updateMany({ where: { tenantId, id: customerId }, data: { identityVerified } });
     }
   };
-  const operations = { async recordSensitiveAccess(tenantId, entry) { audits.push({ tenantId, ...entry }); } };
+  const operations = { async recordSensitiveReadAccess(tenantId, entry) { audits.push({ tenantId, ...entry }); } };
   const service = new CustomerOperationsService(prisma, customers, operations);
   const user = { id: "reviewer-1", displayName: "核验管理员", isSaasAdmin: false, isPlatformAdmin: false,
     permissions: ["rental-os:member:view", "rental-os:member:manage", "rental-os:customer:reveal-sensitive"] };
@@ -86,11 +91,11 @@ function setup() {
 
 (async () => {
   const ctx = setup();
-  const filesControllerSource = fs.readFileSync(path.join(__dirname, "../apps/api/src/modules/files/files.controller.ts"), "utf8");
-  const storageRuntimeSource = fs.readFileSync(path.join(__dirname, "../apps/api/src/modules/integrations/file-storage.runtime.service.ts"), "utf8");
+  const filesControllerSource = fs.readFileSync(path.join(__dirname, "../packages/rental-core/src/http-files.controller.ts"), "utf8");
+  const storageRuntimeSource = fs.readFileSync(path.join(__dirname, "../packages/rental-core/src/file-application-runtime.ts"), "utf8");
   assert.match(filesControllerSource, /实名凭证必须通过客户专用上传入口/u, "generic uploads cannot bypass customer scope checks");
   assert.match(filesControllerSource, /integrationsService\.listFiles\(query\)/u, "general ledger must use the same business ACL as the dashboard");
-  const fileAccessSource = fs.readFileSync(path.join(__dirname, "../apps/api/src/modules/files/file-business-access.service.ts"), "utf8");
+  const fileAccessSource = fs.readFileSync(path.join(__dirname, "../packages/rental-core/src/file-business-access.ts"), "utf8");
   assert.match(fileAccessSource, /\['ai_knowledge_document', 'customer', 'customer_profile', 'membership_review'\]\.includes\(file.businessType\)/u,
     "generic ledger must exclude identity and qualification evidence metadata");
   assert.match(storageRuntimeSource, /当前授权的客户实名核验资料/u, "generic file download URLs cannot expose identity evidence");

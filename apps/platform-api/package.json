@@ -1,0 +1,43 @@
+{
+  "name": "@rental-os/platform-api",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "无业务Core可独立运行的公共SaaS API宿主",
+  "exports": {
+    "./database": { "types": "./dist/database.d.ts", "default": "./dist/database.js" },
+    "./core-dependencies": { "types": "./dist/core-dependencies.d.ts", "default": "./dist/core-dependencies.js" },
+    "./data-plan": { "types": "./dist/platform-data.d.ts", "default": "./dist/platform-data.js" }
+  },
+  "typesVersions": { "*": {
+    "database": ["dist/database.d.ts"], "core-dependencies": ["dist/core-dependencies.d.ts"], "data-plan": ["dist/platform-data.d.ts"]
+  } },
+  "scripts": {
+    "prebuild": "npm run build -w @rental-os/platform-core-host",
+    "build": "tsc -p tsconfig.json",
+    "prelint": "npm run build -w @rental-os/platform-core-host",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/main.js",
+    "initialize": "node dist/initialize.js",
+    "prisma:generate": "prisma generate --schema prisma/schema.prisma",
+    "prisma:validate": "prisma validate --schema prisma/schema.prisma",
+    "prisma:migrate:deploy": "prisma migrate deploy --schema prisma/schema.prisma"
+  },
+  "dependencies": {
+    "@rental-os/platform-core-host": "0.1.0",
+    "@rental-os/platform-server": "0.1.0",
+    "@rental-os/platform-contracts": "0.1.0",
+    "@rental-os/core-contracts": "0.1.0",
+    "@rental-os/core-host": "0.1.0",
+    "@nestjs/common": "^10.4.15",
+    "@nestjs/core": "^10.4.15",
+    "@nestjs/config": "^3.3.0",
+    "@nestjs/platform-express": "^10.4.15",
+    "@prisma/client": "^5.22.0",
+    "class-validator": "^0.14.1",
+    "class-transformer": "^0.5.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1"
+  },
+  "devDependencies": { "prisma": "^5.22.0", "@types/node": "^22.9.0" }
+}

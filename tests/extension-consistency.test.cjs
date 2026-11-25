@@ -143,7 +143,7 @@ assert.ok(!platformSource.includes(TEST_CAPABILITY_CODE), "provisioning/Seed 源
 const navSource = fs.readFileSync(path.join(REPO, "apps/admin/src/app/navigation.tsx"), "utf8");
 assert.ok(!navSource.includes(TEST_CATEGORY_CODE) && !navSource.includes(TEST_CAPABILITY_CODE), "管理端导航不得出现测试夹具");
 // 共享契约里的品类枚举与能力码常量不得包含测试夹具。
-const sharedSource = fs.readFileSync(path.join(REPO, "packages/shared/src/index.ts"), "utf8");
+const sharedSource = fs.readFileSync(path.join(REPO, "packages/rental-core/src/contracts.ts"), "utf8");
 assert.ok(
   !new RegExp(`["']${TEST_CATEGORY_CODE}["']`, "u").test(sharedSource),
   "共享契约不得硬编码测试品类 code"
@@ -155,14 +155,14 @@ console.log("  ✓ 反向扫描：测试品类与能力未出现在生产 Seed/p
 // 判定对象是具体某个品类的**编码字面量**（如 === "camera" 或 === RentalCategoryCode.Vehicle），
 // 而不是把 categoryCode 作为数据透传（写快照、传给 Hook 上下文）。
 const CORE_FLOW_FILES = [
-  "rental-core.service.ts",
-  "rental-business.service.ts",
-  "rental-order-confirmation.service.ts",
-  "capability-hook.runtime.ts"
+  path.join(ROOT, "rental-core.service.ts"),
+  path.join(ROOT, "rental-business.service.ts"),
+  path.join(ROOT, "rental-order-confirmation.service.ts"),
+  path.join(REPO, "packages/rental-core/src/capability-runtime.ts")
 ];
 const CATEGORY_BRANCH = /===\s*RentalCategoryCode\.\w+|RentalCategoryCode\.\w+\s*===|===\s*["'](camera|camping|vehicle|construction)["']|["'](camera|camping|vehicle|construction)["']\s*===/u;
 for (const file of CORE_FLOW_FILES) {
-  const source = fs.readFileSync(path.join(ROOT, file), "utf8");
+  const source = fs.readFileSync(file, "utf8");
   const offenders = source
     .split(/\r?\n/u)
     .map((line, index) => ({ line: line.replace(/\/\/.*$/u, ""), no: index + 1 }))

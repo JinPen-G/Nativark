@@ -1,5 +1,5 @@
 import { Controller, ForbiddenException, Get, Header, Query, Req } from "@nestjs/common";
-import type { SystemUserRow } from "@rental-os/shared";
+import type { SystemUserRow } from "@rental-os/platform-contracts";
 import { DemoRequestListQueryDto } from "./demo-request.dto";
 import { DemoRequestService } from "./demo-request.service";
 

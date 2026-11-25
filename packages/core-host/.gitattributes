@@ -1,0 +1,2 @@
+# 平台独立迁移使用跨平台一致字节，既有组合迁移链原位保留。
+migrations/*.sql text eol=lf

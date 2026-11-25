@@ -109,6 +109,16 @@ test("persisted dynamic-space startup uses its bound definition and creates no s
   config.listWorkspaces = async () => [{ id: workspaceId, tenantId, categoryCode: code, isDefault: true }];
   config.loadAll = async () => [{ tenantId, workspaceId, workspaceCategoryCode: code, hasPersistedConfig: true,
     profile: saved.profile, businessSettings: saved.businessSettings, operators: [], locations: [], itemGroups: [], pricingGroups: [], couponTemplates: [], inspectionTemplates: saved.inspectionTemplates }];
+  // The fixture owns one persisted empty space. Current reads use its bound body.
+  config.loadWorkspaceSnapshot = async (requestedTenantId, requestedWorkspaceId) => {
+    assert.equal(requestedTenantId, tenantId); assert.equal(requestedWorkspaceId, workspaceId);
+    const current = await resolver.forWorkspace(tenantId, workspaceId);
+    return structuredClone({ tenantId, workspaceId, workspaceCategoryCode: code, definition: current.definition,
+      binding: { categoryCode: code, categoryVersionId: current.categoryVersionId, adoptionRevision: current.adoptionRevision },
+      isDefault: true, profile: saved.profile, businessSettings: saved.businessSettings,
+      operators: [], locations: [], itemGroups: [], pricingGroups: [], couponTemplates: [],
+      inspectionTemplates: saved.inspectionTemplates, hasPersistedConfig: true });
+  };
   await core.onApplicationBootstrap();
   assert.equal((await core.getProfile(tenantId)).categoryCode, code);
   assert.deepEqual(core.listItemGroups(tenantId), []);

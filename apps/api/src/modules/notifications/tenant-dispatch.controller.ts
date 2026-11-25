@@ -1,13 +1,9 @@
-import { Controller, Get, Param, Query } from "@nestjs/common";
-import type { TenantDispatchChannel, TenantDispatchSource } from "@rental-os/shared";
-import { TenantDispatchQueryDto } from "./tenant-messaging-request.dto";
+/** 原寄件 HTTP 复用公共 Controller，注入原宿主带业务参加者的同一应用。 */
+import { Controller, Inject } from "@nestjs/common";
+import { TenantDispatchController as PublicTenantDispatchController } from "@rental-os/platform-server/messaging";
 import { TenantDispatchService } from "./tenant-dispatch.service";
 
 @Controller("platform/dispatch")
-export class TenantDispatchController {
-  constructor(private readonly dispatch: TenantDispatchService) {}
-  @Get() list(@Query() query: TenantDispatchQueryDto) { return this.dispatch.list(query); }
-  @Get(":source/:id") detail(@Param("source") source: TenantDispatchSource, @Param("id") id: string, @Query("channel") channel: TenantDispatchChannel) {
-    return this.dispatch.detail(source, id, channel);
-  }
+export class TenantDispatchController extends PublicTenantDispatchController {
+  constructor(@Inject(TenantDispatchService) dispatch: TenantDispatchService) { super(dispatch); }
 }

@@ -1,7 +1,5 @@
-import type { RentalWorkbenchTodos } from "@rental-os/shared";
+/** 员工工作台薄入口，待办事实由同一 Rental 客户端与原服务端提供。 */
+import { createRentalStaffWorkbenchApi } from "@rental-os/rental-core/clients/staff";
 import { request } from "../core/http";
 
-/** 工作台待办投影（按权限聚合订单/资金/工单/通知待办）。 */
-export function workbenchTodos(): Promise<RentalWorkbenchTodos> {
-  return request<RentalWorkbenchTodos>("/rental/v1/workbench/todos");
-}
+export const { workbenchTodos } = createRentalStaffWorkbenchApi({ request });
