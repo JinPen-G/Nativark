@@ -15,6 +15,7 @@ import {
   CorePackageArtifactSchema, createPlatformCorePackageArchiveIndexSource, inspectCorePackageArtifact
 } from "@rental-os/platform-core-host/core-package-preflight";
 import type { CorePackageDeploymentSource } from "@rental-os/platform-core-host/core-package-ports";
+import type { CoreHostSqlTransaction } from "@rental-os/core-host/mysql";
 import type { CorePackagePreparationMaterialsSource } from "@rental-os/platform-core-host/core-package-preparation";
 import { requireCorePackagePin } from "@rental-os/core-contracts/install";
 import { readPlatformRuntimeEvidence } from "@rental-os/platform-core-host";
@@ -29,6 +30,8 @@ export interface RentalCorePackageSourcesInput {
   /** 同一静态装配已核定的实际 server；每次读材料仍重核完整固定包，不能改成配置路径。 */
   additionalCorePackages?: readonly { entry: string; root: string; manifest: CoreManifest; sha256: string }[];
   observe(): Promise<CoreDataObservation>;
+  /** 候选准备在原身份事务内重读，观察器须绑定本次传入的 SQL 读取器。 */
+  observeInTransaction?(transaction: Pick<CoreHostSqlTransaction, "$queryRaw">): Promise<CoreDataObservation>;
   /** AI 启用入口持有原 requireAiNativeDataPackage；无 AI 入口不导入能力实现。 */
   dataCapabilities?(): readonly { root: string; release: CorePlatformDataCapabilityRelease }[];
 }
@@ -71,6 +74,7 @@ export function createRentalCorePackageSources(input: RentalCorePackageSourcesIn
     ? createPlatformCorePackageArchiveIndexSource({ directory: join(storage, "archives") }) : undefined;
   const rentalPackage = input.rentalPackage.bind(input), readCapabilities = input.dataCapabilities?.bind(input);
   const observe = input.observe.bind(input);
+  const observeInTransaction = input.observeInTransaction?.bind(input);
 
   async function readCurrent() {
     if (!artifacts || !reference) return;
@@ -140,15 +144,19 @@ export function createRentalCorePackageSources(input: RentalCorePackageSourcesIn
     return { platform, cores: coreFiles, capabilityFiles };
   }
 
+  async function readDeployment(readObservation: () => Promise<CoreDataObservation>) {
+    if (!await readCurrent()) return;
+    return { lock: structuredClone(lock), installed: {
+      platform: structuredClone(lock.platform), cores: structuredClone(lock.cores),
+      ...(lock.dataCapabilities === undefined ? {} : { dataCapabilities: structuredClone(lock.dataCapabilities) })
+    }, data: await readObservation() };
+  }
+
   return {
     deployment: {
-      async read() {
-        if (!await readCurrent()) return;
-        return { lock: structuredClone(lock), installed: {
-          platform: structuredClone(lock.platform), cores: structuredClone(lock.cores),
-          ...(lock.dataCapabilities === undefined ? {} : { dataCapabilities: structuredClone(lock.dataCapabilities) })
-        }, data: await observe() };
-      }
+      read: () => readDeployment(observe),
+      ...(observeInTransaction ? { readInTransaction: (transaction: Pick<CoreHostSqlTransaction, "$queryRaw">) =>
+        readDeployment(() => observeInTransaction(transaction)) } : {})
     },
     materials: {
       async read() {

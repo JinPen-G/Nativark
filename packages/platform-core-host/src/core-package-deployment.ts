@@ -229,24 +229,27 @@ export function createPublicCorePackageDeploymentSources(input: {
     return { lock, files: installedFiles, plan };
   }
 
+  async function readDeployment(reader: Pick<CoreHostSqlTransaction, "$queryRaw">) {
+    const base = await readBase();
+    if (!base) return;
+    const data = await createMysqlCoreDeploymentObservation({
+      database: reader, platform: base.plan, cores: [],
+      ...(base.lock.dataCapabilities === undefined ? {} : { dataCapabilities: [] })
+    }).read();
+    return {
+      lock: structuredClone(base.lock),
+      installed: {
+        platform: structuredClone(base.lock.platform), cores: [],
+        ...(base.lock.dataCapabilities === undefined ? {} : { dataCapabilities: [] })
+      },
+      data
+    };
+  }
+
   return {
     deployment: {
-      async read() {
-        const base = await readBase();
-        if (!base) return;
-        const data = await createMysqlCoreDeploymentObservation({
-          database, platform: base.plan, cores: [],
-          ...(base.lock.dataCapabilities === undefined ? {} : { dataCapabilities: [] })
-        }).read();
-        return {
-          lock: structuredClone(base.lock),
-          installed: {
-            platform: structuredClone(base.lock.platform), cores: [],
-            ...(base.lock.dataCapabilities === undefined ? {} : { dataCapabilities: [] })
-          },
-          data
-        };
-      }
+      read: () => readDeployment(database),
+      readInTransaction: readDeployment
     },
     materials: {
       async read() {

@@ -108,7 +108,7 @@ export function CreateTicketPage() {
     if (original.current && JSON.stringify(input) !== JSON.stringify(original.current)) return Promise.reject(new Error("请先核对原提交结果"));
     original.current = input;
     setRejected(false);
-    return request(pathFor(TICKETS_HTTP.create.path), { method: "post", data: input }).then(result => {
+    return request(pathFor(TICKETS_HTTP.create.path), { method: "post", data: input, retryAuthentication: false }).then(result => {
       const receipt = TICKETS_HTTP.create.response.parse(result);
       if (receipt.operationId !== input.operationId) throw new Error("工单回执与原操作不一致");
       completed.current = receipt.ticket.id;
@@ -205,7 +205,7 @@ function TicketDetailContent({ ticketId }: { ticketId: string }) {
       return Promise.reject(new Error("请先读取当前工单"));
     const input = op.body.parse({ ...extra, operationId: crypto.randomUUID(), expectedRevision: current.data.revision });
     setSending(true); setRejected(false);
-    const response = request(pathFor(op.path, ticketId), { method: "post", data: input }).then(result => {
+    const response = request(pathFor(op.path, ticketId), { method: "post", data: input, retryAuthentication: false }).then(result => {
       const receipt = op.response.parse(result);
       if (receipt.operationId !== input.operationId || receipt.ticket.id !== ticketId) throw new Error("工单回执与原操作不一致");
       confirmedRevision.current = Math.max(confirmedRevision.current, receipt.ticket.revision);

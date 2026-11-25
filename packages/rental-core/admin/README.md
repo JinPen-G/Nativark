@@ -2,6 +2,8 @@
 
 Rental 后台的统一页面贡献通过一个宿主供给器取得订单、工单、能力、地点、商品资产、商业、治理、会员客户、工作台报表、渠道、开业和支付对账上下文。公共应用继续负责登录、外壳、登记路由、主题、语言和查询缓存。[统一页面贡献](index.tsx) · [宿主工厂与正式输入](host-context.tsx) · [公共应用](../../platform-admin/src/application.tsx)
 
+退出的 `logout()` / `signOut()` 返回原撤销 Promise，公共请求客户端提供独立于业务取消信号的撤销接点；本地凭据立即清空，桌面回执和账户菜单等待服务端原结果。刷新失应答保留失败，不能当成已确认完整退出。[会话API](browser-api.ts) · [原身份存储](browser-auth-store.ts) · [宿主组合](browser.ts)
+
 ## 装配
 
 在受控宿主模块中创建一次工厂，把 `contexts` 交给同一份 Rental 页面贡献。注册通过后，用返回的 `Provider` 包住消费这些页面的应用。下列代码中的 `rentalPorts` 来自当前宿主的真实实现，`manifest` 来自所选 Rental 标准包。

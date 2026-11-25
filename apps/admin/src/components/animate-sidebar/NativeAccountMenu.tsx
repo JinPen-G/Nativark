@@ -21,5 +21,5 @@ export function NativeAccountMenu() {
   return <NativeAccountMenuView name={name} account={account} compact={tenantConsole}
     billingAction={allowed(billing) ? { label: t("版本订阅"), icon: <HugeiconsIcon icon={CreditCardIcon} strokeWidth={2} />, onSelect: () => navigate(billing.path) } : undefined}
     actions={allowed(settings) ? [{ label: t(user?.isSaasAdmin ? "平台参数" : "外观与音效"), icon: <HugeiconsIcon icon={Settings01Icon} strokeWidth={2} />, onSelect: () => navigate(settings.path) }] : []}
-    onSignOut={() => { logout(); navigate("/login"); }} />;
+    onSignOut={async () => { await logout(); navigate("/login"); }} />;
 }

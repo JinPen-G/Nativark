@@ -15,9 +15,13 @@ async function bootstrap() {
     throw new Error(`工单部署锁须与当前 Node ${process.versions.node} 和 Core 合同 ${CORE_CONTRACT_VERSION} 一致`);
   process.env.PLATFORM_DATA_SOURCE = "mysql";
   const port = Number(process.env.API_PORT ?? 3000);
+  const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
+  if (!Number.isSafeInteger(trustProxyHops) || trustProxyHops < 0) throw new Error("TRUST_PROXY_HOPS 须为非负整数");
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("API_PORT必须为1-65535整数");
   const app = await NestFactory.create(ticketsApplicationModule(lock));
   try {
+    // 只按部署方声明的代理跳数解析客户端地址；缺省不采信转发头。
+    if (trustProxyHops > 0) app.getHttpAdapter().getInstance().set("trust proxy", trustProxyHops);
     app.use(requestIdentityMiddleware);
     app.setGlobalPrefix("api");
     app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));

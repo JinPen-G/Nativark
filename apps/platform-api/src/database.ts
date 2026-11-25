@@ -1,5 +1,5 @@
 /** 公共宿主唯一Prisma实例，只由公共schema生成。导入不读环境文件或连接数据库。
- * 所选宿主可在初始化前显式接管生命周期；默认零Core仍沿本模块原连接/断开钩子。 */
+ * 所选宿主可在初始化前显式接管生命周期；默认零Core也由唯一宿主接管，独立初始化命令沿本模块原连接/断开钩子。 */
 import { Global, Injectable, Module, type OnModuleDestroy, type OnModuleInit } from "@nestjs/common";
 import { integrationTestWhere, type IntegrationTestUpdate } from "@rental-os/platform-server/integration-store";
 import { mapPrismaNullInputs } from "@rental-os/platform-server/prisma-runtime";

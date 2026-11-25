@@ -76,7 +76,7 @@ export function DesktopSessionBridge() {
             || request.session.workspaceId !== (before.currentWorkspaceId ?? null)) throw new Error("Business session changed");
           if (command.kind === "logout") {
             if (!window.dispatchEvent(new Event("rental-desktop-before-session-change", { cancelable: true }))) throw new Error("Finish editing before logout");
-            before.logout();
+            await before.logout();
             await navigate("/login", { replace: true, flushSync: true });
             ok = live && projection(desktop, latest.current.navigation, latest.current.pathname, latest.current.t, latest.current.terminology).status === "signed-out";
           } else if (command.kind === "switch-workspace") {

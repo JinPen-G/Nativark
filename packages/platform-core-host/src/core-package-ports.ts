@@ -8,6 +8,7 @@ import type {
 } from "@rental-os/core-contracts";
 import type { GitHubCoreDiscoveryQuerySchema, GitHubCoreDiscoveryResult } from "@rental-os/core-contracts/github";
 import type { GitHubCoreRepositoryInspection } from "@rental-os/core-contracts/github-repository";
+import type { CoreHostSqlTransaction } from "@rental-os/core-host/mysql";
 import type { z } from "zod";
 
 export const CORE_PACKAGE_HTTP_BASE = "platform/core-packages";
@@ -74,6 +75,9 @@ export interface CorePackageDeploymentSource {
     /** 来自原迁移账及实际物理读取，缺失保持 null。 */
     data: CoreDataObservation | null;
   } | undefined>;
+  /** 候选准备持有身份事务时，重核同一安装材料并沿传入事务读取迁移账及物理状态。
+   * 缺少此接点的来源仍可供事务外目录读取，候选准备返回不可用。 */
+  readInTransaction?(transaction: Pick<CoreHostSqlTransaction, "$queryRaw">): ReturnType<CorePackageDeploymentSource["read"]>;
 }
 export interface CorePackageDiscoverySource {
   discover(query: CorePackageDiscoveryRequest["query"], refresh: boolean): Promise<GitHubCoreDiscoveryResult>;

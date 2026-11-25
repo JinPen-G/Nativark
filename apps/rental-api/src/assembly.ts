@@ -168,6 +168,7 @@ export function composeRentalApplication<Binding = never, Additional = unknown>(
       rentalPackage: () => requireRentalDeploymentPackage(pin, lock.platform.versions),
       additionalCorePackages: additional,
       observe: () => observation(database).read(),
+      observeInTransaction: transaction => observation(transaction).read(),
       ...(input.aiMode === "enabled" ? { dataCapabilities: input.ai.readDataPackages } : {}) }) });
   const coreHttp = createPlatformCorePackageAssemblyHttpAccess(packages, createPlatformCoreHttpAccess(core));
   const authorization = createRentalAuthorization(shared);

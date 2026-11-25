@@ -2,6 +2,7 @@
 import { CoreDeploymentLockSchema, type CoreDeploymentLock } from "@rental-os/core-contracts";
 import { createCoreDeployedCatalogue, createCoreTransactionCatalogues, type CoreDeploymentAvailability } from "@rental-os/core-host";
 import { createMysqlCoreDeploymentObservation } from "@rental-os/core-host/mysql-deployment";
+import type { CoreHostSqlTransaction } from "@rental-os/core-host/mysql";
 import {
   composePlatformCoreApplication, composePlatformCorePackageAssembly, createPlatformCorePackageAudit
 } from "@rental-os/platform-core-host";
@@ -32,7 +33,7 @@ export function composeTicketsApplication(database: PlatformDatabaseClient, inpu
   const { manifest } = requireTicketsDeploymentPackage(pin, lock.platform.versions);
   let catalogue: ReturnType<typeof createCoreDeployedCatalogue>;
   const http = createTicketsHttpContribution();
-  const observation = (source: Pick<PublicDatabaseTransaction, "$queryRaw">) =>
+  const observation = (source: Pick<CoreHostSqlTransaction, "$queryRaw">) =>
     createMysqlCoreDeploymentObservation({ database: source, platform: platformPlan,
       cores: [{ coreId: manifest.id, data: manifest.data,
         migrationNames: manifest.data.migrations.map(migration => corePrismaMigrationName(manifest.id, migration.id)),
@@ -51,7 +52,8 @@ export function composeTicketsApplication(database: PlatformDatabaseClient, inpu
     http: [http], observations });
   const { platformReference, ...options } = packageOptions;
   const sources = createTicketsCorePackageSources({ lock, storageDirectory: options.storageDirectory,
-    platformReference, observe: () => observations.read() });
+    platformReference, observe: () => observations.read(),
+    observeInTransaction: transaction => observation(transaction).read() });
   return {
     tickets,
     application: composePlatformCoreApplication<PublicDatabaseTransaction>({ ...dependencies, catalogue, deploymentForTransaction }),

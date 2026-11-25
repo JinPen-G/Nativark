@@ -1,5 +1,5 @@
 /** SaaS 固定候选预览、准备与原结果读取，复用原预检和当前主体事务。
- * 网络与材料读取先完成，文件发布时持原主体锁，失应答沿同一摘要回读。
+ * 网络与材料读取先完成，发布前后重核材料，物理观察复用原主体事务，失应答沿同一摘要回读。
  * 宿主存储回包按原 SHA 和完整候选指纹核对，无法核定的发布结果保持 unknown。
  * 新候选一直 pending，实际迁移、运行版本与授权分别由原部署和业务入口维护。 */
 import { isDeepStrictEqual } from "node:util";
@@ -116,9 +116,11 @@ export function composePlatformCorePackagePreparation<Tx extends PlatformCoreTra
       finally { await revalidate(); }
     }, { isolationLevel: "ReadCommitted", timeout: PREPARATION_TRANSACTION_TIMEOUT_MS });
   }
-  async function sameSnapshot(expected: NonNullable<Snapshot>): Promise<void> {
+  async function sameSnapshot(transaction: Tx, expected: NonNullable<Snapshot>): Promise<void> {
+    if (!input.deployment?.readInTransaction)
+      throw new CoreAccessError("core_unavailable", "部署来源尚未提供当前事务的材料及物理状态读取");
     let current: Snapshot;
-    try { current = await input.deployment?.read(); }
+    try { current = await input.deployment.readInTransaction(transaction); }
     catch { throw new CoreAccessError("core_unavailable", "当前部署读取失败，请沿同一摘要核对原候选结果"); }
     if (!isDeepStrictEqual(expected, current))
       throw new CoreAccessError("revision_conflict", "部署或原数据已变化，请沿原候选摘要读取结果并重新核对");
@@ -128,9 +130,9 @@ export function composePlatformCorePackagePreparation<Tx extends PlatformCoreTra
     async preview(value) {
       const request = CorePackagePreparationRequestSchema.parse(value), built = await build(request);
       if (built.status !== "ready") return built;
-      return locked(async () => {
+      return locked(async transaction => {
         if (!isDeepStrictEqual(built.principal, identityReference())) throw new CoreAccessError("denied", "预览的原主体或会话已变化");
-        await sameSnapshot(built.snapshot);
+        await sameSnapshot(transaction, built.snapshot);
         return { status: "ready" as const, sha256: built.bundle.sha256, plan: built.bundle.plan };
       });
     },
@@ -143,10 +145,10 @@ export function composePlatformCorePackagePreparation<Tx extends PlatformCoreTra
       let dispatched = false;
       return locked(async (transaction, revalidate) => {
         if (!isDeepStrictEqual(built.principal, identityReference())) throw new CoreAccessError("denied", "准备的原主体或会话已变化");
-        await sameSnapshot(built.snapshot);
+        await sameSnapshot(transaction, built.snapshot);
         if (input.audit) {
           await input.audit.recordPublicationAttempt(transaction, { kind: "preparation", sha256: request.expectedSha256 });
-          await sameSnapshot(built.snapshot);
+          await sameSnapshot(transaction, built.snapshot);
           await revalidate();
         }
         let result: CorePackagePreparationResult;
@@ -157,7 +159,7 @@ export function composePlatformCorePackagePreparation<Tx extends PlatformCoreTra
           result = { status: "unknown", sha256: request.expectedSha256, error: {
             code: "preparation_unknown", message: "候选准备尚无确定结果，请按同一摘要核对原回执" } };
         }
-        await sameSnapshot(built.snapshot);
+        await sameSnapshot(transaction, built.snapshot);
         if (result.status === "unavailable") {
           // 存储已调用，原目录不可核定时保留本次摘要供回读。
           return { status: "unknown" as const, sha256: request.expectedSha256, error: result.error };

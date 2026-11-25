@@ -18,6 +18,8 @@
 
 API 启动读取当前进程 `DATABASE_URL`、`AUTH_TOKEN_SECRET`、`CORE_DEPLOYMENT_LOCK`。锁中 Node 和 Core 合同版本须与当前进程实际版本一致，宿主在装配前拒绝不匹配的锁。权限登记读取同一进程的 `DATABASE_URL` 与 `CORE_DEPLOYMENT_LOCK`，初始化口令沿公共宿主步骤提供。锁路径取步骤 3 返回的实际 `core.deployment.lock.json`，包管理的归档存储及当前底座引用见下方配置。Web 的公开基址和代理另按[工单后台](../example-tickets-admin/README.md#本地使用)供给。
 
+反向代理部署可设置进程配置 `TRUST_PROXY_HOPS` 为非负安全整数，默认 `0` 不信任转发头。只在 API 无法绕过代理直达、代理链跳数固定且入口代理正确重写转发头时，按实际跳数配置（例如单层受控代理设为 `1`）。公共限流继续使用 Express 据此解析的 `request.ip`，不直接采信任意 `X-Forwarded-For`，演示预约仍为每地址 5 次 / 600 秒，邀请阈值也保持原规则。非法配置在创建应用前拒绝。[启动实现](src/main.ts)
+
 | 阅读路线 | 入口 |
 | --- | --- |
 | 固定包和部署准备 | [准备命令](src/prepare-deployment.ts)、[包核验](src/deployment-package.ts)；不安装或执行DDL，成功只显示pending |

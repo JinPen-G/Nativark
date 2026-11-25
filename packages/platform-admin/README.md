@@ -2,6 +2,8 @@
 
 `@rental-os/platform-admin` 承载原 React/UIArc 后台的真实公共呈现。业务 Core 用 `/core` 声明页面与操作，使用 `/ui` 的表单、列表和反馈。宿主提供已经验证的身份、唯一 HTTP 客户端和查询缓存。公共包不导入 Rental 页面、权限模型、业务 API 或 AI 执行器。
 
+退出使用同一请求客户端的 `revokeSession(originalRefreshToken)`，独立于本地退出时中止的业务请求。调用者立即清空本地会话并等待原撤销 Promise；同一客户端正在刷新时先等待原刷新，迟到的后继凭证只用于撤销，不覆盖新身份。刷新失应答保留错误，不把原凭证撤销成功说成后继会话已确认失效。[请求与撤销](src/runtime/browser-http.ts) · [公共会话](src/runtime/browser-session.ts)
+
 ## 阅读路线
 
 | 入口 | 职责与直接消费者 |

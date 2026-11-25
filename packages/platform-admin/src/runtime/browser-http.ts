@@ -19,20 +19,26 @@ export function createAdminHttpClient<T extends PlatformLoginResponse>({ baseURL
 }) {
   const http = axios.create({ baseURL, timeout: 12_000 });
   let refreshPromise: Promise<T | undefined> | undefined;
+  let refreshingToken: string | undefined;
   function refreshSession(refreshToken: string) {
     if (refreshPromise) return refreshPromise;
     const rotate = async () => {
       // 跨标签锁内复核，已经轮换的旧 token 不再提交第二次刷新。
       if (session.refreshToken() !== refreshToken) return undefined;
       const epoch = session.currentSessionEpoch();
-      const response = await axios.post<ApiResult<T>>(`${baseURL}/auth/refresh`, { refreshToken });
-      if (session.currentSessionEpoch() !== epoch || session.refreshToken() !== refreshToken) return undefined;
+      const response = await axios.post<ApiResult<T>>(`${baseURL}/auth/refresh`, { refreshToken }, { timeout: 12_000 });
+      if (session.currentSessionEpoch() !== epoch || session.refreshToken() !== refreshToken) {
+        // 服务端已经轮换，迟到凭据不能交给新身份，也不能作为有效孤儿会话遗留。
+        await revokeCredential(response.data.data.refreshToken);
+        return undefined;
+      }
       session.commitRefresh(response.data.data);
       return response.data.data;
     };
     const pending: Promise<T | undefined> = (async () => navigator.locks
       ? await navigator.locks.request(refreshLockName, rotate) : await rotate())();
-    refreshPromise = pending.finally(() => { refreshPromise = undefined; });
+    refreshingToken = refreshToken;
+    refreshPromise = pending.finally(() => { refreshPromise = undefined; refreshingToken = undefined; });
     return refreshPromise;
   }
 
@@ -111,5 +117,22 @@ export function createAdminHttpClient<T extends PlatformLoginResponse>({ baseURL
       transformResponse: [(body: unknown) => String(body ?? "")] });
     return response.data;
   }
-  return { http, request, requestText };
+  /** 撤销只提交原刷新凭证，独立于本地退出时立即中止的业务请求。 */
+  async function revokeCredential(refreshToken: string): Promise<{ loggedOut: boolean }> {
+    const response = await axios.post<ApiResult<{ loggedOut: boolean }>>(
+      `${baseURL}/auth/logout`, { refreshToken }, { timeout: 12_000 });
+    return response.data.data;
+  }
+  async function revokeSession(refreshToken: string): Promise<{ loggedOut: boolean }> {
+    const pending = refreshingToken === refreshToken ? refreshPromise : undefined;
+    let refreshFailure: unknown, refreshFailed = false;
+    // 先等已发出的原刷新完成，再取同一跨标签锁；不能持锁等待正在取锁的刷新。
+    try { await pending; } catch (error) { refreshFailed = true; refreshFailure = error; }
+    const revoke = () => revokeCredential(refreshToken);
+    const result = navigator.locks ? await navigator.locks.request(refreshLockName, revoke) : await revoke();
+    // 刷新失应答不能证明不存在后继会话，保留失败而非宣告服务端撤销完整成功。
+    if (refreshFailed) throw refreshFailure;
+    return result;
+  }
+  return { http, request, requestText, revokeSession };
 }

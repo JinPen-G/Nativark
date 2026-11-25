@@ -14,6 +14,7 @@ import {
   readCorePackageOrdinaryFile
 } from "@rental-os/platform-core-host/core-package-preflight";
 import type { CorePackageDeploymentSource } from "@rental-os/platform-core-host/core-package-ports";
+import type { CoreHostSqlTransaction } from "@rental-os/core-host/mysql";
 import type { CorePackagePreparationMaterialsSource } from "@rental-os/platform-core-host/core-package-preparation";
 import { requireTicketsDeploymentPackage } from "./deployment-package";
 
@@ -22,6 +23,8 @@ export interface TicketsCorePackageSourcesInput {
   storageDirectory?: string;
   platformReference?: string;
   observe(): Promise<CoreDataObservation>;
+  /** 候选准备在原身份事务内重读，观察器须绑定本次传入的 SQL 读取器。 */
+  observeInTransaction?(transaction: Pick<CoreHostSqlTransaction, "$queryRaw">): Promise<CoreDataObservation>;
 }
 
 const digest = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
@@ -66,6 +69,7 @@ export function createTicketsCorePackageSources(input: TicketsCorePackageSources
   const artifacts = storage && reference
     ? createPlatformCorePackageArchiveIndexSource({ directory: join(storage, "archives") }) : undefined;
   const observe = input.observe.bind(input);
+  const observeInTransaction = input.observeInTransaction?.bind(input);
 
   async function readCurrent() {
     if (!artifacts || !reference) return;
@@ -99,15 +103,19 @@ export function createTicketsCorePackageSources(input: TicketsCorePackageSources
     return { platform, cores: new Map([[pin.manifest.id, ticketsFiles]]) };
   }
 
+  async function readDeployment(readObservation: () => Promise<CoreDataObservation>) {
+    if (!await readCurrent()) return;
+    return { lock: structuredClone(lock), installed: {
+      platform: structuredClone(lock.platform), cores: structuredClone(lock.cores),
+      ...(lock.dataCapabilities === undefined ? {} : { dataCapabilities: [] })
+    }, data: await readObservation() };
+  }
+
   return {
     deployment: {
-      async read() {
-        if (!await readCurrent()) return;
-        return { lock: structuredClone(lock), installed: {
-          platform: structuredClone(lock.platform), cores: structuredClone(lock.cores),
-          ...(lock.dataCapabilities === undefined ? {} : { dataCapabilities: [] })
-        }, data: await observe() };
-      }
+      read: () => readDeployment(observe),
+      ...(observeInTransaction ? { readInTransaction: (transaction: Pick<CoreHostSqlTransaction, "$queryRaw">) =>
+        readDeployment(() => observeInTransaction(transaction)) } : {})
     },
     materials: {
       async read() {

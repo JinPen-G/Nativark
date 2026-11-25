@@ -37,11 +37,14 @@ npm run start -w @rental-os/platform-api
 
 构建成功后，可用 `node packages/platform-server/dist/platform-openapi.js` 读取同版本公共接口资料。Web 的代理、首次改密和默认空态见[公共后台步骤](../platform-admin/README.md#本地使用)。已有组合库切换沿下方迁移边界核定。
 
+反向代理部署可设置进程配置 `TRUST_PROXY_HOPS` 为非负安全整数，默认 `0` 不信任转发头。只在 API 无法绕过代理直达、代理链跳数固定且入口代理正确重写转发头时，按实际跳数配置（例如单层受控代理设为 `1`）。公共限流继续使用 Express 据此解析的 `request.ip`，不直接采信任意 `X-Forwarded-For`，演示预约仍为每地址 5 次 / 600 秒，邀请阈值也保持原规则。非法配置在创建应用前拒绝。[启动实现](src/main.ts)
+
 ## 实现与功能入口
 
 | 入口 | 职责 |
 | --- | --- |
 | [启动](src/main.ts) | 消费进程 `DATABASE_URL`、`AUTH_TOKEN_SECRET`、可选 `API_PORT`；不自动加载环境文件 |
+| [唯一生命周期](src/lifecycle.ts) | 停止新 Guard / 处理器并等原初始化和在途工作结束，HTTP 关闭后释放唯一数据库池；断线不取消原事务 |
 | [装配](src/app.module.ts) | 默认空 Core，只选择公共服务和唯一公共数据库 |
 | [Core装配](src/core-assembly.ts) | 同一实际工厂供给标准Core管理、本人目录、范围和Guard；默认零Core，未知业务拒绝 |
 | [Core包管理装配](../../packages/platform-core-host/src/core-package-assembly.ts) | 共用公共数据库和当前账号，实际审计与宿主文件配置供给四组 Controller，原部署及包材料按实际来源提供 |

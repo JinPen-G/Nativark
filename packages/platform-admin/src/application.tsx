@@ -194,7 +194,7 @@ export function createPlatformAdminApplication(options: PlatformAdminApplication
     { path: "/tenant/dispatch", element: <TenantDispatchPage {...options.publicPageContent?.dispatch} /> },
     { path: "/tenant/support", element: <CustomerSupportPage /> },
     { path: PLATFORM_SETTINGS_ROUTES.organizations.path, element: <OrganizationsPage /> },
-    { path: PLATFORM_SETTINGS_ROUTES.security.path, element: <SaasPage permission="system:params:manage"><PlatformSystemPage /></SaasPage> },
+    { path: PLATFORM_SETTINGS_ROUTES.security.path, element: <SaasPage permission="system:params:manage"><PlatformSystemPage platformAiAvailable={Boolean(PlatformAiPage)} /></SaasPage> },
     { path: "/platform/operations", element: <SaasPage permission="system:params:manage"><PlatformOperationsPage /></SaasPage> },
     { path: "/platform/users", element: <SaasPage permission="system:user:manage"><PlatformPage /></SaasPage> },
     { path: "/platform/demo-requests", element: <SaasPage permission="system:demo-request:view"><DemoRequestsPage /></SaasPage> },

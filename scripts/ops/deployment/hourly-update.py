@@ -1,11 +1,13 @@
 """更新 nativark-demo 的 API 和 Web。GitHub CI、数据库基线和回退均在这里核对。"""
 
 import argparse
+from contextlib import contextmanager
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import shlex
 import signal
 import subprocess
 import tarfile
@@ -165,21 +167,48 @@ def restore():
     status("rolled-back", commit=old["commit"], images=old["images"])
 
 
-def git_source(repo, commit, destination):
+@contextmanager
+def git_source_archive(repo, commit):
     paths = (
         "package.json", "package-lock.json", "tsconfig.base.json", "LICENSE", "apps", "packages",
         "assets", "config", "scripts/ops/deployment", "tests/fixtures/ai-native/prisma-offline-preload.cjs",
+        "scripts/build-selected-prisma.cjs", "scripts/miniprogram-shared-types.cjs",
     )
     with subprocess.Popen(
         ["git", "-C", str(repo), "archive", commit, "--", *paths], stdout=subprocess.PIPE
     ) as process:
         try:
             with tarfile.open(fileobj=process.stdout, mode="r|") as archive:
-                archive.extractall(destination, filter="data")
+                yield archive
         finally:
             process.stdout.close()
         if process.wait(timeout=30) != 0:
             raise RuntimeError("Git 固定源码归档失败")
+
+
+def git_source(repo, commit, destination):
+    with git_source_archive(repo, commit) as archive:
+        archive.extractall(destination, filter="data")
+
+
+def check_local_copies(dockerfile, members):
+    sources = []
+    for line in re.sub(r"\\\r?\n", " ", dockerfile).splitlines():
+        instruction = re.match(r"^\s*COPY\s+((?:--\S+\s+)*)(.+)$", line, re.IGNORECASE)
+        if instruction is None:
+            continue
+        options, arguments = instruction.groups()
+        # --from 消费镜像或前序构建层，其路径由 Docker 构建负责核验。
+        if any(option.startswith("--from=") for option in options.split()):
+            continue
+        paths = json.loads(arguments) if arguments.startswith("[") else shlex.split(arguments)
+        if not isinstance(paths, list) or len(paths) < 2 or not all(isinstance(path, str) for path in paths):
+            raise RuntimeError("无法解析 Dockerfile 本地 COPY")
+        sources.extend(path.removeprefix("./").lstrip("/").rstrip("/") for path in paths[:-1])
+    missing = sorted(set(sources) - members)
+    if missing:
+        raise RuntimeError("源码归档缺少本地 COPY 输入 " + ", ".join(missing))
+    return sources
 
 
 def build(repo, work, commit):
@@ -288,6 +317,43 @@ def self_test():
     assert ci_approved([dict(success, event="pull_request"), dict(success, conclusion="failure")], commit) is None
     assert ci_approved([dict(success, head_repository={"full_name": "Other/Nativark"})], commit) is None
     print("CI 固定版本门禁检查通过")
+
+    repo = Path(__file__).resolve().parents[3]
+    commit = run("git", "-C", str(repo), "rev-parse", "--verify", "HEAD^{commit}", capture=True)
+    assert SHA.fullmatch(commit)
+    members = set()
+    files = set()
+    dockerfile = None
+    # 消费与正式构建相同的固定 Git 归档流，避免工作区文件掩盖白名单遗漏。
+    with git_source_archive(repo, commit) as archive:
+        for member in archive:
+            members.add(member.name.rstrip("/"))
+            if member.isfile():
+                files.add(member.name)
+            if member.name == "scripts/ops/deployment/Dockerfile":
+                dockerfile = archive.extractfile(member).read().decode("utf-8")
+    if dockerfile is None:
+        raise RuntimeError("源码归档缺少 Dockerfile")
+    sources = check_local_copies(dockerfile, members)
+    required = {"scripts/build-selected-prisma.cjs", "scripts/miniprogram-shared-types.cjs"}
+    assert required <= set(sources)
+    assert all(path.startswith("scripts/ops/deployment/") or path in required
+               for path in files if path.startswith("scripts/"))
+    for missing in sorted(required):
+        try:
+            check_local_copies(dockerfile, members - {missing})
+        except RuntimeError as error:
+            assert str(error) == "源码归档缺少本地 COPY 输入 " + missing
+        else:
+            raise AssertionError(f"缺文件反例未被拒绝 {missing}")
+    assert check_local_copies(
+        'COPY --chown=node ["one", "two", "/app/"]\n'
+        'COPY three \\\n    four /app/\nCOPY --from=build /generated /app/\n',
+        {"one", "two", "three", "four"},
+    ) == ["one", "two", "three", "four"]
+    print(json.dumps({"self_test": "git-source-copy", "commit": commit,
+                      "archive_files": len(files), "local_copy_sources": len(sources),
+                      "missing_source_cases": len(required)}, ensure_ascii=False))
 
 
 def interrupted(signum, frame):

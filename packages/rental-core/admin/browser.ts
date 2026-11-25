@@ -21,7 +21,7 @@ export function createRentalBrowserAdminSession(options: RentalBrowserAdminSessi
     () => Boolean(window.localStorage.getItem("rental_access_token")),
   );
   const transport = createRentalAdminHttpClient(options.baseURL, queries);
-  const api = createRentalAdminSessionApi(transport.request);
+  const api = createRentalAdminSessionApi(transport.request, transport.revokeSession);
   // 登录前只读网址租户的公开品牌；不携带旧会话凭据、不触发刷新。
   const publicHttp = axios.create({ baseURL: options.baseURL, timeout: 12_000, withCredentials: false,
     headers: { Authorization: null, "x-tenant-id": null, "x-tenant-code": null, "x-workspace-id": null } });
@@ -60,7 +60,7 @@ export function createRentalBrowserAdminSession(options: RentalBrowserAdminSessi
     bootstrap: () => useAuthStore.getState().bootstrap(),
     login: (input: LoginRequest) => useAuthStore.getState().login(input.tenantCode, input.account, input.password),
     changePassword: (input: ChangePasswordRequest) => useAuthStore.getState().changePassword(input.currentPassword, input.newPassword),
-    async signOut() { useAuthStore.getState().logout(); },
+    signOut: () => useAuthStore.getState().logout(),
     invalidateBusinessScope() {
       queries.clearSessionQueryCache();
       useAuthStore.setState({});

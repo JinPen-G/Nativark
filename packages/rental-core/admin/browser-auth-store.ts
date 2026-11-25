@@ -54,7 +54,7 @@ interface AuthState {
   /** 账户级管理后台主题色（跟随登录账户，与租户品牌色独立）。保存后立即换肤。 */
   setAccountThemeColor: (themeColor?: string) => void;
   setTenantBranding: (branding: Pick<TenantContext, "brandName" | "brandLogoUrl" | "faviconUrl" | "themeColor" | "adminCornerRadius" | "adminContainerRadius" | "adminButtonRadius" | "adminInputRadius">) => void;
-  logout: () => void;
+  logout: () => Promise<void>;
   hasPermission: (permission?: string) => boolean;
   hasTenantMembershipPermission: (permission?: string) => boolean;
   hasCapability: (capability?: RentalCapability) => boolean;
@@ -113,7 +113,7 @@ export function createRentalAdminAuthStore({ api, queries, onSessionRefreshed }:
         } catch {
           if (verification !== attempt || currentSessionEpoch() !== epoch
             || token !== window.localStorage.getItem(keys.token)) return;
-          get().logout();
+          void get().logout().catch(() => undefined);
           set({ ready: true });
         }
       })().finally(() => { if (verification === attempt) verification = undefined; });
@@ -219,12 +219,13 @@ export function createRentalAdminAuthStore({ api, queries, onSessionRefreshed }:
       set({ tenant });
       window.dispatchEvent(new CustomEvent("rental-session-updated"));
     },
-    logout() {
+    async logout() {
       const refreshToken = window.localStorage.getItem(keys.refreshToken);
-      if (refreshToken) void api.logout({ refreshToken }).catch(() => undefined);
+      const pending = refreshToken ? api.logout({ refreshToken }) : Promise.resolve();
       clearSessionQueryCache();
       Object.values(keys).forEach((key) => window.localStorage.removeItem(key));
       set({ sessionVerified: false, token: undefined, tenant: undefined, user: undefined, workspaces: [], currentWorkspaceId: undefined });
+      await pending;
     },
     hasPermission(permission) {
       if (!permission) return true;

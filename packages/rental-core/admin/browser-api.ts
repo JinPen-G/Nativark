@@ -11,10 +11,11 @@ import type {
 } from "@rental-os/rental-core/auth-contracts";
 import type { AdminRuntime } from "@rental-os/platform-admin/runtime";
 
-export function createRentalAdminSessionApi(request: AdminRuntime["request"]) {
+export function createRentalAdminSessionApi(request: AdminRuntime["request"],
+  revokeSession: (refreshToken: string) => Promise<{ loggedOut: boolean }>) {
   return {
     login: (payload: LoginRequest) => request<LoginResponse>("/auth/login", { method: "post", data: payload }),
-    logout: (payload: RefreshSessionRequest) => request<{ loggedOut: boolean }>("/auth/logout", { method: "post", data: payload }),
+    logout: (payload: RefreshSessionRequest) => revokeSession(payload.refreshToken),
     changePassword: (payload: ChangePasswordRequest) => request<LoginResponse>("/auth/change-password", { method: "post", data: payload }),
     switchWorkspace: (payload: SwitchWorkspaceRequest) => request<LoginResponse>("/auth/switch-workspace", { method: "post", data: payload }),
     sessionContext: () => request<SessionContextResponse>("/auth/session-context"),

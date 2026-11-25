@@ -25,6 +25,8 @@
 
 SaaS 页面沿原 `hasPermission` 规则：租户、日历和预约使用平台分面；参数和 AI 仍需明确权限或通配权限。`system:user:manage` 不属于原 SaaS 页面许可，组织与权限深链接保持原拒绝，平台治理页保留原说明块并不读取租户工具。页面可见性不改变后端 allowlist。[同源可见性](../../application-access.ts) · [治理页](../platform-tools/PlatformToolsPage.tsx)
 
+平台参数中的 AI 配置按钮同时要求原权限和宿主实际装配 `platformAiPage`。零 Core 宿主未提供该页面时不显示空跳转；原组合入口直接消费页面时保留原默认行为。[页面](PlatformSystemPage.tsx) · [装配](../../application.tsx)
+
 ## 状态和提交边界
 
 读取缓存包含当前会话代次，身份变化沿宿主取消请求及清除缓存。组织页使用原姓名和编码筛选、表格、状态开关及编辑弹窗。缺组织维护权限时保留受权只读列表，维护仍由服务端复验当前租户、全租户与完整地点范围。

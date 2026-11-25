@@ -2,6 +2,8 @@
 
 `@rental-os/example-tickets-core`示范一条非租赁业务链，使用租户范围，不需要经营空间、品类、金额或库存。它已有业务服务、清单/API文档生成、MySQL/Nest适配、标准平台宿主及首次设置/列表/新建/详情四页贡献；[独立示范宿主](../../apps/example-tickets-api/README.md)已接授权/HTTP与部署准备，独立标准包安装、MySQL原迁移、授权与业务HTTP、停用重开及持久重启已有实际冒烟，完整工单后台与双Core继续核收。
 
+工单创建、分派、开始和关闭显式关闭认证自动重发（`retryAuthentication: false`），一次操作只发送一次写请求。失败继续保留原操作键和输入，结果不明沿原收据读取；列表及详情等只读请求仍可按公共认证规则刷新。[页面与原收据恢复](admin/index.tsx)
+
 ## 业务范围
 
 创建 → 分派 → 开始处理 → 关闭。字段与输入输出的唯一来源为[contracts.ts](src/contracts.ts)，状态只有`open / in_progress / closed`。普通成员读取本人创建或获分派的工单；管理者在获授`read.all`等对应权限后读取和管理本租户工单。进入Core本身仍须租户授权和成员分配，不因业务角色存在自动取得使用权。
