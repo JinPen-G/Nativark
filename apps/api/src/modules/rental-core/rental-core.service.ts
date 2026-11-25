@@ -362,8 +362,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   /**
    * 在一个 Core 动作上执行某触发点的全部已启用能力 Hook。
    *
-   * 统一从这里取空间与品类：两者都由服务自身按会话解析（`workspaceOf` / `state`），
-   * 不接受调用方传入——否则调用方可以声明另一个空间或品类来改变判定口径。
+   * 空间沿原会话解析；订单动作使用Core已读取的原订单/变更依据中的品类编码和版本，
+   * 建档动作读取当前权威品类定义。不能用当前缓存替换历史依据，也不接受客户端自授范围。
    *
    * 只有不依赖Hook且没有已启用Hook依据的基础路径可缺执行器并返回undefined。
    * 能力阻止时 `evaluate` 会抛 `CapabilityBlockedException`，本方法不吞异常：
@@ -387,14 +387,24 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       ? payload.order as Record<string, unknown> : payload;
     const historical = subjectRef.type === "order" && orderPayload
       ? orderPayload as Pick<RentalOrder, "categoryCode" | "categoryVersionId" | "capabilityPolicy" | "capabilityRequirementsSnapshot" | "capabilitySnapshot" | "lines" | "fulfillmentMode"> : undefined;
+    if (subjectRef.type === "order" && !historical) throw new ConflictException("能力检查缺少原订单依据");
     if (!this.hooks && historical?.capabilityRequirementsSnapshot) throw new ServiceUnavailableException("条件能力执行模块不可用");
     if (historical?.capabilityRequirementsSnapshot && (!historical.categoryVersionId || !this.categoryResolver)) {
       throw new ConflictException("条件履约依据缺少可核对的品类版本");
     }
     if (historical?.categoryVersionId && !this.categoryResolver) throw new ServiceUnavailableException("历史品类版本解析服务不可用");
-    const definition = historical?.categoryVersionId && this.categoryResolver
-      ? await this.categoryResolver.forVersion(this.state(tenantId).profile.categoryCode, historical.categoryVersionId, tx)
-      : historical ? undefined : await this.getWorkspaceCategory(tenantId);
+    let definition: RentalCategoryDefinition | undefined;
+    let categoryCode: RentalCategoryCode;
+    if (historical) {
+      // 历史编码与版本必须成对消费；实例冷启动或空间换版不能改变原能力适用范围。
+      categoryCode = readRentalCategoryCode(historical.categoryCode);
+      if (historical.categoryVersionId && this.categoryResolver) {
+        definition = await this.categoryResolver.forVersion(categoryCode, historical.categoryVersionId, tx);
+      }
+    } else {
+      definition = await this.getWorkspaceCategory(tenantId);
+      categoryCode = definition.code;
+    }
     if (!this.hooks) {
       if (historical && definition?.conditionalCapabilities?.length) throw new ServiceUnavailableException("条件能力执行模块不可用");
       assertCapabilityHookRuntimeAvailable(this.hooks, definition?.requiredCapabilities ?? [],
@@ -415,7 +425,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       point,
       tenantId,
       workspaceId: this.workspaceOf(tenantId),
-      categoryCode: this.state(tenantId).profile.categoryCode,
+      categoryCode,
       // 旧单明确保留已有兼容政策，不能把升级后新增必选能力套回存量。
       requiredCapabilities: requirements?.required ?? definition?.requiredCapabilities ?? (historical?.capabilityPolicy === "legacy_empty" ? [] : undefined),
       // 建档可以准备未就绪的商品；商品/履约条件在正式报价及订单动作中核对。
@@ -432,8 +442,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    * CORE-EXT-02D：把订单固化的能力快照还原成 Hook 执行名单。
    *
    * 在途订单的每个环节都用它，而不是当前实例：能力升级或暂停后，这张订单必须继续按
-   * 下单当时的版本与配置履约。订单没有快照（旧订单或未注入能力服务时下的单）返回
-   * undefined，`runHook` 退回按当前已启用实例判定——这与升级前的行为一致，不是回退。
+   * 下单当时的版本与配置履约。订单没有快照时返回空名单，历史兼容仍由原政策标记解释，
+   * 不引入下单后新增的能力；明确必选却缺少实例时继续由执行器拒绝。
    */
   private orderHookInstances(tenantId: string, order: RentalOrder): WorkspaceCapabilityInstance[] | undefined {
     // Review P1-10：没有快照的存量订单 → **空执行名单**，不是「按当前已启用能力判定」。
