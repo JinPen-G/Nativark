@@ -7,6 +7,7 @@ import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
 import { getRequestIdentity, runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
 import { CreateRentalOrderDto } from '@rental-os/rental-core/order-dto';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
+import { captureRentalInternalAuthority } from '@rental-os/rental-core/application-internal-authority';
 import type { ApprovedOrderBinding } from '../rental-adapters/approved-order-transaction.ports';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { AiOrderRouteCredentialSource } from '../order-route-context.authority';
@@ -57,6 +58,7 @@ export class AiApprovedOrderRouteAuthority implements AiApprovedOrderAuthority {
       || input.context.actor.kind !== 'user' || input.context.scope.kind !== 'workspace'
       || binding.tenantId !== input.context.scope.tenantId || binding.workspaceId !== input.context.scope.workspaceId
       || binding.idempotencyKey !== input.businessIdempotencyKey || binding.requestFingerprint !== input.actionFingerprint) throw denied();
+    const internal = captureRentalInternalAuthority();
     const body = await this.request(binding);
     const credential = structuredClone(await this.credentials.current());
     if (!credential || !['operator', 'staff'].includes(credential.audience) || credential.audience !== input.context.audience
@@ -84,8 +86,10 @@ export class AiApprovedOrderRouteAuthority implements AiApprovedOrderAuthority {
       if (!isAiStepExecutionContext(context) || identityHash(context) !== identityHash(input.context)) throw denied();
       // The actor is the actual Auth result installed by the original Guard.
       // Credentials stay inside server-owned callbacks and never enter snapshots.
-      return consume(structuredClone(context), body, user.displayName,
+      const invoke = () => consume(structuredClone(context), body, user.displayName,
         { authorization: credential.authorization, user: structuredClone(user) });
+      // 隔离 Guard 已完整复验同一身份；恢复原请求的真实事务参加者，不把AI投影当授权。
+      return internal ? internal.runVerified(invoke) : invoke();
     });
   }
 

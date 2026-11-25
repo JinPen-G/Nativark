@@ -10,7 +10,7 @@ import { composeRentalApplication, type RentalHostAssembly } from "./assembly";
 import type { RentalHostCoreSetup } from "./additional-cores";
 import { createRentalAiFileCleanupSource } from "./ai-file-cleanup-source";
 import type { RentalDatabaseClient } from "./database";
-import { createRentalAiHttpPolicy, rentalAiDeploymentContinuationSelector } from "./ai-http-policy";
+import { createRentalAiHttpPolicy, rentalAiDeploymentContinuationSelector, rentalAiOriginalReceiptSelector } from "./ai-http-policy";
 import { createRentalAiRemovalDependencies } from "./core-removal-source";
 
 export function composeRentalAiApplication<Additional = unknown>(input: {
@@ -25,9 +25,11 @@ export function composeRentalAiApplication<Additional = unknown>(input: {
   const installed = requireAiNativeDataPackage(root, lock.dataCapabilities![0]);
   const dataPlan = createAiNativeMysqlDataPlanFromContribution(installed.contribution);
   const participants = createRentalAiParticipants({ ...input, lock });
-  const continuation = rentalAiDeploymentContinuationSelector(createRentalAiHttpPolicy());
+  const policy = createRentalAiHttpPolicy();
+  const continuation = rentalAiDeploymentContinuationSelector(policy), receipts = rentalAiOriginalReceiptSelector(policy);
   return composeRentalApplication<RentalAiBinding, Additional>({ ...input, lock, aiMode: "enabled", ai: { ...participants, dataPlan,
     deploymentContinuation: (method, path) => continuation.isRoute({ method, url: path }),
+    originalReceiptRead: (method, path) => receipts.isRoute({ method, url: path }),
     removalDependencies: createRentalAiRemovalDependencies(input.database),
     fileCleanupKnowledge: createRentalAiFileCleanupSource(),
     readDataPackages: () => [requireAiNativeDataPackage(root, lock.dataCapabilities![0])] } });

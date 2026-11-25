@@ -8,6 +8,10 @@
 
 完整原组合宿主从 [服务装配](../../apps/api/src/application-services.module.ts) 使用这些工厂。[独立 AI 宿主](../../apps/rental-api/src/ai-app.module.ts) 则显式选择 AI 数据贡献，由 [同实例装配](../../apps/rental-api/src/ai-composition.ts) 提供原 Auth、Guard、Core、数据库和文件权限。只有该宿主 [实际登记并审核的处理器](../../apps/rental-api/src/ai-http-policy.ts) 才发布为可调用能力；工厂、类型或合同存在不等于该宿主已开放全部 AI 路由。
 
+[批准订单授权桥](src/runtime/approval-execution/approved-order-route.authority.ts) 在进入隔离 Guard 前捕获原请求权威；完整 Guard 和身份一致性通过后，准备、读取与执行回调恢复同一原 ALS store。原 Task/批准/Core 事务和幂等仍由真实参加者裁定，失应答保持 unknown，不按新键重发。
+
+Core 停用后的已有回答及模型结果核对，由宿主 [只读处理器闭集](../../apps/rental-api/src/ai-http-policy.ts) 明确开放。原读取器仍执行当前主体、Task/Run 来源、原键和对象权限检查；缺结果保持未知。读取不创建任务、不领取新调用、不恢复模型执行，也不恢复已撤销的成员权限。
+
 ## 入口与调用方
 
 | 入口 | 职责与边界 |

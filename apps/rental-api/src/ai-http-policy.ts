@@ -200,3 +200,29 @@ export function rentalAiRouteSelector(policy: ReturnType<typeof createRentalAiHt
       && route.method === request.method.toUpperCase() && pattern.test(matchableRequestPath(request.url)))
   });
 }
+
+/** Core停用后仅核对已有操作、回答和结果。原控制器继续校验原Task/Run/键和对象权限；
+ * 不包含输入提交、创建任务、批准/决策、recover/reconcile执行器或任何模型派发。
+ * 从真实controller/handler闭集取路由，并要求只读审定；请求标志不能扩展此集合。 */
+export function rentalAiOriginalReceiptSelector(policy: ReturnType<typeof createRentalAiHttpPolicy>) {
+  const selected = new Map<Function, readonly Function[]>([
+    [AiOriginalScenesController, [scene.reconcile, scene.reconcileReissue, scene.recovery]],
+    [AiOriginalSceneRecoveryController, [recovery.readRecoverySnapshot, recovery.readTakeoverReceipt,
+      recovery.readCancellationReceipt, recovery.readCancellationSettlementReceipt, recovery.readAnswer, recovery.readModelResult]],
+    [AiOriginalOrderReadController, [orders.readAnswer, orders.readModelResult, orders.readTaskSnapshot,
+      orders.readTakeoverReceipt, orders.readCancellationReceipt, orders.readCancellationSettlementReceipt]],
+    [AiOriginalQuoteModelExecutionController, [quote.readExecution, quote.readClarifiedQuoteReceipt]],
+    [AiOriginalOpeningModelExecutionController, [opening.readExecution]],
+    [AiTaskCenterController, [center.stopReceipt, center.decisionReceipt, center.inputReceipt, center.result]],
+    ...[RentalWebsiteClientEntryController, RentalWechatClientEntryController].map(controller => [controller,
+      [controller.prototype.readTaskCreation, controller.prototype.readTaskInputReceipt,
+        controller.prototype.readTaskModelResult]] as [Function, readonly Function[]])
+  ]);
+  const routes = policy.routes.filter(route => selected.get(route.controller)?.includes(route.handler));
+  if (routes.some(route => route.method !== "POST" || !["buffered-read", "audited-read"].includes(route.review.kind)))
+    throw new Error("原AI收据恢复登记必须对应已审定的POST读取处理器");
+  const keys = new Set(routes.map(route => route.method + " " + route.path));
+  if (routes.some(route => route.path.includes(":"))) throw new Error("原AI收据恢复不能使用泛化参数路径");
+  return Object.freeze({ isRoute: (request: { method: string; url: string }) =>
+    keys.has(request.method.toUpperCase() + " " + matchableRequestPath(request.url)) });
+}

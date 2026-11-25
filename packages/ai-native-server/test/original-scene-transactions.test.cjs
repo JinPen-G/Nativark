@@ -28,6 +28,7 @@ const { RentalAuthService } = load('packages/rental-core/src/auth-service.ts');
 const { RentalWorkspacePrincipalRepository } = load('packages/rental-core/src/mysql-workspace-principal.ts');
 const { createRentalAuthorization } = load('packages/rental-core/src/http-auth.ts');
 const { createRentalApplicationAccess } = load('packages/rental-core/src/application-access.ts');
+const { createRentalMemberAuthority } = load('packages/rental-core/src/application-member-authority.ts');
 const { createMysqlCoreDeploymentAdmission } = load('packages/core-host/src/mysql-deployment-admission.ts');
 const { createRentalAiHttpPolicy, rentalAiDeploymentContinuationSelector } = load('apps/rental-api/src/ai-http-policy.ts');
 const httpPolicy = createRentalAiHttpPolicy(), deploymentContinuation = rentalAiDeploymentContinuationSelector(httpPolicy);
@@ -80,7 +81,8 @@ function fixture(body = bodies[0], selectedLocations = false, extraTables = {}) 
   const member = { userId: user.id, workspaceId: 'workspace-a', tenantId: 'tenant-a', isActive: true,
     workspace: { status: 'ACTIVE' }, role, dataScope: null,
     locationScope: selectedLocations ? { mode: 'selected', locationIds: ['location-a'] } : { mode: 'all', locationIds: [] } };
-  const store = createTaskInputStore({ ...extraTables, aiScope: [scope], aiTaskOriginalRequest: [], aiTask: [], aiRun: [], aiStep: [],
+  const store = createTaskInputStore({ organizationUnit: [], rentalFulfillmentLocation: [], ...extraTables,
+    aiScope: [scope], aiTaskOriginalRequest: [], aiTask: [], aiRun: [], aiStep: [],
     aiTaskPlanPolicy: [...new Set(bodies.map(body => body.sceneCode))].map(sceneCode => ({ scopeId: scope.id, sceneCode,
       sceneVersion: '1', revision: 1, enabled: true, allowedTools: [], limits: {}, expiresAt })),
     aiGatewayInvocation: [], aiTaskActionInput: [], aiTaskRunPlan: [], aiTaskExecutionCharge: [], rentalApprovedSettingsChange: [], operationLog: [], rentalQuote: [],
@@ -138,6 +140,17 @@ function fixture(body = bodies[0], selectedLocations = false, extraTables = {}) 
   store.db.$transaction = (consume, options) => transaction(async tx => {
     const prior = state.currentTx; state.currentTx = tx;
     tx.$queryRaw = (query, ...values) => raw(tx, query, ...values);
+    // 正式成员权威核对 Auth 事务委托形状，读取和更新继续消费原回滚夹具的数据。
+    tx.user.findUniqueOrThrow = async args => {
+      const row = await tx.user.findUnique(args);
+      if (!row) throw Error('原账号记录不存在');
+      return row;
+    };
+    tx.user.update = async args => {
+      const result = await tx.user.updateMany({ where: args.where, data: args.data });
+      assert.equal(result.count, 1, '账号更新必须命中原唯一记录');
+      return tx.user.findUniqueOrThrow({ where: args.where, select: args.select });
+    };
     try { return await consume(tx); } finally { state.currentTx = prior; }
   }, options);
   store.control.beforeWrite = async (table, args, data) => {
@@ -154,10 +167,12 @@ function fixture(body = bodies[0], selectedLocations = false, extraTables = {}) 
     getAuthSession: id => store.db.authSession.findFirst({ where: { id, revokedAt: null, expiresAt: { gt: new Date() } } }),
     findWorkspaceScopedUser: principals.findWorkspaceScopedUser.bind(principals), listUserWorkspaces: principals.listUserWorkspaces.bind(principals),
     lockWorkspaceSessionUser: principals.lockWorkspaceSessionUser.bind(principals), readWorkspaceSessionUser: principals.readWorkspaceSessionUser.bind(principals),
+    lockMemberSessionUser: principals.lockMemberSessionUser.bind(principals), readMemberSessionUser: principals.readMemberSessionUser.bind(principals),
   };
   const auth = new RentalAuthService(authSource, new ConfigService({ AUTH_TOKEN_SECRET: 'offline-test-secret', NODE_ENV: 'test' }), undefined, undefined, undefined, store.db);
   const guard = new authorization.Guard(auth, undefined, undefined, undefined, store.db);
   const access = createRentalApplicationAccess({ database: store.db, authorization,
+    memberAuthority: createRentalMemberAuthority({ auth, authorization }),
     term: { requireNewBusiness: async () => { throw Error('三场景 Task 元数据不是租赁新业务'); } },
     admissionForTransaction: createMysqlCoreDeploymentAdmission,
     deploymentContinuation: (method, url) => deploymentContinuation.isRoute({ method, url }),

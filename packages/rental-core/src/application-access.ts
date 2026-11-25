@@ -4,6 +4,7 @@
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
+import { requestFingerprint } from "@rental-os/platform-contracts/request-fingerprint";
 import { sqltag as sql, type Sql } from "@prisma/client/runtime/library";
 import { CoreBindingSchema, CoreScopeReferenceSchema, MemberCoreAssignmentSchema, TenantCoreGrantSchema,
   isCoreVersionSupported } from "@rental-os/core-contracts";
@@ -30,6 +31,8 @@ export { createRentalMemberAuthority } from "./application-member-authority";
 /** These are the server request properties written/used by the original Guard,
  * not a DTO to populate from body/query parameters. Staff routing must run first. */
 export interface RentalApplicationAccessRequest {
+  /** 只用于封闭原收据读取的同请求内容绑定，不提供授权。 */
+  body?: unknown;
   method: string;
   url: string;
   user?: SystemUserRow;
@@ -80,6 +83,9 @@ export interface RentalApplicationAccessDependencies {
    * original uppercase method and matchableRequestPath, never request flags.
    * This waives accepting only; it grants no disabled tenant-Core or object access. */
   deploymentContinuation?(method: string, path: string): boolean;
+  /** 受控宿主从实际只读处理器闭集产生；仅准入原操作/回答/结果核对。
+   * 原读取器仍复验Task/Run/操作键和对象归属，不准创建任务、批准或模型调用。 */
+  originalReceiptRead?(method: string, path: string): boolean;
   /** Same original public authority/user repository; SaaS never receives a
    * fabricated member assignment. Optional only for hosts without these routes. */
   managementAuthority?: Pick<PlatformPrincipalAuthority, "lock">;
@@ -110,6 +116,7 @@ type RequestEvidence = {
   newBusiness: boolean;
   bufferedRead: boolean;
   deploymentContinuation: boolean;
+  originalReceiptFingerprint?: string;
   management?: "catalog" | "tenant";
   leases: WeakMap<object, PlatformPrincipalLease>;
   memberLeases: WeakMap<object, RentalMemberAuthorityLease>;
@@ -338,6 +345,8 @@ export function createRentalApplicationAccess(input: RentalApplicationAccessDepe
       || identityFingerprint() !== evidence.identity || actorFingerprint(evidence.request, evidence.audience) !== evidence.actor
       || evidence.request.method.toUpperCase() !== evidence.method || matchableRequestPath(evidence.request.url) !== evidence.path
       || normalizeRequestPath(evidence.request.url) !== evidence.objectPath
+      || evidence.originalReceiptFingerprint !== undefined
+        && requestFingerprint(evidence.request.body) !== evidence.originalReceiptFingerprint
       || evidence.expiresAt !== undefined && evidence.expiresAt <= Date.now() / 1000) {
       throw new CoreAccessError("denied", "Rental 请求已结束，或原主体、会话、动作和空间已变化");
     }
@@ -436,7 +445,7 @@ export function createRentalApplicationAccess(input: RentalApplicationAccessDepe
       WHERE tenant_id = ${tenantId} AND core_id = ${RENTAL_CORE_ID} LOCK IN SHARE MODE`);
     const grant = grants.length === 1 ? TenantCoreGrantSchema.safeParse({ ...grants[0],
       revision: Number(grants[0].revision), tenantId, coreId: RENTAL_CORE_ID }) : undefined;
-    if (!grant?.success || grant.data.state !== "enabled" && !(evidence.recovery && grant.data.state === "disabled")) {
+    if (!grant?.success || grant.data.state !== "enabled" && !((evidence.recovery || evidence.originalReceiptFingerprint !== undefined) && grant.data.state === "disabled")) {
       throw new CoreAccessError("denied", "Rental Core 当前未获授权，且本处理器不属于已登记历史或善后入口");
     }
     if (evidence.audience !== "client" && !evidence.management) {
@@ -455,10 +464,10 @@ export function createRentalApplicationAccess(input: RentalApplicationAccessDepe
       const admission = input.admissionForTransaction(reader);
       if (typeof admission?.requireAccepting !== "function" || typeof admission.readCurrent !== "function")
         throw new CoreAccessError("core_unavailable", "Rental 缺少同事务的部署停新读取器");
-      if (evidence.recovery || evidence.deploymentContinuation) {
+      if (evidence.recovery || evidence.originalReceiptFingerprint !== undefined || evidence.deploymentContinuation) {
         // Exact history/closeout or a server-registered continuation still reads
-        // the canonical S lock. Only recovery can authorize a disabled tenant
-        // grant; a stopped/unknown deployment cannot let a draft establish work.
+        // the canonical S lock. Disabled tenant grants allow only registered
+        // recovery or original-receipt readers, never new work.
         const current = await admission.readCurrent(RENTAL_CORE_ID);
         if (!current || current.coreId !== RENTAL_CORE_ID)
           throw new CoreAccessError("core_unavailable", "Rental 部署停新记录与当前 Core 不符");
@@ -548,6 +557,12 @@ export function createRentalApplicationAccess(input: RentalApplicationAccessDepe
         throw new CoreAccessError("denied", "Rental 读取须明确登记缓冲或独立事务审计；POST 仅允许已审定读取，不允许派生维护");
       }
       // 仅原处理器的已核缓冲声明选择共享身份锁；请求字段和 GET 方法本身不赋予此模式。
+      if (input.originalReceiptRead?.(evidence.method, evidence.path)) {
+        if (!(buffered || audited) || evidence.method !== "POST" || evidence.newBusiness || evidence.management
+          || evidence.tenantScope || !request.body || typeof request.body !== "object" || Array.isArray(request.body))
+          throw new CoreAccessError("denied", "原收据恢复只允许已登记的当前空间读取");
+        evidence.originalReceiptFingerprint = requestFingerprint(request.body);
+      }
       evidence.bufferedRead = buffered;
       scope.evidence = evidence;
       const internal = createRentalInternalAuthorityScope(() => assertEvidence(evidence), () => evidence.request.client, evidence.request);
