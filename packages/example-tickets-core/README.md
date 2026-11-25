@@ -95,6 +95,8 @@ npm run pack:core -w @rental-os/example-tickets-core -- <Core仓库HTTPS地址> 
 
 自 `0.1.2` 起，打包时核对 npm 包名及版本与生成清单的发行身份。遇到版本不一致，先同步 [package.json](package.json) 与 [Core 版本](src/contracts.ts)，再从同一固定来源重建并打包。沿用已登记的旧包作为升级起点，候选继续使用数据版本 `0.1.0` 和原迁移，原绑定与收据按当前权限回读。
 
+当前正式源码版本为 `0.1.4`，包含工单分派筛选，标准包已构建，完整宿主核验进行中。推荐从该固定版本准备更新候选，`dataVersion` 仍为 `0.1.0`，沿用原迁移。独立升级只更新所选 Tickets 包及宿主对应的部署锁，保留原绑定、工单和操作收据。程序回退候选同样须核对包身份、宿主合同、数据版本和完整迁移账，并按目标版本核验页面及 API 能力。[版本与数据合同](src/contracts.ts) · [独立宿主](../../apps/example-tickets-api/README.md)
+
 生成的CORE_GUIDE直接链接本包API、服务端/后台入口和README/LICENSE。公开接入手册和源码资料固定到各自来源提交，README保留本页锚点和代码示例；两份资料复用同一链接规则，Core作者维护原README即可。[资料生成](../core-contracts/src/guide.ts)
 
 ## HTTP 与 API 文档
@@ -141,4 +143,4 @@ npm run pack:core -w @rental-os/example-tickets-core -- <Core仓库HTTPS地址> 
 
 [index](src/index.ts) → [业务schema](src/contracts.ts)/[服务](src/service.ts)/[服务端注册](src/server.ts)/[发行清单](src/manifest.ts)。[Nest入口](src/nest.ts) → 同一[HTTP合同](src/http.ts)与服务，[OpenAPI](src/openapi.ts)及[元数据命令](src/metadata.ts)供离线资料。[MySQL私有适配](src/mysql.ts) → [独立迁移](migrations/001-tickets.sql)。公开领域出口不依赖Rental/Nest/Prisma；私有mysql/nest出口才读取对应依赖。
 
-类型与反向依赖检查、原SQL事务定向验证覆盖完整业务链、当前权限/租户拒绝、修订/同键收据、审计失败回滚及参数化。同一0.1.1标准包已在独立Windows宿主安装，使用真实MySQL8.4和公共40模型Client完成授权、绑定、创建/分派/开始/关闭、跨租户拒绝、撤权及停用重开。API和数据库重启后原业务、绑定及原操作收据保持，重读或复用原键不递增修订、不再次初始化。完整工单Web、同宿主Rental并存、独立更新和Linux镜像另按对应组合核验。验证复用必要类型和定向冒烟。
+类型与反向依赖检查、原SQL事务定向验证覆盖完整业务链、当前权限/租户拒绝、修订/同键收据、审计失败回滚及参数化。早期0.1.1标准包已在独立Windows宿主安装，使用真实MySQL8.4和公共40模型Client完成授权、绑定、创建/分派/开始/关闭、跨租户拒绝、撤权及停用重开。API和数据库重启后原业务、绑定及原操作收据保持，重读或复用原键不递增修订、不再次初始化。完整工单Web、同宿主Rental并存、独立更新和Linux镜像另按对应组合核验。验证复用必要类型和定向冒烟。

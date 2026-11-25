@@ -39,6 +39,10 @@ Core 包目录、预检、版本选择和候选准备的四个原 Controller 挂
 
 [包管理材料读取器](src/core-package-sources.ts)每次按当前实际安装路径核定 Rental 固定包。新版 Core 提供本次已通过完整摘要、数据和 OpenAPI 检查的同一份文件给准备流程使用。旧版 Core 仍由原部署入口核验，再单独读取和核对交付材料。
 
+当前推荐使用已发布的 Base `0.1.17`（源码 `3fee227517a2b20e18a426e853f18cdf37cb63ff`）和 Rental `0.1.13`（独立源码 `affeadb25453b0f977b3760bc9ebd53bfd8ebaad`）。截至 2026-11-25，独立 Rental 默认 `main` 仍提供 `0.1.12` 发现清单，新清单在 PR #2 待集成，安装时应核对所选 Release 内的清单和资产摘要。[发行与发现说明](../../packages/rental-core/README.md#使用与构建)
+
+独立更新先按目标固定包生成并核对部署锁，沿原停新、排空与迁移流程完成更新，再由宿主核定完整迁移账、物理结构及当前权限。Rental `0.1.13` 的 `dataVersion` 为 `0.1.1`，仍允许读取旧 `0.1.0` 绑定，保留原绑定 ID、修订、授权和业务收据。新增六表迁移完成后，程序回退候选须支持该完整迁移链。旧程序 `0.1.12` 未声明新增迁移，不能直接降级并宣称兼容。[Rental 数据合同](../../packages/rental-core/src/data.ts) · [迁移与回退边界](../../packages/rental-core/prisma/README.md)
+
 `createRentalHostPackage` 接收实际已构建字节、Core 和底座的固定来源及公开指南。同一工厂生成 `dist/http-openapi.json` 和 `dist/http-openapi-portable.json`，独立更新保留既有文档路径。原宿主版选择前者，逐条旧路径许可来自实际挂载处理器；独立公开发行选择 `portable` 后以后一份为清单入口，只声明实际审定并由宿主接线的 `/api/cores/rental/v1` 业务操作。两份文档均来自同版本处理器，清单只选一个正式入口。`source` 固定公开版本的真实来源，`documentationSource` 可单独固定原公共源码链接。
 
 宿主无论选择哪一种合法 OpenAPI 文档入口，都由[启动入口](src/bootstrap.ts)在原身份与业务作用域中间件之前，按实际方法和模板将已登记的规范路径交给同一原 Rental Controller；文档文件名不决定业务路径是否挂载。宿主 OpenAPI 同时描述实际规范路径和原路径，客户端原路径及渠道、员工、平台和供应商回调继续沿各自原入口。部署准备和启动仍核对整包摘要、清单及与所选发行一致的文档，身份、权限和业务事务共用原实现。候选 SQL 保留原字节和顺序，`prepared` 表示材料已备妥，部署、迁移和运行状态由原流程核定。

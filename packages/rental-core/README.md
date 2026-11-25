@@ -401,6 +401,8 @@ SQL、Decimal、空值单例、错误类和隔离级别通过正式 `@rental-os/
 
 数据发行从 `createRentalDataRelease` 核对受控包的固定版本、可读范围和迁移原文。每项使用 `rental.` 命名空间，文件位于 `prisma/migrations/<name>/migration.sql` 或 `migrations/<name>/migration.sql`，其中 `<name>` 对应原 Prisma `migration_name`。摘要按原始字节计算，换行及编码变化均须作为发行差异处理。结果中的数据合同、账名称和 SQL 保持同一顺序，供宿主接入数据计划。[发行合同与原文核对](src/data.ts)
 
+Rental `0.1.13` 的 `dataVersion` 为 `0.1.1`，绑定可读范围仍为 `>=0.1.0 <0.2.0`，已有 `0.1.0` 绑定及其 ID、修订和原操作收据继续保留。独立升级核定所选包及部署锁后，沿原迁移链追加六张换货业务表，并核对完整迁移账与物理结构。程序回退也须通过这组检查，旧程序 `0.1.12` 未声明新增迁移，已升级数据库不能直接换回该程序并视为兼容。回退候选须明确支持升级后的数据与完整迁移链。[新增迁移](prisma/migrations/20261125010000_rental_exchange_workflow/migration.sql) · [迁移与回退说明](prisma/README.md)
+
 宿主继续核定 SQL 的表归属、公共关联及实际物理结构，再沿原 Prisma 迁移账读取执行状态。失败和 unknown 保留原迁移、摘要与恢复依据。原 API 的组合迁移涉及公共、Rental 和 AI 数据，存量部署沿其原链及原收据维护，新空库使用所选公共基线与 Rental 自有迁移。[结构核验](../platform-core-host/src/mysql-structure.ts) · [物理观察](../platform-core-host/src/mysql-physical.ts) · [原迁移账读取](../core-host/src/mysql-deployment.ts) · [原组合迁移](../../apps/api/prisma/migrations)
 
 ```powershell
@@ -418,14 +420,18 @@ npm run lint -w @rental-os/rental-core
 
 独立公开仓库从实际发行提交构建标准包，清单、Tag 和 Release 资产须对应同一来源。公开包声明 `/api/cores/rental/v1` 下已审定的业务操作，部署后的规范路径和原路径进入同一 Controller。包准备、实际部署、注册和租户授权沿现有流程完成。见[规范路径和文档共用入口](src/http-portable.ts)与[宿主接入说明](../../apps/rental-api/README.md)。
 
+当前推荐发行组合为 Base `0.1.17`，源码 `3fee227517a2b20e18a426e853f18cdf37cb63ff`，以及 Rental `0.1.13`，独立源码 `affeadb25453b0f977b3760bc9ebd53bfd8ebaad`。两个 Release 均已发布，安装和独立更新按所选固定包摘要及部署锁办理。[Base 0.1.17](https://github.com/JinPen-G/Nativark/releases/tag/v0.1.17) · [Rental 0.1.13](https://github.com/JinPen-G/nativark-rental-core/releases/tag/v0.1.13)
+
+截至 2026-11-25，独立 Rental 仓库默认 `main` 的发现清单仍为 `0.1.12`，`0.1.13` 清单在 PR #2 待集成。选择新版时须核对该 Release 内的清单、来源及资产摘要，默认发现入口更新以该 PR 的实际集成结果为准。[清单更新 PR #2](https://github.com/JinPen-G/nativark-rental-core/pull/2)
+
 Core 使用底座的正式 API 和已声明能力扩展业务，底座与 Core 分别维护版本。底座更新默认兼容支持范围内的 Core；移除旧 API 时明确支持范围、废弃说明和迁移方法。Core 使用新能力时提高相应版本要求，安装前核对兼容范围和 `requires`，现有授权与业务数据仍由原机制维护。
 
 独立 Core 开发先用[源码工作区准备入口](../../scripts/prepare-rental-workspace.cjs)组合固定底座支持源码和 Core 自己的版本标签。它保留原构建工具、各端薄宿主与所选 npm 锁，输出新的开发归档；Core 子树来自独立仓库，底座源码和接口来自明确的支持版本。零 Core 底座继续单独发行。
 
-包含客户和员工小程序的源码开发使用支持提交 `357147d90249c5dd40b67e24824247d80107d33d` 与 Rental `v0.1.12` 的源码提交 `50ba3335592893a3b7a4d440ba85b764b2ca8e24`。准备入口的 `supportScripts` 从 `--commit` 指定的 Git 提交读取 `scripts/miniprogram-ai-runtime.cjs`，两端构建由此取得 `platform-contracts/ai-gateway` 和 `ai-task` 的正式打包接点。取得该固定支持源码后，按原锁文件与各端构建前置准备工作区。[固定支持源码](https://github.com/JinPen-G/Nativark/tree/357147d90249c5dd40b67e24824247d80107d33d)
+包含客户和员工小程序的源码开发使用 Base `0.1.17` 的支持提交 `3fee227517a2b20e18a426e853f18cdf37cb63ff` 与 Rental `v0.1.13` 的源码提交 `affeadb25453b0f977b3760bc9ebd53bfd8ebaad`。准备入口的 `supportScripts` 从 `--commit` 指定的 Git 提交读取 `scripts/miniprogram-ai-runtime.cjs`，两端构建由此取得 `platform-contracts/ai-gateway` 和 `ai-task` 的正式打包接点。取得该固定支持源码后，按原锁文件与各端构建前置准备工作区。[固定支持源码](https://github.com/JinPen-G/Nativark/tree/3fee227517a2b20e18a426e853f18cdf37cb63ff)
 
 ```text
-node scripts/prepare-rental-workspace.cjs --repo <固定底座Git目录> --repository https://github.com/JinPen-G/Nativark --commit 357147d90249c5dd40b67e24824247d80107d33d --core-repo <独立CoreGit目录> --core-commit 50ba3335592893a3b7a4d440ba85b764b2ca8e24 --out <新开发归档.tgz>
+node scripts/prepare-rental-workspace.cjs --repo <固定底座Git目录> --repository https://github.com/JinPen-G/Nativark --commit 3fee227517a2b20e18a426e853f18cdf37cb63ff --core-repo <独立CoreGit目录> --core-commit affeadb25453b0f977b3760bc9ebd53bfd8ebaad --out <新开发归档.tgz>
 ```
 
 在新目录解包，执行 `npm ci`、`npm run check:types`，修改 `packages/rental-core` 后执行 `npm run check:core`。可选 AI 开发组合在准备时显式加 `--ai`；Client 生成、构建、迁移和启动按 [Rental 宿主](../../apps/rental-api/README.md)办理。包内 `development.workspace.json` 记录两个来源和文件摘要，开发组合不依赖维护者私有文档、旧生成物或聊天记忆。
