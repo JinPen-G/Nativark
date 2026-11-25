@@ -194,9 +194,18 @@ def git_source_archive(repo, commit):
             raise RuntimeError("Git 固定源码归档失败")
 
 
+def source_archive_filter(member, destination):
+    filtered = tarfile.data_filter(member, destination)
+    # data_filter 清空目录 mode；部署进程的 umask 077 会使嵌套目录变为
+    # 0700。构建源码需要运行镜像的非 root 用户可遍历，其他安全过滤沿用。
+    if filtered is not None and filtered.isdir():
+        filtered.mode = 0o755
+    return filtered
+
+
 def git_source(repo, commit, destination):
     with git_source_archive(repo, commit) as archive:
-        archive.extractall(destination, filter="data")
+        archive.extractall(destination, filter=source_archive_filter)
 
 
 def fetch_source_blobs(repo, commit):
@@ -330,6 +339,20 @@ def update(apply):
 
 
 def self_test():
+    directory = tarfile.TarInfo("prisma/migrations")
+    directory.type = tarfile.DIRTYPE
+    directory.mode = 0o775
+    assert source_archive_filter(directory, ".").mode == 0o755
+    secret = tarfile.TarInfo("private-file")
+    secret.mode = 0o600
+    assert source_archive_filter(secret, ".").mode == 0o600
+    escaping = tarfile.TarInfo("../outside")
+    try:
+        source_archive_filter(escaping, ".")
+    except tarfile.FilterError:
+        pass
+    else:
+        raise AssertionError("源码归档越界路径未被拒绝")
     commit = "a" * 40
     success = {
         "id": 9, "head_sha": commit, "head_branch": "main", "event": "push",

@@ -8,6 +8,10 @@
 
 批量取得对象后会移除该次专用临时 Git 库的 promisor 配置。服务器 Git 2.34 的 archive 会对部分克隆隐式预取整棵树，因此归档阶段关闭这种下载，缺少所需对象时直接报错。
 
+源码解包沿用 Python `data_filter` 的路径、链接和特殊文件限制，并将源码目录设为 0755。部署进程使用 umask 077 保护私有文件，`data_filter` 默认清空目录 mode，直接使用会让嵌套迁移目录以 0700 进入镜像，导致默认 `node` 用户无法遍历。该权限处理仅适用于固定源码归档。
+
+运行镜像同时明确设置 API 与 Rental Core 的迁移源码目录为 0755，以兼容已有构建缓存。CI 使用默认非 root 用户读取各份迁移 SQL，并加载环境模块、Prisma Client 和 AppModule。
+
 应用范围包括 API、admin 的完整目录，以及 Dockerfile 所需的其他应用 package.json。packages、assets、config、原部署脚本与 Git 归档所需的 `.gitattributes` 沿白名单进入归档。该清单同时供内容拉取和归档使用，自测检查全部 Docker COPY 来源，并拒绝无关应用源码进入上下文。初次浅拉取没有分支通配或完整历史下载，过滤后的检查阶段也无需下载两份快照的文件内容。
 
 在 Git 检出中运行离线自测，需要 Python 3.12 或更新版本及 Git。
