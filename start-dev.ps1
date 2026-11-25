@@ -185,7 +185,17 @@ try {
   $adminListening = (Get-Listeners $adminPort).Count -gt 0
   $apiHealthy = $apiListening -and (Test-ApiHealth $apiPort)
   $adminHealthy = $adminListening -and (Test-AdminHealth $adminPort)
-  if ($apiListening -and -not $apiHealthy) { throw "本树端口 $apiPort 已占用但 API 不健康；请检查现有日志。未自动终止进程。" }
+  if ($apiListening -and -not $apiHealthy) {
+    # Nest watch 重载会短暂关闭 HTTP；已核定本树归属时等待原服务，不另起第二个进程。
+    Write-Host '[nativark] 已运行的 API 正在启动或重载，等待原服务恢复。' -ForegroundColor DarkGray
+    $reloadDeadline = [DateTime]::UtcNow.AddSeconds(90)
+    while (-not $apiHealthy -and [DateTime]::UtcNow -lt $reloadDeadline) {
+      Start-Sleep -Seconds 2
+      Assert-PortOwnership $apiPort
+      $apiHealthy = Test-ApiHealth $apiPort
+    }
+    if (-not $apiHealthy) { throw "本树端口 $apiPort 的 API 等待后仍不健康；请检查现有日志。未停止或重复启动进程。" }
+  }
   if ($adminListening -and -not $adminHealthy) { throw "管理端 HTML 可访问也不代表已启动：$script:adminFailure。若刚恢复链接，请正常重启本树 Vite；脚本不会误停已有进程。" }
   if ($ApplyMigrations -and $apiListening) { throw '应用迁移前请先正常关闭本树 API；本脚本不对运行中的 API 执行迁移。' }
 
