@@ -1,6 +1,6 @@
 {
   "name": "@rental-os/example-tickets-core",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "license": "MIT",
   "description": "租户范围的轻量工单 Core 接入示范",
