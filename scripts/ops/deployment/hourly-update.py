@@ -16,10 +16,10 @@ import urllib.error
 import urllib.request
 
 
-REPOSITORY = "JinPen-G/Nativark"
+REPOSITORY = "JinPen-G/Zelo"
 GIT_URL = f"https://github.com/{REPOSITORY}.git"
 CI_URL = f"https://api.github.com/repos/{REPOSITORY}/actions/workflows/nativark-release.yml/runs"
-ROOT = Path("/home/ritiadm/nativark")
+ROOT = Path("/home/ritiadm/zelo")
 STATE = ROOT / ".hourly-update"
 OVERRIDE = ROOT / "compose.override.yml"
 ACTIVE = STATE / "active.json"
@@ -34,6 +34,15 @@ IMAGE_ID = re.compile(r"sha256:[a-f0-9]{64}\Z")
 SHA = re.compile(r"[a-f0-9]{40}\Z")
 MEDIA = "media/rest-player/all-too-well-10-minute-version.mp3"
 MEDIA_SHA = "2c06b9bd5f056434cd80ec76b995607923fcc9451c51b7997d95b07f732ccf5b"
+SOURCE_PATHS = (
+    ".gitattributes", "package.json", "package-lock.json", "tsconfig.base.json", "LICENSE",
+    "apps/api", "apps/admin", "apps/enterprise-portal/package.json",
+    "apps/miniprogram/package.json", "apps/staff-miniprogram/package.json",
+    "apps/tenant-website/package.json", "apps/website-next/package.json",
+    "packages", "assets", "config", "scripts/ops/deployment",
+    "tests/fixtures/ai-native/prisma-offline-preload.cjs",
+    "scripts/build-selected-prisma.cjs", "scripts/miniprogram-shared-types.cjs",
+)
 
 
 def run(*args, capture=False, timeout=60, **kwargs):
@@ -86,7 +95,7 @@ def ci_approved(runs, commit):
 def ci_run(commit):
     url = f"{CI_URL}?branch=main&event=push&head_sha={commit}&per_page=20"
     request = urllib.request.Request(url, headers={
-        "User-Agent": "Nativark-hourly-update", "Accept": "application/vnd.github+json",
+        "User-Agent": "Zelo-hourly-update", "Accept": "application/vnd.github+json",
     })
     try:
         with urllib.request.urlopen(request, timeout=15) as response:
@@ -136,7 +145,11 @@ def smoke():
 def git_snapshot(work, live, commit):
     repo = work / "repo"
     run("git", "init", "--quiet", "--bare", str(repo))
-    run("git", "-C", str(repo), "fetch", "--quiet", "--depth=1", GIT_URL, live, commit, timeout=180)
+    run("git", "-C", str(repo), "remote", "add", "origin", GIT_URL)
+    # 门禁只比较固定树中的路径和 blob 身份，先取两份浅提交及树。
+    # 构建所需内容在 CI/迁移门禁放行后按同一归档白名单批量取得。
+    run("git", "-C", str(repo), "fetch", "--quiet", "--depth=1", "--no-tags",
+        "--filter=blob:none", "origin", live, commit, timeout=180)
     contents = run("git", "-C", str(repo), "diff", "--name-status", "--no-renames",
                    live, commit, "--", *PRISMA, capture=True)
     return repo, contents
@@ -169,13 +182,8 @@ def restore():
 
 @contextmanager
 def git_source_archive(repo, commit):
-    paths = (
-        "package.json", "package-lock.json", "tsconfig.base.json", "LICENSE", "apps", "packages",
-        "assets", "config", "scripts/ops/deployment", "tests/fixtures/ai-native/prisma-offline-preload.cjs",
-        "scripts/build-selected-prisma.cjs", "scripts/miniprogram-shared-types.cjs",
-    )
     with subprocess.Popen(
-        ["git", "-C", str(repo), "archive", commit, "--", *paths], stdout=subprocess.PIPE
+        ["git", "-C", str(repo), "archive", commit, "--", *SOURCE_PATHS], stdout=subprocess.PIPE
     ) as process:
         try:
             with tarfile.open(fileobj=process.stdout, mode="r|") as archive:
@@ -189,6 +197,22 @@ def git_source_archive(repo, commit):
 def git_source(repo, commit, destination):
     with git_source_archive(repo, commit) as archive:
         archive.extractall(destination, filter="data")
+
+
+def fetch_source_blobs(repo, commit):
+    entries = run("git", "-C", str(repo), "ls-tree", "-r", commit, "--",
+                  *SOURCE_PATHS, capture=True)
+    blobs = sorted({line.split()[2] for line in entries.splitlines() if line.split()[1] == "blob"})
+    if not blobs or not all(SHA.fullmatch(blob) for blob in blobs):
+        raise RuntimeError("固定源码归档缺少有效 blob 身份")
+    # stdin 避免大型工作区的参数长度限制，一批取回候选所需内容。
+    # 显式 blob OID 不携带其他分支、历史或白名单外的文件内容。
+    run("git", "-C", str(repo), "fetch", "--quiet", "--no-tags", "--no-write-fetch-head",
+        "--filter=blob:none", "--stdin", "origin", input=("\n".join(blobs) + "\n").encode(), timeout=300)
+    # 专用临时库已具备全部归档对象。取消隐式下载，缺对象直接失败。
+    # Git 2.34 的 archive 会对部分克隆预取整棵树，超出传入路径范围。
+    run("git", "-C", str(repo), "config", "--unset-all", "remote.origin.promisor")
+    run("git", "-C", str(repo), "config", "--unset-all", "remote.origin.partialclonefilter")
 
 
 def check_local_copies(dockerfile, members):
@@ -214,6 +238,7 @@ def check_local_copies(dockerfile, members):
 def build(repo, work, commit):
     source = work / "source"
     source.mkdir()
+    fetch_source_blobs(repo, commit)
     git_source(repo, commit, source)
     audio = source / "apps/admin/public" / MEDIA
     audio.parent.mkdir(parents=True, exist_ok=True)
@@ -315,7 +340,7 @@ def self_test():
     assert ci_approved([success], "b" * 40) is None
     assert ci_approved([success, dict(success, id=10, status="in_progress")], commit) is None
     assert ci_approved([dict(success, event="pull_request"), dict(success, conclusion="failure")], commit) is None
-    assert ci_approved([dict(success, head_repository={"full_name": "Other/Nativark"})], commit) is None
+    assert ci_approved([dict(success, head_repository={"full_name": "Other/Zelo"})], commit) is None
     print("CI 固定版本门禁检查通过")
 
     repo = Path(__file__).resolve().parents[3]
@@ -339,6 +364,8 @@ def self_test():
     assert required <= set(sources)
     assert all(path.startswith("scripts/ops/deployment/") or path in required
                for path in files if path.startswith("scripts/"))
+    assert all(path.startswith(("apps/api/", "apps/admin/")) or path in SOURCE_PATHS
+               for path in files if path.startswith("apps/"))
     for missing in sorted(required):
         try:
             check_local_copies(dockerfile, members - {missing})
