@@ -12,6 +12,7 @@ import { composePersistedTextProbeWorkflow } from './text-capability-probe-task.
 import { PrismaGatewayCallPricing } from './budget/prisma-gateway-call-pricing';
 import { ModelGatewayError } from './model-gateway.ports';
 import type { AiTaskRunnerClock } from '@rental-os/platform-server/ai-runtime';
+import { createTenantModelConfigurationTransactions, type TenantModelConfigurationTransactions } from './tenant-model-config-transactions';
 
 export type AuthorizedTextProbeWorkflowDependencies = Omit<PersistedTaskAuthorizationDependencies, 'db'> & {
   db: PrismaClient;
@@ -28,6 +29,7 @@ export type AuthorizedTextProbeWorkflowDependencies = Omit<PersistedTaskAuthoriz
   priceVersion: string;
   monotonic?: () => number;
   runnerClock?: AiTaskRunnerClock;
+  transactions?: TenantModelConfigurationTransactions;
 };
 
 /** Explicit request-scoped root: real current identity/configuration and Vault,
@@ -37,6 +39,7 @@ export type AuthorizedTextProbeWorkflowDependencies = Omit<PersistedTaskAuthoriz
 export function composeAuthorizedPersistedTextProbeWorkflow(input: AuthorizedTextProbeWorkflowDependencies) {
   const current = new AiTaskCurrentIdentityAuthority(input.auth, input.credentials, input.clock);
   const management = new TenantModelConfigurationAuthority(input.guard, input.credentials, current);
+  const transactionParticipant = createTenantModelConfigurationTransactions({ transactions: input.transactions, credentials: input.credentials });
   const configuration = createPersistedTenantModelConfiguration({ db: input.db, secrets: input.secrets,
     authorize: (context, action) => management.authorize(context, action) });
   const platform = createAuthorizedPlatformModelConfiguration({ db: input.db, guard: input.guard,
@@ -50,8 +53,9 @@ export function composeAuthorizedPersistedTextProbeWorkflow(input: AuthorizedTex
     })() : input.pricing as TextCapabilityProbeDependencies['pricing'];
   const application = new TextCapabilityProbeApplication({ db: input.db, scopes: authorization.scopes,
     subscriptions: input.subscriptions, authorization, management, configuration, platformConnection: platform.invocation,
-    pricing, audit: input.audit, capacity: input.capacity, protocol: input.protocol, clock: input.clock });
+    pricing, audit: input.audit, capacity: input.capacity, protocol: input.protocol, clock: input.clock,
+    transactionParticipant });
   const workflow = composePersistedTextProbeWorkflow({ ...input, probe: application,
-    financialEvidence: application.financialEvidence });
+    financialEvidence: application.financialEvidence, transactionParticipant });
   return Object.freeze({ application, workflow });
 }

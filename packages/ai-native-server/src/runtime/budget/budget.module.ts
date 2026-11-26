@@ -26,8 +26,10 @@ export function createPersistedBudgetSubsystem(dependencies: {
   evidence: BudgetEvidencePort;
   clock?: () => Date;
   settingsAuthorization?: ConstructorParameters<typeof PrismaBudgetRepository>[2];
+  recoveryTransactions?: ConstructorParameters<typeof PrismaBudgetRepository>[3];
 }): BudgetService {
   const reader = new PrismaSubscriptionBudgetReader(dependencies.db, dependencies.subscriptions, dependencies.clock);
   const authority = new ServerBudgetAuthorityAdapter(dependencies.authorization, new SubscriptionBudgetEntitlementAdapter(reader));
-  return new BudgetService(new PrismaBudgetRepository(dependencies.db, dependencies.clock, dependencies.settingsAuthorization), authority, dependencies.quotes, dependencies.evidence, dependencies.clock);
+  return new BudgetService(new PrismaBudgetRepository(dependencies.db, dependencies.clock, dependencies.settingsAuthorization,
+    dependencies.recoveryTransactions), authority, dependencies.quotes, dependencies.evidence, dependencies.clock);
 }

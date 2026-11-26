@@ -1,13 +1,17 @@
-import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req } from '@nestjs/common';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
+import { hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
 import { AI_TEXT_CAPABILITY_HTTP_DRAFT as routes, type AiTextCapabilityHttpErrorDraft,
   type AiTextCapabilityHttpResponsesDraft } from '@rental-os/shared';
 import { TextCapabilityProbeRequestFactory, type TextCapabilityHttpRequest, type TextCapabilityRequest } from './text-capability-probe-request.factory';
 
 export const TEXT_CAPABILITY_PROBE_REQUESTS = Symbol('TEXT_CAPABILITY_PROBE_REQUESTS');
-type Request = TextCapabilityHttpRequest & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
 type Response = Pick<ServerResponse, 'once' | 'removeListener' | 'writableFinished' | 'destroyed'>;
+type Request = TextCapabilityHttpRequest & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>> & {
+  /** Express-owned response is observed only for disconnect, never written. */
+  res?: Response;
+};
 type Method = keyof AiTextCapabilityHttpResponsesDraft;
 const unknownRead: Record<Method, NonNullable<AiTextCapabilityHttpErrorDraft['nextAction']>> = {
   prepare: 'readOriginal', publish: 'readOriginal', readOriginal: 'readOriginal', createTask: 'readTask', readTask: 'readTask',
@@ -31,7 +35,7 @@ const gatewayCodes: Record<string, keyof typeof statuses> = { FORBIDDEN: 'AI_ACC
 export class TextCapabilityProbeController {
   constructor(@Inject(TEXT_CAPABILITY_PROBE_REQUESTS) private readonly requests: TextCapabilityProbeRequestFactory) {}
   private call(method: Method, request: Request, body: unknown, response?: Response): Promise<AiTextCapabilityHttpResponsesDraft[Method]> {
-    return runWithRequestIdentity({}, async () => {
+    const consume = async () => {
       let current: TextCapabilityRequest | undefined;
       const controller = new AbortController(), abort = () => controller.abort();
       const onResponseClose = () => { if (!response?.writableFinished) abort(); };
@@ -60,7 +64,10 @@ export class TextCapabilityProbeController {
         if (listens) request.removeListener!('aborted', abort);
         if (responds) response.removeListener('close', onResponseClose);
       }
-    });
+    };
+    // The selected host already owns the original Guard store. Internal Auth
+    // checks must return to that same store before any original transaction.
+    return hasRentalBusinessTenantFence() ? consume() : runWithRequestIdentity({}, consume);
   }
   @Post(routes.prepare) @HttpCode(200) @Header('Cache-Control', 'no-store')
   prepare(@Req() request: Request, @Body() body: unknown) { return this.call('prepare', request, body); }
@@ -80,16 +87,16 @@ export class TextCapabilityProbeController {
   @Post(routes.readTask) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readTask(@Req() request: Request, @Body() body: unknown) { return this.call('readTask', request, body); }
   @Post(routes.start) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  start(@Req() request: Request, @Body() body: unknown, @Res({ passthrough: true }) response?: Response) {
-    return this.call('start', request, body, response);
+  start(@Req() request: Request, @Body() body: unknown, response?: Response) {
+    return this.call('start', request, body, response ?? request.res);
   }
   @Post(routes.inspect) @HttpCode(200) @Header('Cache-Control', 'no-store')
   inspect(@Req() request: Request, @Body() body: unknown) { return this.call('inspect', request, body); }
   @Post(routes.cancel) @HttpCode(200) @Header('Cache-Control', 'no-store')
   cancel(@Req() request: Request, @Body() body: unknown) { return this.call('cancel', request, body); }
   @Post(routes.reconcile) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  reconcile(@Req() request: Request, @Body() body: unknown, @Res({ passthrough: true }) response?: Response) {
-    return this.call('reconcile', request, body, response);
+  reconcile(@Req() request: Request, @Body() body: unknown, response?: Response) {
+    return this.call('reconcile', request, body, response ?? request.res);
   }
   @Post(routes.readCapabilityReceipt) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readCapabilityReceipt(@Req() request: Request, @Body() body: unknown) { return this.call('readCapabilityReceipt', request, body); }

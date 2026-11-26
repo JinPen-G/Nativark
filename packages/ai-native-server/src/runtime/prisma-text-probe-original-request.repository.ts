@@ -17,6 +17,8 @@ import { PrismaTaskPlanPolicyRepository } from './runner/prisma-task-plan-policy
 import { aiTaskRunnerLimitsSchema } from './runner/prisma-task-run-evidence.repository';
 import { textProbeCommandSchema, textProbeCapability, TEXT_CAPABILITY_PROBE_TOOL, TEXT_PROBE_SCENE } from './text-capability-probe';
 import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
+import { beginTenantModelConfigurationTransaction, type TenantModelConfigurationTransactionParticipant } from './tenant-model-config-transactions';
+import { holdAiTaskDeploymentAdmission } from './task-transaction-authority';
 
 const version = 'text-probe-original-1';
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
@@ -73,6 +75,7 @@ export class PrismaTextProbeOriginalRequestRepository implements TextCapabilityP
     /** Trusted server composition, not fields accepted from an HTTP body.
      * The existing Gateway pricing port must validate this version at execution. */
     sceneVersion: string; priceVersion: string;
+    transactionParticipant?: TenantModelConfigurationTransactionParticipant;
   }, private readonly clock: () => Date = () => new Date()) {
     this.sceneVersion = id.max(64).parse(input.sceneVersion);
     this.priceVersion = id.max(64).parse(input.priceVersion);
@@ -236,32 +239,45 @@ export class PrismaTextProbeOriginalRequestRepository implements TextCapabilityP
     const contentHash = this.hash(binding);
     try {
       return await this.db.$transaction(async tx => {
-        await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_scopes WHERE id = ${access.owner.scopeId} FOR UPDATE`);
-        await tx.$queryRaw(prismaRuntime.sql`SELECT revision FROM ai_task_plan_policies WHERE scopeId = ${access.owner.scopeId} AND sceneCode = ${TEXT_PROBE_SCENE} AND sceneVersion = ${this.sceneVersion} FOR UPDATE`);
-        const locked = await tx.aiTaskPlanPolicy.findFirst({ where: { scopeId: access.owner.scopeId, sceneCode: TEXT_PROBE_SCENE, sceneVersion: this.sceneVersion } });
-        if (!locked || !locked.enabled || locked.revision !== access.policy.revision || locked.expiresAt.toISOString() !== access.policy.expiresAt
-          || locked.scopeId !== access.owner.scopeId || locked.sceneCode !== TEXT_PROBE_SCENE || locked.sceneVersion !== this.sceneVersion
-          || requestFingerprint(locked.limits) !== requestFingerprint(access.policy.limits)
-          || requestFingerprint(locked.allowedTools) !== requestFingerprint([{ code: TEXT_CAPABILITY_PROBE_TOOL, version: AI_TOOL_DRAFT_VERSION }])) throw conflict();
-        const again = await this.authorized(command.command);
-        if (again.binding !== access.binding || requestFingerprint(again.owner) !== requestFingerprint(access.owner)) throw denied();
-        if (again.policyHash !== access.policyHash || again.preparationHash !== access.preparationHash) throw conflict();
-        const existing = await tx.aiTaskOriginalRequest.findFirst({ where: { ...access.owner, requestKey: command.requestKey } });
-        if (existing) {
-          if (existing.contentHash !== contentHash || existing.contractVersion !== version || existing.status !== 'STORED'
-            || existing.sceneCode !== TEXT_PROBE_SCENE || existing.sceneVersion !== this.sceneVersion
-            || existing.requestKey !== command.requestKey || existing.revision !== 1 || existing.previousRequestId !== null
-            || existing.policyRevision !== binding.policyRevision || existing.policyHash !== binding.policyHash
-            || existing.authorizationBindingHash !== binding.authorizationBindingHash
-            || requestFingerprint(existing.payload) !== requestFingerprint(storedPayload)
-            || Object.entries(access.owner).some(([key, expected]) => existing[key as keyof Row] !== expected)
-            || existing.expiresAt.getTime() <= this.clock().getTime()) throw conflict();
-          return { state: 'stored' as const, inputRef: existing.id, inputHash: contentHash, replayed: true };
-        }
-        const row = await tx.aiTaskOriginalRequest.create({ data: { id: randomUUID(), ...binding,
-          payload: storedPayload as Prisma.InputJsonValue, contractVersion: version, sceneCode: TEXT_PROBE_SCENE,
-          contentHash, previousRequestId: null, status: 'STORED', expiresAt: new Date(access.policy.expiresAt) } });
-        return { state: 'stored' as const, inputRef: row.id, inputHash: contentHash, replayed: false };
+        const context = access.context;
+        const participant = context.actor.kind === 'user' && context.scope.kind === 'workspace'
+          ? await beginTenantModelConfigurationTransaction(tx, { actorId: context.actor.userId,
+            tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId }, this.input.transactionParticipant)
+          : undefined;
+        try {
+          await holdAiTaskDeploymentAdmission(tx, 'new_work');
+          await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_scopes WHERE id = ${access.owner.scopeId} FOR UPDATE`);
+          await tx.$queryRaw(prismaRuntime.sql`SELECT revision FROM ai_task_plan_policies WHERE scopeId = ${access.owner.scopeId} AND sceneCode = ${TEXT_PROBE_SCENE} AND sceneVersion = ${this.sceneVersion} FOR UPDATE`);
+          const locked = await tx.aiTaskPlanPolicy.findFirst({ where: { scopeId: access.owner.scopeId, sceneCode: TEXT_PROBE_SCENE, sceneVersion: this.sceneVersion } });
+          if (!locked || !locked.enabled || locked.revision !== access.policy.revision || locked.expiresAt.toISOString() !== access.policy.expiresAt
+            || locked.scopeId !== access.owner.scopeId || locked.sceneCode !== TEXT_PROBE_SCENE || locked.sceneVersion !== this.sceneVersion
+            || requestFingerprint(locked.limits) !== requestFingerprint(access.policy.limits)
+            || requestFingerprint(locked.allowedTools) !== requestFingerprint([{ code: TEXT_CAPABILITY_PROBE_TOOL, version: AI_TOOL_DRAFT_VERSION }])) throw conflict();
+          const again = await this.authorized(command.command);
+          if (again.binding !== access.binding || requestFingerprint(again.owner) !== requestFingerprint(access.owner)) throw denied();
+          if (again.policyHash !== access.policyHash || again.preparationHash !== access.preparationHash) throw conflict();
+          const existing = await tx.aiTaskOriginalRequest.findFirst({ where: { ...access.owner, requestKey: command.requestKey } });
+          if (existing) {
+            if (existing.contentHash !== contentHash || existing.contractVersion !== version || existing.status !== 'STORED'
+              || existing.sceneCode !== TEXT_PROBE_SCENE || existing.sceneVersion !== this.sceneVersion
+              || existing.requestKey !== command.requestKey || existing.revision !== 1 || existing.previousRequestId !== null
+              || existing.policyRevision !== binding.policyRevision || existing.policyHash !== binding.policyHash
+              || existing.authorizationBindingHash !== binding.authorizationBindingHash
+              || requestFingerprint(existing.payload) !== requestFingerprint(storedPayload)
+              || Object.entries(access.owner).some(([key, expected]) => existing[key as keyof Row] !== expected)
+              || existing.expiresAt.getTime() <= this.clock().getTime()) throw conflict();
+            await participant?.revalidate();
+            return { state: 'stored' as const, inputRef: existing.id, inputHash: contentHash, replayed: true };
+          }
+          const row = await tx.aiTaskOriginalRequest.create({ data: { id: randomUUID(), ...binding,
+            payload: storedPayload as Prisma.InputJsonValue, contractVersion: version, sceneCode: TEXT_PROBE_SCENE,
+            contentHash, previousRequestId: null, status: 'STORED', expiresAt: new Date(access.policy.expiresAt) } });
+          const final = await this.authorized(command.command);
+          if (final.binding !== access.binding || final.policyHash !== access.policyHash
+            || final.preparationHash !== access.preparationHash || requestFingerprint(final.owner) !== requestFingerprint(access.owner)) throw conflict();
+          await participant?.revalidate();
+          return { state: 'stored' as const, inputRef: row.id, inputHash: contentHash, replayed: false };
+        } finally { participant?.close(); }
       }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     } catch (error) {
       if (error instanceof AiTaskRepositoryError) throw error;
@@ -285,6 +301,7 @@ export function composeAuthorizedTextProbeTaskProducer(db: Db, input: {
   auth: Pick<AuthService, 'resolveAccessContext'>; credentials: AiTaskCredentialSource;
   guard: Pick<ApiAuthGuard, 'canActivate'>; probe: Pick<TextCapabilityProbeApplication, 'prepareCurrent'>;
   sceneVersion: string; priceVersion: string; clock?: () => Date;
+  transactionParticipant?: TenantModelConfigurationTransactionParticipant;
 }) {
   const current = new AiTaskCurrentIdentityAuthority(input.auth, input.credentials, input.clock);
   const scopes = new AiScopeRepository(db, current, input.clock);
@@ -292,5 +309,5 @@ export function composeAuthorizedTextProbeTaskProducer(db: Db, input: {
   const policy = new PrismaTaskPlanPolicyRepository(db, { auth: input.auth, credentials: input.credentials, guard: input.guard,
     scene: { code: TEXT_PROBE_SCENE, version: input.sceneVersion }, tool: TEXT_CAPABILITY_PROBE_TOOL }, input.clock);
   return composePersistedTextProbeTaskProducer(db, { scopes, policy, probe: input.probe, management,
-    sceneVersion: input.sceneVersion, priceVersion: input.priceVersion }, input.clock);
+    sceneVersion: input.sceneVersion, priceVersion: input.priceVersion, transactionParticipant: input.transactionParticipant }, input.clock);
 }

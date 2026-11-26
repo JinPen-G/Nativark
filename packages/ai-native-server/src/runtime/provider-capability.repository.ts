@@ -6,6 +6,14 @@ import type { AiProviderProfileRecord } from './provider-profile.ports';
 import type { ProviderCapabilityEvidenceRepository, RecordCapabilityEvidenceInput, AiProviderCapabilityEvidenceRecord } from './provider-capability.ports';
 import { capabilityNameSchema, capabilityProfileFingerprint } from './capability-verification';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
+import { hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
+
+export interface ProviderCapabilityEvidenceTransactions {
+  begin(tx: Prisma.TransactionClient, profile: AiProviderProfileRecord): Promise<{
+    revalidate(): Promise<void>;
+    close(): void;
+  }>;
+}
 
 const id = z.string().min(1).max(36), revision = z.number().int().min(1).max(4294967295);
 const capabilityCount = capabilityNameSchema.options.length;
@@ -53,7 +61,8 @@ function payload(value: { status: string; source: string; evidenceHash: string; 
  * Current Profile fencing serializes probes with config changes. The caller
  * application still supplies current authority and the evidence verifier. */
 export class PrismaProviderCapabilityEvidenceRepository implements ProviderCapabilityEvidenceRepository {
-  constructor(private readonly db: Pick<PrismaClient, '$transaction' | 'aiProviderProfile' | 'aiProviderCapabilityEvidence'>) {
+  constructor(private readonly db: Pick<PrismaClient, '$transaction' | 'aiProviderProfile' | 'aiProviderCapabilityEvidence'>,
+    private readonly transactions?: ProviderCapabilityEvidenceTransactions) {
     if ([db?.$transaction, db?.aiProviderProfile?.updateMany, db?.aiProviderProfile?.findFirst,
       db?.aiProviderCapabilityEvidence?.findMany, db?.aiProviderCapabilityEvidence?.findUnique,
       db?.aiProviderCapabilityEvidence?.upsert].some(method => typeof method !== 'function')) throw new Error('AI_CAPABILITY_EVIDENCE_PRISMA_UNAVAILABLE');
@@ -77,30 +86,36 @@ export class PrismaProviderCapabilityEvidenceRepository implements ProviderCapab
       status: input.status, source: input.source, observedRevision: p.configRevision, evidenceHash: input.evidenceHash,
       checkedAt: input.checkedAt, expiresAt: input.expiresAt ?? null, details: json };
     return this.db.$transaction(async tx => {
-      const where = { id: p.id, scopeId: p.scopeId, scopeKind: p.scopeKind, configRevision: p.configRevision, enabled: true, disabledAt: null };
-      // A same-revision conditional update takes the existing Profile row lock;
-      // it does not grant dispatch rights or advance the configuration revision.
-      if ((await tx.aiProviderProfile.updateMany({ where, data: { configRevision: p.configRevision } })).count !== 1) throw new Error('AI_CAPABILITY_PROFILE_CHANGED');
-      const current = await tx.aiProviderProfile.findFirst({ where });
-      if (!current || capabilityProfileFingerprint(profileSchema.parse(current)) !== capabilityProfileFingerprint(p)) throw new Error('AI_CAPABILITY_PROFILE_CHANGED');
-      const key = { profileId_capability: { profileId: p.id, capability: input.capability } };
-      const previous = await tx.aiProviderCapabilityEvidence.findUnique({ where: key });
-      if (previous) {
-        const old = record(previous);
-        if (old.scope.id !== p.scopeId || old.scope.kind !== p.scopeKind || old.observedRevision > p.configRevision) throw new Error('AI_CAPABILITY_PROFILE_CHANGED');
-        if (old.observedRevision === p.configRevision) {
-          if (old.checkedAt > input.checkedAt) throw new Error('AI_CAPABILITY_EVIDENCE_STALE');
-          if (old.checkedAt.getTime() === input.checkedAt.getTime()) {
-            if (payload(input) !== payload(old)) throw new Error('AI_CAPABILITY_EVIDENCE_CONFLICT');
-            return old;
+      const participant = hasRentalBusinessTenantFence() ? await this.transactions?.begin(tx, p) : undefined;
+      if (hasRentalBusinessTenantFence() && !participant) throw new Error('AI_CAPABILITY_EVIDENCE_AUTHORITY_UNAVAILABLE');
+      try {
+        const where = { id: p.id, scopeId: p.scopeId, scopeKind: p.scopeKind, configRevision: p.configRevision, enabled: true, disabledAt: null };
+        // A same-revision conditional update takes the existing Profile row lock;
+        // it does not grant dispatch rights or advance the configuration revision.
+        if ((await tx.aiProviderProfile.updateMany({ where, data: { configRevision: p.configRevision } })).count !== 1) throw new Error('AI_CAPABILITY_PROFILE_CHANGED');
+        const current = await tx.aiProviderProfile.findFirst({ where });
+        if (!current || capabilityProfileFingerprint(profileSchema.parse(current)) !== capabilityProfileFingerprint(p)) throw new Error('AI_CAPABILITY_PROFILE_CHANGED');
+        const key = { profileId_capability: { profileId: p.id, capability: input.capability } };
+        const previous = await tx.aiProviderCapabilityEvidence.findUnique({ where: key });
+        if (previous) {
+          const old = record(previous);
+          if (old.scope.id !== p.scopeId || old.scope.kind !== p.scopeKind || old.observedRevision > p.configRevision) throw new Error('AI_CAPABILITY_PROFILE_CHANGED');
+          if (old.observedRevision === p.configRevision) {
+            if (old.checkedAt > input.checkedAt) throw new Error('AI_CAPABILITY_EVIDENCE_STALE');
+            if (old.checkedAt.getTime() === input.checkedAt.getTime()) {
+              if (payload(input) !== payload(old)) throw new Error('AI_CAPABILITY_EVIDENCE_CONFLICT');
+              await participant?.revalidate();
+              return old;
+            }
           }
         }
-      }
-      const saved = record(await tx.aiProviderCapabilityEvidence.upsert({ where: key, create: { id: randomUUID(), ...data }, update: data }));
-      if (saved.profileId !== p.id || saved.scope.id !== p.scopeId || saved.scope.kind !== p.scopeKind
-        || saved.capability !== input.capability || saved.observedRevision !== p.configRevision
-        || payload(saved) !== payload(input)) throw new Error('AI_CAPABILITY_EVIDENCE_INVALID_ROW');
-      return saved;
+        const saved = record(await tx.aiProviderCapabilityEvidence.upsert({ where: key, create: { id: randomUUID(), ...data }, update: data }));
+        if (saved.profileId !== p.id || saved.scope.id !== p.scopeId || saved.scope.kind !== p.scopeKind
+          || saved.capability !== input.capability || saved.observedRevision !== p.configRevision
+          || payload(saved) !== payload(input)) throw new Error('AI_CAPABILITY_EVIDENCE_INVALID_ROW');
+        await participant?.revalidate();
+        return saved;
+      } finally { participant?.close(); }
     });
   }
 }

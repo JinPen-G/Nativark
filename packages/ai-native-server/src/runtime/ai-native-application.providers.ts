@@ -1101,7 +1101,7 @@ export const AI_NATIVE_CAPABILITY_PROBE_PROVIDER: FactoryProvider<Pick<TextCapab
     if (typeof secrets?.encrypt !== 'function' || typeof secrets?.decrypt !== 'function') {
       throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     }
-    const factory = new TextCapabilityProbeRequestFactory({ db, auth, guard, subscriptions, secrets, capacity,
+    const factory = new TextCapabilityProbeRequestFactory({ db, auth, guard, subscriptions, secrets, capacity, transactions: { auth },
       platformProfileId: configuration.platformProfileId, sceneVersion: configuration.sceneVersion,
       priceVersion: configuration.priceVersion, pricing: { mode: 'persisted_calls', priceVersion: configuration.priceVersion },
       host: configuration.host, probeCapabilities: configuration.capabilities,

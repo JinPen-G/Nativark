@@ -86,7 +86,8 @@ function sameLedgerPayload(existing: { kind: string; evidenceHash: string | null
 export class PrismaBudgetRepository implements BudgetTransactionRepository {
   constructor(private readonly db: Db, private readonly clock: () => Date = () => new Date(),
     private readonly settingsAuthorization?: { context: WorkspaceGatewayContext;
-      participant: TenantModelConfigurationTransactionParticipant } | { platform: { actorId: string; scopeId: string } }) {}
+      participant: TenantModelConfigurationTransactionParticipant } | { platform: { actorId: string; scopeId: string } },
+    private readonly recoveryTransactions?: 'original_task') {}
 
   async settings(key: BudgetPolicyKey) {
     const row = await this.db.aiBudgetPolicy.findUnique({ where: { scopeId_scopeKind_sceneCode: policyWhere(key) }, select: { id: true, scopeId: true, scopeKind: true, sceneCode: true, configRevision: true, settingsJson: true } });
@@ -615,7 +616,11 @@ const originalWork = async () => {
       return result;
 
 };
-return input.action === 'dispatch' ? withAiTaskTransaction(tx, { kind: 'step', stepId: record.association.stepId }, originalWork) : originalWork();
+// Explicit user recovery can bind the original Task authority in this same
+// transaction. Gateway usage/settlement keeps its independent cleanup path.
+return input.action === 'dispatch' || this.recoveryTransactions === 'original_task'
+  && (input.action === 'release' || input.action === 'reconcile')
+  ? withAiTaskTransaction(tx, { kind: 'step', stepId: record.association.stepId }, originalWork) : originalWork();
 }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 }); }
     catch (error) {
       // A completed callback is not a COMMIT acknowledgement. This includes

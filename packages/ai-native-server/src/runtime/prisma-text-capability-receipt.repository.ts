@@ -2,7 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { ModelGatewayError, modelReasoningEvidenceSchema, modelEmbeddingEvidenceSchema } from './model-gateway.ports';
-import { PrismaProviderCapabilityEvidenceRepository } from './provider-capability.repository';
+import { PrismaProviderCapabilityEvidenceRepository, type ProviderCapabilityEvidenceTransactions } from './provider-capability.repository';
+import { hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
+import { withAiTaskTransaction } from './task-transaction-authority';
 import { ProviderCapabilityService } from './provider-capability.service';
 import type { GatewayInvocationObservation } from './unified-ai-gateway.ports';
 import type { AiLiveCapabilityEvidenceVerifier } from './capability-verification';
@@ -56,12 +58,17 @@ export class PrismaTextCapabilityReceiptRepository implements AiLiveCapabilityEv
       return { receipt: previous, created: false };
     }
     const id = randomUUID();
-    await this.db.$executeRaw(prismaRuntime.sql`INSERT INTO ai_text_capability_receipts
-      (id, scopeId, profileId, operationId, descriptor, descriptorHash, createdAt)
-      VALUES (${id}, ${descriptor.scopeId}, ${descriptor.profileId}, ${descriptor.command.operationId}, ${JSON.stringify(descriptor)}, ${descriptorHash}, CURRENT_TIMESTAMP(3))`);
-    const saved = await this.read(id);
-    if (!saved || saved.descriptorHash !== descriptorHash) throw new ModelGatewayError('ACCOUNTING_PENDING');
-    return { receipt: saved, created: true };
+    const insert = async (db: Reader) => {
+      await db.$executeRaw(prismaRuntime.sql`INSERT INTO ai_text_capability_receipts
+        (id, scopeId, profileId, operationId, descriptor, descriptorHash, createdAt)
+        VALUES (${id}, ${descriptor.scopeId}, ${descriptor.profileId}, ${descriptor.command.operationId}, ${JSON.stringify(descriptor)}, ${descriptorHash}, CURRENT_TIMESTAMP(3))`);
+      const saved = await this.readFrom(db, id);
+      if (!saved || saved.descriptorHash !== descriptorHash) throw new ModelGatewayError('ACCOUNTING_PENDING');
+      return { receipt: saved, created: true };
+    };
+    return hasRentalBusinessTenantFence() ? this.db.$transaction(tx =>
+      withAiTaskTransaction(tx, { kind: 'step', stepId: descriptor.stepId }, () => insert(tx)),
+      { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 }) : insert(this.db);
   }
   private async original(db: Reader, row: TextProbeReceipt, observation: TextProbeObservation, terminal: boolean) {
     const d = row.descriptor, o = observation;
@@ -244,7 +251,8 @@ export class PrismaTextCapabilityReceiptRepository implements AiLiveCapabilityEv
  * Audio evidence proves the versioned bounded input challenge only, not speech
  * recognition accuracy or business approval. Missing original evidence stays closed. */
 export function createPersistedTextCapabilityEvidence(db: TextProbeReceiptDb
-  & ConstructorParameters<typeof PrismaProviderCapabilityEvidenceRepository>[0], clock: () => Date = () => new Date()) {
-  return new ProviderCapabilityService(new PrismaProviderCapabilityEvidenceRepository(db),
+  & ConstructorParameters<typeof PrismaProviderCapabilityEvidenceRepository>[0], clock: () => Date = () => new Date(),
+  transactions?: ProviderCapabilityEvidenceTransactions) {
+  return new ProviderCapabilityService(new PrismaProviderCapabilityEvidenceRepository(db, transactions),
     { liveEvidenceVerifier: new PrismaTextCapabilityReceiptRepository(db, clock) }, clock);
 }

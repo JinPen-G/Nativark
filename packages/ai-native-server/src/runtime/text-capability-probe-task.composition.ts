@@ -31,6 +31,7 @@ import { composePersistedTaskAccountingRecovery } from './task-model-gateway.com
 import { presentTaskBudgetUsageRecord } from './budget/task-budget-usage.reader';
 import { BudgetError } from './budget/budget.ports';
 import { AiTaskRunnerError } from '@rental-os/platform-server/ai-runtime';
+import type { TenantModelConfigurationTransactionParticipant } from './tenant-model-config-transactions';
 
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
@@ -217,6 +218,7 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
   /** Platform consumers must supply their original ledger instead of taking
    * the workspace-only session/authority fallback. */
   accountingRecovery?: TextCapabilityProbeApplication['financialRecovery'];
+  transactionParticipant?: TenantModelConfigurationTransactionParticipant;
 }) {
   const platform = input.taskScopeKind === 'PLATFORM';
   const taskScopeKind = platform ? 'PLATFORM' as const : 'WORKSPACE' as const;
@@ -229,6 +231,7 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
   const producer = input.producer ?? composeAuthorizedTextProbeTaskProducer(input.db, {
     auth: input.auth, credentials: input.credentials, guard: input.guard, probe: input.probe,
     sceneVersion: input.sceneVersion, priceVersion: input.priceVersion, clock: input.clock,
+    transactionParticipant: input.transactionParticipant,
   });
   const taskPolicies = input.taskPolicies ?? composeTaskActionPolicyManagement({ db: input.db, auth: input.auth,
     credentials: input.credentials, guard: input.guard, clock: input.clock });
@@ -339,6 +342,7 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
       const recovery = platform ? input.accountingRecovery : composePersistedTaskAccountingRecovery({ db: input.db, auth: input.auth,
         credentials: input.credentials, subscriptions: input.subscriptions, guard: input.guard, taskId, clock: input.clock,
         pricing: { kind: reservation.unitKind === 'calls' ? 'calls' : 'recorded', priceVersion: invocation.priceVersion },
+        ...(operation !== 'read' && !receiptOnly ? { recoveryTransactions: 'original_task' as const } : {}),
         ...(operation === 'read' || receiptOnly ? { originalTaskRead: originalReader(requestKey, original, taskId).current } : {}) });
       if (!recovery) throw unavailable();
       if (receiptOnly) {

@@ -29,6 +29,8 @@ import { AiPlatformModelSettingsController, AI_NATIVE_PLATFORM_MODEL_SETTINGS_RE
   from "@rental-os/ai-native-server/runtime/platform-model-settings.application";
 import { AiGatewayPricingHistoryController, AI_BUDGET_MANAGEMENT, AI_GATEWAY_PRICING_HISTORY }
   from "@rental-os/ai-native-server/runtime/budget/budget-management.module";
+import { TextCapabilityProbeController, TEXT_CAPABILITY_PROBE_REQUESTS }
+  from "@rental-os/ai-native-server/runtime/text-capability-probe.controller";
 
 export const RENTAL_AI_INSPECTION_OPERATIONS = Object.freeze([
   "fulfillment-receipt-read", "history-read", "receipt-host-read", "host-read", "template-read",
@@ -36,6 +38,7 @@ export const RENTAL_AI_INSPECTION_OPERATIONS = Object.freeze([
   "draft-operation", "input-prepare", "input-receipt", "result-read", "result-save", "result-save-receipt", "submission-review", "submission-prepare", "submission-preparation", "submission-submit", "submission-read"
 ]);
 export const RENTAL_AI_CONTROLLERS = Object.freeze([
+  TextCapabilityProbeController,
   AiPlatformModelSettingsController,
   RentalTenantCreditController, RentalPlatformCreditController,
   RentalTenantBudgetController, RentalPlatformBudgetController, AiGatewayPricingHistoryController,
@@ -47,6 +50,7 @@ export const RENTAL_AI_CONTROLLERS = Object.freeze([
   RentalWebsiteClientEntryController, RentalWechatClientEntryController
 ]);
 export const RENTAL_AI_MOUNTED_REQUESTS: readonly symbol[] = Object.freeze([
+  TEXT_CAPABILITY_PROBE_REQUESTS,
   AI_NATIVE_PLATFORM_MODEL_SETTINGS_REQUESTS,
   AI_BUDGET_MANAGEMENT, AI_GATEWAY_PRICING_HISTORY,
   AI_STAFF_INSPECTION_REQUESTS, INSPECTION_RECOGNITION_TASKS, AI_STAFF_INSPECTION_ACCOUNTING, AI_ORIGINAL_SCENE_REQUESTS, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS,
@@ -64,6 +68,7 @@ const quote = AiOriginalQuoteModelExecutionController.prototype, opening = AiOri
 const orders = AiOriginalOrderReadController.prototype;
 const plans = AiScenePlanPolicyController.prototype, actions = AiOriginalTaskActionPolicyController.prototype;
 const conversations = AiConversationController.prototype;
+const capabilityProbe = TextCapabilityProbeController.prototype;
 const inspection = RentalStaffInspectionAssistController.prototype, recognition = InspectionRecognitionTaskController.prototype;
 const accounting = StaffInspectionAccountingController.prototype;
 const budget = RentalTenantBudgetController.prototype, pricing = AiGatewayPricingHistoryController.prototype;
@@ -72,6 +77,15 @@ const platformSettings = AiPlatformModelSettingsController.prototype;
 const platformBudget = RentalPlatformBudgetController.prototype;
 const platformCredit = RentalPlatformCreditController.prototype;
 const declarations: readonly RentalHttpAccessDeclaration[] = [
+  ...reviewed(TextCapabilityProbeController, [capabilityProbe.prepare, capabilityProbe.readOriginal,
+    capabilityProbe.readTask, capabilityProbe.inspect, capabilityProbe.readHistory, capabilityProbe.preflight,
+    capabilityProbe.readTaskAction, capabilityProbe.readTaskActionReceipt, capabilityProbe.readAccounting,
+    capabilityProbe.readAccountingOperation], "buffered-read",
+  "current tenant configuration manager and original probe request/Task/Run/accounting lineage; same selected identity and final response recheck, preparation does not publish, create or dispatch"),
+  ...reviewed(TextCapabilityProbeController, [capabilityProbe.publish, capabilityProbe.createTask,
+    capabilityProbe.configureTaskAction, capabilityProbe.start, capabilityProbe.cancel, capabilityProbe.reconcile,
+    capabilityProbe.readCapabilityReceipt, capabilityProbe.releaseUnsent, capabilityProbe.reconcileAccounting], "transactional-write",
+  "original probe publication, action policies and Task transactions hold current Auth/Tenant/Core before original input and Task locks; explicit model start retains Gateway single accounting, capability receipt persists only verified original evidence, unknown stays on the same key"),
   ...reviewed(RentalPlatformCreditController, [platformCredit.platformRead, platformCredit.platformReceipt], "buffered-read",
   "original SaaS read permission observes bounded pending requests or the exact decision receipt; same selected identity and final principal recheck, no allowance increase or tenant content"),
   ...reviewed(RentalPlatformCreditController, [platformCredit.platformDecide], "transactional-write",
@@ -268,6 +282,10 @@ export function rentalAiPlatformManagementSelector(policy: ReturnType<typeof cre
  * recover/reconcile 仍由原 lease/receipt 仓储裁定，不能据此创建或重新派发。 */
 export function rentalAiDeploymentContinuationSelector(policy: ReturnType<typeof createRentalAiHttpPolicy>) {
   const selected = new Map<Function, readonly Function[]>([
+    [TextCapabilityProbeController, [capabilityProbe.readOriginal, capabilityProbe.readTask, capabilityProbe.inspect,
+      capabilityProbe.readTaskAction, capabilityProbe.readTaskActionReceipt, capabilityProbe.readHistory,
+      capabilityProbe.readAccounting, capabilityProbe.readAccountingOperation, capabilityProbe.cancel,
+      capabilityProbe.reconcile, capabilityProbe.releaseUnsent, capabilityProbe.reconcileAccounting]],
     [RentalTenantCreditController, [credit.receipt, credit.allocationReceipt, credit.calls]],
     [RentalTenantBudgetController, [budget.readOperation, budget.readPriceReview, budget.readPlatformPriceAdoption]],
     [AiGatewayPricingHistoryController, [pricing.readPrice, pricing.readPublication, pricing.readInputBound]],
@@ -354,6 +372,9 @@ export function rentalAiRouteSelector(policy: ReturnType<typeof createRentalAiHt
  * 从真实controller/handler闭集取路由，并要求只读审定；请求标志不能扩展此集合。 */
 export function rentalAiOriginalReceiptSelector(policy: ReturnType<typeof createRentalAiHttpPolicy>) {
   const selected = new Map<Function, readonly Function[]>([
+    [TextCapabilityProbeController, [capabilityProbe.readOriginal, capabilityProbe.readTask, capabilityProbe.inspect,
+      capabilityProbe.readTaskAction, capabilityProbe.readTaskActionReceipt, capabilityProbe.readHistory,
+      capabilityProbe.readAccounting, capabilityProbe.readAccountingOperation]],
     [RentalTenantCreditController, [credit.receipt, credit.allocationReceipt, credit.calls]],
     [RentalTenantBudgetController, [budget.readOperation, budget.readPriceReview, budget.readPlatformPriceAdoption]],
     [AiGatewayPricingHistoryController, [pricing.readPrice, pricing.readPublication, pricing.readInputBound]],

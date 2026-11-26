@@ -28,6 +28,7 @@ import { capabilityProfileFingerprint } from './capability-verification';
 import type { PersistedBudgetEvidenceSource } from './budget/budget-dependency-adapters';
 import { PrismaTaskGatewayAudit } from './prisma-task-gateway-audit';
 import type { GatewayCapacityPort } from './gateway-capacity.ports';
+import { beginTenantModelConfigurationTransaction, type TenantModelConfigurationTransactionParticipant } from './tenant-model-config-transactions';
 
 export type TextCapabilityProbeDependencies = Omit<Parameters<typeof createPersistedGatewayBudget>[0], 'scopes' | 'db'> & {
   db: Parameters<typeof createPersistedGatewayBudget>[0]['db'] & TextProbeReceiptDb
@@ -50,6 +51,7 @@ export type TextCapabilityProbeDependencies = Omit<Parameters<typeof createPersi
    * a present port replaces ONLY current-identity resolution and route
    * authority, never the Gateway, ledger, receipts or task engine. */
   identity?: TextCapabilityProbeIdentityPort;
+  transactionParticipant?: TenantModelConfigurationTransactionParticipant;
 };
 
 /** Structural authority contract shared by the workspace and platform hosts. */
@@ -93,7 +95,15 @@ export class TextCapabilityProbeApplication {
     }
     this.profiles = new PrismaProviderProfileRepository(input.db);
     this.receipts = new PrismaTextCapabilityReceiptRepository(input.db, input.clock);
-    this.capabilities = createPersistedTextCapabilityEvidence(input.db, input.clock);
+    this.capabilities = createPersistedTextCapabilityEvidence(input.db, input.clock, input.transactionParticipant ? {
+      begin: async tx => {
+        const current = await this.currentRequest();
+        if (isPlatformProbeContext(current.context)) throw new ModelGatewayError('FORBIDDEN');
+        const participant = await beginTenantModelConfigurationTransaction(tx, current.context, input.transactionParticipant);
+        if (!participant) throw new ModelGatewayError('FORBIDDEN');
+        return participant;
+      }
+    } : undefined);
     this.accounting = createPersistedGatewayBudget(input);
     this.financialRecovery = this.accounting.recovery;
     this.financialEvidence = Object.freeze({ readDispatch: (reservationId: string) =>

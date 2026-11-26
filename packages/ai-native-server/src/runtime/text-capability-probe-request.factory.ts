@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { AiTextCapabilityHttpResponsesDraft } from '@rental-os/shared';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
+import { hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { AiTaskCurrentIdentityAuthority } from './task-current-identity.authority';
@@ -14,6 +15,8 @@ import { textProbeTaskCreationKey } from './text-capability-probe-task.compositi
 import { waitForTaskApplicationDependency, type AiTaskApplicationStartResult } from './runner/prisma-task-application';
 import type { AiTaskRepositoryOperation } from './ai-task.repository';
 import { taskActionPolicyOperations } from './prisma-task-action-policy.repository';
+import { createTenantModelConfigurationTransactions } from './tenant-model-config-transactions';
+import { withTextProbeTaskTransactions } from './text-capability-probe-transactions';
 
 export type TextCapabilityHttpRequest = { headers: { authorization?: unknown } };
 export type TextCapabilityRequestDependencies = Omit<AuthorizedTextProbeWorkflowDependencies, 'credentials' | 'pricing'> & {
@@ -99,6 +102,10 @@ export class TextCapabilityProbeRequestFactory {
     let root: ReturnType<typeof composeAuthorizedPersistedTextProbeWorkflow>;
     try { root = composeAuthorizedPersistedTextProbeWorkflow({ ...dependencies, credentials }); }
     catch (error) { authorization = undefined; throw error; }
+    const participant = createTenantModelConfigurationTransactions({ transactions: dependencies.transactions, credentials });
+    const inTask = <T>(requestKey: string, purpose: 'creation' | 'execution' | 'control' | 'recovery' | 'accounting', work: () => Promise<T>) =>
+      withTextProbeTaskTransactions({ db: dependencies.db, requestKey, purpose, participant, clock: dependencies.clock,
+        readOriginal: () => root.workflow.readOriginalLocator(requestKey) }, work);
     const wait = <T>(operation: () => Promise<T>, writes = false, signal?: AbortSignal) =>
       waitForTaskApplicationDependency(operation, writes, signal, dependencies.runnerClock);
     const run = <S extends z.AnyZodObject, T>(schema: S, value: unknown,
@@ -107,7 +114,7 @@ export class TextCapabilityProbeRequestFactory {
       const parsed = schema.safeParse(value);
       if (!parsed.success) return Promise.reject(new AiTaskRepositoryError('AI_INVALID_INPUT'));
       const input = structuredClone(parsed.data);
-      return runWithRequestIdentity({}, async () => {
+      const consume = async () => {
         const before = await wait(binding, false, signal?.aborted ? undefined : signal);
         try {
           // Execution has its own trusted step/total deadlines. Do not cut a
@@ -125,7 +132,8 @@ export class TextCapabilityProbeRequestFactory {
           }
           throw error;
         }
-      });
+      };
+      return hasRentalBusinessTenantFence() ? consume() : runWithRequestIdentity({}, consume);
     };
     const originalKey = async (requestKey: string) => {
       const original = await wait(() => root.workflow.readOriginal(requestKey));
@@ -149,9 +157,11 @@ export class TextCapabilityProbeRequestFactory {
     return Object.freeze({
       readAccountingOperation: value => run(accountingOperationSchema, value, ({ requestKey, operation }) => root.workflow.readOriginalAccountingOperation(requestKey, operation)),
       readAccounting: value => run(requestSchema, value, ({ requestKey }) => root.workflow.readOriginalAccounting(requestKey)),
-      releaseUnsent: value => run(requestSchema, value, ({ requestKey }) => root.workflow.releaseOriginalUnsent(requestKey), true),
-      reconcileAccounting: value => run(requestSchema, value, ({ requestKey }) => root.workflow.reconcileOriginalAccounting(requestKey), true),
-      configureTaskAction: value => run(actionConfigureSchema, value, async ({ requestKey, operation, expectedRevision }) => {
+      releaseUnsent: value => run(requestSchema, value, ({ requestKey }) =>
+        inTask(requestKey, 'accounting', () => root.workflow.releaseOriginalUnsent(requestKey)), true),
+      reconcileAccounting: value => run(requestSchema, value, ({ requestKey }) =>
+        inTask(requestKey, 'accounting', () => root.workflow.reconcileOriginalAccounting(requestKey)), true),
+      configureTaskAction: value => run(actionConfigureSchema, value, ({ requestKey, operation, expectedRevision }) => inTask(requestKey, 'execution', async () => {
         const target = await actionTask(requestKey, operation);
         const originalExpiry = Date.parse(await root.workflow.readOriginalPolicyExpiry(requestKey));
         const now = (dependencies.clock ?? (() => new Date()))().getTime();
@@ -161,7 +171,7 @@ export class TextCapabilityProbeRequestFactory {
           expiresAt: new Date(Math.min(originalExpiry, now + dependencies.taskActionPolicyTtlMs!)) }, expectedRevision, true);
         return { requestKey, state: 'configured' as const, policy, retryable: false as const,
           semantics: 'action_policy_not_dispatch_or_business_approval' as const };
-      }, true),
+      }), true),
       readTaskAction: value => run(actionReadSchema, value, async ({ requestKey, operation }) => {
         const target = await actionTask(requestKey, operation);
         const result = await root.workflow.taskPolicies.read(target.taskId, target.template.operation);
@@ -196,11 +206,11 @@ export class TextCapabilityProbeRequestFactory {
         return original.state === 'stored' ? { requestKey, ...original, retryable: false as const }
           : { requestKey, state: 'not_observed' as const, retryable: false as const };
       }),
-      createTask: value => run(requestSchema, value, async ({ requestKey }) => {
+      createTask: value => run(requestSchema, value, ({ requestKey }) => inTask(requestKey, 'creation', async () => {
         const key = await originalKey(requestKey), task = await root.workflow.createTask(key);
         const metadata = task.replayed ? await root.workflow.readTaskMetadataOriginal(key) : task;
         return { requestKey, ...taskSummary({ ...task, status: metadata.status, revision: metadata.revision }), retryable: false as const };
-      }, true),
+      }), true),
       readTask: value => run(requestSchema, value, async ({ requestKey }) => {
         const key = await originalKey(requestKey), found = await root.workflow.readCreation(key);
         if (!found.task) return { requestKey, state: found.state, task: null, retryable: false as const };
@@ -212,7 +222,7 @@ export class TextCapabilityProbeRequestFactory {
         if (signal?.aborted) return runSummary(requestKey, { kind: 'not_started', reason: 'host_aborted' });
         const key = await originalKey(requestKey);
         selected(await wait(() => root.workflow.readOriginalCapability(requestKey)));
-        return runSummary(requestKey, await root.workflow.startOriginal(key, signal));
+        return runSummary(requestKey, await inTask(requestKey, 'execution', () => root.workflow.startOriginal(key, signal)));
       }, true, true, signal),
       inspect: value => run(requestSchema, value, async ({ requestKey }) => {
         const snapshot = await root.workflow.inspectOriginal(await originalKey(requestKey));
@@ -221,12 +231,14 @@ export class TextCapabilityProbeRequestFactory {
           run: { runId: snapshot.run.runId, status: snapshot.run.status }, semantics: 'task_outcome_not_capability_evidence' as const };
       }),
       cancel: value => run(cancelSchema, value, async ({ requestKey, expectedRevision }) => {
-        const result = await root.workflow.requestCancellationOriginal({ ...await originalKey(requestKey), expectedRevision });
+        const key = { ...await originalKey(requestKey), expectedRevision };
+        const result = await inTask(requestKey, 'control', () => root.workflow.requestCancellationOriginal(key));
         return { requestKey, status: 'cancel_requested' as const, revision: result.event.taskRevision, retryable: false as const };
       }, true),
       reconcile: (value, signal) => run(requestSchema, value, async ({ requestKey }) => {
         if (signal?.aborted) return runSummary(requestKey, { kind: 'not_started', reason: 'host_aborted' });
-        return runSummary(requestKey, await root.workflow.reconcileOriginal(await originalKey(requestKey), signal));
+        const key = await originalKey(requestKey);
+        return runSummary(requestKey, await inTask(requestKey, 'recovery', () => root.workflow.reconcileOriginal(key, signal)));
       }, true, true, signal),
       readCapabilityReceipt: value => run(requestSchema, value, async ({ requestKey }) => {
         // Existing reconciliation may record verified capability evidence; it

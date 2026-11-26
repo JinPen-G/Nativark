@@ -39,18 +39,20 @@ export function createPersistedGatewayBudget(input: {
   entitlementFeatureCode?: string;
   pricing: BudgetQuotePort & GatewayActualUsagePricing;
   settingsAuthorization?: ConstructorParameters<typeof PrismaBudgetRepository>[2];
+  /** Explicit original-task recovery only; automatic Gateway cleanup omits it. */
+  recoveryTransactions?: ConstructorParameters<typeof PrismaBudgetRepository>[3];
   clock?: () => Date;
 }) {
   const bindings = new PrismaGatewayInvocationBindings(input.db, input.scopes, input.clock);
   const pricing = new ServiceModePricing(input.db, input.scopes, input.pricing, input.clock);
   const facts = new PrismaGatewayAccountingFacts(input.db, bindings, input.scopes, pricing, input.clock);
   const service = input.entitlements
-    ? new BudgetService(new PrismaBudgetRepository(input.db, input.clock, input.settingsAuthorization),
+    ? new BudgetService(new PrismaBudgetRepository(input.db, input.clock, input.settingsAuthorization, input.recoveryTransactions),
       new ServerBudgetAuthorityAdapter(input.authorization, input.entitlements, input.entitlementFeatureCode),
       pricing, new PersistedBudgetEvidenceAdapter(facts), input.clock)
     : createPersistedBudgetSubsystem({ db: input.db, subscriptions: input.subscriptions, authorization: input.authorization,
       quotes: pricing, evidence: new PersistedBudgetEvidenceAdapter(facts), clock: input.clock,
-      settingsAuthorization: input.settingsAuthorization });
+      settingsAuthorization: input.settingsAuthorization, recoveryTransactions: input.recoveryTransactions });
   const selector = z.object({ scope: z.enum(['tenant', 'workspace']),
     sceneCode: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict();
   const write = selector.extend({ expectedRevision: z.number().int().min(0).max(4294967294), settings: z.unknown(),
