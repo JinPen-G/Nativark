@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "outDir": "dist-public", "newLine": "lf", "noEmitOnError": true },
+  "include": [],
+  "files": [
+    "src/task-errors.ts",
+    "src/request-binding.ts",
+    "src/task-transactions.ts",
+    "src/platform-transactions.ts",
+    "src/tenant-configuration-transactions.ts",
+    "src/execution-context-validation.ts",
+    "src/model-configuration.ts",
+    "src/public-platform-model-settings.ts",
+    "src/runtime/original-result-reads.ts",
+    "src/runtime/original-task-recovery-read.ts"
+  ]
+}

@@ -90,3 +90,5 @@
 [平台模型配置模块](src/platform-model-settings/README.md)复用原模型目录、编辑、原操作收据和能力证据。选装公共 SaaS 模型设置的宿主从 `@rental-os/ai-native-admin/platform-model-settings/public-application` 使用 [createPublicPlatformModelSettingsPage(runtime)](src/public-platform-application.tsx)，将返回组件传给现有 `platformAiPage`。同一 `runtime` 来自宿主已经验证的会话，不另外登录或建缓存。该页面通过[公共设置服务](../ai-native-server/src/public-platform-model-settings.ts)读取 `platform/ai/providers` 的五条原路由。
 
 [原完整组合](src/platform-application.tsx)继续使用 `createPlatformModelSettingsPage(runtime)`，从相同模型配置视图插入原预算、费率和额度办理。模型配置合同来自 [platform-contracts/ai-usage](../platform-contracts/src/ai-usage.ts)，原完整组合继续消费原财务合同。入口需实际服务器完成数据选择、当前角色及对应配置授权。
+
+[公共源码发行清单](package.public.json)单独包含原模型页的源码、样式和窄出口。使用[公共装包入口](../ai-native-server/public-package.cjs)取其闭包，由公共后台原构建消费。[公共安装说明](README.public.md)

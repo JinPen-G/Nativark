@@ -1,0 +1,42 @@
+{
+  "name": "@rental-os/ai-native-server",
+  "version": "0.2.0",
+  "private": true,
+  "license": "MIT",
+  "type": "commonjs",
+  "description": "Zelo 公共 AI 模型设置、原结果、Task 事务和观察",
+  "files": ["dist", "README.md", "LICENSE"],
+  "exports": {
+    "./task-errors": { "types": "./dist/task-errors.d.ts", "default": "./dist/task-errors.js" },
+    "./request-binding": { "types": "./dist/request-binding.d.ts", "default": "./dist/request-binding.js" },
+    "./task-transactions": { "types": "./dist/task-transactions.d.ts", "default": "./dist/task-transactions.js" },
+    "./platform-transactions": { "types": "./dist/platform-transactions.d.ts", "default": "./dist/platform-transactions.js" },
+    "./tenant-configuration-transactions": { "types": "./dist/tenant-configuration-transactions.d.ts", "default": "./dist/tenant-configuration-transactions.js" },
+    "./execution-context-validation": { "types": "./dist/execution-context-validation.d.ts", "default": "./dist/execution-context-validation.js" },
+    "./model-configuration": { "types": "./dist/model-configuration.d.ts", "default": "./dist/model-configuration.js" },
+    "./public-platform-model-settings": { "types": "./dist/public-platform-model-settings.d.ts", "default": "./dist/public-platform-model-settings.js" },
+    "./runtime/original-result-reads": { "types": "./dist/runtime/original-result-reads.d.ts", "default": "./dist/runtime/original-result-reads.js" },
+    "./runtime/original-task-recovery-read": { "types": "./dist/runtime/original-task-recovery-read.d.ts", "default": "./dist/runtime/original-task-recovery-read.js" }
+  },
+  "typesVersions": { "*": {
+    "task-errors": ["dist/task-errors.d.ts"],
+    "request-binding": ["dist/request-binding.d.ts"],
+    "task-transactions": ["dist/task-transactions.d.ts"],
+    "platform-transactions": ["dist/platform-transactions.d.ts"],
+    "tenant-configuration-transactions": ["dist/tenant-configuration-transactions.d.ts"],
+    "execution-context-validation": ["dist/execution-context-validation.d.ts"],
+    "model-configuration": ["dist/model-configuration.d.ts"],
+    "public-platform-model-settings": ["dist/public-platform-model-settings.d.ts"],
+    "runtime/original-result-reads": ["dist/runtime/original-result-reads.d.ts"],
+    "runtime/original-task-recovery-read": ["dist/runtime/original-task-recovery-read.d.ts"]
+  } },
+  "dependencies": {
+    "@rental-os/platform-contracts": "0.1.0",
+    "@rental-os/platform-server": "0.1.0",
+    "@nestjs/common": "^10.4.15",
+    "ajv": "^8.12.0",
+    "ajv-formats": "^2.1.1",
+    "zod": "3.25.76"
+  },
+  "peerDependencies": { "@prisma/client": "5.22.0" }
+}

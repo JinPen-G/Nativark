@@ -12,6 +12,8 @@
 
 零 Core 宿主可从 [public-data-admission](src/public-data-admission.ts) 创建选装数据观察函数。它读取真实选定锁及固定公共归档，结合原公共数据计划和当前数据库或同一事务的原 Prisma 账与结构来核可用性。它是宿主装配入口，公共数据发行归档仍由原三条窄出口构成。
 
+[公共运行 SDK `0.2.1`](package.public.json)由[独立编译入口](tsconfig.public.json)产生，供宿主同时加载数据贡献、包读取和原账准入。数据能力归档和迁移身份仍为 `0.2.0`，用原 `createPublicAiDataRelease` 从固定材料输出；安装 SDK 的文件集合不替代所选能力归档。[公共装包入口](../ai-native-server/public-package.cjs)
+
 ## 原混合安装兼容基线
 
 原提取基线是公共数据 40 模型、`0.1.8`，Rental 121 模型、`0.1.0`，再加入原 AI 的 86 模型和 16 枚举，组合 **247 模型、35 枚举**。原 API 的 241 模型与其相差 6 个平台 Core 访问、绑定及操作对象。原数据仍提供固定贡献、完整包校验、新库候选及 MySQL 结构计划。固定材料以[原来源表](prisma/provenance.json)和[原准备入口](src/preparation.ts)为准。

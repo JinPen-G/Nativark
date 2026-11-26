@@ -1,0 +1,27 @@
+{
+  "name": "@rental-os/ai-native-admin",
+  "version": "0.2.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "Zelo 公共后台 SaaS 模型设置源码包",
+  "exports": {
+    "./host": "./src/host.tsx",
+    "./platform-model-settings/public-application": "./src/public-platform-application.tsx",
+    "./source/platform-model-settings/platformAiSettings": "./src/platform-model-settings/platformAiSettings.ts"
+  },
+  "files": [
+    "README.md", "LICENSE",
+    "src/host.tsx", "src/public-platform-application.tsx",
+    "src/platform-model-settings/PlatformCapabilityObservation.tsx", "src/platform-model-settings/PlatformModelSettingsView.tsx",
+    "src/platform-model-settings/model-runtime.ts", "src/platform-model-settings/platform-model-settings-session.ts",
+    "src/platform-model-settings/platformAiSettings.ts", "src/platform-model-settings/request.ts",
+    "src/ai-native/AiManagement.module.css", "src/ai-native/safe-display.ts", "src/ai-native/formatters.ts",
+    "src/ai-native/management-locale.ts", "src/ai-native/platform-management-locale.ts"
+  ],
+  "dependencies": {
+    "@rental-os/platform-admin": "0.1.0",
+    "@rental-os/platform-contracts": "0.1.0"
+  },
+  "peerDependencies": { "react": "19.2.8" }
+}

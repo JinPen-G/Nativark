@@ -38,6 +38,10 @@
 
 [原平台后台](../ai-native-admin/README.md#组合原平台模型配置)沿 `platformAiPage` 接现有页面和会话，候选未安装时保留正常公共宿主。默认公共启动装配由宿主维护者按所选数据与许可接入。公共设置源码与类型依赖闭包可独立于 Rental 和混合 shared。旧全量构建仍沿原 Rental-AI 组合；预算、额度、租户设置 HTTP 与完整公开发行各有独立装配边界。
 
+### 公共发行构建
+
+[公共包清单](package.public.json)发布已拆公共出口，[公共 TypeScript 工程](tsconfig.public.json)编译实际 JS 和声明。按[公共安装说明](README.public.md)先核宿主专属 Client，再由[公共装包入口](public-package.cjs)从同次输出收集所有出口及所需依赖文件。旧混合包继续使用原 `package.json`、构建和历史数据锁。
+
 完整原组合宿主从 [服务装配](../../apps/api/src/application-services.module.ts) 使用这些工厂。[独立 AI 宿主](../../apps/rental-api/src/ai-app.module.ts) 则显式选择 AI 数据贡献，由 [同实例装配](../../apps/rental-api/src/ai-composition.ts) 提供原 Auth、Guard、Core、数据库和文件权限。只有该宿主 [实际登记并审核的处理器](../../apps/rental-api/src/ai-http-policy.ts) 才发布为可调用能力；工厂、类型或合同存在不等于该宿主已开放全部 AI 路由。
 
 [批准订单授权桥](src/runtime/approval-execution/approved-order-route.authority.ts) 在进入隔离 Guard 前捕获原请求权威；完整 Guard 和身份一致性通过后，准备、读取与执行回调恢复同一原 ALS store。原 Task/批准/Core 事务和幂等仍由真实参加者裁定，失应答保持 unknown，不按新键重发。

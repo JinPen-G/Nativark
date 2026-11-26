@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "outDir": "dist-public", "newLine": "lf", "noEmitOnError": true },
+  "include": [],
+  "files": ["src/public-data.ts", "src/public-data-package.ts", "src/public-mysql-data.ts", "src/public-data-admission.ts"]
+}

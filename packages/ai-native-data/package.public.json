@@ -1,0 +1,29 @@
+{
+  "name": "@rental-os/ai-native-data",
+  "version": "0.2.1",
+  "private": true,
+  "license": "MIT",
+  "type": "commonjs",
+  "description": "Zelo 公共 AI 数据 SDK 和宿主准入",
+  "main": "dist/public-data.js",
+  "types": "dist/public-data.d.ts",
+  "files": ["dist", "prisma-public", "README.md", "LICENSE"],
+  "exports": {
+    ".": { "types": "./dist/public-data.d.ts", "default": "./dist/public-data.js" },
+    "./public-data": { "types": "./dist/public-data.d.ts", "default": "./dist/public-data.js" },
+    "./public-data-package": { "types": "./dist/public-data-package.d.ts", "default": "./dist/public-data-package.js" },
+    "./public-mysql-data": { "types": "./dist/public-mysql-data.d.ts", "default": "./dist/public-mysql-data.js" },
+    "./public-data-admission": { "types": "./dist/public-data-admission.d.ts", "default": "./dist/public-data-admission.js" }
+  },
+  "typesVersions": { "*": {
+    "public-data": ["dist/public-data.d.ts"],
+    "public-data-package": ["dist/public-data-package.d.ts"],
+    "public-mysql-data": ["dist/public-mysql-data.d.ts"],
+    "public-data-admission": ["dist/public-data-admission.d.ts"]
+  } },
+  "dependencies": {
+    "@rental-os/core-contracts": "0.1.0",
+    "@rental-os/core-host": "0.1.0",
+    "@rental-os/platform-core-host": "0.1.0"
+  }
+}
