@@ -34,6 +34,8 @@
 
 [task-steps](src/task-steps.ts) 复用原 Step 登记、转换、CAS、事件及原动作 ID。宿主提供已发布工具和版本的闭集、当前登记／重开权威、原转换证据与独立 `read_step_terminal` 权威。写入和原证据校验沿同一严格事务，提交后用当前读取权决定是否交付，丢应答或撤权不重做原动作。`createPublicAiTaskRunnerStepPorts` 将原回执接到 Runner 的 lease 和 step revisions；人类确认的具体参加者及实际模型／业务动作由原宿主组合。
 
+[task-measured-effects](src/task-measured-effects.ts) 把原持久化效果、计量和累计资源接到同一 Runner。执行前保存原开始标记，以原单调时钟和实际正文 UTF-8 字节计量；工具等待不占用数据库事务。恢复只读原 Artifact 和计量，缺计量仍待核对。模型步骤须提供原调用准备和同一 Gateway 账本的 `readDispatch`，按已保存的原身份、调用、预占及派发事实结清。宿主提供当前登记和调用权，行业批准与原业务交易仍在原业务参加者内。
+
 ## 公共模型配置
 
 宿主从 [model-configuration](src/model-configuration.ts) 创建租户或平台的持久配置工厂，提供自己的当前动作授权、SecretBox、同一所选 Prisma Client 和显式事务参加者。租户配置上下文允许只有 tenantId、actorId；invoke 仍要求业务 workspace 及其授权。调用 `registerScope` 建立原 canonical TENANT 或 PLATFORM 元数据后，再使用返回的 `configuration` 读取、保存及核对原 operationKey。元数据注册和配置保存分别拥有原事务，元数据存在不表示模型可调用。

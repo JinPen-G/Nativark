@@ -2,8 +2,8 @@
  * Callers supply current authorized ownership and recheck authority afterwards.
  * Absence/expiry alone is never proof; this grants neither retry nor refund. */
 import type { Prisma, PrismaClient } from '@prisma/client';
-import type { AiGatewayConfigReferenceDraft } from '@rental-os/shared';
-import { isGatewayConfig } from '../gateway-contract-validation';
+import type { AiGatewayConfigReferenceDraft } from '@rental-os/platform-contracts/ai-gateway';
+import { isGatewayConfig } from '@rental-os/platform-server/ai-gateway';
 import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 
 const invocationSelect = { id: true, scopeId: true, taskId: true, runId: true, stepId: true, actionId: true,
@@ -13,7 +13,7 @@ const invocationSelect = { id: true, scopeId: true, taskId: true, runId: true, s
 type Invocation = Prisma.AiGatewayInvocationGetPayload<{ select: typeof invocationSelect }>;
 type Db = Pick<PrismaClient, 'aiGatewayInvocation' | 'aiInvocationAdmission' | 'aiGatewayAccountingReceipt' | 'aiBudgetReservation'>;
 
-function invocationBinding(row: Invocation) {
+function invocationBinding(row: Invocation, tenantOnly = false) {
   if (!isGatewayConfig(row.configuration) || hash(row.configuration) !== row.configurationHash) return null;
   const configuration: AiGatewayConfigReferenceDraft = row.configuration;
   const platform = 'consumerScope' in configuration && configuration.consumerScope.kind === 'platform';
@@ -22,7 +22,7 @@ function invocationBinding(row: Invocation) {
   return { id: row.id, scopeId: row.scopeId, taskId: row.taskId, runId: row.runId, stepId: row.stepId,
     actionId: row.actionId, actorId: row.actorId, callId: row.callId, registrationHash: row.registrationHash,
     intentHash: row.intentHash, configurationHash: row.configurationHash,
-    scopeKind: platform ? 'PLATFORM' as const : 'WORKSPACE' as const,
+    scopeKind: platform ? 'PLATFORM' as const : tenantOnly ? 'TENANT' as const : 'WORKSPACE' as const,
     tenantId: 'tenantId' in configuration ? configuration.tenantId : null, configId: configuration.configId,
     configRevision: row.configuration.configRevision, priceVersion: row.priceVersion,
     maxOutputTokens: row.maxOutputTokens, mode: row.mode, sceneCode: row.sceneCode,
@@ -31,20 +31,23 @@ function invocationBinding(row: Invocation) {
 
 export async function readModelNonDispatchEvidence(db: Db,
   owner: Readonly<{ scopeId: string; tenantId: string; workspaceId: string; actorId: string }
+    | { scopeId: string; scopeKind: 'TENANT'; tenantId: string; actorId: string }
     | { scopeId: string; scopeKind: 'PLATFORM'; actorId: string }>, value: Invocation) {
   // This binding must come from the caller's current authorized task/context,
   // not from an HTTP payload. It is evidence selection, never authorization.
   owner = structuredClone(owner);
-  const { scopeId, actorId } = owner, platform = 'scopeKind' in owner && owner.scopeKind === 'PLATFORM';
+  const { scopeId, actorId } = owner, scopeKind = 'scopeKind' in owner ? owner.scopeKind : 'WORKSPACE';
   const tenantId = 'tenantId' in owner ? owner.tenantId : null, workspaceId = 'workspaceId' in owner ? owner.workspaceId : null;
-  const scopeKind = platform ? 'PLATFORM' : 'WORKSPACE', expected = invocationBinding(value);
-  if (!expected || !scopeId || !actorId || (platform ? tenantId !== null || workspaceId !== null : !tenantId || !workspaceId)
+  const tenantOnly = scopeKind === 'TENANT';
+  const expected = invocationBinding(value, tenantOnly);
+  if (!expected || !scopeId || !actorId || (scopeKind === 'PLATFORM' ? tenantId !== null || workspaceId !== null
+    : !tenantId || (scopeKind === 'TENANT' ? workspaceId !== null : !workspaceId))
     || expected.scopeKind !== scopeKind || expected.scopeId !== scopeId || expected.tenantId !== tenantId || expected.actorId !== actorId) return null;
   const read = async () => {
     const [invocation, admission, receipt, reservation] = await Promise.all([
       db.aiGatewayInvocation.findFirst({ where: { id: expected.id, scopeId: expected.scopeId,
         taskId: expected.taskId, runId: expected.runId, stepId: expected.stepId, actorId, callId: expected.callId },
-        select: invocationSelect }).then(row => row ? invocationBinding(row) : null),
+        select: invocationSelect }).then(row => row ? invocationBinding(row, tenantOnly) : null),
       db.aiInvocationAdmission.findFirst({ where: { scopeKind, tenantId, workspaceId, actorId, callId: expected.callId },
         select: { id: true, scopeKind: true, tenantId: true, workspaceId: true, actorId: true, callId: true, profileId: true,
           status: true, dispatchId: true, requestHash: true, revokedAt: true, completedAt: true, unknownReason: true } })

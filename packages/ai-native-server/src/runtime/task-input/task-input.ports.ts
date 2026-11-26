@@ -1,5 +1,5 @@
 import type { AiTaskInputAnswerDraft, AiTaskInputContractDraft } from '@rental-os/shared';
-import type { AiTaskRunnerLease } from '@rental-os/platform-server/ai-runtime';
+import type { TaskInputContext, TaskInputReader } from './task-input-context.ports';
 
 export interface AiTaskInputBinding {
   scopeId: string;
@@ -36,11 +36,5 @@ export interface AiTaskInputSource {
   >;
 }
 
-export interface AiTaskInputContext {
-  requestId: string;
-  receiptId: string;
-  answers: readonly AiTaskInputAnswerDraft[];
-}
-export interface AiTaskInputReader {
-  readForStep(lease: AiTaskRunnerLease, registrationRef: string): Promise<readonly AiTaskInputContext[]>;
-}
+export type AiTaskInputContext = TaskInputContext<AiTaskInputAnswerDraft>;
+export type AiTaskInputReader = TaskInputReader<AiTaskInputAnswerDraft>;

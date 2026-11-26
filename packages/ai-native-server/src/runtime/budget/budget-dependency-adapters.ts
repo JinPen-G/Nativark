@@ -1,3 +1,4 @@
+import type { BudgetEvidenceBinding, GatewayDispatchEvidenceSource } from './gateway-dispatch-evidence.ports';
 import type { AiExecutionContext } from '@rental-os/shared';
 import { BudgetError, isOriginalBudgetLifecycleAction, type BudgetAction, type BudgetAuthority, type BudgetGrant, type BudgetPolicyKey, type BudgetRecord, type BudgetUsageEvidence } from './budget.ports';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
@@ -68,12 +69,8 @@ export class ServerBudgetAuthorityAdapter implements BudgetAuthority {
   }
 }
 
-export interface BudgetEvidenceBinding {
-  reservationId: string; requestId: string; runId: string; stepId: string; actionId: string; callId: string;
-  actorId: string; scopeKey: string; sceneCode: string; configRevision: number; configurationHash: string; priceVersion: string;
-}
-export interface PersistedBudgetEvidenceSource {
-  readDispatch(reservationId: string): Promise<BudgetEvidenceBinding & { state: 'not_dispatched' | 'dispatched' | 'unknown'; dispatchToken: string | null }>;
+export type { BudgetEvidenceBinding } from './gateway-dispatch-evidence.ports';
+export interface PersistedBudgetEvidenceSource extends GatewayDispatchEvidenceSource {
   readUsage(reservationId: string, evidenceRef: string, reconcile: boolean): Promise<BudgetUsageEvidence & BudgetEvidenceBinding & { dispatchToken: string }>;
 }
 function verify(record: Readonly<BudgetRecord>, row: BudgetEvidenceBinding) {

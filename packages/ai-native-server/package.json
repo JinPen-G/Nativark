@@ -47,6 +47,9 @@
       "task-steps": [
         "dist/task-steps.d.ts"
       ],
+      "task-measured-effects": [
+        "dist/task-measured-effects.d.ts"
+      ],
       "public-tenant-task-authority": [
         "dist/public-tenant-task-authority.d.ts"
       ],
@@ -124,6 +127,10 @@
     "./task-steps": {
       "types": "./dist/task-steps.d.ts",
       "default": "./dist/task-steps.js"
+    },
+    "./task-measured-effects": {
+      "types": "./dist/task-measured-effects.d.ts",
+      "default": "./dist/task-measured-effects.js"
     },
     "./public-tenant-task-authority": {
       "types": "./dist/public-tenant-task-authority.d.ts",
