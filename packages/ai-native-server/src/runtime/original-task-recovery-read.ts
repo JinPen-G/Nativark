@@ -68,9 +68,11 @@ export function createOriginalTaskRecoveryRead(db: Pick<Prisma.TransactionClient
     const access = await taskAccess(task.taskId);
     const rows = await steps(() => findSteps({ where: { taskId: task.taskId, task: { is: access.where } },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], take: 51, select }));
-    if ((await taskAccess(task.taskId)).bindingKey !== access.bindingKey) throw denied();
     const latest = await readReceipt(ref.inputRef);
-    if (latest.state !== 'observed' || latest.taskId !== task.taskId || latest.revision !== task.revision) throw changed();
+    if (latest.state !== 'observed' || latest.taskId !== task.taskId || latest.runId !== task.runId || latest.revision !== task.revision)
+      throw changed();
+    // The final receipt await can outlast the persisted metadata policy.
+    if ((await taskAccess(task.taskId)).bindingKey !== access.bindingKey) throw denied();
     return finish({ ...metadata, task: latest, steps: rows.slice(0, 50).map(row => ({
       stepId: row.id, runId: row.runId, actionId: row.actionId, revision: row.revision, status: row.status.toLowerCase(),
       effect: row.effect.toLowerCase(), resultAvailable: row.resultRef !== null,
