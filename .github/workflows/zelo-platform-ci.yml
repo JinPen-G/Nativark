@@ -18,7 +18,7 @@ jobs:
       mysql:
         image: mysql:8.4@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb
         env:
-          MYSQL_RANDOM_ROOT_PASSWORD: 'yes'
+          MYSQL_ROOT_PASSWORD: zelo_ci_root_only
           MYSQL_DATABASE: zelo_platform_ci
           MYSQL_USER: zelo_ci
           MYSQL_PASSWORD: zelo_ci_database_only
@@ -100,7 +100,7 @@ jobs:
             body: JSON.stringify({ tenantCode: 'platform', account: 'admin', password: process.env.SEED_PLATFORM_PASSWORD }) });
           assert(typeof session.accessToken === 'string' && session.accessToken.length > 0, '独立公共登录未返回会话');
           const me = await body('/api/auth/session-context', { headers: { Authorization: `Bearer ${session.accessToken}` } });
-          assert.equal(me.tenant.code, 'platform');
+          assert.equal(me.tenant.tenantCode, 'platform');
           assert.equal(me.user.account, 'admin');
           console.log('零 Core：独立 MySQL 迁移、公共后台产物、代理、登录及真实会话通过');
           NODE
