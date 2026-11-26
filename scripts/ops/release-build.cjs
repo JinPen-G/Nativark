@@ -28,7 +28,7 @@ if (!head || !worktree.clean) {
 }
 
 log(`OPS-01B 生成发布构建：${shortHead} @ ${branch}`);
-const built = run("npm", ["run", "build"], { stdio: "inherit" });
+const built = run("npm", ["run", "build:legacy"], { stdio: "inherit" });
 if (built.status !== 0) fail(`发布构建失败（退出码 ${built.status ?? "未知"}）`);
 
 const builds = summarizeBuilds().map(({ files, ...summary }) => summary);

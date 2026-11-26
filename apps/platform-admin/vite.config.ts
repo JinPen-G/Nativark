@@ -7,7 +7,9 @@ import { platformAdminVite } from "../../packages/platform-admin/config/vite";
 import { apiProxyTarget, loadViteEnvironment, publicEnvironmentDefinitions } from "../../config/environment.cjs";
 
 export default defineConfig(({ mode }) => {
-  const env = loadViteEnvironment(mode, fileURLToPath(new URL(".", import.meta.url)), loadEnv, { offline: mode === "ai-offline" });
+  // 根公共入口显式提供代理和公开变量，避免加载旧组合的环境文件。
+  const env = process.env.ZELO_PLATFORM_PROCESS_ENV === "1" ? process.env
+    : loadViteEnvironment(mode, fileURLToPath(new URL(".", import.meta.url)), loadEnv, { offline: mode === "ai-offline" });
   const platform = platformAdminVite();
   return {
     envDir: false,

@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# 固定源码在隔离 Linux 构建层编译。运行镜像只接收 API 及其正式工作区依赖。
+# 旧组合发布在隔离 Linux 层编译，供原 CI 和更新器的 api / web 目标使用。
 FROM node:24.13.0-bookworm-slim AS base
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
@@ -63,7 +63,7 @@ RUN mkdir -p /app/output/.tmp/prisma && \
     if test -s /app/output/.tmp/prisma/audit.log; then cat /app/output/.tmp/prisma/audit.log; exit 1; fi && \
     mkdir -p node_modules/.prisma/client && \
     cp -a /app/output/.tmp/prisma/client/. node_modules/.prisma/client/ && \
-    RENTAL_PRISMA_CLIENT=/app/output/.tmp/prisma/client/index.d.ts npm run build && \
+    RENTAL_PRISMA_CLIENT=/app/output/.tmp/prisma/client/index.d.ts npm run build:legacy && \
     rm -rf /app/output/.tmp/prisma
 
 FROM manifests AS dependencies

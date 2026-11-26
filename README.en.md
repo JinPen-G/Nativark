@@ -205,26 +205,21 @@ npm ci
   ```
   The unified environment loader lives at [config/environment.cjs](config/environment.cjs): process variables take highest precedence, and `RENTAL_ENV_FILE` can point to an external env file (Docker Compose uses `--env-file`). [.env.example](.env.example) sets `RENTAL_DEPLOYMENT_PROFILE=personal-demo` by default (keeping demo helpers); use `development` for regular development, and set both `NODE_ENV=production` and `RENTAL_DEPLOYMENT_PROFILE=production` for production. Web apps consume only explicitly declared public variables (e.g., `VITE_API_BASE_URL=/api` for admin, empty `VITE_API_BASE` for same-origin storefront) and must be rebuilt after changes.
 
-### 3. Option A: Run the Pure Zero-Core Base (Recommended)
+### 3. Option A: Start the Zero-Core Platform from the Repository Root
 
-Explore or build directly on the Zelo base without compiling or seeding any industry Core:
+Prepare an empty, dedicated local MySQL database and a development account with access to it. In the current shell, set `ZELO_PLATFORM_DATABASE_URL` to `mysql://<user>:<password>@127.0.0.1:<port>/zelo_platform_<name>`, and set `AUTH_TOKEN_SECRET` and `SEED_PLATFORM_PASSWORD`. The public root commands pass that URL to the platform host as `DATABASE_URL`. The database name must match `zelo_platform_*` and the URL may include one `connection_limit` option. The root `.env` serves Option B.
 
 ```bash
-# 1. Start local MySQL (skip if you already have an isolated MySQL instance)
-docker compose up -d mysql
-
-# 2. Export DATABASE_URL, AUTH_TOKEN_SECRET, and SEED_PLATFORM_PASSWORD in your shell, then run:
-npm run db:platform:generate
-npm run build:platform-api
-npm run db:platform:migrate:deploy
-npm run db:platform:initialize
-
-# 3. Start the zero-Core API (default :3000) and zero-Core Admin Console (default :5176)
-npm run start -w @rental-os/platform-api
-npm run dev:platform-admin
+npm run db:generate
+npm run build
+npm run db:migrate:deploy
+npm run db:initialize
+npm run dev
 ```
 
-Open `http://127.0.0.1:5176`, sign in with the initialized SaaS account (tenant `platform` / user `admin`), complete the first-login password change, and explore tenant, org, role, subscription, integration, and `/platform/core-packages` management. Run `npm run api:document:platform` to generate the matching offline platform OpenAPI spec. See [Standalone Platform API](apps/platform-api/README.md#默认零-core-的五步) and [Zero-Core Admin](apps/platform-admin/README.md#本地使用) for details.
+`db:generate` prepares `apps/platform-api/generated/client` in the current checkout and reuses a matching Client. `db:migrate:deploy` accepts an empty database or one whose migration receipts and physical tables match the public schema. `db:initialize` explicitly creates the initial `platform / admin` account. For ordinary startup, use `npm run dev`, `start-dev.cmd`, or `./start-dev.ps1` with the migrated database. The Windows launcher checks the API, frontend modules, and proxy. Logs go to `output/runtime/zelo-platform-dev`. Prepare the database separately. With the platform API stopped, `-ApplyMigrations` runs the same guarded migration command.
+
+The public admin listens on `http://127.0.0.1:5176` and the API on port 3091 by default. Set `ZELO_PLATFORM_WEB_PORT` and `ZELO_PLATFORM_API_PORT` to override them. After the initial password change, you can manage tenants, organizations, roles, subscriptions, integrations, and `/platform/core-packages`. The standalone release and direct workspace commands have their own settings. [Standalone Platform API](apps/platform-api/README.md#默认零-core-的五步) · [Zero-Core Admin](apps/platform-admin/README.md#本地使用)
 
 ### 4. Option B: Run a Core Host or the Full Composite Dev Entry
 
@@ -233,10 +228,10 @@ Open `http://127.0.0.1:5176`, sign in with the initialized SaaS account (tenant 
 
 ```bash
 docker compose up -d mysql
-npm run db:generate
+npm run db:legacy:generate
 npm run build -w @rental-os/shared
-npm run db:migrate:deploy
-npm run db:seed
+npm run db:legacy:migrate:deploy
+npm run db:legacy:seed
 ```
 
 Then point the current shell explicitly to the composite Prisma Client (PowerShell shown below; use `export` in Bash) and start API + Admin:
@@ -244,23 +239,21 @@ Then point the current shell explicitly to the composite Prisma Client (PowerShe
 ```powershell
 $env:RENTAL_PRISMA_CLIENT = (Resolve-Path 'node_modules/.prisma/client/index.d.ts').Path
 $env:RENTAL_PRISMA_LEGACY = '1'
-npm run dev
+npm run dev:legacy
 ```
 
-On Windows, you can also double-click `start-dev.cmd` or run `./start-dev.ps1`. The launcher verifies locked dependencies, workspace links, and Prisma Client, starts API and Admin in the background, and checks API health, proxy forwarding, and key page modules (logs are stored under `output/runtime/rental-os-dev`). By default it never installs dependencies, runs migrations/seeds, or kills existing processes on occupied ports.
-
-Pass `./start-dev.ps1 -SkipDocker` when using an existing local database; `-SkipDatabaseChecks` skips only schema/port preflight while still requiring a valid Client and verifying service health. Use `-ApplyMigrations` only when intentionally applying migrations to the active dev database (cannot be combined with `-SkipDatabaseChecks`, and requires stopping this tree's API first). The launcher accepts loopback database hosts only.
+On Windows, use `./start-dev.ps1 -Legacy` or `start-dev.cmd -Legacy`. Logs go to `output/runtime/rental-os-dev`. Add `-SkipDocker` to use an existing local database. Both profiles reuse locked dependencies and skip migrations and initialization by default. `-SkipDatabaseChecks` skips the launcher's schema and port checks. The public API still checks the migration receipts. Stop the selected API before using `-ApplyMigrations` and leave `-SkipDatabaseChecks` off.
 
 | Entrypoint | Default URL | Notes |
 | --- | --- | --- |
 | **Zero-Core Admin Console** (Option A) | `http://127.0.0.1:5176` | Pure platform base console |
 | **Composite Admin Console** (Option B) | `http://127.0.0.1:5175` | Base + built-in Rental Core console |
-| **API Server** | `http://localhost:3000/api` | Backend REST API root |
-| **Health / OpenAPI** | `http://localhost:3000/api/health` · `/api/openapi.json` | Service health and OpenAPI schema |
+| **Platform API health** | `http://127.0.0.1:3091/api/health` | `nativark-platform-api` |
+| **Legacy API health** | `http://127.0.0.1:3000/api/health` | `rental-os-api` |
 
 > When switching back to standalone `platform-api` or `rental-api`, unset `RENTAL_PRISMA_LEGACY` and point `RENTAL_PRISMA_CLIENT` to that host's `generated/client/index.d.ts` (see [Client Selection Script](scripts/build-selected-prisma.cjs)).
 
-Composite API/Web container images are built from the [Production Dockerfile](scripts/ops/deployment/Dockerfile) using an isolated generated Prisma Client so runtime layers receive compiled outputs only; [CI Workflow](.github/workflows/nativark-release.yml) verifies API module loading and Web assets inside a network-isolated container.
+The existing single-repository CI, updater, and OPS builder select the legacy stack through `build:legacy`. The `api` and `web` image targets use their isolated legacy Client and outputs built from the same commit. [Legacy Dockerfile](scripts/ops/deployment/Dockerfile) · [Existing Deployment](scripts/ops/deployment/README.md)
 
 ---
 

@@ -205,26 +205,21 @@ npm ci
   ```
   统一环境加载器位于 [config/environment.cjs](config/environment.cjs)：进程变量优先级最高，支持通过 `RENTAL_ENV_FILE` 指定外部配置文件（Docker Compose 对应使用 `--env-file`）。[.env.example](.env.example) 默认将 `RENTAL_DEPLOYMENT_PROFILE` 设为 `personal-demo`（保留个人演示辅助项），常规开发可设 `development`，生产部署须同时设置 `NODE_ENV=production` 与 `RENTAL_DEPLOYMENT_PROFILE=production`。Web 端只接收显式声明的公开变量（如管理后台 `VITE_API_BASE_URL=/api`、租户网站同源留空 `VITE_API_BASE`），变动后需重新构建前端。
 
-### 3. 方式 A：启动纯净零 Core 公共底座（推荐）
+### 3. 方式 A：从仓库根目录启动零 Core 公共底座
 
-只体验或基于 Zelo 公共底座二次开发，无需构建或初始化任何行业 Core：
+先在本地 MySQL 准备一个独占空库及有权管理该库的开发账号。当前终端设置 `ZELO_PLATFORM_DATABASE_URL`，格式为 `mysql://<账号>:<口令>@127.0.0.1:<端口>/zelo_platform_<名称>`，并设置 `AUTH_TOKEN_SECRET` 和 `SEED_PLATFORM_PASSWORD`。公共根入口从进程取值，向公共宿主传入 `DATABASE_URL`。库名须匹配 `zelo_platform_*`，连接串可附单一 `connection_limit`。根目录 `.env` 用于方式 B。
 
 ```bash
-# 1. 启动本地 MySQL（若已有独立 MySQL 可跳过）
-docker compose up -d mysql
-
-# 2. 在当前终端设置 DATABASE_URL / AUTH_TOKEN_SECRET / SEED_PLATFORM_PASSWORD 后执行：
-npm run db:platform:generate
-npm run build:platform-api
-npm run db:platform:migrate:deploy
-npm run db:platform:initialize
-
-# 3. 分别启动零 Core 公共 API（默认 3000）与公共管理后台（默认 5176）
-npm run start -w @rental-os/platform-api
-npm run dev:platform-admin
+npm run db:generate
+npm run build
+npm run db:migrate:deploy
+npm run db:initialize
+npm run dev
 ```
 
-启动后访问 `http://127.0.0.1:5176`，使用初始化的 SaaS 账号（租户 `platform` / 账号 `admin`）登录并完成首次改密，即可创建租户、管理组织/角色/订阅/集成，并打开 `/platform/core-packages` 体验 Core 发现与包管理。运行 `npm run api:document:platform` 可离线输出同版本公共 OpenAPI 文档。完整步骤见 [独立公共 API](apps/platform-api/README.md#默认零-core-的五步) 与 [无 Core 公共后台](apps/platform-admin/README.md#本地使用)。
+`db:generate` 生成本树的 `apps/platform-api/generated/client`，已有同 schema 的 Client 会复用。`db:migrate:deploy` 仅接受空库或原迁移收据与实际表结构一致的公共库。`db:initialize` 显式创建 `platform / admin` 初始账号。日常运行 `npm run dev`、`start-dev.cmd` 或 `./start-dev.ps1`，使用已迁移的公共库。Windows 启动器检查实际 API、前端模块和代理，日志在 `output/runtime/zelo-platform-dev`。公共库由开发者先准备。显式 `-ApplyMigrations` 在本树公共 API 停止后执行相同的迁移预检。
+
+公共后台默认 `http://127.0.0.1:5176`，公共 API 默认 3091。可分别用 `ZELO_PLATFORM_WEB_PORT`、`ZELO_PLATFORM_API_PORT` 指定端口。登录完成首次改密后，可管理租户、组织、角色、订阅、集成及 `/platform/core-packages`。独立发行和直接 workspace 入口另用各自配置。[独立公共 API](apps/platform-api/README.md#默认零-core-的五步) · [无 Core 公共后台](apps/platform-admin/README.md#本地使用)
 
 ### 4. 方式 B：运行含业务 Core 的宿主或完整组合开发入口
 
@@ -233,10 +228,10 @@ npm run dev:platform-admin
 
 ```bash
 docker compose up -d mysql
-npm run db:generate
+npm run db:legacy:generate
 npm run build -w @rental-os/shared
-npm run db:migrate:deploy
-npm run db:seed
+npm run db:legacy:migrate:deploy
+npm run db:legacy:seed
 ```
 
 随后在当前终端显式指定原组合生成的 Prisma Client（PowerShell 示例，Bash 用 `export`），再启动 API 与管理后台：
@@ -244,23 +239,21 @@ npm run db:seed
 ```powershell
 $env:RENTAL_PRISMA_CLIENT = (Resolve-Path 'node_modules/.prisma/client/index.d.ts').Path
 $env:RENTAL_PRISMA_LEGACY = '1'
-npm run dev
+npm run dev:legacy
 ```
 
-Windows 日常启动也可双击根目录 `start-dev.cmd`，或运行 `./start-dev.ps1`。脚本检查锁定依赖、同树 workspace 链接与 Prisma Client，隐藏启动 API / 管理端，并验证 API、前端代理及关键页面模块；日志位于 `output/runtime/rental-os-dev`。默认不安装依赖、不执行迁移或 Seed，也不终止占用端口的现有进程。
-
-已有本地数据库时使用 `./start-dev.ps1 -SkipDocker`；`-SkipDatabaseChecks` 仅跳过 schema 与数据库端口预检，仍要求有效 Client 并核对服务健康。只有准备执行当前开发库的已有迁移时才使用 `-ApplyMigrations`，此参数不能与 `-SkipDatabaseChecks` 同用，且须先关闭本树 API。该入口只接受本机回环地址的数据库。
+Windows 使用 `./start-dev.ps1 -Legacy` 或 `start-dev.cmd -Legacy`，日志在 `output/runtime/rental-os-dev`。复用原本地数据库时加 `-SkipDocker`。两种启动模式均复用锁定依赖，默认跳过迁移和初始化。`-SkipDatabaseChecks` 仅跳过启动器的 schema 与端口检查，公共 API 仍核对迁移账。`-ApplyMigrations` 不能与之同用，且须先关闭对应本树 API。
 
 | 入口 | 默认地址 | 说明 |
 | --- | --- | --- |
 | **零 Core 公共后台**（方式 A） | `http://127.0.0.1:5176` | 纯底座管理后台 |
 | **组合管理后台**（方式 B） | `http://127.0.0.1:5175` | 底座 + 内置 Rental Core 组合后台 |
-| **API 服务** | `http://localhost:3000/api` | 后端 REST API 根路径 |
-| **健康检查 / OpenAPI** | `http://localhost:3000/api/health` · `/api/openapi.json` | 服务状态与接口文档 |
+| **公共 API 健康检查** | `http://127.0.0.1:3091/api/health` | `nativark-platform-api` |
+| **旧组合 API 健康检查** | `http://127.0.0.1:3000/api/health` | `rental-os-api` |
 
 > 使用独立公共宿主或独立 Rental 宿主时，请清除 `RENTAL_PRISMA_LEGACY` 并指向各自宿主的 `generated/client/index.d.ts`（详参 [Client 选择规则](scripts/build-selected-prisma.cjs)）。
 
-原底座与 Rental 组合的 API / Web 镜像沿[正式 Dockerfile](scripts/ops/deployment/Dockerfile)构建，包含拆分后的工作区依赖。构建使用隔离生成的同一 Prisma Client，运行层只接收正式编译产物；[现有 CI](.github/workflows/nativark-release.yml)在无网络容器中核对 API 模块加载与 Web 文件。
+原单仓 CI、更新器和 OPS 构建继续经 `build:legacy` 固定旧组合。镜像使用隔离生成的原 Client 和同提交产物，供既有 `api` / `web` 目标消费。[旧组合 Dockerfile](scripts/ops/deployment/Dockerfile) · [原部署入口](scripts/ops/deployment/README.md)
 
 ---
 
@@ -370,7 +363,8 @@ Zelo/
 | **Core 包合规与能力查询** | `node packages/core-contracts/dist/check.js ...`、`node packages/core-contracts/dist/capabilities.js ...` | 校验标准包清单/OpenAPI/兼容版本，及索引当前源码能力 |
 | **独立运行包打包** | [scripts/package-platform-host.cjs](scripts/package-platform-host.cjs)（零 Core / 工单）、`npm run package:rental-host`（Rental） | 生成固定 Linux Docker 运行上下文与编译证据包 |
 | **公共接口与后台约定** | `npm run contract:validate`、`npm run test:admin` | 校验 Controller、OpenAPI、DTO、路由权限及后台组件接入约定 |
-| **组合主工程类型与构建** | `npm run lint`、`npm run build` | 按依赖顺序检查并编译兼容组合工程 |
+| **根公共类型与构建** | `npm run lint`、`npm run build` | 检查并编译公共 API 与后台 |
+| **旧组合类型与构建** | `npm run lint:legacy`、`npm run build:legacy` | 按原依赖顺序检查并编译兼容组合 |
 | **底座与内置 Core 测试** | `npm run test:saas-foundation`、`npm run test:saas-subscription`、`npm run test:rental-core`、`npm run test:pricing-strategy` | 覆盖多租户基础能力、订阅框架及内置 Rental Core 行为；固定发行核验见 [verify-rental-distribution.cjs](scripts/verify-rental-distribution.cjs) |
 
 > 涉及真实数据库的集成测试（如 `test:mysql-e2e`、`test:saas-subscription-db`）请在独立测试库中执行，切勿连接生产数据库。

@@ -2,6 +2,8 @@
 
 [hourly-update.py](hourly-update.py) 为现有 `nativark-demo` API、Web 更新流程固定 Git 提交，核对 CI、数据库文件差异、现有镜像与回退收据，并按 [Dockerfile](Dockerfile) 构建指定版本。
 
+此更新器与[单仓发布 CI](../../../.github/workflows/nativark-release.yml) 选用旧组合 `api`、`web` 镜像目标。两者通过该 Dockerfile 的 `npm run build:legacy` 编译同一旧组合，独立于本地公共根启动入口。
+
 源码归档由 `git_source_archive` 的精确白名单生成。构建需要的两份脚本为 [build-selected-prisma.cjs](../../build-selected-prisma.cjs) 和 [miniprogram-shared-types.cjs](../../miniprogram-shared-types.cjs)，它们与 `scripts/ops/deployment` 一并进入归档。
 
 `git_snapshot` 先以 `--depth=1 --no-tags --filter=blob:none` 取得运行版本和候选版本的两个固定提交及树。迁移比较仍沿原路径和 blob 身份进行。CI 与迁移检查通过后，`fetch_source_blobs` 从候选树列出 `SOURCE_PATHS` 中的 blob，通过 stdin 一批取得这些固定对象，再沿原 Git archive 生成构建上下文。元数据拉取限时 180 秒，构建文件批量拉取限时 300 秒，失败继续中止本次发布。
