@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ModelResponseSecretGuard } from './model-response-secret';
-import { ModelGatewayError, type AdapterResult, type ModelResponsePolicy, type ModelUsage, type ProtocolToolCall } from "./model-gateway.ports";
+import { ModelGatewayError, type AdapterResult, type ModelResponsePolicy, type ModelUsage, type ProtocolToolCall } from '@rental-os/platform-server/ai-gateway';
 const tokenCount = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 /** Protocol-owned counters, never an estimate or a price. Do not synthesize
  * missing usage or replace contradicting provider totals with a guessed sum. */
@@ -18,7 +18,7 @@ export function chatCompletionsUsage(value: z.infer<typeof chatCompletionsUsageS
 const fragment = z.object({ index: z.number().int().min(0).max(7), id: z.string().min(1).max(128).optional(), type: z.literal('function').optional(), function: z.object({ name: z.string().max(64).optional(), arguments: z.string().max(16000).optional() }).strict().optional() }).strict();
 const frame = z.object({ choices: z.array(z.object({ index: z.literal(0), delta: z.object({ content: z.string().nullable().optional(), role: z.literal("assistant").optional(), tool_calls: z.array(z.unknown()).max(8).optional(), refusal: z.string().nullable().optional() }), finish_reason: z.string().nullable().optional() })).max(1), usage: chatCompletionsUsageSchema.optional() });
 /** Bounded incremental text/tool decoder; structured values are validated only at termination. */
-export class ChatCompletionsStream {
+export class ChatCompletionsStream<Tool = never> {
   private readonly decoder = new TextDecoder("utf-8", { fatal: true });
   private pending = "";
   private text = "";
@@ -28,14 +28,14 @@ export class ChatCompletionsStream {
   private stopped = false;
   private failed = false;
   private terminalFailure = false;
-  private usage: AdapterResult["usage"];
+  private usage: ModelUsage | undefined;
   private readonly calls = new Map<number, { id?: string; type?: 'function'; name: string; arguments: string }>();
   private readonly callIds = new Set<string>();
   /** Delivery failure does not void already validated terminal counters. Missing
    * or rejected interim/invalid counter payloads never populate this field. */
-  accountingUsage(): AdapterResult['usage'] { return this.usage && structuredClone(this.usage); }
+  accountingUsage(): ModelUsage | undefined { return this.usage && structuredClone(this.usage); }
   private readonly secrets: ModelResponseSecretGuard;
-  constructor(credential: string, private readonly maxBytes = 1_048_576, private readonly policy?: ModelResponsePolicy) {
+  constructor(credential: string, private readonly maxBytes = 1_048_576, private readonly policy?: ModelResponsePolicy<Tool>) {
     if (!credential || !Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 1_048_576) throw new ModelGatewayError("CONFIG_INVALID");
     this.secrets = new ModelResponseSecretGuard(credential);
   }
@@ -115,7 +115,7 @@ export class ChatCompletionsStream {
     const safe = this.text.slice(this.emitted, end); this.emitted = end;
     return safe;
   }
-  finish(): AdapterResult {
+  finish(): AdapterResult<Tool> {
     try {
       this.pending += this.decoder.decode();
       if (this.failed || this.terminalFailure || !this.done || !this.stopped || this.pending.trim()) throw new Error();

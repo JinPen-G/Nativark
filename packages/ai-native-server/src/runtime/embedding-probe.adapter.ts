@@ -3,12 +3,12 @@
  * arbitrary endpoint, retry or vector export. Protocol reference:
  * https://platform.openai.com/docs/api-reference/embeddings/create */
 import { z } from 'zod';
-import type { ModelJsonTransport } from './chat-completions.adapter';
+import type { ModelJsonTransport } from './model-egress.transport';
 import { modelEgressEvidence } from './model-egress.transport';
 import { normalizeTenantModelBaseUrl } from './tenant-model-config.service';
 import { MODEL_REQUEST_BYTES, MODEL_RESPONSE_BYTES } from './model-response-limits';
 import { ModelAdapterError, ModelGatewayError, modelProtocolRequestSchema, modelEmbeddingEvidenceSchema,
-  type AdapterResult, type ModelAdapter, type ModelProtocolInvocation, type ModelUsage } from './model-gateway.ports';
+  type AdapterResult, type ModelAdapter, type ModelProtocolInvocation, type ModelUsage } from '@rental-os/platform-server/ai-gateway';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 const count = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
@@ -23,7 +23,7 @@ export class EmbeddingProbeAdapter implements ModelAdapter {
   constructor(private readonly transport: ModelJsonTransport) {
     if (typeof transport?.post !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
   }
-  async generate(value: ModelProtocolInvocation, credential: string, connection?: Readonly<{ baseUrl: string }>): Promise<AdapterResult> {
+  async generate(value: ModelProtocolInvocation, credential: string, connection?: Readonly<{ baseUrl: string }>): Promise<AdapterResult<never>> {
     if (!value?.signal || typeof value.signal.aborted !== 'boolean'
       || typeof value.signal.addEventListener !== 'function' || typeof value.signal.removeEventListener !== 'function'
       || value.recordUsage !== undefined && typeof value.recordUsage !== 'function'

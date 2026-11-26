@@ -18,6 +18,7 @@
 - `gateway-admission` 提供租户级原调用的 `admission` 和 `dispatch` 参加者。使用同一严格 Task 事务边界和当次 `identities`，新建与领取须先绑定原 Invocation、当前主体、配置及期限；只有原令牌可以记录其终态。实际发送仍需原 Gateway 的路由、单账和末次授权。
 - `public-tenant-gateway` 将已发布文本步骤的原输入、当前路由及预算接入 C03 和原单账。向 `createPublicTenantTaskGateway` 提供同一次已绑定的 `public-tenant-task-authority`、同一个 Task 边界、进程共享容量门、当前预算动作／权益判断、正式连接和注册协议适配器。将 `invocations`、`tools` 和 `dispatchEvidence` 交给原 Runner 测量。`recovery` 只按原调用读账，或按原已证明的未发／用量办理释放与结清。
 - `model-configuration` 的 `createPublicTenantInvocationConfiguration` 读取原租户模式和加密 BYOK 连接，平台托管连接沿 `PrismaPlatformModelConnection`。两者均需当次执行权。管理设置、正常请求路由、场景输入发布、有效能力证明及正式费率／输入上限由现有授权入口提供。
+- `model-adapters` 注册原 Chat Completions、Responses 和 Messages 编解码器及受控 HTTPS，从服务端挂到同一 Gateway。普通文本和流式沿原错误、取消、用量和终态合同。媒体、结构化结果及 Embedding 探测按显式协议选项启用，仍须当前能力证据。业务工具由其 Core 贡献，不从模型文本注册。
 - `public-tenant-task-authority` 用原签名请求、原主体锁和已保存的 Task action policy 提供当前动作与同事务复核。宿主必须固定实际权限、已发布场景和对象来源，注入真实 `assertTaskAction`、`assertReference` 和数据观察，并在请求结束关闭请求绑定。此入口不登记 HTTP 或任何默认场景。
 - `runtime/budget/public-budget-ledger` 供正式 Gateway 接入原预算账本。新预占和派发需要同一个 Task 事务边界；平台预算、费率和额度 HTTP 本身只管理原政策及人工操作收据。
 - `runtime/original-result-reads` 和 `runtime/original-task-recovery-read` 只观察真实原结果；租约、审批、原账和发布字段仍由原权威核对。缺当前授权或原证据时不可用。

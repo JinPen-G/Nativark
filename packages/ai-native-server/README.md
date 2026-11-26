@@ -22,6 +22,8 @@
 
 [公共租户 Gateway](src/public-tenant-gateway.ts) 将已发布文本步骤接到原 C03、路由、容量、准入和财务账。宿主用同一严格 Task 边界、请求权威及当前预算动作策略组装，把 `invocations`、`tools`、`dispatchEvidence` 交给原 Runner 测量。`model-configuration` 提供原配置和加密连接的执行读取。平台计费依赖同一原 Invocation 的有效费率与输入上限，BYOK 只记录原调用和实际用量。`recovery` 按原调用或预留定位，不重发；原未发和原用量各有独立证据与权限。HTTP、场景发布、能力证明生产和价格上限发布由正式宿主接入。
 
+[公共协议注册](src/model-adapters.ts) 与 Rental 共用 [Chat Completions](src/runtime/chat-completions.protocol.ts)、[Responses／Messages](src/runtime/native-messages.protocol.ts) 和[受控 HTTPS](src/runtime/model-egress.transport.ts)。供应商端点和凭据来自原 Vault，协议编码、流解析、取消、错误、原用量及输入摘要保持在适配层。Rental 的[订单解释工具合同](src/runtime/rental-model-protocol-policy.ts)作为服务器贡献接入同一协议，保留原工具名、版本、参数规则及 Native 结果绑定。
+
 现有 Rental 仓储沿 [Task 兼容入口](src/runtime/task-transaction-authority.ts)共享同一个公共边界实例。[部署准入适配器](src/runtime/rental-adapters/task-deployment-admission.ts)保留原 Rental 停新/控制读取，[平台管理适配器](src/runtime/rental-adapters/platform-management-transaction.ts)保留所选 Rental 宿主的原主体与 Tenant 父锁。只有这些显式适配器识别旧宿主兼容选择；所选请求失活后继续拒绝。
 
 ## 公共 Task 持久层

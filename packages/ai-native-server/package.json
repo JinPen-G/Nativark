@@ -71,6 +71,9 @@
       "model-configuration": [
         "dist/model-configuration.d.ts"
       ],
+      "model-adapters": [
+        "dist/model-adapters.d.ts"
+      ],
       "public-platform-model-settings": [
         "dist/public-platform-model-settings.d.ts"
       ],
@@ -165,6 +168,10 @@
     "./model-configuration": {
       "types": "./dist/model-configuration.d.ts",
       "default": "./dist/model-configuration.js"
+    },
+    "./model-adapters": {
+      "types": "./dist/model-adapters.d.ts",
+      "default": "./dist/model-adapters.js"
     },
     "./public-platform-model-settings": {
       "types": "./dist/public-platform-model-settings.d.ts",

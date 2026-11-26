@@ -18,6 +18,7 @@
     "src/tenant-configuration-transactions.ts",
     "src/execution-context-validation.ts",
     "src/model-configuration.ts",
+    "src/model-adapters.ts",
     "src/public-platform-model-settings.ts",
     "src/public-tenant-model-settings.ts",
     "src/public-platform-finance.ts",

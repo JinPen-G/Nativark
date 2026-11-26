@@ -1,8 +1,7 @@
 /** Private native continuation encoding shared by the existing three codecs.
  * Only the original Task/Core resolver supplies this material. This layer checks
  * protocol consistency; it grants no authority, dispatch, retry or token count. */
-import { ModelGatewayError, type ModelProtocolRequest } from './model-gateway.ports';
-import { resolvedNativeToolResultSchema, type ResolvedNativeToolResult } from './model-input/native-tool-result.ports';
+import { ModelGatewayError, resolvedNativeToolResultSchema, type ModelProtocolRequest, type ResolvedNativeToolResult } from '@rental-os/platform-server/ai-gateway';
 import { MODEL_REQUEST_BYTES } from './model-response-limits';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 

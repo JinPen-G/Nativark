@@ -8,13 +8,14 @@
  * serialization is not certified here and is refused rather than silently
  * omitting the schema sent by the generation adapter. */
 import { z } from 'zod';
-import { ChatProtocolPolicy, type ModelJsonTransport } from '../chat-completions.adapter';
+import type { ModelProtocolPolicy } from '../model-protocol-policy';
+import type { ModelJsonTransport } from '../model-egress.transport';
 import { normalizeTenantModelBaseUrl } from '../tenant-model-config.service';
-import { ModelGatewayError, modelProtocolRequestSchema, type ModelProtocolRequest } from '../model-gateway.ports';
+import { ModelGatewayError, modelProtocolRequestSchema, resolvedNativeToolResultSchema, type ResolvedNativeToolResult,
+  type ModelProtocolRequest } from '@rental-os/platform-server/ai-gateway';
 import { MODEL_REQUEST_BYTES } from '../model-response-limits';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { encodeNativeToolResultBody, nativeMessagesCountBody } from '../native-tool-result.encoding';
-import { resolvedNativeToolResultSchema, type ResolvedNativeToolResult } from '../model-input/native-tool-result.ports';
 
 export type CountTokensProtocol = 'anthropic_messages';
 export interface CountTokensSupport {
@@ -57,7 +58,7 @@ export interface CountTokensMaterial {
  * the original dispatch will send. `features` must be the invocation's
  * declared features; media parts and unregistered structured-output schemas
  * are rejected here, before any admission or egress. */
-export function prepareCountTokensMaterial(input: Readonly<ModelProtocolRequest>, policy: ChatProtocolPolicy): CountTokensMaterial {
+export function prepareCountTokensMaterial(input: Readonly<ModelProtocolRequest>, policy: ModelProtocolPolicy<unknown>): CountTokensMaterial {
   const parsed = modelProtocolRequestSchema.safeParse(structuredClone(input));
   if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
   const request = parsed.data;
@@ -98,7 +99,7 @@ export function prepareCountTokensMaterial(input: Readonly<ModelProtocolRequest>
 /** Count the same private original call/result blocks sent by Messages native
  * generation. Only the original resolver supplies value; no caller native IDs,
  * task authorization, dispatch or additional request is created by this codec. */
-export function prepareNativeCountTokensMaterial(input: Readonly<ModelProtocolRequest>, policy: ChatProtocolPolicy,
+export function prepareNativeCountTokensMaterial(input: Readonly<ModelProtocolRequest>, policy: ModelProtocolPolicy<unknown>,
   value: ResolvedNativeToolResult): CountTokensMaterial {
   if (!policy.nativeToolResults) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
   const parsed = resolvedNativeToolResultSchema.safeParse(structuredClone(value));
