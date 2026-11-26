@@ -388,6 +388,22 @@ Rental 已提供自己的完整业务 schema、关系贡献和 MySQL 数据计�
 
 `lockVersion: 2` 目前只供新装材料准备。旧运行与升级入口会拒绝这类锁；存量库继续使用 original lock 和原账，不能把旧执行记录替换成新装初始迁移。宿主仍须完成自己的部署与物理核验。
 
+### 核对旧 Rental 混合库
+
+从与原镜像同版的备份恢复隔离库后，用[旧库预检](../../scripts/check-rental-legacy-migrations.cjs)识别已知的 260 或 263 条原迁移账。使用能够观察完整结构元数据的连接，采集期间停止结构变更。命令只读迁移账及 MySQL 结构；历史 B02 来源只读取数量。
+
+```sh
+set -o pipefail
+node scripts/check-rental-legacy-migrations.cjs --sql \
+  | mysql --defaults-file="$readonlyClientConfig" --database="$restoredDb" \
+      --batch --raw --skip-column-names --default-character-set=utf8mb4 \
+  | node scripts/check-rental-legacy-migrations.cjs --check
+```
+
+`forward_plan` 仅列出固定旧组合的三条待执行原 SQL；`mixed_current` 表示完整 263 条原账和物理结构吻合。两种结果均为预检（退出码 `0`），不批准升级，也不允许换成 v2。`1` 表示账、已知恢复记录或结构不吻合，`2` 表示读取或输入错误。预检使用 Linux MySQL 8.4.11 的固定结构参照；其他补丁版本产生结构指纹差异时须核清差异，不能用当前结构替换参照来通过预检。实际切换还要用固定 API/Web 镜像和同版备份验证业务读写及回退，原账继续保留。
+
+### 通用升级预检
+
 底座默认保持既有公开 API 兼容。废弃或移除旧 API 时，发行说明须写清兼容范围、废弃说明和迁移方法，兼容承诺以声明范围为准。当前装配按 Core 的 `compatibility.platform`、`compatibility.contract`、`runtime.node` 和必需能力版本预检，区间采用 `minInclusive` / `maxExclusive`。[组合预检](src/compatibility.ts) · [版本范围](src/version.ts)
 
 先构建本包，再用实际发行元数据和迁移账快照执行只读预检。
