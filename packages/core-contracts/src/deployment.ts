@@ -1,10 +1,12 @@
 /** 将已核定的平台迁移和 Core 包组合为候选目录。只准备新文件，不连接库或执行 DDL。 */
 import { createHash } from "node:crypto";
+import { z } from "zod";
 import { closeSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, rmdirSync, unlinkSync, writeFileSync,
   type Stats } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { CoreDeploymentLockSchema, type CoreDeploymentLock } from "./update";
-import { CoreIdSchema, CoreMigrationSchema, CorePackagePathSchema } from "./manifest";
+import { CoreIdSchema, CoreMigrationSchema, CorePackagePathSchema, CoreSourceSchema } from "./manifest";
+import { CoreVersionRangeSchema, isCoreVersionSupported } from "./version";
 import { inspectCorePackageFiles } from "./package";
 import { checkCoreCombination } from "./compatibility";
 import { isDeepStrictEqual } from "node:util";
@@ -23,6 +25,34 @@ export function platformCapabilityPrismaMigrationName(capabilityId: string, migr
   CoreMigrationSchema.shape.id.parse(migrationId);
   if (!migrationId.startsWith(`${capabilityId}.`)) throw new Error("能力迁移未使用所属命名空间");
   return `platform-capability.${migrationId}`;
+}
+
+const migrationRequirement = z.object({
+  version: CoreVersionRangeSchema,
+  migration: CoreMigrationSchema.pick({ id: true, sha256: true })
+}).strict();
+const postCapabilityCoreMigration = z.object({
+  coreId: CoreIdSchema,
+  migration: CoreMigrationSchema.extend({ source: CoreSourceSchema }).strict(),
+  prerequisites: z.object({
+    core: migrationRequirement,
+    capability: migrationRequirement.extend({ id: CoreIdSchema }).strict()
+  }).strict()
+}).strict();
+
+/** Only fresh-install preparation understands the additional phase. Old runtime and update readers reject this lock. */
+export const CorePhasedMigrationLockSchema = z.object({
+  lockVersion: z.literal(2),
+  base: CoreDeploymentLockSchema,
+  postCapability: z.array(postCapabilityCoreMigration).min(1).max(100)
+}).strict();
+export type CorePostCapabilityMigration = z.infer<typeof postCapabilityCoreMigration>;
+
+export function corePostCapabilityPrismaMigrationName(coreId: string, migrationId: string): string {
+  CoreIdSchema.parse(coreId);
+  CoreMigrationSchema.shape.id.parse(migrationId);
+  if (!migrationId.startsWith(`${coreId}.`)) throw new Error("后置迁移未使用所属 Core 命名空间");
+  return `post-capability.${coreId}.${migrationId}`;
 }
 
 // 加上目录分隔点比较，保持与最终 Prisma 目录一致，例如 example-tickets 在 example 之前。
@@ -82,6 +112,46 @@ export function createCoreMigrationDeployment(input: {
   files.set("migrations/migration_lock.toml", Buffer.from('provider = "mysql"\n'));
   files.set("core.deployment.lock.json", Buffer.from(JSON.stringify(lock, null, 2) + "\n"));
   return files;
+}
+
+/** Prepare exact Core-owned SQL after all locked base migrations, without changing any historical ledger name. */
+export function createCorePhasedMigrationDeployment(input: Parameters<typeof createCoreMigrationDeployment>[0] & {
+  postCapability: readonly { release: CorePostCapabilityMigration; sql: Uint8Array }[];
+}) {
+  const lock = CorePhasedMigrationLockSchema.parse({ lockVersion: 2, base: input.lock,
+    postCapability: input.postCapability.map(entry => entry.release) });
+  const files = new Map(createCoreMigrationDeployment({ ...input, lock: lock.base }));
+  const coreData = new Map(lock.base.cores.map(({ manifest }) => [manifest.id, manifest.data]));
+  const capabilityData = new Map((lock.base.dataCapabilities ?? []).map(release => [release.id, release]));
+  const migrationsByCore = new Map<string, Set<string>>();
+  const matches = (data: CoreDeploymentLock["platform"]["data"],
+    version: string, requirement: z.infer<typeof migrationRequirement>) => isCoreVersionSupported(version, requirement.version)
+      && data.migrations.some(entry => entry.id === requirement.migration.id && entry.sha256 === requirement.migration.sha256);
+  let previous = [...files.keys()].filter(file => file.endsWith("/migration.sql")).at(-1) ?? "";
+  const migrations = lock.postCapability.map((release, index) => {
+    const { coreId, migration, prerequisites } = release;
+    const core = coreData.get(coreId), capability = capabilityData.get(prerequisites.capability.id);
+    if (!core || !capability || !matches(core, core.version, prerequisites.core)
+      || !matches(capability.data, capability.version, prerequisites.capability))
+      throw new Error(`后置迁移缺少已锁定的 Core 或能力前置：${migration.id}`);
+    const usedFiles = migrationsByCore.get(coreId) ?? new Set(core.migrations.map(entry => entry.file));
+    if (!migration.file.endsWith(".sql") || usedFiles.has(migration.file) || core.migrations.some(entry => entry.id === migration.id))
+      throw new Error(`后置迁移不能替换历史迁移：${migration.id}`);
+    const migrationName = corePostCapabilityPrismaMigrationName(coreId, migration.id);
+    const file = `migrations/${migrationName}/migration.sql`, sql = input.postCapability[index].sql;
+    if (file <= previous || files.has(file)) throw new Error(`后置迁移与 Prisma 目录实际顺序不一致：${migrationName}`);
+    if (!(sql instanceof Uint8Array) || !sql.byteLength || sql.byteLength > 32 * 1024 * 1024
+      || createHash("sha256").update(sql).digest("hex") !== migration.sha256)
+      throw new Error(`后置迁移原文与锁定摘要不一致：${migration.id}`);
+    files.set(file, Uint8Array.from(sql));
+    usedFiles.add(migration.file);
+    migrationsByCore.set(coreId, usedFiles);
+    previous = file;
+    return { owner: coreId, source: migration.source, originalPath: migration.file, id: migration.id, file,
+      ledger: { table: "_prisma_migrations" as const, migrationName, checksum: migration.sha256 } };
+  });
+  files.set("core.deployment.lock.json", Buffer.from(JSON.stringify(lock, null, 2) + "\n"));
+  return { lock, files, postCapability: migrations };
 }
 
 /** 独占创建候选路径，最后写锁。失败时只清理仍属本次且内容未被接手的文件和空目录。 */
