@@ -1,5 +1,5 @@
 import type { RentalFulfillmentMode, RentalOrderExtensionRequest, RENTAL_PRICING_UNIT_CODES } from './core';
-import { AI_TASK_STATUSES_DRAFT, AI_STEP_STATUSES_DRAFT, type AiTaskStatusDraft, type AiStepStateDraft } from './ai-task-draft';
+import { AI_TASK_STATUSES_DRAFT, AI_STEP_STATUSES_DRAFT, type AiTaskStatusDraft } from './ai-task-draft';
 import type { AiUsageQuantityDraft, AiUsageRecordDraft } from './ai-usage-draft';
 import type { AiWorkspaceScope } from './ai-native';
 import type { AI_TASK_DRAFT_VERSION } from './ai-task-draft';
@@ -17,7 +17,9 @@ export type AiSceneModelQuoteConfirmDraft = AiSceneModelAnswerQueryDraft & {
   selectionRevision: string; inputFingerprint: string; confirmQuote: true;
 };
 
-export const AI_SCENE_REQUEST_DRAFT_VERSION = 'ain-scene-request-draft-1' as const;
+import { AI_SCENE_REQUEST_DRAFT_VERSION, type AiSceneRequestReadDraft, type AiSceneTaskReceiptDraft, type AiSceneRequestRecoveryDraft } from '@rental-os/platform-contracts/ai-original-result';
+export { AI_SCENE_REQUEST_DRAFT_VERSION, type AiSceneRequestReadDraft, type AiSceneTaskReceiptDraft, type AiSceneRequestRecoveryDraft,
+  type AiSceneRecoveryStepDraft } from '@rental-os/platform-contracts/ai-original-result';
 export const AI_SCENE_REQUEST_MAX_BYTES = 32768;
 export const AI_SCENE_CODES = ['order_explanation', 'opening_diagnosis', 'quote_clarification'] as const;
 export type AiSceneCode = typeof AI_SCENE_CODES[number];
@@ -86,10 +88,6 @@ export type AiSceneRequestCreateDraft = AiSceneRequestBody & {
   requestKey: string;
 };
 export type AiSceneRequestReissueDraft = AiSceneRequestCreateDraft & { previousInputRef: string };
-export interface AiSceneRequestReadDraft {
-  draftVersion: typeof AI_SCENE_REQUEST_DRAFT_VERSION;
-  inputRef: string;
-}
 /** Explicit current preview for the order selected by the stored original
  * next-steps request. No caller order/actor/scope, amount or execution grant. */
 export interface AiSceneOrderExtensionPreviewDraft extends AiSceneRequestReadDraft {
@@ -250,20 +248,6 @@ export interface AiOriginalOpeningReadSourceDraft {
     execution: 'not_invoked';
   };
 }
-export type AiSceneTaskReceiptDraft =
-  | { state: 'not_observed'; retryable: false }
-  | { state: 'observed'; taskId: string; runId: string; status: AiTaskStatusDraft; revision: number;
-      plan: 'stored' | 'not_observed'; resultAvailable: boolean; execution: 'not_inferred_from_metadata' };
-export interface AiSceneRecoveryStepDraft {
-  stepId: string;
-  runId: string;
-  actionId: string;
-  revision: number;
-  status: AiStepStateDraft['outcome']['status'];
-  effect: AiStepStateDraft['outcome']['effect'];
-  resultAvailable: boolean;
-  nextAction: 'reconcile_original_action' | 'read_authorized_result' | 'runner_owned';
-}
 export interface AiSceneCreatedTaskDraft { taskId: string; runId: string; status: AiTaskStatusDraft; revision: number; replayed: boolean }
 export type AiSceneRequestCreationResponseDraft = { receipt: AiSceneRequestReceiptDraft; model: 'not_called' } & (
   | { stage: 'existing_request'; task: AiSceneTaskReceiptDraft }
@@ -274,10 +258,6 @@ export type AiSceneRequestCreationResponseDraft = { receipt: AiSceneRequestRecei
 export interface AiSceneRequestReadResponseDraft { receipt: AiSceneRequestReceiptDraft; request: AiSceneRequestBody }
 export type AiSceneRequestReconcileResponseDraft = { state: 'not_observed'; retryable: false }
   | { state: 'observed'; receipt: AiSceneRequestReceiptDraft; task: AiSceneTaskReceiptDraft };
-export type AiSceneRequestRecoveryDraft =
-  | { task: Extract<AiSceneTaskReceiptDraft, { state: 'not_observed' }>; nextAction: 'reconcile_request_or_explicit_create_task'; automaticExecution: false }
-  | { task: Extract<AiSceneTaskReceiptDraft, { state: 'observed' }>; steps: AiSceneRecoveryStepDraft[]; hasMore: boolean; automaticExecution: false;
-      nextAction: 'host_plan_handoff' | 'existing_runner_recovery'; observedResults: 'preserved_even_if_task_cancelled'; snapshot: 'bounded_sequential_read' };
 function sceneMetadataClosed(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
     && Object.keys(value).length === keys.length && Object.keys(value).every(key => keys.includes(key));

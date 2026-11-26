@@ -10,7 +10,10 @@ import { AI_WORKBENCH_MODEL_CONTROL_SCHEMAS } from './ai-workbench-model-control
 import { leafClosed as object, leafEnum as choice, leafId as id, leafInt as integer,
   leafList as list, leafRef as ref, leafText as text, leafTime as time, type AiLeafSchemaDraft } from './ai-gateway-draft-schemas';
 
-export const AI_CONVERSATION_DRAFT_VERSION = 'ain-conversation-draft-2' as const;
+import { AI_CONVERSATION_DRAFT_VERSION, AI_ORIGINAL_RESULT_LOCATOR_SCHEMAS, type AiConversationReferenceDraft,
+  type AiConversationTurnReferenceDraft } from '@rental-os/platform-contracts/ai-original-result';
+export { AI_CONVERSATION_DRAFT_VERSION, type AiConversationReferenceDraft, type AiConversationTurnReferenceDraft,
+  type AiConversationModelResultReadDraft } from '@rental-os/platform-contracts/ai-original-result';
 interface Version { draftVersion: typeof AI_CONVERSATION_DRAFT_VERSION }
 export const AI_CONVERSATION_UNSTARTED_DRAFT_VERSION = 'ain-conversation-unstarted-draft-1' as const;
 export interface AiConversationUnstartedCloseDraft {
@@ -23,7 +26,6 @@ export interface AiConversationUnstartedReceiptDraft {
   creation: 'permanently_closed'; task: 'not_created'; taskCancellation: 'not_requested'; businessRecords: 'not_modified';
 }
 export interface AiConversationCreateDraft extends Version { operationKey: string; capabilityCode: AiSceneCode }
-export interface AiConversationReferenceDraft extends Version { conversationId: string }
 export interface AiConversationReadDraft extends AiConversationReferenceDraft { includeClosedTurn?: true }
 export interface AiConversationOperationRequestDraft extends Version { operationKey: string }
 export interface AiConversationTurnListDraft extends AiConversationReferenceDraft { limit: number; beforeId?: string }
@@ -36,10 +38,6 @@ export interface AiConversationListDraft extends Version { status: 'active' | 'a
 export interface AiConversationTurnAdmissionDraft extends AiConversationReferenceDraft {
   expectedRevision: number; admissionKey: string; request: AiSceneRequestBody;
 }
-export interface AiConversationTurnReferenceDraft extends AiConversationReferenceDraft { admissionKey: string }
-/** A result ID is only a lookup candidate. The original result reader must bind
- * it to this admitted request and task; no caller supplies a model or reader. */
-export interface AiConversationModelResultReadDraft extends AiConversationTurnReferenceDraft { resultId: string }
 export type AiConversationModelResultResponseDraft = AiConversationTurnReferenceDraft & {
   turn: AiConversationTurnObservationDraft; execution: 'read_only_no_start_no_dispatch';
 } & (
@@ -139,8 +137,8 @@ export const AI_CONVERSATION_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
   AiConversationMutationDraft: object(operation),
   AiConversationListDraft: object({ ...version, status: choice('active', 'archived'), limit: integer(1, 20), beforeId: id(), capabilityCode: capability }, ['draftVersion', 'status', 'limit']),
   AiConversationTurnAdmissionDraft: object({ ...reference, expectedRevision: revision, admissionKey: { ...id(), maxLength: 128 }, request: ref('AiSceneRequestBodyDraft') }),
-  AiConversationTurnReferenceDraft: object({ ...reference, admissionKey: key }),
-  AiConversationModelResultReadDraft: object({ ...reference, admissionKey: key, resultId: id() }),
+  AiConversationTurnReferenceDraft: AI_ORIGINAL_RESULT_LOCATOR_SCHEMAS.AiConversationTurnReferenceDraft,
+  AiConversationModelResultReadDraft: AI_ORIGINAL_RESULT_LOCATOR_SCHEMAS.AiConversationModelResultReadDraft,
   AiConversationTaskResultDraft: { oneOf: [
     object({ ...reference, admissionKey: key, turn: ref('AiConversationTurnObservationDraft'), status: choice('observed'),
       result: ref('AiTaskModelObservationDraft'), lineage: object({ kind: choice('original_run', 'human_answer', 'model_control'),

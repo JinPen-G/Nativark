@@ -73,7 +73,7 @@ export function composeAiConversationRequests(dependencies: Omit<AiOriginalScene
             if (!active) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
             if (!observations) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
             return observations.readModelResult({ headers: { authorization: header } }, command);
-          } })
+          } }, signal)
           : await app[action](supplied);
         return conversationResponse(action, result, command);
       };

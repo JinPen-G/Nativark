@@ -24,6 +24,7 @@ import { aiTaskHasUnresolvedEffects } from './task-unresolved-effects';
 import { validateAiSceneModelObservation } from './scenes/scene-observation-contracts';
 import { originalRequestReferenceSchema, freezeOriginalInput } from './task-request/original-request.validation';
 import { beginConversationTransaction } from './conversation-transactions';
+import { createOriginalConversationResultRead } from './original-result-reads';
 
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const conflict = () => new AiTaskRepositoryError('AI_REVISION_CONFLICT');
@@ -391,20 +392,16 @@ export class AiConversationRepository {
   }
   /** Fixed existing artifact reader supplied by server composition. Recheck the
    * original admission after it returns; no execution or reader name from wire. */
-  async modelResult(value: unknown, reader: { readModelResult(value: unknown): Promise<unknown> }): Promise<AiConversationModelResultResponseDraft> {
+  async modelResult(value: unknown, reader: { readModelResult(value: unknown): Promise<unknown> },
+    signal = new AbortController().signal): Promise<AiConversationModelResultResponseDraft> {
     const command = conversationCommand('AiConversationModelResultReadDraft', value);
-    const reference = { draftVersion: command.draftVersion, conversationId: command.conversationId, admissionKey: command.admissionKey };
-    const before = await this.readAdmission(reference), turn = before.result;
-    if (!turn?.task) throw unavailable();
-    if (turn.material === 'erased') return { ...reference, turn, status: 'material_erased', result: null,
-      nextAction: 'original_task_center', execution: 'read_only_no_start_no_dispatch' };
-    const result = validateAiSceneModelObservation(await reader.readModelResult({ original: structuredClone(turn.original), resultId: command.resultId }));
-    if (result.original.inputRef !== turn.original.inputRef || result.original.requestKey !== turn.originalRequestKey
-      || result.sceneCode !== turn.capabilityCode || result.original.sceneVersion !== turn.capabilityVersion
-      || result.taskId !== turn.task.taskId || result.resultId !== command.resultId) throw unavailable();
-    const after = await this.readAdmission(reference);
-    if (requestFingerprint(after) !== requestFingerprint(before)) throw conflict();
-    return { ...reference, turn, status: 'observed', result, execution: 'read_only_no_start_no_dispatch' };
+    if (signal.aborted) throw denied();
+    const session = await this.current();
+    const read = createOriginalConversationResultRead({
+      assertCurrent: () => this.check(session), readAdmission: reference => this.readAdmission(reference),
+      readModelResult: async reference => validateAiSceneModelObservation(await reader.readModelResult(reference))
+    });
+    return read(command, signal);
   }
   async admit(value: unknown): Promise<AiConversationAdmissionResponseDraft> {
     const command = conversationCommand('AiConversationTurnAdmissionDraft', value), session = await this.current();

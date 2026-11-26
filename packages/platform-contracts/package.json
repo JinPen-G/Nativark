@@ -67,6 +67,10 @@
       "types": "./dist/ai-gateway.d.ts",
       "default": "./dist/ai-gateway.js"
     },
+    "./ai-original-result": {
+      "types": "./dist/ai-original-result.d.ts",
+      "default": "./dist/ai-original-result.js"
+    },
     "./ai-usage": {
       "types": "./dist/ai-usage.d.ts",
       "default": "./dist/ai-usage.js"
@@ -123,6 +127,9 @@
       ],
       "ai-gateway": [
         "dist/ai-gateway.d.ts"
+      ],
+      "ai-original-result": [
+        "dist/ai-original-result.d.ts"
       ],
       "ai-usage": [
         "dist/ai-usage.d.ts"

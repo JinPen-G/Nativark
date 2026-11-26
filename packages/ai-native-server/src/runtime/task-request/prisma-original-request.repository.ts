@@ -189,6 +189,22 @@ export class PrismaOriginalRequestRepository implements AiTaskCreationAuthority 
     const result = await this.load(parsed.data.inputRef, false, true, tx);
     return freezeOriginalInput({ receipt: result.receipt, request: result.body, context: result.context });
   }
+  /** Same Native and original codec for historical metadata, never create/resume.
+   * The caller owns its current grant/resource fences and the acknowledged read. */
+  bindHistoricalTaskReadsIn(native: Prisma.TransactionClient, authority: AiOriginalRequestNativeAuthority, signal: AbortSignal,
+    observeTask?: NonNullable<AiOriginalRequestAuthority['observeTask']>) {
+    if (!native || '$transaction' in native || typeof authority?.bindIn !== 'function' || signal.aborted) throw denied();
+    const bound = authority.bindIn(native, signal), db = bindAiBodyStorageTransaction(this.db, native);
+    const live = () => { if (signal.aborted) throw denied(); bound.assertCurrent(); };
+    const reader = new PrismaOriginalRequestRepository(this.db, {
+      current: () => bound.current(), read: (body, version) => bound.read(body, version),
+      create: async () => { throw denied(); },
+      ...(observeTask ? { observeTask } : {})
+    }, this.clock);
+    const read = async <T>(work: () => Promise<T>) => { live(); const value = await work(); live(); return value; };
+    return Object.freeze({ assertCurrent: live, readTaskReceipt: (inputRef: string) => read(() => reader.readTaskReceipt(inputRef, db)),
+      readTaskLocator: (value: unknown) => read(() => reader.readTaskLocator(value, db)) });
+  }
   /** Retained business locator only. An erasure receipt attests deletion, not
    * the missing plaintext. Current task policy and downstream Core/quote guards
    * still authorize each read; this never returns scene input or a create grant. */
