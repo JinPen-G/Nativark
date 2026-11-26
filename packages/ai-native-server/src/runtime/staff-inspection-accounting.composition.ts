@@ -6,6 +6,7 @@ import type { PrismaClient } from '@prisma/client';
 import { AI_TASK_DRAFT_VERSION, aiStaffTaskAccountingRequestSchema, aiTaskAccountingObservationSchema } from '@rental-os/shared';
 import { z } from 'zod';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
+import { captureRentalInternalAuthority } from '@rental-os/rental-core/application-internal-authority';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError, aiTaskAccessFromContext } from './ai-task.repository';
 import { composePersistedTaskAuthorization, type PersistedTaskAuthorizationDependencies } from './task-authorization.composition';
@@ -37,7 +38,8 @@ export function composeStaffInspectionAccounting(input: Dependencies, scenes: re
     } };
     signal?.addEventListener('abort', close, { once: true });
     try {
-      return await waitForTaskApplicationDependency(() => runWithRequestIdentity({}, async () => {
+      const selectedRequest = captureRentalInternalAuthority();
+      const consume = async () => {
         const dependencies = { ...input, credentials, clock }, authorization = composePersistedTaskAuthorization(dependencies);
         const current = async () => {
           assertActive();
@@ -88,7 +90,8 @@ export function composeStaffInspectionAccounting(input: Dependencies, scenes: re
         return freezeOriginalInput(aiTaskAccountingObservationSchema.parse({ contractVersion: AI_TASK_DRAFT_VERSION,
           callId: command.callId, state: account ? 'observed' : 'unknown', account, meaning: 'ai_invocation_not_business_payment',
           observedAt: clock().toISOString(), execution: 'not_authorized_by_accounting', retryable: false, nextAction: 'read_original_accounting' }));
-      }), reconcile, signal);
+      };
+      return await waitForTaskApplicationDependency(() => selectedRequest ? consume() : runWithRequestIdentity({}, consume), reconcile, signal);
     } finally { signal?.removeEventListener('abort', close); close(); }
   };
   return Object.freeze({

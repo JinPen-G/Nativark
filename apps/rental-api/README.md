@@ -14,6 +14,7 @@
 | [ai-composition.ts](src/ai-composition.ts)、[ai-inspection-transactions.ts](src/ai-inspection-transactions.ts) | 原 AI 工厂、知识权限、检查事务和生命周期参加者；复用当前 Auth、Guard、Core 和业务实例，构造阶段不执行外部调用。 |
 | [ai-http-policy.ts](src/ai-http-policy.ts)、[ai-openapi.ts](src/ai-openapi.ts) | 对实际 AI 处理器逐条登记读取/审计/原事务边界；发布相同挂载范围和原成功状态，不以 provider 存在开放路由。 |
 | [ai-client-http.ts](src/ai-client-http.ts)、[ai-client-request.ts](src/ai-client-request.ts) | 网站和小程序各五十一个原客户操作的明确挂载，覆盖目标与候选、报价参数准备/明确确认/原收据、Booking草稿/选择/页面提交、订单导航、资料、Task、模型及取消收尾；仅接受同一 Guard/客户准入绑定的实际请求，保留原方法、收据、响应状态和中止语义。 |
+| [ai-inspection-http.ts](src/ai-inspection-http.ts) | 逐条挂载员工原检查的二十二个操作，复用原 Controller；识别 Task 的十四个操作及两类账务操作由原 Controller 承接，读取、保存候选、人工确认与履约提交分别核权。 |
 | [database.ts](src/database.ts) | 当前公共 41 模型与 Rental 121 模型组成宿主 Client，公共数据库令牌使用同一连接池；生成物仅归本宿主。唯一请求入口将公共及 Core 适配使用的官方 JSON 空值映射为所选 Client 的同义单例，不另开连接或改动调用方事务。 |
 | [http-application-views.ts](src/http-application-views.ts) | 向 HTTP 注入原服务方法，隐藏 Nest 生命周期钩子，避免同一业务实例被多个模块重复启动。 |
 | [lifecycle.ts](src/lifecycle.ts) | 唯一初始化、预热、配货/到期/文件/限流作业与数据库退出负责人；停止新请求和作业，等待原 HTTP 处理器及四作业参加者完成，再断开连接，排空失败不提前断库。 |
@@ -119,7 +120,9 @@ npm run lint:rental-api:mcp
 
 普通宿主使用无 AI 的 162 模型；客户检查出箱用 `null` 表达未选择，`undefined` 或残缺参加者会拒绝。AI 启用入口使用 248 模型，通过原实际工厂组合失败出箱、同事务事件、通知草稿、知识读取和原请求服务。公共数据库视图限定当前 41 模型；两个 Client 的运行时模型图互不覆盖，正文加密沿各自实际模型关系处理嵌套数据。
 
-启用宿主的 HTTP 清单见 [AI 处理器政策](src/ai-http-policy.ts)：运营/员工场景目录、原输入与任务创建、原任务恢复、报价澄清、开业诊断、订单解释、任务中心、场景计划与任务动作策略、租户模型配置及明确列出的手动检查操作。三个执行入口分别消费原专用请求工厂与持久 runner，不同时挂载旧的宽泛模型执行器。每个路由仍通过原 Auth/Guard，后续原场景、owner、对象、能力、任务策略和模型配置分别核定。场景目录只公布确实挂载的请求工厂；原服务端配置未启用、未提供的客户或供应商能力保持不可用。
+启用宿主的 HTTP 清单见 [AI 处理器政策](src/ai-http-policy.ts)：运营/员工场景目录、原输入与任务创建、原任务恢复、报价澄清、开业诊断、订单解释、任务中心、场景计划与任务动作策略、租户模型配置，以及员工手动检查、图片/语音识别 Task 和原账务操作。三个执行入口分别消费原专用请求工厂与持久 runner，不同时挂载旧的宽泛模型执行器。每个路由仍通过原 Auth/Guard，后续原场景、owner、对象、能力、任务策略和模型配置分别核定。场景目录只公布确实挂载的请求工厂；原服务端配置未启用、未提供的客户或供应商能力保持不可用。
+
+员工交付/归还页沿[原客户端工厂](../../packages/rental-core/clients/staff/ai-inspection-tasks.ts)提交冻结附件和检查输入，经[标准识别组合](../../packages/ai-native-server/src/runtime/inspection-assist/inspection-standard.application.ts)创建同一 Task 并显式启动。服务端须提供原 image 配置，语音另须 audio 配置及当前能力证据；模型、原用量与候选读取保留同一请求身份、订单/分配项、模板和材料修订。候选保存后仍由员工明确采用或更正，再到原检查提交入口确认最终事实。停新时的取消、原任务与账务核对，以及 Core 停用后的精确原收据读取，均由实际处理器闭集和当前权限共同裁定。
 
 MCP 的 OAuth、Host router 与原 Web 参加者由独立的 `rental-mcp-host` 包提供，旧组合路径转接相同实现。明确选择 MCP 的宿主沿上面的静态启动入口绑定原 Auth、Native/Core 与部署准入，实际运行和切换按所选组合验收。[原参加者路线](../../packages/rental-mcp-host/README.md)
 

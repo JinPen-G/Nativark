@@ -317,8 +317,11 @@ const originalOrderExecutionRoutes = new Set(([
 function requiredPermissions(method: string, path: string) {
   // Original inspection entry policy is shared with the staff Guard. The action
   // authority still checks the persisted order and pickup/return stage rights.
+  const { basePath: recognitionBase, method: recognitionMethod, ...recognitionOperations } = AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT;
   if (method.toUpperCase() === "POST" && Object.values(AI_STAFF_INSPECTION_HTTP_DRAFT.operations)
-    .some(operation => path === `/${AI_STAFF_INSPECTION_HTTP_DRAFT.basePath}/${operation}`)) {
+    .some(operation => path === `/${AI_STAFF_INSPECTION_HTTP_DRAFT.basePath}/${operation}`)
+    || method.toUpperCase() === recognitionMethod && Object.values(recognitionOperations)
+      .some(operation => path === `/${recognitionBase}/${operation}`)) {
     return staffRoutePermissions(method, path) ?? [UNMATCHED_ROUTE_PERMISSION];
   }
   if (method.toUpperCase() === 'POST' && ['list', 'preview', 'prepare', 'operation'].some(action =>

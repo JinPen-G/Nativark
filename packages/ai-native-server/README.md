@@ -47,6 +47,8 @@ Core 停用后的已有回答及模型结果核对，由宿主 [只读处理器�
 
 [Booking 跨渠道转接](src/runtime/scenes/client-booking-transfer-host.ts)由原签发/消费仓储保存短期引用，目标端重新通过 ClientAuth 后只绑定同一客户、空间和原 Draft。双方政策按固定渠道顺序锁定，ClientAuth/Tenant/Core 先于 Draft 锁，原材料正文保留源渠道绑定。目标端消费后沿原受理、唯一 attempt 和 Core 幂等键提交，较短的转接期限在订单事务末次等待后仍须有效；历史签发/消费收据不延长期限或重新派发。
 
+员工图片/语音识别从[原请求工厂](src/runtime/inspection-assist/inspection-assist.composition.ts)进入[标准识别组合](src/runtime/inspection-assist/inspection-standard.application.ts)。所选宿主保留最初 Guard 形成的请求身份，资源授权仍复核当前员工、空间、地点、订单及检查阶段；旧宿主继续使用自己的隔离身份作用域。冻结输入、Task 创建、显式执行、原结果引用及[调用账务](src/runtime/staff-inspection-accounting.composition.ts)各有独立入口，执行复用原 Gateway 单账和累计资源。结果保存只追加待核候选，人工采用/更正和原 Core 履约提交分别办理。独立宿主从[精确处理器清单](../../apps/rental-api/src/ai-http-policy.ts)发布上述操作，员工端通过[原运输工厂](../rental-core/clients/staff/inspection-transport.ts)读取和确认。
+
 Rental 的通知缓存和草稿仓储通过 `@rental-os/rental-core/notification-draft` 消费以下组合：
 
 ```ts

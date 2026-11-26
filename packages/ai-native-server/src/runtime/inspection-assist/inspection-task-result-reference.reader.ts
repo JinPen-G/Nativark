@@ -11,6 +11,7 @@ import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, AI_TEXT_MODEL_STEP_CODE,
 import type { AuthService } from '../rental-adapters/auth.service';
 import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
+import { captureRentalInternalAuthority } from '@rental-os/rental-core/application-internal-authority';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepository, AiTaskRepositoryError } from '../ai-task.repository';
 import { AiTaskResultRepository } from '../runner/ai-task-result.repository';
@@ -67,7 +68,8 @@ export function createInspectionTaskResultReferenceReader(dependencies: Inspecti
       const close = () => { active = false; };
       signal?.addEventListener('abort', close, { once: true });
       try {
-        return await runWithRequestIdentity({}, async () => {
+        const selectedRequest = captureRentalInternalAuthority();
+        const consume = async (): Promise<AiInspectionTaskResultReferenceObservation> => {
           const scopes = new AiScopeRepository(model.db, new AiTaskCurrentIdentityAuthority(model.auth, credentials, clock), clock);
           const resource = new InspectionActionAuthority(model.guard, credentials);
           const tasks = new AiTaskRepository(model.db, { resolve: async (requested, operation) => {
@@ -162,7 +164,8 @@ export function createInspectionTaskResultReferenceReader(dependencies: Inspecti
           return { contractVersion: AI_TASK_DRAFT_VERSION, task, state: 'observed',
             reference: { ...reference, taskId, resultId: result.resultId },
             execution: 'read_only_no_lease_or_dispatch', retryable: false, nextAction: 'read_original_result' };
-        });
+        };
+        return await (selectedRequest ? consume() : runWithRequestIdentity({}, consume));
       } catch (error) {
         if (error instanceof AiTaskRepositoryError) throw error;
         throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');

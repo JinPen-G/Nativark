@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { PrismaClient } from '@prisma/client';
 import type { AuthService } from './rental-adapters/auth.service';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
+import { captureRentalInternalAuthority } from '@rental-os/rental-core/application-internal-authority';
 import { AiTaskCreationRepository } from './ai-task-creation.repository';
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from './ai-task.repository';
 import { AiScopeRepository } from './ai-scope.repository';
@@ -53,7 +54,8 @@ export function composeStaffInspectionTaskReceiptReader(dependencies: StaffInspe
         if (!active || signal?.aborted) throw denied();
         return { authorization: token.data, requestId, audience: 'staff' as const };
       } };
-      return runWithRequestIdentity({}, async () => {
+      const selectedRequest = captureRentalInternalAuthority();
+      const consume = async () => {
         const scopes = new AiScopeRepository(server.db, new AiTaskCurrentIdentityAuthority(server.auth, credentials, clock), clock);
         const resource = new InspectionActionAuthority(server.inspection.guard, credentials);
         const close = () => { active = false; };
@@ -122,7 +124,8 @@ export function composeStaffInspectionTaskReceiptReader(dependencies: StaffInspe
           return freezeOriginalInput({ ...receipt, execution: 'not_attested' as const,
             semantics: 'original_metadata_not_dispatch_or_candidate_evidence' as const });
         } finally { signal?.removeEventListener('abort', close); close(); }
-      });
+      };
+      return selectedRequest ? consume() : runWithRequestIdentity({}, consume);
     }
   });
 }

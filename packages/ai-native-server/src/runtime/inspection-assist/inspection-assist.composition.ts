@@ -2,6 +2,7 @@ import { Module, type DynamicModule } from '@nestjs/common';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
+import { captureRentalInternalAuthority } from '@rental-os/rental-core/application-internal-authority';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import type { AiStaffInspectionHostProjection, AiStaffInspectionReceiptHostProjection } from '@rental-os/shared';
 import { recognitionSaveReferenceSchema } from './inspection-recognition-save.association';
@@ -96,7 +97,9 @@ export class StaffInspectionRequestFactory {
     signal?.addEventListener('abort', close, { once: true });
     try {
       if (signal?.aborted) throw new InspectionAssistError('RECONCILIATION_REQUIRED');
-      return await runWithRequestIdentity({}, () => consume(services));
+      // The selected host owns the actual Guard store. Resource guards still
+      // perform their own current checks and one-use return bridge.
+      return await (captureRentalInternalAuthority() ? consume(services) : runWithRequestIdentity({}, () => consume(services)));
     } finally { signal?.removeEventListener('abort', close); close(); }
   }
 

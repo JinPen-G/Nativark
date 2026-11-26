@@ -30,6 +30,7 @@ import { composePersistedTaskAuthorization } from '../task-authorization.composi
 import { aiTaskAccessFromContext } from '../ai-task.repository';
 import { composePersistedTaskDispatchEvidence } from '../task-model-gateway.composition';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
+import { captureRentalInternalAuthority } from '@rental-os/rental-core/application-internal-authority';
 import { inspectionId, inspectionTargetSchema } from './inspection-assist.validation';
 import { randomUUID } from 'node:crypto';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
@@ -209,7 +210,8 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
     } };
     signal?.addEventListener('abort', close, { once: true });
     try {
-      return await runWithRequestIdentity({}, async () => {
+      const selectedRequest = captureRentalInternalAuthority();
+      const consume = async () => {
         const original = await receipts.readCreation({ headers: { authorization } }, reference, signal);
         if (!original.task || expectedTaskId !== undefined && original.task.taskId !== expectedTaskId)
           throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
@@ -236,7 +238,8 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
           await current.authority.resolve(original.task.taskId, 'read_step_terminal');
           return result;
         } finally { signal?.removeEventListener('abort', closeReader); selected.close(); }
-      });
+      };
+      return await (selectedRequest ? consume() : runWithRequestIdentity({}, consume));
     } finally { signal?.removeEventListener('abort', close); close(); }
   };
   if (!selected.enabled) return { enabled: false as const, staffRequests: new StaffInspectionRequestFactory(inspection),

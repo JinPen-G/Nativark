@@ -5,7 +5,10 @@ import { createRentalAuthorization } from "@rental-os/rental-core/http-auth";
 import { StaffUploadsController } from "@rental-os/rental-core/http-staff-uploads";
 import { matchableRequestPath } from "@rental-os/platform-server/request-path";
 import { OperatorEntrySceneCatalogController, StaffEntrySceneCatalogController } from "@rental-os/ai-native-server/runtime/scenes/entry-scene-catalog.controller";
-import { StaffInspectionAssistController } from "@rental-os/ai-native-server/runtime/inspection-assist/staff-inspection-assist.controller";
+import { RentalStaffInspectionAssistController } from "./ai-inspection-http";
+import { InspectionRecognitionTaskController, StaffInspectionAccountingController, INSPECTION_RECOGNITION_TASKS }
+  from "@rental-os/ai-native-server/runtime/inspection-assist/inspection-recognition-task.controller";
+import { AI_STAFF_INSPECTION_ACCOUNTING } from "@rental-os/ai-native-server/runtime/staff-inspection-accounting.composition";
 import { AiOriginalScenesController, AiOriginalSceneRecoveryController, AiOriginalQuoteModelExecutionController,
   AiScenePlanPolicyController, AiOriginalTaskActionPolicyController, AI_SCENE_PLAN_POLICIES, AI_ORIGINAL_TASK_ACTION_POLICIES,
   AI_ORIGINAL_SCENE_REQUESTS, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS,
@@ -24,17 +27,18 @@ import { RentalWebsiteClientEntryController, RentalWechatClientEntryController }
 export const RENTAL_AI_INSPECTION_OPERATIONS = Object.freeze([
   "fulfillment-receipt-read", "history-read", "receipt-host-read", "host-read", "template-read",
   "evidence-bind", "evidence-fingerprint", "draft-create", "draft-read", "draft-edit", "evidence-replace",
-  "draft-operation", "submission-review", "submission-prepare", "submission-preparation", "submission-submit", "submission-read"
+  "draft-operation", "input-prepare", "input-receipt", "result-read", "result-save", "result-save-receipt", "submission-review", "submission-prepare", "submission-preparation", "submission-submit", "submission-read"
 ]);
 export const RENTAL_AI_CONTROLLERS = Object.freeze([
-  OperatorEntrySceneCatalogController, StaffEntrySceneCatalogController, StaffInspectionAssistController,
+  OperatorEntrySceneCatalogController, StaffEntrySceneCatalogController, RentalStaffInspectionAssistController,
+  InspectionRecognitionTaskController, StaffInspectionAccountingController,
   AiOriginalScenesController, AiOriginalSceneRecoveryController, AiTaskCenterController, AiModelSettingsController,
   AiOriginalQuoteModelExecutionController, AiOriginalOpeningModelExecutionController, AiOriginalOrderReadController,
   AiScenePlanPolicyController, AiOriginalTaskActionPolicyController, AiConversationController, AiTaskOrderHandoffController,
   RentalWebsiteClientEntryController, RentalWechatClientEntryController
 ]);
 export const RENTAL_AI_MOUNTED_REQUESTS: readonly symbol[] = Object.freeze([
-  AI_STAFF_INSPECTION_REQUESTS, AI_ORIGINAL_SCENE_REQUESTS, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS,
+  AI_STAFF_INSPECTION_REQUESTS, INSPECTION_RECOGNITION_TASKS, AI_STAFF_INSPECTION_ACCOUNTING, AI_ORIGINAL_SCENE_REQUESTS, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS,
   AI_NATIVE_TASK_CENTER_REQUESTS, AI_NATIVE_MODEL_SETTINGS_REQUESTS,
   AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS, AI_ORIGINAL_OPENING_MODEL_REQUESTS, AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS,
   AI_SCENE_PLAN_POLICIES, AI_ORIGINAL_TASK_ACTION_POLICIES, AI_CONVERSATION_REQUESTS, AI_TASK_ORDER_HANDOFF_REQUESTS
@@ -49,6 +53,8 @@ const quote = AiOriginalQuoteModelExecutionController.prototype, opening = AiOri
 const orders = AiOriginalOrderReadController.prototype;
 const plans = AiScenePlanPolicyController.prototype, actions = AiOriginalTaskActionPolicyController.prototype;
 const conversations = AiConversationController.prototype;
+const inspection = RentalStaffInspectionAssistController.prototype, recognition = InspectionRecognitionTaskController.prototype;
+const accounting = StaffInspectionAccountingController.prototype;
 const declarations: readonly RentalHttpAccessDeclaration[] = [
   ...reviewed(AiTaskOrderHandoffController, [AiTaskOrderHandoffController.prototype.read], "buffered-read",
   "original Task/Run/input provenance and current guarded order/next-step read; same selected request identity and final scope/source checks, manual handoff grants no approval or execution"),
@@ -169,8 +175,26 @@ const declarations: readonly RentalHttpAccessDeclaration[] = [
   ...[OperatorEntrySceneCatalogController, StaffEntrySceneCatalogController].map(controller => ({ controller,
     handler: controller.prototype.read, review: { kind: "buffered-read" as const,
       evidence: "original current Auth/Guard/scope and read-only scene publication/policy metadata; actual mounted factory filter; no scope creation, task, ledger or model dispatch; same selected access rechecks before return" } })),
-  { controller: StaffInspectionAssistController, handler: StaffInspectionAssistController.prototype.consume,
-    review: { kind: "transactional-write", evidence: "host intersects original publication with the explicit manual operation set; original draft/evidence transactions lock current Auth Tenant/Core/Order and revalidate before commit; original submission uses same internal authority and original idempotent Core; committed/unknown receipts never re-admit or redispatch" } },
+  ...reviewed(RentalStaffInspectionAssistController, [inspection.fulfillmentReceiptRead, inspection.historyRead,
+    inspection.receiptHostRead, inspection.hostRead, inspection.templateRead, inspection.evidenceFingerprint,
+    inspection.draftRead, inspection.draftOperation, inspection.inputReceipt, inspection.resultRead,
+    inspection.resultSaveReceipt, inspection.submissionPreparation, inspection.submissionRead], "buffered-read",
+  "exact original staff operations preserve current order/location/owner, frozen media/Task/result and human draft revision; receipt reads never prepare, persist candidates or submit fulfillment, same selected identity and final response recheck"),
+  ...reviewed(RentalStaffInspectionAssistController, [inspection.evidenceBind, inspection.draftCreate, inspection.draftEdit,
+    inspection.evidenceReplace, inspection.inputPrepare, inspection.resultSave, inspection.submissionReview,
+    inspection.submissionPrepare, inspection.submissionSubmit], "transactional-write",
+  "original staff publication plus explicit operation; owning draft/evidence/input/candidate transactions hold Auth/Tenant/Core then Order and revision with final revalidation; result-save persists review candidates only, explicit human adoption and original idempotent Core submission stay separate"),
+  ...reviewed(InspectionRecognitionTaskController, [recognition.readCreation, recognition.readResultReference,
+    recognition.readInput, recognition.readAnswer, recognition.readCancelReceipt, recognition.readCancellationSettlementReceipt], "buffered-read",
+  "original current staff owner/order and persisted input/Task/Run lineage, current action and frozen result readers; no profile, lease, model, input submission or fulfillment dispatch; same selected identity survives original read wrappers"),
+  ...reviewed(InspectionRecognitionTaskController, [recognition.create, recognition.start, recognition.resume,
+    recognition.continueAnswer, recognition.reconcile, recognition.requestCancel, recognition.settleUnstartedCancellation,
+    recognition.settleReleasedInputCancellation], "transactional-write",
+  "original staff input/task and independent explicit execution; Auth/Tenant/Core/Order precede original Task CAS, current deployment/policy and Gateway financial authority retained; cancellation and reconciliation observe the original attempt without automatic redispatch"),
+  ...reviewed(StaffInspectionAccountingController, [accounting.read], "buffered-read",
+  "current same staff and Task action authority reads the exact original invocation/financial receipt; independent of new recognition, no reservation, release or settlement"),
+  ...reviewed(StaffInspectionAccountingController, [accounting.reconcile], "transactional-write",
+  "original owned invocation and persisted usage/dispatch evidence settle the same financial reservation under original budget locks; no new model call, reservation or inferred refund, current authority checked before original mutation"),
   { controller: StaffUploadsController, handler: StaffUploadsController.prototype.bindInspectionEvidence,
     review: { kind: "transactional-write", evidence: "original HTTP request credentials enter the same inspection request factory; current Auth Tenant/Core/Order and original exact asset/template/revision checks share the original evidence transaction" } }
 ];
@@ -185,6 +209,13 @@ export function createRentalAiHttpPolicy(authorization = createRentalAuthorizati
  * recover/reconcile 仍由原 lease/receipt 仓储裁定，不能据此创建或重新派发。 */
 export function rentalAiDeploymentContinuationSelector(policy: ReturnType<typeof createRentalAiHttpPolicy>) {
   const selected = new Map<Function, readonly Function[]>([
+    [RentalStaffInspectionAssistController, [inspection.fulfillmentReceiptRead, inspection.historyRead, inspection.receiptHostRead,
+      inspection.hostRead, inspection.templateRead, inspection.draftRead, inspection.draftOperation, inspection.inputReceipt,
+      inspection.resultRead, inspection.resultSaveReceipt, inspection.submissionPreparation, inspection.submissionRead]],
+    [InspectionRecognitionTaskController, [recognition.readCreation, recognition.readResultReference, recognition.readInput,
+      recognition.readAnswer, recognition.reconcile, recognition.requestCancel, recognition.readCancelReceipt,
+      recognition.settleUnstartedCancellation, recognition.settleReleasedInputCancellation, recognition.readCancellationSettlementReceipt]],
+    [StaffInspectionAccountingController, [accounting.read, accounting.reconcile]],
     [AiTaskOrderHandoffController, [AiTaskOrderHandoffController.prototype.read]],
     [AiConversationController, [conversations.read, conversations.list, conversations.turns, conversations.operation,
       conversations.admission, conversations.archive, conversations.delete, conversations.release, conversations.closeUnstarted,
@@ -228,22 +259,15 @@ export function rentalAiDeploymentContinuationSelector(policy: ReturnType<typeof
         controller.prototype.readTaskModelResult, controller.prototype.recoverTaskModel,
         controller.prototype.reconcileTaskModel]] as [Function, readonly Function[]])
   ]);
-  const inspectionReads = new Set(['fulfillment-receipt-read', 'history-read', 'receipt-host-read',
-    'host-read', 'template-read', 'draft-read', 'draft-operation', 'submission-preparation', 'submission-read']);
-  const routes = policy.routes.flatMap(route => {
-    if (selected.get(route.controller)?.includes(route.handler)) return [{ ...route, path: route.path }];
-    if (route.controller !== StaffInspectionAssistController || route.handler !== StaffInspectionAssistController.prototype.consume)
-      return [];
-    return RENTAL_AI_INSPECTION_OPERATIONS.filter(operation => inspectionReads.has(operation))
-      .map(operation => ({ ...route, path: route.path.replace(':operation', operation) }));
-  }).map(route => ({ ...route, pattern: new RegExp(`^${route.path.split('/').map(segment => segment.startsWith(':')
-    ? '[^/]+' : segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('/')}$`, 'u') }));
+  const routes = policy.routes.filter(route => selected.get(route.controller)?.includes(route.handler))
+    .map(route => ({ ...route, pattern: new RegExp(`^${route.path.split('/').map(segment => segment.startsWith(':')
+        ? '[^/]+' : segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('/')}$`, 'u') }));
   const matches = (route: typeof routes[number], request: { method: string; url: string }) =>
     route.method === request.method.toUpperCase() && route.pattern.test(matchableRequestPath(request.url));
   return Object.freeze({
     isHandler: (controller: Function, handler: Function, request?: { method: string; url: string }) =>
       routes.some(route => route.controller === controller && route.handler === handler
-        && (request ? matches(route, request) : controller !== StaffInspectionAssistController)),
+        && (!request || matches(route, request))),
     isRoute: (request: { method: string; url: string }) => routes.some(route => matches(route, request))
   });
 }
@@ -268,6 +292,12 @@ export function rentalAiRouteSelector(policy: ReturnType<typeof createRentalAiHt
  * 从真实controller/handler闭集取路由，并要求只读审定；请求标志不能扩展此集合。 */
 export function rentalAiOriginalReceiptSelector(policy: ReturnType<typeof createRentalAiHttpPolicy>) {
   const selected = new Map<Function, readonly Function[]>([
+    [RentalStaffInspectionAssistController, [inspection.fulfillmentReceiptRead, inspection.receiptHostRead,
+      inspection.draftOperation, inspection.inputReceipt, inspection.resultRead, inspection.resultSaveReceipt,
+      inspection.submissionPreparation, inspection.submissionRead]],
+    [InspectionRecognitionTaskController, [recognition.readCreation, recognition.readResultReference, recognition.readInput,
+      recognition.readAnswer, recognition.readCancelReceipt, recognition.readCancellationSettlementReceipt]],
+    [StaffInspectionAccountingController, [accounting.read]],
     [AiConversationController, [conversations.operation, conversations.modelResult, conversations.taskResult,
       conversations.readModelControl]],
     [AiOriginalScenesController, [scene.reconcile, scene.reconcileReissue, scene.recovery]],
