@@ -61,11 +61,9 @@ tools/                   静态预览、源码检查及一次性迁移工具
 - 顶栏和页脚 GitHub、页脚 X 使用用户指定链接。页脚署名 `Powered by PenG-AI · All rights reserved.`。移动菜单的外部文档、插件和论文沿各自来源维护，政策文字沿现有入口呈现。
 - 原站字体、图标和着色器的来源不因迁移而变化；源码迁移不等于第三方素材已获得新的许可。
 
-## 与旧目录的关系
+## 维护源码
 
-`../deepseek-harness-clone` 是改写版镜像，`../deepseek-harness-original` 是独立原始下载副本。本次不覆盖它们，也不切换既有 8138 / 8139 的入口。
-
-`migration-manifest.json` 记录原文件清单与迁移边界。`tools/migrate-reference.mjs` 仅用于最初的机械迁移：它读取旧目录并覆盖生成组件，**后续日常开发不要重跑**；直接修改现在的组件、文案和样式即可。新工程复制到其他位置后，安装依赖即可单独开发和构建，不需要带上旧镜像。
+直接维护当前的组件、文案和样式。安装依赖后可独立开发和构建，历史镜像与一次性迁移材料仅由维护者保存在本地。
 
 Next.js 原生路由与安装说明见 [官方文档](https://nextjs.org/docs/app/getting-started/installation)。
 
